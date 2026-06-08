@@ -2281,22 +2281,18 @@ export async function registerPoolRoutes(fastify) {
       });
     }
 
-    // Byte-size mass-aware fee: refund TX 1-in 1-out + side redeem ~1999B → ~2300B → mass ~5750 → fee ~632_500.
-    // 跟 unlockPoolSpineRefundMakerUnjoined 同公式 (Bettor 891c94d sediment).
-    // J1tn r303 P0-#1 sweep (Bettor r341 钦定 bettor-side MARGINAL 防御性补强): 加 KIP-9 storage_mass
-    // 项. 单 output bettor refund ≈ side_stake - fee. 对 thin sides (= 接近 1 KAS) 防御性补.
+    // Byte-size mass-aware fee + KIP-9 storage_mass (= helper refactor lib/kip9-mass.mjs).
+    // J1tn r303 P0-#1 sweep (Bettor r341+r346/r366b 钦定 helper refactor): 公式抽 lib/kip9-mass.mjs
+    // computeSingleOutputFee, 5 site 不再各抄 STORAGE_MASS_C + 公式.
+    const { computeSingleOutputFee } = await import('../lib/kip9-mass.mjs');
     const redeemBytes = Buffer.from(side.side_redeem_script_hex, 'hex');
     const sigScriptSize = 70 + redeemBytes.length;
     const txByteEstimate = 45 + sigScriptSize + 50 + 80;
     const computeMassEst = Math.ceil(txByteEstimate * 2.5);
-    const STORAGE_MASS_C_INT = 1_000_000_000_000;
     const sideStakeInt = parseInt(side.stake_amount, 10) || 1_000_000_000;
-    const storageMassSide = Math.ceil(STORAGE_MASS_C_INT / Math.max(1000, sideStakeInt));
-    const massEst = computeMassEst + storageMassSide;
-    const FEE_MIN = 1000;
-    const FEE_MAX = 100_000_000;
-    let fee = Math.max(FEE_MIN, massEst * 110);
-    if (fee > FEE_MAX) fee = FEE_MAX;
+    const feeResult = computeSingleOutputFee(computeMassEst, sideStakeInt, 1000, 100_000_000);
+    const massEst = feeResult.totalMass;
+    const fee = feeResult.dynamicFee;
 
     const stakeSompi = BigInt(side.stake_amount);
     const outAmount = stakeSompi - BigInt(fee);

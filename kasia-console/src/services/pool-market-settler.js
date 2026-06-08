@@ -18,6 +18,15 @@
 import { sqlite } from '../db/client.js';
 import { sendCommandAsync } from './relay-manager.js';
 import { createHash } from 'node:crypto';
+// J1tn r303 P0-#1 sweep helper refactor (Bettor r346/r366b 钦定 fork 合 1 helper): KIP-9
+// storage_mass 公式 + STORAGE_MASS_C const 抽 lib/kip9-mass.mjs. 5 call sites 不再各抄.
+import {
+  STORAGE_MASS_C,
+  MIN_BROKER_FEE_FLOOR,
+  computeDynamicMinBrokerFee,
+  estimateStorageMass,
+  computeMultiOutputFee,
+} from '../lib/kip9-mass.mjs';
 
 // J2-tn r382 (Bettor 16:29 钦定): TICK_INTERVAL_MS env-configurable. Default 5min mainnet,
 // demo 期 .env 设 POOL_SETTLER_TICK_SEC=60 (= 1min) 提速 5x 整条流水.
@@ -44,16 +53,9 @@ const STORAGE_MASS_CAP = 500_000;             // kaspad standardness cap
 // 实可 settle 但被 false cancel. Tune to 470k (= 6% margin) — est_storage_mass 估值通常偏保守
 // (KIP-9 公式 Σ(1/v) 单调 + 离散累积 round-up), 实实 mass 大概率更低. 6% margin 防估值偏差.
 const STORAGE_MASS_SAFE_THRESHOLD = 470_000;
-// J1tn r303 P0-#1 fix (Bettor r298+r299+r300 钦定 升格 #6 G6 第三面 fee-too-low 红线): 旧 5M 焊死
-// floor 是 KIP-9 storage mass 主导根因 (= D11 ko421 实证 broker output 0.05 KAS → mass 1e12/5e6=200K
-// 单笔吃 fee budget 10×). 真修不焊死, 走动态 (= computeMinBrokerFeeForKIP9 + dynamicFee += storage_mass
-// 项, dispatchPhase2 内). 此 const 保留为 absolute floor (= 退路, 防 dynamic 算出过低).
-const MIN_BROKER_FEE_SOMPI = 5_000_000;       // 0.05 KAS absolute floor (dynamic 算大就用大, 算小落此底)
-
-// KIP-9 storage mass empirical constant (= ko421 实证 5M sompi output → mass 200K, 5e6 × 2e5 ≈ 1e12).
-// kaspad post-Toccata KIP-9 公式 mass(output) ≈ STORAGE_MASS_C / output_value 对 small outputs (< 0.1 KAS)
-// 主导. 用此 derive dynamic MIN_BROKER_FEE (= 让 storage_mass(broker) ≈ compute_mass, 不爆 fee budget).
-const STORAGE_MASS_C = 1_000_000_000_000;
+// J1tn r303 P0-#1 sweep helper refactor (Bettor r346/r366b 钦定): MIN_BROKER_FEE_SOMPI 改为
+// lib/kip9-mass.mjs MIN_BROKER_FEE_FLOOR 别名 (= 5M absolute floor, dynamic 算大就用大).
+const MIN_BROKER_FEE_SOMPI = MIN_BROKER_FEE_FLOOR;
 
 let timer = null;
 let running = false;
@@ -1404,17 +1406,11 @@ export async function dispatchPhase2(market, decision) {
     const computeMassEst = Math.ceil(txByteEstimate * MASS_MULTIPLIER_X10 / 10);
     const SETTLE_FEE_MIN = 2_000_000;  // 0.02 KAS floor (= settle 大 TX 起步 + Bettor r404 安全余量)
     const SETTLE_FEE_MAX = 100_000_000;  // 1 KAS cap defense
-    // J1tn r303 P0-#1 (Bettor r298+r299+r300 钦定): KIP-9 storage_mass aware dynamic fee.
-    // ko421 实证: brokerOutput 5M sompi → mass=1e12/5e6=200K 单笔吃 fee budget 10×. 原 dynamicFee
-    // 只算 computeMass (= byte mass) 漏 storage_mass → 真 mass 是 estimate 的 ~10×.
-    // 修: (1) derive dynamicMinBrokerFee = ceil(STORAGE_MASS_C / computeMass) (= 让 broker storage_mass
-    // ≈ compute_mass 自平衡, 不爆 fee budget); (2) dynamicFee += storage_mass(broker) 项, totalMass
-    // = compute + storage(broker), fee = totalMass × 100 + buffer. Floor 退路用 absolute MIN.
-    const dynamicMinBrokerFee = Math.max(
-      MIN_BROKER_FEE_SOMPI,                                      // absolute 5M floor
-      Math.ceil(STORAGE_MASS_C / Math.max(1000, computeMassEst))  // self-balance: storage = compute mass
-    );
-    const storageMassBroker = Math.ceil(STORAGE_MASS_C / dynamicMinBrokerFee);
+    // J1tn r303 P0-#1 (Bettor r298+r299+r300 钦定 + r346/r366b helper refactor): KIP-9 storage_mass
+    // aware dynamic fee. ko421 实证: brokerOutput 5M sompi → mass=1e12/5e6=200K 单笔吃 fee budget 10×.
+    // 公式抽 lib/kip9-mass.mjs (= 5 site 不再各抄).
+    const dynamicMinBrokerFee = computeDynamicMinBrokerFee(computeMassEst);
+    const storageMassBroker = estimateStorageMass(dynamicMinBrokerFee);
     const totalMassEst = computeMassEst + storageMassBroker;
     let dynamicFee = Math.max(SETTLE_FEE_MIN, totalMassEst * 110);
     if (dynamicFee > SETTLE_FEE_MAX) dynamicFee = SETTLE_FEE_MAX;
@@ -1907,12 +1903,10 @@ async function computeMassAwareV07RefundFee({ market, makerStake, networkId, mak
   const estimatedTxSize = inputSize + outputSize + txOverhead;
   const MASS_RATIO_BYTES_TO_MASS = 25n;  // 2.5x as BigInt (× 10 for integer math)
   const computeMassEstimate = (BigInt(estimatedTxSize) * MASS_RATIO_BYTES_TO_MASS) / 10n;
-  // J1tn r303 P0-#1 sweep (Bettor r341 钦定 maker_unjoined MARGINAL 防御性补强): 加 KIP-9
-  // storage_mass term. 单 output maker payout ≈ makerStake - fee, makerStake 是主导 (fee << stake).
-  // storage_mass(makerOutput) ≈ STORAGE_MASS_C / makerStake_sompi. 对 thin markets (= makerStake
-  // 接近 ctor MIN_BET_SOMPI 1e8) 防御性补 storage_mass.
-  const makerStakeBig = BigInt(makerStake || 100_000_000);
-  const storageMassMaker = BigInt(STORAGE_MASS_C) / (makerStakeBig > 1000n ? makerStakeBig : 1000n);
+  // J1tn r303 P0-#1 sweep (Bettor r341+r346/r366b helper refactor): KIP-9 storage_mass term.
+  // 单 output maker payout ≈ makerStake - fee, makerStake 是主导. storage_mass 经 lib/kip9-mass.mjs
+  // estimateStorageMass(value) → Number, 转 BigInt 续 dynamic fee 计算.
+  const storageMassMaker = BigInt(estimateStorageMass(makerStake || 100_000_000));
   const mass = computeMassEstimate + storageMassMaker;
   console.log(`[pool-settler] v0.7 byte-size mass estimate market=${market.id.slice(0,12)} txBytes≈${estimatedTxSize} computeMass≈${computeMassEstimate} storageMass(maker)≈${storageMassMaker} totalMass≈${mass} (redeem ${redeemBytes.length}B, sigScript ${sigScriptSize}B, makerStake=${makerStake})`);
   let dynamicFee = BigInt(mass) * SOMPI_PER_MASS;
@@ -2033,11 +2027,9 @@ export async function dispatchRefundDisagreement(market, decision) {
 
     const makerStake = parseInt(market.maker_stake_amount, 10) || 0;
     const oracleBond = parseInt(market.oracle_bond_amount, 10) || 0;
-    // J1tn r303 P0-#1 sweep (Bettor r341 钦定 refund_disagreement HIGH risk 修): 老 ctor minerFee
-    // 20K sompi 是 KIP-9 mempool floor 下面的 25× 不足. refund_disagreement TX 4 outputs (maker
-    // refund + 3 oracle bonds 1 KAS each), oracle bond outputs storage_mass = 1e12/1e8 = 10K mass
-    // each, × 3 = 30K storage_mass. 加 compute_mass ~25K, total ~55K, minFee 5.5M sompi. 老 20K
-    // 死 KIP-9. 修: 动态 mass-aware fee (mirror dispatchPhase2 commit 6077ccd6e 公式).
+    // J1tn r303 P0-#1 sweep (Bettor r341+r346/r366b 钦定 helper refactor): KIP-9 storage_mass
+    // aware dynamic fee for refund_disagreement (4 outputs: maker + 3 oracle bonds 1 KAS each).
+    // 公式抽 lib/kip9-mass.mjs computeMultiOutputFee, 老 ctor minerFee static 20K 死 KIP-9.
     let metaForFee = {};
     try { metaForFee = JSON.parse(market.metadata || '{}'); } catch {}
     const spineRedeemHex = metaForFee.spine_redeem_script_hex || '';
@@ -2050,19 +2042,13 @@ export async function dispatchRefundDisagreement(market, decision) {
     const outputSizeTotal = outputCountForMass * 50;
     const txByteEstimateRD = inputSizeTotal + outputSizeTotal + 80;
     const computeMassEstRD = Math.ceil(txByteEstimateRD * 30 / 10);  // ×3 multiplier
-    // storage_mass: maker output 大 (~0 mass), oracle bonds 小 (= bond / 1e8 sompi each →
-    // mass STORAGE_MASS_C / bond_sompi). 3 (or 2) bond outputs 主导.
+    // storage_mass: maker output 大 (~0 mass), oracle bonds 小 (= bond / 1e8 sompi each).
     const oracleOutputCount = outputCountForMass - 1;  // exclude maker output
-    const storageMassBonds = oracleOutputCount * Math.ceil(STORAGE_MASS_C / Math.max(1000, oracleBond));
-    const totalMassEstRD = computeMassEstRD + storageMassBonds;
-    const RD_FEE_MIN = 2_000_000;   // 0.02 KAS floor
-    const RD_FEE_MAX = 100_000_000;  // 1 KAS cap
-    let dynamicMinerFeeRD = Math.max(RD_FEE_MIN, totalMassEstRD * 110);
-    if (dynamicMinerFeeRD > RD_FEE_MAX) dynamicMinerFeeRD = RD_FEE_MAX;
+    const rdFee = computeMultiOutputFee(computeMassEstRD, oracleBond, oracleOutputCount);
     const isAnonymousPoolRD = market.protocol_version === 'v0.6' || market.protocol_version === 'v0.7';
     // v0.5 legacy: keep old static (per dispatchPhase2 L1406 sweep pattern).
-    const minerFee = isAnonymousPoolRD ? dynamicMinerFeeRD : (parseInt(market.miner_fee, 10) || 20_000);
-    console.log(`[pool-settler] refund_disagreement mass-aware fee market=${market.id.slice(0,12)} txBytes≈${txByteEstimateRD} computeMass≈${computeMassEstRD} storageMass(${oracleOutputCount} bonds)≈${storageMassBonds} totalMass≈${totalMassEstRD} fee=${minerFee} (oracleBond=${oracleBond}, version=${market.protocol_version})`);
+    const minerFee = isAnonymousPoolRD ? rdFee.dynamicFee : (parseInt(market.miner_fee, 10) || 20_000);
+    console.log(`[pool-settler] refund_disagreement mass-aware fee market=${market.id.slice(0,12)} txBytes≈${txByteEstimateRD} computeMass≈${computeMassEstRD} storageMass(${oracleOutputCount} bonds)≈${rdFee.storageMass} totalMass≈${rdFee.totalMass} fee=${minerFee} (oracleBond=${oracleBond}, version=${market.protocol_version})`);
 
     const makerRow = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(market.maker_relay_id);
     if (!makerRow?.address) {

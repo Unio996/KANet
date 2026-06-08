@@ -13,6 +13,9 @@ import { sendCommandAsync } from './relay-manager.js';
 import { isRelayAlive } from './relay-manager.js';
 // J1tn r303 (Bettor 03:19 v3 approve): de-dup REFUND_GRACE_SEC hardcode → shared const.
 import { REFUND_GRACE_SEC } from '../lib/pool-refund-grace.mjs';
+// J1tn r303 P0-#1 sweep helper refactor (Bettor r346/r366b 钦定): KIP-9 storage_mass aware fee
+// 抽 lib/kip9-mass.mjs. 5 call sites 不再各抄.
+import { computeSingleOutputFee } from '../lib/kip9-mass.mjs';
 
 const TICK_INTERVAL_MS = 5 * 60 * 1000;  // 5 min, 同 pool-market-settler
 const STARTUP_GRACE_MS = 60 * 1000;
@@ -79,21 +82,15 @@ export async function claimAutoDispatcherTick() {
           continue;
         }
 
-        // Byte-size mass-aware fee (= 同 endpoint + 891c94d sediment).
-        // J1tn r303 P0-#1 sweep (Bettor r341 钦定 bettor-side MARGINAL 防御性补强): 加 KIP-9
-        // storage_mass 项 (= 同 pool.js bettor-refund-claim endpoint sweep).
+        // Byte-size mass-aware fee + KIP-9 storage_mass (= helper refactor lib/kip9-mass.mjs).
+        // J1tn r303 P0-#1 sweep (Bettor r341+r346/r366b 钦定 helper refactor): 5 site 收一处.
         const redeemBytes = Buffer.from(side.side_redeem_script_hex, 'hex');
         const sigScriptSize = 70 + redeemBytes.length;
         const txByteEstimate = 45 + sigScriptSize + 50 + 80;
         const computeMassEst = Math.ceil(txByteEstimate * 2.5);
-        const STORAGE_MASS_C_INT = 1_000_000_000_000;
         const sideStakeInt = parseInt(side.stake_amount, 10) || 1_000_000_000;
-        const storageMassSide = Math.ceil(STORAGE_MASS_C_INT / Math.max(1000, sideStakeInt));
-        const massEst = computeMassEst + storageMassSide;
-        const FEE_MIN = 1000;
-        const FEE_MAX = 100_000_000;
-        let fee = Math.max(FEE_MIN, massEst * 110);
-        if (fee > FEE_MAX) fee = FEE_MAX;
+        const feeResult = computeSingleOutputFee(computeMassEst, sideStakeInt, 1000, 100_000_000);
+        const fee = feeResult.dynamicFee;
 
         const stakeSompi = BigInt(side.stake_amount);
         const outAmount = stakeSompi - BigInt(fee);
