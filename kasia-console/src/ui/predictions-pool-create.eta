@@ -280,7 +280,7 @@
               </div>
               <p x-show="touched.rule && !form.resolution_rule_spec.trim()" class="text-xs text-red-500 mt-1">请填判定规则</p>
 
-              <!-- 预审结果面板 (= J2 endpoint /api/oracle/prevet contract) -->
+              <!-- 预审结果面板 (= J2 endpoint /api/pool/prevet contract, Bettor r361 锁) -->
               <template x-if="preVet.result">
                 <div class="mt-2 space-y-2">
                   <!-- 主标题 + 分数 (Bettor §5 '启发非保证') -->
@@ -445,7 +445,7 @@ function createPoolPage() {
     touched: { title: false, deadline: false, rule: false, outcome_side: false },
     // KANet-UI 2026-06-07 P1-#1 (Bettor r324): ship 后高级 detail 折叠 (议题 ID 全 / 本金锁地址 默认收)
     showAdvancedShipDetail: false,
-    // KANet-UI 2026-06-08 P0-A MVP (Bettor r360 关 1 PASS): 预审 state (J2 endpoint /api/oracle/prevet)
+    // KANet-UI 2026-06-08 P0-A MVP (Bettor r360 关 1 PASS, r361 锁 URL): 预审 state (J2 endpoint /api/pool/prevet)
     preVet: {
       checking: false,
       result: null,         // { score 0-10, level 'pass'|'warn'|'critical', why: [], suggestions: [], llm_votes: [{provider, score}] }
@@ -631,21 +631,27 @@ function createPoolPage() {
       this.searchQuery = '';
     },
 
-    // KANet-UI 2026-06-08 P0-A MVP (Bettor r360 关 1 PASS): J2 endpoint /api/oracle/prevet 调
+    // KANet-UI 2026-06-08 P0-A MVP (Bettor r360 关 1 PASS, r361 锁 URL): J2 endpoint /api/pool/prevet 调
     canPreVet() {
       // 必填: title + resolution_rule_spec + source 已配
       if (!this.form.title.trim() || !this.form.resolution_rule_spec.trim()) return false;
       if (this.missingList().includes('数据来源')) return false;
       return true;
     },
+    // KANet-UI 2026-06-08 P0-A r408 兼容: J2 endpoint 返 'tier' 字段 (Bettor 最初锁), 兼容 'level' fallback
+    _preVetLevel() {
+      const r = this.preVet.result;
+      if (!r) return null;
+      return r.tier || r.level || (r.score >= 7 ? 'pass' : r.score >= 4 ? 'warn' : 'critical');
+    },
     levelBadgeClass() {
-      const lvl = this.preVet.result?.level || (this.preVet.result?.score >= 7 ? 'pass' : this.preVet.result?.score >= 4 ? 'warn' : 'critical');
+      const lvl = this._preVetLevel();
       if (lvl === 'pass') return 'bg-green-50 text-green-700 border border-green-200';
       if (lvl === 'warn') return 'bg-amber-50 text-amber-700 border border-amber-200';
       return 'bg-red-50 text-red-700 border border-red-200';
     },
     levelLabel() {
-      const lvl = this.preVet.result?.level || (this.preVet.result?.score >= 7 ? 'pass' : this.preVet.result?.score >= 4 ? 'warn' : 'critical');
+      const lvl = this._preVetLevel();
       if (lvl === 'pass') return '✓ 易裁 — 可发起';
       if (lvl === 'warn') return '⚠ 低可裁性 — 可建, 押注端会显警告';
       return '⛔ 难裁 — 请按建议改善后再试';
