@@ -1079,6 +1079,32 @@ async function verifyV06(baselinePath) {
     check('L38 三桶 UI (probe)', false, { err: e.message }, 'soft');
   }
 
+  // L39 Bettor r427/r428 跨节点 settle sync 守 (J2 r418 9bfad844 ship)
+  // = settler 广播 pool_market_settled_v1 + trade-protocol-filter consumer handler 接 = :3200 settle → :3300 ingest
+  // 真因: vaaks :3200 settle 链上 PASS 但 :3300 没人听 settled 事件 → 卡 verifying
+  try {
+    const filterPath = path.resolve(REPO_ROOT, 'kasia-console/src/services/trade-protocol-filter.js');
+    const filterSrc = fs.readFileSync(filterPath, 'utf8');
+    const settlerPath = path.resolve(REPO_ROOT, 'kasia-console/src/services/pool-market-settler.js');
+    const settlerSrc = fs.readFileSync(settlerPath, 'utf8');
+    // sub-a: trade-protocol-filter 含 case 'pool_market_settled_v1'
+    const hasSettledHandler = /case\s+['"]pool_market_settled_v1['"]/.test(filterSrc);
+    // sub-b: settler 广播 pool_market_settled_v1 (= 来源, 不只 consumer)
+    const settlerBroadcasts = /pool_market_settled_v1/.test(settlerSrc);
+    const allOk = hasSettledHandler && settlerBroadcasts;
+    check(
+      'L39 跨节点 settle sync: pool_market_settled_v1 producer + consumer (Bettor r427/r428, J2 r418 9bfad844)',
+      allOk,
+      {
+        filter_has_settled_handler: hasSettledHandler,
+        settler_broadcasts_settled_v1: settlerBroadcasts,
+        note: allOk ? '跨节点 settle 状态同步守门完整' : '任一回归 → :3300 settle 状态不同步 卡 verifying'
+      }
+    );
+  } catch (e) {
+    check('L39 cross-node settle sync (probe)', false, { err: e.message }, 'soft');
+  }
+
   const total = report.pass + report.fail + report.deploy_pending;
   if (report.fail > 0) report.verdict = 'FAIL';
   else if (report.deploy_pending > 0) report.verdict = 'PASS_WITH_DEPLOY_PENDING';
