@@ -802,10 +802,14 @@ async function verifyV06(baselinePath) {
   // = settler dispatchPhase2 fee 必按实际 storage_mass 算, 不 static (= 防 5M→50M 类 band-aid 回归)
   try {
     const settlerPath = path.resolve(REPO_ROOT, 'kasia-console/src/services/pool-market-settler.js');
+    const kip9Path = path.resolve(REPO_ROOT, 'kasia-console/src/lib/kip9-mass.mjs');
     const settlerSrc = fs.readFileSync(settlerPath, 'utf8');
-    const hasStorageMassConst = /const\s+STORAGE_MASS_C\s*=\s*1[_]?000[_]?000[_]?000[_]?000/.test(settlerSrc);
-    const hasDynamicMinBrokerFee = /dynamicMinBrokerFee\s*=\s*Math\.max/.test(settlerSrc);
-    const hasStorageMassDerivation = /Math\.ceil\(\s*STORAGE_MASS_C\s*\/\s*dynamicMinBrokerFee\s*\)/.test(settlerSrc);
+    const kip9Src = fs.existsSync(kip9Path) ? fs.readFileSync(kip9Path, 'utf8') : '';
+    // J1 refactor 抽 lib/kip9-mass.mjs (= 5 call sites 合一处), const + helper 在 lib; settler import 用
+    const combined = settlerSrc + '\n' + kip9Src;
+    const hasStorageMassConst = /(export\s+)?const\s+STORAGE_MASS_C\s*=\s*1[_]?000[_]?000[_]?000[_]?000/.test(combined);
+    const hasDynamicMinBrokerFee = /dynamicMinBrokerFee\s*=\s*Math\.max|Math\.max\([^)]*MIN_BROKER_FEE_FLOOR/.test(combined);
+    const hasStorageMassDerivation = /Math\.ceil\(\s*STORAGE_MASS_C\s*\/\s*/.test(combined);
     const passesAsMinBrokerFee = /minBrokerFee:\s*dynamicMinBrokerFee/.test(settlerSrc);
     const allOk = hasStorageMassConst && hasDynamicMinBrokerFee && hasStorageMassDerivation && passesAsMinBrokerFee;
     check(
@@ -924,6 +928,56 @@ async function verifyV06(baselinePath) {
     );
   } catch (e) {
     check('L33 P0-A 锁契约 (probe)', false, { err: e.message }, 'soft');
+  }
+
+  // L34 Bettor r367/r369/r371/r372 DoD 问1 broker 推荐 守门 (J2 r409 c1681162 / KANet-UI 7b62de27 ship)
+  // 4 sub: backend POST /api/broker/recommend (prevet-gate) + GET /api/broker/recommendations + UI 🌟 filter + 三层制衡 badge
+  try {
+    const poolPath = path.resolve(REPO_ROOT, 'kasia-console/src/api/pool.js');
+    const listEtaPath = path.resolve(REPO_ROOT, 'kasia-console/src/ui/predictions-list.eta');
+    const poolSrc = fs.readFileSync(poolPath, 'utf8');
+    const listSrc = fs.readFileSync(listEtaPath, 'utf8');
+    const hasPostRec = /fastify\.post\(['"]\/api\/broker\/recommend['"]/.test(poolSrc);
+    const hasGetRec = /fastify\.get\(['"]\/api\/broker\/recommendations['"]/.test(poolSrc);
+    const uiHasFilter = /Broker\s*推荐/.test(listSrc);
+    const uiHasMode = /filterMode\s*=\s*['"]recommended['"]/.test(listSrc);
+    const allOk = hasPostRec && hasGetRec && uiHasFilter && uiHasMode;
+    check(
+      'L34 DoD 问1 broker 推荐: POST/GET endpoint + UI 🌟 filter (Bettor r367-r372, J2 6b8ea4a3, KANet-UI 7b62de27)',
+      allOk,
+      {
+        backend_post_recommend: hasPostRec,
+        backend_get_recommendations: hasGetRec,
+        ui_has_broker_filter: uiHasFilter,
+        ui_has_recommended_mode: uiHasMode,
+        note: allOk ? '问1 broker 推荐三层制衡守门完整' : '任一回归 → endpoint 删 / UI filter 漂'
+      }
+    );
+  } catch (e) {
+    check('L34 broker 推荐 (probe)', false, { err: e.message }, 'soft');
+  }
+
+  // L35 Bettor r372 DoD 问2 VRF 排 broker_pk + maker_pk (J1 6694d3bf ship)
+  // 2 sub: committee sampler 含 excludePks 参数 + 守过滤同 PK 双角色
+  try {
+    const samplerPath = path.resolve(REPO_ROOT, 'kasia-console/src/services/pool-committee-sampler.mjs');
+    const samplerSrc = fs.existsSync(samplerPath) ? fs.readFileSync(samplerPath, 'utf8') : '';
+    const hasExcludePks = /options\.excludePks|excludePks\s*:/.test(samplerSrc);
+    const hasFilter = /filter\(m\s*=>\s*!\s*excludePks\.has/.test(samplerSrc);
+    const mentionsBrokerMakerPk = /broker_pk\s*\+\s*maker_pk|maker_pk\s*\+\s*broker_pk|excludePks.*maker_pk.*broker_pk/.test(samplerSrc);
+    const allOk = hasExcludePks && hasFilter && mentionsBrokerMakerPk;
+    check(
+      'L35 DoD 问2 VRF 排 broker_pk + maker_pk (Bettor r372, J1 6694d3bf)',
+      allOk,
+      {
+        sampler_has_excludePks_param: hasExcludePks,
+        sampler_has_filter_logic: hasFilter,
+        sampler_mentions_broker_maker_pk: mentionsBrokerMakerPk,
+        note: allOk ? 'VRF 排同 PK 双角色守门完整' : '任一回归 → excludePks 删 / filter 漂 / 同 PK 双角色操纵漏'
+      }
+    );
+  } catch (e) {
+    check('L35 VRF 排除 (probe)', false, { err: e.message }, 'soft');
   }
 
   const total = report.pass + report.fail + report.deploy_pending;
