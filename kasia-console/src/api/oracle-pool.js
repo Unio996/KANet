@@ -354,4 +354,86 @@ export async function registerOraclePoolRoutes(fastify) {
       _note: 'r350 chain_view source. /chain-snapshot is canonical.',
     });
   });
+
+  // POST /api/oracle-pool/timeout-unlock — DoD 问3 oracle 退出 (Bettor r365b + KANet-UI r641
+  // 派工). Body: { staker_pk_x }. Pre-check: lock_until_daa <= current_daa (SS enforces via
+  // timeout_unlock entry require, pre-check 防浪费 IPC roundtrip). Look up relay_id by
+  // matching enrollment relay_address → relay_nodes. Compute to_address = staker P2PK. IPC
+  // relay stake_unlock_tx → on chain self-unstake TX.
+  fastify.post('/api/oracle-pool/timeout-unlock', async (request, reply) => {
+    const b = request.body || {};
+    const stakerPkX = typeof b.staker_pk_x === 'string' ? b.staker_pk_x.toLowerCase() : null;
+    if (!stakerPkX || !/^[0-9a-fA-F]{64}$/.test(stakerPkX)) {
+      return reply.code(400).send({ ok: false, error: 'staker_pk_x must be 64 hex chars' });
+    }
+    const enroll = sqlite.prepare('SELECT staker_pk_x, lock_until_daa, p2sh_addr, redeem_script_hex, relay_address, active FROM oracle_stake_enrollments WHERE staker_pk_x = ?').get(stakerPkX);
+    if (!enroll) return reply.code(404).send({ ok: false, error: `no enrollment for staker_pk_x ${stakerPkX.slice(0,12)}..` });
+    if (!enroll.active) return reply.code(409).send({ ok: false, error: 'enrollment not active (= already unlocked or never funded)' });
+    if (!enroll.relay_address) return reply.code(409).send({ ok: false, error: 'enrollment missing relay_address (= chain_envelope ingest path 未完, 不知 to_address)' });
+    // Check current DAA via RPC vs lock_until_daa.
+    const network = process.env.KASPA_NETWORK || 'testnet-12';
+    try {
+      const { getWorkingRpc } = await import('../services/rpc-health.js');
+      const { url: rpcUrl } = await getWorkingRpc();
+      const { RpcClient, Encoding } = await import('kaspa-wasm');
+      const rpc = new RpcClient({ url: rpcUrl, encoding: Encoding.Borsh, networkId: network });
+      await rpc.connect();
+      let currentDaa;
+      try {
+        const dag = await rpc.getBlockDagInfo();
+        currentDaa = Number(dag.virtualDaaScore);
+      } finally { try { await rpc.disconnect(); } catch {} }
+      if (!Number.isFinite(currentDaa)) {
+        return reply.code(503).send({ ok: false, error: 'cannot fetch current DAA score' });
+      }
+      if (currentDaa < enroll.lock_until_daa) {
+        return reply.code(409).send({
+          ok: false,
+          error: `lock period not expired: current DAA ${currentDaa} < lock_until_daa ${enroll.lock_until_daa} (= ${enroll.lock_until_daa - currentDaa} blocks remaining)`,
+          current_daa: currentDaa,
+          lock_until_daa: enroll.lock_until_daa,
+          remaining_blocks: enroll.lock_until_daa - currentDaa,
+        });
+      }
+    } catch (rpcErr) {
+      return reply.code(503).send({ ok: false, error: `current DAA fetch fail: ${rpcErr.message}` });
+    }
+
+    // Find local relay by relay_address. Owner cannot unlock for someone else's stake.
+    const relayRow = sqlite.prepare('SELECT id, address FROM relay_nodes WHERE LOWER(address) = LOWER(?) LIMIT 1').get(enroll.relay_address);
+    if (!relayRow?.id) {
+      return reply.code(409).send({
+        ok: false,
+        error: `signing relay not local (enrollment relay_address=${enroll.relay_address.slice(0,30)}.. not in relay_nodes). Unlock must run on staker's own host.`,
+      });
+    }
+    // IPC: relay signs + submits stake_unlock_tx.
+    const lockTime = BigInt(enroll.lock_until_daa);  // SS contract reads lockTime as DAA score
+    try {
+      const { sendCommandAsync } = await import('../services/relay-manager.js');
+      const submitResult = await sendCommandAsync(relayRow.id, {
+        type: 'stake_unlock_tx',
+        p2sh_address: enroll.p2sh_addr,
+        redeem_script_hex: enroll.redeem_script_hex,
+        to_address: enroll.relay_address,
+        lock_time: lockTime.toString(),
+      });
+      if (!submitResult?.ok || !submitResult.txId) {
+        return reply.code(503).send({ ok: false, error: `relay stake_unlock submit fail: ${submitResult?.error || 'no txId'}` });
+      }
+      // Mark enrollment inactive so it's excluded from future committee VRF samples.
+      sqlite.prepare('UPDATE oracle_stake_enrollments SET active = 0 WHERE staker_pk_x = ?').run(stakerPkX);
+      return reply.send({
+        ok: true,
+        unlock_txid: submitResult.txId,
+        staker_pk_x: stakerPkX,
+        to_address: enroll.relay_address,
+        amount_sompi: submitResult.amount || null,
+        lock_until_daa: enroll.lock_until_daa,
+        note: 'enrollment marked inactive; stake unlocked to relay_address on chain.',
+      });
+    } catch (ipcErr) {
+      return reply.code(503).send({ ok: false, error: `IPC stake_unlock fail: ${ipcErr.message}` });
+    }
+  });
 }
