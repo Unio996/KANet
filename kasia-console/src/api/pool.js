@@ -741,6 +741,19 @@ export async function registerPoolRoutes(fastify) {
           await scanAndDerivePool({ rpc, networkId: network, currentDaa });
         } finally { try { await rpc.disconnect(); } catch {} }
         const derived = derivePoolMerkleRoot(snapshotDaa);
+        // J1tn r303 DoD §硬 gap (Bettor r382b 钦定 大众测试致命): 建市时 eligible pool < COMMITTEE_SIZE
+        // 5 应拒建. 否则池 dip 期间建的单全永卡死 + 资金锁死 (= 7un1d 真实事故). 修: pre-create
+        // 检查 derived.pool_size >= 5, 不足直拒 400 + 清晰错误 + 建议下一步 (= maker 等更多 enroll).
+        const { COMMITTEE_SIZE: REQ_POOL_SIZE } = await import('../services/pool-committee-sampler.mjs');
+        if (!derived.pool_size || derived.pool_size < REQ_POOL_SIZE) {
+          return reply.code(400).send({
+            ok: false,
+            error: `oracle pool 不足: snapshot 含 ${derived.pool_size || 0} 名 oracle, 需 >= ${REQ_POOL_SIZE} 才能建市. 现役 oracle 太少, 建市后 committee 永远抽不出 → market 永卡死 + 资金锁死. 请等更多 oracle 注册或主动 enroll 后再试.`,
+            pool_size: derived.pool_size || 0,
+            required_pool_size: REQ_POOL_SIZE,
+            next_step: `等更多 oracle 经 POST /api/oracle-pool/enroll 进池. 当前可用 ${derived.pool_size || 0}, 需 ${REQ_POOL_SIZE - (derived.pool_size || 0)} 名 oracle 才能开建市.`,
+          });
+        }
         b.pool_merkle_root = derived.pool_merkle_root;
         b._snapshot_daa = snapshotDaa;
         // J2-tn r323 (Bettor 钦定 NWT+J1 合解): 烤 deadline_daa 入 market row + envelope.
