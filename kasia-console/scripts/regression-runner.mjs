@@ -1008,6 +1008,36 @@ async function verifyV06(baselinePath) {
     check('L36 pool guard 双层 (probe)', false, { err: e.message }, 'soft');
   }
 
+  // L37 Bettor r401-r404 Oracle 判断框架 spec §5 守门 (J2 b5113af5 ship)
+  // 4 sub: ABSTAIN-not-guess (= 删 guess-fallback) + 三态 enum YES/NO/ABSTAIN + ABSTAIN 广播上链
+  // 真因: w0s3m 4/5 oracle 错判 NO 因 deriveKanetNativeVote ||rawText.slice(0,2000) 喂 LLM 截断 boilerplate
+  try {
+    const voterPath = path.resolve(REPO_ROOT, 'kasia-console/src/services/bettor-prediction-voter.js');
+    const voterSrc = fs.readFileSync(voterPath, 'utf8');
+    // sub-a: voter 不含 'clean || rawText.slice' guess-fallback (= Bettor r402b 钉死 #1)
+    const hasGuessFallback = /evidence_text\s*=\s*clean\s*\|\|\s*rawText\.slice|evidence_text\s*=\s*rawText\.slice\s*\(\s*0\s*,\s*\d+\s*\)/.test(voterSrc);
+    // sub-b: voter abstain 路径存在 (= return { ok:false, ... abstain ... })
+    const hasAbstainReturn = /(abstain|ABSTAIN)/i.test(voterSrc) && /(return\s+\{[^}]*ok\s*:\s*false[^}]*abstain|outcome\s*:\s*['"]ABSTAIN['"])/i.test(voterSrc);
+    // sub-c: outcome enum YES/NO/ABSTAIN 在 voter
+    const hasOutcomeEnum = /outcome\s*:\s*['"]ABSTAIN['"]/.test(voterSrc);
+    // sub-d: extractor_kind_used 字段 broadcast (= J1 r303 不变量提议)
+    const hasExtractorKindUsed = /extractor_kind_used/.test(voterSrc);
+    const allOk = !hasGuessFallback && hasAbstainReturn && hasOutcomeEnum && hasExtractorKindUsed;
+    check(
+      'L37 Oracle 判断框架: ABSTAIN-not-guess + 三态 enum + extractor_kind_used (Bettor r401-r404, J2 b5113af5)',
+      allOk,
+      {
+        voter_no_guess_fallback: !hasGuessFallback,
+        voter_has_abstain_return: hasAbstainReturn,
+        voter_has_outcome_enum_abstain: hasOutcomeEnum,
+        voter_broadcasts_extractor_kind: hasExtractorKindUsed,
+        note: allOk ? 'ABSTAIN-not-guess 守门完整 防 w0s3m 类 oracle 错判' : '任一回归 → guess fallback 重生 / abstain 路径丢 / enum 漂 / extractor_kind_used 删 立 hard FAIL'
+      }
+    );
+  } catch (e) {
+    check('L37 ABSTAIN framework (probe)', false, { err: e.message }, 'soft');
+  }
+
   const total = report.pass + report.fail + report.deploy_pending;
   if (report.fail > 0) report.verdict = 'FAIL';
   else if (report.deploy_pending > 0) report.verdict = 'PASS_WITH_DEPLOY_PENDING';
