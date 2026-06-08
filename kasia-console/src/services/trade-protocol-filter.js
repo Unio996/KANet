@@ -94,6 +94,8 @@ export async function onBroadcastWritten(row) {
         await handlePoolBetRegistered(msg); break;  // Bettor r113/r117/r120 ② consumer: bet_register
       case 'pool_market_chunk_v1':
         await handlePoolMarketChunk(msg); break;  // Bettor r128/r129 + J1 e67c9328 chunked v1
+      case 'pool_market_settled_v1':
+        await handlePoolMarketSettled(msg); break;  // J2-tn r418 (Bettor r428 关1): cross-node settle sync push
       case 'oracle_stake_enroll_v1':
         await handleOracleStakeEnroll(msg); break;  // J2-tn r301 Path A: cross-node enrollment ingest
       case 'kanet_pool_oracle_tx_sign_resp_v1':
@@ -790,6 +792,36 @@ function _evictExpiredChunks(now = Date.now()) {
       POOL_CHUNK_CACHE.delete(hash);
     }
   }
+}
+
+// J2-tn r418 (Bettor r428 关1 方案 C 路径 A push): consumer ingest pool_market_settled_v1.
+// Idempotent: 仅当 protocol_status='verifying' or 'collecting_sigs' 时 UPDATE → 'completed'.
+// Defends 重复 broadcast (= cron retry / chain replay). 不动 settle_txid 若 already 设.
+async function handlePoolMarketSettled(msg) {
+  const required = ['market_id', 'settle_txid', 'winner'];
+  for (const k of required) {
+    if (msg[k] === undefined || msg[k] === null) {
+      console.warn(`[trade-filter:settled] missing ${k} market=${msg.market_id?.slice(0,12)} — reject`);
+      return;
+    }
+  }
+  const row = sqlite.prepare('SELECT id, protocol_status, settle_txid FROM pool_markets WHERE id = ?').get(msg.market_id);
+  if (!row) {
+    console.log(`[trade-filter:settled] market ${msg.market_id?.slice(0,12)} not in local DB — skip (cross-node race)`);
+    return;
+  }
+  if (row.protocol_status === 'completed' && row.settle_txid) {
+    console.log(`[trade-filter:settled] market ${msg.market_id.slice(0,12)} already completed (txid=${row.settle_txid.slice(0,16)}) — skip idempotent`);
+    return;
+  }
+  // Only advance from verifying/collecting_sigs — refuse to overwrite refunded/cancelled.
+  if (row.protocol_status !== 'verifying' && row.protocol_status !== 'collecting_sigs') {
+    console.warn(`[trade-filter:settled] market ${msg.market_id.slice(0,12)} status=${row.protocol_status} not eligible to settle → ignore (protected)`);
+    return;
+  }
+  sqlite.prepare('UPDATE pool_markets SET settle_txid = ?, protocol_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+    .run(msg.settle_txid, 'completed', msg.market_id);
+  console.log(`[trade-filter:settled] cross-node sync market=${msg.market_id.slice(0,12)} settle_txid=${msg.settle_txid.slice(0,16)} winner=${msg.winner} (was ${row.protocol_status})`);
 }
 
 async function handlePoolMarketChunk(msg) {

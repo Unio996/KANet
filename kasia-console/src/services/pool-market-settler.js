@@ -2548,6 +2548,39 @@ async function handleCollectingSigs(market) {
     sqlite.prepare('UPDATE pool_markets SET settle_txid = ?, protocol_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
       .run(submitResult.txId, 'completed', market.id);
     console.log(`[pool-settler:collecting] SETTLED market=${market.id.slice(0,12)} settle_txid=${submitResult.txId.slice(0,16)} winner=${meta.phase2_winner}`);
+
+    // r418 (Bettor r428 PASS — 方案 C 路径 A push): broadcast pool_market_settled_v1 so cross-node
+    // 节点 (= consumer-ingested markets, maker_relay_id='cross-node:..') 也能标 completed.
+    // 之前 vaaks settle 落链 :3200 但 :3300 cross-ingest 仍 'verifying' = downstream state 病.
+    // Idempotent on consumer side: only UPDATE if currently verifying/collecting_sigs.
+    try {
+      const { getStatus, isRelayAlive, sendCommandAsync } = await import('./relay-manager.js');
+      const candidates = getStatus() || [];
+      const localAlive = candidates.find(r => r.pid && isRelayAlive(r.relayNodeId)?.alive);
+      if (localAlive) {
+        const payload = {
+          t: 'pool_market_settled_v1',
+          market_id: market.id,
+          settle_txid: submitResult.txId,
+          winner: meta.phase2_winner,
+          settled_at: new Date().toISOString(),
+        };
+        const bcastResult = await sendCommandAsync(localAlive.relayNodeId, {
+          type: 'send_broadcast',
+          channel: 'kanet-prediction',
+          message: JSON.stringify(payload),
+        });
+        if (bcastResult?.ok && bcastResult.txId) {
+          console.log(`[pool-settler:collecting] cross-node settled broadcast market=${market.id.slice(0,12)} bcast_txid=${bcastResult.txId.slice(0,16)}`);
+        } else {
+          console.warn(`[pool-settler:collecting] cross-node settled broadcast fail market=${market.id.slice(0,12)}: ${bcastResult?.error || 'no txId'}`);
+        }
+      } else {
+        console.warn(`[pool-settler:collecting] no alive relay to broadcast settled market=${market.id.slice(0,12)}`);
+      }
+    } catch (bcastErr) {
+      console.warn(`[pool-settler:collecting] cross-node settled broadcast exception market=${market.id.slice(0,12)}: ${bcastErr.message}`);
+    }
   } catch (e) {
     console.error(`[pool-settler:collecting] settle submit exception market=${market.id?.slice(0,12)}: ${e.message}`);
   }
