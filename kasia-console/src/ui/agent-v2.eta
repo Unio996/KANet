@@ -72,14 +72,34 @@
         x-text="agent ? KANet.shortAddr(agent.address) : ''"
         :title="agent?.address"
         @click="agent && KANet.copy(agent.address)"></button>
-      <div class="flex items-center gap-1.5">
+      <div class="flex items-center gap-2">
         <template x-if="balLoading">
           <div class="skeleton" style="width:80px;height:18px;"></div>
         </template>
         <template x-if="!balLoading">
           <span class="text-sm font-bold text-ink-700" x-text="balance != null ? KANet.formatKas(balance, 4) + ' KAS' : '--'"></span>
         </template>
+        <!-- KANet-UI 2026-06-08 DoD-D.1 (Bettor r368 关 1 PASS): 领测试币 button -->
+        <button x-show="!balLoading && agent?.address" @click="claimFaucet()" :disabled="faucet.claiming"
+                class="text-[11px] px-2 py-1 rounded bg-emerald-100 hover:bg-emerald-200 text-emerald-700 disabled:opacity-50"
+                title="一键领 testnet KAS (= 同 wallet 永久 1 次, 同 IP 24h 3 次)">
+          <span x-text="faucet.claiming ? '领币中...' : '🚰 领测试币'"></span>
+        </button>
       </div>
+    </div>
+  </div>
+
+  <!-- Faucet claim 结果 toast -->
+  <div x-show="faucet.result || faucet.error" x-transition class="fixed top-4 right-4 max-w-sm z-50 rounded-lg shadow-lg p-3 text-sm"
+       :class="faucet.error ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-emerald-50 text-emerald-700 border border-emerald-200'">
+    <div class="flex items-start justify-between gap-2">
+      <div>
+        <div class="font-medium" x-text="faucet.error ? '领币失败' : '✓ 领币成功'"></div>
+        <div class="text-xs mt-1" x-text="faucet.error || ('已发 ' + (faucet.result?.amount || '5 KAS') + ' 到你的 agent')"></div>
+        <a x-show="!faucet.error && faucet.result?.txid" :href="'https://explorer-tn12.kaspa.org/txs/' + faucet.result.txid" target="_blank"
+           class="text-[10px] font-mono underline mt-1 inline-block" x-text="faucet.result?.txid?.slice(0,16) + '...'"></a>
+      </div>
+      <button @click="faucet.result = null; faucet.error = ''" class="text-xs">✕</button>
     </div>
   </div>
 
@@ -1355,6 +1375,8 @@ function agentApp() {
   return {
     agents: [], selectedIdx: 0, loading: true, activeTab: null,
     balance: null, balLoading: false, spending: null, spendLoading: false,
+    // KANet-UI 2026-06-08 DoD-D.1 (Bettor r368 关 1 PASS): faucet claim state
+    faucet: { claiming: false, result: null, error: '' },
     wallets: null, walletsLoading: false, goals: [], goalsLoading: false,
     mindSkills: [], recentActivity: [], txHistory: [], txLoading: false,
     episodes: [], episodesLoading: false, health: null,
@@ -1446,6 +1468,30 @@ function agentApp() {
       if (!this.agent) return; this.balLoading = true;
       try { const r = await fetch('/api/relay/' + this.agent.id + '/balance'); this.balance = (await r.json()).balance; }
       catch { this.balance = null; } this.balLoading = false;
+    },
+    // KANet-UI 2026-06-08 DoD-D.1 (Bettor r368 关 1 PASS): 一键领 testnet KAS
+    async claimFaucet() {
+      if (!this.agent?.address || this.faucet.claiming) return;
+      this.faucet.claiming = true;
+      this.faucet.error = '';
+      this.faucet.result = null;
+      try {
+        const r = await fetch('/api/faucet/request', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ wallet_address: this.agent.address }),
+        });
+        const j = await r.json();
+        if (!r.ok || !j.ok) {
+          throw new Error(j.error || `HTTP ${r.status}`);
+        }
+        this.faucet.result = j;
+        // refresh 余额 (= 等几秒等链上确认)
+        setTimeout(() => this.loadBal(), 8000);
+      } catch (e) {
+        this.faucet.error = String(e.message || e);
+      }
+      this.faucet.claiming = false;
     },
     async loadSpent() {
       if (!this.agent) return; this.spendLoading = true;
