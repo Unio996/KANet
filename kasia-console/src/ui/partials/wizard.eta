@@ -1,0 +1,115 @@
+<!--
+  KANet-UI 2026-06-08 DoD-D.2 (Bettor r373 关 1 PASS): onboarding wizard
+  3 步 modal + localStorage + dismissable banner. 0 backend.
+-->
+<div x-data="onboardingWizard()" x-init="init()" x-cloak>
+
+  <!-- Banner (D.3): 已 onboarded 不显, 否则顶部固定显 + ✕ 关 -->
+  <div x-show="!hasOnboarded && !modalOpen" x-transition class="bg-amber-50 border-b border-amber-200 px-4 py-2 flex items-center justify-between gap-3 text-sm">
+    <div class="text-amber-700">
+      👋 新用户? 看 3 步 onboarding 了解怎么用 KANet
+    </div>
+    <div class="flex items-center gap-2">
+      <button @click="openModal()" class="px-3 py-1 rounded bg-amber-500 hover:bg-amber-600 text-white text-xs">开始</button>
+      <button @click="dismiss()" class="text-amber-500 hover:text-amber-700 text-lg leading-none" title="不再显示">✕</button>
+    </div>
+  </div>
+
+  <!-- Modal (D.2): 3 步 wizard -->
+  <div x-show="modalOpen" x-transition class="fixed inset-0 bg-ink-700/50 z-50 flex items-center justify-center p-4">
+    <div class="bg-white rounded-lg max-w-md w-full p-6 shadow-xl">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-lg font-display text-ink-800">欢迎使用 KANet</h2>
+        <button @click="closeModal()" class="text-ink-400 hover:text-ink-700 text-xl">✕</button>
+      </div>
+
+      <!-- 进度指示 -->
+      <div class="flex items-center gap-2 mb-5">
+        <template x-for="i in 3" :key="i">
+          <div class="flex-1 h-1.5 rounded-full" :class="i <= step ? 'bg-brand-500' : 'bg-warm-200'"></div>
+        </template>
+      </div>
+
+      <!-- Step 1: 建 agent -->
+      <div x-show="step === 1">
+        <div class="text-2xl mb-3">🤖</div>
+        <h3 class="text-base font-medium text-ink-700 mb-2">1. 建一个 Agent</h3>
+        <p class="text-sm text-ink-500 leading-relaxed mb-4">
+          Agent = 你在 KANet 上的代理人, 持有 testnet KAS, 代你建市 / 押注 / 仲裁. 多个 Agent 可分担角色.
+        </p>
+        <div class="text-xs text-ink-400 mb-4">
+          去 <a href="/agent" class="text-brand-500 hover:underline">Agent 页</a> 建一个 (顶部 '+ 建 Agent' 按钮).
+        </div>
+      </div>
+
+      <!-- Step 2: 领 KAS -->
+      <div x-show="step === 2">
+        <div class="text-2xl mb-3">🚰</div>
+        <h3 class="text-base font-medium text-ink-700 mb-2">2. 领测试 KAS</h3>
+        <p class="text-sm text-ink-500 leading-relaxed mb-4">
+          testnet 币零经济价值, 用于走通流程. 同 wallet 永久 1 次, 同 IP 24h 3 次.
+        </p>
+        <div class="text-xs text-ink-400 mb-4">
+          去 <a href="/agent" class="text-brand-500 hover:underline">Agent 页</a> 点 '🚰 领测试币' 按钮.
+        </div>
+      </div>
+
+      <!-- Step 3: 建市/押注 -->
+      <div x-show="step === 3">
+        <div class="text-2xl mb-3">🎯</div>
+        <h3 class="text-base font-medium text-ink-700 mb-2">3. 建市或押注</h3>
+        <p class="text-sm text-ink-500 leading-relaxed mb-4">
+          有 Agent + KAS 就能 (a) 在 <a href="/predictions/pool/create" class="text-brand-500 hover:underline">建市</a> 出题 (b) 在 <a href="/predictions" class="text-brand-500 hover:underline">看市</a> 押注. 仲裁人自动判, 钱链上结算到 Agent.
+        </p>
+        <div class="text-xs text-ink-400 mb-4">
+          建市需过预审 (估算题目可裁性). 押注前看每题易裁度.
+        </div>
+      </div>
+
+      <!-- 步骤导航 -->
+      <div class="flex items-center justify-between gap-2 mt-5">
+        <button @click="prev()" :disabled="step === 1"
+                class="px-4 py-2 rounded text-sm border border-warm-300 text-ink-600 hover:bg-warm-50 disabled:opacity-40 disabled:cursor-not-allowed">
+          ← 上一步
+        </button>
+        <div class="text-xs text-ink-400" x-text="step + ' / 3'"></div>
+        <button x-show="step < 3" @click="next()"
+                class="px-4 py-2 rounded text-sm bg-brand-500 hover:bg-brand-600 text-white">
+          下一步 →
+        </button>
+        <button x-show="step === 3" @click="finish()"
+                class="px-4 py-2 rounded text-sm bg-emerald-500 hover:bg-emerald-600 text-white">
+          完成 ✓
+        </button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+function onboardingWizard() {
+  return {
+    modalOpen: false,
+    step: 1,
+    hasOnboarded: false,
+    init() {
+      this.hasOnboarded = localStorage.getItem('kanet_onboarded') === '1';
+    },
+    openModal() { this.step = 1; this.modalOpen = true; },
+    closeModal() { this.modalOpen = false; },
+    next() { if (this.step < 3) this.step++; },
+    prev() { if (this.step > 1) this.step--; },
+    finish() {
+      localStorage.setItem('kanet_onboarded', '1');
+      this.hasOnboarded = true;
+      this.modalOpen = false;
+    },
+    dismiss() {
+      // dismissable banner = 只关 banner 不算完成 wizard, 仍可再开
+      localStorage.setItem('kanet_onboarded', '1');
+      this.hasOnboarded = true;
+    },
+  };
+}
+</script>

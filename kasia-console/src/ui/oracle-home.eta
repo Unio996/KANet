@@ -220,6 +220,24 @@
                   </div>
                 </div>
                 <p class="ar-empty-note mt-3">提交申请改配置 + 执照域: Phase2 上线后开放. 当前 Phase1 走通用执照.</p>
+
+                <!-- KANet-UI 2026-06-08 DoD 问 3 (Bettor r373 关 1 PASS, J1 r303 派 (3) endpoint LIVE): 退出仲裁人 -->
+                <div class="mt-4 pt-3 border-t border-warm-200">
+                  <div class="text-xs font-medium text-ink-700 mb-2">退出仲裁人</div>
+                  <p class="text-[11px] text-ink-500 mb-2">取回质押的 KAS. 须 lock 期已过 + 无在岗未结算市场.</p>
+                  <button @click="startUnlock()" :disabled="unlock.checking || unlock.submitting"
+                          class="px-3 py-1.5 rounded bg-red-100 hover:bg-red-200 text-red-700 text-xs font-medium disabled:opacity-50">
+                    <span x-text="unlock.submitting ? '退出中...' : (unlock.checking ? '检查中...' : '退出仲裁人 →')"></span>
+                  </button>
+                  <!-- 错: lock 未过 / cross-node / 在岗 -->
+                  <div x-show="unlock.error" class="mt-2 text-[11px] bg-red-50 text-red-700 rounded px-2 py-1" x-text="unlock.error"></div>
+                  <!-- 成: TX explorer link -->
+                  <div x-show="unlock.result" class="mt-2 text-[11px] bg-emerald-50 text-emerald-700 rounded px-2 py-1">
+                    ✓ 已退出, stake 退回 <span x-text="unlock.result?.to_address?.slice(0,18) + '...'"></span>.
+                    <a x-show="unlock.result?.unlock_txid" :href="'https://explorer-tn12.kaspa.org/txs/' + unlock.result?.unlock_txid"
+                       target="_blank" class="font-mono underline ml-1" x-text="unlock.result?.unlock_txid?.slice(0,16) + '...'"></a>
+                  </div>
+                </div>
               </div>
 
               <!-- 未注册: 注册按钮 -->
@@ -255,6 +273,8 @@ function arbiterHome() {
     myAgents: [],
     selectedAgentId: '',
     chainSnapshot: null,    // { leaves: [{pk_x, stake_sompi, ...}] }
+    // KANet-UI 2026-06-08 DoD 问 3 (Bettor r373 关 1 PASS, J1 r303 派 (3)): 退出仲裁人 state
+    unlock: { checking: false, submitting: false, error: '', result: null },
 
     get selectedAgent() {
       return this.myAgents.find(a => a.id === this.selectedAgentId) || null;
@@ -403,6 +423,43 @@ function arbiterHome() {
 
     onAgentChange() {
       // selectedAgent + myOracleRecord 是 getter, 切换自动 render
+      this.unlock = { checking: false, submitting: false, error: '', result: null };  // 切换 agent 清状态
+    },
+
+    // KANet-UI 2026-06-08 DoD 问 3: 退出仲裁人 (J1 r303 endpoint POST /api/oracle-pool/timeout-unlock)
+    async startUnlock() {
+      if (!this.myOracleRecord) return;
+      const pkX = this.myOracleRecord.pubkey;
+      if (!pkX) { this.unlock.error = '该仲裁人无 pubkey, 无法 unlock'; return; }
+      this.unlock.error = '';
+      this.unlock.result = null;
+      // confirm 弹: 简单 confirm() (= MVP, 后期可换 modal)
+      const ok = window.confirm('退出仲裁人 = 取回 stake. lock 期已过+无未结算市场才能退. 继续?');
+      if (!ok) return;
+      this.unlock.submitting = true;
+      try {
+        const r = await fetch('/api/oracle-pool/timeout-unlock', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ staker_pk_x: pkX }),
+        });
+        const j = await r.json();
+        if (!j.ok) {
+          // 错文案大白话: lock 未过显剩余 blocks, cross-node 显原因
+          if (j.remaining_blocks != null) {
+            this.unlock.error = `lock 未过期, 还需 ${j.remaining_blocks} 个块 (~${Math.round(j.remaining_blocks / 10 / 60)} 小时, 假设 10 BPS testnet)`;
+          } else {
+            this.unlock.error = j.error || `HTTP ${r.status}`;
+          }
+        } else {
+          this.unlock.result = j;
+          // 重 load 名册 (= active=0 已写, 段 1 应自动不显)
+          setTimeout(() => this.loadOracles(), 3000);
+        }
+      } catch (e) {
+        this.unlock.error = String(e.message || e);
+      }
+      this.unlock.submitting = false;
     },
   };
 }
