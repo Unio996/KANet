@@ -15,10 +15,12 @@
   </div>
 
   <!-- KANet-UI 2026-06-07 Track B (Bettor r335 关 1 PASS): filter + 排序 + 题目搜 -->
+  <!-- KANet-UI 2026-06-08 DoD 问 1 (Bettor r369 关 1 PASS): broker 推荐 filter mode -->
   <div class="flex flex-wrap items-center gap-2 mb-4 text-xs">
     <button @click="filterMode = 'all'" :class="filterMode === 'all' ? 'bg-brand-500 text-white' : 'bg-white border border-warm-300 text-ink-600 hover:bg-warm-50'" class="px-3 py-1.5 rounded-lg transition">全部 (<span x-text="counts.all"></span>)</button>
     <button @click="filterMode = 'open'" :class="filterMode === 'open' ? 'bg-brand-500 text-white' : 'bg-white border border-warm-300 text-ink-600 hover:bg-warm-50'" class="px-3 py-1.5 rounded-lg transition">进行中 (<span x-text="counts.open"></span>)</button>
     <button @click="filterMode = 'settled'" :class="filterMode === 'settled' ? 'bg-brand-500 text-white' : 'bg-white border border-warm-300 text-ink-600 hover:bg-warm-50'" class="px-3 py-1.5 rounded-lg transition">已结算 (<span x-text="counts.settled"></span>)</button>
+    <button @click="filterMode = 'recommended'" :class="filterMode === 'recommended' ? 'bg-amber-500 text-white' : 'bg-white border border-warm-300 text-ink-600 hover:bg-warm-50'" class="px-3 py-1.5 rounded-lg transition">🌟 Broker 推荐 (<span x-text="counts.recommended"></span>)</button>
     <div class="flex-1"></div>
     <input type="text" x-model.debounce.300ms="searchQuery" placeholder="搜题目..." class="px-3 py-1.5 rounded-lg border border-warm-300 text-xs w-40 focus:outline-none focus:border-brand-400" />
     <select x-model="sortMode" class="px-3 py-1.5 rounded-lg border border-warm-300 bg-white text-xs">
@@ -40,12 +42,17 @@
 
   <div x-show="!loading && filtered().length > 0" class="space-y-2">
     <template x-for="m in filtered()" :key="m.id">
-      <div class="card p-4 hover:border-brand-300 hover:bg-warm-50 transition">
+      <div class="card p-4 hover:border-brand-300 hover:bg-warm-50 transition"
+           :class="m._recommended ? 'border-amber-300 bg-amber-50/30' : ''">
         <div class="flex items-start gap-3">
           <a :href="`/predictions/pool/${encodeURIComponent(m.id)}`" class="flex-1 min-w-0 cursor-pointer">
             <div class="text-sm font-medium text-ink-700 leading-snug" x-text="m.title || m.id.slice(0, 20)"></div>
-            <div class="flex items-center gap-3 mt-2 text-xs text-ink-500">
+            <div class="flex items-center gap-3 mt-2 text-xs text-ink-500 flex-wrap">
               <span class="px-2 py-0.5 rounded font-medium" :class="statusBadge(m.statusKind)" x-text="statusLabel(m.statusKind)"></span>
+              <!-- DoD 问 1: broker 推荐 badge (= 三层制衡第 1 层 透明) -->
+              <span x-show="m._recommended" class="px-2 py-0.5 rounded font-medium bg-amber-100 text-amber-700">🌟 <span x-text="m._broker_name + ' 推荐'"></span></span>
+              <span x-show="m._recommended && m._prevet_score != null" class="text-ink-500" x-text="'易裁度 ' + m._prevet_score + '/10'"></span>
+              <span x-show="m._recommended && m._broker_history_accuracy != null" class="text-ink-500" x-text="'broker 历史准确率 ' + (m._broker_history_accuracy * 100).toFixed(0) + '%'"></span>
               <span x-show="m.deadlineDate" x-text="'截止 ' + m.deadlineDate"></span>
               <span x-text="'出单人: ' + makerLabel(m)"></span>
             </div>
@@ -75,12 +82,16 @@ function predictionsListPage() {
     loading: true,
     markets: [],
     filterMode: 'open',
-    counts: { all: 0, open: 0, settled: 0 },
+    counts: { all: 0, open: 0, settled: 0, recommended: 0 },
+    // KANet-UI 2026-06-08 DoD 问 1 (Bettor r369 关 1 PASS): broker 推荐 state (= J2 endpoint /api/broker/recommendations)
+    recommended: [],
     // KANet-UI 2026-06-07 Track B (Bettor r335 关 1 PASS): 搜 + 排序 state
     searchQuery: '',
     sortMode: 'newest',
 
     async init() {
+      // KANet-UI 2026-06-08 DoD 问 1: 并行拉 broker 推荐 (= J2 r409 endpoint live)
+      this.loadRecommendations().catch(() => {});
       try {
         const r = await fetch('/api/pool/markets?limit=200').then(x => x.json());
         const raw = (r.markets || []);
@@ -122,6 +133,36 @@ function predictionsListPage() {
         closed: 'bg-warm-200 text-ink-500',
       })[k] || 'bg-warm-100 text-ink-500';
     },
+    // KANet-UI 2026-06-08 DoD 问 1 (Bettor r369, J2 r409): broker 推荐 endpoint 拉
+    // J2 contract: GET /api/broker/recommendations?broker_id=X&limit=10 → { ok, broker_id, recommendations: [...] }
+    async loadRecommendations() {
+      try {
+        const agResp = await fetch('/api/agent/profile').then(r => r.json()).catch(() => ([]));
+        const agents = Array.isArray(agResp) ? agResp : (agResp.agents || []);
+        const brokers = agents.filter(a => a.is_dex_broker);
+        if (!brokers.length) { this.counts.recommended = 0; return; }
+        const all = [];
+        for (const b of brokers) {
+          try {
+            const r = await fetch(`/api/broker/recommendations?broker_id=${encodeURIComponent(b.id)}&limit=10`).then(x => x.json());
+            const list = r?.recommendations || [];
+            for (const rec of list) all.push({ ...rec, broker_name: b.name, broker_id: b.id });
+          } catch {}
+        }
+        this.recommended = all;
+        this.counts.recommended = all.length;
+        const byId = new Map(all.map(r => [r.market_id, r]));
+        for (const m of this.markets) {
+          const rec = byId.get(m.id);
+          if (rec) {
+            m._recommended = true;
+            m._prevet_score = rec.prevet_score;
+            m._broker_name = rec.broker_name;
+            m._broker_history_accuracy = rec.broker_history_accuracy;
+          }
+        }
+      } catch {}
+    },
     // KANet-UI 2026-06-07 r308: maker_name (本节点) 优先, 否则跨节点显短 id
     makerLabel(m) {
       if (m.maker_name) return m.maker_name;
@@ -144,6 +185,7 @@ function predictionsListPage() {
       let arr = this.markets;
       if (this.filterMode === 'open') arr = arr.filter(m => m.statusKind === 'open' || m.statusKind === 'awaiting');
       else if (this.filterMode === 'settled') arr = arr.filter(m => m.statusKind === 'settled');
+      else if (this.filterMode === 'recommended') arr = arr.filter(m => m._recommended);  // DoD 问 1
       // KANet-UI 2026-06-07 Track B (Bettor r335): 题目搜 (= 客户端 includes, 复用现 m.title)
       const q = (this.searchQuery || '').trim().toLowerCase();
       if (q) arr = arr.filter(m => (m.title || m.id || '').toLowerCase().includes(q));
