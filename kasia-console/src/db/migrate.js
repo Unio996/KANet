@@ -4956,5 +4956,32 @@ export function runMigrations() {
     }
   }
 
+  // v167: broker_recommendations table (J2-tn r409, Bettor r369 DoD 问1 锁契约).
+  // POST /api/broker/recommend → prevet-gate 必经 → 入此表 + 0.01K bond 退/没.
+  // GET /api/broker/recommendations 按 prevet_score 0.7 + history_accuracy 0.2 + recency 0.1 排序.
+  {
+    try {
+      sqlite.exec(`
+        CREATE TABLE IF NOT EXISTS broker_recommendations (
+          id TEXT PRIMARY KEY,
+          broker_relay_id TEXT NOT NULL,
+          market_id TEXT NOT NULL,
+          prevet_score INTEGER NOT NULL,
+          prevet_tier TEXT NOT NULL,
+          bond_txid TEXT,
+          bond_status TEXT DEFAULT 'pending',
+          history_accuracy_at_time REAL,
+          recommended_at TEXT DEFAULT (datetime('now')),
+          UNIQUE (broker_relay_id, market_id)
+        )
+      `);
+      sqlite.exec('CREATE INDEX IF NOT EXISTS idx_broker_rec_broker ON broker_recommendations(broker_relay_id)');
+      sqlite.exec('CREATE INDEX IF NOT EXISTS idx_broker_rec_market ON broker_recommendations(market_id)');
+      console.log('[migrate] v167: broker_recommendations table (DoD 问1 prevet-gate + 排序).');
+    } catch (e) {
+      console.warn(`[migrate] v167 broker_recommendations fail: ${e.message}`);
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }

@@ -2477,4 +2477,126 @@ export async function registerPoolRoutes(fastify) {
       llm_endpoint_hash: llmEndpointHash,
     });
   });
+
+  // J2-tn r409 DoD 问1 Bettor r369 锁契约 — broker 推单 prevet-gate.
+  // POST /api/broker/recommend { broker_relay_id, market_id }
+  // 1. 调 /api/pool/prevet 跑 prevet (复用 endpoint 同 LLM 路径)
+  // 2. <pass tier → reject + 0.01K bond 没 (= 自利推劣经济防)
+  // 3. >=pass → 入 broker_recommendations 表 + 退 bond
+  fastify.post('/api/broker/recommend', async (request, reply) => {
+    const b = request.body || {};
+    if (!b.broker_relay_id || !b.market_id) {
+      return reply.code(400).send({ ok: false, error: 'broker_relay_id + market_id required' });
+    }
+    const market = sqlite.prepare('SELECT id, broker_relay_id, resolution_rule_spec FROM pool_markets WHERE id = ?').get(b.market_id);
+    if (!market) return reply.code(404).send({ ok: false, error: 'market not found' });
+    // 自家 broker 验.
+    if (market.broker_relay_id !== b.broker_relay_id) {
+      return reply.code(403).send({ ok: false, error: 'broker_relay_id mismatch market.broker_relay_id (只能推自家做 broker 的 market)' });
+    }
+    // Parse spec for prevet input.
+    let specObj;
+    try { specObj = JSON.parse(market.resolution_rule_spec || '{}'); } catch { specObj = {}; }
+    // Internal prevet call (= 复用 /api/pool/prevet 同款 LLM eval).
+    let prevetScore = 0, prevetTier = 'critical';
+    try {
+      const prevetReq = await fetch(`http://127.0.0.1:${process.env.PORT || '3200'}/api/pool/prevet`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: AbortSignal.timeout(30_000),
+        body: JSON.stringify({
+          maker_relay_id: market.broker_relay_id,  // 用 broker_relay_id 当 adapter source
+          title: specObj.title || '',
+          resolution_rule_spec: market.resolution_rule_spec,
+          data_source_canonical: specObj.data_source_canonical || '',
+        }),
+      });
+      const j = await prevetReq.json();
+      if (j?.ok) {
+        prevetScore = j.score;
+        prevetTier = j.tier;
+      }
+    } catch (e) {
+      return reply.code(503).send({ ok: false, error: `prevet 调用失败: ${e.message}` });
+    }
+    if (prevetTier !== 'pass') {
+      // 0.01K bond 没 (MVP: 不实际转账, 只 record).
+      return reply.code(409).send({
+        ok: false, error: `prevet ${prevetTier} (score ${prevetScore}/10) — 推单 reject, 0.01K bond 没收`,
+        prevet_score: prevetScore, prevet_tier: prevetTier,
+      });
+    }
+    // Compute history accuracy: settled markets where this broker recommended.
+    let historyAccuracy = null;
+    try {
+      const hist = sqlite.prepare(`
+        SELECT br.market_id, pm.protocol_status, pm.outcome_side
+        FROM broker_recommendations br
+        JOIN pool_markets pm ON pm.id = br.market_id
+        WHERE br.broker_relay_id = ? AND pm.protocol_status = 'completed'
+      `).all(b.broker_relay_id);
+      if (hist.length > 0) {
+        const correct = hist.filter(h => h.outcome_side).length;
+        historyAccuracy = correct / hist.length;
+      }
+    } catch {}
+    // Insert recommendation.
+    const id = `rec_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    try {
+      sqlite.prepare(`
+        INSERT INTO broker_recommendations (id, broker_relay_id, market_id, prevet_score, prevet_tier, bond_status, history_accuracy_at_time)
+        VALUES (?, ?, ?, ?, ?, 'returned', ?)
+      `).run(id, b.broker_relay_id, b.market_id, prevetScore, prevetTier, historyAccuracy);
+    } catch (e) {
+      if (String(e.message).includes('UNIQUE')) {
+        return reply.code(409).send({ ok: false, error: 'broker 已推过此 market (UNIQUE constraint)' });
+      }
+      return reply.code(500).send({ ok: false, error: `insert fail: ${e.message}` });
+    }
+    return reply.send({
+      ok: true,
+      recommendation_id: id,
+      broker_relay_id: b.broker_relay_id,
+      market_id: b.market_id,
+      prevet_score: prevetScore,
+      prevet_tier: prevetTier,
+      bond_status: 'returned',
+      history_accuracy: historyAccuracy,
+    });
+  });
+
+  // GET /api/broker/recommendations?broker_id=X&limit=10
+  // 排序 (Bettor r369 locked): 0.7 × prevet_score/10 + 0.2 × history_accuracy + 0.1 × recency.
+  fastify.get('/api/broker/recommendations', async (request, reply) => {
+    const brokerId = request.query.broker_id;
+    const limit = Math.min(50, parseInt(request.query.limit, 10) || 10);
+    if (!brokerId) return reply.code(400).send({ ok: false, error: 'broker_id required' });
+    const rows = sqlite.prepare(`
+      SELECT br.market_id, br.prevet_score, br.prevet_tier, br.history_accuracy_at_time,
+             br.recommended_at, pm.resolution_rule_spec, pm.protocol_status, pm.created_at as market_created_at
+      FROM broker_recommendations br
+      JOIN pool_markets pm ON pm.id = br.market_id
+      WHERE br.broker_relay_id = ?
+        AND pm.protocol_status IN ('pending_bettors', 'verifying')
+    `).all(brokerId);
+    const now = Date.now();
+    const enriched = rows.map(r => {
+      let title = '';
+      try { title = JSON.parse(r.resolution_rule_spec || '{}').title || ''; } catch {}
+      const daysSince = (now - new Date(r.market_created_at).getTime()) / (24 * 3600 * 1000);
+      const recencyFactor = 1 / (1 + daysSince / 7);
+      const hist = r.history_accuracy_at_time ?? 0.5;
+      const totalScore = 0.7 * (r.prevet_score / 10) + 0.2 * hist + 0.1 * recencyFactor;
+      return {
+        market_id: r.market_id,
+        title,
+        prevet_score: r.prevet_score,
+        prevet_tier: r.prevet_tier,
+        broker_history_accuracy: r.history_accuracy_at_time,
+        recency_days: Math.round(daysSince * 10) / 10,
+        total_score: Math.round(totalScore * 100) / 100,
+      };
+    }).sort((a, b) => b.total_score - a.total_score).slice(0, limit);
+    return reply.send({ ok: true, broker_id: brokerId, recommendations: enriched });
+  });
 }
