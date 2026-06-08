@@ -2,7 +2,7 @@
 
 > **性质**: **再次对齐**,不是新定义。设计目标 + 方案早已在已锁文档里清楚(Owner 2026-06-01:"我们之前设计目标、设计方案已经很明确了,这次是再次对齐")。本文 = 把"终点"从已有文档**重新对齐 + 收口成一张可验收清单**,5-agent 对抗校验"我们是否还对齐、还差哪些具体缺口",收敛后 Owner 终裁。
 > **主持**: Bettor-tn(架构/facilitator) | **对抗方**: J1(SS)/ J2(settler/relay)/ KANet-UI(bot/UI)/ NWT(攻击审)
-> **状态**: v0 对齐草案。
+> **状态**: ✅ **Owner 终裁锁定(2026-06-01):6 条判据认可,执行序从 create-v07 快照起,开干。** 执行中。
 
 ## 0.0 锚:目标/方案的权威出处(本 DoD 从这些派生,不新增)
 
@@ -49,4 +49,43 @@
 
 ---
 
-*Bettor-tn 起草 — 边界 Owner 钦定不可议,5 条判据征对抗收敛,收敛后 Owner 终裁。收敛即定稿,create-v07 快照作为第 1 项立即开干。*
+## 4. 对抗收敛结果(J2/KANet-UI/NWT 已出;J1 SS 三问折入执行,不阻框架)
+
+**框架收敛:5 条判据全员认 + NWT 加第 6 条(verifier gatekeeper)。** 各判据的"真实范围"被对抗逼出:
+
+### #1 完整赌局闭环(带 bettor)— 范围远大于"修个快照"
+- create-v07 快照修(L552 pool_merkle_root mismatch)
+- **settle 路径 7+ 处 v0.6-only guard 未堵**(J2.a:L606/651/655/669/746/781/1455)→ 带 bettor v0.7 settle 会复刻 T2 那套 multi-tick churn
+- **bot console-api 没 wire v0.7 register**(KANet-UI W1)→ 用户 /bet 选 v0.7 市场被 L287 filter 掉 = **用户根本下不了 v0.7 注**,必修
+- **WASM 殃及 settle 待验**(J2.e):`_assertTxInvariants` L93 + `unlockPoolSpineP2SH` 都调坏掉的 `calculateTransactionMass` → settle 是否同 panic 未知,待带-bettor settle 实测;若中招,把 891c94d 的 byte-size mass 推广到 settle
+
+### #3 鲁棒 — 今晚同类脆弱点必须系统性堵
+- **RPC-timeout-everywhere**(J2.c):全 codebase 只补了 1 处,dispatchPhase2/sampling 仍裸 await → 必 lint `RPC await 必 Promise.race timeout`
+- **auto deadline-watcher**(J2.f,~20-30 LOC):settler tick 顶 query `pending_bettors AND deadline<=?` → auto-fire,不靠用户手动 /settle
+- **same-tick handleRefunding**(J2.g):dispatchRefund 后同 tick 广播,别等 5min
+
+### #5 用户可用 + 可审计 — 入口大体已 ship,卡在 W1
+- ✅ TG bot 0-key deep-link 入口(E1:/bet /mybets /link /swap /help)+ G4 deadline 拦 + variable-stake UX
+- ✅ 证据链(V1-V3):/mybets 显示 stake_txid + settle/refund_txid + tn12 explorer 双向 link;押注 confirm 即时自验;DM 凭据指针
+- ✅ testnet 攻击挡:bot 推假 settle → 用户 explorer 自验识破;bot 拒推 → wallet 自动 sync 兜底
+- ⚠ 阻塞 = W1(bot 没 wire v0.7);claim 一键 button defer(mainnet 才整 wallet sdk)
+
+### #6 verifier baked gatekeeper(NWT 新增,全员认)
+- 每 ship 前自动跑 NWT 3-mode(attack-static 等)+ **git pre-commit hook 强制**(KANet-UI 加力)→ 堵"同类坑再生"(7+ guard / RPC-no-timeout 这类不再靠人肉)
+
+### J1 SS 三问(已答,r240,J1 11h 离线后 catch-up)
+- **Q1 settle SS 洞**:v0.7 settle ≈ v0.6(委员 sig/4-of-5 阈值/depth-8 merkle/payout 公式 `inputs[0].value × total/winner` **全同**),只多分片 ctor +3 + entry0 +3 args + PoolSide fee 范围化。**4 洞全是跨-shard 一致性**(commit_v2 SS 不 verify blake2b、靠 committee sig + off-chain settler;totalPool/winnerPool caller-supplied 靠 committee sig 覆盖)→ **单片 #1 无关,是多片 #2/批3 的攻击面**。→ **#1 带 bettor settle SS 侧低风险,复用已证 v0.6**。
+- **Q2 dispute_reveal slash 最小 SS**:**SS hook 已存在**(PoolSpine v06/v07 entry 1,L254-275,收 disputeOutcomeHash + 5 committee sig,**unanimous t=5**,验 blake2b==committeePkHash),**不需新 SS**。**关键:slash 不在 SS——是 SOCIAL/off-chain**:dispute_reveal 链上暴露 individual 签字 → settler 社交层从 pool standing stake(A.1 决议)forfeit。**SS attest,social slash**。→ #4 演示 = ① settled market(46f8a ✓)② 定 dispute window(spec 未明文,J1 起草)③ coordinator 触 5 委员签 ④ settler 接 off-chain forfeit。
+- **Q3 WASM 殃及 settle**:_assertTxInvariants(p2sh.mjs L41)在全 5 个 P2SH submit 站(含 settle 的 unlockPoolSpineP2SH L923)被调,**不会崩**(Σin==Σout+fee + dust 仍 active,graceful)。**但**结合 J2.e:mass-floor(6ed8848 红线7)调坏掉的 calculateTransactionMass 时是**静默降级**(caught→warn)→ 红线7 在 settle 上没真生效。→ **#3 新增项:把 891c94d 的 byte-size mass 扩到 _assertTxInvariants mass-floor**。
+
+## 5. 执行序(Owner 终裁后)
+
+1. **#1 带 bettor settle**(最大块):create-v07 快照 → 7+ v0.6 guard wire → bot v0.7 register(W1)→ #1.4 带 bettor settle 真链测(same-node 先证机制)→ **#1.4b cross-node 真链测(必加)**:J1 是独立节点(LAN :3300 + 自己 kaspad),真实测试网公开=分布式,参与方跨节点。必验:① 委员跨节点签 settle ② 跨节点 maker settle/refund(settler 现有 'skip remote-maker→producer node' 逻辑必须真测能跨节点协调、不是只 skip)③ 三方分账跨节点落链。**same-node PASS ≠ cross-node PASS,两者都要真链 is_accepted。**(顺带验 WASM 殃及 settle 的 mass-floor)
+2. **#3 鲁棒**:RPC-timeout 扫荡 + lint + auto deadline-watcher + same-tick UX
+3. **#2 规模**:分片(批3)+ T3 多片 E2E
+4. **#4 经济范式演示**:J1 定 slash 最小 SS → 落地 → testnet 演示
+5. **#6 gatekeeper**:贯穿,git pre-commit hook 立即可上
+
+---
+
+*Bettor-tn 起草 + 对抗收敛(J2/KANet-UI/NWT 已折入,J1 SS 三问待补不阻框架)。边界 Owner 钦定不可议。请 Owner 终裁 6 条判据 + 执行序;终裁后第 1 项 create-v07 快照立即开干。*

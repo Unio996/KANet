@@ -37,7 +37,9 @@ J1 在 :3300 另一 host(D:\kanet-testnet);其余 agent + 你在 :3200 同 host�
 - `D:\kanet-tn12\docs\QWEN-RULES.md` — Rule 11: Qwen caller 必加 enable_thinking=false
 - `D:\kanet-tn12\docs\kanet-investigation-methodology.md` — 六层调查方法论,异常必走不跳步
 - `D:\kanet-tn12\docs\phase2-d-variable-stake-spec.md` — P0#2 变量金额 spec(已 LOCK)
-- `D:\KANet-Knowledge-Base\oracle-anti-grinding-committee-randomness.md` — 预言机防作弊三命门(本任写,含 ③ 11 层 bug 档案)
+- **`D:\KANet-Knowledge-Base\` — ⚠ 设计权威库(比仓库 docs/ 更上位 = 设计层)。任何领域设计/spec/重大决策前,第一步必全读该领域目录,否则重造已设计系统(2026-06-01 血教训:重新发明了 oracle-v06-runtime-spec §8.2)。**
+  - 目录: `README.md` / `architecture/` / `roles/` / `products/` / `invariants/` / `infrastructure/`
+  - **预言机设计必读全套**: `roles/oracle.md`(3 支柱能力+声誉+经济 / 借→攒→发执照 3 阶段,Phase 1 已 ship 公开 master)+ `architecture/2026-05-30-oracle-economic-security-v0.6-spec.md`(匿名质押池)+ `architecture/2026-05-30-oracle-v06-runtime-spec.md`(§8.2 链上锁 stake SS + stake-unlock 延迟铁律 + VRF 委员)+ `oracle-anti-grinding-committee-randomness.md`(防作弊三命门)+ `infrastructure/11-anti-spam-reputation.md`(声誉)
 - 本手册自身: `D:\kanet-tn12\docs\BETTOR-TN-接位手册.md`
 - 工具脚本(本任建): `D:\kanet-tn12\_send.cjs` / `D:\kanet-tn12\_bet.cjs`
 - live DB: `D:\kanet-tn12\kasia-console\data\console.db`

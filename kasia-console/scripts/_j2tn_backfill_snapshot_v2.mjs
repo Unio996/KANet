@@ -38,37 +38,36 @@ for (const r of relays) {
 console.log(`[backfill] resolved ${resolved}/${relays.length} relay pubkeys via IPC`);
 
 // 3. Backfill oracle_pool_membership from chain_envelope enrollments.
+//    J2-tn r337 (Bettor 6/5 C2): 加 relay_address column (= settler 跨节点 DM target).
 const enrollments = db.prepare(
-  "SELECT staker_pk_x, amount_sompi FROM oracle_stake_enrollments WHERE active = 1 AND source = 'chain_envelope'"
+  "SELECT staker_pk_x, amount_sompi, relay_address FROM oracle_stake_enrollments WHERE active = 1 AND source = 'chain_envelope'"
 ).all();
 console.log(`[backfill] ${enrollments.length} chain_envelope enrollments`);
 
 const insertMembership = db.prepare(`
   INSERT OR REPLACE INTO oracle_pool_membership
-    (relay_id, oracle_pk, stake_locked_kas, joined_at, active)
-  VALUES (?, ?, ?, COALESCE((SELECT joined_at FROM oracle_pool_membership WHERE relay_id = ?), CURRENT_TIMESTAMP), 1)
+    (relay_id, oracle_pk, stake_locked_kas, joined_at, active, relay_address)
+  VALUES (?, ?, ?, COALESCE((SELECT joined_at FROM oracle_pool_membership WHERE relay_id = ?), CURRENT_TIMESTAMP), 1, ?)
 `);
 
 let membershipInserted = 0;
 let membershipNoRelay = 0;
 for (const e of enrollments) {
   const owner = pkToRelay.get(e.staker_pk_x.toLowerCase());
+  // J2-tn r337: enrollment.relay_address 是 chain envelope baked address (= 跨节点同源).
+  // 优先用它. 本地 relay row.address 是 fallback (= 仅当 envelope address NULL 但 local owner).
+  const relayAddress = e.relay_address || owner?.address || null;
   if (!owner) {
-    // Peer-owned (= on remote node). For settler PK→relay_id reverse-lookup,
-    // we still INSERT a placeholder row with relay_id=NULL is invalid (= PK col is FK?).
-    // Use staker_pk_x prefix as synthetic relay_id (= 'peer-<pk12>') so settler can at least
-    // not throw. Settler 后续 IPC sign will fail (= peer relay 不在本节点) — but committee
-    // sample step itself unblocks for cross-node verify (Bettor r218 NWT verifier wants this).
     const syntheticRelay = `peer-${e.staker_pk_x.slice(0, 12)}`;
     const stakeKas = e.amount_sompi ? Number(e.amount_sompi) / 1e8 : 5;
-    insertMembership.run(syntheticRelay, e.staker_pk_x.toLowerCase(), stakeKas, syntheticRelay);
+    insertMembership.run(syntheticRelay, e.staker_pk_x.toLowerCase(), stakeKas, syntheticRelay, relayAddress);
     membershipNoRelay++;
-    console.log(`[backfill] peer-owned staker=${e.staker_pk_x.slice(0,12)} → synthetic relay=${syntheticRelay} stake=${stakeKas}`);
+    console.log(`[backfill] peer-owned staker=${e.staker_pk_x.slice(0,12)} → synthetic relay=${syntheticRelay} stake=${stakeKas} addr=${relayAddress?.slice(-12) || 'NULL'}`);
   } else {
     const stakeKas = e.amount_sompi ? Number(e.amount_sompi) / 1e8 : 5;
-    insertMembership.run(owner.relay_id, e.staker_pk_x.toLowerCase(), stakeKas, owner.relay_id);
+    insertMembership.run(owner.relay_id, e.staker_pk_x.toLowerCase(), stakeKas, owner.relay_id, relayAddress);
     membershipInserted++;
-    console.log(`[backfill] staker=${e.staker_pk_x.slice(0,12)} relay=${owner.name} stake=${stakeKas} KAS`);
+    console.log(`[backfill] staker=${e.staker_pk_x.slice(0,12)} relay=${owner.name} stake=${stakeKas} KAS addr=${relayAddress?.slice(-12) || 'NULL'}`);
   }
 }
 console.log(`[backfill] oracle_pool_membership: ${membershipInserted} local + ${membershipNoRelay} peer synthetic`);

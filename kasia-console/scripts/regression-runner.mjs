@@ -980,6 +980,34 @@ async function verifyV06(baselinePath) {
     check('L35 VRF 排除 (probe)', false, { err: e.message }, 'soft');
   }
 
+  // L36 Bettor r382/r385/r386 DoD §硬 gap 双层 pool 守门 (J2 b07b535b layer 1 + J1 401bc78c/902a75e5 layer 2)
+  // = create-v07 前置查 snapshot pool_size < 5 直 reject 503 + sampler filter 后再守 throw
+  // 真因: 7un1d 建时 eligible pool=4 < COMMITTEE_SIZE 5 → 委员永远抽不出 → unsettlable
+  try {
+    const poolPath = path.resolve(REPO_ROOT, 'kasia-console/src/api/pool.js');
+    const samplerPath = path.resolve(REPO_ROOT, 'kasia-console/src/services/pool-committee-sampler.mjs');
+    const poolSrc = fs.readFileSync(poolPath, 'utf8');
+    const samplerSrc = fs.existsSync(samplerPath) ? fs.readFileSync(samplerPath, 'utf8') : '';
+    // sub-a: layer 1 在 create-v07 前置查 chain_view snapshot + pool_size < COMMITTEE_SIZE_GUARD reject
+    const hasChainViewQuery = /oracle_pool_chain_view\s+ORDER BY snapshot_daa DESC LIMIT 1|FROM oracle_pool_chain_view\s+ORDER BY/.test(poolSrc);
+    const hasGuardRejectPath = /pool_size\s*<\s*COMMITTEE_SIZE_GUARD|pool_size\s*<\s*5\b/.test(poolSrc);
+    // sub-b: layer 2 sampler filter 后守 throw 含 'pool must have'
+    const samplerHasGuard = /pool must have/.test(samplerSrc);
+    const allOk = hasChainViewQuery && hasGuardRejectPath && samplerHasGuard;
+    check(
+      'L36 DoD §硬 gap 双层 pool guard (Bettor r382/r385/r386, J2 b07b535b + J1 401bc78c)',
+      allOk,
+      {
+        layer1_chain_view_snapshot_query: hasChainViewQuery,
+        layer1_pool_size_reject: hasGuardRejectPath,
+        layer2_sampler_throw_guard: samplerHasGuard,
+        note: allOk ? '双层 pool 守门完整 防 7un1d 类 unsettlable 重演' : '任一回归 → pool<5 仍可建市 → unsettlable 卡 verifying'
+      }
+    );
+  } catch (e) {
+    check('L36 pool guard 双层 (probe)', false, { err: e.message }, 'soft');
+  }
+
   const total = report.pass + report.fail + report.deploy_pending;
   if (report.fail > 0) report.verdict = 'FAIL';
   else if (report.deploy_pending > 0) report.verdict = 'PASS_WITH_DEPLOY_PENDING';

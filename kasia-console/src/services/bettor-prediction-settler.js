@@ -431,6 +431,29 @@ async function dispatchPhase2OrCheckSigs(offer, winnerStr, db) {
       db.prepare(`UPDATE exchange_offers SET settle_txid=? WHERE id=?`).run(submitResult.txId, offer.id);
       transition(offer.id, 'completed');
       console.log(`[settler] Phase 4a Sub 8 SETTLE COMPLETED offer=${offer.id.slice(0,12)} settle_txid=${submitResult.txId.slice(0,16)} winner=${meta.phase2_winner}`);
+
+      // 5/28 Owner 钦定 DM push 实战 — settle completed → notify maker + taker.
+      // Fire-and-forget: failure doesn't undo chain TX. Owner: "状态变化用户必须知道".
+      try {
+        const { buildCompletedDm } = await import('./prediction-agent-mind.mjs');
+        const winnerOutcome = meta.phase2_winner === 0 ? offer.outcome_side : (offer.outcome_side === 'YES' ? 'NO' : 'YES');
+        const makerWon = meta.phase2_winner === 0;
+        const winnerAmt = (winnerAmount / 100000000n).toString();
+        const makerDm = buildCompletedDm(offer.id, offer, winnerOutcome, submitResult.txId, winnerAmt, makerWon);
+        const takerDm = buildCompletedDm(offer.id, offer, winnerOutcome, submitResult.txId, winnerAmt, !makerWon);
+        const { sendCommandAsync: sca2 } = await import('./relay-manager.js');
+        if (offer.maker_kaspa_addr && offer.maker_relay_id) {
+          sca2(offer.maker_relay_id, { type: 'send_message', target: offer.maker_kaspa_addr, message: makerDm })
+            .catch(e => console.warn(`[settler] DM push maker fail: ${e.message}`));
+        }
+        if (offer.taker && offer.maker_relay_id) {
+          sca2(offer.maker_relay_id, { type: 'send_message', target: offer.taker, message: takerDm })
+            .catch(e => console.warn(`[settler] DM push taker fail: ${e.message}`));
+        }
+        console.log(`[settler] DM push fired maker+taker offer=${offer.id.slice(0,12)}`);
+      } catch (dmErr) {
+        console.warn(`[settler] DM push wire fail (non-fatal): ${dmErr.message}`);
+      }
       return { handled: true, completed: true };
     } catch (e) {
       console.error(`[settler] Phase 4a Sub 8 settle assemble fail offer=${offer.id?.slice(0,12)}: ${e.message}`);
