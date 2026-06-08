@@ -676,7 +676,7 @@ function createPoolPage() {
         source_params: { ...this.form.source_params },
       };
       try {
-        const r = await fetch('/api/oracle/prevet', {
+        const r = await fetch('/api/pool/prevet', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
