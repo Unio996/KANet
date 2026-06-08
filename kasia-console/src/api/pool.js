@@ -2391,13 +2391,17 @@ export async function registerPoolRoutes(fastify) {
       suggestions.push('加 https://... URL 或具体描述');
     }
     // (b) title+criteria 含明确 outcome 词 +3
+    // J2-tn r410 P0-A Bettor r379 调: NWT 报 good_multi/edge (finance/crypto) 误杀.
+    // finance/crypto 单不用 'will win/won' 而用 'price/above/below/closes/$X by date'.
+    // 扩 outcome 关键词覆盖体育 + 金融 + 政治 + 一般 thresholds.
     const specRaw = typeof b.resolution_rule_spec === 'string' ? b.resolution_rule_spec : JSON.stringify(b.resolution_rule_spec);
     const lower = (title + ' ' + specRaw).toLowerCase();
-    if (/(will win|won|finalized|>=|<=|wins?|loses?|result|outcome|champion|elected|defeated|score)/i.test(lower)) {
+    const outcomePattern = /(will win|won|finalized|>=|<=|>|<|\bover\b|\bunder\b|above|below|wins?|loses?|result|outcome|champion|elected|defeated|score|price|close[ds]?|reach|exceed|hits?|threshold|target|by [0-9]|\$[0-9]|percent|%|\d+\s*(usd|kas|eth|btc))/i;
+    if (outcomePattern.test(lower)) {
       score += 3;
     } else {
-      why.push('题目/规则缺明确 outcome 关键词 (will win / >= / finalized 等)');
-      suggestions.push('题目应含明确 outcome 描述, e.g. "Will TEAM A win?"');
+      why.push('题目/规则缺明确 outcome 关键词 (will win / price >= / will close above 等)');
+      suggestions.push('题目应含明确 outcome 描述, e.g. "Will TEAM A win?" 或 "Will BTC close above $100K by 2026-12-31?"');
     }
     // (c) deadline UTC 锚 +2
     if (b.outcome_end_date && /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(String(b.outcome_end_date))) {
@@ -2407,7 +2411,8 @@ export async function registerPoolRoutes(fastify) {
       suggestions.push('截止时间用 ISO 8601 UTC 格式 e.g. 2026-06-15T18:00:00Z');
     }
     // (d) domain in sport/finance/politics +2
-    if (/(nba|nfl|mlb|nhl|premier|champion|election|btc|eth|stock|congress|president)/i.test(lower)) {
+    // J2-tn r410 调: 扩 finance/crypto 域关键词覆盖更多 ticker 和市场名 (NWT FP fix).
+    if (/(nba|nfl|mlb|nhl|premier|champion|election|btc|bitcoin|eth|ethereum|sol|solana|stock|nasdaq|s&p|sp500|sp-500|dow|congress|president|senate|euro|usd|gbp|jpy|cny)/i.test(lower)) {
       score += 2;
     } else {
       suggestions.push('题目主题不在已知高可裁 domain (体育/金融/政治), 可能 LLM 难判');
