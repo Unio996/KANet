@@ -2352,4 +2352,133 @@ export async function registerPoolRoutes(fastify) {
       return reply.code(500).send({ ok: false, error: `claim fail: ${e.message}` });
     }
   });
+
+  // J2-tn r408 P0-A MVP Bettor r361 锁契约 — backend LLM prevet 评估端点.
+  // POST /api/pool/prevet
+  // body: { maker_relay_id, title, resolution_rule_spec, data_source_canonical }
+  // returns: { score 0-10, tier 'pass'|'warn'|'critical', why[], suggestions[],
+  //           llm_votes[{provider, model, score, why}], llm_endpoint_hash }
+  //
+  // MVP 单 LLM (Qwen via maker_relay_id adapter); 多 LLM scaffold 留 llm_votes[] 数组.
+  // 不锚链, 不 challenge tx (= J1 cluster Phase2). 仅查 'structural resolvability':
+  //   - 源 URL parseable + 已知 extractor domain → +3
+  //   - title+criteria 含明确 outcome 词 → +3
+  //   - deadline UTC 锚 → +2
+  //   - domain in sport/finance/政治 → +2
+  // Heuristic baseline + LLM 修正; LLM 不通过仅启发 (= UI 标'启发非保证').
+  fastify.post('/api/pool/prevet', async (request, reply) => {
+    const b = request.body || {};
+    if (!b.maker_relay_id || !b.title || !b.resolution_rule_spec) {
+      return reply.code(400).send({ ok: false, error: 'maker_relay_id + title + resolution_rule_spec required' });
+    }
+    const title = String(b.title).trim();
+    const dsc = String(b.data_source_canonical || '').trim();
+    // Heuristic baseline (= 不需 LLM 也能跑出基础分).
+    let score = 0;
+    const why = [];
+    const suggestions = [];
+    // (a) URL parseable + extractor 已知域名 +3
+    let urlOk = false;
+    if (dsc && /^https?:\/\//.test(dsc)) {
+      urlOk = true;
+      score += 1;
+      if (/espn\.com|bbc\.co|reuters\.com|apnews\.com|polymarket\.com/i.test(dsc)) {
+        score += 2;
+      } else {
+        suggestions.push('数据源域名不在已知抽取器列表 (ESPN/BBC/Reuters/AP/Polymarket), 可能需扩展抽取器');
+      }
+    } else if (dsc) {
+      score += 1;  // 有 free-text source, 半分
+      suggestions.push('数据源未给 http(s) URL, 启发 LLM 用 spec 文案推断 (准确度受限)');
+    } else {
+      why.push('缺数据源 (data_source_canonical 空)');
+      suggestions.push('加 https://... URL 或具体描述');
+    }
+    // (b) title+criteria 含明确 outcome 词 +3
+    const specRaw = typeof b.resolution_rule_spec === 'string' ? b.resolution_rule_spec : JSON.stringify(b.resolution_rule_spec);
+    const lower = (title + ' ' + specRaw).toLowerCase();
+    if (/(will win|won|finalized|>=|<=|wins?|loses?|result|outcome|champion|elected|defeated|score)/i.test(lower)) {
+      score += 3;
+    } else {
+      why.push('题目/规则缺明确 outcome 关键词 (will win / >= / finalized 等)');
+      suggestions.push('题目应含明确 outcome 描述, e.g. "Will TEAM A win?"');
+    }
+    // (c) deadline UTC 锚 +2
+    if (b.outcome_end_date && /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(String(b.outcome_end_date))) {
+      score += 2;
+    } else {
+      why.push('截止时间未给 ISO UTC');
+      suggestions.push('截止时间用 ISO 8601 UTC 格式 e.g. 2026-06-15T18:00:00Z');
+    }
+    // (d) domain in sport/finance/politics +2
+    if (/(nba|nfl|mlb|nhl|premier|champion|election|btc|eth|stock|congress|president)/i.test(lower)) {
+      score += 2;
+    } else {
+      suggestions.push('题目主题不在已知高可裁 domain (体育/金融/政治), 可能 LLM 难判');
+    }
+    // LLM 修正 (MVP 单 Qwen via maker_relay_id adapter).
+    let llmEndpointHash = null;
+    const llmVotes = [];
+    try {
+      const { sqlite } = await import('../db/client.js');
+      const row = sqlite.prepare(`
+        SELECT a.ai_provider_url, a.ai_model
+        FROM relay_nodes r JOIN adapter_nodes a ON r.adapter_node_id = a.id
+        WHERE r.id = ?
+      `).get(b.maker_relay_id);
+      const providerUrl = process.env.QWEN_LLM_URL || row?.ai_provider_url || null;
+      const providerModel = row?.ai_model || null;
+      if (providerUrl) {
+        const llmUrl = providerUrl.replace(/\/$/, '') + '/chat/completions';
+        const { createHash } = await import('crypto');
+        llmEndpointHash = createHash('blake2b512').update(llmUrl + '|' + (providerModel || '') + '|0.1').digest('hex').slice(0, 32);
+        const prompt = `你是预测市场可裁决性评估器. 仅评 spec 结构, 不评结果.\n` +
+          `题目: ${title}\n` +
+          `判定规则: ${specRaw.slice(0, 800)}\n` +
+          `数据源: ${dsc.slice(0, 200)}\n` +
+          `评估 (0-10):\n- 数据源能否在截止后取到确定结果?\n- 规则是否歧义?\n- outcome 是否清晰二元?\n` +
+          `只回 JSON {"score": 0-10, "why": ["..."], "suggestions": ["..."]}`;
+        const llmRes = await fetch(llmUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: AbortSignal.timeout(20000),
+          body: JSON.stringify({
+            model: providerModel || undefined,
+            messages: [{ role: 'user', content: prompt }],
+            chat_template_kwargs: { enable_thinking: false },
+            response_format: { type: 'json_object' },
+            temperature: 0.1,
+            max_tokens: 300,
+          }),
+        });
+        if (llmRes.ok) {
+          const j = await llmRes.json();
+          const content = j?.choices?.[0]?.message?.content || '{}';
+          let parsed = {};
+          try { parsed = JSON.parse(content); } catch {}
+          const llmScore = Math.max(0, Math.min(10, parseInt(parsed.score, 10) || 0));
+          llmVotes.push({ provider: 'qwen', model: providerModel || 'qwen', score: llmScore, why: Array.isArray(parsed.why) ? parsed.why.slice(0, 5) : [] });
+          if (Array.isArray(parsed.why)) why.push(...parsed.why.slice(0, 3));
+          if (Array.isArray(parsed.suggestions)) suggestions.push(...parsed.suggestions.slice(0, 3));
+          // LLM 修正: 启发分 + LLM 分平均.
+          score = Math.round((score + llmScore) / 2);
+        }
+      } else {
+        suggestions.push('未配置 LLM provider (= adapter ai_provider_url 缺), 仅启发分');
+      }
+    } catch (e) {
+      suggestions.push(`LLM 修正失败 ${e.message?.slice(0,80)}, 仅启发分`);
+    }
+    score = Math.max(0, Math.min(10, score));
+    let tier;
+    if (score >= 7) tier = 'pass';
+    else if (score >= 4) tier = 'warn';
+    else tier = 'critical';
+    return reply.send({
+      ok: true,
+      score, tier, why: why.slice(0, 8), suggestions: suggestions.slice(0, 8),
+      llm_votes: llmVotes,
+      llm_endpoint_hash: llmEndpointHash,
+    });
+  });
 }
