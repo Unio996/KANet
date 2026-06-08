@@ -1056,42 +1056,55 @@ function decideConsensusV06(market) {
   // 派签 (= 4 real + 1 will never come) → handleCollectingSigs spineRequiredSigs=5 卡
   // 永远不 settle. 静默 = 投票 ≠ winner direction OR 没投票的 committee_pks[i] 索引.
   // Mirror v0.5 path L556 logic (= 3-oracle) to 5-oracle.
-  // J2-tn r413 Oracle 框架 Bettor r407 关1 PASS: 区分 true-silent vs abstain vs malformed.
-  // forfeit_1 优先选 true-silent (= 0 chain_events row), 然后 malformed (= silent-equiv 5.2);
-  // ABSTAIN 优先级最低 (= spec 5.5 不损 stake reputation 中性, 仅当 4-of-5 + abstain 是唯一非 winner 才 fallback).
+  // J2-tn r414 Oracle 框架 Bettor r409 关2 PASS: 4-同向+1-abstain 边界 — abstain 仍 forfeit bug 修.
+  // forfeit_1 必 1 silent 输出 (SS limit, 无 abstain enum), 仅 true-silent/malformed/dissent 合法.
+  // 仅 abstain 在 5th slot → 返 null → caller fallback refund (spec 5.5 abstain 不损 stake).
   function _findSilentForWinner(winnerStr) {
     // 优先 1: true-silent (forfeit + 中立)
     for (let i = 0; i < 5; i++) if (trueSilentSet.has(i)) return i;
     // 优先 2: malformed (= silent-equiv, Bettor 5.2 也 forfeit)
     for (let i = 0; i < 5; i++) if (malformedSet.has(i)) return i;
-    // 优先 3: 投了 NOT winnerStr 的 (= dissent, 不 forfeit, 该是 disagreement 路, 此处 fallback)
+    // 优先 3: 投了 NOT winnerStr 的 (= dissent, 经济上参与 disagreement, 此处 fallback)
     for (let i = 0; i < 5; i++) {
       const v = votes.find(vt => vt.oracleIndex === i);
       if (v && v.outcome !== winnerStr) return i;
     }
-    // 优先 4 (= 最后): ABSTAIN. 不该到此 (= 4-of-5 + abstainCount<2 = 至多 1 abstain + 1 dissent,
-    // dissent 优先抢前面). 防御: 真到此, abstain 被选作 forfeit 是 SS limit (forfeit_1 必 1 silent
-    // 输出, 无 abstain enum 在 SS).
-    for (let i = 0; i < 5; i++) if (abstainSet.has(i)) return i;
-    return null;  // unreachable for 4-of-5
+    // 仅 abstain 剩 → 返 null. caller 必 fallback refund 路径 (spec 5.5).
+    return null;
   }
   if (yesCount >= 4) {
     const unanimous = yesCount === 5;
+    let silentIdx = null;
+    if (!unanimous) {
+      silentIdx = _findSilentForWinner('YES');
+      // r414: 4-YES + 1-ABSTAIN edge — _findSilentForWinner 返 null = 仅 abstain 剩, spec 5.5 不损 stake.
+      if (silentIdx === null) {
+        return { action: 'refund', reason: `v0.6 4-of-5 forfeit_1 无合法 silent slot (5th = ABSTAIN, spec 5.5 不损 stake) → refund_consensus_insufficient (YES=${yesCount}/5 ABSTAIN=${abstainCount})` };
+      }
+    }
     return {
       action: 'consensus',
       winner: 0,
       unanimous,
-      silentOracleIndex: unanimous ? null : _findSilentForWinner('YES'),
+      silentOracleIndex: silentIdx,
       vote_summary: `v0.6 ${yesCount}/5 YES`,
     };
   }
   if (noCount >= 4) {
     const unanimous = noCount === 5;
+    let silentIdx = null;
+    if (!unanimous) {
+      silentIdx = _findSilentForWinner('NO');
+      // r414: 4-NO + 1-ABSTAIN edge — 同上.
+      if (silentIdx === null) {
+        return { action: 'refund', reason: `v0.6 4-of-5 forfeit_1 无合法 silent slot (5th = ABSTAIN, spec 5.5 不损 stake) → refund_consensus_insufficient (NO=${noCount}/5 ABSTAIN=${abstainCount})` };
+      }
+    }
     return {
       action: 'consensus',
       winner: 1,
       unanimous,
-      silentOracleIndex: unanimous ? null : _findSilentForWinner('NO'),
+      silentOracleIndex: silentIdx,
       vote_summary: `v0.6 ${noCount}/5 NO`,
     };
   }
