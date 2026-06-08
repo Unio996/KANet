@@ -24,7 +24,7 @@ import {
   STORAGE_MASS_C,
   MIN_BROKER_FEE_FLOOR,
   computeDynamicMinBrokerFee,
-  estimateStorageMass,
+  estimateStorageMass as estimateOutputStorageMass,  // J1tn r303: rename 避 L72 existing estimateStorageMass(inputs,outputs) 冲突
   computeMultiOutputFee,
 } from '../lib/kip9-mass.mjs';
 
@@ -1410,7 +1410,7 @@ export async function dispatchPhase2(market, decision) {
     // aware dynamic fee. ko421 实证: brokerOutput 5M sompi → mass=1e12/5e6=200K 单笔吃 fee budget 10×.
     // 公式抽 lib/kip9-mass.mjs (= 5 site 不再各抄).
     const dynamicMinBrokerFee = computeDynamicMinBrokerFee(computeMassEst);
-    const storageMassBroker = estimateStorageMass(dynamicMinBrokerFee);
+    const storageMassBroker = estimateOutputStorageMass(dynamicMinBrokerFee);
     const totalMassEst = computeMassEst + storageMassBroker;
     let dynamicFee = Math.max(SETTLE_FEE_MIN, totalMassEst * 110);
     if (dynamicFee > SETTLE_FEE_MAX) dynamicFee = SETTLE_FEE_MAX;
@@ -1905,8 +1905,8 @@ async function computeMassAwareV07RefundFee({ market, makerStake, networkId, mak
   const computeMassEstimate = (BigInt(estimatedTxSize) * MASS_RATIO_BYTES_TO_MASS) / 10n;
   // J1tn r303 P0-#1 sweep (Bettor r341+r346/r366b helper refactor): KIP-9 storage_mass term.
   // 单 output maker payout ≈ makerStake - fee, makerStake 是主导. storage_mass 经 lib/kip9-mass.mjs
-  // estimateStorageMass(value) → Number, 转 BigInt 续 dynamic fee 计算.
-  const storageMassMaker = BigInt(estimateStorageMass(makerStake || 100_000_000));
+  // estimateOutputStorageMass(value) → Number, 转 BigInt 续 dynamic fee 计算.
+  const storageMassMaker = BigInt(estimateOutputStorageMass(makerStake || 100_000_000));
   const mass = computeMassEstimate + storageMassMaker;
   console.log(`[pool-settler] v0.7 byte-size mass estimate market=${market.id.slice(0,12)} txBytes≈${estimatedTxSize} computeMass≈${computeMassEstimate} storageMass(maker)≈${storageMassMaker} totalMass≈${mass} (redeem ${redeemBytes.length}B, sigScript ${sigScriptSize}B, makerStake=${makerStake})`);
   let dynamicFee = BigInt(mass) * SOMPI_PER_MASS;
