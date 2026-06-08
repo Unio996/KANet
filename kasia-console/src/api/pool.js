@@ -689,6 +689,33 @@ export async function registerPoolRoutes(fastify) {
     for (const k of required) {
       if (b[k] === undefined || b[k] === null || b[k] === '') return reply.code(400).send({ ok: false, error: `missing ${k}` });
     }
+    // J2-tn r411 DoD-E Bettor r383 关1 PASS — 源头堵 oracle pool < 5 卡死单 gap.
+    // 现状: 委员从建市时 pool_snapshots 定格. snapshot eligible < COMMITTEE_SIZE (5) →
+    // 委员永远抽不出 → 市场永卡 + 资金锁死 (= 7un1d 实证).
+    // 修: 建市前查 oracle_pool_chain_view 最新 snapshot pool_size, < 5 reject 503.
+    // 同源同标准 (Bettor 条件): pool_size 字段 = 当前 snapshot eligible (= active + lock_until_daa
+    // > snapshot_daa 已 filter, 跟 sampler 同口径).
+    const COMMITTEE_SIZE_GUARD = 5;
+    try {
+      const latestSnapshot = sqlite.prepare(
+        'SELECT pool_size, snapshot_daa FROM oracle_pool_chain_view ORDER BY snapshot_daa DESC LIMIT 1'
+      ).get();
+      if (!latestSnapshot) {
+        return reply.code(503).send({ ok: false, error: 'oracle pool snapshot 不可用, 暂不能建市 (= 等 chain_view 同步)' });
+      }
+      if (latestSnapshot.pool_size < COMMITTEE_SIZE_GUARD) {
+        return reply.code(503).send({
+          ok: false,
+          error: `oracle pool insufficient (eligible ${latestSnapshot.pool_size} < ${COMMITTEE_SIZE_GUARD} needed) — 等 pool admin re-enroll oracle 后重试`,
+          pool_size: latestSnapshot.pool_size,
+          required: COMMITTEE_SIZE_GUARD,
+          snapshot_daa: latestSnapshot.snapshot_daa,
+        });
+      }
+    } catch (e) {
+      console.warn(`[create-v07] oracle pool guard query fail: ${e.message}`);
+      // Defensive: query fail 不挡建市 (= 仅警告), 让创建路径不被守门误杀.
+    }
     // DoD #1.1 (T2 sediment): pool_merkle_root optional / 'auto' / missing → server auto-derives
     // from current pool state. testnet 简单 path. mainnet caller pins explicit root (= TOCTOU).
     if (!b.pool_merkle_root || b.pool_merkle_root === 'auto') {
