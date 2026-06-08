@@ -60,7 +60,7 @@
           <div class="flex items-center gap-2 text-xs bg-warm-50 rounded px-3 py-2">
             <div class="w-6 h-6 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center text-[10px] font-medium flex-shrink-0" x-text="i+1"></div>
             <div class="flex-1 min-w-0">
-              <div class="text-ink-700 font-medium" x-text="eventLabel(ev.event_type)"></div>
+              <div class="text-ink-700 font-medium" x-text="eventLabel(ev.event_type, ev.payload)"></div>
               <div class="text-[10px] text-ink-400" x-text="formatEventTime(ev.observed_at)"></div>
             </div>
             <a :href="explorerTxUrl(ev.txid)" target="_blank" class="text-brand-500 hover:text-brand-700 text-[11px] flex-shrink-0" :title="ev.txid">🔗 TX</a>
@@ -145,7 +145,13 @@
     <div x-show="!isSettled()" class="card p-4 mb-4">
       <div class="flex items-center justify-between mb-3">
         <span class="text-sm font-medium text-ink-700">仲裁人投票进度</span>
-        <span class="text-xs text-ink-500" x-text="votedCount() + ' / ' + oracleList.length + ' 已投'"></span>
+        <!-- KANet-UI 2026-06-08 P0-B 三桶 (Bettor r414 + spec §7.2): 判定 / 弃权 / 未响应 -->
+        <span class="text-xs text-ink-500">
+          <span x-text="judgedCount()"></span> 判定
+          <span x-show="abstainCount() > 0" class="ml-1" x-text="'+ ' + abstainCount() + ' 弃权'"></span>
+          <span x-show="silentCount() > 0" class="ml-1" x-text="'+ ' + silentCount() + ' 未响应'"></span>
+          / <span x-text="oracleList.length"></span>, 需 4 同向 (YES 或 NO)
+        </span>
       </div>
       <!-- progress bar -->
       <div class="w-full bg-warm-100 rounded-full h-2 mb-4">
@@ -160,12 +166,15 @@
       <div class="space-y-1.5">
         <template x-for="o in oracleList" :key="o.relay_id">
           <div class="flex items-center gap-2 text-xs bg-warm-50 rounded px-3 py-2">
-            <div class="w-2 h-2 rounded-full flex-shrink-0" :class="o.voted ? 'bg-emerald-500' : 'bg-warm-300'"></div>
+            <!-- KANet-UI 2026-06-08 P0-B 三桶: 判定 (YES/NO=绿/红) / 弃权 (ABSTAIN=灰带边) / 未响应 (silent=空灰) -->
+            <div class="w-2 h-2 rounded-full flex-shrink-0"
+                 :class="o.vote === 'YES' ? 'bg-emerald-500' : (o.vote === 'NO' ? 'bg-red-500' : (o.vote === 'ABSTAIN' ? 'bg-warm-400 border border-ink-400' : 'bg-warm-300'))"></div>
             <span class="font-mono text-ink-500 flex-1 truncate" x-text="o.relay_id.slice(0, 16)"></span>
-            <span x-show="o.voted" class="px-1.5 py-0.5 rounded font-medium"
-                  :class="o.vote === 'YES' ? 'bg-emerald-100 text-emerald-700' : (o.vote === 'NO' ? 'bg-red-100 text-red-700' : 'bg-warm-200 text-ink-500')"
-                  x-text="o.vote"></span>
-            <span x-show="!o.voted" class="text-ink-400">等待中</span>
+            <span x-show="o.vote === 'YES'" class="px-1.5 py-0.5 rounded font-medium bg-emerald-100 text-emerald-700">判 YES</span>
+            <span x-show="o.vote === 'NO'" class="px-1.5 py-0.5 rounded font-medium bg-red-100 text-red-700">判 NO</span>
+            <span x-show="o.vote === 'ABSTAIN'" class="px-1.5 py-0.5 rounded font-medium bg-warm-200 text-ink-500 border border-ink-300"
+                  title="oracle 看了但判不了 (数据不足或解析失败), 不计 4-of-5, 不损 stake">弃权</span>
+            <span x-show="o.vote === 'silent' || o.vote == null" class="text-ink-400" x-text="o.vote === 'silent' ? '未响应 (forfeit)' : '等待中'"></span>
           </div>
         </template>
       </div>
@@ -186,8 +195,9 @@
           <div class="flex items-center gap-2 text-xs bg-warm-50 rounded px-3 py-2">
             <span class="font-mono text-ink-500 flex-1 truncate" x-text="(h.oracle_relay_id || '').slice(0, 16)"></span>
             <span class="px-1.5 py-0.5 rounded font-medium"
-                  :class="h.vote === h.consensus_outcome ? 'bg-emerald-100 text-emerald-700' : (h.vote === 'silent' ? 'bg-warm-200 text-ink-500' : 'bg-red-100 text-red-700')"
-                  x-text="h.vote || '—'"></span>
+                  :class="h.vote === h.consensus_outcome ? 'bg-emerald-100 text-emerald-700' : (h.vote === 'silent' ? 'bg-warm-200 text-ink-500' : (h.vote === 'ABSTAIN' ? 'bg-warm-200 text-ink-500 border border-ink-300' : 'bg-red-100 text-red-700'))"
+                  :title="h.vote === 'ABSTAIN' ? '弃权 (= 看了但判不了, 不计 4-of-5, 不损 stake)' : (h.vote === 'silent' ? '未响应 (= forfeit)' : '')"
+                  x-text="h.vote === 'ABSTAIN' ? '弃权' : (h.vote === 'silent' ? '未响应' : (h.vote || '—'))"></span>
             <span x-show="h.reward_amount > 0" class="text-emerald-600 text-[11px]" x-text="'+' + (h.reward_amount || 0).toFixed(1)"></span>
             <span x-show="h.slashed_amount > 0" class="text-red-600 text-[11px]" x-text="'-' + (h.slashed_amount || 0).toFixed(1)"></span>
           </div>
@@ -432,11 +442,17 @@ function poolDetailPage(marketId) {
       if (this.market?.maker_relay_id) return '跨节点 ' + String(this.market.maker_relay_id).slice(0, 8);
       return '?';
     },
-    eventLabel(t) {
+    eventLabel(t, payload) {
       // KANet-UI 2026-06-07 P1-#5 (Bettor r325): '委员' → '仲裁人' 贯穿
+      // KANet-UI 2026-06-08 P0-B (Bettor r414 + spec §7.2): pool_oracle_vote 含 outcome enum 区分判定/弃权
+      if (t === 'pool_oracle_vote') {
+        const oc = payload?.outcome || payload?.vote;
+        if (oc === 'ABSTAIN') return '仲裁人弃权';
+        if (oc === 'YES' || oc === 'NO') return '仲裁人判 ' + oc;
+        return '仲裁人投票';
+      }
       const map = {
         pool_oracle_deposit: '仲裁人入金',
-        pool_oracle_vote: '仲裁人投票',
         pool_oracle_tx_sig: '仲裁人签名',
         pool_settle_consensual_dispatched: '结算分发 (赢家+仲裁人+主持人)',
         pool_oracle_refund_disagreement_tx_sig: '争议退款签名',
@@ -462,7 +478,16 @@ function poolDetailPage(marketId) {
       if (st === 'pending_oracle_deposits') return '等仲裁人接单 (= 仲裁人押 bond 接单).';
       if (st === 'pending_oracle_sampling' || st === 'pending_oracle_sample') return '抽仲裁人中 (约 10 秒).';
       if (st === 'pending_bettors') return '等用户押注 (= 截止前任何人可押 YES/NO).';
-      if (st === 'verifying') return `等仲裁人投票 (${voted}/${total} 已投).`;
+      if (st === 'verifying') {
+        const judged = this.judgedCount?.() ?? 0;
+        const abstain = this.abstainCount?.() ?? 0;
+        const silent = this.silentCount?.() ?? 0;
+        let txt = `等仲裁人投票 (${judged} 判定`;
+        if (abstain > 0) txt += `, ${abstain} 弃权`;
+        if (silent > 0) txt += `, ${silent} 未响应`;
+        txt += `, 共 ${total}, 需 4 同向)`;
+        return txt;
+      }
       if (st === 'collecting_sigs') return `等仲裁人签名 (${sigs}/${total} 已签).`;
       if (st === 'completed') return '已结算. 链上 TX 见上面 🔗.';
       if (st === 'refunded' || st === 'cancelled') return '已退款.';
@@ -520,6 +545,17 @@ function poolDetailPage(marketId) {
 
     isSettled() {
       return this.market && (this.market.protocol_status === 'completed' || this.market.settle_txid);
+    },
+    // KANet-UI 2026-06-08 P0-B 三桶 (Bettor r414 + spec §7.2):
+    // 判定 (YES/NO 计 4-of-5) / 弃权 (ABSTAIN 不计) / 未响应 (silent forfeit)
+    judgedCount() {
+      return this.oracleList.filter(o => o.vote === 'YES' || o.vote === 'NO').length;
+    },
+    abstainCount() {
+      return this.oracleList.filter(o => o.vote === 'ABSTAIN').length;
+    },
+    silentCount() {
+      return this.oracleList.filter(o => o.vote === 'silent').length;
     },
     votedCount() {
       return this.oracleList.filter(function(o){ return o.voted; }).length;
