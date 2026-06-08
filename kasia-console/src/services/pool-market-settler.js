@@ -1109,13 +1109,24 @@ function decideConsensusV06(market) {
     };
   }
 
-  // Threshold not met → timeout → refund.
+  // Threshold not met → consider clean-default-refund or timeout fallback.
   const verifyingSinceMs = parseSqliteUtc(market.updated_at);
   const ageMs = Date.now() - verifyingSinceMs;
+
   // r412 Bettor 5.5: abstain >= 2 → 4-of-5 不可达 → refund 早. 不等 timeout.
   if (abstainCount >= 2) {
     return { action: 'refund', reason: `v0.6 abstain≥2 (${abstainCount}/5) → 4-of-5 不可达, refund_consensus_insufficient (YES=${yesCount} NO=${noCount} ABSTAIN=${abstainCount} malformed=${malformedCount})` };
   }
+
+  // r415 Owner 终裁 spec v1 §7.2 (clean-default-refund): 5 oracle 全部表态 (= 投票/abstain/malformed) 后
+  // 仍非 4-同向 → 数学不可能反转 (= 即使额外 vote 也救不了, 因 5 全已发声). 立即 refund 不等 timeout.
+  // 防 split-limbo (= 3y2n, 1a3y1n, 1a2y2n 等过去等 24h timeout 卡资金).
+  // 注: trueSilentSet ≠ "5 已发声" (= 那是没投, 可能还会投). decidedCount = votes + abstain + malformed.
+  const decidedCount = votes.length + abstainCount + malformedCount;
+  if (decidedCount === 5) {
+    return { action: 'refund', reason: `v0.6 5/5 oracle 表态但非 4-同向 (YES=${yesCount} NO=${noCount} ABSTAIN=${abstainCount} malformed=${malformedCount}) → refund_consensus_insufficient (split-default)` };
+  }
+
   if (ageMs >= ORACLE_SILENT_TIMEOUT_MS) {
     return { action: 'refund', reason: `v0.6 4-of-5 threshold unmet (YES=${yesCount} NO=${noCount} ABSTAIN=${abstainCount} malformed=${malformedCount} total_votes=${votes.length}/5) past ${Math.round(ORACLE_SILENT_TIMEOUT_MS/60000)}min timeout` };
   }
