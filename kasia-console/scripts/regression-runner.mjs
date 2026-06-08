@@ -1024,22 +1024,27 @@ async function verifyV06(baselinePath) {
     const hasOutcomeEnum = /outcome\s*:\s*['"]ABSTAIN['"]/.test(voterSrc);
     // sub-d: extractor_kind_used 字段 broadcast (= J1 r303 不变量提议)
     const hasExtractorKindUsed = /extractor_kind_used/.test(voterSrc);
-    // sub-e: settler 独立 abstainCount 计数 (= 不与 silent 混 = Bettor r406 派 NWT 验)
-    const settlerHasAbstainCount = /abstainCount\s*\+\+|abstainCount\s*=\s*0/.test(settlerSrc);
-    // sub-f: settler 三态分流逻辑 (= abstain≥2 → refund, 不当 silent forfeit, spec 5.5 reputation 中性)
-    const settlerAbstainNotForfeit = /abstainCount\s*>=?\s*2/.test(settlerSrc) && /refund.*abstain|abstain.*refund/i.test(settlerSrc);
-    const allOk = !hasGuessFallback && hasAbstainReturn && hasOutcomeEnum && hasExtractorKindUsed && settlerHasAbstainCount && settlerAbstainNotForfeit;
+    // sub-e: settler 独立 abstainCount + trueSilentSet + abstainSet + malformedSet 全分 (= 不混)
+    const settlerHasAllSets = /trueSilentSet/.test(settlerSrc) && /abstainSet/.test(settlerSrc) && /malformedSet/.test(settlerSrc);
+    // sub-f: _findSilentForWinner 函数体内 abstainSet 检查位置 AFTER malformedSet (= 优先级 ABSTAIN 最后, Bettor r408 真覆盖)
+    let findSilentBody = '';
+    const fsfwMatch = settlerSrc.match(/function\s+_findSilentForWinner[\s\S]*?(?=\n\s*function|\n\s*if\s*\(\s*yesCount\s*>=)/);
+    if (fsfwMatch) findSilentBody = fsfwMatch[0];
+    const malformedPos = findSilentBody.indexOf('malformedSet.has');
+    const abstainPos = findSilentBody.indexOf('abstainSet.has');
+    const settlerAbstainLastPriority = findSilentBody && malformedPos > 0 && abstainPos > malformedPos;
+    const allOk = !hasGuessFallback && hasAbstainReturn && hasOutcomeEnum && hasExtractorKindUsed && settlerHasAllSets && settlerAbstainLastPriority;
     check(
-      'L37 Oracle 判断框架: ABSTAIN-not-guess + 三态 enum + settler 不当 forfeit (Bettor r401-r406, J2 b5113af5)',
+      'L37 Oracle 判断框架: ABSTAIN-not-guess + 三态 enum + ABSTAIN forfeit 优先级最后 (Bettor r401-r408, J2 b5113af5+r413)',
       allOk,
       {
         voter_no_guess_fallback: !hasGuessFallback,
         voter_has_abstain_return: hasAbstainReturn,
         voter_has_outcome_enum_abstain: hasOutcomeEnum,
         voter_broadcasts_extractor_kind: hasExtractorKindUsed,
-        settler_has_abstain_count: settlerHasAbstainCount,
-        settler_abstain_not_forfeit: settlerAbstainNotForfeit,
-        note: allOk ? 'ABSTAIN-not-guess + 三态分流守门完整' : '任一回归 → guess fallback 重生 / abstain=forfeit / 三态混 立 hard FAIL'
+        settler_has_all_three_sets: settlerHasAllSets,
+        settler_abstain_last_priority_in_findSilent: settlerAbstainLastPriority,
+        note: allOk ? 'ABSTAIN-not-guess + 4 优先级 (silent>malformed>dissent>ABSTAIN) 守门完整' : '任一回归 → guess fallback 重生 / 三 set 混 / abstain 抢 forfeit 立 hard FAIL'
       }
     );
   } catch (e) {
