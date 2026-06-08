@@ -2457,6 +2457,16 @@ export async function registerPoolRoutes(fastify) {
     } else {
       suggestions.push('题目主题不在已知高可裁 domain (体育/金融/政治), 可能 LLM 难判');
     }
+    // J2-tn r412 Oracle 框架 Bettor r404 钉死: prevet 验 canonical extractor coverage.
+    // KANet extractor 已知域名 → +3 (高可裁性, oracle 可解析); 不在 → -2 (= 启发, 不强阻).
+    const KNOWN_EXTRACTOR_DOMAINS_PREVET = /espn\.com|bbc\.co|reuters\.com|apnews\.com/i;
+    if (urlOk && KNOWN_EXTRACTOR_DOMAINS_PREVET.test(dsc)) {
+      score += 3;
+    } else if (urlOk) {
+      score -= 2;
+      why.push('数据源域名不在 KANet extractor 已知列表 (= oracle 会 ABSTAIN, 此单可能等 silent_timeout 退款)');
+      suggestions.push('用 ESPN/BBC/Reuters/AP 等已知源, 或等 framework 加 extractor 此源');
+    }
     // LLM 修正 (MVP 单 Qwen via maker_relay_id adapter).
     let llmEndpointHash = null;
     const llmVotes = [];

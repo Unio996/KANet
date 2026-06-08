@@ -1018,7 +1018,10 @@ function decideConsensusV06(market) {
     return { action: 'pending', reason: `v0.6/v0.7 pool_committee.committee_pks invalid (expected 5, got ${committeePks.length}) — committee not yet sampled` };
   }
 
+  // J2-tn r412 Oracle 框架 spec (Bettor r404 #3 钉死 + 5.2): 三态 enum + malformed = silent-equiv.
   const votes = [];
+  let abstainCount = 0;
+  let malformedCount = 0;
   for (let i = 0; i < 5; i++) {
     const voterPk = committeePks[i];
     const row = sqlite.prepare(`
@@ -1028,11 +1031,17 @@ function decideConsensusV06(market) {
         AND payload LIKE ?
       ORDER BY observed_at ASC LIMIT 1
     `).get(`%"market_id":"${market.id}"%`, `%"voter_pubkey":"${voterPk}"%`);
-    if (!row) continue;
+    if (!row) continue;  // silent (= 没投票)
     let payload;
-    try { payload = JSON.parse(row.payload); } catch { continue; }
-    if (payload.outcome !== 'YES' && payload.outcome !== 'NO') continue;
-    votes.push({ oracleIndex: i, outcome: payload.outcome });
+    try { payload = JSON.parse(row.payload); } catch { malformedCount++; continue; }
+    // r412: outcome enum {YES, NO, ABSTAIN}. 其他 = malformed = silent-equiv (Bettor r404 5.2).
+    if (payload.outcome === 'YES' || payload.outcome === 'NO') {
+      votes.push({ oracleIndex: i, outcome: payload.outcome });
+    } else if (payload.outcome === 'ABSTAIN') {
+      abstainCount++;
+    } else {
+      malformedCount++;  // = 不计入 consensus, 等同 silent (forfeit)
+    }
   }
 
   const yesCount = votes.filter(v => v.outcome === 'YES').length;
@@ -1073,10 +1082,14 @@ function decideConsensusV06(market) {
   // Threshold not met → timeout → refund.
   const verifyingSinceMs = parseSqliteUtc(market.updated_at);
   const ageMs = Date.now() - verifyingSinceMs;
-  if (ageMs >= ORACLE_SILENT_TIMEOUT_MS) {
-    return { action: 'refund', reason: `v0.6 4-of-5 threshold unmet (YES=${yesCount} NO=${noCount} total=${votes.length}/5) past ${Math.round(ORACLE_SILENT_TIMEOUT_MS/60000)}min timeout` };
+  // r412 Bettor 5.5: abstain >= 2 → 4-of-5 不可达 → refund 早. 不等 timeout.
+  if (abstainCount >= 2) {
+    return { action: 'refund', reason: `v0.6 abstain≥2 (${abstainCount}/5) → 4-of-5 不可达, refund_consensus_insufficient (YES=${yesCount} NO=${noCount} ABSTAIN=${abstainCount} malformed=${malformedCount})` };
   }
-  return { action: 'pending', reason: `v0.6 votes ${votes.length}/5 (YES=${yesCount} NO=${noCount}) age=${Math.floor(ageMs/60000)}min < timeout` };
+  if (ageMs >= ORACLE_SILENT_TIMEOUT_MS) {
+    return { action: 'refund', reason: `v0.6 4-of-5 threshold unmet (YES=${yesCount} NO=${noCount} ABSTAIN=${abstainCount} malformed=${malformedCount} total_votes=${votes.length}/5) past ${Math.round(ORACLE_SILENT_TIMEOUT_MS/60000)}min timeout` };
+  }
+  return { action: 'pending', reason: `v0.6 votes ${votes.length}/5 (YES=${yesCount} NO=${noCount} ABSTAIN=${abstainCount}) age=${Math.floor(ageMs/60000)}min < timeout` };
 }
 
 /**

@@ -364,9 +364,10 @@ async function processPoolMarket(voter) {
         market_id: market.id,
         voter_relay_id: voter.id,
         voter_pubkey: voterXOnlyPubkey,
-        outcome: voteResult.outcome,
+        outcome: voteResult.outcome,  // 'YES' | 'NO' | 'ABSTAIN' (= J2-tn r412 Oracle 框架 spec)
         evidence_url: voteResult.evidence_url || null,
         evidence_hash: evidenceHash,
+        extractor_kind_used: voteResult.extractor_kind_used || null,  // r412: audit trail
         vote_timestamp: new Date().toISOString(),
         epoch: 1,  // Oracle v0.3 sub 3 v2 (= J1 #4 C3/C4 fix)
       };
@@ -809,19 +810,26 @@ export async function deriveKanetNativeVote(offer, spec) {
       // ESPN/BBC/etc structured 源 → extractEvidence 解析关键字段 (winner/score) → < 500 字符
       // 喂 LLM 干净 prompt 而非截断 raw JSON. 抽取器返 null = 比赛未 final/抽取失败 → fallback
       // raw slice(0,2000) 保 deriveKanetNativeVote 现 behavior (= 不破 free-text path).
+      // J2-tn r412 Oracle 框架 spec Bettor r404 关1 PASS — 删 guess-fallback ABSTAIN-not-guess.
+      // 之前: extractor null → fallback rawText.slice(0,2000) → LLM 瞎猜 (= w0s3m 4/5 错判根因).
+      // 现在: extractor null + known source → ABSTAIN (= 结果未 final), unknown source → ABSTAIN (= 不在 extractor list).
+      // 仅 extractor 返 clean evidence 才喂 LLM.
+      const KNOWN_EXTRACTOR_DOMAINS = /espn\.com|bbc\.co|reuters\.com|apnews\.com/i;
       try {
         const { extractEvidence } = await import('../lib/oracle-evidence-extractors.mjs');
         const clean = extractEvidence(url, rawText);
-        evidence_text = clean || rawText.slice(0, 2000);
-        if (clean === null && /espn\.com|bbc\.co|reuters\.com|apnews\.com/i.test(url)) {
-          // Bettor 条件 (1): known sports/news source 但抽取返 null = 结果未出/未 final.
-          // voter abstain (= 返 ok:false 让 LLM 不蒙).
-          return { ok: false, reason: `结果未出/未 final at known source ${url} (extractor returned null)` };
+        if (clean === null) {
+          // ABSTAIN: 弃权 — extractor 不出 clean evidence. 区分两种 reason:
+          if (KNOWN_EXTRACTOR_DOMAINS.test(url)) {
+            return { ok: true, outcome: 'ABSTAIN', extractor_kind_used: 'known-source-not-final', reason: 'extractor returned null at known source (= 结果未 final 或 game 数据缺)' };
+          }
+          return { ok: true, outcome: 'ABSTAIN', extractor_kind_used: 'no-extractor-match', reason: `URL ${url} not in extractor known-list (= 框架不识此源)` };
         }
+        evidence_text = clean;
       } catch (e) {
-        // Defensive: 抽取器异常 → fallback raw slice 不破现 path.
-        console.warn(`[deriveKanetNative] extractor exception ${e.message}, falling back to raw slice`);
-        evidence_text = rawText.slice(0, 2000);
+        // Defensive: extractor 模块自身异常 → ABSTAIN (= 不假装能判).
+        console.warn(`[deriveKanetNative] extractor exception ${e.message}, ABSTAIN`);
+        return { ok: true, outcome: 'ABSTAIN', extractor_kind_used: 'extractor-exception', reason: `extractor exception: ${e.message?.slice(0,100)}` };
       }
     } catch (e) {
       return { ok: false, reason: `kanet_native fetch fail: ${e.message}` };
