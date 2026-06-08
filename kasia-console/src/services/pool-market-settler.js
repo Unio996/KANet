@@ -629,8 +629,31 @@ export async function poolSettlerTick() {
                 console.warn(`[pool-settler] committee_unformed market=${market.id.slice(0,12)} sample_fail_count=${cur.sample_fail_count} >= MAX_SAMPLE_FAIL(${MAX_SAMPLE_FAIL}) → dispatchRefund (committee_unformed)`);
                 sqlite.prepare('UPDATE pool_markets SET metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
                   .run(JSON.stringify(cur), market.id);
-                // Trigger refund; if cross-node, dispatchRefund 内 skip 自家 log (r402 broadcast path)
+                // Trigger maker refund; if cross-node, dispatchRefund 内 skip 自家 log (r402 broadcast path)
                 await dispatchRefund(market, { action: 'refund', reason: `committee_unformed (sample_fail=${cur.sample_fail_count}, last=${cur.sample_last_err?.slice(0,80) || 'n/a'})` });
+                // r417 (Bettor r419/r420 monitor): emit bettor_refund_available for any sides
+                // so bettor-refund-claim-auto cron can sweep + dispatch PoolSide entry 2 refund.
+                // 7un1d 实证缺这步 — maker refund 落链 但 bettor side 5 KAS 没出 refund_available.
+                const sides = sqlite.prepare('SELECT id, bettor_pk, side_p2sh, side_lock_tx, stake_amount, direction FROM pool_bettor_sides WHERE market_id = ?').all(market.id);
+                for (const side of sides) {
+                  const bettorRefundPayload = JSON.stringify({
+                    market_id: market.id,
+                    bettor_pk: side.bettor_pk,
+                    side_p2sh: side.side_p2sh,
+                    side_lock_tx: side.side_lock_tx,
+                    stake: side.stake_amount,
+                    direction: side.direction,
+                    reason: 'committee_unformed',
+                    claim_entry: 'PoolSide_v07 entry 2 refund_market_cancelled',
+                  });
+                  sqlite.prepare(`
+                    INSERT INTO chain_events (id, txid, event_type, from_address, to_address, payload, observed_by, observed_at)
+                    VALUES (lower(hex(randomblob(16))), ?, 'bettor_refund_available', NULL, NULL, ?, 'pool-settler', CURRENT_TIMESTAMP)
+                  `).run(`bettor_refund:${market.id.slice(0,12)}:${String(side.bettor_pk).slice(0,12)}:${Date.now()}`, bettorRefundPayload);
+                }
+                if (sides.length > 0) {
+                  console.log(`[pool-settler] committee_unformed market=${market.id.slice(0,12)} emitted ${sides.length} bettor_refund_available event(s)`);
+                }
                 refund++;
                 continue;
               }
