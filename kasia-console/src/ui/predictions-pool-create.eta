@@ -334,6 +334,28 @@
               <template x-if="preVet.error">
                 <div class="mt-2 text-xs px-3 py-2 rounded-lg bg-warm-50 text-ink-500" x-text="'预审暂不可用 (' + preVet.error + '), 仍可建市但建议自查 spec 清晰度.'"></div>
               </template>
+
+              <!-- KANet-UI 2026-06-09 r448 (Bettor Owner 钦定 maker-facing 源可判性): /api/pool/prevet-extract -->
+              <div class="mt-3 flex items-center justify-end gap-2">
+                <button @click="runPreVetExtract()" :disabled="!canPreVetExtract() || preVetExtract.checking"
+                        class="text-[11px] accent-gold hover:underline disabled:opacity-40">
+                  <span x-text="preVetExtract.checking ? '检查源可判性中...' : '🔍 检查源可判性'"></span>
+                </button>
+              </div>
+              <template x-if="preVetExtract.result">
+                <div class="mt-2 text-xs px-3 py-2 rounded-lg" :class="extractBadgeClass()">
+                  <div class="font-medium" x-text="extractBadgeLabel()"></div>
+                  <template x-if="preVetExtract.result.advice">
+                    <div class="text-[11px] mt-1" x-text="preVetExtract.result.advice"></div>
+                  </template>
+                  <template x-if="preVetExtract.result.preview">
+                    <div class="text-[11px] mt-1 text-ink-500" x-text="'抽样: ' + preVetExtract.result.preview"></div>
+                  </template>
+                </div>
+              </template>
+              <template x-if="preVetExtract.error">
+                <div class="mt-2 text-xs px-3 py-2 rounded-lg bg-warm-50 text-ink-500" x-text="'源验证暂不可用 (' + preVetExtract.error + '), 不阻 submit 但建议自查 source enum/canonical URL.'"></div>
+              </template>
             </div>
           </div>
         </div>
@@ -452,6 +474,17 @@ function createPoolPage() {
       error: '',
       specHash: '',         // 上次预审的 spec hash (= form 改后清 result 防 stale)
     },
+    // KANet-UI 2026-06-09 r448 (Bettor r448 Owner 钦定): 源可判性预审 state
+    // J2 endpoint /api/pool/prevet-extract — 建市前调一遍 voter extractor 路由验证.
+    // Verdict 绿: judgeable_now / judgeable_pending / judgeable_polymarket
+    // Verdict 红: unsupported_source_enum / no_extractor / no_canonical / canonical_unreachable / shape_mismatch
+    // 红时 missingList 加 '源判不了' → 禁 submit.
+    preVetExtract: {
+      checking: false,
+      result: null,       // { ok, verdict, label?, kind?, preview?, advice? }
+      error: '',
+      sigHash: '',        // 上次调用的 source+canonical 组合, 改后清 result 防 stale
+    },
     form: {
       outcome_end_date_local: '',
       outcome_side: '',
@@ -540,6 +573,8 @@ function createPoolPage() {
       if (!(this.form.maker_stake_kas > 0)) out.push('押金');
       // KANet-UI 2026-06-08 P0-A MVP (Bettor r360): critical 阻提交 (= 难裁请改)
       if (this.preVet.result && this.preVet.result.level === 'critical') out.push('题目难裁需改善');
+      // KANet-UI 2026-06-09 r448 (Bettor Owner 钦定): 源判不了阻提交
+      if (this.preVetExtract.result && !this.extractVerdictGreen()) out.push('源判不了需换');
       return out;
     },
 
@@ -656,6 +691,91 @@ function createPoolPage() {
       if (lvl === 'warn') return '⚠ 低可裁性 — 可建, 押注端会显警告';
       return '⛔ 难裁 — 请按建议改善后再试';
     },
+    // KANet-UI 2026-06-09 r448 (Bettor Owner 钦定): 源可判性预审 helpers
+    // 镜像 pool.js SOURCE_KIND_DERIVERS — 客户端 derive canonical 给 prevet-extract 用.
+    _canonicalFromForm() {
+      const sk = this.form.source_kind;
+      const p = this.form.source_params || {};
+      try {
+        if (sk === 'manual') return (this.form.data_source_canonical || '').trim();
+        if (sk === 'polymarket') {
+          const cond = (p.condition_id || '').trim();
+          if (!cond) return '';
+          return 'https://gamma-api.polymarket.com/markets?clob_token_ids=' + encodeURIComponent(cond) + '&closed=true';
+        }
+        if (sk === 'binance') {
+          const sym = (p.symbol || '').trim();
+          if (!sym) return '';
+          return 'https://api.binance.com/api/v3/klines?symbol=' + encodeURIComponent(sym) + '&interval=1d&limit=1';
+        }
+        if (sk === 'sport') {
+          const eid = (p.event_id || '').trim();
+          if (!eid) return '';
+          // 测试网占位; 真用户必走 ESPN canonical (= manual 模式直填 URL).
+          return 'http://localhost:' + window.location.port + '/api/test-oracle/' + encodeURIComponent(eid);
+        }
+        if (sk === 'kaspa-onchain') {
+          const tx = (p.tx_hash || '').trim();
+          if (!/^[0-9a-fA-F]{64}$/.test(tx)) return '';
+          return 'https://api-tn12.kaspa.org/transactions/' + tx;
+        }
+      } catch (e) { /* derive 异常 = 返空, 由 missingList 兜底 */ }
+      return '';
+    },
+    _outcomeMarketSourceFromForm() {
+      // Polymarket 走 derivePolymarketVote 路径 (= source enum 'polymarket').
+      // 其他全部默认 'kanet_v07' (= 后端 create-v07 默认值, 同 vaaks 同 wghdr 同源).
+      return this.form.source_kind === 'polymarket' ? 'polymarket' : 'kanet_v07';
+    },
+    canPreVetExtract() {
+      // 源 + canonical 都有才能验 (= 否则 endpoint 必返 no_canonical)
+      return !!this._canonicalFromForm();
+    },
+    extractVerdictGreen() {
+      const r = this.preVetExtract.result;
+      if (!r || !r.verdict) return true;  // null result 不阻 (= 用户没调过, 默认放)
+      return String(r.verdict).startsWith('judgeable_');
+    },
+    extractBadgeClass() {
+      if (!this.preVetExtract.result) return '';
+      return this.extractVerdictGreen()
+        ? 'bg-green-50 text-green-700 border border-green-200'
+        : 'bg-red-50 text-red-700 border border-red-200';
+    },
+    extractBadgeLabel() {
+      const r = this.preVetExtract.result;
+      if (!r) return '';
+      if (this.extractVerdictGreen()) return '✓ 这单可判 (' + (r.label || r.kind || r.verdict) + ')';
+      return '⛔ 这源判不了 (' + r.verdict + ')';
+    },
+    async runPreVetExtract() {
+      if (!this.canPreVetExtract()) return;
+      const canonical = this._canonicalFromForm();
+      const source = this._outcomeMarketSourceFromForm();
+      const sig = source + '||' + canonical;
+      // 同 sig 缓存命中 (= 不重复打)
+      if (this.preVetExtract.result && this.preVetExtract.sigHash === sig) return;
+      this.preVetExtract.checking = true;
+      this.preVetExtract.error = '';
+      this.preVetExtract.result = null;
+      try {
+        const r = await fetch('/api/pool/prevet-extract', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ outcome_market_source: source, data_source_canonical: canonical }),
+        });
+        if (r.status === 404) throw new Error('endpoint 尚未实现');
+        const j = await r.json();
+        // diagnoseSource 总返 { ok, verdict, ... } — ok=false 不等于 error, 是红 verdict
+        if (!j.verdict) throw new Error('endpoint 无 verdict 字段');
+        this.preVetExtract.result = j;
+        this.preVetExtract.sigHash = sig;
+      } catch (e) {
+        this.preVetExtract.error = String(e.message || e);
+      }
+      this.preVetExtract.checking = false;
+    },
+
     async runPreVet() {
       if (!this.canPreVet()) return;
       this.preVet.checking = true;
@@ -705,6 +825,15 @@ function createPoolPage() {
 
     async submitMarket() {
       if (!this.canSubmit) return;
+      // KANet-UI 2026-06-09 r448 (Bettor Owner 钦定): submit 前必跑源可判性
+      // (= 防 maker 没点 button 就建出 espn-enum 类无效单. canPreVetExtract 检 canonical 存在).
+      if (this.canPreVetExtract() && !this.preVetExtract.result) {
+        await this.runPreVetExtract();
+        if (!this.extractVerdictGreen()) {
+          this.submitError = '建市拦截: ' + (this.preVetExtract.result?.advice || '源判不了, 改源后再试');
+          return;
+        }
+      }
       this.submitting = true;
       this.submitError = '';
       try {
