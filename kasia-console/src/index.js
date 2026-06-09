@@ -3,6 +3,16 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { randomBytes } from 'crypto';
 
+// J2-tn r429 (Bettor r467 P0 Console crash 根治): defensive top-level handlers.
+// 防 Console 反复 crash 真因 — uncaught exception / unhandledRejection 自 child relay /
+// adapter spawn / scout RPC / LLM 调用. 保进程活, log 异常 (= supervisor 不再每次拉起).
+process.on('uncaughtException', (err) => {
+  console.error('[kanet:uncaught]', err?.stack || err?.message || String(err));
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('[kanet:unhandled-rejection]', reason?.stack || reason?.message || String(reason));
+});
+
 // DB setup
 import { runMigrations } from './db/migrate.js';
 import { sqlite as _sqlite } from './db/client.js';
