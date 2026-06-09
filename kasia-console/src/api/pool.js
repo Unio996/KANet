@@ -2415,9 +2415,11 @@ export async function registerPoolRoutes(fastify) {
   fastify.post('/api/pool/prevet-extract', async (request, reply) => {
     const b = request.body || {};
     const url = String(b.data_source_canonical || '').trim();
+    // r422 (Bettor r442 关2 漏抓): outcome_market_source 也校验 enum 接受 (= voter 路由).
+    const source = b.outcome_market_source !== undefined ? String(b.outcome_market_source) : undefined;
     try {
       const { diagnoseSource } = await import('../lib/oracle-evidence-extractors.mjs');
-      const result = await diagnoseSource(url);
+      const result = await diagnoseSource(url, source);
       return reply.send(result);
     } catch (e) {
       return reply.code(500).send({ ok: false, verdict: 'internal_error', advice: `diagnose 异常: ${String(e.message || '').slice(0,120)}` });

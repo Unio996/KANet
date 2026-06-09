@@ -109,7 +109,24 @@ export function extractEvidence(url, rawText) {
 }
 
 /**
- * J2-tn r421 (Bettor r441 关1 钉1+钉2): maker-facing prevet diagnose.
+ * J2-tn r422 (Bettor r442 关2 漏抓): voter 接受的 outcome_market_source enum 列表.
+ * 必 mirror bettor-prediction-voter.js L687-702:
+ *   - 'polymarket' → polymarket handler
+ *   - 'kanet_native' OR startsWith('kanet_') → kanet_native handler
+ *   - else → unsupported
+ * prevet 必同时校验 enum 接受 + URL 抽取, 防 espn-enum+ESPN-URL 错配 (= URL judgeable 但 voter
+ * 拒 enum → ABSTAIN → refund).
+ */
+export function isVoterSupportedSource(source) {
+  if (!source || typeof source !== 'string') return false;
+  if (source === 'polymarket') return true;
+  if (source === 'kanet_native') return true;
+  if (source.startsWith('kanet_')) return true;
+  return false;
+}
+
+/**
+ * J2-tn r421 (Bettor r441 关1 钉1+钉2 + r422 r442 关2 漏抓): maker-facing prevet diagnose.
  *
  * Returns structured verdict for build-time gate. Bettor 钉2: 'not_final_yet' is GREEN
  * (= 可判待终态, 市场为未来事件正常). RED = 该源 fundamentally 判不了.
@@ -120,11 +137,22 @@ export function extractEvidence(url, rawText) {
  *   - 'no_extractor'       — source 不在 registry (= 该域无 extractor, 换源 OR UMA)
  *   - 'canonical_unreachable' — URL 不可达 / 网络错
  *   - 'shape_mismatch'     — URL OK 但 JSON 不能解析 OR 结构不对 (= 拼错 URL / 私有 endpoint)
+ *   - 'unsupported_source_enum' — outcome_market_source enum 不在 voter handler 列表 (r422)
  *
  * @param {string} url
+ * @param {string} source - outcome_market_source enum (= voter 路由 key)
  * @returns {Promise<{ok, verdict, label?, kind?, preview?, advice}>}
  */
-export async function diagnoseSource(url) {
+export async function diagnoseSource(url, source) {
+  // r422 (Bettor r442 关2): 先校验 enum, 防 espn-enum+ESPN-URL 错配 (= URL 抽得到但 voter 拒 enum).
+  if (source !== undefined && !isVoterSupportedSource(source)) {
+    return {
+      ok: false,
+      verdict: 'unsupported_source_enum',
+      advice: `outcome_market_source='${source}' 不在 voter handler 列表 (= polymarket / kanet_*). 换 'kanet_v07' (= 同 vaaks PASS 源).`,
+    };
+  }
+
   if (!url) {
     return { ok: false, verdict: 'no_canonical', advice: '必填 data_source_canonical (= 机器可解析 URL)' };
   }
