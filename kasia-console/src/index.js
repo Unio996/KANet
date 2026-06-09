@@ -503,6 +503,13 @@ startPoolMarketSettlerCron();
 import { startBettorRefundClaimAutoCron } from './services/bettor-refund-claim-auto.mjs';
 startBettorRefundClaimAutoCron();
 
+// r420 auto-bet (Bettor r433/r436 Owner 钦定 规模化跨域实测): Console-cron 自动押注.
+// 取代外部 _nwt_tn_autobet_loop.mjs daemon (= 不 follow Console restart, KANet-UI r656 surface).
+// env: AUTO_BET_TICK_MS (60s default), AUTO_BET_PER_TICK (2), MIN/MAX_STAKE_KAS (1/50),
+//      MIN_RESERVE_KAS (10), AUTO_BET_RELAYS (= AutoBetter-1/2/3 + tester-1/2/3 default).
+import { startAutoBetterCron } from './services/pool-auto-better.js';
+startAutoBetterCron();
+
 // 质押池活化 (Bettor r449): 5min cron 刷 oracle_pool_chain_view 保新鲜.
 import { startOraclePoolScannerCron } from './services/oracle-pool-chain-scanner-cron.mjs';
 startOraclePoolScannerCron();
