@@ -788,11 +788,25 @@ const POOL_CHUNK_CACHE = new Map();  // key=hash → { total, parts: Map<ord,dat
 // J2-tn r426 (Bettor r453 / J1 r417 钉死 wghdr 根因): 5min TTL 太短 for 55-chunk envelope
 // (= settle sign_req with embedded phase2_tx_obj). chunks ord 44-54 arrive after first batch ord
 // 0-43 expired → eternal incomplete. 改 30 min TTL — chain re-broadcast retry 2 rounds 时间够.
+//
+// J2-tn r430 (Bettor r468 OOM 根治): 30min TTL × 大 envelope (= 55-chunk × 340B = 18.7KB) 累积
+// 触发 OOM. 加 max-size LRU 兜底: > MAX_CACHE_ENTRIES (= 200) 时 evict 最旧条目 (= firstAt asc).
 const POOL_CHUNK_TTL_MS = 30 * 60 * 1000;
+const POOL_CHUNK_MAX_ENTRIES = 200;
 function _evictExpiredChunks(now = Date.now()) {
   for (const [hash, entry] of POOL_CHUNK_CACHE) {
     if (now - entry.firstAt > POOL_CHUNK_TTL_MS) {
       console.warn(`[trade-filter:chunk] evict expired hash=${hash.slice(0,12)} age=${Math.round((now - entry.firstAt)/1000)}s have=${entry.parts.size}/${entry.total} (incomplete reassembly, dropped)`);
+      POOL_CHUNK_CACHE.delete(hash);
+    }
+  }
+  // r430: max-size LRU eviction (OOM 兜底). 超 200 → evict 最旧 N 个直到 <= 200.
+  if (POOL_CHUNK_CACHE.size > POOL_CHUNK_MAX_ENTRIES) {
+    const sorted = Array.from(POOL_CHUNK_CACHE.entries()).sort((a, b) => a[1].firstAt - b[1].firstAt);
+    const toEvict = POOL_CHUNK_CACHE.size - POOL_CHUNK_MAX_ENTRIES;
+    for (let i = 0; i < toEvict; i++) {
+      const [hash, entry] = sorted[i];
+      console.warn(`[trade-filter:chunk] evict over-cap hash=${hash.slice(0,12)} firstAt=${new Date(entry.firstAt).toISOString()} have=${entry.parts.size}/${entry.total} (cache size > ${POOL_CHUNK_MAX_ENTRIES}, dropped LRU)`);
       POOL_CHUNK_CACHE.delete(hash);
     }
   }

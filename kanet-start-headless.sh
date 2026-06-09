@@ -93,7 +93,7 @@ KANET_ROOT="$KANET_ROOT" \
 CONSOLE_ENCRYPTION_KEY="$CONSOLE_ENCRYPTION_KEY" \
 PORT="$CONSOLE_PORT" \
 DB_PATH="$CONSOLE_DIR/data/console.db" \
-  node "$CONSOLE_DIR/src/index.js" >> "$CONSOLE_LOG" 2>&1 &
+  node --max-old-space-size=4096 "$CONSOLE_DIR/src/index.js" >> "$CONSOLE_LOG" 2>&1 &
 CONSOLE_PID=$!
 echo "$CONSOLE_PID" > "$PID_DIR/console.pid"
 
