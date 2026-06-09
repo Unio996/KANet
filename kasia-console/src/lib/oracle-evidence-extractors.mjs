@@ -144,12 +144,25 @@ export function isVoterSupportedSource(source) {
  * @returns {Promise<{ok, verdict, label?, kind?, preview?, advice}>}
  */
 export async function diagnoseSource(url, source) {
-  // r422 (Bettor r442 关2): 先校验 enum, 防 espn-enum+ESPN-URL 错配 (= URL 抽得到但 voter 拒 enum).
+  // r422 (Bettor r442): 先校验 enum, 防 espn-enum+ESPN-URL 错配 (= URL 抽得到但 voter 拒 enum).
   if (source !== undefined && !isVoterSupportedSource(source)) {
     return {
       ok: false,
       verdict: 'unsupported_source_enum',
       advice: `outcome_market_source='${source}' 不在 voter handler 列表 (= polymarket / kanet_*). 换 'kanet_v07' (= 同 vaaks PASS 源).`,
+    };
+  }
+
+  // r423 (Bettor r443 关2 漏抓): polymarket 是 voter 非-extractor 判路 (= derivePolymarketVote
+  // 读 gamma API), 不走 KNOWN_EXTRACTORS. 必单独认 GREEN 不走 ESPN 路径.
+  const urlLower = String(url || '').toLowerCase();
+  if (source === 'polymarket' || urlLower.includes('polymarket.com')) {
+    return {
+      ok: true,
+      verdict: 'judgeable_polymarket',
+      label: 'Polymarket gamma',
+      kind: 'polymarket',
+      advice: '✓ Polymarket 源 (= voter derivePolymarketVote 读 gamma API). 不需 ESPN extractor.',
     };
   }
 
@@ -162,7 +175,7 @@ export async function diagnoseSource(url, source) {
     return {
       ok: false,
       verdict: 'no_extractor',
-      advice: `该源无 KANet extractor (= AI 判不了). 已支持: ${knownList}. 主观题走 UMA 底座.`,
+      advice: `该源无 KANet extractor (= AI 判不了). 已支持: ${knownList} + Polymarket gamma. 主观题走 UMA 底座.`,
     };
   }
 
