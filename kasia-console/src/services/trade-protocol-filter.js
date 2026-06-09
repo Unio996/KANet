@@ -781,10 +781,14 @@ async function handlePoolMarketPublished(msg) {
 // route a single-shot pool_market_published_v1 would take, no special-casing).
 const POOL_CHUNK_CACHE = new Map();  // key=hash → { total, parts: Map<ord,data>, firstAt }
 // Bettor r135 close-gate #3: chunk cache TTL. Incomplete reassembly (= producer crashed mid-broadcast,
-// or chunks lost on chain) would leak entries forever. Eviction: 5 min TTL since firstAt — generous
-// since chunked market takes ~50s end-to-end + chain propagation delays. Run lazy on each new chunk
+// or chunks lost on chain) would leak entries forever. Eviction: TTL since firstAt — generous
+// since chunked envelope takes ~50s+ end-to-end + chain propagation delays. Run lazy on each new chunk
 // (= O(cache_size), tiny for our scale).
-const POOL_CHUNK_TTL_MS = 5 * 60 * 1000;
+//
+// J2-tn r426 (Bettor r453 / J1 r417 钉死 wghdr 根因): 5min TTL 太短 for 55-chunk envelope
+// (= settle sign_req with embedded phase2_tx_obj). chunks ord 44-54 arrive after first batch ord
+// 0-43 expired → eternal incomplete. 改 30 min TTL — chain re-broadcast retry 2 rounds 时间够.
+const POOL_CHUNK_TTL_MS = 30 * 60 * 1000;
 function _evictExpiredChunks(now = Date.now()) {
   for (const [hash, entry] of POOL_CHUNK_CACHE) {
     if (now - entry.firstAt > POOL_CHUNK_TTL_MS) {
