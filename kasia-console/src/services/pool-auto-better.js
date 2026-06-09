@@ -97,16 +97,21 @@ async function _placeBet(bot, market) {
   }
 }
 
+// J2-tn r433 (Bettor r471 真解): 聚焦 near-deadline 单, 不均摊 97+ 远期单 → 押注稀释.
+// 排序 deadline ASC (= 最早过期优先) + LIMIT 20 (= 仅最临近 20 个市场).
+// 远期单 (deadline > now + 6h) 不优先, 留给 ramp 拆分.
 async function _fetchEligibleMarkets() {
+  const NEAR_DEADLINE_SEC = 6 * 3600;  // 仅押 < 6h 之内 deadline 的市场
   return sqlite.prepare(`
     SELECT id, protocol_version, deadline
     FROM pool_markets
     WHERE protocol_status = 'pending_bettors'
       AND (protocol_version = 'v0.6' OR protocol_version = 'v0.7')
       AND deadline > unixepoch() + 120
-    ORDER BY created_at DESC
-    LIMIT 50
-  `).all();
+      AND deadline < unixepoch() + ?
+    ORDER BY deadline ASC
+    LIMIT 20
+  `).all(NEAR_DEADLINE_SEC);
 }
 
 function _fetchRelayBots() {
