@@ -20,8 +20,10 @@
 import { sqlite } from '../db/client.js';
 import { isRelayAlive, sendCommandAsync } from './relay-manager.js';
 
-const TICK_INTERVAL_MS = Number(process.env.AUTO_BET_TICK_MS) || 60_000;  // 1 min default
-const PER_TICK = Number(process.env.AUTO_BET_PER_TICK) || 2;
+// J2-tn r428 (Bettor r466 Owner 钦定火力全开): tick 60s→20s, PER_TICK 2→50 (= 押所有开放市场).
+// 8 单并发 0-bet 饿死 surface → 调猛 3x 频率 + 每 tick 全市场扫.
+const TICK_INTERVAL_MS = Number(process.env.AUTO_BET_TICK_MS) || 20_000;  // 20s default (= 3x faster)
+const PER_TICK = Number(process.env.AUTO_BET_PER_TICK) || 50;  // 押所有开放市场 (每个 relay 每 tick 上限 50 单, 实际看 markets.length)
 const MIN_STAKE_KAS = Number(process.env.AUTO_BET_MIN_STAKE_KAS) || 1;
 const MAX_STAKE_KAS = Number(process.env.AUTO_BET_MAX_STAKE_KAS) || 50;
 const MIN_RESERVE_KAS = Number(process.env.AUTO_BET_MIN_RESERVE_KAS) || 10;
