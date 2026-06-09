@@ -510,6 +510,12 @@ startBettorRefundClaimAutoCron();
 import { startAutoBetterCron } from './services/pool-auto-better.js';
 startAutoBetterCron();
 
+// r425 relay-orphan 固化 (Bettor r446 task 2): 30s cron 扫 enrolled relays, dead → startRelay.
+// 配合 r424 Console supervisor: supervisor 救 Console 死, monitor 救 relay 死/没起来.
+// Restart storm 防护: 3/h cap per relay.
+import { startRelayHealthMonitorCron } from './services/relay-health-monitor.js';
+startRelayHealthMonitorCron();
+
 // 质押池活化 (Bettor r449): 5min cron 刷 oracle_pool_chain_view 保新鲜.
 import { startOraclePoolScannerCron } from './services/oracle-pool-chain-scanner-cron.mjs';
 startOraclePoolScannerCron();
