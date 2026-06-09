@@ -108,6 +108,19 @@ for i in $(seq 1 "$TIMEOUT"); do
   ELAPSED=$((ELAPSED + 1))
 done
 
+# J2-tn r432 (Bettor r469 wire 持久化): supervisor 自动启 — Console 死自愈不需手动.
+# 防 supervisor pid 残留: 仅当不活才拉.
+SUPERVISOR_SCRIPT="$KANET_ROOT/scripts/kanet-console-supervisor.sh"
+if [ -f "$SUPERVISOR_SCRIPT" ]; then
+  if [ -f "$KANET_ROOT/logs/pids/console-supervisor.pid" ] && \
+     kill -0 "$(cat "$KANET_ROOT/logs/pids/console-supervisor.pid" 2>/dev/null)" 2>/dev/null; then
+    echo "[supervisor] already running pid=$(cat "$KANET_ROOT/logs/pids/console-supervisor.pid")"
+  else
+    bash "$SUPERVISOR_SCRIPT" start >/dev/null 2>&1
+    echo "[supervisor] auto-started (r432 wire)"
+  fi
+fi
+
 # ── 写回 INGEST_SECRET ──────────────────────────────────────────────────────
 NEW_SECRET=$(grep -oP 'INGEST_SECRET=\K[0-9a-f]+' "$CONSOLE_LOG" 2>/dev/null | head -1 || true)
 if [ -n "$NEW_SECRET" ]; then
