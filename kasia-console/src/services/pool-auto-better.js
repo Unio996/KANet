@@ -121,6 +121,21 @@ function _fetchRelayBots() {
   return bots;
 }
 
+// J2-tn r431 (NWT r362 audit catch): r428 commit 声称 balance guardrail 实际 0 ref.
+// 真 guardrail: 每 relay 每 tick 查一次 balance, < MIN_RESERVE_KAS 则跳过整 relay 本 tick.
+async function _getBalanceKas(relayId) {
+  try {
+    const r = await fetch(`${CONSOLE_BASE}/api/relay/${relayId}/balance`);
+    const j = await r.json();
+    if (!j?.ok) return null;
+    // /api/relay/:id/balance 返 { ok, total_sompi, ... } 通常. 兼容 multiple shapes.
+    const sompi = j.total_sompi ?? j.balance_sompi ?? j.totalSompi ?? null;
+    if (typeof sompi === 'number') return sompi / 1e8;
+    if (typeof sompi === 'string') return parseInt(sompi, 10) / 1e8;
+    return null;
+  } catch { return null; }
+}
+
 export async function autoBetterTick() {
   if (running) return { skipped: true };
   running = true;
@@ -130,9 +145,16 @@ export async function autoBetterTick() {
     const bots = _fetchRelayBots();
     if (bots.length === 0) return { ok: true, processed: 0, note: 'no alive relay bots' };
 
-    const summary = { prep_fail: 0, pay_fail: 0, paid_not_confirmed: 0, confirmed: 0, dup: 0, exception: 0 };
+    const summary = { prep_fail: 0, pay_fail: 0, paid_not_confirmed: 0, confirmed: 0, dup: 0, exception: 0, low_balance_skip: 0 };
     const placements = [];
     for (const bot of bots) {
+      // r431 (NWT r362 audit catch): real balance guardrail. < MIN_RESERVE 整 relay skip 本 tick.
+      const balKas = await _getBalanceKas(bot.id);
+      if (balKas !== null && balKas < MIN_RESERVE_KAS) {
+        summary.low_balance_skip++;
+        console.warn(`[auto-bet] ${bot.name} balance ${balKas.toFixed(2)} KAS < MIN_RESERVE_KAS=${MIN_RESERVE_KAS} → skip relay this tick`);
+        continue;
+      }
       const picks = _pickRandomSubset(markets, PER_TICK);
       for (const m of picks) {
         const r = await _placeBet(bot, m);
