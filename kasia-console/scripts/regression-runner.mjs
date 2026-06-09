@@ -1132,6 +1132,40 @@ async function verifyV06(baselinePath) {
     check('L40 auto-bet 服务 (probe)', false, { err: e.message }, 'soft');
   }
 
+  // L41 Bettor r439-r442 prevet mock-extract maker-facing (J2 r421 015cbb07 + r422 40751bbe fix)
+  // = POST /api/pool/prevet-extract + diagnoseSource(url, source) + isVoterSupportedSource enum gate
+  // 真因: r442 抓 prevet 接 espn-enum+ESPN-URL 但 voter enum 路由拒 → judgeable_now 错放. r422 加 enum 校验.
+  try {
+    const poolPath = path.resolve(REPO_ROOT, 'kasia-console/src/api/pool.js');
+    const extractorsPath = path.resolve(REPO_ROOT, 'kasia-console/src/lib/oracle-evidence-extractors.mjs');
+    const poolSrc = fs.readFileSync(poolPath, 'utf8');
+    const extractorsSrc = fs.readFileSync(extractorsPath, 'utf8');
+    // sub-a: pool.js endpoint POST /api/pool/prevet-extract
+    const hasEndpoint = /fastify\.post\(['"]\/api\/pool\/prevet-extract['"]/.test(poolSrc);
+    // sub-b: endpoint 调 diagnoseSource(url, source) 含 source 参数 (= r422 fix)
+    const callsDiagnoseWithSource = /diagnoseSource\s*\(\s*url\s*,\s*source\s*\)/.test(poolSrc);
+    // sub-c: extractors 含 isVoterSupportedSource 函数 export
+    const hasIsVoterSupported = /export\s+function\s+isVoterSupportedSource/.test(extractorsSrc);
+    // sub-d: diagnoseSource 函数体 含 isVoterSupportedSource 校验 + 'unsupported_source_enum' verdict
+    const fsfwMatch = extractorsSrc.match(/export\s+async\s+function\s+diagnoseSource[\s\S]*?(?=\nexport\s|\n}\s*$)/);
+    const diagnoseBody = fsfwMatch ? fsfwMatch[0] : '';
+    const diagnoseValidatesEnum = diagnoseBody.includes('isVoterSupportedSource') && diagnoseBody.includes('unsupported_source_enum');
+    const allOk = hasEndpoint && callsDiagnoseWithSource && hasIsVoterSupported && diagnoseValidatesEnum;
+    check(
+      'L41 prevet mock-extract + URL-enum 对齐 (Bettor r439-r442, J2 r421 015cbb07 + r422 40751bbe)',
+      allOk,
+      {
+        endpoint_registered: hasEndpoint,
+        endpoint_calls_diagnose_with_source: callsDiagnoseWithSource,
+        has_isVoterSupportedSource: hasIsVoterSupported,
+        diagnose_validates_enum: diagnoseValidatesEnum,
+        note: allOk ? 'prevet-extract 守门完整 + URL-enum 校验对齐, 防 espn-enum+ESPN-URL 错配' : '任一回归 → enum 校验丢 / source 参数没传入 / endpoint 删 立 hard FAIL'
+      }
+    );
+  } catch (e) {
+    check('L41 prevet-extract (probe)', false, { err: e.message }, 'soft');
+  }
+
   const total = report.pass + report.fail + report.deploy_pending;
   if (report.fail > 0) report.verdict = 'FAIL';
   else if (report.deploy_pending > 0) report.verdict = 'PASS_WITH_DEPLOY_PENDING';
