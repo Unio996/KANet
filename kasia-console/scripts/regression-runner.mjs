@@ -1166,6 +1166,32 @@ async function verifyV06(baselinePath) {
     check('L41 prevet-extract (probe)', false, { err: e.message }, 'soft');
   }
 
+  // L42 Bettor r443/r444 polymarket judge-path GREEN (J2 r423 42bede3e fix)
+  // = diagnoseSource 识 polymarket = voter 非-extractor 判路 (derivePolymarketVote 读 gamma), 不被 'no_extractor' 误拒
+  // 真因: r443 抓 'polymarket source 经 KNOWN_EXTRACTORS 找不到 → 误判 unjudgeable', r423 加 polymarket 分支 → 'judgeable_polymarket'
+  try {
+    const extractorsPath = path.resolve(REPO_ROOT, 'kasia-console/src/lib/oracle-evidence-extractors.mjs');
+    const extractorsSrc = fs.readFileSync(extractorsPath, 'utf8');
+    // sub-a: isVoterSupportedSource 接 'polymarket' (= return true)
+    const acceptsPolymarket = /source\s*===\s*['"]polymarket['"]\s*\)\s*return\s+true/.test(extractorsSrc);
+    // sub-b: diagnoseSource 函数体含 polymarket 分支返 'judgeable_polymarket'
+    const fsfwMatch = extractorsSrc.match(/export\s+async\s+function\s+diagnoseSource[\s\S]*?(?=\nexport\s|\n}\s*$)/);
+    const diagnoseBody = fsfwMatch ? fsfwMatch[0] : '';
+    const handlesPolymarket = /source\s*===\s*['"]polymarket['"]|polymarket\.com/.test(diagnoseBody) && diagnoseBody.includes('judgeable_polymarket');
+    const allOk = acceptsPolymarket && handlesPolymarket;
+    check(
+      'L42 polymarket judge-path GREEN (Bettor r443/r444, J2 r423 42bede3e)',
+      allOk,
+      {
+        isVoterSupportedSource_accepts_polymarket: acceptsPolymarket,
+        diagnoseSource_handles_polymarket_green: handlesPolymarket,
+        note: allOk ? 'polymarket 非-extractor 判路守门完整, 不被误拒 no_extractor' : '任一回归 → polymarket 单被错拒 立 hard FAIL'
+      }
+    );
+  } catch (e) {
+    check('L42 polymarket (probe)', false, { err: e.message }, 'soft');
+  }
+
   const total = report.pass + report.fail + report.deploy_pending;
   if (report.fail > 0) report.verdict = 'FAIL';
   else if (report.deploy_pending > 0) report.verdict = 'PASS_WITH_DEPLOY_PENDING';
