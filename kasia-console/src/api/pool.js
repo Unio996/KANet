@@ -2402,6 +2402,28 @@ export async function registerPoolRoutes(fastify) {
   //   - deadline UTC 锚 → +2
   //   - domain in sport/finance/政治 → +2
   // Heuristic baseline + LLM 修正; LLM 不通过仅启发 (= UI 标'启发非保证').
+  // J2-tn r421 (Bettor r441 关1 PASS 钉1+钉2): maker-facing mock-extract prevet.
+  // 区别于 /api/pool/prevet (= 启发 + LLM 评分): 此 endpoint 实跑 KNOWN_EXTRACTORS registry
+  // 对 canonical URL fetch + extract, 返结构化 verdict 给 maker 当场决策.
+  //
+  // Bettor 钉1: KNOWN_EXTRACTORS 共用 voter (= findExtractor single source) — 不另搞 map.
+  // Bettor 钉2: 'judgeable_pending' = GREEN (= 结构 OK + 未 final 是建未来事件的正常态).
+  //
+  // Body: { data_source_canonical }
+  // 返回: { ok, verdict, label?, kind?, preview?, advice }
+  //   verdicts: judgeable_now / judgeable_pending (= GREEN) | no_extractor / canonical_unreachable / shape_mismatch (= RED)
+  fastify.post('/api/pool/prevet-extract', async (request, reply) => {
+    const b = request.body || {};
+    const url = String(b.data_source_canonical || '').trim();
+    try {
+      const { diagnoseSource } = await import('../lib/oracle-evidence-extractors.mjs');
+      const result = await diagnoseSource(url);
+      return reply.send(result);
+    } catch (e) {
+      return reply.code(500).send({ ok: false, verdict: 'internal_error', advice: `diagnose 异常: ${String(e.message || '').slice(0,120)}` });
+    }
+  });
+
   fastify.post('/api/pool/prevet', async (request, reply) => {
     const b = request.body || {};
     if (!b.maker_relay_id || !b.title || !b.resolution_rule_spec) {

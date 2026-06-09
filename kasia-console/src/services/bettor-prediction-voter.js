@@ -814,13 +814,14 @@ export async function deriveKanetNativeVote(offer, spec) {
       // 之前: extractor null → fallback rawText.slice(0,2000) → LLM 瞎猜 (= w0s3m 4/5 错判根因).
       // 现在: extractor null + known source → ABSTAIN (= 结果未 final), unknown source → ABSTAIN (= 不在 extractor list).
       // 仅 extractor 返 clean evidence 才喂 LLM.
-      const KNOWN_EXTRACTOR_DOMAINS = /espn\.com|bbc\.co|reuters\.com|apnews\.com/i;
+      // J2-tn r421 (Bettor r441 钉1): registry 单一源 — findExtractor 取代 inline regex.
+      // 防 prevet 端 + voter 端各自硬编码 list → 分叉 (= espn 病换地方).
       try {
-        const { extractEvidence } = await import('../lib/oracle-evidence-extractors.mjs');
+        const { extractEvidence, findExtractor } = await import('../lib/oracle-evidence-extractors.mjs');
         const clean = extractEvidence(url, rawText);
         if (clean === null) {
           // ABSTAIN: 弃权 — extractor 不出 clean evidence. 区分两种 reason:
-          if (KNOWN_EXTRACTOR_DOMAINS.test(url)) {
+          if (findExtractor(url)) {
             return { ok: true, outcome: 'ABSTAIN', extractor_kind_used: 'known-source-not-final', reason: 'extractor returned null at known source (= 结果未 final 或 game 数据缺)' };
           }
           return { ok: true, outcome: 'ABSTAIN', extractor_kind_used: 'no-extractor-match', reason: `URL ${url} not in extractor known-list (= 框架不识此源)` };

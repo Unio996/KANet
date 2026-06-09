@@ -61,8 +61,41 @@ export function extractEspnEvidence(rawText) {
 }
 
 /**
+ * Single source-of-truth registry (J2-tn r421 Bettor r441 钉1):
+ * prevet mock-extract + voter deriveVote 共用此 registry → 永不分叉.
+ *
+ * 每条: { domainRe, extractor, label }
+ *   domainRe — case-insensitive 正则匹 URL
+ *   extractor — (rawText) => string|null (= clean evidence or null when not final)
+ *   label — human-readable 源名 (= maker-facing UI 显)
+ */
+export const KNOWN_EXTRACTORS = [
+  {
+    domainRe: /site\.api\.espn\.com|cdn\.espn\.com|espn\.com\/.*\/api/i,
+    extractor: extractEspnEvidence,
+    label: 'ESPN sports summary',
+    kind: 'espn',
+  },
+  // Future: CoinGecko (extractCoinGeckoPrice), BBC, Reuters, AP, etc.
+];
+
+/**
+ * Find extractor entry by URL. Single API for prevet + voter.
+ * @param {string} url
+ * @returns {{domainRe, extractor, label, kind} | null}
+ */
+export function findExtractor(url) {
+  if (!url) return null;
+  const lower = String(url).toLowerCase();
+  for (const ent of KNOWN_EXTRACTORS) {
+    if (ent.domainRe.test(lower)) return ent;
+  }
+  return null;
+}
+
+/**
  * Dispatcher: route by URL → call source-specific extractor.
- * Falls back to raw slice(0, 2000) if no match (= 保 deriveKanetNativeVote 现 behavior).
+ * Falls back to null if no match (= voter must abstain).
  *
  * @param {string} url - source URL
  * @param {string} rawText - HTTP response text
@@ -70,16 +103,104 @@ export function extractEspnEvidence(rawText) {
  */
 export function extractEvidence(url, rawText) {
   if (!url || !rawText) return null;
-  const lower = String(url).toLowerCase();
+  const ent = findExtractor(url);
+  if (!ent) return null;
+  return ent.extractor(rawText);
+}
 
-  // ESPN site.api.espn.com / cdn.espn.com / espn.com/api
-  if (/site\.api\.espn\.com|cdn\.espn\.com|espn\.com\/.*\/api/i.test(lower)) {
-    return extractEspnEvidence(rawText);
+/**
+ * J2-tn r421 (Bettor r441 关1 钉1+钉2): maker-facing prevet diagnose.
+ *
+ * Returns structured verdict for build-time gate. Bettor 钉2: 'not_final_yet' is GREEN
+ * (= 可判待终态, 市场为未来事件正常). RED = 该源 fundamentally 判不了.
+ *
+ * Verdicts:
+ *   - 'judgeable_now'      — extract returned non-null clean text (= 事件已 final, AI 可直判)
+ *   - 'judgeable_pending'  — extract returned null + JSON shape OK (= 等终态, 结构对)
+ *   - 'no_extractor'       — source 不在 registry (= 该域无 extractor, 换源 OR UMA)
+ *   - 'canonical_unreachable' — URL 不可达 / 网络错
+ *   - 'shape_mismatch'     — URL OK 但 JSON 不能解析 OR 结构不对 (= 拼错 URL / 私有 endpoint)
+ *
+ * @param {string} url
+ * @returns {Promise<{ok, verdict, label?, kind?, preview?, advice}>}
+ */
+export async function diagnoseSource(url) {
+  if (!url) {
+    return { ok: false, verdict: 'no_canonical', advice: '必填 data_source_canonical (= 机器可解析 URL)' };
+  }
+  const ent = findExtractor(url);
+  if (!ent) {
+    const knownList = KNOWN_EXTRACTORS.map(e => e.label).join(' / ');
+    return {
+      ok: false,
+      verdict: 'no_extractor',
+      advice: `该源无 KANet extractor (= AI 判不了). 已支持: ${knownList}. 主观题走 UMA 底座.`,
+    };
   }
 
-  // Future: BBC, Reuters, AP, other domain-specific extractors.
-  // bbc.co.uk/news: parse <h1 class="story-headline"> + result block.
+  let rawText;
+  try {
+    const r = await fetch(url, { signal: AbortSignal.timeout(8000) });
+    if (!r.ok) {
+      return {
+        ok: false,
+        verdict: 'canonical_unreachable',
+        label: ent.label,
+        kind: ent.kind,
+        advice: `canonical URL HTTP ${r.status} — 检查 URL 拼写 / 等源 publish`,
+      };
+    }
+    rawText = await r.text();
+  } catch (e) {
+    return {
+      ok: false,
+      verdict: 'canonical_unreachable',
+      label: ent.label,
+      kind: ent.kind,
+      advice: `fetch 失败 (${String(e.message || e).slice(0,80)}) — 检查 URL / 等源`,
+    };
+  }
 
-  // Fallback — 不在已知源, voter 仍 slice raw, 返 null 不影响.
-  return null;
+  // Shape sanity: try JSON.parse, must succeed (= structure exists).
+  let parsed;
+  try { parsed = JSON.parse(rawText); }
+  catch {
+    return {
+      ok: false,
+      verdict: 'shape_mismatch',
+      label: ent.label,
+      kind: ent.kind,
+      advice: '响应不是 JSON — 检查 URL 是否 API endpoint (= 不是网页)',
+    };
+  }
+  // ESPN-specific shape sanity (= 防 maker 拼错 endpoint 给个无 header.competitions 的页).
+  if (ent.kind === 'espn' && !parsed?.header?.competitions?.[0]) {
+    return {
+      ok: false,
+      verdict: 'shape_mismatch',
+      label: ent.label,
+      kind: ent.kind,
+      advice: 'ESPN summary URL 结构不对 (= header.competitions 缺). 用 site.api.espn.com/.../summary?event=<id>',
+    };
+  }
+
+  const evidence = ent.extractor(rawText);
+  if (evidence) {
+    return {
+      ok: true,
+      verdict: 'judgeable_now',
+      label: ent.label,
+      kind: ent.kind,
+      preview: evidence.slice(0, 200),
+      advice: '✓ 源已可判 (= AI 可直读 final 结果).',
+    };
+  }
+  // Bettor r441 钉2: 结构 OK + 未 final → GREEN 'judgeable_pending'.
+  return {
+    ok: true,
+    verdict: 'judgeable_pending',
+    label: ent.label,
+    kind: ent.kind,
+    advice: '✓ 源结构正确 (= 事件未 final, 待终态 AI 可判).',
+  };
 }
