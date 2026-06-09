@@ -1219,6 +1219,32 @@ async function verifyV06(baselinePath) {
     check('L43 relay-orphan (probe)', false, { err: e.message }, 'soft');
   }
 
+  // L44 Bettor r462/r465 跨域 ramp 第 1 — CoinGecko extractor (J2 r427 af0b25d0 ship)
+  // = extractCoinGeckoPrice + KNOWN_EXTRACTORS registry + isVoterSupportedSource accepts 'coingecko'
+  try {
+    const extractorsPath = path.resolve(REPO_ROOT, 'kasia-console/src/lib/oracle-evidence-extractors.mjs');
+    const extractorsSrc = fs.readFileSync(extractorsPath, 'utf8');
+    // sub-a: extractCoinGeckoPrice export
+    const hasExtractor = /export\s+function\s+extractCoinGeckoPrice/.test(extractorsSrc);
+    // sub-b: KNOWN_EXTRACTORS 含 coingecko entry (domainRe + kind:'coingecko')
+    const inRegistry = /kind\s*:\s*['"]coingecko['"]/.test(extractorsSrc) && /domainRe\s*:\s*\/[^\/]*coingecko/.test(extractorsSrc);
+    // sub-c: isVoterSupportedSource accepts 'coingecko'
+    const acceptsEnum = /source\s*===\s*['"]coingecko['"]\s*\)\s*return\s+true/.test(extractorsSrc);
+    const allOk = hasExtractor && inRegistry && acceptsEnum;
+    check(
+      'L44 CoinGecko extractor 跨域 ramp 第 1 (Bettor r462/r465, J2 r427 af0b25d0)',
+      allOk,
+      {
+        has_extractCoinGeckoPrice_export: hasExtractor,
+        in_KNOWN_EXTRACTORS_registry: inRegistry,
+        isVoterSupportedSource_accepts_coingecko: acceptsEnum,
+        note: allOk ? 'CoinGecko 跨域 extractor 守门完整 prevet+voter 单一 registry' : '任一回归 → coingecko 单被错拒 / registry 漂 立 hard FAIL'
+      }
+    );
+  } catch (e) {
+    check('L44 CoinGecko extractor (probe)', false, { err: e.message }, 'soft');
+  }
+
   const total = report.pass + report.fail + report.deploy_pending;
   if (report.fail > 0) report.verdict = 'FAIL';
   else if (report.deploy_pending > 0) report.verdict = 'PASS_WITH_DEPLOY_PENDING';
