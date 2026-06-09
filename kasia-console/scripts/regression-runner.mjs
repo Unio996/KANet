@@ -1192,6 +1192,33 @@ async function verifyV06(baselinePath) {
     check('L42 polymarket (probe)', false, { err: e.message }, 'soft');
   }
 
+  // L43 Bettor r433b/r446 task 2 relay-orphan 固化 (J2 r425 a31fefc7 ship)
+  // = relay-health-monitor.js Console cron 自动检 + 重启 dead relay, 防 AutoBetter relay-orphan 致 0 押注
+  try {
+    const monitorPath = path.resolve(REPO_ROOT, 'kasia-console/src/services/relay-health-monitor.js');
+    const indexPath = path.resolve(REPO_ROOT, 'kasia-console/src/index.js');
+    const monitorExists = fs.existsSync(monitorPath);
+    const monitorSrc = monitorExists ? fs.readFileSync(monitorPath, 'utf8') : '';
+    const indexSrc = fs.readFileSync(indexPath, 'utf8');
+    const hasExport = /export\s+function\s+startRelayHealthMonitorCron/.test(monitorSrc);
+    const indexImports = /import\s+\{[^}]*startRelayHealthMonitorCron[^}]*\}\s+from\s+['"]\.\/services\/relay-health-monitor/.test(indexSrc);
+    const indexCalls = /startRelayHealthMonitorCron\s*\(\s*\)/.test(indexSrc);
+    const allOk = monitorExists && hasExport && indexImports && indexCalls;
+    check(
+      'L43 relay-orphan 固化 Console cron (Bettor r433b/r446, J2 r425 a31fefc7)',
+      allOk,
+      {
+        relay_health_monitor_exists: monitorExists,
+        has_startRelayHealthMonitorCron_export: hasExport,
+        index_imports: indexImports,
+        index_calls: indexCalls,
+        note: allOk ? 'relay-orphan cron 守门完整 防 AutoBetter relay-orphan 致 0 押注' : '任一回归 → cron 删 / wire 断 → relay 死无自愈'
+      }
+    );
+  } catch (e) {
+    check('L43 relay-orphan (probe)', false, { err: e.message }, 'soft');
+  }
+
   const total = report.pass + report.fail + report.deploy_pending;
   if (report.fail > 0) report.verdict = 'FAIL';
   else if (report.deploy_pending > 0) report.verdict = 'PASS_WITH_DEPLOY_PENDING';
