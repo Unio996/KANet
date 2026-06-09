@@ -1105,6 +1105,33 @@ async function verifyV06(baselinePath) {
     check('L39 cross-node settle sync (probe)', false, { err: e.message }, 'soft');
   }
 
+  // L40 Bettor r433 Owner 钦定 auto-bet 服务 (J2 r420 14983c0d ship): Console cron 不依赖 AI 循环
+  // = pool-auto-better.js 存 + index.js wire startAutoBetterCron() 调
+  try {
+    const autoBetterPath = path.resolve(REPO_ROOT, 'kasia-console/src/services/pool-auto-better.js');
+    const indexPath = path.resolve(REPO_ROOT, 'kasia-console/src/index.js');
+    const autoBetterExists = fs.existsSync(autoBetterPath);
+    const autoBetterSrc = autoBetterExists ? fs.readFileSync(autoBetterPath, 'utf8') : '';
+    const indexSrc = fs.readFileSync(indexPath, 'utf8');
+    const hasStartCron = /export\s+function\s+startAutoBetterCron/.test(autoBetterSrc);
+    const indexImports = /import\s+\{[^}]*startAutoBetterCron[^}]*\}\s+from\s+['"]\.\/services\/pool-auto-better/.test(indexSrc);
+    const indexCalls = /startAutoBetterCron\s*\(\s*\)/.test(indexSrc);
+    const allOk = autoBetterExists && hasStartCron && indexImports && indexCalls;
+    check(
+      'L40 auto-bet 服务 Console cron (Bettor r433 Owner r436, J2 r420 14983c0d)',
+      allOk,
+      {
+        pool_auto_better_exists: autoBetterExists,
+        has_startAutoBetterCron_export: hasStartCron,
+        index_imports_cron: indexImports,
+        index_calls_cron: indexCalls,
+        note: allOk ? 'auto-bet cron 守门完整 不再 relay-orphan 致 0 押注' : '任一回归 → cron 删 / wire 断 → AutoBetter 不再自动押'
+      }
+    );
+  } catch (e) {
+    check('L40 auto-bet 服务 (probe)', false, { err: e.message }, 'soft');
+  }
+
   const total = report.pass + report.fail + report.deploy_pending;
   if (report.fail > 0) report.verdict = 'FAIL';
   else if (report.deploy_pending > 0) report.verdict = 'PASS_WITH_DEPLOY_PENDING';
