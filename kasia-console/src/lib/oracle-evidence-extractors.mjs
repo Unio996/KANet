@@ -69,6 +69,47 @@ export function extractEspnEvidence(rawText) {
  *   extractor — (rawText) => string|null (= clean evidence or null when not final)
  *   label — human-readable 源名 (= maker-facing UI 显)
  */
+/**
+ * J2-tn r427 (Bettor r462 跨域 ramp 第 1 个): CoinGecko price extractor.
+ * 形如 'BTC >= $X at T' 类 price-threshold 市场. CoinGecko 客观结构化源.
+ *
+ * URL 格式: https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd
+ * 响应: {"bitcoin":{"usd":107000.5}}
+ *
+ * Bettor 条件 (1) 比赛/事件未 final: 此处 price 是即时实测, 总是 final (= 任意时刻读都是当时价).
+ *   故只要 API 返合法 JSON + 含 price → 出 evidence. fetch fail → null = ABSTAIN (= 命门不猜).
+ * Bettor 条件 (3) 忠实抽取: price 原样喂 LLM, 不做语义推理 (= 不猜 ">=X" 判 YES/NO, 让 LLM 看).
+ */
+export function extractCoinGeckoPrice(rawText) {
+  let data;
+  try { data = JSON.parse(rawText); } catch { return null; }
+  if (!data || typeof data !== 'object') return null;
+
+  // simple/price form: {"bitcoin":{"usd":42345.67}}
+  const parts = [];
+  for (const coinId of Object.keys(data)) {
+    const prices = data[coinId];
+    if (!prices || typeof prices !== 'object') continue;
+    for (const [currency, price] of Object.entries(prices)) {
+      if (typeof price === 'number' && Number.isFinite(price)) {
+        parts.push(`${coinId.toUpperCase()} = ${price} ${currency.toUpperCase()}`);
+      }
+    }
+  }
+  // coins/markets form (= array): [{"id":"bitcoin","current_price":107000.5,"symbol":"btc"}]
+  if (parts.length === 0 && Array.isArray(data)) {
+    for (const row of data) {
+      if (row && typeof row === 'object' && typeof row.current_price === 'number' && Number.isFinite(row.current_price)) {
+        const id = String(row.id || row.symbol || '?').toUpperCase();
+        parts.push(`${id} = ${row.current_price} USD`);
+      }
+    }
+  }
+  if (parts.length === 0) return null;
+  const evidence = `CoinGecko price (real-time): ${parts.join(', ')}.`;
+  return evidence.length > 500 ? evidence.slice(0, 497) + '...' : evidence;
+}
+
 export const KNOWN_EXTRACTORS = [
   {
     domainRe: /site\.api\.espn\.com|cdn\.espn\.com|espn\.com\/.*\/api/i,
@@ -76,7 +117,13 @@ export const KNOWN_EXTRACTORS = [
     label: 'ESPN sports summary',
     kind: 'espn',
   },
-  // Future: CoinGecko (extractCoinGeckoPrice), BBC, Reuters, AP, etc.
+  {
+    domainRe: /api\.coingecko\.com|coingecko\.com\/.*\/api/i,
+    extractor: extractCoinGeckoPrice,
+    label: 'CoinGecko price',
+    kind: 'coingecko',
+  },
+  // Future: BBC, Reuters, AP, other domain-specific extractors.
 ];
 
 /**
@@ -122,6 +169,7 @@ export function isVoterSupportedSource(source) {
   if (source === 'polymarket') return true;
   if (source === 'kanet_native') return true;
   if (source.startsWith('kanet_')) return true;
+  if (source === 'coingecko') return true;  // r427 Bettor r462: 跨域 ramp 第 1 个金融源
   return false;
 }
 

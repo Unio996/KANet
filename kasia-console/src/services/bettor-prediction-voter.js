@@ -699,6 +699,13 @@ async function deriveVote(offer) {
     return deriveKanetNativeVote(offer, spec);
   }
 
+  // Branch 3: coingecko (J2-tn r427 / Bettor r462 跨域 ramp 第 1 个金融源).
+  // 同 kanet_native 路径 — deriveKanetNativeVote 内部按 data_source_canonical URL 路由,
+  // findExtractor 匹 coingecko domainRe → extractCoinGeckoPrice 干净 evidence 喂 LLM.
+  if (offer.outcome_market_source === 'coingecko') {
+    return deriveKanetNativeVote(offer, spec);
+  }
+
   return { ok: false, reason: `unsupported outcome_market_source: ${offer.outcome_market_source}` };
 }
 
