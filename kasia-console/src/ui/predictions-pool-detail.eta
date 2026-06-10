@@ -83,6 +83,100 @@
       </div>
 
       <div x-show="bet.open" x-transition class="mt-4 space-y-3">
+        <!-- KANet-UI GAP-2 (Bettor r494/r496): 模式切换 — 外部钱包(大众默认) vs Console agent(内部) -->
+        <div class="grid grid-cols-2 gap-1 p-1 bg-warm-100 rounded-lg text-xs">
+          <button @click="bet.mode = 'external'"
+                  class="py-1.5 rounded font-medium transition"
+                  :class="bet.mode === 'external' ? 'bg-white text-ink-800 shadow-sm' : 'text-ink-400'">用我的钱包付</button>
+          <button @click="bet.mode = 'agent'"
+                  class="py-1.5 rounded font-medium transition"
+                  :class="bet.mode === 'agent' ? 'bg-white text-ink-800 shadow-sm' : 'text-ink-400'">用 Console agent</button>
+        </div>
+
+        <!-- ===== 外部钱包押注流 (GAP-2): prep → 付款地址/URI → 轮询 confirm ===== -->
+        <div x-show="bet.mode === 'external'" class="space-y-3">
+          <!-- step 1: 还没 prep — 填地址/方向/金额 -->
+          <div x-show="!ext.prep" class="space-y-3">
+            <div>
+              <label class="block text-[11px] text-ink-500 mb-1">你的 Kaspa 地址 (中奖用此地址的钥匙领取)</label>
+              <input type="text" x-model="ext.addr" placeholder="kaspatest:q..."
+                     class="w-full px-3 py-2 rounded border border-warm-300 text-sm font-mono" />
+            </div>
+            <div>
+              <label class="block text-[11px] text-ink-500 mb-1">押哪边</label>
+              <div class="grid grid-cols-2 gap-2">
+                <button @click="ext.direction = 0" class="py-2 rounded border-2 transition font-medium"
+                        :class="ext.direction === 0 ? 'bg-emerald-100 text-emerald-700 border-emerald-300' : 'border-warm-300 text-ink-500 hover:bg-warm-100'">YES</button>
+                <button @click="ext.direction = 1" class="py-2 rounded border-2 transition font-medium"
+                        :class="ext.direction === 1 ? 'bg-red-100 text-red-700 border-red-300' : 'border-warm-300 text-ink-500 hover:bg-warm-100'">NO</button>
+              </div>
+            </div>
+            <div>
+              <label class="block text-[11px] text-ink-500 mb-1">押多少 KAS</label>
+              <input type="number" x-model.number="ext.stakeKas" min="1" step="0.1" placeholder="例: 100"
+                     class="w-full px-3 py-2 rounded border border-warm-300 text-sm" />
+              <div class="text-[10px] text-ink-400 mt-1">最低 1 KAS · testnet 币零经济价值</div>
+            </div>
+            <button @click="extPrep()" :disabled="!canExtPrep() || ext.preparing"
+                    class="w-full py-2.5 rounded font-medium text-sm transition"
+                    :class="canExtPrep() && !ext.preparing ? 'bg-brand-500 hover:bg-brand-600 text-white' : 'bg-warm-200 text-ink-400 cursor-not-allowed'">
+              <span x-text="ext.preparing ? '生成付款地址中...' : '生成付款地址 →'"></span>
+            </button>
+            <div x-show="ext.error" class="bg-red-50 text-red-700 rounded p-3 text-xs" x-text="ext.error"></div>
+          </div>
+
+          <!-- step 2: prep 完成 — 展付款地址 + 精确金额 + Kaspa URI, 轮询 confirm -->
+          <div x-show="ext.prep && !ext.registered" class="space-y-3">
+            <div class="bg-amber-50 border border-amber-200 rounded p-3 text-xs text-amber-800">
+              用你的钱包付 <b><span x-text="ext.prep?.exact_stake_kas"></span> KAS</b> (精确金额) 到下面地址押 <b x-text="ext.direction === 0 ? 'YES' : 'NO'"></b>。付完我自动检测入账。
+            </div>
+            <div>
+              <label class="block text-[11px] text-ink-500 mb-1">付款地址</label>
+              <div class="flex items-center gap-2 bg-warm-50 rounded px-3 py-2">
+                <span class="font-mono text-[11px] text-ink-700 break-all flex-1" x-text="ext.prep?.side_p2sh"></span>
+                <button @click="copyText(ext.prep?.side_p2sh)" class="text-brand-500 text-[11px] flex-shrink-0">复制</button>
+              </div>
+            </div>
+            <div>
+              <label class="block text-[11px] text-ink-500 mb-1">精确金额 (多付差额烧成手续费, 少付锁到截止)</label>
+              <div class="flex items-center gap-2 bg-warm-50 rounded px-3 py-2">
+                <span class="font-mono text-sm text-ink-700 flex-1" x-text="ext.prep?.exact_stake_kas + ' KAS'"></span>
+                <button @click="copyText(ext.prep?.exact_stake_kas)" class="text-brand-500 text-[11px] flex-shrink-0">复制</button>
+              </div>
+            </div>
+            <div>
+              <label class="block text-[11px] text-ink-500 mb-1">Kaspa 付款链接 (支持的钱包可直接打开)</label>
+              <div class="flex items-center gap-2 bg-warm-50 rounded px-3 py-2">
+                <span class="font-mono text-[10px] text-ink-600 break-all flex-1" x-text="kaspaPayUri()"></span>
+                <button @click="copyText(kaspaPayUri())" class="text-brand-500 text-[11px] flex-shrink-0">复制</button>
+              </div>
+            </div>
+            <div class="flex items-center gap-2 text-xs text-ink-500">
+              <svg x-show="ext.polling" class="animate-spin h-4 w-4 text-brand-500" viewBox="0 0 24 24" fill="none"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.4 0 0 5.4 0 12h4z"></path></svg>
+              <span x-text="ext.statusNote || (ext.polling ? '等待你的付款入账...' : '')"></span>
+            </div>
+            <div class="flex gap-2">
+              <button @click="extConfirmOnce()" :disabled="ext.checking"
+                      class="flex-1 py-2 rounded font-medium text-sm bg-brand-500 hover:bg-brand-600 text-white disabled:bg-warm-200 disabled:text-ink-400">
+                <span x-text="ext.checking ? '检测中...' : '我已付款, 立即检测'"></span>
+              </button>
+              <button @click="extReset()" class="px-3 py-2 rounded text-xs text-ink-500 border border-warm-300 hover:bg-warm-100">重填</button>
+            </div>
+            <div x-show="ext.error" class="bg-red-50 text-red-700 rounded p-3 text-xs" x-text="ext.error"></div>
+          </div>
+
+          <!-- step 3: 注册成功 -->
+          <div x-show="ext.registered" class="bg-emerald-50 rounded p-3 text-xs">
+            <div class="font-medium text-emerald-700">✓ 押注已上链确认 — <span x-text="ext.prep?.exact_stake_kas"></span> KAS 押 <span x-text="ext.direction === 0 ? 'YES' : 'NO'"></span></div>
+            <div class="mt-1 text-ink-500">锁仓 TX:</div>
+            <a x-show="ext.registered?.side_lock_tx" :href="explorerTxUrl(ext.registered.side_lock_tx)" target="_blank"
+               class="font-mono text-[10px] text-brand-500 hover:underline break-all" x-text="ext.registered?.side_lock_tx"></a>
+            <button @click="extReset()" class="mt-2 text-[11px] text-ink-500 underline">再押一笔</button>
+          </div>
+        </div>
+
+        <!-- ===== Console agent 押注流 (内部, 保留原路) ===== -->
+        <div x-show="bet.mode === 'agent'" class="space-y-3">
         <!-- bettor agent 选 -->
         <div>
           <label class="block text-[11px] text-ink-500 mb-1">出押人 (你的 agent)</label>
@@ -134,6 +228,7 @@
 
         <!-- 失败 -->
         <div x-show="bet.error" class="bg-red-50 text-red-700 rounded p-3 text-xs" x-text="bet.error"></div>
+        </div>
       </div>
     </div>
 
@@ -307,6 +402,7 @@ function poolDetailPage(marketId) {
     // KANet-UI 2026-06-07 P0-#2 (Bettor r319 关 1 PASS): web 押注 panel state
     bet: {
       open: false,
+      mode: 'external',     // GAP-2 (Bettor r494/r496): external 钱包(大众默认) | agent(内部)
       agents: [],
       bettorRelayId: '',
       direction: null,      // 0=YES, 1=NO
@@ -314,6 +410,21 @@ function poolDetailPage(marketId) {
       submitting: false,
       txResult: null,
       error: '',
+    },
+    // KANet-UI GAP-2 (Bettor r494/r496): 外部钱包零售用户押注流 state.
+    // 复用 register-v06/{prep,confirm} 后端(同 tg-bot): prep 返 side_p2sh → 用户自己钱包付 → confirm 验链.
+    ext: {
+      addr: '',
+      direction: null,      // 0=YES, 1=NO
+      stakeKas: 100,
+      prep: null,           // { side_p2sh, exact_stake_sompi, exact_stake_kas, ... }
+      registered: null,     // { side_lock_tx, ... } 成功
+      preparing: false,
+      checking: false,
+      polling: false,
+      statusNote: '',
+      error: '',
+      _pollTimer: null,
     },
     mapping: null,          // condition_id_mapping row (mirror_only / independent_source) OR null=未映射
     audit: null,            // /api/pool/market/:id/settle-audit (= 证据链 v0.7 全链路, KANet-UI #12 P0.1)
@@ -435,6 +546,86 @@ function poolDetailPage(marketId) {
         this.bet.error = String(e.message || e);
       }
       this.bet.submitting = false;
+    },
+    // ===== KANet-UI GAP-2 (Bettor r494/r496): 外部钱包押注流 =====
+    canExtPrep() {
+      return /^kaspa(test)?:[a-z0-9]{20,}$/i.test((this.ext.addr || '').trim())
+        && this.ext.direction !== null
+        && Number(this.ext.stakeKas) >= 1;
+    },
+    kaspaPayUri() {
+      if (!this.ext.prep?.side_p2sh) return '';
+      // Kaspa URI: kaspa:<addr>?amount=<sompi> (整数 sompi). 钱包按精确额预填.
+      const sompi = this.ext.prep?.exact_stake_sompi;
+      return 'kaspa:' + this.ext.prep.side_p2sh + (sompi != null ? '?amount=' + sompi : '');
+    },
+    async copyText(t) {
+      if (!t) return;
+      try { await navigator.clipboard.writeText(String(t)); } catch {}
+    },
+    async extPrep() {
+      if (!this.canExtPrep()) return;
+      this.ext.preparing = true;
+      this.ext.error = '';
+      try {
+        const r = await fetch(`/api/pool/market/${encodeURIComponent(this.marketId)}/bettor/register-v06/prep`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ linked_addr: this.ext.addr.trim(), direction: this.ext.direction, stake_kas: String(this.ext.stakeKas) }),
+        });
+        const j = await r.json();
+        if (!j.ok) throw new Error(j.error || `HTTP ${r.status}`);
+        this.ext.prep = j;
+        this.extStartPoll();   // prep 完成即开始轮询检测付款
+      } catch (e) {
+        this.ext.error = String(e.message || e);
+      }
+      this.ext.preparing = false;
+    },
+    async extConfirmOnce() {
+      if (!this.ext.prep || this.ext.registered) return;
+      this.ext.checking = true;
+      this.ext.error = '';
+      try {
+        const r = await fetch(`/api/pool/market/${encodeURIComponent(this.marketId)}/bettor/register-v06/confirm`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ linked_addr: this.ext.addr.trim(), direction: this.ext.direction, stake_kas: String(this.ext.stakeKas) }),
+        });
+        const j = await r.json();
+        if (!j.ok) throw new Error(j.error || `HTTP ${r.status}`);
+        if (j.registered) {
+          this.ext.registered = j;            // 成功
+          this.extStopPoll();
+          setTimeout(() => this.load(), 1500); // reload 看进度/证据链
+        } else if (j.dust_below_floor) {
+          this.ext.statusNote = `检测到付款但低于最低额 (${(j.found_sompi/1e8).toFixed(8)} KAS), 请补足到 ${this.ext.prep?.exact_stake_kas} KAS.`;
+        } else {
+          this.ext.statusNote = '还没检测到付款入账, 继续等待...';
+        }
+      } catch (e) {
+        this.ext.error = String(e.message || e);
+      }
+      this.ext.checking = false;
+    },
+    extStartPoll() {
+      this.extStopPoll();
+      this.ext.polling = true;
+      const tick = async () => {
+        if (!this.ext.prep || this.ext.registered) { this.extStopPoll(); return; }
+        await this.extConfirmOnce();
+        if (!this.ext.registered) this.ext._pollTimer = setTimeout(tick, 6000);
+      };
+      this.ext._pollTimer = setTimeout(tick, 6000);
+    },
+    extStopPoll() {
+      this.ext.polling = false;
+      if (this.ext._pollTimer) { clearTimeout(this.ext._pollTimer); this.ext._pollTimer = null; }
+    },
+    extReset() {
+      this.extStopPoll();
+      this.ext.prep = null;
+      this.ext.registered = null;
+      this.ext.statusNote = '';
+      this.ext.error = '';
     },
     // KANet-UI 2026-06-07 r308: maker_name 主持人显. 跨节点 fallback 短 id.
     makerLabel() {
