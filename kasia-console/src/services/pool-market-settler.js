@@ -37,6 +37,13 @@ const STARTUP_GRACE_MS = 60 * 1000;         // 60s grace (= 错峰 voter daemon 
 // Default 30 min OK for testnet rapid iteration. Mainnet deploy MUST set 1440 (= 24h 钢线).
 const ORACLE_SILENT_TIMEOUT_MIN = parseInt(process.env.ORACLE_SILENT_TIMEOUT_MIN, 10) || 30;
 const ORACLE_SILENT_TIMEOUT_MS = ORACLE_SILENT_TIMEOUT_MIN * 60_000;
+// J2-tn 规模测试 (Bettor r547/r548): collecting_sigs watchdog-b 超时. 旧硬编码 15min 在 20 并发
+// 收签下太紧 — sign_req(各 45-58 chunk)+ 跨节点 sig 回传在并发竞争下 >15min 没凑 4 签 → 误判
+// silent-stuck 强制 refund 达共识(5 票)的单。改 env, 默认 30min (并发容差); mainnet 可调。
+// 关键: 必须 > ③ sign_req re-broadcast backoff cap (见下 SIGN_REQ backoff Math.min ...,8 = 12min),
+// 否则 backoff 到下次 retry 前先被 watchdog refund (retry 没机会) = r548 时序 bug。
+const COLLECTING_SIGS_WATCHDOG_MIN = parseInt(process.env.COLLECTING_SIGS_WATCHDOG_MIN, 10) || 30;
+const COLLECTING_SIGS_WATCHDOG_MS = COLLECTING_SIGS_WATCHDOG_MIN * 60_000;
 // 门C 档1 (Owner 终裁 r518, e8727706): dispute 中间态 grace 窗. 过 grace → dispatchRefund 终态
 // (档1 自治, 无 owner-manual 依赖)。档2/mainnet 才把终态换成挑战机制 (非退款 dispute terminal)。
 // testnet 默认短 (10min) 快迭代; mainnet 该长。诚实残留 (Bettor r521 → e8727706 §6): dispute→自动
@@ -963,7 +970,7 @@ export async function poolSettlerTick() {
         // (b) collecting_sigs + phase2_dispatched_at + age > 15min + sigs < 4 → force cancel
         if (wm.protocol_status === 'collecting_sigs' && meta.phase2_dispatched_at) {
           const phase2AgeMs = Date.now() - new Date(meta.phase2_dispatched_at).getTime();
-          if (phase2AgeMs > 15 * 60 * 1000) {
+          if (phase2AgeMs > COLLECTING_SIGS_WATCHDOG_MS) {
             const sigCount = sqlite.prepare(`
               SELECT COUNT(*) c FROM chain_events
               WHERE event_type='pool_oracle_tx_sig' AND payload LIKE ?
@@ -2512,7 +2519,9 @@ async function handleCollectingSigs(market) {
       // ×2^failCount, 上限 ~24min), 成功 (拿到 txId) reset failCount → 失败市场不再每 90s 烧 58 TX。
       const baseThrottle = parseInt(process.env.SIGN_REQ_REBROADCAST_MS, 10) || 90_000;
       const failCount = meta.sign_req_fail_count || 0;
-      const effThrottle = baseThrottle * Math.min(2 ** failCount, 16);  // 90s → 最长 24min
+      // J2-tn r548: cap 16×(24min) > watchdog 15min 旧值 = backoff 到下次 retry 前先被 refund (retry
+      // 没机会)。cap 降 8×(12min) < COLLECTING_SIGS_WATCHDOG (默认 30min) → 失败单仍在 watchdog 前重试。
+      const effThrottle = baseThrottle * Math.min(2 ** failCount, 8);  // 90s → 最长 12min (< watchdog)
       if (Date.now() - lastReDMms > effThrottle && meta.phase2_request_payload) {
         const signedSet = new Set();
         for (const s of sigsByInput[0] || []) signedSet.add(s.voter_pubkey);
