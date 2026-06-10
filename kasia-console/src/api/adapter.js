@@ -17,28 +17,17 @@ async function pingAdapter(port) {
 // Deep API check cache: port → { apiOk, apiError, checkedAt, failStreak }
 const _apiCheckCache = {};
 
-// 去抖 (KANet-UI r-debounce, Bettor r480 派工): 惊群期 llama 瞬时过载会让单次 deep-check 超时,
-// 旧逻辑 (apiOk=false → 立即 amber + 缓存 120s) 一次抖动就把 adapter 判红卡 2min = 误报噪声。
-// 对齐仓库既定去抖约定 scripts/health-monitor.mjs CRITICAL_FAIL_THRESHOLD=2 (2 连续 fail 才告警):
-//   单次 transient fail 不翻 amber (apiOk=null='checking'), 连续达阈值才真红;
-//   失败结果只缓存短 TTL (快重试恢复), 绿仍长 TTL。
+// 去抖 (KANet-UI r-debounce, Bettor r480 派工 ③ + J1 #6 参考对齐): 惊群期 llama 瞬时过载让单次
+// deep-check 的 fetch 超时 (= Owner 看到的 'fetch failed'), 旧逻辑 (任何 fail → 立即 amber + 缓存 120s)
+// 一次抖动就把 adapter 判红卡 2min = 误报噪声。J1 #6 四点对齐:
+//   ① ttl 分级: 绿 120s / 红 30s(快复绿) / soft 维持绿 20s(快复查);
+//   ② failStreak 计连续 fetch-fail, < 阈值 且上次绿 → 维持绿 + soft 20s 复查 (不翻红);
+//   ③ 连续 ≥ 阈值, 或 HTTP 响应非 ok (= 确定性 API 错、非瞬时) → 真红 amber;
+//   ④ invalidateApiCheckCache 清整条 cache (含 failStreak, 同对象)。
 const DEEP_CHECK_GREEN_TTL_MS = 120_000;   // 绿: 长缓存
-const DEEP_CHECK_FAIL_TTL_MS = 30_000;     // 非绿: 短缓存, 快重试 → llama 恢复后 30s 内转绿
-const DEEP_CHECK_FAIL_THRESHOLD = 2;       // 连续 fail 达此值才判红 (单次抖动不判红)
-
-// fail 记录 + 去抖判定: < 阈值 → checking (apiOk=null, 不翻 amber); >= 阈值 → 真红 (apiOk=false)。
-function recordDeepCheckFail(port, prevStreak, errMsg) {
-  const failStreak = prevStreak + 1;
-  const isRed = failStreak >= DEEP_CHECK_FAIL_THRESHOLD;
-  const result = {
-    apiOk: isRed ? false : null,            // null → adapters.js 映射 'checking', 非 'amber'
-    apiError: isRed ? errMsg : null,
-    checkedAt: Date.now(),
-    failStreak,
-  };
-  _apiCheckCache[port] = result;
-  return result;
-}
+const DEEP_CHECK_RED_TTL_MS = 30_000;      // 红: 短缓存, 快复绿
+const DEEP_CHECK_SOFT_TTL_MS = 20_000;     // soft 维持绿(单次抖动): 快复查
+const DEEP_CHECK_FAIL_THRESHOLD = 2;       // 连续 fetch-fail 达此值才判红 (单次抖动不判红)
 
 // 端口是可复用的：旧 adapter 删了，新建可能复用同一个 port，会继承旧 cache 的 404 状态
 // 因此 create/update/delete 任一改变"port 背后实体"的操作发生时，主动失效该 port 的缓存。
@@ -50,12 +39,14 @@ function invalidateApiCheckCache(port) {
 // 超时放宽到 45s：推理模型（glm4.7 / qwen thinking 系列）首 token 前思考 10-30s 常见
 async function deepCheckAdapter(port) {
   const cached = _apiCheckCache[port];
-  // 缓存命中: 绿用长 TTL, 非绿(red/checking)用短 TTL 快重试
+  // 缓存命中 TTL 分级: soft 维持绿 20s / 绿 120s / 红·checking 30s
   if (cached) {
-    const ttl = cached.apiOk === true ? DEEP_CHECK_GREEN_TTL_MS : DEEP_CHECK_FAIL_TTL_MS;
+    const ttl = cached._soft ? DEEP_CHECK_SOFT_TTL_MS
+              : (cached.apiOk === true ? DEEP_CHECK_GREEN_TTL_MS : DEEP_CHECK_RED_TTL_MS);
     if (Date.now() - cached.checkedAt < ttl) return cached;
   }
   const prevStreak = cached?.failStreak || 0;
+  const prevGreen = cached?.apiOk === true;   // 上次是否绿 (含 soft 维持绿)
   try {
     const res = await fetch(`http://localhost:${port}/reply`, {
       method: 'POST',
@@ -70,12 +61,25 @@ async function deepCheckAdapter(port) {
       _apiCheckCache[port] = result;
       return result;
     }
-    // HTTP 非 2xx = 一次 fail, 走去抖
+    // ③ HTTP 响应非 2xx = 确定性 API 错 (服务器活着但报错, 非瞬时) → 不去抖, 立即红
     const errText = (await res.text().catch(() => '')).slice(0, 100);
-    return recordDeepCheckFail(port, prevStreak, errText);
+    const result = { apiOk: false, apiError: errText, checkedAt: Date.now(), failStreak: prevStreak + 1 };
+    _apiCheckCache[port] = result;
+    return result;
   } catch (e) {
-    // 超时/连接失败 = 一次 fail, 走去抖 (惊群期瞬时超时最常落这里)
-    return recordDeepCheckFail(port, prevStreak, e.message);
+    // fetch failed (超时/网络) = 惊群瞬时症状 → 去抖
+    const failStreak = prevStreak + 1;
+    if (failStreak < DEEP_CHECK_FAIL_THRESHOLD && prevGreen) {
+      // ② 单次抖动 且 上次绿 → 维持绿, soft 20s 快复查, 不翻红
+      const result = { apiOk: true, apiError: null, checkedAt: Date.now(), failStreak, _soft: true };
+      _apiCheckCache[port] = result;
+      return result;
+    }
+    // 连续 ≥ 阈值 → 真红; 首次即 fail 无绿可维持 → checking(null)
+    const isRed = failStreak >= DEEP_CHECK_FAIL_THRESHOLD;
+    const result = { apiOk: isRed ? false : null, apiError: isRed ? e.message : null, checkedAt: Date.now(), failStreak };
+    _apiCheckCache[port] = result;
+    return result;
   }
 }
 
