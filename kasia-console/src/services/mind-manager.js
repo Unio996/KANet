@@ -393,6 +393,15 @@ export async function getReply(relayNodeId, peer, message, channel) {
     return null;
   }
 
+  // ── Gate -0.5 (KANet-UI r546 scale-test): reactive auto-reply pause ──
+  // 外部 agent 持续 DM 21 agent → reactive 回复(巨 context ~15-22k token) hog 共享单 :8000 llama
+  // → 卡 deriveVote 投票 (J1 #60 协议修治了协议消息那路, 这治外部 chat 那路 = proactive/reflection/reactive
+  // 三路 Mind-pause 的第三路, 补 lever③)。live API: PUT /api/trade/triggers {reactiveEnabled:false}。
+  // 默认 true (production 社交不变); scale-test 期临时 pause 腾 :8000。durable=社交 LLM 限频 backlog。
+  if (!_reactiveEnabled) {
+    return null;
+  }
+
   // ── Gate 0: "stop messaging" detection ──
   if (peer && message && detectStopRequest(peer, message)) {
     console.log(`[mind-manager] STOP REQUEST from ${peer.slice(-8)} — auto do_not_contact, no reply sent`);
@@ -591,6 +600,7 @@ export function getQueueStats() {
 let _schedulerStarted = false;
 let _proactiveEnabled = true;
 let _reflectionEnabled = true;
+let _reactiveEnabled = true;  // KANet-UI r546: reactive auto-reply (getReply) 全局闸, scale-test 期 pause 腾 :8000
 let _priceAlertEnabled = true;
 let _priceThresholdPct = 3;
 let _proactiveIntervalMs = 60 * 60_000;
@@ -617,6 +627,7 @@ export function getTriggerStatus() {
   return {
     proactive: { enabled: _proactiveEnabled, intervalMin: _proactiveIntervalMs / 60_000 },
     reflection: { enabled: _reflectionEnabled, intervalHours: 24 },
+    reactive: { enabled: _reactiveEnabled },
     priceAlert: {
       enabled: _priceAlertEnabled,
       thresholdPct: _priceThresholdPct,
@@ -630,9 +641,10 @@ export function getTriggerStatus() {
 /**
  * Update trigger settings.
  */
-export function updateTriggerSettings({ proactiveEnabled, reflectionEnabled, priceAlertEnabled, priceThresholdPct, proactiveIntervalMin }) {
+export function updateTriggerSettings({ proactiveEnabled, reflectionEnabled, reactiveEnabled, priceAlertEnabled, priceThresholdPct, proactiveIntervalMin }) {
   if (proactiveEnabled !== undefined) _proactiveEnabled = !!proactiveEnabled;
   if (reflectionEnabled !== undefined) _reflectionEnabled = !!reflectionEnabled;
+  if (reactiveEnabled !== undefined) _reactiveEnabled = !!reactiveEnabled;
   if (priceAlertEnabled !== undefined) _priceAlertEnabled = !!priceAlertEnabled;
   if (priceThresholdPct !== undefined) _priceThresholdPct = Math.max(0.5, parseFloat(priceThresholdPct) || 3);
   if (proactiveIntervalMin !== undefined) _proactiveIntervalMs = Math.max(5, parseInt(proactiveIntervalMin) || 60) * 60_000;
