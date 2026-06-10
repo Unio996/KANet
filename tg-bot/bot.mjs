@@ -15,10 +15,22 @@ const bot = new Bot(CONFIG.botToken);
 // Bettor 2026-06-03 止血 1-2 行: Telegram URL 预览图乱码 — 关掉所有 sendMessage 的 link preview.
 // 适用所有 ctx.reply / bot.api.sendMessage 不破 parse_mode 等其他选项 (transformer 仅注 link_preview_options).
 bot.api.config.use(async (prev, method, payload, signal) => {
-  if (method === 'sendMessage' && payload && typeof payload === 'object' && !payload.link_preview_options) {
-    payload.link_preview_options = { is_disabled: true };
+  if (method === 'sendMessage' && payload && typeof payload === 'object') {
+    if (!payload.link_preview_options) payload.link_preview_options = { is_disabled: true };
+    // KANet-UI (Owner r549 'tg-bot 又死了'): cap text 至 Telegram 4096 限 — 超长回复(如长菜单/
+    // 错误回显)否则 Telegram 返 400 'message is too long' → 未捕获 BotError → bot 进程崩。截断兜底。
+    if (typeof payload.text === 'string' && payload.text.length > 4096) {
+      payload.text = payload.text.slice(0, 4080) + '\n[…内容过长已截断]';
+    }
   }
   return prev(method, payload, signal);
+});
+
+// KANet-UI (Owner r549): 全局错误捕获 — 任何 handler / API 调用抛错(含 send 失败)只记日志不崩进程。
+// 之前缺这个 → 一条 'message too long' 400 就把整个 bot poller 崩掉 (= Owner 'tg-bot 又死了' 第二次).
+bot.catch((err) => {
+  const desc = err?.error?.description || err?.message || String(err);
+  console.error('[tg-bot] caught (no-crash):', desc);
 });
 
 // broker X identity — resolved from UI/DB config (Owner sets in Console Settings, 0-restart),
