@@ -609,6 +609,25 @@ export async function poolSettlerTick() {
                 deadlineDaa = Math.max(1, currentDaa - Math.max(0, (nowSec - market.deadline) * 10));
                 console.log(`[pool-settler] market=${market.id.slice(0,12)} legacy fallback: estimate deadlineDaa=${deadlineDaa} (no deadline_daa col)`);
               }
+              // J2-tn lever② (Bettor r524/r530/r531 规模 hygiene): unrecoverable-market 检测.
+              // getBlockAtDaa SPC-walk 从 tip 倒走 MAX_WALK=50000 步; deadline_daa 离 tip > MAX_WALK
+              // = 永达不到 → 永重试 backoff 3600s = zombie 卡 verifying + 耗 settler tick/chain-read
+              // (规模测照出, 单笔看不见)。采样前查 Δ, 超 cap → 不可采样, 直接 dispatchRefund 终态
+              // (maker+bettor 退, market 永不可裁), 停永重试。诚实: 减的是 settler/chain-read 浪费,
+              // 非 :8000 LLM (unsampled zombie 本就不投票)。
+              const MAX_SPC_WALK = 50000;  // == rpc-listener.mjs getBlockAtDaa MAX_WALK
+              const tipDaaUR = await chainReader.getCurrentDaaScore();
+              if (Number.isFinite(tipDaaUR) && (tipDaaUR - deadlineDaa) > MAX_SPC_WALK) {
+                const urMeta = JSON.parse(market.metadata || '{}');
+                urMeta.unrecoverable = true;
+                urMeta.unrecoverable_reason = `deadline_daa ${deadlineDaa} 离 tip ${tipDaaUR} Δ=${tipDaaUR - deadlineDaa} > MAX_WALK ${MAX_SPC_WALK} → SPC-walk 永达不到, committee 不可采样 → 终态 refund`;
+                urMeta.unrecoverable_at = new Date().toISOString();
+                sqlite.prepare("UPDATE pool_markets SET metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(JSON.stringify(urMeta), market.id);
+                console.warn(`[pool-settler] UNRECOVERABLE market=${market.id.slice(0,12)} Δ=${tipDaaUR - deadlineDaa} > MAX_WALK → dispatchRefund 终态 (停永重试 SPC-walk)`);
+                await dispatchRefund(market, { action: 'refund', reason: urMeta.unrecoverable_reason });
+                refund++;
+                continue;
+              }
               const endBlock = await fetchEndBlockHashCanonical(chainReader, deadlineDaa);
               const committee = sampleAndStoreCommittee(market.id, endBlock.hash);
               // Wire committee_relay_ids → pool_markets.oracle_relay_ids so voter scan picks up.
