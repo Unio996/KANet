@@ -10,7 +10,10 @@
 // (3) 忠实抽取不加工 (winner 字段原样, 不做语义推理).
 //
 // 抽取器返干净 evidence_text (≤ 500 字符) 或 null (= 结果未出/抽取失败).
-// 没匹配 source → fallback raw slice(0,2000) (= 现 behavior, 保兼容).
+// J2-tn r412 (ABSTAIN-not-guess, Bettor r404): 没匹配 source / 抽取失败 → extractEvidence
+// 返【null】→ voter ABSTAIN, 【不再 fallback raw slice(0,2000) 喂 LLM 瞎猜】(= w0s3m 4/5 错判
+// 根因已删)。门C 档1 item4② guess-fallback grep 确认: 全库无 active raw-slice fallback。
+// (上面 L4-5 描述的是已删的旧行为, 留作根因档案。)
 
 /**
  * Parse ESPN summary JSON → extract winner + final score.
