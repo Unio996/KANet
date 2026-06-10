@@ -666,6 +666,7 @@ export async function triggerProactive(agentName) {
  * Mind decides → Console transmits → Relay executes.
  */
 const PROACTIVE_COOLDOWN_MS = 30_000; // 30s cooldown between proactive cycles per agent
+const PROACTIVE_STAGGER_MS = parseInt(process.env.PROACTIVE_STAGGER_MS, 10) || 5_000; // Bettor r484: 事件触发全员 proactive 的错峰间隔 (防 .105 惊群), env 可调
 const DAILY_PROACTIVE_LIMIT = 50; // max proactive cycles per agent per day (D-7)
 const _proactiveRunning = new Set(); // mutex: prevent concurrent proactive per agent
 const _healthPaused = {};            // agentName → true if red, proactive skips
@@ -688,6 +689,7 @@ function _isDailyLimitReached(agentName) {
 
 export async function triggerProactiveAll(eventContext) {
   const now = Date.now();
+  let _proactiveStaggerIdx = 0; // Bettor r484: 每次事件批从 0 错峰, 防累积无界
   for (const name of Object.keys(minds)) {
     const mind = minds[name];
     if (!mind?.runProactive) continue;
@@ -718,14 +720,21 @@ export async function triggerProactiveAll(eventContext) {
     }
 
     _proactiveRunning.add(name);
-    mind.runProactive(eventContext).then((result) => {
-      _lastProactiveTime[name] = new Date().toISOString();
-      recordMindEvent(name, 'proactive_event', JSON.stringify(eventContext).slice(0, 100) + ' → ' + (result || '').slice(0, 100));
-    }).catch(err => {
-      console.log(`[mind-manager] ${name} event proactive error: ${err?.message || err}`);
-    }).finally(() => {
-      _proactiveRunning.delete(name);
-    });
+    // Bettor r484 (.105 惊群根修, J1 #2 诊断): 之前全员 runProactive 同毫秒并发齐发 → N 个 LLM
+    // 调用同时砸单实例 llama-server → 每 ~30min fetch failed/timeout 成簇 (同机 kaspad 也跟着卡)。
+    // 错峰: 按 index 延迟 PROACTIVE_STAGGER_MS 摊开发, 不同毫秒齐砸 (interval 路径 L770 已有 25s
+    // 错峰, 这条事件路径之前漏了)。mutex 在 add 时已占, 延迟期间不会被重复触发。配 llama --parallel。
+    const _staggerDelay = (_proactiveStaggerIdx++) * PROACTIVE_STAGGER_MS;
+    setTimeout(() => {
+      mind.runProactive(eventContext).then((result) => {
+        _lastProactiveTime[name] = new Date().toISOString();
+        recordMindEvent(name, 'proactive_event', JSON.stringify(eventContext).slice(0, 100) + ' → ' + (result || '').slice(0, 100));
+      }).catch(err => {
+        console.log(`[mind-manager] ${name} event proactive error: ${err?.message || err}`);
+      }).finally(() => {
+        _proactiveRunning.delete(name);
+      });
+    }, _staggerDelay);
   }
 }
 
