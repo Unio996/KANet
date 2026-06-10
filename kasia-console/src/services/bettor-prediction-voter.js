@@ -909,10 +909,15 @@ export async function deriveKanetNativeVote(offer, spec) {
   let llmReason = '';
   try {
     const url = providerUrl.replace(/\/$/, '') + '/chat/completions';
+    // J2-tn 规模测试 (Bettor r527/r528): voterTick 串行处理多 oracle×多市场, 单个 deriveVote LLM
+    // 调用挂久 = 后面 oracle 永远轮不到 → 卡 N/5 (scale trial 实证: :8000 饱和 27s ttfb 下卡 2/5)。
+    // 60s→30s: :8000 饱和时慢调用快失败 → 串行 loop 不 bog、移到下个 oracle (catch 返 ok:false 已
+    // skip 该票)。Bettor r528 "deriveVote 别挂 27s" 无论 ①竞争②自身需求都要的 robustness。
+    // 注: 这只让 loop 不卡; 票实际落地仍需 :8000 有容量 (= seeder-down 腾负载 + 长远更多 LLM 容量)。
     const llmRes = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      signal: AbortSignal.timeout(60_000),
+      signal: AbortSignal.timeout(30_000),
       body: JSON.stringify({
         model: providerModel || undefined,
         messages: [{ role: 'user', content: prompt }],
