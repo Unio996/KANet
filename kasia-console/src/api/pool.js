@@ -159,7 +159,12 @@ async function _broadcastMarketPublished(marketRow, makerRelayId) {
       outcome_market_source: marketRow.outcome_market_source,
       outcome_condition_id: marketRow.outcome_condition_id,
       outcome_token_id: marketRow.outcome_token_id,
-      outcome_side: marketRow.outcome_side,
+      // J2-tn (2a) 跨节点 publish 根治 (Bettor r507): DB 把 outcome_side 存成 '0.0' 字符串,
+      // 但 market_metadata_hash 在 create 时用数字 0 算 (b.outcome_side). _mrowV07 从 DB 读出
+      // '0.0' 直发 → consumer 重算 hash (用 '0.0') ≠ 存储 hash (用 0) → 拒 = 每个 v0.7 市场
+      // create-time 跨节点 publish 都失败 (本会话 iqftu/mix0d 实证, 手动 re-publish side=0 才过).
+      // 修: 发 Number(outcome_side) 还原 create 时的数字 canonical → consumer 重算命中.
+      outcome_side: Number(marketRow.outcome_side),
       resolution_rule_spec: marketRow.resolution_rule_spec,
       deadline: marketRow.deadline,
       miner_fee: marketRow.miner_fee,
