@@ -37,6 +37,12 @@ const STARTUP_GRACE_MS = 60 * 1000;         // 60s grace (= 错峰 voter daemon 
 // Default 30 min OK for testnet rapid iteration. Mainnet deploy MUST set 1440 (= 24h 钢线).
 const ORACLE_SILENT_TIMEOUT_MIN = parseInt(process.env.ORACLE_SILENT_TIMEOUT_MIN, 10) || 30;
 const ORACLE_SILENT_TIMEOUT_MS = ORACLE_SILENT_TIMEOUT_MIN * 60_000;
+// 门C 档1 (Owner 终裁 r518, e8727706): dispute 中间态 grace 窗. 过 grace → dispatchRefund 终态
+// (档1 自治, 无 owner-manual 依赖)。档2/mainnet 才把终态换成挑战机制 (非退款 dispute terminal)。
+// testnet 默认短 (10min) 快迭代; mainnet 该长。诚实残留 (Bettor r521 → e8727706 §6): dispute→自动
+// refund 留弱 griefing 路 (corrupt 2 oracle 阻 settle-maj → dispute → 延迟免费 cancel), 档2 靠挑战机制收。
+const DISPUTE_GRACE_MIN = parseInt(process.env.DISPUTE_GRACE_MIN, 10) || 10;
+const DISPUTE_GRACE_MS = DISPUTE_GRACE_MIN * 60_000;
 // Area-7 T5 / area-4 Gap 6: DISAGREEMENT_TIMEOUT independent timer (= NOT ORACLE_SILENT_TIMEOUT
 // reuse, different semantics — disagreement is info-complete, no value waiting 24h). testnet
 // 5 min default, matches PoolSpine.sil refund_disagreement entry's `tx.time >= deadline + 300`
@@ -302,7 +308,7 @@ export async function poolSettlerTick() {
              outcome_market_source, outcome_token_id, outcome_side, protocol_version, pool_merkle_root,
              deadline_daa
       FROM pool_markets
-      WHERE protocol_status IN ('verifying', 'collecting_sigs', 'refunding')
+      WHERE protocol_status IN ('verifying', 'collecting_sigs', 'refunding', 'disputed')
         AND deadline <= ?
       ORDER BY updated_at DESC
     `).all(Math.floor(Date.now() / 1000));
@@ -313,7 +319,7 @@ export async function poolSettlerTick() {
     const TICK_TIMEBOX_MS = parseInt(process.env.POOL_SETTLER_TIMEBOX_MS, 10) || 30_000;
     const tickStartMs = Date.now();
 
-    let consensus = 0, pending = 0, refund = 0, errored = 0, doomed = 0, sampledCommittee = 0;
+    let consensus = 0, pending = 0, refund = 0, errored = 0, doomed = 0, sampledCommittee = 0, disputed = 0;
     let processedCount = 0;
     for (const market of markets) {
       // J2-tn r388 #24 time-box check: 处理超 30s 后 break (= 同 tick 内有 stale retry 不阻塞下个 tick).
@@ -836,6 +842,32 @@ export async function poolSettlerTick() {
           if (!meta.refund_disagreement_dispatched_at) {
             await dispatchRefundDisagreement(market, decision);
           }
+        } else if (decision.action === 'dispute') {
+          // 门C 档1 (Owner 终裁 r518): 中间态 (非 4-同向 settle 且 abstain<4) → dispute, 非自动 refund
+          // (不奖 griefer)。dispute 写死终态 (防 stuck-order = 刚硬化掉的死单换衣回来):
+          // 首检 → status='disputed' + grace 计时; 过 grace → dispatchRefund (档1 自治终态)。
+          let meta = {};
+          try { meta = JSON.parse(market.metadata || '{}'); } catch {}
+          if (!meta.dispute_started_at) {
+            meta.dispute_started_at = new Date().toISOString();
+            meta.dispute_reason = decision.reason;
+            sqlite.prepare("UPDATE pool_markets SET protocol_status = 'disputed', metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+              .run(JSON.stringify(meta), market.id);
+            console.warn(`[pool-settler] DISPUTE market=${market.id.slice(0,12)} → status=disputed (grace ${DISPUTE_GRACE_MIN}min, 终态 dispatchRefund) reason=${decision.reason}`);
+            disputed++;
+          } else {
+            const disputeAgeMs = Date.now() - parseSqliteUtc(meta.dispute_started_at);
+            if (disputeAgeMs >= DISPUTE_GRACE_MS) {
+              // 终态: grace 过 → dispatchRefund (复用现有硬化退款路 + grace, 可 scale)。
+              logThrottled(`dispute-term:${market.id}`, `[pool-settler] DISPUTE terminal market=${market.id.slice(0,12)} grace ${DISPUTE_GRACE_MIN}min 过 → dispatchRefund (档1 自治终态)`);
+              if (!meta.refund_dispatched_at) {
+                await dispatchRefund(market, { action: 'refund', reason: `dispute grace timeout → refund (${meta.dispute_reason || decision.reason})` });
+              }
+              refund++;
+            } else {
+              pending++;  // 仍在 grace 窗内, 等 (档2: 此处接挑战机制)
+            }
+          }
         } else {
           pending++;
           // J2-tn r401 P0-#2 (Bettor r290b 钦点 trace 先证 不猜):
@@ -859,7 +891,7 @@ export async function poolSettlerTick() {
         console.error(`[pool-settler] process fail market=${market.id?.slice(0,12)}: ${e.message}`);
       }
     }
-    console.log(`[pool-settler] tick: ${markets.length} verifying markets, consensus=${consensus} refund=${refund} pending=${pending} doomed=${doomed} errored=${errored} sampledCommittee=${sampledCommittee}`);
+    console.log(`[pool-settler] tick: ${markets.length} verifying markets, consensus=${consensus} refund=${refund} dispute=${disputed} pending=${pending} doomed=${doomed} errored=${errored} sampledCommittee=${sampledCommittee}`);
 
     // J2-tn r401 P0-#1 (Bettor r290+r291 关1 PASS): watchdog phase 加在主 loop 后.
     // 2 watchdogs:
@@ -1233,28 +1265,31 @@ function decideConsensusV06(market) {
     };
   }
 
-  // Threshold not met → consider clean-default-refund or timeout fallback.
+  // ── 门C 档1 三态判定 (Owner 终裁 r518, 决议 e8727706) ──────────────────────────
+  // J2-tn 档1: settle (任一 side ≥4, 上方两 if) / abstain-refund (≥4 主动 ABSTAIN) / 其余=else
+  // catch-all → dispute (非自动 refund, 不奖 griefer)。改自旧 abstain≥2→即 refund (= griefer
+  // 腐蚀 2 委员就拿免费 cancel) + split/timeout→即 refund。档1 无挑战窗 (= 档2/mainnet);
+  // dispute 终态由 caller 写死: status='disputed' + grace → timeout → dispatchRefund (防 stuck-order)。
   const verifyingSinceMs = parseSqliteUtc(market.updated_at);
   const ageMs = Date.now() - verifyingSinceMs;
 
-  // r412 Bettor 5.5: abstain >= 2 → 4-of-5 不可达 → refund 早. 不等 timeout.
-  if (abstainCount >= 2) {
-    return { action: 'refund', reason: `v0.6 abstain≥2 (${abstainCount}/5) → 4-of-5 不可达, refund_consensus_insufficient (YES=${yesCount} NO=${noCount} ABSTAIN=${abstainCount} malformed=${malformedCount})` };
+  // ① abstain-refund: ≥4 委员【主动】投 ABSTAIN (affirmative-unjudgeable supermajority) = genuinely
+  //    不可判 → 合法 refund。门槛由旧 ≥2 抬到 ≥4 (= griefer 腐蚀 1-2 委员凑不出, 落 dispute 不奖)。
+  if (abstainCount >= 4) {
+    return { action: 'refund', reason: `档1 abstain≥4 (${abstainCount}/5) affirmative-unjudgeable supermajority → 合法 refund (genuinely 不可判)` };
   }
 
-  // r415 Owner 终裁 spec v1 §7.2 (clean-default-refund): 5 oracle 全部表态 (= 投票/abstain/malformed) 后
-  // 仍非 4-同向 → 数学不可能反转 (= 即使额外 vote 也救不了, 因 5 全已发声). 立即 refund 不等 timeout.
-  // 防 split-limbo (= 3y2n, 1a3y1n, 1a2y2n 等过去等 24h timeout 卡资金).
-  // 注: trueSilentSet ≠ "5 已发声" (= 那是没投, 可能还会投). decidedCount = votes + abstain + malformed.
+  // ② else catch-all → dispute: 既非 4-同向 settle 也非 ≥4-abstain。覆盖 split (3y2n/3y1n1a…) /
+  //    2-3 abstain / malformed / 非法枚举(已并入 malformed) / 5-全表态-非4同向 / timeout。
+  //    仅在【5 全表态 OR 过 timeout】才进 dispute (= 数学不可能再反转 / 等够了), 否则 pending 等更多票。
   const decidedCount = votes.length + abstainCount + malformedCount;
-  if (decidedCount === 5) {
-    return { action: 'refund', reason: `v0.6 5/5 oracle 表态但非 4-同向 (YES=${yesCount} NO=${noCount} ABSTAIN=${abstainCount} malformed=${malformedCount}) → refund_consensus_insufficient (split-default)` };
+  const allDecided = decidedCount === 5;
+  if (allDecided || ageMs >= ORACLE_SILENT_TIMEOUT_MS) {
+    return { action: 'dispute', reason: `档1 非 4-同向 且 abstain<4 (YES=${yesCount} NO=${noCount} ABSTAIN=${abstainCount} malformed=${malformedCount} silent=${trueSilentSet.size} decided=${decidedCount}/5${allDecided ? ' all-decided' : ' timeout'}) → dispute (catch-all, 不自动 refund 不奖 griefer; 终态 grace→refund 由 caller)` };
   }
 
-  if (ageMs >= ORACLE_SILENT_TIMEOUT_MS) {
-    return { action: 'refund', reason: `v0.6 4-of-5 threshold unmet (YES=${yesCount} NO=${noCount} ABSTAIN=${abstainCount} malformed=${malformedCount} total_votes=${votes.length}/5) past ${Math.round(ORACLE_SILENT_TIMEOUT_MS/60000)}min timeout` };
-  }
-  return { action: 'pending', reason: `v0.6 votes ${votes.length}/5 (YES=${yesCount} NO=${noCount} ABSTAIN=${abstainCount}) age=${Math.floor(ageMs/60000)}min < timeout` };
+  // ③ 尚未表态够 + 未 timeout → pending, 等更多票 (1 no-show 仍可能凑 4-同向)。
+  return { action: 'pending', reason: `档1 votes ${votes.length}/5 (YES=${yesCount} NO=${noCount} ABSTAIN=${abstainCount}) age=${Math.floor(ageMs/60000)}min < timeout, 等更多票` };
 }
 
 /**
