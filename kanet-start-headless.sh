@@ -7,7 +7,7 @@ ENV_FILE="$KANET_ROOT/kanet.env"
 LOG_DIR="$KANET_ROOT/logs"
 PID_DIR="$LOG_DIR/pids"
 CONSOLE_DIR="$KANET_ROOT/kasia-console"
-CONSOLE_PORT=3100
+CONSOLE_PORT=3200   # tn12 KANet Console (kanet.env PORT=3200). 3100 = 主网 Console (C:/kanet, 独立). Bettor r473 纠: 原硬编码 3100 是从主网脚本拷来的错值, 把 tn12 起到了主网端口.
 LLAMA_PORT=8000
 TIMEOUT="${HEADLESS_TIMEOUT:-30}"
 START_MS=$(date +%s%3N 2>/dev/null || echo 0)

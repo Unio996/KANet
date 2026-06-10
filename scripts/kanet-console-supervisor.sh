@@ -30,12 +30,10 @@ HEALTH_FAIL_THRESHOLD=${KANET_SUPERVISOR_FAIL_THRESHOLD:-3}
 RESTART_WINDOW_SEC=${KANET_SUPERVISOR_RESTART_WINDOW_SEC:-300}   # 5 min
 RESTART_MAX_IN_WINDOW=${KANET_SUPERVISOR_RESTART_MAX:-5}
 COOL_DOWN_SEC=${KANET_SUPERVISOR_COOL_DOWN_SEC:-1800}            # 30 min after burst
-# Bettor r472 (P0 incident 2026-06-10): health-check the SAME port the Console actually binds.
-# kanet-start-headless.sh launches Console with PORT=$CONSOLE_PORT (default 3100). The old hardcoded
-# :3200 here NEVER matched → every health check failed → supervisor killed + restarted a perfectly
-# healthy Console every ~90s (fail#1/2/3 → 'death detected'), one half of last night's restart
-# cascade. Default 3100 to match headless; override via CONSOLE_PORT if the operator changes it.
-CONSOLE_PORT=${CONSOLE_PORT:-3100}
+# tn12 KANet Console binds PORT=3200 (kanet.env). 3100 = 主网 Console (C:/kanet, 独立).
+# Bettor r473 纠正 r472: 之前 headless 误把 tn12 起到 3100 (硬编码错值), 我又把这里改成 3100 焊死了错向.
+# 真相: 健康检查必须对齐 Console 实际端口 = 3200。headless 已修回 CONSOLE_PORT=3200, 这里也回 3200.
+CONSOLE_PORT=${CONSOLE_PORT:-3200}
 
 log() {
   echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] $*" >> "$LOG"
