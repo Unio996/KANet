@@ -14,6 +14,30 @@
     </div>
   </div>
 
+  <!-- 门D 零售首访 tour (Bettor r509): 用自己钱包押的零售用户 — 领钱→找单→押, 3 步. 不建 agent. -->
+  <div x-show="showRetailHint" x-cloak class="card card-flush overflow-hidden mb-5 border-emerald-200">
+    <div class="px-5 py-3 bg-emerald-50 border-b border-emerald-100 flex items-center justify-between">
+      <span class="text-sm font-medium text-emerald-800">第一次来？用你自己的钱包押，3 步开始</span>
+      <button @click="dismissRetailHint()" class="text-xs text-emerald-500 hover:text-emerald-700">知道了</button>
+    </div>
+    <div class="px-5 py-4 grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+      <div class="bg-warm-50 rounded-lg p-3">
+        <div class="font-medium text-ink-700 mb-1">① 领测试 KAS</div>
+        <p class="text-ink-500 mb-2">没有 testnet KAS？输地址领一点（够押注 + 链上 fee）。币零价值，纯试玩。</p>
+        <a href="/faucet" class="inline-block px-2.5 py-1 rounded bg-emerald-500 text-white hover:bg-emerald-600">去领 KAS →</a>
+      </div>
+      <div class="bg-warm-50 rounded-lg p-3">
+        <div class="font-medium text-ink-700 mb-1">② 找一个能押的市场</div>
+        <p class="text-ink-500 mb-2">点下方 <strong>“进行中”</strong> 只看还在收押注的市场，挑个你有看法的。</p>
+        <button @click="filterMode = 'open'" class="inline-block px-2.5 py-1 rounded bg-emerald-500 text-white hover:bg-emerald-600">只看进行中 →</button>
+      </div>
+      <div class="bg-warm-50 rounded-lg p-3">
+        <div class="font-medium text-ink-700 mb-1">③ 用钱包押注</div>
+        <p class="text-ink-500">点市场的 <strong>“押 →”</strong>，选 <strong>“用我的钱包付”</strong>，按提示用你钱包付到生成的地址。押对均分输家池。</p>
+      </div>
+    </div>
+  </div>
+
   <!-- KANet-UI 2026-06-07 Track B (Bettor r335 关 1 PASS): filter + 排序 + 题目搜 -->
   <!-- KANet-UI 2026-06-08 DoD 问 1 (Bettor r369 关 1 PASS): broker 推荐 filter mode -->
   <div class="flex flex-wrap items-center gap-2 mb-4 text-xs">
@@ -88,6 +112,8 @@ function predictionsListPage() {
     // KANet-UI 2026-06-07 Track B (Bettor r335 关 1 PASS): 搜 + 排序 state
     searchQuery: '',
     sortMode: 'newest',
+    // 门D 零售首访 tour (Bettor r509): 用自己钱包押的零售用户引导, 1 次 dismiss persist
+    showRetailHint: !localStorage.getItem('kanet_predict_retail_hint_seen'),
 
     async init() {
       // KANet-UI 2026-06-08 DoD 问 1: 并行拉 broker 推荐 (= J2 r409 endpoint live)
@@ -114,6 +140,10 @@ function predictionsListPage() {
         this.counts.settled = this.markets.filter(m => m.statusKind === 'settled').length;
       } catch (e) { console.warn('predictions list load fail', e); }
       this.loading = false;
+    },
+    dismissRetailHint() {
+      this.showRetailHint = false;
+      localStorage.setItem('kanet_predict_retail_hint_seen', '1');
     },
     classifyStatus(s) {
       if (s === 'completed') return 'settled';
