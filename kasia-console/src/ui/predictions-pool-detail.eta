@@ -75,11 +75,15 @@
       <div class="flex items-center justify-between">
         <div>
           <div class="text-sm font-medium text-ink-700">我要押</div>
-          <div class="text-[11px] text-ink-400 mt-0.5">从你自家 agent 锁 KAS 押注. 押对均分输家池.</div>
+          <div class="text-[11px] text-ink-400 mt-0.5">押对均分输家池.</div>
         </div>
         <button @click="bet.open = !bet.open" class="px-3 py-1.5 rounded bg-brand-500 hover:bg-brand-600 text-white text-xs font-medium">
           <span x-text="bet.open ? '收起 ↑' : '我要押 →'"></span>
         </button>
+      </div>
+      <!-- KANet-UI r520 (Bettor): 押注当场的诚实边界轻提示 (= dc-disclaimer 那段的 in-context 版, 下注者不用翻 disclaimer) -->
+      <div class="mt-2 text-[10px] text-ink-400 bg-warm-50 rounded px-2.5 py-1.5 leading-relaxed">
+        ⚖ 若裁决源真的不可得 / 歧义无法判定，仲裁人会<strong>弃权 → 本市场退款</strong>（非保证结算）。这是去中心化预言机的边界，非缺陷。
       </div>
 
       <div x-show="bet.open" x-transition class="mt-4 space-y-3">
