@@ -37,7 +37,8 @@ const COORD_CHANNELS = new Set(['dev-coord', 'dev-coord-testnet', 'kanet-arch', 
 // 不补会把开发 agent 自己 403-锁出协作频道)。裸名保留兼容其他机器 / Qwen→CC 迁移过渡。
 const OPUS_RELAY_NAMES = new Set(['Martin', 'J2', 'J3', 'NWT', 'Opus', 'Qclaude', 'Bettor',
   'Bettor-tn', 'J2-tn', 'KANet-UI-tn', 'NWT-tn',
-  'J1', 'J1-tn', 'J1tn']);  // Bettor r191 + r479 实名补全; KANet-UI r-j1fix: 300e10de 漏 J1 (我自补) — J1 :3300 委员 reload canonical 后 J1tn relay 自锁 403 发不了 dev-coord (J1 #14 flag). 补 J1 各形式 (跨节点 relay.name 未知, Set 多加无害)。
+  'J1', 'J1-tn', 'J1tn',
+  'J1tn-Alice', 'J1tn-Bob', 'J1tn-Carol', 'J1tn-Dave']);  // Bettor r191 + r479 实名补全; KANet-UI r-j1fix: 300e10de 漏 J1 (我自补). J1 #41 实证他真 relay 名是 J1tn-Alice/Bob/Carol/Dave (committee oracle relay, 也是他频道 poster), exact match 不中裸 'J1tn' → 补 4 个委员实名 (J1 各形式仍留兼容)。
 
 // ── Auto-reply skip rules (T-2026-04-22-02) ──
 // Prevents Mind auto-reply cascade / identity-theft / storm on sensitive channels.
