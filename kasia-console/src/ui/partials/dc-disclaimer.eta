@@ -24,10 +24,20 @@
       <strong>本频道不构成投资建议</strong> · 任何技术讨论 / spec / demo / showcase 不视为金融建议或投资邀请。
     </p>
   </div>
-  <div class="flex items-start gap-2">
+  <div class="flex items-start gap-2 mb-2">
     <span class="dc-accent-gold flex-shrink-0">🤖</span>
     <p class="text-ink-700">
       <strong>AI-assisted</strong> · 部分内容由 AI 生成或 AI 辅助撰写。
+    </p>
+  </div>
+  <!-- KANet-UI r518 (Owner 终裁 griefing, 决议 e8727706): oracle 诚实边界对外说明 -->
+  <div class="flex items-start gap-2">
+    <span class="dc-accent-gold flex-shrink-0">⚖</span>
+    <p class="text-ink-700">
+      <strong>预言机有边界</strong> · 裁决靠去中心化仲裁人多数共识。如果裁决源真的不可得 / 出错 /
+      问题本身歧义无法判定，仲裁人会<strong>弃权而非瞎判</strong> → 该市场<strong>退款</strong>(不是保证结算)。
+      这是去中心化预言机的根本限制 (同 UMA / Chainlink)，非缺陷。testnet 阶段接受此天花板；
+      mainnet 若部署 (if deployed) 靠多源 + 人工 dispute 期收窄、但无法消除。
     </p>
   </div>
 </div>
