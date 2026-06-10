@@ -14,8 +14,31 @@ async function pingAdapter(port) {
   return null;
 }
 
-// Deep API check cache: port → { apiOk, apiError, checkedAt }
+// Deep API check cache: port → { apiOk, apiError, checkedAt, failStreak }
 const _apiCheckCache = {};
+
+// 去抖 (KANet-UI r-debounce, Bettor r480 派工): 惊群期 llama 瞬时过载会让单次 deep-check 超时,
+// 旧逻辑 (apiOk=false → 立即 amber + 缓存 120s) 一次抖动就把 adapter 判红卡 2min = 误报噪声。
+// 对齐仓库既定去抖约定 scripts/health-monitor.mjs CRITICAL_FAIL_THRESHOLD=2 (2 连续 fail 才告警):
+//   单次 transient fail 不翻 amber (apiOk=null='checking'), 连续达阈值才真红;
+//   失败结果只缓存短 TTL (快重试恢复), 绿仍长 TTL。
+const DEEP_CHECK_GREEN_TTL_MS = 120_000;   // 绿: 长缓存
+const DEEP_CHECK_FAIL_TTL_MS = 30_000;     // 非绿: 短缓存, 快重试 → llama 恢复后 30s 内转绿
+const DEEP_CHECK_FAIL_THRESHOLD = 2;       // 连续 fail 达此值才判红 (单次抖动不判红)
+
+// fail 记录 + 去抖判定: < 阈值 → checking (apiOk=null, 不翻 amber); >= 阈值 → 真红 (apiOk=false)。
+function recordDeepCheckFail(port, prevStreak, errMsg) {
+  const failStreak = prevStreak + 1;
+  const isRed = failStreak >= DEEP_CHECK_FAIL_THRESHOLD;
+  const result = {
+    apiOk: isRed ? false : null,            // null → adapters.js 映射 'checking', 非 'amber'
+    apiError: isRed ? errMsg : null,
+    checkedAt: Date.now(),
+    failStreak,
+  };
+  _apiCheckCache[port] = result;
+  return result;
+}
 
 // 端口是可复用的：旧 adapter 删了，新建可能复用同一个 port，会继承旧 cache 的 404 状态
 // 因此 create/update/delete 任一改变"port 背后实体"的操作发生时，主动失效该 port 的缓存。
@@ -27,7 +50,12 @@ function invalidateApiCheckCache(port) {
 // 超时放宽到 45s：推理模型（glm4.7 / qwen thinking 系列）首 token 前思考 10-30s 常见
 async function deepCheckAdapter(port) {
   const cached = _apiCheckCache[port];
-  if (cached && Date.now() - cached.checkedAt < 120_000) return cached;
+  // 缓存命中: 绿用长 TTL, 非绿(red/checking)用短 TTL 快重试
+  if (cached) {
+    const ttl = cached.apiOk === true ? DEEP_CHECK_GREEN_TTL_MS : DEEP_CHECK_FAIL_TTL_MS;
+    if (Date.now() - cached.checkedAt < ttl) return cached;
+  }
+  const prevStreak = cached?.failStreak || 0;
   try {
     const res = await fetch(`http://localhost:${port}/reply`, {
       method: 'POST',
@@ -36,14 +64,18 @@ async function deepCheckAdapter(port) {
       body: JSON.stringify({ peer: '_ping', message: 'hi', mindTask: true }),
       signal: AbortSignal.timeout(45000),
     });
-    const result = { apiOk: res.ok, apiError: null, checkedAt: Date.now() };
-    if (!res.ok) result.apiError = (await res.text().catch(() => '')).slice(0, 100);
-    _apiCheckCache[port] = result;
-    return result;
+    if (res.ok) {
+      // 成功: 绿, 重置 failStreak
+      const result = { apiOk: true, apiError: null, checkedAt: Date.now(), failStreak: 0 };
+      _apiCheckCache[port] = result;
+      return result;
+    }
+    // HTTP 非 2xx = 一次 fail, 走去抖
+    const errText = (await res.text().catch(() => '')).slice(0, 100);
+    return recordDeepCheckFail(port, prevStreak, errText);
   } catch (e) {
-    const result = { apiOk: false, apiError: e.message, checkedAt: Date.now() };
-    _apiCheckCache[port] = result;
-    return result;
+    // 超时/连接失败 = 一次 fail, 走去抖 (惊群期瞬时超时最常落这里)
+    return recordDeepCheckFail(port, prevStreak, e.message);
   }
 }
 
