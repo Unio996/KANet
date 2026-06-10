@@ -99,19 +99,23 @@ maker-2/maker-3/broker-1/broker-2 各 ~10 万 KAS;tester-1 ~9.8 万;OwnerTest/Fa
 
 ## 5. 当前急办事务(交接点)
 
-### 跨节点③ vote→settler e2e(最热,卡在最后一环)
-- **已通(DB 实证)**: committee VRF 抽样 + 5 委员签名投票 + 4-of-5 共识(decideConsensusV06)。测试 case `ext-pool-v06-1780231971611-46f8a`: 8 笔真注(L1 Alice 跨host YES + L2 NWT/J2/KANet-UI 跨op + L3 maker/broker 背景),YES池934/NO池801.5,5-of-5 全 YES(3 LLM 自投 + 2 手动)。
-- **卡点(第 11 层)**: status=collecting_sigs, pool_oracle_tx_sig=5 全收齐, 但 **settle_txid 仍 no**。settle TX 组装缺 committee_pks + 5 merkle_proofs 注入(PoolSpine_v06.sil entry 0 settle_aggregate scriptSig spec)。**J1 r221 已推完整 scriptSig 结构(58 args + 反序 LIFO push 顺序),J2 据此组装。** 你审 J2 的组装 commit + 盯 settle_txid 落链。
-- ③ 共挖出 11 层 bug(全 v0.5→v0.6 升级残留): SELECT 缺列 / chainReader 选远程 maker / isRelayAlive 对象当 bool / IPC 白名单漏注册 / deriveVote 不支持 kanet_v06 / decideConsensus 硬编码 3-oracle / anti-spam 误拦跨市场投票 / signingOracles 硬编码[0,1,2] / voter sign handler / settle 组装 merkle proof。模式: 声明与实现/v0.5 与 v0.6 不同步(KI 49)。
+> **更新 2026-06-10 (KANet-UI, doc owner).** 旧 §5(跨节点③ settle 卡 settle_txid no / P0#2 文案脱节)已全部过期 —— settle 早通、P0#2 文案已收尾。下为当前真相,均 DB/代码实证。
 
-### Owner P0#2 变量金额 — 后端已改, bot 文案脱节(待收尾,危险)
-- **后端 = v0.7(已 ship 6f45e9c)**: register-v06/confirm 读真实 UTXO 值,任意金额接受(实测 5000 KAS 非整额都过)。三层 min_stake(POLICY=1 KAS)。
-- **bot 文案 = 还停 v0.6**(prediction-menu.mjs 未改): L58 MIN_STAKE_KAS=0.5、L396 "转少锁死"、L400 "下版本规划"、L440 "务必付精确金额"。**这是危险脱节: 用户看文案以为必须精确,实际后端任意额都收。**
-- **改文案前必先查实 SS 合约(PoolSide_v06.sil)是否真 v0.7 live**: 若合约 ctor 已删 stakeAmount + payout 用 tx.inputs[0].value + derive 不烤金额 = 安全可改文案;若后端 v0.7 但合约仍 v0.6 烤金额 = 非精确额会真锁死,文案警告反而该留。条件锁(③ e2e PASS + 合约 ship)满足后,KANet-UI 改文案。
+### settle 已通(不再是卡点,v0.6→v0.7)
+- **跨节点 + same-node settle 均链上证**。pool_markets 实查 6 笔 protocol_version=v0.7 带 settle_txid 落链: 跨节点 `1r8zz` settle a4fc4fea(4-of-5 threshold, 2026-06-09)、same-node `qoyqv`、4-of-5 funded `6hu1t` 2475ade4(D7/D8/D12 系列)、`w0s3m`/`vaaks`/`i7h0o`。
+- **诚实边界(守 G5)**: testnet-12 + mock canonical, **机制闭环 ≠ 经济闭环**。go-live(seeder 真用户大众测试)未全开。
 
-### 后续(③ 通后)
-- 跨节点④ 及 dispute/refund 争议路径 + committee 作恶经济惩罚(dispute_reveal forfeit)未跑
-- P0#2 文案收尾(见上)
+### Owner P0#2 变量金额 — 文案已收尾(不再危险)
+- bot 文案 `tg-bot/prediction-menu.mjs` 已改对齐后端 v0.7: L59 `MIN_STAKE_KAS=1.0`(非旧 0.5)、L647 "任意 ≥1 KAS 都接受 — 实际仓位按转入额算"。后端 v0.7 register 读真实 UTXO 值收任意额,旧"务必精确/转少锁死"脱节已消。
+
+### 当前最热 incident — .105 惊群(Bettor 治中, r477-r482)
+- **根因①**(bf6bdab4): settler/voter/register 热循环 —— 跨节点卡死单无限重刷 → fork 耗尽全崩。节流治**症**。
+- **根因②**(27fd8d66): headless 漏全量透传 env(KASPA_RPC_URL 等)→ supervisor auto-recover 静默失败 → down 不自愈。
+- **真收敛 ≠ 治症**(NWT r2 flag, 准): bf6bdab4 只治症, 实收敛 = cross-node verifying 市场达 terminal = **J2 Path B(r418/r419)未闭 + 9 卡单未清**。incident 未算真闭。
+
+### 后续 / 北极星
+- 项目终点 = **公开 testnet 大众测试**(DoD 5 门槛, 见记忆 project-public-testnet-dod-northstar)。mainnet 生产不在 scope。
+- 跨节点 dispute/refund 争议路径 + committee 作恶经济惩罚(dispute_reveal forfeit)持续验(D12 自然 silent forfeit 已链上证)。
 
 ---
 

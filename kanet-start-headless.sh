@@ -7,7 +7,7 @@ ENV_FILE="$KANET_ROOT/kanet.env"
 LOG_DIR="$KANET_ROOT/logs"
 PID_DIR="$LOG_DIR/pids"
 CONSOLE_DIR="$KANET_ROOT/kasia-console"
-CONSOLE_PORT=3200   # tn12 KANet Console (kanet.env PORT=3200). 3100 = 主网 Console (C:/kanet, 独立). Bettor r473 纠: 原硬编码 3100 是从主网脚本拷来的错值, 把 tn12 起到了主网端口.
+CONSOLE_PORT=3200   # fallback ONLY (kanet.env 无 PORT key 时). 真相源 = kanet.env PORT, 下方 env-load 后派生覆盖. 3100 = 主网 Console (C:/kanet, 独立). Bettor r473 纠: 原硬编码 3100 是从主网脚本拷来的错值, 把 tn12 起到了主网端口.
 LLAMA_PORT=8000
 TIMEOUT="${HEADLESS_TIMEOUT:-30}"
 START_MS=$(date +%s%3N 2>/dev/null || echo 0)
@@ -39,6 +39,12 @@ if [ -f "$ENV_FILE" ]; then
     esac
   done < "$ENV_FILE"
 fi
+
+# KANet-UI r-portconverge: Console 端口单一源 = kanet.env PORT (上方 export "$k=$v" 已导入 PORT).
+# 派生 CONSOLE_PORT 跟随 kanet.env, 硬编码 3200 退为无 PORT key 时 fallback.
+# 修 latent drift: 原 headless 行104 PORT="$CONSOLE_PORT" 用硬编码值, 无视 kanet.env PORT,
+# 与 kanet-start.sh (case PORT) CONSOLE_PORT="$v") 漂移. 现两脚本同源.
+CONSOLE_PORT="${PORT:-$CONSOLE_PORT}"
 
 [ -n "$OPENCLAW_TOKEN" ] && export OPENCLAW_TOKEN
 
@@ -73,16 +79,27 @@ if [ "${HEADLESS_NO_KILL:-0}" != "1" ]; then
 fi
 
 # ── llama-server (spawn 不等健康) ────────────────────────────────────────────
-LLAMA_SERVER="$KANET_ROOT/tools/llama-server/llama-server.exe"
-LLAMA_MODEL="${LLAMA_MODEL_PATH:-$KANET_ROOT/models/Qwen_Qwen3.5-35B-A3B-Q4_K_M.gguf}"
+# KANet-UI r-llamafix (Bettor r481 指派): tn12 树 (D:\kanet-tn12) 本身无 llama-server.exe / models/,
+# llama 是 C:\KANet 树的单实例共享服务 (mainnet+testnet 共用一个 GPU/模型, serving :8000).
+# 旧默认 $KANET_ROOT/tools|models 在 D: 全是死路 + 版本写错 Qwen3.5 (实际 3.6) → headless 永报
+# 'model file not found'、Console 重启不带 llama. 修: 默认指 C:\KANet 实际路径 (env 可覆盖) + 版本 3.6.
+LLAMA_SERVER="${LLAMA_SERVER_PATH:-C:/KANet/tools/llama-server/llama-server.exe}"
+LLAMA_MODEL="${LLAMA_MODEL_PATH:-C:/KANet/models/Qwen_Qwen3.6-35B-A3B-Q4_K_M.gguf}"
+LLAMA_DIR="$(dirname "$LLAMA_SERVER")"
 LLAMA_LOG="$LOG_DIR/llama-server.log"
 LLAMA_PID=""
 LLAMA_SKIPPED="false"
 LLAMA_REASON=""
 
-if [ -f "$LLAMA_SERVER" ] && [ -f "$LLAMA_MODEL" ]; then
+# :8000 健康守卫: llama 是共享单实例. 若已有人 serving :8000 (= C:\KANet 起的) 则复用、绝不重起,
+# 否则会在已占端口上 spawn 第二个 llama → bind 冲突 + 21GB 重复加载 GPU OOM. (headless 只 kill :3200
+# 不 kill :8000, 故必须此守卫.) 只在 :8000 死 且 模型/exe 在位时, 才作 fallback 自愈拉起.
+if curl -sf "http://127.0.0.1:$LLAMA_PORT/v1/models" >/dev/null 2>&1; then
+  LLAMA_SKIPPED="true"
+  LLAMA_REASON="already serving :$LLAMA_PORT (shared llama, reused)"
+elif [ -f "$LLAMA_SERVER" ] && [ -f "$LLAMA_MODEL" ]; then
   > "$LLAMA_LOG"
-  (cd "$KANET_ROOT/tools/llama-server" && ./llama-server.exe \
+  (cd "$LLAMA_DIR" && ./llama-server.exe \
     --model "$LLAMA_MODEL" \
     --host 0.0.0.0 --port $LLAMA_PORT \
     --n-gpu-layers 99 --ctx-size 262144 --threads 8 \
@@ -92,7 +109,7 @@ if [ -f "$LLAMA_SERVER" ] && [ -f "$LLAMA_MODEL" ]; then
   echo "$LLAMA_PID" > "$PID_DIR/llama-server.pid"
 else
   LLAMA_SKIPPED="true"
-  LLAMA_REASON="model file not found"
+  LLAMA_REASON="model/exe not found ($LLAMA_MODEL)"
 fi
 
 # ── kasia-console ────────────────────────────────────────────────────────────
