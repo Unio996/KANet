@@ -120,6 +120,10 @@ if [ -f "$ENV_FILE" ]; then
       # J2-tn r382 (Bettor 6/5 16:29 钦定): demo 提速 cron 5min → 1min (5x). mainnet 不设默认 5min.
       POOL_SETTLER_TICK_SEC) export POOL_SETTLER_TICK_SEC="$v" ;;
       PREDICTION_VOTER_TICK_SEC) export PREDICTION_VOTER_TICK_SEC="$v" ;;
+      # J1 #73 (scale-test 20档 collecting_sigs 瓶颈根因): relay 每日广播限默认 200 → oracle sig 广播撞限没落链 → maker ingest 不到 → 超时 refund. 必 export 否则 case 未 match 静默忽略 (= line 102 同坑). per-node 须各设 (J2 5f6200e5 watchdog 修的配对 primary 修).
+      DAILY_SEND_LIMIT) export DAILY_SEND_LIMIT="$v" ;;
+      # J2 watchdog env (默认 code 内 30min, 仅覆盖时设)
+      COLLECTING_SIGS_WATCHDOG_MIN) export COLLECTING_SIGS_WATCHDOG_MIN="$v" ;;
     esac
   done < "$ENV_FILE"
   ok "已加载配置: $ENV_FILE"
