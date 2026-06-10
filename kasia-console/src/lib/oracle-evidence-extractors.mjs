@@ -110,15 +110,19 @@ export function extractCoinGeckoPrice(rawText) {
   return evidence.length > 500 ? evidence.slice(0, 497) + '...' : evidence;
 }
 
+// J2-tn 门C 红队 fix (Bettor r512 / NWT r14 🔴CRIT): hostRe 是【host-anchored】正则 (匹 URL
+// 解析后的 hostname, 末尾锚定), 不是对整 URL 字符串子串匹配. 旧 domainRe 子串匹配 = 源伪造/SSRF
+// 洞 (evil.com/site.api.espn.com / 127.0.0.1/site.api.espn.com 都过) → 攻击者控判决证据 → settle 错.
+// hostRe 模式 /^([a-z0-9-]+\.)*espn\.com$/ : 匹 espn.com + 真子域, 拒 espn.com.evil.com / evil.com/...espn...
 export const KNOWN_EXTRACTORS = [
   {
-    domainRe: /site\.api\.espn\.com|cdn\.espn\.com|espn\.com\/.*\/api/i,
+    hostRe: /^([a-z0-9-]+\.)*espn\.com$/i,
     extractor: extractEspnEvidence,
     label: 'ESPN sports summary',
     kind: 'espn',
   },
   {
-    domainRe: /api\.coingecko\.com|coingecko\.com\/.*\/api/i,
+    hostRe: /^([a-z0-9-]+\.)*coingecko\.com$/i,
     extractor: extractCoinGeckoPrice,
     label: 'CoinGecko price',
     kind: 'coingecko',
@@ -126,16 +130,38 @@ export const KNOWN_EXTRACTORS = [
   // Future: BBC, Reuters, AP, other domain-specific extractors.
 ];
 
+// SSRF 防护: 禁私网/loopback/link-local host (攻击者用内网 IP + 白名单子串绕过 fetch 打内网服务).
+function _isPrivateOrLocalHost(host) {
+  if (!host) return true;
+  const h = host.toLowerCase().replace(/^\[|\]$/g, ''); // strip IPv6 brackets
+  if (h === 'localhost' || h.endsWith('.local') || h.endsWith('.internal')) return true;
+  if (h === '::1' || h.startsWith('fc') || h.startsWith('fd') || h.startsWith('fe80')) return true; // IPv6 loopback/ULA/link-local
+  // IPv4 private / loopback / link-local / unspecified
+  if (/^127\./.test(h) || /^10\./.test(h) || /^192\.168\./.test(h) || /^169\.254\./.test(h) || /^0\./.test(h)) return true;
+  if (/^172\.(1[6-9]|2\d|3[01])\./.test(h)) return true;
+  return false;
+}
+
 /**
  * Find extractor entry by URL. Single API for prevet + voter.
+ * J2-tn 门C fix: host-anchored + https-only + SSRF block (不再子串匹配).
  * @param {string} url
- * @returns {{domainRe, extractor, label, kind} | null}
+ * @returns {{hostRe, extractor, label, kind} | null}
  */
 export function findExtractor(url) {
   if (!url) return null;
-  const lower = String(url).toLowerCase();
+  let host;
+  try {
+    const u = new URL(String(url));
+    // 只允许 https (防 MITM + 禁 http SSRF/明文). 解析失败 / 非 https → null (= voter ABSTAIN, 不判).
+    if (u.protocol !== 'https:') return null;
+    host = u.hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+  if (_isPrivateOrLocalHost(host)) return null; // SSRF: 拒内网/loopback
   for (const ent of KNOWN_EXTRACTORS) {
-    if (ent.domainRe.test(lower)) return ent;
+    if (ent.hostRe.test(host)) return ent; // host-anchored, 非整 URL 子串
   }
   return null;
 }
