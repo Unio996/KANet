@@ -13,9 +13,15 @@ import { sendCommandAsync } from '../services/relay-manager.js';
 export const SAFE_CHUNK_BUDGET = 450;
 export const CHUNK_DATA_BUDGET = 340;
 
-export async function sendBroadcastChunked(relayId, channel, payloadStr) {
+export async function sendBroadcastChunked(relayId, channel, payloadStr, timeoutMs) {
+  // J2-tn 规模测试 (KANet-UI 定位 / Bettor r552): sendCommandAsync 默认 IPC timeout=30s
+  // (relay-manager.js:274)。大 sign_req (settle TX 14-18in → 45-58 chunk) 每 chunk 提交在并发 +
+  // storage-mass 下 >30s → IPC reject → oracle 收不到 sign_req → collecting_sigs 卡 1/4 → refund。
+  // 修: chunked 路每 chunk 提 90s (env 可调) → 慢提交完成。深层 (UTXO consolidation 降 storage-mass /
+  // 减 settle TX 尺寸 = broadcast-880 根治) 另治; 此处先让大广播不被 30s 硬截。
+  const tmo = timeoutMs || parseInt(process.env.BROADCAST_CHUNK_TIMEOUT_MS, 10) || 90_000;
   if (payloadStr.length <= SAFE_CHUNK_BUDGET) {
-    return await sendCommandAsync(relayId, { type: 'send_broadcast', channel, message: payloadStr });
+    return await sendCommandAsync(relayId, { type: 'send_broadcast', channel, message: payloadStr }, tmo);
   }
   const hash = createHash('sha256').update(payloadStr).digest('hex');
   const total = Math.ceil(payloadStr.length / CHUNK_DATA_BUDGET);
@@ -23,7 +29,7 @@ export async function sendBroadcastChunked(relayId, channel, payloadStr) {
   for (let ord = 0; ord < total; ord++) {
     const data = payloadStr.slice(ord * CHUNK_DATA_BUDGET, (ord + 1) * CHUNK_DATA_BUDGET);
     const chunkPayload = JSON.stringify({ t: 'pool_market_chunk_v1', hash, ord, total, data });
-    const r = await sendCommandAsync(relayId, { type: 'send_broadcast', channel, message: chunkPayload });
+    const r = await sendCommandAsync(relayId, { type: 'send_broadcast', channel, message: chunkPayload }, tmo);
     if (!r?.txId) throw new Error(`chunk ${ord+1}/${total} broadcast no txId: ${JSON.stringify(r).slice(0,200)}`);
     txIds.push(r.txId);
   }
