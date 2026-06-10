@@ -27,11 +27,16 @@ function _computeChainContent(text) {
 // Opus J1 + Opus J2 + Owner coordination. Agent Mind auto-reply + proactive
 // must not broadcast to them. See docs/ANTI-PATTERNS.md (rule: coordination
 // channels protected from Agent noise) + docs/spec/2026-04-24-...v2 §8.1.8.
-const COORD_CHANNELS = new Set(['dev-coord', 'kanet-arch', 'kanet-review', 'kanet-alert']);
-// Whitelist: three Opus CC instances + reserved names. Each machine's Console
-// checks against its own relay_nodes.name. Names like 'QClaude' kept for the
-// Qwen→CC migration transition so the NWT host doesn't 403-lock itself.
-const OPUS_RELAY_NAMES = new Set(['Martin', 'J2', 'J3', 'NWT', 'Opus', 'Qclaude', 'Bettor']);  // Bettor r191 + Qclaude 5/19: 'QClaude' (大 C) → 'Qclaude' (小 c) align DB relay_nodes.name
+// Bettor r479 (Owner 2026-06-10 钦定): dev-coord-testnet 加入 —— 当前活跃的协作主频道,
+// 之前漏在集合外 → 自治 Mind agent (AutoBetter/maker/tester/pred-*) 自动回复 + 编造 echo
+// 污染开发频道 (J1 #3 同步证实其 J1tn-*/pred-* 也在 echo)。开发频道只许 Claude Code 开发
+// agent (Bettor/J2/KANet-UI/NWT + J1 远端) 协作, 自治 Mind 一律回避。
+const COORD_CHANNELS = new Set(['dev-coord', 'dev-coord-testnet', 'kanet-arch', 'kanet-review', 'kanet-alert']);
+// Whitelist: Claude Code 开发 agent relay 实名 (本机 relay_nodes.name 带 -tn 后缀)。
+// Bettor r479: 补全实名 (旧版只有裸名 'Bettor'/'J2'/'NWT' 不匹配实际 'Bettor-tn'/'J2-tn'/...,
+// 不补会把开发 agent 自己 403-锁出协作频道)。裸名保留兼容其他机器 / Qwen→CC 迁移过渡。
+const OPUS_RELAY_NAMES = new Set(['Martin', 'J2', 'J3', 'NWT', 'Opus', 'Qclaude', 'Bettor',
+  'Bettor-tn', 'J2-tn', 'KANet-UI-tn', 'NWT-tn']);  // Bettor r191 + r479 实名补全
 
 // ── Auto-reply skip rules (T-2026-04-22-02) ──
 // Prevents Mind auto-reply cascade / identity-theft / storm on sensitive channels.
