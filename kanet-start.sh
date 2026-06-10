@@ -81,6 +81,10 @@ if [ -f "$ENV_FILE" ]; then
   while IFS='=' read -r k v; do
     [[ "$k" =~ ^# ]] && continue
     [ -z "$k" ] && continue
+    # Bettor r551 durable 收口 (J1): full passthrough — export EVERY kanet.env key (= headless r472 同源),
+    # 结构性消除 case-block 漏 export 漂移 (DAILY_SEND_LIMIT 等 scale env 漏过 = 本轮 root). case 块保留仅做
+    # 变量名转换 (PORT→CONSOLE_PORT 等). 未来加 env 不再漏, 重启不 revert scale fix stack.
+    export "$k=$v"
     case "$k" in
       KANET_ROOT)              KANET_ROOT="$v" ;;
       CONSOLE_ENCRYPTION_KEY)  CONSOLE_ENCRYPTION_KEY="$v" ;;
