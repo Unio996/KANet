@@ -696,7 +696,7 @@ async function processPoolRefundDisagreementTxSign(voter) {
 // deriveVote — Phase 3a MVP dispatcher per Bettor r219 spec.
 //   1) Polymarket gamma (= polymarket.com source) — direct resolved price check
 //   2) kanet_native (= any other data_source_canonical URL) — fetch + LLM consensus (Qwen3.6-LAN)
-async function deriveVote(offer) {
+export async function deriveVote(offer) {
   // Parse resolution_rule_spec → data_source_canonical (= judge URL)
   let spec = null;
   try { spec = JSON.parse(offer.resolution_rule_spec || '{}'); } catch {}
@@ -718,14 +718,21 @@ async function deriveVote(offer) {
     return deriveKanetNativeVote(offer, spec);
   }
 
-  // Branch 3: coingecko (J2-tn r427 / Bettor r462 跨域 ramp 第 1 个金融源).
-  // 同 kanet_native 路径 — deriveKanetNativeVote 内部按 data_source_canonical URL 路由,
-  // findExtractor 匹 coingecko domainRe → extractCoinGeckoPrice 干净 evidence 喂 LLM.
-  if (offer.outcome_market_source === 'coingecko') {
-    return deriveKanetNativeVote(offer, spec);
+  // Branch 3: registry-driven (J2-tn — 根治 GAP-1 "espn 病换地方": deriveVote 此前按
+  // outcome_market_source enum 硬列 (polymarket/kanet_*/coingecko), 漏 espn → 撞 L728
+  // unsupported (voter log 实证 360 次 deriveVote fail). 抽取器 (extractEspnEvidence) 早就
+  // 存在且 canonical 是有效 ESPN URL, 唯一缺的是路由. 改为: 任何 source 只要
+  // data_source_canonical 命中 KNOWN_EXTRACTORS (findExtractor) → 走同一 deriveKanetNativeVote
+  // LLM-consensus 路径 (= registry 单一源真相, 覆盖 espn/coingecko/未来 BBC/Reuters/AP,
+  // 不再 per-source enum 硬列, 杜绝"加 extractor 漏加 deriveVote 分支"分叉再发生).
+  if (sourceUrl) {
+    const { findExtractor } = await import('../lib/oracle-evidence-extractors.mjs');
+    if (findExtractor(sourceUrl)) {
+      return deriveKanetNativeVote(offer, spec);
+    }
   }
 
-  return { ok: false, reason: `unsupported outcome_market_source: ${offer.outcome_market_source}` };
+  return { ok: false, reason: `unsupported outcome_market_source: ${offer.outcome_market_source} (data_source_canonical ${sourceUrl || '(none)'} 无 known extractor)` };
 }
 
 // P0 UMA finalization gate (Bettor r137/r139 Owner 钦定, J2 r70 propose):
