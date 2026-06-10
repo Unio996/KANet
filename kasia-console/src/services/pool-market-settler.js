@@ -2506,7 +2506,14 @@ async function handleCollectingSigs(market) {
     // 早于 r377 没 phase2_tx_obj). Throttle 90s (= 缩短: 之前 5min 慢, 跨 host 节奏需密).
     try {
       const lastReDMms = meta.last_sign_req_redm_at ? new Date(meta.last_sign_req_redm_at).getTime() : 0;
-      if (Date.now() - lastReDMms > 90_000 && meta.phase2_request_payload) {
+      // J2-tn lever③ (Bettor r540 / KANet-UI 完整数据链): retry-storm 修. 每次 re-broadcast 重发
+      // 全 ~45-58 chunk sign_req; 初次广播因 storage-mass 失败 → 固定 90s 死命重发全量 → ~4 轮
+      // 烧爆 relay 每日 200 限额 (= daily-limit 的实凶上游)。修: 失败时【指数 backoff】(90s →
+      // ×2^failCount, 上限 ~24min), 成功 (拿到 txId) reset failCount → 失败市场不再每 90s 烧 58 TX。
+      const baseThrottle = parseInt(process.env.SIGN_REQ_REBROADCAST_MS, 10) || 90_000;
+      const failCount = meta.sign_req_fail_count || 0;
+      const effThrottle = baseThrottle * Math.min(2 ** failCount, 16);  // 90s → 最长 24min
+      if (Date.now() - lastReDMms > effThrottle && meta.phase2_request_payload) {
         const signedSet = new Set();
         for (const s of sigsByInput[0] || []) signedSet.add(s.voter_pubkey);
         const missingOracles = signingOracles.filter(i => !signedSet.has(committeePksForSort[i] || oracleArr[i]));
@@ -2518,12 +2525,19 @@ async function handleCollectingSigs(market) {
             phase2_tx_obj: meta.phase2_tx_obj,
           };
           const { sendBroadcastChunked } = await import('../lib/pool-broadcast.mjs');
-          await sendBroadcastChunked(market.maker_relay_id, 'kanet-prediction', JSON.stringify(rebroadcastPayload))
-            .catch(err => console.warn(`[pool-settler:collecting] re-broadcast fail market=${market.id.slice(0,12)}: ${err.message}`));
-          const newMeta = { ...meta, last_sign_req_redm_at: new Date().toISOString() };
+          let broadcastOk = false;
+          try {
+            await sendBroadcastChunked(market.maker_relay_id, 'kanet-prediction', JSON.stringify(rebroadcastPayload));
+            broadcastOk = true;
+          } catch (err) {
+            console.warn(`[pool-settler:collecting] re-broadcast fail market=${market.id.slice(0,12)} (failCount=${failCount}→${failCount + 1}, backoff): ${err.message}`);
+          }
+          // 失败 → failCount++ (下次 backoff 更久, 不烧限额); 成功 → reset (拿到 txId 说明 relay 通)
+          const newMeta = { ...meta, last_sign_req_redm_at: new Date().toISOString(),
+            sign_req_fail_count: broadcastOk ? 0 : (failCount + 1) };
           sqlite.prepare('UPDATE pool_markets SET metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
             .run(JSON.stringify(newMeta), market.id);
-          console.log(`[pool-settler:collecting] re-broadcast sign_req market=${market.id.slice(0,12)} missing=${missingOracles.length} chunked`);
+          if (broadcastOk) console.log(`[pool-settler:collecting] re-broadcast sign_req market=${market.id.slice(0,12)} missing=${missingOracles.length} chunked OK`);
         }
       }
     } catch (e) {
