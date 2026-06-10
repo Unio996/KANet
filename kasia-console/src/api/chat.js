@@ -259,7 +259,8 @@ export async function registerChatRoutes(fastify) {
       const isOwnAgentSend = sqlite.prepare('SELECT id FROM relay_nodes WHERE address = ?').get(senderAddress);
       // Owner 消息 = sender 是本地 relay 地址 → 只让一个 Agent 回复（不抢答）
       const isOwnerMessage = sqlite.prepare('SELECT id FROM relay_nodes WHERE address = ?').get(senderAddress);
-      const isProtocolMessage = content.startsWith('{"t":"kanet_');
+      // J1 #60 (log 实证 77× reactive on {): 放宽 kanet_ → 任何 {"t":" JSON 信封 = 机器协议(pool_oracle_vote/chunk/kanet_*), 不喂 mind reactive LLM (砍 :8000 reactive spike, scale ramp 前置). 需 upstream 双节点.
+      const isProtocolMessage = content.startsWith('{"t":"');
       const isDevCoord = content.startsWith('[DEV-COORD]');
       const isKnownForeign = isKnownForeignAgent(senderAddress);
       const isBotReply = isBotAutoReplyContent(content);
@@ -391,7 +392,7 @@ export async function registerChatRoutes(fastify) {
     // ── Auto-reply: let agents respond to EXTERNAL messages only ──
     // Skip: otc-market channel, AND skip if sender is one of our own agents (prevents storm)
     const isOwnAgent = sqlite.prepare('SELECT id FROM relay_nodes WHERE address = ?').get(senderAddress);
-    const isProtocolMsg = content.startsWith('{"t":"kanet_');
+    const isProtocolMsg = content.startsWith('{"t":"');  // J1 #60: 同上, pool_* 协议消息也跳 mind reactive (砍 :8000 spike)
     const isDevChannel = channelName === 'dev-coord' || channelName === 'kanet-dev';
     const isDevMsg = content.startsWith('[DEV-COORD]');
     const isKnownForeign2 = isKnownForeignAgent(senderAddress);
