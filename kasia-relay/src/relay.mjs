@@ -13,7 +13,11 @@ const KASPA_NETWORK = process.env.KASPA_NETWORK || "mainnet";
 
 // ── Chain message guardrails ──
 const MAX_MESSAGE_CHARS = 5000;        // hard cap per message — beyond this, truncate
-const DAILY_SEND_LIMIT = 200;          // max chain messages per day per relay
+// J2-tn 规模测试 (Bettor r538): 200 硬上限在 scale 期被烧光 → settle sign_req 分块广播
+// ('daily limit reached (200)' 撞 dvi6w 52-chunk sign_req)。改 env-configurable: 每 settle TX
+// (14in/12out ~40KB PSKT) 分 ~50 chunk = ~50 TX, 20-档 ramp ~1000 TX 仅 sign_req, 200/day 远不够。
+// 安全护栏保留 (防 Brain 幻觉循环刷链), scale 期由 env 调高; 默认仍 200 (production 保守)。
+const DAILY_SEND_LIMIT = parseInt(process.env.DAILY_SEND_LIMIT, 10) || 200;  // max chain messages per day per relay (env-overridable for scale-test)
 let _dailySendCount = 0;
 let _dailyResetDate = new Date().toISOString().slice(0, 10);
 
