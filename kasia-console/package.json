@@ -22,6 +22,7 @@
     "fastify": "^4.28.1",
     "hyperliquid": "^1.7.7",
     "kaspa-wasm": "file:../shared/vendor/kaspa-wasm",
+    "playwright": "^1.60.0",
     "tronweb": "^6.2.2"
   }
 }

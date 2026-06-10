@@ -14,6 +14,12 @@ kaspa-scout/data/
 kanet.env
 _relay_env.txt
 
+# === 临时/草稿产物（约定: `_` 前缀 = scratch，禁入库）===
+# 每轮 bettor 发送器 / 余额 dump / 日志 / 实验 .cjs|.txt|.json 等。
+# 已跟踪的 _owner-uat-*.mjs / _scenario*.mjs 等正经脚本不受影响（git 对已跟踪文件忽略本规则）。
+# 确需新增 `_` 前缀的正经文件 → `git add -f <file>`。
+_*
+
 # === 运行时 dump 目录（dump-launch.mjs / 进程日志，含明文密钥）===
 logs/
 
