@@ -1528,6 +1528,14 @@ export async function registerPoolRoutes(fastify) {
       sqlite.prepare(`INSERT INTO pool_bettor_sides (market_id, bettor_pk, bettor_relay_id, direction, stake_amount, side_p2sh, side_lock_tx, merkle_index, side_redeem_script_hex)
         VALUES (?,?,?,?,?,?,?,?,?)`).run(marketId, d.bettorPk, null, v.direction, stakeAmountInt, sideP2sh, txId, merkleIndex, d.sideResult.redeemScript);
     } catch (e) {
+      // Bettor r472: UNIQUE constraint on side_lock_tx is BENIGN — the bet is already registered
+      // (concurrent confirm race, OR the L1522 idempotency check raced this INSERT). Returning 500
+      // made the client retry → re-fire every tick → 1817 error-logs in a 5MB log window, a
+      // contributor to the 2026-06-10 fork-exhaustion incident. Treat as idempotent success.
+      if (/UNIQUE constraint failed/.test(e.message)) {
+        const dup = sqlite.prepare('SELECT bettor_pk, direction, stake_amount, side_p2sh, merkle_index FROM pool_bettor_sides WHERE side_lock_tx = ?').get(txId);
+        if (dup) return reply.send({ ok: true, registered: true, already_registered: true, side_lock_tx: txId, ...dup });
+      }
       console.error(`[pool/register-v06/confirm] DB insert fail: ${e.message}`);
       return reply.code(500).send({ ok: false, error: `DB insert fail: ${e.message}` });
     }

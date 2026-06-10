@@ -60,6 +60,35 @@ const MIN_BROKER_FEE_SOMPI = MIN_BROKER_FEE_FLOOR;
 let timer = null;
 let running = false;
 
+// Bettor r472 (P0 incident 2026-06-10): per-market watchdog-a backoff. Markets that can't make
+// local progress (e.g. cross-node maker — dispatchRefund returns early at the cross-node guard
+// WITHOUT setting refund_dispatched_at, so the `!meta.refund_dispatched_at` re-entry guard stays
+// true forever) were re-decided + re-dispatched EVERY tick. That cascade (watchdog-a force-decide
+// → dispatchRefund cross-node skip → dispatchPhase no-maker → REFUND) spammed a 201MB log over
+// days → bash fork exhaustion → whole Console tree torn down. Back off re-attempts on the SAME
+// market to once per WATCHDOG_BACKOFF_MS. Pure rate-limit — does NOT change settlement outcome
+// (the market is still retried, just every 10min not every 60s) and writes no DB state. In-memory;
+// resets on restart. The REAL convergence fix (cross-node verifying markets must reach a terminal
+// state) is the xnode Path B gap — owned by J2-tn (r418/r419).
+const _watchdogBackoff = new Map(); // marketId -> last-attempt epoch ms
+const WATCHDOG_BACKOFF_MS = 10 * 60 * 1000;
+
+// Bettor r472: per-key log throttle for hot lines that re-fire every tick on stuck markets the
+// node can't action (main-loop REFUND + dispatchRefund cross-node skip). Logging guard only — the
+// dispatch attempt itself is unchanged (still cheap; the fatal resource was log VOLUME, not CPU).
+const _logThrottle = new Map(); // key -> last-logged epoch ms
+const LOG_THROTTLE_MS = 10 * 60 * 1000;
+function logThrottled(key, msg) {
+  const now = Date.now();
+  if (now - (_logThrottle.get(key) || 0) < LOG_THROTTLE_MS) return;
+  _logThrottle.set(key, now);
+  if (_logThrottle.size > 5000) {
+    const cutoff = now - LOG_THROTTLE_MS;
+    for (const [k, t] of _logThrottle) { if (t < cutoff) _logThrottle.delete(k); }
+  }
+  console.log(msg);
+}
+
 /**
  * Estimate a transaction's KIP-9 storage mass.
  * storage_mass = C × max(0, Σ(1/output_value) − inputCount² / Σ(input_value))
@@ -792,7 +821,7 @@ export async function poolSettlerTick() {
           }
         } else if (decision.action === 'refund') {
           refund++;
-          console.log(`[pool-settler] REFUND market=${market.id.slice(0,12)} reason=${decision.reason}`);
+          logThrottled(`refund:${market.id}`, `[pool-settler] REFUND market=${market.id.slice(0,12)} reason=${decision.reason}`);
           // Phase 2a-3: skip if already dispatched
           let meta = {};
           try { meta = JSON.parse(market.metadata || '{}'); } catch {}
@@ -857,6 +886,15 @@ export async function poolSettlerTick() {
         const ageSinceDeadlineMin = Math.floor((nowSec2 - wm.deadline) / 60);
         // (a) verifying + 无 phase2_dispatched_at + ageSinceDeadlineMin > 30
         if (wm.protocol_status === 'verifying' && !meta.phase2_dispatched_at && ageSinceDeadlineMin > 30) {
+          // Bettor r472: back off markets that can't make local progress (re-attempted within
+          // WATCHDOG_BACKOFF_MS) — prevents the every-tick re-decide/re-dispatch spam cascade.
+          const lastAttempt = _watchdogBackoff.get(wm.id) || 0;
+          if (Date.now() - lastAttempt < WATCHDOG_BACKOFF_MS) { continue; }
+          _watchdogBackoff.set(wm.id, Date.now());
+          if (_watchdogBackoff.size > 5000) {
+            const cutoff = Date.now() - WATCHDOG_BACKOFF_MS;
+            for (const [k, t] of _watchdogBackoff) { if (t < cutoff) _watchdogBackoff.delete(k); }
+          }
           try {
             const decision = decideConsensus(wm);
             console.log(`[pool-settler:watchdog-a] market=${wm.id.slice(0,12)} ageSinceDeadlineMin=${ageSinceDeadlineMin} verifying+no-phase2 → force decideConsensus=${decision.action} reason=${decision.reason}`);
@@ -1912,7 +1950,7 @@ export async function dispatchRefund(market, decision) {
     const makerRow = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(market.maker_relay_id);
     if (!makerRow?.address) {
       if (typeof market.maker_relay_id === 'string' && market.maker_relay_id.startsWith('cross-node:')) {
-        console.log(`[pool-settler] dispatchRefund skip cross-node market ${market.id.slice(0,12)} (maker on remote host, refund must dispatch from producer node)`);
+        logThrottled(`xnode-skip:${market.id}`, `[pool-settler] dispatchRefund skip cross-node market ${market.id.slice(0,12)} (maker on remote host, refund must dispatch from producer node)`);
       } else {
         console.warn(`[pool-settler] dispatchRefund market=${market.id.slice(0,12)} no maker address`);
       }

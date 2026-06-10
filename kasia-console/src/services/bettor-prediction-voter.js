@@ -35,6 +35,25 @@ const STARTUP_GRACE_MS = 45 * 1000;        // 45s grace (= settler 30s + 15s 错
 let timer = null;
 let running = false;
 
+// Bettor r472 (P0 incident 2026-06-10): per-(key) log throttle. Stuck offers in a permanent
+// condition (e.g. collecting_sigs with invalid/undefined phase2_winner) were re-warned every
+// tick → 201MB log over days → bash fork exhaustion → whole Console tree torn down. Throttle
+// repeated identical warnings to once per WARN_THROTTLE_MS per key. Pure logging guard — no
+// vote/sign logic or DB state changed. In-memory; resets on restart (acceptable).
+const _warnThrottle = new Map(); // key -> last-logged epoch ms
+const WARN_THROTTLE_MS = 10 * 60 * 1000;
+function warnThrottled(key, msg) {
+  const now = Date.now();
+  const last = _warnThrottle.get(key) || 0;
+  if (now - last < WARN_THROTTLE_MS) return;
+  _warnThrottle.set(key, now);
+  // opportunistic prune so the map can't grow unbounded across long uptimes
+  if (_warnThrottle.size > 2000) {
+    for (const [k, t] of _warnThrottle) { if (now - t > WARN_THROTTLE_MS) _warnThrottle.delete(k); }
+  }
+  console.warn(msg);
+}
+
 export function startPredictionVoterCron() {
   if (timer) return;
   console.log('[prediction-voter] started — 5min cron, scan is_oracle=1 relays + vote offers (Phase 3a r211 v3)');
@@ -948,8 +967,11 @@ async function handleTxSignReq(voter, offer) {
   // PB-S8-1 byzantine 防: verify own Phase 1 vote matches request winner
   const winner = parseInt(meta.phase2_winner, 10);
   if (winner !== 0 && winner !== 1) {
-    console.warn(`[prediction-voter] handleTxSignReq invalid winner offer=${offer.id.slice(0,8)}`);
-    return { signed: false, skipped: false };
+    // Permanent condition for this offer (winner won't self-heal). Throttle the warn so a
+    // stuck offer can't spam the log every tick. Treat as skipped (not errored) — re-attempting
+    // is pointless. Bettor r472.
+    warnThrottled(`invalid-winner:${offer.id}`, `[prediction-voter] handleTxSignReq invalid winner offer=${offer.id.slice(0,8)} (throttled 10min)`);
+    return { signed: false, skipped: true };
   }
   const myVoteRow = sqlite.prepare(`
     SELECT payload FROM chain_events
