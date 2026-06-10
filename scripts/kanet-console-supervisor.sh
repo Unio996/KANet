@@ -30,13 +30,19 @@ HEALTH_FAIL_THRESHOLD=${KANET_SUPERVISOR_FAIL_THRESHOLD:-3}
 RESTART_WINDOW_SEC=${KANET_SUPERVISOR_RESTART_WINDOW_SEC:-300}   # 5 min
 RESTART_MAX_IN_WINDOW=${KANET_SUPERVISOR_RESTART_MAX:-5}
 COOL_DOWN_SEC=${KANET_SUPERVISOR_COOL_DOWN_SEC:-1800}            # 30 min after burst
+# Bettor r472 (P0 incident 2026-06-10): health-check the SAME port the Console actually binds.
+# kanet-start-headless.sh launches Console with PORT=$CONSOLE_PORT (default 3100). The old hardcoded
+# :3200 here NEVER matched → every health check failed → supervisor killed + restarted a perfectly
+# healthy Console every ~90s (fail#1/2/3 → 'death detected'), one half of last night's restart
+# cascade. Default 3100 to match headless; override via CONSOLE_PORT if the operator changes it.
+CONSOLE_PORT=${CONSOLE_PORT:-3100}
 
 log() {
   echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] $*" >> "$LOG"
 }
 
 console_alive() {
-  curl -sf --max-time 5 "http://127.0.0.1:3200/" > /dev/null 2>&1
+  curl -sf --max-time 5 "http://127.0.0.1:${CONSOLE_PORT}/" > /dev/null 2>&1
 }
 
 count_recent_restarts() {

@@ -22,6 +22,16 @@ if [ -f "$ENV_FILE" ]; then
   while IFS='=' read -r k v; do
     [[ "$k" =~ ^# ]] && continue
     [ -z "$k" ] && continue
+    # Bettor r472 (P0 incident 2026-06-10): EXPORT EVERY key from kanet.env, not a hand-maintained
+    # allowlist. The old 3-key allowlist silently dropped KASPA_RPC_URL (+ KASPA_NETWORK, pool/voter
+    # tick vars, seeder config …) → Console child crashed on startup (rpc-health.js throws
+    # 'KASPA_RPC_URL not set'). Because the r432 supervisor auto-restarts via THIS headless script,
+    # every auto-recovery silently failed → restart-loop → fork exhaustion. kanet-start.sh already
+    # exports the full set via a giant case block (L84+) — the two drifted, which is exactly the
+    # 'case 未 match key 静默忽略' anti-pattern this codebase has hit repeatedly. Full passthrough
+    # makes drift structurally impossible. kanet.env IS the canonical config; exporting all of it is
+    # the intent.
+    export "$k=$v"
     case "$k" in
       KANET_ROOT)              KANET_ROOT="$v" ;;
       CONSOLE_ENCRYPTION_KEY)  CONSOLE_ENCRYPTION_KEY="$v" ;;
