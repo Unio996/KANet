@@ -72,9 +72,15 @@ function isBotAutoReplyContent(content) {
 }
 
 // 3) Channel-level Mind auto-reply disable list (audit + alert channels stay clean)
+// KANet-UI r-mindfw (J1 #39): dev 协调频道必掐 Mind auto-reply — 配套 0bd410ad(OPUS 白名单放行 J1tn
+// 等 mind relay【手动】发协调消息), 但不掐 auto-reply → Alice/mind relay 的自治 auto-reply 仍漏过又灌频道
+// (= r479 防火墙 'COORD 频道只许人类 agent 手动协调' 初衷的另一半)。两个一起焊: 手动通 + auto-reply 掐。
 const MIND_DISABLED_CHANNELS = new Set([
   'kanet-review',
   'kanet-alert',
+  'dev-coord',
+  'dev-coord-testnet',
+  'kanet-arch',
 ]);
 function isAutoReplyDisabledForChannel(channelName) {
   return MIND_DISABLED_CHANNELS.has(channelName);

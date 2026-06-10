@@ -119,8 +119,12 @@ CONSOLE_LOG="$LOG_DIR/console.log"
 KANET_ROOT="$KANET_ROOT" \
 CONSOLE_ENCRYPTION_KEY="$CONSOLE_ENCRYPTION_KEY" \
 PORT="$CONSOLE_PORT" \
+CONSOLE_URL="http://localhost:$CONSOLE_PORT" \
 DB_PATH="$CONSOLE_DIR/data/console.db" \
   node --max-old-space-size=4096 "$CONSOLE_DIR/src/index.js" >> "$CONSOLE_LOG" 2>&1 &
+# KANet-UI r-consoleurl (J1 #39 canonical 缺口): 传 CONSOLE_URL=本 host CONSOLE_PORT 派生 → mind.mjs:81/101
+# 不再默认 localhost:3100(主网口) → 非-3100 host(tn12 :3200 / J1 :3300) mind fetch config 不再 fail.
+# 各 host 按自己 CONSOLE_PORT 派生, 通用 canonical (= 同端口派生单一源思路)。
 CONSOLE_PID=$!
 echo "$CONSOLE_PID" > "$PID_DIR/console.pid"
 
