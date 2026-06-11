@@ -56,7 +56,19 @@ export function betFlow(broker) {
 
 export function notifyLine(ev) {
   const tx = (ev.txid || '').slice(0, 12);
-  return `🔔 ${ev.event_type || 'event'} · tx ${tx}… · ${ev.observed_at || ''}`;
+  const t = ev.event_type || 'event';
+  // KANet-UI 线B P1 (Bettor v2 ③): settle/refund 事件友好化 — 用户押注有结果时给可读+可执行通知,
+  // 指向 /mybets 看赢/输/退 + 金额(原 generic '🔔 event tx' 用户看不懂)。金额/赢输详情在 /mybets。
+  if (/settle|payout|winner|distribut/i.test(t)) {
+    return `🎉 你押注的预测市场结算了! 押中的话 KAS 已到你 /link 地址。\ntx ${tx}… — 回 /mybets 看你赢了多少。`;
+  }
+  if (/refund/i.test(t)) {
+    return `↩ 你押注的市场退款了 (裁决源不可得 / 仲裁人弃权, 押金退回你地址)。\ntx ${tx}… — /mybets 看详情。`;
+  }
+  if (t === 'tx') {
+    return `💰 你的地址有链上入账 (可能是押注结算赢款或退款)。\ntx ${tx}… — /mybets 看你的押注结果。`;
+  }
+  return `🔔 链上动态: ${t} · tx ${tx}… · ${ev.observed_at || ''}`;
 }
 
 export function help() {
