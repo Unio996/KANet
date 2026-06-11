@@ -199,8 +199,15 @@ export async function registerRelayRoutes(fastify) {
     if (!newRole || !VALID_ROLES.includes(newRole)) {
       return reply.code(400).send({ error: 'invalid_role', message: `role 必 ∈ [${VALID_ROLES.join(', ')}]` });
     }
-    const relay = sqlite.prepare(`SELECT id, name, role, is_dex_broker, is_service FROM relay_nodes WHERE id = ?`).get(request.params.id);
+    const relay = sqlite.prepare(`SELECT id, name, role, is_dex_broker, is_service, is_oracle FROM relay_nodes WHERE id = ?`).get(request.params.id);
     if (!relay) return reply.code(404).send({ error: 'relay_not_found' });
+
+    // KANet-UI 2026-06-11 (Bettor r600 + NWT r64 红队): broker/oracle 互斥【双向】(Area 1.4 角色分离).
+    // 此前单向 (oracle-enroll bettor.js:2153 拒 is_dex_broker, 但无 gateway 侧拒 is_oracle).
+    // 补对称: 设 role=broker (gateway register) 时 relay is_oracle=1 → reject (镜像 oracle 侧拒 broker).
+    if (newRole === 'broker' && relay.is_oracle === 1) {
+      return reply.code(403).send({ error: 'role_conflict', message: 'relay 已是 oracle (is_oracle=1) — broker/oracle 互斥 (Area 1.4 角色分离). 先退出 oracle (unstake) 再注册 gateway.' });
+    }
 
     const oldRole = relay.role;
     if (oldRole === newRole) {
