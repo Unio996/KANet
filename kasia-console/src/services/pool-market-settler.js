@@ -1903,6 +1903,10 @@ export async function dispatchPhase2(market, decision) {
       phase2_input_count: requiredInputOutpoints.length,
       phase2_spine_input_count: spineInputCount,  // Phase 3 bug 4: spine has 1 maker + N oracle bond UTXOs
       phase2_output_count: outputs.length,
+      // J2-tn (Bettor r617 ②): 记录【实际 broker fee】= payouts.brokerFee (losingPool×fee_pct, L1364-1366)。
+      // earnings 端点此前估 maker_stake×fee_pct (≠ 实际, gz5g7 估 2.0 vs 实落 6.73 KAS) → earnings 改读
+      // 这个实际值 (settled 市场)。phase2_outputs[0] 也是 broker fee output 但读 order 脆, 显式字段更稳。
+      phase2_broker_fee_sompi: payouts.brokerFee,
       phase2_outputs: outputs,  // Phase 2c step 2c: full outputs array for collecting_sigs handler IPC assembly
     };
     // J1 r221 + Bettor r218 ③ Layer-12: v0.6 settle_aggregate needs committee data — fetch

@@ -78,7 +78,7 @@ export async function registerKanetBrokerRoutes(fastify) {
     if (!relay_id) return reply.code(400).send({ ok: false, error: 'relay_id required' });
 
     const poolRows = sqlite.prepare(`
-      SELECT id, broker_fee_pct, maker_stake_amount, protocol_status, settle_txid, refund_txid, updated_at
+      SELECT id, broker_fee_pct, maker_stake_amount, protocol_status, settle_txid, refund_txid, updated_at, metadata
       FROM pool_markets WHERE broker_relay_id = ?
     `).all(relay_id);
 
@@ -98,10 +98,17 @@ export async function registerKanetBrokerRoutes(fastify) {
     const byMarket = [];
 
     for (const r of poolRows) {
-      const stake = BigInt(r.maker_stake_amount || 0);
-      const feeBps = BigInt(r.broker_fee_pct || 0);
-      const feeSompi = (stake * feeBps) / 10000n;
       const isRealized = !!r.settle_txid;
+      // J2-tn (Bettor r617 ②): settled 市场用【实际落链 broker fee】= settler 记的 phase2_broker_fee_sompi
+      // (losingPool×fee_pct, L1364-1366), 非 maker_stake×fee_pct 估算 (gz5g7 估 2.0 KAS vs 实落 6.73 KAS)。
+      // 无记录 (pending 未 settle / 旧 settle 无 phase2_broker_fee_sompi) 回退估算 (兼容 + pending 显示)。
+      let actualFeeSompi = null;
+      if (isRealized && r.metadata) {
+        try { const _m = JSON.parse(r.metadata); if (_m.phase2_broker_fee_sompi != null) actualFeeSompi = BigInt(_m.phase2_broker_fee_sompi); } catch {}
+      }
+      const feeSompi = actualFeeSompi != null
+        ? actualFeeSompi
+        : (BigInt(r.maker_stake_amount || 0) * BigInt(r.broker_fee_pct || 0)) / 10000n;
       const isRefunded = !!r.refund_txid;
       const status = isRealized ? 'settled' : (isRefunded ? 'refunded' : r.protocol_status);
       if (isRealized) {
