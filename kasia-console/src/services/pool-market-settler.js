@@ -1496,16 +1496,17 @@ export async function dispatchPhase2(market, decision) {
     }
 
     // r339 push 3: broker_relay_id required (= broker fee output dest, no longer placeholder).
-    // J2-tn (NWT r62 / J1 #138 settle BREAKER): broker fee 地址此前只 broker_relay_id→relay_nodes 本地
-    // 查, 跨节点 broker 非本地 → null → return abort 整个 dispatchPhase2 (不只 fee 漏, 全市场 settle 停)。
-    // 镜像 bettor external 路 (L1522-1524): 本地查不到 → 从 market.broker_pk (签名 canonical L180 跨节点
-    // 自含) 派生 P2PK 地址 fallback。= 跨节点铁律: 跨节点字段从链上数据 derive, 非本地表查 (J1 #139)。
+    // J2-tn settle BREAKER 修 (NWT r62 / J1 #138) + determinism 根治 (J1 #140 红队):
+    // 此前 broker fee 地址只 broker_relay_id→relay_nodes 本地查 → 跨节点 broker 非本地 → null → return
+    // abort 整个 dispatchPhase2 (全市场 settle 停)。b502a805 首修 "relay查优先 pk兜底" 仍【非对称】:
+    // 本地节点用 relay.address / 远端用 pk-派生, 若 gateway relay 非 P2PK 地址 (relay.address != pk-派生,
+    // L1507-1513 P2SH/multisig edge) → 两节点 broker 地址分歧 → 跨节点 settle 分歧。根治 (J1 #140 ①):
+    // 【两节点都从 broker_pk 派生】(broker_pk 签进 unsignedPayload L181 = 跨节点确定; relay.address 本地
+    // 表不进 canonical, 不用) = 对称确定, 同 bettor-external (L1522-1524)。跨节点铁律: 跨节点字段从链上
+    // 数据 derive, 非本地表查。testnet 标准 P2PK 钱包 relay.address==pk-派生 (零行为变化), 非 P2PK edge
+    // 由 pk-派生统一消歧 (Bettor r67 edge 同 bettor-external 已接受 first-ship)。
     let brokerAddress = null;
-    if (market.broker_relay_id) {
-      const brokerRow = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(market.broker_relay_id);
-      brokerAddress = brokerRow?.address || null;
-    }
-    if (!brokerAddress && market.broker_pk) {
+    if (market.broker_pk) {
       try {
         const _kw = await import('kaspa-wasm');
         const _net = market.spine_p2sh && market.spine_p2sh.startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
@@ -1515,7 +1516,7 @@ export async function dispatchPhase2(market, decision) {
       }
     }
     if (!brokerAddress) {
-      console.warn(`[pool-settler] dispatchPhase2 market=${market.id.slice(0,12)} missing broker address (broker_relay_id=${market.broker_relay_id} broker_pk=${String(market.broker_pk||'').slice(0,8)})`);
+      console.warn(`[pool-settler] dispatchPhase2 market=${market.id.slice(0,12)} missing broker address (broker_pk=${String(market.broker_pk||'').slice(0,8)} broker_relay_id=${market.broker_relay_id})`);
       return;
     }
 
