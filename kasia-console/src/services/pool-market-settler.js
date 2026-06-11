@@ -1496,11 +1496,26 @@ export async function dispatchPhase2(market, decision) {
     }
 
     // r339 push 3: broker_relay_id required (= broker fee output dest, no longer placeholder).
-    const brokerRow = market.broker_relay_id
-      ? sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(market.broker_relay_id)
-      : null;
-    if (!brokerRow?.address) {
-      console.warn(`[pool-settler] dispatchPhase2 market=${market.id.slice(0,12)} missing broker address (broker_relay_id=${market.broker_relay_id})`);
+    // J2-tn (NWT r62 / J1 #138 settle BREAKER): broker fee 地址此前只 broker_relay_id→relay_nodes 本地
+    // 查, 跨节点 broker 非本地 → null → return abort 整个 dispatchPhase2 (不只 fee 漏, 全市场 settle 停)。
+    // 镜像 bettor external 路 (L1522-1524): 本地查不到 → 从 market.broker_pk (签名 canonical L180 跨节点
+    // 自含) 派生 P2PK 地址 fallback。= 跨节点铁律: 跨节点字段从链上数据 derive, 非本地表查 (J1 #139)。
+    let brokerAddress = null;
+    if (market.broker_relay_id) {
+      const brokerRow = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(market.broker_relay_id);
+      brokerAddress = brokerRow?.address || null;
+    }
+    if (!brokerAddress && market.broker_pk) {
+      try {
+        const _kw = await import('kaspa-wasm');
+        const _net = market.spine_p2sh && market.spine_p2sh.startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
+        brokerAddress = new _kw.XOnlyPublicKey(market.broker_pk).toAddress(_net).toString();
+      } catch (e) {
+        console.warn(`[pool-settler] broker pk→addr fail market=${market.id.slice(0,12)} broker_pk=${String(market.broker_pk).slice(0,8)}: ${e.message}`);
+      }
+    }
+    if (!brokerAddress) {
+      console.warn(`[pool-settler] dispatchPhase2 market=${market.id.slice(0,12)} missing broker address (broker_relay_id=${market.broker_relay_id} broker_pk=${String(market.broker_pk||'').slice(0,8)})`);
       return;
     }
 
@@ -1725,7 +1740,7 @@ export async function dispatchPhase2(market, decision) {
 
     const outputs = [];
     if (payouts.brokerFee > 0) {
-      outputs.push({ address: brokerRow.address, amountSompi: payouts.brokerFee.toString() });
+      outputs.push({ address: brokerAddress, amountSompi: payouts.brokerFee.toString() });
     }
     // Bettor r277 layer-19: v0.6/v0.7 PoolSpine settle_aggregate fixed output layout:
     // [0]=broker, [1..5]=5 committee P2PKs (>= oracleBondAmount each), [6..]=winners.
