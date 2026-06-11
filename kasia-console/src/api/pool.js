@@ -109,6 +109,23 @@ function deriveXOnlyPubkey(address) {
   });
 }
 
+// KANet-UI 2026-06-11 (Bettor r606/r607 + J1 #143 chokepoint + NWT r66): broker/gateway 收款址必 P2PK.
+// 否则 settle always-pk-derive (J2 ca5e8658) 从 broker_pk 派生的地址 ≠ 意图收款址 → fee 到错处.
+// 所有 create 函数 derive brokerPk 后必经此校验 = chokepoint 覆盖全 gateway-设置路径 (无旁路).
+// reject guard, derive 后建 payload 前拦, 不改 signed payload = 0 跨节点 hash 风险.
+// ⚠ MAINTAIN (Bettor r608): 每个 `deriveXOnlyPubkey(brokerRow.address)` 点【必】紧跟调本 helper.
+//   现 3 处 (create/v06/v07). 将来加第 4 条 broker_pk-derive 建市路径忘调 = 非 P2PK gateway 旁路漏.
+async function assertBrokerP2PK(brokerPk, brokerAddress) {
+  const kaspa = await import('kaspa-wasm');
+  const net = (brokerAddress || '').startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
+  const roundTrip = new kaspa.XOnlyPublicKey(brokerPk).toAddress(net).toString();
+  if (roundTrip !== brokerAddress) {
+    const e = new Error('broker relay 地址非 P2PK (round-trip ≠ 原址) — gateway 须 P2PK 保跨节点 settle fee 派生到对处 (Bettor r606/J1 #143)');
+    e.code = 400;
+    throw e;
+  }
+}
+
 // Bettor r117/r118/r120 cross-node hardening producer ② — broadcast market_publish
 // onchain so remote nodes' Scout + trade-protocol-filter rebuild pool_markets locally.
 // Best-effort: fail logs warn, doesn't fail create (spine_lock_tx already onchain).
@@ -312,6 +329,7 @@ export async function registerPoolRoutes(fastify) {
 
     const makerPk = await deriveXOnlyPubkey(makerRow.address);
     const brokerPk = await deriveXOnlyPubkey(brokerRow.address);
+    try { await assertBrokerP2PK(brokerPk, brokerRow.address); } catch (e) { return reply.code(e.code || 400).send({ ok: false, error: e.message }); }
     const oraclePks = await Promise.all(oracleRows.map(r => deriveXOnlyPubkey(r.address)));
 
     // deadline + amounts.
@@ -540,6 +558,7 @@ export async function registerPoolRoutes(fastify) {
 
     const makerPk = await deriveXOnlyPubkey(makerRow.address);
     const brokerPk = await deriveXOnlyPubkey(brokerRow.address);
+    try { await assertBrokerP2PK(brokerPk, brokerRow.address); } catch (e) { return reply.code(e.code || 400).send({ ok: false, error: e.message }); }
 
     const minDeadlineMin = parseInt(process.env.POOL_DEADLINE_MIN_OVERRIDE, 10) || 15;
     const outcomeEndMs = new Date(b.outcome_end_date).getTime();
@@ -804,6 +823,7 @@ export async function registerPoolRoutes(fastify) {
 
     const makerPk = await deriveXOnlyPubkey(makerRow.address);
     const brokerPk = await deriveXOnlyPubkey(brokerRow.address);
+    try { await assertBrokerP2PK(brokerPk, brokerRow.address); } catch (e) { return reply.code(e.code || 400).send({ ok: false, error: e.message }); }
 
     const minDeadlineMin = parseInt(process.env.POOL_DEADLINE_MIN_OVERRIDE, 10) || 15;
     const outcomeEndMs = new Date(b.outcome_end_date).getTime();

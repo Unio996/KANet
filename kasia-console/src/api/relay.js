@@ -199,14 +199,31 @@ export async function registerRelayRoutes(fastify) {
     if (!newRole || !VALID_ROLES.includes(newRole)) {
       return reply.code(400).send({ error: 'invalid_role', message: `role 必 ∈ [${VALID_ROLES.join(', ')}]` });
     }
-    const relay = sqlite.prepare(`SELECT id, name, role, is_dex_broker, is_service, is_oracle FROM relay_nodes WHERE id = ?`).get(request.params.id);
+    const relay = sqlite.prepare(`SELECT id, name, role, is_dex_broker, is_service, is_oracle, address FROM relay_nodes WHERE id = ?`).get(request.params.id);
     if (!relay) return reply.code(404).send({ error: 'relay_not_found' });
 
-    // KANet-UI 2026-06-11 (Bettor r600 + NWT r64 红队): broker/oracle 互斥【双向】(Area 1.4 角色分离).
-    // 此前单向 (oracle-enroll bettor.js:2153 拒 is_dex_broker, 但无 gateway 侧拒 is_oracle).
-    // 补对称: 设 role=broker (gateway register) 时 relay is_oracle=1 → reject (镜像 oracle 侧拒 broker).
-    if (newRole === 'broker' && relay.is_oracle === 1) {
-      return reply.code(403).send({ error: 'role_conflict', message: 'relay 已是 oracle (is_oracle=1) — broker/oracle 互斥 (Area 1.4 角色分离). 先退出 oracle (unstake) 再注册 gateway.' });
+    // KANet-UI 2026-06-11 gateway register 守门 (role=broker 时):
+    // ① broker/oracle 互斥【双向】(Bettor r600 + NWT r64, Area 1.4 角色分离). 此前单向
+    //    (oracle-enroll bettor.js:2153 拒 is_dex_broker, 无 gateway 侧拒 is_oracle).
+    // ② 收款址 P2PK 约束 (Bettor r604 + J1 #141 + NWT r66 determinism 收口上游守门):
+    //    settler always-pk-derive (J2 ca5e8658) 保跨节点同地址不炸; 这里保 broker_pk 派生地址==意图址,
+    //    非 P2PK (P2SH/multisig) 地址 round-trip 后 ≠ 原址 → fee 到错处 → 拒注册 gateway.
+    if (newRole === 'broker') {
+      if (relay.is_oracle === 1) {
+        return reply.code(403).send({ error: 'role_conflict', message: 'relay 已是 oracle (is_oracle=1) — broker/oracle 互斥 (Area 1.4 角色分离). 先退出 oracle (unstake) 再注册 gateway.' });
+      }
+      try {
+        const kaspa = await import('kaspa-wasm');
+        const addr = relay.address;
+        const net = (addr || '').startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
+        const pk = kaspa.XOnlyPublicKey.fromAddress(new kaspa.Address(addr)).toString();
+        const roundTrip = new kaspa.XOnlyPublicKey(pk).toAddress(net).toString();
+        if (roundTrip !== addr) {
+          return reply.code(400).send({ error: 'address_not_p2pk', message: 'relay 收款址非 P2PK (round-trip 不回原址) — gateway 须 P2PK 地址保跨节点 settle fee 派生到对处 (Bettor r604/J1 #141).' });
+        }
+      } catch (e) {
+        return reply.code(400).send({ error: 'address_validation_fail', message: `gateway 收款址 P2PK 校验失败: ${e?.message || e}` });
+      }
     }
 
     const oldRole = relay.role;
