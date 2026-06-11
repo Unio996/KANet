@@ -120,9 +120,14 @@ function deriveXOnlyPubkey(address) {
 const SAFE_CHUNK_BUDGET = 450;  // hard ceiling per chunk (envelope + data)
 // Envelope overhead at worst (3-digit ord/total, 64-hex hash, json quotes): ~110 chars. Leave 340 for data.
 const CHUNK_DATA_BUDGET = 340;
-async function _sendBroadcastChunked(relayId, channel, payloadStr) {
+async function _sendBroadcastChunked(relayId, channel, payloadStr, timeoutMs) {
+  // J2-tn 跨节点一致 (Bettor r559 / J1 #84): 6476f167 只改了 lib/pool-broadcast.mjs sendBroadcastChunked
+  // (settler sign_req 路径), 这份 pool.js 私函数 (market-publish 路径) 漏同步 → IPC 默认 30s。J1 :3300
+  // 两份都补了, :3200 这份也同步 90s 灭跨节点 drift。market-publish 现 5-chunk 小 (30s 也够), 但大
+  // payload (未来/边界) 不被 30s 截 + 与 lib/J1 一致。env BROADCAST_CHUNK_TIMEOUT_MS 同一变量。
+  const tmo = timeoutMs || parseInt(process.env.BROADCAST_CHUNK_TIMEOUT_MS, 10) || 90_000;
   if (payloadStr.length <= SAFE_CHUNK_BUDGET) {
-    return await sendCommandAsync(relayId, { type: 'send_broadcast', channel, message: payloadStr });
+    return await sendCommandAsync(relayId, { type: 'send_broadcast', channel, message: payloadStr }, tmo);
   }
   const hash = createHash('sha256').update(payloadStr).digest('hex');
   const total = Math.ceil(payloadStr.length / CHUNK_DATA_BUDGET);
@@ -130,7 +135,7 @@ async function _sendBroadcastChunked(relayId, channel, payloadStr) {
   for (let ord = 0; ord < total; ord++) {
     const data = payloadStr.slice(ord * CHUNK_DATA_BUDGET, (ord + 1) * CHUNK_DATA_BUDGET);
     const chunkPayload = JSON.stringify({ t: 'pool_market_chunk_v1', hash, ord, total, data });
-    const r = await sendCommandAsync(relayId, { type: 'send_broadcast', channel, message: chunkPayload });
+    const r = await sendCommandAsync(relayId, { type: 'send_broadcast', channel, message: chunkPayload }, tmo);
     if (!r?.txId) throw new Error(`chunk ${ord+1}/${total} broadcast no txId: ${JSON.stringify(r).slice(0,200)}`);
     txIds.push(r.txId);
   }
