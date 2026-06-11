@@ -44,6 +44,10 @@ const ORACLE_SILENT_TIMEOUT_MS = ORACLE_SILENT_TIMEOUT_MIN * 60_000;
 // 否则 backoff 到下次 retry 前先被 watchdog refund (retry 没机会) = r548 时序 bug。
 const COLLECTING_SIGS_WATCHDOG_MIN = parseInt(process.env.COLLECTING_SIGS_WATCHDOG_MIN, 10) || 30;
 const COLLECTING_SIGS_WATCHDOG_MS = COLLECTING_SIGS_WATCHDOG_MIN * 60_000;
+// J2-tn (J1 #103 catch): settle 路 pool_settle_tx submit 永久失败 (UTXO-gone/fee-impossible) 给 give-up
+// 上限 — 超此 submit_fail_count → cancelled + refund 终态, 停无限退避重试 (ext-pool-177 count=90 实证).
+// 镜像 J1 门B refund-dis give-up cap. 默认 10 (60s×2^9 已退避到 3600s cap = ~5h 才到, transient 早自愈).
+const SETTLE_SUBMIT_GIVEUP = parseInt(process.env.SETTLE_SUBMIT_GIVEUP, 10) || 10;
 // 门C 档1 (Owner 终裁 r518, e8727706): dispute 中间态 grace 窗. 过 grace → dispatchRefund 终态
 // (档1 自治, 无 owner-manual 依赖)。档2/mainnet 才把终态换成挑战机制 (非退款 dispute terminal)。
 // testnet 默认短 (10min) 快迭代; mainnet 该长。诚实残留 (Bettor r521 → e8727706 §6): dispute→自动
@@ -2699,6 +2703,19 @@ async function handleCollectingSigs(market) {
         const cur = JSON.parse(market.metadata || '{}');
         cur.submit_fail_count = (cur.submit_fail_count || 0) + 1;
         cur.submit_last_err = (submitResult?.error || '').slice(0, 200);
+        // J2-tn (J1 #103 catch): settle 路有 backoff 但【无终态 give-up】→ submit 永久失败 (UTXO-gone /
+        // fee-impossible) 的单退避到 3600s cap 后仍每小时重试一次, 永不终止 (ext-pool-177 count=90 实证).
+        // 镜像 J1 门B refund-dis give-up: count >= SETTLE_SUBMIT_GIVEUP → cancelled + dispatchRefund 终态
+        // (committee 共识有但 settle TX 提不上链 = 退款保护 winner, 安全终止)。cancelled 被 L311 主查询排除.
+        if (cur.submit_fail_count >= SETTLE_SUBMIT_GIVEUP && !cur.refund_dispatched_at) {
+          cur.cancel_reason = 'settle_submit_giveup';
+          cur.cancelled_at = new Date().toISOString();
+          sqlite.prepare("UPDATE pool_markets SET protocol_status='cancelled', metadata=?, updated_at=CURRENT_TIMESTAMP WHERE id=?")
+            .run(JSON.stringify(cur), market.id);
+          console.warn(`[pool-settler:collecting] pool_settle_tx submit GIVE-UP market=${market.id.slice(0,12)} count=${cur.submit_fail_count} (${SETTLE_SUBMIT_GIVEUP}) → cancelled + maker refund (永久 submit fail, 停无限重试)`);
+          await dispatchRefund(market, { action: 'refund', reason: `settle_submit_giveup: ${cur.submit_fail_count} fails, ${cur.submit_last_err}` });
+          return;
+        }
         const submitBackoffSec = Math.min(60 * Math.pow(2, Math.max(0, cur.submit_fail_count - 1)), 3600);
         cur.skip_until_ms = Date.now() + submitBackoffSec * 1000;
         sqlite.prepare('UPDATE pool_markets SET metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
