@@ -383,8 +383,9 @@
     <!-- market meta -->
     <div class="card p-4 text-[11px] text-ink-500 space-y-1">
       <!-- KANet-UI 2026-06-07 P2 (Bettor r330 关 1 PASS): market meta jargon → 中文 -->
-      <div class="flex justify-between"><span>主持人本金</span><span x-text="(market?.maker_stake_amount || '?') + ' KAS'"></span></div>
-      <div class="flex justify-between"><span>仲裁人押金 (每位)</span><span x-text="(market?.oracle_bond_amount || '?') + ' KAS'"></span></div>
+      <!-- KANet-UI 2026-06-11 (Bettor r588 P0): maker_stake_amount/oracle_bond_amount 是 sompi, 显示须 /1e8 转 KAS (Owner 实测 10000000000/100000000 天文数字 = sompi-as-KAS) -->
+      <div class="flex justify-between"><span>主持人本金</span><span x-text="(market?.maker_stake_amount != null ? market.maker_stake_amount / 1e8 : '?') + ' KAS'"></span></div>
+      <div class="flex justify-between"><span>仲裁人押金 (每位)</span><span x-text="(market?.oracle_bond_amount != null ? market.oracle_bond_amount / 1e8 : '?') + ' KAS'"></span></div>
       <div class="flex justify-between"><span>押注人数</span><span x-text="bettorCount"></span></div>
       <div class="flex justify-between"><span>已签人数</span><span x-text="sigsCollected"></span></div>
     </div>
