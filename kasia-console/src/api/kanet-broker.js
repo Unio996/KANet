@@ -93,8 +93,10 @@ export async function registerKanetBrokerRoutes(fastify) {
 
     let realizedPoolSompi = 0n;
     let pendingPoolSompi = 0n;
+    let refundedPoolSompi = 0n; // KANet-UI (Bettor r618): refunded 市场 fee (被退, broker 未赚)
     let realizedPoolN = 0;
     let pendingPoolN = 0;
+    let refundedPoolN = 0;
     const byMarket = [];
 
     for (const r of poolRows) {
@@ -114,7 +116,10 @@ export async function registerKanetBrokerRoutes(fastify) {
       if (isRealized) {
         realizedPoolSompi += feeSompi;
         realizedPoolN += 1;
-      } else if (!isRefunded) {
+      } else if (isRefunded) {
+        refundedPoolSompi += feeSompi;
+        refundedPoolN += 1;
+      } else {
         pendingPoolSompi += feeSompi;
         pendingPoolN += 1;
       }
@@ -129,8 +134,10 @@ export async function registerKanetBrokerRoutes(fastify) {
 
     let realizedRetailKas = 0;
     let pendingRetailKas = 0;
+    let refundedRetailKas = 0;
     let realizedRetailN = 0;
     let pendingRetailN = 0;
+    let refundedRetailN = 0;
 
     for (const r of retailRows) {
       const fee = parseFloat(r.broker_fee_kas || '0') || 0;
@@ -140,7 +147,10 @@ export async function registerKanetBrokerRoutes(fastify) {
       if (isRealized) {
         realizedRetailKas += fee;
         realizedRetailN += 1;
-      } else if (!isRefunded) {
+      } else if (isRefunded) {
+        refundedRetailKas += fee;
+        refundedRetailN += 1;
+      } else {
         pendingRetailKas += fee;
         pendingRetailN += 1;
       }
@@ -155,6 +165,7 @@ export async function registerKanetBrokerRoutes(fastify) {
 
     const realizedPoolKas = Number(realizedPoolSompi) / 1e8;
     const pendingPoolKas = Number(pendingPoolSompi) / 1e8;
+    const refundedPoolKas = Number(refundedPoolSompi) / 1e8;
 
     return reply.send({
       ok: true,
@@ -172,6 +183,13 @@ export async function registerKanetBrokerRoutes(fastify) {
         total_kas: (pendingPoolKas + pendingRetailKas).toFixed(8),
         n_markets: pendingPoolN,
         n_orders: pendingRetailN,
+      },
+      refunded: {
+        pool_kas: refundedPoolKas.toFixed(8),
+        retail_kas: refundedRetailKas.toFixed(8),
+        total_kas: (refundedPoolKas + refundedRetailKas).toFixed(8),
+        n_markets: refundedPoolN,
+        n_orders: refundedRetailN,
       },
       by_market: byMarket,
     });

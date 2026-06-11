@@ -86,24 +86,24 @@
             <div class="grid grid-cols-3 gap-4">
               <div>
                 <div class="rh-stat-label">已结算</div>
-                <div class="rh-stat-value rh-display" x-text="fmtKas(earnings.totals?.realized_kas)"></div>
+                <div class="rh-stat-value rh-display" x-text="fmtKas(earnings.realized?.total_kas)"></div>
                 <div class="text-[10px] text-ink-400 mt-0.5">KAS · 实际到账</div>
               </div>
               <div>
                 <div class="rh-stat-label">未结算 (待 settle)</div>
-                <div class="rh-stat-value rh-display text-amber-700" x-text="fmtKas(earnings.totals?.pending_kas)"></div>
+                <div class="rh-stat-value rh-display text-amber-700" x-text="fmtKas(earnings.pending?.total_kas)"></div>
                 <div class="text-[10px] text-ink-400 mt-0.5">KAS</div>
               </div>
               <div>
                 <div class="rh-stat-label">已退还 (refund)</div>
-                <div class="rh-stat-value rh-display text-ink-400" x-text="fmtKas(earnings.totals?.refunded_kas)"></div>
+                <div class="rh-stat-value rh-display text-ink-400" x-text="fmtKas(earnings.refunded?.total_kas)"></div>
                 <div class="text-[10px] text-ink-400 mt-0.5">KAS</div>
               </div>
             </div>
             <div class="rh-divider"></div>
             <div class="text-[10px] uppercase tracking-wider text-ink-400 mb-2">分域明细</div>
             <div class="space-y-1.5">
-              <template x-for="d in earnings.by_domain || []" :key="d.domain">
+              <template x-for="d in byDomain()" :key="d.domain">
                 <div class="flex items-center justify-between text-xs">
                   <span class="text-ink-600 uppercase" x-text="d.domain"></span>
                   <span class="tabular-nums text-ink-700">
@@ -112,7 +112,7 @@
                   </span>
                 </div>
               </template>
-              <div x-show="!earnings.by_domain || earnings.by_domain.length === 0" class="text-xs text-ink-300">暂无分域数据</div>
+              <div x-show="byDomain().length === 0" class="text-xs text-ink-300">暂无分域数据</div>
             </div>
           </div>
         </template>
@@ -128,15 +128,15 @@
             <div class="grid grid-cols-3 gap-4">
               <div>
                 <div class="rh-stat-label">active 市场</div>
-                <div class="rh-stat-value" x-text="markets.totals?.active ?? 0"></div>
+                <div class="rh-stat-value" x-text="markets.totals?.pool_active ?? 0"></div>
               </div>
               <div>
                 <div class="rh-stat-label">已结算</div>
-                <div class="rh-stat-value" x-text="markets.totals?.settled ?? 0"></div>
+                <div class="rh-stat-value" x-text="markets.totals?.pool_settled ?? 0"></div>
               </div>
               <div>
                 <div class="rh-stat-label">refund/cancel</div>
-                <div class="rh-stat-value text-ink-400" x-text="markets.totals?.refunded ?? 0"></div>
+                <div class="rh-stat-value text-ink-400" x-text="markets.totals?.pool_refunded ?? 0"></div>
               </div>
             </div>
           </div>
@@ -215,6 +215,21 @@ function brokerHome() {
       const x = parseFloat(n);
       if (!Number.isFinite(x)) return '0';
       return x.toFixed(4);
+    },
+
+    // KANet-UI 2026-06-11 (Bettor r618): 分域明细 = 从 earnings.realized/pending 的 per-domain 值构 (pool/retail 2 行).
+    // 端点返 realized.pool_kas/retail_kas + pending.pool_kas/retail_kas (非 by_domain 数组).
+    byDomain() {
+      const e = this.earnings;
+      if (!e) return [];
+      const rows = [];
+      for (const dom of ['pool', 'retail']) {
+        const realized = parseFloat(e.realized?.[dom + '_kas'] || 0);
+        const pending = parseFloat(e.pending?.[dom + '_kas'] || 0);
+        const refunded = parseFloat(e.refunded?.[dom + '_kas'] || 0);
+        if (realized > 0 || pending > 0 || refunded > 0) rows.push({ domain: dom, realized_kas: realized, pending_kas: pending });
+      }
+      return rows;
     },
 
     // KANet-UI 2026-06-11 (Bettor r594/r595): resolution_rule_spec 是 JSON {title, data_source_canonical, ...},
