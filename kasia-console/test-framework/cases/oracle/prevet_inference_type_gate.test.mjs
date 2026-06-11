@@ -6,8 +6,8 @@
 // guard: INFERENCE_RE 必命中推理题型 (margin/spread/by-N/差值), 必【不】命中直接字段题
 //   (winner/price阈值)。任一回归 → 推理题混进 pass / 或好单被误杀。与 pool.js prevet INFERENCE_RE 同步.
 
-// 复刻 pool.js prevet 的 INFERENCE_RE (改动必两处同步)。
-const INFERENCE_RE = /(win|won|beat|lead|cover|lose|trail)\w*\s+by\s+(more than\s+|at least\s+|over\s+|under\s+)?\d|by (more than|at least|over|under)\s+\d+\s*(point|run|goal|score|basket|yard)|\bmargin\b|point[\s-]*spread|\bspread\b|difference between|combined\s+(score|total|points).{0,30}(over|under|>|<|above|below)|how many .*\b(more|fewer|less)\b/i;
+// 复刻 pool.js prevet 的 INFERENCE_RE (改动必两处同步)。NWT r37 broadening 后版本。
+const INFERENCE_RE = /\b(win|won|beat|lead|cover|lose|trail|ahead|up|outscor\w*)\b[^.]{0,25}\bby\b\s+(more than\s+|at least\s+|over\s+|under\s+|greater than\s+)?\d|\bby\s+(more than|at least|over|under|greater than)\s+\d+\s*(point|run|goal|score)|\bmargin\b|\bdifferential\b|point[\s-]*spread|\bspread\b|\bgap\b|\bdifference\b|combined\s+(score|total|points)|(total|score|runs|points|goals)\b[^.]{0,20}\b(exceed|greater than|more than|over|above|below|under)\s*\d|\d+\s*(point|run|goal|score)?s?\s+(more|fewer|less)\s+than|how many .*\b(more|fewer|less)\b/i;
 
 export default {
   id: 'oracle_prevet_inference_type_gate',
@@ -31,6 +31,15 @@ export default {
       'Will the combined total score be over 45 points',
       'how many more goals will Team A score than Team B',
       'Braves beat Pirates by over 2 runs',
+      // NWT r37 同义词改写规避 (broadening 后必抓)
+      'Will Team A be ahead by 4 at the end',
+      'Will the score gap be above 5',
+      'Will total runs exceed 9',
+      'Will Team A outscore Team B by 3',
+      'victory differential over 5',
+      'Will Team A score 4 more than Team B',
+      'Will the score difference be greater than 6',
+      'Will Team A be up by 3 at end',
     ];
     for (const q of inference) {
       if (!INFERENCE_RE.test(lc(q))) failures.push(`推理题漏检 (该 cap warn 却没检到): "${q}"`);

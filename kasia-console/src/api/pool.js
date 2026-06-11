@@ -2489,7 +2489,11 @@ export async function registerPoolRoutes(fastify) {
     // 成立; 若题需 LLM 从字段【推理】(margin "赢>3 分" / spread / 差值) → 推理步是注入/相关错的重入
     // 面。确定性预扫: 检到推理题 → cap 至 warn (不给 pass) + suggestion 改直接字段断言。直接字段题
     // (winner / price 阈值 above/below) 不命中、不误杀。配 NWT 运行时红队 (推理题伪装维度)。
-    const INFERENCE_RE = /(win|won|beat|lead|cover|lose|trail)\w*\s+by\s+(more than\s+|at least\s+|over\s+|under\s+)?\d|by (more than|at least|over|under)\s+\d+\s*(point|run|goal|score|basket|yard)|\bmargin\b|point[\s-]*spread|\bspread\b|difference between|combined\s+(score|total|points).{0,30}(over|under|>|<|above|below)|how many .*\b(more|fewer|less)\b/i;
+    // NWT r37 红队 broadening (Bettor r572): 原 regex 被同义词改写绕过 (ahead by/gap/outscore/
+    // differential/total exceed/N more than/up by). 一次性扩 (非无限 whack-a-mole) 降绕过面。
+    // 诚实 limitation: regex 关键词绑定固有可绕, 这是 best-effort 软预筛; 实 safety net = deriveVote
+    // (prompt 硬化抗注入 r36 13/13 + clean evidence 正确推理 r38 8/8) — 绕过题走 deriveVote 不瞎判.
+    const INFERENCE_RE = /\b(win|won|beat|lead|cover|lose|trail|ahead|up|outscor\w*)\b[^.]{0,25}\bby\b\s+(more than\s+|at least\s+|over\s+|under\s+|greater than\s+)?\d|\bby\s+(more than|at least|over|under|greater than)\s+\d+\s*(point|run|goal|score)|\bmargin\b|\bdifferential\b|point[\s-]*spread|\bspread\b|\bgap\b|\bdifference\b|combined\s+(score|total|points)|(total|score|runs|points|goals)\b[^.]{0,20}\b(exceed|greater than|more than|over|above|below|under)\s*\d|\d+\s*(point|run|goal|score)?s?\s+(more|fewer|less)\s+than|how many .*\b(more|fewer|less)\b/i;
     const inferenceDetected = INFERENCE_RE.test(lower);
     const outcomePattern = /(will win|won|finalized|>=|<=|>|<|\bover\b|\bunder\b|above|below|wins?|loses?|result|outcome|champion|elected|defeated|score|price|close[ds]?|reach|exceed|hits?|threshold|target|by [0-9]|\$[0-9]|percent|%|\d+\s*(usd|kas|eth|btc))/i;
     if (outcomePattern.test(lower)) {
