@@ -268,6 +268,30 @@ export async function registerBrokerRoutes(fastify) {
     return reply.send(getSystemInfo());
   });
 
+  // GET /api/system/config-fingerprint — KANet-UI §10.2 smoke: 跨节点 scale env 一致性检查.
+  // 返 effective 值(parseInt||code-default, Bettor r573: 避 30-vs-null false-positive)+ raw(debug).
+  // diff 脚本 curl 两节点 effective 值比对, 不一致 = 跨节点 config drift(daily-limit/90s 撞 3 次的结构根治).
+  fastify.get('/api/system/config-fingerprint', async (request, reply) => {
+    const effInt = (k, def) => { const v = parseInt(process.env[k], 10); return Number.isNaN(v) ? def : v; };
+    return reply.send({
+      node: ':3200',
+      config: {
+        BROADCAST_CHUNK_TIMEOUT_MS: effInt('BROADCAST_CHUNK_TIMEOUT_MS', 90000),
+        DAILY_SEND_LIMIT: effInt('DAILY_SEND_LIMIT', 200),
+        COLLECTING_SIGS_WATCHDOG_MIN: effInt('COLLECTING_SIGS_WATCHDOG_MIN', 30),
+        POOL_SETTLER_TICK_SEC: effInt('POOL_SETTLER_TICK_SEC', 300),
+        KASPA_NETWORK: process.env.KASPA_NETWORK || 'mainnet',
+      },
+      raw: {
+        BROADCAST_CHUNK_TIMEOUT_MS: process.env.BROADCAST_CHUNK_TIMEOUT_MS || null,
+        DAILY_SEND_LIMIT: process.env.DAILY_SEND_LIMIT || null,
+        COLLECTING_SIGS_WATCHDOG_MIN: process.env.COLLECTING_SIGS_WATCHDOG_MIN || null,
+        POOL_SETTLER_TICK_SEC: process.env.POOL_SETTLER_TICK_SEC || null,
+        KASPA_NETWORK: process.env.KASPA_NETWORK || null,
+      },
+    });
+  });
+
   // GET /api/system/downloads — 可用的下载列表
   fastify.get('/api/system/downloads', async (request, reply) => {
     return reply.send(getAvailableDownloads());
