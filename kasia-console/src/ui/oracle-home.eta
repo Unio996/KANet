@@ -34,8 +34,18 @@
   <!-- HEADER -->
   <div class="mb-6">
     <h1 class="text-2xl ar-display text-ink-800">仲裁人中心</h1>
-    <p class="text-xs text-ink-400 mt-1">看哪些仲裁人在岗 · 哪些题在裁 · 我注册自家 agent 当仲裁人.</p>
+    <p class="text-xs text-ink-400 mt-1">注册 / 管理自家 agent 当仲裁人 (下方 ③ 我的仲裁人). 全网名册 + 在裁题目可展开看.</p>
   </div>
+
+  <!-- S-C 观察 context 折叠 (Bettor r624 Q3): 段1名册+段2裁决 降次要默认折叠, 操作员主流程(段3)不被挤 -->
+  <div class="mb-4">
+    <button @click="showObserve = !showObserve" class="text-xs text-ink-500 hover:text-brand-600 flex items-center gap-1.5">
+      <span x-text="showObserve ? '▾' : '▸'"></span>
+      <span>观察全网: 仲裁人名册 + 进行中裁决</span>
+      <span class="text-ink-400" x-show="!loading">(<span x-text="oracles.length"></span> 仲裁人 · <span x-text="activeMarkets.length"></span> 在裁)</span>
+    </button>
+  </div>
+  <div x-show="showObserve" x-cloak>
 
   <!-- ============================================================ -->
   <!-- 段 1: 仲裁人名册                                                  -->
@@ -166,8 +176,10 @@
     </div>
   </section>
 
+  </div><!-- /观察 context 折叠 (段1+段2) -->
+
   <!-- ============================================================ -->
-  <!-- 段 3: 我注册仲裁人                                                -->
+  <!-- 段 3: 我注册仲裁人 (= 操作员主流程, 不被观察 context 挤)            -->
   <!-- ============================================================ -->
   <section class="mb-4">
     <div class="ar-section-title">
@@ -294,6 +306,8 @@ function arbiterHome() {
     // S-C 2026-06-11 (Bettor r633): oracle enroll 搬 /agent → /oracle 段3 (操作员一站注册).
     oracleEnrollDaa: null, oracleCurrentDaa: null,
     oracleEnrolling: false, oracleEnrollError: '', oracleEnrollResult: null,
+    // S-C 观察 context 折叠 (Bettor r624 Q3): 段1名册+段2裁决 默认折叠, 操作员主流程(段3)不被挤.
+    showObserve: false,
 
     get selectedAgent() {
       return this.myAgents.find(a => a.id === this.selectedAgentId) || null;
