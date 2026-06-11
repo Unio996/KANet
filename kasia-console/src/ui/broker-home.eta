@@ -175,7 +175,7 @@
               <template x-for="m in (markets.pool_markets || []).slice(0, 10)" :key="m.id">
                 <div class="flex items-center justify-between text-xs py-1.5 border-b border-warm-100 last:border-0">
                   <div class="flex-1 min-w-0">
-                    <div class="text-ink-700 truncate" :title="m.resolution_rule_spec || m.id" x-text="(m.resolution_rule_spec || m.id).slice(0, 64)"></div>
+                    <div class="text-ink-700 truncate" :title="specTitle(m.resolution_rule_spec) || m.id" x-text="(specTitle(m.resolution_rule_spec) || m.id).slice(0, 64)"></div>
                     <div class="text-[10px] text-ink-400 mt-0.5">
                       <span class="uppercase">POOL</span> · <span x-text="m.protocol_status"></span> · stake <span x-text="m.maker_stake_kas ?? '?'"></span> KAS · fee <span x-text="((m.broker_fee_pct ?? 0)/100).toFixed(2)"></span>%
                     </div>
@@ -215,6 +215,21 @@ function brokerHome() {
       const x = parseFloat(n);
       if (!Number.isFinite(x)) return '0';
       return x.toFixed(4);
+    },
+
+    // KANet-UI 2026-06-11 (Bettor r594/r595): resolution_rule_spec 是 JSON {title, data_source_canonical, ...},
+    // 列表显干净 title 非 raw JSON。复刻 tg-bot/prediction-menu.mjs:87-98 specTitle (Alpine 客户端无法 import
+    // server-side, 两份拷贝 — 逻辑改要同步两处)。fallback strip http(s):// URL 防 data_source_canonical 内部 URL 泄漏。
+    specTitle(spec) {
+      if (!spec) return '';
+      const s = String(spec).trim();
+      if (s.startsWith('{')) {
+        try {
+          const obj = JSON.parse(s);
+          if (typeof obj.title === 'string' && obj.title.trim()) return obj.title.trim();
+        } catch (e) {}
+      }
+      return s.replace(/https?:\/\/\S+/g, '').trim();
     },
     shortAddr(a) {
       if (!a) return '';
