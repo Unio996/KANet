@@ -2485,6 +2485,12 @@ export async function registerPoolRoutes(fastify) {
     // 正则精炼: 不匹配体育 "final score 10-2" (要求 X/10 或 score[:=]digit 等评分上下文), 防误杀好单.
     const INJECTION_RE = /ignore\s+(all\s+|previous\s+|above\s+)?instruction|you\s+must\s+score|give\s+(it\s+)?(full|max|maximum)\s+(marks|score)|\d{1,2}\s*\/\s*10\b|score\s*[:=]\s*\d|tier\s*[:=]\s*(pass|critical|warn)|disregard\s+(the\s+)?(spec|missing|source|rule|evaluation)|\bevaluator\s*[:：]|\bassistant\s*[:：]|<<<|\[\[|<\/?(prompt|system|instruction)|new\s+instruction|scoring_override|always\s+(pass|approve)|must\s+(pass|approve)/i;
     const injectionDetected = INJECTION_RE.test(lower);
+    // J2-tn 门C 档1 题型 gate (NWT r22 #2 / r35 推理题维度): 结构化源防御只在【直接字段比较可答】时
+    // 成立; 若题需 LLM 从字段【推理】(margin "赢>3 分" / spread / 差值) → 推理步是注入/相关错的重入
+    // 面。确定性预扫: 检到推理题 → cap 至 warn (不给 pass) + suggestion 改直接字段断言。直接字段题
+    // (winner / price 阈值 above/below) 不命中、不误杀。配 NWT 运行时红队 (推理题伪装维度)。
+    const INFERENCE_RE = /(win|won|beat|lead|cover|lose|trail)\w*\s+by\s+(more than\s+|at least\s+|over\s+|under\s+)?\d|by (more than|at least|over|under)\s+\d+\s*(point|run|goal|score|basket|yard)|\bmargin\b|point[\s-]*spread|\bspread\b|difference between|combined\s+(score|total|points).{0,30}(over|under|>|<|above|below)|how many .*\b(more|fewer|less)\b/i;
+    const inferenceDetected = INFERENCE_RE.test(lower);
     const outcomePattern = /(will win|won|finalized|>=|<=|>|<|\bover\b|\bunder\b|above|below|wins?|loses?|result|outcome|champion|elected|defeated|score|price|close[ds]?|reach|exceed|hits?|threshold|target|by [0-9]|\$[0-9]|percent|%|\d+\s*(usd|kas|eth|btc))/i;
     if (outcomePattern.test(lower)) {
       score += 3;
@@ -2575,6 +2581,14 @@ export async function registerPoolRoutes(fastify) {
       score = Math.min(score, 2);
       why.unshift('检测到 prompt-injection / 评分操纵模式 (e.g. "score 10" / "ignore instructions" / "tier=pass" / "evaluator:") — 标记不可信单, 强制 critical');
       suggestions.unshift('移除 spec/题目中任何指示评估器评分或越权的文本; 合法市场只描述结果判定规则');
+    }
+    // J2-tn 门C 档1 题型 gate: 推理题 (需从字段计算 margin/spread/差值, 非直接字段比较) → cap 至 warn
+    // (score<=6, 不 pass). 非 critical (不是恶意, 是结构不可直判 = 推理步注入/相关错重入面). injection
+    // 已 critical 时不叠加 (injection 优先级高). suggestion 改成直接字段断言 = 可结构化直判防推理步攻击.
+    if (inferenceDetected && !injectionDetected) {
+      score = Math.min(score, 6);
+      why.unshift('题型=推理题 (需 LLM 从字段计算 margin/spread/差值, 非直接字段比较) — 推理步是注入/相关错重入面, prevet 不给 pass');
+      suggestions.unshift('改成直接字段断言 (e.g. "X 队赢" / "价格 > Y" 而非 "X 赢超 N 分" / "X cover the spread") = 可结构化直判, 防推理步攻击');
     }
     score = Math.max(0, Math.min(10, score));
     let tier;
