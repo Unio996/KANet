@@ -29,10 +29,29 @@
     </div>
   </div>
 
-  <!-- EMPTY (no broker agents) -->
-  <div x-show="!loading && agents.length === 0" class="rh-block text-center py-10">
-    <div class="text-sm text-ink-500 mb-2">还没有 broker 角色的 agent.</div>
-    <a href="/agent" class="text-xs text-brand-500 hover:text-brand-700">→ 去 /agent 把某个 relay 改成 broker 角色</a>
+  <!-- S-A: 注册 gateway (Bettor r627) — 始终显 (无 broker 时唯一内容; 有 broker 时'注册更多') -->
+  <div x-show="!loading" class="rh-block mb-5">
+    <div class="rh-block-title"><span class="rh-block-dot bg-brand-500"></span><span x-text="agents.length === 0 ? '注册成为 Gateway' : '注册更多 Gateway'"></span></div>
+    <p class="text-xs text-ink-500 mb-3">把一个 relay 注册成 gateway(撮合者): 它可被 user-facing 市场设为 broker, 按 fee% 收取撮合费。gateway 不碰用户资金, 只收费。</p>
+    <div x-show="registerableRelays().length === 0" class="text-xs text-ink-400">暂无可注册的 relay (已是 broker/oracle 的不能注册; broker/oracle 互斥)。</div>
+    <div x-show="registerableRelays().length > 0" class="flex flex-wrap items-end gap-3">
+      <div>
+        <label class="rh-stat-label block mb-1">选 relay</label>
+        <select x-model="registerRelayId" class="px-3 py-2 border border-warm-300 rounded-lg text-sm bg-white min-w-[180px]">
+          <option value="">— 选一个 relay —</option>
+          <template x-for="rl in registerableRelays()" :key="rl.id">
+            <option :value="rl.id" x-text="rl.name + ' (' + (rl.role || 'general') + ')'"></option>
+          </template>
+        </select>
+      </div>
+      <button @click="registerGateway()" :disabled="registering || !registerRelayId"
+        class="px-4 py-2 rounded-lg bg-brand-500 hover:bg-brand-600 disabled:opacity-50 text-white text-sm font-medium">
+        <span x-show="!registering">注册成 Gateway</span><span x-show="registering">注册中…</span>
+      </button>
+    </div>
+    <div x-show="registerError" class="text-xs text-red-500 mt-2" x-text="registerError"></div>
+    <div x-show="registerMsg" class="text-xs text-emerald-600 mt-2" x-text="registerMsg"></div>
+    <p class="text-[10px] text-ink-400 mt-2">注: gateway 收款地址 = relay 自带地址(须 P2PK)。oracle relay 不能注册成 gateway(角色互斥)。fee% 在创建市场时按笔设。</p>
   </div>
 
   <!-- MAIN -->
@@ -74,6 +93,15 @@
             <div class="rh-stat-label">收款地址</div>
             <div class="font-mono text-xs text-ink-600 break-all mt-1" x-text="agent?.address"></div>
           </div>
+        </div>
+        <!-- S-A: 注销 gateway 角色 (Bettor r627) -->
+        <div class="mt-4 pt-3 border-t border-warm-100 flex items-center gap-3">
+          <button @click="revokeGateway(agent.id)" :disabled="revoking"
+            class="px-3 py-1.5 rounded border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-50 text-xs font-medium">
+            <span x-show="!revoking">注销 gateway 角色</span><span x-show="revoking">注销中…</span>
+          </button>
+          <span class="text-[10px] text-ink-400">撤销后不再是 broker、不再收 fee</span>
+          <span x-show="revokeError" class="text-xs text-red-500" x-text="revokeError"></span>
         </div>
       </div>
 
@@ -210,6 +238,10 @@ function brokerHome() {
     get agent() { return this.agents[this.selectedIdx] || null; },
     earnings: null, earningsLoading: false, earningsError: '',
     markets: null, marketsLoading: false, marketsError: '',
+    // S-A gateway 注册/注销 (Bettor r627): 全 relay 列表 + 注册/注销 state
+    allRelays: [],
+    registerRelayId: '', registerFeePct: 2, registering: false, registerError: '', registerMsg: '',
+    revoking: false, revokeError: '',
 
     fmtKas(n) {
       const x = parseFloat(n);
@@ -255,13 +287,59 @@ function brokerHome() {
       navigator.clipboard.writeText(this.agent.address).catch(() => {});
     },
 
+    // S-A gateway 注册/注销 (Bettor r627): 复用 /api/relay/:id/role (S1 守门), 零新端点.
+    // 可注册 relay = 非 broker + 非 oracle (互斥 UI 前置; 后端 S1 硬拦兜底, 非 P2PK 也由 S1 拒+优雅回显).
+    registerableRelays() {
+      return this.allRelays.filter(r => !(r.role === 'broker' || r.is_dex_broker) && !r.is_oracle);
+    },
+    async registerGateway() {
+      if (!this.registerRelayId) { this.registerError = '请先选一个 relay'; return; }
+      this.registering = true; this.registerError = ''; this.registerMsg = '';
+      try {
+        const r = await fetch(`/api/relay/${encodeURIComponent(this.registerRelayId)}/role`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ role: 'broker' }),
+        });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          this.registerError = j.message || j.error || ('注册失败 (HTTP ' + r.status + ')'); // S1: role_conflict / address_not_p2pk 优雅回显
+        } else {
+          this.registerMsg = '注册成功! 该 relay 现在是 gateway, user-facing 市场可设它收 broker fee.';
+          this.registerRelayId = '';
+          await this.init();
+        }
+      } catch (e) {
+        this.registerError = '注册请求失败: ' + (e?.message || e);
+      } finally {
+        this.registering = false;
+      }
+    },
+    async revokeGateway(relayId) {
+      if (!confirm('确认注销这个 gateway 角色? 撤销后该 relay 不再是 broker、不再收 broker fee.')) return;
+      this.revoking = true; this.revokeError = '';
+      try {
+        const r = await fetch(`/api/relay/${encodeURIComponent(relayId)}/role`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ role: 'general' }),
+        });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) { this.revokeError = j.message || j.error || ('注销失败 (HTTP ' + r.status + ')'); }
+        else { await this.init(); }
+      } catch (e) {
+        this.revokeError = '注销请求失败: ' + (e?.message || e);
+      } finally {
+        this.revoking = false;
+      }
+    },
+
     async init() {
       try {
         // /api/agent/profile returns array of relays with role / is_dex_broker / adapter info
         // (R-1 audit fix: /api/relays was 404 silent, agent selector 跑空 — Owner UI audit 2026-05-30).
         const r = await fetch('/api/agent/profile');
         const j = await r.json();
-        this.agents = (Array.isArray(j) ? j : [])
+        this.allRelays = Array.isArray(j) ? j : []; // S-A: 全 relay 给注册选
+        this.agents = this.allRelays
           .filter(x => x.role === 'broker' || x.is_dex_broker)
           .map(x => ({ ...x, kasBalance: null }));
         if (this.agents.length > 0) await this.loadData();
