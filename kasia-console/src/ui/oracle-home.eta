@@ -240,11 +240,27 @@
                 </div>
               </div>
 
-              <!-- 未注册: 注册按钮 -->
-              <div x-show="!myOracleRecord">
-                <p class="text-xs text-ink-500 mb-2">该 agent 尚未注册为仲裁人. 注册流程包含 stake 锁仓 + 链上声明.</p>
-                <a href="/agent?tab=oracle" class="inline-block px-3 py-1.5 rounded bg-brand-500 hover:bg-brand-600 text-white text-xs font-medium">去 /agent 注册仲裁人 →</a>
-                <p class="ar-empty-note mt-2">注册成功后此处显 5 维度状态 + 工作记录.</p>
+              <!-- 未注册: S-C enroll 表单 (Bettor r633, 港自 /agent, 操作员一站注册不跳) -->
+              <div x-show="!myOracleRecord" x-init="loadOracleCurrentDaa()">
+                <p class="text-xs text-ink-500 mb-2">该 agent 尚未注册为仲裁人. 注册 = 押 KAS 到链上锁仓 → 成为预言机池一员 → 抽中后给市场投票, 投对得报酬, 偏离共识扣 stake.</p>
+                <!-- enroll 输入 -->
+                <div x-show="!oracleEnrollResult" class="space-y-2 bg-warm-50 rounded p-3">
+                  <label class="block text-xs text-ink-600">锁到 DAA 块号 (lock_until_daa)</label>
+                  <input type="number" x-model.number="oracleEnrollDaa" class="w-full text-sm px-2 py-1.5 rounded border border-warm-300 bg-white" placeholder="e.g. 当前 DAA + 60">
+                  <p class="text-[11px] text-ink-400">锁仓到该 DAA 块号才能取回 stake (退池冷却期, 防 flash 撤池影响投票公正). 当前 DAA: <span x-text="oracleCurrentDaa ?? '...'"></span></p>
+                  <button @click="submitOracleEnroll()" :disabled="oracleEnrolling || !oracleEnrollDaa"
+                          class="px-3 py-1.5 rounded bg-brand-500 hover:bg-brand-600 text-white text-xs font-medium disabled:opacity-50">
+                    <span x-text="oracleEnrolling ? '注册中...' : '注册成仲裁人'"></span>
+                  </button>
+                  <div x-show="oracleEnrollError" class="text-[11px] text-red-600 bg-red-50 rounded px-2 py-1" x-text="oracleEnrollError"></div>
+                </div>
+                <!-- enroll 成功: P2SH 锁仓地址引导 -->
+                <div x-show="oracleEnrollResult" class="space-y-1.5 bg-emerald-50 rounded p-3 text-xs">
+                  <p class="font-semibold text-emerald-700">✓ 注册成功 — 下一步: 用自家钱包转 stake</p>
+                  <div class="text-ink-600">P2SH 锁仓地址 (= stake 转这里):</div>
+                  <div class="font-mono break-all text-ink-700" x-text="oracleEnrollResult?.p2sh_addr"></div>
+                  <p class="text-ink-500">建议 stake ≥ 1 KAS (越多权重越大, VRF 抽中概率高). 转账后等 scanner verify, snapshot 之后池中含此仲裁人.</p>
+                </div>
               </div>
             </div>
           </template>
@@ -275,6 +291,9 @@ function arbiterHome() {
     chainSnapshot: null,    // { leaves: [{pk_x, stake_sompi, ...}] }
     // KANet-UI 2026-06-08 DoD 问 3 (Bettor r373 关 1 PASS, J1 r303 派 (3)): 退出仲裁人 state
     unlock: { checking: false, submitting: false, error: '', result: null },
+    // S-C 2026-06-11 (Bettor r633): oracle enroll 搬 /agent → /oracle 段3 (操作员一站注册).
+    oracleEnrollDaa: null, oracleCurrentDaa: null,
+    oracleEnrolling: false, oracleEnrollError: '', oracleEnrollResult: null,
 
     get selectedAgent() {
       return this.myAgents.find(a => a.id === this.selectedAgentId) || null;
@@ -424,6 +443,47 @@ function arbiterHome() {
     onAgentChange() {
       // selectedAgent + myOracleRecord 是 getter, 切换自动 render
       this.unlock = { checking: false, submitting: false, error: '', result: null };  // 切换 agent 清状态
+      this.oracleEnrollError = ''; this.oracleEnrollResult = null;  // S-C: 切换 agent 清 enroll 状态
+    },
+
+    // S-C 2026-06-11 (Bettor r633): oracle enroll 港自 agent-v2.eta L1525-1551 → /oracle 段3.
+    // 复用 POST /api/oracle-pool/enroll (链上单源不双写 is_oracle) + 【保留 signing_relay_id=agent.id】
+    // (J1 #154: 触发 envelope 跨节点广播 → enrollments 表收敛 → poolMerkleRoot 一致)。
+    async loadOracleCurrentDaa() {
+      try {
+        const r = await fetch('/api/oracle-pool/chain-snapshot').then(x => x.json());
+        if (r.ok && r.snapshotDaa) {
+          this.oracleCurrentDaa = r.snapshotDaa;
+          if (!this.oracleEnrollDaa) this.oracleEnrollDaa = r.snapshotDaa + 60;  // 默认 +60 块短期
+        }
+      } catch (e) {}
+    },
+    async submitOracleEnroll() {
+      if (!this.selectedAgent || !this.oracleEnrollDaa) return;
+      this.oracleEnrolling = true; this.oracleEnrollError = ''; this.oracleEnrollResult = null;
+      try {
+        const pkResp = await fetch('/api/relay/' + this.selectedAgent.id + '/pubkey').then(r => r.json());
+        if (!pkResp.ok || !pkResp.x_only_pubkey) {
+          this.oracleEnrollError = '取 agent 公钥失败: ' + (pkResp.error || '未知错误');
+          this.oracleEnrolling = false; return;
+        }
+        const body = {
+          staker_pk_x: pkResp.x_only_pubkey,
+          lock_until_daa: Number(this.oracleEnrollDaa),
+          signing_relay_id: this.selectedAgent.id,  // J1 #154: 跨节点 envelope 广播, 勿丢
+        };
+        const enrollResp = await fetch('/api/oracle-pool/enroll', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+        }).then(r => r.json());
+        if (!enrollResp.ok) {
+          this.oracleEnrollError = '注册失败: ' + (enrollResp.error || '未知错误');
+        } else {
+          this.oracleEnrollResult = { staker_pk_x: enrollResp.staker_pk_x, p2sh_addr: enrollResp.p2sh_addr, lock_until_daa: enrollResp.lock_until_daa };
+        }
+      } catch (e) {
+        this.oracleEnrollError = '请求异常: ' + (e?.message || String(e));
+      }
+      this.oracleEnrolling = false;
     },
 
     // KANet-UI 2026-06-08 DoD 问 3: 退出仲裁人 (J1 r303 endpoint POST /api/oracle-pool/timeout-unlock)
