@@ -121,6 +121,10 @@ export async function tick() {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       maker_relay_id: maker,
+      // S2 broker-fee wiring (Bettor r615 per-path): user-facing 市场设 gateway 为 broker (不塌 maker).
+      // gateway relay env-可配 (默认 broker-1 15593e10, P2PK 过 create-v07 chokepoint, is_oracle=0 过互斥).
+      broker_relay_id: process.env.GATEWAY_RELAY_ID || '15593e10-fe63-4806-a7b5-cae062699de8',
+      broker_fee_pct: parseInt(process.env.GATEWAY_FEE_PCT, 10) || 200, // 2% (bp) of losing pool
       outcome_side: 'YES',
       outcome_end_date: gm.endDateIso,
       resolution_rule_spec: gm.resolutionRule,

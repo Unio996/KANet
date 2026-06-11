@@ -855,6 +855,10 @@ function createPoolPage() {
         const structuredSpec = JSON.stringify(specObj);
         const body = {
           maker_relay_id: this.selectedRelayId,
+          // S2 broker-fee wiring (Bettor r615 per-path, 改 r449 塌-maker): user-facing 市场默认 broker=gateway.
+          // 默认 broker-1 (15593e10, P2PK 过 chokepoint, is_oracle=0 过互斥), operator 可改 form.broker_relay_id override.
+          broker_relay_id: this.form.broker_relay_id || '15593e10-fe63-4806-a7b5-cae062699de8',
+          broker_fee_pct: Math.round((this.form.broker_fee_pct ?? 2) * 100), // form % → basis points (2% → 200)
           outcome_side: this.form.outcome_side,
           outcome_end_date: outcomeEndIso,
           resolution_rule_spec: structuredSpec,
