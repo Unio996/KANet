@@ -2505,4 +2505,42 @@ qlfpv 实测 5 层 brick:
 
 ---
 
+## 规则 46 · 下强结论前必验对对象 — ground-truth > grep > 转述, 调查未完别 codify
+
+**触发时机** (Bettor r780): 任何要下【这是 bug / severity 是 X / 把结论 codify 成框架·北极星 / 删·停·改 determinism 这类强结论或不可逆动作】之前。越是"我很确定" + 别人正拿模糊证据反驳, 越要先验。
+
+### Wrong
+凭 grep 命中 / 别人转述 / 未验前提 / **查错对象**, 就下强结论 (这是 bug / severity 是 X / codify 成框架 / 删这行数据)。尤其在【别人拿模糊证据反驳你的强发现】时立刻过度认错 —— 社会压力下丢掉正确结论。
+
+### Right
+1. **验对对象**: 用对 identifier (relay_id 非 name)、对 binary (实跑的那个非同名另一个)、对表 (settle 事件可能在 exchange_offers 非 pool_markets)。查错对象 = 结论必错。
+2. **ground-truth > grep > 转述**: grep 命中字符串 ≠ feature 激活 (config code-path 可关); 转述 ≠ 实测。下强结论前去读实码 / curl live / 查实 DB / 实链跑。
+3. **VERIFIED 与 OPEN 严格分开**: 报告显式标"这些验过 / 这些我不下结论"。前提没验透用开放措辞 (倾向于 / 待验), 禁"唯一解释 / 铁证 / 必然"封闭词 —— 封闭词会社会性压制别人正确的异见。
+4. **调查未完别 codify**: 框架 / 北极星 / severity 定论必须在调查闭环后下。把未验结论焊成框架, 别人会在错前提上叠加。
+5. **destructive 前先验**: 删 / 停 / 改 determinism 前必验"无下游消费 / 不破坏 / 跨节点一致"。条件没满足 = 不动, 报回重裁。
+6. **遇模糊反证别社会性退让**: 有强发现 (实测 / 读码) 时别人拿模糊证据反驳, 先问"那反证到底证明了啥、我前提验了吗", 再决定改不改。
+
+### Why
+2026-06-12 一天内全队命中【4+ 次】同病 = 系统性非单点:
+- Bettor r740: 裁"清 2 行 cruft" — 实那 2 行在 exchange_offers 有 market + voter L195 消费 (J1 条件② 查出), 删=db-hack。正解=修测试断言跨两表, 非删数据。
+- 全队 (NWT 挖矿): "配错工具 / binary 无 feature" — grep InternalMiner=0 武断; 实 feature 在 config/env, NWT ground-truth = 用错 binary (官方 InternalMiner=0 vs 自build InternalMiner=4)。
+- Bettor r773: 裁"收益没修好 total_reward=0" — 查错对象 (tester 没投票=真 0), 实赚的 maker-3 端点正确读出 9.83。
+- J2 Q2 + Bettor r776 (getBlockAtDaa): J2 grep 看 rpc-listener L228 有 throw 就断 "cap=availability 非 correctness", 没 trace 那 throw 被 L227 `if(!lastEligible)` gate 住 — past-deadline-超窗口时 lastEligible 非空 → 不 throw → 返错 endBlock = correctness。Bettor 又把 J2 这未验 Q2 codify 成 "availability 北极星框架" (在错前提上叠加)。J1 #238 读码 push back → Bettor+J2 各独立读自己 :3200/:3300 证实 → 撤回。
+- J1 #230: NWT 挖矿 reconcile 把"06/07 log = 同 binary"未验前提当真, 自信封闭措辞 ("唯一解释") 成社会压力, 推翻 Bettor 正确的 r759。
+
+每次都"没验对 / 验透就下强结论"。团队对抗验证 (互相 ground-truth 复核 + 诚实认错改裁) 兜住了全部 = 无单点英雄, 但靠人肉兜不可持续 → 制度化。
+
+**前科**: 一天 4+ 次, 全员 (Bettor 4 + J1 1)。Bettor r778 "verify-before-conclude 嘴上记了手上没守住, 该深治" 钦定落 doc。
+
+**Lint 守**: 本条是【流程/判断纪律】非机械 code pattern, lint-kanet 无法 grep "下结论前验没验" (不同于规则 1-45 多查 code-smell)。机械化只能覆盖【特定 destructive 子集】(e.g. 删 chain_events / force-resolve 前必有"无下游消费"验证步 = review checklist gate), 非 static lint。主守靠【报告 VERIFIED/OPEN 分栏 + 强结论标置信度 + destructive 前置条件验证】的 review 文化。
+
+**Enforce 附录 (Bettor r780 · destructive 子集机械化)**: 删 / 停 / 改 chain_events·DB 行·determinism 这类不可逆动作前, 走 review checklist 三勾 (比假 lint 实):
+- ☐ 查过【无下游消费】(grep 读方 + 别表引用)
+- ☐【非我建的先问】(我创建的才轻量改, 别人的 / 来历不明的先报回)
+- ☐【跨节点一致】(动 determinism 函数必两节点字节对拍)
+
+三勾缺一 = 不动, 报回重裁。J1 条件②(删 cruft 前查出 exchange_offers 有 market + voter L195 消费 → 没删 → 改测试断言) 就是这 checklist 救场的实例。
+
+---
+
 *本档案在 v2 spec 第八章元教训基础上独立。spec 聚焦"这次怎么做"，本档案聚焦"下次别再犯"。*
