@@ -27,13 +27,21 @@ export default {
     },
     {
       // chain_events ingest integrity: every settle_consensual_dispatched event references a real
-      // pool_markets row (= no orphan events from a half-ingested outage scenario).
+      // market row (= no orphan events from a half-ingested outage scenario).
+      // [J1 #59c update 2026-06-12, Bettor r743] settle event 的 market 合法跨两表: pool_markets
+      // (ext-pool-v07 committee pool 代) + exchange_offers (ext-pred-* 老 exchange 预测代, voter
+      // L195 consensual-skip 消费 + audit-prediction 读). 原断言只查 pool_markets → 误判 2 个合法
+      // ext-pred exchange settle 为孤儿. 补全为【两表皆无才算真孤儿】(NOT 弱化: 真孤儿仍抓).
       action: 'query_db',
       sql: `SELECT e.id FROM chain_events e
             WHERE e.event_type = 'pool_settle_consensual_dispatched'
               AND NOT EXISTS (
                 SELECT 1 FROM pool_markets m
                 WHERE e.payload LIKE '%' || m.id || '%'
+              )
+              AND NOT EXISTS (
+                SELECT 1 FROM exchange_offers o
+                WHERE e.payload LIKE '%' || o.id || '%'
               )`,
       expect: { must: { db_row_count: 0 } },
     },
