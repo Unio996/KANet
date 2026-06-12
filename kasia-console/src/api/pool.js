@@ -1665,6 +1665,8 @@ export async function registerPoolRoutes(fastify) {
     if (q.category) { where.push('pool_markets.category = ?'); params.push(String(q.category)); }
     /* KANet-UI 2026-06-07 r316 (Bettor 正解, my-markets r603 fetch-all-519 绕路退): API 诚实读 maker_relay_id */
     if (q.maker_relay_id) { where.push('pool_markets.maker_relay_id = ?'); params.push(String(q.maker_relay_id)); }
+    /* J2-tn r741 broker Phase1: broker_relay_id filter (= broker DM agent markets-tool 列本 broker 经手市场 + recommended 通电复用). additive, 不传则全量同旧行为. */
+    if (q.broker_relay_id) { where.push('pool_markets.broker_relay_id = ?'); params.push(String(q.broker_relay_id)); }
     if (q.q) {
       where.push('LOWER(pool_markets.resolution_rule_spec) LIKE LOWER(?)');
       params.push(`%${String(q.q).replace(/[%_]/g, ch => '\\' + ch)}%`);
@@ -1682,7 +1684,7 @@ export async function registerPoolRoutes(fastify) {
              pool_markets.category, pool_markets.protocol_status, pool_markets.protocol_version,
              pool_markets.deadline, pool_markets.maker_stake_amount, pool_markets.oracle_bond_amount,
              pool_markets.outcome_market_source, pool_markets.outcome_condition_id, pool_markets.created_at,
-             pool_markets.maker_relay_id,                       /* KANet-UI 2026-06-07 r308 maker 名显 */
+             pool_markets.maker_relay_id, pool_markets.broker_relay_id, pool_markets.oracle_relay_ids,  /* KANet-UI r308 maker 名显 + J2-tn r741 broker filter/markets-tool */
              rn_maker.name AS maker_name,                       /* LEFT JOIN: 跨节点 maker 不在本表 → NULL, 前端兜底 */
              (SELECT COUNT(*) FROM pool_bettor_sides s WHERE s.market_id = pool_markets.id) AS bettor_count,
              (SELECT COALESCE(SUM(stake_amount),0) FROM pool_bettor_sides s WHERE s.market_id = pool_markets.id AND s.direction = 0) AS yes_bettor_stake_sompi,
