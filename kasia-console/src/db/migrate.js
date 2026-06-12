@@ -4983,5 +4983,18 @@ export function runMigrations() {
     }
   }
 
+  // v168: relay_nodes.default_broker_fee_pct (KANet-UI Lane③ r654, J2 r654 绿灯) — gateway operator
+  // 在 /broker 设默认 broker fee% (bps); seeder/UI 建市时读 (替硬编码 200). DEFAULT 200 保 S2 现行为.
+  // ⚠ J2 caveat 标死: 只影响【新建市场】建市时读; 禁 retro-apply 到现有市场 per-market broker_fee_pct
+  // (改已建市场 fee = 破 settle 跨节点 determinism, fee 进 SS ctor/签名载荷).
+  {
+    try {
+      sqlite.exec(`ALTER TABLE relay_nodes ADD COLUMN default_broker_fee_pct INTEGER DEFAULT 200`);
+      console.log('[migrate] v168: relay_nodes.default_broker_fee_pct (gateway 默认 fee, 只新建市场读).');
+    } catch (e) {
+      if (!/duplicate column/i.test(e.message)) console.warn(`[migrate] v168 default_broker_fee_pct fail: ${e.message}`);
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }

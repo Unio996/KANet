@@ -124,7 +124,9 @@ export async function tick() {
       // S2 broker-fee wiring (Bettor r615 per-path): user-facing 市场设 gateway 为 broker (不塌 maker).
       // gateway relay env-可配 (默认 broker-1 15593e10, P2PK 过 create-v07 chokepoint, is_oracle=0 过互斥).
       broker_relay_id: process.env.GATEWAY_RELAY_ID || '15593e10-fe63-4806-a7b5-cae062699de8',
-      broker_fee_pct: parseInt(process.env.GATEWAY_FEE_PCT, 10) || 200, // 2% (bp) of losing pool
+      // Lane③ r654: 省略 broker_fee_pct → create-v07 读 gateway default_broker_fee_pct (gateway /broker 自设 fee 生效).
+      // env GATEWAY_FEE_PCT 显式覆盖; 否则 undefined → JSON.stringify 省略 → 走 gateway 默认.
+      broker_fee_pct: process.env.GATEWAY_FEE_PCT ? parseInt(process.env.GATEWAY_FEE_PCT, 10) : undefined,
       outcome_side: 'YES',
       outcome_end_date: gm.endDateIso,
       resolution_rule_spec: gm.resolutionRule,

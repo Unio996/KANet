@@ -293,6 +293,24 @@ export async function registerRelayRoutes(fastify) {
     });
   });
 
+  // POST /api/relay/:id/broker-fee — gateway operator 设默认 broker fee% (KANet-UI Lane③ r654, J2 绿灯).
+  // seeder/UI 建市时读此默认 (替硬编码 200). ⚠ 只影响【新建市场】; 禁 retro-apply 已建市场 (J2 caveat:
+  // 改已建市场 fee = 破 settle 跨节点 determinism). display/config 层, 不碰签名载荷.
+  fastify.post('/api/relay/:id/broker-fee', async (request, reply) => {
+    const { fee_pct } = request.body || {};
+    const bps = parseInt(fee_pct, 10);
+    if (!Number.isFinite(bps) || bps < 0 || bps > 9999) {
+      return reply.code(400).send({ error: 'invalid_fee', message: 'fee_pct 必 0-9999 basis points (0-99.99%)' });
+    }
+    const relay = sqlite.prepare(`SELECT id, role, is_dex_broker FROM relay_nodes WHERE id = ?`).get(request.params.id);
+    if (!relay) return reply.code(404).send({ error: 'relay_not_found' });
+    if (!(relay.role === 'broker' || relay.is_dex_broker)) {
+      return reply.code(400).send({ error: 'not_gateway', message: '只有 gateway (broker) relay 能设默认 fee — 先注册成 gateway.' });
+    }
+    sqlite.prepare(`UPDATE relay_nodes SET default_broker_fee_pct = ?, updated_at = ? WHERE id = ?`).run(bps, new Date().toISOString(), request.params.id);
+    return reply.send({ ok: true, default_broker_fee_pct: bps });
+  });
+
   // Balance query — auto-selects best available RPC node
   // GET /api/relay/:id/active-peers — addresses this agent has a live handshake with
   // Used by Explore page to disable "send handshake" button for already-connected peers.

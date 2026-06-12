@@ -176,11 +176,17 @@
         <div class="rh-block-title"><span class="rh-block-dot bg-purple-500"></span>配置</div>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
           <div>
-            <div class="rh-stat-label">默认 broker fee% (per-market, 创建时设)</div>
-            <div class="text-ink-600 mt-1">
-              单笔由 maker 创建市场时定 (单位 basis points / 100 = %).
-              典型: 100 bps = 1%.
+            <div class="rh-stat-label">默认 broker fee% (新建市场用)</div>
+            <div class="flex items-center gap-2 mt-1">
+              <input type="number" x-model.number="feeInput" min="0" max="99.99" step="0.5" class="w-20 px-2 py-1 border border-warm-300 rounded text-sm">
+              <span class="text-ink-500">%</span>
+              <button @click="saveFee()" :disabled="feeSaving" class="px-2 py-1 rounded bg-brand-500 hover:bg-brand-600 disabled:opacity-50 text-white text-[11px] font-medium">
+                <span x-text="feeSaving ? '存…' : '保存'"></span>
+              </button>
             </div>
+            <div class="text-[10px] text-ink-400 mt-1">seeder/UI 新建市场读此默认 (替硬编码). 已建市场 fee 不变.</div>
+            <div x-show="feeMsg" class="text-[10px] text-emerald-600 mt-0.5" x-text="feeMsg"></div>
+            <div x-show="feeError" class="text-[10px] text-red-500 mt-0.5" x-text="feeError"></div>
           </div>
           <div>
             <div class="rh-stat-label">收款地址</div>
@@ -242,6 +248,8 @@ function brokerHome() {
     allRelays: [],
     registerRelayId: '', registerFeePct: 2, registering: false, registerError: '', registerMsg: '',
     revoking: false, revokeError: '',
+    // Lane③ fee 编辑 (Bettor r654): gateway 默认 fee% (新建市场用)
+    feeInput: 2, feeSaving: false, feeMsg: '', feeError: '',
 
     fmtKas(n) {
       const x = parseFloat(n);
@@ -350,9 +358,31 @@ function brokerHome() {
       }
     },
 
+    async saveFee() {
+      const a = this.agent;
+      if (!a) return;
+      const bps = Math.round((this.feeInput ?? 0) * 100); // % → basis points
+      this.feeSaving = true; this.feeMsg = ''; this.feeError = '';
+      try {
+        const r = await fetch(`/api/relay/${a.id}/broker-fee`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fee_pct: bps }),
+        });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) { this.feeError = j.message || j.error || ('保存失败 (HTTP ' + r.status + ')'); }
+        else { this.feeMsg = '已保存 ' + (bps / 100) + '% (新建市场生效)'; a.default_broker_fee_pct = bps; }
+      } catch (e) {
+        this.feeError = '保存请求失败: ' + (e?.message || e);
+      } finally {
+        this.feeSaving = false;
+      }
+    },
+
     async loadData() {
       const a = this.agent;
       if (!a) return;
+      this.feeInput = (a.default_broker_fee_pct ?? 200) / 100; // bps → % 预填
+      this.feeMsg = ''; this.feeError = '';
       // fetch balance + earnings + markets in parallel
       this.earningsLoading = true; this.marketsLoading = true;
       this.earnings = null; this.markets = null;

@@ -532,8 +532,18 @@ export async function registerPoolRoutes(fastify) {
     for (const k of required) {
       if (b[k] === undefined || b[k] === null || b[k] === '') return reply.code(400).send({ ok: false, error: `missing ${k}` });
     }
-    if (b.broker_relay_id === undefined || b.broker_relay_id === null || b.broker_relay_id === '') b.broker_relay_id = b.maker_relay_id;
-    if (b.broker_fee_pct === undefined || b.broker_fee_pct === null || b.broker_fee_pct === '') b.broker_fee_pct = 0;
+    const brokerProvided = !(b.broker_relay_id === undefined || b.broker_relay_id === null || b.broker_relay_id === '');
+    if (!brokerProvided) b.broker_relay_id = b.maker_relay_id;  // 塌 maker (maker == broker thesis)
+    if (b.broker_fee_pct === undefined || b.broker_fee_pct === null || b.broker_fee_pct === '') {
+      // Lane③ r654 (J2 绿灯): fee 省略 — 真 gateway → 读其 default_broker_fee_pct (gateway 自设 fee 生效);
+      // 塌-maker → 0 (maker 非真 broker 不收 fee)。只新建市场读, 不碰已建 (J2 caveat).
+      if (brokerProvided) {
+        const gw = sqlite.prepare('SELECT default_broker_fee_pct FROM relay_nodes WHERE id = ?').get(b.broker_relay_id);
+        b.broker_fee_pct = gw?.default_broker_fee_pct ?? 0;
+      } else {
+        b.broker_fee_pct = 0;
+      }
+    }
     if (b.oracle_bond_kas === undefined || b.oracle_bond_kas === null || b.oracle_bond_kas === '') b.oracle_bond_kas = 1;
     if (b.oracle_fee_pct === undefined || b.oracle_fee_pct === null || b.oracle_fee_pct === '') b.oracle_fee_pct = 100;
     if (b.outcome_market_source === undefined || b.outcome_market_source === null || b.outcome_market_source === '') b.outcome_market_source = 'kanet_v06';
@@ -798,8 +808,18 @@ export async function registerPoolRoutes(fastify) {
         return reply.code(503).send({ ok: false, error: `pool_merkle_root auto-derive fail: ${e.message}` });
       }
     }
-    if (b.broker_relay_id === undefined || b.broker_relay_id === null || b.broker_relay_id === '') b.broker_relay_id = b.maker_relay_id;
-    if (b.broker_fee_pct === undefined || b.broker_fee_pct === null || b.broker_fee_pct === '') b.broker_fee_pct = 0;
+    const brokerProvided = !(b.broker_relay_id === undefined || b.broker_relay_id === null || b.broker_relay_id === '');
+    if (!brokerProvided) b.broker_relay_id = b.maker_relay_id;  // 塌 maker (maker == broker thesis)
+    if (b.broker_fee_pct === undefined || b.broker_fee_pct === null || b.broker_fee_pct === '') {
+      // Lane③ r654 (J2 绿灯): fee 省略 — 真 gateway → 读其 default_broker_fee_pct (gateway 自设 fee 生效);
+      // 塌-maker → 0 (maker 非真 broker 不收 fee)。只新建市场读, 不碰已建 (J2 caveat).
+      if (brokerProvided) {
+        const gw = sqlite.prepare('SELECT default_broker_fee_pct FROM relay_nodes WHERE id = ?').get(b.broker_relay_id);
+        b.broker_fee_pct = gw?.default_broker_fee_pct ?? 0;
+      } else {
+        b.broker_fee_pct = 0;
+      }
+    }
     if (b.oracle_bond_kas === undefined || b.oracle_bond_kas === null || b.oracle_bond_kas === '') b.oracle_bond_kas = 1;
     if (b.oracle_fee_pct === undefined || b.oracle_fee_pct === null || b.oracle_fee_pct === '') b.oracle_fee_pct = 100;
     if (b.outcome_market_source === undefined || b.outcome_market_source === null || b.outcome_market_source === '') b.outcome_market_source = 'kanet_v07';
