@@ -41,7 +41,7 @@
           <th class="text-left py-2 px-3">题干</th>
           <th class="text-left py-2 px-3">出单人</th>
           <th class="text-center py-2 px-3">状态</th>
-          <th class="text-right py-2 px-3">押金 KAS</th>
+          <th class="text-right py-2 px-3">池子 KAS</th>
           <th class="text-right py-2 px-3">下注人</th>
           <th class="text-right py-2 px-3">建市时间</th>
           <th class="text-center py-2 px-3"></th>
@@ -57,7 +57,11 @@
               <span class="text-[10px] px-1.5 py-0.5 rounded font-medium"
                     :class="statusBadge(m.protocol_status)" x-text="statusLabel(m.protocol_status)"></span>
             </td>
-            <td class="py-2 px-3 text-right tabular-nums text-ink-600" x-text="m.maker_stake_kas || '?'"></td>
+            <!-- KANet-UI 2026-06-12 (Bettor r731 / Owner抓): 显实池子总额 = yes_pool_kas + no_pool_kas (含 maker + 双边 bettor 实押),
+                 非 maker_stake_kas (demo maker≥100 致永远显 100, 真池子被藏). 字段已 KAS, 无 sompi 转换. -->
+            <td class="py-2 px-3 text-right tabular-nums text-ink-600"
+                :title="`YES池 ${Number(m.yes_pool_kas||0).toFixed(2)} + NO池 ${Number(m.no_pool_kas||0).toFixed(2)} (含 maker ${m.maker_stake_kas||0})`"
+                x-text="(m.yes_pool_kas != null || m.no_pool_kas != null) ? (Number(m.yes_pool_kas||0) + Number(m.no_pool_kas||0)).toFixed(2) : (m.maker_stake_kas || '?')"></td>
             <td class="py-2 px-3 text-right tabular-nums text-ink-600" x-text="m.bettor_count || 0"></td>
             <td class="py-2 px-3 text-right text-[11px] text-ink-400" x-text="(m.created_at || '').slice(0, 16)"></td>
             <td class="py-2 px-3 text-center">
