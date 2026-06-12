@@ -62,16 +62,22 @@ const STAKE_OPTIONS_KAS = [10, 50, 100];
 function fetchActiveMarkets(limit = 5, brokerRelayId = null) {
   const db = getDb();
   // Path A: pool_markets committee-judged (= register-v06 flow, my line-B 验通真路).
+  // ONLY v0.6/v0.7 — confirmPoolBet uses register-v06 which rejects v0.5 (= /register-external path).
+  // deadline > now (unix sec) drops expired markets (= can't usefully bet). M2 self-test caught the
+  // v0.5 leak (stale 2026-05-29 markets ranked first by deadline ASC → register-v06 400).
+  const nowUnix = Math.floor(Date.now() / 1000);
   const pools = db.prepare(`
     SELECT id, maker_relay_id, broker_relay_id, broker_fee_pct,
            outcome_market_source, outcome_condition_id, outcome_token_id, outcome_side,
            resolution_rule_spec, deadline, maker_stake_amount, 'pool' AS kind
     FROM pool_markets
     WHERE protocol_status = 'pending_bettors'
+      AND protocol_version IN ('v0.6','v0.7')
+      AND deadline > ?
       ${brokerRelayId ? 'AND broker_relay_id = ?' : ''}
     ORDER BY deadline ASC
     LIMIT ?
-  `).all(...(brokerRelayId ? [brokerRelayId, limit] : [limit]));
+  `).all(...(brokerRelayId ? [nowUnix, brokerRelayId, limit] : [nowUnix, limit]));
   // Path B: exchange_offers E pre-handshake (= /api/prediction/pending-offer L1490 bettor.js).
   // Bettor r106 Bug A hotfix: 2 null-field offers cause marketLabel render all `?` — exclude via NOT NULL 3-col filter.
   const offers = db.prepare(`
