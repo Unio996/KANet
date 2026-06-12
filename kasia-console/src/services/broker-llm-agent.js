@@ -22,7 +22,12 @@ import {
   getConvoState,
 } from './broker-state-authority.js';
 
-const BROKER_RELAY_ID = '0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0';
+// J2-tn r766 identity 根治 (Bettor r744 flag + Owner GO, 方案 A): 硬编码 0a8e9723 是 stale 错值
+// (不在 relay_nodes / 无 adapter) → _callLlm 查 adapter port 失败 → broker LLM dialog 整体调不通 (挡所有 tool 前)。
+// env 可配 (node-agnostic): 本节点 kanet.env 设 BROKER_RELAY_ID=15593e10 (broker-1, 有 adapter port 3031 + is_dex_broker)
+// → 修 adapter (L305-309) + trader addr (L584) + markets filter 默认 (L580 区) 全归 15593e10。默认保 0a8e9723 不变
+// = 不动 J1/其它节点 (没设 env 的上下文仍 stale = 已知, 归 B follow-up 审计统一两 BROKER env + 清残留 ref)。
+const BROKER_RELAY_ID = process.env.BROKER_RELAY_ID || '0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0';
 
 // T-J2-2026-04-27 v1.1 Phase E generic minimal — 动态 supported assets section from asset-registry
 // (Owner 23:43 钦定真碰撞: NWT vote (a) "SYSTEM_PROMPT 留 v1.2" 真灾难 — user 'buy USDC' LLM
