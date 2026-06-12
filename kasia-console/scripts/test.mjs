@@ -4,6 +4,10 @@
 //        node scripts/test.mjs --domain=broker  (run all in domain)
 //        node scripts/test.mjs --all
 
+// DoD-E env 单源 (J1 Bettor r739 Option A): 必须排在 runner.mjs import 之前 —— 派生
+// KANET_CONSOLE_URL + PORT from kanet.env PORT, 让 runner.mjs:19 顶层 const + case TN12_CONSOLE
+// 都跟随跑测节点 (测试节点无关). 见 test-framework/lib/env-bootstrap.mjs 头注.
+import '../test-framework/lib/env-bootstrap.mjs';
 import path from 'node:path';
 import fs from 'node:fs/promises';
 import { pathToFileURL, fileURLToPath } from 'node:url';
