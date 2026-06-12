@@ -52,14 +52,19 @@ export function extractEspnEvidence(rawText) {
   const away = competitors.find(c => c.homeAway === 'away');
   if (!home || !away) return null;
 
-  const homeTeam = home.team?.abbreviation || home.team?.shortDisplayName || '?';
-  const awayTeam = away.team?.abbreviation || away.team?.shortDisplayName || '?';
-  const homeScore = home.score ?? '?';
-  const awayScore = away.score ?? '?';
+  // J2-tn r681 (NWT line-E N=35 抓到 WSH@NO 误判, format-isolated 实锤): winner-first + 每队紧邻自己
+  // 分数 (消歧义)。原 `(homeTeam homeScore - awayScore awayTeam)` = home 是 team-score 相邻、away 是
+  // score-team 相邻 (不一致) → "NO 19 - 20 WSH" LLM 把 away 队读错分 → 误判 (同 LLM 同题, 格式是唯一变量;
+  // 清晰 "winner 20, loser 19" 则判对)。共享 extractor (prevet mock-extract + voter deriveVote 共用):
+  // 纯证据措辞改, 无下游结构解析, prevet 仍判非空 (final game → 非 null)。
+  const loser = competitors.find(c => c.winner === false) || competitors.find(c => c !== winner);
   const winnerName = winner.team?.displayName || winner.team?.shortDisplayName || winner.team?.abbreviation || '?';
+  const loserName = loser?.team?.displayName || loser?.team?.shortDisplayName || loser?.team?.abbreviation || '?';
+  const winnerScore = winner.score ?? '?';
+  const loserScore = loser?.score ?? '?';
   const league = data?.header?.league?.abbreviation || data?.leagues?.[0]?.abbreviation || '';
 
-  const evidence = `${winnerName} won (${homeTeam} ${homeScore} - ${awayScore} ${awayTeam}${league ? ', ' + league : ''}).`;
+  const evidence = `${winnerName} won. Final score: ${winnerName} ${winnerScore}, ${loserName} ${loserScore}${league ? ' (' + league + ')' : ''}.`;
   return evidence.length > 500 ? evidence.slice(0, 497) + '...' : evidence;
 }
 
