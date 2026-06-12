@@ -1907,6 +1907,12 @@ export async function dispatchPhase2(market, decision) {
       // earnings 端点此前估 maker_stake×fee_pct (≠ 实际, gz5g7 估 2.0 vs 实落 6.73 KAS) → earnings 改读
       // 这个实际值 (settled 市场)。phase2_outputs[0] 也是 broker fee output 但读 order 脆, 显式字段更稳。
       phase2_broker_fee_sompi: payouts.brokerFee,
+      // J2-tn Lane① (Bettor r638 统一'settler 记实际值, display 读'): oracle reward + maker payout 同 broker
+      // fee 模式记【实际落链值】→ 三角色 display 统一读实际非估算 (oracle_history.reward_amount / maker 视图)。
+      //  - oracle reward = oracleFeePerSig (oracleFeeTotal/N = 每签名委员实际 fee, L1735-1737)。
+      //  - maker payout = maker 地址收到的 output 总额 (maker 赢=winner payout, 输=0)。读 outputs robust。
+      phase2_oracle_reward_per_sig: oracleFeePerSig,
+      phase2_maker_payout_sompi: outputs.filter(o => o.address === makerRow.address).reduce((s, o) => s + (parseInt(o.amountSompi, 10) || 0), 0),
       phase2_outputs: outputs,  // Phase 2c step 2c: full outputs array for collecting_sigs handler IPC assembly
     };
     // J1 r221 + Bettor r218 ③ Layer-12: v0.6 settle_aggregate needs committee data — fetch
@@ -2750,6 +2756,23 @@ async function handleCollectingSigs(market) {
     sqlite.prepare('UPDATE pool_markets SET settle_txid = ?, protocol_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
       .run(submitResult.txId, 'completed', market.id);
     console.log(`[pool-settler:collecting] SETTLED market=${market.id.slice(0,12)} settle_txid=${submitResult.txId.slice(0,16)} winner=${meta.phase2_winner}`);
+
+    // J2-tn Lane① (Bettor r638 统一'settler 记实际值' + r646 单位定案): 记【实际 oracle reward】到
+    // oracle_history.reward_amount。settle 时 committeeMode 全委员 uniform 实赚 oracleFeePerSig
+    // (meta.phase2_oracle_reward_per_sig, dispatchPhase2 记的实际落链值; L1429-1434 委员市场不跳任何委员,
+    // 全 N 委员都拿 bond+oracleFeePerSig)。此前 reward_amount 恒 0 → oracle 面板'暂无收益'实则赚了 (同 broker
+    // fee 病)。【写 SOMPI】(守 _sompi 约定, 现有读侧 bettor.js:2230 SUM(reward_amount) → oracle-home.eta
+    // L109 fmtKas(/1e8); 写 KAS 会显示小 1e8 倍)。只更 vote!=null 委员行 (consensual vote=NULL 不动) + reward=0 防重。
+    try {
+      const oracleRewardSompi = meta.phase2_oracle_reward_per_sig;
+      if (oracleRewardSompi != null && Number(oracleRewardSompi) > 0) {
+        const upd = sqlite.prepare(`UPDATE oracle_history SET reward_amount = ? WHERE market_id = ? AND vote IS NOT NULL AND (reward_amount IS NULL OR reward_amount = 0)`)
+          .run(Number(oracleRewardSompi), market.id);
+        console.log(`[pool-settler:collecting] oracle reward recorded market=${market.id.slice(0,12)} per_sig=${Number(oracleRewardSompi)} sompi (${(Number(oracleRewardSompi)/1e8).toFixed(8)} KAS) rows=${upd.changes}`);
+      }
+    } catch (rwErr) {
+      console.warn(`[pool-settler:collecting] oracle reward record fail market=${market.id.slice(0,12)}: ${rwErr.message}`);
+    }
 
     // r418 (Bettor r428 PASS — 方案 C 路径 A push): broadcast pool_market_settled_v1 so cross-node
     // 节点 (= consumer-ingested markets, maker_relay_id='cross-node:..') 也能标 completed.
