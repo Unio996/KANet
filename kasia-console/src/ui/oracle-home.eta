@@ -207,9 +207,12 @@
 
           <template x-if="selectedAgent">
             <div class="mt-4 pt-3 border-t border-warm-200 space-y-3">
-              <!-- 已注册: 显其状态 + 5 维度 (= 同段 1 卡片) -->
-              <div x-show="myOracleRecord">
-                <div class="text-xs font-medium text-ink-700 mb-2">已注册状态</div>
+              <!-- 切换 agent 解析链上实况中 -->
+              <div x-show="myStatus.loading" class="text-xs text-ink-400 py-3">解析仲裁人实况中...</div>
+
+              <!-- 已注册 (链上有质押 OR legacy is_oracle): 完整操作员面板 (Bettor r772 ①②) -->
+              <div x-show="!myStatus.loading && myStatus.enrolled">
+                <div class="text-xs font-medium text-ink-700 mb-2">我的仲裁人面板</div>
                 <div class="grid grid-cols-2 gap-3 text-xs">
                   <div>
                     <div class="ar-stat-label">级别</div>
@@ -217,7 +220,23 @@
                   </div>
                   <div>
                     <div class="ar-stat-label">状态</div>
-                    <div class="text-ink-600" x-text="(myOracleRecord?.frozen ? '已冻结' : (myOracleRecord?.status === 'active' ? '在岗' : (myOracleRecord?.status || '?')))"></div>
+                    <div class="text-ink-600" x-text="(myOracleRecord?.frozen ? '已冻结' : (myOracleRecord?.status === 'active' ? '在岗' : (myStatus.stakeKas > 0 ? '在岗 (链上质押)' : (myOracleRecord?.status || '在岗'))))"></div>
+                  </div>
+                  <!-- KANet-UI r772 ②: 质押额 (链上 snapshot, 操作员面板原缺) -->
+                  <div>
+                    <div class="ar-stat-label">已质押 (锁仓)</div>
+                    <div class="text-ink-600">
+                      <span x-show="myStatus.stakeKas > 0"><span class="ar-stat-value" x-text="fmtKas(myStatus.stakeKas)"></span> KAS</span>
+                      <span x-show="!(myStatus.stakeKas > 0)" class="ar-empty-note">链上未见质押</span>
+                    </div>
+                  </div>
+                  <!-- KANet-UI r772 ②: 累计仲裁收益 (reputation total_reward, 操作员面板原缺 = Owner '没有收益' 实因) -->
+                  <div>
+                    <div class="ar-stat-label">累计仲裁收益 (测试币)</div>
+                    <div class="text-ink-600">
+                      <span x-show="myStatus.rewardKas > 0"><span class="ar-stat-value" x-text="fmtKas(myStatus.rewardKas)"></span> KAS</span>
+                      <span x-show="!(myStatus.rewardKas > 0)" class="ar-empty-note">暂无收益</span>
+                    </div>
                   </div>
                   <div>
                     <div class="ar-stat-label">能裁什么</div>
@@ -231,7 +250,31 @@
                     </div>
                   </div>
                 </div>
-                <p class="ar-empty-note mt-3">提交申请改配置 + 执照域: Phase2 上线后开放. 当前 Phase1 走通用执照.</p>
+                <p class="ar-empty-note mt-3">改判定能力 + 执照域: Phase2 上线后开放 (执照按指标自动授, 非手填). 当前 Phase1 走通用执照.</p>
+
+                <!-- ③ 加/重质押 (Bettor r772 ③): re-enroll 到新 lock → 出 p2sh → 自钱包加转 stake -->
+                <div class="mt-4 pt-3 border-t border-warm-200">
+                  <div class="text-xs font-medium text-ink-700 mb-2">加 / 重新质押</div>
+                  <p class="text-[11px] text-ink-500 mb-2">加大质押 = 权重更高 (VRF 抽中概率高). 重新锁仓到新 DAA 块号 → 转 KAS 到出的 P2SH.</p>
+                  <button x-show="!restake.open" @click="restake.open = true; restake.daa = (oracleCurrentDaa || 0) + 60; loadOracleCurrentDaa()"
+                          class="px-3 py-1.5 rounded bg-brand-50 hover:bg-brand-100 text-brand-700 text-xs font-medium">加 / 重新质押 →</button>
+                  <div x-show="restake.open" class="space-y-2 bg-warm-50 rounded p-3 mt-1">
+                    <label class="block text-xs text-ink-600">锁到 DAA 块号 (lock_until_daa)</label>
+                    <input type="number" x-model.number="restake.daa" class="w-full text-sm px-2 py-1.5 rounded border border-warm-300 bg-white">
+                    <p class="text-[11px] text-ink-400">当前 DAA: <span x-text="oracleCurrentDaa ?? '...'"></span></p>
+                    <div class="flex gap-2">
+                      <button @click="submitRestake()" :disabled="restake.submitting || !restake.daa"
+                              class="px-3 py-1.5 rounded bg-brand-500 hover:bg-brand-600 text-white text-xs font-medium disabled:opacity-50">
+                        <span x-text="restake.submitting ? '提交中...' : '确认重质押'"></span></button>
+                      <button @click="restake.open = false" class="px-3 py-1.5 rounded bg-warm-100 hover:bg-warm-200 text-ink-600 text-xs">取消</button>
+                    </div>
+                    <div x-show="restake.error" class="text-[11px] text-red-600 bg-red-50 rounded px-2 py-1" x-text="restake.error"></div>
+                    <div x-show="restake.result" class="space-y-1 bg-emerald-50 rounded px-2 py-1.5 text-[11px]">
+                      <p class="font-semibold text-emerald-700">✓ 已开重质押 — 转 stake 到此 P2SH:</p>
+                      <div class="font-mono break-all text-ink-700" x-text="restake.result?.p2sh_addr"></div>
+                    </div>
+                  </div>
+                </div>
 
                 <!-- KANet-UI 2026-06-08 DoD 问 3 (Bettor r373 关 1 PASS, J1 r303 派 (3) endpoint LIVE): 退出仲裁人 -->
                 <div class="mt-4 pt-3 border-t border-warm-200">
@@ -252,8 +295,8 @@
                 </div>
               </div>
 
-              <!-- 未注册: S-C enroll 表单 (Bettor r633, 港自 /agent, 操作员一站注册不跳) -->
-              <div x-show="!myOracleRecord" x-init="loadOracleCurrentDaa()">
+              <!-- 未注册 (链上无质押 且 不在 legacy): S-C enroll 表单 (Bettor r633 + r772 ①: gate 改 myStatus.enrolled) -->
+              <div x-show="!myStatus.loading && !myStatus.enrolled" x-init="loadOracleCurrentDaa()">
                 <p class="text-xs text-ink-500 mb-2">该 agent 尚未注册为仲裁人. 注册 = 押 KAS 到链上锁仓 → 成为预言机池一员 → 抽中后给市场投票, 投对得报酬, 偏离共识扣 stake.</p>
                 <!-- enroll 输入 -->
                 <div x-show="!oracleEnrollResult" class="space-y-2 bg-warm-50 rounded p-3">
@@ -308,6 +351,12 @@ function arbiterHome() {
     oracleEnrolling: false, oracleEnrollError: '', oracleEnrollResult: null,
     // S-C 观察 context 折叠 (Bettor r624 Q3): 段1名册+段2裁决 默认折叠, 操作员主流程(段3)不被挤.
     showObserve: false,
+    // KANet-UI 2026-06-12 (Bettor r772): 段3 操作员自助控制台 — 对账链上 enroll (非只 legacy /api/oracles).
+    stakeByPk: {},   // pk_x → stake KAS, from chain-snapshot (loadOracles 填)
+    // 选中 agent 的链上仲裁人实况 (enrolled 判定 + 收益 + 质押 + pubkey for 退出).
+    myStatus: { loading: false, enrolled: false, pubkey: null, stakeKas: 0, rewardKas: 0, stats: null },
+    // ③ 加/重质押 state (Bettor r772 ③)
+    restake: { open: false, daa: null, submitting: false, error: '', result: null },
 
     get selectedAgent() {
       return this.myAgents.find(a => a.id === this.selectedAgentId) || null;
@@ -392,6 +441,11 @@ function arbiterHome() {
         if (snapResp?.leaves && Array.isArray(snapResp.leaves)) {
           for (const l of snapResp.leaves) stakeByPk[l.pk_x] = Number(l.stake_sompi || 0) / 1e8;
         }
+        // KANet-UI 2026-06-12 (Bettor r772 ①): store stake-by-pk so 段3 操作员面板 can reconcile
+        // a selected agent against the CHAIN snapshot (authoritative enrollment), not just the
+        // legacy /api/oracles list. Fixes Owner '注册后无法删除' (chain-enrolled agent not in legacy
+        // → myOracleRecord null → panel+退出 hidden).
+        this.stakeByPk = stakeByPk;
 
         const oracles = baseList.map(o => {
           const reg = regById[o.id] || null;
@@ -458,6 +512,57 @@ function arbiterHome() {
       // selectedAgent + myOracleRecord 是 getter, 切换自动 render
       this.unlock = { checking: false, submitting: false, error: '', result: null };  // 切换 agent 清状态
       this.oracleEnrollError = ''; this.oracleEnrollResult = null;  // S-C: 切换 agent 清 enroll 状态
+      this.restake = { open: false, daa: null, submitting: false, error: '', result: null };
+      this.loadMyStatus();  // KANet-UI r772 ①②: 对账链上 enroll + 拉收益/质押
+    },
+
+    // KANet-UI 2026-06-12 (Bettor r772 ①②): resolve the selected agent's REAL arbiter status by
+    // reconciling against the chain snapshot (stake) + reputation (reward), not just legacy /api/oracles.
+    // enrolled = has on-chain stake OR is in the legacy oracle list. Drives 段3 panel + 退出 visibility.
+    async loadMyStatus() {
+      this.myStatus = { loading: true, enrolled: false, pubkey: null, stakeKas: 0, rewardKas: 0, stats: null };
+      const agent = this.selectedAgent;
+      if (!agent) { this.myStatus.loading = false; return; }
+      try {
+        const pkResp = await fetch('/api/relay/' + agent.id + '/pubkey').then(r => r.json()).catch(() => null);
+        const pk = pkResp?.x_only_pubkey || null;
+        const stakeKas = (pk && this.stakeByPk && this.stakeByPk[pk]) ? this.stakeByPk[pk] : 0;
+        const rep = await fetch('/api/oracle/' + encodeURIComponent(agent.id) + '/reputation').then(r => r.json()).catch(() => null);
+        const rewardKas = rep?.history?.total_reward ? Number(rep.history.total_reward) / 1e8 : 0;
+        this.myStatus = {
+          loading: false,
+          enrolled: stakeKas > 0 || this.isOracleRegistered(agent.id),
+          pubkey: pk,
+          stakeKas,
+          rewardKas,
+          stats: rep?.history || null,
+        };
+      } catch (e) {
+        this.myStatus.loading = false;
+      }
+    },
+
+    // ③ 加/重质押 (Bettor r772 ③): re-stake = re-enroll 到新 lock_until_daa → 出新 p2sh → 自钱包加转 stake.
+    // 复用 /api/oracle-pool/enroll (链上单源, top-up 转同/新 p2sh 累加 stake). 0 新后端.
+    async submitRestake() {
+      const agent = this.selectedAgent;
+      if (!agent || !this.restake.daa) return;
+      this.restake.submitting = true; this.restake.error = ''; this.restake.result = null;
+      try {
+        const pkResp = await fetch('/api/relay/' + agent.id + '/pubkey').then(r => r.json());
+        if (!pkResp.ok || !pkResp.x_only_pubkey) {
+          this.restake.error = '取 agent 公钥失败: ' + (pkResp.error || '未知错误'); this.restake.submitting = false; return;
+        }
+        const resp = await fetch('/api/oracle-pool/enroll', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ staker_pk_x: pkResp.x_only_pubkey, lock_until_daa: Number(this.restake.daa), signing_relay_id: agent.id }),
+        }).then(r => r.json());
+        if (!resp.ok) { this.restake.error = '重质押失败: ' + (resp.error || '未知错误'); }
+        else { this.restake.result = { p2sh_addr: resp.p2sh_addr, lock_until_daa: resp.lock_until_daa }; }
+      } catch (e) {
+        this.restake.error = '请求异常: ' + (e?.message || String(e));
+      }
+      this.restake.submitting = false;
     },
 
     // S-C 2026-06-11 (Bettor r633): oracle enroll 港自 agent-v2.eta L1525-1551 → /oracle 段3.
@@ -502,8 +607,9 @@ function arbiterHome() {
 
     // KANet-UI 2026-06-08 DoD 问 3: 退出仲裁人 (J1 r303 endpoint POST /api/oracle-pool/timeout-unlock)
     async startUnlock() {
-      if (!this.myOracleRecord) return;
-      const pkX = this.myOracleRecord.pubkey;
+      // KANet-UI r772 ①: 用 myStatus.pubkey (链上对账解析的, 覆盖 chain-enrolled 但不在 legacy 的 agent),
+      // fallback myOracleRecord.pubkey. 原来只读 myOracleRecord → 链上 enroll 的 agent 退不了 (Owner '删不了').
+      const pkX = this.myStatus?.pubkey || this.myOracleRecord?.pubkey;
       if (!pkX) { this.unlock.error = '该仲裁人无 pubkey, 无法 unlock'; return; }
       this.unlock.error = '';
       this.unlock.result = null;
