@@ -30,10 +30,18 @@ HEALTH_FAIL_THRESHOLD=${KANET_SUPERVISOR_FAIL_THRESHOLD:-3}
 RESTART_WINDOW_SEC=${KANET_SUPERVISOR_RESTART_WINDOW_SEC:-300}   # 5 min
 RESTART_MAX_IN_WINDOW=${KANET_SUPERVISOR_RESTART_MAX:-5}
 COOL_DOWN_SEC=${KANET_SUPERVISOR_COOL_DOWN_SEC:-1800}            # 30 min after burst
-# tn12 KANet Console binds PORT=3200 (kanet.env). 3100 = 主网 Console (C:/kanet, 独立).
-# Bettor r473 纠正 r472: 之前 headless 误把 tn12 起到 3100 (硬编码错值), 我又把这里改成 3100 焊死了错向.
-# 真相: 健康检查必须对齐 Console 实际端口 = 3200。headless 已修回 CONSOLE_PORT=3200, 这里也回 3200.
-CONSOLE_PORT=${CONSOLE_PORT:-3200}
+# r-portconverge (J1 DoD-E E3, 2026-06-12): Console 端口单一源 = kanet.env PORT
+# (同 kanet-start.sh L105 case PORT) / headless L47 收敛). 原硬编码 3200 是 r473 port 收敛
+# 漏掉的【第三个脚本】: Console 实绑 kanet.env PORT=3300, 但 supervisor 探 3200 → 永远误判
+# 健康 Console 死 → 反复 kill+restart storm. headless 启 supervisor 时只 export PORT 不 export
+# CONSOLE_PORT, supervisor 读 CONSOLE_PORT 故拿不到. 现从 kanet.env PORT 派生: 显式 CONSOLE_PORT
+# env 仍优先 override, 次取 kanet.env PORT, 3200 仅二者皆无时 fallback.
+ENV_FILE="$KANET_ROOT/kanet.env"
+ENV_PORT=""
+if [[ -f "$ENV_FILE" ]]; then
+  ENV_PORT="$(grep -E '^PORT=' "$ENV_FILE" 2>/dev/null | tail -1 | cut -d= -f2 | tr -d '[:space:]' || true)"
+fi
+CONSOLE_PORT=${CONSOLE_PORT:-${ENV_PORT:-3200}}
 
 log() {
   echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] $*" >> "$LOG"
