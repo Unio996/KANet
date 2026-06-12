@@ -42,6 +42,7 @@ import { registerStockRoutes } from './api/stocks.js';
 import { registerBettorRoutes } from './api/bettor.js';
 import { registerPoolRoutes } from './api/pool.js';
 import { registerKanetBrokerRoutes } from './api/kanet-broker.js';
+import { registerKanetMakerRoutes } from './api/kanet-maker.js';
 import { registerOraclePoolRoutes } from './api/oracle-pool.js';
 import { registerTestOracleRoutes } from './api/test-oracle.js';
 import { registerBrokerRoutes } from './api/broker.js';
@@ -181,6 +182,7 @@ await registerAuditPredictionRoutes(fastify);
 await registerBettorRoutes(fastify);
 await registerPoolRoutes(fastify);
 await registerKanetBrokerRoutes(fastify);
+await registerKanetMakerRoutes(fastify);
 await registerOraclePoolRoutes(fastify);
 await registerTestOracleRoutes(fastify);
 await registerDefiRoutes(fastify);
@@ -405,6 +407,13 @@ fastify.get('/oracle', async (request, reply) => {
   const lang = parseLang(request.headers.cookie);
   const t = getT(lang);
   return reply.viewAsync('oracle-home', { lang, t, dir: isRtl(lang) ? 'rtl' : 'ltr', _page: 'oracle' });
+});
+
+// Maker home — 数据三角色补齐 Lane① (Bettor r639). 我的市场 + 盈亏 (P&L). Data: /api/kanet-maker/*.
+fastify.get('/maker', async (request, reply) => {
+  const lang = parseLang(request.headers.cookie);
+  const t = getT(lang);
+  return reply.viewAsync('maker-home', { lang, t, dir: isRtl(lang) ? 'rtl' : 'ltr', _page: 'maker' });
 });
 
 

@@ -1,0 +1,207 @@
+<%~ include('partials/page-open', { _page: 'maker', pageTitle: 'Maker', ...it }) %>
+<!--
+  Maker home — 数据三角色补齐 Lane① (Bettor r639 事先审 PASS).
+  镜像 broker-home 5 块结构 (身份/盈亏/状态/历史) + 创建市场 CTA (maker 不"注册", 是建市).
+  Data 源: /api/kanet-maker/markets/:id + /api/kanet-maker/pnl/:id.
+  铁律 (Bettor r639): template 读的字段名 = 端点返的字段名, 一开始逐字对齐 (别重蹈 broker 显 0).
+-->
+<style>
+  .rh-display { font-family: 'Fraunces', Georgia, serif; font-feature-settings: 'opsz' 36; }
+  .rh-block { @apply bg-white rounded-lg border border-warm-200 p-5; }
+  .rh-block-title { @apply text-[10px] uppercase tracking-wider text-ink-400 mb-3 flex items-center gap-1.5; }
+  .rh-block-dot { @apply w-1.5 h-1.5 rounded-full; }
+  .rh-stat-label { @apply text-[10px] uppercase tracking-wider text-ink-400; }
+  .rh-stat-value { @apply text-lg font-semibold text-ink-700 tabular-nums; }
+</style>
+
+<div class="p-6" x-data="makerHome()" x-cloak>
+
+  <!-- LOADING -->
+  <div x-show="loading" class="space-y-4">
+    <div class="skeleton" style="width:200px;height:36px;border-radius:8px;"></div>
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div class="skeleton" style="height:140px;border-radius:8px;"></div>
+      <div class="skeleton" style="height:140px;border-radius:8px;"></div>
+    </div>
+  </div>
+
+  <!-- EMPTY (no maker agents) -->
+  <div x-show="!loading && agents.length === 0" class="rh-block text-center py-10">
+    <div class="text-sm text-ink-500 mb-2">还没有创建过市场的 agent.</div>
+    <a href="/predictions/pool/create" class="text-xs text-brand-500 hover:text-brand-700">→ 去创建一个预测市场</a>
+  </div>
+
+  <!-- MAIN -->
+  <template x-if="!loading && agents.length > 0">
+    <div class="space-y-5">
+
+      <!-- AGENT SELECTOR -->
+      <div class="flex items-center justify-between mb-2">
+        <div class="flex items-center gap-3">
+          <select x-model.number="selectedIdx" @change="loadData()"
+            class="px-4 py-2 border border-warm-300 rounded-lg text-sm font-medium text-ink-600 bg-white focus:ring-2 focus:ring-brand-200 focus:border-brand-400 focus:outline-none">
+            <template x-for="(a, idx) in agents" :key="a.id">
+              <option :value="idx" x-text="a.name"></option>
+            </template>
+          </select>
+          <span class="text-[10px] uppercase tracking-wider text-ink-400">Maker</span>
+        </div>
+        <a href="/predictions/pool/create" class="px-3 py-1.5 rounded-lg bg-brand-500 hover:bg-brand-600 text-white text-xs font-medium">+ 创建市场</a>
+      </div>
+
+      <!-- ① 角色身份 -->
+      <div class="rh-block">
+        <div class="rh-block-title"><span class="rh-block-dot bg-brand-500"></span>角色身份</div>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div>
+            <div class="rh-stat-label">名称</div>
+            <div class="rh-stat-value" x-text="agent?.name"></div>
+          </div>
+          <div>
+            <div class="rh-stat-label">角色</div>
+            <div class="rh-stat-value">Maker</div>
+            <div class="text-[10px] text-ink-400 mt-0.5" x-show="agent?.role">role: <span x-text="agent.role"></span></div>
+          </div>
+          <div>
+            <div class="rh-stat-label">地址</div>
+            <div class="font-mono text-xs text-ink-600 break-all mt-1" x-text="agent?.address"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ② 盈亏 (P&L, /api/kanet-maker/pnl 数据源) -->
+      <div class="rh-block">
+        <div class="rh-block-title"><span class="rh-block-dot bg-green-500"></span>盈亏</div>
+        <div x-show="pnlLoading" class="text-xs text-ink-300">加载中...</div>
+        <template x-if="!pnlLoading && pnl">
+          <div>
+            <div class="grid grid-cols-3 gap-4">
+              <div>
+                <div class="rh-stat-label">已实现净盈亏</div>
+                <div class="rh-stat-value rh-display" :class="parseFloat(pnl.realized?.net_kas) < 0 ? 'text-red-600' : 'text-emerald-700'" x-text="fmtSignedKas(pnl.realized?.net_kas)"></div>
+                <div class="text-[10px] text-ink-400 mt-0.5">KAS · <span x-text="pnl.realized?.n_markets ?? 0"></span> 单已结</div>
+              </div>
+              <div>
+                <div class="rh-stat-label">在押 (active stake)</div>
+                <div class="rh-stat-value rh-display text-amber-700" x-text="fmtKas(pnl.pending?.at_risk_kas)"></div>
+                <div class="text-[10px] text-ink-400 mt-0.5">KAS · <span x-text="pnl.pending?.n_markets ?? 0"></span> 单在押</div>
+              </div>
+              <div>
+                <div class="rh-stat-label">退回</div>
+                <div class="rh-stat-value rh-display text-ink-400" x-text="(pnl.refunded?.n_markets ?? 0) + ' 单'"></div>
+                <div class="text-[10px] text-ink-400 mt-0.5">stake 退回</div>
+              </div>
+            </div>
+            <p class="text-[10px] text-ink-400 mt-2">已实现 = settle 时 maker 实际 output (赢含 stake 返还+winnings, 输=0) − 本金 stake。读链上实际值, 非估算。</p>
+          </div>
+        </template>
+        <div x-show="pnlError" class="text-xs text-red-500" x-text="pnlError"></div>
+      </div>
+
+      <!-- ③ 状态 (/api/kanet-maker/markets 数据源) -->
+      <div class="rh-block">
+        <div class="rh-block-title"><span class="rh-block-dot bg-blue-500"></span>状态</div>
+        <div x-show="marketsLoading" class="text-xs text-ink-300">加载中...</div>
+        <template x-if="!marketsLoading && markets">
+          <div class="grid grid-cols-3 gap-4">
+            <div>
+              <div class="rh-stat-label">active 市场</div>
+              <div class="rh-stat-value" x-text="markets.totals?.pool_active ?? 0"></div>
+            </div>
+            <div>
+              <div class="rh-stat-label">已结算</div>
+              <div class="rh-stat-value" x-text="markets.totals?.pool_settled ?? 0"></div>
+            </div>
+            <div>
+              <div class="rh-stat-label">refund/cancel</div>
+              <div class="rh-stat-value text-ink-400" x-text="markets.totals?.pool_refunded ?? 0"></div>
+            </div>
+          </div>
+        </template>
+      </div>
+
+      <!-- ④ 历史 (我的市场 + 盈亏, /api/kanet-maker/pnl by_market) -->
+      <div class="rh-block">
+        <div class="rh-block-title"><span class="rh-block-dot bg-ink-400"></span>历史 (我的市场)</div>
+        <div x-show="!pnl || (pnl.by_market || []).length === 0" class="text-xs text-ink-300 py-3">暂无市场</div>
+        <div class="space-y-1.5">
+          <template x-for="m in (pnl?.by_market || []).slice(0, 15)" :key="m.id">
+            <div class="flex items-center justify-between text-xs py-1 border-b border-warm-100">
+              <span class="font-mono text-ink-500" x-text="m.id.slice(0, 22) + '…'"></span>
+              <span class="flex items-center gap-3">
+                <span class="text-ink-400" x-text="m.status"></span>
+                <span class="tabular-nums" :class="m.pnl_kas == null ? 'text-ink-300' : (parseFloat(m.pnl_kas) < 0 ? 'text-red-600' : 'text-emerald-700')"
+                      x-text="m.pnl_kas == null ? ('押 ' + fmtKas(m.stake_kas)) : fmtSignedKas(m.pnl_kas)"></span>
+              </span>
+            </div>
+          </template>
+        </div>
+      </div>
+
+    </div>
+  </template>
+</div>
+
+<script>
+function makerHome() {
+  return {
+    loading: true,
+    agents: [],
+    selectedIdx: 0,
+    get agent() { return this.agents[this.selectedIdx] || null; },
+    pnl: null, pnlLoading: false, pnlError: '',
+    markets: null, marketsLoading: false,
+
+    fmtKas(n) {
+      const x = parseFloat(n);
+      if (!Number.isFinite(x)) return '0';
+      return x.toFixed(4);
+    },
+    fmtSignedKas(n) {
+      const x = parseFloat(n);
+      if (!Number.isFinite(x)) return '0';
+      return (x >= 0 ? '+' : '') + x.toFixed(4);
+    },
+
+    async init() {
+      try {
+        // 全 relay, 过滤出有建过市场的 (= maker). 用 /api/agent/profile + 名下市场数判定.
+        const all = await fetch('/api/agent/profile').then(r => r.json()).catch(() => []);
+        const relays = Array.isArray(all) ? all : [];
+        // 并行查每 relay 名下市场数, >0 才算 maker
+        const withCounts = await Promise.all(relays.map(async r => {
+          const mk = await fetch(`/api/kanet-maker/markets/${r.id}`).then(x => x.json()).catch(() => null);
+          const n = mk && mk.pool_markets ? mk.pool_markets.length : 0;
+          return { ...r, _marketCount: n };
+        }));
+        this.agents = withCounts.filter(r => r._marketCount > 0);
+        if (this.agents.length > 0) await this.loadData();
+      } catch (e) {
+        console.error('load maker agents fail:', e);
+      } finally {
+        this.loading = false;
+      }
+    },
+
+    async loadData() {
+      const a = this.agent;
+      if (!a) return;
+      this.pnlLoading = true; this.marketsLoading = true;
+      this.pnl = null; this.markets = null; this.pnlError = '';
+      try {
+        const [pnl, markets] = await Promise.all([
+          fetch(`/api/kanet-maker/pnl/${a.id}`).then(r => r.json()),
+          fetch(`/api/kanet-maker/markets/${a.id}`).then(r => r.json()),
+        ]);
+        if (pnl.ok) this.pnl = pnl; else this.pnlError = 'pnl 接口报错: ' + (pnl.error || 'unknown');
+        if (markets.ok) this.markets = markets;
+      } catch (e) {
+        this.pnlError = 'pnl 请求失败: ' + (e?.message || e);
+      } finally {
+        this.pnlLoading = false; this.marketsLoading = false;
+      }
+    },
+  };
+}
+</script>
+<%~ include('partials/page-close') %>
