@@ -199,7 +199,7 @@ export async function registerRelayRoutes(fastify) {
     if (!newRole || !VALID_ROLES.includes(newRole)) {
       return reply.code(400).send({ error: 'invalid_role', message: `role 必 ∈ [${VALID_ROLES.join(', ')}]` });
     }
-    const relay = sqlite.prepare(`SELECT id, name, role, is_dex_broker, is_service, is_oracle, address FROM relay_nodes WHERE id = ?`).get(request.params.id);
+    const relay = sqlite.prepare(`SELECT id, name, role, is_dex_broker, is_service, is_oracle, address, roles_json FROM relay_nodes WHERE id = ?`).get(request.params.id);
     if (!relay) return reply.code(404).send({ error: 'relay_not_found' });
 
     // KANet-UI 2026-06-11 gateway register 守门 (role=broker 时):
@@ -231,19 +231,33 @@ export async function registerRelayRoutes(fastify) {
       return reply.send({ ok: true, role: newRole, unchanged: true });
     }
 
-    // legacy field 同步 (role authoritative, legacy mirror)
-    const newIsDexBroker = newRole === 'broker' ? 1 : 0;
-    const newIsService = newRole === 'broker' ? 1 : 0;
+    // S-A prev_role 还原 (Bettor r638/r647): gateway register 存原角色, revoke 还原 (非硬 general).
+    let effectiveRole = newRole;
+    let rolesJsonUpdate = relay.roles_json;
+    if (newRole === 'broker' && oldRole !== 'broker') {
+      // ① 实切换到 broker: 存原角色 (oldRole==broker 已 early-return, 不覆盖原 prev)
+      rolesJsonUpdate = JSON.stringify({ prev_role: oldRole });
+    } else if (oldRole === 'broker' && newRole === 'general') {
+      // ② revoke (revokeGateway 传 general): 还原 prev_role; 无/非法 → general default
+      let prev = null;
+      try { prev = JSON.parse(relay.roles_json || '{}').prev_role; } catch {}
+      effectiveRole = (prev && VALID_ROLES.includes(prev)) ? prev : 'general';
+      rolesJsonUpdate = null;  // 清 prev_role
+    }
+
+    // legacy field 同步 (role authoritative, legacy mirror) — 按 effectiveRole
+    const newIsDexBroker = effectiveRole === 'broker' ? 1 : 0;
+    const newIsService = effectiveRole === 'broker' ? 1 : 0;
 
     const now = new Date().toISOString();
     sqlite.prepare(`
       UPDATE relay_nodes
-      SET role = ?, is_dex_broker = ?, is_service = ?, updated_at = ?
+      SET role = ?, is_dex_broker = ?, is_service = ?, roles_json = ?, updated_at = ?
       WHERE id = ?
-    `).run(newRole, newIsDexBroker, newIsService, now, request.params.id);
+    `).run(effectiveRole, newIsDexBroker, newIsService, rolesJsonUpdate, now, request.params.id);
 
-    // ROLE_SKILL_ALLOWED auto-enforce: 不兼容 active trading skill auto-disable
-    const allowed = ROLE_SKILL_ALLOWED_LOCAL[newRole] || [];
+    // ROLE_SKILL_ALLOWED auto-enforce: 不兼容 active trading skill auto-disable (按 effectiveRole)
+    const allowed = ROLE_SKILL_ALLOWED_LOCAL[effectiveRole] || [];
     const allowedSet = new Set(allowed);
     const activeSkills = sqlite.prepare(`
       SELECT id, name FROM skills WHERE relay_node_id = ? AND status = 'active'
@@ -257,20 +271,25 @@ export async function registerRelayRoutes(fastify) {
       }
     }
 
-    // suggested skills: ROLE_SKILL_ALLOWED 中此 agent 已 disabled 状态的 skill (UI prompt 一键启用)
+    // S-A (Bettor r638): auto re-enable effectiveRole 允许但当前 disabled 的 skill.
+    // 修 register→revoke 丢 skill 的不对称 (旧码只 disable 不 re-enable): revoke 还原原角色后
+    // 原角色 skill 集自动恢复; register 也补齐新角色允许的 skill。
     const disabledMatch = sqlite.prepare(`
-      SELECT name FROM skills WHERE relay_node_id = ? AND status = 'disabled' AND name IN (${allowed.map(() => '?').join(',') || "''"})
+      SELECT id, name FROM skills WHERE relay_node_id = ? AND status = 'disabled' AND name IN (${allowed.map(() => '?').join(',') || "''"})
     `).all(request.params.id, ...allowed);
-    const suggested_skills = disabledMatch.map(r => r.name);
+    const reEnableStmt = sqlite.prepare(`UPDATE skills SET status='active', updated_at=? WHERE id=?`);
+    for (const s of disabledMatch) { reEnableStmt.run(now, s.id); }
+    const suggested_skills = disabledMatch.map(r => r.name);  // 已 auto re-enable, 返回供 UI 告知
 
-    console.log(`[relay role] ${relay.name}: '${oldRole}' → '${newRole}', is_dex_broker=${newIsDexBroker}, disabled=${disabled_skills.length}, suggested=${suggested_skills.length}`);
+    console.log(`[relay role] ${relay.name}: '${oldRole}' → '${effectiveRole}'${effectiveRole !== newRole ? ` (revoke→prev_role, requested='${newRole}')` : ''}, is_dex_broker=${newIsDexBroker}, disabled=${disabled_skills.length}, re_enabled=${suggested_skills.length}`);
 
     return reply.send({
       ok: true,
-      role: newRole,
+      role: effectiveRole,            // S-A: revoke 还原 prev_role (非 requested newRole)
+      requested_role: newRole,
       old_role: oldRole,
       legacy_sync: { is_dex_broker: newIsDexBroker, is_service: newIsService },
-      side_effects: { disabled_skills, suggested_skills },
+      side_effects: { disabled_skills, re_enabled_skills: suggested_skills },
     });
   });
 
