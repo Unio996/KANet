@@ -2496,14 +2496,20 @@ export async function registerPoolRoutes(fastify) {
     const why = [];
     const suggestions = [];
     // (a) URL parseable + extractor 已知域名 +3
+    // J2-tn r690 gap3 (J1 line-E N=30 抓): prevet 可裁性判用 findExtractor 单源 (= voter 实际能判的源),
+    // 替原硬编码 regex。drift 实锤: coingecko 在 findExtractor (voter 能判) 但不在硬编码 list → 合法
+    // CoinGecko price 单被误拒 (ETH>=100 warn)。findExtractor 单源 = prevet 允许==oracle 能判、物理不漂
+    // (加 extractor 自动同步, 守'焊死单一访问器')。bbc/reuters/apnews 无 extractor → 不再误奖 (voter 本会 ABSTAIN)。
+    const { findExtractor } = await import('../lib/oracle-evidence-extractors.mjs');
+    const hasKnownExtractor = !!findExtractor(dsc);  // host-anchored + https + SSRF 防护 (= voter 同款判定)
     let urlOk = false;
     if (dsc && /^https?:\/\//.test(dsc)) {
       urlOk = true;
       score += 1;
-      if (/espn\.com|bbc\.co|reuters\.com|apnews\.com|polymarket\.com/i.test(dsc)) {
+      if (hasKnownExtractor || /^https:\/\/([a-z0-9-]+\.)*polymarket\.com/i.test(dsc)) {
         score += 2;
       } else {
-        suggestions.push('数据源域名不在已知抽取器列表 (ESPN/BBC/Reuters/AP/Polymarket), 可能需扩展抽取器');
+        suggestions.push('数据源域名不在已知抽取器列表 (findExtractor: ESPN/CoinGecko 等 + Polymarket), 可能需扩展抽取器');
       }
     } else if (dsc) {
       score += 1;  // 有 free-text source, 半分
@@ -2535,6 +2541,13 @@ export async function registerPoolRoutes(fastify) {
     // (prompt 硬化抗注入 r36 13/13 + clean evidence 正确推理 r38 8/8) — 绕过题走 deriveVote 不瞎判.
     const INFERENCE_RE = /\b(win|won|beat|lead|cover|lose|trail|ahead|up|outscor\w*)\b[^.]{0,25}\bby\b\s+(more than\s+|at least\s+|over\s+|under\s+|greater than\s+)?\d|\bby\s+(more than|at least|over|under|greater than)\s+\d+\s*(point|run|goal|score)|\bmargin\b|\bdifferential\b|point[\s-]*spread|\bspread\b|\bgap\b|\bdifference\b|combined\s+(score|total|points)|(total|score|runs|points|goals)\b[^.]{0,20}\b(exceed|greater than|more than|over|above|below|under)\s*\d|\d+\s*(point|run|goal|score)?s?\s+(more|fewer|less)\s+than|how many .*\b(more|fewer|less)\b/i;
     const inferenceDetected = INFERENCE_RE.test(lower);
+    // J2-tn r690 gap2① (NWT line-E 命门: deriveVote backstop 对主观题失效=高 conf 硬判 0/4 abstain,
+    // 故 prevet 主观闸是【唯一】拦纯主观题的有效门, 非可选 best-effort)。纯主观措辞(无客观判定标准:
+    // play well/deserve/fair/exciting/打得好/配赢/公平/精彩)→ cap warn (不给 pass)。诚实 limitation:
+    // 措辞绑定固有可绕 (best-effort 软预筛), 残留主观题文档标 known limitation (Bettor r691, SS 三态/dispute 兜)。
+    // FP 控制实测: 7/7 主观命中 + 6/6 客观题 (win/price 阈值) 不命中。
+    const SUBJECTIVE_RE = /\b(play|played|playing|perform\w*|do|did|does)\s+(well|poorly|badly|great|good)\b|\bdeserved?\b|\b(was|is|were)\s+(it|this|that|the\s+\w+\s+)?(fair|unfair|exciting|boring|impressive|entertaining|enjoyable|dominant|convincing)\b|\b(fair|unfair|exciting|boring|deserved|impressive)\s+(game|win|victory|outcome|result|performance)\b|打得(好|不好|烂|棒|怎么样)|配(得上)?(赢|win)|公平吗|精彩吗|值得(赢|win)|应该赢|表现(好|出色)/i;
+    const subjectiveDetected = SUBJECTIVE_RE.test(lower);
     const outcomePattern = /(will win|won|finalized|>=|<=|>|<|\bover\b|\bunder\b|above|below|wins?|loses?|result|outcome|champion|elected|defeated|score|price|close[ds]?|reach|exceed|hits?|threshold|target|by [0-9]|\$[0-9]|percent|%|\d+\s*(usd|kas|eth|btc))/i;
     if (outcomePattern.test(lower)) {
       score += 3;
@@ -2556,15 +2569,15 @@ export async function registerPoolRoutes(fastify) {
     } else {
       suggestions.push('题目主题不在已知高可裁 domain (体育/金融/政治), 可能 LLM 难判');
     }
-    // J2-tn r412 Oracle 框架 Bettor r404 钉死: prevet 验 canonical extractor coverage.
-    // KANet extractor 已知域名 → +3 (高可裁性, oracle 可解析); 不在 → -2 (= 启发, 不强阻).
-    const KNOWN_EXTRACTOR_DOMAINS_PREVET = /espn\.com|bbc\.co|reuters\.com|apnews\.com/i;
-    if (urlOk && KNOWN_EXTRACTOR_DOMAINS_PREVET.test(dsc)) {
+    // J2-tn r412 Oracle 框架 Bettor r404 钉死 + r690 gap3 单源: prevet 验 canonical extractor coverage。
+    // 用 hasKnownExtractor (findExtractor 单源, 上方算) 替原硬编码 KNOWN_EXTRACTOR_DOMAINS_PREVET regex —
+    // prevet 允许==oracle 能判 (= voter findExtractor), 物理不漂; coingecko 等 findExtractor 源 +3 不再误拒。
+    if (urlOk && hasKnownExtractor) {
       score += 3;
     } else if (urlOk) {
       score -= 2;
       why.push('数据源域名不在 KANet extractor 已知列表 (= oracle 会 ABSTAIN, 此单可能等 silent_timeout 退款)');
-      suggestions.push('用 ESPN/BBC/Reuters/AP 等已知源, 或等 framework 加 extractor 此源');
+      suggestions.push('用 ESPN / CoinGecko 等 findExtractor 已知源, 或等 framework 加 extractor 此源');
     }
     // LLM 修正 (MVP 单 Qwen via maker_relay_id adapter).
     let llmEndpointHash = null;
@@ -2633,6 +2646,13 @@ export async function registerPoolRoutes(fastify) {
       score = Math.min(score, 6);
       why.unshift('题型=推理题 (需 LLM 从字段计算 margin/spread/差值, 非直接字段比较) — 推理步是注入/相关错重入面, prevet 不给 pass');
       suggestions.unshift('改成直接字段断言 (e.g. "X 队赢" / "价格 > Y" 而非 "X 赢超 N 分" / "X cover the spread") = 可结构化直判, 防推理步攻击');
+    }
+    // J2-tn r690 gap2① 主观题 gate: 纯主观措辞 (无客观判定标准) → cap warn。deriveVote backstop 对主观题
+    // 失效 (命门: 高 conf 硬判 0/4 abstain), prevet 是唯一有效闸。injection 优先级高时不叠加。
+    if (subjectiveDetected && !injectionDetected) {
+      score = Math.min(score, 6);
+      why.unshift('题型=主观题 (play well/deserve/fair/exciting/打得好/配赢 等无客观判定标准) — oracle 无客观证据可判, deriveVote 会过度自信硬判 (非弃权), prevet 不给 pass');
+      suggestions.unshift('改成有客观判定标准的题 (e.g. "X 队赢了吗" / "得分 > N" 而非 "X 打得好吗" / "X 配赢吗") = 有 final 事实可裁');
     }
     score = Math.max(0, Math.min(10, score));
     let tier;
