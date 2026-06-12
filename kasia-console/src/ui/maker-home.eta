@@ -204,4 +204,4 @@ function makerHome() {
   };
 }
 </script>
-<%~ include('partials/page-close') %>
+<%~ include('partials/page-close', it) %>
