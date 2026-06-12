@@ -4,10 +4,14 @@
 //
 // Real version-drift dispatcher branch test requires live config flip + restart; operator-only.
 
+// [J1 #59c update 2026-06-12] added 'refunding' + 'disputed': both are legit pool_markets.protocol_status
+// values written by pool-market-settler.js (refunding = refund-in-progress, L2096, G2-B Bettor r263;
+// disputed = dispute 终态 + grace timer, L883). Verified live DB has rows in both (refunding×3, disputed×1)
+// and they are settler-produced, NOT stranded/corrupt. Allowlist was stale (KANet-UI M3 FSM-rewire surfaced).
 const SPEC_STATUSES = [
   'pending_oracle_sampling', 'pending_oracle_deposits', 'pending_bettors',
-  'collecting_sigs', 'verifying', 'completed', 'refunded',
-  'doomed', 'errored', 'cancelled',
+  'collecting_sigs', 'verifying', 'refunding', 'completed', 'refunded',
+  'disputed', 'doomed', 'errored', 'cancelled',
 ];
 
 export default {
