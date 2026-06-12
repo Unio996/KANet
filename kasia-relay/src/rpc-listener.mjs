@@ -148,15 +148,57 @@ export async function getBlockAtDaa(deadlineDaa) {
   if (!Number.isFinite(deadlineDaa) || deadlineDaa <= 0) {
     throw new Error(`deadlineDaa must be positive number, got ${deadlineDaa}`);
   }
+  // J1tn P1 throughput fix (Bettor r668 批 / J2 r667 cross-node determinism PASS):
+  // backward selectedParentHash walk from tip costs O(tip - deadline) getBlock RPCs → far-back
+  // deadlines (backlog) hit the 30s settler tick → 20-scale NOT-PASS. FORWARD opt: ring buffer
+  // (_recentBlocks, 50000-block/~14h window) gives an anchor block with daa just below deadline;
+  // getBlocks(lowHash=anchor, includeBlocks) batch-fetches forward; filter verboseData.isChainBlock
+  // (= canonical SPC), lowest daaScore >= deadline = endBlock. determinism-equivalent: returns the
+  // BYTE-IDENTICAL endBlock to the backward walk — verified J1 #166/#169 (forward==backward 4/4 on
+  // :3300) + J2 r667 (:3200 backward == J1 forward 4/4 cross-node). endBlock feeds committee_pk_hash
+  // (cross-node consensus), so equivalence is mandatory before switching. 69-93x faster at the
+  // danger zone. Backward walk retained as fallback for deadlines older than the ring window (rare).
+  let anchor = null; // ring block with highest daa strictly below deadlineDaa
+  for (const b of _recentBlocks) {
+    if (b.daaScore < deadlineDaa && (!anchor || b.daaScore > anchor.daaScore)) anchor = b;
+  }
+  if (anchor) {
+    try {
+      let cursor = anchor.hash;
+      let best = null; // lowest-daa SPC block with daa >= deadline (= canonical endBlock, == backward's lastEligible)
+      const MAX_PAGES = 300;
+      for (let page = 0; page < MAX_PAGES; page++) {
+        const resp = await _rpc.getBlocks({ lowHash: cursor, includeBlocks: true, includeTransactions: false });
+        const blocks = resp?.blocks || [];
+        if (blocks.length === 0) break;
+        for (const blk of blocks) {
+          if (!blk?.verboseData?.isChainBlock) continue; // SPC only (kaspad consensus = deterministic)
+          const daa = Number(blk?.header?.daaScore || 0);
+          if (daa >= deadlineDaa) {
+            const hash = blk?.verboseData?.hash || blk?.header?.hash;
+            if (hash && (!best || daa < best.daaScore)) {
+              best = { hash, daaScore: daa, timestamp_ms: Number(blk?.header?.timestamp || 0), isChainBlock: true };
+            }
+          }
+        }
+        // First page crossing the deadline contains the canonical (lowest-daa) SPC endBlock; later
+        // pages are strictly higher daa (forward) so cannot hold a lower eligible block.
+        if (best) return best;
+        const lastHash = (resp.blockHashes && resp.blockHashes[resp.blockHashes.length - 1]) || blocks[blocks.length - 1]?.verboseData?.hash;
+        if (!lastHash || lastHash === cursor) break;
+        cursor = lastHash;
+      }
+      // forward exhausted without crossing deadline (deadline beyond tip, or anchor unexpectedly low) → fall through to backward
+    } catch (e) {
+      log(`getBlockAtDaa forward attempt failed (${e.message}); falling back to backward SPC walk`);
+    }
+  }
+  // Backward SPC walk fallback (original impl): no ring anchor below deadline, or forward inconclusive.
   const info = await _rpc.getBlockDagInfo();
-  // info.sink = SPC tip (= virtual selected parent). NOT virtualParentHashes which can be
-  // any virtual parent including non-SPC. Walking selectedParentHash chain only well-defined
+  // info.sink = SPC tip (= virtual selected parent). Walking selectedParentHash chain well-defined
   // from an SPC block — info.sink is the canonical start.
   const startHash = info?.sink;
   if (!startHash) throw new Error(`cannot resolve SPC tip from getBlockDagInfo (sink missing; got: ${JSON.stringify(Object.keys(info || {}))})`);
-  // Cap (= chain depth this walk can cover). 50000 steps × ~2 daa/step ≈ 100k daa ≈ 9h chain
-  // window. Beyond pruning we'd fail anyway. Each step is ~5ms LAN getBlock = ~250s worst-case,
-  // but typically deadlineDaa is within 5-30min finality so 300-1800 steps = 2-10s in practice.
   const MAX_WALK = 50000;
   let cursor = startHash;
   let lastEligible = null; // last block where daa >= deadlineDaa during walk
@@ -180,7 +222,7 @@ export async function getBlockAtDaa(deadlineDaa) {
     break;
   }
   if (steps >= MAX_WALK) {
-    log(`getBlockAtDaa: walk hit MAX_WALK=${MAX_WALK} cap without crossing deadlineDaa=${deadlineDaa} (returned daa=${lastEligible?.daaScore})`);
+    log(`getBlockAtDaa: backward walk hit MAX_WALK=${MAX_WALK} cap without crossing deadlineDaa=${deadlineDaa} (returned daa=${lastEligible?.daaScore})`);
   }
   if (!lastEligible) {
     throw new Error(`no SPC block crossing deadlineDaa ${deadlineDaa} found within ${MAX_WALK} walk steps (chain may not have reached deadline yet)`);
