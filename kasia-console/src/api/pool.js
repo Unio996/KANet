@@ -238,15 +238,36 @@ async function _broadcastMarketPublished(marketRow, makerRelayId) {
 // (= 质量门, 劣市场不上推荐位)。自家 broker 验在 endpoint L2702 (market.broker_relay_id==broker_relay_id)。
 // ⚠ 设计点待 reviewer 裁: self-broker (broker==maker, 当前 fee 模型多数市场) 也推 = prevet-gate 兜质量;
 //   若只推 distinct broker (独立第三方背书) 则这里加 brokerRelayId != makerRelayId 条件 (现 incl 全 broker-handled)。
+// J2-tn task#12 (b) (Bettor r923 + NWT determinism 轴 PASS): :8000 饱和探针。GET /slots, 所有 slot
+// is_processing=true → 饱和。只读轻量, fail-open (探针失败 → false 不误 skip; auto-recommend 非关键)。
+// 供【非共识 caller】gate 让 slot 给共识路 deriveVote。⚠ 绝不碰 deriveVote (NWT 命门: 共识路永不 node-local
+// skip, 它靠现有 voter-timeout block/超时; 本函数+gate 只在非共识展示层 auto-recommend, 零引用 deriveVote 路)。
+async function is8000Saturated() {
+  try {
+    const r = await fetch('http://127.0.0.1:8000/slots', { signal: AbortSignal.timeout(3000) });
+    if (!r.ok) return false;
+    const slots = await r.json();
+    if (!Array.isArray(slots) || !slots.length) return false;
+    return slots.every(s => s.is_processing === true);
+  } catch { return false; }
+}
+
 function _autoRecommendBrokeredMarket(marketId, brokerRelayId) {
   if (!brokerRelayId) return;
   const port = process.env.PORT || '3200';
-  fetch(`http://127.0.0.1:${port}/api/broker/recommend`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    signal: AbortSignal.timeout(40_000),
-    body: JSON.stringify({ broker_relay_id: brokerRelayId, market_id: marketId }),
-  }).then(r => r.json()).then(j => {
-    console.log(`[pool/auto-recommend] market=${marketId.slice(0, 12)} broker=${brokerRelayId.slice(0, 8)} → ${j?.ok ? 'recommended tier=' + j.prevet_tier + ' score=' + j.prevet_score : 'skip: ' + (j?.error || '?')}`);
+  // task#12 (b): :8000 饱和 → skip auto-推单 (非共识展示层让 slot 给共识 deriveVote/Mind)。deriveVote 零碰。
+  is8000Saturated().then(saturated => {
+    if (saturated) {
+      console.log(`[pool/auto-recommend] market=${marketId.slice(0, 12)} SKIP — :8000 saturated (非共识让 slot 给共识, task#12 b)`);
+      return;
+    }
+    return fetch(`http://127.0.0.1:${port}/api/broker/recommend`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(40_000),
+      body: JSON.stringify({ broker_relay_id: brokerRelayId, market_id: marketId }),
+    }).then(r => r.json()).then(j => {
+      console.log(`[pool/auto-recommend] market=${marketId.slice(0, 12)} broker=${brokerRelayId.slice(0, 8)} → ${j?.ok ? 'recommended tier=' + j.prevet_tier + ' score=' + j.prevet_score : 'skip: ' + (j?.error || '?')}`);
+    });
   }).catch(e => console.warn(`[pool/auto-recommend] market=${marketId.slice(0, 12)} fail: ${e.message}`));
 }
 
