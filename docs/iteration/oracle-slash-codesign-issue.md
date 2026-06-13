@@ -56,7 +56,7 @@ testnet bond = test-KAS 零价值 → slash 是【机制演示】非真经济威
 ## 6. OPEN (待 co-design + Owner 终裁)
 
 1. (a)(b) MVP 可落 (各带 J1 红队修: a 固定线 / b known-limit); (c) echo-slash 归 roadmap (温0+model-pin+clear-mismatch), 且 (c) **治错票不治 lazy-correct echo**——echo 真解=commit-reveal(抄票) + 源多样性/dispute-UMA(canonical 错), 非 slash。
-2. **bond forfeit 去向 = 烧 OR 进 winner pool, 【非进协议】** (J1: 避协议有 slash 牟利动机=别给协议罚款 incentive)。Owner 选烧还是进 winner pool。
+2. **bond forfeit 去向 = 进 winner pool** [Owner 终裁 r827]。否决'烧'(量子计算: 烧到无私钥地址留隐患)。非进协议(避 slash 牟利)。**安全 note**: Architect 担心 winner-pool 制造构陷动机 → 被【provable-only slashing】中和: slash 只罚客观链上事实(提前 unlock / 签错 winner), 攻击者无法 fabricate 这些事实 → 构陷不可执行 → winner-pool 安全。
 3. (b) byzantine slash 与现 PB-S8-1 校验的耦合点 (J2 settler 域)。
 4. lock_until + 固定 expected-settle-deadline 必链上可 derive (跨节点 determinism 铁律) — J2 确认 enrollment P2SH lock_until + deadline 链上可读 + MAX_settle_window 协议常量。
 5. **lazy-correct echo 治本(roadmap)**: 源/extractor 多样性(破 findExtractor 单源)+ dispute/UMA 底座 + reputation 战绩 — 进 oracle 能力分档路线图 [[project-oracle-capability-staged-uma-backbone]]。
@@ -89,3 +89,15 @@ testnet bond = test-KAS 零价值 → slash 是【机制演示】非真经济威
 **测法 (同票实证)**: 喂【同一 boundary prompt】(① 清晰题 ② 小margin ③ no-question→应 ABSTAIN ④ 主观)到两节点 deriveVote → **两节点必出 byte-identical vote** → 贴双节点原始输出。任一不同 = cross-node determinism 破 = FAIL(查是函数/param/model 哪层漂)。
 
 = 这 INVARIANT 堵住 :3300 那类静默漂移(函数版本/param 不同→不同票→committee 不 agree)。R1 闭 = 此测两节点 4 题全同票 + 双节点原始输出贴档。
+
+**⚠ [J2 r822] R1 测范围必含 settle determinism 对拍 (非只 deriveVote 同票)**: :3300 settler 113 行 stale = settle 逻辑(payout/committee bond/fee)漂 → 同市场两节点 settle 可能算出不同输出 → committee_pk_hash 分歧 → 跨节点 settle 不可见(DoD#1.4b 那类墙)。所以 R1 cross-node 测两层: ① deriveVote 同票(本节)② **settle determinism 对拍**(同市场两节点 settle → payout 逐 sompi + committee_pk_hash byte-identical)。whole-repo sync 1dfa83a7b 一并修 settler(→origin == :3200 已验 0-diff)。
+
+## 9. [R4] bond 守恒核验 (NWT 核 J2 r822) — PASS
+
+- **R4-a Σbond_in = Σbond_returned + Σbond_slashed (一笔不丢)**: ✓ 闭
+  - committeeMode (v0.6/v0.7 生产): N×oracleBond = N×oracleBond(全还 L1443) + 0(門C slash 未 live)。
+  - v0.5 silent: N×oracleBond = (N-1)×oracleBond(还) + 1×oracleBond(静默 forfeit L1442)。
+- **R4-b slashed 去向守恒 (不凭空)**: ✓ 逐 sompi 无泄
+  - v0.5 静默 1×oracleBond = 50% winnerForfeit + 25% makerForfeit + 25%(2×perOracleForfeit) = 100%, floor 余 remainder-fold 折进 maker(L1415-6)= exact 无 floor 泄。
+  - committeeMode 未来 slash → **进 winner pool** [Owner 终裁 r827: 否决烧(量子: 烧到无私钥地址留隐患); provable-only slashing 中和构陷顾虑]。
+- **bond ⊥ fee-on-total**: bond reserve (N×oracleBond) 是 SS floor, fee-on-total 只改 fee base 不动 bond reserve。两守恒(⑥ fee + R4 bond)正交、各自逐 sompi 闭。
