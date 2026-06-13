@@ -85,7 +85,7 @@ Betting and creating markets use the **same on-chain protocol** as the rest of K
 
 - **This is testnet.** The KAS here is play money with no value — it's for proving the mechanism, not for profit.
 - **The judges are getting smarter over time.** Today they reliably resolve questions backed by a clean, named data source (e.g. sports finals). For fuzzier or subjective questions, the system leans on a more conservative backstop or simply refuses the market at pre-vet — on purpose. The roadmap widens what the panel can judge **one careful step at a time**, always keeping the abstain-not-guess guardrail.
-- **Known limits are documented**, not hidden — see [12-known-limits.md](12-known-limits.md).
+- **Known limits are documented**, not hidden — see [known limits](../guide/12-known-limits.md).
 
 ## In one sentence
 

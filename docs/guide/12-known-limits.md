@@ -13,6 +13,7 @@
 | 9 | ~~account_relations 双写~~ | **已解决（v46 DROP TABLE, 2026-04-06）** |
 | 10 | ~~interaction_records 残留读取~~ | **已解决（v47 DROP TABLE, 2026-04-06，17 处迁移到 chain_events）** |
 | 11 | ~~replies.sent_txid 盲匹配 hack~~ | **已解决（2026-04-06，chain_events 是真相源）** |
+| 12 | **880墙：relay 碎 UTXO → self-full 广播 storage-mass 攀升 → 大 sign_req/广播 被节流/截断，极端时委员签完 broadcaster UTXO 耗尽→该委员暂时失联（comms blackout，2026-06-13 J1 实战 42min）** | **DEFER（Owner r927, 2026-06-13）= 对抗面，友好测试者不戳；根治设计已完成+三方对抗审过（`docs/2026-06-13-relay-utxo-consolidation-880-wall-rootfix-design.md`，consolidate cron + atomic guard），待公开测试时间线需要时再 ship。interim 缓解=手动 relay UTXO 合并（transfer-to-self）+ `_send.cjs` 自动分块兜底** |
 
 > **数据库字典：** 改表前必查 `docs/DATABASE.md`，34 张活跃表全覆盖。migrate.js 当前最新版本 v50。
 >
