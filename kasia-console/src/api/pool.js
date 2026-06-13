@@ -231,6 +231,25 @@ async function _broadcastMarketPublished(marketRow, makerRelayId) {
   }
 }
 
+// J2-tn task#13 (Bettor r913 GREENLIT): broker 经手市场 create 后自动推单 → 通电 broker_recommendations
+// '③ recommended' 链 (此前表空=没 caller 触发 POST /api/broker/recommend, J2 scope r894 实证 1 行)。
+// 复用 POST endpoint 同款 prevet+history+INSERT 逻辑 (内部 fetch, 零逻辑重复=不 drift)。fire-and-forget:
+// 不 await/不 fail create (prevet 30s LLM 不阻 create); prevet tier!='pass' → endpoint 自然 reject 不入表
+// (= 质量门, 劣市场不上推荐位)。自家 broker 验在 endpoint L2702 (market.broker_relay_id==broker_relay_id)。
+// ⚠ 设计点待 reviewer 裁: self-broker (broker==maker, 当前 fee 模型多数市场) 也推 = prevet-gate 兜质量;
+//   若只推 distinct broker (独立第三方背书) 则这里加 brokerRelayId != makerRelayId 条件 (现 incl 全 broker-handled)。
+function _autoRecommendBrokeredMarket(marketId, brokerRelayId) {
+  if (!brokerRelayId) return;
+  const port = process.env.PORT || '3200';
+  fetch(`http://127.0.0.1:${port}/api/broker/recommend`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    signal: AbortSignal.timeout(40_000),
+    body: JSON.stringify({ broker_relay_id: brokerRelayId, market_id: marketId }),
+  }).then(r => r.json()).then(j => {
+    console.log(`[pool/auto-recommend] market=${marketId.slice(0, 12)} broker=${brokerRelayId.slice(0, 8)} → ${j?.ok ? 'recommended tier=' + j.prevet_tier + ' score=' + j.prevet_score : 'skip: ' + (j?.error || '?')}`);
+  }).catch(e => console.warn(`[pool/auto-recommend] market=${marketId.slice(0, 12)} fail: ${e.message}`));
+}
+
 // Bettor r117/r120 cross-node hardening producer ② — broadcast bet_register onchain.
 // NO signature (chain side_lock_tx UTXO at side_p2sh is truth anchor; consumer
 // recomputes side_p2sh from bettor_pk + market.oracle_pks then verifies UTXO).
@@ -993,6 +1012,7 @@ export async function registerPoolRoutes(fastify) {
     const _mrowV07 = sqlite.prepare('SELECT * FROM pool_markets WHERE id = ?').get(marketId);
     let _bcastV07 = null;
     if (_mrowV07) _bcastV07 = await _broadcastMarketPublished(_mrowV07, b.maker_relay_id);
+    _autoRecommendBrokeredMarket(marketId, b.broker_relay_id);  // J2-tn task#13 通电 broker_recommendations (fire-and-forget)
 
     return reply.send({
       ok: true,
