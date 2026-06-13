@@ -157,3 +157,17 @@
 5. **数值确认**: broker 1.9% / oracle 1%(0.5 均分 + 0.5 质押) / maker 0.1% / 总 ~3% — 确认或调。
 
 **终裁后**: J2 land (base losing→total + maker-self-broker + oracle 0.5% 分账 + ⑥⑦⑧ 码) → Tier4 same-node + **cross-node** → 回归。诚实级别: 本节是**对抗审收口**, fee 模型机制层严密就绪待终裁; G5 报机制非经济闭环。
+
+---
+
+## 10. Owner 终裁 (2026-06-13, "干!!")
+
+5 项 OPEN Owner 已拍:
+1. **② 鲸鱼**: ✅ **接受 linear + 监控** (实测背书)。
+2. **① echo**: ✅ **staged** (MVP temp0+abstain 现防+文档 known-limit; commit-reveal/源多样性 roadmap)。
+3. **⑧ bond 去向**: ✅ **进赢家池 (winner pool)** — Owner 否决 "烧" (理由: 烧到无私钥地址有**量子计算机**未来隐患, 留 honeypot)。Architect 的 "winner pool 制造构陷动机" 顾虑被 **provable-only slashing 中和** (slash 只罚客观链上事实=提前 unlock/签错 winner, 没法 fabricate→构陷不可执行)。
+4. **④ dust/BPS**: ✅ 交 J2 落码定。
+5. **数值**: ✅ 锁 **broker 1.9% / oracle 1%(0.5 均分+0.5 质押) / maker 0.1% / 总 ~3%**。
+
+**⚠ 落码前置 (硬规程, Owner 干 ≠ 现在落码)**: **R1 (cross-node 确定性, §9 ③) 必须先闭** (J1 sync :3300 whole-repo + 两节点同票实测 + model-pin assert) 才让 J2 动 fee 码。R1 闭 → Bettor 报 "机制层就绪" → J2 land → Tier4 same+cross-node → 回归。
+**earlier cross-node landmark (mix0d 等) validity**: 链证 (is_accepted + 4-of-5 签 + settle TX home 构造委员签同一 TX) 客观仍 valid; :3300 settler 113 行 drift 实影响仅 edge-case 未测, sync 后 R1 步②补。
