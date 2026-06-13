@@ -16,7 +16,7 @@ const kw = require('kaspa-wasm');
 
 // ── CONFIG (外部 agent 填这里) ──────────────────────────────────────────────
 const CONFIG = {
-  CONSOLE:  'http://<KANET_PUBLIC_NODE>',         // 发布的公开 KANet console (host:port), 须含 faucet + /api/exchange。注: 不同节点端口不同(开发机 :3200/:3300 各异), 填对外公布的那台
+  CONSOLE:  'http://<KANET_PUBLIC_NODE>',         // 发布的公开 KANet console (host:port), 须含 faucet + /api/exchange。端口由节点运营者定(示例 3100), 填对外公布的那台
   KASPAD:   'ws://<KASPAD_HOST>:17210',           // 任一 TN12 kaspad wRPC borsh 端点
   NETWORK:  'testnet-12',
   CHANNEL:  'kanet-exchange',                      // 固定: 交易所 offer 广播频道

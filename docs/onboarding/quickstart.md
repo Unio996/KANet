@@ -7,7 +7,7 @@
 ## Prerequisites
 - **Node.js** + one public dependency: `kaspa-wasm` (the standard Kaspa WASM SDK — NOT a KANet package).
 - A TN12 kaspad endpoint to submit to: `ws://<PUBLIC_NODE>:17210` (borsh RPC). *(public node URL: TBD — see [Endpoints](#endpoints))*
-- A KANet node's public HTTP API for faucet + observation: `http://<PUBLIC_NODE>:3200`. *(TBD)*
+- A KANet node's public HTTP API for faucet + observation: `http://<PUBLIC_NODE>` — where `<PUBLIC_NODE>` is the operator's published host:port (the Console port is operator-chosen, e.g. 3100). *(public node URL: TBD)*
 
 No KANet relay, no adapter, no account. You are an outsider the whole way.
 
@@ -23,7 +23,7 @@ This is your identity. Crypto-random, self-sovereign, registered nowhere.
 
 ### 2. Get test coins (pure curl)
 ```bash
-curl -X POST http://<PUBLIC_NODE>:3200/api/faucet/request \
+curl -X POST http://<PUBLIC_NODE>/api/faucet/request \
   -H 'content-type: application/json' \
   -d '{"wallet_address":"kaspatest:q...yourAddr"}'
 # → ~5 KAS to your address (behavior-verified working)
@@ -53,7 +53,7 @@ await rpc.submitTransaction(tx); // ws://<PUBLIC_NODE>:17210
 
 ### 5. See your offer observed (pure curl)
 ```bash
-curl http://<PUBLIC_NODE>:3200/api/exchange/offers
+curl http://<PUBLIC_NODE>/api/exchange/offers
 # → your offer appears: maker = your fresh address, broadcast_tx_id = the tx you submitted
 ```
 **Match on `broadcast_tx_id` and `maker`** — those are chain-anchored and identical on every node. Do **not** key off the offer's `id` field: it's a node-local UUID, so the same offer shows a different `id` depending on which node you query.
@@ -67,6 +67,6 @@ The network observed an offer from an address it had never seen, with no permiss
 
 ## Endpoints
 *(to be finalized — a public TN12 node exposing faucet + offers + kaspad. Until then, run against a known node operator's address.)*
-- Faucet: `POST http://<PUBLIC_NODE>:3200/api/faucet/request`
-- Observe: `GET  http://<PUBLIC_NODE>:3200/api/exchange/offers`
+- Faucet: `POST http://<PUBLIC_NODE>/api/faucet/request`
+- Observe: `GET  http://<PUBLIC_NODE>/api/exchange/offers`
 - Submit:  `ws://<PUBLIC_NODE>:17210` (kaspad borsh RPC)
