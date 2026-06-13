@@ -1607,11 +1607,13 @@ export async function dispatchPhase2(market, decision) {
       return;
     }
 
-    // maker payout addr pk-derive from canonical maker_pk (Bettor r859 (a) + NWT②/J1 #296 铁律, 一修两治):
-    // market.maker_pk = create 持久化的 ctor-baked makerPk (canonical 单源, 全节点市场复制读同值, NWT 第二签).
-    // 修 pre-existing breaker: maker WINNER payout (此 participant addr) + makerFee/makerExtra 都从此 pk-derive
-    // 非 makerRow.address (node-local relay 查 = cross-node maker availability 限制)。Fallback (老市场 maker_pk
-    // NULL): cross-node sentinel(cross-node:<pk>) strip → 否则 makerRow.address legacy。
+    // maker payout addr pk-derive from canonical maker_pk (Bettor r859/r863 单源 + NWT②/J1 #296-299, 一修两治):
+    // market.maker_pk = create 持久化的【maker_relay_pk = get_pubkey x_only_pubkey (relay 实际 pk)】= 与跨节点
+    // 广播 (_broadcastMarketPublished L180) → sentinel (cross-node:<pk>) 【同一 get_pubkey 口径, 逐字节同】
+    // (非 deriveXOnlyPubkey(address) round-trip = 非 P2PK edge fork 消除, NWT 单源 refine)。列 || sentinel 两源
+    // 逐字节同 → 全节点单一 derivation。修 pre-existing breaker: maker WINNER payout (此 participant addr) +
+    // makerFee/makerExtra 都 pk-derive 非 makerRow.address (node-local 查)。Fallback (老市场 maker_pk NULL):
+    // cross-node sentinel strip (同 maker_relay_pk) → 否则 makerRow.address legacy。
     let makerAddress = null;
     const makerPkCanonical = market.maker_pk
       || (String(market.maker_relay_id).startsWith('cross-node:') ? market.maker_relay_id.replace(/^cross-node:/, '') : null);

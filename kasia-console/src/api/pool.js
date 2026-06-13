@@ -163,11 +163,20 @@ async function _sendBroadcastChunked(relayId, channel, payloadStr, timeoutMs) {
 // Schema pool_market_published_v1 (r179-locked, r180 3-way verified, r120 ACK).
 // market_metadata_hash 3-way alignment (r180 grep verified L191-198): producer/consumer/spine
 // all sha256(JSON.stringify({source, condition, token, side, end, rule})).
+// J2-tn fee-on-total maker_pk 单源 (NWT/J1 #294-299 + Bettor r863): maker payout addr 派生口径
+// 单源化 = create 持久化 maker_pk 列 + 跨节点广播 sentinel 都用【这同一个 get_pubkey x_only_pubkey】
+// (relay 实际 pk, 非 deriveXOnlyPubkey(address) round-trip = 非 P2PK edge fork)。列==sentinel 逐字节同
+// = 全节点单一 derivation。helper 保 3 create path + broadcast 同口径 (NWT "一个变量/口径")。
+async function _getMakerRelayPk(makerRelayId) {
+  const pkResult = await sendCommandAsync(makerRelayId, { type: 'get_pubkey' });
+  const pk = pkResult?.x_only_pubkey;
+  if (!pk || pk.length !== 64) throw new Error(`maker get_pubkey invalid: ${pk}`);
+  return pk;
+}
+
 async function _broadcastMarketPublished(marketRow, makerRelayId) {
   try {
-    const pkResult = await sendCommandAsync(makerRelayId, { type: 'get_pubkey' });
-    const maker_relay_pk = pkResult?.x_only_pubkey;
-    if (!maker_relay_pk || maker_relay_pk.length !== 64) throw new Error(`maker get_pubkey invalid: ${maker_relay_pk}`);
+    const maker_relay_pk = await _getMakerRelayPk(makerRelayId);
 
     const oracle_relay_pks = [marketRow.oracle1_pk, marketRow.oracle2_pk, marketRow.oracle3_pk].filter(Boolean);
 
@@ -331,6 +340,9 @@ export async function registerPoolRoutes(fastify) {
     const brokerPk = await deriveXOnlyPubkey(brokerRow.address);
     try { await assertBrokerP2PK(brokerPk, brokerRow.address); } catch (e) { return reply.code(e.code || 400).send({ ok: false, error: e.message }); }
     const oraclePks = await Promise.all(oracleRows.map(r => deriveXOnlyPubkey(r.address)));
+    // maker_pk 列 = 实际 relay pk (== broadcast/sentinel 同源, 单源化 NWT/Bettor r863). ctor 仍用 makerPk
+    // (deriveXOnlyPubkey, L448 不动 = 不改 P2SH 地址). payout 用 maker_relay_pk (settle pk-derive).
+    const maker_relay_pk = await _getMakerRelayPk(b.maker_relay_id);
 
     // deadline + amounts.
     // UAT pain point #2: 15-min minimum is friction for quick testnet demos. POOL_DEADLINE_MIN_OVERRIDE
@@ -482,7 +494,7 @@ export async function registerPoolRoutes(fastify) {
         outcome_market_source, outcome_condition_id, outcome_token_id, outcome_side, resolution_rule_spec,
         protocol_status, sides_merkle_root, oracle_relay_ids, broker_relay_id, metadata, category
       ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
-        marketId, b.maker_relay_id, makerPk, spineResult.p2shAddr, spineTxId, marketMetadataHash,
+        marketId, b.maker_relay_id, maker_relay_pk, spineResult.p2shAddr, spineTxId, marketMetadataHash,
         oraclePks[0], oraclePks[1], oraclePks[2], brokerPk,
         deadline, minerFee, brokerFeePct, oracleBondAmount, makerStakeAmount,
         b.outcome_market_source, b.outcome_condition_id, b.outcome_token_id, b.outcome_side, b.resolution_rule_spec,
@@ -569,6 +581,8 @@ export async function registerPoolRoutes(fastify) {
     const makerPk = await deriveXOnlyPubkey(makerRow.address);
     const brokerPk = await deriveXOnlyPubkey(brokerRow.address);
     try { await assertBrokerP2PK(brokerPk, brokerRow.address); } catch (e) { return reply.code(e.code || 400).send({ ok: false, error: e.message }); }
+    // maker_pk 列 = 实际 relay pk (单源 == broadcast/sentinel, NWT/Bettor r863). ctor 仍 makerPk 不动.
+    const maker_relay_pk = await _getMakerRelayPk(b.maker_relay_id);
 
     const minDeadlineMin = parseInt(process.env.POOL_DEADLINE_MIN_OVERRIDE, 10) || 15;
     const outcomeEndMs = new Date(b.outcome_end_date).getTime();
@@ -665,7 +679,7 @@ export async function registerPoolRoutes(fastify) {
         protocol_status, sides_merkle_root, oracle_relay_ids, broker_relay_id, metadata, category,
         protocol_version, pool_merkle_root
       ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
-        marketId, b.maker_relay_id, makerPk, spineResult.p2shAddr, spineTxId, marketMetadataHash,
+        marketId, b.maker_relay_id, maker_relay_pk, spineResult.p2shAddr, spineTxId, marketMetadataHash,
         null, null, null, brokerPk,
         deadline, minerFee, brokerFeePct, oracleBondAmount, makerStakeAmount,
         b.outcome_market_source, b.outcome_condition_id, b.outcome_token_id, b.outcome_side, b.resolution_rule_spec,
@@ -844,6 +858,8 @@ export async function registerPoolRoutes(fastify) {
     const makerPk = await deriveXOnlyPubkey(makerRow.address);
     const brokerPk = await deriveXOnlyPubkey(brokerRow.address);
     try { await assertBrokerP2PK(brokerPk, brokerRow.address); } catch (e) { return reply.code(e.code || 400).send({ ok: false, error: e.message }); }
+    // maker_pk 列 = 实际 relay pk (单源 == broadcast/sentinel, NWT/Bettor r863). ctor 仍 makerPk 不动.
+    const maker_relay_pk = await _getMakerRelayPk(b.maker_relay_id);
 
     const minDeadlineMin = parseInt(process.env.POOL_DEADLINE_MIN_OVERRIDE, 10) || 15;
     const outcomeEndMs = new Date(b.outcome_end_date).getTime();
@@ -951,7 +967,7 @@ export async function registerPoolRoutes(fastify) {
         protocol_status, sides_merkle_root, oracle_relay_ids, broker_relay_id, metadata, category,
         protocol_version, pool_merkle_root, deadline_daa
       ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
-        marketId, b.maker_relay_id, makerPk, spineResult.p2shAddr, spineTxId, marketMetadataHash,
+        marketId, b.maker_relay_id, maker_relay_pk, spineResult.p2shAddr, spineTxId, marketMetadataHash,
         null, null, null, brokerPk,
         deadline, minerFee, brokerFeePct, oracleBondAmount, makerStakeAmount,
         b.outcome_market_source, b.outcome_condition_id, b.outcome_token_id, b.outcome_side, b.resolution_rule_spec,

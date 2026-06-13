@@ -4996,16 +4996,17 @@ export function runMigrations() {
     }
   }
 
-  // v169: pool_markets.maker_pk (J2 fee-on-total 2026-06-13, Bettor r859 采纳 (a) + NWT/J1 co-design):
-  // 持久化 ctor-baked makerPk (create deriveXOnlyPubkey → spine ctor makerPk param) 成可读列 = canonical
-  // (= SS 链上承诺同值, 两节点同, 非重新 derive 防 P2PK-edge 漂 per NWT 审①). settle pk-derive maker
-  // payout addr (winner payout + makerFee output) 从此列, 替 makerRow.address (node-local relay 查 =
-  // cross-node maker availability 限制 + NWT② 地址派生轴 BREAKER 同款). 只新建市场填; 老市场 NULL →
-  // settler fallback (cross-node sentinel strip / makerRow.address legacy). DEFAULT NULL 不 retro-apply.
+  // v169: pool_markets.maker_pk (J2 fee-on-total 2026-06-13, Bettor r859/r863 单源 + NWT/J1 co-design):
+  // 持久化【maker_relay_pk = get_pubkey x_only_pubkey (relay 实际 pk)】= 与 _broadcastMarketPublished 广播
+  // (L180) → 跨节点 sentinel (cross-node:<pk>) 【同一 get_pubkey 口径, 逐字节同】(非 deriveXOnlyPubkey(addr)
+  // round-trip = 非 P2PK edge fork 消除, NWT 单源 refine 升 '两源 round-trip 等' 到 '两源逐字节同'). settle
+  // pk-derive maker payout addr (winner payout + makerFee output) 从此列, 替 makerRow.address (node-local
+  // relay 查 = cross-node maker availability 限制 + NWT② 地址派生轴 BREAKER). 只新建市场填; 老市场 NULL →
+  // settler fallback (cross-node sentinel strip 同 maker_relay_pk / makerRow.address legacy). 不 retro-apply.
   {
     try {
       sqlite.exec(`ALTER TABLE pool_markets ADD COLUMN maker_pk TEXT`);
-      console.log('[migrate] v169: pool_markets.maker_pk (ctor-baked makerPk canonical, settle maker payout pk-derive 一修两治 winner+fee).');
+      console.log('[migrate] v169: pool_markets.maker_pk (= maker_relay_pk 单源 == broadcast/sentinel, settle maker payout pk-derive 一修两治 winner+fee).');
     } catch (e) {
       if (!/duplicate column/i.test(e.message)) console.warn(`[migrate] v169 maker_pk fail: ${e.message}`);
     }
