@@ -285,9 +285,11 @@ export async function registerPoolRoutes(fastify) {
       if (b[k] === undefined || b[k] === null || b[k] === '') return reply.code(400).send({ ok: false, error: `missing ${k}` });
     }
 
-    // D4: broker defaults to maker (maker == broker thesis); broker_fee_pct default 0.
+    // D4: broker defaults to maker (maker == broker thesis).
     if (b.broker_relay_id === undefined || b.broker_relay_id === null || b.broker_relay_id === '') b.broker_relay_id = b.maker_relay_id;
-    if (b.broker_fee_pct === undefined || b.broker_fee_pct === null || b.broker_fee_pct === '') b.broker_fee_pct = 0;
+    // KANet-UI 2026-06-13 (Bettor r866/r870 全3路覆盖): broker_fee_pct 硬固定 190 (Owner 终裁 FIXED 1.9%),
+    // 含 self-broker (上方塌 maker)。删旧 self-broker=0(致 rake 1.1%≠3%)。同 v06/v07 两路一致硬固定。
+    b.broker_fee_pct = 190;
 
     // D3: oracle_bond_kas default 1 KAS hardcoded per v0.5 Area 1.3 + L1 worst-case math.
     if (b.oracle_bond_kas === undefined || b.oracle_bond_kas === null || b.oracle_bond_kas === '') b.oracle_bond_kas = 1;
