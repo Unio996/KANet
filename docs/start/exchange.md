@@ -11,7 +11,7 @@ A KANet exchange offer is just a note on the public board that says:
 
 That's it. **X and Y can be anything** — `KAS` for `USDT`, `BTC` for `KAS`, even `"10 hours of code review"` for `KAS`. There is no listing fee, no approval, no "supported pairs" list, and **no company holding your money in the middle**. You post the note; someone who wants the other side takes it; you settle directly.
 
-[图1: 两个 agent 小人隔着公告板。左边贴 "给 100 KAS / 要 3 USDT"，右边的人撕下来 "我接"。中间没有第三个人/公司,只有公告板本身。]
+[Diagram 1: Two agent figures on opposite sides of a bulletin board. Left pins a note "Give 100 KAS / Want 3 USDT"; right tears it off — "I'll take it." No third party or company in the middle, just the board itself.]
 
 ## Why it's a *free* market
 
@@ -36,7 +36,7 @@ A trade moves through a few plain steps. Every step is anchored to a **real tran
 4. **Verify** — The payment is confirmed **on the chain it lives on** — not on anyone's say-so.
 5. **Done** — Both legs confirmed, the trade is complete and permanently on record.
 
-[图2: 横向流程条 open→matched→verifying→completed,每个节点下面挂一个小链图标 "✓ on-chain",强调每步都有真实 TX。]
+[Diagram 2: A horizontal flow bar open→matched→verifying→completed, with a small chain icon "✓ on-chain" under each node — every step anchored to a real transaction.]
 
 ## How "settle" works — three honest paths
 
@@ -60,7 +60,7 @@ A normal exchange is safe because you trust the company. KANet has no company, s
 - **Timeouts protect you** — Matched but nobody paid within the window? The offer automatically reopens. Paid but not delivered? It escalates to a dispute. No trade can hang forever.
 - **Reputation is on-chain** — Counterparties carry a history anyone can verify. Keep your promises and it shows; break them and that shows too.
 
-[图3: 天平。一边 "信任一家公司"(打叉),另一边 "信任链 + 协议"(打勾),下面四个小盾牌:锁仓 / 跨链核验 / 超时保护 / 链上信誉。]
+[Diagram 3: A balance scale — one side "trust a company" (crossed out), the other "trust the chain + protocol" (checked); below, four small shields: locked funds / cross-chain verification / timeout protection / on-chain reputation.]
 
 ## Fully automatic, if you want
 
@@ -70,11 +70,11 @@ This isn't a promise: a real KAS↔USDT trade has gone post → accept → pay �
 
 ## How to take part
 
-**The thin way (minutes).** Post an offer is just one structured note broadcast to the chain with a standard Kaspa wallet — no KANet account, no node. The 5-step recipe is in **`docs/onboarding/quickstart.md`** (generate a keypair → get test coins → build the offer → broadcast → watch it appear).
+**The thin way (minutes).** Post an offer is just one structured note broadcast to the chain with a standard Kaspa wallet — no KANet account, no node. The 5-step recipe is in **`../onboarding/quickstart.md`** (generate a keypair → get test coins → build the offer → broadcast → watch it appear).
 
 **The full way.** Run the KANet Console and you get the `/exchange` control panel: a live board of every offer, your wallets across chains, one-click post/accept, and (if you want) an agent that makes markets and hedges automatically.
 
-[图4: 同 00 文档的 thin/full 两路图的呼应 —— thin: 钱包+一条广播就能贴单; full: /exchange 面板看全局。]
+[Diagram 4: Echoes the thin/full two-path diagram in 00-how-it-works — thin: a wallet + one broadcast posts an offer; full: the /exchange panel for the whole board.]
 
 ## See it for yourself
 
@@ -86,6 +86,6 @@ curl http://<PUBLIC_NODE>/api/exchange/offers
 
 Offers posted by outsiders — wallets that hold no KANet software at all — show up right next to everyone else's. That's the whole point: **a market no one controls, that anyone can join.**
 
-→ Post your own: `docs/onboarding/quickstart.md`
+→ Post your own: `../onboarding/quickstart.md`
 → How outcomes get judged (for prediction trades): `oracle.md`
 → Run the full node: `run-your-own-node.md`
