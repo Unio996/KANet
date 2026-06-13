@@ -19,7 +19,16 @@
  */
 
 import { sqlite as _sqlite } from '../db/client.js';
+import { emitDmMenuAction } from '../api/audit-prediction.js';
 function getDb() { return _sqlite; }
+
+// KANet-UI 2026-06-13 (Bettor r787 ④): wire DM menu actions into the audit trail (fixes
+// last_7_days_dm 空 — emitDmMenuAction existed but was never called). CRITICAL (Bettor r787 注):
+// audit is a SIDE-EFFECT, never blocking — a failed emit MUST NOT break the DM/betting flow
+// (register-v06 落链 main path must not depend on this). Every call goes through this swallow-wrapper.
+function safeEmit(opts) {
+  try { emitDmMenuAction(opts); } catch (e) { /* audit side-effect — swallow, never block betting */ }
+}
 
 // ── State machine constants ──────────────────────────────────────────────
 
@@ -396,6 +405,9 @@ async function confirmPoolBet(senderAddress, session, relayId, baseUrl) {
     }
     if (cfm && cfm.ok && cfm.registered) {
       updateSession(senderAddress, STATE.MATCHED, { aux: { tx: cfm.side_lock_tx || payTxid } });
+      // Audit: bet confirmed on-chain — link DM action to the real side_lock_tx (Bettor r787 ④).
+      safeEmit({ user_address: senderAddress, market_id: marketId, action_type: 'confirm_bet',
+        action_payload: { side, stake_kas: stakeKas, kind: 'pool' }, dispatch_txid: cfm.side_lock_tx || payTxid });
       return [
         '🎯 下注成功 + 已上链!',
         `市场: ${marketId.slice(0, 16)}...`,
@@ -469,12 +481,14 @@ export async function handleDmMessage(senderAddress, text, ctx = {}) {
 
   // /my_bets — anywhere
   if (trimmed === MENU.MY_BETS) {
+    safeEmit({ user_address: senderAddress, action_type: 'my_bets' });
     return renderMyBets(await fetchUserBets(senderAddress, relayId, baseUrl));
   }
 
   // /predict — enter SELECT_MARKET state
   if (trimmed === MENU.PREDICT) {
     const markets = fetchActiveMarkets();
+    safeEmit({ user_address: senderAddress, action_type: 'predict_browse', action_payload: { market_count: markets.length } });
     // Encode markets snapshot ids into aux as comma-list (= short enough for last_action col)
     updateSession(senderAddress, STATE.SELECT_MARKET, {
       aux: { ms: markets.map(m => m.id.slice(-8)).join(',') },
@@ -538,6 +552,9 @@ export async function handleDmMessage(senderAddress, text, ctx = {}) {
       }
 
       updateSession(senderAddress, STATE.MATCHED, { aux: { tx: stakeJson.txid || stakeJson.tx } });
+      // Audit: offer (E pre-handshake) bet matched — link to escrow stake TX (Bettor r787 ④).
+      safeEmit({ user_address: senderAddress, market_id: session.last_market_id, action_type: 'confirm_bet',
+        action_payload: { side: session.last_outcome, stake_kas: session.aux.stake, kind: 'offer' }, dispatch_txid: stakeJson.txid || stakeJson.tx });
       return [
         '🎯 stake locked + MATCHED!',
         `Offer: ${session.last_market_id}`,
@@ -563,6 +580,7 @@ export async function handleDmMessage(senderAddress, text, ctx = {}) {
       const market = markets[num - 1];
       // Persist market kind in aux (= pool|offer) so SELECT_OUTCOME/CONFIRM_STAKE/confirm route correctly.
       updateSession(senderAddress, STATE.SELECT_OUTCOME, { last_market_id: market.id, aux: { kind: market.kind } });
+      safeEmit({ user_address: senderAddress, market_id: market.id, action_type: 'select_market', action_payload: { kind: market.kind } });
       return renderOutcomeList(market);
     }
 
