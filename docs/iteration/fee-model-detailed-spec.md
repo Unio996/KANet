@@ -101,8 +101,11 @@
 - **漏洞 (KANet-UI ④)**: 若无 broker 市场省 1.9% → 更便宜 → 用户偏好无 broker → 砸 broker 模型 (= Owner existential 担忧反面)。
 - **解 = maker 默认自任 broker** (KANet-UI): 无第三方 broker 时 `broker_relay_id = maker_relay_id` → **永远没'无 broker 市场'** → 用户永远看**恒定 3%** → 无更便宜选项可避 → broker 模型不被砸。
   - ① 1.9% 永远奖"带来 volume 的人" (第三方 broker 或自推广 maker), 激励一致。
-  - ② 防自肥: fee 从**别人的** losingPool 抽 → maker 自任只在**别人来押**才赚 = 无自交易套利。
-  - Bettor 撤回 '诚实 1.1%' 案: KANet-UI 解更优 (服务没缺席 = maker 自分发, 不是向缺席服务收费)。
+  - ② **自洗盘经济 (B 下实算, Architect ⑤ 纠正)**: maker 自任 broker 两边各押 x (总池 2x) 自洗盘:
+    - 付费 = 3% × 2x = 0.06x; 回收 = broker 1.9%×2x + maker 0.1%×2x = 0.04x; **净 = −0.02x = 洗盘量的 1% (= 正好 oracle 份额)**。
+    - 结论**不是"无自交易套利"** (那是 fee-on-winnings/A 语言, 与 §1 锁定的 fee-on-total/B 不兼容) — 而是**自洗盘不盈利 (净亏 ≈ oracle 1%) 但廉价**: 可 (a) 花钱雇 oracle 裁假市场 (b) 以 1% 成本刷 volume。
+    - **🔴 残留风险 (OPEN-⑤, J1 红队)**: volume 是选 B 的存在性理由 (可预测 volume → 好招 broker) → **论证 B 的指标本身可被 1% 成本污染**。若 volume 进 broker 招募/信誉/排名 → 需独立缓解 (wash-volume 检测 / 自押不计 volume 指标); 缓解若用事后审, 复用 ⑧/G5 同源证据 ([门C] 弱耦合)。
+  - Bettor 撤回 '诚实 1.1%' 案: maker 自任 broker 仍是恒定 3% 的正解 (服务没缺席 = maker 自分发), 但**自肥论证按 B 重写如上** (非"无套利")。
 - **OPEN 落码**: create-v06 无 broker 时自动填 maker_relay_id 进 broker 位; SS ctor broker 输出指向 maker P2PK。J2 域确认可落。
 
 ---
