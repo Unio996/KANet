@@ -28,4 +28,5 @@ console.log('[launch] token=' + (kv.TELEGRAM_BOT_TOKEN ? 'set' : 'MISSING') +
             ' ingest_secret=' + (ingest ? 'resolved' : 'MISSING') +
             ' broker=15593e10(broker-1) console=:3200');
 
-await import('../tg-bot/bot.mjs'); // starts the bot (grammy bot.start)
+const { startBot } = await import('../tg-bot/bot.mjs'); // import registers handlers (no side-effects)…
+startBot();                                              // …startBot() goes live (grammy bot.start + pollers)

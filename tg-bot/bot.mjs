@@ -37,7 +37,7 @@ bot.catch((err) => {
 // refreshed periodically so a UI change takes effect live. env BROKER_RELAY_ID is fallback only.
 let brokerRelayId = await resolveBrokerRelayId();
 if (!brokerRelayId) console.warn('[tg-bot] no broker configured — set it in Console Settings → Telegram Bot Broker');
-setInterval(async () => { brokerRelayId = await resolveBrokerRelayId(); }, CONFIG.brokerRefreshMs);
+// broker-refresh interval moved into startBot() (below) so import doesn't poll the Console.
 
 // linked users for the reactive notification poller (tg_user -> { address, lastTs }).
 // Bettor r63 P0 fix: link store 持久化已迁到 prediction-menu._state.json (getLinkedAddr/setLinkedAddr).
@@ -62,7 +62,7 @@ bot.command('link', async (ctx) => {
 bot.command('verify', (ctx) => ctx.reply('用 /link <你的 kaspatest 地址> 绑定即可。/bet 开始押注。'));
 
 bot.command('swap', async (ctx) => { const broker = await api.brokerInfo(brokerRelayId); return ctx.reply(M.swapFlow(broker)); });
-bot.command('bet',  async (ctx) => ctx.reply(await PM.startBet(String(ctx.from.id))));  // S-C: in-chat 编号菜单
+bot.command('bet',  async (ctx) => ctx.reply(await PM.startBet(String(ctx.from.id), brokerRelayId)));  // S-C: in-chat 编号菜单 — broker-scoped (only this broker's 经手 markets)
 // Bettor r78 ① — /mybets: 列自己押注 + 赢/输/退款状态 (= J2 r126 my-positions wire).
 // Bettor r87 ③ 续 — 每 open position 加 inline-keyboard '➕ 加注/反手' (防流失, callback 接 startBetFromMarket).
 bot.command('mybets', async (ctx) => {
@@ -123,7 +123,7 @@ async function pollLoop() {
     if (evs.length) { const last = Date.parse(evs[evs.length - 1].observed_at); if (last) st.lastTs = last; }
   }
 }
-setInterval(() => { pollLoop().catch(() => {}); }, CONFIG.pollMs);
+// pollLoop interval moved into startBot() (below).
 
 // S-C stage5 — poll backend confirm for users awaiting on-chain bet payment (design LOCKED Bettor r263).
 // confirm runs server-side 3-validation (dest==side_p2sh + amount==exact_sompi + UNIQUE tx) → insert pool_bettor_sides.
@@ -159,7 +159,7 @@ async function pollPendingBets() {
     // else (pending / not ok / soft fail): payment not yet detected — keep polling silently.
   }
 }
-setInterval(() => { pollPendingBets().catch(() => {}); }, CONFIG.pollMs);
+// pollPendingBets interval moved into startBot() (below).
 
 // Bettor r71 ① — settle-result poller: 每 link'd 用户的所有 positions, 检测结算/退款后通知.
 // 0-custody: read-only my-positions; 不签不付. 跨重启幂等 (seen_settled 持久化 _state.json).
@@ -197,7 +197,16 @@ async function pollSettleResults() {
     } catch {}
   }
 }
-setInterval(() => { pollSettleResults().catch(() => {}); }, CONFIG.pollMs);
+// KANet-UI 2026-06-13: runtime side-effects (Telegram poller + the 3 background pollers, which can send
+// real messages) live in startBot() so `import`ing this module (e.g. from a test) registers the handlers
+// WITHOUT going live. _launch_tg_bot.mjs calls startBot(); tests import { bot } and feed bot.handleUpdate().
+export function startBot() {
+  setInterval(async () => { brokerRelayId = await resolveBrokerRelayId(); }, CONFIG.brokerRefreshMs);
+  setInterval(() => { pollLoop().catch(() => {}); }, CONFIG.pollMs);
+  setInterval(() => { pollPendingBets().catch(() => {}); }, CONFIG.pollMs);
+  setInterval(() => { pollSettleResults().catch(() => {}); }, CONFIG.pollMs);
+  bot.start();
+  console.log('[tg-bot] @' + CONFIG.botUsername + ' up (broker=' + (brokerRelayId || 'UNSET — set in Console Settings') + ', 0-key / deep-link only)');
+}
 
-bot.start();
-console.log('[tg-bot] @' + CONFIG.botUsername + ' up (broker=' + (brokerRelayId || 'UNSET — set in Console Settings') + ', 0-key / deep-link only)');
+export { bot };

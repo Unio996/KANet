@@ -47,10 +47,13 @@ export async function brokerInfo(brokerRelayId) {
 }
 
 // S-C — prediction markets (J1 S-B, contract frozen r81). Read-only for the in-chat menu.
-export function poolMarkets({ status, category, limit = 50, offset = 0 } = {}) {
+export function poolMarkets({ status, category, limit = 50, offset = 0, broker_relay_id } = {}) {
   const q = new URLSearchParams();
   if (status) q.set('status', status);
   if (category) q.set('category', category);
+  // broker-scoped: pass through to the SAME canonical /api/pool/markets?broker_relay_id filter the
+  // Kasia broker-DM markets-tool uses (broker-llm-agent.js:594) — one filter source, two broker faces.
+  if (broker_relay_id) q.set('broker_relay_id', broker_relay_id);
   q.set('limit', String(limit));
   q.set('offset', String(offset));
   return req('GET', `/api/pool/markets?${q.toString()}`);

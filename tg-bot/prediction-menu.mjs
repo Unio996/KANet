@@ -404,11 +404,13 @@ export function pickFreshSettlements(tgUser, currentSettled) {
 }
 
 // /bet → stage0: 列品类 (按 pending_bettors 市场的 category 聚合)
-export async function startBet(tgUser) {
-  try { return await _startBetImpl(tgUser); } finally { persist(); }
+export async function startBet(tgUser, brokerRelayId) {
+  try { return await _startBetImpl(tgUser, brokerRelayId); } finally { persist(); }
 }
-async function _startBetImpl(tgUser) {
-  const r = await api.poolMarkets({ status: 'pending_bettors', limit: 200 });
+async function _startBetImpl(tgUser, brokerRelayId) {
+  // broker-scoped (Bettor r957): the bot is broker X's face, so it lists ONLY this broker's brokered
+  // (经手) markets. brokerRelayId = the bot's tg_bot_broker_relay_id (passed from bot.mjs).
+  const r = await api.poolMarkets({ status: 'pending_bettors', limit: 200, broker_relay_id: brokerRelayId });
   // Bettor r68 P0 fix: bot 走 register-external (v0.5 only) — v0.6 市场用 register-v06/confirm,
   // bot 还没接. 不滤会拒 → 用户选中 v0.6 市场 register-external 拒 protocol mismatch = broken path.
   // 等 bot v0.6 wire 完成再删此过滤.
