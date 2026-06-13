@@ -195,9 +195,15 @@ export async function registerExchangeRoutes(fastify) {
       t: 'kanet_exchange_v1',
       id: offerId,
       give_asset,
+      // lint-allow-chain-amount-precision: J2-tn (KANet-UI flag + Bettor r942 裁): give/want_amount 是
+      // kanet_exchange_v1 broadcast offer 的 JSON wire 字段 (offer 展示/撮合条款, 用户输入字符串), 非 Kaspa TX
+      // sompi amount (实际转账精度由 settle sendAsset 处理)。格式 behavior-verified 锁定 (J1 live e2e offer
+      // 061ef38c/66e0b93c + ext-agent 模板 + quickstart 全用 '0.01' 这种 String); 改 .toFixed(8) 破已发布 kit
+      // + 链上已验 wire 格式 = 反模式。KI-30 此处 false-positive (offer JSON 字段非 TX amount)。
       give_amount: String(give_amount),
       give_chain: give_chain || null,
       want_asset,
+      // lint-allow-chain-amount-precision: 同上 give_amount (offer JSON wire 字段非 TX amount, behavior-verified 锁定)
       want_amount: String(want_amount),
       want_chain: want_chain || null,
       expires_at: expiresAt,
