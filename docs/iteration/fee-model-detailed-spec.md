@@ -20,6 +20,8 @@
 
 **Owner 选 B 的理由 (existential)**: broker 收入稳定可预测 = 好招 broker。Owner 钦定 "没人当 broker 这产品只有死"。代价: winner 略少 — 用 §6 透明前置兜 (押注前显净预期赔付)。
 
+> ⚠ **stale (R2v2-R3, 以 §9 ⑦ 为准)**: 上表 "押 100→净 97 进局" 是 **entry-framing 近似**。真模型=**settle-time** (fee=3%×totalPool 在结算算), winner 净赔付**依赖最终池组成** (L/W 比), 非固定 97%。UI 必显实算动态净赔付 (§6)。
+
 ---
 
 ## 2. 三分账 (on TOTAL pool) 【框架·Owner r791 建议值】
@@ -90,7 +92,7 @@
 ## 4. fee-on-total 实现细则 (取整/dust/floor 优先级)
 
 - SS 校验**输出结构非费用公式** (PoolSpine_v07 L255-257: broker 输出 = P2PK + dust ≥1000 sompi)。fee 烤进 spine ctor @ create = **per-market immutable** (改=P2SH 迁移, [[feedback-ss-ctor-param-change-equals-address-migration]])。
-- **每个委员 payout 必 ≥ oracleBond** (SS 硬底 L261-277, NWT)。质押 0.5% 份额拉低某委员 payout < bond → 必兜 (floor 优先于比例)。
+- ~~**每个委员 payout 必 ≥ oracleBond**...质押 0.5% 份额拉低某委员 payout < bond → 必兜 (floor 优先于比例)~~ → **stale (R2v2-R3, 以 §9 ⑥ 为准)**: ⑥ 解 = **bond 单独预留** + fee-share 相加 (payout = bond + fee-share ≥ bond), 根本**无"比例被 floor 兜"的情形**。原 "floor 优先于比例" 会误导 J2 落码, 作废。
 - **取整/dust 优先级 (OPEN, 待 J2 落码细)**: brokerFeeRaw = totalPool × 190/10000 (整数 sompi); 各方四舍五入余数归谁 (winner? 还是按现 L1364 distributablePool 逻辑)? dust < 1000 怎么处理? = §需 J2 settler 域定死 + 测。
 - **base 改动点**: 现 `computePoolPayouts` L1364 `brokerFeeRaw = losingPool × pct` → 改 `totalPool × pct` (Owner B)。这是**未来 fee 码改动的唯一入口**, Owner 终裁后 J2 land + 链上 Tier 验。
 
@@ -145,7 +147,7 @@
 | ⑧ | work-fee slash 逃逸口 | ✅ co-design 草案 (待终裁) | → `docs/iteration/oracle-slash-codesign-issue.md`。fee门(J2): work-fee 需 `lock_until ≥ 固定 expected-settle-deadline`(=deadline+MAX_settle_window, 攻3 修)。slash(NWT): (a)unlock-before-固定线 + (b)byzantine **known-limit**(honest-majority 破时复合害, 主防=VRF+bond 非 slash) MVP 可落; (c)echo=roadmap。J1 红队 4 向量全纳入。bond 去向=烧 OR winner pool(非协议)。 |
 | ① | echo 搭便车 | 🔁 re-framed (roadmap) | addendum 纠: 危害是**均分 work 的纳什均衡**(抄票省算力→独立验证层萎缩)非仅 abstain 边界。slash-on-mismatch **治错票、不治 lazy-correct echo**(抄【对】答案=票==canonical 不 mismatch, J1 攻1)。echo 真解二分: ①copying-echo→**commit-reveal**(看不到别人票) ②independent-same-canonical→**源/extractor 多样性**(破 findExtractor 单源)+dispute/UMA+reputation。归分档 roadmap [[project-oracle-capability-staged-uma-backbone]]。 |
 | ② | stake 双重复利 | ✅ resolved (实测翻案) | NWT 蒙特卡洛 20000 市场: 鲸鱼 fee/stake = **集中场景 0.64-0.98x(亚比例·被惩罚) / 分散场景最大者 1.17x(无 takeover)**。= 机制 **mildly 去中心化, 非鲸鱼通吃**(uniform 0.5%半稀释+WOR 一席上限 压过 stake 加权)。addendum '钦定非证明' 双标 → 实测闭。缓解 **(a) 接受 linear** 实测 justified, **无需 cap/sqrt**; 监控触发=仅若真实集中超模拟假设。 |
-| ③ | BPS + deriveVote 确定性 | ✅ resolved (部分 roadmap) | deriveVote: **temp0 钉死**(2dc86635, L933 0.1→0) + **line-E 回归 CLEAN**(正 24/24 + 负弃权 11/11 == temp0.1 基线, 无降准) = 经验确定性实证。**model 版本未钉**(L929=:8000 当前加载, 攻2)→审计需 vote-time 记 (model+temp+seed) 进 canonical 票=roadmap。BPS 值: 从 tn12 在跑节点 `getBlockDagInfo` 实取(待 J2, §3.C.1)。 |
+| ③ | BPS + deriveVote 确定性 | 🔶 **same-node 证 / cross-node 待证 (R2v2-R1 挡终裁)** | deriveVote: **temp0 钉死**(2dc86635, L933 0.1→0) + **line-E 回归 CLEAN**(正 24/24 + 负弃权 11/11, 无降准) = **same-node 经验确定性实证**。⚠ **但承重作用是分布式结算(两节点同题→同票), single-node 回归没证 cross-node 确定性**(违 same-node PASS≠cross-node PASS)。**model 版本未钉**(L929=:8000 当前加载)= **cross-node 前置 INVARIANT 非 roadmap**: 两节点 :8000 载不同 model→两诚实 oracle 边界题不同票→打穿 echo independent-same-canonical + threshold 三态。**R1 实锤**: J1 :3300 误删 ABSTAIN guard→畸形题两节点不同票(#282-284)=此墙的具象 bug。**闭 R1 DoD**: ①J1 sync :3300→whole-repo 同 commit ②同边界 prompt 两节点(:3200+:3300)跑**同票**贴双节点原始输出 ③测前 assert 两节点 model+temp+seed 同。BPS 值: 从 tn12 在跑节点 `getBlockDagInfo` 实取(待 J2)。 |
 
 ### Owner 终裁 OPEN (实施细节, 终裁前零 fee 码改动)
 1. **② 缓解**: 实测 mildly 去中心化 → 建议 **(a) 接受 linear + 监控**(实测背书, 最简, 无需 cap/sqrt)。
