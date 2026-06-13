@@ -437,6 +437,15 @@ async function _executeTool(peer, name, args) {
   return result;
 }
 
+// J2-tn L3 cross-surface test hook (Bettor r954 全自动测 L3): expose the deterministic
+// list_broker_prediction_markets handler so the L3 test invokes the REAL Kasia broker-DM surface
+// (the preview_text the LLM forwards 100% verbatim) — not a replica (NWT fixture-mirror discipline).
+// brokerRelay resolves from BROKER_PREDICTION_BROKER_RELAY_ID||BROKER_RELAY_ID (set by the test).
+// Test-only, read-only: no LLM call, no SYSTEM_PROMPT, no state lock touched (R37-safe, blast radius nil).
+export async function _testListBrokerMarketsPreview() {
+  return _executeTool(null, 'list_broker_prediction_markets', {});
+}
+
 async function _executeToolImpl(peer, name, args) {
   if (name === 'preview_order') {
     // 议 B (Owner 钦定): 字段齐 preview, 不真 publish. user YES 后才 finalize_order.
