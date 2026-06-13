@@ -61,3 +61,31 @@ testnet bond = test-KAS 零价值 → slash 是【机制演示】非真经济威
 4. lock_until + 固定 expected-settle-deadline 必链上可 derive (跨节点 determinism 铁律) — J2 确认 enrollment P2SH lock_until + deadline 链上可读 + MAX_settle_window 协议常量。
 5. **lazy-correct echo 治本(roadmap)**: 源/extractor 多样性(破 findExtractor 单源)+ dispute/UMA 底座 + reputation 战绩 — 进 oracle 能力分档路线图 [[project-oracle-capability-staged-uma-backbone]]。
 6. vote-time 记 (model_version+temp+seed) 进 canonical 票 (J2 攻2 修, 待 audit 机制定形)。
+
+## 7. [R5] Monte Carlo 集中度假设 + 监控阈值 (供 §3.C.4 回填)
+
+**模型假设 (NWT 20000 市场模拟, 'accept linear' 的实测依据)**:
+- 委员 k=5; sampling = linear stake-weighted WITHOUT replacement; reward = 0.5% uniform(均分) + 0.5% stake-weighted(按 committee 内 stake 比例)。
+- 分布族测了: ①一鲸(40%)+9小 ②均匀10 ③power-law(stake_i=1/i, N=20) ④超集中(1鲸70%/90%) ⑤2-3鲸 ⑥多小(50 均匀)。
+- 结果: top-oracle fee/stake ∈ **[0.64, 1.00]** (集中场景全亚比例, 鲸越大越低); 小 oracle 至多 **1.17x**(分散 power-law)。= 复利对鲸鱼 self-limiting, 净 mildly 去中心化。
+
+**监控触发阈值 (实质押集中度'超假设'才判定需 cap)**:
+- 监控三量: (i) max-oracle stake 占比 (ii) eligible oracle 池大小 N (iii) fee-Gini vs stake-Gini 差。
+- **触发重审 (b) per-oracle cap 条件 (任一)**:
+  - max-oracle stake 占比 > 40% **且** 池 N < 10 (模拟该档仍亚比例, 但超此 envelope 未验);
+  - 或 实测 fee-Gini − stake-Gini > 0.10 (超 power-law 档的 1.17x 放大);
+  - 或 出现模拟未覆盖的分布(如多鲸>3 且各>20% 同池)。
+- 未超 envelope = accept linear 持续 (实测 justified); 超 = 进 (b) cap 议 + 附正式 sybil 证明 (sqrt 已证破 sybil-中性, cap 按身份非按质押笔)。
+
+## 8. [R1 步③] cross-node deriveVote 测 INVARIANT (NWT+J2)
+
+> R1 关键路径: deriveVote 承重分布式结算(两节点同题→同票), 必证 cross-node。:3300 误删 guard(#282-284)= 这墙的具象 bug。
+
+**测前 assert (INVARIANT, 不满足整测 FAIL)**:
+1. 两节点 deriveVote 路【whole-repo 同 commit】(byte-identical bettor-prediction-voter.js + derivevote-prompt.mjs + oracle-evidence-extractors.mjs)。git rev-parse HEAD 两节点同 + 三文件 0-diff。
+2. 两节点 LLM 调用参数【identical】: model_version + temperature(=0) + seed(若有)+ backend(:8000 同实例 .106)。
+3. canonical vote 记录加 model_version (J2 攻2 修) → assert 两节点投票时 model_version 同。
+
+**测法 (同票实证)**: 喂【同一 boundary prompt】(① 清晰题 ② 小margin ③ no-question→应 ABSTAIN ④ 主观)到两节点 deriveVote → **两节点必出 byte-identical vote** → 贴双节点原始输出。任一不同 = cross-node determinism 破 = FAIL(查是函数/param/model 哪层漂)。
+
+= 这 INVARIANT 堵住 :3300 那类静默漂移(函数版本/param 不同→不同票→committee 不 agree)。R1 闭 = 此测两节点 4 题全同票 + 双节点原始输出贴档。
