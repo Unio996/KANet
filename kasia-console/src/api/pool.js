@@ -8,6 +8,7 @@ import { sendCommandAsync, transferAndConfirm, isRelayAlive } from '../services/
 import { getWorkingRpc } from '../services/rpc-health.js';
 import { estimateStorageMass } from '../services/pool-market-settler.js';
 import { categorizeMarket } from '../lib/market-category.js';
+import { isStructuredSpec } from '../lib/spec-validation.js';
 import { createHash, randomUUID } from 'node:crypto';
 
 // L4 (area-11): create-time invariants. Hardcoded mirrors of the settler constants;
@@ -36,25 +37,12 @@ const POOL_MAKER_STAKE_MIN_KAS = 100;
 // KANet-UI 2026-06-06 (Bettor ③ APPROVE r546 + Bettor 钦定双层堵): 创建端结构化 spec 强制.
 // 配 bot specIsUsable (= 展示端 filter, tg-bot/prediction-menu.mjs) 形成双层守门:
 // 创建端拒 = 烂单源头堵; 展示端滤 = 历史烂单不显.
-// **绑死 voter deriveVote 依赖** (Bettor r243 加固): voter (bettor-prediction-voter.js)
-// kanet_native deriveVote 强制 obj.data_source_canonical URL non-empty (= 否则
-// 'kanet_native missing data_source_canonical URL' fail, qrv65 实证). isStructuredSpec
-// qualifications MUST == voter derivable. 漂移 = c06178c 类回归源, 改时三端 (pool.js
-// + bot specIsUsable + voter deriveVote) 必同步.
-// Follow-up: 抽 lib/spec-validation cross-dir 真单一源 import (= 不在 HALT 域).
-export function isStructuredSpec(spec) {
-  if (!spec) return false;
-  const s = String(spec).trim();
-  if (!s.startsWith('{')) return false;
-  try {
-    const obj = JSON.parse(s);
-    return (
-      typeof obj.title === 'string' && obj.title.trim().length > 0 &&
-      typeof obj.resolution_criteria === 'string' && obj.resolution_criteria.trim().length > 0 &&
-      typeof obj.data_source_canonical === 'string' && obj.data_source_canonical.trim().length > 0
-    );
-  } catch { return false; }
-}
+// **绑死 voter deriveVote 依赖** (Bettor r243 加固): voter kanet_native deriveVote 强制
+// obj.data_source_canonical URL non-empty. isStructuredSpec qualifications MUST == voter derivable.
+// J2-tn 2026-06-13 (Bettor r971 + L3 cross-surface finding): isStructuredSpec 移到 lib/spec-validation.js
+// = L44 flag 的真单一源落地. 现 4 端共用同一 import (pool.js create-gate + tg-bot specIsUsable[mirror]
+// + Kasia broker-llm-agent markets-tool + voter deriveVote contract). re-export 保 external callers 不变.
+export { isStructuredSpec };
 
 // KANet-UI 2026-06-07 P0-#5 form 软化 (Bettor r291b 关1 PASS 条件):
 // 用户从 source_kind 下拉选预设源, 后端 derive canonical URL 塞回 spec.

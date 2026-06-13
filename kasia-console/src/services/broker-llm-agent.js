@@ -14,6 +14,7 @@
 
 import { sqlite } from '../db/client.js';
 import { listAssets, listChainsFor, getAsset } from './asset-registry.js';
+import { isStructuredSpec } from '../lib/spec-validation.js';
 import {
   setConvoStateLock,
   resetConvoState,
@@ -606,7 +607,9 @@ async function _executeToolImpl(peer, name, args) {
       const j = await resp.json();
       const nowSec = Math.floor(Date.now() / 1000);
       const allActive = (j?.markets || [])
-        .filter(m => Number(m.deadline) > nowSec && ['v0.6', 'v0.7'].includes(m.protocol_version));
+        .filter(m => Number(m.deadline) > nowSec && ['v0.6', 'v0.7'].includes(m.protocol_version)
+          && isStructuredSpec(m.resolution_rule_spec));  // J2-tn L3 finding fix (Bettor r971): 同 tg-bot
+        // specIsUsable 质量门 (单源 lib/spec-validation.isStructuredSpec) — 不显畸形/不可裁市场糊弄用户, 两面 UX 一致.
       const active = allActive.slice(0, 8);  // DM 消息控长, >8 截断 + 末尾告知 (不 silent 截)
       if (!active.length) {
         return { ok: true, preview_text: '我这边暂时没有活跃的预测市场。过段时间再来看看，或去 /predict 看全部市场。' };

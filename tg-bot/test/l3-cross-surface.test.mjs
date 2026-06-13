@@ -17,8 +17,8 @@
 //   L3② Kasia surface:  non-empty + ⊆ canonical broker-1 (no foreign-broker leak).
 //   L3③ CROSS-SURFACE PARITY (the L3-distinct claim): the fixture market (UNIQUE title) appears on
 //       BOTH surfaces — the same brokered market is visible on the Telegram face AND the Kasia DM face.
-//   L3④ honest 口径 note (non-fatal): logs displayed counts A vs B; they may differ (different post-
-//       filters) — true byte-parity would need a single-sourced usable-filter = follow-up.
+//   L3④ regression guard (after the finding fix): both faces now apply the SAME single-source usable
+//       gate (lib/spec-validation.isStructuredSpec) → un-usable/junk markets appear on NEITHER face.
 //
 // Fixture (Bettor r963 + NWT fixture-mirror): clone a REAL usable v0.6/v0.7 broker market's full
 // column set (production-faithful, NOT a hand-built minimal row), override id/broker=broker-1/spec
@@ -133,8 +133,18 @@ check('L3② Kasia ⊆ canonical broker-1 (no foreign-broker leak)', kasiaLeaks.
 const inTg = tgTitles.some(t => FIXTURE_TITLE.startsWith(t.replace(/…$/, '')) || t === FIXTURE_TITLE);
 const inKasia = kasiaTitles.some(t => t === FIXTURE_TITLE || FIXTURE_TITLE.startsWith(t.replace(/…$/, '')));
 check('L3③ cross-surface parity: fixture market shown on BOTH tg-bot AND Kasia', inTg && inKasia, `tg=${inTg} kasia=${inKasia}`);
-// L3④ honest 口径 note (non-fatal)
-console.log(`  ⓘ L3④ 口径: tg-bot displayed ${tgTitles.length} / Kasia displayed ${kasiaTitles.length} / canonical broker-1 ${canonTitles.size} — counts may differ (different post-filters; byte-parity = single-sourced usable-filter follow-up)`);
+// L3④ regression guard (Bettor r971 + L3 finding FIX): Kasia broker-DM now applies the SAME usable
+// gate as tg-bot (single-source lib/spec-validation.isStructuredSpec) → un-usable/junk markets must
+// appear on NEITHER face. Before the fix Kasia showed junk tg-bot hid — the bug this cross-surface test caught.
+const { isStructuredSpec } = await import('../../kasia-console/src/lib/spec-validation.js');
+const usableTitle = (m) => { try { const o = JSON.parse(m.resolution_rule_spec); return (o.title || '').trim(); } catch { return String(m.resolution_rule_spec || '').trim(); } };
+const unusableTitles = (canonical.markets || []).filter(m => !isStructuredSpec(m.resolution_rule_spec)).map(usableTitle).filter(Boolean);
+const shows = (titles, ut) => titles.some(t => t === ut || ut.startsWith(t.replace(/…$/, '')) || t.startsWith(ut.slice(0, 40)));
+const kasiaJunk = unusableTitles.filter(ut => shows(kasiaTitles, ut));
+const tgJunk = unusableTitles.filter(ut => shows(tgTitles, ut));
+check('L3④ Kasia applies usable gate — no un-usable/junk shown (regression: finding fix)', kasiaJunk.length === 0, `kasia junk: ${kasiaJunk.join(' / ').slice(0, 80)}`);
+check('L3④ tg-bot applies usable gate — no un-usable/junk shown', tgJunk.length === 0, `tg junk: ${tgJunk.join(' / ').slice(0, 80)}`);
+console.log(`  ⓘ counts: tg-bot ${tgTitles.length} / Kasia ${kasiaTitles.length} / canonical broker-1 ${canonTitles.size} (${unusableTitles.length} un-usable, now excluded by BOTH faces)`);
 
 console.log(`\nL3: ${pass}/${pass + fail} PASS`);
 
