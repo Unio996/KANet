@@ -2004,9 +2004,11 @@ export async function dispatchPhase2(market, decision) {
       phase2_broker_fee_sompi: payouts.brokerFee,
       // J2-tn Lane① (Bettor r638 统一'settler 记实际值, display 读'): oracle reward + maker payout 同 broker
       // fee 模式记【实际落链值】→ 三角色 display 统一读实际非估算 (oracle_history.reward_amount / maker 视图)。
-      //  - oracle reward = oracleFeePerSig (oracleFeeTotal/N = 每签名委员实际 fee, L1735-1737)。
-      //  - maker payout = maker 地址收到的 output 总额 (maker 赢=winner payout, 输=0)。读 outputs robust。
-      phase2_oracle_reward_per_sig: oracleFeePerSig,
+      //  - oracle reward = oracleFeeTotal/N (每签名委员平均 fee)。J2-tn fix: 旧引用 oracleFeePerSig 变量
+      //    在 fee-on-total 重构后已不存在 (oracle fee 改 perCommFeeBI 数组 stake-weighted, L1818-1827) →
+      //    ReferenceError 阻所有 v0.7 dispatchPhase2。改自包含 oracleFeeTotal/委员数 (= 注释本意, 聚合守恒:
+      //    avg×N≈oracleFeeTotal; uniform 半精确/stake 半近似, 消费侧 L2864 均匀写 = 显示层近似可接受)。
+      phase2_oracle_reward_per_sig: Math.floor(Number(payouts.oracleFeeTotal) / ((market.protocol_version === 'v0.6' || market.protocol_version === 'v0.7') ? 5 : 3)),
       phase2_maker_payout_sompi: outputs.filter(o => o.address === makerRow.address).reduce((s, o) => s + (parseInt(o.amountSompi, 10) || 0), 0),
       phase2_outputs: outputs,  // Phase 2c step 2c: full outputs array for collecting_sigs handler IPC assembly
     };
