@@ -82,7 +82,7 @@ testnet bond = test-KAS 零价值 → slash 是【机制演示】非真经济威
 > R1 关键路径: deriveVote 承重分布式结算(两节点同题→同票), 必证 cross-node。:3300 误删 guard(#282-284)= 这墙的具象 bug。
 
 **测前 assert (INVARIANT, 不满足整测 FAIL)**:
-1. 两节点 deriveVote 路【whole-repo 同 commit】(byte-identical bettor-prediction-voter.js + derivevote-prompt.mjs + oracle-evidence-extractors.mjs)。git rev-parse HEAD 两节点同 + 三文件 0-diff。
+1. 两节点 deriveVote 路【whole-repo 同 commit】。determinism 面 = **2 文件**(J2 r826 rule46 纠: extractors/findExtractor 内联在 voter.js, 无独立 oracle-evidence-extractors.mjs — 别 assert phantom): byte-identical `bettor-prediction-voter.js`(含内联 extractors) + `derivevote-prompt.mjs`(L29 import)。git rev-parse HEAD 两节点同 + 此 2 文件 0-diff(:3200 vs origin 已 0-diff ✓)。
 2. 两节点 LLM 调用参数【identical】: model_version + temperature(=0) + seed(若有)+ backend(:8000 同实例 .106)。
 3. canonical vote 记录加 model_version (J2 攻2 修) → assert 两节点投票时 model_version 同。
 
