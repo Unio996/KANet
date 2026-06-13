@@ -930,7 +930,7 @@ export async function deriveKanetNativeVote(offer, spec) {
         messages: [{ role: 'user', content: prompt }],
         chat_template_kwargs: { enable_thinking: false },  // Qwen Rule 11 必加
         response_format: { type: 'json_object' },
-        temperature: 0.1,
+        temperature: 0,  // 门C echo-slash premise: 生产 deriveVote 严格确定 (temp0.1 实测 5/5+12/12 确定, temp0 strictly-more-deterministic, prior 3/3 clean)
         max_tokens: 200,
       }),
     });
