@@ -266,21 +266,12 @@ if [ "$READY" -eq 0 ]; then
   exit 1
 fi
 
-# ── 启动 TG bot (broker X 电报前端, S4 — Owner r238/钦定 常驻) ────────────────
-# 在 Console ready 之后起 (bot poller 调 Console S1/S2/brokerInfo). launcher 自读 kanet.env
-# (token) + 解 ingest_secret + 起 tg-bot/bot.mjs. 0-key. broker 走 UI/DB config (env fallback broker-1).
-if grep -q "^TELEGRAM_BOT_TOKEN=" "$ENV_FILE" 2>/dev/null; then
-  TG_BOT_LOG="$LOG_DIR/tg-bot.log"
-  > "$TG_BOT_LOG"
-  # exec: 让 node 替换 subshell 进程映像, 使 $! = 真实 node PID (否则抓到 subshell PID,
-  # subshell fork 完即退 → pidfile 指向死 PID, 任何 pidfile-based health 监控会误报 bot-down. Bettor r269 flag.)
-  ( cd "$CONSOLE_DIR" && exec node _launch_tg_bot.mjs >> "$TG_BOT_LOG" 2>&1 ) &
-  TG_BOT_PID=$!
-  echo "$TG_BOT_PID" > "$PID_DIR/tg-bot.pid"
-  echo -e "  ${C_GREEN}✓${C_RESET} TG bot @KANET_Broker_bot (PID $TG_BOT_PID, log $TG_BOT_LOG)"
-else
-  echo "  - TG bot 跳过 (kanet.env 无 TELEGRAM_BOT_TOKEN)"
-fi
+# ── TG bot: NOT launched here anymore (KANet-UI 2026-06-13). ──
+# The Console's tg-bot-manager (src/services/tg-bot-manager.js) is now the SOLE owner: index.js
+# boot-start (enabled-gated, tg_bot_enabled flag) + Settings UI start/stop/status + crash respawn.
+# The old start-script launch raced the manager → two pollers on one token → Telegram 409 Conflict.
+# Single owner = no 409; the operator controls it from Settings → Telegram Bot.
+echo "  - TG bot: 由 Console 管理 (Settings → Telegram Bot 启停; 启用后随 Console 自启)"
 
 ok "Console 就绪  →  http://localhost:$CONSOLE_PORT  (PID $CONSOLE_PID)"
 

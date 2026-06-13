@@ -147,4 +147,24 @@ export async function registerSettingsRoutes(fastify) {
     await setConfig('tg_bot_broker_relay_id', broker_relay_id, { category: 'tg_bot' });
     return reply.send({ ok: true, broker_relay_id, broker_name: relay.name });
   });
+
+  // ── TG Bot lifecycle (KANet-UI, Bettor r945 接通最小路 ②) ──
+  // start/stop/status over the bot process (separate 0-key process, supervised by tg-bot-manager).
+  fastify.post('/api/tg-bot/start', async (request, reply) => {
+    const { startTgBot } = await import('../services/tg-bot-manager.js');
+    const r = await startTgBot();
+    if (r.ok) await setConfig('tg_bot_enabled', '1', { category: 'tg_bot' });  // remembered across restarts
+    return reply.send(r);
+  });
+
+  fastify.post('/api/tg-bot/stop', async (request, reply) => {
+    const { stopTgBot } = await import('../services/tg-bot-manager.js');
+    await setConfig('tg_bot_enabled', '0', { category: 'tg_bot' });  // manual stop is remembered → no auto-start on boot
+    return reply.send(await stopTgBot());
+  });
+
+  fastify.get('/api/tg-bot/status', async (request, reply) => {
+    const { tgBotStatus } = await import('../services/tg-bot-manager.js');
+    return reply.send(await tgBotStatus());
+  });
 }

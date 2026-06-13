@@ -162,15 +162,11 @@ if [ -n "$NEW_SECRET" ]; then
   fi
 fi
 
-# ── 启动 TG bot (Owner r549 durable: headless restart 必带 — 之前漏了 → Console restart 把 ──
-# tg-bot orphan 不自愈, 同 relay orphan 类坑。kanet-start.sh 有此块, headless 漏。Console ready 后起。──
-if grep -q "^TELEGRAM_BOT_TOKEN=" "$ENV_FILE" 2>/dev/null; then
-  # 先清残留 poller (Telegram 单 token 单 poller, 双开 = 409 conflict)
-  powershell -Command "Get-CimInstance Win32_Process -Filter \"name='node.exe'\" | Where-Object { \$_.CommandLine -like '*_launch_tg_bot*' } | ForEach-Object { Stop-Process -Id \$_.ProcessId -Force -ErrorAction SilentlyContinue }" 2>/dev/null || true
-  TG_BOT_LOG="$LOG_DIR/tg-bot.log"
-  ( cd "$CONSOLE_DIR" && exec node _launch_tg_bot.mjs >> "$TG_BOT_LOG" 2>&1 ) &
-  echo "$!" > "$PID_DIR/tg-bot.pid"
-fi
+# ── TG bot: NOT launched here anymore (KANet-UI 2026-06-13). ──
+# The Console's tg-bot-manager (src/services/tg-bot-manager.js) is now the SOLE owner of the bot:
+# index.js boot-start (enabled-gated, tg_bot_enabled flag) + Settings UI start/stop/status + crash
+# respawn. The old start-script launch raced the manager → two pollers on one token → Telegram 409
+# Conflict. Single owner = no 409, and the operator controls it from Settings → Telegram Bot.
 
 # ── 计算耗时 ─────────────────────────────────────────────────────────────────
 END_MS=$(date +%s%3N 2>/dev/null || echo 0)

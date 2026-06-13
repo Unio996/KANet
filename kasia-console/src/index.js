@@ -454,6 +454,12 @@ startScheduler();
 import { startAll as startAllRelays, stopAll as stopAllRelays } from './services/relay-manager.js';
 await startAllRelays();
 
+// Auto-start the Telegram broker bot if the operator previously enabled it (tg_bot_enabled='1').
+// Manual Stop is remembered (adapter is_enabled pattern), so the bot survives Console restarts
+// without going live on its own. (KANet-UI, Bettor r945 接通最小路 ①)
+import { startTgBotIfConfigured } from './services/tg-bot-manager.js';
+await startTgBotIfConfigured();
+
 // Bettor scanner cron — Phase 3a (6h cron, top 10 推荐写入 bettor_recommendations)
 // 5/14 Owner pivot: 数学 Kelly 路线 deprecated, 新 scavenger 接管. 老 scanner 暂保留留 fallback.
 // import { startCron as startBettorCron } from './services/bettor-scanner.js';

@@ -107,6 +107,39 @@
           </div>
         </div>
 
+        <!-- Telegram Bot — 运行控制 (启动/停止/状态, KANet-UI Bettor r945 接通最小路②) -->
+        <div class="bg-white rounded-lg border border-gray-200" x-data="{
+          st: null, loading: true, busy: false,
+          async load() { try { const r = await fetch('/api/tg-bot/status'); this.st = await r.json(); } catch {} finally { this.loading = false; } },
+          init() { this.load(); setInterval(() => this.load(), 5000); },
+          async start() { this.busy = true; try { const r = await fetch('/api/tg-bot/start', { method: 'POST' }); const j = await r.json(); if (!j.ok && j.message) alert('启动失败: ' + j.message); } catch {} finally { this.busy = false; await this.load(); } },
+          async stop() { this.busy = true; try { await fetch('/api/tg-bot/stop', { method: 'POST' }); } catch {} finally { this.busy = false; await this.load(); } }
+        }">
+          <div class="px-6 py-4 border-b border-gray-200 flex items-center space-x-2">
+            <svg class="h-5 w-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M12 5l7 7-7 7"/></svg>
+            <h2 class="text-sm font-semibold text-gray-700">Telegram Bot — 运行控制</h2>
+          </div>
+          <div class="px-6 py-5 space-y-3">
+            <p class="text-xs text-gray-500">启动/停止 Telegram broker bot 进程。启动后即使 Console 重启它也自动拉起(手动停止会被记住,不自动起)。bot 不持私钥、碰不到资金。</p>
+            <div class="flex items-center space-x-2 text-sm">
+              <span x-show="loading" class="text-gray-400 text-xs">加载中…</span>
+              <template x-if="!loading && st">
+                <div class="flex items-center space-x-2">
+                  <span class="inline-block w-2.5 h-2.5 rounded-full" :class="st.running ? 'bg-green-500' : 'bg-gray-300'"></span>
+                  <span x-text="st.running ? ('运行中 · @' + st.username + ' · pid ' + st.pid) : '已停止'"></span>
+                </div>
+              </template>
+            </div>
+            <template x-if="st && !st.token_configured"><p class="text-xs text-amber-600">⚠ 未配置 TELEGRAM_BOT_TOKEN(kanet.env / @BotFather)— 无法启动。</p></template>
+            <template x-if="st && !st.broker_relay_id"><p class="text-xs text-amber-600">⚠ 未选 broker(上方设置)— bot 会起但没 broker 身份。</p></template>
+            <template x-if="st && st.last_error"><p class="text-xs text-red-500" x-text="'上次错误: ' + st.last_error"></p></template>
+            <div class="flex items-center space-x-3">
+              <button @click="start()" :disabled="busy || (st && st.running) || (st && !st.token_configured)" class="px-4 py-2 bg-green-600 text-white text-sm rounded-lg disabled:opacity-50">启动</button>
+              <button @click="stop()" :disabled="busy || !(st && st.running)" class="px-4 py-2 bg-red-600 text-white text-sm rounded-lg disabled:opacity-50">停止</button>
+            </div>
+          </div>
+        </div>
+
         <!-- Node Configuration -->
         <div class="bg-white rounded-lg border border-gray-200" x-data="{
           mode: '<%= it.rpcMode %>',
