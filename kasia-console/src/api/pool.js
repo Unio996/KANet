@@ -533,6 +533,7 @@ export async function registerPoolRoutes(fastify) {
     const _mrow = sqlite.prepare('SELECT * FROM pool_markets WHERE id = ?').get(marketId);
     let _bcast = null;
     if (_mrow) _bcast = await _broadcastMarketPublished(_mrow, b.maker_relay_id);
+    _autoRecommendBrokeredMarket(marketId, b.broker_relay_id);  // J2-tn task#13 通电 broker_recommendations (fire-and-forget)
 
     return reply.send({
       ok: true,
@@ -729,6 +730,7 @@ export async function registerPoolRoutes(fastify) {
     const _mrowV06 = sqlite.prepare('SELECT * FROM pool_markets WHERE id = ?').get(marketId);
     let _bcastV06 = null;
     if (_mrowV06) _bcastV06 = await _broadcastMarketPublished(_mrowV06, b.maker_relay_id);
+    _autoRecommendBrokeredMarket(marketId, b.broker_relay_id);  // J2-tn task#13 通电 broker_recommendations (fire-and-forget)
 
     return reply.send({
       ok: true,
