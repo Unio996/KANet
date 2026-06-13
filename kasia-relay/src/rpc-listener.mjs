@@ -202,6 +202,14 @@ export async function getBlockAtDaa(deadlineDaa) {
   const MAX_WALK = 50000;
   let cursor = startHash;
   let lastEligible = null; // last block where daa >= deadlineDaa during walk
+  // J1 #266/#268 (a) boundary seam fix (Bettor r807 批 / J2 r798 闭环核 / r800 caveat moot):
+  // resolved = canonical endBlock CONFIRMED (walk crossed the deadline OR reached genesis). If the loop
+  // EXHAUSTS MAX_WALK without resolving AND the deepest block is still too-new (daa > deadline), the true
+  // endBlock is DEEPER than the walk window → returning lastEligible = a wrong (too-new) endBlock → wrong
+  // committee_pk_hash (+ cross-node divergence if two nodes walk from different tips). THROW instead →
+  // settler L587 try/L681 catch → sample_fail → retry → deadline ages past L628 guard → terminal refund.
+  // Never emit a wrong endBlock. (b) guard race-margin keeps this path unreached in normal operation.
+  let resolved = false;
   let steps = 0;
   for (let i = 0; i < MAX_WALK; i++) {
     steps++;
@@ -214,15 +222,20 @@ export async function getBlockAtDaa(deadlineDaa) {
     if (!hash || !daa) throw new Error(`getBlock returned malformed block at cursor ${cursor?.slice(0,16)}`);
     if (daa >= deadlineDaa) {
       lastEligible = { hash, daaScore: daa, timestamp_ms, isChainBlock: true };
-      if (!sp || sp === '0'.repeat(64)) break; // reached genesis
+      if (!sp || sp === '0'.repeat(64)) { resolved = true; break; } // genesis: oldest SPC block still >= deadline = canonical endBlock (deadline predates chain)
       cursor = sp;
       continue;
     }
-    // daa < deadlineDaa — we passed the boundary. The previous lastEligible is the answer.
+    // daa < deadlineDaa — crossed the boundary. The previous lastEligible is the canonical endBlock.
+    resolved = true;
     break;
   }
-  if (steps >= MAX_WALK) {
-    log(`getBlockAtDaa: backward walk hit MAX_WALK=${MAX_WALK} cap without crossing deadlineDaa=${deadlineDaa} (returned daa=${lastEligible?.daaScore})`);
+  // (a) seam fix: loop exhausted MAX_WALK without crossing/genesis AND deepest block still too-new
+  // (daa > deadline) → endBlock deeper than walk window → refuse to return a wrong (too-new) block.
+  // daa == deadline at exhaust = deepest reached IS exactly the canonical crossing (SPC daaScore strictly
+  // increases per J2 r800 → no deeper same-daa block) → that's correct, return it.
+  if (!resolved && lastEligible && lastEligible.daaScore > deadlineDaa) {
+    throw new Error(`getBlockAtDaa: backward walk exhausted MAX_WALK=${MAX_WALK} without crossing deadlineDaa=${deadlineDaa} (deepest walked daa=${lastEligible.daaScore} > deadline = too-new; endBlock deeper than walk window). Refusing wrong endBlock — settler retries → L628 guard refunds. steps=${steps}`);
   }
   if (!lastEligible) {
     throw new Error(`no SPC block crossing deadlineDaa ${deadlineDaa} found within ${MAX_WALK} walk steps (chain may not have reached deadline yet)`);

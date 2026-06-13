@@ -627,14 +627,22 @@ export async function poolSettlerTick() {
               // (maker+bettor 退, market 永不可裁), 停永重试。诚实: 减的是 settler/chain-read 浪费,
               // 非 :8000 LLM (unsampled zombie 本就不投票)。
               const MAX_SPC_WALK = 50000;  // == rpc-listener.mjs getBlockAtDaa MAX_WALK
+              // J1 #265/#266 (b) boundary race-margin (Bettor r807 批): getBlockAtDaa backward walk 在
+              // Δ=MAX_WALK 处 off-by-one (只回溯到 49999-back, 够不到 50000-back), 且此处 tip 读(L630)早于
+              // getBlockAtDaa 自读 tip → Δ_walk = Δ_guard + N (IPC 期链推进), 两节点各读各 tip 可返不同错块
+              // → committee_pk_hash 跨节点分歧. 留 SAFETY_MARGIN: Δ > MAX_WALK−MARGIN 即终态 refund, 让
+              // getBlockAtDaa 永远带余量不撞 cap. MARGIN 盖 off-by-one(1) + IPC 期链推进(几块). 配 (a)
+              // getBlockAtDaa cap-throw 双封 (即便 margin 算漏, (a) throw 也兜住不 emit 错块).
+              const SAFETY_MARGIN = 100;
+              const REFUND_THRESHOLD = MAX_SPC_WALK - SAFETY_MARGIN;  // 49900
               const tipDaaUR = await chainReader.getCurrentDaaScore();
-              if (Number.isFinite(tipDaaUR) && (tipDaaUR - deadlineDaa) > MAX_SPC_WALK) {
+              if (Number.isFinite(tipDaaUR) && (tipDaaUR - deadlineDaa) > REFUND_THRESHOLD) {
                 const urMeta = JSON.parse(market.metadata || '{}');
                 urMeta.unrecoverable = true;
-                urMeta.unrecoverable_reason = `deadline_daa ${deadlineDaa} 离 tip ${tipDaaUR} Δ=${tipDaaUR - deadlineDaa} > MAX_WALK ${MAX_SPC_WALK} → SPC-walk 永达不到, committee 不可采样 → 终态 refund`;
+                urMeta.unrecoverable_reason = `deadline_daa ${deadlineDaa} 离 tip ${tipDaaUR} Δ=${tipDaaUR - deadlineDaa} > MAX_WALK−MARGIN ${REFUND_THRESHOLD} → SPC-walk 边界不安全(达不到/off-by-one/race), committee 不可采样 → 终态 refund`;
                 urMeta.unrecoverable_at = new Date().toISOString();
                 sqlite.prepare("UPDATE pool_markets SET metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(JSON.stringify(urMeta), market.id);
-                console.warn(`[pool-settler] UNRECOVERABLE market=${market.id.slice(0,12)} Δ=${tipDaaUR - deadlineDaa} > MAX_WALK → dispatchRefund 终态 (停永重试 SPC-walk)`);
+                console.warn(`[pool-settler] UNRECOVERABLE market=${market.id.slice(0,12)} Δ=${tipDaaUR - deadlineDaa} > MAX_WALK−MARGIN ${REFUND_THRESHOLD} → dispatchRefund 终态 (停永重试 SPC-walk)`);
                 await dispatchRefund(market, { action: 'refund', reason: urMeta.unrecoverable_reason });
                 refund++;
                 continue;
