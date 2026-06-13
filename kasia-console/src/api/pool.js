@@ -163,11 +163,20 @@ async function _sendBroadcastChunked(relayId, channel, payloadStr, timeoutMs) {
 // Schema pool_market_published_v1 (r179-locked, r180 3-way verified, r120 ACK).
 // market_metadata_hash 3-way alignment (r180 grep verified L191-198): producer/consumer/spine
 // all sha256(JSON.stringify({source, condition, token, side, end, rule})).
+// J2-tn fee-on-total maker_pk 单源 (NWT/J1 #294-299 + Bettor r863): maker payout addr 派生口径
+// 单源化 = create 持久化 maker_pk 列 + 跨节点广播 sentinel 都用【这同一个 get_pubkey x_only_pubkey】
+// (relay 实际 pk, 非 deriveXOnlyPubkey(address) round-trip = 非 P2PK edge fork)。列==sentinel 逐字节同
+// = 全节点单一 derivation。helper 保 3 create path + broadcast 同口径 (NWT "一个变量/口径")。
+async function _getMakerRelayPk(makerRelayId) {
+  const pkResult = await sendCommandAsync(makerRelayId, { type: 'get_pubkey' });
+  const pk = pkResult?.x_only_pubkey;
+  if (!pk || pk.length !== 64) throw new Error(`maker get_pubkey invalid: ${pk}`);
+  return pk;
+}
+
 async function _broadcastMarketPublished(marketRow, makerRelayId) {
   try {
-    const pkResult = await sendCommandAsync(makerRelayId, { type: 'get_pubkey' });
-    const maker_relay_pk = pkResult?.x_only_pubkey;
-    if (!maker_relay_pk || maker_relay_pk.length !== 64) throw new Error(`maker get_pubkey invalid: ${maker_relay_pk}`);
+    const maker_relay_pk = await _getMakerRelayPk(makerRelayId);
 
     const oracle_relay_pks = [marketRow.oracle1_pk, marketRow.oracle2_pk, marketRow.oracle3_pk].filter(Boolean);
 
@@ -276,9 +285,11 @@ export async function registerPoolRoutes(fastify) {
       if (b[k] === undefined || b[k] === null || b[k] === '') return reply.code(400).send({ ok: false, error: `missing ${k}` });
     }
 
-    // D4: broker defaults to maker (maker == broker thesis); broker_fee_pct default 0.
+    // D4: broker defaults to maker (maker == broker thesis).
     if (b.broker_relay_id === undefined || b.broker_relay_id === null || b.broker_relay_id === '') b.broker_relay_id = b.maker_relay_id;
-    if (b.broker_fee_pct === undefined || b.broker_fee_pct === null || b.broker_fee_pct === '') b.broker_fee_pct = 0;
+    // KANet-UI 2026-06-13 (Bettor r866/r870 全3路覆盖): broker_fee_pct 硬固定 190 (Owner 终裁 FIXED 1.9%),
+    // 含 self-broker (上方塌 maker)。删旧 self-broker=0(致 rake 1.1%≠3%)。同 v06/v07 两路一致硬固定。
+    b.broker_fee_pct = 190;
 
     // D3: oracle_bond_kas default 1 KAS hardcoded per v0.5 Area 1.3 + L1 worst-case math.
     if (b.oracle_bond_kas === undefined || b.oracle_bond_kas === null || b.oracle_bond_kas === '') b.oracle_bond_kas = 1;
@@ -331,6 +342,9 @@ export async function registerPoolRoutes(fastify) {
     const brokerPk = await deriveXOnlyPubkey(brokerRow.address);
     try { await assertBrokerP2PK(brokerPk, brokerRow.address); } catch (e) { return reply.code(e.code || 400).send({ ok: false, error: e.message }); }
     const oraclePks = await Promise.all(oracleRows.map(r => deriveXOnlyPubkey(r.address)));
+    // maker_pk 列 = 实际 relay pk (== broadcast/sentinel 同源, 单源化 NWT/Bettor r863). ctor 仍用 makerPk
+    // (deriveXOnlyPubkey, L448 不动 = 不改 P2SH 地址). payout 用 maker_relay_pk (settle pk-derive).
+    const maker_relay_pk = await _getMakerRelayPk(b.maker_relay_id);
 
     // deadline + amounts.
     // UAT pain point #2: 15-min minimum is friction for quick testnet demos. POOL_DEADLINE_MIN_OVERRIDE
@@ -476,13 +490,13 @@ export async function registerPoolRoutes(fastify) {
       });
 
       sqlite.prepare(`INSERT INTO pool_markets (
-        id, maker_relay_id, spine_p2sh, spine_lock_tx, market_metadata_hash,
+        id, maker_relay_id, maker_pk, spine_p2sh, spine_lock_tx, market_metadata_hash,
         oracle1_pk, oracle2_pk, oracle3_pk, broker_pk,
         deadline, miner_fee, broker_fee_pct, oracle_bond_amount, maker_stake_amount,
         outcome_market_source, outcome_condition_id, outcome_token_id, outcome_side, resolution_rule_spec,
         protocol_status, sides_merkle_root, oracle_relay_ids, broker_relay_id, metadata, category
-      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
-        marketId, b.maker_relay_id, spineResult.p2shAddr, spineTxId, marketMetadataHash,
+      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+        marketId, b.maker_relay_id, maker_relay_pk, spineResult.p2shAddr, spineTxId, marketMetadataHash,
         oraclePks[0], oraclePks[1], oraclePks[2], brokerPk,
         deadline, minerFee, brokerFeePct, oracleBondAmount, makerStakeAmount,
         b.outcome_market_source, b.outcome_condition_id, b.outcome_token_id, b.outcome_side, b.resolution_rule_spec,
@@ -534,16 +548,14 @@ export async function registerPoolRoutes(fastify) {
     }
     const brokerProvided = !(b.broker_relay_id === undefined || b.broker_relay_id === null || b.broker_relay_id === '');
     if (!brokerProvided) b.broker_relay_id = b.maker_relay_id;  // 塌 maker (maker == broker thesis)
-    if (b.broker_fee_pct === undefined || b.broker_fee_pct === null || b.broker_fee_pct === '') {
-      // Lane③ r654 (J2 绿灯): fee 省略 — 真 gateway → 读其 default_broker_fee_pct (gateway 自设 fee 生效);
-      // 塌-maker → 0 (maker 非真 broker 不收 fee)。只新建市场读, 不碰已建 (J2 caveat).
-      if (brokerProvided) {
-        const gw = sqlite.prepare('SELECT default_broker_fee_pct FROM relay_nodes WHERE id = ?').get(b.broker_relay_id);
-        b.broker_fee_pct = gw?.default_broker_fee_pct ?? 0;
-      } else {
-        b.broker_fee_pct = 0;
-      }
-    }
+    // KANet-UI 2026-06-13 (Bettor r866/r867 + Owner 终裁 broker FIXED 1.9%): broker_fee_pct 硬固定
+    // 190 bps for ALL markets — real-broker AND self-broker (塌 maker: 上方 broker_relay_id=maker)。
+    // 删旧 gateway-default / self-broker=0 两分支: self-broker=0 致 rake 1.1%≠3% (NWT gate② 缺口) =
+    // 'no-broker 市场反而便宜砸 broker 模型' (spec no-broker 一致性解要防的反面)。硬固定 190 → self-broker
+    // 的 broker output(1.9%) via broker_relay_id==maker (settler 单源 brokerPk=makerPk, 4c41137e) 落 maker
+    // = maker 自任恒定 3% (190 broker→maker + 100 oracle + 10 maker)。不让 per-gateway/caller override
+    // (Owner '固定')。只新市场生效, 不 backfill 已建 (J2 determinism caveat: home 190/peer 200 → 跨节点碎)。
+    b.broker_fee_pct = 190;
     if (b.oracle_bond_kas === undefined || b.oracle_bond_kas === null || b.oracle_bond_kas === '') b.oracle_bond_kas = 1;
     if (b.oracle_fee_pct === undefined || b.oracle_fee_pct === null || b.oracle_fee_pct === '') b.oracle_fee_pct = 100;
     if (b.outcome_market_source === undefined || b.outcome_market_source === null || b.outcome_market_source === '') b.outcome_market_source = 'kanet_v06';
@@ -569,6 +581,8 @@ export async function registerPoolRoutes(fastify) {
     const makerPk = await deriveXOnlyPubkey(makerRow.address);
     const brokerPk = await deriveXOnlyPubkey(brokerRow.address);
     try { await assertBrokerP2PK(brokerPk, brokerRow.address); } catch (e) { return reply.code(e.code || 400).send({ ok: false, error: e.message }); }
+    // maker_pk 列 = 实际 relay pk (单源 == broadcast/sentinel, NWT/Bettor r863). ctor 仍 makerPk 不动.
+    const maker_relay_pk = await _getMakerRelayPk(b.maker_relay_id);
 
     const minDeadlineMin = parseInt(process.env.POOL_DEADLINE_MIN_OVERRIDE, 10) || 15;
     const outcomeEndMs = new Date(b.outcome_end_date).getTime();
@@ -658,14 +672,14 @@ export async function registerPoolRoutes(fastify) {
         v06_pool_merkle_root: poolMerkleRoot,
       });
       sqlite.prepare(`INSERT INTO pool_markets (
-        id, maker_relay_id, spine_p2sh, spine_lock_tx, market_metadata_hash,
+        id, maker_relay_id, maker_pk, spine_p2sh, spine_lock_tx, market_metadata_hash,
         oracle1_pk, oracle2_pk, oracle3_pk, broker_pk,
         deadline, miner_fee, broker_fee_pct, oracle_bond_amount, maker_stake_amount,
         outcome_market_source, outcome_condition_id, outcome_token_id, outcome_side, resolution_rule_spec,
         protocol_status, sides_merkle_root, oracle_relay_ids, broker_relay_id, metadata, category,
         protocol_version, pool_merkle_root
-      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
-        marketId, b.maker_relay_id, spineResult.p2shAddr, spineTxId, marketMetadataHash,
+      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+        marketId, b.maker_relay_id, maker_relay_pk, spineResult.p2shAddr, spineTxId, marketMetadataHash,
         null, null, null, brokerPk,
         deadline, minerFee, brokerFeePct, oracleBondAmount, makerStakeAmount,
         b.outcome_market_source, b.outcome_condition_id, b.outcome_token_id, b.outcome_side, b.resolution_rule_spec,
@@ -810,16 +824,14 @@ export async function registerPoolRoutes(fastify) {
     }
     const brokerProvided = !(b.broker_relay_id === undefined || b.broker_relay_id === null || b.broker_relay_id === '');
     if (!brokerProvided) b.broker_relay_id = b.maker_relay_id;  // 塌 maker (maker == broker thesis)
-    if (b.broker_fee_pct === undefined || b.broker_fee_pct === null || b.broker_fee_pct === '') {
-      // Lane③ r654 (J2 绿灯): fee 省略 — 真 gateway → 读其 default_broker_fee_pct (gateway 自设 fee 生效);
-      // 塌-maker → 0 (maker 非真 broker 不收 fee)。只新建市场读, 不碰已建 (J2 caveat).
-      if (brokerProvided) {
-        const gw = sqlite.prepare('SELECT default_broker_fee_pct FROM relay_nodes WHERE id = ?').get(b.broker_relay_id);
-        b.broker_fee_pct = gw?.default_broker_fee_pct ?? 0;
-      } else {
-        b.broker_fee_pct = 0;
-      }
-    }
+    // KANet-UI 2026-06-13 (Bettor r866/r867 + Owner 终裁 broker FIXED 1.9%): broker_fee_pct 硬固定
+    // 190 bps for ALL markets — real-broker AND self-broker (塌 maker: 上方 broker_relay_id=maker)。
+    // 删旧 gateway-default / self-broker=0 两分支: self-broker=0 致 rake 1.1%≠3% (NWT gate② 缺口) =
+    // 'no-broker 市场反而便宜砸 broker 模型' (spec no-broker 一致性解要防的反面)。硬固定 190 → self-broker
+    // 的 broker output(1.9%) via broker_relay_id==maker (settler 单源 brokerPk=makerPk, 4c41137e) 落 maker
+    // = maker 自任恒定 3% (190 broker→maker + 100 oracle + 10 maker)。不让 per-gateway/caller override
+    // (Owner '固定')。只新市场生效, 不 backfill 已建 (J2 determinism caveat: home 190/peer 200 → 跨节点碎)。
+    b.broker_fee_pct = 190;
     if (b.oracle_bond_kas === undefined || b.oracle_bond_kas === null || b.oracle_bond_kas === '') b.oracle_bond_kas = 1;
     if (b.oracle_fee_pct === undefined || b.oracle_fee_pct === null || b.oracle_fee_pct === '') b.oracle_fee_pct = 100;
     if (b.outcome_market_source === undefined || b.outcome_market_source === null || b.outcome_market_source === '') b.outcome_market_source = 'kanet_v07';
@@ -844,6 +856,8 @@ export async function registerPoolRoutes(fastify) {
     const makerPk = await deriveXOnlyPubkey(makerRow.address);
     const brokerPk = await deriveXOnlyPubkey(brokerRow.address);
     try { await assertBrokerP2PK(brokerPk, brokerRow.address); } catch (e) { return reply.code(e.code || 400).send({ ok: false, error: e.message }); }
+    // maker_pk 列 = 实际 relay pk (单源 == broadcast/sentinel, NWT/Bettor r863). ctor 仍 makerPk 不动.
+    const maker_relay_pk = await _getMakerRelayPk(b.maker_relay_id);
 
     const minDeadlineMin = parseInt(process.env.POOL_DEADLINE_MIN_OVERRIDE, 10) || 15;
     const outcomeEndMs = new Date(b.outcome_end_date).getTime();
@@ -944,14 +958,14 @@ export async function registerPoolRoutes(fastify) {
         v07_market_id_hash: market_id_hash,
       });
       sqlite.prepare(`INSERT INTO pool_markets (
-        id, maker_relay_id, spine_p2sh, spine_lock_tx, market_metadata_hash,
+        id, maker_relay_id, maker_pk, spine_p2sh, spine_lock_tx, market_metadata_hash,
         oracle1_pk, oracle2_pk, oracle3_pk, broker_pk,
         deadline, miner_fee, broker_fee_pct, oracle_bond_amount, maker_stake_amount,
         outcome_market_source, outcome_condition_id, outcome_token_id, outcome_side, resolution_rule_spec,
         protocol_status, sides_merkle_root, oracle_relay_ids, broker_relay_id, metadata, category,
         protocol_version, pool_merkle_root, deadline_daa
-      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
-        marketId, b.maker_relay_id, spineResult.p2shAddr, spineTxId, marketMetadataHash,
+      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+        marketId, b.maker_relay_id, maker_relay_pk, spineResult.p2shAddr, spineTxId, marketMetadataHash,
         null, null, null, brokerPk,
         deadline, minerFee, brokerFeePct, oracleBondAmount, makerStakeAmount,
         b.outcome_market_source, b.outcome_condition_id, b.outcome_token_id, b.outcome_side, b.resolution_rule_spec,
