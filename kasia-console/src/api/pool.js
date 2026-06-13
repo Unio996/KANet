@@ -476,13 +476,13 @@ export async function registerPoolRoutes(fastify) {
       });
 
       sqlite.prepare(`INSERT INTO pool_markets (
-        id, maker_relay_id, spine_p2sh, spine_lock_tx, market_metadata_hash,
+        id, maker_relay_id, maker_pk, spine_p2sh, spine_lock_tx, market_metadata_hash,
         oracle1_pk, oracle2_pk, oracle3_pk, broker_pk,
         deadline, miner_fee, broker_fee_pct, oracle_bond_amount, maker_stake_amount,
         outcome_market_source, outcome_condition_id, outcome_token_id, outcome_side, resolution_rule_spec,
         protocol_status, sides_merkle_root, oracle_relay_ids, broker_relay_id, metadata, category
-      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
-        marketId, b.maker_relay_id, spineResult.p2shAddr, spineTxId, marketMetadataHash,
+      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+        marketId, b.maker_relay_id, makerPk, spineResult.p2shAddr, spineTxId, marketMetadataHash,
         oraclePks[0], oraclePks[1], oraclePks[2], brokerPk,
         deadline, minerFee, brokerFeePct, oracleBondAmount, makerStakeAmount,
         b.outcome_market_source, b.outcome_condition_id, b.outcome_token_id, b.outcome_side, b.resolution_rule_spec,
@@ -658,14 +658,14 @@ export async function registerPoolRoutes(fastify) {
         v06_pool_merkle_root: poolMerkleRoot,
       });
       sqlite.prepare(`INSERT INTO pool_markets (
-        id, maker_relay_id, spine_p2sh, spine_lock_tx, market_metadata_hash,
+        id, maker_relay_id, maker_pk, spine_p2sh, spine_lock_tx, market_metadata_hash,
         oracle1_pk, oracle2_pk, oracle3_pk, broker_pk,
         deadline, miner_fee, broker_fee_pct, oracle_bond_amount, maker_stake_amount,
         outcome_market_source, outcome_condition_id, outcome_token_id, outcome_side, resolution_rule_spec,
         protocol_status, sides_merkle_root, oracle_relay_ids, broker_relay_id, metadata, category,
         protocol_version, pool_merkle_root
-      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
-        marketId, b.maker_relay_id, spineResult.p2shAddr, spineTxId, marketMetadataHash,
+      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+        marketId, b.maker_relay_id, makerPk, spineResult.p2shAddr, spineTxId, marketMetadataHash,
         null, null, null, brokerPk,
         deadline, minerFee, brokerFeePct, oracleBondAmount, makerStakeAmount,
         b.outcome_market_source, b.outcome_condition_id, b.outcome_token_id, b.outcome_side, b.resolution_rule_spec,
@@ -944,14 +944,14 @@ export async function registerPoolRoutes(fastify) {
         v07_market_id_hash: market_id_hash,
       });
       sqlite.prepare(`INSERT INTO pool_markets (
-        id, maker_relay_id, spine_p2sh, spine_lock_tx, market_metadata_hash,
+        id, maker_relay_id, maker_pk, spine_p2sh, spine_lock_tx, market_metadata_hash,
         oracle1_pk, oracle2_pk, oracle3_pk, broker_pk,
         deadline, miner_fee, broker_fee_pct, oracle_bond_amount, maker_stake_amount,
         outcome_market_source, outcome_condition_id, outcome_token_id, outcome_side, resolution_rule_spec,
         protocol_status, sides_merkle_root, oracle_relay_ids, broker_relay_id, metadata, category,
         protocol_version, pool_merkle_root, deadline_daa
-      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
-        marketId, b.maker_relay_id, spineResult.p2shAddr, spineTxId, marketMetadataHash,
+      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+        marketId, b.maker_relay_id, makerPk, spineResult.p2shAddr, spineTxId, marketMetadataHash,
         null, null, null, brokerPk,
         deadline, minerFee, brokerFeePct, oracleBondAmount, makerStakeAmount,
         b.outcome_market_source, b.outcome_condition_id, b.outcome_token_id, b.outcome_side, b.resolution_rule_spec,

@@ -4996,5 +4996,20 @@ export function runMigrations() {
     }
   }
 
+  // v169: pool_markets.maker_pk (J2 fee-on-total 2026-06-13, Bettor r859 采纳 (a) + NWT/J1 co-design):
+  // 持久化 ctor-baked makerPk (create deriveXOnlyPubkey → spine ctor makerPk param) 成可读列 = canonical
+  // (= SS 链上承诺同值, 两节点同, 非重新 derive 防 P2PK-edge 漂 per NWT 审①). settle pk-derive maker
+  // payout addr (winner payout + makerFee output) 从此列, 替 makerRow.address (node-local relay 查 =
+  // cross-node maker availability 限制 + NWT② 地址派生轴 BREAKER 同款). 只新建市场填; 老市场 NULL →
+  // settler fallback (cross-node sentinel strip / makerRow.address legacy). DEFAULT NULL 不 retro-apply.
+  {
+    try {
+      sqlite.exec(`ALTER TABLE pool_markets ADD COLUMN maker_pk TEXT`);
+      console.log('[migrate] v169: pool_markets.maker_pk (ctor-baked makerPk canonical, settle maker payout pk-derive 一修两治 winner+fee).');
+    } catch (e) {
+      if (!/duplicate column/i.test(e.message)) console.warn(`[migrate] v169 maker_pk fail: ${e.message}`);
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }

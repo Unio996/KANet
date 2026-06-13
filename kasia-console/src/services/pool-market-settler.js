@@ -313,7 +313,7 @@ export async function poolSettlerTick() {
     // J2-tn r388 (#24 settler 饥饿根治 — Bettor 02:18 钦定 自治闭环地基):
     // ORDER BY updated_at DESC = 活跃市场优先 (= 新近活动 process 在前, stale markets 不阻塞 demo).
     const markets = sqlite.prepare(`
-      SELECT id, maker_relay_id, spine_p2sh, spine_lock_tx, oracle1_pk, oracle2_pk, oracle3_pk,
+      SELECT id, maker_relay_id, maker_pk, spine_p2sh, spine_lock_tx, oracle1_pk, oracle2_pk, oracle3_pk,
              oracle_relay_ids, deadline, protocol_status, sides_merkle_root, broker_pk, broker_fee_pct, broker_relay_id,
              updated_at, maker_stake_amount, oracle_bond_amount, miner_fee, metadata,
              outcome_market_source, outcome_token_id, outcome_side, protocol_version, pool_merkle_root,
@@ -1548,11 +1548,11 @@ export async function dispatchPhase2(market, decision) {
       console.warn(`[pool-settler] dispatchPhase2 market=${market.id.slice(0,12)} missing oracle addresses`);
       return;
     }
-    const makerRow = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(market.maker_relay_id);
-    if (!makerRow?.address) {
-      console.warn(`[pool-settler] dispatchPhase2 market=${market.id.slice(0,12)} no maker address`);
-      return;
-    }
+    // makerRow now OPTIONAL fallback (NWT② 地址派生轴 BREAKER 修): maker payout addr 主用 maker_pk
+    // pk-derive (makerAddress 下, 两节点 canonical), relay 查只 same-node legacy 兜底。cross-node maker
+    // (maker_relay_id='cross-node:<pk>' sentinel) relay 查 null 不再 abort settle (= 之前 regression: 我
+    // 新增 makerFee 每笔用 makerRow → cross-node maker 永久 settle 不了, NWT git-show catch)。
+    const makerRow = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(market.maker_relay_id) || {};
 
     // r339 push 3: broker_relay_id required (= broker fee output dest, no longer placeholder).
     // J2-tn settle BREAKER 修 (NWT r62 / J1 #138) + determinism 根治 (J1 #140 红队):
@@ -1607,9 +1607,30 @@ export async function dispatchPhase2(market, decision) {
       return;
     }
 
+    // maker payout addr pk-derive from canonical maker_pk (Bettor r859 (a) + NWT②/J1 #296 铁律, 一修两治):
+    // market.maker_pk = create 持久化的 ctor-baked makerPk (canonical 单源, 全节点市场复制读同值, NWT 第二签).
+    // 修 pre-existing breaker: maker WINNER payout (此 participant addr) + makerFee/makerExtra 都从此 pk-derive
+    // 非 makerRow.address (node-local relay 查 = cross-node maker availability 限制)。Fallback (老市场 maker_pk
+    // NULL): cross-node sentinel(cross-node:<pk>) strip → 否则 makerRow.address legacy。
+    let makerAddress = null;
+    const makerPkCanonical = market.maker_pk
+      || (String(market.maker_relay_id).startsWith('cross-node:') ? market.maker_relay_id.replace(/^cross-node:/, '') : null);
+    if (makerPkCanonical) {
+      try {
+        makerAddress = new kaspaWasm.XOnlyPublicKey(makerPkCanonical).toAddress(settleNetwork).toString();
+      } catch (e) {
+        console.warn(`[pool-settler] maker pk→addr fail market=${market.id.slice(0,12)} maker_pk=${String(makerPkCanonical).slice(0,8)}: ${e.message}`);
+      }
+    }
+    if (!makerAddress) makerAddress = makerRow.address || null;  // legacy fallback (老市场无 maker_pk + 非 sentinel)
+    if (!makerAddress) {
+      console.warn(`[pool-settler] dispatchPhase2 market=${market.id.slice(0,12)} no maker address (maker_pk + sentinel + relay all null) — abort`);
+      return;
+    }
+
     // 3. Build participants array (= maker + bettors), use pure function computePoolPayouts.
     const participants = [
-      { addr: makerRow.address, stake: makerStake, direction: makerDirection, isMaker: true },
+      { addr: makerAddress, stake: makerStake, direction: makerDirection, isMaker: true },
       ...sides.map((s, i) => ({ addr: sideAddrs[i], stake: parseInt(s.stake_amount, 10) || 0, direction: s.direction, isMaker: false })),
     ];
 
@@ -1821,12 +1842,13 @@ export async function dispatchPhase2(market, decision) {
     for (const w of payouts.winnerPayouts) {
       outputs.push({ address: participants[w.participantIndex].addr, amountSompi: w.amount.toString() });
     }
-    // makerFee 0.1% output (Owner 终裁新增, → maker address). [6+] SS 不约束.
+    // makerFee 0.1% output (Owner 终裁新增, → maker pk-derive addr). [6+] SS 不约束. makerAddress
+    // = canonical pk-derive (上, 非 makerRow.address node-local 查 = NWT② BREAKER 修 一修两治).
     if (payouts.makerFee > 0) {
-      outputs.push({ address: makerRow.address, amountSompi: payouts.makerFee.toString() });
+      outputs.push({ address: makerAddress, amountSompi: payouts.makerFee.toString() });
     }
     if (payouts.makerExtraOutput) {
-      outputs.push({ address: makerRow.address, amountSompi: payouts.makerExtraOutput.toString() });
+      outputs.push({ address: makerAddress, amountSompi: payouts.makerExtraOutput.toString() });
     }
     if (!isAnonymousPoolOutputs) {
       // v0.5 legacy layout: bond returns (+ per-committee oracle fee) at end
