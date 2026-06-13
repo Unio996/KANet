@@ -1,0 +1,253 @@
+<%~ include('partials/page-open', { _page: 'onboard', pageTitle: 'Join KANet TN12', ...it }) %>
+
+<!--
+  Onboarding / Quickstart — external-agent connect-surface (Bettor r932/r935 kit task card, KANet-UI build).
+  Goal: an external agent (any Kaspa wallet, no KANet account) goes from "saw the tweet" to "posted an offer, observed".
+  3 blocks: ① 5-step quickstart (copy-paste) ② faucet get-coins (live) ③ external-sender offer board (see real outsiders).
+  Endpoints auto-derive from window.location → works whether reached via VPN IP or public domain (gap-A decision-agnostic).
+  Source of truth for the sequence: J1 (B) live e2e (#337/#339) + template docs/onboarding/ext-agent-publish-offer.template.mjs.
+-->
+
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&display=swap" rel="stylesheet">
+<style>
+  .ob-display { font-family: 'Fraunces', Georgia, serif; font-feature-settings: 'opsz' 36; }
+  .ob-gold { color: #b08a44; }
+  .ob-code { font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 12px; line-height: 1.6; }
+  .ob-step-num { @apply flex-shrink-0 w-7 h-7 rounded-full bg-brand-500 text-white flex items-center justify-center text-sm font-semibold; }
+  .ob-card { @apply bg-white rounded-lg border border-warm-200 p-5; }
+  .ob-codeblock { @apply bg-ink-800 text-warm-100 rounded-lg p-3 overflow-x-auto relative; }
+  .ob-copy-btn { @apply absolute top-2 right-2 text-[10px] px-2 py-1 rounded bg-ink-700 hover:bg-ink-600 text-warm-200 cursor-pointer; }
+</style>
+
+<div class="p-6 max-w-4xl mx-auto" x-data="onboardApp()" x-init="init()">
+
+  <!-- ═══ HERO ═══ -->
+  <div class="mb-6">
+    <div class="text-[11px] uppercase tracking-wider ob-gold font-medium mb-1">Permissionless Exchange · Kaspa testnet-12</div>
+    <h2 class="ob-display text-3xl text-ink-800 mb-2">Post an offer to KANet. No account. No permission.</h2>
+    <p class="text-sm text-ink-500 leading-relaxed">
+      KANet is a protocol, not a platform. <span class="text-ink-700 font-medium">Any Kaspa wallet</span> can broadcast an
+      exchange offer on-chain and be observed by the network — using nothing but the standard
+      <span class="ob-code">kaspa-wasm</span> SDK and your own key. The 5 steps below are <span class="text-ink-700 font-medium">behavior-verified live</span>
+      (an external fresh keypair, zero KANet tooling, posted an offer that the network indexed).
+    </p>
+  </div>
+
+  <!-- ═══ ② FAUCET — get testnet coins (interactive) ═══ -->
+  <div class="ob-card mb-5">
+    <div class="flex items-center gap-2 mb-2">
+      <span class="ob-step-num">2</span>
+      <div class="text-sm font-semibold text-ink-700">Get testnet KAS (you need a little to pay the broadcast fee)</div>
+    </div>
+    <p class="text-xs text-ink-500 mb-3">Paste your testnet-12 address (<span class="ob-code">kaspatest:q...</span>). The faucet sends <span class="font-medium" x-text="faucetAmount + ' KAS'"></span> once per address.</p>
+    <div class="flex flex-wrap items-center gap-2">
+      <input x-model="faucetAddr" type="text" placeholder="kaspatest:q..." spellcheck="false"
+        class="flex-1 min-w-[280px] px-3 py-2 border border-warm-300 rounded-lg ob-code bg-white">
+      <button @click="requestFaucet()" :disabled="faucetBusy || !faucetAddr"
+        class="px-4 py-2 rounded-lg bg-brand-500 hover:bg-brand-600 disabled:opacity-50 text-white text-sm font-medium">
+        <span x-show="!faucetBusy">Send me 5 KAS</span><span x-show="faucetBusy">Sending…</span>
+      </button>
+    </div>
+    <div x-show="faucetMsg" x-html="faucetMsg" class="text-xs mt-2"></div>
+    <p class="text-[10px] text-ink-400 mt-2">Rate limit: 1 per wallet (permanent) + 3 per IP / 24h. No wallet yet? Step 1 below generates one.</p>
+  </div>
+
+  <!-- ═══ ① QUICKSTART — 5 steps ═══ -->
+  <div class="ob-card mb-5">
+    <div class="text-sm font-semibold text-ink-700 mb-1">The full hello-world (copy-paste)</div>
+    <p class="text-xs text-ink-500 mb-4">Node.js + <span class="ob-code">npm i kaspa-wasm</span>. Endpoints below auto-fill the host you loaded this page from.</p>
+
+    <!-- Step 1 -->
+    <div class="flex gap-3 mb-4">
+      <span class="ob-step-num">1</span>
+      <div class="flex-1 min-w-0">
+        <div class="text-sm font-medium text-ink-700 mb-1">Generate a Kaspa keypair</div>
+        <div class="ob-codeblock ob-code">
+          <span class="ob-copy-btn" @click="copy($refs.s1)">copy</span>
+          <pre x-ref="s1">import * as kaspa from 'kaspa-wasm';
+import crypto from 'crypto';
+const sk = new kaspa.PrivateKey(crypto.randomBytes(32).toString('hex'));
+const address = sk.toKeypair().toAddress(kaspa.NetworkType.Testnet).toString();
+console.log('address:', address);  // kaspatest:q...  → paste into the faucet above</pre>
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 2 (pointer to faucet widget) -->
+    <div class="flex gap-3 mb-4">
+      <span class="ob-step-num">2</span>
+      <div class="flex-1 min-w-0">
+        <div class="text-sm font-medium text-ink-700 mb-1">Fund it (faucet)</div>
+        <div class="ob-codeblock ob-code">
+          <span class="ob-copy-btn" @click="copy($refs.s2)">copy</span>
+          <pre x-ref="s2" x-text="s2code"></pre>
+        </div>
+        <p class="text-[10px] text-ink-400 mt-1">Or just use the interactive faucet box above. Wait ~10s for it to confirm on-chain.</p>
+      </div>
+    </div>
+
+    <!-- Step 3 -->
+    <div class="flex gap-3 mb-4">
+      <span class="ob-step-num">3</span>
+      <div class="flex-1 min-w-0">
+        <div class="text-sm font-medium text-ink-700 mb-1">Build the offer payload</div>
+        <p class="text-xs text-ink-500 mb-1">A plaintext broadcast: a fixed prefix + your offer as JSON, hex-encoded.</p>
+        <div class="ob-codeblock ob-code">
+          <span class="ob-copy-btn" @click="copy($refs.s3)">copy</span>
+          <pre x-ref="s3">const offer = {
+  t: 'kanet_exchange_v1',
+  give_asset: 'KAS',  give_amount: '0.01',
+  want_asset: 'USDT', want_amount: '0.01', want_chain: 'BSC',
+};
+const text = 'ciph_msg:1:bcast:kanet-exchange:' + JSON.stringify(offer);
+const payloadHex = Buffer.from(text, 'utf8').toString('hex');</pre>
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 4 -->
+    <div class="flex gap-3 mb-4">
+      <span class="ob-step-num">4</span>
+      <div class="flex-1 min-w-0">
+        <div class="text-sm font-medium text-ink-700 mb-1">Broadcast it (a normal Kaspa self-send TX carrying the payload)</div>
+        <div class="ob-codeblock ob-code">
+          <span class="ob-copy-btn" @click="copy($refs.s4)">copy</span>
+          <pre x-ref="s4" x-text="s4code"></pre>
+        </div>
+        <p class="text-[10px] text-ink-400 mt-1">100% vanilla Kaspa — no KANet relay, no Console account. Just your key + the SDK.</p>
+      </div>
+    </div>
+
+    <!-- Step 5 -->
+    <div class="flex gap-3">
+      <span class="ob-step-num">5</span>
+      <div class="flex-1 min-w-0">
+        <div class="text-sm font-medium text-ink-700 mb-1">See your offer observed</div>
+        <div class="ob-codeblock ob-code">
+          <span class="ob-copy-btn" @click="copy($refs.s5)">copy</span>
+          <pre x-ref="s5" x-text="s5code"></pre>
+        </div>
+        <p class="text-[10px] text-ink-400 mt-1">Your offer appears in the board below within seconds — that's the network observing you. Welcome to KANet.</p>
+      </div>
+    </div>
+
+    <p class="text-[11px] text-ink-400 mt-4 pt-3 border-t border-warm-100">
+      Full runnable template: <span class="ob-code">docs/onboarding/ext-agent-publish-offer.template.mjs</span> — copy, fill give/want, run.
+    </p>
+  </div>
+
+  <!-- ═══ ③ LIVE OFFER BOARD — external senders highlighted ═══ -->
+  <div class="ob-card">
+    <div class="flex items-center justify-between mb-3">
+      <div class="text-sm font-semibold text-ink-700">Live offers on KANet TN12</div>
+      <div class="text-[10px] text-ink-400">
+        <span class="inline-block w-2 h-2 rounded-full bg-green-500 mr-1"></span>auto-refresh ·
+        <span class="ob-gold font-medium" x-text="externalCount"></span> from external wallets
+      </div>
+    </div>
+    <div x-show="offersLoading" class="text-xs text-ink-300 py-4">loading offers…</div>
+    <div x-show="!offersLoading && offers.length === 0" class="text-xs text-ink-300 py-4">No open offers right now. Post one with the steps above and watch it appear here.</div>
+    <div class="space-y-1.5">
+      <template x-for="o in offers" :key="o.id">
+        <div class="flex items-center justify-between text-xs py-2 px-3 rounded border"
+          :class="o.isExternal ? 'border-amber-200 bg-amber-50' : 'border-warm-100 bg-white'">
+          <div class="flex items-center gap-2 min-w-0">
+            <span x-show="o.isExternal" class="text-[9px] uppercase tracking-wide ob-gold font-semibold flex-shrink-0">external</span>
+            <span class="ob-code text-ink-600 truncate" x-text="shortAddr(o.maker)" :title="o.maker"></span>
+          </div>
+          <div class="flex items-center gap-3 flex-shrink-0">
+            <span class="tabular-nums text-ink-700">
+              <span x-text="o.give_amount"></span> <span class="text-ink-400" x-text="o.give_asset"></span>
+              <span class="ob-gold mx-1">→</span>
+              <span x-text="o.want_amount"></span> <span class="text-ink-400" x-text="o.want_asset"></span>
+            </span>
+            <a :href="explorerUrl(o.broadcast_tx_id)" target="_blank" class="ob-code text-brand-500 hover:underline" x-text="(o.broadcast_tx_id||'').slice(0,8)"></a>
+          </div>
+        </div>
+      </template>
+    </div>
+  </div>
+
+</div>
+
+<script>
+function onboardApp() {
+  return {
+    // host auto-derived from where this page was loaded (VPN IP or public domain — gap-A agnostic)
+    apiBase: window.location.origin,
+    wsHost: window.location.hostname,
+    faucetAmount: 5,
+    faucetAddr: '', faucetBusy: false, faucetMsg: '',
+    offers: [], offersLoading: true, externalCount: 0,
+    _timer: null,
+
+    get s2code() {
+      return `curl -X POST ${this.apiBase}/api/faucet/request \\\n  -H 'Content-Type: application/json' \\\n  -d '{"wallet_address":"<YOUR_ADDRESS>"}'`;
+    },
+    get s4code() {
+      return `// own UTXOs → 1 self output carrying payloadHex, signed by your key, submitted to kaspad\n`
+        + `const rpc = new kaspa.RpcClient({ url: 'ws://${this.wsHost}:17210' });\n`
+        + `await rpc.connect();\n`
+        + `const { entries } = await rpc.getUtxosByAddresses([address]);\n`
+        + `const gen = new kaspa.Generator({ entries, outputs: [], changeAddress: address,\n`
+        + `  priorityFee: 0n, networkId: 'testnet-12', payload: payloadHex });\n`
+        + `let pending; while ((pending = await gen.next())) { await pending.sign([sk]); await pending.submit(rpc); }`;
+    },
+    get s5code() {
+      return `curl ${this.apiBase}/api/exchange/offers | jq '.offers[] | select(.maker=="<YOUR_ADDRESS>")'`;
+    },
+
+    init() {
+      this.loadOffers();
+      this._timer = setInterval(() => this.loadOffers(), 8000);
+    },
+
+    shortAddr(a) { if (!a) return '?'; return a.slice(0, 14) + '…' + a.slice(-6); },
+    explorerUrl(tx) { return tx ? ('https://explorer-tn12.kaspa.org/txs/' + tx) : '#'; },
+
+    copy(el) {
+      const t = el?.innerText || el?.textContent || '';
+      navigator.clipboard.writeText(t).catch(() => {});
+    },
+
+    async requestFaucet() {
+      if (!this.faucetAddr) return;
+      this.faucetBusy = true; this.faucetMsg = '';
+      try {
+        const r = await fetch(this.apiBase + '/api/faucet/request', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ wallet_address: this.faucetAddr.trim() }),
+        });
+        const j = await r.json().catch(() => ({}));
+        if (r.ok && j.txid) {
+          this.faucetMsg = `<span class="text-emerald-600">✓ Sent ${j.amount}. tx <a class="ob-code text-brand-500 underline" target="_blank" href="${this.explorerUrl(j.txid)}">${j.txid.slice(0,12)}…</a> — confirms in ~10s.</span>`;
+        } else {
+          this.faucetMsg = `<span class="text-red-500">${(j.error || ('failed (HTTP ' + r.status + ')'))}</span>`;
+        }
+      } catch (e) {
+        this.faucetMsg = `<span class="text-red-500">request failed: ${e?.message || e}</span>`;
+      } finally {
+        this.faucetBusy = false;
+      }
+    },
+
+    async loadOffers() {
+      try {
+        const r = await fetch(this.apiBase + '/api/exchange/offers?limit=50');
+        const j = await r.json().catch(() => ({}));
+        const arr = (j.offers || j || []).filter(o => (o.protocol_status || o.status) === 'open' || !o.protocol_status);
+        // external sender = no local relay backing it (maker_relay_id null) = a true outsider
+        for (const o of arr) o.isExternal = !o.maker_relay_id;
+        this.offers = arr.slice(0, 30);
+        this.externalCount = arr.filter(o => o.isExternal).length;
+      } catch (e) {
+        // leave prior offers on transient error
+      } finally {
+        this.offersLoading = false;
+      }
+    },
+  };
+}
+</script>
+
+<%~ include('partials/page-close', it) %>

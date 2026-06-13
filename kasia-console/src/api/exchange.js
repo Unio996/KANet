@@ -1431,4 +1431,13 @@ export async function registerExchangeRoutes(fastify) {
       pageTitle: 'Free Market — KANet',
     });
   });
+
+  // Onboarding / quickstart — external-agent connect-surface (Bettor r932/r935 kit task card).
+  // External agent: any Kaspa wallet → post an offer → observed. 3 blocks: 5-step quickstart + live faucet + external-offer board.
+  fastify.get('/onboard', async (request, reply) => {
+    return reply.view('onboard.eta', {
+      _page: 'onboard',
+      pageTitle: 'Join KANet TN12',
+    });
+  });
 }
