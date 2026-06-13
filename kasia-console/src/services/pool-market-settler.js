@@ -1358,36 +1358,41 @@ export function computePoolPayouts(args) {
   const losers = participants.filter(p => p.direction !== winner);
   if (!winners.length) throw new Error('no winners');
 
+  // === Owner 终裁 2026-06-13: fee-on-TOTAL parimutuel rake (was fee-on-losing). ⑤数值锁:
+  // broker 1.9% / oracle 1% / maker 0.1% = ~3% on TOTAL pool. 全 BigInt sompi 零 float
+  // (NWT④ / D7 BigInt L654 漂移教训). Cross-node byte-identical (R1 承重墙): 整数 + 固定 floor
+  // 顺序 broker→oracle→maker→winner→dust=remainder; participants 已按 merkle_index ASC 序
+  // (dispatchPhase2 L1469) → winners[0]=min merkle_index = dust absorber (NWT③/J1 tie-break). ===
   const totalLoserStake = losers.reduce((s, p) => s + p.stake, 0);
   const totalWinnerStake = winners.reduce((s, p) => s + p.stake, 0);
-  // Self-catch: subtract minerFee from losing pool (= same class as 1V1 settle TX fee bug observed
-  // 5/21 in tn12 console.log "transaction has 10000 fees which is under the required amount of 13130").
-  // Winners absorb fee. losingPool >= brokerFee + minerFee required else throws.
-  const losingPool = Math.max(0, totalLoserStake - minerFee);
-  if (totalLoserStake < minerFee) {
-    throw new Error(`losing pool (${totalLoserStake}) less than minerFee (${minerFee}) — settle impossible without fee`);
+  const totalWinnerStakeBI = winners.reduce((s, p) => s + BigInt(p.stake), 0n);
+  const totalLoserStakeBI = losers.reduce((s, p) => s + BigInt(p.stake), 0n);
+  const totalPoolBI = totalWinnerStakeBI + totalLoserStakeBI;  // = Σ全 stake (maker stake 已在某侧)
+  const minerFeeBI = BigInt(minerFee);
+  if (totalPoolBI <= minerFeeBI) {
+    throw new Error(`totalPool (${totalPoolBI}) <= minerFee (${minerFeeBI}) — settle impossible without fee`);
   }
-  // Bug 8: broker_fee floor MIN_BROKER_FEE_SOMPI (= 0.05 KAS) — a tiny broker output
-  // dominates KIP-9 storage mass (Σ 1/output_value). Floored so the output isn't dust-small.
-  const brokerFeeRaw = Math.floor(losingPool * brokerFeePct / 10000);
-  const brokerFee = Math.max(brokerFeeRaw, minBrokerFee);
-  if (losingPool < brokerFee) {
-    throw new Error(`losing pool (${losingPool}) less than broker_fee floor (${brokerFee}) — pot too small to settle`);
-  }
-  // Bettor r355 — committee bond-floor reservation (qoyqv 'script ran, but verification failed').
-  // PoolSpine_v0.6/v0.7 entry 0 require(output[1..N].value >= oracleBondAmount) — the SS demands
-  // each committee output >= oracleBond even though committee posts NO on-chain bond (committeeMode).
-  // The bond floor is paid FROM the losing pool; the min-pot LOCK (losingPool >= N×oracleBond +
-  // broker + margin, Owner 6/1) exists precisely to guarantee this is affordable. So reserve
-  // N×oracleBond off the distributable pool before computing winner shares. r230's bond=0 left
-  // committee outputs = fee-share only → < oracleBond when fee thin → SS reject. v0.5 (real bonds
-  // posted as inputs): no reservation, bond returned from the input UTXO.
+  // Fee basis points (caller passes bps). brokerFeePct legacy arg; oracle/maker default per ⑤.
+  const brokerBps = BigInt(brokerFeePct);
+  const oracleBps = BigInt(Number.isFinite(args.oracleFeePct) ? args.oracleFeePct : 100);  // 1%
+  const makerBps = BigInt(Number.isFinite(args.makerFeePct) ? args.makerFeePct : 10);      // 0.1%
+  // Fixed floor order (R1 承重墙): broker → oracle → maker, each floor(totalPool × bps / 10000).
+  let brokerFeeBI = (totalPoolBI * brokerBps) / 10000n;
+  const minBrokerFeeBI = BigInt(minBrokerFee);
+  if (brokerFeeBI < minBrokerFeeBI) brokerFeeBI = minBrokerFeeBI;  // Bug 8 floor (KIP-9 storage mass)
+  const oracleFeeTotalBI = (totalPoolBI * oracleBps) / 10000n;
+  const makerFeeBI = (totalPoolBI * makerBps) / 10000n;
+  const brokerFee = Number(brokerFeeBI);
+  // Bettor r355 — committee bond-floor reservation: PoolSpine_v0.6/v0.7 entry 0 requires each
+  // committee output >= oracleBond (committeeMode posts NO on-chain bond). Reserve N×oracleBond
+  // off distributable. MIN_POT LOCK guarantees affordability (now re-derived for fee-on-total ⑥).
   const oracleCountForBonds = Number.isInteger(args.oracleCount) ? args.oracleCount : 3;
   const committeeMode = !!args.committeeMode;
-  const committeeBondReserve = committeeMode ? oracleCountForBonds * oracleBond : 0;
-  const distributablePool = losingPool - brokerFee - committeeBondReserve;
-  if (distributablePool < 0) {
-    throw new Error(`distributable pool negative after committee bond reserve (losingPool=${losingPool} brokerFee=${brokerFee} committeeBond=${committeeBondReserve}) — min-pot guard should have prevented`);
+  const committeeBondReserveBI = committeeMode ? BigInt(oracleCountForBonds) * BigInt(oracleBond) : 0n;
+  // distributable = totalPool − Σfees − bondReserve − minerFee (winners 分整个 post-rake 池).
+  const distributableBI = totalPoolBI - brokerFeeBI - oracleFeeTotalBI - makerFeeBI - committeeBondReserveBI - minerFeeBI;
+  if (distributableBI < 0n) {
+    throw new Error(`distributable negative (total=${totalPoolBI} broker=${brokerFeeBI} oracle=${oracleFeeTotalBI} maker=${makerFeeBI} bond=${committeeBondReserveBI} miner=${minerFeeBI}) — MIN_POT guard should have prevented`);
   }
 
   // Forfeit_1 50/25/25 split per v0.5 spec section 4.4
@@ -1406,27 +1411,34 @@ export function computePoolPayouts(args) {
   // #12 实证: input 7 KAS, output 7.72 KAS (overspend 0.72 KAS) = redistribution adds up.
   // 设计上 committeeMode 静默员仍拿 oracleBond (Bettor 23:59 红线: '不卡主线 settle 照样落,
   // 主线证完起对抗讨论 KB 经济模型再定'). 此处守 settle 落链, 经济模型后续 retro.
-  let winnerForfeitShare = 0, makerForfeitShare = 0, perOracleForfeitShare = 0;
+  let winnerForfeitShareBI = 0n, makerForfeitShareBI = 0n, perOracleForfeitShareBI = 0n;
   if (!unanimous && typeof silentOracleIndex === 'number' && !committeeMode) {
-    winnerForfeitShare = Math.floor(oracleBond * 50 / 100);
-    makerForfeitShare = Math.floor(oracleBond * 25 / 100);
-    perOracleForfeitShare = Math.floor(oracleBond * 25 / 100 / 2);
-    const totalAllocated = winnerForfeitShare + makerForfeitShare + perOracleForfeitShare * 2;
-    const remainder = oracleBond - totalAllocated;
-    makerForfeitShare += remainder;
+    const ob = BigInt(oracleBond);
+    winnerForfeitShareBI = (ob * 50n) / 100n;
+    makerForfeitShareBI = (ob * 25n) / 100n;
+    perOracleForfeitShareBI = (ob * 25n) / 100n / 2n;
+    const allocated = winnerForfeitShareBI + makerForfeitShareBI + perOracleForfeitShareBI * 2n;
+    makerForfeitShareBI += ob - allocated;  // remainder fold (no sompi leak)
   }
 
-  const winnerPayouts = winners.map(w => {
-    const winnerShare = totalWinnerStake > 0
-      ? Math.floor((distributablePool + winnerForfeitShare) * w.stake / totalWinnerStake)
-      : 0;
-    let amount = w.stake + winnerShare;
-    if (w.isMaker) amount += makerForfeitShare;
-    return { participantIndex: w.idx, isMaker: !!w.isMaker, amount };
+  // Winner parimutuel (fee-on-total): floor((distributable + winnerForfeit) × stake_i / ΣwinnerStake).
+  // NO "+stake" (winner stake already inside distributable, unlike old fee-on-losing). dust (floor 余)
+  // → winners[0] (= min merkle_index, participants idx-sorted) absorber, cross-node same (NWT③/J1).
+  const poolToSplitBI = distributableBI + winnerForfeitShareBI;
+  const shareBIs = winners.map(w => (totalWinnerStakeBI > 0n
+    ? (poolToSplitBI * BigInt(w.stake)) / totalWinnerStakeBI
+    : 0n));
+  const shareSumBI = shareBIs.reduce((s, x) => s + x, 0n);
+  const winnerDustBI = poolToSplitBI - shareSumBI;  // 0..(N-1) sompi floor remainder
+  const winnerPayouts = winners.map((w, i) => {
+    let amtBI = shareBIs[i];
+    if (i === 0) amtBI += winnerDustBI;       // dust → min merkle_index winner (单一确定 absorber)
+    if (w.isMaker) amtBI += makerForfeitShareBI;
+    return { participantIndex: w.idx, isMaker: !!w.isMaker, amount: Number(amtBI) };
   });
 
   const isMakerWinner = winners.some(w => w.isMaker);
-  const makerExtraOutput = (!isMakerWinner && makerForfeitShare > 0) ? makerForfeitShare : null;
+  const makerExtraOutput = (!isMakerWinner && makerForfeitShareBI > 0n) ? Number(makerForfeitShareBI) : null;
 
   // Bettor r355 SUPERSEDES r230 (committeeMode bond=0): the deployed PoolSpine_v0.6/v0.7 entry 0
   // requires output[1..N] >= oracleBondAmount, so committeeMode MUST pay each committee >= oracleBond
@@ -1440,11 +1452,50 @@ export function computePoolPayouts(args) {
   const oracleBondReturns = [];
   for (let i = 0; i < oracleCountForBonds; i++) {
     if (!committeeMode && !unanimous && silentOracleIndex === i) continue;
-    const bondReturnAmount = committeeMode ? oracleBond : (oracleBond + perOracleForfeitShare);
+    const bondReturnAmount = committeeMode ? oracleBond : Number(BigInt(oracleBond) + perOracleForfeitShareBI);
     oracleBondReturns.push({ oracleIndex: i, amount: bondReturnAmount });
   }
 
-  return { brokerFee, winnerPayouts, makerExtraOutput, oracleBondReturns };
+  // oracleFeeTotal/makerFee returned so dispatchPhase2 builds outputs from canonical fee-on-total
+  // computation (NOT recompute on losingPool). oracle 0.5%均分+0.5%质押 split done in dispatchPhase2
+  // (has committee stakes). _totalPool/_distributable = ⑥ 守恒 anchors for caller post-construction assert.
+  return {
+    brokerFee,
+    oracleFeeTotal: Number(oracleFeeTotalBI),
+    makerFee: Number(makerFeeBI),
+    winnerPayouts,
+    makerExtraOutput,
+    oracleBondReturns,
+    _totalPool: Number(totalPoolBI),
+    _distributable: Number(distributableBI),
+  };
+}
+
+/**
+ * Committee enrollment stakes for oracle 0.5%质押 stake-weighted split (Owner 终裁 ⑤).
+ * Source = pool_snapshots.pool_stakes_json[committee_index] — CANONICAL merkle-rooted snapshot
+ * (= VRF 采样同源, baked 进 pool merkle root that SS verifies; 跨节点同, 非 node-local 可变表 = NWT①).
+ * MVP create-snapshot. 待 Owner 时点裁定: (1) create-snapshot=此; (2) deadline-snapshot=换
+ * oracle_pool_chain_view@deadlineDaa derive 一行 (stakeSource 抽象, 不改结构). Locked P2SH UTXO
+ * 恒定 while locked + ⑧ lock_until≥settle → committee create-stake == deadline-stake (J2 r841).
+ * Returns BigInt[] in committee_pks order; missing data → all 0n (caller degrades to uniform split).
+ */
+function getCommitteeStakesCanonical(marketId, divisor) {
+  try {
+    const snap = sqlite.prepare('SELECT pool_pks_json, pool_stakes_json FROM pool_snapshots WHERE market_id = ?').get(marketId);
+    const comm = sqlite.prepare('SELECT committee_pks FROM pool_committee WHERE market_id = ?').get(marketId);
+    if (!snap || !comm) return new Array(divisor).fill(0n);
+    const pks = JSON.parse(snap.pool_pks_json || '[]').map(p => String(p).toLowerCase());
+    const stakes = JSON.parse(snap.pool_stakes_json || '[]');
+    const committeePks = JSON.parse(comm.committee_pks || '[]').map(p => String(p).toLowerCase());
+    return committeePks.map(pk => {
+      const idx = pks.indexOf(pk);
+      return (idx >= 0 && stakes[idx] != null) ? BigInt(stakes[idx]) : 0n;
+    });
+  } catch (e) {
+    console.warn(`[pool-settler] getCommitteeStakesCanonical fail market=${String(marketId).slice(0,12)}: ${e.message}`);
+    return new Array(divisor).fill(0n);
+  }
 }
 
 /**
@@ -1694,6 +1745,8 @@ export async function dispatchPhase2(market, decision) {
         participants,
         winner: decision.winner,
         brokerFeePct: parseInt(market.broker_fee_pct, 10) || 0,
+        oracleFeePct: parseInt(market.oracle_fee_pct, 10) || 100,  // Owner 终裁 ⑤: 1% (= 0.5%均分+0.5%质押)
+        makerFeePct: parseInt(market.maker_fee_pct, 10) || 10,     // Owner 终裁 ⑤: 0.1% (新 fee channel, fee-on-total)
         oracleBond: parseInt(market.oracle_bond_amount, 10) || 0,
         minerFee: minerFeeFinal,
         unanimous: decision.unanimous,
@@ -1730,57 +1783,67 @@ export async function dispatchPhase2(market, decision) {
     // Sub 5b (Oracle v0.3 J1 #21 critical gap fix): NWT sub 4 PoolSpine ctor 12 + outputs[last 3]
     // 合并 bond + oracleFee/3 per oracle (= 3 oracle outputs each get bond_return + oracleFee/3 share).
     // outputs.length 不变 (= PoolSpine 3 oracle), 但 amount 含 oracleFee share.
-    const oracleFeePct = parseInt(market.oracle_fee_pct, 10) || 100;  // default 1% per Bettor r17 truth matrix
-    const losingPoolForOracleFee = Math.max(0, parseInt(market.maker_stake_amount, 10) || 0); // approx; per NWT spec deviated
-    // Per Bettor r17 truth matrix: oracleFee = oracleFeePct × losingPool (= same source as brokerFee).
-    // computePoolPayouts didn't compute this; sub 5b adds explicitly.
-    const totalLoserStake = participants.filter(p => p.direction !== decision.winner).reduce((s, p) => s + p.stake, 0);
+    // === fee-on-total (Owner 终裁 2026-06-13): broker/oracle/maker fee 全来自 computePoolPayouts
+    // (fee-on-totalPool, oracleFeeTotal 已从 distributable 减出). dispatchPhase2 只 split oracleFeeTotal
+    // 给委员 + 建 output。winner 用 payouts.amount 直接 (NO 旧的再扣 oracleFee = 去双扣 bug)。
     const baseMinerFeeSompi = parseInt(market.miner_fee, 10) || 20_000;
-    // A批2 动态费 (Bettor r402 + Owner 钦定): v0.6+v0.7 用 dynamicFee 同 L798. v0.5 keep base.
     const isAnonymousPoolOutputs = market.protocol_version === 'v0.6' || market.protocol_version === 'v0.7';
-    const minerFeeSompi = isAnonymousPoolOutputs ? dynamicFee : baseMinerFeeSompi;
-    const oracleLosingPool = Math.max(0, totalLoserStake - minerFeeSompi);
-    const oracleFeeTotal = Math.floor(oracleLosingPool * oracleFeePct / 10000);
+    const minerFeeSompi = isAnonymousPoolOutputs ? dynamicFee : baseMinerFeeSompi;  // settle TX fee
     const oracleFeeDivisor = isAnonymousPoolOutputs ? 5 : 3;
-    const oracleFeePerSig = Math.floor(oracleFeeTotal / oracleFeeDivisor);
-    // Spec note: oracleFeeTotal % 3 余数 (= 0-2 sompi) 留 brokerFee 端 (= 等同 W3 余数 maker pattern reuse).
-    // Per J1 #4 fix: oracleFee deducted from broker pool? No — 跟 Bettor r17 truth matrix "brokerFeePct × losingPool" + "oracleFeePct × losingPool" 是 2 个独立 channel, 不 carved from broker.
-    // Settler 必从 distributablePool 进一步扣除 oracleFeeTotal (= winner pool 减小). 这是 NWT sub 4 PoolSpine 改的 semantic.
+    // oracle 1% split: 0.5%均分 (uniform/N) + 0.5%质押 (committee enrollment stake-weighted, NWT①).
+    // 全 BigInt (NWT④/D7 教训). dust → committee[0] (canonical 采样序, 单一确定 absorber).
+    const oracleFeeTotalBI = BigInt(payouts.oracleFeeTotal);
+    const uniformHalfBI = oracleFeeTotalBI / 2n;            // 0.5%均分 half
+    const stakeHalfBI = oracleFeeTotalBI - uniformHalfBI;   // 0.5%质押 half (= remainder of /2, no leak)
+    const uniformPerSigBI = uniformHalfBI / BigInt(oracleFeeDivisor);
+    const committeeStakesBI = getCommitteeStakesCanonical(market.id, oracleFeeDivisor);
+    const totalCommStakeBI = committeeStakesBI.reduce((s, x) => s + x, 0n);
+    const perCommFeeBI = committeeStakesBI.map(st => uniformPerSigBI
+      + (totalCommStakeBI > 0n ? (stakeHalfBI * st) / totalCommStakeBI : 0n));
+    const oracleDustBI = oracleFeeTotalBI - perCommFeeBI.reduce((s, x) => s + x, 0n);
+    if (perCommFeeBI.length) perCommFeeBI[0] += oracleDustBI;
 
     const outputs = [];
+    // [0] broker fee (P2PK brokerLock; == maker 若 maker 自任 broker = create-time ctor brokerPk=makerPk).
     if (payouts.brokerFee > 0) {
       outputs.push({ address: brokerAddress, amountSompi: payouts.brokerFee.toString() });
     }
-    // Bettor r277 layer-19: v0.6/v0.7 PoolSpine settle_aggregate fixed output layout:
-    // [0]=broker, [1..5]=5 committee P2PKs (>= oracleBondAmount each), [6..]=winners.
-    // v0.5 had [broker, winners, makerExtra, oracleBondReturns] — committee at end.
-    // Reorder for v0.6/v0.7: insert oracleBondReturns (+ fee/N) BEFORE winners.
+    // v0.6/v0.7 PoolSpine settle layout: [0]=broker, [1..5]=committee(>=oracleBond each), [6..]=winners
+    // + makerFee (SS require outputs.length>=6, [6..] 不约束 → makerFee 自由放 [6+], J2 r845 查 SS L253-277).
+    // committee output = bond return + per-committee oracle fee (0.5%均分 + 0.5%质押 share).
     if (isAnonymousPoolOutputs) {
       for (const r of payouts.oracleBondReturns) {
-        const mergedAmount = r.amount + oracleFeePerSig;
-        outputs.push({ address: oracleRows[r.oracleIndex].address, amountSompi: mergedAmount.toString() });
+        const merged = BigInt(r.amount) + (perCommFeeBI[r.oracleIndex] ?? 0n);
+        outputs.push({ address: oracleRows[r.oracleIndex].address, amountSompi: merged.toString() });
       }
     }
-    // Winners reduced by oracleFeeTotal share — proportional to original share
-    // (= 等同 W2 spec "distributablePool = losingPool − brokerFee" 加 minus oracleFeeTotal)
-    let winnerOracleFeeDeducted = 0;
+    // [6..] winners — payouts.amount 直接用 (fee-on-total: 已净 broker/oracle/maker, NO 再扣 = 去双扣 bug).
     for (const w of payouts.winnerPayouts) {
-      // Pro-rata oracleFee deduction (= winner share scales linearly with stake)
-      const winnerStake = participants[w.participantIndex].stake;
-      const totalWinnerStake = payouts.winnerPayouts.reduce((s, p) => s + participants[p.participantIndex].stake, 0);
-      const oracleFeeShareForWinner = totalWinnerStake > 0 ? Math.floor(oracleFeeTotal * winnerStake / totalWinnerStake) : 0;
-      const adjustedAmount = Math.max(0, w.amount - oracleFeeShareForWinner);
-      winnerOracleFeeDeducted += oracleFeeShareForWinner;
-      outputs.push({ address: participants[w.participantIndex].addr, amountSompi: adjustedAmount.toString() });
+      outputs.push({ address: participants[w.participantIndex].addr, amountSompi: w.amount.toString() });
+    }
+    // makerFee 0.1% output (Owner 终裁新增, → maker address). [6+] SS 不约束.
+    if (payouts.makerFee > 0) {
+      outputs.push({ address: makerRow.address, amountSompi: payouts.makerFee.toString() });
     }
     if (payouts.makerExtraOutput) {
       outputs.push({ address: makerRow.address, amountSompi: payouts.makerExtraOutput.toString() });
     }
     if (!isAnonymousPoolOutputs) {
-      // v0.5 legacy layout: bond returns at end
+      // v0.5 legacy layout: bond returns (+ per-committee oracle fee) at end
       for (const r of payouts.oracleBondReturns) {
-        const mergedAmount = r.amount + oracleFeePerSig;
-        outputs.push({ address: oracleRows[r.oracleIndex].address, amountSompi: mergedAmount.toString() });
+        const merged = BigInt(r.amount) + (perCommFeeBI[r.oracleIndex] ?? 0n);
+        outputs.push({ address: oracleRows[r.oracleIndex].address, amountSompi: merged.toString() });
+      }
+    }
+
+    // ⑥ 守恒 assert (NWT⑤: post-construction on 实 TX outputs, 抓构造 bug 非只 pre-compute).
+    // committeeMode bonds pool-funded (reserved from totalPool) → Σoutputs + minerFee == totalPool 逐 sompi.
+    // minerFeeSompi == computePoolPayouts 用的 minerFeeFinal (committeeMode 都 = dynamicFee). 不闭 = abort 防泄.
+    if (isAnonymousPoolOutputs) {
+      const outSumBI = outputs.reduce((s, o) => s + BigInt(o.amountSompi), 0n);
+      const expectBI = BigInt(payouts._totalPool) - BigInt(minerFeeSompi);
+      if (outSumBI !== expectBI) {
+        throw new Error(`⑥ 守恒 fail (fee-on-total): Σoutputs(${outSumBI}) != totalPool−minerFee(${expectBI}) [total=${payouts._totalPool} miner=${minerFeeSompi}] — settle aborted (sompi 泄漏防护, NWT⑤ post-construction)`);
       }
     }
 
