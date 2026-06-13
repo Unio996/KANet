@@ -82,7 +82,9 @@ testnet bond = test-KAS 零价值 → slash 是【机制演示】非真经济威
 > R1 关键路径: deriveVote 承重分布式结算(两节点同题→同票), 必证 cross-node。:3300 误删 guard(#282-284)= 这墙的具象 bug。
 
 **测前 assert (INVARIANT, 不满足整测 FAIL)**:
-1. 两节点 deriveVote 路【whole-repo 同 commit】。determinism 面 = **2 文件**(J2 r826 rule46 纠: extractors/findExtractor 内联在 voter.js, 无独立 oracle-evidence-extractors.mjs — 别 assert phantom): byte-identical `bettor-prediction-voter.js`(含内联 extractors) + `derivevote-prompt.mjs`(L29 import)。git rev-parse HEAD 两节点同 + 此 2 文件 0-diff(:3200 vs origin 已 0-diff ✓)。
+1. 两节点 deriveVote 路【whole-repo 同 commit】。committee 同票 determinism 面 = **3 文件**(J2 r828 自纠回退 r826 的 phantom 误判 — extractors 确在 `src/lib/`, 非 inline, NWT 自验确认): byte-identical ① `src/services/bettor-prediction-voter.js` ② `src/services/derivevote-prompt.mjs`(L29 import) ③ `src/lib/oracle-evidence-extractors.mjs`(voter L730/L854 动态 import findExtractor/extractEvidence = 决定 ABSTAIN + 塑 LLM evidence)。git rev-parse HEAD 两节点同 + 此 3 文件 0-diff(:3200 vs origin 三文件全 0-diff ✓)。
+   - **审计层第4文件**(标注, 非 R1③ 同票 gate 路): `src/services/prediction-parallel-judgment.mjs`(voter L116, Oracle v0.3 Phase2 parallel-judgment, 内部调 deriveKanetNativeVote 作 judgeFn) — 也 determinism-critical 且 master↔docs 漂 22 行, 由 whole-repo sync 一并覆盖; R1③ 核心同票路是前 3, 此审计层在 Phase2 audit gate 验。
+   - **跨分支铁证**: 3 核心文件 master vs docs 漂 voter +233/-38 / prompt +28 / extractors +329 = **590 行** — 错分支(master)跑测 = 假信心。assert 必比 `origin/docs/oracle-v06-spec` 非 master。
 2. 两节点 LLM 调用参数【identical】: model_version + temperature(=0) + seed(若有)+ backend(:8000 同实例 .106)。
 3. canonical vote 记录加 model_version (J2 攻2 修) → assert 两节点投票时 model_version 同。
 
