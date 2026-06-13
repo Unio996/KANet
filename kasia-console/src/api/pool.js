@@ -546,16 +546,14 @@ export async function registerPoolRoutes(fastify) {
     }
     const brokerProvided = !(b.broker_relay_id === undefined || b.broker_relay_id === null || b.broker_relay_id === '');
     if (!brokerProvided) b.broker_relay_id = b.maker_relay_id;  // 塌 maker (maker == broker thesis)
-    if (b.broker_fee_pct === undefined || b.broker_fee_pct === null || b.broker_fee_pct === '') {
-      // Lane③ r654 (J2 绿灯): fee 省略 — 真 gateway → 读其 default_broker_fee_pct (gateway 自设 fee 生效);
-      // 塌-maker → 0 (maker 非真 broker 不收 fee)。只新建市场读, 不碰已建 (J2 caveat).
-      if (brokerProvided) {
-        const gw = sqlite.prepare('SELECT default_broker_fee_pct FROM relay_nodes WHERE id = ?').get(b.broker_relay_id);
-        b.broker_fee_pct = gw?.default_broker_fee_pct ?? 0;
-      } else {
-        b.broker_fee_pct = 0;
-      }
-    }
+    // KANet-UI 2026-06-13 (Bettor r866/r867 + Owner 终裁 broker FIXED 1.9%): broker_fee_pct 硬固定
+    // 190 bps for ALL markets — real-broker AND self-broker (塌 maker: 上方 broker_relay_id=maker)。
+    // 删旧 gateway-default / self-broker=0 两分支: self-broker=0 致 rake 1.1%≠3% (NWT gate② 缺口) =
+    // 'no-broker 市场反而便宜砸 broker 模型' (spec no-broker 一致性解要防的反面)。硬固定 190 → self-broker
+    // 的 broker output(1.9%) via broker_relay_id==maker (settler 单源 brokerPk=makerPk, 4c41137e) 落 maker
+    // = maker 自任恒定 3% (190 broker→maker + 100 oracle + 10 maker)。不让 per-gateway/caller override
+    // (Owner '固定')。只新市场生效, 不 backfill 已建 (J2 determinism caveat: home 190/peer 200 → 跨节点碎)。
+    b.broker_fee_pct = 190;
     if (b.oracle_bond_kas === undefined || b.oracle_bond_kas === null || b.oracle_bond_kas === '') b.oracle_bond_kas = 1;
     if (b.oracle_fee_pct === undefined || b.oracle_fee_pct === null || b.oracle_fee_pct === '') b.oracle_fee_pct = 100;
     if (b.outcome_market_source === undefined || b.outcome_market_source === null || b.outcome_market_source === '') b.outcome_market_source = 'kanet_v06';
@@ -824,16 +822,14 @@ export async function registerPoolRoutes(fastify) {
     }
     const brokerProvided = !(b.broker_relay_id === undefined || b.broker_relay_id === null || b.broker_relay_id === '');
     if (!brokerProvided) b.broker_relay_id = b.maker_relay_id;  // 塌 maker (maker == broker thesis)
-    if (b.broker_fee_pct === undefined || b.broker_fee_pct === null || b.broker_fee_pct === '') {
-      // Lane③ r654 (J2 绿灯): fee 省略 — 真 gateway → 读其 default_broker_fee_pct (gateway 自设 fee 生效);
-      // 塌-maker → 0 (maker 非真 broker 不收 fee)。只新建市场读, 不碰已建 (J2 caveat).
-      if (brokerProvided) {
-        const gw = sqlite.prepare('SELECT default_broker_fee_pct FROM relay_nodes WHERE id = ?').get(b.broker_relay_id);
-        b.broker_fee_pct = gw?.default_broker_fee_pct ?? 0;
-      } else {
-        b.broker_fee_pct = 0;
-      }
-    }
+    // KANet-UI 2026-06-13 (Bettor r866/r867 + Owner 终裁 broker FIXED 1.9%): broker_fee_pct 硬固定
+    // 190 bps for ALL markets — real-broker AND self-broker (塌 maker: 上方 broker_relay_id=maker)。
+    // 删旧 gateway-default / self-broker=0 两分支: self-broker=0 致 rake 1.1%≠3% (NWT gate② 缺口) =
+    // 'no-broker 市场反而便宜砸 broker 模型' (spec no-broker 一致性解要防的反面)。硬固定 190 → self-broker
+    // 的 broker output(1.9%) via broker_relay_id==maker (settler 单源 brokerPk=makerPk, 4c41137e) 落 maker
+    // = maker 自任恒定 3% (190 broker→maker + 100 oracle + 10 maker)。不让 per-gateway/caller override
+    // (Owner '固定')。只新市场生效, 不 backfill 已建 (J2 determinism caveat: home 190/peer 200 → 跨节点碎)。
+    b.broker_fee_pct = 190;
     if (b.oracle_bond_kas === undefined || b.oracle_bond_kas === null || b.oracle_bond_kas === '') b.oracle_bond_kas = 1;
     if (b.oracle_fee_pct === undefined || b.oracle_fee_pct === null || b.oracle_fee_pct === '') b.oracle_fee_pct = 100;
     if (b.outcome_market_source === undefined || b.outcome_market_source === null || b.outcome_market_source === '') b.outcome_market_source = 'kanet_v07';
