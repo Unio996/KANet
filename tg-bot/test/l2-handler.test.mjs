@@ -161,6 +161,4 @@ console.log(`\nL2: ${pass}/${pass + fail} PASS`);
 globalThis.fetch = realFetch;
 removeFixture();
 try { db.close(); } catch { /* already closed */ }
-const code = fail > 0 ? 1 : 0;
-try { const u = await import('undici'); u.getGlobalDispatcher().destroy(); } catch { /* not available */ }
-process.exit(code);
+process.exit(fail > 0 ? 1 : 0);   // sockets already non-keep-alive (set at top) → clean exit

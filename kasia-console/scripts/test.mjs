@@ -43,12 +43,52 @@ async function findCases({ caseFile, domain, all }) {
   return out;
 }
 
+// Telegram live-smoke domain (KANet-UI, Bettor r970 — wire the orphan tg-bot tests into the auto-runner).
+// The tg-bot tests (l1 getMe / l2 handler / l2b startBot-wiring) are standalone scripts that need a running
+// Console + grammy (tg-bot/node_modules) + TELEGRAM_BOT_TOKEN — not the declarative case format. Run them as
+// subprocesses + aggregate exit codes. Pre-check the Console; if it's down, SKIP (keeps --all CI-safe).
+async function runTelegramDomain() {
+  const { spawnSync } = await import('node:child_process');
+  const REPO_ROOT = path.join(__dirname, '..', '..');
+  const tgTestDir = path.join(REPO_ROOT, 'tg-bot', 'test');
+  let files = [];
+  try { files = (await fs.readdir(tgTestDir)).filter(f => f.endsWith('.test.mjs')).sort(); } catch {}
+  if (!files.length) { console.log('telegram: no tg-bot/test/*.test.mjs found'); return { pass: 0, fail: 0, skipped: 0 }; }
+
+  const consoleUrl = process.env.KANET_CONSOLE_URL || `http://127.0.0.1:${process.env.PORT || 3200}`;
+  let consoleUp = false;
+  try { consoleUp = (await fetch(`${consoleUrl}/api/pool/markets?limit=1`, { signal: AbortSignal.timeout(3000) })).ok; } catch {}
+  if (!consoleUp) {
+    console.log(`telegram: SKIP — Console not reachable at ${consoleUrl} (live-smoke needs a running Console + grammy + token). ${files.length} test(s) skipped.`);
+    return { pass: 0, fail: 0, skipped: files.length };
+  }
+
+  let pass = 0, fail = 0;
+  for (const f of files) {
+    const r = spawnSync(process.execPath, [path.join(tgTestDir, f)], { cwd: REPO_ROOT, encoding: 'utf8' });
+    const out = (r.stdout || '') + (r.stderr || '');
+    const verdict = out.split('\n').filter(l => /\bPASS\b|\bFAIL\b/.test(l)).slice(-1)[0]?.trim() || '(no verdict)';
+    // Pass/fail from the test's own "N/M PASS" tally (authoritative — it only prints after all assertions
+    // ran). The exit code is a secondary signal: a known Windows libuv UV_HANDLE_CLOSING quirk on
+    // process.exit (lingering keep-alive sockets) can corrupt a 5/5-passing test's exit code, so we trust
+    // the printed tally and just note an exit-code discrepancy. No verdict line (early crash) → fail.
+    const m = verdict.match(/(\d+)\s*\/\s*(\d+)\s+PASS/);
+    const ok = m ? (Number(m[1]) === Number(m[2]) && Number(m[2]) > 0) : false;
+    const note = (ok && r.status !== 0) ? '  [exit-code quirk ignored — tally authoritative]' : '';
+    console.log(`${ok ? '✓' : '✗'} tg-bot/${f}  — ${verdict}${note}`);
+    if (ok) pass++;
+    else { fail++; console.log(out.split('\n').filter(l => l.trim()).slice(-10).map(l => '    ' + l).join('\n')); }
+  }
+  return { pass, fail, skipped: 0 };
+}
+
 async function main() {
   const caseFile = arg('case');
   const domain = arg('domain');
   const tag = arg('tag');  // 用于 git hook critical 优先 (--tag=critical 跑所有标 critical 的 case)
   const adversarial = arg('adversarial', args.includes('--adversarial') ? '' : null);  // J1 phase 7a: load probes.mjs probes
   const allFlag = args.includes('--all');
+  const isTelegram = domain === 'tg-bot' || domain === 'telegram';  // live-smoke tg-bot tests (subprocess)
   const quietFlag = args.includes('--quiet');  // 只输出 summary, 不 dump 每 case 详情 (post-commit 用)
   if (!caseFile && !domain && !tag && !allFlag && adversarial === null) {
     console.log('Usage: node scripts/test.mjs --case=<path> | --domain=<broker|seeker|...> | --tag=<critical|security|...> | --all');
@@ -65,8 +105,8 @@ async function main() {
     adversarialCases = await loadAdversarialCases(opts);
   }
 
-  const files = adversarialCases.length > 0 ? [] : await findCases({ caseFile, domain, all: allFlag || !!tag });
-  if (files.length === 0 && adversarialCases.length === 0) {
+  const files = (adversarialCases.length > 0 || isTelegram) ? [] : await findCases({ caseFile, domain, all: allFlag || !!tag });
+  if (files.length === 0 && adversarialCases.length === 0 && !isTelegram) {
     console.log('No matching test cases found.');
     process.exit(1);
   }
@@ -108,6 +148,13 @@ async function main() {
       if (result.pass) totalPass++; else totalFail++;
       summary.push({ id: result.id, pass: result.pass, failed: result.failed_assertions, trace_file: result.trace_file });
     }
+  }
+
+  // Telegram live-smoke domain — explicit --domain=tg-bot/telegram, or folded into --all (Console-gated).
+  if (isTelegram || allFlag) {
+    if (!quietFlag) console.log('--- Telegram live-smoke (tg-bot/test) ---');
+    const tg = await runTelegramDomain();
+    totalPass += tg.pass; totalFail += tg.fail; totalSkipped += tg.skipped;
   }
 
   console.log('='.repeat(60));
