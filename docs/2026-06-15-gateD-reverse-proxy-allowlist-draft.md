@@ -35,27 +35,47 @@ The **only remaining gate-D blocker is OPS, not code**: the Console is `localhos
 
 ```nginx
 # default-deny: only the allowlisted locations proxy_pass; all else 403.
-server {
-  listen 443 ssl;            # TLS terminates here; Console stays 127.0.0.1
-  server_name onboard.kanet.example;
+# zones must be at http{} scope (shown here inline for readability).
+limit_req_zone $binary_remote_addr zone=faucet:10m rate=3r/m;
 
-  # faucet — tight per-IP rate limit on top of app's once-per-address
-  limit_req_zone $binary_remote_addr zone=faucet:10m rate=3r/m;
+server {
+  listen 443 ssl;            # TLS terminates here; Console stays 127.0.0.1 (see INVARIANT below)
+  server_name onboard.kanet.example;
+  merge_slashes on;          # collapse // ; default on — keep it (path-normalization bypass guard)
+
+  # ⚠ NWT red-team #2 — reject encoded-slash / dot-segment smuggling BEFORE routing, so a crafted
+  # /api/faucet/request/..%2f..%2fapi%2fsystem%2frun can't normalize into a denied route post-match.
+  if ($request_uri ~* "%2f|%2e%2e|\.\.") { return 400; }
 
   location = /onboard            { proxy_pass http://127.0.0.1:3200; }
   location = /faucet             { proxy_pass http://127.0.0.1:3200; }
-  location = /api/faucet/request { limit_req zone=faucet burst=2 nodelay; proxy_pass http://127.0.0.1:3200; }
-  location = /api/exchange/offers{ proxy_pass http://127.0.0.1:3200; }   # GET only — see below
-  location ^~ /assets/           { proxy_pass http://127.0.0.1:3200; }
 
-  # method guard: offers is read-only
-  if ($request_method !~ ^(GET|HEAD)$) { return 403; }   # apply within the offers location
+  # ⚠ NWT red-team #1 (FIXED): method-guard MUST be INSIDE the location, never server-scope —
+  # a server-wide `if ($request_method !~ GET)` would 403 the faucet POST below = faucet dead.
+  location = /api/faucet/request {
+    limit_except POST { deny all; }                    # faucet is POST-only
+    limit_req zone=faucet burst=2 nodelay;
+    proxy_pass http://127.0.0.1:3200;
+  }
+  location = /api/exchange/offers {
+    limit_except GET { deny all; }                     # offers is read-only
+    proxy_pass http://127.0.0.1:3200;
+  }
+  location ^~ /assets/ {
+    limit_except GET { deny all; }
+    proxy_pass http://127.0.0.1:3200;
+  }
 
-  location / { return 403; }     # DEFAULT DENY — everything not listed above
+  location / { return 403; }     # DEFAULT DENY — everything not exact-matched above
 }
 ```
 
-(Caddy/Traefik equivalent fine; the invariant is **default-deny + explicit allowlist + faucet rate-limit + TLS + Console stays 127.0.0.1**.)
+NWT red-team (security-domain) hardening folded in:
+- **#1 (was a real bug)**: the method-guard was at server scope → would have 403'd the faucet POST = gate-D core dead. Moved to per-location `limit_except`.
+- **#2 bypass**: `merge_slashes on` + encoded-slash/dot-segment 400-reject so a crafted path can't normalize past an `=` exact-match into a denied route. Use **exact `=`** matches (not prefix) for the API allowlist so `/api/faucet/request/../system/run` never matches the faucet location.
+- **INVARIANT (gap-A 命门)**: the Console process MUST stay bound to `127.0.0.1` — the proxy is the ONLY public listener. If the Console binds `0.0.0.0` "behind" the proxy, an attacker connects to it directly (bypassing the whole allowlist) AND `trustProxy:'127.0.0.1'` lets them spoof `X-Forwarded-For`. 127.0.0.1-bind is non-negotiable.
+
+(Caddy/Traefik equivalent fine; invariants are **Console 127.0.0.1-only + default-deny + exact-match allowlist + per-location method guard + faucet rate-limit + TLS + path-normalization reject**.)
 
 ## Open items for Owner
 1. **Host/topology**: which box runs the proxy, what public DNS/TLS cert.
