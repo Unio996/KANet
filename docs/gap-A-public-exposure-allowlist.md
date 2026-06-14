@@ -129,6 +129,10 @@ Code fixes #2/#3/#4a/#4a' are landed in the working tree (deploy on the gap-A re
 
 ## 7. Open decisions (for Bettor + Owner)
 1. Public node = :3200 itself (confirmed by Bettor r1035) or a separate box later?
-2. Proxy: Caddy (simplest allowlist + built-in TLS) vs nginx (limit_req mature)? — recommend **Caddy**.
+2. Proxy: Caddy (simplest allowlist + built-in auto-TLS) vs nginx (limit_req mature)? — recommend **Caddy**.
+   ⚠ **Deploy-readiness (checked 2026-06-14): none of caddy/xcaddy/nginx/go installed on the :3200 host.**
+   The caddy-ratelimit plugin needs `xcaddy`+Go to build (or a pre-built binary that bundles it); nginx
+   `limit_req` is built-in (no plugin/Go). Trade-off: Caddy = auto-TLS but Go-toolchain build for the
+   rate-limit plugin; nginx = built-in rate-limit but manual TLS. Either is a fresh install on this host.
 3. Faucet daily/address cap value + whether to expose `/faucet` UI at all.
 4. Public port / TLS cert (Let's Encrypt via Caddy auto, if a domain exists).
