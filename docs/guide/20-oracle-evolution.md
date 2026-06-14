@@ -120,3 +120,32 @@ J1 实现 `frozen`(auto 可逆刹车) + 偏离入 `disagreement_queue` 待 revie
 - **组合 + 多池效率** → bshard(#26): 一赛事炸出几十上百 binary 池, 各池无界+并行结。
 
 镜像(seeder)必 verbatim 搬每个 binary 完整谓词(类型+线值+球员/统计目标+时间窗+规则+源), 少搬一项=判错。设计权威: [`docs/2026-06-14-prediction-market-binary-decomposition-charter.md`](../2026-06-14-prediction-market-binary-decomposition-charter.md) + KB `architecture/2026-06-14-binary-decomposition-charter.md`。
+
+## 20.11 委员会 byte-equal determinism 硬化 — daa-anchor 排除 + forward-break 修 (batch2, 2026-06-15)
+
+§20.9 把**池**链上派生; 本节把**委员排除集 (excludePks)** 也链上锚定 → 两节点 committee_pk_hash **全 64 字节 byte-equal** (五方多 vantage 链验 PASS)。
+
+**#27a-v2 — bettor-exclude 链锚 side_lock_daa** (`pool-market-settler-v06.mjs` sampleAndStoreCommittee):
+- 委员排除集要排掉「市场内既是 oracle 又下了注」的 pk (oracle∩bettor 防自判)。旧版读 live `pool_bettor_sides` → 跨节点 bet 集分歧 (晚传播的边界 bet) → excludePks 漂 → committee_pk_hash fork。
+- v2: bet 计入排除集 **iff `side_lock_daa <= deadline_daa`** (deadline_daa = committee endBlock 用的同一个)。`side_lock_daa` = bet 的 side_lock UTXO **accepting-block daaScore** (链共识, 跨节点 byte-equal; (a) 测 20/20 共享 bet daa 逐笔 byte-equal)。→ 各节点算出同 excludePks → committee byte-equal。
+- 单源: 全 repo **仅一个** `captureSideLockDaa` (`trade-protocol-filter.js`), ingest + recapture 都 import 它 (防双实现漂)。
+- `side_lock_daa IS NULL` = 歧义 → **fail-loud throw** (绝不静默 include/exclude)。
+- **关键性质**: 排除只对 **oracle∩bettor** 起作用。被排 bettor 若**不是 oracle 池成员** → 排不排都同委员 (no-op) → 即使两节点 bet 集不对称, 非-oracle bettor 的有无不影响 committee。
+
+**forward-break 修 (#27a v2.1, e0ktm live repro)** — 新市场的命门:
+- bet 注册时 side_lock UTXO 还在 **mempool** (无 accepting-block daaScore) → `side_lock_daa=NULL` at ingest → 到 deadline 采样时 #27a fail-loud on NULL → **新市场永远采不到委员 → 卡到 quorum-timeout-refund = 破新市场/demo 流**。backfill 只救 historical (UTXO 早确认), forward 新 bet 不救。
+- 修: `recaptureSideLockDaaForMarket(marketId)` (settler-v06, async) 在 `sampleAndStoreCommittee` **前** await — 对每个 NULL-daa bet 用**同一单源** `captureSideLockDaa` 从链重取 (此时 UTXO 已确认)。idempotent (只填 NULL 行, `UPDATE ... WHERE side_lock_daa IS NULL` 双 guard, 永不覆盖)。truly-unresolvable (spent/从未确认) 仍 NULL → fail-loud as designed (transient: 下 tick 重试, 否则 quorum-timeout-refund)。
+- determinism-safe: blockDaaScore 是链共识, 确认后所有节点取同值; fail-loud-until-all-recaptured = eventual consistency (node A 先 recapture 先出 X-committee / node B NULL 时 fail-loud 等下 tick → 同 X-committee, 绝不产出分歧 committee)。
+- e0ktm 端到端实证: mempool-NULL bet → recapture (NULL→38458736) → committee sample → vote → settle (8403d585 landed)。
+
+**#28 — oracle_bond clamp** (`api/pool.js` create-v05/06/07): `Math.max(1, Math.round(oracleBondKas*1e8))`。bond=0 撞 SS PoolSpine ctor 强制 `oracleBondAmount ∈ [1,MAX]` (compile-time) → create HTTP 500 = 建市破。clamp 到 **1 sompi** (≈0% → oracle take ≈ feeShare 1%, #28 目标保住; v0.5 bond≥1KAS clamp no-op)。⚠ 码审 + spend-side require 审都漏了 ctor 约束, **只 trial-ramp 实跑建市抓到** (SS ctor [min,MAX] 约束 ≠ spend-side require)。
+
+**跨节点验证方法论** (接位/审计必用):
+- 比 bet daa 跨节点: key = **`side_lock_tx`** (唯一 UTXO; `side_p2sh` 非唯一, 同地址多 UTXO)。同 bet 同 daa = PASS。
+- 比 committee 跨节点: **同 bet 集前提下**比 `committee_pk_hash` 全 64 字节。bet 集差 (ingestion gap) → excludePks 差 → pk_hash 合法不等**非 determinism bug** → 要 #27d-synced fresh 市场才是干净测 (或 non-oracle-bettor case 排除 no-op 也可比)。
+- 比码跨节点: `git rev-parse <sha>^{tree}` 两节点 byte-identical。**committed≠deployed**: 验**运行进程** PID CreationDate post-FF, 非只 git (running source = 进程内存非 working-tree; FF≠restart)。
+- 链上验 tx: relay `check_utxo_landed` 走本地 kaspad 看整链, 别用挂掉的公链 API。
+
+**残留/局限** (诚实分级, 守 milestone-非-finish): item② 跨节点 byte-equal 目前实证的是 **non-oracle-bettor (排除 no-op) case**; oracle∩bettor **真咬**的跨节点 live e2e 由 unit test (`test_27a_committee_exclude` starve 路) + daa-byte-equal 论证覆盖, fresh-市场 biting live e2e 作 belt-suspenders (J2 域)。#27d catch-up 的 regression 待补。
+
+设计/实证权威: commit `959acd21`(#27a-v2) + `c3582a05`(#27d) + `d2d11a2f`(forward-break+regression) + `ee483f20`(#28)。接位手册 `docs/2026-06-15-{KANet-UI-operator,NWT-verifier}-handoff.md`。
