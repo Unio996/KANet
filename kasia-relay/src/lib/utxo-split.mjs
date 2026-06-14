@@ -30,9 +30,18 @@ function maxSafeOutputs(balanceSompi) {
 /**
  * Split UTXOs using Relay's own wallet.
  * @param {number} targetCount - Desired number of UTXOs (default 3)
+ * @param {object} [opts]
+ * @param {boolean} [opts.force] - design-v2 (B): REBALANCE mode. Without force, returns early when
+ *   utxosBefore >= targetCount (the "enough count" heuristic). But for broadcaster-UTXO management
+ *   (parallel chunk broadcast, J2 (A)) "enough count" is wrong: after a parallel broadcast the relay
+ *   accumulates N small/dust changes (count >= N but each too small / unevenly sized to feed the next
+ *   parallel batch). force=true ALWAYS rebalances ALL entries → N fresh equal medium UTXOs in one tx
+ *   (the Generator consuming every entry = consolidate dust + split big), so the next parallel broadcast
+ *   has N independent same-sized UTXOs and concurrent chunks never double-spend / starve on a change-chain.
  * @returns {{ ok, split, utxosBefore, utxosAfter, txId?, fee?, reason? }}
  */
-export async function splitUtxosRelay(targetCount = 3) {
+export async function splitUtxosRelay(targetCount = 3, opts = {}) {
+  const force = opts.force === true;
   const wallet = getWallet();
   const address = wallet.getAddress();
   // KANet-UI r55 Layer 4: testnet-12 → testnet-10 for Generator (vendored wasm string match).
@@ -44,7 +53,7 @@ export async function splitUtxosRelay(targetCount = 3) {
     if (!entries || entries.length === 0) return { ok: false, reason: 'no_utxos' };
 
     const utxosBefore = entries.length;
-    if (utxosBefore >= targetCount) {
+    if (!force && utxosBefore >= targetCount) {
       return { ok: true, split: false, utxosBefore, utxosAfter: utxosBefore, reason: 'sufficient' };
     }
 

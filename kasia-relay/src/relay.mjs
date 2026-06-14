@@ -476,7 +476,9 @@ if (process.send) {
           // Split UTXOs for concurrent transaction support.
           // Uses Relay's own wallet + RPC — no mnemonic leaves the process.
           const { splitUtxosRelay } = await import('./lib/utxo-split.mjs');
-          const splitResult = await splitUtxosRelay(cmd.targetCount || 3);
+          // design-v2 (B): cmd.force = REBALANCE to N medium UTXOs (consolidate dust + split) even when
+          // count >= target — for broadcaster-UTXO management feeding parallel chunk broadcast (J2 (A)).
+          const splitResult = await splitUtxosRelay(cmd.targetCount || 3, { force: cmd.force === true });
           if (cmd.requestId && process.send) {
             process.send({ requestId: cmd.requestId, result: splitResult });
           }
