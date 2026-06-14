@@ -49,30 +49,20 @@ contract PoolSpine_v07_shard(
     // —— entry: register_bet (transition covenant) ——
     // 一注加入本片: prev(localYes,localNo) → new = prev + 本注 (方向对应 tally), 另一边不变.
     // NWT ①: genesis 0 起 + 此处单调增 (new >= prev) → tally 链上不可篡改累计 = fold 读真值.
-    #[covenant(binding = cov, from = 1, to = 1, mode = transition)]
-    function register_bet(State[] prev_states, State[] new_states, int bet_direction, int bet_stake, sig bettor_sig) {
-        require(prev_states.length == 1);
-        require(new_states.length == 1);
+    //
+    // SS 校准 (DECL.md 实读, J2 r-msg 两点修):
+    //   ① transition mode 必声明返回值 (DECL.md L136-153): transition 函数【计算并 return 新 state】,
+    //      非 verification 式把 new_states 当入参 require-校验. 故签名去 new_states 入参 + 加 `: (State)` 返回型
+    //      + 末尾 return 新 state object. (verification 范式见 conserve_and_bump; 件1 叶 register 是 transition.)
+    //   ② binding=auth 非 cov (DECL.md Rule 5/8 L44-51): register = 1 shard 入→1 shard 出 (from=1,to=1) 真 1:1.
+    //      Rule 5: from==1 → 默认 auth; Rule 8: 显写 binding=cov+from=1 触发 warning 荐 auth. 1:1 用 auth =
+    //      更省 op (单 entrypoint vs cov 双 leader/delegate) + this.activeInputIndex 直取 prev_state.
+    //      bettor side_lock stake 是 tx.inputs[1] 普通 introspection 校验 (非 covenant 续延 state), auth 只守
+    //      shard spine 续延正确 = 语义对. (件2 fold = N:M conserve → 那里才 binding=cov, 与叶 register 不冲突.)
+    #[covenant(binding = auth, from = 1, mode = transition)]
+    function register_bet(State prev_state, int bet_direction, int bet_stake, sig bettor_sig) : (State) {
         require(bet_stake > 0);
         require(bet_direction == 0 || bet_direction == 1);
-
-        // 方向对应 tally 增, 另一边严格不变 (防偷改对家).
-        if (bet_direction == 0) {
-            require(new_states[0].localYes == prev_states[0].localYes + bet_stake);
-            require(new_states[0].localNo  == prev_states[0].localNo);
-        }
-        if (bet_direction == 1) {
-            require(new_states[0].localNo  == prev_states[0].localNo + bet_stake);
-            require(new_states[0].localYes == prev_states[0].localYes);
-        }
-
-        // NWT ①: 单调增 (冗余但显式焊 — new tally 必 >= prev, 防任何减/重置).
-        require(new_states[0].localYes >= prev_states[0].localYes);
-        require(new_states[0].localNo  >= prev_states[0].localNo);
-
-        // NWT ③: 上界防 fold 求和 wrap (单片 tally < MAX_TALLY).
-        require(new_states[0].localYes < 2100000000000000);
-        require(new_states[0].localNo  < 2100000000000000);
 
         // NWT 攻击面#1 (hard-req, J2 r1146 fold/pot 域确认非可选): bet_stake 必绑【真 side_lock UTXO value】—
         // OpInputCovenantId 白名单只认输入 cov_id (= 是 shard/side_lock 模板), 不认 tally 增量的【值】; 不绑则
@@ -83,6 +73,27 @@ contract PoolSpine_v07_shard(
         require(tx.inputs.length >= 2);                       // [0]=shard cov 输入, [1]=side_lock 本注输入 (顺序待 J2 TX 构造域定)
         require(tx.inputs[1].value == bet_stake);             // tally 增量 == 链上真锁本金 (防灌水, NWT #1)
         require(checkSig(bettor_sig, tx.inputs[1].scriptPubKey));  // 本注归属 (占位: side_lock redeem 验本人, 待 J2 接口定 — side_lock P2SH 已绑 bettor_pk)
+
+        // 方向对应 tally 增, 另一边不变 (transition: 计算新 tally, 非 require 校验入参).
+        int newLocalYes = prev_state.localYes;
+        int newLocalNo  = prev_state.localNo;
+        if (bet_direction == 0) {
+            newLocalYes = prev_state.localYes + bet_stake;
+        }
+        if (bet_direction == 1) {
+            newLocalNo  = prev_state.localNo + bet_stake;
+        }
+
+        // NWT ①: 单调增 (bet_stake>0 已蕴含, 显式焊防任何减/重置 — fold 读真值前提).
+        require(newLocalYes >= prev_state.localYes);
+        require(newLocalNo  >= prev_state.localNo);
+
+        // NWT ③: 上界防 fold 求和 wrap (单片 tally < MAX_TALLY ≈ 2.1e15 sompi << 2^128).
+        require(newLocalYes < 2100000000000000);
+        require(newLocalNo  < 2100000000000000);
+
+        // transition 续延: 返回新 shard state (编译期 lower 为 validateOutputState 校验输出片 == 此).
+        return({ localYes: newLocalYes, localNo: newLocalNo });
     }
 
     // —— settle / dispute_reveal / refund: 单片市场 (shard_count==1) 复用 PoolSpine_v07 现有 entry 不动 ——
