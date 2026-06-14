@@ -16,7 +16,7 @@ import { readFileSync } from 'node:fs';
 const CONSOLE = process.env.CONSOLE_URL || 'http://127.0.0.1:3200';
 const LWRCL_ID = 'ext-pool-v07-1781439783496-lwrcl';
 const WINNER_RELAY = 'AutoBetter-3';                 // the DM-bet persona (external bettor, P2PK payout)
-const WINNER_PAYOUT_ADDR = 'kaspatest:qqvax2yukqzxe8lrt0nxk30vm6enc2wse90sqn47';  // settler P2PK(bettor_pk), the actual settle out#6
+const WINNER_PAYOUT_ADDR = 'kaspatest:qqvax2yukqzxe8lrt0nxk30vm6enc2wse90sqn47373u9m5uxtdzw0gn8whkz';  // settler P2PK(bettor_pk), the actual settle out#6
 const EPS = 1e-4;
 
 const require = createRequire('D:/kanet-tn12/kasia-console/package.json');
