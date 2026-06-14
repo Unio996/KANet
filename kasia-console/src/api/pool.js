@@ -588,7 +588,15 @@ export async function registerPoolRoutes(fastify) {
     // = maker 自任恒定 3% (190 broker→maker + 100 oracle + 10 maker)。不让 per-gateway/caller override
     // (Owner '固定')。只新市场生效, 不 backfill 已建 (J2 determinism caveat: home 190/peer 200 → 跨节点碎)。
     b.broker_fee_pct = 190;
-    if (b.oracle_bond_kas === undefined || b.oracle_bond_kas === null || b.oracle_bond_kas === '') b.oracle_bond_kas = 1;
+    // J2-tn #28 (Bettor sprint, NWT r1171 economic-verify): committeeMode (v0.6/v0.7) 委员不押链上 bond —
+    // settle 每委员 output = oracleBond + oracleFee/N (ADDITIVE, settler computePoolPayouts L1421-1428)。
+    // 固定默认 1 KAS 使 5 委员 = 5 KAS pool-funded 主导小池 (151 池 oracle 实拿 4.31% vs spec 1%)。默认 0 →
+    // committee output = oracleFee/N = 正好 spec 1%, winner 拿回省下的 bond reserve。SS PoolSpine_v07 L261
+    // committee output require >= oracleBondAmount=0 trivially 过; 实际 output=feeShare (MIN_POT 100 →
+    // >= 0.2 KAS = 2e7 sompi >> SS dust 1000 sompi)。mass-safe (worst 100 池/50 bettor → 353k < settler
+    // STORAGE_MASS_SAFE_THRESHOLD 470k)。bond=fake pool-funded 非实 collateral (oracle 实 stake 在 oracle
+    // pool), 设 0 无安全损。caller 显式传 oracle_bond_kas 则尊重 (省掉=拿 0)。
+    if (b.oracle_bond_kas === undefined || b.oracle_bond_kas === null || b.oracle_bond_kas === '') b.oracle_bond_kas = 0;
     if (b.oracle_fee_pct === undefined || b.oracle_fee_pct === null || b.oracle_fee_pct === '') b.oracle_fee_pct = 100;
     if (b.outcome_market_source === undefined || b.outcome_market_source === null || b.outcome_market_source === '') b.outcome_market_source = 'kanet_v06';
     if (b.outcome_token_id === undefined || b.outcome_token_id === null || b.outcome_token_id === '') b.outcome_token_id = 'KAS_native';
@@ -646,7 +654,8 @@ export async function registerPoolRoutes(fastify) {
     const makerStakeKas = parseFloat(b.maker_stake_kas);
     const oracleBondKas = parseFloat(b.oracle_bond_kas);
     if (!Number.isFinite(makerStakeKas) || makerStakeKas <= 0) return reply.code(400).send({ ok: false, error: 'maker_stake_kas must be positive' });
-    if (!Number.isFinite(oracleBondKas) || oracleBondKas <= 0) return reply.code(400).send({ ok: false, error: 'oracle_bond_kas must be positive' });
+    // J2-tn #28: committeeMode bond=0 合法 (pool-funded 委员奖, 非实 collateral) → 允许 0, 仅拒负值/NaN。
+    if (!Number.isFinite(oracleBondKas) || oracleBondKas < 0) return reply.code(400).send({ ok: false, error: 'oracle_bond_kas must be >= 0 (v0.6/v0.7 committeeMode: 0 = no pool-funded committee bond, oracle paid via fee only)' });
     // 100 KAS Owner 钦定 demo 实质押 — 移出 NO_LIMITS 守卫 (r544 v2 Bettor APPROVE).
     if (makerStakeKas < POOL_MAKER_STAKE_MIN_KAS) return reply.code(400).send({ ok: false, error: `maker_stake_kas must be >= ${POOL_MAKER_STAKE_MIN_KAS} KAS (Owner 钦定 demo 实质押 skin-in-game, 单一源 L33)` });
     // KANet-UI 2026-06-06 (Bettor ③ APPROVE r546): 创建端 spec 结构化强制 (= 配 bot 入口 filter 双层堵).
@@ -865,7 +874,15 @@ export async function registerPoolRoutes(fastify) {
     // = maker 自任恒定 3% (190 broker→maker + 100 oracle + 10 maker)。不让 per-gateway/caller override
     // (Owner '固定')。只新市场生效, 不 backfill 已建 (J2 determinism caveat: home 190/peer 200 → 跨节点碎)。
     b.broker_fee_pct = 190;
-    if (b.oracle_bond_kas === undefined || b.oracle_bond_kas === null || b.oracle_bond_kas === '') b.oracle_bond_kas = 1;
+    // J2-tn #28 (Bettor sprint, NWT r1171 economic-verify): committeeMode (v0.6/v0.7) 委员不押链上 bond —
+    // settle 每委员 output = oracleBond + oracleFee/N (ADDITIVE, settler computePoolPayouts L1421-1428)。
+    // 固定默认 1 KAS 使 5 委员 = 5 KAS pool-funded 主导小池 (151 池 oracle 实拿 4.31% vs spec 1%)。默认 0 →
+    // committee output = oracleFee/N = 正好 spec 1%, winner 拿回省下的 bond reserve。SS PoolSpine_v07 L261
+    // committee output require >= oracleBondAmount=0 trivially 过; 实际 output=feeShare (MIN_POT 100 →
+    // >= 0.2 KAS = 2e7 sompi >> SS dust 1000 sompi)。mass-safe (worst 100 池/50 bettor → 353k < settler
+    // STORAGE_MASS_SAFE_THRESHOLD 470k)。bond=fake pool-funded 非实 collateral (oracle 实 stake 在 oracle
+    // pool), 设 0 无安全损。caller 显式传 oracle_bond_kas 则尊重 (省掉=拿 0)。
+    if (b.oracle_bond_kas === undefined || b.oracle_bond_kas === null || b.oracle_bond_kas === '') b.oracle_bond_kas = 0;
     if (b.oracle_fee_pct === undefined || b.oracle_fee_pct === null || b.oracle_fee_pct === '') b.oracle_fee_pct = 100;
     if (b.outcome_market_source === undefined || b.outcome_market_source === null || b.outcome_market_source === '') b.outcome_market_source = 'kanet_v07';
     if (b.outcome_token_id === undefined || b.outcome_token_id === null || b.outcome_token_id === '') b.outcome_token_id = 'KAS_native';
@@ -931,7 +948,8 @@ export async function registerPoolRoutes(fastify) {
     const makerStakeKas = parseFloat(b.maker_stake_kas);
     const oracleBondKas = parseFloat(b.oracle_bond_kas);
     if (!Number.isFinite(makerStakeKas) || makerStakeKas <= 0) return reply.code(400).send({ ok: false, error: 'maker_stake_kas must be positive' });
-    if (!Number.isFinite(oracleBondKas) || oracleBondKas <= 0) return reply.code(400).send({ ok: false, error: 'oracle_bond_kas must be positive' });
+    // J2-tn #28: committeeMode bond=0 合法 (pool-funded 委员奖, 非实 collateral) → 允许 0, 仅拒负值/NaN。
+    if (!Number.isFinite(oracleBondKas) || oracleBondKas < 0) return reply.code(400).send({ ok: false, error: 'oracle_bond_kas must be >= 0 (v0.6/v0.7 committeeMode: 0 = no pool-funded committee bond, oracle paid via fee only)' });
     // 100 KAS Owner 钦定 demo 实质押 — 移出 NO_LIMITS 守卫 (r544 v2 Bettor APPROVE).
     if (makerStakeKas < POOL_MAKER_STAKE_MIN_KAS) return reply.code(400).send({ ok: false, error: `maker_stake_kas must be >= ${POOL_MAKER_STAKE_MIN_KAS} KAS (Owner 钦定 demo 实质押 skin-in-game, 单一源 L33)` });
     // KANet-UI 2026-06-06 (Bettor ③ APPROVE r546): 创建端 spec 结构化强制 (= 配 bot 入口 filter 双层堵).
