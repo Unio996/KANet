@@ -557,15 +557,6 @@ startOracleVoterHealthMonitorCron();
 import { startOraclePoolScannerCron } from './services/oracle-pool-chain-scanner-cron.mjs';
 startOraclePoolScannerCron();
 
-// design-v2 (B) broadcaster N-medium-UTXO maintainer (KANet-UI, 880 settle-throughput; Bettor r489b APPROVE).
-// Proactive cron keeps settle broadcasters (local oracle signers + hot seeder maker) topped at N confirmed
-// medium UTXOs → settle sign_req chunks pick the next pre-confirmed UTXO instead of waiting each chunk's
-// change to confirm = eliminates inter-chunk confirm-wait (the real 880 bottleneck; NOT parallelism —
-// sendKaspa is serial via withSendLock). The rebalance shares that same withSendLock (utxo-split.mjs) so it
-// can never double-spend an in-flight settle/sign_req. Hard-gated by load test (before ~33min / after).
-import { startBroadcasterUtxoMaintainerCron } from './lib/broadcaster-utxo.mjs';
-startBroadcasterUtxoMaintainerCron();
-
 // Phase B Variant Expander 3-tier (Owner 5/16 钦定 "B" + Bettor r141 spec) — 30 min cron.
 // per scanner rec → auto-find related markets → 3 档 variant (激进/适中/保守) INSERT.
 // Phase 1 skeleton + UI surface, Phase 2 will integrate depth-500 /book API real-time.
