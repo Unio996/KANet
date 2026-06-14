@@ -541,6 +541,13 @@ startAutoBetterCron();
 import { startRelayHealthMonitorCron } from './services/relay-health-monitor.js';
 startRelayHealthMonitorCron();
 
+// Oracle-voter PRODUCING-health (KANet-UI, Q2 durability hard-req per NWT/Bettor r989/r997): relay-health
+// catches a DEAD relay, but Q2 was a SILENT 0-vote stall while the voter cron ran fine (process-alive).
+// 2min cron flags verifying markets a LOCAL committee oracle owes a vote on but hasn't cast (>10min) →
+// WARN log + events row (Brain/UI visible). Detect+surface only (a vote-routing/quorum bug isn't restart-healable).
+import { startOracleVoterHealthMonitorCron } from './services/oracle-voter-health-monitor.js';
+startOracleVoterHealthMonitorCron();
+
 // 质押池活化 (Bettor r449): 5min cron 刷 oracle_pool_chain_view 保新鲜.
 import { startOraclePoolScannerCron } from './services/oracle-pool-chain-scanner-cron.mjs';
 startOraclePoolScannerCron();
