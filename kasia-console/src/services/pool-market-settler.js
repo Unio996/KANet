@@ -217,15 +217,16 @@ async function legacyRefundBuilderTick() {
       WHERE (
               (pm.protocol_version IS NULL OR pm.protocol_version = 'v0.5')
               OR pm.id IN (${unfixablePlaceholders})
-              -- J2-tn r397 (Bettor r226 ④ catch): dispatchRefund 设 status='refunded' + 可能擦 cancel_reason
-              -- 不依赖 metadata, 直接 recompute totalPool < 1e10 for v0.6/v0.7 cancelled/refunded markets.
+              -- J2-tn r397 (Bettor r226 ④): dispatchRefund 设 status='refunded'/'cancelled'.
+              -- J2-tn r1016 (NWT r1108 catch): DROPPED the <1e10 (100 KAS) pool-size filter. ANY
+              -- v0.6/v0.7 cancelled/refunded market = no-winner terminal ⇒ ALL bettor sides refund,
+              -- regardless of pool size. The old <1e10 filter only caught min-pot cancels and WRONGLY
+              -- excluded large (c) quorum-timeout-refunded markets → bettor stake stuck despite maker
+              -- refund landed (NWT 4万 locked). refunded/cancelled status ⇒ bettors refund (not paid);
+              -- settled (status='completed') markets are NOT matched here so winners' payouts unaffected.
               OR (
                 pm.protocol_status IN ('cancelled', 'refunded')
                 AND pm.protocol_version IN ('v0.6', 'v0.7')
-                AND (
-                  CAST(pm.maker_stake_amount AS INTEGER) +
-                  COALESCE((SELECT SUM(CAST(stake_amount AS INTEGER)) FROM pool_bettor_sides WHERE market_id = pm.id), 0)
-                ) < 10000000000
               )
             )
         AND pm.deadline <= ?
