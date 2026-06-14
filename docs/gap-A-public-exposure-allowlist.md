@@ -137,6 +137,13 @@ server {
 Deploy: install nginx on the :3200 host → drop this in `conf.d/` with Owner's port/domain → `nginx -t` →
 start → J1 §6 external red-team. Console stays `127.0.0.1:3200` (unchanged).
 
+**STAGED + VALIDATED (2026-06-14, KANet-UI — Bettor r1080 prep-ahead):**
+- nginx 1.27.4 installed at `C:\Users\ADMIN\gapa-nginx` (winget/zip; :3200 host had none).
+- Config staged at `C:\Users\ADMIN\gapa-nginx\conf\nginx-gapa.conf` (the block above), `nginx -t` = **test successful**.
+- **NOT started** (staged only). Owner §7.4 fills `listen` port + `server_name` domain (+ `ssl`/cert for TLS).
+- Start command: `C:\Users\ADMIN\gapa-nginx\nginx.exe -p C:\Users\ADMIN\gapa-nginx -c C:\Users\ADMIN\gapa-nginx\conf\nginx-gapa.conf`
+  → then J1 external red-team bypass test (§6) → red/green report = perimeter live.
+
 ## 6. Exposure test (J1 red-team, builder≠verifier)
 
 After deploy, J1 curls from an external position:
