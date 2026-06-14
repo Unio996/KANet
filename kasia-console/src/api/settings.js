@@ -1,4 +1,5 @@
 import { getConfig, setConfig } from '../data/settings/configs.js';
+import { makeTokenHint } from '../services/crypto.js';
 import { parseLang, getT, isRtl, LANG_NAMES } from '../i18n/index.js';
 import { fork } from 'child_process';
 import { dirname, join } from 'path';
@@ -146,6 +147,36 @@ export async function registerSettingsRoutes(fastify) {
     if (!relay) return reply.code(404).send({ ok: false, error: 'relay not found' });
     await setConfig('tg_bot_broker_relay_id', broker_relay_id, { category: 'tg_bot' });
     return reply.send({ ok: true, broker_relay_id, broker_name: relay.name });
+  });
+
+  // ── TG Bot token + username (J1, Owner 2026-06-14: UI-端配置补齐, 免手改 kanet.env) ──
+  // TELEGRAM_BOT_TOKEN/USERNAME were env-only (tg-bot-manager L56/127/140) — UI couldn't set them,
+  // operator had to edit kanet.env (system defect Owner flagged). Now UI-settable DB config: token
+  // stored ENCRYPTED (isSensitive, same crypto.js pattern as adapter-nodes / ingest_secret),
+  // tg-bot-manager reads config-first env-fallback + injects into the forked bot env. GET never
+  // returns the raw token — only a masked hint + token_configured bool (secret never leaves server).
+  fastify.get('/api/config/tg-bot-token', async (request, reply) => {
+    const token = await getConfig('tg_bot_token');  // env-fallback NOT applied here: UI shows DB-config state
+    const username = await getConfig('tg_bot_username') || '';
+    return reply.send({
+      token_configured: !!token,
+      token_hint: token ? makeTokenHint(token) : null,
+      username,
+    });
+  });
+
+  fastify.post('/api/config/tg-bot-token', async (request, reply) => {
+    const { token, username } = request.body || {};
+    // token optional on POST (operator may update only username); blank token = keep existing.
+    if (token !== undefined && token !== null && String(token).trim()) {
+      const t = String(token).trim();
+      await setConfig('tg_bot_token', t, { category: 'tg_bot', isSensitive: true, hint: makeTokenHint(t) });
+    }
+    if (username !== undefined && username !== null) {
+      await setConfig('tg_bot_username', String(username).trim(), { category: 'tg_bot' });
+    }
+    const saved = await getConfig('tg_bot_token');
+    return reply.send({ ok: true, token_configured: !!saved, token_hint: saved ? makeTokenHint(saved) : null, username: await getConfig('tg_bot_username') || '' });
   });
 
   // ── TG Bot lifecycle (KANet-UI, Bettor r945 接通最小路 ②) ──

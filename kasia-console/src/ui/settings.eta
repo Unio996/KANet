@@ -77,6 +77,44 @@
     <main class="flex-1 overflow-y-auto p-6">
       <div class="max-w-3xl mx-auto space-y-6">
 
+        <!-- Telegram Bot — Token 配置 (J1, Owner 2026-06-14: UI-端配置补齐, 免手改 kanet.env) -->
+        <div class="bg-white rounded-lg border border-gray-200" x-data="{
+          token: '', username: '', tokenConfigured: false, tokenHint: '', saving: false, saved: false,
+          async init() {
+            try { const r = await fetch('/api/config/tg-bot-token'); const j = await r.json(); this.tokenConfigured = !!j.token_configured; this.tokenHint = j.token_hint || ''; this.username = j.username || ''; } catch {}
+          },
+          async save() {
+            this.saving = true; this.saved = false;
+            try {
+              const body = { username: this.username };
+              if (this.token && this.token.trim()) body.token = this.token.trim();
+              const r = await fetch('/api/config/tg-bot-token', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+              const j = await r.json(); this.saved = !!j.ok; this.tokenConfigured = !!j.token_configured; this.tokenHint = j.token_hint || ''; this.token = '';
+            } catch {} finally { this.saving = false; }
+          }
+        }">
+          <div class="px-6 py-4 border-b border-gray-200 flex items-center space-x-2">
+            <svg class="h-5 w-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/></svg>
+            <h2 class="text-sm font-semibold text-gray-700">Telegram Bot — Token 配置</h2>
+          </div>
+          <div class="px-6 py-5 space-y-4">
+            <p class="text-xs text-gray-500">从 @BotFather 拿 bot token 填这里(不用再手改 kanet.env)。token <strong>加密存储</strong>(CONSOLE_ENCRYPTION_KEY),改完下方"运行控制"重启 bot 生效。也兼容 kanet.env(UI 配置优先)。</p>
+            <div>
+              <label class="block text-xs text-gray-600 mb-1">Bot Token</label>
+              <input type="password" x-model="token" :placeholder="tokenConfigured ? ('已配置: ' + tokenHint + ' — 留空保持不变') : '粘贴 @BotFather 的 token'" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" autocomplete="off">
+              <p x-show="tokenConfigured" class="text-xs text-green-600 mt-1">✓ 已配置 (<span x-text="tokenHint"></span>)</p>
+            </div>
+            <div>
+              <label class="block text-xs text-gray-600 mb-1">Bot Username (可选, 默认 KANET_Broker_bot)</label>
+              <input type="text" x-model="username" placeholder="KANET_Broker_bot" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" autocomplete="off">
+            </div>
+            <div class="flex items-center space-x-3">
+              <button @click="save()" :disabled="saving" class="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg disabled:opacity-50" x-text="saving ? '保存中…' : '保存'"></button>
+              <span x-show="saved" class="text-sm text-green-600">✓ 已保存(重启 bot 生效)</span>
+            </div>
+          </div>
+        </div>
+
         <!-- Telegram Bot Broker (S4) -->
         <div class="bg-white rounded-lg border border-gray-200" x-data="{
           brokerId: '', brokers: [], saving: false, saved: false,
@@ -130,7 +168,7 @@
                 </div>
               </template>
             </div>
-            <template x-if="st && !st.token_configured"><p class="text-xs text-amber-600">⚠ 未配置 TELEGRAM_BOT_TOKEN(kanet.env / @BotFather)— 无法启动。</p></template>
+            <template x-if="st && !st.token_configured"><p class="text-xs text-amber-600">⚠ 未配置 TELEGRAM_BOT_TOKEN(上方 Token 配置 / kanet.env)— 无法启动。</p></template>
             <template x-if="st && !st.broker_relay_id"><p class="text-xs text-amber-600">⚠ 未选 broker(上方设置)— bot 会起但没 broker 身份。</p></template>
             <template x-if="st && st.last_error"><p class="text-xs text-red-500" x-text="'上次错误: ' + st.last_error"></p></template>
             <div class="flex items-center space-x-3">
