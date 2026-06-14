@@ -100,6 +100,43 @@ Reverse proxy runs **on :3200's host** (faucet/exchange/Console all live there =
 (nginx equivalent: `location`-allowlist + two `limit_req` zones + `return 403` default — v3 if nginx chosen.)
 caddy-ratelimit = third-party plugin (`mholt/caddy-ratelimit`) — build Caddy with `xcaddy build --with github.com/mholt/caddy-ratelimit`. **Confirm availability for the deploy (checklist #7).**
 
+## 5.1 nginx config (CHOSEN for controlled demo — Bettor r1045; built-in limit_req, no plugin)
+
+Port/`server_name`/TLS are the only Owner-§7④ blanks. Path-traversal-safe (`[^/]+` forbids `/` in :id;
+traversal/encoded paths fall through to `location /` → 403). `X-Forwarded-For` set so the Console's
+`trustProxy:'127.0.0.1'` resolves the real client IP (faucet per-IP limit).
+
+```nginx
+limit_req_zone $binary_remote_addr zone=reads:10m  rate=100r/m;   # J1 #381 hole-1: read-flood cap
+limit_req_zone $binary_remote_addr zone=faucet:10m rate=6r/m;     # defense-in-depth; app-level 24h×3 is the real cap
+
+server {
+    listen 8080;          # ← Owner §7④: final public port (+ `ssl` / 443 + cert when TLS added)
+    server_name _;        # ← Owner §7④: public domain (or _ for IP-only controlled demo)
+    client_max_body_size 4k;
+
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;   # → Console trustProxy real client IP
+    proxy_http_version 1.1;
+
+    # ── allowlist: safe read-only GETs ──
+    location = /api/pool/markets            { limit_except GET { deny all; } limit_req zone=reads burst=20 nodelay; proxy_pass http://127.0.0.1:3200; }
+    location ~ ^/api/pool/market/[^/]+$     { limit_except GET { deny all; } limit_req zone=reads burst=20 nodelay; proxy_pass http://127.0.0.1:3200; }
+    location = /api/exchange/offers         { limit_except GET { deny all; } limit_req zone=reads burst=20 nodelay; proxy_pass http://127.0.0.1:3200; }
+    location ~ ^/api/exchange/offers/[^/]+$ { limit_except GET { deny all; } limit_req zone=reads burst=20 nodelay; proxy_pass http://127.0.0.1:3200; }
+    location = /api/exchange/peer-reputation{ limit_except GET { deny all; } limit_req zone=reads burst=20 nodelay; proxy_pass http://127.0.0.1:3200; }
+    location = /api/predictions/markets     { limit_except GET { deny all; } limit_req zone=reads burst=20 nodelay; proxy_pass http://127.0.0.1:3200; }
+
+    # ── faucet: the one exposed write (POST only, tight rate-limit) ──
+    location = /api/faucet/request          { limit_except POST { deny all; } limit_req zone=faucet burst=2 nodelay; proxy_pass http://127.0.0.1:3200; }
+
+    # ── DEFAULT-DENY everything else (567+ routes incl /api/system/run RCE, relay/transfer, adapters, ingest, DB) ──
+    location / { return 403; }
+}
+```
+Deploy: install nginx on the :3200 host → drop this in `conf.d/` with Owner's port/domain → `nginx -t` →
+start → J1 §6 external red-team. Console stays `127.0.0.1:3200` (unchanged).
+
 ## 6. Exposure test (J1 red-team, builder≠verifier)
 
 After deploy, J1 curls from an external position:
