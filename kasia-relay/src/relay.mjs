@@ -487,6 +487,22 @@ if (process.send) {
           break;
         }
 
+        case 'consolidate_utxo': {
+          // design-v2 (B) §2 root-fix (Bettor r627): consolidate this relay's fragmented UTXOs N→1 to
+          // keep `best` large (self-full broadcast mass ≈ C×feeReserve/best² → large best = low mass =
+          // no 880-wall grind-down / committee-comms blackout). Inverse of split_utxo. Relay's own
+          // wallet + RPC (no mnemonic leaves). Atomic vs in-flight sign_req (withSendLock) + inputs ⊆
+          // relay-own P2PK → disjoint from P2SH-spine settle UTXOs → settle bytes / determinism unchanged.
+          const { consolidateUtxosRelay } = await import('./lib/utxo-split.mjs');
+          const consResult = await consolidateUtxosRelay({ minFragments: cmd.minFragments });
+          if (cmd.requestId && process.send) {
+            process.send({ requestId: cmd.requestId, result: consResult });
+          }
+          log(`UTXO CONSOLIDATE: ${consResult.consolidated ? consResult.utxosBefore + '→1 (' + consResult.rounds + ' round)' : 'skipped'} ${consResult.reason || ''}`);
+          sent = consResult; // for generic result handler
+          break;
+        }
+
         case 'get_rpc_state': {
           // T-J2-2026-05-12 #2 — read-only state probe (UI 健康检测 P0, NWT spec sub #2/7).
           // 直接 return 短路 generic handler (避双 reply, 跟 split_utxo pattern 类似但 cleaner).
