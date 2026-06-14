@@ -91,21 +91,38 @@ fold TX 序列**, 零 node-local 输入。
 |---|---|
 | **J1 (我)** | 本 spec + auto-form 多级 fold SS (件2 fccaea6c 定稿) + by-root 树派生算法 (§1) + 两轴自扫 (§4) |
 | **NWT** | #2 by-root determinism PoC (攻击: 喂 node-local 序/分组 / 伪中间 UTXO / 跨节点不同树 → 验 settle fork 不可达) |
-| **J2** | fold 调度 (谁广播何序, permissionless) + co-verify 两节点 fold-root byte-equal (双 vantage 跨节点 DB root 对照, 复用 committee byte-equal 验法) + pot 模型 (§6 依赖) |
+| **J2** | fold 调度 (谁广播何序, permissionless) + co-verify 两节点 fold-root byte-equal (双 vantage 跨节点 DB root 对照, 复用 committee byte-equal 验法). pot 模型已定 (§6, 既有设计 06-02, tally-only) |
+
+> **NWT #2 PoC review (5b64a730)**: §1 树派生 + §4 ②轴 **defended NWT 3 vectors ✓** — ①node-local 序→shard_id
+> ctor 锚 (非 outpoint/提交序) ②伪中间→cov_id grouping (①merge) + outpoint 由 §1 链式定 ③②地址轴→cov 模板派生。
+> J2 ratify shard_id 排序 (撤 outpoint-tiebreak). 决策三方收敛, NWT 续 full PoC。
 
 **验收** (post-demo, §4 gated): 真多片 e2e (28+注多片 fold→root→settle), 两节点 fold-root **byte-equal**
 (双 vantage DB 对照) + settle 三方分账跨节点落链 + NWT PoC 全不可达。基准: 单片 46f8a/xfu62 19/19 仍 PASS。
 
 ---
 
-## 6. 开放依赖 (impl 前闭)
+## 6. pot 模型 (J2 r-msg 已定·既有设计 docs/2026-06-02-bshard-rolling-design-consensus, 不重造) + 余项
 
-- **pot 模型** (@J2 域, impl plan §2): shard UTXO 是否携本金 pot (本片 staked 总额) 供 settle 分账? 若是, fold
-  除 tally (localYes/localNo) 还需 fold pot (Σ本金) → conserve 多一维 (value 守恒, KIP-9 找零核弹守 [[gateB①]])。
-  **pot 定 → §1 fold step 是否多 fold 一个 pot 标量 + §2 TX value 守恒** 据此补。pot 未定前本 spec 守 tally 派生骨架。
+**pot 模型 = 已定 (关闭原开放项, 简化 件4)**: shard UTXO = **tally state (localYes/localNo) + dust (KIP-9 floor),
+**非 pot 本金**。bet 本金 (真钱) 在 **per-bet side_locks** (现 v07 资金锁机制不变)。
+∴ **fold 只折 tally, 无 pot/value 守恒维度** (§1 fold step 不多 fold pot 标量; §2 fold TX 无 value 守恒 —— shard
+是 dust 非钱 → fold TX storage-mass 低, 印证 J2 K=23 = size-mass 主导)。**conserve 只 tally 一维** (§4 ①轴不变)。
+**settle (Q4 既定, 各片独立并行)**: 关池锁全局比率 (fold-root globalYes/globalNo 定 YES/NO 赢方比), 各片
+**独立结**, 各从**自己 side_locks** 付本片 winners (非全有全无; 某片失败走 PoolSide refund)。fold-root 只供
+【全局比率】, 不经手钱 → 件4 fold 树纯 tally 派生, 真钱不进 fold TX。
+
+**shard SET @ close (rolling reconcile, 06-02 Q1=B witness 无限)**: shards 滚动生长 (顺序填, shard_id 0,1,2..
+按开片序 = 链上 genesis 事件序 = 确定)。**fold 树的 shard 集 = deadline 前所有已开 shard** (链上 genesis 截至
+deadline, 非 node-local)。shard_count @ close = 该集大小 (witness 背书, 非 ctor 固定 — 与 06-02 Q1 一致)。§1
+"按 shard_id 升序" 即此开片序, 两节点同 (链上 genesis 序确定, J2 已 ratify 撤 outpoint-tiebreak)。
+
+**余项**:
 - **FOLD_K 终值**: 本 spec 用 16 (J2 K=23 留 headroom); J2 final compile auto-form @ K 确认后定。
 - **件3 commit 接入**: ROOT.localYes/localNo → settle_aggregate introspect 读 (替 committee-sig 背书) +
-  `require(blake2b(globalYes‖globalNo‖market_id‖shard_count)==commit_v2)`。件3 spec 另出。
+  `require(blake2b(globalYes‖globalNo‖market_id‖shard_count)==commit_v2)`。**这正是 06-02 doc 顶 ⚠ 推翻"链下
+  绕路"后的 trustless 链上升级** (Owner catch: silverc 实有 introspection/covenant/int-to-byte → commit 链上
+  硬校验激活, 非 committee-sig fallback)。件3 spec 另出。
 
 ---
 *J1 件4 spec。设计 by 5-agent §4 收敛 + 本会话 J2/NWT 三方裁 (auto-form K=23 → 多级树 by-root)。impl gated post-demo。*
