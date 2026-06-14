@@ -23,10 +23,13 @@ import { sendCommandAsync } from '../services/relay-manager.js';
 
 const TICK_INTERVAL_MS = Number(process.env.BROADCASTER_UTXO_TICK_MS) || 180_000;   // 3min
 const STARTUP_GRACE_MS = 90_000;
-// Target independent UTXOs per broadcaster — sized to the parallel-chunk degree we want to sustain.
-// A 79-chunk settle won't get 79 UTXOs (KIP-9 caps it); ~12 already collapses a 79-chunk serial chain
-// into ~7 parallel waves instead of 79 serial steps = the dominant win. Env-tunable.
-const TARGET_UTXOS = Number(process.env.BROADCASTER_UTXO_TARGET) || 12;
+// Target independent UTXOs per broadcaster — sized to send a whole settle's chunks in ~1 wave (no
+// confirm-wait between chunks). With J2's payload compression (sign_req ~79→~30 chunks), N=30 covers a
+// settle in one wave, so the broadcaster never exhausts mid-burst (J2 r997 gap: all-N-in-flight →
+// 'No UTXOs available' hard-fail) — J2's pool-broadcast exhaustion-retry is then just a safety net.
+// Capped relay-side by KIP-9 maxSafeOutputs (a low-balance relay gets fewer; high-balance maker gets N).
+// Env-tunable. A 79-chunk uncompressed settle still wins big: ~3 waves vs 79 serial steps.
+const TARGET_UTXOS = Number(process.env.BROADCASTER_UTXO_TARGET) || 30;
 
 let timer = null;
 let running = false;
