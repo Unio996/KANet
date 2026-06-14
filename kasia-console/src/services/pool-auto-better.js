@@ -22,12 +22,25 @@ import { isRelayAlive, sendCommandAsync } from './relay-manager.js';
 
 // J2-tn r428 (Bettor r466 Owner 钦定火力全开): tick 60s→20s, PER_TICK 2→50 (= 押所有开放市场).
 // 8 单并发 0-bet 饿死 surface → 调猛 3x 频率 + 每 tick 全市场扫.
-const TICK_INTERVAL_MS = Number(process.env.AUTO_BET_TICK_MS) || 20_000;  // 20s default (= 3x faster)
+// J2-tn #27c (Bettor r529/r532 sprint): `|| 20_000` / `|| default` 是 falsy bug — Number('0')=0 与 ''
+// 都 falsy → 退回默认, 所以 AUTO_BET_TICK_MS=0 永远无法 disable (startAutoBetterCron L187 ===0 成死码;
+// demo 期只能用 999999999 绕停) + AUTO_BET_RELAYS='' 无法清空。抽成纯函数 export 供 regression 单测
+// (test-framework/standalone/test_autobet_config_parse.mjs)。
+export function parseTickMs(raw) {
+  const n = Number(raw);
+  return (Number.isFinite(n) && n >= 0) ? n : 20_000;  // 显式 0 = disabled (L187); NaN/unset/负 → 20s 默认
+}
+export function parseRelays(raw) {
+  // `??` (非 `||`): 显式 '' → [] (filter(Boolean) 后) = 彻底清空; 只 null/undefined(unset) → 默认串。
+  // 默认串去 oracle testers (tester-1/2/3) = KANet-UI #27b 在此改值 (同区一个 owner)。
+  return (raw ?? 'AutoBetter-1,AutoBetter-2,AutoBetter-3,tester-1,tester-2,tester-3').split(',').map(s => s.trim()).filter(Boolean);
+}
+const TICK_INTERVAL_MS = parseTickMs(process.env.AUTO_BET_TICK_MS);
 const PER_TICK = Number(process.env.AUTO_BET_PER_TICK) || 50;  // 押所有开放市场 (每个 relay 每 tick 上限 50 单, 实际看 markets.length)
 const MIN_STAKE_KAS = Number(process.env.AUTO_BET_MIN_STAKE_KAS) || 1;
 const MAX_STAKE_KAS = Number(process.env.AUTO_BET_MAX_STAKE_KAS) || 50;
 const MIN_RESERVE_KAS = Number(process.env.AUTO_BET_MIN_RESERVE_KAS) || 10;
-const RELAYS = (process.env.AUTO_BET_RELAYS || 'AutoBetter-1,AutoBetter-2,AutoBetter-3,tester-1,tester-2,tester-3').split(',').map(s => s.trim()).filter(Boolean);
+const RELAYS = parseRelays(process.env.AUTO_BET_RELAYS);
 const CONSOLE_BASE = process.env.AUTO_BET_CONSOLE_BASE || 'http://127.0.0.1:3200';
 
 let timer = null;
