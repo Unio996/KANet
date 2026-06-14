@@ -40,12 +40,26 @@ faucet are reachable; everything else returns 403 at the proxy, never touching t
 Everything not in this table → **403 at proxy**. (`GET /faucet` UI page optional — serve a static
 read-only landing instead of the Console route, to avoid pulling in Console assets/JS.)
 
-### 3.1 Faucet hardening (the one exposed write — hard requirements)
-The faucet (`POST /api/faucet/request`, chat.js:583) dispenses real test KAS → **drainable without
-controls.** Before exposure it MUST have: (a) per-IP rate limit at the proxy (e.g. 1 req / 10 min);
-(b) per-address cap (already `FAUCET_AMOUNT_KAS=5` per request — confirm a daily/address cap exists,
-add if not); (c) request-body size limit; (d) faucet relay balance alarm. **Action item — verify/add
-before go-live (not in this draft).**
+### 3.1 Faucet hardening (the one exposed write)
+The faucet (`POST /api/faucet/request`, chat.js:583) dispenses real test KAS → drainable.
+**Existing app-level controls (good):** permanent per-wallet 1-grant (`faucet_grants.wallet_address`
+→ 429) + per-IP 24h×3 (`ip_address` count) + `FAUCET_AMOUNT_KAS=5`/grant + wallet-format validation.
+
+**🔴 CRITICAL proxy-interaction bug (found 2026-06-14, must fix before exposure):**
+chat.js:585 `const ip = request.ip || request.headers['x-forwarded-for'] || 'unknown'`. `request.ip`
+is the **socket IP** = `127.0.0.1` (the proxy) for ALL external requests once behind the proxy — and
+it's truthy, so the `||` never reaches X-Forwarded-For. **The per-IP limit collapses**: every external
+user shares the `127.0.0.1` bucket → 3 grants total for the whole internet (or, read another way, no
+real per-user limit). The permanent per-wallet limit still holds, but wallets are free to generate.
+- **FIX:** enable fastify `trustProxy` scoped to the proxy IP (`{ trustProxy: '127.0.0.1' }`) so
+  `request.ip` resolves to the real client from X-Forwarded-For **only when the hop is the trusted
+  proxy** (prevents spoofing). Then the per-IP 24h×3 works against real client IPs.
+- The proxy MUST set `X-Forwarded-For` (Caddy/nginx default) and the Console must NOT trust it from
+  any non-proxy source (scoped trustProxy handles this; never `trustProxy: true` unscoped).
+
+**Remaining hard requirements before go-live:** (a) proxy-level rate limit as defense-in-depth
+(§5, 1 req/10min/IP); (b) request-body size limit (4KB, §5); (c) faucet relay balance alarm
+(reuse oracle-voter-health events pattern). **Action items — fix the trustProxy bug + add (a)-(c).**
 
 ## 4. Architecture
 
