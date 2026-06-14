@@ -3,8 +3,10 @@
 // scope: gate B #31 找零核弹 / chunk-determinism 硬前置. settle 的 bettor payout addr 必 pk-derive from
 //   bettor_pk (chain-anchored, 两节点 pool_bettor_sides commit 同源), 禁 node-local relay_nodes 查 (非持该
 //   relay 的节点查返 NULL → settle abort/异 addr → cross-node 命门 = #293 maker_pk / committee active-flag 同病).
-// why determinism-critical: addr node-local → 异 addr → 异 output → 异 storage-mass → 异贪心封片点 → 异 chunk
-//   划分 (chunk 边界都漂, 不只 addr 错). ∴ pk-derive 单源 = chunk-boundary byte-equal 的硬前置.
+// why critical: addr node-local → 非持 relay 节点查返 NULL → settle abort (非持 relay 节点结不了) 或异 recipient
+//   (付错人) = cross-node 命门. pk-derive 单源 → 任意节点可结 + 输出 byte-equal (付对人).
+//   (注: chunk 封片点由 output 值/序定 [merkle_index + computePoolPayouts 链锚], 与 addr 内容无关 — 全 P2PK 同
+//   脚本长不动 storage/compute mass; addr 是独立"付对人"命门, 非 chunk-边界 [J2 纠正原 cascade 过度断言].)
 // run: node test-framework/standalone/test_31_bettor_addr_determinism.mjs   (exit 0=PASS, 1=FAIL)
 
 import { readFileSync } from 'node:fs';
