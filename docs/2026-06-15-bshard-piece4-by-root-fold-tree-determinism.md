@@ -24,9 +24,24 @@ fold TX 序列**, 零 node-local 输入。
 
 ## 1. 树派生算法 (deterministic, 每节点同算)
 
+### 1.0 shard-SET completeness determinism (NWT #2 残留子面修, J2 finality-snapshot 法)
+
+⚠ **树 byte-equal 的前置**: 两节点必先 agree【WHICH shard UTXOs 在集】。若取 node-indexed tip → node B ingestion-lag
+没 index 某已上链 shard → A 集 {0,1,2,3} vs B {0,1,2} → 异树 → fork (= committee 池 chain-derived 非 node-local
+同课 / #22 zombie 同病, NWT 抓)。
+**修 (J2: 复用既有 committee 池 snapshot-by-finality 机制)**: shard 集 = **chain-derived snapshot @ `deadline_daa
++ FINALITY_N`** (= committee `snapshot_daa = currentDaa − FINALITY_N` 同锚法) → 两节点 **post-finality 取相同
+confirmed 集** (非 node-indexed tip → 消除 ingestion-lag fork)。
+- 集 = **所有匹配 `market_id`/cov_id 的 confirmed shard UTXO @ snapshot** (rolling on-demand 创, **非固定 ctor
+  shard_count** — 06-02 Q1 witness 无限)。
+- **empty/unfunded shard** (rolled 但 0 bet, genesis localYes/No=0) **一致在树** (占 shard_id slot, 0 tally 不影响
+  Σ) → 两节点同集同树。
+
 输入 (全 chain-anchored, 非 node-local):
-- `shard_count` (市场 create-v07 锚, 链上 ctor 值, 两节点同)。
-- 每片 shard 的【链上身份】: `shard_id` (0..shard_count-1, ctor 锚) + 该片 UTXO 的 outpoint (deadline 后消费态由链确定)。
+- shard 集 = §1.0 finality-snapshot 集 (`market_id`/cov_id @ deadline_daa+FINALITY_N confirmed)。
+- 每片 `shard_id` (create 时 distinct P2SH w/ distinct shard_id, ctor 锚 + genesis localYes/No=0 焊 = 唯一+0起,
+  NWT/J2 双验) = 树排序 key。outpoint 仅作 fold TX 输入引用 (不作排序 key — outpoint txid 提交时序歧义, J2 已撤
+  outpoint-tiebreak)。
 
 **FOLD_K = 16** (per-fold 叉数, J2 实测 K=23 留 headroom; 编译期 `max_fold_ins`)。
 
