@@ -66,6 +66,33 @@ async function _broadcastOracleStakeEnroll({ stakerPkX, lockUntilDaa, p2shAddr, 
   return { ok: true, txId };
 }
 
+// 问3 (a) withdraw broadcast (mirror enroll): staker-signed oracle_stake_withdraw_v1 envelope on kanet-prediction.
+// EVERY node (incl this one) ingests it (trade-protocol-filter handleOracleStakeWithdraw) → sets active=0 in
+// lockstep = the CROSS-NODE-CONVERGENT pool removal (NOT a node-local UPDATE = #22 active-flag divergence).
+async function _broadcastOracleStakeWithdraw({ stakerPkX, signingRelayId }) {
+  const pkRes = await sendCommandAsync(signingRelayId, { type: 'get_pubkey' });
+  const signerPk = String(pkRes?.x_only_pubkey || '').toLowerCase();
+  if (!signerPk || signerPk.length !== 64) throw new Error(`signing relay get_pubkey invalid: ${signerPk}`);
+  if (signerPk !== stakerPkX.toLowerCase()) {
+    throw new Error(`signing_relay_id pubkey mismatch: signer=${signerPk.slice(0,12)} stakerPkX=${stakerPkX.slice(0,12)}`);
+  }
+  const unsignedPayload = {
+    t: 'oracle_stake_withdraw_v1',
+    staker_pk_x: stakerPkX.toLowerCase(),
+    withdrawn_at: new Date().toISOString(),
+  };
+  const messageToSign = JSON.stringify(unsignedPayload);
+  const signResult = await sendCommandAsync(signingRelayId, { type: 'ecdsa_sign', message: messageToSign });
+  const signature = signResult?.signature;
+  if (!signature) throw new Error('ecdsa_sign returned empty');
+  const payloadStr = JSON.stringify({ ...unsignedPayload, signature });
+  const bcastResult = await sendBroadcastChunked(signingRelayId, 'kanet-prediction', payloadStr);
+  const txId = bcastResult?.txId;
+  if (!txId) throw new Error(`broadcast no txId: ${JSON.stringify(bcastResult).slice(0, 200)}`);
+  console.log(`[oracle-pool/broadcast] withdraw staker=${stakerPkX.slice(0,12)} txId=${txId.slice(0, 16)}...`);
+  return { ok: true, txId };
+}
+
 export async function registerOraclePoolRoutes(fastify) {
   // POST /api/oracle-pool/seed — testnet bootstrap: add is_oracle relays to pool with nominal stake.
   // Body: { relay_ids?: [string], nominal_stake_kas?: number, dry_run?: boolean }
@@ -260,6 +287,71 @@ export async function registerOraclePoolRoutes(fastify) {
     } catch (e) {
       console.error(`[oracle-pool/enroll] fail: ${e.message}`);
       return reply.code(500).send({ ok: false, error: `enroll fail: ${e.message}` });
+    }
+  });
+
+  // POST /api/oracle-pool/withdraw — 问3 (a) (Bettor 2026-06-15 钦定·分阶段): RECORD-level oracle 撤出.
+  // 押金当前 NOT chain-locked (oracle-pool L144; 真链锁 = Phase 2 / (b)). ∴ (a) = 记录级可见撤出:
+  // enrollment 置 active=0 + 写可审计 chain_event, NO 真-UTXO unlock. 铁律守 + 冷却防 gaming.
+  //   - 铁律【在岗不许退】: oracle 是【未决市场 committee 在岗】时禁撤 (否则委员中途跑路卡结算).
+  //   - 冷却 24h: enroll 后 24h 内禁撤 (防 enroll→vote→秒退 操纵委员选拔).
+  // ⚠ determinism follow-up: active flag 是 node-local; oracle 池(未来市场 snapshot)从 active enrollments
+  //   派生 → 撤出须跨节点一致才不致未来市场池分歧. 在飞市场用【create 时冻结的 pool_snapshots】不受影响
+  //   (determinism-safe). 跨节点收敛 = 广播 withdraw envelope (mirror enroll, 待 (a) 验收后补, 同 enroll
+  //   的 chain_envelope 收敛路) — 现 (a) 本地记录级先闭 DoD 演示, 广播传播记 follow-up.
+  // Body: { staker_pk_x: 64hex }
+  fastify.post('/api/oracle-pool/withdraw', async (request, reply) => {
+    const b = request.body || {};
+    if (typeof b.staker_pk_x !== 'string' || !/^[0-9a-fA-F]{64}$/.test(b.staker_pk_x)) {
+      return reply.code(400).send({ ok: false, error: 'staker_pk_x must be 64 hex chars' });
+    }
+    const stakerPkX = b.staker_pk_x.toLowerCase();
+    try {
+      const enr = sqlite.prepare('SELECT staker_pk_x, enrolled_at, active, relay_address FROM oracle_stake_enrollments WHERE staker_pk_x = ?').get(stakerPkX);
+      if (!enr) return reply.code(404).send({ ok: false, error: 'no enrollment for this staker_pk_x' });
+      if (!enr.active) return reply.send({ ok: true, staker_pk_x: stakerPkX, status: 'already_inactive' });
+
+      // 铁律 在岗不许退: oracle 在未决市场 committee 在岗 → 禁撤.
+      const onDuty = sqlite.prepare(`
+        SELECT pc.market_id FROM pool_committee pc JOIN pool_markets m ON m.id = pc.market_id
+        WHERE m.protocol_status IN ('pending_oracle_deposits','pending_bettors','verifying','collecting_sigs')
+          AND lower(pc.committee_pks) LIKE ?
+      `).all('%' + stakerPkX + '%');
+      if (onDuty.length > 0) {
+        return reply.code(409).send({ ok: false, error: `on-duty: committee member of ${onDuty.length} unsettled market(s) — cannot withdraw until they settle/refund`, on_duty_markets: onDuty.map(r => r.market_id) });
+      }
+
+      // 冷却 24h: enroll 后 24h 内禁撤.
+      const COOLDOWN_MS = 24 * 3600 * 1000;
+      const enrolledMs = enr.enrolled_at ? new Date(enr.enrolled_at).getTime() : 0;
+      if (enrolledMs && (Date.now() - enrolledMs) < COOLDOWN_MS) {
+        const remainHr = Math.ceil((COOLDOWN_MS - (Date.now() - enrolledMs)) / 3600000);
+        return reply.code(409).send({ ok: false, error: `cooldown: enrolled <24h ago, ${remainHr}h remaining before withdraw allowed` });
+      }
+
+      // REAL withdrawal via the CROSS-NODE-CONVERGENT broadcast path (Bettor/NWT/KANet-UI consensus 2026-06-15):
+      // broadcast a staker-signed oracle_stake_withdraw_v1 envelope → EVERY node ingests it
+      // (trade-protocol-filter handleOracleStakeWithdraw) → sets active=0 in lockstep. This is the determinism-safe
+      // pool removal — NOT a node-local UPDATE active=0 (which = #22 active-flag cross-node divergence: one node's
+      // committee-sampling pool, scanAndDerivePool WHERE active=1, ≠ the other's → divergent root → zombie committee).
+      // signing_relay_id REQUIRED: only the staking oracle's key can sign its own withdraw (verified in broadcast).
+      const signingRelayId = typeof b.signing_relay_id === 'string' ? b.signing_relay_id : null;
+      if (!signingRelayId) {
+        return reply.code(400).send({ ok: false, error: 'signing_relay_id required: the staking oracle must sign the withdraw envelope so every node can verify + drop it from the pool in lockstep (cross-node convergence)' });
+      }
+      let broadcastResult;
+      try {
+        broadcastResult = await _broadcastOracleStakeWithdraw({ stakerPkX, signingRelayId });
+      } catch (bcErr) {
+        return reply.code(503).send({ ok: false, error: `withdraw broadcast fail: ${bcErr.message}` });
+      }
+      // active=0 + auditable chain_event are written by handleOracleStakeWithdraw on EVERY node (incl this one when
+      // it ingests its own broadcast) — NO node-local UPDATE here, by design (determinism-safe).
+      console.log(`[oracle-pool/withdraw] staker=${stakerPkX.slice(0, 12)} → withdraw broadcast txId=${broadcastResult.txId?.slice(0, 16)} (cross-node active=0 via ingest, NOT node-local)`);
+      return reply.send({ ok: true, staker_pk_x: stakerPkX, status: 'withdraw_broadcast', txId: broadcastResult.txId, note: 'withdraw envelope broadcast; every node ingests → active=0 in lockstep (cross-node convergent, determinism-safe). real-UTXO unlock = Phase 2 (chain-locked stake).' });
+    } catch (e) {
+      console.error(`[oracle-pool/withdraw] fail: ${e.message}`);
+      return reply.code(500).send({ ok: false, error: `withdraw fail: ${e.message}` });
     }
   });
 
