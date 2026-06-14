@@ -2652,12 +2652,14 @@ export async function registerPoolRoutes(fastify) {
     // differential/total exceed/N more than/up by). 一次性扩 (非无限 whack-a-mole) 降绕过面。
     // 诚实 limitation: regex 关键词绑定固有可绕, 这是 best-effort 软预筛; 实 safety net = deriveVote
     // (prompt 硬化抗注入 r36 13/13 + clean evidence 正确推理 r38 8/8) — 绕过题走 deriveVote 不瞎判.
-    const INFERENCE_RE = /\b(win|won|beat|lead|cover|lose|trail|ahead|up|outscor\w*)\b[^.]{0,25}\bby\b\s+(more than\s+|at least\s+|over\s+|under\s+|greater than\s+)?\d|\bby\s+(more than|at least|over|under|greater than)\s+\d+\s*(point|run|goal|score)|\bmargin\b|\bdifferential\b|point[\s-]*spread|\bspread\b|\bgap\b|\bdifference\b|combined\s+(score|total|points)|(total|score|runs|points|goals)\b[^.]{0,20}\b(exceed|greater than|more than|over|above|below|under)\s*\d|\d+\s*(point|run|goal|score)?s?\s+(more|fewer|less)\s+than|how many .*\b(more|fewer|less)\b|(total|combined)\b[^.]{0,45}\b(exceed|greater than|more than|over|above|below|under|at least)\s*\d|\b(scores?|scoring)\s+first\b|\bfirst\s+to\s+score\b|\bat\s+(half[\s-]?time|the\s+half)\b|\bhalf[\s-]?time\b|\blead[^.]{0,18}\bhalf|\b(first|1st|second|2nd|third|3rd|fourth|4th)\s+(inning|quarter|period|half|frame|set)\b|\bboth\s+teams\s+score/i;
-    // J2-tn P1-C (DoD gate C, NWT 对抗集实测 FP=18.2% 抓): 旧 INFERENCE_RE 只抓算术 margin/spread, 漏 4 类
-    // 误 pass (score 9-10) = oracle 无法从终分判但 gate 放行: ①total/combined over X (需 sum) ②score first
-    // (temporal 首事件, 非终分) ③lead at halftime / per-period (非终分态) ④both teams score 1st inning
-    // (per-inning, extractor 只给终分). 上面 append 扩这 4 类 → reject(warn). standalone 验: 8 judgeable
-    // GOOD 不误命中 (FN=0), 4 reasoning FP 全命中. = beyond-final-score 不可直判 → prevet 不给 pass.
+    // J2-tn #25 UMA L1 RELAX (NWT co-approve, frontier split): margin/让分 + total/大小球 + spread 等
+    // 【终场比分算术】= L1 现可判 (#25 evidence 附客观 margin/total → deriveVote cross-sport 16/16 100%,
+    // e65719e4). 故从 INFERENCE_RE 移除所有 win-by-N/margin/differential/spread/gap/difference/combined-total/
+    // total-over-N/N-more-than 算术 clause (它们不再是"判不了的推理题", 拦它们 = FN on #25-judgeable 市场).
+    // 仅保留【beyond-final-box】真推理 (L2/L3, extractor 只给终分判不了): ①score first / first-to-score
+    // (temporal 首事件) ②halftime / lead-at-half / per-period(inning|quarter|period|half|frame|set) (非终分态)
+    // ③both teams score (per-frame) ④how-many-more (标量非干净 binary). = 这些待 L2/L3 源, 仍 cap warn.
+    const INFERENCE_RE = /how many .*\b(more|fewer|less)\b|\b(scores?|scoring)\s+first\b|\bfirst\s+to\s+score\b|\bat\s+(half[\s-]?time|the\s+half)\b|\bhalf[\s-]?time\b|\blead[^.]{0,18}\bhalf|\b(first|1st|second|2nd|third|3rd|fourth|4th)\s+(inning|quarter|period|half|frame|set)\b|\bboth\s+teams\s+score/i;
     const inferenceDetected = INFERENCE_RE.test(lower);
     // J2-tn r690 gap2① (NWT line-E 命门: deriveVote backstop 对主观题失效=高 conf 硬判 0/4 abstain,
     // 故 prevet 主观闸是【唯一】拦纯主观题的有效门, 非可选 best-effort)。纯主观措辞(无客观判定标准:
