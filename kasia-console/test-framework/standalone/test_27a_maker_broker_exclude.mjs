@@ -73,6 +73,47 @@ if (committee) {
   check('determinism: re-sample → identical committee_pk_hash', again.committee_pk_hash === committee.committee_pk_hash, `${again.committee_pk_hash} vs ${committee.committee_pk_hash}`);
 }
 
+// ── BROKER branch (L332-335) — independent exercise (Owner 2026-06-15 requested; NWT gap② residual) ──
+// 7-member pool so excluding BOTH maker + broker leaves exactly 5 = COMMITTEE_SIZE (no starve).
+const POOL7 = ['aa', 'bb', 'cc', 'dd', 'ee', 'ff', '11'].map(h => h.repeat(32)); // distinct from POOL (no enrollment PK clash)
+const STAKES7 = POOL7.map(() => '100000000');
+const MAKER7_PK = POOL7[0];                 // this market's maker (own addr, distinct from CASE-1's maker)
+const MAKER7_ADDR = 'kaspatest:maker7';
+const BROKER_PK = POOL7[1];                 // broker is also pool member 1 → broker-exclude BITES
+const BROKER_ADDR = 'kaspatest:broker';     // != maker addr → broker branch (L332 guard) runs
+sqlite.prepare(`INSERT INTO pool_snapshots (market_id, pool_merkle_root, pool_size, pool_pks_json, pool_stakes_json)
+  VALUES (?,?,?,?,?)`).run('mkt-brk', POOL_ROOT, POOL7.length, JSON.stringify(POOL7), JSON.stringify(STAKES7));
+sqlite.prepare(`INSERT INTO pool_markets (id, maker_relay_id, broker_relay_id, spine_p2sh, market_metadata_hash, deadline, deadline_daa)
+  VALUES (?,?,?,?,?,?,?)`).run('mkt-brk', 'maker-relay-7', 'broker-relay', 'kaspatest:spine', '00'.repeat(32), DEADLINE_DAA, DEADLINE_DAA);
+sqlite.prepare(`INSERT INTO relay_nodes (id, name, network, poll_ms, address, created_at, updated_at)
+  VALUES ('maker-relay-7','maker7','testnet-12',1000,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`).run(MAKER7_ADDR);
+sqlite.prepare(`INSERT INTO relay_nodes (id, name, network, poll_ms, address, created_at, updated_at)
+  VALUES ('broker-relay','broker','testnet-12',1000,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`).run(BROKER_ADDR);
+// enrollments for all 7 pool pks (own addresses, no clash with CASE-1); pk0→maker7 addr, pk1→broker addr.
+POOL7.forEach((pk, i) => enr.run(pk, i === 0 ? MAKER7_ADDR : (i === 1 ? BROKER_ADDR : ('kaspatest:q' + i)), 999999, 'kaspatest:pp' + i, 'pph' + i, 'prs' + i));
+
+let cb, cbErr = '';
+try { cb = sampleAndStoreCommittee('mkt-brk', END_BLOCK); }
+catch (e) { cbErr = e.message; }
+check('maker+broker market sampled (7→5 after double-exclude)', !!cb, `err=${cbErr}`);
+if (cb) {
+  const pks = cb.committee_pks.map(p => String(p).toLowerCase());
+  check('BROKER pk (pool member, addr != maker) EXCLUDED from committee', !pks.includes(BROKER_PK), `broker=${BROKER_PK.slice(0,8)} committee=${JSON.stringify(pks.map(p=>p.slice(0,8)))}`);
+  check('maker also still excluded (both branches bite)', !pks.includes(MAKER7_PK), `maker=${MAKER7_PK.slice(0,8)} committee=${JSON.stringify(pks.map(p=>p.slice(0,8)))}`);
+  check('committee == the 5 pool members minus maker(0) and broker(1)', pks.slice().sort().join(',') === POOL7.slice(2).map(p => p.toLowerCase()).sort().join(','), JSON.stringify(pks.map(p=>p.slice(0,8))));
+}
+
+// broker_address == maker_address (same relay) → L332 != guard SKIPS the broker branch (no double-count of same pk).
+// 6-member pool, maker=broker=pool[0]'s relay → only ONE exclude → committee = 5.
+sqlite.prepare(`INSERT INTO pool_snapshots (market_id, pool_merkle_root, pool_size, pool_pks_json, pool_stakes_json)
+  VALUES (?,?,?,?,?)`).run('mkt-brk-same', POOL_ROOT, POOL.length, JSON.stringify(POOL), JSON.stringify(STAKES));
+sqlite.prepare(`INSERT INTO pool_markets (id, maker_relay_id, broker_relay_id, spine_p2sh, market_metadata_hash, deadline, deadline_daa)
+  VALUES (?,?,?,?,?,?,?)`).run('mkt-brk-same', 'maker-relay', 'maker-relay', 'kaspatest:spine', '00'.repeat(32), DEADLINE_DAA, DEADLINE_DAA);
+let cs, csErr = '';
+try { cs = sampleAndStoreCommittee('mkt-brk-same', END_BLOCK); }
+catch (e) { csErr = e.message; }
+check('broker_addr == maker_addr → != guard skips broker branch → still 6→5 (no double-exclude starve)', !!cs && cs.committee_pks.length === 5, `err=${csErr} size=${cs?.committee_pks?.length}`);
+
 try { sqlite.close(); } catch {}
 try { rmSync(TMP, { force: true }); rmSync(TMP + '-wal', { force: true }); rmSync(TMP + '-shm', { force: true }); } catch {}
 
