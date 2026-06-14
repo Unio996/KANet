@@ -5012,5 +5012,22 @@ export function runMigrations() {
     }
   }
 
+  // v170: pool_bettor_sides.side_lock_daa (J1 #27a v2, Owner hardening sprint 2026-06-14; Bettor daa-source
+  // 钦定 + NWT r1175 canonical-daa refine): persist the CANONICAL accepting-block daaScore of each bet's
+  // side_lock_tx (= UTXO blockDaaScore from getUtxosByAddresses at ingest = chain consensus fact, byte-equal
+  // across nodes). #27a v2 chain-anchors the committee bettor-exclude set to side_lock_daa <= deadline_daa
+  // (same deadline_daa the committee endBlock uses) → all nodes compute identical excludePks → committee
+  // byte-equal (fixes the live-pool_bettor_sides determinism hole NWT caught). NULL = legacy/unconfirmed →
+  // #27a fail-loud (never silently include/exclude → no fork). New bets + #27d catch-up fill it from the
+  // same canonical source; not retro-applied (legacy markets settle via fallback).
+  {
+    try {
+      sqlite.exec(`ALTER TABLE pool_bettor_sides ADD COLUMN side_lock_daa INTEGER`);
+      console.log('[migrate] v170: pool_bettor_sides.side_lock_daa (= canonical accepting-block daa, #27a v2 chain-anchored bettor-exclude determinism).');
+    } catch (e) {
+      if (!/duplicate column/i.test(e.message)) console.warn(`[migrate] v170 side_lock_daa fail: ${e.message}`);
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }

@@ -1044,14 +1044,25 @@ async function handlePoolBetRegistered(msg) {
     return;
   }
 
+  // J1 #27a v2 (Owner hardening sprint 2026-06-14, Bettor daa-source + NWT r1175 canonical-daa): capture the
+  // CANONICAL accepting-block daaScore of the side_lock UTXO (= chain consensus fact, byte-equal across nodes).
+  // #27a v2 chain-anchors the committee bettor-exclude set to side_lock_daa <= deadline_daa. kaspa-wasm
+  // UtxoEntryReference shape varies (cross-chain-verify.mjs L545 same defensive pattern) → try the known paths.
+  let sideLockDaa = null;
+  try {
+    const rawDaa = exactUtxo.blockDaaScore ?? exactUtxo.utxoEntry?.blockDaaScore ?? exactUtxo.entry?.blockDaaScore ?? exactUtxo.entry?.utxoEntry?.blockDaaScore;
+    if (rawDaa !== undefined && rawDaa !== null) sideLockDaa = Number(BigInt(rawDaa));  // daa ~38M fits Number safely
+  } catch { sideLockDaa = null; }
+  if (sideLockDaa === null) console.warn(`[trade-filter:bet-reg] side_lock_daa unresolved from UTXO market=${msg.market_id.slice(0,12)} tx=${msg.side_lock_tx.slice(0,16)} — stored NULL (#27a fail-loud at sample)`);
+
   // 4. INSERT OR IGNORE pool_bettor_sides (UNIQUE side_lock_tx WHERE NOT NULL dedup anchor).
   //    bettor_relay_id NULL = external 0-key bettor on remote node (no local relay knows the privkey).
   try {
     const insertResult = sqlite.prepare(`INSERT OR IGNORE INTO pool_bettor_sides
-      (market_id, bettor_pk, bettor_relay_id, direction, stake_amount, side_p2sh, side_lock_tx, merkle_index, side_redeem_script_hex)
-      VALUES (?,?,?,?,?,?,?,?,?)`).run(
+      (market_id, bettor_pk, bettor_relay_id, direction, stake_amount, side_p2sh, side_lock_tx, merkle_index, side_redeem_script_hex, side_lock_daa)
+      VALUES (?,?,?,?,?,?,?,?,?,?)`).run(
         msg.market_id, msg.bettor_pk, null, msg.direction, msg.stake_amount,
-        msg.side_p2sh, msg.side_lock_tx, msg.merkle_index || null, recomputedRedeem,
+        msg.side_p2sh, msg.side_lock_tx, msg.merkle_index || null, recomputedRedeem, sideLockDaa,
       );
     if (insertResult.changes === 0) {
       const stillMissing = !sqlite.prepare('SELECT 1 FROM pool_bettor_sides WHERE side_lock_tx = ?').get(msg.side_lock_tx);
