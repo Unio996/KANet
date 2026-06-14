@@ -50,7 +50,7 @@ let _sendLock = Promise.resolve();
 // 充分 buffer + cover restart race.
 const _pendingSpentUtxos = new Map(); // key = "txid:index" → expiry timestamp
 const _PENDING_UTXO_TTL_MS = 60_000;  // J1-D-4 extended from 30000
-function markUtxoSpent(entry) {
+export function markUtxoSpent(entry) {
   const key = `${entry.entry?.transactionId || entry.transactionId || ''}:${entry.entry?.index ?? entry.index ?? 0}`;
   if (key === ':0') return; // safety: no valid outpoint
   _pendingSpentUtxos.set(key, Date.now() + _PENDING_UTXO_TTL_MS);
@@ -64,7 +64,7 @@ export function markUtxoSpentByOutpoint(txid, index) {
   const key = `${txid}:${index ?? 0}`;
   _pendingSpentUtxos.set(key, Date.now() + _PENDING_UTXO_TTL_MS);
 }
-function filterPendingUtxos(entries) {
+export function filterPendingUtxos(entries) {
   const now = Date.now();
   // Clean expired entries
   for (const [k, exp] of _pendingSpentUtxos) { if (exp < now) _pendingSpentUtxos.delete(k); }
@@ -74,7 +74,11 @@ function filterPendingUtxos(entries) {
     return !_pendingSpentUtxos.has(key);
   });
 }
-function withSendLock(fn) {
+// design-v2 (B) risk#4 (Bettor r486): exported so the broadcaster-UTXO rebalance (splitUtxosRelay force)
+// can acquire the SAME serial lock that sendKaspa uses → rebalance is atomically mutually-exclusive with
+// any in-flight settle broadcast (maker settle TX OR committee sign_req chunk) on this relay's wallet.
+// No settler-state query / no TOCTOU — the lock IS the mutual exclusion.
+export function withSendLock(fn) {
   const prev = _sendLock;
   let resolve;
   _sendLock = new Promise(r => { resolve = r; });
