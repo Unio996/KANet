@@ -110,3 +110,13 @@ J1 实现 `frozen`(auto 可逆刹车) + 偏离入 `disagreement_queue` 待 revie
 **破单市场押注上限 = bshard 滚动分片 + 链上 fold trustless 聚合** (设计完成, 实施 gate 在 demo 后):
 - 一个市场切 1→∞ 片 (mass-aware 封片), 各片独立并行结算; 跨片全局赔率靠**链上层次 fold 树** introspection 强制求和 (OpInputCovenantId 输入白名单防伪造 + commit 硬校验, 零 committee-sig)。
 - 设计权威: [`docs/2026-06-14-bshard-fold-trustless-§4-consensus.md`](../2026-06-14-bshard-fold-trustless-§4-consensus.md) + KB `products/03-prediction-pool.md` §2.B。
+
+## 20.10 复杂市场 = binary 分解 + 组合 (统一纲领, 2026-06-14)
+
+**任意复杂预测市场 = 一组精确 binary YES/NO 谓词 + 组合层** (Owner 洞察, Polymarket 实证)。让分/大小球/角球阶梯/球员 props 全是 binary("净胜≥2?"/"总进球≥3?"/"角球≥7?"/"Ueda 进球≥1?"); 连续标量拆阶梯/分桶。**我们的 binary YES/NO 池(PoolSpine_v07 + PoolSide)就是普适原语**, 不需新市场类型; 各 binary 池**独立结算**(耦合 ΣYES≈1 是显示/定价上层)。
+
+复杂度搬到两处 = 两条主线:
+- **谓词定义 + oracle 判定力** → UMA 引擎(#25): oracle 能力分层 **L1**(终场比分+算术=moneyline/让分/大小球, **现在就够得着**, 一个比分源解锁一批)→ **L2**(半场明细=BTTS/谁先进)→ **L3**(统计级源=角球/球员 props)。
+- **组合 + 多池效率** → bshard(#26): 一赛事炸出几十上百 binary 池, 各池无界+并行结。
+
+镜像(seeder)必 verbatim 搬每个 binary 完整谓词(类型+线值+球员/统计目标+时间窗+规则+源), 少搬一项=判错。设计权威: [`docs/2026-06-14-prediction-market-binary-decomposition-charter.md`](../2026-06-14-prediction-market-binary-decomposition-charter.md) + KB `architecture/2026-06-14-binary-decomposition-charter.md`。
