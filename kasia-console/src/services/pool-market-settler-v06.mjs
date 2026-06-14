@@ -333,6 +333,17 @@ export function sampleAndStoreCommittee(marketId, endBlockHash) {
     const bp = sqlite.prepare('SELECT staker_pk_x FROM oracle_stake_enrollments WHERE relay_address = ? LIMIT 1').get(marketRow.broker_address);
     if (bp?.staker_pk_x) excludePks.push(String(bp.staker_pk_x).toLowerCase());
   }
+  // J1 #27a (Owner public-testnet hardening sprint 2026-06-14): exclude this market's BETTORS from its
+  // own committee — an oracle who also bet on the market must not judge it (oracle∩bettor conflict the
+  // demo exposed: AUTO_BET_RELAYS included oracle testers → a betting oracle could be sampled). bettor_pk
+  // is chain-anchored (PoolSide lock, synced cross-node) + the bet set is frozen at deadline → all nodes
+  // compute the SAME excludePks → committee stays byte-equal (preserves cross-node determinism).
+  // COUPLING (NWT r1164): MUST deploy in the same batch as #27b (drop oracle testers from
+  // AUTO_BET_RELAYS) — alone, excluding bettor-oracles can starve the pool. GUARD: selectCommittee
+  // throws fail-loud if eligible < COMMITTEE_SIZE after exclusion (never silently shrinks / re-includes).
+  for (const b of sqlite.prepare('SELECT DISTINCT bettor_pk FROM pool_bettor_sides WHERE market_id = ?').all(marketId)) {
+    if (b?.bettor_pk) excludePks.push(String(b.bettor_pk).toLowerCase());
+  }
   const sampling = selectCommittee(
     snapshot.pool_pks.map((pk, i) => ({ pk_hex: pk, stake_sompi: BigInt(snapshot.pool_stakes[i]) })),
     seed,
