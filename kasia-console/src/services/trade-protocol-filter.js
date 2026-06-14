@@ -931,6 +931,56 @@ async function handlePoolMarketChunk(msg) {
 // coordinated spec round — affects cross-node consensus.
 const BETTOR_MIN_STAKE_POLICY_SOMPI = 100_000_000n;
 
+/**
+ * captureSideLockDaa — single canonical source for a bet's side_lock UTXO accepting-block daaScore.
+ * (J1 #27a v2, NWT r1181 single-source mandate.) Called by BOTH the live bet-register ingest AND the
+ * deploy-time backfill script (scripts/backfill-side-lock-daa.mjs) so a backfilled daa is byte-equal to
+ * the daa a fresh ingest would have written — zero cross-node divergence in the committee bettor-exclude set.
+ *
+ * Chain truth: getUtxosByAddresses(side_p2sh) returns the UNSPENT UTXO for an OPEN position; we match it by
+ * stake_amount + side_lock_tx (a spent/missing UTXO = already settled or never paid → not capturable here).
+ * The daaScore is the CANONICAL accepting-block daa (chain consensus fact, identical on every node).
+ * kaspa-wasm UtxoEntryReference shape varies (cross-chain-verify.mjs L545 same defensive pattern).
+ *
+ * @returns {Promise<{daa:number|null, reason:'ok'|'daa-unresolved'|'no-unspent-utxo'|'no-rpc'|string}>}
+ *   reason 'rpc-fail: ...' is transient (replay later); 'no-unspent-utxo' = settled/unpaid; 'daa-unresolved'
+ *   = UTXO found but shape unknown (daa null, fail-loud at sample). NEVER guesses — null over a non-canonical value.
+ */
+export async function captureSideLockDaa({ side_p2sh, side_lock_tx, stake_amount, network }) {
+  const { getWorkingRpc } = await import('./rpc-health.js');
+  const { url: rpcUrl } = await getWorkingRpc();
+  if (!rpcUrl) return { daa: null, reason: 'no-rpc' };
+  const { RpcClient, Encoding, Address } = await import('kaspa-wasm');
+  const rpc = new RpcClient({ url: rpcUrl, encoding: Encoding.Borsh, networkId: network });
+  let utxos;
+  try {
+    await Promise.race([rpc.connect({}), new Promise((_, rej) => setTimeout(() => rej(new Error('RPC connect timeout')), 4000))]);
+    ({ entries: utxos } = await rpc.getUtxosByAddresses([new Address(side_p2sh)]));
+  } catch (e) {
+    try { await rpc.disconnect(); } catch {}
+    return { daa: null, reason: `rpc-fail: ${e.message}` };
+  } finally {
+    try { await rpc.disconnect(); } catch {}
+  }
+  utxos = utxos || [];
+  const wantSompi = BigInt(stake_amount);
+  const exactUtxo = utxos.find(u => {
+    try {
+      if (BigInt(u.amount) !== wantSompi) return false;
+      const op = u.outpoint || u.entry?.outpoint;
+      const txid = op && (op.transactionId || op.transaction_id);
+      return txid === side_lock_tx;
+    } catch { return false; }
+  });
+  if (!exactUtxo) return { daa: null, reason: 'no-unspent-utxo' };
+  let daa = null;
+  try {
+    const rawDaa = exactUtxo.blockDaaScore ?? exactUtxo.utxoEntry?.blockDaaScore ?? exactUtxo.entry?.blockDaaScore ?? exactUtxo.entry?.utxoEntry?.blockDaaScore;
+    if (rawDaa !== undefined && rawDaa !== null) daa = Number(BigInt(rawDaa));  // daa ~38M fits Number safely
+  } catch { daa = null; }
+  return { daa, reason: daa === null ? 'daa-unresolved' : 'ok' };
+}
+
 async function handlePoolBetRegistered(msg) {
   const { createHash } = await import('crypto');
   const required = ['market_id', 'bettor_pk', 'direction', 'stake_amount', 'side_p2sh', 'side_lock_tx'];
@@ -1005,53 +1055,35 @@ async function handlePoolBetRegistered(msg) {
     return;
   }
 
-  // 3. Chain truth: getUtxosByAddresses(side_p2sh) finds UTXO matching stake_amount + side_lock_tx,
-  //    AND it's still UNSPENT (= position open). Bettor r113 refine: spent UTXO = already settled, skip.
-  const { getWorkingRpc } = await import('./rpc-health.js');
-  const { url: rpcUrl } = await getWorkingRpc();
-  if (!rpcUrl) {
-    console.warn(`[trade-filter:bet-reg] no working RPC, skip (will replay on next broadcast)`);
-    return;
-  }
-  const { RpcClient, Encoding, Address } = await import('kaspa-wasm');
-  const network = market.spine_p2sh.startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
-  const rpc = new RpcClient({ url: rpcUrl, encoding: Encoding.Borsh, networkId: network });
-  let utxos;
-  try {
-    await Promise.race([rpc.connect({}), new Promise((_, rej) => setTimeout(() => rej(new Error('RPC connect timeout')), 4000))]);
-    ({ entries: utxos } = await rpc.getUtxosByAddresses([new Address(msg.side_p2sh)]));
-  } catch (e) {
-    console.warn(`[trade-filter:bet-reg] RPC UTXO query fail market=${msg.market_id.slice(0,12)}: ${e.message} — skip (replay later)`);
-    try { await rpc.disconnect(); } catch {}
-    return;
-  } finally {
-    try { await rpc.disconnect(); } catch {}
-  }
-  utxos = utxos || [];
-  const wantSompi = BigInt(msg.stake_amount);
-  const exactUtxo = utxos.find(u => {
-    try {
-      if (BigInt(u.amount) !== wantSompi) return false;
-      const op = u.outpoint || u.entry?.outpoint;
-      const txid = op && (op.transactionId || op.transaction_id);
-      return txid === msg.side_lock_tx;
-    } catch { return false; }
+  // 3. Chain truth (single-source #27a v2, NWT r1181): captureSideLockDaa does getUtxosByAddresses(side_p2sh),
+  //    matches the UNSPENT UTXO by stake_amount + side_lock_tx (Bettor r113: spent = settled, skip), and reads
+  //    its CANONICAL accepting-block daaScore. The SAME fn the backfill script calls → backfill daa == new-bet
+  //    daa, zero divergence. The committee bettor-exclude set chain-anchors to side_lock_daa <= deadline_daa.
+  const cap = await captureSideLockDaa({
+    side_p2sh: msg.side_p2sh, side_lock_tx: msg.side_lock_tx, stake_amount: msg.stake_amount,
+    network: market.spine_p2sh.startsWith('kaspatest:') ? 'testnet-12' : 'mainnet',
   });
-  if (!exactUtxo) {
-    // Position either never paid, already spent (settled), or wrong amount. Skip without INSERT —
+  if (cap.reason === 'no-rpc' || cap.reason.startsWith('rpc-fail')) {
+    console.warn(`[trade-filter:bet-reg] ${cap.reason} market=${msg.market_id.slice(0,12)} — skip (replay later)`);
+    return;
+  }
+  if (cap.reason === 'no-unspent-utxo') {
+    // Position never paid, already spent (settled), or wrong amount. Skip without INSERT —
     // settled positions don't belong in pool_bettor_sides on this remote node (settler local truth wins).
     console.log(`[trade-filter:bet-reg] no UNSPENT UTXO matching tx=${msg.side_lock_tx.slice(0,16)} amount=${msg.stake_amount} at ${msg.side_p2sh.slice(0,20)} (settled/unpaid/wrong) — skip`);
     return;
   }
+  const sideLockDaa = cap.daa;  // CANONICAL accepting-block daaScore (chain consensus fact, byte-equal across nodes), or null
+  if (sideLockDaa === null) console.warn(`[trade-filter:bet-reg] side_lock_daa unresolved from UTXO market=${msg.market_id.slice(0,12)} tx=${msg.side_lock_tx.slice(0,16)} — stored NULL (#27a fail-loud at sample)`);
 
   // 4. INSERT OR IGNORE pool_bettor_sides (UNIQUE side_lock_tx WHERE NOT NULL dedup anchor).
   //    bettor_relay_id NULL = external 0-key bettor on remote node (no local relay knows the privkey).
   try {
     const insertResult = sqlite.prepare(`INSERT OR IGNORE INTO pool_bettor_sides
-      (market_id, bettor_pk, bettor_relay_id, direction, stake_amount, side_p2sh, side_lock_tx, merkle_index, side_redeem_script_hex)
-      VALUES (?,?,?,?,?,?,?,?,?)`).run(
+      (market_id, bettor_pk, bettor_relay_id, direction, stake_amount, side_p2sh, side_lock_tx, merkle_index, side_redeem_script_hex, side_lock_daa)
+      VALUES (?,?,?,?,?,?,?,?,?,?)`).run(
         msg.market_id, msg.bettor_pk, null, msg.direction, msg.stake_amount,
-        msg.side_p2sh, msg.side_lock_tx, msg.merkle_index || null, recomputedRedeem,
+        msg.side_p2sh, msg.side_lock_tx, msg.merkle_index || null, recomputedRedeem, sideLockDaa,
       );
     if (insertResult.changes === 0) {
       const stillMissing = !sqlite.prepare('SELECT 1 FROM pool_bettor_sides WHERE side_lock_tx = ?').get(msg.side_lock_tx);
