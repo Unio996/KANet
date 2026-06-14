@@ -586,7 +586,7 @@ export async function poolSettlerTick() {
           if (!alreadySampled) {
             try {
               const { createRelayChainReader } = await import('./relay-chain-reader.mjs');
-              const { fetchEndBlockHashCanonical, sampleAndStoreCommittee } = await import('./pool-market-settler-v06.mjs');
+              const { fetchEndBlockHashCanonical, sampleAndStoreCommittee, ensurePoolSnapshotByRoot } = await import('./pool-market-settler-v06.mjs');
               const { getStatus, isRelayAlive } = await import('./relay-manager.js');
               // Bettor r182/r183/r184: maker_relay_id may be remote (cross-node ingested market) →
               // local Console can't IPC to it. Use any locally-running relay for chainReader —
@@ -648,6 +648,19 @@ export async function poolSettlerTick() {
                 continue;
               }
               const endBlock = await fetchEndBlockHashCanonical(chainReader, deadlineDaa);
+              // (b) J2-tn r1011 cross-node committee self-heal (liveness P0): bake local pool_snapshots
+              // from THIS node's own chain_view (matched by baked pool_merkle_root) before sampling, so
+              // a non-producer node (e.g. :3300 committee member) can sample + vote — the producer only
+              // baked the snapshot at create-v07. null = root not chain-reproducible here (doomed, e.g.
+              // artificial active-flip root) → sampleAndStoreCommittee throws → market stays verifying →
+              // (c) quorum-timeout-refund cleans it up. saveable (root in chain_view) → bakes → samples.
+              try {
+                const sh = ensurePoolSnapshotByRoot(market.id, market.pool_merkle_root);
+                if (sh?.source === 'self_heal_by_root') console.log(`[pool-settler] self-heal snapshot market=${market.id.slice(0,12)} from chain_view root=${(market.pool_merkle_root||'').slice(0,8)} pool_size=${sh.pool_size}`);
+                else if (sh === null) console.warn(`[pool-settler] self-heal: no chain_view row matching root=${(market.pool_merkle_root||'').slice(0,8)} market=${market.id.slice(0,12)} (non-reproducible here → stays verifying → quorum-timeout-refund)`);
+              } catch (shErr) {
+                console.warn(`[pool-settler] self-heal snapshot market=${market.id.slice(0,12)}: ${shErr.message}`);
+              }
               const committee = sampleAndStoreCommittee(market.id, endBlock.hash);
               // Wire committee_relay_ids → pool_markets.oracle_relay_ids so voter scan picks up.
               sqlite.prepare('UPDATE pool_markets SET oracle_relay_ids = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
@@ -907,21 +920,42 @@ export async function poolSettlerTick() {
             }
           }
         } else {
-          pending++;
-          // J2-tn r401 P0-#2 (Bettor r290b 钦点 trace 先证 不猜):
-          // qrv65 类奇案 — direct decideConsensus call 返 action=refund 但 tick 报 pending=1.
-          // 加 trace log 仅在 pending 时, 揭示 ageMs / updated_at_runtime / why-pending.
-          // 不修复, 只观察, 复现下次卡死时根因可见.
-          try {
-            const updated_at = market.updated_at;
-            const verifyingSinceMs = parseSqliteUtc(updated_at);
-            const ageMs = Date.now() - verifyingSinceMs;
-            const ageMin = Math.floor(ageMs / 60000);
-            const deadlineSec = market.deadline;
-            const ageSinceDeadlineMin = deadlineSec ? Math.floor((Math.floor(Date.now()/1000) - deadlineSec) / 60) : null;
-            console.log(`[pool-settler:trace] PENDING market=${market.id.slice(0,12)} status=${market.protocol_status} ver=${market.protocol_version} updated_at=${updated_at} ageMin=${ageMin} ageSinceDeadlineMin=${ageSinceDeadlineMin} decision_action=${decision.action} decision_reason=${decision.reason}`);
-          } catch (e) {
-            console.warn(`[pool-settler:trace] log fail market=${market.id?.slice(0,12)}: ${e.message}`);
+          // (c) J2-tn r1009 quorum-timeout-refund (cross-node liveness P0, ZOMBIE 实证):
+          // committee 成形但 quorum 永不可达 (cross-node committee >=2 成员投不了 → 可投 < 4-of-5
+          // threshold, 见 project-crossnode-committee-liveness-blocker) → 市场永卡 verifying,
+          // bettor+maker stake 永锁。settler 原无 'committee-formed-but-quorum-unreachable → refund'
+          // 路 (只有 committee_unformed / unrecoverable-SPC / min-pot / dispute-grace)。补此兜底:
+          // verifying 超 grace 仍未达共识 → dispatchRefund 终态 (退所有 bettor + maker)。grace 足够长
+          // (legit 跨节点投票分钟级完成, mix0d 证), 4x 余量, 仅兜真永卡单, 不误退 legit slow。
+          const VERIFYING_QUORUM_TIMEOUT_SEC = parseInt(process.env.VERIFYING_QUORUM_TIMEOUT_SEC, 10) || 7200;  // 2h default, env 可调
+          const ageSinceDeadlineSec = market.deadline ? (Math.floor(Date.now() / 1000) - market.deadline) : 0;
+          let meta = {};
+          try { meta = JSON.parse(market.metadata || '{}'); } catch {}
+          if (ageSinceDeadlineSec > VERIFYING_QUORUM_TIMEOUT_SEC && !meta.refund_dispatched_at && !meta.quorum_timeout_refund_at) {
+            meta.quorum_timeout_refund_at = new Date().toISOString();
+            meta.quorum_timeout_reason = `verifying ${Math.floor(ageSinceDeadlineSec / 60)}min > grace ${Math.floor(VERIFYING_QUORUM_TIMEOUT_SEC / 60)}min 未达 quorum (unreachable) → refund 终态`;
+            sqlite.prepare('UPDATE pool_markets SET metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+              .run(JSON.stringify(meta), market.id);
+            console.warn(`[pool-settler] QUORUM-TIMEOUT-REFUND market=${market.id.slice(0,12)} ${meta.quorum_timeout_reason}`);
+            await dispatchRefund(market, { action: 'refund', reason: meta.quorum_timeout_reason });
+            refund++;
+          } else {
+            pending++;
+            // J2-tn r401 P0-#2 (Bettor r290b 钦点 trace 先证 不猜):
+            // qrv65 类奇案 — direct decideConsensus call 返 action=refund 但 tick 报 pending=1.
+            // 加 trace log 仅在 pending 时, 揭示 ageMs / updated_at_runtime / why-pending.
+            // 不修复, 只观察, 复现下次卡死时根因可见.
+            try {
+              const updated_at = market.updated_at;
+              const verifyingSinceMs = parseSqliteUtc(updated_at);
+              const ageMs = Date.now() - verifyingSinceMs;
+              const ageMin = Math.floor(ageMs / 60000);
+              const deadlineSec = market.deadline;
+              const ageSinceDeadlineMin = deadlineSec ? Math.floor((Math.floor(Date.now()/1000) - deadlineSec) / 60) : null;
+              console.log(`[pool-settler:trace] PENDING market=${market.id.slice(0,12)} status=${market.protocol_status} ver=${market.protocol_version} updated_at=${updated_at} ageMin=${ageMin} ageSinceDeadlineMin=${ageSinceDeadlineMin} decision_action=${decision.action} decision_reason=${decision.reason}`);
+            } catch (e) {
+              console.warn(`[pool-settler:trace] log fail market=${market.id?.slice(0,12)}: ${e.message}`);
+            }
           }
         }
       } catch (e) {

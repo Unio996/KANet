@@ -393,6 +393,56 @@ export function loadCommittee(marketId) {
 }
 
 /**
+ * (b) J2-tn r1011 cross-node committee self-heal (liveness P0, ZOMBIE 实证).
+ *
+ * Problem: pool_snapshots row is baked by ensurePoolSnapshot only at create-v07 on the PRODUCER
+ * node. A non-producer node (e.g. :3300 cross-node committee member) ingests the market but has no
+ * local pool_snapshots row → sampleAndStoreCommittee → loadPoolSnapshot throws 'no pool_snapshot'
+ * → can't sample → can't vote (the cross-node liveness blocker).
+ *
+ * Fix: bake the local pool_snapshots row from the node's OWN chain_view, matched by the market's
+ * baked pool_merkle_root (NOT exact snapshot_daa — the committee seed = marketId+endBlockHash+
+ * pool_merkle_root, snapshot_daa is just a label; oracle stakes are locked UTXOs so a same-root row
+ * = same pks AND same stakes = deterministic committee). This naturally implements the team's
+ * saveable/doomed distinction:
+ *   - saveable: root IS chain-reproducible on this node (chain_view has a matching row) → bake → sample.
+ *   - doomed:   root only exists via an artificial local active-flip (no matching chain_view row here)
+ *               → return null → caller falls through → market stays verifying → (c) quorum-timeout-refund.
+ *
+ * @returns {object|null} baked snapshot summary, or null if root not chain-reproducible on this node.
+ */
+export function ensurePoolSnapshotByRoot(marketId, expectedPoolMerkleRoot) {
+  if (!marketId || typeof marketId !== 'string') throw new Error('marketId required (string)');
+  const cleanExpected = (expectedPoolMerkleRoot || '').toLowerCase();
+  if (!/^[0-9a-f]{64}$/.test(cleanExpected)) {
+    throw new Error(`expectedPoolMerkleRoot must be 64-char hex (got ${cleanExpected.length} chars)`);
+  }
+  // Already baked locally (e.g. producer node, or prior self-heal) → no-op.
+  const existing = sqlite.prepare('SELECT 1 FROM pool_snapshots WHERE market_id = ?').get(marketId);
+  if (existing) return { source: 'already_baked' };
+  // Find any chain_view row whose merkle_root matches the market's baked root (= membership this
+  // node can independently chain-reproduce). Latest such row (stakes identical for locked UTXOs).
+  const row = sqlite.prepare(
+    'SELECT snapshot_daa, leaves_json, merkle_root, pool_size FROM oracle_pool_chain_view WHERE lower(merkle_root) = ? ORDER BY snapshot_daa DESC LIMIT 1'
+  ).get(cleanExpected);
+  if (!row) return null;  // root not reproducible here → doomed → caller → (c) timeout-refund
+  const leaves = JSON.parse(row.leaves_json);
+  const chainPks = leaves.map(l => String(l.pk_x).toLowerCase());
+  const chainStakes = leaves.map(l => String(l.stake_sompi));
+  sqlite.prepare(`
+    INSERT OR REPLACE INTO pool_snapshots
+      (market_id, pool_merkle_root, pool_size, pool_pks_json, pool_stakes_json, snapshot_at, protocol_version, snapshot_daa)
+    VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, 'v0.7', ?)
+  `).run(marketId, row.merkle_root, row.pool_size, JSON.stringify(chainPks), JSON.stringify(chainStakes), row.snapshot_daa);
+  return {
+    pool_size: row.pool_size,
+    pool_merkle_root: row.merkle_root,
+    source: 'self_heal_by_root',
+    snapshot_daa: row.snapshot_daa,
+  };
+}
+
+/**
  * v0.6 payout computation (= 5 committee adapted from v0.5 computePoolPayouts).
  *
  * Inputs:
