@@ -36,9 +36,8 @@ contract PoolSpine_v07_shard(
     // —— shard 叶 state genesis (NWT 攻击面①: 必 0 起) ——
     int      init_localYes,      // 创建时 == 0 (ctor 调用方焊 0; SS 侧 register 单调增防后改)
     int      init_localNo,
-    // —— fold covenant 循环界 (①合并: fold entrypoint 并入本叶合约同 cov_id, Bettor r637+NWT 拍) ——
-    int      max_fold_ins,       // = MAX_FOLD_K (fold for 循环界, Q5 mass 实测定; register_bet binding=auth from=1 无循环不需界)
-    int      max_fold_outs       // = 1 (fold k→1; 对齐 conserve_and_bump to=max_outs 模板)
+    // —— fold 循环界 (①合并: fold leader/delegate 并入本叶合约同 cov_id, Bettor r637+NWT 拍) ——
+    int      max_fold_ins        // = MAX_FOLD_K (fold_leader for 循环编译期界; 输出数由 OpCovOutputCount==1 硬校验不需 param)
 ) {
     // —— 可变 state (UTXO 携值, fold 经 readInputState 读) ——
     int localYes = init_localYes;
@@ -98,37 +97,55 @@ contract PoolSpine_v07_shard(
         return({ localYes: newLocalYes, localNo: newLocalNo });
     }
 
-    // —— entry: fold (N:M conserve covenant, #26 件2 ①合并进本叶合约) ——
-    // N 输入(本模板 shard 叶 + 同模板中间 UTXO) → 1 输出(聚合中间/root). readInputState 逐片读 tally → 逐 sompi
-    // 精确求和 → conserve EXACT → root.localYes/localNo = globalYes/globalNo (件3 settle_aggregate introspect 读).
+    // —— entry: fold (N:M conserve, #26 件2 ①合并进本叶合约; 手写流式 leader/delegate = O(1) 栈) ——
+    // N 输入(本模板 shard 叶 + 同模板中间 UTXO) → 1 输出(聚合中间/root). 流式 readInputState 逐片读 tally →
+    // 逐 sompi 累加(只留 sumYes/sumNo)→ conserve EXACT(out==Σin)→ root.localYes/localNo = globalYes/globalNo
+    // (件3 settle_aggregate introspect 读).
     //
     // ①合并红利 (Bettor r637 + NWT 拍, DECL L271-294 验证驱动): register_bet + fold 共本合约【一脚本=一 cov_id】
-    //   → fold 的 OpCovInputCount(cov_id) 只数本模板输入 → shards(register_bet 路径写的)+中间(fold 路径写的) 天然
-    //   在 fold covenant group, 假/外来 UTXO(异脚本=异 cov_id)物理上不在 group 进不来 = provenance by-construction
-    //   (NWT 攻击面①结构满足, 零手动白名单 op). 零 committee-sig: fold permissionless, conserve 精确(out==Σin)无法偷值.
+    //   → OpCovInputCount(cov_id) 只数本模板输入 → shards(register 路径写)+中间(fold 路径写) 天然在 fold covenant
+    //   group, 假/外来 UTXO(异脚本=异 cov_id)物理排除 = provenance by-construction (NWT 攻击面①结构满足, 零白名单 op).
+    //   零 committee-sig: fold permissionless, conserve 精确(out==Σin)无法偷值.
     //
-    // SS: conserve_and_bump N:M 模板 (DECL L224-246 源 + L266-306 lowering): binding=cov + State[] prev_states
-    //   由 silverc lower 为 cov_id=OpInputCovenantId → for(k,0,OpCovInputCount(cov_id),max){readInputState(OpCovInputIdx(cov_id,k))}.
-    #[covenant(binding = cov, from = max_fold_ins, to = max_fold_outs, mode = verification)]
-    function fold(State[] prev_states, State[] new_states) {
-        require(prev_states.length >= 1);
-        require(new_states.length == 1);        // fold k→1 (单输出聚合; to=max_fold_outs 但语义恒 1)
+    // ⚠ 为何手写 leader/delegate 而非 #[covenant] auto-form (J2 r-msg 实测裁): auto-form `State[] prev_states`
+    //   由 silverc lower 时**建完整 N 个 state 的栈数组**(~2N 项) = O(N) 栈 → 撞 MAX_STACK_SIZE=244 RUNTIME 限
+    //   (compile 不 catch, K=200 编过但执行栈溢) → K~120 上限. 手写流式: 不建 prev_states 数组, 循环里逐个
+    //   readInputState 即累加即弃 → 栈只留 sumYes/sumNo/ly/ln/k = **O(1)** → MAX_FOLD_K 脱栈限, 转 op/size/tx-mass
+    //   bind (J2 实测 K~6000+ op/size 下). 手写 = 照 DECL L266-306 auto lowering 形, 但流式累加替数组构建.
+    //
+    // N:M = leader/delegate 双 entrypoint (DECL "Inferred entrypoints" L199-204 + L270-313 lowering):
+    //   被 fold TX 消费的 K 个输入, input[0]=leader(跑求和+输出校验), input[1..K-1]=delegate(仅验非 leader,
+    //   同 cov 续延). spender 按位选 entrypoint. 二者共本合约一脚本一 cov_id.
 
+    // leader: 流式求和 + 输出续延校验. (k=0 必是本输入, OpCovInputCount 只含本 cov_id = provenance.)
+    entrypoint function fold_leader() {
+        byte[32] cov_id = OpInputCovenantId(this.activeInputIndex);
+        require(OpCovInputIdx(cov_id, 0) == this.activeInputIndex);   // 本输入必是 leader (k=0)
+        require(OpCovOutputCount(cov_id) == 1);                        // fold k→1 (单聚合输出)
+
+        int in_count = OpCovInputCount(cov_id);                        // 同 cov_id(本模板)输入数 = 本片树层叉数
         int sumYes = 0;
         int sumNo  = 0;
-        for(i, 0, prev_states.length, max_fold_ins) {
-            sumYes = sumYes + prev_states[i].localYes;
-            sumNo  = sumNo  + prev_states[i].localNo;
+        for(k, 0, in_count, max_fold_ins) {                           // max_fold_ins = MAX_FOLD_K 编译期界
+            int in_idx = OpCovInputIdx(cov_id, k);
+            { localYes: int ly, localNo: int ln } = readInputState(in_idx);  // 读即弃 (O(1) 栈, 不存数组)
+            sumYes = sumYes + ly;
+            sumNo  = sumNo  + ln;
         }
 
-        // conserve EXACT (非 conserve_and_bump 的 >=): tally 是计数非可烧 value → 输出必逐 sompi 等于求和
-        // (fold trustless 核心: root tally 链上派生 = Σ叶真值, 无创造/销毁/谎报空间).
-        require(new_states[0].localYes == sumYes);
-        require(new_states[0].localNo  == sumNo);
-
         // NWT ③ overflow: 防多片求和近 2^128 wrap (单 root tally < MAX_TALLY ≈ 2.1e15 sompi << 2^128).
-        require(new_states[0].localYes < 2100000000000000);
-        require(new_states[0].localNo  < 2100000000000000);
+        require(sumYes < 2100000000000000);
+        require(sumNo  < 2100000000000000);
+
+        // conserve EXACT: 输出片续延本模板 + state == 链上流式真和 (tally 计数非可烧 value, 无创造/谎报空间).
+        // validateOutputState 链上强制 out 片 localYes/localNo == sumYes/sumNo (fold trustless 核心).
+        validateOutputState(OpCovOutputIdx(cov_id, 0), { localYes: sumYes, localNo: sumNo });
+    }
+
+    // delegate: 非 leader 输入路径 — 仅验本输入不是 leader (同 cov 续延由 leader 的 OpCovInputCount 覆盖).
+    entrypoint function fold_delegate() {
+        byte[32] cov_id = OpInputCovenantId(this.activeInputIndex);
+        require(OpCovInputIdx(cov_id, 0) != this.activeInputIndex);   // 本输入非 leader (delegate path, DECL L309-312)
     }
 
     // —— settle / dispute_reveal / refund: 单片市场 (shard_count==1) 复用 PoolSpine_v07 现有 entry 不动 ——
