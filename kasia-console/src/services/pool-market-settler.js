@@ -23,6 +23,7 @@ import { createHash } from 'node:crypto';
 import {
   STORAGE_MASS_C,
   MIN_BROKER_FEE_FLOOR,
+  SOMPI_PER_MASS,                                     // gate B③ fork合: fee-rate 单源 (前 L2287 本地 110n 副本删, INVARIANTS SYS-2)
   computeDynamicMinBrokerFee,
   estimateStorageMass as estimateOutputStorageMass,  // J1tn r303: rename 避 L72 existing estimateStorageMass(inputs,outputs) 冲突
   computeMultiOutputFee,
@@ -2284,7 +2285,10 @@ export async function dispatchRefund(market, decision) {
 async function computeMassAwareV07RefundFee({ market, makerStake, networkId, makerAddress }) {
   const V07_MIN_FEE = 50_000n;
   const V07_MAX_FEE = 100_000_000n;
-  const SOMPI_PER_MASS = 110n;  // 10% margin over mempool floor 100 (qlfpv 实测 442000/4420=100)
+  // gate B③ fork合 (INVARIANTS SYS-2): fee-rate 单源 kip9-mass.mjs SOMPI_PER_MASS (== 110, 10% margin over
+  // mempool floor 100; qlfpv 实测 442000/4420=100). 前为本地 `110n` 副本=fork (rate 改则 settler 不跟 drift) — 删,
+  // import 单源 + BigInt() 包供 TX-fee 大数运算. drift-guard 测 test_gateB_fee_single_source.mjs 守.
+  const SOMPI_PER_MASS_BI = BigInt(SOMPI_PER_MASS);
 
   // Read v0.7 spine redeem from market metadata (stashed at create-v07 time).
   let meta = {};
@@ -2319,7 +2323,7 @@ async function computeMassAwareV07RefundFee({ market, makerStake, networkId, mak
   const storageMassMaker = BigInt(estimateOutputStorageMass(makerStake || 100_000_000));
   const mass = computeMassEstimate + storageMassMaker;
   console.log(`[pool-settler] v0.7 byte-size mass estimate market=${market.id.slice(0,12)} txBytes≈${estimatedTxSize} computeMass≈${computeMassEstimate} storageMass(maker)≈${storageMassMaker} totalMass≈${mass} (redeem ${redeemBytes.length}B, sigScript ${sigScriptSize}B, makerStake=${makerStake})`);
-  let dynamicFee = BigInt(mass) * SOMPI_PER_MASS;
+  let dynamicFee = BigInt(mass) * SOMPI_PER_MASS_BI;
   if (dynamicFee < V07_MIN_FEE) dynamicFee = V07_MIN_FEE;
   if (dynamicFee > V07_MAX_FEE) dynamicFee = V07_MAX_FEE;
   console.log(`[pool-settler] v0.7 mass-aware fee compute market=${market.id.slice(0,12)} mass=${mass} fee=${dynamicFee} (mass × ${SOMPI_PER_MASS} sompi/mass, cap [${V07_MIN_FEE}, ${V07_MAX_FEE}])`);
