@@ -279,18 +279,19 @@
                 <!-- KANet-UI 2026-06-08 DoD 问 3 (Bettor r373 关 1 PASS, J1 r303 派 (3) endpoint LIVE): 退出仲裁人 -->
                 <div class="mt-4 pt-3 border-t border-warm-200">
                   <div class="text-xs font-medium text-ink-700 mb-2">退出仲裁人</div>
-                  <p class="text-[11px] text-ink-500 mb-2">取回质押的 KAS. 须 lock 期已过 + 无在岗未结算市场.</p>
+                  <p class="text-[11px] text-ink-500 mb-2">退出 = 不再被抽中给市场投票. 须无在岗未结算市场, 且加入已满 24 小时.</p>
                   <button @click="startUnlock()" :disabled="unlock.checking || unlock.submitting"
                           class="px-3 py-1.5 rounded bg-red-100 hover:bg-red-200 text-red-700 text-xs font-medium disabled:opacity-50">
                     <span x-text="unlock.submitting ? '退出中...' : (unlock.checking ? '检查中...' : '退出仲裁人 →')"></span>
                   </button>
-                  <!-- 错: lock 未过 / cross-node / 在岗 -->
+                  <!-- 错: 在岗 / 冷却未满 / 其他 -->
                   <div x-show="unlock.error" class="mt-2 text-[11px] bg-red-50 text-red-700 rounded px-2 py-1" x-text="unlock.error"></div>
-                  <!-- 成: TX explorer link -->
+                  <!-- 成: 退出请求已广播 (record-level 真撤出; 押金取回 = 后续版本) -->
                   <div x-show="unlock.result" class="mt-2 text-[11px] bg-emerald-50 text-emerald-700 rounded px-2 py-1">
-                    ✓ 已退出, stake 退回 <span x-text="unlock.result?.to_address?.slice(0,18) + '...'"></span>.
-                    <a x-show="unlock.result?.unlock_txid" :href="'https://explorer-tn12.kaspa.org/txs/' + unlock.result?.unlock_txid"
-                       target="_blank" class="font-mono underline ml-1" x-text="unlock.result?.unlock_txid?.slice(0,16) + '...'"></a>
+                    ✓ 退出请求已广播, 各节点同步后将不再抽你给市场投票.
+                    <a x-show="unlock.result?.txId" :href="'https://explorer-tn12.kaspa.org/txs/' + unlock.result?.txId"
+                       target="_blank" class="font-mono underline ml-1" x-text="unlock.result?.txId?.slice(0,16) + '...'"></a>
+                    <div class="text-ink-400 mt-0.5">押金取回将在后续版本开放 (当前押金未链锁).</div>
                   </div>
                 </div>
               </div>
@@ -607,33 +608,38 @@ function arbiterHome() {
 
     // KANet-UI 2026-06-08 DoD 问 3: 退出仲裁人 (J1 r303 endpoint POST /api/oracle-pool/timeout-unlock)
     async startUnlock() {
-      // KANet-UI r772 ①: 用 myStatus.pubkey (链上对账解析的, 覆盖 chain-enrolled 但不在 legacy 的 agent),
-      // fallback myOracleRecord.pubkey. 原来只读 myOracleRecord → 链上 enroll 的 agent 退不了 (Owner '删不了').
+      // 问3(a) 真撤出 (record-level, J1 44d2ed9e): POST /api/oracle-pool/withdraw → 广播 staker 签名的
+      // oracle_stake_withdraw_v1 envelope → 每节点 ingest → active=0 跨节点收敛 (= 真停止被 VRF 抽中).
+      // 不再调旧 timeout-unlock (押金现未链锁; 真-UTXO 取回 = Phase 2).
+      // signing_relay_id = selectedAgentId (= 仲裁人自家 key 签自己的退出, 每节点可验).
       const pkX = this.myStatus?.pubkey || this.myOracleRecord?.pubkey;
-      if (!pkX) { this.unlock.error = '该仲裁人无 pubkey, 无法 unlock'; return; }
+      if (!pkX) { this.unlock.error = '该仲裁人无 pubkey, 无法退出'; return; }
+      if (!this.selectedAgentId) { this.unlock.error = '未选中 agent, 无法退出'; return; }
       this.unlock.error = '';
       this.unlock.result = null;
-      // confirm 弹: 简单 confirm() (= MVP, 后期可换 modal)
-      const ok = window.confirm('退出仲裁人 = 取回 stake. lock 期已过+无未结算市场才能退. 继续?');
+      const ok = window.confirm('退出预言机池 = 不再被抽中给市场投票. 须无在岗未结算市场, 且加入已满 24 小时. 继续?');
       if (!ok) return;
       this.unlock.submitting = true;
       try {
-        const r = await fetch('/api/oracle-pool/timeout-unlock', {
+        const r = await fetch('/api/oracle-pool/withdraw', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ staker_pk_x: pkX }),
+          body: JSON.stringify({ staker_pk_x: pkX, signing_relay_id: this.selectedAgentId }),
         });
         const j = await r.json();
         if (!j.ok) {
-          // 错文案大白话: lock 未过显剩余 blocks, cross-node 显原因
-          if (j.remaining_blocks != null) {
-            this.unlock.error = `lock 未过期, 还需 ${j.remaining_blocks} 个块 (~${Math.round(j.remaining_blocks / 10 / 60)} 小时, 假设 10 BPS testnet)`;
+          // 错文案大白话: 在岗(列市场数) / 冷却(剩小时) / 其他
+          if (Array.isArray(j.on_duty_markets) && j.on_duty_markets.length) {
+            this.unlock.error = `你正在 ${j.on_duty_markets.length} 个未结算市场担任评判, 这些市场结算后才能退出.`;
+          } else if (/cooldown/.test(j.error || '')) {
+            const hr = (String(j.error).match(/(\d+)\s*h/) || [])[1];
+            this.unlock.error = `加入预言机池不满 24 小时, 还需 ${hr || '一段时间'} 小时后才能退出 (防刚加入就投票后秒退操纵抽签).`;
           } else {
             this.unlock.error = j.error || `HTTP ${r.status}`;
           }
         } else {
           this.unlock.result = j;
-          // 重 load 名册 (= active=0 已写, 段 1 应自动不显)
+          // 重 load 名册 (= 退出广播后池 snapshot 同步, 段 1 状态应转为非在岗)
           setTimeout(() => this.loadOracles(), 3000);
         }
       } catch (e) {
