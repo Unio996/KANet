@@ -440,7 +440,11 @@ export async function registerPoolRoutes(fastify) {
       if (makerStakeKas > MAKER_STAKE_MAX_KAS) return reply.code(400).send({ ok: false, error: `maker_stake_kas must be <= ${MAKER_STAKE_MAX_KAS} KAS (v0.5 testnet per-market softcap, Bettor r444 + Owner钦定 SS-baked)` });
     }
     const makerStakeAmount = Math.round(makerStakeKas * 1e8);
-    const oracleBondAmount = Math.round(oracleBondKas * 1e8);
+    // J2-tn #28 hotfix (NWT r1206 trial 抓): SS PoolSpine ctor 强制 oracleBondAmount ∈ [1, MAX] (compile-time),
+    // bond=0 (#28 默认) → 'got 0' → create-v07 HTTP 500 = 生产建市破。我 r1091 SS 分析只查 spend-side
+    // require(output>=oracleBond) 漏了 ctor [1,MAX] 约束。clamp 到 1 sompi 最小: committee floor = 5×1=5 sompi
+    // ≈ 0% → oracle ≈ feeShare = #28 目标 (oracle 1%) 保住 + SS ctor 满足。v0.5 (bond>=1 KAS) clamp no-op。
+    const oracleBondAmount = Math.max(1, Math.round(oracleBondKas * 1e8));
     const makerStakeStr = (makerStakeAmount / 1e8).toFixed(8);
 
     // L4 (area-11): create-time invariants reject configs that cannot settle later.
@@ -665,7 +669,11 @@ export async function registerPoolRoutes(fastify) {
       if (makerStakeKas > MAKER_STAKE_MAX_KAS) return reply.code(400).send({ ok: false, error: `maker_stake_kas must be <= ${MAKER_STAKE_MAX_KAS} KAS` });
     }
     const makerStakeAmount = Math.round(makerStakeKas * 1e8);
-    const oracleBondAmount = Math.round(oracleBondKas * 1e8);
+    // J2-tn #28 hotfix (NWT r1206 trial 抓): SS PoolSpine ctor 强制 oracleBondAmount ∈ [1, MAX] (compile-time),
+    // bond=0 (#28 默认) → 'got 0' → create-v07 HTTP 500 = 生产建市破。我 r1091 SS 分析只查 spend-side
+    // require(output>=oracleBond) 漏了 ctor [1,MAX] 约束。clamp 到 1 sompi 最小: committee floor = 5×1=5 sompi
+    // ≈ 0% → oracle ≈ feeShare = #28 目标 (oracle 1%) 保住 + SS ctor 满足。v0.5 (bond>=1 KAS) clamp no-op。
+    const oracleBondAmount = Math.max(1, Math.round(oracleBondKas * 1e8));
     const makerStakeStr = (makerStakeAmount / 1e8).toFixed(8);
 
     const metaInput = JSON.stringify({
@@ -959,7 +967,11 @@ export async function registerPoolRoutes(fastify) {
       if (makerStakeKas > MAKER_STAKE_MAX_KAS) return reply.code(400).send({ ok: false, error: `maker_stake_kas must be <= ${MAKER_STAKE_MAX_KAS} KAS` });
     }
     const makerStakeAmount = Math.round(makerStakeKas * 1e8);
-    const oracleBondAmount = Math.round(oracleBondKas * 1e8);
+    // J2-tn #28 hotfix (NWT r1206 trial 抓): SS PoolSpine ctor 强制 oracleBondAmount ∈ [1, MAX] (compile-time),
+    // bond=0 (#28 默认) → 'got 0' → create-v07 HTTP 500 = 生产建市破。我 r1091 SS 分析只查 spend-side
+    // require(output>=oracleBond) 漏了 ctor [1,MAX] 约束。clamp 到 1 sompi 最小: committee floor = 5×1=5 sompi
+    // ≈ 0% → oracle ≈ feeShare = #28 目标 (oracle 1%) 保住 + SS ctor 满足。v0.5 (bond>=1 KAS) clamp no-op。
+    const oracleBondAmount = Math.max(1, Math.round(oracleBondKas * 1e8));
     const makerStakeStr = (makerStakeAmount / 1e8).toFixed(8);
 
     const metaInput = JSON.stringify({
