@@ -86,8 +86,14 @@ export async function pickGammaMarket() {
     // {title: 干净题干, data_source_canonical: <polymarket URL>, resolution_criteria: 干净规则}.
     // 用 sanitizeText strip URL/HTML/curly quotes 防 bot 显示乱码 (Owner 06-03 报).
     const { sanitizeText } = await import('../lib/market-spec-sanitizer.js');
-    const cleanTitle = sanitizeText(String(question || '')).slice(0, 200);
-    const cleanCriteria = sanitizeText(String(m.description || '')).slice(0, 1500);
+    // J2-tn 2026-06-14 Q1 fix (Bettor r979/r983, Owner 查): 旧 slice(200)/slice(1500) 死截丢语义
+    // → oracle 读半句判定条件判错 + UMA 对不上。改【宽松 cap】(Bettor r983 复审): 实镜像 spec
+    // max=1805 / 均 1052 → criteria 4000 + title 500 cap = 100% 不截任何实 criteria (保 Owner 关心的语义)
+    // 同时封病态多 KB 撑爆链上 create payload chunk 喂 880 墙 (pool.js:121 >450 char chunk)。两头平衡。
+    // sanitizeText 保义 (strip URL/HTML/curly); condition ID (下方 dataSource) = UMA canonical 锚不动。
+    const TITLE_CAP = 500, CRITERIA_CAP = 4000;
+    const cleanTitle = sanitizeText(String(question || '')).slice(0, TITLE_CAP);
+    const cleanCriteria = sanitizeText(String(m.description || '')).slice(0, CRITERIA_CAP);
     const cleanSource = String(m.resolutionSource || m.resolution_source || '').trim();
     // data_source_canonical: 链上独立判定源, mirror-able 市场 = polymarket gamma 条件 ID.
     const dataSource = `polymarket:${condStr}`;
@@ -97,7 +103,10 @@ export async function pickGammaMarket() {
     return {
       conditionId: condStr,
       question: cleanTitle,                           // short title (logging only)
-      resolutionRule: JSON.stringify(specObj).slice(0, 2000),  // JSON spec → resolution_rule_spec
+      // Q1 fix (Bettor r979/r983): 不 slice JSON 本身 (截断 JSON = 无效 JSON OR 丢 criteria 尾)。
+      // criteria/title 已在源头宽松 cap (4000/500) → JSON 全文有界 (~4.6KB max) 且 valid + 链上 payload chunk 安全;
+      // resolution_rule_spec 列 = TEXT 无限, create-v07 无长度校验; 显示层另行截断 (markets-tool/menu)。
+      resolutionRule: JSON.stringify(specObj),        // JSON spec → resolution_rule_spec (capped fields, valid)
       endDateIso: new Date(endMs).toISOString(),
       category: categorizeMarket(question),           // r247①/r256: classify on TITLE only (desc false-matches country kw)
       volume24h: parseFloat(m.volume24hr || m.volume || 0),
