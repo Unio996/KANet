@@ -1,0 +1,122 @@
+// PoolSpine_v08_chunk — #31 找零核弹 settle_chunk SS 草稿 (J1 §3 spine-remainder, seed J2 mass + NWT PoC).
+//
+// 性质: DRAFT (.sil.draft, 非编译路). gate B #31 = winner 超 KIP-9 mass cap → settle 拆多 chunk TX. 本草稿 =
+//   chunk-capable spine 新版本的 settle_chunk entry (partial-settle + change 续锁 spine = trustless 找零链).
+//
+// ⚠ 地址迁移决策 (Bettor reviewer 铁律 + J1 拍 (a) + NWT (b)-分析坐实): settle_chunk **必新合约版本 PoolSpine_v08**
+//   (新 redeem → 新 P2SH 地址), **只新市场用**. 现存 v07 市场保留 settle_aggregate 单 TX 不动 (P2SH=hash(全 spend
+//   逻辑); 加 entry 改 hash 改地址 → 现存 v07 锁旧地址花不了 = 不可 retrofit). v07 大市场超 cap 走现 cancel-refund
+//   (非回归). 匹配 v06→v07 "新 contract=新 P2SH=inherently distinct" precedent.
+//
+// J2 change-chain TX layout (我接):
+//   chunk_0 : in=[pool-lock spine UTXO]          out=[broker, oracle_0..4(5 committee bond), winner_0..K0-1, change_0]
+//   chunk_i : in=[chunk_{i-1} 的 change spine UTXO] out=[winner_{...}..., change_i]            (0<i<n; broker/committee 只 chunk_0 付一次)
+//   chunk_n : in=[chunk_{n-1} change]             out=[winner_{...}...末段]                     (末 chunk, 无 change, change==0)
+//
+// 4 SS 校验点 (J2 r-msg): ①committee sig ≥4 ②winner outputs match merkle-proven bettor(merkle_index 连续子段)
+//   ③非末 chunk: output[change_idx] 续锁同 spine-P2SH(下 chunk 可花) ④守恒 Σ(本 chunk outputs)+fee+change==本 chunk 输入.
+//
+// ⚠⚠ 执行 mass 关键设计杠杆 (Bettor: compute-mass 含 script EXECUTION sig-ops+introspection; 真 chunk 数 = f(每 chunk
+//   执行 mass)): 每 chunk 花一个 spine-P2SH 输入 → redeem 执行 5×checkSig + merkle-climb + introspection = 重执行 mass
+//   → 每 chunk 容 winner 少 → 真 chunk 数 >> 23 (cheap-P2PK 估). **两设计选 (待 J2 mass 实测 + NWT PoC 裁)**:
+//   (A) per-chunk full committee-sig: 每 chunk 独立 5×checkSig(≥4)+本段 merkle. 安全-简单, 但每 chunk 重 sig-ops →
+//       chunk 数最多.
+//   (B) once-sig + covenant-chain: chunk_0 full committee-sig 授权【全 settle plan(全 winner 列+chunk 划分 commit)】;
+//       chunk_i(i>0) 仅 introspection 验【续自合法 settle_chunk cov + 本段 outputs ∈ chunk_0 已签 plan】(OpInputCovenantId
+//       续锁链, 轻于 5×checkSig) → 中间 chunk 执行 mass 大降 → chunk 容量大 → 真 chunk 数少 → broadcast 负载小.
+//   J1 荐 (B)(中间 chunk 省 sig-ops 是真容量杠杆), 但 (B) 需 chunk_0 committee-sig commit 全 plan(plan_commit_id) +
+//   chunk_i 验 plan 成员 = 多一层 SS. 本草稿先写 (A)(secure-简单基线, J2 量执行 mass 上界); (B) 优化待量后定.
+
+pragma silverscript ^0.1.0;
+
+contract PoolSpine_v08_chunk(
+    // —— 继承 v07 ctor 锚 (同值 → 同 logical market; v08 = 新脚本新 P2SH) ——
+    byte[32] makerPk,
+    byte[32] brokerPk,
+    byte[32] poolMerkleRoot,
+    int      deadline,
+    byte[32] marketMetadataHash,
+    byte[32] market_id,
+    int      shard_id,
+    int      shard_count,
+    int      oracleBondAmount,
+    // —— v08 chunk 新增 ——
+    int      maxWinnersPerChunk   // = MAX_K (J2 computeSettleChunks 实测定, 本 chunk merkle-proof 循环编译期界)
+) {
+    // —— entry 0 — settle_chunk (partial-settle + change 续锁; chunk_0/chunk_i/chunk_n 经参数区分) ——
+    // 复用 settle_aggregate 的 committee-sig(≥4)+depth-8 merkle proof 机制 (本草稿引其逻辑, 不重抄~150 行).
+    // 新增: (a) winner 子段 (merkle_index [seg_lo, seg_hi) 连续) 而非全 winner; (b) change 输出续锁 spine-P2SH;
+    //       (c) 守恒到本 chunk 输入 (非全 pool); (d) chunk_kind ∈ {first(付 broker+committee), mid, last(无 change)}.
+    entrypoint function settle_chunk(
+        // —— committee 授权 (设计 A: 每 chunk full sig; 复用 settle_aggregate ①②③ 逻辑) ——
+        sig c0Sig, sig c1Sig, sig c2Sig, sig c3Sig, sig c4Sig,
+        byte[32] c0Pk, byte[32] c1Pk, byte[32] c2Pk, byte[32] c3Pk, byte[32] c4Pk,
+        byte[32] committeePkHash,
+        int      winner,                 // 0=YES 1=NO
+        // —— chunk 定位 (链锚, 两节点同 → byte-equal partition) ——
+        int      chunk_kind,             // 0=first, 1=mid, 2=last
+        int      seg_lo,                 // 本 chunk winner 子段起 (merkle_index, inclusive)
+        int      seg_hi,                 // 本 chunk winner 子段止 (exclusive); 段= [seg_lo, seg_hi)
+        // —— change 续锁 (非末 chunk; introspection 验 output 续同 spine-P2SH) ——
+        int      change_idx,             // change 输出位 (J2 layout 定); chunk_kind==last 时无 change
+        byte[32] spine_p2sh_hash         // 本 v08 合约自身 P2SH hash (change 必续锁此 = settler 挪不走)
+        // ... (winner merkle proofs per 子段成员 + globalYes/No + commit_id 同 settle_aggregate, 草稿略)
+    ) {
+        // ① committee sig ≥4 (复用 settle_aggregate ①, 设计 A 每 chunk 验; 设计 B 仅 chunk_0 验 + chunk_i 走 cov-chain).
+        int validSigs = 0;
+        if (checkSig(c0Sig, pubkey(c0Pk))) { validSigs = validSigs + 1; }
+        if (checkSig(c1Sig, pubkey(c1Pk))) { validSigs = validSigs + 1; }
+        if (checkSig(c2Sig, pubkey(c2Pk))) { validSigs = validSigs + 1; }
+        if (checkSig(c3Sig, pubkey(c3Pk))) { validSigs = validSigs + 1; }
+        if (checkSig(c4Sig, pubkey(c4Pk))) { validSigs = validSigs + 1; }
+        require(validSigs >= 4);
+        require(winner == 0 || winner == 1);
+        require(chunk_kind >= 0); require(chunk_kind <= 2);
+
+        // ② committee commitment (复用 settle_aggregate ②, 绑 dispute_reveal).
+        byte[] cc0 = c0Pk + c1Pk; byte[] cc1 = cc0 + c2Pk; byte[] cc2 = cc1 + c3Pk; byte[] cc3 = cc2 + c4Pk;
+        require(blake2b(cc3) == committeePkHash);
+
+        // ② winner 子段 merkle proof: 本 chunk 只付 [seg_lo, seg_hi) 的 winner, 每个 merkle-proven against poolMerkleRoot
+        //    (复用 settle_aggregate ③ depth-8 position-aware climb, per 子段成员; 草稿略循环体).
+        //    连续子段 (seg 由 computeSettleChunks merkle_index ASC 贪心定, 链锚 → 两节点同段 → byte-equal).
+        require(seg_lo >= 0); require(seg_hi > seg_lo);
+        require(seg_hi - seg_lo <= maxWinnersPerChunk);   // 段长 ≤ MAX_K (mass cap 派生)
+
+        // ②b cross-chunk linkage HWM (NWT 核心攻面 + J2 解, 防 winner skip/repeat): 仅 value 守恒(④)+末 change==0
+        //    【不防子段 overlap(双付) / gap(漏付)】—— 攻击者可喂重叠/跳段子段, value 仍可凑平. **正解 = change UTXO
+        //    携 SS state: hwm = 下个待付 merkle_index** (同 bshard localYes/localNo state transition 模式).
+        //    settle_chunk 硬验【本 chunk seg_lo == 上个 change UTXO 的 hwm】+【output change hwm = seg_hi】→ 段链式
+        //    严格连续 (无 overlap 无 gap, SS 强制), 两节点同 (hwm 链锚续延).
+        //    chunk_0: 输入 pool-lock (无 hwm → 隐含 hwm==0, seg_lo 必==0 从首 winner 起).
+        //    chunk_i (i>0): readInputState(本 chunk 输入=上 change UTXO).hwm → require(seg_lo == prevHwm).
+        //    末 chunk: seg_hi == 总 winner 数 (全付完) → 无 change (hwm 链终).
+        int prevHwm = 0;                                  // chunk_0 隐含 (pool-lock 无 state)
+        if (chunk_kind != 0) {
+            { hwm: int inHwm } = readInputState(this.activeInputIndex);   // 上个 change UTXO 携的 hwm
+            prevHwm = inHwm;
+        }
+        require(seg_lo == prevHwm);                        // ★ 链式连续: 本段起 == 上段止 (无 overlap 无 gap)
+
+        // ③ change 续锁 spine-P2SH + hwm state 续延 (非末 chunk; trustless 核心: 未付余额仍 SS-governed + 链式连续).
+        //    introspection: change 输出 scriptPubKey == 本 v08 合约 P2SH (settler 挪不走) + change.state.hwm == seg_hi.
+        if (chunk_kind != 2) {
+            // 非末 chunk: change 续锁本模板 + 携 hwm=seg_hi (下 chunk 必从 seg_hi 续付)
+            require(tx.outputs[change_idx].scriptPubKey == spine_p2sh_hash);   // change 续锁同 spine (下 chunk 可花)
+            require(tx.outputs[change_idx].value > 0);                          // change>0 (非末 → 还有未付 winner)
+            validateOutputState(change_idx, { hwm: seg_hi });                   // ★ output change.hwm = seg_hi (链式续)
+        }
+        // 末 chunk (chunk_kind==2): seg_hi == 总 winner 数 (全付完, 由守恒④ change==0 蕴含); 无 change 输出 (hwm 链终).
+
+        // ④ 守恒到本 chunk 输入 (非全 pool; 找零链逐 chunk 递减): Σ(本 chunk winner outputs [+ chunk_0: broker+5committee])
+        //    + minerFee + change == 本 chunk 输入 value (= 上个 change 或 pool-lock), 逐 sompi.
+        //    (introspection tx.inputs[0].value + tx.outputs[*].value 求和校验; 草稿略求和体. 全 BigInt sompi 零 float.)
+        //    末 chunk: change 项 = 0.
+
+        // ⑤ min-pot / losing-side floor / commit anchor: 复用 settle_aggregate ⑦/⑦b/⑨ (全局值跨 chunk 不变, chunk_0 验即可).
+    }
+
+    // —— entry 1 — settle_aggregate (继承 v07 单 TX 全付路; 小池 <cap 走此, 不拆 chunk = 回归 v07 行为) ——
+    //   (草稿略, = PoolSpine_v07 settle_aggregate 逐字继承; v08 小池单 chunk = v07 等价).
+    // —— entry 2 — dispute_reveal / entry 3 — refund_maker_unjoined: 继承 v07 不动.
+}
