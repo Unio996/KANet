@@ -1,0 +1,90 @@
+// PoolSpine_v07_shard — #26 bshard 件1 shard 叶 (J1 草稿 seed, 待 J2 Q5 mass 实测 + NWT attack-PoC).
+//
+// 性质: DRAFT (.sil.draft, 非编译路) — seed J2 编译量 op<201/bytecode<10000B 定 MAX_FOLD_K (件2 fold 依赖)
+//       + NWT 件1 attack-PoC. impl plan 63d3ac35 件1. SS 原语真读 DECL.md (VaultNM L208-265 state 语法 +
+//       conserve_and_bump N:M + readInputState + OpInputCovenantId, 非凭记忆).
+//
+// 设计 (5-agent §4 收敛 2026-06-14): 每片 = 独立 shard UTXO 携 localYes/localNo (script state, J2 Q2 定:
+//   两标量塞不进单 value field → 必 state). 关池后 fold 树 (件2 PoolFold.sil) readInputState 读各片 local
+//   → 链上层次求和到 1 root UTXO 携 globalYes/globalNo → commit 硬校验 (件3). by-root determinism (件4).
+//
+// NWT 件1 attack-surface 焊 (r-msg threat model):
+//   ① 叶 state genesis (最尖): 创建时 localYes==0 && localNo==0 起 (init_* 必 0, ctor 焊) + register 单调增
+//      → fold readInputState 拿不可篡改的真 tally. (防 #1b 叶后改 / 伪 genesis)
+//   ③ conserve 溢出: localYes/localNo 上界 assert (< MAX_TALLY) 防 fold 求和近 2^128 wrap (BigInt sompi
+//      零 float 已对, 加上界).
+//
+// ⚠ 开放集成点 (待 §4 设计讨论 + J2 fold 调度域定, 本草稿先立 state+register 结构):
+//   - pot 模型: shard UTXO 是否同时携【本金 pot】(本片 staked 总额) 供 settle 分账? vs side_lock 独立?
+//     (现 v07: 资金锁 per-bettor side_lock P2SH; shard pot 是否聚合本金 = 滚动分片 §2.A 设计点).
+//   - bet_stake == 真 staked UTXO value 绑定: register 时 require bet 对应 side_lock UTXO 真值 (introspection
+//     tx.inputs[].value, 同 #27a side_lock 思路) — 防伪 tally 灌水.
+//   - rolling 分片 ("填满即挂钩"): 片满 → 新片开 + 锚同 market_id (ctor 已有 shard_id/shard_count/market_id).
+
+pragma silverscript ^0.1.0;
+
+contract PoolSpine_v07_shard(
+    // —— market 锚 (== PoolSpine_v07, 所有片同值锚同 logical market) ——
+    byte[32] makerPk,
+    byte[32] brokerPk,
+    byte[32] poolMerkleRoot,
+    int      deadline,
+    byte[32] marketMetadataHash,
+    int      shard_id,            // 0..shard_count-1
+    int      shard_count,
+    byte[32] market_id,
+    // —— shard 叶 state genesis (NWT 攻击面①: 必 0 起) ——
+    int      init_localYes,      // 创建时 == 0 (ctor 调用方焊 0; SS 侧 register 单调增防后改)
+    int      init_localNo,
+    int      max_register_ins    // register covenant 的 for 循环界 (mass 实测定)
+) {
+    // —— 可变 state (UTXO 携值, fold 经 readInputState 读) ——
+    int localYes = init_localYes;
+    int localNo  = init_localNo;
+
+    // 上界 (NWT ③ conserve 溢出): 单片 tally 上限, 防 fold 求和 wrap. testnet 占位, mass/经济实定.
+    // 21e6 KAS * 1e8 sompi = 2.1e15 << 2^128, 留足头.
+    // (用 require 显式上界比靠类型隐式安全 — silverc int 是 big, 无溢出但 fold 多片求和要逻辑上界.)
+
+    // —— entry: register_bet (transition covenant) ——
+    // 一注加入本片: prev(localYes,localNo) → new = prev + 本注 (方向对应 tally), 另一边不变.
+    // NWT ①: genesis 0 起 + 此处单调增 (new >= prev) → tally 链上不可篡改累计 = fold 读真值.
+    #[covenant(binding = cov, from = 1, to = 1, mode = transition)]
+    function register_bet(State[] prev_states, State[] new_states, int bet_direction, int bet_stake, sig bettor_sig) {
+        require(prev_states.length == 1);
+        require(new_states.length == 1);
+        require(bet_stake > 0);
+        require(bet_direction == 0 || bet_direction == 1);
+
+        // 方向对应 tally 增, 另一边严格不变 (防偷改对家).
+        if (bet_direction == 0) {
+            require(new_states[0].localYes == prev_states[0].localYes + bet_stake);
+            require(new_states[0].localNo  == prev_states[0].localNo);
+        }
+        if (bet_direction == 1) {
+            require(new_states[0].localNo  == prev_states[0].localNo + bet_stake);
+            require(new_states[0].localYes == prev_states[0].localYes);
+        }
+
+        // NWT ①: 单调增 (冗余但显式焊 — new tally 必 >= prev, 防任何减/重置).
+        require(new_states[0].localYes >= prev_states[0].localYes);
+        require(new_states[0].localNo  >= prev_states[0].localNo);
+
+        // NWT ③: 上界防 fold 求和 wrap (单片 tally < MAX_TALLY).
+        require(new_states[0].localYes < 2100000000000000);
+        require(new_states[0].localNo  < 2100000000000000);
+
+        // NWT 攻击面#1 (hard-req, J2 r1146 fold/pot 域确认非可选): bet_stake 必绑【真 side_lock UTXO value】—
+        // OpInputCovenantId 白名单只认输入 cov_id (= 是 shard/side_lock 模板), 不认 tally 增量的【值】; 不绑则
+        // 攻击者喂小 side_lock 却 register 大 bet_stake = 伪 tally 灌水 → fold globalYes/No 失真 → 假 settle 分账.
+        // 绑定 = introspection tx.inputs[side_lock_idx].value == bet_stake (同 #27a side_lock daa-anchor: tally
+        // 增量锚链上真本金, 非 caller 自报). side_lock_idx = register TX 里 side_lock UTXO 输入位 (= bettor 在
+        // side_p2sh 锁的本注, 现 join 进本片). bettor_sig 验本注归属.
+        require(tx.inputs.length >= 2);                       // [0]=shard cov 输入, [1]=side_lock 本注输入 (顺序待 J2 TX 构造域定)
+        require(tx.inputs[1].value == bet_stake);             // tally 增量 == 链上真锁本金 (防灌水, NWT #1)
+        require(checkSig(bettor_sig, tx.inputs[1].scriptPubKey));  // 本注归属 (占位: side_lock redeem 验本人, 待 J2 接口定 — side_lock P2SH 已绑 bettor_pk)
+    }
+
+    // —— settle / dispute_reveal / refund: 单片市场 (shard_count==1) 复用 PoolSpine_v07 现有 entry 不动 ——
+    //   (多片 settle 走 fold-root 派生 globalYes/globalNo + commit 硬校验, 件3 接入; 单片 == 现行为, 守回归).
+}
