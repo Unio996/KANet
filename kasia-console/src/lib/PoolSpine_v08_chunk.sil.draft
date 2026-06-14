@@ -41,8 +41,13 @@ contract PoolSpine_v08_chunk(
     int      shard_count,
     int      oracleBondAmount,
     // —— v08 chunk 新增 ——
-    int      maxWinnersPerChunk   // = MAX_K (J2 computeSettleChunks 实测定, 本 chunk merkle-proof 循环编译期界)
+    int      maxWinnersPerChunk,  // = MAX_K (J2 computeSettleChunks 实测定, 本 chunk merkle-proof 循环编译期界)
+    int      init_hwm             // change UTXO genesis HWM (chunk_0 输出 change 起; pool-lock 隐含 hwm==0)
 ) {
+    // —— 可变 state (change UTXO 携值, 下 chunk readInputState 读 — J2 compile fix: readInputState 须 contract state 字段) ——
+    // HWM = 已付到的 merkle_index (下个待付). chunk_i.seg_lo == 上个 change.hwm (cross-chunk linkage) + resume cursor.
+    int hwm = init_hwm;
+
     // —— entry 0 — settle_chunk (partial-settle + change 续锁; chunk_0/chunk_i/chunk_n 经参数区分) ——
     // 复用 settle_aggregate 的 committee-sig(≥4)+depth-8 merkle proof 机制 (本草稿引其逻辑, 不重抄~150 行).
     // 新增: (a) winner 子段 (merkle_index [seg_lo, seg_hi) 连续) 而非全 winner; (b) change 输出续锁 spine-P2SH;
@@ -57,9 +62,11 @@ contract PoolSpine_v08_chunk(
         int      chunk_kind,             // 0=first, 1=mid, 2=last
         int      seg_lo,                 // 本 chunk winner 子段起 (merkle_index, inclusive)
         int      seg_hi,                 // 本 chunk winner 子段止 (exclusive); 段= [seg_lo, seg_hi)
-        // —— change 续锁 (非末 chunk; introspection 验 output 续同 spine-P2SH) ——
-        int      change_idx,             // change 输出位 (J2 layout 定); chunk_kind==last 时无 change
-        byte[32] spine_p2sh_hash         // 本 v08 合约自身 P2SH hash (change 必续锁此 = settler 挪不走)
+        // —— change 续锁 (非末 chunk; validateOutputState 验 output 续【本 covenant 自身 cov_id】非 witness hash) ——
+        int      change_idx              // change 输出位 (J2 layout 定); chunk_kind==last 时无 change
+        // ⚠ Bettor CRITICAL fix: 原 `byte[32] spine_p2sh_hash` witness 参数已删 — spender 自填 hash → require(==)可绕
+        //    (填自己地址 hash → change 转走 = trustless 破). 正解: validateOutputState(change_idx, {hwm}) 由编译期 lower
+        //    为续【OpInputCovenantId(activeInputIndex)=本 covenant 自身链上身份】, 非自由 witness hash (同 #26 bshard cov 续链).
         // ... (winner merkle proofs per 子段成员 + globalYes/No + commit_id 同 settle_aggregate, 草稿略)
     ) {
         // ① committee sig ≥4 (复用 settle_aggregate ①, 设计 A 每 chunk 验; 设计 B 仅 chunk_0 验 + chunk_i 走 cov-chain).
@@ -98,13 +105,14 @@ contract PoolSpine_v08_chunk(
         }
         require(seg_lo == prevHwm);                        // ★ 链式连续: 本段起 == 上段止 (无 overlap 无 gap)
 
-        // ③ change 续锁 spine-P2SH + hwm state 续延 (非末 chunk; trustless 核心: 未付余额仍 SS-governed + 链式连续).
-        //    introspection: change 输出 scriptPubKey == 本 v08 合约 P2SH (settler 挪不走) + change.state.hwm == seg_hi.
+        // ③ change 续锁本 covenant + hwm state 续延 (非末 chunk; trustless 核心: 未付余额仍 SS-governed + 链式连续).
+        //    validateOutputState(change_idx,{hwm}) 编译期 lower 为续【OpInputCovenantId(activeInputIndex)=本 covenant
+        //    自身链上身份】+ 写 hwm state → change 只能被下个 settle_chunk(同 cov)花, settler 挪不走 (Bettor 🔴 修:
+        //    非 witness spine_p2sh_hash, 那是 spender 自填 tautology = 偷余额破口).
         if (chunk_kind != 2) {
-            // 非末 chunk: change 续锁本模板 + 携 hwm=seg_hi (下 chunk 必从 seg_hi 续付)
-            require(tx.outputs[change_idx].scriptPubKey == spine_p2sh_hash);   // change 续锁同 spine (下 chunk 可花)
+            // 非末 chunk: change 续锁本 covenant (cov_id 自验) + 携 hwm=seg_hi (下 chunk 必从 seg_hi 续付)
             require(tx.outputs[change_idx].value > 0);                          // change>0 (非末 → 还有未付 winner)
-            validateOutputState(change_idx, { hwm: seg_hi });                   // ★ output change.hwm = seg_hi (链式续)
+            validateOutputState(change_idx, { hwm: seg_hi });                   // ★ 续本 cov(自身身份) + change.hwm=seg_hi (链式续, trustless)
         }
         // 末 chunk (chunk_kind==2): seg_hi == 总 winner 数 (全付完, 由守恒④ change==0 蕴含); 无 change 输出 (hwm 链终).
 
