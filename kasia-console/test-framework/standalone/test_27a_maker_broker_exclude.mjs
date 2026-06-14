@@ -114,6 +114,24 @@ try { cs = sampleAndStoreCommittee('mkt-brk-same', END_BLOCK); }
 catch (e) { csErr = e.message; }
 check('broker_addr == maker_addr → != guard skips broker branch → still 6→5 (no double-exclude starve)', !!cs && cs.committee_pks.length === 5, `err=${csErr} size=${cs?.committee_pks?.length}`);
 
+// ── 问2 (Bettor 2026-06-15): CHAIN-ANCHORED broker_pk exclude catches what the node-local address lookup MISSES ──
+// Vector: broker (broker≠maker) enrolled as an oracle under a DIFFERENT relay_address than the market's
+// broker_relay_id → the address→oracle_stake_enrollments lookup returns nothing → broker NOT excluded → could be
+// VRF-sampled onto its own market's committee. Fix: pool_markets.broker_pk (chain-anchored) excluded DIRECTLY.
+// Setup: broker_pk = pool[0]; broker_relay_id's address has NO enrollment (lookup misses); maker has no address.
+sqlite.prepare(`INSERT INTO pool_snapshots (market_id, pool_merkle_root, pool_size, pool_pks_json, pool_stakes_json)
+  VALUES (?,?,?,?,?)`).run('mkt-q2', POOL_ROOT, POOL.length, JSON.stringify(POOL), JSON.stringify(STAKES));
+sqlite.prepare(`INSERT INTO pool_markets (id, maker_relay_id, broker_relay_id, broker_pk, spine_p2sh, market_metadata_hash, deadline, deadline_daa)
+  VALUES (?,?,?,?,?,?,?,?)`).run('mkt-q2', '__none__', 'q2-broker-relay', POOL[0], 'kaspatest:spine', '00'.repeat(32), DEADLINE_DAA, DEADLINE_DAA);
+sqlite.prepare(`INSERT INTO relay_nodes (id, name, network, poll_ms, address, created_at, updated_at)
+  VALUES ('q2-broker-relay','q2broker','testnet-12',1000,'kaspatest:q2broker-noenroll',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`).run();
+let cq, cqErr = '';
+try { cq = sampleAndStoreCommittee('mkt-q2', END_BLOCK); }
+catch (e) { cqErr = e.message; }
+check('问2: chain-anchored broker_pk EXCLUDED even when address→enrollment lookup misses (no broker enrollment)',
+  !!cq && !cq.committee_pks.map(p => String(p).toLowerCase()).includes(POOL[0]) && cq.committee_pks.length === 5,
+  `err=${cqErr} committee=${JSON.stringify(cq?.committee_pks?.map(p=>p.slice(0,8)))}`);
+
 try { sqlite.close(); } catch {}
 try { rmSync(TMP, { force: true }); rmSync(TMP + '-wal', { force: true }); rmSync(TMP + '-shm', { force: true }); } catch {}
 

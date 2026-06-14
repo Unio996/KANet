@@ -684,14 +684,16 @@ async function handlePoolMarketPublished(msg) {
   try {
     const insertResult = sqlite.prepare(`INSERT OR IGNORE INTO pool_markets (
       id, maker_relay_id, spine_p2sh, spine_lock_tx, market_metadata_hash,
-      oracle1_pk, oracle2_pk, oracle3_pk, broker_pk,
+      oracle1_pk, oracle2_pk, oracle3_pk, broker_pk, maker_pk,
       deadline, miner_fee, broker_fee_pct, oracle_bond_amount, maker_stake_amount,
       outcome_market_source, outcome_condition_id, outcome_token_id, outcome_side, resolution_rule_spec,
       protocol_status, sides_merkle_root, oracle_relay_ids, broker_relay_id, metadata, category,
       protocol_version, pool_merkle_root, deadline_daa
-    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
       msg.market_id, sentinelRelayId, msg.spine_p2sh, msg.spine_lock_tx, msg.market_metadata_hash,
       oraclePks[0] || null, oraclePks[1] || null, oraclePks[2] || null, msg.broker_pk,
+      msg.maker_relay_pk,  // 问2 (NWT review): chain-anchor maker_pk from the sig-verified payload (L623) so the
+                           // committee maker-exclude is byte-equal cross-node (producer also sets it, see pool.js).
       msg.deadline, msg.miner_fee, msg.broker_fee_pct, msg.oracle_bond_amount, msg.maker_stake_amount,
       msg.outcome_market_source, msg.outcome_condition_id, msg.outcome_token_id, msg.outcome_side, msg.resolution_rule_spec,
       'pending_bettors', '', '[]', sentinelRelayId, metadata, msg.category,
