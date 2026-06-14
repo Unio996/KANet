@@ -196,9 +196,12 @@ async function handlePoolOracleVote(msg) {
   // not protocol membership. xpk recompute path obsoleted.
   const market = sqlite.prepare('SELECT id, oracle1_pk, oracle2_pk, oracle3_pk, protocol_version FROM pool_markets WHERE id = ?').get(msg.market_id);
   if (!market) {
-    // Cross-node case: vote for a market this node hasn't seen yet (market_publish broadcast
-    // is a separate cross-node hardening sub — Bettor r88 b-class market gap). Log + skip.
-    console.log(`[trade-filter:pool-vote] market ${msg.market_id.slice(0,12)} not in local DB (cross-node market_publish gap, skip vote)`);
+    // Cross-node case: vote for a market this node hasn't seen yet. J1 #27d: this is the SIGNAL that a
+    // market_publish was missed (LRU-evicted under chunk-flood / lost across restart). Fire the catch-up
+    // re-ingest (NWT r1166 ④ signal-triggered, throttled, fire-and-forget — don't block vote handling).
+    // Once catch-up rebuilds the row, the settler committee-sample + post-sample vote re-scan replay this vote.
+    console.log(`[trade-filter:pool-vote] market ${msg.market_id.slice(0,12)} not in local DB (cross-node market_publish gap) — trigger #27d catch-up re-ingest`);
+    catchUpUningestedMarkets({ windowHours: 24 }).catch(e => console.warn(`[trade-filter:pool-vote] catch-up trigger fail: ${e.message}`));
     return;
   }
 
@@ -925,6 +928,75 @@ async function handlePoolMarketChunk(msg) {
   }
 }
 
+// J1 #27d (Owner public-testnet hardening sprint 2026-06-14): catch-up re-ingest for market_publishes
+// whose in-mem chunk reassembly was MISSED. Root cause (demo lwrcl): a sign_req re-broadcast flood
+// (stuck settles re-broadcasting chunked sign_req every ~5s) filled the in-mem POOL_CHUNK_CACHE
+// (LRU max 200) → evicted a market_publish's in-progress chunks before they completed → no reassembly
+// → no pool_markets row → :3300 committee members never knew they were sampled → liveness blocker.
+// broadcast_messages is the DURABLE store (chunks persist there regardless of in-mem eviction). This
+// reassembles from it for any market_publish whose market_id is not yet in pool_markets, then dispatches
+// to handlePoolMarketPublished (idempotent: it skips if the row already exists, and verifies
+// metadata_hash + maker sig → a corrupt/forged reassembly is rejected, never overwrites a correct row).
+// = cross-node market-row arrival self-heals (the bshard foundation: every node reliably gets the row).
+//
+// NWT r1166 review points honored: ② only COMPLETE chunk-sets reassemble (sha256-verify; no half rows)
+// ③ idempotent never overwrites (handler L591-595 skip-if-exists) ④ SIGNAL-TRIGGERED (called from
+// orphan bet/vote handlers when market_id ∉ pool_markets) + throttled + bounded window — NOT a full
+// scan every tick.
+let _lastCatchUpMs = 0;
+const CATCHUP_THROTTLE_MS = 30_000;   // at most one pass per 30s (orphan bets can arrive in bursts)
+export async function catchUpUningestedMarkets({ windowHours = 24, force = false } = {}) {
+  const now = Date.now();
+  if (!force && (now - _lastCatchUpMs) < CATCHUP_THROTTLE_MS) return { scanned: 0, rebuilt: 0, throttled: true };
+  _lastCatchUpMs = now;
+  const sinceIso = new Date(now - windowHours * 3600 * 1000).toISOString();
+  let scanned = 0, rebuilt = 0;
+  const tryDispatch = async (inner, meta) => {
+    if (inner?.t !== 'pool_market_published_v1' || !inner.market_id) return;
+    scanned++;
+    if (sqlite.prepare('SELECT 1 FROM pool_markets WHERE id = ?').get(inner.market_id)) return;  // ③ already have it
+    inner._tx = meta.tx_hash; inner._from = meta.sender_address; inner._channel = meta.channel_name; inner._at = meta.created_at;
+    try {
+      await handlePoolMarketPublished(inner);  // idempotent + verifies metadata_hash/sig
+      if (sqlite.prepare('SELECT 1 FROM pool_markets WHERE id = ?').get(inner.market_id)) {
+        rebuilt++;
+        console.log(`[catch-up-markets] rebuilt missed market=${inner.market_id.slice(0,12)} (was LRU-evicted/lost)`);
+      }
+    } catch (e) { console.warn(`[catch-up-markets] dispatch fail market=${inner.market_id?.slice(0,12)}: ${e.message}`); }
+  };
+  try {
+    // 1. Single (unchunked) pool_market_published_v1 not yet ingested
+    const singles = sqlite.prepare(
+      "SELECT content, tx_hash, sender_address, channel_name, created_at FROM broadcast_messages WHERE channel_name = 'kanet-prediction' AND content LIKE '%pool_market_published_v1%' AND content NOT LIKE '%pool_market_chunk%' AND created_at > ? ORDER BY created_at DESC"
+    ).all(sinceIso);
+    for (const row of singles) { let inner; try { inner = JSON.parse(row.content); } catch { continue; } await tryDispatch(inner, row); }
+    // 2. Chunked: group pool_market_chunk_v1 by hash, reassemble ONLY complete sets (② no half rows)
+    const { createHash } = await import('crypto');
+    const chunkRows = sqlite.prepare(
+      "SELECT content, tx_hash, sender_address, channel_name, created_at FROM broadcast_messages WHERE channel_name = 'kanet-prediction' AND content LIKE '%pool_market_chunk_v1%' AND created_at > ? ORDER BY created_at ASC"
+    ).all(sinceIso);
+    const byHash = new Map();
+    for (const row of chunkRows) {
+      let c; try { c = JSON.parse(row.content); } catch { continue; }
+      if (c?.t !== 'pool_market_chunk_v1' || !c.hash || c.ord === undefined || !c.total) continue;
+      let e = byHash.get(c.hash); if (!e) { e = { total: Number(c.total), parts: new Map(), meta: row }; byHash.set(c.hash, e); }
+      e.parts.set(Number(c.ord), c.data);
+    }
+    for (const [hash, e] of byHash) {
+      if (!Number.isInteger(e.total) || e.parts.size < e.total) continue;   // ② incomplete in durable store too — real loss, skip
+      const ordered = []; let complete = true;
+      for (let i = 0; i < e.total; i++) { const p = e.parts.get(i); if (p === undefined) { complete = false; break; } ordered.push(p); }
+      if (!complete) continue;
+      const reassembled = ordered.join('');
+      if (createHash('sha256').update(reassembled).digest('hex') !== hash) continue;   // corrupt — skip
+      let inner; try { inner = JSON.parse(reassembled); } catch { continue; }
+      await tryDispatch(inner, e.meta);   // tryDispatch filters to pool_market_published_v1 (sign_req etc. skipped)
+    }
+  } catch (err) { console.warn(`[catch-up-markets] scan fail: ${err.message}`); }
+  if (scanned > 0 || rebuilt > 0) console.log(`[catch-up-markets] pass done: scanned=${scanned} rebuilt=${rebuilt} (window ${windowHours}h)`);
+  return { scanned, rebuilt };
+}
+
 // Bettor r158 §5.3c layer 2 — anti-bot policy floor defends against malicious node directly
 // broadcasting <POLICY bet to bypass producer (NWT r121 #1 命门). Hardcoded here matches
 // pool.js BETTOR_MIN_STAKE_POLICY constant (= 1 KAS = 1e8 sompi). DO NOT lower without
@@ -962,7 +1034,10 @@ async function handlePoolBetRegistered(msg) {
   const market = sqlite.prepare(`SELECT id, spine_p2sh, market_metadata_hash, pool_merkle_root, deadline, protocol_version
     FROM pool_markets WHERE id = ?`).get(msg.market_id);
   if (!market) {
-    console.log(`[trade-filter:bet-reg] market ${msg.market_id.slice(0,12)} not in local DB (race vs market_publish, skip — replay on next broadcast)`);
+    // J1 #27d: orphan bet = signal a market_publish was missed. Fire catch-up re-ingest (throttled,
+    // fire-and-forget). Once it rebuilds the row, handlePoolMarketPublished's H2 rescan replays this bet.
+    console.log(`[trade-filter:bet-reg] market ${msg.market_id.slice(0,12)} not in local DB — trigger #27d catch-up re-ingest (H2 rescan then replays this bet)`);
+    catchUpUningestedMarkets({ windowHours: 24 }).catch(e => console.warn(`[trade-filter:bet-reg] catch-up trigger fail: ${e.message}`));
     return;
   }
 

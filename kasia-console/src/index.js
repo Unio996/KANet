@@ -540,6 +540,14 @@ startBettorRefundClaimAutoCron();
 import { startAutoBetterCron } from './services/pool-auto-better.js';
 startAutoBetterCron();
 
+// J1 #27d (Owner public-testnet hardening sprint 2026-06-14): boot catch-up for market_publishes
+// missed by in-mem chunk reassembly (LRU-evicted under sign_req re-broadcast flood, or lost across a
+// restart). Rebuilds pre-restart misses from the DURABLE broadcast_messages store (idempotent: the
+// handler skips rows that already exist). Runtime misses self-heal via orphan bet/vote signal-triggers
+// in trade-protocol-filter (NWT r1166 ④). force=true bypasses the throttle for this one-shot boot pass.
+import { catchUpUningestedMarkets } from './services/trade-protocol-filter.js';
+catchUpUningestedMarkets({ windowHours: 24, force: true }).catch((e) => console.warn('[index] #27d boot market catch-up fail:', e.message));
+
 // r425 relay-orphan 固化 (Bettor r446 task 2): 30s cron 扫 enrolled relays, dead → startRelay.
 // 配合 r424 Console supervisor: supervisor 救 Console 死, monitor 救 relay 死/没起来.
 // Restart storm 防护: 3/h cap per relay.
