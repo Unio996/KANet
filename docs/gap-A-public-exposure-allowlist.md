@@ -85,16 +85,20 @@ Reverse proxy runs **on :3200's host** (faucet/exchange/Console all live there =
         method POST
         path /api/faucet/request
     }
-    handle @safe_reads { reverse_proxy 127.0.0.1:3200 }
+    handle @safe_reads {
+        rate_limit { zone reads { key {remote_host} events 100 window 1m } }   # J1 #381 hole-1: :3200 is single-instance → cap read flood
+        reverse_proxy 127.0.0.1:3200
+    }
     handle @faucet {
-        rate_limit { zone faucet { key {remote_host} events 1 window 10m } }   # caddy-ratelimit plugin
+        rate_limit { zone faucet { key {remote_host} events 1 window 10m } }   # caddy-ratelimit plugin (mholt/caddy-ratelimit)
         request_body { max_size 4KB }
         reverse_proxy 127.0.0.1:3200
     }
     handle { respond 403 }   # DEFAULT-DENY everything else
 }
 ```
-(nginx equivalent: `location`-allowlist + `limit_req` + `return 403` default — provided in v2.)
+(nginx equivalent: `location`-allowlist + two `limit_req` zones + `return 403` default — v3 if nginx chosen.)
+caddy-ratelimit = third-party plugin (`mholt/caddy-ratelimit`) — build Caddy with `xcaddy build --with github.com/mholt/caddy-ratelimit`. **Confirm availability for the deploy (checklist #7).**
 
 ## 6. Exposure test (J1 red-team, builder≠verifier)
 
@@ -104,6 +108,24 @@ After deploy, J1 curls from an external position:
   `POST /adapters/...`, `POST /api/chat/ingest`, `/api/settings`, a sample of random internal GETs.
 - **Faucet abuse:** rapid repeat → rate-limited after 1.
 - Red/green report → no high-risk route reachable = perimeter holds.
+
+## 8. Go-live hardening checklist (consolidated 3-layer review: Bettor + NWT + J1 red-team)
+
+**All must be closed before the proxy is deployed.**
+
+| # | Item | Status | Owner |
+|---|---|---|---|
+| 1 | faucet per-address cap | ✅ already exists (permanent per-wallet 1-grant, stronger than per-day) | — |
+| 2 | faucet per-IP collapses behind proxy → `trustProxy:'127.0.0.1'` | ✅ **fixed** (index.js:97) | KANet-UI |
+| 3 | safe_reads (6 GET) no rate-limit → DoS single :3200 | ✅ **fixed in config** (§5, 100/min/IP) | KANet-UI |
+| 4a | GET /api/exchange/offers had `expireStale()` WRITE side-effect (DoS write-amp) | ✅ **fixed** (removed; cron index.js:212 handles expiry) | KANet-UI |
+| 4a' | offers `limit` uncapped → DoS/large-dump | ✅ **fixed** (cap 1-200, exchange.js) | KANet-UI |
+| 4b | offers/market `SELECT *` (63/33 cols) leaks internal UUIDs/metadata (no secrets — J1 confirmed) | 🟡 **design note** — handler is SHARED with internal UI (naive strip breaks UI); recommend a curated public projection on the proxy path, or accept non-secret internals. Decide. | KANet-UI + Bettor |
+| 5 | path-traversal + bypass variants (URL-encode / method-mismatch / trailing-slash — note fastify `ignoreTrailingSlash`+`ignoreDuplicateSlashes` on) | ⏳ J1 red-team external test post-deploy (default-deny is robust; verify) | J1 |
+| 6 | kaspad (ws :17210) is a separate service the proxy doesn't cover → external broadcast needs a reachable TN12 kaspad | ⏳ onboarding `KASPAD_HOST` = a public TN12 node (NOT operator's) | J1 (onboarding) |
+| 7 | caddy-ratelimit third-party plugin availability | ⏳ confirm `xcaddy --with mholt/caddy-ratelimit` at deploy | KANet-UI |
+
+Code fixes #2/#3/#4a/#4a' are landed in the working tree (deploy on the gap-A restart). #4b/#5/#6/#7 open.
 
 ## 7. Open decisions (for Bettor + Owner)
 1. Public node = :3200 itself (confirmed by Bettor r1035) or a separate box later?

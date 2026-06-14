@@ -94,7 +94,12 @@ const PORT = parseInt(process.env.PORT || '3100');
 
 // ignoreDuplicateSlashes: //welcome-dev → /welcome-dev (= Owner 2026-05-28 撞双斜杠 404 修).
 // ignoreTrailingSlash: /faucet/ → /faucet (= 顺手防尾斜杠 404).
-const fastify = Fastify({ logger: false, ignoreDuplicateSlashes: true, ignoreTrailingSlash: true });
+// gap-A: trustProxy scoped to the reverse proxy (127.0.0.1) so request.ip resolves to the REAL client
+// from X-Forwarded-For ONLY when the hop is the trusted local proxy (the faucet per-IP 24h×3 limit in
+// chat.js:585 reads request.ip — without this it sees 127.0.0.1 for every external user behind the proxy
+// → per-IP limit collapses to one shared bucket). Never `trustProxy: true` (unscoped = X-Forwarded-For
+// spoofable). Harmless pre-proxy: Console is localhost-bound, only localhost (trusted) can reach it.
+const fastify = Fastify({ logger: false, ignoreDuplicateSlashes: true, ignoreTrailingSlash: true, trustProxy: '127.0.0.1' });
 
 // Plugins
 await fastify.register(import('@fastify/formbody'));

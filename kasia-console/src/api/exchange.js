@@ -57,17 +57,18 @@ export async function registerExchangeRoutes(fastify) {
       params.push(maker);
     }
 
-    // T-J2-2026-05-11 Phase 2 A.2 (NWT #18 ABE audit): inline UPDATE → expireStale() transition() loop。
-    // 现 expireStale (exchange-machine.js:575) 真 SELECT stale + transition(id, 'expired') loop, 走 transition() invariant 路径
-    // (timestamp 设 expired_at + audit log)。inline UPDATE bypass transition() 是 A 断点根因。
-    expireStale();
+    // gap-A (J1 #382 red-team): expireStale() was called here = a WRITE (SELECT stale + transition→expired
+    // + timestamp/audit) in a GET → public-exposed read with a write side-effect = DoS write-amplification
+    // (hammer this GET → repeated expire write-storm). REMOVED — expiry is already run by the periodic
+    // setInterval in index.js:212 (startup + every tick), so this GET is now truly read-only. The stale
+    // filter below (exclude expired) still hides anything not-yet-transitioned until the next cron tick.
 
     const rows = sqlite.prepare(`
       SELECT * FROM exchange_offers
       WHERE ${where}
       ORDER BY broadcast_at DESC
       LIMIT ? OFFSET ?
-    `).all(...params, Number(limit), Number(offset));
+    `).all(...params, Math.min(Math.max(Number(limit) || 50, 1), 200), Math.max(Number(offset) || 0, 0));  // gap-A: cap limit 1-200 (= /api/pool/markets pattern) — public route DoS/large-dump guard
 
     const total = sqlite.prepare(
       `SELECT COUNT(*) as cnt FROM exchange_offers WHERE ${where}`
