@@ -100,16 +100,21 @@ function buildSamples(g) {
   console.log(`=== #25 L1 spread/total 准确率 harness ${TRIAL ? '[TRIAL 5]' : '[N=' + LIMIT + ']'} (import 生产 deriveVote) ===`);
   console.log(`LLM=${process.env.QWEN_LLM_URL}\n`);
 
-  const games = [];
+  const perSport = [];
   for (const s of SPORTS) {
-    let per = 0;
+    const bucket = [];
     for (const d of DATES) {
       const gs = await fetchGames(s.league, d);
-      for (const g of gs) { if (per < 4) { games.push(g); per++; } }
-      if (per >= 4) break;
+      for (const g of gs) { if (bucket.length < 4) bucket.push(g); }
+      if (bucket.length >= 4) break;
     }
+    perSport.push(bucket);
   }
-  console.log(`已结束赛(含分数): ${games.length} 场`);
+  // 跨运动 round-robin (防 slice 取偏单一运动 = MLB-only caveat 修): [MLB0,NBA0,NFL0,NHL0,MLB1,...]
+  const games = [];
+  for (let i = 0; i < 4; i++) for (const b of perSport) if (b[i]) games.push(b[i]);
+  const sportCount = games.reduce((m, g) => { const k = g.lg.split('/')[1]; m[k] = (m[k] || 0) + 1; return m; }, {});
+  console.log(`已结束赛(含分数): ${games.length} 场 (跨类: ${JSON.stringify(sportCount)})`);
 
   // round-robin 4 类 (spread-Y/spread-N/total-Y/total-N) 跨场交错, 防 slice 取偏 (= 全 spread-N bug)
   const perGame = games.map(buildSamples);  // 每场 [sprdY, sprdN, totY, totN]
