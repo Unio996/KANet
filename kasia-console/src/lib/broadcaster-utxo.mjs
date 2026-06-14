@@ -39,16 +39,9 @@ let running = false;
 function _broadcasterRelays() {
   const env = (process.env.BROADCASTER_RELAY_IDS || '').split(',').map(s => s.trim()).filter(Boolean);
   if (env.length) return env;
-  // default: local oracle relays (sign_req/sign_resp signers) UNION the hot seeder maker (broadcasts the
-  // settle TX chunks — it's not is_oracle so the oracle query misses it; Bettor r489b: cdb1f91d must be in).
-  // Computed default (not env-hardcoded) so it survives oracle-pool enroll/unstake without a manual env edit.
-  const ids = sqlite.prepare(`SELECT id FROM relay_nodes WHERE is_oracle = 1 AND address IS NOT NULL`).all().map(r => r.id);
-  const maker = (process.env.POOL_SEEDER_MAKER_RELAY || '').trim();
-  if (maker && !ids.includes(maker)) {
-    const row = sqlite.prepare(`SELECT id FROM relay_nodes WHERE id = ? AND address IS NOT NULL`).get(maker);
-    if (row) ids.push(row.id);
-  }
-  return ids;
+  // default: local oracle relays (sign_req signers) — the load test showed the settle broadcaster is the
+  // contention point; makers are added via env when a specific maker is the hot broadcaster.
+  return sqlite.prepare(`SELECT id FROM relay_nodes WHERE is_oracle = 1 AND address IS NOT NULL`).all().map(r => r.id);
 }
 
 // On-demand: rebalance one relay to N independent medium UTXOs (force = consolidate dust + split).
