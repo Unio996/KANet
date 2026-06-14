@@ -98,6 +98,8 @@ export async function onBroadcastWritten(row) {
         await handlePoolMarketSettled(msg); break;  // J2-tn r418 (Bettor r428 关1): cross-node settle sync push
       case 'oracle_stake_enroll_v1':
         await handleOracleStakeEnroll(msg); break;  // J2-tn r301 Path A: cross-node enrollment ingest
+      case 'oracle_stake_withdraw_v1':
+        await handleOracleStakeWithdraw(msg); break;  // 问3 (a): cross-node-convergent oracle 撤出 (active=0 on all nodes)
       case 'kanet_pool_oracle_tx_sign_resp_v1':
         await handlePoolOracleTxSignResp(msg); break;  // J2-tn r374 (Bettor 15:02 catch): cross-node sign_resp ingest
       case 'kanet_pool_oracle_tx_sign_req_v1':
@@ -389,6 +391,47 @@ async function handleOracleStakeEnroll(msg) {
   } catch (e) {
     console.warn(`[trade-filter:oracle-enroll] enrollments upsert fail: ${e.message}`);
   }
+}
+
+// 问3 (a) (Bettor 2026-06-15): cross-node-CONVERGENT oracle 撤出 ingest. The /withdraw endpoint broadcasts a
+// staker-signed oracle_stake_withdraw_v1 envelope; EVERY node (incl producer) ingests it HERE → sets active=0.
+// = the REAL pool removal via the convergent broadcast path so both nodes drop the oracle in lockstep — NOT a
+// node-local endpoint UPDATE (which = #22 active-flag cross-node divergence: one node's pool ≠ the other's).
+// Staker-sig auth (only the oracle can withdraw its own enrollment) + chain_events idempotency, mirroring enroll.
+async function handleOracleStakeWithdraw(msg) {
+  const { randomUUID } = await import('crypto');
+  const kaspa = await import('kaspa-wasm');
+  if (msg.staker_pk_x === undefined || msg.signature === undefined) {
+    console.warn(`[trade-filter:oracle-withdraw] missing staker_pk_x/signature — reject`); return;
+  }
+  const stakerPkX = String(msg.staker_pk_x).toLowerCase();
+  if (!/^[0-9a-f]{64}$/.test(stakerPkX)) {
+    console.warn(`[trade-filter:oracle-withdraw] staker_pk_x invalid format ${stakerPkX.slice(0,12)} — reject`); return;
+  }
+  // Verify staker sig: only the staking oracle (private key) can withdraw its own enrollment (mirror enroll).
+  const unsignedCopy = { ...msg };
+  delete unsignedCopy.signature;
+  delete unsignedCopy._tx; delete unsignedCopy._from; delete unsignedCopy._channel; delete unsignedCopy._at;
+  let sigValid = false;
+  try {
+    sigValid = kaspa.verifyMessage({ message: JSON.stringify(unsignedCopy), signature: msg.signature, publicKey: stakerPkX });
+  } catch (e) { console.warn(`[trade-filter:oracle-withdraw] verifyMessage exception staker=${stakerPkX.slice(0,12)}: ${e.message}`); return; }
+  if (!sigValid) { console.warn(`[trade-filter:oracle-withdraw] sig invalid staker=${stakerPkX.slice(0,12)} — reject`); return; }
+
+  // idempotent chain_events INSERT (UNIQUE on txid) — auditable withdraw record.
+  try {
+    sqlite.prepare(`
+      INSERT OR IGNORE INTO chain_events (id, txid, event_type, from_address, to_address, payload, observed_by, observed_at)
+      VALUES (?, ?, 'oracle_stake_withdraw', ?, ?, ?, 'scout-ingest', CURRENT_TIMESTAMP)
+    `).run(randomUUID(), msg._tx, msg._from || null, null, JSON.stringify(msg));
+  } catch (e) { console.warn(`[trade-filter:oracle-withdraw] chain_events insert fail (dedup ok): ${e.message}`); }
+
+  // CROSS-NODE-CONVERGENT active removal: every node ingests the SAME broadcast → every node sets active=0 →
+  // the oracle leaves the chain-derived committee-sampling pool (scanAndDerivePool WHERE active=1) in lockstep.
+  try {
+    const r = sqlite.prepare('UPDATE oracle_stake_enrollments SET active = 0 WHERE staker_pk_x = ?').run(stakerPkX);
+    console.log(`[trade-filter:oracle-withdraw] staker=${stakerPkX.slice(0,12)} → active=0 (cross-node convergent, changes=${r.changes}) tx=${msg._tx?.slice(0,16)}`);
+  } catch (e) { console.warn(`[trade-filter:oracle-withdraw] active=0 update fail: ${e.message}`); }
 }
 
 // J2-tn r374 (Bettor 15:02 catch): cross-node oracle TX sign_resp ingest.
@@ -915,6 +958,8 @@ async function handlePoolMarketChunk(msg) {
       await handlePoolMarketPublished(inner); break;
     case 'oracle_stake_enroll_v1':
       await handleOracleStakeEnroll(inner); break;
+    case 'oracle_stake_withdraw_v1':
+      await handleOracleStakeWithdraw(inner); break;  // 问3 (a): cross-node-convergent oracle 撤出
     case 'pool_oracle_vote_v1':
       await handlePoolOracleVote(inner); break;
     case 'pool_bet_registered_v1':
