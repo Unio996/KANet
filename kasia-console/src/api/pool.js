@@ -1837,6 +1837,18 @@ export async function registerPoolRoutes(fastify) {
       ORDER BY s.created_at DESC
     `).all(bettorPk);
 
+    // #27e (KANet-UI sprint): the settler pays an EXTERNAL bettor (bettor_relay_id NULL, = bot/DM-path)
+    // to the P2PK address derived from x-only bettor_pk (pool-market-settler.js L1634) — which differs
+    // from a non-P2PK linkedAddr (e.g. a relay's native address). Derive the SAME payout address so the
+    // on-chain settle output (metadata.phase2_outputs) matches; relay-bound sides pay to the relay address
+    // (= linkedAddr) so keep both as candidates.
+    const _payoutAddrSet = new Set([linkedAddr]);
+    try {
+      const _kw = await import('kaspa-wasm');
+      const _net = linkedAddr.startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
+      _payoutAddrSet.add(new _kw.XOnlyPublicKey(bettorPk).toAddress(_net).toString());
+    } catch { /* derive fail → linkedAddr-only match (degrades to projection fallback) */ }
+
     // For each position, compute pool distribution + payout-if-win.
     const out = [];
     for (const p of positions) {
@@ -1873,7 +1885,28 @@ export async function registerPoolRoutes(fastify) {
         if (meta.phase2_winner === 0 || meta.phase2_winner === 1) {
           outcomeWinner = meta.phase2_winner;
           didWin = (myDirection === outcomeWinner);
-          if (didWin) actualPayoutKas = payoutIfWin / 1e8;
+          if (didWin) {
+            // #27e (KANet-UI sprint, NWT r1161/J2 r1080): read the ACTUAL on-chain payout from the
+            // settler-recorded settle outputs (metadata.phase2_outputs = real settle TX outputs) matched by
+            // this bettor's payout address — NOT the payoutIfWin projection, which omits the oracle fee
+            // (L1861 upper-bound) + the committeeMode SS bond-floor (5×oracleBond paid from the pool) →
+            // over-states (demo lwrcl: 148.1 projected vs 141.427 on-chain). data-three-role: settler
+            // records actual, display reads. Robust to #28 (oracle_bond tuning): reads the real output,
+            // no local formula to drift. Fallback to the projection only for legacy settles w/o outputs.
+            const myOnChainSompi = Array.isArray(meta.phase2_outputs)
+              ? meta.phase2_outputs.filter(o => _payoutAddrSet.has(o.address)).reduce((s, o) => s + (Number(o.amountSompi) || 0), 0)
+              : 0;
+            if (myOnChainSompi > 0) {
+              // A bettor may hold multiple winning sides on one market → multiple outputs to one address.
+              // Split this side's share by stake so the per-direction sum (formatMyBets) == on-chain total.
+              const myWinStake = Number(sqlite.prepare(
+                'SELECT COALESCE(SUM(stake_amount),0) s FROM pool_bettor_sides WHERE market_id=? AND bettor_pk=? AND direction=?'
+              ).get(p.market_id, bettorPk, outcomeWinner).s) || stakeSompi;
+              actualPayoutKas = (myOnChainSompi * stakeSompi / myWinStake) / 1e8;
+            } else {
+              actualPayoutKas = payoutIfWin / 1e8;  // legacy settles without phase2_outputs
+            }
+          }
         }
       } catch {}
       out.push({
