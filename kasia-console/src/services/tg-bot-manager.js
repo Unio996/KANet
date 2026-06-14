@@ -53,8 +53,13 @@ export async function startTgBot() {
   if (isBotAlive()) return { ok: false, reason: 'already_running', pid: _bot.pid };
   _bot = null;  // clear any stale handle
 
-  if (!process.env.TELEGRAM_BOT_TOKEN) {
-    _lastError = 'TELEGRAM_BOT_TOKEN not set (kanet.env — get one from @BotFather)';
+  // J1 (Owner 2026-06-14): config-first, env-fallback. Token/username are UI-settable DB config
+  // (Settings → Telegram Bot), falling back to kanet.env for backward compat. The resolved values
+  // are injected into the forked bot's env below so the 0-key bot process sees them.
+  const token = (await getConfig('tg_bot_token')) || process.env.TELEGRAM_BOT_TOKEN;
+  const username = (await getConfig('tg_bot_username')) || process.env.TELEGRAM_BOT_USERNAME || 'KANET_Broker_bot';
+  if (!token) {
+    _lastError = 'TELEGRAM_BOT_TOKEN not set (configure in Settings → Telegram Bot, or kanet.env — get one from @BotFather)';
     return { ok: false, reason: 'no_token', message: _lastError };
   }
 
@@ -64,7 +69,7 @@ export async function startTgBot() {
   _lastError = null;
   let child;
   try {
-    child = fork(LAUNCHER, [], { cwd: CONSOLE_DIR, env: { ...process.env } });
+    child = fork(LAUNCHER, [], { cwd: CONSOLE_DIR, env: { ...process.env, TELEGRAM_BOT_TOKEN: token, TELEGRAM_BOT_USERNAME: username } });
   } catch (e) {
     _lastError = `spawn failed: ${e.message}`;
     return { ok: false, reason: 'spawn_failed', message: _lastError };
@@ -120,13 +125,16 @@ export async function tgBotStatus() {
   const alive = isBotAlive();
   if (!alive && _bot) _bot = null;  // reconcile a dead handle
   const brokerRelayId = (await getConfig('tg_bot_broker_relay_id')) || process.env.BROKER_RELAY_ID || '';
+  // J1 (Owner 2026-06-14): config-first, env-fallback (matches startTgBot resolution).
+  const token = (await getConfig('tg_bot_token')) || process.env.TELEGRAM_BOT_TOKEN;
+  const username = (await getConfig('tg_bot_username')) || process.env.TELEGRAM_BOT_USERNAME || 'KANET_Broker_bot';
   return {
     running: alive,
     pid: alive ? _bot.pid : null,
     started_at: alive ? _bot.startedAt : null,
-    username: process.env.TELEGRAM_BOT_USERNAME || 'KANET_Broker_bot',
+    username,
     broker_relay_id: brokerRelayId,
-    token_configured: !!process.env.TELEGRAM_BOT_TOKEN,
+    token_configured: !!token,
     last_error: _lastError,
   };
 }
@@ -137,8 +145,10 @@ export async function tgBotStatus() {
  * a manual Stop is remembered across restarts, so the bot doesn't silently go live on its own.
  */
 export async function startTgBotIfConfigured() {
-  if (!process.env.TELEGRAM_BOT_TOKEN) {
-    console.log('[tg-bot-manager] TELEGRAM_BOT_TOKEN not set — bot not auto-started (configure + start from Settings)');
+  // J1 (Owner 2026-06-14): config-first, env-fallback (matches startTgBot resolution).
+  const token = (await getConfig('tg_bot_token')) || process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) {
+    console.log('[tg-bot-manager] TELEGRAM_BOT_TOKEN not set (config or env) — bot not auto-started (configure + start from Settings)');
     return { ok: false, reason: 'no_token' };
   }
   const enabled = (await getConfig('tg_bot_enabled')) === '1';
