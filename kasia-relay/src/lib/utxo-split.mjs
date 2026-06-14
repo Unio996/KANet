@@ -10,6 +10,12 @@
 import * as kaspa from 'kaspa-wasm';
 import { getWallet } from './wallet.mjs';
 import { waitForRpc } from '../rpc-listener.mjs';
+// design-v2 (B) risk#4 (Bettor r486): reuse the SAME wallet send mutex + pending-spent guards that
+// sendKaspa uses, so a force-rebalance is atomically serialized against any in-flight settle broadcast
+// (maker settle TX / committee sign_req / sign_resp — all go through send_broadcast → sendKaspa →
+// withSendLock, verified pool-broadcast.mjs L44 + trade-protocol-filter.js L512). No settler-state
+// query / no TOCTOU: the lock IS the mutual exclusion.
+import { withSendLock, filterPendingUtxos, markUtxoSpent } from './transaction.mjs';
 
 const { Generator, Encoding, Address, sompiToKaspaString, PaymentOutput } = kaspa;
 const Resolver = kaspa.Resolver || null;
@@ -48,9 +54,16 @@ export async function splitUtxosRelay(targetCount = 3, opts = {}) {
   const networkId = wallet.getGeneratorNetworkId();
 
   const rpc = await waitForRpc();
-  try {
-    const { entries } = await rpc.getUtxosByAddresses([new Address(address)]);
-    if (!entries || entries.length === 0) return { ok: false, reason: 'no_utxos' };
+  // withSendLock: serialize the whole rebalance against this relay's sendKaspa calls (settle chunk /
+  // sign_req / sign_resp). A settle is a CHAIN of sendKaspa calls; the rebalance can only run when it
+  // owns the lock, so it never interleaves a chunk mid-flight. filterPendingUtxos additionally skips
+  // UTXOs a just-finished chunk marked pending (RPC still returns them as confirmed); markUtxoSpent on
+  // the consumed entries makes the NEXT chunk skip the UTXOs this rebalance just spent. = no double-spend.
+  return withSendLock(async () => {
+    const { entries: rawEntries } = await rpc.getUtxosByAddresses([new Address(address)]);
+    if (!rawEntries || rawEntries.length === 0) return { ok: false, reason: 'no_utxos' };
+    const entries = filterPendingUtxos(rawEntries);
+    if (entries.length === 0) return { ok: false, reason: 'no_utxos_all_pending' };
 
     const utxosBefore = entries.length;
     if (!force && utxosBefore >= targetCount) {
@@ -97,8 +110,11 @@ export async function splitUtxosRelay(targetCount = 3, opts = {}) {
     if (!lastTxId) return { ok: false, reason: 'no_tx_produced' };
     const fee = sompiToKaspaString(generator.summary().fees).toString();
 
+    // Mark every consumed UTXO pending so the next chunk's sendKaspa (after we release the lock) won't
+    // reselect one this rebalance just spent before RPC reflects it (mirrors transaction.mjs L214).
+    for (const e of entries) markUtxoSpent(e);
+
     return { ok: true, split: true, utxosBefore, utxosAfter: splitCount, txId: lastTxId, fee };
-  } finally {
     // shared RpcClient managed by rpc-listener — do NOT disconnect from transaction layer
-  }
+  });
 }
