@@ -64,7 +64,16 @@ export function extractEspnEvidence(rawText) {
   const loserScore = loser?.score ?? '?';
   const league = data?.header?.league?.abbreviation || data?.leagues?.[0]?.abbreviation || '';
 
-  const evidence = `${winnerName} won. Final score: ${winnerName} ${winnerScore}, ${loserName} ${loserScore}${league ? ' (' + league + ')' : ''}.`;
+  // #25 UMA L1 (J2-tn): 附客观算术派生量 (margin/total) 卸掉 LLM 的净胜/总分算术负担。
+  // §20.10 L1: 一个比分源解锁 moneyline + 让分(margin) + 大小球(total). spread/total 边界判定
+  // 靠 LLM 自算分差/和 → trial 实测 60% (boundary off-by-one: 实赢 2 问 >=3 误判 YES / 总 4 问 >=4
+  // 误判 NO). margin/total = 两分数纯算术 (无语义判断, 守忠实抽取铁律), 显式给出让 LLM 只比较 → 准确率↑.
+  // 仅双方分数为有限数值时附 (非 final/异常分 → 不附, 退回原 winner-only 证据, 不破 moneyline).
+  const ws = Number(winnerScore), ls = Number(loserScore);
+  const arith = (Number.isFinite(ws) && Number.isFinite(ls))
+    ? ` ${winnerName} won by ${ws - ls} (margin). Combined total of both teams: ${ws + ls}.`
+    : '';
+  const evidence = `${winnerName} won. Final score: ${winnerName} ${winnerScore}, ${loserName} ${loserScore}${league ? ' (' + league + ')' : ''}.${arith}`;
   return evidence.length > 500 ? evidence.slice(0, 497) + '...' : evidence;
 }
 
