@@ -2543,4 +2543,27 @@ qlfpv 实测 5 层 brick:
 
 ---
 
+## 规则 47 · 本地 active-flag override 破跨节点 determinism — 池/委员组成只许链上派生, 永不手动 flip
+
+**触发时机** (Bettor r488, 2026-06-14): 任何要【塑造 oracle 池 / 委员组成 / 任何 determinism-critical 集合】的时候。尤其想"凑个数 / 临时排除某个 / 恢复跨节点"时手痒去 UPDATE 本地 flag。
+
+### Wrong
+用 **node-local DB flag**(`relay_nodes.active` / `is_oracle` 等不广播的本地列)override 链上有效状态来塑 determinism-critical 集合。e.g. `UPDATE relay_nodes SET active=0 WHERE id=<OwnerTest>` 想把池从 10 凑成 9 "恢复跨节点委员会"。
+
+### Right
+1. **池/委员组成只许从链上派生**: `scanAndDerivePool` 读链上有效性(stake lock UTXO + enrollment envelope), 不读本地 flag。集合成员加入/移除**必走链上**(enroll envelope / unstake / deactivate envelope), 让所有节点的链派生结果一致。
+2. **本地 flag 不是真相源**: node-local flag 不跨节点同步 → 节点 A 改了, 节点 B 看不到 → 两节点派生不同 root → determinism 自废。
+3. **想改 determinism 集合 = 上链或不动**: 没有链上路径就发起设计(议题→共识→链上机制), 不 hack 本地 flag 绕过。
+
+### Why
+2026-06-14: Q2 修 oracle 活性时为绕票传播把 6 oracle 全 :3200 单机 = 从已证跨节点倒退。后"恢复 9 跨节点池"用 **:3200 本地 `active=0` flip**(deactivate OwnerTest 凑 9)——本地 flag 不广播 → :3300 链派生 10-pool(含 OwnerTest 链上仍有效) ≠ :3200 baked 9-pool → 两节点 root 分歧 → :3300 chainViewMatch=NO → 采不到委员 → **J1 oracle 被抽中却投不了票(名义委员)** → 委员含 ≥2 J1 时只 ≤3 :3200 投 → 凑不齐 4-of-5 → **~50% 市场 zombie 永卡**。= 分布式比单机还坏, 且是**静默** regression(Owner 震怒)。
+
+**修**: (a) 撤本地 active override(re-activate)→ 两节点各自链派生同 10-pool root(byte-equal) + (b) settler self-heal `ensurePoolSnapshotByRoot`(非 producer 节点按 market 的 pool_merkle_root 从本节点 chain_view bake snapshot) + (c) quorum-timeout-refund(救已卡 zombie)。③ 新市场 J1-majority 委员真投票真 settle 四方两 vantage 链验 PASS。
+
+**前科**: 与 [规则 46](#规则-46) destructive-前先验"跨节点一致"三勾同源; 与 `feedback-no-db-hack-understand-design-first` + `feedback-cross-node-whole-repo-sync-not-cherry-pick` 互补。本条专治"手痒 flip 本地 flag 塑 determinism 集合"。
+
+**Lint 守**: 半机械——lint-kanet 可 grep `UPDATE.*relay_nodes SET (active|is_oracle)` 在 src/services/ 出现 → WARN "determinism 集合改本地 flag? 确认是否该走链上"。主守靠 review 文化(动 determinism 集合必两节点 root 字节对拍)。
+
+---
+
 *本档案在 v2 spec 第八章元教训基础上独立。spec 聚焦"这次怎么做"，本档案聚焦"下次别再犯"。*

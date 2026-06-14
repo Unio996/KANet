@@ -99,3 +99,14 @@ J1 实现 `frozen`(auto 可逆刹车) + 偏离入 `disagreement_queue` 待 revie
 | **PROD bug**: `derivePolymarketVote` gamma `closed` ≠ UMA finalized (24-48h reverse) | J1 R15 放大 | J2 `cea78b1` 48h finalization gate (ship-block mainnet) |
 | 假并行 (无独立源 KANet 抄 UMA = 0 信号) | J1 R23b | 两类市场 + `independent_source` + 防假并行 assert |
 | UMA herding (UMA 自己错时误罚诚实 oracle) | Bettor 修3 | `disagreement_queue` 不直罚, review/confidence gate |
+
+## 20.9 跨节点委员会 determinism + 规模化 (2026-06-14)
+
+**真分布式委员会 = 链上派生, 永不本地 flag** (`project-crossnode-cosmetic-committee-chain-derive-fix`):
+- 委员会从池采样, 池**必从链上派生** (`scanAndDerivePool` 读 stake lock UTXO + enrollment envelope), 不读 node-local `relay_nodes.active` flag。本地 flag override 塑池 = 两节点 root 分歧 → :3300 采不到委员 → 名义委员投不了票 → ~50% zombie。详见 [ANTI-PATTERNS 规则 47](../ANTI-PATTERNS.md)。
+- settler self-heal `ensurePoolSnapshotByRoot`: 非 producer 节点按 market 的 `pool_merkle_root` 从本节点 `oracle_pool_chain_view` bake snapshot (saveable=root 链上可复现→bake / doomed=root 只本地人为→null→refund) + `quorum-timeout-refund` 救 zombie。
+- 2026-06-14 J1-majority 委员真投票真 settle 四方两 vantage 链验 PASS = 首个真分布式 settle 实证。
+
+**破单市场押注上限 = bshard 滚动分片 + 链上 fold trustless 聚合** (设计完成, 实施 gate 在 demo 后):
+- 一个市场切 1→∞ 片 (mass-aware 封片), 各片独立并行结算; 跨片全局赔率靠**链上层次 fold 树** introspection 强制求和 (OpInputCovenantId 输入白名单防伪造 + commit 硬校验, 零 committee-sig)。
+- 设计权威: [`docs/2026-06-14-bshard-fold-trustless-§4-consensus.md`](../2026-06-14-bshard-fold-trustless-§4-consensus.md) + KB `products/03-prediction-pool.md` §2.B。
