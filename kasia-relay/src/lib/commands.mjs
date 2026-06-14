@@ -20,6 +20,8 @@ export const COMMAND_TYPES = Object.freeze({
   SEND_BROADCAST: 'send_broadcast',
   TRANSFER: 'transfer',
   SPLIT_UTXO: 'split_utxo',
+  // design-v2 B §2 root-fix (#24): consolidate relay-own fragmented UTXOs N→1 (keep `best` large).
+  CONSOLIDATE_UTXO: 'consolidate_utxo',
   // T-J2-2026-05-12 #2 — read-only IPC: console 取 relay child rpc-listener._rpc state snapshot (UI 健康检测 P0 NWT spec).
   GET_RPC_STATE: 'get_rpc_state',
   // Phase 4a SS trustless escrow (Sub 6+8+9) — oracle / maker IPC for prediction market settle TX flow.
@@ -82,6 +84,7 @@ export const COMMAND_PAYLOAD_SCHEMA = Object.freeze({
   [COMMAND_TYPES.SEND_BROADCAST]: ['channel', 'message'],
   [COMMAND_TYPES.TRANSFER]: ['target', 'amount'],
   [COMMAND_TYPES.SPLIT_UTXO]: [],
+  [COMMAND_TYPES.CONSOLIDATE_UTXO]: [],  // #24: no required field (minFragments optional)
   [COMMAND_TYPES.GET_RPC_STATE]: [],  // T-J2-2026-05-12 #2 — read-only, 无 required field
   // Phase 4a SS trustless escrow
   [COMMAND_TYPES.ECDSA_SIGN]: ['message'],
@@ -123,6 +126,7 @@ export const COMMAND_FIELD_TYPES = Object.freeze({
   [COMMAND_TYPES.TRANSFER]: { target: 'string', amount: ['string', 'number'] },
   [COMMAND_TYPES.PUBLISH_CARD]: { params: 'object' },
   [COMMAND_TYPES.SPLIT_UTXO]: { targetCount: 'number' },
+  [COMMAND_TYPES.CONSOLIDATE_UTXO]: { minFragments: 'number' },  // #24: optional
   [COMMAND_TYPES.GET_RPC_STATE]: {},  // T-J2-2026-05-12 #2 — read-only, 无 typeof constraint
   // Phase 4a SS trustless escrow
   [COMMAND_TYPES.ECDSA_SIGN]: { message: 'string' },
