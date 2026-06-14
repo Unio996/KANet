@@ -1634,16 +1634,18 @@ export async function dispatchPhase2(market, decision) {
     // so acceptable for first-ship, /link endpoint hardening can validate-on-bind later.
     const kaspaWasm = await import('kaspa-wasm');
     const settleNetwork = market.spine_p2sh.startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
+    // #31 ②轴 (chunk-determinism 硬前置, 4方确认 + Bettor 实测): bettor payout addr 一律 pk-derive from
+    // bettor_pk (chain-anchored, 两节点 pool_bettor_sides commit 同源) — 删原 node-local relay_nodes 查分叉.
+    // 原 bettor_relay_id 路 (SELECT address FROM relay_nodes WHERE id) = NODE-LOCAL: 非持该 relay 的节点查返
+    // NULL → 下方 missing addresses return = settle abort (非持 relay 节点结不了) 或异 addr → cross-node 命门
+    // (= #293 maker_pk / committee active-flag 同病). chunk-determinism 级联: addr node-local → 异 addr → 异
+    // output → 异 mass → 异封片点 → 异 chunk 划分 (不只 addr 错, chunk 边界都漂). 无 fallback: Bettor 实测
+    // pool_bettor_sides relay-bound 行 (bettor_relay_id 非空) = 403/403 bettor_pk POPULATED, 0 NULL.
     const sideAddrs = sides.map(s => {
-      if (s.bettor_relay_id) {
-        const row = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(s.bettor_relay_id);
-        return row?.address || null;
-      }
-      // External bettor: derive P2PK address from x-only bettor_pk.
       try {
         return new kaspaWasm.XOnlyPublicKey(s.bettor_pk).toAddress(settleNetwork).toString();
       } catch (e) {
-        console.warn(`[pool-settler] external bettor pk→addr fail market=${market.id.slice(0,12)} bettor_pk=${String(s.bettor_pk).slice(0,8)}: ${e.message}`);
+        console.warn(`[pool-settler] bettor pk→addr fail market=${market.id.slice(0,12)} bettor_pk=${String(s.bettor_pk).slice(0,8)}: ${e.message}`);
         return null;
       }
     });
