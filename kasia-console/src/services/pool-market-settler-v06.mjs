@@ -320,11 +320,18 @@ export function sampleAndStoreCommittee(marketId, endBlockHash) {
   // J1tn r303 P0-#1 sweep (Bettor r365b 问2 钦定): 同市场 broker∉oracle + maker∉oracle. derive
   // excludePks from market row (公开链上字段 maker_pk + broker_pk, 跨节点 verifier 可重算).
   // 防同 PK 双角色直接操纵 (= 收 broker fee + 当 oracle 投自家方向). Sybil 多 PK P2+ deferred.
-  const marketRow = sqlite.prepare('SELECT m.id, m.deadline_daa, mr.address AS maker_address, br.address AS broker_address FROM pool_markets m LEFT JOIN relay_nodes mr ON mr.id = m.maker_relay_id LEFT JOIN relay_nodes br ON br.id = m.broker_relay_id WHERE m.id = ?').get(marketId);
+  const marketRow = sqlite.prepare('SELECT m.id, m.deadline_daa, m.maker_pk, m.broker_pk, mr.address AS maker_address, br.address AS broker_address FROM pool_markets m LEFT JOIN relay_nodes mr ON mr.id = m.maker_relay_id LEFT JOIN relay_nodes br ON br.id = m.broker_relay_id WHERE m.id = ?').get(marketId);
   const excludePks = [];
-  // maker_pk / broker_pk derive from address via x-only (= async needed but here sync, so look
-  // up from oracle_stake_enrollments where relay_address matches; or derive sync if WASM available).
-  // Simplest: look up x-only via stake_enrollments (already canonicalized).
+  // 问2 fix (Bettor 2026-06-15, extends #27 maker/broker exclude): exclude maker_pk + broker_pk CHAIN-ANCHORED
+  // (pool_markets.{maker,broker}_pk = set at create + folded into metadata_hash → byte-equal across nodes).
+  // This is ROBUST vs the address→oracle_stake_enrollments lookup below, which is NODE-LOCAL and MISSES when a
+  // broker (broker≠maker) enrolled as an oracle under a DIFFERENT relay_address than the market's broker_relay_id
+  // — the 问2 manipulation vector: such a broker_pk could be VRF-sampled onto its OWN market's committee and
+  // judge a market it brokers. Direct chain-anchored pk closes it + is more deterministic (= same cross-node
+  // lesson as side_lock_daa: prefer chain-anchored over node-local DB lookups). Belt+suspenders: keep the
+  // address lookup too (covers legacy markets where pool_markets.maker_pk is NULL, resolved via maker_address).
+  if (marketRow?.broker_pk) excludePks.push(String(marketRow.broker_pk).toLowerCase());
+  if (marketRow?.maker_pk) excludePks.push(String(marketRow.maker_pk).toLowerCase());
   if (marketRow?.maker_address) {
     const mp = sqlite.prepare('SELECT staker_pk_x FROM oracle_stake_enrollments WHERE relay_address = ? LIMIT 1').get(marketRow.maker_address);
     if (mp?.staker_pk_x) excludePks.push(String(mp.staker_pk_x).toLowerCase());
