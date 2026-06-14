@@ -36,16 +36,29 @@ J2 `computeSettleChunks(winners[], cap)` (greedy, merkle_index ASC): 遍历累�
 | ② winner payout amount | `computePoolPayouts` 纯 fn (pool state 派生, BigInt sompi 零 float) | ✓ |
 | ③ winner payout addr | `XOnlyPublicKey(bettor_pk).toAddress` pk-derive (②轴修, 删 node-local) | ✓ a40e96d5 |
 | ④ cap | **SOURCE 硬编码常量** (如 SAFE_THRESHOLD), **禁 process.env/DB/node-config 读** | ⚠ Bettor①/NWT⑤ fork-命门 |
-| ⑤ estimateStorageMass predicate | KIP-9 完整公式 (L1948), **over chunk TX 全体** (input + K winner outputs + 1 change + fee), 非只 winner 输出 | ⚠ NWT② undercount |
+| ⑤ mass predicate = **FULL totalMass** | `computeMassEst(byte-mass, **含 spine-P2SH redeem witness 实字节**) + Σ storageMass(每 winner) + storageMass(change)`, **非只 lib estimateStorageMass(storage 分量)** | ⚠⚠ Bettor 命门: spine redeem 主导 |
+| ⑥ N_max fee-reserve (J2 B-上界) | `N_max = ceil(numWinners × C / (cap × minPayout))` → reserve = N_max×per-chunk-fee; numWinners(链计数)/C(常量)/cap(④常量)/minPayout(computePoolPayouts 链锚)/ceil(确定) 全链锚 | ✓ J1 co-verify byte-equal |
 
 ∴ greedy partition 是 pure fn of 链锚输入 → **两节点同切** (封片点确定: mass=f(output 值+数+脚本长), 全 P2PK
 同脚本长 → addr 内容不动 mass, 封片点由 ②amount+①序 定, 与 addr 内容无关 [J2 纠正后准确表述]).
 
+⚠ **⑥ fee↔N 循环 break (J2 B-上界预留, J1 determinism co-verify)**: chunking 引入 N miner fee (每 chunk 1 个)
+→ 守恒 Σwinners+broker+Σoracle+Σ(N fee)==pool; N 越多 fee 越多 → 必预留. **否决 A(迭代)**: reserve↑→payout↓→
+1/payout↑→mass↑→N↑→reserve↑ **正反馈可震荡/发散 = 非确定收敛** (cross-node 致命). **B(上界一次定)**: N_max
+链锚公式 → 两节点同 N_max → reserve 确定 → payout 确定 → **determinism-by-construction 零迭代**. = §1 贪心切的
+payout 输入(②)的前置 (reserve 先定才有 distributable→payout).
+
 ⚠ **④ cap-source = fork 命门** (Bettor①/NWT⑤): cap 直接定封片点 → cap 若 env/DB 可变 → 两节点异 cap → 异
 封片 → 异 chunk 划分 = settle fork. **cap 必 source 常量** (lint/测断言 cap 非 `process.env`/DB 读; NWT 攻面: 喂
-异 cap 验 fork). ⑤ **mass predicate 必算 chunk TX 全体** (NWT②): chunk = input(上 change) + K winner + 1 change +
-fee; greedy 若只 sum winner 输出 mass = undercount → 按 winner 塞满 cap 后建全 TX 超 100k → 不 relay. J2 predicate
-`estimateStorageMass(chunk inputs, [已累 + 本 winner + 1 change])` 已含 input+change ✓ (确认对齐).
+异 cap 验 fork). ⑤ **mass predicate 必 = FULL totalMass** (Bettor 命门 + NWT② sharpen, 双重 undercount):
+chunk = input(上 change spine-P2SH) + K winner + 1 change + fee. **双重漏算**: ①只 sum winner 输出 (漏 change/input)
+②**只 storage 分量** (lib `estimateStorageMass(value)`=纯 KIP-9 C/value storage, **不含 compute/size mass**).
+**真 totalMass = computeMassEst(byte-mass, 含 spine-P2SH redeem witness 实字节) + Σ storageMass(winner) + storageMass(change)**
+(= `computeMultiOutputFee` 内 totalMass 法). ⚠ **spine redeem witness 主导**: §3 找零链每 chunk 花一个 spine-P2SH
+输入, redeem script(大=整 PoolSpine bytecode)进 witness = 大 compute/size mass = **正是 bshard MAX_FOLD_K=23 的
+quadratic-redeem-per-P2SH-input 同绑定**. ∴ J2 prototype 若用廉价 P2PK 输入模型 → undercount → 真 chunk 数 >> 23-class
+预估 (每 chunk 容纳的 winner 数被 spine redeem 挤小). **必用真 spine-P2SH 输入 mass 重量 computeSettleChunks** (待 J2
+校正 predicate + 我 §3 SS spine-remainder 定 redeem 实字节). 此 mass predicate 两节点必同 (链锚 redeem bytes) = determinism.
 
 ### 1.1 edge guards (NWT design-stage 攻面先焊 + Bettor②)
 - **single-winner > cap (NWT①/Bettor②)**: 一 winner output mass 独超 cap → greedy 在空 chunk 上"试+本超cap即封"
