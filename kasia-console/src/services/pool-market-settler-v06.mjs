@@ -398,6 +398,40 @@ export function sampleAndStoreCommittee(marketId, endBlockHash) {
 }
 
 /**
+ * recaptureSideLockDaaForMarket — #27a v2.1 forward-break fix (Owner hardening sprint, e0ktm live repro).
+ *
+ * A bet registered while its side_lock UTXO was still in the mempool gets side_lock_daa = NULL at ingest
+ * (no accepting-block daaScore yet). By committee-sample time (deadline passed) that UTXO is confirmed, so we
+ * RE-CAPTURE its canonical accepting-block daa from chain via the SAME single-source captureSideLockDaa the
+ * ingest uses → byte-equal across nodes (proven: (a) 20/20 cross-node daa byte-equal). Idempotent: only fills
+ * NULL rows, never overwrites a set daa. A bet still unresolvable here (spent / never-confirmed) stays NULL →
+ * sampleAndStoreCommittee fail-louds as designed (transient: retry next tick, else quorum-timeout-refund).
+ *
+ * MUST be awaited BEFORE sampleAndStoreCommittee (which is sync + cannot do the async RPC recapture itself).
+ * @returns {Promise<{recaptured:number, remaining:number}>}
+ */
+export async function recaptureSideLockDaaForMarket(marketId) {
+  const nullBets = sqlite.prepare(
+    'SELECT id, side_p2sh, side_lock_tx, stake_amount FROM pool_bettor_sides WHERE market_id = ? AND side_lock_daa IS NULL'
+  ).all(marketId);
+  if (!nullBets.length) return { recaptured: 0, remaining: 0 };
+  const { captureSideLockDaa } = await import('./trade-protocol-filter.js');
+  const marketRow = sqlite.prepare('SELECT spine_p2sh FROM pool_markets WHERE id = ?').get(marketId);
+  const network = String(marketRow?.spine_p2sh || '').startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
+  const upd = sqlite.prepare('UPDATE pool_bettor_sides SET side_lock_daa = ? WHERE id = ? AND side_lock_daa IS NULL');
+  let recaptured = 0;
+  for (const b of nullBets) {
+    let cap;
+    try {
+      cap = await captureSideLockDaa({ side_p2sh: b.side_p2sh, side_lock_tx: b.side_lock_tx, stake_amount: b.stake_amount, network });
+    } catch { cap = { daa: null }; }
+    if (cap && cap.daa !== null && cap.daa !== undefined) { upd.run(cap.daa, b.id); recaptured++; }
+  }
+  const remaining = sqlite.prepare('SELECT COUNT(*) AS c FROM pool_bettor_sides WHERE market_id = ? AND side_lock_daa IS NULL').get(marketId).c;
+  return { recaptured, remaining };
+}
+
+/**
  * Load committee for a market from pool_committee.
  */
 export function loadCommittee(marketId) {

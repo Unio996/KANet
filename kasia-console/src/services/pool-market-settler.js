@@ -587,7 +587,7 @@ export async function poolSettlerTick() {
           if (!alreadySampled) {
             try {
               const { createRelayChainReader } = await import('./relay-chain-reader.mjs');
-              const { fetchEndBlockHashCanonical, sampleAndStoreCommittee, ensurePoolSnapshotByRoot } = await import('./pool-market-settler-v06.mjs');
+              const { fetchEndBlockHashCanonical, sampleAndStoreCommittee, ensurePoolSnapshotByRoot, recaptureSideLockDaaForMarket } = await import('./pool-market-settler-v06.mjs');
               const { getStatus, isRelayAlive } = await import('./relay-manager.js');
               // Bettor r182/r183/r184: maker_relay_id may be remote (cross-node ingested market) →
               // local Console can't IPC to it. Use any locally-running relay for chainReader —
@@ -662,6 +662,15 @@ export async function poolSettlerTick() {
               } catch (shErr) {
                 console.warn(`[pool-settler] self-heal snapshot market=${market.id.slice(0,12)}: ${shErr.message}`);
               }
+              // #27a v2.1 forward-break fix (Owner hardening sprint, e0ktm live repro): a bet registered while
+              // its side_lock UTXO was in mempool got NULL side_lock_daa at ingest (no accepting-block daa yet).
+              // By now the UTXO is confirmed → re-capture its canonical daa from chain (single-source
+              // captureSideLockDaa → byte-equal cross-node) so #27a doesn't fail-loud on a now-resolvable fresh
+              // bet. MUST run before sampleAndStoreCommittee (sync). Truly-unresolvable bets stay NULL → fail-loud.
+              try {
+                const rc = await recaptureSideLockDaaForMarket(market.id);
+                if (rc.recaptured) console.log(`[pool-settler] #27a recapture market=${market.id.slice(0,12)} filled ${rc.recaptured} mempool-NULL-daa bets from chain (remaining NULL ${rc.remaining})`);
+              } catch (rcErr) { console.warn(`[pool-settler] #27a recapture market=${market.id.slice(0,12)}: ${rcErr.message}`); }
               const committee = sampleAndStoreCommittee(market.id, endBlock.hash);
               // Wire committee_relay_ids → pool_markets.oracle_relay_ids so voter scan picks up.
               sqlite.prepare('UPDATE pool_markets SET oracle_relay_ids = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
