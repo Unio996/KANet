@@ -51,11 +51,35 @@
 
 ---
 
-## 待团队 review / 补充
+## 7. 节点侧 (:3300 独立机器) — J1
 
-- J1: :3300 节点侧 restart/sync 流程是否有本 checklist 没覆盖的(独立机器特有)?
-- J2: mass/880 层有无补充(consolidate cron 部署纪律)?
-- NWT: determinism 验证还有哪些必核项进 checklist?
-- KANet-UI: operator 实操还有哪些 step(faucet relay gas / tg-bot 单 poller 防 409)?
+- [ ] **跨节点 code-sync**: `git fresh-fetch origin`(别信本地 stale ref)→ **diff 目标 commit vs 当前**(确认只含预期改)→ `git merge --ff-only origin/<branch>` 到【与 :3200 EXACT 同一 commit】。**禁 :3300 独立 cherry-pick**(不同 sha=drift)。验 HEAD + **tree hash == :3200**(byte-equal)。
+- [ ] **restart-safety = deadline age(zombie vs real)**: 仅【无真 settle 在飞】才 restart。deadline 数天前的 verifying = watchdog 重试的 zombie = 安全；近期 deadline 的 collecting_sigs = 真 settle = 等。
+- [ ] **anti-split-brain restart SOP**: 先停 supervisor(⚠ Git-Bash kill 杀不动 Win 进程 → 必 PowerShell Stop-Process)+ 停 Console → 验两进程死 + port 空 → `nohup bash kanet-start-headless.sh` → 验 **单 Console**(count==1，防双 Console 抢 :3300/DB split-brain)+ supervisor==1 + monitor(生命线)alive + /health 200。
+- [ ] **node_modules junction 坑**: 禁 `rm -Recurse` worktree/junction(删真 packages → boot crash)；用 `git worktree remove` / `cmd rmdir <link>`。
 
-— Bettor-tn 草稿, 候团队补充收口成开门正式 runbook。
+## 8. §880 / consolidate cron 部署 — J2
+
+- [ ] **consolidate cron 活性验行为非 config**: design-v2 B maintainer(tick 180s/target 30)post-deploy 验 broadcaster `utxosBefore≥target`(行为探针)非看 index.js 配；cron 静默死 → 880 复发。
+- [ ] **consolidate_utxo 命令 3-层注册全**: commands.mjs COMMAND_TYPES + SCHEMA + FIELD_TYPES 全注册(KANet-UI 撞过漏一层 → unknown reject)→ post-deploy 跑一次 consolidate 验真 work。
+- [ ] **大 settle 前 broadcaster UTXO 预检**: gate B #31 chunk = N sequential sign_req → 验 broadcaster `utxosBefore≥N` 否则 broadcast-starvation(qr733 重演)；不够手动 /transfer 充。
+- [ ] **kip9-mass/SOMPI_PER_MASS 单源 drift-guard 测 PASS**(防跨节点 fee fork → settle 漂)。
+- [ ] **mid-broadcast merge 禁**(consolidate 不在大 sign_req 在飞时跑 → 消费在飞 chunk UTXO 打断)。
+
+## 9. determinism 验证 — NWT
+
+- [ ] **endpoint-liveness probe**: 验 NEW route/行为 live(probe → 非 404)非只看 PID restart(dee7bc9a 用 POST /withdraw→404 抓未部署)。
+- [ ] **跨节点 OUTPUT byte-equal**: 两节点同 market 的 committee_pk_hash / settle TX 逐字节同 = **终极 determinism 验**(tree byte-equal 证同码；output byte-equal 证 deployed 码 PRODUCE 同果)。
+- [ ] **value-equiv 声明必 empirical 验**(drift-guard 或 before/after，非凭信)。
+- [ ] **禁 stale 码跑 post-deploy verify/test**(必 gate on confirmed-fresh running，否则 false-negative 误归给改动)。
+
+## 10. operator 实操 — KANet-UI
+
+- [ ] **tg-bot 单 poller 防 409**: 重启 bot 用 stop→(等旧 poller getUpdates 锁 ~30s 释放)→start；验 console.log `@<bot> up` + 0 个 409 + 单 `_launch_tg_bot` 进程(无 stray)。
+- [ ] **faucet relay gas**: FaucetRelay-tn-2 余额监控；drain 大则 /transfer 补；per-IP/per-TG 限速防 drain。
+- [ ] **log mtime 验真**: 报警/状态前核 log mtime 是不是当前进程写的(stale log 误导 → 本 session 2 天前 tg-bot.log 409 虚惊；Console-managed bot 走 console.log 非旧 standalone log)。
+- [ ] **pidfile MSYS vs Windows pid**: supervisor pidfile 存 MSYS `$$` pid ≠ PowerShell Get-Process 的 Windows pid；验 supervisor 走 `kanet-console-supervisor.sh status` 非眼睛比对。
+
+---
+
+⚠ **真正"稳固"还差一次干净的两节点全栈部署演练**(开门前最后一关)。本 checklist = 4-agent 实战经验固化(Bettor 草稿 + J1/J2/NWT/KANet-UI 各域补)。
