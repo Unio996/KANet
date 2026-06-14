@@ -1638,9 +1638,11 @@ export async function dispatchPhase2(market, decision) {
     // bettor_pk (chain-anchored, 两节点 pool_bettor_sides commit 同源) — 删原 node-local relay_nodes 查分叉.
     // 原 bettor_relay_id 路 (SELECT address FROM relay_nodes WHERE id) = NODE-LOCAL: 非持该 relay 的节点查返
     // NULL → 下方 missing addresses return = settle abort (非持 relay 节点结不了) 或异 addr → cross-node 命门
-    // (= #293 maker_pk / committee active-flag 同病). chunk-determinism 级联: addr node-local → 异 addr → 异
-    // output → 异 mass → 异封片点 → 异 chunk 划分 (不只 addr 错, chunk 边界都漂). 无 fallback: Bettor 实测
+    // (= #293 maker_pk / committee active-flag 同病). 命门: 非持 relay 节点查返 NULL → settle abort (结不了) 或
+    // 异 recipient (付错人); pk-derive 单源 → 任意节点可结 + 输出 byte-equal (付对人). 无 fallback: Bettor 实测
     // pool_bettor_sides relay-bound 行 (bettor_relay_id 非空) = 403/403 bettor_pk POPULATED, 0 NULL.
+    // (注: chunk 封片点由 output 值/数定 [computePoolPayouts + merkle_index 链锚], 与 addr 内容无关 — 全 P2PK
+    // 同脚本长不动 storage/compute mass; addr 是独立"付对人"命门, 非 chunk-边界 [J2 纠正原 cascade 过度断言].)
     const sideAddrs = sides.map(s => {
       try {
         return new kaspaWasm.XOnlyPublicKey(s.bettor_pk).toAddress(settleNetwork).toString();
