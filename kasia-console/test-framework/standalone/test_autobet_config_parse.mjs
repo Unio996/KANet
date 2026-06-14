@@ -43,6 +43,14 @@ check('relays unset → non-empty default', parseRelays(undefined).length > 0,
 eqArr('relays "a,b" → ["a","b"]', parseRelays('a,b'), ['a', 'b']);
 eqArr('relays " a , , b " → ["a","b"] (trim + drop blanks)', parseRelays(' a , , b '), ['a', 'b']);
 
+// --- #27b (KANet-UI sprint): default RELAYS must EXCLUDE oracle relays (tester-1/2/3) so auto-bet
+//     never makes an oracle a bettor (oracle∩bettor, the demo blocker that starves #27a's committee). ---
+const _def = parseRelays(undefined);
+check('relays default excludes oracle testers (tester-1/2/3) — #27b',
+  !_def.some(r => /^tester-/i.test(r)), `default = ${JSON.stringify(_def)}`);
+check('relays default keeps only non-oracle bettor bots (AutoBetter-*) — #27b',
+  _def.length >= 1 && _def.every(r => /^AutoBetter-/i.test(r)), `default = ${JSON.stringify(_def)}`);
+
 if (fails) { console.error(`\n${fails} assertion(s) FAILED`); process.exit(1); }
-console.log('\nALL PASS (10 assertions) — #27c falsy-disable fix verified');
+console.log('\nALL PASS (12 assertions) — #27c falsy-disable + #27b oracle-relay removal verified');
 process.exit(0);

@@ -32,8 +32,10 @@ export function parseTickMs(raw) {
 }
 export function parseRelays(raw) {
   // `??` (非 `||`): 显式 '' → [] (filter(Boolean) 后) = 彻底清空; 只 null/undefined(unset) → 默认串。
-  // 默认串去 oracle testers (tester-1/2/3) = KANet-UI #27b 在此改值 (同区一个 owner)。
-  return (raw ?? 'AutoBetter-1,AutoBetter-2,AutoBetter-3,tester-1,tester-2,tester-3').split(',').map(s => s.trim()).filter(Boolean);
+  // #27b (KANet-UI sprint): 默认串移除 oracle relays (tester-1/2/3) — 它们既是委员池成员又被 auto-bet
+  // 押注 → 制造 oracle∩bettor 重叠 (#27a J1 sampler 要排除的)。auto-bet 只用非-oracle 押注 bot。
+  // ⚠ 同批部署 (#27a + #27b): 单上 #27a (排除 bettor-oracle) 会饿死委员若 oracle 仍在押; 必跟此 land。
+  return (raw ?? 'AutoBetter-1,AutoBetter-2,AutoBetter-3').split(',').map(s => s.trim()).filter(Boolean);
 }
 const TICK_INTERVAL_MS = parseTickMs(process.env.AUTO_BET_TICK_MS);
 const PER_TICK = Number(process.env.AUTO_BET_PER_TICK) || 50;  // 押所有开放市场 (每个 relay 每 tick 上限 50 单, 实际看 markets.length)
