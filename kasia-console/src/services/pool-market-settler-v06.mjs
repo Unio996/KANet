@@ -320,7 +320,7 @@ export function sampleAndStoreCommittee(marketId, endBlockHash) {
   // J1tn r303 P0-#1 sweep (Bettor r365b 问2 钦定): 同市场 broker∉oracle + maker∉oracle. derive
   // excludePks from market row (公开链上字段 maker_pk + broker_pk, 跨节点 verifier 可重算).
   // 防同 PK 双角色直接操纵 (= 收 broker fee + 当 oracle 投自家方向). Sybil 多 PK P2+ deferred.
-  const marketRow = sqlite.prepare('SELECT m.id, mr.address AS maker_address, br.address AS broker_address FROM pool_markets m LEFT JOIN relay_nodes mr ON mr.id = m.maker_relay_id LEFT JOIN relay_nodes br ON br.id = m.broker_relay_id WHERE m.id = ?').get(marketId);
+  const marketRow = sqlite.prepare('SELECT m.id, m.deadline_daa, mr.address AS maker_address, br.address AS broker_address FROM pool_markets m LEFT JOIN relay_nodes mr ON mr.id = m.maker_relay_id LEFT JOIN relay_nodes br ON br.id = m.broker_relay_id WHERE m.id = ?').get(marketId);
   const excludePks = [];
   // maker_pk / broker_pk derive from address via x-only (= async needed but here sync, so look
   // up from oracle_stake_enrollments where relay_address matches; or derive sync if WASM available).
@@ -332,6 +332,28 @@ export function sampleAndStoreCommittee(marketId, endBlockHash) {
   if (marketRow?.broker_address && marketRow.broker_address !== marketRow.maker_address) {
     const bp = sqlite.prepare('SELECT staker_pk_x FROM oracle_stake_enrollments WHERE relay_address = ? LIMIT 1').get(marketRow.broker_address);
     if (bp?.staker_pk_x) excludePks.push(String(bp.staker_pk_x).toLowerCase());
+  }
+  // J1 #27a v2 (Owner hardening sprint 2026-06-14; Bettor daa-source + NWT r1175 canonical-daa): exclude this
+  // market's BETTORS from its own committee (oracle∩bettor: a betting oracle must not judge a market it bet on
+  // — the demo exposed AUTO_BET_RELAYS including oracle testers). CHAIN-ANCHORED for cross-node determinism:
+  // a bettor is in the set iff side_lock_daa <= deadline_daa (deadline_daa = the SAME field the committee
+  // endBlock uses; side_lock_daa = canonical accepting-block daa captured at ingest = chain consensus fact).
+  // → every node computes IDENTICAL excludePks → committee byte-equal. (NOT live pool_bettor_sides, which
+  // diverges on late-propagating boundary bets = the determinism hole NWT r1170 caught.) NULL side_lock_daa =
+  // ambiguous (legacy/unconfirmed) → FAIL-LOUD (throw): never silently include/exclude → no cross-node fork
+  // (NWT r1175 ②). #27d catch-up re-ingests bets with daa from the same source; an unresolvable-daa bet keeps
+  // sampling failing → (c) quorum-timeout-refund. GUARD: selectCommittee throws fail-loud if eligible <
+  // COMMITTEE_SIZE after exclusion (couples #27b which stops oracles betting → no committee starvation).
+  const deadlineDaa = Number(marketRow?.deadline_daa);
+  if (!Number.isFinite(deadlineDaa) || deadlineDaa <= 0) {
+    throw new Error(`#27a: market ${marketId.slice(0, 12)} missing valid deadline_daa (${marketRow?.deadline_daa}) — cannot chain-anchor bettor exclusion`);
+  }
+  for (const b of sqlite.prepare('SELECT DISTINCT bettor_pk, side_lock_daa FROM pool_bettor_sides WHERE market_id = ?').all(marketId)) {
+    if (b.side_lock_daa === null || b.side_lock_daa === undefined) {
+      throw new Error(`#27a: market ${marketId.slice(0, 12)} bettor ${String(b.bettor_pk).slice(0, 12)} has NULL side_lock_daa — fail-loud (ambiguous bet set breaks cross-node determinism; awaits #27d daa re-ingest)`);
+    }
+    if (b.bettor_pk && Number(b.side_lock_daa) <= deadlineDaa) excludePks.push(String(b.bettor_pk).toLowerCase());
+    // side_lock_daa > deadline_daa = post-deadline straggler → not a valid bettor for this market → not excluded.
   }
   const sampling = selectCommittee(
     snapshot.pool_pks.map((pk, i) => ({ pk_hex: pk, stake_sompi: BigInt(snapshot.pool_stakes[i]) })),
