@@ -36,7 +36,9 @@ contract PoolSpine_v07_shard(
     // —— shard 叶 state genesis (NWT 攻击面①: 必 0 起) ——
     int      init_localYes,      // 创建时 == 0 (ctor 调用方焊 0; SS 侧 register 单调增防后改)
     int      init_localNo,
-    int      max_register_ins    // register covenant 的 for 循环界 (mass 实测定)
+    // —— fold covenant 循环界 (①合并: fold entrypoint 并入本叶合约同 cov_id, Bettor r637+NWT 拍) ——
+    int      max_fold_ins,       // = MAX_FOLD_K (fold for 循环界, Q5 mass 实测定; register_bet binding=auth from=1 无循环不需界)
+    int      max_fold_outs       // = 1 (fold k→1; 对齐 conserve_and_bump to=max_outs 模板)
 ) {
     // —— 可变 state (UTXO 携值, fold 经 readInputState 读) ——
     int localYes = init_localYes;
@@ -96,6 +98,40 @@ contract PoolSpine_v07_shard(
         return({ localYes: newLocalYes, localNo: newLocalNo });
     }
 
+    // —— entry: fold (N:M conserve covenant, #26 件2 ①合并进本叶合约) ——
+    // N 输入(本模板 shard 叶 + 同模板中间 UTXO) → 1 输出(聚合中间/root). readInputState 逐片读 tally → 逐 sompi
+    // 精确求和 → conserve EXACT → root.localYes/localNo = globalYes/globalNo (件3 settle_aggregate introspect 读).
+    //
+    // ①合并红利 (Bettor r637 + NWT 拍, DECL L271-294 验证驱动): register_bet + fold 共本合约【一脚本=一 cov_id】
+    //   → fold 的 OpCovInputCount(cov_id) 只数本模板输入 → shards(register_bet 路径写的)+中间(fold 路径写的) 天然
+    //   在 fold covenant group, 假/外来 UTXO(异脚本=异 cov_id)物理上不在 group 进不来 = provenance by-construction
+    //   (NWT 攻击面①结构满足, 零手动白名单 op). 零 committee-sig: fold permissionless, conserve 精确(out==Σin)无法偷值.
+    //
+    // SS: conserve_and_bump N:M 模板 (DECL L224-246 源 + L266-306 lowering): binding=cov + State[] prev_states
+    //   由 silverc lower 为 cov_id=OpInputCovenantId → for(k,0,OpCovInputCount(cov_id),max){readInputState(OpCovInputIdx(cov_id,k))}.
+    #[covenant(binding = cov, from = max_fold_ins, to = max_fold_outs, mode = verification)]
+    function fold(State[] prev_states, State[] new_states) {
+        require(prev_states.length >= 1);
+        require(new_states.length == 1);        // fold k→1 (单输出聚合; to=max_fold_outs 但语义恒 1)
+
+        int sumYes = 0;
+        int sumNo  = 0;
+        for(i, 0, prev_states.length, max_fold_ins) {
+            sumYes = sumYes + prev_states[i].localYes;
+            sumNo  = sumNo  + prev_states[i].localNo;
+        }
+
+        // conserve EXACT (非 conserve_and_bump 的 >=): tally 是计数非可烧 value → 输出必逐 sompi 等于求和
+        // (fold trustless 核心: root tally 链上派生 = Σ叶真值, 无创造/销毁/谎报空间).
+        require(new_states[0].localYes == sumYes);
+        require(new_states[0].localNo  == sumNo);
+
+        // NWT ③ overflow: 防多片求和近 2^128 wrap (单 root tally < MAX_TALLY ≈ 2.1e15 sompi << 2^128).
+        require(new_states[0].localYes < 2100000000000000);
+        require(new_states[0].localNo  < 2100000000000000);
+    }
+
     // —— settle / dispute_reveal / refund: 单片市场 (shard_count==1) 复用 PoolSpine_v07 现有 entry 不动 ——
     //   (多片 settle 走 fold-root 派生 globalYes/globalNo + commit 硬校验, 件3 接入; 单片 == 现行为, 守回归).
+    //   件3: settle_aggregate 的 globalYes/No 从 fold-root introspection 读 (非 committee-sig 背书) → trustless 升级.
 }
