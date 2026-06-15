@@ -1425,3 +1425,275 @@ export async function checkUtxoLanded(address, txid, networkId) {
     try { await rpc.disconnect(); } catch {}
   }
 }
+
+// ── 9. bshard M3 fold-carries-KAS relay handlers (J1, 2026-06-15) ──
+//
+// e2e-blocker 补齐: builders 产 command(action=bshard_register_bet/claim_winner/refund_cancelled), 本组 unlock 函数
+//   在 relay build+sign+broadcast。承重正确性:
+//   • selector(ABI 实查, 4-vantage): register_append=OP_0 / claim_draw=OP_4 / refund_draw=OP_5
+//     (covenant fold 占 __leader_fold[1]/__delegate_fold[2] 2 ABI 槽 → close/claim/refund 挤到 3/4/5).
+//   • witness scriptSig push 序 = SS entrypoint 声明序 forward + selector + redeem reveal.
+//   • witness int = CScriptNum 最小(OP_N ≤16 / minimal LE 大); State 区(splice 用)= 固定 PUSH8(0x08)+i64-LE 8B.
+//   • 续约地址 PER-STATE(state_layout{start:1,len:87}): relay splice input redeem[1:88]→new-state 87B → payToScriptHash.
+//     validateOutputState 绑此 per-state P2SH(TUTORIAL L1000 + WithTemplate 类比)→ 续约不可重定向(算错=SS 拒, 不丢钱).
+
+const _POOL_STATE_START = 1;       // state_layout.start (PoolShard_fold)
+const _POOL_STATE_LEN = 87;        // state_layout.len = 6×(PUSH8+8) + (PUSH32+32)
+
+function _i64LE(v) {               // BigInt/number → 8-byte LE Buffer (固定 i64, 非最小)
+  const b = Buffer.alloc(8);
+  let n = BigInt(v);
+  if (n < 0n) n = (1n << 64n) + n;   // two's complement (State 值非负, 防御)
+  for (let i = 0; i < 8; i++) { b[i] = Number(n & 0xffn); n >>= 8n; }
+  return b;
+}
+
+// CScriptNum 最小编码 (witness int args). 0→OP_0('00'); 1-16→OP_N(0x50+n); else minimal LE + sign byte → push.
+function _encodeScriptNumPush(val) {
+  let v = BigInt(val);
+  if (v === 0n) return '00';
+  const neg = v < 0n; if (neg) v = -v;
+  const bytes = [];
+  while (v > 0n) { bytes.push(Number(v & 0xffn)); v >>= 8n; }
+  if (bytes[bytes.length - 1] & 0x80) bytes.push(neg ? 0x80 : 0x00);
+  else if (neg) bytes[bytes.length - 1] |= 0x80;
+  return _encodePushDataHex(Buffer.from(bytes));
+}
+function _pushInt(n) {
+  const v = BigInt(n);
+  if (v === 0n) return '00';
+  if (v >= 1n && v <= 16n) return (0x50 + Number(v)).toString(16).padStart(2, '0');  // OP_1..OP_16
+  return _encodeScriptNumPush(v);
+}
+function _pushBytes(hexOrBuf) {
+  const buf = Buffer.isBuffer(hexOrBuf) ? hexOrBuf : Buffer.from(hexOrBuf, 'hex');
+  return _encodePushDataHex(buf);
+}
+
+// 序列化 PoolShard_fold 7-field State → 87B hex (固定 PUSH8/PUSH32, State 声明序). NWT 2-impl byte-match 此格式.
+function _serializePoolStateHex(s) {
+  return _encodePushDataHex(_i64LE(s.local_yes))
+    + _encodePushDataHex(_i64LE(s.local_no))
+    + _encodePushDataHex(_i64LE(s.count))
+    + _encodePushDataHex(_i64LE(s.pool_value))
+    + _encodePushDataHex(_i64LE(s.closed))
+    + _encodePushDataHex(_i64LE(s.winningSide))
+    + _encodePushDataHex(Buffer.from(s.payoutRoot.replace(/^0x/, ''), 'hex'));   // PUSH32 + 32B
+}
+
+// per-state 续约 P2SH 地址: splice input redeem 的 state 区[1:88] → new state 87B → payToScriptHash.
+function _continuationAddress(inputRedeemHex, newStateHex, networkId) {
+  const redeem = Buffer.from(inputRedeemHex, 'hex');
+  const stateBytes = Buffer.from(newStateHex, 'hex');
+  if (stateBytes.length !== _POOL_STATE_LEN) throw new Error(`pool state ser ${stateBytes.length}B != ${_POOL_STATE_LEN}`);
+  const spliced = Buffer.concat([redeem.slice(0, _POOL_STATE_START), stateBytes, redeem.slice(_POOL_STATE_START + _POOL_STATE_LEN)]);
+  const spk = payToScriptHashScript(new Uint8Array(spliced));
+  return addressFromScriptPublicKey(spk, networkId).toString();
+}
+
+// dust PoolSide-ticket 地址: ps_prefix ‖ serialize(ticketState 4-field) ‖ ps_suffix → payToScriptHash.
+//   ticket State = {bettorPk(32), direction(int), stake(int), shardPoolId(32)} → PUSH32+PUSH8+PUSH8+PUSH32.
+function _ticketAddress(psPrefixHex, psSuffixHex, ticket, networkId) {
+  const stateHex = _pushBytes(ticket.bettorPk) + _encodePushDataHex(_i64LE(ticket.direction))
+    + _encodePushDataHex(_i64LE(ticket.stake)) + _pushBytes(ticket.shardPoolId);
+  const redeem = Buffer.concat([Buffer.from(psPrefixHex, 'hex'), Buffer.from(stateHex, 'hex'), Buffer.from(psSuffixHex, 'hex')]);
+  const spk = payToScriptHashScript(new Uint8Array(redeem));
+  return addressFromScriptPublicKey(spk, networkId).toString();
+}
+
+// 取 UTXO by outpoint txid at a P2SH/address (单一匹配).
+async function _matchUtxo(rpc, address, outpointTxid) {
+  const { entries } = await rpc.getUtxosByAddresses([address]);
+  const hits = (entries || []).filter(e => e.outpoint.transactionId === outpointTxid);
+  if (hits.length === 0) throw new Error(`UTXO not found at ${address} for tx ${outpointTxid}`);
+  if (hits.length > 1) throw new Error(`ambiguous ${hits.length} UTXOs at ${address} from ${outpointTxid}`);
+  return hits[0];
+}
+
+/**
+ * unlockBshardRegister — bshard_register_bet (register_append entry OP_0).
+ * Inputs: [0] leaf (P2SH register_append, no sig) + funding P2PK (wallet-signed).
+ * Outputs: [leaf_out_idx] new leaf (per-state addr, value+=stake) + [ps_out_idx] dust ticket + change.
+ */
+export async function unlockBshardRegister(args) {
+  const { wallet, cmd, networkId, lockTime = 0n } = args;
+  const w = cmd.witness;
+  const rpc = await connectRpc(networkId);
+  try {
+    const leafAddr = _continuationAddress(cmd.inputs.leaf.redeem_hex,
+      _serializePoolStateHex(cmd.inputs.leaf.current_state), networkId);   // 输入 leaf 当前 state → 当前地址(取 UTXO)
+    const leafUtxo = await _matchUtxo(rpc, leafAddr, cmd.inputs.leaf.outpointTxid);
+    const fundUtxos = [];
+    for (const f of (cmd.inputs.funding || [])) fundUtxos.push(await _matchUtxo(rpc, f.address, f.outpointTxid));
+
+    // 输出地址 relay 自算 per-state (忽略 cmd.address)
+    const newLeafAddr = _continuationAddress(cmd.inputs.leaf.redeem_hex, _serializePoolStateHex(cmd.outputs.leaf_continuation.state), networkId);
+    const ticketAddr = _ticketAddress(w.ps_prefix_hex, w.ps_suffix_hex, cmd.outputs.poolSide_ticket.state, networkId);
+
+    // leaf scriptSig: register_append witness(声明序) + selector OP_0 + redeem reveal. (无 sig: covenant-accumulate)
+    const leafSig = _pushInt(w.side) + _pushInt(w.stake) + _pushInt(w.leaf_out_idx) + _pushInt(w.ps_out_idx)
+      + _pushBytes(w.bettor_pk) + _pushBytes(w.ps_prefix_hex) + _pushBytes(w.ps_suffix_hex)
+      + '00' + _encodePushDataHex(Buffer.from(cmd.inputs.leaf.redeem_hex, 'hex'));
+
+    const outputs = [];
+    outputs[w.leaf_out_idx] = new TransactionOutput(BigInt(cmd.outputs.leaf_continuation.amountSompi), payToAddressScript(new Address(newLeafAddr)));
+    outputs[w.ps_out_idx] = new TransactionOutput(BigInt(cmd.outputs.poolSide_ticket.amountSompi), payToAddressScript(new Address(ticketAddr)));
+    const orderedOut = outputs.filter(o => o !== undefined);
+    if (cmd.outputs.change_address && cmd.outputs.change_amountSompi) {
+      orderedOut.push(new TransactionOutput(BigInt(cmd.outputs.change_amountSompi), payToAddressScript(new Address(cmd.outputs.change_address))));
+    }
+
+    const matched = [leafUtxo, ...fundUtxos];
+    // unsigned (funding inputs 留空待签; leaf 无 sig 直接置 scriptSig)
+    const unsigned = new Transaction({
+      version: 0,
+      inputs: matched.map((u, i) => ({
+        previousOutpoint: { transactionId: u.outpoint.transactionId, index: u.outpoint.index },
+        signatureScript: '', sequence: 0n, sigOpCount: i === 0 ? 0 : 1, utxo: u,
+      })),
+      outputs: orderedOut, lockTime: BigInt(lockTime), gas: 0n,
+      subnetworkId: '0000000000000000000000000000000000000000', payload: '',
+    });
+    const sigScripts = [leafSig];
+    for (let i = 1; i < matched.length; i++) {
+      sigScripts.push(createInputSignature(unsigned, i, wallet.getPrivateKey(), SighashType.All));
+    }
+    const signedTx = new Transaction({
+      version: 0,
+      inputs: matched.map((u, i) => ({
+        previousOutpoint: { transactionId: u.outpoint.transactionId, index: u.outpoint.index },
+        signatureScript: sigScripts[i], sequence: 0n, sigOpCount: i === 0 ? 0 : 1,
+      })),
+      outputs: orderedOut, lockTime: BigInt(lockTime), gas: 0n,
+      subnetworkId: '0000000000000000000000000000000000000000', payload: '',
+    });
+    _assertTxInvariants(matched, signedTx, 'unlockBshardRegister', networkId);
+    const r = await rpc.submitTransaction({ transaction: signedTx, allowOrphan: false });
+    return { txId: r.transactionId };
+  } finally { try { await rpc.disconnect(); } catch {} }
+}
+
+/**
+ * unlockBshardClaim — bshard_claim_winner (claim_draw entry OP_4).
+ * Inputs: [0] root (P2SH claim_draw, no sig) + ticket (P2SH authorize_spend, bettorSig) + fee P2PK (wallet-signed).
+ * Outputs: [payout_out_idx] payout→bettor P2PK + [root_out_idx] recreated root(value-=payout, closed=1) + change.
+ */
+export async function unlockBshardClaim(args) {
+  const { wallet, cmd, networkId, lockTime = 0n } = args;
+  const w = cmd.witness;
+  const rpc = await connectRpc(networkId);
+  try {
+    const rootAddr = _continuationAddress(cmd.inputs.root.redeem_hex, _serializePoolStateHex(cmd.inputs.root.current_state), networkId);
+    const ticketAddr = _ticketAddress(w.ps_prefix_hex, w.ps_suffix_hex, cmd.inputs.ticket.state, networkId);
+    const rootUtxo = await _matchUtxo(rpc, rootAddr, cmd.inputs.root.outpointTxid);
+    const ticketUtxo = await _matchUtxo(rpc, ticketAddr, cmd.inputs.ticket.outpointTxid);
+    const feeUtxo = cmd.inputs.fee ? await _matchUtxo(rpc, cmd.inputs.fee.address, cmd.inputs.fee.outpointTxid) : null;
+    const matched = [rootUtxo, ticketUtxo, ...(feeUtxo ? [feeUtxo] : [])];
+
+    const newRootAddr = _continuationAddress(cmd.inputs.root.redeem_hex, _serializePoolStateHex(cmd.outputs.root_continuation.state), networkId);
+    const bettorLockSpk = payToAddressScript(new Address(cmd.outputs.payout.address));
+
+    const outputs = [];
+    outputs[w.payout_out_idx] = new TransactionOutput(BigInt(cmd.outputs.payout.amountSompi), bettorLockSpk);
+    outputs[w.root_out_idx] = new TransactionOutput(BigInt(cmd.outputs.root_continuation.amountSompi), payToAddressScript(new Address(newRootAddr)));
+    const orderedOut = outputs.filter(o => o !== undefined);
+    if (cmd.outputs.change_address && cmd.outputs.change_amountSompi) {
+      orderedOut.push(new TransactionOutput(BigInt(cmd.outputs.change_amountSompi), payToAddressScript(new Address(cmd.outputs.change_address))));
+    }
+
+    // root scriptSig: claim_draw witness(声明序: rootOutIdx,payoutOutIdx,payout,merkle_index,tree_depth,siblings[],ticketInIdx,prefix/suffix_len)+ OP_4 + redeem.
+    let sibPush = '';
+    for (const s of w.siblings_hex) sibPush += _pushBytes(s);     // byte[32][] = depth 个 push, forward 序
+    const rootSig = _pushInt(w.root_out_idx) + _pushInt(w.payout_out_idx) + _pushInt(w.payout)
+      + _pushInt(w.merkle_index) + _pushInt(w.tree_depth) + sibPush
+      + _pushInt(w.ticket_in_idx) + _pushInt(w.ticket_prefix_len) + _pushInt(w.ticket_suffix_len)
+      + '54' + _encodePushDataHex(Buffer.from(cmd.inputs.root.redeem_hex, 'hex'));     // OP_4='54'
+
+    // ticket scriptSig: authorize_spend(bettorSig)+ OP_0 + redeem. bettorSig = relay 用 bettor key 签 ticket input.
+    // (root input 无 sig; fee input wallet-签). 先建 unsigned(待签 input scriptSig=''), 算 sighash.
+    const unsigned = new Transaction({
+      version: 0,
+      inputs: matched.map((u, i) => ({
+        previousOutpoint: { transactionId: u.outpoint.transactionId, index: u.outpoint.index },
+        signatureScript: '', sequence: 0n, sigOpCount: i === 0 ? 0 : 1, utxo: u,    // root(0)=0; ticket(1)=1; fee(2)=1
+      })),
+      outputs: orderedOut, lockTime: BigInt(lockTime), gas: 0n,
+      subnetworkId: '0000000000000000000000000000000000000000', payload: '',
+    });
+    const ticketSigHex = createInputSignature(unsigned, 1, wallet.getPrivateKey(), SighashType.All);
+    const ticketSig = ticketSigHex + '00' + _encodePushDataHex(Buffer.from(cmd.inputs.ticket.redeem_hex, 'hex'));   // OP_0 selector
+    const sigScripts = [rootSig, ticketSig];
+    if (feeUtxo) sigScripts.push(createInputSignature(unsigned, 2, wallet.getPrivateKey(), SighashType.All));
+
+    const signedTx = new Transaction({
+      version: 0,
+      inputs: matched.map((u, i) => ({
+        previousOutpoint: { transactionId: u.outpoint.transactionId, index: u.outpoint.index },
+        signatureScript: sigScripts[i], sequence: 0n, sigOpCount: i === 0 ? 0 : 1,
+      })),
+      outputs: orderedOut, lockTime: BigInt(lockTime), gas: 0n,
+      subnetworkId: '0000000000000000000000000000000000000000', payload: '',
+    });
+    _assertTxInvariants(matched, signedTx, 'unlockBshardClaim', networkId);
+    const r = await rpc.submitTransaction({ transaction: signedTx, allowOrphan: false });
+    return { txId: r.transactionId };
+  } finally { try { await rpc.disconnect(); } catch {} }
+}
+
+/**
+ * unlockBshardRefund — bshard_refund_cancelled (refund_draw entry OP_5).
+ * Inputs: [0] pool (P2SH refund_draw, no sig) + ticket (P2SH authorize_spend, bettorSig).
+ * Outputs: [payout_out_idx] refund→bettor P2PK=stake + [pool_out_idx] recreated pool(value-=stake, closed=2) + change.
+ */
+export async function unlockBshardRefund(args) {
+  const { wallet, cmd, networkId, lockTime = 0n } = args;
+  const w = cmd.witness;
+  const rpc = await connectRpc(networkId);
+  try {
+    const poolAddr = _continuationAddress(cmd.inputs.pool.redeem_hex, _serializePoolStateHex(cmd.inputs.pool.current_state), networkId);
+    const ticketAddr = _ticketAddress(w.ps_prefix_hex, w.ps_suffix_hex, cmd.inputs.ticket.state, networkId);
+    const poolUtxo = await _matchUtxo(rpc, poolAddr, cmd.inputs.pool.outpointTxid);
+    const ticketUtxo = await _matchUtxo(rpc, ticketAddr, cmd.inputs.ticket.outpointTxid);
+    const matched = [poolUtxo, ticketUtxo];
+
+    const newPoolAddr = _continuationAddress(cmd.inputs.pool.redeem_hex, _serializePoolStateHex(cmd.outputs.pool_continuation.state), networkId);
+    const outputs = [];
+    outputs[w.payout_out_idx] = new TransactionOutput(BigInt(cmd.outputs.payout.amountSompi), payToAddressScript(new Address(cmd.outputs.payout.address)));
+    outputs[w.pool_out_idx] = new TransactionOutput(BigInt(cmd.outputs.pool_continuation.amountSompi), payToAddressScript(new Address(newPoolAddr)));
+    const orderedOut = outputs.filter(o => o !== undefined);
+    if (cmd.outputs.change_address && cmd.outputs.change_amountSompi) {
+      orderedOut.push(new TransactionOutput(BigInt(cmd.outputs.change_amountSompi), payToAddressScript(new Address(cmd.outputs.change_address))));
+    }
+
+    // pool scriptSig: refund_draw witness(声明序: poolOutIdx,payoutOutIdx,ticketInIdx,prefix/suffix_len)+ OP_5 + redeem.
+    const poolSig = _pushInt(w.pool_out_idx) + _pushInt(w.payout_out_idx) + _pushInt(w.ticket_in_idx)
+      + _pushInt(w.ticket_prefix_len) + _pushInt(w.ticket_suffix_len)
+      + '55' + _encodePushDataHex(Buffer.from(cmd.inputs.pool.redeem_hex, 'hex'));    // OP_5='55'
+
+    const unsigned = new Transaction({
+      version: 0,
+      inputs: matched.map((u, i) => ({
+        previousOutpoint: { transactionId: u.outpoint.transactionId, index: u.outpoint.index },
+        signatureScript: '', sequence: 0n, sigOpCount: i === 0 ? 0 : 1, utxo: u,
+      })),
+      outputs: orderedOut, lockTime: BigInt(lockTime), gas: 0n,
+      subnetworkId: '0000000000000000000000000000000000000000', payload: '',
+    });
+    const ticketSigHex = createInputSignature(unsigned, 1, wallet.getPrivateKey(), SighashType.All);
+    const ticketSig = ticketSigHex + '00' + _encodePushDataHex(Buffer.from(cmd.inputs.ticket.redeem_hex, 'hex'));
+    const sigScripts = [poolSig, ticketSig];
+
+    const signedTx = new Transaction({
+      version: 0,
+      inputs: matched.map((u, i) => ({
+        previousOutpoint: { transactionId: u.outpoint.transactionId, index: u.outpoint.index },
+        signatureScript: sigScripts[i], sequence: 0n, sigOpCount: i === 0 ? 0 : 1,
+      })),
+      outputs: orderedOut, lockTime: BigInt(lockTime), gas: 0n,
+      subnetworkId: '0000000000000000000000000000000000000000', payload: '',
+    });
+    _assertTxInvariants(matched, signedTx, 'unlockBshardRefund', networkId);
+    const r = await rpc.submitTransaction({ transaction: signedTx, allowOrphan: false });
+    return { txId: r.transactionId };
+  } finally { try { await rpc.disconnect(); } catch {} }
+}

@@ -785,6 +785,33 @@ if (process.send) {
           return;
         }
 
+        case 'bshard_register_bet': {
+          // bshard M3 (J1 2026-06-15): register_append OP_0. leaf P2SH(no sig)+funding P2PK. relay 自算 per-state 续约地址.
+          const { unlockBshardRegister } = await import('./lib/p2sh.mjs');
+          const wallet = getWallet();
+          const r = await unlockBshardRegister({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) });
+          if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, txId: r.txId } });
+          return;
+        }
+
+        case 'bshard_claim_winner': {
+          // bshard M3: claim_draw OP_4. root P2SH(no sig)+ticket(bettorSig)+fee. winner draw-down from root.
+          const { unlockBshardClaim } = await import('./lib/p2sh.mjs');
+          const wallet = getWallet();
+          const r = await unlockBshardClaim({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) });
+          if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, txId: r.txId } });
+          return;
+        }
+
+        case 'bshard_refund_cancelled': {
+          // bshard M3: refund_draw OP_5. pool P2SH(no sig)+ticket(bettorSig). 退本金 + closed flip 0→2.
+          const { unlockBshardRefund } = await import('./lib/p2sh.mjs');
+          const wallet = getWallet();
+          const r = await unlockBshardRefund({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) });
+          if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, txId: r.txId } });
+          return;
+        }
+
         case 'pool_v07_compute_refund_mass': {
           // G6 批 3 段① Bettor r311 钦定: Console 手搓 UtxoEntry 喂 calculateTransactionMass
           // 多次 WASM panic (unreachable / 'outpoint is not an object' / scriptPublicKey 格式).
