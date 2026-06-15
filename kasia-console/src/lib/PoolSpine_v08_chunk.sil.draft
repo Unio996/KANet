@@ -42,11 +42,16 @@ contract PoolSpine_v08_chunk(
     int      oracleBondAmount,
     // —— v08 chunk 新增 ——
     int      maxWinnersPerChunk,  // = MAX_K (J2 computeSettleChunks 实测定, 本 chunk merkle-proof 循环编译期界)
-    int      init_hwm             // change UTXO genesis HWM (chunk_0 输出 change 起; pool-lock 隐含 hwm==0)
+    int      init_hwm,            // change UTXO genesis HWM (chunk_0 输出 change 起; pool-lock 隐含 hwm==0)
+    byte[32] init_plan_commit     // change UTXO genesis plan_commit (chunk_0 由 committee-sig commit, chunk_i 续读)
 ) {
     // —— 可变 state (change UTXO 携值, 下 chunk readInputState 读 — J2 compile fix: readInputState 须 contract state 字段) ——
-    // HWM = 已付到的 merkle_index (下个待付). chunk_i.seg_lo == 上个 change.hwm (cross-chunk linkage) + resume cursor.
+    // ★ B 设计双 state 字段 (NWT no-free-witness 不变量: chunk_i 所有 security-critical 从 state 读非 free-witness):
+    //   hwm = 已付到的 merkle_index (cross-chunk linkage seg_lo==prev.hwm + resume cursor).
+    //   planCommit = blake2b(全 winner pk+金额 + 段划分 + per-chunk fee-ceiling + winner方向) = committee-attested
+    //     settle 全 plan 承诺 (chunk_0 由 5×committee-sig commit; chunk_i 续读 → 7项 verify against 它, 零 free-witness).
     int hwm = init_hwm;
+    byte[32] planCommit = init_plan_commit;
 
     // —— entry 0 — settle_chunk (partial-settle + change 续锁; chunk_0/chunk_i/chunk_n 经参数区分) ——
     // 复用 settle_aggregate 的 committee-sig(≥4)+depth-8 merkle proof 机制 (本草稿引其逻辑, 不重抄~150 行).
@@ -69,20 +74,31 @@ contract PoolSpine_v08_chunk(
         //    为续【OpInputCovenantId(activeInputIndex)=本 covenant 自身链上身份】, 非自由 witness hash (同 #26 bshard cov 续链).
         // ... (winner merkle proofs per 子段成员 + globalYes/No + commit_id 同 settle_aggregate, 草稿略)
     ) {
-        // ① committee sig ≥4 (复用 settle_aggregate ①, 设计 A 每 chunk 验; 设计 B 仅 chunk_0 验 + chunk_i 走 cov-chain).
-        int validSigs = 0;
-        if (checkSig(c0Sig, pubkey(c0Pk))) { validSigs = validSigs + 1; }
-        if (checkSig(c1Sig, pubkey(c1Pk))) { validSigs = validSigs + 1; }
-        if (checkSig(c2Sig, pubkey(c2Pk))) { validSigs = validSigs + 1; }
-        if (checkSig(c3Sig, pubkey(c3Pk))) { validSigs = validSigs + 1; }
-        if (checkSig(c4Sig, pubkey(c4Pk))) { validSigs = validSigs + 1; }
-        require(validSigs >= 4);
-        require(winner == 0 || winner == 1);
         require(chunk_kind >= 0); require(chunk_kind <= 2);
+        require(winner == 0 || winner == 1);
 
-        // ② committee commitment (复用 settle_aggregate ②, 绑 dispute_reveal).
-        byte[] cc0 = c0Pk + c1Pk; byte[] cc1 = cc0 + c2Pk; byte[] cc2 = cc1 + c3Pk; byte[] cc3 = cc2 + c4Pk;
-        require(blake2b(cc3) == committeePkHash);
+        // ① B 授权分支 (B-safety 不变量: chunk_i 无 sig, 授权经 planCommit state 链锚传递, 非 free-witness):
+        //   设计 B (J2+J1+NWT+Bettor 裁): 仅 chunk_0 验 5×committee-sig (省中间 chunk sig-ops = 真容量杠杆,
+        //   缓 J2 880 broadcast). chunk_i (kind!=0) 无 sig — 续自合法 settle_chunk cov (validateOutputState/cov_id
+        //   provenance) + planCommit 从 input change state 读 (②b 块) → 7项 verify against state.planCommit.
+        if (chunk_kind == 0) {
+            // —— chunk_0: full committee-sig ≥4 (4-of-5 阈值, 同 settle_aggregate ①) + committee commitment ——
+            int validSigs = 0;
+            if (checkSig(c0Sig, pubkey(c0Pk))) { validSigs = validSigs + 1; }
+            if (checkSig(c1Sig, pubkey(c1Pk))) { validSigs = validSigs + 1; }
+            if (checkSig(c2Sig, pubkey(c2Pk))) { validSigs = validSigs + 1; }
+            if (checkSig(c3Sig, pubkey(c3Pk))) { validSigs = validSigs + 1; }
+            if (checkSig(c4Sig, pubkey(c4Pk))) { validSigs = validSigs + 1; }
+            require(validSigs >= 4);
+            // committee commitment (绑 dispute_reveal, 同 settle_aggregate ②).
+            byte[] cc0 = c0Pk + c1Pk; byte[] cc1 = cc0 + c2Pk; byte[] cc2 = cc1 + c3Pk; byte[] cc3 = cc2 + c4Pk;
+            require(blake2b(cc3) == committeePkHash);
+            // planCommit (winner方向 + 全winner pk+金额 + 段划分 + per-chunk fee-ceiling 的 blake2b) 经 5×sig sighash
+            // 覆盖本 scriptSig args = committee-attested. chunk_0 输出 change.planCommit = 此 (validateOutputState ③).
+            // (NWT plan_commit 攻面: chunk_0 once-sig 必 commit 全 chunk plan → chunk_i 无 sig 但 outputs 被授权.)
+        }
+        // chunk_i (chunk_kind != 0): 无 committee-sig. planCommit 从 input change state 读 (②b 块 readInputState),
+        //   一切 security-critical (winner方向/winner pk+金额/段/fee-ceiling) verify against state.planCommit (零 free-witness).
 
         // ② winner 子段 merkle proof: 本 chunk 只付 [seg_lo, seg_hi) 的 winner, 每个 merkle-proven against poolMerkleRoot
         //    (复用 settle_aggregate ③ depth-8 position-aware climb, per 子段成员; 草稿略循环体).
