@@ -80,7 +80,7 @@ contract PoolSpine_v08_chunk(
         // —— winner-subset merkle 证 (本段 [seg_lo,seg_hi) 每 winner; merkle-path 是唯一许的 free-witness: 自暴 against
         //    committed poolMerkleRoot, 篡改即 merkle fail) ——
         byte[32][] winnerPks,            // 本段 winner pubkey (k=0..segLen-1; merkle_index = seg_lo+k 派生非 free)
-        int[]      winnerAmounts,        // 本段 winner payout 金额 sompi (leaf=blake2b(pk‖amount[8B BE]) → merkle 证 amount)
+        int[]      winnerAmounts,        // 本段 winner payout 金额 sompi (leaf=blake2b(pk‖amount[8B LE]) → merkle 证 amount)
         byte[32][] winnerSiblings        // 本段 merkle siblings 扁平 (winnerSiblings[k*8+lvl] = winner k 第 lvl 层兄弟, depth-8)
         // (winner payout amount + tx-output 位 verify against planCommit 待续填; 本增量先填 merkle-climb 让 J2 量 per-winner mass)
     ) {
@@ -136,7 +136,7 @@ contract PoolSpine_v08_chunk(
         for (k, 0, segLen, maxWinnersPerChunk) {
             int widx = seg_lo + k;                         // merkle_index 连续派生 (链锚, 非 free-witness)
             require(widx >= 0); require(widx < 256);       // depth-8 → 256 叶
-            // (A)-refined 叶 = blake2b(pk ‖ payout amount[8B BE sompi]) → 一 climb 同证身份+金额 (J2: i64 防 bet×ratio 溢出, 强制 store-payout).
+            // (A)-refined 叶 = blake2b(pk ‖ payout amount[8B LE sompi]) → 一 climb 同证身份+金额 (J2: i64 防 bet×ratio 溢出, 强制 store-payout).
             byte[32] cur = blake2b(byte[](winnerPks[k]) + byte[](winnerAmounts[k], 8));
             int b0 = widx % 2;
             if (b0 == 0) { cur = blake2b(byte[](cur) + byte[](winnerSiblings[k*8+0])); } else { cur = blake2b(byte[](winnerSiblings[k*8+0]) + byte[](cur)); }
