@@ -250,6 +250,11 @@ committee-sig (续 change-chain cov). ∴ partition 是 settler-local 选择 **�
 - **守恒断言** (§4): Σ(all chunk winner outputs) + Σ(N chunk fees) + broker + Σ committee bond == pool 逐 sompi;
   **末 chunk change==0** (零 stuck); 每 winner ∈ 恰 1 chunk (无双付/漏).
 - **change-chain induction** (§2): chunk_{i+1} 输入 outpoint == chunk_i change output (txid+idx) 链上实证.
+- ⚠ **throughput 预期 (NWT 注, e2e timeout 须知)**: change-chain 是 UTXO 依赖**固有串行** — chunk_{i+1} 花 chunk_i
+  的 change → 必等 chunk_i **confirmed** 才能建 chunk_{i+1} (check_utxo_landed gate, §8.3 NO-TX-NO-STATE). ∴ N chunk
+  ≈ **N × block-time** (非瞬时; 100-winner 3-chunk ≈ 3 确认). correctness-required 不可并行 (change UTXO 未 confirm 不存在).
+  e2e harness timeout 据此设. (未来 scale 可 mempool-chain 提速 — 安全[capstone double-spend-reject 兜底]但加 orphan 处理,
+  **出 #31 开门 scope**, 现 confirmed-gate = 简单正确, 开门非规模.)
 
 ### 8.3 resumable kill-mid-chunk (NO-TX-NO-STATE 实证; HWM resume-token 验) — gate B 真闭核心 (Bettor)
 **两变体** (NWT coverage 加: 分布式 settler = 任意节点可结, cross-node resume 比 same-node restart 更贴 testnet 现实):
