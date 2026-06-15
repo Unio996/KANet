@@ -261,6 +261,15 @@ committee-sig (续 change-chain cov). ∴ partition 是 settler-local 选择 **�
   winner) + **无 skip** (不能跳过 hwm 漏付) → 全 winner 付齐 + 末 change==0. = HWM 一机制三性质 (linkage+resume+state).
 - **NO-TX-NO-STATE**: resume 只信**链上 HWM** (非本地 settler 进度文件/内存) → crash/换节点 不丢不重 = trustless 续结.
   cross-node (8.3b) 是此性质的**充分实证**: node B 无 node A 任何本地态, 纯链上 HWM 即可正确续 = 设计目标达成.
+- **★ resume-cursor 确定性算法 (NWT forward-flag, J2 wire 据此一次对 + 我 co-verify)**: 游标必找【**未花的 change
+  UTXO 链尾**】, 非已花中间 change (读已花中间 → resume 到过去 hwm → 重付已付 winner). 算法:
+  1. 查【**confirmed** UTXO 集】@ **v08 P2SH** (= ctor16 派生, per-market 唯一: ctor 含 market_id/shard_id → 此地址只住
+     本 market-shard 的 pool-lock + change 链; refund/dispute 输出 P2PK 不落此址 → 无混入).
+  2. filter unspent → **恰 1 个** = 链尾 (hwm=0 时是 pool-lock; 否则最新 change). 读其 state.hwm = resume cursor.
+  3. **边界**: 0 unspent = settle 完成 (末 chunk 已落, 无 change); **>1 unspent = ANOMALY** (halt+alert, 设计上不应发生
+     — 暗示 fork/bug). 续 chunk seg_lo == 读到的 hwm.
+  - **cross-node 确定性**: UTXO 集是**共识状态** (两节点同 on-chain view) → "unspent tip @ v08 P2SH" 任意节点查得同一答案
+    → resume cursor 跨节点确定 (8.3b node B 与 node A 读同一 tip). 只读 **confirmed** (非 mempool) = NO-TX-NO-STATE.
 
 ### 8.4 regression baseline (不退化红线)
 - **小池 ≤MAX_K**: 单 `settle_aggregate` (entry 1, =命门闭的 v07 路) 仍 PASS (46f8a/xfu62 等价回归).
