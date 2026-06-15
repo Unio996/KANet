@@ -143,8 +143,9 @@ chunk settle 回归 (46f8a/xfu62) 仍 PASS.
 
 ## 7. v08 SS-契约 FREEZE (J2 `computeSettleChunks`/settler **照此 code** = 源头防漂; drift-check 权威)
 
-> 来源 = `kasia-console/src/lib/PoolSpine_v08_chunk.sil.draft` @ **b367753b** (4-entry COMPILE OK, J2/NWT/Bettor 三验,
-> ctor FREEZE@16). 此节是 §1-4 设计落地后的**实现契约**: §3 旧述 (free `change_idx` / `spine_p2sh_hash` witness
+> 来源 = `kasia-console/src/lib/PoolSpine_v08_chunk.sil.draft` @ **f739ab2e** (4-entry COMPILE OK, J2/NWT/Bettor 三验,
+> ctor FREEZE@16 + **chunk_0 broker/committee 显式 P2PK 验** [§7.4 ★, 闭比 v07 弱回归]; SS freeze b367753b→f739ab2e).
+> 此节是 §1-4 设计落地后的**实现契约**: §3 旧述 (free `change_idx` / `spine_p2sh_hash` witness
 > introspection) **已被取代** — 实现走 `validateOutputState`(OpInputCovenantId 本 cov 自验) + 确定 `changeIdx`.
 > **J2 出码即 diff 本节 7 项, 任一不符=喊 (我 own SS 契约)。**
 
@@ -198,7 +199,11 @@ chunk_n (kind=2): [0 .. segLen-1]=winners            (无 change)
 - `wOutBase` = 6 (chunk_0) / 0 (chunk_i,n);  `segLen = seg_hi - seg_lo`;  `changeIdx = wOutBase + segLen`.
 - winner k → `outputs[wOutBase+k]`: `scriptPubKey == ScriptPubKeyP2PK(pubkey(winnerPks[k]))` **且** `value == winnerAmounts[k]`.
 - **output-count bound (keystone 防 steal-output)**: `outputs.length == wOutBase + segLen + (chunk_kind!=2 ? 1 : 0)`.
-- broker `outputs[0].value>=1000`; committee `outputs[1..5].value>=oracleBondAmount` (仅 chunk_0).
+- **★ chunk_0 broker/committee 显式 P2PK+floor 验 (f739ab2e ADD, Bettor 发现 → J1 终裁 → 全员 unanimous)**: chunk_0
+  `outputs[0].scriptPubKey == P2PK(brokerPk)` 且 `value>=1000`; `outputs[1..5].scriptPubKey == P2PK(c0..c4Pk)` 且
+  `value>=oracleBondAmount`. mirror settle_aggregate L395-417. **闭 settle_chunk 比 v07 弱的回归**: 此前仅靠 committee
+  sighash+守恒+output-count → 恶意 4-of-5 可挪 broker fee/超付自身 bond (sighash 只证"committee 同意此 TX", 显式检才挡
+  改址/值; v07-precedent: settle_aggregate 也有 sig 仍加显式检 = sighash 不够). 收口回 v07-equivalent.
 
 ### 7.5 HWM change-state (`validateOutputState(changeIdx, {...})`; cross-chunk linkage)
 - change UTXO 携 **`{hwm:int, planCommit:byte[32], totalWinners:int}`** (readInputState 须**全字段**).
@@ -279,7 +284,7 @@ committee-sig (续 change-chain cov). ∴ partition 是 settler-local 选择 **�
     confirmed) 死, node B 从 confirmed tip (= chunk_i 的输入 change, 未被 confirm 花) resume 重建 chunk_i' → A 的 chunk_i
     与 B 的 chunk_i' **都花同一 change UTXO** → 共识只许一个 confirm, 另一 = double-spend **必拒** → change **恰花一次**
     → **无 double-pay** (即使两 settler 段划分不同: 谁 confirm 谁定该段, loser 自动 re-resume 新 tip 续后段 = 自愈分布式 settle).
-    ∴ confirmed-only resume 在**任意 in-flight/race 下都安全** — UTXO 单花模型即协调, 零 settler 间锁. (b367753b 实码: 唯一
+    ∴ confirmed-only resume 在**任意 in-flight/race 下都安全** — UTXO 单花模型即协调, 零 settler 间锁. (f739ab2e 实码: 唯一
     re-lock spine 址的 output = settle_chunk change L193; winner L169-170/broker+committee/refund/dispute 全 P2PK → tip 唯一, NWT 实码 verified.)
 
 ### 8.4 regression baseline (不退化红线)
@@ -295,4 +300,4 @@ committee-sig (续 change-chain cov). ∴ partition 是 settler-local 选择 **�
 | **NWT** | 2nd-vantage: 前置检 co-attack + check_utxo_landed output addr 核 + runnable PoC (7 attack mutation) |
 
 ---
-*J1 #31 determinism slice spec。MASS 机械 by J2, 对抗验 by NWT。impl gated post-demo / 真大池 e2e 守红线。§7 = b367753b 实现契约 freeze (J2 照此 code 防漂); §8 = gate B finish-line e2e harness 断言计划 (J2-wire 落地我照此 impl)。*
+*J1 #31 determinism slice spec。MASS 机械 by J2, 对抗验 by NWT。impl gated post-demo / 真大池 e2e 守红线。§7 = f739ab2e 实现契约 freeze (J2 照此 code 防漂); §8 = gate B finish-line e2e harness 断言计划 (J2-wire 落地我照此 impl)。*
