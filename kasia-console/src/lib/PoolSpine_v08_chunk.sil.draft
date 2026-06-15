@@ -160,7 +160,7 @@ contract PoolSpine_v08_chunk(
             //    J2 compile fix: p2pk() 不存在 → 正解 new ScriptPubKeyP2PK(pubkey(...)) (TUTORIAL.md L972-978, byte[34]).
             //    NWT heads-up (verify-not-assume): 用中间变量形 (文档 L977-8 + v07 _ps7.sil L255-6 同款), 非未验的 inline 形.
             byte[34] expWinnerSPK = new ScriptPubKeyP2PK(pubkey(winnerPks[k]));
-            require(tx.outputs[wOutBase + k].scriptPubKey == expWinnerSPK);
+            require(tx.outputs[wOutBase + k].scriptPubKey == byte[](expWinnerSPK));   // byte[] cast (J2: scriptPubKey 是 byte[]动态 vs byte[34]固定不可比; v07 _ps7.sil L256 同款 cast)
             // ★★ amount 绑定 ((A)-refined): winner k 输出金额必 == merkle-proven 的 payout amount (含 off-chain 算好的 dust).
             require(tx.outputs[wOutBase + k].value == winnerAmounts[k]);
         }
