@@ -270,6 +270,12 @@ committee-sig (续 change-chain cov). ∴ partition 是 settler-local 选择 **�
      — 暗示 fork/bug). 续 chunk seg_lo == 读到的 hwm.
   - **cross-node 确定性**: UTXO 集是**共识状态** (两节点同 on-chain view) → "unspent tip @ v08 P2SH" 任意节点查得同一答案
     → resume cursor 跨节点确定 (8.3b node B 与 node A 读同一 tip). 只读 **confirmed** (非 mempool) = NO-TX-NO-STATE.
+  - **★ capstone: mempool-race 安全 (NWT, change UTXO 单花性兜底)**: 即使 node A 广播 chunk_i 后 (in mempool 未
+    confirmed) 死, node B 从 confirmed tip (= chunk_i 的输入 change, 未被 confirm 花) resume 重建 chunk_i' → A 的 chunk_i
+    与 B 的 chunk_i' **都花同一 change UTXO** → 共识只许一个 confirm, 另一 = double-spend **必拒** → change **恰花一次**
+    → **无 double-pay** (即使两 settler 段划分不同: 谁 confirm 谁定该段, loser 自动 re-resume 新 tip 续后段 = 自愈分布式 settle).
+    ∴ confirmed-only resume 在**任意 in-flight/race 下都安全** — UTXO 单花模型即协调, 零 settler 间锁. (b367753b 实码: 唯一
+    re-lock spine 址的 output = settle_chunk change L193; winner L169-170/broker+committee/refund/dispute 全 P2PK → tip 唯一, NWT 实码 verified.)
 
 ### 8.4 regression baseline (不退化红线)
 - **小池 ≤MAX_K**: 单 `settle_aggregate` (entry 1, =命门闭的 v07 路) 仍 PASS (46f8a/xfu62 等价回归).
