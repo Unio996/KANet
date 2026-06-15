@@ -577,6 +577,35 @@ relay_address (v166 +, = oracle PK 绑定的 relay 接收 DM 地址).
 
 ---
 
+## 预测市场分片层（v171+, bshard 无限押注）
+
+> Owner 2026-06-15 #1 directive：分片(sharding)+自取(self-claim) = 无限押注设计。一个**逻辑市场** =
+> N 个**物理分片**；每片 = 独立的 `pool_markets` 行（自己的 market_id + spine_p2sh），装保守 ≤32 bettors，
+> 一笔普通 settle_aggregate TX 结算（不分块、不撞 mass cap）。片数无上限 → 总容量无限。跨片全局赔率走
+> trustless fold 树（J1 `PoolShard_fold.sil` ddd043d7），winner 自取（`PoolSide_v07 claim_winner`）。
+> 设计：`docs/2026-06-02-bshard-rolling-design-consensus.md` / `docs/2026-06-14-bshard-fold-trustless-§4-consensus.md`。
+
+### market_shards（v171+）
+**滚动分片注册表：逻辑市场 ↔ 物理分片(pool_markets) 映射 + 顺序填分配锁**
+
+**字段**：id (PK AUTOINCREMENT), logical_market_id (用户面市场 group key), shard_index (0,1,2... 顺序填),
+shard_market_id (= 本片 `pool_markets.id`，KANet-UI 按此 join `pool_bettor_sides` 聚合赔率 / fold 叶),
+shard_p2sh (本片 PoolSpine P2SH，denorm 给 fold调度 by-root), bettor_count, projected_settle_mass
+(= Σ `estimateStorageMass(stake)`，复用 `kip9-mass.mjs`), status (open|sealed|settling|settled|refunded),
+created_at, sealed_at。
+**UNIQUE(logical_market_id, shard_index)** = 注册竞态锁（并发开新片只一个 INSERT 赢，输者重试读已开片）；
+**UNIQUE(shard_market_id)** = 一物理片一行。索引 `idx_market_shards_open(logical_market_id, status)`。
+
+**写入方**：`src/lib/shard-allocator.mjs`（registerShard / sealShard / onBettorRegistered），register 流路由。
+**读取方**：fold调度 by-root（listShards 按 shard_index ASC）/ KANet-UI 跨片赔率聚合 `/api/pool/markets` /
+allocateForRegister 顺序填。
+**封片规则**（保守，Owner 钦定）：bettor_count ≥ 32 **OR** projected_settle_mass > 380_000（< 470k SAFE）→ 封片开下一片。
+**陷阱**：market_shards 是**链锚分片集的本地索引**（同 pool_markets 是链上市场的本地 cache）；logical↔shard 链接烤在
+分片 PoolSpine ctor（J1 shard variant）→ 每节点派生同分片集（by-root determinism）。double-count 由
+`pool_bettor_sides` 的 `UNIQUE(market_id, bettor_pk)` (v62) + 链上 PoolSide spent-once 双堵。
+
+---
+
 ## 市场数据层
 
 ### chain_snapshots（1078 条）
@@ -757,6 +786,7 @@ CEX 交易日志。v51 新增 `exchange` 列记录交易所归属（旧记录为
 
 ## 版本历史（近期）
 
+- **v171 (2026-06-15 bshard 无限押注)**: `market_shards` 新表（滚动分片注册表：logical_market_id ↔ shard_market_id 映射 + UNIQUE(logical,index) 注册竞态锁 + 封片状态）。Owner #1 directive 分片+自取。见「预测市场分片层」节 + `src/lib/shard-allocator.mjs`。
 - **v157 (2026-05-30 r281 私钥型 relay)**: `relay_nodes` 新加 `privkey_encrypted` + `privkey_hint`（裸 kaspa 私钥型 relay 支持，幂等 additive，不破助记词型）。详见 `KANet-Knowledge-Base/architecture/2026-05-30-privkey-relay-spec.md`
 - **v124 (2026-05-20 r211 Phase 3a v3 oracle)**: `exchange_offers` 新加 `outcome_oracle_relay_id` + `resolution_rule_spec` (= Path D maker 自选 oracle + 5 字段 structured 判定规则); `relay_nodes` 新加 `is_oracle` + `oracle_capabilities` + `oracle_stake_locked_kas` + `oracle_reputation_score` + `broker_referral_code/broker_stake_locked_kas/broker_stake_lock_until/broker_approved_by/broker_approved_at` (broker treasury 字段同 line 出 v124)
 - v122 (2026-05-19 r177 Phase 2 prediction market): exchange_offers 新加 outcome_* 字段 (= polymarket-style prediction market on Kaspa) + `maker_kaspa_addr` + `maker_relay_id`

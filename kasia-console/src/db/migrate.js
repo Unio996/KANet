@@ -5029,5 +5029,46 @@ export function runMigrations() {
     }
   }
 
+  // v171: market_shards — rolling-shard registry for UNLIMITED betting (bshard B + self-claim C + trustless fold).
+  // Owner 2026-06-15 #1 directive: 分片(sharding)+自取(self-claim) is THE unlimited-betting design (replaces the
+  // shelved #31 chunk-settle "wasted labor"). One logical market = N physical shards; each shard is its OWN
+  // pool_markets row (independent market_id + spine_p2sh) holding ≤~64 bettors and settling in ONE normal
+  // settle_aggregate TX (no chunking, no mass cap hit). This table is the logical↔physical mapping + the
+  // sequential-fill allocation lock. Design: docs/2026-06-02-bshard-rolling-design-consensus.md §2 (@J2),
+  // docs/2026-06-14-bshard-fold-trustless-§4-consensus.md, docs/2026-06-15-bshard-shard-variant-fold-covenant-structure-j1.md.
+  //
+  // Columns (grounded by team 2026-06-15: KANet-UI透明层 needs mapping+status+index ONLY; odds derive from
+  // existing SUM(pool_bettor_sides.stake_amount) per shard market_id, so NO localYes/No columns here):
+  //   logical_market_id      = user-facing market group key (UI groups shards under this → 1 market view)
+  //   shard_index            = 0,1,2... sequential fill order (open shard = max index with status='open')
+  //   shard_market_id        = pool_markets.id of THIS shard (KANet-UI joins pool_bettor_sides on this; fold leaf)
+  //   shard_p2sh             = this shard's PoolSpine P2SH (denormalized from pool_markets.spine_p2sh for fold调度 by-root)
+  //   bettor_count           = current registered bettors in this shard (封片 trigger: count >= SHARD_MAX ~64)
+  //   projected_settle_mass  = estimated settle_aggregate mass (mass-aware 封片 trigger: > 440k, whichever hits first)
+  //   status                 = open | sealed | settling | settled | refunded
+  // UNIQUE(logical_market_id, shard_index) = atomic sequential-fill / register race lock (= the竞态锁; two concurrent
+  //   "open new shard" lose the INSERT race → one wins, other retries reading the now-open shard).
+  // UNIQUE(shard_market_id) = each physical shard maps to exactly one registry row.
+  {
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS market_shards (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        logical_market_id TEXT NOT NULL,
+        shard_index INTEGER NOT NULL,
+        shard_market_id TEXT NOT NULL REFERENCES pool_markets(id),
+        shard_p2sh TEXT NOT NULL,
+        bettor_count INTEGER NOT NULL DEFAULT 0,
+        projected_settle_mass INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'open',
+        created_at INTEGER,
+        sealed_at INTEGER,
+        UNIQUE(logical_market_id, shard_index),
+        UNIQUE(shard_market_id)
+      )
+    `);
+    sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_market_shards_open ON market_shards(logical_market_id, status)`);
+    console.log('[migrate] v171: market_shards table created (rolling-shard registry for unlimited betting — bshard B + self-claim C).');
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
