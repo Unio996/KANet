@@ -74,11 +74,14 @@ contract PoolSpine_v08_chunk(
         int      seg_lo,                 // 本 chunk winner 子段起 (merkle_index, inclusive)
         int      seg_hi,                 // 本 chunk winner 子段止 (exclusive); 段= [seg_lo, seg_hi)
         // —— change 续锁 (非末 chunk; validateOutputState 验 output 续【本 covenant 自身 cov_id】非 witness hash) ——
-        int      change_idx              // change 输出位 (J2 layout 定); chunk_kind==last 时无 change
-        // ⚠ Bettor CRITICAL fix: 原 `byte[32] spine_p2sh_hash` witness 参数已删 — spender 自填 hash → require(==)可绕
-        //    (填自己地址 hash → change 转走 = trustless 破). 正解: validateOutputState(change_idx, {hwm}) 由编译期 lower
-        //    为续【OpInputCovenantId(activeInputIndex)=本 covenant 自身链上身份】, 非自由 witness hash (同 #26 bshard cov 续链).
-        // ... (winner merkle proofs per 子段成员 + globalYes/No + commit_id 同 settle_aggregate, 草稿略)
+        int      change_idx,             // change 输出位 (J2 layout 定); chunk_kind==last 时无 change
+        // ⚠ Bettor CRITICAL fix: 原 `byte[32] spine_p2sh_hash` witness 参数已删 (spender 自填 tautology 偷余额破口);
+        //    正解 validateOutputState 续【OpInputCovenantId 本 covenant 自身身份】非自由 witness hash (同 #26 bshard cov 续链).
+        // —— winner-subset merkle 证 (本段 [seg_lo,seg_hi) 每 winner; merkle-path 是唯一许的 free-witness: 自暴 against
+        //    committed poolMerkleRoot, 篡改即 merkle fail) ——
+        byte[32][] winnerPks,            // 本段 winner pubkey (k=0..segLen-1; merkle_index = seg_lo+k 派生非 free)
+        byte[32][] winnerSiblings        // 本段 merkle siblings 扁平 (winnerSiblings[k*8+lvl] = winner k 第 lvl 层兄弟, depth-8)
+        // (winner payout amount + tx-output 位 verify against planCommit 待续填; 本增量先填 merkle-climb 让 J2 量 per-winner mass)
     ) {
         require(chunk_kind >= 0); require(chunk_kind <= 2);
         require(winner == 0 || winner == 1);
@@ -111,6 +114,34 @@ contract PoolSpine_v08_chunk(
         //    连续子段 (seg 由 computeSettleChunks merkle_index ASC 贪心定, 链锚 → 两节点同段 → byte-equal).
         require(seg_lo >= 0); require(seg_hi > seg_lo);
         require(seg_hi - seg_lo <= maxWinnersPerChunk);   // 段长 ≤ MAX_K (mass cap 派生)
+
+        // ②a winner-subset merkle-climb loop (per winner in [seg_lo,seg_hi); = J2 量 per-winner mass → 真 MAX_K 驱动).
+        //    每 winner merkle_index = seg_lo+k (连续段派生, 非 free-witness) → depth-8 position-aware climb against
+        //    ctor poolMerkleRoot (复用 settle_aggregate ③). merkle-path 是唯一许的 free-witness (篡改即 fail=自暴).
+        int segLen = seg_hi - seg_lo;
+        for (k, 0, segLen, maxWinnersPerChunk) {
+            int widx = seg_lo + k;                         // merkle_index 连续派生 (链锚, 非 free-witness)
+            require(widx >= 0); require(widx < 256);       // depth-8 → 256 叶
+            byte[32] cur = blake2b(byte[](winnerPks[k]));  // 叶 = blake2b(winner pk)
+            int b0 = widx % 2;
+            if (b0 == 0) { cur = blake2b(byte[](cur) + byte[](winnerSiblings[k*8+0])); } else { cur = blake2b(byte[](winnerSiblings[k*8+0]) + byte[](cur)); }
+            int b1 = (widx / 2) % 2;
+            if (b1 == 0) { cur = blake2b(byte[](cur) + byte[](winnerSiblings[k*8+1])); } else { cur = blake2b(byte[](winnerSiblings[k*8+1]) + byte[](cur)); }
+            int b2 = (widx / 4) % 2;
+            if (b2 == 0) { cur = blake2b(byte[](cur) + byte[](winnerSiblings[k*8+2])); } else { cur = blake2b(byte[](winnerSiblings[k*8+2]) + byte[](cur)); }
+            int b3 = (widx / 8) % 2;
+            if (b3 == 0) { cur = blake2b(byte[](cur) + byte[](winnerSiblings[k*8+3])); } else { cur = blake2b(byte[](winnerSiblings[k*8+3]) + byte[](cur)); }
+            int b4 = (widx / 16) % 2;
+            if (b4 == 0) { cur = blake2b(byte[](cur) + byte[](winnerSiblings[k*8+4])); } else { cur = blake2b(byte[](winnerSiblings[k*8+4]) + byte[](cur)); }
+            int b5 = (widx / 32) % 2;
+            if (b5 == 0) { cur = blake2b(byte[](cur) + byte[](winnerSiblings[k*8+5])); } else { cur = blake2b(byte[](winnerSiblings[k*8+5]) + byte[](cur)); }
+            int b6 = (widx / 64) % 2;
+            if (b6 == 0) { cur = blake2b(byte[](cur) + byte[](winnerSiblings[k*8+6])); } else { cur = blake2b(byte[](winnerSiblings[k*8+6]) + byte[](cur)); }
+            int b7 = (widx / 128) % 2;
+            if (b7 == 0) { cur = blake2b(byte[](cur) + byte[](winnerSiblings[k*8+7])); } else { cur = blake2b(byte[](winnerSiblings[k*8+7]) + byte[](cur)); }
+            require(cur == poolMerkleRoot);                // ★ winner identity merkle-proven against ctor poolMerkleRoot (链锚)
+            // (winner k 的 tx-output 位 + amount==plan + 7项 verify against planCommit 待续增量填)
+        }
 
         // ②b cross-chunk linkage HWM (NWT 核心攻面 + J2 解, 防 winner skip/repeat): 仅 value 守恒(④)+末 change==0
         //    【不防子段 overlap(双付) / gap(漏付)】—— 攻击者可喂重叠/跳段子段, value 仍可凑平. **正解 = change UTXO
