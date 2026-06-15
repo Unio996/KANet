@@ -27,7 +27,9 @@ import { computeParimutuelPayouts, buildPayoutTree } from '../src/lib/pool-payou
 async function sendAndLand(config, relayId, cmd, label) {
   const { txId } = await config.sendCommand(relayId, cmd);
   if (!txId) throw new Error(`${label}: relay returned no txId (broadcast failed — NO TX NO STATE)`);
-  const landed = await config.checkLanded(txId);
+  // checkLanded(txId, cmd): cmd carries the output context (relay's check_utxo_landed needs {type,address,txid};
+  // the operator adapter derives address from cmd.outputs / the landed tx). NO TX NO STATE: only advance on true.
+  const landed = await config.checkLanded(txId, cmd);
   if (!landed) throw new Error(`${label}: tx ${txId} did NOT land (check_utxo_landed false — NOT advancing state)`);
   config.log?.(`✓ ${label} landed: ${txId}`);
   return txId;
