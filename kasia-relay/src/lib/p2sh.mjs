@@ -1702,3 +1702,114 @@ export async function unlockBshardRefund(args) {
     return { txId: r.transactionId };
   } finally { try { await rpc.disconnect(); } catch {} }
 }
+
+/**
+ * unlockBshardClose — bshard_close_commit (close_commit entry OP_3, committee 4-of-5).
+ * Inputs: [0] root (P2SH close_commit) + fee P2PK (wallet-signed). 委员 sig 从 cmd(driver 用 committee key 签 preimage).
+ * Outputs: [root_out_idx] recreated root(closed=1, winningSide/payoutRoot 写入, value 不变) + change.
+ * witness 声明序(close_commit): c0Sig,c1Sig,c2Sig,c3Sig,c4Sig, rootOutIdx, new_winningSide, new_payoutRoot.
+ */
+export async function unlockBshardClose(args) {
+  const { wallet, cmd, networkId, lockTime = 0n } = args;
+  const w = cmd.witness;
+  const rpc = await connectRpc(networkId);
+  try {
+    const rootUtxo = await _matchUtxo(rpc, _addressFromRedeem(cmd.inputs.root.redeem_hex, networkId), cmd.inputs.root.outpointTxid);
+    const feeUtxo = cmd.inputs.fee ? await _matchUtxo(rpc, cmd.inputs.fee.address, cmd.inputs.fee.outpointTxid) : null;
+    const matched = [rootUtxo, ...(feeUtxo ? [feeUtxo] : [])];
+
+    const newRootAddr = _continuationAddress(cmd.inputs.root.redeem_hex, _serializePoolStateHex(cmd.outputs.root_continuation.state), networkId);
+    const outputs = [];
+    outputs[w.root_out_idx] = new TransactionOutput(BigInt(cmd.outputs.root_continuation.amountSompi), payToAddressScript(new Address(newRootAddr)));
+    const orderedOut = outputs.filter(o => o !== undefined);
+    _appendChange(orderedOut, matched, cmd.outputs.change_address);
+
+    // root scriptSig: close_commit witness(声明序: c0-c4Sig + rootOutIdx + new_winningSide + new_payoutRoot)+ OP_3 + redeem.
+    //   委员 5 sig 从 cmd.witness.sigs_hex(driver 用 baked committee key 对本 TX preimage 签; 4-of-5 → 至少 4 真签, 缺的占位).
+    let sigPush = '';
+    for (const s of w.sigs_hex) sigPush += _pushBytes(s);     // 5 sig push (已 sig-encoded)
+    const rootSig = sigPush + _pushInt(w.root_out_idx) + _pushInt(w.new_winning_side) + _pushBytes(w.new_payout_root)
+      + '53' + _encodePushDataHex(Buffer.from(cmd.inputs.root.redeem_hex, 'hex'));     // OP_3='53'
+
+    // sighash 一致(committee sig 须对此 TX): txObjPreimage 由 driver 供(同 unlockPoolSpineP2SH); root sigOpCount=4(4-of-5 checkSig).
+    let signedTx;
+    if (cmd.tx_obj_preimage) {
+      const parsed = JSON.parse(JSON.stringify(cmd.tx_obj_preimage));
+      parsed.lockTime = BigInt(parsed.lockTime || lockTime); parsed.gas = BigInt(parsed.gas || 0);
+      const feeSig = feeUtxo ? (() => {
+        const un = new Transaction({ version:0, inputs: matched.map((u,i)=>({previousOutpoint:{transactionId:u.outpoint.transactionId,index:u.outpoint.index},signatureScript:'',sequence:0n,sigOpCount:i===0?4:1,utxo:u})), outputs:orderedOut, lockTime:BigInt(lockTime), gas:0n, subnetworkId:'0'.repeat(40), payload:'' });
+        return createInputSignature(un, 1, wallet.getPrivateKey(), SighashType.All);
+      })() : null;
+      const sigScripts = feeUtxo ? [rootSig, feeSig] : [rootSig];
+      parsed.inputs = parsed.inputs.map((inp,i)=>({ ...inp, signatureScript: sigScripts[i], sequence: BigInt(inp.sequence||0), sigOpCount: i===0?4:1, utxo: inp.utxo?{...inp.utxo, amount:BigInt(inp.utxo.amount||0), blockDaaScore:BigInt(inp.utxo.blockDaaScore||0)}:undefined }));
+      parsed.outputs = parsed.outputs.map(o=>({ ...o, value: BigInt(o.value||0) }));
+      signedTx = new Transaction(parsed);
+    } else {
+      throw new Error('unlockBshardClose: tx_obj_preimage required (committee sig sighash consistency)');
+    }
+    _assertTxInvariants(matched, signedTx, 'unlockBshardClose', networkId);
+    const r = await rpc.submitTransaction({ transaction: signedTx, allowOrphan: false });
+    return { txId: r.transactionId };
+  } finally { try { await rpc.disconnect(); } catch {} }
+}
+
+/**
+ * unlockBshardFold — bshard_fold (covenant __leader_fold OP_1 / __delegate_fold OP_2, k children → 1 parent).
+ * 代码库首个 covenant relay handler. DECL: verification-mode cov leader 暴露 new_states(State[]); prev_states 自动从
+ *   cov-inputs readInputState(不押). fold 无 extra arg → leader scriptSig = push(new_states=parent_state) + OP_1 + redeem.
+ *   delegate(其余 children) scriptSig = OP_2 + redeem(无 witness, __delegate_f 不跑 policy 只 delegation 不变量).
+ * Inputs: children[0]=leader + children[1..]=delegate + fee. Outputs: parent_continuation(per-state addr, value=Σchild) + change.
+ * ⚠ e2e-定: new_states(State[1]) 押栈是否需 count 前缀未定(siblings[] 无 count→length 从 param; fold to=1 fixed→押 7-field 无 count
+ *   是首选猜测). 首 fold TX 落=对; 拒→第一查 new_states count/格式。
+ */
+export async function unlockBshardFold(args) {
+  const { wallet, cmd, networkId, lockTime = 0n } = args;
+  const w = cmd.witness;
+  const rpc = await connectRpc(networkId);
+  try {
+    const children = cmd.inputs.children;
+    const childUtxos = [];
+    for (const c of children) childUtxos.push(await _matchUtxo(rpc, _addressFromRedeem(c.redeem_hex, networkId), c.outpointTxid));
+    const feeUtxo = cmd.inputs.fee ? await _matchUtxo(rpc, cmd.inputs.fee.address, cmd.inputs.fee.outpointTxid) : null;
+    const matched = [...childUtxos, ...(feeUtxo ? [feeUtxo] : [])];
+
+    // parent 续约地址: 任一 child redeem(同 PoolShard_fold 模板)splice parent_state → per-state P2SH.
+    const parentAddr = _continuationAddress(children[0].redeem_hex, _serializePoolStateHex(w.parent_state), networkId);
+    const outputs = [];
+    outputs[w.parent_out_idx] = new TransactionOutput(BigInt(cmd.outputs.parent_continuation.amountSompi), payToAddressScript(new Address(parentAddr)));
+    const orderedOut = outputs.filter(o => o !== undefined);
+    _appendChange(orderedOut, matched, cmd.outputs.change_address);
+
+    // children[0]=leader: push new_states(parent_state 7-field) + OP_1 + redeem; children[1..]=delegate: OP_2 + redeem.
+    const sigScripts = [];
+    for (let i = 0; i < children.length; i++) {
+      const redeemPush = _encodePushDataHex(Buffer.from(children[i].redeem_hex, 'hex'));
+      if (i === 0) sigScripts.push(_serializePoolStateHex(w.parent_state) + '51' + redeemPush);   // leader OP_1
+      else sigScripts.push('52' + redeemPush);                                                    // delegate OP_2
+    }
+
+    const unsigned = new Transaction({
+      version: 0,
+      inputs: matched.map((u, i) => ({
+        previousOutpoint: { transactionId: u.outpoint.transactionId, index: u.outpoint.index },
+        signatureScript: '', sequence: 0n, sigOpCount: i < children.length ? 0 : 1, utxo: u,    // children 无 sig; fee=1
+      })),
+      outputs: orderedOut, lockTime: BigInt(lockTime), gas: 0n,
+      subnetworkId: '0000000000000000000000000000000000000000', payload: '',
+    });
+    if (feeUtxo) sigScripts.push(createInputSignature(unsigned, children.length, wallet.getPrivateKey(), SighashType.All));
+
+    const signedTx = new Transaction({
+      version: 0,
+      inputs: matched.map((u, i) => ({
+        previousOutpoint: { transactionId: u.outpoint.transactionId, index: u.outpoint.index },
+        signatureScript: sigScripts[i], sequence: 0n, sigOpCount: i < children.length ? 0 : 1,
+      })),
+      outputs: orderedOut, lockTime: BigInt(lockTime), gas: 0n,
+      subnetworkId: '0000000000000000000000000000000000000000', payload: '',
+    });
+    _assertTxInvariants(matched, signedTx, 'unlockBshardFold', networkId);
+    const r = await rpc.submitTransaction({ transaction: signedTx, allowOrphan: false });
+    return { txId: r.transactionId };
+  } finally { try { await rpc.disconnect(); } catch {} }
+}

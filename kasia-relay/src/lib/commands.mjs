@@ -71,6 +71,8 @@ export const COMMAND_TYPES = Object.freeze({
   BSHARD_REGISTER_BET: 'bshard_register_bet',
   BSHARD_CLAIM_WINNER: 'bshard_claim_winner',
   BSHARD_REFUND_CANCELLED: 'bshard_refund_cancelled',
+  BSHARD_FOLD: 'bshard_fold',
+  BSHARD_CLOSE_COMMIT: 'bshard_close_commit',
 });
 
 export const COMMAND_TYPE_SET = new Set(Object.values(COMMAND_TYPES));
@@ -117,6 +119,8 @@ export const COMMAND_PAYLOAD_SCHEMA = Object.freeze({
   [COMMAND_TYPES.BSHARD_REGISTER_BET]: ['witness', 'inputs', 'outputs'],
   [COMMAND_TYPES.BSHARD_CLAIM_WINNER]: ['witness', 'inputs', 'outputs'],
   [COMMAND_TYPES.BSHARD_REFUND_CANCELLED]: ['witness', 'inputs', 'outputs'],
+  [COMMAND_TYPES.BSHARD_FOLD]: ['witness', 'inputs', 'outputs'],
+  [COMMAND_TYPES.BSHARD_CLOSE_COMMIT]: ['witness', 'inputs', 'outputs'],
 });
 
 // R38 (Z23 sediment): typeof spec per field. Bug-Z23 真根因 — broker enqueue amount: number,
@@ -159,6 +163,8 @@ export const COMMAND_FIELD_TYPES = Object.freeze({
   [COMMAND_TYPES.BSHARD_REGISTER_BET]: { witness: 'object', inputs: 'object', outputs: 'object' },
   [COMMAND_TYPES.BSHARD_CLAIM_WINNER]: { witness: 'object', inputs: 'object', outputs: 'object' },
   [COMMAND_TYPES.BSHARD_REFUND_CANCELLED]: { witness: 'object', inputs: 'object', outputs: 'object' },
+  [COMMAND_TYPES.BSHARD_FOLD]: { witness: 'object', inputs: 'object', outputs: 'object' },
+  [COMMAND_TYPES.BSHARD_CLOSE_COMMIT]: { witness: 'object', inputs: 'object', outputs: 'object' },
 });
 
 export function validateCommandPayload(cmd) {

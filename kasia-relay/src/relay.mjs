@@ -815,6 +815,24 @@ if (process.send) {
           return;
         }
 
+        case 'bshard_fold': {
+          // bshard M3: fold covenant __leader_fold OP_1 / __delegate_fold OP_2, k children → 1 parent.
+          const { unlockBshardFold } = await import('./lib/p2sh.mjs');
+          const wallet = getWallet();
+          const r = await unlockBshardFold({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) });
+          if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, txId: r.txId } });
+          return;
+        }
+
+        case 'bshard_close_commit': {
+          // bshard M3: close_commit OP_3, committee 4-of-5. root P2SH + fee. closed 0→1 + outcome 写入.
+          const { unlockBshardClose } = await import('./lib/p2sh.mjs');
+          const wallet = getWallet();
+          const r = await unlockBshardClose({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) });
+          if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, txId: r.txId } });
+          return;
+        }
+
         case 'pool_v07_compute_refund_mass': {
           // G6 批 3 段① Bettor r311 钦定: Console 手搓 UtxoEntry 喂 calculateTransactionMass
           // 多次 WASM panic (unreachable / 'outpoint is not an object' / scriptPublicKey 格式).
