@@ -17,7 +17,13 @@ contract PoolShard_fold(
     int      shard_count,      // 关池锚: root.count 必 == 此
     int      max_fan_in,       // fold 叉数上限 (编译界)
     // —— register_bet 用: PoolSide expectedTemplateHash(J2 PoolSide-artifact, byte-match). prefix/suffix 走 witness(验 blake2b==此) ——
-    byte[32] ps_tmpl_hash,     // PoolSide expectedTemplateHash(= blake2b(prefix‖suffix)); validateOutputStateWithTemplate 验 witness prefix/suffix 对此
+    byte[32] ps_tmpl_hash,     // PoolSide expectedTemplateHash(= blake2b(prefix‖suffix)); validateOutputStateWithTemplate 验 witness prefix/suffix 对此.
+                               //   per-market: PoolSide template 含 spine_template_hash(non-State ctor, USE)→烤 market_id→per-market.
+                               //   此 hash 挡死 THEFT(外市场模板 hash≠此→register fail), 但【State 字段 spineP2shHash 是 witness 不被它绑】.
+    byte[32] spine_p2sh_hash,  // ★ Bettor verify-flag 修a(链上绑死, value-SOURCE 铁律): = 本市场 spine P2SH(= J2 PoolSide.init_spineP2shHash 同值).
+                               //   register_bet 验 PoolSide.spineP2shHash==此 → 否则攻击者建 template对/State spineP2shHash错 的 PoolSide:
+                               //   bump leaf(stake 实存)但自己 claim 永不可满足(L65 spine 比对)→ deposit 砖死 → Σleaf>Σclaimable(破确定性 invariant→
+                               //   IF builder 数砖死笔→settle 超兑 insolvency). 绑死后: 每笔累进 leaf 的 stake 都有可满足 claim 路 → Σleaf==Σclaimable.
     int      seal_count,       // 封口数 (= SHARD_SEAL_COUNT=32; count>=此 拒新注)
     // —— genesis state (叶 = 0/0/0 由 register 累积; 中间/root fold UTXO 由 fold cov 产) ——
     int      init_local_yes,
@@ -55,6 +61,12 @@ contract PoolShard_fold(
     ) {
         require(count < seal_count);                       // 未封口才收注(count>=seal_count 拒)
         require(side == 0 || side == 1);
+
+        // ★ Bettor 修a(NWT/J2 同意根治): 绑 PoolSide.spineP2shHash 到本市场 spine(链上 value-SOURCE). ps_tmpl_hash 挡 THEFT 但
+        //   spineP2shHash 是 witness State 不被它绑 → 不绑则攻击者建 template对/spineP2shHash错 的 PoolSide bump leaf(stake 实存)
+        //   但自己 claim 永砖死(L65 spine 比对不满足)→ Σleaf>Σclaimable(破确定性 invariant; IF builder 数砖死笔→settle 超兑).
+        //   绑死 → 每笔累进 leaf 的 stake 都有可满足 claim 路 → Σleaf==Σclaimable.
+        require(spineP2shHash == spine_p2sh_hash);
 
         // PoC-1b: 验 output[psOutIdx] 真是 PoolSide template + 完整 State(方向==side) → 绑实 claimable deposit(非任意 real-KAS).
         validateOutputStateWithTemplate(psOutIdx, {
