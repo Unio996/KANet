@@ -22,6 +22,19 @@ import { buildCloseCommitWitness, buildCloseCommitCommand } from '../src/lib/poo
 import { buildClaimWitness, buildClaimCommand } from '../src/lib/pool-claim-builder.mjs';
 import { buildRefundWitness, buildRefundCommand } from '../src/lib/pool-refund-builder.mjs';
 import { computeParimutuelPayouts, buildPayoutTree } from '../src/lib/pool-payout-parimutuel.mjs';
+import { serializeI64 } from '../src/lib/pool-payout-root.mjs';
+
+// ── dust-ticket redeem builder: PoolSide template (prefix‖suffix) splice the 4-field ticket State (J1 confirmed
+// structure; MUST byte-match relay _ticketAddress so the per-state ticket P2SH lines up). 4-field serialize order =
+// PoolSide State decl: bettorPk(0x20+32), direction(0x08+i64LE), stake(0x08+i64LE), shardPoolId(0x20+32). ──
+function _serialize4FieldTicket(ts) {
+  const p32 = (h) => '20' + Buffer.from(h, 'hex').toString('hex'); // OP_PUSHBYTES_32 + 32B
+  const p8 = (n) => '08' + serializeI64(BigInt(n), 8).toString('hex'); // OP_PUSHBYTES_8 + i64-LE
+  return p32(ts.bettorPk) + p8(ts.direction) + p8(ts.stake) + p32(ts.shardPoolId);
+}
+function _ticketRedeemHex(psArtifact, ticketState) {
+  return psArtifact.templatePrefix.toString('hex') + _serialize4FieldTicket(ticketState) + psArtifact.templateSuffix.toString('hex');
+}
 
 // ── helper: broadcast a relay command + block until landed (NO TX NO STATE) ──
 async function sendAndLand(config, relayId, cmd, label) {
@@ -50,17 +63,25 @@ export async function runHappyPath(config) {
   const m = config.market;
   const out = { registerTxids: [], foldTxids: [], claimTxids: [] };
 
-  // ① genesis-leaf-create: lock first stake to the genesis-state P2SH (= computeP2SH(redeem with genesis state)).
+  // ① genesis-leaf-create: lock first stake to the genesis-state leaf P2SH + create the first bettor's dust ticket.
+  config.tickets = config.tickets || {};
   const genesisAddr = config.computeP2SH(m.redeemHexForGenesisState);
   const g = await config.lockToP2SH(genesisAddr, BigInt(m.genesisState.pool_value), config.relays.bettorRelayId);
   out.genesisTxid = g.txId;
   config.log?.(`✓ genesis leaf created at ${genesisAddr}: ${g.txId}`);
+  // first dust ticket (genesis bettor): lock dust to the ticket P2SH = _addressFromRedeem(ticketRedeem). Populate
+  // config.tickets so claim/refund can reference it (J1-confirmed: ticket = PoolSide template splice bettor State).
+  const gTicketRedeem = _ticketRedeemHex(m.psArtifact, m.firstTicketState);
+  const gt = await config.lockToP2SH(config.computeP2SH(gTicketRedeem), BigInt(config.ticketDustSompi || 1000n), config.relays.bettorRelayId);
+  config.tickets[m.firstTicketState.bettorPk] = { txid: gt.outpointTxid, redeemHex: gTicketRedeem };
+  config.log?.(`✓ genesis ticket created: ${gt.txId}`);
   // shard-allocator: post-land record (NO TX NO STATE → only after genesis landed)
   let leafState = { ...m.genesisState };
   let leafOutpointTxid = g.outpointTxid, leafRedeemHex = m.redeemHexForGenesisState, leafValue = BigInt(m.genesisState.pool_value);
 
   // ② register × N (append): allocator routes, buildRegisterCommand, send+land, advance leaf state.
-  for (const b of config.bettors) {
+  // config.bettors[0] = the genesis bettor (already baked into the leaf in ①); register bettors [1..N).
+  for (const b of config.bettors.slice(1)) {
     const alloc = allocateForRegister({ logicalMarketId: m.marketId, projectedMass: 0 }); // 'use' open shard or 'open_new'
     const w = buildRegisterWitness({ side: b.side, stake: BigInt(b.stakeSompi), leafOutIdx: 0, psOutIdx: 1, bettorPk: b.bettorPk, psArtifact: m.psArtifact });
     const cmd = buildRegisterCommand({
@@ -71,6 +92,8 @@ export async function runHappyPath(config) {
     const txid = await sendAndLand(config, config.relays.bettorRelayId, cmd, `register bettor ${b.bettorPk.slice(0, 8)}`);
     out.registerTxids.push(txid);
     leafState = cmd.outputs.leaf_continuation.state; leafOutpointTxid = txid; leafValue += BigInt(b.stakeSompi);
+    // ticket-tracking: register created the dust ticket at ps_out_idx of this TX → record for claim/refund (J1-confirmed).
+    config.tickets[b.bettorPk] = { txid, redeemHex: _ticketRedeemHex(m.psArtifact, cmd.outputs.poolSide_ticket.state) };
     onBettorRegistered({ logicalMarketId: m.marketId, shardIndex: alloc.shardIndex ?? 0 });
   }
 
