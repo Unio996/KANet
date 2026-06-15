@@ -1,28 +1,28 @@
-// PoolSide_v08_shard.sil — bshard sharded per-bettor side (J1, 2026-06-15). 显式 State 变体.
+// PoolSide_v08_shard.sil — bshard sharded per-bettor side (J1, 2026-06-15). 显式 State + payoutRoot-claim.
 //
-// 与 PoolSide_v07 差异(两处):
+// 与 PoolSide_v07 差异:
 //   (1) **6 字段从 ctor → 显式 State**(field_prolog len>0) → validateOutputStateWithTemplate 可 template(J1 leaf register
-//       绑此; J2 template-artifact 生成器需显式 State 才能切 prefix/state/suffix). 现 v07 纯 ctor → field_prolog len=0 不可 template.
-//   (2) **claim_winner 替委员 4-of-5 attestation → fold-root 绑定**(J2 spec + NWT struct-syntax): claim 引 fold-root UTXO,
-//       readInputStateWithTemplate 读链上 fold 派生 globalYes/No(实值非 witness) + root.count==shard_count(全折锚) → parimutuel. 零委员 merkle.
+//       绑此; J2 PoolSide-artifact 生成器需显式 State). PoolSide template = **常量**(不带 post-close 值 → 解 timing deadlock).
+//   (2) **claim_winner 替委员 4-of-5 → spine close-commit payoutRoot 绑定**(J2 design doc 2026-06-15-bshard-payout-commit):
+//       读 spine closeCommit{winningSide, payoutRoot, ...} → 验 winner(finding-1) + merkle-prove 预算 payout(finding-2 无链上 mult).
 //
-// 新合约新 P2SH(不碰老 v07 市场, 同 v06→v07 precedent). refund 保留 v07 逐字.
-// 单 author = J1(SS 我域); template artifact + off-chain = J2; claim 语义 J2 给 spec; struct-syntax = NWT(kcc20-minter 模式); NWT co-verify PoC-5.
+// 修史: deadlock(fold_tmpl_hash post-close 烤不进 register) → 去 ctor, 延 claim 读 spine close-commit.
+//        finding-1(settlementWinner 自由 witness 两边掏池) → spine closeCommit.winningSide 绑.
+//        finding-2(链上 stake×totalPool i64 溢出, 三-vantage 源证) → payoutRoot 链下 BigInt 预算 + merkle-prove, 无链上 mult.
+// 单 author = J1; payoutRoot/spine builder = J2; struct-syntax = NWT; NWT co-verify PoC + 2-impl byte-match.
 
 pragma silverscript ^0.1.0;
 
 contract PoolSide_v08_shard(
-    // —— init for 显式 State (6 字段, ctor 注入 → State; 顺序 = J2 schema L64-70) ——
+    // —— init for 显式 State (6 字段; PoolSide template **常量** — 不含 post-close 值, 解 deadlock) ——
     byte[32] init_bettorPk,
-    byte[32] init_spineP2shHash,        // = 本 shard 的 spine(PoolSide 天然 scope 到片)
+    byte[32] init_spineP2shHash,        // = 本 shard 的 spine(claim 验 spine input == 此, scope 到片)
     byte[32] init_poolMerkleRoot,
     byte[32] init_marketMetadataHash,
     int      init_direction,             // 0=YES 1=NO
     int      init_deadline,
-    // —— 非-State ctor(claim fold-root 绑定常量; 不进 template state 区) ——
-    int      shard_id,                   // 片身份
-    int      shard_count,                // 关池片数(claim 验 root.count==此 → 全折完 ROOT 非中间 fold, NWT 命门)
-    byte[32] fold_template_hash          // fold-root template hash(readInputStateWithTemplate 自验, J2 artifact 给真值, byte-match)
+    // —— 非-State ctor(常量; spine close-commit 读用) ——
+    byte[32] spine_template_hash         // spine 合约 template hash(readInputStateWithTemplate 自验; J2 artifact, byte-match)
 ) {
     // —— 显式 State(6 字段; validateOutputStateWithTemplate 的 state 区) ——
     byte[32] bettorPk = init_bettorPk;
@@ -32,50 +32,58 @@ contract PoolSide_v08_shard(
     int      direction = init_direction;
     int      deadline = init_deadline;
 
-    // fold-root 的 State 布局(= PoolShard_fold 的 {local_yes, local_no, count}); readInputStateWithTemplate 绑此 struct.
-    struct FoldRootState {
-        int local_yes;
-        int local_no;
-        int count;
+    // spine close-commit 布局(= J2 design doc §1: 关池写进 shard spine 的 state). readInputStateWithTemplate 绑此 struct.
+    struct SpineCloseCommit {
+        int      winningSide;            // finding-1: oracle/委员裁的赢向(绑, 非自由 witness)
+        byte[32] payoutRoot;             // finding-2: 每 winner 精确 payout 的 merkle root(链下 BigInt, 无链上 mult)
+        byte[32] fold_tmpl_hash;         // (deadlock: post-close 值移此; claim 不直接用, 留布局对齐)
+        int      shard_count;            // (同上)
     }
 
-    // entry 0 — claim_winner (fold-root 绑定, 替 v07 委员 4-of-5; J2 spec + NWT struct-syntax 自取另一半).
-    //   ① readInputStateWithTemplate 读 fold-root globalYes/No 实值 —— 原语**自验 foreign template hash + P2SH commitment**
-    //      → claim 自动绑实 fold 合约(非假) = NWT PoC-5 经此原语堵.
-    //   ② require(root.count == shard_count) → 读的是**全折完 ROOT**(非中间 fold 部分 global, 否则错额) = NWT 命门.
-    //   ③ payout = parimutuel(本 stake, root.local_yes/no, 赢向) + spent-once(本 side UTXO 花) + 输向无 payout(direction==winner gate).
+    // entry 0 — claim_winner (spine close-commit payoutRoot 绑定; per-winner 独立自取; 无链上 mult).
+    //   MAX_DEPTH = payoutRoot merkle climb 编译界(= ceil(log2 max_winners); demo 取 16 → 65536 winner).
     entrypoint function claim_winner(
         sig bettorSig,
-        int settlementWinner,            // 0=YES 1=NO(赢向; direction gate 绑)
-        int fold_root_input_idx,         // fold-root UTXO 在 inputs 的位(ref)
-        int fold_prefix_len,             // fold template prefix 长(J2 artifact)
-        int fold_suffix_len              // fold template suffix 长
+        int      payout,                 // 本 winner 的预算 payout(witness; merkle-prove ∈ payoutRoot → 非自由)
+        int      merkle_index,           // 本 winner 在 payoutRoot 的叶位(0..n-1; pk-ASC canonical 序)
+        int      tree_depth,             // payoutRoot 深 = ceil(log2 n)(climb 实跑层数, ≤ MAX_DEPTH)
+        byte[32][] siblings,             // climb siblings(扁平 depth 个)
+        int      spine_in_idx,           // spine close-commit UTXO 在 inputs 的位(ref)
+        int      spine_prefix_len,       // spine template prefix 长(J2 artifact)
+        int      spine_suffix_len        // spine template suffix 长
     ) {
         require(checkSig(bettorSig, pubkey(bettorPk)));     // bettor 授权自取
-        require(settlementWinner == 0 || settlementWinner == 1);
-        require(direction == settlementWinner);             // 我在赢向(输向无 payout)
+        require(tree_depth >= 0); require(tree_depth <= 16);
+        require(merkle_index >= 0);
+        require(payout >= 1000);                            // dust floor
 
-        // ① 读 fold-root 链上派生 global(实值非 witness); 原语自验 fold template hash + P2SH(PoC-5).
-        FoldRootState root = readInputStateWithTemplate(fold_root_input_idx, fold_prefix_len, fold_suffix_len, fold_template_hash);
-        // ② 必全折完 ROOT(非中间 fold) —— NWT 命门(中间 fold 部分 global → 错额).
-        require(root.count == shard_count);
-        require(root.count > 0);
+        // ① 读 spine close-commit(原语自验 spine template hash + P2SH); + 验绑本市场 spine(NWT req-3).
+        SpineCloseCommit cc = readInputStateWithTemplate(spine_in_idx, spine_prefix_len, spine_suffix_len, spine_template_hash);
+        require(cc.winningSide == 0 || cc.winningSide == 1);
+        require(tx.inputs[spine_in_idx].scriptPubKey == byte[](spineP2shHash));   // NWT req-3: spine 绑本市场(hash 比非重构)
 
-        // ③ parimutuel payout (totalPool/winnerPool 来自链上 fold 实 global).
-        int notWinner = 1 - settlementWinner;
-        int winnerPool = root.local_yes * notWinner + root.local_no * settlementWinner;
-        int totalPool = root.local_yes + root.local_no;
-        require(winnerPool > 0);
-        require(tx.inputs.length >= 1);                     // inputs[0]=本 side UTXO(spent-once 自取) + fold-root ref + fee-UTXO
-        int payout = tx.inputs[0].value * totalPool / winnerPool;
+        // ② finding-1: 赢向绑 spine.winningSide(非自由 witness) + 本 side 在赢向.
+        require(direction == cc.winningSide);
 
-        // 出 bettor(spent-once: 本 side UTXO 被花 → 不可双领).
+        // ③ finding-2: merkle-prove 本 winner 预算 payout ∈ payoutRoot(无链上 mult). leaf=blake2b(pk‖ser(payout,8)), pk-ASC.
+        byte[32] cur = blake2b(byte[](bettorPk) + byte[](payout, 8));
+        int div = 1;                                        // running 2^k (pow2 无原语 → div 每层 ×2)
+        for (k, 0, tree_depth, 16) {                        // position-aware climb, 跑 tree_depth 层(界 MAX_DEPTH=16)
+            int bit = (merkle_index / div) % 2;
+            if (bit == 0) { cur = blake2b(byte[](cur) + byte[](siblings[k])); }
+            else          { cur = blake2b(byte[](siblings[k]) + byte[](cur)); }
+            div = div * 2;
+        }
+        require(cur == cc.payoutRoot);                      // 证 payout 是 committed 真值(非自由)
+
+        // ④ output payout to bettor + spent-once(本 side UTXO 花 → 不可双领); fee [0, 1KAS].
+        require(tx.inputs.length >= 1);                     // inputs[0]=本 side UTXO; spine ref + fee-UTXO append
         require(tx.outputs.length >= 1);
         byte[34] bettorLock = new ScriptPubKeyP2PK(pubkey(bettorPk));
         require(tx.outputs[0].scriptPubKey == byte[](bettorLock));
         require(tx.outputs[0].value <= payout);
-        require(tx.outputs[0].value >= payout - 100000000); // fee [0, 1KAS]
-        require(tx.outputs[0].value >= 1000);               // dust floor
+        require(tx.outputs[0].value >= payout - 100000000);
+        require(tx.outputs[0].value >= 1000);
     }
 
     // entry 1 — refund_market_cancelled (保留 v07 逐字; bettor 过 deadline+grace 自退).
