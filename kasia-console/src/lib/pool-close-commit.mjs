@@ -32,7 +32,10 @@ function asBuf32(x, name) {
  * @returns {Buffer} 93-byte state region (byte-matches validateOutputState commit)
  */
 export function serializeCloseCommitState({ closed, winningSide, payoutRoot, foldTmplHash, shardCount }) {
-  if (closed !== 0 && closed !== 1) throw new Error(`closed must be 0|1, got ${closed}`);
+  // closed 3-state {0=open, 1=settled, 2=cancelled} — M3 F2 fix (refund flips 0→2, write-once latch; b1e9ca14).
+  // The cancel state (closed=2) is set on-chain by refund_draw; off-chain it must be serializable for the
+  // refund-passthrough recreated-spine state (committee/relay sighash byte-match).
+  if (closed !== 0 && closed !== 1 && closed !== 2) throw new Error(`closed must be 0|1|2 (open|settled|cancelled), got ${closed}`);
   if (winningSide !== 0 && winningSide !== 1) throw new Error(`winningSide must be 0|1, got ${winningSide}`);
   if (!(Number(shardCount) >= 0)) throw new Error(`shardCount must be >= 0, got ${shardCount}`);
   const out = Buffer.concat([

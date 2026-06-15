@@ -79,11 +79,34 @@ export function computePoolSideArtifact(poolSideSilPath, poolSideCtor, silvercPa
 }
 
 /**
+ * Fail-fast canonical genesis-seed guard for the spine ctor (PoolSpine_v08_shard.sil aa041d91).
+ * The committee-bypass fix (PoolShard_fold fold L108-110) pins the folded parent's outcome to the GENESIS
+ * seed: new.closed==0, new.winningSide==0, new.payoutRoot==init_payoutRoot. For the induction base case +
+ * cross-node determinism, the genesis ctor MUST seed the canonical zero outcome. A non-canonical seed does
+ * NOT break fund-safety (init_closed=1 → register gate blocks all bets = dead market; init_payoutRoot≠ZERO →
+ * close_commit overwrites at settle), but it breaks cross-node P2SH byte-equality + diverges the fold
+ * canonical-pin. Verified ctor positions (git show aa041d91:...PoolSpine_v08_shard.sil):
+ *   [c0..c4Pk(0-4), market_id(5), deadline(6), init_closed(7), init_winningSide(8), init_payoutRoot(9),
+ *    init_fold_tmpl_hash(10), init_shard_count(11)].
+ */
+export function assertCanonicalGenesisSpineSeed(spineCtor) {
+  const isIntZero = (n) => n && n.kind === 'int' && Number(n.data) === 0;
+  const isZero32 = (n) => n && n.kind === 'array' && n.data.length === 32 && n.data.every(b => Number(b.data) === 0);
+  if (!Array.isArray(spineCtor) || spineCtor.length < 12) throw new Error(`spineCtor must have 12 ctor nodes (PoolSpine_v08_shard), got ${spineCtor && spineCtor.length}`);
+  if (!isIntZero(spineCtor[7])) throw new Error('genesis seed: init_closed (idx 7) must be int 0 (open) — fold/register induction base case');
+  if (!isIntZero(spineCtor[8])) throw new Error('genesis seed: init_winningSide (idx 8) must be int 0 (canonical) — fold L109 new.winningSide==0');
+  if (!isZero32(spineCtor[9])) throw new Error('genesis seed: init_payoutRoot (idx 9) must be ZERO32 — fold L110 pins new.payoutRoot==init_payoutRoot');
+  if (!isZero32(spineCtor[10])) throw new Error('genesis seed: init_fold_tmpl_hash (idx 10) must be ZERO32 (genesis)');
+  if (!isIntZero(spineCtor[11])) throw new Error('genesis seed: init_shard_count (idx 11) must be int 0 (genesis; close_commit attests final count)');
+}
+
+/**
  * Full create-phase per-market artifact bundle. Chains spine → PoolSide (single-source ctor + silverc).
  * @param {object} opts { spineSilPath, poolSideSilPath, spineCtor, poolSideCtorBase (6 State init, WITHOUT spine_template_hash), silvercPath? }
  * @returns {{ spine, poolSide }}  spine={templateHashHex,prefixLen,suffixLen}, poolSide={templateHashHex,prefix/suffix,...}
  */
 export function computeMarketCreateArtifacts({ spineSilPath, poolSideSilPath, spineCtor, poolSideCtorBase, silvercPath = SILVERC }) {
+  assertCanonicalGenesisSpineSeed(spineCtor); // fail-fast: genesis must seed canonical zero outcome (induction base + cross-node determinism)
   const spine = computeSpineArtifact(spineSilPath, spineCtor, silvercPath);
   const poolSideCtor = [...poolSideCtorBase, ctorBytes32(spine.templateHashHex)];
   const poolSide = computePoolSideArtifact(poolSideSilPath, poolSideCtor, silvercPath);
