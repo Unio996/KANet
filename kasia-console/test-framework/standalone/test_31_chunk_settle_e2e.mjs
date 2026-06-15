@@ -97,7 +97,7 @@ function phaseB_conservation(winners, plan) {
   overK.length === 0 ? ok('每 chunk segLen ≤ 47 (MAX_K)') : bad('segLen ≤ 47', `${overK.length} chunk 超`);
 
   // ③ 末 chunk change==0 (零 stuck, §4②/§8.3).
-  chunks[chunks.length - 1].change === 0 ? ok('末 chunk change==0 (零 stuck)') : bad('末 change==0', `=${chunks[chunks.length-1].change}`);
+  BigInt(chunks[chunks.length - 1].change) === 0n ? ok('末 chunk change==0 (零 stuck)') : bad('末 change==0', `=${chunks[chunks.length-1].change}`);
 
   // ④ 守恒: Σ(all chunk winner payouts) + Σ fixed(chunk_0) ≤ pool (余=fees, §4①).
   const totalWinnerPaid = winners.reduce((s, w) => s + w.amount, 0);

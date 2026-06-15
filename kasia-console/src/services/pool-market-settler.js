@@ -207,7 +207,7 @@ async function legacyRefundBuilderTick() {
     const unfixablePlaceholders = unfixableIds.length ? unfixableIds.map(() => '?').join(',') : "''";
     const sides = sqlite.prepare(`
       SELECT pbs.id AS side_id, pbs.market_id, pbs.bettor_pk, pbs.side_p2sh, pbs.side_lock_tx,
-             pbs.side_redeem_script_hex, pbs.stake_amount, pbs.merkle_index, pbs.direction, pm.deadline, pm.protocol_version
+             pbs.side_redeem_script_hex, pbs.stake_amount, pm.deadline, pm.protocol_version
       FROM pool_bettor_sides pbs
       JOIN pool_markets pm ON pm.id = pbs.market_id
       WHERE (
@@ -1474,7 +1474,9 @@ export function computePoolPayouts(args) {
     let amtBI = shareBIs[i];
     if (i === 0) amtBI += winnerDustBI;       // dust → min merkle_index winner (单一确定 absorber)
     if (w.isMaker) amtBI += makerForfeitShareBI;
-    return { participantIndex: w.idx, isMaker: !!w.isMaker, amount: Number(amtBI) };
+    // amount = Number (v07 callers .toString() it; safe < 2^53). amountSompi = EXACT decimal string —
+    // #31 v0.8 payoutRoot leaf = blake2b(pk ‖ amount[8B LE]) MUST be byte-exact (零 float, R1 承重墙).
+    return { participantIndex: w.idx, isMaker: !!w.isMaker, amount: Number(amtBI), amountSompi: amtBI.toString() };
   });
 
   const isMakerWinner = winners.some(w => w.isMaker);
@@ -1948,16 +1950,19 @@ export async function dispatchPhase2(market, decision) {
     if (estMass > STORAGE_MASS_SAFE_THRESHOLD) {
       // #31 ② wire: v0.8 chunk-capable markets → chunked settle (PoolSpine_v08) instead of cancel-refund.
       //   winners = winning-side (computePoolPayouts already filters), CANONICAL order = [maker@idx0 if winning,
-      //   then winning bettors by pool merkle_index ASC] (NOT stake_amount/DB order = cross-node fork bug;
-      //   sides query 必 ORDER BY merkle_index + SELECT merkle_index — coupled fix). pk = maker_pk/bettor_pk
-      //   x-only (NOT addr). amount = computePoolPayouts parimutuel (BigInt, dust→winners[0], i-iv 已满足).
-      //   continuous re-index 0..K-1 = array index = SS climb leaf (NOT raw merkle_index — re-index VERIFIED 散 PASS).
+      //   then winning bettors by pool merkle_index ASC]. The settle sides query (dispatchPhase2 L1565) ALREADY
+      //   `ORDER BY merkle_index ASC` + participants = [maker idx0, ...sides merkle_index ASC] (L1678) →
+      //   winners[0] = min merkle_index = deterministic dust absorber (L1475). The JS .sort below is REDUNDANT
+      //   belt-and-suspenders on that order — it does NOT change any SQL query (NO coupled query fix; the legacy
+      //   refund query at L209 keeps ORDER BY stake_amount). pk = maker_pk / sides[].bettor_pk x-only (NOT addr).
+      //   amount = computePoolPayouts parimutuel EXACT sompi (w.amountSompi BigInt-string, 零 float = R1 byte-
+      //   identical 承重墙 — NOT Number). continuous re-index 0..K-1 = array index = SS climb leaf.
       if (market.protocol_version === 'v0.8') {
         const chunkWinners = payouts.winnerPayouts.map(w => {
           const isMaker = w.participantIndex === 0 && participants[0]?.isMaker;
           const sortKey = isMaker ? -1 : (parseInt(sides[w.participantIndex - 1]?.merkle_index, 10));
           const pk = isMaker ? makerPk : sides[w.participantIndex - 1]?.bettor_pk;
-          return { pk, amount: Number(w.amount), _sortKey: sortKey };
+          return { pk, amount: w.amountSompi, _sortKey: sortKey };  // EXACT sompi string (NOT Number — R1 承重墙)
         }).sort((a, b) => a._sortKey - b._sortKey)         // canonical: maker(-1) first, then merkle_index ASC
           .map(({ pk, amount }) => ({ pk, amount }));        // continuous re-index 0..K-1 (array idx = leaf)
         const payoutRootHex = computePayoutRoot(chunkWinners).toString('hex');

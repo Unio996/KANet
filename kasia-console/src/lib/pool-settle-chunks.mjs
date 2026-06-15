@@ -39,45 +39,54 @@ function fits(inputVals, outVals, nWinners, nFixedOut, hasChange, applyKCap = tr
 }
 
 /**
- * @param {{pk:string, amount:number}[]} winners  payouts from computePoolPayouts (merkle_index order; dust in winners[0])
- * @param {{value:number}[]} fixedOutputs  chunk_0 fixed outputs: broker + 5 oracle
- * @param {number} poolValue  total locked sompi (chunk_0 input)
+ * @param {{pk:string, amount:number|string|bigint}[]} winners  payouts from computePoolPayouts (merkle_index order;
+ *   dust in winners[0]). amount = EXACT sompi (string/BigInt preferred; Number ok for <2^53). Conservation below
+ *   normalizes to BigInt — float64 amount > 2^53 would corrupt `change` (R1 cross-node byte-identical 承重墙).
+ * @param {{value:number|string|bigint}[]} fixedOutputs  chunk_0 fixed outputs: broker + 5 oracle
+ * @param {number|string|bigint} poolValue  total locked sompi (chunk_0 input)
  * @param {string} payoutRootHex  from pool-payout-root builder
- * @returns {{route:'aggregate'|'chunk', numChunks, payoutRoot, chunks}}
+ * @returns {{route:'aggregate'|'chunk', numChunks, payoutRoot, chunks}}  chunks[].change = EXACT decimal string
+ *   (JSON-serializable, BigInt-exact; ③ does BigInt(change) to build the change UTXO).
  */
 export function computeSettleChunks(winners, fixedOutputs, poolValue, payoutRootHex) {
   const n = winners.length;
-  const fixedVals = fixedOutputs.map(o => o.value);
+  // ── value arithmetic in BigInt (conservation = exact sompi → change output is byte-identical cross-node);
+  //    mass estimate in Number (heuristic Σ1/v float — segmentation is settler-chosen, NOT consensus). ──
+  const amtBI = winners.map(w => BigInt(w.amount));
+  const fixedBI = fixedOutputs.map(o => BigInt(o.value));
+  const poolBI = BigInt(poolValue);
+  const num = (b) => Number(b);  // BigInt→Number for mass est ONLY (never for conservation / output values)
+  const fixedNum = fixedBI.map(num);
+
   // route: does ONE aggregate TX fit (broker+5oracle+ALL winners, NO change)? aggregate = mass-only.
-  const aggOut = [...fixedVals, ...winners.map(w => w.amount)];
-  if (fits([poolValue], aggOut, n, fixedOutputs.length, false, /*applyKCap=*/false)) {
+  const aggOut = [...fixedNum, ...amtBI.map(num)];
+  if (fits([num(poolBI)], aggOut, n, fixedOutputs.length, false, /*applyKCap=*/false)) {
     return { route: 'aggregate', numChunks: 1, payoutRoot: payoutRootHex,
-      chunks: [{ kind: 'aggregate', chunk_kind: 0, seg_lo: 0, seg_hi: n, winners, change: 0 }] };
+      chunks: [{ kind: 'aggregate', chunk_kind: 0, seg_lo: 0, seg_hi: n, winners, change: '0' }] };
   }
   // chunk chain: greedy value-aware packing
   const chunks = [];
-  let lo = 0, prevChange = poolValue, isFirst = true;
+  let lo = 0, prevChangeBI = poolBI, isFirst = true;
   while (lo < n) {
-    const fixed = isFirst ? fixedVals : [];
+    const segFixedNum = isFirst ? fixedNum : [];
+    const segFixedSumBI = isFirst ? fixedBI.reduce((s, v) => s + v, 0n) : 0n;
     let hi = lo;
     while (hi < n) {
-      const seg = winners.slice(lo, hi + 1);
-      const segVals = seg.map(w => w.amount);
+      const segNum = amtBI.slice(lo, hi + 1).map(num);
       const isFinalTry = (hi + 1 === n);
-      const outVals = isFinalTry ? [...fixed, ...segVals] : [...fixed, ...segVals, prevChange];
-      if (fits([prevChange], outVals, seg.length, fixed.length, !isFinalTry)) hi++;
+      const outVals = isFinalTry ? [...segFixedNum, ...segNum] : [...segFixedNum, ...segNum, num(prevChangeBI)];
+      if (fits([num(prevChangeBI)], outVals, hi + 1 - lo, segFixedNum.length, !isFinalTry)) hi++;
       else break;
     }
     if (hi === lo) throw new Error(`cannot fit even 1 winner at idx ${lo} (payout=${winners[lo].amount} → storage>${STORAGE_MASS_SAFE_THRESHOLD})`);
-    const seg = winners.slice(lo, hi);
-    const segPaid = seg.reduce((s, w) => s + w.amount, 0);
-    const fixedPaid = fixed.reduce((s, v) => s + v, 0);
+    const segPaidBI = amtBI.slice(lo, hi).reduce((s, v) => s + v, 0n);
     const isLast = (hi === n);
-    const change = isLast ? 0 : (prevChange - segPaid - fixedPaid);
-    if (change < 0) throw new Error(`negative change chunk lo=${lo}: prevChange=${prevChange} segPaid=${segPaid} fixedPaid=${fixedPaid}`);
+    const changeBI = isLast ? 0n : (prevChangeBI - segPaidBI - segFixedSumBI);
+    if (changeBI < 0n) throw new Error(`negative change chunk lo=${lo}: prevChange=${prevChangeBI} segPaid=${segPaidBI} fixedPaid=${segFixedSumBI}`);
     chunks.push({ kind: isFirst ? 'chunk_0' : (isLast ? 'chunk_last' : 'chunk_mid'),
-      chunk_kind: isFirst ? 0 : (isLast ? 2 : 1), seg_lo: lo, seg_hi: hi, winners: seg, change, hwm_out: hi });
-    prevChange = change; lo = hi; isFirst = false;
+      chunk_kind: isFirst ? 0 : (isLast ? 2 : 1), seg_lo: lo, seg_hi: hi,
+      winners: winners.slice(lo, hi), change: String(changeBI), hwm_out: hi });
+    prevChangeBI = changeBI; lo = hi; isFirst = false;
   }
   return { route: 'chunk', numChunks: chunks.length, payoutRoot: payoutRootHex, chunks };
 }
