@@ -77,7 +77,7 @@ export function buildRefundCommand({ witness, poolOutpointTxid, poolRedeemHex, c
   // inputs.ticket.{redeem_hex, state, outpointTxid}, witness.{ps_prefix_hex, ps_suffix_hex} (ticket-addr metadata);
   // computes per-state pool/ticket addr + change itself. (ps_prefix/suffix derived from the witness template buffers.)
   return {
-    action: 'bshard_refund_cancelled',
+    action: 'bshard_refund_cancelled', type: 'bshard_refund_cancelled', // relay dispatches on cmd.type (relay.mjs switch(cmd.type))
     witness: {
       pool_out_idx: witness.poolOutIdx, payout_out_idx: witness.payoutOutIdx, ticket_in_idx: witness.ticketInIdx,
       ticket_prefix_len: witness.ticket_prefix_len, ticket_suffix_len: witness.ticket_suffix_len,

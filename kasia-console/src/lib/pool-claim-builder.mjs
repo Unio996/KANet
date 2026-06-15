@@ -84,7 +84,7 @@ export function buildClaimCommand({ witness, rootOutpointTxid, rootRedeemHex, cu
   // inputs.ticket.{redeem_hex, state, outpointTxid}, witness.{ps_prefix_hex, ps_suffix_hex} (ticket addr metadata,
   // NOT pushed on-chain), inputs.fee.{address, outpointTxid}; computes per-state root/ticket addr + change itself.
   return {
-    action: 'bshard_claim_winner',
+    action: 'bshard_claim_winner', type: 'bshard_claim_winner', // relay dispatches on cmd.type (relay.mjs switch(cmd.type))
     witness: {
       root_out_idx: witness.rootOutIdx, payout_out_idx: witness.payoutOutIdx,
       payout: payout.toString(), merkle_index: witness.merkle_index, tree_depth: witness.tree_depth,

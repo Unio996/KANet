@@ -67,7 +67,7 @@ export function buildRegisterCommand({ witness, leafOutpointTxid, leafRedeemHex,
   // relay handler (unlockBshardRegister) consumes: inputs.leaf.{redeem_hex, current_state, outpointTxid},
   // inputs.funding[].{address, outpointTxid}; computes per-state leaf addr + ticket addr + change itself.
   return {
-    action: 'bshard_register_bet',
+    action: 'bshard_register_bet', type: 'bshard_register_bet', // relay dispatches on cmd.type (relay.mjs switch(cmd.type))
     witness: {
       side: witness.side, stake: stake.toString(), leaf_out_idx: witness.leafOutIdx, ps_out_idx: witness.psOutIdx,
       bettor_pk: witness.bettorPk,
