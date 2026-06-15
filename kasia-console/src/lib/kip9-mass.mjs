@@ -26,6 +26,12 @@ export const SOMPI_PER_MASS = 110;
 // Absolute floor for MIN_BROKER_FEE_SOMPI (= dynamic 算出过低退路).
 export const MIN_BROKER_FEE_FLOOR = 5_000_000;  // 0.05 KAS
 
+// —— #31 single-source consts (J2 ⑤ consolidation, J1 GREEN-lit; was scattered: settler L69/L73 +
+//    SETTLE_FEE_MAX L1798 + V07_MAX_FEE L2291 + pool-p2sh-v08 V08_MAX_CHUNK_FEE = 4+ local dups). ——
+export const STORAGE_MASS_CAP = 500_000;             // kaspad standardness storage cap (post-Toccata block)
+export const STORAGE_MASS_SAFE_THRESHOLD = 470_000;  // settle/chunk pack target (6% headroom under cap)
+export const MAX_TX_FEE_SOMPI = 100_000_000;         // anti-grief per-TX miner-fee ceiling (= 1 KAS = old V07_MAX_FEE)
+
 /**
  * Estimate KIP-9 storage_mass for a single output value.
  * mass(output) ≈ STORAGE_MASS_C / output_value_sompi (dominant for low-value outputs).
@@ -37,6 +43,26 @@ export function estimateStorageMass(outputValueSompi) {
   const v = Number(outputValueSompi) || 0;
   const safeV = Math.max(1000, v);
   return Math.ceil(STORAGE_MASS_C / safeV);
+}
+
+/**
+ * Estimate a full transaction's KIP-9 storage mass (multi-input/multi-output).
+ *   storage_mass = C × max(0, Σ(1/output_value) − inputCount² / Σ(input_value))
+ * Verified vs UAT cycle 3 observed mass. DISTINCT from single-value estimateStorageMass() above
+ * (J1 r303 collision discipline): this is the full formula (was pool-market-settler.js L119; moved here
+ * for #31 single-source so settler + pool-settle-chunks share it without a settler↔chunks circular import).
+ * ⚠ #31 chunk packing MUST use THIS (full), not the single-value approx (single-value undercounts →
+ *   over-pack → mempool reject → no valid chunk plan = stuck = liveness 命门, NWT-flagged).
+ *
+ * @param {number[]} inputValues  sompi value of each input UTXO
+ * @param {number[]} outputValues sompi value of each output
+ * @returns {number} estimated storage mass
+ */
+export function estimateMultiOutputStorageMass(inputValues, outputValues) {
+  const sumOutInv = outputValues.reduce((s, v) => s + (v > 0 ? 1 / v : 0), 0);
+  const sumIn = inputValues.reduce((s, v) => s + v, 0);
+  const inputsTerm = sumIn > 0 ? (inputValues.length * inputValues.length) / sumIn : 0;
+  return Math.max(0, Math.round(STORAGE_MASS_C * (sumOutInv - inputsTerm)));
 }
 
 /**
