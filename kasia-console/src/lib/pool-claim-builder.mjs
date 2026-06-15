@@ -46,13 +46,15 @@ export function buildClaimWitness(payouts, winnerPkHex, spine) {
 
 /**
  * Assemble the relay claim command (I/O spec for the relay TX builder). The relay reveals PoolSide + spine,
- * recreates the spine (passthrough, identical closeCommit state), pays the winner, and signs/broadcasts.
- * spineCloseCommitStateHex = the 93B serialized close-commit (pool-close-commit serializeCloseCommitState) — the
- * relay re-emits it byte-identical on the recreated spine output (passthrough recreate-identical).
+ * recreates the spine (claim_passthrough, identical closeCommit state), pays the winner, and signs/broadcasts.
+ * recreated spine output = the SAME address+value as the spine input (J1 Q2: identical state → identical redeem
+ * → identical P2SH/address; passthrough preserves value) — no state bytes needed off-chain (on-chain
+ * validateOutputState enforces identical; off-chain same-address satisfies it).
  * @returns {object} relay command (action='bshard_claim_winner')
  */
-export function buildClaimCommand({ witness, poolSideOutpoint, poolSideRedeemHex, spineOutpoint, spineRedeemHex, spineCloseCommitStateHex, feeOutpoint, bettorAddress, changeAddress }) {
+export function buildClaimCommand({ witness, poolSideOutpoint, poolSideRedeemHex, spineOutpoint, spineRedeemHex, spineAddress, spineValueSompi, feeOutpoint, bettorAddress, changeAddress }) {
   if (!poolSideOutpoint || !spineOutpoint) throw new Error('poolSideOutpoint + spineOutpoint required');
+  if (!spineAddress) throw new Error('spineAddress (spine input address; recreated spine reuses it) required');
   return {
     action: 'bshard_claim_winner',
     witness: {
@@ -66,7 +68,7 @@ export function buildClaimCommand({ witness, poolSideOutpoint, poolSideRedeemHex
       bettor_pk: witness.bettorPk,
     },
     inputs: { poolSide: { ...poolSideOutpoint, redeem_hex: poolSideRedeemHex }, spine: { ...spineOutpoint, redeem_hex: spineRedeemHex }, fee: feeOutpoint },
-    // outputs: [0] payout → bettor P2PK; [1] recreated spine (passthrough, identical close-commit state); [2] change
-    outputs: { payout: { address: bettorAddress, amountSompi: witness.payout.toString() }, recreated_spine_state_hex: spineCloseCommitStateHex, change_address: changeAddress },
+    // outputs: [0] payout → bettor P2PK; [spine_out_idx] recreated spine (SAME address+value as spine input); change
+    outputs: { payout: { address: bettorAddress, amountSompi: witness.payout.toString() }, recreated_spine: { address: spineAddress, amountSompi: spineValueSompi != null ? String(spineValueSompi) : null }, change_address: changeAddress },
   };
 }
