@@ -158,7 +158,9 @@ contract PoolSpine_v08_chunk(
                                                            //   (=effPlanCommit, committee-sign) → 同证身份+金额, v07-equiv trust.
             // ★★ recipient 绑定 (NWT/Bettor 🔴 承重墙·最关键一行): winner k 输出必付【实 winner pk-derive 地址】.
             //    J2 compile fix: p2pk() 不存在 → 正解 new ScriptPubKeyP2PK(pubkey(...)) (TUTORIAL.md L972-978, byte[34]).
-            require(tx.outputs[wOutBase + k].scriptPubKey == new ScriptPubKeyP2PK(pubkey(winnerPks[k])));
+            //    NWT heads-up (verify-not-assume): 用中间变量形 (文档 L977-8 + v07 _ps7.sil L255-6 同款), 非未验的 inline 形.
+            byte[34] expWinnerSPK = new ScriptPubKeyP2PK(pubkey(winnerPks[k]));
+            require(tx.outputs[wOutBase + k].scriptPubKey == expWinnerSPK);
             // ★★ amount 绑定 ((A)-refined): winner k 输出金额必 == merkle-proven 的 payout amount (含 off-chain 算好的 dust).
             require(tx.outputs[wOutBase + k].value == winnerAmounts[k]);
         }
