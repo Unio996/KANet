@@ -1,24 +1,33 @@
-// pool-claim-builder.mjs — bshard self-claim witness assembler (J2, 2026-06-15, integration builder 2/3).
+// pool-claim-builder.mjs — bshard claim_draw witness/command assembler (J2, 2026-06-15; M3-aligned 2026-06-15).
 //
-// Console-side assembly for a winner's claim_winner TX. The relay builds/signs/broadcasts the actual TX (model:
-// bettor-refund-claim-auto.mjs → relay command). This produces the deterministic witness + I/O spec; the relay
-// handler reveals the PoolSide + spine, recreates the spine (claim_passthrough), and pays the winner.
+// Console-side assembly for a winner's claim_draw TX (M3 fold-carries-KAS: winner draws their parimutuel payout
+// directly from the ROOT market-pool, serial draw-down). Models PoolShard_fold claim_draw (aa041d91 entry 3,
+// L154-205). The relay builds/signs/broadcasts:
+//   - reveals the ROOT pool UTXO (claim_draw selector) + the winner's PoolSide dust-ticket (spent-once),
+//   - merkle-proves payout ∈ payoutRoot (committee-attested at close_commit), pays the winner P2PK(bettorPk)=payout,
+//   - recreates the root continuation: SAME address (template P2SH, state-excluded) + value = pool_value - payout,
+//     state closed:1 preserved (claim does NOT change outcome; only draws down pool_value).
 //
-// claim_winner witness order (J1 PoolSide_v08_shard L45-53): bettorSig(relay signs), payout, merkle_index,
-// tree_depth, siblings[], spine_in_idx, spine_prefix_len, spine_suffix_len. payout/index/siblings come from the
-// committee-attested payoutRoot (my pool-payout-parimutuel). spine_prefix/suffix_len from the spine artifact.
+// claim_draw witness order (aa041d91 L155-166): rootOutIdx, payoutOutIdx, payout, merkle_index, tree_depth,
+// siblings[], ticketInIdx, ticket_prefix_len, ticket_suffix_len. payout/index/siblings come from the
+// committee-attested payoutRoot (my pool-payout-parimutuel). The dust-ticket gives eligibility on-chain
+// (tk.shardPoolId == shard_pool_id ∧ tk.direction == winningSide). NO spine (pre-M3 spine-passthrough removed).
+//
+// On-chain welds (aa041d91): closed==1 gate / payout∈[1000, pool_value] / merkle climb == payoutRoot /
+// payout output == P2PK(tk.bettorPk) exact / weld4 require(out[rootOutIdx].value == pool_value - payout).
 
 import { payoutMerkleProof, climbPayoutProof, buildPayoutTree } from './pool-payout-parimutuel.mjs';
 
 /**
- * Assemble the claim_winner witness for one winner, self-verified against the payoutRoot.
+ * Assemble the claim_draw witness for one winner, self-verified against the payoutRoot.
  * @param {Array<{pk:string, payout:bigint}>} payouts  canonical (pk-ASC) payouts from computeParimutuelPayouts
  * @param {string} winnerPkHex  this winner's pk (must be in payouts)
- * @param {object} spine  { inIdx, prefixLen, suffixLen }  spine close-commit input position + template lens (artifact)
- * @returns {{ bettorPk:string, payout:bigint, merkle_index:number, tree_depth:number, siblings:Buffer[],
- *            spine_in_idx:number, spine_prefix_len:number, spine_suffix_len:number, payoutRootHex:string }}
+ * @param {object} pos  { rootOutIdx, payoutOutIdx, ticketInIdx, ticketPrefixLen, ticketSuffixLen }
+ *                      root continuation + payout output positions + dust-ticket input position & template lens
+ * @returns {{ bettorPk, payout:bigint, merkle_index, tree_depth, siblings:Buffer[], rootOutIdx, payoutOutIdx,
+ *            ticketInIdx, ticket_prefix_len, ticket_suffix_len, payoutRootHex }}
  */
-export function buildClaimWitness(payouts, winnerPkHex, spine) {
+export function buildClaimWitness(payouts, winnerPkHex, pos) {
   const merkleIndex = payouts.findIndex(p => p.pk === winnerPkHex);
   if (merkleIndex < 0) throw new Error(`winner ${winnerPkHex} not in payouts (loser/unknown → no claim)`);
   const payout = payouts[merkleIndex].payout;
@@ -28,8 +37,10 @@ export function buildClaimWitness(payouts, winnerPkHex, spine) {
   const root = buildPayoutTree(payouts).root;
   const climbed = climbPayoutProof(winnerPkHex, payout, merkleIndex, siblings);
   if (!climbed.equals(root)) throw new Error(`claim witness self-verify FAILED: climb != payoutRoot for ${winnerPkHex}`);
-  if (!spine || typeof spine.inIdx !== 'number' || typeof spine.prefixLen !== 'number' || typeof spine.suffixLen !== 'number') {
-    throw new Error('spine {inIdx, prefixLen, suffixLen} required');
+  if (treeDepth > 16) throw new Error(`tree_depth ${treeDepth} > 16 (SS claim_draw require tree_depth <= 16)`);
+  for (const [k, v] of [['rootOutIdx', pos?.rootOutIdx], ['payoutOutIdx', pos?.payoutOutIdx], ['ticketInIdx', pos?.ticketInIdx],
+    ['ticketPrefixLen', pos?.ticketPrefixLen], ['ticketSuffixLen', pos?.ticketSuffixLen]]) {
+    if (typeof v !== 'number' || v < 0) throw new Error(`pos.${k} must be a non-negative int, got ${v}`);
   }
   return {
     bettorPk: winnerPkHex,
@@ -37,38 +48,51 @@ export function buildClaimWitness(payouts, winnerPkHex, spine) {
     merkle_index: merkleIndex,
     tree_depth: treeDepth,
     siblings,
-    spine_in_idx: spine.inIdx,
-    spine_prefix_len: spine.prefixLen,
-    spine_suffix_len: spine.suffixLen,
+    rootOutIdx: pos.rootOutIdx,
+    payoutOutIdx: pos.payoutOutIdx,
+    ticketInIdx: pos.ticketInIdx,
+    ticket_prefix_len: pos.ticketPrefixLen,
+    ticket_suffix_len: pos.ticketSuffixLen,
     payoutRootHex: root.toString('hex'),
   };
 }
 
 /**
- * Assemble the relay claim command (I/O spec for the relay TX builder). The relay reveals PoolSide + spine,
- * recreates the spine (claim_passthrough, identical closeCommit state), pays the winner, and signs/broadcasts.
- * recreated spine output = the SAME address+value as the spine input (J1 Q2: identical state → identical redeem
- * → identical P2SH/address; passthrough preserves value) — no state bytes needed off-chain (on-chain
- * validateOutputState enforces identical; off-chain same-address satisfies it).
+ * Assemble the relay claim command (I/O spec for the relay TX builder). The relay reveals ROOT + dust-ticket,
+ * pays the winner P2PK(bettorPk)=payout, and recreates the root continuation (SAME address, value pool_value-payout,
+ * state closed:1 preserved + pool_value-=payout). The new root State region is given by `rootContinuationState`
+ * for the relay to serialize. value-conserve weld (on-chain weld4) self-checked: payout + root_out == pool_value.
  * @returns {object} relay command (action='bshard_claim_winner')
  */
-export function buildClaimCommand({ witness, poolSideOutpoint, poolSideRedeemHex, spineOutpoint, spineRedeemHex, spineAddress, spineValueSompi, feeOutpoint, bettorAddress, changeAddress }) {
-  if (!poolSideOutpoint || !spineOutpoint) throw new Error('poolSideOutpoint + spineOutpoint required');
-  if (!spineAddress) throw new Error('spineAddress (spine input address; recreated spine reuses it) required');
+export function buildClaimCommand({ witness, rootOutpoint, rootRedeemHex, ticketOutpoint, ticketRedeemHex, rootAddress, rootValueSompi, rootContinuationState, bettorAddress, feeOutpoint, changeAddress }) {
+  if (!rootOutpoint || !ticketOutpoint) throw new Error('rootOutpoint + ticketOutpoint required');
+  if (!rootAddress) throw new Error('rootAddress (root input address; recreated root reuses it — template P2SH, state-excluded) required');
+  if (!bettorAddress) throw new Error('bettorAddress (P2PK(bettorPk); payout recipient) required');
+  if (rootValueSompi == null) throw new Error('rootValueSompi (current root UTXO value) required');
+  const rootValue = BigInt(rootValueSompi);
+  const payout = BigInt(witness.payout);
+  const rootOut = rootValue - payout;
+  if (rootOut < 0n) throw new Error(`claim value-conserve FAILED: payout ${payout} > root pool_value ${rootValue}`);
+  // value-conserve self-check (mirrors on-chain weld4 + payout bind): payout + root_out == pool_value.
+  if (payout + rootOut !== rootValue) throw new Error('claim value-conserve self-check FAILED: payout + root_out != pool_value');
+  if (rootContinuationState && rootContinuationState.closed !== 1) {
+    throw new Error(`claim root continuation must keep closed=1 (settled; claim does not change outcome), got ${rootContinuationState.closed}`);
+  }
   return {
     action: 'bshard_claim_winner',
     witness: {
-      payout: witness.payout.toString(),
-      merkle_index: witness.merkle_index,
-      tree_depth: witness.tree_depth,
+      root_out_idx: witness.rootOutIdx, payout_out_idx: witness.payoutOutIdx,
+      payout: payout.toString(), merkle_index: witness.merkle_index, tree_depth: witness.tree_depth,
       siblings_hex: witness.siblings.map(s => s.toString('hex')),
-      spine_in_idx: witness.spine_in_idx,
-      spine_prefix_len: witness.spine_prefix_len,
-      spine_suffix_len: witness.spine_suffix_len,
+      ticket_in_idx: witness.ticketInIdx, ticket_prefix_len: witness.ticket_prefix_len, ticket_suffix_len: witness.ticket_suffix_len,
       bettor_pk: witness.bettorPk,
     },
-    inputs: { poolSide: { ...poolSideOutpoint, redeem_hex: poolSideRedeemHex }, spine: { ...spineOutpoint, redeem_hex: spineRedeemHex }, fee: feeOutpoint },
-    // outputs: [0] payout → bettor P2PK; [spine_out_idx] recreated spine (SAME address+value as spine input); change
-    outputs: { payout: { address: bettorAddress, amountSompi: witness.payout.toString() }, recreated_spine: { address: spineAddress, amountSompi: spineValueSompi != null ? String(spineValueSompi) : null }, change_address: changeAddress },
+    inputs: { root: { ...rootOutpoint, redeem_hex: rootRedeemHex }, ticket: { ...ticketOutpoint, redeem_hex: ticketRedeemHex }, fee: feeOutpoint },
+    // outputs: [payout_out_idx] payout → bettor P2PK; [root_out_idx] recreated root (SAME address, value-=payout, closed=1); change
+    outputs: {
+      payout: { address: bettorAddress, amountSompi: payout.toString() },
+      root_continuation: { address: rootAddress, amountSompi: rootOut.toString(), state: rootContinuationState || null },
+      change_address: changeAddress,
+    },
   };
 }
