@@ -1,0 +1,60 @@
+// PoolShard_fold.sil — bshard §4 fold covenant (J1, 2026-06-15). FOLD-only 首版验 conserve policy.
+//
+// (a) 同合约 auto conserve_and_bump (J2 撤 (b) 改 (a), DECL SS-safety: compiler-验过 >> 手写).
+// 层次 fold 树: k 个 (shard 叶 或 中间 fold) UTXO → 1 中间/root UTXO 携 (localYes, localNo, count) partial-sum.
+//
+// 结构-阶段对抗审 bake (NWT/J2 PoC):
+//   PoC-1 provenance: auto-pattern OpInputCovenantId(activeInputIndex) 链派生 cov_id (非 witness) → 同-cov_id 集自验.
+//   PoC-2 conserve 命门(NWT): policy 必 **== 非 vanilla >=** (>= = vault fee-从池扣 → winner 短付) + 双量(yes/no 各 ==).
+//     fee 从 non-cov append input (cov conserve 只管 OpCovInputCount 集 → fee-UTXO 在集外 → 池零蚀).
+//   PoC-4 漏片/重计(J2): state 含 count (叶=1, out.count==Σin.count) → root.count==shard_count 关池锚 + UTXO spent-once.
+//   PoC-3 commit(NWT): root (count==shard_count) require blake2b(localYes‖localNo‖market_id‖shard_count)==commit_v2,
+//     globalYes/No = 链上 fold 派生真值 (非 settler/witness).
+//
+// 注: register_bet (叶 covenant-accumulating localYes/No) gated on register↔PoolSide 耦合裁 (flag 给 Bettor/J2), 续填.
+
+pragma silverscript ^0.1.0;
+
+contract PoolShard_fold(
+    byte[32] market_id,        // 跨片锚 (commit 绑)
+    byte[32] commit_v2,        // root commit 硬校验目标 (= blake2b(globalYes‖globalNo‖market_id‖shard_count))
+    int      shard_count,      // 关池锚: root.count 必 == 此 (全片恰折一次)
+    int      max_fan_in,       // fold 叉数上限 (= 编译期 for-loop 界; J2 mass 实测定 < MAX_OPS 201)
+    // genesis state (叶 = 0/0/0 由 register 累积; 中间/root fold UTXO 由本 cov 产):
+    int      init_local_yes,
+    int      init_local_no,
+    int      init_count
+) {
+    int local_yes = init_local_yes;
+    int local_no  = init_local_no;
+    int count     = init_count;
+
+    // —— fold: k→1 conserve (== 严格守恒, 双量, leaf_count, root commit 硬校验) ——
+    #[covenant(binding = cov, from = max_fan_in, to = 1, mode = verification)]
+    function fold(State[] prev_states, State[] new_states) {
+        require(new_states.length == 1);
+
+        int yes_sum = 0;
+        int no_sum = 0;
+        int count_sum = 0;
+        for (i, 0, prev_states.length, max_fan_in) {
+            yes_sum = yes_sum + prev_states[i].local_yes;
+            no_sum = no_sum + prev_states[i].local_no;
+            count_sum = count_sum + prev_states[i].count;
+        }
+
+        // PoC-2: == 非 >= (双量各严格守恒, 池零 fee-蚀; fee 从 non-cov append input 自动排除).
+        require(new_states[0].local_yes == yes_sum);
+        require(new_states[0].local_no == no_sum);
+        // PoC-4: leaf_count 守恒 (叶=1 → root.count==Σ = shard_count = 每片恰折一次).
+        require(new_states[0].count == count_sum);
+
+        // PoC-3: root (count==shard_count = 全片聚完) commit 硬校验 — globalYes/No 链上 fold 派生真值.
+        if (count_sum == shard_count) {
+            byte[] commit_pre0 = byte[](yes_sum, 16) + byte[](no_sum, 16);
+            byte[] commit_pre1 = commit_pre0 + byte[](market_id);
+            byte[] commit_pre2 = commit_pre1 + byte[](shard_count, 4);
+            require(blake2b(commit_pre2) == commit_v2);
+        }
+    }
+}
