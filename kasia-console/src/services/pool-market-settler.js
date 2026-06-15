@@ -36,6 +36,10 @@ import {
 } from '../lib/kip9-mass.mjs';
 export { estimateStorageMass };  // re-export so pool.js L9/L471 import stays valid (was settler-local L119 fn)
 
+// #31 ② wire: v08 chunked-settle (computeSettleChunks routes aggregate/chunk; payoutRoot = chunk_0 plan_commit).
+import { computeSettleChunks } from '../lib/pool-settle-chunks.mjs';
+import { payoutRoot as computePayoutRoot } from '../lib/pool-payout-root.mjs';
+
 // J2-tn r382 (Bettor 16:29 钦定): TICK_INTERVAL_MS env-configurable. Default 5min mainnet,
 // demo 期 .env 设 POOL_SETTLER_TICK_SEC=60 (= 1min) 提速 5x 整条流水.
 const TICK_INTERVAL_MS = (parseInt(process.env.POOL_SETTLER_TICK_SEC, 10) || 300) * 1000;
@@ -203,7 +207,7 @@ async function legacyRefundBuilderTick() {
     const unfixablePlaceholders = unfixableIds.length ? unfixableIds.map(() => '?').join(',') : "''";
     const sides = sqlite.prepare(`
       SELECT pbs.id AS side_id, pbs.market_id, pbs.bettor_pk, pbs.side_p2sh, pbs.side_lock_tx,
-             pbs.side_redeem_script_hex, pbs.stake_amount, pm.deadline, pm.protocol_version
+             pbs.side_redeem_script_hex, pbs.stake_amount, pbs.merkle_index, pbs.direction, pm.deadline, pm.protocol_version
       FROM pool_bettor_sides pbs
       JOIN pool_markets pm ON pm.id = pbs.market_id
       WHERE (
@@ -1942,6 +1946,29 @@ export async function dispatchPhase2(market, decision) {
     const outputValues = outputs.map(o => parseInt(o.amountSompi, 10) || 0);
     const estMass = estimateStorageMass(inputValues, outputValues);
     if (estMass > STORAGE_MASS_SAFE_THRESHOLD) {
+      // #31 ② wire: v0.8 chunk-capable markets → chunked settle (PoolSpine_v08) instead of cancel-refund.
+      //   winners = winning-side (computePoolPayouts already filters), CANONICAL order = [maker@idx0 if winning,
+      //   then winning bettors by pool merkle_index ASC] (NOT stake_amount/DB order = cross-node fork bug;
+      //   sides query 必 ORDER BY merkle_index + SELECT merkle_index — coupled fix). pk = maker_pk/bettor_pk
+      //   x-only (NOT addr). amount = computePoolPayouts parimutuel (BigInt, dust→winners[0], i-iv 已满足).
+      //   continuous re-index 0..K-1 = array index = SS climb leaf (NOT raw merkle_index — re-index VERIFIED 散 PASS).
+      if (market.protocol_version === 'v0.8') {
+        const chunkWinners = payouts.winnerPayouts.map(w => {
+          const isMaker = w.participantIndex === 0 && participants[0]?.isMaker;
+          const sortKey = isMaker ? -1 : (parseInt(sides[w.participantIndex - 1]?.merkle_index, 10));
+          const pk = isMaker ? makerPk : sides[w.participantIndex - 1]?.bettor_pk;
+          return { pk, amount: Number(w.amount), _sortKey: sortKey };
+        }).sort((a, b) => a._sortKey - b._sortKey)         // canonical: maker(-1) first, then merkle_index ASC
+          .map(({ pk, amount }) => ({ pk, amount }));        // continuous re-index 0..K-1 (array idx = leaf)
+        const payoutRootHex = computePayoutRoot(chunkWinners).toString('hex');
+        const fixedOuts = outputs.slice(0, 6).map(o => ({ value: parseInt(o.amountSompi, 10) || 0 }));
+        const poolValueSompi = inputValues.reduce((s, v) => s + v, 0);
+        const plan = computeSettleChunks(chunkWinners, fixedOuts, poolValueSompi, payoutRootHex);
+        console.log(`[pool-settler] dispatchPhase2 v0.8 market=${market.id.slice(0,12)} estMass ${estMass}>${STORAGE_MASS_SAFE_THRESHOLD} → CHUNK-SETTLE route=${plan.route} numChunks=${plan.numChunks} segLens=[${plan.chunks.map(c=>c.seg_hi-c.seg_lo).join(',')}] payoutRoot=${payoutRootHex.slice(0,16)} winners=${chunkWinners.length}`);
+        // ③ chunk-chain dispatch (build/sign/broadcast loop + resume from unspent-tip) + ④ relay v08 scriptSig:
+        //   next pieces. In dev no live v0.8 market exists → this path unexercised until ①-create + ③④ + e2e.
+        throw new Error(`#31 ②-routed v0.8 chunk-settle (plan route=${plan.route} chunks=${plan.numChunks}) — ③④ chunk-chain dispatch + relay scriptSig not yet wired`);
+      }
       // min-pot 选项 A (Bettor r337 实证 unmfw 50 KAS 输方仍触): storage-mass cap 是 KIP-9
       // pool-dependent (≈ 1/pool); 单纯 5×oracleBond pre-check 不充分. 真根因 = 任何
       // payout outputs 触 storage_mass > cap → 该走 cancel-refund 不是 needs_larger_pot
