@@ -80,6 +80,9 @@ contract PoolSpine_v08_chunk(
         // —— plan 绑定 (chunk_0 用: committee-sig sighash 覆盖这俩 → committee-attested; chunk_i 不用这俩, 从 state 读) ——
         byte[32] plan_commit_arg,        // chunk_0 的 planCommit (blake2b 全 plan); chunk_i 走 state.planCommit 忽略此
         int      total_winners_arg,      // chunk_0 的总 winner 数; chunk_i 走 state.totalWinners 忽略此
+        // —— ⑦ min-pot global (chunk_0 committee-sighash 覆盖→attested; 仅 chunk_0 检=global 性质验一次. ⑦b/⑨ subsumed 不带) ——
+        int      globalYesTotal_sompi,   // 跨 shard YES 池总 (chunk_0 ⑦ min-pot defense-in-depth, 团队裁 2026-06-15)
+        int      globalNoTotal_sompi,    // 跨 shard NO 池总
         // —— chunk 定位 (链锚, 两节点同 → byte-equal partition) ——
         int      chunk_kind,             // 0=first, 1=mid, 2=last
         int      seg_lo,                 // 本 chunk winner 子段起 (merkle_index, inclusive)
@@ -137,6 +140,15 @@ contract PoolSpine_v08_chunk(
             byte[34] oLock4 = new ScriptPubKeyP2PK(pubkey(c4Pk));
             require(tx.outputs[5].scriptPubKey == byte[](oLock4));
             require(tx.outputs[5].value >= oracleBondAmount);
+            // ⑦ min-pot global (defense-in-depth, 团队裁 2026-06-15; ⑦b losing-floor SUBSUMED by 上方 committee per-output
+            //   floor(out1-5 >=oracleBondAmount), ⑨ commit-anchor SUBSUMED by payoutRoot): globalYes+globalNo
+            //   committee-sighash-attested 本 chunk_0 → require total ≥ 100KAS (= settle_aggregate ⑦ 同值 1e10 sompi).
+            //   硬化"chunk-trigger ⟹ 大池"软依赖, 防 thin-pool dust. 仅 chunk_0 检 (global 验一次; chunk_i 无 sig 不验).
+            require(globalYesTotal_sompi >= 0);
+            require(globalNoTotal_sompi >= 0);
+            require(globalYesTotal_sompi + globalNoTotal_sompi >= 10000000000);
+            require(globalYesTotal_sompi < 1000000000000000000);  // 1e18 sanity upper
+            require(globalNoTotal_sompi < 1000000000000000000);
             // planCommit (= payoutRoot, winner pk‖amount[8B LE] 的 depth-8 merkle root) 经 5×sig sighash 覆盖本
             // scriptSig args = committee-attested. chunk_0 输出 change.planCommit = 此 (validateOutputState ③).
             // (NWT plan_commit 攻面: chunk_0 once-sig commit payoutRoot → chunk_i 无 sig 但 winner outputs[pk+amount] 被授权.)
@@ -248,7 +260,16 @@ contract PoolSpine_v08_chunk(
         require(chunkMinerFee >= 0);                             // 零 mint (consensus 白给, 留作显式)
         require(chunkMinerFee <= maxChunkFee);                  // ⑦ over-fee 防护 (=V07_MAX_FEE 单源 ctor)
 
-        // ⑤ min-pot / losing-side floor / commit anchor: 复用 settle_aggregate ⑦/⑦b/⑨ (全局值跨 chunk 不变, chunk_0 验即可).
+        // ⚠ min-pot/losing-floor/commit-anchor — SUBSUMPTION 分析 (Bettor 08:39 实读 catch + NWT subsumption + J1 自核,
+        //   修正旧 draft 误导注释 "复用 settle_aggregate ⑦/⑦b/⑨ chunk_0 验即可" = aspirational/false, 本 entry 无 global params):
+        //   • ⑦b losing-side-floor → **SUBSUMED**: chunk_0 上方 broker/committee per-output 显式 floor (out1-5 value>=oracleBondAmount)
+        //     已挡 committee-bond dust = ⑦b 实质. 再加 = 冗余 bloat redeem.
+        //   • ⑨ commit-anchor → **SUBSUMED**: payoutRoot (committee-attested via chunk_0 sig, 编码 final payouts) 已绑 plan.
+        //     再加 = 冗余.
+        //   • ⑦ min-pot (totalPool≥100KAS) → **唯一实缺口, 但软-covered**: chunk-trigger(>47 winner @1KAS min-bet ⟹ 池>>100KAS)
+        //     + off-chain computePoolPayouts dust-handling (amounts pre-dust-absorbed, SS 验已 dust-safe 的 committed amounts).
+        //     **非 SS-hard-enforced**. 团队裁 (2026-06-15): demo-defer+doc 软依赖 (feasibility: 不 bloat redeem + 不触 ④b) VS
+        //     chunk_0 加显式 ⑦ (only globalYes+globalNo + require≥1e10, +~0.3KB, 触 J2 ④b 供 params). 补则在此 chunk_0 分支加.
     }
 
     // entry 1 — dispute_reveal: triggered when a settle outcome is disputed. Each committee
