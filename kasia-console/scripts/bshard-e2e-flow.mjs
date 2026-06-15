@@ -15,7 +15,6 @@
 // computeP2SH(redeemHex), funding/committee/relay-ids. RELAY HANDLERS unlockBshard{Register,Fold,Close,Claim,Refund}
 // = J1 domain (must be live for ④⑤ — fold/close were the missing pieces). NO TX NO STATE: only advance on landed.
 
-import { allocateForRegister, onBettorRegistered } from '../src/lib/shard-allocator.mjs';
 import { buildRegisterWitness, buildRegisterCommand } from '../src/lib/pool-register-builder.mjs';
 import { buildFoldWitness, buildFoldCommand } from '../src/lib/pool-fold-builder.mjs';
 import { buildCloseCommitWitness, buildCloseCommitCommand } from '../src/lib/pool-close-builder.mjs';
@@ -82,10 +81,10 @@ export async function runHappyPath(config) {
   let leafState = { ...m.genesisState };
   let leafOutpointTxid = g.outpointTxid, leafRedeemHex = m.redeemHexForGenesisState, leafValue = BigInt(m.genesisState.pool_value);
 
-  // ② register × N (append): allocator routes, buildRegisterCommand, send+land, advance leaf state.
+  // ② register × N (append): buildRegisterCommand, send+land, advance leaf state. Minimal single-shard e2e appends
+  // all bettors to the genesis leaf (no allocator/DB routing — shard-allocator is multi-shard, the fold path).
   // config.bettors[0] = the genesis bettor (already baked into the leaf in ①); register bettors [1..N).
   for (const b of config.bettors.slice(1)) {
-    const alloc = allocateForRegister({ logicalMarketId: m.marketId, projectedMass: 0 }); // 'use' open shard or 'open_new'
     const w = buildRegisterWitness({ side: b.side, stake: BigInt(b.stakeSompi), leafOutIdx: 0, psOutIdx: 1, bettorPk: b.bettorPk, psArtifact: m.psArtifact });
     const cmd = buildRegisterCommand({
       witness: w, leafAddress: config.computeP2SH(leafRedeemHex), leafOutpointTxid, leafRedeemHex, leafValueSompi: leafValue,
@@ -97,7 +96,6 @@ export async function runHappyPath(config) {
     leafState = cmd.outputs.leaf_continuation.state; leafOutpointTxid = txid; leafValue += BigInt(b.stakeSompi);
     // ticket-tracking: register created the dust ticket at ps_out_idx of this TX → record for claim/refund (J1-confirmed).
     config.tickets[b.bettorPk] = { txid, redeemHex: _ticketRedeemHex(m.psArtifact, cmd.outputs.poolSide_ticket.state) };
-    onBettorRegistered({ logicalMarketId: m.marketId, shardIndex: alloc.shardIndex ?? 0 });
   }
 
   // ③ seal: leafState.count == sealCount (or the test target) → shard foldable. (single-shard e2e: skip multi-shard fold)
