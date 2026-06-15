@@ -57,7 +57,7 @@ export function buildFoldWitness(o) {
  * template (same redeem modulo State), so the parent P2SH derives from any child's redeem + parentState.
  * @returns {object} relay command (type='bshard_fold')
  */
-export function buildFoldCommand({ witness, children, parentOutIdx = 0, changeAddress }) {
+export function buildFoldCommand({ witness, children, fee, parentOutIdx = 0, changeAddress }) {
   if (!Array.isArray(children) || children.length < 2) throw new Error('children [{outpointTxid, redeem_hex}] (k >= 2) required');
   for (const [i, c] of children.entries()) {
     if (!c.outpointTxid || !c.redeem_hex) throw new Error(`child[${i}].{outpointTxid, redeem_hex} required (relay derives addr from redeem + reveals)`);
@@ -65,6 +65,8 @@ export function buildFoldCommand({ witness, children, parentOutIdx = 0, changeAd
   if (witness.parentState.closed !== 0 || witness.parentState.winningSide !== 0) {
     throw new Error('fold parent must be canonical open (closed=0, winningSide=0) — committee-bypass fix');
   }
+  // fee = non-cov P2PK input for miner fee (children value Σ-conserved into parent by weld2 → no fee room in pool;
+  // relay handler reads inputs.fee.{address, outpointTxid} optionally; without it the fold TX has no miner-fee source).
   return {
     action: 'bshard_fold', type: 'bshard_fold', // relay dispatches on cmd.type
     witness: {
@@ -75,6 +77,7 @@ export function buildFoldCommand({ witness, children, parentOutIdx = 0, changeAd
     inputs: {
       // k covenant children; relay derives each addr from redeem_hex (per-state P2SH) + assembles leader/delegate scriptSig.
       children: children.map(c => ({ outpointTxid: c.outpointTxid, redeem_hex: c.redeem_hex })),
+      fee: fee ? { outpointTxid: fee.outpointTxid, address: fee.address } : null, // P2PK miner-fee input (relay wallet-signs)
     },
     // outputs: parent_continuation — relay computes per-state addr from a child redeem + parent_state; value = Σ child.value (weld2).
     outputs: {

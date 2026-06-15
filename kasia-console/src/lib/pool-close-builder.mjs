@@ -41,20 +41,25 @@ export function buildCloseCommitWitness(o) {
  * (relay computes per-state P2SH from redeem + closeState), value UNCHANGED (weld3), State closed:1.
  * @returns {object} relay command (type='bshard_close_commit')
  */
-export function buildCloseCommitCommand({ witness, rootOutpointTxid, rootRedeemHex, rootValueSompi, changeAddress }) {
+export function buildCloseCommitCommand({ witness, rootOutpointTxid, rootRedeemHex, rootValueSompi, fee, sigsHex, txObjPreimage, changeAddress }) {
   if (!rootOutpointTxid) throw new Error('rootOutpointTxid (root pool UTXO txid) required');
   if (!rootRedeemHex) throw new Error('rootRedeemHex (root redeem; relay derives per-state addr + reveals) required');
   if (rootValueSompi == null) throw new Error('rootValueSompi (current root UTXO value; close keeps it unchanged) required');
   if (!witness.closeState || witness.closeState.closed !== 1) throw new Error('witness.closeState must be closed=1 (close sets settled)');
+  if (sigsHex != null && (!Array.isArray(sigsHex) || sigsHex.length !== 5)) throw new Error('sigsHex must be 5 committee sig slots (4-of-5; missing → placeholder), got ' + (sigsHex && sigsHex.length));
+  // committee 4-of-5: driver builds the close TX preimage (tx_obj_preimage), each committee member signs it with its
+  // baked ctor key (c0-c4Pk), driver collects → sigs_hex (relay pushes 5 slots, >=4 valid). Mirrors v07 settle pattern.
   return {
     action: 'bshard_close_commit', type: 'bshard_close_commit', // relay dispatches on cmd.type
     witness: {
       root_out_idx: witness.rootOutIdx, new_winning_side: witness.new_winningSide, new_payout_root: witness.new_payoutRoot,
-      // c0Sig..c4Sig: gathered by relay/committee 4-of-5 signing (cross-node), NOT supplied by builder.
+      sigs_hex: sigsHex || [], // 5 committee sigs (4-of-5; driver-gathered against tx_obj_preimage; relay pushes them)
     },
     inputs: {
       root: { outpointTxid: rootOutpointTxid, redeem_hex: rootRedeemHex },
+      fee: fee ? { outpointTxid: fee.outpointTxid, address: fee.address } : null, // P2PK miner-fee input (close value unchanged → no fee room in pool)
     },
+    tx_obj_preimage: txObjPreimage || null, // committee sighash consistency (relay requires; driver builds the preimage committee signs)
     // outputs: root_continuation — relay computes per-state addr from redeem + closeState (closed:1), value UNCHANGED (weld3).
     outputs: {
       root_continuation: { amountSompi: BigInt(rootValueSompi).toString(), state: witness.closeState },

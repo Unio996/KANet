@@ -81,7 +81,10 @@ export async function runHappyPath(config) {
   const payouts = computeParimutuelPayouts(winners, netPoolToSplit(leafState), winnerPoolSompi(winners));
   const payoutRoot = buildPayoutTree(payouts).root.toString('hex');
   const cw = buildCloseCommitWitness({ rootOutIdx: 0, winningSide: config.winningSide, payoutRoot, currentRootState: leafState });
-  const closeCmd = buildCloseCommitCommand({ witness: cw, rootOutpointTxid: leafOutpointTxid, rootRedeemHex: leafRedeemHex, rootValueSompi: leafValue, changeAddress: config.changeAddress });
+  // committee 4-of-5: operator builds the close TX preimage + collects committee sigs (baked ctor keys c0-c4Pk) →
+  // { sigsHex(5 slots, >=4 valid), txObjPreimage }. Mirrors v07 settle (driver builds preimage, committee signs, relay assembles).
+  const { sigsHex, txObjPreimage } = await config.signCommittee({ phase: 'close_commit', rootOutpointTxid: leafOutpointTxid, rootRedeemHex: leafRedeemHex, closeState: cw.closeState, rootValueSompi: leafValue, feeOutpoint: config.feeOutpoint });
+  const closeCmd = buildCloseCommitCommand({ witness: cw, rootOutpointTxid: leafOutpointTxid, rootRedeemHex: leafRedeemHex, rootValueSompi: leafValue, fee: config.feeOutpoint, sigsHex, txObjPreimage, changeAddress: config.changeAddress });
   out.closeTxid = await sendAndLand(config, config.relays.committeeRelayIds[0], closeCmd, 'close_commit (committee 4-of-5)');
   let rootState = cw.closeState, rootOutpointTxid = out.closeTxid, rootValue = leafValue;
 
