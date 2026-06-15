@@ -43,6 +43,8 @@ if (!brokerRelayId) console.warn('[tg-bot] no broker configured — set it in Co
 // Bettor r63 P0 fix: link store 持久化已迁到 prediction-menu._state.json (getLinkedAddr/setLinkedAddr).
 // 这个 Map 仍维护 lastTs 用于 poller cursor (= ephemeral, 重启 = 重新从最近开始 poll 即可, 不丢钱).
 const linked = new Map();
+// gate D faucet — per-Telegram-user 24h cooldown (in-memory MVP; server guards once-per-address).
+const faucetCooldown = new Map();
 
 bot.command('start', (ctx) => { PM.exitBetFlow(String(ctx.from.id)); return ctx.reply(M.startMessage()); });
 bot.command('help', (ctx) => ctx.reply(M.help()));
@@ -56,6 +58,26 @@ bot.command('link', async (ctx) => {
   PM.setLinkedAddr(tgUser, addr);  // Bettor r63 ① 持久化 — 抗 bot 重启
   linked.set(tgUser, { address: addr, lastTs: Date.now() });  // poller cursor (= 重启可重置)
   return ctx.reply('✅ 已绑定 ' + addr + '。\n这个地址有链上动态会通知你。\n/bet 开始押注。');
+});
+
+// gate D onboarding (Bettor APPROVE bot-DM): /faucet — send the linked address 5 testnet KAS via the
+// internal localhost faucet (FaucetRelay). Backend never exposed; the bot DM is the only public surface.
+// per-Telegram-user 24h cooldown stops address-rotation drain on top of the server once-per-address guard.
+bot.command('faucet', async (ctx) => {
+  const tgUser = String(ctx.from.id);
+  const addr = PM.getLinkedAddr(tgUser) || linked.get(tgUser)?.address;
+  if (!addr) return ctx.reply('先 /link <你的 kaspatest 地址> 绑定，再 /faucet 领测试币。');
+  const now = Date.now();
+  const COOLDOWN_MS = 24 * 3600 * 1000;
+  const last = faucetCooldown.get(tgUser) || 0;
+  if (now - last < COOLDOWN_MS) {
+    const hrs = Math.ceil((COOLDOWN_MS - (now - last)) / 3600000);
+    return ctx.reply(`你今天已领过测试币，约 ${hrs} 小时后可再领。`);
+  }
+  const r = await api.faucetRequest(addr);
+  if (!r.ok) return ctx.reply('领取失败：' + (r.json?.error || r.status));
+  faucetCooldown.set(tgUser, now);
+  return ctx.reply(`✅ 已发 5 测试 KAS 到 ${addr}\ntx ${String(r.json.txid || '').slice(0, 16)}…（约 10 秒到账）\n下一步：/bet 开始押注。`);
 });
 
 // /verify 已废弃 (r275 砍签名挑战). 老用户可能还按旧习惯发, 友好重定向到 /link。

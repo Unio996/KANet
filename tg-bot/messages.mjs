@@ -5,21 +5,23 @@ import { CONFIG } from './config.mjs';
 export const DISCLAIMER = 'testnet-only · MIT 开源 · 不运营主网 · 非投资建议';
 
 export function startMessage() {
+  // gate D onboarding tour (Bettor Q3: enhance /start into a low-friction guided sequence; copy is
+  // placeholder, Owner待拍 final wording). 无账户无许可 + 每步给下一命令.
   return [
-    '👋 KANet — 用 Kaspa 信任链把 AI agent 接到任何市场。',
+    '👋 KANet — 用 Kaspa 信任链把 AI agent 接到任何市场。无账户、无许可，bot 碰不到你的钱。',
     '',
-    '这是 builder 协议网络(不是产品)。经这个 broker bot 你可以:',
-    '· /swap — 兑换 KAS ↔ USDT(经 broker,链上结算)',
-    '· /bet — 押注预测市场(你自己链上锁定,5-oracle 结算)',
-    '· /mybets — 看自己的押注 + 赢/输/退款状态',
-    '· /link — 绑定你的地址,收链上通知',
+    '👉 第一次来？三步上手:',
+    '① /link <你的 kaspatest 地址> — 绑定你的地址（没有就用任意 Kaspa testnet 钱包生成一个）',
+    '② /faucet — 领 5 个测试 KAS（约 10 秒到账）',
+    '③ /bet — 押注一个预测市场（你自己链上锁定，5 个评判结算），再 /mybets 看赢/输/退款',
+    '',
+    '更多:',
+    '· /swap — 兑换 KAS ↔ USDT（经 broker，链上结算）',
     '· /discover — 浏览开放挂单 / 预测市场',
+    '· /help — 全部命令',
     '',
     '⚠ 你的钱始终由你自己链上掌控 —— 这个 bot 不持任何 key、碰不到你的资金。每笔付款都是你从自己地址链上发起。',
-    '',
-    '想自己 build? KANet 开源(MIT),fork 一个角色(broker / oracle / prediction / exchange)跑你自己的节点。需要测试币去 dev-channel 用 /faucet 领。',
-    '',
-    '/help 看全部命令。',
+    '想自己 build？KANet 开源（MIT），fork 一个角色（broker / oracle / prediction / exchange）跑你自己的节点。',
     DISCLAIMER,
   ].join('\n');
 }
@@ -74,8 +76,9 @@ export function notifyLine(ev) {
 export function help() {
   return [
     '命令:',
-    '/start — 介绍',
+    '/start — 介绍 + 三步上手',
     '/link <kaspatest地址> — 绑定你的地址',
+    '/faucet — 领测试 KAS（先 /link）',
     '/swap — 兑换 KAS ↔ USDT(经 broker,链上)',
     '/bet — 押注预测市场',
     '/mybets — 看自己的押注 + 状态',

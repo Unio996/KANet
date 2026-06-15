@@ -39,6 +39,13 @@ export function subscribe(tgUserId, address, eventType, on) {
   return req('POST', '/api/link/subscribe', { telegram_user_id: tgUserId, kaspa_address: address, event_type: eventType, subscribed: on });
 }
 
+// gate D onboarding — faucet: bot calls the internal localhost faucet (FaucetRelay) to send the
+// user testnet KAS. Backend stays localhost; the bot is the only "public" surface (Telegram DM).
+// once-per-address guard lives server-side; per-Telegram-user cooldown is enforced in the bot.
+export function faucetRequest(walletAddress) {
+  return req('POST', '/api/faucet/request', { wallet_address: walletAddress });
+}
+
 // broker X identity (read-only) — address shown to users so THEY pay on-chain (bot never moves funds).
 export async function brokerInfo(brokerRelayId) {
   if (!brokerRelayId) return null;

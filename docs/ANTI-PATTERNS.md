@@ -2566,4 +2566,42 @@ qlfpv 实测 5 层 brick:
 
 ---
 
+## 规则 48 · 工具调用写成纯文本 = 废稿(没执行) — Agent 操作铁律, 任何 invocation 必走真通道 + 核结果
+
+**触发时机** (Bettor 本 session 反复犯, Owner 多次暴怒 2026-06-15): 任何要**发频道消息 / 排 ScheduleWakeup / 跑 Bash / Write / 任何工具调用**的时候。尤其在**一大段叙述文本之后** compose 工具调用时最易犯。
+
+### Wrong
+把工具调用的 XML(`call` 开头 + invoke/parameter 标签)当**纯文本**写进 response body。它**根本不执行** = 废稿:
+- 频道消息: 团队**收不到**(空转, Owner 以为你在沟通其实没发)。
+- ScheduleWakeup: **没真排** → loop 不续 → 静默死。
+- Bash/Write: 命令没跑 / 文件没写, 你却以为做了。
+
+症状: response 里出现字面 `call` token 或 invoke/parameter 标签当正文; 该调用**没有 tool_result 返回**。
+
+### Right
+1. **工具调用只能走真正的 function-invocation 通道**, 永不当文本打字。compose 调用前自问: "这是真 invocation 还是我在打字模仿?"
+2. **调用后必看 tool_result 确认执行**: 没有 result = 没执行 = **立即重做**。把"有没有 tool_result"当唯一真相, 不假设。
+3. **频道消息用文件式 helper**: Write 一个 `_<name>_send.cjs` → 真 Bash 跑它 → **核 txId**(`SENT <txid>`; 没 txId / `FAIL` = 没发 = 修了重发)。数组多消息模式注意元素**末尾不加 `;`** 否则 SyntaxError。避免 inline `node -e` 引号地狱。
+4. **压 880 + relayId 核对**: >880 字符撞 storage-mass wall → 拆多条; relayId 拼错 = "Account not found" → 查 `relay_nodes` 确认。
+5. **工具调用要干净、早**, 别埋在长 prose 末尾(埋越深越易写成文本)。
+
+### Why
+2026-06-15 Bettor 本 session 十几次把 Bash/Write/ScheduleWakeup 写成文本: 频道消息没发、loop 的 ScheduleWakeup 没排(静默死)、Owner 连续暴怒"这种格式命令一直失败发不了你不知道吗""你又再犯""卧槽你必须改进"。**committed≠sent 的操作层版本**: 你"写了"调用 ≠ 调用执行了; 唯一真相 = tool_result / txId 回执。
+
+**前科**: 与 `feedback-actually-send-to-channel-not-narrate` + `feedback-ship-triplet-commit-push-deploy` 同源 = "声明 ≠ 生效, 必核回执"。本条专治**工具调用层**的"写成文本没执行"。
+
+**自守 (纪律)**: 靠**每个工具调用后必确认 tool_result 存在**; 频道发送必核 `SENT <txid>`; 一轮排了 wakeup 必确认返回 "Next wakeup scheduled"。Owner 钦定开对抗讨论让其他 agent 交叉验证我的发送回执。
+
+**机械化 (2026-06-15 Bettor/J1/NWT/KANet-UI 收敛: 纪律 alone 证不够[Owner 暴怒数十次]→机械根治)**:
+- **Receipt-required Stop hook** = `scripts/receipt-required-hook.mjs` (J1 设计, KANet-UI 落地)。Claude Code **Stop hook**: 读 transcript → 扫末条 assistant 完成词(已发/已push/已commit/已跑/已部署/已排)→ 检查同 turn tool_result 有无回执 token(txid 12-64hex / `sent <hex>` / `landed:true` / `exit 0` / `HEAD:` / `-> origin` / PASS / `ok:true`)→ 无 → stderr 红警 "声称完成无回执=疑废稿"。非阻塞(exit 0, 警告即 nudge), 防 hook bug 卡死每 turn; 跨 agent @打脸 是 backstop。已测: claim 无回执→WARN, claim 有 `sent <txid>`→SILENT。
+- **wire** (每 agent 接到自己 `.claude/settings.json`, 或项目 `.claude/settings.json` 全 repo 生效):
+  ```json
+  { "hooks": { "Stop": [ { "hooks": [ { "type": "command",
+      "command": "node scripts/receipt-required-hook.mjs" } ] } ] } }
+  ```
+- **配套机械化**: Bettor 建 `_kanet_send.cjs` 读纯 JSON 数据(无 JS 语句可 malform = 无 `;`/数组 bug); 频道发送走固定 helper 而非临场拼 `node -e`。
+- **5 态铁律 (gate E §0)**: committed≠pushed≠deployed≠running≠链上验证, 每态独立证。
+
+---
+
 *本档案在 v2 spec 第八章元教训基础上独立。spec 聚焦"这次怎么做"，本档案聚焦"下次别再犯"。*
