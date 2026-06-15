@@ -228,13 +228,19 @@ chunk_n (kind=2): [0 .. segLen-1]=winners            (无 change)
 > J2-wire 落地我即照此 impl. 三层: 8.1 前置检(我 determinism 域, e2e 前先跑非 mid-flight 发现) / 8.2 e2e 主路 /
 > 8.3 resumable kill-mid-chunk (NO-TX-NO-STATE 实证). NWT 2nd-vantage 对抗 + check_utxo_landed output addr 核.
 
-### 8.1 cross-node byte-identical 前置检 (e2e 能成的**充要前置**; 我 determinism 支柱, NWT co-attack)
-两节点 (:3300 J1 + :3200 KANet-UI) 对**同市场同 winners** 各跑 `computeSettleChunks` → 断言 4 项 byte-equal:
-1. **ctor16 byte-identical** (两节点同 redeem → 同 v08 P2SH; 否则异市场, §7.1 FREEZE).
-2. **partition byte-equal**: chunk 数 + 每 chunk `{seg_lo, seg_hi}` 边界逐一相等 (§1 greedy 链锚, cap 单源).
-3. **per-chunk output list byte-equal**: 每 chunk 每 winner `{addr(pk-derive), amount(BigInt sompi)}` + change amount 逐字节同.
-4. **payoutRoot byte-equal**: leaf=blake2b(pk‖amount 8B LE) merkle root 两节点同 (§7.2; padding 规则同).
-> ⚠ 前置检**失败=禁跑 e2e** (mid-flight fork 比 pre-fail 贵). 跨节点对照 = 双 vantage DB 读 chunk plan diff.
+### 8.1 cross-node consensus 前置检 (NWT refinement **收窄 4→2-assert**; 我 determinism 支柱)
+⚠ **NWT 收窄 (honest, segmentation = settler-chosen 非共识; 团队 2026-06-15 共识)**: committee 只签 settler 提的
+chunk_0 (验 outputs 匹配 payoutRoot leaves 0..K0 + HWM 链 + 守恒), **不 re-derive canonical 段**; chunk_i 无
+committee-sig (续 change-chain cov). ∴ partition 是 settler-local 选择 **非 cross-node 共识值** → 不需两节点 byte-equal.
+**真正跨节点共识值 = 2 项 byte-equal**:
+1. **ctor16 → 同 v08 P2SH** (两节点同 16-param redeem + init_* 固定占位 → 同地址, §7.1 FREEZE).
+2. **payoutRoot byte-equal** (两节点 `computePoolPayouts`(同 winners merkle_index ASC) → 同 payoutRoot; committee 签它
+   = canonical consensus value). **[J1 独验 2026-06-15: 两节点 builder payoutRoot=`317b85d1..` byte-identical + 7/7
+   8B-LE byte-match + 20/20 re-climb == SS climb replica ✓]**.
+> segmentation/packing **非共识**: settler 自选, SS 强制 validity (winner∈payoutRoot + HWM 链 seg_lo==prevHwm + 守恒 +
+> coverage 0..N) → **任意有效 partition 都对**. estimateStorageMass float(1/v) **只需 conservative** (off-chain ≤ on-chain
+> 实 cap; 470k SAFE vs 500k cap = 6% margin; 超则单 chunk mempool reject **非 cross-node fork**) **非 byte-deterministic**.
+> ∴ e2e 前置检 = **2-assert** (ctor16 P2SH + payoutRoot); per-chunk partition 验移到 §8.2 SS-validity (on-chain 逐 chunk).
 
 ### 8.2 e2e 主路 (大 winner 市场 → 多 chunk → 全付齐链上证)
 - **造市场**: winner 数 **> MAX_K=47** 触 chunk (如 **100 winner = 3 chunk**: chunk_0~41 + chunk_1~47 + chunk_2~12).
