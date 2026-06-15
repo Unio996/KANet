@@ -13,12 +13,27 @@
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join } from 'node:path';
 import { writeFileSync } from 'node:fs';
+import { blake2b } from '@noble/hashes/blake2b';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SRC_LIB = join(__dirname, '../../src/lib');
 const imp = (rel) => import(pathToFileURL(join(SRC_LIB, rel)).href);
 const { computeSettleChunks } = await imp('pool-settle-chunks.mjs');
 const { payoutRoot } = await imp('pool-payout-root.mjs');
+const kaspa = await import('kaspa-wasm');
+
+// —— (A) shared deterministic seed → 真 keypair (KANet-UI 造市用同 seed 同派生法 → 同 100 keypair → 链上
+//    bettor_pk == fixture pk → 链上 payoutRoot == fixture payoutRoot byte-equal; NWT 独立重算交叉验 root). ——
+// **公开派生法 (KANet-UI 复现铁律)**: sk_i = blake2b(utf8(SEED) ‖ uint32LE(i))[32]; pk_i = kaspa.PrivateKey(sk_i)
+//   .toPublicKey().toXOnlyPublicKey() (64-hex x-only). privkey 派自 seed → KANet-UI 可签 bettor register.
+const SEED = 'KANET-31-E2E-FIXTURE-SEED-v1';
+function deriveSk(i) {
+  const idx = Buffer.alloc(4); idx.writeUInt32LE(i);
+  return Buffer.from(blake2b(Buffer.concat([Buffer.from(SEED, 'utf8'), idx]), { dkLen: 32 })).toString('hex');
+}
+function derivePk(i) {
+  return new kaspa.PrivateKey(deriveSk(i)).toPublicKey().toXOnlyPublicKey().toString();
+}
 
 // —— fixture 参数 (Bettor 100-winner/3-chunk; 1 KAS 均匀全 winning side → 100 winner storage-bound → [40,47,13]) ——
 const N_WINNERS = 100;
@@ -27,13 +42,12 @@ const POOL_VALUE = N_WINNERS * STAKE_SOMPI + 1e9;   // 100 KAS + 10 KAS fee/fixe
 const ORACLE_BOND = 1.2e8;
 const FIXED = [{ value: 5e7 }, ...Array.from({ length: 5 }, () => ({ value: ORACLE_BOND }))];  // broker + 5 committee
 
-// 确定性 winner pk (merkle_index = i; 真 e2e: seed→keypair 派生, 此 fixture pk = 确定占位, on-chain setup 替真 keypair).
-//   ⚠ 真 on-chain 须真 keypair(注册需签); 此 fixture 的 pk 仅供 payoutRoot/partition determinism 参考.
+// winner pk = seed 派生**真 XOnlyPublicKey** (merkle_index = i; KANet-UI 同 seed 同派生 → 链上 bettor_pk == 此 → payoutRoot byte-equal).
 function mkWinners(n) {
   return Array.from({ length: n }, (_, i) => ({
     merkle_index: i,
-    pk: ((i % 250) + 1).toString(16).padStart(2, '0').repeat(32),  // 占位确定 pk (on-chain: seed→真 XOnlyPublicKey)
-    amount: STAKE_SOMPI,                                            // 真 e2e: computePoolPayouts BigInt(此 fixture 均匀)
+    pk: derivePk(i),                  // 真 x-only pk (seed→PrivateKey→toPublicKey→toXOnlyPublicKey), 非占位
+    amount: STAKE_SOMPI,              // 真 e2e: computePoolPayouts BigInt(此 fixture 1KAS 均匀全 winning side)
   }));
 }
 
@@ -54,9 +68,12 @@ function build() {
   }));
 
   return {
-    note: 'J1 #31 e2e expected fixture (off-chain deterministic). on-chain e2e(④) 造此 100-winner v08 市场 → settle → 逐 chunk 验 output{pk-derive addr, amount} == 此期望 + payoutRoot byte-equal 两节点. pk 为确定占位, on-chain setup seed→真 keypair.',
+    note: 'J1 #31 e2e expected fixture (A: seed-派生真 keypair). on-chain e2e(④): KANet-UI 用同 seed 同派生法造 100-winner v08 市场 → settle → 逐 chunk 验 output{pk-derive addr, amount} == 此期望 + 链上 payoutRoot == 此 payoutRoot byte-equal. NWT 独立 impl 重算 payoutRoot 交叉验(2-impl 抓共享 builder bug).',
+    // —— (A) 派生契约 (KANet-UI 复现铁律 + NWT 独立重算锚) ——
+    seed: SEED,
+    derivation: 'sk_i = blake2b(utf8(seed) ‖ uint32LE(i))[dkLen32]; pk_i = kaspa-wasm PrivateKey(sk_i).toPublicKey().toXOnlyPublicKey() (64-hex x-only); i=0..99 (merkle_index)',
     n_winners: N_WINNERS, stake_sompi: STAKE_SOMPI, pool_value: POOL_VALUE,
-    payoutRoot: root,
+    payoutRoot: root,                 // = pool-payout-root.mjs(真 pk) → NWT 独立 impl 须重算出同值 (cross-check)
     route: plan.route, numChunks: plan.numChunks,
     segLens: plan.chunks.map(c => c.seg_hi - c.seg_lo),
     chunks,
