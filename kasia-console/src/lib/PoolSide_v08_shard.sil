@@ -3,11 +3,11 @@
 // 与 PoolSide_v07 差异(两处):
 //   (1) **6 字段从 ctor → 显式 State**(field_prolog len>0) → validateOutputStateWithTemplate 可 template(J1 leaf register
 //       绑此; J2 template-artifact 生成器需显式 State 才能切 prefix/state/suffix). 现 v07 纯 ctor → field_prolog len=0 不可 template.
-//   (2) **claim_winner 替委员 4-of-5 attestation → fold-root 绑定**(J2 spec, 自取另一半): claim 引 fold-root UTXO,
-//       readInputState 读链上 fold 派生 globalYes/No(实值非 witness) + commit 验 + 片 scope → parimutuel. 零委员 merkle.
+//   (2) **claim_winner 替委员 4-of-5 attestation → fold-root 绑定**(J2 spec + NWT struct-syntax): claim 引 fold-root UTXO,
+//       readInputStateWithTemplate 读链上 fold 派生 globalYes/No(实值非 witness) + root.count==shard_count(全折锚) → parimutuel. 零委员 merkle.
 //
 // 新合约新 P2SH(不碰老 v07 市场, 同 v06→v07 precedent). refund 保留 v07 逐字.
-// 单 author = J1(SS 我域); template artifact + off-chain = J2; claim 语义 J2 给 spec 我落码; NWT co-verify PoC-5.
+// 单 author = J1(SS 我域); template artifact + off-chain = J2; claim 语义 J2 给 spec; struct-syntax = NWT(kcc20-minter 模式); NWT co-verify PoC-5.
 
 pragma silverscript ^0.1.0;
 
@@ -20,8 +20,9 @@ contract PoolSide_v08_shard(
     int      init_direction,             // 0=YES 1=NO
     int      init_deadline,
     // —— 非-State ctor(claim fold-root 绑定常量; 不进 template state 区) ——
-    int      shard_id,                   // 片身份(claim 验 ∈ 该 fold root)
-    byte[32] fold_template_hash          // fold-root template hash(claim readInputStateWithTemplate 验, J2 artifact 给真值, byte-match)
+    int      shard_id,                   // 片身份
+    int      shard_count,                // 关池片数(claim 验 root.count==此 → 全折完 ROOT 非中间 fold, NWT 命门)
+    byte[32] fold_template_hash          // fold-root template hash(readInputStateWithTemplate 自验, J2 artifact 给真值, byte-match)
 ) {
     // —— 显式 State(6 字段; validateOutputStateWithTemplate 的 state 区) ——
     byte[32] bettorPk = init_bettorPk;
@@ -31,40 +32,41 @@ contract PoolSide_v08_shard(
     int      direction = init_direction;
     int      deadline = init_deadline;
 
-    // entry 0 — claim_winner (fold-root 绑定, 替 v07 委员 4-of-5; J2 spec 自取另一半).
-    //   ① 引 fold-root UTXO 读链上 fold 派生 globalYes/No(实值) + commit_v2 验.
-    //   ② 验本 side ∈ 该片(已 fold 进 root) via shard scope.
-    //   ③ payout = parimutuel(本 stake, globalYes/No, 赢向) + spent-once + 输向无 payout.
-    //   ⚠ fold-root 读用 readInputStateWithTemplate(foldRootInIdx, prefixLen, suffixLen, fold_template_hash) — J2 artifact 定 len/hash.
+    // fold-root 的 State 布局(= PoolShard_fold 的 {local_yes, local_no, count}); readInputStateWithTemplate 绑此 struct.
+    struct FoldRootState {
+        int local_yes;
+        int local_no;
+        int count;
+    }
+
+    // entry 0 — claim_winner (fold-root 绑定, 替 v07 委员 4-of-5; J2 spec + NWT struct-syntax 自取另一半).
+    //   ① readInputStateWithTemplate 读 fold-root globalYes/No 实值 —— 原语**自验 foreign template hash + P2SH commitment**
+    //      → claim 自动绑实 fold 合约(非假) = NWT PoC-5 经此原语堵.
+    //   ② require(root.count == shard_count) → 读的是**全折完 ROOT**(非中间 fold 部分 global, 否则错额) = NWT 命门.
+    //   ③ payout = parimutuel(本 stake, root.local_yes/no, 赢向) + spent-once(本 side UTXO 花) + 输向无 payout(direction==winner gate).
     entrypoint function claim_winner(
         sig bettorSig,
-        int settlementWinner,            // 0=YES 1=NO(= fold-root 验出的赢向; SS 经 root 读绑, 非 free)
-        int foldRootInIdx,               // fold-root UTXO 在 inputs 的位(ref)
+        int settlementWinner,            // 0=YES 1=NO(赢向; direction gate 绑)
+        int fold_root_input_idx,         // fold-root UTXO 在 inputs 的位(ref)
         int fold_prefix_len,             // fold template prefix 长(J2 artifact)
-        int fold_suffix_len,             // fold template suffix 长
-        int global_yes,                  // 见下: 必 == readInputState(foldRoot).local_yes(SS 验, 非信 witness)
-        int global_no,
-        int root_count                   // 必 == readInputState(foldRoot).count == shard_count(全 fold)
+        int fold_suffix_len              // fold template suffix 长
     ) {
         require(checkSig(bettorSig, pubkey(bettorPk)));     // bettor 授权自取
         require(settlementWinner == 0 || settlementWinner == 1);
         require(direction == settlementWinner);             // 我在赢向(输向无 payout)
 
-        // ① 读 fold-root 链上派生 globalYes/No(实值非 witness): readInputStateWithTemplate 验 fold template hash + P2SH commit.
-        //   ⚠ TODO(struct-decl): readInputStateWithTemplate 需声明 struct 绑定(NWT PoolSideTmpl 模式), 待 NWT 给 syntax 接上.
-        //   现 stub 为占位让显式-State 编过(J2 artifact 生成器依赖); 接上后 global_yes/no/root_count 必 == 链上 fold 实值.
-        require(global_yes >= 0);
-        require(global_no >= 0);
-        // ② root 全 fold(count == 关池片数) → globalYes/No 是终值; 片 scope 由 spineP2shHash 锚(本 side 属该 spine).
-        require(root_count > 0);
-        require(foldRootInIdx >= 0); require(fold_prefix_len >= 0); require(fold_suffix_len >= 0);
+        // ① 读 fold-root 链上派生 global(实值非 witness); 原语自验 fold template hash + P2SH(PoC-5).
+        FoldRootState root = readInputStateWithTemplate(fold_root_input_idx, fold_prefix_len, fold_suffix_len, fold_template_hash);
+        // ② 必全折完 ROOT(非中间 fold) —— NWT 命门(中间 fold 部分 global → 错额).
+        require(root.count == shard_count);
+        require(root.count > 0);
 
-        // ③ parimutuel payout (= v07 公式, totalPool/winnerPool 来自链上 fold 实 global).
+        // ③ parimutuel payout (totalPool/winnerPool 来自链上 fold 实 global).
         int notWinner = 1 - settlementWinner;
-        int winnerPool = global_yes * notWinner + global_no * settlementWinner;
-        int totalPool = global_yes + global_no;
+        int winnerPool = root.local_yes * notWinner + root.local_no * settlementWinner;
+        int totalPool = root.local_yes + root.local_no;
         require(winnerPool > 0);
-        require(tx.inputs.length >= 1);                     // inputs[0] = 本 side UTXO(spent-once 自取) + fold-root ref + fee-UTXO
+        require(tx.inputs.length >= 1);                     // inputs[0]=本 side UTXO(spent-once 自取) + fold-root ref + fee-UTXO
         int payout = tx.inputs[0].value * totalPool / winnerPool;
 
         // 出 bettor(spent-once: 本 side UTXO 被花 → 不可双领).
