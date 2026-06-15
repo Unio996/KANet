@@ -27,7 +27,14 @@ import {
   computeDynamicMinBrokerFee,
   estimateStorageMass as estimateOutputStorageMass,  // J1tn r303: rename 避 L72 existing estimateStorageMass(inputs,outputs) 冲突
   computeMultiOutputFee,
+  // #31 ⑤b single-source (J2, Bettor/J1/NWT GREEN): full multi-output formula + caps moved to kip9-mass
+  //   (was settler-local L119/L68/L69/L73/SETTLE_FEE_MAX/V07_MAX_FEE). re-exported below as estimateStorageMass.
+  estimateMultiOutputStorageMass as estimateStorageMass,
+  STORAGE_MASS_CAP,
+  STORAGE_MASS_SAFE_THRESHOLD,
+  MAX_TX_FEE_SOMPI,
 } from '../lib/kip9-mass.mjs';
+export { estimateStorageMass };  // re-export so pool.js L9/L471 import stays valid (was settler-local L119 fn)
 
 // J2-tn r382 (Bettor 16:29 钦定): TICK_INTERVAL_MS env-configurable. Default 5min mainnet,
 // demo 期 .env 设 POOL_SETTLER_TICK_SEC=60 (= 1min) 提速 5x 整条流水.
@@ -65,12 +72,8 @@ const DISAGREEMENT_TIMEOUT_MS = DISAGREEMENT_TIMEOUT_MIN * 60_000;
 // B2 v0.5 Phase 3 bug 8 — Kaspa Crescendo KIP-9 storage mass constraints.
 // A pool settle TX with many small-value outputs blows the storage mass cap (= UAT cycle 3:
 // 0.5 KAS bettor stakes → broker_fee 500k sompi → storage_mass 1.99M > 500k cap).
-const KIP9_C = 1e12;                          // KIP-9 mass constant
-const STORAGE_MASS_CAP = 500_000;             // kaspad standardness cap
-// Bettor r349 catch (3l06n 实证): 400k = 20% buffer 过保守, 厚池 100+100 KAS est=449975 < 500k
-// 实可 settle 但被 false cancel. Tune to 470k (= 6% margin) — est_storage_mass 估值通常偏保守
-// (KIP-9 公式 Σ(1/v) 单调 + 离散累积 round-up), 实实 mass 大概率更低. 6% margin 防估值偏差.
-const STORAGE_MASS_SAFE_THRESHOLD = 470_000;
+// #31 ⑤b: KIP9_C / STORAGE_MASS_CAP / STORAGE_MASS_SAFE_THRESHOLD moved to kip9-mass.mjs single-source
+//   (imported above). Values unchanged (500_000 / 470_000; 470k = 6% margin per Bettor r349 3l06n).
 // J1tn r303 P0-#1 sweep helper refactor (Bettor r346/r366b 钦定): MIN_BROKER_FEE_SOMPI 改为
 // lib/kip9-mass.mjs MIN_BROKER_FEE_FLOOR 别名 (= 5M absolute floor, dynamic 算大就用大).
 const MIN_BROKER_FEE_SOMPI = MIN_BROKER_FEE_FLOOR;
@@ -107,21 +110,9 @@ function logThrottled(key, msg) {
   console.log(msg);
 }
 
-/**
- * Estimate a transaction's KIP-9 storage mass.
- * storage_mass = C × max(0, Σ(1/output_value) − inputCount² / Σ(input_value))
- * Verified against UAT cycle 3 observed mass (1,991,668 ≈ computed).
- *
- * @param {number[]} inputValues - sompi values of each input UTXO
- * @param {number[]} outputValues - sompi values of each output
- * @returns {number} estimated storage mass
- */
-export function estimateStorageMass(inputValues, outputValues) {
-  const sumOutInv = outputValues.reduce((s, v) => s + (v > 0 ? 1 / v : 0), 0);
-  const sumIn = inputValues.reduce((s, v) => s + v, 0);
-  const inputsTerm = sumIn > 0 ? (inputValues.length * inputValues.length) / sumIn : 0;
-  return Math.max(0, Math.round(KIP9_C * (sumOutInv - inputsTerm)));
-}
+// estimateStorageMass(inputValues, outputValues) — #31 ⑤b: moved to kip9-mass.mjs as
+//   estimateMultiOutputStorageMass (single-source), imported above as estimateStorageMass + re-exported.
+//   Formula unchanged (byte-identical): C × max(0, Σ(1/out) − inputCount²/Σ(in)). Verified UAT cycle 3.
 
 /**
  * Parse a SQLite CURRENT_TIMESTAMP string as UTC.
@@ -1795,7 +1786,7 @@ export async function dispatchPhase2(market, decision) {
     const MASS_MULTIPLIER_X10 = 30;
     const computeMassEst = Math.ceil(txByteEstimate * MASS_MULTIPLIER_X10 / 10);
     const SETTLE_FEE_MIN = 2_000_000;  // 0.02 KAS floor (= settle 大 TX 起步 + Bettor r404 安全余量)
-    const SETTLE_FEE_MAX = 100_000_000;  // 1 KAS cap defense
+    const SETTLE_FEE_MAX = MAX_TX_FEE_SOMPI;  // #31 ⑤b single-source (was local 1e8); 1 KAS cap defense
     // J1tn r303 P0-#1 (Bettor r298+r299+r300 钦定 + r346/r366b helper refactor): KIP-9 storage_mass
     // aware dynamic fee. ko421 实证: brokerOutput 5M sompi → mass=1e12/5e6=200K 单笔吃 fee budget 10×.
     // 公式抽 lib/kip9-mass.mjs (= 5 site 不再各抄).
@@ -2288,7 +2279,7 @@ export async function dispatchRefund(market, decision) {
  */
 async function computeMassAwareV07RefundFee({ market, makerStake, networkId, makerAddress }) {
   const V07_MIN_FEE = 50_000n;
-  const V07_MAX_FEE = 100_000_000n;
+  const V07_MAX_FEE = BigInt(MAX_TX_FEE_SOMPI);  // #31 ⑤b single-source (was local 1e8n)
   // gate B③ fork合 (INVARIANTS SYS-2): fee-rate 单源 kip9-mass.mjs SOMPI_PER_MASS (== 110, 10% margin over
   // mempool floor 100; qlfpv 实测 442000/4420=100). 前为本地 `110n` 副本=fork (rate 改则 settler 不跟 drift) — 删,
   // import 单源 + BigInt() 包供 TX-fee 大数运算. drift-guard 测 test_gateB_fee_single_source.mjs 守.

@@ -21,7 +21,7 @@ export const MAX_WINNERS_PER_CHUNK = 47;
 // compute-mass approx (4-entry redeem + per-winner witness + spk). Measured @ b367753b sweep.
 // ⚠ KNOWN CONSERVATIVE APPROX on the aggregate route (J1 mass-model note): over-estimates aggregate compute
 //   (settle_aggregate has no per-winner loop) → errs toward chunk = SAFE. storage dominates at realistic payouts.
-const REDEEM_BASE = 2702, REDEEM_PER_WINNER = 601;
+const REDEEM_BASE = 2878, REDEEM_PER_WINNER = 601;
 const WITNESS_PER_WINNER = 314, SPK = 35, TX_FIXED = 564, SIG_OPS = 5;
 function chunkComputeMass(nWinners, nFixedOut, hasChange) {
   const nOut = nFixedOut + nWinners + (hasChange ? 1 : 0);
