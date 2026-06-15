@@ -61,9 +61,8 @@ export function buildRegisterCommand({ witness, leafOutpointTxid, leafRedeemHex,
   const stake = BigInt(witness.stake);
   const leafValue = BigInt(leafValueSompi);
   const newLeafValue = leafValue + stake; // weld1: stake deposited into the leaf
-  if (leafContinuationState && leafContinuationState.closed !== 0) {
-    throw new Error(`register leaf continuation must keep closed=0 (open pool), got ${leafContinuationState.closed}`);
-  }
+  // route-split: PoolLeaf is 4-field {local_yes,local_no,count,pool_value} — NO outcome fields (closed/winningSide/
+  // payoutRoot live in PoolRoot). leafContinuationState is the 4-field leaf state; no closed check (leaf has no closed).
   // relay handler (unlockBshardRegister) consumes: inputs.leaf.{redeem_hex, current_state, outpointTxid},
   // inputs.funding[].{address, outpointTxid}; computes per-state leaf addr + ticket addr + change itself.
   return {
