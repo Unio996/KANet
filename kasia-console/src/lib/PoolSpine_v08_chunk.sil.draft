@@ -80,6 +80,7 @@ contract PoolSpine_v08_chunk(
         // —— winner-subset merkle 证 (本段 [seg_lo,seg_hi) 每 winner; merkle-path 是唯一许的 free-witness: 自暴 against
         //    committed poolMerkleRoot, 篡改即 merkle fail) ——
         byte[32][] winnerPks,            // 本段 winner pubkey (k=0..segLen-1; merkle_index = seg_lo+k 派生非 free)
+        int[]      winnerAmounts,        // 本段 winner payout 金额 sompi (leaf=blake2b(pk‖amount[8B BE]) → merkle 证 amount)
         byte[32][] winnerSiblings        // 本段 merkle siblings 扁平 (winnerSiblings[k*8+lvl] = winner k 第 lvl 层兄弟, depth-8)
         // (winner payout amount + tx-output 位 verify against planCommit 待续填; 本增量先填 merkle-climb 让 J2 量 per-winner mass)
     ) {
@@ -106,11 +107,21 @@ contract PoolSpine_v08_chunk(
             // 覆盖本 scriptSig args = committee-attested. chunk_0 输出 change.planCommit = 此 (validateOutputState ③).
             // (NWT plan_commit 攻面: chunk_0 once-sig 必 commit 全 chunk plan → chunk_i 无 sig 但 outputs 被授权.)
         }
-        // chunk_i (chunk_kind != 0): 无 committee-sig. planCommit 从 input change state 读 (②b 块 readInputState),
-        //   一切 security-critical (winner方向/winner pk+金额/段/fee-ceiling) verify against state.planCommit (零 free-witness).
+        // chunk_i (chunk_kind != 0): 无 committee-sig. planCommit(=payoutRoot) 从 input change state 读,
+        //   一切 security-critical verify against state.planCommit (零 free-witness).
 
-        // ② winner 子段 merkle proof: 本 chunk 只付 [seg_lo, seg_hi) 的 winner, 每个 merkle-proven against poolMerkleRoot
-        //    (复用 settle_aggregate ③ depth-8 position-aware climb, per 子段成员; 草稿略循环体).
+        // ②0 state-read (重排到 merkle-loop 前: (A)-refined climb target = payoutRoot=effPlanCommit, 须先建).
+        //   chunk_0: effPlanCommit=plan_commit_arg(=committee-sign 的 payoutRoot, sighash 覆盖); chunk_i: 从 state 读全字段.
+        int prevHwm = 0;                                  // chunk_0 隐含 (pool-lock 无 state)
+        byte[32] effPlanCommit = plan_commit_arg;         // = payoutRoot (chunk_0 witness committee-signed)
+        int effTotalWinners = total_winners_arg;
+        if (chunk_kind != 0) {
+            { hwm: int inHwm, planCommit: byte[32] inPC, totalWinners: int inTW } = readInputState(this.activeInputIndex);
+            prevHwm = inHwm; effPlanCommit = inPC; effTotalWinners = inTW;   // chunk_i: 全从 state 读 (零 free-witness)
+        }
+
+        // ② winner 子段 (A)-refined: 每 winner merkle-proven against **payoutRoot(=effPlanCommit)**(REPLACE poolMerkleRoot;
+        //    leaf=blake2b(pk‖amount) → 一 climb 同证 pk 身份+payout 金额; v07-equivalent trust=committee-sign payoutRoot).
         //    连续子段 (seg 由 computeSettleChunks merkle_index ASC 贪心定, 链锚 → 两节点同段 → byte-equal).
         require(seg_lo >= 0); require(seg_hi > seg_lo);
         require(seg_hi - seg_lo <= maxWinnersPerChunk);   // 段长 ≤ MAX_K (mass cap 派生)
@@ -125,7 +136,8 @@ contract PoolSpine_v08_chunk(
         for (k, 0, segLen, maxWinnersPerChunk) {
             int widx = seg_lo + k;                         // merkle_index 连续派生 (链锚, 非 free-witness)
             require(widx >= 0); require(widx < 256);       // depth-8 → 256 叶
-            byte[32] cur = blake2b(byte[](winnerPks[k]));  // 叶 = blake2b(winner pk)
+            // (A)-refined 叶 = blake2b(pk ‖ payout amount[8B BE sompi]) → 一 climb 同证身份+金额 (J2: i64 防 bet×ratio 溢出, 强制 store-payout).
+            byte[32] cur = blake2b(byte[](winnerPks[k]) + byte[](winnerAmounts[k], 8));
             int b0 = widx % 2;
             if (b0 == 0) { cur = blake2b(byte[](cur) + byte[](winnerSiblings[k*8+0])); } else { cur = blake2b(byte[](winnerSiblings[k*8+0]) + byte[](cur)); }
             int b1 = (widx / 2) % 2;
@@ -142,32 +154,18 @@ contract PoolSpine_v08_chunk(
             if (b6 == 0) { cur = blake2b(byte[](cur) + byte[](winnerSiblings[k*8+6])); } else { cur = blake2b(byte[](winnerSiblings[k*8+6]) + byte[](cur)); }
             int b7 = (widx / 128) % 2;
             if (b7 == 0) { cur = blake2b(byte[](cur) + byte[](winnerSiblings[k*8+7])); } else { cur = blake2b(byte[](winnerSiblings[k*8+7]) + byte[](cur)); }
-            require(cur == poolMerkleRoot);                // ★ winner identity merkle-proven against ctor poolMerkleRoot (链锚)
-            // ★★ recipient 绑定 (NWT/Bettor 🔴 承重墙·最关键一行): winner k 的输出必付【实 winner pk-derive 地址】.
-            //    winnerPks[k] 已 merkle-proven(身份) → 此行绑【付款到实 winner】, 否则 chunk_i 无 sig 可付任意地址=偷.
+            require(cur == effPlanCommit);                 // ★ (A)-refined: leaf(pk‖amount) merkle-proven against payoutRoot
+                                                           //   (=effPlanCommit, committee-sign) → 同证身份+金额, v07-equiv trust.
+            // ★★ recipient 绑定 (NWT/Bettor 🔴 承重墙·最关键一行): winner k 输出必付【实 winner pk-derive 地址】.
             require(tx.outputs[wOutBase + k].scriptPubKey == p2pk(winnerPks[k]));
-            // ⚠ amount 绑定 (winnerPayout==committed plan) 待 J2 payout 结构 (payout-merkle vs bet+ratio) → 下增量填.
+            // ★★ amount 绑定 ((A)-refined): winner k 输出金额必 == merkle-proven 的 payout amount (含 off-chain 算好的 dust).
+            require(tx.outputs[wOutBase + k].value == winnerAmounts[k]);
         }
 
-        // ②b cross-chunk linkage HWM (NWT 核心攻面 + J2 解, 防 winner skip/repeat): 仅 value 守恒(④)+末 change==0
-        //    【不防子段 overlap(双付) / gap(漏付)】—— 攻击者可喂重叠/跳段子段, value 仍可凑平. **正解 = change UTXO
-        //    携 SS state: hwm = 下个待付 merkle_index** (同 bshard localYes/localNo state transition 模式).
-        //    settle_chunk 硬验【本 chunk seg_lo == 上个 change UTXO 的 hwm】+【output change hwm = seg_hi】→ 段链式
-        //    严格连续 (无 overlap 无 gap, SS 强制), 两节点同 (hwm 链锚续延).
-        //    chunk_0: 输入 pool-lock (无 hwm → 隐含 hwm==0, seg_lo 必==0 从首 winner 起).
-        //    chunk_i (i>0): readInputState(本 chunk 输入=上 change UTXO).hwm → require(seg_lo == prevHwm).
-        //    末 chunk: seg_hi == 总 winner 数 (全付完) → 无 change (hwm 链终).
-        int prevHwm = 0;                                  // chunk_0 隐含 (pool-lock 无 state)
-        byte[32] effPlanCommit = plan_commit_arg;         // chunk_0: witness (committee-sig sighash 覆盖); chunk_i 下方覆盖为 state
-        int effTotalWinners = total_winners_arg;          // chunk_0: witness (committee-signed); chunk_i 下方覆盖为 state
-        if (chunk_kind != 0) {
-            // J2 compile: readInputState 须读【全】state 字段 {hwm, planCommit, totalWinners}. chunk_i 从 state 读 = 零 free-witness.
-            { hwm: int inHwm, planCommit: byte[32] inPC, totalWinners: int inTW } = readInputState(this.activeInputIndex);
-            prevHwm = inHwm;
-            effPlanCommit = inPC;                         // chunk_i: planCommit 从 input change state 读 (非 witness)
-            effTotalWinners = inTW;                       // chunk_i: totalWinners 从 state 读 (绑 ⑤ chunk_kind)
-        }
-        require(seg_lo == prevHwm);                        // ★ 链式连续: 本段起 == 上段止 (无 overlap 无 gap)
+        // ②b cross-chunk linkage HWM (NWT 核心攻面 + J2 解, 防 winner skip/repeat overlap/gap): change UTXO 携 hwm state
+        //    (= 下个待付 merkle_index). state-read 已上移 ②0(prevHwm/effPlanCommit/effTotalWinners 已建). 此处硬验链式连续:
+        //    chunk_0: pool-lock 无 state → prevHwm==0, seg_lo 必==0; chunk_i: seg_lo == 上个 change.hwm (readInputState).
+        require(seg_lo == prevHwm);                        // ★ 链式连续: 本段起 == 上段止 (无 overlap 无 gap; hwm 链锚续延)
 
         // ⑤ chunk_kind 硬验绑定 (NWT 攻面: chunk_kind 非 free-witness, 防早 claim last 跳未付 / 谎 mid 跳 broker):
         require((chunk_kind == 0) == (seg_lo == 0));                 // first ⟺ 首段 (seg_lo==0, 付 broker+committee 一次)
