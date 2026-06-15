@@ -1947,33 +1947,36 @@ export async function dispatchPhase2(market, decision) {
     ];
     const outputValues = outputs.map(o => parseInt(o.amountSompi, 10) || 0);
     const estMass = estimateStorageMass(inputValues, outputValues);
+    // #31 ③ TOP-LEVEL v0.8 routing (J1-ratified 2026-06-15: route by protocol_version==v0.8, NOT estMass-gated —
+    //   estMass only decides aggregate ≤cap vs chunk-chain >cap INSIDE v0.8). v0.8 funds lock the v08 P2SH; routing
+    //   v0.8 through the v07 path below would build a v07-P2SH settle ≠ v08 P2SH = unspendable/stuck (NWT) + no
+    //   payoutRoot/v08 witness (KANet-UI e2e void). So v0.8 settles HERE regardless of estMass.
+    //   winners = winning-side (computePoolPayouts already filters), CANONICAL order = [maker@idx0 if winning, then
+    //   winning bettors by pool merkle_index ASC]. settle sides query (L1565) ALREADY ORDER BY merkle_index ASC +
+    //   participants = [maker idx0, ...sides merkle_index ASC] → winners[0] = min merkle_index = deterministic dust
+    //   absorber (L1475). The JS .sort below is REDUNDANT belt-and-suspenders (no SQL change; legacy refund query
+    //   L209 keeps ORDER BY stake_amount). pk = maker_pk / sides[].bettor_pk x-only (NOT addr). amount =
+    //   computePoolPayouts parimutuel EXACT sompi (w.amountSompi BigInt-string, 零 float = R1 承重墙). re-index
+    //   0..K-1 = array index = SS climb leaf. computeSettleChunks decides route=aggregate (single settle_aggregate
+    //   entry1) vs route=chunk (change-chain entry0).
+    if (market.protocol_version === 'v0.8') {
+      const chunkWinners = payouts.winnerPayouts.map(w => {
+        const isMaker = w.participantIndex === 0 && participants[0]?.isMaker;
+        const sortKey = isMaker ? -1 : (parseInt(sides[w.participantIndex - 1]?.merkle_index, 10));
+        const pk = isMaker ? makerPk : sides[w.participantIndex - 1]?.bettor_pk;
+        return { pk, amount: w.amountSompi, _sortKey: sortKey };  // EXACT sompi string (NOT Number — R1 承重墙)
+      }).sort((a, b) => a._sortKey - b._sortKey)         // canonical: maker(-1) first, then merkle_index ASC
+        .map(({ pk, amount }) => ({ pk, amount }));        // continuous re-index 0..K-1 (array idx = leaf)
+      const payoutRootHex = computePayoutRoot(chunkWinners).toString('hex');
+      const fixedOuts = outputs.slice(0, 6).map(o => ({ value: parseInt(o.amountSompi, 10) || 0 }));
+      const poolValueSompi = inputValues.reduce((s, v) => s + v, 0);
+      const plan = computeSettleChunks(chunkWinners, fixedOuts, poolValueSompi, payoutRootHex);
+      console.log(`[pool-settler] dispatchPhase2 v0.8 market=${market.id.slice(0,12)} estMass=${estMass} route=${plan.route} numChunks=${plan.numChunks} segLens=[${plan.chunks.map(c=>c.seg_hi-c.seg_lo).join(',')}] payoutRoot=${payoutRootHex.slice(0,16)} winners=${chunkWinners.length}`);
+      // ③ dispatch (aggregate: single settle_aggregate TX via relay; chunk: change-chain loop + resume from
+      //   unspent-tip) + ④ relay v08 scriptSig: next pieces. No live v0.8 market until ①-create + ③④ + e2e.
+      throw new Error(`#31 v0.8 settle routed (route=${plan.route} chunks=${plan.numChunks}) — ③ dispatch + ④ relay scriptSig not yet wired`);
+    }
     if (estMass > STORAGE_MASS_SAFE_THRESHOLD) {
-      // #31 ② wire: v0.8 chunk-capable markets → chunked settle (PoolSpine_v08) instead of cancel-refund.
-      //   winners = winning-side (computePoolPayouts already filters), CANONICAL order = [maker@idx0 if winning,
-      //   then winning bettors by pool merkle_index ASC]. The settle sides query (dispatchPhase2 L1565) ALREADY
-      //   `ORDER BY merkle_index ASC` + participants = [maker idx0, ...sides merkle_index ASC] (L1678) →
-      //   winners[0] = min merkle_index = deterministic dust absorber (L1475). The JS .sort below is REDUNDANT
-      //   belt-and-suspenders on that order — it does NOT change any SQL query (NO coupled query fix; the legacy
-      //   refund query at L209 keeps ORDER BY stake_amount). pk = maker_pk / sides[].bettor_pk x-only (NOT addr).
-      //   amount = computePoolPayouts parimutuel EXACT sompi (w.amountSompi BigInt-string, 零 float = R1 byte-
-      //   identical 承重墙 — NOT Number). continuous re-index 0..K-1 = array index = SS climb leaf.
-      if (market.protocol_version === 'v0.8') {
-        const chunkWinners = payouts.winnerPayouts.map(w => {
-          const isMaker = w.participantIndex === 0 && participants[0]?.isMaker;
-          const sortKey = isMaker ? -1 : (parseInt(sides[w.participantIndex - 1]?.merkle_index, 10));
-          const pk = isMaker ? makerPk : sides[w.participantIndex - 1]?.bettor_pk;
-          return { pk, amount: w.amountSompi, _sortKey: sortKey };  // EXACT sompi string (NOT Number — R1 承重墙)
-        }).sort((a, b) => a._sortKey - b._sortKey)         // canonical: maker(-1) first, then merkle_index ASC
-          .map(({ pk, amount }) => ({ pk, amount }));        // continuous re-index 0..K-1 (array idx = leaf)
-        const payoutRootHex = computePayoutRoot(chunkWinners).toString('hex');
-        const fixedOuts = outputs.slice(0, 6).map(o => ({ value: parseInt(o.amountSompi, 10) || 0 }));
-        const poolValueSompi = inputValues.reduce((s, v) => s + v, 0);
-        const plan = computeSettleChunks(chunkWinners, fixedOuts, poolValueSompi, payoutRootHex);
-        console.log(`[pool-settler] dispatchPhase2 v0.8 market=${market.id.slice(0,12)} estMass ${estMass}>${STORAGE_MASS_SAFE_THRESHOLD} → CHUNK-SETTLE route=${plan.route} numChunks=${plan.numChunks} segLens=[${plan.chunks.map(c=>c.seg_hi-c.seg_lo).join(',')}] payoutRoot=${payoutRootHex.slice(0,16)} winners=${chunkWinners.length}`);
-        // ③ chunk-chain dispatch (build/sign/broadcast loop + resume from unspent-tip) + ④ relay v08 scriptSig:
-        //   next pieces. In dev no live v0.8 market exists → this path unexercised until ①-create + ③④ + e2e.
-        throw new Error(`#31 ②-routed v0.8 chunk-settle (plan route=${plan.route} chunks=${plan.numChunks}) — ③④ chunk-chain dispatch + relay scriptSig not yet wired`);
-      }
       // min-pot 选项 A (Bettor r337 实证 unmfw 50 KAS 输方仍触): storage-mass cap 是 KIP-9
       // pool-dependent (≈ 1/pool); 单纯 5×oracleBond pre-check 不充分. 真根因 = 任何
       // payout outputs 触 storage_mass > cap → 该走 cancel-refund 不是 needs_larger_pot
