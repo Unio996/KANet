@@ -251,12 +251,16 @@ committee-sig (续 change-chain cov). ∴ partition 是 settler-local 选择 **�
   **末 chunk change==0** (零 stuck); 每 winner ∈ 恰 1 chunk (无双付/漏).
 - **change-chain induction** (§2): chunk_{i+1} 输入 outpoint == chunk_i change output (txid+idx) 链上实证.
 
-### 8.3 resumable kill-mid-chunk (NO-TX-NO-STATE 实证; HWM resume-token 验)
-- **杀**: settler 广播 chunk_1 上链后、chunk_2 广播前 kill (模拟 crash/重启).
-- **重启**: settler 读**链上 chunk_1 change UTXO 的 HWM state** (= seg_hi of chunk_1) → resume cursor.
-- **断言**: 续广播 chunk_2 的 `seg_lo == 链上 hwm` (§7.5 linkage) → **无双付** (不重付 chunk_0/1 winner) +
-  **无 skip** (不跳未付) → 链续完成全 winner 付齐 + 末 change==0. = HWM 一机制三性质 (linkage+resume+state) 实证.
-- **NO-TX-NO-STATE**: resume 只信**链上 HWM** (非本地 settler 进度文件) → crash 不丢不重 = trustless 续结.
+### 8.3 resumable kill-mid-chunk (NO-TX-NO-STATE 实证; HWM resume-token 验) — gate B 真闭核心 (Bettor)
+**两变体** (NWT coverage 加: 分布式 settler = 任意节点可结, cross-node resume 比 same-node restart 更贴 testnet 现实):
+- **8.3a same-node restart**: 同 settler 广播 chunk_1 上链后、chunk_2 广播前 kill → 同节点重启读链上 HWM → 续完.
+- **8.3b ★cross-node resume (我 determinism 域核心)**: node A settle chunk_0,1 上链 → **node A 死** → **node B** (从未碰此
+  settle) 读**链上最后 landed change UTXO 的 HWM state** (= seg_hi of chunk_1) → resume cursor → node B 续广播
+  chunk_2.. → 末 change==0. = HWM resume-token 全价值实证 (resume 只读链上 → **任意节点可续, 零本地 settler 状态依赖**).
+- **共同断言** (两变体): 续 chunk `seg_lo == 链上 hwm` (§7.5 linkage) → **无双付** (不能 restart 到 hwm 之前重付
+  winner) + **无 skip** (不能跳过 hwm 漏付) → 全 winner 付齐 + 末 change==0. = HWM 一机制三性质 (linkage+resume+state).
+- **NO-TX-NO-STATE**: resume 只信**链上 HWM** (非本地 settler 进度文件/内存) → crash/换节点 不丢不重 = trustless 续结.
+  cross-node (8.3b) 是此性质的**充分实证**: node B 无 node A 任何本地态, 纯链上 HWM 即可正确续 = 设计目标达成.
 
 ### 8.4 regression baseline (不退化红线)
 - **小池 ≤MAX_K**: 单 `settle_aggregate` (entry 1, =命门闭的 v07 路) 仍 PASS (46f8a/xfu62 等价回归).
