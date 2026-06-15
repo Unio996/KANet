@@ -12,7 +12,7 @@
 
 import { blake2b } from '@noble/hashes/blake2b';
 import { compileSil, computePoolSideArtifact, ctorBytes32, ctorInt } from './pool-bshard-artifacts.mjs';
-import { serializePoolShardState } from './pool-shard-state-serialize.mjs';
+import { serializeLeafState } from './pool-shard-state-serialize.mjs';
 
 const ZERO32_HEX = '00'.repeat(32);
 const SILVERC = process.env.SILVERC_PATH || 'D:/silverscript/target/release/silverc.exe'; // single-source w/ pool-bshard-artifacts
@@ -26,7 +26,7 @@ const SILVERC = process.env.SILVERC_PATH || 'D:/silverscript/target/release/silv
  * @returns {{ poolCtor, redeemHexForGenesisState, scriptHashHex, genesisState, psArtifact, firstTicketState }}
  */
 export function computeMarketGenesis(o) {
-  const { poolShardSilPath, poolSideSilPath, marketId, shardPoolId, committeePks, deadline, minBet, shardCount, sealCount, maxFanIn = 16, firstBet, silvercPath = SILVERC } = o;
+  const { poolLeafSilPath, poolRootSilPath, poolSideSilPath, marketId, shardPoolId, committeePks, deadline, minBet, shardCount, sealCount, maxFanIn = 4, firstBet, silvercPath = SILVERC } = o;
   if (!Array.isArray(committeePks) || committeePks.length !== 5) throw new Error('committeePks must be 5 × 32B hex');
   if (!firstBet || (firstBet.side !== 0 && firstBet.side !== 1)) throw new Error('firstBet {bettorPk, side(0|1), stakeSompi} required');
   const stake = BigInt(firstBet.stakeSompi);
@@ -36,42 +36,57 @@ export function computeMarketGenesis(o) {
   const psDummyCtor = [ctorBytes32(firstBet.bettorPk), ctorInt(firstBet.side), ctorInt(Number(stake)), ctorBytes32(shardPoolId)];
   const psArtifact = computePoolSideArtifact(poolSideSilPath, psDummyCtor, silvercPath); // {templateHashHex, templatePrefix, templateSuffix, prefixLen, suffixLen}
 
-  // 2. genesis leaf State = first bet baked (canonical zero outcome — committee-bypass + genesis-seed canonical).
+  // 2. PoolRoot template (State-excluded) → root_tmpl_hash + rootArtifact (baked into PoolLeaf ctor as the seal_to_root
+  //    foreign-template anchor; the seal builder's root_prefix/suffix). PoolRoot ctor (16): ps_tmpl_hash, shard_pool_id,
+  //    shard_count, c0-c4Pk, deadline, init_local_yes/no/count/pool_value/closed/winningSide/payoutRoot (state arbitrary,
+  //    template excludes State region). committee + deadline + shard_pool_id baked → per-market root template.
+  const rootInitPayoutRoot = ZERO32_HEX;
+  const rootCtor = [
+    ctorBytes32(psArtifact.templateHashHex), ctorBytes32(shardPoolId), ctorInt(shardCount),
+    ...committeePks.map(ctorBytes32), ctorInt(Number(deadline)),
+    ctorInt(0), ctorInt(0), ctorInt(0), ctorInt(0), ctorInt(0), ctorInt(0), ctorBytes32(rootInitPayoutRoot), // init State (arbitrary; template excludes State)
+  ];
+  const rootCompiled = compileSil(poolRootSilPath, rootCtor, silvercPath);
+  const rootRedeem = Buffer.from(rootCompiled.script);
+  const rsl = rootCompiled.state_layout;
+  const rootPrefix = rootRedeem.slice(0, rsl.start), rootSuffix = rootRedeem.slice(rsl.start + rsl.len);
+  const rootTmplHash = Buffer.from(blake2b(Buffer.concat([rootPrefix, rootSuffix]), { dkLen: 32 })).toString('hex');
+  const rootArtifact = { templatePrefix: rootPrefix, templateSuffix: rootSuffix, templateHashHex: rootTmplHash };
+
+  // 3. genesis leaf State = first bet baked (4-field PoolLeaf — NO outcome fields; outcome lives in PoolRoot).
   const genesisState = {
     local_yes: (stake * BigInt(1 - firstBet.side)).toString(),
     local_no: (stake * BigInt(firstBet.side)).toString(),
     count: 1, pool_value: stake.toString(),
-    closed: 0, winningSide: 0, payoutRoot: ZERO32_HEX,
   };
 
-  // 3. PoolShard_fold ctor (21 params). commit_v2: minimal single-shard e2e skips fold → not exercised; set ZERO
-  //    placeholder. (Multi-shard fold sets commit_v2 = blake2b(expectedΣyes‖Σno‖market_id‖shard_count); separate path.)
-  const poolCtor = [
+  // 4. PoolLeaf ctor (14): market_id, commit_v2(ZERO — minimal single-shard skips fold), shard_count, max_fan_in,
+  //    ps_tmpl_hash, shard_pool_id, seal_count, min_bet, root_tmpl_hash, root_init_payoutRoot, init_local_yes/no/count/pool_value.
+  const leafCtor = [
     ctorBytes32(marketId), ctorBytes32(ZERO32_HEX), ctorInt(shardCount), ctorInt(maxFanIn),
     ctorBytes32(psArtifact.templateHashHex), ctorBytes32(shardPoolId), ctorInt(sealCount), ctorInt(Number(minBet)),
-    ...committeePks.map(ctorBytes32),
-    ctorInt(Number(deadline)),
+    ctorBytes32(rootTmplHash), ctorBytes32(rootInitPayoutRoot),
     ctorInt(Number(genesisState.local_yes)), ctorInt(Number(genesisState.local_no)), ctorInt(genesisState.count), ctorInt(Number(genesisState.pool_value)),
-    ctorInt(0), ctorInt(0), ctorBytes32(ZERO32_HEX), // init_closed, init_winningSide, init_payoutRoot — canonical genesis seed
   ];
-  if (poolCtor.length !== 21) throw new Error(`poolCtor must be 21 params, got ${poolCtor.length}`);
+  if (leafCtor.length !== 14) throw new Error(`leafCtor must be 14 params, got ${leafCtor.length}`);
 
-  // 4. compile → genesis redeem + scriptHash (P2SH = operator computeP2SH(redeemHex)). Sanity: baked state region
-  //    must byte-match serializePoolShardState(genesisState) (so register/close per-state derivation lines up).
-  const compiled = compileSil(poolShardSilPath, poolCtor, silvercPath);
+  // 5. compile PoolLeaf → genesis redeem + scriptHash. Sanity: baked 4-field state == serializeLeafState(genesisState).
+  const compiled = compileSil(poolLeafSilPath, leafCtor, silvercPath);
   const redeem = Buffer.from(compiled.script);
   const sl = compiled.state_layout;
   const bakedState = redeem.slice(sl.start, sl.start + sl.len);
-  const expectState = serializePoolShardState(genesisState);
-  if (!bakedState.equals(expectState)) throw new Error(`genesis baked state != serializePoolShardState(genesisState) — ctor/state mismatch (baked ${bakedState.toString('hex').slice(0, 24)} vs ${expectState.toString('hex').slice(0, 24)})`);
+  const expectState = serializeLeafState(genesisState);
+  if (!bakedState.equals(expectState)) throw new Error(`genesis baked leaf state != serializeLeafState(genesisState) (baked ${bakedState.toString('hex').slice(0, 24)} vs ${expectState.toString('hex').slice(0, 24)})`);
 
   return {
-    poolCtor,
-    redeemHexForGenesisState: redeem.toString('hex'),
-    scriptHashHex: Buffer.from(blake2b(redeem, { dkLen: 32 })).toString('hex'), // → operator addressFromScriptPublicKey(P2SH(scriptHash))
-    genesisState,
-    shardPoolId, // top-level (driver builds per-bettor ticket states {bettorPk,direction,stake,shardPoolId})
-    psArtifact, // {templateHashHex, templatePrefix, templateSuffix} for register/claim/refund builders' ps_prefix/ps_suffix
-    firstTicketState: { bettorPk: firstBet.bettorPk, direction: firstBet.side, stake: stake.toString(), shardPoolId }, // genesis-create also creates this dust ticket
+    leafCtor, rootCtor,
+    redeemHexForGenesisState: redeem.toString('hex'), // PoolLeaf genesis redeem (operator computeP2SH → genesis leaf addr)
+    scriptHashHex: Buffer.from(blake2b(redeem, { dkLen: 32 })).toString('hex'),
+    genesisState,   // 4-field {local_yes, local_no, count, pool_value}
+    shardPoolId,
+    psArtifact,     // {templateHashHex, templatePrefix, templateSuffix} for register/claim/refund ps_prefix/ps_suffix
+    rootArtifact,   // {templatePrefix, templateSuffix, templateHashHex} for seal_to_root root_prefix/root_suffix (foreign-template)
+    rootTmplHash, rootInitPayoutRoot, committeePks, deadline, // PoolRoot deploy inputs (root_tmpl_hash baked in leaf)
+    firstTicketState: { bettorPk: firstBet.bettorPk, direction: firstBet.side, stake: stake.toString(), shardPoolId },
   };
 }
