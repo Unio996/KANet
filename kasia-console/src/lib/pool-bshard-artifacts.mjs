@@ -18,6 +18,7 @@ import { execFileSync } from 'node:child_process';
 import { writeFileSync, readFileSync, mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { blake2b } from '@noble/hashes/blake2b';
 import { extractTemplateArtifact } from './pool-template-artifact.mjs';
 
 const SILVERC = process.env.SILVERC_PATH || 'D:/silverscript/target/release/silverc.exe';
@@ -52,8 +53,18 @@ export const ctorInt = (n) => ({ kind: 'int', data: Number(n) });
  * @returns {{templateHashHex:string, prefixLen:number, suffixLen:number, redeemLen:number}}
  */
 export function computeSpineArtifact(spineSilPath, spineCtor, silvercPath = SILVERC) {
-  const a = extractTemplateArtifact(compileSil(spineSilPath, spineCtor, silvercPath));
-  return { templateHashHex: a.expectedTemplateHashHex, prefixLen: a.templatePrefixLen, suffixLen: a.templateSuffixLen, redeemLen: a.templatePrefixLen + a.encodedStateLen + a.templateSuffixLen };
+  const compiled = compileSil(spineSilPath, spineCtor, silvercPath);
+  const a = extractTemplateArtifact(compiled);
+  // spine_p2sh_hash = blake2b(full redeem) (= Kaspa P2SH commitment; for register_bet fix-a ctor + claim
+  // spineP2shHash check). DISTINCT from templateHashHex (= blake2b(prefix‖suffix), state-excluded, for the
+  // readInputStateWithTemplate template check). NWT/Bettor fix-a binds the PoolSide to the market's single spine.
+  const p2shHashHex = Buffer.from(blake2b(Buffer.from(compiled.script), { dkLen: 32 })).toString('hex');
+  return {
+    templateHashHex: a.expectedTemplateHashHex,
+    p2shHashHex,
+    prefixLen: a.templatePrefixLen, suffixLen: a.templateSuffixLen,
+    redeemLen: a.templatePrefixLen + a.encodedStateLen + a.templateSuffixLen,
+  };
 }
 
 /**
