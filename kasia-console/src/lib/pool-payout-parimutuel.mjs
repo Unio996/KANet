@@ -31,26 +31,30 @@ const ZERO32 = Buffer.alloc(32);
  * @param {number} winningSide  0 = YES wins, 1 = NO wins (matches PoolSide direction encoding)
  * @returns {Array<{pk:string, payout:bigint}>}  canonical order (pk ASC), Σpayout == totalPool exactly
  */
-export function computeParimutuelPayouts(winners, globalYesSompi, globalNoSompi, winningSide) {
-  const totalPool = BigInt(globalYesSompi) + BigInt(globalNoSompi);
-  const winnerPool = winningSide === 0 ? BigInt(globalYesSompi) : BigInt(globalNoSompi);
-  if (winnerPool <= 0n) throw new Error(`winnerPool must be > 0 (winningSide=${winningSide})`);
+export function computeParimutuelPayouts(winners, poolToSplitSompi, winnerPoolSompi) {
+  // poolToSplit = NET distributable pool = totalPool − fees (broker/oracle/maker, fee-on-TOTAL model). The caller
+  // deducts fees BEFORE calling (NWT catch 2026-06-15: splitting raw totalPool over-pays winners → pool can't cover
+  // fees). winnerPool = winning-side RAW stake total (the proportional-split denominator/weights).
+  const poolToSplit = BigInt(poolToSplitSompi);
+  const winnerPool = BigInt(winnerPoolSompi);
+  if (winnerPool <= 0n) throw new Error(`winnerPool must be > 0 (got ${winnerPool})`);
+  if (poolToSplit <= 0n) throw new Error(`poolToSplit must be > 0 (got ${poolToSplit})`);
   if (winners.length === 0) throw new Error('no winners');
   // (1) canonical order: pk ASC (unique → tie-free → cross-node byte-equal)
   const sorted = [...winners].sort((a, b) => (a.pk < b.pk ? -1 : a.pk > b.pk ? 1 : 0));
   // detect duplicate pk (would fork the index / double-count)
   for (let i = 1; i < sorted.length; i++) if (sorted[i].pk === sorted[i - 1].pk) throw new Error(`duplicate winner pk ${sorted[i].pk}`);
-  // (2) single-source BigInt floor formula
+  // (2) single-source BigInt floor formula: payout = stake × poolToSplit / winnerPool
   let distributed = 0n;
   const payouts = sorted.map(w => {
     const stake = BigInt(w.stake);
     if (stake <= 0n) throw new Error(`winner stake must be > 0 (pk ${w.pk})`);
-    const p = (stake * totalPool) / winnerPool;
+    const p = (stake * poolToSplit) / winnerPool;
     distributed += p;
     return { pk: w.pk, payout: p };
   });
-  // (3) dust → winners[0] (canonical absorber) → Σ == totalPool exact
-  const dust = totalPool - distributed;
+  // (3) dust → winners[0] (canonical absorber) → Σ == poolToSplit exact
+  const dust = poolToSplit - distributed;
   if (dust < 0n) throw new Error(`over-distributed (dust ${dust} < 0)`);
   payouts[0].payout += dust;
   return payouts;
