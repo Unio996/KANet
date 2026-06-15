@@ -22,6 +22,14 @@ function estimateStorageMass(inputValues, outputValues) {
 }
 
 // compute-mass approx (redeem + witness bytes + spk) — secondary to storage at realistic payouts.
+// ⚠ KNOWN CONSERVATIVE APPROX (J1 mass-model note, safe direction): this models settle_CHUNK
+//   (per-winner merkle-climb → REDEEM_PER_WINNER + WITNESS_PER_WINNER grow with nWinners). Applied to the
+//   AGGREGATE route it OVER-estimates compute ~8× (settle_aggregate has NO per-winner loop — winners are
+//   committee-SIGHASH-attested pure outputs, only +SPK/winner; committee merkle is fixed 5×8). Effect: errs
+//   toward chunk (never over-capacity reject = SAFE). Cost: hundreds-of-winners @ high-payout that could
+//   single-aggregate get an unnecessary chunk-chain. gate B core (找零核弹 = many small-payout winners) chunks
+//   regardless → not affected. Precise aggregateComputeMass (fixed redeem + 5-committee witness + N×SPK)
+//   lands in the dispatchPhase2 wire pass where real TX mass is needed.
 const REDEEM_BASE = 2702, REDEEM_PER_WINNER = 601;  // measured @ b367753b 4-entry sweep
 const WITNESS_PER_WINNER = 314, SPK = 35, TX_FIXED = 564, SIG_OPS = 5;
 function chunkComputeMass(nWinners, nFixedOut, hasChange) {
