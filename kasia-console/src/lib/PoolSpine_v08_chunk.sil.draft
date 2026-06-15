@@ -43,15 +43,18 @@ contract PoolSpine_v08_chunk(
     // —— v08 chunk 新增 ——
     int      maxWinnersPerChunk,  // = MAX_K (J2 computeSettleChunks 实测定, 本 chunk merkle-proof 循环编译期界)
     int      init_hwm,            // change UTXO genesis HWM (chunk_0 输出 change 起; pool-lock 隐含 hwm==0)
-    byte[32] init_plan_commit     // change UTXO genesis plan_commit (chunk_0 由 committee-sig commit, chunk_i 续读)
+    byte[32] init_plan_commit,    // change UTXO genesis plan_commit (chunk_0 由 committee-sig commit, chunk_i 续读)
+    int      init_total_winners   // change UTXO genesis 总 winner 数 (chunk_0 commit; chunk_i 续读 → 绑 chunk_kind==last)
 ) {
     // —— 可变 state (change UTXO 携值, 下 chunk readInputState 读 — J2 compile fix: readInputState 须 contract state 字段) ——
-    // ★ B 设计双 state 字段 (NWT no-free-witness 不变量: chunk_i 所有 security-critical 从 state 读非 free-witness):
+    // ★ B 设计三 state 字段 (NWT no-free-witness 不变量: chunk_i 所有 security-critical 从 state 读非 free-witness):
     //   hwm = 已付到的 merkle_index (cross-chunk linkage seg_lo==prev.hwm + resume cursor).
     //   planCommit = blake2b(全 winner pk+金额 + 段划分 + per-chunk fee-ceiling + winner方向) = committee-attested
     //     settle 全 plan 承诺 (chunk_0 由 5×committee-sig commit; chunk_i 续读 → 7项 verify against 它, 零 free-witness).
+    //   totalWinners = 总 winner 数 (绑 ⑤ chunk_kind: last ⟺ seg_hi==totalWinners, 防早 claim last 跳未付, NWT 攻面).
     int hwm = init_hwm;
     byte[32] planCommit = init_plan_commit;
+    int totalWinners = init_total_winners;
 
     // —— entry 0 — settle_chunk (partial-settle + change 续锁; chunk_0/chunk_i/chunk_n 经参数区分) ——
     // 复用 settle_aggregate 的 committee-sig(≥4)+depth-8 merkle proof 机制 (本草稿引其逻辑, 不重抄~150 行).
@@ -63,6 +66,9 @@ contract PoolSpine_v08_chunk(
         byte[32] c0Pk, byte[32] c1Pk, byte[32] c2Pk, byte[32] c3Pk, byte[32] c4Pk,
         byte[32] committeePkHash,
         int      winner,                 // 0=YES 1=NO
+        // —— plan 绑定 (chunk_0 用: committee-sig sighash 覆盖这俩 → committee-attested; chunk_i 不用这俩, 从 state 读) ——
+        byte[32] plan_commit_arg,        // chunk_0 的 planCommit (blake2b 全 plan); chunk_i 走 state.planCommit 忽略此
+        int      total_winners_arg,      // chunk_0 的总 winner 数; chunk_i 走 state.totalWinners 忽略此
         // —— chunk 定位 (链锚, 两节点同 → byte-equal partition) ——
         int      chunk_kind,             // 0=first, 1=mid, 2=last
         int      seg_lo,                 // 本 chunk winner 子段起 (merkle_index, inclusive)
@@ -115,20 +121,31 @@ contract PoolSpine_v08_chunk(
         //    chunk_i (i>0): readInputState(本 chunk 输入=上 change UTXO).hwm → require(seg_lo == prevHwm).
         //    末 chunk: seg_hi == 总 winner 数 (全付完) → 无 change (hwm 链终).
         int prevHwm = 0;                                  // chunk_0 隐含 (pool-lock 无 state)
+        byte[32] effPlanCommit = plan_commit_arg;         // chunk_0: witness (committee-sig sighash 覆盖); chunk_i 下方覆盖为 state
+        int effTotalWinners = total_winners_arg;          // chunk_0: witness (committee-signed); chunk_i 下方覆盖为 state
         if (chunk_kind != 0) {
-            { hwm: int inHwm } = readInputState(this.activeInputIndex);   // 上个 change UTXO 携的 hwm
+            // J2 compile: readInputState 须读【全】state 字段 {hwm, planCommit, totalWinners}. chunk_i 从 state 读 = 零 free-witness.
+            { hwm: int inHwm, planCommit: byte[32] inPC, totalWinners: int inTW } = readInputState(this.activeInputIndex);
             prevHwm = inHwm;
+            effPlanCommit = inPC;                         // chunk_i: planCommit 从 input change state 读 (非 witness)
+            effTotalWinners = inTW;                       // chunk_i: totalWinners 从 state 读 (绑 ⑤ chunk_kind)
         }
         require(seg_lo == prevHwm);                        // ★ 链式连续: 本段起 == 上段止 (无 overlap 无 gap)
+
+        // ⑤ chunk_kind 硬验绑定 (NWT 攻面: chunk_kind 非 free-witness, 防早 claim last 跳未付 / 谎 mid 跳 broker):
+        require((chunk_kind == 0) == (seg_lo == 0));                 // first ⟺ 首段 (seg_lo==0, 付 broker+committee 一次)
+        require((chunk_kind == 2) == (seg_hi == effTotalWinners));   // last ⟺ 全付完 (seg_hi==总 winner 数, 防早 claim last)
+        // mid (==1) = 非 first 非 last (上两条排除): seg_lo>0 && seg_hi<totalWinners.
 
         // ③ change 续锁本 covenant + hwm state 续延 (非末 chunk; trustless 核心: 未付余额仍 SS-governed + 链式连续).
         //    validateOutputState(change_idx,{hwm}) 编译期 lower 为续【OpInputCovenantId(activeInputIndex)=本 covenant
         //    自身链上身份】+ 写 hwm state → change 只能被下个 settle_chunk(同 cov)花, settler 挪不走 (Bettor 🔴 修:
         //    非 witness spine_p2sh_hash, 那是 spender 自填 tautology = 偷余额破口).
         if (chunk_kind != 2) {
-            // 非末 chunk: change 续锁本 covenant (cov_id 自验) + 携 hwm=seg_hi (下 chunk 必从 seg_hi 续付)
+            // 非末 chunk: change 续锁本 covenant (cov_id 自验) + 携全 state {hwm=seg_hi, planCommit, totalWinners} 续延
+            //   (planCommit/totalWinners 跨 chunk 不变 = 续传同一 committee-attested plan; hwm 链式递进).
             require(tx.outputs[change_idx].value > 0);                          // change>0 (非末 → 还有未付 winner)
-            validateOutputState(change_idx, { hwm: seg_hi });                   // ★ 续本 cov(自身身份) + change.hwm=seg_hi (链式续, trustless)
+            validateOutputState(change_idx, { hwm: seg_hi, planCommit: effPlanCommit, totalWinners: effTotalWinners });
         }
         // 末 chunk (chunk_kind==2): seg_hi == 总 winner 数 (全付完, 由守恒④ change==0 蕴含); 无 change 输出 (hwm 链终).
 
