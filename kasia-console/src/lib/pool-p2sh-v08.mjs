@@ -22,6 +22,7 @@ import {
   validateInt,
   compileAndComputeP2SH,
 } from './pool-p2sh.mjs';
+import { MAX_TX_FEE_SOMPI } from './kip9-mass.mjs';  // #31 ⑤ single-source (was local 1e8 literal)
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -33,7 +34,7 @@ const SPINE_V08_SIL = process.env.POOL_SPINE_V08_SIL_PATH || join(__dirname, 'Po
 //   init_* = genesis placeholders (chunk_0 uses committee-signed plan_commit_arg witness, NOT readInputState;
 //     pool-lock has no state — see SS L122. init_* only affect P2SH determinism, never require-checked).
 export const V08_MAX_WINNERS_PER_CHUNK = 47;
-export const V08_MAX_CHUNK_FEE = 100_000_000;       // = V07_MAX_FEE
+export const V08_MAX_CHUNK_FEE = MAX_TX_FEE_SOMPI;   // #31 ⑤ single-source (kip9-mass), was local 1e8 literal
 const ZERO32_HEX = '00'.repeat(32);
 
 /**
