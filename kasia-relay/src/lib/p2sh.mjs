@@ -1501,6 +1501,18 @@ function _ticketAddress(psPrefixHex, psSuffixHex, ticket, networkId) {
   return addressFromScriptPublicKey(spk, networkId).toString();
 }
 
+const _BSHARD_MINER_FEE = 10000n;   // 0.0001 KAS, within SS fee 范围 [1000, 1e8]
+function _utxoValue(u) { return BigInt(u.amount ?? u.utxoEntry?.amount ?? u.entry?.amount ?? 0); }
+// relay 算 change(Bettor 裁: relay fetch UTXO 后才知真 Σinput+fee): change = Σin − Σ业务out − minerFee.
+function _appendChange(orderedOut, matched, changeAddress) {
+  const sumIn = matched.reduce((a, u) => a + _utxoValue(u), 0n);
+  const sumOut = orderedOut.reduce((a, o) => a + BigInt(o.value), 0n);
+  const change = sumIn - sumOut - _BSHARD_MINER_FEE;
+  if (change < 0n) throw new Error(`bshard insufficient input: Σin ${sumIn} < Σout ${sumOut} + fee ${_BSHARD_MINER_FEE}`);
+  if (change >= 1000n && changeAddress) orderedOut.push(new TransactionOutput(change, payToAddressScript(new Address(changeAddress))));
+  return orderedOut;
+}
+
 // 取 UTXO by outpoint txid at a P2SH/address (单一匹配).
 async function _matchUtxo(rpc, address, outpointTxid) {
   const { entries } = await rpc.getUtxosByAddresses([address]);
@@ -1520,9 +1532,7 @@ export async function unlockBshardRegister(args) {
   const w = cmd.witness;
   const rpc = await connectRpc(networkId);
   try {
-    const leafAddr = _continuationAddress(cmd.inputs.leaf.redeem_hex,
-      _serializePoolStateHex(cmd.inputs.leaf.current_state), networkId);   // 输入 leaf 当前 state → 当前地址(取 UTXO)
-    const leafUtxo = await _matchUtxo(rpc, leafAddr, cmd.inputs.leaf.outpointTxid);
+    const leafUtxo = await _matchUtxo(rpc, cmd.inputs.leaf.address, cmd.inputs.leaf.outpointTxid);   // input 地址 builder 供
     const fundUtxos = [];
     for (const f of (cmd.inputs.funding || [])) fundUtxos.push(await _matchUtxo(rpc, f.address, f.outpointTxid));
 
@@ -1539,11 +1549,8 @@ export async function unlockBshardRegister(args) {
     outputs[w.leaf_out_idx] = new TransactionOutput(BigInt(cmd.outputs.leaf_continuation.amountSompi), payToAddressScript(new Address(newLeafAddr)));
     outputs[w.ps_out_idx] = new TransactionOutput(BigInt(cmd.outputs.poolSide_ticket.amountSompi), payToAddressScript(new Address(ticketAddr)));
     const orderedOut = outputs.filter(o => o !== undefined);
-    if (cmd.outputs.change_address && cmd.outputs.change_amountSompi) {
-      orderedOut.push(new TransactionOutput(BigInt(cmd.outputs.change_amountSompi), payToAddressScript(new Address(cmd.outputs.change_address))));
-    }
-
     const matched = [leafUtxo, ...fundUtxos];
+    _appendChange(orderedOut, matched, cmd.outputs.change_address);   // relay 算 change=Σin−Σout−fee
     // unsigned (funding inputs 留空待签; leaf 无 sig 直接置 scriptSig)
     const unsigned = new Transaction({
       version: 0,
@@ -1583,10 +1590,8 @@ export async function unlockBshardClaim(args) {
   const w = cmd.witness;
   const rpc = await connectRpc(networkId);
   try {
-    const rootAddr = _continuationAddress(cmd.inputs.root.redeem_hex, _serializePoolStateHex(cmd.inputs.root.current_state), networkId);
-    const ticketAddr = _ticketAddress(w.ps_prefix_hex, w.ps_suffix_hex, cmd.inputs.ticket.state, networkId);
-    const rootUtxo = await _matchUtxo(rpc, rootAddr, cmd.inputs.root.outpointTxid);
-    const ticketUtxo = await _matchUtxo(rpc, ticketAddr, cmd.inputs.ticket.outpointTxid);
+    const rootUtxo = await _matchUtxo(rpc, cmd.inputs.root.address, cmd.inputs.root.outpointTxid);     // input 地址 builder 供
+    const ticketUtxo = await _matchUtxo(rpc, cmd.inputs.ticket.address, cmd.inputs.ticket.outpointTxid);
     const feeUtxo = cmd.inputs.fee ? await _matchUtxo(rpc, cmd.inputs.fee.address, cmd.inputs.fee.outpointTxid) : null;
     const matched = [rootUtxo, ticketUtxo, ...(feeUtxo ? [feeUtxo] : [])];
 
@@ -1597,9 +1602,7 @@ export async function unlockBshardClaim(args) {
     outputs[w.payout_out_idx] = new TransactionOutput(BigInt(cmd.outputs.payout.amountSompi), bettorLockSpk);
     outputs[w.root_out_idx] = new TransactionOutput(BigInt(cmd.outputs.root_continuation.amountSompi), payToAddressScript(new Address(newRootAddr)));
     const orderedOut = outputs.filter(o => o !== undefined);
-    if (cmd.outputs.change_address && cmd.outputs.change_amountSompi) {
-      orderedOut.push(new TransactionOutput(BigInt(cmd.outputs.change_amountSompi), payToAddressScript(new Address(cmd.outputs.change_address))));
-    }
+    _appendChange(orderedOut, matched, cmd.outputs.change_address);   // relay 算 change=Σin−Σout−fee
 
     // root scriptSig: claim_draw witness(声明序: rootOutIdx,payoutOutIdx,payout,merkle_index,tree_depth,siblings[],ticketInIdx,prefix/suffix_len)+ OP_4 + redeem.
     let sibPush = '';
@@ -1650,10 +1653,8 @@ export async function unlockBshardRefund(args) {
   const w = cmd.witness;
   const rpc = await connectRpc(networkId);
   try {
-    const poolAddr = _continuationAddress(cmd.inputs.pool.redeem_hex, _serializePoolStateHex(cmd.inputs.pool.current_state), networkId);
-    const ticketAddr = _ticketAddress(w.ps_prefix_hex, w.ps_suffix_hex, cmd.inputs.ticket.state, networkId);
-    const poolUtxo = await _matchUtxo(rpc, poolAddr, cmd.inputs.pool.outpointTxid);
-    const ticketUtxo = await _matchUtxo(rpc, ticketAddr, cmd.inputs.ticket.outpointTxid);
+    const poolUtxo = await _matchUtxo(rpc, cmd.inputs.pool.address, cmd.inputs.pool.outpointTxid);     // input 地址 builder 供
+    const ticketUtxo = await _matchUtxo(rpc, cmd.inputs.ticket.address, cmd.inputs.ticket.outpointTxid);
     const matched = [poolUtxo, ticketUtxo];
 
     const newPoolAddr = _continuationAddress(cmd.inputs.pool.redeem_hex, _serializePoolStateHex(cmd.outputs.pool_continuation.state), networkId);
@@ -1661,9 +1662,7 @@ export async function unlockBshardRefund(args) {
     outputs[w.payout_out_idx] = new TransactionOutput(BigInt(cmd.outputs.payout.amountSompi), payToAddressScript(new Address(cmd.outputs.payout.address)));
     outputs[w.pool_out_idx] = new TransactionOutput(BigInt(cmd.outputs.pool_continuation.amountSompi), payToAddressScript(new Address(newPoolAddr)));
     const orderedOut = outputs.filter(o => o !== undefined);
-    if (cmd.outputs.change_address && cmd.outputs.change_amountSompi) {
-      orderedOut.push(new TransactionOutput(BigInt(cmd.outputs.change_amountSompi), payToAddressScript(new Address(cmd.outputs.change_address))));
-    }
+    _appendChange(orderedOut, matched, cmd.outputs.change_address);   // relay 算 change=Σin−Σout−fee
 
     // pool scriptSig: refund_draw witness(声明序: poolOutIdx,payoutOutIdx,ticketInIdx,prefix/suffix_len)+ OP_5 + redeem.
     const poolSig = _pushInt(w.pool_out_idx) + _pushInt(w.payout_out_idx) + _pushInt(w.ticket_in_idx)
