@@ -137,4 +137,77 @@ chunk settle 回归 (46f8a/xfu62) 仍 PASS.
   最小 fee+floor) 边界, 非 mass-cap (mass-cap 改 chunk 不再 cancel).
 
 ---
-*J1 #31 determinism slice spec。MASS 机械 by J2, 对抗验 by NWT。impl gated post-demo / 真大池 e2e 守红线。*
+
+## 7. v08 SS-契约 FREEZE (J2 `computeSettleChunks`/settler **照此 code** = 源头防漂; drift-check 权威)
+
+> 来源 = `kasia-console/src/lib/PoolSpine_v08_chunk.sil.draft` @ **b367753b** (4-entry COMPILE OK, J2/NWT/Bettor 三验,
+> ctor FREEZE@16). 此节是 §1-4 设计落地后的**实现契约**: §3 旧述 (free `change_idx` / `spine_p2sh_hash` witness
+> introspection) **已被取代** — 实现走 `validateOutputState`(OpInputCovenantId 本 cov 自验) + 确定 `changeIdx`.
+> **J2 出码即 diff 本节 7 项, 任一不符=喊 (我 own SS 契约)。**
+
+### 7.1 ctor16 (P2SH-affecting, FROZEN — 序/类型/值源任一变=异 P2SH 异市场)
+| idx | param | type | 值源 / 链锚 |
+|---|---|---|---|
+| 0 | makerPk | byte[32] | maker 身份 (market-create) |
+| 1 | brokerPk | byte[32] | broker 身份 |
+| 2 | poolMerkleRoot | byte[32] | pool snapshot depth-8 root (committee 池, v07-继承) |
+| 3 | deadline | int | market deadline |
+| 4 | marketMetadataHash | byte[32] | |
+| 5 | market_id | byte[32] | raw (跨 shard 同 logical market 锚) |
+| 6 | shard_id | int | 0..shard_count-1 |
+| 7 | shard_count | int | |
+| 8 | oracleBondAmount | int | committee bond (sompi) |
+| 9 | maxWinnersPerChunk | int | **= MAX_K = 47** (settle_chunk merkle-loop 编译期界 = chunk_i 最大容量) |
+| 10 | init_hwm | int | change UTXO genesis HWM (pool-lock 隐含 0) |
+| 11 | init_plan_commit | byte[32] | genesis planCommit = **payoutRoot** (chunk_0 committee-sign) |
+| 12 | init_total_winners | int | genesis 总 winner 数 |
+| 13 | maxChunkFee | int | **= V07_MAX_FEE = 1e8** 单源 (pool-market-settler.js L2291); ⑦ over-fee 上界 |
+| 14 | makerStakeAmount | int | **v07-anchor 补** (settle_aggregate min-bet≥1e8/dust + refund output 范围) |
+| 15 | minerFee | int | **v07-anchor 补** (settle_aggregate fee sanity >0 && <1e8 loose) |
+
+### 7.2 payoutRoot 构造 (J2 builder 必 byte-match; SS climb target = `effPlanCommit`)
+- **leaf_k = `blake2b( winnerPk[32] ‖ amount_sompi[8B **LE**] )`** (SS L147: `blake2b(byte[](pk) + byte[](amount, 8))`).
+  ⚠ `byte[](int,8)` = **LITTLE-ENDIAN** (J2 byte-match 7/7 实证). amount = `computePoolPayouts` BigInt sompi (含 off-chain dust).
+- depth-8 position-aware merkle, **winner 按 `merkle_index` ASC** 排 (= bet-time pool-root commit 位, §1①链锚).
+- `winnerSiblings` 扁平: `winnerSiblings[k*8 + lvl]` = winner k 第 lvl 层兄弟 (lvl 0=底). bit = `(merkle_index / 2^lvl) % 2`;
+  bit==0 → `blake2b(cur‖sib)`, bit==1 → `blake2b(sib‖cur)` (SS L148-163).
+- root = `init_plan_commit` (chunk_0 经 5×committee-sig sighash commit `plan_commit_arg`; chunk_i 从 state.planCommit 读).
+- **<256 叶 padding 规则两节点必同** (待 J2 builder 定: 空叶填 0x00*32 or dup-last → 我 diff 时核此).
+
+### 7.3 settle_chunk witness 序 (entry 0; chunk_0 vs chunk_i 用法差异)
+`(sig c0Sig..c4Sig, byte[32] c0Pk..c4Pk, byte[32] committeePkHash, int winner, byte[32] plan_commit_arg,`
+`  int total_winners_arg, int chunk_kind, int seg_lo, int seg_hi, byte[32][] winnerPks, int[] winnerAmounts, byte[32][] winnerSiblings)`
+- **chunk_0** (chunk_kind==0): c*Sig 须 **≥4 valid** (4-of-5) + `blake2b(c0Pk‖..‖c4Pk)==committeePkHash`;
+  `plan_commit_arg`=payoutRoot (sighash-committed), `total_winners_arg`=总数. **seg_lo 必==0**.
+- **chunk_i** (chunk_kind!=0): **无 sig** (省 sig-ops = 容量杠杆); planCommit/totalWinners/prevHwm **全从 `readInputState` 读**
+  (零 free-witness); `plan_commit_arg`/`total_winners_arg`/c*Sig/c*Pk **忽略** (settler 填占位即可, 不参与 verify).
+
+### 7.4 output layout (per chunk_kind; `wOutBase`+`changeIdx` 确定派生, 非 free)
+```
+chunk_0 (kind=0): [0]=broker  [1..5]=committee c0..c4 bond  [6 .. 6+segLen-1]=winners  [6+segLen]=change
+chunk_i (kind=1): [0 .. segLen-1]=winners  [segLen]=change
+chunk_n (kind=2): [0 .. segLen-1]=winners            (无 change)
+```
+- `wOutBase` = 6 (chunk_0) / 0 (chunk_i,n);  `segLen = seg_hi - seg_lo`;  `changeIdx = wOutBase + segLen`.
+- winner k → `outputs[wOutBase+k]`: `scriptPubKey == ScriptPubKeyP2PK(pubkey(winnerPks[k]))` **且** `value == winnerAmounts[k]`.
+- **output-count bound (keystone 防 steal-output)**: `outputs.length == wOutBase + segLen + (chunk_kind!=2 ? 1 : 0)`.
+- broker `outputs[0].value>=1000`; committee `outputs[1..5].value>=oracleBondAmount` (仅 chunk_0).
+
+### 7.5 HWM change-state (`validateOutputState(changeIdx, {...})`; cross-chunk linkage)
+- change UTXO 携 **`{hwm:int, planCommit:byte[32], totalWinners:int}`** (readInputState 须**全字段**).
+- `hwm = seg_hi` (下个待付 merkle_index);  `planCommit`/`totalWinners` 跨 chunk **不变** (续传同 plan).
+- 链式连续硬验: **`seg_lo == prevHwm`** (chunk_0: prevHwm=0; chunk_i: = input change.hwm) — 防 overlap/gap/skip/repeat.
+- chunk_kind 绑定: `(kind==0)==(seg_lo==0)`; `(kind==2)==(seg_hi==totalWinners)`; mid=其余.
+- genesis (pool-lock UTXO, market-create 时): state = {hwm: init_hwm(0), planCommit: init_plan_commit(payoutRoot), totalWinners: init_total_winners(N)}. **J2 market-create wire 必设此 = ctor init_* 同值** (否则 chunk_0 readInputState 读不到/异 P2SH).
+
+### 7.6 capacity (J2 域, 我 co-verify byte-deterministic)
+- `maxWinnersPerChunk` ctor = **47** = 编译期 merkle-loop 上界 = **chunk_i** 最大容量 (winners+change only).
+- 实 per-chunk segLen 由 **value-aware greedy packing** (J2 `computeSettleChunks` via 单源 `estimateStorageMass`) 定:
+  **chunk_0 ≤ ~41** (+6 broker/committee 输出占 mass), chunk_i ≤ 47, chunk_n ≤ 剩余. 两节点同 `estimateStorageMass` → 同 segLen → byte-equal partition (§1).
+- ⚠ chunk_0 capacity **< 47** = NWT capacity-asymmetry edge (J2 greedy 已含; **禁 hardcode chunk_0=47** → 漂/超 cap).
+
+### 7.7 drift-check 清单 (J2 出码我逐条 diff; 任一 FAIL=喊)
+1. ctor16 序/类型 == 7.1 (idx14=makerStakeAmount, idx15=minerFee).  2. payoutRoot leaf = blake2b(pk‖amount **8B LE**), merkle_index ASC, sibling flatten k*8+lvl, padding 规则锁定.  3. witness 序 == 7.3, chunk_i 不喂真 sig.  4. output layout/wOutBase/changeIdx == 7.4, output-count bound 在.  5. HWM state 3-字段 + seg_lo==prevHwm + genesis init_* 同值.  6. chunk_0 capacity 走 greedy 非 hardcode 47.  7. cap/maxChunkFee/MAX_K = **SOURCE 单源常量** (禁 env/DB, §1④ fork 命门).
+
+---
+*J1 #31 determinism slice spec。MASS 机械 by J2, 对抗验 by NWT。impl gated post-demo / 真大池 e2e 守红线。§7 = b367753b 实现契约 freeze, J2 照此 code 防漂。*
