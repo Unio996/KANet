@@ -1,0 +1,113 @@
+{
+ "note": "J1 #31 确定性 fixture (8-participant aggregate, 真 parimutuel via 生产 computePoolPayouts+computeChunkFee 单源). e2e: KANet-UI 同 seed derivePk(0..7)+同 fees 造市 → 链上 payoutRoot==此 root byte-equal. NWT 独立 impl 交叉.",
+ "seed": "KANET-31-E2E-FIXTURE-SEED-v1",
+ "winner": 0,
+ "fees": {
+  "brokerFeePct": 190,
+  "oracleFeePct": 100,
+  "makerFeePct": 10,
+  "oracleBond": 1,
+  "committeeMode": true,
+  "oracleCount": 5,
+  "unanimous": true
+ },
+ "minerFee": 13997720,
+ "totalPool_sompi": "285000000000",
+ "derivation": "sk_i=blake2b(utf8(seed)‖uint32LE(mi))[32]; pk_i=kaspa PrivateKey(sk).toPublicKey().toXOnlyPublicKey()",
+ "composition": [
+  {
+   "merkle_index": 0,
+   "pk": "9338fdfdcb0532fc0b1a038a858318897694aac7b041228a64390f2ee75b9beb",
+   "side": "YES",
+   "stake_sompi": "50000000000",
+   "isMaker": true
+  },
+  {
+   "merkle_index": 1,
+   "pk": "1f91b653f73add8208602ff206a662194b8fc587e1fa24779b6c80d721ffd52f",
+   "side": "NO",
+   "stake_sompi": "30000000000",
+   "isMaker": false
+  },
+  {
+   "merkle_index": 2,
+   "pk": "13b7bfc85676c034933c189681579a9af4e80d5b45ece29d273d1450c007269e",
+   "side": "YES",
+   "stake_sompi": "20000000000",
+   "isMaker": false
+  },
+  {
+   "merkle_index": 3,
+   "pk": "40df5fd2673a354f7ba3562b48b3caa1b54f9356e75386ebdef75dd9e41e13e5",
+   "side": "YES",
+   "stake_sompi": "70000000000",
+   "isMaker": false
+  },
+  {
+   "merkle_index": 4,
+   "pk": "d31381707885171319cb34050eab00789b507eefdf2b87cd283dc5ba793bc2a3",
+   "side": "NO",
+   "stake_sompi": "40000000000",
+   "isMaker": false
+  },
+  {
+   "merkle_index": 5,
+   "pk": "12da7d22a8332ad75fb4c9e49e1e2baf631441e303fc476c0f48c0eaefdb7539",
+   "side": "YES",
+   "stake_sompi": "15000000000",
+   "isMaker": false
+  },
+  {
+   "merkle_index": 6,
+   "pk": "0925cd4ec8baeba9ad709f15da2e7819f837de37d6dd174e94008163a266b6a6",
+   "side": "NO",
+   "stake_sompi": "25000000000",
+   "isMaker": false
+  },
+  {
+   "merkle_index": 7,
+   "pk": "0ec93cac00c8c4b75100848133ecbbfb7f88d60fe857938999c7e31ea0f35a59",
+   "side": "YES",
+   "stake_sompi": "35000000000",
+   "isMaker": false
+  }
+ ],
+ "payoutRoot": "b30b1ff36d53adc617f63de4aae6bd4975abd21246ab6e81fdbff5fd5e0b9b11",
+ "winners": [
+  {
+   "leaf_index": 0,
+   "merkle_index": 0,
+   "pk": "9338fdfdcb0532fc0b1a038a858318897694aac7b041228a64390f2ee75b9beb",
+   "amount_sompi": "72746316390",
+   "isMaker": true
+  },
+  {
+   "leaf_index": 1,
+   "merkle_index": 2,
+   "pk": "13b7bfc85676c034933c189681579a9af4e80d5b45ece29d273d1450c007269e",
+   "amount_sompi": "29098526555",
+   "isMaker": false
+  },
+  {
+   "leaf_index": 2,
+   "merkle_index": 3,
+   "pk": "40df5fd2673a354f7ba3562b48b3caa1b54f9356e75386ebdef75dd9e41e13e5",
+   "amount_sompi": "101844842943",
+   "isMaker": false
+  },
+  {
+   "leaf_index": 3,
+   "merkle_index": 5,
+   "pk": "12da7d22a8332ad75fb4c9e49e1e2baf631441e303fc476c0f48c0eaefdb7539",
+   "amount_sompi": "21823894916",
+   "isMaker": false
+  },
+  {
+   "leaf_index": 4,
+   "merkle_index": 7,
+   "pk": "0ec93cac00c8c4b75100848133ecbbfb7f88d60fe857938999c7e31ea0f35a59",
+   "amount_sompi": "50922421471",
+   "isMaker": false
+  }
+ ]
+}
