@@ -1796,6 +1796,94 @@ export async function registerPoolRoutes(fastify) {
     return reply.send({ ok: true, total, count: markets.length, limit, offset, markets });
   });
 
+  // GET /api/pool/logical-markets — KANet-UI 分片对用户透明 (bshard B + self-claim C, Owner 2026-06-15 #1 directive).
+  // One LOGICAL market = N physical shards (market_shards registry, v171). Each shard is its own pool_markets
+  // row (≤~32 bettors, settle_aggregate, no chunking). This endpoint hides the sharding: presents 1 market per
+  // logical_market_id with CROSS-SHARD aggregated pari-mutuel odds (Σ pool_bettor_sides over all shard market_ids
+  // + Σ maker stakes), shard_count, and the current open shard (status='open', max shard_index) for transparent
+  // bet routing. Odds derive from existing pool_bettor_sides (NO new columns — same single source as /markets).
+  // Read-only. Filters: ?logical_market_id= (single), ?limit/?offset.
+  fastify.get('/api/pool/logical-markets', async (request, reply) => {
+    const q = request.query || {};
+    const limit = Math.min(Math.max(parseInt(q.limit, 10) || 50, 1), 200);
+    const offset = Math.max(parseInt(q.offset, 10) || 0, 0);
+    const where = ["ms.status != 'refunded'"];  // J2 review minor-2: refunded shards' bets are refunded → exclude from live odds
+    const params = [];
+    if (q.logical_market_id) { where.push('ms.logical_market_id = ?'); params.push(String(q.logical_market_id)); }
+    const whereSql = `WHERE ${where.join(' AND ')}`;
+    // Inner: per-logical-market shard rollup (shard_count + Σ maker over shards — NO bettor JOIN here, so the
+    // maker SUM is not multiplied by bettor rows). Metadata (spec/outcome/deadline/category) is identical across
+    // a logical market's shards (same ctor outcome), so MAX() picks the representative.
+    const rows = sqlite.prepare(`
+      SELECT lm.logical_market_id, lm.shard_count, lm.maker_stake_sompi, lm.outcome_side,
+             lm.resolution_rule_spec, lm.deadline, lm.category, lm.protocol_version, lm.created_at,
+             (SELECT COALESCE(SUM(s.stake_amount),0) FROM pool_bettor_sides s
+                WHERE s.market_id IN (SELECT shard_market_id FROM market_shards WHERE logical_market_id = lm.logical_market_id AND status != 'refunded')
+                  AND s.direction = 0) AS yes_bettor_stake_sompi,
+             (SELECT COALESCE(SUM(s.stake_amount),0) FROM pool_bettor_sides s
+                WHERE s.market_id IN (SELECT shard_market_id FROM market_shards WHERE logical_market_id = lm.logical_market_id AND status != 'refunded')
+                  AND s.direction = 1) AS no_bettor_stake_sompi,
+             (SELECT COUNT(*) FROM pool_bettor_sides s
+                WHERE s.market_id IN (SELECT shard_market_id FROM market_shards WHERE logical_market_id = lm.logical_market_id AND status != 'refunded')) AS bettor_count
+      FROM (
+        SELECT ms.logical_market_id,
+               COUNT(DISTINCT ms.shard_market_id)      AS shard_count,
+               COALESCE(SUM(pm.maker_stake_amount), 0) AS maker_stake_sompi,
+               MAX(pm.outcome_side)                    AS outcome_side,
+               MAX(pm.resolution_rule_spec)            AS resolution_rule_spec,
+               MAX(pm.deadline)                        AS deadline,
+               MAX(pm.category)                        AS category,
+               MAX(pm.protocol_version)                AS protocol_version,
+               MIN(pm.created_at)                      AS created_at
+        FROM market_shards ms
+        LEFT JOIN pool_markets pm ON pm.id = ms.shard_market_id
+        ${whereSql}
+        GROUP BY ms.logical_market_id
+      ) lm
+      ORDER BY lm.created_at DESC
+      LIMIT ? OFFSET ?
+    `).all(...params, limit, offset);
+    const total = sqlite.prepare(`SELECT COUNT(*) c FROM (SELECT 1 FROM market_shards ms ${whereSql} GROUP BY ms.logical_market_id)`).get(...params).c;
+    const markets = rows.map(r => {
+      // pari-mutuel pools: maker is implicit bettor on outcome_side (same invariant as /markets, area-1).
+      const makerSompi = Number(r.maker_stake_sompi) || 0;
+      const makerOnYes = r.outcome_side === 'YES';
+      const yesPoolSompi = Number(r.yes_bettor_stake_sompi) + (makerOnYes ? makerSompi : 0);
+      const noPoolSompi = Number(r.no_bettor_stake_sompi) + (!makerOnYes ? makerSompi : 0);
+      const totalPool = yesPoolSompi + noPoolSompi;
+      // current open shard (transparent bet routing target). NULL if all shards sealed/settled.
+      const openShard = sqlite.prepare(
+        `SELECT shard_market_id, shard_index, bettor_count FROM market_shards
+           WHERE logical_market_id = ? AND status = 'open' ORDER BY shard_index DESC LIMIT 1`
+      ).get(r.logical_market_id) || null;
+      return {
+        logical_market_id: r.logical_market_id,
+        shard_count: r.shard_count,
+        bettor_count: r.bettor_count,
+        resolution_rule_spec: r.resolution_rule_spec,
+        outcome_side: r.outcome_side,
+        category: r.category,
+        protocol_version: r.protocol_version,
+        deadline: r.deadline,
+        created_at: r.created_at,
+        // cross-shard aggregated pari-mutuel odds (the "1 market view")
+        yes_pool_kas: yesPoolSompi / 1e8,
+        no_pool_kas: noPoolSompi / 1e8,
+        yes_implied_prob: totalPool > 0 ? yesPoolSompi / totalPool : null,
+        no_implied_prob: totalPool > 0 ? noPoolSompi / totalPool : null,
+        total_pool_kas: totalPool / 1e8,
+        // transparent bet routing HINT (NULL → all shards closed). J2 review minor-1: this is a HINT not a
+        // guarantee — register's allocateForRegister re-checks shardHasRoom (count<32 + mass<380k); a full
+        // shard (race window) auto-opens the next shard, invisible to the user. register is authoritative;
+        // the UI must NOT promise the bet lands in this exact shard (user only bets the logical market).
+        open_shard_market_id: openShard ? openShard.shard_market_id : null,
+        open_shard_index: openShard ? openShard.shard_index : null,
+        open_shard_bettor_count: openShard ? openShard.bettor_count : null,
+      };
+    });
+    return reply.send({ ok: true, total, count: markets.length, limit, offset, markets });
+  });
+
   fastify.get('/api/pool/market/:id', async (request, reply) => {
     const marketId = request.params.id;
     const market = sqlite.prepare('SELECT * FROM pool_markets WHERE id = ?').get(marketId);
