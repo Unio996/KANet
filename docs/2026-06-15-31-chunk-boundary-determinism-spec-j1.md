@@ -247,6 +247,20 @@ committee-sig (续 change-chain cov). ∴ partition 是 settler-local 选择 **�
 > 实 cap; 470k SAFE vs 500k cap = 6% margin; 超则单 chunk mempool reject **非 cross-node fork**) **非 byte-deterministic**.
 > ∴ e2e 前置检 = **2-assert** (ctor16 P2SH + payoutRoot); per-chunk partition 验移到 §8.2 SS-validity (on-chain 逐 chunk).
 
+**★ 8.1a chunk-specific 第 3 assert + fail-closed (NWT degrade-to-uniform EDGE, 2026-06-15, 实读 getCommitteeStakesCanonical
+L1525-1541 三方确认)**: chunk 路 committee output 值**影响 partition → global minerFee (Σ per-chunk computeChunkFee) →
+payoutRoot** (8-part aggregate 不影响 = settle_aggregate sighash-attest committee). committee 值 = oracleBond + oracleFee
+**stake-weighted split** via `getCommitteeStakesCanonical` (源 = `pool_snapshots.pool_stakes_json`, canonical merkle-rooted
+VRF 同源). 🔴 **EDGE**: L1529 `if(!snap||!comm) return fill(0n)` + L1535 per-pk missing→0n + L1537 catch→0n →
+**caller degrades to uniform split**. ∴ 节点A 有快照(stake-weighted) / 节点B 缺(uniform-degrade) → 异 committee output →
+异 partition → 异 payoutRoot = **静默 cross-node fork**.
+- **fix-1 fail-closed (J2 helper/③ 落)**: v08 chunk settle 前 getCommitteeStakesCanonical 全-0n / missing snapshot|committee
+  → **HALT/abort 不 settle**, 禁静默 uniform degrade. 缺数据宁等快照传播齐 (NO-TX-NO-STATE).
+- **fix-2 Phase A-cross 第 3 assert**: 不止 ctor16-P2SH+payoutRoot, 加 **committee output 值逐个 byte-equal 跨节点**
+  (= pool_snapshots+pool_committee 两节点 present 且 byte-equal, 非一边 0n-degrade).
+- **de-risk (KANet-UI)**: e2e equal-stake committee → uniform==stake-weighted 恰免疫 (但只 happy 路; **adversarial fixture
+  (unequal-stake+缺快照模拟) 须证 fail-closed 实触发**, NWT: 别只跑 happy fixture mask 命门 = fixture-must-mirror 第 2 重现).
+
 ### 8.2 e2e 主路 (大 winner 市场 → 多 chunk → 全付齐链上证)
 - **造市场**: winner 数 **> MAX_K=47** 触 chunk (如 **100 winner = 3 chunk**: chunk_0~41 + chunk_1~47 + chunk_2~12).
 - **settle on :3300** (真参与节点): dispatchPhase2 v08 路由 >MAX_K → chunk 链; 逐 chunk 广播 (Bettor broadcast slice).
