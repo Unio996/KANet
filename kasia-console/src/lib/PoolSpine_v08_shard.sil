@@ -1,0 +1,64 @@
+// PoolSpine_v08_shard.sil — bshard per-shard spine close-commit (J1, 2026-06-15). Bettor nail-1.
+//
+// 职责: 关池时把 {winningSide, payoutRoot, fold_tmpl_hash, shard_count} **写一次、不可改、post-close-only** 进 spine state →
+//   PoolSide claim ref-input 读它(readInputStateWithTemplate) → 验 winner(finding-1) + merkle-prove payout(finding-2).
+//   committee 4-of-5 sig attest winningSide+payoutRoot(= outcome/payoutRoot 的 committee-trust 锚, trust-scoping 一致).
+//
+// write-once immutable: closed flag. close_commit require(closed==0) → 写 closed=1 → 此后无 entry 能改(close_commit 拒 closed==1).
+//   spine UTXO 持久(claim ref-input 读不消费; close_commit 后只读不写).
+// committee = baked ctor(market-create 时 oracle 指派, 5 pk 烤) → 4-of-5 sig 无 merkle(简, 委员固定 per-market).
+// State 布局 = PoolSide_v08_shard 的 SpineCloseCommit struct(逐字段对齐, 含 closed → claim 验 closed==1). 单 author J1.
+
+pragma silverscript ^0.1.0;
+
+contract PoolSpine_v08_shard(
+    // —— baked committee (oracle, market-create 指派; 4-of-5 attest winningSide+payoutRoot) ——
+    byte[32] c0Pk, byte[32] c1Pk, byte[32] c2Pk, byte[32] c3Pk, byte[32] c4Pk,
+    byte[32] market_id,                 // 跨片锚
+    int      deadline,                  // post-close 闸(close_commit 须 deadline 过)
+    // —— genesis State (closeCommit 空; open 态) ——
+    int      init_closed,               // genesis 0
+    int      init_winningSide,          // genesis 0
+    byte[32] init_payoutRoot,           // genesis ZERO32
+    byte[32] init_fold_tmpl_hash,       // genesis ZERO32
+    int      init_shard_count           // genesis 0
+) {
+    // —— State (= PoolSide SpineCloseCommit struct 对齐: closed, winningSide, payoutRoot, fold_tmpl_hash, shard_count) ——
+    int      closed = init_closed;
+    int      winningSide = init_winningSide;
+    byte[32] payoutRoot = init_payoutRoot;
+    byte[32] fold_tmpl_hash = init_fold_tmpl_hash;
+    int      shard_count = init_shard_count;
+
+    // entry 0 — close_commit: 关池写一次(committee 4-of-5 attest, post-close, immutable).
+    entrypoint function close_commit(
+        sig c0Sig, sig c1Sig, sig c2Sig, sig c3Sig, sig c4Sig,
+        int      new_winningSide,        // oracle 裁的赢向(0=YES 1=NO; committee sighash attest)
+        byte[32] new_payoutRoot,         // 链下 BigInt 算的 payoutRoot(committee sighash attest)
+        byte[32] new_fold_tmpl_hash,     // 关池后已知的 fold-root template hash
+        int      new_shard_count         // 关池片数
+    ) {
+        require(closed == 0);                          // ★ write-once: 已 closed 拒(immutable)
+        require(tx.time >= deadline * 1000);           // post-close-only(deadline 过)
+        require(new_winningSide == 0 || new_winningSide == 1);
+        require(new_shard_count > 0);
+
+        // committee 4-of-5 (sighash 覆盖 new_* → attest winningSide+payoutRoot, = committee-trust 锚).
+        int validSigs = 0;
+        if (checkSig(c0Sig, pubkey(c0Pk))) { validSigs = validSigs + 1; }
+        if (checkSig(c1Sig, pubkey(c1Pk))) { validSigs = validSigs + 1; }
+        if (checkSig(c2Sig, pubkey(c2Pk))) { validSigs = validSigs + 1; }
+        if (checkSig(c3Sig, pubkey(c3Pk))) { validSigs = validSigs + 1; }
+        if (checkSig(c4Sig, pubkey(c4Pk))) { validSigs = validSigs + 1; }
+        require(validSigs >= 4);
+
+        // 写 closeCommit (continuation, closed=1; 续锁本 spine cov → 只此一次写定值).
+        validateOutputState(0, {
+            closed: 1,
+            winningSide: new_winningSide,
+            payoutRoot: new_payoutRoot,
+            fold_tmpl_hash: new_fold_tmpl_hash,
+            shard_count: new_shard_count
+        });
+    }
+}
