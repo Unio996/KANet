@@ -1501,6 +1501,12 @@ function _ticketAddress(psPrefixHex, psSuffixHex, ticket, networkId) {
   return addressFromScriptPublicKey(spk, networkId).toString();
 }
 
+// P2SH input 地址 = payToScriptHash(完整 redeem_hex)(redeem 含当前 state, 是 ground-truth; 无需 current_state/.address).
+function _addressFromRedeem(redeemHex, networkId) {
+  const spk = payToScriptHashScript(new Uint8Array(Buffer.from(redeemHex, 'hex')));
+  return addressFromScriptPublicKey(spk, networkId).toString();
+}
+
 const _BSHARD_MINER_FEE = 10000n;   // 0.0001 KAS, within SS fee 范围 [1000, 1e8]
 function _utxoValue(u) { return BigInt(u.amount ?? u.utxoEntry?.amount ?? u.entry?.amount ?? 0); }
 // relay 算 change(Bettor 裁: relay fetch UTXO 后才知真 Σinput+fee): change = Σin − Σ业务out − minerFee.
@@ -1532,7 +1538,7 @@ export async function unlockBshardRegister(args) {
   const w = cmd.witness;
   const rpc = await connectRpc(networkId);
   try {
-    const leafUtxo = await _matchUtxo(rpc, cmd.inputs.leaf.address, cmd.inputs.leaf.outpointTxid);   // input 地址 builder 供
+    const leafUtxo = await _matchUtxo(rpc, _addressFromRedeem(cmd.inputs.leaf.redeem_hex, networkId), cmd.inputs.leaf.outpointTxid);   // P2SH 地址 = hash(redeem)
     const fundUtxos = [];
     for (const f of (cmd.inputs.funding || [])) fundUtxos.push(await _matchUtxo(rpc, f.address, f.outpointTxid));
 
@@ -1590,8 +1596,8 @@ export async function unlockBshardClaim(args) {
   const w = cmd.witness;
   const rpc = await connectRpc(networkId);
   try {
-    const rootUtxo = await _matchUtxo(rpc, cmd.inputs.root.address, cmd.inputs.root.outpointTxid);     // input 地址 builder 供
-    const ticketUtxo = await _matchUtxo(rpc, cmd.inputs.ticket.address, cmd.inputs.ticket.outpointTxid);
+    const rootUtxo = await _matchUtxo(rpc, _addressFromRedeem(cmd.inputs.root.redeem_hex, networkId), cmd.inputs.root.outpointTxid);   // P2SH 地址 = hash(redeem)
+    const ticketUtxo = await _matchUtxo(rpc, _addressFromRedeem(cmd.inputs.ticket.redeem_hex, networkId), cmd.inputs.ticket.outpointTxid);
     const feeUtxo = cmd.inputs.fee ? await _matchUtxo(rpc, cmd.inputs.fee.address, cmd.inputs.fee.outpointTxid) : null;
     const matched = [rootUtxo, ticketUtxo, ...(feeUtxo ? [feeUtxo] : [])];
 
@@ -1653,8 +1659,8 @@ export async function unlockBshardRefund(args) {
   const w = cmd.witness;
   const rpc = await connectRpc(networkId);
   try {
-    const poolUtxo = await _matchUtxo(rpc, cmd.inputs.pool.address, cmd.inputs.pool.outpointTxid);     // input 地址 builder 供
-    const ticketUtxo = await _matchUtxo(rpc, cmd.inputs.ticket.address, cmd.inputs.ticket.outpointTxid);
+    const poolUtxo = await _matchUtxo(rpc, _addressFromRedeem(cmd.inputs.pool.redeem_hex, networkId), cmd.inputs.pool.outpointTxid);   // P2SH 地址 = hash(redeem)
+    const ticketUtxo = await _matchUtxo(rpc, _addressFromRedeem(cmd.inputs.ticket.redeem_hex, networkId), cmd.inputs.ticket.outpointTxid);
     const matched = [poolUtxo, ticketUtxo];
 
     const newPoolAddr = _continuationAddress(cmd.inputs.pool.redeem_hex, _serializePoolStateHex(cmd.outputs.pool_continuation.state), networkId);
