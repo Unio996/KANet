@@ -31,8 +31,11 @@ function chunkComputeMass(nWinners, nFixedOut, hasChange) {
 }
 
 // Does a set of outputs fit one TX under all caps?
-function fits(inputVals, outVals, nWinners, nFixedOut, hasChange) {
-  if (nWinners > MAX_WINNERS_PER_CHUNK) return false;            // ctor for-loop bound
+// applyKCap: settle_chunk has a per-winner merkle-climb for-loop (compile-time bound = MAX_WINNERS_PER_CHUNK);
+//   settle_aggregate (NWT obs, SS L230-477 verified no for-loop) pays winners as committee-SIGHASH-attested
+//   outputs with NO per-winner climb → aggregate capacity is MASS-ONLY (no 47 cap). aggregate route passes false.
+function fits(inputVals, outVals, nWinners, nFixedOut, hasChange, applyKCap = true) {
+  if (applyKCap && nWinners > MAX_WINNERS_PER_CHUNK) return false;  // settle_chunk for-loop bound only
   if (estimateStorageMass(inputVals, outVals) > STORAGE_SAFE) return false;
   const cm = chunkComputeMass(nWinners, nFixedOut, hasChange);
   return cm.compute <= COMPUTE_CAP && cm.transient <= TRANSIENT_CAP;
@@ -50,7 +53,7 @@ export function computeSettleChunks(winners, fixedOutputs, poolValue, payoutRoot
   const fixedVals = fixedOutputs.map(o => o.value);
   // ── route check: does ONE aggregate TX fit (broker+5oracle+ALL winners, NO change)? ──
   const aggOut = [...fixedVals, ...winners.map(w => w.amount)];
-  if (fits([poolValue], aggOut, n, fixedOutputs.length, false)) {
+  if (fits([poolValue], aggOut, n, fixedOutputs.length, false, /*applyKCap=*/false)) {  // aggregate = mass-only, no 47 cap (NWT obs)
     return { route: 'aggregate', numChunks: 1, payoutRoot: payoutRootHex,
       chunks: [{ kind: 'aggregate', seg_lo: 0, seg_hi: n, winners, change: 0 }] };
   }
@@ -102,6 +105,11 @@ function runTests() {
   const fixed = [broker, ...oracles];
   const small = Array.from({ length: 20 }, (_, i) => ({ pk: (i + 16).toString(16).padStart(2, '0').repeat(32), amount: 1e8 }));
   const rs = computeSettleChunks(small, fixed, 1e11, 'aa'.repeat(32));
+
+  // NWT obs regression: 60 winners @ 10 KAS (mass-fits, but >47) → AGGREGATE (no per-winner for-loop in settle_aggregate)
+  const hp = Array.from({ length: 60 }, (_, i) => ({ pk: ((i % 250) + 1).toString(16).padStart(2, '0').repeat(32), amount: 1e9 }));
+  const rhp = computeSettleChunks(hp, fixed, 700e8, 'cc'.repeat(32));
+  T('60-winner @10KAS (>47, mass-fits) → aggregate (no 47-cap on agg, NWT obs)', rhp.route === 'aggregate');
   T('20-winner @1KAS → aggregate', rs.route === 'aggregate' && rs.numChunks === 1);
 
   // big market → chunk chain (200 winners @1KAS)
