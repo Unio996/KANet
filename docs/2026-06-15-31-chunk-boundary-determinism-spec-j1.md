@@ -258,6 +258,11 @@ VRF 同源). 🔴 **EDGE**: L1529 `if(!snap||!comm) return fill(0n)` + L1535 per
   → **HALT/abort 不 settle**, 禁静默 uniform degrade. 缺数据宁等快照传播齐 (NO-TX-NO-STATE).
   - ⚠ **liveness caveat (Bettor)**: fail-closed HALT 须**不致永久 stuck** — snapshot 永不传播则靠**既有 quorum-timeout-refund
     兜底**(超时→cancel-refund 全员退款). 即 safety(防 fork)**不以 liveness(卡死无解)为代价**: HALT 是临时等快照, 超时则 refund.
+  - 🔑 **fail-closed 决策必链锚 (NWT crux, 否则 fail-closed 本身 node-local 非确定)**: "HALT-等 vs refund" 判定必锚
+    **链上 pool root**(snapshot merkle-rooted 进 pool root, 两节点同), **非 `SELECT FROM pool_snapshots` 行在不在**
+    (= node-local ingest 态, 会不对称). ∴ 分: **链上 pool root commit snapshot 却本地未 ingest → HALT 等 ingest**(snapshot 存在);
+    **链上 pool root 也无 snapshot → refund**(genuinely 无 committee). 既有 refund_maker_unjoined timeout 用链锚 DAA
+    (`tx.time>=(deadline+grace)*1000`, 链 time 非 wall-clock) → HALT→refund transition 两节点同点触发, 兜底不成新 fork 源 (NWT backstop-race).
 - **fix-2 Phase A-cross 第 3 assert**: 不止 ctor16-P2SH+payoutRoot, 加 **committee output 值逐个 byte-equal 跨节点**
   (= pool_snapshots+pool_committee 两节点 present 且 byte-equal, 非一边 0n-degrade).
 - **de-risk (KANet-UI)**: e2e equal-stake committee → uniform==stake-weighted 恰免疫 (但只 happy 路; **adversarial fixture
