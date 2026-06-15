@@ -1,0 +1,32 @@
+// PoolSide_v08_shard.sil — bshard M3 dust spent-once 票 (J1, 2026-06-15 rework).
+//
+// M3 重设计: PoolSide 从"持 stake-funds 的 per-bettor custody"退化成 **dust spent-once 票**(不再持注金; 注金真存进
+//   PoolShard_fold leaf-pool 经 fold 上行到 root market-pool)。本票只剩两职:
+//   ① **spent-once 防双领/双退**: claim/refund 时此票被消费(UTXO 花掉)→ 同 bettor 不可既 claim 又 refund、不可重复 claim。
+//   ② **身份+额记录**: State{bettorPk, direction, stake, shardPoolId} 供 PoolShard_fold 的 claim_draw/refund_draw
+//      readInputStateWithTemplate 读取(merkle leaf 用 bettorPk; refund 退 stake; shardPoolId 定位本 pool; direction 验赢向)。
+// custody 的 parallel-claim 收益 void(finding-5 串行强制), 但 spent-once O(1) 收益真→保留 dust 票比丢它(root O(N) bitmap/
+//   ordered-claim 活性险)更净(J1+J2+NWT 共识)。State 4 字段逐字对齐 PoolShard_fold.PoolSideTicket(template byte-match)。
+
+pragma silverscript ^0.1.0;
+
+contract PoolSide_v08_shard(
+    byte[32] init_bettorPk,
+    int      init_direction,        // 0=YES 1=NO
+    int      init_stake,            // 本注额 (refund 凭此退本金; claim merkle leaf 含此)
+    byte[32] init_shardPoolId       // 本 shard pool 身份 (= PoolShard_fold.shard_pool_id)
+) {
+    // —— 显式 State (4 字段; PoolShard_fold validateOutputStateWithTemplate/readInputStateWithTemplate 绑此布局) ——
+    byte[32] bettorPk = init_bettorPk;
+    int      direction = init_direction;
+    int      stake = init_stake;
+    byte[32] shardPoolId = init_shardPoolId;
+
+    // —— entry: authorize_spend (bettor 授权消费此票 = 触发 claim/refund 时的 spent-once 闸) ——
+    //   实际 payout/refund 金额逻辑在 PoolShard_fold.claim_draw/refund_draw(它 readInputStateWithTemplate 读本票 State)。
+    //   本票被花 = spent-once: 同票不可二次用(UTXO model) → claim XOR refund、防重复领。
+    //   payout 去 bettorPk(P2PK, claim_draw 焊), 故任谁触发都付给本人; 但要本人 sig 授权(防误花/非自愿)。
+    entrypoint function authorize_spend(sig bettorSig) {
+        require(checkSig(bettorSig, pubkey(bettorPk)));
+    }
+}

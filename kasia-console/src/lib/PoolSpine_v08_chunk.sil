@@ -1,0 +1,333 @@
+// PoolSpine_v08_chunk (#31 two-P2SH CHUNK version, J1 SS-域裁 2026-06-15) — settle_chunk + dispute + refund.
+// = PoolSpine_v08_chunk.sil.draft 去 settle_aggregate (两-P2SH-by-route: 大池 >MAX_K 锁此 version; 小池走 PoolSpine_v08_agg).
+// settle_chunk=entry0/OP_0 不变 (J2 ④b relay selector 无需改); dispute=entry1/OP_1, refund=entry2/OP_2.
+// redeem size ∝ ctor maxWinnersPerChunk (for-loop unroll bound): maxK=5→~3.9KB. settle_aggregate 逐字未改, 仅移出.
+//
+// PoolSpine_v08_chunk — #31 找零核弹 settle_chunk SS 草稿 (J1 §3 spine-remainder, seed J2 mass + NWT PoC).
+//
+// 性质: DRAFT (.sil.draft, 非编译路). gate B #31 = winner 超 KIP-9 mass cap → settle 拆多 chunk TX. 本草稿 =
+//   chunk-capable spine 新版本的 settle_chunk entry (partial-settle + change 续锁 spine = trustless 找零链).
+//
+// ⚠ 地址迁移决策 (Bettor reviewer 铁律 + J1 拍 (a) + NWT (b)-分析坐实): settle_chunk **必新合约版本 PoolSpine_v08**
+//   (新 redeem → 新 P2SH 地址), **只新市场用**. 现存 v07 市场保留 settle_aggregate 单 TX 不动 (P2SH=hash(全 spend
+//   逻辑); 加 entry 改 hash 改地址 → 现存 v07 锁旧地址花不了 = 不可 retrofit). v07 大市场超 cap 走现 cancel-refund
+//   (非回归). 匹配 v06→v07 "新 contract=新 P2SH=inherently distinct" precedent.
+//
+// J2 change-chain TX layout (我接):
+//   chunk_0 : in=[pool-lock spine UTXO]          out=[broker, oracle_0..4(5 committee bond), winner_0..K0-1, change_0]
+//   chunk_i : in=[chunk_{i-1} 的 change spine UTXO] out=[winner_{...}..., change_i]            (0<i<n; broker/committee 只 chunk_0 付一次)
+//   chunk_n : in=[chunk_{n-1} change]             out=[winner_{...}...末段]                     (末 chunk, 无 change, change==0)
+//
+// 4 SS 校验点 (J2 r-msg): ①committee sig ≥4 ②winner outputs match merkle-proven bettor(merkle_index 连续子段)
+//   ③非末 chunk: output[change_idx] 续锁同 spine-P2SH(下 chunk 可花) ④守恒 Σ(本 chunk outputs)+fee+change==本 chunk 输入.
+//
+// ⚠⚠ 执行 mass 关键设计杠杆 (Bettor: compute-mass 含 script EXECUTION sig-ops+introspection; 真 chunk 数 = f(每 chunk
+//   执行 mass)): 每 chunk 花一个 spine-P2SH 输入 → redeem 执行 5×checkSig + merkle-climb + introspection = 重执行 mass
+//   → 每 chunk 容 winner 少 → 真 chunk 数 >> 23 (cheap-P2PK 估). **两设计选 (待 J2 mass 实测 + NWT PoC 裁)**:
+//   (A) per-chunk full committee-sig: 每 chunk 独立 5×checkSig(≥4)+本段 merkle. 安全-简单, 但每 chunk 重 sig-ops →
+//       chunk 数最多.
+//   (B) once-sig + covenant-chain: chunk_0 full committee-sig 授权【全 settle plan(全 winner 列+chunk 划分 commit)】;
+//       chunk_i(i>0) 仅 introspection 验【续自合法 settle_chunk cov + 本段 outputs ∈ chunk_0 已签 plan】(OpInputCovenantId
+//       续锁链, 轻于 5×checkSig) → 中间 chunk 执行 mass 大降 → chunk 容量大 → 真 chunk 数少 → broadcast 负载小.
+//   J1 荐 (B)(中间 chunk 省 sig-ops 是真容量杠杆), 但 (B) 需 chunk_0 committee-sig commit 全 plan(plan_commit_id) +
+//   chunk_i 验 plan 成员 = 多一层 SS. 本草稿先写 (A)(secure-简单基线, J2 量执行 mass 上界); (B) 优化待量后定.
+
+pragma silverscript ^0.1.0;
+
+contract PoolSpine_v08_chunk(
+    // —— 继承 v07 ctor 锚 (同值 → 同 logical market; v08 = 新脚本新 P2SH) ——
+    byte[32] makerPk,
+    byte[32] brokerPk,
+    byte[32] poolMerkleRoot,
+    int      deadline,
+    byte[32] marketMetadataHash,
+    byte[32] market_id,
+    int      shard_id,
+    int      shard_count,
+    int      oracleBondAmount,
+    // —— v08 chunk 新增 ——
+    int      maxWinnersPerChunk,  // = MAX_K (J2 computeSettleChunks 实测定, 本 chunk merkle-proof 循环编译期界)
+    int      init_hwm,            // change UTXO genesis HWM (chunk_0 输出 change 起; pool-lock 隐含 hwm==0)
+    byte[32] init_plan_commit,    // change UTXO genesis plan_commit (chunk_0 由 committee-sig commit, chunk_i 续读)
+    int      init_total_winners,  // change UTXO genesis 总 winner 数 (chunk_0 commit; chunk_i 续读 → 绑 chunk_kind==last)
+    int      maxChunkFee,         // ⑦ over-fee 上界常量 (部署 = V07_MAX_FEE=1e8 单源, pool-market-settler.js L2291; 非 witness 两节点同)
+    // —— v07-anchor 补 (settle_aggregate 小池单TX + refund_maker_unjoined 引用; v08 ctor 须含, 否则 verbatim paste = undefined-ref) ——
+    int      makerStakeAmount,    // settle_aggregate min-bet(≥1e8)/dust + refund output 范围 [stake-MAX_FEE, stake-MIN_FEE]
+    int      minerFee             // settle_aggregate fee sanity (L284-285: >0 且 <1e8)
+) {
+    // —— 可变 state (change UTXO 携值, 下 chunk readInputState 读 — J2 compile fix: readInputState 须 contract state 字段) ——
+    // ★ B 设计三 state 字段 (NWT no-free-witness 不变量: chunk_i 所有 security-critical 从 state 读非 free-witness):
+    //   hwm = 已付到的 merkle_index (cross-chunk linkage seg_lo==prev.hwm + resume cursor).
+    //   planCommit = **payoutRoot** (depth-8 blake2b merkle of leaf_k=blake2b(winner pk‖amount[8B LE])) = committee-attested
+    //     winner 付款 plan (chunk_0 由 5×committee-sig sighash commit; chunk_i 续读 → winner identity+amount merkle-proven
+    //     against 它, 零 free-witness). 注: brokerFee/bonds 只 chunk_0(sig-attest 守恒求和); feeCeiling=ctor maxChunkFee
+    //     (非 planCommit); winner方向 由 payoutRoot subsume (只 winning side 进 leaf 集) → 均不在 planCommit (NWT 校准).
+    //   totalWinners = 总 winner 数 (绑 ⑤ chunk_kind: last ⟺ seg_hi==totalWinners, 防早 claim last 跳未付, NWT 攻面).
+    int hwm = init_hwm;
+    byte[32] planCommit = init_plan_commit;
+    int totalWinners = init_total_winners;
+
+    // —— entry 0 — settle_chunk (partial-settle + change 续锁; chunk_0/chunk_i/chunk_n 经参数区分) ——
+    // 复用 settle_aggregate 的 committee-sig(≥4)+depth-8 merkle proof 机制 (本草稿引其逻辑, 不重抄~150 行).
+    // 新增: (a) winner 子段 (merkle_index [seg_lo, seg_hi) 连续) 而非全 winner; (b) change 输出续锁 spine-P2SH;
+    //       (c) 守恒到本 chunk 输入 (非全 pool); (d) chunk_kind ∈ {first(付 broker+committee), mid, last(无 change)}.
+    entrypoint function settle_chunk(
+        // —— committee 授权 (设计 A: 每 chunk full sig; 复用 settle_aggregate ①②③ 逻辑) ——
+        sig c0Sig, sig c1Sig, sig c2Sig, sig c3Sig, sig c4Sig,
+        byte[32] c0Pk, byte[32] c1Pk, byte[32] c2Pk, byte[32] c3Pk, byte[32] c4Pk,
+        byte[32] committeePkHash,
+        int      winner,                 // 0=YES 1=NO
+        // —— plan 绑定 (chunk_0 用: committee-sig sighash 覆盖这俩 → committee-attested; chunk_i 不用这俩, 从 state 读) ——
+        byte[32] plan_commit_arg,        // chunk_0 的 planCommit (blake2b 全 plan); chunk_i 走 state.planCommit 忽略此
+        int      total_winners_arg,      // chunk_0 的总 winner 数; chunk_i 走 state.totalWinners 忽略此
+        // —— ⑦ min-pot global (chunk_0 committee-sighash 覆盖→attested; 仅 chunk_0 检=global 性质验一次. ⑦b/⑨ subsumed 不带) ——
+        int      globalYesTotal_sompi,   // 跨 shard YES 池总 (chunk_0 ⑦ min-pot defense-in-depth, 团队裁 2026-06-15)
+        int      globalNoTotal_sompi,    // 跨 shard NO 池总
+        // —— chunk 定位 (链锚, 两节点同 → byte-equal partition) ——
+        int      chunk_kind,             // 0=first, 1=mid, 2=last
+        int      seg_lo,                 // 本 chunk winner 子段起 (merkle_index, inclusive)
+        int      seg_hi,                 // 本 chunk winner 子段止 (exclusive); 段= [seg_lo, seg_hi)
+        // —— change 续锁 (非末 chunk; change index 确定=wOutBase+segLen 派生, 非 free param[(c) 防指错位]; validateOutputState
+        //    验 output 续【本 covenant 自身 cov_id】非 witness hash; 原 change_idx free param 删) ——
+        // ⚠ Bettor CRITICAL fix: 原 `byte[32] spine_p2sh_hash` witness 参数已删 (spender 自填 tautology 偷余额破口);
+        //    正解 validateOutputState 续【OpInputCovenantId 本 covenant 自身身份】非自由 witness hash (同 #26 bshard cov 续链).
+        // —— winner-subset merkle 证 (本段 [seg_lo,seg_hi) 每 winner; merkle-path 是唯一许的 free-witness: 自暴 against
+        //    committed poolMerkleRoot, 篡改即 merkle fail) ——
+        byte[32][] winnerPks,            // 本段 winner pubkey (k=0..segLen-1; merkle_index = seg_lo+k 派生非 free)
+        int[]      winnerAmounts,        // 本段 winner payout 金额 sompi (leaf=blake2b(pk‖amount[8B LE]) → merkle 证 amount)
+        byte[32][] winnerSiblings        // 本段 merkle siblings 扁平 (winnerSiblings[k*8+lvl] = winner k 第 lvl 层兄弟, depth-8)
+        // (winner payout amount + tx-output 位 verify against planCommit 待续填; 本增量先填 merkle-climb 让 J2 量 per-winner mass)
+    ) {
+        require(chunk_kind >= 0); require(chunk_kind <= 2);
+        require(winner == 0 || winner == 1);
+
+        // ① B 授权分支 (B-safety 不变量: chunk_i 无 sig, 授权经 planCommit state 链锚传递, 非 free-witness):
+        //   设计 B (J2+J1+NWT+Bettor 裁): 仅 chunk_0 验 5×committee-sig (省中间 chunk sig-ops = 真容量杠杆,
+        //   缓 J2 880 broadcast). chunk_i (kind!=0) 无 sig — 续自合法 settle_chunk cov (validateOutputState/cov_id
+        //   provenance) + planCommit 从 input change state 读 (②b 块) → 7项 verify against state.planCommit.
+        if (chunk_kind == 0) {
+            // —— chunk_0: full committee-sig ≥4 (4-of-5 阈值, 同 settle_aggregate ①) + committee commitment ——
+            int validSigs = 0;
+            if (checkSig(c0Sig, pubkey(c0Pk))) { validSigs = validSigs + 1; }
+            if (checkSig(c1Sig, pubkey(c1Pk))) { validSigs = validSigs + 1; }
+            if (checkSig(c2Sig, pubkey(c2Pk))) { validSigs = validSigs + 1; }
+            if (checkSig(c3Sig, pubkey(c3Pk))) { validSigs = validSigs + 1; }
+            if (checkSig(c4Sig, pubkey(c4Pk))) { validSigs = validSigs + 1; }
+            require(validSigs >= 4);
+            // committee commitment (绑 dispute_reveal, 同 settle_aggregate ②).
+            byte[] cc0 = c0Pk + c1Pk; byte[] cc1 = cc0 + c2Pk; byte[] cc2 = cc1 + c3Pk; byte[] cc3 = cc2 + c4Pk;
+            require(blake2b(cc3) == committeePkHash);
+            // ★ broker(out0)+committee(out1-5) 显式 P2PK+floor 验 (Bettor 发现, J1 终裁 ADD, NWT 决定性论点 + J2 认 ④核 miss):
+            //   闭 settle_chunk chunk_0 比 v07 弱的回归. 此前 broker/committee 仅靠 ①committee sighash + ④守恒 + (d)output-count
+            //   — 但 sighash 只证"committee 同意了此 TX", 恶意 4-of-5 可同意一个 broker 付自己/超付自身 bond 的 TX (它们签了=sig 过).
+            //   只有显式 require(out==P2PK(broker/ci)+floor) 才挡恶意 committee 改址/值 (v07 settle_aggregate L395-417 同款防护).
+            //   恶意 4-of-5 威胁面: 不仅铸假 winner(documented), 此前还能挪 broker fee+超付 committee bond → 显式检收口回 v07-equivalent.
+            byte[34] brokerLock0 = new ScriptPubKeyP2PK(pubkey(brokerPk));
+            require(tx.outputs[0].scriptPubKey == byte[](brokerLock0));
+            require(tx.outputs[0].value >= 1000);                       // broker dust floor (同 settle_aggregate L257)
+            byte[34] oLock0 = new ScriptPubKeyP2PK(pubkey(c0Pk));
+            require(tx.outputs[1].scriptPubKey == byte[](oLock0));
+            require(tx.outputs[1].value >= oracleBondAmount);
+            byte[34] oLock1 = new ScriptPubKeyP2PK(pubkey(c1Pk));
+            require(tx.outputs[2].scriptPubKey == byte[](oLock1));
+            require(tx.outputs[2].value >= oracleBondAmount);
+            byte[34] oLock2 = new ScriptPubKeyP2PK(pubkey(c2Pk));
+            require(tx.outputs[3].scriptPubKey == byte[](oLock2));
+            require(tx.outputs[3].value >= oracleBondAmount);
+            byte[34] oLock3 = new ScriptPubKeyP2PK(pubkey(c3Pk));
+            require(tx.outputs[4].scriptPubKey == byte[](oLock3));
+            require(tx.outputs[4].value >= oracleBondAmount);
+            byte[34] oLock4 = new ScriptPubKeyP2PK(pubkey(c4Pk));
+            require(tx.outputs[5].scriptPubKey == byte[](oLock4));
+            require(tx.outputs[5].value >= oracleBondAmount);
+            // ⑦ min-pot global (defense-in-depth, 团队裁 2026-06-15; ⑦b losing-floor SUBSUMED by 上方 committee per-output
+            //   floor(out1-5 >=oracleBondAmount), ⑨ commit-anchor SUBSUMED by payoutRoot): globalYes+globalNo
+            //   committee-sighash-attested 本 chunk_0 → require total ≥ 100KAS (= settle_aggregate ⑦ 同值 1e10 sompi).
+            //   硬化"chunk-trigger ⟹ 大池"软依赖, 防 thin-pool dust. 仅 chunk_0 检 (global 验一次; chunk_i 无 sig 不验).
+            require(globalYesTotal_sompi >= 0);
+            require(globalNoTotal_sompi >= 0);
+            require(globalYesTotal_sompi + globalNoTotal_sompi >= 10000000000);
+            require(globalYesTotal_sompi < 1000000000000000000);  // 1e18 sanity upper
+            require(globalNoTotal_sompi < 1000000000000000000);
+            // planCommit (= payoutRoot, winner pk‖amount[8B LE] 的 depth-8 merkle root) 经 5×sig sighash 覆盖本
+            // scriptSig args = committee-attested. chunk_0 输出 change.planCommit = 此 (validateOutputState ③).
+            // (NWT plan_commit 攻面: chunk_0 once-sig commit payoutRoot → chunk_i 无 sig 但 winner outputs[pk+amount] 被授权.)
+        }
+        // chunk_i (chunk_kind != 0): 无 committee-sig. planCommit(=payoutRoot) 从 input change state 读,
+        //   一切 security-critical verify against state.planCommit (零 free-witness).
+
+        // ②0 state-read (重排到 merkle-loop 前: (A)-refined climb target = payoutRoot=effPlanCommit, 须先建).
+        //   chunk_0: effPlanCommit=plan_commit_arg(=committee-sign 的 payoutRoot, sighash 覆盖); chunk_i: 从 state 读全字段.
+        int prevHwm = 0;                                  // chunk_0 隐含 (pool-lock 无 state)
+        byte[32] effPlanCommit = plan_commit_arg;         // = payoutRoot (chunk_0 witness committee-signed)
+        int effTotalWinners = total_winners_arg;
+        if (chunk_kind != 0) {
+            { hwm: int inHwm, planCommit: byte[32] inPC, totalWinners: int inTW } = readInputState(this.activeInputIndex);
+            prevHwm = inHwm; effPlanCommit = inPC; effTotalWinners = inTW;   // chunk_i: 全从 state 读 (零 free-witness)
+        }
+
+        // ② winner 子段 (A)-refined: 每 winner merkle-proven against **payoutRoot(=effPlanCommit)**(REPLACE poolMerkleRoot;
+        //    leaf=blake2b(pk‖amount) → 一 climb 同证 pk 身份+payout 金额; v07-equivalent trust=committee-sign payoutRoot).
+        //    连续子段 (seg 由 computeSettleChunks merkle_index ASC 贪心定, 链锚 → 两节点同段 → byte-equal).
+        require(seg_lo >= 0); require(seg_hi > seg_lo);
+        require(seg_hi - seg_lo <= maxWinnersPerChunk);   // 段长 ≤ MAX_K (mass cap 派生)
+
+        // ②a winner-subset merkle-climb loop (per winner in [seg_lo,seg_hi); = J2 量 per-winner mass → 真 MAX_K 驱动).
+        //    每 winner merkle_index = seg_lo+k (连续段派生, 非 free-witness) → depth-8 position-aware climb against
+        //    ctor poolMerkleRoot (复用 settle_aggregate ③). merkle-path 是唯一许的 free-witness (篡改即 fail=自暴).
+        int segLen = seg_hi - seg_lo;
+        // winner output 基址: chunk_0 前 6 输出=broker+5 committee bond, winner 从 idx 6 起; chunk_i winner 从 idx 0 起.
+        int wOutBase = 0;
+        if (chunk_kind == 0) { wOutBase = 6; }
+        int changeIdx = wOutBase + segLen;                // (c) change 确定 index = winner 段后 (非 free param, ③+④ 共用)
+        for (k, 0, segLen, maxWinnersPerChunk) {
+            int widx = seg_lo + k;                         // merkle_index 连续派生 (链锚, 非 free-witness)
+            require(widx >= 0); require(widx < 256);       // depth-8 → 256 叶
+            // (A)-refined 叶 = blake2b(pk ‖ payout amount[8B LE sompi]) → 一 climb 同证身份+金额 (J2: i64 防 bet×ratio 溢出, 强制 store-payout).
+            byte[32] cur = blake2b(byte[](winnerPks[k]) + byte[](winnerAmounts[k], 8));
+            int b0 = widx % 2;
+            if (b0 == 0) { cur = blake2b(byte[](cur) + byte[](winnerSiblings[k*8+0])); } else { cur = blake2b(byte[](winnerSiblings[k*8+0]) + byte[](cur)); }
+            int b1 = (widx / 2) % 2;
+            if (b1 == 0) { cur = blake2b(byte[](cur) + byte[](winnerSiblings[k*8+1])); } else { cur = blake2b(byte[](winnerSiblings[k*8+1]) + byte[](cur)); }
+            int b2 = (widx / 4) % 2;
+            if (b2 == 0) { cur = blake2b(byte[](cur) + byte[](winnerSiblings[k*8+2])); } else { cur = blake2b(byte[](winnerSiblings[k*8+2]) + byte[](cur)); }
+            int b3 = (widx / 8) % 2;
+            if (b3 == 0) { cur = blake2b(byte[](cur) + byte[](winnerSiblings[k*8+3])); } else { cur = blake2b(byte[](winnerSiblings[k*8+3]) + byte[](cur)); }
+            int b4 = (widx / 16) % 2;
+            if (b4 == 0) { cur = blake2b(byte[](cur) + byte[](winnerSiblings[k*8+4])); } else { cur = blake2b(byte[](winnerSiblings[k*8+4]) + byte[](cur)); }
+            int b5 = (widx / 32) % 2;
+            if (b5 == 0) { cur = blake2b(byte[](cur) + byte[](winnerSiblings[k*8+5])); } else { cur = blake2b(byte[](winnerSiblings[k*8+5]) + byte[](cur)); }
+            int b6 = (widx / 64) % 2;
+            if (b6 == 0) { cur = blake2b(byte[](cur) + byte[](winnerSiblings[k*8+6])); } else { cur = blake2b(byte[](winnerSiblings[k*8+6]) + byte[](cur)); }
+            int b7 = (widx / 128) % 2;
+            if (b7 == 0) { cur = blake2b(byte[](cur) + byte[](winnerSiblings[k*8+7])); } else { cur = blake2b(byte[](winnerSiblings[k*8+7]) + byte[](cur)); }
+            require(cur == effPlanCommit);                 // ★ (A)-refined: leaf(pk‖amount) merkle-proven against payoutRoot
+                                                           //   (=effPlanCommit, committee-sign) → 同证身份+金额, v07-equiv trust.
+            // ★★ recipient 绑定 (NWT/Bettor 🔴 承重墙·最关键一行): winner k 输出必付【实 winner pk-derive 地址】.
+            //    J2 compile fix: p2pk() 不存在 → 正解 new ScriptPubKeyP2PK(pubkey(...)) (TUTORIAL.md L972-978, byte[34]).
+            //    NWT heads-up (verify-not-assume): 用中间变量形 (文档 L977-8 + v07 _ps7.sil L255-6 同款), 非未验的 inline 形.
+            byte[34] expWinnerSPK = new ScriptPubKeyP2PK(pubkey(winnerPks[k]));
+            require(tx.outputs[wOutBase + k].scriptPubKey == byte[](expWinnerSPK));   // byte[] cast (J2: scriptPubKey 是 byte[]动态 vs byte[34]固定不可比; v07 _ps7.sil L256 同款 cast)
+            // ★★ amount 绑定 ((A)-refined): winner k 输出金额必 == merkle-proven 的 payout amount (含 off-chain 算好的 dust).
+            require(tx.outputs[wOutBase + k].value == winnerAmounts[k]);
+        }
+
+        // ②b cross-chunk linkage HWM (NWT 核心攻面 + J2 解, 防 winner skip/repeat overlap/gap): change UTXO 携 hwm state
+        //    (= 下个待付 merkle_index). state-read 已上移 ②0(prevHwm/effPlanCommit/effTotalWinners 已建). 此处硬验链式连续:
+        //    chunk_0: pool-lock 无 state → prevHwm==0, seg_lo 必==0; chunk_i: seg_lo == 上个 change.hwm (readInputState).
+        require(seg_lo == prevHwm);                        // ★ 链式连续: 本段起 == 上段止 (无 overlap 无 gap; hwm 链锚续延)
+
+        // ⑤ chunk_kind 硬验绑定 (NWT 攻面: chunk_kind 非 free-witness, 防早 claim last 跳未付 / 谎 mid 跳 broker):
+        require((chunk_kind == 0) == (seg_lo == 0));                 // first ⟺ 首段 (seg_lo==0, 付 broker+committee 一次)
+        require((chunk_kind == 2) == (seg_hi == effTotalWinners));   // last ⟺ 全付完 (seg_hi==总 winner 数, 防早 claim last)
+        // mid (==1) = 非 first 非 last (上两条排除): seg_lo>0 && seg_hi<totalWinners.
+
+        // ③ change 续锁本 covenant + hwm state 续延 (非末 chunk; trustless 核心: 未付余额仍 SS-governed + 链式连续).
+        //    validateOutputState(change_idx,{hwm}) 编译期 lower 为续【OpInputCovenantId(activeInputIndex)=本 covenant
+        //    自身链上身份】+ 写 hwm state → change 只能被下个 settle_chunk(同 cov)花, settler 挪不走 (Bettor 🔴 修:
+        //    非 witness spine_p2sh_hash, 那是 spender 自填 tautology = 偷余额破口).
+        if (chunk_kind != 2) {
+            // 非末 chunk: change 续锁本 covenant (cov_id 自验) + 携全 state {hwm=seg_hi, planCommit, totalWinners} 续延
+            //   (planCommit/totalWinners 跨 chunk 不变 = 续传同一 committee-attested plan; hwm 链式递进).
+            require(tx.outputs[changeIdx].value > 0);                          // change>0 (非末 → 还有未付 winner)
+            validateOutputState(changeIdx, { hwm: seg_hi, planCommit: effPlanCommit, totalWinners: effTotalWinners });
+        }
+        // 末 chunk (chunk_kind==2): seg_hi == 总 winner 数 (全付完, 由守恒④ change==0 蕴含); 无 change 输出 (hwm 链终).
+
+        // ④守恒 (J2 6 查, 含关键 output-count bound 防 steal-output) + ⑦fee:
+        //   ⚠ 纯 Σoutputs+minerFee==input 是 consensus-free 白给(共识已保证), **不防 steal-output**: settler 可造
+        //   winners(绑)+change(短付)+额外偷币 output, Σ 仍成立. **正解 = (d) output-count bound**: 输出数必 ==
+        //   预期(winners + chunk_0:broker+5committee + 非末:1 change), 无额外 output = 偷币 output 进不来.
+        //   change index 确定 = wOutBase+segLen (winner 段后第一个), 非 free param (防 settler 指错位).
+        // (d) ★output-count bound (J2/NWT keystone 关键缺的牙齿): 输出数 == wOutBase + segLen + (非末? 1 change : 0). 防额外 steal-output.
+        int expectedOutCount = wOutBase + segLen;
+        if (chunk_kind != 2) { expectedOutCount = expectedOutCount + 1; }   // 非末: +1 change
+        require(tx.outputs.length == expectedOutCount);
+        // ⑦fee bound: chunkMinerFee = input − Σoutputs ≤ maxChunkFee (=V07_MAX_FEE 单源 ctor; chunk_i 无 sig 防 over-fee 短付).
+        //   Σoutputs = Σ winner(amount 绑) + chunk_0:broker+5committee(sighash attest) + 非末:change. (d)保证无额外 output.
+        int sumOut = 0;
+        for (k, 0, segLen, maxWinnersPerChunk) {
+            sumOut = sumOut + tx.outputs[wOutBase + k].value;   // Σ winner outputs (amount 已 amount-verify 绑)
+        }
+        if (chunk_kind == 0) {
+            sumOut = sumOut + tx.outputs[0].value + tx.outputs[1].value + tx.outputs[2].value
+                            + tx.outputs[3].value + tx.outputs[4].value + tx.outputs[5].value;   // broker+5committee
+        }
+        if (chunk_kind != 2) {
+            sumOut = sumOut + tx.outputs[changeIdx].value;      // 非末: + change (确定 index)
+        }
+        int chunkMinerFee = tx.inputs[0].value - sumOut;        // 本 chunk 实际 miner fee (≠ ctor minerFee[v07 nominal sanity], 防 ctor-param 重名 collision)
+        require(chunkMinerFee >= 0);                             // 零 mint (consensus 白给, 留作显式)
+        require(chunkMinerFee <= maxChunkFee);                  // ⑦ over-fee 防护 (=V07_MAX_FEE 单源 ctor)
+
+        // ⚠ min-pot/losing-floor/commit-anchor — SUBSUMPTION 分析 (Bettor 08:39 实读 catch + NWT subsumption + J1 自核,
+        //   修正旧 draft 误导注释 "复用 settle_aggregate ⑦/⑦b/⑨ chunk_0 验即可" = aspirational/false, 本 entry 无 global params):
+        //   • ⑦b losing-side-floor → **SUBSUMED**: chunk_0 上方 broker/committee per-output 显式 floor (out1-5 value>=oracleBondAmount)
+        //     已挡 committee-bond dust = ⑦b 实质. 再加 = 冗余 bloat redeem.
+        //   • ⑨ commit-anchor → **SUBSUMED**: payoutRoot (committee-attested via chunk_0 sig, 编码 final payouts) 已绑 plan.
+        //     再加 = 冗余.
+        //   • ⑦ min-pot (totalPool≥100KAS) → **唯一实缺口, 但软-covered**: chunk-trigger(>47 winner @1KAS min-bet ⟹ 池>>100KAS)
+        //     + off-chain computePoolPayouts dust-handling (amounts pre-dust-absorbed, SS 验已 dust-safe 的 committed amounts).
+        //     **非 SS-hard-enforced**. 团队裁 (2026-06-15): demo-defer+doc 软依赖 (feasibility: 不 bloat redeem + 不触 ④b) VS
+        //     chunk_0 加显式 ⑦ (only globalYes+globalNo + require≥1e10, +~0.3KB, 触 J2 ④b 供 params). 补则在此 chunk_0 分支加.
+    }
+
+    // entry 1 — dispute_reveal: triggered when a settle outcome is disputed. Each committee
+    // member's individual sig over disputeOutcomeHash is required (unanimous t=5 here, since
+    // dispute mode is about establishing individual accountability for slashing).
+    entrypoint function dispute_reveal(
+        byte[32]  committeePkHash,
+        byte[32]  disputeOutcomeHash,
+        byte[32]  c0Pk, byte[32] c1Pk, byte[32] c2Pk, byte[32] c3Pk, byte[32] c4Pk,
+        sig       c0Sig, sig c1Sig, sig c2Sig, sig c3Sig, sig c4Sig
+    ) {
+        byte[] dConcat0 = c0Pk + c1Pk;
+        byte[] dConcat1 = dConcat0 + c2Pk;
+        byte[] dConcat2 = dConcat1 + c3Pk;
+        byte[] dConcat3 = dConcat2 + c4Pk;
+        byte[32] dHash  = blake2b(dConcat3);
+        require(dHash == committeePkHash);
+
+        require(checkSig(c0Sig, pubkey(c0Pk)));
+        require(checkSig(c1Sig, pubkey(c1Pk)));
+        require(checkSig(c2Sig, pubkey(c2Pk)));
+        require(checkSig(c3Sig, pubkey(c3Pk)));
+        require(checkSig(c4Sig, pubkey(c4Pk)));
+
+        require(tx.inputs.length >= 1);
+        require(tx.outputs.length >= 1);
+    }
+
+    // entry 2 — refund_maker_unjoined (v0.7 红线 8/9 Bettor G6批2): maker recovers stake if
+    // no bettor joined. Fee NOT hardcoded — settler picks fee dynamically based on real TX
+    // mass (= KIP-9 mass × mempool floor rate). SS守上下限防 maker 被宰 + cover 最坏 mass.
+    //
+    // qlfpv 教训 (2026-06-01): hardcoded minerFee=50000 < real mass-fee 442000 → mempool reject →
+    // 100 KAS effectively bricked. v0.7 fix: output 范围 [makerStake-MAX_FEE, makerStake-MIN_FEE]
+    // + inputs >= 1 (allow fee-UTXO append for under-funded refund).
+    //
+    // MIN_FEE = 50,000 sompi (= 0.0005 KAS, current ctor placeholder, settler picks >= this)
+    // MAX_FEE = 100,000,000 sompi (= 1 KAS, defense against maker-rob-self via excessive fee)
+    // FRONT-RUN FIX (Bettor r388/r389 spec, 2026-06-02): name "unjoined" misleading —
+    // SS never verified "no bettor joined". REFUND_GRACE_SEC = 7200 (2h) >= NWT 委员结算 SLA.
+    // Prevents losing maker from front-running settle to spend spine UTXO + brick settle_via_spine.
+    entrypoint function refund_maker_unjoined(sig makerSig) {
+        require(checkSig(makerSig, pubkey(makerPk)));
+        require(tx.time >= (deadline + 7200) * 1000);  // grace 修 (bug 10d Path A ms 模式)
+
+        // v0.7 红线 9: inputs >= 1 (allow fee-UTXO append). Was inputs == 1 in v0.6.
+        require(tx.inputs.length >= 1);
+        require(tx.outputs.length == 1);
+
+        byte[34] makerLock = new ScriptPubKeyP2PK(pubkey(makerPk));
+        require(tx.outputs[0].scriptPubKey == byte[](makerLock));
+
+        // v0.7 红线 8: fee 范围 [MIN_FEE, MAX_FEE] not hardcoded ctor minerFee.
+        // output value = makerStakeAmount - fee, where fee >= 50000 (MIN_FEE) + fee <= 100M (MAX_FEE).
+        // Equivalent: output <= makerStakeAmount - MIN_FEE AND output >= makerStakeAmount - MAX_FEE.
+        require(tx.outputs[0].value <= makerStakeAmount - 50000);
+        require(tx.outputs[0].value >= makerStakeAmount - 100000000);
+        require(tx.outputs[0].value >= 1000);  // dust floor (J2 d649f16)
+    }
+
+}

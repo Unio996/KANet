@@ -143,8 +143,29 @@ chunk settle 回归 (46f8a/xfu62) 仍 PASS.
 
 ## 7. v08 SS-契约 FREEZE (J2 `computeSettleChunks`/settler **照此 code** = 源头防漂; drift-check 权威)
 
-> 来源 = `kasia-console/src/lib/PoolSpine_v08_chunk.sil.draft` @ **f739ab2e** (4-entry COMPILE OK, J2/NWT/Bettor 三验,
-> ctor FREEZE@16 + **chunk_0 broker/committee 显式 P2PK 验** [§7.4 ★, 闭比 v07 弱回归]; SS freeze b367753b→f739ab2e).
+> ### ⚠ 2026-06-15 RESHAPE — 单体 4-entry → TWO-P2SH-BY-ROUTE (J1 SS-域裁; 31KB monolith INFEASIBLE 所致)
+> J2/NWT compile **实测** 单体 4-entry v08 redeem = **31,073/31,120 bytes** (settle_chunk 47w×depth-8 unroll = 28,971B/93% 主凶).
+> 6 spine-input × 31KB = 186KB scriptSig → 炸广播 880 (212 chunk) + 连 8p aggregate on-chain compute >500K cap = **INFEASIBLE**.
+> Kaspa P2SH = monolithic whole-redeem reveal (无 leaf-reveal; selector dispatch). 拆 **按 ROUTE** (非按 entry-type — 拆
+> dispute/refund 仅省 0.7% 无效) 成两 P2SH version, 各自洽 (各含 own settle + dispute + refund, 避 fund-access 破口):
+>
+> | version | 文件 | 入口序 (selector) | redeem | freeze-ref | 验 |
+> |---|---|---|---|---|---|
+> | **agg** (≤MAX_K 小池) | `PoolSpine_v08_agg.sil` | settle_aggregate=**OP_0** / dispute=OP_1 / refund=OP_2 | **2,111B** (J1) / 2,110 (NWT) | **183a97cc** | 2-vantage ✓ + Bettor 审 SOUND |
+> | **chunk** (>MAX_K 大池) | `PoolSpine_v08_chunk.sil` | settle_chunk=**OP_0** / dispute=OP_1 / refund=OP_2 | **4,042B@maxK5** (含 ⑦min-pot) | **9c23a9f2** | 2-vantage(待新)+ Bettor 审 |
+>
+> - **chunk redeem ∝ ctor maxWinnersPerChunk** (for-loop unroll bound, 线性): mw=5→3985(无min-pot)/4042(+⑦); mw=20→14846; mw=47→31120.
+> - **chunk_0 加 ⑦ min-pot** (团队裁 2026-06-15): globalYesTotal+globalNoTotal + require≥1e10. **⑦b losing-floor SUBSUMED** by
+>   chunk_0 committee per-output floor; **⑨ commit-anchor SUBSUMED** by payoutRoot → 不重加 (省 redeem). witness param-order:
+>   globalYes/No 插 pos14-15 (total_winners_arg 后, chunk_kind 前).
+> - **P2SH builders**: `computeSpineP2SH_v08_agg` / `computeSpineP2SH_v08_chunk` (pool-p2sh-v08.mjs, 共享 ctor16). version-选择
+>   必确定 (同 market 两节点同 version=同 P2SH; task#2 reconstruct 守点选对 version 源).
+> - **LEGACY 单体** `.draft` @ f739ab2e (4-entry 31KB) = INFEASIBLE, 仅存 ref/diff. 下方 §7.1-7.7 契约 (ctor16/payoutRoot/
+>   witness/output/HWM/drift-check) 对 **chunk-version 仍逐字成立** (settle_chunk 逻辑零改, 仅移出 settle_aggregate + 加 ⑦).
+
+> 来源(契约逻辑) = `PoolSpine_v08_chunk.sil` (chunk-version) + `PoolSpine_v08_agg.sil` (agg-version). settle_chunk/aggregate/
+> dispute/refund 逐字源自 `.draft` @ f739ab2e (4-entry COMPILE OK, J2/NWT/Bettor 三验), ctor FREEZE@16 + **chunk_0 broker/
+> committee 显式 P2PK 验** [§7.4 ★] + **chunk_0 ⑦ min-pot** [2026-06-15 加].
 > 此节是 §1-4 设计落地后的**实现契约**: §3 旧述 (free `change_idx` / `spine_p2sh_hash` witness
 > introspection) **已被取代** — 实现走 `validateOutputState`(OpInputCovenantId 本 cov 自验) + 确定 `changeIdx`.
 > **J2 出码即 diff 本节 7 项, 任一不符=喊 (我 own SS 契约)。**
@@ -161,7 +182,7 @@ chunk settle 回归 (46f8a/xfu62) 仍 PASS.
 | 6 | shard_id | int | 0..shard_count-1 |
 | 7 | shard_count | int | |
 | 8 | oracleBondAmount | int | committee bond (sompi) |
-| 9 | maxWinnersPerChunk | int | **= MAX_K = 47** (settle_chunk merkle-loop 编译期界 = chunk_i 最大容量) |
+| 9 | maxWinnersPerChunk | int | settle_chunk merkle-loop 编译期界 = **redeem-size lever** (redeem ∝ mw, unroll). **demo = maxK=5** (4042B@chunk; 31KB monolith 不可行所致缩). agg-version 不引用此(unused baked). 两节点同值=同 P2SH |
 | 10 | init_hwm | int | change UTXO genesis HWM (pool-lock 隐含 0) |
 | 11 | init_plan_commit | byte[32] | genesis = **ZERO32** 固定占位 (payoutRoot 创建时未知, 走 chunk_0 plan_commit_arg committee-sign) |
 | 12 | init_total_winners | int | genesis = **0** 固定占位 (真总数走 chunk_0 total_winners_arg) |
