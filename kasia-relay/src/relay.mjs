@@ -330,6 +330,9 @@ if (process.send) {
 
   process.on('message', async (cmd) => {
     try {
+      // bshard M3 (J1 2026-06-15): builder produces `action` (buildXCommand), relay dispatches on `cmd.type`.
+      // Normalize action→type before validate/dispatch (robust to either field; no-op if type already set).
+      if (cmd && !cmd.type && cmd.action) cmd.type = cmd.action;
       // Reject invalid commands loudly (unknown type / missing required field / typeof mismatch).
       const validateResult = validateCommandPayload(cmd);
       if (!validateResult.valid) {
