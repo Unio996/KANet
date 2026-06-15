@@ -62,6 +62,30 @@ export function serializePoolShardState({ local_yes, local_no, count, pool_value
 }
 
 /**
+ * Serialize the PoolLeaf 4-field State to the exact on-chain field-prolog bytes (36B). Route-split (2026-06-15):
+ * PoolLeaf carries only accounts {local_yes, local_no, count, pool_value} — NO outcome fields (closed/winningSide/
+ * payoutRoot live in PoolRoot) → committee-bypass structurally moot for the leaf. state_layout {start:1, len:36}
+ * (J1 PoolLeaf ABI). MUST byte-match relay _serializeLeafStateHex. Encoding: 4×[0x08+i64-LE] = 4×9 = 36B.
+ * @param {object} s { local_yes, local_no, count, pool_value } (int fields accept bigint|number|numeric-string; >= 0)
+ * @returns {Buffer} 36-byte leaf State region
+ */
+export function serializeLeafState({ local_yes, local_no, count, pool_value }) {
+  const ints = { local_yes, local_no, count, pool_value };
+  for (const [k, v] of Object.entries(ints)) {
+    if (v == null) throw new Error(`${k} required`);
+    if (BigInt(v) < 0n) throw new Error(`${k} must be >= 0 (state ints non-negative), got ${v}`);
+  }
+  const out = Buffer.concat([
+    PUSH8, serializeI64(BigInt(local_yes), 8),
+    PUSH8, serializeI64(BigInt(local_no), 8),
+    PUSH8, serializeI64(BigInt(count), 8),
+    PUSH8, serializeI64(BigInt(pool_value), 8),
+  ]);
+  if (out.length !== 36) throw new Error(`pool-leaf state must be 36B (== PoolLeaf state_layout.len), got ${out.length}`);
+  return out;
+}
+
+/**
  * Compute the per-state continuation P2SH script-hash by splicing the new State into the input redeem.
  * new_redeem = redeem[0:start] ‖ serializePoolShardState(newState) ‖ redeem[start+len:] ; scriptHash = blake2b(new_redeem).
  * The relay turns scriptHash → P2SH address (kaspa ScriptPubKeyP2SH). validateOutputState enforces this on-chain,
