@@ -60,6 +60,27 @@ export function computeParimutuelPayouts(winners, poolToSplitSompi, winnerPoolSo
   return payouts;
 }
 
+/**
+ * Σleaf==Σclaimable defense (NWT/Bettor griefing-residual 2026-06-15): a self-funded griefer can register a PoolSide
+ * with the correct per-market template but a WRONG State.spineP2shHash → it bumps the leaf (real stake) but its
+ * claim is unsatisfiable (bricked) → Σleaf > Σclaimable → over-payout if payouts use the raw leaf sum. ROOT fix is
+ * on-chain (register_bet require(PoolSide.spineP2shHash == market spine)); this is the off-chain defense-in-depth:
+ * compute pool totals from ONLY claimable PoolSides (State.spineP2shHash == the market's spine), excluding bricked.
+ * @param {Array<{direction:number, stake:(number|bigint|string), spineP2shHash:string}>} poolSides
+ * @param {string} marketSpineP2shHex  this market's spine P2SH (claimable iff side.spineP2shHash === this)
+ * @returns {{ yesPool:bigint, noPool:bigint, totalPool:bigint, excluded:number }}
+ */
+export function computeClaimablePoolTotals(poolSides, marketSpineP2shHex) {
+  let yesPool = 0n, noPool = 0n, excluded = 0;
+  for (const s of poolSides) {
+    if (s.spineP2shHash !== marketSpineP2shHex) { excluded++; continue; } // bricked/cross-market → excluded
+    const stake = BigInt(s.stake);
+    if (stake <= 0n) throw new Error('stake must be > 0');
+    if (s.direction === 0) yesPool += stake; else noPool += stake;
+  }
+  return { yesPool, noPool, totalPool: yesPool + noPool, excluded };
+}
+
 /** Minimal merkle depth to hold n leaves (>=1). */
 function depthFor(n) { let d = 0; while ((1 << d) < n) d++; return Math.max(1, d); }
 
