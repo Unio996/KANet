@@ -1,103 +1,32 @@
-// PoolSide_v08_shard.sil — bshard sharded per-bettor side (J1, 2026-06-15). 显式 State + payoutRoot-claim.
+// PoolSide_v08_shard.sil — bshard M3 dust spent-once 票 (J1, 2026-06-15 rework).
 //
-// 与 PoolSide_v07 差异:
-//   (1) **6 字段从 ctor → 显式 State**(field_prolog len>0) → validateOutputStateWithTemplate 可 template(J1 leaf register
-//       绑此; J2 PoolSide-artifact 生成器需显式 State). PoolSide template = **常量**(不带 post-close 值 → 解 timing deadlock).
-//   (2) **claim_winner 替委员 4-of-5 → spine close-commit payoutRoot 绑定**(J2 design doc 2026-06-15-bshard-payout-commit):
-//       读 spine closeCommit{winningSide, payoutRoot, ...} → 验 winner(finding-1) + merkle-prove 预算 payout(finding-2 无链上 mult).
-//
-// 修史: deadlock(fold_tmpl_hash post-close 烤不进 register) → 去 ctor, 延 claim 读 spine close-commit.
-//        finding-1(settlementWinner 自由 witness 两边掏池) → spine closeCommit.winningSide 绑.
-//        finding-2(链上 stake×totalPool i64 溢出, 三-vantage 源证) → payoutRoot 链下 BigInt 预算 + merkle-prove, 无链上 mult.
-// 单 author = J1; payoutRoot/spine builder = J2; struct-syntax = NWT; NWT co-verify PoC + 2-impl byte-match.
+// M3 重设计: PoolSide 从"持 stake-funds 的 per-bettor custody"退化成 **dust spent-once 票**(不再持注金; 注金真存进
+//   PoolShard_fold leaf-pool 经 fold 上行到 root market-pool)。本票只剩两职:
+//   ① **spent-once 防双领/双退**: claim/refund 时此票被消费(UTXO 花掉)→ 同 bettor 不可既 claim 又 refund、不可重复 claim。
+//   ② **身份+额记录**: State{bettorPk, direction, stake, shardPoolId} 供 PoolShard_fold 的 claim_draw/refund_draw
+//      readInputStateWithTemplate 读取(merkle leaf 用 bettorPk; refund 退 stake; shardPoolId 定位本 pool; direction 验赢向)。
+// custody 的 parallel-claim 收益 void(finding-5 串行强制), 但 spent-once O(1) 收益真→保留 dust 票比丢它(root O(N) bitmap/
+//   ordered-claim 活性险)更净(J1+J2+NWT 共识)。State 4 字段逐字对齐 PoolShard_fold.PoolSideTicket(template byte-match)。
 
 pragma silverscript ^0.1.0;
 
 contract PoolSide_v08_shard(
-    // —— init for 显式 State (6 字段; PoolSide template **常量** — 不含 post-close 值, 解 deadlock) ——
     byte[32] init_bettorPk,
-    byte[32] init_spineP2shHash,        // = 本 shard 的 spine(claim 验 spine input == 此, scope 到片)
-    byte[32] init_poolMerkleRoot,
-    byte[32] init_marketMetadataHash,
-    int      init_direction,             // 0=YES 1=NO
-    int      init_deadline,
-    // —— 非-State ctor(常量; spine close-commit 读用) ——
-    byte[32] spine_template_hash         // spine 合约 template hash(readInputStateWithTemplate 自验; J2 artifact, byte-match)
+    int      init_direction,        // 0=YES 1=NO
+    int      init_stake,            // 本注额 (refund 凭此退本金; claim merkle leaf 含此)
+    byte[32] init_shardPoolId       // 本 shard pool 身份 (= PoolShard_fold.shard_pool_id)
 ) {
-    // —— 显式 State(6 字段; validateOutputStateWithTemplate 的 state 区) ——
+    // —— 显式 State (4 字段; PoolShard_fold validateOutputStateWithTemplate/readInputStateWithTemplate 绑此布局) ——
     byte[32] bettorPk = init_bettorPk;
-    byte[32] spineP2shHash = init_spineP2shHash;
-    byte[32] poolMerkleRoot = init_poolMerkleRoot;
-    byte[32] marketMetadataHash = init_marketMetadataHash;
     int      direction = init_direction;
-    int      deadline = init_deadline;
+    int      stake = init_stake;
+    byte[32] shardPoolId = init_shardPoolId;
 
-    // spine close-commit 布局(= J2 design doc §1: 关池写进 shard spine 的 state). readInputStateWithTemplate 绑此 struct.
-    struct SpineCloseCommit {            // 逐字段对齐 PoolSpine_v08_shard 的 State(含 closed → claim 验 closed==1).
-        int      closed;                 // 0=open 1=closed(write-once 已写); claim 必 closed==1(否则读未关池 spine).
-        int      winningSide;            // finding-1: oracle/委员裁的赢向(绑, 非自由 witness)
-        byte[32] payoutRoot;             // finding-2: 每 winner 精确 payout 的 merkle root(链下 BigInt, 无链上 mult)
-        byte[32] fold_tmpl_hash;         // (deadlock: post-close 值移此; claim 不直接用, 留布局对齐)
-        int      shard_count;            // (同上)
-    }
-
-    // entry 0 — claim_winner (spine close-commit payoutRoot 绑定; per-winner 独立自取; 无链上 mult).
-    //   MAX_DEPTH = payoutRoot merkle climb 编译界(= ceil(log2 max_winners); demo 取 16 → 65536 winner).
-    entrypoint function claim_winner(
-        sig bettorSig,
-        int      payout,                 // 本 winner 的预算 payout(witness; merkle-prove ∈ payoutRoot → 非自由)
-        int      merkle_index,           // 本 winner 在 payoutRoot 的叶位(0..n-1; pk-ASC canonical 序)
-        int      tree_depth,             // payoutRoot 深 = ceil(log2 n)(climb 实跑层数, ≤ MAX_DEPTH)
-        byte[32][] siblings,             // climb siblings(扁平 depth 个)
-        int      spine_in_idx,           // spine close-commit UTXO 在 inputs 的位(ref)
-        int      spine_prefix_len,       // spine template prefix 长(J2 artifact)
-        int      spine_suffix_len        // spine template suffix 长
-    ) {
-        require(checkSig(bettorSig, pubkey(bettorPk)));     // bettor 授权自取
-        require(tree_depth >= 0); require(tree_depth <= 16);
-        require(merkle_index >= 0);
-        require(payout >= 1000);                            // dust floor
-
-        // ① 读 spine close-commit(原语自验 spine template hash + P2SH); + 验绑本市场 spine(NWT req-3).
-        SpineCloseCommit cc = readInputStateWithTemplate(spine_in_idx, spine_prefix_len, spine_suffix_len, spine_template_hash);
-        require(cc.closed == 1);                             // spine 已关池(write-once 已写); 防读未关池 spine 的空 closeCommit
-        require(cc.winningSide == 0 || cc.winningSide == 1);
-        require(tx.inputs[spine_in_idx].scriptPubKey == byte[](spineP2shHash));   // NWT req-3: spine 绑本市场(hash 比非重构)
-
-        // ② finding-1: 赢向绑 spine.winningSide(非自由 witness) + 本 side 在赢向.
-        require(direction == cc.winningSide);
-
-        // ③ finding-2: merkle-prove 本 winner 预算 payout ∈ payoutRoot(无链上 mult). leaf=blake2b(pk‖ser(payout,8)), pk-ASC.
-        byte[32] cur = blake2b(byte[](bettorPk) + byte[](payout, 8));
-        int div = 1;                                        // running 2^k (pow2 无原语 → div 每层 ×2)
-        for (k, 0, tree_depth, 16) {                        // position-aware climb, 跑 tree_depth 层(界 MAX_DEPTH=16)
-            int bit = (merkle_index / div) % 2;
-            if (bit == 0) { cur = blake2b(byte[](cur) + byte[](siblings[k])); }
-            else          { cur = blake2b(byte[](siblings[k]) + byte[](cur)); }
-            div = div * 2;
-        }
-        require(cur == cc.payoutRoot);                      // 证 payout 是 committed 真值(非自由)
-
-        // ④ output payout to bettor + spent-once(本 side UTXO 花 → 不可双领); fee [0, 1KAS].
-        require(tx.inputs.length >= 1);                     // inputs[0]=本 side UTXO; spine ref + fee-UTXO append
-        require(tx.outputs.length >= 1);
-        byte[34] bettorLock = new ScriptPubKeyP2PK(pubkey(bettorPk));
-        require(tx.outputs[0].scriptPubKey == byte[](bettorLock));
-        require(tx.outputs[0].value <= payout);
-        require(tx.outputs[0].value >= payout - 100000000);
-        require(tx.outputs[0].value >= 1000);
-    }
-
-    // entry 1 — refund_market_cancelled (保留 v07 逐字; bettor 过 deadline+grace 自退).
-    entrypoint function refund_market_cancelled(sig bettorSig) {
+    // —— entry: authorize_spend (bettor 授权消费此票 = 触发 claim/refund 时的 spent-once 闸) ——
+    //   实际 payout/refund 金额逻辑在 PoolShard_fold.claim_draw/refund_draw(它 readInputStateWithTemplate 读本票 State)。
+    //   本票被花 = spent-once: 同票不可二次用(UTXO model) → claim XOR refund、防重复领。
+    //   payout 去 bettorPk(P2PK, claim_draw 焊), 故任谁触发都付给本人; 但要本人 sig 授权(防误花/非自愿)。
+    entrypoint function authorize_spend(sig bettorSig) {
         require(checkSig(bettorSig, pubkey(bettorPk)));
-        require(tx.time >= (deadline + 7200) * 1000);
-        require(tx.inputs.length >= 1);
-        require(tx.outputs.length == 1);
-        byte[34] bettorLock = new ScriptPubKeyP2PK(pubkey(bettorPk));
-        require(tx.outputs[0].scriptPubKey == byte[](bettorLock));
-        require(tx.outputs[0].value <= tx.inputs[0].value - 1000);
-        require(tx.outputs[0].value >= tx.inputs[0].value - 100000000);
-        require(tx.outputs[0].value >= 1000);
     }
 }
