@@ -131,7 +131,10 @@ chunk settle 回归 (46f8a/xfu62) 仍 PASS.
 ---
 
 ## 6. 余项
-- **J2 接口**: computeSettleChunks 出码 + change_idx 位定 → 我 SS settle_chunk entry 接.
+- **robustness `require(winnerAmounts[k] > 0)`** (NWT 小建议): amount sign-magnitude 下负值会异编码破 byte-match.
+  现已**双重阻断** (负 amount → leaf 异 → merkle fail; 且 output value≥0 consensus → value-match fail), 故非 blocker;
+  作显式防御余项, **批下次 recompile 时加** (避单为此 churn 一轮编译). payout 恒正 (min-pot 保 >dust) → 不影响现路.
+- **J2 接口**: ✅ computeSettleChunks 已出 (10/10 self-test, 待 push 我 drift-check); change_idx 已定 (changeIdx=wOutBase+segLen 派生).
 - **dispute/claim 路**: 同 chunk 适用? dispute_reveal/refund 输出超 cap 也需 chunk (同 §1-4 法). 待审 4-TX 全覆盖.
 - **现 THIN-MARKET cancel (L1949)**: chunk settle 上线后, cancel-refund 仅留【真经济不可结】(losing pool < 1 chunk
   最小 fee+floor) 边界, 非 mass-cap (mass-cap 改 chunk 不再 cancel).
@@ -159,8 +162,8 @@ chunk settle 回归 (46f8a/xfu62) 仍 PASS.
 | 8 | oracleBondAmount | int | committee bond (sompi) |
 | 9 | maxWinnersPerChunk | int | **= MAX_K = 47** (settle_chunk merkle-loop 编译期界 = chunk_i 最大容量) |
 | 10 | init_hwm | int | change UTXO genesis HWM (pool-lock 隐含 0) |
-| 11 | init_plan_commit | byte[32] | genesis planCommit = **payoutRoot** (chunk_0 committee-sign) |
-| 12 | init_total_winners | int | genesis 总 winner 数 |
+| 11 | init_plan_commit | byte[32] | genesis = **ZERO32** 固定占位 (payoutRoot 创建时未知, 走 chunk_0 plan_commit_arg committee-sign) |
+| 12 | init_total_winners | int | genesis = **0** 固定占位 (真总数走 chunk_0 total_winners_arg) |
 | 13 | maxChunkFee | int | **= V07_MAX_FEE = 1e8** 单源 (pool-market-settler.js L2291); ⑦ over-fee 上界 |
 | 14 | makerStakeAmount | int | **v07-anchor 补** (settle_aggregate min-bet≥1e8/dust + refund output 范围) |
 | 15 | minerFee | int | **v07-anchor 补** (settle_aggregate fee sanity >0 && <1e8 loose) |
@@ -172,7 +175,11 @@ chunk settle 回归 (46f8a/xfu62) 仍 PASS.
 - `winnerSiblings` 扁平: `winnerSiblings[k*8 + lvl]` = winner k 第 lvl 层兄弟 (lvl 0=底). bit = `(merkle_index / 2^lvl) % 2`;
   bit==0 → `blake2b(cur‖sib)`, bit==1 → `blake2b(sib‖cur)` (SS L148-163).
 - root = `init_plan_commit` (chunk_0 经 5×committee-sig sighash commit `plan_commit_arg`; chunk_i 从 state.planCommit 读).
-- **<256 叶 padding 规则两节点必同** (待 J2 builder 定: 空叶填 0x00*32 or dup-last → 我 diff 时核此).
+- **<256 叶 padding = `ZERO32` (0x00*32) 零填 — LOCKED** (J2 builder `new Array(256).fill(ZERO32)` re-climb 20/20 +
+  NWT 独验 = malleability-free, 防 dup-last CVE-2012-2459). SS climb empty sibling 即 ZERO32, 两节点同 builder 一致.
+- **amount 编码 sign-magnitude 注** (NWT): `byte[](amount,8)` = Kaspa ScriptNum **sign-magnitude LE** (非 two-comp;
+  serializeI64(-1,8)=01..00 **80** sign-bit). payout **恒正** → 纯 8B LE 路径 = SS `byte[](amount,8)` byte-match (7/7).
+  robustness 余项: builder+SS 宜加 `require(winnerAmounts[k] > 0)` 防负值漏入破 byte-match (NWT 小建议, 见 §6 余项).
 
 ### 7.3 settle_chunk witness 序 (entry 0; chunk_0 vs chunk_i 用法差异)
 `(sig c0Sig..c4Sig, byte[32] c0Pk..c4Pk, byte[32] committeePkHash, int winner, byte[32] plan_commit_arg,`
@@ -198,7 +205,11 @@ chunk_n (kind=2): [0 .. segLen-1]=winners            (无 change)
 - `hwm = seg_hi` (下个待付 merkle_index);  `planCommit`/`totalWinners` 跨 chunk **不变** (续传同 plan).
 - 链式连续硬验: **`seg_lo == prevHwm`** (chunk_0: prevHwm=0; chunk_i: = input change.hwm) — 防 overlap/gap/skip/repeat.
 - chunk_kind 绑定: `(kind==0)==(seg_lo==0)`; `(kind==2)==(seg_hi==totalWinners)`; mid=其余.
-- genesis (pool-lock UTXO, market-create 时): state = {hwm: init_hwm(0), planCommit: init_plan_commit(payoutRoot), totalWinners: init_total_winners(N)}. **J2 market-create wire 必设此 = ctor init_* 同值** (否则 chunk_0 readInputState 读不到/异 P2SH).
+- genesis (pool-lock UTXO, market-create 时): state = ctor init_* = **{hwm:0, planCommit:ZERO32, totalWinners:0}** 固定占位
+  常量 (payoutRoot/N 创建时未知 → 两节点同 → 同 v08 P2SH). ⚠ **chunk_0 (kind==0) 不 readInputState** → 取 witness
+  plan_commit_arg(committee-sign payoutRoot)/total_winners_arg = 真值, 故 genesis 占位与 chunk_0 verify **无关**
+  (J2 收口, 修我原 spec 误写 payoutRoot/N). chunk_0 输出 change.state = {hwm:seg_hi, planCommit:真payoutRoot,
+  totalWinners:真N} → chunk_1 起 readInputState 读真值续链.
 
 ### 7.6 capacity (J2 域, 我 co-verify byte-deterministic)
 - `maxWinnersPerChunk` ctor = **47** = 编译期 merkle-loop 上界 = **chunk_i** 最大容量 (winners+change only).
@@ -210,4 +221,48 @@ chunk_n (kind=2): [0 .. segLen-1]=winners            (无 change)
 1. ctor16 序/类型 == 7.1 (idx14=makerStakeAmount, idx15=minerFee).  2. payoutRoot leaf = blake2b(pk‖amount **8B LE**), merkle_index ASC, sibling flatten k*8+lvl, padding 规则锁定.  3. witness 序 == 7.3, chunk_i 不喂真 sig.  4. output layout/wOutBase/changeIdx == 7.4, output-count bound 在.  5. HWM state 3-字段 + seg_lo==prevHwm + genesis init_* 同值.  6. chunk_0 capacity 走 greedy 非 hardcode 47.  7. cap/maxChunkFee/MAX_K = **SOURCE 单源常量** (禁 env/DB, §1④ fork 命门).
 
 ---
-*J1 #31 determinism slice spec。MASS 机械 by J2, 对抗验 by NWT。impl gated post-demo / 真大池 e2e 守红线。§7 = b367753b 实现契约 freeze, J2 照此 code 防漂。*
+
+## 8. gate B finish-line 跨节点 settle e2e harness 断言计划 (Bettor 下一手②; J1:3300+Bettor broadcast co-own)
+
+> **prep** (impl gated on J2 production `computeSettleChunks` push + dispatchPhase2 v08 wire + 部署). 此节定**断言**,
+> J2-wire 落地我即照此 impl. 三层: 8.1 前置检(我 determinism 域, e2e 前先跑非 mid-flight 发现) / 8.2 e2e 主路 /
+> 8.3 resumable kill-mid-chunk (NO-TX-NO-STATE 实证). NWT 2nd-vantage 对抗 + check_utxo_landed output addr 核.
+
+### 8.1 cross-node byte-identical 前置检 (e2e 能成的**充要前置**; 我 determinism 支柱, NWT co-attack)
+两节点 (:3300 J1 + :3200 KANet-UI) 对**同市场同 winners** 各跑 `computeSettleChunks` → 断言 4 项 byte-equal:
+1. **ctor16 byte-identical** (两节点同 redeem → 同 v08 P2SH; 否则异市场, §7.1 FREEZE).
+2. **partition byte-equal**: chunk 数 + 每 chunk `{seg_lo, seg_hi}` 边界逐一相等 (§1 greedy 链锚, cap 单源).
+3. **per-chunk output list byte-equal**: 每 chunk 每 winner `{addr(pk-derive), amount(BigInt sompi)}` + change amount 逐字节同.
+4. **payoutRoot byte-equal**: leaf=blake2b(pk‖amount 8B LE) merkle root 两节点同 (§7.2; padding 规则同).
+> ⚠ 前置检**失败=禁跑 e2e** (mid-flight fork 比 pre-fail 贵). 跨节点对照 = 双 vantage DB 读 chunk plan diff.
+
+### 8.2 e2e 主路 (大 winner 市场 → 多 chunk → 全付齐链上证)
+- **造市场**: winner 数 **> MAX_K=47** 触 chunk (如 **100 winner = 3 chunk**: chunk_0~41 + chunk_1~47 + chunk_2~12).
+- **settle on :3300** (真参与节点): dispatchPhase2 v08 路由 >MAX_K → chunk 链; 逐 chunk 广播 (Bettor broadcast slice).
+- **per-chunk check_utxo_landed** (NWT 核 + 我): 每 chunk 上链后, 每 winner output `{addr, value}` 在链上可查 (kaspa_tx_log
+  本地 indexer 优先 / RPC 降级) + addr == winner pk-derive + value == computePoolPayouts amount.
+- **守恒断言** (§4): Σ(all chunk winner outputs) + Σ(N chunk fees) + broker + Σ committee bond == pool 逐 sompi;
+  **末 chunk change==0** (零 stuck); 每 winner ∈ 恰 1 chunk (无双付/漏).
+- **change-chain induction** (§2): chunk_{i+1} 输入 outpoint == chunk_i change output (txid+idx) 链上实证.
+
+### 8.3 resumable kill-mid-chunk (NO-TX-NO-STATE 实证; HWM resume-token 验)
+- **杀**: settler 广播 chunk_1 上链后、chunk_2 广播前 kill (模拟 crash/重启).
+- **重启**: settler 读**链上 chunk_1 change UTXO 的 HWM state** (= seg_hi of chunk_1) → resume cursor.
+- **断言**: 续广播 chunk_2 的 `seg_lo == 链上 hwm` (§7.5 linkage) → **无双付** (不重付 chunk_0/1 winner) +
+  **无 skip** (不跳未付) → 链续完成全 winner 付齐 + 末 change==0. = HWM 一机制三性质 (linkage+resume+state) 实证.
+- **NO-TX-NO-STATE**: resume 只信**链上 HWM** (非本地 settler 进度文件) → crash 不丢不重 = trustless 续结.
+
+### 8.4 regression baseline (不退化红线)
+- **小池 ≤MAX_K**: 单 `settle_aggregate` (entry 1, =命门闭的 v07 路) 仍 PASS (46f8a/xfu62 等价回归).
+- **0-bet**: 走现有 dispatchRefund shortcut (不进 chunk 路, §1.1 NWT④).
+
+### 8.5 分工锚 (此 harness)
+| 谁 | 负责 |
+|---|---|
+| **J1 (我)** | 8.1 前置检 (determinism 域) + 8.3 kill-mid-chunk resume 验 + :3300 真节点跑 + §7 drift-watch |
+| **Bettor** | broadcast slice (逐 chunk 广播链上) + co-own e2e 执行 |
+| **J2** | production computeSettleChunks + dispatchPhase2 v08 wire (8.2 造 chunk plan) + signed baseline (→ NWT PoC) |
+| **NWT** | 2nd-vantage: 前置检 co-attack + check_utxo_landed output addr 核 + runnable PoC (7 attack mutation) |
+
+---
+*J1 #31 determinism slice spec。MASS 机械 by J2, 对抗验 by NWT。impl gated post-demo / 真大池 e2e 守红线。§7 = b367753b 实现契约 freeze (J2 照此 code 防漂); §8 = gate B finish-line e2e harness 断言计划 (J2-wire 落地我照此 impl)。*
