@@ -256,6 +256,8 @@ VRF 同源). 🔴 **EDGE**: L1529 `if(!snap||!comm) return fill(0n)` + L1535 per
 异 partition → 异 payoutRoot = **静默 cross-node fork**.
 - **fix-1 fail-closed (J2 helper/③ 落)**: v08 chunk settle 前 getCommitteeStakesCanonical 全-0n / missing snapshot|committee
   → **HALT/abort 不 settle**, 禁静默 uniform degrade. 缺数据宁等快照传播齐 (NO-TX-NO-STATE).
+  - ⚠ **liveness caveat (Bettor)**: fail-closed HALT 须**不致永久 stuck** — snapshot 永不传播则靠**既有 quorum-timeout-refund
+    兜底**(超时→cancel-refund 全员退款). 即 safety(防 fork)**不以 liveness(卡死无解)为代价**: HALT 是临时等快照, 超时则 refund.
 - **fix-2 Phase A-cross 第 3 assert**: 不止 ctor16-P2SH+payoutRoot, 加 **committee output 值逐个 byte-equal 跨节点**
   (= pool_snapshots+pool_committee 两节点 present 且 byte-equal, 非一边 0n-degrade).
 - **de-risk (KANet-UI)**: e2e equal-stake committee → uniform==stake-weighted 恰免疫 (但只 happy 路; **adversarial fixture
