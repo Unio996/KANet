@@ -30,7 +30,11 @@ relay 只广播 **compact plan**（~few KB），委员**本地重建整 TX → �
 ### 1.2 委员重建步骤（each committee member, local）
 1. 从 market state 取 sides（全 bettor side outpoints + values + params）+ spine inputs（maker stake + N oracle bonds outpoints）+ ctor params。
 2. 用 compact plan 的 seg_lo/seg_hi + 本地 computePoolPayouts（同 settler）算 winner subset + amounts + payoutRoot。
-3. 重建整 TX（inputs + outputs, arch-A: chunk_0 全 sides + spine）→ 算 SIGHASH_ALL sighash。
+3. 重建整 TX **按 canonical 序（NWT GAP-1, SIGHASH_ALL order-dependent）**:
+   - **inputs 序** = `[spine pool-lock(或 prev change), 5 oracle bonds, N sides by merkle_index ASC]`
+   - **outputs 序** = `[broker, 5 committee, winners by canonical re-index 0..K-1(= maker@idx0 if winning, then bettors merkle_index ASC), change]`
+   两节点同序 → 同 sighash（否则各签不同 preimage → 不 aggregate → 4-of-5 fail/fork）。= 复用 ② canonical winner 序。
+   → 算 SIGHASH_ALL sighash。
 4. **签 sighash**（committee privkey）→ 回 sig（只 sig 小）。
 
 ### 1.3 广播节省
@@ -48,6 +52,14 @@ relay 只广播 **compact plan**（~few KB），委员**本地重建整 TX → �
    byte-match gate(a) 应用到 reconstruct-sign 步, 非新机制）。anti version/ctor 漂。
 
 通过三步 → 算 sighash → sign。= 全程 chain-anchor 原则（重建必锚链上 hash 验, 同 fail-closed HALT 判定锚链 root）。
+
+### 2.1 byte-identical reconstruct 三柱 (NWT co-verify; redeem byte-match 必要不充分)
+3 步 gate 守的是 **redeem(合约 code)**；byte-identical sighash 还需 TX 结构确定:
+1. **redeem byte-match** [§2 三步 ✅] —— 合约 code 对。
+2. **canonical input/output 序** [§1.2 步3, NWT GAP-1] —— SIGHASH_ALL order-dependent, 两节点同序。
+3. **input-SET 完整 + fail-closed** [NWT GAP-2] —— 委员重建前 **assert N sides 全 present**(对**链锚 side count**, 非本地 ingest 表行数)；缺一 side(ingest 滞后)→ 重建会少 input → sig 签错 input-set（redeem gate 查不到, redeem≠input-set）→ **HALT 不签**（= degrade-edge fail-closed 应用到 reconstruct, 同 chain-anchor 判定: 链该有本地没→HALT 等 ingest, 非签残缺）。
+
+三柱缺一 → 委员签错 preimage/input-set = 无效 sig / 跨节点漂。NWT co-verify 三柱 byte-equal + cross-node。
 
 ## 3. determinism
 
