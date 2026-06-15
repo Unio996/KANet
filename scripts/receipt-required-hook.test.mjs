@@ -10,9 +10,13 @@ import { spawnSync } from 'node:child_process';
 
 const HOOK = new URL('./receipt-required-hook.mjs', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
 
+// cwd-INDEPENDENT: write the temp fixture next to THIS test file (absolute, via import.meta.url),
+// not `./` — else running from a different cwd (e.g. /tmp) gives a flawed-setup false alarm
+// (both KANet-UI and Bettor hit this; the test must mirror production = run from anywhere).
+const HERE = new URL('.', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
 let _seq = 0;
 function runHook(lines) {
-  const tmp = `./_rr_test_${_seq++}.jsonl`;
+  const tmp = `${HERE}_rr_test_${_seq++}.jsonl`;
   writeFileSync(tmp, lines.map((o) => JSON.stringify(o)).join('\n') + '\n');
   const r = spawnSync('node', [HOOK], { input: JSON.stringify({ transcript_path: tmp }), encoding: 'utf8' });
   try { unlinkSync(tmp); } catch { /* ignore */ }
