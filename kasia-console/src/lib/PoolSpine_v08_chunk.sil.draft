@@ -119,6 +119,9 @@ contract PoolSpine_v08_chunk(
         //    每 winner merkle_index = seg_lo+k (连续段派生, 非 free-witness) → depth-8 position-aware climb against
         //    ctor poolMerkleRoot (复用 settle_aggregate ③). merkle-path 是唯一许的 free-witness (篡改即 fail=自暴).
         int segLen = seg_hi - seg_lo;
+        // winner output 基址: chunk_0 前 6 输出=broker+5 committee bond, winner 从 idx 6 起; chunk_i winner 从 idx 0 起.
+        int wOutBase = 0;
+        if (chunk_kind == 0) { wOutBase = 6; }
         for (k, 0, segLen, maxWinnersPerChunk) {
             int widx = seg_lo + k;                         // merkle_index 连续派生 (链锚, 非 free-witness)
             require(widx >= 0); require(widx < 256);       // depth-8 → 256 叶
@@ -140,7 +143,10 @@ contract PoolSpine_v08_chunk(
             int b7 = (widx / 128) % 2;
             if (b7 == 0) { cur = blake2b(byte[](cur) + byte[](winnerSiblings[k*8+7])); } else { cur = blake2b(byte[](winnerSiblings[k*8+7]) + byte[](cur)); }
             require(cur == poolMerkleRoot);                // ★ winner identity merkle-proven against ctor poolMerkleRoot (链锚)
-            // (winner k 的 tx-output 位 + amount==plan + 7项 verify against planCommit 待续增量填)
+            // ★★ recipient 绑定 (NWT/Bettor 🔴 承重墙·最关键一行): winner k 的输出必付【实 winner pk-derive 地址】.
+            //    winnerPks[k] 已 merkle-proven(身份) → 此行绑【付款到实 winner】, 否则 chunk_i 无 sig 可付任意地址=偷.
+            require(tx.outputs[wOutBase + k].scriptPubKey == p2pk(winnerPks[k]));
+            // ⚠ amount 绑定 (winnerPayout==committed plan) 待 J2 payout 结构 (payout-merkle vs bet+ratio) → 下增量填.
         }
 
         // ②b cross-chunk linkage HWM (NWT 核心攻面 + J2 解, 防 winner skip/repeat): 仅 value 守恒(④)+末 change==0
