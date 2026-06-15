@@ -32,11 +32,14 @@
 // rather than enforced inline because (1) v0.6 inherits this from v0.5 PoolSide L87-89 unchanged,
 // (2) explicit fee args in claim_winner would expand the already-large arg list further.
 //
-// PAYOUT OVERFLOW (Bettor r38 F2 audit response): silverc literal-fold probe accepts 1e20 mult
-// clean — strong evidence the SS arithmetic stack uses bignum (Kaspa SmartScript CScriptNum-style),
-// not i64. With Owner's bettor-floor strip (no upper-bound on stakes) extreme markets could
-// theoretically reach 1e20+ products; dynamic e2e (attack-self-claim live mode) is the
-// definitive runtime verification.
+// 🔴 PAYOUT OVERFLOW (2026-06-15 CORRECTION — 旧 r38 F2 注释 DEFINITIVELY 错, 别再信): 旧注释称 "literal-fold
+// probe 1e20 clean = SS arithmetic bignum 非 i64" —— **错**. 那是 **compile-期 i128 暂存**(ast/mod.rs parse_number,
+// 且 literal>i64::MAX 实际报 overflow), 被误读成 runtime. **runtime VM 严格 i64**: rusty-kaspa crypto/txscript/src/
+// opcodes/mod.rs L772 OpMul = `a.checked_mul(b).ok_or(NumberTooBig)` —— i64 checked_mul, 积>9.2e18 即 error.
+// (J1/J2/NWT 三 vantage 源级确认 2026-06-15.) ∴ **本 L251 `payout = inputs[0].value * totalPool / winnerPool`
+// 链上算 OVERFLOWS**: stake(1e8) × totalPool > ~920KAS(1e11) → 积>i64 → settle 炸. = v07 预存 bug, 中小池侥幸没触.
+// bshard 修(无限押注必触): 链下 BigInt 算 payout(by-root 确定) + payoutRoot trustless commit + claim merkle-prove,
+// **避开链上乘**(详 bshard finding-2 收敛 / 2026-06-15-bshard payout-commit doc).
 //
 // MINER FEE (Bettor r38 F3 audit response): claim_winner enforces output[0].value == payout
 // without minerFee deduction — assumes settle_via_spine cooperative path (= spine settle TX

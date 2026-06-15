@@ -26,6 +26,12 @@ import { MAX_TX_FEE_SOMPI } from './kip9-mass.mjs';  // #31 ⑤ single-source (w
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
+// #31 two-P2SH-by-route (J1 SS-域裁 2026-06-15): 单体 4-entry v08 redeem=31KB (6×spine=186KB) → INFEASIBLE (连 8p
+//   aggregate 都 on-chain >cap). 拆两 version (各自洽 settle+dispute+refund): agg (settle_aggregate, ≤MAX_K 小池, ~2.1KB)
+//   + chunk (settle_chunk, >MAX_K 大池, ~3.9KB@maxK5). 主 settle 都 entry0/OP_0.
+const SPINE_V08_AGG_SIL   = process.env.POOL_SPINE_V08_AGG_SIL_PATH   || join(__dirname, 'PoolSpine_v08_agg.sil');
+const SPINE_V08_CHUNK_SIL = process.env.POOL_SPINE_V08_CHUNK_SIL_PATH || join(__dirname, 'PoolSpine_v08_chunk.sil');
+// LEGACY 单体 monolith (.draft, 4-entry 31KB, INFEASIBLE — 保留仅供 ref/diff, 不应再被任何活路径用):
 const SPINE_V08_SIL = process.env.POOL_SPINE_V08_SIL_PATH || join(__dirname, 'PoolSpine_v08_chunk.sil.draft');
 
 // Deployment constants (single-source / determinism — both nodes MUST agree):
@@ -47,7 +53,9 @@ const ZERO32_HEX = '00'.repeat(32);
  *
  * @returns {{ p2shAddr, redeemScript, p2shHash, cacheHit }}
  */
-export async function computeSpineP2SH_v08(args) {
+// Shared builder: validate args + build ctor16 + compile the given .sil → P2SH. Both versions share ctor16
+//   (same builder/fixture/migration-determinism); only silPath + contractName differ (two-P2SH-by-route).
+async function _computeSpineV08(args, silPath, contractName) {
   const makerPk = validatePubkeyHex(args.makerPk, 'makerPk');
   const brokerPk = validatePubkeyHex(args.brokerPk, 'brokerPk');
   const poolMerkleRoot = validateHashHex(args.poolMerkleRoot, 'poolMerkleRoot');
@@ -88,7 +96,7 @@ export async function computeSpineP2SH_v08(args) {
     intExpr(minerFee),                 // 15
   ];
 
-  const result = await compileAndComputeP2SH(SPINE_V08_SIL, ctorJson, 'PoolSpine_v08_chunk', args.network);
+  const result = await compileAndComputeP2SH(silPath, ctorJson, contractName, args.network);
   const p2shHash = Buffer.from(blake2b(result.scriptBytes, { dkLen: 32 })).toString('hex');
 
   return {
@@ -98,3 +106,11 @@ export async function computeSpineP2SH_v08(args) {
     cacheHit: result.cacheHit,
   };
 }
+
+// #31 two-P2SH-by-route builders (J1 SS-域裁). Same ctor16 args; pick version by route at market-create:
+//   ≤MAX_K winner 池 → _agg (settle_aggregate); >MAX_K → _chunk (settle_chunk, maxWinnersPerChunk = unroll bound).
+//   ⚠ version-选择必确定 (同 market 两节点选同 version = 同 P2SH; task#2 reconstruct 守点须选对 version 源 + ctor).
+export const computeSpineP2SH_v08_agg   = (args) => _computeSpineV08(args, SPINE_V08_AGG_SIL,   'PoolSpine_v08_agg');
+export const computeSpineP2SH_v08_chunk = (args) => _computeSpineV08(args, SPINE_V08_CHUNK_SIL, 'PoolSpine_v08_chunk');
+// LEGACY: 单体 .draft (4-entry 31KB INFEASIBLE). 保留 export 名向后兼容, 但指向 legacy .draft — 活路径应迁到 _agg/_chunk.
+export const computeSpineP2SH_v08       = (args) => _computeSpineV08(args, SPINE_V08_SIL,       'PoolSpine_v08_chunk');

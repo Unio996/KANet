@@ -1,0 +1,141 @@
+// PoolLeaf.sil — bshard M3 route-split LEAF 合约 (J1, 2026-06-15 拆 PoolShard_fold).
+//
+// 拆分动因(script-unit P0): unified 5-entry PoolShard_fold redeem=10973B → validateOutputState 的 blake2b-整-redeem
+//   = 21944 script-units > Kaspa 9999 硬限(register TX 被共识拒)。源证(covenant_declarations.rs L467/515/905/928 +
+//   compile.rs L2050-2097): covenant 两模式内部也 emit validateOutputState, units ∝ redeem 字节数与 mode 无关 →
+//   唯一杠杆 = 减 redeem。拆 register+fold(本合约 LEAF, 4-field, 2091B~4182u) / close+claim+refund(PoolRoot 7-field, 2940B~5880u), 两半都 <9999。
+//
+// LEAF 职责 = 收注(register) + 聚合(fold k→1 携 value+account 守恒) + 单一受控封顶(seal_to_root → PoolRoot)。
+// 4-field state {local_yes, local_no, count, pool_value} **无 outcome 字段**(closed/winningSide/payoutRoot) →
+//   leaf 无 close/claim 入口 = **结构上不可能被结算** → fold 的 committee-bypass 面彻底消失(NWT: 不可能优于被挡)。
+//   canonical-outcome 保护移到唯一 seal_to_root 闸: 它**用 literal/ctor-const(非 witness)** 硬设 root genesis outcome。
+// 承重锚(与 unified 同) = 零豁免 output-bind(每 script-create require tx.outputs[i].value==newState.pool_value) +
+//   induction(child.pool_value 创建时绑) + Kaspa Σin==Σout 不可 mint(谎 genesis 被首 covenant-spend+共识中和, 数学闭非 trust)。
+// leaf→root = foreign-template 转换(seal 用 baked root_tmpl_hash + witness root_prefix/suffix, 同 register 造 ticket 的证明模式)。
+
+pragma silverscript ^0.1.0;
+
+contract PoolLeaf(
+    byte[32] market_id,
+    byte[32] commit_v2,
+    int      shard_count,
+    int      max_fan_in,
+    byte[32] ps_tmpl_hash,        // dust PoolSide-ticket expectedTemplateHash (J2 artifact)
+    byte[32] shard_pool_id,       // 本 pool 身份 (ticket 记此)
+    int      seal_count,
+    int      min_bet,
+    byte[32] root_tmpl_hash,      // PoolRoot expectedTemplateHash (seal_to_root foreign-template 桥; genesis 已知=可 bake)
+    byte[32] root_init_payoutRoot, // PoolRoot genesis payoutRoot (canonical, ZERO; close_commit 才写真值)
+    // —— genesis State (4-field, 无 outcome) ——
+    int      init_local_yes,
+    int      init_local_no,
+    int      init_count,
+    int      init_pool_value
+) {
+    int local_yes  = init_local_yes;
+    int local_no   = init_local_no;
+    int count      = init_count;
+    int pool_value = init_pool_value;
+
+    // dust PoolSide-ticket State (= PoolSide_v08_shard 4 字段; spent-once 防双领, 不持 stake-funds)
+    struct Tk {
+        byte[32] bettorPk;
+        int      direction;
+        int      stake;
+        byte[32] shardPoolId;
+    }
+    // PoolRoot 7-field State 镜像 (seal_to_root foreign-template 序列化布局; 字段序/类型必 == PoolRoot State)
+    struct RootState {
+        int      local_yes;
+        int      local_no;
+        int      count;
+        int      pool_value;
+        int      closed;
+        int      winningSide;
+        byte[32] payoutRoot;
+    }
+
+    // —— entry 0: register_append (收注; spend leaf + 重建 bumped leaf, stake 真存进 leaf-pool) ——
+    entrypoint function register_append(
+        int      side,
+        int      stake,               // witness; output-bind 焊死 == 实存
+        int      leafOutIdx,
+        int      psOutIdx,
+        byte[32] bettorPk,
+        byte[]   ps_prefix,
+        byte[]   ps_suffix
+    ) {
+        require(count < seal_count);
+        require(side == 0 || side == 1);
+        require(stake >= min_bet);
+
+        // mint dust ticket (spent-once claim/refund 凭证)
+        validateOutputStateWithTemplate(psOutIdx, {
+            bettorPk: bettorPk,
+            direction: side,
+            stake: stake,
+            shardPoolId: shard_pool_id
+        }, ps_prefix, ps_suffix, ps_tmpl_hash);
+
+        // 重建 bumped leaf (stake 真存)
+        validateOutputState(leafOutIdx, {
+            local_yes:  local_yes + stake * (1 - side),
+            local_no:   local_no + stake * side,
+            count:      count + 1,
+            pool_value: pool_value + stake
+        });
+        // ★ output-bind weld 1: leaf value == 新 pool_value (KAS 真入池)
+        require(tx.outputs[leafOutIdx].value == pool_value + stake);
+    }
+
+    // —— entry 1: fold (k→1 携 value+account 守恒; leaf→leaf 同合约纯 covenant) ——
+    #[covenant(binding = cov, from = max_fan_in, to = 1, mode = verification)]
+    function fold(State[] prev_states, State[] new_states) {
+        require(new_states.length == 1);
+        int yes_sum = 0;
+        int no_sum = 0;
+        int count_sum = 0;
+        int value_sum = 0;
+        for (i, 0, prev_states.length, max_fan_in) {
+            yes_sum = yes_sum + prev_states[i].local_yes;
+            no_sum = no_sum + prev_states[i].local_no;
+            count_sum = count_sum + prev_states[i].count;
+            value_sum = value_sum + prev_states[i].pool_value;
+        }
+        require(new_states[0].local_yes == yes_sum);
+        require(new_states[0].local_no == no_sum);
+        require(new_states[0].count == count_sum);
+        require(new_states[0].pool_value == value_sum);
+        // ★ output-bind weld 2: parent value == parent.pool_value (induction: 每 child 创建时已绑真值)
+        require(tx.outputs[0].value == new_states[0].pool_value);
+        // 折满全片 → 验 commit_v2 完整性(yes/no/market/shard_count 绑预提交; 单片 minimal e2e 跳 fold 不验, 多片必经)
+        if (count_sum == shard_count) {
+            byte[] commit_pre0 = byte[](yes_sum, 16) + byte[](no_sum, 16);
+            byte[] commit_pre1 = commit_pre0 + byte[](market_id);
+            byte[] commit_pre2 = commit_pre1 + byte[](shard_count, 4);
+            require(blake2b(commit_pre2) == commit_v2);
+        }
+    }
+
+    // —— entry 2: seal_to_root (唯一受控 leaf→root 闸; canonical outcome 硬设 literal/ctor-const; value 守恒) ——
+    entrypoint function seal_to_root(
+        int      rootOutIdx,
+        byte[]   root_prefix,         // PoolRoot redeem state 区前段 (witness; blake2b(prefix‖suffix)==root_tmpl_hash 焊)
+        byte[]   root_suffix
+    ) {
+        require(count == shard_count);                     // 仅全片折满的单 leaf 可封顶
+        // 产 PoolRoot genesis: account 字段 carry 真值; outcome 字段 **literal/ctor-const(非 witness)** = committee-bypass carry
+        //   (NWT gate: closed/winningSide=0 literal, payoutRoot=root_init_payoutRoot ctor-const → seal 不能造 closed=1/自设 payoutRoot)
+        validateOutputStateWithTemplate(rootOutIdx, {
+            local_yes:   local_yes,
+            local_no:    local_no,
+            count:       count,
+            pool_value:  pool_value,
+            closed:      0,
+            winningSide: 0,
+            payoutRoot:  root_init_payoutRoot
+        }, root_prefix, root_suffix, root_tmpl_hash);
+        // ★ output-bind weld 3 (跨合约边界 value 守恒, Bettor 重点缝): root value == 全池 pool_value
+        require(tx.outputs[rootOutIdx].value == pool_value);
+    }
+}

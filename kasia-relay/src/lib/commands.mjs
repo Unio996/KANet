@@ -67,6 +67,13 @@ export const COMMAND_TYPES = Object.freeze({
   // #17 G1 (J1tn r303) — OracleStake_v1 timeout_unlock self-unstake.
   // Single-entry SS contract → scriptSig NO selector (sediment feedback-silverc-single-entry-no-selector).
   STAKE_UNLOCK_TX: 'stake_unlock_tx',
+  // bshard M3 fold-carries-KAS (J1 2026-06-15): register/claim/refund relay handlers. 三层注册(KI49 防坑).
+  BSHARD_REGISTER_BET: 'bshard_register_bet',
+  BSHARD_CLAIM_WINNER: 'bshard_claim_winner',
+  BSHARD_REFUND_CANCELLED: 'bshard_refund_cancelled',
+  BSHARD_FOLD: 'bshard_fold',
+  BSHARD_CLOSE_COMMIT: 'bshard_close_commit',
+  BSHARD_SEAL_TO_ROOT: 'bshard_seal_to_root',   // route-split: PoolLeaf seal_to_root OP_3, leaf→root foreign-template 桥
 });
 
 export const COMMAND_TYPE_SET = new Set(Object.values(COMMAND_TYPES));
@@ -109,6 +116,13 @@ export const COMMAND_PAYLOAD_SCHEMA = Object.freeze({
   [COMMAND_TYPES.CHAIN_GET_BLOCK_AT_DAA]: ['min_daa_score'],
   // #17 G1 (J1tn r303) — stake_unlock_tx single-entry P2SH unlock for OracleStake_v1.
   [COMMAND_TYPES.STAKE_UNLOCK_TX]: ['p2sh_address', 'redeem_script_hex', 'to_address', 'lock_time'],
+  // bshard M3: relay 自算 per-state 续约地址 + scriptSig 押栈 — cmd 带 witness/inputs/outputs 三块.
+  [COMMAND_TYPES.BSHARD_REGISTER_BET]: ['witness', 'inputs', 'outputs'],
+  [COMMAND_TYPES.BSHARD_CLAIM_WINNER]: ['witness', 'inputs', 'outputs'],
+  [COMMAND_TYPES.BSHARD_REFUND_CANCELLED]: ['witness', 'inputs', 'outputs'],
+  [COMMAND_TYPES.BSHARD_FOLD]: ['witness', 'inputs', 'outputs'],
+  [COMMAND_TYPES.BSHARD_CLOSE_COMMIT]: ['witness', 'inputs', 'outputs'],
+  [COMMAND_TYPES.BSHARD_SEAL_TO_ROOT]: ['witness', 'inputs', 'outputs'],
 });
 
 // R38 (Z23 sediment): typeof spec per field. Bug-Z23 真根因 — broker enqueue amount: number,
@@ -147,6 +161,13 @@ export const COMMAND_FIELD_TYPES = Object.freeze({
   [COMMAND_TYPES.POOL_V07_COMPUTE_REFUND_MASS]: { spine_p2sh: 'string', spine_lock_tx: 'string', spine_redeem_script_hex: 'string', maker_address: 'string', maker_stake: ['string','number'], deadline: ['string','number'] },
   [COMMAND_TYPES.CHECK_UTXO_LANDED]: { address: 'string', txid: 'string' },
   [COMMAND_TYPES.STAKE_UNLOCK_TX]: { p2sh_address: 'string', redeem_script_hex: 'string', to_address: 'string', lock_time: ['string', 'number'] },
+  // bshard M3: 三块 object (witness 含 push 值 + ps_prefix/suffix; inputs 含 redeem/outpoint/current_state; outputs 含 state/amount).
+  [COMMAND_TYPES.BSHARD_REGISTER_BET]: { witness: 'object', inputs: 'object', outputs: 'object' },
+  [COMMAND_TYPES.BSHARD_CLAIM_WINNER]: { witness: 'object', inputs: 'object', outputs: 'object' },
+  [COMMAND_TYPES.BSHARD_REFUND_CANCELLED]: { witness: 'object', inputs: 'object', outputs: 'object' },
+  [COMMAND_TYPES.BSHARD_FOLD]: { witness: 'object', inputs: 'object', outputs: 'object' },
+  [COMMAND_TYPES.BSHARD_CLOSE_COMMIT]: { witness: 'object', inputs: 'object', outputs: 'object' },
+  [COMMAND_TYPES.BSHARD_SEAL_TO_ROOT]: { witness: 'object', inputs: 'object', outputs: 'object' },
 });
 
 export function validateCommandPayload(cmd) {
