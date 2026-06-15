@@ -64,9 +64,11 @@ export function buildClaimWitness(payouts, winnerPkHex, pos) {
  * for the relay to serialize. value-conserve weld (on-chain weld4) self-checked: payout + root_out == pool_value.
  * @returns {object} relay command (action='bshard_claim_winner')
  */
-export function buildClaimCommand({ witness, rootOutpoint, rootRedeemHex, ticketOutpoint, ticketRedeemHex, rootAddress, rootValueSompi, rootContinuationState, bettorAddress, feeOutpoint, changeAddress }) {
-  if (!rootOutpoint || !ticketOutpoint) throw new Error('rootOutpoint + ticketOutpoint required');
-  if (!rootAddress) throw new Error('rootAddress (root input address; recreated root reuses it — template P2SH, state-excluded) required');
+export function buildClaimCommand({ witness, rootOutpointTxid, rootRedeemHex, currentRootState, ticketOutpointTxid, ticketRedeemHex, ticketState, psPrefixHex, psSuffixHex, rootValueSompi, rootContinuationState, bettorAddress, fee, changeAddress }) {
+  if (!rootOutpointTxid || !ticketOutpointTxid) throw new Error('rootOutpointTxid + ticketOutpointTxid required');
+  if (!currentRootState) throw new Error('currentRootState (current root 7-field state; relay computes current per-state root address) required');
+  if (!ticketState) throw new Error('ticketState {bettorPk, direction, stake, shardPoolId} (relay computes ticket address) required');
+  if (!psPrefixHex || !psSuffixHex) throw new Error('psPrefixHex + psSuffixHex (PoolSide template; relay computes ticket address) required');
   if (!bettorAddress) throw new Error('bettorAddress (P2PK(bettorPk); payout recipient) required');
   if (rootValueSompi == null) throw new Error('rootValueSompi (current root UTXO value) required');
   const rootValue = BigInt(rootValueSompi);
@@ -78,6 +80,9 @@ export function buildClaimCommand({ witness, rootOutpoint, rootRedeemHex, ticket
   if (rootContinuationState && rootContinuationState.closed !== 1) {
     throw new Error(`claim root continuation must keep closed=1 (settled; claim does not change outcome), got ${rootContinuationState.closed}`);
   }
+  // relay handler (unlockBshardClaim) consumes: inputs.root.{redeem_hex, current_state, outpointTxid},
+  // inputs.ticket.{redeem_hex, state, outpointTxid}, witness.{ps_prefix_hex, ps_suffix_hex} (ticket addr metadata,
+  // NOT pushed on-chain), inputs.fee.{address, outpointTxid}; computes per-state root/ticket addr + change itself.
   return {
     action: 'bshard_claim_winner',
     witness: {
@@ -86,12 +91,17 @@ export function buildClaimCommand({ witness, rootOutpoint, rootRedeemHex, ticket
       siblings_hex: witness.siblings.map(s => s.toString('hex')),
       ticket_in_idx: witness.ticketInIdx, ticket_prefix_len: witness.ticket_prefix_len, ticket_suffix_len: witness.ticket_suffix_len,
       bettor_pk: witness.bettorPk,
+      ps_prefix_hex: psPrefixHex, ps_suffix_hex: psSuffixHex, // ticket-address metadata (relay-only; NOT in on-chain push)
     },
-    inputs: { root: { ...rootOutpoint, redeem_hex: rootRedeemHex }, ticket: { ...ticketOutpoint, redeem_hex: ticketRedeemHex }, fee: feeOutpoint },
-    // outputs: [payout_out_idx] payout → bettor P2PK; [root_out_idx] recreated root (SAME address, value-=payout, closed=1); change
+    inputs: {
+      root: { outpointTxid: rootOutpointTxid, redeem_hex: rootRedeemHex, current_state: currentRootState },
+      ticket: { outpointTxid: ticketOutpointTxid, redeem_hex: ticketRedeemHex, state: ticketState },
+      fee: fee ? { outpointTxid: fee.outpointTxid, address: fee.address } : null,
+    },
+    // outputs: payout → bettor P2PK; root_continuation (relay computes per-state addr; value-=payout, closed=1); change (relay computes amount)
     outputs: {
       payout: { address: bettorAddress, amountSompi: payout.toString() },
-      root_continuation: { address: rootAddress, amountSompi: rootOut.toString(), state: rootContinuationState || null },
+      root_continuation: { amountSompi: rootOut.toString(), state: rootContinuationState || null },
       change_address: changeAddress,
     },
   };

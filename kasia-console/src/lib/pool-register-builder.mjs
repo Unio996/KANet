@@ -54,10 +54,9 @@ export function buildRegisterWitness(o) {
  * value-conserve self-check (mirrors weld1): leaf_out == leaf_value + stake (stake deposited into leaf, NOT the ticket).
  * @returns {object} relay command (action='bshard_register_bet')
  */
-export function buildRegisterCommand({ witness, leafOutpoint, leafRedeemHex, bettorFundingOutpoints, leafValueSompi, leafContinuationState, ticketDustSompi, poolSideAddress, leafAddress, changeAddress }) {
-  if (!leafOutpoint) throw new Error('leafOutpoint (current shard leaf UTXO) required');
-  if (!leafAddress) throw new Error('leafAddress (leaf input address; new leaf reuses it — template P2SH, state-excluded) required');
-  if (!poolSideAddress) throw new Error('poolSideAddress (dust-ticket recipient) required');
+export function buildRegisterCommand({ witness, leafOutpointTxid, leafRedeemHex, currentLeafState, bettorFunding, leafValueSompi, leafContinuationState, ticketDustSompi, shardPoolId, changeAddress }) {
+  if (!leafOutpointTxid) throw new Error('leafOutpointTxid (current shard leaf UTXO txid) required');
+  if (!currentLeafState) throw new Error('currentLeafState (current leaf 7-field state; relay computes current per-state leaf address from redeem+current_state) required');
   if (leafValueSompi == null) throw new Error('leafValueSompi (current leaf UTXO value) required');
   const stake = BigInt(witness.stake);
   const leafValue = BigInt(leafValueSompi);
@@ -65,6 +64,8 @@ export function buildRegisterCommand({ witness, leafOutpoint, leafRedeemHex, bet
   if (leafContinuationState && leafContinuationState.closed !== 0) {
     throw new Error(`register leaf continuation must keep closed=0 (open pool), got ${leafContinuationState.closed}`);
   }
+  // relay handler (unlockBshardRegister) consumes: inputs.leaf.{redeem_hex, current_state, outpointTxid},
+  // inputs.funding[].{address, outpointTxid}; computes per-state leaf addr + ticket addr + change itself.
   return {
     action: 'bshard_register_bet',
     witness: {
@@ -72,11 +73,15 @@ export function buildRegisterCommand({ witness, leafOutpoint, leafRedeemHex, bet
       bettor_pk: witness.bettorPk,
       ps_prefix_hex: witness.ps_prefix.toString('hex'), ps_suffix_hex: witness.ps_suffix.toString('hex'),
     },
-    inputs: { leaf: { ...leafOutpoint, redeem_hex: leafRedeemHex }, funding: bettorFundingOutpoints },
-    // outputs: [leaf_out_idx] new leaf (SAME address, value+=stake, closed=0); [ps_out_idx] dust ticket {bettorPk,direction,stake,shardPoolId}; change
+    inputs: {
+      leaf: { outpointTxid: leafOutpointTxid, redeem_hex: leafRedeemHex, current_state: currentLeafState },
+      funding: bettorFunding, // [{ outpointTxid, address }] P2PK wallet UTXOs (relay finds + wallet-signs)
+    },
+    // outputs: leaf_continuation (relay computes per-state addr; value+=stake, closed=0) + dust ticket
+    // {bettorPk,direction,stake,shardPoolId} (relay computes ticket addr) + change (relay computes amount).
     outputs: {
-      leaf_continuation: { address: leafAddress, amountSompi: newLeafValue.toString(), state: leafContinuationState || null },
-      poolSide_ticket: { address: poolSideAddress, amountSompi: ticketDustSompi != null ? String(ticketDustSompi) : null, state: { bettorPk: witness.bettorPk, direction: witness.side, stake: stake.toString(), shardPoolId: leafContinuationState && leafContinuationState.shardPoolId || null } },
+      leaf_continuation: { amountSompi: newLeafValue.toString(), state: leafContinuationState || null },
+      poolSide_ticket: { amountSompi: ticketDustSompi != null ? String(ticketDustSompi) : null, state: { bettorPk: witness.bettorPk, direction: witness.side, stake: stake.toString(), shardPoolId: shardPoolId || (leafContinuationState && leafContinuationState.shardPoolId) || null } },
       change_address: changeAddress,
     },
   };

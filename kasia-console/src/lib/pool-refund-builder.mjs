@@ -58,9 +58,10 @@ export function buildRefundWitness(o) {
  * (on-chain L238) self-checked here: payout(stake) + pool_out(poolValue-stake) == poolValue (no value created).
  * @returns {object} relay command (action='bshard_refund_cancelled')
  */
-export function buildRefundCommand({ witness, poolOutpoint, poolRedeemHex, ticketOutpoint, ticketRedeemHex, poolAddress, poolValueSompi, bettorAddress, poolContinuationState, changeAddress }) {
-  if (!poolOutpoint || !ticketOutpoint) throw new Error('poolOutpoint + ticketOutpoint required');
-  if (!poolAddress) throw new Error('poolAddress (pool input address; recreated pool reuses it — template P2SH, state-excluded) required');
+export function buildRefundCommand({ witness, poolOutpointTxid, poolRedeemHex, currentPoolState, ticketOutpointTxid, ticketRedeemHex, ticketState, poolValueSompi, bettorAddress, poolContinuationState, changeAddress }) {
+  if (!poolOutpointTxid || !ticketOutpointTxid) throw new Error('poolOutpointTxid + ticketOutpointTxid required');
+  if (!currentPoolState) throw new Error('currentPoolState (current pool 7-field state; relay computes current per-state pool address) required');
+  if (!ticketState) throw new Error('ticketState {bettorPk, direction, stake, shardPoolId} (relay computes ticket address) required');
   if (!bettorAddress) throw new Error('bettorAddress (P2PK(bettorPk); refund recipient) required');
   if (poolValueSompi == null) throw new Error('poolValueSompi (current pool UTXO value) required');
   const poolValue = BigInt(poolValueSompi);
@@ -72,19 +73,25 @@ export function buildRefundCommand({ witness, poolOutpoint, poolRedeemHex, ticke
   if (poolContinuationState && poolContinuationState.closed !== 2) {
     throw new Error(`refund pool continuation must set closed=2 (F2 cancel latch), got ${poolContinuationState.closed}`);
   }
+  // relay handler (unlockBshardRefund) consumes: inputs.pool.{redeem_hex, current_state, outpointTxid},
+  // inputs.ticket.{redeem_hex, state, outpointTxid}, witness.{ps_prefix_hex, ps_suffix_hex} (ticket-addr metadata);
+  // computes per-state pool/ticket addr + change itself. (ps_prefix/suffix derived from the witness template buffers.)
   return {
     action: 'bshard_refund_cancelled',
     witness: {
       pool_out_idx: witness.poolOutIdx, payout_out_idx: witness.payoutOutIdx, ticket_in_idx: witness.ticketInIdx,
       ticket_prefix_len: witness.ticket_prefix_len, ticket_suffix_len: witness.ticket_suffix_len,
-      ticket_prefix_hex: witness.ticket_prefix.toString('hex'), ticket_suffix_hex: witness.ticket_suffix.toString('hex'),
+      ps_prefix_hex: witness.ticket_prefix.toString('hex'), ps_suffix_hex: witness.ticket_suffix.toString('hex'),
       bettor_pk: witness.bettorPk,
     },
-    inputs: { pool: { ...poolOutpoint, redeem_hex: poolRedeemHex }, ticket: { ...ticketOutpoint, redeem_hex: ticketRedeemHex } },
-    // outputs: [payout_out_idx] refund → bettor P2PK = stake; [pool_out_idx] recreated pool (SAME address, value-=stake, closed=2); change
+    inputs: {
+      pool: { outpointTxid: poolOutpointTxid, redeem_hex: poolRedeemHex, current_state: currentPoolState },
+      ticket: { outpointTxid: ticketOutpointTxid, redeem_hex: ticketRedeemHex, state: ticketState },
+    },
+    // outputs: refund → bettor P2PK = stake; pool_continuation (relay computes per-state addr; value-=stake, closed=2); change (relay computes amount)
     outputs: {
       payout: { address: bettorAddress, amountSompi: stake.toString() },
-      pool_continuation: { address: poolAddress, amountSompi: poolOut.toString(), state: poolContinuationState || null },
+      pool_continuation: { amountSompi: poolOut.toString(), state: poolContinuationState || null },
       change_address: changeAddress,
     },
   };
