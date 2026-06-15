@@ -819,8 +819,12 @@ export async function unlockPoolSpineP2SH(args) {
   const {
     spineP2shAddress, sideP2shAddresses, spineRedeemScriptHex, sideRedeemScriptHexes,
     requiredInputOutpoints, outputs, spineSigsByInput, spineInputCount, winner, sidesMerkleRootHex,
-    unanimous, networkId, lockTime = 0n, txObjPreimage = null,
+    unanimous, networkId, lockTime = 0n, txObjPreimage = null, settleEntrypoint = 0,
   } = args;
+  // #31 ④a: PoolSpine_v08 settle_aggregate is entry 1 (multi-entry contract) — v0.5/0.6/0.7 settle was
+  // entry 0. ONLY the spine input selector changes (OP_1); PoolSide "settled_via_spine" stays entry 0 (OP_0).
+  // Witness param order is byte-identical to v0.7 entry0 (verified vs PoolSpine_v08_chunk.sil L253-273).
+  if (settleEntrypoint !== 0 && settleEntrypoint !== 1) throw new Error(`settleEntrypoint must be 0 (v05/06/07 settle / v08 settle_chunk) or 1 (v08 settle_aggregate), got ${settleEntrypoint}`);
 
   // Bettor r287 layer-21 G2-A relay: v0.6 settle_aggregate has validSigs counter (4-of-5
   // threshold) → unanimous skip moot. v0.5 still requires unanimous (entry 0 only, entry 1
@@ -873,7 +877,10 @@ export async function unlockPoolSpineP2SH(args) {
     ));
 
     const winnerOpHex = winner === 0 ? '00' : '51';
-    const selectorOpHex = '00';
+    // #31 ④a: split spine vs side selector. spine: v08 settle_aggregate=entry1(OP_1='51'), else entry0(OP_0='00').
+    // side: PoolSide settled_via_spine = entry0(OP_0) unchanged across all versions.
+    const spineSelectorOpHex = settleEntrypoint === 1 ? '51' : '00';
+    const sideSelectorOpHex = '00';
 
     const rootBytes = new Uint8Array(Buffer.from(sidesMerkleRootHex.replace(/^0x/, ''), 'hex'));
     if (rootBytes.length !== 32) throw new Error(`sidesMerkleRoot must be 32 bytes, got ${rootBytes.length}`);
@@ -896,7 +903,7 @@ export async function unlockPoolSpineP2SH(args) {
     const spineScriptSigs = spineSigsByInput.map(sigs => {
       if (!isV06) {
         // v0.5 legacy path: 3 sigs + winner + root + selector + redeem.
-        return sigs.join('') + winnerOpHex + rootPushHex + selectorOpHex + spineRedeemPushHex;
+        return sigs.join('') + winnerOpHex + rootPushHex + spineSelectorOpHex + spineRedeemPushHex;
       }
       // v0.6 path A settle_aggregate. Push order per J1 r221 spec (= silverc LIFO, declaration
       // reversed): siblings[4] depth7..0 → ... → siblings[0] depth7..0 → indices c4..c0 → PKs
@@ -963,8 +970,8 @@ export async function unlockPoolSpineP2SH(args) {
         }
         for (let d = 0; d < 8; d++) scriptSigHex += pushBytes(sibs[d]);
       }
-      // Selector OP_0 (entry 0 = settle_aggregate) + redeem reveal
-      scriptSigHex += selectorOpHex;
+      // Selector (v0.6/0.7 settle_aggregate=entry0 OP_0; v08 settle_aggregate=entry1 OP_1) + redeem reveal
+      scriptSigHex += spineSelectorOpHex;
       scriptSigHex += spineRedeemPushHex;
       // J1 r245 + Bettor diff request: dump FULL scriptSig hex for byte-level cross-verify
       // against Bettor's _diag_scriptsig_46f8a.cjs reconstruction.
@@ -974,7 +981,7 @@ export async function unlockPoolSpineP2SH(args) {
 
     const sideScriptSigs = sideRedeemScriptHexes.map(redeemHex => {
       const redeemBytes = Buffer.from(redeemHex, 'hex');
-      return selectorOpHex + _encodePushDataHex(redeemBytes);
+      return sideSelectorOpHex + _encodePushDataHex(redeemBytes);
     });
 
     const allScriptSigs = [...spineScriptSigs, ...sideScriptSigs];

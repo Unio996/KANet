@@ -751,6 +751,7 @@ if (process.send) {
             lockTime: BigInt(cmd.lock_time || 0),
             txObjPreimage: cmd.tx_obj_preimage || null,
             committee_data,
+            settleEntrypoint: cmd.settle_entrypoint || 0,  // #31 ④a: 1 = v08 settle_aggregate (entry1); 0 = v05/06/07 / v08 chunk
           });
           if (cmd.requestId && process.send) {
             process.send({ requestId: cmd.requestId, result: { ok: true, txId: r.txId } });
