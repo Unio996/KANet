@@ -73,6 +73,7 @@ export const COMMAND_TYPES = Object.freeze({
   BSHARD_REFUND_CANCELLED: 'bshard_refund_cancelled',
   BSHARD_FOLD: 'bshard_fold',
   BSHARD_CLOSE_COMMIT: 'bshard_close_commit',
+  BSHARD_SEAL_TO_ROOT: 'bshard_seal_to_root',   // route-split: PoolLeaf seal_to_root OP_3, leaf→root foreign-template 桥
 });
 
 export const COMMAND_TYPE_SET = new Set(Object.values(COMMAND_TYPES));
@@ -121,6 +122,7 @@ export const COMMAND_PAYLOAD_SCHEMA = Object.freeze({
   [COMMAND_TYPES.BSHARD_REFUND_CANCELLED]: ['witness', 'inputs', 'outputs'],
   [COMMAND_TYPES.BSHARD_FOLD]: ['witness', 'inputs', 'outputs'],
   [COMMAND_TYPES.BSHARD_CLOSE_COMMIT]: ['witness', 'inputs', 'outputs'],
+  [COMMAND_TYPES.BSHARD_SEAL_TO_ROOT]: ['witness', 'inputs', 'outputs'],
 });
 
 // R38 (Z23 sediment): typeof spec per field. Bug-Z23 真根因 — broker enqueue amount: number,
@@ -165,6 +167,7 @@ export const COMMAND_FIELD_TYPES = Object.freeze({
   [COMMAND_TYPES.BSHARD_REFUND_CANCELLED]: { witness: 'object', inputs: 'object', outputs: 'object' },
   [COMMAND_TYPES.BSHARD_FOLD]: { witness: 'object', inputs: 'object', outputs: 'object' },
   [COMMAND_TYPES.BSHARD_CLOSE_COMMIT]: { witness: 'object', inputs: 'object', outputs: 'object' },
+  [COMMAND_TYPES.BSHARD_SEAL_TO_ROOT]: { witness: 'object', inputs: 'object', outputs: 'object' },
 });
 
 export function validateCommandPayload(cmd) {

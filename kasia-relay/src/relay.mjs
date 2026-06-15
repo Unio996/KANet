@@ -798,7 +798,7 @@ if (process.send) {
         }
 
         case 'bshard_claim_winner': {
-          // bshard M3: claim_draw OP_4. root P2SH(no sig)+ticket(bettorSig)+fee. winner draw-down from root.
+          // bshard M3 route-split: PoolRoot claim_draw OP_1. root P2SH(no sig)+ticket(bettorSig)+fee. winner draw-down from root.
           const { unlockBshardClaim } = await import('./lib/p2sh.mjs');
           const wallet = getWallet();
           const r = await unlockBshardClaim({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) });
@@ -807,7 +807,7 @@ if (process.send) {
         }
 
         case 'bshard_refund_cancelled': {
-          // bshard M3: refund_draw OP_5. pool P2SH(no sig)+ticket(bettorSig). 退本金 + closed flip 0→2.
+          // bshard M3 route-split: PoolRoot refund_draw OP_2. pool P2SH(no sig)+ticket(bettorSig). 退本金 + closed flip 0→2.
           const { unlockBshardRefund } = await import('./lib/p2sh.mjs');
           const wallet = getWallet();
           const r = await unlockBshardRefund({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) });
@@ -825,10 +825,19 @@ if (process.send) {
         }
 
         case 'bshard_close_commit': {
-          // bshard M3: close_commit OP_3, committee 4-of-5. root P2SH + fee. closed 0→1 + outcome 写入.
+          // bshard M3 route-split: PoolRoot close_commit OP_0, committee 4-of-5. root P2SH + fee. closed 0→1 + outcome 写入.
           const { unlockBshardClose } = await import('./lib/p2sh.mjs');
           const wallet = getWallet();
           const r = await unlockBshardClose({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) });
+          if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, txId: r.txId } });
+          return;
+        }
+
+        case 'bshard_seal_to_root': {
+          // bshard M3 route-split: PoolLeaf seal_to_root OP_3, leaf→root foreign-template 桥. leaf P2SH(no sig)+funding. 全池 KAS → PoolRoot.
+          const { unlockBshardSeal } = await import('./lib/p2sh.mjs');
+          const wallet = getWallet();
+          const r = await unlockBshardSeal({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) });
           if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, txId: r.txId } });
           return;
         }
