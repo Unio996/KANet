@@ -10,6 +10,8 @@ import {
   estimateMultiOutputStorageMass,
   STORAGE_MASS_SAFE_THRESHOLD,
   MAX_TX_FEE_SOMPI,
+  STORAGE_MASS_C,
+  SOMPI_PER_MASS,
 } from './kip9-mass.mjs';
 
 // post-Toccata per-tx consensus limits (rusty-kaspa params.rs: block compute/storage 500k, transient 1M).
@@ -27,6 +29,32 @@ function chunkComputeMass(nWinners, nFixedOut, hasChange) {
   const nOut = nFixedOut + nWinners + (hasChange ? 1 : 0);
   const txBytes = TX_FIXED + REDEEM_BASE + nWinners * REDEEM_PER_WINNER + nWinners * WITNESS_PER_WINNER + nOut * SPK;
   return { compute: txBytes + nOut * SPK * 10 + SIG_OPS * 1000, transient: txBytes };
+}
+
+// ── (B)-uniform deterministic settle-fee bound (§1⑥; 4-way consensus 2026-06-15) ────────────────────
+// minerFee MUST be fixed BEFORE computePoolPayouts (distributable = pool − fees − minerFee). It therefore
+// CANNOT depend on payout values (would be circular). This bound is PURE-COUNT (amount-independent) so
+// fixture-gen + on-chain ④ wire import the SAME fn → byte-identical minerFee → byte-equal payoutRoot.
+//
+// COMPUTE-mass dominated: v08 spine-redeem witness + per-winner siblings (chunkComputeMass) >> storage for
+// realistic payouts (§1⑤ "spine redeem witness 主导"). chunkComputeMass is KNOWN-CONSERVATIVE on the
+// aggregate route (over-estimates, no per-winner loop on-chain) → safe UPPER bound.
+//
+// Storage term = nOut × C/STORAGE_PAYOUT_FLOOR. UPPER fee bound needs a LOWER payout bound → STORAGE_PAYOUT_FLOOR
+// is the assumed minimum per-output payout. ⚠ OPEN (J1 §1⑥ co-design): if a real winner payout < FLOOR, its
+// on-chain storage mass exceeds this allowance → bound may under-reserve. For markets where min-pot guarantees
+// payouts ≥ FLOOR this is exact-with-slack; pathological tiny payouts hit the 1e8 anti-grief clamp anyway.
+export const STORAGE_PAYOUT_FLOOR = 100_000_000;  // 1 KAS — assumed min per-output payout for the storage allowance
+export const SETTLE_FEE_MIN = 2_000_000;          // 0.02 KAS floor (= pool-market-settler.js SETTLE_FEE_MIN)
+
+// Deterministic fee for ONE settle TX (aggregate, or one chunk). Pure fn of counts + deploy constants.
+// Clamped [SETTLE_FEE_MIN, MAX_TX_FEE_SOMPI=1e8 SS maxChunkFee ceiling].
+export function computeChunkFee({ nWinners, nFixedOut, hasChange }) {
+  const cm = chunkComputeMass(nWinners, nFixedOut, hasChange);
+  const nOut = nFixedOut + nWinners + (hasChange ? 1 : 0);
+  const storageAllowance = nOut * Math.ceil(STORAGE_MASS_C / STORAGE_PAYOUT_FLOOR);  // amount-independent bound
+  const totalMass = cm.compute + storageAllowance;
+  return Math.min(MAX_TX_FEE_SOMPI, Math.max(SETTLE_FEE_MIN, totalMass * SOMPI_PER_MASS));
 }
 
 // applyKCap: settle_chunk has per-winner merkle for-loop (bound = MAX_WINNERS_PER_CHUNK); settle_aggregate
