@@ -1727,7 +1727,7 @@ export async function unlockBshardClose(args) {
     // root scriptSig: close_commit witness(声明序: c0-c4Sig + rootOutIdx + new_winningSide + new_payoutRoot)+ OP_3 + redeem.
     //   委员 5 sig 从 cmd.witness.sigs_hex(driver 用 baked committee key 对本 TX preimage 签; 4-of-5 → 至少 4 真签, 缺的占位).
     let sigPush = '';
-    for (const s of w.sigs_hex) sigPush += _pushBytes(s);     // 5 sig push (已 sig-encoded)
+    for (const s of w.sigs_hex) sigPush += s;                 // 5 sig 直接 concat(createInputSignature 输出已 push-encoded 66B, 同 unlockPoolSpineP2SH L462/L944; _pushBytes 会 double-push=bug)
     const rootSig = sigPush + _pushInt(w.root_out_idx) + _pushInt(w.new_winning_side) + _pushBytes(w.new_payout_root)
       + '53' + _encodePushDataHex(Buffer.from(cmd.inputs.root.redeem_hex, 'hex'));     // OP_3='53'
 
