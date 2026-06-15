@@ -6,7 +6,8 @@
 // 承重锚 = **零豁免 output-bind**(每 script-create 路径 require(tx.outputs[i].value==newState.pool_value)) + induction
 //   (child.pool_value 创建时绑) + Kaspa Σin==Σout(不可 mint)。genesis 谎值被首次 covenant-spend(fold/close)+共识中和(数学闭, 非 trust)。
 // silverscript 无 self/current-input-index(compile 实证)→ 纯靠 output-bind, spend 侧不 re-bind self。
-// tri-state closed{0=open,1=settled,2=cancelled}: claim(==1) XOR refund(timeout∧!=1) 互斥(ticket spent-once + closed gate)。
+// tri-state closed{0=open,1=settled,2=cancelled} write-once: close(0→1) vs 首refund(0→2 flip, A 修) 抢 closed==0 = market 级 XOR(首发先得原子);
+//   claim gate closed==1 / refund gate closed!=1∧timeout 且置 closed=2 → late-close(req closed==0)被首 refund 永挡 → 杜绝 refund-then-close insolvency+非确定 outcome(F2, NWT/Bettor 双 vantage)。
 // 协议 fee = payoutRoot fee-leaf(off-chain merkle-bound); miner fee = non-pool input(v07 纪律, 不入 value 守恒)。
 
 pragma silverscript ^0.1.0;
@@ -160,6 +161,7 @@ contract PoolShard_fold(
         require(tree_depth >= 0); require(tree_depth <= 16);
         require(merkle_index >= 0);
         require(payout >= 1000);
+        require(payout <= pool_value);                     // minor①(NWT/Bettor 防御性): fail-fast(weld4+共识本就兜负输出, 此条更快更清晰)
 
         // 读 dust-ticket (spent-once; 原语验 ps_tmpl_hash + 取 bettorPk/direction/stake/shardPoolId)
         PoolSideTicket tk = readInputStateWithTemplate(ticketInIdx, ticket_prefix_len, ticket_suffix_len, ps_tmpl_hash);
@@ -205,7 +207,7 @@ contract PoolShard_fold(
         int      ticket_suffix_len
     ) {
         require(closed != 1);                              // 未 settled (settled 走 claim, 互斥)
-        require(tx.time >= (deadline + 7200) * 1000);      // deadline+grace 超时 = 取消
+        require(tx.time >= (deadline + 7200) * 1000);      // deadline+grace 超时才可取消 (防 betting 期早退)
 
         PoolSideTicket tk = readInputStateWithTemplate(ticketInIdx, ticket_prefix_len, ticket_suffix_len, ps_tmpl_hash);
         require(tk.shardPoolId == shard_pool_id);          // ticket 属本 pool
@@ -220,11 +222,11 @@ contract PoolShard_fold(
             local_no:  local_no,
             count:     count,
             pool_value: pool_value - tk.stake,
-            closed:    closed,
+            closed:    2,                                  // ★ F2 修(NWT/Bettor): 首 refund flip 0→2 = 隐式 cancel, write-once 锁死 late-close → close(req closed==0) 永挡 → refund-then-close 的 insolvency+非确定 outcome 杜绝。后续 refund closed==2(!=1✓)续。
             winningSide: winningSide,
             payoutRoot: payoutRoot
         });
-        // ★ output-bind weld 5: pool value == pool_value - stake
+        // ★ output-bind weld 5: pool value == pool_value - stake (closed flip 不动钱, value 守恒)
         require(tx.outputs[poolOutIdx].value == pool_value - tk.stake);
     }
 }
