@@ -70,6 +70,7 @@ export function computeMarketGenesis(o) {
     redeemHexForGenesisState: redeem.toString('hex'),
     scriptHashHex: Buffer.from(blake2b(redeem, { dkLen: 32 })).toString('hex'), // → operator addressFromScriptPublicKey(P2SH(scriptHash))
     genesisState,
+    shardPoolId, // top-level (driver builds per-bettor ticket states {bettorPk,direction,stake,shardPoolId})
     psArtifact, // {templateHashHex, templatePrefix, templateSuffix} for register/claim/refund builders' ps_prefix/ps_suffix
     firstTicketState: { bettorPk: firstBet.bettorPk, direction: firstBet.side, stake: stake.toString(), shardPoolId }, // genesis-create also creates this dust ticket
   };

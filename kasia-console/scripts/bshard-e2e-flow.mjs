@@ -69,11 +69,14 @@ export async function runHappyPath(config) {
   const g = await config.lockToP2SH(genesisAddr, BigInt(m.genesisState.pool_value), config.relays.bettorRelayId);
   out.genesisTxid = g.txId;
   config.log?.(`✓ genesis leaf created at ${genesisAddr}: ${g.txId}`);
-  // first dust ticket (genesis bettor): lock dust to the ticket P2SH = _addressFromRedeem(ticketRedeem). Populate
-  // config.tickets so claim/refund can reference it (J1-confirmed: ticket = PoolSide template splice bettor State).
-  const gTicketRedeem = _ticketRedeemHex(m.psArtifact, m.firstTicketState);
+  // first dust ticket (genesis bettor = config.bettors[0]): lock dust to the ticket P2SH. Populate config.tickets so
+  // claim/refund can reference it (J1-confirmed: ticket = PoolSide template splice bettor State). Construct the ticket
+  // state from config.bettors[0] + shardPoolId (robust — does not rely on m.firstTicketState being threaded through).
+  const b0 = config.bettors[0];
+  const firstTicketState = { bettorPk: b0.bettorPk, direction: b0.side, stake: BigInt(b0.stakeSompi).toString(), shardPoolId: m.shardPoolId || (m.firstTicketState && m.firstTicketState.shardPoolId) };
+  const gTicketRedeem = _ticketRedeemHex(m.psArtifact, firstTicketState);
   const gt = await config.lockToP2SH(config.computeP2SH(gTicketRedeem), BigInt(config.ticketDustSompi || 1000n), config.relays.bettorRelayId);
-  config.tickets[m.firstTicketState.bettorPk] = { txid: gt.outpointTxid, redeemHex: gTicketRedeem };
+  config.tickets[firstTicketState.bettorPk] = { txid: gt.outpointTxid, redeemHex: gTicketRedeem };
   config.log?.(`✓ genesis ticket created: ${gt.txId}`);
   // shard-allocator: post-land record (NO TX NO STATE → only after genesis landed)
   let leafState = { ...m.genesisState };
