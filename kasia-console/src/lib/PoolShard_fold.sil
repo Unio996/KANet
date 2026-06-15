@@ -1,26 +1,25 @@
-// PoolShard_fold.sil — bshard §4 fold covenant (J1, 2026-06-15). FOLD-only 首版验 conserve policy.
+// PoolShard_fold.sil — bshard §4 (a) 同合约: shard 叶 register-accumulate + 层次 fold conserve (J1, 2026-06-15).
 //
-// (a) 同合约 auto conserve_and_bump (J2 撤 (b) 改 (a), DECL SS-safety: compiler-验过 >> 手写).
-// 层次 fold 树: k 个 (shard 叶 或 中间 fold) UTXO → 1 中间/root UTXO 携 (localYes, localNo, count) partial-sum.
+// (a) 叶+fold 同合约(同 cov_id; J2 撤 (b) 改 (a), DECL SS-safety auto conserve_and_bump). 一套合约两 entry:
+//   • register_bet: shard 叶每注 covenant-accumulate localYes/No + count (singleton transition) + **validateOutputStateWithTemplate
+//     绑 PoolSide output**(NWT PoC-1b: 增量==实存 deposit value + 方向绑 + 一注一 PoolSide=double-count). 叶≤32 注封口(count<32).
+//   • fold: k 叶/中间 → 1 partial-sum (== 严格守恒 双量 + leaf_count + root commit). 关池后跑.
 //
-// 结构-阶段对抗审 bake (NWT/J2 PoC):
-//   PoC-1 provenance: auto-pattern OpInputCovenantId(activeInputIndex) 链派生 cov_id (非 witness) → 同-cov_id 集自验.
-//   PoC-2 conserve 命门(NWT): policy 必 **== 非 vanilla >=** (>= = vault fee-从池扣 → winner 短付) + 双量(yes/no 各 ==).
-//     fee 从 non-cov append input (cov conserve 只管 OpCovInputCount 集 → fee-UTXO 在集外 → 池零蚀).
-//   PoC-4 漏片/重计(J2): state 含 count (叶=1, out.count==Σin.count) → root.count==shard_count 关池锚 + UTXO spent-once.
-//   PoC-3 commit(NWT): root (count==shard_count) require blake2b(localYes‖localNo‖market_id‖shard_count)==commit_v2,
-//     globalYes/No = 链上 fold 派生真值 (非 settler/witness).
-//
-// 注: register_bet (叶 covenant-accumulating localYes/No) gated on register↔PoolSide 耦合裁 (flag 给 Bettor/J2), 续填.
+// 对抗审 bake: PoC-1 provenance(auto OpInputCovenantId)/PoC-2 conserve ==双量(非vault>=)/PoC-3 root commit/PoC-4 leaf_count/
+//   PoC-1b register(本文件 register_bet: validateOutputStateWithTemplate 绑实 PoolSide + 值/方向/double-count).
+// 叶累积无溢出(per-shard ≤32 注; stake*(1-side)=stake|0 非真乘). artifact(ps_prefix/suffix/hash)= ctor const(J2 PoolSide-artifact, byte-match).
 
 pragma silverscript ^0.1.0;
 
 contract PoolShard_fold(
-    byte[32] market_id,        // 跨片锚 (commit 绑)
+    byte[32] market_id,        // 跨片锚 (fold commit 绑)
     byte[32] commit_v2,        // root commit 硬校验目标 (= blake2b(globalYes‖globalNo‖market_id‖shard_count))
-    int      shard_count,      // 关池锚: root.count 必 == 此 (全片恰折一次)
-    int      max_fan_in,       // fold 叉数上限 (= 编译期 for-loop 界; J2 mass 实测定 < MAX_OPS 201)
-    // genesis state (叶 = 0/0/0 由 register 累积; 中间/root fold UTXO 由本 cov 产):
+    int      shard_count,      // 关池锚: root.count 必 == 此
+    int      max_fan_in,       // fold 叉数上限 (编译界)
+    // —— register_bet 用: PoolSide expectedTemplateHash(J2 PoolSide-artifact, byte-match). prefix/suffix 走 witness(验 blake2b==此) ——
+    byte[32] ps_tmpl_hash,     // PoolSide expectedTemplateHash(= blake2b(prefix‖suffix)); validateOutputStateWithTemplate 验 witness prefix/suffix 对此
+    int      seal_count,       // 封口数 (= SHARD_SEAL_COUNT=32; count>=此 拒新注)
+    // —— genesis state (叶 = 0/0/0 由 register 累积; 中间/root fold UTXO 由 fold cov 产) ——
     int      init_local_yes,
     int      init_local_no,
     int      init_count
@@ -29,7 +28,56 @@ contract PoolShard_fold(
     int local_no  = init_local_no;
     int count     = init_count;
 
-    // —— fold: k→1 conserve (== 严格守恒, 双量, leaf_count, root commit 硬校验) ——
+    // PoolSide State 布局(= PoolSide_v08_shard 6 显式 State 字段; validateOutputStateWithTemplate 绑此 struct).
+    struct PoolSideState {
+        byte[32] bettorPk;
+        byte[32] spineP2shHash;
+        byte[32] poolMerkleRoot;
+        byte[32] marketMetadataHash;
+        int      direction;            // 0=YES 1=NO (= 本注 side, 绑)
+        int      deadline;
+    }
+
+    // —— entry: register_bet (shard 叶每注 accumulate; singleton transition 花叶→产 bumped 叶 + 验 PoolSide deposit) ——
+    //   NWT PoC-1b: validateOutputStateWithTemplate 验 output[psOutIdx] 真是 PoolSide(template hash+P2SH 原语自验)+ 完整 State
+    //   (bettorPk/方向...)→ 增量 == introspect(实 deposit value) + 方向绑(side→对栏) + 一注一新 PoolSide(double-count).
+    entrypoint function register_bet(
+        int      side,                 // 0=YES 1=NO (= PoolSide.direction, 绑)
+        int      psOutIdx,             // PoolSide deposit output 位
+        int      leafOutIdx,           // 本叶 continuation output 位(builder 控 layout)
+        byte[32] bettorPk,             // 本注 bettor (= PoolSide State, validateOutputStateWithTemplate 绑)
+        byte[32] spineP2shHash,
+        byte[32] poolMerkleRoot,
+        byte[32] marketMetadataHash,
+        int      ps_deadline,
+        byte[]   ps_prefix,            // PoolSide template prefix (witness; 验 blake2b(prefix‖suffix)==ps_tmpl_hash, 假过不了)
+        byte[]   ps_suffix             // PoolSide template suffix (witness)
+    ) {
+        require(count < seal_count);                       // 未封口才收注(count>=seal_count 拒)
+        require(side == 0 || side == 1);
+
+        // PoC-1b: 验 output[psOutIdx] 真是 PoolSide template + 完整 State(方向==side) → 绑实 claimable deposit(非任意 real-KAS).
+        validateOutputStateWithTemplate(psOutIdx, {
+            bettorPk: bettorPk,
+            spineP2shHash: spineP2shHash,
+            poolMerkleRoot: poolMerkleRoot,
+            marketMetadataHash: marketMetadataHash,
+            direction: side,                               // 方向绑: PoolSide.direction == 本注 side
+            deadline: ps_deadline
+        }, ps_prefix, ps_suffix, ps_tmpl_hash);
+
+        int stake = tx.outputs[psOutIdx].value;            // introspect 实 deposit value(链实非 witness)
+        require(stake >= 100000000);                       // 1 KAS min-bet floor
+
+        // 增量 == stake, 方向绑(stake*(1-side)=stake|0, 非真乘无溢; per-shard ≤32 注 总不溢). double-count: 一注一新 PoolSide output.
+        validateOutputState(leafOutIdx, {
+            local_yes: local_yes + stake * (1 - side),
+            local_no:  local_no + stake * side,
+            count:     count + 1
+        });
+    }
+
+    // —— entry: fold (k→1 conserve; == 严格守恒 双量 + leaf_count + root commit 硬校验; 关池后跑) ——
     #[covenant(binding = cov, from = max_fan_in, to = 1, mode = verification)]
     function fold(State[] prev_states, State[] new_states) {
         require(new_states.length == 1);
@@ -43,14 +91,11 @@ contract PoolShard_fold(
             count_sum = count_sum + prev_states[i].count;
         }
 
-        // PoC-2: == 非 >= (双量各严格守恒, 池零 fee-蚀; fee 从 non-cov append input 自动排除).
-        require(new_states[0].local_yes == yes_sum);
+        require(new_states[0].local_yes == yes_sum);       // PoC-2: == 非 >= (双量严格守恒)
         require(new_states[0].local_no == no_sum);
-        // PoC-4: leaf_count 守恒 (叶=1 → root.count==Σ = shard_count = 每片恰折一次).
-        require(new_states[0].count == count_sum);
+        require(new_states[0].count == count_sum);         // PoC-4: leaf_count 守恒
 
-        // PoC-3: root (count==shard_count = 全片聚完) commit 硬校验 — globalYes/No 链上 fold 派生真值.
-        if (count_sum == shard_count) {
+        if (count_sum == shard_count) {                    // PoC-3: root commit 硬校验(globalYes/No 链上派生真值)
             byte[] commit_pre0 = byte[](yes_sum, 16) + byte[](no_sum, 16);
             byte[] commit_pre1 = commit_pre0 + byte[](market_id);
             byte[] commit_pre2 = commit_pre1 + byte[](shard_count, 4);
