@@ -37,7 +37,7 @@ export function buildClaimWitness(payouts, winnerPkHex, pos) {
   const root = buildPayoutTree(payouts).root;
   const climbed = climbPayoutProof(winnerPkHex, payout, merkleIndex, siblings);
   if (!climbed.equals(root)) throw new Error(`claim witness self-verify FAILED: climb != payoutRoot for ${winnerPkHex}`);
-  if (treeDepth > 16) throw new Error(`tree_depth ${treeDepth} > 16 (SS claim_draw require tree_depth <= 16)`);
+  if (treeDepth > 8) throw new Error(`tree_depth ${treeDepth} > 8 (route-split PoolRoot claim merkleMAX 8 = 256-winner/market cap; depth-16 exceeded seal script-units)`);
   for (const [k, v] of [['rootOutIdx', pos?.rootOutIdx], ['payoutOutIdx', pos?.payoutOutIdx], ['ticketInIdx', pos?.ticketInIdx],
     ['ticketPrefixLen', pos?.ticketPrefixLen], ['ticketSuffixLen', pos?.ticketSuffixLen]]) {
     if (typeof v !== 'number' || v < 0) throw new Error(`pos.${k} must be a non-negative int, got ${v}`);

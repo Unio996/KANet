@@ -20,6 +20,8 @@ import { buildFoldWitness, buildFoldCommand } from '../src/lib/pool-fold-builder
 import { buildCloseCommitWitness, buildCloseCommitCommand } from '../src/lib/pool-close-builder.mjs';
 import { buildClaimWitness, buildClaimCommand } from '../src/lib/pool-claim-builder.mjs';
 import { buildRefundWitness, buildRefundCommand } from '../src/lib/pool-refund-builder.mjs';
+import { buildSealToRootWitness, buildSealToRootCommand } from '../src/lib/pool-seal-builder.mjs';
+import { serializePoolShardState } from '../src/lib/pool-shard-state-serialize.mjs';
 import { computeParimutuelPayouts, buildPayoutTree } from '../src/lib/pool-payout-parimutuel.mjs';
 import { serializeI64 } from '../src/lib/pool-payout-root.mjs';
 
@@ -100,27 +102,34 @@ export async function runHappyPath(config) {
     config.tickets[b.bettorPk] = { txid, redeemHex: _ticketRedeemHex(m.psArtifact, cmd.outputs.poolSide_ticket.state) };
   }
 
-  // ③ seal: leafState.count == sealCount (or the test target) → shard foldable. (single-shard e2e: skip multi-shard fold)
-  // ④ fold k→1: for a multi-shard market, fold the sealed shard leaves → root. (single-shard: the leaf IS the root once count==shardCount)
-  // (Real multi-shard fold loops buildFoldTree levels; the minimal e2e can run shardCount=1 so the leaf==root, skipping ④.)
+  // ④ seal_to_root (route-split): leaf (count==shard_count) → PoolRoot carrying full pool KAS + canonical outcome.
+  // Single-shard minimal e2e: the genesis+register leaf IS the single shard → seal directly (multi-shard fold = post-e2e).
+  // ⚠ seal is the route-split MAKE-OR-BREAK: its on-chain script-units (2× cross-template blake2b + overhead, ~8982 est,
+  // margin ~1000) is the live ground truth; if the seal TX is RPC-rejected for script-units, route-split needs reduction.
+  const sealW = buildSealToRootWitness({ rootOutIdx: 0, rootArtifact: m.rootArtifact });
+  const sealCmd = buildSealToRootCommand({ witness: sealW, leafOutpointTxid, leafRedeemHex, leafState, rootInitPayoutRoot: m.rootInitPayoutRoot, funding: [{ outpointTxid: config.feeOutpoint.outpointTxid, address: config.feeOutpoint.address }], leafValueSompi: leafValue, changeAddress: config.changeAddress });
+  out.sealTxid = await sendAndLand(config, config.relays.bettorRelayId, sealCmd, 'seal_to_root (PoolLeaf→PoolRoot — make-or-break units)');
+  // sealed PoolRoot: 7-field {leaf accounts carry, closed:0, winningSide:0, payoutRoot:rootInit}; redeem = rootArtifact splice.
+  const rootState0 = sealCmd.outputs.root.state;
+  const rootRedeemHex = m.rootArtifact.templatePrefix.toString('hex') + serializePoolShardState(rootState0).toString('hex') + m.rootArtifact.templateSuffix.toString('hex');
+  let rootValue = leafValue;
 
-  // ⑤ close_commit: committee 4-of-5 attests winningSide + payoutRoot. payoutRoot computed off-chain (parimutuel).
-  const winners = winnersFromState(leafState, config.winningSide, config.bettors); // {pk, stake} on winning side
-  const payouts = computeParimutuelPayouts(winners, netPoolToSplit(leafState), winnerPoolSompi(winners));
+  // ⑤ close_commit on PoolRoot: committee 4-of-5 attests winningSide + payoutRoot. payoutRoot computed off-chain (parimutuel).
+  const winners = winnersFromState(rootState0, config.winningSide, config.bettors); // {pk, stake} on winning side
+  const payouts = computeParimutuelPayouts(winners, netPoolToSplit(rootState0), winnerPoolSompi(winners));
   const payoutRoot = buildPayoutTree(payouts).root.toString('hex');
-  const cw = buildCloseCommitWitness({ rootOutIdx: 0, winningSide: config.winningSide, payoutRoot, currentRootState: leafState });
-  // committee 4-of-5: operator builds the close TX preimage + collects committee sigs (baked ctor keys c0-c4Pk) →
-  // { sigsHex(5 slots, >=4 valid), txObjPreimage }. Mirrors v07 settle (driver builds preimage, committee signs, relay assembles).
-  const { sigsHex, txObjPreimage } = await config.signCommittee({ phase: 'close_commit', rootOutpointTxid: leafOutpointTxid, rootRedeemHex: leafRedeemHex, closeState: cw.closeState, rootValueSompi: leafValue, feeOutpoint: config.feeOutpoint });
-  const closeCmd = buildCloseCommitCommand({ witness: cw, rootOutpointTxid: leafOutpointTxid, rootRedeemHex: leafRedeemHex, rootValueSompi: leafValue, fee: config.feeOutpoint, sigsHex, txObjPreimage, changeAddress: config.changeAddress });
+  const cw = buildCloseCommitWitness({ rootOutIdx: 0, winningSide: config.winningSide, payoutRoot, currentRootState: rootState0 });
+  // committee 4-of-5: operator builds the close TX preimage + collects committee sigs (baked PoolRoot ctor keys c0-c4Pk).
+  const { sigsHex, txObjPreimage } = await config.signCommittee({ phase: 'close_commit', rootOutpointTxid: out.sealTxid, rootRedeemHex, closeState: cw.closeState, rootValueSompi: rootValue, feeOutpoint: config.feeOutpoint });
+  const closeCmd = buildCloseCommitCommand({ witness: cw, rootOutpointTxid: out.sealTxid, rootRedeemHex, rootValueSompi: rootValue, fee: config.feeOutpoint, sigsHex, txObjPreimage, changeAddress: config.changeAddress });
   out.closeTxid = await sendAndLand(config, config.relays.committeeRelayIds[0], closeCmd, 'close_commit (committee 4-of-5)');
-  let rootState = cw.closeState, rootOutpointTxid = out.closeTxid, rootValue = leafValue;
+  let rootState = cw.closeState, rootOutpointTxid = out.closeTxid;
 
   // ⑥ claim: each winner draws their parimutuel payout from root (serial draw-down). root_final → 0/dust.
   for (const win of payouts) {
     const cwit = buildClaimWitness(payouts, win.pk, { rootOutIdx: 0, payoutOutIdx: 1, ticketInIdx: 1, ticketPrefixLen: m.psArtifact.templatePrefix.length, ticketSuffixLen: m.psArtifact.templateSuffix.length });
     const claimCmd = buildClaimCommand({
-      witness: cwit, rootOutpointTxid, rootRedeemHex: leafRedeemHex, currentRootState: rootState,
+      witness: cwit, rootOutpointTxid, rootRedeemHex, currentRootState: rootState,
       ticketOutpointTxid: ticketOf(win.pk, config).txid, ticketRedeemHex: ticketOf(win.pk, config).redeemHex,
       ticketState: { bettorPk: win.pk, direction: config.winningSide, stake: stakeOf(win.pk, config).toString(), shardPoolId: m.genesisState.shardPoolId },
       psPrefixHex: m.psArtifact.templatePrefix.toString('hex'), psSuffixHex: m.psArtifact.templateSuffix.toString('hex'),
@@ -153,10 +162,10 @@ export async function runPoCInjection(config, baseCmd, mutate, label) {
 function nextLeafState(s, b) {
   const stake = BigInt(b.stakeSompi);
   return {
+    // route-split: PoolLeaf 4-field {local_yes, local_no, count, pool_value} — no outcome fields.
     local_yes: (BigInt(s.local_yes) + stake * BigInt(1 - b.side)).toString(),
     local_no: (BigInt(s.local_no) + stake * BigInt(b.side)).toString(),
     count: Number(s.count) + 1, pool_value: (BigInt(s.pool_value) + stake).toString(),
-    closed: 0, winningSide: s.winningSide, payoutRoot: s.payoutRoot, shardPoolId: s.shardPoolId,
   };
 }
 function drawDownState(s, payout) { return { ...s, pool_value: (BigInt(s.pool_value) - BigInt(payout)).toString() }; }

@@ -21,7 +21,7 @@ import { serializeI64 } from './pool-payout-root.mjs';
 // the unrolled for-loop, so the template hash is k-dependent → a k mismatch breaks claim's
 // readInputStateWithTemplate. J2 件4 mass实测 (2026-06-15): k=16 is conservative (compute 13% / bytecode 40%
 // of caps), max viable ≈32; depth log_16 (10k shards → 4 levels). fold is zero-committee-sig → no 880 wall.
-export const FOLD_FANIN = 16;
+export const FOLD_FANIN = 4; // route-split: PoolLeaf max_fan_in=4 (4-ary fold; k=16 redeem exceeded 9999 script-units)
 
 /**
  * Off-chain fold root commit_v2 — byte-matches PoolShard_fold.sil require(blake2b(...)==commit_v2).
