@@ -93,6 +93,7 @@ contract PoolShard_fold(
         int count_sum = 0;
         int value_sum = 0;
         for (i, 0, prev_states.length, max_fan_in) {
+            require(prev_states[i].closed == 0);           // ★ committee-bypass 修: 禁折已结算/取消子池(closed!=0)→ 防 closed 子池被重折资金卡死
             yes_sum = yes_sum + prev_states[i].local_yes;
             no_sum = no_sum + prev_states[i].local_no;
             count_sum = count_sum + prev_states[i].count;
@@ -102,6 +103,11 @@ contract PoolShard_fold(
         require(new_states[0].local_no == no_sum);
         require(new_states[0].count == count_sum);
         require(new_states[0].pool_value == value_sum);
+        // ★ committee-bypass 修(J2/Bettor/NWT 三方): fold 只能产**开池**; outcome(closed/winningSide/payoutRoot)只 close_commit 4-of-5 委员可设。
+        //   漏约束 = permissionless folder 可造 closed=1+自设 payoutRoot 的 parent/root 绕委员 → claim 掏空整池(M3 新增 3 字段漏补约束)。
+        require(new_states[0].closed == 0);                // 核心: parent 必开池(folder 不能自结算)
+        require(new_states[0].winningSide == 0);           // 开池 canonical zero outcome (determinism)
+        require(new_states[0].payoutRoot == prev_states[0].payoutRoot);   // 继承子池 payoutRoot(子全开=ZERO, 避 ZERO32 literal)
         // ★ output-bind weld 2: parent value == parent.pool_value (parent cov-output 在 outputs[0] builder 约定, e2e 验)
         require(tx.outputs[0].value == new_states[0].pool_value);
         if (count_sum == shard_count) {
