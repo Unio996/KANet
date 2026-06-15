@@ -44,13 +44,16 @@ contract PoolSpine_v08_chunk(
     int      maxWinnersPerChunk,  // = MAX_K (J2 computeSettleChunks 实测定, 本 chunk merkle-proof 循环编译期界)
     int      init_hwm,            // change UTXO genesis HWM (chunk_0 输出 change 起; pool-lock 隐含 hwm==0)
     byte[32] init_plan_commit,    // change UTXO genesis plan_commit (chunk_0 由 committee-sig commit, chunk_i 续读)
-    int      init_total_winners   // change UTXO genesis 总 winner 数 (chunk_0 commit; chunk_i 续读 → 绑 chunk_kind==last)
+    int      init_total_winners,  // change UTXO genesis 总 winner 数 (chunk_0 commit; chunk_i 续读 → 绑 chunk_kind==last)
+    int      maxChunkFee          // ⑦ over-fee 上界常量 (部署 = V07_MAX_FEE=1e8 单源, pool-market-settler.js L2291; 非 witness 两节点同)
 ) {
     // —— 可变 state (change UTXO 携值, 下 chunk readInputState 读 — J2 compile fix: readInputState 须 contract state 字段) ——
     // ★ B 设计三 state 字段 (NWT no-free-witness 不变量: chunk_i 所有 security-critical 从 state 读非 free-witness):
     //   hwm = 已付到的 merkle_index (cross-chunk linkage seg_lo==prev.hwm + resume cursor).
-    //   planCommit = blake2b(全 winner pk+金额 + 段划分 + per-chunk fee-ceiling + winner方向) = committee-attested
-    //     settle 全 plan 承诺 (chunk_0 由 5×committee-sig commit; chunk_i 续读 → 7项 verify against 它, 零 free-witness).
+    //   planCommit = **payoutRoot** (depth-8 blake2b merkle of leaf_k=blake2b(winner pk‖amount[8B LE])) = committee-attested
+    //     winner 付款 plan (chunk_0 由 5×committee-sig sighash commit; chunk_i 续读 → winner identity+amount merkle-proven
+    //     against 它, 零 free-witness). 注: brokerFee/bonds 只 chunk_0(sig-attest 守恒求和); feeCeiling=ctor maxChunkFee
+    //     (非 planCommit); winner方向 由 payoutRoot subsume (只 winning side 进 leaf 集) → 均不在 planCommit (NWT 校准).
     //   totalWinners = 总 winner 数 (绑 ⑤ chunk_kind: last ⟺ seg_hi==totalWinners, 防早 claim last 跳未付, NWT 攻面).
     int hwm = init_hwm;
     byte[32] planCommit = init_plan_commit;
@@ -103,9 +106,9 @@ contract PoolSpine_v08_chunk(
             // committee commitment (绑 dispute_reveal, 同 settle_aggregate ②).
             byte[] cc0 = c0Pk + c1Pk; byte[] cc1 = cc0 + c2Pk; byte[] cc2 = cc1 + c3Pk; byte[] cc3 = cc2 + c4Pk;
             require(blake2b(cc3) == committeePkHash);
-            // planCommit (winner方向 + 全winner pk+金额 + 段划分 + per-chunk fee-ceiling 的 blake2b) 经 5×sig sighash
-            // 覆盖本 scriptSig args = committee-attested. chunk_0 输出 change.planCommit = 此 (validateOutputState ③).
-            // (NWT plan_commit 攻面: chunk_0 once-sig 必 commit 全 chunk plan → chunk_i 无 sig 但 outputs 被授权.)
+            // planCommit (= payoutRoot, winner pk‖amount[8B LE] 的 depth-8 merkle root) 经 5×sig sighash 覆盖本
+            // scriptSig args = committee-attested. chunk_0 输出 change.planCommit = 此 (validateOutputState ③).
+            // (NWT plan_commit 攻面: chunk_0 once-sig commit payoutRoot → chunk_i 无 sig 但 winner outputs[pk+amount] 被授权.)
         }
         // chunk_i (chunk_kind != 0): 无 committee-sig. planCommit(=payoutRoot) 从 input change state 读,
         //   一切 security-critical verify against state.planCommit (零 free-witness).
@@ -187,10 +190,26 @@ contract PoolSpine_v08_chunk(
         }
         // 末 chunk (chunk_kind==2): seg_hi == 总 winner 数 (全付完, 由守恒④ change==0 蕴含); 无 change 输出 (hwm 链终).
 
-        // ④ 守恒到本 chunk 输入 (非全 pool; 找零链逐 chunk 递减): Σ(本 chunk winner outputs [+ chunk_0: broker+5committee])
-        //    + minerFee + change == 本 chunk 输入 value (= 上个 change 或 pool-lock), 逐 sompi.
-        //    (introspection tx.inputs[0].value + tx.outputs[*].value 求和校验; 草稿略求和体. 全 BigInt sompi 零 float.)
-        //    末 chunk: change 项 = 0.
+        // ④守恒 + ⑦fee bound (纯 introspection, 防 over-mint + over-fee 短付 change):
+        //   minerFee = input − Σoutputs (隐式矿工费). 守恒: Σ(本 chunk outputs) + minerFee == 本 chunk input value
+        //   (= 上个 change 或 pool-lock). require minerFee>=0 (零 mint: Σoutputs<=input) + minerFee<=maxChunkFee
+        //   (⑦ over-fee 防护: chunk_i 无 sig 时防 settler 抬 fee 压 change → 短付下 chunk; maxChunkFee=V07_MAX_FEE 单源).
+        //   broker+5committee (chunk_0) committee-sig sighash attest → 守恒 Σ 求和即可不单独 commit (Bettor/NWT).
+        int sumOut = 0;
+        for (k, 0, segLen, maxWinnersPerChunk) {
+            sumOut = sumOut + tx.outputs[wOutBase + k].value;   // Σ winner outputs (amount 已 amount-verify 绑)
+        }
+        if (chunk_kind == 0) {
+            // chunk_0: + broker(out 0) + 5 committee bond(out 1..5) (committee-sig sighash attest)
+            sumOut = sumOut + tx.outputs[0].value + tx.outputs[1].value + tx.outputs[2].value
+                            + tx.outputs[3].value + tx.outputs[4].value + tx.outputs[5].value;
+        }
+        if (chunk_kind != 2) {
+            sumOut = sumOut + tx.outputs[change_idx].value;     // 非末 chunk: + change (末 chunk change==0 无输出)
+        }
+        int minerFee = tx.inputs[0].value - sumOut;
+        require(minerFee >= 0);                                  // 零 mint: Σoutputs <= input
+        require(minerFee <= maxChunkFee);                       // ⑦ over-fee 防护 (=V07_MAX_FEE 单源 ctor)
 
         // ⑤ min-pot / losing-side floor / commit anchor: 复用 settle_aggregate ⑦/⑦b/⑨ (全局值跨 chunk 不变, chunk_0 验即可).
     }
