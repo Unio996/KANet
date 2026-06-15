@@ -76,8 +76,8 @@ contract PoolSpine_v08_chunk(
         int      chunk_kind,             // 0=first, 1=mid, 2=last
         int      seg_lo,                 // 本 chunk winner 子段起 (merkle_index, inclusive)
         int      seg_hi,                 // 本 chunk winner 子段止 (exclusive); 段= [seg_lo, seg_hi)
-        // —— change 续锁 (非末 chunk; validateOutputState 验 output 续【本 covenant 自身 cov_id】非 witness hash) ——
-        int      change_idx,             // change 输出位 (J2 layout 定); chunk_kind==last 时无 change
+        // —— change 续锁 (非末 chunk; change index 确定=wOutBase+segLen 派生, 非 free param[(c) 防指错位]; validateOutputState
+        //    验 output 续【本 covenant 自身 cov_id】非 witness hash; 原 change_idx free param 删) ——
         // ⚠ Bettor CRITICAL fix: 原 `byte[32] spine_p2sh_hash` witness 参数已删 (spender 自填 tautology 偷余额破口);
         //    正解 validateOutputState 续【OpInputCovenantId 本 covenant 自身身份】非自由 witness hash (同 #26 bshard cov 续链).
         // —— winner-subset merkle 证 (本段 [seg_lo,seg_hi) 每 winner; merkle-path 是唯一许的 free-witness: 自暴 against
@@ -136,6 +136,7 @@ contract PoolSpine_v08_chunk(
         // winner output 基址: chunk_0 前 6 输出=broker+5 committee bond, winner 从 idx 6 起; chunk_i winner 从 idx 0 起.
         int wOutBase = 0;
         if (chunk_kind == 0) { wOutBase = 6; }
+        int changeIdx = wOutBase + segLen;                // (c) change 确定 index = winner 段后 (非 free param, ③+④ 共用)
         for (k, 0, segLen, maxWinnersPerChunk) {
             int widx = seg_lo + k;                         // merkle_index 连续派生 (链锚, 非 free-witness)
             require(widx >= 0); require(widx < 256);       // depth-8 → 256 叶
@@ -185,30 +186,35 @@ contract PoolSpine_v08_chunk(
         if (chunk_kind != 2) {
             // 非末 chunk: change 续锁本 covenant (cov_id 自验) + 携全 state {hwm=seg_hi, planCommit, totalWinners} 续延
             //   (planCommit/totalWinners 跨 chunk 不变 = 续传同一 committee-attested plan; hwm 链式递进).
-            require(tx.outputs[change_idx].value > 0);                          // change>0 (非末 → 还有未付 winner)
-            validateOutputState(change_idx, { hwm: seg_hi, planCommit: effPlanCommit, totalWinners: effTotalWinners });
+            require(tx.outputs[changeIdx].value > 0);                          // change>0 (非末 → 还有未付 winner)
+            validateOutputState(changeIdx, { hwm: seg_hi, planCommit: effPlanCommit, totalWinners: effTotalWinners });
         }
         // 末 chunk (chunk_kind==2): seg_hi == 总 winner 数 (全付完, 由守恒④ change==0 蕴含); 无 change 输出 (hwm 链终).
 
-        // ④守恒 + ⑦fee bound (纯 introspection, 防 over-mint + over-fee 短付 change):
-        //   minerFee = input − Σoutputs (隐式矿工费). 守恒: Σ(本 chunk outputs) + minerFee == 本 chunk input value
-        //   (= 上个 change 或 pool-lock). require minerFee>=0 (零 mint: Σoutputs<=input) + minerFee<=maxChunkFee
-        //   (⑦ over-fee 防护: chunk_i 无 sig 时防 settler 抬 fee 压 change → 短付下 chunk; maxChunkFee=V07_MAX_FEE 单源).
-        //   broker+5committee (chunk_0) committee-sig sighash attest → 守恒 Σ 求和即可不单独 commit (Bettor/NWT).
+        // ④守恒 (J2 6 查, 含关键 output-count bound 防 steal-output) + ⑦fee:
+        //   ⚠ 纯 Σoutputs+minerFee==input 是 consensus-free 白给(共识已保证), **不防 steal-output**: settler 可造
+        //   winners(绑)+change(短付)+额外偷币 output, Σ 仍成立. **正解 = (d) output-count bound**: 输出数必 ==
+        //   预期(winners + chunk_0:broker+5committee + 非末:1 change), 无额外 output = 偷币 output 进不来.
+        //   change index 确定 = wOutBase+segLen (winner 段后第一个), 非 free param (防 settler 指错位).
+        // (d) ★output-count bound (J2/NWT keystone 关键缺的牙齿): 输出数 == wOutBase + segLen + (非末? 1 change : 0). 防额外 steal-output.
+        int expectedOutCount = wOutBase + segLen;
+        if (chunk_kind != 2) { expectedOutCount = expectedOutCount + 1; }   // 非末: +1 change
+        require(tx.outputs.length == expectedOutCount);
+        // ⑦fee bound: minerFee = input − Σoutputs ≤ maxChunkFee (=V07_MAX_FEE 单源 ctor; chunk_i 无 sig 防 over-fee 短付).
+        //   Σoutputs = Σ winner(amount 绑) + chunk_0:broker+5committee(sighash attest) + 非末:change. (d)保证无额外 output.
         int sumOut = 0;
         for (k, 0, segLen, maxWinnersPerChunk) {
             sumOut = sumOut + tx.outputs[wOutBase + k].value;   // Σ winner outputs (amount 已 amount-verify 绑)
         }
         if (chunk_kind == 0) {
-            // chunk_0: + broker(out 0) + 5 committee bond(out 1..5) (committee-sig sighash attest)
             sumOut = sumOut + tx.outputs[0].value + tx.outputs[1].value + tx.outputs[2].value
-                            + tx.outputs[3].value + tx.outputs[4].value + tx.outputs[5].value;
+                            + tx.outputs[3].value + tx.outputs[4].value + tx.outputs[5].value;   // broker+5committee
         }
         if (chunk_kind != 2) {
-            sumOut = sumOut + tx.outputs[change_idx].value;     // 非末 chunk: + change (末 chunk change==0 无输出)
+            sumOut = sumOut + tx.outputs[changeIdx].value;      // 非末: + change (确定 index)
         }
         int minerFee = tx.inputs[0].value - sumOut;
-        require(minerFee >= 0);                                  // 零 mint: Σoutputs <= input
+        require(minerFee >= 0);                                  // 零 mint (consensus 白给, 留作显式)
         require(minerFee <= maxChunkFee);                       // ⑦ over-fee 防护 (=V07_MAX_FEE 单源 ctor)
 
         // ⑤ min-pot / losing-side floor / commit anchor: 复用 settle_aggregate ⑦/⑦b/⑨ (全局值跨 chunk 不变, chunk_0 验即可).
