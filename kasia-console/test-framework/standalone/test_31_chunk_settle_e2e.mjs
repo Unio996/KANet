@@ -47,19 +47,20 @@ function mkWinners(n) {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// Phase A (§8.1) — cross-node consensus 前置检 (RUNNABLE NOW): 2-assert byte-equal.
-//   NWT refinement: segmentation=settler-chosen 非共识; 真共识值 = ctor16-P2SH + payoutRoot.
-//   此处验 payoutRoot byte-equal (两节点 = 两次独立 build 同 winners → byte-identical) + chunk-plan determinism bonus.
+// Phase A (§8.1) — **off-chain 函数确定性 smoke + 结构验** (NWT gap2: same-process 2-build = 函数确定性,
+//   非实跨节点). 真共识值 = {ctor16-P2SH, payoutRoot} (§8.1 2-assert); 此处验二者**函数确定性** (同输入→同输出)
+//   + chunk-plan determinism. **实跨节点 byte-equal (:3300 算 vs :3200 算 vs 比) = Phase A-cross (GATED 双节点部署)**.
+//   smoke 过 = 必要非充分 (函数确定 → 两节点同代码同输入必同输出); 实跨节点比对在 dual-node phase 坐实.
 // ═════════════════════════════════════════════════════════════════════════════
-function phaseA_precheck() {
-  console.log('\n── Phase A (§8.1) cross-node consensus 前置检 [RUNNABLE] ──');
+async function phaseA_precheck() {
+  console.log('\n── Phase A (§8.1) off-chain 函数确定性 smoke + 结构 [RUNNABLE; 实跨节点=Phase A-cross GATED] ──');
   const winners = mkWinners(N_WINNERS);
 
-  // ① payoutRoot byte-equal (node A vs node B = 两次独立 build) — 真跨节点共识值, committee 签它.
+  // ① payoutRoot 函数确定性 (同进程 2-build smoke; NWT gap2: 非实跨节点, 实跨节点在 dual-node phase).
   const rootA = payoutRoot(winners).toString('hex');
-  const rootB = payoutRoot(winners).toString('hex');   // 模拟另一节点独立 build
-  if (rootA === rootB && rootA.length === 64) ok(`payoutRoot byte-equal (${rootA.slice(0, 16)}..)`);
-  else bad('payoutRoot byte-equal', `A=${rootA} B=${rootB}`);
+  const rootB = payoutRoot(winners).toString('hex');
+  if (rootA === rootB && rootA.length === 64) ok(`payoutRoot 函数确定性 smoke (${rootA.slice(0, 16)}.., 2-build identical)`);
+  else bad('payoutRoot 确定性', `A=${rootA} B=${rootB}`);
 
   // ② merkle-proof re-climb == payoutRoot (= SS climb replica; 每 winner proof 自洽 → settle 时 SS 验得过).
   let climbFails = 0;
@@ -152,10 +153,25 @@ export function assertResumeCursor(unspentUtxos) {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
+// Phase A-cross (§8.1 实跨节点 2-assert) — NWT gap1+gap2: 真共识值 = {payoutRoot, ctor16-P2SH} 两值,
+//   **实跨节点** byte-equal (:3300 各算 + :3200 各算 + 比对), 非同进程 smoke. [GATED 双节点部署].
+// ═════════════════════════════════════════════════════════════════════════════
+function phaseAcross_dualnode(/* ctx */) {
+  console.log('\n── Phase A-cross (§8.1 实跨节点 2-assert) [GATED 双节点] ──');
+  // TODO(双节点): :3300 + :3200 对**同市场同 winners** 各算 → emit {payoutRoot, p2shHash} → 比对 byte-equal.
+  //   ① payoutRoot byte-equal (两节点 computePoolPayouts→payoutRoot 同; committee 签它 = 真共识值).
+  //   ② spine P2SH byte-equal (两节点 computeSpineP2SH_v08(ctor16)→同 P2SH = 资金锁址命门; gate(a) 已验单节点
+  //      builder==silverc, 此处验**两节点**互等). 任一不等 = 禁跑 e2e (mid-flight fork 比 pre-fail 贵).
+  // 注: Phase A(上) = 单进程函数确定性 smoke (必要非充分); Phase A-cross = 充分实跨节点共识验.
+  skip('实跨节点 2-assert (payoutRoot + ctor16-P2SH, :3300 vs :3200 byte-equal)', '双节点部署 (gate(a) 已验单节点 builder==silverc)');
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
 async function main() {
   console.log('=== #31 chunked-settle e2e harness (§8) — RUNNABLE 前置 + GATED on-chain ===');
-  const { winners, root, plan } = phaseA_precheck();
+  const { winners, root, plan } = await phaseA_precheck();
   phaseB_conservation(winners, plan);
+  phaseAcross_dualnode();
   phaseC_onchain_settle();
   phaseD_kill_resume();
 
