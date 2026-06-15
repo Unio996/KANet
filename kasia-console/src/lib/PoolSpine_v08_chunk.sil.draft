@@ -109,6 +109,29 @@ contract PoolSpine_v08_chunk(
             // committee commitment (绑 dispute_reveal, 同 settle_aggregate ②).
             byte[] cc0 = c0Pk + c1Pk; byte[] cc1 = cc0 + c2Pk; byte[] cc2 = cc1 + c3Pk; byte[] cc3 = cc2 + c4Pk;
             require(blake2b(cc3) == committeePkHash);
+            // ★ broker(out0)+committee(out1-5) 显式 P2PK+floor 验 (Bettor 发现, J1 终裁 ADD, NWT 决定性论点 + J2 认 ④核 miss):
+            //   闭 settle_chunk chunk_0 比 v07 弱的回归. 此前 broker/committee 仅靠 ①committee sighash + ④守恒 + (d)output-count
+            //   — 但 sighash 只证"committee 同意了此 TX", 恶意 4-of-5 可同意一个 broker 付自己/超付自身 bond 的 TX (它们签了=sig 过).
+            //   只有显式 require(out==P2PK(broker/ci)+floor) 才挡恶意 committee 改址/值 (v07 settle_aggregate L395-417 同款防护).
+            //   恶意 4-of-5 威胁面: 不仅铸假 winner(documented), 此前还能挪 broker fee+超付 committee bond → 显式检收口回 v07-equivalent.
+            byte[34] brokerLock0 = new ScriptPubKeyP2PK(pubkey(brokerPk));
+            require(tx.outputs[0].scriptPubKey == byte[](brokerLock0));
+            require(tx.outputs[0].value >= 1000);                       // broker dust floor (同 settle_aggregate L257)
+            byte[34] oLock0 = new ScriptPubKeyP2PK(pubkey(c0Pk));
+            require(tx.outputs[1].scriptPubKey == byte[](oLock0));
+            require(tx.outputs[1].value >= oracleBondAmount);
+            byte[34] oLock1 = new ScriptPubKeyP2PK(pubkey(c1Pk));
+            require(tx.outputs[2].scriptPubKey == byte[](oLock1));
+            require(tx.outputs[2].value >= oracleBondAmount);
+            byte[34] oLock2 = new ScriptPubKeyP2PK(pubkey(c2Pk));
+            require(tx.outputs[3].scriptPubKey == byte[](oLock2));
+            require(tx.outputs[3].value >= oracleBondAmount);
+            byte[34] oLock3 = new ScriptPubKeyP2PK(pubkey(c3Pk));
+            require(tx.outputs[4].scriptPubKey == byte[](oLock3));
+            require(tx.outputs[4].value >= oracleBondAmount);
+            byte[34] oLock4 = new ScriptPubKeyP2PK(pubkey(c4Pk));
+            require(tx.outputs[5].scriptPubKey == byte[](oLock4));
+            require(tx.outputs[5].value >= oracleBondAmount);
             // planCommit (= payoutRoot, winner pk‖amount[8B LE] 的 depth-8 merkle root) 经 5×sig sighash 覆盖本
             // scriptSig args = committee-attested. chunk_0 输出 change.planCommit = 此 (validateOutputState ③).
             // (NWT plan_commit 攻面: chunk_0 once-sig commit payoutRoot → chunk_i 无 sig 但 winner outputs[pk+amount] 被授权.)
