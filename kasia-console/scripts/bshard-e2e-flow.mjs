@@ -74,7 +74,7 @@ export async function runHappyPath(config) {
   const b0 = config.bettors[0];
   const firstTicketState = { bettorPk: b0.bettorPk, direction: b0.side, stake: BigInt(b0.stakeSompi).toString(), shardPoolId: m.shardPoolId || (m.firstTicketState && m.firstTicketState.shardPoolId) };
   const gTicketRedeem = _ticketRedeemHex(m.psArtifact, firstTicketState);
-  const gt = await config.lockToP2SH(config.computeP2SH(gTicketRedeem), BigInt(config.ticketDustSompi || 1000n), config.relays.bettorRelayId);
+  const gt = await config.lockToP2SH(config.computeP2SH(gTicketRedeem), BigInt(config.ticketDustSompi || 20000000n), config.relays.bettorRelayId); // ~0.2 KAS: true-dust fails storage mass (∝1/value)
   config.tickets[firstTicketState.bettorPk] = { txid: gt.outpointTxid, redeemHex: gTicketRedeem };
   config.log?.(`✓ genesis ticket created: ${gt.txId}`);
   // shard-allocator: post-land record (NO TX NO STATE → only after genesis landed)
@@ -87,9 +87,11 @@ export async function runHappyPath(config) {
   for (const b of config.bettors.slice(1)) {
     const w = buildRegisterWitness({ side: b.side, stake: BigInt(b.stakeSompi), leafOutIdx: 0, psOutIdx: 1, bettorPk: b.bettorPk, psArtifact: m.psArtifact });
     const cmd = buildRegisterCommand({
-      witness: w, leafAddress: config.computeP2SH(leafRedeemHex), leafOutpointTxid, leafRedeemHex, leafValueSompi: leafValue,
+      witness: w, leafOutpointTxid, leafRedeemHex, currentLeafState: leafState, leafValueSompi: leafValue,
       bettorFunding: [{ outpointTxid: b.fundingOutpoint.txid, address: b.fundingOutpoint.address }],
-      leafContinuationState: nextLeafState(leafState, b), ticketDustSompi: 1000n, shardPoolId: m.genesisState.shardPoolId, changeAddress: b.changeAddress,
+      leafContinuationState: nextLeafState(leafState, b),
+      ticketDustSompi: config.ticketDustSompi || 20000000n, // ~0.2 KAS: true-dust (1000 sompi) fails storage mass (∝1/value)
+      shardPoolId: m.shardPoolId, changeAddress: b.changeAddress,
     });
     const txid = await sendAndLand(config, config.relays.bettorRelayId, cmd, `register bettor ${b.bettorPk.slice(0, 8)}`);
     out.registerTxids.push(txid);
