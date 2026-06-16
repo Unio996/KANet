@@ -816,6 +816,17 @@ export async function derivePolymarketVote(offer) {
 //   silent_timeout → refund / forfeit_1 per area 4. operator can manually override
 //   via pool.js vote endpoint before silent_timeout if they reach a determination.
 //   Qwen Rule 11: enable_thinking=false 必加 (= 漏会 60-120s timeout)
+// 403-flood root-fix (KANet-UI single-writer, Owner MUST-DO 2026-06-16): per-URL cache of FINAL
+// (immutable) extracted source evidence. Without it the voter (parallel-judgment audit loop + main
+// vote) re-fetches already-resolved games every tick → self-inflicted egress burst → ESPN
+// token-bucket 403 → cross-node committee members can't vote → quorum stalls (= fgx2k 2/5 实事故).
+// Determinism guard (NWT review): ONLY clean evidence is cached, and extractEvidence returns clean
+// ONLY when the game is FINAL (null = not-final → ABSTAIN, never cached). So no pre-final transient
+// is ever stored → no stale-cache fork; cached value = same immutable source data both nodes fetch
+// → same evidence → same vote. whole-repo (both nodes' voter, per cross-node-whole-repo-sync).
+const _finalEvidenceCache = new Map();  // url → { evidence_text, cachedAt }
+const FINAL_EVIDENCE_TTL_MS = 6 * 60 * 60 * 1000;  // 6h — final game results are immutable; bounds memory
+
 export async function deriveKanetNativeVote(offer, spec) {
   let url = spec?.data_source_canonical;
   if (!url || typeof url !== 'string') {
@@ -836,6 +847,13 @@ export async function deriveKanetNativeVote(offer, spec) {
   let evidence_text = '';
   let evidence_url = url;
   if (url.startsWith('http://') || url.startsWith('https://')) {
+    // 403-flood root-fix: serve FINAL evidence from cache (skip fetch) so audit loop + main vote
+    // don't re-hit the source every tick. Cache holds ONLY final results (populated below), so a hit
+    // is always an immutable resolved-game outcome — never a pre-final transient.
+    const _cachedFinal = _finalEvidenceCache.get(url);
+    if (_cachedFinal && (Date.now() - _cachedFinal.cachedAt) < FINAL_EVIDENCE_TTL_MS) {
+      evidence_text = _cachedFinal.evidence_text;
+    } else {
     try {
       const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
       if (!res.ok) return { ok: false, reason: `kanet_native source HTTP ${res.status}` };
@@ -861,6 +879,9 @@ export async function deriveKanetNativeVote(offer, spec) {
           return { ok: true, outcome: 'ABSTAIN', extractor_kind_used: 'no-extractor-match', reason: `URL ${url} not in extractor known-list (= 框架不识此源)` };
         }
         evidence_text = clean;
+        // FINAL (clean evidence ⟺ game over) → cache so subsequent ticks skip the fetch (stops the
+        // self-DoS burst). Only immutable resolved-game evidence reaches here (null = not-final above).
+        _finalEvidenceCache.set(url, { evidence_text: clean, cachedAt: Date.now() });
       } catch (e) {
         // Defensive: extractor 模块自身异常 → ABSTAIN (= 不假装能判).
         console.warn(`[deriveKanetNative] extractor exception ${e.message}, ABSTAIN`);
@@ -868,6 +889,7 @@ export async function deriveKanetNativeVote(offer, spec) {
       }
     } catch (e) {
       return { ok: false, reason: `kanet_native fetch fail: ${e.message}` };
+    }
     }
   } else {
     // free-text description path — 用 spec 5 字段 作 evidence
