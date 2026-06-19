@@ -1549,12 +1549,15 @@ function _appendChange(orderedOut, matched, changeAddress) {
   return orderedOut;
 }
 
-// 取 UTXO by outpoint txid at a P2SH/address (单一匹配).
-async function _matchUtxo(rpc, address, outpointTxid) {
+// 取 UTXO by outpoint at a P2SH/address. outpointIndex 可选: 同 txid 同 addr 可有多 UTXO
+// (relay 给自己 addr transfer = target+change 2 个) → 用 outpoint index 消歧 (KANet-UI 2026-06-19, seal/register funding 管道).
+// backward-compat: 不传 index (P2SH 唯一 addr 调用点) → 仅按 txid, 行为不变; 旧 funding 命令无 index (undefined != null = false) 亦不变.
+async function _matchUtxo(rpc, address, outpointTxid, outpointIndex = null) {
   const { entries } = await rpc.getUtxosByAddresses([address]);
-  const hits = (entries || []).filter(e => e.outpoint.transactionId === outpointTxid);
-  if (hits.length === 0) throw new Error(`UTXO not found at ${address} for tx ${outpointTxid}`);
-  if (hits.length > 1) throw new Error(`ambiguous ${hits.length} UTXOs at ${address} from ${outpointTxid}`);
+  let hits = (entries || []).filter(e => e.outpoint.transactionId === outpointTxid);
+  if (outpointIndex != null) hits = hits.filter(e => Number(e.outpoint.index) === Number(outpointIndex));
+  if (hits.length === 0) throw new Error(`UTXO not found at ${address} for tx ${outpointTxid}${outpointIndex != null ? `:${outpointIndex}` : ''}`);
+  if (hits.length > 1) throw new Error(`ambiguous ${hits.length} UTXOs at ${address} from ${outpointTxid} (pass outpoint index to disambiguate)`);
   return hits[0];
 }
 
@@ -1570,7 +1573,7 @@ export async function unlockBshardRegister(args) {
   try {
     const leafUtxo = await _matchUtxo(rpc, _addressFromRedeem(cmd.inputs.leaf.redeem_hex, networkId), cmd.inputs.leaf.outpointTxid);   // P2SH 地址 = hash(redeem)
     const fundUtxos = [];
-    for (const f of (cmd.inputs.funding || [])) fundUtxos.push(await _matchUtxo(rpc, f.address, f.outpointTxid));
+    for (const f of (cmd.inputs.funding || [])) fundUtxos.push(await _matchUtxo(rpc, f.address, f.outpointTxid, f.index));
 
     // 输出地址 relay 自算 per-state (忽略 cmd.address)
     const newLeafAddr = _continuationAddress(cmd.inputs.leaf.redeem_hex, _serializeLeafStateHex(cmd.outputs.leaf_continuation.state), networkId);
@@ -1860,15 +1863,20 @@ export async function unlockBshardSeal(args) {
   try {
     const leafUtxo = await _matchUtxo(rpc, _addressFromRedeem(cmd.inputs.leaf.redeem_hex, networkId), cmd.inputs.leaf.outpointTxid);   // P2SH 地址 = hash(redeem)
     const fundUtxos = [];
-    for (const f of (cmd.inputs.funding || [])) fundUtxos.push(await _matchUtxo(rpc, f.address, f.outpointTxid));
+    for (const f of (cmd.inputs.funding || [])) fundUtxos.push(await _matchUtxo(rpc, f.address, f.outpointTxid, f.index));
     const matched = [leafUtxo, ...fundUtxos];
 
     // root 输出地址 relay 自算 (foreign-template; 忽略 cmd.address). sealed state = builder 供 7-field {carry account + closed:0/winningSide:0/payoutRoot:init}.
     const rootAddr = _foreignTemplateAddress(w.root_prefix_hex, _serializeRootStateHex(cmd.outputs.root.state), w.root_suffix_hex, networkId);
 
-    // leaf scriptSig: seal_to_root witness(声明序: rootOutIdx, root_prefix, root_suffix) + selector OP_3 + redeem reveal. (无 sig: output 约束到 canonical root)
+    // leaf scriptSig: seal_to_root witness(声明序: rootOutIdx, root_prefix, root_suffix) + selector + redeem reveal. (无 sig: output 约束到 canonical root)
+    // selector = seal_to_root 在【本合约】的 ABI entry index (covenant fold 也占槽):
+    //   PoolLeaf: register=OP_0/__leader_fold=OP_1/__delegate_fold=OP_2/seal_to_root=entry3=OP_3='53' (default).
+    //   FoldNode: fold=entry0/seal_to_root=entry1=OP_1='51' (FoldNode.sil L52/L82, J2 实查 + UI 核 entrypoint 序).
+    // 错 selector → dispatch no-match → OpFalse OpVerify → VerifyError(seal body 不执行). caller 经 cmd.inputs.leaf.seal_selector_hex 指定. (KANet-UI 2026-06-19)
+    const sealSelector = cmd.inputs.leaf.seal_selector_hex || '53';
     const leafSig = _pushInt(w.root_out_idx) + _pushBytes(w.root_prefix_hex) + _pushBytes(w.root_suffix_hex)
-      + '53' + _encodePushDataHex(Buffer.from(cmd.inputs.leaf.redeem_hex, 'hex'));     // seal_to_root=OP_3='53'
+      + sealSelector + _encodePushDataHex(Buffer.from(cmd.inputs.leaf.redeem_hex, 'hex'));
 
     const outputs = [];
     outputs[w.root_out_idx] = new TransactionOutput(BigInt(cmd.outputs.root.amountSompi), payToAddressScript(new Address(rootAddr)));
