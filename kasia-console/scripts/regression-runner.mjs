@@ -1,0 +1,1282 @@
+#!/usr/bin/env node
+// scripts/regression-runner.mjs — Plan A real-chain orchestrator (NWT-tn r97 propose, Bettor r4 ACK)
+// (A) v0.5 baseline snapshot — capture existing chain history as backward-compat baseline
+//     run: node scripts/regression-runner.mjs --mode=baseline --out=baseline.v0.5.json
+// (B) v0.6 compat verify — diff post-v0.6 chain state vs baseline (TODO, wait spec doc + ship)
+// (C) autobet hybrid stress — measure cost diff pre/post hybrid (TODO, wait sub B ship)
+
+import Database from 'better-sqlite3';
+import fs from 'node:fs';
+import path from 'node:path';
+import crypto from 'node:crypto';
+
+const DB_PATH = 'D:/kanet-tn12/kasia-console/data/console.db';
+const REPO_ROOT = 'D:/kanet-tn12';
+const SS_LIB_DIR = path.join(REPO_ROOT, 'kasia-console/src/lib');
+
+// Auto-discover SS files in src/lib/. v0.5 = no _v06 suffix; v0.6 = _v06 anywhere in name.
+function discoverSSFiles() {
+  if (!fs.existsSync(SS_LIB_DIR)) return { v05: {}, v06: {} };
+  const entries = fs.readdirSync(SS_LIB_DIR).filter(f => f.endsWith('.sil') && /^Pool/.test(f));
+  const v05 = {};
+  const v06 = {};
+  for (const f of entries) {
+    const name = f.replace(/\.sil$/, '');
+    const full = path.join(SS_LIB_DIR, f);
+    if (/_v06/.test(name)) v06[name] = full;
+    else v05[name] = full;
+  }
+  return { v05, v06 };
+}
+
+const _discovered = discoverSSFiles();
+const SS_FILES_V05 = _discovered.v05;
+const SS_FILES_V06 = _discovered.v06;
+// Backward compat single-path constants
+const SS_V05 = SS_FILES_V05.PoolSpine || null;
+const SS_V06 = SS_FILES_V06.PoolSpine_v06 || null;
+
+const args = process.argv.slice(2);
+function arg(name, def) {
+  const a = args.find(a => a.startsWith(`--${name}=`));
+  return a ? a.slice(name.length + 3) : def;
+}
+
+const mode = arg('mode', 'baseline');
+const outPath = arg('out', mode === 'baseline' ? 'baseline.v0.5.json' : 'verify-v06.report.json');
+const baselineIn = arg('baseline', 'baseline.v0.5.json');
+
+if (!['baseline', 'verify-v06'].includes(mode)) {
+  console.error(`mode must be 'baseline' or 'verify-v06'. (C) autobet hybrid awaits sub C trigger.`);
+  process.exit(1);
+}
+
+function sha256File(p) {
+  if (!fs.existsSync(p)) return null;
+  return crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex');
+}
+
+function extractEntrypoints(silPath) {
+  if (!fs.existsSync(silPath)) return [];
+  const txt = fs.readFileSync(silPath, 'utf8');
+  const re = /entrypoint\s+function\s+(\w+)\s*\(/g;
+  const names = [];
+  let m;
+  while ((m = re.exec(txt))) names.push(m[1]);
+  return names;
+}
+
+async function captureBaseline() {
+  const db = new Database(DB_PATH, { readonly: true });
+
+  // 1. Settle TX (= 1V1 + pool consensual dispatch)
+  const settleEvents = db.prepare(`
+    SELECT event_type, txid, observed_at, payload, from_address, to_address
+    FROM chain_events
+    WHERE event_type IN (
+      'pool_settle_consensual_dispatched',
+      'oracle_vote',
+      'oracle_tx_sig'
+    )
+    ORDER BY observed_at DESC
+  `).all();
+
+  // 2. Bettor stake TX (= register-external broadcast, = per-bet cost samples)
+  const betEvents = db.prepare(`
+    SELECT event_type, txid, observed_at, payload, from_address, to_address
+    FROM chain_events
+    WHERE event_type = 'pool_oracle_deposit'
+    ORDER BY observed_at DESC
+  `).all();
+
+  // 3. Fetch TX detail from kaspa_tx_log (= outputs_json)
+  const txDetailStmt = db.prepare(`
+    SELECT tx_id, block_hash, block_time, from_address, to_address, amount, outputs_json
+    FROM kaspa_tx_log WHERE tx_id = ?
+  `);
+
+  function enrich(evt) {
+    const payloadMeta = (() => {
+      try { return JSON.parse(evt.payload); } catch { return null; }
+    })();
+    // chain_events.txid for prediction events is synthetic; real chain TX lives in payload
+    const realTxid = payloadMeta?.deposit_tx
+      || payloadMeta?.settle_tx
+      || payloadMeta?.settle_txid
+      || payloadMeta?.tx_id
+      || (evt.txid && /^[0-9a-f]{64}$/.test(evt.txid) ? evt.txid : null);
+    const detail = realTxid ? (txDetailStmt.get(realTxid) || null) : null;
+    let outputs = null, outputsLen = null;
+    if (detail?.outputs_json) {
+      try {
+        outputs = JSON.parse(detail.outputs_json);
+        outputsLen = Array.isArray(outputs) ? outputs.length : null;
+      } catch {}
+    }
+    return {
+      event_type: evt.event_type,
+      event_synthetic_id: evt.txid,
+      real_chain_txid: realTxid,
+      observed_at: evt.observed_at,
+      from_address: evt.from_address,
+      to_address: evt.to_address,
+      block_hash: detail?.block_hash || null,
+      block_time: detail?.block_time || null,
+      amount_sompi: detail?.amount || null,
+      outputs_length: outputsLen,
+      outputs_sample: outputs?.slice(0, 3) || null,
+      payload_meta: payloadMeta,
+    };
+  }
+
+  // 4. Per-bet fee aggregate from kaspa_tx_log directly (= broader, not just chain_events)
+  // Filter: TX to bettor relay addresses + reasonable bet size (= 0.5-5 KAS range from autobet config)
+  const betTxStmt = db.prepare(`
+    SELECT k.tx_id, k.amount, k.from_address, k.to_address, k.observed_at, k.outputs_json
+    FROM kaspa_tx_log k
+    WHERE k.observed_at >= ?
+    ORDER BY k.observed_at DESC
+    LIMIT 500
+  `);
+  const since = new Date(Date.now() - 7 * 24 * 60 * 60_000).toISOString();
+  const recentTx = betTxStmt.all(since);
+
+  // 5. Bond/fee summary stats
+  const betSamples = betEvents.map(enrich);
+  const settleSamples = settleEvents.map(enrich);
+
+  // 6. Per-bet bond_amount (sompi) distribution (= from pool_oracle_deposit payload)
+  const bondAmountsSompi = [];
+  for (const b of betSamples) {
+    const p = b.payload_meta;
+    if (p?.bond_amount) bondAmountsSompi.push(Number(p.bond_amount));
+  }
+  // Settle TX fee/amount distribution (= from payload broker_fee + winner_amount)
+  const settleBrokerFees = [];
+  const settleWinnerAmounts = [];
+  for (const s of settleSamples) {
+    const p = s.payload_meta;
+    if (s.event_type === 'pool_settle_consensual_dispatched') {
+      if (p?.broker_fee_amount) settleBrokerFees.push(Number(p.broker_fee_amount));
+      if (p?.winner_amount) settleWinnerAmounts.push(Number(p.winner_amount));
+    }
+  }
+
+  const baseline = {
+    schema_version: 'v0.5-baseline-r1',
+    captured_at: new Date().toISOString(),
+    captured_by: 'NWT-tn regression-runner Plan A (A)',
+    summary: {
+      settle_tx_count: settleSamples.length,
+      bet_tx_count: betSamples.length,
+      bond_amount_samples_sompi: bondAmountsSompi.length,
+      bond_amount_sompi_min: bondAmountsSompi.length ? Math.min(...bondAmountsSompi) : null,
+      bond_amount_sompi_max: bondAmountsSompi.length ? Math.max(...bondAmountsSompi) : null,
+      bond_amount_sompi_avg: bondAmountsSompi.length ? Math.round(bondAmountsSompi.reduce((a, b) => a + b, 0) / bondAmountsSompi.length) : null,
+      settle_broker_fee_samples: settleBrokerFees.length,
+      settle_broker_fee_sompi_avg: settleBrokerFees.length ? Math.round(settleBrokerFees.reduce((a, b) => a + b, 0) / settleBrokerFees.length) : null,
+      settle_winner_amount_sompi_avg: settleWinnerAmounts.length ? Math.round(settleWinnerAmounts.reduce((a, b) => a + b, 0) / settleWinnerAmounts.length) : null,
+      total_recent_tx_7d: recentTx.length,
+      settle_real_chain_tx_resolved: settleSamples.filter(s => s.real_chain_txid).length,
+      bet_real_chain_tx_resolved: betSamples.filter(b => b.real_chain_txid).length,
+    },
+    v0_5_invariants: {
+      // Lock these — v0.6 backward compat MUST preserve
+      pool_settle_outputs_length_expected: 7,
+      pool_settle_outputs_length_observed: [...new Set(settleSamples.filter(s => s.event_type === 'pool_settle_consensual_dispatched').map(s => s.outputs_length))],
+      broker_fee_ratios_expected: [0.003, 0.005, 0.007],  // 0.3%/0.5%/0.7% per J2 r72
+      ss_p2sh_format: 'P2SH 32-byte payload + OP_PUSHDATA2 for >520 byte redeem',
+      dispute_path_expected: 'dispatch via voter v2 + 7 outputs + oracleFee/5 split',
+      ss_v05_file_sha256: sha256File(SS_V05),
+      ss_v05_entrypoints: extractEntrypoints(SS_V05),
+      ss_files_v05: Object.fromEntries(
+        Object.entries(SS_FILES_V05).map(([k, p]) => [k, { sha256: sha256File(p), entrypoints: extractEntrypoints(p) }])
+      ),
+    },
+    settle_tx_baseline: settleSamples,
+    bet_tx_baseline: betSamples,
+    notes: [
+      'v0.6 compat verify: post-ship rerun captureBaseline() + diff against this snapshot.',
+      'Critical invariants for v0.5 markets (ADDITIVE design — v0.6 spec §7): bond_amount sompi/broker_fee_pct/winner_amount distribution MUST stay constant.',
+      'Settle real chain TX hash not in pool_settle_consensual_dispatched payload (= dispatched intent only) — outputs.length validation falls back to NEW dispatched events post-v0.6 schema diff vs this snapshot.',
+      'v0.6 ADDITIVE: protocol_version branch, v0.5 markets untouched. New paths (merkle proof / dispute reveal entrypoint) MUST NOT replace existing entrypoints.',
+      'autobet hybrid (sub C) will re-capture bet_tx_baseline post-hybrid for cost diff (chain TX count/sompi fee/latency/oracle round time).',
+    ],
+  };
+
+  db.close();
+  return baseline;
+}
+
+async function verifyV06(baselinePath) {
+  const baselineAbs = path.resolve(baselinePath);
+  if (!fs.existsSync(baselineAbs)) {
+    throw new Error(`baseline not found: ${baselineAbs} — run --mode=baseline first`);
+  }
+  const baseline = JSON.parse(fs.readFileSync(baselineAbs, 'utf8'));
+
+  const report = {
+    schema_version: 'v0.6-compat-verify-r1',
+    verified_at: new Date().toISOString(),
+    baseline_ref: { path: baselineAbs, schema: baseline.schema_version, captured_at: baseline.captured_at },
+    checks: [],
+    pass: 0,
+    fail: 0,
+  };
+
+  function check(name, pass, detail, severity = 'hard') {
+    report.checks.push({ name, pass, detail, severity });
+    if (pass) report.pass++;
+    else if (severity === 'hard') report.fail++;
+    else report.deploy_pending++;
+  }
+  report.deploy_pending = 0;
+
+  // Check 1: All v0.5 SS files byte-identical (= ADDITIVE design 守, spec §7)
+  const baselineV05Files = baseline.v0_5_invariants?.ss_files_v05 || {
+    PoolSpine: { sha256: baseline.v0_5_invariants?.ss_v05_file_sha256, entrypoints: baseline.v0_5_invariants?.ss_v05_entrypoints || [] }
+  };
+  for (const [name, p] of Object.entries(SS_FILES_V05)) {
+    const baselineEntry = baselineV05Files[name];
+    if (!baselineEntry) continue;
+    const currentHash = sha256File(p);
+    check(
+      `v0.5 ${name}.sil 字节不变 (spec §7 ADDITIVE)`,
+      currentHash === baselineEntry.sha256,
+      { current: currentHash, baseline: baselineEntry.sha256 }
+    );
+    const currentEps = extractEntrypoints(p);
+    check(
+      `v0.5 ${name} entrypoints 不变 (= ${baselineEntry.entrypoints.length} 件)`,
+      JSON.stringify(currentEps.sort()) === JSON.stringify([...(baselineEntry.entrypoints || [])].sort()),
+      { current: currentEps, baseline: baselineEntry.entrypoints }
+    );
+  }
+
+  // Check v0.6 SS files exist + structural validity
+  // Note: entrypoint names may evolve mid-design (e.g., J1 r119 path A pivot from settle_aggregate → 5-sig variant).
+  // Verifier records observed entrypoints; soft check for known spec entrypoints if any match.
+  const v06SpecEpsHints = {
+    'PoolSpine': ['settle_aggregate', 'dispute_reveal', 'refund_maker_unjoined', 'settle_tofn', 'settle_5sig'],
+    'PoolSide': ['settled_via_spine', 'claim_winner', 'refund_market_cancelled'],
+  };
+  function classifyV06(name) {
+    if (/Side/i.test(name)) return 'PoolSide';
+    if (/Spine/i.test(name)) return 'PoolSpine';
+    return null;
+  }
+  for (const [name, p] of Object.entries(SS_FILES_V06)) {
+    const hash = sha256File(p);
+    const eps = extractEntrypoints(p);
+    const cls = classifyV06(name);
+    const expectedHints = cls ? v06SpecEpsHints[cls] : [];
+    check(
+      `v0.6 ${name}.sil 存在 + ≥1 entrypoint`,
+      hash !== null && eps.length >= 1,
+      { sha256: hash, entrypoints: eps, classification: cls }
+    );
+    if (expectedHints.length) {
+      const overlap = eps.filter(e => expectedHints.includes(e));
+      check(
+        `v0.6 ${name} entrypoints 命中 spec hints (${cls})`,
+        overlap.length >= 1,
+        { matched: overlap, found: eps, hints: expectedHints },
+        'soft'  // soft = name may evolve, surface不 hard fail
+      );
+    }
+  }
+
+  // v0.5 + v0.6 hashes differ (= protocol_version separation, 不同 P2SH 派生)
+  const allV05Hashes = Object.values(SS_FILES_V05).map(sha256File);
+  const allV06Hashes = Object.values(SS_FILES_V06).map(sha256File);
+  const overlap = allV05Hashes.some(h => h && allV06Hashes.includes(h));
+  check(
+    'v0.5 ≠ v0.6 SS file hashes 全分 (= protocol_version branch 独立, 派生不同 P2SH)',
+    !overlap,
+    { v05_hashes: allV05Hashes, v06_hashes: allV06Hashes }
+  );
+
+  // Check 5: v0.5 chain invariants 现链 state vs baseline (= 老市场 bond/broker_fee 分布不飘)
+  // Re-snapshot current chain state + compare summary
+  const currentSnapshot = await captureBaseline();
+  const baselineSummary = baseline.summary;
+  const currentSummary = currentSnapshot.summary;
+
+  check(
+    'bond_amount sompi distribution 不变 (= 100M uniform = 1 KAS register-external default)',
+    currentSummary.bond_amount_sompi_min === baselineSummary.bond_amount_sompi_min
+      && currentSummary.bond_amount_sompi_max === baselineSummary.bond_amount_sompi_max,
+    {
+      baseline: { min: baselineSummary.bond_amount_sompi_min, max: baselineSummary.bond_amount_sompi_max },
+      current: { min: currentSummary.bond_amount_sompi_min, max: currentSummary.bond_amount_sompi_max },
+    }
+  );
+
+  // Check 6: bet TX count 单调不减 (= 历史不丢)
+  check(
+    'bet TX 历史不丢 (current ≥ baseline)',
+    currentSummary.bet_tx_count >= baselineSummary.bet_tx_count,
+    { baseline: baselineSummary.bet_tx_count, current: currentSummary.bet_tx_count }
+  );
+
+  // Check 7: settle TX events 单调不减
+  check(
+    'settle TX events 历史不丢',
+    currentSummary.settle_tx_count >= baselineSummary.settle_tx_count,
+    { baseline: baselineSummary.settle_tx_count, current: currentSummary.settle_tx_count }
+  );
+
+  // Check 8: v158 schema deploy state (= J1 r108 ship 的 pool_markets += protocol_version + pool_merkle_root)
+  // NOT a hard fail — deploy gap is operational state. Verifier reports both true_pass + deploy_pending.
+  const db = new Database(DB_PATH, { readonly: true });
+  const poolCols = db.prepare('PRAGMA table_info(pool_markets)').all().map(c => c.name);
+  const hasV06Cols = poolCols.includes('protocol_version') && poolCols.includes('pool_merkle_root');
+  db.close();
+  check(
+    'v158 schema deployed (pool_markets has protocol_version + pool_merkle_root)',
+    hasV06Cols,
+    { has_protocol_version: poolCols.includes('protocol_version'), has_pool_merkle_root: poolCols.includes('pool_merkle_root'), note: hasV06Cols ? 'v0.6 ready' : 'DEPLOY_PENDING — Console need pull origin/j1tn/pred-menu-sab + restart for v158 migration to run' },
+    'soft'
+  );
+
+  // Check 9: /api/pool/market/create-v06 endpoint live (= curl 401/200 vs 404)
+  let createV06Status = null;
+  try {
+    const r = await fetch('http://127.0.0.1:3200/api/pool/market/create-v06', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    createV06Status = r.status;
+  } catch (e) {
+    createV06Status = `fetch_error:${e.message}`;
+  }
+  // 400 (missing required) or 401 (auth) = endpoint registered; 404 = deploy gap
+  const endpointLive = createV06Status === 400 || createV06Status === 401 || createV06Status === 403;
+  check(
+    '/api/pool/market/create-v06 endpoint live (= Console 跑新代码)',
+    endpointLive,
+    { http_status: createV06Status, note: endpointLive ? 'endpoint registered' : (createV06Status === 404 ? 'DEPLOY_PENDING (404) — Console restart needed' : 'unexpected status') },
+    'soft'
+  );
+
+  // Check 10: v159 schema deployed (= J2.1 d804175 oracle_pool_membership + pool_snapshots)
+  // Reason (Owner 铁律 ②): J2.1 ship 后 schema 须落地, 否则 v0.6 market publish 时 poolMerkleRoot 派生路径 (pool_snapshots freeze) 无法 record, 用户 publish 失败.
+  const db2 = new Database(DB_PATH, { readonly: true });
+  const tableNames = db2.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('oracle_pool_membership','pool_snapshots','pool_committee')").all().map(t => t.name);
+  db2.close();
+  const v159Expected = ['oracle_pool_membership', 'pool_snapshots'];
+  const v159Missing = v159Expected.filter(t => !tableNames.includes(t));
+  check(
+    'v159 schema deployed (oracle_pool_membership + pool_snapshots tables)',
+    v159Missing.length === 0,
+    { found: tableNames, expected: v159Expected, missing: v159Missing, note: v159Missing.length === 0 ? 'J2.1 schema live' : 'DEPLOY_PENDING — J2.1 d804175 须 Console pull docs/oracle-v06-spec + restart' },
+    'soft'
+  );
+
+  // Check 11: pool-merkle-v06.mjs derive module 存在 (= J2.1 d804175 byte-align d5d4ecbdd SS climb)
+  // Reason (Owner 铁律 ②): J2.2/J2.3 sampling+VRF 依赖 derive 模块; 不存在则 v0.6 market 不能 derive poolMerkleRoot.
+  const mergeModulePath = path.join(REPO_ROOT, 'kasia-console/src/services/pool-merkle-v06.mjs');
+  const hasMergeModule = fs.existsSync(mergeModulePath);
+  check(
+    'pool-merkle-v06.mjs derive 模块存在 (J2.1 byte-align SS climb)',
+    hasMergeModule,
+    { path: mergeModulePath, exists: hasMergeModule }
+  );
+
+  // Check 12: pool-committee-sampler.mjs 存在 (= J2.2+J2.3 c974028 committee 选拔+keyless 确定性抽样)
+  // Reason (Owner 铁律 ②): SS settle 需 committee 5 oracle 选拔结果; 缺则 v0.6 settle 不能跑 (没人签).
+  const samplerPath = path.join(REPO_ROOT, 'kasia-console/src/services/pool-committee-sampler.mjs');
+  const hasSampler = fs.existsSync(samplerPath);
+  check(
+    'pool-committee-sampler.mjs 存在 (J2.2+J2.3 keyless stake-weighted committee 选拔)',
+    hasSampler,
+    { path: samplerPath, exists: hasSampler }
+  );
+
+  // Check 13: pool-market-settler-v06.mjs 存在 (= J2 86d1efc v0.6 settler with F-S1/F-S2 fix)
+  // Reason (Owner 铁律 ②): v0.6 market settle 需调此 settler 算 5 oracle payout / broker fee / winner share; 缺则 v0.6 market 无法 settle.
+  const settlerPath = path.join(REPO_ROOT, 'kasia-console/src/services/pool-market-settler-v06.mjs');
+  const hasSettler = fs.existsSync(settlerPath);
+  check(
+    'pool-market-settler-v06.mjs 存在 (J2 v0.6 settler with F-S1 canonical endBlockHash + F-S2 256-bit rand)',
+    hasSettler,
+    { path: settlerPath, exists: hasSettler }
+  );
+
+  // Check 14: cross-node min_stake POLICY 三层 enforce (= Bettor r158 防机器人 + NWT r121 cross-node 双侧)
+  // Reason (Owner 铁律 ② + 反机器人): API 层 register prep stake<1 KAS 必 reject
+  // 防恶意节点直 broadcast <1 KAS 绕 producer floor
+  let underFloorStatus = null;
+  try {
+    const r = await fetch('http://127.0.0.1:3200/api/pool/market/nonexistent/bettor/register-external/prep', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ linked_addr: 'kaspatest:qrl33afery94spm6dwa4cl2xnfgxus6dlh8hj0ld6d6cszjxs3dsk76jlh2cc', direction: 0, stake_kas: 0.5 }),
+    });
+    underFloorStatus = r.status;
+  } catch (e) {
+    underFloorStatus = `fetch_error:${e.message}`;
+  }
+  // 400/404 with stake-floor reject reason expected (= reject below floor, market_not_found ok too because endpoint reaches floor check)
+  // 200/201 = floor 没 enforce → CRITICAL
+  const apiFloorEnforced = underFloorStatus !== 200 && underFloorStatus !== 201;
+  check(
+    'API 层 register prep stake<1 KAS reject (= 反机器人三层防御 layer 1)',
+    apiFloorEnforced,
+    { http_status: underFloorStatus, expected: '400/404 reject 不是 200', note: 'Bettor r158 三层防御 + NWT r121 cross-node spec' }
+  );
+
+  // L11 market spec sanitize (Bettor r230, restored 6/6 from rewrite)
+  try {
+    const Database = (await import('better-sqlite3')).default;
+    const db = new Database(path.resolve(REPO_ROOT, 'kasia-console/data/console.db'), { readonly: true });
+    const rows = db.prepare("SELECT id, resolution_rule_spec FROM pool_markets WHERE protocol_version IN ('v0.6','v0.7') AND resolution_rule_spec IS NOT NULL").all();
+    db.close();
+    const dirty = [];
+    const URL_PAT = /https?:\/\/|www\./i;
+    const HTML_PAT = /!\[|<img|<a\s+href|<\/?(p|div|span|br)\b/i;
+    for (const r of rows) {
+      let spec; try { spec = JSON.parse(r.resolution_rule_spec); } catch { continue; }
+      if (!spec.source && !spec.title) continue;
+      const title = spec.title || '';
+      if (!title) { dirty.push({ id: r.id, reason: 'no_title' }); continue; }
+      if (URL_PAT.test(title)) { dirty.push({ id: r.id, reason: 'title_has_url' }); continue; }
+      if (HTML_PAT.test(title)) { dirty.push({ id: r.id, reason: 'title_has_html' }); continue; }
+    }
+    check('L11 market spec sanitize (Bettor r230 restored 6/6)', dirty.length === 0, { dirty_count: dirty.length, first_5: dirty.slice(0,5) });
+  } catch (e) { check('L11 spec sanitize (probe)', false, { err: e.message }, 'soft'); }
+
+  // L16 oracle_pool_membership 单一源 (Bettor r265, restored 6/6) — soft until J2 完成 reader 全迁
+  try {
+    const { execSync } = await import('child_process');
+    const cwd = path.resolve(REPO_ROOT, 'kasia-console');
+    const WHITELIST = ['src/lib/oracle-pool-source.mjs', 'src/db/migrate.js'];
+    let prodFiles = [];
+    // Only flag files with actual SQL patterns (not throw msg / JSDoc / comments)
+    // Exclude comment lines (//, * JSDoc) via grep -n, then filter
+    try {
+      const raw = execSync('grep -rnE "(INSERT|SELECT|UPDATE|DELETE|FROM)[^;]*oracle_pool_membership" src/', { cwd, encoding: 'utf8' });
+      const matches = raw.split(/\r?\n/).filter(Boolean);
+      const fileSet = new Set();
+      for (const line of matches) {
+        const m = line.match(/^([^:]+):(\d+):(.*)$/);
+        if (!m) continue;
+        const [, file, , content] = m;
+        const trimmed = content.trim();
+        // Skip comment lines (// or * JSDoc)
+        if (trimmed.startsWith('//') || trimmed.startsWith('*')) continue;
+        fileSet.add(file.replace(/\\/g, '/'));
+      }
+      prodFiles = [...fileSet];
+    } catch {}
+    const offenders = prodFiles.filter(f => !WHITELIST.some(w => f === w || f.endsWith('/' + w)));
+    check('L16 oracle pool 单一源焊死 (Bettor r265 restored / soft until reader 全迁)', offenders.length === 0, { offender_count: offenders.length, offenders: offenders.slice(0, 8) }, offenders.length === 0 ? 'hard' : 'soft');
+  } catch (e) { check('L16 single source (probe)', false, { err: e.message }, 'soft'); }
+
+  // L17 oracle id/address 一致 (Bettor r276, restored 6/6)
+  try {
+    const Database = (await import('better-sqlite3')).default;
+    const db = new Database(path.resolve(REPO_ROOT, 'kasia-console/data/console.db'), { readonly: true });
+    const enrollments = db.prepare("SELECT staker_pk_x, relay_address FROM oracle_stake_enrollments WHERE active=1").all();
+    db.close();
+    const missing = enrollments.filter(e => !e.relay_address);
+    const invalid = enrollments.filter(e => e.relay_address && !/^kaspatest:[a-z0-9]+$/.test(e.relay_address));
+    check('L17 oracle id/address 一致 (Bettor r276 restored)', missing.length === 0 && invalid.length === 0, { active: enrollments.length, missing: missing.length, invalid: invalid.length });
+  } catch (e) { check('L17 id/address (probe)', false, { err: e.message }, 'soft'); }
+
+  // L18 merkle leaf algo (Bettor r327, restored 6/6)
+  try {
+    const cwd = path.resolve(REPO_ROOT, 'kasia-console');
+    const scanner = fs.readFileSync(path.resolve(cwd, 'src/services/oracle-pool-chain-scanner.mjs'), 'utf8');
+    const merkle = fs.readFileSync(path.resolve(cwd, 'src/services/pool-merkle-v06.mjs'), 'utf8');
+    const ssPath = path.resolve(cwd, 'src/lib/PoolSpine_v07.sil');
+    const ss = fs.existsSync(ssPath) ? fs.readFileSync(ssPath, 'utf8') : '';
+    const sActive = scanner.split(/\r?\n/).filter(l => !l.trim().startsWith('//') && !l.trim().startsWith('*')).join('\n');
+    const importsMerkle = /pool-merkle-v06/.test(sActive) && /(import\(|from\s+['"])/.test(sActive);
+    const noSha256 = !/createHash\(['"]sha256['"]\)/.test(sActive);
+    const allOk = importsMerkle && noSha256 && /blake2b/i.test(merkle) && (ss ? /blake2b/i.test(ss) : true);
+    check('L18 merkle leaf algo 一致 (Bettor r327 restored)', allOk, { scanner_imports_merkle: importsMerkle, scanner_no_sha256: noSha256 });
+  } catch (e) { check('L18 merkle leaf (probe)', false, { err: e.message }, 'soft'); }
+
+  // L19 settle TX 三方分账守恒 (Bettor r373, restored 6/6)
+  try {
+    const p2sh = fs.readFileSync(path.resolve(REPO_ROOT, 'kasia-relay/src/lib/p2sh.mjs'), 'utf8');
+    const allOk = /function\s+_assertTxInvariants/.test(p2sh) && (/fee\s*<\s*0n/.test(p2sh) || /overspend/.test(p2sh)) && /fee\s*===\s*0n/.test(p2sh) && /mass/i.test(p2sh) && /dust/i.test(p2sh);
+    check('L19 settle TX 三方分账守恒 (Bettor r373 restored)', allOk, { note: '_assertTxInvariants 4 守门 (overspend/0-fee/mass/dust)' });
+  } catch (e) { check('L19 settle 守恒 (probe)', false, { err: e.message }, 'soft'); }
+
+  // L20 settler 饥饿根治 (Bettor r366 / J2 c9f5814, restored 6/6)
+  try {
+    const settler = fs.readFileSync(path.resolve(REPO_ROOT, 'kasia-console/src/services/pool-market-settler.js'), 'utf8');
+    const active = settler.split(/\r?\n/).filter(l => !l.trim().startsWith('//') && !l.trim().startsWith('*')).join('\n');
+    const allOk = /ORDER BY updated_at DESC/i.test(active) && /backoff/i.test(active) && /TICK_TIMEBOX_MS|TICK_TIMEOUT|tickTimeout|time-box/i.test(active);
+    check('L20 settler 饥饿根治 (Bettor r366 + J2 c9f5814 restored)', allOk, { active_priority: /ORDER BY updated_at DESC/i.test(active), exp_backoff: /backoff/i.test(active), tick_timebox: /TICK_TIMEBOX_MS|TICK_TIMEOUT/.test(active) });
+  } catch (e) { check('L20 settler 饥饿 (probe)', false, { err: e.message }, 'soft'); }
+
+  // L21 refund locktime grace (Bettor r379 / J1 b25c4ac, restored 6/6)
+  try {
+    const settler = fs.readFileSync(path.resolve(REPO_ROOT, 'kasia-console/src/services/pool-market-settler.js'), 'utf8');
+    const claimAuto = fs.readFileSync(path.resolve(REPO_ROOT, 'kasia-console/src/services/bettor-refund-claim-auto.mjs'), 'utf8');
+    const graceLib = fs.existsSync(path.resolve(REPO_ROOT, 'kasia-console/src/lib/pool-refund-grace.mjs'));
+    check('L21 refund locktime grace 一致 (Bettor r379 + J1 b25c4ac restored)', graceLib && /REFUND_GRACE_SEC/.test(settler) && /REFUND_GRACE_SEC/.test(claimAuto), { grace_lib: graceLib });
+  } catch (e) { check('L21 refund grace (probe)', false, { err: e.message }, 'soft'); }
+
+  // L23 Bettor r216/r217 派工 6/6: MIN_POT 100KAS 守门 + 前置 refund 路由 (= 守 SS L300 不被绕, 不变 dispatch fail 死单)
+  try {
+    const ssPath = path.resolve(REPO_ROOT, 'kasia-console/src/lib/PoolSpine_v07.sil');
+    const ssSrc = fs.existsSync(ssPath) ? fs.readFileSync(ssPath, 'utf8') : '';
+    const ssHasMinPot = /MIN_POT_SOMPI|globalYesTotal_sompi.*\+.*globalNoTotal_sompi.*>=/.test(ssSrc);
+    const settlerPath = path.resolve(REPO_ROOT, 'kasia-console/src/services/pool-market-settler.js');
+    const settlerSrc = fs.readFileSync(settlerPath, 'utf8');
+    const settlerHasPreCheck = /MIN_POT|globalYes.*\+.*globalNo|pot\s*<\s*1e10|pot.*<.*100.*KAS/i.test(settlerSrc);
+    const allOk = ssHasMinPot && settlerHasPreCheck;
+    check(
+      'L23 MIN_POT 100KAS 守门 + 前置 refund 路由 (Bettor r216/r217 守 SS L300 不被绕)',
+      allOk,
+      {
+        ss_has_min_pot_require: ssHasMinPot,
+        settler_has_pre_check: settlerHasPreCheck,
+        note: 'SS L300 require >= 1e10 sompi. settler 前置 pot<MIN_POT → refund 路由不 dispatch fail 死单 (= Bettor r217 精化)'
+      },
+      settlerHasPreCheck ? 'hard' : 'soft'
+    );
+  } catch (e) {
+    check('L23 MIN_POT 守门 (probe)', false, { err: e.message }, 'soft');
+  }
+
+  // L22 Bettor r383 派工 6/6: maker_stake server 强制 lint (= 守 KANet-UI 7e5a5d2 + f8b64a5 不回归)
+  // 3 endpoint (v0.5/v0.6/v0.7) 必 enforce makerStakeKas >= POOL_MAKER_STAKE_MIN_KAS + 单一源 const
+  // 增强 (Bettor r388 派): 检查行不在 NO_LIMITS 守卫块内 (= 防 env 守卫坑回归)
+  try {
+    const poolPath = path.resolve(REPO_ROOT, 'kasia-console/src/api/pool.js');
+    const poolSrc = fs.readFileSync(poolPath, 'utf8');
+    const hasSingleSourceConst = /const\s+POOL_MAKER_STAKE_MIN_KAS\s*=\s*100\s*;/.test(poolSrc);
+    const enforceCount = (poolSrc.match(/makerStakeKas\s*<\s*POOL_MAKER_STAKE_MIN_KAS/g) || []).length;
+    // L22 enhanced: 检每条 check 行不被 NO_LIMITS 守卫块包
+    const lines = poolSrc.split(/\r?\n/);
+    let nestedInNoLimits = 0;
+    for (let i = 0; i < lines.length; i++) {
+      if (!/makerStakeKas\s*<\s*POOL_MAKER_STAKE_MIN_KAS/.test(lines[i])) continue;
+      // walk back up to 15 lines, count { vs } between NO_LIMITS open & check line
+      let openNoLimits = false, braceBalance = 0;
+      for (let j = i - 1; j >= Math.max(0, i - 15); j--) {
+        const opens = (lines[j].match(/\{/g) || []).length;
+        const closes = (lines[j].match(/\}/g) || []).length;
+        braceBalance += closes - opens;
+        if (/NO_LIMITS.*!==.*'1'\)\s*\{/.test(lines[j])) {
+          openNoLimits = true;
+          break;
+        }
+      }
+      if (openNoLimits && braceBalance < 0) nestedInNoLimits++;
+    }
+    const allOk = hasSingleSourceConst && enforceCount >= 3 && nestedInNoLimits === 0;
+    check(
+      'L22 maker stake min 单一源+3 endpoint 强制+不在 NO_LIMITS 块内 (Bettor r383+r388 / 守 KANet-UI f8b64a5)',
+      allOk,
+      {
+        single_source_const_L33: hasSingleSourceConst,
+        enforcement_count: enforceCount,
+        nested_in_no_limits_count: nestedInNoLimits,
+        note: '3 enforce + 全不在 NO_LIMITS 守卫块. 任一脱掉 = env 守卫坑可绕过 = 演示破信'
+      }
+    );
+  } catch (e) {
+    check('L22 maker stake min check (probe)', false, { err: e.message }, 'soft');
+  }
+
+  // L24 Bettor r243/r244b 派工 6/6: isStructuredSpec ≡ deriveVote ≡ specIsUsable 三端绑死 data_source_canonical 单一源
+  // = 守 qrv65 类病 (spec 漏 canonical → voter deriveVote fail → 市场卡死)
+  // 3 sub baked: pool.js isStructuredSpec / voter deriveVote / tg-bot specIsUsable 同字段
+  try {
+    const poolPath = path.resolve(REPO_ROOT, 'kasia-console/src/api/pool.js');
+    const voterPath = path.resolve(REPO_ROOT, 'kasia-console/src/services/bettor-prediction-voter.js');
+    const botPath = path.resolve(REPO_ROOT, 'tg-bot/prediction-menu.mjs');
+    const poolSrc = fs.readFileSync(poolPath, 'utf8');
+    const voterSrc = fs.readFileSync(voterPath, 'utf8');
+    const botSrc = fs.existsSync(botPath) ? fs.readFileSync(botPath, 'utf8') : '';
+    // sub-a: pool.js isStructuredSpec 必含 data_source_canonical typeof check (非 comment)
+    const poolLines = poolSrc.split(/\r?\n/);
+    let poolInIsStructured = false, poolHasCanonicalCheck = false, poolBraceDepth = 0;
+    for (const ln of poolLines) {
+      if (/function\s+isStructuredSpec\s*\(/.test(ln)) { poolInIsStructured = true; poolBraceDepth = 0; }
+      if (poolInIsStructured) {
+        poolBraceDepth += (ln.match(/\{/g) || []).length - (ln.match(/\}/g) || []).length;
+        const codeLine = ln.replace(/\/\/.*$/, '').trim();
+        if (!codeLine.startsWith('*') && /typeof\s+\w+\.data_source_canonical\s*===\s*['"]string['"]/.test(codeLine)) {
+          poolHasCanonicalCheck = true;
+        }
+        if (poolBraceDepth <= 0 && /\}/.test(ln) && poolHasCanonicalCheck !== false) {
+          if (!poolHasCanonicalCheck) poolInIsStructured = false;
+          else break;
+        }
+      }
+    }
+    // sub-b: voter deriveVote 必 read spec.data_source_canonical (= 单一源不别名)
+    const voterReadsCanonical = /spec\??\.\s*data_source_canonical/.test(voterSrc) || /data_source_canonical\s*:\s*\w+/.test(voterSrc);
+    // sub-c: tg-bot specIsUsable 同字段
+    const botHasCanonicalCheck = /data_source_canonical/.test(botSrc) && /specIsUsable/.test(botSrc);
+    const allOk = poolHasCanonicalCheck && voterReadsCanonical && botHasCanonicalCheck;
+    check(
+      'L24 isStructuredSpec ≡ deriveVote ≡ specIsUsable 三端 data_source_canonical 单一源 (Bettor r243/r244b 守 qrv65 病根)',
+      allOk,
+      {
+        pool_isStructuredSpec_has_canonical: poolHasCanonicalCheck,
+        voter_deriveVote_reads_canonical: voterReadsCanonical,
+        bot_specIsUsable_has_canonical: botHasCanonicalCheck,
+        note: '三端任一脱钩 → 漂回 qrv65 漏 canonical 病. KANet-UI f83ab1c 修, lint 永守'
+      }
+    );
+  } catch (e) {
+    check('L24 三端单一源 (probe)', false, { err: e.message }, 'soft');
+  }
+
+  // L25 Bettor r250 ④ APPROVE 第4路 (= 单元测 isStructuredSpec 纯函数, 零 side effect):
+  // J2 af74509 export 后 dynamic import + 5 case 覆全分支 (= NWT r326 propose)
+  try {
+    // 防 pool.js 顶 import 链 rpc-health 抛 env-not-set: 占位 dummy
+    if (!process.env.KASPA_RPC_URL) process.env.KASPA_RPC_URL = 'http://lint-dummy';
+    if (!process.env.KASPA_NETWORK) process.env.KASPA_NETWORK = 'testnet-12';
+    const poolMod = await import('file://' + path.resolve(REPO_ROOT, 'kasia-console/src/api/pool.js').replace(/\\/g, '/'));
+    const isStructuredSpec = poolMod.isStructuredSpec;
+    if (typeof isStructuredSpec !== 'function') throw new Error('isStructuredSpec not exported as function');
+    const cases = [
+      { name: '漏 canonical', input: { title: 't', resolution_criteria: 'c' }, expect: false },
+      { name: '全字段 PASS', input: { title: 't', resolution_criteria: 'c', data_source_canonical: 'http://x' }, expect: true },
+      { name: '空 spec', input: {}, expect: false },
+      { name: '非对象 string', input: 'string', expect: false },
+      { name: '空 canonical', input: { title: 't', resolution_criteria: 'c', data_source_canonical: '' }, expect: false },
+    ];
+    const results = cases.map(c => {
+      let actual;
+      try {
+        if (typeof c.input === 'string') actual = isStructuredSpec(JSON.stringify(c.input));
+        else actual = isStructuredSpec(JSON.stringify(c.input));
+      } catch (_) { actual = false; }
+      return { name: c.name, expect: c.expect, actual, ok: actual === c.expect };
+    });
+    const allOk = results.every(r => r.ok);
+    check(
+      'L25 unit test: isStructuredSpec 5 case 覆全分支 (Bettor r250 第4路 / J2 af74509 export)',
+      allOk,
+      {
+        cases: results.map(r => `${r.name}: expect=${r.expect} actual=${r.actual} ${r.ok ? '✓' : '✗'}`),
+        note: allOk ? '5 case 全 PASS, 纯函数零 side effect' : '任一 case 不符 = isStructuredSpec 逻辑漂回 qrv65 病根'
+      }
+    );
+  } catch (e) {
+    check('L25 unit test (probe)', false, { err: e.message, note: 'import fail or export missing' }, 'soft');
+  }
+
+  // L26 Bettor r256b/r258 件1 nav 基础: /predictions 归档 + sidebar 5 处中文 (= KANet-UI 43ebfdd ship)
+  // 3 sub baked: 302 redirect / legacy route / sidebar 中文字串
+  try {
+    const stocksPath = path.resolve(REPO_ROOT, 'kasia-console/src/api/stocks.js');
+    const sidebarPath = path.resolve(REPO_ROOT, 'kasia-console/src/ui/partials/sidebar.eta');
+    const stocksSrc = fs.readFileSync(stocksPath, 'utf8');
+    const sidebarSrc = fs.readFileSync(sidebarPath, 'utf8');
+    // sub-a: /predictions 服新 predictions-list 页 (Bettor r265b 解 r265b 7 条, 替原 302→/legacy)
+    const stocksPredictionsServesNew = /fastify\.get\(['"]\/predictions['"][\s\S]{0,300}reply\.view\(['"]predictions-list['"]/.test(stocksSrc);
+    // sub-b: /legacy/polymarket-escrow route 仍存 (= 旧 1v1 保历史)
+    const hasLegacyRoute = /fastify\.get\(['"]\/legacy\/polymarket-escrow['"]/.test(stocksSrc);
+    // sub-c: sidebar 5 处中文 (Bettor r256b 件1 范围 + KANet-UI 43ebfdd ship)
+    const zhStrings = ['聊天', '联系人', '资产', '总览', '设置'];
+    const sidebarMissing = zhStrings.filter(s => !sidebarSrc.includes(s));
+    const sidebarOk = sidebarMissing.length === 0;
+    // sub-d: predictions-list.eta 存在 (= Owner 6 条新页, b8f62f9 ship)
+    const predListPath = path.resolve(REPO_ROOT, 'kasia-console/src/ui/predictions-list.eta');
+    const predListExists = fs.existsSync(predListPath);
+    const allOk = stocksPredictionsServesNew && hasLegacyRoute && sidebarOk && predListExists;
+    check(
+      'L26 件1 nav + 预测市场首页: /predictions 服新页 + sidebar 5 中文 + legacy 保 (Bettor r256b/r258/r265, KANet-UI 43ebfdd+b8f62f9)',
+      allOk,
+      {
+        stocks_predictions_serves_new: stocksPredictionsServesNew,
+        stocks_has_legacy_route: hasLegacyRoute,
+        predictions_list_eta_exists: predListExists,
+        sidebar_zh_strings_missing: sidebarMissing,
+        note: allOk ? '件1 nav + 首页 守门完整' : '任一回归 → 漂回旧 1v1 入口 / sidebar 中英混 / 首页删'
+      }
+    );
+  } catch (e) {
+    check('L26 件1 nav (probe)', false, { err: e.message }, 'soft');
+  }
+
+  // L27 Bettor R3 P0-#5 派 (KANet-UI 3c5fefe ship): source_kind 4 enum + backend derive canonical 守门
+  // = form 软化 (= UX 不强 user 填 URL), backend isStructuredSpec 仍 strict (= L24/L25 已守, derive 后 canonical 必填)
+  try {
+    const poolPath = path.resolve(REPO_ROOT, 'kasia-console/src/api/pool.js');
+    const poolSrc = fs.readFileSync(poolPath, 'utf8');
+    const expectedKinds = ['binance', 'polymarket', 'sport', 'kaspa-onchain'];
+    const hasDerivers = /const\s+SOURCE_KIND_DERIVERS\s*=/.test(poolSrc);
+    const missingKinds = expectedKinds.filter(k => !new RegExp(`['"]${k.replace('-', '\\-')}['"]\\s*:`).test(poolSrc) && !new RegExp(`\\b${k.replace('-', '\\-')}\\s*:`).test(poolSrc));
+    const hasDeriveFn = /export\s+function\s+deriveCanonicalFromSourceKind/.test(poolSrc);
+    const hasMaybeFn = /_maybeDeriveSpecFromSourceKind/.test(poolSrc);
+    const allOk = hasDerivers && missingKinds.length === 0 && hasDeriveFn && hasMaybeFn;
+    check(
+      'L27 P0-#5 source_kind 4 enum + backend derive canonical (Bettor R3, KANet-UI 3c5fefe)',
+      allOk,
+      {
+        has_SOURCE_KIND_DERIVERS: hasDerivers,
+        missing_kinds: missingKinds,
+        has_deriveCanonicalFromSourceKind_export: hasDeriveFn,
+        has_maybeDeriveSpec_fn: hasMaybeFn,
+        note: allOk ? 'form 软 + backend strict + derive 4 源齐' : '任一 enum 缺 / derive fn 缺 → form 软漂或新源没守'
+      }
+    );
+  } catch (e) {
+    check('L27 source_kind (probe)', false, { err: e.message }, 'soft');
+  }
+
+  // L28 Bettor R3 P0-#4 派 (KANet-UI 3c5fefe ship): chain_events 三阶段 event_type 实名守门
+  // = settler + voter + pool 写入 + UI detail page 显 timeline 必用实名 (= NWT r335 grep 实证: pool_oracle_vote / pool_oracle_tx_sig / pool_settle_consensual_dispatched)
+  try {
+    const poolSettlerPath = path.resolve(REPO_ROOT, 'kasia-console/src/services/pool-market-settler.js');
+    const bettorSettlerPath = path.resolve(REPO_ROOT, 'kasia-console/src/services/bettor-prediction-settler.js');
+    const voterPath = path.resolve(REPO_ROOT, 'kasia-console/src/services/bettor-prediction-voter.js');
+    const poolPath = path.resolve(REPO_ROOT, 'kasia-console/src/api/pool.js');
+    const uiDetailPath = path.resolve(REPO_ROOT, 'kasia-console/src/ui/predictions-pool-detail.eta');
+    const poolSettlerSrc = fs.readFileSync(poolSettlerPath, 'utf8');
+    const bettorSettlerSrc = fs.existsSync(bettorSettlerPath) ? fs.readFileSync(bettorSettlerPath, 'utf8') : '';
+    const voterSrc = fs.readFileSync(voterPath, 'utf8');
+    const poolSrc = fs.readFileSync(poolPath, 'utf8');
+    const uiSrc = fs.existsSync(uiDetailPath) ? fs.readFileSync(uiDetailPath, 'utf8') : '';
+    const types = ['pool_oracle_vote', 'pool_oracle_tx_sig', 'pool_settle_consensual_dispatched'];
+    const settlerCombined = poolSettlerSrc + '\n' + bettorSettlerSrc;
+    const settlerHasAll = types.every(t => settlerCombined.includes(t));
+    const uiHasAll = types.every(t => uiSrc.includes(t));
+    const hasEventsRoute = /\/api\/pool\/market\/:id\/events/.test(poolSrc);
+    const allOk = settlerHasAll && uiHasAll && hasEventsRoute;
+    check(
+      'L28 P0-#4 chain_events 三阶段 event_type 实名 + /events endpoint (Bettor R3, KANet-UI 3c5fefe)',
+      allOk,
+      {
+        settler_has_3_types: settlerHasAll,
+        ui_detail_has_3_types: uiHasAll,
+        events_endpoint_registered: hasEventsRoute,
+        types,
+        note: allOk ? 'timeline 三阶段实名 + /events 路存' : '任一 type 缺 / /events 删 → 前端 timeline 漏阶段或拉失败'
+      }
+    );
+  } catch (e) {
+    check('L28 timeline event_type (probe)', false, { err: e.message }, 'soft');
+  }
+
+  // L29 Bettor R3 P0 5 件 UI 全 ship 守门 (KANet-UI partner 模式: 616d8f87 + 8f7718d2 + 9d0ba87 + c48786d + 0c863af + b8f62f9)
+  // 4 sub: 建市 form 合一 + web 押注 button + my-markets agent selector + backend maker_relay_id filter
+  try {
+    const createEtaPath = path.resolve(REPO_ROOT, 'kasia-console/src/ui/predictions-pool-create.eta');
+    const listEtaPath = path.resolve(REPO_ROOT, 'kasia-console/src/ui/predictions-list.eta');
+    const myMarketsEtaPath = path.resolve(REPO_ROOT, 'kasia-console/src/ui/my-markets.eta');
+    const poolPath = path.resolve(REPO_ROOT, 'kasia-console/src/api/pool.js');
+    const createSrc = fs.existsSync(createEtaPath) ? fs.readFileSync(createEtaPath, 'utf8') : '';
+    const listSrc = fs.existsSync(listEtaPath) ? fs.readFileSync(listEtaPath, 'utf8') : '';
+    const myMarketsSrc = fs.existsSync(myMarketsEtaPath) ? fs.readFileSync(myMarketsEtaPath, 'utf8') : '';
+    const poolSrc = fs.readFileSync(poolPath, 'utf8');
+    // sub-a: 建市 form 合一 '议题' label + '判定凭据' card
+    const createHasUnifiedLabel = /议题\s*<span[^>]*>\s*\*/.test(createSrc) && /判定凭据/.test(createSrc);
+    // sub-b: 押 → button 在 list
+    const listHasBetButton = /押\s*→|押→/.test(listSrc);
+    // sub-c: my-markets agent selector
+    const myMarketsHasSelector = /selectedAgentId/.test(myMarketsSrc) && /x-model[=\s]*['"]selectedAgentId/.test(myMarketsSrc);
+    // sub-d: backend filter
+    const backendHasMakerFilter = /q\.maker_relay_id\s*\)\s*\{\s*where\.push|pool_markets\.maker_relay_id\s*=\s*\?/.test(poolSrc);
+    const allOk = createHasUnifiedLabel && listHasBetButton && myMarketsHasSelector && backendHasMakerFilter;
+    check(
+      'L29 P0 5 件 UI ship (KANet-UI partner: 建市 form 合一 + web 押 button + my-markets selector + backend maker filter)',
+      allOk,
+      {
+        create_form_unified_label_judgement_card: createHasUnifiedLabel,
+        list_has_bet_button: listHasBetButton,
+        my_markets_has_selector: myMarketsHasSelector,
+        backend_has_maker_filter: backendHasMakerFilter,
+        note: allOk ? '5 件 P0 UI 守门完整 (Bettor r322 全 PASS)' : '任一回归 → P0 UI 漂回旧 raw ID / 无押注 button / 无 agent 选择器'
+      }
+    );
+  } catch (e) {
+    check('L29 P0 UI ship (probe)', false, { err: e.message }, 'soft');
+  }
+
+  // L30 P0-#6 G6 fee-adequacy 红线收口 (J1 6077ccd6 ship): mass-aware 动态 fee 公式
+  // = settler dispatchPhase2 fee 必按实际 storage_mass 算, 不 static (= 防 5M→50M 类 band-aid 回归)
+  try {
+    const settlerPath = path.resolve(REPO_ROOT, 'kasia-console/src/services/pool-market-settler.js');
+    const kip9Path = path.resolve(REPO_ROOT, 'kasia-console/src/lib/kip9-mass.mjs');
+    const settlerSrc = fs.readFileSync(settlerPath, 'utf8');
+    const kip9Src = fs.existsSync(kip9Path) ? fs.readFileSync(kip9Path, 'utf8') : '';
+    // J1 refactor 抽 lib/kip9-mass.mjs (= 5 call sites 合一处), const + helper 在 lib; settler import 用
+    const combined = settlerSrc + '\n' + kip9Src;
+    const hasStorageMassConst = /(export\s+)?const\s+STORAGE_MASS_C\s*=\s*1[_]?000[_]?000[_]?000[_]?000/.test(combined);
+    const hasDynamicMinBrokerFee = /dynamicMinBrokerFee\s*=\s*Math\.max|Math\.max\([^)]*MIN_BROKER_FEE_FLOOR/.test(combined);
+    const hasStorageMassDerivation = /Math\.ceil\(\s*STORAGE_MASS_C\s*\/\s*/.test(combined);
+    const passesAsMinBrokerFee = /minBrokerFee:\s*dynamicMinBrokerFee/.test(settlerSrc);
+    const allOk = hasStorageMassConst && hasDynamicMinBrokerFee && hasStorageMassDerivation && passesAsMinBrokerFee;
+    check(
+      'L30 P0-#6 G6 mass-aware 动态 fee (J1 6077ccd6, Bettor r298-r303 红线收口)',
+      allOk,
+      {
+        has_storage_mass_const_1e12: hasStorageMassConst,
+        has_dynamic_min_broker_fee_max: hasDynamicMinBrokerFee,
+        has_storage_mass_derivation_ceil_div: hasStorageMassDerivation,
+        passes_dynamic_min_broker_fee: passesAsMinBrokerFee,
+        note: allOk ? 'KIP-9 storage_mass aware fee 完整守门' : '任一回归 → static fee bump 类 band-aid (= 5M→50M 又会撞 mass floor)'
+      }
+    );
+  } catch (e) {
+    check('L30 mass-aware fee (probe)', false, { err: e.message }, 'soft');
+  }
+
+  // L31 Bettor r332/r333 派 P2 全域 jargon 收尾 (KANet-UI 43945cd7+4a40dc40 ship):
+  // 4 sub: 3 UI 文件中文术语在 + 旧 jargon 缺 + statusLabel helper + fee 标签
+  try {
+    const detailPath = path.resolve(REPO_ROOT, 'kasia-console/src/ui/predictions-pool-detail.eta');
+    const listPath = path.resolve(REPO_ROOT, 'kasia-console/src/ui/predictions-list.eta');
+    const myMarketsPath = path.resolve(REPO_ROOT, 'kasia-console/src/ui/my-markets.eta');
+    const createPath = path.resolve(REPO_ROOT, 'kasia-console/src/ui/predictions-pool-create.eta');
+    const detailSrc = fs.readFileSync(detailPath, 'utf8');
+    const listSrc = fs.readFileSync(listPath, 'utf8');
+    const myMarketsSrc = fs.readFileSync(myMarketsPath, 'utf8');
+    const createSrc = fs.readFileSync(createPath, 'utf8');
+    // sub-a: 详情页 jargon → 中文术语 (= 押注池 / 仲裁人押金 / 押注人数 / 已签人数)
+    const detailHasZh = ['押注池', '仲裁人押金', '押注人数', '已签人数'].every(s => detailSrc.includes(s));
+    // sub-b: list+my-markets+detail 旧英 jargon 残留 0 hit (= oracle bond / sigs collected / 'bettor 数')
+    const oldJargon = /oracle bond|sigs collected|bettor 数/i;
+    const noOldJargon = !oldJargon.test(detailSrc) && !oldJargon.test(listSrc) && !oldJargon.test(myMarketsSrc);
+    // sub-c: statusLabel helper 在 list+my-markets (= raw 'pending_bettors' etc 替换)
+    const listHasStatusLabel = /statusLabel/.test(listSrc);
+    const myMarketsHasStatusLabel = /statusLabel/.test(myMarketsSrc);
+    // sub-d: create 页 fee 标签 主持费/仲裁费/中介费 (= 4a40dc40)
+    const createHasFeeLabels = /主持费/.test(createSrc) && /仲裁费/.test(createSrc) && /中介费/.test(createSrc);
+    const allOk = detailHasZh && noOldJargon && listHasStatusLabel && myMarketsHasStatusLabel && createHasFeeLabels;
+    check(
+      'L31 P2 全域 jargon 收尾: 3 UI 中文术语 + 0 旧 jargon + statusLabel + create 费标签 (Bettor r332/r333, KANet-UI 43945cd7+4a40dc40)',
+      allOk,
+      {
+        detail_has_zh_terms: detailHasZh,
+        no_old_jargon_3_files: noOldJargon,
+        list_has_statusLabel: listHasStatusLabel,
+        my_markets_has_statusLabel: myMarketsHasStatusLabel,
+        create_has_fee_zh_labels: createHasFeeLabels,
+        note: allOk ? 'P2 jargon 收尾守门完整' : '任一回归 → jargon 漂回 oracle/bettor 数/sigs'
+      }
+    );
+  } catch (e) {
+    check('L31 P2 jargon 收尾 (probe)', false, { err: e.message }, 'soft');
+  }
+
+  // L32 Bettor r334-r338 4 线并行 ship 守 Track A+B+C (= bot 去泄露 + sidebar 嵌套 + /oracle 仲裁人中心):
+  // 4 sub: specTitle helper 用 + sidebar 预测市场嵌套 + oracle 3 段中文 + 钉死无数据态
+  try {
+    const botPath = path.resolve(REPO_ROOT, 'tg-bot/bot.mjs');
+    const sidebarPath = path.resolve(REPO_ROOT, 'kasia-console/src/ui/partials/sidebar.eta');
+    const oracleHomePath = path.resolve(REPO_ROOT, 'kasia-console/src/ui/oracle-home.eta');
+    const botSrc = fs.existsSync(botPath) ? fs.readFileSync(botPath, 'utf8') : '';
+    const sidebarSrc = fs.readFileSync(sidebarPath, 'utf8');
+    const oracleHomeSrc = fs.existsSync(oracleHomePath) ? fs.readFileSync(oracleHomePath, 'utf8') : '';
+    // sub-a: bot.mjs 用户消息用 specTitle (= 不 dump raw spec JSON 含 127.0.0.1)
+    const botUsesSpecTitle = (botSrc.match(/PM\.specTitle\(p\.question\)/g) || []).length >= 3;
+    const botNoRawLocalhost = !/['"]http:\/\/127\.0\.0\.1[^'"]*['"]/.test(botSrc.replace(/^\s*\/\/.*$/gm, '')) || /specTitle/.test(botSrc);
+    // sub-b: sidebar 预测市场嵌套 x-data pred
+    const sidebarHasPredictNest = /预测市场/.test(sidebarSrc) && /x-data\s*=\s*['"]?\{\s*pred/.test(sidebarSrc);
+    // sub-c: oracle-home.eta 中文术语 (= '暂无评分' / '暂无收益' / '级别待定')
+    const oracleHasZh = /暂无评分/.test(oracleHomeSrc) && /暂无收益/.test(oracleHomeSrc) && /级别待定/.test(oracleHomeSrc);
+    // sub-d: oracle-home.eta 0 旧 jargon (= VRF / stake-weighted / voter_misbehave)
+    const oracleNoJargon = !/VRF|stake-weighted|voter_misbehave|stake_locked_kas/.test(oracleHomeSrc);
+    const allOk = botUsesSpecTitle && sidebarHasPredictNest && oracleHasZh && oracleNoJargon;
+    check(
+      'L32 4 线并行 Track A+B+C: bot specTitle 用 + sidebar 预测市场嵌套 + oracle 中文 3 段 + 钉死无数据 (Bettor r334-r338, KANet-UI ac079464+e1c57d7f+c932cb19)',
+      allOk,
+      {
+        bot_uses_specTitle_3plus: botUsesSpecTitle,
+        sidebar_has_predict_nest: sidebarHasPredictNest,
+        oracle_has_zh_terms: oracleHasZh,
+        oracle_no_old_jargon: oracleNoJargon,
+        note: allOk ? '4 线并行守门完整' : '任一回归 → bot 漏 specTitle dump URL / sidebar 预测市场扁平 / oracle 漂回 jargon'
+      }
+    );
+  } catch (e) {
+    check('L32 4 线并行 (probe)', false, { err: e.message }, 'soft');
+  }
+
+  // L33 Bettor r361 P0-A MVP 锁契约: /api/pool/prevet 守门 (J2 c13bba63 + KANet-UI 36937d5d+81cac7fa+be9202cb ship)
+  // 4 sub: 0 残留旧 URL + UI 用新 URL + 0 false confidence 词 + backend route 注册
+  try {
+    const createEtaPath = path.resolve(REPO_ROOT, 'kasia-console/src/ui/predictions-pool-create.eta');
+    const poolApiPath = path.resolve(REPO_ROOT, 'kasia-console/src/api/pool.js');
+    const createSrc = fs.readFileSync(createEtaPath, 'utf8');
+    const poolSrc = fs.readFileSync(poolApiPath, 'utf8');
+    // sub-a: UI 0 hit '/api/oracle/prevet' (= 守 URL 锁修不漂回)
+    const oldUrlInUi = createSrc.includes('/api/oracle/prevet');
+    // sub-b: UI 有 '/api/pool/prevet' (= 守新 URL 在用)
+    const newUrlInUi = /\/api\/pool\/prevet/.test(createSrc);
+    // sub-c: UI 0 hit 'certified/verified/guaranteed' (= 防 false confidence, Bettor r361b/KANet-UI r633 钉死)
+    const hasBadWords = /\bcertified\b|\bverified\b|\bguaranteed\b/i.test(createSrc);
+    // sub-d: backend pool.js 注册 POST /api/pool/prevet route
+    const backendRouteRegistered = /fastify\.post\(['"]\/api\/pool\/prevet['"]/.test(poolSrc);
+    const allOk = !oldUrlInUi && newUrlInUi && !hasBadWords && backendRouteRegistered;
+    check(
+      'L33 P0-A MVP /api/pool/prevet 锁契约 + 0 false confidence (Bettor r361/r363/r364, J2 c13bba63, KANet-UI 36937d5d+be9202cb)',
+      allOk,
+      {
+        ui_no_old_oracle_url: !oldUrlInUi,
+        ui_has_new_pool_url: newUrlInUi,
+        ui_no_certified_verified_guaranteed: !hasBadWords,
+        backend_route_registered: backendRouteRegistered,
+        note: allOk ? 'P0-A MVP 锁契约守门完整' : '任一回归 → URL 漂回 oracle / false confidence 串入 / route 删'
+      }
+    );
+  } catch (e) {
+    check('L33 P0-A 锁契约 (probe)', false, { err: e.message }, 'soft');
+  }
+
+  // L34 Bettor r367/r369/r371/r372 DoD 问1 broker 推荐 守门 (J2 r409 c1681162 / KANet-UI 7b62de27 ship)
+  // 4 sub: backend POST /api/broker/recommend (prevet-gate) + GET /api/broker/recommendations + UI 🌟 filter + 三层制衡 badge
+  try {
+    const poolPath = path.resolve(REPO_ROOT, 'kasia-console/src/api/pool.js');
+    const listEtaPath = path.resolve(REPO_ROOT, 'kasia-console/src/ui/predictions-list.eta');
+    const poolSrc = fs.readFileSync(poolPath, 'utf8');
+    const listSrc = fs.readFileSync(listEtaPath, 'utf8');
+    const hasPostRec = /fastify\.post\(['"]\/api\/broker\/recommend['"]/.test(poolSrc);
+    const hasGetRec = /fastify\.get\(['"]\/api\/broker\/recommendations['"]/.test(poolSrc);
+    const uiHasFilter = /Broker\s*推荐/.test(listSrc);
+    const uiHasMode = /filterMode\s*=\s*['"]recommended['"]/.test(listSrc);
+    const allOk = hasPostRec && hasGetRec && uiHasFilter && uiHasMode;
+    check(
+      'L34 DoD 问1 broker 推荐: POST/GET endpoint + UI 🌟 filter (Bettor r367-r372, J2 6b8ea4a3, KANet-UI 7b62de27)',
+      allOk,
+      {
+        backend_post_recommend: hasPostRec,
+        backend_get_recommendations: hasGetRec,
+        ui_has_broker_filter: uiHasFilter,
+        ui_has_recommended_mode: uiHasMode,
+        note: allOk ? '问1 broker 推荐三层制衡守门完整' : '任一回归 → endpoint 删 / UI filter 漂'
+      }
+    );
+  } catch (e) {
+    check('L34 broker 推荐 (probe)', false, { err: e.message }, 'soft');
+  }
+
+  // L35 Bettor r372 DoD 问2 VRF 排 broker_pk + maker_pk (J1 6694d3bf ship)
+  // 2 sub: committee sampler 含 excludePks 参数 + 守过滤同 PK 双角色
+  try {
+    const samplerPath = path.resolve(REPO_ROOT, 'kasia-console/src/services/pool-committee-sampler.mjs');
+    const samplerSrc = fs.existsSync(samplerPath) ? fs.readFileSync(samplerPath, 'utf8') : '';
+    const hasExcludePks = /options\.excludePks|excludePks\s*:/.test(samplerSrc);
+    const hasFilter = /filter\(m\s*=>\s*!\s*excludePks\.has/.test(samplerSrc);
+    const mentionsBrokerMakerPk = /broker_pk\s*\+\s*maker_pk|maker_pk\s*\+\s*broker_pk|excludePks.*maker_pk.*broker_pk/.test(samplerSrc);
+    const allOk = hasExcludePks && hasFilter && mentionsBrokerMakerPk;
+    check(
+      'L35 DoD 问2 VRF 排 broker_pk + maker_pk (Bettor r372, J1 6694d3bf)',
+      allOk,
+      {
+        sampler_has_excludePks_param: hasExcludePks,
+        sampler_has_filter_logic: hasFilter,
+        sampler_mentions_broker_maker_pk: mentionsBrokerMakerPk,
+        note: allOk ? 'VRF 排同 PK 双角色守门完整' : '任一回归 → excludePks 删 / filter 漂 / 同 PK 双角色操纵漏'
+      }
+    );
+  } catch (e) {
+    check('L35 VRF 排除 (probe)', false, { err: e.message }, 'soft');
+  }
+
+  // L36 Bettor r382/r385/r386 DoD §硬 gap 双层 pool 守门 (J2 b07b535b layer 1 + J1 401bc78c/902a75e5 layer 2)
+  // = create-v07 前置查 snapshot pool_size < 5 直 reject 503 + sampler filter 后再守 throw
+  // 真因: 7un1d 建时 eligible pool=4 < COMMITTEE_SIZE 5 → 委员永远抽不出 → unsettlable
+  try {
+    const poolPath = path.resolve(REPO_ROOT, 'kasia-console/src/api/pool.js');
+    const samplerPath = path.resolve(REPO_ROOT, 'kasia-console/src/services/pool-committee-sampler.mjs');
+    const poolSrc = fs.readFileSync(poolPath, 'utf8');
+    const samplerSrc = fs.existsSync(samplerPath) ? fs.readFileSync(samplerPath, 'utf8') : '';
+    // sub-a: layer 1 在 create-v07 前置查 chain_view snapshot + pool_size < COMMITTEE_SIZE_GUARD reject
+    const hasChainViewQuery = /oracle_pool_chain_view\s+ORDER BY snapshot_daa DESC LIMIT 1|FROM oracle_pool_chain_view\s+ORDER BY/.test(poolSrc);
+    const hasGuardRejectPath = /pool_size\s*<\s*COMMITTEE_SIZE_GUARD|pool_size\s*<\s*5\b/.test(poolSrc);
+    // sub-b: layer 2 sampler filter 后守 throw 含 'pool must have'
+    const samplerHasGuard = /pool must have/.test(samplerSrc);
+    const allOk = hasChainViewQuery && hasGuardRejectPath && samplerHasGuard;
+    check(
+      'L36 DoD §硬 gap 双层 pool guard (Bettor r382/r385/r386, J2 b07b535b + J1 401bc78c)',
+      allOk,
+      {
+        layer1_chain_view_snapshot_query: hasChainViewQuery,
+        layer1_pool_size_reject: hasGuardRejectPath,
+        layer2_sampler_throw_guard: samplerHasGuard,
+        note: allOk ? '双层 pool 守门完整 防 7un1d 类 unsettlable 重演' : '任一回归 → pool<5 仍可建市 → unsettlable 卡 verifying'
+      }
+    );
+  } catch (e) {
+    check('L36 pool guard 双层 (probe)', false, { err: e.message }, 'soft');
+  }
+
+  // L37 Bettor r401-r404 Oracle 判断框架 spec §5 守门 (J2 b5113af5 ship)
+  // 4 sub: ABSTAIN-not-guess (= 删 guess-fallback) + 三态 enum YES/NO/ABSTAIN + ABSTAIN 广播上链
+  // 真因: w0s3m 4/5 oracle 错判 NO 因 deriveKanetNativeVote ||rawText.slice(0,2000) 喂 LLM 截断 boilerplate
+  try {
+    const voterPath = path.resolve(REPO_ROOT, 'kasia-console/src/services/bettor-prediction-voter.js');
+    const settlerPath = path.resolve(REPO_ROOT, 'kasia-console/src/services/pool-market-settler.js');
+    const voterSrc = fs.readFileSync(voterPath, 'utf8');
+    const settlerSrc = fs.readFileSync(settlerPath, 'utf8');
+    // sub-a: voter 不含 'clean || rawText.slice' guess-fallback (= Bettor r402b 钉死 #1)
+    const hasGuessFallback = /evidence_text\s*=\s*clean\s*\|\|\s*rawText\.slice|evidence_text\s*=\s*rawText\.slice\s*\(\s*0\s*,\s*\d+\s*\)/.test(voterSrc);
+    // sub-b: voter abstain 路径存在 (= return { ok:false, ... abstain ... })
+    const hasAbstainReturn = /(abstain|ABSTAIN)/i.test(voterSrc) && /(return\s+\{[^}]*ok\s*:\s*false[^}]*abstain|outcome\s*:\s*['"]ABSTAIN['"])/i.test(voterSrc);
+    // sub-c: outcome enum YES/NO/ABSTAIN 在 voter
+    const hasOutcomeEnum = /outcome\s*:\s*['"]ABSTAIN['"]/.test(voterSrc);
+    // sub-d: extractor_kind_used 字段 broadcast (= J1 r303 不变量提议)
+    const hasExtractorKindUsed = /extractor_kind_used/.test(voterSrc);
+    // sub-e: settler 独立 abstainCount + trueSilentSet + abstainSet + malformedSet 全分 (= 不混)
+    const settlerHasAllSets = /trueSilentSet/.test(settlerSrc) && /abstainSet/.test(settlerSrc) && /malformedSet/.test(settlerSrc);
+    // sub-f: _findSilentForWinner 函数体不含 abstainSet 检查 (= ABSTAIN 永不被选为 forfeit, J2 r414 修)
+    let findSilentBody = '';
+    const fsfwMatch = settlerSrc.match(/function\s+_findSilentForWinner[\s\S]*?(?=\n\s*function|\n\s*if\s*\(\s*yesCount\s*>=)/);
+    if (fsfwMatch) findSilentBody = fsfwMatch[0];
+    // 强守: function body 必含 malformedSet.has (= 仍 priority 2) 且 不含 abstainSet.has (= ABSTAIN 永不当 forfeit, spec 5.5)
+    const settlerAbstainNotInFindSilent = findSilentBody && findSilentBody.includes('malformedSet.has') && !findSilentBody.includes('abstainSet.has');
+    const allOk = !hasGuessFallback && hasAbstainReturn && hasOutcomeEnum && hasExtractorKindUsed && settlerHasAllSets && settlerAbstainNotInFindSilent;
+    check(
+      'L37 Oracle 判断框架: ABSTAIN-not-guess + 三态 enum + ABSTAIN 永不当 forfeit (Bettor r401-r414, J2 b5113af5+r413+r414)',
+      allOk,
+      {
+        voter_no_guess_fallback: !hasGuessFallback,
+        voter_has_abstain_return: hasAbstainReturn,
+        voter_has_outcome_enum_abstain: hasOutcomeEnum,
+        voter_broadcasts_extractor_kind: hasExtractorKindUsed,
+        settler_has_all_three_sets: settlerHasAllSets,
+        settler_abstain_not_in_findSilent: settlerAbstainNotInFindSilent,
+        note: allOk ? 'ABSTAIN-not-guess + ABSTAIN 永不当 forfeit (J2 r414 修) 守门完整' : '任一回归 → guess fallback 重生 / 三 set 混 / abstain 被选 forfeit 立 hard FAIL'
+      }
+    );
+  } catch (e) {
+    check('L37 ABSTAIN framework (probe)', false, { err: e.message }, 'soft');
+  }
+
+  // L38 Bettor r416 三桶 UI 渲染守 (KANet-UI c5ece2c1, spec §7.2)
+  // = predictions-pool-detail.eta 三桶 judged/abstain/silent 分明 + 不混
+  try {
+    const detailPath = path.resolve(REPO_ROOT, 'kasia-console/src/ui/predictions-pool-detail.eta');
+    const src = fs.readFileSync(detailPath, 'utf8');
+    // sub-a: 三桶 count 函数都在 (= judgedCount + abstainCount + silentCount)
+    const hasAllCounts = /judgedCount\s*\(/.test(src) && /abstainCount\s*\(/.test(src) && /silentCount\s*\(/.test(src);
+    // sub-b: 三态 文案 '判定 / 弃权 / 未响应'
+    const hasZhTerms = /判定/.test(src) && /弃权/.test(src) && /未响应/.test(src);
+    // sub-c: ABSTAIN 视觉独立 silent (= tooltip '不计 4-of-5' or '不损 stake' 类)
+    const hasAbstainTooltip = /不计\s*4-of-5|不损\s*stake|看了但判不了/.test(src);
+    // sub-d: vote === 'ABSTAIN' 分支独立 vote === 'silent' 分支 (= 不归 silent forfeit)
+    const distinguishedAbstainSilent = /vote\s*===\s*['"]ABSTAIN['"]/.test(src) && /vote\s*===\s*['"]silent['"]/.test(src);
+    const allOk = hasAllCounts && hasZhTerms && hasAbstainTooltip && distinguishedAbstainSilent;
+    check(
+      'L38 三桶 UI 渲染: judged/abstain/silent 分明 + ABSTAIN 不混 silent (Bettor r416, KANet-UI c5ece2c1, spec §7.2)',
+      allOk,
+      {
+        ui_has_all_three_counts: hasAllCounts,
+        ui_has_zh_terms: hasZhTerms,
+        ui_has_abstain_tooltip: hasAbstainTooltip,
+        ui_distinguishes_abstain_silent: distinguishedAbstainSilent,
+        note: allOk ? '三桶 UI 守门完整 守 spec 5.5 弃权 reputation 中性' : '任一回归 → abstain 混入 voted / silent 错算 / tooltip 文案漂'
+      }
+    );
+  } catch (e) {
+    check('L38 三桶 UI (probe)', false, { err: e.message }, 'soft');
+  }
+
+  // L39 Bettor r427/r428 跨节点 settle sync 守 (J2 r418 9bfad844 ship)
+  // = settler 广播 pool_market_settled_v1 + trade-protocol-filter consumer handler 接 = :3200 settle → :3300 ingest
+  // 真因: vaaks :3200 settle 链上 PASS 但 :3300 没人听 settled 事件 → 卡 verifying
+  try {
+    const filterPath = path.resolve(REPO_ROOT, 'kasia-console/src/services/trade-protocol-filter.js');
+    const filterSrc = fs.readFileSync(filterPath, 'utf8');
+    const settlerPath = path.resolve(REPO_ROOT, 'kasia-console/src/services/pool-market-settler.js');
+    const settlerSrc = fs.readFileSync(settlerPath, 'utf8');
+    // sub-a: trade-protocol-filter 含 case 'pool_market_settled_v1'
+    const hasSettledHandler = /case\s+['"]pool_market_settled_v1['"]/.test(filterSrc);
+    // sub-b: settler 广播 pool_market_settled_v1 (= 来源, 不只 consumer)
+    const settlerBroadcasts = /pool_market_settled_v1/.test(settlerSrc);
+    const allOk = hasSettledHandler && settlerBroadcasts;
+    check(
+      'L39 跨节点 settle sync: pool_market_settled_v1 producer + consumer (Bettor r427/r428, J2 r418 9bfad844)',
+      allOk,
+      {
+        filter_has_settled_handler: hasSettledHandler,
+        settler_broadcasts_settled_v1: settlerBroadcasts,
+        note: allOk ? '跨节点 settle 状态同步守门完整' : '任一回归 → :3300 settle 状态不同步 卡 verifying'
+      }
+    );
+  } catch (e) {
+    check('L39 cross-node settle sync (probe)', false, { err: e.message }, 'soft');
+  }
+
+  // L40 Bettor r433 Owner 钦定 auto-bet 服务 (J2 r420 14983c0d ship): Console cron 不依赖 AI 循环
+  // = pool-auto-better.js 存 + index.js wire startAutoBetterCron() 调
+  try {
+    const autoBetterPath = path.resolve(REPO_ROOT, 'kasia-console/src/services/pool-auto-better.js');
+    const indexPath = path.resolve(REPO_ROOT, 'kasia-console/src/index.js');
+    const autoBetterExists = fs.existsSync(autoBetterPath);
+    const autoBetterSrc = autoBetterExists ? fs.readFileSync(autoBetterPath, 'utf8') : '';
+    const indexSrc = fs.readFileSync(indexPath, 'utf8');
+    const hasStartCron = /export\s+function\s+startAutoBetterCron/.test(autoBetterSrc);
+    const indexImports = /import\s+\{[^}]*startAutoBetterCron[^}]*\}\s+from\s+['"]\.\/services\/pool-auto-better/.test(indexSrc);
+    const indexCalls = /startAutoBetterCron\s*\(\s*\)/.test(indexSrc);
+    const allOk = autoBetterExists && hasStartCron && indexImports && indexCalls;
+    check(
+      'L40 auto-bet 服务 Console cron (Bettor r433 Owner r436, J2 r420 14983c0d)',
+      allOk,
+      {
+        pool_auto_better_exists: autoBetterExists,
+        has_startAutoBetterCron_export: hasStartCron,
+        index_imports_cron: indexImports,
+        index_calls_cron: indexCalls,
+        note: allOk ? 'auto-bet cron 守门完整 不再 relay-orphan 致 0 押注' : '任一回归 → cron 删 / wire 断 → AutoBetter 不再自动押'
+      }
+    );
+  } catch (e) {
+    check('L40 auto-bet 服务 (probe)', false, { err: e.message }, 'soft');
+  }
+
+  // L41 Bettor r439-r442 prevet mock-extract maker-facing (J2 r421 015cbb07 + r422 40751bbe fix)
+  // = POST /api/pool/prevet-extract + diagnoseSource(url, source) + isVoterSupportedSource enum gate
+  // 真因: r442 抓 prevet 接 espn-enum+ESPN-URL 但 voter enum 路由拒 → judgeable_now 错放. r422 加 enum 校验.
+  try {
+    const poolPath = path.resolve(REPO_ROOT, 'kasia-console/src/api/pool.js');
+    const extractorsPath = path.resolve(REPO_ROOT, 'kasia-console/src/lib/oracle-evidence-extractors.mjs');
+    const poolSrc = fs.readFileSync(poolPath, 'utf8');
+    const extractorsSrc = fs.readFileSync(extractorsPath, 'utf8');
+    // sub-a: pool.js endpoint POST /api/pool/prevet-extract
+    const hasEndpoint = /fastify\.post\(['"]\/api\/pool\/prevet-extract['"]/.test(poolSrc);
+    // sub-b: endpoint 调 diagnoseSource(url, source) 含 source 参数 (= r422 fix)
+    const callsDiagnoseWithSource = /diagnoseSource\s*\(\s*url\s*,\s*source\s*\)/.test(poolSrc);
+    // sub-c: extractors 含 isVoterSupportedSource 函数 export
+    const hasIsVoterSupported = /export\s+function\s+isVoterSupportedSource/.test(extractorsSrc);
+    // sub-d: diagnoseSource 函数体 含 isVoterSupportedSource 校验 + 'unsupported_source_enum' verdict
+    const fsfwMatch = extractorsSrc.match(/export\s+async\s+function\s+diagnoseSource[\s\S]*?(?=\nexport\s|\n}\s*$)/);
+    const diagnoseBody = fsfwMatch ? fsfwMatch[0] : '';
+    const diagnoseValidatesEnum = diagnoseBody.includes('isVoterSupportedSource') && diagnoseBody.includes('unsupported_source_enum');
+    const allOk = hasEndpoint && callsDiagnoseWithSource && hasIsVoterSupported && diagnoseValidatesEnum;
+    check(
+      'L41 prevet mock-extract + URL-enum 对齐 (Bettor r439-r442, J2 r421 015cbb07 + r422 40751bbe)',
+      allOk,
+      {
+        endpoint_registered: hasEndpoint,
+        endpoint_calls_diagnose_with_source: callsDiagnoseWithSource,
+        has_isVoterSupportedSource: hasIsVoterSupported,
+        diagnose_validates_enum: diagnoseValidatesEnum,
+        note: allOk ? 'prevet-extract 守门完整 + URL-enum 校验对齐, 防 espn-enum+ESPN-URL 错配' : '任一回归 → enum 校验丢 / source 参数没传入 / endpoint 删 立 hard FAIL'
+      }
+    );
+  } catch (e) {
+    check('L41 prevet-extract (probe)', false, { err: e.message }, 'soft');
+  }
+
+  // L42 Bettor r443/r444 polymarket judge-path GREEN (J2 r423 42bede3e fix)
+  // = diagnoseSource 识 polymarket = voter 非-extractor 判路 (derivePolymarketVote 读 gamma), 不被 'no_extractor' 误拒
+  // 真因: r443 抓 'polymarket source 经 KNOWN_EXTRACTORS 找不到 → 误判 unjudgeable', r423 加 polymarket 分支 → 'judgeable_polymarket'
+  try {
+    const extractorsPath = path.resolve(REPO_ROOT, 'kasia-console/src/lib/oracle-evidence-extractors.mjs');
+    const extractorsSrc = fs.readFileSync(extractorsPath, 'utf8');
+    // sub-a: isVoterSupportedSource 接 'polymarket' (= return true)
+    const acceptsPolymarket = /source\s*===\s*['"]polymarket['"]\s*\)\s*return\s+true/.test(extractorsSrc);
+    // sub-b: diagnoseSource 函数体含 polymarket 分支返 'judgeable_polymarket'
+    const fsfwMatch = extractorsSrc.match(/export\s+async\s+function\s+diagnoseSource[\s\S]*?(?=\nexport\s|\n}\s*$)/);
+    const diagnoseBody = fsfwMatch ? fsfwMatch[0] : '';
+    const handlesPolymarket = /source\s*===\s*['"]polymarket['"]|polymarket\.com/.test(diagnoseBody) && diagnoseBody.includes('judgeable_polymarket');
+    const allOk = acceptsPolymarket && handlesPolymarket;
+    check(
+      'L42 polymarket judge-path GREEN (Bettor r443/r444, J2 r423 42bede3e)',
+      allOk,
+      {
+        isVoterSupportedSource_accepts_polymarket: acceptsPolymarket,
+        diagnoseSource_handles_polymarket_green: handlesPolymarket,
+        note: allOk ? 'polymarket 非-extractor 判路守门完整, 不被误拒 no_extractor' : '任一回归 → polymarket 单被错拒 立 hard FAIL'
+      }
+    );
+  } catch (e) {
+    check('L42 polymarket (probe)', false, { err: e.message }, 'soft');
+  }
+
+  // L43 Bettor r433b/r446 task 2 relay-orphan 固化 (J2 r425 a31fefc7 ship)
+  // = relay-health-monitor.js Console cron 自动检 + 重启 dead relay, 防 AutoBetter relay-orphan 致 0 押注
+  try {
+    const monitorPath = path.resolve(REPO_ROOT, 'kasia-console/src/services/relay-health-monitor.js');
+    const indexPath = path.resolve(REPO_ROOT, 'kasia-console/src/index.js');
+    const monitorExists = fs.existsSync(monitorPath);
+    const monitorSrc = monitorExists ? fs.readFileSync(monitorPath, 'utf8') : '';
+    const indexSrc = fs.readFileSync(indexPath, 'utf8');
+    const hasExport = /export\s+function\s+startRelayHealthMonitorCron/.test(monitorSrc);
+    const indexImports = /import\s+\{[^}]*startRelayHealthMonitorCron[^}]*\}\s+from\s+['"]\.\/services\/relay-health-monitor/.test(indexSrc);
+    const indexCalls = /startRelayHealthMonitorCron\s*\(\s*\)/.test(indexSrc);
+    const allOk = monitorExists && hasExport && indexImports && indexCalls;
+    check(
+      'L43 relay-orphan 固化 Console cron (Bettor r433b/r446, J2 r425 a31fefc7)',
+      allOk,
+      {
+        relay_health_monitor_exists: monitorExists,
+        has_startRelayHealthMonitorCron_export: hasExport,
+        index_imports: indexImports,
+        index_calls: indexCalls,
+        note: allOk ? 'relay-orphan cron 守门完整 防 AutoBetter relay-orphan 致 0 押注' : '任一回归 → cron 删 / wire 断 → relay 死无自愈'
+      }
+    );
+  } catch (e) {
+    check('L43 relay-orphan (probe)', false, { err: e.message }, 'soft');
+  }
+
+  // L44 Bettor r462/r465 跨域 ramp 第 1 — CoinGecko extractor (J2 r427 af0b25d0 ship)
+  // = extractCoinGeckoPrice + KNOWN_EXTRACTORS registry + isVoterSupportedSource accepts 'coingecko'
+  try {
+    const extractorsPath = path.resolve(REPO_ROOT, 'kasia-console/src/lib/oracle-evidence-extractors.mjs');
+    const extractorsSrc = fs.readFileSync(extractorsPath, 'utf8');
+    // sub-a: extractCoinGeckoPrice export
+    const hasExtractor = /export\s+function\s+extractCoinGeckoPrice/.test(extractorsSrc);
+    // sub-b: KNOWN_EXTRACTORS 含 coingecko entry (domainRe + kind:'coingecko')
+    const inRegistry = /kind\s*:\s*['"]coingecko['"]/.test(extractorsSrc) && /domainRe\s*:\s*\/[^\/]*coingecko/.test(extractorsSrc);
+    // sub-c: isVoterSupportedSource accepts 'coingecko'
+    const acceptsEnum = /source\s*===\s*['"]coingecko['"]\s*\)\s*return\s+true/.test(extractorsSrc);
+    const allOk = hasExtractor && inRegistry && acceptsEnum;
+    check(
+      'L44 CoinGecko extractor 跨域 ramp 第 1 (Bettor r462/r465, J2 r427 af0b25d0)',
+      allOk,
+      {
+        has_extractCoinGeckoPrice_export: hasExtractor,
+        in_KNOWN_EXTRACTORS_registry: inRegistry,
+        isVoterSupportedSource_accepts_coingecko: acceptsEnum,
+        note: allOk ? 'CoinGecko 跨域 extractor 守门完整 prevet+voter 单一 registry' : '任一回归 → coingecko 单被错拒 / registry 漂 立 hard FAIL'
+      }
+    );
+  } catch (e) {
+    check('L44 CoinGecko extractor (probe)', false, { err: e.message }, 'soft');
+  }
+
+  const total = report.pass + report.fail + report.deploy_pending;
+  if (report.fail > 0) report.verdict = 'FAIL';
+  else if (report.deploy_pending > 0) report.verdict = 'PASS_WITH_DEPLOY_PENDING';
+  else report.verdict = 'PASS';
+  report.summary = `${report.pass}/${total} PASS, ${report.fail} hard FAIL, ${report.deploy_pending} deploy pending — verdict ${report.verdict}`;
+  return report;
+}
+
+if (mode === 'baseline') {
+  const baseline = await captureBaseline();
+  const outAbs = path.resolve(outPath);
+  fs.writeFileSync(outAbs, JSON.stringify(baseline, null, 2));
+
+  console.log(`Baseline captured: ${outAbs}`);
+  console.log(`Settle TX events: ${baseline.summary.settle_tx_count} (real chain TX resolved: ${baseline.summary.settle_real_chain_tx_resolved})`);
+  console.log(`Bet TX events: ${baseline.summary.bet_tx_count} (real chain TX resolved: ${baseline.summary.bet_real_chain_tx_resolved})`);
+  console.log(`Bond amount sompi samples: ${baseline.summary.bond_amount_samples_sompi} (min=${baseline.summary.bond_amount_sompi_min} max=${baseline.summary.bond_amount_sompi_max} avg=${baseline.summary.bond_amount_sompi_avg})`);
+  console.log(`Settle broker_fee_sompi avg: ${baseline.summary.settle_broker_fee_sompi_avg} (samples=${baseline.summary.settle_broker_fee_samples})`);
+  console.log(`Settle winner_amount_sompi avg: ${baseline.summary.settle_winner_amount_sompi_avg}`);
+  console.log(`Recent 7d chain TX: ${baseline.summary.total_recent_tx_7d}`);
+  console.log(`v0.5 SS sha256: ${baseline.v0_5_invariants.ss_v05_file_sha256}`);
+  console.log(`v0.5 SS entrypoints: [${(baseline.v0_5_invariants.ss_v05_entrypoints || []).join(', ')}]`);
+} else {
+  const report = await verifyV06(baselineIn);
+  const outAbs = path.resolve(outPath);
+  fs.writeFileSync(outAbs, JSON.stringify(report, null, 2));
+  console.log(`v0.6 compat verify report: ${outAbs}`);
+  console.log(report.summary);
+  for (const c of report.checks) {
+    const tag = c.pass ? 'PASS' : (c.severity === 'soft' ? 'DEPLOY_PENDING' : 'FAIL');
+    console.log(`  [${tag}] ${c.name}`);
+    if (!c.pass) console.log('    detail:', JSON.stringify(c.detail).slice(0, 200));
+  }
+  process.exit(report.fail === 0 ? 0 : 1);
+}

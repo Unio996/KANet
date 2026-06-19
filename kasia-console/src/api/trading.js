@@ -105,17 +105,10 @@ export async function registerTradingRoutes(fastify) {
     });
   });
 
-  // GET /trading-v2 — new design system trading page
+  // GET /trading-v2 — retired (Gap 3 dedup, Bettor r36 GO).
+  // /trading-v2 (stub 151L) → 302 /trading (canonical 2914L). trading-v2.eta fossil retained.
   fastify.get('/trading-v2', async (request, reply) => {
-    const relayNodes = sqlite.prepare('SELECT id, name, address FROM relay_nodes').all();
-    const lang = parseLang(request.headers.cookie);
-    const t = getT(lang);
-    return reply.viewAsync('trading-v2.eta', {
-      title: 'Trading — KANet',
-      relayNodes,
-      t, lang, dir: isRtl(lang) ? 'rtl' : 'ltr', langs: LANG_NAMES,
-      _page: 'trading',
-    });
+    return reply.redirect(302, '/trading');
   });
 
   // GET /api/trade/wallet-balance — 实时查链上余额（USDT + 原生币）
@@ -226,17 +219,10 @@ export async function registerTradingRoutes(fastify) {
     });
   });
 
-  // GET /market-v2 — 自由市场（新设计系统）
+  // GET /market-v2 — retired (Gap 3 dedup, Bettor r36 GO).
+  // /market-v2 (442L) → 302 /market (canonical 1045L). market-v2.eta fossil retained.
   fastify.get('/market-v2', async (request, reply) => {
-    const relayNodes = sqlite.prepare('SELECT id, name, address FROM relay_nodes').all();
-    const lang = parseLang(request.headers.cookie);
-    const t = getT(lang);
-    return reply.viewAsync('market-v2.eta', {
-      title: '自由市场 — KANet',
-      relayNodes,
-      t, lang, dir: isRtl(lang) ? 'rtl' : 'ltr', langs: LANG_NAMES,
-      _page: 'market',
-    });
+    return reply.redirect(302, '/market');
   });
 
   // GET /api/trade/mode — get current trade mode

@@ -27,6 +27,16 @@ Phase 1 证的是**工程层**, 不是经济层 — 避免误读:
   - **激励模型抗对抗** (= 养肥再杀 / sybil 刷单 / domain-shift 等攻击)
   这些靠 Phase 2/3 (攒信任 + 真 bond + 持续吊销 + 真 slash) 真上场后才证。Phase 1 **不解** Owner 的经济兜底关切, 也不 imply 解。
 
+## ⚠ 节点 / 模型多样性 (诚实标 — Bettor r173 + J2 r77 共识)
+
+Phase 1 demand 现 **100% 自家循环**, 不是 organic 外部需求:
+
+- **节点 (host) 多样性**: 当前 5 oracle 全跑在 **单 host** (.105 same machine), 不 robust against host-level outage 或 collusion。真"agent 经济体"语义要求 **≥3 独立 host**, Phase 1 未达。
+- **LLM 模型多样性**: 5 oracle 全用 **同一个 Qwen3.6 模型** (single brain identity per memory project_qwen36_milestone), domain-shift 防御为 0。真"多样性"语义要求 **≥2 独立 LLM provider**, Phase 1 未达。
+- **demand 来源**: 5 oracle 投 5 oracle 自家上挂的 polymarket-mirror 市场, 无 external builder, reputation 现 ≈ 0 (= network effect 不足支撑 organic incentive)。
+
+= Phase 1 是 **能力 demo** (证 rails 真跑), 不是 **PMF / organic demand 证据**。每个公开物料须 explicit 标 self-generated demand + 单 host + 单 LLM 现状, 不 imply 已是 production-grade decentralized oracle network。
+
 ## 真链证据 (testnet-12)
 
 完整 e2e — 真 Polymarket 市场 Espresso FDV $200M (condition `0x374e86da`, resolved YES, closed 70 天前):

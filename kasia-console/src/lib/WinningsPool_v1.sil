@@ -1,0 +1,92 @@
+// WinningsPool_v1 — KANet predict market v0.7.1 trustless settle layer (pattern B + a)
+//
+// Decision: Bettor r415 + Owner 终裁 scope A (2026-06-02). per-PoolSide self-defense, spine
+// settle 产生 1 个 WinningsPool UTXO holding 全 winnings, 每赢方独立 claim TX 引此 UTXO 取自家 share.
+//
+// 4 死焊 (Bettor r415):
+//   ① Σ claim ≤ pool: silverc require(share <= input[0].value), 每次 claim 减少 WinningsPool value
+//   ② share = stakeAmount × (yesPool + noPool) / winningPool 精确 (= 公式整数除, 末轮 dust 归 broker fee)
+//   ③ 每 PoolSide 只领一次: bettor 自家 PoolSide UTXO 作 input[1] 一花就 gone (silverc 天然挡)
+//   ④ 池空不可超抽: require(share <= remaining)
+//
+// 状态 = UTXO value (= Mecenas 模式, 无显式 state struct, 自递归保持 scriptPubKey)
+//   value = **remaining LOSING pool only** (= 初始 losingPool, 不含 winner stake)
+//   Bettor r418 守恒 bug catch fix: 池 holds losing pool only, winner stake stays on his PoolSide.
+//   claim TX 守恒:
+//     in[0] = WinningsPool UTXO (= losingPool 剩余)
+//     in[1] = winning PoolSide UTXO (= bettor stake, 一花防重复)
+//     out[0] = P2PK(bettorPk) value = share (= stake + 自家在 loser pool 的份额)
+//     out[1] (= continuation 除非最末): value = WinningsPool − (share − stake) − minerFee
+//     即 pool 只减 (share − winnerStake) = bettor 从 loser pool 提取的份额, 不双算自家 stake.
+//
+// PoolSide 验证 (= 防伪 PoolSide UTXO 输入): PoolSide_v0.7.1 spend 时自验 direction == outcome,
+//   readInputStateWithTemplate 读 WinningsPool ctor 的 outcome/yesPool/noPool → 算 share → 自验 output[0]
+//   = P2PK(bettorPk) value == share. WinningsPool 这边主要守 self-continuation + cap.
+//
+// ctor: (outcome, yesPool, noPool, brokerPk, marketCovenantId)
+//   outcome: 0 = YES 赢, 1 = NO 赢
+//   yesPool / noPool: total stake (sompi) per side, baked at spine settle time (spine 强制 ctor 值)
+//   brokerPk: 末轮 dust 归 broker
+//   marketCovenantId: KIP-20 covenant 锚 logical market (= 跨 shard 同 marketId 但 single-shard v0.7.1 仍 baked)
+//
+// 编译: silverc.exe WinningsPool_v1.sil --ctor args.json
+pragma silverscript ^0.1.0;
+
+contract WinningsPool_v1(
+    int outcome,             // 0 = YES, 1 = NO
+    int yesPool,             // sompi
+    int noPool,              // sompi
+    byte[32] brokerPk,
+    byte[32] marketCovenantId
+) {
+
+    // entry 0 — claim: bettor 拉自家 winning PoolSide UTXO + WinningsPool UTXO, 取 share, 续 WinningsPool.
+    //   PoolSide 在自家 entry 里验自己 direction == outcome + share 公式 (= 那是 PoolSide_v0.7.1 责任).
+    //   这里守: ① 自继续 ② share 上限 ③ value math sanity
+    entrypoint function claim(int share) {
+        // ① 本合约必在 in[0]
+        require(this.activeInputIndex == 0);
+        require(tx.inputs.length == 2);  // [self, winning PoolSide]
+
+        // ② 守恒 (Bettor r418 fix): pool 只减 (share − winnerStake), 不双算
+        int poolValue = tx.inputs[0].value;
+        int winnerStake = tx.inputs[1].value;
+        require(share > 0);
+        require(winnerStake > 0);
+        require(share >= winnerStake);  // share ≥ stake (= winner 至少拿回本金)
+
+        int poolShareTaken = share - winnerStake;  // bettor 实从 loser pool 提取份额
+        require(poolShareTaken <= poolValue);  // ④ 池空不可超抽
+
+        // ③ share 公式 sanity (= losingPool 上限, 单 winner 最多拿自家 stake + 整个 loser pool)
+        int losingPool = outcome * yesPool + (1 - outcome) * noPool;
+        require(losingPool > 0);
+        require(poolShareTaken <= losingPool);  // 全 loser pool 上限
+
+        // ④ out[0] = P2PK(bettorPk) value == share (= PoolSide_v0.7.1 自验 bettorPk + share 精确公式)
+        require(tx.outputs[0].value == share);
+
+        // ⑤ self-continuation 或 末轮归 broker (= 守恒: pool 减 poolShareTaken)
+        int newPoolValue = poolValue - poolShareTaken;
+        byte[34] brokerLock = new ScriptPubKeyP2PK(pubkey(brokerPk));
+        if (newPoolValue <= 10000000) {
+            // 末轮: pool dust 余 (≤ 0.1 KAS) → broker
+            require(tx.outputs.length == 2);
+            require(tx.outputs[1].scriptPubKey == byte[](brokerLock));
+            require(tx.outputs[1].value <= newPoolValue);
+            require(tx.outputs[1].value >= 2000000);  // KIP-9 mass cap: out_value >= 2e6 sompi → mass ≤ 500k
+        } else {
+            // 续: out[1] = WinningsPool 同 scriptPubKey (= self recursion)
+            require(tx.outputs.length == 3);
+            byte[] selfSpk = tx.inputs[0].scriptPubKey;
+            require(tx.outputs[1].scriptPubKey == selfSpk);
+            require(tx.outputs[1].value <= newPoolValue);
+            // Bettor r433 实链 storage_mass catch: 100000 sompi fee budget 太小 → broker 必 ≥ 2e6 sompi
+            // (KIP-9: mass = 1e12/out_value, cap 500k → out_value ≥ 2e6). 改 1e8 (= 1 KAS) 留 broker 余地.
+            require(tx.outputs[1].value >= newPoolValue - 100000000);  // minerFee+broker max 1 KAS
+            // out[2] = broker fee (= minerFee margin 防 maker-rob-self 巨 fee, KIP-9 mass safe)
+            require(tx.outputs[2].scriptPubKey == byte[](brokerLock));
+            require(tx.outputs[2].value >= 2000000);  // KIP-9 storage_mass safe floor
+        }
+    }
+}

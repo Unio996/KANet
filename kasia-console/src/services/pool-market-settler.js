@@ -18,14 +18,54 @@
 import { sqlite } from '../db/client.js';
 import { sendCommandAsync } from './relay-manager.js';
 import { createHash } from 'node:crypto';
+// J1tn r303 P0-#1 sweep helper refactor (Bettor r346/r366b 钦定 fork 合 1 helper): KIP-9
+// storage_mass 公式 + STORAGE_MASS_C const 抽 lib/kip9-mass.mjs. 5 call sites 不再各抄.
+import {
+  STORAGE_MASS_C,
+  MIN_BROKER_FEE_FLOOR,
+  SOMPI_PER_MASS,                                     // gate B③ fork合: fee-rate 单源 (前 L2287 本地 110n 副本删, INVARIANTS SYS-2)
+  computeDynamicMinBrokerFee,
+  estimateStorageMass as estimateOutputStorageMass,  // J1tn r303: rename 避 L72 existing estimateStorageMass(inputs,outputs) 冲突
+  computeMultiOutputFee,
+  // #31 ⑤b single-source (J2, Bettor/J1/NWT GREEN): full multi-output formula + caps moved to kip9-mass
+  //   (was settler-local L119/L68/L69/L73/SETTLE_FEE_MAX/V07_MAX_FEE). re-exported below as estimateStorageMass.
+  estimateMultiOutputStorageMass as estimateStorageMass,
+  STORAGE_MASS_CAP,
+  STORAGE_MASS_SAFE_THRESHOLD,
+  MAX_TX_FEE_SOMPI,
+} from '../lib/kip9-mass.mjs';
+export { estimateStorageMass };  // re-export so pool.js L9/L471 import stays valid (was settler-local L119 fn)
 
-const TICK_INTERVAL_MS = 5 * 60 * 1000;     // 5 min
+// #31 ② wire: v08 chunked-settle (computeSettleChunks routes aggregate/chunk; payoutRoot = chunk_0 plan_commit).
+import { computeSettleChunks } from '../lib/pool-settle-chunks.mjs';
+import { payoutRoot as computePayoutRoot } from '../lib/pool-payout-root.mjs';
+
+// J2-tn r382 (Bettor 16:29 钦定): TICK_INTERVAL_MS env-configurable. Default 5min mainnet,
+// demo 期 .env 设 POOL_SETTLER_TICK_SEC=60 (= 1min) 提速 5x 整条流水.
+const TICK_INTERVAL_MS = (parseInt(process.env.POOL_SETTLER_TICK_SEC, 10) || 300) * 1000;
 const STARTUP_GRACE_MS = 60 * 1000;         // 60s grace (= 错峰 voter daemon 45s startup)
 
 // Per Bettor r336 + v0.5 spec section 4.3: ORACLE_SILENT_TIMEOUT_MIN ENV var.
 // Default 30 min OK for testnet rapid iteration. Mainnet deploy MUST set 1440 (= 24h 钢线).
 const ORACLE_SILENT_TIMEOUT_MIN = parseInt(process.env.ORACLE_SILENT_TIMEOUT_MIN, 10) || 30;
 const ORACLE_SILENT_TIMEOUT_MS = ORACLE_SILENT_TIMEOUT_MIN * 60_000;
+// J2-tn 规模测试 (Bettor r547/r548): collecting_sigs watchdog-b 超时. 旧硬编码 15min 在 20 并发
+// 收签下太紧 — sign_req(各 45-58 chunk)+ 跨节点 sig 回传在并发竞争下 >15min 没凑 4 签 → 误判
+// silent-stuck 强制 refund 达共识(5 票)的单。改 env, 默认 30min (并发容差); mainnet 可调。
+// 关键: 必须 > ③ sign_req re-broadcast backoff cap (见下 SIGN_REQ backoff Math.min ...,8 = 12min),
+// 否则 backoff 到下次 retry 前先被 watchdog refund (retry 没机会) = r548 时序 bug。
+const COLLECTING_SIGS_WATCHDOG_MIN = parseInt(process.env.COLLECTING_SIGS_WATCHDOG_MIN, 10) || 30;
+const COLLECTING_SIGS_WATCHDOG_MS = COLLECTING_SIGS_WATCHDOG_MIN * 60_000;
+// J2-tn (J1 #103 catch): settle 路 pool_settle_tx submit 永久失败 (UTXO-gone/fee-impossible) 给 give-up
+// 上限 — 超此 submit_fail_count → cancelled + refund 终态, 停无限退避重试 (ext-pool-177 count=90 实证).
+// 镜像 J1 门B refund-dis give-up cap. 默认 10 (60s×2^9 已退避到 3600s cap = ~5h 才到, transient 早自愈).
+const SETTLE_SUBMIT_GIVEUP = parseInt(process.env.SETTLE_SUBMIT_GIVEUP, 10) || 10;
+// 门C 档1 (Owner 终裁 r518, e8727706): dispute 中间态 grace 窗. 过 grace → dispatchRefund 终态
+// (档1 自治, 无 owner-manual 依赖)。档2/mainnet 才把终态换成挑战机制 (非退款 dispute terminal)。
+// testnet 默认短 (10min) 快迭代; mainnet 该长。诚实残留 (Bettor r521 → e8727706 §6): dispute→自动
+// refund 留弱 griefing 路 (corrupt 2 oracle 阻 settle-maj → dispute → 延迟免费 cancel), 档2 靠挑战机制收。
+const DISPUTE_GRACE_MIN = parseInt(process.env.DISPUTE_GRACE_MIN, 10) || 10;
+const DISPUTE_GRACE_MS = DISPUTE_GRACE_MIN * 60_000;
 // Area-7 T5 / area-4 Gap 6: DISAGREEMENT_TIMEOUT independent timer (= NOT ORACLE_SILENT_TIMEOUT
 // reuse, different semantics — disagreement is info-complete, no value waiting 24h). testnet
 // 5 min default, matches PoolSpine.sil refund_disagreement entry's `tx.time >= deadline + 300`
@@ -36,29 +76,47 @@ const DISAGREEMENT_TIMEOUT_MS = DISAGREEMENT_TIMEOUT_MIN * 60_000;
 // B2 v0.5 Phase 3 bug 8 — Kaspa Crescendo KIP-9 storage mass constraints.
 // A pool settle TX with many small-value outputs blows the storage mass cap (= UAT cycle 3:
 // 0.5 KAS bettor stakes → broker_fee 500k sompi → storage_mass 1.99M > 500k cap).
-const KIP9_C = 1e12;                          // KIP-9 mass constant
-const STORAGE_MASS_CAP = 500_000;             // kaspad standardness cap
-const STORAGE_MASS_SAFE_THRESHOLD = 400_000;  // 20% buffer — settle aborts above this
-const MIN_BROKER_FEE_SOMPI = 5_000_000;       // 0.05 KAS broker_fee floor (Bettor r370)
+// #31 ⑤b: KIP9_C / STORAGE_MASS_CAP / STORAGE_MASS_SAFE_THRESHOLD moved to kip9-mass.mjs single-source
+//   (imported above). Values unchanged (500_000 / 470_000; 470k = 6% margin per Bettor r349 3l06n).
+// J1tn r303 P0-#1 sweep helper refactor (Bettor r346/r366b 钦定): MIN_BROKER_FEE_SOMPI 改为
+// lib/kip9-mass.mjs MIN_BROKER_FEE_FLOOR 别名 (= 5M absolute floor, dynamic 算大就用大).
+const MIN_BROKER_FEE_SOMPI = MIN_BROKER_FEE_FLOOR;
 
 let timer = null;
 let running = false;
 
-/**
- * Estimate a transaction's KIP-9 storage mass.
- * storage_mass = C × max(0, Σ(1/output_value) − inputCount² / Σ(input_value))
- * Verified against UAT cycle 3 observed mass (1,991,668 ≈ computed).
- *
- * @param {number[]} inputValues - sompi values of each input UTXO
- * @param {number[]} outputValues - sompi values of each output
- * @returns {number} estimated storage mass
- */
-export function estimateStorageMass(inputValues, outputValues) {
-  const sumOutInv = outputValues.reduce((s, v) => s + (v > 0 ? 1 / v : 0), 0);
-  const sumIn = inputValues.reduce((s, v) => s + v, 0);
-  const inputsTerm = sumIn > 0 ? (inputValues.length * inputValues.length) / sumIn : 0;
-  return Math.max(0, Math.round(KIP9_C * (sumOutInv - inputsTerm)));
+// Bettor r472 (P0 incident 2026-06-10): per-market watchdog-a backoff. Markets that can't make
+// local progress (e.g. cross-node maker — dispatchRefund returns early at the cross-node guard
+// WITHOUT setting refund_dispatched_at, so the `!meta.refund_dispatched_at` re-entry guard stays
+// true forever) were re-decided + re-dispatched EVERY tick. That cascade (watchdog-a force-decide
+// → dispatchRefund cross-node skip → dispatchPhase no-maker → REFUND) spammed a 201MB log over
+// days → bash fork exhaustion → whole Console tree torn down. Back off re-attempts on the SAME
+// market to once per WATCHDOG_BACKOFF_MS. Pure rate-limit — does NOT change settlement outcome
+// (the market is still retried, just every 10min not every 60s) and writes no DB state. In-memory;
+// resets on restart. The REAL convergence fix (cross-node verifying markets must reach a terminal
+// state) is the xnode Path B gap — owned by J2-tn (r418/r419).
+const _watchdogBackoff = new Map(); // marketId -> last-attempt epoch ms
+const WATCHDOG_BACKOFF_MS = 10 * 60 * 1000;
+
+// Bettor r472: per-key log throttle for hot lines that re-fire every tick on stuck markets the
+// node can't action (main-loop REFUND + dispatchRefund cross-node skip). Logging guard only — the
+// dispatch attempt itself is unchanged (still cheap; the fatal resource was log VOLUME, not CPU).
+const _logThrottle = new Map(); // key -> last-logged epoch ms
+const LOG_THROTTLE_MS = 10 * 60 * 1000;
+function logThrottled(key, msg) {
+  const now = Date.now();
+  if (now - (_logThrottle.get(key) || 0) < LOG_THROTTLE_MS) return;
+  _logThrottle.set(key, now);
+  if (_logThrottle.size > 5000) {
+    const cutoff = now - LOG_THROTTLE_MS;
+    for (const [k, t] of _logThrottle) { if (t < cutoff) _logThrottle.delete(k); }
+  }
+  console.log(msg);
 }
+
+// estimateStorageMass(inputValues, outputValues) — #31 ⑤b: moved to kip9-mass.mjs as
+//   estimateMultiOutputStorageMass (single-source), imported above as estimateStorageMass + re-exported.
+//   Formula unchanged (byte-identical): C × max(0, Σ(1/out) − inputCount²/Σ(in)). Verified UAT cycle 3.
 
 /**
  * Parse a SQLite CURRENT_TIMESTAMP string as UTC.
@@ -71,6 +129,19 @@ export function parseSqliteUtc(ts) {
   if (typeof ts === 'number') return ts;
   const iso = ts.includes('T') ? ts : ts.replace(' ', 'T');
   return new Date(iso.endsWith('Z') ? iso : iso + 'Z').getTime();
+}
+
+/**
+ * Single source of truth: read Σ pool_bettor_sides.stake_amount as BigInt.
+ * J2-tn r399 #26 D7 (Bettor r253 关1 PASS): r395 (9fe19b6) BigInt mix bug fix 漏 L654
+ * consensus 路 (replace_all 模式没匹 inline .s). 抽 helper 三处统一 + JSDoc bigint
+ * 防再漂 (= 类型边界根治非 band-aid).
+ * @param {string} marketId
+ * @returns {bigint}
+ */
+function getBettorSumSompi(marketId) {
+  const r = sqlite.prepare('SELECT COALESCE(SUM(CAST(stake_amount AS INTEGER)), 0) AS s FROM pool_bettor_sides WHERE market_id = ?').get(marketId);
+  return BigInt(r?.s || 0);
 }
 
 export function startPoolMarketSettlerCron() {
@@ -91,35 +162,667 @@ export function stopPoolMarketSettlerCron() {
   if (timer) { clearInterval(timer); timer = null; }
 }
 
+// J2-tn r391 (#28 Bettor ③ APPROVE v2 + Owner 终裁 修法 A 解冻):
+// legacy ver=null/v0.5 markets 卡死 (43c06c7 deadline-watcher 'separate concern flagged not touched').
+// 走 PoolSide.sil entry 3 refund_market_cancelled (= bettorSig + tx.time>=deadline*1000 ms, 无 grace).
+// 复用 /api/pool/market/:id/bettor-refund-claim 现有 endpoint (= POST 内 IPC pool_side_refund_cancelled_tx).
+// 不另立 endpoint, settler tick 集成. batch size 5/tick 控 RPC.
+// 关2 硬门: 第 1 笔最小 trial 必 ④ 链 accept + bettor 实收, 验过 batch 剩.
+async function legacyRefundBuilderTick() {
+  try {
+    const nowSec = Math.floor(Date.now() / 1000);
+    // J2-tn r392 #28 v4 (Bettor ③ 05:46 APPROVE + 05:48 trial 放行): 加入 pre-r380 sha256-baked
+    // v0.7 markets (= 通过 pool_snapshots self-consistency 判别器: stored != blake2b recompute).
+    // 不依赖时间窗 / canonical root, 只看自家 algo fingerprint (= r204 BLOCK 修, r207 trial 放).
+    //
+    // Step 1: legacy ver=null/v0.5 + 过期 + side_lock_tx + 未结算 (= 原 r391 scope).
+    // Step 2: v0.7 collecting_sigs + submit_fail_count > 5 + 判别器 mismatch (= sha256 baked 不可救).
+    const { buildPoolMerkleTree } = await import('./pool-merkle-v06.mjs');
+    // 候选 markets (= step 2 v0.7 unfixable detect).
+    const v07Cands = sqlite.prepare(`
+      SELECT id, pool_merkle_root, metadata FROM pool_markets
+      WHERE protocol_version = 'v0.7'
+        AND protocol_status = 'collecting_sigs'
+    `).all();
+    const unfixableIds = [];
+    for (const m of v07Cands) {
+      try {
+        const meta = JSON.parse(m.metadata || '{}');
+        if ((meta.submit_fail_count || 0) <= 5) continue;
+        const ps = sqlite.prepare('SELECT pool_pks_json FROM pool_snapshots WHERE market_id = ?').get(m.id);
+        if (!ps) continue;
+        const pks = JSON.parse(ps.pool_pks_json);
+        const recomputed = buildPoolMerkleTree(pks).root.toString('hex');
+        if (recomputed !== m.pool_merkle_root) {
+          unfixableIds.push(m.id);
+          // 大声日志 (= Bettor r202b a/b/c 三约束 #1: 别 silent)
+          console.warn(`[pool-settler:legacy-refund] UNFIXABLE PRE-r380 SHA256-BAKED ROOT market=${m.id.slice(0,16)} stored=${m.pool_merkle_root.slice(0,16)} blake2b_recomputed=${recomputed.slice(0,16)} submit_fails=${meta.submit_fail_count} — eligible for refund.`);
+        }
+      } catch {}
+    }
+
+    // J2-tn r393 #25 Step 3 (Bettor r221 APPROVE): MIN_POT cancel markets 拉 bettor sides 同款
+    // legacyRefundBuilderTick 自取 (= entry 2 OP_2 + (deadline+7200)*1000 ms via pool.js
+    // bettor-refund-claim isLegacy 检 v0.7 path). maker stake 由 dispatchRefund 已 trigger 异步.
+    const unfixablePlaceholders = unfixableIds.length ? unfixableIds.map(() => '?').join(',') : "''";
+    const sides = sqlite.prepare(`
+      SELECT pbs.id AS side_id, pbs.market_id, pbs.bettor_pk, pbs.side_p2sh, pbs.side_lock_tx,
+             pbs.side_redeem_script_hex, pbs.stake_amount, pm.deadline, pm.protocol_version
+      FROM pool_bettor_sides pbs
+      JOIN pool_markets pm ON pm.id = pbs.market_id
+      WHERE (
+              (pm.protocol_version IS NULL OR pm.protocol_version = 'v0.5')
+              OR pm.id IN (${unfixablePlaceholders})
+              -- J2-tn r397 (Bettor r226 ④): dispatchRefund 设 status='refunded'/'cancelled'.
+              -- J2-tn r1016 (NWT r1108 catch): DROPPED the <1e10 (100 KAS) pool-size filter. ANY
+              -- v0.6/v0.7 cancelled/refunded market = no-winner terminal ⇒ ALL bettor sides refund,
+              -- regardless of pool size. The old <1e10 filter only caught min-pot cancels and WRONGLY
+              -- excluded large (c) quorum-timeout-refunded markets → bettor stake stuck despite maker
+              -- refund landed (NWT 4万 locked). refunded/cancelled status ⇒ bettors refund (not paid);
+              -- settled (status='completed') markets are NOT matched here so winners' payouts unaffected.
+              OR (
+                pm.protocol_status IN ('cancelled', 'refunded')
+                AND pm.protocol_version IN ('v0.6', 'v0.7')
+              )
+            )
+        AND pm.deadline <= ?
+        AND pbs.side_lock_tx IS NOT NULL
+        AND pbs.claim_txid IS NULL
+        AND (pbs.refund_attempted_at IS NULL OR pbs.refund_attempted_at < datetime('now', '-1 hour'))
+      ORDER BY pbs.stake_amount ASC
+      LIMIT ?
+    `).all(...unfixableIds, nowSec, parseInt(process.env.LEGACY_REFUND_BATCH, 10) || 1);
+    // J2-tn r391 关2 硬门: 默认 batch=1 trial 模式. Bettor ④ 验过最小 1 笔 chain accept + bettor 实收
+    // 后 env LEGACY_REFUND_BATCH=5 bump 进 batch. 不接受未验 ramp.
+    if (!sides.length) return { processed: 0 };
+    let triggered = 0, failed = 0;
+    for (const side of sides) {
+      try {
+        // 复用 endpoint via HTTP localhost (= same-process re-entry safe, endpoint has full
+        // signing-relay resolve + IPC + UPDATE claim_txid logic).
+        const port = process.env.PORT || '3200';
+        const url = `http://127.0.0.1:${port}/api/pool/market/${side.market_id}/bettor-refund-claim`;
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ side_id: side.side_id }),
+        });
+        const j = await res.json().catch(() => ({}));
+        if (res.ok && j.refund_txid) {
+          triggered++;
+          console.log(`[pool-settler:legacy-refund] side_id=${side.side_id} market=${side.market_id.slice(0,16)} stake=${side.stake_amount} refund_txid=${j.refund_txid.slice(0,16)}`);
+        } else {
+          failed++;
+          // Surface bettor-key-cannot-sign errors per Bettor 05:24 确认点 (2) — not silent skip.
+          console.warn(`[pool-settler:legacy-refund] FAIL side_id=${side.side_id}: ${j.error || res.statusText}`);
+          // Mark refund_attempted_at to throttle retry (= 1h backoff applied via WHERE clause).
+          sqlite.prepare('UPDATE pool_bettor_sides SET refund_attempted_at = CURRENT_TIMESTAMP WHERE id = ?').run(side.side_id);
+        }
+      } catch (e) {
+        failed++;
+        console.warn(`[pool-settler:legacy-refund] exception side_id=${side.side_id}: ${e.message}`);
+        try {
+          sqlite.prepare('UPDATE pool_bettor_sides SET refund_attempted_at = CURRENT_TIMESTAMP WHERE id = ?').run(side.side_id);
+        } catch {}
+      }
+    }
+    return { processed: sides.length, triggered, failed };
+  } catch (e) {
+    console.error('[pool-settler:legacy-refund] tick exception:', e.message);
+    return { error: e.message };
+  }
+}
+
 export async function poolSettlerTick() {
   if (running) { return { skipped: true }; }
   running = true;
   try {
+    // J2-tn r391 #28: legacy-refund-builder before main tick. 解冻 ver=null/v0.5 卡单.
+    // 独立 path 不碰 committee 路 (= Bettor ③ 关1 护栏达标).
+    const legacyResult = await legacyRefundBuilderTick();
+    if (legacyResult.processed > 0) {
+      console.log(`[pool-settler:legacy-refund] tick: processed=${legacyResult.processed} triggered=${legacyResult.triggered} failed=${legacyResult.failed}`);
+    }
+    // ── Deadline-watcher (Bettor P1 gap fix) ────────────────────────────────
+    // pending_bettors markets past deadline had NO auto-advance: the /settle endpoint
+    // (pool.js) was manual-only, never called by any cron/bot → markets stuck in
+    // pending_bettors forever (22 observed), real users' stakes frozen, no settle/refund.
+    // = root cause of "v0.6 unusable". Mirror the /settle transition here so every market
+    // auto-advances to verifying at deadline; the loop below then settles / refunds / cancels
+    // (0-bet → maker refund, thin → cancel-refund, healthy → committee settle).
+    // Scope: ONLY v0.6/v0.7 committee markets — this settler's dispatchPhase2 is committee logic.
+    // null/v0.5-version pending_bettors markets (legacy/other type) must NOT be force-advanced here
+    // (would mis-route through committee settle). They are a separate concern (flagged, not touched).
+    const nowSec = Math.floor(Date.now() / 1000);
+    const dueMarkets = sqlite.prepare(`
+      SELECT id FROM pool_markets
+      WHERE protocol_status = 'pending_bettors' AND deadline <= ?
+        AND protocol_version IN ('v0.6', 'v0.7')
+    `).all(nowSec);
+    if (dueMarkets.length) {
+      for (const dm of dueMarkets) {
+        sqlite.prepare('UPDATE pool_markets SET protocol_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+          .run('verifying', dm.id);
+      }
+      console.log(`[pool-settler] deadline-watcher: advanced ${dueMarkets.length} pending_bettors → verifying (deadline passed): ${dueMarkets.map(m => m.id.slice(-5)).join(',')}`);
+    }
+
+    // J2-tn r388 (#24 settler 饥饿根治 — Bettor 02:18 钦定 自治闭环地基):
+    // ORDER BY updated_at DESC = 活跃市场优先 (= 新近活动 process 在前, stale markets 不阻塞 demo).
     const markets = sqlite.prepare(`
-      SELECT id, maker_relay_id, spine_p2sh, spine_lock_tx, oracle1_pk, oracle2_pk, oracle3_pk,
+      SELECT id, maker_relay_id, maker_pk, spine_p2sh, spine_lock_tx, oracle1_pk, oracle2_pk, oracle3_pk,
              oracle_relay_ids, deadline, protocol_status, sides_merkle_root, broker_pk, broker_fee_pct, broker_relay_id,
              updated_at, maker_stake_amount, oracle_bond_amount, miner_fee, metadata,
-             outcome_market_source, outcome_token_id, outcome_side
+             outcome_market_source, outcome_token_id, outcome_side, protocol_version, pool_merkle_root,
+             deadline_daa
       FROM pool_markets
-      WHERE protocol_status IN ('verifying', 'collecting_sigs')
+      WHERE protocol_status IN ('verifying', 'collecting_sigs', 'refunding', 'disputed')
         AND deadline <= ?
+      ORDER BY updated_at DESC
     `).all(Math.floor(Date.now() / 1000));
     if (!markets.length) return { ok: true, processed: 0 };
 
-    let consensus = 0, pending = 0, refund = 0, errored = 0, doomed = 0;
+    // J2-tn r388 #24 time-box: settler tick max duration 30s. Stale 死单 retry chain 若爆 30s,
+    // break 让 active 市场下一 tick 仍有机会 process. log unprocessed count.
+    const TICK_TIMEBOX_MS = parseInt(process.env.POOL_SETTLER_TIMEBOX_MS, 10) || 30_000;
+    const tickStartMs = Date.now();
+
+    let consensus = 0, pending = 0, refund = 0, errored = 0, doomed = 0, sampledCommittee = 0, disputed = 0;
+    let processedCount = 0;
     for (const market of markets) {
+      // J2-tn r388 #24 time-box check: 处理超 30s 后 break (= 同 tick 内有 stale retry 不阻塞下个 tick).
+      if (Date.now() - tickStartMs > TICK_TIMEBOX_MS) {
+        const remaining = markets.length - processedCount;
+        console.warn(`[pool-settler] tick time-box ${TICK_TIMEBOX_MS}ms hit after ${processedCount}/${markets.length} markets, ${remaining} deferred to next tick`);
+        break;
+      }
+      processedCount++;
+      // J2-tn r388 #24 exponential backoff: meta.skip_until_ms (epoch ms) set after repeated
+      // sample failures. Skip if set + 未到. Active state (collecting_sigs / refunding +
+      // refund_dispatched_at) 仍走原 handler 不 skip (= 完成中状态优先).
+      let backoffMeta = {};
+      try { backoffMeta = JSON.parse(market.metadata || '{}'); } catch {}
+      // J2-tn r396 #25 (Bettor r225 ④ catch + r224 #1 fix): MIN_POT pre-check 排 backoff 之前.
+      // 之前 r394 collecting_sigs MIN_POT gate 排 backoff skip 之后 → zc9jw 撞 skip_until_ms +27min
+      // backoff 跳过 → 永不到 MIN_POT gate → cancel 不触. 死循环.
+      // Fix: pre-skip MIN_POT check (= 凡 verifying/collecting_sigs + v0.6/v0.7 + pool < MIN_POT
+      // 直接 cancel + dispatchRefund, 无视 backoff = D9 优先级最高).
+      if ((market.protocol_status === 'verifying' || market.protocol_status === 'collecting_sigs')
+          && (market.protocol_version === 'v0.6' || market.protocol_version === 'v0.7')) {
+        const totalPoolPre = BigInt(market.maker_stake_amount || 0) + getBettorSumSompi(market.id);
+        const MIN_POT_PRE = 10_000_000_000n;
+        if (totalPoolPre < MIN_POT_PRE && backoffMeta.cancel_reason !== 'min_pot_undersize') {
+          console.warn(`[pool-settler:min-pot] pre-backoff catch market=${market.id.slice(0,12)} pool=${(Number(totalPoolPre)/1e8).toFixed(2)}KAS < 100KAS → cancel (override backoff)`);
+          const curMetaPre = { ...backoffMeta };
+          curMetaPre.cancel_reason = 'min_pot_undersize';
+          curMetaPre.cancel_pool_sompi = totalPoolPre.toString();
+          curMetaPre.cancelled_at = new Date().toISOString();
+          delete curMetaPre.skip_until_ms;  // clear backoff so refund path 不被卡
+          sqlite.prepare("UPDATE pool_markets SET protocol_status = 'cancelled', metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+            .run(JSON.stringify(curMetaPre), market.id);
+          dispatchRefund(market, { action: 'refund', reason: 'min_pot_undersize cancel-refund (pre-backoff override)' }).catch(e =>
+            console.warn(`[pool-settler:min-pot] pre-backoff maker dispatchRefund market=${market.id.slice(0,12)}: ${e.message}`));
+          refund++;
+          continue;
+        }
+      }
+
+      if (backoffMeta.skip_until_ms && Date.now() < backoffMeta.skip_until_ms
+          && (market.protocol_status === 'verifying' || market.protocol_status === 'collecting_sigs')) {
+        doomed++;
+        continue;
+      }
       try {
         // Phase 2b Ship #1 — doomed-market skip. A market marked needs_larger_pot can never
         // settle (settle TX storage mass exceeds the 500k cap). Without this skip dispatchPhase2
         // recomputes the same doomed mass every tick forever, starving healthy markets.
         let doomedMeta = {};
         try { doomedMeta = JSON.parse(market.metadata || '{}'); } catch {}
-        if (doomedMeta.needs_larger_pot) { doomed++; continue; }
+        if (doomedMeta.needs_larger_pot) {
+          // Bettor r343 catch: active state machine 优先于 doomed-skip. ccvr9+unmfw 已 self-heal
+          // dispatchRefund (refund_dispatched_at set) + status='refunding' 但 needs_larger_pot=true
+          // 仍 set → 下次 tick L117 doomed-skip → handleRefunding (L141 之后) 永轮不到. 加 fall-through:
+          // refunding / cancelled status 跳过 doomed-skip 继续走 handleRefunding (= 同 34a402b 模式).
+          if (market.protocol_status === 'refunding' || market.protocol_status === 'cancelled') {
+            // Fall through to L141 refunding/collecting_sigs handler. 不 continue.
+          } else {
+          // min-pot 选项 A (Bettor r339): v0.6/v0.7 anonymous-pool legacy needs_larger_pot markets
+          // (= 7446fba 之前 marked, ccvr9 / unmfw / 等) 不该永远 skip 卡死. 同 storage-mass cap
+          // 触发路径 → cancel-refund 全员 (= dispatchRefund maker + per-bettor 'bettor_refund_available').
+          const isAnonymousPoolDoomed = market.protocol_version === 'v0.6' || market.protocol_version === 'v0.7';
+          if (isAnonymousPoolDoomed && !doomedMeta.refund_dispatched_at && market.protocol_status === 'verifying') {
+            console.log(`[pool-settler] legacy needs_larger_pot doomed market=${market.id.slice(0,12)} pv=${market.protocol_version} → cancel-refund 自愈`);
+            // Clear needs_larger_pot 标记 + Status. 防下次 tick L117 仍见 doomed=true + refund_dispatched_at 已设
+            // → guard false → 'doomed++; continue' 死循环 → handleRefunding 永轮不到 (Bettor r341 catch).
+            const cleanedMeta = { ...doomedMeta };
+            delete cleanedMeta.needs_larger_pot;
+            cleanedMeta.legacy_doomed_self_heal_at = new Date().toISOString();
+            cleanedMeta.legacy_est_storage_mass = doomedMeta.est_storage_mass;
+            sqlite.prepare('UPDATE pool_markets SET protocol_status = ?, metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+              .run('cancelled', JSON.stringify(cleanedMeta), market.id);
+            const cancelEventPayload = JSON.stringify({
+              market_id: market.id,
+              reason: 'legacy_doomed_needs_larger_pot_self_heal',
+              est_storage_mass: doomedMeta.est_storage_mass,
+              cancelled_at: new Date().toISOString(),
+            });
+            sqlite.prepare(`
+              INSERT INTO chain_events (id, txid, event_type, from_address, to_address, payload, observed_by, observed_at)
+              VALUES (lower(hex(randomblob(16))), ?, 'market_cancelled', NULL, NULL, ?, 'pool-settler', CURRENT_TIMESTAMP)
+            `).run(`market_cancelled:${market.id.slice(0,12)}:${Date.now()}`, cancelEventPayload);
+            // Auto maker refund
+            await dispatchRefund(market, {
+              action: 'refund',
+              reason: `legacy doomed self-heal: needs_larger_pot=true, est_mass=${doomedMeta.est_storage_mass}`,
+            });
+            // Per-bettor events
+            const sides = sqlite.prepare(`
+              SELECT bettor_pk, side_p2sh, side_lock_tx, stake_amount, direction
+              FROM pool_bettor_sides WHERE market_id = ? AND side_lock_tx IS NOT NULL
+            `).all(market.id);
+            for (const side of sides) {
+              const bettorRefundPayload = JSON.stringify({
+                market_id: market.id,
+                bettor_pk: side.bettor_pk,
+                side_p2sh: side.side_p2sh,
+                side_lock_tx: side.side_lock_tx,
+                stake: side.stake_amount,
+                direction: side.direction,
+                reason: 'market_cancelled_legacy_doomed_self_heal',
+                claim_entry: 'PoolSide_v07 entry 2 refund_market_cancelled',
+              });
+              sqlite.prepare(`
+                INSERT INTO chain_events (id, txid, event_type, from_address, to_address, payload, observed_by, observed_at)
+                VALUES (lower(hex(randomblob(16))), ?, 'bettor_refund_available', NULL, NULL, ?, 'pool-settler', CURRENT_TIMESTAMP)
+              `).run(`bettor_refund:${market.id.slice(0,12)}:${String(side.bettor_pk).slice(0,12)}:${Date.now()}`, bettorRefundPayload);
+            }
+            console.log(`[pool-settler] legacy doomed self-heal market=${market.id.slice(0,12)} CANCELLED + maker_refund dispatched + ${sides.length} bettor_refund_available events`);
+            refund++;
+            continue;
+          }
+          doomed++;
+          continue;
+          }  // end else (= not refunding/cancelled fall-through)
+        }
 
-        // Phase 2b: collecting_sigs status → handle sig aggregation + submit
+        // G6 批 3 段① 0-bet PRE-sampling shortcut (Bettor r301 catch): committee sampling needs
+        // pool_snapshot which may not exist (e.g. create-v07 ensurePoolSnapshot failed). 0-bet
+        // markets have no votes coming, no winners to settle — directly refund. Skip sampling +
+        // decideConsensus entirely. v0.6/v0.7 only (anonymous-pool committee model).
+        // J2-tn r384 (J1 r303 root cause + Bettor 钦定): skip 0-bet shortcut for cross-node
+        // markets where maker_relay_id is 'cross-node:<pk>' sentinel (= maker on remote host).
+        // 否则 dispatchRefund 走到 L1354 silently 跳过 (= cross-node refund 必 producer node 干),
+        // 既不 sample 又不 refund → 卡 status=verifying. #10 + #12 都撞这复发 bug.
+        // 对 cross-node maker, local betCount=0 不代表市场无 bet (= 本节点 bet ingest 可能 lag);
+        // 让市场继续 committee sample 路径, 委员 sample 不依赖 local bets (= 用 chain_view +
+        // VRF + endBlockHash 跨节点 deterministic).
+        if (market.protocol_status === 'verifying' &&
+            (market.protocol_version === 'v0.6' || market.protocol_version === 'v0.7')) {
+          const isCrossNode = typeof market.maker_relay_id === 'string' && market.maker_relay_id.startsWith('cross-node:');
+          if (!isCrossNode) {
+            const betCount = sqlite.prepare('SELECT COUNT(*) as c FROM pool_bettor_sides WHERE market_id = ?').get(market.id)?.c || 0;
+            if (betCount === 0) {
+              // Skip if already dispatched.
+              let meta0 = {};
+              try { meta0 = JSON.parse(market.metadata || '{}'); } catch {}
+              if (!meta0.refund_dispatched_at) {
+                console.log(`[pool-settler] 0-bet pre-sample shortcut market=${market.id.slice(0,12)} pv=${market.protocol_version} → dispatchRefund (skip committee sampling + voting)`);
+                await dispatchRefund(market, { action: 'refund', reason: '0-bet market, refund_maker_unjoined (pre-sample shortcut)' });
+                refund++;
+              } else {
+                pending++;  // already dispatched, wait handleRefunding tick
+              }
+              continue;
+            }
+          } else {
+            // J2-tn r402 P0-#3 (Bettor r290b+r291b 关1 PASS): cross-node 0-bet maker refund 死路修.
+            // 之前: cross-node maker_relay_id sentinel, 本机不能 dispatchRefund (= 没真 relay IPC),
+            // settler 每 tick log 'dispatchRefund skip cross-node market' 但什么也不做 → 卡死.
+            // 修: 本节点 broadcast pool_refund_request_v1 上链 → producer 节点 (= 真 maker_relay_id
+            // 所在 host) 监听 → 本机 ingest 后 dispatchRefund 用真实 maker_relay_id. 仿 r400 模式.
+            // 仅 0-bet 0-side cross-node 触发 (= 双向无 stakeholder 卡, 经济无歧义).
+            const betCount = sqlite.prepare('SELECT COUNT(*) as c FROM pool_bettor_sides WHERE market_id = ?').get(market.id)?.c || 0;
+            if (betCount === 0) {
+              let meta0 = {};
+              try { meta0 = JSON.parse(market.metadata || '{}'); } catch {}
+              // Idempotent: 仅广播一次. consumer 端 trade-protocol-filter handle 后 dispatchRefund
+              // 真正修改 refund_dispatched_at, 不在本机标记 (= 跨节点信任 chain ingest).
+              const broadcastedAt = meta0.refund_request_broadcasted_at;
+              const REQUEST_REBROADCAST_MS = 60 * 60 * 1000; // 1h re-broadcast if no response
+              const needsBroadcast = !broadcastedAt || (Date.now() - new Date(broadcastedAt).getTime() > REQUEST_REBROADCAST_MS);
+              if (needsBroadcast && !meta0.refund_dispatched_at) {
+                try {
+                  // 提取 producer maker_pk (= 'cross-node:<pk>' sentinel 后半).
+                  const makerPk = market.maker_relay_id.replace(/^cross-node:/, '');
+                  const { getStatus, isRelayAlive } = await import('./relay-manager.js');
+                  const candidates = getStatus() || [];
+                  const localAlive = candidates.find(r => r.pid && isRelayAlive(r.relayNodeId)?.alive);
+                  if (!localAlive) {
+                    console.warn(`[pool-settler:xnode-refund] no local alive relay to broadcast market=${market.id.slice(0,12)}`);
+                  } else {
+                    const { _sendBroadcastChunked } = await import('../api/pool.js').catch(() => ({}));
+                    // _sendBroadcastChunked 在 pool.js 私函数; 此处直 import 不可. 改用 IPC send_broadcast.
+                    const { sendCommandAsync } = await import('./relay-manager.js');
+                    const payload = {
+                      t: 'pool_refund_request_v1',
+                      market_id: market.id,
+                      maker_pk: makerPk,
+                      protocol_version: market.protocol_version,
+                      reason: '0-bet cross-node maker refund (settler watchdog)',
+                      requested_at: new Date().toISOString(),
+                    };
+                    const bcastResult = await sendCommandAsync(localAlive.relayNodeId, {
+                      type: 'send_broadcast',
+                      channel: 'kanet-prediction',
+                      message: JSON.stringify(payload),
+                    });
+                    if (bcastResult?.ok && bcastResult.txId) {
+                      meta0.refund_request_broadcasted_at = new Date().toISOString();
+                      meta0.refund_request_txid = bcastResult.txId;
+                      sqlite.prepare('UPDATE pool_markets SET metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+                        .run(JSON.stringify(meta0), market.id);
+                      console.log(`[pool-settler:xnode-refund] broadcast pool_refund_request_v1 market=${market.id.slice(0,12)} maker_pk=${makerPk.slice(0,12)} txId=${bcastResult.txId.slice(0,16)}`);
+                    } else {
+                      console.warn(`[pool-settler:xnode-refund] broadcast fail market=${market.id.slice(0,12)}: ${bcastResult?.error || 'no txId'}`);
+                    }
+                  }
+                } catch (e) {
+                  console.warn(`[pool-settler:xnode-refund] exception market=${market.id.slice(0,12)}: ${e.message}`);
+                }
+                pending++;
+                continue;
+              }
+            }
+          }
+        }
+
+        // G6 批 3 段① T2 blocker3 (T2 9th attempt 实测): refunding state markets must skip
+        // committee sampling. After dispatchRefund transitions status='refunding', the next
+        // tick re-enters this loop. Without this early exit, sampling tries again (because
+        // oracle_relay_ids is still '[]' — 0-bet shortcut never populated it) → fails on
+        // missing pool_snapshot → continue → handleRefunding never reached. Move the
+        // refunding handler ABOVE sampling.
+        if (market.protocol_status === 'refunding') {
+          await handleRefunding(market);
+          continue;
+        }
         if (market.protocol_status === 'collecting_sigs') {
+          // J2-tn r394 #25 (Bettor r223 ④ catch): collecting_sigs 入口同款 MIN_POT 守门.
+          // r393 只 gate consensus 入口, 但 zc9jw/xejkf 已 past dispatch → collecting_sigs
+          // 循环 handleCollectingSigs 永 submit fail (= pool 7 < 100). 加 gate 让已陷入
+          // collecting_sigs 的 < MIN_POT 单也走 cancel + refund 路 (= D9 自愈 retroactive).
+          if (market.protocol_version === 'v0.6' || market.protocol_version === 'v0.7') {
+            const totalPool = BigInt(market.maker_stake_amount || 0) + getBettorSumSompi(market.id);
+            const MIN_POT_SOMPI = 10_000_000_000n;
+            if (totalPool < MIN_POT_SOMPI) {
+              console.warn(`[pool-settler:min-pot] collecting_sigs market=${market.id.slice(0,12)} pool=${(Number(totalPool)/1e8).toFixed(2)}KAS < 100KAS → cancel + refund route (retroactive D9 自愈)`);
+              const curMeta1 = JSON.parse(market.metadata || '{}');
+              curMeta1.cancel_reason = 'min_pot_undersize';
+              curMeta1.cancel_pool_sompi = totalPool.toString();
+              curMeta1.cancelled_at = new Date().toISOString();
+              sqlite.prepare("UPDATE pool_markets SET protocol_status = 'cancelled', metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+                .run(JSON.stringify(curMeta1), market.id);
+              dispatchRefund(market, { action: 'refund', reason: 'min_pot_undersize cancel-refund (retroactive)' }).catch(e =>
+                console.warn(`[pool-settler:min-pot] retroactive maker dispatchRefund market=${market.id.slice(0,12)}: ${e.message}`));
+              refund++;
+              continue;
+            }
+          }
           await handleCollectingSigs(market);
           continue;
+        }
+
+        // Bettor r172/r174 + J1 r205 ③ wire — v0.6 path A committee sampling. Idempotent: skip
+        // if already sampled. Requires pool_snapshots row (created at market create-v06 per F-S3
+        // anti-grinding). chainReader uses maker_relay_id (= already running). F-S1 finality_depth
+        // failures are non-fatal: throw → log → continue → next tick retries until chain advances.
+        // G6 批 3 段① extend committee sampling to v0.7. v0.7 同 v0.6 用 5-committee + poolMerkleRoot,
+        // 只 SS bytecode 不同 (refund fee 范围). committee 抽样逻辑 reuse.
+        if ((market.protocol_version === 'v0.6' || market.protocol_version === 'v0.7') && (!market.oracle_relay_ids || market.oracle_relay_ids === '[]')) {
+          const alreadySampled = sqlite.prepare('SELECT market_id FROM pool_committee WHERE market_id = ?').get(market.id);
+          if (!alreadySampled) {
+            try {
+              const { createRelayChainReader } = await import('./relay-chain-reader.mjs');
+              const { fetchEndBlockHashCanonical, sampleAndStoreCommittee, ensurePoolSnapshotByRoot, recaptureSideLockDaaForMarket } = await import('./pool-market-settler-v06.mjs');
+              const { getStatus, isRelayAlive } = await import('./relay-manager.js');
+              // Bettor r182/r183/r184: maker_relay_id may be remote (cross-node ingested market) →
+              // local Console can't IPC to it. Use any locally-running relay for chainReader —
+              // chain state is global, any alive relay sees the same DAA progression.
+              // isRelayAlive returns {alive: bool, reason: string} not a bare boolean — must
+              // read .alive (d4558dd silent bug: truthy object always selected maker_relay_id).
+              let chainReaderRelayId = null;
+              if (market.maker_relay_id) {
+                const aliveCheck = isRelayAlive(market.maker_relay_id);
+                if (aliveCheck?.alive) chainReaderRelayId = market.maker_relay_id;
+              }
+              if (!chainReaderRelayId) {
+                const candidates = getStatus() || [];
+                // getStatus rows have relayNodeId + pid set when process is up. Pick first w/ pid +
+                // confirm IPC alive via isRelayAlive.alive (defense-in-depth vs stale state cache).
+                const localAlive = candidates.find(r => r.pid && isRelayAlive(r.relayNodeId)?.alive);
+                if (!localAlive) throw new Error(`no locally-alive relay for chainReader (checked ${candidates.length})`);
+                chainReaderRelayId = localAlive.relayNodeId;
+              }
+              console.log(`[pool-settler] committee sample using relay=${chainReaderRelayId?.slice(0,8)} for market=${market.id.slice(0,12)}`);
+              const chainReader = createRelayChainReader(chainReaderRelayId);
+              // J2-tn r323 (Bettor 钦定 NWT+J1 合解): 优先 market.deadline_daa baked-at-create
+              // (= 跨节点 envelope propagate 同字段). Wallclock estimate fallback 仅 legacy markets
+              // 没 deadline_daa column (= 165 前 v0.6/v0.7 row). Anti-grinding: deadline_daa 是未来
+              // daa, maker create 时 endBlockHash 不可知.
+              let deadlineDaa = market.deadline_daa;
+              if (!deadlineDaa) {
+                // Legacy fallback: pre-v165 markets without deadline_daa column populated.
+                const currentDaa = await chainReader.getCurrentDaaScore();
+                const nowSec = Math.floor(Date.now() / 1000);
+                deadlineDaa = Math.max(1, currentDaa - Math.max(0, (nowSec - market.deadline) * 10));
+                console.log(`[pool-settler] market=${market.id.slice(0,12)} legacy fallback: estimate deadlineDaa=${deadlineDaa} (no deadline_daa col)`);
+              }
+              // J2-tn lever② (Bettor r524/r530/r531 规模 hygiene): unrecoverable-market 检测.
+              // getBlockAtDaa SPC-walk 从 tip 倒走 MAX_WALK=50000 步; deadline_daa 离 tip > MAX_WALK
+              // = 永达不到 → 永重试 backoff 3600s = zombie 卡 verifying + 耗 settler tick/chain-read
+              // (规模测照出, 单笔看不见)。采样前查 Δ, 超 cap → 不可采样, 直接 dispatchRefund 终态
+              // (maker+bettor 退, market 永不可裁), 停永重试。诚实: 减的是 settler/chain-read 浪费,
+              // 非 :8000 LLM (unsampled zombie 本就不投票)。
+              const MAX_SPC_WALK = 50000;  // == rpc-listener.mjs getBlockAtDaa MAX_WALK
+              // J1 #265/#266 (b) boundary race-margin (Bettor r807 批): getBlockAtDaa backward walk 在
+              // Δ=MAX_WALK 处 off-by-one (只回溯到 49999-back, 够不到 50000-back), 且此处 tip 读(L630)早于
+              // getBlockAtDaa 自读 tip → Δ_walk = Δ_guard + N (IPC 期链推进), 两节点各读各 tip 可返不同错块
+              // → committee_pk_hash 跨节点分歧. 留 SAFETY_MARGIN: Δ > MAX_WALK−MARGIN 即终态 refund, 让
+              // getBlockAtDaa 永远带余量不撞 cap. MARGIN 盖 off-by-one(1) + IPC 期链推进(几块). 配 (a)
+              // getBlockAtDaa cap-throw 双封 (即便 margin 算漏, (a) throw 也兜住不 emit 错块).
+              const SAFETY_MARGIN = 100;
+              const REFUND_THRESHOLD = MAX_SPC_WALK - SAFETY_MARGIN;  // 49900
+              const tipDaaUR = await chainReader.getCurrentDaaScore();
+              if (Number.isFinite(tipDaaUR) && (tipDaaUR - deadlineDaa) > REFUND_THRESHOLD) {
+                const urMeta = JSON.parse(market.metadata || '{}');
+                urMeta.unrecoverable = true;
+                urMeta.unrecoverable_reason = `deadline_daa ${deadlineDaa} 离 tip ${tipDaaUR} Δ=${tipDaaUR - deadlineDaa} > MAX_WALK−MARGIN ${REFUND_THRESHOLD} → SPC-walk 边界不安全(达不到/off-by-one/race), committee 不可采样 → 终态 refund`;
+                urMeta.unrecoverable_at = new Date().toISOString();
+                sqlite.prepare("UPDATE pool_markets SET metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(JSON.stringify(urMeta), market.id);
+                console.warn(`[pool-settler] UNRECOVERABLE market=${market.id.slice(0,12)} Δ=${tipDaaUR - deadlineDaa} > MAX_WALK−MARGIN ${REFUND_THRESHOLD} → dispatchRefund 终态 (停永重试 SPC-walk)`);
+                await dispatchRefund(market, { action: 'refund', reason: urMeta.unrecoverable_reason });
+                refund++;
+                continue;
+              }
+              const endBlock = await fetchEndBlockHashCanonical(chainReader, deadlineDaa);
+              // (b) J2-tn r1011 cross-node committee self-heal (liveness P0): bake local pool_snapshots
+              // from THIS node's own chain_view (matched by baked pool_merkle_root) before sampling, so
+              // a non-producer node (e.g. :3300 committee member) can sample + vote — the producer only
+              // baked the snapshot at create-v07. null = root not chain-reproducible here (doomed, e.g.
+              // artificial active-flip root) → sampleAndStoreCommittee throws → market stays verifying →
+              // (c) quorum-timeout-refund cleans it up. saveable (root in chain_view) → bakes → samples.
+              try {
+                const sh = ensurePoolSnapshotByRoot(market.id, market.pool_merkle_root);
+                if (sh?.source === 'self_heal_by_root') console.log(`[pool-settler] self-heal snapshot market=${market.id.slice(0,12)} from chain_view root=${(market.pool_merkle_root||'').slice(0,8)} pool_size=${sh.pool_size}`);
+                else if (sh === null) console.warn(`[pool-settler] self-heal: no chain_view row matching root=${(market.pool_merkle_root||'').slice(0,8)} market=${market.id.slice(0,12)} (non-reproducible here → stays verifying → quorum-timeout-refund)`);
+              } catch (shErr) {
+                console.warn(`[pool-settler] self-heal snapshot market=${market.id.slice(0,12)}: ${shErr.message}`);
+              }
+              // #27a v2.1 forward-break fix (Owner hardening sprint, e0ktm live repro): a bet registered while
+              // its side_lock UTXO was in mempool got NULL side_lock_daa at ingest (no accepting-block daa yet).
+              // By now the UTXO is confirmed → re-capture its canonical daa from chain (single-source
+              // captureSideLockDaa → byte-equal cross-node) so #27a doesn't fail-loud on a now-resolvable fresh
+              // bet. MUST run before sampleAndStoreCommittee (sync). Truly-unresolvable bets stay NULL → fail-loud.
+              try {
+                const rc = await recaptureSideLockDaaForMarket(market.id);
+                if (rc.recaptured) console.log(`[pool-settler] #27a recapture market=${market.id.slice(0,12)} filled ${rc.recaptured} mempool-NULL-daa bets from chain (remaining NULL ${rc.remaining})`);
+              } catch (rcErr) { console.warn(`[pool-settler] #27a recapture market=${market.id.slice(0,12)}: ${rcErr.message}`); }
+              const committee = sampleAndStoreCommittee(market.id, endBlock.hash);
+              // Wire committee_relay_ids → pool_markets.oracle_relay_ids so voter scan picks up.
+              sqlite.prepare('UPDATE pool_markets SET oracle_relay_ids = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+                .run(JSON.stringify(committee.committee_relay_ids), market.id);
+              sampledCommittee++;
+              console.log(`[pool-settler] committee sampled market=${market.id.slice(0,12)} pks=${committee.committee_pks.length} endBlock=${endBlock.hash.slice(0,16)} daa=${endBlock.block_daa}`);
+
+              // J2-tn r371 (Bettor 14:53 钦定): post-sample vote re-scan. broadcast_messages 含
+              // 委员抽样前 / handler fix 前 (= 924b6a2) 已上链的 pool_oracle_vote_v1, 当时被旧
+              // filter reject 或 race-skip → chain_events 没写. 现 committee 抽好 → replay via
+              // onBroadcastWritten → idempotent (= chain_events.txid UNIQUE). 同 L502 bet H2 pattern.
+              try {
+                const { onBroadcastWritten } = await import('./trade-protocol-filter.js');
+                const orphanVotes = sqlite.prepare(`
+                  SELECT tx_hash, sender_address, channel_name, content, created_at
+                  FROM broadcast_messages
+                  WHERE channel_name = 'kanet-prediction'
+                    AND content LIKE '%pool_oracle_vote_v1%'
+                    AND content LIKE ?
+                    AND tx_hash NOT IN (SELECT txid FROM chain_events WHERE event_type = 'pool_oracle_vote')
+                  ORDER BY created_at ASC
+                `).all(`%"market_id":"${market.id}"%`);
+                if (orphanVotes.length > 0) {
+                  console.log(`[pool-settler] post-sample vote re-scan market=${market.id.slice(0,12)}: ${orphanVotes.length} orphan vote(s) — replaying`);
+                  for (const row of orphanVotes) {
+                    try {
+                      await onBroadcastWritten({
+                        tx_hash: row.tx_hash, content: row.content, sender_address: row.sender_address,
+                        channel_name: row.channel_name, created_at: row.created_at,
+                      });
+                    } catch (replayErr) {
+                      console.warn(`[pool-settler] vote replay fail tx=${row.tx_hash.slice(0,16)}: ${replayErr.message}`);
+                    }
+                  }
+                }
+              } catch (rescanErr) {
+                console.warn(`[pool-settler] post-sample vote re-scan fail market=${market.id.slice(0,12)}: ${rescanErr.message}`);
+              }
+            } catch (sampleErr) {
+              // F-S1 finality not met / no blocks / snapshot missing → log + skip this tick.
+              // J2-tn r388 #24 exp backoff: count failures + set skip_until_ms. After N
+              // failures, settler 跳过 N ticks. mainnet: stale 死单不再 starve active markets.
+              const cur = {};
+              try { Object.assign(cur, JSON.parse(market.metadata || '{}')); } catch {}
+              cur.sample_fail_count = (cur.sample_fail_count || 0) + 1;
+              cur.sample_last_err = sampleErr.message?.slice(0, 200);
+              // r416 (Bettor r412 提议 + r413 催执行): MAX_SAMPLE_FAIL=20 → 'unsettlable, committee_unformed'
+              // refund. 防 7un1d 类委员从未 sample 成功 + 永 backoff 1h cap 卡资金死循环.
+              // 20 次 ≈ 17h 累计 backoff (1+2+4+...+1+1...+1h cap), 已属 'fundamentally unsettlable'.
+              const MAX_SAMPLE_FAIL = 20;
+              if (cur.sample_fail_count >= MAX_SAMPLE_FAIL) {
+                console.warn(`[pool-settler] committee_unformed market=${market.id.slice(0,12)} sample_fail_count=${cur.sample_fail_count} >= MAX_SAMPLE_FAIL(${MAX_SAMPLE_FAIL}) → dispatchRefund (committee_unformed)`);
+                sqlite.prepare('UPDATE pool_markets SET metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+                  .run(JSON.stringify(cur), market.id);
+                // Trigger maker refund; if cross-node, dispatchRefund 内 skip 自家 log (r402 broadcast path)
+                await dispatchRefund(market, { action: 'refund', reason: `committee_unformed (sample_fail=${cur.sample_fail_count}, last=${cur.sample_last_err?.slice(0,80) || 'n/a'})` });
+                // r417 (Bettor r419/r420 monitor): emit bettor_refund_available for any sides
+                // so bettor-refund-claim-auto cron can sweep + dispatch PoolSide entry 2 refund.
+                // 7un1d 实证缺这步 — maker refund 落链 但 bettor side 5 KAS 没出 refund_available.
+                const sides = sqlite.prepare('SELECT id, bettor_pk, side_p2sh, side_lock_tx, stake_amount, direction FROM pool_bettor_sides WHERE market_id = ?').all(market.id);
+                for (const side of sides) {
+                  const bettorRefundPayload = JSON.stringify({
+                    market_id: market.id,
+                    bettor_pk: side.bettor_pk,
+                    side_p2sh: side.side_p2sh,
+                    side_lock_tx: side.side_lock_tx,
+                    stake: side.stake_amount,
+                    direction: side.direction,
+                    reason: 'committee_unformed',
+                    claim_entry: 'PoolSide_v07 entry 2 refund_market_cancelled',
+                  });
+                  sqlite.prepare(`
+                    INSERT INTO chain_events (id, txid, event_type, from_address, to_address, payload, observed_by, observed_at)
+                    VALUES (lower(hex(randomblob(16))), ?, 'bettor_refund_available', NULL, NULL, ?, 'pool-settler', CURRENT_TIMESTAMP)
+                  `).run(`bettor_refund:${market.id.slice(0,12)}:${String(side.bettor_pk).slice(0,12)}:${Date.now()}`, bettorRefundPayload);
+                }
+                if (sides.length > 0) {
+                  console.log(`[pool-settler] committee_unformed market=${market.id.slice(0,12)} emitted ${sides.length} bettor_refund_available event(s)`);
+                }
+                refund++;
+                continue;
+              }
+              // Exp backoff: 60s × 2^(N-1), cap 1h. After 10 fails (~17h cumulative) 退到 1h cap.
+              const backoffSec = Math.min(60 * Math.pow(2, Math.max(0, cur.sample_fail_count - 1)), 3600);
+              cur.skip_until_ms = Date.now() + backoffSec * 1000;
+              sqlite.prepare('UPDATE pool_markets SET metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+                .run(JSON.stringify(cur), market.id);
+              console.log(`[pool-settler] committee sample retry market=${market.id.slice(0,12)} fail#${cur.sample_fail_count} backoff=${backoffSec}s: ${sampleErr.message}`);
+              pending++;
+              continue;
+            }
+            // Re-load market with new oracle_relay_ids so downstream decideConsensus sees it.
+            const reloaded = sqlite.prepare('SELECT * FROM pool_markets WHERE id = ?').get(market.id);
+            if (reloaded) Object.assign(market, reloaded);
+          }
+        }
+
+        // (refunding + collecting_sigs handlers moved above sampling — see T2 blocker3 comment)
+
+        // J2-tn r372 (Bettor 14:55 catch — 206b0a4 触发位置不对): vote re-scan 每 tick 跑
+        // (= 不只 sample 那一刻). #9 12:36 votes broadcast at 13:57 sample (= 早于 924b6a2
+        // filter fix) → broadcast_messages 有但 chain_events 没. 每 tick 扫 orphan vote
+        // → replay → idempotent INSERT. 治存量 + 守未来.
+        // J2-tn r374 (Bettor 15:02 catch): 同款 sign_resp re-scan 加 (= 同 vote pattern).
+        if ((market.protocol_version === 'v0.6' || market.protocol_version === 'v0.7')
+            && (market.protocol_status === 'verifying' || market.protocol_status === 'collecting_sigs')) {
+          try {
+            const { onBroadcastWritten } = await import('./trade-protocol-filter.js');
+            const orphanVotes = sqlite.prepare(`
+              SELECT tx_hash, sender_address, channel_name, content, created_at
+              FROM broadcast_messages
+              WHERE channel_name = 'kanet-prediction'
+                AND content LIKE '%pool_oracle_vote_v1%'
+                AND content LIKE ?
+                AND tx_hash NOT IN (SELECT txid FROM chain_events WHERE event_type = 'pool_oracle_vote')
+              ORDER BY created_at ASC
+            `).all(`%"market_id":"${market.id}"%`);
+            if (orphanVotes.length > 0) {
+              console.log(`[pool-settler] per-tick vote re-scan market=${market.id.slice(0,12)}: ${orphanVotes.length} orphan vote(s) — replaying`);
+              for (const row of orphanVotes) {
+                try {
+                  await onBroadcastWritten({
+                    tx_hash: row.tx_hash, content: row.content, sender_address: row.sender_address,
+                    channel_name: row.channel_name, created_at: row.created_at,
+                  });
+                } catch (replayErr) {
+                  console.warn(`[pool-settler] vote replay fail tx=${row.tx_hash.slice(0,16)}: ${replayErr.message}`);
+                }
+              }
+            }
+            // r374: orphan sign_resp ingest (= same pattern as vote re-scan).
+            const orphanSigs = sqlite.prepare(`
+              SELECT tx_hash, sender_address, channel_name, content, created_at
+              FROM broadcast_messages
+              WHERE channel_name = 'kanet-prediction'
+                AND content LIKE '%kanet_pool_oracle_tx_sign_resp_v1%'
+                AND content LIKE ?
+                AND tx_hash NOT IN (SELECT txid FROM chain_events WHERE event_type = 'pool_oracle_tx_sig')
+              ORDER BY created_at ASC
+            `).all(`%"market_id":"${market.id}"%`);
+            if (orphanSigs.length > 0) {
+              console.log(`[pool-settler] per-tick sign_resp re-scan market=${market.id.slice(0,12)}: ${orphanSigs.length} orphan sig(s) — replaying`);
+              for (const row of orphanSigs) {
+                try {
+                  await onBroadcastWritten({
+                    tx_hash: row.tx_hash, content: row.content, sender_address: row.sender_address,
+                    channel_name: row.channel_name, created_at: row.created_at,
+                  });
+                } catch (replayErr) {
+                  console.warn(`[pool-settler] sig replay fail tx=${row.tx_hash.slice(0,16)}: ${replayErr.message}`);
+                }
+              }
+            }
+          } catch (rescanErr) {
+            console.warn(`[pool-settler] per-tick re-scan fail market=${market.id.slice(0,12)}: ${rescanErr.message}`);
+          }
         }
 
         const decision = decideConsensus(market);
@@ -149,6 +852,30 @@ export async function poolSettlerTick() {
         if (decision.action === 'consensus') {
           consensus++;
           console.log(`[pool-settler] CONSENSUS market=${market.id.slice(0,12)} winner=${decision.winner} unanimous=${decision.unanimous} silent_oracle=${decision.silentOracleIndex ?? 'none'}`);
+          // J2-tn r393 #25 MIN_POT 前置守门 (Bettor r217 钦定 + r220 完整性 + r221 APPROVE):
+          // PoolSpine_v07.sil L300 require(globalYesTotal + globalNoTotal >= 1e10 sompi = 100KAS).
+          // 总池 = maker_stake + Σ bettor_sides.stake_amount. < 1e10 → dispatchPhase2 必 SS reject
+          // (= zc9jw/xejkf 7 KAS 实证). 不 dispatch 走死循环 + r389 backoff (= D9 违反留死单).
+          // 改 路由 cancel + 通知 legacyRefundBuilderTick Step 3 自取 (= maker dispatchRefund +
+          // bettor sides 各退). 大声 warn 不 silent.
+          if (market.protocol_version === 'v0.6' || market.protocol_version === 'v0.7') {
+            const totalPool = BigInt(market.maker_stake_amount || 0) + getBettorSumSompi(market.id);
+            const MIN_POT_SOMPI = 10_000_000_000n;  // 100 KAS = 1e10 sompi (= PoolSpine_v07.sil L300 钦定)
+            if (BigInt(totalPool) < MIN_POT_SOMPI) {
+              console.warn(`[pool-settler:min-pot] market=${market.id.slice(0,12)} pool=${(Number(totalPool)/1e8).toFixed(2)}KAS < 100KAS MIN_POT → cancel + refund route (D9 自愈, 不 dispatch死单)`);
+              const curMeta0 = JSON.parse(market.metadata || '{}');
+              curMeta0.cancel_reason = 'min_pot_undersize';
+              curMeta0.cancel_pool_sompi = totalPool.toString();
+              curMeta0.cancelled_at = new Date().toISOString();
+              sqlite.prepare("UPDATE pool_markets SET protocol_status = 'cancelled', metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+                .run(JSON.stringify(curMeta0), market.id);
+              // maker dispatchRefund (= 已有 pool_refund_maker_unjoined_tx 流) 异步, 不等待.
+              dispatchRefund(market, { action: 'refund', reason: 'min_pot_undersize cancel-refund' }).catch(e =>
+                console.warn(`[pool-settler:min-pot] maker dispatchRefund market=${market.id.slice(0,12)}: ${e.message}`));
+              refund++;
+              continue;
+            }
+          }
           // Phase 2a-2: skip if already dispatched (check metadata.phase2_dispatched_at)
           let meta = {};
           try { meta = JSON.parse(market.metadata || '{}'); } catch {}
@@ -157,7 +884,7 @@ export async function poolSettlerTick() {
           }
         } else if (decision.action === 'refund') {
           refund++;
-          console.log(`[pool-settler] REFUND market=${market.id.slice(0,12)} reason=${decision.reason}`);
+          logThrottled(`refund:${market.id}`, `[pool-settler] REFUND market=${market.id.slice(0,12)} reason=${decision.reason}`);
           // Phase 2a-3: skip if already dispatched
           let meta = {};
           try { meta = JSON.parse(market.metadata || '{}'); } catch {}
@@ -172,16 +899,205 @@ export async function poolSettlerTick() {
           if (!meta.refund_disagreement_dispatched_at) {
             await dispatchRefundDisagreement(market, decision);
           }
+        } else if (decision.action === 'dispute') {
+          // 门C 档1 (Owner 终裁 r518): 中间态 (非 4-同向 settle 且 abstain<4) → dispute, 非自动 refund
+          // (不奖 griefer)。dispute 写死终态 (防 stuck-order = 刚硬化掉的死单换衣回来):
+          // 首检 → status='disputed' + grace 计时; 过 grace → dispatchRefund (档1 自治终态)。
+          let meta = {};
+          try { meta = JSON.parse(market.metadata || '{}'); } catch {}
+          if (!meta.dispute_started_at) {
+            meta.dispute_started_at = new Date().toISOString();
+            meta.dispute_reason = decision.reason;
+            sqlite.prepare("UPDATE pool_markets SET protocol_status = 'disputed', metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+              .run(JSON.stringify(meta), market.id);
+            console.warn(`[pool-settler] DISPUTE market=${market.id.slice(0,12)} → status=disputed (grace ${DISPUTE_GRACE_MIN}min, 终态 dispatchRefund) reason=${decision.reason}`);
+            disputed++;
+          } else {
+            const disputeAgeMs = Date.now() - parseSqliteUtc(meta.dispute_started_at);
+            if (disputeAgeMs >= DISPUTE_GRACE_MS) {
+              // 终态: grace 过 → dispatchRefund (复用现有硬化退款路 + grace, 可 scale)。
+              logThrottled(`dispute-term:${market.id}`, `[pool-settler] DISPUTE terminal market=${market.id.slice(0,12)} grace ${DISPUTE_GRACE_MIN}min 过 → dispatchRefund (档1 自治终态)`);
+              if (!meta.refund_dispatched_at) {
+                await dispatchRefund(market, { action: 'refund', reason: `dispute grace timeout → refund (${meta.dispute_reason || decision.reason})` });
+              }
+              refund++;
+            } else {
+              pending++;  // 仍在 grace 窗内, 等 (档2: 此处接挑战机制)
+            }
+          }
         } else {
-          pending++;
+          // (c) J2-tn r1009 quorum-timeout-refund (cross-node liveness P0, ZOMBIE 实证):
+          // committee 成形但 quorum 永不可达 (cross-node committee >=2 成员投不了 → 可投 < 4-of-5
+          // threshold, 见 project-crossnode-committee-liveness-blocker) → 市场永卡 verifying,
+          // bettor+maker stake 永锁。settler 原无 'committee-formed-but-quorum-unreachable → refund'
+          // 路 (只有 committee_unformed / unrecoverable-SPC / min-pot / dispute-grace)。补此兜底:
+          // verifying 超 grace 仍未达共识 → dispatchRefund 终态 (退所有 bettor + maker)。grace 足够长
+          // (legit 跨节点投票分钟级完成, mix0d 证), 4x 余量, 仅兜真永卡单, 不误退 legit slow。
+          const VERIFYING_QUORUM_TIMEOUT_SEC = parseInt(process.env.VERIFYING_QUORUM_TIMEOUT_SEC, 10) || 7200;  // 2h default, env 可调
+          const ageSinceDeadlineSec = market.deadline ? (Math.floor(Date.now() / 1000) - market.deadline) : 0;
+          let meta = {};
+          try { meta = JSON.parse(market.metadata || '{}'); } catch {}
+          if (ageSinceDeadlineSec > VERIFYING_QUORUM_TIMEOUT_SEC && !meta.refund_dispatched_at && !meta.quorum_timeout_refund_at) {
+            meta.quorum_timeout_refund_at = new Date().toISOString();
+            meta.quorum_timeout_reason = `verifying ${Math.floor(ageSinceDeadlineSec / 60)}min > grace ${Math.floor(VERIFYING_QUORUM_TIMEOUT_SEC / 60)}min 未达 quorum (unreachable) → refund 终态`;
+            sqlite.prepare('UPDATE pool_markets SET metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+              .run(JSON.stringify(meta), market.id);
+            console.warn(`[pool-settler] QUORUM-TIMEOUT-REFUND market=${market.id.slice(0,12)} ${meta.quorum_timeout_reason}`);
+            await dispatchRefund(market, { action: 'refund', reason: meta.quorum_timeout_reason });
+            refund++;
+          } else {
+            pending++;
+            // J2-tn r401 P0-#2 (Bettor r290b 钦点 trace 先证 不猜):
+            // qrv65 类奇案 — direct decideConsensus call 返 action=refund 但 tick 报 pending=1.
+            // 加 trace log 仅在 pending 时, 揭示 ageMs / updated_at_runtime / why-pending.
+            // 不修复, 只观察, 复现下次卡死时根因可见.
+            try {
+              const updated_at = market.updated_at;
+              const verifyingSinceMs = parseSqliteUtc(updated_at);
+              const ageMs = Date.now() - verifyingSinceMs;
+              const ageMin = Math.floor(ageMs / 60000);
+              const deadlineSec = market.deadline;
+              const ageSinceDeadlineMin = deadlineSec ? Math.floor((Math.floor(Date.now()/1000) - deadlineSec) / 60) : null;
+              console.log(`[pool-settler:trace] PENDING market=${market.id.slice(0,12)} status=${market.protocol_status} ver=${market.protocol_version} updated_at=${updated_at} ageMin=${ageMin} ageSinceDeadlineMin=${ageSinceDeadlineMin} decision_action=${decision.action} decision_reason=${decision.reason}`);
+            } catch (e) {
+              console.warn(`[pool-settler:trace] log fail market=${market.id?.slice(0,12)}: ${e.message}`);
+            }
+          }
         }
       } catch (e) {
         errored++;
         console.error(`[pool-settler] process fail market=${market.id?.slice(0,12)}: ${e.message}`);
       }
     }
-    console.log(`[pool-settler] tick: ${markets.length} verifying markets, consensus=${consensus} refund=${refund} pending=${pending} doomed=${doomed} errored=${errored}`);
-    return { ok: true, processed: markets.length, consensus, refund, pending, doomed, errored };
+    console.log(`[pool-settler] tick: ${markets.length} verifying markets, consensus=${consensus} refund=${refund} dispute=${disputed} pending=${pending} doomed=${doomed} errored=${errored} sampledCommittee=${sampledCommittee}`);
+
+    // J2-tn r401 P0-#1 (Bettor r290+r291 关1 PASS): watchdog phase 加在主 loop 后.
+    // 2 watchdogs:
+    //  (a) verifying + phase2_dispatched_at NULL + ageSinceDeadlineMin > 30 → force re-decide
+    //      + dispatch per decision (Bettor r291 flag: 别硬码 refund, 按 decision 走 settle/refund).
+    //  (b) collecting_sigs + phase2_dispatched_at + age > 15min + sigs_collected < 4 → force cancel
+    //      + maker refund (配 J1 自然 silent 真测后场景).
+    let watchdogFired = 0;
+    try {
+      const nowSec2 = Math.floor(Date.now() / 1000);
+      const wmarkets = sqlite.prepare(`
+        SELECT id, maker_relay_id, spine_p2sh, spine_lock_tx, oracle1_pk, oracle2_pk, oracle3_pk,
+               oracle_relay_ids, deadline, protocol_status, sides_merkle_root, broker_pk, broker_fee_pct, broker_relay_id,
+               updated_at, maker_stake_amount, oracle_bond_amount, miner_fee, metadata,
+               outcome_market_source, outcome_token_id, outcome_side, protocol_version, pool_merkle_root,
+               deadline_daa
+        FROM pool_markets
+        WHERE protocol_status IN ('verifying', 'collecting_sigs')
+          AND deadline <= ?
+      `).all(nowSec2);
+      for (const wm of wmarkets) {
+        let meta = {};
+        try { meta = JSON.parse(wm.metadata || '{}'); } catch {}
+        const ageSinceDeadlineMin = Math.floor((nowSec2 - wm.deadline) / 60);
+        // (a) verifying + 无 phase2_dispatched_at + ageSinceDeadlineMin > 30
+        if (wm.protocol_status === 'verifying' && !meta.phase2_dispatched_at && ageSinceDeadlineMin > 30) {
+          // Bettor r472: back off markets that can't make local progress (re-attempted within
+          // WATCHDOG_BACKOFF_MS) — prevents the every-tick re-decide/re-dispatch spam cascade.
+          const lastAttempt = _watchdogBackoff.get(wm.id) || 0;
+          if (Date.now() - lastAttempt < WATCHDOG_BACKOFF_MS) { continue; }
+          _watchdogBackoff.set(wm.id, Date.now());
+          if (_watchdogBackoff.size > 5000) {
+            const cutoff = Date.now() - WATCHDOG_BACKOFF_MS;
+            for (const [k, t] of _watchdogBackoff) { if (t < cutoff) _watchdogBackoff.delete(k); }
+          }
+          try {
+            const decision = decideConsensus(wm);
+            console.log(`[pool-settler:watchdog-a] market=${wm.id.slice(0,12)} ageSinceDeadlineMin=${ageSinceDeadlineMin} verifying+no-phase2 → force decideConsensus=${decision.action} reason=${decision.reason}`);
+            if (decision.action === 'consensus' && !meta.phase2_dispatched_at) {
+              await dispatchPhase2(wm, decision);
+              watchdogFired++;
+            } else if (decision.action === 'refund' && !meta.refund_dispatched_at) {
+              await dispatchRefund(wm, decision);
+              watchdogFired++;
+            }
+          } catch (e) {
+            console.warn(`[pool-settler:watchdog-a] fail market=${wm.id.slice(0,12)}: ${e.message}`);
+          }
+        }
+        // (b) collecting_sigs + phase2_dispatched_at + age > 15min + sigs < 4 → force cancel
+        if (wm.protocol_status === 'collecting_sigs' && meta.phase2_dispatched_at) {
+          const phase2AgeMs = Date.now() - new Date(meta.phase2_dispatched_at).getTime();
+          if (phase2AgeMs > COLLECTING_SIGS_WATCHDOG_MS) {
+            const sigCount = sqlite.prepare(`
+              SELECT COUNT(*) c FROM chain_events
+              WHERE event_type='pool_oracle_tx_sig' AND payload LIKE ?
+            `).get(`%"market_id":"${wm.id}"%`).c;
+            if (sigCount < 4 && !meta.refund_dispatched_at) {
+              console.warn(`[pool-settler:watchdog-b] market=${wm.id.slice(0,12)} collecting_sigs ageMin=${Math.floor(phase2AgeMs/60000)} sigs=${sigCount}/4 → force cancel + maker refund (silent stuck)`);
+              try {
+                meta.cancel_reason = 'collecting_sigs_silent_timeout';
+                meta.cancelled_at = new Date().toISOString();
+                sqlite.prepare("UPDATE pool_markets SET protocol_status='cancelled', metadata=?, updated_at=CURRENT_TIMESTAMP WHERE id=?")
+                  .run(JSON.stringify(meta), wm.id);
+                await dispatchRefund(wm, { action: 'refund', reason: 'watchdog-b: collecting_sigs silent timeout' });
+                watchdogFired++;
+              } catch (e) {
+                console.warn(`[pool-settler:watchdog-b] dispatchRefund fail market=${wm.id.slice(0,12)}: ${e.message}`);
+              }
+            }
+          }
+        }
+      }
+      if (watchdogFired > 0) console.log(`[pool-settler:watchdog] fired ${watchdogFired} market(s) this tick`);
+    } catch (e) {
+      console.warn(`[pool-settler:watchdog] phase fail: ${e.message}`);
+    }
+
+    // r419 (Bettor r429 关2 推进 Path B): re-derive from chain — authoritative 收敛.
+    // 防 Path A push broadcast 丢失. settler tick 扫 verifying cross-node markets, 查
+    // kaspa_tx_log 是否有 TX spend spine UTXO (= from_address = spine_p2sh). 找到即终态:
+    // - outputs ≥ 2 → settle (settle_aggregate 多输出: maker+bettors+oracles)
+    // - outputs = 1 → refund (refund_maker_unjoined 单输出)
+    // 仅 cross-node (= maker_relay_id 'cross-node:...') 走此路径 — local maker 由 settler 主线驱.
+    let pathBReconciled = 0;
+    try {
+      const stuckMarkets = sqlite.prepare(`
+        SELECT id, spine_p2sh, maker_relay_id, protocol_status, protocol_version
+        FROM pool_markets
+        WHERE protocol_status IN ('verifying', 'collecting_sigs')
+          AND maker_relay_id LIKE 'cross-node:%'
+          AND settle_txid IS NULL
+          AND refund_txid IS NULL
+      `).all();
+      for (const sm of stuckMarkets) {
+        const chainTx = sqlite.prepare(`
+          SELECT tx_id, outputs_json, block_time
+          FROM kaspa_tx_log
+          WHERE from_address = ?
+          ORDER BY block_time DESC
+          LIMIT 1
+        `).get(sm.spine_p2sh);
+        if (!chainTx) continue;
+        let outputCount = 0;
+        try {
+          const outs = JSON.parse(chainTx.outputs_json || '[]');
+          outputCount = Array.isArray(outs) ? outs.length : 0;
+        } catch {}
+        if (outputCount >= 2) {
+          // Settle: many outputs (maker+bettors+oracles).
+          sqlite.prepare('UPDATE pool_markets SET settle_txid = ?, protocol_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+            .run(chainTx.tx_id, 'completed', sm.id);
+          console.log(`[pool-settler:path-b] re-derive cross-node SETTLED market=${sm.id.slice(0,12)} settle_txid=${chainTx.tx_id.slice(0,16)} outputs=${outputCount} (was ${sm.protocol_status})`);
+          pathBReconciled++;
+        } else if (outputCount === 1) {
+          // Refund: single output (maker).
+          sqlite.prepare('UPDATE pool_markets SET refund_txid = ?, protocol_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+            .run(chainTx.tx_id, 'refunded', sm.id);
+          console.log(`[pool-settler:path-b] re-derive cross-node REFUNDED market=${sm.id.slice(0,12)} refund_txid=${chainTx.tx_id.slice(0,16)} (was ${sm.protocol_status})`);
+          pathBReconciled++;
+        }
+      }
+      if (pathBReconciled > 0) console.log(`[pool-settler:path-b] reconciled ${pathBReconciled} cross-node market(s) from chain this tick`);
+    } catch (e) {
+      console.warn(`[pool-settler:path-b] phase fail: ${e.message}`);
+    }
+
+    return { ok: true, processed: markets.length, consensus, refund, pending, doomed, errored, pathBReconciled };
   } finally {
     running = false;
   }
@@ -199,6 +1115,11 @@ export async function poolSettlerTick() {
  * }}
  */
 export function decideConsensus(market) {
+  // Bettor r197 P0 fix: v0.6 path A uses 5-committee 4-of-5 threshold (= committee-attest
+  // model post P2 §5.3 LOCK). v0.5 legacy 3-oracle 3-of-3 path below unchanged.
+  if (market.protocol_version === 'v0.6' || market.protocol_version === 'v0.7') {
+    return decideConsensusV06(market);
+  }
   let oracleIds;
   try { oracleIds = JSON.parse(market.oracle_relay_ids || '[]'); } catch { oracleIds = []; }
   if (!Array.isArray(oracleIds) || oracleIds.length !== 3) {
@@ -300,6 +1221,155 @@ export function decideConsensus(market) {
   return { action: 'pending', reason: `votes=${votes.length}/3 age=${Math.floor(ageMs/60000)}min (timeout 30min)` };
 }
 
+// v0.6 path A consensus: 5-committee, 4-of-5 same-outcome threshold for consensus.
+// No DISAGREEMENT_TIMEOUT branches (= committee model assumes Byzantine-1 fault tolerance
+// inherently; 4-of-5 either reaches threshold or doesn't). Silent timeout → refund.
+function decideConsensusV06(market) {
+  // G6 批 3 段① 0-bet immediate refund short-circuit: if 0 bettor joined by deadline,
+  // SS entry 2 refund_maker_unjoined applies (no votes needed). Skip 30min ORACLE_SILENT_TIMEOUT
+  // wait — return refund immediately. Works for both v0.6 + v0.7.
+  const betCount = sqlite.prepare('SELECT COUNT(*) as c FROM pool_bettor_sides WHERE market_id = ?').get(market.id)?.c || 0;
+  if (betCount === 0) {
+    return { action: 'refund', reason: `0-bet market past deadline (no votes possible, refund_maker_unjoined)` };
+  }
+  let oracleIds;
+  try { oracleIds = JSON.parse(market.oracle_relay_ids || '[]'); } catch { oracleIds = []; }
+  if (!Array.isArray(oracleIds) || oracleIds.length !== 5) {
+    return { action: 'pending', reason: `v0.6/v0.7 invalid oracle_relay_ids (expected 5, got ${oracleIds?.length || 0})` };
+  }
+
+  // J2-tn r361 (Bettor 12:55 catch + r337 漏迁 reader 第 5 次): voter envelope 写
+  // voter_relay_id=voter.id (UUID), 但 r337 后 oracle_relay_ids 存 addresses → 这 query
+  // 永不命中 → 0 vote counted → consensus 0/5 → 30min timeout refund. fix: 改读
+  // pool_committee.committee_pks (= 5 PKs, voter envelope 同样写 voter_pubkey 字段),
+  // 用 voter_pubkey 匹 (= PK 跨节点 canonical, 不受 r337 地址迁移影响).
+  let committeePks = [];
+  try {
+    const commRow = sqlite.prepare('SELECT committee_pks FROM pool_committee WHERE market_id = ?').get(market.id);
+    committeePks = JSON.parse(commRow?.committee_pks || '[]').map(p => String(p).toLowerCase());
+  } catch {}
+  if (committeePks.length !== 5) {
+    return { action: 'pending', reason: `v0.6/v0.7 pool_committee.committee_pks invalid (expected 5, got ${committeePks.length}) — committee not yet sampled` };
+  }
+
+  // J2-tn r412 Oracle 框架 spec (Bettor r404 #3 钉死 + 5.2): 三态 enum + malformed = silent-equiv.
+  const votes = [];
+  let abstainCount = 0;
+  let malformedCount = 0;
+  const trueSilentSet = new Set();      // = 0 chain_events row (network/silent)
+  const abstainSet = new Set();         // = outcome='ABSTAIN' (= spec 5.5 不损 stake/reputation 中性)
+  const malformedSet = new Set();       // = invalid payload/enum = silent-equiv (forfeit per 5.2)
+  for (let i = 0; i < 5; i++) {
+    const voterPk = committeePks[i];
+    const row = sqlite.prepare(`
+      SELECT payload, observed_at FROM chain_events
+      WHERE event_type = 'pool_oracle_vote'
+        AND payload LIKE ?
+        AND payload LIKE ?
+      ORDER BY observed_at ASC LIMIT 1
+    `).get(`%"market_id":"${market.id}"%`, `%"voter_pubkey":"${voterPk}"%`);
+    if (!row) { trueSilentSet.add(i); continue; }
+    let payload;
+    try { payload = JSON.parse(row.payload); } catch { malformedCount++; malformedSet.add(i); continue; }
+    // r412: outcome enum {YES, NO, ABSTAIN}. 其他 = malformed = silent-equiv (Bettor r404 5.2).
+    if (payload.outcome === 'YES' || payload.outcome === 'NO') {
+      votes.push({ oracleIndex: i, outcome: payload.outcome });
+    } else if (payload.outcome === 'ABSTAIN') {
+      abstainCount++;
+      abstainSet.add(i);
+    } else {
+      malformedCount++;
+      malformedSet.add(i);
+    }
+  }
+
+  const yesCount = votes.filter(v => v.outcome === 'YES').length;
+  const noCount = votes.filter(v => v.outcome === 'NO').length;
+  // J2-tn r383 (Bettor 23:59 + 6/6 00:00 钦定 4-of-5 活性路单验): forfeit_1 path needs
+  // silentOracleIndex set so dispatchPhase2 L1284 signingOracles 排除静默员, 否则全 5
+  // 派签 (= 4 real + 1 will never come) → handleCollectingSigs spineRequiredSigs=5 卡
+  // 永远不 settle. 静默 = 投票 ≠ winner direction OR 没投票的 committee_pks[i] 索引.
+  // Mirror v0.5 path L556 logic (= 3-oracle) to 5-oracle.
+  // J2-tn r414 Oracle 框架 Bettor r409 关2 PASS: 4-同向+1-abstain 边界 — abstain 仍 forfeit bug 修.
+  // forfeit_1 必 1 silent 输出 (SS limit, 无 abstain enum), 仅 true-silent/malformed/dissent 合法.
+  // 仅 abstain 在 5th slot → 返 null → caller fallback refund (spec 5.5 abstain 不损 stake).
+  function _findSilentForWinner(winnerStr) {
+    // 优先 1: true-silent (forfeit + 中立)
+    for (let i = 0; i < 5; i++) if (trueSilentSet.has(i)) return i;
+    // 优先 2: malformed (= silent-equiv, Bettor 5.2 也 forfeit)
+    for (let i = 0; i < 5; i++) if (malformedSet.has(i)) return i;
+    // 优先 3: 投了 NOT winnerStr 的 (= dissent, 经济上参与 disagreement, 此处 fallback)
+    for (let i = 0; i < 5; i++) {
+      const v = votes.find(vt => vt.oracleIndex === i);
+      if (v && v.outcome !== winnerStr) return i;
+    }
+    // 仅 abstain 剩 → 返 null. caller 必 fallback refund 路径 (spec 5.5).
+    return null;
+  }
+  if (yesCount >= 4) {
+    const unanimous = yesCount === 5;
+    let silentIdx = null;
+    if (!unanimous) {
+      silentIdx = _findSilentForWinner('YES');
+      // r414: 4-YES + 1-ABSTAIN edge — _findSilentForWinner 返 null = 仅 abstain 剩, spec 5.5 不损 stake.
+      if (silentIdx === null) {
+        return { action: 'refund', reason: `v0.6 4-of-5 forfeit_1 无合法 silent slot (5th = ABSTAIN, spec 5.5 不损 stake) → refund_consensus_insufficient (YES=${yesCount}/5 ABSTAIN=${abstainCount})` };
+      }
+    }
+    return {
+      action: 'consensus',
+      winner: 0,
+      unanimous,
+      silentOracleIndex: silentIdx,
+      vote_summary: `v0.6 ${yesCount}/5 YES`,
+    };
+  }
+  if (noCount >= 4) {
+    const unanimous = noCount === 5;
+    let silentIdx = null;
+    if (!unanimous) {
+      silentIdx = _findSilentForWinner('NO');
+      // r414: 4-NO + 1-ABSTAIN edge — 同上.
+      if (silentIdx === null) {
+        return { action: 'refund', reason: `v0.6 4-of-5 forfeit_1 无合法 silent slot (5th = ABSTAIN, spec 5.5 不损 stake) → refund_consensus_insufficient (NO=${noCount}/5 ABSTAIN=${abstainCount})` };
+      }
+    }
+    return {
+      action: 'consensus',
+      winner: 1,
+      unanimous,
+      silentOracleIndex: silentIdx,
+      vote_summary: `v0.6 ${noCount}/5 NO`,
+    };
+  }
+
+  // ── 门C 档1 三态判定 (Owner 终裁 r518, 决议 e8727706) ──────────────────────────
+  // J2-tn 档1: settle (任一 side ≥4, 上方两 if) / abstain-refund (≥4 主动 ABSTAIN) / 其余=else
+  // catch-all → dispute (非自动 refund, 不奖 griefer)。改自旧 abstain≥2→即 refund (= griefer
+  // 腐蚀 2 委员就拿免费 cancel) + split/timeout→即 refund。档1 无挑战窗 (= 档2/mainnet);
+  // dispute 终态由 caller 写死: status='disputed' + grace → timeout → dispatchRefund (防 stuck-order)。
+  const verifyingSinceMs = parseSqliteUtc(market.updated_at);
+  const ageMs = Date.now() - verifyingSinceMs;
+
+  // ① abstain-refund: ≥4 委员【主动】投 ABSTAIN (affirmative-unjudgeable supermajority) = genuinely
+  //    不可判 → 合法 refund。门槛由旧 ≥2 抬到 ≥4 (= griefer 腐蚀 1-2 委员凑不出, 落 dispute 不奖)。
+  if (abstainCount >= 4) {
+    return { action: 'refund', reason: `档1 abstain≥4 (${abstainCount}/5) affirmative-unjudgeable supermajority → 合法 refund (genuinely 不可判)` };
+  }
+
+  // ② else catch-all → dispute: 既非 4-同向 settle 也非 ≥4-abstain。覆盖 split (3y2n/3y1n1a…) /
+  //    2-3 abstain / malformed / 非法枚举(已并入 malformed) / 5-全表态-非4同向 / timeout。
+  //    仅在【5 全表态 OR 过 timeout】才进 dispute (= 数学不可能再反转 / 等够了), 否则 pending 等更多票。
+  const decidedCount = votes.length + abstainCount + malformedCount;
+  const allDecided = decidedCount === 5;
+  if (allDecided || ageMs >= ORACLE_SILENT_TIMEOUT_MS) {
+    return { action: 'dispute', reason: `档1 非 4-同向 且 abstain<4 (YES=${yesCount} NO=${noCount} ABSTAIN=${abstainCount} malformed=${malformedCount} silent=${trueSilentSet.size} decided=${decidedCount}/5${allDecided ? ' all-decided' : ' timeout'}) → dispute (catch-all, 不自动 refund 不奖 griefer; 终态 grace→refund 由 caller)` };
+  }
+
+  // ③ 尚未表态够 + 未 timeout → pending, 等更多票 (1 no-show 仍可能凑 4-同向)。
+  return { action: 'pending', reason: `档1 votes ${votes.length}/5 (YES=${yesCount} NO=${noCount} ABSTAIN=${abstainCount}) age=${Math.floor(ageMs/60000)}min < timeout, 等更多票` };
+}
+
 /**
  * Pure function — compute pool payout amounts per Bettor r339 spec.
  * Extracted for testability (= no DB, no IPC).
@@ -328,23 +1398,42 @@ export function computePoolPayouts(args) {
   const losers = participants.filter(p => p.direction !== winner);
   if (!winners.length) throw new Error('no winners');
 
+  // === Owner 终裁 2026-06-13: fee-on-TOTAL parimutuel rake (was fee-on-losing). ⑤数值锁:
+  // broker 1.9% / oracle 1% / maker 0.1% = ~3% on TOTAL pool. 全 BigInt sompi 零 float
+  // (NWT④ / D7 BigInt L654 漂移教训). Cross-node byte-identical (R1 承重墙): 整数 + 固定 floor
+  // 顺序 broker→oracle→maker→winner→dust=remainder; participants 已按 merkle_index ASC 序
+  // (dispatchPhase2 L1469) → winners[0]=min merkle_index = dust absorber (NWT③/J1 tie-break). ===
   const totalLoserStake = losers.reduce((s, p) => s + p.stake, 0);
   const totalWinnerStake = winners.reduce((s, p) => s + p.stake, 0);
-  // Self-catch: subtract minerFee from losing pool (= same class as 1V1 settle TX fee bug observed
-  // 5/21 in tn12 console.log "transaction has 10000 fees which is under the required amount of 13130").
-  // Winners absorb fee. losingPool >= brokerFee + minerFee required else throws.
-  const losingPool = Math.max(0, totalLoserStake - minerFee);
-  if (totalLoserStake < minerFee) {
-    throw new Error(`losing pool (${totalLoserStake}) less than minerFee (${minerFee}) — settle impossible without fee`);
+  const totalWinnerStakeBI = winners.reduce((s, p) => s + BigInt(p.stake), 0n);
+  const totalLoserStakeBI = losers.reduce((s, p) => s + BigInt(p.stake), 0n);
+  const totalPoolBI = totalWinnerStakeBI + totalLoserStakeBI;  // = Σ全 stake (maker stake 已在某侧)
+  const minerFeeBI = BigInt(minerFee);
+  if (totalPoolBI <= minerFeeBI) {
+    throw new Error(`totalPool (${totalPoolBI}) <= minerFee (${minerFeeBI}) — settle impossible without fee`);
   }
-  // Bug 8: broker_fee floor MIN_BROKER_FEE_SOMPI (= 0.05 KAS) — a tiny broker output
-  // dominates KIP-9 storage mass (Σ 1/output_value). Floored so the output isn't dust-small.
-  const brokerFeeRaw = Math.floor(losingPool * brokerFeePct / 10000);
-  const brokerFee = Math.max(brokerFeeRaw, minBrokerFee);
-  if (losingPool < brokerFee) {
-    throw new Error(`losing pool (${losingPool}) less than broker_fee floor (${brokerFee}) — pot too small to settle`);
+  // Fee basis points (caller passes bps). brokerFeePct legacy arg; oracle/maker default per ⑤.
+  const brokerBps = BigInt(brokerFeePct);
+  const oracleBps = BigInt(Number.isFinite(args.oracleFeePct) ? args.oracleFeePct : 100);  // 1%
+  const makerBps = BigInt(Number.isFinite(args.makerFeePct) ? args.makerFeePct : 10);      // 0.1%
+  // Fixed floor order (R1 承重墙): broker → oracle → maker, each floor(totalPool × bps / 10000).
+  let brokerFeeBI = (totalPoolBI * brokerBps) / 10000n;
+  const minBrokerFeeBI = BigInt(minBrokerFee);
+  if (brokerFeeBI < minBrokerFeeBI) brokerFeeBI = minBrokerFeeBI;  // Bug 8 floor (KIP-9 storage mass)
+  const oracleFeeTotalBI = (totalPoolBI * oracleBps) / 10000n;
+  const makerFeeBI = (totalPoolBI * makerBps) / 10000n;
+  const brokerFee = Number(brokerFeeBI);
+  // Bettor r355 — committee bond-floor reservation: PoolSpine_v0.6/v0.7 entry 0 requires each
+  // committee output >= oracleBond (committeeMode posts NO on-chain bond). Reserve N×oracleBond
+  // off distributable. MIN_POT LOCK guarantees affordability (now re-derived for fee-on-total ⑥).
+  const oracleCountForBonds = Number.isInteger(args.oracleCount) ? args.oracleCount : 3;
+  const committeeMode = !!args.committeeMode;
+  const committeeBondReserveBI = committeeMode ? BigInt(oracleCountForBonds) * BigInt(oracleBond) : 0n;
+  // distributable = totalPool − Σfees − bondReserve − minerFee (winners 分整个 post-rake 池).
+  const distributableBI = totalPoolBI - brokerFeeBI - oracleFeeTotalBI - makerFeeBI - committeeBondReserveBI - minerFeeBI;
+  if (distributableBI < 0n) {
+    throw new Error(`distributable negative (total=${totalPoolBI} broker=${brokerFeeBI} oracle=${oracleFeeTotalBI} maker=${makerFeeBI} bond=${committeeBondReserveBI} miner=${minerFeeBI}) — MIN_POT guard should have prevented`);
   }
-  const distributablePool = losingPool - brokerFee;
 
   // Forfeit_1 50/25/25 split per v0.5 spec section 4.4
   // W3 (area-5/6): the 4 floor calls (winner / maker / oracle × 2) can each shed 0-1 sompi
@@ -353,35 +1442,102 @@ export function computePoolPayouts(args) {
   // total_allocated == oracleBond (matches the W2 formula spec). area-10 outstanding may
   // revisit whether maker share belongs to maker at all (same +EV pattern as Gap 1B burn),
   // but until that decision the remainder follows the same destination as the 25% share.
-  let winnerForfeitShare = 0, makerForfeitShare = 0, perOracleForfeitShare = 0;
-  if (!unanimous && typeof silentOracleIndex === 'number') {
-    winnerForfeitShare = Math.floor(oracleBond * 50 / 100);
-    makerForfeitShare = Math.floor(oracleBond * 25 / 100);
-    perOracleForfeitShare = Math.floor(oracleBond * 25 / 100 / 2);
-    const totalAllocated = winnerForfeitShare + makerForfeitShare + perOracleForfeitShare * 2;
-    const remainder = oracleBond - totalAllocated;
-    makerForfeitShare += remainder;
+  // J2-tn r385 (Bettor #3 设计问题 + #12 实证 overspend bug): v0.5 forfeit_1 redistribution
+  // (50/25/25 split of silent's bond) ONLY applies when silent oracle's bond is forfeited
+  // (= !committeeMode path). In committeeMode (v0.6/v0.7), L783-786 returns bond to ALL 5
+  // committee including silent (= Bettor r355 SS L138 require all N outputs >= oracleBond).
+  // Without committeeMode guard here, code: 5 × bond return + 50%+25%+25% redistribution =
+  // overspend silent's bond TWICE → settle TX Σout > Σin → kaspad reject pre-submit invariant.
+  // #12 实证: input 7 KAS, output 7.72 KAS (overspend 0.72 KAS) = redistribution adds up.
+  // 设计上 committeeMode 静默员仍拿 oracleBond (Bettor 23:59 红线: '不卡主线 settle 照样落,
+  // 主线证完起对抗讨论 KB 经济模型再定'). 此处守 settle 落链, 经济模型后续 retro.
+  let winnerForfeitShareBI = 0n, makerForfeitShareBI = 0n, perOracleForfeitShareBI = 0n;
+  if (!unanimous && typeof silentOracleIndex === 'number' && !committeeMode) {
+    const ob = BigInt(oracleBond);
+    winnerForfeitShareBI = (ob * 50n) / 100n;
+    makerForfeitShareBI = (ob * 25n) / 100n;
+    perOracleForfeitShareBI = (ob * 25n) / 100n / 2n;
+    const allocated = winnerForfeitShareBI + makerForfeitShareBI + perOracleForfeitShareBI * 2n;
+    makerForfeitShareBI += ob - allocated;  // remainder fold (no sompi leak)
   }
 
-  const winnerPayouts = winners.map(w => {
-    const winnerShare = totalWinnerStake > 0
-      ? Math.floor((distributablePool + winnerForfeitShare) * w.stake / totalWinnerStake)
-      : 0;
-    let amount = w.stake + winnerShare;
-    if (w.isMaker) amount += makerForfeitShare;
-    return { participantIndex: w.idx, isMaker: !!w.isMaker, amount };
+  // Winner parimutuel (fee-on-total): floor((distributable + winnerForfeit) × stake_i / ΣwinnerStake).
+  // NO "+stake" (winner stake already inside distributable, unlike old fee-on-losing). dust (floor 余)
+  // → winners[0] (= min merkle_index, participants idx-sorted) absorber, cross-node same (NWT③/J1).
+  const poolToSplitBI = distributableBI + winnerForfeitShareBI;
+  const shareBIs = winners.map(w => (totalWinnerStakeBI > 0n
+    ? (poolToSplitBI * BigInt(w.stake)) / totalWinnerStakeBI
+    : 0n));
+  const shareSumBI = shareBIs.reduce((s, x) => s + x, 0n);
+  const winnerDustBI = poolToSplitBI - shareSumBI;  // 0..(N-1) sompi floor remainder
+  const winnerPayouts = winners.map((w, i) => {
+    let amtBI = shareBIs[i];
+    if (i === 0) amtBI += winnerDustBI;       // dust → min merkle_index winner (单一确定 absorber)
+    if (w.isMaker) amtBI += makerForfeitShareBI;
+    // amount = Number (v07 callers .toString() it; safe < 2^53). amountSompi = EXACT decimal string —
+    // #31 v0.8 payoutRoot leaf = blake2b(pk ‖ amount[8B LE]) MUST be byte-exact (零 float, R1 承重墙).
+    return { participantIndex: w.idx, isMaker: !!w.isMaker, amount: Number(amtBI), amountSompi: amtBI.toString() };
   });
 
   const isMakerWinner = winners.some(w => w.isMaker);
-  const makerExtraOutput = (!isMakerWinner && makerForfeitShare > 0) ? makerForfeitShare : null;
+  const makerExtraOutput = (!isMakerWinner && makerForfeitShareBI > 0n) ? Number(makerForfeitShareBI) : null;
 
+  // Bettor r355 SUPERSEDES r230 (committeeMode bond=0): the deployed PoolSpine_v0.6/v0.7 entry 0
+  // requires output[1..N] >= oracleBondAmount, so committeeMode MUST pay each committee >= oracleBond
+  // (reserved off distributablePool above). qoyqv 实证: r230 bond=0 → committee fee-only 0.2 KAS <
+  // 1 KAS oracleBond floor → SS 'verification failed'. Now committeeMode bond = oracleBond, merged
+  // with oracleFee/N share in dispatchPhase2 → committee output = oracleBond + fee >= oracleBond ✓.
+  // - v0.5: 3 oracle bond returns (+ forfeit redistribution) from real posted bonds.
+  // - v0.6/v0.7: 5 committee members each get oracleBond (pool-funded) + oracleFee/5 share.
+  // committeeMode NEVER skips a member (SS checks all N committee outputs c0..cN-1); the v0.5
+  // forfeit_1 silent-skip applies only to non-committee markets.
   const oracleBondReturns = [];
-  for (let i = 0; i < 3; i++) {
-    if (!unanimous && silentOracleIndex === i) continue;
-    oracleBondReturns.push({ oracleIndex: i, amount: oracleBond + perOracleForfeitShare });
+  for (let i = 0; i < oracleCountForBonds; i++) {
+    if (!committeeMode && !unanimous && silentOracleIndex === i) continue;
+    const bondReturnAmount = committeeMode ? oracleBond : Number(BigInt(oracleBond) + perOracleForfeitShareBI);
+    oracleBondReturns.push({ oracleIndex: i, amount: bondReturnAmount });
   }
 
-  return { brokerFee, winnerPayouts, makerExtraOutput, oracleBondReturns };
+  // oracleFeeTotal/makerFee returned so dispatchPhase2 builds outputs from canonical fee-on-total
+  // computation (NOT recompute on losingPool). oracle 0.5%均分+0.5%质押 split done in dispatchPhase2
+  // (has committee stakes). _totalPool/_distributable = ⑥ 守恒 anchors for caller post-construction assert.
+  return {
+    brokerFee,
+    oracleFeeTotal: Number(oracleFeeTotalBI),
+    makerFee: Number(makerFeeBI),
+    winnerPayouts,
+    makerExtraOutput,
+    oracleBondReturns,
+    _totalPool: Number(totalPoolBI),
+    _distributable: Number(distributableBI),
+  };
+}
+
+/**
+ * Committee enrollment stakes for oracle 0.5%质押 stake-weighted split (Owner 终裁 ⑤).
+ * Source = pool_snapshots.pool_stakes_json[committee_index] — CANONICAL merkle-rooted snapshot
+ * (= VRF 采样同源, baked 进 pool merkle root that SS verifies; 跨节点同, 非 node-local 可变表 = NWT①).
+ * MVP create-snapshot. 待 Owner 时点裁定: (1) create-snapshot=此; (2) deadline-snapshot=换
+ * oracle_pool_chain_view@deadlineDaa derive 一行 (stakeSource 抽象, 不改结构). Locked P2SH UTXO
+ * 恒定 while locked + ⑧ lock_until≥settle → committee create-stake == deadline-stake (J2 r841).
+ * Returns BigInt[] in committee_pks order; missing data → all 0n (caller degrades to uniform split).
+ */
+function getCommitteeStakesCanonical(marketId, divisor) {
+  try {
+    const snap = sqlite.prepare('SELECT pool_pks_json, pool_stakes_json FROM pool_snapshots WHERE market_id = ?').get(marketId);
+    const comm = sqlite.prepare('SELECT committee_pks FROM pool_committee WHERE market_id = ?').get(marketId);
+    if (!snap || !comm) return new Array(divisor).fill(0n);
+    const pks = JSON.parse(snap.pool_pks_json || '[]').map(p => String(p).toLowerCase());
+    const stakes = JSON.parse(snap.pool_stakes_json || '[]');
+    const committeePks = JSON.parse(comm.committee_pks || '[]').map(p => String(p).toLowerCase());
+    return committeePks.map(pk => {
+      const idx = pks.indexOf(pk);
+      return (idx >= 0 && stakes[idx] != null) ? BigInt(stakes[idx]) : 0n;
+    });
+  } catch (e) {
+    console.warn(`[pool-settler] getCommitteeStakesCanonical fail market=${String(marketId).slice(0,12)}: ${e.message}`);
+    return new Array(divisor).fill(0n);
+  }
 }
 
 /**
@@ -411,62 +1567,281 @@ export async function dispatchPhase2(market, decision) {
       ORDER BY merkle_index ASC
     `).all(market.id);
 
+    // Bettor r293 Owner钦定: 0-bet shortcut. No bettor sides → no losing pool, no economics.
+    // Route directly to dispatchRefund (refund_maker_unjoined) regardless of which side maker is on.
+    // Avoids brittle error-string matching in catch (= ee92218 first attempt missed qlfpv case).
+    if (sides.length === 0) {
+      console.log(`[pool-settler] dispatchPhase2 market=${market.id.slice(0,12)} 0-bet shortcut → dispatchRefund`);
+      await dispatchRefund(market, { action: 'refund', reason: '0-bet market (sides=0), refund_maker_unjoined' });
+      return;
+    }
+
     // Per Bettor r339: maker is a bettor (= not a seeder). maker direction = outcome_side mapping.
     const makerDirection = market.outcome_side === 'YES' ? 0 : 1;
     const makerStake = parseInt(market.maker_stake_amount, 10) || 0;
 
     // 2. Look up addresses
+    // J2-tn r337 (Bettor 6/5 C2 实施): oracle_relay_ids field 复用存 addresses (= committee_addresses
+    // 写入 by sampleAndStoreCommittee post-r337). dispatchPhase2 直接以 address 调 DM, 不查
+    // relay_nodes (= peer-owned address 不在本地 relay_nodes 表).
     const oracleIds = JSON.parse(market.oracle_relay_ids || '[]');
-    const oracleRows = oracleIds.map(rid => sqlite.prepare('SELECT id, address FROM relay_nodes WHERE id = ?').get(rid));
+    const oracleRows = oracleIds.map(addr => ({ id: null, address: addr }));
     if (oracleRows.some(r => !r?.address)) {
       console.warn(`[pool-settler] dispatchPhase2 market=${market.id.slice(0,12)} missing oracle addresses`);
       return;
     }
-    const makerRow = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(market.maker_relay_id);
-    if (!makerRow?.address) {
-      console.warn(`[pool-settler] dispatchPhase2 market=${market.id.slice(0,12)} no maker address`);
-      return;
-    }
+    // makerRow now OPTIONAL fallback (NWT② 地址派生轴 BREAKER 修): maker payout addr 主用 maker_pk
+    // pk-derive (makerAddress 下, 两节点 canonical), relay 查只 same-node legacy 兜底。cross-node maker
+    // (maker_relay_id='cross-node:<pk>' sentinel) relay 查 null 不再 abort settle (= 之前 regression: 我
+    // 新增 makerFee 每笔用 makerRow → cross-node maker 永久 settle 不了, NWT git-show catch)。
+    const makerRow = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(market.maker_relay_id) || {};
 
     // r339 push 3: broker_relay_id required (= broker fee output dest, no longer placeholder).
-    const brokerRow = market.broker_relay_id
-      ? sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(market.broker_relay_id)
-      : null;
-    if (!brokerRow?.address) {
-      console.warn(`[pool-settler] dispatchPhase2 market=${market.id.slice(0,12)} missing broker address (broker_relay_id=${market.broker_relay_id})`);
+    // J2-tn settle BREAKER 修 (NWT r62 / J1 #138) + determinism 根治 (J1 #140 红队):
+    // 此前 broker fee 地址只 broker_relay_id→relay_nodes 本地查 → 跨节点 broker 非本地 → null → return
+    // abort 整个 dispatchPhase2 (全市场 settle 停)。b502a805 首修 "relay查优先 pk兜底" 仍【非对称】:
+    // 本地节点用 relay.address / 远端用 pk-派生, 若 gateway relay 非 P2PK 地址 (relay.address != pk-派生,
+    // L1507-1513 P2SH/multisig edge) → 两节点 broker 地址分歧 → 跨节点 settle 分歧。根治 (J1 #140 ①):
+    // 【两节点都从 broker_pk 派生】(broker_pk 签进 unsignedPayload L181 = 跨节点确定; relay.address 本地
+    // 表不进 canonical, 不用) = 对称确定, 同 bettor-external (L1522-1524)。跨节点铁律: 跨节点字段从链上
+    // 数据 derive, 非本地表查。testnet 标准 P2PK 钱包 relay.address==pk-派生 (零行为变化), 非 P2PK edge
+    // 由 pk-派生统一消歧 (Bettor r67 edge 同 bettor-external 已接受 first-ship)。
+    let brokerAddress = null;
+    if (market.broker_pk) {
+      try {
+        const _kw = await import('kaspa-wasm');
+        const _net = market.spine_p2sh && market.spine_p2sh.startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
+        brokerAddress = new _kw.XOnlyPublicKey(market.broker_pk).toAddress(_net).toString();
+      } catch (e) {
+        console.warn(`[pool-settler] broker pk→addr fail market=${market.id.slice(0,12)} broker_pk=${String(market.broker_pk).slice(0,8)}: ${e.message}`);
+      }
+    }
+    if (!brokerAddress) {
+      console.warn(`[pool-settler] dispatchPhase2 market=${market.id.slice(0,12)} missing broker address (broker_pk=${String(market.broker_pk||'').slice(0,8)} broker_relay_id=${market.broker_relay_id})`);
       return;
     }
 
     // Bettor addresses
+    // Bettor r67 ACK + J1 r153 Owner P0 closed-loop back-half fix: external bettors
+    // (bettor_relay_id NULL per register-external/v06 INSERT) derive payout address from
+    // x-only bettor_pk via P2PK reconstruction (round-trip address→XOnlyPublicKey→address
+    // verified PASS for standard P2PK wallet addresses). Relay-bound bettors continue
+    // using relay_nodes.address. Edge case noted by Bettor r67: non-P2PK linkedAddr
+    // (P2SH/multisig) would reconstruct to ≠ original; testnet standard wallets all P2PK
+    // so acceptable for first-ship, /link endpoint hardening can validate-on-bind later.
+    const kaspaWasm = await import('kaspa-wasm');
+    const settleNetwork = market.spine_p2sh.startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
+    // #31 ②轴 (chunk-determinism 硬前置, 4方确认 + Bettor 实测): bettor payout addr 一律 pk-derive from
+    // bettor_pk (chain-anchored, 两节点 pool_bettor_sides commit 同源) — 删原 node-local relay_nodes 查分叉.
+    // 原 bettor_relay_id 路 (SELECT address FROM relay_nodes WHERE id) = NODE-LOCAL: 非持该 relay 的节点查返
+    // NULL → 下方 missing addresses return = settle abort (非持 relay 节点结不了) 或异 addr → cross-node 命门
+    // (= #293 maker_pk / committee active-flag 同病). 命门: 非持 relay 节点查返 NULL → settle abort (结不了) 或
+    // 异 recipient (付错人); pk-derive 单源 → 任意节点可结 + 输出 byte-equal (付对人). 无 fallback: Bettor 实测
+    // pool_bettor_sides relay-bound 行 (bettor_relay_id 非空) = 403/403 bettor_pk POPULATED, 0 NULL.
+    // (注: chunk 封片点由 output 值/数定 [computePoolPayouts + merkle_index 链锚], 与 addr 内容无关 — 全 P2PK
+    // 同脚本长不动 storage/compute mass; addr 是独立"付对人"命门, 非 chunk-边界 [J2 纠正原 cascade 过度断言].)
     const sideAddrs = sides.map(s => {
-      const row = s.bettor_relay_id
-        ? sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(s.bettor_relay_id)
-        : null;
-      return row?.address || null;
+      try {
+        return new kaspaWasm.XOnlyPublicKey(s.bettor_pk).toAddress(settleNetwork).toString();
+      } catch (e) {
+        console.warn(`[pool-settler] bettor pk→addr fail market=${market.id.slice(0,12)} bettor_pk=${String(s.bettor_pk).slice(0,8)}: ${e.message}`);
+        return null;
+      }
     });
     if (sideAddrs.some(a => !a)) {
       console.warn(`[pool-settler] dispatchPhase2 market=${market.id.slice(0,12)} missing bettor addresses`);
       return;
     }
 
+    // maker payout addr pk-derive from canonical maker_pk (Bettor r859/r863 单源 + NWT②/J1 #296-299, 一修两治):
+    // market.maker_pk = create 持久化的【maker_relay_pk = get_pubkey x_only_pubkey (relay 实际 pk)】= 与跨节点
+    // 广播 (_broadcastMarketPublished L180) → sentinel (cross-node:<pk>) 【同一 get_pubkey 口径, 逐字节同】
+    // (非 deriveXOnlyPubkey(address) round-trip = 非 P2PK edge fork 消除, NWT 单源 refine)。列 || sentinel 两源
+    // 逐字节同 → 全节点单一 derivation。修 pre-existing breaker: maker WINNER payout (此 participant addr) +
+    // makerFee/makerExtra 都 pk-derive 非 makerRow.address (node-local 查)。Fallback (老市场 maker_pk NULL):
+    // cross-node sentinel strip (同 maker_relay_pk) → 否则 makerRow.address legacy。
+    let makerAddress = null;
+    const makerPkCanonical = market.maker_pk
+      || (String(market.maker_relay_id).startsWith('cross-node:') ? market.maker_relay_id.replace(/^cross-node:/, '') : null);
+    if (makerPkCanonical) {
+      try {
+        makerAddress = new kaspaWasm.XOnlyPublicKey(makerPkCanonical).toAddress(settleNetwork).toString();
+      } catch (e) {
+        console.warn(`[pool-settler] maker pk→addr fail market=${market.id.slice(0,12)} maker_pk=${String(makerPkCanonical).slice(0,8)}: ${e.message}`);
+      }
+    }
+    if (!makerAddress) makerAddress = makerRow.address || null;  // legacy fallback (老市场无 maker_pk + 非 sentinel)
+    if (!makerAddress) {
+      console.warn(`[pool-settler] dispatchPhase2 market=${market.id.slice(0,12)} no maker address (maker_pk + sentinel + relay all null) — abort`);
+      return;
+    }
+
     // 3. Build participants array (= maker + bettors), use pure function computePoolPayouts.
     const participants = [
-      { addr: makerRow.address, stake: makerStake, direction: makerDirection, isMaker: true },
+      { addr: makerAddress, stake: makerStake, direction: makerDirection, isMaker: true },
       ...sides.map((s, i) => ({ addr: sideAddrs[i], stake: parseInt(s.stake_amount, 10) || 0, direction: s.direction, isMaker: false })),
     ];
 
+    // min-pot 选项 A 落地 (Owner 2026-06-01 终裁, docs/2026-06-01-min-pot-thin-market-refund-decision.md):
+    // displayName=THIN-MARKET PRE-CHECK. 显式公式 boolean too_small, 禁 string-match throw catch.
+    //
+    // 真根因 (ccvr9 实证): 输方池 < N×oracleBondAmount + broker_floor + KIP-9 margin → settle TX
+    // payout outputs 小 → Σ(1/output_value) 爆 KIP-9 storage mass cap → mempool reject. v0.6+v0.7
+    // 都 anonymous-pool 5-committee 模式同 risk.
+    //
+    // Threshold = 5 × oracleBondAmount + MIN_BROKER_FEE_SOMPI + STORAGE_MASS_MARGIN.
+    //   = 5 × 1 KAS + 0.05 KAS + 0.01 KAS = ~5.06 KAS losing-side floor for default 1 KAS bond.
+    //
+    // Cancel path (= N+1 退款 by Owner+J1 r245 LOCK):
+    //   1. status='cancelled' + chain_event 'market_cancelled' (= audit trail)
+    //   2. dispatchRefund(maker) → spine refund_maker_unjoined (v0.7 mass-aware byte-size 已 ship)
+    //   3. emit 'bettor_refund_available' per bettor (= 通知 bettor client 自家 claim PoolSide
+    //      entry 2 refund_market_cancelled, settler 不 sign because no bettor privkey)
+    const isAnonymousPool0 = market.protocol_version === 'v0.6' || market.protocol_version === 'v0.7';
+    if (isAnonymousPool0) {
+      const losingDirection = 1 - decision.winner;
+      const losingPool = participants
+        .filter(p => p.direction === losingDirection)
+        .reduce((s, p) => s + p.stake, 0);
+      const oracleBondAmount = parseInt(market.oracle_bond_amount, 10) || 100_000_000;
+      const N_COMMITTEE = 5;
+      const STORAGE_MASS_MARGIN = 1_000_000;  // 0.01 KAS headroom for KIP-9 numerical safety
+      const thinThreshold = N_COMMITTEE * oracleBondAmount + MIN_BROKER_FEE_SOMPI + STORAGE_MASS_MARGIN;
+      if (losingPool < thinThreshold) {
+        console.log(`[pool-settler] dispatchPhase2 market=${market.id.slice(0,12)} THIN MARKET losing_pool=${losingPool} < threshold=${thinThreshold} (5×bond=${5*oracleBondAmount} + broker=${MIN_BROKER_FEE_SOMPI} + margin=${STORAGE_MASS_MARGIN}) → cancel + N+1 refund`);
+        // 1. Status transition + audit event
+        sqlite.prepare('UPDATE pool_markets SET protocol_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+          .run('cancelled', market.id);
+        const cancelEventPayload = JSON.stringify({
+          market_id: market.id,
+          reason: 'thin_losing_side',
+          losing_pool: losingPool,
+          threshold: thinThreshold,
+          losing_direction: losingDirection,
+          winner: decision.winner,
+          cancelled_at: new Date().toISOString(),
+        });
+        sqlite.prepare(`
+          INSERT INTO chain_events (id, txid, event_type, from_address, to_address, payload, observed_by, observed_at)
+          VALUES (lower(hex(randomblob(16))), ?, 'market_cancelled', NULL, NULL, ?, 'pool-settler', CURRENT_TIMESTAMP)
+        `).run(`market_cancelled:${market.id.slice(0,12)}:${Date.now()}`, cancelEventPayload);
+        // 2. Auto maker refund (= spine refund_maker_unjoined via existing dispatchRefund path)
+        await dispatchRefund(market, {
+          action: 'refund',
+          reason: `thin-market cancel: losing_pool=${losingPool} < threshold=${thinThreshold}`,
+        });
+        // 3. Per-bettor cancel events for client-side self-claim. settler can't sign because no privkey.
+        for (const side of sides) {
+          const bettorRefundPayload = JSON.stringify({
+            market_id: market.id,
+            bettor_pk: side.bettor_pk,
+            side_p2sh: side.side_p2sh,
+            side_lock_tx: side.side_lock_tx,
+            stake: side.stake_amount,
+            direction: side.direction,
+            reason: 'market_cancelled_thin_losing_side',
+            claim_entry: 'PoolSide_v07 entry 2 refund_market_cancelled',
+          });
+          sqlite.prepare(`
+            INSERT INTO chain_events (id, txid, event_type, from_address, to_address, payload, observed_by, observed_at)
+            VALUES (lower(hex(randomblob(16))), ?, 'bettor_refund_available', NULL, NULL, ?, 'pool-settler', CURRENT_TIMESTAMP)
+          `).run(`bettor_refund:${market.id.slice(0,12)}:${String(side.bettor_pk).slice(0,12)}:${Date.now()}`, bettorRefundPayload);
+        }
+        console.log(`[pool-settler] dispatchPhase2 market=${market.id.slice(0,12)} CANCELLED + maker_refund dispatched + ${sides.length} bettor_refund_available events emitted`);
+        return;
+      }
+    }
+
     let payouts;
+    // A批2 动态费 (Bettor r402 + r404 catch refinement): replace static Math.max(fee, 5_000_000) with
+    // byte-mass-aware compute. Bettor r404 实证: qoyqv 实 mass=17136, 我 v1 估 10795 = 低估 1.6x
+    // 因 spine scriptSig 实际 ~4KB (5sig+5pk+40siblings+redeem+selector OPs) NOT 2.5KB. 修正估算 +
+    // 多 multiplier 安全余量.
+    //
+    // Spine scriptSig 拆解 (PoolSpine_v07 settle_aggregate):
+    //   5 sigs push-encoded (66B each) = 330
+    //   5 committee_pks push (33B each) = 165
+    //   5 committee_indices push (small int ~2B each) = 10
+    //   40 merkle siblings push (33B each) = 1320
+    //   spine_redeem ~2100B (PoolSpine_v07 含 sharding)
+    //   selector OP_0 + winner OP + sidesMerkleRoot push (~36B)
+    //   v0.7 sharding extras (globalYes/No/commit_v2 ~60B)
+    //   subtotal ~4021B (= Bettor r404 confirmed shape)
+    let metaForFee = {};
+    try { metaForFee = JSON.parse(market.metadata || '{}'); } catch {}
+    const spineRedeemHex = metaForFee.spine_redeem_script_hex || '';
+    const spineRedeemSize = spineRedeemHex ? Buffer.from(spineRedeemHex, 'hex').length : 2100;
+    const SPINE_SIGS_PKS = 66 * 5 + 33 * 5;       // 5 sigs + 5 committee PKs push-encoded
+    const SPINE_INDICES = 2 * 5;                  // 5 small int indices
+    const SPINE_SIBLINGS = 33 * 40;                // 5 committee × 8 depth merkle siblings
+    const SPINE_SELECTOR_WINNER_MERKLE = 36;       // OP_0 + winner OP + sidesMerkleRoot push
+    const SPINE_V07_SHARDING = market.protocol_version === 'v0.7' ? 60 : 0;
+    const SPINE_SCRIPTSIG_OVERHEAD = SPINE_SIGS_PKS + SPINE_INDICES + SPINE_SIBLINGS + SPINE_SELECTOR_WINNER_MERKLE + SPINE_V07_SHARDING;
+    const spineInputSize = 45 + SPINE_SCRIPTSIG_OVERHEAD + spineRedeemSize;
+    let sidesInputSize = 0;
+    for (const s of sides) {
+      const sideRedeemSize = s.side_redeem_script_hex ? Buffer.from(s.side_redeem_script_hex, 'hex').length : 2000;
+      sidesInputSize += 45 + 4 + sideRedeemSize;  // input overhead + OP_0 selector + redeem (no PUSHDATA2 prefix needed for ≤520B but ~2KB → push prefix 3B included in 4)
+    }
+    const outputsCount = 1 + 5 + participants.filter(p => p.direction === decision.winner).length;  // broker + 5 committee + winners
+    const outputsSize = outputsCount * 50;
+    const txByteEstimate = spineInputSize + sidesInputSize + outputsSize + 80;
+    // Bettor r404 catch: bump multiplier 2.5 → 3 for safety margin (= cover storage_mass component
+    // KIP-9 + estimation slack). Real qoyqv 17136/6545 ≈ 2.62 ratio + storage_mass for thin markets
+    // dominates → 3 covers both compute + storage portions.
+    const MASS_MULTIPLIER_X10 = 30;
+    const computeMassEst = Math.ceil(txByteEstimate * MASS_MULTIPLIER_X10 / 10);
+    const SETTLE_FEE_MIN = 2_000_000;  // 0.02 KAS floor (= settle 大 TX 起步 + Bettor r404 安全余量)
+    const SETTLE_FEE_MAX = MAX_TX_FEE_SOMPI;  // #31 ⑤b single-source (was local 1e8); 1 KAS cap defense
+    // J1tn r303 P0-#1 (Bettor r298+r299+r300 钦定 + r346/r366b helper refactor): KIP-9 storage_mass
+    // aware dynamic fee. ko421 实证: brokerOutput 5M sompi → mass=1e12/5e6=200K 单笔吃 fee budget 10×.
+    // 公式抽 lib/kip9-mass.mjs (= 5 site 不再各抄).
+    const dynamicMinBrokerFee = computeDynamicMinBrokerFee(computeMassEst);
+    const storageMassBroker = estimateOutputStorageMass(dynamicMinBrokerFee);
+    const totalMassEst = computeMassEst + storageMassBroker;
+    let dynamicFee = Math.max(SETTLE_FEE_MIN, totalMassEst * 110);
+    if (dynamicFee > SETTLE_FEE_MAX) dynamicFee = SETTLE_FEE_MAX;
+    // legacy massEst alias (= some downstream code reads `massEst`, e.g. estimateStorageMass logging).
+    const massEst = totalMassEst;
+    console.log(`[pool-settler] settle mass-aware fee market=${market.id.slice(0,12)} txBytes≈${txByteEstimate} computeMass≈${computeMassEst} storageMass(broker)≈${storageMassBroker} totalMass≈${totalMassEst} fee=${dynamicFee} dynamicMinBrokerFee=${dynamicMinBrokerFee} (sides=${sides.length}, winners=${outputsCount-6}, spineRedeem=${spineRedeemSize}B)`);
     try {
+      const baseMinerFee = parseInt(market.miner_fee, 10) || 20_000;
+      // DoD #1.2 sweep: v0.6 + v0.7 都是 anonymous-pool 5-committee 模式. v0.5 legacy 路径 keep
+      // baseMinerFee 不动 (= 改 v0.6/v0.7 为 byte-mass dynamicFee, v0.5 不在 scope).
+      const isAnonymousPool = market.protocol_version === 'v0.6' || market.protocol_version === 'v0.7';
+      const minerFeeFinal = isAnonymousPool ? dynamicFee : baseMinerFee;
       payouts = computePoolPayouts({
         participants,
         winner: decision.winner,
         brokerFeePct: parseInt(market.broker_fee_pct, 10) || 0,
+        oracleFeePct: parseInt(market.oracle_fee_pct, 10) || 100,  // Owner 终裁 ⑤: 1% (= 0.5%均分+0.5%质押)
+        makerFeePct: parseInt(market.maker_fee_pct, 10) || 10,     // Owner 终裁 ⑤: 0.1% (新 fee channel, fee-on-total)
         oracleBond: parseInt(market.oracle_bond_amount, 10) || 0,
-        minerFee: parseInt(market.miner_fee, 10) || 20_000,
+        minerFee: minerFeeFinal,
         unanimous: decision.unanimous,
         silentOracleIndex: decision.silentOracleIndex ?? null,
+        oracleCount: isAnonymousPool ? 5 : 3,
+        committeeMode: isAnonymousPool,
+        // J1tn r303 P0-#1 (Bettor r300 动态): pass dynamicMinBrokerFee = KIP-9 storage-mass-aware
+        // 自平衡 broker floor (= 让 broker output 大到 storage_mass(broker) ≈ compute_mass 不爆 fee
+        // budget). 老 static 5M 焊死 → ko421 实证 fee 不够覆盖 KIP-9 mempool floor.
+        minBrokerFee: dynamicMinBrokerFee,
       });
     } catch (e) {
+      // Bettor r291/r293 Owner钦定 auto-refund: 0-bet markets fail computePoolPayouts via
+      // multiple strings: 'no winners' (= side empty after vote winner determined), OR
+      // 'losing pool (0) less than minerFee' (= 0 sides bet at all), OR
+      // 'less than broker_fee'. All mean 0-economy → route to dispatchRefund.
+      const msg = e.message || '';
+      const is0Bet = msg.includes('no winners')
+        || msg.includes('losing pool (0)')
+        || msg.includes('less than minerFee')
+        || msg.includes('less than broker_fee');
+      if (is0Bet) {
+        console.log(`[pool-settler] dispatchPhase2 market=${market.id.slice(0,12)} 0-bet (${msg.slice(0,80)}) → route to dispatchRefund`);
+        await dispatchRefund(market, { action: 'refund', reason: '0-bet market, refund_maker_unjoined' });
+        return;
+      }
       console.warn(`[pool-settler] dispatchPhase2 market=${market.id.slice(0,12)} computePoolPayouts fail: ${e.message}`);
       return;
     }
@@ -477,42 +1852,69 @@ export async function dispatchPhase2(market, decision) {
     // Sub 5b (Oracle v0.3 J1 #21 critical gap fix): NWT sub 4 PoolSpine ctor 12 + outputs[last 3]
     // 合并 bond + oracleFee/3 per oracle (= 3 oracle outputs each get bond_return + oracleFee/3 share).
     // outputs.length 不变 (= PoolSpine 3 oracle), 但 amount 含 oracleFee share.
-    const oracleFeePct = parseInt(market.oracle_fee_pct, 10) || 100;  // default 1% per Bettor r17 truth matrix
-    const losingPoolForOracleFee = Math.max(0, parseInt(market.maker_stake_amount, 10) || 0); // approx; per NWT spec deviated
-    // Per Bettor r17 truth matrix: oracleFee = oracleFeePct × losingPool (= same source as brokerFee).
-    // computePoolPayouts didn't compute this; sub 5b adds explicitly.
-    const totalLoserStake = participants.filter(p => p.direction !== decision.winner).reduce((s, p) => s + p.stake, 0);
-    const minerFeeSompi = parseInt(market.miner_fee, 10) || 20_000;
-    const oracleLosingPool = Math.max(0, totalLoserStake - minerFeeSompi);
-    const oracleFeeTotal = Math.floor(oracleLosingPool * oracleFeePct / 10000);
-    const oracleFeePerSig = Math.floor(oracleFeeTotal / 3);  // 3 oracle each gets oracleFeeTotal/3
-    // Spec note: oracleFeeTotal % 3 余数 (= 0-2 sompi) 留 brokerFee 端 (= 等同 W3 余数 maker pattern reuse).
-    // Per J1 #4 fix: oracleFee deducted from broker pool? No — 跟 Bettor r17 truth matrix "brokerFeePct × losingPool" + "oracleFeePct × losingPool" 是 2 个独立 channel, 不 carved from broker.
-    // Settler 必从 distributablePool 进一步扣除 oracleFeeTotal (= winner pool 减小). 这是 NWT sub 4 PoolSpine 改的 semantic.
+    // === fee-on-total (Owner 终裁 2026-06-13): broker/oracle/maker fee 全来自 computePoolPayouts
+    // (fee-on-totalPool, oracleFeeTotal 已从 distributable 减出). dispatchPhase2 只 split oracleFeeTotal
+    // 给委员 + 建 output。winner 用 payouts.amount 直接 (NO 旧的再扣 oracleFee = 去双扣 bug)。
+    const baseMinerFeeSompi = parseInt(market.miner_fee, 10) || 20_000;
+    const isAnonymousPoolOutputs = market.protocol_version === 'v0.6' || market.protocol_version === 'v0.7';
+    const minerFeeSompi = isAnonymousPoolOutputs ? dynamicFee : baseMinerFeeSompi;  // settle TX fee
+    const oracleFeeDivisor = isAnonymousPoolOutputs ? 5 : 3;
+    // oracle 1% split: 0.5%均分 (uniform/N) + 0.5%质押 (committee enrollment stake-weighted, NWT①).
+    // 全 BigInt (NWT④/D7 教训). dust → committee[0] (canonical 采样序, 单一确定 absorber).
+    const oracleFeeTotalBI = BigInt(payouts.oracleFeeTotal);
+    const uniformHalfBI = oracleFeeTotalBI / 2n;            // 0.5%均分 half
+    const stakeHalfBI = oracleFeeTotalBI - uniformHalfBI;   // 0.5%质押 half (= remainder of /2, no leak)
+    const uniformPerSigBI = uniformHalfBI / BigInt(oracleFeeDivisor);
+    const committeeStakesBI = getCommitteeStakesCanonical(market.id, oracleFeeDivisor);
+    const totalCommStakeBI = committeeStakesBI.reduce((s, x) => s + x, 0n);
+    const perCommFeeBI = committeeStakesBI.map(st => uniformPerSigBI
+      + (totalCommStakeBI > 0n ? (stakeHalfBI * st) / totalCommStakeBI : 0n));
+    const oracleDustBI = oracleFeeTotalBI - perCommFeeBI.reduce((s, x) => s + x, 0n);
+    if (perCommFeeBI.length) perCommFeeBI[0] += oracleDustBI;
 
     const outputs = [];
+    // [0] broker fee (P2PK brokerLock; == maker 若 maker 自任 broker = create-time ctor brokerPk=makerPk).
     if (payouts.brokerFee > 0) {
-      outputs.push({ address: brokerRow.address, amountSompi: payouts.brokerFee.toString() });
+      outputs.push({ address: brokerAddress, amountSompi: payouts.brokerFee.toString() });
     }
-    // Winners reduced by oracleFeeTotal share — proportional to original share
-    // (= 等同 W2 spec "distributablePool = losingPool − brokerFee" 加 minus oracleFeeTotal)
-    let winnerOracleFeeDeducted = 0;
+    // v0.6/v0.7 PoolSpine settle layout: [0]=broker, [1..5]=committee(>=oracleBond each), [6..]=winners
+    // + makerFee (SS require outputs.length>=6, [6..] 不约束 → makerFee 自由放 [6+], J2 r845 查 SS L253-277).
+    // committee output = bond return + per-committee oracle fee (0.5%均分 + 0.5%质押 share).
+    if (isAnonymousPoolOutputs) {
+      for (const r of payouts.oracleBondReturns) {
+        const merged = BigInt(r.amount) + (perCommFeeBI[r.oracleIndex] ?? 0n);
+        outputs.push({ address: oracleRows[r.oracleIndex].address, amountSompi: merged.toString() });
+      }
+    }
+    // [6..] winners — payouts.amount 直接用 (fee-on-total: 已净 broker/oracle/maker, NO 再扣 = 去双扣 bug).
     for (const w of payouts.winnerPayouts) {
-      // Pro-rata oracleFee deduction (= winner share scales linearly with stake)
-      const winnerStake = participants[w.participantIndex].stake;
-      const totalWinnerStake = payouts.winnerPayouts.reduce((s, p) => s + participants[p.participantIndex].stake, 0);
-      const oracleFeeShareForWinner = totalWinnerStake > 0 ? Math.floor(oracleFeeTotal * winnerStake / totalWinnerStake) : 0;
-      const adjustedAmount = Math.max(0, w.amount - oracleFeeShareForWinner);
-      winnerOracleFeeDeducted += oracleFeeShareForWinner;
-      outputs.push({ address: participants[w.participantIndex].addr, amountSompi: adjustedAmount.toString() });
+      outputs.push({ address: participants[w.participantIndex].addr, amountSompi: w.amount.toString() });
+    }
+    // makerFee 0.1% output (Owner 终裁新增, → maker pk-derive addr). [6+] SS 不约束. makerAddress
+    // = canonical pk-derive (上, 非 makerRow.address node-local 查 = NWT② BREAKER 修 一修两治).
+    if (payouts.makerFee > 0) {
+      outputs.push({ address: makerAddress, amountSompi: payouts.makerFee.toString() });
     }
     if (payouts.makerExtraOutput) {
-      outputs.push({ address: makerRow.address, amountSompi: payouts.makerExtraOutput.toString() });
+      outputs.push({ address: makerAddress, amountSompi: payouts.makerExtraOutput.toString() });
     }
-    // Oracle bond returns + oracleFee/3 merged per output (= NWT sub 4 PoolSpine spec)
-    for (const r of payouts.oracleBondReturns) {
-      const mergedAmount = r.amount + oracleFeePerSig;
-      outputs.push({ address: oracleRows[r.oracleIndex].address, amountSompi: mergedAmount.toString() });
+    if (!isAnonymousPoolOutputs) {
+      // v0.5 legacy layout: bond returns (+ per-committee oracle fee) at end
+      for (const r of payouts.oracleBondReturns) {
+        const merged = BigInt(r.amount) + (perCommFeeBI[r.oracleIndex] ?? 0n);
+        outputs.push({ address: oracleRows[r.oracleIndex].address, amountSompi: merged.toString() });
+      }
+    }
+
+    // ⑥ 守恒 assert (NWT⑤: post-construction on 实 TX outputs, 抓构造 bug 非只 pre-compute).
+    // committeeMode bonds pool-funded (reserved from totalPool) → Σoutputs + minerFee == totalPool 逐 sompi.
+    // minerFeeSompi == computePoolPayouts 用的 minerFeeFinal (committeeMode 都 = dynamicFee). 不闭 = abort 防泄.
+    if (isAnonymousPoolOutputs) {
+      const outSumBI = outputs.reduce((s, o) => s + BigInt(o.amountSompi), 0n);
+      const expectBI = BigInt(payouts._totalPool) - BigInt(minerFeeSompi);
+      if (outSumBI !== expectBI) {
+        throw new Error(`⑥ 守恒 fail (fee-on-total): Σoutputs(${outSumBI}) != totalPool−minerFee(${expectBI}) [total=${payouts._totalPool} miner=${minerFeeSompi}] — settle aborted (sompi 泄漏防护, NWT⑤ post-construction)`);
+      }
     }
 
     // 5. Build input outpoints. Spine P2SH has MULTIPLE UTXOs: 1 maker stake (spine_lock_tx) +
@@ -545,8 +1947,84 @@ export async function dispatchPhase2(market, decision) {
     ];
     const outputValues = outputs.map(o => parseInt(o.amountSompi, 10) || 0);
     const estMass = estimateStorageMass(inputValues, outputValues);
+    // #31 ③ TOP-LEVEL v0.8 routing (J1-ratified 2026-06-15: route by protocol_version==v0.8, NOT estMass-gated —
+    //   estMass only decides aggregate ≤cap vs chunk-chain >cap INSIDE v0.8). v0.8 funds lock the v08 P2SH; routing
+    //   v0.8 through the v07 path below would build a v07-P2SH settle ≠ v08 P2SH = unspendable/stuck (NWT) + no
+    //   payoutRoot/v08 witness (KANet-UI e2e void). So v0.8 settles HERE regardless of estMass.
+    //   winners = winning-side (computePoolPayouts already filters), CANONICAL order = [maker@idx0 if winning, then
+    //   winning bettors by pool merkle_index ASC]. settle sides query (L1565) ALREADY ORDER BY merkle_index ASC +
+    //   participants = [maker idx0, ...sides merkle_index ASC] → winners[0] = min merkle_index = deterministic dust
+    //   absorber (L1475). The JS .sort below is REDUNDANT belt-and-suspenders (no SQL change; legacy refund query
+    //   L209 keeps ORDER BY stake_amount). pk = maker_pk / sides[].bettor_pk x-only (NOT addr). amount =
+    //   computePoolPayouts parimutuel EXACT sompi (w.amountSompi BigInt-string, 零 float = R1 承重墙). re-index
+    //   0..K-1 = array index = SS climb leaf. computeSettleChunks decides route=aggregate (single settle_aggregate
+    //   entry1) vs route=chunk (change-chain entry0).
+    if (market.protocol_version === 'v0.8') {
+      const chunkWinners = payouts.winnerPayouts.map(w => {
+        const isMaker = w.participantIndex === 0 && participants[0]?.isMaker;
+        const sortKey = isMaker ? -1 : (parseInt(sides[w.participantIndex - 1]?.merkle_index, 10));
+        const pk = isMaker ? makerPk : sides[w.participantIndex - 1]?.bettor_pk;
+        return { pk, amount: w.amountSompi, _sortKey: sortKey };  // EXACT sompi string (NOT Number — R1 承重墙)
+      }).sort((a, b) => a._sortKey - b._sortKey)         // canonical: maker(-1) first, then merkle_index ASC
+        .map(({ pk, amount }) => ({ pk, amount }));        // continuous re-index 0..K-1 (array idx = leaf)
+      const payoutRootHex = computePayoutRoot(chunkWinners).toString('hex');
+      const fixedOuts = outputs.slice(0, 6).map(o => ({ value: parseInt(o.amountSompi, 10) || 0 }));
+      const poolValueSompi = inputValues.reduce((s, v) => s + v, 0);
+      const plan = computeSettleChunks(chunkWinners, fixedOuts, poolValueSompi, payoutRootHex);
+      console.log(`[pool-settler] dispatchPhase2 v0.8 market=${market.id.slice(0,12)} estMass=${estMass} route=${plan.route} numChunks=${plan.numChunks} segLens=[${plan.chunks.map(c=>c.seg_hi-c.seg_lo).join(',')}] payoutRoot=${payoutRootHex.slice(0,16)} winners=${chunkWinners.length}`);
+      // ③ dispatch (aggregate: single settle_aggregate TX via relay; chunk: change-chain loop + resume from
+      //   unspent-tip) + ④ relay v08 scriptSig: next pieces. No live v0.8 market until ①-create + ③④ + e2e.
+      throw new Error(`#31 v0.8 settle routed (route=${plan.route} chunks=${plan.numChunks}) — ③ dispatch + ④ relay scriptSig not yet wired`);
+    }
     if (estMass > STORAGE_MASS_SAFE_THRESHOLD) {
-      console.warn(`[pool-settler] dispatchPhase2 market=${market.id.slice(0,12)} estimated storage mass ${estMass} > ${STORAGE_MASS_SAFE_THRESHOLD} (cap ${STORAGE_MASS_CAP}) — pot too small, marking needs_larger_pot`);
+      // min-pot 选项 A (Bettor r337 实证 unmfw 50 KAS 输方仍触): storage-mass cap 是 KIP-9
+      // pool-dependent (≈ 1/pool); 单纯 5×oracleBond pre-check 不充分. 真根因 = 任何
+      // payout outputs 触 storage_mass > cap → 该走 cancel-refund 不是 needs_larger_pot
+      // 永久标记 (= 钱永远卡 verifying 状态, 用户无法取). 改: 触 storage-mass cap → 跟
+      // pre-check 同 cancel-refund 路径.
+      const isAnonymousPoolCancel = market.protocol_version === 'v0.6' || market.protocol_version === 'v0.7';
+      if (isAnonymousPoolCancel) {
+        console.warn(`[pool-settler] dispatchPhase2 market=${market.id.slice(0,12)} estimated storage mass ${estMass} > ${STORAGE_MASS_SAFE_THRESHOLD} (cap ${STORAGE_MASS_CAP}) → THIN-MARKET cancel-refund (= KIP-9 storage-mass post-build floor)`);
+        sqlite.prepare('UPDATE pool_markets SET protocol_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+          .run('cancelled', market.id);
+        const cancelEventPayload = JSON.stringify({
+          market_id: market.id,
+          reason: 'storage_mass_exceed_cap',
+          est_storage_mass: estMass,
+          cap: STORAGE_MASS_CAP,
+          threshold: STORAGE_MASS_SAFE_THRESHOLD,
+          winner: decision.winner,
+          cancelled_at: new Date().toISOString(),
+        });
+        sqlite.prepare(`
+          INSERT INTO chain_events (id, txid, event_type, from_address, to_address, payload, observed_by, observed_at)
+          VALUES (lower(hex(randomblob(16))), ?, 'market_cancelled', NULL, NULL, ?, 'pool-settler', CURRENT_TIMESTAMP)
+        `).run(`market_cancelled:${market.id.slice(0,12)}:${Date.now()}`, cancelEventPayload);
+        await dispatchRefund(market, {
+          action: 'refund',
+          reason: `thin-market cancel: est_storage_mass=${estMass} > cap=${STORAGE_MASS_CAP}`,
+        });
+        for (const side of sides) {
+          const bettorRefundPayload = JSON.stringify({
+            market_id: market.id,
+            bettor_pk: side.bettor_pk,
+            side_p2sh: side.side_p2sh,
+            side_lock_tx: side.side_lock_tx,
+            stake: side.stake_amount,
+            direction: side.direction,
+            reason: 'market_cancelled_storage_mass_exceed_cap',
+            claim_entry: 'PoolSide_v07 entry 2 refund_market_cancelled',
+          });
+          sqlite.prepare(`
+            INSERT INTO chain_events (id, txid, event_type, from_address, to_address, payload, observed_by, observed_at)
+            VALUES (lower(hex(randomblob(16))), ?, 'bettor_refund_available', NULL, NULL, ?, 'pool-settler', CURRENT_TIMESTAMP)
+          `).run(`bettor_refund:${market.id.slice(0,12)}:${String(side.bettor_pk).slice(0,12)}:${Date.now()}`, bettorRefundPayload);
+        }
+        console.log(`[pool-settler] dispatchPhase2 market=${market.id.slice(0,12)} CANCELLED storage-mass + maker_refund dispatched + ${sides.length} bettor_refund_available events emitted`);
+        return;
+      }
+      // v0.5 legacy 仍 mark needs_larger_pot (= 不变 legacy behavior, 待 owner spec).
+      console.warn(`[pool-settler] dispatchPhase2 market=${market.id.slice(0,12)} estimated storage mass ${estMass} > ${STORAGE_MASS_SAFE_THRESHOLD} (cap ${STORAGE_MASS_CAP}) — v0.5 legacy mark needs_larger_pot`);
       let prevM = {};
       try { prevM = JSON.parse(market.metadata || '{}'); } catch {}
       sqlite.prepare('UPDATE pool_markets SET metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
@@ -559,7 +2037,14 @@ export async function dispatchPhase2(market, decision) {
     //    Phase 3 bug 5: per-input sigOpCount — spine inputs have 3 checkSig, sides 0.
     //    Preimage sigOpCount MUST match final settle TX (= Kaspa sighash includes sig_op_counts_hash).
     const p2shAddresses = [market.spine_p2sh, ...sides.map(s => s.side_p2sh)];
-    const sigOpCounts = requiredInputOutpoints.map((_, i) => (i < spineInputCount ? 3 : 0));
+    // Bettor r271/r275 layer-16/18: budget formula 100k×N+9999. v0.6 used 510021,
+    // sigOpCount=5 budget=509999 → 22 short. Bump 8 → 809999 (~59% margin).
+    // sigOpCount IS in sighash → reset/re-collect on change.
+    // DoD #1.2 sweep: v0.7 same as v0.6 sigOpCount budget (= same 5 committee sigs + selector args).
+    // v0.7 sharding adds 3 extra args (globalYes/No/commit_v2) but those are byte[]/int pushes,
+    // not checkSig opcodes — sigOpCount unchanged at 8.
+    const spineSigOpCount = (market.protocol_version === 'v0.6' || market.protocol_version === 'v0.7') ? 8 : 3;
+    const sigOpCounts = requiredInputOutpoints.map((_, i) => (i < spineInputCount ? spineSigOpCount : 0));
     const preimage = await sendCommandAsync(market.maker_relay_id, {
       type: 'prediction_settle_build_preimage',
       p2sh_address: p2shAddresses,  // array — multi-p2sh extension Phase 2a-1
@@ -588,14 +2073,79 @@ export async function dispatchPhase2(market, decision) {
       phase2_input_count: requiredInputOutpoints.length,
       phase2_spine_input_count: spineInputCount,  // Phase 3 bug 4: spine has 1 maker + N oracle bond UTXOs
       phase2_output_count: outputs.length,
+      // J2-tn (Bettor r617 ②): 记录【实际 broker fee】= payouts.brokerFee (losingPool×fee_pct, L1364-1366)。
+      // earnings 端点此前估 maker_stake×fee_pct (≠ 实际, gz5g7 估 2.0 vs 实落 6.73 KAS) → earnings 改读
+      // 这个实际值 (settled 市场)。phase2_outputs[0] 也是 broker fee output 但读 order 脆, 显式字段更稳。
+      phase2_broker_fee_sompi: payouts.brokerFee,
+      // J2-tn Lane① (Bettor r638 统一'settler 记实际值, display 读'): oracle reward + maker payout 同 broker
+      // fee 模式记【实际落链值】→ 三角色 display 统一读实际非估算 (oracle_history.reward_amount / maker 视图)。
+      //  - oracle reward = oracleFeeTotal/N (每签名委员平均 fee)。J2-tn fix: 旧引用 oracleFeePerSig 变量
+      //    在 fee-on-total 重构后已不存在 (oracle fee 改 perCommFeeBI 数组 stake-weighted, L1818-1827) →
+      //    ReferenceError 阻所有 v0.7 dispatchPhase2。改自包含 oracleFeeTotal/委员数 (= 注释本意, 聚合守恒:
+      //    avg×N≈oracleFeeTotal; uniform 半精确/stake 半近似, 消费侧 L2864 均匀写 = 显示层近似可接受)。
+      phase2_oracle_reward_per_sig: Math.floor(Number(payouts.oracleFeeTotal) / ((market.protocol_version === 'v0.6' || market.protocol_version === 'v0.7') ? 5 : 3)),
+      phase2_maker_payout_sompi: outputs.filter(o => o.address === makerRow.address).reduce((s, o) => s + (parseInt(o.amountSompi, 10) || 0), 0),
       phase2_outputs: outputs,  // Phase 2c step 2c: full outputs array for collecting_sigs handler IPC assembly
     };
-    sqlite.prepare('UPDATE pool_markets SET metadata = ?, protocol_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
-      .run(JSON.stringify(newMeta), 'collecting_sigs', market.id);
+    // J1 r221 + Bettor r218 ③ Layer-12: v0.6 settle_aggregate needs committee data — fetch
+    // 5 committee pks + their indices in pool_snapshots + 5×8 merkle proofs + committee_pk_hash,
+    // persist into meta so relay can assemble scriptSig per PoolSpine_v06.sil entry 0 spec.
+    if (market.protocol_version === 'v0.6' || market.protocol_version === 'v0.7') {
+      try {
+        const committeeRow = sqlite.prepare('SELECT committee_pks, committee_pk_hash FROM pool_committee WHERE market_id = ?').get(market.id);
+        if (!committeeRow) throw new Error('pool_committee row missing');
+        const committee_pks = JSON.parse(committeeRow.committee_pks);  // 5-element array, in selection order
+        if (!Array.isArray(committee_pks) || committee_pks.length !== 5) throw new Error('committee_pks must be 5');
+        const { loadPoolSnapshot } = await import('./pool-market-settler-v06.mjs');
+        const snapshot = loadPoolSnapshot(market.id);
+        const { buildPoolMerkleTree, getPoolMerkleProof } = await import('./pool-merkle-v06.mjs');
+        // Bettor r221 hardening: buildPoolMerkleTree internally sorts. Use tree.sortedPks
+        // for index resolution to guarantee alignment regardless of snapshot storage order.
+        const tree = buildPoolMerkleTree(snapshot.pool_pks.map(p => String(p).toLowerCase()));
+        const sortedPks = tree.sortedPks;
+        const committee_indices = committee_pks.map(pk => {
+          const i = sortedPks.indexOf(String(pk).toLowerCase());
+          if (i < 0) throw new Error(`committee pk ${pk.slice(0,12)} not in pool snapshot`);
+          return i;
+        });
+        const committee_merkle_proofs = committee_indices.map(idx =>
+          getPoolMerkleProof(tree, idx).map(buf => buf.toString('hex'))
+        );  // 5 arrays of 8 hex strings each = 40 sibling hashes total
+        newMeta.phase2_committee_pks = committee_pks;
+        newMeta.phase2_committee_indices = committee_indices;
+        newMeta.phase2_committee_merkle_proofs = committee_merkle_proofs;
+        newMeta.phase2_committee_pk_hash = committeeRow.committee_pk_hash;
+        console.log(`[pool-settler] v0.6 committee data baked market=${market.id.slice(0,12)} indices=[${committee_indices.join(',')}]`);
+      } catch (e) {
+        console.error(`[pool-settler] dispatchPhase2 v0.6 committee data fail market=${market.id.slice(0,12)}: ${e.message}`);
+        return;
+      }
+    }
+
+    // Bettor r353 — v0.7 settle_aggregate sharding globals (qoyqv 实证 'pick at invalid location'):
+    // PoolSpine_v07.sil settle_aggregate (L103-105) ADDS 3 args between indices and siblings:
+    // globalYesTotal_sompi (int), globalNoTotal_sompi (int), global_commit_id (byte[32]).
+    // SS require()s them (L298-315): globalYes/No >= 0, sum >= 1e10, losingPool>=5×bond.
+    // v0.6 SS has NO these args (46f8a settled without) → bake ONLY for v0.7. Missing them =
+    // scriptSig short 3 stack items → all sibling picks off-by-3 → 'pick at invalid location'.
+    // direction 0=YES 1=NO (same convention as thin-check losingDirection above).
+    if (market.protocol_version === 'v0.7') {
+      const globalYes = participants.filter(p => p.direction === 0).reduce((s, p) => s + p.stake, 0);
+      const globalNo = participants.filter(p => p.direction === 1).reduce((s, p) => s + p.stake, 0);
+      // global_commit_id: SS L322-329 blake2b commit-check is INACTIVE (silverc int-to-byte
+      // unconfirmed) → field is layout-only (attested via committee sighash, not require()'d).
+      // Deterministic placeholder until J1 activates the cross-shard commit check.
+      const crypto = await import('crypto');
+      const globalCommitId = crypto.createHash('sha256').update(market.id).digest('hex');
+      newMeta.phase2_global_yes_sompi = globalYes;
+      newMeta.phase2_global_no_sompi = globalNo;
+      newMeta.phase2_global_commit_id = globalCommitId;
+      console.log(`[pool-settler] v0.7 sharding globals baked market=${market.id.slice(0,12)} globalYes=${globalYes} globalNo=${globalNo}`);
+    }
 
     // 8. DM 3 oracle relays with kanet_pool_oracle_tx_sign_req_v1
     //    (= adapted from 1V1 kanet_oracle_tx_sign_req_v1, uses market_id instead of offer_id)
-    const reqPayload = JSON.stringify({
+    const reqPayloadObj = {
       t: 'kanet_pool_oracle_tx_sign_req_v1',
       market_id: market.id,
       winner: decision.winner,
@@ -603,15 +2153,37 @@ export async function dispatchPhase2(market, decision) {
       silent_oracle_index: decision.silentOracleIndex ?? null,
       input_count: requiredInputOutpoints.length,
       spine_input_count: spineInputCount,
-    });
-    const signingOracles = decision.unanimous
-      ? [0, 1, 2]
-      : [0, 1, 2].filter(i => i !== decision.silentOracleIndex);
-    Promise.allSettled(signingOracles.map(i =>
-      sendCommandAsync(market.maker_relay_id, { type: 'send_message', target: oracleRows[i].address, message: reqPayload })
-    )).catch(() => {});
+      // J2-tn r377 (Bettor 15:12 catch): include phase2_tx_obj 跨节点 — :3300 委员收 sign_req
+      // 不在本地 metadata 找不到 phase2_tx_obj → skip. 嵌入广播 payload (= chunked broadcast
+      // SAFE_CHUNK_BUDGET 450 + sendBroadcastChunked 兜底). 各节点 handler 自取 phase2_tx_obj
+      // → sign_input_for_settle IPC → sign_resp broadcast.
+      phase2_tx_obj: newMeta.phase2_tx_obj,
+    };
+    const reqPayload = JSON.stringify(reqPayloadObj);
+    // Persist payload for handleCollectingSigs re-DM (KANet-UI r387 follow-up).
+    newMeta.phase2_request_payload = reqPayloadObj;
+    sqlite.prepare('UPDATE pool_markets SET metadata = ?, protocol_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+      .run(JSON.stringify(newMeta), 'collecting_sigs', market.id);
 
-    console.log(`[pool-settler] DISPATCHED Phase 2 market=${market.id.slice(0,12)} winner=${decision.winner} unanimous=${decision.unanimous} inputs=${requiredInputOutpoints.length} outputs=${outputs.length} → collecting_sigs`);
+    // KANet-UI r386 Layer-9 KI 49: v0.6 5-oracle path. v0.5 hardcoded [0,1,2] missed 5-committee.
+    // For v0.6 unanimous (5/5 same): all 5 sign. For v0.6 non-unanimous (4/5): exclude silent.
+    const oracleN = oracleRows.length;
+    const allIdx = Array.from({ length: oracleN }, (_, i) => i);
+    const signingOracles = decision.unanimous
+      ? allIdx
+      : allIdx.filter(i => i !== decision.silentOracleIndex);
+    // J2-tn r375 (Bettor 15:04 钦定): sign_req DM 改 broadcast (= 投票 proven pattern).
+    // r377 (Bettor 15:12 catch): reqPayload 含 phase2_tx_obj 大概率 > SAFE_CHUNK_BUDGET →
+    // chunked broadcast (= 同 _broadcastMarketPublished pattern). 各节点 handler 取
+    // pool_market_chunk_v1 reassembly then dispatch sign_req.
+    try {
+      const { sendBroadcastChunked } = await import('../lib/pool-broadcast.mjs');
+      await sendBroadcastChunked(market.maker_relay_id, 'kanet-prediction', reqPayload);
+    } catch (err) {
+      console.warn(`[pool-settler] sign_req broadcast fail market=${market.id.slice(0,12)}: ${err.message}`);
+    }
+
+    console.log(`[pool-settler] DISPATCHED Phase 2 market=${market.id.slice(0,12)} winner=${decision.winner} unanimous=${decision.unanimous} inputs=${requiredInputOutpoints.length} outputs=${outputs.length} sign_req → broadcast → collecting_sigs`);
   } catch (e) {
     console.error(`[pool-settler] dispatchPhase2 fail market=${market.id?.slice(0,12)}: ${e.message}`);
   }
@@ -634,30 +2206,58 @@ export async function dispatchPhase2(market, decision) {
  */
 export async function dispatchRefund(market, decision) {
   try {
-    // 1. Compute maker output amount per PoolSpine.sil entry 2:
-    //    tx.outputs[0].value == makerStakeAmount + oracleBondAmount * 3 - minerFee
     const makerStake = parseInt(market.maker_stake_amount, 10) || 0;
     const oracleBond = parseInt(market.oracle_bond_amount, 10) || 0;
-    const minerFee = parseInt(market.miner_fee, 10) || 20_000;
-    const makerRefundAmount = makerStake + oracleBond * 3 - minerFee;
+
+    // Look up maker address (needed for both fee compute + preimage outputs)
+    const makerRow = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(market.maker_relay_id);
+    if (!makerRow?.address) {
+      if (typeof market.maker_relay_id === 'string' && market.maker_relay_id.startsWith('cross-node:')) {
+        logThrottled(`xnode-skip:${market.id}`, `[pool-settler] dispatchRefund skip cross-node market ${market.id.slice(0,12)} (maker on remote host, refund must dispatch from producer node)`);
+      } else {
+        console.warn(`[pool-settler] dispatchRefund market=${market.id.slice(0,12)} no maker address`);
+      }
+      return;
+    }
+    const networkId = makerRow.address.startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
+
+    // Fee compute branches by protocol version:
+    //   v0.5: legacy fixed minerFee from market row (SS 焊死, can't change here).
+    //   v0.6: G2-B 二期 sediment — SS L281 require value==stake-ctor_minerFee, MUST use
+    //         baseMinerFeeR (= same as ctor). 47ff13d not floor (qlfpv 实测).
+    //   v0.7: G6 批3 段① — SS L372/373 fee 范围 [MIN_FEE=50_000, MAX_FEE=100M]. RED-LINE 2
+    //         (Bettor r297): fee MUST be mass-aware dynamic, 不 static 常数. Compute via
+    //         kaspa.calculateTransactionMass on a dummy signed-shape TX (= placeholder
+    //         scriptSig with same byte layout as real → mass identical to real signed TX).
+    const baseMinerFeeR = parseInt(market.miner_fee, 10) || 20_000;
+    let minerFee;
+    if (market.protocol_version === 'v0.7') {
+      try {
+        minerFee = await computeMassAwareV07RefundFee({
+          market, makerStake, networkId, makerAddress: makerRow.address,
+        });
+        console.log(`[pool-settler] dispatchRefund v0.7 mass-aware fee market=${market.id.slice(0,12)} fee=${minerFee} (= mass × 110 sompi/mass + cap [50000, 1e8])`);
+      } catch (massErr) {
+        console.error(`[pool-settler] dispatchRefund v0.7 mass compute fail market=${market.id.slice(0,12)}: ${massErr.message}`);
+        return;
+      }
+    } else {
+      minerFee = baseMinerFeeR;
+    }
+
+    const isAnonymousPool = market.protocol_version === 'v0.6' || market.protocol_version === 'v0.7';
+    const makerRefundAmount = isAnonymousPool
+      ? (makerStake - Number(minerFee))
+      : (makerStake + oracleBond * 3 - Number(minerFee));  // v0.5: 3 bonds in spine
     if (makerRefundAmount <= 0) {
       console.warn(`[pool-settler] dispatchRefund market=${market.id.slice(0,12)} makerRefundAmount=${makerRefundAmount} ≤ 0, skip`);
       return;
     }
 
-    // 2. Look up maker address
-    const makerRow = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(market.maker_relay_id);
-    if (!makerRow?.address) {
-      console.warn(`[pool-settler] dispatchRefund market=${market.id.slice(0,12)} no maker address`);
-      return;
-    }
-
-    // 3. Build refund TX preimage — reuse 'prediction_settle_build_preimage' IPC with single-p2sh + 1 output
-    //    Inputs: spine UTXO only (= maker stake + 3 bonds locked here)
-    //    Output: maker_refund_amount to maker_address
+    // Build refund TX preimage — reuse 'prediction_settle_build_preimage' IPC with single-p2sh + 1 output
     const preimage = await sendCommandAsync(market.maker_relay_id, {
       type: 'prediction_settle_build_preimage',
-      p2sh_address: market.spine_p2sh,  // single string for refund (= only spine, no sides)
+      p2sh_address: market.spine_p2sh,
       required_input_outpoints: [
         { outpointTxid: market.spine_lock_tx, outpointIndex: 0 },
       ],
@@ -693,6 +2293,157 @@ export async function dispatchRefund(market, decision) {
 }
 
 /**
+ * G6 批 3 段① (Bettor r296/r297): compute v0.7 refund TX fee from real mass.
+ *
+ * Why mass-aware:
+ *   - v0.7 PoolSpine_v07.sil refund_maker_unjoined (L370-373) uses fee 范围 [MIN_FEE=50_000,
+ *     MAX_FEE=100M] NOT 焊死 ctor minerFee. SS accepts ANY fee in range; settler 必 pick
+ *     fee >= mempool floor (mass × 100 sompi/mass) but not wastefully high.
+ *   - Bettor 红线 2 (Bettor r239): fee = mass × rate, 禁静态常数. 5M floor (v0.6 sediment) 是
+ *     overpay (~11x) violation of 红线 2.
+ *
+ * Algorithm:
+ *   1. Build a fake signed TX with placeholder scriptSig (= same byte layout as real signed
+ *      TX). makerSig is 66 bytes (push-encoded), OP_2 selector 1 byte, OP_PUSHDATA2 redeem
+ *      push = 3 + redeem.length bytes. Total scriptSig size matches real TX.
+ *   2. kaspa.calculateTransactionMass(networkId, fakeTx) → real mass.
+ *   3. fee = max(mass × 110, MIN_FEE) (= 10% safety margin over mempool floor 100).
+ *   4. Cap fee at MAX_FEE (= prevent runaway, defense against maker-rob-self attack).
+ *
+ * Returns: BigInt fee (sompi).
+ */
+async function computeMassAwareV07RefundFee({ market, makerStake, networkId, makerAddress }) {
+  const V07_MIN_FEE = 50_000n;
+  const V07_MAX_FEE = BigInt(MAX_TX_FEE_SOMPI);  // #31 ⑤b single-source (was local 1e8n)
+  // gate B③ fork合 (INVARIANTS SYS-2): fee-rate 单源 kip9-mass.mjs SOMPI_PER_MASS (== 110, 10% margin over
+  // mempool floor 100; qlfpv 实测 442000/4420=100). 前为本地 `110n` 副本=fork (rate 改则 settler 不跟 drift) — 删,
+  // import 单源 + BigInt() 包供 TX-fee 大数运算. drift-guard 测 test_gateB_fee_single_source.mjs 守.
+  const SOMPI_PER_MASS_BI = BigInt(SOMPI_PER_MASS);
+
+  // Read v0.7 spine redeem from market metadata (stashed at create-v07 time).
+  let meta = {};
+  try { meta = JSON.parse(market.metadata || '{}'); } catch {}
+  const spineRedeemHex = meta.spine_redeem_script_hex;
+  if (!spineRedeemHex) throw new Error('market.metadata missing spine_redeem_script_hex');
+
+  // G6 批 3 段① Bettor r311 hard-stop + r301 方案 (a): byte-size mass 估算, 完全绕开 WASM.
+  // calculateTransactionMass 在 Console 端 (4 次 panic: Resolver/unreachable/outpoint/scriptPK)
+  // 和 relay 端 (f4b74b0 仍 unreachable) 都失败. WASM 字段地狱无法稳, 退到 KIP-9 byte-size
+  // 估算 — refund TX 是固定形状 (1 in 1 out + ~1942 byte redeem), byte size 可静态计算.
+  //
+  // Byte size 分解:
+  //   input: 32 txid + 4 vout + sigScript_size + 8 seq + 1 sigOpCount ≈ 45 + sigScript
+  //   sigScript: 66 sig push + 1 OP_2 + 3 PUSHDATA2 header + redeem_size = 70 + redeem_size
+  //   output: ~50 (8 value + ~34 P2PK + headers)
+  //   tx overhead: ~80 (version, locktime, gas, subnetwork, payload)
+  //
+  // qlfpv 实测 mass=4420 for ~2200 byte refund TX = ratio ~2.0. 用 2.5 + 100 overhead
+  // 保守估算 cover variance + storage mass component.
+  const redeemBytes = Buffer.from(spineRedeemHex, 'hex');
+  const sigScriptSize = 70 + redeemBytes.length;  // 66 sig push + 1 OP_2 + 3 PUSHDATA2 header + redeem
+  const inputSize = 45 + sigScriptSize;
+  const outputSize = 50;
+  const txOverhead = 80;
+  const estimatedTxSize = inputSize + outputSize + txOverhead;
+  const MASS_RATIO_BYTES_TO_MASS = 25n;  // 2.5x as BigInt (× 10 for integer math)
+  const computeMassEstimate = (BigInt(estimatedTxSize) * MASS_RATIO_BYTES_TO_MASS) / 10n;
+  // J1tn r303 P0-#1 sweep (Bettor r341+r346/r366b helper refactor): KIP-9 storage_mass term.
+  // 单 output maker payout ≈ makerStake - fee, makerStake 是主导. storage_mass 经 lib/kip9-mass.mjs
+  // estimateOutputStorageMass(value) → Number, 转 BigInt 续 dynamic fee 计算.
+  const storageMassMaker = BigInt(estimateOutputStorageMass(makerStake || 100_000_000));
+  const mass = computeMassEstimate + storageMassMaker;
+  console.log(`[pool-settler] v0.7 byte-size mass estimate market=${market.id.slice(0,12)} txBytes≈${estimatedTxSize} computeMass≈${computeMassEstimate} storageMass(maker)≈${storageMassMaker} totalMass≈${mass} (redeem ${redeemBytes.length}B, sigScript ${sigScriptSize}B, makerStake=${makerStake})`);
+  let dynamicFee = BigInt(mass) * SOMPI_PER_MASS_BI;
+  if (dynamicFee < V07_MIN_FEE) dynamicFee = V07_MIN_FEE;
+  if (dynamicFee > V07_MAX_FEE) dynamicFee = V07_MAX_FEE;
+  console.log(`[pool-settler] v0.7 mass-aware fee compute market=${market.id.slice(0,12)} mass=${mass} fee=${dynamicFee} (mass × ${SOMPI_PER_MASS} sompi/mass, cap [${V07_MIN_FEE}, ${V07_MAX_FEE}])`);
+  return dynamicFee;
+}
+
+/**
+ * G2-B 二期 (Bettor r263 钦点): handle protocol_status='refunding' markets.
+ *
+ * dispatchRefund stashed:
+ *   meta.refund_tx_obj          — preimage TX object (1 input + 1 output, exact value)
+ *   meta.refund_amount          — makerStakeAmount - minerFee (BigInt-as-Number)
+ *   meta.spine_redeem_script_hex — PoolSpine_v06 compiled redeem (stashed at create-time)
+ *
+ * Steps:
+ *   1. Look up maker address (maker_relay_id must be local — refund signs with maker privkey)
+ *   2. IPC maker_relay 'pool_refund_maker_unjoined_tx' (= PoolSpine_v06.sil entry 2):
+ *        scriptSig = [makerSig push] + OP_2 (selector) + [redeemScript push]
+ *        lockTime = deadline * 1000 (ms, per SS L275 bug 10d sediment)
+ *   3. Write refund_txid + status='refunded'
+ *
+ * Cross-node ingested markets are skipped (= maker has no local key, refund must run on
+ * producer node — same pattern as dispatchRefund). qlfpv-shape markets refund here.
+ */
+async function handleRefunding(market) {
+  // G2-B 二期 (v0.6) + G6 批3 段① (v0.7) cover PoolSpine entry 2 refund_maker_unjoined. v0.5
+  // markets use a different SS (3 oracle bonds in spine, fee 焊死) — separate handler not in
+  // scope. v0.6/v0.7 differ only at SS bytecode level (= different redeem), the IPC path is
+  // identical because scriptSig layout is same ([makerSig push] + OP_2 + [redeemScript push]).
+  if (market.protocol_version !== 'v0.6' && market.protocol_version !== 'v0.7') {
+    console.log(`[pool-settler:refunding] skip non-v0.6/v0.7 market ${market.id.slice(0,12)} (protocol_version=${market.protocol_version})`);
+    return;
+  }
+  let meta = {};
+  try { meta = JSON.parse(market.metadata || '{}'); } catch {}
+  if (!meta.refund_tx_obj) {
+    console.warn(`[pool-settler:refunding] market=${market.id.slice(0,12)} missing meta.refund_tx_obj, skip (= dispatchRefund did not stash)`);
+    return;
+  }
+  if (!meta.spine_redeem_script_hex) {
+    console.warn(`[pool-settler:refunding] market=${market.id.slice(0,12)} missing meta.spine_redeem_script_hex (pre-v135 market), cannot assemble scriptSig`);
+    return;
+  }
+  if (meta.refund_amount == null) {
+    console.warn(`[pool-settler:refunding] market=${market.id.slice(0,12)} missing meta.refund_amount, skip`);
+    return;
+  }
+
+  // Skip cross-node markets (maker_relay_id sentinel) — refund must run where maker key lives.
+  if (typeof market.maker_relay_id === 'string' && market.maker_relay_id.startsWith('cross-node:')) {
+    console.log(`[pool-settler:refunding] skip cross-node market ${market.id.slice(0,12)} (maker on remote host)`);
+    return;
+  }
+
+  const makerRow = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(market.maker_relay_id);
+  if (!makerRow?.address) {
+    console.warn(`[pool-settler:refunding] market=${market.id.slice(0,12)} no maker address (maker_relay_id=${market.maker_relay_id?.slice(0,12)})`);
+    return;
+  }
+
+  // PoolSpine_v06/v07/v0_7_1 SS L275/L376: tx.time >= (deadline + REFUND_GRACE_SEC) * 1000 (ms semantics).
+  // J1tn r303 (Bettor 03:19 v3 approve): 漏 +grace 致 kaspad 'Unsatisfied lock time' reject.
+  const { REFUND_GRACE_SEC } = await import('../lib/pool-refund-grace.mjs');
+  const lockTime = (BigInt(market.deadline) + BigInt(REFUND_GRACE_SEC)) * 1000n;
+
+  try {
+    const submitResult = await sendCommandAsync(market.maker_relay_id, {
+      type: 'pool_refund_maker_unjoined_tx',
+      spine_p2sh_address: market.spine_p2sh,
+      spine_redeem_script_hex: meta.spine_redeem_script_hex,
+      required_input_outpoint: { outpointTxid: market.spine_lock_tx, outpointIndex: 0 },
+      output: { address: makerRow.address, amountSompi: String(meta.refund_amount) },
+      lock_time: lockTime.toString(),
+      tx_obj_preimage: meta.refund_tx_obj,
+    });
+
+    if (!submitResult?.ok || !submitResult.txId) {
+      console.error(`[pool-settler:refunding] submit fail market=${market.id.slice(0,12)}: ${submitResult?.error}`);
+      return;
+    }
+
+    sqlite.prepare('UPDATE pool_markets SET refund_txid = ?, protocol_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+      .run(submitResult.txId, 'refunded', market.id);
+    console.log(`[pool-settler:refunding] REFUNDED market=${market.id.slice(0,12)} refund_txid=${submitResult.txId.slice(0,16)} to=${makerRow.address.slice(0,20)} amount=${meta.refund_amount}`);
+  } catch (e) {
+    console.error(`[pool-settler:refunding] submit exception market=${market.id?.slice(0,12)}: ${e.message}`);
+  }
+}
+
+/**
  * 7b — dispatchRefundDisagreement: build settle TX preimage for the refund_disagreement SS
  * entry (area-4 + Owner Gap 1B burn). Mirrors dispatchPhase2 pattern but constructs the
  * refund_disagreement output layout:
@@ -720,7 +2471,28 @@ export async function dispatchRefundDisagreement(market, decision) {
 
     const makerStake = parseInt(market.maker_stake_amount, 10) || 0;
     const oracleBond = parseInt(market.oracle_bond_amount, 10) || 0;
-    const minerFee = parseInt(market.miner_fee, 10) || 20_000;
+    // J1tn r303 P0-#1 sweep (Bettor r341+r346/r366b 钦定 helper refactor): KIP-9 storage_mass
+    // aware dynamic fee for refund_disagreement (4 outputs: maker + 3 oracle bonds 1 KAS each).
+    // 公式抽 lib/kip9-mass.mjs computeMultiOutputFee, 老 ctor minerFee static 20K 死 KIP-9.
+    let metaForFee = {};
+    try { metaForFee = JSON.parse(market.metadata || '{}'); } catch {}
+    const spineRedeemHex = metaForFee.spine_redeem_script_hex || '';
+    const spineRedeemSize = spineRedeemHex ? Buffer.from(spineRedeemHex, 'hex').length : 2100;
+    // refund_disagreement scriptSig per input: 2 sigs push (66B each = 132B) + 1B selector OP_N + PUSHDATA2(3B + redeem)
+    const sigsPerInputBytes = 132 + 1 + 3 + spineRedeemSize;
+    const inputCountForMass = 4;  // 1 spine + 3 oracle deposits
+    const inputSizeTotal = inputCountForMass * (45 + sigsPerInputBytes);
+    const outputCountForMass = (silentOracleIndex === -1 ? 4 : 3);  // maker + (3 OR 2) oracle bonds
+    const outputSizeTotal = outputCountForMass * 50;
+    const txByteEstimateRD = inputSizeTotal + outputSizeTotal + 80;
+    const computeMassEstRD = Math.ceil(txByteEstimateRD * 30 / 10);  // ×3 multiplier
+    // storage_mass: maker output 大 (~0 mass), oracle bonds 小 (= bond / 1e8 sompi each).
+    const oracleOutputCount = outputCountForMass - 1;  // exclude maker output
+    const rdFee = computeMultiOutputFee(computeMassEstRD, oracleBond, oracleOutputCount);
+    const isAnonymousPoolRD = market.protocol_version === 'v0.6' || market.protocol_version === 'v0.7';
+    // v0.5 legacy: keep old static (per dispatchPhase2 L1406 sweep pattern).
+    const minerFee = isAnonymousPoolRD ? rdFee.dynamicFee : (parseInt(market.miner_fee, 10) || 20_000);
+    console.log(`[pool-settler] refund_disagreement mass-aware fee market=${market.id.slice(0,12)} txBytes≈${txByteEstimateRD} computeMass≈${computeMassEstRD} storageMass(${oracleOutputCount} bonds)≈${rdFee.storageMass} totalMass≈${rdFee.totalMass} fee=${minerFee} (oracleBond=${oracleBond}, version=${market.protocol_version})`);
 
     const makerRow = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(market.maker_relay_id);
     if (!makerRow?.address) {
@@ -728,8 +2500,11 @@ export async function dispatchRefundDisagreement(market, decision) {
       return;
     }
 
+    // J2-tn r337 (Bettor 6/5 C2 实施): oracle_relay_ids field 复用存 addresses (= committee_addresses
+    // 写入 by sampleAndStoreCommittee post-r337). dispatchPhase2 直接以 address 调 DM, 不查
+    // relay_nodes (= peer-owned address 不在本地 relay_nodes 表).
     const oracleIds = JSON.parse(market.oracle_relay_ids || '[]');
-    const oracleRows = oracleIds.map(rid => sqlite.prepare('SELECT id, address FROM relay_nodes WHERE id = ?').get(rid));
+    const oracleRows = oracleIds.map(addr => ({ id: null, address: addr }));
     if (oracleRows.some(r => !r?.address)) {
       console.warn(`[pool-settler] dispatchRefundDisagreement market=${market.id.slice(0,12)} missing oracle addresses`);
       return;
@@ -793,7 +2568,10 @@ export async function dispatchRefundDisagreement(market, decision) {
       console.error(`[pool-settler] dispatchRefundDisagreement market=${market.id.slice(0,12)} invalid deadline=${market.deadline}`);
       return;
     }
-    const refundLockTimeMs = (deadlineSec + 300) * 1000;
+    // J1tn r303 (Bettor 03:19 v3 approve): 漏 +grace 致 SS reject (+300 < 7200 require).
+    // 用共享 REFUND_GRACE_SEC, 同 settler L1606 / pool.js / claim-auto.mjs.
+    const { REFUND_GRACE_SEC } = await import('../lib/pool-refund-grace.mjs');
+    const refundLockTimeMs = (deadlineSec + REFUND_GRACE_SEC) * 1000;
 
     // Build preimage via maker_relay (single-p2sh refund TX on spine inputs only)
     const preimage = await sendCommandAsync(market.maker_relay_id, {
@@ -870,15 +2648,30 @@ async function handleCollectingSigs(market) {
     console.warn(`[pool-settler:collecting] market=${market.id.slice(0,12)} missing phase2 metadata, skip`);
     return;
   }
+  // J2-tn r379 (TDZ fix from r378): hoist committeePksForSort lookup to top — re-broadcast
+  // gate at L1790 references it but its `let` was at L1844 (= TDZ ReferenceError, original
+  // 5min throttle masked this by usually finding signedSet via oracleArr fallback). r378
+  // 90s throttle + #9 NEVER 触发 L1790 first iteration → silent fail blocked re-broadcast.
+  let committeePksForSort = [];
+  try {
+    const commRow0 = sqlite.prepare('SELECT committee_pks FROM pool_committee WHERE market_id = ?').get(market.id);
+    committeePksForSort = JSON.parse(commRow0?.committee_pks || '[]').map(p => String(p).toLowerCase());
+  } catch {}
   const inputCount = meta.phase2_input_count;
   // Spine P2SH has MULTIPLE UTXOs (1 maker stake + N oracle bonds) — inputs 0..spineInputCount-1.
   // Each spine input needs PoolSpine settle_unanimous scriptSig (3 sigs unanimous / 2 forfeit_1).
   // Side inputs (spineInputCount..end) auto-unlock via [selector_0 + side_redeem_push] (no sigs).
   const spineInputCount = meta.phase2_spine_input_count || 1;
-  const spineRequiredSigs = meta.phase2_unanimous ? 3 : 2;
+  // KANet-UI r386 Layer-9 KI 49: v0.6 5-oracle. v0.5 hardcoded [0,1,2] missed 5-committee.
+  // unanimous = all sign; non-unanimous = exclude silent (= 4 sigs for v0.6, 2 for v0.5).
+  let oracleArr = [];
+  try { oracleArr = JSON.parse(market.oracle_relay_ids || '[]'); } catch {}
+  const oracleNcollecting = oracleArr.length || 3;
+  const allIdxC = Array.from({ length: oracleNcollecting }, (_, i) => i);
   const signingOracles = meta.phase2_unanimous
-    ? [0, 1, 2]
-    : [0, 1, 2].filter(i => i !== meta.phase2_silent_oracle_index);
+    ? allIdxC
+    : allIdxC.filter(i => i !== meta.phase2_silent_oracle_index);
+  const spineRequiredSigs = signingOracles.length;
 
   // Scan chain_events for sigs scoped to this market + spine input only
   const sigRows = sqlite.prepare(`
@@ -887,7 +2680,9 @@ async function handleCollectingSigs(market) {
       AND payload LIKE ?
   `).all(`%"market_id":"${market.id}"%`);
 
-  // sigsByInput[i] = [{voter_relay_id, signature}, ...] — only inputIdx=0 populated in pool
+  // J2-tn r362 (Bettor 13:16 钦定 协议统一): sigsByInput dedupe + 验签 by voter_pubkey
+  // (= PK 跨节点 canonical). r337 漏迁 reader 第6处 + J1 r343 catch (= pool-sign-handler vs
+  // settler envelope schema 不接). voter L538 同步改 voter_pubkey field.
   const sigsByInput = Array.from({ length: inputCount }, () => []);
   const seenByInput = Array.from({ length: inputCount }, () => new Set());
   for (const row of sigRows) {
@@ -896,10 +2691,12 @@ async function handleCollectingSigs(market) {
       if (p.t !== 'kanet_pool_oracle_tx_sign_resp_v1') continue;
       const inputIdx = parseInt(p.input_index, 10);
       if (inputIdx < 0 || inputIdx >= inputCount) continue;
-      if (!p.voter_relay_id || !p.signature) continue;
-      if (seenByInput[inputIdx].has(p.voter_relay_id)) continue;
-      seenByInput[inputIdx].add(p.voter_relay_id);
-      sigsByInput[inputIdx].push({ voter_relay_id: p.voter_relay_id, signature: p.signature });
+      // Accept new voter_pubkey OR legacy voter_relay_id during migration window.
+      const signerKey = String(p.voter_pubkey || p.voter_relay_id || '').toLowerCase();
+      if (!signerKey || !p.signature) continue;
+      if (seenByInput[inputIdx].has(signerKey)) continue;
+      seenByInput[inputIdx].add(signerKey);
+      sigsByInput[inputIdx].push({ voter_pubkey: signerKey, signature: p.signature });
     } catch {}
   }
 
@@ -914,6 +2711,51 @@ async function handleCollectingSigs(market) {
   if (spineMissing.length > 0) {
     if (Math.random() < 0.1) {
       console.log(`[pool-settler:collecting] market=${market.id.slice(0,12)} waiting spine sigs: ${spineMissing.join(' ')}`);
+    }
+    // J2-tn r378 (Bettor 15:12 catch follow-up): re-broadcast missing oracle sign_req via
+    // chunked broadcast (= 不再 send_message DM, DM cross-host 不通 = r360 已证). 同时 inject
+    // 现在 meta.phase2_tx_obj 进 payload (= 治存量 #9 的 persisted phase2_request_payload
+    // 早于 r377 没 phase2_tx_obj). Throttle 90s (= 缩短: 之前 5min 慢, 跨 host 节奏需密).
+    try {
+      const lastReDMms = meta.last_sign_req_redm_at ? new Date(meta.last_sign_req_redm_at).getTime() : 0;
+      // J2-tn lever③ (Bettor r540 / KANet-UI 完整数据链): retry-storm 修. 每次 re-broadcast 重发
+      // 全 ~45-58 chunk sign_req; 初次广播因 storage-mass 失败 → 固定 90s 死命重发全量 → ~4 轮
+      // 烧爆 relay 每日 200 限额 (= daily-limit 的实凶上游)。修: 失败时【指数 backoff】(90s →
+      // ×2^failCount, 上限 ~24min), 成功 (拿到 txId) reset failCount → 失败市场不再每 90s 烧 58 TX。
+      const baseThrottle = parseInt(process.env.SIGN_REQ_REBROADCAST_MS, 10) || 90_000;
+      const failCount = meta.sign_req_fail_count || 0;
+      // J2-tn r548: cap 16×(24min) > watchdog 15min 旧值 = backoff 到下次 retry 前先被 refund (retry
+      // 没机会)。cap 降 8×(12min) < COLLECTING_SIGS_WATCHDOG (默认 30min) → 失败单仍在 watchdog 前重试。
+      const effThrottle = baseThrottle * Math.min(2 ** failCount, 8);  // 90s → 最长 12min (< watchdog)
+      if (Date.now() - lastReDMms > effThrottle && meta.phase2_request_payload) {
+        const signedSet = new Set();
+        for (const s of sigsByInput[0] || []) signedSet.add(s.voter_pubkey);
+        const missingOracles = signingOracles.filter(i => !signedSet.has(committeePksForSort[i] || oracleArr[i]));
+        if (missingOracles.length > 0) {
+          // Inject phase2_tx_obj if persisted payload预先没有 (= 存量 #9). New payload (post-r377)
+          // 已含, 不影响 idempotent: 覆盖同字段同值.
+          const rebroadcastPayload = {
+            ...meta.phase2_request_payload,
+            phase2_tx_obj: meta.phase2_tx_obj,
+          };
+          const { sendBroadcastChunked } = await import('../lib/pool-broadcast.mjs');
+          let broadcastOk = false;
+          try {
+            await sendBroadcastChunked(market.maker_relay_id, 'kanet-prediction', JSON.stringify(rebroadcastPayload));
+            broadcastOk = true;
+          } catch (err) {
+            console.warn(`[pool-settler:collecting] re-broadcast fail market=${market.id.slice(0,12)} (failCount=${failCount}→${failCount + 1}, backoff): ${err.message}`);
+          }
+          // 失败 → failCount++ (下次 backoff 更久, 不烧限额); 成功 → reset (拿到 txId 说明 relay 通)
+          const newMeta = { ...meta, last_sign_req_redm_at: new Date().toISOString(),
+            sign_req_fail_count: broadcastOk ? 0 : (failCount + 1) };
+          sqlite.prepare('UPDATE pool_markets SET metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+            .run(JSON.stringify(newMeta), market.id);
+          if (broadcastOk) console.log(`[pool-settler:collecting] re-broadcast sign_req market=${market.id.slice(0,12)} missing=${missingOracles.length} chunked OK`);
+        }
+      }
+    } catch (e) {
+      console.warn(`[pool-settler:collecting] re-broadcast fail market=${market.id.slice(0,12)}: ${e.message}`);
     }
     return;
   }
@@ -938,15 +2780,47 @@ async function handleCollectingSigs(market) {
     return;
   }
 
-  // spineSigsByInput[i] = array of signatures for spine input i (= 3 sigs unanimous)
+  // Bettor r273 layer-17: sigs MUST be ordered to match committee_pks order so SS positional
+  // checkSig(c_iSig, c_iPk) binds correctly. handleCollectingSigs scans chain_events by
+  // observed_at → random order. Re-sort by oracle_relay_ids index (= committee order).
+  //
+  // qoyqv 实证 (Bettor r351 4/5 vote case): missing sig 不能 filter, 必 pad dummy 66B
+  // zero-sig 占位. v0.6/v0.7 SS settle_aggregate checkSig 内 validSigs counter — dummy
+  // sig 验失败 counter 不增, 但其他 4 sig PASS → counter=4 ≥ 4-of-5 threshold → SS accept.
+  // Dummy sig 必 same byte format as real (= 41 + 00×64 + 01 push-encoded) 不破坏 sigOpCount/sighash.
+  // J2-tn r386→r387 (Bettor 01:31 方案2 fallback): r386 OP_0 实证 SS 仍 reject
+  // (scriptSig 3983B with `00` at c4 slot 实证, 但 'verification failed' 重现).
+  // = Kaspa OpCheckSig 对 empty sig 也 abort (= 不返 false), 同 all-zero r=0 命运.
+  //
+  // 方案 2: structurally-valid sig with r=G.x (= secp256k1 generator x-coord, 必 lift_x
+  // 成功 = G itself), s=arbitrary (= all 0x01). Sig 格式有效 → checkSig 算 verify →
+  // 不通过 (= sig 不匹 message) → 返 false → validSigs counter skip c4 → counter=4 →
+  // SS accept.
+  //
+  // G.x BIP340: 0x79BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798
+  // s: 0x0101...01 (32 bytes, < curve order, valid scalar)
+  // sighashType: 0x01
+  // Total push: 0x41 + 32B Gx + 32B 0x01... + 0x01 = 66 bytes (same length as real sig).
+  const DUMMY_SIG_PUSH_HEX = '41'
+    + '79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798'  // r = G.x
+    + '0101010101010101010101010101010101010101010101010101010101010101'  // s = 0x01...01
+    + '01';  // sighashType SIGHASH_ALL
+  // J2-tn r362 (now hoisted to top of handleCollectingSigs in r379): committeePksForSort
+  // already loaded above for re-broadcast missing-oracle compare.
   const spineSigsByInput = [];
   for (let i = 0; i < spineInputCount; i++) {
-    spineSigsByInput.push(sigsByInput[i].map(s => s.signature));
+    const bySender = new Map(sigsByInput[i].map(s => [s.voter_pubkey, s.signature]));
+    // Pad missing positions with dummy sig (= same length as real, position-aware for SS positional checkSig).
+    const ordered = committeePksForSort.map(pk => bySender.get(pk) || DUMMY_SIG_PUSH_HEX);
+    spineSigsByInput.push(ordered);
   }
 
-  // Phase 2c step 2c first ship: unanimous (entry 0) only. forfeit_1 entry 1 deferred next iteration.
-  if (!meta.phase2_unanimous) {
-    console.warn(`[pool-settler:collecting] market=${market.id.slice(0,12)} forfeit_1 entry 1 not yet supported in unlockPoolSpineP2SH, skip until next iteration`);
+  // Bettor r283 G2-A: v0.5 phase2c-first-ship skipped non-unanimous (= forfeit_1 entry 1).
+  // v0.6+v0.7 settle_aggregate has built-in 4-of-5 threshold counter (PoolSpine_v06/07.sil:79-83)
+  // so 4 valid sigs settle without a separate forfeit entry. Skip only for v0.5 markets.
+  // qoyqv 实证 (Bettor r351): 4/5 votes 4-of-5 path 触发 forfeit_1 skip 因 v0.7 漏 guard.
+  if (!meta.phase2_unanimous && market.protocol_version !== 'v0.6' && market.protocol_version !== 'v0.7') {
+    console.warn(`[pool-settler:collecting] market=${market.id.slice(0,12)} forfeit_1 entry 1 not yet supported in unlockPoolSpineP2SH (v0.5 only), skip until next iteration`);
     return;
   }
 
@@ -967,7 +2841,43 @@ async function handleCollectingSigs(market) {
 
   console.log(`[pool-settler:collecting] market=${market.id.slice(0,12)} attempting settle TX submit (spine_inputs=${spineInputCount}, sides=${sides.length}, signers=${signingOracles.join(',')})`);
 
+  // Bettor r354 — v0.7 settle_aggregate sharding globals, computed HERE (not just dispatchPhase2).
+  // qoyqv 实证: markets dispatched before r353 are stuck in collecting_sigs and never re-run
+  // dispatchPhase2, so meta.phase2_global_* is undefined → relay can't push globals → scriptSig
+  // short 3 → 'pick at invalid location'. Compute fresh from DB (prefer meta when present).
+  // direction 0=YES 1=NO (= same convention as dispatchPhase2 makerDirection/thin-check).
+  let globalYesSompi = meta.phase2_global_yes_sompi;
+  let globalNoSompi = meta.phase2_global_no_sompi;
+  let globalCommitId = meta.phase2_global_commit_id;
+  if (market.protocol_version === 'v0.7' && (globalYesSompi === undefined || globalYesSompi === null)) {
+    const makerDir = market.outcome_side === 'YES' ? 0 : 1;
+    const makerStk = parseInt(market.maker_stake_amount, 10) || 0;
+    const betRows = sqlite.prepare(`SELECT direction, stake_amount FROM pool_bettor_sides WHERE market_id = ? AND side_lock_tx IS NOT NULL`).all(market.id);
+    const allParts = [{ direction: makerDir, stake: makerStk }, ...betRows.map(b => ({ direction: b.direction, stake: parseInt(b.stake_amount, 10) || 0 }))];
+    globalYesSompi = allParts.filter(p => p.direction === 0).reduce((s, p) => s + p.stake, 0);
+    globalNoSompi = allParts.filter(p => p.direction === 1).reduce((s, p) => s + p.stake, 0);
+    const crypto = await import('crypto');
+    globalCommitId = crypto.createHash('sha256').update(market.id).digest('hex');
+    console.log(`[pool-settler:collecting] v0.7 globals computed (meta fallback) market=${market.id.slice(0,12)} globalYes=${globalYesSompi} globalNo=${globalNoSompi}`);
+  }
+
   try {
+    // J1 r221 + Bettor r218 ③ Layer-12 + DoD #1.2 sweep: v0.6/v0.7 committee data extras for
+    // settle_aggregate. v0.7 adds sharding globals (globalYes/No/commit) per PoolSpine_v07.sil
+    // L103-105 — computed above (dispatchPhase2-baked meta OR fresh DB fallback).
+    const isAnonymousPoolSettle = market.protocol_version === 'v0.6' || market.protocol_version === 'v0.7';
+    const v06Extras = isAnonymousPoolSettle ? {
+      protocol_version: market.protocol_version,
+      committee_pks: meta.phase2_committee_pks,
+      committee_indices: meta.phase2_committee_indices,
+      committee_merkle_proofs: meta.phase2_committee_merkle_proofs,
+      committee_pk_hash: meta.phase2_committee_pk_hash,
+      // Bettor r353/r354: v0.7 sharding globals. v0.6 markets: globalYesSompi stays undefined
+      // (block above gated on v0.7) → relay skips pushing → v0.6 scriptSig byte-identical (46f8a).
+      global_yes_total_sompi: globalYesSompi,
+      global_no_total_sompi: globalNoSompi,
+      global_commit_id: globalCommitId,
+    } : {};
     const submitResult = await sendCommandAsync(market.maker_relay_id, {
       type: 'pool_settle_tx',
       spine_p2sh_address: market.spine_p2sh,
@@ -982,16 +2892,95 @@ async function handleCollectingSigs(market) {
       sides_merkle_root: market.sides_merkle_root,
       unanimous: meta.phase2_unanimous,
       tx_obj_preimage: meta.phase2_tx_obj,
+      ...v06Extras,
     });
 
     if (!submitResult?.ok || !submitResult.txId) {
-      console.error(`[pool-settler:collecting] pool_settle_tx submit fail market=${market.id.slice(0,12)}: ${submitResult?.error}`);
+      // J2-tn r388 #24 (Bettor 02:25 follow-up): collecting_sigs submit-fail backoff. settle
+      // TX 同样 RPC error 永远 retry → 吃 tick time-box. 同 sample-fail 模式 exp backoff:
+      // meta.submit_fail_count + skip_until_ms. r388 main loop L162 skip_until_ms 检查只 gate
+      // verifying status; 这里加 collecting_sigs status 也 gate. retry chain 同源.
+      try {
+        const cur = JSON.parse(market.metadata || '{}');
+        cur.submit_fail_count = (cur.submit_fail_count || 0) + 1;
+        cur.submit_last_err = (submitResult?.error || '').slice(0, 200);
+        // J2-tn (J1 #103 catch): settle 路有 backoff 但【无终态 give-up】→ submit 永久失败 (UTXO-gone /
+        // fee-impossible) 的单退避到 3600s cap 后仍每小时重试一次, 永不终止 (ext-pool-177 count=90 实证).
+        // 镜像 J1 门B refund-dis give-up: count >= SETTLE_SUBMIT_GIVEUP → cancelled + dispatchRefund 终态
+        // (committee 共识有但 settle TX 提不上链 = 退款保护 winner, 安全终止)。cancelled 被 L311 主查询排除.
+        if (cur.submit_fail_count >= SETTLE_SUBMIT_GIVEUP && !cur.refund_dispatched_at) {
+          cur.cancel_reason = 'settle_submit_giveup';
+          cur.cancelled_at = new Date().toISOString();
+          sqlite.prepare("UPDATE pool_markets SET protocol_status='cancelled', metadata=?, updated_at=CURRENT_TIMESTAMP WHERE id=?")
+            .run(JSON.stringify(cur), market.id);
+          console.warn(`[pool-settler:collecting] pool_settle_tx submit GIVE-UP market=${market.id.slice(0,12)} count=${cur.submit_fail_count} (${SETTLE_SUBMIT_GIVEUP}) → cancelled + maker refund (永久 submit fail, 停无限重试)`);
+          await dispatchRefund(market, { action: 'refund', reason: `settle_submit_giveup: ${cur.submit_fail_count} fails, ${cur.submit_last_err}` });
+          return;
+        }
+        const submitBackoffSec = Math.min(60 * Math.pow(2, Math.max(0, cur.submit_fail_count - 1)), 3600);
+        cur.skip_until_ms = Date.now() + submitBackoffSec * 1000;
+        sqlite.prepare('UPDATE pool_markets SET metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+          .run(JSON.stringify(cur), market.id);
+        console.error(`[pool-settler:collecting] pool_settle_tx submit fail#${cur.submit_fail_count} backoff=${submitBackoffSec}s market=${market.id.slice(0,12)}: ${submitResult?.error}`);
+      } catch (metaErr) {
+        console.error(`[pool-settler:collecting] pool_settle_tx submit fail market=${market.id.slice(0,12)}: ${submitResult?.error}`);
+      }
       return;
     }
 
     sqlite.prepare('UPDATE pool_markets SET settle_txid = ?, protocol_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
       .run(submitResult.txId, 'completed', market.id);
     console.log(`[pool-settler:collecting] SETTLED market=${market.id.slice(0,12)} settle_txid=${submitResult.txId.slice(0,16)} winner=${meta.phase2_winner}`);
+
+    // J2-tn Lane① (Bettor r638 统一'settler 记实际值' + r646 单位定案): 记【实际 oracle reward】到
+    // oracle_history.reward_amount。settle 时 committeeMode 全委员 uniform 实赚 oracleFeePerSig
+    // (meta.phase2_oracle_reward_per_sig, dispatchPhase2 记的实际落链值; L1429-1434 委员市场不跳任何委员,
+    // 全 N 委员都拿 bond+oracleFeePerSig)。此前 reward_amount 恒 0 → oracle 面板'暂无收益'实则赚了 (同 broker
+    // fee 病)。【写 SOMPI】(守 _sompi 约定, 现有读侧 bettor.js:2230 SUM(reward_amount) → oracle-home.eta
+    // L109 fmtKas(/1e8); 写 KAS 会显示小 1e8 倍)。只更 vote!=null 委员行 (consensual vote=NULL 不动) + reward=0 防重。
+    try {
+      const oracleRewardSompi = meta.phase2_oracle_reward_per_sig;
+      if (oracleRewardSompi != null && Number(oracleRewardSompi) > 0) {
+        const upd = sqlite.prepare(`UPDATE oracle_history SET reward_amount = ? WHERE market_id = ? AND vote IS NOT NULL AND (reward_amount IS NULL OR reward_amount = 0)`)
+          .run(Number(oracleRewardSompi), market.id);
+        console.log(`[pool-settler:collecting] oracle reward recorded market=${market.id.slice(0,12)} per_sig=${Number(oracleRewardSompi)} sompi (${(Number(oracleRewardSompi)/1e8).toFixed(8)} KAS) rows=${upd.changes}`);
+      }
+    } catch (rwErr) {
+      console.warn(`[pool-settler:collecting] oracle reward record fail market=${market.id.slice(0,12)}: ${rwErr.message}`);
+    }
+
+    // r418 (Bettor r428 PASS — 方案 C 路径 A push): broadcast pool_market_settled_v1 so cross-node
+    // 节点 (= consumer-ingested markets, maker_relay_id='cross-node:..') 也能标 completed.
+    // 之前 vaaks settle 落链 :3200 但 :3300 cross-ingest 仍 'verifying' = downstream state 病.
+    // Idempotent on consumer side: only UPDATE if currently verifying/collecting_sigs.
+    try {
+      const { getStatus, isRelayAlive, sendCommandAsync } = await import('./relay-manager.js');
+      const candidates = getStatus() || [];
+      const localAlive = candidates.find(r => r.pid && isRelayAlive(r.relayNodeId)?.alive);
+      if (localAlive) {
+        const payload = {
+          t: 'pool_market_settled_v1',
+          market_id: market.id,
+          settle_txid: submitResult.txId,
+          winner: meta.phase2_winner,
+          settled_at: new Date().toISOString(),
+        };
+        const bcastResult = await sendCommandAsync(localAlive.relayNodeId, {
+          type: 'send_broadcast',
+          channel: 'kanet-prediction',
+          message: JSON.stringify(payload),
+        });
+        if (bcastResult?.ok && bcastResult.txId) {
+          console.log(`[pool-settler:collecting] cross-node settled broadcast market=${market.id.slice(0,12)} bcast_txid=${bcastResult.txId.slice(0,16)}`);
+        } else {
+          console.warn(`[pool-settler:collecting] cross-node settled broadcast fail market=${market.id.slice(0,12)}: ${bcastResult?.error || 'no txId'}`);
+        }
+      } else {
+        console.warn(`[pool-settler:collecting] no alive relay to broadcast settled market=${market.id.slice(0,12)}`);
+      }
+    } catch (bcastErr) {
+      console.warn(`[pool-settler:collecting] cross-node settled broadcast exception market=${market.id.slice(0,12)}: ${bcastErr.message}`);
+    }
   } catch (e) {
     console.error(`[pool-settler:collecting] settle submit exception market=${market.id?.slice(0,12)}: ${e.message}`);
   }
@@ -1034,6 +3023,7 @@ async function handleCollectingSigsRefundDisagreement(market, meta) {
       AND payload LIKE ?
   `).all(`%"market_id":"${market.id}"%`);
 
+  // J2-tn r362: 同 settle path — voter_pubkey instead of voter_relay_id (UUID).
   const sigsByInput = Array.from({ length: inputCount }, () => []);
   const seenByInput = Array.from({ length: inputCount }, () => new Set());
   for (const row of sigRows) {
@@ -1042,11 +3032,13 @@ async function handleCollectingSigsRefundDisagreement(market, meta) {
       if (p.t !== 'kanet_pool_oracle_refund_disagreement_tx_sig_v1') continue;
       const inputIdx = parseInt(p.input_index, 10);
       if (inputIdx < 0 || inputIdx >= inputCount) continue;
-      if (!p.voter_relay_id || !p.signature) continue;
-      if (!signingRelayIds.includes(p.voter_relay_id)) continue;  // ignore sigs from non-signers
-      if (seenByInput[inputIdx].has(p.voter_relay_id)) continue;
-      seenByInput[inputIdx].add(p.voter_relay_id);
-      sigsByInput[inputIdx].push({ voter_relay_id: p.voter_relay_id, signature: p.signature });
+      const signerKey = String(p.voter_pubkey || p.voter_relay_id || '').toLowerCase();
+      if (!signerKey || !p.signature) continue;
+      // signingRelayIds 现含 addresses (post-r337), 此处 best-effort 暂不强制 (= refund-disagree
+      // 路径 demo 期非关键, 后续 NWT lint 加 PK 校验).
+      if (seenByInput[inputIdx].has(signerKey)) continue;
+      seenByInput[inputIdx].add(signerKey);
+      sigsByInput[inputIdx].push({ voter_pubkey: signerKey, signature: p.signature });
     } catch {}
   }
 

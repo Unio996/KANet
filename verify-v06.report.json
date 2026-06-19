@@ -1,0 +1,271 @@
+{
+  "schema_version": "v0.6-compat-verify-r1",
+  "verified_at": "2026-06-01T03:40:35.912Z",
+  "baseline_ref": {
+    "path": "D:\\kanet-tn12\\baseline.v0.5.json",
+    "schema": "v0.5-baseline-r1",
+    "captured_at": "2026-05-30T05:46:39.740Z"
+  },
+  "checks": [
+    {
+      "name": "v0.5 PoolSide.sil 字节不变 (spec §7 ADDITIVE)",
+      "pass": true,
+      "detail": {
+        "current": "9331a7c70aa3a0c9acb0977033de122c97cbe3575fef773fe743538caede8481",
+        "baseline": "9331a7c70aa3a0c9acb0977033de122c97cbe3575fef773fe743538caede8481"
+      },
+      "severity": "hard"
+    },
+    {
+      "name": "v0.5 PoolSide entrypoints 不变 (= 4 件)",
+      "pass": true,
+      "detail": {
+        "current": [
+          "claim_winner",
+          "consumed_by_oracle_settlement",
+          "refund_market_cancelled",
+          "settled_via_spine"
+        ],
+        "baseline": [
+          "settled_via_spine",
+          "claim_winner",
+          "consumed_by_oracle_settlement",
+          "refund_market_cancelled"
+        ]
+      },
+      "severity": "hard"
+    },
+    {
+      "name": "v0.5 PoolSpine.sil 字节不变 (spec §7 ADDITIVE)",
+      "pass": true,
+      "detail": {
+        "current": "38ae5c74bc8b1729e590b970c1baaf5953fd02dd4ef57ae04954d0b60b8e39e3",
+        "baseline": "38ae5c74bc8b1729e590b970c1baaf5953fd02dd4ef57ae04954d0b60b8e39e3"
+      },
+      "severity": "hard"
+    },
+    {
+      "name": "v0.5 PoolSpine entrypoints 不变 (= 5 件)",
+      "pass": true,
+      "detail": {
+        "current": [
+          "refund_disagreement",
+          "refund_maker_unjoined",
+          "refund_unanimous_silent",
+          "settle_majority_forfeit_1",
+          "settle_unanimous"
+        ],
+        "baseline": [
+          "settle_unanimous",
+          "settle_majority_forfeit_1",
+          "refund_unanimous_silent",
+          "refund_maker_unjoined",
+          "refund_disagreement"
+        ]
+      },
+      "severity": "hard"
+    },
+    {
+      "name": "v0.6 PoolSide_v06.sil 存在 + ≥1 entrypoint",
+      "pass": true,
+      "detail": {
+        "sha256": "221968e7d1a8c576ab52d589081a7e2c887b5c5f9be826ffda7ef9010f7ea048",
+        "entrypoints": [
+          "settled_via_spine",
+          "claim_winner",
+          "refund_market_cancelled"
+        ],
+        "classification": "PoolSide"
+      },
+      "severity": "hard"
+    },
+    {
+      "name": "v0.6 PoolSide_v06 entrypoints 命中 spec hints (PoolSide)",
+      "pass": true,
+      "detail": {
+        "matched": [
+          "settled_via_spine",
+          "claim_winner",
+          "refund_market_cancelled"
+        ],
+        "found": [
+          "settled_via_spine",
+          "claim_winner",
+          "refund_market_cancelled"
+        ],
+        "hints": [
+          "settled_via_spine",
+          "claim_winner",
+          "refund_market_cancelled"
+        ]
+      },
+      "severity": "soft"
+    },
+    {
+      "name": "v0.6 PoolSpine_v06.sil 存在 + ≥1 entrypoint",
+      "pass": true,
+      "detail": {
+        "sha256": "ca47584b3d54d328b54c5b385c5ff89ddb6c8588fe02902622f86b859f8eda86",
+        "entrypoints": [
+          "settle_aggregate",
+          "dispute_reveal",
+          "refund_maker_unjoined"
+        ],
+        "classification": "PoolSpine"
+      },
+      "severity": "hard"
+    },
+    {
+      "name": "v0.6 PoolSpine_v06 entrypoints 命中 spec hints (PoolSpine)",
+      "pass": true,
+      "detail": {
+        "matched": [
+          "settle_aggregate",
+          "dispute_reveal",
+          "refund_maker_unjoined"
+        ],
+        "found": [
+          "settle_aggregate",
+          "dispute_reveal",
+          "refund_maker_unjoined"
+        ],
+        "hints": [
+          "settle_aggregate",
+          "dispute_reveal",
+          "refund_maker_unjoined",
+          "settle_tofn",
+          "settle_5sig"
+        ]
+      },
+      "severity": "soft"
+    },
+    {
+      "name": "v0.5 ≠ v0.6 SS file hashes 全分 (= protocol_version branch 独立, 派生不同 P2SH)",
+      "pass": true,
+      "detail": {
+        "v05_hashes": [
+          "9331a7c70aa3a0c9acb0977033de122c97cbe3575fef773fe743538caede8481",
+          "38ae5c74bc8b1729e590b970c1baaf5953fd02dd4ef57ae04954d0b60b8e39e3",
+          "5bd34aec1f69e794dd79ed62fffa2bcb52983805ba1ad1c9b62a02f15b8138e5"
+        ],
+        "v06_hashes": [
+          "221968e7d1a8c576ab52d589081a7e2c887b5c5f9be826ffda7ef9010f7ea048",
+          "ca47584b3d54d328b54c5b385c5ff89ddb6c8588fe02902622f86b859f8eda86"
+        ]
+      },
+      "severity": "hard"
+    },
+    {
+      "name": "bond_amount sompi distribution 不变 (= 100M uniform = 1 KAS register-external default)",
+      "pass": true,
+      "detail": {
+        "baseline": {
+          "min": 100000000,
+          "max": 100000000
+        },
+        "current": {
+          "min": 100000000,
+          "max": 100000000
+        }
+      },
+      "severity": "hard"
+    },
+    {
+      "name": "bet TX 历史不丢 (current ≥ baseline)",
+      "pass": true,
+      "detail": {
+        "baseline": 42,
+        "current": 42
+      },
+      "severity": "hard"
+    },
+    {
+      "name": "settle TX events 历史不丢",
+      "pass": true,
+      "detail": {
+        "baseline": 73,
+        "current": 73
+      },
+      "severity": "hard"
+    },
+    {
+      "name": "v158 schema deployed (pool_markets has protocol_version + pool_merkle_root)",
+      "pass": true,
+      "detail": {
+        "has_protocol_version": true,
+        "has_pool_merkle_root": true,
+        "note": "v0.6 ready"
+      },
+      "severity": "soft"
+    },
+    {
+      "name": "/api/pool/market/create-v06 endpoint live (= Console 跑新代码)",
+      "pass": true,
+      "detail": {
+        "http_status": 400,
+        "note": "endpoint registered"
+      },
+      "severity": "soft"
+    },
+    {
+      "name": "v159 schema deployed (oracle_pool_membership + pool_snapshots tables)",
+      "pass": true,
+      "detail": {
+        "found": [
+          "oracle_pool_membership",
+          "pool_snapshots",
+          "pool_committee"
+        ],
+        "expected": [
+          "oracle_pool_membership",
+          "pool_snapshots"
+        ],
+        "missing": [],
+        "note": "J2.1 schema live"
+      },
+      "severity": "soft"
+    },
+    {
+      "name": "pool-merkle-v06.mjs derive 模块存在 (J2.1 byte-align SS climb)",
+      "pass": true,
+      "detail": {
+        "path": "D:\\kanet-tn12\\kasia-console\\src\\services\\pool-merkle-v06.mjs",
+        "exists": true
+      },
+      "severity": "hard"
+    },
+    {
+      "name": "pool-committee-sampler.mjs 存在 (J2.2+J2.3 keyless stake-weighted committee 选拔)",
+      "pass": true,
+      "detail": {
+        "path": "D:\\kanet-tn12\\kasia-console\\src\\services\\pool-committee-sampler.mjs",
+        "exists": true
+      },
+      "severity": "hard"
+    },
+    {
+      "name": "pool-market-settler-v06.mjs 存在 (J2 v0.6 settler with F-S1 canonical endBlockHash + F-S2 256-bit rand)",
+      "pass": true,
+      "detail": {
+        "path": "D:\\kanet-tn12\\kasia-console\\src\\services\\pool-market-settler-v06.mjs",
+        "exists": true
+      },
+      "severity": "hard"
+    },
+    {
+      "name": "API 层 register prep stake<1 KAS reject (= 反机器人三层防御 layer 1)",
+      "pass": true,
+      "detail": {
+        "http_status": 400,
+        "expected": "400/404 reject 不是 200",
+        "note": "Bettor r158 三层防御 + NWT r121 cross-node spec"
+      },
+      "severity": "hard"
+    }
+  ],
+  "pass": 19,
+  "fail": 0,
+  "deploy_pending": 0,
+  "verdict": "PASS",
+  "summary": "19/19 PASS, 0 hard FAIL, 0 deploy pending — verdict PASS"
+}

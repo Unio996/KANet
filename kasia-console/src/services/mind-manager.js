@@ -393,6 +393,15 @@ export async function getReply(relayNodeId, peer, message, channel) {
     return null;
   }
 
+  // ── Gate -0.5 (KANet-UI r546 scale-test): reactive auto-reply pause ──
+  // 外部 agent 持续 DM 21 agent → reactive 回复(巨 context ~15-22k token) hog 共享单 :8000 llama
+  // → 卡 deriveVote 投票 (J1 #60 协议修治了协议消息那路, 这治外部 chat 那路 = proactive/reflection/reactive
+  // 三路 Mind-pause 的第三路, 补 lever③)。live API: PUT /api/trade/triggers {reactiveEnabled:false}。
+  // 默认 true (production 社交不变); scale-test 期临时 pause 腾 :8000。durable=社交 LLM 限频 backlog。
+  if (!_reactiveEnabled) {
+    return null;
+  }
+
   // ── Gate 0: "stop messaging" detection ──
   if (peer && message && detectStopRequest(peer, message)) {
     console.log(`[mind-manager] STOP REQUEST from ${peer.slice(-8)} — auto do_not_contact, no reply sent`);
@@ -591,6 +600,7 @@ export function getQueueStats() {
 let _schedulerStarted = false;
 let _proactiveEnabled = true;
 let _reflectionEnabled = true;
+let _reactiveEnabled = true;  // KANet-UI r546: reactive auto-reply (getReply) 全局闸, scale-test 期 pause 腾 :8000
 let _priceAlertEnabled = true;
 let _priceThresholdPct = 3;
 let _proactiveIntervalMs = 60 * 60_000;
@@ -617,6 +627,7 @@ export function getTriggerStatus() {
   return {
     proactive: { enabled: _proactiveEnabled, intervalMin: _proactiveIntervalMs / 60_000 },
     reflection: { enabled: _reflectionEnabled, intervalHours: 24 },
+    reactive: { enabled: _reactiveEnabled },
     priceAlert: {
       enabled: _priceAlertEnabled,
       thresholdPct: _priceThresholdPct,
@@ -630,9 +641,10 @@ export function getTriggerStatus() {
 /**
  * Update trigger settings.
  */
-export function updateTriggerSettings({ proactiveEnabled, reflectionEnabled, priceAlertEnabled, priceThresholdPct, proactiveIntervalMin }) {
+export function updateTriggerSettings({ proactiveEnabled, reflectionEnabled, reactiveEnabled, priceAlertEnabled, priceThresholdPct, proactiveIntervalMin }) {
   if (proactiveEnabled !== undefined) _proactiveEnabled = !!proactiveEnabled;
   if (reflectionEnabled !== undefined) _reflectionEnabled = !!reflectionEnabled;
+  if (reactiveEnabled !== undefined) _reactiveEnabled = !!reactiveEnabled;
   if (priceAlertEnabled !== undefined) _priceAlertEnabled = !!priceAlertEnabled;
   if (priceThresholdPct !== undefined) _priceThresholdPct = Math.max(0.5, parseFloat(priceThresholdPct) || 3);
   if (proactiveIntervalMin !== undefined) _proactiveIntervalMs = Math.max(5, parseInt(proactiveIntervalMin) || 60) * 60_000;
@@ -666,6 +678,7 @@ export async function triggerProactive(agentName) {
  * Mind decides → Console transmits → Relay executes.
  */
 const PROACTIVE_COOLDOWN_MS = 30_000; // 30s cooldown between proactive cycles per agent
+const PROACTIVE_STAGGER_MS = parseInt(process.env.PROACTIVE_STAGGER_MS, 10) || 5_000; // Bettor r484: 事件触发全员 proactive 的错峰间隔 (防 .105 惊群), env 可调
 const DAILY_PROACTIVE_LIMIT = 50; // max proactive cycles per agent per day (D-7)
 const _proactiveRunning = new Set(); // mutex: prevent concurrent proactive per agent
 const _healthPaused = {};            // agentName → true if red, proactive skips
@@ -688,6 +701,7 @@ function _isDailyLimitReached(agentName) {
 
 export async function triggerProactiveAll(eventContext) {
   const now = Date.now();
+  let _proactiveStaggerIdx = 0; // Bettor r484: 每次事件批从 0 错峰, 防累积无界
   for (const name of Object.keys(minds)) {
     const mind = minds[name];
     if (!mind?.runProactive) continue;
@@ -718,14 +732,21 @@ export async function triggerProactiveAll(eventContext) {
     }
 
     _proactiveRunning.add(name);
-    mind.runProactive(eventContext).then((result) => {
-      _lastProactiveTime[name] = new Date().toISOString();
-      recordMindEvent(name, 'proactive_event', JSON.stringify(eventContext).slice(0, 100) + ' → ' + (result || '').slice(0, 100));
-    }).catch(err => {
-      console.log(`[mind-manager] ${name} event proactive error: ${err?.message || err}`);
-    }).finally(() => {
-      _proactiveRunning.delete(name);
-    });
+    // Bettor r484 (.105 惊群根修, J1 #2 诊断): 之前全员 runProactive 同毫秒并发齐发 → N 个 LLM
+    // 调用同时砸单实例 llama-server → 每 ~30min fetch failed/timeout 成簇 (同机 kaspad 也跟着卡)。
+    // 错峰: 按 index 延迟 PROACTIVE_STAGGER_MS 摊开发, 不同毫秒齐砸 (interval 路径 L770 已有 25s
+    // 错峰, 这条事件路径之前漏了)。mutex 在 add 时已占, 延迟期间不会被重复触发。配 llama --parallel。
+    const _staggerDelay = (_proactiveStaggerIdx++) * PROACTIVE_STAGGER_MS;
+    setTimeout(() => {
+      mind.runProactive(eventContext).then((result) => {
+        _lastProactiveTime[name] = new Date().toISOString();
+        recordMindEvent(name, 'proactive_event', JSON.stringify(eventContext).slice(0, 100) + ' → ' + (result || '').slice(0, 100));
+      }).catch(err => {
+        console.log(`[mind-manager] ${name} event proactive error: ${err?.message || err}`);
+      }).finally(() => {
+        _proactiveRunning.delete(name);
+      });
+    }, _staggerDelay);
   }
 }
 

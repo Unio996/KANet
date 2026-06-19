@@ -3,6 +3,16 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { randomBytes } from 'crypto';
 
+// J2-tn r429 (Bettor r467 P0 Console crash 根治): defensive top-level handlers.
+// 防 Console 反复 crash 真因 — uncaught exception / unhandledRejection 自 child relay /
+// adapter spawn / scout RPC / LLM 调用. 保进程活, log 异常 (= supervisor 不再每次拉起).
+process.on('uncaughtException', (err) => {
+  console.error('[kanet:uncaught]', err?.stack || err?.message || String(err));
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('[kanet:unhandled-rejection]', reason?.stack || reason?.message || String(reason));
+});
+
 // DB setup
 import { runMigrations } from './db/migrate.js';
 import { sqlite as _sqlite } from './db/client.js';
@@ -16,6 +26,7 @@ import { registerConversationRoutes } from './api/conversations.js';
 import { registerRelayRoutes } from './api/relay.js';
 import { registerAdapterRoutes } from './api/adapter.js';
 import { registerEventRoutes } from './api/events.js';
+import { registerLinkRoutes } from './api/link.js';
 import { registerHealthRoutes } from './api/health.js';
 import { registerContextRoutes } from './api/context.js';
 import { registerSettingsRoutes } from './api/settings.js';
@@ -30,6 +41,10 @@ import { registerChainDataRoutes } from './api/chain-data.js';
 import { registerStockRoutes } from './api/stocks.js';
 import { registerBettorRoutes } from './api/bettor.js';
 import { registerPoolRoutes } from './api/pool.js';
+import { registerKanetBrokerRoutes } from './api/kanet-broker.js';
+import { registerKanetMakerRoutes } from './api/kanet-maker.js';
+import { registerOraclePoolRoutes } from './api/oracle-pool.js';
+import { registerTestOracleRoutes } from './api/test-oracle.js';
 import { registerBrokerRoutes } from './api/broker.js';
 import { registerAuthRoutes } from './api/auth.js';
 import { registerOAuthRoutes } from './api/oauth.js';
@@ -79,7 +94,12 @@ const PORT = parseInt(process.env.PORT || '3100');
 
 // ignoreDuplicateSlashes: //welcome-dev → /welcome-dev (= Owner 2026-05-28 撞双斜杠 404 修).
 // ignoreTrailingSlash: /faucet/ → /faucet (= 顺手防尾斜杠 404).
-const fastify = Fastify({ logger: false, ignoreDuplicateSlashes: true, ignoreTrailingSlash: true });
+// gap-A: trustProxy scoped to the reverse proxy (127.0.0.1) so request.ip resolves to the REAL client
+// from X-Forwarded-For ONLY when the hop is the trusted local proxy (the faucet per-IP 24h×3 limit in
+// chat.js:585 reads request.ip — without this it sees 127.0.0.1 for every external user behind the proxy
+// → per-IP limit collapses to one shared bucket). Never `trustProxy: true` (unscoped = X-Forwarded-For
+// spoofable). Harmless pre-proxy: Console is localhost-bound, only localhost (trusted) can reach it.
+const fastify = Fastify({ logger: false, ignoreDuplicateSlashes: true, ignoreTrailingSlash: true, trustProxy: '127.0.0.1' });
 
 // Plugins
 await fastify.register(import('@fastify/formbody'));
@@ -147,6 +167,7 @@ await registerConversationRoutes(fastify);
 await registerRelayRoutes(fastify);
 await registerAdapterRoutes(fastify);
 await registerEventRoutes(fastify);
+await registerLinkRoutes(fastify);
 await registerContextRoutes(fastify);
 await registerSettingsRoutes(fastify);
 await registerIdentityRoutes(fastify);
@@ -165,6 +186,10 @@ await registerExchangeRoutes(fastify);
 await registerAuditPredictionRoutes(fastify);
 await registerBettorRoutes(fastify);
 await registerPoolRoutes(fastify);
+await registerKanetBrokerRoutes(fastify);
+await registerKanetMakerRoutes(fastify);
+await registerOraclePoolRoutes(fastify);
+await registerTestOracleRoutes(fastify);
 await registerDefiRoutes(fastify);
 await registerPortfolioRoutes(fastify);
 await registerBackupRoutes(fastify);
@@ -348,12 +373,12 @@ fastify.get('/predictions/pool/create', async (request, reply) => {
   return reply.viewAsync('predictions-pool-create', { lang, t, dir: isRtl(lang) ? 'rtl' : 'ltr', relayNodes, _page: 'predictions-pool-create' });
 });
 
-// Oracle v0.3 sub #7 D1 — Markets › Predictions › Oracle Registry sub-page
-// reads /api/oracle/registry (= J2 sub 1 oracle_registry table)
+// /predictions/oracle-registry — retired (Gap 3 dedup, Bettor r36 GO).
+// Subsumed by /oracle home (Owner 钦定 ② independent oracle system UI, Bettor r35 CLOSE).
+// 信任系统 tab + 我的 oracle tab 覆盖 registry 全功能 + 池透明 + 每市场信任 + onboarding.
+// predictions-oracle-registry.eta fossil retained.
 fastify.get('/predictions/oracle-registry', async (request, reply) => {
-  const lang = parseLang(request.headers.cookie);
-  const t = getT(lang);
-  return reply.viewAsync('predictions-oracle-registry', { lang, t, dir: isRtl(lang) ? 'rtl' : 'ltr', _page: 'predictions-oracle-registry' });
+  return reply.redirect(302, '/oracle');
 });
 
 // Oracle UI piece 1+2 (Bettor r128/r129) — pool market detail page (= 填 create 页 dead link + oracle 透明度)
@@ -372,6 +397,29 @@ fastify.get('/audit', async (request, reply) => {
 
 // /settings → redirect to /relays (node config is there now)
 fastify.get('/settings', async (request, reply) => reply.redirect('/relays'));
+
+// Broker home — Gap 1 (Owner UI buildout, Bettor r29 LOCK + r28 role-home 模板).
+// Subsume /agent?tab=broker (Iron Rule "建=取代非新增"). Data: J2 r111 kanet-broker endpoints.
+fastify.get('/broker', async (request, reply) => {
+  const lang = parseLang(request.headers.cookie);
+  const t = getT(lang);
+  return reply.viewAsync('broker-home', { lang, t, dir: isRtl(lang) ? 'rtl' : 'ltr', _page: 'broker' });
+});
+
+// Oracle home — Gap 2 batch 1 (Owner UI buildout, Bettor r29 LOCK). 用同 role-home 5 块模板.
+// Subsume /agent?tab=oracle. Data: J1 r137 /api/oracle/income + /api/oracle/max-pot + relay endpoints.
+fastify.get('/oracle', async (request, reply) => {
+  const lang = parseLang(request.headers.cookie);
+  const t = getT(lang);
+  return reply.viewAsync('oracle-home', { lang, t, dir: isRtl(lang) ? 'rtl' : 'ltr', _page: 'oracle' });
+});
+
+// Maker home — 数据三角色补齐 Lane① (Bettor r639). 我的市场 + 盈亏 (P&L). Data: /api/kanet-maker/*.
+fastify.get('/maker', async (request, reply) => {
+  const lang = parseLang(request.headers.cookie);
+  const t = getT(lang);
+  return reply.viewAsync('maker-home', { lang, t, dir: isRtl(lang) ? 'rtl' : 'ltr', _page: 'maker' });
+});
 
 
 // POST /lang — set language cookie
@@ -410,6 +458,12 @@ startScheduler();
 // Auto-start all relay processes (per-account)
 import { startAll as startAllRelays, stopAll as stopAllRelays } from './services/relay-manager.js';
 await startAllRelays();
+
+// Auto-start the Telegram broker bot if the operator previously enabled it (tg_bot_enabled='1').
+// Manual Stop is remembered (adapter is_enabled pattern), so the bot survives Console restarts
+// without going live on its own. (KANet-UI, Bettor r945 接通最小路 ①)
+import { startTgBotIfConfigured } from './services/tg-bot-manager.js';
+await startTgBotIfConfigured();
 
 // Bettor scanner cron — Phase 3a (6h cron, top 10 推荐写入 bettor_recommendations)
 // 5/14 Owner pivot: 数学 Kelly 路线 deprecated, 新 scavenger 接管. 老 scanner 暂保留留 fallback.
@@ -475,6 +529,51 @@ startPredictionVoterCron();
 import { startPoolMarketSettlerCron } from './services/pool-market-settler.js';
 startPoolMarketSettlerCron();
 
+// DoD C 收尾 (Bettor r393): 5min cron 自动领 unclaimed bettor refunds for cancelled markets.
+import { startBettorRefundClaimAutoCron } from './services/bettor-refund-claim-auto.mjs';
+startBettorRefundClaimAutoCron();
+
+// r420 auto-bet (Bettor r433/r436 Owner 钦定 规模化跨域实测): Console-cron 自动押注.
+// 取代外部 _nwt_tn_autobet_loop.mjs daemon (= 不 follow Console restart, KANet-UI r656 surface).
+// env: AUTO_BET_TICK_MS (60s default), AUTO_BET_PER_TICK (2), MIN/MAX_STAKE_KAS (1/50),
+//      MIN_RESERVE_KAS (10), AUTO_BET_RELAYS (= AutoBetter-1/2/3 + tester-1/2/3 default).
+import { startAutoBetterCron } from './services/pool-auto-better.js';
+startAutoBetterCron();
+
+// J1 #27d (Owner public-testnet hardening sprint 2026-06-14): boot catch-up for market_publishes
+// missed by in-mem chunk reassembly (LRU-evicted under sign_req re-broadcast flood, or lost across a
+// restart). Rebuilds pre-restart misses from the DURABLE broadcast_messages store (idempotent: the
+// handler skips rows that already exist). Runtime misses self-heal via orphan bet/vote signal-triggers
+// in trade-protocol-filter (NWT r1166 ④). force=true bypasses the throttle for this one-shot boot pass.
+import { catchUpUningestedMarkets } from './services/trade-protocol-filter.js';
+catchUpUningestedMarkets({ windowHours: 24, force: true }).catch((e) => console.warn('[index] #27d boot market catch-up fail:', e.message));
+
+// r425 relay-orphan 固化 (Bettor r446 task 2): 30s cron 扫 enrolled relays, dead → startRelay.
+// 配合 r424 Console supervisor: supervisor 救 Console 死, monitor 救 relay 死/没起来.
+// Restart storm 防护: 3/h cap per relay.
+import { startRelayHealthMonitorCron } from './services/relay-health-monitor.js';
+startRelayHealthMonitorCron();
+
+// Oracle-voter PRODUCING-health (KANet-UI, Q2 durability hard-req per NWT/Bettor r989/r997): relay-health
+// catches a DEAD relay, but Q2 was a SILENT 0-vote stall while the voter cron ran fine (process-alive).
+// 2min cron flags verifying markets a LOCAL committee oracle owes a vote on but hasn't cast (>10min) →
+// WARN log + events row (Brain/UI visible). Detect+surface only (a vote-routing/quorum bug isn't restart-healable).
+import { startOracleVoterHealthMonitorCron } from './services/oracle-voter-health-monitor.js';
+startOracleVoterHealthMonitorCron();
+
+// 质押池活化 (Bettor r449): 5min cron 刷 oracle_pool_chain_view 保新鲜.
+import { startOraclePoolScannerCron } from './services/oracle-pool-chain-scanner-cron.mjs';
+startOraclePoolScannerCron();
+
+// design-v2 (B) broadcaster N-medium-UTXO maintainer (KANet-UI, 880 settle-throughput; Bettor r489b APPROVE).
+// Proactive cron keeps settle broadcasters (local oracle signers + hot seeder maker) topped at N confirmed
+// medium UTXOs → settle sign_req chunks pick the next pre-confirmed UTXO instead of waiting each chunk's
+// change to confirm = eliminates inter-chunk confirm-wait (the real 880 bottleneck; NOT parallelism —
+// sendKaspa is serial via withSendLock). The rebalance shares that same withSendLock (utxo-split.mjs) so it
+// can never double-spend an in-flight settle/sign_req. Hard-gated by load test (before ~33min / after).
+import { startBroadcasterUtxoMaintainerCron } from './lib/broadcaster-utxo.mjs';
+startBroadcasterUtxoMaintainerCron();
+
 // Phase B Variant Expander 3-tier (Owner 5/16 钦定 "B" + Bettor r141 spec) — 30 min cron.
 // per scanner rec → auto-find related markets → 3 档 variant (激进/适中/保守) INSERT.
 // Phase 1 skeleton + UI surface, Phase 2 will integrate depth-500 /book API real-time.
@@ -497,6 +596,11 @@ import { startMarketSeeder, startSeederDepositWatcher, startSeederRefundWorker }
 startMarketSeeder();
 startSeederDepositWatcher();
 startSeederRefundWorker();
+
+// Pool-market seeder (S-A, Bettor r240) — auto-mirror real Polymarket top-volume markets →
+// pending_bettors. Opt-in via POOL_SEEDER_ENABLED=1 + POOL_SEEDER_MAKER_RELAY (off = no-op).
+import { startPoolMarketSeeder } from './services/pool-market-seeder.js';
+startPoolMarketSeeder();
 
 // R5 T-J2-16: retail-dex v1 deprecated, deleted. broker is_service Service 模式
 // 直走 broker-buy/sell-handler + broker-action-queue. retail_dex_orders 表保留

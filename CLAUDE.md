@@ -46,12 +46,13 @@
 
 ## 接位 SOP（新会话 / 接替前任 Agent 必跑）
 
-**写代码前 4 步扫描**（漏一步重复犯历史错, 见 ANTI-PATTERNS.md 规则 12）:
+**写代码前 5 步扫描**（漏一步重复犯历史错, 见 ANTI-PATTERNS.md 规则 12）:
 
 1. **领域 anti-pattern**: `grep -i <topic> docs/ANTI-PATTERNS.md docs/QWEN-RULES.md`
 2. **现有 caller 模式**: `grep -rn <key_function> kasia-console/src/` (e.g. 写 LLM caller → `grep chat_template_kwargs` 看 4 个现有 caller)
 3. **该领域 commit 历史**: `git log --grep=<topic> --oneline -20` (近期相关 fix 暴露的坑)
 4. **memory 相关 feedback**: `grep -ri <topic> ~/.claude/projects/*/memory/feedback_*.md`
+5. **设计前查资产（铁律,违=重造/绕路,第3次同病的根治）**: 任何**领域设计 / SS / 链上机制**动手前——(a) 必读 `D:\KANet-Knowledge-Base` 该领域目录 + 既有设计文档(防重造已设计系统);(b) 写 SS/链上前**必查 silverscript 官方 `docs/DECL.md`+`TUTORIAL.md` 确认可用原语**(introspection `tx.outputs[i].value/scriptPubKey` / covenant `OpInputCovenantId` / `byte[](int,int)` int-to-byte / `blake2b` / `for` 循环——TN12 全有,见记忆 `reference-silverscript-real-capabilities`)。**撞到"这原语好像没有/做不了"的假设,必先去文档/源码验证再决定绕不绕——禁止凭印象判定限制然后搭链下 fallback**(漏 KB / 漏既有 §2.A 滚动分片设计 / 漏 silverscript 工具 = 同一个病)。
 
 **写完 commit 前必跑**: `node scripts/lint-kanet.mjs <changed-files>` — 失败一条 commit 都不让 (git pre-commit hook 强制).
 

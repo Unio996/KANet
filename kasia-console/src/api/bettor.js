@@ -10,13 +10,17 @@ import { isRelayAlive } from '../services/relay-manager.js';
 
 export async function registerBettorRoutes(fastify) {
   // GET /api/bettor/recommendations — top N most-recent batch (optional filter by relay_node_id)
+  // Owner UI audit fix 2026-05-30: 当带 relay 过滤时, 也包含全局 (relay_node_id IS NULL) 推荐.
+  // 因 fossa-stable scanner (cron, 全局扫 Polymarket) 写 NULL relay (= 待 Owner ack 全局推荐),
+  // 旧 UI 调时带 selectedAgent → 把这些全 filter 掉 → 用户 /predictions 看不到任何推荐.
+  // 修法: relay 过滤时 = WHERE relay_node_id = ? OR relay_node_id IS NULL.
   fastify.get('/api/bettor/recommendations', async (request, reply) => {
     const limit = Math.min(parseInt(request.query.limit) || 10, 50);
     const relayNodeId = request.query.relay_node_id || null;
 
-    // Find latest scan timestamp (per agent if given, else global latest)
+    // Find latest scan timestamp (per agent + global if relay given; else global latest)
     const latest = relayNodeId
-      ? sqlite.prepare(`SELECT scanned_at FROM bettor_recommendations WHERE relay_node_id = ? ORDER BY scanned_at DESC LIMIT 1`).get(relayNodeId)
+      ? sqlite.prepare(`SELECT scanned_at FROM bettor_recommendations WHERE relay_node_id = ? OR relay_node_id IS NULL ORDER BY scanned_at DESC LIMIT 1`).get(relayNodeId)
       : sqlite.prepare(`SELECT scanned_at FROM bettor_recommendations ORDER BY scanned_at DESC LIMIT 1`).get();
 
     if (!latest) return reply.send({ ok: true, scanned_at: null, recommendations: [] });
@@ -29,7 +33,7 @@ export async function registerBettorRoutes(fastify) {
                  reasoning_json, trigger_type, llm_tier, status, scanned_at,
                  fundamental_estimate, fundamental_sources, fundamental_confidence
           FROM bettor_recommendations
-          WHERE scanned_at = ? AND relay_node_id = ?
+          WHERE scanned_at = ? AND (relay_node_id = ? OR relay_node_id IS NULL)
           ORDER BY score DESC LIMIT ?
         `).all(latest.scanned_at, relayNodeId, limit)
       : sqlite.prepare(`
@@ -1892,7 +1896,7 @@ export async function registerBettorRoutes(fastify) {
           p2sh_address: offer.escrow_p2sh,
           redeem_script_hex: redeemScriptHex,
           maker_address: offer.maker_kaspa_addr,
-          lock_time: deadlineSeconds,  // Sub 8.3 Bug 15: SS contract require(tx.time >= deadline)
+          lock_time: deadlineSeconds * 1000,  // J1tn r303 (Bettor 03:19 v3): *1000 → ms; PredictionEscrowUnanimous5 SS L146/167 require(tx.time >= deadline*1000), NO grace. 漏 *1000 致 kaspad DAA 模式 reject.
         });
       } else {
         // refund_both — caller pre-resolves both outpoints (= maker_lock_tx[0] + taker_lock_tx[0]).
@@ -1911,7 +1915,7 @@ export async function registerBettorRoutes(fastify) {
             { address: offer.maker_kaspa_addr, amountSompi: String((makerStakeSompi - halfFee).toString()) },
             { address: offer.taker, amountSompi: String((takerStakeSompi - halfFee).toString()) },
           ],
-          lock_time: deadlineSeconds,  // Sub 8.3 Bug 15: SS contract require(tx.time >= deadline)
+          lock_time: deadlineSeconds * 1000,  // J1tn r303 (Bettor 03:19 v3): *1000 → ms; PredictionEscrowUnanimous5 SS L146/167 require(tx.time >= deadline*1000), NO grace. 漏 *1000 致 kaspad DAA 模式 reject.
         });
       }
     } catch (err) {
@@ -2181,19 +2185,22 @@ export async function registerBettorRoutes(fastify) {
 
   // GET /api/oracle/registry — list active oracles (filter optional tier + status).
   fastify.get('/api/oracle/registry', async (request, reply) => {
-    const { tier, status } = request.query || {};
-    const where = ["expires_at > datetime('now')"];
+    const { tier, status, include_expired } = request.query || {};
+    // KANet-UI 2026-06-07 Track C r338 增强: ?include_expired=1 显过期 registry 行 (= /oracle 仲裁人中心
+    // 段 1 用真 tier+capabilities+licensed_domains 比 legacy is_oracle=1 全; Bettor r338 校准)
+    const where = include_expired === '1' ? [] : ["expires_at > datetime('now')"];
     const params = [];
     if (tier != null) {
       const tierNum = parseInt(tier, 10);
       if ([1, 2, 3].includes(tierNum)) { where.push('tier = ?'); params.push(tierNum); }
     }
     if (status) { where.push('status = ?'); params.push(status); }
+    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
     const rows = sqlite.prepare(`
       SELECT relay_node_id, pubkey, tier, capabilities, announced_at, expires_at,
              bond_amount, status, epoch, updated_at, licensed_domains, frozen
       FROM oracle_registry
-      WHERE ${where.join(' AND ')}
+      ${whereSql}
       ORDER BY tier ASC, announced_at DESC
       LIMIT 200
     `).all(...params);

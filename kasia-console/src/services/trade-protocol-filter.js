@@ -28,7 +28,15 @@ export { _executeHedge as executeHedge };
 export { _autoPayExchange as triggerAutoPay, _autoSettleAsset, _autoSettleAsset as _autoSendKas };
 
 export async function onBroadcastWritten(row) {
-  if (!row.content || !row.content.startsWith('{"t":"kanet_')) return;
+  // Pre-filter to skip non-protocol broadcasts cheaply (full JSON.parse only if prefix match).
+  // Bettor r97 J2 consumer half: pool_oracle_vote_v1 payload starts with "pool_" not "kanet_",
+  // so widen prefix check. Adds ~1ns cost per non-matching broadcast vs prevents silent skip
+  // of the entire new pool flow (= KI 49 silent skip pattern that bit voter ingest before).
+  if (!row.content) return;
+  // J2-tn r301 Path A: add `oracle_` prefix for `oracle_stake_enroll_v1` envelope ingest.
+  if (!row.content.startsWith('{"t":"kanet_')
+      && !row.content.startsWith('{"t":"pool_')
+      && !row.content.startsWith('{"t":"oracle_')) return;
 
   let msg;
   try {
@@ -78,6 +86,24 @@ export async function onBroadcastWritten(row) {
         await handleExchangeResolve(msg); break;
       case 'kanet_prediction_params_v1':
         await handlePredictionParams(msg); break;
+      case 'pool_oracle_vote_v1':
+        await handlePoolOracleVote(msg); break;  // Bettor r97 J2 consumer: 跨节点 oracle vote ingest
+      case 'pool_market_published_v1':
+        await handlePoolMarketPublished(msg); break;  // Bettor r117/r118/r120 ② consumer: market_publish
+      case 'pool_bet_registered_v1':
+        await handlePoolBetRegistered(msg); break;  // Bettor r113/r117/r120 ② consumer: bet_register
+      case 'pool_market_chunk_v1':
+        await handlePoolMarketChunk(msg); break;  // Bettor r128/r129 + J1 e67c9328 chunked v1
+      case 'pool_market_settled_v1':
+        await handlePoolMarketSettled(msg); break;  // J2-tn r418 (Bettor r428 关1): cross-node settle sync push
+      case 'oracle_stake_enroll_v1':
+        await handleOracleStakeEnroll(msg); break;  // J2-tn r301 Path A: cross-node enrollment ingest
+      case 'oracle_stake_withdraw_v1':
+        await handleOracleStakeWithdraw(msg); break;  // 问3 (a): cross-node-convergent oracle 撤出 (active=0 on all nodes)
+      case 'kanet_pool_oracle_tx_sign_resp_v1':
+        await handlePoolOracleTxSignResp(msg); break;  // J2-tn r374 (Bettor 15:02 catch): cross-node sign_resp ingest
+      case 'kanet_pool_oracle_tx_sign_req_v1':
+        await handlePoolOracleTxSignReq(msg); break;  // J1tn r361 (Bettor 15:05 钦定): cross-node sign_req trigger
     }
   } catch (err) {
     console.error(`[trade-filter] Error processing ${msg.t}: ${err.message}`);
@@ -85,6 +111,1114 @@ export async function onBroadcastWritten(row) {
 }
 
 // ── Handlers ──────────────────────────────────────────────────
+
+// Bettor r95/r97 J2 consumer half: cross-node oracle vote ingest.
+// Producer (J1 r166 bbaea95): voter broadcasts kanet-prediction channel w/ pool_oracle_vote_v1 payload
+// + REAL Kaspa txid. Same producer node ALSO direct-INSERTs chain_events 'pool_oracle_vote'.
+// Consumer (THIS handler): on ANY node receiving the broadcast, re-INSERT the same chain_event
+// row (same txid → INSERT OR IGNORE 幂等), so settler decideConsensus on remote nodes picks
+// up the vote identical to producer.
+//
+// Verification (跨节点防伪造):
+// 1. market_id exists in local pool_markets (= skip if we don't know this market)
+// 2. voter_pubkey 真在 market.oracle_relay_ids assigned oracle set
+// 3. signature 真验 (kaspa.verifyMessage 跟 prediction-params-cache 同款)
+//
+// Same-node case (producer + consumer on same Console, broadcast fires onBroadcastWritten locally):
+// the producer's direct INSERT already wrote the row; this handler's INSERT OR IGNORE no-ops.
+// J2-tn r402 P0-#3 (Bettor r290b+r291b 关1 PASS): cross-node maker refund handler.
+// settler broadcasts pool_refund_request_v1 for 0-bet cross-node markets when local maker is sentinel.
+// Producer node (where real maker_relay_id lives) ingests this msg, verifies local maker_pk match,
+// and triggers dispatchRefund using real local relay. Idempotent: skip if refund_dispatched_at set.
+async function handlePoolRefundRequest(msg) {
+  if (!msg.market_id || !msg.maker_pk) {
+    console.warn(`[trade-filter:pool-refund-req] msg missing fields market=${msg.market_id?.slice(0,12)} maker_pk=${msg.maker_pk?.slice(0,12)}`);
+    return;
+  }
+  const market = sqlite.prepare('SELECT * FROM pool_markets WHERE id = ?').get(msg.market_id);
+  if (!market) {
+    console.warn(`[trade-filter:pool-refund-req] unknown market=${msg.market_id?.slice(0,12)} — skip`);
+    return;
+  }
+  // Producer check: market.maker_relay_id must be real UUID (= local relay), not cross-node sentinel.
+  const isCrossNode = typeof market.maker_relay_id === 'string' && market.maker_relay_id.startsWith('cross-node:');
+  if (isCrossNode) {
+    // 我也是 consumer 节点 (= 不是 producer). 我不能 refund. Drop.
+    console.log(`[trade-filter:pool-refund-req] market=${msg.market_id.slice(0,12)} I am also cross-node consumer — drop`);
+    return;
+  }
+  let meta = {};
+  try { meta = JSON.parse(market.metadata || '{}'); } catch {}
+  if (meta.refund_dispatched_at) {
+    console.log(`[trade-filter:pool-refund-req] market=${msg.market_id.slice(0,12)} already refund_dispatched_at=${meta.refund_dispatched_at} — skip idempotent`);
+    return;
+  }
+  // Verify msg.maker_pk matches local market's maker (= producer authority check).
+  try {
+    const makerRow = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(market.maker_relay_id);
+    if (makerRow?.address) {
+      const { deriveXOnlyPubkey } = await import('../api/pool.js').catch(() => ({}));
+      // deriveXOnlyPubkey is private; recompute inline via kaspa-wasm.
+      const kaspa = await import('kaspa-wasm');
+      const localMakerPk = kaspa.XOnlyPublicKey.fromAddress(new kaspa.Address(makerRow.address)).toString();
+      if (String(localMakerPk).toLowerCase() !== String(msg.maker_pk).toLowerCase()) {
+        console.warn(`[trade-filter:pool-refund-req] market=${msg.market_id.slice(0,12)} maker_pk mismatch local=${localMakerPk.slice(0,12)} msg=${String(msg.maker_pk).slice(0,12)} — drop`);
+        return;
+      }
+    }
+  } catch (e) {
+    console.warn(`[trade-filter:pool-refund-req] verify maker_pk fail market=${msg.market_id.slice(0,12)}: ${e.message}`);
+    return;
+  }
+  // Producer auth verified — dispatchRefund using real local maker_relay_id.
+  try {
+    const { dispatchRefund } = await import('./pool-market-settler.js');
+    console.log(`[trade-filter:pool-refund-req] market=${msg.market_id.slice(0,12)} dispatchRefund 触发 (cross-node consumer request)`);
+    await dispatchRefund(market, { action: 'refund', reason: 'cross-node consumer refund request (P0-#3)' });
+  } catch (e) {
+    console.warn(`[trade-filter:pool-refund-req] dispatchRefund fail market=${msg.market_id.slice(0,12)}: ${e.message}`);
+  }
+}
+
+// Idempotency = chain_events.txid UNIQUE.
+async function handlePoolOracleVote(msg) {
+  const { randomUUID } = await import('crypto');
+  const kaspa = await import('kaspa-wasm');
+
+  if (!msg.market_id || !msg.voter_pubkey || !msg.outcome || !msg.signature) {
+    console.warn(`[trade-filter:pool-vote] msg missing fields (market=${msg.market_id?.slice(0,12)} voter=${msg.voter_pubkey?.slice(0,12)} outcome=${msg.outcome} sig=${!!msg.signature})`);
+    return;
+  }
+
+  // 1. Market exists on this node?
+  // Cross-node-correct membership check: read oracle1/2/3_pk DIRECTLY (= protocol-truth on
+  // market row, cross-node consistent via market_publish). KANet-UI r332 caught: original
+  // code resolved relay_nodes WHERE id IN oracle_relay_ids (= local relay infra), which
+  // fails on cross-node ingest when peer's relays unknown locally. relay_nodes is plumbing
+  // not protocol membership. xpk recompute path obsoleted.
+  const market = sqlite.prepare('SELECT id, oracle1_pk, oracle2_pk, oracle3_pk, protocol_version FROM pool_markets WHERE id = ?').get(msg.market_id);
+  if (!market) {
+    // Cross-node case: vote for a market this node hasn't seen yet. J1 #27d: this is the SIGNAL that a
+    // market_publish was missed (LRU-evicted under chunk-flood / lost across restart). Fire the catch-up
+    // re-ingest (NWT r1166 ④ signal-triggered, throttled, fire-and-forget — don't block vote handling).
+    // Once catch-up rebuilds the row, the settler committee-sample + post-sample vote re-scan replay this vote.
+    console.log(`[trade-filter:pool-vote] market ${msg.market_id.slice(0,12)} not in local DB (cross-node market_publish gap) — trigger #27d catch-up re-ingest`);
+    catchUpUningestedMarkets({ windowHours: 24 }).catch(e => console.warn(`[trade-filter:pool-vote] catch-up trigger fail: ${e.message}`));
+    return;
+  }
+
+  // 2. voter_pubkey is one of assigned oracles? Direct pk compare, no relay_nodes hop.
+  // J2-tn r369 (Bettor 14:41 catch — 精确根因 vote-ingest 漏 v0.7 path):
+  // v0.5: oracle1/2/3_pk on market row. v0.6/v0.7: NULL on market row (= committee
+  // sampled at settle time stored in pool_committee.committee_pks). 之前只读 v0.5 路径
+  // → v0.7 markets assignedPks=[] → 全 reject → chain_events 没写 → consensus 0 票.
+  const voterPkNorm = String(msg.voter_pubkey || '').toLowerCase();
+  let assignedPks;
+  if (market.protocol_version === 'v0.6' || market.protocol_version === 'v0.7') {
+    let committeePks = [];
+    try {
+      const commRow = sqlite.prepare('SELECT committee_pks FROM pool_committee WHERE market_id = ?').get(market.id);
+      committeePks = JSON.parse(commRow?.committee_pks || '[]');
+    } catch {}
+    assignedPks = committeePks.map(p => String(p).toLowerCase());
+    if (assignedPks.length === 0) {
+      // Committee not yet sampled on this node; vote arrives before committee sample finishes.
+      // chain_events.txid UNIQUE means a later replay (via on-chain TX) is safe. Skip-with-log.
+      console.log(`[trade-filter:pool-vote] market=${market.id.slice(0,12)} pv=${market.protocol_version} committee not yet sampled (waiting), skip — settler tick will trigger re-process`);
+      return;
+    }
+  } else {
+    // v0.5 legacy path — oracle1/2/3_pk on market row.
+    assignedPks = [market.oracle1_pk, market.oracle2_pk, market.oracle3_pk]
+      .filter(Boolean).map(p => String(p).toLowerCase());
+  }
+  if (!assignedPks.includes(voterPkNorm)) {
+    console.warn(`[trade-filter:pool-vote] voter_pubkey ${voterPkNorm.slice(0,12)} not in assigned committee [${assignedPks.map(p=>p.slice(0,8)).join(',')}] for market ${msg.market_id.slice(0,12)} pv=${market.protocol_version} — reject`);
+    return;
+  }
+
+  // 3. Verify signature (= reconstruct unsignedPayload, verifyMessage against voter_pubkey).
+  // Producer signed: JSON.stringify({ t, market_id, voter_relay_id, voter_pubkey, outcome,
+  // evidence_url, evidence_hash, vote_timestamp, epoch }) — keys MUST match producer field order
+  // for canonical sig input. We rebuild by dropping `signature` from msg.
+  const unsignedCopy = { ...msg };
+  delete unsignedCopy.signature;
+  // Drop trade-filter-added _tx/_from/_channel/_at meta too (added at L41-44 onBroadcastWritten).
+  delete unsignedCopy._tx; delete unsignedCopy._from; delete unsignedCopy._channel; delete unsignedCopy._at;
+  const messageToVerify = JSON.stringify(unsignedCopy);
+  let sigValid = false;
+  try {
+    sigValid = kaspa.verifyMessage({ message: messageToVerify, signature: msg.signature, publicKey: msg.voter_pubkey });
+  } catch (e) {
+    console.warn(`[trade-filter:pool-vote] verifyMessage exception market=${msg.market_id.slice(0,12)}: ${e.message}`);
+    return;
+  }
+  if (!sigValid) {
+    console.warn(`[trade-filter:pool-vote] sig invalid voter=${msg.voter_pubkey.slice(0,12)} market=${msg.market_id.slice(0,12)} — reject`);
+    return;
+  }
+
+  // 4. Idempotent INSERT (same shape as producer L417-419: INSERT OR IGNORE on UNIQUE(txid)).
+  // observed_by 'scout-ingest' marks this came via cross-node ingest path; producer uses 'prediction-voter'.
+  // settler.decideConsensus reads chain_events WHERE event_type='pool_oracle_vote' regardless of observed_by.
+  try {
+    const fromAddr = msg._from || null;
+    const makerRow = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = (SELECT maker_relay_id FROM pool_markets WHERE id = ?)').get(msg.market_id);
+    sqlite.prepare(`
+      INSERT OR IGNORE INTO chain_events (id, txid, event_type, from_address, to_address, payload, observed_by, observed_at)
+      VALUES (?, ?, 'pool_oracle_vote', ?, ?, ?, 'scout-ingest', CURRENT_TIMESTAMP)
+    `).run(randomUUID(), msg._tx, fromAddr, makerRow?.address || null, JSON.stringify(msg));
+    console.log(`[trade-filter:pool-vote] ingested market=${msg.market_id.slice(0,12)} outcome=${msg.outcome} voter=${msg.voter_pubkey.slice(0,12)} tx=${msg._tx?.slice(0,16)}`);
+  } catch (e) {
+    console.warn(`[trade-filter:pool-vote] insert fail (likely dedup, ok): ${e.message}`);
+  }
+}
+
+// J2-tn r301 Path A consumer half: cross-node oracle enrollment ingest.
+//
+// Producer (api/oracle-pool.js _broadcastOracleStakeEnroll): owner relay ecdsa_sign over
+// JSON.stringify({t, staker_pk_x, lock_until_daa, p2sh_addr, enrolled_at}) → sendBroadcastChunked
+// on kanet-prediction. Sig 是 staker_pk_x 自家 wallet 签 (= 防伪造 enrollment).
+//
+// Consumer (THIS handler): on ANY node receiving the broadcast:
+//   1. Recompute P2SH via computeStakeP2SH_v1(staker_pk_x, lock_until_daa) — must match
+//      msg.p2sh_addr (= ctor anchor 跨节点同源 invariant).
+//   2. Verify sig via kaspa.verifyMessage(message, signature, staker_pk_x).
+//   3. INSERT OR IGNORE chain_events (event_type='oracle_stake_enroll', txid UNIQUE).
+//   4. INSERT OR REPLACE oracle_stake_enrollments (source='chain_envelope'), preserve
+//      outpoint_txid/index/amount_sompi if already scanned locally (= scanner cache survives).
+//
+// Same-node case (producer + consumer on same Console): producer's local INSERT (source='manual')
+// 先写, broadcast 自己也 ingest, 这里 UPDATE source='chain_envelope' (= 表明已链上确权).
+// Cross-node case: consumer 这里 INSERT new row, scanner 后续 RPC verify UTXO 验真实 stake.
+//
+// 不在此处 RPC verify UTXO: 留给 scanner 在 snapshotDaa 时点 RPC finality verify (= 跨节点
+// 各自 RPC 同 finality 同结果). 这里只确权"声明" enrollment 存在 = chain_events 同步.
+async function handleOracleStakeEnroll(msg) {
+  const { randomUUID } = await import('crypto');
+  const kaspa = await import('kaspa-wasm');
+
+  // J2-tn r337 (Bettor 6/5 C1 终裁): relay_address required for cross-node settle DM.
+  // Pre-r337 envelopes (= 5/30~6/5 已上链历史 envelopes) 无 relay_address — backward compat:
+  // ingest 仍 accept, but relay_address null OK (= 后续 backfill 走 backfill script + new enroll
+  // 自动带 address).
+  const required = ['staker_pk_x', 'lock_until_daa', 'p2sh_addr', 'signature'];
+  for (const k of required) {
+    if (msg[k] === undefined || msg[k] === null) {
+      console.warn(`[trade-filter:oracle-enroll] missing ${k} staker=${msg.staker_pk_x?.slice(0,12)} — reject`);
+      return;
+    }
+  }
+
+  const stakerPkX = String(msg.staker_pk_x).toLowerCase();
+  if (!/^[0-9a-f]{64}$/.test(stakerPkX)) {
+    console.warn(`[trade-filter:oracle-enroll] staker_pk_x invalid format ${stakerPkX.slice(0,12)} — reject`);
+    return;
+  }
+  const lockUntilDaa = parseInt(msg.lock_until_daa, 10);
+  if (!Number.isFinite(lockUntilDaa) || lockUntilDaa <= 0) {
+    console.warn(`[trade-filter:oracle-enroll] lock_until_daa invalid ${msg.lock_until_daa} staker=${stakerPkX.slice(0,12)} — reject`);
+    return;
+  }
+
+  // 1. Recompute P2SH (= ctor anchor 跨节点同源 invariant). Mismatch = forgery / version skew.
+  const network = (msg.p2sh_addr || '').startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
+  let recomputed;
+  try {
+    const { computeStakeP2SH_v1 } = await import('../lib/oracle-stake-v1.mjs');
+    recomputed = await computeStakeP2SH_v1({ stakerPkX, lockUntilDaa, network });
+  } catch (e) {
+    console.warn(`[trade-filter:oracle-enroll] computeStakeP2SH_v1 exception staker=${stakerPkX.slice(0,12)}: ${e.message}`);
+    return;
+  }
+  if (recomputed.p2shAddr !== msg.p2sh_addr) {
+    console.warn(`[trade-filter:oracle-enroll] p2sh_addr mismatch staker=${stakerPkX.slice(0,12)} expected=${msg.p2sh_addr?.slice(0,32)} got=${recomputed.p2shAddr.slice(0,32)} — reject (ctor anchor break)`);
+    return;
+  }
+
+  // 2. Verify staker sig: rebuild unsignedPayload by stripping signature + meta (mirror producer).
+  const unsignedCopy = { ...msg };
+  delete unsignedCopy.signature;
+  delete unsignedCopy._tx; delete unsignedCopy._from; delete unsignedCopy._channel; delete unsignedCopy._at;
+  const messageToVerify = JSON.stringify(unsignedCopy);
+  let sigValid = false;
+  try {
+    sigValid = kaspa.verifyMessage({ message: messageToVerify, signature: msg.signature, publicKey: stakerPkX });
+  } catch (e) {
+    console.warn(`[trade-filter:oracle-enroll] verifyMessage exception staker=${stakerPkX.slice(0,12)}: ${e.message}`);
+    return;
+  }
+  if (!sigValid) {
+    console.warn(`[trade-filter:oracle-enroll] sig invalid staker=${stakerPkX.slice(0,12)} — reject`);
+    return;
+  }
+
+  // 3. Idempotent chain_events INSERT (UNIQUE on txid).
+  try {
+    const fromAddr = msg._from || null;
+    sqlite.prepare(`
+      INSERT OR IGNORE INTO chain_events (id, txid, event_type, from_address, to_address, payload, observed_by, observed_at)
+      VALUES (?, ?, 'oracle_stake_enroll', ?, ?, ?, 'scout-ingest', CURRENT_TIMESTAMP)
+    `).run(randomUUID(), msg._tx, fromAddr, msg.p2sh_addr, JSON.stringify(msg));
+  } catch (e) {
+    console.warn(`[trade-filter:oracle-enroll] chain_events insert fail (likely dedup, ok): ${e.message}`);
+  }
+
+  // 4. UPSERT oracle_stake_enrollments — chain-confirmed enrollment registry.
+  //    Preserve outpoint/amount fields if scanner already populated (= 不洗 scanner cache).
+  //    J2-tn r337 C1: relay_address 写入 (= cross-node DM target).
+  const relayAddress = typeof msg.relay_address === 'string' && msg.relay_address.length > 0 ? msg.relay_address : null;
+  try {
+    const existing = sqlite.prepare(
+      'SELECT outpoint_txid, outpoint_index, amount_sompi, last_scanned_at FROM oracle_stake_enrollments WHERE staker_pk_x = ?'
+    ).get(stakerPkX);
+    if (existing) {
+      // Already in local table — only flip source to chain_envelope (= 链上确权了).
+      sqlite.prepare(`
+        UPDATE oracle_stake_enrollments
+        SET lock_until_daa = ?, p2sh_addr = ?, p2sh_hash = ?, redeem_script_hex = ?,
+            source = 'chain_envelope', active = 1, relay_address = COALESCE(?, relay_address)
+        WHERE staker_pk_x = ?
+      `).run(lockUntilDaa, recomputed.p2shAddr, recomputed.p2shHash, recomputed.redeemScript, relayAddress, stakerPkX);
+    } else {
+      sqlite.prepare(`
+        INSERT INTO oracle_stake_enrollments
+          (staker_pk_x, lock_until_daa, p2sh_addr, p2sh_hash, redeem_script_hex, source, active, relay_address)
+        VALUES (?, ?, ?, ?, ?, 'chain_envelope', 1, ?)
+      `).run(stakerPkX, lockUntilDaa, recomputed.p2shAddr, recomputed.p2shHash, recomputed.redeemScript, relayAddress);
+    }
+    console.log(`[trade-filter:oracle-enroll] ingested staker=${stakerPkX.slice(0,12)} lock=${lockUntilDaa} addr=${relayAddress?.slice(-12) || 'NULL'} tx=${msg._tx?.slice(0,16)}`);
+  } catch (e) {
+    console.warn(`[trade-filter:oracle-enroll] enrollments upsert fail: ${e.message}`);
+  }
+}
+
+// 问3 (a) (Bettor 2026-06-15): cross-node-CONVERGENT oracle 撤出 ingest. The /withdraw endpoint broadcasts a
+// staker-signed oracle_stake_withdraw_v1 envelope; EVERY node (incl producer) ingests it HERE → sets active=0.
+// = the REAL pool removal via the convergent broadcast path so both nodes drop the oracle in lockstep — NOT a
+// node-local endpoint UPDATE (which = #22 active-flag cross-node divergence: one node's pool ≠ the other's).
+// Staker-sig auth (only the oracle can withdraw its own enrollment) + chain_events idempotency, mirroring enroll.
+async function handleOracleStakeWithdraw(msg) {
+  const { randomUUID } = await import('crypto');
+  const kaspa = await import('kaspa-wasm');
+  if (msg.staker_pk_x === undefined || msg.signature === undefined) {
+    console.warn(`[trade-filter:oracle-withdraw] missing staker_pk_x/signature — reject`); return;
+  }
+  const stakerPkX = String(msg.staker_pk_x).toLowerCase();
+  if (!/^[0-9a-f]{64}$/.test(stakerPkX)) {
+    console.warn(`[trade-filter:oracle-withdraw] staker_pk_x invalid format ${stakerPkX.slice(0,12)} — reject`); return;
+  }
+  // Verify staker sig: only the staking oracle (private key) can withdraw its own enrollment (mirror enroll).
+  const unsignedCopy = { ...msg };
+  delete unsignedCopy.signature;
+  delete unsignedCopy._tx; delete unsignedCopy._from; delete unsignedCopy._channel; delete unsignedCopy._at;
+  let sigValid = false;
+  try {
+    sigValid = kaspa.verifyMessage({ message: JSON.stringify(unsignedCopy), signature: msg.signature, publicKey: stakerPkX });
+  } catch (e) { console.warn(`[trade-filter:oracle-withdraw] verifyMessage exception staker=${stakerPkX.slice(0,12)}: ${e.message}`); return; }
+  if (!sigValid) { console.warn(`[trade-filter:oracle-withdraw] sig invalid staker=${stakerPkX.slice(0,12)} — reject`); return; }
+
+  // idempotent chain_events INSERT (UNIQUE on txid) — auditable withdraw record.
+  try {
+    sqlite.prepare(`
+      INSERT OR IGNORE INTO chain_events (id, txid, event_type, from_address, to_address, payload, observed_by, observed_at)
+      VALUES (?, ?, 'oracle_stake_withdraw', ?, ?, ?, 'scout-ingest', CURRENT_TIMESTAMP)
+    `).run(randomUUID(), msg._tx, msg._from || null, null, JSON.stringify(msg));
+  } catch (e) { console.warn(`[trade-filter:oracle-withdraw] chain_events insert fail (dedup ok): ${e.message}`); }
+
+  // CROSS-NODE-CONVERGENT active removal: every node ingests the SAME broadcast → every node sets active=0 →
+  // the oracle leaves the chain-derived committee-sampling pool (scanAndDerivePool WHERE active=1) in lockstep.
+  try {
+    const r = sqlite.prepare('UPDATE oracle_stake_enrollments SET active = 0 WHERE staker_pk_x = ?').run(stakerPkX);
+    console.log(`[trade-filter:oracle-withdraw] staker=${stakerPkX.slice(0,12)} → active=0 (cross-node convergent, changes=${r.changes}) tx=${msg._tx?.slice(0,16)}`);
+  } catch (e) { console.warn(`[trade-filter:oracle-withdraw] active=0 update fail: ${e.message}`); }
+}
+
+// J2-tn r374 (Bettor 15:02 catch): cross-node oracle TX sign_resp ingest.
+// Producer (J1 d5e2f26 pool-sign-handler OR voter bettor-prediction-voter.js L538): committee
+// oracle 收 sign_req → 签 spine input → 广播 kanet_pool_oracle_tx_sign_resp_v1 含 voter_pubkey
+// + signature + input_index. settler handleCollectingSigs L1640 读 chain_events
+// event_type='pool_oracle_tx_sig' 聚集. Consumer (THIS handler): 写 chain_events 让 settler
+// 读到跨节点 sig. Verification: voter_pubkey ∈ pool_committee.committee_pks (= 跨节点 canonical).
+// Same idempotency pattern as oracle vote (chain_events.txid UNIQUE).
+async function handlePoolOracleTxSignResp(msg) {
+  const { randomUUID } = await import('crypto');
+  const required = ['market_id', 'voter_pubkey', 'signature', 'input_index'];
+  for (const k of required) {
+    if (msg[k] === undefined || msg[k] === null) {
+      console.warn(`[trade-filter:sign-resp] missing ${k} market=${msg.market_id?.slice(0,12)} — reject`);
+      return;
+    }
+  }
+  const voterPkNorm = String(msg.voter_pubkey || '').toLowerCase();
+  if (!/^[0-9a-f]{64}$/.test(voterPkNorm)) {
+    console.warn(`[trade-filter:sign-resp] voter_pubkey invalid format market=${msg.market_id?.slice(0,12)} — reject`);
+    return;
+  }
+  // 1. Verify voter_pubkey ∈ committee_pks (= canonical 跨节点 anti-spoof).
+  let committeePks = [];
+  try {
+    const commRow = sqlite.prepare('SELECT committee_pks FROM pool_committee WHERE market_id = ?').get(msg.market_id);
+    committeePks = JSON.parse(commRow?.committee_pks || '[]').map(p => String(p).toLowerCase());
+  } catch {}
+  if (committeePks.length === 0) {
+    console.log(`[trade-filter:sign-resp] market=${msg.market_id?.slice(0,12)} committee not yet sampled (waiting), skip — settler per-tick re-scan will replay`);
+    return;
+  }
+  if (!committeePks.includes(voterPkNorm)) {
+    console.warn(`[trade-filter:sign-resp] voter_pubkey ${voterPkNorm.slice(0,12)} not in committee [${committeePks.map(p=>p.slice(0,8)).join(',')}] for market ${msg.market_id.slice(0,12)} — reject`);
+    return;
+  }
+  // 2. Idempotent INSERT chain_events 'pool_oracle_tx_sig'.
+  try {
+    const fromAddr = msg._from || null;
+    sqlite.prepare(`
+      INSERT OR IGNORE INTO chain_events (id, txid, event_type, from_address, to_address, payload, observed_by, observed_at)
+      VALUES (?, ?, 'pool_oracle_tx_sig', ?, ?, ?, 'scout-ingest', CURRENT_TIMESTAMP)
+    `).run(randomUUID(), msg._tx, fromAddr, null, JSON.stringify(msg));
+    console.log(`[trade-filter:sign-resp] ingested market=${msg.market_id.slice(0,12)} voter=${voterPkNorm.slice(0,12)} input=${msg.input_index} tx=${msg._tx?.slice(0,16)}`);
+  } catch (e) {
+    console.warn(`[trade-filter:sign-resp] chain_events INSERT fail (likely dedup, ok): ${e.message}`);
+  }
+}
+
+// J1tn r361 (Bettor 15:05 钦定): cross-node sign_req broadcast trigger.
+// Producer (J2 5a06b31 dispatchPhase2): organizer broadcasts kanet_pool_oracle_tx_sign_req_v1
+// containing {market_id, winner, unanimous, silent_oracle_index, input_count, spine_input_count}.
+// Consumer (THIS handler): for each local is_oracle relay whose pubkey ∈ committee_pks for this
+// market → call sign_input_for_settle IPC per spine input → broadcast kanet_pool_oracle_tx_sign_resp_v1.
+// Same broadcast-symmetric pattern as oracle vote (replaces obsolete DM-based pool-sign-handler.js).
+//
+// Requires local phase2_tx_obj in pool_markets.metadata (= produced by local dispatchPhase2).
+// If absent (= cross-node maker), settler's per-tick replay + cross-node market_publish ingest
+// must materialize phase2_tx_obj first. For now, skip with warning if missing.
+async function handlePoolOracleTxSignReq(msg) {
+  const required = ['market_id', 'winner', 'input_count', 'spine_input_count'];
+  for (const k of required) {
+    if (msg[k] === undefined || msg[k] === null) {
+      console.warn(`[trade-filter:sign-req] missing ${k} market=${msg.market_id?.slice(0,12)} — reject`);
+      return;
+    }
+  }
+  // 1. Load market + phase2_tx_obj (needed to sign).
+  //    J2-tn r377 (48960f6): sign_req broadcast now carries phase2_tx_obj cross-node.
+  //    Prefer payload-supplied tx_obj (cross-node canonical); fallback to local meta for
+  //    same-node path where dispatchPhase2 wrote local metadata first.
+  const market = sqlite.prepare(
+    'SELECT id, protocol_status, metadata FROM pool_markets WHERE id = ?'
+  ).get(msg.market_id);
+  if (!market) {
+    console.log(`[trade-filter:sign-req] market ${msg.market_id?.slice(0,12)} not in local DB — skip`);
+    return;
+  }
+  let meta = {};
+  try { meta = JSON.parse(market.metadata || '{}'); } catch {}
+  const phase2TxObj = msg.phase2_tx_obj || meta.phase2_tx_obj;
+  if (!phase2TxObj) {
+    console.log(`[trade-filter:sign-req] market ${market.id.slice(0,12)} no phase2_tx_obj (neither msg nor local meta) — skip`);
+    return;
+  }
+  // 2. Load committee_pks (canonical cross-node identity).
+  let committeePks = [];
+  try {
+    const commRow = sqlite.prepare('SELECT committee_pks FROM pool_committee WHERE market_id = ?').get(msg.market_id);
+    committeePks = JSON.parse(commRow?.committee_pks || '[]').map(p => String(p).toLowerCase());
+  } catch {}
+  if (committeePks.length === 0) {
+    console.log(`[trade-filter:sign-req] market=${msg.market_id?.slice(0,12)} committee not sampled locally — skip`);
+    return;
+  }
+  // 3. Find local is_oracle relays whose pubkey ∈ committee_pks.
+  const localOracles = sqlite.prepare(
+    'SELECT id, name, address FROM relay_nodes WHERE is_oracle = 1'
+  ).all();
+  if (localOracles.length === 0) {
+    return; // no local oracles, nothing to sign
+  }
+  const { sendCommandAsync } = await import('./relay-manager.js');
+  const spineInputCount = Number(msg.spine_input_count) || 1;
+  // J1tn r361 (Bettor): forfeit_1 path — silent oracle does not sign.
+  const silentIdx = (msg.unanimous === false || msg.unanimous === 'false') && typeof msg.silent_oracle_index === 'number'
+    ? msg.silent_oracle_index : -1;
+  let signedTotal = 0;
+  for (const oracle of localOracles) {
+    // Get oracle's pubkey via IPC, check membership.
+    let voterPubkey;
+    try {
+      const pkRes = await sendCommandAsync(oracle.id, { type: 'get_pubkey' });
+      if (!pkRes?.x_only_pubkey) continue;
+      voterPubkey = String(pkRes.x_only_pubkey).toLowerCase();
+    } catch { continue; }
+    const myIdx = committeePks.indexOf(voterPubkey);
+    if (myIdx === -1) continue; // not in committee for this market
+    if (silentIdx === myIdx) {
+      console.log(`[trade-filter:sign-req] oracle=${oracle.name} forfeit_1 silent (idx=${myIdx}) — skip sign`);
+      continue;
+    }
+    // 4. Sign each spine input + broadcast sign_resp.
+    for (let inputIdx = 0; inputIdx < spineInputCount; inputIdx++) {
+      // Idempotent: skip if already signed (chain_events local)
+      const existing = sqlite.prepare(`
+        SELECT id FROM chain_events
+        WHERE event_type = 'pool_oracle_tx_sig'
+          AND payload LIKE ? AND payload LIKE ? AND payload LIKE ?
+        LIMIT 1
+      `).get(`%"market_id":"${market.id}"%`, `%"input_index":${inputIdx}%`, `%"voter_pubkey":"${voterPubkey}"%`);
+      if (existing) continue;
+
+      let signResult;
+      try {
+        signResult = await sendCommandAsync(oracle.id, {
+          type: 'sign_input_for_settle',
+          tx_hex: JSON.stringify(phase2TxObj),
+          input_index: inputIdx,
+        });
+      } catch (e) {
+        console.warn(`[trade-filter:sign-req] sign IPC fail market=${market.id.slice(0,12)} oracle=${oracle.name} input=${inputIdx}: ${e.message}`);
+        continue;
+      }
+      if (!signResult?.ok || !signResult.signature) {
+        console.warn(`[trade-filter:sign-req] sign fail market=${market.id.slice(0,12)} oracle=${oracle.name} input=${inputIdx}: ${signResult?.error || 'no sig'}`);
+        continue;
+      }
+      const respPayload = {
+        t: 'kanet_pool_oracle_tx_sign_resp_v1',
+        market_id: market.id,
+        voter_pubkey: voterPubkey,
+        input_index: inputIdx,
+        winner: msg.winner,
+        signature: signResult.signature,
+        epoch: 1,
+      };
+      try {
+        const bcastRes = await sendCommandAsync(oracle.id, {
+          type: 'send_broadcast',
+          channel: 'kanet-prediction',
+          message: JSON.stringify(respPayload),
+        });
+        if (!bcastRes?.txId) {
+          console.warn(`[trade-filter:sign-req] broadcast no txId market=${market.id.slice(0,12)} oracle=${oracle.name} input=${inputIdx}`);
+          continue;
+        }
+        console.log(`[trade-filter:sign-req] SIGNED+BROADCAST market=${market.id.slice(0,12)} oracle=${oracle.name} input=${inputIdx} tx=${bcastRes.txId.slice(0,16)} voter_pubkey=${voterPubkey.slice(0,12)}`);
+        signedTotal++;
+      } catch (e) {
+        console.warn(`[trade-filter:sign-req] broadcast IPC fail market=${market.id.slice(0,12)} oracle=${oracle.name} input=${inputIdx}: ${e.message}`);
+      }
+    }
+  }
+  if (signedTotal > 0) {
+    console.log(`[trade-filter:sign-req] DONE market=${market.id.slice(0,12)} signed=${signedTotal} across local oracles`);
+  }
+}
+
+// Bettor r117/r118/r120 ② consumer half — cross-node market_publish ingest.
+// Producer (J1 a3565bf _broadcastMarketPublished pool.js:36-95): maker_relay ecdsa_sign over
+// JSON.stringify(unsignedPayload) + send_broadcast kanet-prediction. Schema 22 fields + sig.
+// Consumer: verify metadata_hash (3-way命门 producer/consumer/spine ctor anchor) + verify maker sig
+// (kaspa.verifyMessage via maker_relay_pk from payload, NOT relay_nodes lookup) + INSERT OR IGNORE
+// pool_markets. Cross-node-correct identity via maker_relay_pk in protocol payload (= ① c2c84d1
+// same lesson: protocol membership lives in protocol fields not local relay_nodes infra).
+async function handlePoolMarketPublished(msg) {
+  const { randomUUID, createHash } = await import('crypto');
+  const kaspa = await import('kaspa-wasm');
+
+  const required = ['market_id', 'spine_p2sh', 'market_metadata_hash', 'maker_relay_pk', 'signature',
+    'outcome_market_source', 'outcome_condition_id', 'outcome_token_id', 'outcome_side',
+    'resolution_rule_spec', 'deadline'];
+  for (const k of required) {
+    if (msg[k] === undefined || msg[k] === null) {
+      console.warn(`[trade-filter:market-pub] missing ${k} market=${msg.market_id?.slice(0,12)} — reject`);
+      return;
+    }
+  }
+
+  // Idempotent: already on this node? (= same-node producer-direct INSERT pre-empted, or prior consumer)
+  const existing = sqlite.prepare('SELECT id FROM pool_markets WHERE id = ?').get(msg.market_id);
+  if (existing) {
+    console.log(`[trade-filter:market-pub] market ${msg.market_id.slice(0,12)} already in local DB — skip`);
+    return;
+  }
+
+  // 1. Recompute market_metadata_hash (3-way命门: producer pool.js:283-291 == consumer == spine ctor anchor)
+  //    Formula a3565bf: end=deadline (int unix sec), NOT outcome_end_date. r123 fix landed.
+  const metaInput = JSON.stringify({
+    source: msg.outcome_market_source,
+    condition: msg.outcome_condition_id,
+    token: msg.outcome_token_id,
+    side: msg.outcome_side,
+    end: msg.deadline,
+    rule: msg.resolution_rule_spec,
+  });
+  const recomputedHash = createHash('sha256').update(metaInput).digest('hex');
+  if (recomputedHash !== msg.market_metadata_hash) {
+    console.warn(`[trade-filter:market-pub] metadata_hash mismatch market=${msg.market_id.slice(0,12)} expected=${msg.market_metadata_hash.slice(0,16)} got=${recomputedHash.slice(0,16)} — reject (3-way anchor break)`);
+    return;
+  }
+
+  // 2. Verify maker sig: rebuild unsignedPayload by stripping signature + meta (mirror producer L73 spread)
+  const unsignedCopy = { ...msg };
+  delete unsignedCopy.signature;
+  delete unsignedCopy._tx; delete unsignedCopy._from; delete unsignedCopy._channel; delete unsignedCopy._at;
+  const messageToVerify = JSON.stringify(unsignedCopy);
+  let sigValid = false;
+  try {
+    sigValid = kaspa.verifyMessage({ message: messageToVerify, signature: msg.signature, publicKey: String(msg.maker_relay_pk).toLowerCase() });
+  } catch (e) {
+    console.warn(`[trade-filter:market-pub] verifyMessage exception market=${msg.market_id.slice(0,12)}: ${e.message}`);
+    return;
+  }
+  if (!sigValid) {
+    console.warn(`[trade-filter:market-pub] sig invalid maker=${msg.maker_relay_pk?.slice(0,12)} market=${msg.market_id.slice(0,12)} — reject`);
+    return;
+  }
+
+  // Bettor r135 H1 close-gate: verify spine_lock_tx UTXO on chain at spine_p2sh BEFORE INSERT.
+  // Without this, a valid maker sig over a fabricated payload (no actual on-chain stake) would
+  // get ingested — market listed everywhere, bets attempted, all fail because the spine never
+  // really existed. Same pattern as bet handler getUtxosByAddresses + outpoint match.
+  try {
+    const { getWorkingRpc } = await import('./rpc-health.js');
+    const { url: rpcUrl } = await getWorkingRpc();
+    if (!rpcUrl) {
+      console.warn(`[trade-filter:market-pub] no working RPC — skip (will replay on next broadcast)`);
+      return;
+    }
+    const { RpcClient, Encoding, Address } = await import('kaspa-wasm');
+    const network = msg.spine_p2sh.startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
+    const rpc = new RpcClient({ url: rpcUrl, encoding: Encoding.Borsh, networkId: network });
+    let utxos;
+    try {
+      await Promise.race([rpc.connect({}), new Promise((_, rej) => setTimeout(() => rej(new Error('RPC connect timeout')), 4000))]);
+      ({ entries: utxos } = await rpc.getUtxosByAddresses([new Address(msg.spine_p2sh)]));
+    } finally {
+      try { await rpc.disconnect(); } catch {}
+    }
+    utxos = utxos || [];
+    const spineMatch = utxos.find(u => {
+      const op = u.outpoint || u.entry?.outpoint;
+      const txid = op && (op.transactionId || op.transaction_id);
+      return txid === msg.spine_lock_tx;
+    });
+    if (!spineMatch) {
+      console.warn(`[trade-filter:market-pub] spine_lock_tx ${msg.spine_lock_tx.slice(0,16)} not UNSPENT at spine_p2sh ${msg.spine_p2sh.slice(0,20)} (fake market or already settled) — reject`);
+      return;
+    }
+  } catch (e) {
+    console.warn(`[trade-filter:market-pub] spine UTXO verify fail market=${msg.market_id.slice(0,12)}: ${e.message} — skip (replay later)`);
+    return;
+  }
+
+  // 3. INSERT OR IGNORE pool_markets — cols mirror create-v06 path (pool.js:399-413).
+  //    Local-only cols (maker_relay_id / broker_relay_id / oracle_relay_ids) = NULL — we don't know
+  //    peer's relay IDs (protocol membership lives in pubkey fields). updated_at / sides_merkle_root
+  //    default. metadata flagged cross_node_origin for forensic clarity.
+  const oraclePks = Array.isArray(msg.oracle_relay_pks) ? msg.oracle_relay_pks : [];
+  const metadata = JSON.stringify({
+    cross_node_origin: true, source_tx: msg._tx, source_addr: msg._from,
+    published_at: msg.published_at,
+  });
+  // maker_relay_id is NOT NULL on the table but cross-node ingest doesn't know peer's UUID.
+  // Use `cross-node:<maker_relay_pk>` sentinel — unique per peer maker + makes origin obvious
+  // in queries. UI and settler treat unknown relay_ids as remote (already handle null relay
+  // lookup gracefully — `relay_nodes WHERE id = ?` returns nothing, callers fall back to
+  // protocol fields like maker_pk on the row).
+  const sentinelRelayId = `cross-node:${msg.maker_relay_pk}`;
+  try {
+    const insertResult = sqlite.prepare(`INSERT OR IGNORE INTO pool_markets (
+      id, maker_relay_id, spine_p2sh, spine_lock_tx, market_metadata_hash,
+      oracle1_pk, oracle2_pk, oracle3_pk, broker_pk, maker_pk,
+      deadline, miner_fee, broker_fee_pct, oracle_bond_amount, maker_stake_amount,
+      outcome_market_source, outcome_condition_id, outcome_token_id, outcome_side, resolution_rule_spec,
+      protocol_status, sides_merkle_root, oracle_relay_ids, broker_relay_id, metadata, category,
+      protocol_version, pool_merkle_root, deadline_daa
+    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+      msg.market_id, sentinelRelayId, msg.spine_p2sh, msg.spine_lock_tx, msg.market_metadata_hash,
+      oraclePks[0] || null, oraclePks[1] || null, oraclePks[2] || null, msg.broker_pk,
+      msg.maker_relay_pk,  // 问2 (NWT review): chain-anchor maker_pk from the sig-verified payload (L623) so the
+                           // committee maker-exclude is byte-equal cross-node (producer also sets it, see pool.js).
+      msg.deadline, msg.miner_fee, msg.broker_fee_pct, msg.oracle_bond_amount, msg.maker_stake_amount,
+      msg.outcome_market_source, msg.outcome_condition_id, msg.outcome_token_id, msg.outcome_side, msg.resolution_rule_spec,
+      'pending_bettors', '', '[]', sentinelRelayId, metadata, msg.category,
+      msg.protocol_version || 'v0.5', msg.pool_merkle_root,
+      msg.deadline_daa || null,  // J2-tn r323: 跨节点 endBlock 锚, NWT+J1 合解.
+    );
+    // Bettor r135 close-gate #2: silent-skip guard — INSERT OR IGNORE returns changes=0 if
+    // either dedup (= row existed, ok) or constraint violation (= bug). Distinguish via
+    // SELECT after for forensic clarity. Bare INSERT OR IGNORE returning 0 hid f7f1af2 bug.
+    if (insertResult.changes === 0) {
+      const stillMissing = !sqlite.prepare('SELECT 1 FROM pool_markets WHERE id = ?').get(msg.market_id);
+      if (stillMissing) {
+        console.warn(`[trade-filter:market-pub] INSERT OR IGNORE changes=0 AND row still missing market=${msg.market_id.slice(0,12)} — constraint violation? (KI 49 silent-skip)`);
+        return;
+      }
+      // else: row exists from prior INSERT (e.g. same-node producer-direct), ok.
+    }
+    console.log(`[trade-filter:market-pub] ingested market=${msg.market_id.slice(0,12)} maker_pk=${msg.maker_relay_pk.slice(0,12)} tx=${msg._tx?.slice(0,16)}`);
+  } catch (e) {
+    console.warn(`[trade-filter:market-pub] insert fail market=${msg.market_id.slice(0,12)}: ${e.message}`);
+    return;
+  }
+
+  // Bettor §5.3 F-S3 cross-node snapshot bake: settler-tick committee sample requires
+  // pool_snapshots row. On producer node ensurePoolSnapshot is called at create-v0X.
+  // J2-tn r360 (J1 r337 catch + Bettor 12:41 锁定): v0.7 cross-node ingest 也必 bake snapshot
+  // (= 之前只 v0.6 → :3300 ingest q8m8t v0.7 后 snapshot 空 → settler sample 缺前置 → committee
+  // 永 [] → voter 0 match → settle 永卡). 真源 = chain_view row where merkle_root ==
+  // msg.pool_merkle_root (= 跨节点同步 by chain envelope), 取对应 snapshot_daa baked.
+  if ((msg.protocol_version === 'v0.6' || msg.protocol_version === 'v0.7') && msg.pool_merkle_root) {
+    try {
+      const { ensurePoolSnapshot } = await import('./pool-market-settler-v06.mjs');
+      // Find chain_view row matching the ctor pool_merkle_root (= envelope baked).
+      const cv = sqlite.prepare(
+        'SELECT snapshot_daa FROM oracle_pool_chain_view WHERE merkle_root = ? ORDER BY snapshot_daa DESC LIMIT 1'
+      ).get(msg.pool_merkle_root.toLowerCase());
+      const snapshotDaa = cv?.snapshot_daa || null;  // null fallback = legacy 7d grace path
+      ensurePoolSnapshot(msg.market_id, msg.pool_merkle_root, snapshotDaa);
+      console.log(`[trade-filter:market-pub] snapshot baked market=${msg.market_id.slice(0,12)} pv=${msg.protocol_version} snapshot_daa=${snapshotDaa || 'NULL_legacy'}`);
+    } catch (snapErr) {
+      // Mismatch = remote chain_view differs from envelope root (= shouldn't happen post-r337
+      // chain-derived consistency). Market row still ingested but settler-tick will skip
+      // committee sampling — operator can backfill later via scripts/_j2tn_backfill_snapshot_v2.mjs.
+      console.warn(`[trade-filter:market-pub] snapshot bake skip market=${msg.market_id.slice(0,12)}: ${snapErr.message}`);
+    }
+  }
+
+  // Bettor r132 H2 critical upgrade: chunked market ~50s vs bet 单 TX 瞬到 → bet 必 first → race is
+  // norm not edge. Post-market-ingest: re-scan broadcast_messages for orphaned pool_bet_registered_v1
+  // referencing this market_id and re-run their handler. Idempotent via UNIQUE side_lock_tx.
+  try {
+    const orphanedBets = sqlite.prepare(`
+      SELECT tx_hash, sender_address, channel_name, content, created_at
+      FROM broadcast_messages
+      WHERE channel_name = 'kanet-prediction'
+        AND content LIKE '%pool_bet_registered_v1%'
+        AND content LIKE ?
+      ORDER BY created_at ASC
+    `).all(`%"market_id":"${msg.market_id}"%`);
+    if (orphanedBets.length > 0) {
+      console.log(`[trade-filter:market-pub] H2 rescan: ${orphanedBets.length} orphan bet(s) for market=${msg.market_id.slice(0,12)} — replaying`);
+      for (const row of orphanedBets) {
+        try {
+          await onBroadcastWritten({
+            tx_hash: row.tx_hash, content: row.content, sender_address: row.sender_address,
+            channel_name: row.channel_name, created_at: row.created_at,
+          });
+        } catch (replayErr) {
+          console.warn(`[trade-filter:market-pub] H2 bet replay fail tx=${row.tx_hash.slice(0,16)}: ${replayErr.message}`);
+        }
+      }
+    }
+  } catch (rescanErr) {
+    console.warn(`[trade-filter:market-pub] H2 rescan fail market=${msg.market_id.slice(0,12)}: ${rescanErr.message}`);
+  }
+}
+
+// Bettor r113/r117/r120 ② consumer half — cross-node bet_register ingest.
+// Producer (J1 _broadcastBetRegistered pool.js:97-115): NO signature. Schema 9 fields.
+// Consumer verifies via CHAIN truth not sig: recompute side_p2sh from bettor_pk + market.spine + protocol_version,
+// then RPC getUtxosByAddresses(side_p2sh) finds UTXO with amount===stake_amount AND outpoint.txid===side_lock_tx
+// AND UTXO still UNSPENT (Bettor r113 refine: UNSPENT = open position; spent = already settled, skip).
+// Idempotent via UNIQUE side_lock_tx index on pool_bettor_sides.
+// Bettor r128 + J1 r188 (e67c9328) chunked v1 reassembler. Producer pool.js _sendBroadcastChunked
+// splits market_publish payload > 450 chars into ord 0..total-1 chunks, envelope
+// {t:'pool_market_chunk_v1', hash, ord, total, data} per chunk. hash = sha256(full payloadStr) is
+// the dedup + integrity anchor. Consumer accumulates in-mem (cheap, market publishes are rare +
+// idempotent — dedup by hash), reassembles when complete, verifies hash byte-identical, then
+// recursively dispatches the reassembled JSON through the full pre-filter + switch path (= same
+// route a single-shot pool_market_published_v1 would take, no special-casing).
+const POOL_CHUNK_CACHE = new Map();  // key=hash → { total, parts: Map<ord,data>, firstAt }
+// Bettor r135 close-gate #3: chunk cache TTL. Incomplete reassembly (= producer crashed mid-broadcast,
+// or chunks lost on chain) would leak entries forever. Eviction: TTL since firstAt — generous
+// since chunked envelope takes ~50s+ end-to-end + chain propagation delays. Run lazy on each new chunk
+// (= O(cache_size), tiny for our scale).
+//
+// J2-tn r426 (Bettor r453 / J1 r417 钉死 wghdr 根因): 5min TTL 太短 for 55-chunk envelope
+// (= settle sign_req with embedded phase2_tx_obj). chunks ord 44-54 arrive after first batch ord
+// 0-43 expired → eternal incomplete. 改 30 min TTL — chain re-broadcast retry 2 rounds 时间够.
+//
+// J2-tn r430 (Bettor r468 OOM 根治): 30min TTL × 大 envelope (= 55-chunk × 340B = 18.7KB) 累积
+// 触发 OOM. 加 max-size LRU 兜底: > MAX_CACHE_ENTRIES (= 200) 时 evict 最旧条目 (= firstAt asc).
+const POOL_CHUNK_TTL_MS = 30 * 60 * 1000;
+const POOL_CHUNK_MAX_ENTRIES = 200;
+function _evictExpiredChunks(now = Date.now()) {
+  for (const [hash, entry] of POOL_CHUNK_CACHE) {
+    if (now - entry.firstAt > POOL_CHUNK_TTL_MS) {
+      console.warn(`[trade-filter:chunk] evict expired hash=${hash.slice(0,12)} age=${Math.round((now - entry.firstAt)/1000)}s have=${entry.parts.size}/${entry.total} (incomplete reassembly, dropped)`);
+      POOL_CHUNK_CACHE.delete(hash);
+    }
+  }
+  // r430: max-size LRU eviction (OOM 兜底). 超 200 → evict 最旧 N 个直到 <= 200.
+  if (POOL_CHUNK_CACHE.size > POOL_CHUNK_MAX_ENTRIES) {
+    const sorted = Array.from(POOL_CHUNK_CACHE.entries()).sort((a, b) => a[1].firstAt - b[1].firstAt);
+    const toEvict = POOL_CHUNK_CACHE.size - POOL_CHUNK_MAX_ENTRIES;
+    for (let i = 0; i < toEvict; i++) {
+      const [hash, entry] = sorted[i];
+      console.warn(`[trade-filter:chunk] evict over-cap hash=${hash.slice(0,12)} firstAt=${new Date(entry.firstAt).toISOString()} have=${entry.parts.size}/${entry.total} (cache size > ${POOL_CHUNK_MAX_ENTRIES}, dropped LRU)`);
+      POOL_CHUNK_CACHE.delete(hash);
+    }
+  }
+}
+
+// J2-tn r418 (Bettor r428 关1 方案 C 路径 A push): consumer ingest pool_market_settled_v1.
+// Idempotent: 仅当 protocol_status='verifying' or 'collecting_sigs' 时 UPDATE → 'completed'.
+// Defends 重复 broadcast (= cron retry / chain replay). 不动 settle_txid 若 already 设.
+async function handlePoolMarketSettled(msg) {
+  const required = ['market_id', 'settle_txid', 'winner'];
+  for (const k of required) {
+    if (msg[k] === undefined || msg[k] === null) {
+      console.warn(`[trade-filter:settled] missing ${k} market=${msg.market_id?.slice(0,12)} — reject`);
+      return;
+    }
+  }
+  const row = sqlite.prepare('SELECT id, protocol_status, settle_txid FROM pool_markets WHERE id = ?').get(msg.market_id);
+  if (!row) {
+    console.log(`[trade-filter:settled] market ${msg.market_id?.slice(0,12)} not in local DB — skip (cross-node race)`);
+    return;
+  }
+  if (row.protocol_status === 'completed' && row.settle_txid) {
+    console.log(`[trade-filter:settled] market ${msg.market_id.slice(0,12)} already completed (txid=${row.settle_txid.slice(0,16)}) — skip idempotent`);
+    return;
+  }
+  // Only advance from verifying/collecting_sigs — refuse to overwrite refunded/cancelled.
+  if (row.protocol_status !== 'verifying' && row.protocol_status !== 'collecting_sigs') {
+    console.warn(`[trade-filter:settled] market ${msg.market_id.slice(0,12)} status=${row.protocol_status} not eligible to settle → ignore (protected)`);
+    return;
+  }
+  sqlite.prepare('UPDATE pool_markets SET settle_txid = ?, protocol_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+    .run(msg.settle_txid, 'completed', msg.market_id);
+  console.log(`[trade-filter:settled] cross-node sync market=${msg.market_id.slice(0,12)} settle_txid=${msg.settle_txid.slice(0,16)} winner=${msg.winner} (was ${row.protocol_status})`);
+}
+
+async function handlePoolMarketChunk(msg) {
+  const { createHash } = await import('crypto');
+  _evictExpiredChunks();  // lazy GC every chunk
+  if (!msg.hash || msg.ord === undefined || !msg.total || msg.data === undefined) {
+    console.warn(`[trade-filter:chunk] missing fields hash=${msg.hash?.slice(0,12)} ord=${msg.ord} total=${msg.total} — reject`);
+    return;
+  }
+  const total = Number(msg.total);
+  const ord = Number(msg.ord);
+  if (!Number.isInteger(total) || total <= 0 || !Number.isInteger(ord) || ord < 0 || ord >= total) {
+    console.warn(`[trade-filter:chunk] bad ord=${ord} total=${total} hash=${msg.hash.slice(0,12)} — reject`);
+    return;
+  }
+
+  let entry = POOL_CHUNK_CACHE.get(msg.hash);
+  if (!entry) {
+    entry = { total, parts: new Map(), firstAt: Date.now() };
+    POOL_CHUNK_CACHE.set(msg.hash, entry);
+  } else if (entry.total !== total) {
+    console.warn(`[trade-filter:chunk] total mismatch hash=${msg.hash.slice(0,12)} cached=${entry.total} new=${total} — reject`);
+    return;
+  }
+  entry.parts.set(ord, msg.data);
+  console.log(`[trade-filter:chunk] cached hash=${msg.hash.slice(0,12)} ord=${ord}/${total - 1} have=${entry.parts.size}/${total} tx=${msg._tx?.slice(0,12)}`);
+  if (entry.parts.size < total) return;
+
+  // Reassemble in ord order
+  const ordered = [];
+  for (let i = 0; i < total; i++) {
+    const part = entry.parts.get(i);
+    if (part === undefined) {
+      console.warn(`[trade-filter:chunk] internal inconsistency: size=${total} but ord=${i} missing hash=${msg.hash.slice(0,12)}`);
+      return;
+    }
+    ordered.push(part);
+  }
+  const reassembled = ordered.join('');
+  const computedHash = createHash('sha256').update(reassembled).digest('hex');
+  if (computedHash !== msg.hash) {
+    console.warn(`[trade-filter:chunk] hash mismatch reassembled hash=${msg.hash.slice(0,12)} got=${computedHash.slice(0,12)} — reject corrupted chunks`);
+    POOL_CHUNK_CACHE.delete(msg.hash);
+    return;
+  }
+  POOL_CHUNK_CACHE.delete(msg.hash);
+  console.log(`[trade-filter:chunk] reassembled ${total} chunks hash=${msg.hash.slice(0,12)} payload_len=${reassembled.length} — dispatching to handler`);
+
+  let inner;
+  try {
+    inner = JSON.parse(reassembled);
+  } catch (e) {
+    console.warn(`[trade-filter:chunk] reassembled JSON parse fail hash=${msg.hash.slice(0,12)}: ${e.message}`);
+    return;
+  }
+  // Carry chain meta from any chunk (= same TX context, all chunks share sender). Use the LAST chunk's
+  // meta as anchor (= the one that completed reassembly).
+  inner._tx = msg._tx;
+  inner._from = msg._from;
+  inner._channel = msg._channel;
+  inner._at = msg._at;
+  // Direct switch dispatch (mirror onBroadcastWritten switch path). J2-tn r337 fix: 加
+  // oracle_stake_enroll_v1 (= v2 envelope 含 relay_address 后超 450 char SAFE_CHUNK_BUDGET,
+  // chunked broadcast 进 此 path. 之前只 dispatch pool_market_published_v1 → 我 v2 enroll
+  // envelope 静默 drop, 跨节点 settle DM 仍 NULL address).
+  switch (inner.t) {
+    case 'pool_market_published_v1':
+      await handlePoolMarketPublished(inner); break;
+    case 'oracle_stake_enroll_v1':
+      await handleOracleStakeEnroll(inner); break;
+    case 'oracle_stake_withdraw_v1':
+      await handleOracleStakeWithdraw(inner); break;  // 问3 (a): cross-node-convergent oracle 撤出
+    case 'pool_oracle_vote_v1':
+      await handlePoolOracleVote(inner); break;
+    case 'pool_bet_registered_v1':
+      await handlePoolBetRegistered(inner); break;
+    case 'kanet_pool_oracle_tx_sign_req_v1':
+      await handlePoolOracleTxSignReq(inner); break;  // J2-tn r377: chunked sign_req (phase2_tx_obj 超 SAFE_CHUNK_BUDGET)
+    case 'kanet_pool_oracle_tx_sign_resp_v1':
+      await handlePoolOracleTxSignResp(inner); break;
+    case 'pool_refund_request_v1':
+      await handlePoolRefundRequest(inner); break;  // J2-tn r402 P0-#3: cross-node maker refund
+    default:
+      console.warn(`[trade-filter:chunk] reassembled unknown type t=${inner.t} hash=${msg.hash.slice(0,12)} — drop`);
+  }
+}
+
+// J1 #27d (Owner public-testnet hardening sprint 2026-06-14): catch-up re-ingest for market_publishes
+// whose in-mem chunk reassembly was MISSED. Root cause (demo lwrcl): a sign_req re-broadcast flood
+// (stuck settles re-broadcasting chunked sign_req every ~5s) filled the in-mem POOL_CHUNK_CACHE
+// (LRU max 200) → evicted a market_publish's in-progress chunks before they completed → no reassembly
+// → no pool_markets row → :3300 committee members never knew they were sampled → liveness blocker.
+// broadcast_messages is the DURABLE store (chunks persist there regardless of in-mem eviction). This
+// reassembles from it for any market_publish whose market_id is not yet in pool_markets, then dispatches
+// to handlePoolMarketPublished (idempotent: it skips if the row already exists, and verifies
+// metadata_hash + maker sig → a corrupt/forged reassembly is rejected, never overwrites a correct row).
+// = cross-node market-row arrival self-heals (the bshard foundation: every node reliably gets the row).
+//
+// NWT r1166 review points honored: ② only COMPLETE chunk-sets reassemble (sha256-verify; no half rows)
+// ③ idempotent never overwrites (handler L591-595 skip-if-exists) ④ SIGNAL-TRIGGERED (called from
+// orphan bet/vote handlers when market_id ∉ pool_markets) + throttled + bounded window — NOT a full
+// scan every tick.
+let _lastCatchUpMs = 0;
+const CATCHUP_THROTTLE_MS = 30_000;   // at most one pass per 30s (orphan bets can arrive in bursts)
+export async function catchUpUningestedMarkets({ windowHours = 24, force = false } = {}) {
+  const now = Date.now();
+  if (!force && (now - _lastCatchUpMs) < CATCHUP_THROTTLE_MS) return { scanned: 0, rebuilt: 0, throttled: true };
+  _lastCatchUpMs = now;
+  const sinceIso = new Date(now - windowHours * 3600 * 1000).toISOString();
+  let scanned = 0, rebuilt = 0;
+  const tryDispatch = async (inner, meta) => {
+    if (inner?.t !== 'pool_market_published_v1' || !inner.market_id) return;
+    scanned++;
+    if (sqlite.prepare('SELECT 1 FROM pool_markets WHERE id = ?').get(inner.market_id)) return;  // ③ already have it
+    inner._tx = meta.tx_hash; inner._from = meta.sender_address; inner._channel = meta.channel_name; inner._at = meta.created_at;
+    try {
+      await handlePoolMarketPublished(inner);  // idempotent + verifies metadata_hash/sig
+      if (sqlite.prepare('SELECT 1 FROM pool_markets WHERE id = ?').get(inner.market_id)) {
+        rebuilt++;
+        console.log(`[catch-up-markets] rebuilt missed market=${inner.market_id.slice(0,12)} (was LRU-evicted/lost)`);
+      }
+    } catch (e) { console.warn(`[catch-up-markets] dispatch fail market=${inner.market_id?.slice(0,12)}: ${e.message}`); }
+  };
+  try {
+    // 1. Single (unchunked) pool_market_published_v1 not yet ingested
+    const singles = sqlite.prepare(
+      "SELECT content, tx_hash, sender_address, channel_name, created_at FROM broadcast_messages WHERE channel_name = 'kanet-prediction' AND content LIKE '%pool_market_published_v1%' AND content NOT LIKE '%pool_market_chunk%' AND created_at > ? ORDER BY created_at DESC"
+    ).all(sinceIso);
+    for (const row of singles) { let inner; try { inner = JSON.parse(row.content); } catch { continue; } await tryDispatch(inner, row); }
+    // 2. Chunked: group pool_market_chunk_v1 by hash, reassemble ONLY complete sets (② no half rows)
+    const { createHash } = await import('crypto');
+    const chunkRows = sqlite.prepare(
+      "SELECT content, tx_hash, sender_address, channel_name, created_at FROM broadcast_messages WHERE channel_name = 'kanet-prediction' AND content LIKE '%pool_market_chunk_v1%' AND created_at > ? ORDER BY created_at ASC"
+    ).all(sinceIso);
+    const byHash = new Map();
+    for (const row of chunkRows) {
+      let c; try { c = JSON.parse(row.content); } catch { continue; }
+      if (c?.t !== 'pool_market_chunk_v1' || !c.hash || c.ord === undefined || !c.total) continue;
+      let e = byHash.get(c.hash); if (!e) { e = { total: Number(c.total), parts: new Map(), meta: row }; byHash.set(c.hash, e); }
+      e.parts.set(Number(c.ord), c.data);
+    }
+    for (const [hash, e] of byHash) {
+      if (!Number.isInteger(e.total) || e.parts.size < e.total) continue;   // ② incomplete in durable store too — real loss, skip
+      const ordered = []; let complete = true;
+      for (let i = 0; i < e.total; i++) { const p = e.parts.get(i); if (p === undefined) { complete = false; break; } ordered.push(p); }
+      if (!complete) continue;
+      const reassembled = ordered.join('');
+      if (createHash('sha256').update(reassembled).digest('hex') !== hash) continue;   // corrupt — skip
+      let inner; try { inner = JSON.parse(reassembled); } catch { continue; }
+      await tryDispatch(inner, e.meta);   // tryDispatch filters to pool_market_published_v1 (sign_req etc. skipped)
+    }
+  } catch (err) { console.warn(`[catch-up-markets] scan fail: ${err.message}`); }
+  if (scanned > 0 || rebuilt > 0) console.log(`[catch-up-markets] pass done: scanned=${scanned} rebuilt=${rebuilt} (window ${windowHours}h)`);
+  return { scanned, rebuilt };
+}
+
+// Bettor r158 §5.3c layer 2 — anti-bot policy floor defends against malicious node directly
+// broadcasting <POLICY bet to bypass producer (NWT r121 #1 命门). Hardcoded here matches
+// pool.js BETTOR_MIN_STAKE_POLICY constant (= 1 KAS = 1e8 sompi). DO NOT lower without
+// coordinated spec round — affects cross-node consensus.
+const BETTOR_MIN_STAKE_POLICY_SOMPI = 100_000_000n;
+
+/**
+ * captureSideLockDaa — single canonical source for a bet's side_lock UTXO accepting-block daaScore.
+ * (J1 #27a v2, NWT r1181 single-source mandate.) Called by BOTH the live bet-register ingest AND the
+ * deploy-time backfill script (scripts/backfill-side-lock-daa.mjs) so a backfilled daa is byte-equal to
+ * the daa a fresh ingest would have written — zero cross-node divergence in the committee bettor-exclude set.
+ *
+ * Chain truth: getUtxosByAddresses(side_p2sh) returns the UNSPENT UTXO for an OPEN position; we match it by
+ * stake_amount + side_lock_tx (a spent/missing UTXO = already settled or never paid → not capturable here).
+ * The daaScore is the CANONICAL accepting-block daa (chain consensus fact, identical on every node).
+ * kaspa-wasm UtxoEntryReference shape varies (cross-chain-verify.mjs L545 same defensive pattern).
+ *
+ * @returns {Promise<{daa:number|null, reason:'ok'|'daa-unresolved'|'no-unspent-utxo'|'no-rpc'|string}>}
+ *   reason 'rpc-fail: ...' is transient (replay later); 'no-unspent-utxo' = settled/unpaid; 'daa-unresolved'
+ *   = UTXO found but shape unknown (daa null, fail-loud at sample). NEVER guesses — null over a non-canonical value.
+ */
+export async function captureSideLockDaa({ side_p2sh, side_lock_tx, stake_amount, network }) {
+  const { getWorkingRpc } = await import('./rpc-health.js');
+  const { url: rpcUrl } = await getWorkingRpc();
+  if (!rpcUrl) return { daa: null, reason: 'no-rpc' };
+  const { RpcClient, Encoding, Address } = await import('kaspa-wasm');
+  const rpc = new RpcClient({ url: rpcUrl, encoding: Encoding.Borsh, networkId: network });
+  let utxos;
+  try {
+    await Promise.race([rpc.connect({}), new Promise((_, rej) => setTimeout(() => rej(new Error('RPC connect timeout')), 4000))]);
+    ({ entries: utxos } = await rpc.getUtxosByAddresses([new Address(side_p2sh)]));
+  } catch (e) {
+    try { await rpc.disconnect(); } catch {}
+    return { daa: null, reason: `rpc-fail: ${e.message}` };
+  } finally {
+    try { await rpc.disconnect(); } catch {}
+  }
+  utxos = utxos || [];
+  const wantSompi = BigInt(stake_amount);
+  const exactUtxo = utxos.find(u => {
+    try {
+      if (BigInt(u.amount) !== wantSompi) return false;
+      const op = u.outpoint || u.entry?.outpoint;
+      const txid = op && (op.transactionId || op.transaction_id);
+      return txid === side_lock_tx;
+    } catch { return false; }
+  });
+  if (!exactUtxo) return { daa: null, reason: 'no-unspent-utxo' };
+  let daa = null;
+  try {
+    const rawDaa = exactUtxo.blockDaaScore ?? exactUtxo.utxoEntry?.blockDaaScore ?? exactUtxo.entry?.blockDaaScore ?? exactUtxo.entry?.utxoEntry?.blockDaaScore;
+    if (rawDaa !== undefined && rawDaa !== null) daa = Number(BigInt(rawDaa));  // daa ~38M fits Number safely
+  } catch { daa = null; }
+  return { daa, reason: daa === null ? 'daa-unresolved' : 'ok' };
+}
+
+async function handlePoolBetRegistered(msg) {
+  const { createHash } = await import('crypto');
+  const required = ['market_id', 'bettor_pk', 'direction', 'stake_amount', 'side_p2sh', 'side_lock_tx'];
+  for (const k of required) {
+    if (msg[k] === undefined || msg[k] === null) {
+      console.warn(`[trade-filter:bet-reg] missing ${k} market=${msg.market_id?.slice(0,12)} — reject`);
+      return;
+    }
+  }
+
+  // Layer 2 floor check (NWT r121 #1): defense-in-depth against malicious producer.
+  let stakeSompi;
+  try { stakeSompi = BigInt(msg.stake_amount); }
+  catch { console.warn(`[trade-filter:bet-reg] stake_amount not integer market=${msg.market_id.slice(0,12)} val=${msg.stake_amount} — reject`); return; }
+  if (stakeSompi < BETTOR_MIN_STAKE_POLICY_SOMPI) {
+    console.warn(`[trade-filter:bet-reg] stake ${stakeSompi} < POLICY floor ${BETTOR_MIN_STAKE_POLICY_SOMPI} market=${msg.market_id.slice(0,12)} bettor=${msg.bettor_pk.slice(0,12)} — reject (anti-bot)`);
+    return;
+  }
+
+  // Idempotent: side_lock_tx UNIQUE index → INSERT OR IGNORE handles dedup. Cheap pre-check skips
+  // entire RPC roundtrip if already ingested.
+  const existing = sqlite.prepare('SELECT id FROM pool_bettor_sides WHERE side_lock_tx = ?').get(msg.side_lock_tx);
+  if (existing) {
+    console.log(`[trade-filter:bet-reg] side_lock_tx ${msg.side_lock_tx.slice(0,16)} already ingested — skip`);
+    return;
+  }
+
+  // 1. Market must exist on this node (cross-node market_publish gap → skip until market_publish lands).
+  const market = sqlite.prepare(`SELECT id, spine_p2sh, market_metadata_hash, pool_merkle_root, deadline, protocol_version
+    FROM pool_markets WHERE id = ?`).get(msg.market_id);
+  if (!market) {
+    // J1 #27d: orphan bet = signal a market_publish was missed. Fire catch-up re-ingest (throttled,
+    // fire-and-forget). Once it rebuilds the row, handlePoolMarketPublished's H2 rescan replays this bet.
+    console.log(`[trade-filter:bet-reg] market ${msg.market_id.slice(0,12)} not in local DB — trigger #27d catch-up re-ingest (H2 rescan then replays this bet)`);
+    catchUpUningestedMarkets({ windowHours: 24 }).catch(e => console.warn(`[trade-filter:bet-reg] catch-up trigger fail: ${e.message}`));
+    return;
+  }
+
+  // 2. Recompute side_p2sh + verify == payload. Path differs v0.5/v0.6/v0.7.
+  // J2-tn r345 (J1 r320 catch): v0.7 path 漏 → 跨节点 bet ingest 全栈 silent skip → settle 路径
+  // 0 bettors visible 跨节点 → committee 抽样后 fund-lock 错 → settle 出账失败. fix mirror api/pool.js
+  // _extStakeDeriveSide_v07 (= 4 args: bettorPk + spineP2shHash + poolMerkleRoot + marketMetadataHash
+  // + direction + deadline, 无 stakeAmount).
+  let recomputedSideP2sh, recomputedRedeem;
+  try {
+    const ver = msg.protocol_version || market.protocol_version;
+    const spineP2shHash = createHash('sha256').update(market.spine_p2sh).digest('hex');
+    const network = market.spine_p2sh.startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
+    if (ver === 'v0.7') {
+      const { computeSideP2SH_v07 } = await import('../lib/pool-p2sh-v07.mjs');
+      const r = await computeSideP2SH_v07({
+        bettorPk: msg.bettor_pk, spineP2shHash, poolMerkleRoot: market.pool_merkle_root,
+        marketMetadataHash: market.market_metadata_hash, direction: msg.direction,
+        deadline: market.deadline, network,
+      });
+      recomputedSideP2sh = r.p2shAddr; recomputedRedeem = r.redeemScript;
+    } else if (ver === 'v0.6') {
+      const { computeSideP2SH_v06 } = await import('../lib/pool-p2sh-v06.mjs');
+      const r = await computeSideP2SH_v06({
+        bettorPk: msg.bettor_pk, spineP2shHash, poolMerkleRoot: market.pool_merkle_root,
+        marketMetadataHash: market.market_metadata_hash, direction: msg.direction,
+        stakeAmount: msg.stake_amount, deadline: market.deadline, network,
+      });
+      recomputedSideP2sh = r.p2shAddr; recomputedRedeem = r.redeemScript;
+    } else {
+      console.warn(`[trade-filter:bet-reg] v0.5 path not implemented yet market=${msg.market_id.slice(0,12)} — skip`);
+      return;
+    }
+  } catch (e) {
+    console.warn(`[trade-filter:bet-reg] side_p2sh recompute fail market=${msg.market_id.slice(0,12)}: ${e.message}`);
+    return;
+  }
+  if (recomputedSideP2sh !== msg.side_p2sh) {
+    console.warn(`[trade-filter:bet-reg] side_p2sh mismatch market=${msg.market_id.slice(0,12)} expected=${msg.side_p2sh?.slice(0,20)} got=${recomputedSideP2sh?.slice(0,20)} — reject (spoofed bettor_pk or wrong derivation)`);
+    return;
+  }
+
+  // 3. Chain truth (single-source #27a v2, NWT r1181): captureSideLockDaa does getUtxosByAddresses(side_p2sh),
+  //    matches the UNSPENT UTXO by stake_amount + side_lock_tx (Bettor r113: spent = settled, skip), and reads
+  //    its CANONICAL accepting-block daaScore. The SAME fn the backfill script calls → backfill daa == new-bet
+  //    daa, zero divergence. The committee bettor-exclude set chain-anchors to side_lock_daa <= deadline_daa.
+  const cap = await captureSideLockDaa({
+    side_p2sh: msg.side_p2sh, side_lock_tx: msg.side_lock_tx, stake_amount: msg.stake_amount,
+    network: market.spine_p2sh.startsWith('kaspatest:') ? 'testnet-12' : 'mainnet',
+  });
+  if (cap.reason === 'no-rpc' || cap.reason.startsWith('rpc-fail')) {
+    console.warn(`[trade-filter:bet-reg] ${cap.reason} market=${msg.market_id.slice(0,12)} — skip (replay later)`);
+    return;
+  }
+  if (cap.reason === 'no-unspent-utxo') {
+    // Position never paid, already spent (settled), or wrong amount. Skip without INSERT —
+    // settled positions don't belong in pool_bettor_sides on this remote node (settler local truth wins).
+    console.log(`[trade-filter:bet-reg] no UNSPENT UTXO matching tx=${msg.side_lock_tx.slice(0,16)} amount=${msg.stake_amount} at ${msg.side_p2sh.slice(0,20)} (settled/unpaid/wrong) — skip`);
+    return;
+  }
+  const sideLockDaa = cap.daa;  // CANONICAL accepting-block daaScore (chain consensus fact, byte-equal across nodes), or null
+  if (sideLockDaa === null) console.warn(`[trade-filter:bet-reg] side_lock_daa unresolved from UTXO market=${msg.market_id.slice(0,12)} tx=${msg.side_lock_tx.slice(0,16)} — stored NULL (#27a fail-loud at sample)`);
+
+  // 4. INSERT OR IGNORE pool_bettor_sides (UNIQUE side_lock_tx WHERE NOT NULL dedup anchor).
+  //    bettor_relay_id NULL = external 0-key bettor on remote node (no local relay knows the privkey).
+  try {
+    const insertResult = sqlite.prepare(`INSERT OR IGNORE INTO pool_bettor_sides
+      (market_id, bettor_pk, bettor_relay_id, direction, stake_amount, side_p2sh, side_lock_tx, merkle_index, side_redeem_script_hex, side_lock_daa)
+      VALUES (?,?,?,?,?,?,?,?,?,?)`).run(
+        msg.market_id, msg.bettor_pk, null, msg.direction, msg.stake_amount,
+        msg.side_p2sh, msg.side_lock_tx, msg.merkle_index || null, recomputedRedeem, sideLockDaa,
+      );
+    if (insertResult.changes === 0) {
+      const stillMissing = !sqlite.prepare('SELECT 1 FROM pool_bettor_sides WHERE side_lock_tx = ?').get(msg.side_lock_tx);
+      if (stillMissing) {
+        console.warn(`[trade-filter:bet-reg] INSERT OR IGNORE changes=0 AND row still missing side_lock_tx=${msg.side_lock_tx.slice(0,16)} — constraint violation? (KI 49 silent-skip)`);
+        return;
+      }
+    }
+    console.log(`[trade-filter:bet-reg] ingested market=${msg.market_id.slice(0,12)} bettor=${msg.bettor_pk.slice(0,12)} dir=${msg.direction} stake=${msg.stake_amount} tx=${msg.side_lock_tx.slice(0,16)}`);
+  } catch (e) {
+    console.warn(`[trade-filter:bet-reg] insert fail (likely UNIQUE dedup, ok): ${e.message}`);
+  }
+}
 
 async function handleOrder(msg) {
   const orderId = msg.id;

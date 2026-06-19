@@ -1,0 +1,238 @@
+// PoolShard_fold.sil — bshard M3 fold-carries-KAS, unified pool 合约 (J1, 2026-06-15 rework).
+//
+// M3 重设计(funding gap 根治): leaf 持 value(KAS)+account 双轨。register 真存 stake 进 leaf-pool → fold 携 KAS 上行
+//   (parent.value==Σchild.value) → root==market-pool 持全池 → winner 串行从 root draw-down(payout merkle-bound)。
+// 统一合约(leaf=root 同型, fold to=1 recreate 同合约): 5 entry — register_append / fold / close_commit / claim_draw / refund_draw。
+// 承重锚 = **零豁免 output-bind**(每 script-create 路径 require(tx.outputs[i].value==newState.pool_value)) + induction
+//   (child.pool_value 创建时绑) + Kaspa Σin==Σout(不可 mint)。genesis 谎值被首次 covenant-spend(fold/close)+共识中和(数学闭, 非 trust)。
+// silverscript 无 self/current-input-index(compile 实证)→ 纯靠 output-bind, spend 侧不 re-bind self。
+// tri-state closed{0=open,1=settled,2=cancelled} write-once: close(0→1) vs 首refund(0→2 flip, A 修) 抢 closed==0 = market 级 XOR(首发先得原子);
+//   claim gate closed==1 / refund gate closed!=1∧timeout 且置 closed=2 → late-close(req closed==0)被首 refund 永挡 → 杜绝 refund-then-close insolvency+非确定 outcome(F2, NWT/Bettor 双 vantage)。
+// 协议 fee = payoutRoot fee-leaf(off-chain merkle-bound); miner fee = non-pool input(v07 纪律, 不入 value 守恒)。
+
+pragma silverscript ^0.1.0;
+
+contract PoolShard_fold(
+    byte[32] market_id,
+    byte[32] commit_v2,
+    int      shard_count,
+    int      max_fan_in,
+    byte[32] ps_tmpl_hash,     // dust PoolSide-ticket expectedTemplateHash (J2 artifact)
+    byte[32] shard_pool_id,    // 本 pool 身份 (ticket 记此, claim/refund 定位)
+    int      seal_count,
+    int      min_bet,
+    // —— committee (close_commit 4-of-5 attest winningSide+payoutRoot) ——
+    byte[32] c0Pk, byte[32] c1Pk, byte[32] c2Pk, byte[32] c3Pk, byte[32] c4Pk,
+    int      deadline,         // betting deadline; close post-deadline; refund timeout deadline+grace
+    // —— genesis State ——
+    int      init_local_yes,
+    int      init_local_no,
+    int      init_count,
+    int      init_pool_value,
+    int      init_closed,         // 0=open 1=settled 2=cancelled
+    int      init_winningSide,
+    byte[32] init_payoutRoot
+) {
+    int      local_yes = init_local_yes;
+    int      local_no  = init_local_no;
+    int      count     = init_count;
+    int      pool_value = init_pool_value;
+    int      closed    = init_closed;
+    int      winningSide = init_winningSide;
+    byte[32] payoutRoot = init_payoutRoot;
+
+    // dust PoolSide-ticket State (= PoolSide_v08_shard 4 字段; spent-once 防双领, 不持 stake-funds)
+    struct PoolSideTicket {
+        byte[32] bettorPk;
+        int      direction;
+        int      stake;
+        byte[32] shardPoolId;
+    }
+
+    // —— entry 0: register_append (后续注; spend leaf + 重建 bumped leaf, stake 真存) ——
+    entrypoint function register_append(
+        int      side,
+        int      stake,                // witness; output-bind 焊死 == 实存
+        int      leafOutIdx,
+        int      psOutIdx,
+        byte[32] bettorPk,
+        byte[]   ps_prefix,
+        byte[]   ps_suffix
+    ) {
+        require(closed == 0);                              // 只 open 收注
+        require(count < seal_count);
+        require(side == 0 || side == 1);
+        require(stake >= min_bet);
+
+        validateOutputStateWithTemplate(psOutIdx, {
+            bettorPk: bettorPk,
+            direction: side,
+            stake: stake,
+            shardPoolId: shard_pool_id
+        }, ps_prefix, ps_suffix, ps_tmpl_hash);
+
+        validateOutputState(leafOutIdx, {
+            local_yes: local_yes + stake * (1 - side),
+            local_no:  local_no + stake * side,
+            count:     count + 1,
+            pool_value: pool_value + stake,
+            closed:    0,
+            winningSide: winningSide,
+            payoutRoot: payoutRoot
+        });
+        // ★ output-bind weld 1: leaf value == 新 pool_value
+        require(tx.outputs[leafOutIdx].value == pool_value + stake);
+    }
+
+    // —— entry 1: fold (k→1 携 value+account 守恒) ——
+    #[covenant(binding = cov, from = max_fan_in, to = 1, mode = verification)]
+    function fold(State[] prev_states, State[] new_states) {
+        require(new_states.length == 1);
+        int yes_sum = 0;
+        int no_sum = 0;
+        int count_sum = 0;
+        int value_sum = 0;
+        for (i, 0, prev_states.length, max_fan_in) {
+            require(prev_states[i].closed == 0);           // ★ committee-bypass 修: 禁折已结算/取消子池(closed!=0)→ 防 closed 子池被重折资金卡死
+            yes_sum = yes_sum + prev_states[i].local_yes;
+            no_sum = no_sum + prev_states[i].local_no;
+            count_sum = count_sum + prev_states[i].count;
+            value_sum = value_sum + prev_states[i].pool_value;
+        }
+        require(new_states[0].local_yes == yes_sum);
+        require(new_states[0].local_no == no_sum);
+        require(new_states[0].count == count_sum);
+        require(new_states[0].pool_value == value_sum);
+        // ★ committee-bypass 修(J2/Bettor/NWT 三方): fold 只能产**开池**; outcome(closed/winningSide/payoutRoot)只 close_commit 4-of-5 委员可设。
+        //   漏约束 = permissionless folder 可造 closed=1+自设 payoutRoot 的 parent/root 绕委员 → claim 掏空整池(M3 新增 3 字段漏补约束)。
+        require(new_states[0].closed == 0);                // 核心: parent 必开池(folder 不能自结算)
+        require(new_states[0].winningSide == 0);           // 开池 canonical zero outcome
+        require(new_states[0].payoutRoot == init_payoutRoot);   // ★ canonical(Bettor determinism 裁): ==genesis init_payoutRoot(ZERO), 非 inherit 子值 → 两诚实 builder 折同 children 必产同 State(跨节点 byte-equal)
+        // ★ output-bind weld 2: parent value == parent.pool_value (parent cov-output 在 outputs[0] builder 约定, e2e 验)
+        require(tx.outputs[0].value == new_states[0].pool_value);
+        if (count_sum == shard_count) {
+            byte[] commit_pre0 = byte[](yes_sum, 16) + byte[](no_sum, 16);
+            byte[] commit_pre1 = commit_pre0 + byte[](market_id);
+            byte[] commit_pre2 = commit_pre1 + byte[](shard_count, 4);
+            require(blake2b(commit_pre2) == commit_v2);
+        }
+    }
+
+    // —— entry 2: close_commit (root 写 outcome; committee 4-of-5; write-once; value 不变) ——
+    entrypoint function close_commit(
+        sig c0Sig, sig c1Sig, sig c2Sig, sig c3Sig, sig c4Sig,
+        int      rootOutIdx,
+        int      new_winningSide,      // 0=YES 1=NO
+        byte[32] new_payoutRoot        // off-chain BigInt 算 (winner+fee leaves, Σ==totalPool)
+    ) {
+        require(closed == 0);                              // write-once
+        require(count == shard_count);                     // 仅 root (全片折满)
+        require(tx.time >= deadline * 1000);               // post-deadline
+        require(new_winningSide == 0 || new_winningSide == 1);
+
+        int validSigs = 0;
+        if (checkSig(c0Sig, pubkey(c0Pk))) { validSigs = validSigs + 1; }
+        if (checkSig(c1Sig, pubkey(c1Pk))) { validSigs = validSigs + 1; }
+        if (checkSig(c2Sig, pubkey(c2Pk))) { validSigs = validSigs + 1; }
+        if (checkSig(c3Sig, pubkey(c3Pk))) { validSigs = validSigs + 1; }
+        if (checkSig(c4Sig, pubkey(c4Pk))) { validSigs = validSigs + 1; }
+        require(validSigs >= 4);
+
+        validateOutputState(rootOutIdx, {
+            local_yes: local_yes,
+            local_no:  local_no,
+            count:     count,
+            pool_value: pool_value,
+            closed:    1,
+            winningSide: new_winningSide,
+            payoutRoot: new_payoutRoot
+        });
+        // ★ output-bind weld 3: root value 不变 (close 只写 state 不动钱)
+        require(tx.outputs[rootOutIdx].value == pool_value);
+    }
+
+    // —— entry 3: claim_draw (winner 串行从 root 取; closed==1; payout merkle-bound) ——
+    entrypoint function claim_draw(
+        int      rootOutIdx,           // 重建 root continuation
+        int      payoutOutIdx,         // winner payout output
+        int      payout,               // witness; merkle-prove ∈ payoutRoot
+        int      merkle_index,
+        int      tree_depth,
+        byte[32][] siblings,
+        int      ticketInIdx,          // dust-ticket UTXO 在 inputs 的位 (spent-once)
+        int      ticket_prefix_len,
+        int      ticket_suffix_len
+    ) {
+        require(closed == 1);                              // 仅 settled 可 claim
+        require(tree_depth >= 0); require(tree_depth <= 16);
+        require(merkle_index >= 0);
+        require(payout >= 1000);
+        require(payout <= pool_value);                     // minor①(NWT/Bettor 防御性): fail-fast(weld4+共识本就兜负输出, 此条更快更清晰)
+
+        // 读 dust-ticket (spent-once; 原语验 ps_tmpl_hash + 取 bettorPk/direction/stake/shardPoolId)
+        PoolSideTicket tk = readInputStateWithTemplate(ticketInIdx, ticket_prefix_len, ticket_suffix_len, ps_tmpl_hash);
+        require(tk.shardPoolId == shard_pool_id);          // ticket 属本 pool
+        require(tk.direction == winningSide);              // winner (赢向绑 spine.winningSide)
+
+        // merkle-prove payout ∈ payoutRoot: leaf=blake2b(pk‖ser(payout,8)), pk-ASC, running-divisor climb
+        byte[32] cur = blake2b(byte[](tk.bettorPk) + byte[](payout, 8));
+        int div = 1;
+        for (k, 0, tree_depth, 16) {
+            int bit = (merkle_index / div) % 2;
+            if (bit == 0) { cur = blake2b(byte[](cur) + byte[](siblings[k])); }
+            else          { cur = blake2b(byte[](siblings[k]) + byte[](cur)); }
+            div = div * 2;
+        }
+        require(cur == payoutRoot);
+
+        // payout → bettor P2PK (exact; fee 走 non-pool input + change)
+        byte[34] bettorLock = new ScriptPubKeyP2PK(pubkey(tk.bettorPk));
+        require(tx.outputs[payoutOutIdx].scriptPubKey == byte[](bettorLock));
+        require(tx.outputs[payoutOutIdx].value == payout);
+
+        // 重建 root: pool_value -= payout (draw-down); state 余不变
+        validateOutputState(rootOutIdx, {
+            local_yes: local_yes,
+            local_no:  local_no,
+            count:     count,
+            pool_value: pool_value - payout,
+            closed:    1,
+            winningSide: winningSide,
+            payoutRoot: payoutRoot
+        });
+        // ★ output-bind weld 4: root value == pool_value - payout
+        require(tx.outputs[rootOutIdx].value == pool_value - payout);
+    }
+
+    // —— entry 4: refund_draw (市场取消 → bettor 退本金; timeout∧未settled; 从本 pool draw ticket.stake) ——
+    entrypoint function refund_draw(
+        int      poolOutIdx,           // 重建 pool continuation
+        int      payoutOutIdx,         // refund output to bettor
+        int      ticketInIdx,
+        int      ticket_prefix_len,
+        int      ticket_suffix_len
+    ) {
+        require(closed != 1);                              // 未 settled (settled 走 claim, 互斥)
+        require(tx.time >= (deadline + 7200) * 1000);      // deadline+grace 超时才可取消 (防 betting 期早退)
+
+        PoolSideTicket tk = readInputStateWithTemplate(ticketInIdx, ticket_prefix_len, ticket_suffix_len, ps_tmpl_hash);
+        require(tk.shardPoolId == shard_pool_id);          // ticket 属本 pool
+
+        // refund = 本人 stake (1:1 退本金, parimutuel 不适用)
+        byte[34] bettorLock = new ScriptPubKeyP2PK(pubkey(tk.bettorPk));
+        require(tx.outputs[payoutOutIdx].scriptPubKey == byte[](bettorLock));
+        require(tx.outputs[payoutOutIdx].value == tk.stake);
+
+        validateOutputState(poolOutIdx, {
+            local_yes: local_yes,
+            local_no:  local_no,
+            count:     count,
+            pool_value: pool_value - tk.stake,
+            closed:    2,                                  // ★ F2 修(NWT/Bettor): 首 refund flip 0→2 = 隐式 cancel, write-once 锁死 late-close → close(req closed==0) 永挡 → refund-then-close 的 insolvency+非确定 outcome 杜绝。后续 refund closed==2(!=1✓)续。
+            winningSide: winningSide,
+            payoutRoot: payoutRoot
+        });
+        // ★ output-bind weld 5: pool value == pool_value - stake (closed flip 不动钱, value 守恒)
+        require(tx.outputs[poolOutIdx].value == pool_value - tk.stake);
+    }
+}

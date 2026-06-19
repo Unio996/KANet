@@ -1,0 +1,103 @@
+// PoolSide_v0.7.1 — KANet predict market trustless settle bettor-side (pattern B 自卫)
+//
+// v0.7 → v0.7.1 主要变化:
+//   1. **claim_winner DRAMATICALLY simplified** — 不再 5 委员 sigs + 8-deep merkle climb
+//      (那是 v07 path A LOCK 模式). v0.7.1 信 spine settle 已成 WinningsPool UTXO (= 委员 sig
+//      sighash 覆 spine settle TX 担保了, 链上事实). PoolSide claim 只需:
+//        a. bettor 自签 (= 防别人代领)
+//        b. 自家 direction == settlement winner (= 赢方才能 claim)
+//        c. share = stakeAmount × (yesPool+noPool) / winningPool 公式
+//        d. WinningsPool UTXO 在 in[1] 担保 share <= losingPool (= WinningsPool 自家 SS 验)
+//   2. **settled_via_spine entry 保留** legacy stub — settler reaper 可走此路 spend loser PoolSides.
+//   3. **grace fix 保留** refund_market_cancelled deadline + 7200 (Bettor r388 front-run vuln)
+//   4. **ctor 简化** — 不烤 outcome/yesPool/noPool (不在 bet 时知, settle 后才确定),
+//      由 entry args 传入 + WinningsPool 自家 SS 强制 ctor 值一致 (= 双向验).
+//
+// trust 模型:
+//   - bettor 传入的 yesPool/noPool/outcome 若伪造 → 算 share 错 → out[0].value 错
+//     → in[1] WinningsPool SS 自验 (poolShareTaken <= losingPool 由其 ctor 已 baked)
+//     → 总不会超抽. PoolSide 这端只信 bettor (自家钱), 不信 anyone else.
+//   - 真 trustless guard 在 WinningsPool ctor (= 由 spine settle TX 强制 ctor 值,
+//     spine 上的 4-of-5 committee sigs 担保 spine settle TX 输出 WinningsPool ctor 真实).
+//
+// 编译: silverc.exe PoolSide_v0_7_1.sil --ctor args.json
+pragma silverscript ^0.1.0;
+
+contract PoolSide_v0_7_1(
+    byte[32] bettorPk,
+    byte[32] spineP2shHash,         // ctor anchor (= bet 时 spine 已存)
+    byte[32] marketMetadataHash,
+    int direction,                  // 0 = YES, 1 = NO
+    int deadline
+) {
+    // entry 0 — settled_via_spine: legacy reaper, spine settle TX 可 spend 本 UTXO (= loser path).
+    // 仅守 inputs >= 2 (= 必含 spine), 不验细节 (spine SS 自己验全).
+    entrypoint function settled_via_spine() {
+        require(tx.inputs.length >= 2);  // spine + this side minimum
+    }
+
+    // entry 1 — claim_winner (v0.7.1 trustless self-claim):
+    //   bettor 自签 + 自家 direction match outcome + share 公式 + WinningsPool 在 in[1] 担保上限.
+    entrypoint function claim_winner(
+        sig bettorSig,
+        int settlementWinner,        // 0 = YES winner, 1 = NO winner (= 与 ctor direction 对比)
+        int totalYesPool,            // sompi, 来自 spine settle TX commit (= WinningsPool ctor 同源)
+        int totalNoPool              // sompi, 同上
+    ) {
+        // ① bettor self-sig (= 防别人代领)
+        require(checkSig(bettorSig, pubkey(bettorPk)));
+
+        // ② 我必在 winning side
+        require(settlementWinner == 0 || settlementWinner == 1);
+        require(direction == settlementWinner);
+
+        // ③ pool sanity
+        require(totalYesPool > 0);
+        require(totalNoPool > 0);
+
+        // ④ input shape (Bettor r424/r426/r428 critical fix 钦定):
+        // 统一 [WinningsPool=in[0], PoolSide=in[1]] — 两 SS 不能都 require ==0.
+        // PoolSide 在 in[1], WinningsPool 自身在 in[0] 不动.
+        require(this.activeInputIndex == 1);
+        require(tx.inputs.length == 2);
+
+        // ⑤ share 公式 (= stakeAmount × totalPool / winningPool); winnerStake 读 in[1]=自家 PoolSide value
+        int winnerStake = tx.inputs[1].value;
+        int oneMinusWinner = 1 - settlementWinner;
+        int winningPool = settlementWinner * totalNoPool + oneMinusWinner * totalYesPool;
+        // wait: settlementWinner==0 → YES wins → winning side = YES → winningPool = totalYesPool
+        // settlementWinner * totalNoPool + (1-settlementWinner) * totalYesPool:
+        //   winner==0: 0*noPool + 1*yesPool = yesPool ✓
+        //   winner==1: 1*noPool + 0*yesPool = noPool ✓
+        require(winningPool > 0);
+        int totalPool = totalYesPool + totalNoPool;
+        int share = winnerStake * totalPool / winningPool;
+
+        // ⑥ share sanity (= 至少拿回本金 + 不超过总池)
+        require(share >= winnerStake);
+        require(share <= totalPool);
+
+        // ⑦ output[0] = P2PK(bettorPk) value == share
+        require(tx.outputs.length >= 2);  // at least [bettor, WinningsPool continuation]
+        byte[34] bettorLock = new ScriptPubKeyP2PK(pubkey(bettorPk));
+        require(tx.outputs[0].scriptPubKey == byte[](bettorLock));
+        require(tx.outputs[0].value == share);
+        // WinningsPool 端 SS 验 out[1] (= 自家 self-continuation + poolShareTaken cap)
+        // = 我这边不重复验, 信 WinningsPool ctor + 自己的 silverc rules
+    }
+
+    // entry 2 — refund_market_cancelled: bettor self-refund 过 deadline + grace (=v07 同 + grace fix)
+    // FRONT-RUN FIX (Bettor r388/r389 spec): push refund window 出 settle SLA (= REFUND_GRACE_SEC=7200 sec).
+    entrypoint function refund_market_cancelled(sig bettorSig) {
+        require(checkSig(bettorSig, pubkey(bettorPk)));
+        require(tx.time >= (deadline + 7200) * 1000);  // grace 7200s 防 front-run
+
+        require(tx.inputs.length >= 1);
+        require(tx.outputs.length == 1);
+        byte[34] bettorLock = new ScriptPubKeyP2PK(pubkey(bettorPk));
+        require(tx.outputs[0].scriptPubKey == byte[](bettorLock));
+        require(tx.outputs[0].value <= tx.inputs[0].value - 1000);
+        require(tx.outputs[0].value >= tx.inputs[0].value - 100000000);
+        require(tx.outputs[0].value >= 1000);
+    }
+}

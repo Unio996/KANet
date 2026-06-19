@@ -117,6 +117,16 @@ async function handleReply(req, res) {
   res.end(JSON.stringify(responseBody));
 }
 
+// J2-tn r429 (Bettor r467 P0 Console crash 根治): defensive top-level handlers — Qwen3.6B
+// adapter 老 log 'throw er; //Unhandled error' from EventEmitter (= server stream or fetch).
+// process.on('uncaughtException') + ('unhandledRejection') keep child alive instead of exit.
+process.on('uncaughtException', (err) => {
+  log('UNCAUGHT_EXCEPTION', err?.stack || err?.message || String(err));
+});
+process.on('unhandledRejection', (reason) => {
+  log('UNHANDLED_REJECTION', reason?.stack || reason?.message || String(reason));
+});
+
 const server = http.createServer(async (req, res) => {
   if (req.method === "POST" && req.url === "/reply") {
     try {

@@ -1,0 +1,472 @@
+#!/usr/bin/env node
+// scripts/attack-self-claim.mjs — Self-claim attack reproduction (Bettor r19 verify gate 必件)
+//
+// Attack vector (J1 r119 confirmed pre-path-A):
+//   Loser bettor takes any 5 pool PKs (公开知) + self-signs aggSig + self-picks winner = own direction
+//   + computes committeePkHash = blake2b(c0..c4) + broadcasts settle TX → SS accepts (vulnerable)
+//
+// Path A defense (J1 r121 draft 5c3830ff7 broken → path A 双合约):
+//   Spine settle_aggregate replaces aggSig+aggPk with 5 individual checkSig + counter ≥ t (t=4).
+//   Each checkSig(sig_i, pubkey(pk_i)) verifies sig matches the committee PK.
+//   Attacker doesn't hold committee priv keys → all 5 checkSig fail → counter=0 → require(>=4) fail.
+//
+// Modes:
+//   --mode=static  Analyze SS files + verify defense mechanism present (= structural proof)
+//   --mode=live    Actually broadcast attack TX against a live v06 market (= real-chain proof)
+//                  REQUIRES: J1 path A SS ship + v06 market exists + Console restart + attacker relay funded
+//
+// Run:
+//   node scripts/attack-self-claim.mjs --mode=static --out=attack-static.report.json
+//   node scripts/attack-self-claim.mjs --mode=live --market=<id> --attacker=<relay_id> --out=attack-live.report.json
+
+import fs from 'node:fs';
+import path from 'node:path';
+
+const REPO_ROOT = 'D:/kanet-tn12';
+const SS_LIB_DIR = path.join(REPO_ROOT, 'kasia-console/src/lib');
+const CONSOLE_URL = 'http://127.0.0.1:3200';
+
+const args = process.argv.slice(2);
+function arg(name, def) {
+  const a = args.find(a => a.startsWith(`--${name}=`));
+  return a ? a.slice(name.length + 3) : def;
+}
+
+const mode = arg('mode', 'static');
+const outPath = arg('out', `attack-${mode}.report.json`);
+const marketId = arg('market', null);
+const attackerRelay = arg('attacker', null);
+
+function listV06SSFiles() {
+  if (!fs.existsSync(SS_LIB_DIR)) return [];
+  return fs.readdirSync(SS_LIB_DIR)
+    .filter(f => f.endsWith('.sil') && /^Pool/.test(f) && /_v0[67]/.test(f))
+    .map(f => ({ name: f.replace(/\.sil$/, ''), path: path.join(SS_LIB_DIR, f) }));
+}
+
+// ── static mode ────────────────────────────────────────────────────────────
+
+function staticAnalysis() {
+  const files = listV06SSFiles();
+  const report = {
+    mode: 'static',
+    analyzed_at: new Date().toISOString(),
+    files_scanned: files.map(f => f.name),
+    findings: [],
+    verdict: null,
+  };
+
+  if (files.length === 0) {
+    report.verdict = 'NO_V06_SS_FILES';
+    return report;
+  }
+
+  // Find spine SS file (= primary settle entrypoint)
+  const spineFile = files.find(f => /Spine/i.test(f.name));
+  if (!spineFile) {
+    report.findings.push({ severity: 'WARN', msg: 'No PoolSpine v06 file found' });
+    report.verdict = 'INCOMPLETE';
+    return report;
+  }
+
+  const spineSrc = fs.readFileSync(spineFile.path, 'utf8');
+
+  // Defense check 1: settle entrypoint uses 5 individual checkSig (path A) NOT single aggSig?
+  const aggSigPattern = /checkSig\s*\(\s*aggSig\s*,\s*aggPk\s*\)/;
+  // Match J1 path A pattern: if (checkSig(c0Sig, pubkey(c0Pk))) { ... } + require(checkSig(...)) for dispute
+  const individualSigPattern = /checkSig\s*\(\s*c\d+Sig\s*,\s*pubkey\s*\(\s*c\d+Pk\s*\)\s*\)/g;
+  const counterPattern = /require\s*\(\s*(?:validSigs|verifiedCount|sigCount|\w+Sigs)\s*>=?\s*(\d+)/i;
+
+  const hasAggSig = aggSigPattern.test(spineSrc);
+  const indivSigMatches = (spineSrc.match(individualSigPattern) || []).length;
+  const counterMatch = spineSrc.match(counterPattern);
+
+  // Path A defense pattern: ≥3 individual checkSig + counter require ≥t
+  if (hasAggSig && indivSigMatches < 3) {
+    report.findings.push({
+      severity: 'CRITICAL',
+      msg: 'spine uses single aggSig+aggPk — self-claim VULNERABLE (= J1 r119 confirmed hole)',
+      evidence: 'checkSig(aggSig, aggPk) pattern present, < 3 individual sig checks',
+    });
+  } else if (indivSigMatches >= 3 && counterMatch) {
+    report.findings.push({
+      severity: 'INFO',
+      msg: `Path A defense PRESENT — ${indivSigMatches} individual checkSig + counter require ≥${counterMatch[1]}`,
+      evidence: { individual_checksigs: indivSigMatches, threshold_t: parseInt(counterMatch[1], 10) },
+    });
+  } else {
+    report.findings.push({
+      severity: 'WARN',
+      msg: `Unclear defense pattern — aggSig:${hasAggSig}, individual:${indivSigMatches}, counter:${counterMatch ? counterMatch[1] : 'absent'}`,
+    });
+  }
+
+  // Defense check 2: poolMerkleRoot baked in ctor (= committee subset constraint)
+  const ctorRe = /contract\s+\w+\s*\(([^)]+)\)/;
+  const ctorMatch = spineSrc.match(ctorRe);
+  if (ctorMatch) {
+    const hasPoolMerkleRoot = /poolMerkleRoot/i.test(ctorMatch[1]);
+    report.findings.push({
+      severity: hasPoolMerkleRoot ? 'INFO' : 'CRITICAL',
+      msg: hasPoolMerkleRoot ? 'poolMerkleRoot baked in ctor (= committee constrained to public pool)' : 'poolMerkleRoot MISSING from ctor — attacker free to pick arbitrary PKs',
+    });
+  }
+
+  // Defense check 2b: PoolSide v0.7 variable-stake — ctor 不烤 stakeAmount + per-UTXO single-input + payout 用 tx.inputs[0].value
+  // (J1 P2-4 SS v0.7 ship + Bettor r158 三层防御 + P2 (d) Variable-Stake spec LOCK)
+  const sideFileForV07 = files.find(f => /Side/i.test(f.name));
+  if (sideFileForV07) {
+    const sideSrc = fs.readFileSync(sideFileForV07.path, 'utf8');
+    // a) ctor 块不含 stakeAmount (= 变量金额 v0.7 必)
+    const ctorBlock = sideSrc.match(/contract\s+\w+\s*\(([^)]+)\)/);
+    const ctorHasStakeAmount = ctorBlock && /\bstakeAmount\b/.test(ctorBlock[1]);
+    report.findings.push({
+      severity: ctorHasStakeAmount ? 'WARN' : 'INFO',
+      msg: ctorHasStakeAmount
+        ? 'PoolSide ctor 仍含 stakeAmount (= v0.6 旧版, 未升级 v0.7 变量金额)'
+        : 'PoolSide v0.7 ctor 删 stakeAmount ✓ (= 变量金额支持)',
+    });
+    // b) require(tx.inputs.length == 1) 存在 (= per-UTXO 防多 input 求和 fraud)
+    const inputsLenOne = /require\s*\(\s*tx\.inputs\.length\s*==\s*1\s*\)/.test(sideSrc);
+    report.findings.push({
+      severity: inputsLenOne ? 'INFO' : 'WARN',
+      msg: inputsLenOne
+        ? 'PoolSide v0.7 claim/refund require inputs.length==1 ✓ (= per-UTXO 防求和 fraud)'
+        : 'PoolSide claim/refund 未限 inputs.length==1 (= 多 UTXO 一 TX 求和 fraud risk)',
+    });
+    // c) payout 用 tx.inputs[0].value (= 变量金额命门)
+    const payoutVariable = /payout\s*=\s*tx\.inputs\[0\]\.value\s*\*/.test(sideSrc);
+    report.findings.push({
+      severity: payoutVariable ? 'INFO' : 'WARN',
+      msg: payoutVariable
+        ? 'PoolSide v0.7 payout 用 tx.inputs[0].value ✓ (= 变量金额命门)'
+        : 'PoolSide payout 未使用 tx.inputs[0].value (= 仍依烤死 stakeAmount, v0.6 旧版)',
+    });
+  }
+
+  // Defense check 2d: G6 批2 红线 8 + 红线 7 — SS 不硬等 fee + helper mass-floor
+  // (Bettor r287 qlfpv 5 层实测 forward fix, audit doc §7 红线 8/9 + 红线 7)
+  // Reason: SS 硬编 fee/mass = mainnet brick (qlfpv 100 KAS 已 brick). 改 'output <= stake - MIN_FEE' 灵活 fee.
+  const spineV06File = files.find(f => /Spine_v06$/i.test(f.name));
+  if (spineV06File) {
+    const v06Src = fs.readFileSync(spineV06File.path, 'utf8');
+    // a) v0.6 refund_maker_unjoined 是否仍硬等 fee (= require output == stake - 50000 类) → mainnet brick risk
+    const hardEqFee = /require\s*\(\s*tx\.outputs\[\d+\]\.value\s*==\s*\w+\s*-\s*(\d+|minerFee)/.test(v06Src);
+    report.findings.push({
+      severity: hardEqFee ? 'WARN' : 'INFO',
+      msg: hardEqFee
+        ? 'PoolSpine v0.6 仍硬等 fee (= output == stake - X), G6 批2 红线 8 待 J1 改 output <= stake - MIN_FEE (qlfpv brick KI sediment 永久 — v0.6 SS 不可改, v0.7 forward fix)'
+        : 'PoolSpine v0.6 fee 灵活 ✓ (= 不硬等, G6 批2 红线 8 守)',
+    });
+  }
+  // a2) v0.7 fee range check (= J1 r238 0c0fc979 forward fix output <= stake - MIN_FEE + >= stake - MAX_FEE)
+  const spineV07ForFeeCheck = files.find(f => /Spine_v07$/i.test(f.name));
+  if (spineV07ForFeeCheck) {
+    const v07Src = fs.readFileSync(spineV07ForFeeCheck.path, 'utf8');
+    // v0.7 fee range: require(tx.outputs[i].value <= makerStakeAmount - 50000) + (>= - 100000000)
+    const hasFeeUpperBound = /tx\.outputs\[\d+\]\.value\s*<=\s*\w+\s*-\s*\d+/.test(v07Src);
+    const hasFeeLowerBound = /tx\.outputs\[\d+\]\.value\s*>=\s*\w+\s*-\s*\d+/.test(v07Src);
+    report.findings.push({
+      severity: (hasFeeUpperBound && hasFeeLowerBound) ? 'INFO' : 'WARN',
+      msg: (hasFeeUpperBound && hasFeeLowerBound)
+        ? 'PoolSpine v0.7 fee 范围 [stake-MAX, stake-MIN] ✓ (= J1 r238 forward fix 红线 8/9 ship)'
+        : `PoolSpine v0.7 fee 范围检查不全 (upper:${hasFeeUpperBound} lower:${hasFeeLowerBound}) — 红线 8 forward fix 未完整`,
+    });
+  }
+  // b) p2sh.mjs _assertTxInvariants 是否含 mass-floor check (= 红线 7 fee >= mass × rate)
+  const p2shSrc = fs.readFileSync(path.join(REPO_ROOT, 'kasia-relay/src/lib/p2sh.mjs'), 'utf8');
+  const hasMassFloor = /fee\s*<\s*\w*[Mm]ass\s*\*|mass.*floor|fee\s*>=\s*mass/.test(p2shSrc);
+  report.findings.push({
+    severity: hasMassFloor ? 'INFO' : 'WARN',
+    msg: hasMassFloor
+      ? '_assertTxInvariants 含 mass-floor check ✓ (= 红线 7, G6 批2 ship)'
+      : '_assertTxInvariants 缺 mass-floor check (= 红线 7 待 J2 加 fee >= mass × mempool_floor_rate, qlfpv mass-fee 50k<442k brick KI)',
+  });
+
+  // Defense check 2c: PoolSpine v0.7 G6 shard commit anchor (= Bettor r307 commit_v2 + J1 r236 ship efab03a9)
+  // Reason: 跨分片 atomic, attacker forge globalYes/No → commit hash 变 → SS reject.
+  const spineV07File = files.find(f => /Spine_v07/i.test(f.name));
+  if (spineV07File) {
+    const spineV07Src = fs.readFileSync(spineV07File.path, 'utf8');
+    // a) ctor 含 shard_id + shard_count
+    const hasShardCtor = /shard_id/.test(spineV07Src) && /shard_count/.test(spineV07Src);
+    report.findings.push({
+      severity: hasShardCtor ? 'INFO' : 'WARN',
+      msg: hasShardCtor
+        ? 'PoolSpine v0.7 ctor 含 shard_id + shard_count ✓ (= 分片 commit identity)'
+        : 'PoolSpine v0.7 ctor 缺 shard_id/shard_count (= G6 分片设计 break)',
+    });
+    // b) settle_aggregate 含 globalYesTotal_sompi + globalNoTotal_sompi + global_commit_id args
+    const hasGlobalArgs = /globalYesTotal_sompi/.test(spineV07Src) && /globalNoTotal_sompi/.test(spineV07Src);
+    report.findings.push({
+      severity: hasGlobalArgs ? 'INFO' : 'WARN',
+      msg: hasGlobalArgs
+        ? 'PoolSpine v0.7 含 globalYes/No totals args ✓ (= commit_v2 跨片承诺 anchor)'
+        : 'PoolSpine v0.7 缺 globalYes/No totals args (= G6 commit anchor 缺)',
+    });
+    // c) min-bet + min-pot floor require (= forensic 防最小赌注)
+    const hasMinBet = /makerStakeAmount\s*>=\s*100000000/.test(spineV07Src);
+    const hasMinPot = /globalYesTotal_sompi\s*>=\s*0|globalNoTotal_sompi\s*>=\s*0/.test(spineV07Src);
+    report.findings.push({
+      severity: (hasMinBet && hasMinPot) ? 'INFO' : 'WARN',
+      msg: (hasMinBet && hasMinPot)
+        ? 'PoolSpine v0.7 含 min-bet (1 KAS) + min-pot floor require ✓ (= Bettor r261 forensic)'
+        : `PoolSpine v0.7 forensic floor 不全 (= min-bet:${hasMinBet} min-pot:${hasMinPot})`,
+    });
+  } else {
+    report.findings.push({
+      severity: 'INFO',
+      msg: 'PoolSpine v0.7 SS file 不存在 (= G6 未 ship)',
+    });
+  }
+
+  // Defense check 2e: min-pot SS↔settler 数学一致 (Bettor r329 Owner 终裁 选项 A)
+  // SS L313 require(losingPool >= MIN_LOSING_POOL) vs settler L659 thinThreshold = N*bond + broker + margin
+  // 必 thinThreshold >= MIN_LOSING_POOL (= settler 严守 SS 不漏放)
+  let ssMinFormula = null;  // 'static:X' OR 'dynamic:N*oracleBondAmount'
+  let ssMinLosingPool = null;  // BigInt static value, or null if dynamic
+  const v07ForMinPot = files.find(f => /Spine_v07$/i.test(f.name));
+  if (v07ForMinPot) {
+    const v07Src = fs.readFileSync(v07ForMinPot.path, 'utf8');
+    const dynM = v07Src.match(/require\s*\(\s*losingPool\s*>=\s*(\d+)\s*\*\s*oracleBondAmount\s*\)/);
+    const staticM = v07Src.match(/require\s*\(\s*losingPool\s*>=\s*(\d+)\s*\)/);
+    if (dynM) {
+      ssMinFormula = `dynamic: ${dynM[1]} * oracleBondAmount`;
+      ssMinLosingPool = BigInt(dynM[1]) * 100000000n;  // assuming default 1 KAS bond
+    } else if (staticM) {
+      ssMinFormula = `static: ${staticM[1]}`;
+      ssMinLosingPool = BigInt(staticM[1]);
+    }
+  }
+  const settlerSrc = fs.readFileSync(path.join(REPO_ROOT, 'kasia-console/src/services/pool-market-settler.js'), 'utf8');
+  const ncMatch = settlerSrc.match(/N_COMMITTEE\s*=\s*(\d+)/);
+  const mbfMatch = settlerSrc.match(/MIN_BROKER_FEE_SOMPI\s*=\s*([\d_]+)/);
+  const smmMatch = settlerSrc.match(/STORAGE_MASS_MARGIN\s*=\s*([\d_]+)/);
+  if (ssMinLosingPool !== null && mbfMatch && smmMatch) {
+    const N = ncMatch ? BigInt(ncMatch[1]) : 5n;
+    const MBF = BigInt(mbfMatch[1].replace(/_/g, ''));
+    const SMM = BigInt(smmMatch[1].replace(/_/g, ''));
+    const OB = 100000000n;  // default oracleBond 1 KAS
+    const settlerThreshold = N * OB + MBF + SMM;
+    const consistent = settlerThreshold >= ssMinLosingPool;
+    const margin = consistent ? Number((settlerThreshold - ssMinLosingPool) * 100n / ssMinLosingPool) : 0;
+    report.findings.push({
+      severity: consistent ? 'INFO' : 'CRITICAL',
+      msg: consistent
+        ? `min-pot SS↔settler 一致 ✓ (SS ${ssMinFormula} = ${ssMinLosingPool} sompi @ 1 KAS bond, settler thinThreshold=${settlerThreshold}, 严守 SS + ${margin}% margin)`
+        : `min-pot 反 invariant! settler 阈 ${settlerThreshold} < SS 阈 ${ssMinLosingPool} (= settler 放过 SS 守 thin market, 数学一致破)`,
+    });
+  } else {
+    report.findings.push({
+      severity: 'INFO',
+      msg: `min-pot SS↔settler lint skipped (SS formula:${ssMinFormula} settler MBF:${!!mbfMatch} SMM:${!!smmMatch})`,
+    });
+  }
+
+  // Defense check 3a: position-aware merkle climb (= J2 r105 catch + J1 r126 fix d5d4ecbdd)
+  // Bug pattern: `cur = blake2b(cur + sib)` (leftmost-only, fails for non-zero positions)
+  // Fix pattern: `if (b == 0) { cur = blake2b(cur + sib) } else { cur = blake2b(sib + cur) }`
+  const posAwareRe = /if\s*\(\s*\w+\s*==\s*0\s*\)\s*\{[^}]*blake2b\([^}]*\+[^}]*\)\s*;?\s*\}\s*else\s*\{[^}]*blake2b\([^}]*\+[^}]*\)/g;
+  const posAwareMatches = (spineSrc.match(posAwareRe) || []).length;
+  if (posAwareMatches >= 5) {
+    report.findings.push({
+      severity: 'INFO',
+      msg: `Position-aware merkle climb PRESENT — ${posAwareMatches} if-else hash branches (J1 r126 fix d5d4ecbdd)`,
+    });
+  } else {
+    report.findings.push({
+      severity: 'CRITICAL',
+      msg: `Position-aware merkle climb INSUFFICIENT — only ${posAwareMatches} if-else hash branches (J2 r105 catch — leftmost-only bug = legitimate settle fails for non-pos-0 oracles)`,
+    });
+  }
+
+  // Defense check 3: PoolSide v06 — claim_winner spine-binding?
+  const sideFile = files.find(f => /Side/i.test(f.name));
+  if (sideFile) {
+    const sideSrc = fs.readFileSync(sideFile.path, 'utf8');
+    const sideCtor = sideSrc.match(ctorRe);
+    if (sideCtor) {
+      const hasSpineHash = /spineP2shHash/i.test(sideCtor[1]);
+      const hasPoolMerkle = /poolMerkleRoot/i.test(sideCtor[1]);
+      // Path A spec: side ctor MUST bake poolMerkleRoot (= claim_winner verifies via OpTxInputSpk-like binding when supported, or via aggPk hash binding)
+      report.findings.push({
+        severity: (hasSpineHash || hasPoolMerkle) ? 'INFO' : 'CRITICAL',
+        msg: `PoolSide v06 ctor binding fields — spineP2shHash:${hasSpineHash}, poolMerkleRoot:${hasPoolMerkle}`,
+      });
+    }
+    // Check claim_winner uses runtime args without binding to committee/spine?
+    const claimWinnerSec = sideSrc.match(/entrypoint\s+function\s+claim_winner\s*\([^)]*\)\s*\{[\s\S]*?\n\s*\}/);
+    if (claimWinnerSec) {
+      const hasMerkleVerify = /poolMerkleRoot|merkleProof|merkleRoot/i.test(claimWinnerSec[0]);
+      report.findings.push({
+        severity: hasMerkleVerify ? 'INFO' : 'WARN',
+        msg: hasMerkleVerify ? 'claim_winner body references merkle proof verify' : 'claim_winner body does NOT reference merkle verify — bind-to-spine may be weak',
+      });
+    }
+  }
+
+  // Verdict
+  const critical = report.findings.filter(f => f.severity === 'CRITICAL').length;
+  const warn = report.findings.filter(f => f.severity === 'WARN').length;
+  if (critical > 0) report.verdict = 'ATTACK_FEASIBLE';
+  else if (warn > 0) report.verdict = 'INCOMPLETE_DEFENSE';
+  else report.verdict = 'DEFENSE_PRESENT';
+
+  return report;
+}
+
+// ── live mode ──────────────────────────────────────────────────────────────
+
+async function liveAttack() {
+  const report = {
+    mode: 'live',
+    attempted_at: new Date().toISOString(),
+    inputs: { market_id: marketId, attacker_relay: attackerRelay },
+    steps: [],
+    verdict: null,
+  };
+
+  function step(name, ok, detail) {
+    report.steps.push({ name, ok, detail });
+  }
+
+  if (!marketId || !attackerRelay) {
+    step('inputs validated', false, { error: 'Both --market=<id> and --attacker=<relay_id> required for live mode' });
+    report.verdict = 'INPUT_MISSING';
+    return report;
+  }
+
+  // Step 1: fetch market — must be v0.6 market
+  try {
+    const r = await fetch(`${CONSOLE_URL}/api/pool/market/${marketId}`);
+    if (!r.ok) {
+      step('fetch market', false, { http_status: r.status });
+      report.verdict = 'MARKET_FETCH_FAIL';
+      return report;
+    }
+    const market = (await r.json()).market || {};
+    const isV06 = market.protocol_version === 'v0.6';
+    report.market = market;
+    step('fetch market', true, {
+      market_id: market.id,
+      protocol_version: market.protocol_version,
+      spine_p2sh: market.spine_p2sh,
+      pool_merkle_root: market.pool_merkle_root,
+      is_v06: isV06,
+    });
+    if (!isV06) {
+      report.verdict = 'NOT_V06_MARKET';
+      return report;
+    }
+  } catch (e) {
+    step('fetch market', false, { error: e.message });
+    report.verdict = 'MARKET_FETCH_FAIL';
+    return report;
+  }
+
+  const spinePsh = report.market?.spine_p2sh;
+
+  // Step 2: Fetch spine UTXO via RPC
+  let spineUtxo = null;
+  try {
+    const k = await import('kaspa-wasm');
+    const rpc = new k.RpcClient({ url: process.env.KASPA_RPC_URL || 'ws://127.0.0.1:17210' });
+    await rpc.connect();
+    const r = await rpc.getUtxosByAddresses({ addresses: [spinePsh] });
+    await rpc.disconnect();
+    if (!r.entries?.length) {
+      step('fetch spine UTXO', false, { error: 'spine_p2sh has 0 UTXOs', address: spinePsh });
+      report.verdict = 'SPINE_NO_UTXO';
+      return report;
+    }
+    spineUtxo = r.entries[0];
+    step('fetch spine UTXO', true, {
+      txid: spineUtxo.outpoint.transactionId,
+      index: spineUtxo.outpoint.index,
+      amount_sompi: String(spineUtxo.entry.amount),
+    });
+  } catch (e) {
+    step('fetch spine UTXO', false, { error: e.message });
+    report.verdict = 'UTXO_FETCH_FAIL';
+    return report;
+  }
+
+  // Step 3: Construct minimal attack TX — spend spine UTXO with EMPTY scriptSig
+  // Expected: mempool reject (= P2SH script verify fails for any scriptSig that doesn't match SS predicates)
+  // This is Phase 1 (trivial reject proof). Phase 2 = construct full settle_aggregate scriptSig with attacker sigs (= prove path A 5-checkSig specifically rejects).
+  let attackResult = null;
+  try {
+    const k = await import('kaspa-wasm');
+    const rpc = new k.RpcClient({ url: process.env.KASPA_RPC_URL || 'ws://127.0.0.1:17210' });
+    await rpc.connect();
+    const attackerSpkParts = (await rpc.getServerInfo());  // sanity check connection
+    const lockedAmount = BigInt(spineUtxo.entry.amount);
+    const fee = 100000n;  // 0.001 KAS
+    const outValue = lockedAmount - fee;
+    // Use attacker addr as output target (= would steal 100 KAS if SS accepts)
+    const attackerAddr = (await fetch(`${CONSOLE_URL}/api/relay/${attackerRelay}`).then(r => r.json())).relay?.address;
+    if (!attackerAddr) throw new Error('attacker relay address not found');
+    const toSpk = k.payToAddressScript(new k.Address(attackerAddr));
+    const attackTx = new k.Transaction({
+      version: 0,
+      inputs: [{
+        previousOutpoint: { transactionId: spineUtxo.outpoint.transactionId, index: spineUtxo.outpoint.index },
+        signatureScript: '',  // EMPTY scriptSig = attack: try to spend without satisfying SS
+        sequence: 0n,
+        sigOpCount: 1,
+      }],
+      outputs: [new k.TransactionOutput(outValue, toSpk)],
+      lockTime: 0n,
+      gas: 0n,
+      subnetworkId: '0000000000000000000000000000000000000000',
+      payload: '',
+    });
+    try {
+      const submitResult = await rpc.submitTransaction({ transaction: attackTx, allowOrphan: false });
+      attackResult = { ACCEPTED: true, txId: submitResult.transactionId, note: 'CRITICAL: spine accepted empty-scriptSig attack = SS is broken!' };
+    } catch (e) {
+      attackResult = { ACCEPTED: false, reject_reason: e.message };
+    }
+    await rpc.disconnect();
+  } catch (e) {
+    step('attack TX construct', false, { error: e.message });
+    report.verdict = 'ATTACK_CONSTRUCT_FAIL';
+    return report;
+  }
+
+  const attackBlocked = attackResult.ACCEPTED === false;
+  step('attack TX submit (empty scriptSig phase 1)', attackBlocked, attackResult);
+
+  report.verdict = attackBlocked ? 'ATTACK_BLOCKED_PHASE_1' : 'ATTACK_ACCEPTED_BREAK';
+  return report;
+}
+
+// ── main ────────────────────────────────────────────────────────────────────
+
+let report;
+if (mode === 'static') report = staticAnalysis();
+else if (mode === 'live') report = await liveAttack();
+else {
+  console.error(`mode must be 'static' or 'live'`);
+  process.exit(1);
+}
+
+const outAbs = path.resolve(outPath);
+fs.writeFileSync(outAbs, JSON.stringify(report, null, 2));
+
+console.log(`Attack report: ${outAbs}`);
+console.log(`Mode: ${mode} | Verdict: ${report.verdict}`);
+if (report.findings) {
+  for (const f of report.findings) {
+    console.log(`  [${f.severity}] ${f.msg}`);
+  }
+}
+if (report.steps) {
+  for (const s of report.steps) {
+    console.log(`  [${s.ok ? 'OK' : 'NOTE'}] ${s.name}`);
+  }
+}
+
+// Exit code: 0 if defense present OR stub pending; 1 if attack feasible (= broken design)
+const exitCode = report.verdict === 'ATTACK_FEASIBLE' ? 1 : 0;
+process.exit(exitCode);

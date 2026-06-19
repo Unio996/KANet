@@ -1,0 +1,116 @@
+// pool-p2sh-v08.mjs — Node-side ctor builder + P2SH derivation for PoolSpine_v08_chunk.sil (#31 找零核弹).
+//
+// v08 = v07 + chunked settle (settle_chunk entry0) + ported settle_aggregate/dispute/refund (entry1-3).
+// New ctor (16 params, DIFFERS from v07): drops v07's brokerFeePct/oracleFeePct; reorders; adds
+//   maxWinnersPerChunk/init_hwm/init_plan_commit/init_total_winners/maxChunkFee; keeps makerStakeAmount/minerFee
+//   (v07-anchor, J1 ported settle_aggregate/refund need them — ctor14→16 drift, b367753b).
+//
+// Reuses pool-p2sh.mjs helpers (single source, no drift). Same compile→P2SH path as v07.
+//
+// ⚠ NWT byte-match gate (a) (THE stuck-funds 命门): this off-chain P2SH MUST byte-match silverc-compiled
+//   SS P2SH (= blake2b(redeem)). Since compileAndComputeP2SH invokes silverc.exe on the SAME .sil with the
+//   SAME ctor16, it matches by construction; the gate re-verifies independently.
+
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { blake2b } from '@noble/hashes/blake2b';
+import {
+  bytes32Expr,
+  intExpr,
+  validatePubkeyHex,
+  validateHashHex,
+  validateInt,
+  compileAndComputeP2SH,
+} from './pool-p2sh.mjs';
+import { MAX_TX_FEE_SOMPI } from './kip9-mass.mjs';  // #31 ⑤ single-source (was local 1e8 literal)
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
+// #31 two-P2SH-by-route (J1 SS-域裁 2026-06-15): 单体 4-entry v08 redeem=31KB (6×spine=186KB) → INFEASIBLE (连 8p
+//   aggregate 都 on-chain >cap). 拆两 version (各自洽 settle+dispute+refund): agg (settle_aggregate, ≤MAX_K 小池, ~2.1KB)
+//   + chunk (settle_chunk, >MAX_K 大池, ~3.9KB@maxK5). 主 settle 都 entry0/OP_0.
+const SPINE_V08_AGG_SIL   = process.env.POOL_SPINE_V08_AGG_SIL_PATH   || join(__dirname, 'PoolSpine_v08_agg.sil');
+const SPINE_V08_CHUNK_SIL = process.env.POOL_SPINE_V08_CHUNK_SIL_PATH || join(__dirname, 'PoolSpine_v08_chunk.sil');
+// LEGACY 单体 monolith (.draft, 4-entry 31KB, INFEASIBLE — 保留仅供 ref/diff, 不应再被任何活路径用):
+const SPINE_V08_SIL = process.env.POOL_SPINE_V08_SIL_PATH || join(__dirname, 'PoolSpine_v08_chunk.sil.draft');
+
+// Deployment constants (single-source / determinism — both nodes MUST agree):
+//   maxWinnersPerChunk = settle_chunk for-loop compile bound (1KAS headline = 47; storage-derived).
+//   maxChunkFee = V07_MAX_FEE = 1e8 (anti-grief ceiling; REUSE pool-market-settler.js L2291 const when wired).
+//   init_* = genesis placeholders (chunk_0 uses committee-signed plan_commit_arg witness, NOT readInputState;
+//     pool-lock has no state — see SS L122. init_* only affect P2SH determinism, never require-checked).
+export const V08_MAX_WINNERS_PER_CHUNK = 47;
+export const V08_MAX_CHUNK_FEE = MAX_TX_FEE_SOMPI;   // #31 ⑤ single-source (kip9-mass), was local 1e8 literal
+const ZERO32_HEX = '00'.repeat(32);
+
+/**
+ * Compute PoolSpine_v08_chunk P2SH address + redeem script.
+ *
+ * Ctor order MUST match PoolSpine_v08_chunk.sil.draft (16 params, verified e79f00a9 L34-49):
+ *   (makerPk, brokerPk, poolMerkleRoot, deadline, marketMetadataHash, market_id, shard_id, shard_count,
+ *    oracleBondAmount, maxWinnersPerChunk, init_hwm, init_plan_commit, init_total_winners, maxChunkFee,
+ *    makerStakeAmount, minerFee)
+ *
+ * @returns {{ p2shAddr, redeemScript, p2shHash, cacheHit }}
+ */
+// Shared builder: validate args + build ctor16 + compile the given .sil → P2SH. Both versions share ctor16
+//   (same builder/fixture/migration-determinism); only silPath + contractName differ (two-P2SH-by-route).
+async function _computeSpineV08(args, silPath, contractName) {
+  const makerPk = validatePubkeyHex(args.makerPk, 'makerPk');
+  const brokerPk = validatePubkeyHex(args.brokerPk, 'brokerPk');
+  const poolMerkleRoot = validateHashHex(args.poolMerkleRoot, 'poolMerkleRoot');
+  const deadline = validateInt(args.deadline, 'deadline', 1);
+  const marketMetadataHash = validateHashHex(args.marketMetadataHash, 'marketMetadataHash');
+  const market_id = validateHashHex(args.market_id, 'market_id');
+  const shard_id = validateInt(args.shard_id, 'shard_id', 0);
+  const shard_count = validateInt(args.shard_count, 'shard_count', 1);
+  if (shard_id >= shard_count) throw new Error(`shard_id ${shard_id} >= shard_count ${shard_count}`);
+  const oracleBondAmount = validateInt(args.oracleBondAmount, 'oracleBondAmount', 1);
+  // v08-new (genesis/deploy constants — default to canonical values; both nodes MUST match):
+  const maxWinnersPerChunk = validateInt(args.maxWinnersPerChunk ?? V08_MAX_WINNERS_PER_CHUNK, 'maxWinnersPerChunk', 1);
+  const init_hwm = validateInt(args.init_hwm ?? 0, 'init_hwm', 0);
+  const init_plan_commit = validateHashHex(args.init_plan_commit ?? ZERO32_HEX, 'init_plan_commit');
+  const init_total_winners = validateInt(args.init_total_winners ?? 0, 'init_total_winners', 0);
+  const maxChunkFee = validateInt(args.maxChunkFee ?? V08_MAX_CHUNK_FEE, 'maxChunkFee', 1);
+  // v07-anchor (settle_aggregate/refund need these):
+  const minerFee = validateInt(args.minerFee, 'minerFee', 1, 99_999_999);  // SS L284-285 require 0<minerFee<1e8
+  const makerStakeAmount = validateInt(args.makerStakeAmount, 'makerStakeAmount', 1);
+  if (!args.network) throw new Error('network required');
+
+  const ctorJson = [
+    bytes32Expr(makerPk),              // 0
+    bytes32Expr(brokerPk),             // 1
+    bytes32Expr(poolMerkleRoot),       // 2
+    intExpr(deadline),                 // 3
+    bytes32Expr(marketMetadataHash),   // 4
+    bytes32Expr(market_id),            // 5
+    intExpr(shard_id),                 // 6
+    intExpr(shard_count),              // 7
+    intExpr(oracleBondAmount),         // 8
+    intExpr(maxWinnersPerChunk),       // 9
+    intExpr(init_hwm),                 // 10
+    bytes32Expr(init_plan_commit),     // 11
+    intExpr(init_total_winners),       // 12
+    intExpr(maxChunkFee),              // 13
+    intExpr(makerStakeAmount),         // 14
+    intExpr(minerFee),                 // 15
+  ];
+
+  const result = await compileAndComputeP2SH(silPath, ctorJson, contractName, args.network);
+  const p2shHash = Buffer.from(blake2b(result.scriptBytes, { dkLen: 32 })).toString('hex');
+
+  return {
+    p2shAddr: result.p2shAddr,
+    redeemScript: result.redeemScript,
+    p2shHash,
+    cacheHit: result.cacheHit,
+  };
+}
+
+// #31 two-P2SH-by-route builders (J1 SS-域裁). Same ctor16 args; pick version by route at market-create:
+//   ≤MAX_K winner 池 → _agg (settle_aggregate); >MAX_K → _chunk (settle_chunk, maxWinnersPerChunk = unroll bound).
+//   ⚠ version-选择必确定 (同 market 两节点选同 version = 同 P2SH; task#2 reconstruct 守点须选对 version 源 + ctor).
+export const computeSpineP2SH_v08_agg   = (args) => _computeSpineV08(args, SPINE_V08_AGG_SIL,   'PoolSpine_v08_agg');
+export const computeSpineP2SH_v08_chunk = (args) => _computeSpineV08(args, SPINE_V08_CHUNK_SIL, 'PoolSpine_v08_chunk');
+// LEGACY: 单体 .draft (4-entry 31KB INFEASIBLE). 保留 export 名向后兼容, 但指向 legacy .draft — 活路径应迁到 _agg/_chunk.
+export const computeSpineP2SH_v08       = (args) => _computeSpineV08(args, SPINE_V08_SIL,       'PoolSpine_v08_chunk');

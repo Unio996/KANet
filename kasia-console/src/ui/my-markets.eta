@@ -1,0 +1,154 @@
+<%~ include('partials/page-open', { _page: 'my-markets', pageTitle: '我的市场', ...it }) %>
+
+<!-- KANet-UI 2026-06-06 件2 (Bettor ③ APPROVE r261c r580): maker 视角自家 markets list.
+     纯 client filter /api/pool/markets?maker_relay_id=<my agents 各 id>. 0 backend 改. -->
+<div class="p-6 max-w-5xl mx-auto" x-data="myMarketsPage()" x-init="init()">
+  <div class="flex items-center justify-between mb-5">
+    <div>
+      <h1 class="text-2xl font-display text-ink-800">我的市场</h1>
+      <p class="text-xs text-ink-400 mt-1">你自家 agent 发起过的预测市场, 含状态 + 详情链接.</p>
+    </div>
+    <a href="/predictions/pool/create" class="btn btn-primary btn-sm">发起新市场 →</a>
+  </div>
+
+  <!-- KANet-UI 2026-06-07 r600 P0-#3 (Bettor r312 + Owner 实测): agent 选择器, 用户选'看哪个 agent 的' -->
+  <div x-show="!loading && agents.length > 0" class="mb-4 flex items-center gap-2 text-sm">
+    <label class="text-ink-500 text-xs">看哪个 Agent 的市场:</label>
+    <select x-model="selectedAgentId" class="px-3 py-1.5 rounded-lg border border-warm-300 bg-white text-sm font-medium">
+      <option value="">全部 (<span x-text="totalCount"></span>)</option>
+      <template x-for="a in agents" :key="a.id">
+        <option :value="a.id" x-text="a.name + ' (' + (countByAgent[a.id] || 0) + ')'"></option>
+      </template>
+    </select>
+  </div>
+
+  <div x-show="loading" class="text-center py-12 text-ink-400">载入中...</div>
+
+  <div x-show="!loading && filteredMarkets.length === 0 && totalCount === 0" class="text-center py-16 bg-warm-50 rounded-lg">
+    <div class="text-3xl mb-3">🪧</div>
+    <p class="text-ink-500">你还没有发起过预测市场。</p>
+    <a href="/predictions/pool/create" class="text-brand-500 hover:text-brand-700 text-sm mt-2 inline-block">发起第一个 →</a>
+  </div>
+
+  <div x-show="!loading && filteredMarkets.length === 0 && totalCount > 0" class="text-center py-12 bg-warm-50 rounded-lg">
+    <p class="text-ink-500 text-sm">这个 Agent 没有发起过市场。换一个看看。</p>
+  </div>
+
+  <div x-show="!loading && filteredMarkets.length > 0" class="card overflow-hidden">
+    <table class="w-full text-sm">
+      <thead class="bg-warm-50 text-ink-500 text-xs">
+        <tr>
+          <th class="text-left py-2 px-3">题干</th>
+          <th class="text-left py-2 px-3">出单人</th>
+          <th class="text-center py-2 px-3">状态</th>
+          <th class="text-right py-2 px-3">池子 KAS</th>
+          <th class="text-right py-2 px-3">下注人</th>
+          <th class="text-right py-2 px-3">建市时间</th>
+          <th class="text-center py-2 px-3"></th>
+        </tr>
+      </thead>
+      <tbody>
+        <template x-for="m in filteredMarkets" :key="m.id">
+          <tr class="border-t border-warm-100 hover:bg-warm-50">
+            <td class="py-2 px-3 max-w-[280px] truncate" :title="m.title || m.id" x-text="titleLabel(m)"></td>
+            <td class="py-2 px-3 text-ink-500 text-xs" x-text="m.maker_name || '?'"></td>
+            <td class="py-2 px-3 text-center">
+              <!-- KANet-UI 2026-06-07 P2 (Bettor r330 关 1 PASS): 状态 raw → 中文映射 -->
+              <span class="text-[10px] px-1.5 py-0.5 rounded font-medium"
+                    :class="statusBadge(m.protocol_status)" x-text="statusLabel(m.protocol_status)"></span>
+            </td>
+            <!-- KANet-UI 2026-06-12 (Bettor r731 / Owner抓): 显实池子总额 = yes_pool_kas + no_pool_kas (含 maker + 双边 bettor 实押),
+                 非 maker_stake_kas (demo maker≥100 致永远显 100, 真池子被藏). 字段已 KAS, 无 sompi 转换. -->
+            <td class="py-2 px-3 text-right tabular-nums text-ink-600"
+                :title="`YES池 ${Number(m.yes_pool_kas||0).toFixed(2)} + NO池 ${Number(m.no_pool_kas||0).toFixed(2)} (含 maker ${m.maker_stake_kas||0})`"
+                x-text="(m.yes_pool_kas != null || m.no_pool_kas != null) ? (Number(m.yes_pool_kas||0) + Number(m.no_pool_kas||0)).toFixed(2) : (m.maker_stake_kas || '?')"></td>
+            <td class="py-2 px-3 text-right tabular-nums text-ink-600" x-text="m.bettor_count || 0"></td>
+            <td class="py-2 px-3 text-right text-[11px] text-ink-400" x-text="(m.created_at || '').slice(0, 16)"></td>
+            <td class="py-2 px-3 text-center">
+              <a :href="`/predictions/pool/${encodeURIComponent(m.id)}`" class="text-brand-500 hover:text-brand-700 text-xs">详情 →</a>
+            </td>
+          </tr>
+        </template>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+function myMarketsPage() {
+  return {
+    loading: true,
+    markets: [],                  // 全部 (= 所有 agent 拉的)
+    agents: [],                   // 非 broker agent list (有市场的)
+    selectedAgentId: '',          // '' = 全部
+    countByAgent: {},             // { agentId: 数量 }
+    totalCount: 0,
+    get filteredMarkets() {
+      if (!this.selectedAgentId) return this.markets;
+      return this.markets.filter(m => m.maker_relay_id === this.selectedAgentId);
+    },
+    // KANet-UI 2026-06-07 r600 P0-#3: 题干兜底 (= Bettor r312 + Owner 实测 raw ID 糟).
+    // 优先级: title > category 名 > '(无标题市场)'. 不再露 raw id.
+    titleLabel(m) {
+      if (m.title && m.title.trim() && m.title !== m.id) return m.title;
+      if (m.category) return '(无标题 · ' + m.category + ')';
+      return '(无标题市场)';
+    },
+    async init() {
+      // KANet-UI 2026-06-07 r316 (Bettor 正解, r603 fetch-all 绕路退):
+      // backend /api/pool/markets 已加 maker_relay_id query filter → per-agent fetch 真返自家单, 不再 519 全拉.
+      try {
+        const agResp = await fetch('/api/agent/profile').then(r => r.json()).catch(() => ({}));
+        const allAgents = (agResp.agents || agResp || []).filter(a => !a.is_dex_broker);
+        if (!allAgents.length) { this.loading = false; return; }
+        const allMarkets = [];
+        const countByAgent = {};
+        for (const a of allAgents) {
+          try {
+            const mResp = await fetch(`/api/pool/markets?maker_relay_id=${encodeURIComponent(a.id)}&limit=200`).then(x => x.json());
+            const list = mResp.markets || [];
+            countByAgent[a.id] = list.length;
+            for (const m of list) {
+              let title = '';
+              try { const o = JSON.parse(m.resolution_rule_spec || ''); title = o.title || ''; } catch {}
+              allMarkets.push({ ...m, title });
+            }
+          } catch { countByAgent[a.id] = 0; }
+        }
+        allMarkets.sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
+        this.markets = allMarkets;
+        this.totalCount = allMarkets.length;
+        this.countByAgent = countByAgent;
+        // 选择器仅列【有市场的 agent】(= 0 个的别堆下拉)
+        this.agents = allAgents.filter(a => (countByAgent[a.id] || 0) > 0);
+      } catch (e) {
+        console.warn('my-markets load fail', e);
+      }
+      this.loading = false;
+    },
+    statusBadge(s) {
+      if (s === 'completed') return 'bg-emerald-100 text-emerald-700';
+      if (s === 'collecting_sigs' || s === 'verifying') return 'bg-amber-100 text-amber-700';
+      if (s === 'cancelled' || s === 'refunded') return 'bg-warm-200 text-ink-500';
+      return 'bg-warm-100 text-ink-500';
+    },
+    // KANet-UI 2026-06-07 P2 (Bettor r330): 状态 raw → 中文 (= 同详情页 currentStageHint 一致)
+    statusLabel(s) {
+      const m = {
+        pending_oracle_deposits: '等仲裁人接单',
+        pending_oracle_sampling: '抽仲裁人中',
+        pending_oracle_sample: '抽仲裁人中',
+        pending_bettors: '押注中',
+        verifying: '等仲裁人投票',
+        collecting_sigs: '收仲裁人签名',
+        completed: '已结算',
+        cancelled: '已取消',
+        refunded: '已退款',
+      };
+      return m[s] || s || '?';
+    },
+  };
+}
+</script>
+
+<%~ include('partials/page-close', it) %>

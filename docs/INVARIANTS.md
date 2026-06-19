@@ -478,3 +478,52 @@ T2/T3 任务卡 acceptance criteria 必反映三层:
 *v0.1 — 2026-05-03 Architect mode (claude.ai) 起草. Retro report 数据 + Phase 1 实施 trace + 17 KI sediment + 6 反模式 evidence + 5 轴 layered protection. NWT reviewer hat 审 + Owner final ack 待.*
 
 *KANet 工程文化的真核心: Sediment is forward-looking, not just retrospective.*
+
+---
+
+# Chapter 9: 系统不变量 v0.3(2026-06-08 Owner 钦定 codify)
+
+> 上面 Chapter 1-8 = Phase1 工程文化/流程不变量。本章 = 预测/预言机**系统层**硬不变量,本轮(A 长杆 e2e + 找零核弹 + D12 forfeit + A settle 付错边 bug)攒出。reviewer(Bettor 关2)逐条核;违反即 RED。
+
+### SYS-1 — NO-TX-NO-STATE
+任何 terminal 状态(completed/settled/refunded/cancelled)**必须有一笔 `kaspa_tx_log` 索引可查(有 block_hash)的真链上 TX**。DB status ≠ 真相。
+- 反例(本轮已撤):raw `UPDATE status='cancelled'` 而 refund_txid 空 = 钱锁链上、status 撒谎。改 skip_until_ms(只挡 voter spam、不伪造 terminal)。
+- 验法:terminal → 取 txid → kaspa_tx_log.tx_id 有 block_hash。check_utxo_landed 要查 payout 地址(settle 花掉的输入地址会假 false)。
+
+### SYS-2 — Fee 按实际 mass 动态算
+手构 TX(settle/refund/dispute/claim)fee **必按实际 KIP-9 mass 动态算(含 storage_mass),禁静态常数**。小额 output → storage_mass 爆 → 静态 fee 必 too-low → reject。
+- 单一访问器:`lib/kip9-mass.mjs`(本轮 5 fork 合 1)。新构 TX 必用,禁再抄。
+- 反例(找零核弹 #6):dispatchRefundDisagreement 静态 minerFee=20000。已修。
+
+### SYS-3 — Committee 自然失联 = 自动 forfeit
+委员中途失联(含 mid-flight 进程死)= **自动 forfeit_n,无需手动重启/外部干预**;活委员上达 4-of-5 即 settle。
+- 反例:手动重启复活静默员 → stale-sig 污染(D12 教训)。
+- 验法:杀 1 委员不重启仍 4-of-5 settle 链证(D12 nb4ko 3a71c12d)。
+
+### SYS-4 — UI partner 同步纪律
+一处协议/契约改 → **全 partner 整盘走**(backend + 全 UI 消费端 + lint),不留半同步。
+- 反例(本轮):prevet URL 改但 3 处注释残留。已修 + L33 守。
+- 配 [[deploy-discipline-checklist]]:契约改 = 锁契约 + 双方同建 + 关2 验对齐。
+
+### SYS-5 — Settle 付 winner 方(本轮 A bug 暴出·codify)
+settle 分账**必付 winner direction 方**。winner-side 空集 / maker 作隐含对手方 等边界**严禁把池子赔给 loser**。
+- 反例(本轮 A w0s3m):winner=0(YES)但唯一 participant 是 NO 输家、YES 方 0 人 → 全池 143KAS 赔给输家。settler owners 修中。
+- 验法(强制·Owner 钦定):terminal payout **逐个对 outputs 地址→角色**(winner/broker/N committee),贴进验收。地址不对 = 不算绿。
+
+---
+
+## KI-30 — Gate 2 = 行为 trace + 链索引查询,不是渲染视检
+
+**Invariant**: Gate 2(关2 事后验收)的定义 = **(a) 行为 trace(实打 API / 断言响应行为)+ (b) 链索引查询(kaspa_tx_log / check_utxo_landed 对地址)**;**不是 UI 渲染视检**。
+
+**反例(本轮"一娃娃二十妈")**:`/api/pool/markets?maker_relay_id=X` 看页面元素渲出就签 Gate 2 PASS → 实际后端忽略 filter 返全部。看渲染过不去,看 API 行为才抓到。
+
+**反例(本轮 A settle)**:看"5/5 投票 + 5/5 签名 + 上链"就报 PASS → 没逐个对 payout 地址,漏了"付错边"bug。**terminal 必逐笔地址映射(SYS-5)**。
+
+**修法**:Gate 2 三必做 —(1)实打接口断言行为(非看元素);(2)链上 terminal 查 kaspa_tx_log 有 block_hash(非信 DB status);(3)payout 逐个对地址→角色。三缺一 = Gate 2 没做完。
+
+**Sediment evidence**: 2026-06-08 本轮 maker filter "一娃娃二十妈" + A settle 付错边,两次都是渲染/机制视检过、行为+链+地址查才抓到。
+
+---
+
+*v0.3 — 2026-06-08 Bettor codify(Owner 钦定). 新增 SYS-1~5 系统不变量 + KI-30 Gate2 定义. 触发:A 长杆 e2e 暴出 oracle infra 4 硬伤 + settle 付错边 bug.*

@@ -80,7 +80,12 @@ export async function recordParallelJudgment(offer, oracleRelayId, judgeFn) {
   ).get(offer.id, oracleRelayId);
   if (exists) return { graded: false, reason: 'already_recorded' };
 
-  const verdict = await judgeFn(cfg.independentSource, offer);
+  // J2-tn r405 Track D fix: pool_markets path 无 outcome_oracle_relay_id field,
+  // deriveKanetNativeVote 内 LLM provider lookup 用 offer.outcome_oracle_relay_id,
+  // null 时 returns 'no LLM provider URL' → judge silent abstain → A.recorded=0.
+  // Inject voter relay id as outcome_oracle_relay_id (= 让 voter 的 adapter 跑 LLM).
+  const offerWithVoter = { ...offer, outcome_oracle_relay_id: oracleRelayId };
+  const verdict = await judgeFn(cfg.independentSource, offerWithVoter);
   if (!verdict || !verdict.outcome) return { graded: false, reason: 'judge_abstain' };
 
   const id = randomUUID();
@@ -106,7 +111,9 @@ export async function scoreParallelJudgments(umaResolveFn) {
 
   let scored = 0, disagreements = 0, pendingFinal = 0, missingOffer = 0;
   for (const row of pending) {
-    const offer = sqlite.prepare(`SELECT * FROM exchange_offers WHERE id = ?`).get(row.offer_id);
+    // J2-tn r406 Track D: Phase B 同 UNION 路径 — pool_markets 也是 offer 源.
+    let offer = sqlite.prepare(`SELECT * FROM exchange_offers WHERE id = ?`).get(row.offer_id);
+    if (!offer) offer = sqlite.prepare(`SELECT * FROM pool_markets WHERE id = ?`).get(row.offer_id);
     if (!offer) { missingOffer++; continue; }
     const uma = await umaResolveFn(offer);
     if (!uma || !uma.ok) { pendingFinal++; continue; } // UMA 48h finalization gate not passed yet
@@ -180,12 +187,23 @@ export async function parallelJudgmentTick({ judgeFn, umaResolveFn, voterRelayId
   }
   // Phase A: active prediction offers (give_asset prediction share) past their outcome window,
   // restricted to gradable (mapped + independent_source) markets — recordParallelJudgment filters.
+  // J2-tn r404 Track D Bettor r348 关1 PASS — UNION pool_markets 接通两子系统.
+  // 之前: 引擎只查 exchange_offers (= OTC-style prediction_outcome_share). pool_markets v0.7
+  // 路径 (= 现 KANet 协议主路) 完全不在视图 → kutzj 类 mapping 永不 Phase A fire.
+  // 修: UNION ALL pool_markets, 映射列对齐 offer shape, NULL outcome_oracle_relay_id
+  // (= pool 用 5-committee, 不是单 oracle; recordParallelJudgment 不依赖该字段).
   const activeOffers = sqlite.prepare(`
     SELECT id, outcome_condition_id, outcome_market_source, outcome_token_id, outcome_side,
            resolution_rule_spec, protocol_status
     FROM exchange_offers
     WHERE (give_asset = 'prediction_outcome_share' OR want_asset = 'prediction_outcome_share')
       AND protocol_status IN ('matched','verifying','collecting_sigs','completed')
+    UNION ALL
+    SELECT id, outcome_condition_id, outcome_market_source, outcome_token_id, outcome_side,
+           resolution_rule_spec, protocol_status
+    FROM pool_markets
+    WHERE outcome_condition_id IS NOT NULL
+      AND protocol_status IN ('pending_bettors','verifying','collecting_sigs','completed','cancelled','refunded')
   `).all();
 
   let recorded = 0, skipped = 0;

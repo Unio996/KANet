@@ -19,7 +19,16 @@
  */
 
 import { sqlite as _sqlite } from '../db/client.js';
+import { emitDmMenuAction } from '../api/audit-prediction.js';
 function getDb() { return _sqlite; }
+
+// KANet-UI 2026-06-13 (Bettor r787 ④): wire DM menu actions into the audit trail (fixes
+// last_7_days_dm 空 — emitDmMenuAction existed but was never called). CRITICAL (Bettor r787 注):
+// audit is a SIDE-EFFECT, never blocking — a failed emit MUST NOT break the DM/betting flow
+// (register-v06 落链 main path must not depend on this). Every call goes through this swallow-wrapper.
+function safeEmit(opts) {
+  try { emitDmMenuAction(opts); } catch (e) { /* audit side-effect — swallow, never block betting */ }
+}
 
 // ── State machine constants ──────────────────────────────────────────────
 
@@ -48,18 +57,42 @@ const STAKE_OPTIONS_KAS = [10, 50, 100];
 // ── DB query helpers (= chain truth, stateless) ──────────────────────────
 
 /**
- * Fetch active offers awaiting taker (= protocol_status='pending_taker' in exchange_offers,
- * since pool_markets is maker-first and taker-side flow uses exchange_offers per E pre-handshake).
- * Returns top N by handshake expiry asc (soonest first).
+ * Fetch active markets the user can bet on. DUAL-PATH (Bettor r728/r730 approved):
+ *  - Path A (PRIMARY, kind='pool'): pool_markets v0.6/v0.7 committee-judged. Broker-introduced
+ *    markets live here (seeder sets broker_relay_id). Bettors register via register-v06
+ *    (= line-B proven path). This is what Owner task#3 (DM real betting) targets.
+ *  - Path B (PRESERVED旁路, kind='offer'): exchange_offers E pre-handshake (P2P escrow).
+ *    UNCHANGED — keeps r106 Bug A null-field filter intact, no regression of working路.
+ * Pool markets first (主推 broker 经手 committee 市场), then offers, capped to limit.
+ *
+ * @param {string} [brokerRelayId] — if set, restrict pool path to this broker's markets
+ *   (= broker-introduction filter, broker加强 Phase 2 hook).
  */
-function fetchActiveMarkets(limit = 5) {
+function fetchActiveMarkets(limit = 5, brokerRelayId = null) {
   const db = getDb();
-  // E pre-handshake flow uses exchange_offers (= /api/prediction/pending-offer L1490 bettor.js)
-  // Bettor r106 Bug A hotfix: 2 null-field offers cause marketLabel render all `?` — exclude via NOT NULL 3-col filter
-  return db.prepare(`
+  // Path A: pool_markets committee-judged (= register-v06 flow, my line-B 验通真路).
+  // ONLY v0.6/v0.7 — confirmPoolBet uses register-v06 which rejects v0.5 (= /register-external path).
+  // deadline > now (unix sec) drops expired markets (= can't usefully bet). M2 self-test caught the
+  // v0.5 leak (stale 2026-05-29 markets ranked first by deadline ASC → register-v06 400).
+  const nowUnix = Math.floor(Date.now() / 1000);
+  const pools = db.prepare(`
+    SELECT id, maker_relay_id, broker_relay_id, broker_fee_pct,
+           outcome_market_source, outcome_condition_id, outcome_token_id, outcome_side,
+           resolution_rule_spec, deadline, maker_stake_amount, 'pool' AS kind
+    FROM pool_markets
+    WHERE protocol_status = 'pending_bettors'
+      AND protocol_version IN ('v0.6','v0.7')
+      AND deadline > ?
+      ${brokerRelayId ? 'AND broker_relay_id = ?' : ''}
+    ORDER BY deadline ASC
+    LIMIT ?
+  `).all(...(brokerRelayId ? [nowUnix, brokerRelayId, limit] : [nowUnix, limit]));
+  // Path B: exchange_offers E pre-handshake (= /api/prediction/pending-offer L1490 bettor.js).
+  // Bettor r106 Bug A hotfix: 2 null-field offers cause marketLabel render all `?` — exclude via NOT NULL 3-col filter.
+  const offers = db.prepare(`
     SELECT id, maker_relay_id, outcome_oracle_relay_ids AS oracle_relay_ids,
            outcome_market_source, outcome_condition_id, outcome_token_id, outcome_side,
-           pending_handshake_expires_at AS deadline, give_amount AS maker_stake_amount
+           pending_handshake_expires_at AS deadline, give_amount AS maker_stake_amount, 'offer' AS kind
     FROM exchange_offers
     WHERE protocol_status = 'pending_taker'
       AND pending_handshake_expires_at > datetime('now')
@@ -69,42 +102,93 @@ function fetchActiveMarkets(limit = 5) {
     ORDER BY pending_handshake_expires_at ASC
     LIMIT ?
   `).all(limit);
+  // pool first (主推 broker 经手), then offers, cap to limit.
+  return [...pools, ...offers].slice(0, limit);
+}
+
+/** Derive x-only pubkey from a kaspa address (= pool_bettor_sides.bettor_pk key, mirrors pool.js L106). */
+async function deriveXOnlyPk(address) {
+  try {
+    const kaspa = await import('kaspa-wasm');
+    return kaspa.XOnlyPublicKey.fromAddress(new kaspa.Address(address)).toString();
+  } catch { return null; }
 }
 
 /**
- * Fetch user's own offers — exchange_offers where maker_relay_id == user OR taker (addr) == user.
+ * Fetch user's own bets. DUAL-PATH (mirror fetchActiveMarkets):
+ *  - Path A (kind='pool'): pool_bettor_sides where bettor_pk = xonly(relay address) — the
+ *    register-v06 external path stores bettor_relay_id=null, so bettor_pk is the only link.
+ *  - Path B (kind='offer'): exchange_offers where maker_relay_id == user OR taker == user (UNCHANGED).
  *
  * @param {string} senderAddress — user's kaspa addr
- * @param {string} [relayId] — user's relay_node_id (optional, for maker-side filter)
+ * @param {string} [relayId] — user's relay_node_id (needed for pool path: resolve bettor_pk)
+ * @param {string} [baseUrl] — console base for relay address lookup
  */
-function fetchUserBets(senderAddress, relayId) {
+async function fetchUserBets(senderAddress, relayId, baseUrl = 'http://127.0.0.1:3200') {
   const db = getDb();
+  const bets = [];
+  // Path A: pool_bettor_sides matched by bettor_pk = xonly(relay address). Best-effort (guarded).
   if (relayId) {
-    return db.prepare(`
-      SELECT id, outcome_market_source, outcome_condition_id, outcome_side,
-             give_amount AS maker_stake_amount, protocol_status, pending_handshake_expires_at AS deadline, created_at
-      FROM exchange_offers
-      WHERE maker_relay_id = ? OR taker = ?
-      ORDER BY created_at DESC
-      LIMIT 10
-    `).all(relayId, senderAddress);
+    try {
+      const relayRes = await fetch(`${baseUrl}/api/relay/${relayId}`);
+      const relayJson = await relayRes.json();
+      const addr = relayJson.address || relayJson.relay?.address;
+      const pk = addr ? await deriveXOnlyPk(addr) : null;
+      if (pk) {
+        const poolBets = db.prepare(`
+          SELECT pbs.market_id AS id, pbs.direction, pbs.stake_amount AS maker_stake_amount,
+                 pbs.side_lock_tx, pbs.claim_txid, pbs.created_at,
+                 pm.protocol_status, pm.outcome_market_source, pm.outcome_condition_id,
+                 pm.outcome_side, pm.resolution_rule_spec, pm.settle_txid, 'pool' AS kind
+          FROM pool_bettor_sides pbs JOIN pool_markets pm ON pm.id = pbs.market_id
+          WHERE pbs.bettor_pk = ?
+          ORDER BY pbs.created_at DESC LIMIT 10
+        `).all(pk);
+        for (const b of poolBets) b.outcome_side = b.direction === 0 ? 'YES' : 'NO';
+        bets.push(...poolBets);
+      }
+    } catch { /* best-effort — fall through to offer path */ }
   }
-  return db.prepare(`
-    SELECT id, outcome_market_source, outcome_condition_id, outcome_side,
-           give_amount AS maker_stake_amount, protocol_status, pending_handshake_expires_at AS deadline, created_at
-    FROM exchange_offers
-    WHERE taker = ?
-    ORDER BY created_at DESC
-    LIMIT 10
-  `).all(senderAddress);
+  // Path B: exchange_offers (UNCHANGED).
+  const offerBets = relayId
+    ? db.prepare(`
+        SELECT id, outcome_market_source, outcome_condition_id, outcome_side,
+               give_amount AS maker_stake_amount, protocol_status, pending_handshake_expires_at AS deadline, created_at, 'offer' AS kind
+        FROM exchange_offers WHERE maker_relay_id = ? OR taker = ?
+        ORDER BY created_at DESC LIMIT 10
+      `).all(relayId, senderAddress)
+    : db.prepare(`
+        SELECT id, outcome_market_source, outcome_condition_id, outcome_side,
+               give_amount AS maker_stake_amount, protocol_status, pending_handshake_expires_at AS deadline, created_at, 'offer' AS kind
+        FROM exchange_offers WHERE taker = ?
+        ORDER BY created_at DESC LIMIT 10
+      `).all(senderAddress);
+  bets.push(...offerBets);
+  return bets;
 }
 
-/** Compose human-readable market name from outcome cols (no `question` col in schema). */
+/** Compose human-readable market name. Pool markets carry a structured spec title; offers use outcome cols. */
 function marketLabel(m) {
+  if (m.kind === 'pool' && m.resolution_rule_spec) {
+    try {
+      const spec = typeof m.resolution_rule_spec === 'string' ? JSON.parse(m.resolution_rule_spec) : m.resolution_rule_spec;
+      if (spec && spec.title) return String(spec.title).slice(0, 60);
+    } catch { /* fall through to outcome cols */ }
+  }
   const src = (m.outcome_market_source || '?').slice(0, 12);
   const cond = (m.outcome_condition_id || '?').slice(0, 12);
   const side = m.outcome_side || '?';
   return `${src}/${cond} (${side})`;
+}
+
+/** Format a deadline (pool = INTEGER unix ts; offer = TEXT datetime) to a YYYY-MM-DD-ish hint. */
+function fmtDeadline(d) {
+  if (d == null) return '?';
+  if (typeof d === 'number') {
+    const ms = d > 1e12 ? d : d * 1000; // sec vs ms heuristic
+    try { return new Date(ms).toISOString().slice(0, 10); } catch { return String(d); }
+  }
+  return String(d).slice(0, 10);
 }
 
 /**
@@ -177,7 +261,7 @@ function renderHelp() {
 function renderMarketList(markets) {
   if (!markets.length) {
     return [
-      '当前 0 个等待 taker 的市场。',
+      '当前没有可下注的活跃市场。',
       '',
       '想创建? 浏览器开 http://192.168.1.105:3200/predictions/pool/create',
       '回 /help 看完整 menu。',
@@ -185,25 +269,36 @@ function renderMarketList(markets) {
   }
   const lines = ['活跃市场:'];
   markets.forEach((m, i) => {
-    const ddl = (m.deadline || '').slice(0, 10);
+    const ddl = fmtDeadline(m.deadline);
     const stake = (m.maker_stake_amount || 0) / 100_000_000; // sompi → KAS
-    lines.push(`[${i + 1}] ${marketLabel(m)} (deadline ${ddl}, maker stake ${stake} KAS)`);
+    lines.push(`[${i + 1}] ${marketLabel(m)} (截止 ${ddl}, 创建者押注 ${stake} KAS)`);
   });
   lines.push('', `回 1-${markets.length} 选市场, OR /create /my_bets /help`);
   return lines.join('\n');
 }
 
 function renderOutcomeList(market) {
-  // pool_markets stores outcome_side as a single field (= YES/NO/winner_idx 等 binary by spec).
-  // Render side selection: taker can pick the OPPOSITE side of maker.
+  // Pool markets (committee-judged): bettor freely picks a side (multiple bettors per side).
+  if (market.kind === 'pool') {
+    return [
+      `市场: ${marketLabel(market)}`,
+      '',
+      '选你押哪边:',
+      '[1] YES',
+      '[2] NO',
+      '',
+      '回 1 (YES) 或 2 (NO), OR /cancel',
+    ].join('\n');
+  }
+  // Offer (E pre-handshake P2P): binary, taker takes the OPPOSITE side of maker.
   const makerSide = market.outcome_side || '?';
   const oppSide = makerSide === 'YES' ? 'NO' : (makerSide === 'NO' ? 'YES' : `opposite of ${makerSide}`);
   const lines = [
     `市场: ${marketLabel(market)}`,
-    `Maker 押: ${makerSide}`,
+    `对家押: ${makerSide}`,
     '',
     '选你的押注:',
-    `[1] ${oppSide} (= 跟 maker 对赌)`,
+    `[1] ${oppSide} (= 跟对家对赌)`,
   ];
   lines.push('', '回 1 确认对赌, OR /cancel');
   return lines.join('\n');
@@ -225,26 +320,116 @@ function renderStakeOptions(market, outcomeIdx) {
 }
 
 function renderConfirmation(ctx) {
+  const confirmLine = ctx.kind === 'pool'
+    ? '回 /confirm 确认 (= 锁定押注上链, 等截止后委员会裁决结算)'
+    : '回 /confirm 确认 (= 锁定押注上链, 跟对家对赌结算)';
   return [
-    '准备 publish 下注:',
+    '准备下注:',
     `市场: ${ctx.market_label}`,
     `押: ${ctx.outcome_label}`,
-    `Stake: ${ctx.stake_kas} KAS`,
+    `金额: ${ctx.stake_kas} KAS`,
     '',
-    '回 /confirm 确认 (= taker-handshake + escrow lock)',
+    confirmLine,
     '回 /cancel 取消',
   ].join('\n');
 }
 
 function renderMyBets(bets) {
-  if (!bets.length) return '0 下注 history. 回 /predict 开始。';
+  if (!bets.length) return '还没有下注记录. 回 /predict 开始。';
   const lines = ['我的下注:'];
   bets.forEach((b, i) => {
     const ts = (b.created_at || '').slice(0, 16);
     const stake = (b.maker_stake_amount || 0) / 100_000_000;
-    lines.push(`[${i + 1}] ${b.id.slice(0, 12)}... · ${marketLabel(b)} · ${stake} KAS · ${b.protocol_status} · ${ts}`);
+    const side = b.outcome_side ? ` · ${b.outcome_side}` : '';
+    lines.push(`[${i + 1}] ${b.id.slice(0, 12)}...${side} · ${marketLabel(b)} · ${stake} KAS · ${b.protocol_status} · ${ts}`);
   });
   return lines.join('\n');
+}
+
+/**
+ * Confirm a POOL-market bet via the line-B-proven register-v06 flow (Bettor r728/r730 dual-path):
+ *   GET relay address (= linked_addr) → register-v06/prep (side_p2sh + exact stake)
+ *   → relay send-command transfer (fund side_p2sh) → wait chain → register-v06/confirm (insert pool_bettor_sides).
+ * The relay is the bettor; claim key binds to the relay address (parity w/ taker-stake using taker_relay_id).
+ * Does NOT touch signed payloads (= same path my线B e2e cross-check proved).
+ */
+async function confirmPoolBet(senderAddress, session, relayId, baseUrl) {
+  const marketId = session.last_market_id;
+  const side = session.last_outcome;            // 'YES' | 'NO'
+  const direction = side === 'YES' ? 0 : 1;     // pool: 0=YES, 1=NO (settle winner convention)
+  const stakeKas = Number(session.aux.stake);
+  if (!marketId || !(stakeKas > 0)) {
+    updateSession(senderAddress, STATE.IDLE, { aux: {} });
+    return '❌ 下注信息不完整. /predict 重来.';
+  }
+  try {
+    // Step 1: resolve the relay's own kaspa address (= linked_addr, binds claim key to the relay).
+    const relayRes = await fetch(`${baseUrl}/api/relay/${relayId}`);
+    const relayJson = await relayRes.json();
+    const linkedAddr = relayJson.address || relayJson.relay?.address;
+    if (!linkedAddr) {
+      updateSession(senderAddress, STATE.IDLE, { aux: {} });
+      return '❌ 无法解析下注钱包地址. /predict 重来.';
+    }
+    // Step 2: register-v06/prep → side_p2sh + exact stake.
+    const prepRes = await fetch(`${baseUrl}/api/pool/market/${marketId}/bettor/register-v06/prep`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ linked_addr: linkedAddr, direction, stake_kas: stakeKas }),
+    });
+    const prep = await prepRes.json();
+    if (!prepRes.ok || !prep.ok) {
+      updateSession(senderAddress, STATE.IDLE, { aux: {} });
+      return `❌ 下注准备失败: ${prep.error || prepRes.status}. /predict 重来.`;
+    }
+    // Step 3: fund the side P2SH from the relay wallet (exact stake).
+    const trfRes = await fetch(`${baseUrl}/api/relay/${relayId}/send-command`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'transfer', target: prep.side_p2sh, amount: prep.exact_stake_kas }),
+    });
+    const trf = await trfRes.json();
+    if (!trfRes.ok || !trf.ok) {
+      updateSession(senderAddress, STATE.IDLE, { aux: {} });
+      return `❌ 下注付款失败: ${trf.error || trfRes.status}. /predict 重来.`;
+    }
+    const payTxid = trf.txid || trf.tx || trf.txId;
+    // Step 4: confirm — RPC detects the UTXO + inserts pool_bettor_sides. Chain needs ~12s; retry.
+    let cfm = null;
+    for (let attempt = 0; attempt < 4; attempt++) {
+      await new Promise(r => setTimeout(r, attempt === 0 ? 12000 : 6000));
+      const cfmRes = await fetch(`${baseUrl}/api/pool/market/${marketId}/bettor/register-v06/confirm`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ linked_addr: linkedAddr, direction, stake_kas: stakeKas }),
+      });
+      cfm = await cfmRes.json();
+      if (cfm && cfm.ok && cfm.registered) break;
+    }
+    if (cfm && cfm.ok && cfm.registered) {
+      updateSession(senderAddress, STATE.MATCHED, { aux: { tx: cfm.side_lock_tx || payTxid } });
+      // Audit: bet confirmed on-chain — link DM action to the real side_lock_tx (Bettor r787 ④).
+      safeEmit({ user_address: senderAddress, market_id: marketId, action_type: 'confirm_bet',
+        action_payload: { side, stake_kas: stakeKas, kind: 'pool' }, dispatch_txid: cfm.side_lock_tx || payTxid });
+      return [
+        '🎯 下注成功 + 已上链!',
+        `市场: ${marketId.slice(0, 16)}...`,
+        `你押: ${side} · ${stakeKas} KAS`,
+        `TX: ${String(cfm.side_lock_tx || payTxid || '?').slice(0, 20)}...`,
+        '',
+        '等截止后委员会裁决结算. /my_bets 查状态.',
+      ].join('\n');
+    }
+    // Paid but not yet detected on-chain — keep the user informed, don't lose the bet.
+    updateSession(senderAddress, STATE.WAITING_TAKER, { aux: { tx: payTxid } });
+    return [
+      '⏳ 付款已发, 链上确认中.',
+      `市场: ${marketId.slice(0, 16)}...`,
+      `TX: ${String(payTxid || '?').slice(0, 20)}...`,
+      cfm && cfm.note ? `状态: ${cfm.note}` : '',
+      '',
+      '稍后回 /my_bets 查注册状态.',
+    ].filter(Boolean).join('\n');
+  } catch (e) {
+    return `❌ 下注失败: ${e.message}. /predict 重来.`;
+  }
 }
 
 // ── Main DM dispatcher (= called by NWT's conversations.js router) ──────
@@ -296,12 +481,14 @@ export async function handleDmMessage(senderAddress, text, ctx = {}) {
 
   // /my_bets — anywhere
   if (trimmed === MENU.MY_BETS) {
-    return renderMyBets(fetchUserBets(senderAddress, relayId));
+    safeEmit({ user_address: senderAddress, action_type: 'my_bets' });
+    return renderMyBets(await fetchUserBets(senderAddress, relayId, baseUrl));
   }
 
   // /predict — enter SELECT_MARKET state
   if (trimmed === MENU.PREDICT) {
     const markets = fetchActiveMarkets();
+    safeEmit({ user_address: senderAddress, action_type: 'predict_browse', action_payload: { market_count: markets.length } });
     // Encode markets snapshot ids into aux as comma-list (= short enough for last_action col)
     updateSession(senderAddress, STATE.SELECT_MARKET, {
       aux: { ms: markets.map(m => m.id.slice(-8)).join(',') },
@@ -316,13 +503,20 @@ export async function handleDmMessage(senderAddress, text, ctx = {}) {
     }
     if (!relayId) {
       return [
-        '⚠ /confirm 需 relay context (= NWT router 应 pass relayId 给 handleDmMessage).',
-        '当前 session ready: market=' + (session.last_market_id || '?') + ', side=' + (session.last_outcome || '?') + ', stake=' + (session.aux.stake || '?') + ' KAS',
+        '⚠ 下注需要钱包上下文 (relay)。',
+        `当前已选: 市场=${session.last_market_id || '?'}, 押=${session.last_outcome || '?'}, 金额=${session.aux.stake || '?'} KAS`,
         '',
-        '请 console restart load NWT 完整 router OR DM via UI 自行 publish-v2.',
+        '请稍后重试 OR 浏览器自行下注。',
       ].join('\n');
     }
 
+    // Route by market kind (Bettor r728/r730 dual-path): pool → register-v06; offer → taker-stake.
+    const confirmKind = session.aux.kind || 'offer';
+    if (confirmKind === 'pool') {
+      return await confirmPoolBet(senderAddress, session, relayId, baseUrl);
+    }
+
+    // ── E pre-handshake (offer) path — UNCHANGED (保留 pre-handshake, Bettor caveat) ──
     // Step 1: taker-handshake to register our taker_kaspa_addr → derive pubkey
     try {
       const handshakeRes = await fetch(`${baseUrl}/api/prediction/taker-handshake/${session.last_market_id}`, {
@@ -358,6 +552,9 @@ export async function handleDmMessage(senderAddress, text, ctx = {}) {
       }
 
       updateSession(senderAddress, STATE.MATCHED, { aux: { tx: stakeJson.txid || stakeJson.tx } });
+      // Audit: offer (E pre-handshake) bet matched — link to escrow stake TX (Bettor r787 ④).
+      safeEmit({ user_address: senderAddress, market_id: session.last_market_id, action_type: 'confirm_bet',
+        action_payload: { side: session.last_outcome, stake_kas: session.aux.stake, kind: 'offer' }, dispatch_txid: stakeJson.txid || stakeJson.tx });
       return [
         '🎯 stake locked + MATCHED!',
         `Offer: ${session.last_market_id}`,
@@ -381,12 +578,25 @@ export async function handleDmMessage(senderAddress, text, ctx = {}) {
       const markets = fetchActiveMarkets();
       if (num > markets.length) return `无效选项. 请回 1-${markets.length}.`;
       const market = markets[num - 1];
-      updateSession(senderAddress, STATE.SELECT_OUTCOME, { last_market_id: market.id });
+      // Persist market kind in aux (= pool|offer) so SELECT_OUTCOME/CONFIRM_STAKE/confirm route correctly.
+      updateSession(senderAddress, STATE.SELECT_OUTCOME, { last_market_id: market.id, aux: { kind: market.kind } });
+      safeEmit({ user_address: senderAddress, market_id: market.id, action_type: 'select_market', action_payload: { kind: market.kind } });
       return renderOutcomeList(market);
     }
 
     if (session.state === STATE.SELECT_OUTCOME) {
-      // Bettor r106 Bug B hotfix: pool_markets count=0 vs exchange_offers count=21 — sweep to exchange_offers per L51-57 spec
+      const kind = session.aux.kind || 'offer';
+      if (kind === 'pool') {
+        // Pool market: bettor freely picks YES (1) or NO (2).
+        const market = db.prepare(`SELECT * FROM pool_markets WHERE id = ?`).get(session.last_market_id);
+        if (!market) return '市场已结束 OR 失效. 回 /predict 刷新.';
+        if (num !== 1 && num !== 2) return '无效选项. 回 1 (YES) 或 2 (NO), OR /cancel.';
+        const side = num === 1 ? 'YES' : 'NO';
+        updateSession(senderAddress, STATE.CONFIRM_STAKE, { last_outcome: side });
+        market.kind = 'pool';
+        return renderStakeOptions(market, num - 1);
+      }
+      // Offer (E pre-handshake) — Bettor r106 Bug B hotfix: sweep to exchange_offers. UNCHANGED.
       const market = db.prepare(`SELECT * FROM exchange_offers WHERE id = ?`).get(session.last_market_id);
       if (!market) return '订单已 closed OR 失效. 回 /predict 刷新.';
       // Binary outcome: only 1 valid choice (= opposite of maker)
@@ -394,6 +604,7 @@ export async function handleDmMessage(senderAddress, text, ctx = {}) {
       const makerSide = market.outcome_side || '?';
       const oppSide = makerSide === 'YES' ? 'NO' : (makerSide === 'NO' ? 'YES' : `opposite of ${makerSide}`);
       updateSession(senderAddress, STATE.CONFIRM_STAKE, { last_outcome: oppSide });
+      market.kind = 'offer';
       return renderStakeOptions(market, 0);
     }
 
@@ -405,12 +616,16 @@ export async function handleDmMessage(senderAddress, text, ctx = {}) {
         stakeKas = num;
       }
       updateSession(senderAddress, STATE.CONFIRM_STAKE, { aux: { stake: stakeKas } });
-      // Bettor r106 Bug B hotfix: pool_markets → exchange_offers (= sweep schema 一致)
-      const market = db.prepare(`SELECT * FROM exchange_offers WHERE id = ?`).get(session.last_market_id);
+      const kind = session.aux.kind || 'offer';
+      const market = kind === 'pool'
+        ? db.prepare(`SELECT * FROM pool_markets WHERE id = ?`).get(session.last_market_id)
+        : db.prepare(`SELECT * FROM exchange_offers WHERE id = ?`).get(session.last_market_id);
+      if (market) market.kind = kind;
       return renderConfirmation({
         market_label: market ? marketLabel(market) : session.last_market_id,
         outcome_label: session.last_outcome,
         stake_kas: stakeKas,
+        kind,
       });
     }
   }

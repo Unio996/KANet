@@ -1,0 +1,4 @@
+{
+  "outcome": "YES",
+  "_note": "J2-tn r355 (Bettor 6/5 Owner 钦定 共享 canonical 源): static fixture for cross-node settle demo. 双节点 voter 各自 fetch 同一 GitHub raw URL → 同 outcome → 实共识 (不靠各查各本地 mock). 守 G5: 生产路 polymarket.com 公网共享源, 此 fixture 仅 demo settle 机制."
+}

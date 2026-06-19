@@ -22,4 +22,6 @@
       </div>
     </header>
     <% } %>
+    <!-- KANet-UI 2026-06-08 DoD-D.2 (Bettor r373 关 1 PASS): onboarding wizard 全页加 -->
+    <%~ include('./wizard', it) %>
     <main class="flex-1 overflow-y-auto">

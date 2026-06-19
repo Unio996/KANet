@@ -118,6 +118,148 @@ let _watchedRefreshTimer = null;
 const _indexedTxs = new Set();
 const INDEXED_MAX = 20000;
 
+// ── ③ committee chainReader: recent-blocks ring buffer for fetchEndBlockHashCanonical ──
+// Tracks (hash, daaScore) for every block-added event. Console settler-tick queries via
+// chain_get_blocks_from_daa_score IPC to find the canonical endBlock for VRF seed input.
+// Bettor r170 ③ 接线 — relay 唯一链上出口 (CLAUDE.md), Console 不直碰链.
+const RECENT_BLOCKS_MAX = 50000;  // ~14h @ 1bps testnet-12, plenty for any deadline
+const _recentBlocks = [];  // [{ hash, daaScore }] insertion order = block-added order
+const _recentBlockHashes = new Set();  // dedup
+export function getRecentBlocksAtOrAbove(minDaa) {
+  return _recentBlocks.filter(b => b.daaScore >= minDaa);
+}
+export async function getCurrentDaaScore() {
+  if (!_rpc) throw new Error('rpc not connected');
+  const info = await _rpc.getBlockDagInfo();
+  return Number(info.virtualDaaScore);
+}
+
+// J1tn r303 (Bettor 钦定 SPC fix + J2 r327 split): chain-authoritative endBlock at deadlineDaa.
+// Walks kaspad selected-parent-chain backward from virtualSelectedParentHash via each block's
+// verboseData.selectedParentHash field until daa < deadlineDaa. Returns the LAST SPC block
+// where daa >= deadlineDaa — = the canonical first SPC block crossing the deadline. SPC is
+// consensus = all nodes converge byte-exact regardless of ring buffer state.
+//
+// Not ring-buffer-based — direct kaspad RPC. Caller pays ~O(currentDaa - deadlineDaa) getBlock
+// RPC calls (~5ms each on LAN node = 1000 blocks ≈ 5s). Acceptable for one-shot sample at
+// settle time. Future opt: cache walks past finality depth.
+export async function getBlockAtDaa(deadlineDaa) {
+  if (!_rpc) throw new Error('rpc not connected');
+  if (!Number.isFinite(deadlineDaa) || deadlineDaa <= 0) {
+    throw new Error(`deadlineDaa must be positive number, got ${deadlineDaa}`);
+  }
+  // J1tn P1 throughput fix (Bettor r668 批 / J2 r667 cross-node determinism PASS):
+  // backward selectedParentHash walk from tip costs O(tip - deadline) getBlock RPCs → far-back
+  // deadlines (backlog) hit the 30s settler tick → 20-scale NOT-PASS. FORWARD opt: ring buffer
+  // (_recentBlocks, 50000-block/~14h window) gives an anchor block with daa just below deadline;
+  // getBlocks(lowHash=anchor, includeBlocks) batch-fetches forward; filter verboseData.isChainBlock
+  // (= canonical SPC), lowest daaScore >= deadline = endBlock. determinism-equivalent: returns the
+  // BYTE-IDENTICAL endBlock to the backward walk — verified J1 #166/#169 (forward==backward 4/4 on
+  // :3300) + J2 r667 (:3200 backward == J1 forward 4/4 cross-node). endBlock feeds committee_pk_hash
+  // (cross-node consensus), so equivalence is mandatory before switching. 69-93x faster at the
+  // danger zone. Backward walk retained as fallback for deadlines older than the ring window (rare).
+  let anchor = null; // ring block with highest daa strictly below deadlineDaa
+  for (const b of _recentBlocks) {
+    if (b.daaScore < deadlineDaa && (!anchor || b.daaScore > anchor.daaScore)) anchor = b;
+  }
+  if (anchor) {
+    try {
+      let cursor = anchor.hash;
+      let best = null; // lowest-daa SPC block with daa >= deadline (= canonical endBlock, == backward's lastEligible)
+      const MAX_PAGES = 300;
+      for (let page = 0; page < MAX_PAGES; page++) {
+        const resp = await _rpc.getBlocks({ lowHash: cursor, includeBlocks: true, includeTransactions: false });
+        const blocks = resp?.blocks || [];
+        if (blocks.length === 0) break;
+        for (const blk of blocks) {
+          if (!blk?.verboseData?.isChainBlock) continue; // SPC only (kaspad consensus = deterministic)
+          const daa = Number(blk?.header?.daaScore || 0);
+          if (daa >= deadlineDaa) {
+            const hash = blk?.verboseData?.hash || blk?.header?.hash;
+            if (hash && (!best || daa < best.daaScore)) {
+              best = { hash, daaScore: daa, timestamp_ms: Number(blk?.header?.timestamp || 0), isChainBlock: true };
+            }
+          }
+        }
+        // First page crossing the deadline contains the canonical (lowest-daa) SPC endBlock; later
+        // pages are strictly higher daa (forward) so cannot hold a lower eligible block.
+        if (best) return best;
+        const lastHash = (resp.blockHashes && resp.blockHashes[resp.blockHashes.length - 1]) || blocks[blocks.length - 1]?.verboseData?.hash;
+        if (!lastHash || lastHash === cursor) break;
+        cursor = lastHash;
+      }
+      // forward exhausted without crossing deadline (deadline beyond tip, or anchor unexpectedly low) → fall through to backward
+    } catch (e) {
+      log(`getBlockAtDaa forward attempt failed (${e.message}); falling back to backward SPC walk`);
+    }
+  }
+  // Backward SPC walk fallback (original impl): no ring anchor below deadline, or forward inconclusive.
+  const info = await _rpc.getBlockDagInfo();
+  // info.sink = SPC tip (= virtual selected parent). Walking selectedParentHash chain well-defined
+  // from an SPC block — info.sink is the canonical start.
+  const startHash = info?.sink;
+  if (!startHash) throw new Error(`cannot resolve SPC tip from getBlockDagInfo (sink missing; got: ${JSON.stringify(Object.keys(info || {}))})`);
+  const MAX_WALK = 50000;
+  let cursor = startHash;
+  let lastEligible = null; // last block where daa >= deadlineDaa during walk
+  // J1 #266/#268 (a) boundary seam fix (Bettor r807 批 / J2 r798 闭环核 / r800 caveat moot):
+  // resolved = canonical endBlock CONFIRMED (walk crossed the deadline OR reached genesis). If the loop
+  // EXHAUSTS MAX_WALK without resolving AND the deepest block is still too-new (daa > deadline), the true
+  // endBlock is DEEPER than the walk window → returning lastEligible = a wrong (too-new) endBlock → wrong
+  // committee_pk_hash (+ cross-node divergence if two nodes walk from different tips). THROW instead →
+  // settler L587 try/L681 catch → sample_fail → retry → deadline ages past L628 guard → terminal refund.
+  // Never emit a wrong endBlock. (b) guard race-margin keeps this path unreached in normal operation.
+  let resolved = false;
+  let steps = 0;
+  for (let i = 0; i < MAX_WALK; i++) {
+    steps++;
+    const blkResp = await _rpc.getBlock({ hash: cursor, includeTransactions: false });
+    const blk = blkResp?.block || blkResp;
+    const hash = blk?.verboseData?.hash || blk?.header?.hash;
+    const daa = Number(blk?.header?.daaScore || 0);
+    const timestamp_ms = Number(blk?.header?.timestamp || 0);
+    const sp = blk?.verboseData?.selectedParentHash;
+    if (!hash || !daa) throw new Error(`getBlock returned malformed block at cursor ${cursor?.slice(0,16)}`);
+    if (daa >= deadlineDaa) {
+      lastEligible = { hash, daaScore: daa, timestamp_ms, isChainBlock: true };
+      if (!sp || sp === '0'.repeat(64)) { resolved = true; break; } // genesis: oldest SPC block still >= deadline = canonical endBlock (deadline predates chain)
+      cursor = sp;
+      continue;
+    }
+    // daa < deadlineDaa — crossed the boundary. The previous lastEligible is the canonical endBlock.
+    resolved = true;
+    break;
+  }
+  // (a) seam fix: loop exhausted MAX_WALK without crossing/genesis AND deepest block still too-new
+  // (daa > deadline) → endBlock deeper than walk window → refuse to return a wrong (too-new) block.
+  // daa == deadline at exhaust = deepest reached IS exactly the canonical crossing (SPC daaScore strictly
+  // increases per J2 r800 → no deeper same-daa block) → that's correct, return it.
+  if (!resolved && lastEligible && lastEligible.daaScore > deadlineDaa) {
+    throw new Error(`getBlockAtDaa: backward walk exhausted MAX_WALK=${MAX_WALK} without crossing deadlineDaa=${deadlineDaa} (deepest walked daa=${lastEligible.daaScore} > deadline = too-new; endBlock deeper than walk window). Refusing wrong endBlock — settler retries → L628 guard refunds. steps=${steps}`);
+  }
+  if (!lastEligible) {
+    throw new Error(`no SPC block crossing deadlineDaa ${deadlineDaa} found within ${MAX_WALK} walk steps (chain may not have reached deadline yet)`);
+  }
+  return lastEligible;
+}
+function _trackBlockForChainReader(block) {
+  const hash = block?.verboseData?.hash || block?.header?.hash;
+  const daa = Number(block?.header?.daaScore || 0);
+  if (!hash || !daa || _recentBlockHashes.has(hash)) return;
+  // J2-tn r323 (J1 r298 spec v2): add timestamp_ms + isChainBlock for deterministic
+  // endBlock selection. deadlineDaa 跨节点 wallclock 估算 mismatch (J1 r297 实证): 改 chain
+  // timestamp scan. DAG 同 daa 多 block 用 verboseData.isChainBlock (= kaspad selected-parent-chain
+  // 共识 deterministic) tiebreak; fallback min-hex-hash. NWT L5 lint baked verify.
+  const timestamp_ms = Number(block?.header?.timestamp || 0);
+  const isChainBlock = !!(block?.verboseData?.isChainBlock);
+  _recentBlocks.push({ hash, daaScore: daa, timestamp_ms, isChainBlock });
+  _recentBlockHashes.add(hash);
+  if (_recentBlocks.length > RECENT_BLOCKS_MAX) {
+    const dropped = _recentBlocks.splice(0, _recentBlocks.length - RECENT_BLOCKS_MAX);
+    for (const d of dropped) _recentBlockHashes.delete(d.hash);
+  }
+}
+
 // ── Logging ─────────────────────────────────────────────────────────────────
 
 function log(...args) {
@@ -599,6 +741,10 @@ export async function stopRpcListener() {
 async function handleBlock(event) {
   const block = event?.data?.block;
   if (!block) return;
+
+  // ③ committee chainReader: track (hash, daaScore) into recent-blocks ring buffer for
+  // Console chain_get_blocks_from_daa_score IPC (committee endBlock VRF seed).
+  try { _trackBlockForChainReader(block); } catch (e) { log('chainReader track:', e?.message); }
 
   // Embedded Kaspa TX indexer: record watched-address TXs BEFORE protocol filtering.
   // This is independent of protocol payload — we want to track all value transfers

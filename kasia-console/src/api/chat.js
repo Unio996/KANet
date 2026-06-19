@@ -27,11 +27,18 @@ function _computeChainContent(text) {
 // Opus J1 + Opus J2 + Owner coordination. Agent Mind auto-reply + proactive
 // must not broadcast to them. See docs/ANTI-PATTERNS.md (rule: coordination
 // channels protected from Agent noise) + docs/spec/2026-04-24-...v2 §8.1.8.
-const COORD_CHANNELS = new Set(['dev-coord', 'kanet-arch', 'kanet-review', 'kanet-alert']);
-// Whitelist: three Opus CC instances + reserved names. Each machine's Console
-// checks against its own relay_nodes.name. Names like 'QClaude' kept for the
-// Qwen→CC migration transition so the NWT host doesn't 403-lock itself.
-const OPUS_RELAY_NAMES = new Set(['Martin', 'J2', 'J3', 'NWT', 'Opus', 'Qclaude', 'Bettor']);  // Bettor r191 + Qclaude 5/19: 'QClaude' (大 C) → 'Qclaude' (小 c) align DB relay_nodes.name
+// Bettor r479 (Owner 2026-06-10 钦定): dev-coord-testnet 加入 —— 当前活跃的协作主频道,
+// 之前漏在集合外 → 自治 Mind agent (AutoBetter/maker/tester/pred-*) 自动回复 + 编造 echo
+// 污染开发频道 (J1 #3 同步证实其 J1tn-*/pred-* 也在 echo)。开发频道只许 Claude Code 开发
+// agent (Bettor/J2/KANet-UI/NWT + J1 远端) 协作, 自治 Mind 一律回避。
+const COORD_CHANNELS = new Set(['dev-coord', 'dev-coord-testnet', 'kanet-arch', 'kanet-review', 'kanet-alert']);
+// Whitelist: Claude Code 开发 agent relay 实名 (本机 relay_nodes.name 带 -tn 后缀)。
+// Bettor r479: 补全实名 (旧版只有裸名 'Bettor'/'J2'/'NWT' 不匹配实际 'Bettor-tn'/'J2-tn'/...,
+// 不补会把开发 agent 自己 403-锁出协作频道)。裸名保留兼容其他机器 / Qwen→CC 迁移过渡。
+const OPUS_RELAY_NAMES = new Set(['Martin', 'J2', 'J3', 'NWT', 'Opus', 'Qclaude', 'Bettor',
+  'Bettor-tn', 'J2-tn', 'KANet-UI-tn', 'NWT-tn',
+  'J1', 'J1-tn', 'J1tn',
+  'J1tn-Alice', 'J1tn-Bob', 'J1tn-Carol', 'J1tn-Dave']);  // Bettor r191 + r479 实名补全; KANet-UI r-j1fix: 300e10de 漏 J1 (我自补). J1 #41 实证他真 relay 名是 J1tn-Alice/Bob/Carol/Dave (committee oracle relay, 也是他频道 poster), exact match 不中裸 'J1tn' → 补 4 个委员实名 (J1 各形式仍留兼容)。
 
 // ── Auto-reply skip rules (T-2026-04-22-02) ──
 // Prevents Mind auto-reply cascade / identity-theft / storm on sensitive channels.
@@ -66,9 +73,15 @@ function isBotAutoReplyContent(content) {
 }
 
 // 3) Channel-level Mind auto-reply disable list (audit + alert channels stay clean)
+// KANet-UI r-mindfw (J1 #39): dev 协调频道必掐 Mind auto-reply — 配套 0bd410ad(OPUS 白名单放行 J1tn
+// 等 mind relay【手动】发协调消息), 但不掐 auto-reply → Alice/mind relay 的自治 auto-reply 仍漏过又灌频道
+// (= r479 防火墙 'COORD 频道只许人类 agent 手动协调' 初衷的另一半)。两个一起焊: 手动通 + auto-reply 掐。
 const MIND_DISABLED_CHANNELS = new Set([
   'kanet-review',
   'kanet-alert',
+  'dev-coord',
+  'dev-coord-testnet',
+  'kanet-arch',
 ]);
 function isAutoReplyDisabledForChannel(channelName) {
   return MIND_DISABLED_CHANNELS.has(channelName);
@@ -246,7 +259,8 @@ export async function registerChatRoutes(fastify) {
       const isOwnAgentSend = sqlite.prepare('SELECT id FROM relay_nodes WHERE address = ?').get(senderAddress);
       // Owner 消息 = sender 是本地 relay 地址 → 只让一个 Agent 回复（不抢答）
       const isOwnerMessage = sqlite.prepare('SELECT id FROM relay_nodes WHERE address = ?').get(senderAddress);
-      const isProtocolMessage = content.startsWith('{"t":"kanet_');
+      // J1 #60 (log 实证 77× reactive on {): 放宽 kanet_ → 任何 {"t":" JSON 信封 = 机器协议(pool_oracle_vote/chunk/kanet_*), 不喂 mind reactive LLM (砍 :8000 reactive spike, scale ramp 前置). 需 upstream 双节点.
+      const isProtocolMessage = content.startsWith('{"t":"');
       const isDevCoord = content.startsWith('[DEV-COORD]');
       const isKnownForeign = isKnownForeignAgent(senderAddress);
       const isBotReply = isBotAutoReplyContent(content);
@@ -378,7 +392,7 @@ export async function registerChatRoutes(fastify) {
     // ── Auto-reply: let agents respond to EXTERNAL messages only ──
     // Skip: otc-market channel, AND skip if sender is one of our own agents (prevents storm)
     const isOwnAgent = sqlite.prepare('SELECT id FROM relay_nodes WHERE address = ?').get(senderAddress);
-    const isProtocolMsg = content.startsWith('{"t":"kanet_');
+    const isProtocolMsg = content.startsWith('{"t":"');  // J1 #60: 同上, pool_* 协议消息也跳 mind reactive (砍 :8000 spike)
     const isDevChannel = channelName === 'dev-coord' || channelName === 'kanet-dev';
     const isDevMsg = content.startsWith('[DEV-COORD]');
     const isKnownForeign2 = isKnownForeignAgent(senderAddress);

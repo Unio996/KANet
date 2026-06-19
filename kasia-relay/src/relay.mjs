@@ -13,7 +13,11 @@ const KASPA_NETWORK = process.env.KASPA_NETWORK || "mainnet";
 
 // ── Chain message guardrails ──
 const MAX_MESSAGE_CHARS = 5000;        // hard cap per message — beyond this, truncate
-const DAILY_SEND_LIMIT = 200;          // max chain messages per day per relay
+// J2-tn 规模测试 (Bettor r538): 200 硬上限在 scale 期被烧光 → settle sign_req 分块广播
+// ('daily limit reached (200)' 撞 dvi6w 52-chunk sign_req)。改 env-configurable: 每 settle TX
+// (14in/12out ~40KB PSKT) 分 ~50 chunk = ~50 TX, 20-档 ramp ~1000 TX 仅 sign_req, 200/day 远不够。
+// 安全护栏保留 (防 Brain 幻觉循环刷链), scale 期由 env 调高; 默认仍 200 (production 保守)。
+const DAILY_SEND_LIMIT = parseInt(process.env.DAILY_SEND_LIMIT, 10) || 200;  // max chain messages per day per relay (env-overridable for scale-test)
 let _dailySendCount = 0;
 let _dailyResetDate = new Date().toISOString().slice(0, 10);
 
@@ -93,7 +97,10 @@ function shouldBlockOutbound(target, message) {
 
   // 协议消息不走去重拦截 — 协议重试是有意为之，不是垃圾消息
   // 陷阱 #45: shouldBlockOutbound 拦截了协议消息重试，导致 paid 广播永远上不了链
-  if (message.startsWith('{"t":"kanet_')) return null;
+  // KANet-UI r383: pool_oracle_vote_v1 / pool_market_published_v1 / pool_bet_registered_v1
+  // 跨 market 同 schema 不同字段 → similarity 85% > DEDUP_SIMILARITY 触发 → vote 永不广播.
+  // 同 KI 49 silent-skip 第 6 次 (= 'kanet_' prefix-only 漏覆盖 'pool_').
+  if (message.startsWith('{"t":"kanet_') || message.startsWith('{"t":"pool_')) return null;
 
   // 防线 1: 幻觉模式匹配
   const hallMatch = HALLUCINATION_PATTERNS.find(p => p.test(message));
@@ -323,6 +330,9 @@ if (process.send) {
 
   process.on('message', async (cmd) => {
     try {
+      // bshard M3 (J1 2026-06-15): builder produces `action` (buildXCommand), relay dispatches on `cmd.type`.
+      // Normalize action→type before validate/dispatch (robust to either field; no-op if type already set).
+      if (cmd && !cmd.type && cmd.action) cmd.type = cmd.action;
       // Reject invalid commands loudly (unknown type / missing required field / typeof mismatch).
       const validateResult = validateCommandPayload(cmd);
       if (!validateResult.valid) {
@@ -438,6 +448,14 @@ if (process.send) {
                 log(`⚠ BROADCAST #${cmd.channel} mempool reject, sleep ${sleepMs}ms before retry (attempt ${bcastAttempts + 1}/${BCAST_MAX_ATTEMPTS})`);
                 await new Promise(r => setTimeout(r, sleepMs));
               } else if ((bcastErrMsg.includes('Insufficient funds') || bcastErrMsg.includes('Storage mass')) && bcastAttempts < BCAST_MAX_ATTEMPTS - 1) {
+                // Bettor r128 P0: JSON protocol payloads must NOT be truncated — silent
+                // corruption breaks consumer parse → handler never fires. Gate by content
+                // shape (starts with '{') so this protects all JSON channels (kanet-prediction,
+                // exchange, OTC, vote, future protocols) without coupling to channel name.
+                if (bcastMsg.trimStart().startsWith('{')) {
+                  log(`✘ BROADCAST #${cmd.channel} JSON payload ${bcastMsg.length} chars exceeds storage mass; surfacing error (no truncation per Bettor r128 P0)`);
+                  throw bcastErr;
+                }
                 const target = Math.max(20, Math.floor(bcastMsg.length * 0.9));
                 bcastMsg = bcastMsg.slice(0, target).replace(/\s+\S*$/, '') + '...';
                 bcastAttempts++;
@@ -461,12 +479,30 @@ if (process.send) {
           // Split UTXOs for concurrent transaction support.
           // Uses Relay's own wallet + RPC — no mnemonic leaves the process.
           const { splitUtxosRelay } = await import('./lib/utxo-split.mjs');
-          const splitResult = await splitUtxosRelay(cmd.targetCount || 3);
+          // design-v2 (B): cmd.force = REBALANCE to N medium UTXOs (consolidate dust + split) even when
+          // count >= target — for broadcaster-UTXO management feeding parallel chunk broadcast (J2 (A)).
+          const splitResult = await splitUtxosRelay(cmd.targetCount || 3, { force: cmd.force === true });
           if (cmd.requestId && process.send) {
             process.send({ requestId: cmd.requestId, result: splitResult });
           }
           log(`UTXO SPLIT: ${splitResult.split ? splitResult.utxosBefore + '→' + splitResult.utxosAfter : 'skipped'} ${splitResult.reason || ''}`);
           sent = splitResult; // for generic result handler
+          break;
+        }
+
+        case 'consolidate_utxo': {
+          // design-v2 (B) §2 root-fix (Bettor r627): consolidate this relay's fragmented UTXOs N→1 to
+          // keep `best` large (self-full broadcast mass ≈ C×feeReserve/best² → large best = low mass =
+          // no 880-wall grind-down / committee-comms blackout). Inverse of split_utxo. Relay's own
+          // wallet + RPC (no mnemonic leaves). Atomic vs in-flight sign_req (withSendLock) + inputs ⊆
+          // relay-own P2PK → disjoint from P2SH-spine settle UTXOs → settle bytes / determinism unchanged.
+          const { consolidateUtxosRelay } = await import('./lib/utxo-split.mjs');
+          const consResult = await consolidateUtxosRelay({ minFragments: cmd.minFragments });
+          if (cmd.requestId && process.send) {
+            process.send({ requestId: cmd.requestId, result: consResult });
+          }
+          log(`UTXO CONSOLIDATE: ${consResult.consolidated ? consResult.utxosBefore + '→1 (' + consResult.rounds + ' round)' : 'skipped'} ${consResult.reason || ''}`);
+          sent = consResult; // for generic result handler
           break;
         }
 
@@ -479,6 +515,65 @@ if (process.send) {
             process.send({ requestId: cmd.requestId, result: { ok: true, state: snapshot } });
           }
           return;  // skip generic completion reply
+        }
+
+        case 'chain_get_current_daa_score': {
+          // ③ committee chainReader (Bettor r170): Console wraps as chainReader.getCurrentDaaScore.
+          // Used by fetchEndBlockHashCanonical finality_depth check (F-S1).
+          try {
+            const { getCurrentDaaScore } = await import('./rpc-listener.mjs');
+            const daa = await getCurrentDaaScore();
+            if (cmd.requestId && process.send) {
+              process.send({ requestId: cmd.requestId, result: { ok: true, daa_score: daa } });
+            }
+          } catch (e) {
+            if (cmd.requestId && process.send) {
+              process.send({ requestId: cmd.requestId, result: { ok: false, error: e.message } });
+            }
+          }
+          return;
+        }
+
+        case 'chain_get_blocks_from_daa_score': {
+          // ③ committee chainReader: returns recent-blocks ring buffer filtered to daaScore >= minDaa.
+          // Console wraps as chainReader.getBlocksFromDaaScore; settler-tick finds first endBlock at/above
+          // deadline daaScore as VRF seed input for sampleAndStoreCommittee.
+          try {
+            const minDaa = Number(cmd.min_daa_score);
+            if (!Number.isFinite(minDaa) || minDaa < 0) throw new Error('min_daa_score must be non-negative number');
+            const { getRecentBlocksAtOrAbove } = await import('./rpc-listener.mjs');
+            const blocks = getRecentBlocksAtOrAbove(minDaa);
+            if (cmd.requestId && process.send) {
+              process.send({ requestId: cmd.requestId, result: { ok: true, blocks } });
+            }
+          } catch (e) {
+            if (cmd.requestId && process.send) {
+              process.send({ requestId: cmd.requestId, result: { ok: false, error: e.message } });
+            }
+          }
+          return;
+        }
+
+        case 'chain_get_block_at_daa': {
+          // J1tn r303 (Bettor 钦定 SPC fix + J2 r327 split): chain-authoritative endBlock at deadlineDaa.
+          // Walks kaspad selected-parent-chain via getBlock RPC (NOT ring buffer) — cross-node deterministic.
+          // Console wraps as chainReader.getBlockAtDaa; replaces ring buffer minDaa selection for endBlock.
+          // Response shape: flatten { ok, hash, daaScore, timestamp_ms, isChainBlock } to match
+          // J2-tn r327 relay-chain-reader.getBlockAtDaa wrapper contract (= reads r.hash/r.daaScore directly).
+          try {
+            const minDaa = Number(cmd.min_daa_score);
+            if (!Number.isFinite(minDaa) || minDaa < 0) throw new Error('min_daa_score must be non-negative number');
+            const { getBlockAtDaa } = await import('./rpc-listener.mjs');
+            const block = await getBlockAtDaa(minDaa);
+            if (cmd.requestId && process.send) {
+              process.send({ requestId: cmd.requestId, result: { ok: true, hash: block.hash, daaScore: block.daaScore, timestamp_ms: block.timestamp_ms, isChainBlock: block.isChainBlock } });
+            }
+          } catch (e) {
+            if (cmd.requestId && process.send) {
+              process.send({ requestId: cmd.requestId, result: { ok: false, error: e.message } });
+            }
+          }
+          return;
         }
 
         case 'ecdsa_sign': {
@@ -628,6 +723,21 @@ if (process.send) {
           // Side inputs auto-unlock via [selector_0 + side_redeem_push] (= settled_via_spine no sigs)
           const { unlockPoolSpineP2SH } = await import('./lib/p2sh.mjs');
           const wallet = getWallet();
+          // J2 r192 Part B v0.6: forward committee_data when present (= cmd.protocol_version='v0.6').
+          // Bettor r352: v0.6→v0.7 sweep gap. v0.7 settle_aggregate (PoolSpine_v07.sil entry 0)
+          // has the same 4-of-5 validSigs threshold as v0.6 → non-unanimous v0.7 also needs
+          // committee_data so isV06EarlyDetect bypasses the v0.5 unanimous-only guard (p2sh.mjs:753).
+          // qoyqv 4/5 实证: v0.6-only gate left committee_data=null → unanimous guard rejected settle.
+          const committee_data = (cmd.protocol_version === 'v0.6' || cmd.protocol_version === 'v0.7') ? {
+            committee_pks: cmd.committee_pks,
+            committee_indices: cmd.committee_indices,
+            committee_merkle_proofs: cmd.committee_merkle_proofs,
+            committee_pk_hash: cmd.committee_pk_hash,
+            // Bettor r353: v0.7 settle_aggregate sharding globals (undefined for v0.6 → p2sh skips).
+            global_yes_total_sompi: cmd.global_yes_total_sompi,
+            global_no_total_sompi: cmd.global_no_total_sompi,
+            global_commit_id: cmd.global_commit_id,
+          } : null;
           const r = await unlockPoolSpineP2SH({
             spineP2shAddress: cmd.spine_p2sh_address,
             sideP2shAddresses: cmd.side_p2sh_addresses,
@@ -640,6 +750,173 @@ if (process.send) {
             winner: cmd.winner,
             sidesMerkleRootHex: cmd.sides_merkle_root,
             unanimous: cmd.unanimous,
+            networkId: wallet.getNetworkId(),
+            lockTime: BigInt(cmd.lock_time || 0),
+            txObjPreimage: cmd.tx_obj_preimage || null,
+            committee_data,
+            settleEntrypoint: cmd.settle_entrypoint || 0,  // #31 ④a: 1 = v08 settle_aggregate (entry1); 0 = v05/06/07 / v08 chunk
+          });
+          if (cmd.requestId && process.send) {
+            process.send({ requestId: cmd.requestId, result: { ok: true, txId: r.txId } });
+          }
+          return;
+        }
+
+        case 'pool_side_refund_cancelled_tx': {
+          // DoD C 退款自取 (Bettor r261 钦点) — PoolSide_v06/v07 entry 2 refund_market_cancelled.
+          // Bettor single-sig + 1 input + 1 output, inline sign+submit (same pattern as spine
+          // refund_maker_unjoined). 7132ddd 第一轮漏 ship 此 handler (Bettor r386 catch), 补齐.
+          // Caller (Console claim endpoint) sends lock_time = (deadline + 7200) * 1000 ms post J1
+          // 5dd590cd0 grace fix to satisfy SS L260/270 require(tx.time >= (deadline+REFUND_GRACE_SEC)*1000).
+          const { unlockPoolSideRefundCancelled } = await import('./lib/p2sh.mjs');
+          const wallet = getWallet();
+          const r = await unlockPoolSideRefundCancelled({
+            wallet,
+            sideP2shAddress: cmd.side_p2sh_address,
+            sideRedeemScriptHex: cmd.side_redeem_script_hex,
+            requiredInputOutpoint: cmd.required_input_outpoint,
+            output: cmd.output,
+            networkId: wallet.getNetworkId(),
+            lockTime: BigInt(cmd.lock_time || 0),
+            txObjPreimage: cmd.tx_obj_preimage || null,
+            // J2-tn r391 (#28 Bettor ③ APPROVE v2): entry_index 透传 — 2 for v06/v07, 3 for legacy v0.5.
+            entryIndex: Number.isInteger(cmd.entry_index) ? cmd.entry_index : 2,
+          });
+          if (cmd.requestId && process.send) {
+            process.send({ requestId: cmd.requestId, result: { ok: true, txId: r.txId } });
+          }
+          return;
+        }
+
+        case 'bshard_register_bet': {
+          // bshard M3 (J1 2026-06-15): register_append OP_0. leaf P2SH(no sig)+funding P2PK. relay 自算 per-state 续约地址.
+          const { unlockBshardRegister } = await import('./lib/p2sh.mjs');
+          const wallet = getWallet();
+          const r = await unlockBshardRegister({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) });
+          if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, txId: r.txId } });
+          return;
+        }
+
+        case 'bshard_claim_winner': {
+          // bshard M3 route-split: PoolRoot claim_draw OP_1. root P2SH(no sig)+ticket(bettorSig)+fee. winner draw-down from root.
+          const { unlockBshardClaim } = await import('./lib/p2sh.mjs');
+          const wallet = getWallet();
+          const r = await unlockBshardClaim({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) });
+          if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, txId: r.txId } });
+          return;
+        }
+
+        case 'bshard_refund_cancelled': {
+          // bshard M3 route-split: PoolRoot refund_draw OP_2. pool P2SH(no sig)+ticket(bettorSig). 退本金 + closed flip 0→2.
+          const { unlockBshardRefund } = await import('./lib/p2sh.mjs');
+          const wallet = getWallet();
+          const r = await unlockBshardRefund({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) });
+          if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, txId: r.txId } });
+          return;
+        }
+
+        case 'bshard_fold': {
+          // bshard M3: fold covenant __leader_fold OP_1 / __delegate_fold OP_2, k children → 1 parent.
+          const { unlockBshardFold } = await import('./lib/p2sh.mjs');
+          const wallet = getWallet();
+          const r = await unlockBshardFold({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) });
+          if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, txId: r.txId } });
+          return;
+        }
+
+        case 'bshard_close_commit': {
+          // bshard M3 route-split: PoolRoot close_commit OP_0, committee 4-of-5. root P2SH + fee. closed 0→1 + outcome 写入.
+          const { unlockBshardClose } = await import('./lib/p2sh.mjs');
+          const wallet = getWallet();
+          const r = await unlockBshardClose({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) });
+          if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, txId: r.txId } });
+          return;
+        }
+
+        case 'bshard_seal_to_root': {
+          // bshard M3 route-split: PoolLeaf seal_to_root OP_3, leaf→root foreign-template 桥. leaf P2SH(no sig)+funding. 全池 KAS → PoolRoot.
+          const { unlockBshardSeal } = await import('./lib/p2sh.mjs');
+          const wallet = getWallet();
+          const r = await unlockBshardSeal({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) });
+          if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, txId: r.txId } });
+          return;
+        }
+
+        case 'pool_v07_compute_refund_mass': {
+          // G6 批 3 段① Bettor r311 钦定: Console 手搓 UtxoEntry 喂 calculateTransactionMass
+          // 多次 WASM panic (unreachable / 'outpoint is not an object' / scriptPublicKey 格式).
+          // Relay 端有 well-tested kaspa-wasm UtxoEntry pattern (p2sh.mjs 内 unlockPoolSpineRefundMakerUnjoined
+          // 已 ship), 直接 reuse: fetch UTXO + build fake signed TX + calculateTransactionMass + return.
+          const { RpcClient, Encoding, Address, Transaction, TransactionOutput,
+                  payToAddressScript, calculateTransactionMass } = await import('kaspa-wasm');
+          const wallet = getWallet();
+          const networkId = wallet.getNetworkId();
+          // Reuse relay's connectRpc helper for consistent URL + 15s timeout.
+          const { connectRpc, _encodePushDataHex } = await import('./lib/p2sh.mjs').then(m => ({
+            connectRpc: async (nid) => {
+              const { connectRpc } = await import('./lib/p2sh.mjs');
+              return connectRpc ? connectRpc(nid) : null;
+            },
+            _encodePushDataHex: m._encodePushDataHex,
+          })).catch(() => ({}));
+          const RPC_TIMEOUT_MS = 15_000;
+          const withTimeout = (p, ms, lbl) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error(`timeout ${ms}ms ${lbl}`)), ms))]);
+          const rpc = new RpcClient({ url: process.env.KASPA_RPC_URL || 'ws://127.0.0.1:17210', encoding: Encoding.Borsh, networkId });
+          await withTimeout(rpc.connect(), RPC_TIMEOUT_MS, 'connect');
+          let spineUtxo;
+          try {
+            const { entries } = await withTimeout(rpc.getUtxosByAddresses([cmd.spine_p2sh]), RPC_TIMEOUT_MS, 'getUtxos');
+            if (!entries?.length) throw new Error('no spine UTXO');
+            const hits = entries.filter(e => e.outpoint.transactionId === cmd.spine_lock_tx);
+            if (!hits.length) throw new Error('spine_lock_tx UTXO not found');
+            spineUtxo = hits[0];
+          } finally {
+            try { await rpc.disconnect(); } catch {}
+          }
+
+          const redeemBytes = Buffer.from(cmd.spine_redeem_script_hex, 'hex');
+          let redeemPushHex;
+          if (redeemBytes.length <= 75) redeemPushHex = redeemBytes.length.toString(16).padStart(2,'0') + redeemBytes.toString('hex');
+          else if (redeemBytes.length <= 255) redeemPushHex = '4c' + redeemBytes.length.toString(16).padStart(2,'0') + redeemBytes.toString('hex');
+          else { const lenLE = Buffer.alloc(2); lenLE.writeUInt16LE(redeemBytes.length); redeemPushHex = '4d' + lenLE.toString('hex') + redeemBytes.toString('hex'); }
+          const dummyScriptSigHex = '41' + '00'.repeat(64) + '01' + '52' + redeemPushHex;
+          const placeholderValue = BigInt(cmd.maker_stake) - 50000n;
+          const outSpk = payToAddressScript(new Address(cmd.maker_address));
+
+          // BUILD using relay-side pattern (= same as p2sh.mjs unlockPoolSpineRefundMakerUnjoined L1110+).
+          const fakeTx = new Transaction({
+            version: 0,
+            inputs: [{
+              previousOutpoint: { transactionId: spineUtxo.outpoint.transactionId, index: spineUtxo.outpoint.index },
+              signatureScript: dummyScriptSigHex,
+              sequence: 0n,
+              sigOpCount: 1,
+              utxo: spineUtxo,  // pass the WHOLE utxo entry from RPC (relay-tested pattern)
+            }],
+            outputs: [new TransactionOutput(placeholderValue, outSpk)],
+            lockTime: BigInt(cmd.deadline) * 1000n,
+            gas: 0n,
+            subnetworkId: '0000000000000000000000000000000000000000',
+            payload: '',
+          });
+          const mass = calculateTransactionMass(networkId, fakeTx);
+          if (cmd.requestId && process.send) {
+            process.send({ requestId: cmd.requestId, result: { ok: true, mass: String(mass) } });
+          }
+          return;
+        }
+
+        case 'pool_refund_maker_unjoined_tx': {
+          // G2-B 二期 (Bettor r263 钦点) — PoolSpine_v06 entry 2 refund_maker_unjoined.
+          // Maker single-sig + 1 input + 1 output, inline sign+submit (no DM/chain collection).
+          const { unlockPoolSpineRefundMakerUnjoined } = await import('./lib/p2sh.mjs');
+          const wallet = getWallet();
+          const r = await unlockPoolSpineRefundMakerUnjoined({
+            wallet,
+            spineP2shAddress: cmd.spine_p2sh_address,
+            spineRedeemScriptHex: cmd.spine_redeem_script_hex,
+            requiredInputOutpoint: cmd.required_input_outpoint,
+            output: cmd.output,
             networkId: wallet.getNetworkId(),
             lockTime: BigInt(cmd.lock_time || 0),
             txObjPreimage: cmd.tx_obj_preimage || null,
@@ -768,6 +1045,23 @@ if (process.send) {
             throw new Error(`Invalid branch ${cmd.branch}, must be 1 (refund_both) or 2 (refund_maker_unjoined)`);
           }
           if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result });
+          return;
+        }
+
+        case 'stake_unlock_tx': {
+          // #17 G1 (J1tn r303) — OracleStake_v1 timeout_unlock self-unstake on chain.
+          // Single-entry SS contract → scriptSig = [sigPush][redeemScriptPush] NO selector.
+          // Caller pass p2sh_address (= computed from stakerPkX+lockUntilDaa), redeem_script_hex,
+          // to_address (= staker P2PK), lock_time (= lockUntilDaa, must <= current daa).
+          // 红线 8 fee 范围 [1000, 1e8] enforced by SS, JS picks 0.001 KAS = 100000 sompi.
+          const { unlockP2SH_SingleEntry } = await import('./lib/p2sh.mjs');
+          const wallet = getWallet();
+          const redeemScript = new Uint8Array(Buffer.from(cmd.redeem_script_hex, 'hex'));
+          const lockTime = BigInt(cmd.lock_time || 0);
+          const r = await unlockP2SH_SingleEntry(wallet, cmd.p2sh_address, redeemScript, cmd.to_address, lockTime);
+          if (cmd.requestId && process.send) {
+            process.send({ requestId: cmd.requestId, result: { ok: true, txId: r.txId, amount: r.amount?.toString() } });
+          }
           return;
         }
       }

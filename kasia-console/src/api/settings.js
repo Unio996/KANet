@@ -1,4 +1,5 @@
 import { getConfig, setConfig } from '../data/settings/configs.js';
+import { makeTokenHint } from '../services/crypto.js';
 import { parseLang, getT, isRtl, LANG_NAMES } from '../i18n/index.js';
 import { fork } from 'child_process';
 import { dirname, join } from 'path';
@@ -123,5 +124,78 @@ export async function registerSettingsRoutes(fastify) {
     if (!fixId) return reply.code(400).send({ ok: false, message: 'fixId required' });
     const { applyFix } = await import('../services/system-repair.js');
     return reply.send(await applyFix(fixId, fixData || {}));
+  });
+
+  // ── TG Bot Broker (S4, Owner v1.3 §8) ──
+  // Which broker relay the TG bot represents (broker X). UI-settable DB config (0-restart),
+  // replaces env BROKER_RELAY_ID — the bot fetches this at runtime so Owner can switch broker
+  // from the Settings page without editing kanet.env or restarting.
+  fastify.get('/api/config/tg-bot-broker', async (request, reply) => {
+    const { sqlite } = await import('../db/client.js');
+    const brokerRelayId = await getConfig('tg_bot_broker_relay_id') || '';
+    const brokers = sqlite.prepare(
+      "SELECT id, name, address, role FROM relay_nodes WHERE role='broker' OR is_dex_broker=1 OR name LIKE 'broker%' ORDER BY name"
+    ).all();
+    return reply.send({ broker_relay_id: brokerRelayId, brokers });
+  });
+
+  fastify.post('/api/config/tg-bot-broker', async (request, reply) => {
+    const { broker_relay_id } = request.body || {};
+    if (!broker_relay_id) return reply.code(400).send({ ok: false, error: 'broker_relay_id required' });
+    const { sqlite } = await import('../db/client.js');
+    const relay = sqlite.prepare('SELECT id, name FROM relay_nodes WHERE id = ?').get(broker_relay_id);
+    if (!relay) return reply.code(404).send({ ok: false, error: 'relay not found' });
+    await setConfig('tg_bot_broker_relay_id', broker_relay_id, { category: 'tg_bot' });
+    return reply.send({ ok: true, broker_relay_id, broker_name: relay.name });
+  });
+
+  // ── TG Bot token + username (J1, Owner 2026-06-14: UI-端配置补齐, 免手改 kanet.env) ──
+  // TELEGRAM_BOT_TOKEN/USERNAME were env-only (tg-bot-manager L56/127/140) — UI couldn't set them,
+  // operator had to edit kanet.env (system defect Owner flagged). Now UI-settable DB config: token
+  // stored ENCRYPTED (isSensitive, same crypto.js pattern as adapter-nodes / ingest_secret),
+  // tg-bot-manager reads config-first env-fallback + injects into the forked bot env. GET never
+  // returns the raw token — only a masked hint + token_configured bool (secret never leaves server).
+  fastify.get('/api/config/tg-bot-token', async (request, reply) => {
+    const token = await getConfig('tg_bot_token');  // env-fallback NOT applied here: UI shows DB-config state
+    const username = await getConfig('tg_bot_username') || '';
+    return reply.send({
+      token_configured: !!token,
+      token_hint: token ? makeTokenHint(token) : null,
+      username,
+    });
+  });
+
+  fastify.post('/api/config/tg-bot-token', async (request, reply) => {
+    const { token, username } = request.body || {};
+    // token optional on POST (operator may update only username); blank token = keep existing.
+    if (token !== undefined && token !== null && String(token).trim()) {
+      const t = String(token).trim();
+      await setConfig('tg_bot_token', t, { category: 'tg_bot', isSensitive: true, hint: makeTokenHint(t) });
+    }
+    if (username !== undefined && username !== null) {
+      await setConfig('tg_bot_username', String(username).trim(), { category: 'tg_bot' });
+    }
+    const saved = await getConfig('tg_bot_token');
+    return reply.send({ ok: true, token_configured: !!saved, token_hint: saved ? makeTokenHint(saved) : null, username: await getConfig('tg_bot_username') || '' });
+  });
+
+  // ── TG Bot lifecycle (KANet-UI, Bettor r945 接通最小路 ②) ──
+  // start/stop/status over the bot process (separate 0-key process, supervised by tg-bot-manager).
+  fastify.post('/api/tg-bot/start', async (request, reply) => {
+    const { startTgBot } = await import('../services/tg-bot-manager.js');
+    const r = await startTgBot();
+    if (r.ok) await setConfig('tg_bot_enabled', '1', { category: 'tg_bot' });  // remembered across restarts
+    return reply.send(r);
+  });
+
+  fastify.post('/api/tg-bot/stop', async (request, reply) => {
+    const { stopTgBot } = await import('../services/tg-bot-manager.js');
+    await setConfig('tg_bot_enabled', '0', { category: 'tg_bot' });  // manual stop is remembered → no auto-start on boot
+    return reply.send(await stopTgBot());
+  });
+
+  fastify.get('/api/tg-bot/status', async (request, reply) => {
+    const { tgBotStatus } = await import('../services/tg-bot-manager.js');
+    return reply.send(await tgBotStatus());
   });
 }

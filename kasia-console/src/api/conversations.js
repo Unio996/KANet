@@ -29,13 +29,20 @@ export async function registerConversationRoutes(fastify) {
     return reply.view('agent-v2', { title: '我的 Agent', t, lang, dir, langs, _page: 'agent', _agentTab: tab });
   });
 
-  // Agent profile page — legacy (for rollback if needed)
+  // Agent profile page — legacy retired (Gap 3 dedup, Bettor r36 GO).
+  // /agent-legacy → 302 /agent (agent-v2.eta = canonical). agent.eta fossil retained.
   fastify.get('/agent-legacy', async (request, reply) => {
+    return reply.redirect(302, '/agent');
+  });
+
+  // KANet-UI 2026-06-06 件2 (Bettor ③ APPROVE r261c r580): /my-markets — maker 视角自家 markets,
+  // 纯 client filter /api/pool/markets?maker_relay_id, 0 backend 0 数据破坏.
+  fastify.get('/my-markets', async (request, reply) => {
     const lang = parseLang(request.headers.cookie);
     const t = getT(lang);
     const dir = isRtl(lang) ? 'rtl' : 'ltr';
     const langs = LANG_NAMES;
-    return reply.view('agent', { title: '我的 Agent', t, lang, dir, langs });
+    return reply.view('my-markets', { title: '我的市场', t, lang, dir, langs, _page: 'my-markets' });
   });
 
   // Page: /approvals — standalone pending approvals page

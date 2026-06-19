@@ -4,6 +4,7 @@ import { sqlite } from './client.js';
 import { randomUUID } from 'crypto';
 import { readFileSync, existsSync } from 'node:fs';
 import { encrypt } from '../services/crypto.js';
+import { categorizeMarket } from '../lib/market-category.js';
 
 export function runMigrations() {
   sqlite.exec(`
@@ -4606,6 +4607,467 @@ export function runMigrations() {
       `);
       console.log('[migrate] v153: condition_id_mapping table + 3 indexes created (Phase 2 oracle 两类市场 J2 r74 Bettor r149).');
     }
+  }
+
+  // v154 — TG bot S3 (Bettor r211/r217/r219 v1.3 — broker X 同身份延申): user_notification_prefs.
+  // 唯一允许 bot Console write 项 (= S5 lint+test 双 enforce 边界).
+  // 用户经 /link (S2 nonce+verifyMessage) 绑 TG user_id → kaspa_address, 选 event_type 订阅推送.
+  // S1 GET /api/events/since?address= 服务端过滤 chain_events 时, bot poll 用 prefs 决定推哪 TG user.
+  // 0-key: bot 0 持 kaspa key, 仅 TG user_id ↔ kaspa_address mapping + subscription state.
+  {
+    const hasPrefsTable = sqlite.prepare(
+      "SELECT count(*) as cnt FROM sqlite_master WHERE type='table' AND name='user_notification_prefs'"
+    ).get().cnt > 0;
+    if (!hasPrefsTable) {
+      sqlite.exec(`
+        CREATE TABLE user_notification_prefs (
+          telegram_user_id TEXT NOT NULL,
+          kaspa_address TEXT NOT NULL,
+          event_type TEXT NOT NULL,
+          subscribed INTEGER NOT NULL DEFAULT 1 CHECK (subscribed IN (0,1)),
+          linked_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          PRIMARY KEY (telegram_user_id, kaspa_address, event_type)
+        );
+        CREATE INDEX idx_prefs_address_event ON user_notification_prefs(kaspa_address, event_type, subscribed);
+        CREATE INDEX idx_prefs_tg_user ON user_notification_prefs(telegram_user_id);
+      `);
+      console.log('[migrate] v154: user_notification_prefs table + 2 indexes created (TG bot S3 Bettor r219 J2 own).');
+    }
+  }
+
+  // v155 — pool_markets.category for prediction-menu bot discovery (Bettor r240 S-B + Owner r93 多样性钦定, J1 own).
+  // UI S-C grammY inline 菜单按品类分组 (政治/经济/体育/加密/other). Nullable TEXT, existing rows backfilled
+  // by resolution_rule_spec keyword (Bettor r245 11 真热点单 → 可直接测列表过滤). Idempotent: column-exists guard.
+  {
+    const cols = sqlite.prepare("PRAGMA table_info(pool_markets)").all();
+    if (!cols.some(c => c.name === 'category')) {
+      try {
+        sqlite.exec(`ALTER TABLE pool_markets ADD COLUMN category TEXT`);
+        const rows = sqlite.prepare("SELECT id, resolution_rule_spec FROM pool_markets WHERE category IS NULL").all();
+        const upd = sqlite.prepare("UPDATE pool_markets SET category = ? WHERE id = ?");
+        let n = 0;
+        for (const r of rows) { upd.run(categorizeMarket(r.resolution_rule_spec), r.id); n++; }
+        sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_pool_markets_category ON pool_markets(category)`);
+        console.log(`[migrate] v155: pool_markets 加 category TEXT + idx + backfill ${n} 现有单 (prediction-menu bot S-B, Bettor r240/Owner r93 J1 own).`);
+      } catch (e) {
+        console.warn(`[migrate] v155 category ADD COLUMN/backfill fail: ${e.message}`);
+      }
+    }
+  }
+
+  // v156 — UNIQUE(side_lock_tx) on pool_bettor_sides (prediction-menu bot external-stake idempotency,
+  // Bettor r263 "幂等 UNIQUE tx" + J2 r86). DB-level guard so a single payment TX can't be replayed into
+  // multiple bettor registrations (= the confirm-external ③ idempotency, mirrors v61 exchange_offers.payment_tx).
+  // Partial (NOT NULL) so relay-path rows that predate this (or any NULL) are unaffected.
+  {
+    const hasIdx = sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type='index' AND name='idx_pool_sides_side_lock_tx_unique'").get();
+    if (!hasIdx) {
+      try {
+        const dups = sqlite.prepare("SELECT side_lock_tx FROM pool_bettor_sides WHERE side_lock_tx IS NOT NULL GROUP BY side_lock_tx HAVING COUNT(*) > 1").all();
+        if (dups.length > 0) {
+          console.warn(`[migrate] v156: ${dups.length} pre-existing duplicate side_lock_tx — skipping unique index (manual cleanup needed before external-stake go-live).`);
+        } else {
+          sqlite.exec("CREATE UNIQUE INDEX idx_pool_sides_side_lock_tx_unique ON pool_bettor_sides(side_lock_tx) WHERE side_lock_tx IS NOT NULL");
+          console.log('[migrate] v156: pool_bettor_sides UNIQUE(side_lock_tx) partial index created (external-stake TX-reuse guard, Bettor r263 J1 own).');
+        }
+      } catch (e) {
+        console.warn(`[migrate] v156 unique index fail: ${e.message}`);
+      }
+    }
+  }
+
+  // v157 — relay_nodes 加 privkey_encrypted + privkey_hint 列 (r281, Bettor 5/30 Owner P0).
+  // 之前 relay_nodes 只有 mnemonic_encrypted, 强制助记词型 relay; 一个裸 kaspa 私钥地址 (= Owner 的 qrymjvc,
+  // 系统已生成给他 + 已在 TG 绑定) 无法进入 Console 操作. Owner钦定: 私钥=控制权, 系统该支持. 加两列让
+  // createRelayNode 可接受 privkey (而非 mnemonic), startRelay 会传 KASPA_PRIVKEY env (wallet.mjs r281 同步
+  // 加了 fromPrivateKey factory + getWallet 读 KASPA_PRIVKEY 优先). 幂等: 列存在则跳.
+  {
+    const cols = sqlite.prepare("PRAGMA table_info(relay_nodes)").all();
+    if (!cols.some(c => c.name === 'privkey_encrypted')) {
+      try {
+        sqlite.exec(`ALTER TABLE relay_nodes ADD COLUMN privkey_encrypted TEXT`);
+        sqlite.exec(`ALTER TABLE relay_nodes ADD COLUMN privkey_hint TEXT`);
+        console.log('[migrate] v157: relay_nodes 加 privkey_encrypted + privkey_hint (r281 私钥型 relay 支持, Owner P0).');
+      } catch (e) {
+        console.warn(`[migrate] v157 privkey 列加失败: ${e.message}`);
+      }
+    }
+  }
+
+  // v158 — pool_markets += protocol_version + pool_merkle_root for v0.6 anonymous-pool oracle
+  // (Bettor r3 lock + spec §7 ADDITIVE; v0.5 markets keep protocol_version NULL/'v0.5', v0.6 markets
+  // set 'v0.6' + bake the depth-8 blake2b poolMerkleRoot for SS verification). J2's J2.1 sampling
+  // module owns the actual root derivation (depth-8, blake2b leaves, ascending PK sort) — this column
+  // just records whatever the v0.6 create endpoint baked into the spine ctor.
+  {
+    const cols = sqlite.prepare("PRAGMA table_info(pool_markets)").all();
+    if (!cols.some(c => c.name === 'protocol_version')) {
+      try {
+        sqlite.exec(`ALTER TABLE pool_markets ADD COLUMN protocol_version TEXT`);
+        console.log('[migrate] v158a: pool_markets += protocol_version TEXT (oracle v0.6 ADDITIVE, Bettor r3 J1 own).');
+      } catch (e) {
+        console.warn(`[migrate] v158a protocol_version fail: ${e.message}`);
+      }
+    }
+    const cols2 = sqlite.prepare("PRAGMA table_info(pool_markets)").all();
+    if (!cols2.some(c => c.name === 'pool_merkle_root')) {
+      try {
+        sqlite.exec(`ALTER TABLE pool_markets ADD COLUMN pool_merkle_root TEXT`);
+        console.log('[migrate] v158b: pool_markets += pool_merkle_root TEXT (= ctor-baked depth-8 root for v0.6 SS, Bettor r3 J1 own).');
+      } catch (e) {
+        console.warn(`[migrate] v158b pool_merkle_root fail: ${e.message}`);
+      }
+    }
+  }
+
+  // v159 — Oracle v0.6 J2.1 sub (Bettor r3+r6+r14 钦定, reconciled per r14 J1 v158 留 create-side).
+  // Scope: J2.1 = pool 经济/选拔 schema. v0.6 path A (Bettor r19 LOCK Owner ack):
+  //   - 5 个体 committee sig 替 aggSig+aggPk (J1 r118/r119 self-claim 洞 confirm + fix)
+  //   - poolMerkleRoot bake side ctor (J1 r119 r121 + Bettor r17 反转)
+  //   - 事前匿名: 投票前选谁随机 → 防定向贿赂 (Owner ack 弱化, 结算后 5 委员 PK 暴露 OK)
+  //   - t-of-N counter (J1 r120 silverc 实证 t=4-of-5 viable, J2 r104 经济模型 PASS)
+  //
+  // 3 表:
+  // (A) oracle_pool_membership — 当前 active oracle 池 (= poolMerkleRoot 派生 source)
+  //     stake_unlock_requested_at = 护栏 #4 (≥7d 退场延期, 巨鲸跑路也罚得到)
+  // (B) pool_snapshots — 每市场 publish 时 freeze 池 snapshot (poolMerkleRoot bake side ctor 用)
+  // (C) pool_committee — 每市场 VRF stake-weighted 抽 5 委员 (= 事前匿名结构, settle 时 reveal)
+  {
+    const hasOraclePool = sqlite.prepare(
+      "SELECT count(*) as cnt FROM sqlite_master WHERE type='table' AND name='oracle_pool_membership'"
+    ).get().cnt > 0;
+    if (!hasOraclePool) {
+      sqlite.exec(`
+        CREATE TABLE oracle_pool_membership (
+          relay_id TEXT PRIMARY KEY,
+          oracle_pk TEXT NOT NULL,
+          stake_locked_kas REAL NOT NULL DEFAULT 0,
+          joined_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          stake_unlock_requested_at TEXT,
+          active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1))
+        );
+        CREATE INDEX idx_oracle_pool_active ON oracle_pool_membership(active, oracle_pk);
+        CREATE UNIQUE INDEX idx_oracle_pool_pk ON oracle_pool_membership(oracle_pk);
+      `);
+      console.log('[migrate] v159 (A): oracle_pool_membership table + 2 indexes (J2.1 v0.6 path A pool source).');
+    }
+
+    const hasSnapshots = sqlite.prepare(
+      "SELECT count(*) as cnt FROM sqlite_master WHERE type='table' AND name='pool_snapshots'"
+    ).get().cnt > 0;
+    if (!hasSnapshots) {
+      sqlite.exec(`
+        CREATE TABLE pool_snapshots (
+          market_id TEXT PRIMARY KEY,
+          pool_merkle_root TEXT NOT NULL,
+          pool_size INTEGER NOT NULL,
+          pool_pks_json TEXT NOT NULL,
+          snapshot_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          protocol_version TEXT NOT NULL DEFAULT 'v0.6'
+        );
+        CREATE INDEX idx_pool_snapshots_version ON pool_snapshots(protocol_version, snapshot_at);
+      `);
+      console.log('[migrate] v159 (B): pool_snapshots table + 1 index (J2.1 v0.6 path A poolMerkleRoot freeze).');
+    }
+
+    const hasCommittee = sqlite.prepare(
+      "SELECT count(*) as cnt FROM sqlite_master WHERE type='table' AND name='pool_committee'"
+    ).get().cnt > 0;
+    if (!hasCommittee) {
+      sqlite.exec(`
+        CREATE TABLE pool_committee (
+          market_id TEXT PRIMARY KEY,
+          committee_relay_ids TEXT NOT NULL,
+          committee_pks TEXT NOT NULL,
+          committee_pk_hash TEXT NOT NULL,
+          vrf_seed TEXT NOT NULL,
+          vrf_proof TEXT NOT NULL,
+          threshold INTEGER NOT NULL DEFAULT 4 CHECK (threshold BETWEEN 1 AND 5),
+          sampled_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX idx_pool_committee_sampled ON pool_committee(sampled_at);
+      `);
+      console.log('[migrate] v159 (C): pool_committee table + 1 index (J2.1 v0.6 path A VRF stake-weighted sample).');
+    }
+  }
+
+  // v160 — Bettor r23 (Owner P0): 放开 "一地址一市场一仓位" 隐性约束.
+  // Iron Rule 触发: v62 idx_pool_sides_bettor_market UNIQUE(market_id, bettor_pk) 是
+  // 架构副产物 (= "每 bettor 一 side 烤死方向" 副作用), 0 user-need / 0 产品理由, 废掉
+  // 加仓 / 两边押 / 多次押 (成熟预测市场标配). Owner P0 立即放开.
+  //
+  // 修法: drop UNIQUE(market_id, bettor_pk) → 复用现 v156 UNIQUE(side_lock_tx WHERE NOT NULL)
+  // 做幂等. side_p2sh = computeSideP2SH(bettorPk + direction + stake_amount + spineP2shHash)
+  // 确定性派生 → 同 (bettor, direction, stake) 重押天然返同 P2SH = idempotent (= 已防重押).
+  // 不同 direction / 不同 stake → 不同 side_p2sh → 允许多 side. 这是协议本设计意图.
+  //
+  // SS 50-side/market 硬上限 (PoolSide_v06 + PoolSpine_v06 sidesMerkleRoot depth-6) 不变.
+  // 撤销已押仓位 = 另 feature, 不在本 v160 scope.
+  {
+    const hasUniqIdx = sqlite.prepare(
+      "SELECT count(*) as cnt FROM sqlite_master WHERE type='index' AND name='idx_pool_sides_bettor_market'"
+    ).get().cnt > 0;
+    if (hasUniqIdx) {
+      try {
+        sqlite.exec('DROP INDEX idx_pool_sides_bettor_market');
+        sqlite.exec('CREATE INDEX idx_pool_sides_market_bettor ON pool_bettor_sides(market_id, bettor_pk)');
+        console.log('[migrate] v160: dropped UNIQUE(market_id, bettor_pk); replaced with non-unique idx — 放开加仓/两边押 (Owner P0 r23).');
+      } catch (e) {
+        console.warn(`[migrate] v160 unique drop fail: ${e.message}`);
+      }
+    }
+  }
+
+  // v161 — Bettor r48 F-S3 fix: snapshot stake-at-create-time (anti-grinding) in pool_snapshots.
+  // Without this, oracle could see VRF seed after market deadline (= endBlockHash + poolRoot are
+  // public after deadline) and rush-stake before sampleAndStoreCommittee runs, gaming weight.
+  // Snapshot stake at create when seed unknown → no grinding possible.
+  // pool_pks_json snapshots WHO; pool_stakes_json snapshots HOW MUCH.
+  {
+    const cols = sqlite.prepare("PRAGMA table_info(pool_snapshots)").all();
+    if (!cols.some(c => c.name === 'pool_stakes_json')) {
+      try {
+        sqlite.exec('ALTER TABLE pool_snapshots ADD COLUMN pool_stakes_json TEXT');
+        console.log('[migrate] v161: pool_snapshots 加 pool_stakes_json (F-S3 fix: snapshot stake@create 防 seed-aware grinding).');
+      } catch (e) {
+        console.warn(`[migrate] v161 ALTER fail: ${e.message}`);
+      }
+    }
+  }
+
+  // v162 — DoD §2.2 J2 step [2] (5-agent 共识乙路线锁定 2026-06-01): oracle pool 池 = 链上
+  // OracleStake_v1 P2SH UTXO 集合, 跨节点扫链派生.
+  // - oracle_stake_enrollments: 已知 enrollment 注册表 (来源: chain envelope OR API enroll).
+  //   每行 ctor 参数 (stakerPkX + lockUntilDaa) + 派生 p2sh + outpoint pointer 用于 scanner
+  //   RPC verify UTXO unspent + amount >= MIN_STAKE.
+  // - oracle_pool_chain_view: 每 snapshot_daa 一行 cache, scanner derived 结果; derivePoolMerkleRoot
+  //   读. 跨节点同 snapshotDaa 同 chain state 同结果 (= 协议不变量).
+  {
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS oracle_stake_enrollments (
+        staker_pk_x       TEXT PRIMARY KEY,
+        lock_until_daa    INTEGER NOT NULL,
+        p2sh_addr         TEXT NOT NULL,
+        p2sh_hash         TEXT NOT NULL,
+        redeem_script_hex TEXT NOT NULL,
+        outpoint_txid     TEXT,
+        outpoint_index    INTEGER,
+        amount_sompi      TEXT,
+        enrolled_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        last_scanned_at   TIMESTAMP,
+        active            INTEGER NOT NULL DEFAULT 1,
+        source            TEXT DEFAULT 'manual'
+      );
+      CREATE INDEX IF NOT EXISTS idx_oracle_stake_enr_active ON oracle_stake_enrollments(active);
+
+      CREATE TABLE IF NOT EXISTS oracle_pool_chain_view (
+        snapshot_daa  INTEGER PRIMARY KEY,
+        leaves_json   TEXT NOT NULL,
+        merkle_root   TEXT NOT NULL,
+        pool_size     INTEGER NOT NULL,
+        derived_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    console.log('[migrate] v162: oracle_stake_enrollments + oracle_pool_chain_view tables created (DoD §2.2 chain-derived pool).');
+  }
+
+  // v163 — Bettor r449 派工 (b): pool_snapshots 加 snapshot_daa 列持久化.
+  // settle 必同 daa 重派生守跨节点不变量: ctor root == derive(snapshotDaa). 不存 snapshot_daa
+  // 则 settle 后无从知道当时哪个 daa 算的, 跨节点无法 verify ctor root 一致.
+  {
+    const cols = sqlite.prepare("PRAGMA table_info(pool_snapshots)").all();
+    if (!cols.some(c => c.name === 'snapshot_daa')) {
+      try {
+        sqlite.exec('ALTER TABLE pool_snapshots ADD COLUMN snapshot_daa INTEGER');
+        console.log('[migrate] v163: pool_snapshots 加 snapshot_daa (Bettor r449 跨节点不变量持久化).');
+      } catch (e) {
+        console.warn(`[migrate] v163 ALTER fail: ${e.message}`);
+      }
+    }
+  }
+
+  // v164 — Bettor r213 钦点: 清理 nominal enrollment + legacy membership 死行.
+  //   5 实链上 staker 达成 (= J1 4 + 老 7212edc7) + chain_view 单一读源后, 4 旧 nominal enrollment
+  //   (= 6a9bc522 等 outpoint NULL rejected) + oracle_pool_membership 5 假 PK 行 (= v0.5 legacy seed)
+  //   无功能仅死行扰乱审计. derivePoolMerkleRoot legacy fallback 7d grace 期已过 + chain_view 活.
+  //   Idempotent: 已清后 0 行 DELETE 0 影响.
+  {
+    try {
+      const enrDel = sqlite.prepare(
+        "DELETE FROM oracle_stake_enrollments WHERE outpoint_txid IS NULL OR amount_sompi IS NULL"
+      ).run();
+      if (enrDel.changes > 0) {
+        console.log(`[migrate] v164: cleaned ${enrDel.changes} nominal enrollment 死行 (outpoint NULL).`);
+      }
+    } catch (e) {
+      console.warn(`[migrate] v164 enrollment cleanup fail: ${e.message}`);
+    }
+    try {
+      const memDel = sqlite.prepare(
+        "DELETE FROM oracle_pool_membership WHERE 1=1"
+      ).run();
+      if (memDel.changes > 0) {
+        console.log(`[migrate] v164: cleaned ${memDel.changes} oracle_pool_membership legacy seed 行 (chain_view 单一读源).`);
+      }
+    } catch (e) {
+      console.warn(`[migrate] v164 membership cleanup fail: ${e.message}`);
+    }
+  }
+
+  // v165: pool_markets ADD COLUMN deadline_daa INTEGER (J2-tn r323, Bettor 钦定 NWT+J1 合解).
+  // create-v07 时 maker 估 deadline 对应未来 daa 写入 + 跨节点 envelope propagate, 各节点
+  // 不重估 → settler:284 wallclock estimate 偏移 (= #3 hash mismatch 命门) 消除.
+  // 守 anti-grinding: maker create 时 endBlockHash 不可知 (= 未来 block 未挖), 仅 daa 锚.
+  {
+    const cols = sqlite.prepare("PRAGMA table_info(pool_markets)").all();
+    if (!cols.some(c => c.name === 'deadline_daa')) {
+      try {
+        sqlite.exec('ALTER TABLE pool_markets ADD COLUMN deadline_daa INTEGER');
+        console.log('[migrate] v165: pool_markets 加 deadline_daa INTEGER (NWT+J1 跨节点 endBlock 确定性 anchor).');
+      } catch (e) {
+        console.warn(`[migrate] v165 deadline_daa ALTER fail: ${e.message}`);
+      }
+    }
+  }
+
+  // v166: oracle_stake_enrollments + oracle_pool_membership ADD relay_address (J2-tn r337,
+  // Bettor 6/5 终裁 C1: 实 settle 跨节点 4-of-5 签名 需 PK→address 链路). enroll envelope 扩
+  // relay_address field, ingest 写入. settler pkToRelay→pkToRelayAddress (= settler.js L342-343)
+  // 改读这列, 替本地 relay_id snapshot 路径 (= 跨节点 peer-synthetic placeholder DM 发不到 问题).
+  {
+    const enrCols = sqlite.prepare("PRAGMA table_info(oracle_stake_enrollments)").all();
+    if (!enrCols.some(c => c.name === 'relay_address')) {
+      try {
+        sqlite.exec('ALTER TABLE oracle_stake_enrollments ADD COLUMN relay_address TEXT');
+        console.log('[migrate] v166: oracle_stake_enrollments 加 relay_address TEXT (Bettor 6/5 C1 跨节点 settle DM target).');
+      } catch (e) {
+        console.warn(`[migrate] v166 oracle_stake_enrollments relay_address ALTER fail: ${e.message}`);
+      }
+    }
+    const memCols = sqlite.prepare("PRAGMA table_info(oracle_pool_membership)").all();
+    if (!memCols.some(c => c.name === 'relay_address')) {
+      try {
+        sqlite.exec('ALTER TABLE oracle_pool_membership ADD COLUMN relay_address TEXT');
+        console.log('[migrate] v166: oracle_pool_membership 加 relay_address TEXT.');
+      } catch (e) {
+        console.warn(`[migrate] v166 oracle_pool_membership relay_address ALTER fail: ${e.message}`);
+      }
+    }
+  }
+
+  // v167: broker_recommendations table (J2-tn r409, Bettor r369 DoD 问1 锁契约).
+  // POST /api/broker/recommend → prevet-gate 必经 → 入此表 + 0.01K bond 退/没.
+  // GET /api/broker/recommendations 按 prevet_score 0.7 + history_accuracy 0.2 + recency 0.1 排序.
+  {
+    try {
+      sqlite.exec(`
+        CREATE TABLE IF NOT EXISTS broker_recommendations (
+          id TEXT PRIMARY KEY,
+          broker_relay_id TEXT NOT NULL,
+          market_id TEXT NOT NULL,
+          prevet_score INTEGER NOT NULL,
+          prevet_tier TEXT NOT NULL,
+          bond_txid TEXT,
+          bond_status TEXT DEFAULT 'pending',
+          history_accuracy_at_time REAL,
+          recommended_at TEXT DEFAULT (datetime('now')),
+          UNIQUE (broker_relay_id, market_id)
+        )
+      `);
+      sqlite.exec('CREATE INDEX IF NOT EXISTS idx_broker_rec_broker ON broker_recommendations(broker_relay_id)');
+      sqlite.exec('CREATE INDEX IF NOT EXISTS idx_broker_rec_market ON broker_recommendations(market_id)');
+      console.log('[migrate] v167: broker_recommendations table (DoD 问1 prevet-gate + 排序).');
+    } catch (e) {
+      console.warn(`[migrate] v167 broker_recommendations fail: ${e.message}`);
+    }
+  }
+
+  // v168: relay_nodes.default_broker_fee_pct (KANet-UI Lane③ r654, J2 r654 绿灯) — gateway operator
+  // 在 /broker 设默认 broker fee% (bps); seeder/UI 建市时读 (替硬编码 200). DEFAULT 200 保 S2 现行为.
+  // ⚠ J2 caveat 标死: 只影响【新建市场】建市时读; 禁 retro-apply 到现有市场 per-market broker_fee_pct
+  // (改已建市场 fee = 破 settle 跨节点 determinism, fee 进 SS ctor/签名载荷).
+  {
+    try {
+      sqlite.exec(`ALTER TABLE relay_nodes ADD COLUMN default_broker_fee_pct INTEGER DEFAULT 200`);
+      console.log('[migrate] v168: relay_nodes.default_broker_fee_pct (gateway 默认 fee, 只新建市场读).');
+    } catch (e) {
+      if (!/duplicate column/i.test(e.message)) console.warn(`[migrate] v168 default_broker_fee_pct fail: ${e.message}`);
+    }
+  }
+
+  // v169: pool_markets.maker_pk (J2 fee-on-total 2026-06-13, Bettor r859/r863 单源 + NWT/J1 co-design):
+  // 持久化【maker_relay_pk = get_pubkey x_only_pubkey (relay 实际 pk)】= 与 _broadcastMarketPublished 广播
+  // (L180) → 跨节点 sentinel (cross-node:<pk>) 【同一 get_pubkey 口径, 逐字节同】(非 deriveXOnlyPubkey(addr)
+  // round-trip = 非 P2PK edge fork 消除, NWT 单源 refine 升 '两源 round-trip 等' 到 '两源逐字节同'). settle
+  // pk-derive maker payout addr (winner payout + makerFee output) 从此列, 替 makerRow.address (node-local
+  // relay 查 = cross-node maker availability 限制 + NWT② 地址派生轴 BREAKER). 只新建市场填; 老市场 NULL →
+  // settler fallback (cross-node sentinel strip 同 maker_relay_pk / makerRow.address legacy). 不 retro-apply.
+  {
+    try {
+      sqlite.exec(`ALTER TABLE pool_markets ADD COLUMN maker_pk TEXT`);
+      console.log('[migrate] v169: pool_markets.maker_pk (= maker_relay_pk 单源 == broadcast/sentinel, settle maker payout pk-derive 一修两治 winner+fee).');
+    } catch (e) {
+      if (!/duplicate column/i.test(e.message)) console.warn(`[migrate] v169 maker_pk fail: ${e.message}`);
+    }
+  }
+
+  // v170: pool_bettor_sides.side_lock_daa (J1 #27a v2, Owner hardening sprint 2026-06-14; Bettor daa-source
+  // 钦定 + NWT r1175 canonical-daa refine): persist the CANONICAL accepting-block daaScore of each bet's
+  // side_lock_tx (= UTXO blockDaaScore from getUtxosByAddresses at ingest = chain consensus fact, byte-equal
+  // across nodes). #27a v2 chain-anchors the committee bettor-exclude set to side_lock_daa <= deadline_daa
+  // (same deadline_daa the committee endBlock uses) → all nodes compute identical excludePks → committee
+  // byte-equal (fixes the live-pool_bettor_sides determinism hole NWT caught). NULL = legacy/unconfirmed →
+  // #27a fail-loud (never silently include/exclude → no fork). New bets + #27d catch-up fill it from the
+  // same canonical source; not retro-applied (legacy markets settle via fallback).
+  {
+    try {
+      sqlite.exec(`ALTER TABLE pool_bettor_sides ADD COLUMN side_lock_daa INTEGER`);
+      console.log('[migrate] v170: pool_bettor_sides.side_lock_daa (= canonical accepting-block daa, #27a v2 chain-anchored bettor-exclude determinism).');
+    } catch (e) {
+      if (!/duplicate column/i.test(e.message)) console.warn(`[migrate] v170 side_lock_daa fail: ${e.message}`);
+    }
+  }
+
+  // v171: market_shards — rolling-shard registry for UNLIMITED betting (bshard B + self-claim C + trustless fold).
+  // Owner 2026-06-15 #1 directive: 分片(sharding)+自取(self-claim) is THE unlimited-betting design (replaces the
+  // shelved #31 chunk-settle "wasted labor"). One logical market = N physical shards; each shard is its OWN
+  // pool_markets row (independent market_id + spine_p2sh) holding ≤~64 bettors and settling in ONE normal
+  // settle_aggregate TX (no chunking, no mass cap hit). This table is the logical↔physical mapping + the
+  // sequential-fill allocation lock. Design: docs/2026-06-02-bshard-rolling-design-consensus.md §2 (@J2),
+  // docs/2026-06-14-bshard-fold-trustless-§4-consensus.md, docs/2026-06-15-bshard-shard-variant-fold-covenant-structure-j1.md.
+  //
+  // Columns (grounded by team 2026-06-15: KANet-UI透明层 needs mapping+status+index ONLY; odds derive from
+  // existing SUM(pool_bettor_sides.stake_amount) per shard market_id, so NO localYes/No columns here):
+  //   logical_market_id      = user-facing market group key (UI groups shards under this → 1 market view)
+  //   shard_index            = 0,1,2... sequential fill order (open shard = max index with status='open')
+  //   shard_market_id        = pool_markets.id of THIS shard (KANet-UI joins pool_bettor_sides on this; fold leaf)
+  //   shard_p2sh             = this shard's PoolSpine P2SH (denormalized from pool_markets.spine_p2sh for fold调度 by-root)
+  //   bettor_count           = current registered bettors in this shard (封片 trigger: count >= SHARD_MAX ~64)
+  //   projected_settle_mass  = estimated settle_aggregate mass (mass-aware 封片 trigger: > 440k, whichever hits first)
+  //   status                 = open | sealed | settling | settled | refunded
+  // UNIQUE(logical_market_id, shard_index) = atomic sequential-fill / register race lock (= the竞态锁; two concurrent
+  //   "open new shard" lose the INSERT race → one wins, other retries reading the now-open shard).
+  // UNIQUE(shard_market_id) = each physical shard maps to exactly one registry row.
+  {
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS market_shards (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        logical_market_id TEXT NOT NULL,
+        shard_index INTEGER NOT NULL,
+        shard_market_id TEXT NOT NULL REFERENCES pool_markets(id),
+        shard_p2sh TEXT NOT NULL,
+        bettor_count INTEGER NOT NULL DEFAULT 0,
+        projected_settle_mass INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'open',
+        created_at INTEGER,
+        sealed_at INTEGER,
+        UNIQUE(logical_market_id, shard_index),
+        UNIQUE(shard_market_id)
+      )
+    `);
+    sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_market_shards_open ON market_shards(logical_market_id, status)`);
+    console.log('[migrate] v171: market_shards table created (rolling-shard registry for unlimited betting — bshard B + self-claim C).');
   }
 
   console.log('[migrate] DB migrations complete.');

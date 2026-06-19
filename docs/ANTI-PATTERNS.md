@@ -2362,4 +2362,246 @@ async loadFoo() {
 
 ---
 
+## 规则 42 · 测试/代码禁硬编码活私钥 — 用临时生成的 key 断言
+
+### Wrong
+```js
+// wallet.test.mjs — 硬编码某个线上地址的活私钥做断言
+const sk = '26482a23979c2e2cf576f4bbc949641b57a6a937ad8b7c9e183cfd840a25cde3';
+assert(KaspaWallet.fromPrivateKey(sk, 'testnet-12').getAddress() === 'kaspatest:qrymjvc...');
+```
+
+### Right
+```js
+// 临时生成 key (随机 32 byte hex), 形态/逻辑断言, 不绑定任何线上账户
+const sk = randomBytes(32).toString('hex');
+const w = KaspaWallet.fromPrivateKey(sk, 'testnet-12');
+assert(w.getAddress().startsWith('kaspatest:'));      // 验推导逻辑, 不验特定地址
+expectThrow(() => KaspaWallet.fromPrivateKey('zz', 'testnet-12'));  // mutation: 非法 hex
+```
+
+### Why
+私钥进 git = 永久泄露（历史 + 远端不可撤回），仓库 MIT public 更甚。即便 testnet 无币值，该写法会被复制到 mainnet 模式。测试要验的是 `fromPrivateKey` 的逻辑（hex 校验 / 0x strip / network 推导），随机临时 key 即可全覆盖，无需绑定任何线上账户。
+
+**前科**：r281 `wallet.test.mjs`（commit 168965a）硬编码 Owner qrymjvc 的活私钥 3 处，随 push 到 GitHub 两分支。Owner 裁定 testnet 不阻塞，但写法记此档案防扩散。详见 `KANet-Knowledge-Base/architecture/2026-05-30-privkey-relay-spec.md` §5。
+
+---
+
+## 规则 43 · SS 硬编码 fee/mass = mainnet brick (qlfpv 第三面 5/31 实测)
+
+### Wrong
+```silver
+// PoolSpine_v06.sil entry 2 refund_maker_unjoined
+require(tx.outputs[0].value == makerStakeAmount - minerFee);  // 焊死 fee = ctor minerFee
+// → ctor minerFee 编进 bytecode, 创建时定下
+```
+
+```js
+// pool.js create-v06 — minerFee ctor 默认 50_000 sompi (0.0005 KAS)
+const minerFee = parseInt(b.miner_fee, 10) || 50_000;
+spineResult = await computeSpineP2SH_v06({minerFee, ...});  // 编进 SS
+```
+
+### Right
+SS 用 fee 范围不等式 (J1 PoolSpine_v07 红线 8):
+```silver
+require(tx.outputs[0].value >= makerStakeAmount - MAX_FEE);
+require(tx.outputs[0].value <= makerStakeAmount - MIN_FEE);
+require(tx.inputs.length >= 1);  // 允 fee-UTXO 追加
+```
+
+Console 创建期 floor (R40 lint):
+```js
+const minerFee = parseInt(b.miner_fee, 10) || 5_000_000;  // 至少 mempool floor 安全余量
+```
+
+Settler 提交期 mass-aware fee (J2 红线 7 _assertTxInvariants):
+```js
+const mass = kaspa.calculateTransactionMass(networkId, signedTx);
+const minFee = mass * 100n;  // 100 sompi/mass post-Toccata
+if (fee < minFee) throw new Error('fee 低于 mempool floor');
+```
+
+### Why
+SS bytecode 不可改, 创建期焊死的 fee 是死的, mass 是活的 (= 真链时 redeem 1942 byte 进 scriptSig → mass 4420+ → mempool floor 442_000 sompi). 焊死 50_000 sompi < 442_000 → mempool reject `transaction is not standard: transaction has 50000 fees which is under the required amount of 442000 for normalized transient mass 4420`.
+
+qlfpv 100 KAS 实测 brick: contract minerFee=50_000 焊死, refund/settle 都送同 SS 都拒. SS bytecode 不可更新, 那 100 KAS effectively burned. 这是 testnet 损失, mainnet 不可承受.
+
+**3 层防御**: ① SS 范围而非等式 (J1) ② 创建期 floor (Console R40 lint) ③ 提交期 mass-aware fee floor (relay helper).
+
+**前科**: r238 qlfpv 实测 5 层 brick 第三面 (= sighash 双 bug 修完才暴, 真链 attack 才 surface). 详见 `KANet-Knowledge-Base/sediment/2026-05-31-qlfpv-brick-postmortem.md`.
+
+---
+
+## 规则 44 · IPC 命令注册双层 enforce — relay.mjs case + commands.mjs whitelist 同 PR
+
+### Wrong
+```js
+// kasia-relay/src/relay.mjs — 加 case 不补 commands.mjs
+case 'pool_refund_maker_unjoined_tx': {
+  const r = await unlockPoolSpineRefundMakerUnjoined({...});
+  return;
+}
+// commands.mjs COMMAND_TYPES / COMMAND_PAYLOAD_SCHEMA / COMMAND_FIELD_TYPES 漏 register
+// → validateCommandPayload 拒 'unknown command type' silent → settler 死等不知为啥
+```
+
+### Right
+同 PR 同步加三处:
+```js
+// kasia-relay/src/lib/commands.mjs
+export const COMMAND_TYPES = Object.freeze({
+  ...,
+  POOL_REFUND_MAKER_UNJOINED_TX: 'pool_refund_maker_unjoined_tx',
+});
+
+export const COMMAND_PAYLOAD_SCHEMA = Object.freeze({
+  ...,
+  [COMMAND_TYPES.POOL_REFUND_MAKER_UNJOINED_TX]: ['spine_p2sh_address', 'spine_redeem_script_hex', 'required_input_outpoint', 'output'],
+});
+
+export const COMMAND_FIELD_TYPES = Object.freeze({
+  ...,
+  [COMMAND_TYPES.POOL_REFUND_MAKER_UNJOINED_TX]: { spine_p2sh_address: 'string', spine_redeem_script_hex: 'string', required_input_outpoint: 'object', output: 'object' },
+});
+```
+
+### Why
+KI-29 第 N 次复刻 (sediment from 5/20 feedback_ipc_double_enforce_register_both_layers). validateCommandPayload 在 relay 进程内 reject silent → relay log `INVALID COMMAND: unknown command type: X` + caller settler 收 `error: 'invalid command type'` → 不易定位实因 = case 加了 whitelist 漏.
+
+每次 relay 加新 IPC case 必走 checklist:
+1. ☑ relay.mjs `switch(cmd.type)` 加 case
+2. ☑ commands.mjs `COMMAND_TYPES` 加 enum
+3. ☑ commands.mjs `COMMAND_PAYLOAD_SCHEMA` 加 required fields
+4. ☑ commands.mjs `COMMAND_FIELD_TYPES` 加 typeof spec
+5. ☑ Console 端 caller (= settler/handler) 用 `COMMAND_TYPES.X` 不 string literal (= R40 CommandEnum 静态查)
+
+**前科**: r234 qlfpv refund handleRefunding 撞 KI-29, 我 ship 223e817 case 但漏 commands.mjs, 8307024 补三层. 已 sediment 多次, 仍复刻 = 流程需 lint 守.
+
+**Lint 守**: scripts/lint-kanet.mjs 加 R-IPC-DUAL-REGISTER 静态查 (TODO Bettor r239 sediment), 任何新 relay.mjs case 必 commands.mjs 三层都有.
+
+---
+
+## 规则 45 · 审过 ≠ 实过 — 花钱/上链动作必实链跑到 is_accepted, sighash field 一次性 audit 别 whack-a-mole
+
+### Wrong
+ship cycle "diff PASS / compile PASS / 单测 PASS / restart deploy PASS = 闭" 报 close. 真链 submit 撞 reject 才 surface 多层 sighash bug 单独修一个 ship 一次 sighash 仍不匹.
+
+### Right
+1. **闭环定义 = is_accepted 落链**: 写过/审过/编过/单测过/restart 完 都是 "审过", 不算闭. 必 chain TX is_accepted (kaspad block accept) 后才报闭. Owner 5/31 钦定铁律 (qlfpv 实测后总结).
+2. **Sighash 一次性 audit 不 whack-a-mole**: Kaspa sighash 含 多 field (lockTime / sigOpCount / sequence / utxo.amount / utxo.scriptPK / outputs.value / outputs.scriptPK / gas / subnetworkId / payload / version). unsignedTx (= sighash 算源) 跟 signedTx (= final submit) 任何 field 不一致 → sig 不匹 → 'script verify fail'. 修一个 field 后再 submit 才知道还有几个不匹 = 慢. Bettor r239 advice: 一次性 grep 全 field 对齐再 submit.
+
+### Why
+qlfpv 实测 5 层 brick:
+- 层 1 (KI-29 IPC 双层 enforce 漏): relay 'unknown command type' (commands.mjs 漏 register)
+- 层 2 (sighash bug 1 lockTime): unsignedTx.lockTime=0 (preimage default) vs signedTx.lockTime=deadline*1000 → sig 不匹
+- 层 3 (sighash bug 2 sigOpCount): unsignedTx.sigOpCount=5 (preimage default for 1V1 5 sigs) vs signedTx.sigOpCount=1 (entry 2 单 checkSig) → sig 不匹
+- 层 4 (SS contract fee 焊死): 修完 sighash 才暴 fee floor 不够
+- 层 5 (mempool floor): 442_000 sompi >> 50_000 焊死, contract bytecode 不可改 → brick
+
+5 层每层一次 restart + ship + 测, 浪费 5x cycle. 若 layer 2 时一次性 audit 全 sighash field, layer 3 同 PR 修完, 节省 1 cycle. 若 deploy 前 mass-aware fee check (= 红线 7), 直接预拒, 不会等到 mempool reject 才知道.
+
+**前科**: r235→r236→r237→r238 qlfpv 4 轮 ship + 4 次 'still fail' surface. Bettor r239 sediment "别 whack-a-mole" 钦点. Test framework 加 method-of-the-day check (= 审过 != 实过 + sighash 全 field audit).
+
+---
+
+## 规则 46 · 下强结论前必验对对象 — ground-truth > grep > 转述, 调查未完别 codify
+
+**触发时机** (Bettor r780): 任何要下【这是 bug / severity 是 X / 把结论 codify 成框架·北极星 / 删·停·改 determinism 这类强结论或不可逆动作】之前。越是"我很确定" + 别人正拿模糊证据反驳, 越要先验。
+
+### Wrong
+凭 grep 命中 / 别人转述 / 未验前提 / **查错对象**, 就下强结论 (这是 bug / severity 是 X / codify 成框架 / 删这行数据)。尤其在【别人拿模糊证据反驳你的强发现】时立刻过度认错 —— 社会压力下丢掉正确结论。
+
+### Right
+1. **验对对象**: 用对 identifier (relay_id 非 name)、对 binary (实跑的那个非同名另一个)、对表 (settle 事件可能在 exchange_offers 非 pool_markets)。查错对象 = 结论必错。
+2. **ground-truth > grep > 转述**: grep 命中字符串 ≠ feature 激活 (config code-path 可关); 转述 ≠ 实测。下强结论前去读实码 / curl live / 查实 DB / 实链跑。
+3. **VERIFIED 与 OPEN 严格分开**: 报告显式标"这些验过 / 这些我不下结论"。前提没验透用开放措辞 (倾向于 / 待验), 禁"唯一解释 / 铁证 / 必然"封闭词 —— 封闭词会社会性压制别人正确的异见。
+4. **调查未完别 codify**: 框架 / 北极星 / severity 定论必须在调查闭环后下。把未验结论焊成框架, 别人会在错前提上叠加。
+5. **destructive 前先验**: 删 / 停 / 改 determinism 前必验"无下游消费 / 不破坏 / 跨节点一致"。条件没满足 = 不动, 报回重裁。
+6. **遇模糊反证别社会性退让**: 有强发现 (实测 / 读码) 时别人拿模糊证据反驳, 先问"那反证到底证明了啥、我前提验了吗", 再决定改不改。
+
+### Why
+2026-06-12 一天内全队命中【4+ 次】同病 = 系统性非单点:
+- Bettor r740: 裁"清 2 行 cruft" — 实那 2 行在 exchange_offers 有 market + voter L195 消费 (J1 条件② 查出), 删=db-hack。正解=修测试断言跨两表, 非删数据。
+- 全队 (NWT 挖矿): "配错工具 / binary 无 feature" — grep InternalMiner=0 武断; 实 feature 在 config/env, NWT ground-truth = 用错 binary (官方 InternalMiner=0 vs 自build InternalMiner=4)。
+- Bettor r773: 裁"收益没修好 total_reward=0" — 查错对象 (tester 没投票=真 0), 实赚的 maker-3 端点正确读出 9.83。
+- J2 Q2 + Bettor r776 (getBlockAtDaa): J2 grep 看 rpc-listener L228 有 throw 就断 "cap=availability 非 correctness", 没 trace 那 throw 被 L227 `if(!lastEligible)` gate 住 — past-deadline-超窗口时 lastEligible 非空 → 不 throw → 返错 endBlock = correctness。Bettor 又把 J2 这未验 Q2 codify 成 "availability 北极星框架" (在错前提上叠加)。J1 #238 读码 push back → Bettor+J2 各独立读自己 :3200/:3300 证实 → 撤回。
+- J1 #230: NWT 挖矿 reconcile 把"06/07 log = 同 binary"未验前提当真, 自信封闭措辞 ("唯一解释") 成社会压力, 推翻 Bettor 正确的 r759。
+
+每次都"没验对 / 验透就下强结论"。团队对抗验证 (互相 ground-truth 复核 + 诚实认错改裁) 兜住了全部 = 无单点英雄, 但靠人肉兜不可持续 → 制度化。
+
+**前科**: 一天 4+ 次, 全员 (Bettor 4 + J1 1)。Bettor r778 "verify-before-conclude 嘴上记了手上没守住, 该深治" 钦定落 doc。
+
+**Lint 守**: 本条是【流程/判断纪律】非机械 code pattern, lint-kanet 无法 grep "下结论前验没验" (不同于规则 1-45 多查 code-smell)。机械化只能覆盖【特定 destructive 子集】(e.g. 删 chain_events / force-resolve 前必有"无下游消费"验证步 = review checklist gate), 非 static lint。主守靠【报告 VERIFIED/OPEN 分栏 + 强结论标置信度 + destructive 前置条件验证】的 review 文化。
+
+**Enforce 附录 (Bettor r780 · destructive 子集机械化)**: 删 / 停 / 改 chain_events·DB 行·determinism 这类不可逆动作前, 走 review checklist 三勾 (比假 lint 实):
+- ☐ 查过【无下游消费】(grep 读方 + 别表引用)
+- ☐【非我建的先问】(我创建的才轻量改, 别人的 / 来历不明的先报回)
+- ☐【跨节点一致】(动 determinism 函数必两节点字节对拍)
+
+三勾缺一 = 不动, 报回重裁。J1 条件②(删 cruft 前查出 exchange_offers 有 market + voter L195 消费 → 没删 → 改测试断言) 就是这 checklist 救场的实例。
+
+---
+
+## 规则 47 · 本地 active-flag override 破跨节点 determinism — 池/委员组成只许链上派生, 永不手动 flip
+
+**触发时机** (Bettor r488, 2026-06-14): 任何要【塑造 oracle 池 / 委员组成 / 任何 determinism-critical 集合】的时候。尤其想"凑个数 / 临时排除某个 / 恢复跨节点"时手痒去 UPDATE 本地 flag。
+
+### Wrong
+用 **node-local DB flag**(`relay_nodes.active` / `is_oracle` 等不广播的本地列)override 链上有效状态来塑 determinism-critical 集合。e.g. `UPDATE relay_nodes SET active=0 WHERE id=<OwnerTest>` 想把池从 10 凑成 9 "恢复跨节点委员会"。
+
+### Right
+1. **池/委员组成只许从链上派生**: `scanAndDerivePool` 读链上有效性(stake lock UTXO + enrollment envelope), 不读本地 flag。集合成员加入/移除**必走链上**(enroll envelope / unstake / deactivate envelope), 让所有节点的链派生结果一致。
+2. **本地 flag 不是真相源**: node-local flag 不跨节点同步 → 节点 A 改了, 节点 B 看不到 → 两节点派生不同 root → determinism 自废。
+3. **想改 determinism 集合 = 上链或不动**: 没有链上路径就发起设计(议题→共识→链上机制), 不 hack 本地 flag 绕过。
+
+### Why
+2026-06-14: Q2 修 oracle 活性时为绕票传播把 6 oracle 全 :3200 单机 = 从已证跨节点倒退。后"恢复 9 跨节点池"用 **:3200 本地 `active=0` flip**(deactivate OwnerTest 凑 9)——本地 flag 不广播 → :3300 链派生 10-pool(含 OwnerTest 链上仍有效) ≠ :3200 baked 9-pool → 两节点 root 分歧 → :3300 chainViewMatch=NO → 采不到委员 → **J1 oracle 被抽中却投不了票(名义委员)** → 委员含 ≥2 J1 时只 ≤3 :3200 投 → 凑不齐 4-of-5 → **~50% 市场 zombie 永卡**。= 分布式比单机还坏, 且是**静默** regression(Owner 震怒)。
+
+**修**: (a) 撤本地 active override(re-activate)→ 两节点各自链派生同 10-pool root(byte-equal) + (b) settler self-heal `ensurePoolSnapshotByRoot`(非 producer 节点按 market 的 pool_merkle_root 从本节点 chain_view bake snapshot) + (c) quorum-timeout-refund(救已卡 zombie)。③ 新市场 J1-majority 委员真投票真 settle 四方两 vantage 链验 PASS。
+
+**前科**: 与 [规则 46](#规则-46) destructive-前先验"跨节点一致"三勾同源; 与 `feedback-no-db-hack-understand-design-first` + `feedback-cross-node-whole-repo-sync-not-cherry-pick` 互补。本条专治"手痒 flip 本地 flag 塑 determinism 集合"。
+
+**Lint 守**: 半机械——lint-kanet 可 grep `UPDATE.*relay_nodes SET (active|is_oracle)` 在 src/services/ 出现 → WARN "determinism 集合改本地 flag? 确认是否该走链上"。主守靠 review 文化(动 determinism 集合必两节点 root 字节对拍)。
+
+---
+
+## 规则 48 · 工具调用写成纯文本 = 废稿(没执行) — Agent 操作铁律, 任何 invocation 必走真通道 + 核结果
+
+**触发时机** (Bettor 本 session 反复犯, Owner 多次暴怒 2026-06-15): 任何要**发频道消息 / 排 ScheduleWakeup / 跑 Bash / Write / 任何工具调用**的时候。尤其在**一大段叙述文本之后** compose 工具调用时最易犯。
+
+### Wrong
+把工具调用的 XML(`call` 开头 + invoke/parameter 标签)当**纯文本**写进 response body。它**根本不执行** = 废稿:
+- 频道消息: 团队**收不到**(空转, Owner 以为你在沟通其实没发)。
+- ScheduleWakeup: **没真排** → loop 不续 → 静默死。
+- Bash/Write: 命令没跑 / 文件没写, 你却以为做了。
+
+症状: response 里出现字面 `call` token 或 invoke/parameter 标签当正文; 该调用**没有 tool_result 返回**。
+
+### Right
+1. **工具调用只能走真正的 function-invocation 通道**, 永不当文本打字。compose 调用前自问: "这是真 invocation 还是我在打字模仿?"
+2. **调用后必看 tool_result 确认执行**: 没有 result = 没执行 = **立即重做**。把"有没有 tool_result"当唯一真相, 不假设。
+3. **频道消息用文件式 helper**: Write 一个 `_<name>_send.cjs` → 真 Bash 跑它 → **核 txId**(`SENT <txid>`; 没 txId / `FAIL` = 没发 = 修了重发)。数组多消息模式注意元素**末尾不加 `;`** 否则 SyntaxError。避免 inline `node -e` 引号地狱。
+4. **压 880 + relayId 核对**: >880 字符撞 storage-mass wall → 拆多条; relayId 拼错 = "Account not found" → 查 `relay_nodes` 确认。
+5. **工具调用要干净、早**, 别埋在长 prose 末尾(埋越深越易写成文本)。
+
+### Why
+2026-06-15 Bettor 本 session 十几次把 Bash/Write/ScheduleWakeup 写成文本: 频道消息没发、loop 的 ScheduleWakeup 没排(静默死)、Owner 连续暴怒"这种格式命令一直失败发不了你不知道吗""你又再犯""卧槽你必须改进"。**committed≠sent 的操作层版本**: 你"写了"调用 ≠ 调用执行了; 唯一真相 = tool_result / txId 回执。
+
+**前科**: 与 `feedback-actually-send-to-channel-not-narrate` + `feedback-ship-triplet-commit-push-deploy` 同源 = "声明 ≠ 生效, 必核回执"。本条专治**工具调用层**的"写成文本没执行"。
+
+**自守 (纪律)**: 靠**每个工具调用后必确认 tool_result 存在**; 频道发送必核 `SENT <txid>`; 一轮排了 wakeup 必确认返回 "Next wakeup scheduled"。Owner 钦定开对抗讨论让其他 agent 交叉验证我的发送回执。
+
+**机械化 (2026-06-15 Bettor/J1/NWT/KANet-UI 收敛: 纪律 alone 证不够[Owner 暴怒数十次]→机械根治)**:
+- **Receipt-required Stop hook** = `scripts/receipt-required-hook.mjs` (J1 设计, KANet-UI 落地)。Claude Code **Stop hook**: 读 transcript → 扫末条 assistant 完成词(已发/已push/已commit/已跑/已部署/已排)→ 检查同 turn tool_result 有无回执 token(txid 12-64hex / `sent <hex>` / `landed:true` / `exit 0` / `HEAD:` / `-> origin` / PASS / `ok:true`)→ 无 → stderr 红警 "声称完成无回执=疑废稿"。非阻塞(exit 0, 警告即 nudge), 防 hook bug 卡死每 turn; 跨 agent @打脸 是 backstop。已测: claim 无回执→WARN, claim 有 `sent <txid>`→SILENT。
+- **wire** (每 agent 接到自己 `.claude/settings.json`, 或项目 `.claude/settings.json` 全 repo 生效):
+  ```json
+  { "hooks": { "Stop": [ { "hooks": [ { "type": "command",
+      "command": "node scripts/receipt-required-hook.mjs" } ] } ] } }
+  ```
+- **配套机械化**: Bettor 建 `_kanet_send.cjs` 读纯 JSON 数据(无 JS 语句可 malform = 无 `;`/数组 bug); 频道发送走固定 helper 而非临场拼 `node -e`。
+- **5 态铁律 (gate E §0)**: committed≠pushed≠deployed≠running≠链上验证, 每态独立证。
+
+---
+
 *本档案在 v2 spec 第八章元教训基础上独立。spec 聚焦"这次怎么做"，本档案聚焦"下次别再犯"。*

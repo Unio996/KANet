@@ -56,6 +56,8 @@ for pidfile in "$PID_DIR"/*.pid; do
   fi
   rm -f "$pidfile"
 done
+# tg-bot: 额外按 cmdline 清 (= 可能 session/手动起无 pidfile) — 防双开 (Telegram 单 poller/token, 否则 409 conflict)
+powershell -Command "Get-CimInstance Win32_Process -Filter \"name='node.exe'\" | Where-Object { \$_.CommandLine -like '*_launch_tg_bot*' -or \$_.CommandLine -like '*tg-bot*bot.mjs*' } | ForEach-Object { Stop-Process -Id \$_.ProcessId -Force -ErrorAction SilentlyContinue }" 2>/dev/null || true
 # 强制释放端口
 for PORT_CHECK in $CONSOLE_PORT; do
   PIDS=$(powershell -Command "
@@ -79,6 +81,10 @@ if [ -f "$ENV_FILE" ]; then
   while IFS='=' read -r k v; do
     [[ "$k" =~ ^# ]] && continue
     [ -z "$k" ] && continue
+    # Bettor r551 durable 收口 (J1): full passthrough — export EVERY kanet.env key (= headless r472 同源),
+    # 结构性消除 case-block 漏 export 漂移 (DAILY_SEND_LIMIT 等 scale env 漏过 = 本轮 root). case 块保留仅做
+    # 变量名转换 (PORT→CONSOLE_PORT 等). 未来加 env 不再漏, 重启不 revert scale fix stack.
+    export "$k=$v"
     case "$k" in
       KANET_ROOT)              KANET_ROOT="$v" ;;
       CONSOLE_ENCRYPTION_KEY)  CONSOLE_ENCRYPTION_KEY="$v" ;;
@@ -103,6 +109,25 @@ if [ -f "$ENV_FILE" ]; then
       BROKER_V2_ENABLED_PEERS) export BROKER_V2_ENABLED_PEERS="$v" ;;
       # B2 v0.5 area-8 E7 — pool market deadline maximum cap (testnet 30day default, mainnet 365day)
       POOL_DEADLINE_MAX_DAY)   export POOL_DEADLINE_MAX_DAY="$v" ;;
+      # 5/29 KANet-UI — dev-channel faucet relay (clean relay#2 d9a8fffb; 原 FaucetRelay-tn 撞 relay-instance BUG1 弃用). 必 export 否则 case 未 match 静默忽略 (= line 100 同坑).
+      FAUCET_RELAY_ID)         export FAUCET_RELAY_ID="$v" ;;
+      FAUCET_AMOUNT_KAS)       export FAUCET_AMOUNT_KAS="$v" ;;
+      # Owner 派工 100 cases (2026-06-02): seed Polymarket hot markets via v0.7
+      POOL_SEEDER_ENABLED)     export POOL_SEEDER_ENABLED="$v" ;;
+      POOL_SEEDER_MAKER_RELAY) export POOL_SEEDER_MAKER_RELAY="$v" ;;
+      POOL_SEED_TARGET)        export POOL_SEED_TARGET="$v" ;;
+      POOL_SEED_STAKE_KAS)     export POOL_SEED_STAKE_KAS="$v" ;;
+      POOL_SEED_INTERVAL_MIN)  export POOL_SEED_INTERVAL_MIN="$v" ;;
+      POOL_SEED_MAX_DAY)       export POOL_SEED_MAX_DAY="$v" ;;
+      # J2-tn r364 (Bettor 6/5 钦定 demo headroom): cross-node settler chain 25min, 30 太紧.
+      ORACLE_SILENT_TIMEOUT_MIN) export ORACLE_SILENT_TIMEOUT_MIN="$v" ;;
+      # J2-tn r382 (Bettor 6/5 16:29 钦定): demo 提速 cron 5min → 1min (5x). mainnet 不设默认 5min.
+      POOL_SETTLER_TICK_SEC) export POOL_SETTLER_TICK_SEC="$v" ;;
+      PREDICTION_VOTER_TICK_SEC) export PREDICTION_VOTER_TICK_SEC="$v" ;;
+      # J1 #73 (scale-test 20档 collecting_sigs 瓶颈根因): relay 每日广播限默认 200 → oracle sig 广播撞限没落链 → maker ingest 不到 → 超时 refund. 必 export 否则 case 未 match 静默忽略 (= line 102 同坑). per-node 须各设 (J2 5f6200e5 watchdog 修的配对 primary 修).
+      DAILY_SEND_LIMIT) export DAILY_SEND_LIMIT="$v" ;;
+      # J2 watchdog env (默认 code 内 30min, 仅覆盖时设)
+      COLLECTING_SIGS_WATCHDOG_MIN) export COLLECTING_SIGS_WATCHDOG_MIN="$v" ;;
     esac
   done < "$ENV_FILE"
   ok "已加载配置: $ENV_FILE"
@@ -214,6 +239,7 @@ CONSOLE_LOG="$LOG_DIR/console.log"
 KANET_ROOT=$KANET_ROOT \
 CONSOLE_ENCRYPTION_KEY=$CONSOLE_ENCRYPTION_KEY \
 PORT=$CONSOLE_PORT \
+CONSOLE_URL="http://localhost:$CONSOLE_PORT" \
 DB_PATH="$CONSOLE_DIR/data/console.db" \
 KASPA_RPC_URL="$KASPA_RPC_URL" \
 KASPA_NETWORK="$KASPA_NETWORK" \
@@ -239,6 +265,13 @@ if [ "$READY" -eq 0 ]; then
   tail -20 "$CONSOLE_LOG"
   exit 1
 fi
+
+# ── TG bot: NOT launched here anymore (KANet-UI 2026-06-13). ──
+# The Console's tg-bot-manager (src/services/tg-bot-manager.js) is now the SOLE owner: index.js
+# boot-start (enabled-gated, tg_bot_enabled flag) + Settings UI start/stop/status + crash respawn.
+# The old start-script launch raced the manager → two pollers on one token → Telegram 409 Conflict.
+# Single owner = no 409; the operator controls it from Settings → Telegram Bot.
+echo "  - TG bot: 由 Console 管理 (Settings → Telegram Bot 启停; 启用后随 Console 自启)"
 
 ok "Console 就绪  →  http://localhost:$CONSOLE_PORT  (PID $CONSOLE_PID)"
 

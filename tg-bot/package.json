@@ -1,0 +1,14 @@
+{
+  "name": "kanet-tg-bot",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "KANet TG bot — broker X 电报前端 (0-key/0-custody). Track B, MIT, testnet-only. 独立 deps, 不污染 kasia-console.",
+  "main": "bot.mjs",
+  "scripts": {
+    "start": "node bot.mjs"
+  },
+  "dependencies": {
+    "grammy": "^1.30.0"
+  }
+}

@@ -60,6 +60,10 @@ export async function handleIngestMessage(payload) {
   await updateConversationTimestamps(convId, { lastMessageAt: timestamp || nowIso() });
   if (direction === 'inbound') await incrementUnread(convId);
 
+  // J1tn r361 (Bettor 15:05 钦定): pool sign_req moved from DM → broadcast trigger
+  // (= handlePoolOracleTxSignReq in trade-protocol-filter.js, fires from onBroadcastWritten).
+  // Cross-node DM doesn't reach remote oracles; broadcast does. DM hook removed.
+
   // 链上事实归档（有 txid 的消息才记录）
   if (txid) {
     const fromAddr = direction === 'inbound' ? remoteAddress : localAddress;

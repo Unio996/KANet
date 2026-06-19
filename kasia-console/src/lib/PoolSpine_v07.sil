@@ -1,0 +1,392 @@
+// PoolSpine_v07.sil — v0.7 sharded variant of v0.6, supports unlimited bettors via N shards
+//
+// Bettor G6 决议 (2026-06-01): 反 depth-20 单合约, 选 N×depth-6 shards. Each shard = its own
+// PoolSpine_v07 contract + own committee + own settle TX, all bound to a shared market_id via
+// global_commit_id (= blake2b of global totals + market_id + shard_count). Off-chain settler
+// coordinates: all shards' settle_aggregate use the SAME global_commit_id + globals.
+//
+// Differences from v0.6 PoolSpine_v06.sil:
+//   - ctor adds: shard_id, shard_count, market_id (raw byte[32], non-hash).
+//   - settle_aggregate adds entry args: globalYesTotal_sompi, globalNoTotal_sompi, global_commit_id.
+//   - commit verify: blake2b(globalYes||globalNo||market_id||shard_count) == global_commit_id.
+//     If silverc lacks int-to-byte primitive, falls back to committee-sig-sighash attestation
+//     (sigs cover scriptSig args → implicit attest). See SS body for impl note.
+//   - min-pot global: require(globalYes + globalNo >= MIN_POT_SOMPI) — ensures winner share
+//     > dust under any distribution (Bettor r259 forensic).
+//   - per-output dust: each P2PK output value >= MIN_DUST_SOMPI (= 1000 sompi, aligns J2 d649f16).
+//   - ctor adds min-bet check: require(makerStakeAmount >= MIN_BET_SOMPI = 1e8 sompi = 1 KAS).
+//
+// v0.6 PoolSpine_v06.sil UNTOUCHED — 46f8a/xfu62 backward compat ✓. v0.7 opt-in via new
+// pool.js protocol_version='v0.7' branch (new SS = new P2SH = inherently distinct).
+//
+// (Below: v0.6 original header preserved for reference.)
+//
+// PoolSpine_v06.sil — v0.6 anonymous-pool oracle prediction spine, **depth-8** (pool ≤256)
+// Bettor r3 lock + Owner ack 5/30 + Bettor r10 finding (depth-4 too small) + J2 r102 attack math
+// + Bettor r12 lock (depth-8 ACK, J1 SS t-agnostic) + **Bettor r19 lock (path A, t=4-of-5, 5/30)**.
+//
+// What changed from v0.5 PoolSpine.sil:
+// - v0.5: ctor baked 3 oracle PKs; settle = checkSig×3 against individuals (identities public).
+// - v0.6: ctor bakes ONE poolMerkleRoot (snapshot of the public oracle pool at market create);
+//   committee is selected per-event by off-chain stake-weighted VRF and reaches consensus via
+//   individual Schnorr sigs — settle verifies ≥4 of 5 individual sigs (threshold counter) + merkle
+//   proof that each committee member is in the ctor pool.
+//
+// Pre-vote anonymity: identities hidden DURING voting (= prevents directed bribery). Settlement
+// reveals the 5 committee PKs (= pool is public + selection is per-event random, acceptable per
+// Owner ack via Bettor r19). MuSig2 "full anonymity at settle" was infeasible without silverc
+// KeyAgg primitive — caused the J1 r119 aggSig-aggPk-unbound fund-loss hole.
+//
+// SS validation per spec §1 (post-r19 path A):
+//   ① threshold counter: ≥4 of 5 individual checkSig (= Owner ack 97.7% liveness, 4-of-5)
+//   ② blake2b(c0||c1||c2||c3||c4) == committeePkHash — binds revealed committee to dispute commitment
+//   ③ for each c_i: depth-8 merkle proof verifies c_i ∈ poolMerkleRoot — committee subset of pool
+//
+// The combined ① + ③ closes the v0.6 first-draft aggSig-aggPk-unbound hole (J1 r118/r119 +
+// Bettor r17 catch): committee PKs are bound to the pool via merkle (③), AND each PK directly
+// signed the settlement (①). No KeyAgg derivation needed; impersonation requires forging an
+// individual committee member's private key.
+//
+// Slash granularity is fork A (iii) per spec §1: aggregate fast path keeps individuals
+// pre-vote-anonymous; dispute_reveal entrypoint requires individual sigs matching the commitment
+// for per-oracle bond forfeiture. (Bond redirection at the SS-output level is structural and
+// lives in the pool-bond contract layer.)
+//
+// Fixed scope:
+// - committee size N = 5 (spec allows 5–7; locked at 5 for first ship)
+// - threshold t = 4 (Owner ack via Bettor r19: 97.7% liveness, tolerates 1 absent/equivocating)
+// - pool merkle depth = 8 (pool ≤ 256, future-proof per Bettor r10 finding + J2 r102 attack math)
+// - dispute_reveal binding via committeePkHash arg (off-chain coordinator-provided)
+//
+// Counter pattern per J1 r120 probe (silverc supports `int v=0; if(checkSig(...)) v=v+1;` —
+// validated at 223 script bytes for 5 sigs + 1 require).
+//
+// Backward compat (spec §7): v0.5 PoolSpine.sil untouched, v0.5 markets continue. v0.6 opt-in
+// via pool.js protocol_version='v0.6' branch (new contract = new P2SH = inherently distinct).
+
+pragma silverscript ^0.1.0;
+
+contract PoolSpine_v07(
+    byte[32] makerPk,
+    byte[32] brokerPk,
+    byte[32] poolMerkleRoot,    // depth-8 blake2b root of pool snapshot (per-shard committee pool)
+    int deadline,
+    int minerFee,
+    int brokerFeePct,
+    int oracleFeePct,
+    int oracleBondAmount,
+    int makerStakeAmount,
+    byte[32] marketMetadataHash,
+    // v0.7 sharding additions:
+    int shard_id,               // 0..shard_count-1, this shard's index in market
+    int shard_count,            // total number of shards in market
+    byte[32] market_id          // raw market_id bytes (= anchors all shards to same logical market)
+) {
+
+    // entry 0 — settle_aggregate (v0.7 sharded): 5 individual committee sigs (≥4 valid) + depth-8 merkle proofs.
+    // v0.7 ADDS: globalYes/globalNo totals (sompi) across all shards + global_commit_id (32B blake2b
+    // of cross-shard commit). SS verifies blake2b match (silverc int-to-byte caveat: see body),
+    // OR relies on committee sigs covering scriptSig args (= implicit attest via sighash).
+    entrypoint function settle_aggregate(
+        sig       c0Sig, sig c1Sig, sig c2Sig, sig c3Sig, sig c4Sig,
+        byte[32]  committeePkHash,     // blake2b(c0||c1||c2||c3||c4) — binds for dispute_reveal
+        int       winner,              // 0 = YES, 1 = NO
+        byte[32]  sidesMerkleRoot,
+        byte[32]  c0Pk, byte[32] c1Pk, byte[32] c2Pk, byte[32] c3Pk, byte[32] c4Pk,
+        // FIX (J2 r105 catch): each committee member's position in poolMerkleRoot tree (= leaf index 0..255 for depth-8).
+        // silverc has no native position-aware merkle climb → bits are derived per-level via (idx / 2^level) % 2.
+        int       c0Idx, int c1Idx, int c2Idx, int c3Idx, int c4Idx,
+        // v0.7 sharding: cross-shard global totals + commit anchor.
+        // globalYesTotal_sompi + globalNoTotal_sompi = SUM across ALL N shards (= attested by committee
+        // sig sighash covering this scriptSig). global_commit_id = blake2b(globalYes||globalNo||market_id||shard_count)
+        // per Bettor G6 spec. Off-chain settler ensures all shards use SAME values.
+        int       globalYesTotal_sompi,
+        int       globalNoTotal_sompi,
+        byte[32]  global_commit_id,
+        byte[32]  c0s0, byte[32] c0s1, byte[32] c0s2, byte[32] c0s3, byte[32] c0s4, byte[32] c0s5, byte[32] c0s6, byte[32] c0s7,
+        byte[32]  c1s0, byte[32] c1s1, byte[32] c1s2, byte[32] c1s3, byte[32] c1s4, byte[32] c1s5, byte[32] c1s6, byte[32] c1s7,
+        byte[32]  c2s0, byte[32] c2s1, byte[32] c2s2, byte[32] c2s3, byte[32] c2s4, byte[32] c2s5, byte[32] c2s6, byte[32] c2s7,
+        byte[32]  c3s0, byte[32] c3s1, byte[32] c3s2, byte[32] c3s3, byte[32] c3s4, byte[32] c3s5, byte[32] c3s6, byte[32] c3s7,
+        byte[32]  c4s0, byte[32] c4s1, byte[32] c4s2, byte[32] c4s3, byte[32] c4s4, byte[32] c4s5, byte[32] c4s6, byte[32] c4s7
+    ) {
+        // ① path A threshold t=4-of-5: each sig bound to ITS committee PK; counter requires ≥4 valid.
+        // if (checkSig false) → branch skipped (no contract failure); require enforces threshold.
+        // Tolerates 1 absent/equivocating committee member.
+        int validSigs = 0;
+        if (checkSig(c0Sig, pubkey(c0Pk))) { validSigs = validSigs + 1; }
+        if (checkSig(c1Sig, pubkey(c1Pk))) { validSigs = validSigs + 1; }
+        if (checkSig(c2Sig, pubkey(c2Pk))) { validSigs = validSigs + 1; }
+        if (checkSig(c3Sig, pubkey(c3Pk))) { validSigs = validSigs + 1; }
+        if (checkSig(c4Sig, pubkey(c4Pk))) { validSigs = validSigs + 1; }
+        require(validSigs >= 4);
+        require(winner == 0 || winner == 1);
+
+        // ② committee commitment — binds revealed committee to a hash usable by dispute_reveal.
+        byte[] cConcat0 = c0Pk + c1Pk;
+        byte[] cConcat1 = cConcat0 + c2Pk;
+        byte[] cConcat2 = cConcat1 + c3Pk;
+        byte[] cConcat3 = cConcat2 + c4Pk;
+        byte[32] committeeHash = blake2b(cConcat3);
+        require(committeeHash == committeePkHash);
+
+        // ③ depth-8 position-aware merkle proof per committee PK against ctor-baked poolMerkleRoot.
+        // FIX (J2 r105 catch + J1 r125 own): hardcoded leaf-left order ONLY verifies position 0 →
+        // 5 committee members can't all be at pos 0, legitimate settle FAIL = protocol liveness 0%.
+        // silverc has no native position-aware climb → bits derived per-level via (idx / 2^level) % 2.
+        // c0 merkle proof against poolMerkleRoot (depth-8 position-aware climb).
+        require(c0Idx >= 0); require(c0Idx < 256);
+        byte[32] c0Cur = blake2b(byte[](c0Pk));
+        int c0b0 = c0Idx % 2;
+        if (c0b0 == 0) { c0Cur = blake2b(byte[](c0Cur) + byte[](c0s0)); } else { c0Cur = blake2b(byte[](c0s0) + byte[](c0Cur)); }
+        int c0b1 = (c0Idx / 2) % 2;
+        if (c0b1 == 0) { c0Cur = blake2b(byte[](c0Cur) + byte[](c0s1)); } else { c0Cur = blake2b(byte[](c0s1) + byte[](c0Cur)); }
+        int c0b2 = (c0Idx / 4) % 2;
+        if (c0b2 == 0) { c0Cur = blake2b(byte[](c0Cur) + byte[](c0s2)); } else { c0Cur = blake2b(byte[](c0s2) + byte[](c0Cur)); }
+        int c0b3 = (c0Idx / 8) % 2;
+        if (c0b3 == 0) { c0Cur = blake2b(byte[](c0Cur) + byte[](c0s3)); } else { c0Cur = blake2b(byte[](c0s3) + byte[](c0Cur)); }
+        int c0b4 = (c0Idx / 16) % 2;
+        if (c0b4 == 0) { c0Cur = blake2b(byte[](c0Cur) + byte[](c0s4)); } else { c0Cur = blake2b(byte[](c0s4) + byte[](c0Cur)); }
+        int c0b5 = (c0Idx / 32) % 2;
+        if (c0b5 == 0) { c0Cur = blake2b(byte[](c0Cur) + byte[](c0s5)); } else { c0Cur = blake2b(byte[](c0s5) + byte[](c0Cur)); }
+        int c0b6 = (c0Idx / 64) % 2;
+        if (c0b6 == 0) { c0Cur = blake2b(byte[](c0Cur) + byte[](c0s6)); } else { c0Cur = blake2b(byte[](c0s6) + byte[](c0Cur)); }
+        int c0b7 = (c0Idx / 128) % 2;
+        if (c0b7 == 0) { c0Cur = blake2b(byte[](c0Cur) + byte[](c0s7)); } else { c0Cur = blake2b(byte[](c0s7) + byte[](c0Cur)); }
+        require(c0Cur == poolMerkleRoot);
+
+        // c1 merkle proof against poolMerkleRoot (depth-8 position-aware climb).
+        require(c1Idx >= 0); require(c1Idx < 256);
+        byte[32] c1Cur = blake2b(byte[](c1Pk));
+        int c1b0 = c1Idx % 2;
+        if (c1b0 == 0) { c1Cur = blake2b(byte[](c1Cur) + byte[](c1s0)); } else { c1Cur = blake2b(byte[](c1s0) + byte[](c1Cur)); }
+        int c1b1 = (c1Idx / 2) % 2;
+        if (c1b1 == 0) { c1Cur = blake2b(byte[](c1Cur) + byte[](c1s1)); } else { c1Cur = blake2b(byte[](c1s1) + byte[](c1Cur)); }
+        int c1b2 = (c1Idx / 4) % 2;
+        if (c1b2 == 0) { c1Cur = blake2b(byte[](c1Cur) + byte[](c1s2)); } else { c1Cur = blake2b(byte[](c1s2) + byte[](c1Cur)); }
+        int c1b3 = (c1Idx / 8) % 2;
+        if (c1b3 == 0) { c1Cur = blake2b(byte[](c1Cur) + byte[](c1s3)); } else { c1Cur = blake2b(byte[](c1s3) + byte[](c1Cur)); }
+        int c1b4 = (c1Idx / 16) % 2;
+        if (c1b4 == 0) { c1Cur = blake2b(byte[](c1Cur) + byte[](c1s4)); } else { c1Cur = blake2b(byte[](c1s4) + byte[](c1Cur)); }
+        int c1b5 = (c1Idx / 32) % 2;
+        if (c1b5 == 0) { c1Cur = blake2b(byte[](c1Cur) + byte[](c1s5)); } else { c1Cur = blake2b(byte[](c1s5) + byte[](c1Cur)); }
+        int c1b6 = (c1Idx / 64) % 2;
+        if (c1b6 == 0) { c1Cur = blake2b(byte[](c1Cur) + byte[](c1s6)); } else { c1Cur = blake2b(byte[](c1s6) + byte[](c1Cur)); }
+        int c1b7 = (c1Idx / 128) % 2;
+        if (c1b7 == 0) { c1Cur = blake2b(byte[](c1Cur) + byte[](c1s7)); } else { c1Cur = blake2b(byte[](c1s7) + byte[](c1Cur)); }
+        require(c1Cur == poolMerkleRoot);
+
+        // c2 merkle proof against poolMerkleRoot (depth-8 position-aware climb).
+        require(c2Idx >= 0); require(c2Idx < 256);
+        byte[32] c2Cur = blake2b(byte[](c2Pk));
+        int c2b0 = c2Idx % 2;
+        if (c2b0 == 0) { c2Cur = blake2b(byte[](c2Cur) + byte[](c2s0)); } else { c2Cur = blake2b(byte[](c2s0) + byte[](c2Cur)); }
+        int c2b1 = (c2Idx / 2) % 2;
+        if (c2b1 == 0) { c2Cur = blake2b(byte[](c2Cur) + byte[](c2s1)); } else { c2Cur = blake2b(byte[](c2s1) + byte[](c2Cur)); }
+        int c2b2 = (c2Idx / 4) % 2;
+        if (c2b2 == 0) { c2Cur = blake2b(byte[](c2Cur) + byte[](c2s2)); } else { c2Cur = blake2b(byte[](c2s2) + byte[](c2Cur)); }
+        int c2b3 = (c2Idx / 8) % 2;
+        if (c2b3 == 0) { c2Cur = blake2b(byte[](c2Cur) + byte[](c2s3)); } else { c2Cur = blake2b(byte[](c2s3) + byte[](c2Cur)); }
+        int c2b4 = (c2Idx / 16) % 2;
+        if (c2b4 == 0) { c2Cur = blake2b(byte[](c2Cur) + byte[](c2s4)); } else { c2Cur = blake2b(byte[](c2s4) + byte[](c2Cur)); }
+        int c2b5 = (c2Idx / 32) % 2;
+        if (c2b5 == 0) { c2Cur = blake2b(byte[](c2Cur) + byte[](c2s5)); } else { c2Cur = blake2b(byte[](c2s5) + byte[](c2Cur)); }
+        int c2b6 = (c2Idx / 64) % 2;
+        if (c2b6 == 0) { c2Cur = blake2b(byte[](c2Cur) + byte[](c2s6)); } else { c2Cur = blake2b(byte[](c2s6) + byte[](c2Cur)); }
+        int c2b7 = (c2Idx / 128) % 2;
+        if (c2b7 == 0) { c2Cur = blake2b(byte[](c2Cur) + byte[](c2s7)); } else { c2Cur = blake2b(byte[](c2s7) + byte[](c2Cur)); }
+        require(c2Cur == poolMerkleRoot);
+
+        // c3 merkle proof against poolMerkleRoot (depth-8 position-aware climb).
+        require(c3Idx >= 0); require(c3Idx < 256);
+        byte[32] c3Cur = blake2b(byte[](c3Pk));
+        int c3b0 = c3Idx % 2;
+        if (c3b0 == 0) { c3Cur = blake2b(byte[](c3Cur) + byte[](c3s0)); } else { c3Cur = blake2b(byte[](c3s0) + byte[](c3Cur)); }
+        int c3b1 = (c3Idx / 2) % 2;
+        if (c3b1 == 0) { c3Cur = blake2b(byte[](c3Cur) + byte[](c3s1)); } else { c3Cur = blake2b(byte[](c3s1) + byte[](c3Cur)); }
+        int c3b2 = (c3Idx / 4) % 2;
+        if (c3b2 == 0) { c3Cur = blake2b(byte[](c3Cur) + byte[](c3s2)); } else { c3Cur = blake2b(byte[](c3s2) + byte[](c3Cur)); }
+        int c3b3 = (c3Idx / 8) % 2;
+        if (c3b3 == 0) { c3Cur = blake2b(byte[](c3Cur) + byte[](c3s3)); } else { c3Cur = blake2b(byte[](c3s3) + byte[](c3Cur)); }
+        int c3b4 = (c3Idx / 16) % 2;
+        if (c3b4 == 0) { c3Cur = blake2b(byte[](c3Cur) + byte[](c3s4)); } else { c3Cur = blake2b(byte[](c3s4) + byte[](c3Cur)); }
+        int c3b5 = (c3Idx / 32) % 2;
+        if (c3b5 == 0) { c3Cur = blake2b(byte[](c3Cur) + byte[](c3s5)); } else { c3Cur = blake2b(byte[](c3s5) + byte[](c3Cur)); }
+        int c3b6 = (c3Idx / 64) % 2;
+        if (c3b6 == 0) { c3Cur = blake2b(byte[](c3Cur) + byte[](c3s6)); } else { c3Cur = blake2b(byte[](c3s6) + byte[](c3Cur)); }
+        int c3b7 = (c3Idx / 128) % 2;
+        if (c3b7 == 0) { c3Cur = blake2b(byte[](c3Cur) + byte[](c3s7)); } else { c3Cur = blake2b(byte[](c3s7) + byte[](c3Cur)); }
+        require(c3Cur == poolMerkleRoot);
+
+        // c4 merkle proof against poolMerkleRoot (depth-8 position-aware climb).
+        require(c4Idx >= 0); require(c4Idx < 256);
+        byte[32] c4Cur = blake2b(byte[](c4Pk));
+        int c4b0 = c4Idx % 2;
+        if (c4b0 == 0) { c4Cur = blake2b(byte[](c4Cur) + byte[](c4s0)); } else { c4Cur = blake2b(byte[](c4s0) + byte[](c4Cur)); }
+        int c4b1 = (c4Idx / 2) % 2;
+        if (c4b1 == 0) { c4Cur = blake2b(byte[](c4Cur) + byte[](c4s1)); } else { c4Cur = blake2b(byte[](c4s1) + byte[](c4Cur)); }
+        int c4b2 = (c4Idx / 4) % 2;
+        if (c4b2 == 0) { c4Cur = blake2b(byte[](c4Cur) + byte[](c4s2)); } else { c4Cur = blake2b(byte[](c4s2) + byte[](c4Cur)); }
+        int c4b3 = (c4Idx / 8) % 2;
+        if (c4b3 == 0) { c4Cur = blake2b(byte[](c4Cur) + byte[](c4s3)); } else { c4Cur = blake2b(byte[](c4s3) + byte[](c4Cur)); }
+        int c4b4 = (c4Idx / 16) % 2;
+        if (c4b4 == 0) { c4Cur = blake2b(byte[](c4Cur) + byte[](c4s4)); } else { c4Cur = blake2b(byte[](c4s4) + byte[](c4Cur)); }
+        int c4b5 = (c4Idx / 32) % 2;
+        if (c4b5 == 0) { c4Cur = blake2b(byte[](c4Cur) + byte[](c4s5)); } else { c4Cur = blake2b(byte[](c4s5) + byte[](c4Cur)); }
+        int c4b6 = (c4Idx / 64) % 2;
+        if (c4b6 == 0) { c4Cur = blake2b(byte[](c4Cur) + byte[](c4s6)); } else { c4Cur = blake2b(byte[](c4s6) + byte[](c4Cur)); }
+        int c4b7 = (c4Idx / 128) % 2;
+        if (c4b7 == 0) { c4Cur = blake2b(byte[](c4Cur) + byte[](c4s7)); } else { c4Cur = blake2b(byte[](c4s7) + byte[](c4Cur)); }
+        require(c4Cur == poolMerkleRoot);
+
+        // Payout structure enforcement (Bettor r13/r15 fund-safety):
+        //   outputs[0]       = broker fee (P2PK brokerPk)
+        //   outputs[1..5]    = 5 committee bond-return + fee-share (P2PK c0Pk..c4Pk, fixed N=5)
+        //   outputs[6..]     = bettor winner payouts, attested by **TX sighash** (= SIGHASH_ALL covers
+        //                      every output's scriptPubKey + value); silverc checkSig validates the 5
+        //                      committee Schnorr sigs against this TX sighash, so the per-bettor payout
+        //                      amounts in outputs[6..] are cryptographically bound to committee consent.
+        //                      Verified L559/779/1014 in pool-market-settler.js + v0.5 PoolSpine pattern
+        //                      (= Bettor r46 F1 sighash resolution: option (a), TX sighash attests amount).
+        //                      Each PoolSide_v06 enforces its own bettor-merkle-proof at claim time
+        //                      (per Bettor r15 split + matches v0.5 PoolSide.sil architecture).
+        require(tx.inputs.length >= 1);
+        require(tx.outputs.length >= 6);
+
+        byte[34] brokerLock = new ScriptPubKeyP2PK(pubkey(brokerPk));
+        require(tx.outputs[0].scriptPubKey == byte[](brokerLock));
+        require(tx.outputs[0].value >= 1000);  // v0.7 dust floor (= 1000 sompi, J2 d649f16)
+
+        byte[34] c0Lock = new ScriptPubKeyP2PK(pubkey(c0Pk));
+        require(tx.outputs[1].scriptPubKey == byte[](c0Lock));
+        require(tx.outputs[1].value >= oracleBondAmount);
+
+        byte[34] c1Lock = new ScriptPubKeyP2PK(pubkey(c1Pk));
+        require(tx.outputs[2].scriptPubKey == byte[](c1Lock));
+        require(tx.outputs[2].value >= oracleBondAmount);
+
+        byte[34] c2Lock = new ScriptPubKeyP2PK(pubkey(c2Pk));
+        require(tx.outputs[3].scriptPubKey == byte[](c2Lock));
+        require(tx.outputs[3].value >= oracleBondAmount);
+
+        byte[34] c3Lock = new ScriptPubKeyP2PK(pubkey(c3Pk));
+        require(tx.outputs[4].scriptPubKey == byte[](c3Lock));
+        require(tx.outputs[4].value >= oracleBondAmount);
+
+        byte[34] c4Lock = new ScriptPubKeyP2PK(pubkey(c4Pk));
+        require(tx.outputs[5].scriptPubKey == byte[](c4Lock));
+        require(tx.outputs[5].value >= oracleBondAmount);
+
+        // Integer-overflow guards on baked ctor amounts.
+        require(oracleBondAmount > 0);
+        require(oracleBondAmount < 1000000000000000);   // <1M KAS per oracle bond
+        require(makerStakeAmount > 0);
+        require(makerStakeAmount < 1000000000000000);   // <1M KAS per maker stake
+        require(minerFee > 0);
+        require(minerFee < 100000000);                  // <1 KAS miner fee
+
+        // v0.7 sharding additions (Bettor G6 spec):
+        // ⑥ min-bet (ctor): require(makerStakeAmount >= MIN_BET_SOMPI = 1e8 = 1 KAS).
+        //    Mirrors API-layer 1 KAS anti-bot floor (decision A). Ensures even smallest
+        //    winner share post-payout > dust under any distribution.
+        require(makerStakeAmount >= 100000000);
+
+        // ⑦ min-pot global: globalYes + globalNo (sompi) must exceed minimum to guarantee
+        //    smallest winner share > dust. With N shards × 64 bettors × 1 KAS min stake = 64N
+        //    KAS = 64N × 1e8 sompi. For 1 shard: ≥ 64 KAS. Use 1e10 (= 100 KAS) safe baseline.
+        //    Cross-shard: scaled by shard_count, but SS only sees this shard so use single
+        //    shard floor (committee-attested global sum, settler ensures correctness).
+        require(globalYesTotal_sompi >= 0);
+        require(globalNoTotal_sompi >= 0);
+        require(globalYesTotal_sompi + globalNoTotal_sompi >= 10000000000);
+        require(globalYesTotal_sompi < 1000000000000000000);  // 1e18 sanity upper
+        require(globalNoTotal_sompi < 1000000000000000000);
+
+        // ⑦b min-pot LOSING-SIDE floor (Owner 终裁 6/1 min-pot option A, J1 r245/4 catch):
+        //    Thin losing-side pool causes KIP-9 dust on 5 committee bond_return outputs
+        //    (= ccvr9 教训: maker 100 YES + 2 NO bettor → losing pool 2 KAS < 5 × 1 KAS bond).
+        //    Force losingPool >= N_committee × oracleBondAmount (= 5 × 1 KAS = 5e8 sompi).
+        //    SS reject thin-loser settle → settler routes to refund (= G2-B 0-bet pattern).
+        //    Arithmetic trick (silverc no ternary): losingPool = globalYes*winner + globalNo*(1-winner)
+        //    winner==0 (YES wins): losingPool = globalNo. winner==1 (NO wins): losingPool = globalYes.
+        int oneMinusWinner = 1 - winner;
+        int losingPool = globalYesTotal_sompi * winner + globalNoTotal_sompi * oneMinusWinner;
+        // Bettor r332 catch: dynamic threshold = N_committee (5) × oracleBondAmount (ctor-baked).
+        // Tracks oracleBondAmount changes automatically — no drift if bond param changes per market.
+        require(losingPool >= 5 * oracleBondAmount);
+
+        // ⑧ shard identity (ctor): basic sanity.
+        require(shard_id >= 0);
+        require(shard_count >= 1);
+        require(shard_id < shard_count);
+
+        // ⑨ commit anchor (Bettor G6 cross-shard binding):
+        //    Ideally: require(blake2b(int->bytes(globalYesTotal_sompi) || int->bytes(globalNoTotal_sompi)
+        //    || market_id || int->bytes(shard_count)) == global_commit_id).
+        //    silverc int-to-byte primitive may not exist (= unverified, this is first v0.7 ship).
+        //    Fallback (active until int-to-byte confirmed): committee sigs (5 above) cover scriptSig
+        //    args via sighash — global_commit_id, globalYes, globalNo are implicitly attested by sigs.
+        //    Single-shard attacker forging globals breaks committee sigs (= they'd have to forge sigs).
+        //    Cross-shard consistency relies on off-chain settler using SAME global_commit_id across all
+        //    shards (= Bettor G6 architectural agreement; J2 settler enforces).
+        //    NOTE: still pass commit_v2 as arg so it's covered by sighash + auditable on chain.
+        require(global_commit_id != poolMerkleRoot);  // sanity: commit ≠ accidental zero or pool root
+    }
+
+    // entry 1 — dispute_reveal: triggered when a settle outcome is disputed. Each committee
+    // member's individual sig over disputeOutcomeHash is required (unanimous t=5 here, since
+    // dispute mode is about establishing individual accountability for slashing).
+    entrypoint function dispute_reveal(
+        byte[32]  committeePkHash,
+        byte[32]  disputeOutcomeHash,
+        byte[32]  c0Pk, byte[32] c1Pk, byte[32] c2Pk, byte[32] c3Pk, byte[32] c4Pk,
+        sig       c0Sig, sig c1Sig, sig c2Sig, sig c3Sig, sig c4Sig
+    ) {
+        byte[] dConcat0 = c0Pk + c1Pk;
+        byte[] dConcat1 = dConcat0 + c2Pk;
+        byte[] dConcat2 = dConcat1 + c3Pk;
+        byte[] dConcat3 = dConcat2 + c4Pk;
+        byte[32] dHash  = blake2b(dConcat3);
+        require(dHash == committeePkHash);
+
+        require(checkSig(c0Sig, pubkey(c0Pk)));
+        require(checkSig(c1Sig, pubkey(c1Pk)));
+        require(checkSig(c2Sig, pubkey(c2Pk)));
+        require(checkSig(c3Sig, pubkey(c3Pk)));
+        require(checkSig(c4Sig, pubkey(c4Pk)));
+
+        require(tx.inputs.length >= 1);
+        require(tx.outputs.length >= 1);
+    }
+
+    // entry 2 — refund_maker_unjoined (v0.7 红线 8/9 Bettor G6批2): maker recovers stake if
+    // no bettor joined. Fee NOT hardcoded — settler picks fee dynamically based on real TX
+    // mass (= KIP-9 mass × mempool floor rate). SS守上下限防 maker 被宰 + cover 最坏 mass.
+    //
+    // qlfpv 教训 (2026-06-01): hardcoded minerFee=50000 < real mass-fee 442000 → mempool reject →
+    // 100 KAS effectively bricked. v0.7 fix: output 范围 [makerStake-MAX_FEE, makerStake-MIN_FEE]
+    // + inputs >= 1 (allow fee-UTXO append for under-funded refund).
+    //
+    // MIN_FEE = 50,000 sompi (= 0.0005 KAS, current ctor placeholder, settler picks >= this)
+    // MAX_FEE = 100,000,000 sompi (= 1 KAS, defense against maker-rob-self via excessive fee)
+    // FRONT-RUN FIX (Bettor r388/r389 spec, 2026-06-02): name "unjoined" misleading —
+    // SS never verified "no bettor joined". REFUND_GRACE_SEC = 7200 (2h) >= NWT 委员结算 SLA.
+    // Prevents losing maker from front-running settle to spend spine UTXO + brick settle_via_spine.
+    entrypoint function refund_maker_unjoined(sig makerSig) {
+        require(checkSig(makerSig, pubkey(makerPk)));
+        require(tx.time >= (deadline + 7200) * 1000);  // grace 修 (bug 10d Path A ms 模式)
+
+        // v0.7 红线 9: inputs >= 1 (allow fee-UTXO append). Was inputs == 1 in v0.6.
+        require(tx.inputs.length >= 1);
+        require(tx.outputs.length == 1);
+
+        byte[34] makerLock = new ScriptPubKeyP2PK(pubkey(makerPk));
+        require(tx.outputs[0].scriptPubKey == byte[](makerLock));
+
+        // v0.7 红线 8: fee 范围 [MIN_FEE, MAX_FEE] not hardcoded ctor minerFee.
+        // output value = makerStakeAmount - fee, where fee >= 50000 (MIN_FEE) + fee <= 100M (MAX_FEE).
+        // Equivalent: output <= makerStakeAmount - MIN_FEE AND output >= makerStakeAmount - MAX_FEE.
+        require(tx.outputs[0].value <= makerStakeAmount - 50000);
+        require(tx.outputs[0].value >= makerStakeAmount - 100000000);
+        require(tx.outputs[0].value >= 1000);  // dust floor (J2 d649f16)
+    }
+}

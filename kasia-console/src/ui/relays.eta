@@ -194,13 +194,15 @@
           <%= it.t.no_relays %>
         </div>
         <% } else { %>
-        <!-- Owner 5/26 + Bettor r60 钦定 (b-3): legacy filter toggle, 默认隐 non -tn relay
-             理由: 5/24 testnet migration 后命名 convention -tn 后缀, legacy 名 (J2test/NWT/maker-1/etc) 仍 testnet 但 clutter UX. -->
-        <div x-data="{ showLegacy: false, legacyCount: <%= it.relays.filter(r => !r.name.endsWith('-tn')).length %> }" class="space-y-3">
+        <!-- legacy filter toggle (b-3, Owner 5/26 + Bettor r60). 5/24 testnet migration 后约定 -tn 后缀.
+             2026-05-29 (操作者请求): 默认改为【展开全部】— 这是纯 testnet Console, 全部 relay 都是 testnet,
+             按 -tn 后缀默认隐藏会藏掉正经 relay (如 broker-1 = TG bot 代言的 broker, 创建于迁移前无 -tn 后缀).
+             折叠按钮保留, 可手动收起 legacy. -->
+        <div x-data="{ showLegacy: true, legacyCount: <%= it.relays.filter(r => !r.name.endsWith('-tn')).length %> }" class="space-y-3">
           <div class="flex items-center justify-between text-xs px-1">
             <span class="text-ink-400">
               显 <%= it.relays.filter(r => r.name.endsWith('-tn')).length %> 个 testnet relay (-tn 后缀)
-              <span x-show="legacyCount > 0" class="text-ink-300" x-text="' + 隐 ' + legacyCount + ' 个 legacy'"></span>
+              <span x-show="legacyCount > 0 && !showLegacy" class="text-ink-300" x-text="' + 隐 ' + legacyCount + ' 个 legacy'"></span>
             </span>
             <button x-show="legacyCount > 0" @click="showLegacy = !showLegacy"
               class="text-brand-500 hover:text-brand-700 font-medium"

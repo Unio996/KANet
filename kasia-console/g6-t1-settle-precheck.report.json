@@ -1,0 +1,34 @@
+{
+  "tested_at": "2026-06-01T03:38:27.557Z",
+  "invariant_source": "p2sh.mjs:879-894 (ef3f39c, refined d649f16 dust 600→1000)",
+  "cases": [
+    {
+      "name": "A 超发 input<output → throw overspend",
+      "expected_throw_substring": "overspend",
+      "result": "THROWN: Σin=10000 < Σout=20000 (overspend 10000) — refusing submit",
+      "pass": true
+    },
+    {
+      "name": "B 0 fee Σin==Σout → throw 0 miner fee",
+      "expected_throw_substring": "0 miner fee",
+      "result": "THROWN: Σin==Σout (0 miner fee) — refusing submit",
+      "pass": true
+    },
+    {
+      "name": "C sub-dust output 500 sompi → throw dust floor",
+      "expected_throw_substring": "dust floor",
+      "result": "THROWN: output[1] value=500 < dust floor 1000 — refusing submit",
+      "pass": true
+    },
+    {
+      "name": "D 健康 TX (sanity, must NOT throw)",
+      "expected_throw_substring": null,
+      "result": "ACCEPTED (no throw) — {\"sumIn\":\"100000\",\"sumOut\":\"95000\",\"fee\":\"5000\"}",
+      "pass": true
+    }
+  ],
+  "pass": 4,
+  "fail": 0,
+  "verdict": "ALL PASS",
+  "summary": "4/4 cases PASS — verdict ALL PASS"
+}

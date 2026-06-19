@@ -8,7 +8,7 @@
 <div x-data="poolDetailPage('<%= it.marketId %>')" x-init="init()" class="max-w-3xl mx-auto px-4 py-6 font-body text-ink-700">
 
   <!-- back link -->
-  <a href="/predictions/oracle-registry" class="text-xs text-ink-400 hover:text-ink-600">&larr; 预言机注册表</a>
+  <a href="/oracle" class="text-xs text-ink-400 hover:text-ink-600">&larr; Oracle 信任系统</a>
 
   <!-- loading -->
   <div x-show="loading" class="text-center py-16 text-ink-400">加载市场详情...</div>
@@ -33,7 +33,7 @@
     </div>
 
     <!-- state machine viz -->
-    <div class="flex items-center gap-1 mb-6 text-[10px]">
+    <div class="flex items-center gap-1 mb-4 text-[10px]">
       <template x-for="(st, i) in stateMachine" :key="st.key">
         <div class="flex items-center gap-1">
           <div class="px-2 py-1 rounded"
@@ -44,6 +44,198 @@
       </template>
     </div>
 
+    <!-- KANet-UI 2026-06-07 P0-#4 UX 实时进度 (Bettor r291b 关1 PASS):
+         chain_events 时间线 — 每步带时间 + TX explorer link + 大白话 hint.
+         数据源: /api/pool/market/:id/events 拉 chain_events ASC.
+         event_type 名 (NWT r335 实测): pool_oracle_vote / pool_oracle_tx_sig /
+         pool_settle_consensual_dispatched / pool_oracle_deposit / pool_oracle_refund_disagreement_tx_sig. -->
+    <div class="card p-4 mb-4">
+      <div class="flex items-center justify-between mb-3">
+        <span class="text-sm font-medium text-ink-700">链上进度</span>
+        <span class="text-[10px] text-ink-400" x-text="events.length + ' 条记录'"></span>
+      </div>
+      <div x-show="events.length === 0" class="text-[11px] text-ink-400 py-2 text-center" x-text="currentStageHint()"></div>
+      <div x-show="events.length > 0" class="space-y-1.5">
+        <template x-for="(ev, i) in events" :key="ev.id">
+          <div class="flex items-center gap-2 text-xs bg-warm-50 rounded px-3 py-2">
+            <div class="w-6 h-6 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center text-[10px] font-medium flex-shrink-0" x-text="i+1"></div>
+            <div class="flex-1 min-w-0">
+              <div class="text-ink-700 font-medium" x-text="eventLabel(ev.event_type, ev.payload)"></div>
+              <div class="text-[10px] text-ink-400" x-text="formatEventTime(ev.observed_at)"></div>
+            </div>
+            <a :href="explorerTxUrl(ev.txid)" target="_blank" class="text-brand-500 hover:text-brand-700 text-[11px] flex-shrink-0" :title="ev.txid">🔗 TX</a>
+          </div>
+        </template>
+      </div>
+      <div x-show="!isSettled()" class="mt-3 text-[11px] text-ink-500 bg-amber-50 rounded px-3 py-2" x-text="currentStageHint()"></div>
+    </div>
+
+    <!-- KANet-UI 2026-06-07 P0-#2 (Bettor r319 关 1 PASS): web 押注 panel — 折叠默认收 -->
+    <div id="bet" x-show="canBet()" class="card p-4 mb-4">
+      <div class="flex items-center justify-between">
+        <div>
+          <div class="text-sm font-medium text-ink-700">我要押</div>
+          <div class="text-[11px] text-ink-400 mt-0.5">押对均分输家池.</div>
+        </div>
+        <button @click="bet.open = !bet.open" class="px-3 py-1.5 rounded bg-brand-500 hover:bg-brand-600 text-white text-xs font-medium">
+          <span x-text="bet.open ? '收起 ↑' : '我要押 →'"></span>
+        </button>
+      </div>
+      <!-- KANet-UI r520 (Bettor): 押注当场的诚实边界轻提示 (= dc-disclaimer 那段的 in-context 版, 下注者不用翻 disclaimer) -->
+      <div class="mt-2 text-[10px] text-ink-400 bg-warm-50 rounded px-2.5 py-1.5 leading-relaxed">
+        ⚖ 若裁决源真的不可得 / 歧义无法判定，仲裁人会<strong>弃权 → 本市场退款</strong>（非保证结算）。这是去中心化预言机的边界，非缺陷。
+      </div>
+
+      <div x-show="bet.open" x-transition class="mt-4 space-y-3">
+        <!-- KANet-UI GAP-2 (Bettor r494/r496): 模式切换 — 外部钱包(大众默认) vs Console agent(内部) -->
+        <div class="grid grid-cols-2 gap-1 p-1 bg-warm-100 rounded-lg text-xs">
+          <button @click="bet.mode = 'external'"
+                  class="py-1.5 rounded font-medium transition"
+                  :class="bet.mode === 'external' ? 'bg-white text-ink-800 shadow-sm' : 'text-ink-400'">用我的钱包付</button>
+          <button @click="bet.mode = 'agent'"
+                  class="py-1.5 rounded font-medium transition"
+                  :class="bet.mode === 'agent' ? 'bg-white text-ink-800 shadow-sm' : 'text-ink-400'">用 Console agent</button>
+        </div>
+
+        <!-- ===== 外部钱包押注流 (GAP-2): prep → 付款地址/URI → 轮询 confirm ===== -->
+        <div x-show="bet.mode === 'external'" class="space-y-3">
+          <!-- step 1: 还没 prep — 填地址/方向/金额 -->
+          <div x-show="!ext.prep" class="space-y-3">
+            <div>
+              <label class="block text-[11px] text-ink-500 mb-1">你的 Kaspa 地址 (中奖用此地址的钥匙领取)</label>
+              <input type="text" x-model="ext.addr" placeholder="kaspatest:q..."
+                     class="w-full px-3 py-2 rounded border border-warm-300 text-sm font-mono" />
+            </div>
+            <div>
+              <label class="block text-[11px] text-ink-500 mb-1">押哪边</label>
+              <div class="grid grid-cols-2 gap-2">
+                <button @click="ext.direction = 0" class="py-2 rounded border-2 transition font-medium"
+                        :class="ext.direction === 0 ? 'bg-emerald-100 text-emerald-700 border-emerald-300' : 'border-warm-300 text-ink-500 hover:bg-warm-100'">YES</button>
+                <button @click="ext.direction = 1" class="py-2 rounded border-2 transition font-medium"
+                        :class="ext.direction === 1 ? 'bg-red-100 text-red-700 border-red-300' : 'border-warm-300 text-ink-500 hover:bg-warm-100'">NO</button>
+              </div>
+            </div>
+            <div>
+              <label class="block text-[11px] text-ink-500 mb-1">押多少 KAS</label>
+              <input type="number" x-model.number="ext.stakeKas" min="1" step="0.1" placeholder="例: 100"
+                     class="w-full px-3 py-2 rounded border border-warm-300 text-sm" />
+              <div class="text-[10px] text-ink-400 mt-1">最低 1 KAS · testnet 币零经济价值</div>
+            </div>
+            <button @click="extPrep()" :disabled="!canExtPrep() || ext.preparing"
+                    class="w-full py-2.5 rounded font-medium text-sm transition"
+                    :class="canExtPrep() && !ext.preparing ? 'bg-brand-500 hover:bg-brand-600 text-white' : 'bg-warm-200 text-ink-400 cursor-not-allowed'">
+              <span x-text="ext.preparing ? '生成付款地址中...' : '生成付款地址 →'"></span>
+            </button>
+            <div x-show="ext.error" class="bg-red-50 text-red-700 rounded p-3 text-xs" x-text="ext.error"></div>
+          </div>
+
+          <!-- step 2: prep 完成 — 展付款地址 + 精确金额 + Kaspa URI, 轮询 confirm -->
+          <div x-show="ext.prep && !ext.registered" class="space-y-3">
+            <div class="bg-amber-50 border border-amber-200 rounded p-3 text-xs text-amber-800">
+              用你的钱包付 <b><span x-text="ext.prep?.exact_stake_kas"></span> KAS</b> (精确金额) 到下面地址押 <b x-text="ext.direction === 0 ? 'YES' : 'NO'"></b>。付完我自动检测入账。
+            </div>
+            <div>
+              <label class="block text-[11px] text-ink-500 mb-1">付款地址</label>
+              <div class="flex items-center gap-2 bg-warm-50 rounded px-3 py-2">
+                <span class="font-mono text-[11px] text-ink-700 break-all flex-1" x-text="ext.prep?.side_p2sh"></span>
+                <button @click="copyText(ext.prep?.side_p2sh)" class="text-brand-500 text-[11px] flex-shrink-0">复制</button>
+              </div>
+            </div>
+            <div>
+              <label class="block text-[11px] text-ink-500 mb-1">精确金额 (多付差额烧成手续费, 少付锁到截止)</label>
+              <div class="flex items-center gap-2 bg-warm-50 rounded px-3 py-2">
+                <span class="font-mono text-sm text-ink-700 flex-1" x-text="ext.prep?.exact_stake_kas + ' KAS'"></span>
+                <button @click="copyText(ext.prep?.exact_stake_kas)" class="text-brand-500 text-[11px] flex-shrink-0">复制</button>
+              </div>
+            </div>
+            <div>
+              <label class="block text-[11px] text-ink-500 mb-1">Kaspa 付款链接 (支持的钱包可直接打开)</label>
+              <div class="flex items-center gap-2 bg-warm-50 rounded px-3 py-2">
+                <span class="font-mono text-[10px] text-ink-600 break-all flex-1" x-text="kaspaPayUri()"></span>
+                <button @click="copyText(kaspaPayUri())" class="text-brand-500 text-[11px] flex-shrink-0">复制</button>
+              </div>
+            </div>
+            <div class="flex items-center gap-2 text-xs text-ink-500">
+              <svg x-show="ext.polling" class="animate-spin h-4 w-4 text-brand-500" viewBox="0 0 24 24" fill="none"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.4 0 0 5.4 0 12h4z"></path></svg>
+              <span x-text="ext.statusNote || (ext.polling ? '等待你的付款入账...' : '')"></span>
+            </div>
+            <div class="flex gap-2">
+              <button @click="extConfirmOnce()" :disabled="ext.checking"
+                      class="flex-1 py-2 rounded font-medium text-sm bg-brand-500 hover:bg-brand-600 text-white disabled:bg-warm-200 disabled:text-ink-400">
+                <span x-text="ext.checking ? '检测中...' : '我已付款, 立即检测'"></span>
+              </button>
+              <button @click="extReset()" class="px-3 py-2 rounded text-xs text-ink-500 border border-warm-300 hover:bg-warm-100">重填</button>
+            </div>
+            <div x-show="ext.error" class="bg-red-50 text-red-700 rounded p-3 text-xs" x-text="ext.error"></div>
+          </div>
+
+          <!-- step 3: 注册成功 -->
+          <div x-show="ext.registered" class="bg-emerald-50 rounded p-3 text-xs">
+            <div class="font-medium text-emerald-700">✓ 押注已上链确认 — <span x-text="ext.prep?.exact_stake_kas"></span> KAS 押 <span x-text="ext.direction === 0 ? 'YES' : 'NO'"></span></div>
+            <div class="mt-1 text-ink-500">锁仓 TX:</div>
+            <a x-show="ext.registered?.side_lock_tx" :href="explorerTxUrl(ext.registered.side_lock_tx)" target="_blank"
+               class="font-mono text-[10px] text-brand-500 hover:underline break-all" x-text="ext.registered?.side_lock_tx"></a>
+            <button @click="extReset()" class="mt-2 text-[11px] text-ink-500 underline">再押一笔</button>
+          </div>
+        </div>
+
+        <!-- ===== Console agent 押注流 (内部, 保留原路) ===== -->
+        <div x-show="bet.mode === 'agent'" class="space-y-3">
+        <!-- bettor agent 选 -->
+        <div>
+          <label class="block text-[11px] text-ink-500 mb-1">出押人 (你的 agent)</label>
+          <select x-model="bet.bettorRelayId" class="w-full px-3 py-2 rounded border border-warm-300 bg-white text-sm">
+            <option value="">选一个 agent</option>
+            <template x-for="a in bet.agents" :key="a.id">
+              <option :value="a.id" :disabled="isOracleAgent(a.id) || isMakerAgent(a.id)"
+                      x-text="a.name + (isOracleAgent(a.id) ? ' (本市场仲裁人, 不可押)' : '') + (isMakerAgent(a.id) ? ' (本市场出单人, 已押)' : '')"></option>
+            </template>
+          </select>
+        </div>
+
+        <!-- YES / NO -->
+        <div>
+          <label class="block text-[11px] text-ink-500 mb-1">押哪边</label>
+          <div class="grid grid-cols-2 gap-2">
+            <button @click="bet.direction = 0"
+                    class="py-2 rounded border-2 transition font-medium"
+                    :class="bet.direction === 0 ? 'bg-emerald-100 text-emerald-700 border-emerald-300' : 'border-warm-300 text-ink-500 hover:bg-warm-100'">YES</button>
+            <button @click="bet.direction = 1"
+                    class="py-2 rounded border-2 transition font-medium"
+                    :class="bet.direction === 1 ? 'bg-red-100 text-red-700 border-red-300' : 'border-warm-300 text-ink-500 hover:bg-warm-100'">NO</button>
+          </div>
+        </div>
+
+        <!-- stake KAS -->
+        <div>
+          <label class="block text-[11px] text-ink-500 mb-1">押多少 KAS</label>
+          <input type="number" x-model.number="bet.stakeKas" min="1" step="0.1"
+                 placeholder="例: 100"
+                 class="w-full px-3 py-2 rounded border border-warm-300 text-sm" />
+          <div class="text-[10px] text-ink-400 mt-1">最低 1 KAS · testnet 币零经济价值</div>
+        </div>
+
+        <!-- 提交 -->
+        <button @click="submitBet()" :disabled="!canSubmitBet() || bet.submitting"
+                class="w-full py-2.5 rounded font-medium text-sm transition"
+                :class="canSubmitBet() && !bet.submitting ? 'bg-brand-500 hover:bg-brand-600 text-white' : 'bg-warm-200 text-ink-400 cursor-not-allowed'">
+          <span x-text="bet.submitting ? '锁押金中...' : lockButtonLabel()"></span>
+        </button>
+
+        <!-- 成功 -->
+        <div x-show="bet.txResult" class="bg-emerald-50 rounded p-3 text-xs">
+          <div class="font-medium text-emerald-700">✓ 已锁 <span x-text="bet.stakeKas"></span> KAS 押 <span x-text="bet.direction === 0 ? 'YES' : 'NO'"></span></div>
+          <div class="mt-1 text-ink-500">side_lock TX:</div>
+          <a x-show="bet.txResult?.side_lock_tx" :href="explorerTxUrl(bet.txResult.side_lock_tx)" target="_blank"
+             class="font-mono text-[10px] text-brand-500 hover:underline break-all" x-text="bet.txResult?.side_lock_tx"></a>
+        </div>
+
+        <!-- 失败 -->
+        <div x-show="bet.error" class="bg-red-50 text-red-700 rounded p-3 text-xs" x-text="bet.error"></div>
+        </div>
+      </div>
+    </div>
+
     <!-- ===== UMA finalization 状态 (Phase 1 Sub6, Bettor r156 option A) — protocol_status 驱动 ===== -->
     <div x-show="umaFinalizationStatus()" class="mb-4 rounded-lg px-4 py-3 border text-xs font-medium"
          :class="umaFinalizationStatus()?.cls" x-text="umaFinalizationStatus()?.label"></div>
@@ -51,8 +243,14 @@
     <!-- ===== piece 1: live 投票进度 (未结算) ===== -->
     <div x-show="!isSettled()" class="card p-4 mb-4">
       <div class="flex items-center justify-between mb-3">
-        <span class="text-sm font-medium text-ink-700">预言机投票进度</span>
-        <span class="text-xs text-ink-500" x-text="votedCount() + ' / ' + oracleList.length + ' 已投'"></span>
+        <span class="text-sm font-medium text-ink-700">仲裁人投票进度</span>
+        <!-- KANet-UI 2026-06-08 P0-B 三桶 (Bettor r414 + spec §7.2): 判定 / 弃权 / 未响应 -->
+        <span class="text-xs text-ink-500">
+          <span x-text="judgedCount()"></span> 判定
+          <span x-show="abstainCount() > 0" class="ml-1" x-text="'+ ' + abstainCount() + ' 弃权'"></span>
+          <span x-show="silentCount() > 0" class="ml-1" x-text="'+ ' + silentCount() + ' 未响应'"></span>
+          / <span x-text="oracleList.length"></span>, 需 4 同向 (YES 或 NO)
+        </span>
       </div>
       <!-- progress bar -->
       <div class="w-full bg-warm-100 rounded-full h-2 mb-4">
@@ -67,12 +265,15 @@
       <div class="space-y-1.5">
         <template x-for="o in oracleList" :key="o.relay_id">
           <div class="flex items-center gap-2 text-xs bg-warm-50 rounded px-3 py-2">
-            <div class="w-2 h-2 rounded-full flex-shrink-0" :class="o.voted ? 'bg-emerald-500' : 'bg-warm-300'"></div>
+            <!-- KANet-UI 2026-06-08 P0-B 三桶: 判定 (YES/NO=绿/红) / 弃权 (ABSTAIN=灰带边) / 未响应 (silent=空灰) -->
+            <div class="w-2 h-2 rounded-full flex-shrink-0"
+                 :class="o.vote === 'YES' ? 'bg-emerald-500' : (o.vote === 'NO' ? 'bg-red-500' : (o.vote === 'ABSTAIN' ? 'bg-warm-400 border border-ink-400' : 'bg-warm-300'))"></div>
             <span class="font-mono text-ink-500 flex-1 truncate" x-text="o.relay_id.slice(0, 16)"></span>
-            <span x-show="o.voted" class="px-1.5 py-0.5 rounded font-medium"
-                  :class="o.vote === 'YES' ? 'bg-emerald-100 text-emerald-700' : (o.vote === 'NO' ? 'bg-red-100 text-red-700' : 'bg-warm-200 text-ink-500')"
-                  x-text="o.vote"></span>
-            <span x-show="!o.voted" class="text-ink-400">等待中</span>
+            <span x-show="o.vote === 'YES'" class="px-1.5 py-0.5 rounded font-medium bg-emerald-100 text-emerald-700">判 YES</span>
+            <span x-show="o.vote === 'NO'" class="px-1.5 py-0.5 rounded font-medium bg-red-100 text-red-700">判 NO</span>
+            <span x-show="o.vote === 'ABSTAIN'" class="px-1.5 py-0.5 rounded font-medium bg-warm-200 text-ink-500 border border-ink-300"
+                  title="oracle 看了但判不了 (数据不足或解析失败), 不计 4-of-5, 不损 stake">弃权</span>
+            <span x-show="o.vote === 'silent' || o.vote == null" class="text-ink-400" x-text="o.vote === 'silent' ? '未响应 (forfeit)' : '等待中'"></span>
           </div>
         </template>
       </div>
@@ -87,14 +288,15 @@
         <div class="text-2xl font-display text-emerald-700" x-text="consensusOutcome() || '—'"></div>
       </div>
       <!-- 5 oracle 各投啥 -->
-      <div class="text-[11px] text-ink-500 mb-2">各预言机投票 (= 验证凭什么判这方赢)</div>
+      <div class="text-[11px] text-ink-500 mb-2">各仲裁人投票 (= 验证凭什么判这方赢)</div>
       <div class="space-y-1.5 mb-4">
         <template x-for="h in auditHistory" :key="h.id">
           <div class="flex items-center gap-2 text-xs bg-warm-50 rounded px-3 py-2">
             <span class="font-mono text-ink-500 flex-1 truncate" x-text="(h.oracle_relay_id || '').slice(0, 16)"></span>
             <span class="px-1.5 py-0.5 rounded font-medium"
-                  :class="h.vote === h.consensus_outcome ? 'bg-emerald-100 text-emerald-700' : (h.vote === 'silent' ? 'bg-warm-200 text-ink-500' : 'bg-red-100 text-red-700')"
-                  x-text="h.vote || '—'"></span>
+                  :class="h.vote === h.consensus_outcome ? 'bg-emerald-100 text-emerald-700' : (h.vote === 'silent' ? 'bg-warm-200 text-ink-500' : (h.vote === 'ABSTAIN' ? 'bg-warm-200 text-ink-500 border border-ink-300' : 'bg-red-100 text-red-700'))"
+                  :title="h.vote === 'ABSTAIN' ? '弃权 (= 看了但判不了, 不计 4-of-5, 不损 stake)' : (h.vote === 'silent' ? '未响应 (= forfeit)' : '')"
+                  x-text="h.vote === 'ABSTAIN' ? '弃权' : (h.vote === 'silent' ? '未响应' : (h.vote || '—'))"></span>
             <span x-show="h.reward_amount > 0" class="text-emerald-600 text-[11px]" x-text="'+' + (h.reward_amount || 0).toFixed(1)"></span>
             <span x-show="h.slashed_amount > 0" class="text-red-600 text-[11px]" x-text="'-' + (h.slashed_amount || 0).toFixed(1)"></span>
           </div>
@@ -106,7 +308,7 @@
       </div>
       <!-- payout TX explorer link -->
       <div x-show="market?.settle_txid" class="mt-3">
-        <a :href="'https://explorer-tn10.kaspa.org/txs/' + market?.settle_txid" target="_blank"
+        <a :href="explorerTxUrl(market?.settle_txid)" target="_blank"
            class="block text-center bg-brand-500 hover:bg-brand-600 text-white rounded-lg py-2 text-xs font-medium">
           🔗 结算 TX (Kaspa explorer)
         </a>
@@ -114,12 +316,78 @@
       </div>
     </div>
 
+    <!-- ===== piece 3 (v0.7+): 三方分账证据链 (= 用户可验机制公正) ===== -->
+    <div x-show="audit && (audit.committee || (audit.bettor_sides||[]).length)" class="card p-4 mb-4">
+      <div class="text-sm font-medium text-ink-700 mb-1">证据链 · 全程可审计</div>
+      <div class="text-[11px] text-ink-400 mb-3">每段都是链上真 TX, 点 🔗 看 explorer 验。</div>
+
+      <!-- maker 发市场 (KANet-UI 2026-06-07 r308: 加 maker_name 主显, address 退次) -->
+      <div x-show="audit?.maker" class="mb-3">
+        <div class="text-[11px] text-ink-500 mb-1">① 主持人 (出市场+赌池本金)</div>
+        <div class="bg-warm-50 rounded px-3 py-2 text-xs flex items-center gap-2">
+          <span class="text-ink-700 font-medium flex-shrink-0" x-text="makerLabel()"></span>
+          <span class="text-ink-400 font-mono text-[10px] truncate flex-1" x-text="(audit.maker?.address || '').slice(0, 18) + '…'"></span>
+          <span class="text-ink-600" x-text="(audit.maker?.stake_kas || 0) + ' KAS'"></span>
+          <a x-show="audit.maker?.explorer_url" :href="audit.maker.explorer_url" target="_blank" class="text-brand-500">🔗</a>
+        </div>
+      </div>
+
+      <!-- bettor sides -->
+      <div x-show="(audit?.bettor_sides||[]).length" class="mb-3">
+        <div class="text-[11px] text-ink-500 mb-1">② 押注人 (各自独立锁仓 TX) · <span x-text="(audit?.bettor_sides||[]).length"></span> 笔</div>
+        <div class="space-y-1">
+          <template x-for="b in (audit?.bettor_sides||[])" :key="b.bettor_pk + b.side_lock_txid">
+            <div class="bg-warm-50 rounded px-3 py-2 text-xs flex items-center gap-2">
+              <span class="px-1.5 py-0.5 rounded font-medium text-[10px]"
+                    :class="b.direction === 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'"
+                    x-text="b.direction === 0 ? 'YES' : 'NO'"></span>
+              <span class="text-ink-500 font-mono truncate flex-1" x-text="(b.bettor_pk || '').slice(0, 16) + '…'"></span>
+              <span class="text-ink-600" x-text="(b.stake_kas || 0) + ' KAS'"></span>
+              <a x-show="b.side_lock_explorer_url" :href="b.side_lock_explorer_url" target="_blank" class="text-brand-500" title="锁仓 TX">🔗</a>
+              <a x-show="b.claim_explorer_url" :href="b.claim_explorer_url" target="_blank" class="text-emerald-600" title="领奖 TX">🏆</a>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <!-- committee -->
+      <div x-show="audit?.committee?.members?.length" class="mb-3">
+        <div class="text-[11px] text-ink-500 mb-1">
+          ③ 仲裁人 · 押注池里随机抽 <span x-text="(audit?.committee?.members||[]).length"></span> 个 (阈值 <span x-text="audit?.committee?.threshold || '?'"></span>/<span x-text="(audit?.committee?.members||[]).length"></span>)
+        </div>
+        <div class="text-[10px] text-ink-400 mb-1">
+          抽样时间: <span x-text="audit?.committee?.sampled_at || '?'"></span>
+          · 抽样种子: <code class="font-mono" x-text="(audit?.committee?.vrf_seed || '').slice(0, 16) + '…'"></code>
+        </div>
+        <div class="space-y-1">
+          <template x-for="m in (audit?.committee?.members||[])" :key="m.pk_x">
+            <div class="bg-warm-50 rounded px-3 py-2 text-xs flex items-center gap-2">
+              <span class="text-ink-500 font-mono truncate flex-1" x-text="(m.mapped?.relay_address || m.pk_x || '').slice(0, 24) + '…'"></span>
+              <span class="text-ink-400 text-[10px]" x-text="m.mapped?.source || '?'"></span>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <!-- settle TX outputs hint -->
+      <div x-show="audit?.settle_txid" class="border-t border-warm-200 pt-3 mt-3">
+        <div class="text-[11px] text-ink-500 mb-1">④ 结算 TX · 一笔分给 (赢家 + 仲裁人 + 主持人)</div>
+        <a :href="audit.settle_explorer_url || explorerTxUrl(audit.settle_txid)" target="_blank"
+           class="block bg-warm-50 hover:bg-warm-100 rounded px-3 py-2 text-xs text-ink-600">
+          <div class="font-mono break-all">🔗 <span x-text="audit.settle_txid"></span></div>
+          <div class="text-[10px] text-ink-400 mt-1">点开看 explorer 7 输出 (= broker 抽成 + N 个仲裁人报酬 + 赢家本金+池)</div>
+        </a>
+      </div>
+    </div>
+
     <!-- market meta -->
     <div class="card p-4 text-[11px] text-ink-500 space-y-1">
-      <div class="flex justify-between"><span>maker stake</span><span x-text="(market?.maker_stake_amount || '?') + ' KAS'"></span></div>
-      <div class="flex justify-between"><span>oracle bond (each)</span><span x-text="(market?.oracle_bond_amount || '?') + ' KAS'"></span></div>
-      <div class="flex justify-between"><span>bettor 数</span><span x-text="bettorCount"></span></div>
-      <div class="flex justify-between"><span>sigs collected</span><span x-text="sigsCollected"></span></div>
+      <!-- KANet-UI 2026-06-07 P2 (Bettor r330 关 1 PASS): market meta jargon → 中文 -->
+      <!-- KANet-UI 2026-06-11 (Bettor r588 P0): maker_stake_amount/oracle_bond_amount 是 sompi, 显示须 /1e8 转 KAS (Owner 实测 10000000000/100000000 天文数字 = sompi-as-KAS) -->
+      <div class="flex justify-between"><span>主持人本金</span><span x-text="(market?.maker_stake_amount != null ? market.maker_stake_amount / 1e8 : '?') + ' KAS'"></span></div>
+      <div class="flex justify-between"><span>仲裁人押金 (每位)</span><span x-text="(market?.oracle_bond_amount != null ? market.oracle_bond_amount / 1e8 : '?') + ' KAS'"></span></div>
+      <div class="flex justify-between"><span>押注人数</span><span x-text="bettorCount"></span></div>
+      <div class="flex justify-between"><span>已签人数</span><span x-text="sigsCollected"></span></div>
     </div>
   </div>
 
@@ -135,40 +403,291 @@ function poolDetailPage(marketId) {
     sigsCollected: 0,
     oracleList: [],
     auditHistory: [],
+    events: [],             // KANet-UI 2026-06-07 P0-#4: chain_events 时间线 (ORDER ASC)
+    // KANet-UI 2026-06-07 P0-#2 (Bettor r319 关 1 PASS): web 押注 panel state
+    bet: {
+      open: false,
+      mode: 'external',     // GAP-2 (Bettor r494/r496): external 钱包(大众默认) | agent(内部)
+      agents: [],
+      bettorRelayId: '',
+      direction: null,      // 0=YES, 1=NO
+      stakeKas: 100,
+      submitting: false,
+      txResult: null,
+      error: '',
+    },
+    // KANet-UI GAP-2 (Bettor r494/r496): 外部钱包零售用户押注流 state.
+    // 复用 register-v06/{prep,confirm} 后端(同 tg-bot): prep 返 side_p2sh → 用户自己钱包付 → confirm 验链.
+    ext: {
+      addr: '',
+      direction: null,      // 0=YES, 1=NO
+      stakeKas: 100,
+      prep: null,           // { side_p2sh, exact_stake_sompi, exact_stake_kas, ... }
+      registered: null,     // { side_lock_tx, ... } 成功
+      preparing: false,
+      checking: false,
+      polling: false,
+      statusNote: '',
+      error: '',
+      _pollTimer: null,
+    },
     mapping: null,          // condition_id_mapping row (mirror_only / independent_source) OR null=未映射
+    audit: null,            // /api/pool/market/:id/settle-audit (= 证据链 v0.7 全链路, KANet-UI #12 P0.1)
+    explorerBase: 'https://explorer-tn12.kaspa.org',   // fallback, audit.explorer_base overrides
+    // KANet-UI 2026-06-07 P1-#5 (Bettor r325 关 1 PASS + 一致性): 全'仲裁人'贯穿 (与 P0-#4 hint/eventLabel 一致)
     stateMachine: [
-      { key: 'pending_oracle_deposits', label: '等预言机' },
-      { key: 'pending_bettors', label: '等下注' },
-      { key: 'verifying', label: '验证中' },
-      { key: 'collecting_sigs', label: '收签名' },
+      { key: 'pending_oracle_deposits', label: '等仲裁人接单' },
+      { key: 'pending_bettors', label: '等用户押注' },
+      { key: 'verifying', label: '等仲裁人投票' },
+      { key: 'collecting_sigs', label: '收仲裁人签名' },
       { key: 'completed', label: '已结算' },
     ],
 
     async init() {
       await this.load();
+      // KANet-UI 2026-06-07 P0-#2: 加载自家 agent list (= 同 create form 模式)
+      try {
+        const agResp = await fetch('/api/agent/profile').then(r => r.json()).catch(() => ({}));
+        this.bet.agents = (agResp.agents || agResp || []).filter(a => !a.is_dex_broker);
+      } catch {}
+      // 详情页 #bet 锚跳: /predictions 行点'押 →' 跳进来自动展开
+      if (window.location.hash === '#bet') {
+        this.bet.open = true;
+        this.$nextTick(() => document.getElementById('bet')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+      }
     },
 
     async load() {
       this.loading = true;
       try {
-        const [mR, aR] = await Promise.all([
+        const [mR, aR, sR, evR] = await Promise.all([
           fetch('/api/pool/market/' + encodeURIComponent(this.marketId)),
           fetch('/api/oracle/markets/' + encodeURIComponent(this.marketId) + '/audit'),
+          fetch('/api/pool/market/' + encodeURIComponent(this.marketId) + '/settle-audit'),
+          fetch('/api/pool/market/' + encodeURIComponent(this.marketId) + '/events'),  // KANet-UI 2026-06-07 P0-#4
         ]);
         const mJ = await mR.json();
         const aJ = await aR.json();
+        const sJ = await sR.json();
+        const evJ = await evR.json().catch(() => ({ ok: false }));
+        this.events = (evJ.ok && Array.isArray(evJ.events)) ? evJ.events : [];
         if (mJ.ok) {
           this.market = mJ.market;
           this.bettorCount = mJ.bettor_count || 0;
           this.sigsCollected = mJ.sigs_collected || 0;
         }
         this.auditHistory = (aJ.ok ? aJ.history : []) || [];
+        if (sJ && sJ.ok) {
+          this.audit = sJ;
+          if (sJ.explorer_base) this.explorerBase = sJ.explorer_base;
+        }
         this.buildOracleList();
         await this.loadMapping();
       } catch (e) {
         console.warn('pool detail load fail', e);
       }
       this.loading = false;
+    },
+
+    explorerTxUrl(txid) {
+      return txid ? (this.explorerBase + '/txs/' + txid) : '#';
+    },
+
+    // KANet-UI 2026-06-07 P0-#4: chain_events 大白话 label (NWT r335 实测 event_type).
+    // KANet-UI 2026-06-07 P0-#2 (Bettor r319): web 押注 helpers
+    canBet() {
+      // 仅 pending_bettors 阶段 + deadline 未过 (= 5min buffer 防截止前抢押)
+      const st = this.market?.protocol_status;
+      if (st !== 'pending_bettors') return false;
+      const dl = Number(this.market?.deadline || 0);
+      if (dl && dl * 1000 < Date.now() + 5 * 60_000) return false;
+      return true;
+    },
+    isOracleAgent(agentId) {
+      // Bettor r319 ② 校准: 用本市场 oracle_relay_ids 集 (= pool_markets.oracle_relay_ids JSON 列), 非全局 registry
+      try {
+        const ids = JSON.parse(this.market?.oracle_relay_ids || '[]');
+        return Array.isArray(ids) && ids.includes(agentId);
+      } catch { return false; }
+    },
+    isMakerAgent(agentId) {
+      return this.market?.maker_relay_id === agentId;
+    },
+    canSubmitBet() {
+      return this.bet.bettorRelayId
+        && this.bet.direction !== null
+        && Number(this.bet.stakeKas) >= 1
+        && !this.isOracleAgent(this.bet.bettorRelayId)
+        && !this.isMakerAgent(this.bet.bettorRelayId);
+    },
+    lockButtonLabel() {
+      // Bettor r319 ① 校准: '锁押金'按钮写清'从 [agent X] 锁 N KAS' 防误点
+      if (!this.canSubmitBet()) return '锁押金';
+      const a = (this.bet.agents || []).find(x => x.id === this.bet.bettorRelayId);
+      const name = a?.name || '?';
+      const side = this.bet.direction === 0 ? 'YES' : 'NO';
+      return `从 ${name} 锁 ${this.bet.stakeKas} KAS 押 ${side}`;
+    },
+    async submitBet() {
+      if (!this.canSubmitBet()) return;
+      this.bet.submitting = true;
+      this.bet.error = '';
+      this.bet.txResult = null;
+      try {
+        const r = await fetch(`/api/pool/market/${encodeURIComponent(this.marketId)}/bettor/register`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            bettor_relay_id: this.bet.bettorRelayId,
+            direction: this.bet.direction,
+            stake_kas: String(this.bet.stakeKas),
+          }),
+        });
+        const j = await r.json();
+        if (!j.ok) throw new Error(j.error || `HTTP ${r.status}`);
+        this.bet.txResult = j;
+        // 押后自动 reload market + events 看进度
+        setTimeout(() => this.load(), 1500);
+      } catch (e) {
+        this.bet.error = String(e.message || e);
+      }
+      this.bet.submitting = false;
+    },
+    // ===== KANet-UI GAP-2 (Bettor r494/r496): 外部钱包押注流 =====
+    canExtPrep() {
+      return /^kaspa(test)?:[a-z0-9]{20,}$/i.test((this.ext.addr || '').trim())
+        && this.ext.direction !== null
+        && Number(this.ext.stakeKas) >= 1;
+    },
+    kaspaPayUri() {
+      if (!this.ext.prep?.side_p2sh) return '';
+      // Kaspa URI: kaspa:<addr>?amount=<sompi> (整数 sompi). 钱包按精确额预填.
+      const sompi = this.ext.prep?.exact_stake_sompi;
+      return 'kaspa:' + this.ext.prep.side_p2sh + (sompi != null ? '?amount=' + sompi : '');
+    },
+    async copyText(t) {
+      if (!t) return;
+      try { await navigator.clipboard.writeText(String(t)); } catch {}
+    },
+    async extPrep() {
+      if (!this.canExtPrep()) return;
+      this.ext.preparing = true;
+      this.ext.error = '';
+      try {
+        const r = await fetch(`/api/pool/market/${encodeURIComponent(this.marketId)}/bettor/register-v06/prep`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ linked_addr: this.ext.addr.trim(), direction: this.ext.direction, stake_kas: String(this.ext.stakeKas) }),
+        });
+        const j = await r.json();
+        if (!j.ok) throw new Error(j.error || `HTTP ${r.status}`);
+        this.ext.prep = j;
+        this.extStartPoll();   // prep 完成即开始轮询检测付款
+      } catch (e) {
+        this.ext.error = String(e.message || e);
+      }
+      this.ext.preparing = false;
+    },
+    async extConfirmOnce() {
+      if (!this.ext.prep || this.ext.registered) return;
+      this.ext.checking = true;
+      this.ext.error = '';
+      try {
+        const r = await fetch(`/api/pool/market/${encodeURIComponent(this.marketId)}/bettor/register-v06/confirm`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ linked_addr: this.ext.addr.trim(), direction: this.ext.direction, stake_kas: String(this.ext.stakeKas) }),
+        });
+        const j = await r.json();
+        if (!j.ok) throw new Error(j.error || `HTTP ${r.status}`);
+        if (j.registered) {
+          this.ext.registered = j;            // 成功
+          this.extStopPoll();
+          setTimeout(() => this.load(), 1500); // reload 看进度/证据链
+        } else if (j.dust_below_floor) {
+          this.ext.statusNote = `检测到付款但低于最低额 (${(j.found_sompi/1e8).toFixed(8)} KAS), 请补足到 ${this.ext.prep?.exact_stake_kas} KAS.`;
+        } else {
+          this.ext.statusNote = '还没检测到付款入账, 继续等待...';
+        }
+      } catch (e) {
+        this.ext.error = String(e.message || e);
+      }
+      this.ext.checking = false;
+    },
+    extStartPoll() {
+      this.extStopPoll();
+      this.ext.polling = true;
+      const tick = async () => {
+        if (!this.ext.prep || this.ext.registered) { this.extStopPoll(); return; }
+        await this.extConfirmOnce();
+        if (!this.ext.registered) this.ext._pollTimer = setTimeout(tick, 6000);
+      };
+      this.ext._pollTimer = setTimeout(tick, 6000);
+    },
+    extStopPoll() {
+      this.ext.polling = false;
+      if (this.ext._pollTimer) { clearTimeout(this.ext._pollTimer); this.ext._pollTimer = null; }
+    },
+    extReset() {
+      this.extStopPoll();
+      this.ext.prep = null;
+      this.ext.registered = null;
+      this.ext.statusNote = '';
+      this.ext.error = '';
+    },
+    // KANet-UI 2026-06-07 r308: maker_name 主持人显. 跨节点 fallback 短 id.
+    makerLabel() {
+      if (this.market?.maker_name) return this.market.maker_name;
+      if (this.market?.maker_relay_id) return '跨节点 ' + String(this.market.maker_relay_id).slice(0, 8);
+      return '?';
+    },
+    eventLabel(t, payload) {
+      // KANet-UI 2026-06-07 P1-#5 (Bettor r325): '委员' → '仲裁人' 贯穿
+      // KANet-UI 2026-06-08 P0-B (Bettor r414 + spec §7.2): pool_oracle_vote 含 outcome enum 区分判定/弃权
+      if (t === 'pool_oracle_vote') {
+        const oc = payload?.outcome || payload?.vote;
+        if (oc === 'ABSTAIN') return '仲裁人弃权';
+        if (oc === 'YES' || oc === 'NO') return '仲裁人判 ' + oc;
+        return '仲裁人投票';
+      }
+      const map = {
+        pool_oracle_deposit: '仲裁人入金',
+        pool_oracle_tx_sig: '仲裁人签名',
+        pool_settle_consensual_dispatched: '结算分发 (赢家+仲裁人+主持人)',
+        pool_oracle_refund_disagreement_tx_sig: '争议退款签名',
+        pool_settle_silent_detected: '侦测静默仲裁人',
+        pool_refund_request: '申请退款',
+        pool_market_published: '市场上链',
+      };
+      return map[t] || t || '?';
+    },
+    formatEventTime(ts) {
+      if (!ts) return '?';
+      try { return new Date(ts).toLocaleString('zh-CN', { hour12: false }); }
+      catch { return ts; }
+    },
+    // 当前阶段大白话提示 (= 用户不见 jargon)
+    currentStageHint() {
+      const st = this.market?.protocol_status;
+      const total = (this.audit?.committee?.members || []).length || 5;
+      const voted = this.votedCount?.() ?? 0;
+      const sigs = this.sigsCollected || 0;
+      if (!st) return '加载中...';
+      // KANet-UI 2026-06-07 P1-#5 (Bettor r325): '委员' → '仲裁人' 贯穿
+      if (st === 'pending_oracle_deposits') return '等仲裁人接单 (= 仲裁人押 bond 接单).';
+      if (st === 'pending_oracle_sampling' || st === 'pending_oracle_sample') return '抽仲裁人中 (约 10 秒).';
+      if (st === 'pending_bettors') return '等用户押注 (= 截止前任何人可押 YES/NO).';
+      if (st === 'verifying') {
+        const judged = this.judgedCount?.() ?? 0;
+        const abstain = this.abstainCount?.() ?? 0;
+        const silent = this.silentCount?.() ?? 0;
+        let txt = `等仲裁人投票 (${judged} 判定`;
+        if (abstain > 0) txt += `, ${abstain} 弃权`;
+        if (silent > 0) txt += `, ${silent} 未响应`;
+        txt += `, 共 ${total}, 需 4 同向)`;
+        return txt;
+      }
+      if (st === 'collecting_sigs') return `等仲裁人签名 (${sigs}/${total} 已签).`;
+      if (st === 'completed') return '已结算. 链上 TX 见上面 🔗.';
+      if (st === 'refunded' || st === 'cancelled') return '已退款.';
+      return st;
     },
 
     // condition_id_mapping lookup (J2 Sub1 endpoint) — 404 = 未映射 (graceful)
@@ -187,8 +706,26 @@ function poolDetailPage(marketId) {
       }
     },
 
+    // v0.5/v0.6: oracle_relay_ids (legacy 3 oracle). v0.7+: committee_pks (= settle-audit.committee.members PK 列表).
     buildOracleList() {
       var ids = [];
+      var voteByKey = {};
+      this.auditHistory.forEach(function(h){
+        // 既 key by relay_id (legacy) 又 key by voter_pubkey (v0.7), 兼容两路.
+        if (h.oracle_relay_id) voteByKey[h.oracle_relay_id] = h.vote;
+        if (h.voter_pubkey) voteByKey[h.voter_pubkey] = h.vote;
+      });
+      // v0.7 优先 audit.committee.members (= 池抽样实委员, 链派生).
+      if (this.audit && this.audit.committee && Array.isArray(this.audit.committee.members) && this.audit.committee.members.length) {
+        this.oracleList = this.audit.committee.members.map(function(m){
+          var key = m.pk_x;
+          var label = (m.mapped && m.mapped.relay_address) ? m.mapped.relay_address : m.pk_x;
+          var vote = voteByKey[m.pk_x] || null;
+          return { relay_id: label, voted: vote != null, vote: vote };
+        });
+        return;
+      }
+      // v0.5/v0.6 legacy path.
       if (this.market && this.market.oracle_relay_ids) {
         try {
           var parsed = JSON.parse(this.market.oracle_relay_ids);
@@ -197,15 +734,24 @@ function poolDetailPage(marketId) {
           ids = String(this.market.oracle_relay_ids).split(',').map(function(s){ return s.trim(); }).filter(Boolean);
         }
       }
-      var voteByOracle = {};
-      this.auditHistory.forEach(function(h){ if (h.oracle_relay_id) voteByOracle[h.oracle_relay_id] = h.vote; });
       this.oracleList = ids.map(function(id){
-        return { relay_id: id, voted: voteByOracle[id] != null, vote: voteByOracle[id] || null };
+        return { relay_id: id, voted: voteByKey[id] != null, vote: voteByKey[id] || null };
       });
     },
 
     isSettled() {
       return this.market && (this.market.protocol_status === 'completed' || this.market.settle_txid);
+    },
+    // KANet-UI 2026-06-08 P0-B 三桶 (Bettor r414 + spec §7.2):
+    // 判定 (YES/NO 计 4-of-5) / 弃权 (ABSTAIN 不计) / 未响应 (silent forfeit)
+    judgedCount() {
+      return this.oracleList.filter(o => o.vote === 'YES' || o.vote === 'NO').length;
+    },
+    abstainCount() {
+      return this.oracleList.filter(o => o.vote === 'ABSTAIN').length;
+    },
+    silentCount() {
+      return this.oracleList.filter(o => o.vote === 'silent').length;
     },
     votedCount() {
       return this.oracleList.filter(function(o){ return o.voted; }).length;

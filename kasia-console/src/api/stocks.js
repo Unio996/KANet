@@ -20,10 +20,11 @@ export async function registerStockRoutes(fastify) {
 
   // ── Page routes ──
 
+  // /market-overview — retired (Gap 3 dedup, Bettor r36 GO).
+  // 边缘 Agent 市场综述页 (263L), 不在 sidebar, 用户少 → 302 /market (canonical).
+  // market-overview.eta fossil retained.
   fastify.get('/market-overview', async (request, reply) => {
-    const lang = parseLang(request.headers.cookie);
-    const t = getT(lang);
-    return reply.view('market-overview', { title: '市场概览', t, lang, dir: isRtl(lang) ? 'rtl' : 'ltr', langs: LANG_NAMES, _page: 'market-overview' });
+    return reply.redirect(302, '/market');
   });
 
   fastify.get('/stocks', async (request, reply) => {
@@ -33,11 +34,18 @@ export async function registerStockRoutes(fastify) {
     return reply.view('stocks', { title: '股票市场', t, lang, dir: isRtl(lang) ? 'rtl' : 'ltr', langs: LANG_NAMES, _page: 'stocks', relayNodes });
   });
 
+  // KANet-UI 2026-06-06 (Bettor 关1 派 r265+r265b 7 条): /predictions 服新预测市场首页
+  // predictions-list.eta. 旧 Polymarket 1v1 SS escrow 仍 /legacy/polymarket-escrow 保不动.
   fastify.get('/predictions', async (request, reply) => {
     const lang = parseLang(request.headers.cookie);
     const t = getT(lang);
+    return reply.view('predictions-list', { title: '预测市场', t, lang, dir: isRtl(lang) ? 'rtl' : 'ltr', langs: LANG_NAMES, _page: 'predictions' });
+  });
+  fastify.get('/legacy/polymarket-escrow', async (request, reply) => {
+    const lang = parseLang(request.headers.cookie);
+    const t = getT(lang);
     const relayNodes = sqlite.prepare('SELECT id, name FROM relay_nodes ORDER BY name').all();
-    return reply.view('predictions', { title: '预测市场', t, lang, dir: isRtl(lang) ? 'rtl' : 'ltr', langs: LANG_NAMES, _page: 'predictions', relayNodes });
+    return reply.view('predictions', { title: 'Polymarket 1v1 SS escrow (旧版归档)', t, lang, dir: isRtl(lang) ? 'rtl' : 'ltr', langs: LANG_NAMES, _page: 'predictions', relayNodes });
   });
 
   // ── Watchlist CRUD ──

@@ -13,6 +13,39 @@ export async function registerEventRoutes(fastify) {
     return reply.send({ traceId, events });
   });
 
+  // TG bot S1 (Bettor r211/r219 v1.3): GET /api/events/since/:ts?address=
+  // 服务端按 from/to_address 过滤 chain_events, bot poller 30s 拉差量推 TG.
+  // address required (= privacy + 省流: 不暴别人活动, 不全网广播).
+  // optional: event_type filter (= 配合 user_notification_prefs.event_type 订阅).
+  // optional: limit (default 100, cap 500).
+  fastify.get('/api/events/since/:ts', { preHandler: async (request, reply) => { await verifyIngestRequest(request, reply); } }, async (request, reply) => {
+    const { ts } = request.params;
+    const { address, event_type, limit: limitParam } = request.query;
+    if (!address || typeof address !== 'string' || !address.startsWith('kaspa')) {
+      return reply.code(400).send({ ok: false, error: 'address required (kaspa: prefix)' });
+    }
+    const sinceMs = parseInt(ts, 10);
+    if (!Number.isFinite(sinceMs) || sinceMs < 0) {
+      return reply.code(400).send({ ok: false, error: 'ts required (ms epoch)' });
+    }
+    const sinceIso = new Date(sinceMs).toISOString();
+    const limit = Math.min(parseInt(limitParam, 10) || 100, 500);
+    const filters = ['(from_address = ? OR to_address = ?)', 'observed_at > ?'];
+    const params = [address, address, sinceIso];
+    if (event_type && typeof event_type === 'string') {
+      filters.push('event_type = ?');
+      params.push(event_type);
+    }
+    const sql = `SELECT txid, event_type, from_address, to_address, payload, observed_at, offer_id
+                 FROM chain_events
+                 WHERE ${filters.join(' AND ')}
+                 ORDER BY observed_at ASC
+                 LIMIT ?`;
+    params.push(limit);
+    const rows = sqlite.prepare(sql).all(...params);
+    return reply.send({ ok: true, address, since: sinceIso, count: rows.length, events: rows });
+  });
+
   fastify.get('/events', async (request, reply) => {
     const lang = parseLang(request.headers.cookie);
     const t = getT(lang);

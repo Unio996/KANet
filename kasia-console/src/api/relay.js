@@ -15,6 +15,7 @@ import { startRelay, stopRelay } from '../services/relay-manager.js';
 import { getMind } from '../services/mind-manager.js';
 import { ethers } from 'ethers';
 import { encrypt, decrypt } from '../services/crypto.js';
+import { verifyIngestRequest } from '../services/ingest-auth.js';
 import { randomUUID } from 'crypto';
 import {
   CHAIN_META,
@@ -101,6 +102,35 @@ export async function registerRelayRoutes(fastify) {
     return reply.redirect('/relays');
   });
 
+  // r281 (Bettor 5/30, Owner P0) — import an existing raw kaspa private key as a Console relay.
+  // 用于无助记词只有裸 privkey 的地址 (e.g. Owner 已绑 TG 的 qrymjvc). 创建后跟普通 relay 一样: 分配
+  // adapter 即自动启动, balance/transfer 等操作 endpoint 均可用 (走 KASPA_PRIVKEY env 路径).
+  // J2 r93 reviewer audit: 必须 verifyIngestRequest (跟 chat/send 等敏感写端点对称, 防任何能访问 Console
+  // 的人注入私钥创建可动钱的 relay).
+  fastify.post('/api/relay/import-privkey', { preHandler: async (request, reply) => { await verifyIngestRequest(request, reply); } }, async (request, reply) => {
+    const { name, privkey, network } = request.body || {};
+    if (!name || typeof name !== 'string' || !name.trim()) return reply.code(400).send({ ok: false, error: 'name required' });
+    if (!privkey || typeof privkey !== 'string') return reply.code(400).send({ ok: false, error: 'privkey required (64 hex chars)' });
+    const cleanPriv = privkey.startsWith('0x') ? privkey.slice(2) : privkey;
+    if (!/^[0-9a-fA-F]{64}$/.test(cleanPriv)) return reply.code(400).send({ ok: false, error: 'privkey must be 64 hex chars (32 bytes)' });
+    const net = network || 'testnet-12';
+    let address;
+    try {
+      const kaspa = await import('kaspa-wasm');
+      const sk = new kaspa.PrivateKey(cleanPriv);
+      const netType = (net === 'mainnet') ? kaspa.NetworkType.Mainnet : kaspa.NetworkType.Testnet;
+      address = sk.toKeypair().toAddress(netType).toString();
+    } catch (e) {
+      return reply.code(400).send({ ok: false, error: `address derive fail: ${e.message}` });
+    }
+    // dedup: same address already in relay_nodes
+    const existing = sqlite.prepare('SELECT id, name FROM relay_nodes WHERE address = ?').get(address);
+    if (existing) return reply.code(409).send({ ok: false, error: `address already registered as relay "${existing.name}" (id=${existing.id})`, existing_id: existing.id });
+    const newId = createRelayNode({ name: name.trim(), privkey: cleanPriv, address, network: net, adapterNodeId: null, pollMs: 2000 });
+    console.log(`[relay] r281 imported privkey-relay "${name.trim()}" → ${address}`);
+    return reply.send({ ok: true, id: newId, name: name.trim(), address, network: net });
+  });
+
   fastify.post('/relays/:id/delete', async (request, reply) => {
     deleteRelayNode(request.params.id);
     return reply.redirect('/relays');
@@ -109,10 +139,10 @@ export async function registerRelayRoutes(fastify) {
   fastify.post('/relays/:id/assign', async (request, reply) => {
     const { adapter_node_id } = request.body;
     updateRelayNode(request.params.id, { adapterNodeId: adapter_node_id || null });
-    // Auto-start relay if adapter assigned and relay has address+mnemonic
+    // Auto-start relay if adapter assigned and relay has address + (mnemonic OR privkey, r281).
     if (adapter_node_id) {
       const relay = getRelayNode(request.params.id);
-      if (relay?.address && relay?.mnemonic_encrypted) {
+      if (relay?.address && (relay?.mnemonic_encrypted || relay?.privkey_encrypted)) {
         const result = await startRelay(request.params.id);
         if (result.ok) console.log(`[relay-manager] Auto-started ${relay.name} relay after adapter assign`);
       }
@@ -169,27 +199,65 @@ export async function registerRelayRoutes(fastify) {
     if (!newRole || !VALID_ROLES.includes(newRole)) {
       return reply.code(400).send({ error: 'invalid_role', message: `role 必 ∈ [${VALID_ROLES.join(', ')}]` });
     }
-    const relay = sqlite.prepare(`SELECT id, name, role, is_dex_broker, is_service FROM relay_nodes WHERE id = ?`).get(request.params.id);
+    const relay = sqlite.prepare(`SELECT id, name, role, is_dex_broker, is_service, is_oracle, address, roles_json FROM relay_nodes WHERE id = ?`).get(request.params.id);
     if (!relay) return reply.code(404).send({ error: 'relay_not_found' });
+
+    // KANet-UI 2026-06-11 gateway register 守门 (role=broker 时):
+    // ① broker/oracle 互斥【双向】(Bettor r600 + NWT r64, Area 1.4 角色分离). 此前单向
+    //    (oracle-enroll bettor.js:2153 拒 is_dex_broker, 无 gateway 侧拒 is_oracle).
+    // ② 收款址 P2PK 约束 (Bettor r604 + J1 #141 + NWT r66 determinism 收口上游守门):
+    //    settler always-pk-derive (J2 ca5e8658) 保跨节点同地址不炸; 这里保 broker_pk 派生地址==意图址,
+    //    非 P2PK (P2SH/multisig) 地址 round-trip 后 ≠ 原址 → fee 到错处 → 拒注册 gateway.
+    if (newRole === 'broker') {
+      if (relay.is_oracle === 1) {
+        return reply.code(403).send({ error: 'role_conflict', message: 'relay 已是 oracle (is_oracle=1) — broker/oracle 互斥 (Area 1.4 角色分离). 先退出 oracle (unstake) 再注册 gateway.' });
+      }
+      try {
+        const kaspa = await import('kaspa-wasm');
+        const addr = relay.address;
+        const net = (addr || '').startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
+        const pk = kaspa.XOnlyPublicKey.fromAddress(new kaspa.Address(addr)).toString();
+        const roundTrip = new kaspa.XOnlyPublicKey(pk).toAddress(net).toString();
+        if (roundTrip !== addr) {
+          return reply.code(400).send({ error: 'address_not_p2pk', message: 'relay 收款址非 P2PK (round-trip 不回原址) — gateway 须 P2PK 地址保跨节点 settle fee 派生到对处 (Bettor r604/J1 #141).' });
+        }
+      } catch (e) {
+        return reply.code(400).send({ error: 'address_validation_fail', message: `gateway 收款址 P2PK 校验失败: ${e?.message || e}` });
+      }
+    }
 
     const oldRole = relay.role;
     if (oldRole === newRole) {
       return reply.send({ ok: true, role: newRole, unchanged: true });
     }
 
-    // legacy field 同步 (role authoritative, legacy mirror)
-    const newIsDexBroker = newRole === 'broker' ? 1 : 0;
-    const newIsService = newRole === 'broker' ? 1 : 0;
+    // S-A prev_role 还原 (Bettor r638/r647): gateway register 存原角色, revoke 还原 (非硬 general).
+    let effectiveRole = newRole;
+    let rolesJsonUpdate = relay.roles_json;
+    if (newRole === 'broker' && oldRole !== 'broker') {
+      // ① 实切换到 broker: 存原角色 (oldRole==broker 已 early-return, 不覆盖原 prev)
+      rolesJsonUpdate = JSON.stringify({ prev_role: oldRole });
+    } else if (oldRole === 'broker' && newRole === 'general') {
+      // ② revoke (revokeGateway 传 general): 还原 prev_role; 无/非法 → general default
+      let prev = null;
+      try { prev = JSON.parse(relay.roles_json || '{}').prev_role; } catch {}
+      effectiveRole = (prev && VALID_ROLES.includes(prev)) ? prev : 'general';
+      rolesJsonUpdate = null;  // 清 prev_role
+    }
+
+    // legacy field 同步 (role authoritative, legacy mirror) — 按 effectiveRole
+    const newIsDexBroker = effectiveRole === 'broker' ? 1 : 0;
+    const newIsService = effectiveRole === 'broker' ? 1 : 0;
 
     const now = new Date().toISOString();
     sqlite.prepare(`
       UPDATE relay_nodes
-      SET role = ?, is_dex_broker = ?, is_service = ?, updated_at = ?
+      SET role = ?, is_dex_broker = ?, is_service = ?, roles_json = ?, updated_at = ?
       WHERE id = ?
-    `).run(newRole, newIsDexBroker, newIsService, now, request.params.id);
+    `).run(effectiveRole, newIsDexBroker, newIsService, rolesJsonUpdate, now, request.params.id);
 
-    // ROLE_SKILL_ALLOWED auto-enforce: 不兼容 active trading skill auto-disable
-    const allowed = ROLE_SKILL_ALLOWED_LOCAL[newRole] || [];
+    // ROLE_SKILL_ALLOWED auto-enforce: 不兼容 active trading skill auto-disable (按 effectiveRole)
+    const allowed = ROLE_SKILL_ALLOWED_LOCAL[effectiveRole] || [];
     const allowedSet = new Set(allowed);
     const activeSkills = sqlite.prepare(`
       SELECT id, name FROM skills WHERE relay_node_id = ? AND status = 'active'
@@ -203,21 +271,44 @@ export async function registerRelayRoutes(fastify) {
       }
     }
 
-    // suggested skills: ROLE_SKILL_ALLOWED 中此 agent 已 disabled 状态的 skill (UI prompt 一键启用)
+    // S-A (Bettor r638): auto re-enable effectiveRole 允许但当前 disabled 的 skill.
+    // 修 register→revoke 丢 skill 的不对称 (旧码只 disable 不 re-enable): revoke 还原原角色后
+    // 原角色 skill 集自动恢复; register 也补齐新角色允许的 skill。
     const disabledMatch = sqlite.prepare(`
-      SELECT name FROM skills WHERE relay_node_id = ? AND status = 'disabled' AND name IN (${allowed.map(() => '?').join(',') || "''"})
+      SELECT id, name FROM skills WHERE relay_node_id = ? AND status = 'disabled' AND name IN (${allowed.map(() => '?').join(',') || "''"})
     `).all(request.params.id, ...allowed);
-    const suggested_skills = disabledMatch.map(r => r.name);
+    const reEnableStmt = sqlite.prepare(`UPDATE skills SET status='active', updated_at=? WHERE id=?`);
+    for (const s of disabledMatch) { reEnableStmt.run(now, s.id); }
+    const suggested_skills = disabledMatch.map(r => r.name);  // 已 auto re-enable, 返回供 UI 告知
 
-    console.log(`[relay role] ${relay.name}: '${oldRole}' → '${newRole}', is_dex_broker=${newIsDexBroker}, disabled=${disabled_skills.length}, suggested=${suggested_skills.length}`);
+    console.log(`[relay role] ${relay.name}: '${oldRole}' → '${effectiveRole}'${effectiveRole !== newRole ? ` (revoke→prev_role, requested='${newRole}')` : ''}, is_dex_broker=${newIsDexBroker}, disabled=${disabled_skills.length}, re_enabled=${suggested_skills.length}`);
 
     return reply.send({
       ok: true,
-      role: newRole,
+      role: effectiveRole,            // S-A: revoke 还原 prev_role (非 requested newRole)
+      requested_role: newRole,
       old_role: oldRole,
       legacy_sync: { is_dex_broker: newIsDexBroker, is_service: newIsService },
-      side_effects: { disabled_skills, suggested_skills },
+      side_effects: { disabled_skills, re_enabled_skills: suggested_skills },
     });
+  });
+
+  // POST /api/relay/:id/broker-fee — gateway operator 设默认 broker fee% (KANet-UI Lane③ r654, J2 绿灯).
+  // seeder/UI 建市时读此默认 (替硬编码 200). ⚠ 只影响【新建市场】; 禁 retro-apply 已建市场 (J2 caveat:
+  // 改已建市场 fee = 破 settle 跨节点 determinism). display/config 层, 不碰签名载荷.
+  fastify.post('/api/relay/:id/broker-fee', async (request, reply) => {
+    const { fee_pct } = request.body || {};
+    const bps = parseInt(fee_pct, 10);
+    if (!Number.isFinite(bps) || bps < 0 || bps > 9999) {
+      return reply.code(400).send({ error: 'invalid_fee', message: 'fee_pct 必 0-9999 basis points (0-99.99%)' });
+    }
+    const relay = sqlite.prepare(`SELECT id, role, is_dex_broker FROM relay_nodes WHERE id = ?`).get(request.params.id);
+    if (!relay) return reply.code(404).send({ error: 'relay_not_found' });
+    if (!(relay.role === 'broker' || relay.is_dex_broker)) {
+      return reply.code(400).send({ error: 'not_gateway', message: '只有 gateway (broker) relay 能设默认 fee — 先注册成 gateway.' });
+    }
+    sqlite.prepare(`UPDATE relay_nodes SET default_broker_fee_pct = ?, updated_at = ? WHERE id = ?`).run(bps, new Date().toISOString(), request.params.id);
+    return reply.send({ ok: true, default_broker_fee_pct: bps });
   });
 
   // Balance query — auto-selects best available RPC node
@@ -505,6 +596,7 @@ export async function registerRelayRoutes(fastify) {
       address: relay.address || null,
       balance: kasBalance,
       hasMnemonic: !!relay.mnemonic_encrypted,
+      hasPrivateKey: !!relay.privkey_encrypted,  // r281 privkey-backed relays (Bettor 168965a)
     };
 
     // Multi-chain wallets from agent_wallets
@@ -1558,11 +1650,14 @@ export async function registerRelayRoutes(fastify) {
   });
 
   // POST /api/relay/:id/send-command — unified command to Relay (Console transmits, Relay executes)
+  // Forward full body so commands like chain_get_blocks_from_daa_score (= needs min_daa_score) work.
+  // J1tn r303: chain_get_block_at_daa SPC walk can take up to 60s for deep deadlines; bump timeout.
   fastify.post('/api/relay/:id/send-command', async (request, reply) => {
-    const { type, target, message, params, channel, amount } = request.body || {};
-    if (!type) return reply.code(400).send({ error: 'type is required' });
+    const body = request.body || {};
+    if (!body.type) return reply.code(400).send({ error: 'type is required' });
+    const timeoutMs = body.type === 'chain_get_block_at_daa' ? 120000 : 30000;
     try {
-      const result = await sendCommandAsync(request.params.id, { type, target, message, params, channel, amount });
+      const result = await sendCommandAsync(request.params.id, body, timeoutMs);
       return reply.send({ ok: true, ...result });
     } catch (err) {
       return reply.code(503).send({ ok: false, error: err.message || 'Relay command failed' });

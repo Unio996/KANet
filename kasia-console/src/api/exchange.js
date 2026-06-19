@@ -57,17 +57,18 @@ export async function registerExchangeRoutes(fastify) {
       params.push(maker);
     }
 
-    // T-J2-2026-05-11 Phase 2 A.2 (NWT #18 ABE audit): inline UPDATE → expireStale() transition() loop。
-    // 现 expireStale (exchange-machine.js:575) 真 SELECT stale + transition(id, 'expired') loop, 走 transition() invariant 路径
-    // (timestamp 设 expired_at + audit log)。inline UPDATE bypass transition() 是 A 断点根因。
-    expireStale();
+    // gap-A (J1 #382 red-team): expireStale() was called here = a WRITE (SELECT stale + transition→expired
+    // + timestamp/audit) in a GET → public-exposed read with a write side-effect = DoS write-amplification
+    // (hammer this GET → repeated expire write-storm). REMOVED — expiry is already run by the periodic
+    // setInterval in index.js:212 (startup + every tick), so this GET is now truly read-only. The stale
+    // filter below (exclude expired) still hides anything not-yet-transitioned until the next cron tick.
 
     const rows = sqlite.prepare(`
       SELECT * FROM exchange_offers
       WHERE ${where}
       ORDER BY broadcast_at DESC
       LIMIT ? OFFSET ?
-    `).all(...params, Number(limit), Number(offset));
+    `).all(...params, Math.min(Math.max(Number(limit) || 50, 1), 200), Math.max(Number(offset) || 0, 0));  // gap-A: cap limit 1-200 (= /api/pool/markets pattern) — public route DoS/large-dump guard
 
     const total = sqlite.prepare(
       `SELECT COUNT(*) as cnt FROM exchange_offers WHERE ${where}`
@@ -195,9 +196,15 @@ export async function registerExchangeRoutes(fastify) {
       t: 'kanet_exchange_v1',
       id: offerId,
       give_asset,
+      // lint-allow-chain-amount-precision: J2-tn (KANet-UI flag + Bettor r942 裁): give/want_amount 是
+      // kanet_exchange_v1 broadcast offer 的 JSON wire 字段 (offer 展示/撮合条款, 用户输入字符串), 非 Kaspa TX
+      // sompi amount (实际转账精度由 settle sendAsset 处理)。格式 behavior-verified 锁定 (J1 live e2e offer
+      // 061ef38c/66e0b93c + ext-agent 模板 + quickstart 全用 '0.01' 这种 String); 改 .toFixed(8) 破已发布 kit
+      // + 链上已验 wire 格式 = 反模式。KI-30 此处 false-positive (offer JSON 字段非 TX amount)。
       give_amount: String(give_amount),
       give_chain: give_chain || null,
       want_asset,
+      // lint-allow-chain-amount-precision: 同上 give_amount (offer JSON wire 字段非 TX amount, behavior-verified 锁定)
       want_amount: String(want_amount),
       want_chain: want_chain || null,
       expires_at: expiresAt,
@@ -1429,6 +1436,15 @@ export async function registerExchangeRoutes(fastify) {
     return reply.view('exchange.eta', {
       _page: 'exchange',
       pageTitle: 'Free Market — KANet',
+    });
+  });
+
+  // Onboarding / quickstart — external-agent connect-surface (Bettor r932/r935 kit task card).
+  // External agent: any Kaspa wallet → post an offer → observed. 3 blocks: 5-step quickstart + live faucet + external-offer board.
+  fastify.get('/onboard', async (request, reply) => {
+    return reply.view('onboard.eta', {
+      _page: 'onboard',
+      pageTitle: 'Join KANet TN12',
     });
   });
 }

@@ -11,25 +11,24 @@
     <!-- 1. Chat -->
     <a href="/chat"
       class="flex items-center px-3 py-2.5 rounded-lg text-sm transition-colors <%= it._page === 'chat' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-500 hover:bg-warm-100 hover:text-ink-700' %>">
-      Chat
+      聊天
     </a>
 
     <!-- 2. Contacts (= 社交圈 + Discovery 合并) -->
     <a href="/contacts"
       class="flex items-center px-3 py-2.5 rounded-lg text-sm transition-colors <%= ['contacts','explore','discovered','network','handshakes'].includes(it._page) ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-500 hover:bg-warm-100 hover:text-ink-700' %>">
-      Contacts
+      联系人
     </a>
 
     <!-- 3. Portfolio -->
     <a href="/portfolio"
       class="flex items-center px-3 py-2.5 rounded-lg text-sm transition-colors <%= ['portfolio','ledger'].includes(it._page) ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-500 hover:bg-warm-100 hover:text-ink-700' %>">
-      Portfolio
+      资产
     </a>
 
-    <!-- 4. Agents ▶ (= Overview / Identity / Behavior / Roles ▶ Broker/Oracle) -->
-    <% const _isAgent = ['agent','agent-v2','agent-status','agent-history','story','graph','skills','approvals'].includes(it._page); %>
-    <% const _inRoles = ['broker','oracle'].includes(it._agentTab); %>
-    <div x-data="{ open: <%= _isAgent ? 'true' : 'false' %>, roles: <%= _inRoles ? 'true' : 'false' %> }">
+    <!-- 4. Agents ▶ (Owner 2026-06-06 钦定: 删 Roles 层, Oracle/Broker 提到 Overview 后平级 — 这俩是系统关键) -->
+    <% const _isAgent = ['agent','agent-v2','agent-status','agent-history','story','graph','skills','approvals','broker','oracle'].includes(it._page); %>
+    <div x-data="{ open: <%= _isAgent ? 'true' : 'false' %> }">
       <button @click="open = !open"
         class="flex items-center justify-between w-full px-3 py-2.5 rounded-lg text-sm transition-colors <%= _isAgent ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-500 hover:bg-warm-100 hover:text-ink-700' %>">
         <span>Agents</span>
@@ -38,7 +37,15 @@
       <div x-show="open" x-transition class="mt-1 space-y-0.5">
         <a href="/agent"
           class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._page === 'agent' && !it._agentTab ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
-          Overview
+          总览
+        </a>
+        <a href="/oracle"
+          class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._page === 'oracle' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
+          Oracle
+        </a>
+        <a href="/broker"
+          class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._page === 'broker' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
+          Broker
         </a>
         <a href="/agent?tab=card"
           class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._agentTab === 'card' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
@@ -48,22 +55,6 @@
           class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._page === 'skills' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
           Behavior
         </a>
-        <!-- Roles ▶ (Broker / Oracle) -->
-        <button @click="roles = !roles"
-          class="flex items-center justify-between w-full px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= _inRoles ? 'text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
-          <span>Roles</span>
-          <span class="text-[10px] transition-transform" :class="roles ? 'rotate-90' : ''">›</span>
-        </button>
-        <div x-show="roles" x-transition class="space-y-0.5">
-          <a href="/agent?tab=broker"
-            class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-7 <%= it._agentTab === 'broker' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
-            Broker
-          </a>
-          <a href="/agent?tab=oracle"
-            class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-7 <%= it._agentTab === 'oracle' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
-            Oracle
-          </a>
-        </div>
         <!-- Approvals badge (= 等审批入口) -->
         <a href="/approvals"
           class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._page === 'approvals' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
@@ -72,23 +63,42 @@
       </div>
     </div>
 
-    <!-- 5. Markets ▶ (= Exchange + Predictions only, 删 Overview/CEX/OTC/Stocks/More) -->
-    <% const _isMarket = ['exchange','predictions','predictions-pool-create','predictions-oracle-registry','predictions-quick','market','market-overview','market-v2','trading','trading-v2','stocks','hyperliquid','aevo','aave'].includes(it._page); %>
+    <!-- KANet-UI 2026-06-07 Track B (Bettor r335 关 1 PASS): 市场 ▶ 内 '预测市场 ▶' 嵌套子菜单 (建市场/我的市场 收进) -->
+    <% const _isMarket = ['exchange','predictions','predictions-pool-create','predictions-pool-detail','my-markets','oracle','market','trading','stocks','hyperliquid','aevo','aave'].includes(it._page); %>
+    <% const _isPrediction = ['predictions','predictions-pool-create','predictions-pool-detail','my-markets'].includes(it._page); %>
     <div x-data="{ open: <%= _isMarket ? 'true' : 'false' %> }">
       <button @click="open = !open"
         class="flex items-center justify-between w-full px-3 py-2.5 rounded-lg text-sm transition-colors <%= _isMarket ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-500 hover:bg-warm-100 hover:text-ink-700' %>">
-        <span>Markets</span>
+        <span>市场</span>
         <span class="text-[10px] transition-transform" :class="open ? 'rotate-90' : ''">›</span>
       </button>
       <div x-show="open" x-transition class="mt-1 space-y-0.5">
         <a href="/exchange"
           class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._page === 'exchange' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
-          Exchange
+          兑换
         </a>
-        <a href="/predictions"
-          class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= ['predictions','predictions-pool-create','predictions-oracle-registry','predictions-quick'].includes(it._page) ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
-          Predictions
-        </a>
+        <!-- 预测市场 ▶ 嵌套 -->
+        <div x-data="{ pred: <%= _isPrediction ? 'true' : 'false' %> }">
+          <button @click="pred = !pred"
+            class="flex items-center justify-between w-full px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= _isPrediction ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
+            <span>预测市场</span>
+            <span class="text-[9px] transition-transform" :class="pred ? 'rotate-90' : ''">›</span>
+          </button>
+          <div x-show="pred" x-transition class="mt-0.5 space-y-0.5">
+            <a href="/predictions"
+              class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-8 <%= ['predictions','predictions-pool-detail'].includes(it._page) ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
+              看市场
+            </a>
+            <a href="/predictions/pool/create"
+              class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-8 <%= it._page === 'predictions-pool-create' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
+              建市场
+            </a>
+            <a href="/my-markets"
+              class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-8 <%= it._page === 'my-markets' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
+              我的市场
+            </a>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -97,12 +107,12 @@
     <div class="pt-4 mt-4 border-t border-warm-200" x-data="{ open: <%= _isSettings ? 'true' : 'false' %> }">
       <button @click="open = !open"
         class="flex items-center justify-between w-full px-3 py-2 rounded-lg text-sm transition-colors <%= _isSettings ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
-        <span>Settings</span>
+        <span>设置</span>
         <span class="text-[10px] transition-transform" :class="open ? 'rotate-90' : ''">›</span>
       </button>
       <div x-show="open" x-transition class="mt-1 space-y-0.5">
-        <a href="/settings"
-          class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._page === 'settings' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
+        <a href="/network"
+          class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._page === 'network' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
           Network
         </a>
         <a href="/relays"
@@ -117,14 +127,6 @@
           class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 text-ink-400 hover:bg-warm-100 hover:text-ink-600"
           @click.prevent="document.querySelector('select[name=&quot;lang&quot;]')?.focus()">
           Language
-        </a>
-        <a href="/about"
-          class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 text-ink-400 hover:bg-warm-100 hover:text-ink-600">
-          Security
-        </a>
-        <a href="/about"
-          class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._page === 'about' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
-          About
         </a>
       </div>
     </div>

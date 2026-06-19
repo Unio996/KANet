@@ -26,12 +26,34 @@
 import { sqlite } from '../db/client.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { sendCommandAsync } from './relay-manager.js';
+import { buildDeriveVotePrompt } from './derivevote-prompt.mjs';
 
-const TICK_INTERVAL_MS = 5 * 60 * 1000;  // 5 min, 跟 settler 同
+// J2-tn r382 (Bettor 16:29 钦定): TICK_INTERVAL_MS env-configurable. Default 5min mainnet,
+// demo 期 .env 设 PREDICTION_VOTER_TICK_SEC=60 (= 1min) 提速 5x 流水. 与 settler 同 pattern.
+const TICK_INTERVAL_MS = (parseInt(process.env.PREDICTION_VOTER_TICK_SEC, 10) || 300) * 1000;
 const STARTUP_GRACE_MS = 45 * 1000;        // 45s grace (= settler 30s + 15s 错峰)
 
 let timer = null;
 let running = false;
+
+// Bettor r472 (P0 incident 2026-06-10): per-(key) log throttle. Stuck offers in a permanent
+// condition (e.g. collecting_sigs with invalid/undefined phase2_winner) were re-warned every
+// tick → 201MB log over days → bash fork exhaustion → whole Console tree torn down. Throttle
+// repeated identical warnings to once per WARN_THROTTLE_MS per key. Pure logging guard — no
+// vote/sign logic or DB state changed. In-memory; resets on restart (acceptable).
+const _warnThrottle = new Map(); // key -> last-logged epoch ms
+const WARN_THROTTLE_MS = 10 * 60 * 1000;
+function warnThrottled(key, msg) {
+  const now = Date.now();
+  const last = _warnThrottle.get(key) || 0;
+  if (now - last < WARN_THROTTLE_MS) return;
+  _warnThrottle.set(key, now);
+  // opportunistic prune so the map can't grow unbounded across long uptimes
+  if (_warnThrottle.size > 2000) {
+    for (const [k, t] of _warnThrottle) { if (now - t > WARN_THROTTLE_MS) _warnThrottle.delete(k); }
+  }
+  console.warn(msg);
+}
 
 export function startPredictionVoterCron() {
   if (timer) return;
@@ -273,6 +295,11 @@ async function processVoter(voter) {
 // Pool oracle Phase 2 (settle TX sig) deferred — depends on settler Sub 2d shape.
 async function processPoolMarket(voter) {
   let voted = 0, skipped = 0, errored = 0;
+  // J2-tn r357 (Owner 钦定 J2 implementer 域 + Bettor 撤她 708c16f → J2 canonical commit):
+  // r337 把 oracle_relay_ids 改存 addresses (= committee_addresses for cross-node DM). voter
+  // 之前 L283/L291 用 voter.id (UUID) 匹配 → 永不命中 → voted=0 settle 永卡. 改 voter.address
+  // 匹 oracle_relay_ids 数组 (= addresses). voter.id 保留给 IPC (get_pubkey/sendCommandAsync/
+  // ecdsa_sign). 同 r337 e1468f0 设计未传到所有 reader, 这是 r337 漏迁的 reader.
   const markets = sqlite.prepare(`
     SELECT id, maker_relay_id, outcome_market_source, outcome_token_id, outcome_condition_id, outcome_side,
            resolution_rule_spec, protocol_status, deadline, oracle_relay_ids
@@ -280,7 +307,7 @@ async function processPoolMarket(voter) {
     WHERE oracle_relay_ids LIKE ?
       AND protocol_status = 'verifying'
       AND deadline <= ?
-  `).all(`%"${voter.id}"%`, Math.floor(Date.now() / 1000));
+  `).all(`%"${voter.address}"%`, Math.floor(Date.now() / 1000));
   if (!markets.length) return { voted, skipped, errored };
 
   for (const market of markets) {
@@ -288,7 +315,7 @@ async function processPoolMarket(voter) {
       // Defense in depth: re-parse JSON to confirm match (LIKE may false-positive on prefix collision)
       let oracleIds;
       try { oracleIds = JSON.parse(market.oracle_relay_ids || '[]'); } catch { oracleIds = []; }
-      if (!Array.isArray(oracleIds) || !oracleIds.includes(voter.id)) { skipped++; continue; }
+      if (!Array.isArray(oracleIds) || !oracleIds.includes(voter.address)) { skipped++; continue; }
 
       // Skip if already voted for this market
       const existing = sqlite.prepare(`
@@ -318,6 +345,21 @@ async function processPoolMarket(voter) {
         } catch {}
         skipped++;
         continue;
+      }
+
+      // J2-tn voter-flood-skip (b) (Bettor 裁, unblock cutover): poll 层 fetch 前 skip 无有效 source 的 junk
+      //   市场 — 无 data_source_canonical / 无 known extractor(findExtractor null) → skip 不 fetch
+      //   (abstain-not-guess; 消 :3300 ext-pool-v07 junk 每 tick fetch 403/missing 拖垮事件循环 → Console 无响应)。
+      //   polymarket 走 gamma(derivePolymarketVote) 非 extractor → 例外不 skip。determinism-clean 两节点同码、
+      //   additive 不破现有判定(有效 source 照常走 deriveVote)。
+      if (market.outcome_market_source !== 'polymarket') {
+        let _vfSpec = null;
+        try { _vfSpec = JSON.parse(market.resolution_rule_spec || '{}'); } catch {}
+        const _vfUrl = _vfSpec?.data_source_canonical;
+        const { findExtractor: _vfFind } = await import('../lib/oracle-evidence-extractors.mjs');
+        if (!_vfUrl || typeof _vfUrl !== 'string' || !_vfFind(_vfUrl)) {
+          skipped++; continue;  // 无 data_source_canonical / 无 known extractor → skip 不 fetch
+        }
       }
 
       // deriveVote adapter — pass market as offer-shaped object (= reuse same deriveVote)
@@ -357,9 +399,13 @@ async function processPoolMarket(voter) {
         market_id: market.id,
         voter_relay_id: voter.id,
         voter_pubkey: voterXOnlyPubkey,
-        outcome: voteResult.outcome,
+        outcome: voteResult.outcome,  // 'YES' | 'NO' | 'ABSTAIN' (= J2-tn r412 Oracle 框架 spec)
         evidence_url: voteResult.evidence_url || null,
         evidence_hash: evidenceHash,
+        // J2-tn wave1 (顺序2, 交叠点 J2 先): 源轴 field_hash 进签名 payload 防篡改。observe-only —
+        //   ESPN 结构化源有值, 否则 null。NWT 顺序4 双轴 gate 消费 (委员各自 field_hash 一致才计入 tally)。
+        field_hash: voteResult.field_hash || null,
+        extractor_kind_used: voteResult.extractor_kind_used || null,  // r412: audit trail
         vote_timestamp: new Date().toISOString(),
         epoch: 1,  // Oracle v0.3 sub 3 v2 (= J1 #4 C3/C4 fix)
       };
@@ -376,32 +422,61 @@ async function processPoolMarket(voter) {
       }
       const votePayload = { ...unsignedPayload, signature };
 
-      // DM maker_relay (= settler aggregator path)
+      // J2-tn r366 (J1 r350 catch): cross-node ingested markets have maker_relay_id='cross-node:<pk>'
+      // sentinel → lookup fails → previously errored++ → 投票被跳. 但 broadcast vote 走 voter.id
+      // 不依赖 maker address (= onchain path 不 DM aggregator). 仅 warn + 继续 broadcast.
       const makerRow = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(market.maker_relay_id);
       if (!makerRow?.address) {
-        console.warn(`[prediction-voter:pool] maker_relay ${market.maker_relay_id.slice(0,8)} has no address`);
+        console.log(`[prediction-voter:pool] maker_relay ${market.maker_relay_id.slice(0,16)} no local address (cross-node ingest), proceed broadcast-only`);
+      }
+      // Bettor r95 cross-node hardening: broadcast vote ONCHAIN (= every node's Scout can ingest).
+      // Producer side per spec: relay emits pool_oracle_vote_v1 protocol message to kanet-prediction
+      // channel. (Per Bettor r98: type name MUST match actual payload.t value at L356 above —
+      // 'pool_oracle_vote_v1', NOT 'kanet_oracle_vote_v1' from Bettor r95 spec draft. J2 consumer
+      // filter must key on the actual payload t string to avoid silent-fail no-ingest.)
+      // Real Kaspa txid replaces the prior synthetic 'pool_oracle_vote:...' string so cross-node
+      // dedup-by-txid works (consumer-side Scout filter on remote nodes recreates the same
+      // chain_events row from the same on-chain TX). Closes the most-severe c-class gap I
+      // diagnosed in r165 (vote was 100% local DB before this change).
+      let voteTxid;
+      try {
+        const bcastResult = await sendCommandAsync(voter.id, {
+          type: 'send_broadcast',
+          channel: 'kanet-prediction',
+          message: JSON.stringify(votePayload),
+        });
+        voteTxid = bcastResult?.txId;
+        if (!voteTxid) throw new Error(`broadcast returned no txId: ${JSON.stringify(bcastResult).slice(0, 200)}`);
+      } catch (bcastErr) {
+        console.error(`[prediction-voter:pool] vote broadcast fail voter=${voter.name} market=${market.id.slice(0,12)}: ${bcastErr.message}`);
         errored++;
         continue;
       }
+
+      // DM maker_relay as fast-path (= settler picks up via local DB even before Scout ingest
+      // catches the broadcast). Not load-bearing for cross-node consistency — broadcast above is.
+      // Best-effort: failure logs warn but doesn't error out the vote (broadcast already onchain).
       try {
         await sendCommandAsync(voter.id, {
           type: 'send_message',
           target: makerRow.address,
           message: JSON.stringify(votePayload),
         });
-        voted++;
       } catch (sendErr) {
-        console.error(`[prediction-voter:pool] DM fail voter=${voter.name} market=${market.id.slice(0,12)}: ${sendErr.message}`);
-        errored++;
-        continue;
+        console.warn(`[prediction-voter:pool] DM fast-path fail voter=${voter.name} market=${market.id.slice(0,12)}: ${sendErr.message} (broadcast succeeded, settler will catch via Scout ingest)`);
       }
+      voted++;
 
-      // chain_events 'pool_oracle_vote' audit trail
-      const syntheticTxid = `pool_oracle_vote:${voter.id.slice(0,8)}:${market.id.slice(0,12)}:${Date.now()}`;
+      // chain_events 'pool_oracle_vote' — REAL txid from broadcast above (Bettor r95).
+      // INSERT OR IGNORE for idempotent dedup (Scout ingest on this same node may also INSERT
+      // an identical txid row; one wins, second no-ops). chain_events.txid UNIQUE constraint
+      // is the dedup anchor.
+      // J2-tn r367 (J1 r354 catch): makerRow may be null for cross-node markets (= maker_relay_id
+      // 'cross-node:<pk>' sentinel). Use null to_address fallback so INSERT doesn't throw.
       sqlite.prepare(`
-        INSERT INTO chain_events (id, txid, event_type, from_address, to_address, payload, observed_by, observed_at)
+        INSERT OR IGNORE INTO chain_events (id, txid, event_type, from_address, to_address, payload, observed_by, observed_at)
         VALUES (?, ?, 'pool_oracle_vote', ?, ?, ?, 'prediction-voter', CURRENT_TIMESTAMP)
-      `).run(randomUUID(), syntheticTxid, voter.address, makerRow.address, JSON.stringify(votePayload));
+      `).run(randomUUID(), voteTxid, voter.address, makerRow?.address || null, JSON.stringify(votePayload));
 
       // sub 3 v2 (Oracle v0.3 R7): oracle_history row write per vote.
       // Tier determined via oracle_registry.tier (= sub 1 schema). audit_mode = tier1/tier2/tier3.
@@ -432,19 +507,20 @@ async function processPoolMarket(voter) {
 // Phase 3 e2e caught: signing only input 0 left oracle bond UTXO inputs unsigned → kaspad reject.
 async function processPoolTxSign(voter) {
   let signed = 0, skipped = 0, errored = 0;
+  // J2-tn r357: 同 processPoolMarket — r337 后 oracle_relay_ids 存 addresses, 匹 voter.address.
   const markets = sqlite.prepare(`
     SELECT id, oracle_relay_ids, metadata
     FROM pool_markets
     WHERE protocol_status = 'collecting_sigs'
       AND oracle_relay_ids LIKE ?
-  `).all(`%"${voter.id}"%`);
+  `).all(`%"${voter.address}"%`);
   if (!markets.length) return { signed, skipped, errored };
 
   for (const market of markets) {
     try {
       let oracleIds;
       try { oracleIds = JSON.parse(market.oracle_relay_ids || '[]'); } catch { oracleIds = []; }
-      if (!Array.isArray(oracleIds) || !oracleIds.includes(voter.id)) { skipped++; continue; }
+      if (!Array.isArray(oracleIds) || !oracleIds.includes(voter.address)) { skipped++; continue; }
 
       let meta;
       try { meta = JSON.parse(market.metadata || '{}'); } catch { meta = {}; }
@@ -477,6 +553,17 @@ async function processPoolTxSign(voter) {
 
       const spineInputCount = meta.phase2_spine_input_count || 1;
       let signedAny = false;
+      // J2-tn r362: Get voter pubkey once per market (= used in each sign_resp envelope).
+      let voterPk = null;
+      try {
+        const pkRes = await sendCommandAsync(voter.id, { type: 'get_pubkey' });
+        voterPk = String(pkRes?.x_only_pubkey || '').toLowerCase();
+      } catch {}
+      if (!voterPk || voterPk.length !== 64) {
+        console.warn(`[prediction-voter:pool-txsign] voter=${voter.name} get_pubkey fail, skip market=${market.id.slice(0,12)}`);
+        skipped++;
+        continue;
+      }
       // Sign each spine input (0..spineInputCount-1) — all locked by PoolSpine redeem
       for (let inputIdx = 0; inputIdx < spineInputCount; inputIdx++) {
         // Skip if already signed this input for this market
@@ -499,10 +586,13 @@ async function processPoolTxSign(voter) {
           continue;
         }
 
+        // J2-tn r362 (Bettor 13:16 钦定): voter_pubkey 字段 (= 跨节点 canonical), voter_relay_id
+        // 保留 transitional 双写 (= settler accepts either during migration window).
         const respPayload = JSON.stringify({
           t: 'kanet_pool_oracle_tx_sign_resp_v1',
           market_id: market.id,
-          voter_relay_id: voter.id,
+          voter_pubkey: voterPk,
+          voter_relay_id: voter.id,  // transitional, deprecated
           input_index: inputIdx,
           winner: meta.phase2_winner,
           signature: signResult.signature,
@@ -537,12 +627,13 @@ async function processPoolTxSign(voter) {
 // (= silent in Gap 1B, OR not-signing in Gap 1A's 0/1 default pair) skips.
 async function processPoolRefundDisagreementTxSign(voter) {
   let signed = 0, skipped = 0, errored = 0;
+  // J2-tn r357: 同 processPoolMarket / processPoolTxSign — r337 后 oracle_relay_ids 存 addresses.
   const markets = sqlite.prepare(`
     SELECT id, oracle_relay_ids, metadata
     FROM pool_markets
     WHERE protocol_status = 'collecting_sigs'
       AND oracle_relay_ids LIKE ?
-  `).all(`%"${voter.id}"%`);
+  `).all(`%"${voter.address}"%`);
   if (!markets.length) return { signed, skipped, errored };
 
   for (const market of markets) {
@@ -555,8 +646,9 @@ async function processPoolRefundDisagreementTxSign(voter) {
         continue;
       }
 
+      // J2-tn r357: oracle_relay_ids 存 addresses post-r337, 匹 voter.address.
       const oracleIds = JSON.parse(market.oracle_relay_ids || '[]');
-      if (!Array.isArray(oracleIds) || !oracleIds.includes(voter.id)) { skipped++; continue; }
+      if (!Array.isArray(oracleIds) || !oracleIds.includes(voter.address)) { skipped++; continue; }
 
       const myIndex = oracleIds.indexOf(voter.id);
       const signingPair = meta.refund_disagreement_signing_pair;
@@ -623,7 +715,7 @@ async function processPoolRefundDisagreementTxSign(voter) {
 // deriveVote — Phase 3a MVP dispatcher per Bettor r219 spec.
 //   1) Polymarket gamma (= polymarket.com source) — direct resolved price check
 //   2) kanet_native (= any other data_source_canonical URL) — fetch + LLM consensus (Qwen3.6-LAN)
-async function deriveVote(offer) {
+export async function deriveVote(offer) {
   // Parse resolution_rule_spec → data_source_canonical (= judge URL)
   let spec = null;
   try { spec = JSON.parse(offer.resolution_rule_spec || '{}'); } catch {}
@@ -634,12 +726,32 @@ async function deriveVote(offer) {
     return derivePolymarketVote(offer);
   }
 
-  // Branch 2: kanet_native (= Phase 3a MVP Bettor r219 spec — LLM consensus)
-  if (offer.outcome_market_source === 'kanet_native') {
+  // Branch 2: kanet_native (= Phase 3a MVP Bettor r219 spec — LLM consensus).
+  // J2-tn r381 (Bettor 16:16 catch — #10 voted=0 实因): widen to startsWith('kanet_')
+  // 接受 kanet_v07_test / kanet_v06_demo / 等变种. 所有 kanet_* 都走同 LLM consensus
+  // 路径 (= deriveKanetNativeVote 内部按 data_source_canonical URL 路由). 之前精确
+  // string match 漏未来变种 (= 这次 create-v07 用户传 outcome_market_source=kanet_v07_test
+  // 撞 unsupported → vote derive 拒 → 委员 0 投票 → settle 死循环).
+  if (offer.outcome_market_source === 'kanet_native'
+      || (typeof offer.outcome_market_source === 'string' && offer.outcome_market_source.startsWith('kanet_'))) {
     return deriveKanetNativeVote(offer, spec);
   }
 
-  return { ok: false, reason: `unsupported outcome_market_source: ${offer.outcome_market_source}` };
+  // Branch 3: registry-driven (J2-tn — 根治 GAP-1 "espn 病换地方": deriveVote 此前按
+  // outcome_market_source enum 硬列 (polymarket/kanet_*/coingecko), 漏 espn → 撞 L728
+  // unsupported (voter log 实证 360 次 deriveVote fail). 抽取器 (extractEspnEvidence) 早就
+  // 存在且 canonical 是有效 ESPN URL, 唯一缺的是路由. 改为: 任何 source 只要
+  // data_source_canonical 命中 KNOWN_EXTRACTORS (findExtractor) → 走同一 deriveKanetNativeVote
+  // LLM-consensus 路径 (= registry 单一源真相, 覆盖 espn/coingecko/未来 BBC/Reuters/AP,
+  // 不再 per-source enum 硬列, 杜绝"加 extractor 漏加 deriveVote 分支"分叉再发生).
+  if (sourceUrl) {
+    const { findExtractor } = await import('../lib/oracle-evidence-extractors.mjs');
+    if (findExtractor(sourceUrl)) {
+      return deriveKanetNativeVote(offer, spec);
+    }
+  }
+
+  return { ok: false, reason: `unsupported outcome_market_source: ${offer.outcome_market_source} (data_source_canonical ${sourceUrl || '(none)'} 无 known extractor)` };
 }
 
 // P0 UMA finalization gate (Bettor r137/r139 Owner 钦定, J2 r70 propose):
@@ -657,11 +769,20 @@ const UMA_FINALIZATION_WINDOW_MS = process.env.UMA_FINALIZATION_WINDOW_MS !== un
 // dependency. Any mainnet deployment that creates a real settlement dependency on UMA
 // contracts is the deploying party's responsibility, not the protocol author's.
 export async function derivePolymarketVote(offer) {
-  if (!offer.outcome_token_id) {
-    return { ok: false, reason: 'missing outcome_token_id' };
+  // J2-tn r407 Track D Phase B Bettor r357 关1 PASS — gamma query by condition_id 兜底.
+  // pool_markets 路径 outcome_token_id='KAS_native' 占位非真 clob token → 原走 clob_token_ids
+  // 查 gamma 永空. 改: 优先用 outcome_condition_id 查 gamma (condition_ids 字段, polymarket
+  // 接受), fallback outcome_token_id (= exchange_offers 路径仍兼容).
+  // 48h finalization gate 保留 (条件 1 Bettor r357), 仅查询 key 切换.
+  const hasRealTokenId = offer.outcome_token_id && offer.outcome_token_id !== 'KAS_native';
+  const hasConditionId = offer.outcome_condition_id;
+  if (!hasRealTokenId && !hasConditionId) {
+    return { ok: false, reason: 'missing outcome_token_id and outcome_condition_id' };
   }
   try {
-    const url = `https://gamma-api.polymarket.com/markets?clob_token_ids=${encodeURIComponent(offer.outcome_token_id)}&closed=true`;
+    const url = hasRealTokenId
+      ? `https://gamma-api.polymarket.com/markets?clob_token_ids=${encodeURIComponent(offer.outcome_token_id)}&closed=true`
+      : `https://gamma-api.polymarket.com/markets?condition_ids=${encodeURIComponent(offer.outcome_condition_id)}&closed=true`;
     const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
     if (!res.ok) return { ok: false, reason: `gamma HTTP ${res.status}` };
     const arr = await res.json();
@@ -713,28 +834,124 @@ export async function derivePolymarketVote(offer) {
 //   silent_timeout → refund / forfeit_1 per area 4. operator can manually override
 //   via pool.js vote endpoint before silent_timeout if they reach a determination.
 //   Qwen Rule 11: enable_thinking=false 必加 (= 漏会 60-120s timeout)
+// 403-flood root-fix (KANet-UI single-writer, Owner MUST-DO 2026-06-16): per-URL cache of FINAL
+// (immutable) extracted source evidence. Without it the voter (parallel-judgment audit loop + main
+// vote) re-fetches already-resolved games every tick → self-inflicted egress burst → ESPN
+// token-bucket 403 → cross-node committee members can't vote → quorum stalls (= fgx2k 2/5 实事故).
+// Determinism guard (NWT review): ONLY clean evidence is cached, and extractEvidence returns clean
+// ONLY when the game is FINAL (null = not-final → ABSTAIN, never cached). So no pre-final transient
+// is ever stored → no stale-cache fork; cached value = same immutable source data both nodes fetch
+// → same evidence → same vote. whole-repo (both nodes' voter, per cross-node-whole-repo-sync).
+const _finalEvidenceCache = new Map();  // url → { evidence_text, cachedAt }
+const FINAL_EVIDENCE_TTL_MS = 6 * 60 * 60 * 1000;  // 6h — final game results are immutable; bounds memory
+
 export async function deriveKanetNativeVote(offer, spec) {
-  const url = spec?.data_source_canonical;
+  let url = spec?.data_source_canonical;
   if (!url || typeof url !== 'string') {
     return { ok: false, reason: 'kanet_native missing data_source_canonical URL in resolution_rule_spec' };
+  }
+
+  // J2-tn r353 (Bettor 6/5 11:58 catch + J1 r329 实证): cross-host voter 各节点 Console
+  // port 可能不同 (= :3200 vs :3300). 若 URL 含 localhost/127.0.0.1, 改用本地 Console 实际
+  // port (= process.env.PORT). 各节点 fetch own local test-oracle, 同 condition string 同
+  // outcome → 共识. mock test-oracle deterministic by condition suffix '_yes'/'_no'.
+  if (url.match(/^https?:\/\/(127\.0\.0\.1|localhost)/i)) {
+    const localPort = process.env.PORT || '3200';
+    url = url.replace(/(127\.0\.0\.1|localhost):\d+/i, `127.0.0.1:${localPort}`);
   }
 
   // Phase 3a MVP: 若 URL 不是 http(s) (= 是 free-text 描述 like "Phase 3a真 round-trip 测试"),
   // skip fetch + LLM 用 spec 全文 + market metadata 推 outcome.
   let evidence_text = '';
   let evidence_url = url;
+  let field_hash = null;  // J2-tn wave1: 结构化字段 hash (observe-only; ESPN 结构化源有, 否则 null; NWT 源轴 quorum 闸输入)
+  let _structured = null;  // J2-tn wave1 wire: extractStructuredFields 结果 {fields, field_hash} (judgeLine 路由用)
   if (url.startsWith('http://') || url.startsWith('https://')) {
+    // 403-flood root-fix: serve FINAL evidence from cache (skip fetch) so audit loop + main vote
+    // don't re-hit the source every tick. Cache holds ONLY final results (populated below), so a hit
+    // is always an immutable resolved-game outcome — never a pre-final transient.
+    const _cachedFinal = _finalEvidenceCache.get(url);
+    if (_cachedFinal && (Date.now() - _cachedFinal.cachedAt) < FINAL_EVIDENCE_TTL_MS) {
+      evidence_text = _cachedFinal.evidence_text;
+      field_hash = _cachedFinal.field_hash || null;
+      _structured = _cachedFinal.structured || null;
+    } else {
     try {
       const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
       if (!res.ok) return { ok: false, reason: `kanet_native source HTTP ${res.status}` };
-      evidence_text = (await res.text()).slice(0, 2000);  // 上限防 prompt context 撑爆
+      const rawText = await res.text();
+      // J2-tn r403 Track D Bettor r340 关1 PASS — 证据抽取器 (source-aware clean evidence).
+      // ESPN/BBC/etc structured 源 → extractEvidence 解析关键字段 (winner/score) → < 500 字符
+      // 喂 LLM 干净 prompt 而非截断 raw JSON. 抽取器返 null = 比赛未 final/抽取失败 → fallback
+      // raw slice(0,2000) 保 deriveKanetNativeVote 现 behavior (= 不破 free-text path).
+      // J2-tn r412 Oracle 框架 spec Bettor r404 关1 PASS — 删 guess-fallback ABSTAIN-not-guess.
+      // 之前: extractor null → fallback rawText.slice(0,2000) → LLM 瞎猜 (= w0s3m 4/5 错判根因).
+      // 现在: extractor null + known source → ABSTAIN (= 结果未 final), unknown source → ABSTAIN (= 不在 extractor list).
+      // 仅 extractor 返 clean evidence 才喂 LLM.
+      // J2-tn r421 (Bettor r441 钉1): registry 单一源 — findExtractor 取代 inline regex.
+      // 防 prevet 端 + voter 端各自硬编码 list → 分叉 (= espn 病换地方).
+      try {
+        const { extractEvidence, findExtractor, extractStructuredFields } = await import('../lib/oracle-evidence-extractors.mjs');
+        const clean = extractEvidence(url, rawText);
+        if (clean === null) {
+          // ABSTAIN: 弃权 — extractor 不出 clean evidence. 区分两种 reason:
+          if (findExtractor(url)) {
+            return { ok: true, outcome: 'ABSTAIN', extractor_kind_used: 'known-source-not-final', reason: 'extractor returned null at known source (= 结果未 final 或 game 数据缺)' };
+          }
+          return { ok: true, outcome: 'ABSTAIN', extractor_kind_used: 'no-extractor-match', reason: `URL ${url} not in extractor known-list (= 框架不识此源)` };
+        }
+        evidence_text = clean;
+        // J2-tn wave1: 同步抽结构化字段 field_hash (observe-only; 仅 ESPN 结构化源, 否则 null,
+        // 不阻塞 NL 判定路). field_hash = NWT 源轴 quorum 闸输入 (顺序4 gate 消费, 第一波 observe-only).
+        _structured = extractStructuredFields(url, rawText);
+        field_hash = _structured?.field_hash || null;
+        // FINAL (clean evidence ⟺ game over) → cache so subsequent ticks skip the fetch (stops the
+        // self-DoS burst). Only immutable resolved-game evidence reaches here (null = not-final above).
+        _finalEvidenceCache.set(url, { evidence_text: clean, field_hash, structured: _structured, cachedAt: Date.now() });
+      } catch (e) {
+        // Defensive: extractor 模块自身异常 → ABSTAIN (= 不假装能判).
+        console.warn(`[deriveKanetNative] extractor exception ${e.message}, ABSTAIN`);
+        return { ok: true, outcome: 'ABSTAIN', extractor_kind_used: 'extractor-exception', reason: `extractor exception: ${e.message?.slice(0,100)}` };
+      }
     } catch (e) {
       return { ok: false, reason: `kanet_native fetch fail: ${e.message}` };
+    }
     }
   } else {
     // free-text description path — 用 spec 5 字段 作 evidence
     evidence_text = JSON.stringify(spec);
     evidence_url = `kanet_native_spec:${offer.id}`;
+  }
+
+  // J2-tn wave1 wire (Owner 核心交付): 市场有结构化 resolution_predicate + ESPN 结构化字段
+  //   → D-L1 judgeLine 确定性算术判 (winner/margin/total 整数定点, 消 LLM off-by-one;
+  //   真赛实测 495/495=100% winner+让分+大小球, 独立 ground-truth)。命中则跳 LLM。
+  //   无 resolution_predicate → 走旧 LLM 路 (additive 不破现有非结构化判定)。
+  //   judgeLine ABSTAIN (字段不足/不合法) → 落 abstain, 不退回 LLM (abstain-not-guess)。
+  {
+    let _predicate = null;
+    try {
+      const _specObj = (spec && typeof spec === 'object') ? spec : JSON.parse(String(spec || '{}'));
+      _predicate = _specObj?.resolution_predicate || null;
+    } catch {}
+    if (_predicate) {
+      // 有 resolution_predicate = maker 选了结构化算术判路 → 必走 judgeLine 或 abstain, 【不 fall LLM】
+      //   (J1 finding: structured 路已选, extract 失败再交 LLM 会猜 = 破 abstain-not-guess)。
+      if (!_structured?.fields) {
+        return { ok: true, outcome: 'ABSTAIN', extractor_kind_used: 'judgeline-no-fields',
+          reason: 'resolution_predicate 存在但结构化字段抽取失败 (未 final / 非结构化源), abstain-not-guess 不退 LLM' };
+      }
+      const { judgeLine } = await import('../lib/judgeline.mjs');
+      const verdict = judgeLine(_predicate, _structured.fields);  // _structured = {final,fields,field_hash}, 传 .fields 非 wrapper
+      if (verdict === 'YES' || verdict === 'NO') {
+        return { ok: true, outcome: verdict, evidence_url, field_hash,
+          extractor_kind_used: 'judgeline-deterministic',
+          evidence_raw: JSON.stringify({ fields: _structured.fields, predicate: _predicate, verdict, engine: 'D-L1-judgeLine' }) };
+      }
+      // judgeLine ABSTAIN (predicate 字段不足/不合法) → 落 abstain, 不退回 LLM (abstain-not-guess)
+      return { ok: true, outcome: 'ABSTAIN', extractor_kind_used: 'judgeline-abstain',
+        reason: 'judgeLine ABSTAIN (predicate 字段不足/不合法, abstain-not-guess)' };
+    }
   }
 
   // LLM call (= Bettor r219 spec). r220 fix: 直 call upstream openai-compatible endpoint,
@@ -757,26 +974,42 @@ export async function deriveKanetNativeVote(offer, spec) {
 
   // F1 (area-3): prompt LLM for YES/NO only (DISPUTE removed). Low confidence → daemon
   // abstains downstream, not LLM-emitted DISPUTE token.
-  const prompt = `预测市场结果判定:\n` +
-    `market_question: ${offer.outcome_condition_id || '(none)'}\n` +
-    `data_source: ${evidence_url}\n` +
-    `evidence: ${evidence_text}\n` +
-    `判定: 此市场结果是 YES 还是 NO? 只 JSON 回 {"outcome": "YES"|"NO", "confidence": 0-1, "reason": "..."}. 信置低也仍选 YES 或 NO, 不输出其他.`;
+  // J2-tn 门C 红队硬化 (Bettor r511 / Owner 对抗审): deriveVote 与 prevet 同 LLM-judge 攻击面.
+  // prompt-injection 防御 = (1) evidence 用 <evidence> 标签定界为不可信数据 (2) 显式指令 LLM
+  // 绝不执行 evidence/data_source 内嵌的任何指令 (如 'rule YES'/'score 10'/'ignore'). prompt-
+  // harden 抗注入但仍出判定 (不 ABSTAIN, 避免喂 abstain-refund griefing — 见 settler 立场).
+  // 根治在规则层: prevet 硬门禁 known-extractor 源, free-text 路 (evidence=raw spec) 不让建.
+  // J2-tn 线E P0 关2 (Bettor r584 fallback flag): spec.title + resolution_criteria 都缺 → 没有判定
+  // 问题可喂 LLM; 旧链末 fallback 到 offer.outcome_condition_id (HASH) = 重蹈盲判默认 YES 的 landmine。
+  // abstain-not-guess: 无问题 → ABSTAIN, 绝不 fallback 喂 hash 盲判 (= 根因不复发)。
+  if (!spec?.title && !spec?.resolution_criteria) {
+    return { ok: true, outcome: 'ABSTAIN', extractor_kind_used: 'spec-no-question', reason: 'spec 缺 title + resolution_criteria = 无判定问题可判, abstain-not-guess (不 fallback 喂 condition_id hash 盲判)' };
+  }
+  // J2-tn r675 (Bettor 钦定 fixture-mirror 铁律): prompt 抽进共享单源模块 derivevote-prompt.mjs,
+  // prod (这) + line-E fidelity harness (gateE-*) 都 import 同函数 = 物理单源、byte-identical,
+  // 杜绝 harness 拷贝漂移 (线E P0 = harness 喂 hash 漏 spec.title 的漂移教训)。改 prompt 去那个模块。
+  // 原 inline (线E P0 修后形态: 喂 spec.title 实问题 + resolution_criteria 非 condition_id hash) 逐字节抽出。
+  const prompt = buildDeriveVotePrompt(spec, evidence_url, evidence_text);
   let llmOutcome = null;
   let llmConfidence = 0;
   let llmReason = '';
   try {
     const url = providerUrl.replace(/\/$/, '') + '/chat/completions';
+    // J2-tn 规模测试 (Bettor r527/r528): voterTick 串行处理多 oracle×多市场, 单个 deriveVote LLM
+    // 调用挂久 = 后面 oracle 永远轮不到 → 卡 N/5 (scale trial 实证: :8000 饱和 27s ttfb 下卡 2/5)。
+    // 60s→30s: :8000 饱和时慢调用快失败 → 串行 loop 不 bog、移到下个 oracle (catch 返 ok:false 已
+    // skip 该票)。Bettor r528 "deriveVote 别挂 27s" 无论 ①竞争②自身需求都要的 robustness。
+    // 注: 这只让 loop 不卡; 票实际落地仍需 :8000 有容量 (= seeder-down 腾负载 + 长远更多 LLM 容量)。
     const llmRes = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      signal: AbortSignal.timeout(60_000),
+      signal: AbortSignal.timeout(30_000),
       body: JSON.stringify({
         model: providerModel || undefined,
         messages: [{ role: 'user', content: prompt }],
         chat_template_kwargs: { enable_thinking: false },  // Qwen Rule 11 必加
         response_format: { type: 'json_object' },
-        temperature: 0.1,
+        temperature: 0,  // 门C echo-slash premise: 生产 deriveVote 严格确定 (temp0.1 实测 5/5+12/12 确定, temp0 strictly-more-deterministic, prior 3/3 clean)
         max_tokens: 200,
       }),
     });
@@ -806,6 +1039,7 @@ export async function deriveKanetNativeVote(offer, spec) {
     ok: true,
     outcome: llmOutcome,
     evidence_url,
+    field_hash,  // J2-tn wave1: observe-only, null if 非 ESPN 结构化源 (NWT 源轴 quorum 闸输入)
     evidence_raw: JSON.stringify({ evidence_text: evidence_text.slice(0, 500), llm_confidence: llmConfidence, llm_reason: llmReason }),
   };
 }
@@ -837,8 +1071,11 @@ async function handleTxSignReq(voter, offer) {
   // PB-S8-1 byzantine 防: verify own Phase 1 vote matches request winner
   const winner = parseInt(meta.phase2_winner, 10);
   if (winner !== 0 && winner !== 1) {
-    console.warn(`[prediction-voter] handleTxSignReq invalid winner offer=${offer.id.slice(0,8)}`);
-    return { signed: false, skipped: false };
+    // Permanent condition for this offer (winner won't self-heal). Throttle the warn so a
+    // stuck offer can't spam the log every tick. Treat as skipped (not errored) — re-attempting
+    // is pointless. Bettor r472.
+    warnThrottled(`invalid-winner:${offer.id}`, `[prediction-voter] handleTxSignReq invalid winner offer=${offer.id.slice(0,8)} (throttled 10min)`);
+    return { signed: false, skipped: true };
   }
   const myVoteRow = sqlite.prepare(`
     SELECT payload FROM chain_events

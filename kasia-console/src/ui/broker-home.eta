@@ -1,0 +1,424 @@
+<%~ include('partials/page-open', { _page: 'broker', pageTitle: 'Broker', ...it }) %>
+
+<!--
+  Broker home — Gap 1 (Owner UI buildout, Bettor r29 LOCK).
+  Role-home 模板 5 公共块 (Bettor r28 refine ①): 角色身份 / 收入 / 状态 / 配置 / 历史.
+  Subsume: /agent?tab=broker → 此页 (Iron Rule "建=取代非新增", 页数净减).
+  Data 源: /api/kanet-broker/markets/:id + /api/kanet-broker/earnings/:id (J2 r111 ship).
+  oracle home 用同 5 块结构, 后续 commit 建.
+-->
+
+<style>
+  .rh-display { font-family: 'Fraunces', Georgia, serif; font-feature-settings: 'opsz' 36; }
+  .rh-block { @apply bg-white rounded-lg border border-warm-200 p-5; }
+  .rh-block-title { @apply text-[10px] uppercase tracking-wider text-ink-400 mb-3 flex items-center gap-1.5; }
+  .rh-block-dot { @apply w-1.5 h-1.5 rounded-full; }
+  .rh-stat-label { @apply text-[10px] uppercase tracking-wider text-ink-400; }
+  .rh-stat-value { @apply text-lg font-semibold text-ink-700 tabular-nums; }
+  .rh-divider { @apply border-t border-warm-100 my-3; }
+</style>
+
+<div class="p-6" x-data="brokerHome()" x-cloak>
+
+  <!-- LOADING SKELETON -->
+  <div x-show="loading" class="space-y-4">
+    <div class="skeleton" style="width:200px;height:36px;border-radius:8px;"></div>
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div class="skeleton" style="height:140px;border-radius:8px;"></div>
+      <div class="skeleton" style="height:140px;border-radius:8px;"></div>
+    </div>
+  </div>
+
+  <!-- S-A: 注册 gateway (Bettor r627) — 始终显 (无 broker 时唯一内容; 有 broker 时'注册更多') -->
+  <div x-show="!loading" class="rh-block mb-5">
+    <div class="rh-block-title"><span class="rh-block-dot bg-brand-500"></span><span x-text="agents.length === 0 ? '注册成为 Gateway' : '注册更多 Gateway'"></span></div>
+    <p class="text-xs text-ink-500 mb-3">把一个 relay 注册成 gateway(撮合者): 它可被 user-facing 市场设为 broker, 按 fee% 收取撮合费。gateway 不碰用户资金, 只收费。</p>
+    <div x-show="registerableRelays().length === 0" class="text-xs text-ink-400">暂无可注册的 relay (已是 broker/oracle 的不能注册; broker/oracle 互斥)。</div>
+    <div x-show="registerableRelays().length > 0" class="flex flex-wrap items-end gap-3">
+      <div>
+        <label class="rh-stat-label block mb-1">选 relay</label>
+        <select x-model="registerRelayId" class="px-3 py-2 border border-warm-300 rounded-lg text-sm bg-white min-w-[180px]">
+          <option value="">— 选一个 relay —</option>
+          <template x-for="rl in registerableRelays()" :key="rl.id">
+            <option :value="rl.id" x-text="rl.name + ' (' + (rl.role || 'general') + ')'"></option>
+          </template>
+        </select>
+      </div>
+      <button @click="registerGateway()" :disabled="registering || !registerRelayId"
+        class="px-4 py-2 rounded-lg bg-brand-500 hover:bg-brand-600 disabled:opacity-50 text-white text-sm font-medium">
+        <span x-show="!registering">注册成 Gateway</span><span x-show="registering">注册中…</span>
+      </button>
+    </div>
+    <div x-show="registerError" class="text-xs text-red-500 mt-2" x-text="registerError"></div>
+    <div x-show="registerMsg" class="text-xs text-emerald-600 mt-2" x-text="registerMsg"></div>
+    <p class="text-[10px] text-ink-400 mt-2">注: gateway 收款地址 = relay 自带地址(须 P2PK)。oracle relay 不能注册成 gateway(角色互斥)。fee% 在创建市场时按笔设。</p>
+  </div>
+
+  <!-- MAIN -->
+  <template x-if="!loading && agents.length > 0">
+    <div class="space-y-5">
+
+      <!-- AGENT SELECTOR -->
+      <div class="flex items-center justify-between mb-2">
+        <div class="flex items-center gap-3">
+          <select x-model.number="selectedIdx" @change="loadData()"
+            class="px-4 py-2 border border-warm-300 rounded-lg text-sm font-medium text-ink-600 bg-white focus:ring-2 focus:ring-brand-200 focus:border-brand-400 focus:outline-none">
+            <template x-for="(a, idx) in agents" :key="a.id">
+              <option :value="idx" x-text="a.name"></option>
+            </template>
+          </select>
+          <span class="text-[10px] uppercase tracking-wider text-ink-400">Broker</span>
+        </div>
+        <div x-show="agent" class="flex items-center gap-3">
+          <button class="text-[11px] font-mono text-ink-400 hover:text-brand-500 cursor-pointer"
+            @click="copyAddr()" x-text="shortAddr(agent?.address)" :title="agent?.address"></button>
+          <span class="text-sm font-bold text-ink-700 tabular-nums" x-text="agent?.kasBalance != null ? agent.kasBalance.toFixed(4) + ' KAS' : '--'"></span>
+        </div>
+      </div>
+
+      <!-- ① 角色身份 (role identity) -->
+      <div class="rh-block">
+        <div class="rh-block-title"><span class="rh-block-dot bg-brand-500"></span>角色身份</div>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div>
+            <div class="rh-stat-label">名称</div>
+            <div class="rh-stat-value" x-text="agent?.name"></div>
+          </div>
+          <div>
+            <div class="rh-stat-label">角色</div>
+            <div class="rh-stat-value">Broker</div>
+            <div class="text-[10px] text-ink-400 mt-0.5" x-show="agent?.role">role: <span x-text="agent.role"></span></div>
+          </div>
+          <div>
+            <div class="rh-stat-label">收款地址</div>
+            <div class="font-mono text-xs text-ink-600 break-all mt-1" x-text="agent?.address"></div>
+          </div>
+        </div>
+        <!-- S-A: 注销 gateway 角色 (Bettor r627) -->
+        <div class="mt-4 pt-3 border-t border-warm-100 flex items-center gap-3">
+          <button @click="revokeGateway(agent.id)" :disabled="revoking"
+            class="px-3 py-1.5 rounded border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-50 text-xs font-medium">
+            <span x-show="!revoking">注销 gateway 角色</span><span x-show="revoking">注销中…</span>
+          </button>
+          <span class="text-[10px] text-ink-400">撤销后不再是 broker、不再收 fee</span>
+          <span x-show="revokeError" class="text-xs text-red-500" x-text="revokeError"></span>
+        </div>
+      </div>
+
+      <!-- ② 收入 (earnings, J2 /api/kanet-broker/earnings 数据源) -->
+      <div class="rh-block">
+        <div class="rh-block-title"><span class="rh-block-dot bg-green-500"></span>收入</div>
+        <div x-show="earningsLoading" class="text-xs text-ink-300">加载中...</div>
+        <template x-if="!earningsLoading && earnings">
+          <div>
+            <div class="grid grid-cols-3 gap-4">
+              <div>
+                <div class="rh-stat-label">已结算</div>
+                <div class="rh-stat-value rh-display" x-text="fmtKas(earnings.realized?.total_kas)"></div>
+                <div class="text-[10px] text-ink-400 mt-0.5">KAS · 实际到账</div>
+              </div>
+              <div>
+                <div class="rh-stat-label">未结算 (待 settle)</div>
+                <div class="rh-stat-value rh-display text-amber-700" x-text="fmtKas(earnings.pending?.total_kas)"></div>
+                <div class="text-[10px] text-ink-400 mt-0.5">KAS</div>
+              </div>
+              <div>
+                <div class="rh-stat-label">已退还 (refund)</div>
+                <div class="rh-stat-value rh-display text-ink-400" x-text="fmtKas(earnings.refunded?.total_kas)"></div>
+                <div class="text-[10px] text-ink-400 mt-0.5">KAS</div>
+              </div>
+            </div>
+            <div class="rh-divider"></div>
+            <div class="text-[10px] uppercase tracking-wider text-ink-400 mb-2">分域明细</div>
+            <div class="space-y-1.5">
+              <template x-for="d in byDomain()" :key="d.domain">
+                <div class="flex items-center justify-between text-xs">
+                  <span class="text-ink-600 uppercase" x-text="d.domain"></span>
+                  <span class="tabular-nums text-ink-700">
+                    <span x-text="fmtKas(d.realized_kas)"></span> 已结
+                    <span class="text-ink-400 ml-2" x-show="d.pending_kas > 0">+ <span x-text="fmtKas(d.pending_kas)"></span> 待</span>
+                  </span>
+                </div>
+              </template>
+              <div x-show="byDomain().length === 0" class="text-xs text-ink-300">暂无分域数据</div>
+            </div>
+          </div>
+        </template>
+        <div x-show="earningsError" class="text-xs text-red-500" x-text="earningsError"></div>
+      </div>
+
+      <!-- ③ 状态 (status, J2 /api/kanet-broker/markets 数据源) -->
+      <div class="rh-block">
+        <div class="rh-block-title"><span class="rh-block-dot bg-blue-500"></span>状态</div>
+        <div x-show="marketsLoading" class="text-xs text-ink-300">加载中...</div>
+        <template x-if="!marketsLoading && markets">
+          <div>
+            <div class="grid grid-cols-3 gap-4">
+              <div>
+                <div class="rh-stat-label">active 市场</div>
+                <div class="rh-stat-value" x-text="markets.totals?.pool_active ?? 0"></div>
+              </div>
+              <div>
+                <div class="rh-stat-label">已结算</div>
+                <div class="rh-stat-value" x-text="markets.totals?.pool_settled ?? 0"></div>
+              </div>
+              <div>
+                <div class="rh-stat-label">refund/cancel</div>
+                <div class="rh-stat-value text-ink-400" x-text="markets.totals?.pool_refunded ?? 0"></div>
+              </div>
+            </div>
+          </div>
+        </template>
+      </div>
+
+      <!-- ④ 配置 (config) -->
+      <div class="rh-block">
+        <div class="rh-block-title"><span class="rh-block-dot bg-purple-500"></span>配置</div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+          <div>
+            <div class="rh-stat-label">默认 broker fee% (新建市场用)</div>
+            <div class="flex items-center gap-2 mt-1">
+              <input type="number" x-model.number="feeInput" min="0" max="99.99" step="0.5" class="w-20 px-2 py-1 border border-warm-300 rounded text-sm">
+              <span class="text-ink-500">%</span>
+              <button @click="saveFee()" :disabled="feeSaving" class="px-2 py-1 rounded bg-brand-500 hover:bg-brand-600 disabled:opacity-50 text-white text-[11px] font-medium">
+                <span x-text="feeSaving ? '存…' : '保存'"></span>
+              </button>
+            </div>
+            <div class="text-[10px] text-ink-400 mt-1">seeder/UI 新建市场读此默认 (替硬编码). 已建市场 fee 不变.</div>
+            <div x-show="feeMsg" class="text-[10px] text-emerald-600 mt-0.5" x-text="feeMsg"></div>
+            <div x-show="feeError" class="text-[10px] text-red-500 mt-0.5" x-text="feeError"></div>
+          </div>
+          <div>
+            <div class="rh-stat-label">收款地址</div>
+            <div class="font-mono text-ink-700 break-all mt-1" x-text="agent?.address"></div>
+            <div class="text-[10px] text-ink-400 mt-0.5">所有跨域 broker fee 进此地址.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ⑤ 历史 (history — markets list) -->
+      <div class="rh-block">
+        <div class="rh-block-title"><span class="rh-block-dot bg-ink-400"></span>历史</div>
+        <div x-show="marketsLoading" class="text-xs text-ink-300">加载中...</div>
+        <template x-if="!marketsLoading && markets">
+          <div>
+            <div x-show="(markets.pool_markets || []).length === 0 && (markets.retail_dex_orders || []).length === 0" class="text-xs text-ink-300 py-3">
+              此 broker 尚未撮合任何市场/订单.
+            </div>
+            <div class="space-y-1.5">
+              <template x-for="m in (markets.pool_markets || []).slice(0, 10)" :key="m.id">
+                <div class="flex items-center justify-between text-xs py-1.5 border-b border-warm-100 last:border-0">
+                  <div class="flex-1 min-w-0">
+                    <div class="text-ink-700 truncate" :title="specTitle(m.resolution_rule_spec) || m.id" x-text="(specTitle(m.resolution_rule_spec) || m.id).slice(0, 64)"></div>
+                    <div class="text-[10px] text-ink-400 mt-0.5">
+                      <span class="uppercase">POOL</span> · <span x-text="m.protocol_status"></span> · stake <span x-text="m.maker_stake_kas ?? '?'"></span> KAS · fee <span x-text="((m.broker_fee_pct ?? 0)/100).toFixed(2)"></span>%
+                    </div>
+                  </div>
+                </div>
+              </template>
+              <template x-for="o in (markets.retail_dex_orders || []).slice(0, 5)" :key="o.id">
+                <div class="flex items-center justify-between text-xs py-1.5 border-b border-warm-100 last:border-0">
+                  <div class="flex-1 min-w-0">
+                    <div class="text-ink-700 truncate" x-text="(o.label || o.id).slice(0, 64)"></div>
+                    <div class="text-[10px] text-ink-400 mt-0.5">
+                      <span class="uppercase">RETAIL</span> · <span x-text="o.state"></span> · fee <span x-text="o.broker_fee_kas ?? '?'"></span> KAS
+                    </div>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </div>
+        </template>
+      </div>
+
+    </div>
+  </template>
+</div>
+
+<script>
+function brokerHome() {
+  return {
+    loading: true,
+    agents: [],
+    selectedIdx: 0,
+    get agent() { return this.agents[this.selectedIdx] || null; },
+    earnings: null, earningsLoading: false, earningsError: '',
+    markets: null, marketsLoading: false, marketsError: '',
+    // S-A gateway 注册/注销 (Bettor r627): 全 relay 列表 + 注册/注销 state
+    allRelays: [],
+    registerRelayId: '', registerFeePct: 2, registering: false, registerError: '', registerMsg: '',
+    revoking: false, revokeError: '',
+    // Lane③ fee 编辑 (Bettor r654): gateway 默认 fee% (新建市场用)
+    feeInput: 2, feeSaving: false, feeMsg: '', feeError: '',
+
+    fmtKas(n) {
+      const x = parseFloat(n);
+      if (!Number.isFinite(x)) return '0';
+      return x.toFixed(4);
+    },
+
+    // KANet-UI 2026-06-11 (Bettor r618): 分域明细 = 从 earnings.realized/pending 的 per-domain 值构 (pool/retail 2 行).
+    // 端点返 realized.pool_kas/retail_kas + pending.pool_kas/retail_kas (非 by_domain 数组).
+    byDomain() {
+      const e = this.earnings;
+      if (!e) return [];
+      const rows = [];
+      for (const dom of ['pool', 'retail']) {
+        const realized = parseFloat(e.realized?.[dom + '_kas'] || 0);
+        const pending = parseFloat(e.pending?.[dom + '_kas'] || 0);
+        const refunded = parseFloat(e.refunded?.[dom + '_kas'] || 0);
+        if (realized > 0 || pending > 0 || refunded > 0) rows.push({ domain: dom, realized_kas: realized, pending_kas: pending });
+      }
+      return rows;
+    },
+
+    // KANet-UI 2026-06-11 (Bettor r594/r595): resolution_rule_spec 是 JSON {title, data_source_canonical, ...},
+    // 列表显干净 title 非 raw JSON。复刻 tg-bot/prediction-menu.mjs:87-98 specTitle (Alpine 客户端无法 import
+    // server-side, 两份拷贝 — 逻辑改要同步两处)。fallback strip http(s):// URL 防 data_source_canonical 内部 URL 泄漏。
+    specTitle(spec) {
+      if (!spec) return '';
+      const s = String(spec).trim();
+      if (s.startsWith('{')) {
+        try {
+          const obj = JSON.parse(s);
+          if (typeof obj.title === 'string' && obj.title.trim()) return obj.title.trim();
+        } catch (e) {}
+      }
+      return s.replace(/https?:\/\/\S+/g, '').trim();
+    },
+    shortAddr(a) {
+      if (!a) return '';
+      return a.slice(0, 14) + '...' + a.slice(-6);
+    },
+    copyAddr() {
+      if (!this.agent?.address) return;
+      navigator.clipboard.writeText(this.agent.address).catch(() => {});
+    },
+
+    // S-A gateway 注册/注销 (Bettor r627): 复用 /api/relay/:id/role (S1 守门), 零新端点.
+    // 可注册 relay = 非 broker + 非 oracle (互斥 UI 前置; 后端 S1 硬拦兜底, 非 P2PK 也由 S1 拒+优雅回显).
+    registerableRelays() {
+      return this.allRelays.filter(r => !(r.role === 'broker' || r.is_dex_broker) && !r.is_oracle);
+    },
+    async registerGateway() {
+      if (!this.registerRelayId) { this.registerError = '请先选一个 relay'; return; }
+      this.registering = true; this.registerError = ''; this.registerMsg = '';
+      try {
+        const r = await fetch(`/api/relay/${encodeURIComponent(this.registerRelayId)}/role`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ role: 'broker' }),
+        });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          this.registerError = j.message || j.error || ('注册失败 (HTTP ' + r.status + ')'); // S1: role_conflict / address_not_p2pk 优雅回显
+        } else {
+          this.registerMsg = '注册成功! 该 relay 现在是 gateway, user-facing 市场可设它收 broker fee.';
+          this.registerRelayId = '';
+          await this.init();
+        }
+      } catch (e) {
+        this.registerError = '注册请求失败: ' + (e?.message || e);
+      } finally {
+        this.registering = false;
+      }
+    },
+    async revokeGateway(relayId) {
+      if (!confirm('确认注销这个 gateway 角色? 撤销后该 relay 不再是 broker、不再收 broker fee.')) return;
+      this.revoking = true; this.revokeError = '';
+      try {
+        const r = await fetch(`/api/relay/${encodeURIComponent(relayId)}/role`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ role: 'general' }),
+        });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) { this.revokeError = j.message || j.error || ('注销失败 (HTTP ' + r.status + ')'); }
+        else { await this.init(); }
+      } catch (e) {
+        this.revokeError = '注销请求失败: ' + (e?.message || e);
+      } finally {
+        this.revoking = false;
+      }
+    },
+
+    async init() {
+      try {
+        // /api/agent/profile returns array of relays with role / is_dex_broker / adapter info
+        // (R-1 audit fix: /api/relays was 404 silent, agent selector 跑空 — Owner UI audit 2026-05-30).
+        const r = await fetch('/api/agent/profile');
+        const j = await r.json();
+        this.allRelays = Array.isArray(j) ? j : []; // S-A: 全 relay 给注册选
+        this.agents = this.allRelays
+          .filter(x => x.role === 'broker' || x.is_dex_broker)
+          .map(x => ({ ...x, kasBalance: null }));
+        if (this.agents.length > 0) await this.loadData();
+      } catch (e) {
+        console.error('load broker agents fail:', e);
+      } finally {
+        this.loading = false;
+      }
+    },
+
+    async saveFee() {
+      const a = this.agent;
+      if (!a) return;
+      const bps = Math.round((this.feeInput ?? 0) * 100); // % → basis points
+      this.feeSaving = true; this.feeMsg = ''; this.feeError = '';
+      try {
+        const r = await fetch(`/api/relay/${a.id}/broker-fee`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fee_pct: bps }),
+        });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) { this.feeError = j.message || j.error || ('保存失败 (HTTP ' + r.status + ')'); }
+        else { this.feeMsg = '已保存 ' + (bps / 100) + '% (新建市场生效)'; a.default_broker_fee_pct = bps; }
+      } catch (e) {
+        this.feeError = '保存请求失败: ' + (e?.message || e);
+      } finally {
+        this.feeSaving = false;
+      }
+    },
+
+    async loadData() {
+      const a = this.agent;
+      if (!a) return;
+      this.feeInput = (a.default_broker_fee_pct ?? 200) / 100; // bps → % 预填
+      this.feeMsg = ''; this.feeError = '';
+      // fetch balance + earnings + markets in parallel
+      this.earningsLoading = true; this.marketsLoading = true;
+      this.earnings = null; this.markets = null;
+      this.earningsError = ''; this.marketsError = '';
+
+      const fetchJson = async (url) => {
+        const r = await fetch(url);
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      };
+
+      try {
+        const [bal, earn, mkts] = await Promise.allSettled([
+          fetchJson(`/api/relay/${a.id}/balance`),
+          fetchJson(`/api/kanet-broker/earnings/${a.id}`),
+          fetchJson(`/api/kanet-broker/markets/${a.id}`),
+        ]);
+        if (bal.status === 'fulfilled') {
+          a.kasBalance = (typeof bal.value === 'number') ? bal.value : (bal.value?.balance ?? null);
+        }
+        if (earn.status === 'fulfilled') {
+          this.earnings = earn.value;
+        } else {
+          this.earningsError = '收入接口报错: ' + (earn.reason?.message || 'unknown');
+        }
+        if (mkts.status === 'fulfilled') {
+          this.markets = mkts.value;
+        } else {
+          this.marketsError = '市场接口报错: ' + (mkts.reason?.message || 'unknown');
+        }
+      } finally {
+        this.earningsLoading = false; this.marketsLoading = false;
+      }
+    },
+  };
+}
+</script>
+
+<%~ include('partials/page-close', it) %>

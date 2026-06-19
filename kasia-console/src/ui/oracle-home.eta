@@ -1,0 +1,654 @@
+<%~ include('partials/page-open', { _page: 'oracle', pageTitle: '仲裁人中心', ...it }) %>
+
+<!--
+  KANet-UI 2026-06-07 Track C (Bettor r335b 设计 关 1 PASS):
+  弃旧 2 jargon tab (信任系统/我的 oracle), 改 3 段 (= 仲裁人中心):
+    段 1: 仲裁人名册 (observer 视角, Owner 5 维度 大白话)
+    段 2: 进行中裁决 (de-jargon 旧 ② 表格)
+    段 3: 我注册仲裁人 (operator 视角)
+  钉死 (Bettor 设计 §3): 0 shadow → '暂无评分' 不假分; licensed_domains 全 null → '未分领域执照'; testnet 测试币不报经济价值.
+  Endpoints (现有, 0 backend 改):
+    /api/oracle/registry             — 段 1 名册底
+    /api/oracle-pool/chain-snapshot  — 段 1 质押状态 (stake_locked)
+    /api/oracle/:id/reputation       — 段 1 工作/盈利 (total_reward; accuracy 永显'暂无')
+    /api/pool/markets?status=...     — 段 2 进行中
+    /api/agent/profile               — 段 3 我的 agent list
+-->
+
+<style>
+  .ar-display { font-family: 'Fraunces', Georgia, serif; }
+  .ar-card { @apply bg-white rounded-lg border border-warm-200 p-4 hover:border-brand-300 transition; }
+  .ar-pill { @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium; }
+  .ar-pill-good { @apply bg-emerald-50 text-emerald-700 border border-emerald-200; }
+  .ar-pill-warn { @apply bg-amber-50 text-amber-700 border border-amber-200; }
+  .ar-pill-mute { @apply bg-warm-50 text-ink-500 border border-warm-200; }
+  .ar-section-title { @apply text-xs uppercase tracking-wider text-ink-500 font-semibold mb-3 flex items-center gap-2; }
+  .ar-section-dot { @apply w-2 h-2 rounded-full; }
+  .ar-stat-label { @apply text-[10px] text-ink-400 uppercase tracking-wider; }
+  .ar-stat-value { @apply text-sm font-medium text-ink-700 tabular-nums; }
+  .ar-empty-note { @apply text-[11px] text-ink-400 italic; }
+</style>
+
+<div class="p-6 max-w-7xl mx-auto" x-data="arbiterHome()" x-init="init()" x-cloak>
+
+  <!-- HEADER -->
+  <div class="mb-6">
+    <h1 class="text-2xl ar-display text-ink-800">仲裁人中心</h1>
+    <p class="text-xs text-ink-400 mt-1">注册 / 管理自家 agent 当仲裁人 (下方 ③ 我的仲裁人). 全网名册 + 在裁题目可展开看.</p>
+  </div>
+
+  <!-- S-C 观察 context 折叠 (Bettor r624 Q3): 段1名册+段2裁决 降次要默认折叠, 操作员主流程(段3)不被挤 -->
+  <div class="mb-4">
+    <button @click="showObserve = !showObserve" class="text-xs text-ink-500 hover:text-brand-600 flex items-center gap-1.5">
+      <span x-text="showObserve ? '▾' : '▸'"></span>
+      <span>观察全网: 仲裁人名册 + 进行中裁决</span>
+      <span class="text-ink-400" x-show="!loading">(<span x-text="oracles.length"></span> 仲裁人 · <span x-text="activeMarkets.length"></span> 在裁)</span>
+    </button>
+  </div>
+  <div x-show="showObserve" x-cloak>
+
+  <!-- ============================================================ -->
+  <!-- 段 1: 仲裁人名册                                                  -->
+  <!-- ============================================================ -->
+  <section class="mb-8">
+    <div class="ar-section-title">
+      <span class="ar-section-dot bg-brand-500"></span>
+      <span>① 仲裁人名册</span>
+      <span class="text-ink-400 normal-case tracking-normal" x-show="!loading">· <span x-text="oracles.length"></span> 位</span>
+    </div>
+
+    <div x-show="loading" class="text-xs text-ink-400 py-4">载入中...</div>
+
+    <div x-show="!loading && oracles.length === 0" class="ar-card text-center py-8">
+      <div class="text-3xl mb-2">📋</div>
+      <p class="text-sm text-ink-500">还没有注册仲裁人.</p>
+      <p class="ar-empty-note mt-1">下面段 3 注册自家 agent 当首批仲裁人.</p>
+    </div>
+
+    <div x-show="!loading && oracles.length > 0" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+      <template x-for="o in oracles" :key="o.relay_node_id">
+        <div class="ar-card">
+          <!-- 谁 -->
+          <div class="flex items-center justify-between mb-2">
+            <div>
+              <div class="text-sm font-medium text-ink-700" x-text="o.name || '(未命名)'"></div>
+              <div class="text-[10px] text-ink-400 mt-0.5" x-text="tierLabel(o.tier)"></div>
+            </div>
+            <div>
+              <span x-show="o.frozen" class="ar-pill ar-pill-warn">⛔ 已冻结</span>
+              <span x-show="!o.frozen && o.status === 'active'" class="ar-pill ar-pill-good">在岗</span>
+              <span x-show="!o.frozen && o.status !== 'active'" class="ar-pill ar-pill-mute" x-text="o.status || '?'"></span>
+            </div>
+          </div>
+
+          <!-- 能裁什么 -->
+          <div class="mb-2 pb-2 border-b border-warm-100">
+            <div class="ar-stat-label">能裁什么</div>
+            <div class="text-xs text-ink-600 mt-1" x-text="capabilitiesLabel(o.capabilities)"></div>
+            <div class="text-[11px] text-ink-500 mt-0.5">
+              <span x-show="(o.licensed_domains || []).length === 0">通用 · 未分领域执照</span>
+              <span x-show="(o.licensed_domains || []).length > 0" x-text="(o.licensed_domains || []).join(' · ')"></span>
+            </div>
+          </div>
+
+          <!-- 工作状态 -->
+          <div class="mb-2 pb-2 border-b border-warm-100">
+            <div class="ar-stat-label">工作状态</div>
+            <div class="flex items-center justify-between mt-1">
+              <span class="text-xs text-ink-600">近期裁决 <span class="ar-stat-value" x-text="o._stats?.total_votes ?? '—'"></span> 次</span>
+              <!-- KANet-UI 2026-06-07 Track C 钉死 (Bettor r335b §3): 0 shadow → '暂无评分' 不造假 -->
+              <span class="ar-pill ar-pill-mute" title="并行判定攒分中, 等 Track D 产出对照 UMA 的 shadow 分">暂无评分</span>
+            </div>
+          </div>
+
+          <!-- 盈利状态 -->
+          <div class="mb-2 pb-2 border-b border-warm-100">
+            <div class="ar-stat-label">盈利状态 (测试币)</div>
+            <div class="text-xs text-ink-600 mt-1">
+              <span x-show="(o._stats?.total_reward ?? 0) > 0">
+                累计仲裁收益 <span class="ar-stat-value" x-text="fmtKas((o._stats.total_reward || 0) / 1e8)"></span> KAS
+              </span>
+              <span x-show="!o._stats || (o._stats.total_reward ?? 0) === 0" class="ar-empty-note">暂无收益</span>
+            </div>
+          </div>
+
+          <!-- 质押状态 -->
+          <div>
+            <div class="ar-stat-label">质押状态</div>
+            <div class="text-xs text-ink-600 mt-1">
+              <span x-show="o._stakeKas > 0">
+                已质押 <span class="ar-stat-value" x-text="fmtKas(o._stakeKas)"></span> KAS
+              </span>
+              <span x-show="!(o._stakeKas > 0)" class="ar-empty-note">未质押</span>
+            </div>
+          </div>
+        </div>
+      </template>
+    </div>
+    <div x-show="oraclesError" class="text-xs text-red-500 mt-3" x-text="oraclesError"></div>
+  </section>
+
+  <!-- ============================================================ -->
+  <!-- 段 2: 进行中裁决                                                  -->
+  <!-- ============================================================ -->
+  <section class="mb-8">
+    <div class="ar-section-title">
+      <span class="ar-section-dot bg-amber-500"></span>
+      <span>② 进行中裁决</span>
+      <span class="text-ink-400 normal-case tracking-normal" x-show="!marketsLoading">· <span x-text="activeMarkets.length"></span> 题</span>
+    </div>
+
+    <div x-show="marketsLoading" class="text-xs text-ink-400 py-4">载入中...</div>
+
+    <div x-show="!marketsLoading && activeMarkets.length === 0" class="ar-card text-center py-6">
+      <p class="ar-empty-note">现在没有进行中的裁决.</p>
+    </div>
+
+    <div x-show="!marketsLoading && activeMarkets.length > 0" class="card overflow-hidden">
+      <table class="w-full text-xs">
+        <thead class="bg-warm-50 text-ink-500 text-[11px]">
+          <tr>
+            <th class="text-left py-2 px-3">题目</th>
+            <th class="text-left py-2 px-3">现在哪步</th>
+            <th class="text-left py-2 px-3">谁在裁</th>
+            <th class="text-right py-2 px-3">抵押 (每位)</th>
+            <th class="text-left py-2 px-3">链上 TX</th>
+          </tr>
+        </thead>
+        <tbody>
+          <template x-for="m in activeMarkets" :key="m.id">
+            <tr class="border-t border-warm-100 hover:bg-warm-50">
+              <td class="py-2 px-3 max-w-[260px] truncate">
+                <a :href="`/predictions/pool/${encodeURIComponent(m.id)}`" :title="m.title" class="text-ink-700 hover:text-brand-500" x-text="m.title || m.id.slice(0, 16)"></a>
+              </td>
+              <td class="py-2 px-3"><span class="ar-pill ar-pill-mute" x-text="statusLabel(m.protocol_status)"></span></td>
+              <td class="py-2 px-3 text-ink-500 text-[11px]" x-text="committeeLabel(m)"></td>
+              <td class="py-2 px-3 text-right tabular-nums text-ink-600" x-text="fmtKas((m.oracle_bond_amount || 0) / 1e8) + ' KAS'"></td>
+              <td class="py-2 px-3">
+                <a x-show="m.settle_txid" :href="`https://explorer-tn12.kaspa.org/txs/${m.settle_txid}`" target="_blank"
+                   class="font-mono text-[10px] text-brand-500 hover:underline" x-text="(m.settle_txid || '').slice(0, 10) + '...'"></a>
+                <span x-show="!m.settle_txid" class="text-ink-300 text-[10px]">未结算</span>
+              </td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  </div><!-- /观察 context 折叠 (段1+段2) -->
+
+  <!-- ============================================================ -->
+  <!-- 段 3: 我注册仲裁人 (= 操作员主流程, 不被观察 context 挤)            -->
+  <!-- ============================================================ -->
+  <section class="mb-4">
+    <div class="ar-section-title">
+      <span class="ar-section-dot bg-purple-500"></span>
+      <span>③ 我注册仲裁人</span>
+    </div>
+
+    <div x-show="agentsLoading" class="text-xs text-ink-400 py-4">载入中...</div>
+
+    <div x-show="!agentsLoading && myAgents.length === 0" class="ar-card text-center py-6">
+      <p class="text-sm text-ink-500 mb-1">还没有 agent 可注册.</p>
+      <a href="/agent" class="text-xs text-brand-500 hover:underline">去 /agent 建一个 →</a>
+    </div>
+
+    <template x-if="!agentsLoading && myAgents.length > 0">
+      <div class="space-y-3">
+        <div class="ar-card">
+          <div class="text-xs text-ink-500 mb-2">从自家 agent 选一个注册为仲裁人:</div>
+          <select x-model="selectedAgentId" @change="onAgentChange()" class="w-full text-sm px-3 py-2 rounded border border-warm-300 bg-white">
+            <option value="">选一个 agent</option>
+            <template x-for="a in myAgents" :key="a.id">
+              <option :value="a.id" x-text="a.name + (isOracleRegistered(a.id) ? ' (已注册仲裁人)' : '')"></option>
+            </template>
+          </select>
+
+          <template x-if="selectedAgent">
+            <div class="mt-4 pt-3 border-t border-warm-200 space-y-3">
+              <!-- 切换 agent 解析链上实况中 -->
+              <div x-show="myStatus.loading" class="text-xs text-ink-400 py-3">解析仲裁人实况中...</div>
+
+              <!-- 已注册 (链上有质押 OR legacy is_oracle): 完整操作员面板 (Bettor r772 ①②) -->
+              <div x-show="!myStatus.loading && myStatus.enrolled">
+                <div class="text-xs font-medium text-ink-700 mb-2">我的仲裁人面板</div>
+                <div class="grid grid-cols-2 gap-3 text-xs">
+                  <div>
+                    <div class="ar-stat-label">级别</div>
+                    <div class="text-ink-600" x-text="tierLabel(myOracleRecord?.tier)"></div>
+                  </div>
+                  <div>
+                    <div class="ar-stat-label">状态</div>
+                    <div class="text-ink-600" x-text="(myOracleRecord?.frozen ? '已冻结' : (myOracleRecord?.status === 'active' ? '在岗' : (myStatus.stakeKas > 0 ? '在岗 (链上质押)' : (myOracleRecord?.status || '在岗'))))"></div>
+                  </div>
+                  <!-- KANet-UI r772 ②: 质押额 (链上 snapshot, 操作员面板原缺) -->
+                  <div>
+                    <div class="ar-stat-label">已质押 (锁仓)</div>
+                    <div class="text-ink-600">
+                      <span x-show="myStatus.stakeKas > 0"><span class="ar-stat-value" x-text="fmtKas(myStatus.stakeKas)"></span> KAS</span>
+                      <span x-show="!(myStatus.stakeKas > 0)" class="ar-empty-note">链上未见质押</span>
+                    </div>
+                  </div>
+                  <!-- KANet-UI r772 ②: 累计仲裁收益 (reputation total_reward, 操作员面板原缺 = Owner '没有收益' 实因) -->
+                  <div>
+                    <div class="ar-stat-label">累计仲裁收益 (测试币)</div>
+                    <div class="text-ink-600">
+                      <span x-show="myStatus.rewardKas > 0"><span class="ar-stat-value" x-text="fmtKas(myStatus.rewardKas)"></span> KAS</span>
+                      <span x-show="!(myStatus.rewardKas > 0)" class="ar-empty-note">暂无收益</span>
+                    </div>
+                  </div>
+                  <div>
+                    <div class="ar-stat-label">能裁什么</div>
+                    <div class="text-ink-600" x-text="capabilitiesLabel(myOracleRecord?.capabilities)"></div>
+                  </div>
+                  <div>
+                    <div class="ar-stat-label">执照域</div>
+                    <div class="text-ink-600">
+                      <span x-show="(myOracleRecord?.licensed_domains || []).length === 0">通用 · 未分领域执照</span>
+                      <span x-show="(myOracleRecord?.licensed_domains || []).length > 0" x-text="(myOracleRecord.licensed_domains || []).join(' · ')"></span>
+                    </div>
+                  </div>
+                </div>
+                <p class="ar-empty-note mt-3">改判定能力 + 执照域: Phase2 上线后开放 (执照按指标自动授, 非手填). 当前 Phase1 走通用执照.</p>
+
+                <!-- ③ 加/重质押 (Bettor r772 ③): re-enroll 到新 lock → 出 p2sh → 自钱包加转 stake -->
+                <div class="mt-4 pt-3 border-t border-warm-200">
+                  <div class="text-xs font-medium text-ink-700 mb-2">加 / 重新质押</div>
+                  <p class="text-[11px] text-ink-500 mb-2">加大质押 = 权重更高 (VRF 抽中概率高). 重新锁仓到新 DAA 块号 → 转 KAS 到出的 P2SH.</p>
+                  <button x-show="!restake.open" @click="restake.open = true; restake.daa = (oracleCurrentDaa || 0) + 60; loadOracleCurrentDaa()"
+                          class="px-3 py-1.5 rounded bg-brand-50 hover:bg-brand-100 text-brand-700 text-xs font-medium">加 / 重新质押 →</button>
+                  <div x-show="restake.open" class="space-y-2 bg-warm-50 rounded p-3 mt-1">
+                    <label class="block text-xs text-ink-600">锁到 DAA 块号 (lock_until_daa)</label>
+                    <input type="number" x-model.number="restake.daa" class="w-full text-sm px-2 py-1.5 rounded border border-warm-300 bg-white">
+                    <p class="text-[11px] text-ink-400">当前 DAA: <span x-text="oracleCurrentDaa ?? '...'"></span></p>
+                    <div class="flex gap-2">
+                      <button @click="submitRestake()" :disabled="restake.submitting || !restake.daa"
+                              class="px-3 py-1.5 rounded bg-brand-500 hover:bg-brand-600 text-white text-xs font-medium disabled:opacity-50">
+                        <span x-text="restake.submitting ? '提交中...' : '确认重质押'"></span></button>
+                      <button @click="restake.open = false" class="px-3 py-1.5 rounded bg-warm-100 hover:bg-warm-200 text-ink-600 text-xs">取消</button>
+                    </div>
+                    <div x-show="restake.error" class="text-[11px] text-red-600 bg-red-50 rounded px-2 py-1" x-text="restake.error"></div>
+                    <div x-show="restake.result" class="space-y-1 bg-emerald-50 rounded px-2 py-1.5 text-[11px]">
+                      <p class="font-semibold text-emerald-700">✓ 已开重质押 — 转 stake 到此 P2SH:</p>
+                      <div class="font-mono break-all text-ink-700" x-text="restake.result?.p2sh_addr"></div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- KANet-UI 2026-06-08 DoD 问 3 (Bettor r373 关 1 PASS, J1 r303 派 (3) endpoint LIVE): 退出仲裁人 -->
+                <div class="mt-4 pt-3 border-t border-warm-200">
+                  <div class="text-xs font-medium text-ink-700 mb-2">退出仲裁人</div>
+                  <p class="text-[11px] text-ink-500 mb-2">退出 = 不再被抽中给市场投票. 须无在岗未结算市场, 且加入已满 24 小时.</p>
+                  <button @click="startUnlock()" :disabled="unlock.checking || unlock.submitting"
+                          class="px-3 py-1.5 rounded bg-red-100 hover:bg-red-200 text-red-700 text-xs font-medium disabled:opacity-50">
+                    <span x-text="unlock.submitting ? '退出中...' : (unlock.checking ? '检查中...' : '退出仲裁人 →')"></span>
+                  </button>
+                  <!-- 错: 在岗 / 冷却未满 / 其他 -->
+                  <div x-show="unlock.error" class="mt-2 text-[11px] bg-red-50 text-red-700 rounded px-2 py-1" x-text="unlock.error"></div>
+                  <!-- 成: 退出请求已广播 (record-level 真撤出; 押金取回 = 后续版本) -->
+                  <div x-show="unlock.result" class="mt-2 text-[11px] bg-emerald-50 text-emerald-700 rounded px-2 py-1">
+                    ✓ 退出请求已广播, 各节点同步后将不再抽你给市场投票.
+                    <a x-show="unlock.result?.txId" :href="'https://explorer-tn12.kaspa.org/txs/' + unlock.result?.txId"
+                       target="_blank" class="font-mono underline ml-1" x-text="unlock.result?.txId?.slice(0,16) + '...'"></a>
+                    <div class="text-ink-400 mt-0.5">押金取回将在后续版本开放 (当前押金未链锁).</div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 未注册 (链上无质押 且 不在 legacy): S-C enroll 表单 (Bettor r633 + r772 ①: gate 改 myStatus.enrolled) -->
+              <div x-show="!myStatus.loading && !myStatus.enrolled" x-init="loadOracleCurrentDaa()">
+                <p class="text-xs text-ink-500 mb-2">该 agent 尚未注册为仲裁人. 注册 = 押 KAS 到链上锁仓 → 成为预言机池一员 → 抽中后给市场投票, 投对得报酬, 偏离共识扣 stake.</p>
+                <!-- enroll 输入 -->
+                <div x-show="!oracleEnrollResult" class="space-y-2 bg-warm-50 rounded p-3">
+                  <label class="block text-xs text-ink-600">锁到 DAA 块号 (lock_until_daa)</label>
+                  <input type="number" x-model.number="oracleEnrollDaa" class="w-full text-sm px-2 py-1.5 rounded border border-warm-300 bg-white" placeholder="e.g. 当前 DAA + 60">
+                  <p class="text-[11px] text-ink-400">锁仓到该 DAA 块号才能取回 stake (退池冷却期, 防 flash 撤池影响投票公正). 当前 DAA: <span x-text="oracleCurrentDaa ?? '...'"></span></p>
+                  <button @click="submitOracleEnroll()" :disabled="oracleEnrolling || !oracleEnrollDaa"
+                          class="px-3 py-1.5 rounded bg-brand-500 hover:bg-brand-600 text-white text-xs font-medium disabled:opacity-50">
+                    <span x-text="oracleEnrolling ? '注册中...' : '注册成仲裁人'"></span>
+                  </button>
+                  <div x-show="oracleEnrollError" class="text-[11px] text-red-600 bg-red-50 rounded px-2 py-1" x-text="oracleEnrollError"></div>
+                </div>
+                <!-- enroll 成功: P2SH 锁仓地址引导 -->
+                <div x-show="oracleEnrollResult" class="space-y-1.5 bg-emerald-50 rounded p-3 text-xs">
+                  <p class="font-semibold text-emerald-700">✓ 注册成功 — 下一步: 用自家钱包转 stake</p>
+                  <div class="text-ink-600">P2SH 锁仓地址 (= stake 转这里):</div>
+                  <div class="font-mono break-all text-ink-700" x-text="oracleEnrollResult?.p2sh_addr"></div>
+                  <p class="text-ink-500">建议 stake ≥ 1 KAS (越多权重越大, VRF 抽中概率高). 转账后等 scanner verify, snapshot 之后池中含此仲裁人.</p>
+                </div>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+    </template>
+  </section>
+
+  <!-- 诚实边界声明 (Bettor 设计 §3 钉死) -->
+  <div class="mt-6 pt-4 border-t border-warm-200 text-[11px] text-ink-400 space-y-1">
+    <div>📌 <strong>准确率</strong>: 现 0 shadow 记录 (= 并行判定攒分中), 等 Track D 产出后才显真分. 严禁占位假分.</div>
+    <div>📌 <strong>执照域</strong>: Phase2 硬 gate 未解, 现全 '通用 · 未分领域执照', 不显 '已毕业 / 可裁长尾'.</div>
+    <div>📌 <strong>测试币</strong>: testnet 仲裁收益是测试币, 不报经济价值.</div>
+  </div>
+</div>
+
+<script>
+function arbiterHome() {
+  return {
+    loading: true,
+    oracles: [],
+    oraclesError: '',
+    marketsLoading: true,
+    activeMarkets: [],
+    agentsLoading: true,
+    myAgents: [],
+    selectedAgentId: '',
+    chainSnapshot: null,    // { leaves: [{pk_x, stake_sompi, ...}] }
+    // KANet-UI 2026-06-08 DoD 问 3 (Bettor r373 关 1 PASS, J1 r303 派 (3)): 退出仲裁人 state
+    unlock: { checking: false, submitting: false, error: '', result: null },
+    // S-C 2026-06-11 (Bettor r633): oracle enroll 搬 /agent → /oracle 段3 (操作员一站注册).
+    oracleEnrollDaa: null, oracleCurrentDaa: null,
+    oracleEnrolling: false, oracleEnrollError: '', oracleEnrollResult: null,
+    // S-C 观察 context 折叠 (Bettor r624 Q3): 段1名册+段2裁决 默认折叠, 操作员主流程(段3)不被挤.
+    showObserve: false,
+    // KANet-UI 2026-06-12 (Bettor r772): 段3 操作员自助控制台 — 对账链上 enroll (非只 legacy /api/oracles).
+    stakeByPk: {},   // pk_x → stake KAS, from chain-snapshot (loadOracles 填)
+    // 选中 agent 的链上仲裁人实况 (enrolled 判定 + 收益 + 质押 + pubkey for 退出).
+    myStatus: { loading: false, enrolled: false, pubkey: null, stakeKas: 0, rewardKas: 0, stats: null },
+    // ③ 加/重质押 state (Bettor r772 ③)
+    restake: { open: false, daa: null, submitting: false, error: '', result: null },
+
+    get selectedAgent() {
+      return this.myAgents.find(a => a.id === this.selectedAgentId) || null;
+    },
+    get myOracleRecord() {
+      if (!this.selectedAgentId) return null;
+      return this.oracles.find(o => o.relay_node_id === this.selectedAgentId) || null;
+    },
+
+    fmtKas(n) {
+      const x = parseFloat(n);
+      if (!Number.isFinite(x)) return '0';
+      return x.toFixed(4);
+    },
+    tierLabel(t) {
+      if (t === 1) return '1 级仲裁人';
+      if (t === 2) return '2 级仲裁人';
+      if (t === 3) return '3 级仲裁人';
+      return '(级别待定 · 未走 registry 注册)';
+    },
+    capabilitiesLabel(caps) {
+      const arr = Array.isArray(caps) ? caps : [];
+      if (arr.length === 0) return '二元 YES/NO 判定';
+      // 已知 capability → 中文
+      const map = { binary_outcome: '二元 YES/NO 判定', multi_outcome: '多选项判定', numeric: '数值判定' };
+      return arr.map(c => map[c] || c).join(' · ');
+    },
+    statusLabel(s) {
+      const m = {
+        pending_oracle_deposits: '等仲裁人接单',
+        pending_oracle_sampling: '抽仲裁人中',
+        pending_oracle_sample: '抽仲裁人中',
+        pending_bettors: '押注中',
+        verifying: '等仲裁人投票',
+        collecting_sigs: '收仲裁人签名',
+        completed: '已结算',
+        cancelled: '已取消',
+        refunded: '已退款',
+      };
+      return m[s] || s || '?';
+    },
+    committeeLabel(m) {
+      // m.committee_pks 是 PK 集 — 抽样后才有; 之前显 '等抽签'
+      if (!m.committee_pks) return '等抽签';
+      try {
+        const arr = typeof m.committee_pks === 'string' ? JSON.parse(m.committee_pks) : m.committee_pks;
+        if (Array.isArray(arr) && arr.length) return arr.length + ' 位 (匿名)';
+      } catch {}
+      return '等抽签';
+    },
+    isOracleRegistered(agentId) {
+      return this.oracles.some(o => o.relay_node_id === agentId);
+    },
+
+    async init() {
+      // 并行拉 3 数据源
+      await Promise.all([
+        this.loadOracles(),
+        this.loadActiveMarkets(),
+        this.loadAgents(),
+      ]);
+    },
+
+    async loadOracles() {
+      this.loading = true;
+      this.oraclesError = '';
+      try {
+        // KANet-UI 2026-06-07 Track C catch: oracle_registry 实空 (= count=0, Bettor 设计 doc Sec1 估算误).
+        // 主源改 /api/oracles (= legacy is_oracle=1, 5 个 active). 再尝试 fetch registry tier/caps (= 缺则默认).
+        const [oraResp, regResp, snapResp] = await Promise.all([
+          fetch('/api/oracles').then(x => x.json()).catch(() => ({ oracles: [] })),
+          fetch('/api/oracle/registry?include_expired=1').then(x => x.json()).catch(() => ({ oracles: [] })),
+          fetch('/api/oracle-pool/chain-snapshot').then(x => x.json()).catch(() => ({ leaves: [] })),
+        ]);
+
+        const baseList = (oraResp.oracles || []);
+        const regList = (regResp.oracles || []);
+        const regById = {};
+        for (const r of regList) regById[r.relay_node_id] = r;
+
+        const stakeByPk = {};
+        if (snapResp?.leaves && Array.isArray(snapResp.leaves)) {
+          for (const l of snapResp.leaves) stakeByPk[l.pk_x] = Number(l.stake_sompi || 0) / 1e8;
+        }
+        // KANet-UI 2026-06-12 (Bettor r772 ①): store stake-by-pk so 段3 操作员面板 can reconcile
+        // a selected agent against the CHAIN snapshot (authoritative enrollment), not just the
+        // legacy /api/oracles list. Fixes Owner '注册后无法删除' (chain-enrolled agent not in legacy
+        // → myOracleRecord null → panel+退出 hidden).
+        this.stakeByPk = stakeByPk;
+
+        const oracles = baseList.map(o => {
+          const reg = regById[o.id] || null;
+          return {
+            relay_node_id: o.id,
+            name: o.name,
+            pubkey: reg?.pubkey || null,
+            tier: reg?.tier || null,                  // null = '(级别待定)' 不假分
+            capabilities: reg?.capabilities || [],    // [] → 默认 '二元 YES/NO 判定'
+            licensed_domains: reg?.licensed_domains || [],
+            frozen: reg?.frozen || false,
+            status: reg?.status || 'active',          // 缺则默认 active (= legacy is_oracle=1)
+            _stats: null,
+            _stakeKas: 0,
+          };
+        });
+
+        // 并行拉每 oracle reputation (= 工作 + 盈利)
+        const repResults = await Promise.all(
+          oracles.map(o => fetch(`/api/oracle/${encodeURIComponent(o.relay_node_id)}/reputation`).then(x => x.json()).catch(() => null))
+        );
+        for (let i = 0; i < oracles.length; i++) {
+          const o = oracles[i];
+          const rep = repResults[i];
+          o._stats = rep?.history || null;
+          // 质押: pubkey 在则查 chain_snapshot; 不在 (= registry 空) 则 0
+          o._stakeKas = (o.pubkey && stakeByPk[o.pubkey]) ? stakeByPk[o.pubkey] : 0;
+        }
+        this.oracles = oracles;
+      } catch (e) {
+        this.oraclesError = '加载仲裁人名册失败: ' + (e.message || e);
+      }
+      this.loading = false;
+    },
+
+    async loadActiveMarkets() {
+      this.marketsLoading = true;
+      try {
+        // 进行中 = pending_oracle_deposits / pending_bettors / verifying / collecting_sigs
+        const r = await fetch('/api/pool/markets?limit=200').then(x => x.json());
+        const all = (r?.markets || []);
+        const activeStatus = new Set(['pending_oracle_deposits', 'pending_oracle_sampling', 'pending_bettors', 'verifying', 'collecting_sigs']);
+        const list = all.filter(m => activeStatus.has(m.protocol_status)).map(m => {
+          let title = m.id;
+          try { const o = JSON.parse(m.resolution_rule_spec || ''); title = o.title || title; } catch {}
+          return { ...m, title };
+        });
+        this.activeMarkets = list;
+      } catch {}
+      this.marketsLoading = false;
+    },
+
+    async loadAgents() {
+      this.agentsLoading = true;
+      try {
+        const r = await fetch('/api/agent/profile').then(x => x.json());
+        const list = Array.isArray(r) ? r : (r.agents || []);
+        this.myAgents = list.filter(a => !a.is_dex_broker);
+      } catch {}
+      this.agentsLoading = false;
+    },
+
+    onAgentChange() {
+      // selectedAgent + myOracleRecord 是 getter, 切换自动 render
+      this.unlock = { checking: false, submitting: false, error: '', result: null };  // 切换 agent 清状态
+      this.oracleEnrollError = ''; this.oracleEnrollResult = null;  // S-C: 切换 agent 清 enroll 状态
+      this.restake = { open: false, daa: null, submitting: false, error: '', result: null };
+      this.loadMyStatus();  // KANet-UI r772 ①②: 对账链上 enroll + 拉收益/质押
+    },
+
+    // KANet-UI 2026-06-12 (Bettor r772 ①②): resolve the selected agent's REAL arbiter status by
+    // reconciling against the chain snapshot (stake) + reputation (reward), not just legacy /api/oracles.
+    // enrolled = has on-chain stake OR is in the legacy oracle list. Drives 段3 panel + 退出 visibility.
+    async loadMyStatus() {
+      this.myStatus = { loading: true, enrolled: false, pubkey: null, stakeKas: 0, rewardKas: 0, stats: null };
+      const agent = this.selectedAgent;
+      if (!agent) { this.myStatus.loading = false; return; }
+      try {
+        const pkResp = await fetch('/api/relay/' + agent.id + '/pubkey').then(r => r.json()).catch(() => null);
+        const pk = pkResp?.x_only_pubkey || null;
+        const stakeKas = (pk && this.stakeByPk && this.stakeByPk[pk]) ? this.stakeByPk[pk] : 0;
+        const rep = await fetch('/api/oracle/' + encodeURIComponent(agent.id) + '/reputation').then(r => r.json()).catch(() => null);
+        const rewardKas = rep?.history?.total_reward ? Number(rep.history.total_reward) / 1e8 : 0;
+        this.myStatus = {
+          loading: false,
+          enrolled: stakeKas > 0 || this.isOracleRegistered(agent.id),
+          pubkey: pk,
+          stakeKas,
+          rewardKas,
+          stats: rep?.history || null,
+        };
+      } catch (e) {
+        this.myStatus.loading = false;
+      }
+    },
+
+    // ③ 加/重质押 (Bettor r772 ③): re-stake = re-enroll 到新 lock_until_daa → 出新 p2sh → 自钱包加转 stake.
+    // 复用 /api/oracle-pool/enroll (链上单源, top-up 转同/新 p2sh 累加 stake). 0 新后端.
+    async submitRestake() {
+      const agent = this.selectedAgent;
+      if (!agent || !this.restake.daa) return;
+      this.restake.submitting = true; this.restake.error = ''; this.restake.result = null;
+      try {
+        const pkResp = await fetch('/api/relay/' + agent.id + '/pubkey').then(r => r.json());
+        if (!pkResp.ok || !pkResp.x_only_pubkey) {
+          this.restake.error = '取 agent 公钥失败: ' + (pkResp.error || '未知错误'); this.restake.submitting = false; return;
+        }
+        const resp = await fetch('/api/oracle-pool/enroll', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ staker_pk_x: pkResp.x_only_pubkey, lock_until_daa: Number(this.restake.daa), signing_relay_id: agent.id }),
+        }).then(r => r.json());
+        if (!resp.ok) { this.restake.error = '重质押失败: ' + (resp.error || '未知错误'); }
+        else { this.restake.result = { p2sh_addr: resp.p2sh_addr, lock_until_daa: resp.lock_until_daa }; }
+      } catch (e) {
+        this.restake.error = '请求异常: ' + (e?.message || String(e));
+      }
+      this.restake.submitting = false;
+    },
+
+    // S-C 2026-06-11 (Bettor r633): oracle enroll 港自 agent-v2.eta L1525-1551 → /oracle 段3.
+    // 复用 POST /api/oracle-pool/enroll (链上单源不双写 is_oracle) + 【保留 signing_relay_id=agent.id】
+    // (J1 #154: 触发 envelope 跨节点广播 → enrollments 表收敛 → poolMerkleRoot 一致)。
+    async loadOracleCurrentDaa() {
+      try {
+        const r = await fetch('/api/oracle-pool/chain-snapshot').then(x => x.json());
+        if (r.ok && r.snapshotDaa) {
+          this.oracleCurrentDaa = r.snapshotDaa;
+          if (!this.oracleEnrollDaa) this.oracleEnrollDaa = r.snapshotDaa + 60;  // 默认 +60 块短期
+        }
+      } catch (e) {}
+    },
+    async submitOracleEnroll() {
+      if (!this.selectedAgent || !this.oracleEnrollDaa) return;
+      this.oracleEnrolling = true; this.oracleEnrollError = ''; this.oracleEnrollResult = null;
+      try {
+        const pkResp = await fetch('/api/relay/' + this.selectedAgent.id + '/pubkey').then(r => r.json());
+        if (!pkResp.ok || !pkResp.x_only_pubkey) {
+          this.oracleEnrollError = '取 agent 公钥失败: ' + (pkResp.error || '未知错误');
+          this.oracleEnrolling = false; return;
+        }
+        const body = {
+          staker_pk_x: pkResp.x_only_pubkey,
+          lock_until_daa: Number(this.oracleEnrollDaa),
+          signing_relay_id: this.selectedAgent.id,  // J1 #154: 跨节点 envelope 广播, 勿丢
+        };
+        const enrollResp = await fetch('/api/oracle-pool/enroll', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+        }).then(r => r.json());
+        if (!enrollResp.ok) {
+          this.oracleEnrollError = '注册失败: ' + (enrollResp.error || '未知错误');
+        } else {
+          this.oracleEnrollResult = { staker_pk_x: enrollResp.staker_pk_x, p2sh_addr: enrollResp.p2sh_addr, lock_until_daa: enrollResp.lock_until_daa };
+        }
+      } catch (e) {
+        this.oracleEnrollError = '请求异常: ' + (e?.message || String(e));
+      }
+      this.oracleEnrolling = false;
+    },
+
+    // KANet-UI 2026-06-08 DoD 问 3: 退出仲裁人 (J1 r303 endpoint POST /api/oracle-pool/timeout-unlock)
+    async startUnlock() {
+      // 问3(a) 真撤出 (record-level, J1 44d2ed9e): POST /api/oracle-pool/withdraw → 广播 staker 签名的
+      // oracle_stake_withdraw_v1 envelope → 每节点 ingest → active=0 跨节点收敛 (= 真停止被 VRF 抽中).
+      // 不再调旧 timeout-unlock (押金现未链锁; 真-UTXO 取回 = Phase 2).
+      // signing_relay_id = selectedAgentId (= 仲裁人自家 key 签自己的退出, 每节点可验).
+      const pkX = this.myStatus?.pubkey || this.myOracleRecord?.pubkey;
+      if (!pkX) { this.unlock.error = '该仲裁人无 pubkey, 无法退出'; return; }
+      if (!this.selectedAgentId) { this.unlock.error = '未选中 agent, 无法退出'; return; }
+      this.unlock.error = '';
+      this.unlock.result = null;
+      const ok = window.confirm('退出预言机池 = 不再被抽中给市场投票. 须无在岗未结算市场, 且加入已满 24 小时. 继续?');
+      if (!ok) return;
+      this.unlock.submitting = true;
+      try {
+        const r = await fetch('/api/oracle-pool/withdraw', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ staker_pk_x: pkX, signing_relay_id: this.selectedAgentId }),
+        });
+        const j = await r.json();
+        if (!j.ok) {
+          // 错文案大白话: 在岗(列市场数) / 冷却(剩小时) / 其他
+          if (Array.isArray(j.on_duty_markets) && j.on_duty_markets.length) {
+            this.unlock.error = `你正在 ${j.on_duty_markets.length} 个未结算市场担任评判, 这些市场结算后才能退出.`;
+          } else if (/cooldown/.test(j.error || '')) {
+            const hr = (String(j.error).match(/(\d+)\s*h/) || [])[1];
+            this.unlock.error = `加入预言机池不满 24 小时, 还需 ${hr || '一段时间'} 小时后才能退出 (防刚加入就投票后秒退操纵抽签).`;
+          } else {
+            this.unlock.error = j.error || `HTTP ${r.status}`;
+          }
+        } else {
+          this.unlock.result = j;
+          // 重 load 名册 (= 退出广播后池 snapshot 同步, 段 1 状态应转为非在岗)
+          setTimeout(() => this.loadOracles(), 3000);
+        }
+      } catch (e) {
+        this.unlock.error = String(e.message || e);
+      }
+      this.unlock.submitting = false;
+    },
+  };
+}
+</script>
+
+<%~ include('partials/page-close', it) %>

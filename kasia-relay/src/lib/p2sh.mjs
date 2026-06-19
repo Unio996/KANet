@@ -31,6 +31,47 @@ const TMP_DIR = process.env.KANET_ROOT ? join(process.env.KANET_ROOT, 'tmp') : '
 // Post-Toccata kaspad v1.2.0 TN12 always-toccata accepts up to 1M element. Bypass via manual hex emit.
 // 5 call sites: unlockP2SH / unlockP2SHMultiSig / unlockP2SHConsensual / pool spine settle / pool refund.
 // Use this helper instead of ScriptBuilder.addData() for any data push > 75 bytes.
+// Bettor r263 G6 批1.5 sweep: balance + dust invariant for ALL manual P2SH spend paths.
+// Centralized so all 7 submit sites get the same defense. Called before rpc.submitTransaction.
+// Bettor r239 G6 批2 红线 7 (qlfpv 实测 brick sediment): 加 mass-aware fee floor check.
+// qlfpv 第三面 root cause: SS 焊死 fee = makerStake-ctor_minerFee_50_000, 但实际 mass=4420
+// → mempool floor 442_000 sompi → mempool reject 'transaction is not standard'. Pre-submit
+// 拦下来比等 mempool reject 干净 — 立刻报 mass mismatch 不浪费 RPC roundtrip + log noise.
+const MIN_SOMPI_PER_MASS = 100n;  // Kaspa post-Toccata transient mass mempool floor 实测 qlfpv 442000/4420
+function _assertTxInvariants(matchedUtxos, signedTx, siteLabel = 'unknown', networkId = null) {
+  try {
+    const sumIn = matchedUtxos.reduce((acc, u) => acc + BigInt(u.amount), 0n);
+    const sumOut = signedTx.outputs.reduce((acc, o) => acc + BigInt(typeof o.value === 'bigint' ? o.value : (o.value || 0)), 0n);
+    const fee = sumIn - sumOut;
+    if (fee < 0n) throw new Error(`Σin=${sumIn} < Σout=${sumOut} (overspend ${-fee})`);
+    if (fee === 0n) throw new Error(`Σin==Σout (0 miner fee)`);
+    const MIN_OUTPUT_DUST_SOMPI = 1000n;  // J1 r245 conservative
+    for (let i = 0; i < signedTx.outputs.length; i++) {
+      const v = BigInt(typeof signedTx.outputs[i].value === 'bigint' ? signedTx.outputs[i].value : (signedTx.outputs[i].value || 0));
+      if (v < MIN_OUTPUT_DUST_SOMPI) throw new Error(`output[${i}] value=${v} < dust ${MIN_OUTPUT_DUST_SOMPI}`);
+    }
+    // 红线 7: mass-aware fee floor (skip if networkId not passed, = legacy callers protect).
+    if (networkId && typeof kaspa.calculateTransactionMass === 'function') {
+      let mass;
+      try { mass = kaspa.calculateTransactionMass(networkId, signedTx); } catch (massErr) {
+        // mass calc 不可用 → log warn 不 fail (= 让 mempool 拦截作 fallback).
+        console.warn(`[${siteLabel} invariant] mass calc skipped: ${massErr.message}`);
+        console.log(`[${siteLabel} invariant] Σin=${sumIn} Σout=${sumOut} fee=${fee}, ${signedTx.outputs.length} outputs all >= dust (mass-check skipped)`);
+        return;
+      }
+      const minFee = BigInt(mass) * MIN_SOMPI_PER_MASS;
+      if (fee < minFee) {
+        throw new Error(`fee ${fee} < mempool floor ${minFee} (mass=${mass} × ${MIN_SOMPI_PER_MASS} sompi/mass) — SS contract fee 焊死太低或 scriptSig 太大`);
+      }
+      console.log(`[${siteLabel} invariant] Σin=${sumIn} Σout=${sumOut} fee=${fee} (mass=${mass} minFee=${minFee} ✓), ${signedTx.outputs.length} outputs all >= dust`);
+      return;
+    }
+    console.log(`[${siteLabel} invariant] Σin=${sumIn} Σout=${sumOut} fee=${fee}, ${signedTx.outputs.length} outputs all >= dust`);
+  } catch (e) {
+    throw new Error(`pre-submit invariant assert (${siteLabel}): ${e.message}`);
+  }
+}
+
 function _encodePushDataHex(bytes) {
   const buf = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes);
   const len = buf.length;
@@ -249,7 +290,83 @@ export async function unlockP2SH(wallet, p2shAddress, redeemScript, branch, toAd
       payload: '',
     });
 
-    // Submit
+    _assertTxInvariants([utxo], signedTx, 'unlockP2SH', wallet.getNetworkId());
+    const result = await rpc.submitTransaction({ transaction: signedTx, allowOrphan: false });
+    return { txId: result.transactionId, amount: outValue };
+  } finally {
+    try { await rpc.disconnect(); } catch {}
+  }
+}
+
+// ── 4b. unlockP2SH_SingleEntry — for single-entry SS contracts (no selector byte) ──
+
+/**
+ * Unlock funds from a single-entry P2SH contract (= OracleStake_v1 timeout_unlock).
+ *
+ * silverc single-entry contracts do NOT push a selector byte in scriptSig (sediment
+ * feedback-silverc-single-entry-no-selector 6/2). scriptSig = [sigPush] [redeemScriptPush] only.
+ * Adding OP_0 selector would be parsed as int 0 ctor arg → require fail.
+ *
+ * @param {import('./wallet.mjs').KaspaWallet} wallet - Signer wallet
+ * @param {string} p2shAddress - The P2SH address holding the locked funds
+ * @param {Uint8Array} redeemScript - The compiled contract bytecode
+ * @param {string} toAddress - Destination address for the released funds
+ * @param {bigint} lockTime - TX lockTime (must >= SS-required time)
+ * @returns {Promise<{ txId: string, amount: bigint }>}
+ */
+export async function unlockP2SH_SingleEntry(wallet, p2shAddress, redeemScript, toAddress, lockTime = 0n) {
+  const txLockTime = BigInt(lockTime);
+  const rpc = await connectRpc(wallet.getNetworkId());
+  try {
+    const { entries } = await rpc.getUtxosByAddresses([p2shAddress]);
+    if (!entries?.length) throw new Error(`No UTXOs at P2SH address ${p2shAddress}`);
+
+    const utxo = entries[0];
+    const lockedAmount = utxo.entry.amount;
+    const fee = kaspaToSompi('0.001');
+    const outValue = lockedAmount - fee;
+    if (outValue <= 0n) throw new Error('Locked amount too small to cover fee');
+
+    const toSpk = payToAddressScript(new Address(toAddress));
+
+    const unsignedTx = new Transaction({
+      version: 0,
+      inputs: [{
+        previousOutpoint: { transactionId: utxo.outpoint.transactionId, index: utxo.outpoint.index },
+        signatureScript: '',
+        sequence: 0n,
+        sigOpCount: 1,
+        utxo,
+      }],
+      outputs: [new TransactionOutput(outValue, toSpk)],
+      lockTime: txLockTime,
+      gas: 0n,
+      subnetworkId: '0000000000000000000000000000000000000000',
+      payload: '',
+    });
+
+    const sigHex = createInputSignature(unsignedTx, 0, wallet.getPrivateKey(), SighashType.All);
+
+    // scriptSig: [sigPush][redeemScriptPush] — NO selector byte (single-entry contract)
+    const sb = ScriptBuilder.fromScript(redeemScript);
+    const scriptSigHex = sb.encodePayToScriptHashSignatureScript(sigHex);
+
+    const signedTx = new Transaction({
+      version: 0,
+      inputs: [{
+        previousOutpoint: { transactionId: utxo.outpoint.transactionId, index: utxo.outpoint.index },
+        signatureScript: scriptSigHex,
+        sequence: 0n,
+        sigOpCount: 1,
+      }],
+      outputs: [new TransactionOutput(outValue, toSpk)],
+      lockTime: txLockTime,
+      gas: 0n,
+      subnetworkId: '0000000000000000000000000000000000000000',
+      payload: '',
+    });
+
+    _assertTxInvariants([utxo], signedTx, 'unlockP2SH_SingleEntry', wallet.getNetworkId());
     const result = await rpc.submitTransaction({ transaction: signedTx, allowOrphan: false });
     return { txId: result.transactionId, amount: outValue };
   } finally {
@@ -395,6 +512,7 @@ export async function unlockP2SHMultiSig(p2shAddress, redeemScript, requiredInpu
       });
     }
 
+    _assertTxInvariants(matched, signedTx, 'p2sh-submit', networkId);
     const result = await rpc.submitTransaction({ transaction: signedTx, allowOrphan: false });
     return { txId: result.transactionId };
   } finally {
@@ -513,6 +631,7 @@ export async function unlockP2SHConsensual(p2shAddress, redeemScript, requiredIn
       });
     }
 
+    _assertTxInvariants(matched, signedTx, 'p2sh-submit', networkId);
     const result = await rpc.submitTransaction({ transaction: signedTx, allowOrphan: false });
     return { txId: result.transactionId };
   } finally {
@@ -674,6 +793,7 @@ export async function unlockP2SHDual(wallet, p2shAddress, redeemScript, branch, 
       payload: '',
     });
 
+    _assertTxInvariants(matched, signedTx, 'unlockP2SHDual', wallet.getNetworkId());
     const result = await rpc.submitTransaction({ transaction: signedTx, allowOrphan: false });
     return { txId: result.transactionId };
   } finally {
@@ -699,10 +819,18 @@ export async function unlockPoolSpineP2SH(args) {
   const {
     spineP2shAddress, sideP2shAddresses, spineRedeemScriptHex, sideRedeemScriptHexes,
     requiredInputOutpoints, outputs, spineSigsByInput, spineInputCount, winner, sidesMerkleRootHex,
-    unanimous, networkId, lockTime = 0n, txObjPreimage = null,
+    unanimous, networkId, lockTime = 0n, txObjPreimage = null, settleEntrypoint = 0,
   } = args;
+  // #31 ④a: PoolSpine_v08 settle_aggregate is entry 1 (multi-entry contract) — v0.5/0.6/0.7 settle was
+  // entry 0. ONLY the spine input selector changes (OP_1); PoolSide "settled_via_spine" stays entry 0 (OP_0).
+  // Witness param order is byte-identical to v0.7 entry0 (verified vs PoolSpine_v08_chunk.sil L253-273).
+  if (settleEntrypoint !== 0 && settleEntrypoint !== 1) throw new Error(`settleEntrypoint must be 0 (v05/06/07 settle / v08 settle_chunk) or 1 (v08 settle_aggregate), got ${settleEntrypoint}`);
 
-  if (!unanimous) throw new Error('Phase 2c step 2a first ship supports unanimous only — forfeit_1 entry 1 deferred next step');
+  // Bettor r287 layer-21 G2-A relay: v0.6 settle_aggregate has validSigs counter (4-of-5
+  // threshold) → unanimous skip moot. v0.5 still requires unanimous (entry 0 only, entry 1
+  // forfeit_1 deferred). Detect v0.6 via committee_data presence (= same as scriptSig branch).
+  const isV06EarlyDetect = !!args.committee_data && Array.isArray(args.committee_data.committee_pks) && args.committee_data.committee_pks.length === 5;
+  if (!unanimous && !isV06EarlyDetect) throw new Error('Phase 2c step 2a first ship supports unanimous only (v0.5) — forfeit_1 entry 1 deferred next step');
   if (winner !== 0 && winner !== 1) throw new Error(`winner must be 0 or 1, got ${winner}`);
   if (!Array.isArray(sideP2shAddresses) || !Array.isArray(sideRedeemScriptHexes)) throw new Error('sideP2shAddresses and sideRedeemScriptHexes required arrays');
   if (sideP2shAddresses.length !== sideRedeemScriptHexes.length) throw new Error(`side count mismatch: ${sideP2shAddresses.length} addresses vs ${sideRedeemScriptHexes.length} redeem scripts`);
@@ -711,8 +839,17 @@ export async function unlockPoolSpineP2SH(args) {
   if (!Array.isArray(spineSigsByInput) || spineSigsByInput.length !== spineInputCount) {
     throw new Error(`spineSigsByInput must be ${spineInputCount} arrays, got ${spineSigsByInput?.length}`);
   }
-  if (spineSigsByInput.some(sigs => !Array.isArray(sigs) || sigs.length !== 3)) {
-    throw new Error('each spine input requires 3 oracle sigs for unanimous');
+  // KANet-UI r389 / Bettor r213 Layer-11 KI 49: v0.5 hardcoded 3-sig check rejects v0.6 5-sig
+  // unanimous. Accept any uniform count >= 3 (v0.5) or 5 (v0.6 path A settle_aggregate).
+  // PoolSpine_v06.sil entry 0 expects 5 committee sigs + 5 PKs + merkle proofs — caller
+  // (settler) responsible for assembling correct scriptSig per protocol_version. Here we
+  // only enforce uniformity across spine inputs (= each input gets same number of sigs).
+  const expectedSigCount = spineSigsByInput[0]?.length || 0;
+  if (![3, 5].includes(expectedSigCount)) {
+    throw new Error(`spine sigs/input must be 3 (v0.5) or 5 (v0.6 settle_aggregate), got ${expectedSigCount}`);
+  }
+  if (spineSigsByInput.some(sigs => !Array.isArray(sigs) || sigs.length !== expectedSigCount)) {
+    throw new Error(`each spine input must have ${expectedSigCount} oracle sigs (uniform across inputs)`);
   }
   if (requiredInputOutpoints.length !== spineInputCount + sideP2shAddresses.length) {
     throw new Error(`input outpoint count ${requiredInputOutpoints.length} != ${spineInputCount} spine + ${sideP2shAddresses.length} sides`);
@@ -740,7 +877,10 @@ export async function unlockPoolSpineP2SH(args) {
     ));
 
     const winnerOpHex = winner === 0 ? '00' : '51';
-    const selectorOpHex = '00';
+    // #31 ④a: split spine vs side selector. spine: v08 settle_aggregate=entry1(OP_1='51'), else entry0(OP_0='00').
+    // side: PoolSide settled_via_spine = entry0(OP_0) unchanged across all versions.
+    const spineSelectorOpHex = settleEntrypoint === 1 ? '51' : '00';
+    const sideSelectorOpHex = '00';
 
     const rootBytes = new Uint8Array(Buffer.from(sidesMerkleRootHex.replace(/^0x/, ''), 'hex'));
     if (rootBytes.length !== 32) throw new Error(`sidesMerkleRoot must be 32 bytes, got ${rootBytes.length}`);
@@ -752,14 +892,96 @@ export async function unlockPoolSpineP2SH(args) {
     const spineRedeemBytes = Buffer.from(spineRedeemScriptHex, 'hex');
     const spineRedeemPushHex = _encodePushDataHex(spineRedeemBytes);
 
-    // Each spine input gets its own scriptSig (= own 3 sigs over that input's sighash).
-    const spineScriptSigs = spineSigsByInput.map(sigs =>
-      sigs.join('') + winnerOpHex + rootPushHex + selectorOpHex + spineRedeemPushHex
-    );
+    // J1 r221 + Bettor r219 ③ Layer-12 Part B: v0.6 settle_aggregate path uses 58-arg scriptSig
+    // (5 sigs + committeePkHash + winner + sidesMerkleRoot + 5 PKs + 5 indices + 5x8 siblings).
+    // Detect v0.6 via args.committee_data presence — Console settler bakes it via dispatchPhase2.
+    const isV06 = !!args.committee_data
+      && Array.isArray(args.committee_data.committee_pks)
+      && args.committee_data.committee_pks.length === 5;
+
+    // Each spine input gets its own scriptSig (= own sigs over that input's sighash).
+    const spineScriptSigs = spineSigsByInput.map(sigs => {
+      if (!isV06) {
+        // v0.5 legacy path: 3 sigs + winner + root + selector + redeem.
+        return sigs.join('') + winnerOpHex + rootPushHex + spineSelectorOpHex + spineRedeemPushHex;
+      }
+      // v0.6 path A settle_aggregate. Push order per J1 r221 spec (= silverc LIFO, declaration
+      // reversed): siblings[4] depth7..0 → ... → siblings[0] depth7..0 → indices c4..c0 → PKs
+      // c4..c0 → sidesMerkleRoot → winner → committeePkHash → sigs c4..c0 → selector → redeem.
+      const cd = args.committee_data;
+      const proofs = cd.committee_merkle_proofs;  // 5 arrays of 8 hex strings (= sibling hashes)
+      const indices = cd.committee_indices;  // 5 ints
+      const pks = cd.committee_pks;  // 5 hex strings (32B x-only)
+      const committeePkHash = cd.committee_pk_hash;  // hex 32B
+      if (sigs.length !== 5) throw new Error(`v0.6 settle_aggregate needs 5 sigs per input, got ${sigs.length}`);
+      const pushBytes = (hex) => _encodePushDataHex(Buffer.from(hex, 'hex'));
+      const opNHex = (n) => {
+        if (n === 0) return '00';
+        if (n >= 1 && n <= 16) return (0x50 + n).toString(16).padStart(2, '0');
+        // Push as little-endian minimal int bytes (= silverc int encoding).
+        return _encodePushDataHex(Buffer.from([n & 0xff]));
+      };
+      // Bettor r353: Kaspa CScriptNum encoder for LARGE ints (globalYes/No = 1e10+ sompi exceed
+      // opNHex's 0-255 byte range). Little-endian minimal + high-bit sign disambiguation (= same
+      // CScriptNum convention as Bitcoin). Verified: 1e10 → '0500e40b5402' (matches the 1e10
+      // ctor amount encoding observed in PoolSpine_v07 redeem script scriptSig dump).
+      const encodeScriptNumPush = (val) => {
+        let v = BigInt(val);
+        if (v === 0n) return '00';  // int 0 = OP_0
+        const neg = v < 0n;
+        if (neg) v = -v;
+        const bytes = [];
+        while (v > 0n) { bytes.push(Number(v & 0xffn)); v >>= 8n; }
+        if (bytes[bytes.length - 1] & 0x80) bytes.push(neg ? 0x80 : 0x00);
+        else if (neg) bytes[bytes.length - 1] |= 0x80;
+        return _encodePushDataHex(Buffer.from(bytes));
+      };
+      // Bettor r245 实证定案: v0.5 push = declaration order (silverc binds locals via
+      // reverse-pop internally, declaration order == push order). v0.6 same convention.
+      // Declaration order: sigs c0..c4, committeePkHash, winner, sidesMerkleRoot, PKs c0..c4,
+      // indices c0..c4, siblings c0s0..c0s7 → c1s0..c1s7 → ... → c4s0..c4s7.
+      let scriptSigHex = '';
+      // Sigs c0..c4 (already push-encoded from createInputSignature, 132 hex / 66 bytes each)
+      for (let ci = 0; ci < 5; ci++) scriptSigHex += sigs[ci];
+      // committeePkHash, winner, sidesMerkleRoot
+      scriptSigHex += pushBytes(committeePkHash);
+      scriptSigHex += winnerOpHex;
+      scriptSigHex += rootPushHex;
+      // PKs c0..c4
+      for (let ci = 0; ci < 5; ci++) scriptSigHex += pushBytes(pks[ci]);
+      // Indices c0..c4
+      for (let ci = 0; ci < 5; ci++) scriptSigHex += opNHex(indices[ci]);
+      // Bettor r353: v0.7 settle_aggregate sharding globals — declaration order (PoolSpine_v07.sil
+      // L103-105) is AFTER indices, BEFORE siblings: globalYesTotal_sompi, globalNoTotal_sompi,
+      // global_commit_id(byte[32]). v0.6 SS has none → cd.global_yes_total_sompi undefined → skip
+      // → v0.6 scriptSig byte-identical to 46f8a-proven path. Missing them was the qoyqv
+      // 'pick at invalid location' (stack short 3 → all sibling picks off-by-3).
+      const hasV07Globals = cd.global_yes_total_sompi !== undefined && cd.global_yes_total_sompi !== null;
+      if (hasV07Globals) {
+        scriptSigHex += encodeScriptNumPush(cd.global_yes_total_sompi);
+        scriptSigHex += encodeScriptNumPush(cd.global_no_total_sompi);
+        scriptSigHex += pushBytes(cd.global_commit_id);
+      }
+      // Siblings: committee 0..4 outer, depth 0..7 inner
+      for (let ci = 0; ci < 5; ci++) {
+        const sibs = proofs[ci];
+        if (!Array.isArray(sibs) || sibs.length !== 8) {
+          throw new Error(`v0.6 settle_aggregate committee[${ci}] needs 8 siblings, got ${sibs?.length}`);
+        }
+        for (let d = 0; d < 8; d++) scriptSigHex += pushBytes(sibs[d]);
+      }
+      // Selector (v0.6/0.7 settle_aggregate=entry0 OP_0; v08 settle_aggregate=entry1 OP_1) + redeem reveal
+      scriptSigHex += spineSelectorOpHex;
+      scriptSigHex += spineRedeemPushHex;
+      // J1 r245 + Bettor diff request: dump FULL scriptSig hex for byte-level cross-verify
+      // against Bettor's _diag_scriptsig_46f8a.cjs reconstruction.
+      console.log(`[unlockPoolSpineP2SH v0.6 FULL] scriptSig ${scriptSigHex.length/2}B: ${scriptSigHex}`);
+      return scriptSigHex;
+    });
 
     const sideScriptSigs = sideRedeemScriptHexes.map(redeemHex => {
       const redeemBytes = Buffer.from(redeemHex, 'hex');
-      return selectorOpHex + _encodePushDataHex(redeemBytes);
+      return sideSelectorOpHex + _encodePushDataHex(redeemBytes);
     });
 
     const allScriptSigs = [...spineScriptSigs, ...sideScriptSigs];
@@ -789,13 +1011,15 @@ export async function unlockPoolSpineP2SH(args) {
       }
       signedTx = new Transaction(parsed);
     } else {
+      // Bettor r271/r275 layer-16/18: 5 checkSig→budget=509999, used=510021. Bumped 8→809999 margin.
+      const spineSigOpCountFinal = isV06 ? 8 : 3;
       signedTx = new Transaction({
         version: 0,
         inputs: matched.map((utxo, i) => ({
           previousOutpoint: { transactionId: utxo.outpoint.transactionId, index: utxo.outpoint.index },
           signatureScript: allScriptSigs[i],
           sequence: 0n,
-          sigOpCount: i < spineInputCount ? 3 : 0,
+          sigOpCount: i < spineInputCount ? spineSigOpCountFinal : 0,
         })),
         outputs: txOutputs,
         lockTime: txLockTime,
@@ -805,6 +1029,7 @@ export async function unlockPoolSpineP2SH(args) {
       });
     }
 
+    _assertTxInvariants(matched, signedTx, 'unlockPoolSpineP2SH', networkId);
     const result = await rpc.submitTransaction({ transaction: signedTx, allowOrphan: false });
     return { txId: result.transactionId };
   } finally {
@@ -937,6 +1162,238 @@ export async function unlockPoolSpineRefundDisagreement(args) {
       });
     }
 
+    _assertTxInvariants(matched, signedTx, 'p2sh-submit', networkId);
+    const result = await rpc.submitTransaction({ transaction: signedTx, allowOrphan: false });
+    return { txId: result.transactionId };
+  } finally {
+    try { await rpc.disconnect(); } catch {}
+  }
+}
+
+// ── 7c — unlockPoolSpineRefundMakerUnjoined (G2-B 二期, Bettor r263 钦点) ──
+//
+// PoolSpine_v06.sil entry 2 refund_maker_unjoined (= 0-bet auto-refund single-sig path).
+// Spec L273-282:
+//   - 1 input (= spine UTXO holding maker stake)
+//   - 1 output (= P2PK to makerPk, value == makerStakeAmount - minerFee EXACT)
+//   - require(checkSig(makerSig, pubkey(makerPk))) → maker single sig only
+//   - require(tx.time >= deadline * 1000) → lockTime in ms (bug 10d Path A sediment)
+//
+// scriptSig: [makerSig push] + OP_2 (= selector entry 2) + [redeemScript push].
+//
+// Maker_relay 自家 wallet 签 (= makerPk privkey 在 maker_relay), inline 一步 sign+submit.
+// No DM/chain collection needed (single-sig vs settle 5-of-5 committee).
+export async function unlockPoolSpineRefundMakerUnjoined(args) {
+  const {
+    wallet, spineP2shAddress, spineRedeemScriptHex,
+    requiredInputOutpoint, output,
+    networkId, lockTime = 0n, txObjPreimage = null,
+  } = args;
+  if (!wallet) throw new Error('unlockPoolSpineRefundMakerUnjoined: wallet required (= maker_relay signer)');
+  if (!requiredInputOutpoint?.outpointTxid) throw new Error('requiredInputOutpoint.outpointTxid required');
+  if (!output?.address || (output.amountSompi == null)) throw new Error('output { address, amountSompi } required');
+
+  const txLockTime = BigInt(lockTime);
+  const rpc = await connectRpc(networkId);
+  try {
+    const { entries } = await rpc.getUtxosByAddresses([spineP2shAddress]);
+    if (!entries?.length) throw new Error(`No UTXOs at spine P2SH ${spineP2shAddress}`);
+    const hits = entries.filter(e => e.outpoint.transactionId === requiredInputOutpoint.outpointTxid);
+    if (hits.length === 0) throw new Error(`UTXO not found for lock tx: ${requiredInputOutpoint.outpointTxid}`);
+    if (hits.length > 1) throw new Error(`ambiguous: ${hits.length} UTXOs at spine from tx ${requiredInputOutpoint.outpointTxid}`);
+    const matched = [hits[0]];
+
+    const outAmount = typeof output.amountSompi === 'string' ? BigInt(output.amountSompi) : BigInt(output.amountSompi);
+    const outSpk = payToAddressScript(new Address(output.address));
+
+    // Rehydrate preimage if provided (= settler.dispatchRefund built via prediction_settle_build_preimage).
+    // Preimage owns the exact output amount that matches SS L281 require(value == makerStakeAmount - minerFee).
+    let unsignedTx;
+    if (txObjPreimage) {
+      const parsed = JSON.parse(JSON.stringify(txObjPreimage));
+      // CRITICAL (qlfpv 实测 sighash mismatch bug): preimage 从 prediction_settle_build_preimage
+      // 来 默认 lockTime=0 (= dispatchRefund 不传 lock_time). 但 SS L275 require(tx.time >=
+      // deadline*1000) → final signedTx 必带 txLockTime. Kaspa sighash 含 lockTime →
+      // unsignedTx.lockTime 必须等于 signedTx.lockTime 否则 sig 不匹 → "script ran, but
+      // verification failed" reject. 用 caller 的 txLockTime override preimage.lockTime.
+      parsed.lockTime = txLockTime;
+      parsed.gas = BigInt(parsed.gas || 0);
+      // CRITICAL (2nd sighash bug, qlfpv 实测 2nd round): buildSettleTxPreimage default
+      // sigOpCount=5 (L596 default for 1V1 settle 5 sigs). PoolSpine_v06 entry 2 单 makerSig
+      // → scriptSig 实际 1 sigOp. Kaspa sighash 含 sig_op_counts_hash → unsignedTx sigOpCount
+      // 必须等于 signedTx sigOpCount (= 1 hardcoded below) 否则 sig 不匹 → script verify fail.
+      // 强制覆盖为 1 (= entry 2 SS body 唯一 checkSig).
+      parsed.inputs = parsed.inputs.map(inp => ({
+        ...inp,
+        signatureScript: '',  // strip for sighash compute
+        sequence: BigInt(inp.sequence || 0),
+        sigOpCount: 1,  // override preimage default (5) to match signedTx + SS entry 2 spec
+        utxo: inp.utxo ? {
+          ...inp.utxo,
+          amount: BigInt(inp.utxo.amount || 0),
+          blockDaaScore: BigInt(inp.utxo.blockDaaScore || 0),
+        } : undefined,
+      }));
+      parsed.outputs = parsed.outputs.map(o => ({ ...o, value: BigInt(o.value || 0) }));
+      unsignedTx = new Transaction(parsed);
+    } else {
+      unsignedTx = new Transaction({
+        version: 0,
+        inputs: [{
+          previousOutpoint: { transactionId: matched[0].outpoint.transactionId, index: matched[0].outpoint.index },
+          signatureScript: '',
+          sequence: 0n,
+          sigOpCount: 1,
+          utxo: matched[0],
+        }],
+        outputs: [new TransactionOutput(outAmount, outSpk)],
+        lockTime: txLockTime,
+        gas: 0n,
+        subnetworkId: '0000000000000000000000000000000000000000',
+        payload: '',
+      });
+    }
+
+    // Maker single-sig (= SS L274 require(checkSig(makerSig, pubkey(makerPk)))).
+    // createInputSignature returns push-encoded hex [0x41][64sig][0x01] (= 66 bytes / 132 hex chars).
+    const makerSigHex = createInputSignature(unsignedTx, 0, wallet.getPrivateKey(), SighashType.All);
+
+    // scriptSig: [makerSig push] + OP_2 (selector entry 2 refund_maker_unjoined) + [redeemScript push]
+    const spineRedeemBytes = Buffer.from(spineRedeemScriptHex, 'hex');
+    const spineRedeemPushHex = _encodePushDataHex(spineRedeemBytes);
+    const scriptSigHex = makerSigHex + '52' + spineRedeemPushHex;
+
+    const signedTx = new Transaction({
+      version: 0,
+      inputs: [{
+        previousOutpoint: { transactionId: matched[0].outpoint.transactionId, index: matched[0].outpoint.index },
+        signatureScript: scriptSigHex,
+        sequence: 0n,
+        sigOpCount: 1,
+      }],
+      outputs: [new TransactionOutput(outAmount, outSpk)],
+      lockTime: txLockTime,
+      gas: 0n,
+      subnetworkId: '0000000000000000000000000000000000000000',
+      payload: '',
+    });
+
+    _assertTxInvariants(matched, signedTx, 'unlockPoolSpineRefundMakerUnjoined', networkId);
+    const result = await rpc.submitTransaction({ transaction: signedTx, allowOrphan: false });
+    return { txId: result.transactionId };
+  } finally {
+    try { await rpc.disconnect(); } catch {}
+  }
+}
+
+// ── 7d — unlockPoolSideRefundCancelled (DoD C 退款自取, Bettor r261 钦点) ──
+//
+// PoolSide_v06/v07 entry 2 refund_market_cancelled (= bettor 自取 stake 走 cancel 退款路).
+// Spec PoolSide_v07 L268-281:
+//   - 1 input (= side UTXO holding bettor stake)
+//   - 1 output (= P2PK to bettorPk, value 在 fee 范围)
+//   - require(checkSig(bettorSig, pubkey(bettorPk))) → bettor 自签
+//   - require(tx.time >= deadline * 1000) → lockTime in ms (= 跟 spine refund 同款 grace 雷,
+//     待 J1 r261 v0.8 SS 改 (deadline + refundGraceSeconds)*1000 防 front-run)
+//
+// scriptSig: [bettorSig push] + OP_2 (= selector entry 2) + [redeemScript push].
+//
+// Bettor_relay 自家 wallet 签 (= bettorPk privkey 在 bettor_relay), inline 一步 sign+submit.
+// 同 unlockPoolSpineRefundMakerUnjoined 模式 (qlfpv 实证), 复用 byte-size mass-aware fee.
+export async function unlockPoolSideRefundCancelled(args) {
+  const {
+    wallet, sideP2shAddress, sideRedeemScriptHex,
+    requiredInputOutpoint, output,
+    networkId, lockTime = 0n, txObjPreimage = null,
+    // J2-tn r391 (#28 Bettor ③ APPROVE v2 05:26): entryIndex 参数化 — legacy v0.5 PoolSide 4 entrypoint
+    // refund_market_cancelled=idx 3 (OP_3='53'); v06/v07 PoolSide 3 entrypoint refund=idx 2 (OP_2='52').
+    // 默认 2 (= v06/v07 backward-compat 现 caller 全 v06/v07). 调时显式传 3 for ver=null/v0.5.
+    entryIndex = 2,
+  } = args;
+  if (!wallet) throw new Error('unlockPoolSideRefundCancelled: wallet required (= bettor_relay signer)');
+  if (!requiredInputOutpoint?.outpointTxid) throw new Error('requiredInputOutpoint.outpointTxid required');
+  if (!output?.address || (output.amountSompi == null)) throw new Error('output { address, amountSompi } required');
+
+  const txLockTime = BigInt(lockTime);
+  const rpc = await connectRpc(networkId);
+  try {
+    const { entries } = await rpc.getUtxosByAddresses([sideP2shAddress]);
+    if (!entries?.length) throw new Error(`No UTXOs at side P2SH ${sideP2shAddress}`);
+    const hits = entries.filter(e => e.outpoint.transactionId === requiredInputOutpoint.outpointTxid);
+    if (hits.length === 0) throw new Error(`UTXO not found for side lock tx: ${requiredInputOutpoint.outpointTxid}`);
+    if (hits.length > 1) throw new Error(`ambiguous: ${hits.length} UTXOs at side from tx ${requiredInputOutpoint.outpointTxid}`);
+    const matched = [hits[0]];
+
+    const outAmount = typeof output.amountSompi === 'string' ? BigInt(output.amountSompi) : BigInt(output.amountSompi);
+    const outSpk = payToAddressScript(new Address(output.address));
+
+    // Same sighash field discipline as unlockPoolSpineRefundMakerUnjoined (qlfpv 4-bug sediment):
+    //   parsed.lockTime = txLockTime (= match signedTx, not preimage default 0)
+    //   parsed.inputs[i].sigOpCount = 1 (= match SS entry 2 single checkSig, not preimage default 5)
+    //   signatureScript stripped for sighash compute, scriptSig set on signedTx only.
+    let unsignedTx;
+    if (txObjPreimage) {
+      const parsed = JSON.parse(JSON.stringify(txObjPreimage));
+      parsed.lockTime = txLockTime;
+      parsed.gas = BigInt(parsed.gas || 0);
+      parsed.inputs = parsed.inputs.map(inp => ({
+        ...inp,
+        signatureScript: '',
+        sequence: BigInt(inp.sequence || 0),
+        sigOpCount: 1,
+        utxo: inp.utxo ? {
+          ...inp.utxo,
+          amount: BigInt(inp.utxo.amount || 0),
+          blockDaaScore: BigInt(inp.utxo.blockDaaScore || 0),
+        } : undefined,
+      }));
+      parsed.outputs = parsed.outputs.map(o => ({ ...o, value: BigInt(o.value || 0) }));
+      unsignedTx = new Transaction(parsed);
+    } else {
+      unsignedTx = new Transaction({
+        version: 0,
+        inputs: [{
+          previousOutpoint: { transactionId: matched[0].outpoint.transactionId, index: matched[0].outpoint.index },
+          signatureScript: '',
+          sequence: 0n,
+          sigOpCount: 1,
+          utxo: matched[0],
+        }],
+        outputs: [new TransactionOutput(outAmount, outSpk)],
+        lockTime: txLockTime,
+        gas: 0n,
+        subnetworkId: '0000000000000000000000000000000000000000',
+        payload: '',
+      });
+    }
+
+    // Bettor single-sig (= PoolSide_v07.sil L271 require(checkSig(bettorSig, pubkey(bettorPk)))).
+    const bettorSigHex = createInputSignature(unsignedTx, 0, wallet.getPrivateKey(), SighashType.All);
+
+    // scriptSig: [bettorSig push] + selector OP (= entry index) + [redeemScript push].
+    // J2-tn r391: entryIndex param decides selector — OP_2='52' for v06/v07, OP_3='53' for legacy v0.5.
+    const sideRedeemBytes = Buffer.from(sideRedeemScriptHex, 'hex');
+    const sideRedeemPushHex = _encodePushDataHex(sideRedeemBytes);
+    if (entryIndex < 1 || entryIndex > 16) throw new Error(`entryIndex must be 1-16 (OP_N), got ${entryIndex}`);
+    const selectorOpHex = (0x50 + entryIndex).toString(16).padStart(2, '0');
+    const scriptSigHex = bettorSigHex + selectorOpHex + sideRedeemPushHex;
+
+    const signedTx = new Transaction({
+      version: 0,
+      inputs: [{
+        previousOutpoint: { transactionId: matched[0].outpoint.transactionId, index: matched[0].outpoint.index },
+        signatureScript: scriptSigHex,
+        sequence: 0n,
+        sigOpCount: 1,
+      }],
+      outputs: [new TransactionOutput(outAmount, outSpk)],
+      lockTime: txLockTime,
+      gas: 0n,
+      subnetworkId: '0000000000000000000000000000000000000000',
+      payload: '',
+    });
+
+    _assertTxInvariants(matched, signedTx, 'unlockPoolSideRefundCancelled', networkId);
     const result = await rpc.submitTransaction({ transaction: signedTx, allowOrphan: false });
     return { txId: result.transactionId };
   } finally {
@@ -967,4 +1424,481 @@ export async function checkUtxoLanded(address, txid, networkId) {
   } finally {
     try { await rpc.disconnect(); } catch {}
   }
+}
+
+// ── 9. bshard M3 fold-carries-KAS relay handlers (J1, 2026-06-15) ──
+//
+// e2e-blocker 补齐: builders 产 command(action=bshard_register_bet/claim_winner/refund_cancelled), 本组 unlock 函数
+//   在 relay build+sign+broadcast。承重正确性:
+//   • selector(ABI 实查, 4-vantage): register_append=OP_0 / claim_draw=OP_4 / refund_draw=OP_5
+//     (covenant fold 占 __leader_fold[1]/__delegate_fold[2] 2 ABI 槽 → close/claim/refund 挤到 3/4/5).
+//   • witness scriptSig push 序 = SS entrypoint 声明序 forward + selector + redeem reveal.
+//   • witness int = CScriptNum 最小(OP_N ≤16 / minimal LE 大); State 区(splice 用)= 固定 PUSH8(0x08)+i64-LE 8B.
+//   • 续约地址 PER-STATE: relay splice input redeem[start : start+len]→new-state → payToScriptHash.
+//     validateOutputState 绑此 per-state P2SH(TUTORIAL L1000 + WithTemplate 类比)→ 续约不可重定向(算错=SS 拒, 不丢钱).
+//
+// ── route-split (2026-06-15): unified PoolShard_fold 拆 PoolLeaf + PoolRoot (script-unit 9999 限, 见 PoolLeaf.sil 头注) ──
+//   • PoolLeaf (4-field state {local_yes,local_no,count,pool_value}, state_layout{start:1,len:36}):
+//       register_append=OP_0 / __leader_fold=OP_1 / __delegate_fold=OP_2 / seal_to_root=OP_3.
+//   • PoolRoot (7-field state, state_layout{start:1,len:87}): close_commit=OP_0 / claim_draw=OP_1 / refund_draw=OP_2.
+//   • leaf→root 经 seal_to_root foreign-template 桥 (root addr = payToScriptHash(root_prefix‖serialize(7-field sealed)‖root_suffix)).
+//   ⚠ 选择子变化 vs unified: close/claim/refund OP_3/4/5 → OP_0/1/2 (root 无 covenant fold 槽). silverc artifact.abi 实查.
+
+const _POOL_STATE_START = 1;       // state_layout.start (leaf+root 同)
+const _LEAF_STATE_LEN = 36;        // PoolLeaf state_layout.len = 4×(PUSH8+8)
+const _ROOT_STATE_LEN = 87;        // PoolRoot state_layout.len = 6×(PUSH8+8) + (PUSH32+32)
+
+function _i64LE(v) {               // BigInt/number → 8-byte LE Buffer (固定 i64, 非最小)
+  const b = Buffer.alloc(8);
+  let n = BigInt(v);
+  if (n < 0n) n = (1n << 64n) + n;   // two's complement (State 值非负, 防御)
+  for (let i = 0; i < 8; i++) { b[i] = Number(n & 0xffn); n >>= 8n; }
+  return b;
+}
+
+// CScriptNum 最小编码 (witness int args). 0→OP_0('00'); 1-16→OP_N(0x50+n); else minimal LE + sign byte → push.
+function _encodeScriptNumPush(val) {
+  let v = BigInt(val);
+  if (v === 0n) return '00';
+  const neg = v < 0n; if (neg) v = -v;
+  const bytes = [];
+  while (v > 0n) { bytes.push(Number(v & 0xffn)); v >>= 8n; }
+  if (bytes[bytes.length - 1] & 0x80) bytes.push(neg ? 0x80 : 0x00);
+  else if (neg) bytes[bytes.length - 1] |= 0x80;
+  return _encodePushDataHex(Buffer.from(bytes));
+}
+function _pushInt(n) {
+  const v = BigInt(n);
+  if (v === 0n) return '00';
+  if (v >= 1n && v <= 16n) return (0x50 + Number(v)).toString(16).padStart(2, '0');  // OP_1..OP_16
+  return _encodeScriptNumPush(v);
+}
+function _pushBytes(hexOrBuf) {
+  const buf = Buffer.isBuffer(hexOrBuf) ? hexOrBuf : Buffer.from(hexOrBuf, 'hex');
+  return _encodePushDataHex(buf);
+}
+
+// 序列化 PoolLeaf 4-field State → 36B hex (固定 PUSH8, State 声明序 {local_yes,local_no,count,pool_value}).
+function _serializeLeafStateHex(s) {
+  return _encodePushDataHex(_i64LE(s.local_yes))
+    + _encodePushDataHex(_i64LE(s.local_no))
+    + _encodePushDataHex(_i64LE(s.count))
+    + _encodePushDataHex(_i64LE(s.pool_value));
+}
+
+// 序列化 PoolRoot 7-field State → 87B hex (固定 PUSH8/PUSH32, State 声明序). NWT 2-impl byte-match 此格式.
+function _serializeRootStateHex(s) {
+  return _encodePushDataHex(_i64LE(s.local_yes))
+    + _encodePushDataHex(_i64LE(s.local_no))
+    + _encodePushDataHex(_i64LE(s.count))
+    + _encodePushDataHex(_i64LE(s.pool_value))
+    + _encodePushDataHex(_i64LE(s.closed))
+    + _encodePushDataHex(_i64LE(s.winningSide))
+    + _encodePushDataHex(Buffer.from(s.payoutRoot.replace(/^0x/, ''), 'hex'));   // PUSH32 + 32B
+}
+
+// per-state 续约 P2SH 地址: splice input redeem 的 state 区[start : start+len] → new state → payToScriptHash.
+//   len = newStateHex 字节数 (leaf 36 / root 87 自适应; new state 与 baked genesis state 同布局=同长).
+function _continuationAddress(inputRedeemHex, newStateHex, networkId) {
+  const redeem = Buffer.from(inputRedeemHex, 'hex');
+  const stateBytes = Buffer.from(newStateHex, 'hex');
+  if (stateBytes.length !== _LEAF_STATE_LEN && stateBytes.length !== _ROOT_STATE_LEN) {
+    throw new Error(`pool state ser ${stateBytes.length}B != leaf ${_LEAF_STATE_LEN} / root ${_ROOT_STATE_LEN}`);
+  }
+  const len = stateBytes.length;
+  const spliced = Buffer.concat([redeem.slice(0, _POOL_STATE_START), stateBytes, redeem.slice(_POOL_STATE_START + len)]);
+  const spk = payToScriptHashScript(new Uint8Array(spliced));
+  return addressFromScriptPublicKey(spk, networkId).toString();
+}
+
+// foreign-template 地址 (seal_to_root 产 PoolRoot): root_prefix ‖ serialize(7-field sealed state) ‖ root_suffix → payToScriptHash.
+//   = SS seal_to_root 内 validateOutputStateWithTemplate 的 P2SH 派生口径 (blake2b(prefix‖state‖suffix)).
+function _foreignTemplateAddress(prefixHex, rootStateHex, suffixHex, networkId) {
+  const redeem = Buffer.concat([
+    Buffer.from(prefixHex, 'hex'), Buffer.from(rootStateHex, 'hex'), Buffer.from(suffixHex, 'hex'),
+  ]);
+  const spk = payToScriptHashScript(new Uint8Array(redeem));
+  return addressFromScriptPublicKey(spk, networkId).toString();
+}
+
+// dust PoolSide-ticket 地址: ps_prefix ‖ serialize(ticketState 4-field) ‖ ps_suffix → payToScriptHash.
+//   ticket State = {bettorPk(32), direction(int), stake(int), shardPoolId(32)} → PUSH32+PUSH8+PUSH8+PUSH32.
+function _ticketAddress(psPrefixHex, psSuffixHex, ticket, networkId) {
+  const stateHex = _pushBytes(ticket.bettorPk) + _encodePushDataHex(_i64LE(ticket.direction))
+    + _encodePushDataHex(_i64LE(ticket.stake)) + _pushBytes(ticket.shardPoolId);
+  const redeem = Buffer.concat([Buffer.from(psPrefixHex, 'hex'), Buffer.from(stateHex, 'hex'), Buffer.from(psSuffixHex, 'hex')]);
+  const spk = payToScriptHashScript(new Uint8Array(redeem));
+  return addressFromScriptPublicKey(spk, networkId).toString();
+}
+
+// P2SH input 地址 = payToScriptHash(完整 redeem_hex)(redeem 含当前 state, 是 ground-truth; 无需 current_state/.address).
+function _addressFromRedeem(redeemHex, networkId) {
+  const spk = payToScriptHashScript(new Uint8Array(Buffer.from(redeemHex, 'hex')));
+  return addressFromScriptPublicKey(spk, networkId).toString();
+}
+
+const _BSHARD_MINER_FEE = 10000n;   // 0.0001 KAS, within SS fee 范围 [1000, 1e8]
+function _utxoValue(u) { return BigInt(u.amount ?? u.utxoEntry?.amount ?? u.entry?.amount ?? 0); }
+// relay 算 change(Bettor 裁: relay fetch UTXO 后才知真 Σinput+fee): change = Σin − Σ业务out − minerFee.
+function _appendChange(orderedOut, matched, changeAddress) {
+  const sumIn = matched.reduce((a, u) => a + _utxoValue(u), 0n);
+  const sumOut = orderedOut.reduce((a, o) => a + BigInt(o.value), 0n);
+  const change = sumIn - sumOut - _BSHARD_MINER_FEE;
+  if (change < 0n) throw new Error(`bshard insufficient input: Σin ${sumIn} < Σout ${sumOut} + fee ${_BSHARD_MINER_FEE}`);
+  if (change >= 1000n && changeAddress) orderedOut.push(new TransactionOutput(change, payToAddressScript(new Address(changeAddress))));
+  return orderedOut;
+}
+
+// 取 UTXO by outpoint txid at a P2SH/address (单一匹配).
+async function _matchUtxo(rpc, address, outpointTxid) {
+  const { entries } = await rpc.getUtxosByAddresses([address]);
+  const hits = (entries || []).filter(e => e.outpoint.transactionId === outpointTxid);
+  if (hits.length === 0) throw new Error(`UTXO not found at ${address} for tx ${outpointTxid}`);
+  if (hits.length > 1) throw new Error(`ambiguous ${hits.length} UTXOs at ${address} from ${outpointTxid}`);
+  return hits[0];
+}
+
+/**
+ * unlockBshardRegister — bshard_register_bet (register_append entry OP_0).
+ * Inputs: [0] leaf (P2SH register_append, no sig) + funding P2PK (wallet-signed).
+ * Outputs: [leaf_out_idx] new leaf (per-state addr, value+=stake) + [ps_out_idx] dust ticket + change.
+ */
+export async function unlockBshardRegister(args) {
+  const { wallet, cmd, networkId, lockTime = 0n } = args;
+  const w = cmd.witness;
+  const rpc = await connectRpc(networkId);
+  try {
+    const leafUtxo = await _matchUtxo(rpc, _addressFromRedeem(cmd.inputs.leaf.redeem_hex, networkId), cmd.inputs.leaf.outpointTxid);   // P2SH 地址 = hash(redeem)
+    const fundUtxos = [];
+    for (const f of (cmd.inputs.funding || [])) fundUtxos.push(await _matchUtxo(rpc, f.address, f.outpointTxid));
+
+    // 输出地址 relay 自算 per-state (忽略 cmd.address)
+    const newLeafAddr = _continuationAddress(cmd.inputs.leaf.redeem_hex, _serializeLeafStateHex(cmd.outputs.leaf_continuation.state), networkId);
+    const ticketAddr = _ticketAddress(w.ps_prefix_hex, w.ps_suffix_hex, cmd.outputs.poolSide_ticket.state, networkId);
+
+    // leaf scriptSig: register_append witness(声明序) + selector OP_0 + redeem reveal. (无 sig: covenant-accumulate)
+    const leafSig = _pushInt(w.side) + _pushInt(w.stake) + _pushInt(w.leaf_out_idx) + _pushInt(w.ps_out_idx)
+      + _pushBytes(w.bettor_pk) + _pushBytes(w.ps_prefix_hex) + _pushBytes(w.ps_suffix_hex)
+      + '00' + _encodePushDataHex(Buffer.from(cmd.inputs.leaf.redeem_hex, 'hex'));
+
+    const outputs = [];
+    outputs[w.leaf_out_idx] = new TransactionOutput(BigInt(cmd.outputs.leaf_continuation.amountSompi), payToAddressScript(new Address(newLeafAddr)));
+    outputs[w.ps_out_idx] = new TransactionOutput(BigInt(cmd.outputs.poolSide_ticket.amountSompi), payToAddressScript(new Address(ticketAddr)));
+    const orderedOut = outputs.filter(o => o !== undefined);
+    const matched = [leafUtxo, ...fundUtxos];
+    _appendChange(orderedOut, matched, cmd.outputs.change_address);   // relay 算 change=Σin−Σout−fee
+    // unsigned (funding inputs 留空待签; leaf 无 sig 直接置 scriptSig)
+    const unsigned = new Transaction({
+      version: 0,
+      inputs: matched.map((u, i) => ({
+        previousOutpoint: { transactionId: u.outpoint.transactionId, index: u.outpoint.index },
+        signatureScript: '', sequence: 0n, sigOpCount: i === 0 ? 0 : 1, utxo: u,
+      })),
+      outputs: orderedOut, lockTime: BigInt(lockTime), gas: 0n,
+      subnetworkId: '0000000000000000000000000000000000000000', payload: '',
+    });
+    const sigScripts = [leafSig];
+    for (let i = 1; i < matched.length; i++) {
+      sigScripts.push(createInputSignature(unsigned, i, wallet.getPrivateKey(), SighashType.All));
+    }
+    const signedTx = new Transaction({
+      version: 0,
+      inputs: matched.map((u, i) => ({
+        previousOutpoint: { transactionId: u.outpoint.transactionId, index: u.outpoint.index },
+        signatureScript: sigScripts[i], sequence: 0n, sigOpCount: i === 0 ? 0 : 1,
+      })),
+      outputs: orderedOut, lockTime: BigInt(lockTime), gas: 0n,
+      subnetworkId: '0000000000000000000000000000000000000000', payload: '',
+    });
+    _assertTxInvariants(matched, signedTx, 'unlockBshardRegister', networkId);
+    const r = await rpc.submitTransaction({ transaction: signedTx, allowOrphan: false });
+    return { txId: r.transactionId };
+  } finally { try { await rpc.disconnect(); } catch {} }
+}
+
+/**
+ * unlockBshardClaim — bshard_claim_winner (PoolRoot claim_draw entry OP_1).
+ * Inputs: [0] root (P2SH claim_draw, no sig) + ticket (P2SH authorize_spend, bettorSig) + fee P2PK (wallet-signed).
+ * Outputs: [payout_out_idx] payout→bettor P2PK + [root_out_idx] recreated root(value-=payout, closed=1) + change.
+ */
+export async function unlockBshardClaim(args) {
+  const { wallet, cmd, networkId, lockTime = 0n } = args;
+  const w = cmd.witness;
+  const rpc = await connectRpc(networkId);
+  try {
+    const rootUtxo = await _matchUtxo(rpc, _addressFromRedeem(cmd.inputs.root.redeem_hex, networkId), cmd.inputs.root.outpointTxid);   // P2SH 地址 = hash(redeem)
+    const ticketUtxo = await _matchUtxo(rpc, _addressFromRedeem(cmd.inputs.ticket.redeem_hex, networkId), cmd.inputs.ticket.outpointTxid);
+    const feeUtxo = cmd.inputs.fee ? await _matchUtxo(rpc, cmd.inputs.fee.address, cmd.inputs.fee.outpointTxid) : null;
+    const matched = [rootUtxo, ticketUtxo, ...(feeUtxo ? [feeUtxo] : [])];
+
+    const newRootAddr = _continuationAddress(cmd.inputs.root.redeem_hex, _serializeRootStateHex(cmd.outputs.root_continuation.state), networkId);
+    const bettorLockSpk = payToAddressScript(new Address(cmd.outputs.payout.address));
+
+    const outputs = [];
+    outputs[w.payout_out_idx] = new TransactionOutput(BigInt(cmd.outputs.payout.amountSompi), bettorLockSpk);
+    outputs[w.root_out_idx] = new TransactionOutput(BigInt(cmd.outputs.root_continuation.amountSompi), payToAddressScript(new Address(newRootAddr)));
+    const orderedOut = outputs.filter(o => o !== undefined);
+    _appendChange(orderedOut, matched, cmd.outputs.change_address);   // relay 算 change=Σin−Σout−fee
+
+    // root scriptSig: claim_draw witness(声明序: rootOutIdx,payoutOutIdx,payout,merkle_index,tree_depth,siblings[],ticketInIdx,prefix/suffix_len)+ OP_4 + redeem.
+    let sibPush = '';
+    for (const s of w.siblings_hex) sibPush += _pushBytes(s);     // byte[32][] = depth 个 push, forward 序
+    const rootSig = _pushInt(w.root_out_idx) + _pushInt(w.payout_out_idx) + _pushInt(w.payout)
+      + _pushInt(w.merkle_index) + _pushInt(w.tree_depth) + sibPush
+      + _pushInt(w.ticket_in_idx) + _pushInt(w.ticket_prefix_len) + _pushInt(w.ticket_suffix_len)
+      + '51' + _encodePushDataHex(Buffer.from(cmd.inputs.root.redeem_hex, 'hex'));     // claim_draw=OP_1='51' (PoolRoot; was unified OP_4)
+
+    // ticket scriptSig: authorize_spend(bettorSig)+ OP_0 + redeem. bettorSig = relay 用 bettor key 签 ticket input.
+    // (root input 无 sig; fee input wallet-签). 先建 unsigned(待签 input scriptSig=''), 算 sighash.
+    const unsigned = new Transaction({
+      version: 0,
+      inputs: matched.map((u, i) => ({
+        previousOutpoint: { transactionId: u.outpoint.transactionId, index: u.outpoint.index },
+        signatureScript: '', sequence: 0n, sigOpCount: i === 0 ? 0 : 1, utxo: u,    // root(0)=0; ticket(1)=1; fee(2)=1
+      })),
+      outputs: orderedOut, lockTime: BigInt(lockTime), gas: 0n,
+      subnetworkId: '0000000000000000000000000000000000000000', payload: '',
+    });
+    const ticketSigHex = createInputSignature(unsigned, 1, wallet.getPrivateKey(), SighashType.All);
+    const ticketSig = ticketSigHex + '00' + _encodePushDataHex(Buffer.from(cmd.inputs.ticket.redeem_hex, 'hex'));   // OP_0 selector
+    const sigScripts = [rootSig, ticketSig];
+    if (feeUtxo) sigScripts.push(createInputSignature(unsigned, 2, wallet.getPrivateKey(), SighashType.All));
+
+    const signedTx = new Transaction({
+      version: 0,
+      inputs: matched.map((u, i) => ({
+        previousOutpoint: { transactionId: u.outpoint.transactionId, index: u.outpoint.index },
+        signatureScript: sigScripts[i], sequence: 0n, sigOpCount: i === 0 ? 0 : 1,
+      })),
+      outputs: orderedOut, lockTime: BigInt(lockTime), gas: 0n,
+      subnetworkId: '0000000000000000000000000000000000000000', payload: '',
+    });
+    _assertTxInvariants(matched, signedTx, 'unlockBshardClaim', networkId);
+    const r = await rpc.submitTransaction({ transaction: signedTx, allowOrphan: false });
+    return { txId: r.transactionId };
+  } finally { try { await rpc.disconnect(); } catch {} }
+}
+
+/**
+ * unlockBshardRefund — bshard_refund_cancelled (PoolRoot refund_draw entry OP_2).
+ * Inputs: [0] pool (P2SH refund_draw, no sig) + ticket (P2SH authorize_spend, bettorSig).
+ * Outputs: [payout_out_idx] refund→bettor P2PK=stake + [pool_out_idx] recreated pool(value-=stake, closed=2) + change.
+ */
+export async function unlockBshardRefund(args) {
+  const { wallet, cmd, networkId, lockTime = 0n } = args;
+  const w = cmd.witness;
+  const rpc = await connectRpc(networkId);
+  try {
+    const poolUtxo = await _matchUtxo(rpc, _addressFromRedeem(cmd.inputs.pool.redeem_hex, networkId), cmd.inputs.pool.outpointTxid);   // P2SH 地址 = hash(redeem)
+    const ticketUtxo = await _matchUtxo(rpc, _addressFromRedeem(cmd.inputs.ticket.redeem_hex, networkId), cmd.inputs.ticket.outpointTxid);
+    const matched = [poolUtxo, ticketUtxo];
+
+    const newPoolAddr = _continuationAddress(cmd.inputs.pool.redeem_hex, _serializeRootStateHex(cmd.outputs.pool_continuation.state), networkId);
+    const outputs = [];
+    outputs[w.payout_out_idx] = new TransactionOutput(BigInt(cmd.outputs.payout.amountSompi), payToAddressScript(new Address(cmd.outputs.payout.address)));
+    outputs[w.pool_out_idx] = new TransactionOutput(BigInt(cmd.outputs.pool_continuation.amountSompi), payToAddressScript(new Address(newPoolAddr)));
+    const orderedOut = outputs.filter(o => o !== undefined);
+    _appendChange(orderedOut, matched, cmd.outputs.change_address);   // relay 算 change=Σin−Σout−fee
+
+    // pool scriptSig: refund_draw witness(声明序: poolOutIdx,payoutOutIdx,ticketInIdx,prefix/suffix_len)+ OP_5 + redeem.
+    const poolSig = _pushInt(w.pool_out_idx) + _pushInt(w.payout_out_idx) + _pushInt(w.ticket_in_idx)
+      + _pushInt(w.ticket_prefix_len) + _pushInt(w.ticket_suffix_len)
+      + '52' + _encodePushDataHex(Buffer.from(cmd.inputs.pool.redeem_hex, 'hex'));    // refund_draw=OP_2='52' (PoolRoot; was unified OP_5)
+
+    const unsigned = new Transaction({
+      version: 0,
+      inputs: matched.map((u, i) => ({
+        previousOutpoint: { transactionId: u.outpoint.transactionId, index: u.outpoint.index },
+        signatureScript: '', sequence: 0n, sigOpCount: i === 0 ? 0 : 1, utxo: u,
+      })),
+      outputs: orderedOut, lockTime: BigInt(lockTime), gas: 0n,
+      subnetworkId: '0000000000000000000000000000000000000000', payload: '',
+    });
+    const ticketSigHex = createInputSignature(unsigned, 1, wallet.getPrivateKey(), SighashType.All);
+    const ticketSig = ticketSigHex + '00' + _encodePushDataHex(Buffer.from(cmd.inputs.ticket.redeem_hex, 'hex'));
+    const sigScripts = [poolSig, ticketSig];
+
+    const signedTx = new Transaction({
+      version: 0,
+      inputs: matched.map((u, i) => ({
+        previousOutpoint: { transactionId: u.outpoint.transactionId, index: u.outpoint.index },
+        signatureScript: sigScripts[i], sequence: 0n, sigOpCount: i === 0 ? 0 : 1,
+      })),
+      outputs: orderedOut, lockTime: BigInt(lockTime), gas: 0n,
+      subnetworkId: '0000000000000000000000000000000000000000', payload: '',
+    });
+    _assertTxInvariants(matched, signedTx, 'unlockBshardRefund', networkId);
+    const r = await rpc.submitTransaction({ transaction: signedTx, allowOrphan: false });
+    return { txId: r.transactionId };
+  } finally { try { await rpc.disconnect(); } catch {} }
+}
+
+/**
+ * unlockBshardClose — bshard_close_commit (PoolRoot close_commit entry OP_0, committee 4-of-5).
+ * Inputs: [0] root (P2SH close_commit) + fee P2PK (wallet-signed). 委员 sig 从 cmd(driver 用 committee key 签 preimage).
+ * Outputs: [root_out_idx] recreated root(closed=1, winningSide/payoutRoot 写入, value 不变) + change.
+ * witness 声明序(close_commit): c0Sig,c1Sig,c2Sig,c3Sig,c4Sig, rootOutIdx, new_winningSide, new_payoutRoot.
+ */
+export async function unlockBshardClose(args) {
+  const { wallet, cmd, networkId, lockTime = 0n } = args;
+  const w = cmd.witness;
+  const rpc = await connectRpc(networkId);
+  try {
+    const rootUtxo = await _matchUtxo(rpc, _addressFromRedeem(cmd.inputs.root.redeem_hex, networkId), cmd.inputs.root.outpointTxid);
+    const feeUtxo = cmd.inputs.fee ? await _matchUtxo(rpc, cmd.inputs.fee.address, cmd.inputs.fee.outpointTxid) : null;
+    const matched = [rootUtxo, ...(feeUtxo ? [feeUtxo] : [])];
+
+    const newRootAddr = _continuationAddress(cmd.inputs.root.redeem_hex, _serializeRootStateHex(cmd.outputs.root_continuation.state), networkId);
+    const outputs = [];
+    outputs[w.root_out_idx] = new TransactionOutput(BigInt(cmd.outputs.root_continuation.amountSompi), payToAddressScript(new Address(newRootAddr)));
+    const orderedOut = outputs.filter(o => o !== undefined);
+    _appendChange(orderedOut, matched, cmd.outputs.change_address);
+
+    // root scriptSig: close_commit witness(声明序: c0-c4Sig + rootOutIdx + new_winningSide + new_payoutRoot)+ OP_0 + redeem.
+    //   委员 5 sig 从 cmd.witness.sigs_hex(driver 用 baked committee key 对本 TX preimage 签; 4-of-5 → 至少 4 真签, 缺的占位).
+    let sigPush = '';
+    for (const s of w.sigs_hex) sigPush += s;                 // 5 sig 直接 concat(createInputSignature 输出已 push-encoded 66B, 同 unlockPoolSpineP2SH L462/L944; _pushBytes 会 double-push=bug)
+    const rootSig = sigPush + _pushInt(w.root_out_idx) + _pushInt(w.new_winning_side) + _pushBytes(w.new_payout_root)
+      + '00' + _encodePushDataHex(Buffer.from(cmd.inputs.root.redeem_hex, 'hex'));     // close_commit=OP_0='00' (PoolRoot; was unified OP_3)
+
+    // sighash 一致(committee sig 须对此 TX): txObjPreimage 由 driver 供(同 unlockPoolSpineP2SH); root sigOpCount=4(4-of-5 checkSig).
+    let signedTx;
+    if (cmd.tx_obj_preimage) {
+      const parsed = JSON.parse(JSON.stringify(cmd.tx_obj_preimage));
+      parsed.lockTime = BigInt(parsed.lockTime || lockTime); parsed.gas = BigInt(parsed.gas || 0);
+      const feeSig = feeUtxo ? (() => {
+        const un = new Transaction({ version:0, inputs: matched.map((u,i)=>({previousOutpoint:{transactionId:u.outpoint.transactionId,index:u.outpoint.index},signatureScript:'',sequence:0n,sigOpCount:i===0?4:1,utxo:u})), outputs:orderedOut, lockTime:BigInt(lockTime), gas:0n, subnetworkId:'0'.repeat(40), payload:'' });
+        return createInputSignature(un, 1, wallet.getPrivateKey(), SighashType.All);
+      })() : null;
+      const sigScripts = feeUtxo ? [rootSig, feeSig] : [rootSig];
+      parsed.inputs = parsed.inputs.map((inp,i)=>({ ...inp, signatureScript: sigScripts[i], sequence: BigInt(inp.sequence||0), sigOpCount: i===0?4:1, utxo: inp.utxo?{...inp.utxo, amount:BigInt(inp.utxo.amount||0), blockDaaScore:BigInt(inp.utxo.blockDaaScore||0)}:undefined }));
+      parsed.outputs = parsed.outputs.map(o=>({ ...o, value: BigInt(o.value||0) }));
+      signedTx = new Transaction(parsed);
+    } else {
+      throw new Error('unlockBshardClose: tx_obj_preimage required (committee sig sighash consistency)');
+    }
+    _assertTxInvariants(matched, signedTx, 'unlockBshardClose', networkId);
+    const r = await rpc.submitTransaction({ transaction: signedTx, allowOrphan: false });
+    return { txId: r.transactionId };
+  } finally { try { await rpc.disconnect(); } catch {} }
+}
+
+/**
+ * unlockBshardFold — bshard_fold (covenant __leader_fold OP_1 / __delegate_fold OP_2, k children → 1 parent).
+ * 代码库首个 covenant relay handler. DECL: verification-mode cov leader 暴露 new_states(State[]); prev_states 自动从
+ *   cov-inputs readInputState(不押). fold 无 extra arg → leader scriptSig = push(new_states=parent_state) + OP_1 + redeem.
+ *   delegate(其余 children) scriptSig = OP_2 + redeem(无 witness, __delegate_f 不跑 policy 只 delegation 不变量).
+ * Inputs: children[0]=leader + children[1..]=delegate + fee. Outputs: parent_continuation(per-state addr, value=Σchild) + change.
+ * ⚠ e2e-定: new_states(State[1]) 押栈是否需 count 前缀未定(siblings[] 无 count→length 从 param; fold to=1 fixed→押 4-field leaf state 无 count
+ *   是首选猜测). 首 fold TX 落=对; 拒→第一查 new_states count/格式。fold=leaf→leaf(PoolLeaf 4-field).
+ */
+export async function unlockBshardFold(args) {
+  const { wallet, cmd, networkId, lockTime = 0n } = args;
+  const w = cmd.witness;
+  const rpc = await connectRpc(networkId);
+  try {
+    const children = cmd.inputs.children;
+    const childUtxos = [];
+    for (const c of children) childUtxos.push(await _matchUtxo(rpc, _addressFromRedeem(c.redeem_hex, networkId), c.outpointTxid));
+    const feeUtxo = cmd.inputs.fee ? await _matchUtxo(rpc, cmd.inputs.fee.address, cmd.inputs.fee.outpointTxid) : null;
+    const matched = [...childUtxos, ...(feeUtxo ? [feeUtxo] : [])];
+
+    // parent 续约地址: 任一 child redeem(同 PoolLeaf 模板)splice parent_state(4-field) → per-state P2SH. fold=leaf→leaf.
+    const parentAddr = _continuationAddress(children[0].redeem_hex, _serializeLeafStateHex(w.parent_state), networkId);
+    const outputs = [];
+    outputs[w.parent_out_idx] = new TransactionOutput(BigInt(cmd.outputs.parent_continuation.amountSompi), payToAddressScript(new Address(parentAddr)));
+    const orderedOut = outputs.filter(o => o !== undefined);
+    _appendChange(orderedOut, matched, cmd.outputs.change_address);
+
+    // children[0]=leader: push new_states(parent_state 7-field) + OP_1 + redeem; children[1..]=delegate: OP_2 + redeem.
+    const sigScripts = [];
+    for (let i = 0; i < children.length; i++) {
+      const redeemPush = _encodePushDataHex(Buffer.from(children[i].redeem_hex, 'hex'));
+      if (i === 0) sigScripts.push(_serializeLeafStateHex(w.parent_state) + '51' + redeemPush);   // leader __leader_fold=OP_1, push new_states(4-field parent)
+      else sigScripts.push('52' + redeemPush);                                                    // delegate __delegate_fold=OP_2
+    }
+
+    const unsigned = new Transaction({
+      version: 0,
+      inputs: matched.map((u, i) => ({
+        previousOutpoint: { transactionId: u.outpoint.transactionId, index: u.outpoint.index },
+        signatureScript: '', sequence: 0n, sigOpCount: i < children.length ? 0 : 1, utxo: u,    // children 无 sig; fee=1
+      })),
+      outputs: orderedOut, lockTime: BigInt(lockTime), gas: 0n,
+      subnetworkId: '0000000000000000000000000000000000000000', payload: '',
+    });
+    if (feeUtxo) sigScripts.push(createInputSignature(unsigned, children.length, wallet.getPrivateKey(), SighashType.All));
+
+    const signedTx = new Transaction({
+      version: 0,
+      inputs: matched.map((u, i) => ({
+        previousOutpoint: { transactionId: u.outpoint.transactionId, index: u.outpoint.index },
+        signatureScript: sigScripts[i], sequence: 0n, sigOpCount: i < children.length ? 0 : 1,
+      })),
+      outputs: orderedOut, lockTime: BigInt(lockTime), gas: 0n,
+      subnetworkId: '0000000000000000000000000000000000000000', payload: '',
+    });
+    _assertTxInvariants(matched, signedTx, 'unlockBshardFold', networkId);
+    const r = await rpc.submitTransaction({ transaction: signedTx, allowOrphan: false });
+    return { txId: r.transactionId };
+  } finally { try { await rpc.disconnect(); } catch {} }
+}
+
+/**
+ * unlockBshardSeal — bshard_seal_to_root (PoolLeaf seal_to_root entry OP_3, leaf→root foreign-template 桥).
+ * route-split 引入: 全片折满的单 leaf(count==shard_count) → 创建 PoolRoot(携全池 KAS, canonical genesis outcome)。
+ * Inputs: [0] leaf (P2SH seal_to_root, NO sig — permissionless, output 约束到 canonical root) + funding P2PK (wallet-签, 付 miner fee).
+ * Outputs: [root_out_idx] PoolRoot UTXO (value == leaf.pool_value 全池) + change.
+ *   root addr = payToScriptHash(root_prefix ‖ serialize(7-field sealed state) ‖ root_suffix) = SS validateOutputStateWithTemplate P2SH 派生口径.
+ * witness 声明序(seal_to_root): rootOutIdx, root_prefix, root_suffix.
+ * ⚠ seal 是 route-split 命门 entry: 跨模板 2× blake2b(~整 root) ~8982 units 估算, live TX 是 <9999 唯一 ground truth (本地无 metering).
+ */
+export async function unlockBshardSeal(args) {
+  const { wallet, cmd, networkId, lockTime = 0n } = args;
+  const w = cmd.witness;
+  const rpc = await connectRpc(networkId);
+  try {
+    const leafUtxo = await _matchUtxo(rpc, _addressFromRedeem(cmd.inputs.leaf.redeem_hex, networkId), cmd.inputs.leaf.outpointTxid);   // P2SH 地址 = hash(redeem)
+    const fundUtxos = [];
+    for (const f of (cmd.inputs.funding || [])) fundUtxos.push(await _matchUtxo(rpc, f.address, f.outpointTxid));
+    const matched = [leafUtxo, ...fundUtxos];
+
+    // root 输出地址 relay 自算 (foreign-template; 忽略 cmd.address). sealed state = builder 供 7-field {carry account + closed:0/winningSide:0/payoutRoot:init}.
+    const rootAddr = _foreignTemplateAddress(w.root_prefix_hex, _serializeRootStateHex(cmd.outputs.root.state), w.root_suffix_hex, networkId);
+
+    // leaf scriptSig: seal_to_root witness(声明序: rootOutIdx, root_prefix, root_suffix) + selector OP_3 + redeem reveal. (无 sig: output 约束到 canonical root)
+    const leafSig = _pushInt(w.root_out_idx) + _pushBytes(w.root_prefix_hex) + _pushBytes(w.root_suffix_hex)
+      + '53' + _encodePushDataHex(Buffer.from(cmd.inputs.leaf.redeem_hex, 'hex'));     // seal_to_root=OP_3='53'
+
+    const outputs = [];
+    outputs[w.root_out_idx] = new TransactionOutput(BigInt(cmd.outputs.root.amountSompi), payToAddressScript(new Address(rootAddr)));
+    const orderedOut = outputs.filter(o => o !== undefined);
+    _appendChange(orderedOut, matched, cmd.outputs.change_address);   // relay 算 change=Σin−Σout−fee (leaf 全池→root, fee 来自 funding)
+
+    const unsigned = new Transaction({
+      version: 0,
+      inputs: matched.map((u, i) => ({
+        previousOutpoint: { transactionId: u.outpoint.transactionId, index: u.outpoint.index },
+        signatureScript: '', sequence: 0n, sigOpCount: i === 0 ? 0 : 1, utxo: u,   // leaf(0)=0 无 sig; funding=1
+      })),
+      outputs: orderedOut, lockTime: BigInt(lockTime), gas: 0n,
+      subnetworkId: '0000000000000000000000000000000000000000', payload: '',
+    });
+    const sigScripts = [leafSig];
+    for (let i = 1; i < matched.length; i++) {
+      sigScripts.push(createInputSignature(unsigned, i, wallet.getPrivateKey(), SighashType.All));
+    }
+    const signedTx = new Transaction({
+      version: 0,
+      inputs: matched.map((u, i) => ({
+        previousOutpoint: { transactionId: u.outpoint.transactionId, index: u.outpoint.index },
+        signatureScript: sigScripts[i], sequence: 0n, sigOpCount: i === 0 ? 0 : 1,
+      })),
+      outputs: orderedOut, lockTime: BigInt(lockTime), gas: 0n,
+      subnetworkId: '0000000000000000000000000000000000000000', payload: '',
+    });
+    _assertTxInvariants(matched, signedTx, 'unlockBshardSeal', networkId);
+    const r = await rpc.submitTransaction({ transaction: signedTx, allowOrphan: false });
+    return { txId: r.transactionId };
+  } finally { try { await rpc.disconnect(); } catch {} }
 }

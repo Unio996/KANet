@@ -189,7 +189,7 @@ export function isChainSupported(chain) {
  * @deprecated Use isChainSupported instead.
  */
 export function isEvmChainSupported(chain) {
-  return !!EVM_RPC[chain];
+  return !!EVM_RPC_URLS[chain];  // J2-tn ESLint no-undef fix: 重构撤 hardcoded EVM_RPC 改 EVM_RPC_URLS (L13 import), L192 残留旧名 = dangling-ref
 }
 
 /**

@@ -130,7 +130,7 @@
             </div>
             <div class="flex gap-2 mt-2 flex-wrap">
               <button @click="copyAddr(w.address, $event)" class="px-2 py-1 rounded text-[10px] bg-warm-100 text-ink-500 hover:text-ink-800 border border-warm-200">复制</button>
-              <button @click="sendPrompt(w)"
+              <button @click="openSendModal(w)"
                       :disabled="!w.hasPrivateKey"
                       :title="w.hasPrivateKey ? '发送代币' : '此钱包无私钥'"
                       class="px-2 py-1 rounded text-[10px] bg-warm-100 text-ink-500 hover:text-red-600 border border-warm-200 disabled:opacity-40 disabled:cursor-not-allowed">发送</button>
@@ -182,6 +182,80 @@
             </div>
           </button>
         </template>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ UNIFIED SEND MODAL — 替原 sendPrompt() 4 连弹, 支持 KAS native + 多链 stables/native ═══ -->
+  <div x-show="sendModal.open" x-cloak x-transition
+       class="fixed inset-0 bg-ink-700/50 z-50 flex items-center justify-center p-4"
+       @click.self="sendModal.open = false"
+       @keydown.escape.window="sendModal.open = false">
+    <div class="bg-warm-50 rounded-lg p-5 w-full max-w-sm shadow-xl">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="font-medium text-ink-700 text-sm">
+          发送 <span x-text="sendModal.assetLabel"></span>
+          <span class="text-ink-400 font-normal text-[11px] ml-1" x-text="'· ' + sendModal.chainLabel"></span>
+        </h3>
+        <button @click="sendModal.open = false" class="text-ink-400 hover:text-ink-600 text-xl leading-none">&times;</button>
+      </div>
+      <div class="space-y-3 text-xs">
+        <div class="bg-warm-100 rounded p-2 text-[11px] text-ink-500">
+          从: <span class="font-mono text-ink-600" x-text="(sendModal.fromAddr || '').slice(0,14)+'...'+ (sendModal.fromAddr || '').slice(-6)"></span>
+          <div class="mt-1">可用 <span class="font-medium text-ink-700 tabular-nums" x-text="sendModal.fromBalance"></span> <span x-text="sendModal.assetLabel"></span></div>
+        </div>
+
+        <div x-show="sendModal.assetOptions.length > 1">
+          <label class="text-[10px] text-ink-500 uppercase tracking-wider">币种</label>
+          <div class="flex gap-1 mt-1">
+            <template x-for="o in sendModal.assetOptions" :key="o.key">
+              <button @click="sendModalSetAsset(o.key)"
+                      :class="sendModal.asset === o.key ? 'bg-brand-500 text-white' : 'bg-white text-ink-500 border border-warm-300 hover:bg-warm-100'"
+                      class="flex-1 px-2 py-1 rounded text-[11px]"
+                      x-text="o.label"></button>
+            </template>
+          </div>
+        </div>
+
+        <div>
+          <label class="text-[10px] text-ink-500 uppercase tracking-wider">目的地址</label>
+          <input x-model="sendModal.toAddr" type="text" :placeholder="sendModal.addrHint" spellcheck="false"
+                 class="w-full mt-1 px-2 py-1.5 text-[11px] font-mono bg-white border border-warm-300 rounded focus:outline-none focus:border-brand-400">
+        </div>
+
+        <div>
+          <label class="text-[10px] text-ink-500 uppercase tracking-wider">数量 (<span x-text="sendModal.assetLabel"></span>)</label>
+          <div class="flex gap-1 mt-1">
+            <input x-model="sendModal.amount" type="number" step="any" min="0" placeholder="0.0"
+                   class="flex-1 px-2 py-1.5 text-xs bg-white border border-warm-300 rounded tabular-nums focus:outline-none focus:border-brand-400">
+            <button @click="sendModal.amount = sendModal.fromBalance"
+                    class="text-[10px] px-2 text-brand-500 hover:text-brand-700 hover:bg-warm-100 rounded">全部</button>
+          </div>
+        </div>
+
+        <div x-show="sendModal.error" class="text-[11px] text-red-600 bg-red-50 border border-red-200 rounded px-2 py-1" x-text="sendModal.error"></div>
+        <div x-show="sendModal.txHash" class="text-[11px] text-green-700 bg-green-50 border border-green-200 rounded px-2 py-1">
+          ✓ 已广播  TX: <code class="font-mono" x-text="(sendModal.txHash || '').slice(0,16)+'...'"></code>
+        </div>
+        <!-- (Owner 2026-05-30) UI hint: 让用户清楚为什么"确认发送"按钮灰 (= 缺地址 / 缺金额 / 发送中 / 已成功) -->
+        <div x-show="!sendModal.error && !sendModal.txHash && !sendModal.sending && (!sendModal.toAddr?.trim() || !(parseFloat(sendModal.amount) > 0))"
+             class="text-[11px] text-ink-400 bg-warm-50 border border-warm-200 rounded px-2 py-1">
+          <span x-show="!sendModal.toAddr?.trim()">⚠ 缺目的地址</span>
+          <span x-show="sendModal.toAddr?.trim() && !(parseFloat(sendModal.amount) > 0)">⚠ 缺金额 (&gt; 0)</span>
+        </div>
+
+        <div class="flex gap-2 pt-1">
+          <button @click="sendModal.open = false"
+                  class="flex-1 px-3 py-1.5 bg-warm-200 hover:bg-warm-300 text-ink-700 rounded text-xs">取消</button>
+          <button @click="confirmSend()"
+                  :disabled="sendModal.sending || sendModal.txHash || !sendModal.toAddr?.trim() || !(parseFloat(sendModal.amount) > 0)"
+                  class="flex-1 px-3 py-1.5 bg-brand-500 hover:bg-brand-600 text-white rounded text-xs disabled:opacity-50 disabled:cursor-not-allowed"
+                  :title="(!sendModal.toAddr?.trim() ? '请填目的地址' : '') + (!(parseFloat(sendModal.amount) > 0) ? ' 请填金额(>0)' : '') + (sendModal.sending ? '发送中,请勿重复点击' : '') + (sendModal.txHash ? '已广播,等关闭' : '')">
+            <span x-show="!sendModal.sending && !sendModal.txHash">确认发送</span>
+            <span x-show="sendModal.sending && !sendModal.txHash">发送中...</span>
+            <span x-show="sendModal.txHash">已广播 ✓</span>
+          </button>
+        </div>
       </div>
     </div>
   </div>
@@ -264,7 +338,12 @@
               <div class="text-lg font-semibold text-ink-700 tabular-nums" x-text="(agent.kaspa?.balance || 0).toFixed(4) + ' KAS'"></div>
               <div class="text-[10px] text-ink-400 mt-0.5 font-mono truncate" :title="agent.kaspa?.address" x-text="agent.kaspa?.address?.slice(0,14) + '...'"></div>
               <div class="text-[10px] text-ink-400 mt-0.5" x-show="agent.kaspa?.hasMnemonic">✓ 助记词已保存</div>
-              <div class="text-[10px] text-orange-500 mt-0.5" x-show="!agent.kaspa?.hasMnemonic">⚠ 无助记词</div>
+              <div class="text-[10px] text-ink-400 mt-0.5" x-show="!agent.kaspa?.hasMnemonic && agent.kaspa?.hasPrivateKey">✓ 私钥已导入</div>
+              <div class="text-[10px] text-orange-500 mt-0.5" x-show="!agent.kaspa?.hasMnemonic && !agent.kaspa?.hasPrivateKey">⚠ 无密钥</div>
+              <button @click="openSendModalKaspa(agent)"
+                      :disabled="!(agent.kaspa?.hasMnemonic || agent.kaspa?.hasPrivateKey)"
+                      :title="(agent.kaspa?.hasMnemonic || agent.kaspa?.hasPrivateKey) ? '发送 KAS' : '此地址无密钥(助记词/私钥都没),无法发送'"
+                      class="mt-2 w-full px-2 py-1 rounded text-[10px] bg-warm-100 hover:bg-warm-200 text-ink-600 hover:text-brand-600 border border-warm-200 disabled:opacity-40 disabled:cursor-not-allowed">发送 KAS</button>
             </div>
 
             <!-- 多链钱包 -->
@@ -473,7 +552,7 @@
       <div class="pf-card-editorial pf-accent-gold-border-t p-5 mb-3">
         <div class="flex items-center justify-between mb-4">
           <h3 class="pf-display text-base text-ink-800">Oracle Earnings</h3>
-          <a href="/predictions/oracle-registry" class="text-[11px] pf-accent-gold hover:underline">在线 oracle 名单 →</a>
+          <a href="/oracle" class="text-[11px] pf-accent-gold hover:underline">Oracle 信任系统 →</a>
         </div>
         <template x-if="oracleEarnings && oracleEarnings.length > 0">
           <div>
@@ -570,6 +649,26 @@ function portfolioApp() {
       chain: '',
       wallets: [],  // all wallets on this (agent, chain) pair
     },
+    // 统一发送模态 — 替原 sendPrompt 4-连 prompt() 链. 支持 KAS 原生 + 多链 stables/native.
+    sendModal: {
+      open: false,
+      relayId: null,
+      walletId: null,        // null for KAS native (relay-level)
+      chain: '',             // 'kaspa' for KAS, else from wallet.chain
+      chainLabel: '',
+      fromAddr: '',
+      fromBalance: '0',
+      asset: 'native',       // 'native' | 'usdt' | 'usdc' | 'kas'
+      assetLabel: '',
+      assetOptions: [],      // [{key, label, balance}]
+      addrHint: '',
+      addrValidator: null,
+      toAddr: '',
+      amount: '',
+      sending: false,
+      error: '',
+      txHash: '',
+    },
     get kasPriceUsd() { return this.data?.kasPriceUsd || null; },
 
     // Native-token symbol per EVM chain (MATIC for polygon, ETH for L2s, etc.)
@@ -660,6 +759,120 @@ function portfolioApp() {
         chain,
         wallets,
       };
+    },
+
+    // 多链钱包 (USDT/USDC/native EVM/SOL/TRON) 发送 — 由 walletPanel 上的"发送"按钮触发
+    openSendModal(wallet) {
+      if (!wallet.hasPrivateKey) return;
+      const chain = wallet.chain;
+      const nat = this.nativeSymbol(chain);
+      const stables = this.chainsMeta?.[chain]?.stables || {};
+      const hasUsdt = !!stables.usdt;
+      const hasUsdc = !!stables.usdc || !!(stables.usdcExtras?.length);
+      const isSolOrTron = chain === 'sol' || chain === 'tron';
+      const options = [{ key: 'native', label: nat, balance: (wallet.nativeBalance || 0).toFixed(6) }];
+      if (hasUsdt || isSolOrTron) options.push({ key: 'usdt', label: 'USDT', balance: (wallet.usdtBalance || 0).toFixed(2) });
+      if (hasUsdc || isSolOrTron) options.push({ key: 'usdc', label: 'USDC', balance: (wallet.usdcBalance || 0).toFixed(2) });
+      const addrHint = chain === 'sol' ? 'base58 (32-44 字符)' : chain === 'tron' ? 'T... (~34 字符)' : '0x...';
+      const validators = {
+        sol:  a => /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(a),
+        tron: a => /^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(a),
+      };
+      const validator = validators[chain] || (a => /^0x[a-fA-F0-9]{40}$/.test(a));
+      this.sendModal = {
+        open: true,
+        relayId: this.walletPanel.relayId,
+        walletId: wallet.id,
+        chain,
+        chainLabel: chain.toUpperCase(),
+        fromAddr: wallet.address,
+        fromBalance: options[0].balance,
+        asset: 'native',
+        assetLabel: options[0].label,
+        assetOptions: options,
+        addrHint, addrValidator: validator,
+        toAddr: '', amount: '', sending: false, error: '', txHash: '',
+      };
+    },
+
+    // KAS 原生发送 — 由 agent 卡片 KAS 区的"发送 KAS"按钮触发. 走 /api/relay/:id/transfer
+    // 助记词 OR 私钥(r281 import-privkey relay) 任一即可发送, relay 进程内部从对应 env 加载.
+    openSendModalKaspa(agent) {
+      if (!(agent.kaspa?.hasMnemonic || agent.kaspa?.hasPrivateKey)) return;
+      const isTestnet = (agent.kaspa.address || '').startsWith('kaspatest:');
+      const prefix = isTestnet ? 'kaspatest:' : 'kaspa:';
+      const validator = a => a.startsWith(prefix) && a.length >= prefix.length + 50;
+      this.sendModal = {
+        open: true,
+        relayId: agent.id,
+        walletId: null,
+        chain: 'kaspa',
+        chainLabel: isTestnet ? 'KASPA (testnet)' : 'KASPA',
+        fromAddr: agent.kaspa.address || '',
+        fromBalance: (agent.kaspa.balance || 0).toFixed(8),
+        asset: 'kas',
+        assetLabel: 'KAS',
+        assetOptions: [{ key: 'kas', label: 'KAS', balance: (agent.kaspa.balance || 0).toFixed(8) }],
+        addrHint: prefix + '...',
+        addrValidator: validator,
+        toAddr: '', amount: '', sending: false, error: '', txHash: '',
+      };
+    },
+
+    // 模态内: asset 切换刷新余额显示 + 校验码
+    sendModalSetAsset(key) {
+      const opt = this.sendModal.assetOptions.find(o => o.key === key);
+      if (!opt) return;
+      this.sendModal.asset = key;
+      this.sendModal.assetLabel = opt.label;
+      this.sendModal.fromBalance = opt.balance;
+    },
+
+    // 确认发送 — 路由到对应后端 (KAS 走 /transfer, 其他链走 /wallets/:id/send).
+    // 双发保护 (2026-05-30 operator 撞 2× 1000 KAS bug 后加固):
+    //   ① 入口 idempotency 守: sending 或已有 txHash 即返回, 防 race + 防成功后再点;
+    //   ② 成功不 finally 重置 sending — 保持按钮 disable 直到 modal 关 (2.5s 后);
+    //   ③ 按钮 :disabled 条件并联 txHash, 一旦有交易哈希永久锁死该次 modal.
+    async confirmSend() {
+      const m = this.sendModal;
+      if (m.sending || m.txHash) return;  // ① 双发守
+      m.error = '';
+      const to = (m.toAddr || '').trim();
+      const amt = parseFloat(m.amount);
+      if (!to)              { m.error = '请输入目的地址'; return; }
+      if (!m.addrValidator(to)) { m.error = '地址格式不对 (' + m.chainLabel + ')'; return; }
+      if (!(amt > 0))        { m.error = '金额必须 > 0'; return; }
+      if (amt > parseFloat(m.fromBalance)) { m.error = '余额不足 (可用 ' + m.fromBalance + ' ' + m.assetLabel + ')'; return; }
+      m.sending = true;
+      let succeeded = false;
+      try {
+        let url, body;
+        if (m.chain === 'kaspa') {
+          url = `/api/relay/${m.relayId}/transfer`;
+          body = { to, amount: amt.toFixed(8) };
+        } else {
+          url = `/api/relay/${m.relayId}/wallets/${m.walletId}/send`;
+          body = { asset: m.asset, amount: amt, to };
+        }
+        const r = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(45000),
+        });
+        const d = await r.json();
+        if (r.ok && (d.ok || d.txId || d.txHash)) {
+          m.txHash = d.txId || d.txHash || '';
+          succeeded = true;  // ② 成功不重置 sending — 让按钮持续 disable 直到 modal 关
+          setTimeout(() => { this.sendModal.open = false; this.loadAll(); }, 2500);
+        } else {
+          m.error = '失败: ' + (d.error || ('HTTP ' + r.status));
+        }
+      } catch (e) {
+        m.error = '失败: ' + e.message;
+      } finally {
+        if (!succeeded) m.sending = false;  // 仅失败 / 异常才放开重试
+      }
     },
 
     copyAddr(addr, ev) {

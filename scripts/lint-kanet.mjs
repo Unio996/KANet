@@ -608,6 +608,45 @@ function checkKI32_oracle_channel_mutex(filepath, content) {
   }
 }
 
+// ── KI-49 silent-skip 第 N 次复刻 sediment (qlfpv 实测 G6 批2 红线 7) ──
+//
+// qlfpv 5 层 brick 第三面 (= 后 sighash 双 bug 修完): SS 焊死 fee 跟实际 mass 不匹.
+// pool.js 创建 contract 用 b.miner_fee || 50_000 作 ctor minerFee, 编进 PoolSpine_v06
+// SS L281 require value==makerStakeAmount-minerFee. 但 refund/settle TX 用 SS redeem
+// (1942 bytes) scriptSig → mass 4420+ → mempool floor 442_000 sompi >> 50_000 焊死 fee
+// → mempool reject. qlfpv 100 KAS effective brick.
+//
+// 守: pool.js create-v06 (= pool.js L448) 用 b.miner_fee || N 不可低于 SS refund mass
+// floor 实测下限. 推荐 default 5_000_000 (= 跟 settle 路径 minerFee floor 同步 Bettor
+// 已 r235 钦点, dispatchPhase2 5_000_000 已 ship 47ff13d). create-v06 必符 floor 否则
+// 链上市场无法 refund/settle.
+//
+// 守 b.miner_fee || X 中 X 必 >= 1_000_000 (= 安全余量 SS redeem 1942 byte mass cover).
+// Whitelist marker: 'lint-allow-minerfee-low: <reason>'.
+function checkR40_minerFee_floor(filepath, content) {
+  if (!/[/\\]api[/\\]pool\.js$/.test(filepath)) return;
+  const lines = content.split('\n');
+  const MIN_SAFE = 1_000_000;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (/^\s*(?:\/\/|\*|\/\*)/.test(line)) continue;
+    // Match: parseInt(b.miner_fee, 10) || 50_000 / 20_000 / etc.
+    const m = line.match(/parseInt\s*\(\s*b\.miner_fee[\s,]+\d+\s*\)\s*\|\|\s*(\d[\d_]*)/);
+    if (!m) continue;
+    const defaultValue = parseInt(m[1].replace(/_/g, ''), 10);
+    if (defaultValue < MIN_SAFE) {
+      const windowStart = Math.max(0, i - 3);
+      const windowText = lines.slice(windowStart, i + 1).join('\n');
+      if (/lint-allow-minerfee-low/.test(windowText)) continue;
+      violate(
+        'R40 (G6 批2 红线 7, qlfpv brick sediment)',
+        `b.miner_fee || ${defaultValue} too low — SS contract 焊死此 fee 进 PoolSpine_v06 L281 require, 但 refund/settle TX scriptSig ~2000 byte → mass 4000+ → mempool floor ${defaultValue * 100 / MIN_SAFE * MIN_SAFE}+ sompi >> ${defaultValue} → 'transaction is not standard' brick. Bettor r239 钦点 minimum ${MIN_SAFE} sompi (推荐 5_000_000 跟 settle floor 同步, 47ff13d sediment).`,
+        filepath, i + 1
+      );
+    }
+  }
+}
+
 // ── 跑 ──
 for (const fp of targets) {
   let content;
@@ -629,6 +668,7 @@ for (const fp of targets) {
   checkKI31_gamma_closed_query(fp, content);  // KI-31 (Bettor r184 5/19): gamma single-market query 必 &closed=true
   checkKI32_oracle_channel_mutex(fp, content);  // KI-32 (Oracle v0.3 R7 J2 #9 + J1 #4): oracle-registry NOT 进 COORD_CHANNELS + ORACLE_REGISTRY_CHANNELS 跟 COORD mutex
   checkKI33_trust_score_placeholder(fp, content);  // KI-33 (Oracle v0.3 §9 5/26): broker-llm-agent.js SYSTEM_PROMPT 必含 {{trust_score}}
+  checkR40_minerFee_floor(fp, content);  // R40 (G6 批2 红线 7, qlfpv brick sediment 5/31): pool.js create-v06 minerFee 默认下限
 }
 checkR10();
 

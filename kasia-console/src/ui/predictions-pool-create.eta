@@ -48,19 +48,21 @@
   <!-- 钱包状态栏 (= 复用 predictions.eta pattern) -->
   <!-- ============================================ -->
   <div class="card card-compact mb-5 flex items-center gap-4 flex-wrap">
-    <select x-model="selectedRelayId" @change="onAgentChange()"
-            class="rounded-lg border border-warm-300 px-3 py-1.5 text-sm bg-white font-medium">
-      <%
-        // #1 maker filter: oracle 不当 maker (= Q11 area-1 spec). 严格 maker eligibility 待 Bettor 定 (= prediction_maker_whitelist 等 mechanism).
-        const eligibleMakers = it.relayNodes.filter(r => !r.is_oracle);
-      %>
-      <% if (eligibleMakers.length === 0) { %>
-      <option value="">⚠ 无符合 maker 资格 agent (= 全 is_oracle=1)</option>
-      <% } %>
-      <% eligibleMakers.forEach(r => { %>
-      <option value="<%= r.id %>"><%= r.name %></option>
-      <% }) %>
-    </select>
+    <label class="flex items-center gap-2 text-sm">
+      <span class="text-ink-500">出单人:</span>
+      <select x-model="selectedRelayId" @change="onAgentChange()"
+              class="rounded-lg border border-warm-300 px-3 py-1.5 text-sm bg-white font-medium">
+        <%
+          const eligibleMakers = it.relayNodes.filter(r => !r.is_oracle);
+        %>
+        <% if (eligibleMakers.length === 0) { %>
+        <option value="">没有可用的出单人</option>
+        <% } %>
+        <% eligibleMakers.forEach(r => { %>
+        <option value="<%= r.id %>"><%= r.name %></option>
+        <% }) %>
+      </select>
+    </label>
     <template x-if="walletAddress">
       <div class="flex items-center gap-3 text-sm">
         <span class="font-mono text-xs text-ink-400 cursor-pointer"
@@ -79,9 +81,10 @@
   <!-- ============================================ -->
   <template x-if="shipped">
     <div class="card card-flush overflow-hidden mb-5 border border-warm-200">
+      <!-- KANet-UI 2026-06-07 P1-#1 (Bettor r324 关 1 PASS): jargon → 大白话 -->
       <div class="px-6 py-5 border-b border-warm-200">
         <h2 class="font-display text-2xl text-ink-700">押金 <span x-text="form.maker_stake_kas"></span> KAS 已锁</h2>
-        <p class="text-xs text-ink-400 mt-1">市场 ID: <span class="font-mono" x-text="result.market_id"></span></p>
+        <p class="text-xs text-ink-400 mt-1">议题编号: <span class="font-mono" x-text="result.market_id?.slice(-12)"></span></p>
       </div>
       <div class="px-6 py-5 space-y-1">
         <template x-for="(step, i) in timeline" :key="step.id">
@@ -94,14 +97,25 @@
       </div>
       <div class="px-6 py-4 bg-warm-50 border-t border-warm-200 space-y-2 text-xs">
         <div class="flex items-center gap-2">
-          <span class="text-ink-400 w-20">spine TX</span>
+          <span class="text-ink-500 w-24">本金锁单 TX</span>
           <a class="font-mono accent-gold hover:underline" target="_blank"
              :href="'https://explorer-tn12.kaspa.org/txs/' + result.spine_lock_tx"
              x-text="result.spine_lock_tx?.slice(0,16) + '...' + result.spine_lock_tx?.slice(-8)"></a>
         </div>
-        <div class="flex items-center gap-2">
-          <span class="text-ink-400 w-20">spine P2SH</span>
-          <span class="font-mono text-ink-500" x-text="result.spine_p2sh?.slice(0,18) + '...' + result.spine_p2sh?.slice(-12)"></span>
+        <!-- 高级 detail 折叠默认: market id 完整 + 本金锁地址 -->
+        <button type="button" @click="showAdvancedShipDetail = !showAdvancedShipDetail"
+                class="text-[11px] text-ink-400 hover:underline">
+          <span x-text="showAdvancedShipDetail ? '收起高级详情 ↑' : '看高级详情 (议题 ID 全 + 本金锁地址) →'"></span>
+        </button>
+        <div x-show="showAdvancedShipDetail" class="space-y-2 pt-1 border-t border-warm-200">
+          <div class="flex items-center gap-2">
+            <span class="text-ink-400 w-24">议题 ID 全</span>
+            <span class="font-mono text-ink-500 break-all" x-text="result.market_id"></span>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="text-ink-400 w-24">本金锁地址</span>
+            <span class="font-mono text-ink-500" x-text="result.spine_p2sh?.slice(0,18) + '...' + result.spine_p2sh?.slice(-12)"></span>
+          </div>
         </div>
       </div>
       <div class="px-6 py-4 border-t border-warm-200 flex gap-3">
@@ -179,43 +193,170 @@
         <!-- 左栏 内容 (= col-span-3) -->
         <div class="md:col-span-3 space-y-5">
 
-          <!-- 题目 -->
+          <!-- KANet-UI 2026-06-07 P0-#1 A (Bettor r321 关 1 PASS): 题目+题干合一为'议题'. backend spec 写 title=question 同值. -->
           <div>
-            <label class="block text-xs font-medium text-ink-500 mb-1.5">题目</label>
-            <input type="text" x-model="form.question" maxlength="200"
-                   placeholder="例: 比特币 6 月底前过 $80,000?"
-                   class="w-full font-display text-xl px-4 py-3 rounded-lg border border-warm-300 focus:border-amber-400 focus:ring-2 focus:ring-amber-100 focus:outline-none">
-            <p class="text-xs text-ink-400 mt-1">一句话, 让 oracle / bettor 一眼看懂</p>
+            <label class="block text-xs font-medium text-ink-500 mb-1.5">议题 <span class="text-red-500">*</span></label>
+            <input type="text" x-model="form.title" @blur="touched.title = true" maxlength="200"
+                   placeholder="例: BTC 2026-06-30 23:59 UTC Binance 收盘价 ≥ 80,000?"
+                   class="w-full font-display text-xl px-4 py-3 rounded-lg border focus:border-amber-400 focus:ring-2 focus:ring-amber-100 focus:outline-none"
+                   :class="touched.title && !form.title.trim() ? 'border-red-400' : 'border-warm-300'">
+            <p class="text-xs text-ink-400 mt-1">一句话, 用户和 oracle 都看懂赌什么 (≤ 200 字)</p>
+            <p x-show="touched.title && !form.title.trim()" class="text-xs text-red-500 mt-1">请填议题</p>
           </div>
 
           <!-- 截止 -->
           <div>
-            <label class="block text-xs font-medium text-ink-500 mb-1.5">截止时间 (UTC)</label>
-            <input type="datetime-local" x-model="form.outcome_end_date_local"
+            <label class="block text-xs font-medium text-ink-500 mb-1.5">截止时间 (UTC) <span class="text-red-500">*</span></label>
+            <input type="datetime-local" x-model="form.outcome_end_date_local" @blur="touched.deadline = true"
                    :min="minDeadlineLocal" :max="maxDeadlineLocal"
-                   class="w-full font-mono text-sm px-4 py-2.5 rounded-lg border border-warm-300 focus:border-amber-400 focus:outline-none">
+                   class="w-full font-mono text-sm px-4 py-2.5 rounded-lg border focus:border-amber-400 focus:outline-none"
+                   :class="touched.deadline && !form.outcome_end_date_local ? 'border-red-400' : 'border-warm-300'">
             <p class="text-xs text-ink-400 mt-1">必 ≥ 现在 + <span x-text="minDeadlineMin"></span> 分钟 · ≤ <span x-text="maxDeadlineDay"></span> 天 (testnet)</p>
+            <p x-show="touched.deadline && !form.outcome_end_date_local" class="text-xs text-red-500 mt-1">请选截止时间</p>
           </div>
 
-          <!-- 规则 -->
-          <div>
-            <label class="block text-xs font-medium text-ink-500 mb-1.5">判定规则 (oracle 用这段判 YES/NO)</label>
-            <textarea x-model="form.resolution_rule_spec" rows="4" maxlength="1000"
-                      placeholder="例: 看 6/30 23:59 UTC Binance BTC/USDT 收盘价。 ≥80,000 = YES, 否则 NO."
-                      class="w-full text-sm px-4 py-3 rounded-lg border border-warm-300 focus:border-amber-400 focus:outline-none font-sans leading-relaxed"></textarea>
-            <div class="flex items-center justify-between mt-1">
-              <p class="text-xs text-ink-400">明确数据源 + 时间 + 阈值 = 减少 oracle 分歧</p>
-              <button @click="llmCheckRule()" :disabled="!form.resolution_rule_spec || llmChecking"
-                      class="text-xs accent-gold hover:underline disabled:opacity-40">
-                <span x-text="llmChecking ? '检查中...' : '🤖 LLM 检查规则清晰度'"></span>
-              </button>
-            </div>
-            <template x-if="llmResult">
-              <div class="mt-2 text-xs px-3 py-2 rounded-lg" :class="llmResult.score >= 7 ? 'bg-green-50 text-green-700' : llmResult.score >= 4 ? 'bg-amber-50 text-amber-700' : 'bg-red-50 text-red-700'">
-                <span class="font-medium">清晰度 <span x-text="llmResult.score"></span>/10:</span>
-                <span x-text="llmResult.advice"></span>
+          <!-- KANet-UI 2026-06-07 P0-#1 C (Bettor r321 关 1 PASS): 数据源 + 规则合 1 card '判定凭据'. 内部 2 input 不动. -->
+          <div class="card bg-warm-50 p-4 border border-warm-200">
+            <div class="text-xs font-medium text-ink-700 mb-1">判定凭据 <span class="text-red-500">*</span></div>
+            <p class="text-[11px] text-ink-500 mb-3">oracle 凭什么判 YES/NO. 数据来源 + 怎么解读两件.</p>
+
+            <!-- 数据来源 (子项 1) -->
+            <div class="mb-3">
+              <label class="block text-[11px] text-ink-500 mb-1">数据来源</label>
+              <select x-model="form.source_kind" @change="onSourceKindChange()"
+                      class="w-full text-sm px-3 py-2 rounded-lg border border-warm-300 focus:border-amber-400 focus:outline-none bg-white">
+                <option value="binance">大所收盘价 (Binance 日线)</option>
+                <option value="polymarket">Polymarket 议题</option>
+                <option value="sport">体育/事件 (测试占位)</option>
+                <option value="kaspa-onchain">Kaspa 链上事件</option>
+                <option value="manual">我自己填 URL (高级)</option>
+              </select>
+              <div x-show="form.source_kind === 'binance'" class="mt-2">
+                <input type="text" x-model="form.source_params.symbol" maxlength="20"
+                       placeholder="例: BTCUSDT / ETHUSDT / KASUSDT"
+                       class="w-full text-sm px-3 py-2 rounded-lg border border-warm-300 focus:border-amber-400 focus:outline-none font-mono" />
+                <p class="text-[11px] text-ink-400 mt-1">填 Binance 交易对. 仲裁人自动取日线收盘价判定.</p>
               </div>
-            </template>
+              <div x-show="form.source_kind === 'polymarket'" class="mt-2">
+                <input type="text" x-model="form.source_params.condition_id" maxlength="200"
+                       placeholder="Polymarket condition_id (= 上面议题搜索自动填)"
+                       class="w-full text-sm px-3 py-2 rounded-lg border border-warm-300 focus:border-amber-400 focus:outline-none font-mono" />
+                <p class="text-[11px] text-ink-400 mt-1">用上面"找现成议题"搜出来直接选, condition_id 自动填.</p>
+              </div>
+              <div x-show="form.source_kind === 'sport'" class="mt-2">
+                <input type="text" x-model="form.source_params.event_id" maxlength="100"
+                       placeholder="例: world_cup_final_2026_yes"
+                       class="w-full text-sm px-3 py-2 rounded-lg border border-warm-300 focus:border-amber-400 focus:outline-none font-mono" />
+                <p class="text-[11px] text-ink-400 mt-1">测试网占位 (= 走 mock test-oracle 演示). 末尾 _yes / _no 决判定方向.</p>
+              </div>
+              <div x-show="form.source_kind === 'kaspa-onchain'" class="mt-2">
+                <input type="text" x-model="form.source_params.tx_hash" maxlength="80"
+                       placeholder="64 hex TX hash"
+                       class="w-full text-sm px-3 py-2 rounded-lg border border-warm-300 focus:border-amber-400 focus:outline-none font-mono" />
+                <p class="text-[11px] text-ink-400 mt-1">填 Kaspa 链上 TX hash. 仲裁人查该 TX 状态判定.</p>
+              </div>
+              <div x-show="form.source_kind === 'manual'" class="mt-2">
+                <input type="text" x-model="form.data_source_canonical" maxlength="500"
+                       placeholder="例: https://api.example.com/.../outcome"
+                       class="w-full text-sm px-3 py-2 rounded-lg border border-warm-300 focus:border-amber-400 focus:outline-none font-mono" />
+                <p class="text-[11px] text-ink-400 mt-1">高级: 自填可信公开 URL. 仲裁人自动 fetch 该 URL 提取 outcome.</p>
+              </div>
+            </div>
+
+            <!-- 判定规则 (子项 2) -->
+            <div>
+              <label class="block text-[11px] text-ink-500 mb-1">判定规则</label>
+              <textarea x-model="form.resolution_rule_spec" @blur="touched.rule = true" rows="4" maxlength="1000"
+                        placeholder="例: 看 6/30 23:59 UTC Binance BTC/USDT 收盘价。 ≥80,000 = YES, 否则 NO."
+                        class="w-full text-sm px-3 py-2 rounded-lg border focus:border-amber-400 focus:outline-none font-sans leading-relaxed"
+                        :class="touched.rule && !form.resolution_rule_spec.trim() ? 'border-red-400' : 'border-warm-300'"></textarea>
+              <div class="flex items-center justify-between mt-1">
+                <p class="text-[11px] text-ink-400">明确数据源 + 时间 + 阈值 = 减少仲裁人分歧</p>
+                <!-- KANet-UI 2026-06-08 P0-A MVP 预审 (Bettor r360 关 1 PASS): preview button -->
+                <button @click="runPreVet()" :disabled="!canPreVet() || preVet.checking"
+                        class="text-[11px] accent-gold hover:underline disabled:opacity-40">
+                  <span x-text="preVet.checking ? '预审中...' : '🤖 预审题目可裁性'"></span>
+                </button>
+              </div>
+              <p x-show="touched.rule && !form.resolution_rule_spec.trim()" class="text-xs text-red-500 mt-1">请填判定规则</p>
+
+              <!-- 预审结果面板 (= J2 endpoint /api/pool/prevet contract, Bettor r361 锁) -->
+              <template x-if="preVet.result">
+                <div class="mt-2 space-y-2">
+                  <!-- 主标题 + 分数 (Bettor §5 '启发非保证') -->
+                  <div class="text-xs px-3 py-2 rounded-lg" :class="levelBadgeClass()">
+                    <div class="flex items-center justify-between">
+                      <span class="font-medium">题目可裁性估计 (启发非保证)</span>
+                      <span class="font-display text-base" x-text="'易裁度 ' + preVet.result.score + '/10'"></span>
+                    </div>
+                    <div class="text-[11px] mt-1" x-text="levelLabel()"></div>
+                  </div>
+
+                  <!-- why list -->
+                  <template x-if="(preVet.result.why || []).length > 0">
+                    <div class="bg-warm-50 rounded p-2 text-[11px]">
+                      <div class="text-ink-500 mb-1">缺啥 / 不清:</div>
+                      <ul class="list-disc list-inside text-ink-600 space-y-0.5">
+                        <template x-for="(w, i) in preVet.result.why" :key="i">
+                          <li x-text="w"></li>
+                        </template>
+                      </ul>
+                    </div>
+                  </template>
+
+                  <!-- suggestions list -->
+                  <template x-if="(preVet.result.suggestions || []).length > 0">
+                    <div class="bg-warm-50 rounded p-2 text-[11px]">
+                      <div class="text-ink-500 mb-1">改进建议:</div>
+                      <ul class="list-disc list-inside text-ink-600 space-y-0.5">
+                        <template x-for="(s, i) in preVet.result.suggestions" :key="i">
+                          <li x-text="s"></li>
+                        </template>
+                      </ul>
+                    </div>
+                  </template>
+
+                  <!-- llm_votes 透明 (= Bettor §2 多 LLM 共识可见) -->
+                  <template x-if="(preVet.result.llm_votes || []).length > 0">
+                    <div class="bg-warm-50 rounded p-2 text-[11px]">
+                      <div class="text-ink-500 mb-1">LLM 投票:</div>
+                      <div class="flex flex-wrap gap-2">
+                        <template x-for="(v, i) in preVet.result.llm_votes" :key="i">
+                          <span class="px-2 py-0.5 bg-white rounded border border-warm-200" x-text="v.provider + ' ' + v.score + '/10'"></span>
+                        </template>
+                      </div>
+                    </div>
+                  </template>
+                </div>
+              </template>
+
+              <!-- 预审 endpoint down 时 fallback -->
+              <template x-if="preVet.error">
+                <div class="mt-2 text-xs px-3 py-2 rounded-lg bg-warm-50 text-ink-500" x-text="'预审暂不可用 (' + preVet.error + '), 仍可建市但建议自查 spec 清晰度.'"></div>
+              </template>
+
+              <!-- KANet-UI 2026-06-09 r448 (Bettor Owner 钦定 maker-facing 源可判性): /api/pool/prevet-extract -->
+              <div class="mt-3 flex items-center justify-end gap-2">
+                <button @click="runPreVetExtract()" :disabled="!canPreVetExtract() || preVetExtract.checking"
+                        class="text-[11px] accent-gold hover:underline disabled:opacity-40">
+                  <span x-text="preVetExtract.checking ? '检查源可判性中...' : '🔍 检查源可判性'"></span>
+                </button>
+              </div>
+              <template x-if="preVetExtract.result">
+                <div class="mt-2 text-xs px-3 py-2 rounded-lg" :class="extractBadgeClass()">
+                  <div class="font-medium" x-text="extractBadgeLabel()"></div>
+                  <template x-if="preVetExtract.result.advice">
+                    <div class="text-[11px] mt-1" x-text="preVetExtract.result.advice"></div>
+                  </template>
+                  <template x-if="preVetExtract.result.preview">
+                    <div class="text-[11px] mt-1 text-ink-500" x-text="'抽样: ' + preVetExtract.result.preview"></div>
+                  </template>
+                </div>
+              </template>
+              <template x-if="preVetExtract.error">
+                <div class="mt-2 text-xs px-3 py-2 rounded-lg bg-warm-50 text-ink-500" x-text="'源验证暂不可用 (' + preVetExtract.error + '), 不阻 submit 但建议自查 source enum/canonical URL.'"></div>
+              </template>
+            </div>
           </div>
         </div>
 
@@ -224,14 +365,14 @@
 
           <!-- YES/NO -->
           <div>
-            <label class="block text-xs font-medium text-ink-500 mb-1.5">你押哪边</label>
+            <label class="block text-xs font-medium text-ink-500 mb-1.5">你押哪边 <span class="text-red-500">*</span></label>
             <div class="grid grid-cols-2 gap-2">
-              <button @click="form.outcome_side = 'YES'"
+              <button @click="form.outcome_side = 'YES'; touched.outcome_side = true"
                       class="py-3 rounded-lg border-2 transition font-display text-lg"
                       :class="form.outcome_side === 'YES' ? 'accent-gold-bg text-white accent-gold-border' : 'border-warm-300 text-ink-500 accent-gold-hover-bg'">
                 YES
               </button>
-              <button @click="form.outcome_side = 'NO'"
+              <button @click="form.outcome_side = 'NO'; touched.outcome_side = true"
                       class="py-3 rounded-lg border-2 transition font-display text-lg"
                       :class="form.outcome_side === 'NO' ? 'accent-gold-bg text-white accent-gold-border' : 'border-warm-300 text-ink-500 accent-gold-hover-bg'">
                 NO
@@ -243,17 +384,16 @@
           <div>
             <label class="block text-xs font-medium text-ink-500 mb-1.5 flex items-baseline justify-between">
               <span>押 <span class="font-display text-base text-ink-700" x-text="form.maker_stake_kas"></span> KAS</span>
-              <span class="text-xs text-ink-400">(最低 1 / 上限 <span x-text="poolConfig?.maker_stake_max_kas ?? 4"></span> KAS)</span>
+              <span class="text-xs text-ink-400">(最低 100 KAS)</span>
             </label>
             <input type="range" x-model.number="form.maker_stake_kas"
-                   :min="poolConfig?.maker_stake_min_kas ?? 1"
-                   :max="poolConfig?.maker_stake_max_kas ?? 4"
+                   :min="poolConfig?.maker_stake_min_kas ?? 100"
+                   :max="poolConfig?.maker_stake_max_kas ?? 10000"
                    step="0.5"
                    class="w-full stake-slider">
-            <p class="text-xs text-ink-400 mt-1">SS 合约 baked 数学锁定不可调</p>
           </div>
 
-          <!-- 成交费 (Oracle v0.3 §8 disclose mandatory + 1 input + 1:1:1 split) -->
+          <!-- KANet-UI 2026-06-07 P1 末项 (Bettor r328 续 ship): advanced fee 文案 jargon → 中文一致 -->
           <div>
             <label class="block text-xs font-medium text-ink-500 mb-1.5 flex items-baseline justify-between">
               <span>成交费 <span class="font-display text-base text-ink-700" x-text="form.total_fee_pct"></span>%</span>
@@ -261,67 +401,38 @@
             </label>
             <input type="range" x-model.number="form.total_fee_pct" min="1" max="10" step="1"
                    class="w-full stake-slider">
-            <!-- §8 4 disclose mandatory -->
+            <!-- disclose: 三方分账 -->
             <div class="mt-1.5 text-[11px] text-ink-400 space-y-0.5">
-              <div>📋 <span class="text-ink-500">类型</span>: 预测市场 (pool)</div>
-              <div>💰 <span class="text-ink-500">分账</span>: maker <span x-text="(form.total_fee_pct / 3).toFixed(1)"></span>% / oracle <span x-text="(form.total_fee_pct / 3).toFixed(1)"></span>% / broker <span x-text="(form.total_fee_pct / 3).toFixed(1)"></span>%</div>
-              <div>⚖ <span class="text-ink-500">最大费</span>: 同 <span x-text="form.total_fee_pct"></span>% (= 无 dispute)</div>
+              <div>📋 <span class="text-ink-500">类型</span>: 预测市场</div>
+              <div>💰 <span class="text-ink-500">分账</span>: 主持费 <span x-text="(form.total_fee_pct / 3).toFixed(1)"></span>% / 仲裁费 <span x-text="(form.total_fee_pct / 3).toFixed(1)"></span>% / 中介费 <span x-text="(form.total_fee_pct / 3).toFixed(1)"></span>%</div>
+              <div>⚖ <span class="text-ink-500">最大费</span>: 同 <span x-text="form.total_fee_pct"></span>% (= 无争议)</div>
             </div>
             <button type="button" @click="form.showAdvancedFee = !form.showAdvancedFee"
                     class="text-[11px] text-amber-700 underline mt-1">
-              <span x-text="form.showAdvancedFee ? '收起 ↑' : '调整分配比例 →'"></span>
+              <span x-text="form.showAdvancedFee ? '收起 ↑' : '调整三方分账比例 →'"></span>
             </button>
-            <!-- Advanced collapse: 3 fee channel 分别调 -->
+            <!-- Advanced collapse: 主持/仲裁/中介 3 项分别调 (= 默认收, form.showAdvancedFee=false) -->
             <div x-show="form.showAdvancedFee" x-transition class="mt-2 space-y-2 bg-warm-50 p-2 rounded">
               <div>
-                <label class="text-[11px] text-ink-500">maker fee <span x-text="form.maker_fee_pct"></span>%</label>
+                <label class="text-[11px] text-ink-500">主持费 <span x-text="form.maker_fee_pct"></span>%</label>
                 <input type="range" x-model.number="form.maker_fee_pct" min="0" max="5" step="0.5" class="w-full">
               </div>
               <div>
-                <label class="text-[11px] text-ink-500">oracle fee <span x-text="form.oracle_fee_pct"></span>% (= range 5-20% spec lock)</label>
+                <label class="text-[11px] text-ink-500">仲裁费 <span x-text="form.oracle_fee_pct"></span>% (testnet 范围 5-20%)</label>
                 <input type="range" x-model.number="form.oracle_fee_pct" min="0" max="20" step="1" class="w-full">
               </div>
               <div>
-                <label class="text-[11px] text-ink-500">broker fee <span x-text="form.broker_fee_pct"></span>%</label>
+                <label class="text-[11px] text-ink-500">中介费 <span x-text="form.broker_fee_pct"></span>%</label>
                 <input type="range" x-model.number="form.broker_fee_pct" min="0" max="5" step="0.5" class="w-full">
               </div>
             </div>
           </div>
 
-          <!-- commit_reveal (= O2, Phase 2 defer, default off) -->
-          <div>
-            <label class="flex items-center gap-2 text-xs cursor-pointer">
-              <input type="checkbox" x-model="form.commit_reveal_enabled" class="accent-amber-600">
-              <span class="text-ink-600">commit-reveal 投票 (= 防 herd, Phase 2 启用, testnet 默认 off)</span>
-            </label>
-          </div>
 
-          <!-- broker/oracle 互斥 warning (= pool v0.5 L52 钦定 + J1 #10 fold sub #7) -->
-          <template x-if="brokerOracleMutexWarning">
-            <div class="bg-red-50 border border-red-300 rounded-lg p-3 text-xs text-red-700">
-              ⚠ <span class="font-medium">broker/oracle 互斥铁律警告</span>:
-              <span x-text="brokerOracleMutexWarning"></span>
-              <br>
-              <span class="text-[11px] text-red-600">(= 强烈不建议, backend POST /api/oracle/announce 也 hard 403 拦)</span>
-            </div>
-          </template>
-
-          <!-- D7 disclaimer + checkbox -->
-          <div class="bg-warm-50 rounded-lg p-3 border border-warm-200 space-y-2">
-            <div class="text-xs text-ink-600 leading-relaxed space-y-1.5">
-              <div class="font-medium text-amber-700">⚠ 协议机制提示</div>
-              <ul class="space-y-1 pl-3 text-[11px]">
-                <li>• 单市场 <span x-text="poolConfig?.maker_stake_max_kas ?? 4"></span> KAS 封顶 — SS 合约 baked, 数学锁定不可调</li>
-                <li>• Oracle 2-of-3 多签 + P2SH 链上结算 — 零第三方托管, 钱归你私钥, KANet 团队也拿不到</li>
-                <li>• 赢家自动收钱 — 市场结束 → Oracle 投票 → 多签结算 TX → 钱直接到你原地址</li>
-                <li>• 争议走 refund — 2-1 分歧 或 3 沉默 时全员退款, PoolSide.refund_market_cancelled 自取</li>
-              </ul>
-            </div>
-            <label class="flex items-center gap-2 text-xs cursor-pointer pt-1 border-t border-warm-200">
-              <input type="checkbox" x-model="acceptedDisclaimer" class="accent-amber-600">
-              <span class="text-ink-600">我知道这些, 准备签名锁押金</span>
-            </label>
-          </div>
+          <label class="flex items-center gap-2 text-xs cursor-pointer">
+            <input type="checkbox" x-model="acceptedDisclaimer" class="accent-amber-600">
+            <span class="text-ink-600">我准备签名锁押金</span>
+          </label>
 
           <!-- 发起 button -->
           <button @click="submitMarket()" :disabled="!canSubmit || submitting"
@@ -329,6 +440,10 @@
                   :class="canSubmit && !submitting ? 'accent-gold-bg text-white shadow-sm' : 'bg-warm-200 text-ink-300 cursor-not-allowed'">
             <span x-text="submitting ? '锁押金中...' : '发起预测 →'"></span>
           </button>
+          <!-- KANet-UI 2026-06-07 P0-#1 B (Bettor r321): missing list 显缺啥 -->
+          <div x-show="!canSubmit && missingList().length > 0" class="text-xs text-amber-700 bg-amber-50 rounded px-3 py-2 text-center">
+            还差: <span x-text="missingList().join(' · ')"></span>
+          </div>
           <template x-if="submitError">
             <div class="text-xs text-red-600 px-3 py-2 bg-red-50 rounded-lg" x-text="submitError"></div>
           </template>
@@ -348,11 +463,38 @@ function createPoolPage() {
     poolConfig: null,
     minDeadlineMin: 15,
     maxDeadlineDay: 30,
+    // KANet-UI 2026-06-07 P0-#1 B (Bettor r321): touched 状态 — 失焦才显红字, 防 init 就红
+    touched: { title: false, deadline: false, rule: false, outcome_side: false },
+    // KANet-UI 2026-06-07 P1-#1 (Bettor r324): ship 后高级 detail 折叠 (议题 ID 全 / 本金锁地址 默认收)
+    showAdvancedShipDetail: false,
+    // KANet-UI 2026-06-08 P0-A MVP (Bettor r360 关 1 PASS, r361 锁 URL): 预审 state (J2 endpoint /api/pool/prevet)
+    preVet: {
+      checking: false,
+      result: null,         // { score 0-10, level 'pass'|'warn'|'critical', why: [], suggestions: [], llm_votes: [{provider, score}] }
+      error: '',
+      specHash: '',         // 上次预审的 spec hash (= form 改后清 result 防 stale)
+    },
+    // KANet-UI 2026-06-09 r448 (Bettor r448 Owner 钦定): 源可判性预审 state
+    // J2 endpoint /api/pool/prevet-extract — 建市前调一遍 voter extractor 路由验证.
+    // Verdict 绿: judgeable_now / judgeable_pending / judgeable_polymarket
+    // Verdict 红: unsupported_source_enum / no_extractor / no_canonical / canonical_unreachable / shape_mismatch
+    // 红时 missingList 加 '源判不了' → 禁 submit.
+    preVetExtract: {
+      checking: false,
+      result: null,       // { ok, verdict, label?, kind?, preview?, advice? }
+      error: '',
+      sigHash: '',        // 上次调用的 source+canonical 组合, 改后清 result 防 stale
+    },
     form: {
-      question: '',
       outcome_end_date_local: '',
       outcome_side: '',
-      maker_stake_kas: 1,
+      maker_stake_kas: 100,
+      title: '',                        // KANet-UI 2026-06-07 P0-#1 A (Bettor r321): 题目+题干合一字段 (= '议题')
+      // KANet-UI 2026-06-07 P0-#5 form 软化 (Bettor r291b 关1 PASS):
+      // source_kind 下拉 + source_params 后端 derive canonical. data_source_canonical 仅 manual 模式.
+      source_kind: 'binance',           // default = Binance 大所收盘价 (= UMA 现可裁 + 用户最熟)
+      source_params: { symbol: '', condition_id: '', event_id: '', tx_hash: '' },
+      data_source_canonical: '',        // 仅 source_kind=manual 模式下用
       resolution_rule_spec: '',
       polymarketCondition: null,  // iteration 2: set when 选用 Polymarket result
       // Oracle v0.3 §8/O2/§9 fold sub #7 — 5/26 final lock
@@ -388,7 +530,7 @@ function createPoolPage() {
           this.minDeadlineMin = parseInt(j.disagreement_timeout_min, 10) || 15;
           // 实 backend min deadline 15 min override 通过 env, UI 用 hardcode 15 显示
           this.maxDeadlineDay = parseInt(j.deadline_max_days, 10) || 30;
-          this.form.maker_stake_kas = j.maker_stake_min_kas || 1;
+          this.form.maker_stake_kas = j.maker_stake_min_kas || 100;
         }
       } catch (e) { console.warn('pool config load fail', e); }
       this.setDefaultDeadline();
@@ -409,12 +551,36 @@ function createPoolPage() {
     },
 
     get canSubmit() {
-      return this.form.question.trim()
-        && this.form.outcome_end_date_local
-        && this.form.outcome_side
-        && this.form.maker_stake_kas > 0
-        && this.form.resolution_rule_spec.trim()
-        && this.acceptedDisclaimer;
+      return this.missingList().length === 0;
+    },
+    // KANet-UI 2026-06-07 P0-#1 B (Bettor r321): 必填缺啥清单 (= submit button 旁显)
+    missingList() {
+      const out = [];
+      if (!this.form.title.trim()) out.push('议题');
+      if (!this.form.outcome_end_date_local) out.push('截止时间');
+      if (!this.form.outcome_side) out.push('押方向');
+      if (!this.form.resolution_rule_spec.trim()) out.push('判定规则');
+      const sk = this.form.source_kind;
+      const p = this.form.source_params || {};
+      let srcOk = false;
+      if (sk === 'binance') srcOk = !!(p.symbol || '').trim();
+      else if (sk === 'polymarket') srcOk = !!(p.condition_id || '').trim();
+      else if (sk === 'sport') srcOk = !!(p.event_id || '').trim();
+      else if (sk === 'kaspa-onchain') srcOk = /^[0-9a-fA-F]{64}$/.test((p.tx_hash || '').trim());
+      else if (sk === 'manual') srcOk = !!(this.form.data_source_canonical || '').trim();
+      if (!srcOk) out.push('数据来源');
+      if (!this.acceptedDisclaimer) out.push('勾签名确认');
+      if (!(this.form.maker_stake_kas > 0)) out.push('押金');
+      // KANet-UI 2026-06-08 P0-A MVP (Bettor r360): critical 阻提交 (= 难裁请改)
+      if (this.preVet.result && this.preVet.result.level === 'critical') out.push('题目难裁需改善');
+      // KANet-UI 2026-06-09 r448 (Bettor Owner 钦定): 源判不了阻提交
+      if (this.preVetExtract.result && !this.extractVerdictGreen()) out.push('源判不了需换');
+      return out;
+    },
+
+    onSourceKindChange() {
+      // 切换源时清自填 canonical (= 防上次残留漂回 manual 模式)
+      if (this.form.source_kind !== 'manual') this.form.data_source_canonical = '';
     },
 
     async onAgentChange() {
@@ -462,8 +628,9 @@ function createPoolPage() {
     },
 
     usePolymarketMarket(r) {
-      // auto-fill 题目 / 截止 / 规则 + outcome_condition_id (= polymarket condition 真链)
-      this.form.question = r.question || '';
+      // auto-fill 议题 / 截止 / 规则 + outcome_condition_id (= polymarket condition 真链)
+      // KANet-UI 2026-06-07 P0-#1 A (Bettor r321): 合一字段 → 写 form.title (替换 form.question)
+      this.form.title = r.question || '';
       if (r.end_date) {
         try {
           const d = new Date(r.end_date);
@@ -477,6 +644,9 @@ function createPoolPage() {
         this.form.resolution_rule_spec = `看 Polymarket 议题 "${r.question}" 的官方判定 (slug: ${r.slug || r.condition_id}).`;
       }
       this.form.polymarketCondition = r.condition_id;
+      // KANet-UI 2026-06-07 P0-#5: 选用 Polymarket 议题自动切 source_kind + condition_id
+      this.form.source_kind = 'polymarket';
+      this.form.source_params.condition_id = r.condition_id;
       this.searchResults = null;
       this.searchQuery = '';
       this.llmResult = null;
@@ -484,7 +654,7 @@ function createPoolPage() {
 
     clearPolymarketChoice() {
       this.form.polymarketCondition = null;
-      this.form.question = '';
+      this.form.title = '';
       this.form.resolution_rule_spec = '';
       this.setDefaultDeadline();
       this.searchQuery = '';
@@ -496,37 +666,209 @@ function createPoolPage() {
       this.searchQuery = '';
     },
 
-    async llmCheckRule() {
-      if (!this.form.resolution_rule_spec) return;
-      this.llmChecking = true;
-      this.llmResult = null;
-      // LLM endpoint 待 Bettor architect 钦定 — 现 placeholder stub.
-      // 替换为 POST /api/pool/llm-check-rule { rule, question } → { score, advice }
-      await new Promise(r => setTimeout(r, 800));
-      const r = this.form.resolution_rule_spec.trim();
-      const hasSource = /binance|coinbase|coingecko|polymarket|官方|UTC|GMT|\d/i.test(r);
-      const hasThreshold = /[><=]|大于|小于|等于|超过|不超|多少|\d/.test(r);
-      const score = (hasSource ? 5 : 0) + (hasThreshold ? 5 : 0);
-      this.llmResult = {
-        score,
-        advice: score >= 7 ? '规则清晰, oracle 易判定' : score >= 4 ? '建议加明确数据源 + 阈值 + 时间, 减少 oracle 分歧' : '规则太模糊, oracle 多半投不同 → refund_disagreement',
+    // KANet-UI 2026-06-08 P0-A MVP (Bettor r360 关 1 PASS, r361 锁 URL): J2 endpoint /api/pool/prevet 调
+    canPreVet() {
+      // 必填: title + resolution_rule_spec + source 已配
+      if (!this.form.title.trim() || !this.form.resolution_rule_spec.trim()) return false;
+      if (this.missingList().includes('数据来源')) return false;
+      return true;
+    },
+    // KANet-UI 2026-06-08 P0-A r408 兼容: J2 endpoint 返 'tier' 字段 (Bettor 最初锁), 兼容 'level' fallback
+    _preVetLevel() {
+      const r = this.preVet.result;
+      if (!r) return null;
+      return r.tier || r.level || (r.score >= 7 ? 'pass' : r.score >= 4 ? 'warn' : 'critical');
+    },
+    levelBadgeClass() {
+      const lvl = this._preVetLevel();
+      if (lvl === 'pass') return 'bg-green-50 text-green-700 border border-green-200';
+      if (lvl === 'warn') return 'bg-amber-50 text-amber-700 border border-amber-200';
+      return 'bg-red-50 text-red-700 border border-red-200';
+    },
+    levelLabel() {
+      const lvl = this._preVetLevel();
+      if (lvl === 'pass') return '✓ 易裁 — 可发起';
+      if (lvl === 'warn') return '⚠ 低可裁性 — 可建, 押注端会显警告';
+      return '⛔ 难裁 — 请按建议改善后再试';
+    },
+    // KANet-UI 2026-06-09 r448 (Bettor Owner 钦定): 源可判性预审 helpers
+    // 镜像 pool.js SOURCE_KIND_DERIVERS — 客户端 derive canonical 给 prevet-extract 用.
+    _canonicalFromForm() {
+      const sk = this.form.source_kind;
+      const p = this.form.source_params || {};
+      try {
+        if (sk === 'manual') return (this.form.data_source_canonical || '').trim();
+        if (sk === 'polymarket') {
+          const cond = (p.condition_id || '').trim();
+          if (!cond) return '';
+          return 'https://gamma-api.polymarket.com/markets?clob_token_ids=' + encodeURIComponent(cond) + '&closed=true';
+        }
+        if (sk === 'binance') {
+          const sym = (p.symbol || '').trim();
+          if (!sym) return '';
+          return 'https://api.binance.com/api/v3/klines?symbol=' + encodeURIComponent(sym) + '&interval=1d&limit=1';
+        }
+        if (sk === 'sport') {
+          const eid = (p.event_id || '').trim();
+          if (!eid) return '';
+          // 测试网占位; 真用户必走 ESPN canonical (= manual 模式直填 URL).
+          return 'http://localhost:' + window.location.port + '/api/test-oracle/' + encodeURIComponent(eid);
+        }
+        if (sk === 'kaspa-onchain') {
+          const tx = (p.tx_hash || '').trim();
+          if (!/^[0-9a-fA-F]{64}$/.test(tx)) return '';
+          return 'https://api-tn12.kaspa.org/transactions/' + tx;
+        }
+      } catch (e) { /* derive 异常 = 返空, 由 missingList 兜底 */ }
+      return '';
+    },
+    _outcomeMarketSourceFromForm() {
+      // Polymarket 走 derivePolymarketVote 路径 (= source enum 'polymarket').
+      // 其他全部默认 'kanet_v07' (= 后端 create-v07 默认值, 同 vaaks 同 wghdr 同源).
+      return this.form.source_kind === 'polymarket' ? 'polymarket' : 'kanet_v07';
+    },
+    canPreVetExtract() {
+      // 源 + canonical 都有才能验 (= 否则 endpoint 必返 no_canonical)
+      return !!this._canonicalFromForm();
+    },
+    extractVerdictGreen() {
+      const r = this.preVetExtract.result;
+      if (!r || !r.verdict) return true;  // null result 不阻 (= 用户没调过, 默认放)
+      return String(r.verdict).startsWith('judgeable_');
+    },
+    extractBadgeClass() {
+      if (!this.preVetExtract.result) return '';
+      return this.extractVerdictGreen()
+        ? 'bg-green-50 text-green-700 border border-green-200'
+        : 'bg-red-50 text-red-700 border border-red-200';
+    },
+    extractBadgeLabel() {
+      const r = this.preVetExtract.result;
+      if (!r) return '';
+      if (this.extractVerdictGreen()) return '✓ 这单可判 (' + (r.label || r.kind || r.verdict) + ')';
+      return '⛔ 这源判不了 (' + r.verdict + ')';
+    },
+    async runPreVetExtract() {
+      if (!this.canPreVetExtract()) return;
+      const canonical = this._canonicalFromForm();
+      const source = this._outcomeMarketSourceFromForm();
+      const sig = source + '||' + canonical;
+      // 同 sig 缓存命中 (= 不重复打)
+      if (this.preVetExtract.result && this.preVetExtract.sigHash === sig) return;
+      this.preVetExtract.checking = true;
+      this.preVetExtract.error = '';
+      this.preVetExtract.result = null;
+      try {
+        const r = await fetch('/api/pool/prevet-extract', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ outcome_market_source: source, data_source_canonical: canonical }),
+        });
+        if (r.status === 404) throw new Error('endpoint 尚未实现');
+        const j = await r.json();
+        // diagnoseSource 总返 { ok, verdict, ... } — ok=false 不等于 error, 是红 verdict
+        if (!j.verdict) throw new Error('endpoint 无 verdict 字段');
+        this.preVetExtract.result = j;
+        this.preVetExtract.sigHash = sig;
+      } catch (e) {
+        this.preVetExtract.error = String(e.message || e);
+      }
+      this.preVetExtract.checking = false;
+    },
+
+    async runPreVet() {
+      if (!this.canPreVet()) return;
+      this.preVet.checking = true;
+      this.preVet.error = '';
+      this.preVet.result = null;
+      // 派生用户 spec (= 同 submitMarket 序列化, 保契约一致)
+      const _q = this.form.title.trim();
+      const specObj = {
+        title: _q,
+        question: _q,
+        resolution_criteria: this.form.resolution_rule_spec.trim(),
       };
-      this.llmChecking = false;
+      if (this.form.source_kind === 'manual') {
+        specObj.data_source_canonical = this.form.data_source_canonical.trim();
+        specObj.source = 'manual';
+      }
+      // canonical 在 manual 模式直接拿; 其他模式 backend derive 时拿 (= 我们传 source_kind + params)
+      const body = {
+        maker_relay_id: this.selectedRelayId,
+        title: _q,
+        resolution_rule_spec: JSON.stringify(specObj),
+        data_source_canonical: this.form.data_source_canonical || '',
+        source_kind: this.form.source_kind,
+        source_params: { ...this.form.source_params },
+      };
+      try {
+        const r = await fetch('/api/pool/prevet', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        if (r.status === 404) throw new Error('endpoint 尚未实现');
+        const j = await r.json();
+        if (!j.ok && j.error) throw new Error(j.error);
+        // 标准化字段 (= 防 backend 用 tier/level 不一致)
+        const result = j.result || j;
+        if (!result.level) {
+          result.level = result.score >= 7 ? 'pass' : (result.score >= 4 ? 'warn' : 'critical');
+        }
+        this.preVet.result = result;
+        this.preVet.specHash = JSON.stringify(specObj);
+      } catch (e) {
+        this.preVet.error = String(e.message || e);
+      }
+      this.preVet.checking = false;
     },
 
     async submitMarket() {
       if (!this.canSubmit) return;
+      // KANet-UI 2026-06-09 r448 (Bettor Owner 钦定): submit 前必跑源可判性
+      // (= 防 maker 没点 button 就建出 espn-enum 类无效单. canPreVetExtract 检 canonical 存在).
+      if (this.canPreVetExtract() && !this.preVetExtract.result) {
+        await this.runPreVetExtract();
+        if (!this.extractVerdictGreen()) {
+          this.submitError = '建市拦截: ' + (this.preVetExtract.result?.advice || '源判不了, 改源后再试');
+          return;
+        }
+      }
       this.submitting = true;
       this.submitError = '';
       try {
         const outcomeEndIso = new Date(this.form.outcome_end_date_local).toISOString();
+        // KANet-UI 2026-06-07 P0-#5 form 软化 (Bettor r291b 关1 PASS):
+        // source_kind != manual: 只塞 title + resolution_criteria, backend derive canonical 后塞 spec.
+        // source_kind == manual: 同时塞自填 canonical.
+        // KANet-UI 2026-06-07 P0-#1 A (Bettor r321): title=question 同值. spec 含两字段 = isStructuredSpec 不破 + downstream 兼容.
+        const _q = this.form.title.trim();
+        const specObj = {
+          title: _q,
+          question: _q,
+          resolution_criteria: this.form.resolution_rule_spec.trim(),
+        };
+        if (this.form.source_kind === 'manual') {
+          specObj.data_source_canonical = this.form.data_source_canonical.trim();
+          specObj.source = 'manual';
+        }
+        const structuredSpec = JSON.stringify(specObj);
         const body = {
           maker_relay_id: this.selectedRelayId,
+          // S2 broker-fee wiring (Bettor r615 per-path, 改 r449 塌-maker): user-facing 市场默认 broker=gateway.
+          // 默认 broker-1 (15593e10, P2PK 过 chokepoint, is_oracle=0 过互斥), operator 可改 form.broker_relay_id override.
+          broker_relay_id: this.form.broker_relay_id || '15593e10-fe63-4806-a7b5-cae062699de8',
+          broker_fee_pct: Math.round((this.form.broker_fee_pct ?? 2) * 100), // form % → basis points (2% → 200)
           outcome_side: this.form.outcome_side,
           outcome_end_date: outcomeEndIso,
-          resolution_rule_spec: this.form.resolution_rule_spec.trim(),
+          resolution_rule_spec: structuredSpec,
           maker_stake_kas: String(this.form.maker_stake_kas),
         };
+        // source_kind 非 manual → 带 source_kind + source_params, backend derive canonical
+        if (this.form.source_kind !== 'manual') {
+          body.source_kind = this.form.source_kind;
+          body.source_params = { ...this.form.source_params };
+        }
         // backend r449 4 决策: 不传 oracle_relay_ids / broker_relay_id / broker_fee_pct / oracle_bond_kas
         // / outcome_market_source / outcome_condition_id / outcome_token_id — 全 backend defaults fill
         // iteration 2 (= r455 Polymarket): 如选 Polymarket 议题, 覆盖 outcome_market_source + condition_id 真链
@@ -552,13 +894,14 @@ function createPoolPage() {
     },
 
     initTimeline() {
+      // KANet-UI 2026-06-07 P1-#1 (Bettor r324): jargon → 大白话, 抽块 label 删, Oracle→仲裁人
       this.timeline = [
-        { id: 'broadcast',   label: '广播 TX',                                   state: 'done', note: '' },
-        { id: 'mined',       label: '上链确认',                                   state: 'active', note: '~5-15s' },
-        { id: 'sampling',    label: '等 Oracle 抽签 (k=100 block ≈ 10s)',          state: 'pending', note: '' },
-        { id: 'oracle_deps', label: 'Oracle 接单',                                 state: 'pending', note: '0/3' },
-        { id: 'deadline',    label: '等截止 + 投票',                                state: 'pending', note: '' },
-        { id: 'settle',      label: '结算',                                         state: 'pending', note: '' },
+        { id: 'broadcast',   label: '本金锁单 TX 广播',                              state: 'done', note: '' },
+        { id: 'mined',       label: '上链确认',                                       state: 'active', note: '约 5-15 秒' },
+        { id: 'sampling',    label: '抽仲裁人',                                       state: 'pending', note: '约 10 秒' },
+        { id: 'oracle_deps', label: '仲裁人接单',                                     state: 'pending', note: '' },
+        { id: 'deadline',    label: '等截止 + 投票',                                  state: 'pending', note: '' },
+        { id: 'settle',      label: '结算',                                           state: 'pending', note: '' },
       ];
     },
 
@@ -585,6 +928,19 @@ function createPoolPage() {
       const m = data.market;
       const status = data.protocol_status || m.status;
       const oracleDeposited = data.oracle_deposits_count || 0;
+      // KANet-UI 2026-06-07 P1-#1 (Bettor r324 校准): 委员数动态取本市场, 非硬码 3 或 5
+      // 来源优先: audit.committee.members.length > committee_pks length > oracle_relay_ids length > 5 fallback
+      let total = 5;
+      try {
+        if (Array.isArray(data.audit?.committee?.members) && data.audit.committee.members.length) total = data.audit.committee.members.length;
+        else if (Array.isArray(m?.committee_pks) && m.committee_pks.length) total = m.committee_pks.length;
+        else if (m?.committee_pks && typeof m.committee_pks === 'string') {
+          try { const arr = JSON.parse(m.committee_pks); if (Array.isArray(arr) && arr.length) total = arr.length; } catch {}
+        }
+        else if (m?.oracle_relay_ids) {
+          try { const arr = JSON.parse(m.oracle_relay_ids); if (Array.isArray(arr) && arr.length) total = arr.length; } catch {}
+        }
+      } catch {}
       const set = (id, state, note) => {
         const t = this.timeline.find(x => x.id === id);
         if (t) { t.state = state; if (note !== undefined) t.note = note; }
@@ -595,10 +951,10 @@ function createPoolPage() {
       }
       if (status === 'pending_oracle_deposits' || status === 'pending_bettors' || status === 'verifying' || status === 'collecting_sigs' || status === 'completed' || status === 'refunded') {
         set('sampling', 'done', '');
-        set('oracle_deps', 'active', oracleDeposited + '/3');
+        set('oracle_deps', 'active', oracleDeposited + '/' + total);
       }
       if (status === 'pending_bettors' || status === 'verifying' || status === 'collecting_sigs' || status === 'completed' || status === 'refunded') {
-        set('oracle_deps', 'done', '3/3');
+        set('oracle_deps', 'done', total + '/' + total);
         set('deadline', 'active', '');
       }
       if (status === 'verifying' || status === 'collecting_sigs' || status === 'completed' || status === 'refunded') {
@@ -617,9 +973,10 @@ function createPoolPage() {
       this.submitError = '';
       this.llmResult = null;
       this.acceptedDisclaimer = false;
-      this.form.question = '';
+      this.form.title = '';
       this.form.outcome_side = '';
       this.form.resolution_rule_spec = '';
+      this.touched = { title: false, deadline: false, rule: false, outcome_side: false };
       this.form.polymarketCondition = null;
       this.searchQuery = '';
       this.searchResults = null;

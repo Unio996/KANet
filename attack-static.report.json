@@ -1,0 +1,73 @@
+{
+  "mode": "static",
+  "analyzed_at": "2026-06-01T10:40:30.537Z",
+  "files_scanned": [
+    "PoolSide_v06",
+    "PoolSide_v07",
+    "PoolSpine_v06",
+    "PoolSpine_v07"
+  ],
+  "findings": [
+    {
+      "severity": "INFO",
+      "msg": "Path A defense PRESENT — 10 individual checkSig + counter require ≥4",
+      "evidence": {
+        "individual_checksigs": 10,
+        "threshold_t": 4
+      }
+    },
+    {
+      "severity": "INFO",
+      "msg": "poolMerkleRoot baked in ctor (= committee constrained to public pool)"
+    },
+    {
+      "severity": "INFO",
+      "msg": "PoolSide v0.7 ctor 删 stakeAmount ✓ (= 变量金额支持)"
+    },
+    {
+      "severity": "INFO",
+      "msg": "PoolSide v0.7 claim/refund require inputs.length==1 ✓ (= per-UTXO 防求和 fraud)"
+    },
+    {
+      "severity": "INFO",
+      "msg": "PoolSide v0.7 payout 用 tx.inputs[0].value ✓ (= 变量金额命门)"
+    },
+    {
+      "severity": "WARN",
+      "msg": "PoolSpine v0.6 仍硬等 fee (= output == stake - X), G6 批2 红线 8 待 J1 改 output <= stake - MIN_FEE (qlfpv brick KI sediment 永久 — v0.6 SS 不可改, v0.7 forward fix)"
+    },
+    {
+      "severity": "INFO",
+      "msg": "PoolSpine v0.7 fee 范围 [stake-MAX, stake-MIN] ✓ (= J1 r238 forward fix 红线 8/9 ship)"
+    },
+    {
+      "severity": "INFO",
+      "msg": "_assertTxInvariants 含 mass-floor check ✓ (= 红线 7, G6 批2 ship)"
+    },
+    {
+      "severity": "INFO",
+      "msg": "PoolSpine v0.7 ctor 含 shard_id + shard_count ✓ (= 分片 commit identity)"
+    },
+    {
+      "severity": "INFO",
+      "msg": "PoolSpine v0.7 含 globalYes/No totals args ✓ (= commit_v2 跨片承诺 anchor)"
+    },
+    {
+      "severity": "INFO",
+      "msg": "PoolSpine v0.7 含 min-bet (1 KAS) + min-pot floor require ✓ (= Bettor r261 forensic)"
+    },
+    {
+      "severity": "INFO",
+      "msg": "min-pot SS↔settler 一致 ✓ (SS dynamic: 5 * oracleBondAmount = 500000000 sompi @ 1 KAS bond, settler thinThreshold=506000000, 严守 SS + 1% margin)"
+    },
+    {
+      "severity": "INFO",
+      "msg": "Position-aware merkle climb PRESENT — 40 if-else hash branches (J1 r126 fix d5d4ecbdd)"
+    },
+    {
+      "severity": "INFO",
+      "msg": "PoolSide v06 ctor binding fields — spineP2shHash:true, poolMerkleRoot:true"
+    }
+  ],
+  "verdict": "INCOMPLETE_DEFENSE"
+}

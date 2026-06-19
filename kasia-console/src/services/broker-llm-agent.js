@@ -14,6 +14,7 @@
 
 import { sqlite } from '../db/client.js';
 import { listAssets, listChainsFor, getAsset } from './asset-registry.js';
+import { isStructuredSpec } from '../lib/spec-validation.js';
 import {
   setConvoStateLock,
   resetConvoState,
@@ -22,7 +23,12 @@ import {
   getConvoState,
 } from './broker-state-authority.js';
 
-const BROKER_RELAY_ID = '0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0';
+// J2-tn r766 identity 根治 (Bettor r744 flag + Owner GO, 方案 A): 硬编码 0a8e9723 是 stale 错值
+// (不在 relay_nodes / 无 adapter) → _callLlm 查 adapter port 失败 → broker LLM dialog 整体调不通 (挡所有 tool 前)。
+// env 可配 (node-agnostic): 本节点 kanet.env 设 BROKER_RELAY_ID=15593e10 (broker-1, 有 adapter port 3031 + is_dex_broker)
+// → 修 adapter (L305-309) + trader addr (L584) + markets filter 默认 (L580 区) 全归 15593e10。默认保 0a8e9723 不变
+// = 不动 J1/其它节点 (没设 env 的上下文仍 stale = 已知, 归 B follow-up 审计统一两 BROKER env + 清残留 ref)。
+const BROKER_RELAY_ID = process.env.BROKER_RELAY_ID || '0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0';
 
 // T-J2-2026-04-27 v1.1 Phase E generic minimal — 动态 supported assets section from asset-registry
 // (Owner 23:43 钦定真碰撞: NWT vote (a) "SYSTEM_PROMPT 留 v1.2" 真灾难 — user 'buy USDC' LLM
@@ -114,6 +120,10 @@ bug case (=避免): oracle 信誉 35 但 broker 误导 "看起来 OK" → user �
 
 lint hook: scripts/lint-kanet.mjs grep "{{trust_score}}" 验 SYSTEM_PROMPT 存在 (= 防 prompt refactor 漏丢).
 
+# 预测市场介绍 (Phase1 broker 加强 — 松耦合, J2-tn r724 设计 Bettor r736 APPROVE)
+
+用户问 '有什么预测市场 / 能押什么 / 推荐什么 / prediction market / 有啥可以猜的 / 你经手哪些市场' → **必调 list_broker_prediction_markets tool** (不准自己编市场). tool 返本 broker 经手活跃市场的 preview_text (deterministic 真数据: 问题 / 截止时间 / 双边池子 / 预言机信誉已翻成大白话 + /predict 引导). **tool 返 preview_text → 你 100% 原样转发** (同财务 tool 反幻觉铁律 = 上面 '# tool 返 preview_text' 段, 一字不改、不增减市场、不漏 oracle 信誉行). 严禁 '我不知道有什么市场' / 不调 tool 瞎编市场 / 介绍非本 broker 经手的市场 / 改写市场数据. tool 返空时它的 preview_text 已是 '我这边暂时没有活跃的预测市场', 照转即可.
+
 # 风格 + 约束
 
 中文回中文, 英文回英文. 简洁友好不机械. 不持币非托管, broker fee 0.1 KAS 固定.`;
@@ -184,6 +194,18 @@ const TOOLS = [
     function: {
       name: 'cancel_order',
       description: '用户说 NO/取消/不要了/退我钱/cancel/refund/我等不了了/算了 等任何 cancel-intent 时必调此 tool. 不准自己回 "已取消" / "1-2 分钟到账" / "已为您取消" — 这些是 broker DB cancel + sendKas 的真实结果, 必经此 tool. 即使没 active offer 也调此 tool, 它返 deterministic null/no-op, 让 LLM 不要 hallucinate.',
+      parameters: {
+        type: 'object',
+        properties: {},
+      },
+    },
+  },
+  // J2-tn r724 Phase1 broker 加强 (Bettor r736 APPROVE): 预测市场介绍 tool (松耦合, 只读, 不碰下注/签名).
+  {
+    type: 'function',
+    function: {
+      name: 'list_broker_prediction_markets',
+      description: '用户问预测市场/能押什么/推荐/有啥可以猜的/你经手哪些市场时**必调**此 tool. 返本 broker 经手活跃 pool 预测市场的已格式化 preview_text (deterministic 真数据: 问题/截止/双边池子/oracle 信誉翻译/predict 引导全烤好). tool 返 preview_text → 100% 原样转发 (同财务 tool, 不改不编). 不准自己编市场. 即使没市场也调此 tool, preview_text 已含 "暂无活跃市场" 照转 (不 hallucinate).',
       parameters: {
         type: 'object',
         properties: {},
@@ -416,6 +438,15 @@ async function _executeTool(peer, name, args) {
   return result;
 }
 
+// J2-tn L3 cross-surface test hook (Bettor r954 全自动测 L3): expose the deterministic
+// list_broker_prediction_markets handler so the L3 test invokes the REAL Kasia broker-DM surface
+// (the preview_text the LLM forwards 100% verbatim) — not a replica (NWT fixture-mirror discipline).
+// brokerRelay resolves from BROKER_PREDICTION_BROKER_RELAY_ID||BROKER_RELAY_ID (set by the test).
+// Test-only, read-only: no LLM call, no SYSTEM_PROMPT, no state lock touched (R37-safe, blast radius nil).
+export async function _testListBrokerMarketsPreview() {
+  return _executeTool(null, 'list_broker_prediction_markets', {});
+}
+
 async function _executeToolImpl(peer, name, args) {
   if (name === 'preview_order') {
     // 议 B (Owner 钦定): 字段齐 preview, 不真 publish. user YES 后才 finalize_order.
@@ -559,6 +590,61 @@ async function _executeToolImpl(peer, name, args) {
       return { ok: true, preview_text: '没找到你的 active 订单. 没有可取消的, 重新下单回 "买 X KAS" / "卖 X KAS".' };
     } catch (e) {
       return { ok: true, preview_text: `抱歉, 取消处理失败 (${e.message?.slice(0, 60)}). 请稍后重试或回 NO 联系 broker.` };
+    }
+  }
+  if (name === 'list_broker_prediction_markets') {
+    // J2-tn r741 broker Phase1 (松耦合, 只读, 不碰签名/下注): 列本 broker 经手的活跃 pool 预测市场。
+    // broker filter = agent 代表的 broker relay (BROKER_RELAY_ID, env 可覆盖给 demo/test)。
+    // 单源: 内部调 /api/pool/markets 复用 canonical yes/no pool 派生 (= L1701-1715, 不重造分账)。
+    // 返已格式化 preview_text → LLM 100% 原样转发 (同财务 tool 反幻觉铁律, 防编市场)。
+    try {
+      const brokerRelay = process.env.BROKER_PREDICTION_BROKER_RELAY_ID || BROKER_RELAY_ID;
+      const port = process.env.PORT || '3200';
+      const resp = await fetch(
+        `http://127.0.0.1:${port}/api/pool/markets?broker_relay_id=${encodeURIComponent(brokerRelay)}&status=pending_bettors&limit=200`,
+        { signal: AbortSignal.timeout(10_000) }
+      );
+      const j = await resp.json();
+      const nowSec = Math.floor(Date.now() / 1000);
+      const allActive = (j?.markets || [])
+        .filter(m => Number(m.deadline) > nowSec && ['v0.6', 'v0.7'].includes(m.protocol_version)
+          && isStructuredSpec(m.resolution_rule_spec));  // J2-tn L3 finding fix (Bettor r971): 同 tg-bot
+        // specIsUsable 质量门 (单源 lib/spec-validation.isStructuredSpec) — 不显畸形/不可裁市场糊弄用户, 两面 UX 一致.
+      const active = allActive.slice(0, 8);  // DM 消息控长, >8 截断 + 末尾告知 (不 silent 截)
+      if (!active.length) {
+        return { ok: true, preview_text: '我这边暂时没有活跃的预测市场。过段时间再来看看，或去 /predict 看全部市场。' };
+      }
+      // trust 翻译 (= {{trust_score}} 铁律落地, 大白话不漏 impl-jargon)
+      const trustWord = (t) => t >= 80 ? `信誉高 (${t}/100)` : t >= 50 ? `信誉中 (${t}/100)` : t > 0 ? `信誉偏低 (${t}/100，新预言机)` : '信誉未建立 (新预言机，谨慎下注)';
+      const lines = active.map((m, i) => {
+        let title = m.resolution_rule_spec || m.id;
+        try { const o = JSON.parse(m.resolution_rule_spec || ''); if (o && o.title) title = o.title; } catch {}
+        // committee oracle 信誉均值 (relay_nodes.oracle_reputation_score, 1-100; 当前多 0 = 如实呈现)
+        let trust = 0;
+        try {
+          const ids = JSON.parse(m.oracle_relay_ids || '[]');
+          if (Array.isArray(ids) && ids.length) {
+            const ph = ids.map(() => '?').join(',');
+            const rep = sqlite.prepare(`SELECT AVG(COALESCE(oracle_reputation_score,0)) avg FROM relay_nodes WHERE id IN (${ph})`).get(...ids);
+            trust = rep && rep.avg != null ? Math.round(rep.avg) : 0;
+          }
+        } catch {}
+        const dl = new Date(Number(m.deadline) * 1000);
+        const pad = (n) => n < 10 ? '0' + n : '' + n;
+        const dlStr = Number.isNaN(+dl) ? '?' : `${dl.getFullYear()}-${pad(dl.getMonth() + 1)}-${pad(dl.getDate())} ${pad(dl.getHours())}:${pad(dl.getMinutes())}`;
+        const yes = Number(m.yes_pool_kas || 0).toFixed(2);
+        const no = Number(m.no_pool_kas || 0).toFixed(2);
+        return `${i + 1}. ${title}\n   截止 ${dlStr} · YES 池 ${yes} KAS / NO 池 ${no} KAS · 预言机${trustWord(trust)}`;
+      });
+      const truncated = allActive.length > active.length;
+      const header = truncated
+        ? `我这边现在经手 ${allActive.length} 个活跃的预测市场，先列 ${active.length} 个：`
+        : `我这边现在经手 ${allActive.length} 个活跃的预测市场：`;
+      const moreNote = truncated ? `\n（还有 ${allActive.length - active.length} 个，去 /predict 看全部）` : '';
+      const text = `${header}\n\n${lines.join('\n')}${moreNote}\n\n想押就进 /predict 选市场下注 — 你直接押到链上，我不碰你的钱，全程链上可验证。`;
+      return { ok: true, preview_text: text };
+    } catch (e) {
+      return { ok: true, preview_text: '抱歉，预测市场列表暂时查不了，请稍后再问，或直接去 /predict 看。' };
     }
   }
   return { ok: false, error: `unknown tool: ${name}` };

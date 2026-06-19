@@ -1,0 +1,272 @@
+// PoolSide_v06.sil — v0.6 anonymous-pool per-bettor side contract (path A LOCK).
+//
+// Per Bettor r19 lock (5/30): per-bettor payout enforcement lives in PoolSide spend conditions
+// (not in spine). v0.5 left this as "TODO Phase 2: full Merkle verify per output" — v0.6 fills
+// the gap so 50-bettor pools settle independently per-side with zero loops.
+//
+// Trust model (path A, Owner ack via Bettor r19):
+// - v0.5 baked 3 individual oracle PKs in ctor (3-of-3 unanimous).
+// - v0.6 first draft tried aggSig+aggPk arg → caught as fund-loss hole by Bettor r17 +
+//   J1 r119 self-audit (aggPk unbound, attacker self-fabricates with any pool member PKs).
+// - v0.6 path A LOCKED: 5 individual committee sigs at claim + side ctor bakes poolMerkleRoot
+//   + claim verifies committee ∈ poolMerkleRoot (40 blake2b depth-8 unroll) + 4-of-5 threshold
+//   counter on the 5 individual sigs (Owner ack 97.7% liveness).
+// - Side binds to its market via spineP2shHash (same anchor as v0.5).
+//
+// WHY safe: committee PKs are arg-provided BUT bound via merkle ⊂ poolMerkleRoot (ctor-baked).
+// 5 individual sigs prove THE 5 committee members consented. Impersonation requires forging an
+// individual committee member's private key (= same trust baseline as v0.5 PoolSide 3-of-3
+// oracle model, just per-event committee instead of fixed oracle).
+//
+// Position-aware merkle climb FIXED (J2 r105 catch + J1 r126 fix d5d4ecbdd; refresh per Bettor r38):
+// each climb level uses if/else bit-aware concat (bit_k = (idx / 2^k) % 2; 0=hash(cur||sib),
+// 1=hash(sib||cur)). Both committee merkle (5×depth-8) AND bettor merkle (depth-6) are position-aware
+// — all leaf positions verify correctly, not just position 0. NWT attack-static v2 fingerprints
+// the 40 if-else branches in spine + 6 in side as DEFENSE_PRESENT.
+//
+// PAYOUT FORMULA SEMANTICS (Bettor r38 F1 audit response):
+// `payout = stakeAmount * totalPool / winnerPool` treats totalPool/winnerPool as caller-provided
+// values. The off-chain settler MUST pass NET totals — i.e. totalPool excluding brokerFee +
+// 5×committeeBond + minerFee already deducted from the pool. Contract verifies structure not
+// arithmetic semantics: gross-vs-net interpretation is settler's responsibility. Documented here
+// rather than enforced inline because (1) v0.6 inherits this from v0.5 PoolSide L87-89 unchanged,
+// (2) explicit fee args in claim_winner would expand the already-large arg list further.
+//
+// PAYOUT OVERFLOW (Bettor r38 F2 audit response): silverc literal-fold probe accepts 1e20 mult
+// clean — strong evidence the SS arithmetic stack uses bignum (Kaspa SmartScript CScriptNum-style),
+// not i64. With Owner's bettor-floor strip (no upper-bound on stakes) extreme markets could
+// theoretically reach 1e20+ products; dynamic e2e (attack-self-claim live mode) is the
+// definitive runtime verification.
+//
+// MINER FEE (Bettor r38 F3 audit response): claim_winner enforces output[0].value == payout
+// without minerFee deduction — assumes settle_via_spine cooperative path (= spine settle TX
+// aggregates inputs/outputs across spine + all sides, miner fee paid from spine balance).
+// Self-claim path (= individual bettor TX) needs additional design for per-claim fee handling
+// (= bettor brings additional fee-paying input OR pre-deposit); first ship treats settle_via_spine
+// as primary, self-claim as best-effort fallback once TX-builder layer adds fee aggregation.
+//
+// Threshold t=4-of-5 (Owner ack via Bettor r19 — 5/30): 97.7% liveness, tolerates 1 absent
+// committee member. Counter pattern per J1 r120 probe.
+//
+// Payout fix vs v0.5: branches via arithmetic since silverc has no native if for int:
+// winnerPool = totalYesPool*(1-w) + totalNoPool*w where w ∈ {0,1}.
+
+pragma silverscript ^0.1.0;
+
+// v0.7 Phase-2 (d) variable-stake (Bettor §5.3c LOCKED 2026-05-31):
+// stakeAmount removed from ctor → side P2SH no longer baked with amount. Bettor can deposit
+// any amount ≥ 1 KAS (API floor) to side_p2sh; claim_winner reads tx.inputs[0].value at spend
+// time. payout = side_value × totalPool / winnerPool. Per-UTXO independent claim (multiple
+// deposits = multiple claim TXs).
+contract PoolSide_v06(
+    byte[32] bettorPk,
+    byte[32] spineP2shHash,
+    byte[32] poolMerkleRoot,        // path A: same root as spine — anchors committee membership at claim
+    byte[32] marketMetadataHash,
+    int direction,                  // 0 = YES, 1 = NO
+    int deadline
+) {
+    // entry 0 — settled_via_spine: cooperative path, trusts spine settle TX.
+    entrypoint function settled_via_spine() {
+        require(tx.inputs.length >= 2);  // spine + this side minimum
+    }
+
+    // entry 1 — claim_winner (path A LOCK): 4-of-5 individual committee sigs + committee
+    // merkle ∈ poolMerkleRoot + bettor merkle ∈ sidesMerkleRoot + payout output.
+    entrypoint function claim_winner(
+        sig bettorSig,
+        sig c0Sig, sig c1Sig, sig c2Sig, sig c3Sig, sig c4Sig,
+        byte[32] c0Pk, byte[32] c1Pk, byte[32] c2Pk, byte[32] c3Pk, byte[32] c4Pk,
+        // FIX (J2 r105 catch): each committee member's position in poolMerkleRoot tree (= leaf index 0..255).
+        int c0Idx, int c1Idx, int c2Idx, int c3Idx, int c4Idx,
+        byte[32] c0s0, byte[32] c0s1, byte[32] c0s2, byte[32] c0s3, byte[32] c0s4, byte[32] c0s5, byte[32] c0s6, byte[32] c0s7,
+        byte[32] c1s0, byte[32] c1s1, byte[32] c1s2, byte[32] c1s3, byte[32] c1s4, byte[32] c1s5, byte[32] c1s6, byte[32] c1s7,
+        byte[32] c2s0, byte[32] c2s1, byte[32] c2s2, byte[32] c2s3, byte[32] c2s4, byte[32] c2s5, byte[32] c2s6, byte[32] c2s7,
+        byte[32] c3s0, byte[32] c3s1, byte[32] c3s2, byte[32] c3s3, byte[32] c3s4, byte[32] c3s5, byte[32] c3s6, byte[32] c3s7,
+        byte[32] c4s0, byte[32] c4s1, byte[32] c4s2, byte[32] c4s3, byte[32] c4s4, byte[32] c4s5, byte[32] c4s6, byte[32] c4s7,
+        int settlementWinner,
+        int totalYesPool,
+        int totalNoPool,
+        byte[32] sidesMerkleRoot,
+        // FIX (J2 r105 catch): bettor's position in sidesMerkleRoot tree (= leaf index 0..63 for depth-6).
+        int bettorIdx,
+        byte[32] sibling0, byte[32] sibling1, byte[32] sibling2,
+        byte[32] sibling3, byte[32] sibling4, byte[32] sibling5
+    ) {
+        // ① bettor sig
+        require(checkSig(bettorSig, pubkey(bettorPk)));
+
+        // ② path A t=4-of-5 threshold counter (same pattern as spine settle_aggregate).
+        int validSigs = 0;
+        if (checkSig(c0Sig, pubkey(c0Pk))) { validSigs = validSigs + 1; }
+        if (checkSig(c1Sig, pubkey(c1Pk))) { validSigs = validSigs + 1; }
+        if (checkSig(c2Sig, pubkey(c2Pk))) { validSigs = validSigs + 1; }
+        if (checkSig(c3Sig, pubkey(c3Pk))) { validSigs = validSigs + 1; }
+        if (checkSig(c4Sig, pubkey(c4Pk))) { validSigs = validSigs + 1; }
+        require(validSigs >= 4);
+
+        require(settlementWinner == 0 || settlementWinner == 1);
+        require(direction == settlementWinner);  // = "I'm on the winning side"
+        require(totalYesPool > 0);
+        require(totalNoPool > 0);
+
+        // ③ path A: each committee PK ∈ poolMerkleRoot (depth-8 position-aware climb).
+        // FIX (J2 r105 catch + J1 r125 own): hardcoded leaf-left only verifies position 0 →
+        // 5 committee members can't all be at pos 0, legitimate claim FAIL = liveness 0%.
+        // c0 merkle proof against poolMerkleRoot (depth-8 position-aware climb).
+        require(c0Idx >= 0); require(c0Idx < 256);
+        byte[32] c0Cur = blake2b(byte[](c0Pk));
+        int c0b0 = c0Idx % 2;
+        if (c0b0 == 0) { c0Cur = blake2b(byte[](c0Cur) + byte[](c0s0)); } else { c0Cur = blake2b(byte[](c0s0) + byte[](c0Cur)); }
+        int c0b1 = (c0Idx / 2) % 2;
+        if (c0b1 == 0) { c0Cur = blake2b(byte[](c0Cur) + byte[](c0s1)); } else { c0Cur = blake2b(byte[](c0s1) + byte[](c0Cur)); }
+        int c0b2 = (c0Idx / 4) % 2;
+        if (c0b2 == 0) { c0Cur = blake2b(byte[](c0Cur) + byte[](c0s2)); } else { c0Cur = blake2b(byte[](c0s2) + byte[](c0Cur)); }
+        int c0b3 = (c0Idx / 8) % 2;
+        if (c0b3 == 0) { c0Cur = blake2b(byte[](c0Cur) + byte[](c0s3)); } else { c0Cur = blake2b(byte[](c0s3) + byte[](c0Cur)); }
+        int c0b4 = (c0Idx / 16) % 2;
+        if (c0b4 == 0) { c0Cur = blake2b(byte[](c0Cur) + byte[](c0s4)); } else { c0Cur = blake2b(byte[](c0s4) + byte[](c0Cur)); }
+        int c0b5 = (c0Idx / 32) % 2;
+        if (c0b5 == 0) { c0Cur = blake2b(byte[](c0Cur) + byte[](c0s5)); } else { c0Cur = blake2b(byte[](c0s5) + byte[](c0Cur)); }
+        int c0b6 = (c0Idx / 64) % 2;
+        if (c0b6 == 0) { c0Cur = blake2b(byte[](c0Cur) + byte[](c0s6)); } else { c0Cur = blake2b(byte[](c0s6) + byte[](c0Cur)); }
+        int c0b7 = (c0Idx / 128) % 2;
+        if (c0b7 == 0) { c0Cur = blake2b(byte[](c0Cur) + byte[](c0s7)); } else { c0Cur = blake2b(byte[](c0s7) + byte[](c0Cur)); }
+        require(c0Cur == poolMerkleRoot);
+
+        // c1 merkle proof against poolMerkleRoot (depth-8 position-aware climb).
+        require(c1Idx >= 0); require(c1Idx < 256);
+        byte[32] c1Cur = blake2b(byte[](c1Pk));
+        int c1b0 = c1Idx % 2;
+        if (c1b0 == 0) { c1Cur = blake2b(byte[](c1Cur) + byte[](c1s0)); } else { c1Cur = blake2b(byte[](c1s0) + byte[](c1Cur)); }
+        int c1b1 = (c1Idx / 2) % 2;
+        if (c1b1 == 0) { c1Cur = blake2b(byte[](c1Cur) + byte[](c1s1)); } else { c1Cur = blake2b(byte[](c1s1) + byte[](c1Cur)); }
+        int c1b2 = (c1Idx / 4) % 2;
+        if (c1b2 == 0) { c1Cur = blake2b(byte[](c1Cur) + byte[](c1s2)); } else { c1Cur = blake2b(byte[](c1s2) + byte[](c1Cur)); }
+        int c1b3 = (c1Idx / 8) % 2;
+        if (c1b3 == 0) { c1Cur = blake2b(byte[](c1Cur) + byte[](c1s3)); } else { c1Cur = blake2b(byte[](c1s3) + byte[](c1Cur)); }
+        int c1b4 = (c1Idx / 16) % 2;
+        if (c1b4 == 0) { c1Cur = blake2b(byte[](c1Cur) + byte[](c1s4)); } else { c1Cur = blake2b(byte[](c1s4) + byte[](c1Cur)); }
+        int c1b5 = (c1Idx / 32) % 2;
+        if (c1b5 == 0) { c1Cur = blake2b(byte[](c1Cur) + byte[](c1s5)); } else { c1Cur = blake2b(byte[](c1s5) + byte[](c1Cur)); }
+        int c1b6 = (c1Idx / 64) % 2;
+        if (c1b6 == 0) { c1Cur = blake2b(byte[](c1Cur) + byte[](c1s6)); } else { c1Cur = blake2b(byte[](c1s6) + byte[](c1Cur)); }
+        int c1b7 = (c1Idx / 128) % 2;
+        if (c1b7 == 0) { c1Cur = blake2b(byte[](c1Cur) + byte[](c1s7)); } else { c1Cur = blake2b(byte[](c1s7) + byte[](c1Cur)); }
+        require(c1Cur == poolMerkleRoot);
+
+        // c2 merkle proof against poolMerkleRoot (depth-8 position-aware climb).
+        require(c2Idx >= 0); require(c2Idx < 256);
+        byte[32] c2Cur = blake2b(byte[](c2Pk));
+        int c2b0 = c2Idx % 2;
+        if (c2b0 == 0) { c2Cur = blake2b(byte[](c2Cur) + byte[](c2s0)); } else { c2Cur = blake2b(byte[](c2s0) + byte[](c2Cur)); }
+        int c2b1 = (c2Idx / 2) % 2;
+        if (c2b1 == 0) { c2Cur = blake2b(byte[](c2Cur) + byte[](c2s1)); } else { c2Cur = blake2b(byte[](c2s1) + byte[](c2Cur)); }
+        int c2b2 = (c2Idx / 4) % 2;
+        if (c2b2 == 0) { c2Cur = blake2b(byte[](c2Cur) + byte[](c2s2)); } else { c2Cur = blake2b(byte[](c2s2) + byte[](c2Cur)); }
+        int c2b3 = (c2Idx / 8) % 2;
+        if (c2b3 == 0) { c2Cur = blake2b(byte[](c2Cur) + byte[](c2s3)); } else { c2Cur = blake2b(byte[](c2s3) + byte[](c2Cur)); }
+        int c2b4 = (c2Idx / 16) % 2;
+        if (c2b4 == 0) { c2Cur = blake2b(byte[](c2Cur) + byte[](c2s4)); } else { c2Cur = blake2b(byte[](c2s4) + byte[](c2Cur)); }
+        int c2b5 = (c2Idx / 32) % 2;
+        if (c2b5 == 0) { c2Cur = blake2b(byte[](c2Cur) + byte[](c2s5)); } else { c2Cur = blake2b(byte[](c2s5) + byte[](c2Cur)); }
+        int c2b6 = (c2Idx / 64) % 2;
+        if (c2b6 == 0) { c2Cur = blake2b(byte[](c2Cur) + byte[](c2s6)); } else { c2Cur = blake2b(byte[](c2s6) + byte[](c2Cur)); }
+        int c2b7 = (c2Idx / 128) % 2;
+        if (c2b7 == 0) { c2Cur = blake2b(byte[](c2Cur) + byte[](c2s7)); } else { c2Cur = blake2b(byte[](c2s7) + byte[](c2Cur)); }
+        require(c2Cur == poolMerkleRoot);
+
+        // c3 merkle proof against poolMerkleRoot (depth-8 position-aware climb).
+        require(c3Idx >= 0); require(c3Idx < 256);
+        byte[32] c3Cur = blake2b(byte[](c3Pk));
+        int c3b0 = c3Idx % 2;
+        if (c3b0 == 0) { c3Cur = blake2b(byte[](c3Cur) + byte[](c3s0)); } else { c3Cur = blake2b(byte[](c3s0) + byte[](c3Cur)); }
+        int c3b1 = (c3Idx / 2) % 2;
+        if (c3b1 == 0) { c3Cur = blake2b(byte[](c3Cur) + byte[](c3s1)); } else { c3Cur = blake2b(byte[](c3s1) + byte[](c3Cur)); }
+        int c3b2 = (c3Idx / 4) % 2;
+        if (c3b2 == 0) { c3Cur = blake2b(byte[](c3Cur) + byte[](c3s2)); } else { c3Cur = blake2b(byte[](c3s2) + byte[](c3Cur)); }
+        int c3b3 = (c3Idx / 8) % 2;
+        if (c3b3 == 0) { c3Cur = blake2b(byte[](c3Cur) + byte[](c3s3)); } else { c3Cur = blake2b(byte[](c3s3) + byte[](c3Cur)); }
+        int c3b4 = (c3Idx / 16) % 2;
+        if (c3b4 == 0) { c3Cur = blake2b(byte[](c3Cur) + byte[](c3s4)); } else { c3Cur = blake2b(byte[](c3s4) + byte[](c3Cur)); }
+        int c3b5 = (c3Idx / 32) % 2;
+        if (c3b5 == 0) { c3Cur = blake2b(byte[](c3Cur) + byte[](c3s5)); } else { c3Cur = blake2b(byte[](c3s5) + byte[](c3Cur)); }
+        int c3b6 = (c3Idx / 64) % 2;
+        if (c3b6 == 0) { c3Cur = blake2b(byte[](c3Cur) + byte[](c3s6)); } else { c3Cur = blake2b(byte[](c3s6) + byte[](c3Cur)); }
+        int c3b7 = (c3Idx / 128) % 2;
+        if (c3b7 == 0) { c3Cur = blake2b(byte[](c3Cur) + byte[](c3s7)); } else { c3Cur = blake2b(byte[](c3s7) + byte[](c3Cur)); }
+        require(c3Cur == poolMerkleRoot);
+
+        // c4 merkle proof against poolMerkleRoot (depth-8 position-aware climb).
+        require(c4Idx >= 0); require(c4Idx < 256);
+        byte[32] c4Cur = blake2b(byte[](c4Pk));
+        int c4b0 = c4Idx % 2;
+        if (c4b0 == 0) { c4Cur = blake2b(byte[](c4Cur) + byte[](c4s0)); } else { c4Cur = blake2b(byte[](c4s0) + byte[](c4Cur)); }
+        int c4b1 = (c4Idx / 2) % 2;
+        if (c4b1 == 0) { c4Cur = blake2b(byte[](c4Cur) + byte[](c4s1)); } else { c4Cur = blake2b(byte[](c4s1) + byte[](c4Cur)); }
+        int c4b2 = (c4Idx / 4) % 2;
+        if (c4b2 == 0) { c4Cur = blake2b(byte[](c4Cur) + byte[](c4s2)); } else { c4Cur = blake2b(byte[](c4s2) + byte[](c4Cur)); }
+        int c4b3 = (c4Idx / 8) % 2;
+        if (c4b3 == 0) { c4Cur = blake2b(byte[](c4Cur) + byte[](c4s3)); } else { c4Cur = blake2b(byte[](c4s3) + byte[](c4Cur)); }
+        int c4b4 = (c4Idx / 16) % 2;
+        if (c4b4 == 0) { c4Cur = blake2b(byte[](c4Cur) + byte[](c4s4)); } else { c4Cur = blake2b(byte[](c4s4) + byte[](c4Cur)); }
+        int c4b5 = (c4Idx / 32) % 2;
+        if (c4b5 == 0) { c4Cur = blake2b(byte[](c4Cur) + byte[](c4s5)); } else { c4Cur = blake2b(byte[](c4s5) + byte[](c4Cur)); }
+        int c4b6 = (c4Idx / 64) % 2;
+        if (c4b6 == 0) { c4Cur = blake2b(byte[](c4Cur) + byte[](c4s6)); } else { c4Cur = blake2b(byte[](c4s6) + byte[](c4Cur)); }
+        int c4b7 = (c4Idx / 128) % 2;
+        if (c4b7 == 0) { c4Cur = blake2b(byte[](c4Cur) + byte[](c4s7)); } else { c4Cur = blake2b(byte[](c4s7) + byte[](c4Cur)); }
+        require(c4Cur == poolMerkleRoot);
+
+        // ④ bettor merkle proof ∈ sidesMerkleRoot (depth-6 position-aware climb).
+        // FIX (J2 r105 catch): hardcoded leaf-left only verified bettor at sidesMerkleRoot[0]
+        // (= maker if at index 0); all other 49 bettors locked out of self-claim path.
+        require(bettorIdx >= 0); require(bettorIdx < 64);
+        byte[32] bCur = blake2b(byte[](bettorPk));
+        int bb0 = bettorIdx % 2;
+        if (bb0 == 0) { bCur = blake2b(byte[](bCur) + byte[](sibling0)); } else { bCur = blake2b(byte[](sibling0) + byte[](bCur)); }
+        int bb1 = (bettorIdx / 2) % 2;
+        if (bb1 == 0) { bCur = blake2b(byte[](bCur) + byte[](sibling1)); } else { bCur = blake2b(byte[](sibling1) + byte[](bCur)); }
+        int bb2 = (bettorIdx / 4) % 2;
+        if (bb2 == 0) { bCur = blake2b(byte[](bCur) + byte[](sibling2)); } else { bCur = blake2b(byte[](sibling2) + byte[](bCur)); }
+        int bb3 = (bettorIdx / 8) % 2;
+        if (bb3 == 0) { bCur = blake2b(byte[](bCur) + byte[](sibling3)); } else { bCur = blake2b(byte[](sibling3) + byte[](bCur)); }
+        int bb4 = (bettorIdx / 16) % 2;
+        if (bb4 == 0) { bCur = blake2b(byte[](bCur) + byte[](sibling4)); } else { bCur = blake2b(byte[](sibling4) + byte[](bCur)); }
+        int bb5 = (bettorIdx / 32) % 2;
+        if (bb5 == 0) { bCur = blake2b(byte[](bCur) + byte[](sibling5)); } else { bCur = blake2b(byte[](sibling5) + byte[](bCur)); }
+        require(bCur == sidesMerkleRoot);
+
+        // ⑤ payout calculation (arithmetic branch — fixes v0.5 L88 NO-winner bug).
+        // v0.7: payout uses tx.inputs[0].value (variable amount), enforced single-input below.
+        int notWinner = 1 - settlementWinner;
+        int winnerPool = totalYesPool * notWinner + totalNoPool * settlementWinner;
+        int totalPool = totalYesPool + totalNoPool;
+        require(tx.inputs.length == 1);  // v0.7 per-UTXO claim: N deposits = N claim TXs
+        int payout = tx.inputs[0].value * totalPool / winnerPool;
+
+        // ⑥ output to bettor.
+        require(tx.outputs.length == 1);
+        byte[34] bettorLock = new ScriptPubKeyP2PK(pubkey(bettorPk));
+        require(tx.outputs[0].scriptPubKey == byte[](bettorLock));
+        require(tx.outputs[0].value == payout);
+    }
+
+    // entry 2 — refund_market_cancelled: bettor recovers stake after deadline + grace.
+    // bug 10d fix (v0.5 PoolSide L125-128): Kaspa Crescendo LOCK_TIME_THRESHOLD = 500B.
+    // Multiply deadline by 1000 → operand ≥ 500B → ms interpretation matches tx.lockTime ms.
+    // FRONT-RUN FIX (Bettor r388/r389 spec, 2026-06-02): push refund window past
+    // settle-completion SLA. REFUND_GRACE_SEC = 7200 (2h) > NWT committee 结算 SLA.
+    // Prevents losing bettor from front-running settle to spend side UTXO + brick settle_via_spine.
+    entrypoint function refund_market_cancelled(sig bettorSig) {
+        require(checkSig(bettorSig, pubkey(bettorPk)));
+        require(tx.time >= (deadline + 7200) * 1000);
+
+        // v0.7 per-UTXO refund: spend exactly 1 UTXO, payout = its value - minerFee placeholder.
+        require(tx.inputs.length == 1);
+        require(tx.outputs.length == 1);
+        byte[34] bettorLock = new ScriptPubKeyP2PK(pubkey(bettorPk));
+        require(tx.outputs[0].scriptPubKey == byte[](bettorLock));
+        require(tx.outputs[0].value == tx.inputs[0].value - 1000);  // minerFee placeholder
+    }
+}

@@ -1,0 +1,447 @@
+// J2-tn r403 Track D Bettor r340 关1 PASS — 证据抽取器 (LLM 喂干净 evidence).
+//
+// 根因 (Bettor r339b): bettor-prediction-voter.js deriveKanetNativeVote L796-798
+// fetch 后 slice(0, 2000) 截断 raw JSON, ESPN summary winner 字段被切 →
+// LLM 蒙对/蒙错. 修: source-aware 抽取干净结果字段 (< 500 char) 喂 LLM.
+//
+// Bettor r340 关1 条件 (= baked here):
+// (1) 比赛未结束/延期 → returns null (= LLM 弃权, 不假装 winner).
+// (2) 防假并行 (gamma/UMA) 不在此模块, 仍 L102 voter assert 挡死.
+// (3) 忠实抽取不加工 (winner 字段原样, 不做语义推理).
+//
+// 抽取器返干净 evidence_text (≤ 500 字符) 或 null (= 结果未出/抽取失败).
+// J2-tn r412 (ABSTAIN-not-guess, Bettor r404): 没匹配 source / 抽取失败 → extractEvidence
+// 返【null】→ voter ABSTAIN, 【不再 fallback raw slice(0,2000) 喂 LLM 瞎猜】(= w0s3m 4/5 错判
+// 根因已删)。门C 档1 item4② guess-fallback grep 确认: 全库无 active raw-slice fallback。
+// (上面 L4-5 描述的是已删的旧行为, 留作根因档案。)
+
+// ─────────────────────────────────────────────────────────────────────────
+// Oracle 强化 wave1 (J2-tn, 2026-06-19) — 落码顺序2: 结构化字段抽取 + field_hash.
+// 设计: docs/2026-06-19-J2-derivevote-extraction-design.md §8/§9.
+// 接口三方对死(J1/J2/NWT): field_hash 输入 == judgeLine 输入∪ == StructuredEvidence.fields
+//   == ['winner_side','home_team','away_team','home_score','away_score'] (__SEF__)。
+// ─────────────────────────────────────────────────────────────────────────
+import { createHash } from 'crypto';
+
+// StructuredEvidence.fields 的 canonical key 集 (三方对死锚, == judgeLine __JUDGELINE_INPUT_FIELDS__)。
+export const __STRUCTURED_EVIDENCE_FIELDS__ = ['winner_side', 'home_team', 'away_team', 'home_score', 'away_score'];
+
+// 平局 canonical token (NWT 铁律: 平局显式非涌现, 不产 ''/null=涌现 abstain)。
+// normalizeAbbr 保证真 team abbr 规范化后永不==此值 (ESPN 无队 abbr 为 'TIE')。
+export const TIE_TOKEN = 'TIE';
+
+// 单源 canonical-abbr 规范化 (finding1 seam 解, NWT 06:26)。抽取侧 winner_side/home_team/
+// away_team + 谓词冻结侧 operand 必过【同一函数】, 否则 'Was' vs 'WAS' 字节不等 → judgeLine
+// winner_side===operand 恒 NO 错判 (determinism-same 跨节点, 不破 byte-equal 但错 = 5终裁 D)。
+// 纯函数: trim + toUpperCase (locale-INdependent Unicode default case mapping, 非
+// toLocaleUpperCase; ESPN team abbr 全 ASCII A-Z0-9 → 确定)。
+export function normalizeAbbr(abbr) {
+  if (typeof abbr !== 'string') return null;
+  const t = abbr.trim().toUpperCase();
+  return t.length ? t : null;
+}
+
+// canonical 序列化 = 固定 key order 的严格 5 字段 (防 JSON.stringify 插入序漂移 → field_hash 裂;
+// 严格只哈这 5 字段 = 条件④ field_hash 最小集 + NWT hash集==输入集 invariant)。
+function stableStringifyFields(fields) {
+  return JSON.stringify([
+    ['winner_side', fields.winner_side],
+    ['home_team', fields.home_team],
+    ['away_team', fields.away_team],
+    ['home_score', fields.home_score],
+    ['away_score', fields.away_score],
+  ]);
+}
+
+// field_hash = sha256(canonical 5 字段)。NWT 升为 quorum 闸(源轴), 复用 voter evidenceHash 位。
+export function canonicalFieldHash(fields) {
+  return createHash('sha256').update(stableStringifyFields(fields)).digest('hex');
+}
+
+/**
+ * Parse ESPN summary JSON → extract winner + final score.
+ * URL format: https://site.api.espn.com/apis/site/v2/sports/.../summary?event=<id>
+ *
+ * Bettor 条件 (1): 比赛未 final → 返 null.
+ *   ESPN: status.type.completed === true && status.type.state === 'post' = final.
+ *   其他状态 (pre/in/halftime/postponed) → 返 null.
+ *
+ * @param {string} rawText - raw HTTP response text
+ * @returns {string|null} - "<winner_name> won (<home_abbr> <hs> - <as> <away_abbr>, <league>)" or null
+ */
+// 单源 parse (J2-tn wave1): ESPN summary JSON → { competitors, home, away, league } 或 null
+// (未 final / 结构异常)。NL 路(extractEspnEvidence) + 结构化路(extractEspnFields) 共用此 parse,
+// 防两路解析逻辑分叉 (fixture-mirror 铁律)。不做胜负/字段语义, 只定位 competitors/home/away。
+function parseEspnSummary(rawText) {
+  let data;
+  try { data = JSON.parse(rawText); } catch { return null; }
+  // ESPN summary structure: { header: { competitions: [{ competitors: [{...}], status: {...} }] } }
+  const comp = data?.header?.competitions?.[0];
+  if (!comp) return null;
+  // Bettor 条件 (1) — 比赛未 final → null. ESPN: status.type.completed === true && state==='post'.
+  const status = comp.status;
+  if (status?.type?.completed !== true || status?.type?.state !== 'post') return null; // pre/in/postponed
+  const competitors = comp.competitors || [];
+  if (competitors.length !== 2) return null;
+  const home = competitors.find(c => c.homeAway === 'home');
+  const away = competitors.find(c => c.homeAway === 'away');
+  if (!home || !away) return null;
+  const league = data?.header?.league?.abbreviation || data?.leagues?.[0]?.abbreviation || '';
+  return { competitors, home, away, league };
+}
+
+export function extractEspnEvidence(rawText) {
+  const p = parseEspnSummary(rawText);
+  if (!p) return null;
+  const { competitors, home, away, league } = p;
+
+  // Bettor 条件 (3) — 忠实抽取. NL 路平局/无胜方 → null (LLM 兜底路保守 abstain;
+  // 结构化路 extractEspnFields 则产显式 TIE_TOKEN 交 judgeLine — 两路对平局策略不同, 见下)。
+  const winner = competitors.find(c => c.winner === true);
+  if (!winner) return null;
+
+  // J2-tn r681 (NWT line-E N=35 抓到 WSH@NO 误判, format-isolated 实锤): winner-first + 每队紧邻自己
+  // 分数 (消歧义)。原 `(homeTeam homeScore - awayScore awayTeam)` = home 是 team-score 相邻、away 是
+  // score-team 相邻 (不一致) → "NO 19 - 20 WSH" LLM 把 away 队读错分 → 误判 (同 LLM 同题, 格式是唯一变量;
+  // 清晰 "winner 20, loser 19" 则判对)。共享 extractor (prevet mock-extract + voter deriveVote 共用):
+  // 纯证据措辞改, 无下游结构解析, prevet 仍判非空 (final game → 非 null)。
+  const loser = competitors.find(c => c.winner === false) || competitors.find(c => c !== winner);
+  const winnerName = winner.team?.displayName || winner.team?.shortDisplayName || winner.team?.abbreviation || '?';
+  const loserName = loser?.team?.displayName || loser?.team?.shortDisplayName || loser?.team?.abbreviation || '?';
+  const winnerScore = winner.score ?? '?';
+  const loserScore = loser?.score ?? '?';
+
+  // #25 UMA L1 (J2-tn): 附客观算术派生量 (margin/total) 卸掉 LLM 的净胜/总分算术负担。
+  // §20.10 L1: 一个比分源解锁 moneyline + 让分(margin) + 大小球(total). spread/total 边界判定
+  // 靠 LLM 自算分差/和 → trial 实测 60% (boundary off-by-one: 实赢 2 问 >=3 误判 YES / 总 4 问 >=4
+  // 误判 NO). margin/total = 两分数纯算术 (无语义判断, 守忠实抽取铁律), 显式给出让 LLM 只比较 → 准确率↑.
+  // 仅双方分数为有限数值时附 (非 final/异常分 → 不附, 退回原 winner-only 证据, 不破 moneyline).
+  const ws = Number(winnerScore), ls = Number(loserScore);
+  const arith = (Number.isFinite(ws) && Number.isFinite(ls))
+    ? ` ${winnerName} won by ${ws - ls} (margin). Combined total of both teams: ${ws + ls}.`
+    : '';
+  const evidence = `${winnerName} won. Final score: ${winnerName} ${winnerScore}, ${loserName} ${loserScore}${league ? ' (' + league + ')' : ''}.${arith}`;
+  return evidence.length > 500 ? evidence.slice(0, 497) + '...' : evidence;
+}
+
+/**
+ * 结构化字段抽取 (J2-tn oracle 强化 wave1, 落码顺序2)。喂 D-L1 judgeLine (确定性判, 非 LLM)。
+ * @param {string} rawText - raw ESPN summary HTTP response
+ * @returns {{final:true, fields:{winner_side,home_team,away_team,home_score,away_score}, field_hash:string} | null}
+ *   null = 未 final / 结构异常 / 加固失败 → voter ABSTAIN (不猜)。
+ *
+ * 与 NL 路 (extractEspnEvidence) 区别:
+ *  - 平局 (无 winner:true) → winner_side = TIE_TOKEN (显式, NWT 铁律), 非 null abstain
+ *    (结构化路交 judgeLine 含显式 tie 分支判定; NL 路是 LLM 兜底, 平局保守 abstain)。
+ *  - 所有 abbr 过 normalizeAbbr 单源 (finding1 seam: 与谓词冻结 operand 同一 canonical)。
+ * 加固 (进 field_hash 前): winner_side ∈ {home_team, away_team, TIE_TOKEN} + scores 整数,
+ *   team abbr 不撞 TIE_TOKEN, 否则 null (abstain) — 防 ESPN 自相矛盾/异常分污染 field_hash。
+ * invariant: 返回的 fields 严格 == __STRUCTURED_EVIDENCE_FIELDS__ (== judgeLine 输入∪)。
+ */
+export function extractEspnFields(rawText) {
+  const p = parseEspnSummary(rawText);
+  if (!p) return null;
+  const { competitors, home, away } = p;
+
+  const home_team = normalizeAbbr(home.team?.abbreviation);
+  const away_team = normalizeAbbr(away.team?.abbreviation);
+  if (!home_team || !away_team || home_team === away_team) return null; // abbr 缺/撞 → abstain
+  if (home_team === TIE_TOKEN || away_team === TIE_TOKEN) return null;  // 真 abbr 撞保留字 → abstain
+
+  const home_score = Number(home.score);
+  const away_score = Number(away.score);
+  if (!Number.isInteger(home_score) || !Number.isInteger(away_score)) return null; // 非整数分 → abstain
+
+  // winner_side: ESPN winner:true 权威 (非分数推, 避免加时/点球/特殊计分边界)。平局 → TIE_TOKEN。
+  const winnerC = competitors.find(c => c.winner === true);
+  let winner_side;
+  if (!winnerC) {
+    winner_side = TIE_TOKEN; // 平局显式 token (NWT 铁律: 显式非涌现)
+  } else if (winnerC.homeAway === 'home') {
+    winner_side = home_team;
+  } else if (winnerC.homeAway === 'away') {
+    winner_side = away_team;
+  } else {
+    return null; // winner 既非 home 非 away → 结构异常 → abstain
+  }
+  // 自洽加固: winner_side 必 ∈ {home_team, away_team, TIE_TOKEN} (防 ESPN winner 与 teams 不一致)。
+  if (winner_side !== TIE_TOKEN && winner_side !== home_team && winner_side !== away_team) return null;
+
+  const fields = { winner_side, home_team, away_team, home_score, away_score };
+  return { final: true, fields, field_hash: canonicalFieldHash(fields) };
+}
+
+/**
+ * Single source-of-truth registry (J2-tn r421 Bettor r441 钉1):
+ * prevet mock-extract + voter deriveVote 共用此 registry → 永不分叉.
+ *
+ * 每条: { domainRe, extractor, label }
+ *   domainRe — case-insensitive 正则匹 URL
+ *   extractor — (rawText) => string|null (= clean evidence or null when not final)
+ *   label — human-readable 源名 (= maker-facing UI 显)
+ */
+/**
+ * J2-tn r427 (Bettor r462 跨域 ramp 第 1 个): CoinGecko price extractor.
+ * 形如 'BTC >= $X at T' 类 price-threshold 市场. CoinGecko 客观结构化源.
+ *
+ * URL 格式: https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd
+ * 响应: {"bitcoin":{"usd":107000.5}}
+ *
+ * Bettor 条件 (1) 比赛/事件未 final: 此处 price 是即时实测, 总是 final (= 任意时刻读都是当时价).
+ *   故只要 API 返合法 JSON + 含 price → 出 evidence. fetch fail → null = ABSTAIN (= 命门不猜).
+ * Bettor 条件 (3) 忠实抽取: price 原样喂 LLM, 不做语义推理 (= 不猜 ">=X" 判 YES/NO, 让 LLM 看).
+ */
+export function extractCoinGeckoPrice(rawText) {
+  let data;
+  try { data = JSON.parse(rawText); } catch { return null; }
+  if (!data || typeof data !== 'object') return null;
+
+  // simple/price form: {"bitcoin":{"usd":42345.67}}
+  const parts = [];
+  for (const coinId of Object.keys(data)) {
+    const prices = data[coinId];
+    if (!prices || typeof prices !== 'object') continue;
+    for (const [currency, price] of Object.entries(prices)) {
+      if (typeof price === 'number' && Number.isFinite(price)) {
+        parts.push(`${coinId.toUpperCase()} = ${price} ${currency.toUpperCase()}`);
+      }
+    }
+  }
+  // coins/markets form (= array): [{"id":"bitcoin","current_price":107000.5,"symbol":"btc"}]
+  if (parts.length === 0 && Array.isArray(data)) {
+    for (const row of data) {
+      if (row && typeof row === 'object' && typeof row.current_price === 'number' && Number.isFinite(row.current_price)) {
+        const id = String(row.id || row.symbol || '?').toUpperCase();
+        parts.push(`${id} = ${row.current_price} USD`);
+      }
+    }
+  }
+  if (parts.length === 0) return null;
+  const evidence = `CoinGecko price (real-time): ${parts.join(', ')}.`;
+  return evidence.length > 500 ? evidence.slice(0, 497) + '...' : evidence;
+}
+
+// J2-tn 门C 红队 fix (Bettor r512 / NWT r14 🔴CRIT): hostRe 是【host-anchored】正则 (匹 URL
+// 解析后的 hostname, 末尾锚定), 不是对整 URL 字符串子串匹配. 旧 domainRe 子串匹配 = 源伪造/SSRF
+// 洞 (evil.com/site.api.espn.com / 127.0.0.1/site.api.espn.com 都过) → 攻击者控判决证据 → settle 错.
+// hostRe 模式 /^([a-z0-9-]+\.)*espn\.com$/ : 匹 espn.com + 真子域, 拒 espn.com.evil.com / evil.com/...espn...
+export const KNOWN_EXTRACTORS = [
+  {
+    hostRe: /^([a-z0-9-]+\.)*espn\.com$/i,
+    extractor: extractEspnEvidence,
+    label: 'ESPN sports summary',
+    kind: 'espn',
+  },
+  {
+    hostRe: /^([a-z0-9-]+\.)*coingecko\.com$/i,
+    extractor: extractCoinGeckoPrice,
+    label: 'CoinGecko price',
+    kind: 'coingecko',
+  },
+  // Future: BBC, Reuters, AP, other domain-specific extractors.
+];
+
+// SSRF 防护: 禁私网/loopback/link-local host (攻击者用内网 IP + 白名单子串绕过 fetch 打内网服务).
+function _isPrivateOrLocalHost(host) {
+  if (!host) return true;
+  const h = host.toLowerCase().replace(/^\[|\]$/g, ''); // strip IPv6 brackets
+  if (h === 'localhost' || h.endsWith('.local') || h.endsWith('.internal')) return true;
+  if (h === '::1' || h.startsWith('fc') || h.startsWith('fd') || h.startsWith('fe80')) return true; // IPv6 loopback/ULA/link-local
+  // IPv4 private / loopback / link-local / unspecified
+  if (/^127\./.test(h) || /^10\./.test(h) || /^192\.168\./.test(h) || /^169\.254\./.test(h) || /^0\./.test(h)) return true;
+  if (/^172\.(1[6-9]|2\d|3[01])\./.test(h)) return true;
+  return false;
+}
+
+/**
+ * Find extractor entry by URL. Single API for prevet + voter.
+ * J2-tn 门C fix: host-anchored + https-only + SSRF block (不再子串匹配).
+ * @param {string} url
+ * @returns {{hostRe, extractor, label, kind} | null}
+ */
+export function findExtractor(url) {
+  if (!url) return null;
+  let host;
+  try {
+    const u = new URL(String(url));
+    // 只允许 https (防 MITM + 禁 http SSRF/明文). 解析失败 / 非 https → null (= voter ABSTAIN, 不判).
+    if (u.protocol !== 'https:') return null;
+    host = u.hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+  if (_isPrivateOrLocalHost(host)) return null; // SSRF: 拒内网/loopback
+  for (const ent of KNOWN_EXTRACTORS) {
+    if (ent.hostRe.test(host)) return ent; // host-anchored, 非整 URL 子串
+  }
+  return null;
+}
+
+/**
+ * Dispatcher: route by URL → call source-specific extractor.
+ * Falls back to null if no match (= voter must abstain).
+ *
+ * @param {string} url - source URL
+ * @param {string} rawText - HTTP response text
+ * @returns {string|null} - clean evidence or null (= 结果未出 / 抽取失败, voter 应 abstain)
+ */
+export function extractEvidence(url, rawText) {
+  if (!url || !rawText) return null;
+  const ent = findExtractor(url);
+  if (!ent) return null;
+  return ent.extractor(rawText);
+}
+
+/**
+ * 结构化字段 dispatcher (J2-tn wave1, 对偶 extractEvidence NL 路)。
+ * findExtractor → 结构化抽取 → { final, fields, field_hash } 或 null。
+ * 第一波仅 ESPN 有结构化路 (summary 端点 → 5 字段)。CoinGecko 等后续 ramp。
+ * @param {string} url
+ * @param {string} rawText
+ * @returns {{final:true, fields:object, field_hash:string} | null}
+ */
+export function extractStructuredFields(url, rawText) {
+  if (!url || !rawText) return null;
+  const ent = findExtractor(url);
+  if (!ent || ent.kind !== 'espn') return null; // 仅 ESPN 结构化 (第一波 A-ramp summary 端点)
+  return extractEspnFields(rawText);
+}
+
+/**
+ * J2-tn r422 (Bettor r442 关2 漏抓): voter 接受的 outcome_market_source enum 列表.
+ * 必 mirror bettor-prediction-voter.js L687-702:
+ *   - 'polymarket' → polymarket handler
+ *   - 'kanet_native' OR startsWith('kanet_') → kanet_native handler
+ *   - else → unsupported
+ * prevet 必同时校验 enum 接受 + URL 抽取, 防 espn-enum+ESPN-URL 错配 (= URL judgeable 但 voter
+ * 拒 enum → ABSTAIN → refund).
+ */
+export function isVoterSupportedSource(source) {
+  if (!source || typeof source !== 'string') return false;
+  if (source === 'polymarket') return true;
+  if (source === 'kanet_native') return true;
+  if (source.startsWith('kanet_')) return true;
+  if (source === 'coingecko') return true;  // r427 Bettor r462: 跨域 ramp 第 1 个金融源
+  return false;
+}
+
+/**
+ * J2-tn r421 (Bettor r441 关1 钉1+钉2 + r422 r442 关2 漏抓): maker-facing prevet diagnose.
+ *
+ * Returns structured verdict for build-time gate. Bettor 钉2: 'not_final_yet' is GREEN
+ * (= 可判待终态, 市场为未来事件正常). RED = 该源 fundamentally 判不了.
+ *
+ * Verdicts:
+ *   - 'judgeable_now'      — extract returned non-null clean text (= 事件已 final, AI 可直判)
+ *   - 'judgeable_pending'  — extract returned null + JSON shape OK (= 等终态, 结构对)
+ *   - 'no_extractor'       — source 不在 registry (= 该域无 extractor, 换源 OR UMA)
+ *   - 'canonical_unreachable' — URL 不可达 / 网络错
+ *   - 'shape_mismatch'     — URL OK 但 JSON 不能解析 OR 结构不对 (= 拼错 URL / 私有 endpoint)
+ *   - 'unsupported_source_enum' — outcome_market_source enum 不在 voter handler 列表 (r422)
+ *
+ * @param {string} url
+ * @param {string} source - outcome_market_source enum (= voter 路由 key)
+ * @returns {Promise<{ok, verdict, label?, kind?, preview?, advice}>}
+ */
+export async function diagnoseSource(url, source) {
+  // r422 (Bettor r442): 先校验 enum, 防 espn-enum+ESPN-URL 错配 (= URL 抽得到但 voter 拒 enum).
+  if (source !== undefined && !isVoterSupportedSource(source)) {
+    return {
+      ok: false,
+      verdict: 'unsupported_source_enum',
+      advice: `outcome_market_source='${source}' 不在 voter handler 列表 (= polymarket / kanet_*). 换 'kanet_v07' (= 同 vaaks PASS 源).`,
+    };
+  }
+
+  // r423 (Bettor r443 关2 漏抓): polymarket 是 voter 非-extractor 判路 (= derivePolymarketVote
+  // 读 gamma API), 不走 KNOWN_EXTRACTORS. 必单独认 GREEN 不走 ESPN 路径.
+  const urlLower = String(url || '').toLowerCase();
+  if (source === 'polymarket' || urlLower.includes('polymarket.com')) {
+    return {
+      ok: true,
+      verdict: 'judgeable_polymarket',
+      label: 'Polymarket gamma',
+      kind: 'polymarket',
+      advice: '✓ Polymarket 源 (= voter derivePolymarketVote 读 gamma API). 不需 ESPN extractor.',
+    };
+  }
+
+  if (!url) {
+    return { ok: false, verdict: 'no_canonical', advice: '必填 data_source_canonical (= 机器可解析 URL)' };
+  }
+  const ent = findExtractor(url);
+  if (!ent) {
+    const knownList = KNOWN_EXTRACTORS.map(e => e.label).join(' / ');
+    return {
+      ok: false,
+      verdict: 'no_extractor',
+      advice: `该源无 KANet extractor (= AI 判不了). 已支持: ${knownList} + Polymarket gamma. 主观题走 UMA 底座.`,
+    };
+  }
+
+  let rawText;
+  try {
+    const r = await fetch(url, { signal: AbortSignal.timeout(8000) });
+    if (!r.ok) {
+      return {
+        ok: false,
+        verdict: 'canonical_unreachable',
+        label: ent.label,
+        kind: ent.kind,
+        advice: `canonical URL HTTP ${r.status} — 检查 URL 拼写 / 等源 publish`,
+      };
+    }
+    rawText = await r.text();
+  } catch (e) {
+    return {
+      ok: false,
+      verdict: 'canonical_unreachable',
+      label: ent.label,
+      kind: ent.kind,
+      advice: `fetch 失败 (${String(e.message || e).slice(0,80)}) — 检查 URL / 等源`,
+    };
+  }
+
+  // Shape sanity: try JSON.parse, must succeed (= structure exists).
+  let parsed;
+  try { parsed = JSON.parse(rawText); }
+  catch {
+    return {
+      ok: false,
+      verdict: 'shape_mismatch',
+      label: ent.label,
+      kind: ent.kind,
+      advice: '响应不是 JSON — 检查 URL 是否 API endpoint (= 不是网页)',
+    };
+  }
+  // ESPN-specific shape sanity (= 防 maker 拼错 endpoint 给个无 header.competitions 的页).
+  if (ent.kind === 'espn' && !parsed?.header?.competitions?.[0]) {
+    return {
+      ok: false,
+      verdict: 'shape_mismatch',
+      label: ent.label,
+      kind: ent.kind,
+      advice: 'ESPN summary URL 结构不对 (= header.competitions 缺). 用 site.api.espn.com/.../summary?event=<id>',
+    };
+  }
+
+  const evidence = ent.extractor(rawText);
+  if (evidence) {
+    return {
+      ok: true,
+      verdict: 'judgeable_now',
+      label: ent.label,
+      kind: ent.kind,
+      preview: evidence.slice(0, 200),
+      advice: '✓ 源已可判 (= AI 可直读 final 结果).',
+    };
+  }
+  // Bettor r441 钉2: 结构 OK + 未 final → GREEN 'judgeable_pending'.
+  return {
+    ok: true,
+    verdict: 'judgeable_pending',
+    label: ent.label,
+    kind: ent.kind,
+    advice: '✓ 源结构正确 (= 事件未 final, 待终态 AI 可判).',
+  };
+}
