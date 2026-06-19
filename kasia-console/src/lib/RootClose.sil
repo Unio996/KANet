@@ -19,7 +19,8 @@ pragma silverscript ^0.1.0;
 contract RootClose(
     byte[32] ps_tmpl_hash,        // dust PoolSide-ticket expectedTemplateHash (refund_draw 读 spent-once 凭证)
     byte[32] shard_pool_id,       // 本 pool 身份 (ticket 记此; per-instance P2SH 唯一性锚)
-    int      shard_count,         // close 防御性校验 count==shard_count (seal 已保证, 此为深度防御)
+    // (P1 trim 2026-06-20: 删 shard_count + close 的 count==shard_count 深度防御 — RootClose 只经 FoldNode.seal_to_root
+    //  创建, seal 已 require(count==shard_count) → RootClose.count==shard_count 结构保证, 此防御 provably 冗余。省 ~Δu 过 P1 9999 墙。)
     // —— committee (close_commit 4-of-5 attest winningSide+payoutRoot) ——
     byte[32] c0Pk, byte[32] c1Pk, byte[32] c2Pk, byte[32] c3Pk, byte[32] c4Pk,
     int      deadline,            // close post-deadline; refund timeout deadline+grace
@@ -57,7 +58,6 @@ contract RootClose(
         byte[32] new_payoutRoot        // off-chain BigInt 算 (winner+fee leaves, Σ==totalPool)
     ) {
         require(closed == 0);                              // write-once
-        require(count == shard_count);                     // 深度防御 (seal 已保证仅全片折满的 root)
         require(tx.time >= deadline * 1000);               // post-deadline
         require(new_winningSide == 0 || new_winningSide == 1);
 

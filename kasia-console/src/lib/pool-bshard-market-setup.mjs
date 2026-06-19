@@ -113,7 +113,7 @@ export function computeMarketGenesis(o) {
  * @returns {{ shardLeaf, foldNode, poolRoot, genesisState, psArtifact, shardPoolId, fnTmplHash, rootTmplHash }}
  */
 export function computeConvertSplitGenesis(o) {
-  const { shardLeafSilPath, foldNodeSilPath, poolRootSilPath, poolSideSilPath, marketId, shardPoolId,
+  const { shardLeafSilPath, foldNodeSilPath, rootCloseSilPath, rootClaimSilPath, poolSideSilPath, marketId, shardPoolId,
     committeePks, deadline, minBet, shardCount, sealCount, maxFanIn = 2, firstBet, silvercPath = SILVERC } = o;
   if (!Array.isArray(committeePks) || committeePks.length !== 5) throw new Error('committeePks must be 5 × 32B hex');
   if (!firstBet || (firstBet.side !== 0 && firstBet.side !== 1)) throw new Error('firstBet {bettorPk, side(0|1), stakeSompi} required');
@@ -135,15 +135,26 @@ export function computeConvertSplitGenesis(o) {
   const psDummyCtor = [ctorBytes32(firstBet.bettorPk), ctorInt(firstBet.side), ctorInt(Number(stake)), ctorBytes32(shardPoolId)];
   const psArtifact = computePoolSideArtifact(poolSideSilPath, psDummyCtor, silvercPath);
 
-  // 2. PoolRoot template → root_tmpl_hash (seal_to_root target; ctor 16 — SAME shape as computeMarketGenesis).
+  // cascade convert-split (2026-06-20): PoolRoot split into RootClose (seal target) + RootClaim (convert target).
+  // 2a. RootClaim template → rootclaim_tmpl_hash (convert_to_claim target; ctor 9: ps_tmpl_hash, shard_pool_id, init 7-field).
   const rootInitPayoutRoot = ZERO32_HEX;
-  const rootCtor = [
-    ctorBytes32(psArtifact.templateHashHex), ctorBytes32(shardPoolId), ctorInt(shardCount),
-    ...committeePks.map(ctorBytes32), ctorInt(Number(deadline)),
+  const claimCtor = [
+    ctorBytes32(psArtifact.templateHashHex), ctorBytes32(shardPoolId),
     ctorInt(0), ctorInt(0), ctorInt(0), ctorInt(0), ctorInt(0), ctorInt(0), ctorBytes32(rootInitPayoutRoot),
   ];
-  const poolRoot = templateArtifact(poolRootSilPath, rootCtor);
-  const rootTmplHash = poolRoot.templateHashHex;
+  const rootClaim = templateArtifact(rootClaimSilPath, claimCtor);
+  const rootClaimTmplHash = rootClaim.templateHashHex;
+
+  // 2b. RootClose template → rootclose_tmpl_hash (FoldNode.seal_to_root target; bakes rootclaim_tmpl_hash for convert_to_claim
+  //     foreign-template bridge). ctor 16 (P1 trim: shard_count 删, seal-guaranteed redundant): ps_tmpl_hash, shard_pool_id,
+  //     c0-c4Pk, deadline, claim_tmpl_hash, init 7-field.
+  const closeCtor = [
+    ctorBytes32(psArtifact.templateHashHex), ctorBytes32(shardPoolId),
+    ...committeePks.map(ctorBytes32), ctorInt(Number(deadline)), ctorBytes32(rootClaimTmplHash),
+    ctorInt(0), ctorInt(0), ctorInt(0), ctorInt(0), ctorInt(0), ctorInt(0), ctorBytes32(rootInitPayoutRoot),
+  ];
+  const rootClose = templateArtifact(rootCloseSilPath, closeCtor);
+  const rootCloseTmplHash = rootClose.templateHashHex;
 
   // 3. FoldNode template → fn_tmpl_hash. ⭐ COHERENCE FIX: bake the REAL root_tmpl_hash (ctor param5), not ZERO32,
   //    so FoldNode.seal_to_root foreign-template verify (blake2b(root_prefix‖root_suffix) == baked root_tmpl_hash)
@@ -151,7 +162,7 @@ export function computeConvertSplitGenesis(o) {
   //    root_tmpl_hash, root_init_payoutRoot, init 4-field.
   const fnCtor = [
     ctorBytes32(marketId), ctorBytes32(ZERO32_HEX), ctorInt(shardCount), ctorInt(maxFanIn),
-    ctorBytes32(rootTmplHash), ctorBytes32(rootInitPayoutRoot),
+    ctorBytes32(rootCloseTmplHash), ctorBytes32(rootInitPayoutRoot),
     ctorInt(0), ctorInt(0), ctorInt(0), ctorInt(0),
   ];
   const foldNode = templateArtifact(foldNodeSilPath, fnCtor);
@@ -190,11 +201,16 @@ export function computeConvertSplitGenesis(o) {
       templatePrefix: foldNode.templatePrefix, templateSuffix: foldNode.templateSuffix,
       redeemBytes: foldNode.redeemBytes,
     },
-    poolRoot: {                         // seal_to_root target (foreign-template; root_prefix/root_suffix for seal builder)
-      ctor: rootCtor, tmplHash: rootTmplHash,
-      templatePrefix: poolRoot.templatePrefix, templateSuffix: poolRoot.templateSuffix,
-      redeemBytes: poolRoot.redeemBytes,
+    rootClose: {                        // FoldNode.seal_to_root target (foreign-template; root_prefix/root_suffix for seal builder, sealSelector=52)
+      ctor: closeCtor, tmplHash: rootCloseTmplHash,
+      templatePrefix: rootClose.templatePrefix, templateSuffix: rootClose.templateSuffix,
+      redeemBytes: rootClose.redeemBytes,
     },
-    genesisState, psArtifact, shardPoolId, fnTmplHash, rootTmplHash, rootInitPayoutRoot, committeePks, deadline,
+    rootClaim: {                        // RootClose.convert_to_claim target (foreign-template; claim_prefix/claim_suffix for convert builder)
+      ctor: claimCtor, tmplHash: rootClaimTmplHash,
+      templatePrefix: rootClaim.templatePrefix, templateSuffix: rootClaim.templateSuffix,
+      redeemBytes: rootClaim.redeemBytes,
+    },
+    genesisState, psArtifact, shardPoolId, fnTmplHash, rootCloseTmplHash, rootClaimTmplHash, rootInitPayoutRoot, committeePks, deadline,
   };
 }
