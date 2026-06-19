@@ -74,6 +74,7 @@ export const COMMAND_TYPES = Object.freeze({
   BSHARD_FOLD: 'bshard_fold',
   BSHARD_CLOSE_COMMIT: 'bshard_close_commit',
   BSHARD_SEAL_TO_ROOT: 'bshard_seal_to_root',   // route-split: PoolLeaf seal_to_root OP_3, leaf→root foreign-template 桥
+  BSHARD_CONVERT_TO_FOLDNODE: 'bshard_convert_to_foldnode',   // convert-split: ShardLeaf convert_to_foldnode OP_1, leaf→FoldNode foreign-template 桥
 });
 
 export const COMMAND_TYPE_SET = new Set(Object.values(COMMAND_TYPES));

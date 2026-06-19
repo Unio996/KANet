@@ -1910,3 +1910,59 @@ export async function unlockBshardSeal(args) {
     return { txId: r.transactionId };
   } finally { try { await rpc.disconnect(); } catch {} }
 }
+
+/**
+ * unlockBshardConvert — bshard_convert_to_foldnode (ShardLeaf convert_to_foldnode entry OP_1, leaf→FoldNode
+ * foreign-template 桥; convert-split J1 2026-06-19). Sealed ShardLeaf (count==seal_count) → FoldNode genesis
+ * (4-field carry, NO outcome). 同构 unlockBshardSeal; 差: selector OP_1('51'), 输出 4-field FoldNode state
+ * (_serializeLeafStateHex 非 root 的 7-field), witness {fnOutIdx, fn_prefix, fn_suffix}.
+ */
+export async function unlockBshardConvert(args) {
+  const { wallet, cmd, networkId, lockTime = 0n } = args;
+  const w = cmd.witness;
+  const rpc = await connectRpc(networkId);
+  try {
+    const leafUtxo = await _matchUtxo(rpc, _addressFromRedeem(cmd.inputs.leaf.redeem_hex, networkId), cmd.inputs.leaf.outpointTxid);   // P2SH 地址 = hash(redeem)
+    const fundUtxos = [];
+    for (const f of (cmd.inputs.funding || [])) fundUtxos.push(await _matchUtxo(rpc, f.address, f.outpointTxid));
+    const matched = [leafUtxo, ...fundUtxos];
+
+    // FoldNode 输出地址 relay 自算 (foreign-template; fn_prefix‖serialize4(state)‖fn_suffix, 忽略 cmd.address). 4-field carry (no outcome).
+    const fnAddr = _foreignTemplateAddress(w.fn_prefix_hex, _serializeLeafStateHex(cmd.outputs.foldnode.state), w.fn_suffix_hex, networkId);
+
+    // leaf scriptSig: convert_to_foldnode witness(声明序: fnOutIdx, fn_prefix, fn_suffix) + selector OP_1 + redeem reveal. (无 sig: output 约束到 canonical FoldNode)
+    const leafSig = _pushInt(w.fn_out_idx) + _pushBytes(w.fn_prefix_hex) + _pushBytes(w.fn_suffix_hex)
+      + '51' + _encodePushDataHex(Buffer.from(cmd.inputs.leaf.redeem_hex, 'hex'));     // convert_to_foldnode=OP_1='51'
+
+    const outputs = [];
+    outputs[w.fn_out_idx] = new TransactionOutput(BigInt(cmd.outputs.foldnode.amountSompi), payToAddressScript(new Address(fnAddr)));
+    const orderedOut = outputs.filter(o => o !== undefined);
+    _appendChange(orderedOut, matched, cmd.outputs.change_address);   // relay 算 change=Σin−Σout−fee (leaf 全池→foldnode, fee 来自 funding)
+
+    const unsigned = new Transaction({
+      version: 0,
+      inputs: matched.map((u, i) => ({
+        previousOutpoint: { transactionId: u.outpoint.transactionId, index: u.outpoint.index },
+        signatureScript: '', sequence: 0n, sigOpCount: i === 0 ? 0 : 1, utxo: u,   // leaf(0)=0 无 sig; funding=1
+      })),
+      outputs: orderedOut, lockTime: BigInt(lockTime), gas: 0n,
+      subnetworkId: '0000000000000000000000000000000000000000', payload: '',
+    });
+    const sigScripts = [leafSig];
+    for (let i = 1; i < matched.length; i++) {
+      sigScripts.push(createInputSignature(unsigned, i, wallet.getPrivateKey(), SighashType.All));
+    }
+    const signedTx = new Transaction({
+      version: 0,
+      inputs: matched.map((u, i) => ({
+        previousOutpoint: { transactionId: u.outpoint.transactionId, index: u.outpoint.index },
+        signatureScript: sigScripts[i], sequence: 0n, sigOpCount: i === 0 ? 0 : 1,
+      })),
+      outputs: orderedOut, lockTime: BigInt(lockTime), gas: 0n,
+      subnetworkId: '0000000000000000000000000000000000000000', payload: '',
+    });
+    _assertTxInvariants(matched, signedTx, 'unlockBshardConvert', networkId);
+    const r = await rpc.submitTransaction({ transaction: signedTx, allowOrphan: false });
+    return { txId: r.transactionId };
+  } finally { try { await rpc.disconnect(); } catch {} }
+}
