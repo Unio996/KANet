@@ -389,7 +389,6 @@ async function processPoolMarket(voter) {
         evidence_hash: evidenceHash,
         // J2-tn wave1 (顺序2, 交叠点 J2 先): 源轴 field_hash 进签名 payload 防篡改。observe-only —
         //   ESPN 结构化源有值, 否则 null。NWT 顺序4 双轴 gate 消费 (委员各自 field_hash 一致才计入 tally)。
-        //   ⚠ KANet-UI 顺序3 在此对象后加 code_manifest_hash (码轴), 同对象双轴 (J2 先 UI 后)。
         field_hash: voteResult.field_hash || null,
         extractor_kind_used: voteResult.extractor_kind_used || null,  // r412: audit trail
         vote_timestamp: new Date().toISOString(),
@@ -851,6 +850,7 @@ export async function deriveKanetNativeVote(offer, spec) {
   let evidence_text = '';
   let evidence_url = url;
   let field_hash = null;  // J2-tn wave1: 结构化字段 hash (observe-only; ESPN 结构化源有, 否则 null; NWT 源轴 quorum 闸输入)
+  let _structured = null;  // J2-tn wave1 wire: extractStructuredFields 结果 {fields, field_hash} (judgeLine 路由用)
   if (url.startsWith('http://') || url.startsWith('https://')) {
     // 403-flood root-fix: serve FINAL evidence from cache (skip fetch) so audit loop + main vote
     // don't re-hit the source every tick. Cache holds ONLY final results (populated below), so a hit
@@ -859,6 +859,7 @@ export async function deriveKanetNativeVote(offer, spec) {
     if (_cachedFinal && (Date.now() - _cachedFinal.cachedAt) < FINAL_EVIDENCE_TTL_MS) {
       evidence_text = _cachedFinal.evidence_text;
       field_hash = _cachedFinal.field_hash || null;
+      _structured = _cachedFinal.structured || null;
     } else {
     try {
       const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
@@ -887,10 +888,11 @@ export async function deriveKanetNativeVote(offer, spec) {
         evidence_text = clean;
         // J2-tn wave1: 同步抽结构化字段 field_hash (observe-only; 仅 ESPN 结构化源, 否则 null,
         // 不阻塞 NL 判定路). field_hash = NWT 源轴 quorum 闸输入 (顺序4 gate 消费, 第一波 observe-only).
-        field_hash = extractStructuredFields(url, rawText)?.field_hash || null;
+        _structured = extractStructuredFields(url, rawText);
+        field_hash = _structured?.field_hash || null;
         // FINAL (clean evidence ⟺ game over) → cache so subsequent ticks skip the fetch (stops the
         // self-DoS burst). Only immutable resolved-game evidence reaches here (null = not-final above).
-        _finalEvidenceCache.set(url, { evidence_text: clean, field_hash, cachedAt: Date.now() });
+        _finalEvidenceCache.set(url, { evidence_text: clean, field_hash, structured: _structured, cachedAt: Date.now() });
       } catch (e) {
         // Defensive: extractor 模块自身异常 → ABSTAIN (= 不假装能判).
         console.warn(`[deriveKanetNative] extractor exception ${e.message}, ABSTAIN`);
@@ -904,6 +906,37 @@ export async function deriveKanetNativeVote(offer, spec) {
     // free-text description path — 用 spec 5 字段 作 evidence
     evidence_text = JSON.stringify(spec);
     evidence_url = `kanet_native_spec:${offer.id}`;
+  }
+
+  // J2-tn wave1 wire (Owner 核心交付): 市场有结构化 resolution_predicate + ESPN 结构化字段
+  //   → D-L1 judgeLine 确定性算术判 (winner/margin/total 整数定点, 消 LLM off-by-one;
+  //   真赛实测 495/495=100% winner+让分+大小球, 独立 ground-truth)。命中则跳 LLM。
+  //   无 resolution_predicate → 走旧 LLM 路 (additive 不破现有非结构化判定)。
+  //   judgeLine ABSTAIN (字段不足/不合法) → 落 abstain, 不退回 LLM (abstain-not-guess)。
+  {
+    let _predicate = null;
+    try {
+      const _specObj = (spec && typeof spec === 'object') ? spec : JSON.parse(String(spec || '{}'));
+      _predicate = _specObj?.resolution_predicate || null;
+    } catch {}
+    if (_predicate) {
+      // 有 resolution_predicate = maker 选了结构化算术判路 → 必走 judgeLine 或 abstain, 【不 fall LLM】
+      //   (J1 finding: structured 路已选, extract 失败再交 LLM 会猜 = 破 abstain-not-guess)。
+      if (!_structured?.fields) {
+        return { ok: true, outcome: 'ABSTAIN', extractor_kind_used: 'judgeline-no-fields',
+          reason: 'resolution_predicate 存在但结构化字段抽取失败 (未 final / 非结构化源), abstain-not-guess 不退 LLM' };
+      }
+      const { judgeLine } = await import('../lib/judgeline.mjs');
+      const verdict = judgeLine(_predicate, _structured.fields);  // _structured = {final,fields,field_hash}, 传 .fields 非 wrapper
+      if (verdict === 'YES' || verdict === 'NO') {
+        return { ok: true, outcome: verdict, evidence_url, field_hash,
+          extractor_kind_used: 'judgeline-deterministic',
+          evidence_raw: JSON.stringify({ fields: _structured.fields, predicate: _predicate, verdict, engine: 'D-L1-judgeLine' }) };
+      }
+      // judgeLine ABSTAIN (predicate 字段不足/不合法) → 落 abstain, 不退回 LLM (abstain-not-guess)
+      return { ok: true, outcome: 'ABSTAIN', extractor_kind_used: 'judgeline-abstain',
+        reason: 'judgeLine ABSTAIN (predicate 字段不足/不合法, abstain-not-guess)' };
+    }
   }
 
   // LLM call (= Bettor r219 spec). r220 fix: 直 call upstream openai-compatible endpoint,
