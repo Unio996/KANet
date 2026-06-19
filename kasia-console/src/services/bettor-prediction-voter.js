@@ -347,6 +347,21 @@ async function processPoolMarket(voter) {
         continue;
       }
 
+      // J2-tn voter-flood-skip (b) (Bettor 裁, unblock cutover): poll 层 fetch 前 skip 无有效 source 的 junk
+      //   市场 — 无 data_source_canonical / 无 known extractor(findExtractor null) → skip 不 fetch
+      //   (abstain-not-guess; 消 :3300 ext-pool-v07 junk 每 tick fetch 403/missing 拖垮事件循环 → Console 无响应)。
+      //   polymarket 走 gamma(derivePolymarketVote) 非 extractor → 例外不 skip。determinism-clean 两节点同码、
+      //   additive 不破现有判定(有效 source 照常走 deriveVote)。
+      if (market.outcome_market_source !== 'polymarket') {
+        let _vfSpec = null;
+        try { _vfSpec = JSON.parse(market.resolution_rule_spec || '{}'); } catch {}
+        const _vfUrl = _vfSpec?.data_source_canonical;
+        const { findExtractor: _vfFind } = await import('../lib/oracle-evidence-extractors.mjs');
+        if (!_vfUrl || typeof _vfUrl !== 'string' || !_vfFind(_vfUrl)) {
+          skipped++; continue;  // 无 data_source_canonical / 无 known extractor → skip 不 fetch
+        }
+      }
+
       // deriveVote adapter — pass market as offer-shaped object (= reuse same deriveVote)
       const offerLike = {
         id: market.id,
