@@ -28,6 +28,43 @@ async function _deriveXOnlyPubkey(address) {
   return kaspa.XOnlyPublicKey.fromAddress(new kaspa.Address(address)).toString();
 }
 
+// J1 2026-06-19 post-wave1#1 CPU 根治 (Bettor/NWT review APPROVE, 非 disable):
+// 原 claimAutoDispatcherTick 对每个 unclaimed side × 每个 relayCandidate 做 _deriveXOnlyPubkey
+// (kaspa-wasm 加密派生) 找本地签名 relay = O(sides×relays) 派生/tick, 255 stuck cross-node side
+// 每 tick 重磨派生 → console CPU peg. 根治: tick 内 derive relayCandidates 的 pubkey 【一次】建 map,
+// per-side 改 map 查找 = O(relays) 派生/tick.
+//
+// funds-safety 不变量 (NWT 钦点, 落码必守): map 分类必 ≡ 旧 per-side 派生分类, 对所有【本地】bettor
+// 永不 false-miss (本地漏判=cross-node→refund 永不 dispatch=资金卡死). 满足靠: (1) map 源 ==
+// 旧 loop 源 (同一 relayCandidates) → 完整无漏; (2) 同 lowercase 比 + first-match (有则不覆盖) →
+// 与旧 loop break-on-first 逐字节同分类; (3) _deriveXOnlyPubkey 确定性 (无 IO/无随机, throw 仅 invalid
+// address=永久, 旧 loop 同样 skip) → 无 transient false-miss. 优化仅动 dispatch-routing, 不碰
+// refund eligibility (query 不变) / amount (fee/outAmount 不变) = custody-dispatch 域 node-local BY DESIGN.
+
+/**
+ * 建 pubkey→relay map: derive 每个 relayCandidate 的 x-only pubkey 一次 (hoist 出 per-side 循环).
+ * 保留旧 loop 的 first-match 语义 (has 则不覆盖) + lowercase key. derive throw 的 relay 跳过 (同旧 loop).
+ */
+async function buildPubkeyToRelayMap(relayCandidates) {
+  const map = new Map(); // lowercase x-only pubkey → relay row
+  for (const row of relayCandidates) {
+    try {
+      const pk = String(await _deriveXOnlyPubkey(row.address)).toLowerCase();
+      if (!map.has(pk)) map.set(pk, row);  // first-match (== 旧 loop break-on-first)
+    } catch { /* invalid address 永久跳过, 同旧 loop catch{} */ }
+  }
+  return map;
+}
+
+/**
+ * 纯函数 (可测, 无 kaspa-wasm): 从 pubkey→relay map 解析本地签名 relay.
+ * == 旧 per-side loop 的 lowercase 比 + first-match 结果. null = bettor 不在本节点 (cross-node, skip).
+ */
+export function resolveSigningRelay(pkToRelay, bettorPk) {
+  if (!pkToRelay || bettorPk == null) return null;
+  return pkToRelay.get(String(bettorPk).toLowerCase()) || null;
+}
+
 export async function claimAutoDispatcherTick() {
   if (running) return { skipped: true };
   running = true;
@@ -55,21 +92,15 @@ export async function claimAutoDispatcherTick() {
     if (sides.length === 0) return { ok: true, processed: 0 };
 
     const relayCandidates = sqlite.prepare('SELECT id, address FROM relay_nodes WHERE address IS NOT NULL').all();
+    // CPU 根治 (post-wave1#1): derive relayCandidates pubkey 一次建 map (hoist 出 per-side 循环),
+    // O(sides×relays) 派生 → O(relays). funds-safety 不变量见 buildPubkeyToRelayMap 注释.
+    const pkToRelay = await buildPubkeyToRelayMap(relayCandidates);
     let dispatched = 0, skippedRemote = 0, errored = 0;
 
     for (const side of sides) {
       try {
-        // Resolve signing relay (= deriveXOnlyPubkey match, 同 endpoint 逻辑).
-        let signingRelay = null;
-        for (const row of relayCandidates) {
-          try {
-            const pk = await _deriveXOnlyPubkey(row.address);
-            if (String(pk).toLowerCase() === String(side.bettor_pk).toLowerCase()) {
-              signingRelay = row;
-              break;
-            }
-          } catch {}
-        }
+        // Resolve signing relay via hoisted map (== 旧 per-side 派生 loop 分类, lowercase first-match, 无 false-miss).
+        const signingRelay = resolveSigningRelay(pkToRelay, side.bettor_pk);
         if (!signingRelay) {
           // Bettor not on this node — skip, leave for the node that hosts this bettor relay.
           skippedRemote++;
