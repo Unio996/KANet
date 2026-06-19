@@ -59,3 +59,8 @@
 ## 最后全文结构更新
 
 2026-04-24 拆分: 单文件 2032 行 → 19 章节文件 + 2 铁律 + 1 附录. 原 `DEVELOPER-GUIDE.md` 瘦身为本索引.
+
+## 最近内容更新
+
+2026-06-16: 第 20 章 oracle 演进新增 §20.12-20.16 (W1 用户路机制闭环 PASS / 403 vote-fetch 根治 / bshard M3 设计 sound+PARKED / Kaspa SS cost-model 陷阱 / oracle 强化拓展 charter 指针).
+2026-06-19: 第 20 章新增 §20.17 oracle 强化 wave1 (落码前对抗共识=四正交闸框架[源/码/指令/证据文本]+三轴 determinism+abstain 三态; D-L1 judgeLine 算术判+确定性抽取+wire 落码; 离线 495/495 → 部署两节点 byte-equal 44f0982c/tree ee742325 cutover → **核心 LIVE 跑通**: 真 predicate 市场 judgeLine 真判对 verdict=NO; wave2 加固 hold). bshard 人数无限制已开启 probe 到 register+fold 13738>9999 spend-unit 墙(可解性 SIZE/COUNT probe 进行中).
