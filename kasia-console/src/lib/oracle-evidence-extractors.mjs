@@ -15,6 +15,49 @@
 // 根因已删)。门C 档1 item4② guess-fallback grep 确认: 全库无 active raw-slice fallback。
 // (上面 L4-5 描述的是已删的旧行为, 留作根因档案。)
 
+// ─────────────────────────────────────────────────────────────────────────
+// Oracle 强化 wave1 (J2-tn, 2026-06-19) — 落码顺序2: 结构化字段抽取 + field_hash.
+// 设计: docs/2026-06-19-J2-derivevote-extraction-design.md §8/§9.
+// 接口三方对死(J1/J2/NWT): field_hash 输入 == judgeLine 输入∪ == StructuredEvidence.fields
+//   == ['winner_side','home_team','away_team','home_score','away_score'] (__SEF__)。
+// ─────────────────────────────────────────────────────────────────────────
+import { createHash } from 'crypto';
+
+// StructuredEvidence.fields 的 canonical key 集 (三方对死锚, == judgeLine __JUDGELINE_INPUT_FIELDS__)。
+export const __STRUCTURED_EVIDENCE_FIELDS__ = ['winner_side', 'home_team', 'away_team', 'home_score', 'away_score'];
+
+// 平局 canonical token (NWT 铁律: 平局显式非涌现, 不产 ''/null=涌现 abstain)。
+// normalizeAbbr 保证真 team abbr 规范化后永不==此值 (ESPN 无队 abbr 为 'TIE')。
+export const TIE_TOKEN = 'TIE';
+
+// 单源 canonical-abbr 规范化 (finding1 seam 解, NWT 06:26)。抽取侧 winner_side/home_team/
+// away_team + 谓词冻结侧 operand 必过【同一函数】, 否则 'Was' vs 'WAS' 字节不等 → judgeLine
+// winner_side===operand 恒 NO 错判 (determinism-same 跨节点, 不破 byte-equal 但错 = 5终裁 D)。
+// 纯函数: trim + toUpperCase (locale-INdependent Unicode default case mapping, 非
+// toLocaleUpperCase; ESPN team abbr 全 ASCII A-Z0-9 → 确定)。
+export function normalizeAbbr(abbr) {
+  if (typeof abbr !== 'string') return null;
+  const t = abbr.trim().toUpperCase();
+  return t.length ? t : null;
+}
+
+// canonical 序列化 = 固定 key order 的严格 5 字段 (防 JSON.stringify 插入序漂移 → field_hash 裂;
+// 严格只哈这 5 字段 = 条件④ field_hash 最小集 + NWT hash集==输入集 invariant)。
+function stableStringifyFields(fields) {
+  return JSON.stringify([
+    ['winner_side', fields.winner_side],
+    ['home_team', fields.home_team],
+    ['away_team', fields.away_team],
+    ['home_score', fields.home_score],
+    ['away_score', fields.away_score],
+  ]);
+}
+
+// field_hash = sha256(canonical 5 字段)。NWT 升为 quorum 闸(源轴), 复用 voter evidenceHash 位。
+export function canonicalFieldHash(fields) {
+  return createHash('sha256').update(stableStringifyFields(fields)).digest('hex');
+}
+
 /**
  * Parse ESPN summary JSON → extract winner + final score.
  * URL format: https://site.api.espn.com/apis/site/v2/sports/.../summary?event=<id>
@@ -26,31 +69,36 @@
  * @param {string} rawText - raw HTTP response text
  * @returns {string|null} - "<winner_name> won (<home_abbr> <hs> - <as> <away_abbr>, <league>)" or null
  */
-export function extractEspnEvidence(rawText) {
+// 单源 parse (J2-tn wave1): ESPN summary JSON → { competitors, home, away, league } 或 null
+// (未 final / 结构异常)。NL 路(extractEspnEvidence) + 结构化路(extractEspnFields) 共用此 parse,
+// 防两路解析逻辑分叉 (fixture-mirror 铁律)。不做胜负/字段语义, 只定位 competitors/home/away。
+function parseEspnSummary(rawText) {
   let data;
   try { data = JSON.parse(rawText); } catch { return null; }
-
   // ESPN summary structure: { header: { competitions: [{ competitors: [{...}], status: {...} }] } }
   const comp = data?.header?.competitions?.[0];
   if (!comp) return null;
-
-  // Bettor 条件 (1) — 比赛未 final → null. ESPN: status.type.completed === true.
+  // Bettor 条件 (1) — 比赛未 final → null. ESPN: status.type.completed === true && state==='post'.
   const status = comp.status;
-  const completed = status?.type?.completed === true;
-  const state = status?.type?.state;
-  if (!completed || state !== 'post') {
-    return null;  // pre/in/postponed → LLM 弃权
-  }
-
-  // Bettor 条件 (3) — 忠实抽取. competitors[] 每条含 winner: true/false + score + team.abbreviation.
+  if (status?.type?.completed !== true || status?.type?.state !== 'post') return null; // pre/in/postponed
   const competitors = comp.competitors || [];
   if (competitors.length !== 2) return null;
-  const winner = competitors.find(c => c.winner === true);
-  if (!winner) return null;
-
   const home = competitors.find(c => c.homeAway === 'home');
   const away = competitors.find(c => c.homeAway === 'away');
   if (!home || !away) return null;
+  const league = data?.header?.league?.abbreviation || data?.leagues?.[0]?.abbreviation || '';
+  return { competitors, home, away, league };
+}
+
+export function extractEspnEvidence(rawText) {
+  const p = parseEspnSummary(rawText);
+  if (!p) return null;
+  const { competitors, home, away, league } = p;
+
+  // Bettor 条件 (3) — 忠实抽取. NL 路平局/无胜方 → null (LLM 兜底路保守 abstain;
+  // 结构化路 extractEspnFields 则产显式 TIE_TOKEN 交 judgeLine — 两路对平局策略不同, 见下)。
+  const winner = competitors.find(c => c.winner === true);
+  if (!winner) return null;
 
   // J2-tn r681 (NWT line-E N=35 抓到 WSH@NO 误判, format-isolated 实锤): winner-first + 每队紧邻自己
   // 分数 (消歧义)。原 `(homeTeam homeScore - awayScore awayTeam)` = home 是 team-score 相邻、away 是
@@ -62,7 +110,6 @@ export function extractEspnEvidence(rawText) {
   const loserName = loser?.team?.displayName || loser?.team?.shortDisplayName || loser?.team?.abbreviation || '?';
   const winnerScore = winner.score ?? '?';
   const loserScore = loser?.score ?? '?';
-  const league = data?.header?.league?.abbreviation || data?.leagues?.[0]?.abbreviation || '';
 
   // #25 UMA L1 (J2-tn): 附客观算术派生量 (margin/total) 卸掉 LLM 的净胜/总分算术负担。
   // §20.10 L1: 一个比分源解锁 moneyline + 让分(margin) + 大小球(total). spread/total 边界判定
@@ -75,6 +122,53 @@ export function extractEspnEvidence(rawText) {
     : '';
   const evidence = `${winnerName} won. Final score: ${winnerName} ${winnerScore}, ${loserName} ${loserScore}${league ? ' (' + league + ')' : ''}.${arith}`;
   return evidence.length > 500 ? evidence.slice(0, 497) + '...' : evidence;
+}
+
+/**
+ * 结构化字段抽取 (J2-tn oracle 强化 wave1, 落码顺序2)。喂 D-L1 judgeLine (确定性判, 非 LLM)。
+ * @param {string} rawText - raw ESPN summary HTTP response
+ * @returns {{final:true, fields:{winner_side,home_team,away_team,home_score,away_score}, field_hash:string} | null}
+ *   null = 未 final / 结构异常 / 加固失败 → voter ABSTAIN (不猜)。
+ *
+ * 与 NL 路 (extractEspnEvidence) 区别:
+ *  - 平局 (无 winner:true) → winner_side = TIE_TOKEN (显式, NWT 铁律), 非 null abstain
+ *    (结构化路交 judgeLine 含显式 tie 分支判定; NL 路是 LLM 兜底, 平局保守 abstain)。
+ *  - 所有 abbr 过 normalizeAbbr 单源 (finding1 seam: 与谓词冻结 operand 同一 canonical)。
+ * 加固 (进 field_hash 前): winner_side ∈ {home_team, away_team, TIE_TOKEN} + scores 整数,
+ *   team abbr 不撞 TIE_TOKEN, 否则 null (abstain) — 防 ESPN 自相矛盾/异常分污染 field_hash。
+ * invariant: 返回的 fields 严格 == __STRUCTURED_EVIDENCE_FIELDS__ (== judgeLine 输入∪)。
+ */
+export function extractEspnFields(rawText) {
+  const p = parseEspnSummary(rawText);
+  if (!p) return null;
+  const { competitors, home, away } = p;
+
+  const home_team = normalizeAbbr(home.team?.abbreviation);
+  const away_team = normalizeAbbr(away.team?.abbreviation);
+  if (!home_team || !away_team || home_team === away_team) return null; // abbr 缺/撞 → abstain
+  if (home_team === TIE_TOKEN || away_team === TIE_TOKEN) return null;  // 真 abbr 撞保留字 → abstain
+
+  const home_score = Number(home.score);
+  const away_score = Number(away.score);
+  if (!Number.isInteger(home_score) || !Number.isInteger(away_score)) return null; // 非整数分 → abstain
+
+  // winner_side: ESPN winner:true 权威 (非分数推, 避免加时/点球/特殊计分边界)。平局 → TIE_TOKEN。
+  const winnerC = competitors.find(c => c.winner === true);
+  let winner_side;
+  if (!winnerC) {
+    winner_side = TIE_TOKEN; // 平局显式 token (NWT 铁律: 显式非涌现)
+  } else if (winnerC.homeAway === 'home') {
+    winner_side = home_team;
+  } else if (winnerC.homeAway === 'away') {
+    winner_side = away_team;
+  } else {
+    return null; // winner 既非 home 非 away → 结构异常 → abstain
+  }
+  // 自洽加固: winner_side 必 ∈ {home_team, away_team, TIE_TOKEN} (防 ESPN winner 与 teams 不一致)。
+  if (winner_side !== TIE_TOKEN && winner_side !== home_team && winner_side !== away_team) return null;
+
+  const fields = { winner_side, home_team, away_team, home_score, away_score };
+  return { final: true, fields, field_hash: canonicalFieldHash(fields) };
 }
 
 /**
@@ -196,6 +290,21 @@ export function extractEvidence(url, rawText) {
   const ent = findExtractor(url);
   if (!ent) return null;
   return ent.extractor(rawText);
+}
+
+/**
+ * 结构化字段 dispatcher (J2-tn wave1, 对偶 extractEvidence NL 路)。
+ * findExtractor → 结构化抽取 → { final, fields, field_hash } 或 null。
+ * 第一波仅 ESPN 有结构化路 (summary 端点 → 5 字段)。CoinGecko 等后续 ramp。
+ * @param {string} url
+ * @param {string} rawText
+ * @returns {{final:true, fields:object, field_hash:string} | null}
+ */
+export function extractStructuredFields(url, rawText) {
+  if (!url || !rawText) return null;
+  const ent = findExtractor(url);
+  if (!ent || ent.kind !== 'espn') return null; // 仅 ESPN 结构化 (第一波 A-ramp summary 端点)
+  return extractEspnFields(rawText);
 }
 
 /**
