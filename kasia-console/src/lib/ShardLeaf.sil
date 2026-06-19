@@ -1,0 +1,104 @@
+// ShardLeaf.sil — bshard convert-split REGISTER-side 合约 (J1, 2026-06-19; 解 register SIZE-bound 9999).
+//
+// 动因(probe-B 链上实证 SIZE-bound): register_append validate-调用数恒定(2: ps WithTemplate + leaf self),
+//   register 成本纯∝揭示合约大小。原 PoolLeaf(register+fold+seal 2088B)→register 揭全约→13738u>9999。
+//   convert-split: 把 fold/seal 字节移到 FoldNode 模板, ShardLeaf 只留 register + 轻 convert(1:1→FoldNode) → ~490B
+//   → register 揭小约 → <9999(probe-B 493B 链上实证过 units cap)。
+//
+// 本合约 = ShardLeaf(register-side): register_append(收注, 与原 PoolLeaf byte-identical) + convert_to_foldnode
+//   (count==seal_count 时 1:1 转 FoldNode 外模板, 携 4-field account, value 守恒, 无 fold/seal 字节)。
+// FoldNode(配对合约): fold(covenant 1M 预算) + seal_to_root。fold 读同 FoldNode 模板=covenant 同 cov_id 成立。
+//
+// ⚠ 级联 SIZE(诚实, 见 FoldNode.sil 头注): SIZE-bound rate ~6.58u/byte → 任何被非-covenant entry hash 的合约必 <1519B。
+//   register→ShardLeaf(~490B)✅ / convert→FoldNode@k2(1241B)✅ / fold→covenant(1M)✅ / seal→PoolRoot(2287B)❌
+//   = seal→PoolRoot 是 register 解后【下游】墙, 需 PoolRoot 也拆 <1519B。本合约解【当前 blocker register】, 级联待团队定 scope。
+//
+// 承重锚(与原同): register output-bind weld(leaf value==pool_value+stake) + convert value 守恒(FoldNode value==pool_value)。
+// 4-field 无 outcome = 结构上不可结算; outcome 只在 FoldNode.seal→root literal 硬设(committee-bypass carry 保护链)。
+
+pragma silverscript ^0.1.0;
+
+contract ShardLeaf(
+    byte[32] market_id,
+    byte[32] ps_tmpl_hash,        // dust PoolSide-ticket expectedTemplateHash (register 造 ticket)
+    byte[32] shard_pool_id,       // 本 pool 身份 (ticket 记此)
+    int      seal_count,          // count==seal_count 才可 convert (= 原 PoolLeaf seal 门)
+    int      min_bet,
+    byte[32] fn_tmpl_hash,        // FoldNode expectedTemplateHash (convert_to_foldnode foreign-template 桥; baked)
+    // —— genesis State (4-field, 无 outcome) ——
+    int      init_local_yes,
+    int      init_local_no,
+    int      init_count,
+    int      init_pool_value
+) {
+    int local_yes  = init_local_yes;
+    int local_no   = init_local_no;
+    int count      = init_count;
+    int pool_value = init_pool_value;
+
+    // dust PoolSide-ticket State (= PoolSide_v08_shard 4 字段; register 造 ticket 的 validateOutputStateWithTemplate 类型锚)
+    struct Tk {
+        byte[32] bettorPk;
+        int      direction;
+        int      stake;
+        byte[32] shardPoolId;
+    }
+    // FoldNode 4-field State 镜像 (convert_to_foldnode foreign-template 布局; 字段序/类型必 == FoldNode State)
+    struct FoldNodeState {
+        int local_yes;
+        int local_no;
+        int count;
+        int pool_value;
+    }
+
+    // —— entry 0: register_append (收注; 与原 PoolLeaf entry 0 byte-identical 语义) ——
+    entrypoint function register_append(
+        int      side,
+        int      stake,
+        int      leafOutIdx,
+        int      psOutIdx,
+        byte[32] bettorPk,
+        byte[]   ps_prefix,
+        byte[]   ps_suffix
+    ) {
+        require(count < seal_count);
+        require(side == 0 || side == 1);
+        require(stake >= min_bet);
+
+        // mint dust ticket (spent-once claim/refund 凭证)
+        validateOutputStateWithTemplate(psOutIdx, {
+            bettorPk: bettorPk,
+            direction: side,
+            stake: stake,
+            shardPoolId: shard_pool_id
+        }, ps_prefix, ps_suffix, ps_tmpl_hash);
+
+        // 重建 bumped leaf (stake 真存; ShardLeaf 同模板 recreate)
+        validateOutputState(leafOutIdx, {
+            local_yes:  local_yes + stake * (1 - side),
+            local_no:   local_no + stake * side,
+            count:      count + 1,
+            pool_value: pool_value + stake
+        });
+        // ★ output-bind weld: leaf value == 新 pool_value (KAS 真入池)
+        require(tx.outputs[leafOutIdx].value == pool_value + stake);
+    }
+
+    // —— entry 1: convert_to_foldnode (count 满 → 1:1 转 FoldNode 外模板; 携 4-field; value 守恒; 无 fold/seal 字节) ——
+    entrypoint function convert_to_foldnode(
+        int      fnOutIdx,
+        byte[]   fn_prefix,           // FoldNode redeem state 区前段 (witness; blake2b(prefix‖suffix)==fn_tmpl_hash 焊)
+        byte[]   fn_suffix
+    ) {
+        require(count == seal_count);                      // 仅收满的 leaf 可转 (= 原 seal 门)
+        // 产 FoldNode genesis: account 字段 1:1 carry 真值 (FoldNode 也 4-field 无 outcome, 折满才 seal→root)
+        validateOutputStateWithTemplate(fnOutIdx, {
+            local_yes:  local_yes,
+            local_no:   local_no,
+            count:      count,
+            pool_value: pool_value
+        }, fn_prefix, fn_suffix, fn_tmpl_hash);
+        // ★ output-bind weld (跨合约边界 value 守恒): FoldNode value == 本 leaf pool_value
+        require(tx.outputs[fnOutIdx].value == pool_value);
+    }
+}
