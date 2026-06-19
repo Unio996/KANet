@@ -27,6 +27,7 @@ import { sqlite } from '../db/client.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { sendCommandAsync } from './relay-manager.js';
 import { buildDeriveVotePrompt } from './derivevote-prompt.mjs';
+import { getOracleCodeManifestHash } from '../lib/oracle-code-manifest.mjs';  // KANet-UI wave1 #3 码轴
 
 // J2-tn r382 (Bettor 16:29 钦定): TICK_INTERVAL_MS env-configurable. Default 5min mainnet,
 // demo 期 .env 设 PREDICTION_VOTER_TICK_SEC=60 (= 1min) 提速 5x 流水. 与 settler 同 pattern.
@@ -389,8 +390,11 @@ async function processPoolMarket(voter) {
         evidence_hash: evidenceHash,
         // J2-tn wave1 (顺序2, 交叠点 J2 先): 源轴 field_hash 进签名 payload 防篡改。observe-only —
         //   ESPN 结构化源有值, 否则 null。NWT 顺序4 双轴 gate 消费 (委员各自 field_hash 一致才计入 tally)。
-        //   ⚠ KANet-UI 顺序3 在此对象后加 code_manifest_hash (码轴), 同对象双轴 (J2 先 UI 后)。
         field_hash: voteResult.field_hash || null,
+        // KANet-UI wave1 #3 (顺序3, 码轴, J2 先 UI 后): settle 判决路代码 manifest hash 进签名 payload。
+        //   observe-only — J2 顺序4 双轴 gate 消费 (委员各自 code_manifest_hash 一致才计入 tally; 任一节点
+        //   跑漂移的判决码 → 少数派 hash → 排除 → 防 silent 跨节点 verdict fork)。设计: deploy-equivalence-gate-design.md。
+        code_manifest_hash: getOracleCodeManifestHash(),
         extractor_kind_used: voteResult.extractor_kind_used || null,  // r412: audit trail
         vote_timestamp: new Date().toISOString(),
         epoch: 1,  // Oracle v0.3 sub 3 v2 (= J1 #4 C3/C4 fix)
