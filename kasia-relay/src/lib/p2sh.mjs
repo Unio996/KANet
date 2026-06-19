@@ -1580,6 +1580,12 @@ export async function unlockBshardRegister(args) {
     const leafSig = _pushInt(w.side) + _pushInt(w.stake) + _pushInt(w.leaf_out_idx) + _pushInt(w.ps_out_idx)
       + _pushBytes(w.bettor_pk) + _pushBytes(w.ps_prefix_hex) + _pushBytes(w.ps_suffix_hex)
       + '00' + _encodePushDataHex(Buffer.from(cmd.inputs.leaf.redeem_hex, 'hex'));
+    // J1 2026-06-19 false-stack diagnostic (bshard register 首次链上执行, scriptSig 从没验证过执行).
+    // dump 分段 + 全 leafSig hex 供 J1 逐字节分析 (witness 编码 / push 序 vs SS pop 约定 / selector dispatch).
+    console.log(`[unlockBshardRegister DIAG] leafSig ${leafSig.length/2}B segs:`
+      + ` side=${_pushInt(w.side)} stake=${_pushInt(w.stake)} leafOutIdx=${_pushInt(w.leaf_out_idx)} psOutIdx=${_pushInt(w.ps_out_idx)}`
+      + ` bettorPk=${_pushBytes(w.bettor_pk).slice(0,6)}.. ps_pre=${_pushBytes(w.ps_prefix_hex).length/2}B ps_suf=${_pushBytes(w.ps_suffix_hex).length/2}B sel=00 redeem=${cmd.inputs.leaf.redeem_hex.length/2}B`);
+    console.log(`[unlockBshardRegister DIAG] leafSig FULL hex (paste to J1): ${leafSig}`);
 
     const outputs = [];
     outputs[w.leaf_out_idx] = new TransactionOutput(BigInt(cmd.outputs.leaf_continuation.amountSompi), payToAddressScript(new Address(newLeafAddr)));
