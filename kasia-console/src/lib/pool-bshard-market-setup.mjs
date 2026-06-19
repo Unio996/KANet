@@ -90,3 +90,111 @@ export function computeMarketGenesis(o) {
     firstTicketState: { bettorPk: firstBet.bettorPk, direction: firstBet.side, stake: stake.toString(), shardPoolId },
   };
 }
+
+/**
+ * Convert-split genesis builder (J1, 2026-06-19) — produces the 3 COHERENT artifacts for the convert-split
+ * cascade (seal-SIZE probe): ShardLeaf (register-side concrete genesis) + FoldNode (fold/seal-side template,
+ * baked with the REAL PoolRoot root_tmpl_hash) + PoolRoot (seal_to_root target template).
+ *
+ * Coherence chain (each bakes the next's template hash — the fix vs the probe's computeShardLeafGenesis which
+ * baked a ZERO32 placeholder for FoldNode's root_tmpl_hash, breaking seal_to_root foreign-template verify):
+ *   PoolRoot compile → root_tmpl_hash → FoldNode compile (bakes root_tmpl_hash) → fn_tmpl_hash
+ *   → ShardLeaf compile (bakes fn_tmpl_hash) → genesis redeem.
+ * Cascade: ShardLeaf register (proven LANDS) → convert_to_foldnode → FoldNode → seal_to_root → PoolRoot.
+ *
+ * fn_tmpl_hash / root_tmpl_hash are State-EXCLUDED (blake2b(prefix‖suffix)); init State (param7-10) does not
+ * affect them, but commit_v2/shard_count/max_fan_in/root_tmpl_hash/root_init (prefix) DO — so the deployed
+ * FoldNode MUST use the returned foldNode.ctor for the chain to stay coherent.
+ *
+ * @param {object} o {
+ *   shardLeafSilPath, foldNodeSilPath, poolRootSilPath, poolSideSilPath,
+ *   marketId(32B hex), shardPoolId(32B hex), committeePks(5×32B hex), deadline,
+ *   minBet, shardCount, sealCount, maxFanIn=2, firstBet:{bettorPk,side(0|1),stakeSompi}, silvercPath? }
+ * @returns {{ shardLeaf, foldNode, poolRoot, genesisState, psArtifact, shardPoolId, fnTmplHash, rootTmplHash }}
+ */
+export function computeConvertSplitGenesis(o) {
+  const { shardLeafSilPath, foldNodeSilPath, poolRootSilPath, poolSideSilPath, marketId, shardPoolId,
+    committeePks, deadline, minBet, shardCount, sealCount, maxFanIn = 2, firstBet, silvercPath = SILVERC } = o;
+  if (!Array.isArray(committeePks) || committeePks.length !== 5) throw new Error('committeePks must be 5 × 32B hex');
+  if (!firstBet || (firstBet.side !== 0 && firstBet.side !== 1)) throw new Error('firstBet {bettorPk, side(0|1), stakeSompi} required');
+  const stake = BigInt(firstBet.stakeSompi);
+  if (stake < BigInt(minBet)) throw new Error(`firstBet stake ${stake} < min_bet ${minBet}`);
+
+  // template artifact: compile → state_layout split → tmplHash = blake2b(prefix‖suffix) (State-excluded, same as
+  // computeMarketGenesis step 2 rootArtifact). Returns the concrete redeem too (for size-probe reporting).
+  const templateArtifact = (silPath, ctor) => {
+    const compiled = compileSil(silPath, ctor, silvercPath);
+    const redeem = Buffer.from(compiled.script);
+    const sl = compiled.state_layout;
+    const prefix = redeem.slice(0, sl.start), suffix = redeem.slice(sl.start + sl.len);
+    const templateHashHex = Buffer.from(blake2b(Buffer.concat([prefix, suffix]), { dkLen: 32 })).toString('hex');
+    return { templatePrefix: prefix, templateSuffix: suffix, templateHashHex, redeemBytes: redeem.length };
+  };
+
+  // 1. PoolSide template → ps_tmpl_hash (register mints the dust ticket).
+  const psDummyCtor = [ctorBytes32(firstBet.bettorPk), ctorInt(firstBet.side), ctorInt(Number(stake)), ctorBytes32(shardPoolId)];
+  const psArtifact = computePoolSideArtifact(poolSideSilPath, psDummyCtor, silvercPath);
+
+  // 2. PoolRoot template → root_tmpl_hash (seal_to_root target; ctor 16 — SAME shape as computeMarketGenesis).
+  const rootInitPayoutRoot = ZERO32_HEX;
+  const rootCtor = [
+    ctorBytes32(psArtifact.templateHashHex), ctorBytes32(shardPoolId), ctorInt(shardCount),
+    ...committeePks.map(ctorBytes32), ctorInt(Number(deadline)),
+    ctorInt(0), ctorInt(0), ctorInt(0), ctorInt(0), ctorInt(0), ctorInt(0), ctorBytes32(rootInitPayoutRoot),
+  ];
+  const poolRoot = templateArtifact(poolRootSilPath, rootCtor);
+  const rootTmplHash = poolRoot.templateHashHex;
+
+  // 3. FoldNode template → fn_tmpl_hash. ⭐ COHERENCE FIX: bake the REAL root_tmpl_hash (ctor param5), not ZERO32,
+  //    so FoldNode.seal_to_root foreign-template verify (blake2b(root_prefix‖root_suffix) == baked root_tmpl_hash)
+  //    passes against the real PoolRoot. FoldNode ctor (10): market_id, commit_v2, shard_count, max_fan_in,
+  //    root_tmpl_hash, root_init_payoutRoot, init 4-field.
+  const fnCtor = [
+    ctorBytes32(marketId), ctorBytes32(ZERO32_HEX), ctorInt(shardCount), ctorInt(maxFanIn),
+    ctorBytes32(rootTmplHash), ctorBytes32(rootInitPayoutRoot),
+    ctorInt(0), ctorInt(0), ctorInt(0), ctorInt(0),
+  ];
+  const foldNode = templateArtifact(foldNodeSilPath, fnCtor);
+  const fnTmplHash = foldNode.templateHashHex;
+
+  // 4. genesis leaf State = first bet baked (4-field, no outcome).
+  const genesisState = {
+    local_yes: (stake * BigInt(1 - firstBet.side)).toString(),
+    local_no: (stake * BigInt(firstBet.side)).toString(),
+    count: 1, pool_value: stake.toString(),
+  };
+
+  // 5. ShardLeaf ctor (10) bake fn_tmpl_hash (param6) → concrete genesis redeem. ctor: market_id, ps_tmpl_hash,
+  //    shard_pool_id, seal_count, min_bet, fn_tmpl_hash, init 4-field.
+  const slCtor = [
+    ctorBytes32(marketId), ctorBytes32(psArtifact.templateHashHex), ctorBytes32(shardPoolId),
+    ctorInt(sealCount), ctorInt(Number(minBet)), ctorBytes32(fnTmplHash),
+    ctorInt(Number(genesisState.local_yes)), ctorInt(Number(genesisState.local_no)), ctorInt(genesisState.count), ctorInt(Number(genesisState.pool_value)),
+  ];
+  const slCompiled = compileSil(shardLeafSilPath, slCtor, silvercPath);
+  const slRedeem = Buffer.from(slCompiled.script);
+  const slSl = slCompiled.state_layout;
+  const bakedState = slRedeem.slice(slSl.start, slSl.start + slSl.len);
+  const expectState = serializeLeafState(genesisState);
+  if (!bakedState.equals(expectState)) throw new Error(`ShardLeaf genesis baked state != serializeLeafState (baked ${bakedState.toString('hex').slice(0, 24)} vs ${expectState.toString('hex').slice(0, 24)})`);
+
+  return {
+    shardLeaf: {                        // register-side: operator computeP2SH → genesis leaf addr; lock first stake here
+      ctor: slCtor,
+      redeemHexForGenesisState: slRedeem.toString('hex'),
+      scriptHashHex: Buffer.from(blake2b(slRedeem, { dkLen: 32 })).toString('hex'),
+      redeemBytes: slRedeem.length,
+    },
+    foldNode: {                         // convert_to_foldnode output target + fold/seal-side redeem (deploy with this ctor)
+      ctor: fnCtor, tmplHash: fnTmplHash,
+      templatePrefix: foldNode.templatePrefix, templateSuffix: foldNode.templateSuffix,
+      redeemBytes: foldNode.redeemBytes,
+    },
+    poolRoot: {                         // seal_to_root target (foreign-template; root_prefix/root_suffix for seal builder)
+      ctor: rootCtor, tmplHash: rootTmplHash,
+      templatePrefix: poolRoot.templatePrefix, templateSuffix: poolRoot.templateSuffix,
+      redeemBytes: poolRoot.redeemBytes,
+    },
+    genesisState, psArtifact, shardPoolId, fnTmplHash, rootTmplHash, rootInitPayoutRoot, committeePks, deadline,
+  };
+}
