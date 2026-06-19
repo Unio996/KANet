@@ -387,6 +387,10 @@ async function processPoolMarket(voter) {
         outcome: voteResult.outcome,  // 'YES' | 'NO' | 'ABSTAIN' (= J2-tn r412 Oracle 框架 spec)
         evidence_url: voteResult.evidence_url || null,
         evidence_hash: evidenceHash,
+        // J2-tn wave1 (顺序2, 交叠点 J2 先): 源轴 field_hash 进签名 payload 防篡改。observe-only —
+        //   ESPN 结构化源有值, 否则 null。NWT 顺序4 双轴 gate 消费 (委员各自 field_hash 一致才计入 tally)。
+        //   ⚠ KANet-UI 顺序3 在此对象后加 code_manifest_hash (码轴), 同对象双轴 (J2 先 UI 后)。
+        field_hash: voteResult.field_hash || null,
         extractor_kind_used: voteResult.extractor_kind_used || null,  // r412: audit trail
         vote_timestamp: new Date().toISOString(),
         epoch: 1,  // Oracle v0.3 sub 3 v2 (= J1 #4 C3/C4 fix)
@@ -846,6 +850,7 @@ export async function deriveKanetNativeVote(offer, spec) {
   // skip fetch + LLM 用 spec 全文 + market metadata 推 outcome.
   let evidence_text = '';
   let evidence_url = url;
+  let field_hash = null;  // J2-tn wave1: 结构化字段 hash (observe-only; ESPN 结构化源有, 否则 null; NWT 源轴 quorum 闸输入)
   if (url.startsWith('http://') || url.startsWith('https://')) {
     // 403-flood root-fix: serve FINAL evidence from cache (skip fetch) so audit loop + main vote
     // don't re-hit the source every tick. Cache holds ONLY final results (populated below), so a hit
@@ -853,6 +858,7 @@ export async function deriveKanetNativeVote(offer, spec) {
     const _cachedFinal = _finalEvidenceCache.get(url);
     if (_cachedFinal && (Date.now() - _cachedFinal.cachedAt) < FINAL_EVIDENCE_TTL_MS) {
       evidence_text = _cachedFinal.evidence_text;
+      field_hash = _cachedFinal.field_hash || null;
     } else {
     try {
       const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
@@ -869,7 +875,7 @@ export async function deriveKanetNativeVote(offer, spec) {
       // J2-tn r421 (Bettor r441 钉1): registry 单一源 — findExtractor 取代 inline regex.
       // 防 prevet 端 + voter 端各自硬编码 list → 分叉 (= espn 病换地方).
       try {
-        const { extractEvidence, findExtractor } = await import('../lib/oracle-evidence-extractors.mjs');
+        const { extractEvidence, findExtractor, extractStructuredFields } = await import('../lib/oracle-evidence-extractors.mjs');
         const clean = extractEvidence(url, rawText);
         if (clean === null) {
           // ABSTAIN: 弃权 — extractor 不出 clean evidence. 区分两种 reason:
@@ -879,9 +885,12 @@ export async function deriveKanetNativeVote(offer, spec) {
           return { ok: true, outcome: 'ABSTAIN', extractor_kind_used: 'no-extractor-match', reason: `URL ${url} not in extractor known-list (= 框架不识此源)` };
         }
         evidence_text = clean;
+        // J2-tn wave1: 同步抽结构化字段 field_hash (observe-only; 仅 ESPN 结构化源, 否则 null,
+        // 不阻塞 NL 判定路). field_hash = NWT 源轴 quorum 闸输入 (顺序4 gate 消费, 第一波 observe-only).
+        field_hash = extractStructuredFields(url, rawText)?.field_hash || null;
         // FINAL (clean evidence ⟺ game over) → cache so subsequent ticks skip the fetch (stops the
         // self-DoS burst). Only immutable resolved-game evidence reaches here (null = not-final above).
-        _finalEvidenceCache.set(url, { evidence_text: clean, cachedAt: Date.now() });
+        _finalEvidenceCache.set(url, { evidence_text: clean, field_hash, cachedAt: Date.now() });
       } catch (e) {
         // Defensive: extractor 模块自身异常 → ABSTAIN (= 不假装能判).
         console.warn(`[deriveKanetNative] extractor exception ${e.message}, ABSTAIN`);
@@ -982,6 +991,7 @@ export async function deriveKanetNativeVote(offer, spec) {
     ok: true,
     outcome: llmOutcome,
     evidence_url,
+    field_hash,  // J2-tn wave1: observe-only, null if 非 ESPN 结构化源 (NWT 源轴 quorum 闸输入)
     evidence_raw: JSON.stringify({ evidence_text: evidence_text.slice(0, 500), llm_confidence: llmConfidence, llm_reason: llmReason }),
   };
 }
