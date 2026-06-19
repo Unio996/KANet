@@ -38,8 +38,12 @@ export function buildSealToRootWitness(o) {
  * sealedRootState = 7-field {leaf accounts carry, closed:0, winningSide:0, payoutRoot:root_init_payoutRoot} (canonical).
  * @returns {object} relay command (type='bshard_seal_to_root')
  */
-export function buildSealToRootCommand({ witness, leafOutpointTxid, leafRedeemHex, leafState, rootInitPayoutRoot, funding, leafValueSompi, changeAddress }) {
-  if (!leafOutpointTxid || !leafRedeemHex) throw new Error('leafOutpointTxid + leafRedeemHex (the sealed leaf, count==shard_count) required');
+export function buildSealToRootCommand({ witness, leafOutpointTxid, leafRedeemHex, leafState, rootInitPayoutRoot, funding, leafValueSompi, changeAddress, sealSelector = '53' }) {
+  // sealSelector: which seal_to_root entry to dispatch. PoolLeaf seal_to_root = entry OP_3 ('53', default = back-compat);
+  // FoldNode (convert-split, abi 0:__leader_fold 1:__delegate_fold 2:seal_to_root) seal_to_root = entry OP_2 ('52').
+  // leafRedeemHex/leafState accept the FoldNode redeem/state for the convert-split cascade — seal_to_root witness
+  // {rootOutIdx, root_prefix, root_suffix} + 4-field state carry are byte-identical to PoolLeaf's (only selector differs).
+  if (!leafOutpointTxid || !leafRedeemHex) throw new Error('leafOutpointTxid + leafRedeemHex (the sealed leaf/foldnode, count==shard_count) required');
   if (!leafState) throw new Error('leafState (4-field {local_yes,local_no,count,pool_value}) required for sealed root accounts');
   if (!rootInitPayoutRoot) throw new Error('rootInitPayoutRoot (= PoolLeaf ctor root_init_payoutRoot, canonical ZERO) required');
   if (leafValueSompi == null) throw new Error('leafValueSompi (= leaf pool_value; weld3 root.value==pool_value) required');
@@ -59,6 +63,7 @@ export function buildSealToRootCommand({ witness, leafOutpointTxid, leafRedeemHe
     witness: {
       root_out_idx: witness.rootOutIdx,
       root_prefix_hex: witness.root_prefix.toString('hex'), root_suffix_hex: witness.root_suffix.toString('hex'),
+      seal_selector: sealSelector, // PoolLeaf=OP_3('53'); FoldNode=OP_2('52'). relay unlockBshardSeal reads this (default '53')
     },
     inputs: {
       leaf: { outpointTxid: leafOutpointTxid, redeem_hex: leafRedeemHex }, // relay _addressFromRedeem

@@ -1872,9 +1872,11 @@ export async function unlockBshardSeal(args) {
     // root 输出地址 relay 自算 (foreign-template; 忽略 cmd.address). sealed state = builder 供 7-field {carry account + closed:0/winningSide:0/payoutRoot:init}.
     const rootAddr = _foreignTemplateAddress(w.root_prefix_hex, _serializeRootStateHex(cmd.outputs.root.state), w.root_suffix_hex, networkId);
 
-    // leaf scriptSig: seal_to_root witness(声明序: rootOutIdx, root_prefix, root_suffix) + selector OP_3 + redeem reveal. (无 sig: output 约束到 canonical root)
+    // leaf scriptSig: seal_to_root witness(声明序: rootOutIdx, root_prefix, root_suffix) + selector + redeem reveal. (无 sig: output 约束到 canonical root)
+    // selector: PoolLeaf seal_to_root=OP_3('53', 默认 back-compat); FoldNode(convert-split, abi entry 2)seal_to_root=OP_2('52'). builder 经 cmd.witness.seal_selector 指定.
+    const sealSelector = (typeof w.seal_selector === 'string' && /^[0-9a-fA-F]{2}$/.test(w.seal_selector)) ? w.seal_selector : '53';
     const leafSig = _pushInt(w.root_out_idx) + _pushBytes(w.root_prefix_hex) + _pushBytes(w.root_suffix_hex)
-      + '53' + _encodePushDataHex(Buffer.from(cmd.inputs.leaf.redeem_hex, 'hex'));     // seal_to_root=OP_3='53'
+      + sealSelector + _encodePushDataHex(Buffer.from(cmd.inputs.leaf.redeem_hex, 'hex'));     // seal_to_root selector (default OP_3='53')
 
     const outputs = [];
     outputs[w.root_out_idx] = new TransactionOutput(BigInt(cmd.outputs.root.amountSompi), payToAddressScript(new Address(rootAddr)));
