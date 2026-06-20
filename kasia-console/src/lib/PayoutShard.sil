@@ -1,0 +1,119 @@
+// PayoutShard.sil — bshard 真无限量 B2 核心: 跨片资金归集 + prorata 派彩 (J1, 2026-06-20).
+//
+// 设计: docs/2026-06-20-bshard-rolling-aggregation-redesign-v2.md §6.1 (B2 consolidate-then-prorata)。
+// Owner GO【按原设计落码=committee-attested rolling, 无 fold-tree, 无 SIZE 墙】。本合约 = 单一 payout-shard:
+//   ①absorb: 各输家片【全额 spend 进本 P2SH】, 本合约 same-contract continuation 吸收(pool_value += 输家片值) = 归集成单池。
+//   ②prorata_claim: winner 从归集单池按全局赔率 pro-rata 领, insolvency-guard + R7 nullifier。
+// 全 same-contract continuation(single-blake2b 自重建 ~2.5u/B)+ 读 1 输入 = ShardLeaf/RootClaim 量级小 = 无 fold node = 无墙。
+//
+// ⚠ guard-present 铁律(NWT R7 教训: teeth 可延后, guard 不准缺): 守恒 weld + target-bind + nullifier slot 三 guard 必【在码里】。
+// committee 信任 = v07 同款 4-of-5(provable-fraud-slashable: 片值链上公开)。
+
+pragma silverscript ^0.1.0;
+
+contract PayoutShard(
+    byte[32] ps_tmpl_hash,         // 输家片 PoolSide-ticket / shard expectedTemplateHash (absorb 验输家片真模板)
+    byte[32] market_id,            // 跨片锚 (本 payout-shard 派生自 market_id, 实例唯一)
+    byte[32] committee_hash,       // 委员集 hash (commit_v2 背书验)
+    // —— genesis State (6-field) ——
+    int      init_consolidated_pool,  // 已归集总池 (absorb 累加)
+    int      init_closed,             // 0=归集中 / 1=归集完可 claim
+    byte[32] init_winningRoot,        // 赢家集 merkle root {leaf=blake2b(pk‖ser(stake,8))} (commit_v2 含)
+    int      init_globalWinningTotal, // 赢方总 stake (= Σ winningRoot 叶 stake; 委员背书; provable)
+    int      init_claimed_bitmap      // R7 双领 nullifier 位图
+) {
+    int consolidated_pool   = init_consolidated_pool;
+    int closed              = init_closed;
+    byte[32] winningRoot    = init_winningRoot;
+    int globalWinningTotal  = init_globalWinningTotal;
+    int claimed_bitmap      = init_claimed_bitmap;
+
+    struct Shard {                 // 输家片 state (absorb 读)
+        byte[32] bettorPk;
+        int      direction;
+        int      stake;
+        byte[32] shardPoolId;
+    }
+
+    // —— entry 0: absorb (输家片全额归集进本池; same-contract continuation) ——
+    entrypoint function absorb(
+        int      selfOutIdx,           // 重建 PayoutShard-self
+        int      shardInIdx,           // 输家片 UTXO 在 inputs 的位
+        int      shard_prefix_len,
+        int      shard_suffix_len,
+        int      shard_value           // 输家片 UTXO value (witness; 下方 weld 验 == 链上实值)
+    ) {
+        require(closed == 0);                              // 仅归集态可 absorb
+        Shard sh = readInputStateWithTemplate(shardInIdx, shard_prefix_len, shard_suffix_len, ps_tmpl_hash);
+        require(sh.shardPoolId == market_id);              // ★ target-bind: 输家片属本 market (防外来片注入)
+        // ★ 守恒 weld: 输家片【全额】进本池, 不可截留 (shard_value == 链上该 input 实 value 由共识 Σin==Σout 兜)
+        require(tx.inputs[shardInIdx].value == shard_value);
+        validateOutputState(selfOutIdx, {
+            consolidated_pool:  consolidated_pool + shard_value,
+            closed:             0,
+            winningRoot:        winningRoot,
+            globalWinningTotal: globalWinningTotal,
+            claimed_bitmap:     claimed_bitmap
+        });
+        // ★ target-bind + 守恒: 本池 value 增量 == 吸收的输家片全值 (防重定向/截留)
+        require(tx.outputs[selfOutIdx].value == consolidated_pool + shard_value);
+    }
+
+    // —— entry 1: prorata_claim (winner 从归集单池按全局赔率领; insolvency-guard + nullifier) ——
+    entrypoint function prorata_claim(
+        int      selfOutIdx,           // 重建 PayoutShard-self (draw-down)
+        int      payoutOutIdx,         // winner payout
+        byte[32] bettorPk,             // winner pk (merkle leaf)
+        int      winner_stake,         // winner stake (merkle leaf; insolvency-guard 用)
+        int      merkle_index,
+        int      tree_depth,
+        byte[32][] siblings
+    ) {
+        require(closed == 1);                              // 仅归集完可 claim
+        require(tree_depth >= 0); require(tree_depth <= 8);  // 256 winner/payout-shard cap (depth 可调; J2 probe SIZE)
+        require(merkle_index >= 0);
+        require(winner_stake >= 1);
+        require(globalWinningTotal >= winner_stake);       // ★ insolvency-guard 前置: 单 winner stake 不超总赢方
+
+        // ★ merkle-prove leaf ∈ winningRoot: leaf=blake2b(pk‖ser(stake,8)) — stake 焊进 leaf 防虚高 (amount-weld)
+        byte[32] cur = blake2b(byte[](bettorPk) + byte[](winner_stake, 8));
+        int div = 1;
+        for (k, 0, tree_depth, 1) {
+            int bit = (merkle_index / div) % 2;
+            if (bit == 0) { cur = blake2b(byte[](cur) + byte[](siblings[k])); }
+            else          { cur = blake2b(byte[](siblings[k]) + byte[](cur)); }
+            div = div * 2;
+        }
+        require(cur == winningRoot);
+        require(merkle_index < div);                       // R7 aliasing-fix (绑 index ∈ [0,2^depth))
+
+        // ★ R7 double-claim nullifier: merkle_index slot 领一次
+        int mask = 1;
+        for (b, 0, merkle_index, 2) { mask = mask * 2; }
+        require((claimed_bitmap / mask) % 2 == 0);
+
+        // ★ insolvency-guard 核心: payout = winner_stake × consolidated_pool / globalWinningTotal (链上实量绑死)
+        //   consolidated_pool=链上 state 实值 / globalWinningTotal=委员背书且 provable(==Σ winningRoot 叶 stake) →
+        //   Σ payout == pool 精确守恒, 无 insolvency。⚠ mulDiv 防 i64 溢出: 先 div 后 mul 损精度→必先 mul(stake×pool 可能溢)
+        //   则须定点/分段。此处 winner_stake×consolidated_pool 上界 = pool×pool; pool 量级须 < sqrt(i64)≈3e9 sompi=30 KAS/池?
+        //   ⚠ 大池溢出真风险(记忆 silverscript-kaspa-ss-gotchas runtime i64)→ J1 待 mulDiv 安全序 / 定点重核 (NWT flag)。
+        int payout = (winner_stake * consolidated_pool) / globalWinningTotal;
+        require(payout >= 1);
+        require(payout <= consolidated_pool);              // fail-fast 防超池 (weld 本兜)
+
+        byte[34] winnerLock = new ScriptPubKeyP2PK(pubkey(bettorPk));
+        require(tx.outputs[payoutOutIdx].scriptPubKey == byte[](winnerLock));
+        require(tx.outputs[payoutOutIdx].value == payout);
+
+        // 重建 self: pool -= payout (draw-down) + nullifier slot 置位
+        validateOutputState(selfOutIdx, {
+            consolidated_pool:  consolidated_pool - payout,
+            closed:             1,
+            winningRoot:        winningRoot,
+            globalWinningTotal: globalWinningTotal,
+            claimed_bitmap:     claimed_bitmap + mask
+        });
+        // ★ 守恒 weld: 本池 value == pool - payout
+        require(tx.outputs[selfOutIdx].value == consolidated_pool - payout);
+    }
+}
