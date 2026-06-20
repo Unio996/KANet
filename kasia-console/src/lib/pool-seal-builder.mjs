@@ -61,6 +61,9 @@ export function buildSealToRootCommand({ witness, leafOutpointTxid, leafRedeemHe
     local_yes: carryFullState.local_yes.toString(), local_no: carryFullState.local_no.toString(),
     count: Number(carryFullState.count), pool_value: poolValue.toString(),
     closed: Number(carryFullState.closed), winningSide: Number(carryFullState.winningSide), payoutRoot: carryFullState.payoutRoot,
+    // convert_to_claim → RootClaim 8-field: claimed_bitmap:0(R7 nullifier genesis 空)。relay serialize 须含此 8th field
+    //   (UI 集成 unlockBshardSeal/_serializeRootStateHex 对 RootClaim 8-field)。convert_to_refundclaim 不传=7-field。
+    ...(carryFullState.claimed_bitmap !== undefined ? { claimed_bitmap: Number(carryFullState.claimed_bitmap) } : {}),
   } : {
     local_yes: leafState.local_yes.toString(), local_no: leafState.local_no.toString(),
     count: Number(leafState.count), pool_value: poolValue.toString(),
@@ -97,7 +100,7 @@ export function buildConvertToClaimCommand(o) {
   return buildSealToRootCommand({
     witness: o.claimWitness, leafOutpointTxid: o.rootCloseOutpointTxid, leafRedeemHex: o.rootCloseRedeemHex,
     leafState: o.rootCloseState, funding: o.funding, leafValueSompi: o.valueSompi, changeAddress: o.changeAddress,
-    sealSelector: '52', carryFullState: o.rootCloseState,
+    sealSelector: '52', carryFullState: { ...o.rootCloseState, claimed_bitmap: 0 }, // RootClaim 8-field: R7 bitmap genesis 0
   });
 }
 

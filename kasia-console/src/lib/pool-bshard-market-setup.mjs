@@ -143,10 +143,11 @@ export function computeConvertSplitGenesis(o) {
     ctorBytes32(psArtifact.templateHashHex), ctorBytes32(shardPoolId),
     ctorInt(0), ctorInt(0), ctorInt(0), ctorInt(0), ctorInt(0), ctorInt(0), ctorBytes32(rootInitPayoutRoot),
   ];
-  const rootClaim = templateArtifact(rootClaimSilPath, rcCtor9);
+  const claimCtor10 = [...rcCtor9, ctorInt(0)]; // RootClaim 10-param: + init_claimed_bitmap=0 (R7 re-mint fix bitmap genesis 空)
+  const rootClaim = templateArtifact(rootClaimSilPath, claimCtor10);
   const rootClaimTmplHash = rootClaim.templateHashHex;
 
-  // 2b. RefundClaim template → refundclaim_tmpl_hash (convert_to_refundclaim target; ctor 9 同 RootClaim shape).
+  // 2b. RefundClaim template → refundclaim_tmpl_hash (convert_to_refundclaim target; ctor 9, 7-field 无 bitmap; refund DoD gate-off).
   const refundClaim = templateArtifact(rootRefundClaimSilPath, rcCtor9);
   const refundClaimTmplHash = refundClaim.templateHashHex;
 
@@ -211,8 +212,8 @@ export function computeConvertSplitGenesis(o) {
       templatePrefix: rootClose.templatePrefix, templateSuffix: rootClose.templateSuffix,
       redeemBytes: rootClose.redeemBytes,
     },
-    rootClaim: {                        // RootClose.convert_to_claim target (foreign-template; claim_prefix/claim_suffix for convert builder)
-      ctor: rcCtor9, tmplHash: rootClaimTmplHash,
+    rootClaim: {                        // RootClose.convert_to_claim target (foreign-template; claim_prefix/claim_suffix for convert builder; 8-field w/ claimed_bitmap)
+      ctor: claimCtor10, tmplHash: rootClaimTmplHash,
       templatePrefix: rootClaim.templatePrefix, templateSuffix: rootClaim.templateSuffix,
       redeemBytes: rootClaim.redeemBytes,
     },

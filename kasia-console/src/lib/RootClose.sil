@@ -48,6 +48,18 @@ contract RootClose(
     int winningSide = init_winningSide;
     byte[32] payoutRoot = init_payoutRoot;
 
+    // RootClaim 8-field State 镜像 (convert_to_claim foreign-template 序列化布局; 字段序/类型必 == RootClaim State, 含 R7 claimed_bitmap)
+    struct ClaimState {
+        int      local_yes;
+        int      local_no;
+        int      count;
+        int      pool_value;
+        int      closed;
+        int      winningSide;
+        byte[32] payoutRoot;
+        int      claimed_bitmap;
+    }
+
     // —— entry 0: close_commit (committee 4-of-5 写 outcome; write-once; value 不变) ——
     entrypoint function close_commit(
         byte[32] c0Pk, byte[32] c1Pk, byte[32] c2Pk, byte[32] c3Pk, byte[32] c4Pk,  // witness (R8: 必 hash-match committee_hash)
@@ -93,9 +105,11 @@ contract RootClose(
     //   R2c: outcome 从 self 委员盖章 fields 读非 witness + require(closed==1)。
     entrypoint function convert_to_claim(int claimOutIdx, byte[] claim_prefix, byte[] claim_suffix) {
         require(closed == 1);                              // 仅 settled 转 claim
+        // RootClaim 8-field genesis: 7 self 委员盖章 carry + claimed_bitmap:0(R7 nullifier 起始空, claim 逐 slot 置位)
         validateOutputStateWithTemplate(claimOutIdx, {
             local_yes: local_yes, local_no: local_no, count: count, pool_value: pool_value,
-            closed: closed, winningSide: winningSide, payoutRoot: payoutRoot   // R2c: self 委员盖章
+            closed: closed, winningSide: winningSide, payoutRoot: payoutRoot,   // R2c: self 委员盖章
+            claimed_bitmap: 0
         }, claim_prefix, claim_suffix, claim_tmpl_hash);
         require(tx.outputs[claimOutIdx].value == pool_value);  // R3
     }
