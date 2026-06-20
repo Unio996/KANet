@@ -1,35 +1,11 @@
 /* tslint:disable */
 /* eslint-disable */
 /**
- * Computes the covenant ID from the genesis outpoint and its authorized outputs.
- *
- * `genesis_outpoint` may be a [`TransactionOutpoint`] instance or a
- * compatible plain object: `{ transactionId: HexString, index: number }`.
- *
- * `auth_outputs` is a JS array of objects, each with:
- * - `index: number` — position of this output in the transaction's output array
- * - `output: TransactionOutput | ITransactionOutput` — the authorized output
- *
- * @category Consensus
- */
-export function covenantId(genesis_outpoint: ITransactionOutpoint | TransactionOutpoint, auth_outputs: ICovenantAuthorizedOutput[]): Hash;
-/**
- * Returns true if the script passed is a pay-to-script-hash (P2SH) format, false otherwise.
+ * Returns true if the script passed is a pay-to-pubkey.
  * @param script - The script ({@link HexString} or Uint8Array).
  * @category Wallet SDK
  */
-export function isScriptPayToScriptHash(script: HexString | Uint8Array): boolean;
-/**
- * Creates a new script to pay a transaction output to the specified address.
- * @category Wallet SDK
- */
-export function payToAddressScript(address: Address | string): ScriptPublicKey;
-/**
- * Returns returns true if the script passed is an ECDSA pay-to-pubkey.
- * @param script - The script ({@link HexString} or Uint8Array).
- * @category Wallet SDK
- */
-export function isScriptPayToPubkeyECDSA(script: HexString | Uint8Array): boolean;
+export function isScriptPayToPubkey(script: HexString | Uint8Array): boolean;
 /**
  * Generates a signature script that fits a pay-to-script-hash script.
  * @param redeem_script - The redeem script ({@link HexString} or Uint8Array).
@@ -37,6 +13,23 @@ export function isScriptPayToPubkeyECDSA(script: HexString | Uint8Array): boolea
  * @category Wallet SDK
  */
 export function payToScriptHashSignatureScript(redeem_script: HexString | Uint8Array, signature: HexString | Uint8Array): HexString;
+/**
+ * Creates a new script to pay a transaction output to the specified address.
+ * @category Wallet SDK
+ */
+export function payToAddressScript(address: Address | string): ScriptPublicKey;
+/**
+ * Returns true if the script passed is a pay-to-script-hash (P2SH) format, false otherwise.
+ * @param script - The script ({@link HexString} or Uint8Array).
+ * @category Wallet SDK
+ */
+export function isScriptPayToScriptHash(script: HexString | Uint8Array): boolean;
+/**
+ * Returns returns true if the script passed is an ECDSA pay-to-pubkey.
+ * @param script - The script ({@link HexString} or Uint8Array).
+ * @category Wallet SDK
+ */
+export function isScriptPayToPubkeyECDSA(script: HexString | Uint8Array): boolean;
 /**
  * Takes a script and returns an equivalent pay-to-script-hash script.
  * @param redeem_script - The redeem script ({@link HexString} or Uint8Array).
@@ -51,32 +44,24 @@ export function payToScriptHashScript(redeem_script: HexString | Uint8Array): Sc
  */
 export function addressFromScriptPublicKey(script_public_key: ScriptPublicKey | HexString, network: NetworkType | NetworkId | string): Address | undefined;
 /**
- * Returns true if the script passed is a pay-to-pubkey.
- * @param script - The script ({@link HexString} or Uint8Array).
- * @category Wallet SDK
+ * Computes the covenant ID from the genesis outpoint and its authorized outputs.
+ *
+ * `genesis_outpoint` may be a [`TransactionOutpoint`] instance or a
+ * compatible plain object: `{ transactionId: HexString, index: number }`.
+ *
+ * `auth_outputs` is a JS array of objects, each with:
+ * - `index: number` — position of this output in the transaction's output array
+ * - `output: TransactionOutput | ITransactionOutput` — the authorized output
+ *
+ * @category Consensus
  */
-export function isScriptPayToPubkey(script: HexString | Uint8Array): boolean;
+export function covenantId(genesis_outpoint: ITransactionOutpoint | TransactionOutpoint, auth_outputs: ICovenantAuthorizedOutput[]): Hash;
 /**
  * Calculates target from difficulty, based on set_difficulty function on
  * <https://github.com/tmrlvi/kaspa-miner/blob/bf361d02a46c580f55f46b5dfa773477634a5753/src/client/stratum.rs#L375>
  * @category Mining
  */
 export function calculateTarget(difficulty: number): bigint;
-/**
- * Set the name of the default wallet file name
- * or the `localStorage` key.  If `Wallet::open`
- * is called without a wallet file name, this name
- * will be used.  Please note that this name
- * will be suffixed with `.wallet` suffix.
- *
- * This function should be called before using any
- * other wallet SDK functions.
- *
- * @param {String} folder - the name to the wallet file or key.
- *
- * @category Wallet API
- */
-export function setDefaultWalletFile(folder: string): void;
 /**
  * Set a custom storage folder for the wallet SDK
  * subsystem.  Encrypted wallet files and transaction
@@ -97,15 +82,140 @@ export function setDefaultWalletFile(folder: string): void;
  */
 export function setDefaultStorageFolder(folder: string): void;
 /**
- * Signs a message with the given private key
- * @category Message Signing
+ * Set the name of the default wallet file name
+ * or the `localStorage` key.  If `Wallet::open`
+ * is called without a wallet file name, this name
+ * will be used.  Please note that this name
+ * will be suffixed with `.wallet` suffix.
+ *
+ * This function should be called before using any
+ * other wallet SDK functions.
+ *
+ * @param {String} folder - the name to the wallet file or key.
+ *
+ * @category Wallet API
  */
-export function signMessage(value: ISignMessage): HexString;
+export function setDefaultWalletFile(folder: string): void;
+/**
+ * @category Wallet SDK
+ */
+export function createAddress(key: PublicKey | string, network: NetworkType | NetworkId | string, ecdsa?: boolean | null, account_kind?: AccountKind | null): Address;
+/**
+ * @category Wallet SDK
+ */
+export function createMultisigAddress(minimum_signatures: number, keys: (PublicKey | string)[], network_type: NetworkType, ecdsa?: boolean | null, account_kind?: AccountKind | null): Address;
+/**
+ * WASM32 binding for `argon2sha256iv` hash function.
+ * @param data - The data to hash ({@link HexString} or Uint8Array).
+ * @category Encryption
+ */
+export function argon2sha256ivFromBinary(data: HexString | Uint8Array, hashLength: number): HexString;
+/**
+ * WASM32 binding for `SHA256` hash function.
+ * @param {string} text - The text string to hash.
+ * @category Encryption
+ */
+export function sha256FromText(text: string): HexString;
+/**
+ * WASM32 binding for `argon2sha256iv` hash function.
+ * @param text - The text string to hash.
+ * @category Encryption
+ */
+export function argon2sha256ivFromText(text: string, byteLength: number): HexString;
+/**
+ * WASM32 binding for `decryptXChaCha20Poly1305` function.
+ * @category Encryption
+ */
+export function decryptXChaCha20Poly1305(base64string: string, password: string): string;
+/**
+ * WASM32 binding for `SHA256d` hash function.
+ * @param data - The data to hash ({@link HexString} or Uint8Array).
+ * @category Encryption
+ */
+export function sha256dFromBinary(data: HexString | Uint8Array): HexString;
+/**
+ * WASM32 binding for `SHA256d` hash function.
+ * @param {string} text - The text string to hash.
+ * @category Encryption
+ */
+export function sha256dFromText(text: string): HexString;
+/**
+ * WASM32 binding for `encryptXChaCha20Poly1305` function.
+ * @returns The encrypted text as a base64 string.
+ * @category Encryption
+ */
+export function encryptXChaCha20Poly1305(plainText: string, password: string): string;
+/**
+ * WASM32 binding for `SHA256` hash function.
+ * @param data - The data to hash ({@link HexString} or Uint8Array).
+ * @category Encryption
+ */
+export function sha256FromBinary(data: HexString | Uint8Array): HexString;
+/**
+ * Create a basic transaction without any mass limit checks.
+ * @category Wallet SDK
+ */
+export function createTransaction(utxo_entry_source: IUtxoEntry[], outputs: IPaymentOutput[], priority_fee: bigint, payload?: HexString | Uint8Array | null, sig_op_count?: number | null): Transaction;
+/**
+ * Helper function that creates a set of transactions using the transaction {@link Generator}.
+ * @see {@link IGeneratorSettingsObject}, {@link Generator}, {@link estimateTransactions}
+ * @category Wallet SDK
+ */
+export function createTransactions(settings: IGeneratorSettingsObject): Promise<ICreateTransactions>;
+/**
+ * Helper function that creates an estimate using the transaction {@link Generator}
+ * by producing only the {@link GeneratorSummary} containing the estimate.
+ * @see {@link IGeneratorSettingsObject}, {@link Generator}, {@link createTransactions}
+ * @category Wallet SDK
+ */
+export function estimateTransactions(settings: IGeneratorSettingsObject): Promise<GeneratorSummary>;
 /**
  * Verifies with a public key the signature of the given message
  * @category Message Signing
  */
 export function verifyMessage(value: IVerifyMessage): boolean;
+/**
+ * Signs a message with the given private key
+ * @category Message Signing
+ */
+export function signMessage(value: ISignMessage): HexString;
+/**
+ * `calculateTransactionMass()` returns the mass of the passed transaction.
+ * If the transaction is invalid, or the mass can not be calculated
+ * the function throws an error.
+ *
+ * The mass value must not exceed the maximum standard transaction mass
+ * that can be obtained using `maximumStandardTransactionMass()`.
+ *
+ * @category Wallet SDK
+ * @see {@link maximumStandardTransactionMass}
+ */
+export function calculateTransactionMass(network_id: NetworkId | string, tx: ITransaction | Transaction, minimum_signatures?: number | null): bigint;
+/**
+ * `calculateStorageMass()` is a helper function to compute the storage mass of inputs and outputs.
+ * This function can be use to calculate the storage mass of transaction inputs and outputs.
+ * Note that the storage mass is only a component of the total transaction mass. You are not
+ * meant to use this function by itself and should use `calculateTransactionMass()` instead.
+ * This function purely exists for diagnostic purposes and to help with complex algorithms that
+ * may require a manual UTXO selection for identifying UTXOs and outputs needed for low storage mass.
+ *
+ * @category Wallet SDK
+ * @see {@link maximumStandardTransactionMass}
+ * @see {@link calculateTransactionMass}
+ */
+export function calculateStorageMass(network_id: NetworkId | string, input_values: Array<number>, output_values: Array<number>): bigint | undefined;
+/**
+ * `calculateTransactionFee()` returns minimum fees needed for the transaction to be
+ * accepted by the network. If the transaction is invalid or the mass can not be calculated,
+ * the function throws an error. If the mass exceeds the maximum standard transaction mass,
+ * the function returns `undefined`.
+ *
+ * @category Wallet SDK
+ * @see {@link maximumStandardTransactionMass}
+ * @see {@link calculateTransactionMass}
+ * @see {@link updateTransactionMass}
+ */
+export function calculateTransactionFee(network_id: NetworkId | string, tx: ITransaction | Transaction, minimum_signatures?: number | null): bigint | undefined;
 /**
  * `updateTransactionMass()` updates the mass property of the passed transaction.
  * If the transaction is invalid, the function throws an error.
@@ -123,18 +233,6 @@ export function verifyMessage(value: IVerifyMessage): boolean;
  */
 export function updateTransactionMass(network_id: NetworkId | string, tx: Transaction, minimum_signatures?: number | null): boolean;
 /**
- * `calculateTransactionMass()` returns the mass of the passed transaction.
- * If the transaction is invalid, or the mass can not be calculated
- * the function throws an error.
- *
- * The mass value must not exceed the maximum standard transaction mass
- * that can be obtained using `maximumStandardTransactionMass()`.
- *
- * @category Wallet SDK
- * @see {@link maximumStandardTransactionMass}
- */
-export function calculateTransactionMass(network_id: NetworkId | string, tx: ITransaction | Transaction, minimum_signatures?: number | null): bigint;
-/**
  * `maximumStandardTransactionMass()` returns the maximum transaction
  * size allowed by the network.
  *
@@ -145,46 +243,12 @@ export function calculateTransactionMass(network_id: NetworkId | string, tx: ITr
  */
 export function maximumStandardTransactionMass(): bigint;
 /**
- * `calculateTransactionFee()` returns minimum fees needed for the transaction to be
- * accepted by the network. If the transaction is invalid or the mass can not be calculated,
- * the function throws an error. If the mass exceeds the maximum standard transaction mass,
- * the function returns `undefined`.
- *
- * @category Wallet SDK
- * @see {@link maximumStandardTransactionMass}
- * @see {@link calculateTransactionMass}
- * @see {@link updateTransactionMass}
- */
-export function calculateTransactionFee(network_id: NetworkId | string, tx: ITransaction | Transaction, minimum_signatures?: number | null): bigint | undefined;
-/**
- * `calculateStorageMass()` is a helper function to compute the storage mass of inputs and outputs.
- * This function can be use to calculate the storage mass of transaction inputs and outputs.
- * Note that the storage mass is only a component of the total transaction mass. You are not
- * meant to use this function by itself and should use `calculateTransactionMass()` instead.
- * This function purely exists for diagnostic purposes and to help with complex algorithms that
- * may require a manual UTXO selection for identifying UTXOs and outputs needed for low storage mass.
- *
- * @category Wallet SDK
- * @see {@link maximumStandardTransactionMass}
- * @see {@link calculateTransactionMass}
- */
-export function calculateStorageMass(network_id: NetworkId | string, input_values: Array<number>, output_values: Array<number>): bigint | undefined;
-export function getNetworkParams(networkId: NetworkId | string): INetworkParams;
-/**
  * Convert a Kaspa string to Sompi represented by bigint.
  * This function provides correct precision handling and
  * can be used to parse user input.
  * @category Wallet SDK
  */
 export function kaspaToSompi(kaspa: string): bigint | undefined;
-export function getTransactionMaturityProgress(blockDaaScore: bigint, currentDaaScore: bigint, networkId: NetworkId | string, isCoinbase: boolean): string;
-/**
- *
- * Convert Sompi to a string representation of the amount in Kaspa.
- *
- * @category Wallet SDK
- */
-export function sompiToKaspaString(sompi: bigint | number | HexString): string;
 /**
  *
  * Format a Sompi amount to a string representation of the amount in Kaspa with a suffix
@@ -195,92 +259,28 @@ export function sompiToKaspaString(sompi: bigint | number | HexString): string;
  */
 export function sompiToKaspaStringWithSuffix(sompi: bigint | number | HexString, network: NetworkType | NetworkId | string): string;
 /**
+ *
+ * Convert Sompi to a string representation of the amount in Kaspa.
+ *
  * @category Wallet SDK
  */
-export function signScriptHash(script_hash: any, privkey: PrivateKey): string;
-/**
- * `createInputSignature()` is a helper function to sign a transaction input with a specific SigHash type using a private key.
- * @category Wallet SDK
- */
-export function createInputSignature(tx: Transaction, input_index: number, private_key: PrivateKey, sighash_type?: SighashType | null): HexString;
+export function sompiToKaspaString(sompi: bigint | number | HexString): string;
+export function getTransactionMaturityProgress(blockDaaScore: bigint, currentDaaScore: bigint, networkId: NetworkId | string, isCoinbase: boolean): string;
+export function getNetworkParams(networkId: NetworkId | string): INetworkParams;
 /**
  * `signTransaction()` is a helper function to sign a transaction using a private key array or a signer array.
  * @category Wallet SDK
  */
 export function signTransaction(tx: Transaction, signer: (PrivateKey | HexString | Uint8Array)[], verify_sig: boolean): Transaction;
 /**
- * Helper function that creates a set of transactions using the transaction {@link Generator}.
- * @see {@link IGeneratorSettingsObject}, {@link Generator}, {@link estimateTransactions}
+ * `createInputSignature()` is a helper function to sign a transaction input with a specific SigHash type using a private key.
  * @category Wallet SDK
  */
-export function createTransactions(settings: IGeneratorSettingsObject): Promise<ICreateTransactions>;
-/**
- * Create a basic transaction without any mass limit checks.
- * @category Wallet SDK
- */
-export function createTransaction(utxo_entry_source: IUtxoEntry[], outputs: IPaymentOutput[], priority_fee: bigint, payload?: HexString | Uint8Array | null, sig_op_count?: number | null): Transaction;
-/**
- * Helper function that creates an estimate using the transaction {@link Generator}
- * by producing only the {@link GeneratorSummary} containing the estimate.
- * @see {@link IGeneratorSettingsObject}, {@link Generator}, {@link createTransactions}
- * @category Wallet SDK
- */
-export function estimateTransactions(settings: IGeneratorSettingsObject): Promise<GeneratorSummary>;
-/**
- * WASM32 binding for `argon2sha256iv` hash function.
- * @param data - The data to hash ({@link HexString} or Uint8Array).
- * @category Encryption
- */
-export function argon2sha256ivFromBinary(data: HexString | Uint8Array, hashLength: number): HexString;
-/**
- * WASM32 binding for `SHA256` hash function.
- * @param data - The data to hash ({@link HexString} or Uint8Array).
- * @category Encryption
- */
-export function sha256FromBinary(data: HexString | Uint8Array): HexString;
-/**
- * WASM32 binding for `SHA256d` hash function.
- * @param data - The data to hash ({@link HexString} or Uint8Array).
- * @category Encryption
- */
-export function sha256dFromBinary(data: HexString | Uint8Array): HexString;
-/**
- * WASM32 binding for `encryptXChaCha20Poly1305` function.
- * @returns The encrypted text as a base64 string.
- * @category Encryption
- */
-export function encryptXChaCha20Poly1305(plainText: string, password: string): string;
-/**
- * WASM32 binding for `argon2sha256iv` hash function.
- * @param text - The text string to hash.
- * @category Encryption
- */
-export function argon2sha256ivFromText(text: string, byteLength: number): HexString;
-/**
- * WASM32 binding for `decryptXChaCha20Poly1305` function.
- * @category Encryption
- */
-export function decryptXChaCha20Poly1305(base64string: string, password: string): string;
-/**
- * WASM32 binding for `SHA256d` hash function.
- * @param {string} text - The text string to hash.
- * @category Encryption
- */
-export function sha256dFromText(text: string): HexString;
-/**
- * WASM32 binding for `SHA256` hash function.
- * @param {string} text - The text string to hash.
- * @category Encryption
- */
-export function sha256FromText(text: string): HexString;
+export function createInputSignature(tx: Transaction, input_index: number, private_key: PrivateKey, sighash_type?: SighashType | null): HexString;
 /**
  * @category Wallet SDK
  */
-export function createAddress(key: PublicKey | string, network: NetworkType | NetworkId | string, ecdsa?: boolean | null, account_kind?: AccountKind | null): Address;
-/**
- * @category Wallet SDK
- */
-export function createMultisigAddress(minimum_signatures: number, keys: (PublicKey | string)[], network_type: NetworkType, ecdsa?: boolean | null, account_kind?: AccountKind | null): Address;
+export function signScriptHash(script_hash: any, privkey: PrivateKey): string;
 /**
  * Returns the version of the Rusty Kaspa framework.
  * @category General
@@ -314,6 +314,14 @@ export function defer(): Promise<any>;
  */
 export function initBrowserPanicHook(): void;
 /**
+ * Initialize Rust panic handler in console mode.
+ *
+ * This will output additional debug information during a panic to the console.
+ * This function should be called right after loading WASM libraries.
+ * @category General
+ */
+export function initConsolePanicHook(): void;
+/**
  * Present panic logs to the user in the browser.
  *
  * This function should be called after a panic has occurred and the
@@ -323,14 +331,6 @@ export function initBrowserPanicHook(): void;
  * @category General
  */
 export function presentPanicHookLogs(): void;
-/**
- * Initialize Rust panic handler in console mode.
- *
- * This will output additional debug information during a panic to the console.
- * This function should be called right after loading WASM libraries.
- * @category General
- */
-export function initConsolePanicHook(): void;
 /**
  * Configuration for the WASM32 bindings runtime interface.
  * @see {@link IWASM32BindingsConfig}
@@ -680,12 +680,12 @@ export enum Opcodes {
   OpCovOutputCount = 210,
   OpCovOutputIdx = 211,
   OpChainblockSeqCommit = 212,
-  OpUnknown213 = 213,
+  OpOutputCovenantId = 213,
   OpUnknown214 = 214,
-  OpUnknown215 = 215,
-  OpUnknown216 = 216,
-  OpUnknown217 = 217,
-  OpUnknown218 = 218,
+  OpCheckSigFromStack = 215,
+  OpCheckSigFromStackECDSA = 216,
+  OpBlake3 = 217,
+  OpBlake3WithKey = 218,
   OpUnknown219 = 219,
   OpUnknown220 = 220,
   OpUnknown221 = 221,
@@ -736,99 +736,6 @@ export enum SighashType {
   NoneAnyOneCanPay = 4,
   SingleAnyOneCanPay = 5,
 }
-
-/**
- * Interface defines the structure of a UTXO entry.
- * 
- * @category Consensus
- */
-export interface IUtxoEntry {
-    /** @readonly */
-    address?: Address;
-    /** @readonly */
-    outpoint: ITransactionOutpoint;
-    /** @readonly */
-    amount : bigint;
-    /** @readonly */
-    scriptPublicKey : IScriptPublicKey;
-    /** @readonly */
-    blockDaaScore: bigint;
-    /** @readonly */
-    isCoinbase: boolean;
-}
-
-
-
-
-/**
- * An output authorized by the genesis outpoint for covenant ID derivation.
- *
- * @category Consensus
- */
-export interface ICovenantAuthorizedOutput {
-    index: number;
-    output: ITransactionOutput | TransactionOutput;
-}
-
-
-
-/**
- * Interface defining the structure of a block header.
- *
- * @category Consensus
- */
-export interface IHeader {
-    hash: HexString;
-    version: number;
-    parentsByLevel: Array<Array<HexString>>;
-    hashMerkleRoot: HexString;
-    acceptedIdMerkleRoot: HexString;
-    utxoCommitment: HexString;
-    timestamp: bigint;
-    bits: number;
-    nonce: bigint;
-    daaScore: bigint;
-    blueWork: bigint | HexString;
-    blueScore: bigint;
-    pruningPoint: HexString;
-}
-
-/**
- * Interface defining the structure of a raw block header.
- *
- * This interface is explicitly used by GetBlockTemplate and SubmitBlock RPCs
- * and unlike `IHeader`, does not include a hash.
- *
- * @category Consensus
- */
-export interface IRawHeader {
-    version: number;
-    parentsByLevel: Array<Array<HexString>>;
-    hashMerkleRoot: HexString;
-    acceptedIdMerkleRoot: HexString;
-    utxoCommitment: HexString;
-    timestamp: bigint;
-    bits: number;
-    nonce: bigint;
-    daaScore: bigint;
-    blueWork: bigint | HexString;
-    blueScore: bigint;
-    pruningPoint: HexString;
-}
-
-
-
-/**
- * Interface defines the structure of a transaction outpoint (used by transaction input).
- * 
- * @category Consensus
- */
-export interface ITransactionOutpoint {
-    transactionId: HexString;
-    index: number;
-}
-
-
 
 
 /**
@@ -906,6 +813,144 @@ export interface ISerializableTransaction {
 
 
 /**
+ * Represents a block header where all fields are optional.
+ *
+ * @category Consensus
+ */
+export interface IOptionalHeader {
+    hash?: HexString;
+    version?: number;
+    parentsByLevel?: CompressedParents;
+    hashMerkleRoot?: HexString;
+    acceptedIdMerkleRoot?: HexString;
+    utxoCommitment?: HexString;
+    timestamp?: bigint;
+    bits?: number;
+    nonce?: bigint;
+    daaScore?: bigint;
+    blueWork?: bigint | HexString;
+    blueScore?: bigint;
+    pruningPoint?: HexString;
+}
+
+
+
+/**
+ * Interface defining the structure of a transaction.
+ *
+ * @category Consensus
+ */
+export interface ITransaction {
+    version: number;
+    inputs: ITransactionInput[];
+    outputs: ITransactionOutput[];
+    lockTime: bigint;
+    subnetworkId: HexString;
+    gas: bigint;
+    payload: HexString;
+
+    /**
+     * @deprecated since version 1.3.0, use `storageMass`
+    */
+    mass?: bigint;
+
+    /** The mass of the transaction (the mass is undefined or zero unless explicitly set or obtained from the node) */
+    storageMass?: bigint;
+
+    /** Optional verbose data provided by RPC */
+    verboseData?: ITransactionVerboseData;
+}
+
+/**
+ * Optional transaction verbose data.
+ *
+ * @category Node RPC
+ */
+export interface ITransactionVerboseData {
+    transactionId : HexString;
+    hash : HexString;
+    computeMass : bigint;
+    blockHash : HexString;
+    blockTime : bigint;
+}
+
+
+
+/**
+ * A genesis covenant group for bulk covenant binding population.
+ *
+ * @category Consensus
+ */
+export interface IGenesisCovenantGroup {
+    authorizingInput: number;
+    outputs: number[];
+}
+
+
+
+/**
+ * A covenant binding binds a transaction output to the covenant and input authorizing its creation.
+ *
+ * @category Consensus
+ */
+export interface ICovenantBinding {
+    authorizingInput: number;
+    covenantId: HexString;
+}
+
+
+
+/**
+ * Interface defines the structure of a transaction input.
+ * 
+ * @category Consensus
+ */
+export interface ITransactionInput {
+    previousOutpoint: ITransactionOutpoint;
+    signatureScript?: HexString;
+    sequence: bigint;
+    sigOpCount: number;
+    computeBudget?: number;
+    utxo?: UtxoEntryReference;
+
+    /** Optional verbose data provided by RPC */
+    verboseData?: ITransactionInputVerboseData;
+}
+
+/**
+ * Option transaction input verbose data.
+ * 
+ * @category Node RPC
+ */
+export interface ITransactionInputVerboseData { }
+
+
+
+
+/**
+ * Interface defines the structure of a UTXO entry.
+ * 
+ * @category Consensus
+ */
+export interface IUtxoEntry {
+    /** @readonly */
+    address?: Address;
+    /** @readonly */
+    outpoint: ITransactionOutpoint;
+    /** @readonly */
+    amount : bigint;
+    /** @readonly */
+    scriptPublicKey : IScriptPublicKey;
+    /** @readonly */
+    blockDaaScore: bigint;
+    /** @readonly */
+    isCoinbase: boolean;
+}
+
+
+
+
+/**
  * Interface defining the structure of a transaction output.
  * 
  * @category Consensus
@@ -931,111 +976,82 @@ export interface ITransactionOutputVerboseData {
 
 
 /**
- * Represents a block header where all fields are optional.
+ * An output authorized by the genesis outpoint for covenant ID derivation.
  *
  * @category Consensus
  */
-export interface IOptionalHeader {
-    hash?: HexString;
-    version?: number;
-    parentsByLevel?: CompressedParents;
-    hashMerkleRoot?: HexString;
-    acceptedIdMerkleRoot?: HexString;
-    utxoCommitment?: HexString;
-    timestamp?: bigint;
-    bits?: number;
-    nonce?: bigint;
-    daaScore?: bigint;
-    blueWork?: bigint | HexString;
-    blueScore?: bigint;
-    pruningPoint?: HexString;
+export interface ICovenantAuthorizedOutput {
+    index: number;
+    output: ITransactionOutput | TransactionOutput;
 }
 
 
 
 /**
- * Interface defines the structure of a transaction input.
- * 
+ * Interface defining the structure of a block header.
+ *
  * @category Consensus
  */
-export interface ITransactionInput {
-    previousOutpoint: ITransactionOutpoint;
-    signatureScript?: HexString;
-    sequence: bigint;
-    sigOpCount: number;
-    utxo?: UtxoEntryReference;
-
-    /** Optional verbose data provided by RPC */
-    verboseData?: ITransactionInputVerboseData;
-}
-
-/**
- * Option transaction input verbose data.
- * 
- * @category Node RPC
- */
-export interface ITransactionInputVerboseData { }
-
-
-
-
-/**
- * Interface defining the structure of a transaction.
- * 
- * @category Consensus
- */
-export interface ITransaction {
+export interface IHeader {
+    hash: HexString;
     version: number;
-    inputs: ITransactionInput[];
-    outputs: ITransactionOutput[];
-    lockTime: bigint;
-    subnetworkId: HexString;
-    gas: bigint;
-    payload: HexString;
-    /** The mass of the transaction (the mass is undefined or zero unless explicitly set or obtained from the node) */
-    mass?: bigint;
-
-    /** Optional verbose data provided by RPC */
-    verboseData?: ITransactionVerboseData;
+    parentsByLevel: Array<Array<HexString>>;
+    hashMerkleRoot: HexString;
+    acceptedIdMerkleRoot: HexString;
+    utxoCommitment: HexString;
+    timestamp: bigint;
+    bits: number;
+    nonce: bigint;
+    daaScore: bigint;
+    blueWork: bigint | HexString;
+    blueScore: bigint;
+    pruningPoint: HexString;
 }
 
 /**
- * Optional transaction verbose data.
+ * Interface defining the structure of a raw block header.
+ *
+ * This interface is explicitly used by GetBlockTemplate and SubmitBlock RPCs
+ * and unlike `IHeader`, does not include a hash.
+ *
+ * @category Consensus
+ */
+export interface IRawHeader {
+    version: number;
+    parentsByLevel: Array<Array<HexString>>;
+    hashMerkleRoot: HexString;
+    acceptedIdMerkleRoot: HexString;
+    utxoCommitment: HexString;
+    timestamp: bigint;
+    bits: number;
+    nonce: bigint;
+    daaScore: bigint;
+    blueWork: bigint | HexString;
+    blueScore: bigint;
+    pruningPoint: HexString;
+}
+
+
+
+/**
+ * Interface defines the structure of a transaction outpoint (used by transaction input).
  * 
- * @category Node RPC
+ * @category Consensus
  */
-export interface ITransactionVerboseData {
-    transactionId : HexString;
-    hash : HexString;
-    computeMass : bigint;
-    blockHash : HexString;
-    blockTime : bigint;
+export interface ITransactionOutpoint {
+    transactionId: HexString;
+    index: number;
 }
 
 
 
 /**
- * A covenant binding binds a transaction output to the covenant and input authorizing its creation.
+ * Block Color
  *
  * @category Consensus
  */
-export interface ICovenantBinding {
-    authorizingInput: number;
-    covenantId: HexString;
-}
-
-
-
-/**
- * A genesis covenant group for bulk covenant binding population.
- *
- * @category Consensus
- */
-export interface IGenesisCovenantGroup {
-    authorizingInput: number;
-    outputs: number[];
-}
-
+ export type BlockColor = "blue" | "red" | "unknown";
+ 
 
 
 /**
@@ -1051,37 +1067,71 @@ export interface IScriptPublicKey {
 
 
 /**
-* Argument interface for the {@link RpcClient.getMempoolEntriesByAddresses} RPC method.
+* Return interface for the {@link RpcClient.getMempoolEntry} RPC method.
 *
 *
 * @category Node RPC
 */
-    export interface IGetMempoolEntriesByAddressesRequest {
-        addresses : Address[] | string[];
-        includeOrphanPool? : boolean;
-        filterTransactionPool? : boolean;
+    export interface IGetMempoolEntryResponse {
+        mempoolEntry : IMempoolEntry;
     }
     
 
 
 /**
-* Argument interface for the {@link RpcClient.ping} RPC method.
+* Return interface for the {@link RpcClient.submitTransaction} RPC method.
+*
+*
 * @category Node RPC
 */
-    export interface IPingRequest {
-        message?: string;
+    export interface ISubmitTransactionResponse {
+        transactionId : HexString;
+    }
+    
+
+
+    /**
+     *
+     *
+     * @category Node RPC
+     */
+    export interface IFeerateBucket {
+        /**
+         * The fee/mass ratio estimated to be required for inclusion time <= estimated_seconds
+         */
+        feerate : number;
+        /**
+         * The estimated inclusion time for a transaction with fee/mass = feerate
+         */
+        estimatedSeconds : number;
     }
     
 
 
 /**
-* Argument interface for the {@link RpcClient.getSubnetwork} RPC method.
+* Return interface for the {@link RpcClient.ban} RPC method.
 *
 *
 * @category Node RPC
 */
-    export interface IGetSubnetworkRequest {
-        subnetworkId : HexString;
+    export interface IBanResponse { }
+    
+
+
+/**
+* Argument interface for the {@link RpcClient.getBlockCount} RPC method.
+* @category Node RPC
+*/
+    export interface IGetBlockCountRequest { }
+    
+
+
+/**
+* Return interface for the {@link RpcClient.getSinkBlueScore} RPC method.
+* @category Node RPC
+*/
+    export interface IGetSinkBlueScoreResponse {
+        blueScore : bigint;
     }
     
 
@@ -1095,6 +1145,38 @@ export interface IScriptPublicKey {
 
 
 /**
+* Return interface for the {@link RpcClient.resolveFinalityConflict} RPC method.
+*
+*
+* @category Node RPC
+*/
+    export interface IResolveFinalityConflictResponse { }
+    
+
+
+    /**
+     * Data Verbosity level
+     *
+     * @category Node RPC
+     */
+    export type DataVerbosityLevel = "None" | "Low" | "High" | "Full";
+
+
+
+    /**
+     * Accepted Acceptance Data
+     *
+     * @category Node RPC
+     */
+    export interface IChainBlockAddedTransactions {
+        chainBlockHeader: IOptionalHeader;
+        // small hack because wasm doesn't define OptionalTransaction utility
+        acceptedTransactions: Partial<ITransaction>[];
+    }
+
+
+
+/**
 * Return interface for the {@link RpcClient.getConnections} RPC method.
 * @category Node RPC
 */
@@ -1104,74 +1186,12 @@ export interface IScriptPublicKey {
     
 
 
-    /**
-     *
-     *
-     * @category Node RPC
-     */
-    export interface IFeeEstimateVerboseExperimentalData {
-        mempoolReadyTransactionsCount : bigint;
-        mempoolReadyTransactionsTotalMass : bigint;
-        networkMassPerSecond : bigint;
-        nextBlockTemplateFeerateMin : number;
-        nextBlockTemplateFeerateMedian : number;
-        nextBlockTemplateFeerateMax : number;
-    }
-    
-
-
 /**
-* Return interface for the {@link RpcClient.getHeaders} RPC method.
-*
-*
+* Argument interface for the {@link RpcClient.getBalanceByAddress} RPC method.
 * @category Node RPC
 */
-    export interface IGetHeadersResponse {
-        headers : IHeader[];
-    }
-    
-
-
-/**
-* Return interface for the {@link RpcClient.getCurrentNetwork} RPC method.
-*
-*
-* @category Node RPC
-*/
-    export interface IGetCurrentNetworkResponse {
-        network : string;
-    }
-    
-
-
-/**
-* Return interface for the {@link RpcClient.getMetrics} RPC method.
-* @category Node RPC
-*/
-    export interface IGetMetricsResponse {
-        [key: string]: any
-    }
-    
-
-
-/**
-* Argument interface for the {@link RpcClient.getFeeEstimate} RPC method.
-* Get fee estimate from the node.
-*
-* @category Node RPC
-*/
-    export interface IGetFeeEstimateRequest { }
-    
-
-
-/**
-* Argument interface for the {@link RpcClient.getUtxosByAddresses} RPC method.
-*
-*
-* @category Node RPC
-*/
-    export interface IGetUtxosByAddressesRequest {
-        addresses : Address[] | string[]
+    export interface IGetBalanceByAddressRequest {
+        address : Address | string;
     }
     
 
@@ -1207,270 +1227,15 @@ export interface IScriptPublicKey {
 
 
 /**
-* Argument interface for the {@link RpcClient.getMetrics} RPC method.
-* @category Node RPC
-*/
-    export interface IGetMetricsRequest { }
-    
-
-
-/**
-* Argument interface for the {@link RpcClient.submitBlock} RPC method.
+* Argument interface for the {@link RpcClient.getHeaders} RPC method.
 *
 *
 * @category Node RPC
 */
-    export interface ISubmitBlockRequest {
-        block : IRawBlock;
-        allowNonDAABlocks: boolean;
-    }
-    
-
-
-/**
-* Argument interface for the {@link RpcClient.submitTransaction} RPC method.
-* Submit transaction to the node.
-*
-* @category Node RPC
-*/
-    export interface ISubmitTransactionRequest {
-        transaction : Transaction,
-        allowOrphan? : boolean
-    }
-    
-
-
-/**
-* Argument interface for the {@link RpcClient.getUtxoReturnAddress} RPC method.
-*
-*
-* @category Node RPC
-*/
-    export interface IGetUtxoReturnAddressRequest {
-        txid: HexString;
-        acceptingBlockDaaScore: bigint;
-    }
-    
-
-
-    /**
-     * Accepted transaction IDs.
-     *
-     * @category Node RPC
-     */
-    export interface IAcceptedTransactionIds {
-        acceptingBlockHash : HexString;
-        acceptedTransactionIds : HexString[];
-    }
-
-
-
-/**
-* Argument interface for the {@link RpcClient.getConnections} RPC method.
-* @category Node RPC
-*/
-    export interface IGetConnectionsRequest { }
-    
-
-
-/**
-* Argument interface for the {@link RpcClient.shutdown} RPC method.
-* @category Node RPC
-*/
-    export interface IShutdownRequest { }
-    
-
-
-/**
-* Return interface for the {@link RpcClient.resolveFinalityConflict} RPC method.
-*
-*
-* @category Node RPC
-*/
-    export interface IResolveFinalityConflictResponse { }
-    
-
-
-/**
-* Argument interface for the {@link RpcClient.resolveFinalityConflict} RPC method.
-*
-*
-* @category Node RPC
-*/
-    export interface IResolveFinalityConflictRequest {
-        finalityBlockHash: HexString;
-    }
-    
-
-
-/**
-* Argument interface for the {@link RpcClient.getBlock} RPC method.
-*
-*
-* @category Node RPC
-*/
-    export interface IGetBlockRequest {
-        hash : HexString;
-        includeTransactions : boolean;
-    }
-    
-
-
-/**
-* Argument interface for the {@link RpcClient.getServerInfo} RPC method.
-* @category Node RPC
-*/
-    export interface IGetServerInfoRequest { }
-    
-
-
-/**
-* Argument interface for the {@link RpcClient.getBalanceByAddress} RPC method.
-* @category Node RPC
-*/
-    export interface IGetBalanceByAddressRequest {
-        address : Address | string;
-    }
-    
-
-
-/**
-* Return interface for the {@link RpcClient.getServerInfo} RPC method.
-* @category Node RPC
-*/
-    export interface IGetServerInfoResponse {
-        rpcApiVersion : number[];
-        serverVersion : string;
-        networkId : string;
-        hasUtxoIndex : boolean;
-        isSynced : boolean;
-        virtualDaaScore : bigint;
-    }
-    
-
-
-    /**
-     *
-     *
-     * @category Node RPC
-     */
-    export interface IFeerateBucket {
-        /**
-         * The fee/mass ratio estimated to be required for inclusion time <= estimated_seconds
-         */
-        feerate : number;
-        /**
-         * The estimated inclusion time for a transaction with fee/mass = feerate
-         */
-        estimatedSeconds : number;
-    }
-    
-
-
-/**
-* Argument interface for the {@link RpcClient.getConnectedPeerInfo} RPC method.
-* @category Node RPC
-*/
-    export interface IGetConnectedPeerInfoRequest { }
-    
-
-
-/**
-* Return interface for the {@link RpcClient.unban} RPC method.
-*
-*
-* @category Node RPC
-*/
-    export interface IUnbanResponse { }
-    
-
-
-/**
-* Return interface for the {@link RpcClient.getBlockTemplate} RPC method.
-*
-*
-* @category Node RPC
-*/
-    export interface IGetBlockTemplateResponse {
-        block : IRawBlock;
-    }
-    
-
-
-/**
-* Return interface for the {@link RpcClient.submitBlock} RPC method.
-*
-*
-* @category Node RPC
-*/
-    export interface ISubmitBlockResponse {
-        report : ISubmitBlockReport;
-    }
-    
-
-
-/**
-* Return interface for the {@link RpcClient.getPeerAddresses} RPC method.
-* @category Node RPC
-*/
-    export interface IGetPeerAddressesResponse {
-        [key: string]: any
-    }
-    
-
-
-/**
-* Return interface for the {@link RpcClient.getSinkBlueScore} RPC method.
-* @category Node RPC
-*/
-    export interface IGetSinkBlueScoreResponse {
-        blueScore : bigint;
-    }
-    
-
-
-/**
-* Argument interface for the {@link RpcClient.getDaaScoreTimestampEstimate} RPC method.
-*
-*
-* @category Node RPC
-*/
-    export interface IGetDaaScoreTimestampEstimateRequest {
-        daaScores : bigint[];
-    }
-    
-
-
-/**
-* Argument interface for the {@link RpcClient.addPeer} RPC method.
-*
-*
-* @category Node RPC
-*/
-    export interface IAddPeerRequest {
-        peerAddress : INetworkAddress;
-        isPermanent : boolean;
-    }
-    
-
-
-/**
-* Return interface for the {@link RpcClient.getBlockCount} RPC method.
-* @category Node RPC
-*/
-    export interface IGetBlockCountResponse {
-        headerCount : bigint;
-        blockCount : bigint;
-    }
-    
-
-
-/**
-* Return interface for the {@link RpcClient.ping} RPC method.
-* @category Node RPC
-*/
-    export interface IPingResponse {
-        message?: string;
+    export interface IGetHeadersRequest {
+        startHash : HexString;
+        limit : bigint;
+        isAscending : boolean;
     }
     
 
@@ -1494,6 +1259,102 @@ export interface IScriptPublicKey {
 
 
 /**
+* Argument interface for the {@link RpcClient.getMetrics} RPC method.
+* @category Node RPC
+*/
+    export interface IGetMetricsRequest { }
+    
+
+
+/**
+* Return interface for the {@link RpcClient.submitBlock} RPC method.
+*
+*
+* @category Node RPC
+*/
+    export interface ISubmitBlockResponse {
+        report : ISubmitBlockReport;
+    }
+    
+
+
+/**
+* Argument interface for the {@link RpcClient.submitBlock} RPC method.
+*
+*
+* @category Node RPC
+*/
+    export interface ISubmitBlockRequest {
+        block : IRawBlock;
+        allowNonDAABlocks: boolean;
+    }
+    
+
+
+/**
+* Argument interface for the {@link RpcClient.getSyncStatus} RPC method.
+* @category Node RPC
+*/
+    export interface IGetSyncStatusRequest { }
+    
+
+
+/**
+* Return interface for the {@link RpcClient.getCoinSupply} RPC method.
+* @category Node RPC
+*/
+    export interface IGetCoinSupplyResponse {
+        maxSompi: bigint;
+        circulatingSompi: bigint;
+    }
+    
+
+
+/**
+* Argument interface for the {@link RpcClient.getBlocks} RPC method.
+*
+*
+* @category Node RPC
+*/
+    export interface IGetBlocksRequest {
+        lowHash? : HexString;
+        includeBlocks : boolean;
+        includeTransactions : boolean;
+    }
+    
+
+
+/**
+* Argument interface for the {@link RpcClient.getFeeEstimateExperimental} RPC method.
+* Get fee estimate from the node.
+*
+* @category Node RPC
+*/
+    export interface IGetFeeEstimateExperimentalRequest { }
+    
+
+
+/**
+* Return interface for the {@link RpcClient.getBlockTemplate} RPC method.
+*
+*
+* @category Node RPC
+*/
+    export interface IGetBlockTemplateResponse {
+        block : IRawBlock;
+    }
+    
+
+
+/**
+* Argument interface for the {@link RpcClient.getPeerAddresses} RPC method.
+* @category Node RPC
+*/
+    export interface IGetPeerAddressesRequest { }
+    
+
+
+/**
 * Return interface for the {@link RpcClient.getBlocks} RPC method.
 *
 *
@@ -1507,34 +1368,150 @@ export interface IScriptPublicKey {
 
 
 /**
-* Return interface for the {@link RpcClient.getDaaScoreTimestampEstimate} RPC method.
+* Argument interface for the {@link RpcClient.unban} RPC method.
 *
 *
 * @category Node RPC
 */
-    export interface IGetDaaScoreTimestampEstimateResponse {
-        timestamps : bigint[];
+    export interface IUnbanRequest {
+/**
+* IPv4 or IPv6 address to unban.
+*/
+        ip : string;
     }
     
 
 
 /**
-* Argument interface for the {@link RpcClient.getCurrentBlockColor} RPC method.
-*
-*
+* Return interface for the {@link RpcClient.ping} RPC method.
 * @category Node RPC
 */
-    export interface IGetCurrentBlockColorRequest {
-        hash: HexString;
+    export interface IPingResponse {
+        message?: string;
     }
     
 
 
 /**
-* Return interface for the {@link RpcClient.shutdown} RPC method.
+* Return interface for the {@link RpcClient.getBalanceByAddress} RPC method.
+*
+*
 * @category Node RPC
 */
-    export interface IShutdownResponse { }
+    export interface IGetBalanceByAddressResponse {
+        balance : bigint;
+    }
+    
+
+
+/**
+* Argument interface for the {@link RpcClient.getBlockTemplate} RPC method.
+*
+*
+* @category Node RPC
+*/
+    export interface IGetBlockTemplateRequest {
+        payAddress : Address | string;
+/**
+* `extraData` can contain a user-supplied plain text or a byte array represented by `Uint8array`.
+*/
+        extraData? : string | Uint8Array;
+    }
+    
+
+
+/**
+* Argument interface for the {@link RpcClient.getConnectedPeerInfo} RPC method.
+* @category Node RPC
+*/
+    export interface IGetConnectedPeerInfoRequest { }
+    
+
+
+/**
+* Argument interface for the {@link RpcClient.ban} RPC method.
+*
+*
+* @category Node RPC
+*/
+    export interface IBanRequest {
+/**
+* IPv4 or IPv6 address to ban.
+*/
+        ip : string;
+    }
+    
+
+
+/**
+* Return interface for the {@link RpcClient.getServerInfo} RPC method.
+* @category Node RPC
+*/
+    export interface IGetServerInfoResponse {
+        rpcApiVersion : number[];
+        serverVersion : string;
+        networkId : string;
+        hasUtxoIndex : boolean;
+        isSynced : boolean;
+        virtualDaaScore : bigint;
+    }
+    
+
+
+/**
+* Return interface for the {@link RpcClient.getCurrentBlockColor} RPC method.
+*
+*
+* @category Node RPC
+*/
+    export interface IGetCurrentBlockColorResponse {
+        blue: boolean;
+    }
+    
+
+
+    /**
+     *
+     *
+     * @category Node RPC
+     */
+    export interface IFeeEstimateVerboseExperimentalData {
+        mempoolReadyTransactionsCount : bigint;
+        mempoolReadyTransactionsTotalMass : bigint;
+        networkMassPerSecond : bigint;
+        nextBlockTemplateFeerateMin : number;
+        nextBlockTemplateFeerateMedian : number;
+        nextBlockTemplateFeerateMax : number;
+    }
+    
+
+
+/**
+* Return interface for the {@link RpcClient.getBalancesByAddresses} RPC method.
+*
+*
+* @category Node RPC
+*/
+    export interface IBalancesByAddressesEntry {
+        address : Address;
+        balance : bigint;
+    }
+/**
+*
+*
+* @category Node RPC
+*/
+    export interface IGetBalancesByAddressesResponse {
+        entries : IBalancesByAddressesEntry[];
+    }
+    
+
+
+/**
+* Argument interface for the {@link RpcClient.getConnections} RPC method.
+* @category Node RPC
+*/
+    export interface IGetConnectionsRequest { }
     
 
 
@@ -1557,228 +1534,23 @@ export interface IScriptPublicKey {
 
 
 /**
-* Return interface for the {@link RpcClient.getMempoolEntry} RPC method.
+* Return interface for the {@link RpcClient.getMempoolEntries} RPC method.
 *
 *
 * @category Node RPC
 */
-    export interface IGetMempoolEntryResponse {
-        mempoolEntry : IMempoolEntry;
+    export interface IGetMempoolEntriesResponse {
+        mempoolEntries : IMempoolEntry[];
     }
     
 
 
 /**
-* Argument interface for the {@link RpcClient.getVirtualChainFromBlockV2} RPC method.
-*
-*
+* Return interface for the {@link RpcClient.getSink} RPC method.
 * @category Node RPC
 */
-    export interface IGetVirtualChainFromBlockV2Request {
-        startHash : HexString;
-        dataVerbosityLevel?: DataVerbosityLevel;
-/**
-* If passed, this request will only return blocks that have at least minConfirmationCount number of confirmations. Confirmation is counted through the distance from virtual chain tip.
-* If not passed, it will be interpreted as 0.
-*/
-        minConfirmationCount?: number;
-    }
-    
-
-
-/**
-* Return interface for the {@link RpcClient.getSubnetwork} RPC method.
-*
-*
-* @category Node RPC
-*/
-    export interface IGetSubnetworkResponse {
-        gasLimit : bigint;
-    }
-    
-
-
-/**
-* Argument interface for the {@link RpcClient.getBlockTemplate} RPC method.
-*
-*
-* @category Node RPC
-*/
-    export interface IGetBlockTemplateRequest {
-        payAddress : Address | string;
-/**
-* `extraData` can contain a user-supplied plain text or a byte array represented by `Uint8array`.
-*/
-        extraData? : string | Uint8Array;
-    }
-    
-
-
-/**
-* Return interface for the {@link RpcClient.getFeeEstimate} RPC method.
-*
-*
-* @category Node RPC
-*/
-    export interface IGetFeeEstimateResponse {
-        estimate : IFeeEstimate;
-    }
-    
-
-
-/**
-* Return interface for the {@link RpcClient.getMempoolEntriesByAddresses} RPC method.
-*
-*
-* @category Node RPC
-*/
-    export interface IGetMempoolEntriesByAddressesResponse {
-        entries : IMempoolEntry[];
-    }
-    
-
-
-/**
-* Argument interface for the {@link RpcClient.getPeerAddresses} RPC method.
-* @category Node RPC
-*/
-    export interface IGetPeerAddressesRequest { }
-    
-
-
-/**
-* Argument interface for the {@link RpcClient.getBlocks} RPC method.
-*
-*
-* @category Node RPC
-*/
-    export interface IGetBlocksRequest {
-        lowHash? : HexString;
-        includeBlocks : boolean;
-        includeTransactions : boolean;
-    }
-    
-
-
-/**
-* Argument interface for the {@link RpcClient.unban} RPC method.
-*
-*
-* @category Node RPC
-*/
-    export interface IUnbanRequest {
-/**
-* IPv4 or IPv6 address to unban.
-*/
-        ip : string;
-    }
-    
-
-
-/**
-* Argument interface for the {@link RpcClient.getCurrentNetwork} RPC method.
-*
-*
-* @category Node RPC
-*/
-    export interface IGetCurrentNetworkRequest { }
-    
-
-
-/**
-* Argument interface for the {@link RpcClient.getMempoolEntry} RPC method.
-*
-*
-* @category Node RPC
-*/
-    export interface IGetMempoolEntryRequest {
-        transactionId : HexString;
-        includeOrphanPool? : boolean;
-        filterTransactionPool? : boolean;
-    }
-    
-
-
-/**
-* Argument interface for the {@link RpcClient.ban} RPC method.
-*
-*
-* @category Node RPC
-*/
-    export interface IBanRequest {
-/**
-* IPv4 or IPv6 address to ban.
-*/
-        ip : string;
-    }
-    
-
-
-/**
-* Return interface for the {@link RpcClient.getConnectedPeerInfo} RPC method.
-* @category Node RPC
-*/
-    export interface IGetConnectedPeerInfoResponse {
-        [key: string]: any
-    }
-    
-
-
-/**
-* Return interface for the {@link RpcClient.getBalanceByAddress} RPC method.
-*
-*
-* @category Node RPC
-*/
-    export interface IGetBalanceByAddressResponse {
-        balance : bigint;
-    }
-    
-
-
-/**
-* Return interface for the {@link RpcClient.getVirtualChainFromBlock} RPC method.
-*
-*
-* @category Node RPC
-*/
-    export interface IGetVirtualChainFromBlockResponse {
-        removedChainBlockHashes : HexString[];
-        addedChainBlockHashes : HexString[];
-        acceptedTransactionIds : IAcceptedTransactionIds[];
-    }
-    
-
-
-/**
-* Return interface for the {@link RpcClient.getUtxosByAddresses} RPC method.
-*
-*
-* @category Node RPC
-*/
-    export interface IGetUtxosByAddressesResponse {
-        entries : UtxoEntryReference[];
-    }
-    
-
-
-/**
-* Return interface for the {@link RpcClient.getBalancesByAddresses} RPC method.
-*
-*
-* @category Node RPC
-*/
-    export interface IBalancesByAddressesEntry {
-        address : Address;
-        balance : bigint;
-    }
-/**
-*
-*
-* @category Node RPC
-*/
-    export interface IGetBalancesByAddressesResponse {
-        entries : IBalancesByAddressesEntry[];
+    export interface IGetSinkResponse {
+        sink : HexString;
     }
     
 
@@ -1817,95 +1589,82 @@ export interface IScriptPublicKey {
 
 
 /**
-* Return interface for the {@link RpcClient.getCurrentBlockColor} RPC method.
+* Argument interface for the {@link RpcClient.getCurrentBlockColor} RPC method.
 *
 *
 * @category Node RPC
 */
-    export interface IGetCurrentBlockColorResponse {
-        blue: boolean;
+    export interface IGetCurrentBlockColorRequest {
+        hash: HexString;
     }
     
 
 
 /**
-* Argument interface for the {@link RpcClient.submitTransactionReplacement} RPC method.
-* Submit transaction replacement to the node.
-*
+* Argument interface for the {@link RpcClient.getBlockDagInfo} RPC method.
 * @category Node RPC
 */
-    export interface ISubmitTransactionReplacementRequest {
-        transaction : Transaction,
+    export interface IGetBlockDagInfoRequest { }
+    
+
+
+/**
+* Argument interface for the {@link RpcClient.estimateNetworkHashesPerSecond} RPC method.
+* @category Node RPC
+*/
+    export interface IEstimateNetworkHashesPerSecondRequest {
+        windowSize : number;
+        startHash? : HexString;
     }
     
 
 
 /**
-* Return interface for the {@link RpcClient.getCoinSupply} RPC method.
+* Return interface for the {@link RpcClient.getSubnetwork} RPC method.
+*
+*
 * @category Node RPC
 */
-    export interface IGetCoinSupplyResponse {
-        maxSompi: bigint;
-        circulatingSompi: bigint;
+    export interface IGetSubnetworkResponse {
+        gasLimit : bigint;
     }
     
 
 
 /**
-* Argument interface for the {@link RpcClient.getCoinSupply} RPC method.
+* Return interface for the {@link RpcClient.getDaaScoreTimestampEstimate} RPC method.
+*
+*
 * @category Node RPC
 */
-    export interface IGetCoinSupplyRequest { }
-    
-
-
-/**
-* Return interface for the {@link RpcClient.getSyncStatus} RPC method.
-* @category Node RPC
-*/
-    export interface IGetSyncStatusResponse {
-        isSynced : boolean;
+    export interface IGetDaaScoreTimestampEstimateResponse {
+        timestamps : bigint[];
     }
     
 
 
 /**
-* Return interface for the {@link RpcClient.getBlock} RPC method.
-*
-*
+* Argument interface for the {@link RpcClient.getMempoolEntries} RPC method.
 * @category Node RPC
 */
-    export interface IGetBlockResponse {
-        block : IBlock;
+    export interface IGetMempoolEntriesRequest {
+/** Whether or not to include the orphan pool (transactions which inputs are not known at this time) */
+        includeOrphanPool: boolean;
+/** Whether or not to filter out the transaction pool */
+        filterTransactionPool: boolean;
     }
     
 
 
 /**
-* Return interface for the {@link RpcClient.addPeer} RPC method.
+* Return interface for the {@link RpcClient.getCurrentNetwork} RPC method.
 *
 *
 * @category Node RPC
 */
-    export interface IAddPeerResponse { }
-    
-
-
-/**
-* Return interface for the {@link RpcClient.ban} RPC method.
-*
-*
-* @category Node RPC
-*/
-    export interface IBanResponse { }
-    
-
-
-/**
-* Argument interface for the {@link RpcClient.getSyncStatus} RPC method.
-* @category Node RPC
-*/
-    export interface IGetSyncStatusRequest { }
+    export interface IGetCurrentNetworkResponse {
+        network : string;
+    }
     
 
 
@@ -1923,44 +1682,315 @@ export interface IScriptPublicKey {
     
 
 
+/**
+* Argument interface for the {@link RpcClient.shutdown} RPC method.
+* @category Node RPC
+*/
+    export interface IShutdownRequest { }
+    
+
+
+/**
+* Argument interface for the {@link RpcClient.getMempoolEntry} RPC method.
+*
+*
+* @category Node RPC
+*/
+    export interface IGetMempoolEntryRequest {
+        transactionId : HexString;
+        includeOrphanPool? : boolean;
+        filterTransactionPool? : boolean;
+    }
+    
+
+
+/**
+* Argument interface for the {@link RpcClient.getFeeEstimate} RPC method.
+* Get fee estimate from the node.
+*
+* @category Node RPC
+*/
+    export interface IGetFeeEstimateRequest { }
+    
+
+
+/**
+* Argument interface for the {@link RpcClient.getCurrentNetwork} RPC method.
+*
+*
+* @category Node RPC
+*/
+    export interface IGetCurrentNetworkRequest { }
+    
+
+
+/**
+* Return interface for the {@link RpcClient.getUtxosByAddresses} RPC method.
+*
+*
+* @category Node RPC
+*/
+    export interface IGetUtxosByAddressesResponse {
+        entries : UtxoEntryReference[];
+    }
+    
+
+
+/**
+* Argument interface for the {@link RpcClient.submitTransaction} RPC method.
+* Submit transaction to the node.
+*
+* @category Node RPC
+*/
+    export interface ISubmitTransactionRequest {
+        transaction : Transaction,
+        allowOrphan? : boolean
+    }
+    
+
+
+/**
+* Return interface for the {@link RpcClient.getVirtualChainFromBlock} RPC method.
+*
+*
+* @category Node RPC
+*/
+    export interface IGetVirtualChainFromBlockResponse {
+        removedChainBlockHashes : HexString[];
+        addedChainBlockHashes : HexString[];
+        acceptedTransactionIds : IAcceptedTransactionIds[];
+    }
+    
+
+
+/**
+* Return interface for the {@link RpcClient.getFeeEstimate} RPC method.
+*
+*
+* @category Node RPC
+*/
+    export interface IGetFeeEstimateResponse {
+        estimate : IFeeEstimate;
+    }
+    
+
+
+/**
+* Return interface for the {@link RpcClient.getMetrics} RPC method.
+* @category Node RPC
+*/
+    export interface IGetMetricsResponse {
+        [key: string]: any
+    }
+    
+
+
+/**
+* Return interface for the {@link RpcClient.getHeaders} RPC method.
+*
+*
+* @category Node RPC
+*/
+    export interface IGetHeadersResponse {
+        headers : IHeader[];
+    }
+    
+
+
+/**
+* Argument interface for the {@link RpcClient.getSink} RPC method.
+* @category Node RPC
+*/
+    export interface IGetSinkRequest { }
+    
+
+
+/**
+* Return interface for the {@link RpcClient.getBlock} RPC method.
+*
+*
+* @category Node RPC
+*/
+    export interface IGetBlockResponse {
+        block : IBlock;
+    }
+    
+
+
+/**
+* Argument interface for the {@link RpcClient.getSubnetwork} RPC method.
+*
+*
+* @category Node RPC
+*/
+    export interface IGetSubnetworkRequest {
+        subnetworkId : HexString;
+    }
+    
+
+
     /**
-     * Data Verbosity level
+     * Accepted transaction IDs.
      *
      * @category Node RPC
      */
-    export type DataVerbosityLevel = "None" | "Low" | "High" | "Full";
+    export interface IAcceptedTransactionIds {
+        acceptingBlockHash : HexString;
+        acceptedTransactionIds : HexString[];
+    }
 
 
 
 /**
-* Return interface for the {@link RpcClient.getSink} RPC method.
+* Return interface for the {@link RpcClient.getMempoolEntriesByAddresses} RPC method.
+*
+*
 * @category Node RPC
 */
-    export interface IGetSinkResponse {
-        sink : HexString;
+    export interface IGetMempoolEntriesByAddressesResponse {
+        entries : IMempoolEntry[];
     }
     
 
 
 /**
-* Argument interface for the {@link RpcClient.getHeaders} RPC method.
-*
-*
+* Argument interface for the {@link RpcClient.ping} RPC method.
 * @category Node RPC
 */
-    export interface IGetHeadersRequest {
-        startHash : HexString;
-        limit : bigint;
-        isAscending : boolean;
+    export interface IPingRequest {
+        message?: string;
     }
     
 
 
 /**
-* Argument interface for the {@link RpcClient.getBlockCount} RPC method.
+* Argument interface for the {@link RpcClient.submitTransactionReplacement} RPC method.
+* Submit transaction replacement to the node.
+*
 * @category Node RPC
 */
-    export interface IGetBlockCountRequest { }
+    export interface ISubmitTransactionReplacementRequest {
+        transaction : Transaction,
+    }
+    
+
+
+/**
+* Argument interface for the {@link RpcClient.getServerInfo} RPC method.
+* @category Node RPC
+*/
+    export interface IGetServerInfoRequest { }
+    
+
+
+/**
+* Argument interface for the {@link RpcClient.resolveFinalityConflict} RPC method.
+*
+*
+* @category Node RPC
+*/
+    export interface IResolveFinalityConflictRequest {
+        finalityBlockHash: HexString;
+    }
+    
+
+
+/**
+* Return interface for the {@link RpcClient.addPeer} RPC method.
+*
+*
+* @category Node RPC
+*/
+    export interface IAddPeerResponse { }
+    
+
+
+/**
+* Argument interface for the {@link RpcClient.getSinkBlueScore} RPC method.
+* @category Node RPC
+*/
+    export interface IGetSinkBlueScoreRequest { }
+    
+
+
+/**
+* Argument interface for the {@link RpcClient.addPeer} RPC method.
+*
+*
+* @category Node RPC
+*/
+    export interface IAddPeerRequest {
+        peerAddress : INetworkAddress;
+        isPermanent : boolean;
+    }
+    
+
+
+/**
+* Argument interface for the {@link RpcClient.getCoinSupply} RPC method.
+* @category Node RPC
+*/
+    export interface IGetCoinSupplyRequest { }
+    
+
+
+/**
+* Argument interface for the {@link RpcClient.getDaaScoreTimestampEstimate} RPC method.
+*
+*
+* @category Node RPC
+*/
+    export interface IGetDaaScoreTimestampEstimateRequest {
+        daaScores : bigint[];
+    }
+    
+
+
+/**
+* Return interface for the {@link RpcClient.getSyncStatus} RPC method.
+* @category Node RPC
+*/
+    export interface IGetSyncStatusResponse {
+        isSynced : boolean;
+    }
+    
+
+
+/**
+* Return interface for the {@link RpcClient.estimateNetworkHashesPerSecond} RPC method.
+* @category Node RPC
+*/
+    export interface IEstimateNetworkHashesPerSecondResponse {
+        networkHashesPerSecond : bigint;
+    }
+    
+
+
+/**
+* Argument interface for the {@link RpcClient.getUtxosByAddresses} RPC method.
+*
+*
+* @category Node RPC
+*/
+    export interface IGetUtxosByAddressesRequest {
+        addresses : Address[] | string[]
+    }
+    
+
+
+/**
+* Argument interface for the {@link RpcClient.getMempoolEntriesByAddresses} RPC method.
+*
+*
+* @category Node RPC
+*/
+    export interface IGetMempoolEntriesByAddressesRequest {
+        addresses : Address[] | string[];
+/** Whether or not to include the orphan pool (transactions which inputs are not known at this time) */
+        includeOrphanPool: boolean;
+/** Whether or not to filter out the transaction pool */
+        filterTransactionPool: boolean;
+    }
     
 
 
@@ -1984,34 +2014,69 @@ export interface IScriptPublicKey {
 
 
 /**
-* Argument interface for the {@link RpcClient.getSinkBlueScore} RPC method.
+* Return interface for the {@link RpcClient.getBlockRewardInfo} RPC method.
 * @category Node RPC
 */
-    export interface IGetSinkBlueScoreRequest { }
+    export interface IGetBlockRewardInfoResponse {
+        header: IHeader;
+        blockColor: BlockColor;
+        confirmationCount?: bigint;
+        mergingChainBlockHash?: HexString;
+        rewardAmount?: bigint;
+    }
     
 
 
-    /**
-     * Accepted Acceptance Data
-     *
-     * @category Node RPC
-     */
-    export interface IChainBlockAddedTransactions {
-        chainBlockHeader: IOptionalHeader;
-        // small hack because wasm doesn't define OptionalTransaction utility
-        acceptedTransactions: Partial<ITransaction>[];
-    }
-
-
-
 /**
-* Return interface for the {@link RpcClient.getMempoolEntries} RPC method.
+* Argument interface for the {@link RpcClient.getVirtualChainFromBlockV2} RPC method.
 *
 *
 * @category Node RPC
 */
-    export interface IGetMempoolEntriesResponse {
-        mempoolEntries : IMempoolEntry[];
+    export interface IGetVirtualChainFromBlockV2Request {
+        startHash : HexString;
+        dataVerbosityLevel?: DataVerbosityLevel;
+/**
+* If passed, this request will only return blocks that have at least minConfirmationCount number of confirmations. Confirmation is counted through the distance from virtual chain tip.
+* If not passed, it will be interpreted as 0.
+*/
+        minConfirmationCount?: number;
+    }
+    
+
+
+/**
+* Argument interface for the {@link RpcClient.getBlockRewardInfo} RPC method.
+* @category Node RPC
+*/
+    export interface IGetBlockRewardInfoRequest {
+        hash: HexString;
+    }
+    
+
+
+/**
+* Argument interface for the {@link RpcClient.getBlock} RPC method.
+*
+*
+* @category Node RPC
+*/
+    export interface IGetBlockRequest {
+        hash : HexString;
+        includeTransactions : boolean;
+    }
+    
+
+
+/**
+* Argument interface for the {@link RpcClient.getUtxoReturnAddress} RPC method.
+*
+*
+* @category Node RPC
+*/
+    export interface IGetUtxoReturnAddressRequest {
+        txid: HexString;
+        acceptingBlockDaaScore: bigint;
     }
     
 
@@ -2029,31 +2094,63 @@ export interface IScriptPublicKey {
 
 
 /**
-* Argument interface for the {@link RpcClient.getBlockDagInfo} RPC method.
-* @category Node RPC
-*/
-    export interface IGetBlockDagInfoRequest { }
-    
-
-
-/**
-* Return interface for the {@link RpcClient.submitTransaction} RPC method.
+* Return interface for the {@link RpcClient.submitTransactionReplacement} RPC method.
 *
 *
 * @category Node RPC
 */
-    export interface ISubmitTransactionResponse {
+    export interface ISubmitTransactionReplacementResponse {
         transactionId : HexString;
+        replacedTransaction: Transaction;
     }
     
 
 
 /**
-* Return interface for the {@link RpcClient.estimateNetworkHashesPerSecond} RPC method.
+* Return interface for the {@link RpcClient.getPeerAddresses} RPC method.
 * @category Node RPC
 */
-    export interface IEstimateNetworkHashesPerSecondResponse {
-        networkHashesPerSecond : bigint;
+    export interface IGetPeerAddressesResponse {
+        [key: string]: any
+    }
+    
+
+
+/**
+* Return interface for the {@link RpcClient.getBlockCount} RPC method.
+* @category Node RPC
+*/
+    export interface IGetBlockCountResponse {
+        headerCount : bigint;
+        blockCount : bigint;
+    }
+    
+
+
+/**
+* Return interface for the {@link RpcClient.shutdown} RPC method.
+* @category Node RPC
+*/
+    export interface IShutdownResponse { }
+    
+
+
+/**
+* Return interface for the {@link RpcClient.unban} RPC method.
+*
+*
+* @category Node RPC
+*/
+    export interface IUnbanResponse { }
+    
+
+
+/**
+* Return interface for the {@link RpcClient.getConnectedPeerInfo} RPC method.
+* @category Node RPC
+*/
+    export interface IGetConnectedPeerInfoResponse {
+        [key: string]: any
     }
     
 
@@ -2072,19 +2169,6 @@ export interface IScriptPublicKey {
 
 
 /**
-* Argument interface for the {@link RpcClient.getMempoolEntries} RPC method.
-*
-*
-* @category Node RPC
-*/
-    export interface IGetMempoolEntriesRequest {
-        includeOrphanPool? : boolean;
-        filterTransactionPool? : boolean;
-    }
-    
-
-
-/**
 * Return interface for the {@link RpcClient.getUtxoReturnAddress} RPC method.
 *
 *
@@ -2096,46 +2180,17 @@ export interface IScriptPublicKey {
     
 
 
-/**
-* Argument interface for the {@link RpcClient.getFeeEstimateExperimental} RPC method.
-* Get fee estimate from the node.
-*
-* @category Node RPC
-*/
-    export interface IGetFeeEstimateExperimentalRequest { }
-    
-
-
-/**
-* Return interface for the {@link RpcClient.submitTransactionReplacement} RPC method.
-*
-*
-* @category Node RPC
-*/
-    export interface ISubmitTransactionReplacementResponse {
-        transactionId : HexString;
-        replacedTransaction: Transaction;
-    }
-    
-
-
-/**
-* Argument interface for the {@link RpcClient.getSink} RPC method.
-* @category Node RPC
-*/
-    export interface IGetSinkRequest { }
-    
-
-
-/**
-* Argument interface for the {@link RpcClient.estimateNetworkHashesPerSecond} RPC method.
-* @category Node RPC
-*/
-    export interface IEstimateNetworkHashesPerSecondRequest {
-        windowSize : number;
-        startHash? : HexString;
-    }
-    
+            /**
+             * Mempool entry.
+             * 
+             * @category Node RPC
+             */
+            export interface IMempoolEntry {
+                fee : bigint;
+                transaction : ITransaction;
+                isOrphan : boolean;
+            }
+        
 
 
         /**
@@ -2184,17 +2239,28 @@ export interface IScriptPublicKey {
         
 
 
-            /**
-             * Mempool entry.
-             * 
-             * @category Node RPC
-             */
-            export interface IMempoolEntry {
-                fee : bigint;
-                transaction : ITransaction;
-                isOrphan : boolean;
-            }
-        
+/**
+ * Script builder engine flags.
+ *
+ * @category TxScript
+ */
+export interface ScriptBuilderFlags {
+    /** Whether or not covenant opcodes and post-Toccata script limits are enabled. */
+    covenantsEnabled?: boolean;
+    /** Script units charged for each signature operation. Defaults to the native engine default. */
+    sigopScriptUnits?: bigint | number;
+}
+
+/**
+ * Script builder options.
+ *
+ * @category TxScript
+ */
+export interface ScriptBuilderOptions {
+    /** Engine flags used by the underlying native ScriptBuilder. */
+    flags?: ScriptBuilderFlags;
+}
+
 
 
     /**
@@ -2213,6 +2279,1687 @@ export interface IScriptPublicKey {
         port?: number;
     }
 
+
+
+/**
+ * 
+ * 
+ * @category Wallet SDK
+ * 
+ */
+export enum TransactionKind {
+    Reorg = "reorg",
+    Stasis = "stasis",
+    Batch = "batch",
+    Change = "change",
+    Incoming = "incoming",
+    Outgoing = "outgoing",
+    External = "external",
+    TransferIncoming = "transfer-incoming",
+    TransferOutgoing = "transfer-outgoing",
+}
+
+
+
+
+/**
+ * Type of a binding record.
+ * @see {@link IBinding}, {@link ITransactionDataVariant}, {@link ITransactionRecord}
+ * @category Wallet SDK
+ */
+export enum BindingType {
+    /**
+     * The data structure is associated with a user-supplied id.
+     * @see {@link IBinding}
+     */
+    Custom = "custom",
+    /**
+     * The data structure is associated with a wallet account.
+     * @see {@link IBinding}, {@link Account}
+     */
+    Account = "account",
+}
+
+/**
+ * Internal transaction data contained within the transaction record.
+ * @see {@link ITransactionRecord}
+ * @category Wallet SDK
+ */
+export interface IBinding {
+    type : BindingType;
+    id : HexString;
+}
+
+
+
+    /**
+     * Interface defining response from the {@link createTransactions} function.
+     * 
+     * @category Wallet SDK
+     */
+    export interface ICreateTransactions {
+        /**
+         * Array of pending unsigned transactions.
+         */
+        transactions : PendingTransaction[];
+        /**
+         * Summary of the transaction generation process.
+         */
+        summary : GeneratorSummary;
+    }
+    
+
+
+
+
+
+    /**
+     * UtxoContext constructor arguments.
+     * 
+     * @see {@link UtxoProcessor}, {@link UtxoContext}, {@link RpcClient}
+     * @category Wallet SDK
+     */
+    export interface IUtxoContextArgs {
+        /**
+         * Associated UtxoProcessor.
+         */
+        processor: UtxoProcessor;
+        /**
+         * Optional id for the UtxoContext.
+         * **The id must be a valid 32-byte hex string.**
+         * You can use {@link sha256FromBinary} or {@link sha256FromText} to generate a valid id.
+         * 
+         * If not provided, a random id will be generated.
+         * The IDs are deterministic, based on the order UtxoContexts are created.
+         */
+        id?: HexString;
+    }
+    
+
+
+/**
+ * {@link UtxoContext} (wallet account) balance.
+ * @category Wallet SDK
+ */
+export interface IBalance {
+    /**
+     * Total amount of Kaspa (in SOMPI) available for 
+     * spending.
+     */
+    mature: bigint;
+    /**
+     * Total amount of Kaspa (in SOMPI) that has been 
+     * received and is pending confirmation.
+     */
+    pending: bigint;
+    /**
+     * Total amount of Kaspa (in SOMPI) currently 
+     * being sent as a part of the outgoing transaction
+     * but has not yet been accepted by the network.
+     */
+    outgoing: bigint;
+    /**
+     * Number of UTXOs available for spending.
+     */
+    matureUtxoCount: number;
+    /**
+     * Number of UTXOs that have been received and 
+     * are pending confirmation.
+     */
+    pendingUtxoCount: number;
+    /**
+     * Number of UTXOs currently in stasis (coinbase 
+     * transactions received as a result of mining).
+     * Unlike regular user transactions, coinbase 
+     * transactions go through `stasis->pending->mature`
+     * stages. Client applications should ignore `stasis`
+     * stages and should process transactions only when
+     * they have reached the `pending` stage. However, 
+     * `stasis` information can be used for informative 
+     * purposes to indicate that coinbase transactions
+     * have arrived.
+     */
+    stasisUtxoCount: number;
+}
+
+
+
+    /**
+     * 
+     * @category Wallet SDK
+     */
+    export interface IFees {
+        amount: bigint;
+        source?: FeeSource;
+    }
+    
+
+
+/**
+* Return interface for the {@link Wallet.accountsPskbBroadcast} method.
+*
+*
+* @category Wallet API
+*/
+    export interface IAccountsPskbBroadcastResponse {
+        transactionIds : HexString[];
+    }
+    
+
+
+/**
+* Return interface for the {@link Wallet.accountsEnsureDefault} method.
+*
+*
+* @category Wallet API
+*/
+    export interface IAccountsEnsureDefaultResponse {
+        accountDescriptor : IAccountDescriptor;
+    }
+    
+
+
+/**
+* Argument interface for the {@link Wallet.walletClose} method.
+*
+*
+* @category Wallet API
+*/
+    export interface IWalletCloseRequest { }
+    
+
+
+/**
+* Argument interface for the {@link Wallet.accountsCommitRevealManual} method.
+*
+* Atomic commit reveal operation using given payment outputs.
+*
+* The startDestination stands for the commit transaction and the endDestination
+* for the reveal transaction.
+*
+* The scriptSig will be used to spend the UTXO of the first transaction and
+* must therefore match the startDestination output P2SH.
+*
+* Set revealFeeSompi or reflect the reveal fee transaction on endDestination
+* output amount.
+*
+* The default revealFeeSompi is 100_000 sompi.
+*
+* @category Wallet API
+*/
+    export interface IAccountsCommitRevealManualRequest {
+        accountId : HexString;
+        scriptSig : Uint8Array | HexString;
+        startDestination: IPaymentOutput;
+        endDestination: IPaymentOutput;
+        walletSecret : string;
+        paymentSecret? : string;
+        feeRate? : number;
+        revealFeeSompi : bigint;
+        payload? : Uint8Array | HexString;
+    }
+    
+
+
+/**
+* Argument interface for the {@link Wallet.transactionsReplaceNote} method.
+*
+*
+* @category Wallet API
+*/
+    export interface ITransactionsReplaceNoteRequest {
+/**
+* The id of account the transaction belongs to.
+*/
+        accountId: HexString,
+/**
+* The network id of the transaction.
+*/
+        networkId: NetworkId | string,
+/**
+* The id of the transaction.
+*/
+        transactionId: HexString,
+/**
+* Optional note string to replace the existing note.
+* If not supplied, the note will be removed.
+*/
+        note?: string,
+    }
+    
+
+
+/**
+* Return interface for the {@link Wallet.walletImport} method.
+*
+*
+* @category Wallet API
+*/
+    export interface IWalletImportResponse { }
+    
+
+
+/**
+* Return interface for the {@link Wallet.walletReload} method.
+*
+*
+* @category Wallet API
+*/
+    export interface IWalletReloadResponse { }
+    
+
+
+/**
+* Argument interface for the {@link Wallet.accountsCreate} method.
+*
+*
+* @category Wallet API
+*/
+    export type IAccountsCreateRequest = {
+        walletSecret: string;
+        type: "bip32";
+        accountName:string;
+        accountIndex?:number;
+        prvKeyDataId:string;
+        paymentSecret?:string;
+    } | {
+        walletSecret: string;
+        type: "kaspa-keypair-standard";
+        accountName:string;
+        prvKeyDataId:string;
+        paymentSecret?:string;
+        ecdsa?:boolean;
+    };
+
+    //   |{
+    //     walletSecret: string;
+    //     type: "bip32-readonly";
+    //     accountName:string;
+    //     accountIndex?:number;
+    //     pubkey:HexString;
+    //     paymentSecret?:string;
+    //  }
+    
+
+
+/**
+* Return interface for the {@link Wallet.accountsCreate} method.
+*
+*
+* @category Wallet API
+*/
+    export interface IAccountsCreateResponse {
+        accountDescriptor : IAccountDescriptor;
+    }
+    
+
+
+/**
+* Argument interface for the {@link Wallet.walletImport} method.
+*
+*
+* @category Wallet API
+*/
+    export interface IWalletImportRequest {
+        walletSecret: string;
+        walletData: HexString | Uint8Array;
+    }
+    
+
+
+/**
+* Argument interface for the {@link Wallet.accountsPskbBroadcast} method.
+*
+*
+* @category Wallet API
+*/
+    export interface IAccountsPskbBroadcastRequest {
+        accountId : HexString;
+        pskb : string;
+    }
+    
+
+
+/**
+* Return interface for the {@link Wallet.accountsDiscovery} method.
+*
+*
+* @category Wallet API
+*/
+    export interface IAccountsDiscoveryResponse {
+        lastAccountIndexFound : number;
+    }
+    
+
+
+/**
+* Argument interface for the {@link Wallet.accountsImport} method.
+*
+*
+* @category Wallet API
+*/
+    export interface IAccountsImportRequest {
+        walletSecret: string;
+        // TODO
+    }
+    
+
+
+/**
+* Return interface for the {@link Wallet.prvKeyDataCreate} method.
+*
+*
+* @category Wallet API
+*/
+    export interface IPrvKeyDataCreateResponse {
+        prvKeyDataId: HexString;
+    }
+    
+
+
+/**
+* Argument interface for the {@link Wallet.accountsGetUtxos} method.
+*
+*
+* @category Wallet API
+*/
+    export interface IAccountsGetUtxosRequest {
+        accountId : HexString;
+        addresses : Address[] | string[];
+        minAmountSompi? : bigint;
+    }
+    
+
+
+/**
+* Argument interface for the {@link Wallet.accountsRename} method.
+*
+*
+* @category Wallet API
+*/
+    export interface IAccountsRenameRequest {
+        accountId: string;
+        name?: string;
+        walletSecret: string;
+    }
+    
+
+
+/**
+* Return interface for the {@link Wallet.accountsCommitReveal} method.
+*
+*
+* @category Wallet API
+*/
+    export interface IAccountsCommitRevealResponse {
+        transactionIds : HexString[];
+    }
+    
+
+
+/**
+* Return interface for the {@link Wallet.walletChangeSecret} method.
+*
+*
+* @category Wallet API
+*/
+    export interface IWalletChangeSecretResponse { }
+    
+
+
+/**
+* Argument interface for the {@link Wallet.prvKeyDataCreate} method.
+*
+*
+* @category Wallet API
+*/
+    export interface IPrvKeyDataCreateRequest {
+/** Wallet encryption secret */
+        walletSecret: string;
+/** Optional name of the private key */
+        name? : string;
+/**
+* Optional key secret (BIP39 passphrase).
+*
+* If supplied, all operations requiring access
+* to the key will require the `paymentSecret`
+* to be provided.
+*/
+        paymentSecret? : string;
+/** BIP39 mnemonic phrase (12 or 24 words) if kind is mnemonic */
+        mnemonic? : string;
+/** Secret key if kind is secretKey */
+        secretKey? : string;
+/** Kind of the private key data */
+        kind : "mnemonic" | "secretKey";
+    }
+    
+
+
+/**
+* Return interface for the {@link Wallet.accountsGet} method.
+*
+*
+* @category Wallet API
+*/
+    export interface IAccountsGetResponse {
+        accountDescriptor: IAccountDescriptor;
+    }
+    
+
+
+/**
+* Return interface for the {@link Wallet.transactionsDataGet} method.
+*
+*
+* @category Wallet API
+*/
+    export interface ITransactionsDataGetResponse {
+        accountId : HexString;
+        transactions : ITransactionRecord[];
+        start : bigint;
+        total : bigint;
+    }
+    
+
+
+/**
+* Argument interface for the {@link Wallet.accountsEstimate} method.
+*
+*
+* @category Wallet API
+*/
+    export interface IAccountsEstimateRequest {
+        accountId : HexString;
+        destination : IPaymentOutput[];
+        feeRate? : number;
+        priorityFeeSompi : IFees | bigint;
+        payload? : Uint8Array | string;
+    }
+    
+
+
+/**
+* Return interface for the {@link Wallet.walletCreate} method.
+*
+*
+* @category Wallet API
+*/
+    export interface IWalletCreateResponse {
+        walletDescriptor: IWalletDescriptor;
+        storageDescriptor: IStorageDescriptor;
+    }
+    
+
+
+/**
+* Argument interface for the {@link Wallet.accountsActivate} method.
+*
+*
+* @category Wallet API
+*/
+    export interface IAccountsActivateRequest {
+        accountIds?: HexString[],
+    }
+    
+
+
+/**
+* Argument interface for the {@link Wallet.accountsCommitReveal} method.
+*
+* Atomic commit reveal operation using parameterized account address to
+* dynamically generate the commit P2SH address.
+*
+* The account address is selected through addressType and addressIndex
+* and will be used to complete the script signature.
+*
+* A placeholder of format {{pubkey}} is to be provided inside ScriptSig
+* in order to be superseded by the selected address' payload.
+*
+* The selected address will also be used to spend reveal transaction to.
+*
+* The default revealFeeSompi is 100_000 sompi.
+*
+* @category Wallet API
+*/
+    export interface IAccountsCommitRevealRequest {
+        accountId : HexString;
+        addressType : CommitRevealAddressKind;
+        addressIndex : number;
+        scriptSig : Uint8Array | HexString;
+        walletSecret : string;
+        commitAmountSompi : bigint;
+        paymentSecret? : string;
+        feeRate? : number;
+        revealFeeSompi : bigint;
+        payload? : Uint8Array | HexString;
+    }
+    
+
+
+    export interface IFeeRateEstimateResponse {
+        priority : IFeeRateEstimateBucket,
+        normal : IFeeRateEstimateBucket,
+        low : IFeeRateEstimateBucket,
+    }
+    
+
+
+/**
+* Return interface for the {@link Wallet.accountsActivate} method.
+*
+*
+* @category Wallet API
+*/
+    export interface IAccountsActivateResponse { }
+    
+
+
+/**
+* Return interface for the {@link Wallet.transactionsReplaceMetadata} method.
+*
+*
+* @category Wallet API
+*/
+    export interface ITransactionsReplaceMetadataResponse { }
+    
+
+
+/**
+* Argument interface for the {@link Wallet.prvKeyDataRemove} method.
+*
+*
+* @category Wallet API
+*/
+    export interface IPrvKeyDataRemoveRequest {
+        walletSecret: string;
+        prvKeyDataId: HexString;
+    }
+    
+
+
+/**
+* Return interface for the {@link Wallet.accountsTransfer} method.
+*
+*
+* @category Wallet API
+*/
+    export interface IAccountsTransferResponse {
+        generatorSummary : GeneratorSummary;
+        transactionIds : HexString[];
+    }
+    
+
+
+/**
+* Return interface for the {@link Wallet.accountsDeactivate} method.
+*
+*
+* @category Wallet API
+*/
+    export interface IAccountsDeactivateResponse { }
+    
+
+
+/**
+* Return interface for the {@link Wallet.prvKeyDataGet} method.
+*
+*
+* @category Wallet API
+*/
+    export interface IPrvKeyDataGetResponse {
+        // prvKeyData: PrvKeyData,
+    }
+    
+
+
+/**
+* Argument interface for the {@link Wallet.accountsEnumerate} method.
+*
+*
+* @category Wallet API
+*/
+    export interface IAccountsEnumerateRequest { }
+    
+
+
+/**
+* Argument interface for the {@link Wallet.accountsDiscovery} method.
+*
+*
+* @category Wallet API
+*/
+    export interface IAccountsDiscoveryRequest {
+        discoveryKind: AccountsDiscoveryKind,
+        accountScanExtent: number,
+        addressScanExtent: number,
+        bip39_passphrase?: string,
+        bip39_mnemonic: string,
+    }
+    
+
+
+/**
+* Argument interface for the {@link Wallet.disconnect} method.
+*
+*
+* @category Wallet API
+*/
+    export interface IDisconnectRequest { }
+    
+
+
+/**
+* Return interface for the {@link Wallet.accountsCreateNewAddress} method.
+*
+*
+* @category Wallet API
+*/
+    export interface IAccountsCreateNewAddressResponse {
+        address: Address;
+    }
+    
+
+
+/**
+* Return interface for the {@link Wallet.getStatus} method.
+*
+*
+* @category Wallet API
+*/
+    export interface IGetStatusResponse {
+        isConnected : boolean;
+        isSynced : boolean;
+        isOpen : boolean;
+        url? : string;
+        networkId? : NetworkId;
+        context? : HexString;
+    }
+    
+
+
+/**
+* Return interface for the {@link Wallet.walletExport} method.
+*
+*
+* @category Wallet API
+*/
+    export interface IWalletExportResponse {
+        walletData: HexString;
+    }
+    
+
+
+/**
+* Return interface for the {@link Wallet.addressBookEnumerate} method.
+*
+*
+* @category Wallet API
+*/
+    export interface IAddressBookEnumerateResponse {
+        // TODO
+    }
+    
+
+
+/**
+ * @categoryDescription Wallet API
+ * Wallet API for interfacing with Rusty Kaspa Wallet implementation.
+ */
+
+
+
+/**
+* Return interface for the {@link Wallet.accountsSend} method.
+*
+*
+* @category Wallet API
+*/
+    export interface IAccountsSendResponse {
+/**
+* Summary produced by the transaction generator.
+*/
+        generatorSummary : GeneratorSummary;
+/**
+* Hex identifiers of successfully submitted transactions.
+*/
+        transactionIds : HexString[];
+    }
+    
+
+
+/**
+* Return interface for the {@link Wallet.accountsPskbSign} method.
+*
+*
+* @category Wallet API
+*/
+    export interface IAccountsPskbSignResponse {
+/**
+* signed PSKB.
+*/
+        pskb: string;
+    }
+    
+
+
+/**
+* Argument interface for the {@link Wallet.flush} method.
+*
+*
+* @category Wallet API
+*/
+    export interface IFlushRequest {
+        walletSecret : string;
+    }
+    
+
+
+/**
+* Argument interface for the {@link Wallet.batch} method.
+* Suspend storage operations until invocation of flush().
+*
+* @category Wallet API
+*/
+    export interface IBatchRequest { }
+    
+
+
+/**
+* Argument interface for the {@link Wallet.addressBookEnumerate} method.
+*
+*
+* @category Wallet API
+*/
+    export interface IAddressBookEnumerateRequest { }
+    
+
+
+/**
+* Argument interface for the {@link Wallet.walletExport} method.
+*
+*
+* @category Wallet API
+*/
+    export interface IWalletExportRequest {
+        walletSecret: string;
+        includeTransactions: boolean;
+    }
+    
+
+
+/**
+* Argument interface for the {@link Wallet.walletEnumerate} method.
+*
+*
+* @category Wallet API
+*/
+    export interface IWalletEnumerateRequest { }
+    
+
+
+/**
+* Argument interface for the {@link Wallet.accountsDeactivate} method.
+*
+*
+* @category Wallet API
+*/
+    export interface IAccountsDeactivateRequest {
+        accountIds?: string[];
+    }
+    
+
+
+/**
+* Argument interface for the {@link Wallet.accountsTransfer} method.
+*
+*
+* @category Wallet API
+*/
+    export interface IAccountsTransferRequest {
+        sourceAccountId : HexString;
+        destinationAccountId : HexString;
+        walletSecret : string;
+        paymentSecret? : string;
+        feeRate? : number;
+        priorityFeeSompi? : IFees | bigint;
+        transferAmountSompi : bigint;
+    }
+    
+
+
+/**
+* Return interface for the {@link Wallet.connect} method.
+*
+*
+* @category Wallet API
+*/
+    export interface IConnectResponse { }
+    
+
+
+/**
+* Return interface for the {@link Wallet.prvKeyDataEnumerate} method.
+*
+* Response returning a list of private key ids, their optional names and properties.
+*
+* @see {@link IPrvKeyDataInfo}
+* @category Wallet API
+*/
+    export interface IPrvKeyDataEnumerateResponse {
+        prvKeyDataList: IPrvKeyDataInfo[],
+    }
+    
+
+
+/**
+* Return interface for the {@link Wallet.transactionsReplaceNote} method.
+*
+*
+* @category Wallet API
+*/
+    export interface ITransactionsReplaceNoteResponse { }
+    
+
+
+/**
+* Return interface for the {@link Wallet.accountsImport} method.
+*
+*
+* @category Wallet API
+*/
+    export interface IAccountsImportResponse {
+        // TODO
+    }
+    
+
+
+/**
+* Return interface for the {@link Wallet.retainContext} method.
+*
+*
+* @category Wallet API
+*/
+    export interface IRetainContextResponse {
+    }
+    
+
+
+/**
+* Return interface for the {@link Wallet.accountsCommitRevealManual} method.
+*
+*
+* @category Wallet API
+*/
+    export interface IAccountsCommitRevealManualResponse {
+        transactionIds : HexString[];
+    }
+    
+
+
+/**
+* Argument interface for the {@link Wallet.walletCreate} method.
+*
+* If filename is not supplied, the filename will be derived from the wallet title.
+* If both wallet title and filename are not supplied, the wallet will be create
+* with the default filename `kaspa`.
+*
+* @category Wallet API
+*/
+    export interface IWalletCreateRequest {
+/** Wallet encryption secret */
+        walletSecret: string;
+/** Optional wallet title */
+        title?: string;
+/** Optional wallet filename */
+        filename?: string;
+/** Optional user hint */
+        userHint?: string;
+/**
+* Overwrite wallet data if the wallet with the same filename already exists.
+* (Use with caution!)
+*/
+        overwriteWalletStorage?: boolean;
+    }
+    
+
+
+/**
+* Return interface for the {@link Wallet.accountsEstimate} method.
+*
+*
+* @category Wallet API
+*/
+    export interface IAccountsEstimateResponse {
+        generatorSummary : GeneratorSummary;
+    }
+    
+
+
+    export interface IFeeRateEstimateBucket {
+        feeRate : number;
+        seconds : number;
+    }
+    
+
+
+/**
+* Argument interface for the {@link Wallet.transactionsReplaceMetadata} method.
+* Metadata is a wallet-specific string that can be used to store arbitrary data.
+* It should contain a serialized JSON string with `key` containing the custom
+* data stored by the wallet.  When interacting with metadata, the wallet should
+* always deserialize the JSON string and then serialize it again after making
+* changes, preserving any foreign keys that it might encounter.
+*
+* To preserve foreign metadata, the pattern of access should be:
+* `Get -> Modify -> Replace`
+*
+* @category Wallet API
+*/
+    export interface ITransactionsReplaceMetadataRequest {
+/**
+* The id of account the transaction belongs to.
+*/
+        accountId: HexString,
+/**
+* The network id of the transaction.
+*/
+        networkId: NetworkId | string,
+/**
+* The id of the transaction.
+*/
+        transactionId: HexString,
+/**
+* Optional metadata string to replace the existing metadata.
+* If not supplied, the metadata will be removed.
+*/
+        metadata?: string,    
+    }
+    
+
+
+    export interface IFeeRateEstimateRequest { }
+    
+
+
+/**
+* Return interface for the {@link Wallet.walletClose} method.
+*
+*
+* @category Wallet API
+*/
+    export interface IWalletCloseResponse { }
+    
+
+
+/**
+* Argument interface for the {@link Wallet.accountsEnsureDefault} method.
+*
+*
+* @category Wallet API
+*/
+    export interface IAccountsEnsureDefaultRequest {
+        walletSecret: string;
+        paymentSecret?: string;
+        type : AccountKind | string;
+        mnemonic? : string;
+    }
+    
+
+
+/**
+* Argument interface for the {@link Wallet.retainContext} method.
+*
+*
+* @category Wallet API
+*/
+    export interface IRetainContextRequest {
+/**
+* Optional context creation name.
+*/
+        name : string;
+/**
+* Optional context data to retain.
+*/
+        data? : string;
+    }
+    
+
+
+/**
+* Argument interface for the {@link Wallet.accountsPskbSign} method.
+*
+*
+* @category Wallet API
+*/
+    export interface IAccountsPskbSignRequest {
+/**
+* Hex identifier of the account.
+*/
+        accountId : HexString;
+/**
+* Wallet encryption secret.
+*/
+        walletSecret : string;
+/**
+* Optional key encryption secret or BIP39 passphrase.
+*/
+        paymentSecret? : string;
+
+/**
+* PSKB to sign.
+*/
+        pskb : string;
+
+/**
+* Address to sign for.
+*/
+        signForAddress? : Address | string;
+    }
+    
+
+
+/**
+* Argument interface for the {@link Wallet.walletChangeSecret} method.
+*
+*
+* @category Wallet API
+*/
+    export interface IWalletChangeSecretRequest {
+        oldWalletSecret: string;
+        newWalletSecret: string;
+    }
+    
+
+
+/**
+* Return interface for the {@link Wallet.accountsPskbSend} method.
+*
+*
+* @category Wallet API
+*/
+    export interface IAccountsPskbSendResponse {
+        transactionIds : HexString[];
+    }
+    
+
+
+/**
+* Return interface for the {@link Wallet.accountsGetUtxos} method.
+*
+*
+* @category Wallet API
+*/
+    export interface IAccountsGetUtxosResponse {
+        utxos : UtxoEntry[];
+    }
+    
+
+
+/**
+* Argument interface for the {@link Wallet.getStatus} method.
+*
+*
+* @category Wallet API
+*/
+    export interface IGetStatusRequest {
+/**
+* Optional context creation name.
+* @see {@link IRetainContextRequest}
+*/
+        name? : string;
+    }
+    
+
+
+/**
+* Argument interface for the {@link Wallet.walletReload} method.
+*
+*
+* @category Wallet API
+*/
+    export interface IWalletReloadRequest {
+/**
+* Reactivate accounts that are active before the reload.
+*/
+        reactivate: boolean;
+    }
+    
+
+
+/**
+* Argument interface for the {@link Wallet.accountsGet} method.
+*
+*
+* @category Wallet API
+*/
+    export interface IAccountsGetRequest {
+        accountId: string;
+    }
+    
+
+
+/**
+* Return interface for the {@link Wallet.walletOpen} method.
+*
+*
+* @category Wallet API
+*/
+    export interface IWalletOpenResponse {
+        accountDescriptors: IAccountDescriptor[];
+    }
+    
+
+
+    export interface IFeeRatePollerEnableResponse { }
+    
+
+
+/**
+* Argument interface for the {@link Wallet.accountsCreateNewAddress} method.
+*
+*
+* @category Wallet API
+*/
+    export interface IAccountsCreateNewAddressRequest {
+        accountId: string;
+        addressKind?: NewAddressKind | string,
+    }
+    
+
+
+/**
+* Return interface for the {@link Wallet.batch} method.
+*
+*
+* @category Wallet API
+*/
+    export interface IBatchResponse { }
+    
+
+
+/**
+* Argument interface for the {@link Wallet.walletOpen} method.
+*
+* @category Wallet API
+*/
+    export interface IWalletOpenRequest {
+        walletSecret: string;
+        filename?: string;
+        accountDescriptors: boolean;
+    }
+    
+
+
+    export interface IFeeRatePollerDisableRequest { }
+    
+
+
+/**
+* Argument interface for the {@link Wallet.transactionsDataGet} method.
+*
+*
+* @category Wallet API
+*/
+    export interface ITransactionsDataGetRequest {
+        accountId : HexString;
+        networkId : NetworkId | string;
+        filter? : TransactionKind[];
+        start : bigint;
+        end : bigint;
+    }
+    
+
+
+/**
+* Return interface for the {@link Wallet.accountsRename} method.
+*
+*
+* @category Wallet API
+*/
+    export interface IAccountsRenameResponse { }
+    
+
+
+/**
+* Argument interface for the {@link Wallet.prvKeyDataGet} method.
+*
+*
+* @category Wallet API
+*/
+    export interface IPrvKeyDataGetRequest {
+        walletSecret: string;
+        prvKeyDataId: HexString;
+    }
+    
+
+
+/**
+* Return interface for the {@link Wallet.walletEnumerate} method.
+*
+*
+* @category Wallet API
+*/
+    export interface IWalletEnumerateResponse {
+        walletDescriptors: WalletDescriptor[];
+    }
+    
+
+
+/**
+* Return interface for the {@link Wallet.disconnect} method.
+*
+*
+* @category Wallet API
+*/
+    export interface IDisconnectResponse { }
+    
+
+
+/**
+* Argument interface for the {@link Wallet.accountsPskbSend} method.
+*
+*
+* @category Wallet API
+*/
+    export interface IAccountsPskbSendRequest {
+/**
+* Hex identifier of the account.
+*/
+        accountId : HexString;
+/**
+* Wallet encryption secret.
+*/
+        walletSecret : string;
+/**
+* Optional key encryption secret or BIP39 passphrase.
+*/
+        paymentSecret? : string;
+
+/**
+* PSKB to sign.
+*/
+        pskb : string;
+
+/**
+* Address to sign for.
+*/
+        signForAddress? : Address | string;
+    }
+    
+
+
+/**
+* Return interface for the {@link Wallet.prvKeyDataRemove} method.
+*
+*
+* @category Wallet API
+*/
+    export interface IPrvKeyDataRemoveResponse { }
+    
+
+
+/**
+* Argument interface for the {@link Wallet.prvKeyDataEnumerate} method.
+*
+*
+* @category Wallet API
+*/
+    export interface IPrvKeyDataEnumerateRequest { }
+    
+
+
+    /**
+     * 
+     * 
+     * @category Wallet API
+     */
+    export interface INetworkParams {
+        coinbaseTransactionMaturityPeriodDaa : number;
+        coinbaseTransactionStasisPeriodDaa : number;
+        userTransactionMaturityPeriodDaa : number;
+        additionalCompoundTransactionMass : number;
+    }
+    
+
+
+    export interface IFeeRatePollerDisableResponse { }
+    
+
+
+/**
+* Return interface for the {@link Wallet.flush} method.
+*
+*
+* @category Wallet API
+*/
+    export interface IFlushResponse { }
+    
+
+
+    export interface IFeeRatePollerEnableRequest {
+        intervalSeconds : number;
+    }
+    
+
+
+/**
+* Argument interface for the {@link Wallet.connect} method.
+*
+*
+* @category Wallet API
+*/
+    export interface IConnectRequest {
+        // destination wRPC node URL (if omitted, the resolver is used)
+        url? : string;
+        // network identifier
+        networkId : NetworkId | string;
+        // retry on error
+        retryOnError? : boolean;
+        // block async connect (method will not return until the connection is established)
+        block? : boolean;
+        // require node to be synced (fail otherwise)
+        requireSync? : boolean;
+    }
+    
+
+
+/**
+* Argument interface for the {@link Wallet.accountsSend} method.
+*
+*
+* @category Wallet API
+*/
+    export interface IAccountsSendRequest {
+/**
+* Hex identifier of the account.
+*/
+        accountId : HexString;
+/**
+* Wallet encryption secret.
+*/
+        walletSecret : string;
+/**
+* Optional key encryption secret or BIP39 passphrase.
+*/
+        paymentSecret? : string;
+/**
+* Fee rate in sompi per 1 gram of mass.
+*/
+        feeRate? : number;
+/**
+* Priority fee.
+*/
+        priorityFeeSompi? : IFees | bigint;
+/**
+*
+*/
+        payload? : Uint8Array | HexString;
+/**
+* If not supplied, the destination will be the change address resulting in a UTXO compound transaction.
+*/
+        destination? : IPaymentOutput[];
+    }
+    
+
+
+/**
+* Return interface for the {@link Wallet.accountsEnumerate} method.
+*
+*
+* @category Wallet API
+*/
+    export interface IAccountsEnumerateResponse {
+        accountDescriptors: IAccountDescriptor[];
+    }
+    
+
+
+
+export interface IPrvKeyDataArgs {
+    prvKeyDataId: HexString;
+    paymentSecret?: string;
+}
+
+export interface IAccountCreateArgsBip32 {
+    accountName?: string;
+    accountIndex?: number;
+}
+
+/**
+ * @category Wallet API
+ */
+export interface IAccountCreateArgs {
+    type : "bip32";
+    args : IAccountCreateArgsBip32;
+    prvKeyDataArgs? : IPrvKeyDataArgs;
+}
+
+
+
+/**
+ * Wallet storage information.
+ */
+export interface IStorageDescriptor {
+    kind: string;
+    data: string;
+}
+
+
+
+/**
+ * Wallet storage information.
+ * 
+ * @category Wallet API
+ */
+export interface IWalletDescriptor {
+    title?: string;
+    filename: string;
+}
+
+
+
+/**
+ * Configuration for the transaction {@link Generator}. This interface
+ * allows you to specify UTXO sources, transaction outputs, change address,
+ * priority fee, and other transaction parameters.
+ * 
+ * If the total number of UTXOs needed to satisfy the transaction outputs
+ * exceeds maximum allowed number of UTXOs per transaction (limited by
+ * the maximum transaction mass), the {@link Generator} will produce 
+ * multiple chained transactions to the change address and then used these
+ * transactions as a source for the "final" transaction.
+ * 
+ * @see 
+ *      {@link kaspaToSompi},
+ *      {@link Generator}, 
+ *      {@link PendingTransaction}, 
+ *      {@link UtxoContext}, 
+ *      {@link UtxoEntry},
+ *      {@link createTransactions},
+ *      {@link estimateTransactions}
+ * @category Wallet SDK
+ */
+interface IGeneratorSettingsObject {
+    /** 
+     * Final transaction outputs (do not supply change transaction).
+     * 
+     * Typical usage: { address: "kaspa:...", amount: 1000n }
+     */
+    outputs: PaymentOutput | IPaymentOutput[];
+    /** 
+     * Address to be used for change, if any. 
+     */
+    changeAddress: Address | string;
+    /**
+     * Fee rate in SOMPI per 1 gram of mass.
+     * 
+     * Fee rate is applied to all transactions generated by the {@link Generator}.
+     * This includes batch and final transactions. If not set, the fee rate is 
+     * not applied.
+     */
+    feeRate?: number;
+    /** 
+     * Priority fee in SOMPI.
+     * 
+     * If supplying `bigint` value, it will be interpreted as a sender-pays fee.
+     * Alternatively you can supply an object with `amount` and `source` properties
+     * where `source` contains the {@link FeeSource} enum.
+     * 
+     * **IMPORTANT:* When sending an outbound transaction (transaction that
+     * contains outputs), the `priorityFee` must be set, even if it is zero.
+     * However, if the transaction is missing outputs (and thus you are
+     * creating a compound transaction against your change address),
+     * `priorityFee` should not be set (i.e. it should be `undefined`).
+     * 
+     * @see {@link IFees}, {@link FeeSource}
+     */
+    priorityFee?: IFees | bigint;
+    /**
+     * UTXO entries to be used for the transaction. This can be an
+     * array of UtxoEntry instances, objects matching {@link IUtxoEntry}
+     * interface, or a {@link UtxoContext} instance.
+     */
+    entries: IUtxoEntry[] | UtxoEntryReference[] | UtxoContext;
+    /**
+     * Optional UTXO entries that will be consumed before those available in `entries`.
+     * You can use this property to apply custom input selection logic.
+     * Please note that these inputs are consumed first, then `entries` are consumed
+     * to generate a desirable transaction output amount.  If transaction mass
+     * overflows, these inputs will be consumed into a batch/sweep transaction
+     * where the destination if the `changeAddress`.
+     */
+    priorityEntries?: IUtxoEntry[] | UtxoEntryReference[],
+    /**
+     * Optional number of signature operations in the transaction.
+     */
+    sigOpCount?: number;
+    /**
+     * Optional minimum number of signatures required for the transaction.
+     */
+    minimumSignatures?: number;
+    /**
+     * Optional data payload to be included in the transaction.
+     */
+    payload?: Uint8Array | HexString;
+
+    /**
+     * Optional NetworkId or network id as string (i.e. `mainnet` or `testnet-11`). Required when {@link IGeneratorSettingsObject.entries} is array
+     */
+    networkId?: NetworkId | string
+}
+
+
+
+/**
+ * Interface declaration for {@link signMessage} function arguments.
+ *
+ * @category Message Signing
+ */
+export interface ISignMessage {
+    message: string;
+    privateKey: PrivateKey | string;
+    noAuxRand?: boolean;
+}
+
+
+
+/**
+ * Interface declaration for {@link verifyMessage} function arguments.
+ *
+ * @category Message Signing
+ */
+export interface IVerifyMessage {
+    message: string;
+    signature: HexString;
+    publicKey: PublicKey | string;
+}
+
+
+
+    /**
+     * Private key data information.
+     * @category Wallet API
+     */
+    export interface IPrvKeyDataInfo {
+        /** Deterministic wallet id of the private key */
+        id: HexString;
+        /** Optional name of the private key */
+        name?: string;
+        /** 
+         * Indicates if the key requires additional payment or a recovery secret
+         * to perform wallet operations that require access to it.
+         * For BIP39 keys this indicates that the key was created with a BIP39 passphrase.
+         */
+        isEncrypted: boolean;
+    }
+    
+
+
+    /**
+     * UtxoProcessor constructor arguments.
+     * 
+     * @see {@link UtxoProcessor}, {@link UtxoContext}, {@link RpcClient}, {@link NetworkId}
+     * @category Wallet SDK
+     */
+    export interface IUtxoProcessorArgs {
+        /**
+         * The RPC client to use for network communication.
+         */
+        rpc : RpcClient;
+        networkId : NetworkId | string;
+    }
+    
+
+
+        interface UtxoProcessor {
+            /**
+            * @param {UtxoProcessorNotificationCallback} callback
+            */
+            addEventListener(callback: UtxoProcessorNotificationCallback): void;
+            /**
+            * @param {UtxoProcessorEventType} event
+            * @param {UtxoProcessorNotificationCallback} [callback]
+            */
+            addEventListener<E extends keyof UtxoProcessorEventMap>(
+                event: E,
+                callback: UtxoProcessorNotificationCallback<E>
+            )
+        }
+
+
+    /**
+     * 
+     * 
+     * @category  Wallet API
+     */
+    export interface IWalletConfig {
+        /**
+         * `resident` is a boolean indicating if the wallet should not be stored on the permanent medium.
+         */
+        resident?: boolean;
+        networkId?: NetworkId | string;
+        encoding?: Encoding | string;
+        url?: string;
+        resolver?: Resolver;
+    }
+    
+
+
+        interface Wallet {
+            /**
+            * @param {WalletNotificationCallback} callback
+            */
+            addEventListener(callback:WalletNotificationCallback): void;
+            /**
+            * @param {WalletEventType} event
+            * @param {WalletNotificationCallback} [callback]
+            */
+            addEventListener<M extends keyof WalletEventMap>(
+                event: M,
+                callback: (eventData: WalletEventMap[M]) => void
+            )
+        }
 
 
     /**
@@ -2507,1778 +4254,57 @@ export interface ITransactionRecord {
 
 
     /**
-     * 
-     * @category Wallet SDK
-     */
-    export interface IFees {
-        amount: bigint;
-        source?: FeeSource;
-    }
-    
-
-
-    /**
-     * UtxoContext constructor arguments.
-     * 
-     * @see {@link UtxoProcessor}, {@link UtxoContext}, {@link RpcClient}
-     * @category Wallet SDK
-     */
-    export interface IUtxoContextArgs {
-        /**
-         * Associated UtxoProcessor.
-         */
-        processor: UtxoProcessor;
-        /**
-         * Optional id for the UtxoContext.
-         * **The id must be a valid 32-byte hex string.**
-         * You can use {@link sha256FromBinary} or {@link sha256FromText} to generate a valid id.
-         * 
-         * If not provided, a random id will be generated.
-         * The IDs are deterministic, based on the order UtxoContexts are created.
-         */
-        id?: HexString;
-    }
-    
-
-
-/**
- * Interface declaration for {@link verifyMessage} function arguments.
- *
- * @category Message Signing
- */
-export interface IVerifyMessage {
-    message: string;
-    signature: HexString;
-    publicKey: PublicKey | string;
-}
-
-
-
-/**
- * Interface declaration for {@link signMessage} function arguments.
- *
- * @category Message Signing
- */
-export interface ISignMessage {
-    message: string;
-    privateKey: PrivateKey | string;
-    noAuxRand?: boolean;
-}
-
-
-
-        interface UtxoProcessor {
-            /**
-            * @param {UtxoProcessorNotificationCallback} callback
-            */
-            addEventListener(callback: UtxoProcessorNotificationCallback): void;
-            /**
-            * @param {UtxoProcessorEventType} event
-            * @param {UtxoProcessorNotificationCallback} [callback]
-            */
-            addEventListener<E extends keyof UtxoProcessorEventMap>(
-                event: E,
-                callback: UtxoProcessorNotificationCallback<E>
-            )
-        }
-
-
-    /**
-     * UtxoProcessor constructor arguments.
-     * 
-     * @see {@link UtxoProcessor}, {@link UtxoContext}, {@link RpcClient}, {@link NetworkId}
-     * @category Wallet SDK
-     */
-    export interface IUtxoProcessorArgs {
-        /**
-         * The RPC client to use for network communication.
-         */
-        rpc : RpcClient;
-        networkId : NetworkId | string;
-    }
-    
-
-
-    /**
-     * 
-     * 
-     * @category  Wallet API
-     */
-    export interface IWalletConfig {
-        /**
-         * `resident` is a boolean indicating if the wallet should not be stored on the permanent medium.
-         */
-        resident?: boolean;
-        networkId?: NetworkId | string;
-        encoding?: Encoding | string;
-        url?: string;
-        resolver?: Resolver;
-    }
-    
-
-
-        interface Wallet {
-            /**
-            * @param {WalletNotificationCallback} callback
-            */
-            addEventListener(callback:WalletNotificationCallback): void;
-            /**
-            * @param {WalletEventType} event
-            * @param {WalletNotificationCallback} [callback]
-            */
-            addEventListener<M extends keyof WalletEventMap>(
-                event: M,
-                callback: (eventData: WalletEventMap[M]) => void
-            )
-        }
-
-
-/**
- * {@link UtxoContext} (wallet account) balance.
- * @category Wallet SDK
- */
-export interface IBalance {
-    /**
-     * Total amount of Kaspa (in SOMPI) available for 
-     * spending.
-     */
-    mature: bigint;
-    /**
-     * Total amount of Kaspa (in SOMPI) that has been 
-     * received and is pending confirmation.
-     */
-    pending: bigint;
-    /**
-     * Total amount of Kaspa (in SOMPI) currently 
-     * being sent as a part of the outgoing transaction
-     * but has not yet been accepted by the network.
-     */
-    outgoing: bigint;
-    /**
-     * Number of UTXOs available for spending.
-     */
-    matureUtxoCount: number;
-    /**
-     * Number of UTXOs that have been received and 
-     * are pending confirmation.
-     */
-    pendingUtxoCount: number;
-    /**
-     * Number of UTXOs currently in stasis (coinbase 
-     * transactions received as a result of mining).
-     * Unlike regular user transactions, coinbase 
-     * transactions go through `stasis->pending->mature`
-     * stages. Client applications should ignore `stasis`
-     * stages and should process transactions only when
-     * they have reached the `pending` stage. However, 
-     * `stasis` information can be used for informative 
-     * purposes to indicate that coinbase transactions
-     * have arrived.
-     */
-    stasisUtxoCount: number;
-}
-
-
-
-/**
- * Configuration for the transaction {@link Generator}. This interface
- * allows you to specify UTXO sources, transaction outputs, change address,
- * priority fee, and other transaction parameters.
- * 
- * If the total number of UTXOs needed to satisfy the transaction outputs
- * exceeds maximum allowed number of UTXOs per transaction (limited by
- * the maximum transaction mass), the {@link Generator} will produce 
- * multiple chained transactions to the change address and then used these
- * transactions as a source for the "final" transaction.
- * 
- * @see 
- *      {@link kaspaToSompi},
- *      {@link Generator}, 
- *      {@link PendingTransaction}, 
- *      {@link UtxoContext}, 
- *      {@link UtxoEntry},
- *      {@link createTransactions},
- *      {@link estimateTransactions}
- * @category Wallet SDK
- */
-interface IGeneratorSettingsObject {
-    /** 
-     * Final transaction outputs (do not supply change transaction).
-     * 
-     * Typical usage: { address: "kaspa:...", amount: 1000n }
-     */
-    outputs: PaymentOutput | IPaymentOutput[];
-    /** 
-     * Address to be used for change, if any. 
-     */
-    changeAddress: Address | string;
-    /**
-     * Fee rate in SOMPI per 1 gram of mass.
-     * 
-     * Fee rate is applied to all transactions generated by the {@link Generator}.
-     * This includes batch and final transactions. If not set, the fee rate is 
-     * not applied.
-     */
-    feeRate?: number;
-    /** 
-     * Priority fee in SOMPI.
-     * 
-     * If supplying `bigint` value, it will be interpreted as a sender-pays fee.
-     * Alternatively you can supply an object with `amount` and `source` properties
-     * where `source` contains the {@link FeeSource} enum.
-     * 
-     * **IMPORTANT:* When sending an outbound transaction (transaction that
-     * contains outputs), the `priorityFee` must be set, even if it is zero.
-     * However, if the transaction is missing outputs (and thus you are
-     * creating a compound transaction against your change address),
-     * `priorityFee` should not be set (i.e. it should be `undefined`).
-     * 
-     * @see {@link IFees}, {@link FeeSource}
-     */
-    priorityFee?: IFees | bigint;
-    /**
-     * UTXO entries to be used for the transaction. This can be an
-     * array of UtxoEntry instances, objects matching {@link IUtxoEntry}
-     * interface, or a {@link UtxoContext} instance.
-     */
-    entries: IUtxoEntry[] | UtxoEntryReference[] | UtxoContext;
-    /**
-     * Optional UTXO entries that will be consumed before those available in `entries`.
-     * You can use this property to apply custom input selection logic.
-     * Please note that these inputs are consumed first, then `entries` are consumed
-     * to generate a desirable transaction output amount.  If transaction mass
-     * overflows, these inputs will be consumed into a batch/sweep transaction
-     * where the destination if the `changeAddress`.
-     */
-    priorityEntries?: IUtxoEntry[] | UtxoEntryReference[],
-    /**
-     * Optional number of signature operations in the transaction.
-     */
-    sigOpCount?: number;
-    /**
-     * Optional minimum number of signatures required for the transaction.
-     */
-    minimumSignatures?: number;
-    /**
-     * Optional data payload to be included in the transaction.
-     */
-    payload?: Uint8Array | HexString;
-
-    /**
-     * Optional NetworkId or network id as string (i.e. `mainnet` or `testnet-11`). Required when {@link IGeneratorSettingsObject.entries} is array
-     */
-    networkId?: NetworkId | string
-}
-
-
-
-/**
- * 
- * 
- * @category Wallet SDK
- * 
- */
-export enum TransactionKind {
-    Reorg = "reorg",
-    Stasis = "stasis",
-    Batch = "batch",
-    Change = "change",
-    Incoming = "incoming",
-    Outgoing = "outgoing",
-    External = "external",
-    TransferIncoming = "transfer-incoming",
-    TransferOutgoing = "transfer-outgoing",
-}
-
-
-
-/**
- * 
- * Defines a single payment output.
- * 
- * @see {@link IGeneratorSettingsObject}, {@link Generator}
- * @category Wallet SDK
- */
-export interface IPaymentOutput {
-    /**
-     * Destination address. The address prefix must match the network
-     * you are transacting on (e.g. `kaspa:` for mainnet, `kaspatest:` for testnet, etc).
-     */
-    address: Address | string;
-    /**
-     * Output amount in SOMPI.
-     */
-    amount: bigint;
-}
-
-
-
-
-
-
-    /**
-     * Interface defining response from the {@link createTransactions} function.
-     * 
-     * @category Wallet SDK
-     */
-    export interface ICreateTransactions {
-        /**
-         * Array of pending unsigned transactions.
-         */
-        transactions : PendingTransaction[];
-        /**
-         * Summary of the transaction generation process.
-         */
-        summary : GeneratorSummary;
-    }
-    
-
-
-/**
-* Return interface for the {@link Wallet.flush} method.
-*
-*
-* @category Wallet API
-*/
-    export interface IFlushResponse { }
-    
-
-
-/**
-* Return interface for the {@link Wallet.addressBookEnumerate} method.
-*
-*
-* @category Wallet API
-*/
-    export interface IAddressBookEnumerateResponse {
-        // TODO
-    }
-    
-
-
-/**
-* Argument interface for the {@link Wallet.accountsImport} method.
-*
-*
-* @category Wallet API
-*/
-    export interface IAccountsImportRequest {
-        walletSecret: string;
-        // TODO
-    }
-    
-
-
-/**
-* Return interface for the {@link Wallet.walletImport} method.
-*
-*
-* @category Wallet API
-*/
-    export interface IWalletImportResponse { }
-    
-
-
-/**
-* Argument interface for the {@link Wallet.walletEnumerate} method.
-*
-*
-* @category Wallet API
-*/
-    export interface IWalletEnumerateRequest { }
-    
-
-
-/**
-* Return interface for the {@link Wallet.accountsTransfer} method.
-*
-*
-* @category Wallet API
-*/
-    export interface IAccountsTransferResponse {
-        generatorSummary : GeneratorSummary;
-        transactionIds : HexString[];
-    }
-    
-
-
-/**
-* Return interface for the {@link Wallet.prvKeyDataCreate} method.
-*
-*
-* @category Wallet API
-*/
-    export interface IPrvKeyDataCreateResponse {
-        prvKeyDataId: HexString;
-    }
-    
-
-
-/**
-* Argument interface for the {@link Wallet.transactionsReplaceNote} method.
-*
-*
-* @category Wallet API
-*/
-    export interface ITransactionsReplaceNoteRequest {
-/**
-* The id of account the transaction belongs to.
-*/
-        accountId: HexString,
-/**
-* The network id of the transaction.
-*/
-        networkId: NetworkId | string,
-/**
-* The id of the transaction.
-*/
-        transactionId: HexString,
-/**
-* Optional note string to replace the existing note.
-* If not supplied, the note will be removed.
-*/
-        note?: string,
-    }
-    
-
-
-/**
-* Argument interface for the {@link Wallet.flush} method.
-*
-*
-* @category Wallet API
-*/
-    export interface IFlushRequest {
-        walletSecret : string;
-    }
-    
-
-
-/**
-* Argument interface for the {@link Wallet.connect} method.
-*
-*
-* @category Wallet API
-*/
-    export interface IConnectRequest {
-        // destination wRPC node URL (if omitted, the resolver is used)
-        url? : string;
-        // network identifier
-        networkId : NetworkId | string;
-        // retry on error
-        retryOnError? : boolean;
-        // block async connect (method will not return until the connection is established)
-        block? : boolean;
-        // require node to be synced (fail otherwise)
-        requireSync? : boolean;
-    }
-    
-
-
-/**
-* Return interface for the {@link Wallet.walletExport} method.
-*
-*
-* @category Wallet API
-*/
-    export interface IWalletExportResponse {
-        walletData: HexString;
-    }
-    
-
-
-/**
-* Argument interface for the {@link Wallet.walletCreate} method.
-*
-* If filename is not supplied, the filename will be derived from the wallet title.
-* If both wallet title and filename are not supplied, the wallet will be create
-* with the default filename `kaspa`.
-*
-* @category Wallet API
-*/
-    export interface IWalletCreateRequest {
-/** Wallet encryption secret */
-        walletSecret: string;
-/** Optional wallet title */
-        title?: string;
-/** Optional wallet filename */
-        filename?: string;
-/** Optional user hint */
-        userHint?: string;
-/**
-* Overwrite wallet data if the wallet with the same filename already exists.
-* (Use with caution!)
-*/
-        overwriteWalletStorage?: boolean;
-    }
-    
-
-
-/**
-* Argument interface for the {@link Wallet.accountsEstimate} method.
-*
-*
-* @category Wallet API
-*/
-    export interface IAccountsEstimateRequest {
-        accountId : HexString;
-        destination : IPaymentOutput[];
-        feeRate? : number;
-        priorityFeeSompi : IFees | bigint;
-        payload? : Uint8Array | string;
-    }
-    
-
-
-    export interface IFeeRateEstimateResponse {
-        priority : IFeeRateEstimateBucket,
-        normal : IFeeRateEstimateBucket,
-        low : IFeeRateEstimateBucket,
-    }
-    
-
-
-/**
-* Argument interface for the {@link Wallet.accountsPskbBroadcast} method.
-*
-*
-* @category Wallet API
-*/
-    export interface IAccountsPskbBroadcastRequest {
-        accountId : HexString;
-        pskb : string;
-    }
-    
-
-
-    export interface IFeeRatePollerDisableResponse { }
-    
-
-
-/**
-* Return interface for the {@link Wallet.accountsGet} method.
-*
-*
-* @category Wallet API
-*/
-    export interface IAccountsGetResponse {
-        accountDescriptor: IAccountDescriptor;
-    }
-    
-
-
-/**
-* Return interface for the {@link Wallet.prvKeyDataEnumerate} method.
-*
-* Response returning a list of private key ids, their optional names and properties.
-*
-* @see {@link IPrvKeyDataInfo}
-* @category Wallet API
-*/
-    export interface IPrvKeyDataEnumerateResponse {
-        prvKeyDataList: IPrvKeyDataInfo[],
-    }
-    
-
-
-/**
-* Argument interface for the {@link Wallet.accountsPskbSign} method.
-*
-*
-* @category Wallet API
-*/
-    export interface IAccountsPskbSignRequest {
-/**
-* Hex identifier of the account.
-*/
-        accountId : HexString;
-/**
-* Wallet encryption secret.
-*/
-        walletSecret : string;
-/**
-* Optional key encryption secret or BIP39 passphrase.
-*/
-        paymentSecret? : string;
-
-/**
-* PSKB to sign.
-*/
-        pskb : string;
-
-/**
-* Address to sign for.
-*/
-        signForAddress? : Address | string;
-    }
-    
-
-
-/**
-* Argument interface for the {@link Wallet.accountsCreate} method.
-*
-*
-* @category Wallet API
-*/
-    export type IAccountsCreateRequest = {
-        walletSecret: string;
-        type: "bip32";
-        accountName:string;
-        accountIndex?:number;
-        prvKeyDataId:string;
-        paymentSecret?:string;
-    } | {
-        walletSecret: string;
-        type: "kaspa-keypair-standard";
-        accountName:string;
-        prvKeyDataId:string;
-        paymentSecret?:string;
-        ecdsa?:boolean;
-    };
-
-    //   |{
-    //     walletSecret: string;
-    //     type: "bip32-readonly";
-    //     accountName:string;
-    //     accountIndex?:number;
-    //     pubkey:HexString;
-    //     paymentSecret?:string;
-    //  }
-    
-
-
-/**
-* Return interface for the {@link Wallet.walletEnumerate} method.
-*
-*
-* @category Wallet API
-*/
-    export interface IWalletEnumerateResponse {
-        walletDescriptors: WalletDescriptor[];
-    }
-    
-
-
-/**
-* Return interface for the {@link Wallet.prvKeyDataGet} method.
-*
-*
-* @category Wallet API
-*/
-    export interface IPrvKeyDataGetResponse {
-        // prvKeyData: PrvKeyData,
-    }
-    
-
-
-/**
-* Return interface for the {@link Wallet.walletClose} method.
-*
-*
-* @category Wallet API
-*/
-    export interface IWalletCloseResponse { }
-    
-
-
-/**
- * @categoryDescription Wallet API
- * Wallet API for interfacing with Rusty Kaspa Wallet implementation.
- */
-
-
-
-/**
-* Argument interface for the {@link Wallet.accountsPskbSend} method.
-*
-*
-* @category Wallet API
-*/
-    export interface IAccountsPskbSendRequest {
-/**
-* Hex identifier of the account.
-*/
-        accountId : HexString;
-/**
-* Wallet encryption secret.
-*/
-        walletSecret : string;
-/**
-* Optional key encryption secret or BIP39 passphrase.
-*/
-        paymentSecret? : string;
-
-/**
-* PSKB to sign.
-*/
-        pskb : string;
-
-/**
-* Address to sign for.
-*/
-        signForAddress? : Address | string;
-    }
-    
-
-
-/**
-* Return interface for the {@link Wallet.prvKeyDataRemove} method.
-*
-*
-* @category Wallet API
-*/
-    export interface IPrvKeyDataRemoveResponse { }
-    
-
-
-/**
-* Argument interface for the {@link Wallet.accountsActivate} method.
-*
-*
-* @category Wallet API
-*/
-    export interface IAccountsActivateRequest {
-        accountIds?: HexString[],
-    }
-    
-
-
-/**
-* Argument interface for the {@link Wallet.accountsEnumerate} method.
-*
-*
-* @category Wallet API
-*/
-    export interface IAccountsEnumerateRequest { }
-    
-
-
-/**
-* Return interface for the {@link Wallet.accountsPskbBroadcast} method.
-*
-*
-* @category Wallet API
-*/
-    export interface IAccountsPskbBroadcastResponse {
-        transactionIds : HexString[];
-    }
-    
-
-
-/**
-* Return interface for the {@link Wallet.accountsDeactivate} method.
-*
-*
-* @category Wallet API
-*/
-    export interface IAccountsDeactivateResponse { }
-    
-
-
-/**
-* Return interface for the {@link Wallet.walletReload} method.
-*
-*
-* @category Wallet API
-*/
-    export interface IWalletReloadResponse { }
-    
-
-
-/**
-* Argument interface for the {@link Wallet.prvKeyDataCreate} method.
-*
-*
-* @category Wallet API
-*/
-    export interface IPrvKeyDataCreateRequest {
-/** Wallet encryption secret */
-        walletSecret: string;
-/** Optional name of the private key */
-        name? : string;
-/**
-* Optional key secret (BIP39 passphrase).
-*
-* If supplied, all operations requiring access
-* to the key will require the `paymentSecret`
-* to be provided.
-*/
-        paymentSecret? : string;
-/** BIP39 mnemonic phrase (12 or 24 words) if kind is mnemonic */
-        mnemonic? : string;
-/** Secret key if kind is secretKey */
-        secretKey? : string;
-/** Kind of the private key data */
-        kind : "mnemonic" | "secretKey";
-    }
-    
-
-
-/**
-* Argument interface for the {@link Wallet.transactionsDataGet} method.
-*
-*
-* @category Wallet API
-*/
-    export interface ITransactionsDataGetRequest {
-        accountId : HexString;
-        networkId : NetworkId | string;
-        filter? : TransactionKind[];
-        start : bigint;
-        end : bigint;
-    }
-    
-
-
-    export interface IFeeRatePollerEnableResponse { }
-    
-
-
-/**
-* Return interface for the {@link Wallet.accountsRename} method.
-*
-*
-* @category Wallet API
-*/
-    export interface IAccountsRenameResponse { }
-    
-
-
-/**
-* Return interface for the {@link Wallet.accountsDiscovery} method.
-*
-*
-* @category Wallet API
-*/
-    export interface IAccountsDiscoveryResponse {
-        lastAccountIndexFound : number;
-    }
-    
-
-
-/**
-* Return interface for the {@link Wallet.batch} method.
-*
-*
-* @category Wallet API
-*/
-    export interface IBatchResponse { }
-    
-
-
-/**
-* Return interface for the {@link Wallet.accountsPskbSign} method.
-*
-*
-* @category Wallet API
-*/
-    export interface IAccountsPskbSignResponse {
-/**
-* signed PSKB.
-*/
-        pskb: string;
-    }
-    
-
-
-    /**
-     * 
-     * 
-     * @category Wallet API
-     */
-    export interface INetworkParams {
-        coinbaseTransactionMaturityPeriodDaa : number;
-        coinbaseTransactionStasisPeriodDaa : number;
-        userTransactionMaturityPeriodDaa : number;
-        additionalCompoundTransactionMass : number;
-    }
-    
-
-
-/**
-* Return interface for the {@link Wallet.transactionsDataGet} method.
-*
-*
-* @category Wallet API
-*/
-    export interface ITransactionsDataGetResponse {
-        accountId : HexString;
-        transactions : ITransactionRecord[];
-        start : bigint;
-        total : bigint;
-    }
-    
-
-
-/**
-* Return interface for the {@link Wallet.accountsEnsureDefault} method.
-*
-*
-* @category Wallet API
-*/
-    export interface IAccountsEnsureDefaultResponse {
-        accountDescriptor : IAccountDescriptor;
-    }
-    
-
-
-    export interface IFeeRatePollerEnableRequest {
-        intervalSeconds : number;
-    }
-    
-
-
-/**
-* Return interface for the {@link Wallet.connect} method.
-*
-*
-* @category Wallet API
-*/
-    export interface IConnectResponse { }
-    
-
-
-/**
-* Argument interface for the {@link Wallet.addressBookEnumerate} method.
-*
-*
-* @category Wallet API
-*/
-    export interface IAddressBookEnumerateRequest { }
-    
-
-
-/**
-* Argument interface for the {@link Wallet.accountsDeactivate} method.
-*
-*
-* @category Wallet API
-*/
-    export interface IAccountsDeactivateRequest {
-        accountIds?: string[];
-    }
-    
-
-
-/**
-* Argument interface for the {@link Wallet.accountsEnsureDefault} method.
-*
-*
-* @category Wallet API
-*/
-    export interface IAccountsEnsureDefaultRequest {
-        walletSecret: string;
-        paymentSecret?: string;
-        type : AccountKind | string;
-        mnemonic? : string;
-    }
-    
-
-
-    export interface IFeeRateEstimateRequest { }
-    
-
-
-    export interface IFeeRatePollerDisableRequest { }
-    
-
-
-/**
-* Return interface for the {@link Wallet.retainContext} method.
-*
-*
-* @category Wallet API
-*/
-    export interface IRetainContextResponse {
-    }
-    
-
-
-/**
-* Argument interface for the {@link Wallet.prvKeyDataEnumerate} method.
-*
-*
-* @category Wallet API
-*/
-    export interface IPrvKeyDataEnumerateRequest { }
-    
-
-
-/**
-* Return interface for the {@link Wallet.transactionsReplaceMetadata} method.
-*
-*
-* @category Wallet API
-*/
-    export interface ITransactionsReplaceMetadataResponse { }
-    
-
-
-/**
-* Argument interface for the {@link Wallet.accountsCommitReveal} method.
-*
-* Atomic commit reveal operation using parameterized account address to
-* dynamically generate the commit P2SH address.
-*
-* The account address is selected through addressType and addressIndex
-* and will be used to complete the script signature.
-*
-* A placeholder of format {{pubkey}} is to be provided inside ScriptSig
-* in order to be superseded by the selected address' payload.
-*
-* The selected address will also be used to spend reveal transaction to.
-*
-* The default revealFeeSompi is 100_000 sompi.
-*
-* @category Wallet API
-*/
-    export interface IAccountsCommitRevealRequest {
-        accountId : HexString;
-        addressType : CommitRevealAddressKind;
-        addressIndex : number;
-        scriptSig : Uint8Array | HexString;
-        walletSecret : string;
-        commitAmountSompi : bigint;
-        paymentSecret? : string;
-        feeRate? : number;
-        revealFeeSompi : bigint;
-        payload? : Uint8Array | HexString;
-    }
-    
-
-
-/**
-* Return interface for the {@link Wallet.walletChangeSecret} method.
-*
-*
-* @category Wallet API
-*/
-    export interface IWalletChangeSecretResponse { }
-    
-
-
-/**
-* Argument interface for the {@link Wallet.walletOpen} method.
-*
-* @category Wallet API
-*/
-    export interface IWalletOpenRequest {
-        walletSecret: string;
-        filename?: string;
-        accountDescriptors: boolean;
-    }
-    
-
-
-/**
-* Argument interface for the {@link Wallet.walletChangeSecret} method.
-*
-*
-* @category Wallet API
-*/
-    export interface IWalletChangeSecretRequest {
-        oldWalletSecret: string;
-        newWalletSecret: string;
-    }
-    
-
-
-/**
-* Return interface for the {@link Wallet.accountsEstimate} method.
-*
-*
-* @category Wallet API
-*/
-    export interface IAccountsEstimateResponse {
-        generatorSummary : GeneratorSummary;
-    }
-    
-
-
-/**
-* Return interface for the {@link Wallet.walletOpen} method.
-*
-*
-* @category Wallet API
-*/
-    export interface IWalletOpenResponse {
-        accountDescriptors: IAccountDescriptor[];
-    }
-    
-
-
-/**
-* Argument interface for the {@link Wallet.accountsDiscovery} method.
-*
-*
-* @category Wallet API
-*/
-    export interface IAccountsDiscoveryRequest {
-        discoveryKind: AccountsDiscoveryKind,
-        accountScanExtent: number,
-        addressScanExtent: number,
-        bip39_passphrase?: string,
-        bip39_mnemonic: string,
-    }
-    
-
-
-/**
-* Return interface for the {@link Wallet.accountsCreate} method.
-*
-*
-* @category Wallet API
-*/
-    export interface IAccountsCreateResponse {
-        accountDescriptor : IAccountDescriptor;
-    }
-    
-
-
-/**
-* Argument interface for the {@link Wallet.prvKeyDataRemove} method.
-*
-*
-* @category Wallet API
-*/
-    export interface IPrvKeyDataRemoveRequest {
-        walletSecret: string;
-        prvKeyDataId: HexString;
-    }
-    
-
-
-/**
-* Return interface for the {@link Wallet.accountsActivate} method.
-*
-*
-* @category Wallet API
-*/
-    export interface IAccountsActivateResponse { }
-    
-
-
-/**
-* Argument interface for the {@link Wallet.walletClose} method.
-*
-*
-* @category Wallet API
-*/
-    export interface IWalletCloseRequest { }
-    
-
-
-/**
-* Return interface for the {@link Wallet.accountsGetUtxos} method.
-*
-*
-* @category Wallet API
-*/
-    export interface IAccountsGetUtxosResponse {
-        utxos : UtxoEntry[];
-    }
-    
-
-
-/**
-* Return interface for the {@link Wallet.accountsSend} method.
-*
-*
-* @category Wallet API
-*/
-    export interface IAccountsSendResponse {
-/**
-* Summary produced by the transaction generator.
-*/
-        generatorSummary : GeneratorSummary;
-/**
-* Hex identifiers of successfully submitted transactions.
-*/
-        transactionIds : HexString[];
-    }
-    
-
-
-    export interface IFeeRateEstimateBucket {
-        feeRate : number;
-        seconds : number;
-    }
-    
-
-
-/**
-* Argument interface for the {@link Wallet.accountsCreateNewAddress} method.
-*
-*
-* @category Wallet API
-*/
-    export interface IAccountsCreateNewAddressRequest {
-        accountId: string;
-        addressKind?: NewAddressKind | string,
-    }
-    
-
-
-/**
-* Argument interface for the {@link Wallet.batch} method.
-* Suspend storage operations until invocation of flush().
-*
-* @category Wallet API
-*/
-    export interface IBatchRequest { }
-    
-
-
-/**
-* Return interface for the {@link Wallet.accountsEnumerate} method.
-*
-*
-* @category Wallet API
-*/
-    export interface IAccountsEnumerateResponse {
-        accountDescriptors: IAccountDescriptor[];
-    }
-    
-
-
-/**
-* Argument interface for the {@link Wallet.walletExport} method.
-*
-*
-* @category Wallet API
-*/
-    export interface IWalletExportRequest {
-        walletSecret: string;
-        includeTransactions: boolean;
-    }
-    
-
-
-/**
-* Argument interface for the {@link Wallet.disconnect} method.
-*
-*
-* @category Wallet API
-*/
-    export interface IDisconnectRequest { }
-    
-
-
-/**
-* Return interface for the {@link Wallet.accountsPskbSend} method.
-*
-*
-* @category Wallet API
-*/
-    export interface IAccountsPskbSendResponse {
-        transactionIds : HexString[];
-    }
-    
-
-
-/**
-* Argument interface for the {@link Wallet.accountsSend} method.
-*
-*
-* @category Wallet API
-*/
-    export interface IAccountsSendRequest {
-/**
-* Hex identifier of the account.
-*/
-        accountId : HexString;
-/**
-* Wallet encryption secret.
-*/
-        walletSecret : string;
-/**
-* Optional key encryption secret or BIP39 passphrase.
-*/
-        paymentSecret? : string;
-/**
-* Fee rate in sompi per 1 gram of mass.
-*/
-        feeRate? : number;
-/**
-* Priority fee.
-*/
-        priorityFeeSompi? : IFees | bigint;
-/**
-*
-*/
-        payload? : Uint8Array | HexString;
-/**
-* If not supplied, the destination will be the change address resulting in a UTXO compound transaction.
-*/
-        destination? : IPaymentOutput[];
-    }
-    
-
-
-/**
-* Argument interface for the {@link Wallet.accountsTransfer} method.
-*
-*
-* @category Wallet API
-*/
-    export interface IAccountsTransferRequest {
-        sourceAccountId : HexString;
-        destinationAccountId : HexString;
-        walletSecret : string;
-        paymentSecret? : string;
-        feeRate? : number;
-        priorityFeeSompi? : IFees | bigint;
-        transferAmountSompi : bigint;
-    }
-    
-
-
-/**
-* Argument interface for the {@link Wallet.prvKeyDataGet} method.
-*
-*
-* @category Wallet API
-*/
-    export interface IPrvKeyDataGetRequest {
-        walletSecret: string;
-        prvKeyDataId: HexString;
-    }
-    
-
-
-/**
-* Return interface for the {@link Wallet.transactionsReplaceNote} method.
-*
-*
-* @category Wallet API
-*/
-    export interface ITransactionsReplaceNoteResponse { }
-    
-
-
-/**
-* Argument interface for the {@link Wallet.getStatus} method.
-*
-*
-* @category Wallet API
-*/
-    export interface IGetStatusRequest {
-/**
-* Optional context creation name.
-* @see {@link IRetainContextRequest}
-*/
-        name? : string;
-    }
-    
-
-
-/**
-* Return interface for the {@link Wallet.accountsCreateNewAddress} method.
-*
-*
-* @category Wallet API
-*/
-    export interface IAccountsCreateNewAddressResponse {
-        address: Address;
-    }
-    
-
-
-/**
-* Argument interface for the {@link Wallet.retainContext} method.
-*
-*
-* @category Wallet API
-*/
-    export interface IRetainContextRequest {
-/**
-* Optional context creation name.
-*/
-        name : string;
-/**
-* Optional context data to retain.
-*/
-        data? : string;
-    }
-    
-
-
-/**
-* Argument interface for the {@link Wallet.walletReload} method.
-*
-*
-* @category Wallet API
-*/
-    export interface IWalletReloadRequest {
-/**
-* Reactivate accounts that are active before the reload.
-*/
-        reactivate: boolean;
-    }
-    
-
-
-/**
-* Argument interface for the {@link Wallet.accountsRename} method.
-*
-*
-* @category Wallet API
-*/
-    export interface IAccountsRenameRequest {
-        accountId: string;
-        name?: string;
-        walletSecret: string;
-    }
-    
-
-
-/**
-* Argument interface for the {@link Wallet.accountsGetUtxos} method.
-*
-*
-* @category Wallet API
-*/
-    export interface IAccountsGetUtxosRequest {
-        accountId : HexString;
-        addresses : Address[] | string[];
-        minAmountSompi? : bigint;
-    }
-    
-
-
-/**
-* Argument interface for the {@link Wallet.walletImport} method.
-*
-*
-* @category Wallet API
-*/
-    export interface IWalletImportRequest {
-        walletSecret: string;
-        walletData: HexString | Uint8Array;
-    }
-    
-
-
-/**
-* Return interface for the {@link Wallet.accountsImport} method.
-*
-*
-* @category Wallet API
-*/
-    export interface IAccountsImportResponse {
-        // TODO
-    }
-    
-
-
-/**
-* Argument interface for the {@link Wallet.transactionsReplaceMetadata} method.
-* Metadata is a wallet-specific string that can be used to store arbitrary data.
-* It should contain a serialized JSON string with `key` containing the custom
-* data stored by the wallet.  When interacting with metadata, the wallet should
-* always deserialize the JSON string and then serialize it again after making
-* changes, preserving any foreign keys that it might encounter.
-*
-* To preserve foreign metadata, the pattern of access should be:
-* `Get -> Modify -> Replace`
-*
-* @category Wallet API
-*/
-    export interface ITransactionsReplaceMetadataRequest {
-/**
-* The id of account the transaction belongs to.
-*/
-        accountId: HexString,
-/**
-* The network id of the transaction.
-*/
-        networkId: NetworkId | string,
-/**
-* The id of the transaction.
-*/
-        transactionId: HexString,
-/**
-* Optional metadata string to replace the existing metadata.
-* If not supplied, the metadata will be removed.
-*/
-        metadata?: string,    
-    }
-    
-
-
-/**
-* Return interface for the {@link Wallet.walletCreate} method.
-*
-*
-* @category Wallet API
-*/
-    export interface IWalletCreateResponse {
-        walletDescriptor: IWalletDescriptor;
-        storageDescriptor: IStorageDescriptor;
-    }
-    
-
-
-/**
-* Argument interface for the {@link Wallet.accountsGet} method.
-*
-*
-* @category Wallet API
-*/
-    export interface IAccountsGetRequest {
-        accountId: string;
-    }
-    
-
-
-/**
-* Return interface for the {@link Wallet.accountsCommitRevealManual} method.
-*
-*
-* @category Wallet API
-*/
-    export interface IAccountsCommitRevealManualResponse {
-        transactionIds : HexString[];
-    }
-    
-
-
-/**
-* Return interface for the {@link Wallet.disconnect} method.
-*
-*
-* @category Wallet API
-*/
-    export interface IDisconnectResponse { }
-    
-
-
-/**
-* Argument interface for the {@link Wallet.accountsCommitRevealManual} method.
-*
-* Atomic commit reveal operation using given payment outputs.
-*
-* The startDestination stands for the commit transaction and the endDestination
-* for the reveal transaction.
-*
-* The scriptSig will be used to spend the UTXO of the first transaction and
-* must therefore match the startDestination output P2SH.
-*
-* Set revealFeeSompi or reflect the reveal fee transaction on endDestination
-* output amount.
-*
-* The default revealFeeSompi is 100_000 sompi.
-*
-* @category Wallet API
-*/
-    export interface IAccountsCommitRevealManualRequest {
-        accountId : HexString;
-        scriptSig : Uint8Array | HexString;
-        startDestination: IPaymentOutput;
-        endDestination: IPaymentOutput;
-        walletSecret : string;
-        paymentSecret? : string;
-        feeRate? : number;
-        revealFeeSompi : bigint;
-        payload? : Uint8Array | HexString;
-    }
-    
-
-
-/**
-* Return interface for the {@link Wallet.accountsCommitReveal} method.
-*
-*
-* @category Wallet API
-*/
-    export interface IAccountsCommitRevealResponse {
-        transactionIds : HexString[];
-    }
-    
-
-
-/**
-* Return interface for the {@link Wallet.getStatus} method.
-*
-*
-* @category Wallet API
-*/
-    export interface IGetStatusResponse {
-        isConnected : boolean;
-        isSynced : boolean;
-        isOpen : boolean;
-        url? : string;
-        networkId? : NetworkId;
-        context? : HexString;
-    }
-    
-
-
-
-/**
- * Type of a binding record.
- * @see {@link IBinding}, {@link ITransactionDataVariant}, {@link ITransactionRecord}
- * @category Wallet SDK
- */
-export enum BindingType {
-    /**
-     * The data structure is associated with a user-supplied id.
-     * @see {@link IBinding}
-     */
-    Custom = "custom",
-    /**
-     * The data structure is associated with a wallet account.
-     * @see {@link IBinding}, {@link Account}
-     */
-    Account = "account",
-}
-
-/**
- * Internal transaction data contained within the transaction record.
- * @see {@link ITransactionRecord}
- * @category Wallet SDK
- */
-export interface IBinding {
-    type : BindingType;
-    id : HexString;
-}
-
-
-
-
-export interface IPrvKeyDataArgs {
-    prvKeyDataId: HexString;
-    paymentSecret?: string;
-}
-
-export interface IAccountCreateArgsBip32 {
-    accountName?: string;
-    accountIndex?: number;
-}
-
-/**
- * @category Wallet API
- */
-export interface IAccountCreateArgs {
-    type : "bip32";
-    args : IAccountCreateArgsBip32;
-    prvKeyDataArgs? : IPrvKeyDataArgs;
-}
-
-
-
-    /**
-     * Private key data information.
-     * @category Wallet API
-     */
-    export interface IPrvKeyDataInfo {
-        /** Deterministic wallet id of the private key */
-        id: HexString;
-        /** Optional name of the private key */
-        name?: string;
-        /** 
-         * Indicates if the key requires additional payment or a recovery secret
-         * to perform wallet operations that require access to it.
-         * For BIP39 keys this indicates that the key was created with a BIP39 passphrase.
-         */
-        isEncrypted: boolean;
-    }
-    
-
-
-/**
- * Wallet storage information.
- */
-export interface IStorageDescriptor {
-    kind: string;
-    data: string;
-}
-
-
-
-/**
- * Wallet storage information.
- * 
- * @category Wallet API
- */
-export interface IWalletDescriptor {
-    title?: string;
-    filename: string;
-}
-
-
-
-    /**
-     * Emitted by {@link UtxoProcessor} when it detects that connected node does not have UTXO index enabled.
+     * Emitted by {@link UtxoProcessor} when node is syncing and processing cryptographic proofs.
      * 
      * @category Wallet Events
      */
-    export interface IUtxoIndexNotEnabledEvent {
-        url? : string;
+    export interface ISyncProofEvent {
+        level : number;
     }
     
 
 
     /**
-     * Emitted by {@link UtxoProcessor} after successfully opening an RPC
-     * connection to the Kaspa node. This event contains general information
-     * about the Kaspa node.
+     * Emitted by {@link UtxoProcessor} when it disconnects from RPC.
      * 
      * @category Wallet Events
      */
-    export interface IServerStatusEvent {
+    export interface IDisconnectEvent {
         networkId : string;
-        serverVersion : string;
-        isSynced : boolean;
         url? : string;
     }
     
 
 
     /**
-     * Emitted by {@link Wallet} when the fee rate changes.
+     * Emitted by {@link UtxoContext} when detecting a new transaction during
+     * the initialization phase. Discovery transactions indicate that UTXOs
+     * have been discovered during the initial UTXO scan.
+     * 
+     * When receiving such notifications, the application should check its 
+     * internal storage to see if the transaction already exists. If it doesn't,
+     * it should create a correspond in record and notify the user of a new
+     * transaction.
+     * 
+     * This event is emitted when an address has existing UTXO entries that
+     * may have been received during previous sessions or while the wallet
+     * was offline.
      * 
      * @category Wallet Events
      */
-    export interface IFeeRateEvent {
-        priority: {
-            feerate: bigint,
-            seconds: bigint,
-        },
-        normal: {
-            feerate: bigint,
-            seconds: bigint,
-        },
-        low: {
-            feerate: bigint,
-            seconds: bigint,
-        },
-    }
+    export type IDiscoveryEvent = TransactionRecord;
     
 
 
     /**
-     * Emitted by {@link Wallet} when an account data has been updated.
-     * This event signifies a chance in the internal account state that
-     * includes new address generation.
+     * Emitted by {@link UtxoContext} when detecting a new coinbase transaction.
+     * Transactions are kept in "stasis" for the half of the coinbase maturity DAA period.
+     * A wallet should ignore these transactions until they are re-broadcasted
+     * via the "pending" event.
      * 
      * @category Wallet Events
      */
-    export interface IAccountUpdateEvent {
-        accountDescriptor : IAccountDescriptor;
-    }
-    
-
-
-    /**
-     * Emitted by {@link UtxoProcessor} when node is syncing blocks as a part of the IBD (Initial Block Download) process.
-     * 
-     * @category Wallet Events
-     */
-    export interface ISyncBlocksEvent {
-        blocks : number;
-        progress : number;
-    }
+    export type IStasisEvent = TransactionRecord;
     
 
 
@@ -4294,55 +4320,27 @@ export interface IWalletDescriptor {
 
 
     /**
-     * Emitted when detecting a general error condition.
+     * Emitted by {@link UtxoContext} when detecting a balance change.
+     * This notification is produced during the UTXO scan, when UtxoContext
+     * detects incoming or outgoing transactions or when transactions
+     * change their state (e.g. from pending to confirmed).
      * 
      * @category Wallet Events
      */
-    export interface IErrorEvent {
-        message : string;
+    export interface IBalanceEvent {
+        id : HexString;
+        balance? : IBalance;
     }
     
 
 
     /**
-     * Emitted by {@link Wallet} when the wallet data storage has been successfully created.
+     * Emitted by {@link UtxoProcessor} on DAA score change.
      * 
      * @category Wallet Events
      */
-    export interface IWalletCreateEvent {
-        walletDescriptor : IWalletDescriptor;
-        storageDescriptor : IStorageDescriptor;
-    }
-    
-
-
-
-    /**
-     * 
-     * @category Wallet Events
-     */
-    export interface ISyncState {
-        event : string;
-        data? : ISyncProofEvent | ISyncHeadersEvent | ISyncBlocksEvent | ISyncUtxoSyncEvent | ISyncTrustSyncEvent;
-    }
-    
-    /**
-     * 
-     * @category Wallet Events
-     */
-    export interface ISyncStateEvent {
-        syncState : ISyncState;
-    }
-    
-
-
-    /**
-     * Emitted by {@link UtxoProcessor} when node is syncing and processing cryptographic proofs.
-     * 
-     * @category Wallet Events
-     */
-    export interface ISyncProofEvent {
-        level : number;
+    export interface IDaaScoreChangeEvent {
+        currentDaaScore : number;
     }
     
 
@@ -4422,31 +4420,6 @@ export interface IWalletDescriptor {
 
 
     /**
-     * Emitted by {@link UtxoProcessor} indicating a non-recoverable internal error.
-     * If such event is emitted, the application should stop the UtxoProcessor
-     * and restart all related subsystem. This event is emitted when the UtxoProcessor
-     * encounters a critical condition such as "out of memory".
-     * 
-     * @category Wallet Events
-     */
-    export interface IUtxoProcErrorEvent {
-        message : string;
-    }
-    
-
-
-    /**
-     * Emitted by {@link Wallet} when the wallet has created a private key.
-     * 
-     * @category Wallet Events
-     */
-    export interface IPrvKeyDataCreateEvent {
-        prvKeyDataInfo : IPrvKeyDataInfo;
-    }
-    
-
-
-    /**
      * Emitted by {@link UtxoContext} when detecting a reorg transaction condition.
      * A transaction is considered reorg if it has been removed from the UTXO set
      * as a part of the network reorg process. Transactions notified with this event
@@ -4460,120 +4433,14 @@ export interface IWalletDescriptor {
 
 
     /**
-     * Emitted by {@link Wallet} when the wallet is successfully opened.
+     * Emitted by {@link Wallet} when the wallet data storage has been successfully created.
      * 
      * @category Wallet Events
      */
-    export interface IWalletOpenEvent {
+    export interface IWalletCreateEvent {
         walletDescriptor : IWalletDescriptor;
-        accountDescriptors : IAccountDescriptor[];
+        storageDescriptor : IStorageDescriptor;
     }
-    
-
-
-    /**
-     * Emitted by {@link Wallet} when an account has been created.
-     * 
-     * @category Wallet Events
-     */
-    export interface IAccountCreateEvent {
-        accountDescriptor : IAccountDescriptor;
-    }
-    
-
-
-    /**
-     * Emitted by {@link UtxoProcessor} when node is syncing headers as a part of the IBD (Initial Block Download) process.
-     * 
-     * @category Wallet Events
-     */
-    export interface ISyncHeadersEvent {
-        headers : number;
-        progress : number;
-    }
-    
-
-
-    /**
-     * Emitted by {@link Wallet} when an account has been deactivated.
-     * 
-     * @category Wallet Events
-     */
-    export interface IAccountDeactivationEvent {
-        ids : HexString[];
-    }
-    
-
-
-    /**
-     * Emitted by {@link UtxoProcessor} when node is syncing cryptographic trust data as a part of the IBD (Initial Block Download) process.
-     * 
-     * @category Wallet Events
-     */
-    export interface ISyncTrustSyncEvent {
-        processed : number;
-        total : number;
-    }
-    
-
-
-    /**
-     * Emitted by {@link Wallet} when an error occurs (for example, the wallet has failed to open).
-     * 
-     * @category Wallet Events
-     */
-    export interface IWalletErrorEvent {
-        message : string;
-    }
-    
-
-
-    /**
-     * Emitted by {@link Wallet} when an account has been selected.
-     * This event is used internally in Rust SDK to track currently
-     * selected account in the Rust CLI wallet.
-     * 
-     * @category Wallet Events
-     */
-    export interface IAccountSelectionEvent {
-        id? : HexString;
-    }
-    
-
-
-    /**
-     * Emitted by {@link UtxoProcessor} when it disconnects from RPC.
-     * 
-     * @category Wallet Events
-     */
-    export interface IDisconnectEvent {
-        networkId : string;
-        url? : string;
-    }
-    
-
-
-    /**
-     * Emitted by {@link UtxoProcessor} when it negotiates a successful RPC connection.
-     * 
-     * @category Wallet Events
-     */
-    export interface IConnectEvent {
-        networkId : string;
-        url? : string;
-    }
-    
-
-
-    /**
-     * Emitted by {@link UtxoContext} when detecting a new coinbase transaction.
-     * Transactions are kept in "stasis" for the half of the coinbase maturity DAA period.
-     * A wallet should ignore these transactions until they are re-broadcasted
-     * via the "pending" event.
-     * 
-     * @category Wallet Events
-     */
-    export type IStasisEvent = TransactionRecord;
     
 
 
@@ -4678,6 +4545,111 @@ export interface IWalletDescriptor {
 
 
     /**
+     * Emitted by {@link UtxoContext} when transaction is considered to be confirmed.
+     * This notification will be followed by the "balance" event.
+     * 
+     * @category Wallet Events
+     */
+    export type IMaturityEvent = TransactionRecord;
+    
+
+
+    /**
+     * Emitted by {@link Wallet} when the fee rate changes.
+     * 
+     * @category Wallet Events
+     */
+    export interface IFeeRateEvent {
+        priority: {
+            feerate: bigint,
+            seconds: bigint,
+        },
+        normal: {
+            feerate: bigint,
+            seconds: bigint,
+        },
+        low: {
+            feerate: bigint,
+            seconds: bigint,
+        },
+    }
+    
+
+
+    /**
+     * Emitted by {@link UtxoProcessor} when node is syncing blocks as a part of the IBD (Initial Block Download) process.
+     * 
+     * @category Wallet Events
+     */
+    export interface ISyncBlocksEvent {
+        blocks : number;
+        progress : number;
+    }
+    
+
+
+    /**
+     * Emitted by {@link UtxoProcessor} indicating a non-recoverable internal error.
+     * If such event is emitted, the application should stop the UtxoProcessor
+     * and restart all related subsystem. This event is emitted when the UtxoProcessor
+     * encounters a critical condition such as "out of memory".
+     * 
+     * @category Wallet Events
+     */
+    export interface IUtxoProcErrorEvent {
+        message : string;
+    }
+    
+
+
+    /**
+     * Emitted by {@link UtxoProcessor} when it negotiates a successful RPC connection.
+     * 
+     * @category Wallet Events
+     */
+    export interface IConnectEvent {
+        networkId : string;
+        url? : string;
+    }
+    
+
+
+    /**
+     * Emitted by {@link UtxoProcessor} when node is syncing cryptographic trust data as a part of the IBD (Initial Block Download) process.
+     * 
+     * @category Wallet Events
+     */
+    export interface ISyncTrustSyncEvent {
+        processed : number;
+        total : number;
+    }
+    
+
+
+    /**
+     * Emitted by {@link UtxoProcessor} when node is syncing headers as a part of the IBD (Initial Block Download) process.
+     * 
+     * @category Wallet Events
+     */
+    export interface ISyncHeadersEvent {
+        headers : number;
+        progress : number;
+    }
+    
+
+
+    /**
+     * Emitted by {@link Wallet} when an error occurs (for example, the wallet has failed to open).
+     * 
+     * @category Wallet Events
+     */
+    export interface IWalletErrorEvent {
+        message : string;
+    }
+    
+
+
+    /**
      * Emitted by {@link Wallet} when it opens and contains an optional anti-phishing 'hint' set by the user.
      * 
      * @category Wallet Events
@@ -4689,37 +4661,42 @@ export interface IWalletDescriptor {
 
 
     /**
-     * Emitted by {@link UtxoContext} when transaction is considered to be confirmed.
-     * This notification will be followed by the "balance" event.
+     * Emitted by {@link Wallet} when an account data has been updated.
+     * This event signifies a chance in the internal account state that
+     * includes new address generation.
      * 
      * @category Wallet Events
      */
-    export type IMaturityEvent = TransactionRecord;
-    
-
-
-    /**
-     * Emitted by {@link UtxoContext} when detecting a balance change.
-     * This notification is produced during the UTXO scan, when UtxoContext
-     * detects incoming or outgoing transactions or when transactions
-     * change their state (e.g. from pending to confirmed).
-     * 
-     * @category Wallet Events
-     */
-    export interface IBalanceEvent {
-        id : HexString;
-        balance? : IBalance;
+    export interface IAccountUpdateEvent {
+        accountDescriptor : IAccountDescriptor;
     }
     
 
 
     /**
-     * Emitted by {@link UtxoProcessor} on DAA score change.
+     * Emitted by {@link UtxoProcessor} after successfully opening an RPC
+     * connection to the Kaspa node. This event contains general information
+     * about the Kaspa node.
      * 
      * @category Wallet Events
      */
-    export interface IDaaScoreChangeEvent {
-        currentDaaScore : number;
+    export interface IServerStatusEvent {
+        networkId : string;
+        serverVersion : string;
+        isSynced : boolean;
+        url? : string;
+    }
+    
+
+
+    /**
+     * Emitted by {@link UtxoProcessor} when node is syncing the UTXO set as a part of the IBD (Initial Block Download) process.
+     * 
+     * @category Wallet Events
+     */
+    export interface ISyncUtxoSyncEvent {
+        chunks : number;
+        total : number;
     }
     
 
@@ -4737,22 +4714,102 @@ export interface IWalletDescriptor {
 
 
     /**
-     * Emitted by {@link UtxoContext} when detecting a new transaction during
-     * the initialization phase. Discovery transactions indicate that UTXOs
-     * have been discovered during the initial UTXO scan.
-     * 
-     * When receiving such notifications, the application should check its 
-     * internal storage to see if the transaction already exists. If it doesn't,
-     * it should create a correspond in record and notify the user of a new
-     * transaction.
-     * 
-     * This event is emitted when an address has existing UTXO entries that
-     * may have been received during previous sessions or while the wallet
-     * was offline.
+     * Emitted by {@link UtxoProcessor} when it detects that connected node does not have UTXO index enabled.
      * 
      * @category Wallet Events
      */
-    export type IDiscoveryEvent = TransactionRecord;
+    export interface IUtxoIndexNotEnabledEvent {
+        url? : string;
+    }
+    
+
+
+    /**
+     * Emitted by {@link Wallet} when the wallet is successfully opened.
+     * 
+     * @category Wallet Events
+     */
+    export interface IWalletOpenEvent {
+        walletDescriptor : IWalletDescriptor;
+        accountDescriptors : IAccountDescriptor[];
+    }
+    
+
+
+    /**
+     * Emitted by {@link Wallet} when an account has been selected.
+     * This event is used internally in Rust SDK to track currently
+     * selected account in the Rust CLI wallet.
+     * 
+     * @category Wallet Events
+     */
+    export interface IAccountSelectionEvent {
+        id? : HexString;
+    }
+    
+
+
+    /**
+     * Emitted when detecting a general error condition.
+     * 
+     * @category Wallet Events
+     */
+    export interface IErrorEvent {
+        message : string;
+    }
+    
+
+
+    /**
+     * Emitted by {@link Wallet} when an account has been created.
+     * 
+     * @category Wallet Events
+     */
+    export interface IAccountCreateEvent {
+        accountDescriptor : IAccountDescriptor;
+    }
+    
+
+
+
+    /**
+     * 
+     * @category Wallet Events
+     */
+    export interface ISyncState {
+        event : string;
+        data? : ISyncProofEvent | ISyncHeadersEvent | ISyncBlocksEvent | ISyncUtxoSyncEvent | ISyncTrustSyncEvent;
+    }
+    
+    /**
+     * 
+     * @category Wallet Events
+     */
+    export interface ISyncStateEvent {
+        syncState : ISyncState;
+    }
+    
+
+
+    /**
+     * Emitted by {@link Wallet} when an account has been deactivated.
+     * 
+     * @category Wallet Events
+     */
+    export interface IAccountDeactivationEvent {
+        ids : HexString[];
+    }
+    
+
+
+    /**
+     * Emitted by {@link Wallet} when the wallet has created a private key.
+     * 
+     * @category Wallet Events
+     */
+    export interface IPrvKeyDataCreateEvent {
+        prvKeyDataInfo : IPrvKeyDataInfo;
+    }
     
 
 
@@ -4766,16 +4823,25 @@ export interface IWalletDescriptor {
     
 
 
+/**
+ * 
+ * Defines a single payment output.
+ * 
+ * @see {@link IGeneratorSettingsObject}, {@link Generator}
+ * @category Wallet SDK
+ */
+export interface IPaymentOutput {
     /**
-     * Emitted by {@link UtxoProcessor} when node is syncing the UTXO set as a part of the IBD (Initial Block Download) process.
-     * 
-     * @category Wallet Events
+     * Destination address. The address prefix must match the network
+     * you are transacting on (e.g. `kaspa:` for mainnet, `kaspatest:` for testnet, etc).
      */
-    export interface ISyncUtxoSyncEvent {
-        chunks : number;
-        total : number;
-    }
-    
+    address: Address | string;
+    /**
+     * Output amount in SOMPI.
+     */
+    amount: bigint;
+}
+
 
 
 /**
@@ -4811,50 +4877,6 @@ export interface IHexViewConfig {
  */ 
 export type HexString = string;
 
-
-
-    /**
-     * RPC client configuration options
-     *
-     * @category Node RPC
-     */
-    export interface IRpcConfig {
-        /**
-         * An instance of the {@link Resolver} class to use for an automatic public node lookup.
-         * If supplying a resolver, the `url` property is ignored.
-         */
-        resolver? : Resolver,
-        /**
-         * URL for wRPC node endpoint
-         */
-        url?: string;
-        /**
-         * RPC encoding: `borsh` or `json` (default is `borsh`)
-         */
-        encoding?: Encoding;
-        /**
-         * Network identifier: `mainnet`, `testnet-10` etc.
-         * `networkId` is required when using a resolver.
-         */
-        networkId?: NetworkId | string;
-    }
-    
-
-
-        interface RpcClient {
-            /**
-            * @param {RpcEventCallback} callback
-            */
-            addEventListener(callback:RpcEventCallback): void;
-            /**
-            * @param {RpcEventType} event
-            * @param {RpcEventCallback} [callback]
-            */
-            addEventListener<M extends keyof RpcEventMap>(
-                event: M,
-                callback: (eventData: RpcEventMap[M]) => void
-            )
-        }
 
 
     /**
@@ -4903,63 +4925,57 @@ export type HexString = string;
     
 
 
+        interface RpcClient {
+            /**
+            * @param {RpcEventCallback} callback
+            */
+            addEventListener(callback:RpcEventCallback): void;
+            /**
+            * @param {RpcEventType} event
+            * @param {RpcEventCallback} [callback]
+            */
+            addEventListener<M extends keyof RpcEventMap>(
+                event: M,
+                callback: (eventData: RpcEventMap[M]) => void
+            )
+        }
+
+
     /**
-     * New block template notification event is produced when a new block
-     * template is generated for mining in the Kaspa BlockDAG.
-     * 
+     * RPC client configuration options
+     *
      * @category Node RPC
      */
-    export interface INewBlockTemplate {
-        [key: string]: any;
+    export interface IRpcConfig {
+        /**
+         * An instance of the {@link Resolver} class to use for an automatic public node lookup.
+         * If supplying a resolver, the `url` property is ignored.
+         */
+        resolver? : Resolver,
+        /**
+         * URL for wRPC node endpoint
+         */
+        url?: string;
+        /**
+         * RPC encoding: `borsh` or `json` (default is `borsh`)
+         */
+        encoding?: Encoding;
+        /**
+         * Network identifier: `mainnet`, `testnet-10` etc.
+         * `networkId` is required when using a resolver.
+         */
+        networkId?: NetworkId | string;
     }
     
 
 
     /**
-     * Pruning point UTXO set override notification event is produced when the
-     * UTXO set override for the pruning point changes in the Kaspa BlockDAG.
+     * Finality conflict notification event is produced when a finality
+     * conflict occurs in the Kaspa BlockDAG.
      * 
      * @category Node RPC
      */
-    export interface IPruningPointUtxoSetOverride {
-        [key: string]: any;
-    }
-    
-
-
-    /**
-     * UTXOs changed notification event is produced when the set
-     * of unspent transaction outputs (UTXOs) changes in the
-     * Kaspa BlockDAG. The event notification is scoped to the
-     * monitored list of addresses specified during the subscription.
-     * 
-     * @category Node RPC
-     */
-    export interface IUtxosChanged {
-        [key: string]: any;
-    }
-    
-
-
-    /**
-     * Finality conflict resolved notification event is produced when a finality
-     * conflict in the Kaspa BlockDAG is resolved.
-     * 
-     * @category Node RPC
-     */
-    export interface IFinalityConflictResolved {
-        [key: string]: any;
-    }
-    
-
-
-    /**
-     * Block added notification event is produced when a new
-     * block is added to the Kaspa BlockDAG.
-     * 
-     * @category Node RPC
-     */
-    export interface IBlockAdded {
+    export interface IFinalityConflict {
         [key: string]: any;
     }
     
@@ -5051,12 +5067,74 @@ export type RpcEventCallback = (event: RpcEvent) => void;
 
 
     /**
+     * Virtual DAA score changed notification event is produced when the virtual
+     * Difficulty Adjustment Algorithm (DAA) score changes in the Kaspa BlockDAG.
+     * 
+     * @category Node RPC
+     */
+    export interface IVirtualDaaScoreChanged {
+        [key: string]: any;
+    }
+    
+
+
+    /**
+     * Block added notification event is produced when a new
+     * block is added to the Kaspa BlockDAG.
+     * 
+     * @category Node RPC
+     */
+    export interface IBlockAdded {
+        [key: string]: any;
+    }
+    
+
+
+    /**
+     * Pruning point UTXO set override notification event is produced when the
+     * UTXO set override for the pruning point changes in the Kaspa BlockDAG.
+     * 
+     * @category Node RPC
+     */
+    export interface IPruningPointUtxoSetOverride {
+        [key: string]: any;
+    }
+    
+
+
+    /**
+     * Finality conflict resolved notification event is produced when a finality
+     * conflict in the Kaspa BlockDAG is resolved.
+     * 
+     * @category Node RPC
+     */
+    export interface IFinalityConflictResolved {
+        [key: string]: any;
+    }
+    
+
+
+    /**
      * Virtual chain changed notification event is produced when the virtual
      * chain changes in the Kaspa BlockDAG.
      * 
      * @category Node RPC
      */
     export interface IVirtualChainChanged {
+        [key: string]: any;
+    }
+    
+
+
+    /**
+     * UTXOs changed notification event is produced when the set
+     * of unspent transaction outputs (UTXOs) changes in the
+     * Kaspa BlockDAG. The event notification is scoped to the
+     * monitored list of addresses specified during the subscription.
+     * 
+     * @category Node RPC
+     */
+    export interface IUtxosChanged {
         [key: string]: any;
     }
     
@@ -5075,24 +5153,12 @@ export type RpcEventCallback = (event: RpcEvent) => void;
 
 
     /**
-     * Virtual DAA score changed notification event is produced when the virtual
-     * Difficulty Adjustment Algorithm (DAA) score changes in the Kaspa BlockDAG.
+     * New block template notification event is produced when a new block
+     * template is generated for mining in the Kaspa BlockDAG.
      * 
      * @category Node RPC
      */
-    export interface IVirtualDaaScoreChanged {
-        [key: string]: any;
-    }
-    
-
-
-    /**
-     * Finality conflict notification event is produced when a finality
-     * conflict occurs in the Kaspa BlockDAG.
-     * 
-     * @category Node RPC
-     */
-    export interface IFinalityConflict {
+    export interface INewBlockTemplate {
         [key: string]: any;
     }
     
@@ -6626,6 +6692,13 @@ export class RpcClient {
    */
   clearEventListener(callback: RpcEventCallback): void;
   /**
+   * Retrieves reward information for a block.
+   * Returned information: block color, confirmation count, reward, merging chain block, and header.
+   * @see {@link IGetBlockRewardInfoRequest}, {@link IGetBlockRewardInfoResponse}
+   * @throws `string` on an RPC error, a server-side error or when supplying incorrect arguments.
+   */
+  getBlockRewardInfo(request: IGetBlockRewardInfoRequest): Promise<IGetBlockRewardInfoResponse>;
+  /**
    *
    * Unregister an event listener.
    * This function will remove the callback for the specified event.
@@ -6956,7 +7029,7 @@ export class ScriptBuilder {
    * Creates a new ScriptBuilder over an existing script.
    * Supplied script can be represented as an `Uint8Array` or a `HexString`.
    */
-  static fromScript(script: HexString | Uint8Array): ScriptBuilder;
+  static fromScript(script: HexString | Uint8Array, options?: ScriptBuilderOptions | null): ScriptBuilder;
   addSequence(sequence: bigint): ScriptBuilder;
   /**
    * Get script bytes represented by a hex string.
@@ -6974,7 +7047,7 @@ export class ScriptBuilder {
    * Generates a signature script that fits a pay-to-script-hash script.
    */
   encodePayToScriptHashSignatureScript(signature: HexString | Uint8Array): HexString;
-  constructor();
+  constructor(options?: ScriptBuilderOptions | null);
   /**
    * Drains (empties) the script builder, returning the
    * script bytes represented by a hex string.
@@ -6997,11 +7070,11 @@ export class ScriptBuilder {
    * chooses canonical opcodes depending on the length of the data.
    *
    * A zero length buffer will lead to a push of empty data onto the stack (Op0 = OpFalse)
-   * and any push of data greater than [`MAX_SCRIPT_ELEMENT_SIZE`](kaspa_txscript::MAX_SCRIPT_ELEMENT_SIZE) will not modify
+   * and any push of data greater than the maximum script element size will not modify
    * the script since that is not allowed by the script engine.
    *
    * Also, the script will not be modified if pushing the data would cause the script to
-   * exceed the maximum allowed script engine size [`MAX_SCRIPTS_SIZE`](kaspa_txscript::MAX_SCRIPTS_SIZE).
+   * exceed the maximum allowed script engine size.
    */
   addData(data: HexString | Uint8Array): ScriptBuilder;
   hexView(args?: IHexViewConfig | null): string;
@@ -7124,6 +7197,7 @@ export class Transaction {
   addresses(network_type: NetworkType | NetworkId | string): Address[];
   version: number;
   lockTime: bigint;
+  storageMass: bigint;
   get inputs(): TransactionInput[];
   set inputs(value: (ITransactionInput | TransactionInput)[]);
   get outputs(): TransactionOutput[];
@@ -7133,6 +7207,9 @@ export class Transaction {
   get payload(): string;
   set payload(value: any);
   gas: bigint;
+  /**
+   * @deprecated Use `storageMass` instead
+   */
   mass: bigint;
   /**
    * Returns the transaction ID
@@ -7156,6 +7233,7 @@ export class TransactionInput {
   constructor(value: ITransactionInput | TransactionInput);
   sequence: bigint;
   sigOpCount: number;
+  computeBudget: number;
   get previousOutpoint(): TransactionOutpoint;
   set previousOutpoint(value: any);
   get signatureScript(): string | undefined;
@@ -7629,17 +7707,6 @@ export class Wallet {
 */
   toString(): string;
   free(): void;
-  disconnect(): Promise<void>;
-  constructor(config: IWalletConfig);
-  setNetworkId(network_id: NetworkId | string): void;
-  removeEventListener(event: WalletEventType | WalletEventType[] | string | string[], callback?: WalletNotificationCallback | null): void;
-  stop(): Promise<void>;
-  start(): Promise<void>;
-  /**
-   * Check if a wallet with a given name exists.
-   */
-  exists(name?: string | null): Promise<boolean>;
-  connect(args?: IConnectOptions | undefined | null): Promise<void>;
   /**
    * @see {@link IGetStatusRequest} {@link IGetStatusResponse}
    * @throws `string` in case of an error.
@@ -7851,6 +7918,17 @@ export class Wallet {
    * @throws `string` in case of an error.
    */
   flush(request: IFlushRequest): Promise<IFlushResponse>;
+  disconnect(): Promise<void>;
+  constructor(config: IWalletConfig);
+  setNetworkId(network_id: NetworkId | string): void;
+  removeEventListener(event: WalletEventType | WalletEventType[] | string | string[], callback?: WalletNotificationCallback | null): void;
+  stop(): Promise<void>;
+  start(): Promise<void>;
+  /**
+   * Check if a wallet with a given name exists.
+   */
+  exists(name?: string | null): Promise<boolean>;
+  connect(args?: IConnectOptions | undefined | null): Promise<void>;
   readonly descriptor: WalletDescriptor | undefined;
   readonly rpc: RpcClient;
   /**
