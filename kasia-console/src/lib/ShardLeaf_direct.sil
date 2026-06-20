@@ -1,0 +1,116 @@
+// ShardLeaf_direct.sil — bshard cascade SINGLE-SHARD direct 合约 (J1, 2026-06-20; 解 STEP1 convert_to_foldnode SIZE 墙).
+//
+// 动因(stitch STEP1 链上实证 2026-06-20): ShardLeaf.convert_to_foldnode 的 WithTemplate 目标=完整 FoldNode(模板 1242B),
+//   double-blake2b over 1242B(实测 11242 units, ~9u/byte 非 header 焊的 6.58)>> 9999 → BUST。这是"零件全绿≠机制跑通"
+//   现形: seal 零件测从 direct-funded FoldNode 起跳, ShardLeaf→FoldNode 这跳 stitch 首次真跑才暴。
+//
+// 解(三方收敛 shardCount=1 skip-fold; NWT retarget-convert 路, J1 拍板 impl): DoD 单小市场=1 shard=无多片可聚合 →
+//   FoldNode/fold 逻辑上多余。本合约 = ShardLeaf 把 convert 的 WithTemplate 目标【从 FoldNode(1242B)retarget 到
+//   RootClose(模板 851B < 预算; RootClose 之前当 seal 目标已 LANDED 验过)】, 直接 ShardLeaf→RootClose 跳 FoldNode。
+//   register_append 与 ShardLeaf BYTE-IDENTICAL(零语义改); convert 的 new_state 从 4-field(FoldNode)→ 7-field(RootClose
+//   canonical), 合约略长 → ★register 侧【必 J2 链上 probe 实测】(NWT flag: retarget 长得少但仍长, 别凭 model 假设
+//   register 免 probe = STEP1-redux; UI probe-not-model 锁死)。fallback 若 register re-bust = FoldNode_sealonly(register
+//   字节不变, 多一跳)。
+//
+// ABI(2-entry, J2 wire): register_append=entry0=OP_0('00') / convert_to_rootclose=entry1=OP_1('51') — selector 与原
+//   ShardLeaf 同(STEP0/STEP1 selector 不变), 只 convert 目标+carry state 变。state_layout.start=1(多-entry)。
+// 链: ShardLeaf_direct →(convert_to_rootclose, 7-field canonical)→ RootClose →(close_commit)→ ...→ RootClaim/RefundClaim。
+//   FoldNode 整个绕开(multi-shard fold = post-DoD, 用回 ShardLeaf+FoldNode)。
+// 承重锚: register output-bind weld(leaf value==pool_value+stake) + convert 跨合约 value 守恒(RootClose value==pool_value)
+//   + canonical outcome literal/ctor-const 硬设(closed:0/winningSide:0/payoutRoot:init)= committee-bypass 保护链不变
+//   (与 FoldNode.seal_to_root 的 canonical 硬设同语义)。单 shard 无聚合 → 无 commit_v2 校验需求(单 leaf accounts 即全量)。
+
+pragma silverscript ^0.1.0;
+
+contract ShardLeaf_direct(
+    byte[32] market_id,
+    byte[32] ps_tmpl_hash,           // dust PoolSide-ticket expectedTemplateHash (register 造 ticket)
+    byte[32] shard_pool_id,          // 本 pool 身份 (ticket 记此)
+    int      seal_count,             // count==seal_count 才可 convert (单-shard DoD=1)
+    int      min_bet,
+    byte[32] rootclose_tmpl_hash,    // RootClose expectedTemplateHash (convert_to_rootclose foreign-template 桥; baked; 替原 fn_tmpl_hash)
+    byte[32] rootclose_init_payoutRoot, // RootClose genesis payoutRoot (canonical ZERO; convert 硬设)
+    // —— genesis State (4-field, 无 outcome) ——
+    int      init_local_yes,
+    int      init_local_no,
+    int      init_count,
+    int      init_pool_value
+) {
+    int local_yes  = init_local_yes;
+    int local_no   = init_local_no;
+    int count      = init_count;
+    int pool_value = init_pool_value;
+
+    // dust PoolSide-ticket State (= PoolSide_v08_shard 4 字段; register 造 ticket 的 validateOutputStateWithTemplate 类型锚)
+    struct Tk {
+        byte[32] bettorPk;
+        int      direction;
+        int      stake;
+        byte[32] shardPoolId;
+    }
+    // RootClose 7-field State 镜像 (convert_to_rootclose foreign-template 布局; 字段序/类型必 == RootClose State)
+    struct RootCloseState {
+        int      local_yes;
+        int      local_no;
+        int      count;
+        int      pool_value;
+        int      closed;
+        int      winningSide;
+        byte[32] payoutRoot;
+    }
+
+    // —— entry 0: register_append (收注; 与 ShardLeaf entry 0 BYTE-IDENTICAL) ——
+    entrypoint function register_append(
+        int      side,
+        int      stake,
+        int      leafOutIdx,
+        int      psOutIdx,
+        byte[32] bettorPk,
+        byte[]   ps_prefix,
+        byte[]   ps_suffix
+    ) {
+        require(count < seal_count);
+        require(side == 0 || side == 1);
+        require(stake >= min_bet);
+
+        // mint dust ticket (spent-once claim/refund 凭证)
+        validateOutputStateWithTemplate(psOutIdx, {
+            bettorPk: bettorPk,
+            direction: side,
+            stake: stake,
+            shardPoolId: shard_pool_id
+        }, ps_prefix, ps_suffix, ps_tmpl_hash);
+
+        // 重建 bumped leaf (stake 真存; ShardLeaf_direct 同模板 recreate)
+        validateOutputState(leafOutIdx, {
+            local_yes:  local_yes + stake * (1 - side),
+            local_no:   local_no + stake * side,
+            count:      count + 1,
+            pool_value: pool_value + stake
+        });
+        // ★ output-bind weld: leaf value == 新 pool_value (KAS 真入池)
+        require(tx.outputs[leafOutIdx].value == pool_value + stake);
+    }
+
+    // —— entry 1: convert_to_rootclose (count 满 → 1:1 直转 RootClose 外模板; 7-field canonical; value 守恒; 跳 FoldNode) ——
+    entrypoint function convert_to_rootclose(
+        int      rcOutIdx,
+        byte[]   rc_prefix,              // RootClose redeem state 区前段 (witness; blake2b(prefix‖suffix)==rootclose_tmpl_hash 焊)
+        byte[]   rc_suffix
+    ) {
+        require(count == seal_count);                      // 仅收满的 leaf 可转 (= 原 seal 门)
+        // 产 RootClose genesis: 4-field account 真值 carry + canonical outcome 硬设(closed:0/winningSide:0/payoutRoot:init)
+        //   = committee-bypass(只 close_commit 能改 outcome; 此处 literal/ctor-const 不可被 witness 操纵)。
+        validateOutputStateWithTemplate(rcOutIdx, {
+            local_yes:   local_yes,
+            local_no:    local_no,
+            count:       count,
+            pool_value:  pool_value,
+            closed:      0,
+            winningSide: 0,
+            payoutRoot:  rootclose_init_payoutRoot
+        }, rc_prefix, rc_suffix, rootclose_tmpl_hash);
+        // ★ output-bind weld (跨合约边界 value 守恒): RootClose value == 本 leaf 全池 pool_value
+        require(tx.outputs[rcOutIdx].value == pool_value);
+    }
+}

@@ -1,0 +1,33 @@
+// ProbeC_selfonly.sil — J1 实验变体C (2026-06-19): 最干净隔离 validateOutputState(self)。
+//
+// 目的(EvalFalse reframe): ShardLeaf register×self false-stack = EvalFalse(终端单值 FALSE, 非残项)。
+//   静态全排除(序列化/值/index/leaf-P2SH/opcode-arity 全 net-0 匹配), 必经验隔离。
+// 变体C = 【1 entry(无 selector dispatch) + 仅 1 个 validateOutputState(self) recreate-same-state + 无 WithTemplate/无 ps mint/无 requires】。
+//   C LANDS → validateOutputState(self) 单独【OK】→ bug 在【组合】(多-entry selector dispatch / WithTemplate 空 prefix / value-weld 交互)。
+//   C false-stack(EvalFalse) → validateOutputState(self) 单独就坏 → NWT kaspa VM 源离线执行 dump 末尾栈看 FALSE 哪来。
+// spend: lock 到本 P2SH → 用 recreate entry spend, 建 output[outIdx] 在【同 P2SH(同 state)】。单-entry → scriptSig 无 selector byte。
+
+pragma silverscript ^0.1.0;
+
+contract ProbeC_selfonly(
+    int init_a,
+    int init_b,
+    int init_c,
+    int init_d
+) {
+    int a = init_a;
+    int b = init_b;
+    int c = init_c;
+    int d = init_d;
+
+    // 唯一 entry: validateOutputState(self) recreate 同 4-field state(无算术/无 WithTemplate/无 selector)。
+    // 输出在【同 state】= 同 P2SH(= 本 input 的 P2SH)。relay lock dust 到此 P2SH 即可作 output。
+    entrypoint function recreate(int outIdx) {
+        validateOutputState(outIdx, {
+            a: a,
+            b: b,
+            c: c,
+            d: d
+        });
+    }
+}

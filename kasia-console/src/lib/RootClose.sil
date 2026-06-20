@@ -1,0 +1,126 @@
+// RootClose.sil — cascade convert-split ROOT-CLOSE 合约 (J1, 2026-06-20; recursive-split 过 9999 双-blake2b 墙).
+//
+// 拆分动因(J2/UI 三方 probe 坐实): seal 的 WithTemplate double-blake2b 揭目标模板, 安全目标 redeem <~850B(template<790B,
+//   850B pass / 918B bust)。单体 RootClose(close+refund+convert+merkle)1185B 远超。∴ recursive-split: 贵的下游逻辑
+//   (dust-ticket 退款 payout / merkle claim)移出 seal 目标到独立合约, RootClose 只留 seal-target-critical 的薄逻辑。
+//
+// **RootClose = seal 目标(~825B FITS)**, 4-entry: close_commit + refund_flip + convert_to_claim + convert_to_refundclaim。
+//   下游: convert_to_claim→RootClaim(merkle) / convert_to_refundclaim→RefundClaim(dust-ticket 退款)。
+// 7-field state {local_yes, local_no, count, pool_value, closed, winningSide, payoutRoot}。
+// **RootClose 只经 FoldNode.seal_to_root 创建**(foreign-template, rootclose_tmpl_hash 焊进 FoldNode); genesis outcome
+//   canonical(closed:0/winningSide:0/payoutRoot:init)由 seal 硬设 = committee-bypass。
+//
+// 承重不变量:
+// - **R1 closed-XOR 保住**: close(0→1) vs refund_flip(0→2) 都 require(closed==0) 且都在【本合约同 UTXO】= 原子 latch,
+//   write-once(只一个能花 closed==0 的 RootClose)。F2: 首 refund flip 0→2 锁死 late-close(close req closed==0 永挡)→
+//   refund-then-close insolvency 杜绝。dust-ticket payout 移 RefundClaim 不破 XOR(flip 在此, 只 payout 下游)。
+// - **R8 委员锚 = committee_hash**(Bettor lever, 省 ~128B): 5 pubkey 不再 baked(原 160B), 改 baked 单 committee_hash(32B);
+//   close witness 供 5 pubkey, 必 blake2b(c0‖c1‖c2‖c3‖c4)==committee_hash 才过 = 不可 swap/forge(同 R2(a) value-source 铁律,
+//   锚 baked 非自由 witness)。4-of-5 fault-tolerance 不变, 治理不变(Owner 不需决)。
+// - **R2 bridge**: convert 目标 tmpl_hash ctor-baked(claim/refundclaim_tmpl_hash, 非 witness); new_state 全 7-field;
+//   R2c outcome(closed/winningSide/payoutRoot)从 self 委员盖章 fields 读非 witness。
+// - **R3 value-conserve**: 每 entry weld out.value==pool_value(close/flip/convert 不动钱, draw-down 只在下游 terminal)。
+//
+// ⚠ DRAFT (spec docs/2026-06-19-cascade-convert-split-spec.md; committee_hash lever 全队 affirm; refund-split [flip 留此 +
+//   payout 移 RefundClaim] 待 NWT R1-XOR 终审)。编译 ~822B(my silverc)/~840B(:3200, <850 预算)。
+
+pragma silverscript ^0.1.0;
+
+contract RootClose(
+    byte[32] committee_hash,      // R8: blake2b(c0Pk‖c1Pk‖c2Pk‖c3Pk‖c4Pk) 锚 (close witness 供 pubkey 必 hash-match; 省 ~128B vs 5 baked)
+    int      deadline_ms,         // close post-deadline (已 ms, 省 OP_MUL); refund timeout deadline_ms+grace_ms
+    byte[32] claim_tmpl_hash,     // RootClaim expectedTemplateHash (convert_to_claim foreign-template 桥; baked)
+    byte[32] refundclaim_tmpl_hash, // RefundClaim expectedTemplateHash (convert_to_refundclaim foreign-template 桥; baked)
+    // —— genesis State (7-field; 实际由 seal_to_root 提供, init_* 仅定义 State 布局) ——
+    int      init_local_yes,
+    int      init_local_no,
+    int      init_count,
+    int      init_pool_value,
+    int      init_closed,
+    int      init_winningSide,
+    byte[32] init_payoutRoot
+) {
+    int local_yes   = init_local_yes;
+    int local_no    = init_local_no;
+    int count       = init_count;
+    int pool_value  = init_pool_value;
+    int closed      = init_closed;
+    int winningSide = init_winningSide;
+    byte[32] payoutRoot = init_payoutRoot;
+
+    // RootClaim 8-field State 镜像 (convert_to_claim foreign-template 序列化布局; 字段序/类型必 == RootClaim State, 含 R7 claimed_bitmap)
+    struct ClaimState {
+        int      local_yes;
+        int      local_no;
+        int      count;
+        int      pool_value;
+        int      closed;
+        int      winningSide;
+        byte[32] payoutRoot;
+        int      claimed_bitmap;
+    }
+
+    // —— entry 0: close_commit (committee 4-of-5 写 outcome; write-once; value 不变) ——
+    entrypoint function close_commit(
+        byte[32] c0Pk, byte[32] c1Pk, byte[32] c2Pk, byte[32] c3Pk, byte[32] c4Pk,  // witness (R8: 必 hash-match committee_hash)
+        sig c0Sig, sig c1Sig, sig c2Sig, sig c3Sig, sig c4Sig,
+        int      rootOutIdx,
+        int      new_winningSide,      // 0=YES 1=NO
+        byte[32] new_payoutRoot        // off-chain 算 (winner+fee leaves, Σ==totalPool)
+    ) {
+        require(closed == 0);                              // write-once (R1 XOR: 与 refund_flip 抢 closed==0)
+        require(tx.time >= deadline_ms);                   // post-deadline (deadline_ms 已 ms)
+        require(new_winningSide == 0 || new_winningSide == 1);
+        // R8: witness 5 pubkey 必 hash-match baked committee_hash (不可 swap/forge)
+        require(blake2b(byte[](c0Pk) + byte[](c1Pk) + byte[](c2Pk) + byte[](c3Pk) + byte[](c4Pk)) == committee_hash);
+
+        int validSigs = 0;
+        if (checkSig(c0Sig, pubkey(c0Pk))) { validSigs = validSigs + 1; }
+        if (checkSig(c1Sig, pubkey(c1Pk))) { validSigs = validSigs + 1; }
+        if (checkSig(c2Sig, pubkey(c2Pk))) { validSigs = validSigs + 1; }
+        if (checkSig(c3Sig, pubkey(c3Pk))) { validSigs = validSigs + 1; }
+        if (checkSig(c4Sig, pubkey(c4Pk))) { validSigs = validSigs + 1; }
+        require(validSigs >= 4);
+
+        validateOutputState(rootOutIdx, {
+            local_yes:  local_yes, local_no: local_no, count: count, pool_value: pool_value,
+            closed: 1, winningSide: new_winningSide, payoutRoot: new_payoutRoot
+        });
+        require(tx.outputs[rootOutIdx].value == pool_value);   // R3: close 不动钱
+    }
+
+    // —— entry 1: refund_flip (市场取消 → 仅 flip closed 0→2; dust-ticket payout 在 RefundClaim) ——
+    //   R1 XOR-critical: 与 close 抢 closed==0, 在本合约同 UTXO 原子 latch。F2: flip 0→2 锁死 late-close。
+    entrypoint function refund_flip(int rootOutIdx) {
+        require(closed == 0);                              // R1 XOR (与 close 抢)
+        require(tx.time >= deadline_ms + 7200000);         // deadline+grace(2h) 超时才可取消 (防 betting 期早退)
+        validateOutputState(rootOutIdx, {
+            local_yes:  local_yes, local_no: local_no, count: count, pool_value: pool_value,
+            closed: 2, winningSide: winningSide, payoutRoot: payoutRoot
+        });
+        require(tx.outputs[rootOutIdx].value == pool_value);   // R3: flip 不动钱
+    }
+
+    // —— entry 2: convert_to_claim (settled → RootClaim foreign-template 桥; 全池 value-conserve) ——
+    //   R2c: outcome 从 self 委员盖章 fields 读非 witness + require(closed==1)。
+    entrypoint function convert_to_claim(int claimOutIdx, byte[] claim_prefix, byte[] claim_suffix) {
+        require(closed == 1);                              // 仅 settled 转 claim
+        // RootClaim 8-field genesis: 7 self 委员盖章 carry + claimed_bitmap:0(R7 nullifier 起始空, claim 逐 slot 置位)
+        validateOutputStateWithTemplate(claimOutIdx, {
+            local_yes: local_yes, local_no: local_no, count: count, pool_value: pool_value,
+            closed: closed, winningSide: winningSide, payoutRoot: payoutRoot,   // R2c: self 委员盖章
+            claimed_bitmap: 0
+        }, claim_prefix, claim_suffix, claim_tmpl_hash);
+        require(tx.outputs[claimOutIdx].value == pool_value);  // R3
+    }
+
+    // —— entry 3: convert_to_refundclaim (cancelled → RefundClaim foreign-template 桥; 全池 value-conserve) ——
+    entrypoint function convert_to_refundclaim(int rcOutIdx, byte[] rc_prefix, byte[] rc_suffix) {
+        require(closed == 2);                              // 仅 cancelled 转 refundclaim
+        validateOutputStateWithTemplate(rcOutIdx, {
+            local_yes: local_yes, local_no: local_no, count: count, pool_value: pool_value,
+            closed: closed, winningSide: winningSide, payoutRoot: payoutRoot
+        }, rc_prefix, rc_suffix, refundclaim_tmpl_hash);
+        require(tx.outputs[rcOutIdx].value == pool_value);     // R3
+    }
+}

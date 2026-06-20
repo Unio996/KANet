@@ -833,6 +833,16 @@ if (process.send) {
           return;
         }
 
+        case 'bshard_convert_to_foldnode': {
+          // bshard convert-split (J1 2026-06-19): ShardLeaf convert_to_foldnode OP_1. sealed leaf P2SH(no sig)+funding P2PK.
+          // leaf→FoldNode foreign-template 桥 (4-field carry, no outcome). relay 自算 FoldNode 续约地址.
+          const { unlockBshardConvert } = await import('./lib/p2sh.mjs');
+          const wallet = getWallet();
+          const r = await unlockBshardConvert({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) });
+          if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, txId: r.txId } });
+          return;
+        }
+
         case 'bshard_seal_to_root': {
           // bshard M3 route-split: PoolLeaf seal_to_root OP_3, leaf→root foreign-template 桥. leaf P2SH(no sig)+funding. 全池 KAS → PoolRoot.
           const { unlockBshardSeal } = await import('./lib/p2sh.mjs');
