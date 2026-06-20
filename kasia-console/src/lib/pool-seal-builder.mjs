@@ -38,22 +38,30 @@ export function buildSealToRootWitness(o) {
  * sealedRootState = 7-field {leaf accounts carry, closed:0, winningSide:0, payoutRoot:root_init_payoutRoot} (canonical).
  * @returns {object} relay command (type='bshard_seal_to_root')
  */
-export function buildSealToRootCommand({ witness, leafOutpointTxid, leafRedeemHex, leafState, rootInitPayoutRoot, funding, leafValueSompi, changeAddress, sealSelector = '53' }) {
+export function buildSealToRootCommand({ witness, leafOutpointTxid, leafRedeemHex, leafState, rootInitPayoutRoot, funding, leafValueSompi, changeAddress, sealSelector = '53', carryFullState = null }) {
+  // carryFullState (convert 用): 全 7-field {local_yes,local_no,count,pool_value,closed,winningSide,payoutRoot} 从 RootClose self carry。
+  //   供则目标 state=carry(convert_to_claim/refundclaim, R2c outcome-from-self); 不供则 canonical seal state(closed:0)。
   // sealSelector: which seal_to_root entry to dispatch. PoolLeaf seal_to_root = entry OP_3 ('53', default = back-compat);
   // FoldNode (convert-split, abi 0:__leader_fold 1:__delegate_fold 2:seal_to_root) seal_to_root = entry OP_2 ('52').
   // leafRedeemHex/leafState accept the FoldNode redeem/state for the convert-split cascade — seal_to_root witness
   // {rootOutIdx, root_prefix, root_suffix} + 4-field state carry are byte-identical to PoolLeaf's (only selector differs).
   if (!leafOutpointTxid || !leafRedeemHex) throw new Error('leafOutpointTxid + leafRedeemHex (the sealed leaf/foldnode, count==shard_count) required');
   if (!leafState) throw new Error('leafState (4-field {local_yes,local_no,count,pool_value}) required for sealed root accounts');
-  if (!rootInitPayoutRoot) throw new Error('rootInitPayoutRoot (= PoolLeaf ctor root_init_payoutRoot, canonical ZERO) required');
+  if (!carryFullState && !rootInitPayoutRoot) throw new Error('rootInitPayoutRoot (= seal canonical ZERO) required when carryFullState not provided');
   if (leafValueSompi == null) throw new Error('leafValueSompi (= leaf pool_value; weld3 root.value==pool_value) required');
   const poolValue = BigInt(leafValueSompi);
   if (poolValue.toString() !== BigInt(leafState.pool_value).toString()) {
     throw new Error(`seal value-conserve self-check FAILED: leafValueSompi ${poolValue} != leafState.pool_value ${leafState.pool_value} (weld3)`);
   }
-  // sealed PoolRoot genesis: accounts carry from leaf; outcome CANONICAL (closed:0/winningSide:0 literal, payoutRoot
-  // ctor-const) — matches on-chain seal_to_root literals (committee-bypass cannot move to seal).
-  const sealedRootState = {
+  // target genesis state. SEAL (FoldNode→RootClose): outcome CANONICAL (closed:0/winningSide:0 literal, payoutRoot
+  //   ctor-const) — committee-bypass cannot move to seal. CONVERT (RootClose→RootClaim/RefundClaim, carryFullState 供):
+  //   全 7-field 从 RootClose 已委员盖章 self state CARRY(closed:1/2, real winningSide/payoutRoot) — R2c outcome-from-self。
+  //   relay 用此 state 算 foreign-template 目标地址; 合约 validateOutputStateWithTemplate 验输出匹配(state 由 self fields 算)。
+  const sealedRootState = carryFullState ? {
+    local_yes: carryFullState.local_yes.toString(), local_no: carryFullState.local_no.toString(),
+    count: Number(carryFullState.count), pool_value: poolValue.toString(),
+    closed: Number(carryFullState.closed), winningSide: Number(carryFullState.winningSide), payoutRoot: carryFullState.payoutRoot,
+  } : {
     local_yes: leafState.local_yes.toString(), local_no: leafState.local_no.toString(),
     count: Number(leafState.count), pool_value: poolValue.toString(),
     closed: 0, winningSide: 0, payoutRoot: rootInitPayoutRoot,
@@ -75,4 +83,27 @@ export function buildSealToRootCommand({ witness, leafOutpointTxid, leafRedeemHe
       change_address: changeAddress,
     },
   };
+}
+
+// —— convert_to_claim / convert_to_refundclaim 薄 wrapper (RootClose→RootClaim/RefundClaim; J1 2026-06-20) ——
+// 复用 buildSealToRootCommand(同 foreign-template 桥): leaf=RootClose, target=RootClaim/RefundClaim, carryFullState=RootClose
+// 全 7-field settled/cancelled state(R2c outcome-from-self), selector RootClose abi convert_to_claim=OP_2('52')/convert_to_refundclaim=OP_3('53')。
+
+/** RootClose.convert_to_claim (closed==1) → RootClaim. o: {rootCloseOutpointTxid, rootCloseRedeemHex, rootCloseState(7-field),
+ *  claimWitness(buildSealToRootWitness{rootOutIdx:claimOutIdx, rootArtifact:RootClaim}), funding, valueSompi, changeAddress} */
+export function buildConvertToClaimCommand(o) {
+  return buildSealToRootCommand({
+    witness: o.claimWitness, leafOutpointTxid: o.rootCloseOutpointTxid, leafRedeemHex: o.rootCloseRedeemHex,
+    leafState: o.rootCloseState, funding: o.funding, leafValueSompi: o.valueSompi, changeAddress: o.changeAddress,
+    sealSelector: '52', carryFullState: o.rootCloseState,
+  });
+}
+
+/** RootClose.convert_to_refundclaim (closed==2) → RefundClaim. 同 buildConvertToClaimCommand, selector OP_3, target RefundClaim. */
+export function buildConvertToRefundClaimCommand(o) {
+  return buildSealToRootCommand({
+    witness: o.rcWitness, leafOutpointTxid: o.rootCloseOutpointTxid, leafRedeemHex: o.rootCloseRedeemHex,
+    leafState: o.rootCloseState, funding: o.funding, leafValueSompi: o.valueSompi, changeAddress: o.changeAddress,
+    sealSelector: '53', carryFullState: o.rootCloseState,
+  });
 }
