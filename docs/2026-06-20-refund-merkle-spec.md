@@ -73,7 +73,29 @@ validateOutputState(..., pool_value: pool_value - tk.stake, refunded_bitmap: ref
   cancel 路上线前补 A。
 
 ## 5. 不变量(A 落地必守)
-- refundRoot genuineness: leaf=blake2b(bettorPk‖ser(stake,8)), 排序/索引必与 register append 序一致(同 claim payoutRoot 的 pk-ASC 约定对齐)。
-- refunded_bitmap nullifier: 同 RootClaim — `require(refund_index < div)` aliasing-fix(防 index 别名双退)+ `2^index` mask 复用 loop。
-- value 守恒: Σrefund == pool_value(全退完池清零), 每笔 draw-down weld `out.value == pool_value - tk.stake`。
-- closed==2 gate 不变(仅取消态)。R1-XOR(refund_flip 留 RootClose)不变。
+
+⚠ **外部 Architect 红队回审(2026-06-20)抓出四方验漏的 2 🔴**(元教训: 同质团队共同盲区——都盯 forge 没盯 amount-weld;
+"知道原则≠自动套新 context"——NWT 知 claim amount-binding(#31 settle-chunk)却没 transfer 到 refund)。下列 F-refund-1/2 是修后承重不变量。
+
+- 🔴 **F-refund-1 amount-weld(load-bearing, 漏则盗池)**: merkle membership 只挡【leaf 不在集】, **挡不住【集里那个 stake 金额是假的】**。
+  攻击残路: 一个 genuine-in-set 的 leaf 若其 `stake` 字段虚高(register 时没 weld stake==实际锁进池的 value)→ 超额退 = 盗池。
+  ∴ **三绑死**:(a)**register_append 时 `leaf.stake == 实际锁仓 value`**(造 refundRoot leaf 的 stake 必 == 该注真锁进 pool_value
+  的增量, 不是 witness 自报);(b)**Σ leaf.stake == pool_value**(全 leaf 金额和 == 池, 归纳/value-weld 守);(c)refund 时
+  `out.value == pool_value - tk.stake` **且 tk.stake 是那个 welded 实值**(读 dust-ticket 的 stake 必 == refundRoot leaf 里 welded 的同值)。
+  = 与 claim `payoutRoot` 的 amount-binding **完全对称**(claim 也 merkle-bind pk‖payout 双锚, 非只 pk)。
+- 🔴 **F-refund-2 leaf 序 = 到达序(非 pk-ASC)**: refundRoot 是 register 流式累积 → leaf 索引 = **register append 到达序**(第 i 注 = index i)。
+  **不要 pk-ASC**(那是 claim payoutRoot 离线建树的约定; refund 流式增量无法预知全集排序, 强行 pk-ASC = 累积时要重排=破流式)。
+  refunded_bitmap 的 slot = 到达序 index。emit/judge/merkle-prove 三侧 index 约定对死(到达序)。
+- **F-build-invariant: refundRoot 累积 genuineness covenant 强制(NWT)**: register_append 必 covenant 强制【每注只 append 自己实
+  leaf blake2b(bettorPk‖ser(stake,8)), 且该 stake 经 F-refund-1 weld】。攻击者不能往 refundRoot 塞假 leaf(假 pk / 不实 stake)。
+  这条塌 = refundRoot 被污染(假人/假额进 genuine 集)= A 整个失效。是 A 的根承重(比 merkle-prove 更底层)。
+- **refunded_bitmap nullifier**: 同 RootClaim — `require(refund_index < div)` aliasing-fix(防 index 别名双退)+ `2^index` mask 复用 loop。
+- **value 守恒**: Σrefund == pool_value(全退完池清零), 每笔 draw-down weld `out.value == pool_value - tk.stake`(配 F-refund-1 三绑)。
+- **closed==2 gate 不变**(仅取消态)。R1-XOR(refund_flip 留 RootClose)不变。
+
+## 6. SIZE(⚪ 待 probe, 非 model — F-refund-4)
+⚠ **probe-not-model**(STEP1 教训): §2 提的 "RefundClaim 728B" 是 **small-N linear 估算, 违 probe-not-model, 不可信**。
+- **refunded_bitmap N-wide**(全 bettor, 非 claim depth-1 的 4-wide): 大市场 N 大 → bitmap + merkle 字节随 N 涨 → RefundClaim 模板可能
+  超 ~790B WithTemplate 预算 → **大市场可能要 recursive-split(像 RootClose 拆)或 winner-tree-shard 式分片**。⚪ 待 canonical silverc 链上 probe 实测。
+- **加 refundRoot + refunded_bitmap 2 字段贯穿** register/seal/RootClose → 各合约模板字节涨 → **register monolithic + seal WithTemplate
+  + RootClose seal 目标全须重 probe**(非凭 §2 估算)。落 A 时 J2/canonical probe 裁生死, 同 cascade 一路 probe-first 纪律。
