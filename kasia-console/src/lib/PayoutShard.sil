@@ -1,21 +1,27 @@
-// PayoutShard.sil — bshard 真无限量 B2 (A) self-contained (J1, 2026-06-20; SIZE re-frame 后简化版).
+// PayoutShard.sil — bshard 真无限量 B2 (A) self-contained + cov_id provenance destination-bind (J1, 2026-06-20).
 //
 // 🎉 SIZE re-frame(链上裁实 aa4d1c10): 9999 = FREE-tier 非硬墙; v1 tx 声明 compute_budget 覆盖 blake2b(上限 ~500k mass)。
-//   ∴ (A) self-contained(close_attest ①②③ 在本合约内, 4706B continuation ~11765u)【v1+compute_budget 直接 LAND】。
-//   (B) 拆分 + 外部 CloseCert + cov_id provenance-seam + dynamic-lock = MOOT(那是为绕 9999 + 外部 cert forge, 现都不需)。
+//   ∴ (A) self-contained(close_attest ①②③ 在本合约内)【v1+compute_budget 直接 LAND】。
+//
+// 🔑 covenant 身份(NWT 异质核承重修, 2026-06-20): 本合约【必 market 创建时 genesis-mint 为 covenant(cov_id≠0)】(relay
+//   populateGenesisCovenants / d7c0bacc 机制)。理由 = 输家片 consolidate 的 destination-bind 必绑 cov_id PROVENANCE 非
+//   template LOCATION: template-match 可被 recreatable-UTXO 造【同 template 自控 state 的假 PayoutShard】击穿 → 输家片导入
+//   假 PS 被 attacker claim 走 = 真 theft/grief。cov_id(创世身份, 跨 continuation 稳定不可伪)是唯一真实例锚。
+//   ShardLeaf.consolidate_to_payout bake 本 PS 真 cov_id, 用 OpInputCovenantId 绑(假 template-PS 的 cov_id≠baked → BUST)。
+//   本合约三 entry 全是 same-contract continuation(validateOutputState 编译期 lower 续【本 cov_id】)= 链上自维 provenance。
+//   ⚠ 单向 DAG 破 circular: 本 PS ctor 不 bake 输家片任何东西 → PS 身份独立 ShardLeaf → ShardLeaf 单向 bake payout_cov_id。
 //
 // 三 entry: absorb(归集)/ close_attest(委员 ①②③ 在本合约内, 锁 payoutRoot)/ claim(store-payout 派彩)。
-// 🛡 安全(SIZE-re-frame 不松, guard 全留): close_attest ①②③ 委员实跑 → payoutRoot committee-attested【在本合约 state】=
-//   【无外部 cert = 无 recreatable-cert forge 面】(B 的 cov_id-seam 整个 moot)。absorb consume 真 UTXO 取 tx.inputs[i].value
-//   真值(非 self-report)=伪片只贡献自己 dust。store-payout: payout 烤进 leaf 零 mulDiv。nullifier 多-word(w0..w4)避 i64-63。
-// ⚠ deploy: relay 必建 v1 tx + 声明 compute_budget(新 wasm bdbfa67b 解锁; handler 改 = J2/UI infra 新活)。
+// 🛡 安全: close_attest ①②③ 委员实跑 → payoutRoot committee-attested【在本合约 state】(无外部 cert = 无 forge 面)。
+//   absorb consume 真 UTXO 取 tx.inputs[i].value 真值(非 self-report); 接受任意 input = 顶多捐 value(donor 自损/winners
+//   多得)非偷 — 真账委员 off-chain payoutRoot 锚(theft 防在 source 侧 ShardLeaf cov_id-bind)。store-payout: payout
+//   烤进 leaf 零 mulDiv。nullifier 多-word(w0..w4)避 i64-63。
+// ⚠ deploy: relay 必 ①genesis-mint 本 PS 为 covenant(cov_id≠0)② 建 v1 tx + 声明 compute_budget(handler = J2 infra 新活)。
 // ⚠ unbounded N(>500k mass 单 tx)= rolling-shard(分批 payout-shard)留, MVP(>63 winner 远 <500k)够。
 
 pragma silverscript ^0.1.0;
 
 contract PayoutShard(
-    byte[32] ps_tmpl_hash,         // 输家片 shard expectedTemplateHash (absorb 验真模板)
-    byte[32] market_id,            // 跨片锚
     byte[32] poolMerkleRoot,       // depth-8 chain-derived oracle pool root (close_attest ③ 委员∈pool; == v07 同源)
     // —— genesis State (8-field) ——
     int      init_consolidated_pool,
@@ -28,28 +34,20 @@ contract PayoutShard(
     byte[32] payoutRoot   = init_payoutRoot;
     int w0 = init_w0; int w1 = init_w1; int w2 = init_w2; int w3 = init_w3; int w4 = init_w4;
 
-    struct Shard {                 // 输家片 state (absorb 读)
-        byte[32] bettorPk;
-        int      direction;
-        int      stake;
-        byte[32] shardPoolId;
-    }
-
-    // —— entry 0: absorb (输家片全额归集; same-contract continuation, 归集态) ——
-    entrypoint function absorb(
-        int selfOutIdx, int shardInIdx, int shard_prefix_len, int shard_suffix_len, int shard_value
-    ) {
+    // —— entry 0: absorb (输家片全额归集; same-contract continuation 续本 cov_id, 归集态) ——
+    // 修(J1 finding-a + cov_id re-frame): 不再读 dust ticket(register 真 stake KAS 在 ShardLeaf POOL=pool_value welded,
+    //   ticket 是 dust)。直接 credit 被消费 UTXO 真值 tx.inputs[shardInIdx].value = 归集真池钱。theft 防在 source 侧
+    //   (ShardLeaf.consolidate_to_payout cov_id-bind 只能进本 PS); 此 sink 侧只验守恒(接受任意 input = 顶多捐 value, harmless)。
+    entrypoint function absorb(int selfOutIdx, int shardInIdx) {
         require(closed == 0);
-        Shard sh = readInputStateWithTemplate(shardInIdx, shard_prefix_len, shard_suffix_len, ps_tmpl_hash);
-        require(sh.shardPoolId == market_id);              // ★ target-bind
-        require(tx.inputs[shardInIdx].value == shard_value); // ★ 守恒: consume 真 UTXO 真值(非 self-report)
-        validateOutputState(selfOutIdx, {
+        int shard_value = tx.inputs[shardInIdx].value;     // ★ 守恒: consume 真 UTXO 真值(register-welded == pool_value)
+        validateOutputState(selfOutIdx, {                  // (编译期 lower 续【本 cov_id】= provenance 自维)
             consolidated_pool:  consolidated_pool + shard_value,
             closed:             0,
             payoutRoot:         payoutRoot,
             w0: w0, w1: w1, w2: w2, w3: w3, w4: w4
         });
-        require(tx.outputs[selfOutIdx].value == consolidated_pool + shard_value);  // ★ 守恒
+        require(tx.outputs[selfOutIdx].value == consolidated_pool + shard_value);  // ★ 守恒 weld
     }
 
     // —— entry 1: close_attest (委员 4-of-5 在【本合约内】背书 payoutRoot, closed 0→1 write-once) —— [① ② ③ port v07] ——
