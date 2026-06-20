@@ -1676,7 +1676,9 @@ export async function unlockBshardConsolidate(args) {
 /**
  * unlockBshardPayoutClaim — winner 从 PayoutShard 派彩 (store-payout, claim OP_2)。
  * tx: in=[PS@0(claim OP_2), fee@1] → out=[payout→bettor P2PK@payout_out_idx, PS_continuation@self_out_idx(cov_id 续), change]。
- *   witness 声明序: [selfOutIdx, payoutOutIdx, bettorPk, payout, merkle_index, tree_depth, siblings[]] + OP_2 + redeem (no-sig)。
+ *   witness 声明序: [selfOutIdx, payoutOutIdx, bettorPk, payout, merkle_index, s0..s7(8 individual byte[32])] + OP_2 + redeem (no-sig)。
+ *   🛡 proven-path 🅱(J1, 2026-06-20): siblings 改 8 个 individual byte[32] s0..s7 + 合约 manual unroll(删 byte[32][] array + 删 tree_depth)。
+ *     根因: silverc byte[32][8] 固定数组 witness-ABI 把某 sibling 读成 int(Number-too-big), array-read 约定不可靠; close_attest 的 individual byte[32] c0s0..c4s7 同款已 LANDED 证 work。
  *   recipient-bind(合约 require): out[payoutOutIdx]=P2PK(bettorPk) value=payout(caller 供 payout_address=bettorPk 的地址)。
  *   nullifier: w[merkle_index/63] 置 bit(merkle_index%63)。守恒: out[self]==consolidated_pool-payout(不变量 value==consolidated_pool)。
  */
@@ -1708,10 +1710,11 @@ export async function unlockBshardPayoutClaim(args) {
     _appendChange(orderedOut, matched, cmd.outputs?.change_address, _bshardFeeV1(matched.length));
 
     // PS@0 claim scriptSig (声明序) + OP_2 + redeem (no-sig)
+    // 🛡 proven-path 🅱: s0..s7 = 8 个 individual byte[32] push(同 close_attest 委员 sibs, 已 LANDED 证 work), 删 tree_depth(合约 manual unroll 恒 8 步)。driver 必 pad siblings_hex 到 8。
     let sibPush = '';
-    for (const s of w.siblings_hex) sibPush += _pushBytes(s);         // byte[32][] forward 序 (同旧 claim)
+    for (const s of w.siblings_hex) sibPush += _pushBytes(s);         // s0..s7 forward 序(individual byte[32], 非 array)
     const psSig = _pushInt(w.self_out_idx) + _pushInt(w.payout_out_idx) + _pushBytes(w.bettor_pk)
-      + _pushInt(w.payout) + _pushInt(w.merkle_index) + _pushInt(w.tree_depth) + sibPush
+      + _pushInt(w.payout) + _pushInt(w.merkle_index) + sibPush
       + '52' + _encodePushDataHex(Buffer.from(cmd.inputs.payoutshard.redeem_hex, 'hex'));   // claim=OP_2='52'
 
     const unsigned = new Transaction({ version: 1, inputs: matched.map(u => ({ previousOutpoint: { transactionId: u.outpoint.transactionId, index: u.outpoint.index }, signatureScript: '', sequence: 0n, sigOpCount: 0, computeBudget: _BSHARD_COMPUTE_BUDGET, utxo: u })), outputs: orderedOut, lockTime: BigInt(lockTime), gas: 0n, subnetworkId: '0000000000000000000000000000000000000000', payload: '' });
