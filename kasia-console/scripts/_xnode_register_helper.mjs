@@ -53,14 +53,20 @@ for (const shard of myShards) {
   for (let i = 1; i < SEAL; i++) {
     const bkp = Keypair.random();
     const b = { pk: xonly(bkp), side: 0 };
-    bettors.push({ idx: k, pk: b.pk, addr: bkp.toAddress(NET).toString() });   // (B) 存真 bettor {pk,addr}(public 非私钥, settle payoutRoot 用)
     const newState = { local_yes: st.local_yes + Number(STAKE), local_no: st.local_no, count: st.count + 1, pool_value: st.pool_value + Number(STAKE), shardPoolId: shard.shardPoolId };
-    const fundTx = await lockTo(RELAY_ADDR, STAKE + TICKET_DUST + 30_000_000n);
-    const wit = buildRegisterWitness({ side: b.side, stake: STAKE, leafOutIdx: 0, psOutIdx: 1, bettorPk: b.pk, psArtifact });
-    const cmd = buildRegisterCommand({ witness: wit, leafOutpointTxid: leafTx, leafRedeemHex: curRedeem, currentLeafState: st, bettorFunding: [{ outpointTxid: fundTx, address: RELAY_ADDR, index: 0 }], leafValueSompi: BigInt(st.pool_value), leafContinuationState: newState, ticketDustSompi: TICKET_DUST, shardPoolId: shard.shardPoolId, changeAddress: RELAY_ADDR });
-    const rj = await rc(cmd); const rtx = rj.txId || rj.txid;
     const nextRedeem = spliceLeafState(shard.slRedeemHex, { local_yes: newState.local_yes, local_no: newState.local_no, count: newState.count, pool_value: newState.pool_value });
-    if (!rtx || !await landed(rtx, p2sh(nextRedeem))) throw new Error(`片 ${k} register ${i + 1} no land: ${JSON.stringify(rj).slice(0, 150)}`);
+    const nextAddr = p2sh(nextRedeem);
+    let rtx = null;
+    for (let attempt = 0; attempt < 5; attempt++) {   // retry: transient "output already spent"/UTXO 竞争 → fresh funding 重试(leaf 未花, 重建 register)
+      const fundTx = await lockTo(RELAY_ADDR, STAKE + TICKET_DUST + 30_000_000n);
+      const wit = buildRegisterWitness({ side: b.side, stake: STAKE, leafOutIdx: 0, psOutIdx: 1, bettorPk: b.pk, psArtifact });
+      const cmd = buildRegisterCommand({ witness: wit, leafOutpointTxid: leafTx, leafRedeemHex: curRedeem, currentLeafState: st, bettorFunding: [{ outpointTxid: fundTx, address: RELAY_ADDR, index: 0 }], leafValueSompi: BigInt(st.pool_value), leafContinuationState: newState, ticketDustSompi: TICKET_DUST, shardPoolId: shard.shardPoolId, changeAddress: RELAY_ADDR });
+      const rj = await rc(cmd); const t = rj.txId || rj.txid;
+      if (t && await landed(t, nextAddr)) { rtx = t; break; }
+      if (attempt === 4) throw new Error(`片 ${k} register ${i + 1} fail after 5: ${JSON.stringify(rj).slice(0, 130)}`);
+      await new Promise(r => setTimeout(r, 4000));
+    }
+    bettors.push({ idx: k, pk: b.pk, addr: bkp.toAddress(NET).toString() });   // (B) 存真 bettor {pk,addr}(public, 成功后存避 retry 重复)
     st = { local_yes: newState.local_yes, local_no: newState.local_no, count: newState.count, pool_value: newState.pool_value };
     curRedeem = nextRedeem; leafTx = rtx;
     await maybeDefrag();   // 每 40 注周期 broadcaster defrag(维持 best, 长 ramp 健康)
