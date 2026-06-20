@@ -128,7 +128,9 @@ export function computeConvertSplitGenesis(o) {
     const sl = compiled.state_layout;
     const prefix = redeem.slice(0, sl.start), suffix = redeem.slice(sl.start + sl.len);
     const templateHashHex = Buffer.from(blake2b(Buffer.concat([prefix, suffix]), { dkLen: 32 })).toString('hex');
-    return { templatePrefix: prefix, templateSuffix: suffix, templateHashHex, redeemBytes: redeem.length };
+    // stateStart = state_layout.start: 多-entry(selector byte0)=1 / 单-entry(without_selector, state byte0)=0。
+    //   relay _continuationAddress self-recreation splice offset 必用此(硬编 1 对单-entry RootClaim/RefundClaim 错偏 1=地址错)。
+    return { templatePrefix: prefix, templateSuffix: suffix, templateHashHex, redeemBytes: redeem.length, stateStart: sl.start, stateLen: sl.len };
   };
 
   // 1. PoolSide template → ps_tmpl_hash (register mints the dust ticket).
@@ -210,17 +212,17 @@ export function computeConvertSplitGenesis(o) {
     rootClose: {                        // FoldNode.seal_to_root target (foreign-template; root_prefix/root_suffix for seal builder, sealSelector=52)
       ctor: closeCtor, tmplHash: rootCloseTmplHash,
       templatePrefix: rootClose.templatePrefix, templateSuffix: rootClose.templateSuffix,
-      redeemBytes: rootClose.redeemBytes,
+      redeemBytes: rootClose.redeemBytes, stateStart: rootClose.stateStart, stateLen: rootClose.stateLen, // 多-entry: stateStart=1
     },
     rootClaim: {                        // RootClose.convert_to_claim target (foreign-template; claim_prefix/claim_suffix for convert builder; 8-field w/ claimed_bitmap)
       ctor: claimCtor10, tmplHash: rootClaimTmplHash,
       templatePrefix: rootClaim.templatePrefix, templateSuffix: rootClaim.templateSuffix,
-      redeemBytes: rootClaim.redeemBytes,
+      redeemBytes: rootClaim.redeemBytes, stateStart: rootClaim.stateStart, stateLen: rootClaim.stateLen, // 单-entry: stateStart=0(claim _continuationAddress 用)
     },
     refundClaim: {                      // RootClose.convert_to_refundclaim target (foreign-template; rc_prefix/rc_suffix for convert builder)
       ctor: rcCtor9, tmplHash: refundClaimTmplHash,
       templatePrefix: refundClaim.templatePrefix, templateSuffix: refundClaim.templateSuffix,
-      redeemBytes: refundClaim.redeemBytes,
+      redeemBytes: refundClaim.redeemBytes, stateStart: refundClaim.stateStart, stateLen: refundClaim.stateLen, // 单-entry: stateStart=0
     },
     genesisState, psArtifact, shardPoolId, fnTmplHash, rootCloseTmplHash, rootClaimTmplHash, refundClaimTmplHash, rootInitPayoutRoot, committeePks, deadline,
   };
