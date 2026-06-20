@@ -168,7 +168,7 @@ contract PayoutShard(
     // —— entry 2: claim (store-payout 派彩; payout 来自 leaf 零 mulDiv + 多-word nullifier + recipient-bind) ——
     entrypoint function claim(
         int selfOutIdx, int payoutOutIdx,
-        byte[32] bettorPk, int payout, int merkle_index, int tree_depth, byte[32][] siblings
+        byte[32] bettorPk, int payout, int merkle_index, int tree_depth, byte[32][8] siblings
     ) {
         require(closed == 1);
         require(tree_depth >= 0); require(tree_depth <= 8);
