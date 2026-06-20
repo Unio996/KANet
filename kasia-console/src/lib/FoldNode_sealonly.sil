@@ -1,0 +1,71 @@
+// FoldNode_sealonly.sil — bshard cascade SINGLE-SHARD seal-only 合约 (J1, 2026-06-20; 解 STEP1 convert_to_foldnode SIZE 墙).
+//
+// 动因(stitch STEP1 链上实证 2026-06-20): ShardLeaf.convert_to_foldnode 的 validateOutputStateWithTemplate 目标是
+//   完整 FoldNode(redeem 1278B / 模板 1242B), double-blake2b over 1242B >> 918B 字节预算 → BUST。这是"零件全绿≠
+//   机制跑通"现形: seal 零件测从 direct-funded FoldNode 起跳, ShardLeaf→FoldNode 这跳 stitch 首次真跑才暴。
+//
+// 解(三方收敛 shardCount=1 skip-fold; J2/NWT 精炼为"缩 convert 目标"非"动 ShardLeaf"):
+//   DoD 单小市场 = 1 shard = 无多片可聚合 → fold covenant 是 dead code。本合约 = FoldNode 砍掉 fold entry, 只留
+//   seal_to_root。convert 目标从 1242B(含 fold)缩到本合约(无 fold, 预期 <850B 预算; ★必 J2 链上 probe 实测非 model,
+//   见 ANTI: header 焊的 6.58u/byte 被 STEP1 证伪)。ShardLeaf 100% byte-identical 不动(register 已证 LAND, 零 re-bust
+//   风险; fn_tmpl_hash 仅 ctor 值改指向本合约, 不动 ShardLeaf bytecode)。
+//
+// ABI(单-entry, J2 wire 必读): 仅 seal_to_root → without_selector=true → seal 无 selector(空, 非 '52')+ state_layout.start=0
+//   (同 RootClaim 单-entry 已修 pattern)。convert 目标模板 split 用 start=0。
+//
+// 链: ShardLeaf →(convert_to_foldnode, 4-field carry)→ FoldNode_sealonly →(seal_to_root, 7-field canonical)→ RootClose。
+//   multi-shard fold = post-DoD(用回完整 FoldNode)。
+// 承重锚(与 FoldNode.seal_to_root verbatim): 跨合约 output-bind value 守恒(root value==pool_value)+ canonical outcome
+//   literal/ctor-const 硬设(closed:0/winningSide:0/payoutRoot:init)= committee-bypass 保护链不变。
+// 安全: 单 shard 无聚合 → 砍 fold 移除的 commit_v2 完整性校验对 1-shard 无意义(单 leaf accounts 即全量, 无聚合可伪),
+//   seal 的 require(count==shard_count==1)+ value weld 即足。market 绑定经 root_tmpl_hash(market-specific)+ ShardLeaf
+//   convert foreign-template 链, 不需 market_id ctor(故砍, 避 unused-ctor-param 编译器删的歧义)。
+
+pragma silverscript ^0.1.0;
+
+contract FoldNode_sealonly(
+    int      shard_count,          // seal 门 require(count==shard_count); 单-shard DoD = 1
+    byte[32] root_tmpl_hash,       // RootClose expectedTemplateHash (seal_to_root foreign-template 桥; market-specific = 实例唯一性锚)
+    byte[32] root_init_payoutRoot, // RootClose genesis payoutRoot (canonical ZERO)
+    // —— genesis State (4-field, 无 outcome; 实际由 ShardLeaf.convert_to_foldnode 提供, init_* 仅定 State 布局) ——
+    int      init_local_yes,
+    int      init_local_no,
+    int      init_count,
+    int      init_pool_value
+) {
+    int local_yes  = init_local_yes;
+    int local_no   = init_local_no;
+    int count      = init_count;
+    int pool_value = init_pool_value;
+
+    // RootClose 7-field State 镜像 (seal_to_root foreign-template 序列化布局; 字段序/类型必 == RootClose State)
+    struct RootState {
+        int      local_yes;
+        int      local_no;
+        int      count;
+        int      pool_value;
+        int      closed;
+        int      winningSide;
+        byte[32] payoutRoot;
+    }
+
+    // —— entry 0 (单-entry, without_selector): seal_to_root (FoldNode_sealonly→RootClose; canonical outcome 硬设; value 守恒) ——
+    entrypoint function seal_to_root(
+        int      rootOutIdx,
+        byte[]   root_prefix,
+        byte[]   root_suffix
+    ) {
+        require(count == shard_count);                     // 仅收满(单-shard=1)可封顶
+        validateOutputStateWithTemplate(rootOutIdx, {
+            local_yes:   local_yes,
+            local_no:    local_no,
+            count:       count,
+            pool_value:  pool_value,
+            closed:      0,
+            winningSide: 0,
+            payoutRoot:  root_init_payoutRoot
+        }, root_prefix, root_suffix, root_tmpl_hash);
+        // ★ output-bind weld (跨合约边界 value 守恒): root value == 全池 pool_value
+        require(tx.outputs[rootOutIdx].value == pool_value);
+    }
+}

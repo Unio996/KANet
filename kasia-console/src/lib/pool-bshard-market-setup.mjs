@@ -164,18 +164,6 @@ export function computeConvertSplitGenesis(o) {
   const rootClose = templateArtifact(rootCloseSilPath, closeCtor);
   const rootCloseTmplHash = rootClose.templateHashHex;
 
-  // 3. FoldNode template → fn_tmpl_hash. ⭐ COHERENCE FIX: bake the REAL root_tmpl_hash (ctor param5), not ZERO32,
-  //    so FoldNode.seal_to_root foreign-template verify (blake2b(root_prefix‖root_suffix) == baked root_tmpl_hash)
-  //    passes against the real PoolRoot. FoldNode ctor (10): market_id, commit_v2, shard_count, max_fan_in,
-  //    root_tmpl_hash, root_init_payoutRoot, init 4-field.
-  const fnCtor = [
-    ctorBytes32(marketId), ctorBytes32(ZERO32_HEX), ctorInt(shardCount), ctorInt(maxFanIn),
-    ctorBytes32(rootCloseTmplHash), ctorBytes32(rootInitPayoutRoot),
-    ctorInt(0), ctorInt(0), ctorInt(0), ctorInt(0),
-  ];
-  const foldNode = templateArtifact(foldNodeSilPath, fnCtor);
-  const fnTmplHash = foldNode.templateHashHex;
-
   // 4. genesis leaf State = first bet baked (4-field, no outcome).
   const genesisState = {
     local_yes: (stake * BigInt(1 - firstBet.side)).toString(),
@@ -183,14 +171,41 @@ export function computeConvertSplitGenesis(o) {
     count: 1, pool_value: stake.toString(),
   };
 
-  // 5. ShardLeaf ctor (10) bake fn_tmpl_hash (param6) → concrete genesis redeem. ctor: market_id, ps_tmpl_hash,
-  //    shard_pool_id, seal_count, min_bet, fn_tmpl_hash, init 4-field.
-  const slCtor = [
-    ctorBytes32(marketId), ctorBytes32(psArtifact.templateHashHex), ctorBytes32(shardPoolId),
-    ctorInt(sealCount), ctorInt(Number(minBet)), ctorBytes32(fnTmplHash),
-    ctorInt(Number(genesisState.local_yes)), ctorInt(Number(genesisState.local_no)), ctorInt(genesisState.count), ctorInt(Number(genesisState.pool_value)),
-  ];
-  const slCompiled = compileSil(shardLeafSilPath, slCtor, silvercPath);
+  // 3+5. ShardLeaf + (optional) FoldNode. directSeal (shardCount==1 DoD skip-fold; 2026-06-20 STEP1 convert SIZE 墙解):
+  //   ShardLeaf_direct converts DIRECTLY to RootClose (convert WithTemplate target=RootClose 851B<预算, 跳 FoldNode 1242B
+  //   BUST)。register_append byte-identical; convert new_state 4→7-field canonical(closed:0/winningSide:0/payoutRoot:init)。
+  //   FoldNode omitted。multi-shard(directSeal=false)= 原 ShardLeaf→FoldNode→seal 路(post-DoD)。★register 侧长大 = 必 probe。
+  const directSeal = o.directSeal != null ? o.directSeal : (Number(shardCount) === 1);
+  let foldNode = null, fnTmplHash = null, shardLeafResolvedPath, slCtor;
+  if (directSeal) {
+    // ShardLeaf_direct ctor (11): market_id, ps_tmpl_hash, shard_pool_id, seal_count, min_bet, rootclose_tmpl_hash,
+    //   rootclose_init_payoutRoot, init 4-field. Bakes rootCloseTmplHash (convert_to_rootclose foreign-template target)。
+    shardLeafResolvedPath = o.shardLeafDirectSilPath || shardLeafSilPath;
+    slCtor = [
+      ctorBytes32(marketId), ctorBytes32(psArtifact.templateHashHex), ctorBytes32(shardPoolId),
+      ctorInt(sealCount), ctorInt(Number(minBet)), ctorBytes32(rootCloseTmplHash), ctorBytes32(rootInitPayoutRoot),
+      ctorInt(Number(genesisState.local_yes)), ctorInt(Number(genesisState.local_no)), ctorInt(genesisState.count), ctorInt(Number(genesisState.pool_value)),
+    ];
+  } else {
+    // 3. FoldNode template → fn_tmpl_hash (multi-shard). bake REAL rootclose_tmpl_hash (FoldNode.seal_to_root target,
+    //    ctor param5)。FoldNode ctor (10): market_id, commit_v2, shard_count, max_fan_in, root_tmpl_hash, root_init_payoutRoot, init 4-field.
+    const fnCtor = [
+      ctorBytes32(marketId), ctorBytes32(ZERO32_HEX), ctorInt(shardCount), ctorInt(maxFanIn),
+      ctorBytes32(rootCloseTmplHash), ctorBytes32(rootInitPayoutRoot),
+      ctorInt(0), ctorInt(0), ctorInt(0), ctorInt(0),
+    ];
+    foldNode = templateArtifact(foldNodeSilPath, fnCtor);
+    foldNode.ctor = fnCtor;
+    fnTmplHash = foldNode.templateHashHex;
+    // 5. ShardLeaf ctor (10) bake fn_tmpl_hash (param6). ctor: market_id, ps_tmpl_hash, shard_pool_id, seal_count, min_bet, fn_tmpl_hash, init 4-field.
+    shardLeafResolvedPath = shardLeafSilPath;
+    slCtor = [
+      ctorBytes32(marketId), ctorBytes32(psArtifact.templateHashHex), ctorBytes32(shardPoolId),
+      ctorInt(sealCount), ctorInt(Number(minBet)), ctorBytes32(fnTmplHash),
+      ctorInt(Number(genesisState.local_yes)), ctorInt(Number(genesisState.local_no)), ctorInt(genesisState.count), ctorInt(Number(genesisState.pool_value)),
+    ];
+  }
+  const slCompiled = compileSil(shardLeafResolvedPath, slCtor, silvercPath);
   const slRedeem = Buffer.from(slCompiled.script);
   const slSl = slCompiled.state_layout;
   const bakedState = slRedeem.slice(slSl.start, slSl.start + slSl.len);
@@ -198,17 +213,18 @@ export function computeConvertSplitGenesis(o) {
   if (!bakedState.equals(expectState)) throw new Error(`ShardLeaf genesis baked state != serializeLeafState (baked ${bakedState.toString('hex').slice(0, 24)} vs ${expectState.toString('hex').slice(0, 24)})`);
 
   return {
+    directSeal,                         // true = ShardLeaf_direct→RootClose skip-fold (DoD shardCount=1); false = ShardLeaf→FoldNode (multi-shard)
     shardLeaf: {                        // register-side: operator computeP2SH → genesis leaf addr; lock first stake here
       ctor: slCtor,
       redeemHexForGenesisState: slRedeem.toString('hex'),
       scriptHashHex: Buffer.from(blake2b(slRedeem, { dkLen: 32 })).toString('hex'),
-      redeemBytes: slRedeem.length,
+      redeemBytes: slRedeem.length, stateStart: slSl.start, stateLen: slSl.len,
     },
-    foldNode: {                         // convert_to_foldnode output target + fold/seal-side redeem (deploy with this ctor)
-      ctor: fnCtor, tmplHash: fnTmplHash,
+    foldNode: foldNode ? {              // convert_to_foldnode output target + fold/seal-side redeem (multi-shard only; null when directSeal)
+      ctor: foldNode.ctor, tmplHash: fnTmplHash,
       templatePrefix: foldNode.templatePrefix, templateSuffix: foldNode.templateSuffix,
       redeemBytes: foldNode.redeemBytes,
-    },
+    } : null,
     rootClose: {                        // FoldNode.seal_to_root target (foreign-template; root_prefix/root_suffix for seal builder, sealSelector=52)
       ctor: closeCtor, tmplHash: rootCloseTmplHash,
       templatePrefix: rootClose.templatePrefix, templateSuffix: rootClose.templateSuffix,
