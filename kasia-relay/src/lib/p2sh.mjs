@@ -1655,7 +1655,9 @@ export async function unlockBshardClaim(args) {
     const rootSig = _pushInt(w.root_out_idx) + _pushInt(w.payout_out_idx) + _pushInt(w.payout)
       + _pushInt(w.merkle_index) + _pushInt(w.tree_depth) + sibPush
       + _pushInt(w.ticket_in_idx) + _pushInt(w.ticket_prefix_len) + _pushInt(w.ticket_suffix_len)
-      + '51' + _encodePushDataHex(Buffer.from(cmd.inputs.root.redeem_hex, 'hex'));     // claim_draw=OP_1='51' (PoolRoot; was unified OP_4)
+      + (typeof cmd.inputs.root.claim_selector_hex === 'string' ? cmd.inputs.root.claim_selector_hex : '51') + _encodePushDataHex(Buffer.from(cmd.inputs.root.redeem_hex, 'hex'));
+      //   claim_selector_hex: PoolRoot claim_draw=OP_1('51', 默认 back-compat). **RootClaim 单-entry(without_selector=true)→ ''(空, 无 selector byte)**
+      //   (加 selector 会被当 int ctor-arg, sediment feedback-silverc-single-entry-no-selector)。builder 供 ''(RootClaim)/'51'(PoolRoot)。
 
     // ticket scriptSig: authorize_spend(bettorSig)+ OP_0 + redeem. bettorSig = relay 用 bettor key 签 ticket input.
     // (root input 无 sig; fee input wallet-签). 先建 unsigned(待签 input scriptSig=''), 算 sighash.
