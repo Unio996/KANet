@@ -16,7 +16,11 @@
 //   absorb consume 真 UTXO 取 tx.inputs[i].value 真值(非 self-report); 接受任意 input = 顶多捐 value(donor 自损/winners
 //   多得)非偷 — 真账委员 off-chain payoutRoot 锚(theft 防在 source 侧 ShardLeaf cov_id-bind)。store-payout: payout
 //   烤进 leaf 零 mulDiv。nullifier 多-word(w0..w4)避 i64-63。
-// ⚠ deploy: relay 必 ①genesis-mint 本 PS 为 covenant(cov_id≠0)② 建 v1 tx + 声明 compute_budget(handler = J2 infra 新活)。
+// ⚠ deploy(承重 relay 不变量, NWT flag + J2 链上 de-risk 实证): relay 必 ①genesis-mint 本 PS 为 covenant(cov_id≠0)
+//   ② 给【每个 continuation output(genesis + absorb + close_attest + claim 全部)】续 CovenantBinding(cov_id=payout_cov_id)
+//   —— 否则任一步漏续, cov_id 断, ShardLeaf.consolidate 的 OpInputCovenantId==payout_cov_id 后续就挂(资金归集断)。
+//   entrypoint spend 不必 #[covenant], relay 在 output 设 continuation CovenantBinding 即可(consensus covenants.rs:124
+//   input cov_id==output cov_id 续延接受; J2 probe-not-model 链上双步实证)。③ 建 v1 tx + 声明 compute_budget。
 // ⚠ unbounded N(>500k mass 单 tx)= rolling-shard(分批 payout-shard)留, MVP(>63 winner 远 <500k)够。
 
 pragma silverscript ^0.1.0;
