@@ -24,7 +24,12 @@ contract FoldBootstrap(
     int count      = init_count;
     int pool_value = init_pool_value;
 
-    // —— 单 entry: convert_to_foldonly (lineage-setting covenant-create → 产 cov_id≠0 foldonly; 4-field carry) ——
+    // —— entry 0: placeholder (占 OP_0; handler unlockBshardConvert hardcode OP_1=entry1, 对生产 ShardLeaf convert=entry1 正确, 故 bootstrap convert 也须 entry1) ——
+    entrypoint function placeholder_e0() {
+        require(count >= 0);     // count 是 int 恒 >=0; 占位 entry0, probe 不调此 entry(只调 entry1 convert=OP_1)
+    }
+
+    // —— entry 1: convert_to_foldonly (OP_1; lineage-setting covenant-create → 产 cov_id≠0 foldonly; 4-field carry) ——
     entrypoint function convert_to_foldonly(
         int      foldOutIdx,
         byte[]   fold_prefix,
