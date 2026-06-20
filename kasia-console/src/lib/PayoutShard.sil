@@ -77,21 +77,22 @@ contract PayoutShard(
         if (checkSig(c3Sig, pubkey(c3Pk))) { validSigs = validSigs + 1; }
         if (checkSig(c4Sig, pubkey(c4Pk))) { validSigs = validSigs + 1; }
         require(validSigs >= 4);
-        // ★★ CRITICAL pubkey-distinctness (Bettor 发现 + NWT 撤 premature-GREEN 重攻 + J2 robust 解, 全队收敛 2026-06-20):
-        //   require c0Pk < c1Pk < c2Pk < c3Pk < c4Pk(字节序严格升序)→ 强制 5 个 distinct pubkey = 5 个 distinct signer。
+        // ★★ CRITICAL pubkey-distinctness (Bettor 发现 + NWT 重攻 + J2 robust + silverc-i64-coerce 修, 2026-06-20):
+        //   require 5 委员 pubkey 两两不等 → 5 个 distinct pubkey = 5 个 distinct signer。
         //   ⛔ 修前洞(单-oracle-replay = trustless break): committeePkHash 是 witness(非 ctor-baked)→ ② 假闸; 无 distinctness
         //     → 单 oracle(控 1 pubkey P)填 c0..c4 全 (P,sig_P)→ validSigs=5(同 sig 重复计数)→ 自背书任意 payoutRoot 盗整池。
-        //   ⚠ 为何必【pubkey】异非【idx】异(Bettor residual): idx-distinct → signer-distinct 仅当【池每 leaf 唯一 pubkey】=
-        //     未验 enrollment 前提(UI 查实 oracle_pool_chain_view 无 pubkey-dedup → 同 P 可占多 leaf)。若 P enroll 5 idx
-        //     → 填 (P,sig_P,N1)..(P,sig_P,N5) idx 升序【过】但同 signer → idx-distinct 被绕。pubkey 升序根治: 定义级
-        //     '5 distinct oracle'='5 distinct pubkey', 独立 enrollment/leaf 行为 = robust。单 oracle 控 1 pubkey 填不出
-        //     5 个升序 distinct pubkey(c0Pk<c1Pk 同 P 即 ==  → 升序 false BUST), validSigs 凑不齐 4 distinct signer。
-        //   真 anchor = poolMerkleRoot(ctor-baked ③ 每 pk∈pool)+ pubkey 升序(distinct signer + canonical determinism)。
-        //   ⚠ handler 适配: close_attest witness 必按 pubkey 字节升序排 5 委员(pk+sig+idx+8 merkle siblings 连带排序)。
-        require(c0Pk < c1Pk);
-        require(c1Pk < c2Pk);
-        require(c2Pk < c3Pk);
-        require(c3Pk < c4Pk);
+        //   ⚠ 为何 pairwise != 而非 ordering 升序(silverc 硬坑, J1 b0e35141 的 bug + live e2e 抓): silverc 对 byte[32] 用
+        //     ordering 比较(< <= > >=)→ compile.rs L3127 lower 成 OpLessThan = CScriptNum(i64)运算 → 32B pubkey 数值
+        //     coerce 超 i64 → 运行期 "Number too big" BUST(close_attest 必炸=distinctness 从没生效)。== / != 走 OpEqual
+        //     = byte 比较无 coerce = silverc 可做(同 ③ blake2b== / OpInputCovenantId== 链上证)。∴ 用 pairwise !=。
+        //   ⚠ 为何必【pubkey】异非【idx】异(Bettor residual): idx-distinct → signer-distinct 仅当池每 leaf 唯一 pubkey =
+        //     未验 enrollment 前提(oracle_pool_chain_view 无 pubkey-dedup, 同 P 可占多 leaf)→ pubkey 两两异定义级 robust。
+        //   真 anchor = poolMerkleRoot(ctor-baked ③ 每 pk∈pool)+ pubkey 两两异(distinct signer, enrollment-independent)。
+        //   handler: 委员供序合约不强制(pairwise != 无序), handler 仍可 pk-sort 供 = 跨节点 byte-equal determinism 红利。
+        require(c0Pk != c1Pk); require(c0Pk != c2Pk); require(c0Pk != c3Pk); require(c0Pk != c4Pk);
+        require(c1Pk != c2Pk); require(c1Pk != c3Pk); require(c1Pk != c4Pk);
+        require(c2Pk != c3Pk); require(c2Pk != c4Pk);
+        require(c3Pk != c4Pk);
         // ② committee commitment 绑 (distinctness 修后冗余 consistency-only; ABI 保留不变, 真 anchor 是 ③+pubkey 升序)
         byte[] cConcat0 = c0Pk + c1Pk;
         byte[] cConcat1 = cConcat0 + c2Pk;
