@@ -5,16 +5,17 @@
 //   convert-split: 把 fold/seal 字节移到 FoldNode 模板, ShardLeaf 只留 register + 轻 convert(1:1→FoldNode) → ~490B
 //   → register 揭小约 → <9999(probe-B 493B 链上实证过 units cap)。
 //
-// 本合约 = ShardLeaf(register-side): register_append(收注, 与原 PoolLeaf byte-identical) + convert_to_foldnode
-//   (count==seal_count 时 1:1 转 FoldNode 外模板, 携 4-field account, value 守恒, 无 fold/seal 字节)。
-// FoldNode(配对合约): fold(covenant 1M 预算) + seal_to_root。fold 读同 FoldNode 模板=covenant 同 cov_id 成立。
+// 本合约 = ShardLeaf(register-side): register_append(收注, 与原 PoolLeaf byte-identical) + consolidate_to_payout
+//   (关池后本片全额归集进【真 PayoutShard covenant 实例】, cov_id provenance destination-bind, value 守恒)。
 //
-// ⚠ 级联 SIZE(诚实, 见 FoldNode.sil 头注): SIZE-bound rate ~6.58u/byte → 任何被非-covenant entry hash 的合约必 <1519B。
-//   register→ShardLeaf(~490B)✅ / convert→FoldNode@k2(1241B)✅ / fold→covenant(1M)✅ / seal→PoolRoot(2287B)❌
-//   = seal→PoolRoot 是 register 解后【下游】墙, 需 PoolRoot 也拆 <1519B。本合约解【当前 blocker register】, 级联待团队定 scope。
+// 🔑 (A) cov_id 重设计(NWT 异质核承重修, 2026-06-20): 原 convert_to_foldnode(fold-tree 路)在 (A)/rolling 整个废弃。
+//   归集 destination 必绑 cov_id PROVENANCE 非 template LOCATION — template-match 可被 recreatable-UTXO 造【同 template
+//   自控 state 的假 PayoutShard】击穿 → 输家片导入假 PS 被 attacker claim = 真 theft。∴ bake 真 payout_cov_id(market
+//   创建 genesis-mint PayoutShard 时已知), consolidate 用 OpInputCovenantId 绑(假 PS 的 cov_id≠baked → BUST)。
+//   单向 DAG 破 circular: PayoutShard 身份独立本片(其 ctor 不 bake 本片任何东西)→ 本片单向 bake payout_cov_id, 无循环。
 //
-// 承重锚(与原同): register output-bind weld(leaf value==pool_value+stake) + convert value 守恒(FoldNode value==pool_value)。
-// 4-field 无 outcome = 结构上不可结算; outcome 只在 FoldNode.seal→root literal 硬设(committee-bypass carry 保护链)。
+// 承重锚: register output-bind weld(leaf value==pool_value+stake) + consolidate cov_id-bind + 全额守恒(out==in+pool_value)。
+// 4-field 无 outcome = 结构上不可结算; 结算经 PayoutShard.close_attest(委员 attest payoutRoot)+ claim(store-payout)。
 
 pragma silverscript ^0.1.0;
 
@@ -22,9 +23,9 @@ contract ShardLeaf(
     byte[32] market_id,
     byte[32] ps_tmpl_hash,        // dust PoolSide-ticket expectedTemplateHash (register 造 ticket)
     byte[32] shard_pool_id,       // 本 pool 身份 (ticket 记此)
-    int      seal_count,          // count==seal_count 才可 convert (= 原 PoolLeaf seal 门)
+    int      seal_count,          // count==seal_count 才可 consolidate (= 原 PoolLeaf seal 门)
     int      min_bet,
-    byte[32] fn_tmpl_hash,        // FoldNode expectedTemplateHash (convert_to_foldnode foreign-template 桥; baked)
+    byte[32] payout_cov_id,       // ★ 真 PayoutShard covenant cov_id (genesis-mint 已知; consolidate destination provenance-bind; baked)
     // —— genesis State (4-field, 无 outcome) ——
     int      init_local_yes,
     int      init_local_no,
@@ -42,13 +43,6 @@ contract ShardLeaf(
         int      direction;
         int      stake;
         byte[32] shardPoolId;
-    }
-    // FoldNode 4-field State 镜像 (convert_to_foldnode foreign-template 布局; 字段序/类型必 == FoldNode State)
-    struct FoldNodeState {
-        int local_yes;
-        int local_no;
-        int count;
-        int pool_value;
     }
 
     // —— entry 0: register_append (收注; 与原 PoolLeaf entry 0 byte-identical 语义) ——
@@ -84,21 +78,22 @@ contract ShardLeaf(
         require(tx.outputs[leafOutIdx].value == pool_value + stake);
     }
 
-    // —— entry 1: convert_to_foldnode (count 满 → 1:1 转 FoldNode 外模板; 携 4-field; value 守恒; 无 fold/seal 字节) ——
-    entrypoint function convert_to_foldnode(
-        int      fnOutIdx,
-        byte[]   fn_prefix,           // FoldNode redeem state 区前段 (witness; blake2b(prefix‖suffix)==fn_tmpl_hash 焊)
-        byte[]   fn_suffix
+    // —— entry 1: consolidate_to_payout (替废弃 convert_to_foldnode; 本片全额归集进【真 PayoutShard covenant 实例】) ——
+    // NWT 异质核承重: destination 绑 cov_id PROVENANCE 非 template LOCATION (防 recreatable-UTXO 假 PayoutShard 抢归集偷池)。
+    // 双 teeth: ①cov_id-bind(只能进真 PS)②全额守恒(无 skim)。absorb(PS sink 侧)续 cov_id + 验守恒 = 双侧绑。
+    entrypoint function consolidate_to_payout(
+        int psInIdx,        // 真 PayoutShard covenant input 位
+        int psOutIdx        // PayoutShard 延续输出位 (absorb 续锁同 cov_id)
     ) {
-        require(count == seal_count);                      // 仅收满的 leaf 可转 (= 原 seal 门)
-        // 产 FoldNode genesis: account 字段 1:1 carry 真值 (FoldNode 也 4-field 无 outcome, 折满才 seal→root)
-        validateOutputStateWithTemplate(fnOutIdx, {
-            local_yes:  local_yes,
-            local_no:   local_no,
-            count:      count,
-            pool_value: pool_value
-        }, fn_prefix, fn_suffix, fn_tmpl_hash);
-        // ★ output-bind weld (跨合约边界 value 守恒): FoldNode value == 本 leaf pool_value
-        require(tx.outputs[fnOutIdx].value == pool_value);
+        require(count == seal_count);                       // 仅收满(sealed=停止收注)的片可归集 (= 原 seal 门; 防归集仍在收注的片)
+        // ★ destination = PROVENANCE: 输入是【真 payout_cov_id 的 PayoutShard 实例】(假 template-PS 的 cov_id≠baked → BUST)
+        byte[32] ps_cov = OpInputCovenantId(psInIdx);
+        require(ps_cov == payout_cov_id);
+        require(OpCovOutputCount(ps_cov) >= 1);            // 0==0 防呆: 非法/零 cov_id 令此 fail (NWT 钉; DECL: OpCovOutputCount 拒非 covenant 数据)
+        // ★ 本片 value 必进【同 cov_id 延续输出】(防导向非延续/假输出)
+        byte[32] out_cov = OpOutputCovenantId(psOutIdx);
+        require(out_cov == payout_cov_id);
+        // ★ 全额守恒: 本片全 pool_value 进 PayoutShard 累加 (one-shard-per-tx, 精确无 skim)
+        require(tx.outputs[psOutIdx].value == tx.inputs[psInIdx].value + pool_value);
     }
 }
