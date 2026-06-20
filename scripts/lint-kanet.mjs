@@ -48,7 +48,7 @@ function* walk(dir, ext = ['.js', '.mjs']) {
 const argv = process.argv.slice(2);
 const targets = argv.length > 0
   ? argv.map(p => path.resolve(p)).filter(exists)
-  : [...walk(path.join(ROOT, 'kasia-console/src')), ...walk(path.join(ROOT, 'agent-mind/src')), ...walk(path.join(ROOT, 'agent-adapter/src')), ...walk(path.join(ROOT, 'scripts'))];
+  : [...walk(path.join(ROOT, 'kasia-console/src'), ['.js', '.mjs', '.sil']), ...walk(path.join(ROOT, 'agent-mind/src')), ...walk(path.join(ROOT, 'agent-adapter/src')), ...walk(path.join(ROOT, 'scripts'))];
 
 console.log(`[lint-kanet] scanning ${targets.length} files...`);
 
@@ -648,9 +648,37 @@ function checkR40_minerFee_floor(filepath, content) {
 }
 
 // ── 跑 ──
+// ── R-BYTEORD (J1 2026-06-20, b0e35141 真撞 + live e2e 抓): silverc 对 byte[32]/byte[] 用 ordering 比较 ──
+// (< <= > >=) → compile.rs L3127 lower 成 OpLessThan = CScriptNum(i64) 运算 → 32B 数值 coerce 超 i64 →
+// 运行期 "Number too big" BUST. compile 过 ≠ runtime 对(假信心). 只 == / != (OpEqual byte 比较) 安全.
+// 修法: pairwise == / !=. 见 ANTI-PATTERNS (byte[32] ordering compare).
+function checkSILByteOrdering(filepath, content) {
+  if (!filepath.endsWith('.sil')) return;
+  // 收集 byte[32]/byte[] 声明 + 函数参数名 (= 不可用 ordering 比较的类型)
+  const byteNames = new Set();
+  const declRe = /\bbyte\[\d*\]\s+([a-zA-Z_]\w*)/g;
+  let dm;
+  while ((dm = declRe.exec(content)) !== null) byteNames.add(dm[1]);
+  if (byteNames.size === 0) return;
+  const lines = content.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const code = lines[i].split('//')[0];           // strip 行尾注释 (注释里讲 < 不算违规)
+    if (/^\s*\/\//.test(lines[i]) || !/[<>]/.test(code)) continue;
+    for (const name of byteNames) {
+      // byteName 紧邻 ordering 运算 (< <= > >=, 含可选空格)。== / != 无 <> 不匹配; int 名不在集.
+      const re = new RegExp('\\b' + name + '\\s*[<>]=?|[<>]=?\\s*\\b' + name + '\\b');
+      if (re.test(code)) {
+        violate('R-BYTEORD', `[silverc 硬坑] byte[32]/byte[] '${name}' 用 ordering 比较 (< <= > >=) → OpLessThan CScriptNum(i64) coerce → 32B 超 i64 运行期 'Number too big' BUST (J1 b0e35141 真撞, live e2e 抓; compile 过 runtime 炸). 改 pairwise == / != (OpEqual byte 比较). 见 ANTI-PATTERNS.`, filepath, i + 1);
+        break;
+      }
+    }
+  }
+}
+
 for (const fp of targets) {
   let content;
   try { content = read(fp); } catch { continue; }
+  checkSILByteOrdering(fp, content);
   checkR9(fp, content);
   checkR11(fp, content);
   checkR6(fp, content);
