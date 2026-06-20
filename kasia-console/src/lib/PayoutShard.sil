@@ -77,7 +77,18 @@ contract PayoutShard(
         if (checkSig(c3Sig, pubkey(c3Pk))) { validSigs = validSigs + 1; }
         if (checkSig(c4Sig, pubkey(c4Pk))) { validSigs = validSigs + 1; }
         require(validSigs >= 4);
-        // ② committee commitment 绑
+        // ★★ CRITICAL distinctness (Bettor 发现 + NWT 独立重攻 confirmed + J2 精确 fix, 2026-06-20): 5 委员必【distinct
+        //   pool seat】= c0Idx<c1Idx<c2Idx<c3Idx<c4Idx 严格升序 → 强制 5 个不同 merkle index = 5 个不同 pool 成员。
+        //   ⛔ 修前洞: committeePkHash 是 witness(非 ctor-baked)→ ② 是 attacker 自填 self-consistency 假闸; 加无
+        //   distinctness → 单 oracle 填 c0..c4 全 (P,sig_P,N) → validSigs=5(同 sig 重复计数)→ 自背书任意 payoutRoot
+        //   盗整池 = 4-of-5 坍缩 1-of-pool = trustless break。升序根治: 单 oracle 控 1 seat 只能填 1 个 idx, 凑不齐 4
+        //   distinct seat 的 valid sig → validSigs<4 BUST。真 anchor = poolMerkleRoot(ctor-baked ③)+ distinct index;
+        //   committeePkHash witness ② 此后冗余(consistency-only 非 load-bearing)。升序附带 canonical-ordering determinism 红利。
+        require(c0Idx < c1Idx);
+        require(c1Idx < c2Idx);
+        require(c2Idx < c3Idx);
+        require(c3Idx < c4Idx);
+        // ② committee commitment 绑 (distinctness 修后冗余 consistency-only; ABI 保留不变, 真 anchor 是 ③+升序)
         byte[] cConcat0 = c0Pk + c1Pk;
         byte[] cConcat1 = cConcat0 + c2Pk;
         byte[] cConcat2 = cConcat1 + c3Pk;
