@@ -1,0 +1,53 @@
+// FoldNode_synthetic.sil — ② 选项2-sizing characterization-ONLY 合约 (J1, 2026-06-20).
+//
+// ⚠⚠ 防假声明(NWT 钉死, 报告必带): 【characterization-NOT-production probe】。本合约 ≠ 生产 FoldNode_foldonly(1224B)。
+//   生产 foldonly 在 9999 script-units 内【造不出来】(门1/门2 双源 convert BUST = ②生死终裁结构死, 不变)。本合约【小到能 convert-create】
+//   仅为【量化 fold 步 intrinsic script-units + 随 k 斜率】给 Owner sizing 选项2 redesign 范围。【不证多片可行】。
+//
+// 设计: 砍掉 foldonly 的【convert_to_sealonly entry + 其 sealonly_tmpl_hash ctor(unused 会被编译器删)】, 【只留 fold covenant】。
+//   fold() = FoldNode.fold VERBATIM(4-field 聚合 + output-bind weld + commit_v2 完整性)= 生产 fold 核心逻辑【逐字不改】(NWT 防假:
+//   fold-logic == 生产 core, 才能测出代表性的 fold intrinsic cost)。故本合约 << 1224B(可 <9999 内 convert-create), 但 fold 逻辑同生产。
+// 用法: source(FoldBootstrap, 指向本合约 tmpl_hash)→ convert 产 synthetic foldonly(cov_id≠0)→ fold k=2/k=4 → 测 fold used + k 斜率。
+
+pragma silverscript ^0.1.0;
+
+contract FoldNode_synthetic(
+    byte[32] market_id,
+    byte[32] commit_v2,
+    int      shard_count,
+    int      max_fan_in,
+    // —— genesis State (4-field, 无 outcome; 与生产 foldonly State 布局一致) ——
+    int      init_local_yes,
+    int      init_local_no,
+    int      init_count,
+    int      init_pool_value
+) {
+    int local_yes  = init_local_yes;
+    int local_no   = init_local_no;
+    int count      = init_count;
+    int pool_value = init_pool_value;
+
+    // —— fold (k→1; 同合约 covenant) —— [FoldNode.fold VERBATIM = 生产 fold 核心, 防假不改一字] ——
+    #[covenant(binding = cov, from = max_fan_in, to = 1, mode = verification)]
+    function fold(State[] prev_states, State[] new_states) {
+        require(new_states.length == 1);
+        int yes_sum = 0;
+        int no_sum = 0;
+        int count_sum = 0;
+        int value_sum = 0;
+        for (i, 0, prev_states.length, max_fan_in) {
+            yes_sum = yes_sum + prev_states[i].local_yes;
+            no_sum = no_sum + prev_states[i].local_no;
+            count_sum = count_sum + prev_states[i].count;
+            value_sum = value_sum + prev_states[i].pool_value;
+        }
+        require(new_states[0].local_yes == yes_sum);
+        require(new_states[0].local_no == no_sum);
+        require(new_states[0].count == count_sum);
+        require(new_states[0].pool_value == value_sum);
+        // ★ output-bind weld: parent value == parent.pool_value
+        require(tx.outputs[0].value == new_states[0].pool_value);
+        // ⚠ commit_v2 完整性块【已拆出到独立 commit 步】(design-v2 三拆): 此处不含 = 测【纯 fold 聚合 intrinsic cost】。
+        //   拆解安全(NWT): commit enforce 不丢, 搬到独立 commit-step by construction(见 design-v2 §3/§4)。
+    }
+}
