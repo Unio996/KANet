@@ -1,0 +1,43 @@
+// RootStub_probe.sil — J1 2026-06-20 minimal seal-target STUB (cost-floor probe, 非生产合约).
+//
+// 目的: recursive-split 重设计需 J2 probe【seal→目标 的 cost 分解】定阈值。本 stub = 最小可作 seal_to_root 目标的
+//   7-field 合约(只 1 个 self-recreate entry, 无 committee/merkle/refund/convert)。J2 probe seal→RootStub:
+//   - used 若 LAND(<9999) → 这是【floor 成本】= FoldNode reveal 固定 + 最小目标的 double-blake2b。
+//   - floor 与 9999 的差 = 真实合约逻辑可用的【字节预算】→ 定 recursive-split 每个 WithTemplate 目标的 max。
+// 加 padding entry(下方注释的扩法)可做尺寸阶梯, 探 seal 从 LAND→bust 的临界目标大小 = THE 阈值。
+//
+// ⚠ probe-only, 不部署。7-field 与 RootClose/RootClaim 同布局(seal 产同 7-field state)。
+
+pragma silverscript ^0.1.0;
+
+contract RootStub(
+    int      init_local_yes,
+    int      init_local_no,
+    int      init_count,
+    int      init_pool_value,
+    int      init_closed,
+    int      init_winningSide,
+    byte[32] init_payoutRoot
+) {
+    int local_yes   = init_local_yes;
+    int local_no    = init_local_no;
+    int count       = init_count;
+    int pool_value  = init_pool_value;
+    int closed      = init_closed;
+    int winningSide = init_winningSide;
+    byte[32] payoutRoot = init_payoutRoot;
+
+    // 唯一 entry: self-recreate 同 7-field state (最小可花费, 单 blake2b)。无业务逻辑 = 最小目标模板。
+    entrypoint function passthrough(int outIdx) {
+        validateOutputState(outIdx, {
+            local_yes:   local_yes,
+            local_no:    local_no,
+            count:       count,
+            pool_value:  pool_value,
+            closed:      closed,
+            winningSide: winningSide,
+            payoutRoot:  payoutRoot
+        });
+        require(tx.outputs[outIdx].value == pool_value);
+    }
+}
