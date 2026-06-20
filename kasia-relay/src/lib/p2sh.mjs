@@ -1874,7 +1874,8 @@ export async function unlockBshardSeal(args) {
 
     // leaf scriptSig: seal_to_root witness(声明序: rootOutIdx, root_prefix, root_suffix) + selector + redeem reveal. (无 sig: output 约束到 canonical root)
     // selector: PoolLeaf seal_to_root=OP_3('53', 默认 back-compat); FoldNode(convert-split, abi entry 2)seal_to_root=OP_2('52'). builder 经 cmd.witness.seal_selector 指定.
-    const sealSelector = (typeof w.seal_selector === 'string' && /^[0-9a-fA-F]{2}$/.test(w.seal_selector)) ? w.seal_selector : '53';
+    const _sel = cmd.inputs?.leaf?.seal_selector_hex; // UI canonical: seal_selector_hex 在 cmd.inputs.leaf (非 witness)
+    const sealSelector = (typeof _sel === 'string' && /^[0-9a-fA-F]{2}$/.test(_sel)) ? _sel : '53';
     const leafSig = _pushInt(w.root_out_idx) + _pushBytes(w.root_prefix_hex) + _pushBytes(w.root_suffix_hex)
       + sealSelector + _encodePushDataHex(Buffer.from(cmd.inputs.leaf.redeem_hex, 'hex'));     // seal_to_root selector (default OP_3='53')
 

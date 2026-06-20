@@ -71,10 +71,12 @@ export function buildSealToRootCommand({ witness, leafOutpointTxid, leafRedeemHe
     witness: {
       root_out_idx: witness.rootOutIdx,
       root_prefix_hex: witness.root_prefix.toString('hex'), root_suffix_hex: witness.root_suffix.toString('hex'),
-      seal_selector: sealSelector, // PoolLeaf=OP_3('53'); FoldNode=OP_2('52'). relay unlockBshardSeal reads this (default '53')
     },
     inputs: {
-      leaf: { outpointTxid: leafOutpointTxid, redeem_hex: leafRedeemHex }, // relay _addressFromRedeem
+      // seal_selector_hex 放在 leaf(canonical unlockBshardSeal 读 cmd.inputs.leaf.seal_selector_hex, UI 集成 catch 对齐):
+      //   PoolLeaf seal_to_root=OP_3('53') / FoldNode seal_to_root=OP_2('52') / RootClose convert_to_claim=OP_2('52') /
+      //   convert_to_refundclaim=OP_3('53')。relay 默认 '53' 若缺。
+      leaf: { outpointTxid: leafOutpointTxid, redeem_hex: leafRedeemHex, seal_selector_hex: sealSelector }, // relay _addressFromRedeem
       funding, // [{ address, outpointTxid }] P2PK (miner fee; leaf full pool → root)
     },
     // outputs: root — relay computes foreign-template addr (root_prefix‖serializeRoot(state)‖root_suffix); value == full pool (weld3)
