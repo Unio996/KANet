@@ -158,6 +158,108 @@
           </form>
         </div>
 
+        <!-- Telegram DM bot 配置 (KANet-UI 2026-06-20, Owner 直令 / Bettor APPROVE 方案A: settings.eta 孤儿不可达 → 3 块 tg-bot 管理 mv 到此 /relays 页, 同 RPC-states 块当初 mv 先例。零新后端, 全打现有 API: tg-bot-token/broker/start|stop|status) -->
+        <!-- Telegram Bot — Token 配置 (token 加密存储 CONSOLE_ENCRYPTION_KEY, GET 只返 hint 不回明文, POST 加密 — crypto 在后端 API) -->
+        <div class="bg-white rounded-lg border border-warm-200" x-data="{
+          token: '', username: '', tokenConfigured: false, tokenHint: '', saving: false, saved: false,
+          async init() {
+            try { const r = await fetch('/api/config/tg-bot-token'); const j = await r.json(); this.tokenConfigured = !!j.token_configured; this.tokenHint = j.token_hint || ''; this.username = j.username || ''; } catch {}
+          },
+          async save() {
+            this.saving = true; this.saved = false;
+            try {
+              const body = { username: this.username };
+              if (this.token && this.token.trim()) body.token = this.token.trim();
+              const r = await fetch('/api/config/tg-bot-token', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+              const j = await r.json(); this.saved = !!j.ok; this.tokenConfigured = !!j.token_configured; this.tokenHint = j.token_hint || ''; this.token = '';
+            } catch {} finally { this.saving = false; }
+          }
+        }">
+          <div class="px-6 py-4 border-b border-warm-200 flex items-center space-x-2">
+            <svg class="h-5 w-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/></svg>
+            <h2 class="rl-display text-base text-ink-800">Telegram Bot — Token 配置</h2>
+          </div>
+          <div class="px-6 py-5 space-y-4">
+            <p class="text-xs text-ink-400">从 @BotFather 拿 bot token 填这里(不用再手改 kanet.env)。token <strong>加密存储</strong>(CONSOLE_ENCRYPTION_KEY),改完下方"运行控制"重启 bot 生效。也兼容 kanet.env(UI 配置优先)。</p>
+            <div>
+              <label class="block text-xs text-gray-600 mb-1">Bot Token</label>
+              <input type="password" x-model="token" :placeholder="tokenConfigured ? ('已配置: ' + tokenHint + ' — 留空保持不变') : '粘贴 @BotFather 的 token'" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" autocomplete="off">
+              <p x-show="tokenConfigured" class="text-xs text-green-600 mt-1">✓ 已配置 (<span x-text="tokenHint"></span>)</p>
+            </div>
+            <div>
+              <label class="block text-xs text-gray-600 mb-1">Bot Username (可选, 默认 KANET_Broker_bot)</label>
+              <input type="text" x-model="username" placeholder="KANET_Broker_bot" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" autocomplete="off">
+            </div>
+            <div class="flex items-center space-x-3">
+              <button @click="save()" :disabled="saving" class="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg disabled:opacity-50" x-text="saving ? '保存中…' : '保存'"></button>
+              <span x-show="saved" class="text-sm text-green-600">✓ 已保存(重启 bot 生效)</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Telegram Bot Broker (S4) -->
+        <div class="bg-white rounded-lg border border-warm-200 mt-6" x-data="{
+          brokerId: '', brokers: [], saving: false, saved: false,
+          async init() {
+            try { const r = await fetch('/api/config/tg-bot-broker'); const j = await r.json(); this.brokers = j.brokers || []; this.brokerId = j.broker_relay_id || ''; } catch {}
+          },
+          async save() {
+            if (!this.brokerId) return; this.saving = true; this.saved = false;
+            try { const r = await fetch('/api/config/tg-bot-broker', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ broker_relay_id: this.brokerId }) }); const j = await r.json(); this.saved = !!j.ok; } catch {} finally { this.saving = false; }
+          }
+        }">
+          <div class="px-6 py-4 border-b border-warm-200 flex items-center space-x-2">
+            <svg class="h-5 w-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 3v-3z"/></svg>
+            <h2 class="rl-display text-base text-ink-800">Telegram Bot — Broker 身份</h2>
+          </div>
+          <div class="px-6 py-5 space-y-4">
+            <p class="text-xs text-ink-400">这个 Telegram bot 代言哪个 broker(broker X)。改完<strong>即时生效、不用重启</strong>。bot 以该 broker 身份引导用户兑换/押注,佣金落该 broker 的链上地址。bot 不持私钥、碰不到资金。</p>
+            <select x-model="brokerId" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+              <option value="">— 选 broker relay —</option>
+              <template x-for="b in brokers" :key="b.id">
+                <option :value="b.id" x-text="b.name + ' · ' + (b.address || '').slice(0, 20) + '…'"></option>
+              </template>
+            </select>
+            <div class="flex items-center space-x-3">
+              <button @click="save()" :disabled="saving || !brokerId" class="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg disabled:opacity-50" x-text="saving ? '保存中…' : '保存'"></button>
+              <span x-show="saved" class="text-sm text-green-600">✓ 已保存(即时生效)</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Telegram Bot — 运行控制 (启动/停止/状态) -->
+        <div class="bg-white rounded-lg border border-warm-200 mt-6" x-data="{
+          st: null, loading: true, busy: false,
+          async load() { try { const r = await fetch('/api/tg-bot/status'); this.st = await r.json(); } catch {} finally { this.loading = false; } },
+          init() { this.load(); setInterval(() => this.load(), 5000); },
+          async start() { this.busy = true; try { const r = await fetch('/api/tg-bot/start', { method: 'POST' }); const j = await r.json(); if (!j.ok && j.message) alert('启动失败: ' + j.message); } catch {} finally { this.busy = false; await this.load(); } },
+          async stop() { this.busy = true; try { await fetch('/api/tg-bot/stop', { method: 'POST' }); } catch {} finally { this.busy = false; await this.load(); } }
+        }">
+          <div class="px-6 py-4 border-b border-warm-200 flex items-center space-x-2">
+            <svg class="h-5 w-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M12 5l7 7-7 7"/></svg>
+            <h2 class="rl-display text-base text-ink-800">Telegram Bot — 运行控制</h2>
+          </div>
+          <div class="px-6 py-5 space-y-3">
+            <p class="text-xs text-ink-400">启动/停止 Telegram broker bot 进程。启动后即使 Console 重启它也自动拉起(手动停止会被记住,不自动起)。bot 不持私钥、碰不到资金。</p>
+            <div class="flex items-center space-x-2 text-sm">
+              <span x-show="loading" class="text-gray-400 text-xs">加载中…</span>
+              <template x-if="!loading && st">
+                <div class="flex items-center space-x-2">
+                  <span class="inline-block w-2.5 h-2.5 rounded-full" :class="st.running ? 'bg-green-500' : 'bg-gray-300'"></span>
+                  <span x-text="st.running ? ('运行中 · @' + st.username + ' · pid ' + st.pid) : '已停止'"></span>
+                </div>
+              </template>
+            </div>
+            <template x-if="st && !st.token_configured"><p class="text-xs text-amber-600">⚠ 未配置 TELEGRAM_BOT_TOKEN(上方 Token 配置 / kanet.env)— 无法启动。</p></template>
+            <template x-if="st && !st.broker_relay_id"><p class="text-xs text-amber-600">⚠ 未选 broker(上方设置)— bot 会起但没 broker 身份。</p></template>
+            <template x-if="st && st.last_error"><p class="text-xs text-red-500" x-text="'上次错误: ' + st.last_error"></p></template>
+            <div class="flex items-center space-x-3">
+              <button @click="start()" :disabled="busy || (st && st.running) || (st && !st.token_configured)" class="px-4 py-2 bg-green-600 text-white text-sm rounded-lg disabled:opacity-50">启动</button>
+              <button @click="stop()" :disabled="busy || !(st && st.running)" class="px-4 py-2 bg-red-600 text-white text-sm rounded-lg disabled:opacity-50">停止</button>
+            </div>
+          </div>
+        </div>
+
         <!-- T-J2-2026-05-12 #9 — Relay child RPC states section (UI 健康检测 P0, NWT v0.2 §10 dead-template fix)
              5/12 sub #5 漏 grep route — 加到 settings.eta (dead template, 0 route render). v0.2 §10 钦定 mv 到这里.
              跟上方 Node Configuration (console daemon RpcClient) 区分: 这里是每个 relay 子进程内部 _rpc 状态, ws-proxy hijack 真凶探针. -->

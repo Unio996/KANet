@@ -215,7 +215,7 @@
             </div>
           </div>
           <div x-show="!agentHasAdapter" class="text-[10px] text-amber-600 mt-1">⚠ 本 broker 无 adapter, 不能设为 DM bot broker (先在 /agent 页分配 adapter). bot LLM dialog 需 adapter.</div>
-          <div class="text-[10px] text-ink-400 mt-1">全局管理 (token / 完整启停) 在 <a href="/settings" class="text-brand-600 underline">系统设置</a> 页; 此处为便捷视图+快捷操作 (同源).</div>
+          <div class="text-[10px] text-ink-400 mt-1">节点/账户管理在 <a href="/relays" class="text-brand-600 underline">系统设置</a> 页; 此面板=DM bot 便捷快捷操作 (同源 API).</div>
           <div x-show="tgBotMsg" class="text-[10px] text-emerald-600 mt-0.5" x-text="tgBotMsg"></div>
           <div x-show="tgBotError" class="text-[10px] text-red-500 mt-0.5" x-text="tgBotError"></div>
         </div>
