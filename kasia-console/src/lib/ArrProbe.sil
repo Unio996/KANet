@@ -1,0 +1,28 @@
+// ArrProbe.sil — byte[32][N] array witness-ABI 探针 (J1, 2026-06-20).
+// 唯一目的: cli-debugger runtime 实测 silverc 怎么从 witness 栈读 byte[32][N] 固定数组
+//   (count prefix? 元素 separate push vs 1 contiguous blob? 元素 forward vs reverse? 消耗几个 slot?)。
+// 设计: int a 在数组【前】+ int b 在数组【后】→ 若 array 读消耗 ≠2 slot, b 会读错值 (检测错位)。
+//   arr[0]/arr[1] 比对 ctor-baked e0/e1 → 检测元素序 (forward: arr[0]==e0 / reverse: arr[0]==e1)。
+// 期望 witness (probe 序按合约声明 forward = a, arr, b): NWT 试以下编码哪个【全 require 过 = LAND】:
+//   ① a + [s0 s1] (2 separate 32B push, 无 count) + b
+//   ② a + count(2) + [s0 s1] + b
+//   ③ a + [s0 s1] + count(2) + b
+//   ④ a + (s0‖s1 单个 64B contiguous push) + b
+//   ⑤ ①但元素 reverse: a + [s1 s0] + b
+//   值: a=11(0x0b), e0=0xAA*32, e1=0xBB*32, b=22(0x16). 哪个编码令 4 require 全过 = 真 array ABI。
+pragma silverscript ^0.1.0;
+
+contract ArrProbe(
+    byte[32] e0,        // 期望 arr[0]
+    byte[32] e1         // 期望 arr[1]
+) {
+    byte[32] expect0 = e0;
+    byte[32] expect1 = e1;
+
+    entrypoint function probe(int a, byte[32][2] arr, int b) {
+        require(a == 11);           // 数组前的 int — 错位则这条先炸 (说明 count 在前)
+        require(arr[0] == expect0); // forward: ==e0 / reverse: 需 ==e1
+        require(arr[1] == expect1);
+        require(b == 22);           // 数组后的 int — 数组消耗 slot 数错则这条读到 sibling=Number-too-big
+    }
+}
