@@ -8,8 +8,8 @@
 import { blake2b } from '@noble/hashes/blake2b';
 
 const ZERO32 = Buffer.alloc(32);
-const DEPTH = 8;
-const CAP = 1 << DEPTH; // 256 winners/shard (>256 → #26 bshard sharding)
+const DEPTH = 10; // depth-10 (79b08784): ≤1024 winner/PayoutShard (winner 轴深化, 链上 claim 10-step climb 必同深)。旧 depth-8(≤256)已 superseded。
+const CAP = 1 << DEPTH; // 1024 winners/shard
 
 // Exact JS port of rusty-kaspa serialize_i64(num, size) — the on-chain byte[](int,size) behavior (LE sign-magnitude).
 export function serializeI64(num, size) {
@@ -44,7 +44,7 @@ export function payoutLeaf(pkHex, amountSompi) {
 }
 
 function levelsOf(winners) {
-  if (winners.length > CAP) throw new Error(`>${CAP} winners needs depth>${DEPTH} (SS climb is depth-8; >256 → #26 bshard)`);
+  if (winners.length > CAP) throw new Error(`>${CAP} winners needs depth>${DEPTH} (SS climb is depth-${DEPTH}; >${CAP} → rolling payout-shard)`);
   const levels = [];
   let level = new Array(CAP).fill(ZERO32);
   winners.forEach((w, i) => { level[i] = payoutLeaf(w.pk, w.amount); });

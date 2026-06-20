@@ -1449,6 +1449,7 @@ const _POOL_STATE_START = 1;       // state_layout.start (leaf+root 同)
 const _LEAF_STATE_LEN = 36;        // PoolLeaf state_layout.len = 4×(PUSH8+8)
 const _ROOT_STATE_LEN = 87;        // PoolRoot state_layout.len = 6×(PUSH8+8) + (PUSH32+32)
 const _ROOTCLAIM_STATE_LEN = 96;   // RootClaim 8-field (R7 nullifier): _ROOT_STATE_LEN 87 + claimed_bitmap (PUSH8+8) (KANet-UI 2026-06-20)
+const _PAYOUTSHARD_STATE_LEN = 204; // (A) depth-10 PayoutShard: consolidated_pool+closed (2×9) + payoutRoot (PUSH32+32=33) + w0..w16 (17×9=153) = 204 (J2 2026-06-21 depth-10 sync; 旧 depth-8=96 已 superseded)
 
 function _i64LE(v) {               // BigInt/number → 8-byte LE Buffer (固定 i64, 非最小)
   const b = Buffer.alloc(8);
@@ -1504,15 +1505,15 @@ function _serializeRootStateHex(s) {
 
 // PayoutShard (A) 8-field state serializer (声明序: consolidated_pool, closed, payoutRoot, w0..w4). continuation 续约地址 splice 用。
 // absorb/close_attest/claim 的 validateOutputState 续锁此布局; genesis init_consolidated_pool==seed value(state==UTXO value 不变量)。
+const _NULLIFIER_WORDS = 17;   // depth-10 PayoutShard: 17-word nullifier (w0..w16, 17×63=1071 ≥ 1024 winner). depth-8 旧版=5-word(已 superseded)。
+// 从 state 拷贝 17 个 nullifier word(缺省 0)→ newState 构造复用, 防漏 word(NWT 全字段必列警告)。
+function _nw17(s) { const o = {}; for (let i = 0; i < _NULLIFIER_WORDS; i++) o['w' + i] = (s && s['w' + i] != null) ? s['w' + i] : 0; return o; }
 function _serializePayoutStateHex(s) {
-  return _encodePushDataHex(_i64LE(s.consolidated_pool))
+  let h = _encodePushDataHex(_i64LE(s.consolidated_pool))
     + _encodePushDataHex(_i64LE(s.closed))
-    + _encodePushDataHex(Buffer.from(String(s.payoutRoot).replace(/^0x/, ''), 'hex'))   // PUSH32 + 32B
-    + _encodePushDataHex(_i64LE(s.w0))
-    + _encodePushDataHex(_i64LE(s.w1))
-    + _encodePushDataHex(_i64LE(s.w2))
-    + _encodePushDataHex(_i64LE(s.w3))
-    + _encodePushDataHex(_i64LE(s.w4));
+    + _encodePushDataHex(Buffer.from(String(s.payoutRoot).replace(/^0x/, ''), 'hex'));   // PUSH32 + 32B
+  for (let i = 0; i < _NULLIFIER_WORDS; i++) h += _encodePushDataHex(_i64LE(s['w' + i] ?? 0));   // w0..w16
+  return h;
 }
 
 // per-state 续约 P2SH 地址: splice input redeem 的 state 区[start : start+len] → new state → payToScriptHash.
@@ -1522,8 +1523,8 @@ function _serializePayoutStateHex(s) {
 function _continuationAddress(inputRedeemHex, newStateHex, networkId, stateStart = _POOL_STATE_START) {
   const redeem = Buffer.from(inputRedeemHex, 'hex');
   const stateBytes = Buffer.from(newStateHex, 'hex');
-  if (stateBytes.length !== _LEAF_STATE_LEN && stateBytes.length !== _ROOT_STATE_LEN && stateBytes.length !== _ROOTCLAIM_STATE_LEN) {
-    throw new Error(`pool state ser ${stateBytes.length}B != leaf ${_LEAF_STATE_LEN} / root ${_ROOT_STATE_LEN} / rootclaim ${_ROOTCLAIM_STATE_LEN}`);
+  if (![_LEAF_STATE_LEN, _ROOT_STATE_LEN, _ROOTCLAIM_STATE_LEN, _PAYOUTSHARD_STATE_LEN].includes(stateBytes.length)) {
+    throw new Error(`pool state ser ${stateBytes.length}B != leaf ${_LEAF_STATE_LEN} / root ${_ROOT_STATE_LEN} / rootclaim ${_ROOTCLAIM_STATE_LEN} / payoutshard ${_PAYOUTSHARD_STATE_LEN}`);
   }
   const len = stateBytes.length;
   const spliced = Buffer.concat([redeem.slice(0, stateStart), stateBytes, redeem.slice(stateStart + len)]);
@@ -1651,7 +1652,7 @@ export async function unlockBshardConsolidate(args) {
     const poolValue = BigInt(cmd.inputs.shardleaf.pool_value);          // SL register-welded pool_value (== slUtxo value)
     const ps = cmd.inputs.payoutshard.state;                           // 当前 PS state {consolidated_pool, closed, payoutRoot, w0..4}
     const newConsolidated = BigInt(ps.consolidated_pool) + poolValue;
-    const newState = { consolidated_pool: newConsolidated.toString(), closed: ps.closed, payoutRoot: ps.payoutRoot, w0: ps.w0, w1: ps.w1, w2: ps.w2, w3: ps.w3, w4: ps.w4 };
+    const newState = { consolidated_pool: newConsolidated.toString(), closed: ps.closed, payoutRoot: ps.payoutRoot, ..._nw17(ps) };   // 17-word nullifier 透传(consolidate 不动 nullifier)
     const psContAddr = _continuationAddress(cmd.inputs.payoutshard.redeem_hex, _serializePayoutStateHex(newState), networkId, cmd.inputs.payoutshard.state_start ?? _POOL_STATE_START);
     let psOutValue = _utxoValue(psUtxo) + poolValue;                   // 双 weld: absorb(out==consolidated_pool+pool_value) ∧ consolidate(out==in[ps].value+pool_value); 不变量 in[ps].value==consolidated_pool 使两式一致
     // 🔬 forge② skim-teeth(cmd.forge_skim 仅测; off by default, driver 控): 故意少付 skim 量到 PS 续约 → 合约 ShardLeaf require(out==in+pool_value)/PS absorb 守恒应 BUST(测守恒 weld 的 skim-BUST 方向)。
@@ -1696,12 +1697,13 @@ export async function unlockBshardPayoutClaim(args) {
     const psCovId = _psInputCovId(psUtxo);
 
     const payout = BigInt(w.payout);
-    const ps = cmd.inputs.payoutshard.state;                          // {consolidated_pool, closed, payoutRoot, w0..4}
-    // nullifier 置位: word_idx = merkle_index/63, bit_in = merkle_index%63, mask = 2^bit_in (匹配合约展开上界 63)
+    const ps = cmd.inputs.payoutshard.state;                          // {consolidated_pool, closed, payoutRoot, w0..16}
+    // nullifier 置位: word_idx = merkle_index/63, bit_in = merkle_index%63, mask = 2^bit_in (匹配合约展开上界 63; 17-word w0..16 cap 1071≥1024)
     const idx = Number(w.merkle_index), wordIdx = Math.floor(idx / 63), bitIn = idx % 63;
-    const nw = [BigInt(ps.w0), BigInt(ps.w1), BigInt(ps.w2), BigInt(ps.w3), BigInt(ps.w4)];
+    const nw = []; for (let i = 0; i < _NULLIFIER_WORDS; i++) nw.push(BigInt(ps['w' + i] ?? 0));
     nw[wordIdx] = nw[wordIdx] + (1n << BigInt(bitIn));
-    const newState = { consolidated_pool: (BigInt(ps.consolidated_pool) - payout).toString(), closed: ps.closed, payoutRoot: ps.payoutRoot, w0: nw[0].toString(), w1: nw[1].toString(), w2: nw[2].toString(), w3: nw[3].toString(), w4: nw[4].toString() };
+    const newState = { consolidated_pool: (BigInt(ps.consolidated_pool) - payout).toString(), closed: ps.closed, payoutRoot: ps.payoutRoot, ..._nw17(ps) };
+    for (let i = 0; i < _NULLIFIER_WORDS; i++) newState['w' + i] = nw[i].toString();
     const psContAddr = _continuationAddress(cmd.inputs.payoutshard.redeem_hex, _serializePayoutStateHex(newState), networkId, cmd.inputs.payoutshard.state_start ?? _POOL_STATE_START);
     const psOutValue = _utxoValue(psUtxo) - payout;                  // 守恒 weld: out[self]==consolidated_pool-payout (不变量 in[ps].value==consolidated_pool)
 
@@ -1756,7 +1758,7 @@ export async function unlockBshardCloseAttest(args) {
     members.sort((a, b) => (a.pk.toLowerCase() < b.pk.toLowerCase() ? -1 : a.pk.toLowerCase() > b.pk.toLowerCase() ? 1 : 0));
 
     const ps = cmd.inputs.payoutshard.state;
-    const newState = { consolidated_pool: ps.consolidated_pool, closed: 1, payoutRoot: w.new_payout_root, w0: ps.w0, w1: ps.w1, w2: ps.w2, w3: ps.w3, w4: ps.w4 };   // closed 0→1 + payoutRoot 写入
+    const newState = { consolidated_pool: ps.consolidated_pool, closed: 1, payoutRoot: w.new_payout_root, ..._nw17(ps) };   // closed 0→1 + payoutRoot 写入; 17-word nullifier 透传
     const psContAddr = _continuationAddress(cmd.inputs.payoutshard.redeem_hex, _serializePayoutStateHex(newState), networkId, cmd.inputs.payoutshard.state_start ?? _POOL_STATE_START);
     const psOutValue = _utxoValue(psUtxo);   // close 不动 value(consolidated_pool 不变)
 
