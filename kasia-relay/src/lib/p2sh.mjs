@@ -1745,8 +1745,9 @@ export async function unlockBshardCloseAttest(args) {
     const matched = [psUtxo, feeUtxo];
     const psCovId = _psInputCovId(psUtxo);
 
-    // ★ pubkey 字节升序 sort 5 委员(pk+sig+idx+8 siblings 同步排)→ 满足合约 require(c0Pk<c1Pk<...) (b0e35141 robust fix)
-    const members = w.committee.map((m) => ({ pk: m.pk_hex, sig: m.sig_hex, idx: m.idx, sibs: m.siblings_hex }));
+    // ★ pubkey 字节升序 sort 5 委员(pk+sig+idx+8 siblings 同步排)→ 满足合约 require(c0Pk<c1Pk<...) (b0e35141 robust fix)。
+    //   build-preimage 模式 w.committee 空(driver 还没签)→ members=[] (psSig 不用, 走 preimage 返回)。
+    const members = (w.committee || []).map((m) => ({ pk: m.pk_hex, sig: m.sig_hex, idx: m.idx, sibs: m.siblings_hex }));
     members.sort((a, b) => (a.pk.toLowerCase() < b.pk.toLowerCase() ? -1 : a.pk.toLowerCase() > b.pk.toLowerCase() ? 1 : 0));
 
     const ps = cmd.inputs.payoutshard.state;
@@ -1765,20 +1766,27 @@ export async function unlockBshardCloseAttest(args) {
     const psSig = _pushInt(w.self_out_idx) + _pushBytes(w.new_payout_root) + sigPush + _pushBytes(w.committee_pk_hash) + pkPush + idxPush + sibPush
       + '51' + _encodePushDataHex(Buffer.from(cmd.inputs.payoutshard.redeem_hex, 'hex'));   // close_attest=OP_1='51'
 
-    // 委员 sig 对此 tx sighash(driver 用 committee key 签 tx_obj_preimage); fee input wallet-签。preimage driver 供(同 unlockBshardClose)。
-    let signedTx;
-    if (cmd.tx_obj_preimage) {
-      const parsed = JSON.parse(JSON.stringify(cmd.tx_obj_preimage));
-      parsed.version = 1; parsed.lockTime = BigInt(parsed.lockTime || lockTime); parsed.gas = BigInt(parsed.gas || 0);
-      const un = new Transaction({ version: 1, inputs: matched.map(u => ({ previousOutpoint: { transactionId: u.outpoint.transactionId, index: u.outpoint.index }, signatureScript: '', sequence: 0n, sigOpCount: 0, computeBudget: _BSHARD_COMPUTE_BUDGET, utxo: u })), outputs: orderedOut, lockTime: BigInt(lockTime), gas: 0n, subnetworkId: '0000000000000000000000000000000000000000', payload: '' });
-      const feeSig = createInputSignature(un, 1, wallet.getPrivateKey(), SighashType.All);
-      signedTx = new Transaction({ version: 1, inputs: [
-        { previousOutpoint: { transactionId: psUtxo.outpoint.transactionId, index: psUtxo.outpoint.index }, signatureScript: psSig, sequence: 0n, sigOpCount: 0, computeBudget: _BSHARD_COMPUTE_BUDGET },
-        { previousOutpoint: { transactionId: feeUtxo.outpoint.transactionId, index: feeUtxo.outpoint.index }, signatureScript: feeSig, sequence: 0n, sigOpCount: 0, computeBudget: _BSHARD_COMPUTE_BUDGET },
-      ], outputs: orderedOut, lockTime: BigInt(lockTime), gas: 0n, subnetworkId: '0000000000000000000000000000000000000000', payload: '' });
-    } else {
-      throw new Error('unlockBshardCloseAttest: tx_obj_preimage required (委员 sig sighash 一致性)');
+    // (b) 单一 tx 源: handler 确定性 build canonical un(committee 签此 input 0, fee relay 签). 两阶段:
+    //   ① build-preimage(无 committee sigs)→ 返 canonical preimage(地址-based)供 driver/跨节点委员 createInputSignature(un,0)。
+    //   ② submit(committee sigs 在)→ 注入同一 canonical un + fee 签 + 广播。委员签的 == 最终 tx → sighash 必一致(无复制 fragility)。
+    const psAddrIn = _addressFromRedeem(cmd.inputs.payoutshard.redeem_hex, networkId);
+    const un = new Transaction({ version: 1, inputs: matched.map(u => ({ previousOutpoint: { transactionId: u.outpoint.transactionId, index: u.outpoint.index }, signatureScript: '', sequence: 0n, sigOpCount: 0, computeBudget: _BSHARD_COMPUTE_BUDGET, utxo: u })), outputs: orderedOut, lockTime: BigInt(lockTime), gas: 0n, subnetworkId: '0000000000000000000000000000000000000000', payload: '' });
+    if (!w.committee || w.committee.length === 0) {
+      // build-preimage 模式: 返回 canonical un 结构(地址-based, 含 PS output 的 cov_id covenant)供 committee 签 input 0。
+      return { ok: true, mode: 'preimage', psContAddress: psContAddr, psInputIdx: 0, payoutCovId: psCovId,
+        preimage: {
+          version: 1,
+          inputs: [{ previousOutpoint: { transactionId: psUtxo.outpoint.transactionId, index: Number(psUtxo.outpoint.index) }, address: psAddrIn, amountSompi: _utxoValue(psUtxo).toString() },
+                   { previousOutpoint: { transactionId: feeUtxo.outpoint.transactionId, index: Number(feeUtxo.outpoint.index) }, address: cmd.inputs.fee.address, amountSompi: _utxoValue(feeUtxo).toString() }],
+          outputs: orderedOut.map((o, i) => ({ value: o.value.toString(), address: (i === w.self_out_idx ? psContAddr : cmd.outputs?.change_address), covenantId: (i === w.self_out_idx ? psCovId : null) })),
+        } };
     }
+    // submit 模式: 委员 sig 注入同一 canonical un + fee 签 + 广播。
+    const feeSig = createInputSignature(un, 1, wallet.getPrivateKey(), SighashType.All);
+    const signedTx = new Transaction({ version: 1, inputs: [
+      { previousOutpoint: { transactionId: psUtxo.outpoint.transactionId, index: psUtxo.outpoint.index }, signatureScript: psSig, sequence: 0n, sigOpCount: 0, computeBudget: _BSHARD_COMPUTE_BUDGET },
+      { previousOutpoint: { transactionId: feeUtxo.outpoint.transactionId, index: feeUtxo.outpoint.index }, signatureScript: feeSig, sequence: 0n, sigOpCount: 0, computeBudget: _BSHARD_COMPUTE_BUDGET },
+    ], outputs: orderedOut, lockTime: BigInt(lockTime), gas: 0n, subnetworkId: '0000000000000000000000000000000000000000', payload: '' });
     _assertTxInvariants(matched, signedTx, 'unlockBshardCloseAttest', networkId);
     const r = await rpc.submitTransaction({ transaction: signedTx, allowOrphan: false });
     return { txId: r.transactionId, psContAddress: psContAddr, sortedCommitteePks: members.map(m => m.pk.slice(0, 8)) };
