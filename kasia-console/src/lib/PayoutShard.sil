@@ -27,16 +27,19 @@ pragma silverscript ^0.1.0;
 
 contract PayoutShard(
     byte[32] poolMerkleRoot,       // depth-8 chain-derived oracle pool root (close_attest ③ 委员∈pool; == v07 同源)
-    // —— genesis State (8-field) ——
+    // —— genesis State (20-field): depth-10 winner-axis (≤1024 winner/单片) + 17-word nullifier (17×63=1071≥1024) ——
     int      init_consolidated_pool,
     int      init_closed,          // 0=归集中 / 1=committee-attested 可 claim
     byte[32] init_payoutRoot,      // close_attest 委员背书后锁; leaf=blake2b(pk‖ser(payout,8))
-    int      init_w0, int init_w1, int init_w2, int init_w3, int init_w4   // 多-word nullifier
+    int init_w0, int init_w1, int init_w2, int init_w3, int init_w4, int init_w5, int init_w6, int init_w7, int init_w8,
+    int init_w9, int init_w10, int init_w11, int init_w12, int init_w13, int init_w14, int init_w15, int init_w16  // 17-word nullifier
 ) {
     int consolidated_pool = init_consolidated_pool;
     int closed            = init_closed;
     byte[32] payoutRoot   = init_payoutRoot;
-    int w0 = init_w0; int w1 = init_w1; int w2 = init_w2; int w3 = init_w3; int w4 = init_w4;
+    int w0 = init_w0; int w1 = init_w1; int w2 = init_w2; int w3 = init_w3; int w4 = init_w4; int w5 = init_w5;
+    int w6 = init_w6; int w7 = init_w7; int w8 = init_w8; int w9 = init_w9; int w10 = init_w10; int w11 = init_w11;
+    int w12 = init_w12; int w13 = init_w13; int w14 = init_w14; int w15 = init_w15; int w16 = init_w16;
 
     // —— entry 0: absorb (输家片全额归集; same-contract continuation 续本 cov_id, 归集态) ——
     // 修(J1 finding-a + cov_id re-frame): 不再读 dust ticket(register 真 stake KAS 在 ShardLeaf POOL=pool_value welded,
@@ -49,7 +52,7 @@ contract PayoutShard(
             consolidated_pool:  consolidated_pool + shard_value,
             closed:             0,
             payoutRoot:         payoutRoot,
-            w0: w0, w1: w1, w2: w2, w3: w3, w4: w4
+            w0: w0, w1: w1, w2: w2, w3: w3, w4: w4, w5: w5, w6: w6, w7: w7, w8: w8, w9: w9, w10: w10, w11: w11, w12: w12, w13: w13, w14: w14, w15: w15, w16: w16
         });
         require(tx.outputs[selfOutIdx].value == consolidated_pool + shard_value);  // ★ 守恒 weld
     }
@@ -160,7 +163,7 @@ contract PayoutShard(
             consolidated_pool:  consolidated_pool,
             closed:             1,
             payoutRoot:         new_payoutRoot,
-            w0: w0, w1: w1, w2: w2, w3: w3, w4: w4
+            w0: w0, w1: w1, w2: w2, w3: w3, w4: w4, w5: w5, w6: w6, w7: w7, w8: w8, w9: w9, w10: w10, w11: w11, w12: w12, w13: w13, w14: w14, w15: w15, w16: w16
         });
         require(tx.outputs[selfOutIdx].value == consolidated_pool);  // ★ 守恒: close 不动资金
     }
@@ -169,16 +172,17 @@ contract PayoutShard(
     entrypoint function claim(
         int selfOutIdx, int payoutOutIdx,
         byte[32] bettorPk, int payout, int merkle_index,
-        byte[32] s0, byte[32] s1, byte[32] s2, byte[32] s3, byte[32] s4, byte[32] s5, byte[32] s6, byte[32] s7
+        byte[32] s0, byte[32] s1, byte[32] s2, byte[32] s3, byte[32] s4, byte[32] s5, byte[32] s6, byte[32] s7, byte[32] s8, byte[32] s9
     ) {
         require(closed == 1);
-        require(merkle_index >= 0); require(merkle_index < 256);  // FIXED depth-8 cap (≤256 winner; aliasing-safe; nullifier 315 更松)
+        require(merkle_index >= 0); require(merkle_index < 1024);  // FIXED depth-10 cap (≤1024 winner; aliasing-safe; nullifier 17×63=1071 更松)
         require(payout >= 1); require(payout <= consolidated_pool);
 
         // ★ store-payout: leaf=blake2b(pk‖ser(payout,8)) merkle ∈ payoutRoot(委员 attest 本合约锁)= 零 mulDiv 零 forge
-        // ⚠ 个体 s0..s7 + 手动 8 步 unroll (FIXED depth-8) = close_attest ③ 已 LAND 的 proven 模式(避 byte[32][] array
-        //   witness ABI untested 坑, J1 array 兔子洞收敛 2026-06-20); climb 与 pool-payout-root.mjs climbProof byte-equal
-        //   (DEPTH=8 本就出 8 siblings: bit=(idx>>lvl)&1=(merkle_index/div)%2, bit==0→cur‖sib else sib‖cur, div=2^lvl)。
+        // ⚠ 个体 s0..s9 + 手动 10 步 unroll (FIXED depth-10, >256 winner-axis 深化 ≤1024) = close_attest ③ 同款 proven
+        //   模式(避 byte[32][] array witness ABI untested 坑); climb 与 pool-payout-root.mjs climbProof byte-equal
+        //   ⚠ 链下必同深: pool-payout-root.mjs DEPTH 必 ==10 (payoutRoot pad 1024 叶), 否则 root 对不上 → claim BUST。
+        //   (bit=(idx>>lvl)&1=(merkle_index/div)%2, bit==0→cur‖sib else sib‖cur, div=2^lvl)。
         byte[32] cur = blake2b(byte[](bettorPk) + byte[](payout, 8));
         int div = 1;
         int b0 = (merkle_index / div) % 2; if (b0 == 0) { cur = blake2b(byte[](cur) + byte[](s0)); } else { cur = blake2b(byte[](s0) + byte[](cur)); } div = div * 2;
@@ -189,19 +193,34 @@ contract PayoutShard(
         int b5 = (merkle_index / div) % 2; if (b5 == 0) { cur = blake2b(byte[](cur) + byte[](s5)); } else { cur = blake2b(byte[](s5) + byte[](cur)); } div = div * 2;
         int b6 = (merkle_index / div) % 2; if (b6 == 0) { cur = blake2b(byte[](cur) + byte[](s6)); } else { cur = blake2b(byte[](s6) + byte[](cur)); } div = div * 2;
         int b7 = (merkle_index / div) % 2; if (b7 == 0) { cur = blake2b(byte[](cur) + byte[](s7)); } else { cur = blake2b(byte[](s7) + byte[](cur)); } div = div * 2;
+        int b8 = (merkle_index / div) % 2; if (b8 == 0) { cur = blake2b(byte[](cur) + byte[](s8)); } else { cur = blake2b(byte[](s8) + byte[](cur)); } div = div * 2;
+        int b9 = (merkle_index / div) % 2; if (b9 == 0) { cur = blake2b(byte[](cur) + byte[](s9)); } else { cur = blake2b(byte[](s9) + byte[](cur)); } div = div * 2;
         require(cur == payoutRoot);
 
-        // ★ 多-word nullifier (w0..w4, 各 63; mask unroll 上界 63)
+        // ★ 多-word nullifier (w0..w16, 各 63 bit; mask unroll 上界 63; 17×63=1071 ≥ 1024)
         int word_idx = merkle_index / 63;
         int bit_in   = merkle_index % 63;
         int mask = 1;
         for (b, 0, bit_in, 63) { mask = mask * 2; }
-        int nw0 = w0; int nw1 = w1; int nw2 = w2; int nw3 = w3; int nw4 = w4;
-        if (word_idx == 0)      { require((w0 / mask) % 2 == 0); nw0 = w0 + mask; }
-        else if (word_idx == 1) { require((w1 / mask) % 2 == 0); nw1 = w1 + mask; }
-        else if (word_idx == 2) { require((w2 / mask) % 2 == 0); nw2 = w2 + mask; }
-        else if (word_idx == 3) { require((w3 / mask) % 2 == 0); nw3 = w3 + mask; }
-        else                    { require((w4 / mask) % 2 == 0); nw4 = w4 + mask; }
+        int nw0 = w0; int nw1 = w1; int nw2 = w2; int nw3 = w3; int nw4 = w4; int nw5 = w5; int nw6 = w6; int nw7 = w7; int nw8 = w8;
+        int nw9 = w9; int nw10 = w10; int nw11 = w11; int nw12 = w12; int nw13 = w13; int nw14 = w14; int nw15 = w15; int nw16 = w16;
+        if (word_idx == 0)       { require((w0 / mask) % 2 == 0); nw0 = w0 + mask; }
+        else if (word_idx == 1)  { require((w1 / mask) % 2 == 0); nw1 = w1 + mask; }
+        else if (word_idx == 2)  { require((w2 / mask) % 2 == 0); nw2 = w2 + mask; }
+        else if (word_idx == 3)  { require((w3 / mask) % 2 == 0); nw3 = w3 + mask; }
+        else if (word_idx == 4)  { require((w4 / mask) % 2 == 0); nw4 = w4 + mask; }
+        else if (word_idx == 5)  { require((w5 / mask) % 2 == 0); nw5 = w5 + mask; }
+        else if (word_idx == 6)  { require((w6 / mask) % 2 == 0); nw6 = w6 + mask; }
+        else if (word_idx == 7)  { require((w7 / mask) % 2 == 0); nw7 = w7 + mask; }
+        else if (word_idx == 8)  { require((w8 / mask) % 2 == 0); nw8 = w8 + mask; }
+        else if (word_idx == 9)  { require((w9 / mask) % 2 == 0); nw9 = w9 + mask; }
+        else if (word_idx == 10) { require((w10 / mask) % 2 == 0); nw10 = w10 + mask; }
+        else if (word_idx == 11) { require((w11 / mask) % 2 == 0); nw11 = w11 + mask; }
+        else if (word_idx == 12) { require((w12 / mask) % 2 == 0); nw12 = w12 + mask; }
+        else if (word_idx == 13) { require((w13 / mask) % 2 == 0); nw13 = w13 + mask; }
+        else if (word_idx == 14) { require((w14 / mask) % 2 == 0); nw14 = w14 + mask; }
+        else if (word_idx == 15) { require((w15 / mask) % 2 == 0); nw15 = w15 + mask; }
+        else                     { require((w16 / mask) % 2 == 0); nw16 = w16 + mask; }
 
         // ★ recipient-bind (#31): payout 必去 winner P2PK(bettorPk)
         byte[34] winnerLock = new ScriptPubKeyP2PK(pubkey(bettorPk));
@@ -212,7 +231,7 @@ contract PayoutShard(
             consolidated_pool:  consolidated_pool - payout,
             closed:             1,
             payoutRoot:         payoutRoot,
-            w0: nw0, w1: nw1, w2: nw2, w3: nw3, w4: nw4
+            w0: nw0, w1: nw1, w2: nw2, w3: nw3, w4: nw4, w5: nw5, w6: nw6, w7: nw7, w8: nw8, w9: nw9, w10: nw10, w11: nw11, w12: nw12, w13: nw13, w14: nw14, w15: nw15, w16: nw16
         });
         require(tx.outputs[selfOutIdx].value == consolidated_pool - payout);  // ★ 守恒 weld
     }
