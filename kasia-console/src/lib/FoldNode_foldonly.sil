@@ -1,0 +1,80 @@
+// FoldNode_foldonly.sil — ② multi-shard convert-split-2 FOLD-only 半 (J1, 2026-06-20).
+//
+// 动因(convert_to_foldnode on-chain BUST, J2 probe 2026-06-20): convert cost ∝【ShardLeaf reveal 451B + FoldNode
+//   template 1278B = 1729B】× ~6.5u/B = 11242u > 9999 BUST(我 offline model 漏算 reveal 451B 只算 target 1278B)。
+//   砍 FoldNode 的 seal_to_root + RootState-struct(7-field 镜像)半 → fold-only convert 目标 → convert 降字节。
+//
+// 对称 FoldNode_sealonly.sil(seal 半已存在): 多片链 =
+//   ShardLeaf →convert_to_foldonly→ FoldNode_foldonly →[fold covenant k→1]→ foldonly(满) →convert_to_sealonly→
+//   FoldNode_sealonly →seal_to_root→ RootClose。每 convert 目标都小 → 每步 reveal+template < ~1538B(<9999/6.5)。
+//
+// ⚠ probe-not-model(STEP1+② 双重教训): 本合约 redeem 字节 + convert units 必 compile-probe + J2 链上实测,
+//   【禁 byte-math 预测】(1278B 的估算刚被链上 11242u 证伪 = 字节账必算 reveal+template 全部, 非只 target)。
+// 承重锚(与 FoldNode.fold verbatim): 零豁免 output-bind(parent value==new pool_value)+ induction + commit_v2 完整性。
+// 4-field 无 outcome(closed/winningSide/payoutRoot)= 结构不可结算; canonical outcome 只在 sealonly→root literal 硬设。
+
+pragma silverscript ^0.1.0;
+
+contract FoldNode_foldonly(
+    byte[32] market_id,
+    byte[32] commit_v2,
+    int      shard_count,
+    int      max_fan_in,
+    byte[32] sealonly_tmpl_hash,   // FoldNode_sealonly expectedTemplateHash (convert_to_sealonly foreign-template 桥)
+    // —— genesis State (4-field, 无 outcome; 实际由 ShardLeaf.convert_to_foldonly 提供, init_* 仅定 State 布局) ——
+    int      init_local_yes,
+    int      init_local_no,
+    int      init_count,
+    int      init_pool_value
+) {
+    int local_yes  = init_local_yes;
+    int local_no   = init_local_no;
+    int count      = init_count;
+    int pool_value = init_pool_value;
+
+    // —— entry 0: fold (k→1 携 value+account 守恒; foldonly→foldonly 同合约纯 covenant) —— [FoldNode.fold verbatim]
+    #[covenant(binding = cov, from = max_fan_in, to = 1, mode = verification)]
+    function fold(State[] prev_states, State[] new_states) {
+        require(new_states.length == 1);
+        int yes_sum = 0;
+        int no_sum = 0;
+        int count_sum = 0;
+        int value_sum = 0;
+        for (i, 0, prev_states.length, max_fan_in) {
+            yes_sum = yes_sum + prev_states[i].local_yes;
+            no_sum = no_sum + prev_states[i].local_no;
+            count_sum = count_sum + prev_states[i].count;
+            value_sum = value_sum + prev_states[i].pool_value;
+        }
+        require(new_states[0].local_yes == yes_sum);
+        require(new_states[0].local_no == no_sum);
+        require(new_states[0].count == count_sum);
+        require(new_states[0].pool_value == value_sum);
+        // ★ output-bind weld: parent value == parent.pool_value (induction: 每 child 创建时已绑真值)
+        require(tx.outputs[0].value == new_states[0].pool_value);
+        // 折满全片 → 验 commit_v2 完整性
+        if (count_sum == shard_count) {
+            byte[] commit_pre0 = byte[](yes_sum, 16) + byte[](no_sum, 16);
+            byte[] commit_pre1 = commit_pre0 + byte[](market_id);
+            byte[] commit_pre2 = commit_pre1 + byte[](shard_count, 4);
+            require(blake2b(commit_pre2) == commit_v2);
+        }
+    }
+
+    // —— entry 1: convert_to_sealonly (fold 满 → 转 seal 半; 4-field carry; 替代直接 seal_to_root 降 convert SIZE) ——
+    entrypoint function convert_to_sealonly(
+        int      sealOutIdx,
+        byte[]   seal_prefix,
+        byte[]   seal_suffix
+    ) {
+        require(count == shard_count);                     // 仅全片折满的单 foldonly 可转 seal
+        validateOutputStateWithTemplate(sealOutIdx, {
+            local_yes:  local_yes,
+            local_no:   local_no,
+            count:      count,
+            pool_value: pool_value
+        }, seal_prefix, seal_suffix, sealonly_tmpl_hash);
+        // ★ output-bind weld (跨合约边界 value 守恒): seal value == 全池 pool_value
+        require(tx.outputs[sealOutIdx].value == pool_value);
+    }
+}

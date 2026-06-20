@@ -1,0 +1,42 @@
+// FoldBootstrap.sil — ② 门2 probe-only minimal-source (J1, 2026-06-20).
+//
+// 唯一目的: 用【minimal-source covenant】廉价造一个 lineage'd(cov_id≠0)的 production FoldNode_foldonly, 让 fold
+//   script-units 能【独立 probe(门2)】, 不等门1(生产 ShardLeaf 451B→foldonly convert squeak)。
+// ⚠ probe-only 脚手架, 【非生产聚合源】(生产源=ShardLeaf 收注 451B, 仍 ~10069u BUST=门1 独立必过)。
+// ⚠ NWT 防假 probe: 本源 convert 产出的 foldonly 【必与生产 FoldNode_foldonly template_hash 一致】(同 foldonly_tmpl_hash
+//   ctor + 同 4-field carry), 否则门2 测的不是生产 fold。源不同只影响门1(convert 成本), 不碰门2(fold 读 k 子逻辑)。
+// ⚠ 验 premise(calibrate, 非断言): 本源【无 register_append】砍到最小 → convert=(本源 reveal + foldonly template)×6.5
+//   预期 <9999。且测【validateOutputStateWithTemplate-create 是否 set cov_id≠0】(我读: convert-create set / plain-lock 不 set,
+//   与 J2 direct-lock cov_id=0 一致 — 但 on-chain 裁)。J2 probe: convert LAND + 产出 foldonly 的 cov_id≠0 即证 bootstrap 成立。
+
+pragma silverscript ^0.1.0;
+
+contract FoldBootstrap(
+    byte[32] foldonly_tmpl_hash,   // FoldNode_foldonly expectedTemplateHash (convert 目标桥; == 生产 foldonly 防假)
+    // —— genesis State (4-field; 与 foldonly State 布局一致, init_* 仅定布局) ——
+    int      init_local_yes,
+    int      init_local_no,
+    int      init_count,
+    int      init_pool_value
+) {
+    int local_yes  = init_local_yes;
+    int local_no   = init_local_no;
+    int count      = init_count;
+    int pool_value = init_pool_value;
+
+    // —— 单 entry: convert_to_foldonly (lineage-setting covenant-create → 产 cov_id≠0 foldonly; 4-field carry) ——
+    entrypoint function convert_to_foldonly(
+        int      foldOutIdx,
+        byte[]   fold_prefix,
+        byte[]   fold_suffix
+    ) {
+        validateOutputStateWithTemplate(foldOutIdx, {
+            local_yes:  local_yes,
+            local_no:   local_no,
+            count:      count,
+            pool_value: pool_value
+        }, fold_prefix, fold_suffix, foldonly_tmpl_hash);
+        // ★ value 守恒: 产出 foldonly value == 本源 pool_value
+        require(tx.outputs[foldOutIdx].value == pool_value);
+    }
+}
