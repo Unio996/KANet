@@ -7,8 +7,10 @@ import { writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { blake2b } from '@noble/hashes/blake2b';
+import { buildPoolMerkleTree } from '../src/services/pool-merkle-v06.mjs';
 const W = await import('file:///D:/rusty-kaspa/wasm/nodejs/kaspa/kaspa.js');
-const { ScriptBuilder, addressFromScriptPublicKey } = W;
+const { ScriptBuilder, addressFromScriptPublicKey, PrivateKey } = W;
+const xonly = (kp) => { const x = kp.xOnlyPublicKey ?? kp.toXOnlyPublicKey?.(); return (typeof x === 'string' ? x : x.toString()); };
 const CONSOLE = 'http://127.0.0.1:3200', RELAY = 'eb5a5864-a8e0-4376-8f61-38108abb301f', NET = 'testnet-12';
 const SILVERC = 'D:/silverscript/target/release/silverc.exe', z32 = '00'.repeat(32);
 const LIB = join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'lib');
@@ -22,9 +24,12 @@ async function landed(txid, address, n = 25) { for (let i = 0; i < n; i++) { con
 async function lockTo(addr, sompi) { const j = await rc({ type: 'transfer', target: addr, amount: Number(BigInt(sompi)) / 1e8 }); const tx = j.txId || j.txid; if (!tx || !await landed(tx, addr)) throw new Error(`lock fail: ${JSON.stringify(j).slice(0, 120)}`); return tx; }
 const RELAY_ADDR = (await rc({ type: 'get_pubkey' })).address;
 
-// committee poolMerkleRoot(与 ramp 同 5 distinct, 用于 genesis ctor)— 1000-run 真委员另议; 此处占位 same canonical 5
+// committee poolMerkleRoot = 真 committee tree root(5 distinct canonical, 与 consolidate/settle 同套)。
+// ⚠ baked 不可改: genesis PS 必 bake 真 cmRoot, 否则 close_attest 委员门 require(委员 ∈ poolMerkleRoot) 对 z32 必 BUST(z32-root bug 修)。
 const W17 = () => Array.from({ length: 17 }, () => ctorInt(0));
-const poolMerkleRoot = z32;   // genesis 占位 root(close_attest 委员 ∈pool 由 settler 真组; 占位不影响 register/consolidate)
+const committee = Array.from({ length: 5 }, (_, i) => new PrivateKey((0xc0 + i).toString(16).repeat(32)));
+const cPks = committee.map(priv => xonly(priv.toKeypair()));
+const poolMerkleRoot = buildPoolMerkleTree(cPks).root.toString('hex');   // 真 committee root
 const SEED = 20_000_000n;
 const psCtor = [ctorBytes32(poolMerkleRoot), ctorInt(Number(SEED)), ctorInt(0), ctorBytes32(z32), ...W17()];
 const psRedeem = Buffer.from(compileSil(join(LIB, 'PayoutShard.sil'), psCtor, SILVERC).script).toString('hex');
@@ -54,6 +59,7 @@ log(`编 ${SHARDS} ShardLeaf redeem(${SHARDS}B each~441), J1 片 ${J1_SHARDS.joi
 
 const artifacts = {
   market_id, payout_cov_id: PAYOUT_COV_ID, genesis_ps_tx: genTx, ps_redeem_hex: psRedeem, ps_addr: p2sh(psRedeem),
+  genesis_root: poolMerkleRoot,   // 真 committee tree root(close_attest 委员门验)
   seal_count: SEAL, stake: STAKE.toString(), min_bet: MIN_BET,
   poolside: { ps_prefix_hex: psArtifact.templatePrefix.toString('hex'), ps_suffix_hex: psArtifact.templateSuffix.toString('hex'), ps_tmpl_hash: psArtifact.templateHashHex },
   shards,

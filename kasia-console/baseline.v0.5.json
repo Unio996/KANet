@@ -1,0 +1,2979 @@
+{
+  "schema_version": "v0.5-baseline-r1",
+  "captured_at": "2026-06-07T11:05:17.768Z",
+  "captured_by": "NWT-tn regression-runner Plan A (A)",
+  "summary": {
+    "settle_tx_count": 73,
+    "bet_tx_count": 42,
+    "bond_amount_samples_sompi": 42,
+    "bond_amount_sompi_min": 100000000,
+    "bond_amount_sompi_max": 100000000,
+    "bond_amount_sompi_avg": 100000000,
+    "settle_broker_fee_samples": 13,
+    "settle_broker_fee_sompi_avg": 283434961,
+    "settle_winner_amount_sompi_avg": 28060061205,
+    "total_recent_tx_7d": 500,
+    "settle_real_chain_tx_resolved": 0,
+    "bet_real_chain_tx_resolved": 42
+  },
+  "v0_5_invariants": {
+    "pool_settle_outputs_length_expected": 7,
+    "pool_settle_outputs_length_observed": [
+      null
+    ],
+    "broker_fee_ratios_expected": [
+      0.003,
+      0.005,
+      0.007
+    ],
+    "ss_p2sh_format": "P2SH 32-byte payload + OP_PUSHDATA2 for >520 byte redeem",
+    "dispute_path_expected": "dispatch via voter v2 + 7 outputs + oracleFee/5 split",
+    "ss_v05_file_sha256": "38ae5c74bc8b1729e590b970c1baaf5953fd02dd4ef57ae04954d0b60b8e39e3",
+    "ss_v05_entrypoints": [
+      "settle_unanimous",
+      "settle_majority_forfeit_1",
+      "refund_unanimous_silent",
+      "refund_maker_unjoined",
+      "refund_disagreement"
+    ],
+    "ss_files_v05": {
+      "PoolSide": {
+        "sha256": "9331a7c70aa3a0c9acb0977033de122c97cbe3575fef773fe743538caede8481",
+        "entrypoints": [
+          "settled_via_spine",
+          "claim_winner",
+          "consumed_by_oracle_settlement",
+          "refund_market_cancelled"
+        ]
+      },
+      "PoolSide_v07": {
+        "sha256": "d6c17bd8e43d690b644620a21b59e84d990a5c145ad22d5c9ff0a31536d82732",
+        "entrypoints": [
+          "settled_via_spine",
+          "claim_winner",
+          "refund_market_cancelled"
+        ]
+      },
+      "PoolSide_v0_7_1": {
+        "sha256": "b1692ceff6993e6697aadac0aac7ff8cc370a43ef40cabe7f2259554e3b6c3ca",
+        "entrypoints": [
+          "settled_via_spine",
+          "claim_winner",
+          "refund_market_cancelled"
+        ]
+      },
+      "PoolSpine": {
+        "sha256": "38ae5c74bc8b1729e590b970c1baaf5953fd02dd4ef57ae04954d0b60b8e39e3",
+        "entrypoints": [
+          "settle_unanimous",
+          "settle_majority_forfeit_1",
+          "refund_unanimous_silent",
+          "refund_maker_unjoined",
+          "refund_disagreement"
+        ]
+      },
+      "PoolSpine_v07": {
+        "sha256": "055778e8a1bd2f91fb8bcc96fdd05b565c27fb80a11c0f625fe36432eb528f58",
+        "entrypoints": [
+          "settle_aggregate",
+          "dispute_reveal",
+          "refund_maker_unjoined"
+        ]
+      },
+      "PoolSpine_v0_7_1": {
+        "sha256": "b7bf6b2f8af300eb9d3558a7fd30aea5ec20f5fba187b6dc4eba9d10f9cbfd68",
+        "entrypoints": [
+          "settle_aggregate",
+          "dispute_reveal",
+          "refund_maker_unjoined"
+        ]
+      }
+    }
+  },
+  "settle_tx_baseline": [
+    {
+      "event_type": "pool_settle_consensual_dispatched",
+      "event_synthetic_id": "consensual_dispatched:ext-pred-177:1779931392179",
+      "real_chain_txid": null,
+      "observed_at": "2026-05-28T01:23:12.179Z",
+      "from_address": "kaspatest:qrl33afery94spm6dwa4cl2xnfgxus6dlh8hj0ld6d6cszjxs3dsk76jlh2cc",
+      "to_address": "kaspatest:qrnjmrn74z9984k3recaj832zjwu34xugh6srvt9r9fejlguwvtxw886ujnr5",
+      "block_hash": null,
+      "block_time": null,
+      "amount_sompi": null,
+      "outputs_length": null,
+      "outputs_sample": null,
+      "payload_meta": {
+        "offer_id": "ext-pred-1779926010250-f3qny",
+        "market_id": "ext-pred-1779926010250-f3qny",
+        "winner": 0,
+        "winner_addr": "kaspatest:qrl33afery94spm6dwa4cl2xnfgxus6dlh8hj0ld6d6cszjxs3dsk76jlh2cc",
+        "broker_fee_amount": "124654962",
+        "winner_amount": "12340841330",
+        "dispatched_at": "2026-05-28T01:23:12.179Z",
+        "epoch": 1
+      }
+    },
+    {
+      "event_type": "oracle_tx_sig",
+      "event_synthetic_id": "oracle_tx_sig:4fecfa8d:ext-pred:r0:i0:1779950031473",
+      "real_chain_txid": null,
+      "observed_at": "2026-05-28 06:33:51",
+      "from_address": "kaspatest:qpep9mw8m377jdadh9sawc5ect9d6vhvuv3rvxh2lturp588lejhjg7gq5f4t",
+      "to_address": "kaspatest:qrl33afery94spm6dwa4cl2xnfgxus6dlh8hj0ld6d6cszjxs3dsk76jlh2cc",
+      "block_hash": null,
+      "block_time": null,
+      "amount_sompi": null,
+      "outputs_length": null,
+      "outputs_sample": null,
+      "payload_meta": {
+        "t": "kanet_oracle_tx_sign_resp_v1",
+        "offer_id": "ext-pred-1779949301949-6v7nq",
+        "voter_relay_id": "4fecfa8d-c457-4df4-bbfc-b64ba7e42dd8",
+        "revote_round": 0,
+        "winner": 0,
+        "input_index": 0,
+        "signature": "41fe7aae532eb1e47792e24513254584841fa99a3198234c9fa310cc90071bced6b4ccdf3a763e2771324c93cee042b7a16a2e817c451b1e0a87e6c4859c165f1101"
+      }
+    },
+    {
+      "event_type": "oracle_tx_sig",
+      "event_synthetic_id": "oracle_tx_sig:4fecfa8d:ext-pred:r0:i1:1779950031481",
+      "real_chain_txid": null,
+      "observed_at": "2026-05-28 06:33:51",
+      "from_address": "kaspatest:qpep9mw8m377jdadh9sawc5ect9d6vhvuv3rvxh2lturp588lejhjg7gq5f4t",
+      "to_address": "kaspatest:qrl33afery94spm6dwa4cl2xnfgxus6dlh8hj0ld6d6cszjxs3dsk76jlh2cc",
+      "block_hash": null,
+      "block_time": null,
+      "amount_sompi": null,
+      "outputs_length": null,
+      "outputs_sample": null,
+      "payload_meta": {
+        "t": "kanet_oracle_tx_sign_resp_v1",
+        "offer_id": "ext-pred-1779949301949-6v7nq",
+        "voter_relay_id": "4fecfa8d-c457-4df4-bbfc-b64ba7e42dd8",
+        "revote_round": 0,
+        "winner": 0,
+        "input_index": 1,
+        "signature": "4114d851469e82f8cd89d10e4ddfaf1d73d65a838efa27596d53829afc0e5aef3cb04dbd02b676980571d522b26ee4234e9b222376b2e79caf6139cfd038d764e301"
+      }
+    },
+    {
+      "event_type": "oracle_tx_sig",
+      "event_synthetic_id": "oracle_tx_sig:edea41e5:ext-pred:r0:i0:1779950031488",
+      "real_chain_txid": null,
+      "observed_at": "2026-05-28 06:33:51",
+      "from_address": "kaspatest:qp4fh3fz9g58jccrxjrc6ukfylp9ngg3ufttemk2wc7cfj3dwd95c55pnn8du",
+      "to_address": "kaspatest:qrl33afery94spm6dwa4cl2xnfgxus6dlh8hj0ld6d6cszjxs3dsk76jlh2cc",
+      "block_hash": null,
+      "block_time": null,
+      "amount_sompi": null,
+      "outputs_length": null,
+      "outputs_sample": null,
+      "payload_meta": {
+        "t": "kanet_oracle_tx_sign_resp_v1",
+        "offer_id": "ext-pred-1779949301949-6v7nq",
+        "voter_relay_id": "edea41e5-d5f8-4684-a1da-fd48779dc660",
+        "revote_round": 0,
+        "winner": 0,
+        "input_index": 0,
+        "signature": "4118608772836e0fe5ef2203dc4ff01b3d6714809b12339b0fc41648fcd7ce725a292007775dd72e126c99956f374f238dee1ef6812004a65120851d8626012a1b01"
+      }
+    },
+    {
+      "event_type": "oracle_tx_sig",
+      "event_synthetic_id": "oracle_tx_sig:edea41e5:ext-pred:r0:i1:1779950031496",
+      "real_chain_txid": null,
+      "observed_at": "2026-05-28 06:33:51",
+      "from_address": "kaspatest:qp4fh3fz9g58jccrxjrc6ukfylp9ngg3ufttemk2wc7cfj3dwd95c55pnn8du",
+      "to_address": "kaspatest:qrl33afery94spm6dwa4cl2xnfgxus6dlh8hj0ld6d6cszjxs3dsk76jlh2cc",
+      "block_hash": null,
+      "block_time": null,
+      "amount_sompi": null,
+      "outputs_length": null,
+      "outputs_sample": null,
+      "payload_meta": {
+        "t": "kanet_oracle_tx_sign_resp_v1",
+        "offer_id": "ext-pred-1779949301949-6v7nq",
+        "voter_relay_id": "edea41e5-d5f8-4684-a1da-fd48779dc660",
+        "revote_round": 0,
+        "winner": 0,
+        "input_index": 1,
+        "signature": "4129e010d7a0ed54b7bae297b59c26a6f19c72cfc63e64039b40c140b0722f67f1bc53c63dc787fb0dcdc5a22a68e56e7e7599c34fa07d1188bf4fe9aa7ed1aa3801"
+      }
+    },
+    {
+      "event_type": "oracle_tx_sig",
+      "event_synthetic_id": "oracle_tx_sig:287cbe51:ext-pred:r0:i0:1779950031503",
+      "real_chain_txid": null,
+      "observed_at": "2026-05-28 06:33:51",
+      "from_address": "kaspatest:qr5w3kp8sfuqx00mvs2s8n0szqkr9av4npfzupkn33jday24sw28q43he8rwu",
+      "to_address": "kaspatest:qrl33afery94spm6dwa4cl2xnfgxus6dlh8hj0ld6d6cszjxs3dsk76jlh2cc",
+      "block_hash": null,
+      "block_time": null,
+      "amount_sompi": null,
+      "outputs_length": null,
+      "outputs_sample": null,
+      "payload_meta": {
+        "t": "kanet_oracle_tx_sign_resp_v1",
+        "offer_id": "ext-pred-1779949301949-6v7nq",
+        "voter_relay_id": "287cbe51-6436-48e7-ac63-df8a2199adf4",
+        "revote_round": 0,
+        "winner": 0,
+        "input_index": 0,
+        "signature": "41ec0ae0448a16dce23fd93edef45e60a8867e044ec90bbc7a3b9fed1a9b830c2a0425815320c9a8a488284cc58e46bacac91048b1f53ec2dd28939c9234a69ae101"
+      }
+    },
+    {
+      "event_type": "oracle_tx_sig",
+      "event_synthetic_id": "oracle_tx_sig:287cbe51:ext-pred:r0:i1:1779950031511",
+      "real_chain_txid": null,
+      "observed_at": "2026-05-28 06:33:51",
+      "from_address": "kaspatest:qr5w3kp8sfuqx00mvs2s8n0szqkr9av4npfzupkn33jday24sw28q43he8rwu",
+      "to_address": "kaspatest:qrl33afery94spm6dwa4cl2xnfgxus6dlh8hj0ld6d6cszjxs3dsk76jlh2cc",
+      "block_hash": null,
+      "block_time": null,
+      "amount_sompi": null,
+      "outputs_length": null,
+      "outputs_sample": null,
+      "payload_meta": {
+        "t": "kanet_oracle_tx_sign_resp_v1",
+        "offer_id": "ext-pred-1779949301949-6v7nq",
+        "voter_relay_id": "287cbe51-6436-48e7-ac63-df8a2199adf4",
+        "revote_round": 0,
+        "winner": 0,
+        "input_index": 1,
+        "signature": "41ac8181b60923aa2e5a3c0b72864269b1abf1f9a9134c3786766ac075cd29fc74f7fe2ca016dd797eb7278904c324d674c5bdea004cad3d805880836b1db5a31001"
+      }
+    },
+    {
+      "event_type": "oracle_tx_sig",
+      "event_synthetic_id": "oracle_tx_sig:4355f89c:ext-pred:r0:i0:1779950031518",
+      "real_chain_txid": null,
+      "observed_at": "2026-05-28 06:33:51",
+      "from_address": "kaspatest:qp9r2knhy3r2mkdf37frgsze7d583vxcg8na2z92y77yll3d8ftmzxjxwcd3j",
+      "to_address": "kaspatest:qrl33afery94spm6dwa4cl2xnfgxus6dlh8hj0ld6d6cszjxs3dsk76jlh2cc",
+      "block_hash": null,
+      "block_time": null,
+      "amount_sompi": null,
+      "outputs_length": null,
+      "outputs_sample": null,
+      "payload_meta": {
+        "t": "kanet_oracle_tx_sign_resp_v1",
+        "offer_id": "ext-pred-1779949301949-6v7nq",
+        "voter_relay_id": "4355f89c-66cb-498f-aa9c-242eb91c981c",
+        "revote_round": 0,
+        "winner": 0,
+        "input_index": 0,
+        "signature": "410740d2b7982a7dd9c36ff8389b32b353ead997fd5bb6c11c53df91eda9bf6f52757e3688f22182b3255967658bc60d76112a22c68031b586aa37f7249204ab9301"
+      }
+    },
+    {
+      "event_type": "oracle_tx_sig",
+      "event_synthetic_id": "oracle_tx_sig:4355f89c:ext-pred:r0:i1:1779950031526",
+      "real_chain_txid": null,
+      "observed_at": "2026-05-28 06:33:51",
+      "from_address": "kaspatest:qp9r2knhy3r2mkdf37frgsze7d583vxcg8na2z92y77yll3d8ftmzxjxwcd3j",
+      "to_address": "kaspatest:qrl33afery94spm6dwa4cl2xnfgxus6dlh8hj0ld6d6cszjxs3dsk76jlh2cc",
+      "block_hash": null,
+      "block_time": null,
+      "amount_sompi": null,
+      "outputs_length": null,
+      "outputs_sample": null,
+      "payload_meta": {
+        "t": "kanet_oracle_tx_sign_resp_v1",
+        "offer_id": "ext-pred-1779949301949-6v7nq",
+        "voter_relay_id": "4355f89c-66cb-498f-aa9c-242eb91c981c",
+        "revote_round": 0,
+        "winner": 0,
+        "input_index": 1,
+        "signature": "4146dda2eeacef8bc14897fb60f3acf491d8c14c934e5376912d35b2911f7497d2c386522ca9641e84fff64218baf54470b16187114a86c38a7d6e1bb341be5ffe01"
+      }
+    },
+    {
+      "event_type": "oracle_tx_sig",
+      "event_synthetic_id": "oracle_tx_sig:f77b381d:ext-pred:r0:i0:1779950031533",
+      "real_chain_txid": null,
+      "observed_at": "2026-05-28 06:33:51",
+      "from_address": "kaspatest:qzxuwefy3skknmukz42kps7hf0gw8gt5l4vk8t3uxfpx5tgu90lu2wf4puz3s",
+      "to_address": "kaspatest:qrl33afery94spm6dwa4cl2xnfgxus6dlh8hj0ld6d6cszjxs3dsk76jlh2cc",
+      "block_hash": null,
+      "block_time": null,
+      "amount_sompi": null,
+      "outputs_length": null,
+      "outputs_sample": null,
+      "payload_meta": {
+        "t": "kanet_oracle_tx_sign_resp_v1",
+        "offer_id": "ext-pred-1779949301949-6v7nq",
+        "voter_relay_id": "f77b381d-6a79-4e35-bc4b-1b79bdc78f3b",
+        "revote_round": 0,
+        "winner": 0,
+        "input_index": 0,
+        "signature": "4119d73d4cc0603a899981c146aa44e708448f9a52b68c47a1971bbc36108b496eb62d077beff529126aeefbf86b18f53f3c47a4ac454f2271bbf80034df54dda201"
+      }
+    },
+    {
+      "event_type": "oracle_tx_sig",
+      "event_synthetic_id": "oracle_tx_sig:f77b381d:ext-pred:r0:i1:1779950031541",
+      "real_chain_txid": null,
+      "observed_at": "2026-05-28 06:33:51",
+      "from_address": "kaspatest:qzxuwefy3skknmukz42kps7hf0gw8gt5l4vk8t3uxfpx5tgu90lu2wf4puz3s",
+      "to_address": "kaspatest:qrl33afery94spm6dwa4cl2xnfgxus6dlh8hj0ld6d6cszjxs3dsk76jlh2cc",
+      "block_hash": null,
+      "block_time": null,
+      "amount_sompi": null,
+      "outputs_length": null,
+      "outputs_sample": null,
+      "payload_meta": {
+        "t": "kanet_oracle_tx_sign_resp_v1",
+        "offer_id": "ext-pred-1779949301949-6v7nq",
+        "voter_relay_id": "f77b381d-6a79-4e35-bc4b-1b79bdc78f3b",
+        "revote_round": 0,
+        "winner": 0,
+        "input_index": 1,
+        "signature": "41616b18bee4e8b8729fb5d80bb2afa64287a4a2db252be81222406490a3dfe60d65bae9d2706c6ca63b331a02aa3bfde3e15e1edef3f41b7a5be3127f1efb7cb701"
+      }
+    },
+    {
+      "event_type": "oracle_vote",
+      "event_synthetic_id": "oracle_vote:4fecfa8d:ext-pred:1779949432188",
+      "real_chain_txid": null,
+      "observed_at": "2026-05-28 06:23:52",
+      "from_address": "kaspatest:qpep9mw8m377jdadh9sawc5ect9d6vhvuv3rvxh2lturp588lejhjg7gq5f4t",
+      "to_address": "kaspatest:qrl33afery94spm6dwa4cl2xnfgxus6dlh8hj0ld6d6cszjxs3dsk76jlh2cc",
+      "block_hash": null,
+      "block_time": null,
+      "amount_sompi": null,
+      "outputs_length": null,
+      "outputs_sample": null,
+      "payload_meta": {
+        "t": "kanet_oracle_vote_v1",
+        "offer_id": "ext-pred-1779949301949-6v7nq",
+        "voter_relay_id": "4fecfa8d-c457-4df4-bbfc-b64ba7e42dd8",
+        "voter_pubkey": "7212edc7dc7de937adb961d76299c2cadd32ece322361aeafaf830d0e7fe6579",
+        "outcome": "YES",
+        "evidence_url": "https://gamma-api.polymarket.com/markets?clob_token_ids=106824408592813020013301350134034008352555643908738093172210459345634665782526&closed=true",
+        "evidence_hash": "7f372dcc4e6ca5d773db45d1e1c8964b59cff47f5ef33170348b84cfcbaf8fde",
+        "vote_timestamp": "2026-05-28T06:23:52.180Z",
+        "revote_round": 0,
+        "epoch": 1,
+        "signature": "68649ae38bd5575ca19f386a6039d78d537759ce56713ecbb3eec9e71fa3ea7ac0deffbccf42ba9ca776a6b1602ad18abb9cec6deb3443d28e2b867838795a6c"
+      }
+    },
+    {
+      "event_type": "oracle_vote",
+      "event_synthetic_id": "oracle_vote:edea41e5:ext-pred:1779949432323",
+      "real_chain_txid": null,
+      "observed_at": "2026-05-28 06:23:52",
+      "from_address": "kaspatest:qp4fh3fz9g58jccrxjrc6ukfylp9ngg3ufttemk2wc7cfj3dwd95c55pnn8du",
+      "to_address": "kaspatest:qrl33afery94spm6dwa4cl2xnfgxus6dlh8hj0ld6d6cszjxs3dsk76jlh2cc",
+      "block_hash": null,
+      "block_time": null,
+      "amount_sompi": null,
+      "outputs_length": null,
+      "outputs_sample": null,
+      "payload_meta": {
+        "t": "kanet_oracle_vote_v1",
+        "offer_id": "ext-pred-1779949301949-6v7nq",
+        "voter_relay_id": "edea41e5-d5f8-4684-a1da-fd48779dc660",
+        "voter_pubkey": "6a9bc5222a2879630334878d72c927c259a111e256bceeca763d84ca2d734b4c",
+        "outcome": "YES",
+        "evidence_url": "https://gamma-api.polymarket.com/markets?clob_token_ids=106824408592813020013301350134034008352555643908738093172210459345634665782526&closed=true",
+        "evidence_hash": "7f372dcc4e6ca5d773db45d1e1c8964b59cff47f5ef33170348b84cfcbaf8fde",
+        "vote_timestamp": "2026-05-28T06:23:52.315Z",
+        "revote_round": 0,
+        "epoch": 1,
+        "signature": "e26ca08bcf98bc453390fef91afa4a806f9b6ede06d36c1b13a5243cc6a19f1d50cb48895ba1b7a3c443af36e52f8063ac2a1ac29122a0832fb5146a61e0f719"
+      }
+    },
+    {
+      "event_type": "oracle_vote",
+      "event_synthetic_id": "oracle_vote:287cbe51:ext-pred:1779949432452",
+      "real_chain_txid": null,
+      "observed_at": "2026-05-28 06:23:52",
+      "from_address": "kaspatest:qr5w3kp8sfuqx00mvs2s8n0szqkr9av4npfzupkn33jday24sw28q43he8rwu",
+      "to_address": "kaspatest:qrl33afery94spm6dwa4cl2xnfgxus6dlh8hj0ld6d6cszjxs3dsk76jlh2cc",
+      "block_hash": null,
+      "block_time": null,
+      "amount_sompi": null,
+      "outputs_length": null,
+      "outputs_sample": null,
+      "payload_meta": {
+        "t": "kanet_oracle_vote_v1",
+        "offer_id": "ext-pred-1779949301949-6v7nq",
+        "voter_relay_id": "287cbe51-6436-48e7-ac63-df8a2199adf4",
+        "voter_pubkey": "e8e8d8278278033dfb641503cdf0102c32f59598522e06d38c64de9155839470",
+        "outcome": "YES",
+        "evidence_url": "https://gamma-api.polymarket.com/markets?clob_token_ids=106824408592813020013301350134034008352555643908738093172210459345634665782526&closed=true",
+        "evidence_hash": "7f372dcc4e6ca5d773db45d1e1c8964b59cff47f5ef33170348b84cfcbaf8fde",
+        "vote_timestamp": "2026-05-28T06:23:52.444Z",
+        "revote_round": 0,
+        "epoch": 1,
+        "signature": "a2b007b6b5112b51c11b1b6863e473aeac17c514140669481ffaf617fff46cf65bbcfb04d93d7c594eb4fb8465a9b9b24fc60f9ea0e9a93b11baa81927f230f6"
+      }
+    },
+    {
+      "event_type": "oracle_vote",
+      "event_synthetic_id": "oracle_vote:4355f89c:ext-pred:1779949432586",
+      "real_chain_txid": null,
+      "observed_at": "2026-05-28 06:23:52",
+      "from_address": "kaspatest:qp9r2knhy3r2mkdf37frgsze7d583vxcg8na2z92y77yll3d8ftmzxjxwcd3j",
+      "to_address": "kaspatest:qrl33afery94spm6dwa4cl2xnfgxus6dlh8hj0ld6d6cszjxs3dsk76jlh2cc",
+      "block_hash": null,
+      "block_time": null,
+      "amount_sompi": null,
+      "outputs_length": null,
+      "outputs_sample": null,
+      "payload_meta": {
+        "t": "kanet_oracle_vote_v1",
+        "offer_id": "ext-pred-1779949301949-6v7nq",
+        "voter_relay_id": "4355f89c-66cb-498f-aa9c-242eb91c981c",
+        "voter_pubkey": "4a355a772446add9a98f92344059f36878b0d841e7d508aa27bc4ffe2d3a57b1",
+        "outcome": "YES",
+        "evidence_url": "https://gamma-api.polymarket.com/markets?clob_token_ids=106824408592813020013301350134034008352555643908738093172210459345634665782526&closed=true",
+        "evidence_hash": "7f372dcc4e6ca5d773db45d1e1c8964b59cff47f5ef33170348b84cfcbaf8fde",
+        "vote_timestamp": "2026-05-28T06:23:52.579Z",
+        "revote_round": 0,
+        "epoch": 1,
+        "signature": "3564a330cf6f8e9c81665d2b406879cdd26fc4f852743b0a4a73c04fc73c1a5deaaba4849e13fa2c81ff5a38c35cca41be3fccb19ea7de4b1ada1a7747665fda"
+      }
+    },
+    {
+      "event_type": "oracle_vote",
+      "event_synthetic_id": "oracle_vote:f77b381d:ext-pred:1779949432718",
+      "real_chain_txid": null,
+      "observed_at": "2026-05-28 06:23:52",
+      "from_address": "kaspatest:qzxuwefy3skknmukz42kps7hf0gw8gt5l4vk8t3uxfpx5tgu90lu2wf4puz3s",
+      "to_address": "kaspatest:qrl33afery94spm6dwa4cl2xnfgxus6dlh8hj0ld6d6cszjxs3dsk76jlh2cc",
+      "block_hash": null,
+      "block_time": null,
+      "amount_sompi": null,
+      "outputs_length": null,
+      "outputs_sample": null,
+      "payload_meta": {
+        "t": "kanet_oracle_vote_v1",
+        "offer_id": "ext-pred-1779949301949-6v7nq",
+        "voter_relay_id": "f77b381d-6a79-4e35-bc4b-1b79bdc78f3b",
+        "voter_pubkey": "8dc765248c2d69ef96155560c3d74bd0e3a174fd5963ae3c32426a2d1c2bffc5",
+        "outcome": "YES",
+        "evidence_url": "https://gamma-api.polymarket.com/markets?clob_token_ids=106824408592813020013301350134034008352555643908738093172210459345634665782526&closed=true",
+        "evidence_hash": "7f372dcc4e6ca5d773db45d1e1c8964b59cff47f5ef33170348b84cfcbaf8fde",
+        "vote_timestamp": "2026-05-28T06:23:52.710Z",
+        "revote_round": 0,
+        "epoch": 1,
+        "signature": "eae318fcc3d4c8af36c5981a28b3bf1aaf848f6a9ea67e7811c6161e777fb80e9e16d5618fcb79baa305583c5b04ef7a9b5e077b6371a97569660a4eb53acc56"
+      }
+    },
+    {
+      "event_type": "oracle_tx_sig",
+      "event_synthetic_id": "oracle_tx_sig:4fecfa8d:ext-pred:r0:i0:1779934859624",
+      "real_chain_txid": null,
+      "observed_at": "2026-05-28 02:20:59",
+      "from_address": "kaspatest:qpep9mw8m377jdadh9sawc5ect9d6vhvuv3rvxh2lturp588lejhjg7gq5f4t",
+      "to_address": "kaspatest:qrl33afery94spm6dwa4cl2xnfgxus6dlh8hj0ld6d6cszjxs3dsk76jlh2cc",
+      "block_hash": null,
+      "block_time": null,
+      "amount_sompi": null,
+      "outputs_length": null,
+      "outputs_sample": null,
+      "payload_meta": {
+        "t": "kanet_oracle_tx_sign_resp_v1",
+        "offer_id": "ext-pred-1779933502766-nkl2u",
+        "voter_relay_id": "4fecfa8d-c457-4df4-bbfc-b64ba7e42dd8",
+        "revote_round": 0,
+        "winner": 1,
+        "input_index": 0,
+        "signature": "417e9ba03d7d4166b38570b135b4bcad3e8867960dac214551d56e4db2670a74027040fda96a8ffa36ff0714a4be2965c28b5773f7466748db596d4e3548b4655d01"
+      }
+    },
+    {
+      "event_type": "oracle_tx_sig",
+      "event_synthetic_id": "oracle_tx_sig:4fecfa8d:ext-pred:r0:i1:1779934859636",
+      "real_chain_txid": null,
+      "observed_at": "2026-05-28 02:20:59",
+      "from_address": "kaspatest:qpep9mw8m377jdadh9sawc5ect9d6vhvuv3rvxh2lturp588lejhjg7gq5f4t",
+      "to_address": "kaspatest:qrl33afery94spm6dwa4cl2xnfgxus6dlh8hj0ld6d6cszjxs3dsk76jlh2cc",
+      "block_hash": null,
+      "block_time": null,
+      "amount_sompi": null,
+      "outputs_length": null,
+      "outputs_sample": null,
+      "payload_meta": {
+        "t": "kanet_oracle_tx_sign_resp_v1",
+        "offer_id": "ext-pred-1779933502766-nkl2u",
+        "voter_relay_id": "4fecfa8d-c457-4df4-bbfc-b64ba7e42dd8",
+        "revote_round": 0,
+        "winner": 1,
+        "input_index": 1,
+        "signature": "412f92b7303ad97d93d651688067a8689028fe560318079c9e47d5027de3c294706b2ae677b82c31970ff2bda646c029a6e7220c564be50da65e2f8e59c1f3298301"
+      }
+    },
+    {
+      "event_type": "oracle_tx_sig",
+      "event_synthetic_id": "oracle_tx_sig:edea41e5:ext-pred:r0:i0:1779934859644",
+      "real_chain_txid": null,
+      "observed_at": "2026-05-28 02:20:59",
+      "from_address": "kaspatest:qp4fh3fz9g58jccrxjrc6ukfylp9ngg3ufttemk2wc7cfj3dwd95c55pnn8du",
+      "to_address": "kaspatest:qrl33afery94spm6dwa4cl2xnfgxus6dlh8hj0ld6d6cszjxs3dsk76jlh2cc",
+      "block_hash": null,
+      "block_time": null,
+      "amount_sompi": null,
+      "outputs_length": null,
+      "outputs_sample": null,
+      "payload_meta": {
+        "t": "kanet_oracle_tx_sign_resp_v1",
+        "offer_id": "ext-pred-1779933502766-nkl2u",
+        "voter_relay_id": "edea41e5-d5f8-4684-a1da-fd48779dc660",
+        "revote_round": 0,
+        "winner": 1,
+        "input_index": 0,
+        "signature": "41f423d1f692133357af25c72368579261db6dd79833b07e768cdb05e213398b9ed08e1bb4bd14721caaeb76d8972be3a25f88345ee7c6579adb53e22cae2c5a2201"
+      }
+    },
+    {
+      "event_type": "oracle_tx_sig",
+      "event_synthetic_id": "oracle_tx_sig:edea41e5:ext-pred:r0:i1:1779934859655",
+      "real_chain_txid": null,
+      "observed_at": "2026-05-28 02:20:59",
+      "from_address": "kaspatest:qp4fh3fz9g58jccrxjrc6ukfylp9ngg3ufttemk2wc7cfj3dwd95c55pnn8du",
+      "to_address": "kaspatest:qrl33afery94spm6dwa4cl2xnfgxus6dlh8hj0ld6d6cszjxs3dsk76jlh2cc",
+      "block_hash": null,
+      "block_time": null,
+      "amount_sompi": null,
+      "outputs_length": null,
+      "outputs_sample": null,
+      "payload_meta": {
+        "t": "kanet_oracle_tx_sign_resp_v1",
+        "offer_id": "ext-pred-1779933502766-nkl2u",
+        "voter_relay_id": "edea41e5-d5f8-4684-a1da-fd48779dc660",
+        "revote_round": 0,
+        "winner": 1,
+        "input_index": 1,
+        "signature": "41766d07ebf5a702d4050598bb618f342aca82f0e3e509fd3beda4247dfdfc78ead902167c37ecc17e476cad4521e6cab376064464d847c948e0a81f36d71291f201"
+      }
+    },
+    {
+      "event_type": "oracle_tx_sig",
+      "event_synthetic_id": "oracle_tx_sig:287cbe51:ext-pred:r0:i0:1779934859663",
+      "real_chain_txid": null,
+      "observed_at": "2026-05-28 02:20:59",
+      "from_address": "kaspatest:qr5w3kp8sfuqx00mvs2s8n0szqkr9av4npfzupkn33jday24sw28q43he8rwu",
+      "to_address": "kaspatest:qrl33afery94spm6dwa4cl2xnfgxus6dlh8hj0ld6d6cszjxs3dsk76jlh2cc",
+      "block_hash": null,
+      "block_time": null,
+      "amount_sompi": null,
+      "outputs_length": null,
+      "outputs_sample": null,
+      "payload_meta": {
+        "t": "kanet_oracle_tx_sign_resp_v1",
+        "offer_id": "ext-pred-1779933502766-nkl2u",
+        "voter_relay_id": "287cbe51-6436-48e7-ac63-df8a2199adf4",
+        "revote_round": 0,
+        "winner": 1,
+        "input_index": 0,
+        "signature": "41048d5627929a0d9a7b722fa6c6f7aac505c3b84ed9a5790e9cf397c4eeff2d69f0b439e210cf8c2b78b2af1c65a98661af64b6b4084d5bb0e126599469bf3aae01"
+      }
+    },
+    {
+      "event_type": "oracle_tx_sig",
+      "event_synthetic_id": "oracle_tx_sig:287cbe51:ext-pred:r0:i1:1779934859676",
+      "real_chain_txid": null,
+      "observed_at": "2026-05-28 02:20:59",
+      "from_address": "kaspatest:qr5w3kp8sfuqx00mvs2s8n0szqkr9av4npfzupkn33jday24sw28q43he8rwu",
+      "to_address": "kaspatest:qrl33afery94spm6dwa4cl2xnfgxus6dlh8hj0ld6d6cszjxs3dsk76jlh2cc",
+      "block_hash": null,
+      "block_time": null,
+      "amount_sompi": null,
+      "outputs_length": null,
+      "outputs_sample": null,
+      "payload_meta": {
+        "t": "kanet_oracle_tx_sign_resp_v1",
+        "offer_id": "ext-pred-1779933502766-nkl2u",
+        "voter_relay_id": "287cbe51-6436-48e7-ac63-df8a2199adf4",
+        "revote_round": 0,
+        "winner": 1,
+        "input_index": 1,
+        "signature": "412891aa1d59a31c81504c55f028ee50a1cc87e7fb24bb433cea688b6386af113c8cc877ef6fa08f19d996295b1d1ac3088c8473413f47434fe6ca33dc62c0a95d01"
+      }
+    },
+    {
+      "event_type": "oracle_tx_sig",
+      "event_synthetic_id": "oracle_tx_sig:4355f89c:ext-pred:r0:i0:1779934859685",
+      "real_chain_txid": null,
+      "observed_at": "2026-05-28 02:20:59",
+      "from_address": "kaspatest:qp9r2knhy3r2mkdf37frgsze7d583vxcg8na2z92y77yll3d8ftmzxjxwcd3j",
+      "to_address": "kaspatest:qrl33afery94spm6dwa4cl2xnfgxus6dlh8hj0ld6d6cszjxs3dsk76jlh2cc",
+      "block_hash": null,
+      "block_time": null,
+      "amount_sompi": null,
+      "outputs_length": null,
+      "outputs_sample": null,
+      "payload_meta": {
+        "t": "kanet_oracle_tx_sign_resp_v1",
+        "offer_id": "ext-pred-1779933502766-nkl2u",
+        "voter_relay_id": "4355f89c-66cb-498f-aa9c-242eb91c981c",
+        "revote_round": 0,
+        "winner": 1,
+        "input_index": 0,
+        "signature": "4161f241ffc1cede2ca80eafbfff2429b639f5e5ad9579d8dee53fc49437ffb396fff2ae19eff24819dd3445ccc2f145d3b52f3b3299a3c6e93aa0432b8fa7238201"
+      }
+    },
+    {
+      "event_type": "oracle_tx_sig",
+      "event_synthetic_id": "oracle_tx_sig:4355f89c:ext-pred:r0:i1:1779934859696",
+      "real_chain_txid": null,
+      "observed_at": "2026-05-28 02:20:59",
+      "from_address": "kaspatest:qp9r2knhy3r2mkdf37frgsze7d583vxcg8na2z92y77yll3d8ftmzxjxwcd3j",
+      "to_address": "kaspatest:qrl33afery94spm6dwa4cl2xnfgxus6dlh8hj0ld6d6cszjxs3dsk76jlh2cc",
+      "block_hash": null,
+      "block_time": null,
+      "amount_sompi": null,
+      "outputs_length": null,
+      "outputs_sample": null,
+      "payload_meta": {
+        "t": "kanet_oracle_tx_sign_resp_v1",
+        "offer_id": "ext-pred-1779933502766-nkl2u",
+        "voter_relay_id": "4355f89c-66cb-498f-aa9c-242eb91c981c",
+        "revote_round": 0,
+        "winner": 1,
+        "input_index": 1,
+        "signature": "41b5dae67a2fc641b24ab8f8a571d0c27d66d8c40a951bdb078648546f7089cacfeb65de385747ee3452b4602ce4170a59c42b366245b718d442ef89543451fb3801"
+      }
+    },
+    {
+      "event_type": "oracle_tx_sig",
+      "event_synthetic_id": "oracle_tx_sig:f77b381d:ext-pred:r0:i0:1779934859703",
+      "real_chain_txid": null,
+      "observed_at": "2026-05-28 02:20:59",
+      "from_address": "kaspatest:qzxuwefy3skknmukz42kps7hf0gw8gt5l4vk8t3uxfpx5tgu90lu2wf4puz3s",
+      "to_address": "kaspatest:qrl33afery94spm6dwa4cl2xnfgxus6dlh8hj0ld6d6cszjxs3dsk76jlh2cc",
+      "block_hash": null,
+      "block_time": null,
+      "amount_sompi": null,
+      "outputs_length": null,
+      "outputs_sample": null,
+      "payload_meta": {
+        "t": "kanet_oracle_tx_sign_resp_v1",
+        "offer_id": "ext-pred-1779933502766-nkl2u",
+        "voter_relay_id": "f77b381d-6a79-4e35-bc4b-1b79bdc78f3b",
+        "revote_round": 0,
+        "winner": 1,
+        "input_index": 0,
+        "signature": "41119e10a345dadc15f9b8b090c67efb4fa53570ff94186cc497a286f86d11a1c9f478a096afaac712bb8a96cd408e8bf0f0e153245f8b1da316792fea466c91d701"
+      }
+    },
+    {
+      "event_type": "oracle_tx_sig",
+      "event_synthetic_id": "oracle_tx_sig:f77b381d:ext-pred:r0:i1:1779934859711",
+      "real_chain_txid": null,
+      "observed_at": "2026-05-28 02:20:59",
+      "from_address": "kaspatest:qzxuwefy3skknmukz42kps7hf0gw8gt5l4vk8t3uxfpx5tgu90lu2wf4puz3s",
+      "to_address": "kaspatest:qrl33afery94spm6dwa4cl2xnfgxus6dlh8hj0ld6d6cszjxs3dsk76jlh2cc",
+      "block_hash": null,
+      "block_time": null,
+      "amount_sompi": null,
+      "outputs_length": null,
+      "outputs_sample": null,
+      "payload_meta": {
+        "t": "kanet_oracle_tx_sign_resp_v1",
+        "offer_id": "ext-pred-1779933502766-nkl2u",
+        "voter_relay_id": "f77b381d-6a79-4e35-bc4b-1b79bdc78f3b",
+        "revote_round": 0,
+        "winner": 1,
+        "input_index": 1,
+        "signature": "41da41aa23d3b87351871f4f464352b9d92d25afab63e26cb423198a519baaedd29b5ae41e61f75f2167f36fa21b49312ea35240d90bca787aebdd2efa47fa28c701"
+      }
+    },
+    {
+      "event_type": "oracle_vote",
+      "event_synthetic_id": "oracle_vote:f77b381d:ext-pred:1779934305340",
+      "real_chain_txid": null,
+      "observed_at": "2026-05-28 02:11:45",
+      "from_address": "kaspatest:qzxuwefy3skknmukz42kps7hf0gw8gt5l4vk8t3uxfpx5tgu90lu2wf4puz3s",
+      "to_address": "kaspatest:qrl33afery94spm6dwa4cl2xnfgxus6dlh8hj0ld6d6cszjxs3dsk76jlh2cc",
+      "block_hash": null,
+      "block_time": null,
+      "amount_sompi": null,
+      "outputs_length": null,
+      "outputs_sample": null,
+      "payload_meta": {
+        "t": "kanet_oracle_vote_v1",
+        "offer_id": "ext-pred-1779933502766-nkl2u",
+        "voter_relay_id": "f77b381d-6a79-4e35-bc4b-1b79bdc78f3b",
+        "voter_pubkey": "8dc765248c2d69ef96155560c3d74bd0e3a174fd5963ae3c32426a2d1c2bffc5",
+        "outcome": "NO",
+        "evidence_url": "kanet_native_spec:ext-pred-1779933502766-nkl2u",
+        "evidence_hash": "a1be21a36532f8b8444d77887ba551ffa9d95298c42817b16ff965d00f3006ae",
+        "vote_timestamp": "2026-05-28T02:11:45.331Z",
+        "revote_round": 0,
+        "epoch": 1,
+        "signature": "caca95f7a80e85ac779b83a2820c2a3f4501c16bba7bddb70cd5eb59287016a8bb17bf9c1e835573b38030bdb2c9b418e36c1c4d9b080b3a7c78be623e1ae7af"
+      }
+    },
+    {
+      "event_type": "oracle_vote",
+      "event_synthetic_id": "oracle_vote:287cbe51:ext-pred:1779933718232",
+      "real_chain_txid": null,
+      "observed_at": "2026-05-28 02:01:58",
+      "from_address": "kaspatest:qr5w3kp8sfuqx00mvs2s8n0szqkr9av4npfzupkn33jday24sw28q43he8rwu",
+      "to_address": "kaspatest:qrl33afery94spm6dwa4cl2xnfgxus6dlh8hj0ld6d6cszjxs3dsk76jlh2cc",
+      "block_hash": null,
+      "block_time": null,
+      "amount_sompi": null,
+      "outputs_length": null,
+      "outputs_sample": null,
+      "payload_meta": {
+        "t": "kanet_oracle_vote_v1",
+        "offer_id": "ext-pred-1779933502766-nkl2u",
+        "voter_relay_id": "287cbe51-6436-48e7-ac63-df8a2199adf4",
+        "voter_pubkey": "e8e8d8278278033dfb641503cdf0102c32f59598522e06d38c64de9155839470",
+        "outcome": "NO",
+        "evidence_url": "kanet_native_spec:ext-pred-1779933502766-nkl2u",
+        "evidence_hash": "7d86b8ece3eaf1d5411e4b4d4240d373679cf38583753850ec17ac8ef243d945",
+        "vote_timestamp": "2026-05-28T02:01:58.224Z",
+        "revote_round": 0,
+        "epoch": 1,
+        "signature": "28fb64098a16c7ab5fe0ad23734bea7c9c27ccad3bb0434423ffa992491dd9d816e94665d72c0a0df547f49bc3256598764b21231a0bc9da5b06ffaafd11a7f7"
+      }
+    },
+    {
+      "event_type": "oracle_vote",
+      "event_synthetic_id": "oracle_vote:4355f89c:ext-pred:1779933718726",
+      "real_chain_txid": null,
+      "observed_at": "2026-05-28 02:01:58",
+      "from_address": "kaspatest:qp9r2knhy3r2mkdf37frgsze7d583vxcg8na2z92y77yll3d8ftmzxjxwcd3j",
+      "to_address": "kaspatest:qrl33afery94spm6dwa4cl2xnfgxus6dlh8hj0ld6d6cszjxs3dsk76jlh2cc",
+      "block_hash": null,
+      "block_time": null,
+      "amount_sompi": null,
+      "outputs_length": null,
+      "outputs_sample": null,
+      "payload_meta": {
+        "t": "kanet_oracle_vote_v1",
+        "offer_id": "ext-pred-1779933502766-nkl2u",
+        "voter_relay_id": "4355f89c-66cb-498f-aa9c-242eb91c981c",
+        "voter_pubkey": "4a355a772446add9a98f92344059f36878b0d841e7d508aa27bc4ffe2d3a57b1",
+        "outcome": "NO",
+        "evidence_url": "kanet_native_spec:ext-pred-1779933502766-nkl2u",
+        "evidence_hash": "0ccc164762a766054fb3d4fc1aff62fa55737123e28336f213baaba8c5b7ac28",
+        "vote_timestamp": "2026-05-28T02:01:58.718Z",
+        "revote_round": 0,
+        "epoch": 1,
+        "signature": "0cd40d3f37e66dd7ac9c1cecaa95302f798e28a319f0337be21831dc116776ab91a49d03f9467c6010b4f9e7723cc97dd6d281af1f1647325436bf57b02f0bda"
+      }
+    },
+    {
+      "event_type": "oracle_vote",
+      "event_synthetic_id": "oracle_vote:4fecfa8d:ext-pred:1779933717175",
+      "real_chain_txid": null,
+      "observed_at": "2026-05-28 02:01:57",
+      "from_address": "kaspatest:qpep9mw8m377jdadh9sawc5ect9d6vhvuv3rvxh2lturp588lejhjg7gq5f4t",
+      "to_address": "kaspatest:qrl33afery94spm6dwa4cl2xnfgxus6dlh8hj0ld6d6cszjxs3dsk76jlh2cc",
+      "block_hash": null,
+      "block_time": null,
+      "amount_sompi": null,
+      "outputs_length": null,
+      "outputs_sample": null,
+      "payload_meta": {
+        "t": "kanet_oracle_vote_v1",
+        "offer_id": "ext-pred-1779933502766-nkl2u",
+        "voter_relay_id": "4fecfa8d-c457-4df4-bbfc-b64ba7e42dd8",
+        "voter_pubkey": "7212edc7dc7de937adb961d76299c2cadd32ece322361aeafaf830d0e7fe6579",
+        "outcome": "NO",
+        "evidence_url": "kanet_native_spec:ext-pred-1779933502766-nkl2u",
+        "evidence_hash": "45caab4fbfe19f97c6cd7e96f68ec8ec7e4de45c9474a189c3b3759c741aaec4",
+        "vote_timestamp": "2026-05-28T02:01:57.166Z",
+        "revote_round": 0,
+        "epoch": 1,
+        "signature": "cfafb9f862ffd600bda10c9ab4c410de65744b7708722906c2725e5b494addd756ef15f164f922bf54962f68f89a768d1495e921fce1e1dc20e7c996abdd311d"
+      }
+    },
+    {
+      "event_type": "oracle_vote",
+      "event_synthetic_id": "oracle_vote:edea41e5:ext-pred:1779933717614",
+      "real_chain_txid": null,
+      "observed_at": "2026-05-28 02:01:57",
+      "from_address": "kaspatest:qp4fh3fz9g58jccrxjrc6ukfylp9ngg3ufttemk2wc7cfj3dwd95c55pnn8du",
+      "to_address": "kaspatest:qrl33afery94spm6dwa4cl2xnfgxus6dlh8hj0ld6d6cszjxs3dsk76jlh2cc",
+      "block_hash": null,
+      "block_time": null,
+      "amount_sompi": null,
+      "outputs_length": null,
+      "outputs_sample": null,
+      "payload_meta": {
+        "t": "kanet_oracle_vote_v1",
+        "offer_id": "ext-pred-1779933502766-nkl2u",
+        "voter_relay_id": "edea41e5-d5f8-4684-a1da-fd48779dc660",
+        "voter_pubkey": "6a9bc5222a2879630334878d72c927c259a111e256bceeca763d84ca2d734b4c",
+        "outcome": "NO",
+        "evidence_url": "kanet_native_spec:ext-pred-1779933502766-nkl2u",
+        "evidence_hash": "b8101f999a78584418e66ca90e5e6f40449b4dd5ceb7c443826255cdf0ee4a91",
+        "vote_timestamp": "2026-05-28T02:01:57.606Z",
+        "revote_round": 0,
+        "epoch": 1,
+        "signature": "84851d261fcd9eccb2be3887e3997f2788866dd988b4ea8131b73fb28ae3136a00b64cf5a521a90bfc5b14e184f5f0e87049aac03ec1317da1606a7eb2058dfb"
+      }
+    },
+    {
+      "event_type": "oracle_tx_sig",
+      "event_synthetic_id": "oracle_tx_sig:4fecfa8d:ext-pred:r0:i0:1779933111231",
+      "real_chain_txid": null,
+      "observed_at": "2026-05-28 01:51:51",
+      "from_address": "kaspatest:qpep9mw8m377jdadh9sawc5ect9d6vhvuv3rvxh2lturp588lejhjg7gq5f4t",
+      "to_address": "kaspatest:qrl33afery94spm6dwa4cl2xnfgxus6dlh8hj0ld6d6cszjxs3dsk76jlh2cc",
+      "block_hash": null,
+      "block_time": null,
+      "amount_sompi": null,
+      "outputs_length": null,
+      "outputs_sample": null,
+      "payload_meta": {
+        "t": "kanet_oracle_tx_sign_resp_v1",
+        "offer_id": "ext-pred-1779932215199-gxn45",
+        "voter_relay_id": "4fecfa8d-c457-4df4-bbfc-b64ba7e42dd8",
+        "revote_round": 0,
+        "winner": 0,
+        "input_index": 0,
+        "signature": "41c7dec10d0766874e7f89d6d6b7ff068d7b542dfd05246827988294486271ebc86822795ba395ee325c0e06281968a8724b764069d060dda5f3bc125e8f08e51601"
+      }
+    },
+    {
+      "event_type": "oracle_tx_sig",
+      "event_synthetic_id": "oracle_tx_sig:4fecfa8d:ext-pred:r0:i1:1779933111239",
+      "real_chain_txid": null,
+      "observed_at": "2026-05-28 01:51:51",
+      "from_address": "kaspatest:qpep9mw8m377jdadh9sawc5ect9d6vhvuv3rvxh2lturp588lejhjg7gq5f4t",
+      "to_address": "kaspatest:qrl33afery94spm6dwa4cl2xnfgxus6dlh8hj0ld6d6cszjxs3dsk76jlh2cc",
+      "block_hash": null,
+      "block_time": null,
+      "amount_sompi": null,
+      "outputs_length": null,
+      "outputs_sample": null,
+      "payload_meta": {
+        "t": "kanet_oracle_tx_sign_resp_v1",
+        "offer_id": "ext-pred-1779932215199-gxn45",
+        "voter_relay_id": "4fecfa8d-c457-4df4-bbfc-b64ba7e42dd8",
+        "revote_round": 0,
+        "winner": 0,
+        "input_index": 1,
+        "signature": "4109968682641e88e3be45ac5a20568475711cf4fd09de6bad8e17712a21e18ba14aec599d7258bb20eb8ebc2d0650bf2dd0e85e7dd230b1692f070340dffa4ec901"
+      }
+    },
+    {
+      "event_type": "oracle_tx_sig",
+      "event_synthetic_id": "oracle_tx_sig:edea41e5:ext-pred:r0:i0:1779933111246",
+      "real_chain_txid": null,
+      "observed_at": "2026-05-28 01:51:51",
+      "from_address": "kaspatest:qp4fh3fz9g58jccrxjrc6ukfylp9ngg3ufttemk2wc7cfj3dwd95c55pnn8du",
+      "to_address": "kaspatest:qrl33afery94spm6dwa4cl2xnfgxus6dlh8hj0ld6d6cszjxs3dsk76jlh2cc",
+      "block_hash": null,
+      "block_time": null,
+      "amount_sompi": null,
+      "outputs_length": null,
+      "outputs_sample": null,
+      "payload_meta": {
+        "t": "kanet_oracle_tx_sign_resp_v1",
+        "offer_id": "ext-pred-1779932215199-gxn45",
+        "voter_relay_id": "edea41e5-d5f8-4684-a1da-fd48779dc660",
+        "revote_round": 0,
+        "winner": 0,
+        "input_index": 0,
+        "signature": "410b2e7b3d9348ac3d08204e0c8769203bc1be33ae4664edc15e445dcaf8e0b61c60d75ca2a5af2f599ac0bf707099a54309a83de2c9330e51a0ce94040c40966101"
+      }
+    },
+    {
+      "event_type": "oracle_tx_sig",
+      "event_synthetic_id": "oracle_tx_sig:edea41e5:ext-pred:r0:i1:1779933111254",
+      "real_chain_txid": null,
+      "observed_at": "2026-05-28 01:51:51",
+      "from_address": "kaspatest:qp4fh3fz9g58jccrxjrc6ukfylp9ngg3ufttemk2wc7cfj3dwd95c55pnn8du",
+      "to_address": "kaspatest:qrl33afery94spm6dwa4cl2xnfgxus6dlh8hj0ld6d6cszjxs3dsk76jlh2cc",
+      "block_hash": null,
+      "block_time": null,
+      "amount_sompi": null,
+      "outputs_length": null,
+      "outputs_sample": null,
+      "payload_meta": {
+        "t": "kanet_oracle_tx_sign_resp_v1",
+        "offer_id": "ext-pred-1779932215199-gxn45",
+        "voter_relay_id": "edea41e5-d5f8-4684-a1da-fd48779dc660",
+        "revote_round": 0,
+        "winner": 0,
+        "input_index": 1,
+        "signature": "41216f9192ba46748c2d992d987b505ede9e8e9fb911df2aa163fa8281cda958090759a72d31fcdb7fc3a92e0fa806af8ddc88e780c8d2f229594c06784f93b8ba01"
+      }
+    },
+    {
+      "event_type": "oracle_tx_sig",
+      "event_synthetic_id": "oracle_tx_sig:287cbe51:ext-pred:r0:i0:1779933111261",
+      "real_chain_txid": null,
+      "observed_at": "2026-05-28 01:51:51",
+      "from_address": "kaspatest:qr5w3kp8sfuqx00mvs2s8n0szqkr9av4npfzupkn33jday24sw28q43he8rwu",
+      "to_address": "kaspatest:qrl33afery94spm6dwa4cl2xnfgxus6dlh8hj0ld6d6cszjxs3dsk76jlh2cc",
+      "block_hash": null,
+      "block_time": null,
+      "amount_sompi": null,
+      "outputs_length": null,
+      "outputs_sample": null,
+      "payload_meta": {
+        "t": "kanet_oracle_tx_sign_resp_v1",
+        "offer_id": "ext-pred-1779932215199-gxn45",
+        "voter_relay_id": "287cbe51-6436-48e7-ac63-df8a2199adf4",
+        "revote_round": 0,
+        "winner": 0,
+        "input_index": 0,
+        "signature": "41ca7c0e9039a3b1cbbf5f8a6d5f53f958360a1e1febdc3e98592253788c4665ff3cee75932af55fc98edadcc67dd19e64f9b81f64c40894f5e21e210d7560fd7f01"
+      }
+    },
+    {
+      "event_type": "oracle_tx_sig",
+      "event_synthetic_id": "oracle_tx_sig:287cbe51:ext-pred:r0:i1:1779933111269",
+      "real_chain_txid": null,
+      "observed_at": "2026-05-28 01:51:51",
+      "from_address": "kaspatest:qr5w3kp8sfuqx00mvs2s8n0szqkr9av4npfzupkn33jday24sw28q43he8rwu",
+      "to_address": "kaspatest:qrl33afery94spm6dwa4cl2xnfgxus6dlh8hj0ld6d6cszjxs3dsk76jlh2cc",
+      "block_hash": null,
+      "block_time": null,
+      "amount_sompi": null,
+      "outputs_length": null,
+      "outputs_sample": null,
+      "payload_meta": {
+        "t": "kanet_oracle_tx_sign_resp_v1",
+        "offer_id": "ext-pred-1779932215199-gxn45",
+        "voter_relay_id": "287cbe51-6436-48e7-ac63-df8a2199adf4",
+        "revote_round": 0,
+        "winner": 0,
+        "input_index": 1,
+        "signature": "4180d43166bc7103f5a6171e8adfe09a1ab521dcaa9d07ac8769413863580bc93ab5a0b7dc6d64e511aa4ed670907dce0b2848e365b58a8ee651d6e2b534b01a7001"
+      }
+    },
+    {
+      "event_type": "oracle_tx_sig",
+      "event_synthetic_id": "oracle_tx_sig:4355f89c:ext-pred:r0:i0:1779933111275",
+      "real_chain_txid": null,
+      "observed_at": "2026-05-28 01:51:51",
+      "from_address": "kaspatest:qp9r2knhy3r2mkdf37frgsze7d583vxcg8na2z92y77yll3d8ftmzxjxwcd3j",
+      "to_address": "kaspatest:qrl33afery94spm6dwa4cl2xnfgxus6dlh8hj0ld6d6cszjxs3dsk76jlh2cc",
+      "block_hash": null,
+      "block_time": null,
+      "amount_sompi": null,
+      "outputs_length": null,
+      "outputs_sample": null,
+      "payload_meta": {
+        "t": "kanet_oracle_tx_sign_resp_v1",
+        "offer_id": "ext-pred-1779932215199-gxn45",
+        "voter_relay_id": "4355f89c-66cb-498f-aa9c-242eb91c981c",
+        "revote_round": 0,
+        "winner": 0,
+        "input_index": 0,
+        "signature": "41295810dbaf80ec43c3debb277131475afb0678b2da17c38a0320fa06d49e502be3dc18c71b63287bfed5d314f86cc7e718893db906fbd4657f80ae55aa1b951a01"
+      }
+    },
+    {
+      "event_type": "oracle_tx_sig",
+      "event_synthetic_id": "oracle_tx_sig:4355f89c:ext-pred:r0:i1:1779933111284",
+      "real_chain_txid": null,
+      "observed_at": "2026-05-28 01:51:51",
+      "from_address": "kaspatest:qp9r2knhy3r2mkdf37frgsze7d583vxcg8na2z92y77yll3d8ftmzxjxwcd3j",
+      "to_address": "kaspatest:qrl33afery94spm6dwa4cl2xnfgxus6dlh8hj0ld6d6cszjxs3dsk76jlh2cc",
+      "block_hash": null,
+      "block_time": null,
+      "amount_sompi": null,
+      "outputs_length": null,
+      "outputs_sample": null,
+      "payload_meta": {
+        "t": "kanet_oracle_tx_sign_resp_v1",
+        "offer_id": "ext-pred-1779932215199-gxn45",
+        "voter_relay_id": "4355f89c-66cb-498f-aa9c-242eb91c981c",
+        "revote_round": 0,
+        "winner": 0,
+        "input_index": 1,
+        "signature": "4186a5f48df3155c657e2bbfdf88a1fcaaab197fd06975998a14a6b48df1544297ad436099c295fffd43f42b35058b8227cc56571cb08d7bb197e83b66de047c7801"
+      }
+    },
+    {
+      "event_type": "oracle_tx_sig",
+      "event_synthetic_id": "oracle_tx_sig:f77b381d:ext-pred:r0:i0:1779933111290",
+      "real_chain_txid": null,
+      "observed_at": "2026-05-28 01:51:51",
+      "from_address": "kaspatest:qzxuwefy3skknmukz42kps7hf0gw8gt5l4vk8t3uxfpx5tgu90lu2wf4puz3s",
+      "to_address": "kaspatest:qrl33afery94spm6dwa4cl2xnfgxus6dlh8hj0ld6d6cszjxs3dsk76jlh2cc",
+      "block_hash": null,
+      "block_time": null,
+      "amount_sompi": null,
+      "outputs_length": null,
+      "outputs_sample": null,
+      "payload_meta": {
+        "t": "kanet_oracle_tx_sign_resp_v1",
+        "offer_id": "ext-pred-1779932215199-gxn45",
+        "voter_relay_id": "f77b381d-6a79-4e35-bc4b-1b79bdc78f3b",
+        "revote_round": 0,
+        "winner": 0,
+        "input_index": 0,
+        "signature": "41ac7347f8d4b78a07b10761c92c1c8bfa4993576c5efc69b7aab4fa3f59bda7ca04d9ee35ee8c6f85e0a58035e552960dc5fd7b908d58cc3f4e39cef12573988801"
+      }
+    },
+    {
+      "event_type": "oracle_tx_sig",
+      "event_synthetic_id": "oracle_tx_sig:f77b381d:ext-pred:r0:i1:1779933111298",
+      "real_chain_txid": null,
+      "observed_at": "2026-05-28 01:51:51",
+      "from_address": "kaspatest:qzxuwefy3skknmukz42kps7hf0gw8gt5l4vk8t3uxfpx5tgu90lu2wf4puz3s",
+      "to_address": "kaspatest:qrl33afery94spm6dwa4cl2xnfgxus6dlh8hj0ld6d6cszjxs3dsk76jlh2cc",
+      "block_hash": null,
+      "block_time": null,
+      "amount_sompi": null,
+      "outputs_length": null,
+      "outputs_sample": null,
+      "payload_meta": {
+        "t": "kanet_oracle_tx_sign_resp_v1",
+        "offer_id": "ext-pred-1779932215199-gxn45",
+        "voter_relay_id": "f77b381d-6a79-4e35-bc4b-1b79bdc78f3b",
+        "revote_round": 0,
+        "winner": 0,
+        "input_index": 1,
+        "signature": "41f124533efe0a13046257262adf4043319f4fdf93ec7e507bdc74a830b1f5b9c8e8fce039b9b2dc2d9627107ce2ffbb0de7bafd1a9eff168d9640b51ff11a7bce01"
+      }
+    },
+    {
+      "event_type": "oracle_vote",
+      "event_synthetic_id": "oracle_vote:f77b381d:ext-pred:1779932513215",
+      "real_chain_txid": null,
+      "observed_at": "2026-05-28 01:41:53",
+      "from_address": "kaspatest:qzxuwefy3skknmukz42kps7hf0gw8gt5l4vk8t3uxfpx5tgu90lu2wf4puz3s",
+      "to_address": "kaspatest:qrl33afery94spm6dwa4cl2xnfgxus6dlh8hj0ld6d6cszjxs3dsk76jlh2cc",
+      "block_hash": null,
+      "block_time": null,
+      "amount_sompi": null,
+      "outputs_length": null,
+      "outputs_sample": null,
+      "payload_meta": {
+        "t": "kanet_oracle_vote_v1",
+        "offer_id": "ext-pred-1779932215199-gxn45",
+        "voter_relay_id": "f77b381d-6a79-4e35-bc4b-1b79bdc78f3b",
+        "voter_pubkey": "8dc765248c2d69ef96155560c3d74bd0e3a174fd5963ae3c32426a2d1c2bffc5",
+        "outcome": "YES",
+        "evidence_url": "kanet_native_spec:ext-pred-1779932215199-gxn45",
+        "evidence_hash": "a7a934fb17bc5cab1f101f5da5e043b2fa2966c85d2a8ca281c66b511656581c",
+        "vote_timestamp": "2026-05-28T01:41:53.207Z",
+        "revote_round": 0,
+        "epoch": 1,
+        "signature": "8ebdaecc8b0656ed4fa3652b98d45c3ab0fe29ecb3ef8927f8dad973891c992176471a19c08dcee8708c206d436d9ff908ef73224815135c143d4d51a8d042ef"
+      }
+    },
+    {
+      "event_type": "oracle_vote",
+      "event_synthetic_id": "oracle_vote:edea41e5:ext-pred:1779932512171",
+      "real_chain_txid": null,
+      "observed_at": "2026-05-28 01:41:52",
+      "from_address": "kaspatest:qp4fh3fz9g58jccrxjrc6ukfylp9ngg3ufttemk2wc7cfj3dwd95c55pnn8du",
+      "to_address": "kaspatest:qrl33afery94spm6dwa4cl2xnfgxus6dlh8hj0ld6d6cszjxs3dsk76jlh2cc",
+      "block_hash": null,
+      "block_time": null,
+      "amount_sompi": null,
+      "outputs_length": null,
+      "outputs_sample": null,
+      "payload_meta": {
+        "t": "kanet_oracle_vote_v1",
+        "offer_id": "ext-pred-1779932215199-gxn45",
+        "voter_relay_id": "edea41e5-d5f8-4684-a1da-fd48779dc660",
+        "voter_pubkey": "6a9bc5222a2879630334878d72c927c259a111e256bceeca763d84ca2d734b4c",
+        "outcome": "YES",
+        "evidence_url": "kanet_native_spec:ext-pred-1779932215199-gxn45",
+        "evidence_hash": "6056ddab2b03543377bbd7c3caf4fac80b2ed00a1fde82edb4c295412d0b6621",
+        "vote_timestamp": "2026-05-28T01:41:52.162Z",
+        "revote_round": 0,
+        "epoch": 1,
+        "signature": "887145994e11e6c2ed21025c2a29fc3e7da9791b7dc9370f062a5f8f7eff79f30cc807703fc1c267cb7946e8a929814e12fe54e5e828145db43e78003a3d1ca4"
+      }
+    },
+    {
+      "event_type": "oracle_vote",
+      "event_synthetic_id": "oracle_vote:287cbe51:ext-pred:1779932512505",
+      "real_chain_txid": null,
+      "observed_at": "2026-05-28 01:41:52",
+      "from_address": "kaspatest:qr5w3kp8sfuqx00mvs2s8n0szqkr9av4npfzupkn33jday24sw28q43he8rwu",
+      "to_address": "kaspatest:qrl33afery94spm6dwa4cl2xnfgxus6dlh8hj0ld6d6cszjxs3dsk76jlh2cc",
+      "block_hash": null,
+      "block_time": null,
+      "amount_sompi": null,
+      "outputs_length": null,
+      "outputs_sample": null,
+      "payload_meta": {
+        "t": "kanet_oracle_vote_v1",
+        "offer_id": "ext-pred-1779932215199-gxn45",
+        "voter_relay_id": "287cbe51-6436-48e7-ac63-df8a2199adf4",
+        "voter_pubkey": "e8e8d8278278033dfb641503cdf0102c32f59598522e06d38c64de9155839470",
+        "outcome": "YES",
+        "evidence_url": "kanet_native_spec:ext-pred-1779932215199-gxn45",
+        "evidence_hash": "86b06fc19f3884e6e9955f40ce7a845303579ce731de99ba7eed0c7415623400",
+        "vote_timestamp": "2026-05-28T01:41:52.496Z",
+        "revote_round": 0,
+        "epoch": 1,
+        "signature": "e16acb5c6612090abc5b00863481fa8e10e9dce4dc2213a7816671e27a0d9a0b97ed247fd32f4dd6d7b2b45974a31406c3c8f67cddb8cda98f3074237c8bea6b"
+      }
+    },
+    {
+      "event_type": "oracle_vote",
+      "event_synthetic_id": "oracle_vote:4355f89c:ext-pred:1779932512836",
+      "real_chain_txid": null,
+      "observed_at": "2026-05-28 01:41:52",
+      "from_address": "kaspatest:qp9r2knhy3r2mkdf37frgsze7d583vxcg8na2z92y77yll3d8ftmzxjxwcd3j",
+      "to_address": "kaspatest:qrl33afery94spm6dwa4cl2xnfgxus6dlh8hj0ld6d6cszjxs3dsk76jlh2cc",
+      "block_hash": null,
+      "block_time": null,
+      "amount_sompi": null,
+      "outputs_length": null,
+      "outputs_sample": null,
+      "payload_meta": {
+        "t": "kanet_oracle_vote_v1",
+        "offer_id": "ext-pred-1779932215199-gxn45",
+        "voter_relay_id": "4355f89c-66cb-498f-aa9c-242eb91c981c",
+        "voter_pubkey": "4a355a772446add9a98f92344059f36878b0d841e7d508aa27bc4ffe2d3a57b1",
+        "outcome": "YES",
+        "evidence_url": "kanet_native_spec:ext-pred-1779932215199-gxn45",
+        "evidence_hash": "86b06fc19f3884e6e9955f40ce7a845303579ce731de99ba7eed0c7415623400",
+        "vote_timestamp": "2026-05-28T01:41:52.827Z",
+        "revote_round": 0,
+        "epoch": 1,
+        "signature": "b67be37608a19f3f724b1b4e1b7bd772d87193df1c204003347b64392f05235163d6335f59e947f8714827b8587f1e411c1619972aeeebb8b4835e65b9013704"
+      }
+    },
+    {
+      "event_type": "oracle_vote",
+      "event_synthetic_id": "oracle_vote:4fecfa8d:ext-pred:1779932511848",
+      "real_chain_txid": null,
+      "observed_at": "2026-05-28 01:41:51",
+      "from_address": "kaspatest:qpep9mw8m377jdadh9sawc5ect9d6vhvuv3rvxh2lturp588lejhjg7gq5f4t",
+      "to_address": "kaspatest:qrl33afery94spm6dwa4cl2xnfgxus6dlh8hj0ld6d6cszjxs3dsk76jlh2cc",
+      "block_hash": null,
+      "block_time": null,
+      "amount_sompi": null,
+      "outputs_length": null,
+      "outputs_sample": null,
+      "payload_meta": {
+        "t": "kanet_oracle_vote_v1",
+        "offer_id": "ext-pred-1779932215199-gxn45",
+        "voter_relay_id": "4fecfa8d-c457-4df4-bbfc-b64ba7e42dd8",
+        "voter_pubkey": "7212edc7dc7de937adb961d76299c2cadd32ece322361aeafaf830d0e7fe6579",
+        "outcome": "YES",
+        "evidence_url": "kanet_native_spec:ext-pred-1779932215199-gxn45",
+        "evidence_hash": "a0bacb38a61c334cbb85dab57d3b145b2c9aa62e76ed21ef4b4a127d56fd7de9",
+        "vote_timestamp": "2026-05-28T01:41:51.839Z",
+        "revote_round": 0,
+        "epoch": 1,
+        "signature": "deab32fd29e94b5300e9651f6905838900867be0964e922aaa93ab2db88fbd8932bb7d5e6f375cd391678c78e2d6677434d251937388aaec53febf838e973f17"
+      }
+    },
+    {
+      "event_type": "oracle_tx_sig",
+      "event_synthetic_id": "oracle_tx_sig:4fecfa8d:ext-pred:r0:i0:1779928221231",
+      "real_chain_txid": null,
+      "observed_at": "2026-05-28 00:30:21",
+      "from_address": "kaspatest:qpep9mw8m377jdadh9sawc5ect9d6vhvuv3rvxh2lturp588lejhjg7gq5f4t",
+      "to_address": "kaspatest:qrl33afery94spm6dwa4cl2xnfgxus6dlh8hj0ld6d6cszjxs3dsk76jlh2cc",
+      "block_hash": null,
+      "block_time": null,
+      "amount_sompi": null,
+      "outputs_length": null,
+      "outputs_sample": null,
+      "payload_meta": {
+        "t": "kanet_oracle_tx_sign_resp_v1",
+        "offer_id": "ext-pred-1779926010250-f3qny",
+        "voter_relay_id": "4fecfa8d-c457-4df4-bbfc-b64ba7e42dd8",
+        "revote_round": 0,
+        "winner": 0,
+        "input_index": 0,
+        "signature": "41cc8374702aff5f2d2c30c9325361ee294ab5691c2186ba8f3f685f7d3e6d993ce350fbbe85eab7f1f082cb8c412789bc131bea249ba17720a8ead808dd9c1f5d01"
+      }
+    },
+    {
+      "event_type": "oracle_tx_sig",
+      "event_synthetic_id": "oracle_tx_sig:4fecfa8d:ext-pred:r0:i1:1779928221242",
+      "real_chain_txid": null,
+      "observed_at": "2026-05-28 00:30:21",
+      "from_address": "kaspatest:qpep9mw8m377jdadh9sawc5ect9d6vhvuv3rvxh2lturp588lejhjg7gq5f4t",
+      "to_address": "kaspatest:qrl33afery94spm6dwa4cl2xnfgxus6dlh8hj0ld6d6cszjxs3dsk76jlh2cc",
+      "block_hash": null,
+      "block_time": null,
+      "amount_sompi": null,
+      "outputs_length": null,
+      "outputs_sample": null,
+      "payload_meta": {
+        "t": "kanet_oracle_tx_sign_resp_v1",
+        "offer_id": "ext-pred-1779926010250-f3qny",
+        "voter_relay_id": "4fecfa8d-c457-4df4-bbfc-b64ba7e42dd8",
+        "revote_round": 0,
+        "winner": 0,
+        "input_index": 1,
+        "signature": "41528f937bb41124acc6c5a022c7a132bb0ecf2ca87f39b17b4a8411c49525957a6995fb3f86a6f61b599ab8c1e50969dd4db67017151faff860408258a44e214301"
+      }
+    },
+    {
+      "event_type": "oracle_tx_sig",
+      "event_synthetic_id": "oracle_tx_sig:edea41e5:ext-pred:r0:i0:1779928221249",
+      "real_chain_txid": null,
+      "observed_at": "2026-05-28 00:30:21",
+      "from_address": "kaspatest:qp4fh3fz9g58jccrxjrc6ukfylp9ngg3ufttemk2wc7cfj3dwd95c55pnn8du",
+      "to_address": "kaspatest:qrl33afery94spm6dwa4cl2xnfgxus6dlh8hj0ld6d6cszjxs3dsk76jlh2cc",
+      "block_hash": null,
+      "block_time": null,
+      "amount_sompi": null,
+      "outputs_length": null,
+      "outputs_sample": null,
+      "payload_meta": {
+        "t": "kanet_oracle_tx_sign_resp_v1",
+        "offer_id": "ext-pred-1779926010250-f3qny",
+        "voter_relay_id": "edea41e5-d5f8-4684-a1da-fd48779dc660",
+        "revote_round": 0,
+        "winner": 0,
+        "input_index": 0,
+        "signature": "4128a286053af617c85e7bd82cc67d17d8c2f60b5ed4929ecbdd5d6e2bd23e160c3289c3dcefb26761b272a46b31df831a1f9eba30c0f7fc2806cf97a45a4aecd901"
+      }
+    },
+    {
+      "event_type": "oracle_tx_sig",
+      "event_synthetic_id": "oracle_tx_sig:edea41e5:ext-pred:r0:i1:1779928221260",
+      "real_chain_txid": null,
+      "observed_at": "2026-05-28 00:30:21",
+      "from_address": "kaspatest:qp4fh3fz9g58jccrxjrc6ukfylp9ngg3ufttemk2wc7cfj3dwd95c55pnn8du",
+      "to_address": "kaspatest:qrl33afery94spm6dwa4cl2xnfgxus6dlh8hj0ld6d6cszjxs3dsk76jlh2cc",
+      "block_hash": null,
+      "block_time": null,
+      "amount_sompi": null,
+      "outputs_length": null,
+      "outputs_sample": null,
+      "payload_meta": {
+        "t": "kanet_oracle_tx_sign_resp_v1",
+        "offer_id": "ext-pred-1779926010250-f3qny",
+        "voter_relay_id": "edea41e5-d5f8-4684-a1da-fd48779dc660",
+        "revote_round": 0,
+        "winner": 0,
+        "input_index": 1,
+        "signature": "41903735daa4fb1dee13d78624c47062c3c891ca8a951f723aaf2783e077fb6eac7f730f830f24572d9a2f82fa58566ffb3d99cda528c859646e871eb33950da5701"
+      }
+    },
+    {
+      "event_type": "oracle_tx_sig",
+      "event_synthetic_id": "oracle_tx_sig:287cbe51:ext-pred:r0:i0:1779928221268",
+      "real_chain_txid": null,
+      "observed_at": "2026-05-28 00:30:21",
+      "from_address": "kaspatest:qr5w3kp8sfuqx00mvs2s8n0szqkr9av4npfzupkn33jday24sw28q43he8rwu",
+      "to_address": "kaspatest:qrl33afery94spm6dwa4cl2xnfgxus6dlh8hj0ld6d6cszjxs3dsk76jlh2cc",
+      "block_hash": null,
+      "block_time": null,
+      "amount_sompi": null,
+      "outputs_length": null,
+      "outputs_sample": null,
+      "payload_meta": {
+        "t": "kanet_oracle_tx_sign_resp_v1",
+        "offer_id": "ext-pred-1779926010250-f3qny",
+        "voter_relay_id": "287cbe51-6436-48e7-ac63-df8a2199adf4",
+        "revote_round": 0,
+        "winner": 0,
+        "input_index": 0,
+        "signature": "413719e7ad5ca31ab9d84c77b01b0b5a7521c75fb95dd1bac5d5280e633820cae30bcf2c48f576d56577079ae0f307ac61e7fda068b40bce03a414973d0cbfcca101"
+      }
+    },
+    {
+      "event_type": "oracle_tx_sig",
+      "event_synthetic_id": "oracle_tx_sig:287cbe51:ext-pred:r0:i1:1779928221276",
+      "real_chain_txid": null,
+      "observed_at": "2026-05-28 00:30:21",
+      "from_address": "kaspatest:qr5w3kp8sfuqx00mvs2s8n0szqkr9av4npfzupkn33jday24sw28q43he8rwu",
+      "to_address": "kaspatest:qrl33afery94spm6dwa4cl2xnfgxus6dlh8hj0ld6d6cszjxs3dsk76jlh2cc",
+      "block_hash": null,
+      "block_time": null,
+      "amount_sompi": null,
+      "outputs_length": null,
+      "outputs_sample": null,
+      "payload_meta": {
+        "t": "kanet_oracle_tx_sign_resp_v1",
+        "offer_id": "ext-pred-1779926010250-f3qny",
+        "voter_relay_id": "287cbe51-6436-48e7-ac63-df8a2199adf4",
+        "revote_round": 0,
+        "winner": 0,
+        "input_index": 1,
+        "signature": "418be43c88abb98503e44b35c94756e91ce8fe7a8eabb6cff943ac28d60d04f513ec098e3fe5d51f42acddebbd82ca1622c75bd5655ac47e214a108999a700bb0b01"
+      }
+    },
+    {
+      "event_type": "oracle_tx_sig",
+      "event_synthetic_id": "oracle_tx_sig:4355f89c:ext-pred:r0:i0:1779928221284",
+      "real_chain_txid": null,
+      "observed_at": "2026-05-28 00:30:21",
+      "from_address": "kaspatest:qp9r2knhy3r2mkdf37frgsze7d583vxcg8na2z92y77yll3d8ftmzxjxwcd3j",
+      "to_address": "kaspatest:qrl33afery94spm6dwa4cl2xnfgxus6dlh8hj0ld6d6cszjxs3dsk76jlh2cc",
+      "block_hash": null,
+      "block_time": null,
+      "amount_sompi": null,
+      "outputs_length": null,
+      "outputs_sample": null,
+      "payload_meta": {
+        "t": "kanet_oracle_tx_sign_resp_v1",
+        "offer_id": "ext-pred-1779926010250-f3qny",
+        "voter_relay_id": "4355f89c-66cb-498f-aa9c-242eb91c981c",
+        "revote_round": 0,
+        "winner": 0,
+        "input_index": 0,
+        "signature": "4103e8f4c59c3e0a2d32db5786d1d0b629b19446be546f404193a5b8f40aacef4b139e94f392309b3466562a61b70a7e7ecd4887f1486bdb52addb51956e6242ec01"
+      }
+    },
+    {
+      "event_type": "oracle_tx_sig",
+      "event_synthetic_id": "oracle_tx_sig:4355f89c:ext-pred:r0:i1:1779928221293",
+      "real_chain_txid": null,
+      "observed_at": "2026-05-28 00:30:21",
+      "from_address": "kaspatest:qp9r2knhy3r2mkdf37frgsze7d583vxcg8na2z92y77yll3d8ftmzxjxwcd3j",
+      "to_address": "kaspatest:qrl33afery94spm6dwa4cl2xnfgxus6dlh8hj0ld6d6cszjxs3dsk76jlh2cc",
+      "block_hash": null,
+      "block_time": null,
+      "amount_sompi": null,
+      "outputs_length": null,
+      "outputs_sample": null,
+      "payload_meta": {
+        "t": "kanet_oracle_tx_sign_resp_v1",
+        "offer_id": "ext-pred-1779926010250-f3qny",
+        "voter_relay_id": "4355f89c-66cb-498f-aa9c-242eb91c981c",
+        "revote_round": 0,
+        "winner": 0,
+        "input_index": 1,
+        "signature": "41df57212f7bb231e6d3968261d714e3fcbc8e785589c5f7964eff9beeb7f01547a4f014affb8170ac3d3dc29affdd403c9724250160801454f52885794229a1d601"
+      }
+    },
+    {
+      "event_type": "oracle_tx_sig",
+      "event_synthetic_id": "oracle_tx_sig:f77b381d:ext-pred:r0:i0:1779928221300",
+      "real_chain_txid": null,
+      "observed_at": "2026-05-28 00:30:21",
+      "from_address": "kaspatest:qzxuwefy3skknmukz42kps7hf0gw8gt5l4vk8t3uxfpx5tgu90lu2wf4puz3s",
+      "to_address": "kaspatest:qrl33afery94spm6dwa4cl2xnfgxus6dlh8hj0ld6d6cszjxs3dsk76jlh2cc",
+      "block_hash": null,
+      "block_time": null,
+      "amount_sompi": null,
+      "outputs_length": null,
+      "outputs_sample": null,
+      "payload_meta": {
+        "t": "kanet_oracle_tx_sign_resp_v1",
+        "offer_id": "ext-pred-1779926010250-f3qny",
+        "voter_relay_id": "f77b381d-6a79-4e35-bc4b-1b79bdc78f3b",
+        "revote_round": 0,
+        "winner": 0,
+        "input_index": 0,
+        "signature": "41eeaaccfa1365cbb058deae5960107b4a27d39d1e5558fa2a5038a84753903af500e7af7e8c0da29b3bf54441377b6c2da379d7355cdb69b496980bedaf09471c01"
+      }
+    },
+    {
+      "event_type": "oracle_tx_sig",
+      "event_synthetic_id": "oracle_tx_sig:f77b381d:ext-pred:r0:i1:1779928221310",
+      "real_chain_txid": null,
+      "observed_at": "2026-05-28 00:30:21",
+      "from_address": "kaspatest:qzxuwefy3skknmukz42kps7hf0gw8gt5l4vk8t3uxfpx5tgu90lu2wf4puz3s",
+      "to_address": "kaspatest:qrl33afery94spm6dwa4cl2xnfgxus6dlh8hj0ld6d6cszjxs3dsk76jlh2cc",
+      "block_hash": null,
+      "block_time": null,
+      "amount_sompi": null,
+      "outputs_length": null,
+      "outputs_sample": null,
+      "payload_meta": {
+        "t": "kanet_oracle_tx_sign_resp_v1",
+        "offer_id": "ext-pred-1779926010250-f3qny",
+        "voter_relay_id": "f77b381d-6a79-4e35-bc4b-1b79bdc78f3b",
+        "revote_round": 0,
+        "winner": 0,
+        "input_index": 1,
+        "signature": "41c1704e2f1eb98132874c95b0e4485ce498d20c0dcaae1b952bacde00b2a28b88b1db8637cbd4ff1839b536e03fdc6c47b6b5c78a171aa63b8a54cc4617abb34a01"
+      }
+    },
+    {
+      "event_type": "oracle_vote",
+      "event_synthetic_id": "oracle_vote:edea41e5:ext-pred:1779927622038",
+      "real_chain_txid": null,
+      "observed_at": "2026-05-28 00:20:22",
+      "from_address": "kaspatest:qp4fh3fz9g58jccrxjrc6ukfylp9ngg3ufttemk2wc7cfj3dwd95c55pnn8du",
+      "to_address": "kaspatest:qrl33afery94spm6dwa4cl2xnfgxus6dlh8hj0ld6d6cszjxs3dsk76jlh2cc",
+      "block_hash": null,
+      "block_time": null,
+      "amount_sompi": null,
+      "outputs_length": null,
+      "outputs_sample": null,
+      "payload_meta": {
+        "t": "kanet_oracle_vote_v1",
+        "offer_id": "ext-pred-1779926010250-f3qny",
+        "voter_relay_id": "edea41e5-d5f8-4684-a1da-fd48779dc660",
+        "voter_pubkey": "6a9bc5222a2879630334878d72c927c259a111e256bceeca763d84ca2d734b4c",
+        "outcome": "YES",
+        "evidence_url": "kanet_native_spec:ext-pred-1779926010250-f3qny",
+        "evidence_hash": "db5fb90766392723be2c4af8a398be5520f639f87674b0ce817a7bd954595091",
+        "vote_timestamp": "2026-05-28T00:20:22.030Z",
+        "revote_round": 0,
+        "epoch": 1,
+        "signature": "7264017e50ef788f7b8af8b922523061179f99e6ecc6a36a64e69acc312f49fd17bc021c6f592d0a727271c6d854bc48bab4b6b4882a1675b679049b50360bde"
+      }
+    },
+    {
+      "event_type": "oracle_vote",
+      "event_synthetic_id": "oracle_vote:287cbe51:ext-pred:1779927622281",
+      "real_chain_txid": null,
+      "observed_at": "2026-05-28 00:20:22",
+      "from_address": "kaspatest:qr5w3kp8sfuqx00mvs2s8n0szqkr9av4npfzupkn33jday24sw28q43he8rwu",
+      "to_address": "kaspatest:qrl33afery94spm6dwa4cl2xnfgxus6dlh8hj0ld6d6cszjxs3dsk76jlh2cc",
+      "block_hash": null,
+      "block_time": null,
+      "amount_sompi": null,
+      "outputs_length": null,
+      "outputs_sample": null,
+      "payload_meta": {
+        "t": "kanet_oracle_vote_v1",
+        "offer_id": "ext-pred-1779926010250-f3qny",
+        "voter_relay_id": "287cbe51-6436-48e7-ac63-df8a2199adf4",
+        "voter_pubkey": "e8e8d8278278033dfb641503cdf0102c32f59598522e06d38c64de9155839470",
+        "outcome": "YES",
+        "evidence_url": "kanet_native_spec:ext-pred-1779926010250-f3qny",
+        "evidence_hash": "69f34f47872aff8190978037315897a5a75d51bb281ebc34e3748c533d62e4fd",
+        "vote_timestamp": "2026-05-28T00:20:22.273Z",
+        "revote_round": 0,
+        "epoch": 1,
+        "signature": "9944d3b9c250e51c46257d173cf3a6dff1c5433e20ef6b52e5338415d60775d41bb675efded7e9117b38c169e27b6a9881be93743a7454f217297d76f1306f29"
+      }
+    },
+    {
+      "event_type": "oracle_vote",
+      "event_synthetic_id": "oracle_vote:4355f89c:ext-pred:1779927622518",
+      "real_chain_txid": null,
+      "observed_at": "2026-05-28 00:20:22",
+      "from_address": "kaspatest:qp9r2knhy3r2mkdf37frgsze7d583vxcg8na2z92y77yll3d8ftmzxjxwcd3j",
+      "to_address": "kaspatest:qrl33afery94spm6dwa4cl2xnfgxus6dlh8hj0ld6d6cszjxs3dsk76jlh2cc",
+      "block_hash": null,
+      "block_time": null,
+      "amount_sompi": null,
+      "outputs_length": null,
+      "outputs_sample": null,
+      "payload_meta": {
+        "t": "kanet_oracle_vote_v1",
+        "offer_id": "ext-pred-1779926010250-f3qny",
+        "voter_relay_id": "4355f89c-66cb-498f-aa9c-242eb91c981c",
+        "voter_pubkey": "4a355a772446add9a98f92344059f36878b0d841e7d508aa27bc4ffe2d3a57b1",
+        "outcome": "YES",
+        "evidence_url": "kanet_native_spec:ext-pred-1779926010250-f3qny",
+        "evidence_hash": "69f34f47872aff8190978037315897a5a75d51bb281ebc34e3748c533d62e4fd",
+        "vote_timestamp": "2026-05-28T00:20:22.510Z",
+        "revote_round": 0,
+        "epoch": 1,
+        "signature": "68d14d4cf78db3204b0ceac2fa70bcb5fd3aa616d4b06998d2395c36646b4abc9aad81fee65c446fa0446070db0f1d5c5d73b5de8b4fa417ffcde120a66d0579"
+      }
+    },
+    {
+      "event_type": "oracle_vote",
+      "event_synthetic_id": "oracle_vote:f77b381d:ext-pred:1779927622761",
+      "real_chain_txid": null,
+      "observed_at": "2026-05-28 00:20:22",
+      "from_address": "kaspatest:qzxuwefy3skknmukz42kps7hf0gw8gt5l4vk8t3uxfpx5tgu90lu2wf4puz3s",
+      "to_address": "kaspatest:qrl33afery94spm6dwa4cl2xnfgxus6dlh8hj0ld6d6cszjxs3dsk76jlh2cc",
+      "block_hash": null,
+      "block_time": null,
+      "amount_sompi": null,
+      "outputs_length": null,
+      "outputs_sample": null,
+      "payload_meta": {
+        "t": "kanet_oracle_vote_v1",
+        "offer_id": "ext-pred-1779926010250-f3qny",
+        "voter_relay_id": "f77b381d-6a79-4e35-bc4b-1b79bdc78f3b",
+        "voter_pubkey": "8dc765248c2d69ef96155560c3d74bd0e3a174fd5963ae3c32426a2d1c2bffc5",
+        "outcome": "YES",
+        "evidence_url": "kanet_native_spec:ext-pred-1779926010250-f3qny",
+        "evidence_hash": "db5fb90766392723be2c4af8a398be5520f639f87674b0ce817a7bd954595091",
+        "vote_timestamp": "2026-05-28T00:20:22.753Z",
+        "revote_round": 0,
+        "epoch": 1,
+        "signature": "bf971aaecbfe45c1cb36b049263bc8e917c590ab2a020307506dd61c27a46bef8c4d98f265a68945b6f8f2a6aa7d4afd8e3267cf1810bd4c2986d5fdc28555c1"
+      }
+    },
+    {
+      "event_type": "oracle_vote",
+      "event_synthetic_id": "oracle_vote:4fecfa8d:ext-pred:1779927621790",
+      "real_chain_txid": null,
+      "observed_at": "2026-05-28 00:20:21",
+      "from_address": "kaspatest:qpep9mw8m377jdadh9sawc5ect9d6vhvuv3rvxh2lturp588lejhjg7gq5f4t",
+      "to_address": "kaspatest:qrl33afery94spm6dwa4cl2xnfgxus6dlh8hj0ld6d6cszjxs3dsk76jlh2cc",
+      "block_hash": null,
+      "block_time": null,
+      "amount_sompi": null,
+      "outputs_length": null,
+      "outputs_sample": null,
+      "payload_meta": {
+        "t": "kanet_oracle_vote_v1",
+        "offer_id": "ext-pred-1779926010250-f3qny",
+        "voter_relay_id": "4fecfa8d-c457-4df4-bbfc-b64ba7e42dd8",
+        "voter_pubkey": "7212edc7dc7de937adb961d76299c2cadd32ece322361aeafaf830d0e7fe6579",
+        "outcome": "YES",
+        "evidence_url": "kanet_native_spec:ext-pred-1779926010250-f3qny",
+        "evidence_hash": "db5fb90766392723be2c4af8a398be5520f639f87674b0ce817a7bd954595091",
+        "vote_timestamp": "2026-05-28T00:20:21.781Z",
+        "revote_round": 0,
+        "epoch": 1,
+        "signature": "9b63010157eb0978276e7452bd4ba3fe976badad9681107f75ecec554a7d057da746711ea260c264b1e109b3cb6f5c12f5cec259c2bd0e946ef329a9ab4124a5"
+      }
+    },
+    {
+      "event_type": "pool_settle_consensual_dispatched",
+      "event_synthetic_id": "consensual_dispatched:ext-pred-177:1779878218719",
+      "real_chain_txid": null,
+      "observed_at": "2026-05-27T10:36:58.719Z",
+      "from_address": "kaspatest:qqs0yz9hvhlf6c09pe5zx89c28rjtenrwxya7jaqaafp82q5mq0mvmdgw7u37",
+      "to_address": "kaspatest:qrnjmrn74z9984k3recaj832zjwu34xugh6srvt9r9fejlguwvtxw886ujnr5",
+      "block_hash": null,
+      "block_time": null,
+      "amount_sompi": null,
+      "outputs_length": null,
+      "outputs_sample": null,
+      "payload_meta": {
+        "offer_id": "ext-pred-1779878155530-ae2qc",
+        "market_id": "ext-pred-1779878155530-ae2qc",
+        "winner": 0,
+        "winner_addr": "kaspatest:qqs0yz9hvhlf6c09pe5zx89c28rjtenrwxya7jaqaafp82q5mq0mvmdgw7u37",
+        "broker_fee_amount": "294107647",
+        "winner_amount": "29116657059",
+        "dispatched_at": "2026-05-27T10:36:58.719Z",
+        "epoch": 1
+      }
+    },
+    {
+      "event_type": "pool_settle_consensual_dispatched",
+      "event_synthetic_id": "consensual_dispatched:ext-pred-177:1779876128537",
+      "real_chain_txid": null,
+      "observed_at": "2026-05-27T10:02:08.537Z",
+      "from_address": "kaspatest:qqs0yz9hvhlf6c09pe5zx89c28rjtenrwxya7jaqaafp82q5mq0mvmdgw7u37",
+      "to_address": "kaspatest:qrnjmrn74z9984k3recaj832zjwu34xugh6srvt9r9fejlguwvtxw886ujnr5",
+      "block_hash": null,
+      "block_time": null,
+      "amount_sompi": null,
+      "outputs_length": null,
+      "outputs_sample": null,
+      "payload_meta": {
+        "offer_id": "ext-pred-1779876087882-kln4b",
+        "market_id": "ext-pred-1779876087882-kln4b",
+        "winner": 0,
+        "winner_addr": "kaspatest:qqs0yz9hvhlf6c09pe5zx89c28rjtenrwxya7jaqaafp82q5mq0mvmdgw7u37",
+        "broker_fee_amount": "294107647",
+        "winner_amount": "29116657059",
+        "dispatched_at": "2026-05-27T10:02:08.537Z",
+        "epoch": 1
+      }
+    },
+    {
+      "event_type": "pool_settle_consensual_dispatched",
+      "event_synthetic_id": "consensual_dispatched:ext-pred-177:1779875647264",
+      "real_chain_txid": null,
+      "observed_at": "2026-05-27T09:54:07.264Z",
+      "from_address": "kaspatest:qqs0yz9hvhlf6c09pe5zx89c28rjtenrwxya7jaqaafp82q5mq0mvmdgw7u37",
+      "to_address": "kaspatest:qrnjmrn74z9984k3recaj832zjwu34xugh6srvt9r9fejlguwvtxw886ujnr5",
+      "block_hash": null,
+      "block_time": null,
+      "amount_sompi": null,
+      "outputs_length": null,
+      "outputs_sample": null,
+      "payload_meta": {
+        "offer_id": "ext-pred-1779874135895-nyro6",
+        "market_id": "ext-pred-1779874135895-nyro6",
+        "winner": 0,
+        "winner_addr": "kaspatest:qqs0yz9hvhlf6c09pe5zx89c28rjtenrwxya7jaqaafp82q5mq0mvmdgw7u37",
+        "broker_fee_amount": "301749950",
+        "winner_amount": "29873245138",
+        "dispatched_at": "2026-05-27T09:54:07.264Z",
+        "epoch": 1
+      }
+    },
+    {
+      "event_type": "pool_settle_consensual_dispatched",
+      "event_synthetic_id": "consensual_dispatched:ext-pred-177:1779875242553",
+      "real_chain_txid": null,
+      "observed_at": "2026-05-27T09:47:22.553Z",
+      "from_address": "kaspatest:qqs0yz9hvhlf6c09pe5zx89c28rjtenrwxya7jaqaafp82q5mq0mvmdgw7u37",
+      "to_address": "kaspatest:qrnjmrn74z9984k3recaj832zjwu34xugh6srvt9r9fejlguwvtxw886ujnr5",
+      "block_hash": null,
+      "block_time": null,
+      "amount_sompi": null,
+      "outputs_length": null,
+      "outputs_sample": null,
+      "payload_meta": {
+        "offer_id": "ext-pred-1779874135895-nyro6",
+        "market_id": "ext-pred-1779874135895-nyro6",
+        "winner": 0,
+        "winner_addr": "kaspatest:qqs0yz9hvhlf6c09pe5zx89c28rjtenrwxya7jaqaafp82q5mq0mvmdgw7u37",
+        "broker_fee_amount": "301749950",
+        "winner_amount": "29873245138",
+        "dispatched_at": "2026-05-27T09:47:22.553Z",
+        "epoch": 1
+      }
+    },
+    {
+      "event_type": "pool_settle_consensual_dispatched",
+      "event_synthetic_id": "consensual_dispatched:ext-pred-177:1779874162603",
+      "real_chain_txid": null,
+      "observed_at": "2026-05-27T09:29:22.603Z",
+      "from_address": "kaspatest:qqs0yz9hvhlf6c09pe5zx89c28rjtenrwxya7jaqaafp82q5mq0mvmdgw7u37",
+      "to_address": "kaspatest:qrnjmrn74z9984k3recaj832zjwu34xugh6srvt9r9fejlguwvtxw886ujnr5",
+      "block_hash": null,
+      "block_time": null,
+      "amount_sompi": null,
+      "outputs_length": null,
+      "outputs_sample": null,
+      "payload_meta": {
+        "offer_id": "ext-pred-1779874135895-nyro6",
+        "market_id": "ext-pred-1779874135895-nyro6",
+        "winner": 0,
+        "winner_addr": "kaspatest:qqs0yz9hvhlf6c09pe5zx89c28rjtenrwxya7jaqaafp82q5mq0mvmdgw7u37",
+        "broker_fee_amount": "301749950",
+        "winner_amount": "29873245138",
+        "dispatched_at": "2026-05-27T09:29:22.603Z",
+        "epoch": 1
+      }
+    },
+    {
+      "event_type": "pool_settle_consensual_dispatched",
+      "event_synthetic_id": "consensual_dispatched:ext-pred-177:1779806642194",
+      "real_chain_txid": null,
+      "observed_at": "2026-05-26T14:44:02.194Z",
+      "from_address": "kaspatest:qqs0yz9hvhlf6c09pe5zx89c28rjtenrwxya7jaqaafp82q5mq0mvmdgw7u37",
+      "to_address": "kaspatest:qrnjmrn74z9984k3recaj832zjwu34xugh6srvt9r9fejlguwvtxw886ujnr5",
+      "block_hash": null,
+      "block_time": null,
+      "amount_sompi": null,
+      "outputs_length": null,
+      "outputs_sample": null,
+      "payload_meta": {
+        "offer_id": "ext-pred-1779806630097-0lix3",
+        "market_id": "ext-pred-1779806630097-0lix3",
+        "winner": 0,
+        "winner_addr": "kaspatest:qqs0yz9hvhlf6c09pe5zx89c28rjtenrwxya7jaqaafp82q5mq0mvmdgw7u37",
+        "broker_fee_amount": "294117447",
+        "winner_amount": "29117627259",
+        "dispatched_at": "2026-05-26T14:44:02.194Z",
+        "epoch": 1
+      }
+    },
+    {
+      "event_type": "pool_settle_consensual_dispatched",
+      "event_synthetic_id": "consensual_dispatched:ext-pred-177:1779806085373",
+      "real_chain_txid": null,
+      "observed_at": "2026-05-26T14:34:45.373Z",
+      "from_address": "kaspatest:qqs0yz9hvhlf6c09pe5zx89c28rjtenrwxya7jaqaafp82q5mq0mvmdgw7u37",
+      "to_address": "kaspatest:qrnjmrn74z9984k3recaj832zjwu34xugh6srvt9r9fejlguwvtxw886ujnr5",
+      "block_hash": null,
+      "block_time": null,
+      "amount_sompi": null,
+      "outputs_length": null,
+      "outputs_sample": null,
+      "payload_meta": {
+        "offer_id": "ext-pred-1779806075292-73wqt",
+        "market_id": "ext-pred-1779806075292-73wqt",
+        "winner": 0,
+        "winner_addr": "kaspatest:qqs0yz9hvhlf6c09pe5zx89c28rjtenrwxya7jaqaafp82q5mq0mvmdgw7u37",
+        "broker_fee_amount": "294117447",
+        "winner_amount": "29117627259",
+        "dispatched_at": "2026-05-26T14:34:45.373Z",
+        "epoch": 1
+      }
+    },
+    {
+      "event_type": "pool_settle_consensual_dispatched",
+      "event_synthetic_id": "consensual_dispatched:ext-pred-177:1779805812394",
+      "real_chain_txid": null,
+      "observed_at": "2026-05-26T14:30:12.394Z",
+      "from_address": "kaspatest:qqs0yz9hvhlf6c09pe5zx89c28rjtenrwxya7jaqaafp82q5mq0mvmdgw7u37",
+      "to_address": "kaspatest:qrnjmrn74z9984k3recaj832zjwu34xugh6srvt9r9fejlguwvtxw886ujnr5",
+      "block_hash": null,
+      "block_time": null,
+      "amount_sompi": null,
+      "outputs_length": null,
+      "outputs_sample": null,
+      "payload_meta": {
+        "offer_id": "ext-pred-1779805502515-3koew",
+        "market_id": "ext-pred-1779805502515-3koew",
+        "winner": 0,
+        "winner_addr": "kaspatest:qqs0yz9hvhlf6c09pe5zx89c28rjtenrwxya7jaqaafp82q5mq0mvmdgw7u37",
+        "broker_fee_amount": "297973578",
+        "winner_amount": "29499384252",
+        "dispatched_at": "2026-05-26T14:30:12.394Z",
+        "epoch": 1
+      }
+    },
+    {
+      "event_type": "pool_settle_consensual_dispatched",
+      "event_synthetic_id": "consensual_dispatched:ext-pred-177:1779805812388",
+      "real_chain_txid": null,
+      "observed_at": "2026-05-26T14:30:12.388Z",
+      "from_address": "kaspatest:qqs0yz9hvhlf6c09pe5zx89c28rjtenrwxya7jaqaafp82q5mq0mvmdgw7u37",
+      "to_address": "kaspatest:qrnjmrn74z9984k3recaj832zjwu34xugh6srvt9r9fejlguwvtxw886ujnr5",
+      "block_hash": null,
+      "block_time": null,
+      "amount_sompi": null,
+      "outputs_length": null,
+      "outputs_sample": null,
+      "payload_meta": {
+        "offer_id": "ext-pred-1779805502515-3koew",
+        "market_id": "ext-pred-1779805502515-3koew",
+        "winner": 0,
+        "winner_addr": "kaspatest:qqs0yz9hvhlf6c09pe5zx89c28rjtenrwxya7jaqaafp82q5mq0mvmdgw7u37",
+        "broker_fee_amount": "297973578",
+        "winner_amount": "29499384252",
+        "dispatched_at": "2026-05-26T14:30:12.388Z",
+        "epoch": 1
+      }
+    },
+    {
+      "event_type": "pool_settle_consensual_dispatched",
+      "event_synthetic_id": "consensual_dispatched:ext-pred-177:1779805131114",
+      "real_chain_txid": null,
+      "observed_at": "2026-05-26T14:18:51.114Z",
+      "from_address": "kaspatest:qqs0yz9hvhlf6c09pe5zx89c28rjtenrwxya7jaqaafp82q5mq0mvmdgw7u37",
+      "to_address": "kaspatest:qrnjmrn74z9984k3recaj832zjwu34xugh6srvt9r9fejlguwvtxw886ujnr5",
+      "block_hash": null,
+      "block_time": null,
+      "amount_sompi": null,
+      "outputs_length": null,
+      "outputs_sample": null,
+      "payload_meta": {
+        "offer_id": "ext-pred-1779803424493-dfoma",
+        "market_id": "ext-pred-1779803424493-dfoma",
+        "winner": 0,
+        "winner_addr": "kaspatest:qqs0yz9hvhlf6c09pe5zx89c28rjtenrwxya7jaqaafp82q5mq0mvmdgw7u37",
+        "broker_fee_amount": "294117447",
+        "winner_amount": "29117627259",
+        "dispatched_at": "2026-05-26T14:18:51.114Z",
+        "epoch": 1
+      }
+    },
+    {
+      "event_type": "pool_settle_consensual_dispatched",
+      "event_synthetic_id": "consensual_dispatched:ext-pred-177:1779805131107",
+      "real_chain_txid": null,
+      "observed_at": "2026-05-26T14:18:51.107Z",
+      "from_address": "kaspatest:qqs0yz9hvhlf6c09pe5zx89c28rjtenrwxya7jaqaafp82q5mq0mvmdgw7u37",
+      "to_address": "kaspatest:qrnjmrn74z9984k3recaj832zjwu34xugh6srvt9r9fejlguwvtxw886ujnr5",
+      "block_hash": null,
+      "block_time": null,
+      "amount_sompi": null,
+      "outputs_length": null,
+      "outputs_sample": null,
+      "payload_meta": {
+        "offer_id": "ext-pred-1779803424493-dfoma",
+        "market_id": "ext-pred-1779803424493-dfoma",
+        "winner": 0,
+        "winner_addr": "kaspatest:qqs0yz9hvhlf6c09pe5zx89c28rjtenrwxya7jaqaafp82q5mq0mvmdgw7u37",
+        "broker_fee_amount": "294117447",
+        "winner_amount": "29117627259",
+        "dispatched_at": "2026-05-26T14:18:51.107Z",
+        "epoch": 1
+      }
+    },
+    {
+      "event_type": "pool_settle_consensual_dispatched",
+      "event_synthetic_id": "consensual_dispatched:ext-pred-177:1779804473195",
+      "real_chain_txid": null,
+      "observed_at": "2026-05-26T14:07:53.195Z",
+      "from_address": "kaspatest:qqs0yz9hvhlf6c09pe5zx89c28rjtenrwxya7jaqaafp82q5mq0mvmdgw7u37",
+      "to_address": "kaspatest:qrnjmrn74z9984k3recaj832zjwu34xugh6srvt9r9fejlguwvtxw886ujnr5",
+      "block_hash": null,
+      "block_time": null,
+      "amount_sompi": null,
+      "outputs_length": null,
+      "outputs_sample": null,
+      "payload_meta": {
+        "offer_id": "ext-pred-1779803424493-dfoma",
+        "market_id": "ext-pred-1779803424493-dfoma",
+        "winner": 0,
+        "winner_addr": "kaspatest:qqs0yz9hvhlf6c09pe5zx89c28rjtenrwxya7jaqaafp82q5mq0mvmdgw7u37",
+        "broker_fee_amount": "294117447",
+        "winner_amount": "29117627259",
+        "dispatched_at": "2026-05-26T14:07:53.195Z",
+        "epoch": 1
+      }
+    }
+  ],
+  "bet_tx_baseline": [
+    {
+      "event_type": "pool_oracle_deposit",
+      "event_synthetic_id": "pool_oracle_deposit:ext-pool:6a9bc522:1780056397706",
+      "real_chain_txid": "ca472605075e11b962b23df4e8bfe0d7d30801e4a5e41a848187af569a81439c",
+      "observed_at": "2026-05-29 12:06:37",
+      "from_address": "kaspatest:qp4fh3fz9g58jccrxjrc6ukfylp9ngg3ufttemk2wc7cfj3dwd95c55pnn8du",
+      "to_address": "kaspatest:pqg3nrkeh5zxqp4k2jv2t5ymxu60w9fk2fjck6gleaearuuc3xehc9t8ce7wk",
+      "block_hash": "51f301081a61c43d9e98220266b408e934cf8d731af00ac71b3fb28a2aae77a3",
+      "block_time": 1780056395,
+      "amount_sompi": 12491.75174375,
+      "outputs_length": 2,
+      "outputs_sample": [
+        {
+          "address": "kaspatest:pqg3nrkeh5zxqp4k2jv2t5ymxu60w9fk2fjck6gleaearuuc3xehc9t8ce7wk",
+          "amount_sompi": 100000000
+        },
+        {
+          "address": "kaspatest:qp4fh3fz9g58jccrxjrc6ukfylp9ngg3ufttemk2wc7cfj3dwd95c55pnn8du",
+          "amount_sompi": 1249175174375
+        }
+      ],
+      "payload_meta": {
+        "market_id": "ext-pool-1780056388641-15sch",
+        "oracle_pk": "6a9bc5222a2879630334878d72c927c259a111e256bceeca763d84ca2d734b4c",
+        "deposit_tx": "ca472605075e11b962b23df4e8bfe0d7d30801e4a5e41a848187af569a81439c",
+        "bond_amount": 100000000
+      }
+    },
+    {
+      "event_type": "pool_oracle_deposit",
+      "event_synthetic_id": "pool_oracle_deposit:ext-pool:7212edc7:1780056394689",
+      "real_chain_txid": "4a40608bd23467009134c9b02c53953975766fe7a3b4070ad7d45e804576f432",
+      "observed_at": "2026-05-29 12:06:34",
+      "from_address": "kaspatest:qpep9mw8m377jdadh9sawc5ect9d6vhvuv3rvxh2lturp588lejhjg7gq5f4t",
+      "to_address": "kaspatest:pqg3nrkeh5zxqp4k2jv2t5ymxu60w9fk2fjck6gleaearuuc3xehc9t8ce7wk",
+      "block_hash": "36a0e9e574fb8c01a077256af04722ffddd3654a0b7d21dc245f987140ead9d7",
+      "block_time": 1780056392,
+      "amount_sompi": 12491.75174375,
+      "outputs_length": 2,
+      "outputs_sample": [
+        {
+          "address": "kaspatest:pqg3nrkeh5zxqp4k2jv2t5ymxu60w9fk2fjck6gleaearuuc3xehc9t8ce7wk",
+          "amount_sompi": 100000000
+        },
+        {
+          "address": "kaspatest:qpep9mw8m377jdadh9sawc5ect9d6vhvuv3rvxh2lturp588lejhjg7gq5f4t",
+          "amount_sompi": 1249175174375
+        }
+      ],
+      "payload_meta": {
+        "market_id": "ext-pool-1780056388641-15sch",
+        "oracle_pk": "7212edc7dc7de937adb961d76299c2cadd32ece322361aeafaf830d0e7fe6579",
+        "deposit_tx": "4a40608bd23467009134c9b02c53953975766fe7a3b4070ad7d45e804576f432",
+        "bond_amount": 100000000
+      }
+    },
+    {
+      "event_type": "pool_oracle_deposit",
+      "event_synthetic_id": "pool_oracle_deposit:ext-pool:e8e8d827:1780056391662",
+      "real_chain_txid": "71d58ecbd1fbc1b6caf98694953583ebd0e9877be6d4af7a102b5b71e1bd3584",
+      "observed_at": "2026-05-29 12:06:31",
+      "from_address": "kaspatest:qr5w3kp8sfuqx00mvs2s8n0szqkr9av4npfzupkn33jday24sw28q43he8rwu",
+      "to_address": "kaspatest:pqg3nrkeh5zxqp4k2jv2t5ymxu60w9fk2fjck6gleaearuuc3xehc9t8ce7wk",
+      "block_hash": "2118b44688c07323d7baf00f20f1f6beddb01136f0fce810b7b6df4550e2d2a8",
+      "block_time": 1780056389,
+      "amount_sompi": 988.6689,
+      "outputs_length": 2,
+      "outputs_sample": [
+        {
+          "address": "kaspatest:pqg3nrkeh5zxqp4k2jv2t5ymxu60w9fk2fjck6gleaearuuc3xehc9t8ce7wk",
+          "amount_sompi": 100000000
+        },
+        {
+          "address": "kaspatest:qr5w3kp8sfuqx00mvs2s8n0szqkr9av4npfzupkn33jday24sw28q43he8rwu",
+          "amount_sompi": 98866890000
+        }
+      ],
+      "payload_meta": {
+        "market_id": "ext-pool-1780056388641-15sch",
+        "oracle_pk": "e8e8d8278278033dfb641503cdf0102c32f59598522e06d38c64de9155839470",
+        "deposit_tx": "71d58ecbd1fbc1b6caf98694953583ebd0e9877be6d4af7a102b5b71e1bd3584",
+        "bond_amount": 100000000
+      }
+    },
+    {
+      "event_type": "pool_oracle_deposit",
+      "event_synthetic_id": "pool_oracle_deposit:ext-pool:e8e8d827:1780056385606",
+      "real_chain_txid": "fe8655a3c8fe7318e87294608274c5eb307504ebb97e9533b4257d673110b5fd",
+      "observed_at": "2026-05-29 12:06:25",
+      "from_address": "kaspatest:qr5w3kp8sfuqx00mvs2s8n0szqkr9av4npfzupkn33jday24sw28q43he8rwu",
+      "to_address": "kaspatest:pr6jwjx3k52mq6f8prhmqmfhskmqrws75gaxm6nm9gn4uysna5z7ufpm29gpk",
+      "block_hash": "76286a65b0528a2ddf2ff856478d8df5eb860fff1e92b70da88104207aa01374",
+      "block_time": 1780056383,
+      "amount_sompi": 989.699,
+      "outputs_length": 2,
+      "outputs_sample": [
+        {
+          "address": "kaspatest:pr6jwjx3k52mq6f8prhmqmfhskmqrws75gaxm6nm9gn4uysna5z7ufpm29gpk",
+          "amount_sompi": 100000000
+        },
+        {
+          "address": "kaspatest:qr5w3kp8sfuqx00mvs2s8n0szqkr9av4npfzupkn33jday24sw28q43he8rwu",
+          "amount_sompi": 98969900000
+        }
+      ],
+      "payload_meta": {
+        "market_id": "ext-pool-1780056376553-5j4td",
+        "oracle_pk": "e8e8d8278278033dfb641503cdf0102c32f59598522e06d38c64de9155839470",
+        "deposit_tx": "fe8655a3c8fe7318e87294608274c5eb307504ebb97e9533b4257d673110b5fd",
+        "bond_amount": 100000000
+      }
+    },
+    {
+      "event_type": "pool_oracle_deposit",
+      "event_synthetic_id": "pool_oracle_deposit:ext-pool:6a9bc522:1780056382586",
+      "real_chain_txid": "10e8ffbacd268894584df5e738f954549c600cf567ad18a303a16773c1b3fa1c",
+      "observed_at": "2026-05-29 12:06:22",
+      "from_address": "kaspatest:qp4fh3fz9g58jccrxjrc6ukfylp9ngg3ufttemk2wc7cfj3dwd95c55pnn8du",
+      "to_address": "kaspatest:pr6jwjx3k52mq6f8prhmqmfhskmqrws75gaxm6nm9gn4uysna5z7ufpm29gpk",
+      "block_hash": "430dfc6256dd75964cdd1bc10a147147a3b74891efa6782212f6faf418623f73",
+      "block_time": 1780056380,
+      "amount_sompi": 12492.78184375,
+      "outputs_length": 2,
+      "outputs_sample": [
+        {
+          "address": "kaspatest:pr6jwjx3k52mq6f8prhmqmfhskmqrws75gaxm6nm9gn4uysna5z7ufpm29gpk",
+          "amount_sompi": 100000000
+        },
+        {
+          "address": "kaspatest:qp4fh3fz9g58jccrxjrc6ukfylp9ngg3ufttemk2wc7cfj3dwd95c55pnn8du",
+          "amount_sompi": 1249278184375
+        }
+      ],
+      "payload_meta": {
+        "market_id": "ext-pool-1780056376553-5j4td",
+        "oracle_pk": "6a9bc5222a2879630334878d72c927c259a111e256bceeca763d84ca2d734b4c",
+        "deposit_tx": "10e8ffbacd268894584df5e738f954549c600cf567ad18a303a16773c1b3fa1c",
+        "bond_amount": 100000000
+      }
+    },
+    {
+      "event_type": "pool_oracle_deposit",
+      "event_synthetic_id": "pool_oracle_deposit:ext-pool:4a355a77:1780056379567",
+      "real_chain_txid": "c3cfbd68fafddd8475753b196db8b9ca33af2c053580f7ecbb7dc1153d77d9bf",
+      "observed_at": "2026-05-29 12:06:19",
+      "from_address": "kaspatest:qp9r2knhy3r2mkdf37frgsze7d583vxcg8na2z92y77yll3d8ftmzxjxwcd3j",
+      "to_address": "kaspatest:pr6jwjx3k52mq6f8prhmqmfhskmqrws75gaxm6nm9gn4uysna5z7ufpm29gpk",
+      "block_hash": "09d7b3797845914461fa31c6777491ebb3c5d67cebad1784d1b453f5c48deb33",
+      "block_time": 1780056377,
+      "amount_sompi": 0.87950633,
+      "outputs_length": 2,
+      "outputs_sample": [
+        {
+          "address": "kaspatest:pr6jwjx3k52mq6f8prhmqmfhskmqrws75gaxm6nm9gn4uysna5z7ufpm29gpk",
+          "amount_sompi": 100000000
+        },
+        {
+          "address": "kaspatest:qp9r2knhy3r2mkdf37frgsze7d583vxcg8na2z92y77yll3d8ftmzxjxwcd3j",
+          "amount_sompi": 87950633
+        }
+      ],
+      "payload_meta": {
+        "market_id": "ext-pool-1780056376553-5j4td",
+        "oracle_pk": "4a355a772446add9a98f92344059f36878b0d841e7d508aa27bc4ffe2d3a57b1",
+        "deposit_tx": "c3cfbd68fafddd8475753b196db8b9ca33af2c053580f7ecbb7dc1153d77d9bf",
+        "bond_amount": 100000000
+      }
+    },
+    {
+      "event_type": "pool_oracle_deposit",
+      "event_synthetic_id": "pool_oracle_deposit:ext-pool:6a9bc522:1780056373505",
+      "real_chain_txid": "09384c78d279fa93a05bad4879baf70e357fda9cf114b551541daef38cbe2228",
+      "observed_at": "2026-05-29 12:06:13",
+      "from_address": "kaspatest:qp4fh3fz9g58jccrxjrc6ukfylp9ngg3ufttemk2wc7cfj3dwd95c55pnn8du",
+      "to_address": "kaspatest:pr0sext2292eymhfs56wn2mpjc5r9tp5zskqwfewlxt28kx3kp8vz6am8cvde",
+      "block_hash": "4a26423579cc0df07dd0b59455800bae39df04f2c0c4d0858d8bf3fc2b47dd7f",
+      "block_time": 1780056371,
+      "amount_sompi": 12493.81194375,
+      "outputs_length": 2,
+      "outputs_sample": [
+        {
+          "address": "kaspatest:pr0sext2292eymhfs56wn2mpjc5r9tp5zskqwfewlxt28kx3kp8vz6am8cvde",
+          "amount_sompi": 100000000
+        },
+        {
+          "address": "kaspatest:qp4fh3fz9g58jccrxjrc6ukfylp9ngg3ufttemk2wc7cfj3dwd95c55pnn8du",
+          "amount_sompi": 1249381194375
+        }
+      ],
+      "payload_meta": {
+        "market_id": "ext-pool-1780056364437-pg1ab",
+        "oracle_pk": "6a9bc5222a2879630334878d72c927c259a111e256bceeca763d84ca2d734b4c",
+        "deposit_tx": "09384c78d279fa93a05bad4879baf70e357fda9cf114b551541daef38cbe2228",
+        "bond_amount": 100000000
+      }
+    },
+    {
+      "event_type": "pool_oracle_deposit",
+      "event_synthetic_id": "pool_oracle_deposit:ext-pool:e8e8d827:1780056370485",
+      "real_chain_txid": "83613a6973af3b242bbc86eb9b0dc4e6805d06cb8d4e8208e06523ca28d6b778",
+      "observed_at": "2026-05-29 12:06:10",
+      "from_address": "kaspatest:qr5w3kp8sfuqx00mvs2s8n0szqkr9av4npfzupkn33jday24sw28q43he8rwu",
+      "to_address": "kaspatest:pr0sext2292eymhfs56wn2mpjc5r9tp5zskqwfewlxt28kx3kp8vz6am8cvde",
+      "block_hash": "793447fd86b24243ebf76cffc53a70f8cc4e613c0af52c1acf4f481a7d76937c",
+      "block_time": 1780056368,
+      "amount_sompi": 990.7291,
+      "outputs_length": 2,
+      "outputs_sample": [
+        {
+          "address": "kaspatest:pr0sext2292eymhfs56wn2mpjc5r9tp5zskqwfewlxt28kx3kp8vz6am8cvde",
+          "amount_sompi": 100000000
+        },
+        {
+          "address": "kaspatest:qr5w3kp8sfuqx00mvs2s8n0szqkr9av4npfzupkn33jday24sw28q43he8rwu",
+          "amount_sompi": 99072910000
+        }
+      ],
+      "payload_meta": {
+        "market_id": "ext-pool-1780056364437-pg1ab",
+        "oracle_pk": "e8e8d8278278033dfb641503cdf0102c32f59598522e06d38c64de9155839470",
+        "deposit_tx": "83613a6973af3b242bbc86eb9b0dc4e6805d06cb8d4e8208e06523ca28d6b778",
+        "bond_amount": 100000000
+      }
+    },
+    {
+      "event_type": "pool_oracle_deposit",
+      "event_synthetic_id": "pool_oracle_deposit:ext-pool:4a355a77:1780056367458",
+      "real_chain_txid": "0bc0d8dfbc0a886d8a3dc77333adc98ba1ad3547785ef2e45edd75985786ac34",
+      "observed_at": "2026-05-29 12:06:07",
+      "from_address": "kaspatest:qp9r2knhy3r2mkdf37frgsze7d583vxcg8na2z92y77yll3d8ftmzxjxwcd3j",
+      "to_address": "kaspatest:pr0sext2292eymhfs56wn2mpjc5r9tp5zskqwfewlxt28kx3kp8vz6am8cvde",
+      "block_hash": "2d73e8b0843bbedf598fdf4c1fb9316161bf5036a55a4abd7eb1d96543a96cc4",
+      "block_time": 1780056365,
+      "amount_sompi": 1.90966764,
+      "outputs_length": 2,
+      "outputs_sample": [
+        {
+          "address": "kaspatest:pr0sext2292eymhfs56wn2mpjc5r9tp5zskqwfewlxt28kx3kp8vz6am8cvde",
+          "amount_sompi": 100000000
+        },
+        {
+          "address": "kaspatest:qp9r2knhy3r2mkdf37frgsze7d583vxcg8na2z92y77yll3d8ftmzxjxwcd3j",
+          "amount_sompi": 190966764
+        }
+      ],
+      "payload_meta": {
+        "market_id": "ext-pool-1780056364437-pg1ab",
+        "oracle_pk": "4a355a772446add9a98f92344059f36878b0d841e7d508aa27bc4ffe2d3a57b1",
+        "deposit_tx": "0bc0d8dfbc0a886d8a3dc77333adc98ba1ad3547785ef2e45edd75985786ac34",
+        "bond_amount": 100000000
+      }
+    },
+    {
+      "event_type": "pool_oracle_deposit",
+      "event_synthetic_id": "pool_oracle_deposit:ext-pool:8dc76524:1780044876978",
+      "real_chain_txid": "7ac42395db6f9777d3392a98c72d3ca69b9a4417d2fa19c3383dbf5ffb790f46",
+      "observed_at": "2026-05-29 08:54:36",
+      "from_address": "kaspatest:qzxuwefy3skknmukz42kps7hf0gw8gt5l4vk8t3uxfpx5tgu90lu2wf4puz3s",
+      "to_address": "kaspatest:pz5urfsmwfm4kvl76wf938a65x3uczghn7qdsp0k6trnwyzkuck7v3cl9fgcc",
+      "block_hash": "74735e681089717ad0ce83a40bfb1cadb263fb4e9bf180cac3575cb1307daae2",
+      "block_time": 1780044874,
+      "amount_sompi": 992.7893,
+      "outputs_length": 2,
+      "outputs_sample": [
+        {
+          "address": "kaspatest:pz5urfsmwfm4kvl76wf938a65x3uczghn7qdsp0k6trnwyzkuck7v3cl9fgcc",
+          "amount_sompi": 100000000
+        },
+        {
+          "address": "kaspatest:qzxuwefy3skknmukz42kps7hf0gw8gt5l4vk8t3uxfpx5tgu90lu2wf4puz3s",
+          "amount_sompi": 99278930000
+        }
+      ],
+      "payload_meta": {
+        "market_id": "ext-pool-1780044867953-2w3ip",
+        "oracle_pk": "8dc765248c2d69ef96155560c3d74bd0e3a174fd5963ae3c32426a2d1c2bffc5",
+        "deposit_tx": "7ac42395db6f9777d3392a98c72d3ca69b9a4417d2fa19c3383dbf5ffb790f46",
+        "bond_amount": 100000000
+      }
+    },
+    {
+      "event_type": "pool_oracle_deposit",
+      "event_synthetic_id": "pool_oracle_deposit:ext-pool:7212edc7:1780044873971",
+      "real_chain_txid": "5b4bb12be05e557f6691c7a5dae0316add09820835270aa0b59637ff4cfbd2e8",
+      "observed_at": "2026-05-29 08:54:33",
+      "from_address": "kaspatest:qpep9mw8m377jdadh9sawc5ect9d6vhvuv3rvxh2lturp588lejhjg7gq5f4t",
+      "to_address": "kaspatest:pz5urfsmwfm4kvl76wf938a65x3uczghn7qdsp0k6trnwyzkuck7v3cl9fgcc",
+      "block_hash": "5b7a8945f40c59021da272a9fef775bfabfecaa128f590f5ea05764f5ea247b0",
+      "block_time": 1780044871,
+      "amount_sompi": 12492.78184375,
+      "outputs_length": 2,
+      "outputs_sample": [
+        {
+          "address": "kaspatest:pz5urfsmwfm4kvl76wf938a65x3uczghn7qdsp0k6trnwyzkuck7v3cl9fgcc",
+          "amount_sompi": 100000000
+        },
+        {
+          "address": "kaspatest:qpep9mw8m377jdadh9sawc5ect9d6vhvuv3rvxh2lturp588lejhjg7gq5f4t",
+          "amount_sompi": 1249278184375
+        }
+      ],
+      "payload_meta": {
+        "market_id": "ext-pool-1780044867953-2w3ip",
+        "oracle_pk": "7212edc7dc7de937adb961d76299c2cadd32ece322361aeafaf830d0e7fe6579",
+        "deposit_tx": "5b4bb12be05e557f6691c7a5dae0316add09820835270aa0b59637ff4cfbd2e8",
+        "bond_amount": 100000000
+      }
+    },
+    {
+      "event_type": "pool_oracle_deposit",
+      "event_synthetic_id": "pool_oracle_deposit:ext-pool:6a9bc522:1780044870960",
+      "real_chain_txid": "657230ba0cee8542b6de4cfbdfac5f4c82676da428e40611f0765c2004de7b74",
+      "observed_at": "2026-05-29 08:54:30",
+      "from_address": "kaspatest:qp4fh3fz9g58jccrxjrc6ukfylp9ngg3ufttemk2wc7cfj3dwd95c55pnn8du",
+      "to_address": "kaspatest:pz5urfsmwfm4kvl76wf938a65x3uczghn7qdsp0k6trnwyzkuck7v3cl9fgcc",
+      "block_hash": "1b4014c2de5b5a4d7ff67e11dc8b3527c1711a7ca79092e3c56ae4efcafa7f50",
+      "block_time": 1780044869,
+      "amount_sompi": 12494.84204375,
+      "outputs_length": 2,
+      "outputs_sample": [
+        {
+          "address": "kaspatest:pz5urfsmwfm4kvl76wf938a65x3uczghn7qdsp0k6trnwyzkuck7v3cl9fgcc",
+          "amount_sompi": 100000000
+        },
+        {
+          "address": "kaspatest:qp4fh3fz9g58jccrxjrc6ukfylp9ngg3ufttemk2wc7cfj3dwd95c55pnn8du",
+          "amount_sompi": 1249484204375
+        }
+      ],
+      "payload_meta": {
+        "market_id": "ext-pool-1780044867953-2w3ip",
+        "oracle_pk": "6a9bc5222a2879630334878d72c927c259a111e256bceeca763d84ca2d734b4c",
+        "deposit_tx": "657230ba0cee8542b6de4cfbdfac5f4c82676da428e40611f0765c2004de7b74",
+        "bond_amount": 100000000
+      }
+    },
+    {
+      "event_type": "pool_oracle_deposit",
+      "event_synthetic_id": "pool_oracle_deposit:ext-pool:e8e8d827:1780044864909",
+      "real_chain_txid": "1b43b207c32bc8ce943a096b74e9d07dd681dfeafa3cc66b05286b6b44372eed",
+      "observed_at": "2026-05-29 08:54:24",
+      "from_address": "kaspatest:qr5w3kp8sfuqx00mvs2s8n0szqkr9av4npfzupkn33jday24sw28q43he8rwu",
+      "to_address": "kaspatest:pp2dfrjdhqu30nv9w927xtlc95z577ax75jxjnlmdenakrj7swxk5waz52tpr",
+      "block_hash": "f2080cfd56ab7ea2ac4d65a73e73905f66eedc8c67e1accfdb3ad9a4ab8db04b",
+      "block_time": 1780044863,
+      "amount_sompi": 991.7592,
+      "outputs_length": 2,
+      "outputs_sample": [
+        {
+          "address": "kaspatest:pp2dfrjdhqu30nv9w927xtlc95z577ax75jxjnlmdenakrj7swxk5waz52tpr",
+          "amount_sompi": 100000000
+        },
+        {
+          "address": "kaspatest:qr5w3kp8sfuqx00mvs2s8n0szqkr9av4npfzupkn33jday24sw28q43he8rwu",
+          "amount_sompi": 99175920000
+        }
+      ],
+      "payload_meta": {
+        "market_id": "ext-pool-1780044855869-y7bg1",
+        "oracle_pk": "e8e8d8278278033dfb641503cdf0102c32f59598522e06d38c64de9155839470",
+        "deposit_tx": "1b43b207c32bc8ce943a096b74e9d07dd681dfeafa3cc66b05286b6b44372eed",
+        "bond_amount": 100000000
+      }
+    },
+    {
+      "event_type": "pool_oracle_deposit",
+      "event_synthetic_id": "pool_oracle_deposit:ext-pool:4a355a77:1780044861899",
+      "real_chain_txid": "87a734d247f91f4381125eb9243cd1b322bd1f18d2c7c95caff20097de07c00c",
+      "observed_at": "2026-05-29 08:54:21",
+      "from_address": "kaspatest:qp9r2knhy3r2mkdf37frgsze7d583vxcg8na2z92y77yll3d8ftmzxjxwcd3j",
+      "to_address": "kaspatest:pp2dfrjdhqu30nv9w927xtlc95z577ax75jxjnlmdenakrj7swxk5waz52tpr",
+      "block_hash": "aa949b92cbad2cca1e639550b5bc23fb67f9251344d6935857b8cc190c47edc6",
+      "block_time": 1780044859,
+      "amount_sompi": 2.93978599,
+      "outputs_length": 2,
+      "outputs_sample": [
+        {
+          "address": "kaspatest:pp2dfrjdhqu30nv9w927xtlc95z577ax75jxjnlmdenakrj7swxk5waz52tpr",
+          "amount_sompi": 100000000
+        },
+        {
+          "address": "kaspatest:qp9r2knhy3r2mkdf37frgsze7d583vxcg8na2z92y77yll3d8ftmzxjxwcd3j",
+          "amount_sompi": 293978599
+        }
+      ],
+      "payload_meta": {
+        "market_id": "ext-pool-1780044855869-y7bg1",
+        "oracle_pk": "4a355a772446add9a98f92344059f36878b0d841e7d508aa27bc4ffe2d3a57b1",
+        "deposit_tx": "87a734d247f91f4381125eb9243cd1b322bd1f18d2c7c95caff20097de07c00c",
+        "bond_amount": 100000000
+      }
+    },
+    {
+      "event_type": "pool_oracle_deposit",
+      "event_synthetic_id": "pool_oracle_deposit:ext-pool:7212edc7:1780044858881",
+      "real_chain_txid": "cde5e449bbe3d54d17baaf0e5ca7aa3451b9f0cb54fdacebc7519a8b9b0ea9c8",
+      "observed_at": "2026-05-29 08:54:18",
+      "from_address": "kaspatest:qpep9mw8m377jdadh9sawc5ect9d6vhvuv3rvxh2lturp588lejhjg7gq5f4t",
+      "to_address": "kaspatest:pp2dfrjdhqu30nv9w927xtlc95z577ax75jxjnlmdenakrj7swxk5waz52tpr",
+      "block_hash": "71fd46af80cab165c9db922a6530cf2274f11aebc175a9855ec136d5aefa6cd4",
+      "block_time": 1780044856,
+      "amount_sompi": 12493.81194375,
+      "outputs_length": 2,
+      "outputs_sample": [
+        {
+          "address": "kaspatest:pp2dfrjdhqu30nv9w927xtlc95z577ax75jxjnlmdenakrj7swxk5waz52tpr",
+          "amount_sompi": 100000000
+        },
+        {
+          "address": "kaspatest:qpep9mw8m377jdadh9sawc5ect9d6vhvuv3rvxh2lturp588lejhjg7gq5f4t",
+          "amount_sompi": 1249381194375
+        }
+      ],
+      "payload_meta": {
+        "market_id": "ext-pool-1780044855869-y7bg1",
+        "oracle_pk": "7212edc7dc7de937adb961d76299c2cadd32ece322361aeafaf830d0e7fe6579",
+        "deposit_tx": "cde5e449bbe3d54d17baaf0e5ca7aa3451b9f0cb54fdacebc7519a8b9b0ea9c8",
+        "bond_amount": 100000000
+      }
+    },
+    {
+      "event_type": "pool_oracle_deposit",
+      "event_synthetic_id": "pool_oracle_deposit:ext-pool:7212edc7:1780044852834",
+      "real_chain_txid": "c44ed02e6fb4f19472ba38a3e79b63b1f37649f9be615b47bbc3aed539b2b3bb",
+      "observed_at": "2026-05-29 08:54:12",
+      "from_address": "kaspatest:qpep9mw8m377jdadh9sawc5ect9d6vhvuv3rvxh2lturp588lejhjg7gq5f4t",
+      "to_address": "kaspatest:pq26ntyvhs4mydnhw087w9khp2vv3wc3gajtepx5982wgxtfqtea5szkcxfpt",
+      "block_hash": "a7ea2ea7adf65eea7ad554307d984688a7d6c65fa8180903ee05520cce713186",
+      "block_time": 1780044850,
+      "amount_sompi": 12494.84204375,
+      "outputs_length": 2,
+      "outputs_sample": [
+        {
+          "address": "kaspatest:pq26ntyvhs4mydnhw087w9khp2vv3wc3gajtepx5982wgxtfqtea5szkcxfpt",
+          "amount_sompi": 100000000
+        },
+        {
+          "address": "kaspatest:qpep9mw8m377jdadh9sawc5ect9d6vhvuv3rvxh2lturp588lejhjg7gq5f4t",
+          "amount_sompi": 1249484204375
+        }
+      ],
+      "payload_meta": {
+        "market_id": "ext-pool-1780044843791-1mhio",
+        "oracle_pk": "7212edc7dc7de937adb961d76299c2cadd32ece322361aeafaf830d0e7fe6579",
+        "deposit_tx": "c44ed02e6fb4f19472ba38a3e79b63b1f37649f9be615b47bbc3aed539b2b3bb",
+        "bond_amount": 100000000
+      }
+    },
+    {
+      "event_type": "pool_oracle_deposit",
+      "event_synthetic_id": "pool_oracle_deposit:ext-pool:e8e8d827:1780044849825",
+      "real_chain_txid": "b1d6ab4f917ca5de5aeed019593b810f0c428b48d353f91c658f0d6b5a1a7f8a",
+      "observed_at": "2026-05-29 08:54:09",
+      "from_address": "kaspatest:qr5w3kp8sfuqx00mvs2s8n0szqkr9av4npfzupkn33jday24sw28q43he8rwu",
+      "to_address": "kaspatest:pq26ntyvhs4mydnhw087w9khp2vv3wc3gajtepx5982wgxtfqtea5szkcxfpt",
+      "block_hash": "5774e9255a626013a390a101ce6d5ceb155956a39ddc18915f1c80a42b432c9d",
+      "block_time": 1780044847,
+      "amount_sompi": 992.7893,
+      "outputs_length": 2,
+      "outputs_sample": [
+        {
+          "address": "kaspatest:pq26ntyvhs4mydnhw087w9khp2vv3wc3gajtepx5982wgxtfqtea5szkcxfpt",
+          "amount_sompi": 100000000
+        },
+        {
+          "address": "kaspatest:qr5w3kp8sfuqx00mvs2s8n0szqkr9av4npfzupkn33jday24sw28q43he8rwu",
+          "amount_sompi": 99278930000
+        }
+      ],
+      "payload_meta": {
+        "market_id": "ext-pool-1780044843791-1mhio",
+        "oracle_pk": "e8e8d8278278033dfb641503cdf0102c32f59598522e06d38c64de9155839470",
+        "deposit_tx": "b1d6ab4f917ca5de5aeed019593b810f0c428b48d353f91c658f0d6b5a1a7f8a",
+        "bond_amount": 100000000
+      }
+    },
+    {
+      "event_type": "pool_oracle_deposit",
+      "event_synthetic_id": "pool_oracle_deposit:ext-pool:6a9bc522:1780044846801",
+      "real_chain_txid": "a09e92d51e9601682a60e17bdff73fdb7cf2589f77d8ba3d7423ef132771ef2e",
+      "observed_at": "2026-05-29 08:54:06",
+      "from_address": "kaspatest:qp4fh3fz9g58jccrxjrc6ukfylp9ngg3ufttemk2wc7cfj3dwd95c55pnn8du",
+      "to_address": "kaspatest:pq26ntyvhs4mydnhw087w9khp2vv3wc3gajtepx5982wgxtfqtea5szkcxfpt",
+      "block_hash": "dda196cff57bbc8a5fb0ddd6841b7b442eeb70c739ab2b91530724599a03d96f",
+      "block_time": 1780044844,
+      "amount_sompi": 12495.87214375,
+      "outputs_length": 2,
+      "outputs_sample": [
+        {
+          "address": "kaspatest:pq26ntyvhs4mydnhw087w9khp2vv3wc3gajtepx5982wgxtfqtea5szkcxfpt",
+          "amount_sompi": 100000000
+        },
+        {
+          "address": "kaspatest:qp4fh3fz9g58jccrxjrc6ukfylp9ngg3ufttemk2wc7cfj3dwd95c55pnn8du",
+          "amount_sompi": 1249587214375
+        }
+      ],
+      "payload_meta": {
+        "market_id": "ext-pool-1780044843791-1mhio",
+        "oracle_pk": "6a9bc5222a2879630334878d72c927c259a111e256bceeca763d84ca2d734b4c",
+        "deposit_tx": "a09e92d51e9601682a60e17bdff73fdb7cf2589f77d8ba3d7423ef132771ef2e",
+        "bond_amount": 100000000
+      }
+    },
+    {
+      "event_type": "pool_oracle_deposit",
+      "event_synthetic_id": "pool_oracle_deposit:ext-pool:7212edc7:1780044840751",
+      "real_chain_txid": "808c47fe00e2c4d157042cacc779ce18dd720bc7a50a2fd93a31178a12998e47",
+      "observed_at": "2026-05-29 08:54:00",
+      "from_address": "kaspatest:qpep9mw8m377jdadh9sawc5ect9d6vhvuv3rvxh2lturp588lejhjg7gq5f4t",
+      "to_address": "kaspatest:pppwaajcgy932kck27dqmqx2jrd6yu6zmk82vcyyf43lj0g3s0n9ud36sfttg",
+      "block_hash": "59edcaf3663d8d125fd82e287a0278e2bc00d4aafda9780b2811c2b12431b572",
+      "block_time": 1780044838,
+      "amount_sompi": 12495.87214375,
+      "outputs_length": 2,
+      "outputs_sample": [
+        {
+          "address": "kaspatest:pppwaajcgy932kck27dqmqx2jrd6yu6zmk82vcyyf43lj0g3s0n9ud36sfttg",
+          "amount_sompi": 100000000
+        },
+        {
+          "address": "kaspatest:qpep9mw8m377jdadh9sawc5ect9d6vhvuv3rvxh2lturp588lejhjg7gq5f4t",
+          "amount_sompi": 1249587214375
+        }
+      ],
+      "payload_meta": {
+        "market_id": "ext-pool-1780044831708-2krsb",
+        "oracle_pk": "7212edc7dc7de937adb961d76299c2cadd32ece322361aeafaf830d0e7fe6579",
+        "deposit_tx": "808c47fe00e2c4d157042cacc779ce18dd720bc7a50a2fd93a31178a12998e47",
+        "bond_amount": 100000000
+      }
+    },
+    {
+      "event_type": "pool_oracle_deposit",
+      "event_synthetic_id": "pool_oracle_deposit:ext-pool:6a9bc522:1780044837733",
+      "real_chain_txid": "179464fd57de1e468abd9d7ddcee4030330bbe5953f62e3f423036b0460560b8",
+      "observed_at": "2026-05-29 08:53:57",
+      "from_address": "kaspatest:qp4fh3fz9g58jccrxjrc6ukfylp9ngg3ufttemk2wc7cfj3dwd95c55pnn8du",
+      "to_address": "kaspatest:pppwaajcgy932kck27dqmqx2jrd6yu6zmk82vcyyf43lj0g3s0n9ud36sfttg",
+      "block_hash": "7def597a1bed0a1c9c9a0f8c0d48b0a48e01c6d8da8f16d09fb5392244412698",
+      "block_time": 1780044835,
+      "amount_sompi": 12496.90224375,
+      "outputs_length": 2,
+      "outputs_sample": [
+        {
+          "address": "kaspatest:pppwaajcgy932kck27dqmqx2jrd6yu6zmk82vcyyf43lj0g3s0n9ud36sfttg",
+          "amount_sompi": 100000000
+        },
+        {
+          "address": "kaspatest:qp4fh3fz9g58jccrxjrc6ukfylp9ngg3ufttemk2wc7cfj3dwd95c55pnn8du",
+          "amount_sompi": 1249690224375
+        }
+      ],
+      "payload_meta": {
+        "market_id": "ext-pool-1780044831708-2krsb",
+        "oracle_pk": "6a9bc5222a2879630334878d72c927c259a111e256bceeca763d84ca2d734b4c",
+        "deposit_tx": "179464fd57de1e468abd9d7ddcee4030330bbe5953f62e3f423036b0460560b8",
+        "bond_amount": 100000000
+      }
+    },
+    {
+      "event_type": "pool_oracle_deposit",
+      "event_synthetic_id": "pool_oracle_deposit:ext-pool:e8e8d827:1780044834718",
+      "real_chain_txid": "f618f9e6c34aeb471c85bf1251837b29a22740c43c533425ef5319635567bd81",
+      "observed_at": "2026-05-29 08:53:54",
+      "from_address": "kaspatest:qr5w3kp8sfuqx00mvs2s8n0szqkr9av4npfzupkn33jday24sw28q43he8rwu",
+      "to_address": "kaspatest:pppwaajcgy932kck27dqmqx2jrd6yu6zmk82vcyyf43lj0g3s0n9ud36sfttg",
+      "block_hash": "8fb54ab10ec38ad513e26d6727a10146bb7b1e1b57ad7318fb2b4034c5b1d540",
+      "block_time": 1780044832,
+      "amount_sompi": 993.8194,
+      "outputs_length": 2,
+      "outputs_sample": [
+        {
+          "address": "kaspatest:pppwaajcgy932kck27dqmqx2jrd6yu6zmk82vcyyf43lj0g3s0n9ud36sfttg",
+          "amount_sompi": 100000000
+        },
+        {
+          "address": "kaspatest:qr5w3kp8sfuqx00mvs2s8n0szqkr9av4npfzupkn33jday24sw28q43he8rwu",
+          "amount_sompi": 99381940000
+        }
+      ],
+      "payload_meta": {
+        "market_id": "ext-pool-1780044831708-2krsb",
+        "oracle_pk": "e8e8d8278278033dfb641503cdf0102c32f59598522e06d38c64de9155839470",
+        "deposit_tx": "f618f9e6c34aeb471c85bf1251837b29a22740c43c533425ef5319635567bd81",
+        "bond_amount": 100000000
+      }
+    },
+    {
+      "event_type": "pool_oracle_deposit",
+      "event_synthetic_id": "pool_oracle_deposit:ext-pool:8dc76524:1780044828666",
+      "real_chain_txid": "f2ca487559a3f90e8893876c28611103e1a5ff6bb2fea5032221b3427ba52531",
+      "observed_at": "2026-05-29 08:53:48",
+      "from_address": "kaspatest:qzxuwefy3skknmukz42kps7hf0gw8gt5l4vk8t3uxfpx5tgu90lu2wf4puz3s",
+      "to_address": "kaspatest:prv80tmq2rhryras6x4aspt2t52dt0g42pf9tsch9wr8swqz3w2cu46aswxqe",
+      "block_hash": "52f91c6daad1a32076b62b716a6c1b060ecbf07e5b954cb5955bc9e943cee276",
+      "block_time": 1780044826,
+      "amount_sompi": 993.8194,
+      "outputs_length": 2,
+      "outputs_sample": [
+        {
+          "address": "kaspatest:prv80tmq2rhryras6x4aspt2t52dt0g42pf9tsch9wr8swqz3w2cu46aswxqe",
+          "amount_sompi": 100000000
+        },
+        {
+          "address": "kaspatest:qzxuwefy3skknmukz42kps7hf0gw8gt5l4vk8t3uxfpx5tgu90lu2wf4puz3s",
+          "amount_sompi": 99381940000
+        }
+      ],
+      "payload_meta": {
+        "market_id": "ext-pool-1780044819621-ge26b",
+        "oracle_pk": "8dc765248c2d69ef96155560c3d74bd0e3a174fd5963ae3c32426a2d1c2bffc5",
+        "deposit_tx": "f2ca487559a3f90e8893876c28611103e1a5ff6bb2fea5032221b3427ba52531",
+        "bond_amount": 100000000
+      }
+    },
+    {
+      "event_type": "pool_oracle_deposit",
+      "event_synthetic_id": "pool_oracle_deposit:ext-pool:e8e8d827:1780044825659",
+      "real_chain_txid": "bade45d8df5c24d940dddf1f45427311b0a5257e25f437285770124bd2cfc98c",
+      "observed_at": "2026-05-29 08:53:45",
+      "from_address": "kaspatest:qr5w3kp8sfuqx00mvs2s8n0szqkr9av4npfzupkn33jday24sw28q43he8rwu",
+      "to_address": "kaspatest:prv80tmq2rhryras6x4aspt2t52dt0g42pf9tsch9wr8swqz3w2cu46aswxqe",
+      "block_hash": "d395234d5abc47dc97735c61e7524d7a9f09007341c60c3173bbab97bb0fb659",
+      "block_time": 1780044823,
+      "amount_sompi": 994.8495,
+      "outputs_length": 2,
+      "outputs_sample": [
+        {
+          "address": "kaspatest:prv80tmq2rhryras6x4aspt2t52dt0g42pf9tsch9wr8swqz3w2cu46aswxqe",
+          "amount_sompi": 100000000
+        },
+        {
+          "address": "kaspatest:qr5w3kp8sfuqx00mvs2s8n0szqkr9av4npfzupkn33jday24sw28q43he8rwu",
+          "amount_sompi": 99484950000
+        }
+      ],
+      "payload_meta": {
+        "market_id": "ext-pool-1780044819621-ge26b",
+        "oracle_pk": "e8e8d8278278033dfb641503cdf0102c32f59598522e06d38c64de9155839470",
+        "deposit_tx": "bade45d8df5c24d940dddf1f45427311b0a5257e25f437285770124bd2cfc98c",
+        "bond_amount": 100000000
+      }
+    },
+    {
+      "event_type": "pool_oracle_deposit",
+      "event_synthetic_id": "pool_oracle_deposit:ext-pool:4a355a77:1780044822638",
+      "real_chain_txid": "96a9936c0e48091af8a09e178326a744ce4afb843635332cb8834cfbfc007ad4",
+      "observed_at": "2026-05-29 08:53:42",
+      "from_address": "kaspatest:qp9r2knhy3r2mkdf37frgsze7d583vxcg8na2z92y77yll3d8ftmzxjxwcd3j",
+      "to_address": "kaspatest:prv80tmq2rhryras6x4aspt2t52dt0g42pf9tsch9wr8swqz3w2cu46aswxqe",
+      "block_hash": "439d1f23a3179aa6cb55f44e2c30827bb6c317c226e1a4cec68daf49006dbeed",
+      "block_time": 1780044820,
+      "amount_sompi": 3.96989482,
+      "outputs_length": 2,
+      "outputs_sample": [
+        {
+          "address": "kaspatest:prv80tmq2rhryras6x4aspt2t52dt0g42pf9tsch9wr8swqz3w2cu46aswxqe",
+          "amount_sompi": 100000000
+        },
+        {
+          "address": "kaspatest:qp9r2knhy3r2mkdf37frgsze7d583vxcg8na2z92y77yll3d8ftmzxjxwcd3j",
+          "amount_sompi": 396989482
+        }
+      ],
+      "payload_meta": {
+        "market_id": "ext-pool-1780044819621-ge26b",
+        "oracle_pk": "4a355a772446add9a98f92344059f36878b0d841e7d508aa27bc4ffe2d3a57b1",
+        "deposit_tx": "96a9936c0e48091af8a09e178326a744ce4afb843635332cb8834cfbfc007ad4",
+        "bond_amount": 100000000
+      }
+    },
+    {
+      "event_type": "pool_oracle_deposit",
+      "event_synthetic_id": "pool_oracle_deposit:ext-pool:7212edc7:1780044816578",
+      "real_chain_txid": "91a1f4c8d6d6fe8fbfc8f1ff04bdf5e2d8516487c7bb4533f4759eb1436259c7",
+      "observed_at": "2026-05-29 08:53:36",
+      "from_address": "kaspatest:qpep9mw8m377jdadh9sawc5ect9d6vhvuv3rvxh2lturp588lejhjg7gq5f4t",
+      "to_address": "kaspatest:pqvkvn4rly8dyck2qz48ee2jptam9aakyfahdlp6r052kwq25fsrshvmq4an6",
+      "block_hash": "35d8cb1055a7abab596d60f395d36c2a8caff7c2a803df0f1537f6b84101c8db",
+      "block_time": 1780044814,
+      "amount_sompi": 12496.90224375,
+      "outputs_length": 2,
+      "outputs_sample": [
+        {
+          "address": "kaspatest:pqvkvn4rly8dyck2qz48ee2jptam9aakyfahdlp6r052kwq25fsrshvmq4an6",
+          "amount_sompi": 100000000
+        },
+        {
+          "address": "kaspatest:qpep9mw8m377jdadh9sawc5ect9d6vhvuv3rvxh2lturp588lejhjg7gq5f4t",
+          "amount_sompi": 1249690224375
+        }
+      ],
+      "payload_meta": {
+        "market_id": "ext-pool-1780044807533-yvbqd",
+        "oracle_pk": "7212edc7dc7de937adb961d76299c2cadd32ece322361aeafaf830d0e7fe6579",
+        "deposit_tx": "91a1f4c8d6d6fe8fbfc8f1ff04bdf5e2d8516487c7bb4533f4759eb1436259c7",
+        "bond_amount": 100000000
+      }
+    },
+    {
+      "event_type": "pool_oracle_deposit",
+      "event_synthetic_id": "pool_oracle_deposit:ext-pool:4a355a77:1780044813564",
+      "real_chain_txid": "48c8ffdcf1c350764b3c21aa4cd059f2a66874cb56bfb750fda7befe868e6e8d",
+      "observed_at": "2026-05-29 08:53:33",
+      "from_address": "kaspatest:qp9r2knhy3r2mkdf37frgsze7d583vxcg8na2z92y77yll3d8ftmzxjxwcd3j",
+      "to_address": "kaspatest:pqvkvn4rly8dyck2qz48ee2jptam9aakyfahdlp6r052kwq25fsrshvmq4an6",
+      "block_hash": "24005a15eb0cb27f9a1628c1ebc104e7952597556821b9da4a3a27a6dc79424e",
+      "block_time": 1780044811,
+      "amount_sompi": 0.87950633,
+      "outputs_length": 2,
+      "outputs_sample": [
+        {
+          "address": "kaspatest:pqvkvn4rly8dyck2qz48ee2jptam9aakyfahdlp6r052kwq25fsrshvmq4an6",
+          "amount_sompi": 100000000
+        },
+        {
+          "address": "kaspatest:qp9r2knhy3r2mkdf37frgsze7d583vxcg8na2z92y77yll3d8ftmzxjxwcd3j",
+          "amount_sompi": 87950633
+        }
+      ],
+      "payload_meta": {
+        "market_id": "ext-pool-1780044807533-yvbqd",
+        "oracle_pk": "4a355a772446add9a98f92344059f36878b0d841e7d508aa27bc4ffe2d3a57b1",
+        "deposit_tx": "48c8ffdcf1c350764b3c21aa4cd059f2a66874cb56bfb750fda7befe868e6e8d",
+        "bond_amount": 100000000
+      }
+    },
+    {
+      "event_type": "pool_oracle_deposit",
+      "event_synthetic_id": "pool_oracle_deposit:ext-pool:8dc76524:1780044810557",
+      "real_chain_txid": "943d0860d6a1c28e462779826b258125d6a5a607678f42de69b24089555582b7",
+      "observed_at": "2026-05-29 08:53:30",
+      "from_address": "kaspatest:qzxuwefy3skknmukz42kps7hf0gw8gt5l4vk8t3uxfpx5tgu90lu2wf4puz3s",
+      "to_address": "kaspatest:pqvkvn4rly8dyck2qz48ee2jptam9aakyfahdlp6r052kwq25fsrshvmq4an6",
+      "block_hash": "2a536735a496b0db04a135d1e09c288418c8d8116e2bd46de284af6459c6ff25",
+      "block_time": 1780044808,
+      "amount_sompi": 994.8495,
+      "outputs_length": 2,
+      "outputs_sample": [
+        {
+          "address": "kaspatest:pqvkvn4rly8dyck2qz48ee2jptam9aakyfahdlp6r052kwq25fsrshvmq4an6",
+          "amount_sompi": 100000000
+        },
+        {
+          "address": "kaspatest:qzxuwefy3skknmukz42kps7hf0gw8gt5l4vk8t3uxfpx5tgu90lu2wf4puz3s",
+          "amount_sompi": 99484950000
+        }
+      ],
+      "payload_meta": {
+        "market_id": "ext-pool-1780044807533-yvbqd",
+        "oracle_pk": "8dc765248c2d69ef96155560c3d74bd0e3a174fd5963ae3c32426a2d1c2bffc5",
+        "deposit_tx": "943d0860d6a1c28e462779826b258125d6a5a607678f42de69b24089555582b7",
+        "bond_amount": 100000000
+      }
+    },
+    {
+      "event_type": "pool_oracle_deposit",
+      "event_synthetic_id": "pool_oracle_deposit:ext-pool:e8e8d827:1780044115875",
+      "real_chain_txid": "ccd2e0573eda7801a21b9bcc0823efad15854fe7a8d83d4190f72e938b698ac9",
+      "observed_at": "2026-05-29 08:41:55",
+      "from_address": "kaspatest:qr5w3kp8sfuqx00mvs2s8n0szqkr9av4npfzupkn33jday24sw28q43he8rwu",
+      "to_address": "kaspatest:pzu0794yfnwctm2z3ar5yc85nhd25sd5fd6hsu4zv86zdk7af4qecd0p8ajqv",
+      "block_hash": "ef23e5424c832261f150285fcb3c3ba07257a3e35d98111cbf2c7a83cee52253",
+      "block_time": 1780044113,
+      "amount_sompi": 995.8796,
+      "outputs_length": 2,
+      "outputs_sample": [
+        {
+          "address": "kaspatest:pzu0794yfnwctm2z3ar5yc85nhd25sd5fd6hsu4zv86zdk7af4qecd0p8ajqv",
+          "amount_sompi": 100000000
+        },
+        {
+          "address": "kaspatest:qr5w3kp8sfuqx00mvs2s8n0szqkr9av4npfzupkn33jday24sw28q43he8rwu",
+          "amount_sompi": 99587960000
+        }
+      ],
+      "payload_meta": {
+        "market_id": "ext-pool-1780044106832-u7hq4",
+        "oracle_pk": "e8e8d8278278033dfb641503cdf0102c32f59598522e06d38c64de9155839470",
+        "deposit_tx": "ccd2e0573eda7801a21b9bcc0823efad15854fe7a8d83d4190f72e938b698ac9",
+        "bond_amount": 100000000
+      }
+    },
+    {
+      "event_type": "pool_oracle_deposit",
+      "event_synthetic_id": "pool_oracle_deposit:ext-pool:6a9bc522:1780044112860",
+      "real_chain_txid": "5b1b5e23ab074f8eb00ed3ae518bc09168ad7f94295de545bd4696bed9a89185",
+      "observed_at": "2026-05-29 08:41:52",
+      "from_address": "kaspatest:qp4fh3fz9g58jccrxjrc6ukfylp9ngg3ufttemk2wc7cfj3dwd95c55pnn8du",
+      "to_address": "kaspatest:pzu0794yfnwctm2z3ar5yc85nhd25sd5fd6hsu4zv86zdk7af4qecd0p8ajqv",
+      "block_hash": "a4e0f908b2d98aab69e9a22f5ddf695b146d19ed00a4a05c37424d4aadf7ee52",
+      "block_time": 1780044110,
+      "amount_sompi": 12497.93234375,
+      "outputs_length": 2,
+      "outputs_sample": [
+        {
+          "address": "kaspatest:pzu0794yfnwctm2z3ar5yc85nhd25sd5fd6hsu4zv86zdk7af4qecd0p8ajqv",
+          "amount_sompi": 100000000
+        },
+        {
+          "address": "kaspatest:qp4fh3fz9g58jccrxjrc6ukfylp9ngg3ufttemk2wc7cfj3dwd95c55pnn8du",
+          "amount_sompi": 1249793234375
+        }
+      ],
+      "payload_meta": {
+        "market_id": "ext-pool-1780044106832-u7hq4",
+        "oracle_pk": "6a9bc5222a2879630334878d72c927c259a111e256bceeca763d84ca2d734b4c",
+        "deposit_tx": "5b1b5e23ab074f8eb00ed3ae518bc09168ad7f94295de545bd4696bed9a89185",
+        "bond_amount": 100000000
+      }
+    },
+    {
+      "event_type": "pool_oracle_deposit",
+      "event_synthetic_id": "pool_oracle_deposit:ext-pool:8dc76524:1780044109846",
+      "real_chain_txid": "11f6e6b2dc29462e3d5924e024d1854989817de03ec83ad9cdf5b0c8ea4fdc17",
+      "observed_at": "2026-05-29 08:41:49",
+      "from_address": "kaspatest:qzxuwefy3skknmukz42kps7hf0gw8gt5l4vk8t3uxfpx5tgu90lu2wf4puz3s",
+      "to_address": "kaspatest:pzu0794yfnwctm2z3ar5yc85nhd25sd5fd6hsu4zv86zdk7af4qecd0p8ajqv",
+      "block_hash": "81e8027742c5195e2fdaf98e311a73eeb6e9d855d6c3cceeff47876484427697",
+      "block_time": 1780044108,
+      "amount_sompi": 995.8796,
+      "outputs_length": 2,
+      "outputs_sample": [
+        {
+          "address": "kaspatest:pzu0794yfnwctm2z3ar5yc85nhd25sd5fd6hsu4zv86zdk7af4qecd0p8ajqv",
+          "amount_sompi": 100000000
+        },
+        {
+          "address": "kaspatest:qzxuwefy3skknmukz42kps7hf0gw8gt5l4vk8t3uxfpx5tgu90lu2wf4puz3s",
+          "amount_sompi": 99587960000
+        }
+      ],
+      "payload_meta": {
+        "market_id": "ext-pool-1780044106832-u7hq4",
+        "oracle_pk": "8dc765248c2d69ef96155560c3d74bd0e3a174fd5963ae3c32426a2d1c2bffc5",
+        "deposit_tx": "11f6e6b2dc29462e3d5924e024d1854989817de03ec83ad9cdf5b0c8ea4fdc17",
+        "bond_amount": 100000000
+      }
+    },
+    {
+      "event_type": "pool_oracle_deposit",
+      "event_synthetic_id": "pool_oracle_deposit:ext-pool:6a9bc522:1780044103788",
+      "real_chain_txid": "265a1203295415a0709c0bb09f229bc6f28ff52cae7aeafc49c96e5fed749653",
+      "observed_at": "2026-05-29 08:41:43",
+      "from_address": "kaspatest:qp4fh3fz9g58jccrxjrc6ukfylp9ngg3ufttemk2wc7cfj3dwd95c55pnn8du",
+      "to_address": "kaspatest:pp2zxdr2dr8qx2pge7p6jknhpwa7t9p52uhp72uwmgh270v8x7suzgj9crjjr",
+      "block_hash": "394b060b7244754a303aaea4308389f52dfed4b306e20dd605fb6f6bae87aa9e",
+      "block_time": 1780044101,
+      "amount_sompi": 12498.96244375,
+      "outputs_length": 2,
+      "outputs_sample": [
+        {
+          "address": "kaspatest:pp2zxdr2dr8qx2pge7p6jknhpwa7t9p52uhp72uwmgh270v8x7suzgj9crjjr",
+          "amount_sompi": 100000000
+        },
+        {
+          "address": "kaspatest:qp4fh3fz9g58jccrxjrc6ukfylp9ngg3ufttemk2wc7cfj3dwd95c55pnn8du",
+          "amount_sompi": 1249896244375
+        }
+      ],
+      "payload_meta": {
+        "market_id": "ext-pool-1780044094732-d4z00",
+        "oracle_pk": "6a9bc5222a2879630334878d72c927c259a111e256bceeca763d84ca2d734b4c",
+        "deposit_tx": "265a1203295415a0709c0bb09f229bc6f28ff52cae7aeafc49c96e5fed749653",
+        "bond_amount": 100000000
+      }
+    },
+    {
+      "event_type": "pool_oracle_deposit",
+      "event_synthetic_id": "pool_oracle_deposit:ext-pool:8dc76524:1780044100756",
+      "real_chain_txid": "1f0a60387ee4da5fc301e2f08e1eba62422a759b5b6c9698ffe024b70335c7a5",
+      "observed_at": "2026-05-29 08:41:40",
+      "from_address": "kaspatest:qzxuwefy3skknmukz42kps7hf0gw8gt5l4vk8t3uxfpx5tgu90lu2wf4puz3s",
+      "to_address": "kaspatest:pp2zxdr2dr8qx2pge7p6jknhpwa7t9p52uhp72uwmgh270v8x7suzgj9crjjr",
+      "block_hash": "a646bc199b4eba04a37608f8563bb9806b55ed427c6f26a38d175d0286d64005",
+      "block_time": 1780044098,
+      "amount_sompi": 996.9097,
+      "outputs_length": 2,
+      "outputs_sample": [
+        {
+          "address": "kaspatest:pp2zxdr2dr8qx2pge7p6jknhpwa7t9p52uhp72uwmgh270v8x7suzgj9crjjr",
+          "amount_sompi": 100000000
+        },
+        {
+          "address": "kaspatest:qzxuwefy3skknmukz42kps7hf0gw8gt5l4vk8t3uxfpx5tgu90lu2wf4puz3s",
+          "amount_sompi": 99690970000
+        }
+      ],
+      "payload_meta": {
+        "market_id": "ext-pool-1780044094732-d4z00",
+        "oracle_pk": "8dc765248c2d69ef96155560c3d74bd0e3a174fd5963ae3c32426a2d1c2bffc5",
+        "deposit_tx": "1f0a60387ee4da5fc301e2f08e1eba62422a759b5b6c9698ffe024b70335c7a5",
+        "bond_amount": 100000000
+      }
+    },
+    {
+      "event_type": "pool_oracle_deposit",
+      "event_synthetic_id": "pool_oracle_deposit:ext-pool:4a355a77:1780044097748",
+      "real_chain_txid": "2bbd0657ae7031f0bce055d24e19bc05303da4fecc0fabd963427e670629506e",
+      "observed_at": "2026-05-29 08:41:37",
+      "from_address": "kaspatest:qp9r2knhy3r2mkdf37frgsze7d583vxcg8na2z92y77yll3d8ftmzxjxwcd3j",
+      "to_address": "kaspatest:pp2zxdr2dr8qx2pge7p6jknhpwa7t9p52uhp72uwmgh270v8x7suzgj9crjjr",
+      "block_hash": "a6d755e4b9d371e0e39aa676a2c0c8a4bba8a28ae8807467c2c0c3ef09bc7a7b",
+      "block_time": 1780044095,
+      "amount_sompi": 1.90966764,
+      "outputs_length": 2,
+      "outputs_sample": [
+        {
+          "address": "kaspatest:pp2zxdr2dr8qx2pge7p6jknhpwa7t9p52uhp72uwmgh270v8x7suzgj9crjjr",
+          "amount_sompi": 100000000
+        },
+        {
+          "address": "kaspatest:qp9r2knhy3r2mkdf37frgsze7d583vxcg8na2z92y77yll3d8ftmzxjxwcd3j",
+          "amount_sompi": 190966764
+        }
+      ],
+      "payload_meta": {
+        "market_id": "ext-pool-1780044094732-d4z00",
+        "oracle_pk": "4a355a772446add9a98f92344059f36878b0d841e7d508aa27bc4ffe2d3a57b1",
+        "deposit_tx": "2bbd0657ae7031f0bce055d24e19bc05303da4fecc0fabd963427e670629506e",
+        "bond_amount": 100000000
+      }
+    },
+    {
+      "event_type": "pool_oracle_deposit",
+      "event_synthetic_id": "pool_oracle_deposit:ext-pool:7212edc7:1780044091688",
+      "real_chain_txid": "1274a83d5f39c748504453bffe98ff7593410816f9753e4a000767381c13cfd1",
+      "observed_at": "2026-05-29 08:41:31",
+      "from_address": "kaspatest:qpep9mw8m377jdadh9sawc5ect9d6vhvuv3rvxh2lturp588lejhjg7gq5f4t",
+      "to_address": "kaspatest:pp46jpryvum9kss2tt4g9yyxgmax47us5l3a9a2pjdwmp6r4j0xa57dravju9",
+      "block_hash": "a1ed6051ccb87ff1474f4b08b9785e672da261bb3c0ce08dd93f3dc1a66b11a2",
+      "block_time": 1780044089,
+      "amount_sompi": 12497.93234375,
+      "outputs_length": 2,
+      "outputs_sample": [
+        {
+          "address": "kaspatest:pp46jpryvum9kss2tt4g9yyxgmax47us5l3a9a2pjdwmp6r4j0xa57dravju9",
+          "amount_sompi": 100000000
+        },
+        {
+          "address": "kaspatest:qpep9mw8m377jdadh9sawc5ect9d6vhvuv3rvxh2lturp588lejhjg7gq5f4t",
+          "amount_sompi": 1249793234375
+        }
+      ],
+      "payload_meta": {
+        "market_id": "ext-pool-1780044082629-q5jo0",
+        "oracle_pk": "7212edc7dc7de937adb961d76299c2cadd32ece322361aeafaf830d0e7fe6579",
+        "deposit_tx": "1274a83d5f39c748504453bffe98ff7593410816f9753e4a000767381c13cfd1",
+        "bond_amount": 100000000
+      }
+    },
+    {
+      "event_type": "pool_oracle_deposit",
+      "event_synthetic_id": "pool_oracle_deposit:ext-pool:4a355a77:1780044088672",
+      "real_chain_txid": "9432d16f3362cd69ec1637f9099f86ace62a2b8987226724a2a426afbfcd0fba",
+      "observed_at": "2026-05-29 08:41:28",
+      "from_address": "kaspatest:qp9r2knhy3r2mkdf37frgsze7d583vxcg8na2z92y77yll3d8ftmzxjxwcd3j",
+      "to_address": "kaspatest:pp46jpryvum9kss2tt4g9yyxgmax47us5l3a9a2pjdwmp6r4j0xa57dravju9",
+      "block_hash": "0e82044fb1e2e9d80e1fb635961edc5943996a082f8d2dc18192fbbfc5c56fcd",
+      "block_time": 1780044086,
+      "amount_sompi": 2.93978599,
+      "outputs_length": 2,
+      "outputs_sample": [
+        {
+          "address": "kaspatest:pp46jpryvum9kss2tt4g9yyxgmax47us5l3a9a2pjdwmp6r4j0xa57dravju9",
+          "amount_sompi": 100000000
+        },
+        {
+          "address": "kaspatest:qp9r2knhy3r2mkdf37frgsze7d583vxcg8na2z92y77yll3d8ftmzxjxwcd3j",
+          "amount_sompi": 293978599
+        }
+      ],
+      "payload_meta": {
+        "market_id": "ext-pool-1780044082629-q5jo0",
+        "oracle_pk": "4a355a772446add9a98f92344059f36878b0d841e7d508aa27bc4ffe2d3a57b1",
+        "deposit_tx": "9432d16f3362cd69ec1637f9099f86ace62a2b8987226724a2a426afbfcd0fba",
+        "bond_amount": 100000000
+      }
+    },
+    {
+      "event_type": "pool_oracle_deposit",
+      "event_synthetic_id": "pool_oracle_deposit:ext-pool:e8e8d827:1780044085651",
+      "real_chain_txid": "152dceb91c1b06cc125c96071a1cfb5baf595bcb2f52ab4132cdaf8ba0554c2d",
+      "observed_at": "2026-05-29 08:41:25",
+      "from_address": "kaspatest:qr5w3kp8sfuqx00mvs2s8n0szqkr9av4npfzupkn33jday24sw28q43he8rwu",
+      "to_address": "kaspatest:pp46jpryvum9kss2tt4g9yyxgmax47us5l3a9a2pjdwmp6r4j0xa57dravju9",
+      "block_hash": "446b5d353d8f7131811b45b8f215a8e4ed7b282367017e479ab9883551667384",
+      "block_time": 1780044083,
+      "amount_sompi": 996.9097,
+      "outputs_length": 2,
+      "outputs_sample": [
+        {
+          "address": "kaspatest:pp46jpryvum9kss2tt4g9yyxgmax47us5l3a9a2pjdwmp6r4j0xa57dravju9",
+          "amount_sompi": 100000000
+        },
+        {
+          "address": "kaspatest:qr5w3kp8sfuqx00mvs2s8n0szqkr9av4npfzupkn33jday24sw28q43he8rwu",
+          "amount_sompi": 99690970000
+        }
+      ],
+      "payload_meta": {
+        "market_id": "ext-pool-1780044082629-q5jo0",
+        "oracle_pk": "e8e8d8278278033dfb641503cdf0102c32f59598522e06d38c64de9155839470",
+        "deposit_tx": "152dceb91c1b06cc125c96071a1cfb5baf595bcb2f52ab4132cdaf8ba0554c2d",
+        "bond_amount": 100000000
+      }
+    },
+    {
+      "event_type": "pool_oracle_deposit",
+      "event_synthetic_id": "pool_oracle_deposit:ext-pool:e8e8d827:1780044079596",
+      "real_chain_txid": "6d8e4f24bfd38355b1c1ab308bc97add1701e8bd5dedccf4ac4c3573c7185721",
+      "observed_at": "2026-05-29 08:41:19",
+      "from_address": "kaspatest:qr5w3kp8sfuqx00mvs2s8n0szqkr9av4npfzupkn33jday24sw28q43he8rwu",
+      "to_address": "kaspatest:pr9t3n6y73fr6vvv0g8xpznyrekjm0q0qnggey5nsqmg0zv3xqquwc9rjak9l",
+      "block_hash": "1818196ce5722f2c86ace54e074a935a30f6cffa9d60602070181c5aaeeec8ad",
+      "block_time": 1780044077,
+      "amount_sompi": 997.9398,
+      "outputs_length": 2,
+      "outputs_sample": [
+        {
+          "address": "kaspatest:pr9t3n6y73fr6vvv0g8xpznyrekjm0q0qnggey5nsqmg0zv3xqquwc9rjak9l",
+          "amount_sompi": 100000000
+        },
+        {
+          "address": "kaspatest:qr5w3kp8sfuqx00mvs2s8n0szqkr9av4npfzupkn33jday24sw28q43he8rwu",
+          "amount_sompi": 99793980000
+        }
+      ],
+      "payload_meta": {
+        "market_id": "ext-pool-1780044070514-ka7im",
+        "oracle_pk": "e8e8d8278278033dfb641503cdf0102c32f59598522e06d38c64de9155839470",
+        "deposit_tx": "6d8e4f24bfd38355b1c1ab308bc97add1701e8bd5dedccf4ac4c3573c7185721",
+        "bond_amount": 100000000
+      }
+    },
+    {
+      "event_type": "pool_oracle_deposit",
+      "event_synthetic_id": "pool_oracle_deposit:ext-pool:8dc76524:1780044076575",
+      "real_chain_txid": "b998f72736b1b88aa5b425b24f2e2b8355ecb6f54dae2c9c014157da386af047",
+      "observed_at": "2026-05-29 08:41:16",
+      "from_address": "kaspatest:qzxuwefy3skknmukz42kps7hf0gw8gt5l4vk8t3uxfpx5tgu90lu2wf4puz3s",
+      "to_address": "kaspatest:pr9t3n6y73fr6vvv0g8xpznyrekjm0q0qnggey5nsqmg0zv3xqquwc9rjak9l",
+      "block_hash": "c555b8124349447cc97104ac2feda936f9d0e361defa66276178cab3023258c2",
+      "block_time": 1780044074,
+      "amount_sompi": 997.9398,
+      "outputs_length": 2,
+      "outputs_sample": [
+        {
+          "address": "kaspatest:pr9t3n6y73fr6vvv0g8xpznyrekjm0q0qnggey5nsqmg0zv3xqquwc9rjak9l",
+          "amount_sompi": 100000000
+        },
+        {
+          "address": "kaspatest:qzxuwefy3skknmukz42kps7hf0gw8gt5l4vk8t3uxfpx5tgu90lu2wf4puz3s",
+          "amount_sompi": 99793980000
+        }
+      ],
+      "payload_meta": {
+        "market_id": "ext-pool-1780044070514-ka7im",
+        "oracle_pk": "8dc765248c2d69ef96155560c3d74bd0e3a174fd5963ae3c32426a2d1c2bffc5",
+        "deposit_tx": "b998f72736b1b88aa5b425b24f2e2b8355ecb6f54dae2c9c014157da386af047",
+        "bond_amount": 100000000
+      }
+    },
+    {
+      "event_type": "pool_oracle_deposit",
+      "event_synthetic_id": "pool_oracle_deposit:ext-pool:7212edc7:1780044073555",
+      "real_chain_txid": "4451e1f722cd6f42a26d6b412f137bf113bbcb544a453f9187e7be9d6fc1c7dd",
+      "observed_at": "2026-05-29 08:41:13",
+      "from_address": "kaspatest:qpep9mw8m377jdadh9sawc5ect9d6vhvuv3rvxh2lturp588lejhjg7gq5f4t",
+      "to_address": "kaspatest:pr9t3n6y73fr6vvv0g8xpznyrekjm0q0qnggey5nsqmg0zv3xqquwc9rjak9l",
+      "block_hash": "7b0bccd87200fb67db0b324004f4d836c153c50989298545df9f149d73d0c9dc",
+      "block_time": 1780044071,
+      "amount_sompi": 12498.96244375,
+      "outputs_length": 2,
+      "outputs_sample": [
+        {
+          "address": "kaspatest:pr9t3n6y73fr6vvv0g8xpznyrekjm0q0qnggey5nsqmg0zv3xqquwc9rjak9l",
+          "amount_sompi": 100000000
+        },
+        {
+          "address": "kaspatest:qpep9mw8m377jdadh9sawc5ect9d6vhvuv3rvxh2lturp588lejhjg7gq5f4t",
+          "amount_sompi": 1249896244375
+        }
+      ],
+      "payload_meta": {
+        "market_id": "ext-pool-1780044070514-ka7im",
+        "oracle_pk": "7212edc7dc7de937adb961d76299c2cadd32ece322361aeafaf830d0e7fe6579",
+        "deposit_tx": "4451e1f722cd6f42a26d6b412f137bf113bbcb544a453f9187e7be9d6fc1c7dd",
+        "bond_amount": 100000000
+      }
+    },
+    {
+      "event_type": "pool_oracle_deposit",
+      "event_synthetic_id": "pool_oracle_deposit:ext-pool:4a355a77:1780043980178",
+      "real_chain_txid": "5f98bb66a150cf0fc22150b81cf5496cae359be1dd91e91c42141f15ff632e94",
+      "observed_at": "2026-05-29 08:39:40",
+      "from_address": "kaspatest:qp9r2knhy3r2mkdf37frgsze7d583vxcg8na2z92y77yll3d8ftmzxjxwcd3j",
+      "to_address": "kaspatest:pqefhm8275pqv5gf4cvvuel9320n7mfyxcevxupym8ckdurmmczn74ec70l9k",
+      "block_hash": "59fe625780c1dfe6bb9eadac05e8ae838e0d70ca6b9da53cd5a3778e36acbc0d",
+      "block_time": 1780043978,
+      "amount_sompi": 3.96989482,
+      "outputs_length": 2,
+      "outputs_sample": [
+        {
+          "address": "kaspatest:pqefhm8275pqv5gf4cvvuel9320n7mfyxcevxupym8ckdurmmczn74ec70l9k",
+          "amount_sompi": 100000000
+        },
+        {
+          "address": "kaspatest:qp9r2knhy3r2mkdf37frgsze7d583vxcg8na2z92y77yll3d8ftmzxjxwcd3j",
+          "amount_sompi": 396989482
+        }
+      ],
+      "payload_meta": {
+        "market_id": "ext-pool-1780043949859-mdok0",
+        "oracle_pk": "4a355a772446add9a98f92344059f36878b0d841e7d508aa27bc4ffe2d3a57b1",
+        "deposit_tx": "5f98bb66a150cf0fc22150b81cf5496cae359be1dd91e91c42141f15ff632e94",
+        "bond_amount": 100000000
+      }
+    },
+    {
+      "event_type": "pool_oracle_deposit",
+      "event_synthetic_id": "pool_oracle_deposit:ext-pool:8dc76524:1780043977134",
+      "real_chain_txid": "a734536e0db2ab6ea4c0a7fae6dba30d7eb0bd57934b538b3b74fbacbe2e61a8",
+      "observed_at": "2026-05-29 08:39:37",
+      "from_address": "kaspatest:qzxuwefy3skknmukz42kps7hf0gw8gt5l4vk8t3uxfpx5tgu90lu2wf4puz3s",
+      "to_address": "kaspatest:pqefhm8275pqv5gf4cvvuel9320n7mfyxcevxupym8ckdurmmczn74ec70l9k",
+      "block_hash": "6a0ef9e1e34bfeaab99ceb1c44d5a7c3c2ae8880468b1989c6281072da20a397",
+      "block_time": 1780043974,
+      "amount_sompi": 998.9699,
+      "outputs_length": 2,
+      "outputs_sample": [
+        {
+          "address": "kaspatest:pqefhm8275pqv5gf4cvvuel9320n7mfyxcevxupym8ckdurmmczn74ec70l9k",
+          "amount_sompi": 100000000
+        },
+        {
+          "address": "kaspatest:qzxuwefy3skknmukz42kps7hf0gw8gt5l4vk8t3uxfpx5tgu90lu2wf4puz3s",
+          "amount_sompi": 99896990000
+        }
+      ],
+      "payload_meta": {
+        "market_id": "ext-pool-1780043949859-mdok0",
+        "oracle_pk": "8dc765248c2d69ef96155560c3d74bd0e3a174fd5963ae3c32426a2d1c2bffc5",
+        "deposit_tx": "a734536e0db2ab6ea4c0a7fae6dba30d7eb0bd57934b538b3b74fbacbe2e61a8",
+        "bond_amount": 100000000
+      }
+    },
+    {
+      "event_type": "pool_oracle_deposit",
+      "event_synthetic_id": "pool_oracle_deposit:ext-pool:e8e8d827:1780043974095",
+      "real_chain_txid": "c8a91502f28ab28eb141eef00b82966f4246dd5b0280861775fa287747ac21d3",
+      "observed_at": "2026-05-29 08:39:34",
+      "from_address": "kaspatest:qr5w3kp8sfuqx00mvs2s8n0szqkr9av4npfzupkn33jday24sw28q43he8rwu",
+      "to_address": "kaspatest:pqefhm8275pqv5gf4cvvuel9320n7mfyxcevxupym8ckdurmmczn74ec70l9k",
+      "block_hash": "eb9a4d9d89938e6e07636ab18e55d1ae66f8f6a881c579c755ef4fef656f14de",
+      "block_time": 1780043972,
+      "amount_sompi": 998.9699,
+      "outputs_length": 2,
+      "outputs_sample": [
+        {
+          "address": "kaspatest:pqefhm8275pqv5gf4cvvuel9320n7mfyxcevxupym8ckdurmmczn74ec70l9k",
+          "amount_sompi": 100000000
+        },
+        {
+          "address": "kaspatest:qr5w3kp8sfuqx00mvs2s8n0szqkr9av4npfzupkn33jday24sw28q43he8rwu",
+          "amount_sompi": 99896990000
+        }
+      ],
+      "payload_meta": {
+        "market_id": "ext-pool-1780043949859-mdok0",
+        "oracle_pk": "e8e8d8278278033dfb641503cdf0102c32f59598522e06d38c64de9155839470",
+        "deposit_tx": "c8a91502f28ab28eb141eef00b82966f4246dd5b0280861775fa287747ac21d3",
+        "bond_amount": 100000000
+      }
+    }
+  ],
+  "notes": [
+    "v0.6 compat verify: post-ship rerun captureBaseline() + diff against this snapshot.",
+    "Critical invariants for v0.5 markets (ADDITIVE design — v0.6 spec §7): bond_amount sompi/broker_fee_pct/winner_amount distribution MUST stay constant.",
+    "Settle real chain TX hash not in pool_settle_consensual_dispatched payload (= dispatched intent only) — outputs.length validation falls back to NEW dispatched events post-v0.6 schema diff vs this snapshot.",
+    "v0.6 ADDITIVE: protocol_version branch, v0.5 markets untouched. New paths (merkle proof / dispute reveal entrypoint) MUST NOT replace existing entrypoints.",
+    "autobet hybrid (sub C) will re-capture bet_tx_baseline post-hybrid for cost diff (chain TX count/sompi fee/latency/oracle round time)."
+  ]
+}

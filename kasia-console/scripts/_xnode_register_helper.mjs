@@ -38,6 +38,7 @@ function spliceLeafState(redeemHex, st) {
   return Buffer.concat([redeem.slice(0, start), stateHex, redeem.slice(start + len)]).toString('hex');
 }
 
+const bettors = [];   // (B) 真 bettor {idx,pk,addr}(public, settle payoutRoot 用; 本地存不进 git, 见 _xnode_ gitignore)
 const myShards = ART.shards.filter(s => s.idx >= SHARD_START && s.idx <= SHARD_END);
 log(`本节点 register 片 ${SHARD_START}-${SHARD_END}(${myShards.length} 片 × ${SEAL} 注), relay=${RELAY.slice(0, 8)}, market=${ART.market_id.slice(0, 12)}`);
 // 周期 broadcaster defrag(NWT 880 nuance: 每注 funding 自转账碎片化 best → 2000+ tx 持续健康需周期 consolidate_utxo, 85eab4de force-all-input-sweep)。
@@ -50,7 +51,9 @@ for (const shard of myShards) {
   let curRedeem = shard.slRedeemHex;   // genesis(count=1)
   let leafTx = await lockTo(p2sh(curRedeem), STAKE);   // lock genesis ShardLeaf(第一注 baked)
   for (let i = 1; i < SEAL; i++) {
-    const b = { pk: xonly(Keypair.random()), side: 0 };
+    const bkp = Keypair.random();
+    const b = { pk: xonly(bkp), side: 0 };
+    bettors.push({ idx: k, pk: b.pk, addr: bkp.toAddress(NET).toString() });   // (B) 存真 bettor {pk,addr}(public 非私钥, settle payoutRoot 用)
     const newState = { local_yes: st.local_yes + Number(STAKE), local_no: st.local_no, count: st.count + 1, pool_value: st.pool_value + Number(STAKE), shardPoolId: shard.shardPoolId };
     const fundTx = await lockTo(RELAY_ADDR, STAKE + TICKET_DUST + 30_000_000n);
     const wit = buildRegisterWitness({ side: b.side, stake: STAKE, leafOutIdx: 0, psOutIdx: 1, bettorPk: b.pk, psArtifact });
@@ -65,6 +68,11 @@ for (const shard of myShards) {
   sealed.push({ idx: k, shardPoolId: shard.shardPoolId, sealedTx: leafTx, sealedRedeemHex: curRedeem, sealedAddr: p2sh(curRedeem), poolValue: st.pool_value });
   log(`片 ${k} sealed: count=${SEAL} pool=${st.pool_value} tx=${leafTx.slice(0, 10)} @ ${p2sh(curRedeem).slice(0, 16)}`);
 }
-console.log(`\n✅ 本节点片 ${SHARD_START}-${SHARD_END} 全 sealed. 回报 J2 consolidate:`);
+// (B) 输出真 bettor {pk,addr}(public)→ 本地文件(settle payoutRoot 用; 不进 git)
+const { writeFileSync } = await import('node:fs');
+const bettorsPath = join(dirname(fileURLToPath(import.meta.url)), `_xnode_bettors_${SHARD_START}_${SHARD_END}.json`);
+writeFileSync(bettorsPath, JSON.stringify({ range: [SHARD_START, SHARD_END], count: bettors.length, bettors }, null, 2));
+console.log(`\n✅ 本节点片 ${SHARD_START}-${SHARD_END} 全 sealed. ${bettors.length} 真 bettor {pk,addr} 存 ${bettorsPath}`);
+console.log('回报 J2 consolidate(sealed):');
 console.log(JSON.stringify(sealed.map(s => ({ idx: s.idx, sealedTx: s.sealedTx, sealedAddr: s.sealedAddr, poolValue: s.poolValue })), null, 2));
 process.exit(0);

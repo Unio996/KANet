@@ -1,0 +1,255 @@
+{
+  "source": "espn",
+  "count": 31,
+  "note": "retrospective: 每条 = 已 settle espn 市场; NWT 映射 condition_id→ESPN 比赛真实结果, 比对 oracle settle outcome",
+  "markets": [
+    {
+      "id": "ext-pool-v07-1781137150656-8eqbp",
+      "condition_id": "967a3c5e9ad2ecc9",
+      "token_id": "KAS_native",
+      "settle_txid": "64d3c9f537001f2f8fae4c795805fe33b261fdc9ed30c1c009b5e40092ef87a0",
+      "resolution_rule": "{\"title\":\"Did the Kansas City Royals win? (NYY @ KC, ESPN event 401815523)\",\"resolution_criteria\":\"YES if ESPN summary marks Kansas City Royals winner of event 401815523; NO otherwise.\",\"data_source_c",
+      "created_at": "2026-06-11 00:19:13"
+    },
+    {
+      "id": "ext-pool-v07-1781137114142-vl9vm",
+      "condition_id": "96ee9f276b2e42cf",
+      "token_id": "KAS_native",
+      "settle_txid": "885f42786df997376e9731792b299cd4fcbb95b2908d14a81586480e1df4b98e",
+      "resolution_rule": "{\"title\":\"Did the Chicago White Sox win? (MIN @ CHW, ESPN event 401815522)\",\"resolution_criteria\":\"YES if ESPN summary marks Chicago White Sox winner of event 401815522; NO otherwise.\",\"data_source_ca",
+      "created_at": "2026-06-11 00:18:37"
+    },
+    {
+      "id": "ext-pool-v07-1781137077522-el75o",
+      "condition_id": "467a288adc747cf9",
+      "token_id": "KAS_native",
+      "settle_txid": "46957bc11def69ab05a6eb498346ec430524d085ebb85b4eaee9926e42b4e7d3",
+      "resolution_rule": "{\"title\":\"Did the New York Mets win? (CIN @ NYM, ESPN event 401815517)\",\"resolution_criteria\":\"YES if ESPN summary marks New York Mets winner of event 401815517; NO otherwise.\",\"data_source_canonical\"",
+      "created_at": "2026-06-11 00:18:00"
+    },
+    {
+      "id": "ext-pool-v07-1781136852612-t4cxj",
+      "condition_id": "557b5b65f17643a1",
+      "token_id": "KAS_native",
+      "settle_txid": "a6db69bb5c00e4839cd78e6244a0267e51c6ab17d59a9502caac69781652413b",
+      "resolution_rule": "{\"title\":\"Did the Detroit Tigers win? (LAA @ DET, ESPN event 401815514)\",\"resolution_criteria\":\"YES if ESPN summary marks Detroit Tigers winner of event 401815514; NO otherwise.\",\"data_source_canonica",
+      "created_at": "2026-06-11 00:14:15"
+    },
+    {
+      "id": "ext-pool-v07-1781136779513-k4zub",
+      "condition_id": "ae048d32ea199791",
+      "token_id": "KAS_native",
+      "settle_txid": "f231aa14a2367f31c8783138cd8a92c12794003cffdb8e67ae135c856683dcdf",
+      "resolution_rule": "{\"title\":\"Did the San Diego Padres win? (PHI @ SD, ESPN event 401815527)\",\"resolution_criteria\":\"YES if ESPN summary marks San Diego Padres winner of event 401815527; NO otherwise.\",\"data_source_canon",
+      "created_at": "2026-06-11 00:13:02"
+    },
+    {
+      "id": "ext-pool-v07-1781136742979-csn4r",
+      "condition_id": "097b13c7cdef4fcc",
+      "token_id": "KAS_native",
+      "settle_txid": "5a4450af6eb911b28b5aa2959137a2078eeabeef82615b8d6e519825e54a3ca8",
+      "resolution_rule": "{\"title\":\"Did the San Francisco Giants win? (ARI @ SF, ESPN event 401815525)\",\"resolution_criteria\":\"YES if ESPN summary marks San Francisco Giants winner of event 401815525; NO otherwise.\",\"data_sour",
+      "created_at": "2026-06-11 00:12:26"
+    },
+    {
+      "id": "ext-pool-v07-1781136634991-qn83m",
+      "condition_id": "4004b3bbba9d631c",
+      "token_id": "KAS_native",
+      "settle_txid": "f4794f3df39ef4d873585f740efa95854c02134e30397aee927a67fa020f7ffd",
+      "resolution_rule": "{\"title\":\"Did the Milwaukee Brewers win? (STL @ MIL, ESPN event 401815524)\",\"resolution_criteria\":\"YES if ESPN summary marks Milwaukee Brewers winner of event 401815524; NO otherwise.\",\"data_source_ca",
+      "created_at": "2026-06-11 00:10:38"
+    },
+    {
+      "id": "ext-pool-v07-1781136598496-wern4",
+      "condition_id": "0ec083cc191a3e74",
+      "token_id": "KAS_native",
+      "settle_txid": "6b1da51d646c3b48588db9b4a22ec82ab6270a1c52580574bd5b08f5f381fc26",
+      "resolution_rule": "{\"title\":\"Did the Cleveland Guardians win? (WSH @ CLE, ESPN event 401815520)\",\"resolution_criteria\":\"YES if ESPN summary marks Cleveland Guardians winner of event 401815520; NO otherwise.\",\"data_sourc",
+      "created_at": "2026-06-11 00:10:01"
+    },
+    {
+      "id": "ext-pool-v07-1781136561933-clou9",
+      "condition_id": "8bb6cfdb1a8dd666",
+      "token_id": "KAS_native",
+      "settle_txid": "1cdfc83151572a67854371e3f337b7f88ad200dca5de57541207d86d0ad08e7b",
+      "resolution_rule": "{\"title\":\"Did the Toronto Blue Jays win? (MIA @ TOR, ESPN event 401815518)\",\"resolution_criteria\":\"YES if ESPN summary marks Toronto Blue Jays winner of event 401815518; NO otherwise.\",\"data_source_ca",
+      "created_at": "2026-06-11 00:09:25"
+    },
+    {
+      "id": "ext-pool-v07-1781136510382-sjzv1",
+      "condition_id": "e861b5149758cbfc",
+      "token_id": "KAS_native",
+      "settle_txid": "cdc4ea7844113b5eb83936686e4b428a79b6429aad3f56fd70c5befbfa5ed5e6",
+      "resolution_rule": "{\"title\":\"Did the Texas Rangers win? (HOU @ TEX, ESPN event 401815533)\",\"resolution_criteria\":\"YES if ESPN summary marks Texas Rangers winner of event 401815533; NO otherwise.\",\"data_source_canonical\"",
+      "created_at": "2026-06-11 00:08:33"
+    },
+    {
+      "id": "ext-pool-v07-1781136473866-m95cq",
+      "condition_id": "41cc822ec15240bb",
+      "token_id": "KAS_native",
+      "settle_txid": "9bffb9be5941558c5a1c42a38523e6501e76000e95e304dd26bce10a0756b574",
+      "resolution_rule": "{\"title\":\"Did the Pittsburgh Pirates win? (CHC @ PIT, ESPN event 401815531)\",\"resolution_criteria\":\"YES if ESPN summary marks Pittsburgh Pirates winner of event 401815531; NO otherwise.\",\"data_source_",
+      "created_at": "2026-06-11 00:07:57"
+    },
+    {
+      "id": "ext-pool-v07-1781134809460-j84qg",
+      "condition_id": "dab8f44e5bd4d971",
+      "token_id": "KAS_native",
+      "settle_txid": "3c28ec7df889c4d2f5936c324b989dfad37471229dd5873393e15c8928d9eb23",
+      "resolution_rule": "{\"title\":\"Did the Colorado Rockies win? (SF @ COL, ESPN event 401815576)\",\"resolution_criteria\":\"YES if ESPN summary marks Colorado Rockies winner of event 401815576; NO otherwise.\",\"data_source_canon",
+      "created_at": "2026-06-10 23:40:12"
+    },
+    {
+      "id": "ext-pool-v07-1781134736417-lstvs",
+      "condition_id": "541dd65240bc0098",
+      "token_id": "KAS_native",
+      "settle_txid": "5d571ee10888a13a245a3c7a9df96cd2d2f5699c49940975f752bea18f026f0d",
+      "resolution_rule": "{\"title\":\"Did the Houston Astros win? (MIL @ HOU, ESPN event 401815575)\",\"resolution_criteria\":\"YES if ESPN summary marks Houston Astros winner of event 401815575; NO otherwise.\",\"data_source_canonica",
+      "created_at": "2026-06-10 23:38:59"
+    },
+    {
+      "id": "ext-pool-v07-1781134621791-ode9k",
+      "condition_id": "7511e1367570add1",
+      "token_id": "KAS_native",
+      "settle_txid": "1c1a1a573d2f514957b7c96c984abde979f3113eb0551cc8f679362550702286",
+      "resolution_rule": "{\"title\":\"Did the Cleveland Guardians win? (BOS @ CLE, ESPN event 401815567)\",\"resolution_criteria\":\"YES if ESPN summary marks Cleveland Guardians winner of event 401815567; NO otherwise.\",\"data_sourc",
+      "created_at": "2026-06-10 23:37:04"
+    },
+    {
+      "id": "ext-pool-v07-1781134399363-rnxqc",
+      "condition_id": "c07b11b3ac51deb8",
+      "token_id": "KAS_native",
+      "settle_txid": "a05bc749b6900d4e69d825a0267bdd046c21f5aae186197d087d23601e0c7102",
+      "resolution_rule": "{\"title\":\"Did the Baltimore Orioles win? (TOR @ BAL, ESPN event 401815571)\",\"resolution_criteria\":\"YES if ESPN summary marks Baltimore Orioles winner of event 401815571; NO otherwise.\",\"data_source_ca",
+      "created_at": "2026-06-10 23:33:22"
+    },
+    {
+      "id": "ext-pool-v07-1781134200398-6wjug",
+      "condition_id": "81fc4ca6128cf95b",
+      "token_id": "KAS_native",
+      "settle_txid": "d8140b72eb863c2a7799a7de83917f45240f884139efdab67165ad475cdc55f5",
+      "resolution_rule": "{\"title\":\"Did the Milwaukee Brewers win? (SF @ MIL, ESPN event 401815584)\",\"resolution_criteria\":\"YES if ESPN summary marks Milwaukee Brewers winner of event 401815584; NO otherwise.\",\"data_source_can",
+      "created_at": "2026-06-10 23:30:04"
+    },
+    {
+      "id": "ext-pool-v07-1781134162773-7n4es",
+      "condition_id": "5575843612982235",
+      "token_id": "KAS_native",
+      "settle_txid": "7259398c15de0b67ceef43cfa690c44d6661eb8db201e2ede7ce601dd7912eca",
+      "resolution_rule": "{\"title\":\"Did the Minnesota Twins win? (CHW @ MIN, ESPN event 401815583)\",\"resolution_criteria\":\"YES if ESPN summary marks Minnesota Twins winner of event 401815583; NO otherwise.\",\"data_source_canoni",
+      "created_at": "2026-06-10 23:29:25"
+    },
+    {
+      "id": "ext-pool-v07-1781102489499-7q403",
+      "condition_id": "f95a0e16db5d5b29",
+      "token_id": "KAS_native",
+      "settle_txid": "e50eb3cf7306261d04d76b9c0f7a0393ef4129e40c9a38af983f0f882e03bf1e",
+      "resolution_rule": "{\"title\":\"Did the Atlanta Braves win? (TOR @ ATL, ESPN event 401815622)\",\"resolution_criteria\":\"YES if ESPN summary marks Atlanta Braves winner of event 401815622; NO otherwise.\",\"data_source_canonica",
+      "created_at": "2026-06-10 14:41:32"
+    },
+    {
+      "id": "ext-pool-v07-1781102447973-zaxfi",
+      "condition_id": "a3301e0853376c33",
+      "token_id": "KAS_native",
+      "settle_txid": "17a07aa10d3d9552ad90b6ea5211d71a40f23d50e6acd3c72607d67100d066e8",
+      "resolution_rule": "{\"title\":\"Did the Milwaukee Brewers win? (SF @ MIL, ESPN event 401815626)\",\"resolution_criteria\":\"YES if ESPN summary marks Milwaukee Brewers winner of event 401815626; NO otherwise.\",\"data_source_can",
+      "created_at": "2026-06-10 14:40:51"
+    },
+    {
+      "id": "ext-pool-v07-1781102411473-4dbkp",
+      "condition_id": "77ec13e63d2d7d1d",
+      "token_id": "KAS_native",
+      "settle_txid": "9b199b5d89b71f7fad42a18b4eae45371652ebb846c4e9a8a3004f177633beeb",
+      "resolution_rule": "{\"title\":\"Did the New York Yankees win? (CLE @ NYY, ESPN event 401815620)\",\"resolution_criteria\":\"YES if ESPN summary marks New York Yankees winner of event 401815620; NO otherwise.\",\"data_source_cano",
+      "created_at": "2026-06-10 14:40:14"
+    },
+    {
+      "id": "ext-pool-v07-1781102374940-sms5h",
+      "condition_id": "ce2ce16fed5eaae3",
+      "token_id": "KAS_native",
+      "settle_txid": "f09188f4accc59141431741f9a0e1d5b7f4ad01ebf1ed6cb4a95bbeacf51e684",
+      "resolution_rule": "{\"title\":\"Did the Boston Red Sox win? (BAL @ BOS, ESPN event 401815619)\",\"resolution_criteria\":\"YES if ESPN summary marks Boston Red Sox winner of event 401815619; NO otherwise.\",\"data_source_canonica",
+      "created_at": "2026-06-10 14:39:38"
+    },
+    {
+      "id": "ext-pool-v07-1781102245340-pqqix",
+      "condition_id": "5a4cd236b2c98c45",
+      "token_id": "KAS_native",
+      "settle_txid": "2297ba24b5b1b52426c9517c04512dfb69ec80d9e5fa9361b5bd1070453bf703",
+      "resolution_rule": "{\"title\":\"Did the Arizona Diamondbacks win? (WSH @ ARI, ESPN event 401815642)\",\"resolution_criteria\":\"YES if ESPN summary marks Arizona Diamondbacks winner of event 401815642; NO otherwise.\",\"data_sou",
+      "created_at": "2026-06-10 14:37:28"
+    },
+    {
+      "id": "ext-pool-v07-1781102208854-luid6",
+      "condition_id": "e436649cfef2bea8",
+      "token_id": "KAS_native",
+      "settle_txid": "738d4435012a47cbdb1ee7f535c3cf7d54c63f299e56b28ace085f71553386cf",
+      "resolution_rule": "{\"title\":\"Did the San Diego Padres win? (NYM @ SD, ESPN event 401815641)\",\"resolution_criteria\":\"YES if ESPN summary marks San Diego Padres winner of event 401815641; NO otherwise.\",\"data_source_canon",
+      "created_at": "2026-06-10 14:36:51"
+    },
+    {
+      "id": "ext-pool-v07-1781102037864-n34x0",
+      "condition_id": "7b4744f9a2faf5e0",
+      "token_id": "KAS_native",
+      "settle_txid": "8ff8134f4f91792cea00fad697c1c69b79a026432fad7638e62815b4d8649238",
+      "resolution_rule": "{\"title\":\"Did the St. Louis Cardinals win? (CIN @ STL, ESPN event 401815635)\",\"resolution_criteria\":\"YES if ESPN summary marks St. Louis Cardinals winner of event 401815635; NO otherwise.\",\"data_sourc",
+      "created_at": "2026-06-10 14:34:01"
+    },
+    {
+      "id": "ext-pool-v07-1781101964850-3cki3",
+      "condition_id": "48a174e2ce86a8c9",
+      "token_id": "KAS_native",
+      "settle_txid": "6b43211f3d68077266c3ada9861d9367dc2e7221f57519f14b5c019f8d299c72",
+      "resolution_rule": "{\"title\":\"Did the Atlanta Braves win? (PIT @ ATL, ESPN event 401815631)\",\"resolution_criteria\":\"YES if ESPN summary marks Atlanta Braves winner of event 401815631; NO otherwise.\",\"data_source_canonica",
+      "created_at": "2026-06-10 14:32:47"
+    },
+    {
+      "id": "ext-pool-v07-1781101928325-p27wf",
+      "condition_id": "fbd3aed8e3000462",
+      "token_id": "KAS_native",
+      "settle_txid": "5e477a584d020fe848b1520d92734acf4cdcf9d6609c3d3ec5c087532b7897cc",
+      "resolution_rule": "{\"title\":\"Did the Miami Marlins win? (TB @ MIA, ESPN event 401815633)\",\"resolution_criteria\":\"YES if ESPN summary marks Miami Marlins winner of event 401815633; NO otherwise.\",\"data_source_canonical\":",
+      "created_at": "2026-06-10 14:32:11"
+    },
+    {
+      "id": "ext-pool-v07-1781101876749-h501c",
+      "condition_id": "e780ea3496d999e1",
+      "token_id": "KAS_native",
+      "settle_txid": "ffb1d6873fa2f8c110233850ebe7dcdd575dac83dadcd22eff3521629dc3aa37",
+      "resolution_rule": "{\"title\":\"Did the Toronto Blue Jays win? (BAL @ TOR, ESPN event 401815628)\",\"resolution_criteria\":\"YES if ESPN summary marks Toronto Blue Jays winner of event 401815628; NO otherwise.\",\"data_source_ca",
+      "created_at": "2026-06-10 14:31:19"
+    },
+    {
+      "id": "ext-pool-v07-1781094464976-aaao5",
+      "condition_id": "03a5d42f93a44daa",
+      "token_id": "KAS_native",
+      "settle_txid": "dd295695b50c06eb5e6b00913ffb9173d5534e6229b1e7ba548e96657ff4f0bf",
+      "resolution_rule": "{\"title\":\"Did the New York Yankees win? (BOS @ NYY, ESPN event 401815659)\",\"resolution_criteria\":\"YES if ESPN summary marks New York Yankees winner of event 401815659; NO otherwise.\",\"data_source_cano",
+      "created_at": "2026-06-10 12:27:48"
+    },
+    {
+      "id": "ext-pool-v07-1781094389764-81l7k",
+      "condition_id": "9195833fb55125d1",
+      "token_id": "KAS_native",
+      "settle_txid": "37da9243351a9dbc19d84b8fab2936d581dfb5bd036cf0a4e4458380213d73f2",
+      "resolution_rule": "{\"title\":\"Did the St. Louis Cardinals win? (CIN @ STL, ESPN event 401815650)\",\"resolution_criteria\":\"YES if ESPN summary marks St. Louis Cardinals winner of event 401815650; NO otherwise.\",\"data_sourc",
+      "created_at": "2026-06-10 12:26:32"
+    },
+    {
+      "id": "ext-pool-v07-1781094309001-iip3x",
+      "condition_id": "e22203dd409829e3",
+      "token_id": "KAS_native",
+      "settle_txid": "6776277fcc076512059a4bf6c07a281d2cdee4abd482b5548a72b140a4b27b66",
+      "resolution_rule": "{\"title\":\"Did the Detroit Tigers win? (SEA @ DET, ESPN event 401815647)\",\"resolution_criteria\":\"YES if ESPN summary marks Detroit Tigers winner of event 401815647; NO otherwise.\",\"data_source_canonica",
+      "created_at": "2026-06-10 12:25:12"
+    },
+    {
+      "id": "ext-pool-v07-1781081485631-mix0d",
+      "condition_id": "295a129b523f2c02",
+      "token_id": "KAS_native",
+      "settle_txid": "d513f7b4123c6d85b4d743dd54314bf0052d6a55894ccaa4fd5d27dfb5eb1e32",
+      "resolution_rule": "{\"title\":\"Braves beat Pirates? (espn xnode E2E #3, near-tip sample)\",\"resolution_criteria\":\"YES if ESPN marks Atlanta Braves winner of event 401815661; NO otherwise.\",\"data_source_canonical\":\"https://",
+      "created_at": "2026-06-10 08:51:28"
+    }
+  ]
+}
