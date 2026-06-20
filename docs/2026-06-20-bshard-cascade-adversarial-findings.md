@@ -149,6 +149,11 @@ cascade spec 落码前的对抗审，每条都在"落码前"拦下，省返工�
    - **check_utxo_landed 查完成链**：完成的 cascade 每步输出被下一步合法花掉 → 事后查 live-tip UTXO 全 `false` = 方法假象。右验法 = `kaspa_tx_log.tx_id` block-accepted 查（历史落块）/ per-step at-the-time check（花掉前）。
    - **tx_id vs block_hash 混淆**：把"包含 tx 的 block_hash"误读成"不同的 tx_id"→ 开了个假的 provenance 🔴（实为单一 canonical run）。
    核 provenance/同-run 的**本能对**（该核），但读错了具体值就是假警 —— 独立验证者对自己同样苛刻，才不污染信号。
+9. **多层对抗审：连"对抗审者"也要被审 + "知道原则 ≠ 自动套用"**：refund-merkle SPEC 经四方验（含 NWT/Bettor adversarial review）签 SOLID，但**外部 claude.ai Architect 红队回审抓到 2 个我们漏的 🔴**：
+   - **F-refund-1**（amount-weld）：refundRoot 的 merkle membership 只证 "leaf 在集"，不证 "集里那个 stake 金额是真锁仓的" → register 时 `leaf.stake` 必 weld 实际锁仓 value（`Σleaf.stake == pool_value`），否则虚高 stake 的 genuine leaf 超额退 = 盗池。
+   - **F-refund-2**：leaf 排序用"到达序"非 pk-ASC（确定性）。
+   - **教训核心**：NWT **恰好 championed 过 amount-binding**（#31 settle-chunk：leaf 必绑 amount 非只 pk），却**没把它 transfer 到 refund 域** = "知道一个原则" 不等于 "在新 context 自动想起来用它"。**对策**：把反复出现的承重模式固化成 checklist（如"任何 merkle-membership 设计必问：金额绑了没？排序确定吗？"），别靠临场想起。
+   - **元元教训**：四方独立对抗审仍有共同盲区（大家都盯机制/forge，没盯 amount-weld）→ **多一层外部/异质红队**抓得到同质团队的集体盲点。红蓝对抗是分层的，越多正交视角越好。
 
 ---
 
