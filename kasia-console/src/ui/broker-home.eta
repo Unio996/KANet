@@ -194,6 +194,31 @@
             <div class="text-[10px] text-ink-400 mt-0.5">所有跨域 broker fee 进此地址.</div>
           </div>
         </div>
+
+        <!-- 电报 DM bot 便捷面板 (KANet-UI 2026-06-20, Owner 直令 / Bettor APPROVE option b: Settings 留全局权威, 此处=便捷视图+快捷操作, 同源 API) -->
+        <div class="mt-4 pt-3 border-t border-warm-200">
+          <div class="flex items-center justify-between flex-wrap gap-2">
+            <div class="text-xs">
+              <span class="rh-stat-label">电报 DM bot</span>
+              <span class="ml-2" :class="tgBotRunning ? 'text-emerald-600' : 'text-ink-400'" x-text="tgBotRunning ? '● 运行中' : '○ 已停'"></span>
+              <span class="ml-2" :class="isThisBrokerBot ? 'text-brand-600' : 'text-ink-400'"
+                    x-text="isThisBrokerBot ? '✓ DM bot 当前代表本 broker' : (tgBotBrokerId ? 'DM bot 现代表其他 broker' : 'DM bot 未设 broker')"></span>
+            </div>
+            <div class="flex items-center gap-2">
+              <button x-show="!isThisBrokerBot" @click="setBotBroker()" :disabled="tgBotBusy || !agentHasAdapter"
+                      class="px-2 py-1 rounded bg-brand-500 hover:bg-brand-600 disabled:opacity-40 text-white text-[11px] font-medium"
+                      :title="agentHasAdapter ? '把 DM bot 切到本 broker' : '本 broker 无 adapter, 不能当 DM bot broker'">设为 DM bot 的 broker</button>
+              <button x-show="!tgBotRunning" @click="toggleBot(true)" :disabled="tgBotBusy"
+                      class="px-2 py-1 rounded bg-emerald-500 hover:bg-emerald-600 disabled:opacity-40 text-white text-[11px] font-medium">启动 bot</button>
+              <button x-show="tgBotRunning" @click="toggleBot(false)" :disabled="tgBotBusy"
+                      class="px-2 py-1 rounded bg-warm-200 hover:bg-warm-300 disabled:opacity-40 text-ink-700 text-[11px] font-medium">停止 bot</button>
+            </div>
+          </div>
+          <div x-show="!agentHasAdapter" class="text-[10px] text-amber-600 mt-1">⚠ 本 broker 无 adapter, 不能设为 DM bot broker (先在 /agent 页分配 adapter). bot LLM dialog 需 adapter.</div>
+          <div class="text-[10px] text-ink-400 mt-1">全局管理 (token / 完整启停) 在 <a href="/settings" class="text-brand-600 underline">系统设置</a> 页; 此处为便捷视图+快捷操作 (同源).</div>
+          <div x-show="tgBotMsg" class="text-[10px] text-emerald-600 mt-0.5" x-text="tgBotMsg"></div>
+          <div x-show="tgBotError" class="text-[10px] text-red-500 mt-0.5" x-text="tgBotError"></div>
+        </div>
       </div>
 
       <!-- ⑤ 历史 (history — markets list) -->
@@ -250,6 +275,17 @@ function brokerHome() {
     revoking: false, revokeError: '',
     // Lane③ fee 编辑 (Bettor r654): gateway 默认 fee% (新建市场用)
     feeInput: 2, feeSaving: false, feeMsg: '', feeError: '',
+    // tg-bot/DM 便捷面板 (KANet-UI 2026-06-20, Owner 直令 broker UI 缺 DM 设置 / Bettor APPROVE option b):
+    //   Settings 页保全局权威; broker 页此面板=便捷视图+快捷操作, 同源现有 API 不双写真相.
+    tgBotBrokerId: '', tgBotStatus: null, tgBotBusy: false, tgBotMsg: '', tgBotError: '',
+    // 本 broker 是不是 DM bot 当前代表的 broker:
+    get isThisBrokerBot() { return !!(this.agent && this.tgBotBrokerId && this.agent.id === this.tgBotBrokerId); },
+    // 必改 (Bettor): 只允许有 adapter 的 broker 设为 DM bot broker (否则 bot LLM dialog 调不通 — identity blocker).
+    get agentHasAdapter() {
+      const a = this.agent; if (!a) return false;
+      return !!(a.adapter_node_id || a.adapter || a.adapter_port || a.adapterUrl || a.adapter_url || a.has_adapter);
+    },
+    get tgBotRunning() { return !!(this.tgBotStatus && (this.tgBotStatus.running || this.tgBotStatus.alive)); },
 
     fmtKas(n) {
       const x = parseFloat(n);
@@ -351,11 +387,53 @@ function brokerHome() {
           .filter(x => x.role === 'broker' || x.is_dex_broker)
           .map(x => ({ ...x, kasBalance: null }));
         if (this.agents.length > 0) await this.loadData();
+        await this.loadTgBot();
       } catch (e) {
         console.error('load broker agents fail:', e);
       } finally {
         this.loading = false;
       }
+    },
+
+    // tg-bot/DM 便捷面板 — 复用 Settings 同款 API (/api/config/tg-bot-broker + /api/tg-bot/status|start|stop), 零新后端.
+    async loadTgBot() {
+      try {
+        const r = await fetch('/api/config/tg-bot-broker');
+        const j = await r.json();
+        this.tgBotBrokerId = j.broker_relay_id || '';
+      } catch (e) { /* non-fatal: 面板降级显未知 */ }
+      try {
+        const r = await fetch('/api/tg-bot/status');
+        this.tgBotStatus = await r.json();
+      } catch (e) { this.tgBotStatus = null; }
+    },
+    async setBotBroker() {
+      const a = this.agent;
+      if (!a) return;
+      if (!this.agentHasAdapter) { this.tgBotError = '本 broker 无 adapter，DM bot 调不通 (先在 /agent 页分配 adapter)'; return; }
+      if (!confirm('把 DM bot 切到本 broker「' + (a.name || a.id) + '」？会改变 DM 押注流量代表的 broker。')) return;
+      this.tgBotBusy = true; this.tgBotMsg = ''; this.tgBotError = '';
+      try {
+        const r = await fetch('/api/config/tg-bot-broker', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ broker_relay_id: a.id }),
+        });
+        const j = await r.json().catch(() => ({}));
+        if (!j.ok) { this.tgBotError = j.error || ('设置失败 (HTTP ' + r.status + ')'); }
+        else { this.tgBotMsg = 'DM bot 已设为本 broker (0-restart, bot 运行时读)'; this.tgBotBrokerId = a.id; }
+      } catch (e) { this.tgBotError = '设置请求失败: ' + (e?.message || e); }
+      finally { this.tgBotBusy = false; }
+    },
+    async toggleBot(start) {
+      if (!start && !confirm('停止 DM bot？在飞 DM 押注会收不到回复。')) return;
+      this.tgBotBusy = true; this.tgBotMsg = ''; this.tgBotError = '';
+      try {
+        const r = await fetch('/api/tg-bot/' + (start ? 'start' : 'stop'), { method: 'POST' });
+        const j = await r.json().catch(() => ({}));
+        if (start && !j.ok) { this.tgBotError = '启动失败: ' + (j.message || j.error || ('HTTP ' + r.status)); }
+        else { this.tgBotMsg = start ? 'DM bot 已启动' : 'DM bot 已停止'; }
+      } catch (e) { this.tgBotError = '请求失败: ' + (e?.message || e); }
+      finally { this.tgBotBusy = false; await this.loadTgBot(); }
     },
 
     async saveFee() {
