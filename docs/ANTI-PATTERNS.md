@@ -2602,6 +2602,21 @@ qlfpv 实测 5 层 brick:
 - **配套机械化**: Bettor 建 `_kanet_send.cjs` 读纯 JSON 数据(无 JS 语句可 malform = 无 `;`/数组 bug); 频道发送走固定 helper 而非临场拼 `node -e`。
 - **5 态铁律 (gate E §0)**: committed≠pushed≠deployed≠running≠链上验证, 每态独立证。
 
+## 规则 49 · unbounded-N nullifier 位图禁单 i64(63-slot cap = 假无限) — lint R_NULLIFIER_I64 自动堵
+
+### Wrong
+- `int claimed_bitmap`（单 i64）当 spent-once/双领 nullifier，但 merkle `tree_depth <= 8`（=256 winner）→ winner#64+ 的 slot 装不下（i64 只 63 可用 bit，`mask=2^index` index≥63 溢出）→ nullifier 失效 → **双领抽干 = 假无限**。
+- 根因：从 `RootClaim` depth-1（≤2 winner，i64 够）**抄来没改 depth**。同根还有 `for(b,0,merkle_index,2)` unroll 上界=2（depth-1 抄来），depth-8 时 index 到 255 不匹配。
+
+### Right
+- unbounded-N（claim/refund/任意 N winner）的 nullifier 必 **byte[] 多-slot**（word=index/63 + bit=index%63，容量随长度线性扩）**或分桶 ≤63/shard**（滚动派彩，单 i64 够 + 字节常量不复发 SIZE 墙）。
+- bucket/byte[] 修必**同时修 unroll 上界**匹配 per-bucket index 范围。
+
+### Why
+- i64=63 是"无限"的隐形杀手：happy-path（<64 winner）永不触发 → 看着绿，>63 才被双领抽干。出现 **2 次（④ refund-merkle + B2 PayoutShard，J1 复犯）**→ lint 根治（记性不可靠，自动堵第 3 次）。
+- **lint `R_NULLIFIER_I64`**（`scripts/lint-kanet.mjs`，J2 落）：扫 `.sil`，抓【单-i64 nullifier/claimed/refunded bitmap + `tree_depth <= N` 且 N≥6（2^6=64>63）】→ hard fail。精确信号=depth 上界（depth-1 的 RootClaim 不误报）。
+- 配记忆 `feedback-recreatable-utxo-nullifier-defeatable`（真 nullifier 进链上 state）+ `feedback-ss-attack-review-verify-value-source`。
+
 ---
 
 *本档案在 v2 spec 第八章元教训基础上独立。spec 聚焦"这次怎么做"，本档案聚焦"下次别再犯"。*
