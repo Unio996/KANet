@@ -1494,7 +1494,10 @@ function _serializeRootStateHex(s) {
     + _encodePushDataHex(_i64LE(s.pool_value))
     + _encodePushDataHex(_i64LE(s.closed))
     + _encodePushDataHex(_i64LE(s.winningSide))
-    + _encodePushDataHex(Buffer.from(s.payoutRoot.replace(/^0x/, ''), 'hex'));   // PUSH32 + 32B
+    + _encodePushDataHex(Buffer.from(s.payoutRoot.replace(/^0x/, ''), 'hex'))   // PUSH32 + 32B
+    // RootClaim 8-field (R7 claimed-bitmap): 条件第 8 字段在 payoutRoot 后(合约 state 序: ...payoutRoot, claimed_bitmap)。
+    //   RootClose/RefundClaim 7-field(无 claimed_bitmap)→ 不附加, 保持 7-field 序列化。
+    + (s.claimed_bitmap !== undefined ? _encodePushDataHex(_i64LE(s.claimed_bitmap)) : '');
 }
 
 // per-state 续约 P2SH 地址: splice input redeem 的 state 区[start : start+len] → new state → payToScriptHash.
