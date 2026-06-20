@@ -1653,7 +1653,9 @@ export async function unlockBshardConsolidate(args) {
     const newConsolidated = BigInt(ps.consolidated_pool) + poolValue;
     const newState = { consolidated_pool: newConsolidated.toString(), closed: ps.closed, payoutRoot: ps.payoutRoot, w0: ps.w0, w1: ps.w1, w2: ps.w2, w3: ps.w3, w4: ps.w4 };
     const psContAddr = _continuationAddress(cmd.inputs.payoutshard.redeem_hex, _serializePayoutStateHex(newState), networkId, cmd.inputs.payoutshard.state_start ?? _POOL_STATE_START);
-    const psOutValue = _utxoValue(psUtxo) + poolValue;                 // 双 weld: absorb(out==consolidated_pool+pool_value) ∧ consolidate(out==in[ps].value+pool_value); 不变量 in[ps].value==consolidated_pool 使两式一致
+    let psOutValue = _utxoValue(psUtxo) + poolValue;                   // 双 weld: absorb(out==consolidated_pool+pool_value) ∧ consolidate(out==in[ps].value+pool_value); 不变量 in[ps].value==consolidated_pool 使两式一致
+    // 🔬 forge② skim-teeth(cmd.forge_skim 仅测; off by default, driver 控): 故意少付 skim 量到 PS 续约 → 合约 ShardLeaf require(out==in+pool_value)/PS absorb 守恒应 BUST(测守恒 weld 的 skim-BUST 方向)。
+    if (cmd.forge_skim) { const skim = BigInt(cmd.forge_skim); psOutValue = psOutValue - skim; console.error(`[FORGE_SKIM] psOutValue 少付 ${skim} → 期望合约守恒 BUST`); }
 
     // out[0] = PS continuation (cov_id 续约, relay 设 CovenantBinding); 然后 change (来自 fee input)
     const outputs = [new TransactionOutput(psOutValue, payToAddressScript(new Address(psContAddr)), new CovenantBinding(0, new Hash(psCovId)))];
