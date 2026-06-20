@@ -124,6 +124,7 @@ export const COMMAND_PAYLOAD_SCHEMA = Object.freeze({
   [COMMAND_TYPES.BSHARD_FOLD]: ['witness', 'inputs', 'outputs'],
   [COMMAND_TYPES.BSHARD_CLOSE_COMMIT]: ['witness', 'inputs', 'outputs'],
   [COMMAND_TYPES.BSHARD_SEAL_TO_ROOT]: ['witness', 'inputs', 'outputs'],
+  [COMMAND_TYPES.BSHARD_CONVERT_TO_FOLDNODE]: ['witness', 'inputs', 'outputs'],   // J2 ②: multi-shard convert-split wiring (dispatch+handler 已在, 补 schema entry)
 });
 
 // R38 (Z23 sediment): typeof spec per field. Bug-Z23 真根因 — broker enqueue amount: number,
@@ -169,6 +170,7 @@ export const COMMAND_FIELD_TYPES = Object.freeze({
   [COMMAND_TYPES.BSHARD_FOLD]: { witness: 'object', inputs: 'object', outputs: 'object' },
   [COMMAND_TYPES.BSHARD_CLOSE_COMMIT]: { witness: 'object', inputs: 'object', outputs: 'object' },
   [COMMAND_TYPES.BSHARD_SEAL_TO_ROOT]: { witness: 'object', inputs: 'object', outputs: 'object' },
+  [COMMAND_TYPES.BSHARD_CONVERT_TO_FOLDNODE]: { witness: 'object', inputs: 'object', outputs: 'object' },   // J2 ②: multi-shard convert-split wiring
 });
 
 export function validateCommandPayload(cmd) {
