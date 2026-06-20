@@ -53,7 +53,9 @@ contract RootClaim(
         int      ticket_suffix_len
     ) {
         require(closed == 1);                              // 仅 settled 可 claim (convert 已 gate, 此为结构保证 + 深度防御)
-        require(tree_depth >= 0); require(tree_depth <= 8);  // merkleMAX=8 (256 winner/market); §4 若 P2 撞墙=降 cap 合法 lever
+        require(tree_depth >= 0); require(tree_depth <= 2);  // ★ DoD cap depth-2 (4 winner/market): merkle for-loop 是 RootClaim
+        //   字节大头(~82B/level), convert→RootClaim WithTemplate 揭其模板必 <~790B → depth-2 进预算(depth-3 923B>850 bust,
+        //   J2 3-way probe 坐实)。生产 >4 winner = winner-tree-shard(§7, post-DoD, Owner 定 cap)。DoD §0=单小市场跑通一次。
         require(merkle_index >= 0);
         require(payout >= 1000);
         require(payout <= pool_value);                     // fail-fast (weld+共识本就兜负输出, 此条更快更清晰)
@@ -66,7 +68,7 @@ contract RootClaim(
         // merkle-prove payout ∈ payoutRoot: leaf=blake2b(pk‖ser(payout,8)), pk-ASC, running-divisor climb
         byte[32] cur = blake2b(byte[](tk.bettorPk) + byte[](payout, 8));
         int div = 1;
-        for (k, 0, tree_depth, 8) {
+        for (k, 0, tree_depth, 2) {                        // ★ loop bound 2 = unroll 2 iter (DoD depth-2 cap); bound 控制编译字节非 tree_depth runtime
             int bit = (merkle_index / div) % 2;
             if (bit == 0) { cur = blake2b(byte[](cur) + byte[](siblings[k])); }
             else          { cur = blake2b(byte[](siblings[k]) + byte[](cur)); }
