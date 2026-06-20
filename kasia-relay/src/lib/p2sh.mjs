@@ -1562,7 +1562,7 @@ const _BSHARD_MINER_FEE = 10000n;   // 0.0001 KAS, within SS fee 范围 [1000, 1
 // v1 (TX_VERSION_TOCCATA) tx 每 input 声明 compute_budget(u16)买 script-units: allowed = budget×10000 + 9999.
 // bshard 重 blake2b 合约(register ~13738u / convert ~11242u / PayoutShard(A) ~11765u / P2PK checksig=100000u)
 // 全 < flat budget=50 (allowed 509999, 在 ~500k mass cap 内). 详 [[feedback-spend-units-must-be-probed-not-modeled]].
-const _BSHARD_COMPUTE_BUDGET = 50;    // flat (Bettor 批: 简单+headroom; 后续 per-contract 精算省 mass)
+const _BSHARD_COMPUTE_BUDGET = 70;    // flat (Bettor 批: 简单+headroom). 70=allowed 709999 units (mass 7000 grams/input << ~500k mass cap). close_attest(5 checkSig+40 merkle blake2b+validateOutputState 4448B+10 pairwise !=)=510026u > budget=50(509999)→bump 70. (后续 per-contract 精算省 mass)
 // budget-aware fee: aa4d1c10 实测 budget=60/1-input/fee 0.01KAS LAND → ~0.01KAS(1e6 sompi)/input headroom.
 // _assertTxInvariants mass-aware floor 兜底(fee 不足 pre-submit 拒, 非链上失败).
 const _BSHARD_FEE_PER_INPUT = 1_000_000n;   // 0.01 KAS/input, 覆盖 budget=50 的 compute mass floor
