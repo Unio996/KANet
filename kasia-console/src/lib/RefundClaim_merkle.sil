@@ -1,0 +1,113 @@
+// RefundClaim_merkle.sil — ④ refund-merkle Design A 落码 STEP1 (J1, 2026-06-20).
+//   spec: docs/2026-06-20-refund-merkle-spec.md (定稿 + 外部 Architect 红队 4 钉 F-refund-1/2/build-invariant)。
+//
+// 替代 RefundClaim.sil(spec §1 漏洞: refund_payout 只 readInputStateWithTemplate+shardPoolId → re-mint 假 ticket 盗池)。
+// 根治 = 累积 refundRoot 承诺 genuine ticket 集 {leaf_i=blake2b(bettorPk_i ‖ ser(stake_i,8))}, refund 必 merkle-prove ∈ refundRoot。
+//
+// ★ 设计 = 消费侧【完全镜像 RootClaim.claim_draw 已链上验机制】(merkle-climb + bitmap nullifier + aliasing-fix), 最低风险:
+//   1) genuineness + amount-weld 一个 merkle 双杀: leaf=blake2b(tk.bettorPk ‖ ser(tk.stake,8)), tk.stake 同时喂 leaf 与 payout
+//      → 虚高 stake 则 leaf∉refundRoot BUST(F-refund-1 amount-weld); 假 pk 则 leaf∉refundRoot BUST(forge)。
+//   2) double-refund nullifier: refunded_bitmap slot 未退过(同 RootClaim claimed_bitmap)。
+//   3) aliasing-fix: require(refund_index < div)(同 RootClaim, Bettor 抓的 index 别名双领)。
+//
+// ★ root-slot 复用(SIZE lever, 偏离 spec §2 "+独立 refundRoot 字段"的【刻意精简】, 省 32B/合约 across cascade):
+//   refundRoot 贯穿 register→fold→seal 占 root slot(本是 payoutRoot 槽位)。settle-close 时该槽被 payoutRoot 覆盖(settled 不退款,
+//   refundRoot 作废无害); cancel-close 时该槽保留 refundRoot。∴ 本合约 State 布局与 RootClaim 逐字节同(depth-1 SIZE 应 ≈764B)。
+//   字段名沿用 payoutRoot 保 byte-parity, 语义注释为 refundRoot。
+//
+// ⚠ STEP1 = 消费侧 + SIZE probe。STEP2(register 增量 refundRoot 累积 + 2 字段贯穿 fold/seal/RootClose + register monolithic 重 probe)post。
+// ⚠ refunded_bitmap N-wide(全 bettor, 非 claim depth-1 的 4-wide): tree_depth cap 是 probe lever — depth-1 镜像验机制; N-wide
+//   (depth-8=256bettor)由 silverc 链上 probe 裁是否需 recursive-split(spec §6, probe-not-model)。
+
+pragma silverscript ^0.1.0;
+
+contract RefundClaim_merkle(
+    byte[32] ps_tmpl_hash,        // dust PoolSide-ticket expectedTemplateHash (R7: refund 读 spent-once 凭证)
+    byte[32] shard_pool_id,       // 本 pool 身份 (ticket 记此; per-instance P2SH 唯一性锚)
+    // —— genesis State (8-field; 实际由 RootClose.convert_to_refundclaim 提供, init_* 仅定义 State 布局) ——
+    int      init_local_yes,
+    int      init_local_no,
+    int      init_count,
+    int      init_pool_value,
+    int      init_closed,
+    int      init_winningSide,
+    byte[32] init_payoutRoot,      // ★ 语义 = refundRoot(genuine ticket 集 merkle root); 见 head root-slot 复用注
+    int      init_refunded_bitmap  // R7 double-refund: 已退 ticket slot 位图; convert 创建时 0
+) {
+    int local_yes   = init_local_yes;
+    int local_no    = init_local_no;
+    int count       = init_count;
+    int pool_value  = init_pool_value;
+    int closed      = init_closed;
+    int winningSide = init_winningSide;
+    byte[32] payoutRoot = init_payoutRoot;            // ★ = refundRoot
+    int refunded_bitmap = init_refunded_bitmap;       // R7: refund 标记 refund_index slot, re-mint 同 slot 已置位被挡
+
+    // dust PoolSide-ticket State (refund 读 spent-once 凭证)
+    struct Tk {
+        byte[32] bettorPk;
+        int      direction;
+        int      stake;
+        byte[32] shardPoolId;
+    }
+
+    // —— entry 0: refund_payout (取消市场 → bettor 退本金; merkle-bound genuine ticket draw-down) ——
+    entrypoint function refund_payout(
+        int      rootOutIdx,           // 重建 RefundClaim_merkle continuation (self)
+        int      payoutOutIdx,         // refund output to bettor
+        int      refund_index,         // ticket 在 refundRoot 的 leaf 索引 (= register 到达序, F-refund-2)
+        int      tree_depth,
+        byte[32][] siblings,
+        int      ticketInIdx,          // dust-ticket UTXO 在 inputs 的位 (R7 spent-once)
+        int      ticket_prefix_len,
+        int      ticket_suffix_len
+    ) {
+        require(closed == 2);                              // 仅 cancelled 可 refund (convert 已 gate, 结构保证 + 深度防御)
+        require(tree_depth >= 0); require(tree_depth <= 1);  // ★ probe lever: DoD depth-1 镜像; N-wide post-probe (spec §6)
+        require(refund_index >= 0);
+
+        // 读 dust-ticket (R7 spent-once; 原语验 ps_tmpl_hash + 取 bettorPk/direction/stake/shardPoolId; spend 为 tx input = nullifier)
+        Tk tk = readInputStateWithTemplate(ticketInIdx, ticket_prefix_len, ticket_suffix_len, ps_tmpl_hash);
+        require(tk.shardPoolId == shard_pool_id);          // ticket 属本 pool
+
+        // ★ genuineness + amount-weld 双杀: merkle-prove leaf=blake2b(pk‖ser(stake,8)) ∈ refundRoot。
+        //   tk.stake 同时是 leaf 输入 + 下方 payout 金额 → 虚高 stake 则 leaf 变 → ∉refundRoot BUST(F-refund-1); 假 pk 同理(forge)。
+        //   running-divisor climb 与 RootClaim 逐字节同(F-refund-2: refund_index = register 到达序, 与 emit/judge 三侧对死)。
+        byte[32] cur = blake2b(byte[](tk.bettorPk) + byte[](tk.stake, 8));
+        int div = 1;
+        for (k, 0, tree_depth, 1) {                        // ★ loop bound = compile-time depth cap (probe lever); 控编译字节非 runtime
+            int bit = (refund_index / div) % 2;
+            if (bit == 0) { cur = blake2b(byte[](cur) + byte[](siblings[k])); }
+            else          { cur = blake2b(byte[](siblings[k]) + byte[](cur)); }
+            div = div * 2;
+        }
+        require(cur == payoutRoot);                         // payoutRoot 槽 = refundRoot
+        // ★ aliasing fix(同 RootClaim, Bettor 抓): climb 后 div=2^tree_depth=叶数; refund_index 必 <叶数 防 alias 双退。
+        require(refund_index < div);
+
+        // ★ double-refund nullifier: refund_index slot 退一次。re-mint 假 ticket 同 leaf→同 refund_index→同 slot 已置位被挡。
+        //   SS 无 << → mask=2^refund_index 用 loop; 无 >> → /mask %2 查位; +mask 置位(位已验0=同 |)。
+        int mask = 1;
+        for (b, 0, refund_index, 2) { mask = mask * 2; }   // mask = 2^refund_index
+        require((refunded_bitmap / mask) % 2 == 0);          // slot 未退过
+
+        // refund = 本人 stake (1:1 退本金, parimutuel 不适用); amount-welded by merkle leaf 上方
+        byte[34] bettorLock = new ScriptPubKeyP2PK(pubkey(tk.bettorPk));
+        require(tx.outputs[payoutOutIdx].scriptPubKey == byte[](bettorLock));
+        require(tx.outputs[payoutOutIdx].value == tk.stake);
+
+        // 重建 RefundClaim-self: pool_value -= stake (draw-down) + refunded_bitmap 置 slot 位; state 余不变
+        validateOutputState(rootOutIdx, {
+            local_yes:  local_yes,
+            local_no:   local_no,
+            count:      count,
+            pool_value: pool_value - tk.stake,
+            closed:     2,
+            winningSide: winningSide,
+            payoutRoot: payoutRoot,
+            refunded_bitmap: refunded_bitmap + mask
+        });
+        // ★ output-bind weld: pool value == pool_value - stake (配 F-refund-1 三绑: Σleaf.stake==pool_value 归纳守)
+        require(tx.outputs[rootOutIdx].value == pool_value - tk.stake);
+    }
+}
