@@ -77,12 +77,15 @@ contract RootClaim(
             div = div * 2;
         }
         require(cur == payoutRoot);
+        // ★ R7 aliasing fix(Bettor 抓): climb 后 div=2^tree_depth=叶数。merkle_index 必 <叶数 —— 否则 index=2 与 index=0
+        //   产同 climb(bit=(2/1)%2=0=(0/1)%2)却 mask=2^2=4≠slot0(mask=1)=同票换 alias index 双领。绑死 index∈[0,2^depth)。
+        require(merkle_index < div);
 
         // ★ R7 re-mint fix: claimed-bitmap nullifier — winner slot merkle_index 领一次。re-mint 假 ticket 同 leaf→同
         //   merkle_index→同 slot, 已置位被挡(spent-once 真锚=合约 state 的 slot 位, 非可重铸的 ticket UTXO)。
         //   SS 无 << → mask=2^merkle_index 用 loop(像 merkle div*2); 无 >> → /mask %2 查位; +mask 置位(位已验0=同 |)。
         int mask = 1;
-        for (b, 0, merkle_index, 2) { mask = mask * 2; }   // mask = 2^merkle_index (depth-2: index 0-3, bound 4)
+        for (b, 0, merkle_index, 2) { mask = mask * 2; }   // mask = 2^merkle_index (depth-1: index 0-1, bound 2 够)
         require((claimed_bitmap / mask) % 2 == 0);          // slot 未领过
 
         // payout → bettor P2PK (exact; fee 走 non-pool input + change)
