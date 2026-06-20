@@ -113,7 +113,7 @@ export function computeMarketGenesis(o) {
  * @returns {{ shardLeaf, foldNode, poolRoot, genesisState, psArtifact, shardPoolId, fnTmplHash, rootTmplHash }}
  */
 export function computeConvertSplitGenesis(o) {
-  const { shardLeafSilPath, foldNodeSilPath, rootCloseSilPath, rootClaimSilPath, poolSideSilPath, marketId, shardPoolId,
+  const { shardLeafSilPath, foldNodeSilPath, rootCloseSilPath, rootClaimSilPath, rootRefundClaimSilPath, poolSideSilPath, marketId, shardPoolId,
     committeePks, deadline, minBet, shardCount, sealCount, maxFanIn = 2, firstBet, silvercPath = SILVERC } = o;
   if (!Array.isArray(committeePks) || committeePks.length !== 5) throw new Error('committeePks must be 5 × 32B hex');
   if (!firstBet || (firstBet.side !== 0 && firstBet.side !== 1)) throw new Error('firstBet {bettorPk, side(0|1), stakeSompi} required');
@@ -135,22 +135,27 @@ export function computeConvertSplitGenesis(o) {
   const psDummyCtor = [ctorBytes32(firstBet.bettorPk), ctorInt(firstBet.side), ctorInt(Number(stake)), ctorBytes32(shardPoolId)];
   const psArtifact = computePoolSideArtifact(poolSideSilPath, psDummyCtor, silvercPath);
 
-  // cascade convert-split (2026-06-20): PoolRoot split into RootClose (seal target) + RootClaim (convert target).
-  // 2a. RootClaim template → rootclaim_tmpl_hash (convert_to_claim target; ctor 9: ps_tmpl_hash, shard_pool_id, init 7-field).
+  // cascade recursive-split (2026-06-20): PoolRoot → RootClose(seal target, committee_hash 4-entry) + RootClaim(convert_to_claim
+  //   merkle target) + RefundClaim(convert_to_refundclaim target)。RootClose 烤 claim+refundclaim tmpl_hash; FoldNode 烤 rootclose。
   const rootInitPayoutRoot = ZERO32_HEX;
-  const claimCtor = [
+  // 2a. RootClaim template → rootclaim_tmpl_hash (convert_to_claim target; ctor 9: ps_tmpl_hash, shard_pool_id, init 7-field).
+  const rcCtor9 = [
     ctorBytes32(psArtifact.templateHashHex), ctorBytes32(shardPoolId),
     ctorInt(0), ctorInt(0), ctorInt(0), ctorInt(0), ctorInt(0), ctorInt(0), ctorBytes32(rootInitPayoutRoot),
   ];
-  const rootClaim = templateArtifact(rootClaimSilPath, claimCtor);
+  const rootClaim = templateArtifact(rootClaimSilPath, rcCtor9);
   const rootClaimTmplHash = rootClaim.templateHashHex;
 
-  // 2b. RootClose template → rootclose_tmpl_hash (FoldNode.seal_to_root target; bakes rootclaim_tmpl_hash for convert_to_claim
-  //     foreign-template bridge). ctor 16 (P1 trim: shard_count 删, seal-guaranteed redundant): ps_tmpl_hash, shard_pool_id,
-  //     c0-c4Pk, deadline, claim_tmpl_hash, init 7-field.
+  // 2b. RefundClaim template → refundclaim_tmpl_hash (convert_to_refundclaim target; ctor 9 同 RootClaim shape).
+  const refundClaim = templateArtifact(rootRefundClaimSilPath, rcCtor9);
+  const refundClaimTmplHash = refundClaim.templateHashHex;
+
+  // 2c. RootClose template → rootclose_tmpl_hash (FoldNode.seal_to_root target; 烤 claim+refundclaim tmpl_hash for 双 convert 桥)。
+  //     committee_hash lever (R8 锚, 省 ~128B vs 5 baked pubkey): blake2b(c0Pk‖c1Pk‖c2Pk‖c3Pk‖c4Pk)。
+  //     ctor 11: committee_hash, deadline_ms(=deadline×1000), claim_tmpl_hash, refundclaim_tmpl_hash, init 7-field.
+  const committeeHash = Buffer.from(blake2b(Buffer.concat(committeePks.map(pk => Buffer.from(pk, 'hex'))), { dkLen: 32 })).toString('hex');
   const closeCtor = [
-    ctorBytes32(psArtifact.templateHashHex), ctorBytes32(shardPoolId),
-    ...committeePks.map(ctorBytes32), ctorInt(Number(deadline)), ctorBytes32(rootClaimTmplHash),
+    ctorBytes32(committeeHash), ctorInt(Number(deadline) * 1000), ctorBytes32(rootClaimTmplHash), ctorBytes32(refundClaimTmplHash),
     ctorInt(0), ctorInt(0), ctorInt(0), ctorInt(0), ctorInt(0), ctorInt(0), ctorBytes32(rootInitPayoutRoot),
   ];
   const rootClose = templateArtifact(rootCloseSilPath, closeCtor);
@@ -207,10 +212,15 @@ export function computeConvertSplitGenesis(o) {
       redeemBytes: rootClose.redeemBytes,
     },
     rootClaim: {                        // RootClose.convert_to_claim target (foreign-template; claim_prefix/claim_suffix for convert builder)
-      ctor: claimCtor, tmplHash: rootClaimTmplHash,
+      ctor: rcCtor9, tmplHash: rootClaimTmplHash,
       templatePrefix: rootClaim.templatePrefix, templateSuffix: rootClaim.templateSuffix,
       redeemBytes: rootClaim.redeemBytes,
     },
-    genesisState, psArtifact, shardPoolId, fnTmplHash, rootCloseTmplHash, rootClaimTmplHash, rootInitPayoutRoot, committeePks, deadline,
+    refundClaim: {                      // RootClose.convert_to_refundclaim target (foreign-template; rc_prefix/rc_suffix for convert builder)
+      ctor: rcCtor9, tmplHash: refundClaimTmplHash,
+      templatePrefix: refundClaim.templatePrefix, templateSuffix: refundClaim.templateSuffix,
+      redeemBytes: refundClaim.redeemBytes,
+    },
+    genesisState, psArtifact, shardPoolId, fnTmplHash, rootCloseTmplHash, rootClaimTmplHash, refundClaimTmplHash, rootInitPayoutRoot, committeePks, deadline,
   };
 }
