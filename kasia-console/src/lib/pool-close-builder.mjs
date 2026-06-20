@@ -57,7 +57,7 @@ export function buildCloseCommitCommand({ witness, rootOutpointTxid, rootRedeemH
     },
     inputs: {
       root: { outpointTxid: rootOutpointTxid, redeem_hex: rootRedeemHex },
-      fee: fee ? { outpointTxid: fee.outpointTxid, address: fee.address } : null, // P2PK miner-fee input (close value unchanged → no fee room in pool)
+      fee: fee ? { outpointTxid: fee.outpointTxid, address: fee.address, index: fee.index } : null, // P2PK miner-fee input (close value unchanged → no fee room in pool). index: outpoint 消歧 (同 addr+txid 多 UTXO; relay _matchUtxo 4th arg; undefined→null=backward-compat)
     },
     tx_obj_preimage: txObjPreimage || null, // committee sighash consistency (relay requires; driver builds the preimage committee signs)
     // outputs: root_continuation — relay computes per-state addr from redeem + closeState (closed:1), value UNCHANGED (weld3).

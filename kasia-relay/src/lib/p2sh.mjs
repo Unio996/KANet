@@ -1447,6 +1447,7 @@ export async function checkUtxoLanded(address, txid, networkId) {
 const _POOL_STATE_START = 1;       // state_layout.start (leaf+root 同)
 const _LEAF_STATE_LEN = 36;        // PoolLeaf state_layout.len = 4×(PUSH8+8)
 const _ROOT_STATE_LEN = 87;        // PoolRoot state_layout.len = 6×(PUSH8+8) + (PUSH32+32)
+const _ROOTCLAIM_STATE_LEN = 96;   // RootClaim 8-field (R7 nullifier): _ROOT_STATE_LEN 87 + claimed_bitmap (PUSH8+8) (KANet-UI 2026-06-20)
 
 function _i64LE(v) {               // BigInt/number → 8-byte LE Buffer (固定 i64, 非最小)
   const b = Buffer.alloc(8);
@@ -1488,25 +1489,30 @@ function _serializeLeafStateHex(s) {
 
 // 序列化 PoolRoot 7-field State → 87B hex (固定 PUSH8/PUSH32, State 声明序). NWT 2-impl byte-match 此格式.
 function _serializeRootStateHex(s) {
-  return _encodePushDataHex(_i64LE(s.local_yes))
+  let out = _encodePushDataHex(_i64LE(s.local_yes))
     + _encodePushDataHex(_i64LE(s.local_no))
     + _encodePushDataHex(_i64LE(s.count))
     + _encodePushDataHex(_i64LE(s.pool_value))
     + _encodePushDataHex(_i64LE(s.closed))
     + _encodePushDataHex(_i64LE(s.winningSide))
     + _encodePushDataHex(Buffer.from(s.payoutRoot.replace(/^0x/, ''), 'hex'));   // PUSH32 + 32B
+  // 8-field RootClaim (R7 nullifier claimed_bitmap, State 声明序末位): convert_to_claim 目标. 7-field RootClose/PoolRoot 无 (backward-compat). (KANet-UI 2026-06-20)
+  if (s.claimed_bitmap !== undefined && s.claimed_bitmap !== null) out += _encodePushDataHex(_i64LE(s.claimed_bitmap));
+  return out;
 }
 
 // per-state 续约 P2SH 地址: splice input redeem 的 state 区[start : start+len] → new state → payToScriptHash.
 //   len = newStateHex 字节数 (leaf 36 / root 87 自适应; new state 与 baked genesis state 同布局=同长).
-function _continuationAddress(inputRedeemHex, newStateHex, networkId) {
+// stateStart: state 区在 redeem 的起始 offset. 多-entry(PoolLeaf/PoolRoot/RootClose)有 selector dispatch 前导 → state_layout.start=1(_POOL_STATE_START 默认);
+//   单-entry no-selector(RootClaim/RefundClaim)无前导 → start=0. caller 经 cmd 传合约 state_layout.start, 别硬编 (KANet-UI 2026-06-20, J2/J1/NWT 三方诊断 continuation offset bug).
+function _continuationAddress(inputRedeemHex, newStateHex, networkId, stateStart = _POOL_STATE_START) {
   const redeem = Buffer.from(inputRedeemHex, 'hex');
   const stateBytes = Buffer.from(newStateHex, 'hex');
-  if (stateBytes.length !== _LEAF_STATE_LEN && stateBytes.length !== _ROOT_STATE_LEN) {
-    throw new Error(`pool state ser ${stateBytes.length}B != leaf ${_LEAF_STATE_LEN} / root ${_ROOT_STATE_LEN}`);
+  if (stateBytes.length !== _LEAF_STATE_LEN && stateBytes.length !== _ROOT_STATE_LEN && stateBytes.length !== _ROOTCLAIM_STATE_LEN) {
+    throw new Error(`pool state ser ${stateBytes.length}B != leaf ${_LEAF_STATE_LEN} / root ${_ROOT_STATE_LEN} / rootclaim ${_ROOTCLAIM_STATE_LEN}`);
   }
   const len = stateBytes.length;
-  const spliced = Buffer.concat([redeem.slice(0, _POOL_STATE_START), stateBytes, redeem.slice(_POOL_STATE_START + len)]);
+  const spliced = Buffer.concat([redeem.slice(0, stateStart), stateBytes, redeem.slice(stateStart + len)]);
   const spk = payToScriptHashScript(new Uint8Array(spliced));
   return addressFromScriptPublicKey(spk, networkId).toString();
 }
@@ -1631,10 +1637,11 @@ export async function unlockBshardClaim(args) {
   try {
     const rootUtxo = await _matchUtxo(rpc, _addressFromRedeem(cmd.inputs.root.redeem_hex, networkId), cmd.inputs.root.outpointTxid);   // P2SH 地址 = hash(redeem)
     const ticketUtxo = await _matchUtxo(rpc, _addressFromRedeem(cmd.inputs.ticket.redeem_hex, networkId), cmd.inputs.ticket.outpointTxid);
-    const feeUtxo = cmd.inputs.fee ? await _matchUtxo(rpc, cmd.inputs.fee.address, cmd.inputs.fee.outpointTxid) : null;
+    const feeUtxo = cmd.inputs.fee ? await _matchUtxo(rpc, cmd.inputs.fee.address, cmd.inputs.fee.outpointTxid, cmd.inputs.fee.index) : null;   // fee.index 消歧 (KANet-UI 2026-06-20 sweep; undefined→null=backward-compat)
     const matched = [rootUtxo, ticketUtxo, ...(feeUtxo ? [feeUtxo] : [])];
 
-    const newRootAddr = _continuationAddress(cmd.inputs.root.redeem_hex, _serializeRootStateHex(cmd.outputs.root_continuation.state), networkId);
+    // RootClaim 单-entry state_layout.start=0 (无 selector dispatch 前导); PoolRoot 多-entry=1. caller 经 cmd.inputs.root.state_start 传 (J2 builder 供; 默认 _POOL_STATE_START=1 向后兼容).
+    const newRootAddr = _continuationAddress(cmd.inputs.root.redeem_hex, _serializeRootStateHex(cmd.outputs.root_continuation.state), networkId, cmd.inputs.root.state_start ?? _POOL_STATE_START);
     const bettorLockSpk = payToAddressScript(new Address(cmd.outputs.payout.address));
 
     const outputs = [];
@@ -1646,10 +1653,13 @@ export async function unlockBshardClaim(args) {
     // root scriptSig: claim_draw witness(声明序: rootOutIdx,payoutOutIdx,payout,merkle_index,tree_depth,siblings[],ticketInIdx,prefix/suffix_len)+ OP_4 + redeem.
     let sibPush = '';
     for (const s of w.siblings_hex) sibPush += _pushBytes(s);     // byte[32][] = depth 个 push, forward 序
+    // selector 参数化 (KANet-UI 2026-06-20): RootClaim 单-entry (without_selector) → 无 selector ('' 空); PoolRoot 多-entry claim_draw=OP_1='51'.
+    //   单-entry 合约加 selector 会被当 ctor-arg → require fail (single-entry gotcha). caller 经 cmd.inputs.root.claim_selector_hex 控 (RootClaim 传 '').
+    const claimSelector = cmd.inputs.root.claim_selector_hex !== undefined ? cmd.inputs.root.claim_selector_hex : '51';
     const rootSig = _pushInt(w.root_out_idx) + _pushInt(w.payout_out_idx) + _pushInt(w.payout)
       + _pushInt(w.merkle_index) + _pushInt(w.tree_depth) + sibPush
       + _pushInt(w.ticket_in_idx) + _pushInt(w.ticket_prefix_len) + _pushInt(w.ticket_suffix_len)
-      + '51' + _encodePushDataHex(Buffer.from(cmd.inputs.root.redeem_hex, 'hex'));     // claim_draw=OP_1='51' (PoolRoot; was unified OP_4)
+      + claimSelector + _encodePushDataHex(Buffer.from(cmd.inputs.root.redeem_hex, 'hex'));
 
     // ticket scriptSig: authorize_spend(bettorSig)+ OP_0 + redeem. bettorSig = relay 用 bettor key 签 ticket input.
     // (root input 无 sig; fee input wallet-签). 先建 unsigned(待签 input scriptSig=''), 算 sighash.
@@ -1663,7 +1673,10 @@ export async function unlockBshardClaim(args) {
       subnetworkId: '0000000000000000000000000000000000000000', payload: '',
     });
     const ticketSigHex = createInputSignature(unsigned, 1, wallet.getPrivateKey(), SighashType.All);
-    const ticketSig = ticketSigHex + '00' + _encodePushDataHex(Buffer.from(cmd.inputs.ticket.redeem_hex, 'hex'));   // OP_0 selector
+    // PoolSide ticket authorize_spend selector 参数化 (KANet-UI 2026-06-20 单-entry sweep, 同 claim_selector/offset 同根=单-entry 无 selector 前导字节):
+    //   PoolSide_v08_shard without_selector=true → 单-entry 无 selector → cmd.inputs.ticket.spend_selector_hex='' (空); 旧多-entry ticket=OP_0='00'(default).
+    const ticketSelector = cmd.inputs.ticket.spend_selector_hex !== undefined ? cmd.inputs.ticket.spend_selector_hex : '00';
+    const ticketSig = ticketSigHex + ticketSelector + _encodePushDataHex(Buffer.from(cmd.inputs.ticket.redeem_hex, 'hex'));
     const sigScripts = [rootSig, ticketSig];
     if (feeUtxo) sigScripts.push(createInputSignature(unsigned, 2, wallet.getPrivateKey(), SighashType.All));
 
@@ -1748,7 +1761,7 @@ export async function unlockBshardClose(args) {
   const rpc = await connectRpc(networkId);
   try {
     const rootUtxo = await _matchUtxo(rpc, _addressFromRedeem(cmd.inputs.root.redeem_hex, networkId), cmd.inputs.root.outpointTxid);
-    const feeUtxo = cmd.inputs.fee ? await _matchUtxo(rpc, cmd.inputs.fee.address, cmd.inputs.fee.outpointTxid) : null;
+    const feeUtxo = cmd.inputs.fee ? await _matchUtxo(rpc, cmd.inputs.fee.address, cmd.inputs.fee.outpointTxid, cmd.inputs.fee.index) : null;   // fee.index: P2PK fee 消歧 (KANet-UI 2026-06-20 STEP3: 同 addr+txid 2 UTXO ambiguous; 同 register/seal funding f.index)
     const matched = [rootUtxo, ...(feeUtxo ? [feeUtxo] : [])];
 
     const newRootAddr = _continuationAddress(cmd.inputs.root.redeem_hex, _serializeRootStateHex(cmd.outputs.root_continuation.state), networkId);
@@ -1759,10 +1772,16 @@ export async function unlockBshardClose(args) {
 
     // root scriptSig: close_commit witness(声明序: c0-c4Sig + rootOutIdx + new_winningSide + new_payoutRoot)+ OP_0 + redeem.
     //   委员 5 sig 从 cmd.witness.sigs_hex(driver 用 baked committee key 对本 TX preimage 签; 4-of-5 → 至少 4 真签, 缺的占位).
+    // committee_hash RootClose (KANet-UI 2026-06-20 集成): close_commit witness 声明序 = 5 pubkey(R8 hash-match)+ 5 sig + rootOutIdx + winningSide + payoutRoot.
+    //   committee_pks 供则 push 5 pubkey 在 sig 前(RootClose); 不供则旧 PoolRoot 路(仅 sig, backward-compat).
+    let pkPush = '';
+    if (w.committee_pks) for (const pk of w.committee_pks) pkPush += _pushBytes(pk);   // 5×32B pubkey (hash-anchored, 不可 forge; J1 builder emit witness.committee_pks)
     let sigPush = '';
     for (const s of w.sigs_hex) sigPush += s;                 // 5 sig 直接 concat(createInputSignature 输出已 push-encoded 66B, 同 unlockPoolSpineP2SH L462/L944; _pushBytes 会 double-push=bug)
-    const rootSig = sigPush + _pushInt(w.root_out_idx) + _pushInt(w.new_winning_side) + _pushBytes(w.new_payout_root)
-      + '00' + _encodePushDataHex(Buffer.from(cmd.inputs.root.redeem_hex, 'hex'));     // close_commit=OP_0='00' (PoolRoot; was unified OP_3)
+    // selector 参数化(同 seal_selector 教训, 别假设 ABI entry): RootClose close_commit ABI slot 由 caller 供; 默认 '00'(PoolRoot OP_0).
+    const closeSelector = w.close_selector || cmd.inputs.root.close_selector_hex || '00';
+    const rootSig = pkPush + sigPush + _pushInt(w.root_out_idx) + _pushInt(w.new_winning_side) + _pushBytes(w.new_payout_root)
+      + closeSelector + _encodePushDataHex(Buffer.from(cmd.inputs.root.redeem_hex, 'hex'));
 
     // sighash 一致(committee sig 须对此 TX): txObjPreimage 由 driver 供(同 unlockPoolSpineP2SH); root sigOpCount=4(4-of-5 checkSig).
     let signedTx;
@@ -1787,6 +1806,62 @@ export async function unlockBshardClose(args) {
 }
 
 /**
+ * unlockBshardConvert — bshard_convert_to_foldnode (ShardLeaf convert_to_foldnode entry OP_1, leaf→FoldNode
+ * foreign-template 桥; convert-split J1 2026-06-19, cherry-pick 进 canonical KANet-UI 2026-06-20 for full-chain stitch).
+ * Sealed ShardLeaf (count==seal_count) → FoldNode genesis (4-field carry, NO outcome). 同构 unlockBshardSeal;
+ * 差: selector OP_1('51'), 输出 4-field FoldNode state (_serializeLeafStateHex 非 root 的 7-field), witness {fnOutIdx, fn_prefix, fn_suffix}.
+ */
+export async function unlockBshardConvert(args) {
+  const { wallet, cmd, networkId, lockTime = 0n } = args;
+  const w = cmd.witness;
+  const rpc = await connectRpc(networkId);
+  try {
+    const leafUtxo = await _matchUtxo(rpc, _addressFromRedeem(cmd.inputs.leaf.redeem_hex, networkId), cmd.inputs.leaf.outpointTxid);   // P2SH 地址 = hash(redeem)
+    const fundUtxos = [];
+    for (const f of (cmd.inputs.funding || [])) fundUtxos.push(await _matchUtxo(rpc, f.address, f.outpointTxid, f.index));   // f.index: funding 消歧 (KANet-UI fix, 同 register/seal)
+    const matched = [leafUtxo, ...fundUtxos];
+
+    // FoldNode 输出地址 relay 自算 (foreign-template; fn_prefix‖serialize4(state)‖fn_suffix). 4-field carry (no outcome).
+    const fnAddr = _foreignTemplateAddress(w.fn_prefix_hex, _serializeLeafStateHex(cmd.outputs.foldnode.state), w.fn_suffix_hex, networkId);
+
+    // leaf scriptSig: convert_to_foldnode witness(声明序: fnOutIdx, fn_prefix, fn_suffix) + selector OP_1 + redeem reveal. (无 sig: output 约束到 canonical FoldNode)
+    const leafSig = _pushInt(w.fn_out_idx) + _pushBytes(w.fn_prefix_hex) + _pushBytes(w.fn_suffix_hex)
+      + '51' + _encodePushDataHex(Buffer.from(cmd.inputs.leaf.redeem_hex, 'hex'));     // convert_to_foldnode=OP_1='51'
+
+    const outputs = [];
+    outputs[w.fn_out_idx] = new TransactionOutput(BigInt(cmd.outputs.foldnode.amountSompi), payToAddressScript(new Address(fnAddr)));
+    const orderedOut = outputs.filter(o => o !== undefined);
+    _appendChange(orderedOut, matched, cmd.outputs.change_address);   // relay 算 change=Σin−Σout−fee
+
+    const unsigned = new Transaction({
+      version: 0,
+      inputs: matched.map((u, i) => ({
+        previousOutpoint: { transactionId: u.outpoint.transactionId, index: u.outpoint.index },
+        signatureScript: '', sequence: 0n, sigOpCount: i === 0 ? 0 : 1, utxo: u,   // leaf(0)=0 无 sig; funding=1
+      })),
+      outputs: orderedOut, lockTime: BigInt(lockTime), gas: 0n,
+      subnetworkId: '0000000000000000000000000000000000000000', payload: '',
+    });
+    const sigScripts = [leafSig];
+    for (let i = 1; i < matched.length; i++) {
+      sigScripts.push(createInputSignature(unsigned, i, wallet.getPrivateKey(), SighashType.All));
+    }
+    const signedTx = new Transaction({
+      version: 0,
+      inputs: matched.map((u, i) => ({
+        previousOutpoint: { transactionId: u.outpoint.transactionId, index: u.outpoint.index },
+        signatureScript: sigScripts[i], sequence: 0n, sigOpCount: i === 0 ? 0 : 1,
+      })),
+      outputs: orderedOut, lockTime: BigInt(lockTime), gas: 0n,
+      subnetworkId: '0000000000000000000000000000000000000000', payload: '',
+    });
+    _assertTxInvariants(matched, signedTx, 'unlockBshardConvert', networkId);
+    const r = await rpc.submitTransaction({ transaction: signedTx, allowOrphan: false });
+    return { txId: r.transactionId };
+  } finally { try { await rpc.disconnect(); } catch {} }
+}
+
+/**
  * unlockBshardFold — bshard_fold (covenant __leader_fold OP_1 / __delegate_fold OP_2, k children → 1 parent).
  * 代码库首个 covenant relay handler. DECL: verification-mode cov leader 暴露 new_states(State[]); prev_states 自动从
  *   cov-inputs readInputState(不押). fold 无 extra arg → leader scriptSig = push(new_states=parent_state) + OP_1 + redeem.
@@ -1803,7 +1878,7 @@ export async function unlockBshardFold(args) {
     const children = cmd.inputs.children;
     const childUtxos = [];
     for (const c of children) childUtxos.push(await _matchUtxo(rpc, _addressFromRedeem(c.redeem_hex, networkId), c.outpointTxid));
-    const feeUtxo = cmd.inputs.fee ? await _matchUtxo(rpc, cmd.inputs.fee.address, cmd.inputs.fee.outpointTxid) : null;
+    const feeUtxo = cmd.inputs.fee ? await _matchUtxo(rpc, cmd.inputs.fee.address, cmd.inputs.fee.outpointTxid, cmd.inputs.fee.index) : null;   // fee.index 消歧 (KANet-UI 2026-06-20 sweep; undefined→null=backward-compat)
     const matched = [...childUtxos, ...(feeUtxo ? [feeUtxo] : [])];
 
     // parent 续约地址: 任一 child redeem(同 PoolLeaf 模板)splice parent_state(4-field) → per-state P2SH. fold=leaf→leaf.
@@ -1873,8 +1948,11 @@ export async function unlockBshardSeal(args) {
     // selector = seal_to_root 在【本合约】的 ABI entry index (covenant fold 也占槽):
     //   PoolLeaf: register=OP_0/__leader_fold=OP_1/__delegate_fold=OP_2/seal_to_root=entry3=OP_3='53' (default).
     //   FoldNode: fold=entry0/seal_to_root=entry1=OP_1='51' (FoldNode.sil L52/L82, J2 实查 + UI 核 entrypoint 序).
-    // 错 selector → dispatch no-match → OpFalse OpVerify → VerifyError(seal body 不执行). caller 经 cmd.inputs.leaf.seal_selector_hex 指定. (KANet-UI 2026-06-19)
-    const sealSelector = cmd.inputs.leaf.seal_selector_hex || '53';
+    // 错 selector → dispatch no-match → OpFalse OpVerify → VerifyError(seal body 不执行).
+    // 字段双读 reconcile (KANet-UI 2026-06-20 集成 catch): J1 production buildSealToRootCommand emit witness.seal_selector;
+    //   早期 probe harness 用 cmd.inputs.leaf.seal_selector_hex. 两个都接, witness 主(生产 builder 路) → 默认 '53'(PoolLeaf).
+    //   FoldNode seal=OP_2('52'); convert_to_claim=OP_2('52'); convert_to_refundclaim=OP_3('53'); PoolLeaf seal=OP_3('53').
+    const sealSelector = w.seal_selector || cmd.inputs.leaf.seal_selector_hex || '53';
     const leafSig = _pushInt(w.root_out_idx) + _pushBytes(w.root_prefix_hex) + _pushBytes(w.root_suffix_hex)
       + sealSelector + _encodePushDataHex(Buffer.from(cmd.inputs.leaf.redeem_hex, 'hex'));
 

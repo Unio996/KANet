@@ -96,7 +96,7 @@ export function buildClaimCommand({ witness, rootOutpointTxid, rootRedeemHex, cu
     inputs: {
       root: { outpointTxid: rootOutpointTxid, redeem_hex: rootRedeemHex, current_state: currentRootState },
       ticket: { outpointTxid: ticketOutpointTxid, redeem_hex: ticketRedeemHex, state: ticketState },
-      fee: fee ? { outpointTxid: fee.outpointTxid, address: fee.address } : null,
+      fee: fee ? { outpointTxid: fee.outpointTxid, address: fee.address, index: fee.index } : null, // index: outpoint 消歧 (relay _matchUtxo 4th arg; undefined→null=backward-compat; KANet-UI 2026-06-20 sweep)
     },
     // outputs: payout → bettor P2PK; root_continuation (relay computes per-state addr; value-=payout, closed=1); change (relay computes amount)
     outputs: {
