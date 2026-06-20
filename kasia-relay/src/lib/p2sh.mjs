@@ -1762,7 +1762,8 @@ export async function unlockBshardCloseAttest(args) {
 
     // close_attest scriptSig(pubkey-sorted 委员)+ OP_1 + redeem (no-sig; 委员 sig 在 witness data 非 input sig)
     let sigPush = '', pkPush = '', idxPush = '', sibPush = '';
-    for (const m of members) { sigPush += _pushBytes(m.sig); pkPush += _pushBytes(m.pk); idxPush += _pushInt(m.idx); for (const s of m.sibs) sibPush += _pushBytes(s); }
+    // ⚠ committee sig 已 push-encoded(createInputSignature 输出 66B [0x41][64][0x01])→ 直接 concat, 别 _pushBytes(double-push=malformed, 同 unlockBshardClose/PoolSpine sediment)。pk/idx/sib 是 raw data 需 push。
+    for (const m of members) { sigPush += m.sig; pkPush += _pushBytes(m.pk); idxPush += _pushInt(m.idx); for (const s of m.sibs) sibPush += _pushBytes(s); }
     const psSig = _pushInt(w.self_out_idx) + _pushBytes(w.new_payout_root) + sigPush + _pushBytes(w.committee_pk_hash) + pkPush + idxPush + sibPush
       + '51' + _encodePushDataHex(Buffer.from(cmd.inputs.payoutshard.redeem_hex, 'hex'));   // close_attest=OP_1='51'
 
