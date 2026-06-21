@@ -1169,10 +1169,16 @@ export async function registerPoolRoutes(fastify) {
       let _predicate = null;
       try { _predicate = JSON.parse(market.resolution_rule_spec || '{}')?.resolution_predicate || null; } catch {}
       const predicateCommit = _predicate ? computePredicateCommit(_predicate) : market.market_metadata_hash;
+      // 件1(J1 deadline-gate, NWT option-a): partial-shard sweep gate = market.deadline (Unix s, = outcome_end floor,
+      //   市场创建时 ctor-baked 非 spender → verify-value-source). ShardLeaf bakes it; partial 片仅 tx.time>=deadline 可归集
+      //   (满片随时). 缺则 registerBettorOnShard fail-closed throw. predicate-less / 旧 .sil(无 deadline 参)则被忽略=无害.
+      if (!Number.isFinite(Number(market.deadline)) || Number(market.deadline) <= 0) {
+        return reply.code(409).send({ ok: false, error: 'v0.7 market missing deadline (partial-shard sweep gate, 件1)' });
+      }
       const result = await registerBettorOnShard({
         db: sqlite, rc, transfer, landed, p2sh, logicalMarketId,
         poolMerkleRoot: market.pool_merkle_root, predicateCommit,
-        bettorPk, direction, stakeSompi, relayAddr, silverc, sealCount: 32,
+        bettorPk, direction, stakeSompi, relayAddr, silverc, sealCount: 32, deadline: market.deadline,
         createShardMarketRow, recordBettor,
       });
       return reply.send({ ok: true, logical_market_id: logicalMarketId, bettor_pk: bettorPk, ...result });

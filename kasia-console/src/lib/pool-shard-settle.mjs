@@ -134,7 +134,14 @@ export function settlePayoutRoot(winners) {
  * @param {object} o { db, rc, landed, p2sh, logicalMarketId, payoutShard:{payout_redeem_hex, payout_ps_outpoint, payout_cov_id}, relayAddr, transfer }
  * @returns {{ psOutpoint, consolidatedPool, consolidatedShards }}
  */
-export async function consolidateAllShards({ db, rc, landed, p2sh, logicalMarketId, payoutShard, relayAddr, transfer, resume = null }) {
+export async function consolidateAllShards({ db, rc, landed, p2sh, logicalMarketId, payoutShard, relayAddr, transfer, deadline, resume = null }) {
+  // 件1(J1 deadline-gate, J2 ms-unit fix b98e0112): partial 片(count<seal_count)consolidate 触发 ShardLeaf
+  //   `require(tx.time >= deadline * 1000)` → consolidate tx 必须 set lockTime = deadline*1000(ms, ≥ Kaspa
+  //   LOCK_TIME_THRESHOLD 5e11 → ms-epoch 模式, tx.time=lockTime literal=ms 比对). 否则默认 lockTime=0 →
+  //   tx.time(0) < deadline*1000 → 合法 partial consolidate 被 BUST. settle 在 deadline 后跑 → lockTime<now → tx final.
+  //   sealed 片跳闸(满片随时 LAND), lock_time 无害. 单位三处一致: register 烤秒 / 合约 *1000 / 此处 *1000ms.
+  if (!Number.isFinite(Number(deadline)) || Number(deadline) <= 0) throw new Error(`consolidateAllShards: deadline (Unix s, partial-sweep gate) required, got ${deadline}`);
+  const consolidateLockTimeMs = Math.floor(Number(deadline)) * 1000;
   const allShards = db.prepare(`SELECT * FROM market_shards WHERE logical_market_id = ? ORDER BY shard_index ASC`).all(logicalMarketId);
   // resume(部分 consolidate 后续跑): 跳 shard_index < resume.fromShardIdx, PS 从 resume.psTx/pool 起(已 consolidate 片的 leaf 已花).
   const shards = resume ? allShards.filter(s => s.shard_index >= resume.fromShardIdx) : allShards;
@@ -153,6 +160,7 @@ export async function consolidateAllShards({ db, rc, landed, p2sh, logicalMarket
     const fee = await transfer(relayAddr, 30_000_000);
     const cj = await rc({
       type: 'bshard_consolidate',
+      lock_time: consolidateLockTimeMs,                 // 件1: ms-epoch lockTime so ShardLeaf `tx.time >= deadline*1000` passes (partial 片闸); sealed 片跳闸无害
       inputs: {
         payoutshard: { redeem_hex: psRedeem, outpointTxid: psTx, index: psIdx, state: { consolidated_pool: consolidatedPool.toString(), closed: 0, payoutRoot: z32, w0: 0 }, state_start: 1 },
         shardleaf: { redeem_hex: leafRedeem, outpointTxid: leafTx, index: Number(leafIdxStr || 0), pool_value: st.pool_value },
