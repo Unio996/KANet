@@ -137,6 +137,8 @@ export const COMMAND_PAYLOAD_SCHEMA = Object.freeze({
   [COMMAND_TYPES.BSHARD_CONSOLIDATE]: ['inputs', 'outputs'],
   [COMMAND_TYPES.BSHARD_CLOSE_ATTEST]: ['witness', 'inputs', 'outputs'],
   [COMMAND_TYPES.BSHARD_PAYOUT_CLAIM]: ['witness', 'inputs', 'outputs'],
+  [COMMAND_TYPES.BSHARD_CANCEL_ATTEST]: ['witness', 'inputs', 'outputs'],
+  [COMMAND_TYPES.BSHARD_REFUND_CLAIM]: ['witness', 'inputs', 'outputs'],
 });
 
 // R38 (Z23 sediment): typeof spec per field. Bug-Z23 真根因 — broker enqueue amount: number,
@@ -188,6 +190,8 @@ export const COMMAND_FIELD_TYPES = Object.freeze({
   [COMMAND_TYPES.BSHARD_CONSOLIDATE]: { inputs: 'object', outputs: 'object' },
   [COMMAND_TYPES.BSHARD_CLOSE_ATTEST]: { witness: 'object', inputs: 'object', outputs: 'object' },
   [COMMAND_TYPES.BSHARD_PAYOUT_CLAIM]: { witness: 'object', inputs: 'object', outputs: 'object' },
+  [COMMAND_TYPES.BSHARD_CANCEL_ATTEST]: { witness: 'object', inputs: 'object', outputs: 'object' },
+  [COMMAND_TYPES.BSHARD_REFUND_CLAIM]: { witness: 'object', inputs: 'object', outputs: 'object' },
 });
 
 export function validateCommandPayload(cmd) {
