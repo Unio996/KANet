@@ -1073,6 +1073,91 @@ export async function registerPoolRoutes(fastify) {
     });
   });
 
+  // POST /api/pool/market/:id/bettor/register-v07 — (A)-model rolling-shard bettor register (production register wiring (a), J2 2026-06-21).
+  //   :id = logical market id (pool_markets v0.7 row). Routes the bet to the open shard (or opens a new ShardLeaf via genesis),
+  //   register_append (splice, drift-safe), NO-TX accounting (market_shards). Gateway-custody (testnet): bettor relay funds the
+  //   gateway (maker), the gateway builds the register. Wraps pool-shard-register orchestrator (allocator + pool-register-builder).
+  fastify.post('/api/pool/market/:id/bettor/register-v07', async (request, reply) => {
+    const logicalMarketId = request.params.id;
+    const b = request.body || {};
+    if (!b.bettor_relay_id || b.direction === undefined || !b.stake_kas) {
+      return reply.code(400).send({ ok: false, error: 'bettor_relay_id, direction, stake_kas required' });
+    }
+    const market = sqlite.prepare('SELECT * FROM pool_markets WHERE id = ?').get(logicalMarketId);
+    if (!market) return reply.code(404).send({ ok: false, error: 'market not found' });
+    if (market.protocol_version !== 'v0.7') return reply.code(409).send({ ok: false, error: `register-v07 requires protocol_version v0.7, got ${market.protocol_version}` });
+    if (market.protocol_status !== 'pending_bettors') return reply.code(409).send({ ok: false, error: `market status=${market.protocol_status}, registration closed` });
+    if (!market.pool_merkle_root) return reply.code(409).send({ ok: false, error: 'v0.7 market missing pool_merkle_root (committee)' });
+
+    const direction = parseInt(b.direction, 10);
+    if (direction !== 0 && direction !== 1) return reply.code(400).send({ ok: false, error: 'direction must be 0 (YES) or 1 (NO)' });
+    const stakeSompi = Math.round(parseFloat(b.stake_kas) * 1e8);
+    if (!Number.isFinite(stakeSompi) || stakeSompi < BETTOR_MIN_STAKE_POLICY) return reply.code(400).send({ ok: false, error: `stake_kas must be >= ${BETTOR_MIN_STAKE_POLICY / 1e8} KAS` });
+
+    // oracle/bettor exclusivity (area-1 invariant) — same as /bettor/register.
+    let oracleIds = [];
+    try { oracleIds = JSON.parse(market.oracle_relay_ids || '[]'); } catch {}
+    if (oracleIds.includes(b.bettor_relay_id)) return reply.code(403).send({ ok: false, error: 'bettor is in market oracle set (area-1 exclusivity)' });
+
+    const bettorRow = sqlite.prepare('SELECT id, address FROM relay_nodes WHERE id = ?').get(b.bettor_relay_id);
+    if (!bettorRow?.address) return reply.code(400).send({ ok: false, error: 'bettor relay not found' });
+    const bettorPk = await deriveXOnlyPubkey(bettorRow.address);
+    const network = bettorRow.address.startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
+
+    // gateway relay = market host (maker_relay_id); funds genesis/register, custodies bettor stake (testnet ramp).
+    const gatewayRelayId = market.maker_relay_id;
+    if (!isRelayAlive(gatewayRelayId)) return reply.code(503).send({ ok: false, error: 'gateway (maker) relay not alive' });
+    const gw = await sendCommandAsync(gatewayRelayId, { type: 'get_pubkey' });
+    const relayAddr = gw.address;
+    if (!relayAddr) return reply.code(503).send({ ok: false, error: 'gateway relay get_pubkey returned no address' });
+
+    // bettor funds the gateway (custody-bound, like publish): stake + register/genesis fee headroom.
+    try { await transferAndConfirm(b.bettor_relay_id, relayAddr, ((stakeSompi + 200_000_000) / 1e8).toFixed(8)); }
+    catch (e) { return reply.code(503).send({ ok: false, error: `bettor→gateway funding failed: ${e.message}` }); }
+
+    // relay helpers for the orchestrator (all on the gateway relay).
+    const kaspa = await import('kaspa-wasm');
+    const p2sh = (redeemHex) => kaspa.addressFromScriptPublicKey(kaspa.ScriptBuilder.fromScript(new Uint8Array(Buffer.from(redeemHex, 'hex'))).createPayToScriptHashScript(), network).toString();
+    const rc = (cmd) => sendCommandAsync(gatewayRelayId, cmd, 90000);
+    const transfer = async (addr, sompi) => { const r = await transferAndConfirm(gatewayRelayId, addr, (Number(sompi) / 1e8).toFixed(8)); return r.txId; };
+    const landed = async (txid, addr, n = 25) => { for (let i = 0; i < n; i++) { const j = await sendCommandAsync(gatewayRelayId, { type: 'check_utxo_landed', address: addr, txid }, 20000); if (j.landed || j.found) return true; await new Promise(r => setTimeout(r, 2000)); } return false; };
+
+    // shard→pool_markets row: each physical shard is a minimal pool_markets clone (FK shard_market_id REFERENCES pool_markets(id);
+    //   foreign_keys=ON). UI aggregates shards under the logical market via market_shards.logical_market_id. ⚠ DESIGN-FLAG for team:
+    //   (A)-model shards are ShardLeafs not independent markets — clone keeps the v171 FK satisfied; a leaner shard-row schema is a follow-up.
+    const pmCols = sqlite.prepare('PRAGMA table_info(pool_markets)').all().map(c => c.name);
+    const createShardMarketRow = async (shardIndex, shardP2sh) => {
+      const shardMarketId = `${logicalMarketId}-s${shardIndex}`;
+      const clone = { ...market, id: shardMarketId, spine_p2sh: shardP2sh, protocol_status: 'pending_bettors' };
+      try {
+        sqlite.prepare(`INSERT OR IGNORE INTO pool_markets (${pmCols.join(',')}) VALUES (${pmCols.map(() => '?').join(',')})`).run(...pmCols.map(c => clone[c]));
+      } catch (e) { console.warn(`[register-v07] shard pool_markets clone warn: ${e.message}`); }
+      return shardMarketId;
+    };
+    const recordBettor = async ({ shardMarketId, shardIndex, bettorPk: pk, direction: dir, stakeSompi: st, leafTx }) => {
+      try {
+        sqlite.prepare(`INSERT OR IGNORE INTO pool_bettor_sides (market_id, bettor_pk, bettor_relay_id, direction, stake_amount, side_p2sh, side_lock_tx, merkle_index, side_redeem_script_hex)
+          VALUES (?,?,?,?,?,?,?,?,?)`).run(shardMarketId, pk, b.bettor_relay_id, dir, st, shardP2sh_of(shardMarketId), leafTx, shardIndex, '');
+      } catch (e) { console.warn(`[register-v07] recordBettor warn: ${e.message}`); }
+    };
+    const shardP2sh_of = (smid) => (sqlite.prepare('SELECT shard_p2sh FROM market_shards WHERE shard_market_id = ?').get(smid)?.shard_p2sh) || '';
+
+    try {
+      const { registerBettorOnShard } = await import('../lib/pool-shard-register.mjs');
+      const silverc = process.env.SILVERC_PATH || 'D:/silverscript/target/release/silverc.exe';
+      const result = await registerBettorOnShard({
+        db: sqlite, rc, transfer, landed, p2sh, logicalMarketId,
+        poolMerkleRoot: market.pool_merkle_root, predicateCommit: market.market_metadata_hash,
+        bettorPk, direction, stakeSompi, relayAddr, silverc, sealCount: 32,
+        createShardMarketRow, recordBettor,
+      });
+      return reply.send({ ok: true, logical_market_id: logicalMarketId, bettor_pk: bettorPk, ...result });
+    } catch (e) {
+      console.error(`[pool/register-v07] ${logicalMarketId} fail: ${e.message}`);
+      return reply.code(500).send({ ok: false, error: `register-v07 failed: ${e.message}` });
+    }
+  });
+
   // GET /api/pool/config — static defaults for UI pre-submit preview (D4 wallet浮窗 estimate fee)
   fastify.get('/api/pool/config', async (request, reply) => {
     return reply.send({

@@ -133,11 +133,11 @@ export async function registerBettorOnShard(o) {
     const shardPoolId = hex32(`${logicalMarketId}-shard-${shard.shard_index}`);
     // bettor-independent ps template (4 dust-ticket fields are State, spliced per register)
     const psArtifact = computePoolSideArtifact(join(LIB, 'PoolSide_v08_shard.sil'), [ctorBytes32(bettorPk), ctorInt(direction), ctorInt(stake), ctorBytes32(z32)], silverc);
-    // current leaf redeem: splice current state into the stored genesis redeem (silverc-INDEPENDENT, drift-safe);
-    //   fallback recompile if genesis redeem not stored (older row). Both byte-equal (J2 已验).
-    const curRedeem = shard.shard_redeem_hex
-      ? spliceLeafState(shard.shard_redeem_hex, st)
-      : compileShardLeafRedeem({ marketIdHash, psTmplHashHex: psArtifact.templateHashHex, shardPoolId, sealCount, payoutCovId, localYes: st.local_yes, localNo: st.local_no, count: st.count, poolValue: st.pool_value, silverc });
+    // current leaf redeem: splice current state into the stored genesis redeem (silverc-INDEPENDENT, drift-safe).
+    //   fail-closed (Bettor/NWT/UI convergent): shard_redeem_hex MUST be set at genesis (open_new). null = data-missing bug →
+    //   THROW, never silent recompile (recompile bets determinism on Console silverc==canonical = drift risk).
+    if (!shard.shard_redeem_hex) throw new Error(`shard ${shard.shard_market_id} missing shard_redeem_hex — genesis 应存; fail-closed 防 silverc-drift recompile (data-missing bug)`);
+    const curRedeem = spliceLeafState(shard.shard_redeem_hex, st);
     const newState = { local_yes: st.local_yes + (direction === 0 ? stake : 0), local_no: st.local_no + (direction === 1 ? stake : 0), count: st.count + 1, pool_value: st.pool_value + stake };
 
     const [leafTxid] = String(shard.current_leaf_outpoint).split(':');
@@ -150,9 +150,7 @@ export async function registerBettorOnShard(o) {
     });
     const rj = await rc(cmd);
     const regTx = rj.txId || rj.txid;
-    const leafContAddr = rj.leafContinuationAddress || p2sh(shard.shard_redeem_hex
-      ? spliceLeafState(shard.shard_redeem_hex, newState)
-      : compileShardLeafRedeem({ marketIdHash, psTmplHashHex: psArtifact.templateHashHex, shardPoolId, sealCount, payoutCovId, localYes: newState.local_yes, localNo: newState.local_no, count: newState.count, poolValue: newState.pool_value, silverc }));
+    const leafContAddr = rj.leafContinuationAddress || p2sh(spliceLeafState(shard.shard_redeem_hex, newState));
     if (!regTx || !await landed(regTx, leafContAddr)) throw new Error(`register_append no land: ${JSON.stringify(rj).slice(0, 160)}`);
 
     if (recordBettor) await recordBettor({ shardMarketId: shard.shard_market_id, shardIndex: shard.shard_index, bettorPk, direction, stakeSompi: stake, leafTx: regTx });
