@@ -1701,7 +1701,8 @@ export async function unlockBshardPayoutClaim(args) {
     // nullifier 置位: word_idx = merkle_index/63, bit_in = merkle_index%63, mask = 2^bit_in (匹配合约展开上界 63; 17-word w0..16 cap 1071≥1024)
     const idx = Number(w.merkle_index), wordIdx = Math.floor(idx / 63), bitIn = idx % 63;
     const nw = []; for (let i = 0; i < _NULLIFIER_WORDS; i++) nw.push(BigInt(ps['w' + i] ?? 0));
-    nw[wordIdx] = nw[wordIdx] + (1n << BigInt(bitIn));
+    // guard: merkle_index ≥ 1024(wordIdx ≥ 17 越界)时跳过 nullifier 更新 → tx 仍构造(merkle_index 进 witness)→ 提交 → 合约 require(merkle_index<1024) 链上 BUST(F4 aliasing 防护落在合约层非 handler 崩)。
+    if (wordIdx < _NULLIFIER_WORDS) nw[wordIdx] = nw[wordIdx] + (1n << BigInt(bitIn));
     const newState = { consolidated_pool: (BigInt(ps.consolidated_pool) - payout).toString(), closed: ps.closed, payoutRoot: ps.payoutRoot, ..._nw17(ps) };
     for (let i = 0; i < _NULLIFIER_WORDS; i++) newState['w' + i] = nw[i].toString();
     const psContAddr = _continuationAddress(cmd.inputs.payoutshard.redeem_hex, _serializePayoutStateHex(newState), networkId, cmd.inputs.payoutshard.state_start ?? _POOL_STATE_START);
