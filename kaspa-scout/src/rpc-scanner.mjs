@@ -36,6 +36,12 @@ let _localAddresses = new Set();
 const RECONNECT_BASE_MS = 5000;
 const RECONNECT_MAX_MS  = 60000;
 const STATS_EVERY       = 1000; // log stats every N blocks
+// Heartbeat stall detector — TN12 produces blocks continuously (~10 bps).
+// The 'disconnect' event does NOT fire on a silent WS death (half-open TCP / node vanished),
+// so an event-driven reconnect alone leaves the scanner frozen forever (root cause of the
+// 06:11 receive outage). If no block arrives within BLOCK_STALL_MS, force a reconnect.
+const HEARTBEAT_CHECK_MS = 30000;
+const BLOCK_STALL_MS     = 90000;
 
 // ── State ───────────────────────────────────────────────────────────────────
 
@@ -43,6 +49,9 @@ let _rpc = null;
 let _running = false;
 let _reconnecting = false;
 let _reconnectAttempt = 0;
+let _lastBlockAt = 0;        // heartbeat: timestamp of last block-added event
+let _heartbeatTimer = null;  // stall detector for silent WS death
+let _reporter = null;        // stashed so the heartbeat can force a reconnect
 
 // DAG dedup: same txId appears in many blocks
 const _attempted = new Set();
@@ -320,7 +329,25 @@ async function _connect(reporter) {
     _scheduleReconnect(reporter);
   });
 
+  // Heartbeat baseline + stall detector (catches silent WS death the disconnect event misses)
+  _lastBlockAt = Date.now();
+  _reporter = reporter;
+  _startHeartbeat();
+
   log('listening...');
+}
+
+function _startHeartbeat() {
+  if (_heartbeatTimer) return; // one timer for the scanner's lifetime
+  _heartbeatTimer = setInterval(() => {
+    if (!_running || _reconnecting) return;
+    const silentMs = Date.now() - _lastBlockAt;
+    if (silentMs > BLOCK_STALL_MS) {
+      log(`STALL: no block in ${Math.round(silentMs / 1000)}s — WS silently dead (disconnect never fired), forcing reconnect`);
+      _scheduleReconnect(_reporter);
+    }
+  }, HEARTBEAT_CHECK_MS);
+  if (_heartbeatTimer.unref) _heartbeatTimer.unref();
 }
 
 function _scheduleReconnect(reporter) {
@@ -350,6 +377,7 @@ function _scheduleReconnect(reporter) {
 
 export async function stopRpcScanner() {
   _running = false;
+  if (_heartbeatTimer) { clearInterval(_heartbeatTimer); _heartbeatTimer = null; }
   logStats();
   if (_rpc) { try { await _rpc.disconnect(); } catch {} _rpc = null; }
   log('stopped');
@@ -361,6 +389,7 @@ async function handleBlock(event, reporter) {
   const block = event?.data?.block;
   if (!block) return;
 
+  _lastBlockAt = Date.now(); // heartbeat — proves the WS is alive
   _stats.blocks++;
   const blockHash = block?.verboseData?.hash || null;
   const blockTs = Number(block.header?.timestamp || 0);
