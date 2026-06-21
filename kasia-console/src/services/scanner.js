@@ -36,6 +36,13 @@ let _respawnTimer = null;
 const RESPAWN_BASE_MS = 5000;
 const RESPAWN_MAX_MS  = 60000;
 const CRASH_WINDOW_MS = 30000; // died within 30s of spawn = crash (escalate backoff)
+// ★ root-cure ② (Bettor proposal): authoritative liveness = scout_checkpoint.last_block_time advancing.
+//   Catches every death mode — dead process, WS stall, AND false-alive (running=true but scan stopped,
+//   no exit event so on('exit') respawn can't see it). External watchdog beats per-mode detection.
+let _watchdogTimer = null;
+let _lastWatchdogRestartAt = 0;
+const WATCHDOG_INTERVAL_MS = 45000;
+const SCAN_STALL_MS = 120000;  // checkpoint not advanced in 120s (TN12 ~1 block/s) = stalled → restart
 
 /**
  * Auto-respawn the scout after an unexpected death (root-cure for the false-alive ingest gap).
@@ -244,9 +251,45 @@ export function getScannerStatus() {
  * Auto-start if scanner was enabled before Console restart.
  */
 export async function autoStartIfEnabled() {
+  startScannerWatchdog(); // run for the Console's lifetime; self-gates on scanner_enabled
   const enabled = await getConfig('scanner_enabled');
   if (enabled && enabled !== 'false') {
     console.log('[scanner] auto-starting (was enabled before restart)');
     await startScanner();
   }
+}
+
+/**
+ * Scanner watchdog (root-cure ② for the silent-death ingest gap, 2026-06-21 :3200 incident).
+ * The authoritative liveness signal is scout_checkpoint.last_block_time advancing. A scout can be
+ * dead (no process), WS-stalled, or FALSE-ALIVE (process up, running=true, but scan stopped) — all
+ * three surface as a STALE checkpoint. Every WATCHDOG_INTERVAL, if the scanner is enabled and the
+ * checkpoint is stale beyond SCAN_STALL_MS, force a clean restart. This catches the false-alive mode
+ * that on('exit') respawn (process death) and the scout-internal heartbeat (WS stall) cannot see.
+ */
+export function startScannerWatchdog() {
+  if (_watchdogTimer) return;
+  _watchdogTimer = setInterval(async () => {
+    try {
+      const enabled = await getConfig('scanner_enabled');
+      if (!enabled || enabled === 'false') return; // operator disabled — nothing to guard
+      let lastBlockMs = null;
+      try {
+        const row = sqlite.prepare("SELECT last_block_time FROM scout_checkpoint WHERE address = '_global_'").get();
+        lastBlockMs = row?.last_block_time ? new Date(row.last_block_time).getTime() : null;
+      } catch {}
+      if (!lastBlockMs) return; // no checkpoint yet — give a fresh scout time to write one
+      const staleMs = Date.now() - lastBlockMs;
+      if (staleMs <= SCAN_STALL_MS) return; // healthy — checkpoint advancing
+      if (Date.now() - _lastWatchdogRestartAt < SCAN_STALL_MS) return; // debounce restarts
+      _lastWatchdogRestartAt = Date.now();
+      console.warn(`[scanner:watchdog] scout_checkpoint stale ${Math.round(staleMs / 1000)}s (child=${_child ? 'alive=false-alive/stall' : 'dead'}) — forcing restart`);
+      try { await stopScanner(); } catch {}
+      await startScanner();
+    } catch (e) {
+      console.error(`[scanner:watchdog] tick error: ${e.message}`);
+    }
+  }, WATCHDOG_INTERVAL_MS);
+  if (_watchdogTimer.unref) _watchdogTimer.unref();
+  console.log(`[scanner:watchdog] started — liveness via scout_checkpoint freshness (check ${WATCHDOG_INTERVAL_MS / 1000}s, stall ${SCAN_STALL_MS / 1000}s)`);
 }
