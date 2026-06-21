@@ -69,10 +69,11 @@ export function compilePayoutShardRedeem({ poolMerkleRoot, predicateCommit, cons
  * Compile a ShardLeaf redeem with the given (A) 4-field state baked.
  * @returns {{ redeemHex, psTmplHashHex }}
  */
-export function compileShardLeafRedeem({ marketIdHash, psTmplHashHex, shardPoolId, sealCount, payoutCovId, localYes, localNo, count, poolValue, silverc }) {
+export function compileShardLeafRedeem({ marketIdHash, psTmplHashHex, shardPoolId, sealCount, payoutCovId, deadline, localYes, localNo, count, poolValue, silverc }) {
+  // ★件1(J1): deadline 加在常量区(payoutCovId 后, init State 前) — State 区仍 offset 1/4×PUSH8 不变 (spliceLeafState byte-equal 保持)。
   const ctor = [
     ctorBytes32(marketIdHash), ctorBytes32(psTmplHashHex), ctorBytes32(shardPoolId),
-    ctorInt(sealCount), ctorInt(MIN_BET), ctorBytes32(payoutCovId),
+    ctorInt(sealCount), ctorInt(MIN_BET), ctorBytes32(payoutCovId), ctorInt(deadline),
     ctorInt(localYes), ctorInt(localNo), ctorInt(count), ctorInt(poolValue),
   ];
   return Buffer.from(compileSil(join(LIB, 'ShardLeaf.sil'), ctor, silverc).script).toString('hex');
@@ -103,7 +104,7 @@ export async function ensurePayoutShard({ db, rc, transfer, landed, p2sh, logica
  * @param {object} o {
  *   db, rc(cmd)→Promise, transfer(addr,sompi)→txid, landed(txid,addr)→bool, p2sh(redeemHex)→addr,
  *   logicalMarketId, poolMerkleRoot(hex), predicateCommit(hex), bettorPk(hex), direction(0|1), stakeSompi,
- *   relayAddr, silverc, sealCount, createShardMarketRow(shardIndex, shardP2sh)→shardMarketId (pool_markets row for the shard),
+ *   relayAddr, silverc, sealCount, deadline(Unix ts; partial-shard sweep gate, ctor-baked 件1), createShardMarketRow(shardIndex, shardP2sh)→shardMarketId (pool_markets row for the shard),
  *   recordBettor({ shardMarketId, shardIndex, bettorPk, direction, stakeSompi, leafTx }) (pool_bettor_sides / shard bettor record)
  * }
  * @returns {{ action, shardIndex, shardMarketId, shardP2sh, leafTx, leafOutpoint, leafState, payoutCovId }}
@@ -111,8 +112,9 @@ export async function ensurePayoutShard({ db, rc, transfer, landed, p2sh, logica
 export async function registerBettorOnShard(o) {
   const {
     db, rc, transfer, landed, p2sh, logicalMarketId, poolMerkleRoot, predicateCommit,
-    bettorPk, direction, stakeSompi, relayAddr, silverc, sealCount, createShardMarketRow, recordBettor,
+    bettorPk, direction, stakeSompi, relayAddr, silverc, sealCount, deadline, createShardMarketRow, recordBettor,
   } = o;
+  if (!Number.isFinite(Number(deadline)) || Number(deadline) <= 0) throw new Error(`registerBettorOnShard: deadline (Unix ts, ctor-baked partial-sweep gate) required, got ${deadline}`);
   if (direction !== 0 && direction !== 1) throw new Error(`direction must be 0|1, got ${direction}`);
   if (!(BigInt(stakeSompi) > 0n)) throw new Error(`stakeSompi must be > 0`);
   const stake = Number(stakeSompi);
@@ -164,7 +166,7 @@ export async function registerBettorOnShard(o) {
   const shardPoolId = hex32(`${logicalMarketId}-shard-${shardIndex}`);
   const psArtifact = computePoolSideArtifact(join(LIB, 'PoolSide_v08_shard.sil'), [ctorBytes32(bettorPk), ctorInt(direction), ctorInt(stake), ctorBytes32(z32)], silverc);
   const genState = { local_yes: direction === 0 ? stake : 0, local_no: direction === 1 ? stake : 0, count: 1, pool_value: stake };
-  const genRedeem = compileShardLeafRedeem({ marketIdHash, psTmplHashHex: psArtifact.templateHashHex, shardPoolId, sealCount, payoutCovId, localYes: genState.local_yes, localNo: genState.local_no, count: genState.count, poolValue: genState.pool_value, silverc });
+  const genRedeem = compileShardLeafRedeem({ marketIdHash, psTmplHashHex: psArtifact.templateHashHex, shardPoolId, sealCount, payoutCovId, deadline, localYes: genState.local_yes, localNo: genState.local_no, count: genState.count, poolValue: genState.pool_value, silverc });
   const genAddr = p2sh(genRedeem);
   const genTx = await transfer(genAddr, stake);                            // first bet stake locked INTO genesis ShardLeaf (count=1 baked)
   if (!await landed(genTx, genAddr)) throw new Error('ShardLeaf genesis no land');

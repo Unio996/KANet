@@ -26,6 +26,7 @@ contract ShardLeaf(
     int      seal_count,          // count==seal_count 才可 consolidate (= 原 PoolLeaf seal 门)
     int      min_bet,
     byte[32] payout_cov_id,       // ★ 真 PayoutShard covenant cov_id (genesis-mint 已知; consolidate destination provenance-bind; baked)
+    int      deadline,            // ★件1(J1): partial-shard sweep deadline (Unix ts, ctor-baked immutable=spender 不可伪; partial 片仅 tx.time>=deadline 可归集)
     // —— genesis State (4-field, 无 outcome) ——
     int      init_local_yes,
     int      init_local_no,
@@ -85,7 +86,10 @@ contract ShardLeaf(
         int psInIdx,        // 真 PayoutShard covenant input 位
         int psOutIdx        // PayoutShard 延续输出位 (absorb 续锁同 cov_id)
     ) {
-        require(count == seal_count);                       // 仅收满(sealed=停止收注)的片可归集 (= 原 seal 门; 防归集仍在收注的片)
+        // ★件1(J1) rolling-shard partial-sweep: 满片(count==seal_count)随时归集 OR 截止(tx.time>=deadline)后 partial 片也可归集。
+        //   解最后一片永远 partial(count<seal_count)归集不了→资金卡死 的核心 gap。deadline ctor-baked 不可伪;
+        //   premature partial(count<seal_count AND tx.time<deadline)→两条件皆 false→BUST。满片任何时刻 LAND。
+        require(count == seal_count || tx.time >= deadline);
         // ★ destination = PROVENANCE: 输入是【真 payout_cov_id 的 PayoutShard 实例】(假 template-PS 的 cov_id≠baked → BUST)
         byte[32] ps_cov = OpInputCovenantId(psInIdx);
         require(ps_cov == payout_cov_id);
