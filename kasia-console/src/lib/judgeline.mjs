@@ -17,6 +17,11 @@
 //
 // 三态: 可判+字段足 → 'YES'|'NO'; 字段缺/不合法/无法判 → 'ABSTAIN'(不猜)。
 // 主观/不可结构化谓词在【建市 prevet】拒(spec-validation), 不到 judgeLine。
+//
+// 命门③ canonicalPredicate/predicateCommit 的纯依赖 (均守上面纯函数硬约束: 无 I/O/时钟/随机/浮点):
+//   blake2b — 同 pool-payout-root payoutLeaf / SS 链上同款 (dkLen 32); normalizeAbbr — abbr canonical 单源。
+import { blake2b } from '@noble/hashes/blake2b';
+import { normalizeAbbr } from './oracle-evidence-extractors.mjs';
 
 const METRICS = new Set(['winner', 'margin', 'total', 'score']);
 const NUM_OPS = new Set(['==', '>=', '<=', '>', '<']);
@@ -204,4 +209,85 @@ export function buildResolutionPredicate(o) {
     return v.valid ? { valid: true, predicate } : { valid: false, reason: v.reason };
   }
   return { valid: false, reason: `未知 kind ${JSON.stringify(o.kind)}` };
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// 命门③ (Owner 钦定①真门) — predicate→genesis-commitment 单源绑定 (J1, 2026-06-21)。
+//
+// predicate_commit 是 PayoutShard ctor 参2 (redeem offset 518) 烤死的 immutable genesis hash。
+// 委员 enforceCommitteeSign 必验【blake2b(canonicalPredicate(predicate)) == 链上 predicate_commit】
+// (从被签 close_attest tx 的 PS input redeem 抽, 不信 driver/DB/caller env)——否则委员 re-derive
+// 跑在【未绑 predicate】上 = vacuous 假牙 (NWT/Bettor 红队抓, 2026-06-21)。
+//
+// 单源铁律: genesis 烤 predicate_commit 与委员 re-bind 必调【同一 canonicalPredicate】, 否则跨层
+// 序列化漂移 → hash 裂 → 命门③ 误拒/被绕 (cross-layer-consistency 病)。
+// ─────────────────────────────────────────────────────────────────────────
+
+/**
+ * canonicalPredicate — predicate → 确定性 canonical bytes (跨节点 byte-identical)。
+ * 格式 pc1 (长度前缀防分隔符注入, float-free):
+ *   parts = ['pc1', metric, op, scaleCanon, operandCanon, subjectCanon]
+ *   bytes = Σ ( uint32LE(utf8(part).byteLength) ‖ utf8(part) )
+ * 字段规范:
+ *   · operandCanon: winner → normalizeAbbr(operand) (胜方 abbr 单源, 与 judgeLine winner_side===operand 对死);
+ *                   margin/total/score → String(operand) (已 ×10^scale 整数, validate 已强制)
+ *   · subjectCanon: margin/score → normalizeAbbr(subject); winner/total → ''
+ *   · scaleCanon:   winner → '0'(无 scale 语义); 数值 → String(scale??0)
+ * @param {{metric:string, op:string, operand:(string|number), scale?:number, subject?:string}} predicate
+ * @returns {Uint8Array} 确定性 canonical bytes
+ * @throws 若 predicate 不合 judgeLine 契约 (委员路径必 try/catch → 拒签; 攻击者改结构 → 抛 → 拒)
+ */
+export function canonicalPredicate(predicate) {
+  const v = validateResolutionPredicate(predicate);
+  if (!v.valid) throw new Error(`canonicalPredicate: predicate 不合 judgeLine 契约 — ${v.reason}`);
+
+  const metric = predicate.metric;
+  const op = predicate.op;
+  let operandCanon, subjectCanon, scaleCanon;
+
+  if (metric === 'winner') {
+    operandCanon = normalizeAbbr(predicate.operand);              // 胜方 abbr → 单源规范
+    if (operandCanon === null) throw new Error('canonicalPredicate: winner operand 非法 abbr');
+    if (operandCanon === TIE_TOKEN) throw new Error(`canonicalPredicate: winner operand 规范化后==平局 token '${TIE_TOKEN}'(保留)`);
+    subjectCanon = '';
+    scaleCanon = '0';
+  } else {
+    operandCanon = String(predicate.operand);                    // 已定点整数 (validate isInt 保证)
+    scaleCanon = String(predicate.scale === undefined ? 0 : predicate.scale);
+    if (metric === 'total') {
+      subjectCanon = '';
+    } else {
+      subjectCanon = normalizeAbbr(predicate.subject);           // margin/score 让分方/计分方
+      if (subjectCanon === null) throw new Error('canonicalPredicate: margin/score subject 非法 abbr');
+    }
+  }
+
+  const parts = ['pc1', metric, op, scaleCanon, operandCanon, subjectCanon];
+  const enc = new TextEncoder();
+  const encoded = parts.map((p) => enc.encode(p));
+  const total = encoded.reduce((n, b) => n + 4 + b.length, 0);
+  const out = new Uint8Array(total);
+  const dv = new DataView(out.buffer);
+  let off = 0;
+  for (const b of encoded) {
+    dv.setUint32(off, b.length, true);                           // LE 长度前缀
+    off += 4;
+    out.set(b, off);
+    off += b.length;
+  }
+  return out;
+}
+
+/**
+ * predicateCommit — 命门③ genesis commitment = blake2b(canonicalPredicate(p))[32]。
+ * == PayoutShard ctor 参2 predicate_commit (redeem offset 518)。blake2b dkLen 32, 同 payoutLeaf/SS
+ * 链上同款。genesis 烤 + 委员 re-bind 单源同此 (零跨层漂移)。
+ * @param {{metric,op,operand,scale?,subject?}} predicate
+ * @returns {string} 64-hex (lowercase) 32-byte commitment
+ */
+export function predicateCommit(predicate) {
+  const h = blake2b(canonicalPredicate(predicate), { dkLen: 32 });
+  let hex = '';
+  for (let i = 0; i < h.length; i++) hex += h[i].toString(16).padStart(2, '0');
+  return hex;
 }
