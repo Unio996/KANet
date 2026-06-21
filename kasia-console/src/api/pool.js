@@ -1080,8 +1080,8 @@ export async function registerPoolRoutes(fastify) {
   fastify.post('/api/pool/market/:id/bettor/register-v07', async (request, reply) => {
     const logicalMarketId = request.params.id;
     const b = request.body || {};
-    if (!b.bettor_relay_id || b.direction === undefined || !b.stake_kas) {
-      return reply.code(400).send({ ok: false, error: 'bettor_relay_id, direction, stake_kas required' });
+    if ((!b.bettor_relay_id && !b.bettor_pk) || b.direction === undefined || !b.stake_kas) {
+      return reply.code(400).send({ ok: false, error: 'bettor_relay_id OR bettor_pk (fresh keypair, cross-node fixture), direction, stake_kas required' });
     }
     const market = sqlite.prepare('SELECT * FROM pool_markets WHERE id = ?').get(logicalMarketId);
     if (!market) return reply.code(404).send({ ok: false, error: 'market not found' });
@@ -1097,12 +1097,21 @@ export async function registerPoolRoutes(fastify) {
     // oracle/bettor exclusivity (area-1 invariant) — same as /bettor/register.
     let oracleIds = [];
     try { oracleIds = JSON.parse(market.oracle_relay_ids || '[]'); } catch {}
-    if (oracleIds.includes(b.bettor_relay_id)) return reply.code(403).send({ ok: false, error: 'bettor is in market oracle set (area-1 exclusivity)' });
-
-    const bettorRow = sqlite.prepare('SELECT id, address FROM relay_nodes WHERE id = ?').get(b.bettor_relay_id);
-    if (!bettorRow?.address) return reply.code(400).send({ ok: false, error: 'bettor relay not found' });
-    const bettorPk = await deriveXOnlyPubkey(bettorRow.address);
-    const network = bettorRow.address.startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
+    // fresh keypair bettor (cross-node 命门③ fixture, NWT 干净地址要求 — 解 (c) gateway-as-bettor 派彩淹没 fixture 教训):
+    //   b.bettor_pk 直传(64-hex x-only), gateway-sponsored 资助(testnet test, 无 bettor relay). 非 fresh 走 relay custody 模型.
+    const freshBettor = !!(b.bettor_pk && !b.bettor_relay_id);
+    let bettorPk, network;
+    if (freshBettor) {
+      if (!/^[0-9a-f]{64}$/i.test(b.bettor_pk)) return reply.code(400).send({ ok: false, error: 'bettor_pk must be 64-hex x-only pubkey' });
+      bettorPk = b.bettor_pk.toLowerCase();
+      network = 'testnet-12';
+    } else {
+      if (oracleIds.includes(b.bettor_relay_id)) return reply.code(403).send({ ok: false, error: 'bettor is in market oracle set (area-1 exclusivity)' });
+      const bettorRow = sqlite.prepare('SELECT id, address FROM relay_nodes WHERE id = ?').get(b.bettor_relay_id);
+      if (!bettorRow?.address) return reply.code(400).send({ ok: false, error: 'bettor relay not found' });
+      bettorPk = await deriveXOnlyPubkey(bettorRow.address);
+      network = bettorRow.address.startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
+    }
 
     // gateway relay = market host (maker_relay_id); funds genesis/register, custodies bettor stake (testnet ramp).
     const gatewayRelayId = market.maker_relay_id;
@@ -1112,8 +1121,11 @@ export async function registerPoolRoutes(fastify) {
     if (!relayAddr) return reply.code(503).send({ ok: false, error: 'gateway relay get_pubkey returned no address' });
 
     // bettor funds the gateway (custody-bound, like publish): stake + register/genesis fee headroom.
-    try { await transferAndConfirm(b.bettor_relay_id, relayAddr, ((stakeSompi + 200_000_000) / 1e8).toFixed(8)); }
-    catch (e) { return reply.code(503).send({ ok: false, error: `bettor→gateway funding failed: ${e.message}` }); }
+    //   fresh keypair bettor: gateway sponsors stake from its own balance (testnet fixture, no bettor relay to transfer from).
+    if (!freshBettor) {
+      try { await transferAndConfirm(b.bettor_relay_id, relayAddr, ((stakeSompi + 200_000_000) / 1e8).toFixed(8)); }
+      catch (e) { return reply.code(503).send({ ok: false, error: `bettor→gateway funding failed: ${e.message}` }); }
+    }
 
     // relay helpers for the orchestrator (all on the gateway relay).
     const kaspa = await import('kaspa-wasm');
