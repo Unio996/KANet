@@ -2,7 +2,7 @@
 // 价值/信任步 NEVER executed here; bot deep-links the USER to Console/relay to act + pay on-chain.
 // Run:  TELEGRAM_BOT_TOKEN=.. BROKER_RELAY_ID=.. INGEST_SECRET=.. node tg-bot/bot.mjs
 import { Bot } from 'grammy';
-import { CONFIG, missingConfig, resolveBrokerRelayId } from './config.mjs';
+import { CONFIG, missingConfig, resolveBrokerRelayId, resolveOwnerVoiceRelayId } from './config.mjs';
 import * as api from './console-api.mjs';
 import * as M from './messages.mjs';
 import * as PM from './prediction-menu.mjs';
@@ -127,6 +127,20 @@ bot.on('message:text', async (ctx) => {
     }
     return;
   }
+  // owner-in-dev-channel Direction A (Owner Telegram → dev-coord). Gated on ownerChatId match + NOT a
+  // command (filtered above) + NOT mid-bet-flow (inBetFlow return above, so an Owner placing a bet is
+  // never bridged). Pure messaging, 0-custody. The owner-voice relay is resolved from the owner-classified
+  // address (no custom config); unset → tell the Owner how to enable instead of silently dropping. Placed
+  // before the fallback so a plain Owner message is bridged, not answered with the generic /help reply.
+  if (tgUser === String(CONFIG.ownerChatId)) {
+    const ownerRelayId = await resolveOwnerVoiceRelayId();
+    if (!ownerRelayId) {
+      return ctx.reply('⚠ Owner 桥未就绪：还没有地址被分类为 trust_level=owner。在 Console /identities 把你的地址设为 owner 后即可在 dev-coord 以 owner 身份发言。');
+    }
+    const r = await api.postOwnerMessageToDevCoord(ownerRelayId, '[Owner] ' + txt);
+    if (r.ok && r.json?.txId) return ctx.reply('✓ 已发到 dev-coord');
+    return ctx.reply('⚠ 转发 dev-coord 失败: ' + (r.json?.error || r.json?.detail || r.status));
+  }
   // Bettor r8 即时止血: 用户输看似押注续单的词 (确认/yes/纯数字), 但本地已无 bet 流程态
   // (bot 重启 / 会话超时), 明示而非甩裸菜单, 避免用户以为「确认」生效付了钱。
   const t = (txt || '').trim().toLowerCase();
@@ -219,6 +233,26 @@ async function pollSettleResults() {
     } catch {}
   }
 }
+
+// owner-in-dev-channel Direction B (dev-coord → Owner Telegram). Reads new dev-coord-testnet messages
+// since the last-seen cursor and pushes each to ownerChatId as compact "<sender>: <text>". 0-custody:
+// read-only chat poll + sendMessage. Cursor advances to newest seen (dedup). Filters the Owner's own
+// "[Owner] …" messages so the bridge never echoes the Owner back to themselves (loop guard). Cursor
+// starts at "now" so the first poll never replays channel history into the Owner's DM.
+let _ownerBridgeCursor = new Date().toISOString();
+async function pollOwnerDevCoord() {
+  const r = await api.devCoordMessagesSince(_ownerBridgeCursor, 50);
+  if (!r.ok) return;
+  for (const m of r.messages) {
+    // advance cursor first so a send failure doesn't wedge/replay the same message
+    if (m.created_at && m.created_at > _ownerBridgeCursor) _ownerBridgeCursor = m.created_at;
+    const text = m.content || '';
+    if (text.startsWith('[Owner]')) continue;  // loop guard: skip the Owner's own bridged messages
+    const sender = (m.sender_address ? String(m.sender_address).slice(-8) : 'dev');
+    try { await bot.api.sendMessage(CONFIG.ownerChatId, `${sender}: ${text}`); } catch {}
+  }
+}
+
 // KANet-UI 2026-06-13: runtime side-effects (Telegram poller + the 3 background pollers, which can send
 // real messages) live in startBot() so `import`ing this module (e.g. from a test) registers the handlers
 // WITHOUT going live. _launch_tg_bot.mjs calls startBot(); tests import { bot } and feed bot.handleUpdate().
@@ -227,6 +261,14 @@ export function startBot() {
   setInterval(() => { pollLoop().catch(() => {}); }, CONFIG.pollMs);
   setInterval(() => { pollPendingBets().catch(() => {}); }, CONFIG.pollMs);
   setInterval(() => { pollSettleResults().catch(() => {}); }, CONFIG.pollMs);
+  // owner-in-dev-channel Direction B poller — only when ownerChatId is configured. unref'd so it never
+  // keeps the process alive on its own. ~10s cadence (ownerBridgePollMs). Direction A (Owner→dev-coord)
+  // needs no interval (it fires on the Owner's inbound Telegram message in the message:text handler).
+  if (CONFIG.ownerChatId) {
+    const t = setInterval(() => { pollOwnerDevCoord().catch(() => {}); }, CONFIG.ownerBridgePollMs);
+    if (typeof t.unref === 'function') t.unref();
+    console.log('[tg-bot] owner-bridge: dev-coord → Owner DM poller on (chat=' + CONFIG.ownerChatId + ')');
+  }
   bot.start();
   console.log('[tg-bot] @' + CONFIG.botUsername + ' up (broker=' + (brokerRelayId || 'UNSET — set in Console Settings') + ', 0-key / deep-link only)');
 }
