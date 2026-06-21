@@ -1203,6 +1203,14 @@ export async function registerPoolRoutes(fastify) {
     });
   });
 
+  // GET /api/pool/fee-config — 价值分成 fee 协议常量 (单源 = pool-shard-settle FEE_CONFIG; UI 收口读此防硬编漂移).
+  //   bps: 押注侧 winners 9700 / [broker 160 + oracle 100 + introducer 20 + node 20 = 300] = 3%. 协议常量非 maker 可调
+  //   (determinism: 委员 deriveFeeLeaves re-derive byte-identical). node→signer-committee 均分, broker/introducer create-committed.
+  fastify.get('/api/pool/fee-config', async (request, reply) => {
+    const { FEE_CONFIG } = await import('../lib/pool-shard-settle.mjs');
+    return reply.send({ ok: true, fee_config: FEE_CONFIG, note: '协议常量 (非 maker 可调); winners 97% / fee 3% = broker1.6%+oracle1%+introducer0.2%+node0.2%; node→5签名委员均分, broker/introducer create-committed pk' });
+  });
+
   // POST /api/pool/market/:id/oracle/deposit — oracle 自 locks bond to spine
   fastify.post('/api/pool/market/:id/oracle/deposit', async (request, reply) => {
     const marketId = request.params.id;

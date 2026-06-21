@@ -16,6 +16,12 @@ import { spliceLeafState } from './pool-shard-register.mjs';
 import { blake2b } from '@noble/hashes/blake2b';
 import { deriveCommitteeSeed, selectCommittee } from '../services/pool-committee-sampler.mjs';
 
+// 价值分成 fee 协议常量 (单源 = 真相源; UI 收口 + deriveFeeLeaves + create-v07 都读此, 防硬编漂移). bps = basis points (1% = 100).
+//   押注侧: winners 9700bps (97%) / fee 300bps (3%) = broker 160 + oracle 100 + introducer 20 + node 20.
+//   determinism: 协议常量 (非 maker 可调) → 委员 re-derive byte-identical (maker 可调需 create-烤 per-market, Owner 经济决策).
+//   oracle+node (120bps) → selectCommittee 派生的 5 委员均分 (各 24bps); broker/introducer 各 1 leaf (create-committed pk).
+export const FEE_CONFIG = Object.freeze({ brokerBps: 160, oracleBps: 100, introBps: 20, nodeBps: 20, winnersBps: 9700, totalFeeBps: 300 });
+
 const z32 = '00'.repeat(32);
 
 /**
