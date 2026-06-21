@@ -198,13 +198,15 @@ export async function enforceCommitteeSign({ rcOn, committeeRelayId, txSafeJson,
   //   feeParams 不传 = 无 fee (机制测/旧 teeth 向后兼容). 传则委员 re-derive 含 fee → 假 fee 地址/bps/committee → re-derive≠claimed → BUST.
   let feeLeaves = [];
   if (feeParams) {
+    // J1 footgun-close (cross-layer-consistency): 只接【pinned committeePks】(= loadCommittee = sampleAndStoreCommittee 写,
+    //   已 maker/broker/bettor-excluded) → fee集==签名集 by construction. 【不 re-sample】(deriveFeeLeavesForMarket 的 excludePks
+    //   ≠ sampler → fee委员≠签名委员 gap, NWT/Bettor BREAKER). committeePks 必传, 缺则拒签 (不 silent fallback 到错路).
+    if (!feeParams.committeePks || !feeParams.committeePks.length) {
+      return { ok: false, reason: `命门④: feeParams.committeePks (pinned pool_committee) 必传 — 不 re-sample (fee集必==签名集 by construction)` };
+    }
     const poolSompi = bettors.reduce((s, b) => s + BigInt(b.stake), 0n);
     try {
-      // committeePks pinned (pool_committee, sampler-确定性写) → deriveFeeLeaves 直用 (单源 = driver claim builder 同); 否则
-      //   deriveFeeLeavesForMarket re-sample (链锚 seed, 确定性). v1.5 硬化: enforce 独立读 pool_committee 而非信 passed.
-      feeLeaves = feeParams.committeePks
-        ? deriveFeeLeaves({ poolSompi: poolSompi.toString(), feeConfig: feeParams.feeConfig, brokerPk: feeParams.brokerPk, introducerPk: feeParams.introducerPk, committeePks: feeParams.committeePks }).feeLeaves
-        : deriveFeeLeavesForMarket({ ...feeParams, poolSompi }).feeLeaves;
+      feeLeaves = deriveFeeLeaves({ poolSompi: poolSompi.toString(), feeConfig: feeParams.feeConfig, brokerPk: feeParams.brokerPk, introducerPk: feeParams.introducerPk, committeePks: feeParams.committeePks }).feeLeaves;
     } catch (e) { return { ok: false, reason: `命门④ fee-leaf 派生 FAIL: ${String(e.message).slice(0, 120)}` }; }
   }
   const pm = computePariMutuelPayout({ bettors, winningDirection, feeBps, feeLeaves });
