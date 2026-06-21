@@ -5070,5 +5070,28 @@ export function runMigrations() {
     console.log('[migrate] v171: market_shards table created (rolling-shard registry for unlimited betting — bshard B + self-claim C).');
   }
 
+  // v172: market_shards.current_leaf_outpoint + current_leaf_state — (A)-model ShardLeaf 续约记账 (production register wiring (b)).
+  //   (A) self-contained 模型: ShardLeaf covenant 续约 register_append, count/local_yes/no/pool_value 烤进 state → 每 register
+  //   续约地址变 (shard_p2sh 只 holds 创世). buildRegisterCommand 下一笔要【当前 leaf 续约 UTXO】:
+  //     current_leaf_outpoint (txid:idx)  = 当前 ShardLeaf 续约 UTXO outpoint (上一笔 register 的续约 output)
+  //     current_leaf_state    (JSON)      = {count, local_yes, local_no, pool_value} → spliceLeafState 重算续约 redeem
+  //                                          (J2 已验 byte-equal, 不必存全 redeem_hex — design (b) J2 缺口2 fold-in)
+  //   NO-TX: 每笔 register landed 后 onBettorRegistered 原子更新 (NO TX NO STATE). design: docs/2026-06-21-bshard-production-register-wiring-design.md (b).
+  {
+    const cols = sqlite.prepare(`PRAGMA table_info(market_shards)`).all().map(c => c.name);
+    if (!cols.includes('current_leaf_outpoint')) {
+      try {
+        sqlite.exec(`ALTER TABLE market_shards ADD COLUMN current_leaf_outpoint TEXT`);
+        console.log('[migrate] v172: market_shards.current_leaf_outpoint (当前 ShardLeaf 续约 UTXO txid:idx, buildRegisterCommand input).');
+      } catch (e) { if (!/duplicate column/i.test(e.message)) console.warn(`[migrate] v172 current_leaf_outpoint fail: ${e.message}`); }
+    }
+    if (!cols.includes('current_leaf_state')) {
+      try {
+        sqlite.exec(`ALTER TABLE market_shards ADD COLUMN current_leaf_state TEXT`);
+        console.log('[migrate] v172: market_shards.current_leaf_state (JSON count/local_yes/local_no/pool_value, spliceLeafState 重算续约 redeem).');
+      } catch (e) { if (!/duplicate column/i.test(e.message)) console.warn(`[migrate] v172 current_leaf_state fail: ${e.message}`); }
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
