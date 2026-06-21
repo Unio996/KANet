@@ -102,7 +102,7 @@ export async function enforceCommitteeSign({ rcOn, committeeRelayId, txSafeJson,
     return { ok: false, reason: `命门①: p2sh(psRedeem)=${psAddr.slice(0, 16)} 不是被签 PS input(txid ${psInputTxid.slice(0, 12)})的链上地址 — redeem 假/不绑链, 委员拒签` };
   }
   const onChainPredicateCommit = Buffer.from(psRedeemHex, 'hex').slice(_PREDICATE_COMMIT_REDEEM_OFFSET, _PREDICATE_COMMIT_REDEEM_OFFSET + 32).toString('hex');
-  const predHash = Buffer.from(blake2b(Buffer.from(canonicalPredicate(predicate)), { dkLen: 32 })).toString('hex');
+  const predHash = computePredicateCommit(predicate);   // 单源 (NWT 硬化: 与 genesis 同函数, blake2b 包装不复制 → 零漂移)
   if (predHash !== onChainPredicateCommit) {
     return { ok: false, reason: `命门① predicate hash-bind FAIL: blake2b(canonical(predicate)) ${predHash.slice(0, 14)} != ON-CHAIN predicate_commit ${onChainPredicateCommit.slice(0, 14)} (假 predicate, 委员拒签)` };
   }
