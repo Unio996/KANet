@@ -204,6 +204,15 @@ export async function enforceCommitteeSign({ rcOn, committeeRelayId, txSafeJson,
     if (!feeParams.committeePks || !feeParams.committeePks.length) {
       return { ok: false, reason: `命门④: feeParams.committeePks (pinned pool_committee) 必传 — 不 re-sample (fee集必==签名集 by construction)` };
     }
+    // fix② (NWT/Bettor 实 trustless 洞修): committeePks caller-passed → 必 cross-check == 本 close_attest 的 committee_pk_hash
+    //   (= 实签名者, close_attest 合约链上验 committee_pk_hash==hash(真5签者) — J1 SS 域确认). 不符 → settler 传假 fee 委员 → BUST.
+    //   绑 fee委员 == 实签名者 (oracle/node fee airtight, 非只 self-deal residual). committee_pk_hash = blake2b(concat(sorted-by-pk 委员 pk)).
+    if (feeParams.committeePkHash) {
+      const h = Buffer.from(blake2b(Buffer.concat([...feeParams.committeePks].map(p => String(p).toLowerCase()).sort().map(p => Buffer.from(p, 'hex'))), { dkLen: 32 })).toString('hex');
+      if (h !== String(feeParams.committeePkHash).toLowerCase()) {
+        return { ok: false, reason: `命门④ fix②: fee委员 != 实签名者: blake2b(committeePks) ${h.slice(0, 12)} != close_attest committee_pk_hash ${String(feeParams.committeePkHash).slice(0, 12)} (settler 传假 fee 委员)` };
+      }
+    }
     const poolSompi = bettors.reduce((s, b) => s + BigInt(b.stake), 0n);
     try {
       feeLeaves = deriveFeeLeaves({ poolSompi: poolSompi.toString(), feeConfig: feeParams.feeConfig, brokerPk: feeParams.brokerPk, introducerPk: feeParams.introducerPk, committeePks: feeParams.committeePks }).feeLeaves;
