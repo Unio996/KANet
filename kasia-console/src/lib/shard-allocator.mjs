@@ -92,11 +92,11 @@ export function allocateForRegister(db, logicalMarketId, nextStakeSompi) {
  * Throws on UNIQUE(logical_market_id, shard_index) — concurrent open_new losers catch this and re-run
  * allocateForRegister (which now sees the winner's open shard). This serializes shard opening across nodes/reqs.
  */
-export function registerShard(db, { logicalMarketId, shardIndex, shardMarketId, shardP2sh, currentLeafOutpoint = null, currentLeafState = null, nowSec = null }) {
+export function registerShard(db, { logicalMarketId, shardIndex, shardMarketId, shardP2sh, currentLeafOutpoint = null, currentLeafState = null, shardRedeemHex = null, nowSec = null }) {
   db.prepare(
-    `INSERT INTO market_shards (logical_market_id, shard_index, shard_market_id, shard_p2sh, current_leaf_outpoint, current_leaf_state, status, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, 'open', ?)`
-  ).run(logicalMarketId, shardIndex, shardMarketId, shardP2sh, currentLeafOutpoint, currentLeafState ? JSON.stringify(currentLeafState) : null, nowSec);
+    `INSERT INTO market_shards (logical_market_id, shard_index, shard_market_id, shard_p2sh, current_leaf_outpoint, current_leaf_state, shard_redeem_hex, status, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?)`
+  ).run(logicalMarketId, shardIndex, shardMarketId, shardP2sh, currentLeafOutpoint, currentLeafState ? JSON.stringify(currentLeafState) : null, shardRedeemHex, nowSec);
 }
 
 /** Mark the previous open shard sealed when a new shard supersedes it (atomic part of open_new). */

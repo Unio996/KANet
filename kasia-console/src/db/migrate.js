@@ -5091,6 +5091,32 @@ export function runMigrations() {
         console.log('[migrate] v172: market_shards.current_leaf_state (JSON count/local_yes/local_no/pool_value, spliceLeafState 重算续约 redeem).');
       } catch (e) { if (!/duplicate column/i.test(e.message)) console.warn(`[migrate] v172 current_leaf_state fail: ${e.message}`); }
     }
+    if (!cols.includes('shard_redeem_hex')) {
+      try {
+        sqlite.exec(`ALTER TABLE market_shards ADD COLUMN shard_redeem_hex TEXT`);
+        console.log('[migrate] v172: market_shards.shard_redeem_hex (创世 ShardLeaf redeem 基 = canonical-pipeline 编一次存, splice base — register 时 spliceLeafState 纯字节 op 零 silverc 重编, 防 cross-node build drift).');
+      } catch (e) { if (!/duplicate column/i.test(e.message)) console.warn(`[migrate] v172 shard_redeem_hex fail: ${e.message}`); }
+    }
+  }
+
+  // v172: payout_shards — per-logical-market production-shape PayoutShard covenant (the (A) consolidation sink).
+  //   每 logical market 一个 PayoutShard (genesis-mint once at first shard); 每片 ShardLeaf bake 此 payout_cov_id
+  //   (consolidate destination-bind). settle 阶段 consolidate→close_attest→claim 用 payout_redeem_hex + payout_ps_outpoint.
+  //   写入方: src/lib/pool-shard-register.mjs ensurePayoutShard (register-v07 (a)). 读取方: settle 编排 (c) + consolidate.
+  {
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS payout_shards (
+        logical_market_id   TEXT PRIMARY KEY,
+        payout_cov_id       TEXT NOT NULL,
+        payout_ps_addr      TEXT NOT NULL,
+        payout_ps_outpoint  TEXT,
+        payout_redeem_hex   TEXT NOT NULL,
+        pool_merkle_root    TEXT,
+        predicate_commit    TEXT,
+        created_at          INTEGER
+      )
+    `);
+    console.log('[migrate] v172: payout_shards table (per-market (A) PayoutShard covenant sink — cov_id provenance + settle redeem).');
   }
 
   console.log('[migrate] DB migrations complete.');
