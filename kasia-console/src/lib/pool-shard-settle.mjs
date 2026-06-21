@@ -75,17 +75,28 @@ function canonicalPredicate(p) {
   return '{' + Object.keys(p).sort().map(k => JSON.stringify(k) + ':' + canonicalPredicate(p[k])).join(',') + '}';
 }
 
-export async function enforceCommitteeSign({ rcOn, committeeRelayId, txSafeJson, claimedPayoutRoot, predicate, predicateCommit, frozenFields, bettors, feeBps = 0 }) {
-  // 🔑 命门① predicate hash-bind (NWT load-bearing catch): 委员【不信 driver 传的 predicate】. 验 blake2b(canonical(predicate))
-  //   == 链上 predicate_commit (PayoutShard genesis baked, immutable). 假 predicate(给假 winningSide 自洽 payoutRoot)→
-  //   hash 不符 → 拒签. 没这条 = vacuous 假牙 (judgeLine 跑在未绑 predicate 上). genesis 必烤 predicate_commit=blake2b(canonical(predicate)).
-  if (predicateCommit) {
-    const predHash = Buffer.from(blake2b(Buffer.from(canonicalPredicate(predicate)), { dkLen: 32 })).toString('hex');
-    if (predHash !== String(predicateCommit)) {
-      return { ok: false, reason: `命门① predicate hash-bind FAIL: blake2b(canonical(predicate)) ${predHash.slice(0, 14)} != chain predicate_commit ${String(predicateCommit).slice(0, 14)} (假 predicate, 委员拒签)` };
-    }
-  } else {
-    return { ok: false, reason: `命门①: predicateCommit(链上 baked)必传 — 无 hash-bind = vacuous, 委员拒签` };
+// PayoutShard.sil (canonical 873e799e) ctor-baked predicate_commit 在 redeem 的 byte offset (J2 probe: 两 predicate_commit
+//   compile diff → first occurrence @518). ⚠ .sil 变则 offset 变 — provenance-pinned 873e799e 下稳定. NWT 命门① 审.
+const _PREDICATE_COMMIT_REDEEM_OFFSET = 518;
+
+export async function enforceCommitteeSign({ rcOn, committeeRelayId, txSafeJson, claimedPayoutRoot, predicate, psRedeemHex, p2sh, frozenFields, bettors, feeBps = 0 }) {
+  // 🔑 命门① predicate hash-bind (NWT/Bettor load-bearing catch): 委员【不信 caller】. 不取 caller 的 predicateCommit param
+  //   (= vacuous, caller 可填假) — 而是【从被签 close_attest tx 的 PS input redeem 抽 ON-CHAIN ctor-baked predicate_commit】+
+  //   chain-bound(check_utxo_landed 验 p2sh(redeem)==被签 PS input 的链上地址 → redeem 不可伪). 然后验 blake2b(canonical(predicate))
+  //   == on-chain predicate_commit. 假 predicate(自洽假 payoutRoot)→ hash 不符 → 拒签.
+  //   genesis 必烤 predicate_commit=blake2b(canonical(predicate))(orchestrator 改; 现烤 market_metadata_hash 则永假).
+  if (!psRedeemHex || !p2sh) return { ok: false, reason: `命门①: psRedeemHex + p2sh 必传(链上读 predicate_commit, 不信 caller param)` };
+  let psInputTxid;
+  try { psInputTxid = JSON.parse(txSafeJson).inputs[0].transactionId; } catch { return { ok: false, reason: 'txSafeJson parse fail (no PS input)' }; }
+  const psAddr = p2sh(psRedeemHex);
+  const landedRes = await rcOn(committeeRelayId, { type: 'check_utxo_landed', address: psAddr, txid: psInputTxid });
+  if (!(landedRes?.landed || landedRes?.found)) {
+    return { ok: false, reason: `命门①: p2sh(psRedeem)=${psAddr.slice(0, 16)} 不是被签 PS input(txid ${psInputTxid.slice(0, 12)})的链上地址 — redeem 假/不绑链, 委员拒签` };
+  }
+  const onChainPredicateCommit = Buffer.from(psRedeemHex, 'hex').slice(_PREDICATE_COMMIT_REDEEM_OFFSET, _PREDICATE_COMMIT_REDEEM_OFFSET + 32).toString('hex');
+  const predHash = Buffer.from(blake2b(Buffer.from(canonicalPredicate(predicate)), { dkLen: 32 })).toString('hex');
+  if (predHash !== onChainPredicateCommit) {
+    return { ok: false, reason: `命门① predicate hash-bind FAIL: blake2b(canonical(predicate)) ${predHash.slice(0, 14)} != ON-CHAIN predicate_commit ${onChainPredicateCommit.slice(0, 14)} (假 predicate, 委员拒签)` };
   }
   const { judgeLine } = await import('./judgeline.mjs');
   const verdict = judgeLine(predicate, frozenFields);                 // 'YES' | 'NO' | 'ABSTAIN' (byte-identical 跨节点)
