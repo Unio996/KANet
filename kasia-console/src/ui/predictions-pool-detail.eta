@@ -86,6 +86,19 @@
         ⚖ 若裁决源真的不可得 / 歧义无法判定，仲裁人会<strong>弃权 → 本市场退款</strong>（非保证结算）。这是去中心化预言机的边界，非缺陷。
       </div>
 
+      <!-- KANet-UI 2026-06-22 值分成收口 (Owner 真北极星): 协议 fee 透明 = 命门④ 链上不可篡改, 让用户看得见'每分钱去哪'. 仅 v0.7 bshard 值分成市场显示 (v06 旧费率系统不同). 单源读 feeConfig 防硬编漂移. introducer 标'待上线' (角色未 wire, 诚实不假装). -->
+      <div x-show="feeConfig && market && market.protocol_version === 'v0.7'"
+           class="mt-2 text-[10px] text-ink-500 bg-emerald-50 border border-emerald-100 rounded px-2.5 py-2 leading-relaxed">
+        <div class="font-medium text-ink-600 mb-1">💎 价值分成 · 协议常量 · 链上不可篡改</div>
+        <div class="grid grid-cols-2 gap-x-3 gap-y-0.5">
+          <span>🏆 赢家 <strong x-text="((feeConfig.winnersBps||9700)/100).toFixed(1)+'%'"></strong></span>
+          <span>🛡 仲裁委员 <strong x-text="(((feeConfig.oracleBps||100)+(feeConfig.nodeBps||20))/100).toFixed(1)+'%'"></strong> <span class="text-ink-400">(判决+节点)</span></span>
+          <span>🤝 broker <strong x-text="((feeConfig.brokerBps||160)/100).toFixed(1)+'%'"></strong></span>
+          <span>📣 introducer <strong x-text="((feeConfig.introBps||20)/100).toFixed(1)+'%'"></strong> <span class="text-amber-600">(角色待上线)</span></span>
+        </div>
+        <div class="mt-1.5 text-ink-400">收款方 + 仲裁委员在市场<strong>创建时链上烤死（命门④）</strong>，结算时委员各自独立重算验证；任何人想改收款方 / 比例 → 重算对不上 → 拒签 → 钱发不出去。不靠信任，靠合约数学，每个市场都自动强制。</div>
+      </div>
+
       <div x-show="bet.open" x-transition class="mt-4 space-y-3">
         <!-- KANet-UI GAP-2 (Bettor r494/r496): 模式切换 — 外部钱包(大众默认) vs Console agent(内部) -->
         <div class="grid grid-cols-2 gap-1 p-1 bg-warm-100 rounded-lg text-xs">
@@ -404,6 +417,7 @@ function poolDetailPage(marketId) {
     oracleList: [],
     auditHistory: [],
     events: [],             // KANet-UI 2026-06-07 P0-#4: chain_events 时间线 (ORDER ASC)
+    feeConfig: null,        // KANet-UI 2026-06-22 值分成收口: 协议 fee 常量 {brokerBps,oracleBps,introBps,nodeBps,winnersBps,totalFeeBps} (GET /api/pool/fee-config)
     // KANet-UI 2026-06-07 P0-#2 (Bettor r319 关 1 PASS): web 押注 panel state
     bet: {
       open: false,
@@ -445,6 +459,11 @@ function poolDetailPage(marketId) {
 
     async init() {
       await this.load();
+      // KANet-UI 2026-06-22 值分成收口: 读协议 fee 常量 (单源 GET /api/pool/fee-config = pool-shard-settle FEE_CONFIG, 防硬编漂移; 协议常量非 maker 可调)
+      try {
+        const fcR = await fetch('/api/pool/fee-config').then(r => r.json()).catch(() => ({}));
+        if (fcR.ok && fcR.fee_config) this.feeConfig = fcR.fee_config;
+      } catch {}
       // KANet-UI 2026-06-07 P0-#2: 加载自家 agent list (= 同 create form 模式)
       try {
         const agResp = await fetch('/api/agent/profile').then(r => r.json()).catch(() => ({}));
