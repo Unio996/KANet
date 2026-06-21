@@ -1150,9 +1150,16 @@ export async function registerPoolRoutes(fastify) {
     try {
       const { registerBettorOnShard } = await import('../lib/pool-shard-register.mjs');
       const silverc = process.env.SILVERC_PATH || 'D:/silverscript/target/release/silverc.exe';
+      // 命门① genesis coherence (NWT/Bettor load-bearing): PayoutShard 烤 predicate_commit = blake2b(canonicalPredicate(predicate))
+      //   (单源 computePredicateCommit, 与 enforce 同函数) — 非 market_metadata_hash (= sha256({全市场元}) ≠ blake2b(canonical(predicate))
+      //   → 委员 enforce hash-bind 永假 → close 永 BUST). predicate-less 市场(无结构化判)fallback metadata_hash(无命门③ enforce).
+      const { computePredicateCommit } = await import('../lib/pool-shard-settle.mjs');
+      let _predicate = null;
+      try { _predicate = JSON.parse(market.resolution_rule_spec || '{}')?.resolution_predicate || null; } catch {}
+      const predicateCommit = _predicate ? computePredicateCommit(_predicate) : market.market_metadata_hash;
       const result = await registerBettorOnShard({
         db: sqlite, rc, transfer, landed, p2sh, logicalMarketId,
-        poolMerkleRoot: market.pool_merkle_root, predicateCommit: market.market_metadata_hash,
+        poolMerkleRoot: market.pool_merkle_root, predicateCommit,
         bettorPk, direction, stakeSompi, relayAddr, silverc, sealCount: 32,
         createShardMarketRow, recordBettor,
       });

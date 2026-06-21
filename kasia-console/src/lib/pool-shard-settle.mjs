@@ -68,11 +68,19 @@ export function computeRefundPayout({ bettors }) {
  * @returns {{ ok, signature?, verdict?, reDerivedRoot?, reason? }}
  */
 // canonical(predicate): deterministic 跨节点 byte-identical 序列化 (递归 sorted-key JSON). genesis 烤 predicate_commit 与
-//   enforce 验必用同款 (否则 bind 永假/永真). ⚠ NWT 命门① spec 域: 此格式 + genesis 烤值必三方对死.
-function canonicalPredicate(p) {
+//   enforce 验必用【同一函数 = 单源】(否则 bind 永假/永真). ⚠ NWT 命门① spec 域: 此格式三方对死.
+export function canonicalPredicate(p) {
   if (p === null || typeof p !== 'object') return JSON.stringify(p);
   if (Array.isArray(p)) return '[' + p.map(canonicalPredicate).join(',') + ']';
   return '{' + Object.keys(p).sort().map(k => JSON.stringify(k) + ':' + canonicalPredicate(p[k])).join(',') + '}';
+}
+
+/**
+ * predicate_commit = blake2b(canonicalPredicate(predicate)). 单源: genesis (ensurePayoutShard 烤) + enforce (验) 必用此函数,
+ * 否则 hash 不一致 → bind 永假(legit predicate 也拒). ⚠ NWT 命门① spec 域确认格式.
+ */
+export function computePredicateCommit(predicate) {
+  return Buffer.from(blake2b(Buffer.from(canonicalPredicate(predicate)), { dkLen: 32 })).toString('hex');
 }
 
 // PayoutShard.sil (canonical 873e799e) ctor-baked predicate_commit 在 redeem 的 byte offset (J2 probe: 两 predicate_commit
