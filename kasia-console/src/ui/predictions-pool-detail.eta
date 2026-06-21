@@ -89,14 +89,14 @@
       <!-- KANet-UI 2026-06-22 值分成收口 (Owner 真北极星): 协议 fee 透明 = 命门④ 链上不可篡改, 让用户看得见'每分钱去哪'. 仅 v0.7 bshard 值分成市场显示 (v06 旧费率系统不同). 单源读 feeConfig 防硬编漂移. introducer 标'待上线' (角色未 wire, 诚实不假装). -->
       <div x-show="feeConfig && market && market.protocol_version === 'v0.7'"
            class="mt-2 text-[10px] text-ink-500 bg-emerald-50 border border-emerald-100 rounded px-2.5 py-2 leading-relaxed">
-        <div class="font-medium text-ink-600 mb-1">💎 价值分成 · 协议常量 · 链上不可篡改</div>
+        <div class="font-medium text-ink-600 mb-1">💎 价值分成 · 协议常量</div>
         <div class="grid grid-cols-2 gap-x-3 gap-y-0.5">
           <span>🏆 赢家 <strong x-text="((feeConfig.winnersBps||9700)/100).toFixed(1)+'%'"></strong></span>
           <span>🛡 仲裁委员 <strong x-text="(((feeConfig.oracleBps||100)+(feeConfig.nodeBps||20))/100).toFixed(1)+'%'"></strong> <span class="text-ink-400">(判决+节点)</span></span>
           <span>🤝 broker <strong x-text="((feeConfig.brokerBps||160)/100).toFixed(1)+'%'"></strong></span>
           <span>📣 introducer <strong x-text="((feeConfig.introBps||20)/100).toFixed(1)+'%'"></strong> <span class="text-amber-600">(角色待上线)</span></span>
         </div>
-        <div class="mt-1.5 text-ink-400">收款方 + 仲裁委员在市场<strong>创建时链上烤死（命门④）</strong>，结算时委员各自独立重算验证；任何人想改收款方 / 比例 → 重算对不上 → 拒签 → 钱发不出去。不靠信任，靠合约数学，每个市场都自动强制。</div>
+        <div class="mt-1.5 text-ink-400"><strong class="text-emerald-700">broker / introducer 收款方</strong>在市场<strong>创建时链上烤死（命门④，offset-518）</strong>，结算时委员重算验证，改→拒签→发不出钱（合约数学，已真守）。<strong class="text-amber-700">仲裁委员（oracle/node）收款</strong>当前为协议常量，跨节点合约级绑定（不信任何单方）<strong>硬化中</strong>（v1.5）。</div>
       </div>
 
       <div x-show="bet.open" x-transition class="mt-4 space-y-3">
