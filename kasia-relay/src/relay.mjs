@@ -626,6 +626,17 @@ if (process.send) {
           // Phase 4a v0: TX deserialization + sighash via kaspa-wasm.
           // TODO Sub 8.1 testnet 真 e2e 验: TX hex serialization format compatibility, sighash type selection.
           let unsignedTx;
+          // bshard (A) covenant-tx path (J2 2026-06-21): close_attest/cancel_attest 的 PS output 带 CovenantBinding +
+          //   scriptPublicKey(hex)+ flattened outpoint — manual `new Transaction(parsed)` rehydration 不重建 covenant/spk →
+          //   sighash 错. cmd.safe_json=true → 用 Transaction.deserializeFromSafeJSON(round-trips covenant+utxo+outpoint 全保,
+          //   J2 验结构等价 → sighash 一致). 默认 path 不变(settler 现有 PoolSpine settle 不受影响, backward-compat).
+          if (cmd.safe_json) {
+            try { unsignedTx = Transaction.deserializeFromSafeJSON(cmd.tx_hex); }
+            catch (e) { throw new Error(`sign_input_for_settle safe_json deserialize fail: ${e.message}`); }
+            const signature = createInputSignature(unsignedTx, inputIndex, wallet.getPrivateKey(), SighashType.All);
+            if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, signature, input_index: inputIndex } });
+            return;
+          }
           try {
             // Phase 4a v0 简化: console 直 pass Transaction-shaped object via JSON OR
             // hex full-serialization. kaspa-wasm Transaction constructor expects object spec.
