@@ -113,6 +113,21 @@ export async function registerChatRoutes(fastify) {
     return reply.viewAsync('chat-v3', { title: 'Live Chat', t, lang, dir, langs, relays, _page: 'chat' });
   });
 
+  // GET /api/chat/owner-voice — resolve the relay whose ADDRESS is classified trust_level='owner'
+  // (the Owner's dev-coord "voice"). owner-in-dev-channel Step3: the telegram bridge posts the Owner's
+  // DM via this relay — NO custom OWNER_RELAY_ID; identity anchors on the owner-classified address
+  // (Owner: "地址是最底层最内核身份标签"), the same anchor the L195 firewall OR-clause uses. Returns
+  // { ok, ownerVoice: {id,name,address} | null }. null = no address classified 'owner' yet (bridge no-ops).
+  fastify.get('/api/chat/owner-voice', async (request, reply) => {
+    const row = sqlite.prepare(`
+      SELECT r.id, r.name, r.address FROM relay_nodes r
+      JOIN identities i ON i.address = r.address
+      WHERE i.trust_level = 'owner'
+      ORDER BY r.created_at ASC LIMIT 1
+    `).get();
+    return reply.send({ ok: true, ownerVoice: row || null });
+  });
+
   // GET /api/chat/messages — poll for messages in a channel
   fastify.get('/api/chat/messages', async (request, reply) => {
     const { channel, after, since, limit: rawLimit } = request.query;
