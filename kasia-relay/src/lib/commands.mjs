@@ -80,6 +80,8 @@ export const COMMAND_TYPES = Object.freeze({
   BSHARD_CONSOLIDATE: 'bshard_consolidate',                   // PS absorb OP_0 + SL consolidate_to_payout OP_1, cov_id-bind 归集
   BSHARD_CLOSE_ATTEST: 'bshard_close_attest',                 // PayoutShard close_attest OP_1, 委员 pubkey-distinct 背书 payoutRoot
   BSHARD_PAYOUT_CLAIM: 'bshard_payout_claim',                 // PayoutShard claim OP_2, store-payout merkle+nullifier+recipient
+  BSHARD_CANCEL_ATTEST: 'bshard_cancel_attest',               // PayoutShard cancel_attest OP_3, 委员 pubkey-distinct 背书 refundRoot, closed 0→2 (market-cancel)
+  BSHARD_REFUND_CLAIM: 'bshard_refund_claim',                 // PayoutShard refund_claim OP_4, store-refund merkle+nullifier+recipient (closed==2)
 });
 
 export const COMMAND_TYPE_SET = new Set(Object.values(COMMAND_TYPES));

@@ -1802,6 +1802,121 @@ export async function unlockBshardCloseAttest(args) {
   } finally { try { await rpc.disconnect(); } catch {} }
 }
 
+/**
+ * unlockBshardCancelAttest — 委员 4-of-5 在 PayoutShard 内背书 refundRoot (cancel_attest OP_3, closed 0→2 write-once)。
+ *   ★ 镜像 unlockBshardCloseAttest byte-identical(委员门同款 pubkey-sort + preimage/submit 双模)→ 仅: closed 0→2(非 0→1) + new_refundRoot 进 payoutRoot 槽(复用) + 选择子 OP_3='53'。
+ *   contract cancel_attest(58 形参)= close_attest 形参序仅 pos2 new_payoutRoot→new_refundRoot. closed 0→2 与 close 0→1 互斥 latch(require(closed==0))。
+ *   witness 声明序: [selfOutIdx, new_refundRoot, c0Sig..c4Sig, committeePkHash, c0Pk..c4Pk, c0Idx..c4Idx, c0s0..c4s7(40 siblings)] + OP_3 + redeem。
+ *   cov_id 续: out[selfOutIdx] CovenantBinding(authInput=0, covId=PS cov_id)。cancel 不动 value(out==in[ps].value=consolidated_pool 不变, refund_claim 阶段才花)。
+ */
+export async function unlockBshardCancelAttest(args) {
+  const { wallet, cmd, networkId, lockTime = 0n } = args;
+  const w = cmd.witness;
+  const rpc = await connectRpc(networkId);
+  try {
+    const psUtxo = await _matchUtxo(rpc, _addressFromRedeem(cmd.inputs.payoutshard.redeem_hex, networkId), cmd.inputs.payoutshard.outpointTxid, cmd.inputs.payoutshard.index);
+    if (!cmd.inputs.fee) throw new Error('cancel_attest: fee input 必需');
+    const feeUtxo = await _matchUtxo(rpc, cmd.inputs.fee.address, cmd.inputs.fee.outpointTxid, cmd.inputs.fee.index);
+    const matched = [psUtxo, feeUtxo];
+    const psCovId = _psInputCovId(psUtxo);
+
+    // ★ pubkey 字节升序 sort 5 委员(同 close_attest, b0e35141 robust fix)。
+    const members = (w.committee || []).map((m) => ({ pk: m.pk_hex, sig: m.sig_hex, idx: m.idx, sibs: m.siblings_hex }));
+    members.sort((a, b) => (a.pk.toLowerCase() < b.pk.toLowerCase() ? -1 : a.pk.toLowerCase() > b.pk.toLowerCase() ? 1 : 0));
+
+    const ps = cmd.inputs.payoutshard.state;
+    const newState = { consolidated_pool: ps.consolidated_pool, closed: 2, payoutRoot: w.new_refund_root, ..._nw17(ps) };   // closed 0→2 + refundRoot 进 payoutRoot 槽(复用); 17-word nullifier 透传
+    const psContAddr = _continuationAddress(cmd.inputs.payoutshard.redeem_hex, _serializePayoutStateHex(newState), networkId, cmd.inputs.payoutshard.state_start ?? _POOL_STATE_START);
+    const psOutValue = _utxoValue(psUtxo);   // cancel 不动 value(consolidated_pool 不变)
+
+    const outputs = [];
+    outputs[w.self_out_idx] = new TransactionOutput(psOutValue, payToAddressScript(new Address(psContAddr)), new CovenantBinding(0, new Hash(psCovId)));
+    const orderedOut = outputs.filter(o => o !== undefined);
+    _appendChange(orderedOut, matched, cmd.outputs?.change_address, _bshardFeeV1(matched.length));
+
+    // cancel_attest scriptSig(pubkey-sorted 委员)+ OP_3 + redeem (no-sig; 委员 sig 在 witness data 非 input sig)
+    let sigPush = '', pkPush = '', idxPush = '', sibPush = '';
+    for (const m of members) { sigPush += m.sig; pkPush += _pushBytes(m.pk); idxPush += _pushInt(m.idx); for (const s of m.sibs) sibPush += _pushBytes(s); }
+    const psSig = _pushInt(w.self_out_idx) + _pushBytes(w.new_refund_root) + sigPush + _pushBytes(w.committee_pk_hash) + pkPush + idxPush + sibPush
+      + '53' + _encodePushDataHex(Buffer.from(cmd.inputs.payoutshard.redeem_hex, 'hex'));   // cancel_attest=OP_3='53'
+
+    const psAddrIn = _addressFromRedeem(cmd.inputs.payoutshard.redeem_hex, networkId);
+    const un = new Transaction({ version: 1, inputs: matched.map(u => ({ previousOutpoint: { transactionId: u.outpoint.transactionId, index: u.outpoint.index }, signatureScript: '', sequence: 0n, sigOpCount: 0, computeBudget: _BSHARD_COMPUTE_BUDGET, utxo: u })), outputs: orderedOut, lockTime: BigInt(lockTime), gas: 0n, subnetworkId: '0000000000000000000000000000000000000000', payload: '' });
+    if (!w.committee || w.committee.length === 0) {
+      // build-preimage 模式: 返回 canonical un 供 committee 签 input 0(同 close_attest)。
+      return { ok: true, mode: 'preimage', psContAddress: psContAddr, psInputIdx: 0, payoutCovId: psCovId,
+        preimage: {
+          version: 1,
+          inputs: [{ previousOutpoint: { transactionId: psUtxo.outpoint.transactionId, index: Number(psUtxo.outpoint.index) }, address: psAddrIn, amountSompi: _utxoValue(psUtxo).toString() },
+                   { previousOutpoint: { transactionId: feeUtxo.outpoint.transactionId, index: Number(feeUtxo.outpoint.index) }, address: cmd.inputs.fee.address, amountSompi: _utxoValue(feeUtxo).toString() }],
+          outputs: orderedOut.map((o, i) => ({ value: o.value.toString(), address: (i === w.self_out_idx ? psContAddr : cmd.outputs?.change_address), covenantId: (i === w.self_out_idx ? psCovId : null) })),
+        } };
+    }
+    const feeSig = createInputSignature(un, 1, wallet.getPrivateKey(), SighashType.All);
+    const signedTx = new Transaction({ version: 1, inputs: [
+      { previousOutpoint: { transactionId: psUtxo.outpoint.transactionId, index: psUtxo.outpoint.index }, signatureScript: psSig, sequence: 0n, sigOpCount: 0, computeBudget: _BSHARD_COMPUTE_BUDGET },
+      { previousOutpoint: { transactionId: feeUtxo.outpoint.transactionId, index: feeUtxo.outpoint.index }, signatureScript: feeSig, sequence: 0n, sigOpCount: 0, computeBudget: _BSHARD_COMPUTE_BUDGET },
+    ], outputs: orderedOut, lockTime: BigInt(lockTime), gas: 0n, subnetworkId: '0000000000000000000000000000000000000000', payload: '' });
+    _assertTxInvariants(matched, signedTx, 'unlockBshardCancelAttest', networkId);
+    const r = await rpc.submitTransaction({ transaction: signedTx, allowOrphan: false });
+    return { txId: r.transactionId, psContAddress: psContAddr, sortedCommitteePks: members.map(m => m.pk.slice(0, 8)) };
+  } finally { try { await rpc.disconnect(); } catch {} }
+}
+
+/**
+ * unlockBshardRefundClaim — bettor 从 cancelled PayoutShard 退款 (refund_claim OP_4, closed==2)。
+ *   ★ 镜像 unlockBshardPayoutClaim byte-identical(store-refund + nullifier + recipient-bind)→ 仅: closed==2(合约门, 非 closed==1) + leaf=blake2b(pk‖refund) + 选择子 OP_4='54'。
+ *   contract refund_claim(15 形参)= claim 形参序仅 pos2 payoutOutIdx→refundOutIdx, pos4 payout→refund. payoutRoot 槽此时是 refundRoot, leaf=blake2b(pk‖ser(stake,8))。
+ *   witness 声明序: [selfOutIdx, refundOutIdx, bettorPk, refund, merkle_index, s0..s9(10 individual byte[32])] + OP_4 + redeem (no-sig)。
+ *   nullifier: w[merkle_index/63] 置 bit(merkle_index%63)。守恒: out[self]==consolidated_pool-refund(不变量 value==consolidated_pool)。
+ */
+export async function unlockBshardRefundClaim(args) {
+  const { wallet, cmd, networkId, lockTime = 0n } = args;
+  const w = cmd.witness;
+  const rpc = await connectRpc(networkId);
+  try {
+    const psUtxo = await _matchUtxo(rpc, _addressFromRedeem(cmd.inputs.payoutshard.redeem_hex, networkId), cmd.inputs.payoutshard.outpointTxid, cmd.inputs.payoutshard.index);
+    if (!cmd.inputs.fee) throw new Error('refund_claim: fee input 必需 (PS value weld 进 continuation+refund)');
+    const feeUtxo = await _matchUtxo(rpc, cmd.inputs.fee.address, cmd.inputs.fee.outpointTxid, cmd.inputs.fee.index);
+    const matched = [psUtxo, feeUtxo];
+    const psCovId = _psInputCovId(psUtxo);
+
+    const refund = BigInt(w.refund);
+    const ps = cmd.inputs.payoutshard.state;                          // {consolidated_pool, closed:2, payoutRoot(=refundRoot), w0..16}
+    // nullifier 置位(同 claim): word_idx = merkle_index/63, bit_in = merkle_index%63
+    const idx = Number(w.merkle_index), wordIdx = Math.floor(idx / 63), bitIn = idx % 63;
+    const nw = []; for (let i = 0; i < _NULLIFIER_WORDS; i++) nw.push(BigInt(ps['w' + i] ?? 0));
+    if (wordIdx < _NULLIFIER_WORDS) nw[wordIdx] = nw[wordIdx] + (1n << BigInt(bitIn));   // F4 aliasing: 越界跳过 → 合约 require(merkle_index<1024) 链上 BUST
+    const newState = { consolidated_pool: (BigInt(ps.consolidated_pool) - refund).toString(), closed: ps.closed, payoutRoot: ps.payoutRoot, ..._nw17(ps) };   // closed 续 2, refundRoot 续
+    for (let i = 0; i < _NULLIFIER_WORDS; i++) newState['w' + i] = nw[i].toString();
+    const psContAddr = _continuationAddress(cmd.inputs.payoutshard.redeem_hex, _serializePayoutStateHex(newState), networkId, cmd.inputs.payoutshard.state_start ?? _POOL_STATE_START);
+    const psOutValue = _utxoValue(psUtxo) - refund;                  // 守恒 weld
+
+    const outputs = [];
+    outputs[w.refund_out_idx] = new TransactionOutput(refund, payToAddressScript(new Address(cmd.outputs.refund.address)));   // recipient P2PK(bettorPk); caller 供 bettorPk 派生地址
+    outputs[w.self_out_idx] = new TransactionOutput(psOutValue, payToAddressScript(new Address(psContAddr)), new CovenantBinding(0, new Hash(psCovId)));   // cov_id 续
+    const orderedOut = outputs.filter(o => o !== undefined);
+    _appendChange(orderedOut, matched, cmd.outputs?.change_address, _bshardFeeV1(matched.length));
+
+    // PS@0 refund_claim scriptSig (声明序: selfOutIdx, refundOutIdx, bettorPk, refund, merkle_index, s0..s9) + OP_4 + redeem (no-sig)
+    let sibPush = '';
+    for (const s of w.siblings_hex) sibPush += _pushBytes(s);         // s0..s9 forward 序(individual byte[32], driver 必 pad 到 10)
+    const psSig = _pushInt(w.self_out_idx) + _pushInt(w.refund_out_idx) + _pushBytes(w.bettor_pk)
+      + _pushInt(w.refund) + _pushInt(w.merkle_index) + sibPush
+      + '54' + _encodePushDataHex(Buffer.from(cmd.inputs.payoutshard.redeem_hex, 'hex'));   // refund_claim=OP_4='54'
+
+    const unsigned = new Transaction({ version: 1, inputs: matched.map(u => ({ previousOutpoint: { transactionId: u.outpoint.transactionId, index: u.outpoint.index }, signatureScript: '', sequence: 0n, sigOpCount: 0, computeBudget: _BSHARD_COMPUTE_BUDGET, utxo: u })), outputs: orderedOut, lockTime: BigInt(lockTime), gas: 0n, subnetworkId: '0000000000000000000000000000000000000000', payload: '' });
+    const feeSig = createInputSignature(unsigned, 1, wallet.getPrivateKey(), SighashType.All);
+    const signedTx = new Transaction({ version: 1, inputs: [
+      { previousOutpoint: { transactionId: psUtxo.outpoint.transactionId, index: psUtxo.outpoint.index }, signatureScript: psSig, sequence: 0n, sigOpCount: 0, computeBudget: _BSHARD_COMPUTE_BUDGET },
+      { previousOutpoint: { transactionId: feeUtxo.outpoint.transactionId, index: feeUtxo.outpoint.index }, signatureScript: feeSig, sequence: 0n, sigOpCount: 0, computeBudget: _BSHARD_COMPUTE_BUDGET },
+    ], outputs: orderedOut, lockTime: BigInt(lockTime), gas: 0n, subnetworkId: '0000000000000000000000000000000000000000', payload: '' });
+    _assertTxInvariants(matched, signedTx, 'unlockBshardRefundClaim', networkId);
+    const r = await rpc.submitTransaction({ transaction: signedTx, allowOrphan: false });
+    return { txId: r.transactionId, psContAddress: psContAddr, refundSompi: refund.toString() };
+  } finally { try { await rpc.disconnect(); } catch {} }
+}
+
 // 取 UTXO by outpoint at a P2SH/address. outpointIndex 可选: 同 txid 同 addr 可有多 UTXO
 // (relay 给自己 addr transfer = target+change 2 个) → 用 outpoint index 消歧 (KANet-UI 2026-06-19, seal/register funding 管道).
 // backward-compat: 不传 index (P2SH 唯一 addr 调用点) → 仅按 txid, 行为不变; 旧 funding 命令无 index (undefined != null = false) 亦不变.

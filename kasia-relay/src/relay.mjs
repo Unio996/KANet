@@ -885,6 +885,22 @@ if (process.send) {
           if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, ...r } });
           return;
         }
+        case 'bshard_cancel_attest': {
+          // 委员 4-of-5 (pubkey-distinct) 背书 refundRoot, closed 0→2 write-once + cov_id 续 (cancel_attest OP_3, 镜像 close_attest).
+          const { unlockBshardCancelAttest } = await import('./lib/p2sh.mjs');
+          const wallet = getWallet();
+          const r = await unlockBshardCancelAttest({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) });
+          if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, ...r } });
+          return;
+        }
+        case 'bshard_refund_claim': {
+          // bettor store-refund 退款 (merkle climb + multi-word nullifier + recipient P2PK + cov_id 续, closed==2, refund_claim OP_4, 镜像 claim).
+          const { unlockBshardRefundClaim } = await import('./lib/p2sh.mjs');
+          const wallet = getWallet();
+          const r = await unlockBshardRefundClaim({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) });
+          if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, ...r } });
+          return;
+        }
 
         case 'pool_v07_compute_refund_mass': {
           // G6 批 3 段① Bettor r311 钦定: Console 手搓 UtxoEntry 喂 calculateTransactionMass
