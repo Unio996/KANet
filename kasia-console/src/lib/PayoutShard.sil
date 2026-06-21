@@ -167,7 +167,64 @@ contract PayoutShard(
         require(tx.outputs[selfOutIdx].value == consolidated_pool);  // ★ 守恒: close 不动资金
     }
 
-    // —— entry 2: cancel_attest (★钩子2: market-cancel 委员 4-of-5 背书 refundRoot, closed 0→2 write-once) ——
+    // —— entry 2: claim (store-payout 派彩, closed==1) —— [REGRESSION: 逻辑一字不动; closed==1 精确(非 !=0)消歧 refundRoot] ——
+    entrypoint function claim(
+        int selfOutIdx, int payoutOutIdx,
+        byte[32] bettorPk, int payout, int merkle_index,
+        byte[32] s0, byte[32] s1, byte[32] s2, byte[32] s3, byte[32] s4, byte[32] s5, byte[32] s6, byte[32] s7, byte[32] s8, byte[32] s9
+    ) {
+        require(closed == 1);                                      // ★ F2: 精确 ==1, 防领 cancelled(closed==2)市场的 refundRoot 当 payout
+        require(merkle_index >= 0); require(merkle_index < 1024);  // FIXED depth-10 cap (≤1024 winner; aliasing-safe)
+        require(payout >= 1); require(payout <= consolidated_pool);
+        byte[32] cur = blake2b(byte[](bettorPk) + byte[](payout, 8));
+        int div = 1;
+        int b0 = (merkle_index / div) % 2; if (b0 == 0) { cur = blake2b(byte[](cur) + byte[](s0)); } else { cur = blake2b(byte[](s0) + byte[](cur)); } div = div * 2;
+        int b1 = (merkle_index / div) % 2; if (b1 == 0) { cur = blake2b(byte[](cur) + byte[](s1)); } else { cur = blake2b(byte[](s1) + byte[](cur)); } div = div * 2;
+        int b2 = (merkle_index / div) % 2; if (b2 == 0) { cur = blake2b(byte[](cur) + byte[](s2)); } else { cur = blake2b(byte[](s2) + byte[](cur)); } div = div * 2;
+        int b3 = (merkle_index / div) % 2; if (b3 == 0) { cur = blake2b(byte[](cur) + byte[](s3)); } else { cur = blake2b(byte[](s3) + byte[](cur)); } div = div * 2;
+        int b4 = (merkle_index / div) % 2; if (b4 == 0) { cur = blake2b(byte[](cur) + byte[](s4)); } else { cur = blake2b(byte[](s4) + byte[](cur)); } div = div * 2;
+        int b5 = (merkle_index / div) % 2; if (b5 == 0) { cur = blake2b(byte[](cur) + byte[](s5)); } else { cur = blake2b(byte[](s5) + byte[](cur)); } div = div * 2;
+        int b6 = (merkle_index / div) % 2; if (b6 == 0) { cur = blake2b(byte[](cur) + byte[](s6)); } else { cur = blake2b(byte[](s6) + byte[](cur)); } div = div * 2;
+        int b7 = (merkle_index / div) % 2; if (b7 == 0) { cur = blake2b(byte[](cur) + byte[](s7)); } else { cur = blake2b(byte[](s7) + byte[](cur)); } div = div * 2;
+        int b8 = (merkle_index / div) % 2; if (b8 == 0) { cur = blake2b(byte[](cur) + byte[](s8)); } else { cur = blake2b(byte[](s8) + byte[](cur)); } div = div * 2;
+        int b9 = (merkle_index / div) % 2; if (b9 == 0) { cur = blake2b(byte[](cur) + byte[](s9)); } else { cur = blake2b(byte[](s9) + byte[](cur)); } div = div * 2;
+        require(cur == payoutRoot);
+        int word_idx = merkle_index / 63;
+        int bit_in   = merkle_index % 63;
+        int mask = 1;
+        for (b, 0, bit_in, 63) { mask = mask * 2; }
+        int nw0 = w0; int nw1 = w1; int nw2 = w2; int nw3 = w3; int nw4 = w4; int nw5 = w5; int nw6 = w6; int nw7 = w7; int nw8 = w8;
+        int nw9 = w9; int nw10 = w10; int nw11 = w11; int nw12 = w12; int nw13 = w13; int nw14 = w14; int nw15 = w15; int nw16 = w16;
+        if (word_idx == 0)       { require((w0 / mask) % 2 == 0); nw0 = w0 + mask; }
+        else if (word_idx == 1)  { require((w1 / mask) % 2 == 0); nw1 = w1 + mask; }
+        else if (word_idx == 2)  { require((w2 / mask) % 2 == 0); nw2 = w2 + mask; }
+        else if (word_idx == 3)  { require((w3 / mask) % 2 == 0); nw3 = w3 + mask; }
+        else if (word_idx == 4)  { require((w4 / mask) % 2 == 0); nw4 = w4 + mask; }
+        else if (word_idx == 5)  { require((w5 / mask) % 2 == 0); nw5 = w5 + mask; }
+        else if (word_idx == 6)  { require((w6 / mask) % 2 == 0); nw6 = w6 + mask; }
+        else if (word_idx == 7)  { require((w7 / mask) % 2 == 0); nw7 = w7 + mask; }
+        else if (word_idx == 8)  { require((w8 / mask) % 2 == 0); nw8 = w8 + mask; }
+        else if (word_idx == 9)  { require((w9 / mask) % 2 == 0); nw9 = w9 + mask; }
+        else if (word_idx == 10) { require((w10 / mask) % 2 == 0); nw10 = w10 + mask; }
+        else if (word_idx == 11) { require((w11 / mask) % 2 == 0); nw11 = w11 + mask; }
+        else if (word_idx == 12) { require((w12 / mask) % 2 == 0); nw12 = w12 + mask; }
+        else if (word_idx == 13) { require((w13 / mask) % 2 == 0); nw13 = w13 + mask; }
+        else if (word_idx == 14) { require((w14 / mask) % 2 == 0); nw14 = w14 + mask; }
+        else if (word_idx == 15) { require((w15 / mask) % 2 == 0); nw15 = w15 + mask; }
+        else                     { require((w16 / mask) % 2 == 0); nw16 = w16 + mask; }
+        byte[34] winnerLock = new ScriptPubKeyP2PK(pubkey(bettorPk));
+        require(tx.outputs[payoutOutIdx].scriptPubKey == byte[](winnerLock));
+        require(tx.outputs[payoutOutIdx].value == payout);
+        validateOutputState(selfOutIdx, {
+            consolidated_pool:  consolidated_pool - payout,
+            closed:             1,
+            payoutRoot:         payoutRoot,
+            w0: nw0, w1: nw1, w2: nw2, w3: nw3, w4: nw4, w5: nw5, w6: nw6, w7: nw7, w8: nw8, w9: nw9, w10: nw10, w11: nw11, w12: nw12, w13: nw13, w14: nw14, w15: nw15, w16: nw16
+        });
+        require(tx.outputs[selfOutIdx].value == consolidated_pool - payout);  // ★ 守恒 weld
+    }
+
+    // —— entry 3: cancel_attest (★钩子2: market-cancel 委员 4-of-5 背书 refundRoot, closed 0→2 write-once) ——
     // 镜像 close_attest 委员 ①②③(byte-identical 逻辑): 仅 closed 0→2 + 锁 new_refundRoot 进 payoutRoot 槽。
     //   trust 模型同 close_attest(refundRoot 须 committee-attested ∈ poolMerkleRoot)→ 委员逻辑必同款, 不可省。
     //   SS 无内部函数 → 分离 entry 必 dup committee 验(保 close_attest 不动 = REGRESSION 优先, 非 unified attest)。
@@ -267,63 +324,6 @@ contract PayoutShard(
             w0: w0, w1: w1, w2: w2, w3: w3, w4: w4, w5: w5, w6: w6, w7: w7, w8: w8, w9: w9, w10: w10, w11: w11, w12: w12, w13: w13, w14: w14, w15: w15, w16: w16
         });
         require(tx.outputs[selfOutIdx].value == consolidated_pool);  // ★ 守恒: cancel 不动资金
-    }
-
-    // —— entry 3: claim (store-payout 派彩, closed==1) —— [REGRESSION: 逻辑一字不动; closed==1 精确(非 !=0)消歧 refundRoot] ——
-    entrypoint function claim(
-        int selfOutIdx, int payoutOutIdx,
-        byte[32] bettorPk, int payout, int merkle_index,
-        byte[32] s0, byte[32] s1, byte[32] s2, byte[32] s3, byte[32] s4, byte[32] s5, byte[32] s6, byte[32] s7, byte[32] s8, byte[32] s9
-    ) {
-        require(closed == 1);                                      // ★ F2: 精确 ==1, 防领 cancelled(closed==2)市场的 refundRoot 当 payout
-        require(merkle_index >= 0); require(merkle_index < 1024);  // FIXED depth-10 cap (≤1024 winner; aliasing-safe)
-        require(payout >= 1); require(payout <= consolidated_pool);
-        byte[32] cur = blake2b(byte[](bettorPk) + byte[](payout, 8));
-        int div = 1;
-        int b0 = (merkle_index / div) % 2; if (b0 == 0) { cur = blake2b(byte[](cur) + byte[](s0)); } else { cur = blake2b(byte[](s0) + byte[](cur)); } div = div * 2;
-        int b1 = (merkle_index / div) % 2; if (b1 == 0) { cur = blake2b(byte[](cur) + byte[](s1)); } else { cur = blake2b(byte[](s1) + byte[](cur)); } div = div * 2;
-        int b2 = (merkle_index / div) % 2; if (b2 == 0) { cur = blake2b(byte[](cur) + byte[](s2)); } else { cur = blake2b(byte[](s2) + byte[](cur)); } div = div * 2;
-        int b3 = (merkle_index / div) % 2; if (b3 == 0) { cur = blake2b(byte[](cur) + byte[](s3)); } else { cur = blake2b(byte[](s3) + byte[](cur)); } div = div * 2;
-        int b4 = (merkle_index / div) % 2; if (b4 == 0) { cur = blake2b(byte[](cur) + byte[](s4)); } else { cur = blake2b(byte[](s4) + byte[](cur)); } div = div * 2;
-        int b5 = (merkle_index / div) % 2; if (b5 == 0) { cur = blake2b(byte[](cur) + byte[](s5)); } else { cur = blake2b(byte[](s5) + byte[](cur)); } div = div * 2;
-        int b6 = (merkle_index / div) % 2; if (b6 == 0) { cur = blake2b(byte[](cur) + byte[](s6)); } else { cur = blake2b(byte[](s6) + byte[](cur)); } div = div * 2;
-        int b7 = (merkle_index / div) % 2; if (b7 == 0) { cur = blake2b(byte[](cur) + byte[](s7)); } else { cur = blake2b(byte[](s7) + byte[](cur)); } div = div * 2;
-        int b8 = (merkle_index / div) % 2; if (b8 == 0) { cur = blake2b(byte[](cur) + byte[](s8)); } else { cur = blake2b(byte[](s8) + byte[](cur)); } div = div * 2;
-        int b9 = (merkle_index / div) % 2; if (b9 == 0) { cur = blake2b(byte[](cur) + byte[](s9)); } else { cur = blake2b(byte[](s9) + byte[](cur)); } div = div * 2;
-        require(cur == payoutRoot);
-        int word_idx = merkle_index / 63;
-        int bit_in   = merkle_index % 63;
-        int mask = 1;
-        for (b, 0, bit_in, 63) { mask = mask * 2; }
-        int nw0 = w0; int nw1 = w1; int nw2 = w2; int nw3 = w3; int nw4 = w4; int nw5 = w5; int nw6 = w6; int nw7 = w7; int nw8 = w8;
-        int nw9 = w9; int nw10 = w10; int nw11 = w11; int nw12 = w12; int nw13 = w13; int nw14 = w14; int nw15 = w15; int nw16 = w16;
-        if (word_idx == 0)       { require((w0 / mask) % 2 == 0); nw0 = w0 + mask; }
-        else if (word_idx == 1)  { require((w1 / mask) % 2 == 0); nw1 = w1 + mask; }
-        else if (word_idx == 2)  { require((w2 / mask) % 2 == 0); nw2 = w2 + mask; }
-        else if (word_idx == 3)  { require((w3 / mask) % 2 == 0); nw3 = w3 + mask; }
-        else if (word_idx == 4)  { require((w4 / mask) % 2 == 0); nw4 = w4 + mask; }
-        else if (word_idx == 5)  { require((w5 / mask) % 2 == 0); nw5 = w5 + mask; }
-        else if (word_idx == 6)  { require((w6 / mask) % 2 == 0); nw6 = w6 + mask; }
-        else if (word_idx == 7)  { require((w7 / mask) % 2 == 0); nw7 = w7 + mask; }
-        else if (word_idx == 8)  { require((w8 / mask) % 2 == 0); nw8 = w8 + mask; }
-        else if (word_idx == 9)  { require((w9 / mask) % 2 == 0); nw9 = w9 + mask; }
-        else if (word_idx == 10) { require((w10 / mask) % 2 == 0); nw10 = w10 + mask; }
-        else if (word_idx == 11) { require((w11 / mask) % 2 == 0); nw11 = w11 + mask; }
-        else if (word_idx == 12) { require((w12 / mask) % 2 == 0); nw12 = w12 + mask; }
-        else if (word_idx == 13) { require((w13 / mask) % 2 == 0); nw13 = w13 + mask; }
-        else if (word_idx == 14) { require((w14 / mask) % 2 == 0); nw14 = w14 + mask; }
-        else if (word_idx == 15) { require((w15 / mask) % 2 == 0); nw15 = w15 + mask; }
-        else                     { require((w16 / mask) % 2 == 0); nw16 = w16 + mask; }
-        byte[34] winnerLock = new ScriptPubKeyP2PK(pubkey(bettorPk));
-        require(tx.outputs[payoutOutIdx].scriptPubKey == byte[](winnerLock));
-        require(tx.outputs[payoutOutIdx].value == payout);
-        validateOutputState(selfOutIdx, {
-            consolidated_pool:  consolidated_pool - payout,
-            closed:             1,
-            payoutRoot:         payoutRoot,
-            w0: nw0, w1: nw1, w2: nw2, w3: nw3, w4: nw4, w5: nw5, w6: nw6, w7: nw7, w8: nw8, w9: nw9, w10: nw10, w11: nw11, w12: nw12, w13: nw13, w14: nw14, w15: nw15, w16: nw16
-        });
-        require(tx.outputs[selfOutIdx].value == consolidated_pool - payout);  // ★ 守恒 weld
     }
 
     // —— entry 4: refund_claim (★钩子2: store-refund 退款, closed==2; 镜像 claim, leaf=blake2b(pk‖ser(stake,8))) ——
