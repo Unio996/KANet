@@ -13,6 +13,7 @@
 
 import { payoutRoot as buildPayoutRoot, merkleProof } from './pool-payout-root.mjs';
 import { spliceLeafState } from './pool-shard-register.mjs';
+import { blake2b } from '@noble/hashes/blake2b';
 
 const z32 = '00'.repeat(32);
 
@@ -66,7 +67,26 @@ export function computeRefundPayout({ bettors }) {
  * }
  * @returns {{ ok, signature?, verdict?, reDerivedRoot?, reason? }}
  */
-export async function enforceCommitteeSign({ rcOn, committeeRelayId, txSafeJson, claimedPayoutRoot, predicate, frozenFields, bettors, feeBps = 0 }) {
+// canonical(predicate): deterministic 跨节点 byte-identical 序列化 (递归 sorted-key JSON). genesis 烤 predicate_commit 与
+//   enforce 验必用同款 (否则 bind 永假/永真). ⚠ NWT 命门① spec 域: 此格式 + genesis 烤值必三方对死.
+function canonicalPredicate(p) {
+  if (p === null || typeof p !== 'object') return JSON.stringify(p);
+  if (Array.isArray(p)) return '[' + p.map(canonicalPredicate).join(',') + ']';
+  return '{' + Object.keys(p).sort().map(k => JSON.stringify(k) + ':' + canonicalPredicate(p[k])).join(',') + '}';
+}
+
+export async function enforceCommitteeSign({ rcOn, committeeRelayId, txSafeJson, claimedPayoutRoot, predicate, predicateCommit, frozenFields, bettors, feeBps = 0 }) {
+  // 🔑 命门① predicate hash-bind (NWT load-bearing catch): 委员【不信 driver 传的 predicate】. 验 blake2b(canonical(predicate))
+  //   == 链上 predicate_commit (PayoutShard genesis baked, immutable). 假 predicate(给假 winningSide 自洽 payoutRoot)→
+  //   hash 不符 → 拒签. 没这条 = vacuous 假牙 (judgeLine 跑在未绑 predicate 上). genesis 必烤 predicate_commit=blake2b(canonical(predicate)).
+  if (predicateCommit) {
+    const predHash = Buffer.from(blake2b(Buffer.from(canonicalPredicate(predicate)), { dkLen: 32 })).toString('hex');
+    if (predHash !== String(predicateCommit)) {
+      return { ok: false, reason: `命门① predicate hash-bind FAIL: blake2b(canonical(predicate)) ${predHash.slice(0, 14)} != chain predicate_commit ${String(predicateCommit).slice(0, 14)} (假 predicate, 委员拒签)` };
+    }
+  } else {
+    return { ok: false, reason: `命门①: predicateCommit(链上 baked)必传 — 无 hash-bind = vacuous, 委员拒签` };
+  }
   const { judgeLine } = await import('./judgeline.mjs');
   const verdict = judgeLine(predicate, frozenFields);                 // 'YES' | 'NO' | 'ABSTAIN' (byte-identical 跨节点)
   if (verdict !== 'YES' && verdict !== 'NO') {
