@@ -96,7 +96,7 @@
           <span>🤝 broker <strong x-text="((feeConfig.brokerBps||160)/100).toFixed(1)+'%'"></strong></span>
           <span>📣 introducer <strong x-text="((feeConfig.introBps||20)/100).toFixed(1)+'%'"></strong> <span class="text-amber-600">(角色待上线)</span></span>
         </div>
-        <div class="mt-1.5 text-ink-400"><strong class="text-emerald-700">broker / introducer 收款方</strong>在市场<strong>创建时链上烤死（命门④，offset-518）</strong>，结算时委员重算验证，改→拒签→发不出钱（合约数学，已真守）。<strong class="text-amber-700">仲裁委员（oracle/node）收款</strong>当前为协议常量，跨节点合约级绑定（不信任何单方）<strong>硬化中</strong>（v1.5）。</div>
+        <div class="mt-1.5 text-ink-400"><strong class="text-emerald-700">收款方地址</strong>（broker / introducer）在市场创建时<strong>链上烤死（命门④，offset-518 on-chain 锚）</strong>，不可篡改；仲裁委员（oracle/node）由链锚 pool 确定性派生。<br><strong class="text-amber-700">⚠ 分账执行</strong>（结算时校验收款方+比例）当前由<strong>结算机制/逻辑保证</strong>（已链上证：改 fee 地址/比例 → 机制重算对不上 → BUST），跑在编排层；<strong>每委员 oracle 签名前自治验证</strong>（对恶意结算方 production 级 trustless）<strong>为下一块硬化</strong>，当前 testnet 诚信运营演示。</div>
       </div>
 
       <div x-show="bet.open" x-transition class="mt-4 space-y-3">
