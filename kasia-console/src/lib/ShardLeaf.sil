@@ -86,10 +86,13 @@ contract ShardLeaf(
         int psInIdx,        // 真 PayoutShard covenant input 位
         int psOutIdx        // PayoutShard 延续输出位 (absorb 续锁同 cov_id)
     ) {
-        // ★件1(J1) rolling-shard partial-sweep: 满片(count==seal_count)随时归集 OR 截止(tx.time>=deadline)后 partial 片也可归集。
-        //   解最后一片永远 partial(count<seal_count)归集不了→资金卡死 的核心 gap。deadline ctor-baked 不可伪;
-        //   premature partial(count<seal_count AND tx.time<deadline)→两条件皆 false→BUST。满片任何时刻 LAND。
-        require(count == seal_count || tx.time >= deadline);
+        // ★件1(J1) rolling-shard partial-sweep: 满片(count==seal_count)随时归集 / partial 片仅截止(tx.time>=deadline)后归集。
+        //   解最后一片永远 partial(count<seal_count)归集不了→资金卡死 的核心 gap。deadline ctor-baked 不可伪。
+        //   ⚠ da9fc22 parser 限 tx.time 只能 standalone require(NWT compile-verify 抓, 不能进 || 复合)→拆成 if:
+        //   sealed(count==seal_count): 不进 if→随时 LAND / partial(count<seal_count): 进 if→require, premature(tx.time<deadline)→BUST。
+        if (count != seal_count) {
+            require(tx.time >= deadline);
+        }
         // ★ destination = PROVENANCE: 输入是【真 payout_cov_id 的 PayoutShard 实例】(假 template-PS 的 cov_id≠baked → BUST)
         byte[32] ps_cov = OpInputCovenantId(psInIdx);
         require(ps_cov == payout_cov_id);
