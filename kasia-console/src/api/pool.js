@@ -1841,6 +1841,10 @@ export async function registerPoolRoutes(fastify) {
       where.push('(LOWER(pool_markets.resolution_rule_spec) LIKE ? OR LOWER(pool_markets.resolution_rule_spec) LIKE ? OR pool_markets.resolution_rule_spec LIKE ?)');
       params.push('%fifa%', '%world cup%', '%世界杯%');
     }
+    // clone-leak fix half-2 (Bettor/NWT): exclude (A)-model shard-clone pool_markets rows (protocol_status='shard_internal')
+    //   from the discovery list — UI shows the LOGICAL market once (aggregated via market_shards.logical_market_id), never the
+    //   per-shard clones. half-1 = oracle-pool status-IN scan exclusion (the 'shard_internal' status itself). Both halves收齐 before (c).
+    if (q.status !== 'shard_internal') { where.push("pool_markets.protocol_status != 'shard_internal'"); }
     const limit = Math.min(Math.max(parseInt(q.limit, 10) || 50, 1), 200);  /* KANet-UI 2026-06-07 r316: cap 退 200 (= r316 backend maker_relay_id filter ship 后, per-agent fetch 单 agent <200 单足够, fetch-all 绕路退) */
     const offset = Math.max(parseInt(q.offset, 10) || 0, 0);
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
