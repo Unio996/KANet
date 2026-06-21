@@ -40,6 +40,20 @@ const OPUS_RELAY_NAMES = new Set(['Martin', 'J2', 'J3', 'NWT', 'Opus', 'Qclaude'
   'J1', 'J1-tn', 'J1tn',
   'J1tn-Alice', 'J1tn-Bob', 'J1tn-Carol', 'J1tn-Dave']);  // Bettor r191 + r479 实名补全; KANet-UI r-j1fix: 300e10de 漏 J1 (我自补). J1 #41 实证他真 relay 名是 J1tn-Alice/Bob/Carol/Dave (committee oracle relay, 也是他频道 poster), exact match 不中裸 'J1tn' → 补 4 个委员实名 (J1 各形式仍留兼容)。
 
+// owner-in-dev-channel (2026-06-21, Owner 钦定): a relay whose ADDRESS is classified trust_level='owner'
+// (identities table) may post to COORD_CHANNELS even though its name is not in OPUS_RELAY_NAMES. Identity
+// anchors on the address (Owner: "地址是最底层最内核身份标签"), NOT relay config. One firewall change here
+// unblocks BOTH owner touchpoints (web /chat send + telegram bridge), since both post via /api/chat/send.
+// Conservative: only the send-endpoint allow-path widens; the agent firewalls (triggerAutoReply L~680,
+// action-executor) stay closed — owner is a human voice, never an auto-reply agent (ANTI-PATTERNS firewall rule).
+function isOwnerAddress(address) {
+  if (!address) return false;
+  try {
+    const row = sqlite.prepare("SELECT trust_level FROM identities WHERE address = ?").get(address);
+    return row?.trust_level === 'owner';
+  } catch { return false; }
+}
+
 // ── Auto-reply skip rules (T-2026-04-22-02) ──
 // Prevents Mind auto-reply cascade / identity-theft / storm on sensitive channels.
 // All three helpers used in /api/chat/send and /api/chat/ingest trigger paths.
@@ -191,8 +205,9 @@ export async function registerChatRoutes(fastify) {
     if (!relay) return reply.code(404).send({ error: 'Account not found' });
 
     // 🔒 Coordination-channel firewall (shared constants COORD_CHANNELS +
-    //    OPUS_RELAY_NAMES at top of file; same guard applied in triggerAutoReply)
-    if (COORD_CHANNELS.has(channel.trim()) && !OPUS_RELAY_NAMES.has(relay.name)) {
+    //    OPUS_RELAY_NAMES at top of file; same guard applied in triggerAutoReply).
+    //    owner-in-dev-channel: an address classified trust_level='owner' is also permitted (isOwnerAddress).
+    if (COORD_CHANNELS.has(channel.trim()) && !OPUS_RELAY_NAMES.has(relay.name) && !isOwnerAddress(relay.address)) {
       console.warn(`[chat] coord-channel BLOCKED: ${relay.name} → #${channel.trim()} — "${(message||'').slice(0,60)}"`);
       return reply.code(403).send({
         error: 'coordination_channel_restricted',
