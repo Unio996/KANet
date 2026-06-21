@@ -26,6 +26,39 @@ let _seedAddress = null;
 let _startedAt = null;
 let _lastLog = '';
 let _scanMode = null;
+// ★ root-cure (J1, 2026-06-21 :3200 ingest-gap incident): scanner child died but Console stayed
+//   false-alive (on('exit') only logged + cleared, never respawned) → cross-node ingest stalled until
+//   manual restart. Auto-respawn on unexpected death, with crash-loop backoff to avoid restart storm.
+let _stopping = false;      // true during intentional stopScanner → suppress respawn
+let _lastSpawnAt = 0;       // for crash-loop detection (died-quick = back off harder)
+let _crashCount = 0;
+let _respawnTimer = null;
+const RESPAWN_BASE_MS = 5000;
+const RESPAWN_MAX_MS  = 60000;
+const CRASH_WINDOW_MS = 30000; // died within 30s of spawn = crash (escalate backoff)
+
+/**
+ * Auto-respawn the scout after an unexpected death (root-cure for the false-alive ingest gap).
+ * Suppressed during intentional stopScanner. Crash-loop guard: a scout that dies within
+ * CRASH_WINDOW_MS of spawning escalates the backoff (5s→60s) so a hard-failing scout does not storm.
+ */
+function _maybeRespawn(reason) {
+  if (_stopping) return; // intentional stop — do not respawn
+  const aliveMs = _lastSpawnAt ? Date.now() - _lastSpawnAt : 0;
+  if (aliveMs > 0 && aliveMs < CRASH_WINDOW_MS) _crashCount++; else _crashCount = 0;
+  const delay = Math.min(RESPAWN_BASE_MS * Math.pow(2, _crashCount), RESPAWN_MAX_MS);
+  console.warn(`[scanner] scout ${reason} — auto-respawn in ${delay / 1000}s (crash#${_crashCount}, aliveMs=${aliveMs})`);
+  if (_respawnTimer) clearTimeout(_respawnTimer);
+  _respawnTimer = setTimeout(async () => {
+    _respawnTimer = null;
+    if (_stopping || _child) return; // stopped meanwhile, or already restarted
+    const enabled = await getConfig('scanner_enabled');
+    if (!enabled || enabled === 'false') return; // operator disabled it
+    console.log('[scanner] auto-respawning scout (child died, Console false-alive guard)');
+    try { await startScanner(); } catch (e) { console.error(`[scanner] auto-respawn failed: ${e.message}`); _maybeRespawn('respawn-fail'); }
+  }, delay);
+  if (_respawnTimer.unref) _respawnTimer.unref();
+}
 
 /**
  * Start the scanner (system-level).
@@ -87,6 +120,9 @@ export async function startScanner() {
 
     _running = true;
     _scanMode = scanMode;
+    _stopping = false;
+    _lastSpawnAt = Date.now();
+    if (_respawnTimer) { clearTimeout(_respawnTimer); _respawnTimer = null; }
 
     // Capture last log line for status display
     _child.stdout.on('data', (data) => {
@@ -103,12 +139,14 @@ export async function startScanner() {
       console.log(`[scanner] scout exited with code ${code}`);
       _running = false;
       _child = null;
+      _maybeRespawn(`exit(code=${code})`);
     });
 
     _child.on('error', (err) => {
       console.error(`[scanner] scout spawn error: ${err.message}`);
       _running = false;
       _child = null;
+      _maybeRespawn(`spawn-error(${err.message})`);
     });
 
     // Save enabled flag for auto-restart
@@ -144,6 +182,8 @@ export async function startScanner() {
  * Stop the scanner (kill scout child process).
  */
 export async function stopScanner() {
+  _stopping = true; // suppress auto-respawn for this intentional stop
+  if (_respawnTimer) { clearTimeout(_respawnTimer); _respawnTimer = null; }
   if (!_child) return { ok: false, reason: 'not_running' };
 
   try {
