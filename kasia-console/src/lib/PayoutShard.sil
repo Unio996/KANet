@@ -1,36 +1,44 @@
 // PayoutShard.sil — bshard 真无限量 B2 (A) self-contained + cov_id provenance destination-bind (J1, 2026-06-20).
+//   ★ PRODUCTION-SHAPE (J1, 2026-06-21, Owner plant-now): + predicate_commit 字段 + cancel_attest/refund_claim 两 entry
+//     + closed 三态{0,1,2}。SHAPE 现在种(cov_id 绑 ctor shape, 之后补=re-mint), behavior 分阶段(oracle/refund full logic later)。
+//   ★ REGRESSION-safe (Bettor 维度1): 3 个已证 entry(absorb/close_attest/claim)逻辑【一字不动】; predicate_commit 是
+//     ctor 常量(同 poolMerkleRoot)非 state 字段 → state 布局(consolidated_pool/closed/payoutRoot/w0..w16)不变 →
+//     absorb/close_attest/claim 行为保持; refundRoot 复用 payoutRoot 槽(closed 1=payoutRoot / closed 2=refundRoot, 互斥)。
+//   ★ slot-reuse forge-bar (NWT F1-F4 + Bettor partial-field): 每 entry 必精确约束 closed(claim==1/refund_claim==2/两attest==0,
+//     非 !=0)+ payoutRoot 槽 → closed 精确值消歧 payoutRoot/refundRoot 语义; 漏一既有 entry 不约束 = forge 向量。
 //
 // 🎉 SIZE re-frame(链上裁实 aa4d1c10): 9999 = FREE-tier 非硬墙; v1 tx 声明 compute_budget 覆盖 blake2b(上限 ~500k mass)。
-//   ∴ (A) self-contained(close_attest ①②③ 在本合约内)【v1+compute_budget 直接 LAND】。
+//   ∴ (A) self-contained(close/cancel_attest ①②③ 在本合约内)【v1+compute_budget 直接 LAND】。
 //
 // 🔑 covenant 身份(NWT 异质核承重修, 2026-06-20): 本合约【必 market 创建时 genesis-mint 为 covenant(cov_id≠0)】(relay
 //   populateGenesisCovenants / d7c0bacc 机制)。理由 = 输家片 consolidate 的 destination-bind 必绑 cov_id PROVENANCE 非
 //   template LOCATION: template-match 可被 recreatable-UTXO 造【同 template 自控 state 的假 PayoutShard】击穿 → 输家片导入
 //   假 PS 被 attacker claim 走 = 真 theft/grief。cov_id(创世身份, 跨 continuation 稳定不可伪)是唯一真实例锚。
 //   ShardLeaf.consolidate_to_payout bake 本 PS 真 cov_id, 用 OpInputCovenantId 绑(假 template-PS 的 cov_id≠baked → BUST)。
-//   本合约三 entry 全是 same-contract continuation(validateOutputState 编译期 lower 续【本 cov_id】)= 链上自维 provenance。
+//   本合约 entry 全是 same-contract continuation(validateOutputState 编译期 lower 续【本 cov_id】)= 链上自维 provenance。
 //   ⚠ 单向 DAG 破 circular: 本 PS ctor 不 bake 输家片任何东西 → PS 身份独立 ShardLeaf → ShardLeaf 单向 bake payout_cov_id。
 //
-// 三 entry: absorb(归集)/ close_attest(委员 ①②③ 在本合约内, 锁 payoutRoot)/ claim(store-payout 派彩)。
-// 🛡 安全: close_attest ①②③ 委员实跑 → payoutRoot committee-attested【在本合约 state】(无外部 cert = 无 forge 面)。
-//   absorb consume 真 UTXO 取 tx.inputs[i].value 真值(非 self-report); 接受任意 input = 顶多捐 value(donor 自损/winners
-//   多得)非偷 — 真账委员 off-chain payoutRoot 锚(theft 防在 source 侧 ShardLeaf cov_id-bind)。store-payout: payout
-//   烤进 leaf 零 mulDiv。nullifier 多-word(w0..w4)避 i64-63。
-// ⚠ deploy(承重 relay 不变量, NWT flag + J2 链上 de-risk 实证): relay 必 ①genesis-mint 本 PS 为 covenant(cov_id≠0)
-//   ② 给【每个 continuation output(genesis + absorb + close_attest + claim 全部)】续 CovenantBinding(cov_id=payout_cov_id)
-//   —— 否则任一步漏续, cov_id 断, ShardLeaf.consolidate 的 OpInputCovenantId==payout_cov_id 后续就挂(资金归集断)。
-//   entrypoint spend 不必 #[covenant], relay 在 output 设 continuation CovenantBinding 即可(consensus covenants.rs:124
-//   input cov_id==output cov_id 续延接受; J2 probe-not-model 链上双步实证)。③ 建 v1 tx + 声明 compute_budget。
-// ⚠ unbounded N(>500k mass 单 tx)= rolling-shard(分批 payout-shard)留, MVP(>63 winner 远 <500k)够。
+// 五 entry: absorb(归集)/ close_attest(委员锁 payoutRoot, closed 0→1)/ cancel_attest(委员锁 refundRoot, closed 0→2)/
+//           claim(store-payout 派彩, closed==1)/ refund_claim(store-refund 退款, closed==2)。
+// 🛡 安全: close/cancel_attest ①②③ 委员实跑 → root committee-attested【在本合约 state】(无外部 cert = 无 forge 面)。
+//   store-payout/refund: 金额烤进 leaf 零 mulDiv; refund leaf=blake2b(pk‖ser(stake,8))(stake 绑 committee-attested
+//   refundRoot, 替掉 RefundClaim.sil L54-60 的 ctor-self-fill tk.stake spender-可控-造整池假票漏 = trust-gaps 洞1 修)。
+// ⚠ deploy(承重 relay 不变量): relay 必 ①genesis-mint 本 PS 为 covenant(cov_id≠0)②给【每个 continuation output(genesis +
+//   absorb + close/cancel_attest + claim/refund_claim 全部)】续 CovenantBinding(cov_id=payout_cov_id)③建 v1 tx + compute_budget。
+// ⚠ predicate_commit(钩子1·命门③ shape): genesis 烤 immutable【完整 resolution rule canonical hash】(哪 ESPN 字段+阈值+
+//   winningSide 映射的序列化 hash, 非 placeholder — 否则后期 enforce 无完整规则可 re-derive)。close_attest 引用(sanity-use
+//   强制 baked, 纯 commitment no-op 不 enforce)。【full winningSide re-derive(委员 require winningSide==judgeLine(rule,
+//   ESPN fields))= 预言机 phase, 本期不实现, 不碰 judgeLine】。
 
 pragma silverscript ^0.1.0;
 
 contract PayoutShard(
-    byte[32] poolMerkleRoot,       // depth-8 chain-derived oracle pool root (close_attest ③ 委员∈pool; == v07 同源)
+    byte[32] poolMerkleRoot,       // depth-8 chain-derived oracle pool root (close/cancel_attest ③ 委员∈pool; == v07 同源)
+    byte[32] predicate_commit,     // ★钩子1·命门③ shape: market 完整 resolution rule canonical hash (genesis 烤 immutable; oracle phase 委员 re-derive winningSide 绑它)
     // —— genesis State (20-field): depth-10 winner-axis (≤1024 winner/单片) + 17-word nullifier (17×63=1071≥1024) ——
     int      init_consolidated_pool,
-    int      init_closed,          // 0=归集中 / 1=committee-attested 可 claim
-    byte[32] init_payoutRoot,      // close_attest 委员背书后锁; leaf=blake2b(pk‖ser(payout,8))
+    int      init_closed,          // 0=归集中 / 1=committee-attested 可 claim / 2=cancelled committee-attested 可 refund
+    byte[32] init_payoutRoot,      // closed==1: payoutRoot(leaf=blake2b(pk‖ser(payout,8))) / closed==2: refundRoot(leaf=blake2b(pk‖ser(stake,8))) 复用此槽
     int init_w0, int init_w1, int init_w2, int init_w3, int init_w4, int init_w5, int init_w6, int init_w7, int init_w8,
     int init_w9, int init_w10, int init_w11, int init_w12, int init_w13, int init_w14, int init_w15, int init_w16  // 17-word nullifier
 ) {
@@ -41,10 +49,7 @@ contract PayoutShard(
     int w6 = init_w6; int w7 = init_w7; int w8 = init_w8; int w9 = init_w9; int w10 = init_w10; int w11 = init_w11;
     int w12 = init_w12; int w13 = init_w13; int w14 = init_w14; int w15 = init_w15; int w16 = init_w16;
 
-    // —— entry 0: absorb (输家片全额归集; same-contract continuation 续本 cov_id, 归集态) ——
-    // 修(J1 finding-a + cov_id re-frame): 不再读 dust ticket(register 真 stake KAS 在 ShardLeaf POOL=pool_value welded,
-    //   ticket 是 dust)。直接 credit 被消费 UTXO 真值 tx.inputs[shardInIdx].value = 归集真池钱。theft 防在 source 侧
-    //   (ShardLeaf.consolidate_to_payout cov_id-bind 只能进本 PS); 此 sink 侧只验守恒(接受任意 input = 顶多捐 value, harmless)。
+    // —— entry 0: absorb (输家片全额归集; same-contract continuation 续本 cov_id, 归集态) —— [REGRESSION: 逻辑一字不动] ——
     entrypoint function absorb(int selfOutIdx, int shardInIdx) {
         require(closed == 0);
         int shard_value = tx.inputs[shardInIdx].value;     // ★ 守恒: consume 真 UTXO 真值(register-welded == pool_value)
@@ -58,6 +63,7 @@ contract PayoutShard(
     }
 
     // —— entry 1: close_attest (委员 4-of-5 在【本合约内】背书 payoutRoot, closed 0→1 write-once) —— [① ② ③ port v07] ——
+    // [REGRESSION: 委员逻辑一字不动; 仅加 predicate_commit sanity-use(钩子1 shape, 强制 baked + oracle-phase 引用锚)]
     entrypoint function close_attest(
         int      selfOutIdx,
         byte[32] new_payoutRoot,       // 委员 sigs sighash 覆盖此 = 背书 (committee-attested)
@@ -72,6 +78,10 @@ contract PayoutShard(
         byte[32] c4s0, byte[32] c4s1, byte[32] c4s2, byte[32] c4s3, byte[32] c4s4, byte[32] c4s5, byte[32] c4s6, byte[32] c4s7
     ) {
         require(closed == 0);                              // ★ write-once: closed 0→1 不可逆
+        // ★钩子1 predicate-commit sanity-use(强制 baked, 防 unused-ctor-omit 坑; 纯 commitment no-op 不 enforce):
+        //   oracle phase 此处将 require(winningSide == judgeLine(predicate_commit rule, ESPN fields)) 绑委员 re-derive。
+        //   blake2b(x)!=x 恒真(不可 const-fold)= shape 种 predicate_commit 进 redeem→cov_id, behavior 分阶段。
+        require(blake2b(byte[](predicate_commit)) != predicate_commit);
         // ① threshold t=4-of-5 (sighash 覆盖 new_payoutRoot = 背书)
         int validSigs = 0;
         if (checkSig(c0Sig, pubkey(c0Pk))) { validSigs = validSigs + 1; }
@@ -80,23 +90,12 @@ contract PayoutShard(
         if (checkSig(c3Sig, pubkey(c3Pk))) { validSigs = validSigs + 1; }
         if (checkSig(c4Sig, pubkey(c4Pk))) { validSigs = validSigs + 1; }
         require(validSigs >= 4);
-        // ★★ CRITICAL pubkey-distinctness (Bettor 发现 + NWT 重攻 + J2 robust + silverc-i64-coerce 修, 2026-06-20):
-        //   require 5 委员 pubkey 两两不等 → 5 个 distinct pubkey = 5 个 distinct signer。
-        //   ⛔ 修前洞(单-oracle-replay = trustless break): committeePkHash 是 witness(非 ctor-baked)→ ② 假闸; 无 distinctness
-        //     → 单 oracle(控 1 pubkey P)填 c0..c4 全 (P,sig_P)→ validSigs=5(同 sig 重复计数)→ 自背书任意 payoutRoot 盗整池。
-        //   ⚠ 为何 pairwise != 而非 ordering 升序(silverc 硬坑, J1 b0e35141 的 bug + live e2e 抓): silverc 对 byte[32] 用
-        //     ordering 比较(< <= > >=)→ compile.rs L3127 lower 成 OpLessThan = CScriptNum(i64)运算 → 32B pubkey 数值
-        //     coerce 超 i64 → 运行期 "Number too big" BUST(close_attest 必炸=distinctness 从没生效)。== / != 走 OpEqual
-        //     = byte 比较无 coerce = silverc 可做(同 ③ blake2b== / OpInputCovenantId== 链上证)。∴ 用 pairwise !=。
-        //   ⚠ 为何必【pubkey】异非【idx】异(Bettor residual): idx-distinct → signer-distinct 仅当池每 leaf 唯一 pubkey =
-        //     未验 enrollment 前提(oracle_pool_chain_view 无 pubkey-dedup, 同 P 可占多 leaf)→ pubkey 两两异定义级 robust。
-        //   真 anchor = poolMerkleRoot(ctor-baked ③ 每 pk∈pool)+ pubkey 两两异(distinct signer, enrollment-independent)。
-        //   handler: 委员供序合约不强制(pairwise != 无序), handler 仍可 pk-sort 供 = 跨节点 byte-equal determinism 红利。
+        // ★★ pubkey-distinctness (silverc byte[32] 只能 pairwise != 不能 ordering <, b0e35141 live-e2e 抓): 防单-oracle-replay
         require(c0Pk != c1Pk); require(c0Pk != c2Pk); require(c0Pk != c3Pk); require(c0Pk != c4Pk);
         require(c1Pk != c2Pk); require(c1Pk != c3Pk); require(c1Pk != c4Pk);
         require(c2Pk != c3Pk); require(c2Pk != c4Pk);
         require(c3Pk != c4Pk);
-        // ② committee commitment 绑 (distinctness 修后冗余 consistency-only; ABI 保留不变, 真 anchor 是 ③+pubkey 升序)
+        // ② committee commitment 绑 (consistency; 真 anchor = ③ + pubkey distinctness)
         byte[] cConcat0 = c0Pk + c1Pk;
         byte[] cConcat1 = cConcat0 + c2Pk;
         byte[] cConcat2 = cConcat1 + c3Pk;
@@ -168,21 +167,15 @@ contract PayoutShard(
         require(tx.outputs[selfOutIdx].value == consolidated_pool);  // ★ 守恒: close 不动资金
     }
 
-    // —— entry 2: claim (store-payout 派彩; payout 来自 leaf 零 mulDiv + 多-word nullifier + recipient-bind) ——
+    // —— entry 2: claim (store-payout 派彩, closed==1) —— [REGRESSION: 逻辑一字不动; closed==1 精确(非 !=0)消歧 refundRoot] ——
     entrypoint function claim(
         int selfOutIdx, int payoutOutIdx,
         byte[32] bettorPk, int payout, int merkle_index,
         byte[32] s0, byte[32] s1, byte[32] s2, byte[32] s3, byte[32] s4, byte[32] s5, byte[32] s6, byte[32] s7, byte[32] s8, byte[32] s9
     ) {
-        require(closed == 1);
-        require(merkle_index >= 0); require(merkle_index < 1024);  // FIXED depth-10 cap (≤1024 winner; aliasing-safe; nullifier 17×63=1071 更松)
+        require(closed == 1);                                      // ★ F2: 精确 ==1, 防领 cancelled(closed==2)市场的 refundRoot 当 payout
+        require(merkle_index >= 0); require(merkle_index < 1024);  // FIXED depth-10 cap (≤1024 winner; aliasing-safe)
         require(payout >= 1); require(payout <= consolidated_pool);
-
-        // ★ store-payout: leaf=blake2b(pk‖ser(payout,8)) merkle ∈ payoutRoot(委员 attest 本合约锁)= 零 mulDiv 零 forge
-        // ⚠ 个体 s0..s9 + 手动 10 步 unroll (FIXED depth-10, >256 winner-axis 深化 ≤1024) = close_attest ③ 同款 proven
-        //   模式(避 byte[32][] array witness ABI untested 坑); climb 与 pool-payout-root.mjs climbProof byte-equal
-        //   ⚠ 链下必同深: pool-payout-root.mjs DEPTH 必 ==10 (payoutRoot pad 1024 叶), 否则 root 对不上 → claim BUST。
-        //   (bit=(idx>>lvl)&1=(merkle_index/div)%2, bit==0→cur‖sib else sib‖cur, div=2^lvl)。
         byte[32] cur = blake2b(byte[](bettorPk) + byte[](payout, 8));
         int div = 1;
         int b0 = (merkle_index / div) % 2; if (b0 == 0) { cur = blake2b(byte[](cur) + byte[](s0)); } else { cur = blake2b(byte[](s0) + byte[](cur)); } div = div * 2;
@@ -196,8 +189,6 @@ contract PayoutShard(
         int b8 = (merkle_index / div) % 2; if (b8 == 0) { cur = blake2b(byte[](cur) + byte[](s8)); } else { cur = blake2b(byte[](s8) + byte[](cur)); } div = div * 2;
         int b9 = (merkle_index / div) % 2; if (b9 == 0) { cur = blake2b(byte[](cur) + byte[](s9)); } else { cur = blake2b(byte[](s9) + byte[](cur)); } div = div * 2;
         require(cur == payoutRoot);
-
-        // ★ 多-word nullifier (w0..w16, 各 63 bit; mask unroll 上界 63; 17×63=1071 ≥ 1024)
         int word_idx = merkle_index / 63;
         int bit_in   = merkle_index % 63;
         int mask = 1;
@@ -221,12 +212,9 @@ contract PayoutShard(
         else if (word_idx == 14) { require((w14 / mask) % 2 == 0); nw14 = w14 + mask; }
         else if (word_idx == 15) { require((w15 / mask) % 2 == 0); nw15 = w15 + mask; }
         else                     { require((w16 / mask) % 2 == 0); nw16 = w16 + mask; }
-
-        // ★ recipient-bind (#31): payout 必去 winner P2PK(bettorPk)
         byte[34] winnerLock = new ScriptPubKeyP2PK(pubkey(bettorPk));
         require(tx.outputs[payoutOutIdx].scriptPubKey == byte[](winnerLock));
         require(tx.outputs[payoutOutIdx].value == payout);
-
         validateOutputState(selfOutIdx, {
             consolidated_pool:  consolidated_pool - payout,
             closed:             1,
@@ -234,5 +222,170 @@ contract PayoutShard(
             w0: nw0, w1: nw1, w2: nw2, w3: nw3, w4: nw4, w5: nw5, w6: nw6, w7: nw7, w8: nw8, w9: nw9, w10: nw10, w11: nw11, w12: nw12, w13: nw13, w14: nw14, w15: nw15, w16: nw16
         });
         require(tx.outputs[selfOutIdx].value == consolidated_pool - payout);  // ★ 守恒 weld
+    }
+
+    // —— entry 3: cancel_attest (★钩子2: market-cancel 委员 4-of-5 背书 refundRoot, closed 0→2 write-once) ——
+    // 镜像 close_attest 委员 ①②③(byte-identical 逻辑): 仅 closed 0→2 + 锁 new_refundRoot 进 payoutRoot 槽。
+    //   trust 模型同 close_attest(refundRoot 须 committee-attested ∈ poolMerkleRoot)→ 委员逻辑必同款, 不可省。
+    //   SS 无内部函数 → 分离 entry 必 dup committee 验(保 close_attest 不动 = REGRESSION 优先, 非 unified attest)。
+    //   ★ closed==0 前置 = 与 close_attest 0→1 互斥 latch(先到先 latch): 已 settle(closed==1)市场不可再 cancel; vice versa。
+    entrypoint function cancel_attest(
+        int      selfOutIdx,
+        byte[32] new_refundRoot,       // 委员 sigs sighash 覆盖此 = 背书 refundRoot (committee-attested)
+        sig      c0Sig, sig c1Sig, sig c2Sig, sig c3Sig, sig c4Sig,
+        byte[32] committeePkHash,
+        byte[32] c0Pk, byte[32] c1Pk, byte[32] c2Pk, byte[32] c3Pk, byte[32] c4Pk,
+        int      c0Idx, int c1Idx, int c2Idx, int c3Idx, int c4Idx,
+        byte[32] c0s0, byte[32] c0s1, byte[32] c0s2, byte[32] c0s3, byte[32] c0s4, byte[32] c0s5, byte[32] c0s6, byte[32] c0s7,
+        byte[32] c1s0, byte[32] c1s1, byte[32] c1s2, byte[32] c1s3, byte[32] c1s4, byte[32] c1s5, byte[32] c1s6, byte[32] c1s7,
+        byte[32] c2s0, byte[32] c2s1, byte[32] c2s2, byte[32] c2s3, byte[32] c2s4, byte[32] c2s5, byte[32] c2s6, byte[32] c2s7,
+        byte[32] c3s0, byte[32] c3s1, byte[32] c3s2, byte[32] c3s3, byte[32] c3s4, byte[32] c3s5, byte[32] c3s6, byte[32] c3s7,
+        byte[32] c4s0, byte[32] c4s1, byte[32] c4s2, byte[32] c4s3, byte[32] c4s4, byte[32] c4s5, byte[32] c4s6, byte[32] c4s7
+    ) {
+        require(closed == 0);                              // ★ write-once latch: closed 0→2 不可逆 (与 close 0→1 互斥)
+        require(blake2b(byte[](predicate_commit)) != predicate_commit);  // predicate_commit baked-use (同 close_attest)
+        // ① threshold t=4-of-5 (sighash 覆盖 new_refundRoot = 背书)
+        int validSigs = 0;
+        if (checkSig(c0Sig, pubkey(c0Pk))) { validSigs = validSigs + 1; }
+        if (checkSig(c1Sig, pubkey(c1Pk))) { validSigs = validSigs + 1; }
+        if (checkSig(c2Sig, pubkey(c2Pk))) { validSigs = validSigs + 1; }
+        if (checkSig(c3Sig, pubkey(c3Pk))) { validSigs = validSigs + 1; }
+        if (checkSig(c4Sig, pubkey(c4Pk))) { validSigs = validSigs + 1; }
+        require(validSigs >= 4);
+        require(c0Pk != c1Pk); require(c0Pk != c2Pk); require(c0Pk != c3Pk); require(c0Pk != c4Pk);
+        require(c1Pk != c2Pk); require(c1Pk != c3Pk); require(c1Pk != c4Pk);
+        require(c2Pk != c3Pk); require(c2Pk != c4Pk);
+        require(c3Pk != c4Pk);
+        byte[] dConcat0 = c0Pk + c1Pk;
+        byte[] dConcat1 = dConcat0 + c2Pk;
+        byte[] dConcat2 = dConcat1 + c3Pk;
+        byte[] dConcat3 = dConcat2 + c4Pk;
+        require(blake2b(dConcat3) == committeePkHash);
+        require(c0Idx >= 0); require(c0Idx < 256);
+        byte[32] d0Cur = blake2b(byte[](c0Pk));
+        int d0b0 = c0Idx % 2;       if (d0b0 == 0) { d0Cur = blake2b(byte[](d0Cur) + byte[](c0s0)); } else { d0Cur = blake2b(byte[](c0s0) + byte[](d0Cur)); }
+        int d0b1 = (c0Idx / 2) % 2;  if (d0b1 == 0) { d0Cur = blake2b(byte[](d0Cur) + byte[](c0s1)); } else { d0Cur = blake2b(byte[](c0s1) + byte[](d0Cur)); }
+        int d0b2 = (c0Idx / 4) % 2;  if (d0b2 == 0) { d0Cur = blake2b(byte[](d0Cur) + byte[](c0s2)); } else { d0Cur = blake2b(byte[](c0s2) + byte[](d0Cur)); }
+        int d0b3 = (c0Idx / 8) % 2;  if (d0b3 == 0) { d0Cur = blake2b(byte[](d0Cur) + byte[](c0s3)); } else { d0Cur = blake2b(byte[](c0s3) + byte[](d0Cur)); }
+        int d0b4 = (c0Idx / 16) % 2; if (d0b4 == 0) { d0Cur = blake2b(byte[](d0Cur) + byte[](c0s4)); } else { d0Cur = blake2b(byte[](c0s4) + byte[](d0Cur)); }
+        int d0b5 = (c0Idx / 32) % 2; if (d0b5 == 0) { d0Cur = blake2b(byte[](d0Cur) + byte[](c0s5)); } else { d0Cur = blake2b(byte[](c0s5) + byte[](d0Cur)); }
+        int d0b6 = (c0Idx / 64) % 2; if (d0b6 == 0) { d0Cur = blake2b(byte[](d0Cur) + byte[](c0s6)); } else { d0Cur = blake2b(byte[](c0s6) + byte[](d0Cur)); }
+        int d0b7 = (c0Idx / 128) % 2;if (d0b7 == 0) { d0Cur = blake2b(byte[](d0Cur) + byte[](c0s7)); } else { d0Cur = blake2b(byte[](c0s7) + byte[](d0Cur)); }
+        require(d0Cur == poolMerkleRoot);
+        require(c1Idx >= 0); require(c1Idx < 256);
+        byte[32] d1Cur = blake2b(byte[](c1Pk));
+        int d1b0 = c1Idx % 2;       if (d1b0 == 0) { d1Cur = blake2b(byte[](d1Cur) + byte[](c1s0)); } else { d1Cur = blake2b(byte[](c1s0) + byte[](d1Cur)); }
+        int d1b1 = (c1Idx / 2) % 2;  if (d1b1 == 0) { d1Cur = blake2b(byte[](d1Cur) + byte[](c1s1)); } else { d1Cur = blake2b(byte[](c1s1) + byte[](d1Cur)); }
+        int d1b2 = (c1Idx / 4) % 2;  if (d1b2 == 0) { d1Cur = blake2b(byte[](d1Cur) + byte[](c1s2)); } else { d1Cur = blake2b(byte[](c1s2) + byte[](d1Cur)); }
+        int d1b3 = (c1Idx / 8) % 2;  if (d1b3 == 0) { d1Cur = blake2b(byte[](d1Cur) + byte[](c1s3)); } else { d1Cur = blake2b(byte[](c1s3) + byte[](d1Cur)); }
+        int d1b4 = (c1Idx / 16) % 2; if (d1b4 == 0) { d1Cur = blake2b(byte[](d1Cur) + byte[](c1s4)); } else { d1Cur = blake2b(byte[](c1s4) + byte[](d1Cur)); }
+        int d1b5 = (c1Idx / 32) % 2; if (d1b5 == 0) { d1Cur = blake2b(byte[](d1Cur) + byte[](c1s5)); } else { d1Cur = blake2b(byte[](c1s5) + byte[](d1Cur)); }
+        int d1b6 = (c1Idx / 64) % 2; if (d1b6 == 0) { d1Cur = blake2b(byte[](d1Cur) + byte[](c1s6)); } else { d1Cur = blake2b(byte[](c1s6) + byte[](d1Cur)); }
+        int d1b7 = (c1Idx / 128) % 2;if (d1b7 == 0) { d1Cur = blake2b(byte[](d1Cur) + byte[](c1s7)); } else { d1Cur = blake2b(byte[](c1s7) + byte[](d1Cur)); }
+        require(d1Cur == poolMerkleRoot);
+        require(c2Idx >= 0); require(c2Idx < 256);
+        byte[32] d2Cur = blake2b(byte[](c2Pk));
+        int d2b0 = c2Idx % 2;       if (d2b0 == 0) { d2Cur = blake2b(byte[](d2Cur) + byte[](c2s0)); } else { d2Cur = blake2b(byte[](c2s0) + byte[](d2Cur)); }
+        int d2b1 = (c2Idx / 2) % 2;  if (d2b1 == 0) { d2Cur = blake2b(byte[](d2Cur) + byte[](c2s1)); } else { d2Cur = blake2b(byte[](c2s1) + byte[](d2Cur)); }
+        int d2b2 = (c2Idx / 4) % 2;  if (d2b2 == 0) { d2Cur = blake2b(byte[](d2Cur) + byte[](c2s2)); } else { d2Cur = blake2b(byte[](c2s2) + byte[](d2Cur)); }
+        int d2b3 = (c2Idx / 8) % 2;  if (d2b3 == 0) { d2Cur = blake2b(byte[](d2Cur) + byte[](c2s3)); } else { d2Cur = blake2b(byte[](c2s3) + byte[](d2Cur)); }
+        int d2b4 = (c2Idx / 16) % 2; if (d2b4 == 0) { d2Cur = blake2b(byte[](d2Cur) + byte[](c2s4)); } else { d2Cur = blake2b(byte[](c2s4) + byte[](d2Cur)); }
+        int d2b5 = (c2Idx / 32) % 2; if (d2b5 == 0) { d2Cur = blake2b(byte[](d2Cur) + byte[](c2s5)); } else { d2Cur = blake2b(byte[](c2s5) + byte[](d2Cur)); }
+        int d2b6 = (c2Idx / 64) % 2; if (d2b6 == 0) { d2Cur = blake2b(byte[](d2Cur) + byte[](c2s6)); } else { d2Cur = blake2b(byte[](c2s6) + byte[](d2Cur)); }
+        int d2b7 = (c2Idx / 128) % 2;if (d2b7 == 0) { d2Cur = blake2b(byte[](d2Cur) + byte[](c2s7)); } else { d2Cur = blake2b(byte[](c2s7) + byte[](d2Cur)); }
+        require(d2Cur == poolMerkleRoot);
+        require(c3Idx >= 0); require(c3Idx < 256);
+        byte[32] d3Cur = blake2b(byte[](c3Pk));
+        int d3b0 = c3Idx % 2;       if (d3b0 == 0) { d3Cur = blake2b(byte[](d3Cur) + byte[](c3s0)); } else { d3Cur = blake2b(byte[](c3s0) + byte[](d3Cur)); }
+        int d3b1 = (c3Idx / 2) % 2;  if (d3b1 == 0) { d3Cur = blake2b(byte[](d3Cur) + byte[](c3s1)); } else { d3Cur = blake2b(byte[](c3s1) + byte[](d3Cur)); }
+        int d3b2 = (c3Idx / 4) % 2;  if (d3b2 == 0) { d3Cur = blake2b(byte[](d3Cur) + byte[](c3s2)); } else { d3Cur = blake2b(byte[](c3s2) + byte[](d3Cur)); }
+        int d3b3 = (c3Idx / 8) % 2;  if (d3b3 == 0) { d3Cur = blake2b(byte[](d3Cur) + byte[](c3s3)); } else { d3Cur = blake2b(byte[](c3s3) + byte[](d3Cur)); }
+        int d3b4 = (c3Idx / 16) % 2; if (d3b4 == 0) { d3Cur = blake2b(byte[](d3Cur) + byte[](c3s4)); } else { d3Cur = blake2b(byte[](c3s4) + byte[](d3Cur)); }
+        int d3b5 = (c3Idx / 32) % 2; if (d3b5 == 0) { d3Cur = blake2b(byte[](d3Cur) + byte[](c3s5)); } else { d3Cur = blake2b(byte[](c3s5) + byte[](d3Cur)); }
+        int d3b6 = (c3Idx / 64) % 2; if (d3b6 == 0) { d3Cur = blake2b(byte[](d3Cur) + byte[](c3s6)); } else { d3Cur = blake2b(byte[](c3s6) + byte[](d3Cur)); }
+        int d3b7 = (c3Idx / 128) % 2;if (d3b7 == 0) { d3Cur = blake2b(byte[](d3Cur) + byte[](c3s7)); } else { d3Cur = blake2b(byte[](c3s7) + byte[](d3Cur)); }
+        require(d3Cur == poolMerkleRoot);
+        require(c4Idx >= 0); require(c4Idx < 256);
+        byte[32] d4Cur = blake2b(byte[](c4Pk));
+        int d4b0 = c4Idx % 2;       if (d4b0 == 0) { d4Cur = blake2b(byte[](d4Cur) + byte[](c4s0)); } else { d4Cur = blake2b(byte[](c4s0) + byte[](d4Cur)); }
+        int d4b1 = (c4Idx / 2) % 2;  if (d4b1 == 0) { d4Cur = blake2b(byte[](d4Cur) + byte[](c4s1)); } else { d4Cur = blake2b(byte[](c4s1) + byte[](d4Cur)); }
+        int d4b2 = (c4Idx / 4) % 2;  if (d4b2 == 0) { d4Cur = blake2b(byte[](d4Cur) + byte[](c4s2)); } else { d4Cur = blake2b(byte[](c4s2) + byte[](d4Cur)); }
+        int d4b3 = (c4Idx / 8) % 2;  if (d4b3 == 0) { d4Cur = blake2b(byte[](d4Cur) + byte[](c4s3)); } else { d4Cur = blake2b(byte[](c4s3) + byte[](d4Cur)); }
+        int d4b4 = (c4Idx / 16) % 2; if (d4b4 == 0) { d4Cur = blake2b(byte[](d4Cur) + byte[](c4s4)); } else { d4Cur = blake2b(byte[](c4s4) + byte[](d4Cur)); }
+        int d4b5 = (c4Idx / 32) % 2; if (d4b5 == 0) { d4Cur = blake2b(byte[](d4Cur) + byte[](c4s5)); } else { d4Cur = blake2b(byte[](c4s5) + byte[](d4Cur)); }
+        int d4b6 = (c4Idx / 64) % 2; if (d4b6 == 0) { d4Cur = blake2b(byte[](d4Cur) + byte[](c4s6)); } else { d4Cur = blake2b(byte[](c4s6) + byte[](d4Cur)); }
+        int d4b7 = (c4Idx / 128) % 2;if (d4b7 == 0) { d4Cur = blake2b(byte[](d4Cur) + byte[](c4s7)); } else { d4Cur = blake2b(byte[](c4s7) + byte[](d4Cur)); }
+        require(d4Cur == poolMerkleRoot);
+        // ★ committee-attest 锁: ①②③ 过 → closed 0→2 (cancelled), 锁 new_refundRoot 进 payoutRoot 槽 (复用)
+        validateOutputState(selfOutIdx, {
+            consolidated_pool:  consolidated_pool,
+            closed:             2,
+            payoutRoot:         new_refundRoot,
+            w0: w0, w1: w1, w2: w2, w3: w3, w4: w4, w5: w5, w6: w6, w7: w7, w8: w8, w9: w9, w10: w10, w11: w11, w12: w12, w13: w13, w14: w14, w15: w15, w16: w16
+        });
+        require(tx.outputs[selfOutIdx].value == consolidated_pool);  // ★ 守恒: cancel 不动资金
+    }
+
+    // —— entry 4: refund_claim (★钩子2: store-refund 退款, closed==2; 镜像 claim, leaf=blake2b(pk‖ser(stake,8))) ——
+    // teeth T-r1: 真注册 stake leaf∈refundRoot → LAND; 假票 stake=整池 leaf∉refundRoot → BUST 在 require(cur==payoutRoot[=refundRoot])。
+    //   stake 绑 committee-attested refundRoot(非 RefundClaim.sil ctor-self-fill spender-可控)= forge-proof 同 claim(单变量=leaf 在不在 root)。
+    // teeth T-r2: require(closed==2) 精确 latch — 已 settle 市场(closed==1)refund → BUST。
+    // F4 nullifier 复用 w0..w16: closed 1(claim)/2(refund_claim)互斥(同一 PS 要么 settle 要么 cancel)→ 无双用。
+    entrypoint function refund_claim(
+        int selfOutIdx, int refundOutIdx,
+        byte[32] bettorPk, int refund, int merkle_index,
+        byte[32] s0, byte[32] s1, byte[32] s2, byte[32] s3, byte[32] s4, byte[32] s5, byte[32] s6, byte[32] s7, byte[32] s8, byte[32] s9
+    ) {
+        require(closed == 2);                                      // ★ T-r2 / F2: 精确 ==2 latch, 仅 cancelled 市场可 refund
+        require(merkle_index >= 0); require(merkle_index < 1024);
+        require(refund >= 1); require(refund <= consolidated_pool);
+        // ★ store-refund: leaf=blake2b(pk‖ser(stake,8)) merkle ∈ refundRoot(= payoutRoot 槽, cancel_attest 委员锁)
+        byte[32] cur = blake2b(byte[](bettorPk) + byte[](refund, 8));
+        int div = 1;
+        int b0 = (merkle_index / div) % 2; if (b0 == 0) { cur = blake2b(byte[](cur) + byte[](s0)); } else { cur = blake2b(byte[](s0) + byte[](cur)); } div = div * 2;
+        int b1 = (merkle_index / div) % 2; if (b1 == 0) { cur = blake2b(byte[](cur) + byte[](s1)); } else { cur = blake2b(byte[](s1) + byte[](cur)); } div = div * 2;
+        int b2 = (merkle_index / div) % 2; if (b2 == 0) { cur = blake2b(byte[](cur) + byte[](s2)); } else { cur = blake2b(byte[](s2) + byte[](cur)); } div = div * 2;
+        int b3 = (merkle_index / div) % 2; if (b3 == 0) { cur = blake2b(byte[](cur) + byte[](s3)); } else { cur = blake2b(byte[](s3) + byte[](cur)); } div = div * 2;
+        int b4 = (merkle_index / div) % 2; if (b4 == 0) { cur = blake2b(byte[](cur) + byte[](s4)); } else { cur = blake2b(byte[](s4) + byte[](cur)); } div = div * 2;
+        int b5 = (merkle_index / div) % 2; if (b5 == 0) { cur = blake2b(byte[](cur) + byte[](s5)); } else { cur = blake2b(byte[](s5) + byte[](cur)); } div = div * 2;
+        int b6 = (merkle_index / div) % 2; if (b6 == 0) { cur = blake2b(byte[](cur) + byte[](s6)); } else { cur = blake2b(byte[](s6) + byte[](cur)); } div = div * 2;
+        int b7 = (merkle_index / div) % 2; if (b7 == 0) { cur = blake2b(byte[](cur) + byte[](s7)); } else { cur = blake2b(byte[](s7) + byte[](cur)); } div = div * 2;
+        int b8 = (merkle_index / div) % 2; if (b8 == 0) { cur = blake2b(byte[](cur) + byte[](s8)); } else { cur = blake2b(byte[](s8) + byte[](cur)); } div = div * 2;
+        int b9 = (merkle_index / div) % 2; if (b9 == 0) { cur = blake2b(byte[](cur) + byte[](s9)); } else { cur = blake2b(byte[](s9) + byte[](cur)); } div = div * 2;
+        require(cur == payoutRoot);                                // payoutRoot 槽 closed==2 时 == refundRoot
+        int word_idx = merkle_index / 63;
+        int bit_in   = merkle_index % 63;
+        int mask = 1;
+        for (b, 0, bit_in, 63) { mask = mask * 2; }
+        int nw0 = w0; int nw1 = w1; int nw2 = w2; int nw3 = w3; int nw4 = w4; int nw5 = w5; int nw6 = w6; int nw7 = w7; int nw8 = w8;
+        int nw9 = w9; int nw10 = w10; int nw11 = w11; int nw12 = w12; int nw13 = w13; int nw14 = w14; int nw15 = w15; int nw16 = w16;
+        if (word_idx == 0)       { require((w0 / mask) % 2 == 0); nw0 = w0 + mask; }
+        else if (word_idx == 1)  { require((w1 / mask) % 2 == 0); nw1 = w1 + mask; }
+        else if (word_idx == 2)  { require((w2 / mask) % 2 == 0); nw2 = w2 + mask; }
+        else if (word_idx == 3)  { require((w3 / mask) % 2 == 0); nw3 = w3 + mask; }
+        else if (word_idx == 4)  { require((w4 / mask) % 2 == 0); nw4 = w4 + mask; }
+        else if (word_idx == 5)  { require((w5 / mask) % 2 == 0); nw5 = w5 + mask; }
+        else if (word_idx == 6)  { require((w6 / mask) % 2 == 0); nw6 = w6 + mask; }
+        else if (word_idx == 7)  { require((w7 / mask) % 2 == 0); nw7 = w7 + mask; }
+        else if (word_idx == 8)  { require((w8 / mask) % 2 == 0); nw8 = w8 + mask; }
+        else if (word_idx == 9)  { require((w9 / mask) % 2 == 0); nw9 = w9 + mask; }
+        else if (word_idx == 10) { require((w10 / mask) % 2 == 0); nw10 = w10 + mask; }
+        else if (word_idx == 11) { require((w11 / mask) % 2 == 0); nw11 = w11 + mask; }
+        else if (word_idx == 12) { require((w12 / mask) % 2 == 0); nw12 = w12 + mask; }
+        else if (word_idx == 13) { require((w13 / mask) % 2 == 0); nw13 = w13 + mask; }
+        else if (word_idx == 14) { require((w14 / mask) % 2 == 0); nw14 = w14 + mask; }
+        else if (word_idx == 15) { require((w15 / mask) % 2 == 0); nw15 = w15 + mask; }
+        else                     { require((w16 / mask) % 2 == 0); nw16 = w16 + mask; }
+        // ★ recipient-bind: refund 必去 bettor P2PK(bettorPk) (真退款给真注册者)
+        byte[34] refundLock = new ScriptPubKeyP2PK(pubkey(bettorPk));
+        require(tx.outputs[refundOutIdx].scriptPubKey == byte[](refundLock));
+        require(tx.outputs[refundOutIdx].value == refund);
+        validateOutputState(selfOutIdx, {
+            consolidated_pool:  consolidated_pool - refund,
+            closed:             2,
+            payoutRoot:         payoutRoot,
+            w0: nw0, w1: nw1, w2: nw2, w3: nw3, w4: nw4, w5: nw5, w6: nw6, w7: nw7, w8: nw8, w9: nw9, w10: nw10, w11: nw11, w12: nw12, w13: nw13, w14: nw14, w15: nw15, w16: nw16
+        });
+        require(tx.outputs[selfOutIdx].value == consolidated_pool - refund);  // ★ 守恒 weld
     }
 }
