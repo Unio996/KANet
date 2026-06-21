@@ -107,3 +107,25 @@ logical market 第一注：创建 shard 0 (ShardLeaf genesis-mint) + 该 market 
 | 逐件链上验 (happy LAND + 失败路 + 守恒/cov_id) + 对抗红队 | **Bettor + NWT** | 验证 |
 
 待 Owner 拍：落码顺序 1→2→3 OK？还是先 a+d 一起（intake 全通）再 c？
+
+---
+
+## 6. 两个 production-trust 合约 shape 钩子（NWT 代码层核实·必现在 genesis 阶段种）
+
+⚠ **Bettor 自纠**: 我初版把这两个划成"(c) 实现 / (d) reserve 字段"——**太松**。NWT 代码层核实：这是**合约 shape / genesis 烤值**决定，定型后补 = re-mint/re-deploy。原则 = **shape 现在种，behavior 分阶段**。两个都**不阻 testnet ramp**，但合约 shape 必现在落。
+
+### 钩子1 · 命门③ predicate-commit（WHAT 判·防委员盲签 winningSide）
+- **现状洞**: `computeMarketGenesis` L44-48 烤了 committeePks+deadline+shardPoolId = **WHO 判** 上链；但 `resolution_predicate`（哪个 ESPN 字段/阈值/winningSide 规则）= **WHAT 判** 一个字没烤。(A) PayoutShard ctor L28-35 只 poolMerkleRoot 无 predicate → **委员现可盲签任意 winningSide，共识洗白**（Owner 早点过的命门③ / 见 project-oracle-consensus-launders-poison-rulings）。
+- **⚠ 与 J2 缺口1 不同**: 缺口1 管 payout【金额】(pari-mutuel)；命门③ 管【谁赢】(winningSide 由链上 committed predicate + 委员 re-derive 定，非 settler 说了算)。两条都打 synthetic-blind-sign，一个钱数一个输赢。
+- **shape 现在种**: genesis ctor 烤 `predicate_commit`(resolution rule hash)；close_attest 把 winningSide 绑 committed predicate（委员从 predicate re-derive，非自填）。
+- **behavior 分阶段**: full predicate→oracle 判定（读 ESPN/deriveKanetNativeVote）= **oracle 扩展主线**，不在本 wiring。本 wiring 只种 commitment 锚。
+- **域**: J1 (ctor predicate_commit + close_attest 绑定 shape) + J2 (genesis 烤值)。
+
+### 钩子2 · (A) 模型 refund 路径（现在【没有】）
+- **现状洞**: (A) PayoutShard 仅 absorb/close/claim **无 refund entry**。RefundClaim.sil 只活在 cascade(convert_to_refundclaim) 且有**虚高 stake 洞**（L54-60 读 dust-ticket stake，spender 可控 → 造 stake=整池 假票一笔抽干）。→ 生产走 (A) 的退化市场（单侧池/无赢家/片没填满）**钱卡死无法退**。
+- **NWT 修向（镜像 winner 侧）**: (A) PayoutShard 加 `refund_claim` entry——委员 attest `refundRoot`(全 bettor {pk,stake}, leaf=blake2b(pk‖stake)) + 走同 merkle+nullifier 机器（复用 claim 的 store-payout climb，只 leaf 换 stake）。`closed=2`=cancelled latch（区分 1=settled）。**虚高 stake 洞根治**：stake 不读 spender 可控 dust-ticket，从 committee-attested refundRoot 取。
+- **shape 现在种**: PayoutShard 加 refund_claim entry + closed=2 latch（合约 shape，genesis 定型）。
+- **behavior 分阶段**: refund 触发条件判定（哪些市场 degenerate→cancel）= (c) settle 编排逻辑。
+- **域**: J1 (PayoutShard refund_claim SS entry) + J2 ((c) refund 触发)。
+
+**∴ 修正 scope**: 两钩子的【合约 shape】(predicate_commit ctor + refund_claim entry + closed=2) 现在 (d)/(b-contract) 阶段种；【behavior】(oracle 判定 / refund 触发) 分阶段。**Owner 决策**: 趁 (d) 已动 genesis，shape 现在种全（避 re-genesis）= NWT 推荐 + 我同意；还是 testnet 先 ramp 现 shape、mainnet 前再 harden（要 re-deploy）。

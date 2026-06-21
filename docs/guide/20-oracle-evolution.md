@@ -1,6 +1,6 @@
 # 20. Oracle 演进系统 (Oracle Evolution — 并行判定 / 执照 / 吊销)
 
-> **最近更新: 2026-06-16** (§20.12 W1 用户路闭环 + §20.13 403 vote-fetch 修 + §20.14 bshard M3/PARKED + §20.15 cost-model 陷阱 + §20.16 oracle 拓展 charter 指针)
+> **最近更新: 2026-06-21** (§20.18 bshard 命门链上收官: deadline-gate CLTV + 跨节点 settle-enforce 防假赢家 LIVE; 复活 §20.14 PARKED 状态 → 命门全链上证毕) — 早: §20.17 oracle wave1 四正交闸+核心 LIVE / §20.12-16
 
 > Owner 钦定 thesis: **正确性不是一次保证, 是长期激励涌现**. 不求"保证不作恶", 求"作恶经济上越来越蠢 / 声誉上越来越致命 / 诚实越来越有利" → 系统随积累自选向可信.
 >
@@ -227,3 +227,42 @@ post-W1 起 §20.16 的强化拓展。全队**落码前对抗讨论** (Bettor �
 **实证链**: 离线生产真函数真赛 **495/495=100%** (winner+让分+大小球定点, 独立 ground-truth) → 部署 canonical **`44f0982c`** 两节点 tree **`ee742325` byte-equal** cutover (旧 Console 孤儿清, scout/连接数护栏) → **LIVE 跑通**: 部署真码跑真 predicate 市场 (真 ESPN SF@ATL 2-7)→judgeLine(winner==ATL)→**verdict=NO 正确** (`extractor_kind_used=judgeline-deterministic` 走算术非 LLM)。记忆 [[project-oracle-core-live-judgeline-verdict]]。
 
 **wave2 (hold, observe-only/deferred, 不卡核心)**: field_hash 众数 quorum gate / code_manifest 双轴 enforce / 谓词冻结 immutable / claimAuto 根治。**仍 GATED 待 Owner 批**: 新活源进 settle (odds 端点)、多源 cross-check 进 settle。
+
+## 20.18 bshard 命门链上收官 — deadline-gate (CLTV) + 跨节点 settle-enforce (防假赢家) LIVE (2026-06-21)
+
+§20.14 把 bshard 标成 "PARKED post-demo"。本会话**复活并链上收官 bshard 命门**：把"机制设计 sound"推进到"**两道命门 + 跨节点 enforce 全链上证毕**"。架构同时从 route-split(PoolLeaf+PoolRoot 撞 9999 SIZE 墙)pivot 到 **(A) self-contained PayoutShard**(§20.15 cost-model probe 证 9999 是 free-tier 非硬墙 → v1+compute_budget 解锁，弃 fold/convert/seam 大简化)。
+
+**部署**: canonical sha **`018df29b`**(silverc `da9fc22` + ShardLeaf.sil blob `25ab4b63`)，**双节点 byte-equal 4-vantage 验**(NWT git+compile / J2 silverc 第二 vantage / Bettor content / KANet-UI operator 单写 canonical+:3200)。`origin/bshard-m3-deploy`。
+
+### 件1 — deadline-gate (rolling-shard 最后一片资金卡死的根治)
+**问题**: ShardLeaf 满片(`count==seal_count`)才可 consolidate；若市场永远注不满(最后一片 partial)→ 资金永久卡死。
+**修**: `ShardLeaf.sil` consolidate 入口 `if (count != seal_count) { require(tx.time >= deadline * 1000); }` —— partial 片仅 deadline 后可归集，满片随时可。`deadline` ctor-baked **immutable**(spender 不可伪)。
+**关键陷阱 (vacuous 假牙 + 单位)**:
+- `require(tx.time >= deadline*1000)` 编成 **`OpCheckLockTimeVerify` (CLTV, opcode `0xb0`)** —— **共识层 enforce**(拒 = 'Unsatisfied lock time')，不是 script EvalFalse，不可绕。
+- **`tx.time` 单位 = 毫秒**(链上 LANDED refund precedent 证)，`deadline` 烤**秒**(= `market.deadline`) → 合约 `*1000`(= `OpMul` `0x95`)转 ms 比对。**漏 `*1000` = ms ≥ 秒 恒 TRUE = vacuous 假牙**(premature 永不 BUST = 卡死 bug 没修)。`LOCK_TIME_THRESHOLD=5e11`(<5e11=DAA score 模式 / ≥5e11=ms-epoch CLTV 模式)。
+- **三处单位必一致**: register-v07 烤【秒】(`pool.js` `deadline:market.deadline`) / 合约 require【`*1000`】/ `settle.mjs` consolidate `lock_time = deadline*1000`【ms-epoch】(`consolidateLockTimeMs`，fail-closed)。缺 handler lock_time = 合法 after-deadline partial 也 BUST(partial teeth)。
+- da9fc22 parser 限：`tx.time` 只能进 standalone `require`(不能进 `||` 复合 / if-condition)→ 用 `if`-restructure 拆。
+**链上三臂 teeth (非 vacuous，双轴单变量)**: A premature(`lockTime=0` 或 `<deadline*1000`)→**BUST**(consensus 拒) / B after-deadline(`lockTime=deadline*1000`)→**LAND** / C full(`count==seal_count`，闸 skip)→**LAND**(0eba71d2)。A↔B 只差 lockTime(time 轴)、A↔C 只差 count(count 轴)= 证闸**条件性**非只方向。链上拒绝消息 stack locktime = **`1782032987000` = deadline×1000** 自证 `*1000` 落对(vacuous 会是秒值 1782032987)。
+
+### 命门③ — settle-enforce (跨节点防假赢家)
+**威胁** (§20.16 "共识洗白污染"): close_attest 只证"4-of-5 distinct 委员签了某 payoutRoot"，**不绑"payoutRoot == 链上 predicate 判定结果"** → 恶意 settler 塞假 payoutRoot(假赢家)→委员盲签→共识洗白盗对侧池。
+**修**: `enforceCommitteeSign` (`pool-shard-settle.mjs`) —— 每委员**各自独立 re-derive** payoutRoot：从**链上** `predicate_commit`(PS redeem offset 518，**p2sh-verified** 不信 DB)读 → `computePredicateCommit(predicate)=blake2b(canonicalPredicate(predicate))` 验 claimed predicate 匹配链上承诺(命门①)→ `judgeLine(predicate, frozen ESPN fields)` 算 verdict → 算 payoutRoot → **claimed == re-derive 才签，否则拒**。genesis 烤 `predicate_commit=computePredicateCommit`(single-source coherence)。
+**链上四 teeth (market2 isewb，同 5 委员同 PS 单变量)**: ① happy(对 predicate ATL + 对 verdict)→签→close_attest LANDED `bf6bf100`→winner 实领 **100 KAS** ② 假 predicate(传 winner==SF≠链上烤 ATL)→委员命门① `blake2b(SF)≠链上 b9a7d200`→0 签 **BUST** ③ 假 payoutRoot(claim dir0 但 judgeLine dir1)→委员命门③ re-derive `b2a5b8b5(dir1)≠claimed 1a6139e8(dir0)`→0 签 **BUST** ④ cross-node determinism: J1tn-Bob@:3300 与 4 个 :3200 委员行为一致(happy 签 / 两 attack 同拒)。
+**⚠ attack BUST 在 off-chain enforce 层**(委员提交前 refuse，0 签 → 无 valid tx → 无 on-chain artifact，设计如此)。独立验 = 部署码 code-read(re-derive 逻辑)+ 链上 happy 假根缺席 + 单变量同委员对比。
+
+### 跨节点 happy 链上铁证 (钦定① 真跨节点)
+两市场 close_attest LANDED：`f34c49f1`(14dpa)+ `bf6bf100`(isewb)。独立解 input witness：**5 distinct 委员 pubkey 含 :3300 J1tn-Bob `9e2db8525f`**(= oracle_pool_chain_view 13 成员之一被采进 5 委员且真签)。`bf6bf100` committed **真根 `b2a5b8b5` 在 witness / 假根 `1a6139e8` 缺席**。委员从 `pool_merkle_root`(链上派生)采样，非本地 membership。txid→block 映射经 embedded indexer(`kaspa_tx_log.block_hash`)→`getBlock` 取整 tx 解 witness(TN12 无公共 tx-by-id 索引)。
+
+### 验证方法论 — 异质多 vantage 对抗验证 (本会话沉淀)
+单点会看走眼，多异质 vantage 锁死真相。ship 前拦下：deadline 单位错(ms/秒 1000×)、双 canonical(silverc build 字节分歧)、vacuous 假牙(byte[32]<恒 BUST / tx.time-ms≥deadline-秒恒 TRUE)、consolidated 误标、helper genesis-addr 误报。具体手法：
+- **重编+反编译+源码 opcode 三证**(deadline-gate)：重编 .sil → bytecode `PUSH deadline ×1000 OpMul OpCheckLockTimeVerify` → 源码 `compile.rs:2510` 确认 opcode。
+- **predict==observe**：从源头算 `deadline×1000` == 链上拒绝消息 stack 值。
+- **链上 witness 独立解码**(委员 pubkey) + **key-side 私钥派生**(证 pubkey 归属) + **独立 chain-read**(getBlock) + **operator canonical 单写**。
+- **NO TX NO TRUTH**：自跑 `getBlock`/`getUtxosByAddresses`/`check_utxo_landed`，不 echo 任何人的 "LANDED"。**非 vacuous 纪律**：happy LAND ≠ enforcement(盲签产同样 LAND)，attack BUST 才 load-bearing。
+
+### 残留 (mainnet-before，testnet 1000-ramp 不触发)
+- **RefundClaim 虚高 stake** (洞1，CRITICAL)：refund 读 ctor `tk.stake`(spender 可控)无 merkle 绑 → 造虚高票一笔抽干池。修向 = refund-merkle(close 时 commit `{bettorPk,stake}` 进 refundRoot，refund climb 验)。现 refund gate-off 不 live-exploitable。设计档 [`docs/2026-06-21-bshard-production-trust-gaps-refund-merkle-and-settle-enforce.md`](../2026-06-21-bshard-production-trust-gaps-refund-merkle-and-settle-enforce.md)。
+- **NWT 探针(可选最终 rigor)**：直接 query 委员 sign 端点喂假根、亲眼看 refuse(纯 read 无广播)= 亲触发拒签非信 driver 0-签 report。J2 备 market3(`lddjh`)live PS。
+- predicate 冻结 immutable / RefundClaim production wire / fee 经济模型 reconcile。
+
+设计/实证权威: 上述 trust-gaps 档 + §20.14 route-split 档(历史) + 记忆 [[project-bshard-3axis-trueinfinite-1000-achieved]] / [[reference-silverscript-txtime-ms-lockfile-threshold]] / [[project-bshard-production-register-settle-wiring]]。

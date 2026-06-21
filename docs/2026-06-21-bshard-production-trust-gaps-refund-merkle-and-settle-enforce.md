@@ -57,3 +57,30 @@ refund 必把 tk.stake 绑**不可伪造源** = **refund-merkle**:
 3. 每条 NWT re-review + 判别 teeth(修前 LAND / 修后 BUST)。
 
 **配**: `[[feedback-ss-attack-review-verify-value-source]]`(每 require 比较值问来源) + `[[feedback-recreatable-utxo-nullifier-defeatable]]` + `[[project-oracle-consensus-launders-poison]]`。
+
+---
+
+## (A)-模型适配 + reserve-now framing (2026-06-21, 生产 register 路由对齐)
+
+**背景**: 上文洞1/洞2 原写在 cascade/RootClose 模型。生产 register 路由(`docs/2026-06-21-bshard-production-register-wiring-design.md`)走的是已链上证通的 **(A) 模型**(ShardLeaf→consolidate→PayoutShard→close_attest→claim)。NWT 代码层核实两个适配点 + Bettor scope 划定(防 scope-creep)。
+
+**铁律(Bettor scope, Owner 反过度工程)**: 这两钩子=【设计层 reserve(schema/字段/分支位)现在种, enforcement 真钱前/oracle phase 才 wire】。commitment/合约 shape 定型后再补 = re-mint/re-deploy(已 mint 市场塞不进锚 / 新 entry 要重部署)。**别在 wiring 里做 oracle**(那是 bshard 后另一条主线)。
+
+### 适配点 A — refund-path (洞1 在 (A) 模型) → fold 进 (c) settle
+- **现状(NWT 核)**: (A) PayoutShard 仅 absorb/close_attest/claim **三 entry, 零 refund**。RefundClaim.sil 只活在 cascade(convert_to_refundclaim)且带虚高stake 洞(L54-60 读 dust-ticket stake)。生产走 (A) → 退化市场(单侧池/无赢家/片没填满)**当前无链上退款机制**。
+- **(c) reserve(实现归 (c), Bettor)**: settle 自动编排加 **degenerate→refund 分支**(单侧池/无赢家判 degenerate)。`market_shards` 已有 `refunded` 态。退化市场走 refund 非卡死。
+- **(A) 合约 shape(J1 (b-contract) coherence spec 现在纳入, 实现 deferred)**:
+  - `closed=2` = cancelled write-once latch(vs closed=1 settled)。
+  - `refundRoot`(复用 `payoutRoot` state 位 / 或并列字段)= committee attest 的全 bettor `{pk, stake}` 根, leaf=`blake2b(pk‖ser(stake,8))`。
+  - `refund_claim` entry = 镜像 `claim`: 复用 store-payout 10-step climb(同 `merkle_index` 单变量驱 climb+nullifier, 见 claim L174/L188-197/L201)∈ refundRoot + multi-word nullifier + recipient `ScriptPubKeyP2PK(bettorPk)`, 唯一差 leaf 烤 `stake` 非 `payout`。
+  - refundRoot 与 payoutRoot **同数据源**(注册 bettor, 生产从 `pool_bettor_sides` 读)→ close_attest 复用(cancelled 时 attest refundRoot 取代 payoutRoot)。**修虚高stake 洞**: stake 绑 committee-attested refundRoot, 可重造票造不出有效 leaf。
+- **teeth(wire 后 NWT 验)**: ①真注册 stake 退款(leaf∈refundRoot)→LAND ②虚高票(stake=整池, leaf∉refundRoot)→BUST 在 merkle require(cur==refundRoot)。修前(读 ctor stake 无 merkle)LAND / 修后 BUST = 有牙。
+
+### 适配点 B — predicate-commit (洞2 在 (A) 模型) → reserve 进 (d) 创世字段
+- **现状(NWT 核)**: `computeMarketGenesis`(L44-48)烤 committeePks+deadline+shardPoolId = 【WHO 判】上链; resolution_predicate(哪 ESPN 字段/阈值/winningSide 规则)=【WHAT 判】**一字没烤**。(A)PayoutShard ctor(L28-35)只 poolMerkleRoot 无 predicate。→ 委员盲签任意 winningSide。
+- **vs J2 缺口1(不同facet)**: J2 缺口1 修 payout【金额】(pari-mutuel 从真 bettor 算)=盲签的钱数; 命门③ 修【谁赢】(winningSide 由链上 predicate + 委员 re-derive 定)=盲签的判定。两条都打 synthetic-blind-sign。
+- **(d) reserve(只留字段, Bettor)**: 创世/create 加 `marketMetadataHash`(commit resolution_predicate)进 PayoutShard genesis ctor(或 sibling commit / `market_shards` 列)。**字段现在种**(已 mint 市场塞不进锚)。
+- **enforcement(oracle phase, 非本 wiring)**: 委员从链上 `marketMetadataHash` 读 predicate → judgeLine(predicate, ESPN extractEspnFields 源验)确定性算 winningSide → 算 winner-tree payoutRoot → **只在待签 payoutRoot==自己 re-derive 时才签**。= 命门③ 与 oracle wave2 judgeLine 的生产级合体。归 [[project-oracle-expansion-next-priority-after-bshard]]。
+- **teeth(oracle phase 后 NWT 验)**: ①真 payoutRoot(==judgeLine 结果)→委员签→LAND ②假 payoutRoot→委员 re-derive 不符→拒签→4-of-5 凑不齐→BUST。
+
+**落地序(更新)**: (d) reserve predicate-commit 字段 + (b-contract) spec 纳入 refund 合约 shape【现在·随 genesis+coherence 定型】 → refund 实现归 (c) settle【本 wiring】 → predicate full 判定 enforcement 归 oracle phase【bshard 后】。每条 NWT re-review + 判别 teeth。
