@@ -14,6 +14,7 @@
 import { payoutRoot as buildPayoutRoot, merkleProof } from './pool-payout-root.mjs';
 import { spliceLeafState } from './pool-shard-register.mjs';
 import { blake2b } from '@noble/hashes/blake2b';
+import { deriveCommitteeSeed, selectCommittee } from '../services/pool-committee-sampler.mjs';
 
 const z32 = '00'.repeat(32);
 
@@ -30,22 +31,78 @@ const z32 = '00'.repeat(32);
  * }
  * @returns {{ degenerate:boolean, reason?:string, winners:[{pk,amount}], poolTotal:string, distributable:string, feeSompi:string }}
  */
-export function computePariMutuelPayout({ bettors, winningDirection, poolTotalSompi = null, feeBps = 0 }) {
+export function computePariMutuelPayout({ bettors, winningDirection, poolTotalSompi = null, feeBps = 0, feeLeaves = [] }) {
   if (winningDirection !== 0 && winningDirection !== 1) throw new Error(`winningDirection must be 0|1, got ${winningDirection}`);
   const pool = poolTotalSompi != null ? BigInt(poolTotalSompi) : bettors.reduce((s, b) => s + BigInt(b.stake), 0n);
-  const feeSompi = pool * BigInt(feeBps) / 10000n;
+  // 价值分成 fee (J1 边界②整数): fee total = Σ feeLeaves.amount (单源 deriveFeeLeaves 已 BigInt floor + canonical). 兼容旧
+  //   feeBps path (无 feeLeaves 时 skim feeBps 但不分配, 机制测保留). fee-recipient leaves 进 payoutRoot (与 winner 同 climb).
+  const feeFromLeaves = feeLeaves.reduce((s, l) => s + BigInt(l.amount), 0n);
+  const feeSompi = feeFromLeaves > 0n ? feeFromLeaves : (pool * BigInt(feeBps) / 10000n);
   const distributable = pool - feeSompi;
   const winners = bettors.filter(b => Number(b.direction) === winningDirection);
   const totalWinStake = winners.reduce((s, b) => s + BigInt(b.stake), 0n);
 
   // degenerate: no winning side (single-sided pool / all-loser) → settler can't pay winners → refund (cancel_attest path).
   if (winners.length === 0 || totalWinStake === 0n) {
-    return { degenerate: true, reason: 'no winning-side bettors → refund', winners: [], poolTotal: pool.toString(), distributable: distributable.toString(), feeSompi: feeSompi.toString() };
+    return { degenerate: true, reason: 'no winning-side bettors → refund', winners: [], payoutLeaves: [], poolTotal: pool.toString(), distributable: distributable.toString(), feeSompi: feeSompi.toString() };
   }
   const payouts = winners.map(b => ({ pk: b.pk, amount: BigInt(b.stake) * distributable / totalWinStake }));
   const assigned = payouts.reduce((s, p) => s + p.amount, 0n);
   payouts[0].amount += (distributable - assigned);   // dust → winners[0] (Σ == distributable exact)
-  return { degenerate: false, winners: payouts.map(p => ({ pk: p.pk, amount: p.amount.toString() })), poolTotal: pool.toString(), distributable: distributable.toString(), feeSompi: feeSompi.toString() };
+  const winnerLeaves = payouts.map(p => ({ pk: p.pk, amount: p.amount.toString() }));
+  // payoutRoot leaf 集 = winner leaves ‖ fee-recipient leaves (J1 边界: fee leaf append 在 winner 后, deriveFeeLeaves 已 canonical
+  //   排序 → 顺序确定 → 跨节点 byte-identical). winners 字段保留 (旧 caller 兼容); payoutLeaves 是 root 真集 (含 fee).
+  const payoutLeaves = [...winnerLeaves, ...feeLeaves.map(l => ({ pk: l.pk, amount: BigInt(l.amount).toString() }))];
+  return { degenerate: false, winners: winnerLeaves, payoutLeaves, poolTotal: pool.toString(), distributable: distributable.toString(), feeSompi: feeSompi.toString() };
+}
+
+/**
+ * 价值分成 fee-leaf 单源派生 (J1 co-verify 边界①单源②整数③provenance). claim builder + enforceCommitteeSign re-derive 两处
+ * 【必调此一个函数】否则 bind 永假. 所有 fee-recipient pk 必【链锚派生】(broker/introducer = market create-committed,
+ * oracle+node = pool_merkle_root 派生委员集) — caller 绑 provenance, 本 fn 纯算 (BigInt floor, fee-dust→committee[0] 确定性).
+ * @param {object} o {
+ *   poolSompi, feeConfig:{ brokerBps, oracleBps, introBps, nodeBps }, brokerPk(hex32), introducerPk(hex32|null),
+ *   committeePks(hex32[] 签 close 的链上派生委员, oracle+node reward 均分)
+ * }
+ * @returns {{ feeLeaves:[{pk, amount, type}], feeSompi:string }} — amount BigInt-string, leaves canonical 序 (broker, introducer, committee-by-pk-sorted)
+ */
+export function deriveFeeLeaves({ poolSompi, feeConfig, brokerPk, introducerPk = null, committeePks = [] }) {
+  const pool = BigInt(poolSompi);
+  const bpsAmt = (bps) => pool * BigInt(bps || 0) / 10000n;   // BigInt floor (J1 边界②零浮点)
+  const leaves = [];
+  // broker (create-committed): 总在, market host
+  if (feeConfig.brokerBps > 0 && brokerPk) leaves.push({ pk: brokerPk.toLowerCase(), amount: bpsAmt(feeConfig.brokerBps), type: 'broker' });
+  // introducer (create-committed snapshot): fallback = 无 introducer → 不收 introBps (winner 保, broker 中立不抢 — 假设(b))
+  if (feeConfig.introBps > 0 && introducerPk) leaves.push({ pk: introducerPk.toLowerCase(), amount: bpsAmt(feeConfig.introBps), type: 'introducer' });
+  // oracle + node → 签 close 的链上派生委员均分 (假设(a): determinism + health-proven + 反碎片 + 劳动报酬). canonical: 委员按 pk 排序.
+  const commBps = (feeConfig.oracleBps || 0) + (feeConfig.nodeBps || 0);
+  if (commBps > 0 && committeePks.length) {
+    const total = bpsAmt(commBps);
+    const sorted = [...committeePks].map(p => p.toLowerCase()).sort();
+    const each = total / BigInt(sorted.length);
+    sorted.forEach((pk, i) => leaves.push({ pk, amount: each + (i === 0 ? total - each * BigInt(sorted.length) : 0n), type: 'committee' }));   // fee-dust → committee[0] 确定性
+  }
+  const feeSompi = leaves.reduce((s, l) => s + l.amount, 0n);
+  return { feeLeaves: leaves.map(l => ({ pk: l.pk, amount: l.amount.toString(), type: l.type })), feeSompi: feeSompi.toString() };
+}
+
+/**
+ * 单源 fee-leaf 派生 (claim builder + enforceCommitteeSign re-derive 两处【必调此一个】). 委员【确定性派生零 driver/settler 输入】:
+ *   committee = selectCommittee(poolMembers, deriveCommitteeSeed(marketId, endBlockHash, poolMerkleRoot)) — reuse Bettor r42
+ *   anti-bribery sampler (stake-weighted N=5, 链锚 3-因子 seed 防 grinding, excludePks 排 maker/broker pk 防双角色). 解耦:
+ *   committee=fee-set 确定性独立于实签的 M-of-N (J1/Bettor 收敛, liveness 只影响签名 quorum 不影响 fee 集 → re-derive byte-identical).
+ *   ⚠ provenance(命门④): marketId/poolMerkleRoot/endBlockHash/poolMembers/brokerPk/introducerPk/feeConfig 必【链锚】(create-committed
+ *   + pool_committee pinned endBlockHash + oracle_pool_chain_view poolMembers + 协议常量 feeConfig), 非 settler 供 — caller 绑 provenance.
+ * @param {object} o { marketId, poolMerkleRoot, endBlockHash, poolMembers:[{pk_hex,stake_sompi}], feeConfig, brokerPk, introducerPk, excludePks?, poolSompi }
+ * @returns {{ feeLeaves, feeSompi, committeePks }}
+ */
+export function deriveFeeLeavesForMarket({ marketId, poolMerkleRoot, endBlockHash, poolMembers, feeConfig, brokerPk, introducerPk = null, excludePks = [], poolSompi }) {
+  const seed = deriveCommitteeSeed(marketId, endBlockHash, poolMerkleRoot);
+  const exclude = [...excludePks, brokerPk].filter(Boolean).map(p => String(p).toLowerCase());   // broker 拿 broker-fee 单独, 不进 oracle/node 委员集 (防双领)
+  const sel = selectCommittee(poolMembers, seed, { excludePks: exclude });
+  const committeePks = sel.selected.map(c => c.pk_hex);
+  const r = deriveFeeLeaves({ poolSompi, feeConfig, brokerPk, introducerPk, committeePks });
+  return { ...r, committeePks };
 }
 
 /** Pari-mutuel refund payout (degenerate market): each bettor refunded their OWN stake (refundRoot leaf = blake2b(pk‖stake)). */
@@ -87,7 +144,7 @@ export function computePredicateCommit(predicate) {
 //   compile diff → first occurrence @518). ⚠ .sil 变则 offset 变 — provenance-pinned 873e799e 下稳定. NWT 命门① 审.
 const _PREDICATE_COMMIT_REDEEM_OFFSET = 518;
 
-export async function enforceCommitteeSign({ rcOn, committeeRelayId, txSafeJson, claimedPayoutRoot, predicate, psRedeemHex, p2sh, frozenFields, bettors, feeBps = 0 }) {
+export async function enforceCommitteeSign({ rcOn, committeeRelayId, txSafeJson, claimedPayoutRoot, predicate, psRedeemHex, p2sh, frozenFields, bettors, feeBps = 0, feeParams = null }) {
   // 🔑 命门① predicate hash-bind (NWT/Bettor load-bearing catch): 委员【不信 caller】. 不取 caller 的 predicateCommit param
   //   (= vacuous, caller 可填假) — 而是【从被签 close_attest tx 的 PS input redeem 抽 ON-CHAIN ctor-baked predicate_commit】+
   //   chain-bound(check_utxo_landed 验 p2sh(redeem)==被签 PS input 的链上地址 → redeem 不可伪). 然后验 blake2b(canonical(predicate))
@@ -112,11 +169,19 @@ export async function enforceCommitteeSign({ rcOn, committeeRelayId, txSafeJson,
     return { ok: false, reason: `judgeLine ${verdict} (字段不足/无法判, abstain-not-guess) — 委员拒签` };
   }
   const winningDirection = verdict === 'YES' ? 0 : 1;
-  const pm = computePariMutuelPayout({ bettors, winningDirection, feeBps });
+  // 价值分成 fee (J1/Bettor 收敛: 委员【不信 caller 的 fee-leaf/committee】, 自己从链锚确定性派生 = 单源 deriveFeeLeavesForMarket).
+  //   feeParams 不传 = 无 fee (机制测/旧 teeth 向后兼容). 传则委员 re-derive 含 fee → 假 fee 地址/bps/committee → re-derive≠claimed → BUST.
+  let feeLeaves = [];
+  if (feeParams) {
+    const poolSompi = bettors.reduce((s, b) => s + BigInt(b.stake), 0n);
+    try { feeLeaves = deriveFeeLeavesForMarket({ ...feeParams, poolSompi }).feeLeaves; }
+    catch (e) { return { ok: false, reason: `命门④ fee-leaf 派生 FAIL: ${String(e.message).slice(0, 120)}` }; }
+  }
+  const pm = computePariMutuelPayout({ bettors, winningDirection, feeBps, feeLeaves });
   if (pm.degenerate) return { ok: false, reason: `degenerate (${pm.reason}) — 单边池需 refund 路` };
-  const reDerivedRoot = settlePayoutRoot(pm.winners);
+  const reDerivedRoot = settlePayoutRoot(pm.payoutLeaves && pm.payoutLeaves.length ? pm.payoutLeaves : pm.winners);
   if (reDerivedRoot !== String(claimedPayoutRoot)) {
-    return { ok: false, reason: `命门③ REJECT: re-derive payoutRoot ${reDerivedRoot.slice(0, 14)} != claimed ${String(claimedPayoutRoot).slice(0, 14)} (假 winningSide/payoutRoot)` };
+    return { ok: false, reason: `命门③ REJECT: re-derive payoutRoot ${reDerivedRoot.slice(0, 14)} != claimed ${String(claimedPayoutRoot).slice(0, 14)} (假 winningSide/payoutRoot/fee)` };
   }
   const sj = await rcOn(committeeRelayId, { type: 'sign_input_for_settle', tx_hex: txSafeJson, input_index: 0, safe_json: true });
   if (!sj?.signature) return { ok: false, reason: `re-derive 匹配但 relay 签失败: ${JSON.stringify(sj).slice(0, 100)}` };
