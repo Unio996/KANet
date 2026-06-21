@@ -1130,7 +1130,10 @@ export async function registerPoolRoutes(fastify) {
       const shardMarketId = `${logicalMarketId}-s${shardIndex}`;
       // protocol_status='shard_internal' (Bettor clean-fix): excludes shard-clone rows from oracle-pool scan / /api/pool/markets
       //   aggregation / settle sweep (NOT 'pending_bettors' which would double-count). UI aggregates真 market by market_shards.logical_market_id.
-      const clone = { ...market, id: shardMarketId, spine_p2sh: shardP2sh, protocol_status: 'shard_internal' };
+      // maker_stake_amount=0 (Bettor clone-leak fix half-3, NWT 280≠80 discrepancy root): maker stakes ONCE on the parent market
+      //   (outcome_side implicit bettor); shard clones are FK rows — copying parent's maker_stake → aggregation double-counts
+      //   (N shards × maker stake = inflated pool display). Zero it on clones so only the parent carries maker stake.
+      const clone = { ...market, id: shardMarketId, spine_p2sh: shardP2sh, protocol_status: 'shard_internal', maker_stake_amount: 0 };
       try {
         sqlite.prepare(`INSERT OR IGNORE INTO pool_markets (${pmCols.join(',')}) VALUES (${pmCols.map(() => '?').join(',')})`).run(...pmCols.map(c => clone[c]));
       } catch (e) { console.warn(`[register-v07] shard pool_markets clone warn: ${e.message}`); }
