@@ -93,3 +93,21 @@ export function poolRegisterConfirm(marketId, { linkedAddr, direction, stakeKas 
 export function myPositions(linkedAddr) {
   return req('GET', `/api/pool/my-positions?linked_addr=${encodeURIComponent(linkedAddr)}`);
 }
+
+// owner-in-dev-channel bridge — pure messaging (0-custody, no key/value). Two directions:
+//   A) Owner Telegram → dev-coord: broadcast the Owner's message via the "Owner voice" relay.
+//      POST /api/chat/send mirrors the Console Live Chat send (chat.js /api/chat/send). The relay
+//      must be on the COORD_CHANNELS whitelist (OPUS_RELAY_NAMES) or Console returns 403.
+export function postOwnerMessageToDevCoord(relayId, message) {
+  return req('POST', '/api/chat/send', { relayId, channel: 'dev-coord-testnet', message });
+}
+//   B) dev-coord → Owner Telegram: read recent dev-coord-testnet messages, filter to those strictly
+//      newer than sinceIso in JS (the endpoint returns the latest `limit` rows; created_at is ISO 8601,
+//      lexicographically sortable). Returns messages[] ascending by created_at (oldest first).
+export async function devCoordMessagesSince(sinceIso, limit = 50) {
+  const r = await req('GET', `/api/chat/messages?channel=dev-coord-testnet&limit=${encodeURIComponent(limit)}`);
+  const all = r.json?.messages || [];
+  const fresh = sinceIso ? all.filter(m => m.created_at && m.created_at > sinceIso) : all;
+  fresh.sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
+  return { ok: r.ok, status: r.status, messages: fresh };
+}

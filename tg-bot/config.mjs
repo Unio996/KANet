@@ -10,6 +10,12 @@ export const CONFIG = {
   pollMs: parseInt(process.env.TG_POLL_MS || '30000', 10),  // S1 notification poller cadence
   brokerRefreshMs: parseInt(process.env.TG_BROKER_REFRESH_MS || '60000', 10), // re-read broker config
   network: process.env.KASPA_NETWORK || 'testnet-12',
+  // owner-in-dev-channel bridge (pure messaging, 0-custody). Owner's Telegram chat id is the
+  // gate: only plain text from this chat is bridged to dev-coord-testnet. OWNER_RELAY_ID is the
+  // "Owner voice" relay that posts to dev-coord; unset → post-direction no-ops (Direction A skipped).
+  ownerChatId: process.env.OWNER_CHAT_ID || '1437320734',
+  ownerRelayId: process.env.OWNER_RELAY_ID || '',
+  ownerBridgePollMs: parseInt(process.env.OWNER_BRIDGE_POLL_MS || '10000', 10), // dev-coord → Owner cadence
 };
 
 // Resolve which broker the bot represents — prefer UI/DB config (Owner sets it in Settings,
