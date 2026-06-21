@@ -1128,7 +1128,9 @@ export async function registerPoolRoutes(fastify) {
     const pmCols = sqlite.prepare('PRAGMA table_info(pool_markets)').all().map(c => c.name);
     const createShardMarketRow = async (shardIndex, shardP2sh) => {
       const shardMarketId = `${logicalMarketId}-s${shardIndex}`;
-      const clone = { ...market, id: shardMarketId, spine_p2sh: shardP2sh, protocol_status: 'pending_bettors' };
+      // protocol_status='shard_internal' (Bettor clean-fix): excludes shard-clone rows from oracle-pool scan / /api/pool/markets
+      //   aggregation / settle sweep (NOT 'pending_bettors' which would double-count). UI aggregates真 market by market_shards.logical_market_id.
+      const clone = { ...market, id: shardMarketId, spine_p2sh: shardP2sh, protocol_status: 'shard_internal' };
       try {
         sqlite.prepare(`INSERT OR IGNORE INTO pool_markets (${pmCols.join(',')}) VALUES (${pmCols.map(() => '?').join(',')})`).run(...pmCols.map(c => clone[c]));
       } catch (e) { console.warn(`[register-v07] shard pool_markets clone warn: ${e.message}`); }
