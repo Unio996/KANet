@@ -199,8 +199,13 @@ export async function enforceCommitteeSign({ rcOn, committeeRelayId, txSafeJson,
   let feeLeaves = [];
   if (feeParams) {
     const poolSompi = bettors.reduce((s, b) => s + BigInt(b.stake), 0n);
-    try { feeLeaves = deriveFeeLeavesForMarket({ ...feeParams, poolSompi }).feeLeaves; }
-    catch (e) { return { ok: false, reason: `命门④ fee-leaf 派生 FAIL: ${String(e.message).slice(0, 120)}` }; }
+    try {
+      // committeePks pinned (pool_committee, sampler-确定性写) → deriveFeeLeaves 直用 (单源 = driver claim builder 同); 否则
+      //   deriveFeeLeavesForMarket re-sample (链锚 seed, 确定性). v1.5 硬化: enforce 独立读 pool_committee 而非信 passed.
+      feeLeaves = feeParams.committeePks
+        ? deriveFeeLeaves({ poolSompi: poolSompi.toString(), feeConfig: feeParams.feeConfig, brokerPk: feeParams.brokerPk, introducerPk: feeParams.introducerPk, committeePks: feeParams.committeePks }).feeLeaves
+        : deriveFeeLeavesForMarket({ ...feeParams, poolSompi }).feeLeaves;
+    } catch (e) { return { ok: false, reason: `命门④ fee-leaf 派生 FAIL: ${String(e.message).slice(0, 120)}` }; }
   }
   const pm = computePariMutuelPayout({ bettors, winningDirection, feeBps, feeLeaves });
   if (pm.degenerate) return { ok: false, reason: `degenerate (${pm.reason}) — 单边池需 refund 路` };
