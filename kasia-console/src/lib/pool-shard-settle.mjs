@@ -142,6 +142,22 @@ export function canonicalPredicate(p) {
  * predicate_commit = blake2b(canonicalPredicate(predicate)). 单源: genesis (ensurePayoutShard 烤) + enforce (验) 必用此函数,
  * 否则 hash 不一致 → bind 永假(legit predicate 也拒). ⚠ NWT 命门① spec 域确认格式.
  */
+export function computeMarketCommit(predicate, feeRecipients) {
+  // v1 fee provenance (NWT hard line: fee 地址必链上 committed 不可伪, 非 DB-only). 折 fee_recipients 进 PS redeem
+  //   offset-518 commit slot (= 原 predicate_commit 同一 32B; .sil 不变, 只换 preimage = 零 re-compile/re-deploy).
+  //   genesis 烤 + enforce 验【同一函数 = 单源】(NWT 命门④ flag: 两边不同源 → 永假). determinism 铁律 (NWT/Bettor):
+  //   reuse canonicalPredicate (递归 sorted-key byte-确定) on 组合 obj; pk lowercase; introducer 缺失 → null (一致跨节点).
+  //   fee-市场烤此; predicate-only (旧/无 fee 市场) 用 computePredicateCommit (向后兼容).
+  const obj = {
+    fee_recipients: {
+      broker: feeRecipients?.brokerPk ? String(feeRecipients.brokerPk).toLowerCase() : null,
+      introducer: feeRecipients?.introducerPk ? String(feeRecipients.introducerPk).toLowerCase() : null,
+    },
+    predicate: predicate ?? null,
+  };
+  return Buffer.from(blake2b(Buffer.from(canonicalPredicate(obj)), { dkLen: 32 })).toString('hex');
+}
+
 export function computePredicateCommit(predicate) {
   return Buffer.from(blake2b(Buffer.from(canonicalPredicate(predicate)), { dkLen: 32 })).toString('hex');
 }
@@ -165,9 +181,12 @@ export async function enforceCommitteeSign({ rcOn, committeeRelayId, txSafeJson,
     return { ok: false, reason: `命门①: p2sh(psRedeem)=${psAddr.slice(0, 16)} 不是被签 PS input(txid ${psInputTxid.slice(0, 12)})的链上地址 — redeem 假/不绑链, 委员拒签` };
   }
   const onChainPredicateCommit = Buffer.from(psRedeemHex, 'hex').slice(_PREDICATE_COMMIT_REDEEM_OFFSET, _PREDICATE_COMMIT_REDEEM_OFFSET + 32).toString('hex');
-  const predHash = computePredicateCommit(predicate);   // 单源 (NWT 硬化: 与 genesis 同函数, blake2b 包装不复制 → 零漂移)
+  // 命门①+④: fee-市场烤 computeMarketCommit({predicate, fee_recipients}) 进 offset-518; predicate-only 市场烤 computePredicateCommit.
+  //   委员从【被花 PS UTXO redeem】(p2sh-verified above)读 commit + 单源验. fee-市场: brokerPk/introducerPk 经此 hash-绑链上 →
+  //   settler 改 fee 地址 → computeMarketCommit 不符 → BUST (NWT 底线: fee 地址链上 committed 不可伪). genesis 与此【同函数=单源】.
+  const predHash = feeParams ? computeMarketCommit(predicate, feeParams) : computePredicateCommit(predicate);
   if (predHash !== onChainPredicateCommit) {
-    return { ok: false, reason: `命门① predicate hash-bind FAIL: blake2b(canonical(predicate)) ${predHash.slice(0, 14)} != ON-CHAIN predicate_commit ${onChainPredicateCommit.slice(0, 14)} (假 predicate, 委员拒签)` };
+    return { ok: false, reason: `命门①${feeParams ? '+④' : ''} hash-bind FAIL: ${feeParams ? 'computeMarketCommit(predicate+fee_recipients)' : 'predicate_commit'} ${predHash.slice(0, 14)} != ON-CHAIN ${onChainPredicateCommit.slice(0, 14)} (假 predicate/fee 地址, 委员拒签)` };
   }
   const { judgeLine } = await import('./judgeline.mjs');
   const verdict = judgeLine(predicate, frozenFields);                 // 'YES' | 'NO' | 'ABSTAIN' (byte-identical 跨节点)

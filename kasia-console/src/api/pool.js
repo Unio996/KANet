@@ -1165,10 +1165,15 @@ export async function registerPoolRoutes(fastify) {
       // 命门① genesis coherence (NWT/Bettor load-bearing): PayoutShard 烤 predicate_commit = blake2b(canonicalPredicate(predicate))
       //   (单源 computePredicateCommit, 与 enforce 同函数) — 非 market_metadata_hash (= sha256({全市场元}) ≠ blake2b(canonical(predicate))
       //   → 委员 enforce hash-bind 永假 → close 永 BUST). predicate-less 市场(无结构化判)fallback metadata_hash(无命门③ enforce).
-      const { computePredicateCommit } = await import('../lib/pool-shard-settle.mjs');
+      const { computePredicateCommit, computeMarketCommit } = await import('../lib/pool-shard-settle.mjs');
       let _predicate = null;
       try { _predicate = JSON.parse(market.resolution_rule_spec || '{}')?.resolution_predicate || null; } catch {}
-      const predicateCommit = _predicate ? computePredicateCommit(_predicate) : market.market_metadata_hash;
+      // 命门④ v1 fee provenance (NWT 底线): fee 市场烤 computeMarketCommit({predicate, fee_recipients:{broker_pk, introducer_pk}})
+      //   进 PS offset-518 commit slot (折进 predicate_commit 同一 32B, .sil 不变零 re-deploy). 委员 enforce 从被花 PS 读 + 同函数
+      //   验 → settler 改 broker/introducer 地址 → 不符 → BUST. broker_pk/introducer_pk = market row create-baked (链同步).
+      //   predicate-less 市场 fallback market_metadata_hash (无 fee provenance, 无 enforce). 单源 (genesis+enforce 同 computeMarketCommit).
+      const _feeRecipients = { brokerPk: market.broker_pk || null, introducerPk: market.introducer_pk || null };
+      const predicateCommit = _predicate ? computeMarketCommit(_predicate, _feeRecipients) : market.market_metadata_hash;
       // 件1(J1 deadline-gate, NWT option-a): partial-shard sweep gate = market.deadline (Unix s, = outcome_end floor,
       //   市场创建时 ctor-baked 非 spender → verify-value-source). ShardLeaf bakes it; partial 片仅 tx.time>=deadline 可归集
       //   (满片随时). 缺则 registerBettorOnShard fail-closed throw. predicate-less / 旧 .sil(无 deadline 参)则被忽略=无害.
