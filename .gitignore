@@ -91,3 +91,6 @@ scripts/channel-bridge.lastts.json
 
 # Local bundle server working directory (J1↔J2 LAN sync)
 .bundle-serve/
+
+# owner-in-dev-channel owner bot launcher (legit code, like the grandfathered _launch_tg_bot.mjs)
+!kasia-console/_launch_owner_bot.mjs
