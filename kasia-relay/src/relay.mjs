@@ -852,6 +852,40 @@ if (process.send) {
           return;
         }
 
+        // ── bshard (A) self-contained cov_id-provenance handlers (2026-06-20) ──
+        case 'bshard_genesis_mint_payout': {
+          // market 创建铸空 PayoutShard covenant (populateGenesisCovenants → cov_id). 返回 payoutCovId 供 ShardLeaf ctor bake.
+          const { unlockBshardGenesisMintPayout } = await import('./lib/p2sh.mjs');
+          const wallet = getWallet();
+          const r = await unlockBshardGenesisMintPayout({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) });
+          if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, ...r } });
+          return;
+        }
+        case 'bshard_consolidate': {
+          // 单片全额归集进真 PayoutShard (PS absorb OP_0 + SL consolidate_to_payout OP_1, cov_id-bind destination + CovenantBinding 续).
+          const { unlockBshardConsolidate } = await import('./lib/p2sh.mjs');
+          const wallet = getWallet();
+          const r = await unlockBshardConsolidate({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) });
+          if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, ...r } });
+          return;
+        }
+        case 'bshard_close_attest': {
+          // 委员 4-of-5 (pubkey-distinct, b0e35141) 背书 payoutRoot, closed 0→1 write-once + cov_id 续.
+          const { unlockBshardCloseAttest } = await import('./lib/p2sh.mjs');
+          const wallet = getWallet();
+          const r = await unlockBshardCloseAttest({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) });
+          if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, ...r } });
+          return;
+        }
+        case 'bshard_payout_claim': {
+          // winner store-payout 派彩 (merkle climb + multi-word nullifier + recipient P2PK + cov_id 续, OP_2).
+          const { unlockBshardPayoutClaim } = await import('./lib/p2sh.mjs');
+          const wallet = getWallet();
+          const r = await unlockBshardPayoutClaim({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) });
+          if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, ...r } });
+          return;
+        }
+
         case 'pool_v07_compute_refund_mass': {
           // G6 批 3 段① Bettor r311 钦定: Console 手搓 UtxoEntry 喂 calculateTransactionMass
           // 多次 WASM panic (unreachable / 'outpoint is not an object' / scriptPublicKey 格式).
