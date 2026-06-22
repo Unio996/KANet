@@ -93,27 +93,46 @@ function ctxFullPrimitive() {
   const PSREDEEM = 'aa'.repeat(600);            // dummy PS redeem (够长 ≥ rootOff+33; 测绑定逻辑非真 redeem 内容)
   const RROOT = 'bb'.repeat(32);               // re-derived (诚实) root
   // 自举: 喂一个 dummy-spk covenant output → 函数返 expectedSpk (它内部从 PSREDEEM+RROOT 算的 = 真绑值)
-  const boot = verifyClosePayoutRootBinding({ txSafeJson: JSON.stringify({ outputs: [{ covenant: { covenantId: 'cc' }, scriptPublicKey: 'deadbeef' }] }), psRedeemHex: PSREDEEM, reDerivedRoot: RROOT });
+  const boot = verifyClosePayoutRootBinding({ txSafeJson: JSON.stringify({ version: 1, outputs: [{ covenant: { covenantId: 'cc' }, scriptPublicKey: 'deadbeef' }] }), psRedeemHex: PSREDEEM, reDerivedRoot: RROOT });
   const EXP = boot.expectedSpk;
   if (!EXP) { console.log('  ?? 学不到 expectedSpk, 人工复核 verifyClosePayoutRootBinding'); }
   else {
     // A2-control (TEETH): continuation output spk == expectedSpk(诚实根) → 应 ok:true
-    const ctl = verifyClosePayoutRootBinding({ txSafeJson: JSON.stringify({ outputs: [{ covenant: { covenantId: 'cc' }, scriptPublicKey: EXP }, { scriptPublicKey: 'change00' }] }), psRedeemHex: PSREDEEM, reDerivedRoot: RROOT });
+    const ctl = verifyClosePayoutRootBinding({ txSafeJson: JSON.stringify({ version: 1, outputs: [{ covenant: { covenantId: 'cc' }, scriptPublicKey: EXP }, { scriptPublicKey: 'change00' }] }), psRedeemHex: PSREDEEM, reDerivedRoot: RROOT });
     if (ctl.ok === true) TEETH(`D2-control: 诚实根 continuation output 验过 (matchedOutputs=${ctl.matchedOutputs})`);
     else HOLE(`D2-control 竟拒(诚实根): ${ctl.reason} — 绑定逻辑坏`);
     // A2-attack-1 (TEETH): settler 给【匹配 claimedPayoutRoot 标量】但 continuation output commit 别的根(spk!=expected) → 必 BUST
-    const atk1 = verifyClosePayoutRootBinding({ txSafeJson: JSON.stringify({ outputs: [{ covenant: { covenantId: 'cc' }, scriptPublicKey: '0000aa20' + 'ff'.repeat(32) + '87' }] }), psRedeemHex: PSREDEEM, reDerivedRoot: RROOT });
+    const atk1 = verifyClosePayoutRootBinding({ txSafeJson: JSON.stringify({ version: 1, outputs: [{ covenant: { covenantId: 'cc' }, scriptPublicKey: '0000aa20' + 'ff'.repeat(32) + '87' }] }), psRedeemHex: PSREDEEM, reDerivedRoot: RROOT });
     if (atk1.ok === false && /D2 REJECT/.test(atk1.reason || '')) TEETH(`D2-attack 偷根: 被签 tx commit 恶意根 → BUST (${atk1.reason.slice(0, 40)}..)`);
     else HOLE(`D2-attack 偷根竟通过 (ok=${atk1.ok}) — settler 偷池`);
     // A2-attack-2 decoy (TEETH): 加一个【诚实根】cov-out 当幌子 + 一个【恶意根】cov-out → anti-decoy 全须对 → 必 BUST
-    const atk2 = verifyClosePayoutRootBinding({ txSafeJson: JSON.stringify({ outputs: [{ covenant: { covenantId: 'cc' }, scriptPublicKey: EXP }, { covenant: { covenantId: 'dd' }, scriptPublicKey: '0000aa20' + 'ee'.repeat(32) + '87' }] }), psRedeemHex: PSREDEEM, reDerivedRoot: RROOT });
+    const atk2 = verifyClosePayoutRootBinding({ txSafeJson: JSON.stringify({ version: 1, outputs: [{ covenant: { covenantId: 'cc' }, scriptPublicKey: EXP }, { covenant: { covenantId: 'dd' }, scriptPublicKey: '0000aa20' + 'ee'.repeat(32) + '87' }] }), psRedeemHex: PSREDEEM, reDerivedRoot: RROOT });
     if (atk2.ok === false) TEETH(`D2-decoy: 诚实根 cov-out 当幌子 + 恶意根 cov-out → anti-decoy 全须对 → BUST`);
     else HOLE(`D2-decoy 竟通过 — anti-decoy(全 cov-out 须对)没起作用`);
     // A2-attack-3 (TEETH): 零 covenant continuation output (settler 抹掉 cov-out) → 非合法 close_attest → 必 BUST
-    const atk3 = verifyClosePayoutRootBinding({ txSafeJson: JSON.stringify({ outputs: [{ scriptPublicKey: 'change00' }] }), psRedeemHex: PSREDEEM, reDerivedRoot: RROOT });
+    const atk3 = verifyClosePayoutRootBinding({ txSafeJson: JSON.stringify({ version: 1, outputs: [{ scriptPublicKey: 'change00' }] }), psRedeemHex: PSREDEEM, reDerivedRoot: RROOT });
     if (atk3.ok === false && /covenant continuation/.test(atk3.reason || '')) TEETH(`D2-no-cov-out: 无 covenant continuation → BUST`);
     else HOLE(`D2-no-cov-out 竟通过 (ok=${atk3.ok})`);
   }
+
+  console.log('\n=== A4: D2 version-gate NaN-bypass (Bettor 补 NWT version-gate 残口) ===');
+  // NWT 抓 version-gate(L91 Number(version)<1 拒 v0, malleability-safe 依赖 version>=1)。我补: Number(undefined)=NaN, NaN<1=false
+  //   → version【缺失/非数字】绕过 gate。settler 全控 txSafeJson → 省 version → 若 deserializeFromSafeJSON 默认 v0 则 move-binding 复活。
+  //   修(J1, NWT 自己'别靠别处 BUST'铁律) = !(Number(version)>=1) 拒 NaN/缺失/0。修前: 省略/NaN ok:true(HOLE); 修后: 全 BUST。
+  const vboot = verifyClosePayoutRootBinding({ txSafeJson: JSON.stringify({ version: 1, outputs: [{ covenant: { covenantId: 'cc' }, scriptPublicKey: 'x' }] }), psRedeemHex: PSREDEEM, reDerivedRoot: RROOT });
+  const VEXP = vboot.expectedSpk;
+  // v0 (NWT case) → 必 BUST
+  const v0 = verifyClosePayoutRootBinding({ txSafeJson: JSON.stringify({ version: 0, outputs: [{ covenant: { covenantId: 'cc' }, scriptPublicKey: VEXP }] }), psRedeemHex: PSREDEEM, reDerivedRoot: RROOT });
+  if (v0.ok === false && /version/.test(v0.reason || '')) TEETH(`version=0 → BUST (NWT gate): ${v0.reason.slice(0, 36)}..`);
+  else HOLE(`version=0 竟通过 — NWT version-gate 坏`);
+  // version 省略 → NaN-bypass (我补): 修前 ok:true=HOLE
+  const vNone = verifyClosePayoutRootBinding({ txSafeJson: JSON.stringify({ outputs: [{ covenant: { covenantId: 'cc' }, scriptPublicKey: VEXP }] }), psRedeemHex: PSREDEEM, reDerivedRoot: RROOT });
+  if (vNone.ok === false) TEETH(`version 缺失 → BUST (NaN-gate 修已落)`);
+  else HOLE(`version 缺失 → ok:true = NaN 绕过 version-gate (move-binding malleability 风险)。修=!(Number(version)>=1)`);
+  // version="abc" (NaN) → 同 bypass
+  const vNan = verifyClosePayoutRootBinding({ txSafeJson: JSON.stringify({ version: 'abc', outputs: [{ covenant: { covenantId: 'cc' }, scriptPublicKey: VEXP }] }), psRedeemHex: PSREDEEM, reDerivedRoot: RROOT });
+  if (vNan.ok === false) TEETH(`version='abc'(NaN) → BUST (NaN-gate 修已落)`);
+  else HOLE(`version='abc'(NaN) → ok:true = NaN 绕过 version-gate`);
 
   console.log('\n=== A3: C2 anchor 软 (reDeriveCommittee 接受自洽 sybil snapshot, 即便链上真根不同) ===');
   console.log('  场景: settler 控 loadPoolSnapshot → 供 {honest 6 + sybil 2, root=buildPoolMerkleTree(全集)}。');
