@@ -10,7 +10,8 @@
 //
 // ⚠ 这些是 OFFLINE 逻辑/静态证据 (mock chain / 源码扫描), 非 live 链上。E1 闭+(A)-model live 后我+NWT 跑真链 e2e。
 
-import { verifyBettorsCompleteFromChain } from '../src/lib/bshard-close-enforce.mjs';
+import { verifyBettorsCompleteFromChain, reDeriveCommittee } from '../src/lib/bshard-close-enforce.mjs';
+import { buildPoolMerkleTree } from '../src/services/pool-merkle-v06.mjs';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
@@ -99,6 +100,36 @@ function ctxFullPrimitive() {
     TEETH('enforce 已 parse txSafeJson 输出根验 (D2 修已落)。');
   } else {
     console.log('  ?? D2 静态特征变了, 人工复核 L130/L136。');
+  }
+
+  console.log('\n=== A3: C2 anchor 软 (reDeriveCommittee 接受自洽 sybil snapshot, 即便链上真根不同) ===');
+  console.log('  场景: settler 控 loadPoolSnapshot → 供 {honest 6 + sybil 2, root=buildPoolMerkleTree(全集)}。');
+  const _root = (pks) => { const t = buildPoolMerkleTree(pks); return (t.root?.toString ? t.root.toString('hex') : String(t.root)).toLowerCase(); };
+  const mk = (n, stake) => ({ pk_hex: (n.repeat(64)).slice(0, 64), stake_sompi: String(stake) });
+  const honestMembers = [mk('1', 100), mk('2', 100), mk('3', 100), mk('4', 100), mk('5', 100), mk('6', 100)];
+  const sybilMembers = [...honestMembers, mk('a', 100000), mk('b', 100000)];   // 2 high-stake sybils
+  const honestRoot = _root(honestMembers.map(m => m.pk_hex));
+  const sybilRoot = _root(sybilMembers.map(m => m.pk_hex));
+  // mock ctx: endBlockHash 固定(determinism); 关键 = 同时给 onChainPoolMerkleRoot=honestRoot, 但 snapshot.root=sybilRoot。
+  const a3ctx = (snapMembers, snapRoot) => ({
+    loadPoolSnapshot: async () => ({ pool_merkle_root: snapRoot, members: snapMembers, maker_pk: null, broker_pk: null, deadline_daa: 1000 }),
+    onChainPoolMerkleRoot: honestRoot,                       // 链上真根 (诚实集) — 修后 reDeriveCommittee 应 pin 到它
+    fetchEndBlockHashCanonical: async () => 'cc'.repeat(32),  // 固定 endBlockHash (anti-grinding mock)
+    chainReader: {}, deadlineDaa: 1000,
+  });
+  // control: honest snapshot (root==onChain) → 应正常 re-derive
+  try {
+    const cH = await reDeriveCommittee('mkt-A3', a3ctx(honestMembers, honestRoot));
+    TEETH(`honest snapshot 正常 re-derive (委员 ${cH.length} 名, root==链上)`);
+  } catch (e) { HOLE(`honest snapshot 竟抛: ${e.message}`); }
+  // attack: sybil snapshot (self-consistent sybilRoot) but onChain=honestRoot
+  try {
+    const cS = await reDeriveCommittee('mkt-A3', a3ctx(sybilMembers, sybilRoot));
+    const hasSybil = cS.some(pk => pk.startsWith('a') || pk.startsWith('b'));
+    HOLE(`sybil snapshot 自洽(root=buildPoolMerkleTree(sybil集)) 通过 reDeriveCommittee【虽然链上真根=honestRoot 不同】→ 委员=${cS.length} 名${hasSybil ? ', 含 sybil!' : ''}。修=snap.pool_merkle_root 必 == ctx.onChainPoolMerkleRoot 否则 throw。`);
+  } catch (e) {
+    if (/链上|onChain|on-chain|!=/.test(e.message)) TEETH(`sybil snapshot 被拒(root != 链上真根): ${e.message}`);
+    else HOLE(`sybil snapshot 抛了但非链锚原因(可能 C2 internal-consistency 或缺 module): ${e.message}`);
   }
 
   console.log(`\nRESULT: ${teeth} TEETH(修后正确), ${holes} HOLE(待修)。`);
