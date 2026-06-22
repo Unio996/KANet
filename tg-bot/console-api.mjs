@@ -103,6 +103,12 @@ export function brokerOnboardStatus(address) {
 export function brokerOnboardApply({ address, token, username }) {
   return req('POST', '/api/kanet-broker/onboard', { broker_address: address, bot_token: token, bot_username: username });
 }
+// broker 收益统计 (Owner 钦定 2026-06-22): address-keyed (地址制, 外部 broker 也查得到)。
+// 后端 J2 /api/kanet-broker/earnings-by-address/:address → {by_market:[{market_id,title,fee_kas,
+// status,settle_txid,shards}], totals:{realized,pending}}。fee=价值分成(1.6%×池), 非旧 maker_stake×pct。
+export function brokerEarningsByAddress(address) {
+  return req('GET', `/api/kanet-broker/earnings-by-address/${encodeURIComponent(address)}`);
+}
 
 // ── owner-in-dev-channel bridge (Step3) — pure messaging, 0-custody (no key / no value) ──
 // Direction A (Owner Telegram → dev-coord): post the Owner's message via the owner-voice relay

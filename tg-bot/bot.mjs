@@ -100,6 +100,16 @@ bot.command('broker', async (ctx) => {
   if (addr) { const r = await api.brokerOnboardStatus(addr); if (r.ok) status = r.json; }
   return ctx.reply(M.brokerRole({ addr, status }));
 });
+// /earnings — broker 收益统计 (Owner 钦定 2026-06-22 DM 显): address-keyed, 用户 /link 地址当 broker 查。
+// 经手 N 单 / 已实现 X / 待结算 Y / 各单 explorer 链接 (价值分成 1.6%, 链上可验)。0-key 只读。
+bot.command('earnings', async (ctx) => {
+  const tgUser = String(ctx.from.id);
+  const addr = PM.getLinkedAddr(tgUser) || linked.get(tgUser)?.address;
+  if (!addr) return ctx.reply('先 /link <你的 kaspatest 地址> 绑定 (= 你的 broker 收款地址), 再 /earnings 看收益。');
+  const r = await api.brokerEarningsByAddress(addr);
+  if (!r.ok || !r.json?.ok) return ctx.reply('收益查询失败: ' + (r.json?.error || r.status));
+  return ctx.reply(M.brokerEarnings(r.json), { disable_web_page_preview: true });
+});
 // /broker_apply <bot token> — 提交 broker 自助申请 (地址制): broker_address = 用户 /link 地址,
 // bot_token = 用户自己的 @BotFather token (加密落库, 永不外显)。落 pending, 待 Owner 批 trust 激活。
 bot.command('broker_apply', async (ctx) => {
