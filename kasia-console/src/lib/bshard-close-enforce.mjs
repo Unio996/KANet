@@ -419,10 +419,13 @@ export async function verifyBettorsCompleteFromChain(logicalMarketId, bettors, c
   // ── 级2-B: per-ticket 链锚 (anti-swap) ── 逐 shard 的 loaded bettor recompute ticket 地址 + landed。
   let perTicketChecked = 0;
   let perTicketVerified = false;
-  // 级2-B 只认 relay-IPC 单源 ctx.deriveTicketAddr (byte-equal by construction, 零 silverc 依赖)。
-  //   NWT footgun 修: 删 (silverc && p2sh) compileSil 分支。compileSil 路【实测 byte-equal】(Bettor fy1yk-s0 链上
-  //   15 dust UTXO 坐实, 非 divergent) 但依赖 canonical silverc-pin (跨节点 build drift→false-BUST,
-  //   silverc-build-determinism-pin) → 不作隐式缺省; relay-IPC 零 silverc 依赖更稳。
+  // 级2-B 只认 ctx.deriveTicketAddr 单源 (NWT footgun 修: 删 (silverc && p2sh) compileSil 分支)。
+  //   compileSil 路【实测 byte-equal】(Bettor fy1yk-s0 链上 15 dust UTXO 坐实, 非 divergent), 但依赖 canonical
+  //   silverc-pin (跨节点 build drift→false-BUST, silverc-build-determinism-pin) → 不作隐式缺省。
+  //   ⚠ 口径校正 (J2 verify-not-echo, 防 over-claim): ctx.deriveTicketAddr(relay-IPC) 是【单源避跨节点 drift】,
+  //     非【零 silverc】—— ticket 派生需 ps_prefix/suffix 模板 = computePoolSideArtifact(silverc 编译抽), silverc 依赖
+  //     在【模板】不在位置, 搬 relay 是搬 silverc 非消 silverc。真 zero-silverc = register 持久化 prefix/suffix 进
+  //     market_shards + daemon kaspa-wasm splice (J2 production 硬化, fy1yk 无 backfill); 现 silverc-pin 单源 = working interim。
   const canTicket = typeof ctx.deriveTicketAddr === 'function';
   if (canTicket) {
     for (const sh of shards) {
@@ -462,10 +465,13 @@ export async function verifyBettorsCompleteFromChain(logicalMarketId, bettors, c
 /**
  * Re-derive a bettor's PoolSide dust-ticket per-state P2SH via relay-IPC 单源 (J2 relay derive_poolside_ticket_addr)。
  * relay 用【铸 ticket 那套同码】算 (= ps_prefix ‖ [PUSH32 pk + PUSH8 i64LE dir + PUSH8 i64LE stake + PUSH32 shardPoolId] ‖
- *   ps_suffix → p2sh, J2 实证 relay p2sh.mjs _ticketAddress) → byte-equal by construction, 零 silverc-pin 依赖。
+ *   ps_suffix → p2sh, J2 实证 relay p2sh.mjs _ticketAddress) → 单源 byte-equal (一处算, 避跨节点重算 drift)。
+ * ⚠ 口径 (J2 verify-not-echo 校正, 防 over-claim): relay-IPC 是【单源避 drift】非【零 silverc】—— 模板 ps_prefix/suffix
+ *   仍 = computePoolSideArtifact(silverc 编译抽), silverc 依赖在模板, 搬 relay = 搬 silverc 非消 silverc。真 zero-silverc
+ *   = register 持久化 prefix/suffix 进 market_shards + daemon 纯 kaspa-wasm splice (J2 production 硬化, fy1yk 无 backfill)。
  * 注: console compileSil(PoolSide,[pk,dir,stake,shardPoolId])→p2sh 路【实测 byte-equal】(Bettor fy1yk-s0 链上 15 dust
  *   UTXO 坐实, 非 divergent), 但依赖 canonical silverc-pin (跨节点 build drift 风险) → lib 不内建 compileSil 缺省,
- *   改 relay-IPC 单源; compileSil 路保留作【显式异源交叉核】(Bettor _bettor_ticket_byteeq.mjs / NWT D:/rusty-kaspa wasm)。
+ *   改 ctx.deriveTicketAddr 单源; compileSil 路保留作【显式异源交叉核】(Bettor _bettor_ticket_byteeq.mjs / NWT D:/rusty-kaspa wasm)。
  */
 async function _deriveTicketAddr(bettorPk, direction, stake, shardPoolId, ctx) {
   if (typeof ctx.deriveTicketAddr !== 'function') {
