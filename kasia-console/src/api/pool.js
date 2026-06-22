@@ -2315,8 +2315,20 @@ export async function registerPoolRoutes(fastify) {
   // Kaspa explorer 深链。前端 NWT verifier 跨节点 fetch 双 host 对比 settle_txid + is_accepted 一致。
   fastify.get('/api/pool/market/:id/settle-audit', async (request, reply) => {
     const marketId = request.params.id;
-    const market = sqlite.prepare('SELECT id, protocol_version, protocol_status, spine_p2sh, settle_txid, refund_txid, pool_merkle_root, maker_relay_id, broker_relay_id, broker_pk, outcome_side, outcome_market_source, resolution_rule_spec, maker_stake_amount, oracle_bond_amount FROM pool_markets WHERE id = ?').get(marketId);
+    const market = sqlite.prepare('SELECT id, protocol_version, protocol_status, spine_p2sh, settle_txid, refund_txid, pool_merkle_root, maker_relay_id, broker_relay_id, broker_pk, outcome_side, outcome_market_source, resolution_rule_spec, maker_stake_amount, oracle_bond_amount, metadata FROM pool_markets WHERE id = ?').get(marketId);
     if (!market) return reply.code(404).send({ ok: false, error: 'market not found' });
+
+    // KANet-UI 2026-06-22 值分成收口 chain-truth reconcile: v0.7 bshard markets settle via
+    // driver-side close_attest + winner claim + value-split fee payout (NOT pool_markets.settle_txid).
+    // Bettors live in shard state, so the v0.6/v0.7 settler can misread pool_bettor_sides as 0-bet
+    // and refund the maker seed → protocol_status='refunded' even though the pool settled on chain.
+    // metadata.settle_evidence (recorded from verified chain truth; Track B autonomous settler will
+    // populate going forward) is the authoritative chain-settled signal. NO TX NO TRUTH.
+    let settleEvidence = null;
+    try {
+      const meta = JSON.parse(market.metadata || '{}');
+      if (meta.settle_evidence && meta.settle_evidence.chain_settled) settleEvidence = meta.settle_evidence;
+    } catch {}
 
     const committee = sqlite.prepare('SELECT committee_pks, committee_pk_hash, threshold, sampled_at, vrf_seed FROM pool_committee WHERE market_id = ?').get(marketId);
     let committeePks = null;
@@ -2368,7 +2380,22 @@ export async function registerPoolRoutes(fastify) {
       market_id: marketId,
       protocol_version: market.protocol_version || 'v0.5',
       protocol_status: market.protocol_status,
-      settled: !!market.settle_txid,
+      // chain-truth reconcile: settled if legacy settle_txid OR v0.7 bshard chain settle evidence present.
+      settled: !!market.settle_txid || !!settleEvidence,
+      chain_settled: !!settleEvidence,
+      settle_evidence: settleEvidence ? {
+        ...settleEvidence,
+        close_explorer_url: txUrl(settleEvidence.close_txid),
+        winner_claim: settleEvidence.winner_claim ? {
+          ...settleEvidence.winner_claim,
+          explorer_url: txUrl(settleEvidence.winner_claim.txid),
+        } : null,
+        fee_payouts: (settleEvidence.fee_payouts || []).map(f => ({ ...f, explorer_url: txUrl(f.txid) })),
+        maker_stake_refund: settleEvidence.maker_stake_refund ? {
+          ...settleEvidence.maker_stake_refund,
+          explorer_url: txUrl(settleEvidence.maker_stake_refund.txid),
+        } : null,
+      } : null,
       refunded: !!market.refund_txid,
       settle_txid: market.settle_txid || null,
       settle_explorer_url: txUrl(market.settle_txid),
