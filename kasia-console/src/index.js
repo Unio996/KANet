@@ -524,6 +524,13 @@ startPredictionSettlerCron();
 import { startPredictionVoterCron } from './services/bettor-prediction-voter.js';
 startPredictionVoterCron();
 
+// Track B (production-trustless 自治-enforce): bshard close_attest voter daemon. 30s cron, scan host-local
+// is_oracle=1 relays + v0.7 markets in 'collecting_sigs' with metadata.bshard_close_request → each committee
+// node INDEPENDENTLY runs enforceCloseAttest (命门①③④ + frozen_evidence 同源 + fix① 链锚 re-derive + C1/C3/D1)
+// before its relay signs (replaces relay blind-sign). E1 ctx hooks wired (J2 2026-06-22).
+import { startBshardCloseVoterCron } from './services/bshard-close-voter.js';
+startBshardCloseVoterCron();
+
 // B2 v0.5 Sub 2d Phase 1 — pool_markets settler (aggregate 3 oracle votes + consensus check).
 // Phase 2 (TX construction + sig orchestration + broadcast) deferred.
 import { startPoolMarketSettlerCron } from './services/pool-market-settler.js';
