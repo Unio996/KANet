@@ -27,6 +27,27 @@ export function startMessage() {
   ].join('\n');
 }
 
+// KANet-UI 2026-06-22 (Owner 实测派修): /start 对【已 /link 的用户】不重复三步引导, 改显其绑定地址 +
+// 直接给下一步 (Owner 钦定 'personalize-on-link, 显地址 + 最多一个改绑'). 未绑用户仍走 startMessage()。
+export function startMessageLinked(addr) {
+  return [
+    '👋 KANet — 你已就绪。',
+    '',
+    `📍 你的地址: ${addr}`,
+    '   (改绑: /link <新地址>)',
+    '',
+    '👉 下一步:',
+    '· /bet — 押注预测市场（你自己链上锁定，多评判结算），/mybets 看赢/输/退款',
+    '· /faucet — 领 5 个测试 KAS',
+    '· /swap — 兑换 KAS ↔ USDT（经 broker，链上结算）',
+    '· /broker — 想做撮合者赚佣金？申请当 broker + 价值分成',
+    '· /discover · /help',
+    '',
+    '⚠ 你的钱始终由你自己链上掌控 —— bot 不持 key、碰不到你的资金。',
+    DISCLAIMER,
+  ].join('\n');
+}
+
 // 兑换 flow — show broker X's KAS receiving address; the USER pays on-chain from their own wallet.
 // bot 0 execute: 只显地址 + 引导 + deep-link。broker-intake-watcher 在链上检测到付款后继续。
 export function swapFlow(broker) {
@@ -79,22 +100,40 @@ export function notifyLine(ev) {
 // 【绝不在公开 bot 面给自助注册按钮】—— broker 收 1.6% fee, 公开无 auth 自助注册 = fee 模型被滥用,
 // 须先落 /identities trust auth 硬化(banked). bot 0-key/deep-link only, 此命令纯文字引导.
 // ⚠ Owner待拍 final wording (同 startMessage).
-export function brokerRole() {
-  return [
-    '🤝 成为撮合者 (broker / gateway)',
+// KANet-UI 2026-06-22 (Owner 实测派修 + onboarding 闭环已落): /broker 从 INFO-ONLY 升级为真接通自助
+// 申请流 (地址制 onboarding 已落 + Owner trust 审批门 = auth 硬化已满足, 公开自助安全)。opts:
+//   { addr: 用户 /link 地址 (无则提示先 /link), status: onboard/status 返回 (onboarded/status/trust_level) }
+export function brokerRole(opts = {}) {
+  const { addr, status } = opts;
+  const lines = [
+    '🤝 成为撮合者 (broker)',
     '',
-    'broker = 把预测市场 / 兑换撮合给用户的角色,按协议内置佣金收费(落你自己的链上地址):',
+    'broker = 把预测市场 / 兑换撮合给用户, 按协议内置佣金收费(落你自己的链上地址):',
     '· 价值分成(协议常量): 赢家 97% / oracle 1% / broker 1.6% / introducer 0.2% / node 0.2%',
-    '· broker 不碰用户资金 —— 用户全程自己链上锁仓 + 付款,你只撮合 + 收佣',
+    '· broker 不碰用户资金 —— 用户全程自己链上锁仓+付款, 你只撮合+收佣 (佣金进你地址)',
     '',
-    '怎么参与(当前 testnet):',
-    '· 跑一个 KANet relay 节点(broker 收款地址 = 你 relay 自带地址,须 P2PK)',
-    '· 注册成 gateway / 设佣金由运营方在 Console 配置 —— 现阶段请联系 Owner 接入',
-    '· 开发者: KANet 开源(MIT),fork broker 角色自己跑节点',
-    '',
-    '⚠ 公开一键自助注册(任何人即时成 broker)还在做 —— 需身份认证防佣金滥用,暂经 Owner 接入。',
-    DISCLAIMER,
-  ].join('\n');
+  ];
+  if (!addr) {
+    lines.push('👉 申请当 broker (3 步):');
+    lines.push('① 先 /link <你的 kaspatest 地址> — 这地址就是你的 broker 收款地址(佣金落这)');
+    lines.push('② 去 @BotFather /newbot 拿一个你自己的 bot token');
+    lines.push('③ /broker_apply <你的 bot token> — 提交申请');
+  } else if (status?.onboarded && status.status === 'approved') {
+    lines.push(`✅ 你已是 approved broker (地址 ${addr})`);
+    lines.push('你的 bot 已(或即将由 KANet 托管)拉起, 对外呈现全部市场, 带量成交的佣金落你地址。');
+    lines.push('改 bot token: /broker_apply <新 token>');
+  } else if (status?.onboarded) {
+    lines.push(`⏳ 你的 broker 申请已提交 (地址 ${addr}), 待 Owner 审批。`);
+    lines.push('审批通过后你的 bot 会被 KANet 自动托管拉起。换 token: /broker_apply <新 token>');
+  } else {
+    lines.push(`👉 申请当 broker (你已绑地址 ${addr}):`);
+    lines.push('① 去 @BotFather /newbot 拿一个你自己的 bot token');
+    lines.push('② /broker_apply <你的 bot token> — 提交申请 (待 Owner 审批后激活)');
+  }
+  lines.push('');
+  lines.push('⚠ 申请提交后需 Owner 审批才激活(防佣金滥用/女巫)。你的 bot token 加密存储、绝不外显。');
+  lines.push(DISCLAIMER);
+  return lines.join('\n');
 }
 
 export function help() {

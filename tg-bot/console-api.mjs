@@ -94,6 +94,16 @@ export function myPositions(linkedAddr) {
   return req('GET', `/api/pool/my-positions?linked_addr=${encodeURIComponent(linkedAddr)}`);
 }
 
+// ── broker onboarding (Owner 钦定 2026-06-22): user 在 bot 里申请当 broker (地址制) ──
+// 申请落 pending; Owner 经 /identities 批 trust→approved 才激活 (auth 门已落 = 公开自助安全)。
+// 状态查 (token 永不回); 申请提交 (用户的 /link 地址 + 他的 @BotFather token)。
+export function brokerOnboardStatus(address) {
+  return req('GET', `/api/kanet-broker/onboard/status?address=${encodeURIComponent(address)}`);
+}
+export function brokerOnboardApply({ address, token, username }) {
+  return req('POST', '/api/kanet-broker/onboard', { broker_address: address, bot_token: token, bot_username: username });
+}
+
 // ── owner-in-dev-channel bridge (Step3) — pure messaging, 0-custody (no key / no value) ──
 // Direction A (Owner Telegram → dev-coord): post the Owner's message via the owner-voice relay
 // (resolveOwnerVoiceRelayId). /api/chat/send mirrors the Console Live Chat send; the relay's address
