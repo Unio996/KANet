@@ -47,6 +47,25 @@ function mockCtx({ shards, rows, hasPS, onChainTickets }) {
     },
   };
 }
+// cross-node snapshot ctx (no db; ctx.shards snapshot per-shard bettors + psConsolidatedPool 链锚)。
+const SEED = 20000000;
+const snapshotShards = () => ([
+  { ...honestShards()[0], shard_pool_id: 'sp0', bettors: [{ pk: 'aa', direction: 0, stake: 100 }, { pk: 'bb', direction: 0, stake: 200 }] },
+  { ...honestShards()[1], shard_pool_id: 'sp1', bettors: [{ pk: 'cc', direction: 1, stake: 150 }] },
+]);
+function crossNodeCtx({ shards, psConsolidatedPool, onChainTickets }) {
+  const ticketSet = onChainTickets || new Set([['aa', 0, 100], ['bb', 0, 200], ['cc', 1, 150]].map(([p, d, s]) => `${p}:${d}:${s}`));
+  return {
+    shards, psConsolidatedPool,   // snapshot, NO db (cross-node)
+    p2sh: (redeem) => 'L:' + String(redeem).slice(0, 12),
+    deriveTicketAddr: ({ bettorPk, direction, stake }) => 't:' + `${bettorPk}:${direction}:${stake}`,
+    checkUtxoLanded: async (addr) => {
+      if (String(addr).startsWith('L:')) return true;
+      if (String(addr).startsWith('t:')) return ticketSet.has(String(addr).slice(2));
+      return false;
+    },
+  };
+}
 
 (async () => {
   console.log('== T1: honest (A) market → ok:true, per-ticket verified ==');
@@ -103,6 +122,14 @@ function mockCtx({ shards, rows, hasPS, onChainTickets }) {
   delete ctx10.deriveTicketAddr;   // 只剩级2-A primitive (p2sh+checkUtxoLanded), 无 ticket addr 派生 → canTicket=false
   const r10 = await verifyBettorsCompleteFromChain(MID, honestLoaded, ctx10);
   ok(r10.ok === false && r10.perTicketVerified === false && /级2-B|ticket primitive/.test(r10.reason), `fail-loud (非 silent-skip): ${r10.reason}`);
+
+  console.log('== T11: cross-node snapshot (ctx.shards 无 db) + PS-pool honest → ok ==');
+  const r11 = await verifyBettorsCompleteFromChain(MID, honestLoaded, crossNodeCtx({ shards: snapshotShards(), psConsolidatedPool: SEED + 450 }));
+  ok(r11.ok === true && r11.perTicketVerified === true && r11.perTicketChecked === 3, `cross-node ok (reason=${r11.reason || '-'})`);
+
+  console.log('== T12: PS-pool 链锚 omit-shard 变体① (consolidated_pool 含漏片但 loaded 不含 → BUST) ==');
+  const r12 = await verifyBettorsCompleteFromChain(MID, honestLoaded, crossNodeCtx({ shards: snapshotShards(), psConsolidatedPool: SEED + 600 }));
+  ok(r12.ok === false && /PS-pool/.test(r12.reason), `omit-shard 变体① BUST: ${r12.reason}`);
 
   console.log(`\nRESULT: ${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);

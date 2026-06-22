@@ -64,6 +64,13 @@ function _p2shSpkHex(redeemHex) {
   const h = Buffer.from(blake2b(Buffer.from(String(redeemHex), 'hex'), { dkLen: 32 })).toString('hex');
   return ('0000aa20' + h + '87').toLowerCase();
 }
+// 读 PS continuation state 首字段 consolidated_pool (state_start=1, PUSH8 i64LE @ byte _PS_STATE_START+1)。
+//   = consolidate 全片累积链上聚合 (PS_SEED + Σ all shard pool_value)。C1 PS-level complete-set 链锚用 (抓 omit-shard 变体①)。
+function _readPsConsolidatedPool(psRedeemHex) {
+  const b = Buffer.from(String(psRedeemHex || ''), 'hex');
+  if (b.length < _PS_STATE_START + 9) return null;
+  return b.readBigInt64LE(_PS_STATE_START + 1);   // skip PUSH8 len byte @ _PS_STATE_START
+}
 
 /**
  * D2 FIX (NWT 红队最承重 = verify-value-source 铁律): 验【被签 tx 实际 commit 的 payoutRoot】, 不是 caller 旁路标量。
@@ -189,7 +196,12 @@ export async function enforceCloseAttest(signRequest, ctx) {
   const completeFn = (typeof ctx.verifyBettorsCompleteFromChain === 'function')
     ? ctx.verifyBettorsCompleteFromChain
     : verifyBettorsCompleteFromChain;
-  const cs = await completeFn(market_id, bettors, ctx);
+  // PS-level complete-set 链锚: 从被签 tx 的 PS input redeem(命门①已验 p2sh==landed 链锚)读 consolidated_pool 喂 C1。
+  //   (ctx 已带则不覆盖; cross-node daemon 也可自传。)
+  const completeCtx = (ctx.psConsolidatedPool == null)
+    ? { ...ctx, psConsolidatedPool: _readPsConsolidatedPool(psRedeemHex) }
+    : ctx;
+  const cs = await completeFn(market_id, bettors, completeCtx);
   if (!cs || cs.ok !== true) return { pass: false, reason: `C1: ${cs?.reason || 'bettor 集不完整 (链上 shard 重建 != loaded)'}` };
   const poolSompi = bettors.reduce((s, b) => s + BigInt(b.stake), 0n).toString();
   const { feeLeaves } = deriveFeeLeaves({
@@ -369,28 +381,32 @@ export async function reDeriveCommittee(marketId, ctx, psRedeemHex = null) {
  * @returns {Promise<{ok:bool, reason?, applicable?:bool, aggregate?, perTicketChecked?:number, perTicketVerified?:bool}>}
  */
 export async function verifyBettorsCompleteFromChain(logicalMarketId, bettors, ctx = {}) {
-  if (!ctx.db) return { ok: false, reason: 'C1: ctx.db 缺 — 无法 iterate market_shards (fail-loud)' };
-  const shards = listShards(ctx.db, logicalMarketId);
-
-  // (A)-model 判定: 无 shard 行 → 非 rolling-shard 市场 (e.g. fee-only / 旧模型) → 级2 N/A。
-  //   但若存在 PayoutShard (= (A)-model PS 已 genesis) 却 shard 空 → 数据缺失/篡改 → fail-loud (堵"擦掉 shard 绕 C1")。
+  // shard 来源: cross-node = ctx.shards (sign-request snapshot, 只 hint 指路; 每 {shard_index, shard_redeem_hex,
+  //   current_leaf_state, current_leaf_outpoint, shard_pool_id, bettors?}); local = listShards(ctx.db)。
+  //   NWT 铁律: snapshot 只指路, state/Σ/ticket 全靠【链锚验】(p2sh(spliceLeafState)==landed) 非信 snapshot 值。
+  let shards = Array.isArray(ctx.shards) ? ctx.shards : null;
+  if (!shards) {
+    if (!ctx.db) return { ok: false, reason: 'C1: ctx.shards(snapshot) 与 ctx.db 都缺 — 无 shard 来源 (fail-loud)' };
+    shards = listShards(ctx.db, logicalMarketId);
+  }
+  // (A)-model 判定: 无 shard → 非 rolling-shard (fee-only/旧) → 级2 N/A; 但有 PayoutShard 却 shard 空 → 篡改 fail-loud。
   if (!shards.length) {
     let hasPS = false;
-    try { hasPS = !!ctx.db.prepare(`SELECT 1 FROM payout_shards WHERE logical_market_id = ? LIMIT 1`).get(logicalMarketId); } catch { /* table 不存在 = 非 (A) 环境 */ }
-    if (hasPS) return { ok: false, reason: 'C1: payout_shards 存在但 market_shards 空 — (A)-model shard 数据缺失/篡改 (fail-loud, 堵绕 C1)' };
-    return { ok: true, applicable: false, reason: 'no market_shards + no PayoutShard — 非 (A)-model rolling-shard 市场, 级2 N/A' };
+    try { hasPS = ctx.db ? !!ctx.db.prepare(`SELECT 1 FROM payout_shards WHERE logical_market_id = ? LIMIT 1`).get(logicalMarketId) : false; } catch { /* 非 (A) 环境 */ }
+    if (hasPS) return { ok: false, reason: 'C1: payout_shards 存在但 shards 空 — (A)-model shard 数据缺失/篡改 (fail-loud, 堵绕 C1)' };
+    return { ok: true, applicable: false, reason: 'no shards + no PayoutShard — 非 (A)-model rolling-shard 市场, 级2 N/A' };
   }
-
   if (typeof ctx.p2sh !== 'function' || typeof ctx.checkUtxoLanded !== 'function') {
-    // 链锚 primitive 缺 → 聚合只能 DB-only = 不 trustless → fail-loud (拒静默 DB-only 降级, fix² 教训)。
-    return { ok: false, reason: 'C1: ctx.p2sh/checkUtxoLanded 缺 — leaf state 无法链锚 (拒 DB-only 聚合)' };
+    // 链锚 primitive 缺 → 只能信 snapshot/DB = 不 trustless → fail-loud (拒静默降级, fix² 教训)。
+    return { ok: false, reason: 'C1: ctx.p2sh/checkUtxoLanded 缺 — leaf state 无法链锚 (拒 DB-only/snapshot-only 信任)' };
   }
 
   // ── 级2-A: 跨片聚合链锚 ──
   let chainCount = 0; let chainYes = 0n; let chainNo = 0n; let chainPool = 0n;
   for (const sh of shards) {
     let st = null;
-    try { st = JSON.parse(sh.current_leaf_state || 'null'); } catch { st = null; }
+    // snapshot 可传 obj 或 JSON string (DB 是 string); 兼容两者。
+    try { st = typeof sh.current_leaf_state === 'string' ? JSON.parse(sh.current_leaf_state || 'null') : (sh.current_leaf_state || null); } catch { st = null; }
     if (!st || st.count == null || st.pool_value == null) return { ok: false, reason: `C1: shard ${sh.shard_index} 无 current_leaf_state — fail-loud` };
     if (!sh.shard_redeem_hex || !sh.current_leaf_outpoint) return { ok: false, reason: `C1: shard ${sh.shard_index} 缺 shard_redeem_hex/current_leaf_outpoint — 无法链锚` };
     // chain-anchor: per-state leaf 地址 == current_leaf_outpoint 落地址 (state 篡改 → 地址变 → 落地址不符)。
@@ -424,6 +440,20 @@ export async function verifyBettorsCompleteFromChain(logicalMarketId, bettors, c
   if (loadYes !== chainYes) return { ok: false, reason: `C1 anti-dir-tamper: loaded YES ${loadYes} != 链上 Σlocal_yes ${chainYes}` };
   if (loadNo !== chainNo) return { ok: false, reason: `C1 anti-dir-tamper: loaded NO ${loadNo} != 链上 Σlocal_no ${chainNo}` };
 
+  // ── PS-level complete-set 链锚 (J1 提, NWT/Bettor 强化) ── consolidated_pool = consolidate 全片累积链上聚合
+  //    (= PS_SEED + Σ all shard pool_value)。验 == PS_SEED + loadPool → 抓 omit-shard 变体①(漏【已 consolidate】片:
+  //    consolidated_pool 含它但 loadPool 不含 → BUST) + 片内漏/加/换(Σ 不符)。
+  //    ⚠ 残留 [follow-up, NWT/Bettor 13:25 校准, 诚实标]: 变体②(settler 提前 close 子集, 漏的片【未 consolidate】→
+  //    consolidated_pool 与 loadPool 都不含 = 自洽 → PASS) 本锚【不抓】— 真硬锚需片集从链上【PS cov_id 单例 lineage
+  //    (auto-roll 血缘)】枚举非信 snapshot 片列表。今晚 honest-settler e2e 不触发, 口径标'变体①闭/变体②开'。
+  if (ctx.psConsolidatedPool != null) {
+    const psPool = BigInt(ctx.psConsolidatedPool);
+    const seed = BigInt(ctx.psSeed ?? 20000000);   // register PS_SEED=20M 固定; ctx.psSeed 可覆盖
+    if (psPool !== seed + loadPool) {
+      return { ok: false, reason: `C1 PS-pool 链锚 BUST: consolidated_pool ${psPool} != PS_SEED(${seed})+Σloaded ${loadPool} (omit-shard 变体①/已-consolidate 片不一致 或 漏/加 bettor)` };
+    }
+  }
+
   // ── 级2-B: per-ticket 链锚 (anti-swap) ── 逐 shard 的 loaded bettor recompute ticket 地址 + landed。
   let perTicketChecked = 0;
   let perTicketVerified = false;
@@ -437,12 +467,19 @@ export async function verifyBettorsCompleteFromChain(logicalMarketId, bettors, c
   const canTicket = typeof ctx.deriveTicketAddr === 'function';
   if (canTicket) {
     for (const sh of shards) {
-      const shardPoolId = _hex32(`${logicalMarketId}-shard-${sh.shard_index}`);
-      const rows = ctx.db.prepare(`SELECT bettor_pk, direction, stake_amount FROM pool_bettor_sides WHERE market_id = ?`).all(sh.shard_market_id);
+      const shardPoolId = sh.shard_pool_id || _hex32(`${logicalMarketId}-shard-${sh.shard_index}`);
+      // rows 来源: cross-node = sh.bettors (snapshot per-shard, 只 hint 指路); local = ctx.db pool_bettor_sides。
+      //   字段兼容 snapshot {pk,direction,stake} 与 DB {bettor_pk,direction,stake_amount}。链锚: addr 必 landed (不信 snapshot)。
+      const rows = Array.isArray(sh.bettors)
+        ? sh.bettors
+        : (ctx.db ? ctx.db.prepare(`SELECT bettor_pk, direction, stake_amount FROM pool_bettor_sides WHERE market_id = ?`).all(sh.shard_market_id) : []);
       for (const r of rows) {
-        const addr = await _deriveTicketAddr(String(r.bettor_pk), Number(r.direction), BigInt(r.stake_amount), shardPoolId, ctx);
+        const rpk = String(r.bettor_pk ?? r.pk ?? '');
+        const rdir = Number(r.direction);
+        const rstake = BigInt(r.stake_amount ?? r.stake ?? 0);
+        const addr = await _deriveTicketAddr(rpk, rdir, rstake, shardPoolId, ctx);
         const landed = await ctx.checkUtxoLanded(addr, null);
-        if (!landed) return { ok: false, reason: `C1 anti-swap: bettor ${String(r.bettor_pk).slice(0, 10)} (shard ${sh.shard_index}) PoolSide ticket 链上不存在 (pk/dir/stake 被换/伪造?)` };
+        if (!landed) return { ok: false, reason: `C1 anti-swap: bettor ${rpk.slice(0, 10)} (shard ${sh.shard_index}) PoolSide ticket 链上不存在 (pk/dir/stake 被换/伪造?)` };
         perTicketChecked++;
       }
     }
