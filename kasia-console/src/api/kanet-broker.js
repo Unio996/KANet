@@ -221,25 +221,39 @@ export async function registerKanetBrokerRoutes(fastify) {
       FROM pool_markets WHERE LOWER(broker_pk) = ?
     `).all(brokerPk);
 
-    let realizedSompi = 0n, pendingSompi = 0n, refundedSompi = 0n, realizedN = 0, pendingN = 0, refundedN = 0;
+    let realizedKas = 0, pendingKas = 0, refundedKas = 0, realizedN = 0, pendingN = 0, refundedN = 0;
     const byMarket = [];
     for (const r of poolRows) {
-      const isRealized = !!r.settle_txid;
-      let actualFeeSompi = null;   // settled: 用实落 broker fee (settler 记 phase2_broker_fee_sompi), 回退 maker_stake×pct 估算
-      if (isRealized && r.metadata) { try { const _m = JSON.parse(r.metadata); if (_m.phase2_broker_fee_sompi != null) actualFeeSompi = BigInt(_m.phase2_broker_fee_sompi); } catch {} }
-      const feeSompi = actualFeeSompi != null ? actualFeeSompi : (BigInt(r.maker_stake_amount || 0) * BigInt(r.broker_fee_pct || 0)) / 10000n;
-      const isRefunded = !!r.refund_txid;
+      let meta = null; try { meta = r.metadata ? JSON.parse(r.metadata) : null; } catch {}
+      // KANet-UI 15:45 gap fix: v0.7 bshard 市场走 close_attest → settle_txid=NULL, fee 在 metadata.settle_evidence
+      //   (chain_settled + fee_payouts[role=broker].amount_kas, 链上实分发)。chain-truth 胜过 stale DB status/refund_txid
+      //   (cron 翻 refunding 前链上已 settle, 见 x4kpq status=refunded 但 chain_settled=true)。relay-keyed v06 路不变。
+      const se = meta?.settle_evidence;
+      const bshardSettled = se && se.chain_settled === true;
+      let feeKas, settleTxid = r.settle_txid || null;
+      if (bshardSettled) {
+        const bfees = (se.fee_payouts || []).filter((p) => p && p.role === 'broker');
+        feeKas = bfees.reduce((s, p) => s + (parseFloat(p.amount_kas) || 0), 0);
+        settleTxid = se.close_txid || (bfees[0] && bfees[0].txid) || null;
+      } else {
+        let actualFeeSompi = null;   // legacy v06: 实落 phase2_broker_fee_sompi / 回退 maker_stake×pct 估算
+        if (r.settle_txid && meta?.phase2_broker_fee_sompi != null) { try { actualFeeSompi = BigInt(meta.phase2_broker_fee_sompi); } catch {} }
+        const feeSompi = actualFeeSompi != null ? actualFeeSompi : (BigInt(r.maker_stake_amount || 0) * BigInt(r.broker_fee_pct || 0)) / 10000n;
+        feeKas = Number(feeSompi) / 1e8;
+      }
+      const isRealized = !!r.settle_txid || bshardSettled;
+      const isRefunded = !isRealized && !!r.refund_txid;   // chain-truth: bshardSettled 胜过 refund_txid (stale)
       const status = isRealized ? 'settled' : (isRefunded ? 'refunded' : r.protocol_status);
-      if (isRealized) { realizedSompi += feeSompi; realizedN += 1; }
-      else if (isRefunded) { refundedSompi += feeSompi; refundedN += 1; }
-      else { pendingSompi += feeSompi; pendingN += 1; }
-      byMarket.push({ id: r.id, fee_kas: (Number(feeSompi) / 1e8).toFixed(8), status, settle_txid: isRealized ? r.settle_txid : null, settled_at: isRealized ? r.updated_at : null });
+      if (isRealized) { realizedKas += feeKas; realizedN += 1; }
+      else if (isRefunded) { refundedKas += feeKas; refundedN += 1; }
+      else { pendingKas += feeKas; pendingN += 1; }
+      byMarket.push({ id: r.id, fee_kas: feeKas.toFixed(8), status, settle_txid: isRealized ? settleTxid : null, settled_at: isRealized ? r.updated_at : null });
     }
     return reply.send({
       ok: true, address: String(address), broker_pk: brokerPk,
-      realized: { pool_kas: (Number(realizedSompi) / 1e8).toFixed(8), n_markets: realizedN },
-      pending: { pool_kas: (Number(pendingSompi) / 1e8).toFixed(8), n_markets: pendingN },
-      refunded: { pool_kas: (Number(refundedSompi) / 1e8).toFixed(8), n_markets: refundedN },
+      realized: { pool_kas: realizedKas.toFixed(8), n_markets: realizedN },
+      pending: { pool_kas: pendingKas.toFixed(8), n_markets: pendingN },
+      refunded: { pool_kas: refundedKas.toFixed(8), n_markets: refundedN },
       by_market: byMarket,
     });
   });
