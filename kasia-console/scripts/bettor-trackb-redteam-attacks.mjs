@@ -10,7 +10,7 @@
 //
 // ⚠ 这些是 OFFLINE 逻辑/静态证据 (mock chain / 源码扫描), 非 live 链上。E1 闭+(A)-model live 后我+NWT 跑真链 e2e。
 
-import { verifyBettorsCompleteFromChain, reDeriveCommittee } from '../src/lib/bshard-close-enforce.mjs';
+import { verifyBettorsCompleteFromChain, reDeriveCommittee, verifyClosePayoutRootBinding } from '../src/lib/bshard-close-enforce.mjs';
 import { buildPoolMerkleTree } from '../src/services/pool-merkle-v06.mjs';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -87,19 +87,32 @@ function ctxFullPrimitive() {
     console.log('  ?? 非预期: ', JSON.stringify(atk));
   }
 
-  console.log('\n=== A2: D2 root-from-signed-tx (静态坐实 — enforce 不 parse 被签 txSafeJson 输出根) ===');
-  const src = readFileSync(ENFORCE_SRC, 'utf8');
-  // D2 断言: txSafeJson 在 enforce 仅用于 hash (verifiedTxHash), 从不 parse 取 close_attest 输出 commit 的根。
-  const usesTxSafeJson = (src.match(/txSafeJson/g) || []).length;
-  const parsesTxOutputs = /JSON\.parse\([^)]*txSafeJson|txSafeJson[^;\n]*\.(outputs|output|tx)/.test(src);
-  const comparesClaimedScalar = /reDerivedRoot\s*!==\s*String\(claimedPayoutRoot\)/.test(src);
-  console.log(`  txSafeJson 出现 ${usesTxSafeJson} 次; parse-outputs=${parsesTxOutputs}; 比 caller 标量 claimedPayoutRoot=${comparesClaimedScalar}`);
-  if (comparesClaimedScalar && !parsesTxOutputs) {
-    HOLE('enforce 只比 reDerivedRoot==claimedPayoutRoot(caller 标量), 从不 parse txSafeJson 输出根 → settler 给对的标量+恶意 tx 根 → 签偷池 tx。修=从被签 txSafeJson 反解 sighash 覆盖的输出根验。');
-  } else if (parsesTxOutputs) {
-    TEETH('enforce 已 parse txSafeJson 输出根验 (D2 修已落)。');
-  } else {
-    console.log('  ?? D2 静态特征变了, 人工复核 L130/L136。');
+  console.log('\n=== A2: D2 root-from-signed-tx (功能注入靶 — verifyClosePayoutRootBinding 真绑被签 tx commit 的根) ===');
+  // J1 86523223 落 verifyClosePayoutRootBinding(从被签 txSafeJson 反解 covenant continuation output 的 P2SH spk 验根)。
+  // 我【独立功能注入】(非静态扫): 自举学到 expectedSpk → 造 匹配/错根/decoy txSafeJson 喂进去验 BUST/PASS。零 wasm/零内部 import。
+  const PSREDEEM = 'aa'.repeat(600);            // dummy PS redeem (够长 ≥ rootOff+33; 测绑定逻辑非真 redeem 内容)
+  const RROOT = 'bb'.repeat(32);               // re-derived (诚实) root
+  // 自举: 喂一个 dummy-spk covenant output → 函数返 expectedSpk (它内部从 PSREDEEM+RROOT 算的 = 真绑值)
+  const boot = verifyClosePayoutRootBinding({ txSafeJson: JSON.stringify({ outputs: [{ covenant: { covenantId: 'cc' }, scriptPublicKey: 'deadbeef' }] }), psRedeemHex: PSREDEEM, reDerivedRoot: RROOT });
+  const EXP = boot.expectedSpk;
+  if (!EXP) { console.log('  ?? 学不到 expectedSpk, 人工复核 verifyClosePayoutRootBinding'); }
+  else {
+    // A2-control (TEETH): continuation output spk == expectedSpk(诚实根) → 应 ok:true
+    const ctl = verifyClosePayoutRootBinding({ txSafeJson: JSON.stringify({ outputs: [{ covenant: { covenantId: 'cc' }, scriptPublicKey: EXP }, { scriptPublicKey: 'change00' }] }), psRedeemHex: PSREDEEM, reDerivedRoot: RROOT });
+    if (ctl.ok === true) TEETH(`D2-control: 诚实根 continuation output 验过 (matchedOutputs=${ctl.matchedOutputs})`);
+    else HOLE(`D2-control 竟拒(诚实根): ${ctl.reason} — 绑定逻辑坏`);
+    // A2-attack-1 (TEETH): settler 给【匹配 claimedPayoutRoot 标量】但 continuation output commit 别的根(spk!=expected) → 必 BUST
+    const atk1 = verifyClosePayoutRootBinding({ txSafeJson: JSON.stringify({ outputs: [{ covenant: { covenantId: 'cc' }, scriptPublicKey: '0000aa20' + 'ff'.repeat(32) + '87' }] }), psRedeemHex: PSREDEEM, reDerivedRoot: RROOT });
+    if (atk1.ok === false && /D2 REJECT/.test(atk1.reason || '')) TEETH(`D2-attack 偷根: 被签 tx commit 恶意根 → BUST (${atk1.reason.slice(0, 40)}..)`);
+    else HOLE(`D2-attack 偷根竟通过 (ok=${atk1.ok}) — settler 偷池`);
+    // A2-attack-2 decoy (TEETH): 加一个【诚实根】cov-out 当幌子 + 一个【恶意根】cov-out → anti-decoy 全须对 → 必 BUST
+    const atk2 = verifyClosePayoutRootBinding({ txSafeJson: JSON.stringify({ outputs: [{ covenant: { covenantId: 'cc' }, scriptPublicKey: EXP }, { covenant: { covenantId: 'dd' }, scriptPublicKey: '0000aa20' + 'ee'.repeat(32) + '87' }] }), psRedeemHex: PSREDEEM, reDerivedRoot: RROOT });
+    if (atk2.ok === false) TEETH(`D2-decoy: 诚实根 cov-out 当幌子 + 恶意根 cov-out → anti-decoy 全须对 → BUST`);
+    else HOLE(`D2-decoy 竟通过 — anti-decoy(全 cov-out 须对)没起作用`);
+    // A2-attack-3 (TEETH): 零 covenant continuation output (settler 抹掉 cov-out) → 非合法 close_attest → 必 BUST
+    const atk3 = verifyClosePayoutRootBinding({ txSafeJson: JSON.stringify({ outputs: [{ scriptPublicKey: 'change00' }] }), psRedeemHex: PSREDEEM, reDerivedRoot: RROOT });
+    if (atk3.ok === false && /covenant continuation/.test(atk3.reason || '')) TEETH(`D2-no-cov-out: 无 covenant continuation → BUST`);
+    else HOLE(`D2-no-cov-out 竟通过 (ok=${atk3.ok})`);
   }
 
   console.log('\n=== A3: C2 anchor 软 (reDeriveCommittee 接受自洽 sybil snapshot, 即便链上真根不同) ===');
