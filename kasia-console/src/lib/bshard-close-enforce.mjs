@@ -42,6 +42,61 @@ function _spliceLeafState(baseRedeemHex, st) {
   return Buffer.concat([redeem.slice(0, 1), stateHex, redeem.slice(1 + stateHex.length)]).toString('hex');
 }
 
+// ── D2 (NWT 红队最承重, verify-value-source): PayoutShard close continuation redeem splice (closed 0→1 + payoutRoot 写入) ──
+//   state_start=1 (canonical PayoutShard; 确认 pool-shard-settle.mjs `state_start:1` + relay _POOL_STATE_START=1, 三处一致)。
+//   state 布局 (序列同 relay _serializePayoutStateHex): consolidated_pool(PUSH8=9B) ‖ closed(PUSH8=9B) ‖ payoutRoot(PUSH32=33B) ‖ w0..w16。
+//   只 splice closed+payoutRoot 进【input PS redeem】(consolidated_pool/17-word nullifier 从 redeem 透传) == relay
+//   _continuationAddress(全 state 区替换)byte-equal —— _j2_A_close_attest 实证 recompile==splice==psContAddress。
+const _PS_STATE_START = 1;
+function _splicePayoutCloseRedeem(psRedeemHex, payoutRootHex) {
+  const redeem = Buffer.from(String(psRedeemHex), 'hex');
+  const root = Buffer.from(String(payoutRootHex).replace(/^0x/, ''), 'hex');
+  if (root.length !== 32) throw new Error(`payoutRoot 非 32B (got ${root.length})`);
+  const closedOff = _PS_STATE_START + 9;    // consolidated_pool(9) 之后
+  const rootOff = _PS_STATE_START + 18;      // + closed(9)
+  if (redeem.length < rootOff + 33) throw new Error(`psRedeem 太短 (${redeem.length}B, 需 ≥ ${rootOff + 33}) — 非 PayoutShard redeem?`);
+  const closedField = Buffer.concat([Buffer.from([0x08]), _i64LE(1)]);   // closed=1 (PUSH8 + i64LE)
+  const rootField = Buffer.concat([Buffer.from([0x20]), root]);          // payoutRoot (PUSH32 + 32B)
+  return Buffer.concat([
+    redeem.slice(0, closedOff), closedField,
+    redeem.slice(closedOff + 9, rootOff), rootField,
+    redeem.slice(rootOff + 33),
+  ]).toString('hex');
+}
+// Kaspa P2SH scriptPublicKey hex = version(0000) ‖ OP_BLAKE2B(aa) PUSH32(20) ‖ blake2b256(redeem) ‖ OP_EQUAL(87)。
+//   probe 实证 byte-equal kaspa-wasm createPayToScriptHashScript→serializeToSafeJSON 的 output.scriptPublicKey (plain blake2b-256, 无 key)。
+function _p2shSpkHex(redeemHex) {
+  const h = Buffer.from(blake2b(Buffer.from(String(redeemHex), 'hex'), { dkLen: 32 })).toString('hex');
+  return ('0000aa20' + h + '87').toLowerCase();
+}
+
+/**
+ * D2 FIX (NWT 红队最承重 = verify-value-source 铁律): 验【被签 tx 实际 commit 的 payoutRoot】, 不是 caller 旁路标量。
+ * close_attest 把 payoutRoot 烤进 PS continuation output 的 P2SH scriptPubKey (SIGHASH_ALL 覆盖 = 委员签名真绑的值)。
+ * 攻击 (verdict D2): settler 给【匹配的 claimedPayoutRoot 标量】+【txSafeJson 的 continuation output commit 另一个根】
+ *   → 旧码只验标量 → 漏过 → daemon 签了输出是恶意根的 tx。修 = 从被签 txSafeJson 反解 continuation output 的根验它。
+ * continuation output 唯一识别 = `covenant.covenantId != null` (PS cov_id 续约 output; change output covenant=null) —— probe 实证。
+ * @param {{txSafeJson:string, psRedeemHex:string, reDerivedRoot:string}} o
+ * @returns {{ok:bool, reason?, expectedSpk?, matchedOutputs?:number}}
+ */
+export function verifyClosePayoutRootBinding({ txSafeJson, psRedeemHex, reDerivedRoot }) {
+  let signedTx;
+  try { signedTx = JSON.parse(String(txSafeJson || '')); } catch { return { ok: false, reason: 'D2: txSafeJson parse fail — 无法验被签 tx commit 的根 (弃签)' }; }
+  let expectedSpk;
+  try { expectedSpk = _p2shSpkHex(_splicePayoutCloseRedeem(psRedeemHex, reDerivedRoot)); }
+  catch (e) { return { ok: false, reason: `D2: continuation redeem splice fail (${e.message})` }; }
+  const covOuts = (Array.isArray(signedTx.outputs) ? signedTx.outputs : []).filter(o => o && o.covenant && o.covenant.covenantId);
+  if (covOuts.length === 0) return { ok: false, reason: 'D2: 被签 tx 无 covenant continuation output — 非合法 close_attest (弃签)' };
+  // 每个 covenant continuation output 必 commit re-derived root (防 decoy: 真 continuation 必是 cov_id-bound 那个;
+  //   settler 加假根 cov_id-output → 任一不符 → BUST; 全部都对 → 无论 final witness self_out_idx 指哪个都安全)。
+  for (const o of covOuts) {
+    if (String(o.scriptPublicKey || '').toLowerCase() !== expectedSpk) {
+      return { ok: false, reason: `D2 REJECT: 被签 tx continuation output commit 的根 != re-derive — settler 旁路标量伪装 (spk ${String(o.scriptPublicKey).slice(0, 24)}.. != expected ${expectedSpk.slice(0, 24)}..)`, expectedSpk };
+    }
+  }
+  return { ok: true, expectedSpk, matchedOutputs: covOuts.length };
+}
+
 /**
  * Autonomous close_attest enforce. Returns {pass, reason?, verdict?, skip?}.
  *  - skip:true  → this node isn't a committee member for this market (daemon: not-my-business, no sig, not a fail).
@@ -93,7 +148,7 @@ export async function enforceCloseAttest(signRequest, ctx) {
   //    seed = deriveCommitteeSeed(market_id, endBlockHash[自算], pool_merkle_root[链上读]); members verified ∈ root.
   let committee;
   try {
-    committee = await reDeriveCommittee(market_id, ctx);
+    committee = await reDeriveCommittee(market_id, ctx, psRedeemHex);   // C2-anchor: psRedeemHex 供链锚 poolMerkleRoot 读
   } catch (e) {
     return { pass: false, reason: `fix① committee re-derive fail: ${e.message}` };
   }
@@ -127,12 +182,20 @@ export async function enforceCloseAttest(signRequest, ctx) {
   const pm = computePariMutuelPayout({ bettors, winningDirection, feeLeaves });
   if (pm.degenerate) return { pass: false, reason: `degenerate (${pm.reason}) — 单边池需 refund 路` };
   const reDerivedRoot = settlePayoutRoot(pm.payoutLeaves && pm.payoutLeaves.length ? pm.payoutLeaves : pm.winners);
-  if (reDerivedRoot !== String(claimedPayoutRoot)) {
-    return { pass: false, reason: `命门③/④ payoutRoot REJECT: re-derive ${reDerivedRoot.slice(0, 14)} != claimed ${String(claimedPayoutRoot).slice(0, 14)} (假 winningSide/委员/fee)` };
+
+  // ── D2 FIX (NWT 红队最承重 = verify-value-source): 验【被签 txSafeJson 实际 commit 的根】, 不是 caller 旁路标量 ──
+  //   旧码只 `reDerivedRoot != claimedPayoutRoot` (标量) → settler 给匹配标量 + 输出含恶意根的 tx 即可绕过。
+  //   D2 = 从被签 tx 的 covenant continuation output 反解 P2SH-embedded payoutRoot 验它 == re-derive (sighash 覆盖)。
+  const d2 = verifyClosePayoutRootBinding({ txSafeJson: signRequest.txSafeJson, psRedeemHex, reDerivedRoot });
+  if (!d2.ok) return { pass: false, reason: d2.reason };
+  // defense-in-depth (非 load-bearing, D2 上面已绑被签 tx): caller 标量也须一致 → 早报错配。
+  if (String(claimedPayoutRoot) !== reDerivedRoot) {
+    return { pass: false, reason: `命门③/④ payoutRoot REJECT: re-derive ${reDerivedRoot.slice(0, 14)} != claimed scalar ${String(claimedPayoutRoot).slice(0, 14)} (假 winningSide/委员/fee)` };
   }
 
-  // ── C3 FIX (NWT 红队 TOCTOU): 返【我验的 tx 的 hash】。daemon 必验它 sign_input_for_settle 的 tx hash == 此值,
+  // ── C3 FIX (NWT 红队 TOCTOU): 返【我 D2-验过的那个 tx 的 hash】。daemon 必验它 sign_input_for_settle 的 tx hash == 此值,
   //    否则 enforce 验了 tx-A 却签了 tx-B = enforce 被绕。daemon 签前 assert signedTxHash === verifiedTxHash。
+  //    (D2+C3 合: verifiedTxHash 绑的正是 D2 验过 continuation-root 的同一 txSafeJson 串。)
   const verifiedTxHash = Buffer.from(blake2b(Buffer.from(String(signRequest.txSafeJson || '')), { dkLen: 32 })).toString('hex');
   return { pass: true, verdict, verifiedTxHash };
 }
@@ -204,6 +267,28 @@ export async function verifyFrozenEvidence(predicate, proposedSnapshot, ctx = {}
   return { match: true, ownFetch: ownFetch.fields };
 }
 
+// ── C2-anchor: 从链锚 PS redeem 读 genesis-烤 poolMerkleRoot ──
+//   poolMerkleRoot 是 PayoutShard ctor byte[32] 常量, silverc inline 在每个 require(cXCur == poolMerkleRoot) 站点 (probe: 共 10×)。
+//   close_attest 5 委员 merkle 校验 = 5 个 inlined 副本 @ offsets 1002/1266/1530/1794/2058 (264B 等距, PUSH32 前缀)。
+//   读这 5 个并 cross-check 必全相等 (任一不符 = 非-canonical .sil / silverc build-drift → throw fail-loud, 永不 wrong-pass)。
+//   ⚠ .sil-pinned (= offset-518 predicate_commit 同款 fragility): PayoutShard 22-arg shape。 .sil 变则 offsets 变 → cross-check
+//     自动 fail-loud (安全降级, 非静默错读)。J2 daemon 应优先用 ctx.onChainPoolMerkleRoot (scout 链读 PS state) 绕过 offset 依赖。
+const _PMR_COMMITTEE_CHECK_OFFSETS = [1002, 1266, 1530, 1794, 2058];
+export function extractOnChainPoolMerkleRoot(psRedeemHex) {
+  const redeem = Buffer.from(String(psRedeemHex), 'hex');
+  const reads = [];
+  for (const o of _PMR_COMMITTEE_CHECK_OFFSETS) {
+    if (redeem.length < o + 32 || redeem[o - 1] !== 0x20) {
+      throw new Error(`poolMerkleRoot offset ${o} 非 PUSH32 / redeem 太短 (${redeem.length}B) — 非 canonical PayoutShard redeem (.sil drift?)`);
+    }
+    reads.push(redeem.slice(o, o + 32).toString('hex').toLowerCase());
+  }
+  if (!reads.every(r => r === reads[0])) {
+    throw new Error(`poolMerkleRoot inlined 副本不一致 [${reads.map(r => r.slice(0, 8)).join(',')}] — 非 canonical / build-drift (fail-loud)`);
+  }
+  return reads[0];
+}
+
 /**
  * fix① committee chain-anchored re-derive (ZERO caller). seed = deriveCommitteeSeed(marketId, endBlockHash, poolMerkleRoot).
  *  - endBlockHash: ctx.fetchEndBlockHashCanonical(chainReader, deadline_daa) — 自算, anti-grinding, NOT passed.
@@ -211,22 +296,32 @@ export async function verifyFrozenEvidence(predicate, proposedSnapshot, ctx = {}
  *  - poolMembers: ctx.loadPoolSnapshot(marketId) → verify buildPoolMerkleTree(members) == on-chain poolMerkleRoot.
  *  - excludePks: maker_pk + broker_pk (same-PK 双角色防), chain-anchored.
  */
-export async function reDeriveCommittee(marketId, ctx) {
+export async function reDeriveCommittee(marketId, ctx, psRedeemHex = null) {
   const snap = await ctx.loadPoolSnapshot(marketId);    // {pool_merkle_root, members:[{pk_hex, stake_sompi}], maker_pk, broker_pk}
-  // ── C2 FIX (NWT 红队 转 J1 fix① 域): 验【完整有序成员集】, 非逐个 inclusion ──
-  //   attacker 供子集(漏诚实成员)→ selectCommittee 种子从子集选他控委员会。
-  //   修 = buildPoolMerkleTree(全集 pks) == poolMerkleRoot。子集 → 建出的 root ≠ → reject。
   if (!Array.isArray(snap.members) || snap.members.length === 0) throw new Error('C2: empty/invalid pool members');
+
+  // ── C2-anchor FIX (NWT 红队 'poolMerkleRoot 锚软'): poolMerkleRoot 必【链锚】, 不静默信 DB ──
+  //   旧码用 snap.pool_merkle_root (DB/snapshot) 当种子 + wantRoot → settler 中继假 root → 自选他控委员会。
+  //   修 = 从【链上 PS redeem】(chain-anchored, daemon p2sh-verified, 同命门① offset-518 锚) 读 genesis-烤 poolMerkleRoot,
+  //   DB root 必 == 它 (否则 fail-loud)。onChain 优先 ctx.onChainPoolMerkleRoot (daemon scout 链读注入); 缺则从 psRedeemHex 抽。
+  const redeemForRoot = psRedeemHex || ctx.psRedeemHex || null;
+  let onChainRoot = ctx.onChainPoolMerkleRoot != null ? String(ctx.onChainPoolMerkleRoot).toLowerCase() : null;
+  if (!onChainRoot && redeemForRoot) {
+    try { onChainRoot = extractOnChainPoolMerkleRoot(redeemForRoot); } catch (e) { throw new Error(`C2-anchor: poolMerkleRoot 链读失败 (${e.message})`); }
+  }
+  if (!onChainRoot) throw new Error('C2-anchor: 无 chain-anchored poolMerkleRoot (ctx.onChainPoolMerkleRoot / psRedeemHex 都缺) — 拒静默信 DB root (fail-loud)');
+  const dbRoot = String(snap.pool_merkle_root || '').toLowerCase();
+  if (dbRoot && dbRoot !== onChainRoot) throw new Error(`C2-anchor: DB poolMerkleRoot ${dbRoot.slice(0, 16)} != 链上 ${onChainRoot.slice(0, 16)} (DB 篡改/settler 中继, fail-loud)`);
+
+  // ── C2 完整有序成员集 (子集攻击防): buildPoolMerkleTree(全集 pks) == 链锚 poolMerkleRoot ──
+  //   attacker 供子集(漏诚实成员)→ selectCommittee 种子从子集选他控委员会; 子集 → 建出 root ≠ 链锚 → reject。
   const built = buildPoolMerkleTree(snap.members.map(m => m.pk_hex));
   const builtRoot = (built.root?.toString ? built.root.toString('hex') : String(built.root)).toLowerCase();
-  const wantRoot = String(snap.pool_merkle_root || '').toLowerCase();
-  if (builtRoot !== wantRoot) {
-    throw new Error(`C2: 成员集非完整 — buildPoolMerkleTree ${builtRoot.slice(0, 16)} != poolMerkleRoot ${wantRoot.slice(0, 16)} (子集攻击防, NWT)`);
+  if (builtRoot !== onChainRoot) {
+    throw new Error(`C2: 成员集非完整 — buildPoolMerkleTree ${builtRoot.slice(0, 16)} != 链锚 poolMerkleRoot ${onChainRoot.slice(0, 16)} (子集攻击防, NWT)`);
   }
-  // [C2-companion hardening: snap.pool_merkle_root 本身应从【链上 PS/spine ctor】读 (= ctx.onChainPoolMerkleRoot),
-  //  非 DB; DB root 是本节点自观测。stakes 不进 root(只 commit pks)= determinism-edge, 链上 oracle bond 各节点同观测.]
   const endBlockHash = await ctx.fetchEndBlockHashCanonical(ctx.chainReader, ctx.deadlineDaa ?? snap.deadline_daa);
-  const seed = deriveCommitteeSeed(marketId, endBlockHash, snap.pool_merkle_root);
+  const seed = deriveCommitteeSeed(marketId, endBlockHash, onChainRoot);   // 种子用【链锚 root】(非 DB) → 委员选择 settler 不可 grind
   const exclude = [snap.maker_pk, snap.broker_pk].filter(Boolean).map(p => String(p).toLowerCase());
   const sel = selectCommittee(snap.members, seed, { excludePks: exclude });
   return sel.selected.map(c => c.pk_hex);
