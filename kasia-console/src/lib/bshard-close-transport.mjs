@@ -38,8 +38,14 @@ export function publishCloseRequest(marketId, req) {
     input_index: req.input_index ?? 0,
     broker_pk: req.broker_pk ? String(req.broker_pk).toLowerCase() : null,
     introducer_pk: req.introducer_pk ? String(req.introducer_pk).toLowerCase() : null,
+    maker_pk: req.maker_pk ? String(req.maker_pk).toLowerCase() : null,           // J1 cross-node: reDeriveCommittee exclude
     data_source_canonical: req.data_source_canonical ?? null,   // c77bb356: wrapper-source 市场单独传; source-in-inner 可省
     snapshot: req.snapshot ?? null,                              // 94cfef67 cross-node hint: {shards:[{...,bettors:[]}]}
+    // J1 14:52 cross-node ctx (他 :3300 无本地 pool 数据): reDeriveCommittee 需全 pool members + endBlockHash。
+    //   pool_members=全集 {pk_hex,stake_sompi}(selectCommittee + C2-anchor buildPoolMerkleTree==poolMerkleRoot);
+    //   end_block_hash=deriveCommitteeSeed seed(at deadline_daa, settler 自算 pin 死跨节点确定性)。enforce 链锚验 poolMerkleRoot 从 psRedeem ctor 读, pool_members 只指路。
+    pool_members: Array.isArray(req.pool_members) ? req.pool_members : null,
+    end_block_hash: req.end_block_hash ?? null,
     deadline_daa: req.deadline_daa ?? null,
     published_at_daa: req.published_at_daa ?? null,
   };
