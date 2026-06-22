@@ -90,8 +90,11 @@ export function verifyClosePayoutRootBinding({ txSafeJson, psRedeemHex, reDerive
   // NWT 红队: covenant-output identification 仅在 version>=1 malleability-safe (sighash 覆盖 covenant binding)。
   //   ⚠ NWT NaN-旁路修 (2026-06-22): Number(undefined)=NaN, NaN<1=false → version 缺失/非数字会漏过 `<1` gate。
   //   settler 全控 txSafeJson 可省略 version 绕过。必显式 Number.isInteger + >=1 (fail-closed, 非数字/缺失/小数全拒)。
-  const _ver = Number(signedTx.version);
-  if (!Number.isInteger(_ver) || _ver < 1) return { ok: false, reason: `D2: tx.version=${JSON.stringify(signedTx.version)} 非整数或 <1 — covenant binding 不被 sighash 覆盖 (NaN-旁路: 缺失/非数字 Number()=NaN 漏过 <1), continuation identification 可被 malleate (弃签)` };
+  //   ⚠ NWT type-coerce 修 (2026-06-22 续审): Number('1')=1 会让 string "1" 漏过 Number.isInteger gate, 但 relay
+  //   deserializeFromSafeJSON 要【u16 native int】(probe 实证: string "1"/float 1.5/null 它都 throw) → 我 gate 接受的
+  //   value 必 == relay 接受的 value (verify-value-source 一致). 故必 typeof==='number'(拒 string/null), 再 isInteger+>=1。
+  const _ver = signedTx.version;
+  if (typeof _ver !== 'number' || !Number.isInteger(_ver) || _ver < 1) return { ok: false, reason: `D2: tx.version=${JSON.stringify(_ver)} 非 native-int 或 <1 — relay deserializeFromSafeJSON 要 u16 int(string/float/null 它 throw); covenant binding 仅 v>=1 被 sighash 覆盖, fail-closed 弃签` };
   let expectedSpk;
   try { expectedSpk = _p2shSpkHex(_splicePayoutCloseRedeem(psRedeemHex, reDerivedRoot)); }
   catch (e) { return { ok: false, reason: `D2: continuation redeem splice fail (${e.message})` }; }

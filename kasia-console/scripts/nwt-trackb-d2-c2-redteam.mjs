@@ -82,11 +82,20 @@ function txSafeJson({ contRedeems, covId = 'cd'.repeat(32), version = 1, changeO
 
   console.log('== 🦷 攻击3 version-0 (NWT 新, covenant 不被 sighash 覆盖 → identification 可 malleate) → REJECT ==');
   const a3 = verifyClosePayoutRootBinding({ txSafeJson: txSafeJson({ contRedeems: [relaySplice(goodRoot)], version: 0 }), psRedeemHex: inputRedeem, reDerivedRoot: goodRoot });
-  ok(a3.ok === false && /version.*< 1|malleate/.test(a3.reason), `rejected: ${a3.reason}`);
+  ok(a3.ok === false && /version/.test(a3.reason), `rejected: ${a3.reason}`);
 
   console.log('== 🦷 攻击4 continuation 无 covenant binding (settler 想让 enforce 漏看真 continuation) → REJECT(无 cov-out) ==');
   const a4 = verifyClosePayoutRootBinding({ txSafeJson: txSafeJson({ contRedeems: [relaySplice(badRoot)], contNoCovenant: true }), psRedeemHex: inputRedeem, reDerivedRoot: goodRoot });
   ok(a4.ok === false && /无 covenant continuation/.test(a4.reason), `rejected: ${a4.reason}`);
+
+  console.log('== 🦷 攻击4b version NaN-旁路 (Bettor A4 / J1 79f722a4 修): version 缺失/字符串/小数 → REJECT(非 Number()<1 漏过) ==');
+  // settler 全控 txSafeJson → 省略/篡改 version 字段试图绕 version>=1 gate (Number(undefined)=NaN, NaN<1=false 旧漏)。
+  const honestJson = JSON.parse(txSafeJson({ contRedeems: [relaySplice(goodRoot)] }));
+  for (const [label, mut] of [['version 缺失', (j) => { delete j.version; }], ['version="1"(字符串)', (j) => { j.version = '1'; }], ['version=1.5(小数)', (j) => { j.version = 1.5; }], ['version=null', (j) => { j.version = null; }]]) {
+    const j = JSON.parse(JSON.stringify(honestJson)); mut(j);
+    const r = verifyClosePayoutRootBinding({ txSafeJson: JSON.stringify(j), psRedeemHex: inputRedeem, reDerivedRoot: goodRoot });
+    ok(r.ok === false && /version/.test(r.reason), `${label} → REJECT: ${String(r.reason).slice(0, 60)}`);
+  }
 
   console.log('\n========== C2 (poolMerkleRoot 链锚) ==========');
   const ctx = (ov = {}) => ({ loadPoolSnapshot: async () => ({ pool_merkle_root: poolMerkleRoot, members, maker_pk: null, broker_pk: null, ...(ov.snap || {}) }), fetchEndBlockHashCanonical: async () => 'aa'.repeat(32), deadlineDaa: 1000, ...ov.ctx });
