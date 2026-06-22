@@ -399,7 +399,7 @@
                     </template>
                   </div>
                   <div class="flex border-t border-warm-200">
-                    <input type="text" x-model="chatMsg" @keydown.enter="sendChat(deal)"
+                    <input type="text" x-model="chatMsg" @keydown.enter="if(!$event.isComposing){sendChat(deal)}"
                       placeholder="Type message..."
                       class="flex-1 bg-white text-sm text-ink-600 px-3 py-2 focus:outline-none" />
                     <button @click="sendChat(deal)" :disabled="chatSending || !chatMsg.trim()" class="btn btn-primary rounded-none"

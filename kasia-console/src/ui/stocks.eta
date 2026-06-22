@@ -39,7 +39,7 @@
       <div class="text-xs font-medium text-ink-700 mb-2">添加自选股</div>
       <div class="flex gap-3 items-end">
         <div class="flex-1">
-          <input x-model="addSymbol" placeholder="AAPL, NVDA, 0700.HK..." class="w-full rounded-lg border border-warm-300 px-3 py-2 text-sm" @keydown.enter="addStock()" />
+          <input x-model="addSymbol" placeholder="AAPL, NVDA, 0700.HK..." class="w-full rounded-lg border border-warm-300 px-3 py-2 text-sm" @keydown.enter="if(!$event.isComposing){addStock()}" />
         </div>
         <div class="w-28">
           <select x-model="addMarket" class="w-full rounded-lg border border-warm-300 px-3 py-2 text-sm bg-white">
@@ -55,7 +55,7 @@
       <div class="card">
         <div class="text-xs font-medium text-ink-700 mb-2">搜索标的下单</div>
         <div class="flex gap-2 mb-2">
-          <input x-model="searchQuery" placeholder="搜索股票..." @keydown.enter="searchStock()" class="flex-1 text-sm border border-warm-300 rounded-lg px-3 py-2" />
+          <input x-model="searchQuery" placeholder="搜索股票..." @keydown.enter="if(!$event.isComposing){searchStock()}" class="flex-1 text-sm border border-warm-300 rounded-lg px-3 py-2" />
           <button @click="searchStock()" :disabled="searching || !searchQuery.trim()" class="btn btn-primary btn-sm" x-text="searching ? '...' : '搜索'"></button>
         </div>
         <template x-if="searchResults.length > 0">
@@ -233,7 +233,7 @@
                   </template>
                   <div x-show="!_getChat(p.symbol).history?.length" class="text-sm text-ink-600 leading-relaxed whitespace-pre-line mb-3" x-text="_getChat(p.symbol).reply"></div>
                   <div class="flex gap-2">
-                    <input type="text" x-model="_getChat(p.symbol).input" @keydown.enter="replyStockAgent(p.symbol)"
+                    <input type="text" x-model="_getChat(p.symbol).input" @keydown.enter="if(!$event.isComposing){replyStockAgent(p.symbol)}"
                       :disabled="_getChat(p.symbol).asking" placeholder="继续问..."
                       class="flex-1 text-sm border border-warm-300 rounded-lg px-3 py-1.5" />
                     <button @click="replyStockAgent(p.symbol)" :disabled="_getChat(p.symbol).asking || !_getChat(p.symbol).input"
@@ -372,7 +372,7 @@
                   </template>
                   <div x-show="!_getChat(item.symbol).history?.length" class="text-sm text-ink-600 leading-relaxed whitespace-pre-line mb-3" x-text="_getChat(item.symbol).reply"></div>
                   <div class="flex gap-2">
-                    <input type="text" x-model="_getChat(item.symbol).input" @keydown.enter="replyStockAgent(item.symbol)"
+                    <input type="text" x-model="_getChat(item.symbol).input" @keydown.enter="if(!$event.isComposing){replyStockAgent(item.symbol)}"
                       :disabled="_getChat(item.symbol).asking" placeholder="继续问..."
                       class="flex-1 text-sm border border-warm-300 rounded-lg px-3 py-1.5" />
                     <button @click="replyStockAgent(item.symbol)" :disabled="_getChat(item.symbol).asking || !_getChat(item.symbol).input"

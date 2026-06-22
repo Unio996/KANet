@@ -228,7 +228,7 @@
           </template>
         </div>
         <div class="flex items-center gap-2 mt-3 pt-3 border-t border-warm-200">
-          <input x-model="newRule" @keydown.enter.prevent="addRule()" placeholder="添加新原则..."
+          <input x-model="newRule" @keydown.enter.prevent="if(!$event.isComposing){addRule()}" placeholder="添加新原则..."
             class="flex-1 text-xs border border-warm-300 rounded-lg px-3 py-1.5 bg-white" />
           <button @click="addRule()" class="btn btn-primary btn-sm text-[10px]" :disabled="!newRule.trim()">添加</button>
         </div>
@@ -274,7 +274,7 @@
               </template>
               <template x-if="editingName === p.peer">
                 <input @click.stop x-model="editName"
-                       @keydown.enter.prevent.stop="saveName(p)"
+                       @keydown.enter.prevent.stop="if(!$event.isComposing){saveName(p)}"
                        @keydown.escape="editingName = null"
                        @blur="saveName(p)"
                        class="text-sm border border-brand-400 rounded px-1 py-0 bg-white w-28 outline-none"
@@ -340,7 +340,7 @@
                   <div class="relative" @click.outside="tagComboOpen = false">
                     <input x-model="editTag"
                            @focus="tagComboOpen = true"
-                           @keydown.enter.prevent="if(editTag.trim()){ addTag(p, editTag); editTag=''; tagComboOpen=false; }"
+                           @keydown.enter.prevent="if(!$event.isComposing){if(editTag.trim()){ addTag(p, editTag); editTag=''; tagComboOpen=false; }}"
                            @keydown.escape="tagComboOpen = false; editTag=''"
                            placeholder="+ 选标签或新增"
                            class="text-[10px] border border-warm-300 rounded px-2 py-0.5 w-32 bg-white" />
@@ -373,13 +373,13 @@
               <div class="flex items-center gap-1.5">
                 <span class="text-[10px] text-ink-400 w-8">备注:</span>
                 <span class="text-[10px] text-ink-500" x-text="p.notes || '无'" x-show="!editingNote"></span>
-                <input x-show="editingNote" x-model="editNote" @keydown.enter.prevent="saveNote(p)" class="text-[10px] border border-warm-300 rounded px-2 py-0.5 flex-1 bg-white" />
+                <input x-show="editingNote" x-model="editNote" @keydown.enter.prevent="if(!$event.isComposing){saveNote(p)}" class="text-[10px] border border-warm-300 rounded px-2 py-0.5 flex-1 bg-white" />
                 <button @click="editingNote ? saveNote(p) : (editingNote=true, editNote=p.notes||'')" class="text-[10px] text-brand-600 hover:text-brand-700 cursor-pointer" x-text="editingNote ? '保存' : '编辑'"></button>
               </div>
             </div>
             <!-- 快捷发消息 -->
             <div class="flex items-center gap-2 px-4 py-2 bg-brand-50/30 border-b border-warm-100">
-              <input x-model="quickMsg" placeholder="发送消息..." @keydown.enter.prevent="sendMsg(p)"
+              <input x-model="quickMsg" placeholder="发送消息..." @keydown.enter.prevent="if(!$event.isComposing){sendMsg(p)}"
                 class="flex-1 text-xs border border-warm-300 rounded-lg px-3 py-1.5 bg-white" />
               <button @click="sendMsg(p)" class="btn btn-primary btn-sm text-[10px]" :disabled="!quickMsg.trim() || sending">
                 <span x-text="sending ? '发送中...' : '发送'"></span>

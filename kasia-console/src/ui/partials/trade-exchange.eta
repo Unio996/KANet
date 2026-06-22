@@ -233,7 +233,7 @@
               :class="qtSide === 'SELL' ? 'bg-red-600 text-white' : 'bg-warm-200 text-ink-400 hover:text-red-600'">SELL</button>
             <input type="number" x-model.number="qtQty" placeholder="Qty" min="100" step="100"
               class="w-24 bg-white text-ink-600 text-xs rounded-lg px-2 py-1.5 border border-warm-300 font-mono text-right"
-              @keydown.enter="submitQuickTrade()" @input="qtReady = false; qtResult = null" />
+              @keydown.enter="if(!$event.isComposing){submitQuickTrade()}" @input="qtReady = false; qtResult = null" />
             <button @click="submitQuickTrade()" :disabled="asking || !qtQty || qtQty < 100" class="btn btn-sm btn-primary">
               <span x-text="asking ? '...' : 'Go'"></span>
             </button>
@@ -292,7 +292,7 @@
         <!-- Input -->
         <div class="px-4 py-3 border-t border-warm-200">
           <div class="flex gap-2">
-            <input type="text" x-model="question" @keydown.enter="askAgent()"
+            <input type="text" x-model="question" @keydown.enter="if(!$event.isComposing){askAgent()}"
               placeholder="Ask about KAS..."
               class="flex-1 bg-white text-ink-600 text-sm rounded-lg px-3 py-2 border border-warm-300 focus:outline-none focus:ring-1 focus:ring-brand-500" />
             <button @click="askAgent()" :disabled="asking || !question.trim()" class="btn btn-primary">Ask</button>

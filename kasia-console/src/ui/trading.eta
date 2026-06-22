@@ -1687,7 +1687,7 @@
               :class="qtSide === 'SELL' ? 'bg-red-600 text-white' : 'bg-ink-600 text-ink-400 hover:text-red-400'">SELL</button>
             <input type="number" x-model.number="qtQty" placeholder="数量" min="100" step="100"
               class="w-28 bg-ink-600 text-ink-200 text-xs rounded px-2 py-1.5 border border-ink-500 focus:outline-none focus:border-purple-500 font-mono text-right"
-              @keydown.enter="submitQuickTrade()" @input="qtReady = false; qtResult = null" />
+              @keydown.enter="if(!$event.isComposing){submitQuickTrade()}" @input="qtReady = false; qtResult = null" />
             <button @click="submitQuickTrade()" :disabled="asking || !qtQty || qtQty < 100"
               class="px-3 py-1.5 rounded text-xs font-medium transition-colors"
               :class="(asking || !qtQty || qtQty < 100) ? 'bg-ink-500 text-ink-400 cursor-not-allowed' : 'bg-purple-600 text-white hover:bg-purple-700'">
@@ -1760,7 +1760,7 @@
         <!-- Input -->
         <div class="px-4 py-3 border-t border-ink-600">
           <div class="flex space-x-2">
-            <input type="text" x-model="question" @keydown.enter="askAgent()"
+            <input type="text" x-model="question" @keydown.enter="if(!$event.isComposing){askAgent()}"
               placeholder="Ask about KAS..."
               class="flex-1 bg-ink-600 text-ink-200 text-sm rounded-lg px-3 py-2 border border-ink-500 focus:outline-none focus:ring-1 focus:ring-purple-500" />
             <button @click="askAgent()" :disabled="asking || !question.trim()"
@@ -2887,7 +2887,7 @@
                     </div>
                     <!-- 输入框 -->
                     <div class="flex border-t border-ink-500">
-                      <input type="text" x-model="chatMsg" @keydown.enter="sendChat(deal)"
+                      <input type="text" x-model="chatMsg" @keydown.enter="if(!$event.isComposing){sendChat(deal)}"
                         placeholder="输入消息..."
                         class="flex-1 bg-ink-700 text-sm text-white px-3 py-2 focus:outline-none" />
                       <button @click="sendChat(deal)" :disabled="chatSending || !chatMsg.trim()"

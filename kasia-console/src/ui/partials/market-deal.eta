@@ -247,7 +247,7 @@
 
     <!-- Chat input -->
     <div class="px-5 py-2.5 border-t border-warm-200 bg-white flex gap-2">
-      <input x-model="chatInput" @keydown.enter="sendChat()"
+      <input x-model="chatInput" @keydown.enter="if(!$event.isComposing){sendChat()}"
         :placeholder="deal?.peer_address ? '给对手方留言...' : '发布到市场频道...'"
         class="flex-1 border border-warm-300 rounded-lg px-3 py-2 text-sm focus:border-brand-400 focus:outline-none bg-warm-50 placeholder-ink-300">
       <button @click="sendChat()" class="btn btn-primary">发送</button>
