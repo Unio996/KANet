@@ -217,6 +217,10 @@ async function processCloseRequest(voter, market, req, enforceCloseAttest) {
     // 3. E1 — 建全 ctx hook (链锚) 后自治 enforce (J1 lib: 命门①③④ + frozen_evidence 同源 + fix① 委员链锚 re-derive)。
     await ensureKaspaWasm();   // p2sh sync hook 依赖 (C1 level2-A + 命门① chain-bound 都用)。
     const ctx = buildEnforceCtx(voter, voterPk, market);
+    // cross-node hint (J1 94cfef67): 若 req 带 snapshot.shards, 喂 ctx.shards (lib verifyBettorsCompleteFromChain 优先它,
+    //   否则回退 listShards(ctx.db))。本地 :3200 委员有 market_shards → db 回退即可; ctx.shards 支持跨节点委员(无本地分片表)。
+    //   ⚠ snapshot 只指路: lib 仍链锚验每片 leaf p2sh==landed + per-ticket landed + PS-pool, 不信 snapshot 的数。
+    if (Array.isArray(req.snapshot?.shards) && req.snapshot.shards.length) ctx.shards = req.snapshot.shards;
     const verdict = await enforceCloseAttest({ ...req, committee_pk: voterPk, market_id: req.market_id || market.id }, ctx);
     if (verdict?.skip) return { skipped: true };   // enforce 判定本节点非委员 (链锚 re-derive)
     if (!verdict?.pass) {

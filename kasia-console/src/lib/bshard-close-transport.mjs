@@ -11,8 +11,13 @@ const QUORUM = 4;   // 4-of-5 committee (close_attest .sil require ≥4 distinct
 /**
  * publishCloseRequest — settler 发布 close_attest sign-request (委员 daemon 各自 pull+enforce+签)。
  * @param {string} marketId
- * @param {object} req { txSafeJson, predicate, proposed_evidence, claimedPayoutRoot, psRedeemHex, committee_pks[], input_index, idx, siblings_hex(per-committee map OR settler 注入), broker_pk, deadline_daa }
+ * @param {object} req { txSafeJson, predicate, proposed_evidence, claimedPayoutRoot, psRedeemHex, committee_pks[], input_index, idx, siblings_hex(per-committee map OR settler 注入), broker_pk, deadline_daa, data_source_canonical?, snapshot? }
  *   注: idx/siblings_hex 是 per-committee (各委员在 pool tree 的位置不同) → req.committee_meta = { <pk>: {idx, siblings_hex} }; daemon 按 voterPk 取。
+ *   snapshot (J1 cross-node co-verify 接口 94cfef67, hint-only): { shards:[{shard_index, shard_redeem_hex, current_leaf_state,
+ *     current_leaf_outpoint, shard_pool_id, bettors:[{pk,direction,stake}]}] }。委员 enforce 链锚验全部 (snapshot 只指路,
+ *     state/Σ/ticket landed 全 re-derive 自链不信 snapshot 数) → cross-node 委员(无本地 market_shards)可跑 C1 verifyBettorsCompleteFromChain。
+ *     :3200 本地委员 daemon 不需它 (lib 回退 listShards(db)); 它是给 :3300 跨节点委员的 hint。
+ *   data_source_canonical (c77bb356 载重分离): wrapper-source 市场单独传源给 verifyFrozenEvidence; source-in-inner 市场 (如 2462l) 可省 (predicate 自带)。
  */
 export function publishCloseRequest(marketId, req) {
   if (!req?.txSafeJson || !req?.claimedPayoutRoot || !Array.isArray(req.committee_pks)) {
@@ -32,6 +37,9 @@ export function publishCloseRequest(marketId, req) {
     committee_meta: req.committee_meta || null,   // { <pk>: {idx, siblings_hex} }
     input_index: req.input_index ?? 0,
     broker_pk: req.broker_pk ? String(req.broker_pk).toLowerCase() : null,
+    introducer_pk: req.introducer_pk ? String(req.introducer_pk).toLowerCase() : null,
+    data_source_canonical: req.data_source_canonical ?? null,   // c77bb356: wrapper-source 市场单独传; source-in-inner 可省
+    snapshot: req.snapshot ?? null,                              // 94cfef67 cross-node hint: {shards:[{...,bettors:[]}]}
     deadline_daa: req.deadline_daa ?? null,
     published_at_daa: req.published_at_daa ?? null,
   };
