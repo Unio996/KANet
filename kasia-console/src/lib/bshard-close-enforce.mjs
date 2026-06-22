@@ -76,12 +76,19 @@ function _p2shSpkHex(redeemHex) {
  * 攻击 (verdict D2): settler 给【匹配的 claimedPayoutRoot 标量】+【txSafeJson 的 continuation output commit 另一个根】
  *   → 旧码只验标量 → 漏过 → daemon 签了输出是恶意根的 tx。修 = 从被签 txSafeJson 反解 continuation output 的根验它。
  * continuation output 唯一识别 = `covenant.covenantId != null` (PS cov_id 续约 output; change output covenant=null) —— probe 实证。
+ * ⚠ malleability-safe 前提 = tx.version>=1: rusty-kaspa hashing/sighash.rs hash_output 对 version>=1 把 covenant
+ *   (is_some + authorizing_input + covenant_id) 折进 outputs_hash → covenant binding **被 sighash 覆盖** → settler
+ *   收 sig 后不能把 binding 挪到 decoy output (= NWT 红队 'move-binding' 攻击被堵在共识层)。version 0 不折 covenant →
+ *   identification 可被 malleate → 必 assert version>=1 (close_attest 本就 v1+compute_budget; v0 另会 9999-units BUST,
+ *   但 verify-value-source 铁律: 别靠"它会在别处 BUST", 显式拒)。
  * @param {{txSafeJson:string, psRedeemHex:string, reDerivedRoot:string}} o
  * @returns {{ok:bool, reason?, expectedSpk?, matchedOutputs?:number}}
  */
 export function verifyClosePayoutRootBinding({ txSafeJson, psRedeemHex, reDerivedRoot }) {
   let signedTx;
   try { signedTx = JSON.parse(String(txSafeJson || '')); } catch { return { ok: false, reason: 'D2: txSafeJson parse fail — 无法验被签 tx commit 的根 (弃签)' }; }
+  // NWT 红队: covenant-output identification 仅在 version>=1 malleability-safe (sighash 覆盖 covenant binding)。
+  if (Number(signedTx.version) < 1) return { ok: false, reason: `D2: tx.version=${signedTx.version} < 1 — covenant binding 不被 sighash 覆盖, continuation identification 可被 malleate (弃签)` };
   let expectedSpk;
   try { expectedSpk = _p2shSpkHex(_splicePayoutCloseRedeem(psRedeemHex, reDerivedRoot)); }
   catch (e) { return { ok: false, reason: `D2: continuation redeem splice fail (${e.message})` }; }
