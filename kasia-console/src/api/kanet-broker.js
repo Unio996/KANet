@@ -15,6 +15,7 @@
 import { sqlite } from '../db/client.js';
 import { randomUUID } from 'crypto';
 import { encrypt } from '../services/crypto.js';
+import { reconcileBrokerBots, brokerBotsStatus, stopBrokerBot } from '../services/broker-bot-manager.js';
 
 // 地址格式校验 (testnet-12 = kaspatest: / mainnet = kaspa:). 宽松长度界, 防垃圾提交.
 const KAS_ADDR_RE = /^kaspa(test)?:[a-z0-9]{50,80}$/;
@@ -275,5 +276,27 @@ export async function registerKanetBrokerRoutes(fastify) {
       created_at: r.created_at,
     }));
     return reply.send({ ok: true, count: brokers.length, pending: brokers.filter(b => b.status === 'pending').length, brokers });
+  });
+
+  // ─── 多-bot tg-manager (Owner 钦定 2026-06-22): 每 approved broker 一个真 bot ─────────────
+  //   reconcile = 读 approved broker_onboarding → 各 token fork 一个 bot 进程 (一 token 一 poller, 防 409)。
+  //   approval 经 /identities trust 后调此 endpoint (或等 60s 周期 reconcile) → bot 真拉起。token 永不外回。
+
+  // POST /api/kanet-broker/bots/reconcile — 立即对齐 (审批后调一下 bot 即刻拉起, 不用等周期)。
+  fastify.post('/api/kanet-broker/bots/reconcile', async (request, reply) => {
+    const r = reconcileBrokerBots();
+    return reply.send(r);
+  });
+
+  // GET /api/kanet-broker/bots/status — 各 broker bot 运行状态 (token 不回)。
+  fastify.get('/api/kanet-broker/bots/status', async (request, reply) => {
+    return reply.send(brokerBotsStatus());
+  });
+
+  // POST /api/kanet-broker/bots/stop — 停某 broker 的 bot (admin)。body {broker_address}
+  fastify.post('/api/kanet-broker/bots/stop', async (request, reply) => {
+    const addr = request.body?.broker_address;
+    if (!addr) return reply.code(400).send({ ok: false, error: 'broker_address required' });
+    return reply.send(stopBrokerBot(addr));
   });
 }

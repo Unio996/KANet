@@ -465,6 +465,11 @@ await startAllRelays();
 import { startTgBotIfConfigured } from './services/tg-bot-manager.js';
 await startTgBotIfConfigured();
 
+// 多-bot tg-manager (Owner 钦定 2026-06-22): per-approved-broker bot (地址制). Boots a bot for every
+// approved broker_onboarding (trust elevated) + 60s reconcile to pick up new approvals / respawn deaths.
+import { startBrokerBotManager } from './services/broker-bot-manager.js';
+startBrokerBotManager();
+
 // Bettor scanner cron — Phase 3a (6h cron, top 10 推荐写入 bettor_recommendations)
 // 5/14 Owner pivot: 数学 Kelly 路线 deprecated, 新 scavenger 接管. 老 scanner 暂保留留 fallback.
 // import { startCron as startBettorCron } from './services/bettor-scanner.js';
