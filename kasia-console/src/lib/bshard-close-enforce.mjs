@@ -26,11 +26,6 @@ import { deriveCommitteeSeed, selectCommittee } from '../services/pool-committee
 import { buildPoolMerkleTree } from '../services/pool-merkle-v06.mjs';   // C2: complete-set verify
 import { findExtractor, extractStructuredFields } from './oracle-evidence-extractors.mjs';   // verifyFrozenEvidence canonical fetch (J1)
 import { listShards } from './shard-allocator.mjs';                                          // C1 cross-shard iteration (单源, register/consolidate 同表)
-import { compileSil, ctorBytes32, ctorInt } from './pool-bshard-artifacts.mjs';              // C1 per-ticket PoolSide ticket-addr re-derive (= register/relay 同 compile 路)
-import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
-
-const _LIBDIR = dirname(fileURLToPath(import.meta.url));
 const _PREDICATE_COMMIT_REDEEM_OFFSET = 518;
 const _hex32 = (s) => Buffer.from(blake2b(Buffer.from(s), { dkLen: 32 })).toString('hex');
 // canonical (A) 4-field ShardLeaf state splice (= pool-shard-register.spliceLeafState 单源, byte-equal to recompile, J2 已验)。
@@ -424,7 +419,11 @@ export async function verifyBettorsCompleteFromChain(logicalMarketId, bettors, c
   // ── 级2-B: per-ticket 链锚 (anti-swap) ── 逐 shard 的 loaded bettor recompute ticket 地址 + landed。
   let perTicketChecked = 0;
   let perTicketVerified = false;
-  const canTicket = typeof ctx.deriveTicketAddr === 'function' || (ctx.silverc && typeof ctx.p2sh === 'function');
+  // 级2-B 只认 relay-IPC 单源 ctx.deriveTicketAddr (byte-equal by construction, 零 silverc 依赖)。
+  //   NWT footgun 修: 删 (silverc && p2sh) compileSil 分支。compileSil 路【实测 byte-equal】(Bettor fy1yk-s0 链上
+  //   15 dust UTXO 坐实, 非 divergent) 但依赖 canonical silverc-pin (跨节点 build drift→false-BUST,
+  //   silverc-build-determinism-pin) → 不作隐式缺省; relay-IPC 零 silverc 依赖更稳。
+  const canTicket = typeof ctx.deriveTicketAddr === 'function';
   if (canTicket) {
     for (const sh of shards) {
       const shardPoolId = _hex32(`${logicalMarketId}-shard-${sh.shard_index}`);
@@ -441,13 +440,13 @@ export async function verifyBettorsCompleteFromChain(logicalMarketId, bettors, c
     if (perTicketChecked !== chainCount) return { ok: false, reason: `C1: per-ticket 行数 ${perTicketChecked} != 链上 Σcount ${chainCount} (DB shard 行与链上不符)` };
   } else {
     // ── 级2-B fail-loud (Bettor A1 红队 / J2 point2①; 修我 8f633291 引入的 silent-skip 洞) ──
-    //   到此 shards 非空 = 已确认 (A)-model 市场, 但缺 ticket primitive (deriveTicketAddr 或 silverc+p2sh)
+    //   到此 shards 非空 = 已确认 (A)-model 市场, 但缺 ctx.deriveTicketAddr (relay-IPC 单源)
     //   → 无法验 anti-identity-swap (settler 换等额 sybil bettor: 聚合 Σ 不变但 per-ticket 地址变) → 命门未闭。
-    //   fail-closed 拒签, 绝不静默返 ok:true。配 daemon 默认 OFF (391ed502): 待级2-B live byte-equal
-    //   wire 了 deriveTicketAddr (J2 域) 才解锁真自治签。
+    //   fail-closed 拒签, 绝不静默返 ok:true。配 daemon 默认 OFF (391ed502): 待 J2 wire relay
+    //   derive_poolside_ticket_addr (relay-IPC) 才解锁真自治签。
     return {
       ok: false,
-      reason: 'C1 级2-B: ticket primitive (deriveTicketAddr 或 silverc+p2sh) 缺 — 无法验 anti-identity-swap, fail-closed 拒签 (命门未闭; 待 live (A)-model byte-equal wire deriveTicketAddr)',
+      reason: 'C1 级2-B: ctx.deriveTicketAddr (relay-IPC 单源) 缺 — 无法验 anti-identity-swap, fail-closed 拒签 (命门未闭; 待 J2 wire relay derive_poolside_ticket_addr)',
       perTicketVerified: false,
       aggregate: { count: chainCount, pool: chainPool.toString(), yes: chainYes.toString(), no: chainNo.toString() },
     };
@@ -461,17 +460,18 @@ export async function verifyBettorsCompleteFromChain(logicalMarketId, bettors, c
 }
 
 /**
- * Re-derive a bettor's PoolSide dust-ticket per-state P2SH (= register/relay 同 compileSil 路, real ctor).
- * 优先 ctx.deriveTicketAddr (relay-canonical 单源, 零 drift); 缺省 compileSil-recompute (real ctor [pk,dir,stake,shardPoolId])。
- * ⚠ compileSil-recompute 依赖 canonical silverc pin (记忆 silverc-build-determinism-pin) — byte-equal to relay-splice 待 live 确认。
+ * Re-derive a bettor's PoolSide dust-ticket per-state P2SH via relay-IPC 单源 (J2 relay derive_poolside_ticket_addr)。
+ * relay 用【铸 ticket 那套同码】算 (= ps_prefix ‖ [PUSH32 pk + PUSH8 i64LE dir + PUSH8 i64LE stake + PUSH32 shardPoolId] ‖
+ *   ps_suffix → p2sh, J2 实证 relay p2sh.mjs _ticketAddress) → byte-equal by construction, 零 silverc-pin 依赖。
+ * 注: console compileSil(PoolSide,[pk,dir,stake,shardPoolId])→p2sh 路【实测 byte-equal】(Bettor fy1yk-s0 链上 15 dust
+ *   UTXO 坐实, 非 divergent), 但依赖 canonical silverc-pin (跨节点 build drift 风险) → lib 不内建 compileSil 缺省,
+ *   改 relay-IPC 单源; compileSil 路保留作【显式异源交叉核】(Bettor _bettor_ticket_byteeq.mjs / NWT D:/rusty-kaspa wasm)。
  */
 async function _deriveTicketAddr(bettorPk, direction, stake, shardPoolId, ctx) {
-  if (typeof ctx.deriveTicketAddr === 'function') {
-    return await ctx.deriveTicketAddr({ bettorPk, direction, stake: stake.toString(), shardPoolId });
+  if (typeof ctx.deriveTicketAddr !== 'function') {
+    throw new Error('级2-B: ctx.deriveTicketAddr (relay-IPC 单源) 必需 — console compileSil 重造依赖 silverc-pin, 不作内建缺省');
   }
-  const silPath = ctx.poolSideSilPath || join(_LIBDIR, 'PoolSide_v08_shard.sil');
-  const redeem = Buffer.from(compileSil(silPath, [ctorBytes32(bettorPk), ctorInt(Number(direction)), ctorInt(Number(stake)), ctorBytes32(shardPoolId)], ctx.silverc).script).toString('hex');
-  return ctx.p2sh(redeem);
+  return await ctx.deriveTicketAddr({ bettorPk, direction, stake: stake.toString(), shardPoolId });
 }
 
 export default enforceCloseAttest;
