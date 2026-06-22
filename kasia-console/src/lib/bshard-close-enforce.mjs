@@ -119,7 +119,7 @@ export function verifyClosePayoutRootBinding({ txSafeJson, psRedeemHex, reDerive
 export async function enforceCloseAttest(signRequest, ctx) {
   const {
     market_id, predicate, proposed_evidence, claimedPayoutRoot, psRedeemHex,
-    committee_pk, broker_pk, introducer_pk = null,
+    committee_pk, broker_pk, introducer_pk = null, data_source_canonical = null,
   } = signRequest;
 
   // 1. am I a committee member for this market? (else not-my-business)
@@ -142,7 +142,15 @@ export async function enforceCloseAttest(signRequest, ctx) {
   //   on-chain address via ctx.rcOn check_utxo_landed (= 命门① 的链锚, 同今天手动流). [daemon ctx hook]
 
   // 3. frozen_evidence 同源 (J1 lead) — verify the proposed snapshot against MY OWN canonical fetch.
-  const ev = await verifyFrozenEvidence(predicate, proposed_evidence, ctx);
+  //    ⚠ 载重一致性 (NWT inner-一致性的 fetch-面延伸, J1 12:59 实测): 命门① computeMarketCommit/judgeLine 用的是
+  //      【inner predicate {metric,op,operand}】(create-v07 pool.js:1183 烤的, 无 data_source_canonical), 但
+  //      verifyFrozenEvidence→fetchCanonicalEvidence 需 data_source_canonical 取源(它在 wrapper resolution_rule_spec
+  //      不在 inner)。∴ data_source_canonical 必【单独传】(daemon 从 market wrapper 取); commit/judge 用纯 inner
+  //      (匹配链上烤), fetch 用 inner+data_source 合并。否则: predicate 含 data_source 烤 commit→不符链上; 缺则 fetch 弃签。
+  const evidencePredicate = (data_source_canonical && !predicate?.data_source_canonical)
+    ? { ...predicate, data_source_canonical }
+    : predicate;   // 向后兼容: predicate 已含 data_source(旧/合并测试) 直接用
+  const ev = await verifyFrozenEvidence(evidencePredicate, proposed_evidence, ctx);
   if (!ev.match) return { pass: false, reason: `frozen_evidence: ${ev.reason}` };
 
   // 4. 命门③ winningSide — judgeLine on MY OWN fetched evidence (not the proposed; defense against poison).
