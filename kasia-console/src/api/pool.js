@@ -908,12 +908,25 @@ export async function registerPoolRoutes(fastify) {
     poolMerkleRoot = poolMerkleRoot.toLowerCase();
 
     const makerRow = sqlite.prepare('SELECT id, address FROM relay_nodes WHERE id = ?').get(b.maker_relay_id);
-    const brokerRow = sqlite.prepare('SELECT id, address FROM relay_nodes WHERE id = ?').get(b.broker_relay_id);
-    if (!makerRow?.address || !brokerRow?.address) return reply.code(400).send({ ok: false, error: 'maker or broker relay has no resolvable address' });
-
+    if (!makerRow?.address) return reply.code(400).send({ ok: false, error: 'maker relay has no resolvable address' });
     const makerPk = await deriveXOnlyPubkey(makerRow.address);
-    const brokerPk = await deriveXOnlyPubkey(brokerRow.address);
-    try { await assertBrokerP2PK(brokerPk, brokerRow.address); } catch (e) { return reply.code(e.code || 400).send({ ok: false, error: e.message }); }
+
+    // ── broker 身份 = 地址 (Owner 钦定 2026-06-22 接通外部 broker: 地址涵盖 relay, 向前兼容) ──
+    //   broker_address 提供 → 外部 broker 直接用地址 (无 relay; 玩家绑的地址转 broker 不变, 轻路只有地址制才可能)。
+    //   不提供则走 broker_relay_id relay 路 (relay 有地址 = relay 是"恰好有地址的特例")。两路都 → brokerPk + P2PK
+    //   校验。settle always-pk-derive 从 broker_pk 派生收款址 (pool.js 顶 invariant) → fee 落 brokerPk 对应地址。
+    let brokerPk, _brokerResolvedAddr;
+    if (b.broker_address && String(b.broker_address).trim()) {
+      _brokerResolvedAddr = String(b.broker_address).trim();
+      b.broker_relay_id = null;   // 外部地址 broker 无 relay; DB broker_relay_id 存 null (settle 用 broker_pk 不依赖 relay)
+    } else {
+      const brokerRow = sqlite.prepare('SELECT id, address FROM relay_nodes WHERE id = ?').get(b.broker_relay_id);
+      if (!brokerRow?.address) return reply.code(400).send({ ok: false, error: 'broker relay has no resolvable address' });
+      _brokerResolvedAddr = brokerRow.address;
+    }
+    try { brokerPk = await deriveXOnlyPubkey(_brokerResolvedAddr); }
+    catch (e) { return reply.code(400).send({ ok: false, error: `broker pubkey derive fail (${String(_brokerResolvedAddr).slice(0, 18)}): ${e.message}` }); }
+    try { await assertBrokerP2PK(brokerPk, _brokerResolvedAddr); } catch (e) { return reply.code(e.code || 400).send({ ok: false, error: e.message }); }
     // maker_pk 列 = 实际 relay pk (单源 == broadcast/sentinel, NWT/Bettor r863). ctor 仍 makerPk 不动.
     const maker_relay_pk = await _getMakerRelayPk(b.maker_relay_id);
 
