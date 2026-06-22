@@ -72,3 +72,16 @@ J1 修: `reDeriveCommittee` poolMerkleRoot 从【链锚 PS redeem】读 (`extrac
 | E1/D4/D1/C3-assert/D5 | 🔴 开 | J2 daemon 棒 |
 
 **下一棒**: J2 闭 E1 (注入链锚 ctx hook, 尤其 loadPoolSnapshot 的 **stake 必 scout 自观测** = C2 残口) + D4 relay-gate + C3 daemon-assert(`签的 tx hash == verifiedTxHash`) + D1 dedup-by-market。 (A)-model live e2e 后验 C1 per-ticket byte-equal。
+
+---
+
+## ⚠ 自我校正 (verify-not-echo, 2026-06-22 晚 · NWT 续审)
+本档初版**漏 verify-not-echo**: 我 echo 了旧记忆/接位的"E1 open"而**没复核当前 daemon 码**。复核后校正:
+
+1. **E1 已闭 (commit `978e1a46`, 在本 verdict 之下)** — NWT 旧 verdict 2291daa1 的 E1 (CRITICAL) 已修: `bshard-close-voter.js` 的 `buildEnforceCtx(voter, voterPk, market)` 注入**全部** enforce ctx hook (myOracleKeys=[voterPk] / chainReader / fetchEndBlockHashCanonical / loadPoolSnapshot(members{pk_hex,stake_sompi}+maker/broker pk+deadline) / loadBettors=loadBettorsCrossShard / db / p2sh(kaspa-wasm sync) / checkUtxoLanded), **且** C3 TOCTOU assert (签前 blake2b(tx)==verifiedTxHash) + D1 dedup-by-MARKET + 命门① chain-bound 都已落 daemon 门。**∴ Track B 自治-enforce 路现真跑 (非 placeholder)**。上面 scorecard 的 "E1/D4/D1/C3-assert 开" 中 **E1/C3-assert/D1 已闭**;仅 **D4 (relay no-bypass localhost-gate) + D5 (refund permissionless)** 仍开。
+
+2. **C2 stake 发现【降级+校正】**: 我初版写 "settler 供虚高 stake skew 委员" = **框架不准**。实际 `loadPoolSnapshot` 读【本节点 `pool_snapshots`】(冻结-at-create, 含 snapshot_daa v163), **非 settler 中继** → 非 settler-injection 安全洞。准确表述 = **cross-node determinism**: stake 不在 poolMerkleRoot (只 commit pk), 而 selectCommittee 是 stake-weighted → 各诚实节点须【同 snapshot stake】才选同委员会 (靠 snapshot_daa 冻结点一致)。若快照分歧 = liveness (凑不齐 4-of-5 同委员会), **非 safety** (on-chain `require(pk∈poolMerkleRoot)` 仍兜成员合法)。
+
+3. **Bettor 独立验已收敛 (commit `862120f8`)**: D2/C2 经 Bettor 功能注入红队 (7 TEETH) 独立坐实闭; 剩 1 HOLE = C1 **级2-B silent-skip** (canTicket=false 仍返 ok:true, 在 `verifyBettorsCompleteFromChain`, J1 域, 正在修 fail-closed)。与本档 D2/C2 域不重叠。
+
+**教训**: 接位/记忆是【写时快照】, 红队断言必对【当前码】坐实再下口径 — 我此处违反, 已校正。
