@@ -164,6 +164,53 @@ function ctxFullPrimitive() {
     else HOLE(`sybil snapshot 抛了但非链锚原因(可能 C2 internal-consistency 或缺 module): ${e.message}`);
   }
 
+  console.log('\n=== A5/A6: omit-shard 攻击两变体 (J1 cross-node PS-pool 锚 94cfef67, NWT 点的) ===');
+  // J1 PS-pool 锚: verifyBettorsCompleteFromChain 验 ctx.psConsolidatedPool == psSeed(20M) + Σloaded。
+  //   变体①(漏【已 consolidate】片): psConsolidatedPool 含被漏片 → != seed+loadPool → BUST(有牙)。
+  //   变体②(提前 close 子集, 漏【未 consolidate】片): psConsolidatedPool 与 loadPool 都不含 → 自洽 → PASS(真残留, 待 lineage 锚)。
+  const SEED = 20000000n;                       // PS_SEED 固定 (register)
+  const KAS = 100000000n;
+  // 诚实场景: 3 真片 (s0: a0 YES + b0 NO, s1: a1 YES + c1 YES, s2[被漏]: 2 NO)。每注 1 KAS。
+  // ⚠ sh.bettors 必填(否则 级2-B per-ticket 0 行假 BUST = 误判残留被锚, NWT 警告的坑)。
+  const mkShard = (idx, bets) => ({
+    shard_index: idx, shard_market_id: `s${idx}`, shard_redeem_hex: (String(idx).repeat(2)).repeat(20),
+    current_leaf_outpoint: `tx${idx}:0`, shard_pool_id: 'sp'.repeat(16),
+    current_leaf_state: {
+      local_yes: Number(bets.filter(b => b.direction === 0).reduce((s, b) => s + BigInt(b.stake), 0n)),
+      local_no: Number(bets.filter(b => b.direction === 1).reduce((s, b) => s + BigInt(b.stake), 0n)),
+      count: bets.length, pool_value: Number(bets.reduce((s, b) => s + BigInt(b.stake), 0n)),
+    },
+    bettors: bets,
+  });
+  const s0bets = [{ pk: 'a0', direction: 0, stake: KAS.toString() }, { pk: 'b0', direction: 1, stake: KAS.toString() }];
+  const s1bets = [{ pk: 'a1', direction: 0, stake: KAS.toString() }, { pk: 'c1', direction: 0, stake: KAS.toString() }];
+  // 子集快照 = s0,s1 (漏 s2)。loaded 配子集 (4 注, Σ4 KAS, count 4, yes 3 no 1 == snapSubset 聚合)。
+  const snapSubset = [mkShard(0, s0bets), mkShard(1, s1bets)];
+  const loadedSubset = [...s0bets, ...s1bets];
+  // 诚实链: 子集片 leaf + 子集 bettor 的 ticket 都 landed (settler 没碰子集, 只是【整片漏 s2】)。
+  const honestTickets = new Set(loadedSubset.map(b => `${b.pk}:${b.direction}:${b.stake}`));
+  const omitCtx = (psConsolidatedPool) => ({
+    shards: snapSubset,
+    p2sh: (redeem) => 'L:' + String(redeem).slice(0, 10),
+    checkUtxoLanded: async (addr) => {
+      if (String(addr).startsWith('L:')) return true;                       // 子集 leaf landed
+      if (String(addr).startsWith('t:')) return honestTickets.has(String(addr).slice(2));  // 子集 ticket landed
+      return false;
+    },
+    deriveTicketAddr: ({ bettorPk, direction, stake }) => 't:' + `${bettorPk}:${direction}:${stake}`,
+    psConsolidatedPool, psSeed: SEED.toString(),
+  });
+  // 变体① — psConsolidatedPool 含被漏片 s2 (它【已 consolidate】): seed + (s0+s1+s2)=seed+6KAS, 但 loadPool=4KAS → BUST
+  const v1pool = (SEED + 6n*KAS).toString();
+  const r5 = await verifyBettorsCompleteFromChain('mkt-omit', loadedSubset, omitCtx(v1pool));
+  if (r5.ok === false && /PS-pool|consolidated_pool|omit/.test(r5.reason || '')) TEETH(`变体①(漏已-consolidate 片)→ PS-pool 锚 BUST: ${r5.reason.slice(0, 50)}..`);
+  else HOLE(`变体① 竟未 BUST (ok=${r5.ok}) — PS-pool 锚没起作用`);
+  // 变体② — psConsolidatedPool 只含子集 s0,s1 (s2【未 consolidate】, 提前 close): seed+4KAS == seed+loadPool → 自洽 PASS
+  const v2pool = (SEED + 4n*KAS).toString();
+  const r6 = await verifyBettorsCompleteFromChain('mkt-omit', loadedSubset, omitCtx(v2pool));
+  if (r6.ok === true) HOLE(`变体②(提前 close 子集+漏未-consolidate 片)→ 自洽 PASS = 真残留(诚实标, 待 PS cov_id lineage 片集枚举锚)`);
+  else TEETH(`变体② 已被拒(lineage 锚已落?): ${r6.reason}`);
+
   console.log(`\nRESULT: ${teeth} TEETH(修后正确), ${holes} HOLE(待修)。`);
   console.log(holes > 0
     ? '⛔ 仍有 HOLE — 这些 case 现在【攻击得手】, 是 J1/J2 修的验收靶。修后重跑本档应全 TEETH。'
