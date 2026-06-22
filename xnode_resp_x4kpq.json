@@ -1,0 +1,7 @@
+{
+  "market_id": "ext-pool-v07-1782085313835-x4kpq",
+  "committee_pk": "a102fbde59f8a07933d5c7165718a4b366248805a5bdafc606d0e2d60ba4a297",
+  "input_index": 0,
+  "sig_hex": "411e30a310701b409d144a06f1de3909c955c3f01902936fbdf56324950f6bed1df71e42db7db78caede7d65d3c33a02f891781f0ee9c2ec9b7a2ee1696677aeee01",
+  "signed_by": "J1 :3300 verify-then-sign (judgeLine=NO + redeem[518]==cb620684 + payoutRoot==83c00472, 3/3 PASS)"
+}
