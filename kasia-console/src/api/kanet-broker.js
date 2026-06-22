@@ -205,6 +205,45 @@ export async function registerKanetBrokerRoutes(fastify) {
     });
   });
 
+  // GET /api/kanet-broker/earnings-by-address/:address — address-keyed broker 收益 (Owner 钦定 2026-06-22 DM/UI 显示)。
+  //   地址制铁律: broker 身份 = 地址。broker_pk = XOnlyPublicKey.fromAddress(address) (= pool.js deriveXOnlyPubkey 同源,
+  //   create-v07 broker_address 存的就是它)。外部地址-broker 无 relay_id (broker_relay_id=null) → 按 broker_pk 查得到。
+  //   仅 pool fee (retail_dex 是 relay-keyed, 外部地址-broker 不涉)。fee 数学 == earnings/:relay_id (phase2_broker_fee_sompi 实落 / 回退估算)。
+  fastify.get('/api/kanet-broker/earnings-by-address/:address', async (request, reply) => {
+    const { address } = request.params;
+    if (!address || !String(address).startsWith('kaspa')) return reply.code(400).send({ ok: false, error: 'valid kaspa address required' });
+    let brokerPk;
+    try { const kaspa = await import('kaspa-wasm'); brokerPk = kaspa.XOnlyPublicKey.fromAddress(new kaspa.Address(String(address))).toString().toLowerCase(); }
+    catch (e) { return reply.code(400).send({ ok: false, error: `address→pubkey derive fail: ${e.message}` }); }
+
+    const poolRows = sqlite.prepare(`
+      SELECT id, broker_fee_pct, maker_stake_amount, protocol_status, settle_txid, refund_txid, updated_at, metadata
+      FROM pool_markets WHERE LOWER(broker_pk) = ?
+    `).all(brokerPk);
+
+    let realizedSompi = 0n, pendingSompi = 0n, refundedSompi = 0n, realizedN = 0, pendingN = 0, refundedN = 0;
+    const byMarket = [];
+    for (const r of poolRows) {
+      const isRealized = !!r.settle_txid;
+      let actualFeeSompi = null;   // settled: 用实落 broker fee (settler 记 phase2_broker_fee_sompi), 回退 maker_stake×pct 估算
+      if (isRealized && r.metadata) { try { const _m = JSON.parse(r.metadata); if (_m.phase2_broker_fee_sompi != null) actualFeeSompi = BigInt(_m.phase2_broker_fee_sompi); } catch {} }
+      const feeSompi = actualFeeSompi != null ? actualFeeSompi : (BigInt(r.maker_stake_amount || 0) * BigInt(r.broker_fee_pct || 0)) / 10000n;
+      const isRefunded = !!r.refund_txid;
+      const status = isRealized ? 'settled' : (isRefunded ? 'refunded' : r.protocol_status);
+      if (isRealized) { realizedSompi += feeSompi; realizedN += 1; }
+      else if (isRefunded) { refundedSompi += feeSompi; refundedN += 1; }
+      else { pendingSompi += feeSompi; pendingN += 1; }
+      byMarket.push({ id: r.id, fee_kas: (Number(feeSompi) / 1e8).toFixed(8), status, settle_txid: isRealized ? r.settle_txid : null, settled_at: isRealized ? r.updated_at : null });
+    }
+    return reply.send({
+      ok: true, address: String(address), broker_pk: brokerPk,
+      realized: { pool_kas: (Number(realizedSompi) / 1e8).toFixed(8), n_markets: realizedN },
+      pending: { pool_kas: (Number(pendingSompi) / 1e8).toFixed(8), n_markets: pendingN },
+      refunded: { pool_kas: (Number(refundedSompi) / 1e8).toFixed(8), n_markets: refundedN },
+      by_market: byMarket,
+    });
+  });
+
   // ─── 玩家→轻路 broker onboarding 骨架 (Owner 钦定 2026-06-22, task#4) ──────────────
   //   铁律 = 地址制 (broker 身份 = broker_address, 非 relay_id)。骨架只做'存 + 审批门'。
   //   命名空间走 /api/kanet-broker/* (非 /api/broker/* — 后者是美股证券 broker.js 占用, 见本文件 iron rule ③)。
