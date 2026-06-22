@@ -13,6 +13,15 @@
 //   ⑤ 简单高效: 2 endpoint 直 SQL JOIN, 无中间层
 
 import { sqlite } from '../db/client.js';
+import { randomUUID } from 'crypto';
+import { encrypt } from '../services/crypto.js';
+
+// 地址格式校验 (testnet-12 = kaspatest: / mainnet = kaspa:). 宽松长度界, 防垃圾提交.
+const KAS_ADDR_RE = /^kaspa(test)?:[a-z0-9]{50,80}$/;
+// 审批门 (Owner 钦定 复用 /identities trust): Owner 把该地址 trust 提到 owner/recommended = approved.
+function isApprovedTrust(trustLevel) {
+  return trustLevel === 'owner' || trustLevel === 'recommended';
+}
 
 export async function registerKanetBrokerRoutes(fastify) {
   // GET /api/kanet-broker/markets/:relay_id — 列名下市场 + 订单 (跨域)
@@ -193,5 +202,78 @@ export async function registerKanetBrokerRoutes(fastify) {
       },
       by_market: byMarket,
     });
+  });
+
+  // ─── 玩家→轻路 broker onboarding 骨架 (Owner 钦定 2026-06-22, task#4) ──────────────
+  //   铁律 = 地址制 (broker 身份 = broker_address, 非 relay_id)。骨架只做'存 + 审批门'。
+  //   命名空间走 /api/kanet-broker/* (非 /api/broker/* — 后者是美股证券 broker.js 占用, 见本文件 iron rule ③)。
+  //   多-bot tg-manager (托管各 broker token 同步呈现市场) = 下一步, 不在骨架。
+  //   ⚠ 安全: bot_token = Telegram secret, 加密落库 (crypto.encrypt), 任何 GET 都不回 token。Bettor 审 onboarding 安全 + 命门④ fee 地址链锚。
+
+  // POST /api/kanet-broker/onboard — 玩家自助申请当 broker。body: { broker_address, bot_token, bot_username? }
+  fastify.post('/api/kanet-broker/onboard', async (request, reply) => {
+    const { broker_address, bot_token, bot_username } = request.body || {};
+    if (!broker_address || !KAS_ADDR_RE.test(broker_address)) {
+      return reply.code(400).send({ ok: false, error: 'valid broker_address (kaspatest:… / kaspa:…) required' });
+    }
+    if (!bot_token || String(bot_token).trim().length < 20) {
+      return reply.code(400).send({ ok: false, error: 'bot_token (Telegram @BotFather token) required' });
+    }
+    const now = new Date().toISOString();
+    const tokenEnc = encrypt(String(bot_token).trim());
+    const net = broker_address.startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
+
+    // upsert by address (地址制 UNIQUE)。重复提交 = 更新 token/username, status 保持 (approved 不回退到 pending)。
+    const existing = sqlite.prepare('SELECT id, status FROM broker_onboarding WHERE broker_address = ?').get(broker_address);
+    if (existing) {
+      sqlite.prepare('UPDATE broker_onboarding SET bot_token_encrypted = ?, bot_username = COALESCE(?, bot_username), updated_at = ? WHERE broker_address = ?')
+        .run(tokenEnc, bot_username || null, now, broker_address);
+    } else {
+      sqlite.prepare(`INSERT INTO broker_onboarding (id, broker_address, bot_token_encrypted, bot_username, status, created_at, updated_at)
+        VALUES (?,?,?,?,?,?,?)`).run(randomUUID(), broker_address, tokenEnc, bot_username || null, 'pending', now, now);
+    }
+
+    // 确保该地址在 identities 有行 → Owner 才能在 /identities UI 给它设 trust (审批门)。已存在则不动。
+    sqlite.prepare(`INSERT OR IGNORE INTO identities (id, network, address, display_name, identity_type, created_at, updated_at)
+      VALUES (?,?,?,?,?,?,?)`).run(randomUUID(), net, broker_address, bot_username || 'broker applicant', 'remote', now, now);
+
+    return reply.send({ ok: true, broker_address, status: 'pending', note: '已提交。等待 Owner 审批 (在 /identities 给该地址设 trust=recommended/owner 即 approved)。' });
+  });
+
+  // GET /api/kanet-broker/onboard/status?address=… — 查单个地址 onboarding 状态 (token 永不回)。
+  fastify.get('/api/kanet-broker/onboard/status', async (request, reply) => {
+    const address = request.query.address;
+    if (!address) return reply.code(400).send({ ok: false, error: 'address query param required' });
+    const row = sqlite.prepare('SELECT broker_address, bot_username, status, created_at, updated_at FROM broker_onboarding WHERE broker_address = ?').get(address);
+    if (!row) return reply.send({ ok: true, onboarded: false });
+    const idn = sqlite.prepare('SELECT trust_level FROM identities WHERE address = ?').get(address);
+    const approved = isApprovedTrust(idn?.trust_level);
+    return reply.send({
+      ok: true, onboarded: true,
+      broker_address: row.broker_address,
+      bot_username: row.bot_username,
+      status: approved ? 'approved' : row.status,   // 审批门: trust 派生 approved
+      trust_level: idn?.trust_level || null,
+      has_bot_token: true,
+      created_at: row.created_at,
+    });
+  });
+
+  // GET /api/kanet-broker/onboard/list — Owner/admin 看全部申请 (token 永不回)。
+  fastify.get('/api/kanet-broker/onboard/list', async (request, reply) => {
+    const rows = sqlite.prepare(`
+      SELECT b.broker_address, b.bot_username, b.status, b.created_at, i.trust_level
+      FROM broker_onboarding b
+      LEFT JOIN identities i ON i.address = b.broker_address
+      ORDER BY b.created_at DESC
+    `).all();
+    const brokers = rows.map(r => ({
+      broker_address: r.broker_address,
+      bot_username: r.bot_username,
+      status: isApprovedTrust(r.trust_level) ? 'approved' : r.status,
+      trust_level: r.trust_level || null,
+      created_at: r.created_at,
+    }));
+    return reply.send({ ok: true, count: brokers.length, pending: brokers.filter(b => b.status === 'pending').length, brokers });
   });
 }

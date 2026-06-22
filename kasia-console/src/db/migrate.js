@@ -5119,5 +5119,27 @@ export function runMigrations() {
     console.log('[migrate] v172: payout_shards table (per-market (A) PayoutShard covenant sink — cov_id provenance + settle redeem).');
   }
 
+  // v173 (KANet-UI 2026-06-22, Owner 钦定 玩家→轻路 broker onboarding 骨架): broker_onboarding.
+  //   铁律 = 地址制 (broker 身份 = broker_address, NOT relay_id; 玩家当玩家时绑的地址转 broker 不变).
+  //   bot_token = Telegram bot token (@BotFather), 是 secret → bot_token_encrypted 加密落库 (crypto.encrypt).
+  //   status: pending (提交后) → approved (Owner 经 /identities trust 批 → 派生)。审批门复用 identities.trust_level。
+  //   写入方: POST /api/kanet-broker/onboard。读取方: GET /api/kanet-broker/onboard/* + broker-home.eta onboarding 卡。
+  //   多-bot tg-manager (托管各 broker token 同步呈现市场) = 下一步, 本骨架只做'存+审批'。
+  {
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS broker_onboarding (
+        id                  TEXT PRIMARY KEY,
+        broker_address      TEXT NOT NULL UNIQUE,
+        bot_token_encrypted TEXT,
+        bot_username        TEXT,
+        status              TEXT NOT NULL DEFAULT 'pending',
+        note                TEXT,
+        created_at          TEXT NOT NULL,
+        updated_at          TEXT NOT NULL
+      )
+    `);
+    console.log('[migrate] v173: broker_onboarding table (玩家→轻路 broker 自助 onboarding, 地址制, bot_token 加密, 审批复用 identities.trust).');
+  }
+
   console.log('[migrate] DB migrations complete.');
 }

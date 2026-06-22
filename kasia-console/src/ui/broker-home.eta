@@ -54,6 +54,43 @@
     <p class="text-[10px] text-ink-400 mt-2">注: gateway 收款地址 = relay 自带地址(须 P2PK)。oracle relay 不能注册成 gateway(角色互斥)。fee% 在创建市场时按笔设。</p>
   </div>
 
+  <!-- KANet-UI 2026-06-22 (Owner 钦定 玩家→轻路 broker onboarding 骨架, task#4): 地址制自助申请。
+       区别于上面 S-A (relay 制 gateway): 此卡 re-key 到【地址】= broker 本质身份 (玩家当玩家时绑的地址转 broker 不变)。
+       骨架 = 存 + 审批门 (Owner 经 /identities 批 trust→approved)。多-bot tg-manager 同步呈现市场 = 下一步。 -->
+  <div x-show="!loading" class="rh-block mb-5">
+    <div class="rh-block-title"><span class="rh-block-dot bg-emerald-500"></span>玩家轻路 · 成为 broker（地址制）</div>
+    <p class="text-xs text-ink-500 mb-3">用<strong>你的 Kaspa 地址</strong>（当玩家时绑的地址，转 broker 不变）+ 你的 <strong>Telegram bot token</strong>（@BotFather 拿）申请当 broker。Owner 审批后，你的 bot 对外呈现同一批市场/同规则，差别只在带量的分润进<strong>你的地址</strong>（broker 1.6%）。<span class="text-amber-600">骨架阶段：先存+等审批，多-bot 同步呈现为下一步。</span></p>
+    <div class="space-y-3 max-w-xl">
+      <div>
+        <label class="rh-stat-label block mb-1">你的 Kaspa 地址（broker 收款 = 此地址）</label>
+        <input type="text" x-model="onboard.address" placeholder="kaspatest:q…" class="w-full px-3 py-2 border border-warm-300 rounded-lg text-sm font-mono bg-white" />
+      </div>
+      <div>
+        <label class="rh-stat-label block mb-1">Telegram bot token（加密存储，绝不外显）</label>
+        <input type="password" x-model="onboard.botToken" placeholder="123456:ABC-…" class="w-full px-3 py-2 border border-warm-300 rounded-lg text-sm font-mono bg-white" />
+      </div>
+      <div>
+        <label class="rh-stat-label block mb-1">bot 用户名（可选，便于识别）</label>
+        <input type="text" x-model="onboard.botUsername" placeholder="@my_broker_bot" class="w-full px-3 py-2 border border-warm-300 rounded-lg text-sm bg-white" />
+      </div>
+      <div class="flex items-center gap-3">
+        <button @click="submitOnboard()" :disabled="onboard.submitting || !onboard.address || !onboard.botToken"
+          class="px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-white text-sm font-medium">
+          <span x-show="!onboard.submitting">提交申请</span><span x-show="onboard.submitting">提交中…</span>
+        </button>
+        <button @click="checkOnboard()" :disabled="!onboard.address" class="px-3 py-2 rounded-lg border border-warm-300 text-sm text-ink-600 hover:bg-warm-100">查状态</button>
+      </div>
+      <div x-show="onboard.error" class="text-xs text-red-500" x-text="onboard.error"></div>
+      <div x-show="onboard.result" class="text-xs rounded-lg px-3 py-2"
+           :class="onboard.result && onboard.result.status === 'approved' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'">
+        <span x-show="onboard.result && onboard.result.status === 'approved'">✅ 已审批：该地址是 approved broker，可对外呈现市场吃 1.6% 分润。</span>
+        <span x-show="onboard.result && onboard.result.status === 'pending'">⏳ 待审批：申请已存，等 Owner 在 /identities 给该地址设 trust(recommended/owner)。</span>
+        <span x-show="onboard.result && onboard.result.onboarded === false">该地址还没提交过申请。</span>
+        <span class="block text-ink-400 mt-0.5" x-show="onboard.result && onboard.result.trust_level" x-text="'当前 trust: ' + (onboard.result && onboard.result.trust_level)"></span>
+      </div>
+    </div>
+  </div>
+
   <!-- MAIN -->
   <template x-if="!loading && agents.length > 0">
     <div class="space-y-5">
@@ -273,6 +310,8 @@ function brokerHome() {
     allRelays: [],
     registerRelayId: '', registerFeePct: 2, registering: false, registerError: '', registerMsg: '',
     revoking: false, revokeError: '',
+    // KANet-UI 2026-06-22 (Owner 钦定 task#4): 玩家轻路 broker onboarding (地址制) state.
+    onboard: { address: '', botToken: '', botUsername: '', submitting: false, error: '', result: null },
     // Lane③ fee 编辑 (Bettor r654): gateway 默认 fee% (新建市场用)
     feeInput: 2, feeSaving: false, feeMsg: '', feeError: '',
     // tg-bot/DM 便捷面板 (KANet-UI 2026-06-20, Owner 直令 broker UI 缺 DM 设置 / Bettor APPROVE option b):
@@ -335,6 +374,34 @@ function brokerHome() {
     // 可注册 relay = 非 broker + 非 oracle (互斥 UI 前置; 后端 S1 硬拦兜底, 非 P2PK 也由 S1 拒+优雅回显).
     registerableRelays() {
       return this.allRelays.filter(r => !(r.role === 'broker' || r.is_dex_broker) && !r.is_oracle);
+    },
+    // KANet-UI 2026-06-22 (Owner 钦定 task#4): 玩家轻路 broker onboarding (地址制, 非 relay)。
+    async submitOnboard() {
+      const addr = (this.onboard.address || '').trim();
+      const token = (this.onboard.botToken || '').trim();
+      if (!addr || !token) { this.onboard.error = '地址和 bot token 都必填'; return; }
+      this.onboard.submitting = true; this.onboard.error = ''; this.onboard.result = null;
+      try {
+        const r = await fetch('/api/kanet-broker/onboard', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ broker_address: addr, bot_token: token, bot_username: (this.onboard.botUsername || '').trim() || undefined }),
+        });
+        const j = await r.json();
+        if (!j.ok) { this.onboard.error = j.error || ('HTTP ' + r.status); }
+        else { this.onboard.botToken = ''; await this.checkOnboard(); }  // 提交成功清 token, 拉最新状态
+      } catch (e) { this.onboard.error = String(e.message || e); }
+      this.onboard.submitting = false;
+    },
+    async checkOnboard() {
+      const addr = (this.onboard.address || '').trim();
+      if (!addr) { this.onboard.error = '请先填地址'; return; }
+      this.onboard.error = '';
+      try {
+        const r = await fetch('/api/kanet-broker/onboard/status?address=' + encodeURIComponent(addr));
+        const j = await r.json();
+        if (!j.ok) { this.onboard.error = j.error || ('HTTP ' + r.status); this.onboard.result = null; }
+        else { this.onboard.result = j; }
+      } catch (e) { this.onboard.error = String(e.message || e); }
     },
     async registerGateway() {
       if (!this.registerRelayId) { this.registerError = '请先选一个 relay'; return; }

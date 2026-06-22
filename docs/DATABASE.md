@@ -768,6 +768,9 @@ CEX 交易日志。v51 新增 `exchange` 列记录交易所归属（旧记录为
 ### trade_baselines（9 条）
 持仓基线，用于 PnL 计算。
 
+### broker_onboarding（v173, 0 条）
+玩家→轻路 broker 自助 onboarding（Owner 钦定 2026-06-22, 骨架）。**铁律=地址制**：`broker_address`（UNIQUE）是 broker 身份，**非 relay_id**（玩家当玩家时绑的地址转 broker 不变）。字段：`broker_address` / `bot_token_encrypted`（Telegram bot token，crypto.encrypt aes-256-gcm 加密落库，**任何 GET 都不回**）/ `bot_username` / `status`(pending/approved) / `note` / `created_at` / `updated_at`。审批门复用 `identities.trust_level`（Owner 批 trust=recommended/owner → 派生 approved）。写入方 `POST /api/kanet-broker/onboard`；读取方 `GET /api/kanet-broker/onboard/status|list` + `broker-home.eta` onboarding 卡。多-bot tg-manager（托管各 broker token 同步呈现市场）=下一步。
+
 ---
 
 ## 索引规范
@@ -790,6 +793,7 @@ CEX 交易日志。v51 新增 `exchange` 列记录交易所归属（旧记录为
 
 ## 版本历史（近期）
 
+- **v173 (2026-06-22 玩家→轻路 broker onboarding 骨架)**: `broker_onboarding` 新表（地址制自助申请，bot_token 加密落库，审批门复用 identities.trust）。Owner 钦定，KANet-UI task#4 骨架（存+审批）。见上「broker_onboarding」节 + `src/api/kanet-broker.js` onboard 端点 + `broker-home.eta`。
 - **v172 (2026-06-21 bshard 生产 register wiring (b))**: `market_shards` 新加 `current_leaf_outpoint` (txid:idx 当前 ShardLeaf 续约 UTXO) + `current_leaf_state` (JSON count/local_yes/local_no/pool_value)。(A) 自包含模型 ShardLeaf covenant 每 register 续约地址变（count 烤进 state），buildRegisterCommand 下一笔 register 要当前续约 UTXO + state 重算 redeem（spliceLeafState byte-equal，不存全 redeem_hex）。每笔 register landed 后 `onBettorRegistered` 原子更新。见 `docs/2026-06-21-bshard-production-register-wiring-design.md` (b) + `src/lib/shard-allocator.mjs`。
 - **v171 (2026-06-15 bshard 无限押注)**: `market_shards` 新表（滚动分片注册表：logical_market_id ↔ shard_market_id 映射 + UNIQUE(logical,index) 注册竞态锁 + 封片状态）。Owner #1 directive 分片+自取。见「预测市场分片层」节 + `src/lib/shard-allocator.mjs`。
 - **v157 (2026-05-30 r281 私钥型 relay)**: `relay_nodes` 新加 `privkey_encrypted` + `privkey_hint`（裸 kaspa 私钥型 relay 支持，幂等 additive，不破助记词型）。详见 `KANet-Knowledge-Base/architecture/2026-05-30-privkey-relay-spec.md`
