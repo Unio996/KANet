@@ -84,6 +84,10 @@ bot.command('faucet', async (ctx) => {
 bot.command('verify', (ctx) => ctx.reply('用 /link <你的 kaspatest 地址> 绑定即可。/bet 开始押注。'));
 
 bot.command('swap', async (ctx) => { const broker = await api.brokerInfo(brokerRelayId); return ctx.reply(M.swapFlow(broker)); });
+// /broker — Owner UI gap (2026-06-22): user-facing 'become a broker/gateway' 入口. INFO-ONLY
+// (Bettor security gate): 纯文字讲角色 + 价值分成佣金 + 怎么参与(经 Owner/dev), 0 自助注册按钮
+// (公开自助注册需 /identities auth 硬化先落 — banked). 0-key/deep-link 一致, 无后端调用.
+bot.command('broker', (ctx) => ctx.reply(M.brokerRole()));
 bot.command('bet',  async (ctx) => ctx.reply(await PM.startBet(String(ctx.from.id), brokerRelayId)));  // S-C: in-chat 编号菜单 — broker-scoped (only this broker's 经手 markets)
 // Bettor r78 ① — /mybets: 列自己押注 + 赢/输/退款状态 (= J2 r126 my-positions wire).
 // Bettor r87 ③ 续 — 每 open position 加 inline-keyboard '➕ 加注/反手' (防流失, callback 接 startBetFromMarket).

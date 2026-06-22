@@ -18,6 +18,7 @@ export function startMessage() {
     '更多:',
     '· /swap — 兑换 KAS ↔ USDT（经 broker，链上结算）',
     '· /discover — 浏览开放挂单 / 预测市场',
+    '· /broker — 想做撮合者（broker）赚佣金？怎么参与 + 价值分成',
     '· /help — 全部命令',
     '',
     '⚠ 你的钱始终由你自己链上掌控 —— 这个 bot 不持任何 key、碰不到你的资金。每笔付款都是你从自己地址链上发起。',
@@ -73,6 +74,29 @@ export function notifyLine(ev) {
   return `🔔 链上动态: ${t} · tx ${tx}… · ${ev.observed_at || ''}`;
 }
 
+// 成为撮合者 (broker / gateway) — Owner UI gap (2026-06-22): 公开面缺 user 级 'become broker' 入口.
+// 严格 INFO-ONLY (Bettor security gate): 只讲角色 + 价值分成佣金 + 当前怎么参与(经 Owner/dev fork),
+// 【绝不在公开 bot 面给自助注册按钮】—— broker 收 1.6% fee, 公开无 auth 自助注册 = fee 模型被滥用,
+// 须先落 /identities trust auth 硬化(banked). bot 0-key/deep-link only, 此命令纯文字引导.
+// ⚠ Owner待拍 final wording (同 startMessage).
+export function brokerRole() {
+  return [
+    '🤝 成为撮合者 (broker / gateway)',
+    '',
+    'broker = 把预测市场 / 兑换撮合给用户的角色,按协议内置佣金收费(落你自己的链上地址):',
+    '· 价值分成(协议常量): 赢家 97% / oracle 1% / broker 1.6% / introducer 0.2% / node 0.2%',
+    '· broker 不碰用户资金 —— 用户全程自己链上锁仓 + 付款,你只撮合 + 收佣',
+    '',
+    '怎么参与(当前 testnet):',
+    '· 跑一个 KANet relay 节点(broker 收款地址 = 你 relay 自带地址,须 P2PK)',
+    '· 注册成 gateway / 设佣金由运营方在 Console 配置 —— 现阶段请联系 Owner 接入',
+    '· 开发者: KANet 开源(MIT),fork broker 角色自己跑节点',
+    '',
+    '⚠ 公开一键自助注册(任何人即时成 broker)还在做 —— 需身份认证防佣金滥用,暂经 Owner 接入。',
+    DISCLAIMER,
+  ].join('\n');
+}
+
 export function help() {
   return [
     '命令:',
@@ -83,6 +107,7 @@ export function help() {
     '/bet — 押注预测市场',
     '/mybets — 看自己的押注 + 状态',
     '/discover — 浏览开放挂单 / 市场',
+    '/broker — 想做撮合者(broker)? 角色 + 佣金 + 怎么参与',
     '',
     DISCLAIMER,
   ].join('\n');
