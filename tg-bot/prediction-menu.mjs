@@ -408,9 +408,13 @@ export async function startBet(tgUser, brokerRelayId) {
   try { return await _startBetImpl(tgUser, brokerRelayId); } finally { persist(); }
 }
 async function _startBetImpl(tgUser, brokerRelayId) {
-  // broker-scoped (Bettor r957): the bot is broker X's face, so it lists ONLY this broker's brokered
-  // (经手) markets. brokerRelayId = the bot's tg_bot_broker_relay_id (passed from bot.mjs).
-  const r = await api.poolMarkets({ status: 'pending_bettors', limit: 200, broker_relay_id: brokerRelayId });
+  // KANet-UI 2026-06-22 (Owner 钦定 '对外同一呈现同一批市场' + 'bot 怎么还是这几个单子'): show ALL open
+  // markets, NOT broker-scoped. Supersedes Bettor r957 broker-scope ('broker X's face' = only 经手
+  // markets) — Owner's directive: every bot presents the SAME full market list; broker identity matters
+  // only at bet-settle (fee attribution to the broker's address), NOT at the display面. brokerRelayId
+  // kept in signature (callers pass it) but no longer filters the list. = multi-bot ② 同一呈现.
+  void brokerRelayId;
+  const r = await api.poolMarkets({ status: 'pending_bettors', limit: 200 });
   // Bettor r68 P0 fix: bot 走 register-external (v0.5 only) — v0.6 市场用 register-v06/confirm,
   // bot 还没接. 不滤会拒 → 用户选中 v0.6 市场 register-external 拒 protocol mismatch = broken path.
   // 等 bot v0.6 wire 完成再删此过滤.
