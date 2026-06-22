@@ -126,11 +126,23 @@ async function loadEnforce() {
   return m.enforceCloseAttest;
 }
 
+// ⚠ opt-in gate (default OFF). E1 已闭 (ctx 全 wire), daemon 逻辑可跑, 但 Track B 仍【未 production-trustless】:
+//   D2 (enforce 验 caller 标量非被签 tx 的根, J1 域) + C2 (poolMerkleRoot 来自 DB 非链上 ctor, J1 域) + C1 级2-B
+//   (per-ticket anti-identity-swap; 本 daemon ctx 故意未 wire deriveTicketAddr/silverc → 级2-A only, 而 lib 现 silent-skip
+//   返 ok:true = anti-swap false-GREEN, 待 J1 fail-loud + 我 live byte-equal) + D4 (relay-gate) 仍开。
+//   ∴ 默认不在 boot 自动签 (避免恶意 settler 在命门未闭时拿到自治签名)。BSHARD_CLOSE_VOTER_ENABLED=1 显式 opt-in
+//   仅供【受控 live e2e】(诚实口径: 那也是 driver-supervised, 非 production-trustless)。镜像 BETTOR_REFUND_CLAIM_ENABLED gate 模式。
+const VOTER_ENABLED = process.env.BSHARD_CLOSE_VOTER_ENABLED === '1';
+
 export function startBshardCloseVoterCron() {
   if (timer) return;
+  if (!VOTER_ENABLED) {
+    console.log('[bshard-close-voter] cron NOT started — BSHARD_CLOSE_VOTER_ENABLED!=1 (Track B 命门 D2/C2/级2-B/D4 未闭, 默认不自动签; 设=1 仅供受控 live e2e)');
+    return;
+  }
   setTimeout(() => { bshardCloseVoterTick().catch(e => console.error('[bshard-close-voter] startup tick:', e.message)); }, 5_000);
   timer = setInterval(() => { bshardCloseVoterTick().catch(e => console.error('[bshard-close-voter] tick:', e.message)); }, TICK_MS);
-  console.log(`[bshard-close-voter] cron started (${TICK_MS / 1000}s tick)`);
+  console.log(`[bshard-close-voter] cron started (${TICK_MS / 1000}s tick) — BSHARD_CLOSE_VOTER_ENABLED=1 (受控 live e2e 模式)`);
 }
 export function stopBshardCloseVoterCron() { if (timer) { clearInterval(timer); timer = null; } }
 
