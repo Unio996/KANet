@@ -19,16 +19,24 @@
 import { blake2b } from '@noble/hashes/blake2b';
 import { sqlite } from '../db/client.js';
 import { sendCommandAsync } from './relay-manager.js';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createRelayChainReader } from './relay-chain-reader.mjs';
 import { fetchEndBlockHashCanonical, loadPoolSnapshot } from './pool-market-settler-v06.mjs';
 import { listShards } from '../lib/shard-allocator.mjs';
+import { compileSil, ctorBytes32, ctorInt } from '../lib/pool-bshard-artifacts.mjs';
 
 const TICK_MS = 30_000;   // 30s tick (close_attest 时效性 > 普通 vote; settler 等 quorum)
 let timer = null, running = false;
 
+// C1 级2-B (anti-identity-swap): canonical silverc + PoolSide sil = 必与 register/relay 铸 ticket 同源 build
+//   (记忆 silverc-build-determinism-pin: 跨节点必 pin 同一 silverc, 否则 bytecode 差→p2sh 差→false-BUST 杀 liveness)。
+const SILVERC = process.env.SILVERC_PATH || 'D:/silverscript/target/release/silverc.exe';
+const POOLSIDE_SIL = join(dirname(fileURLToPath(import.meta.url)), '../lib/PoolSide_v08_shard.sil');
+
 // kaspa-wasm lazy-load (p2sh-from-redeem = pure crypto, no chain; mirrors pool-p2sh.mjs compileAndComputeP2SH).
 let _kaspaWasm = null;
-async function ensureKaspaWasm() { if (!_kaspaWasm) _kaspaWasm = await import('kaspa-wasm'); return _kaspaWasm; }
+export async function ensureKaspaWasm() { if (!_kaspaWasm) _kaspaWasm = await import('kaspa-wasm'); return _kaspaWasm; }
 // SYNC p2sh(redeemHex)->addr (enforce lib calls ctx.p2sh synchronously). ensureKaspaWasm() must run first.
 function p2shFromRedeemSync(redeemHex, network) {
   if (!_kaspaWasm) throw new Error('p2shFromRedeemSync: kaspa-wasm not loaded (call ensureKaspaWasm first)');
@@ -112,6 +120,17 @@ export function buildEnforceCtx(voter, voterPk, market) {
       const r = await sendCommandAsync(voter.id, { type: 'check_utxo_landed', address: addr, txid: txid || undefined }, 15000);
       return !!(r?.landed || r?.found);
     },
+    // C1 级2-B (anti-identity-swap): explicit deriveTicketAddr (NWT 红队建议: 只认显式 hook, 不靠 silverc-fallback 自动触发)。
+    //   = Bettor live-proved 路 (market fy1yk-s0, _bettor_ticket_byteeq.mjs: compileSil([pk,dir,stake,shardPoolId])→p2sh
+    //   == 链上 15 个 0.2KAS dust ticket UTXO, byte-equal 实证)。register 的 z32 第4 ctor 只为抽 state-excluded 模板;
+    //   真 ticket State 第4 字段是 shardPoolId, compileSil 烤 shardPoolId 复现真地址 (silverc 同源 pin 前提)。
+    //   喂 swap 过的 (dir/pk/stake) → 算出地址链上不存在 → check_utxo_landed false → BUST。
+    deriveTicketAddr: ({ bettorPk, direction, stake, shardPoolId }) => {
+      const redeem = Buffer.from(compileSil(POOLSIDE_SIL, [
+        ctorBytes32(String(bettorPk)), ctorInt(Number(direction)), ctorInt(Number(stake)), ctorBytes32(String(shardPoolId)),
+      ], SILVERC).script).toString('hex');
+      return p2shFromRedeemSync(redeem, network);
+    },
   };
 }
 
@@ -126,18 +145,18 @@ async function loadEnforce() {
   return m.enforceCloseAttest;
 }
 
-// ⚠ opt-in gate (default OFF). E1 已闭 (ctx 全 wire), daemon 逻辑可跑, 但 Track B 仍【未 production-trustless】:
-//   D2 (enforce 验 caller 标量非被签 tx 的根, J1 域) + C2 (poolMerkleRoot 来自 DB 非链上 ctor, J1 域) + C1 级2-B
-//   (per-ticket anti-identity-swap; 本 daemon ctx 故意未 wire deriveTicketAddr/silverc → 级2-A only, 而 lib 现 silent-skip
-//   返 ok:true = anti-swap false-GREEN, 待 J1 fail-loud + 我 live byte-equal) + D4 (relay-gate) 仍开。
-//   ∴ 默认不在 boot 自动签 (避免恶意 settler 在命门未闭时拿到自治签名)。BSHARD_CLOSE_VOTER_ENABLED=1 显式 opt-in
-//   仅供【受控 live e2e】(诚实口径: 那也是 driver-supervised, 非 production-trustless)。镜像 BETTOR_REFUND_CLAIM_ENABLED gate 模式。
+// ⚠ opt-in gate (default OFF). E1 已闭 (ctx 全 wire 含 C1 级2-B deriveTicketAddr, Bettor live byte-equal 实证), daemon
+//   逻辑可跑。但 Track B 整体仍待【live e2e 实证】才能宣称 production-trustless:
+//   - D2/C2: J1 逻辑层闭 (86523223/f4d2a7ee, NWT 11 TEETH 红队验), 但尚未在【活 (A)-model 自治 settle】端到端跑过。
+//   - D4 (relay-gate no-bypass): relay sign 端点仍可被 daemon 外路触发 — 仍开 (relay-side 下一块)。
+//   ∴ 默认不在 boot 自动签 (避免命门未端到端验证时被恶意 settler 利用)。BSHARD_CLOSE_VOTER_ENABLED=1 显式 opt-in
+//   供【受控 live e2e】(Bettor 起活 (A) 市场 → cron ON → Bettor/NWT co-verify settle 落链)。镜像 BETTOR_REFUND_CLAIM_ENABLED gate。
 const VOTER_ENABLED = process.env.BSHARD_CLOSE_VOTER_ENABLED === '1';
 
 export function startBshardCloseVoterCron() {
   if (timer) return;
   if (!VOTER_ENABLED) {
-    console.log('[bshard-close-voter] cron NOT started — BSHARD_CLOSE_VOTER_ENABLED!=1 (Track B 命门 D2/C2/级2-B/D4 未闭, 默认不自动签; 设=1 仅供受控 live e2e)');
+    console.log('[bshard-close-voter] cron NOT started — BSHARD_CLOSE_VOTER_ENABLED!=1 (Track B 待 live e2e 实证 + D4 relay-gate 未闭, 默认不自动签; 设=1 供受控 live e2e)');
     return;
   }
   setTimeout(() => { bshardCloseVoterTick().catch(e => console.error('[bshard-close-voter] startup tick:', e.message)); }, 5_000);
