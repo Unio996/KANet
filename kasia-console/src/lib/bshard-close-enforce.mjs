@@ -88,7 +88,10 @@ export function verifyClosePayoutRootBinding({ txSafeJson, psRedeemHex, reDerive
   let signedTx;
   try { signedTx = JSON.parse(String(txSafeJson || '')); } catch { return { ok: false, reason: 'D2: txSafeJson parse fail — 无法验被签 tx commit 的根 (弃签)' }; }
   // NWT 红队: covenant-output identification 仅在 version>=1 malleability-safe (sighash 覆盖 covenant binding)。
-  if (Number(signedTx.version) < 1) return { ok: false, reason: `D2: tx.version=${signedTx.version} < 1 — covenant binding 不被 sighash 覆盖, continuation identification 可被 malleate (弃签)` };
+  //   ⚠ NWT NaN-旁路修 (2026-06-22): Number(undefined)=NaN, NaN<1=false → version 缺失/非数字会漏过 `<1` gate。
+  //   settler 全控 txSafeJson 可省略 version 绕过。必显式 Number.isInteger + >=1 (fail-closed, 非数字/缺失/小数全拒)。
+  const _ver = Number(signedTx.version);
+  if (!Number.isInteger(_ver) || _ver < 1) return { ok: false, reason: `D2: tx.version=${JSON.stringify(signedTx.version)} 非整数或 <1 — covenant binding 不被 sighash 覆盖 (NaN-旁路: 缺失/非数字 Number()=NaN 漏过 <1), continuation identification 可被 malleate (弃签)` };
   let expectedSpk;
   try { expectedSpk = _p2shSpkHex(_splicePayoutCloseRedeem(psRedeemHex, reDerivedRoot)); }
   catch (e) { return { ok: false, reason: `D2: continuation redeem splice fail (${e.message})` }; }
@@ -433,6 +436,18 @@ export async function verifyBettorsCompleteFromChain(logicalMarketId, bettors, c
     perTicketVerified = true;
     // 防御: per-shard DB ticket 行总数必 == 链上 Σcount (否则 DB shard 行与链上注册数不符 = 漏/加)。
     if (perTicketChecked !== chainCount) return { ok: false, reason: `C1: per-ticket 行数 ${perTicketChecked} != 链上 Σcount ${chainCount} (DB shard 行与链上不符)` };
+  } else {
+    // ── 级2-B fail-loud (Bettor A1 红队 / J2 point2①; 修我 8f633291 引入的 silent-skip 洞) ──
+    //   到此 shards 非空 = 已确认 (A)-model 市场, 但缺 ticket primitive (deriveTicketAddr 或 silverc+p2sh)
+    //   → 无法验 anti-identity-swap (settler 换等额 sybil bettor: 聚合 Σ 不变但 per-ticket 地址变) → 命门未闭。
+    //   fail-closed 拒签, 绝不静默返 ok:true。配 daemon 默认 OFF (391ed502): 待级2-B live byte-equal
+    //   wire 了 deriveTicketAddr (J2 域) 才解锁真自治签。
+    return {
+      ok: false,
+      reason: 'C1 级2-B: ticket primitive (deriveTicketAddr 或 silverc+p2sh) 缺 — 无法验 anti-identity-swap, fail-closed 拒签 (命门未闭; 待 live (A)-model byte-equal wire deriveTicketAddr)',
+      perTicketVerified: false,
+      aggregate: { count: chainCount, pool: chainPool.toString(), yes: chainYes.toString(), no: chainNo.toString() },
+    };
   }
 
   return {

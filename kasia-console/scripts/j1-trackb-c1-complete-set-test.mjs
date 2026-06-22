@@ -97,6 +97,13 @@ function mockCtx({ shards, rows, hasPS, onChainTickets }) {
   const r9 = await verifyBettorsCompleteFromChain(MID, honestLoaded, {});
   ok(r9.ok === false && /ctx.db/.test(r9.reason), `fail-loud: ${r9.reason}`);
 
+  console.log('== T10: 级2-B silent-skip regression (级2-A pass 但缺 ticket primitive → 必 fail-loud, 非 ok:true) ==');
+  // 我 8f633291 引入的洞 (Bettor A1 红队抓): canTicket=false 时旧码静默返 ok:true → identity-swap 漏过。修后必 ok:false。
+  const ctx10 = mockCtx({ shards: honestShards(), rows: honestRows });
+  delete ctx10.deriveTicketAddr;   // 只剩级2-A primitive (p2sh+checkUtxoLanded), 无 ticket addr 派生 → canTicket=false
+  const r10 = await verifyBettorsCompleteFromChain(MID, honestLoaded, ctx10);
+  ok(r10.ok === false && r10.perTicketVerified === false && /级2-B|ticket primitive/.test(r10.reason), `fail-loud (非 silent-skip): ${r10.reason}`);
+
   console.log(`\nRESULT: ${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();
