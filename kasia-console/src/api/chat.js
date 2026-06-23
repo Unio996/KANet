@@ -1,7 +1,7 @@
 import { sqlite } from '../db/client.js';
 import { getRelayNode, listRelayNodes } from '../data/settings/relay-nodes.js';
 import { sendCommandAsync } from '../services/relay-manager.js';
-import { verifyIngestRequest } from '../services/ingest-auth.js';
+import { verifyIngestRequest, isValidIngestSecret } from '../services/ingest-auth.js';
 import { parseLang, getT, isRtl, LANG_NAMES } from '../i18n/index.js';
 import { randomUUID } from 'crypto';
 import { nowIso } from '../lib/time.js';
@@ -625,7 +625,7 @@ export async function registerChatRoutes(fastify) {
     //   Owner 钦定零门槛玩 broken。per-IP 对 bot 路径既无效(Sybil 开多 TG 账号仍同 bot IP)又有害(挤掉诚实用户)。
     //   修: 可信内部代理(带 x-ingest-secret = bot console-api.mjs 已带; 公网网页不带) 豁免 per-IP; Sybil 防护
     //   对 bot 路径靠 per-wallet 永久 once(托管钱包幂等 = 每 TG 用户一地址一次) + 全局日帽。per-IP 仅对公网网页 faucet 保留。
-    const isTrustedProxy = !!request.headers['x-ingest-secret'];  // bot 带, 公网浏览器不带
+    const isTrustedProxy = await isValidIngestSecret(request);  // 验值(timingSafeEqual), 非仅验存在
     if (!isTrustedProxy) {
       // Check IP rate limit (= 24h 3 次, 公网网页 faucet only)
       const ipCount = sqlite.prepare('SELECT COUNT(*) AS cnt FROM faucet_grants WHERE ip_address = ? AND granted_at > ?').get(ip, day).cnt;
