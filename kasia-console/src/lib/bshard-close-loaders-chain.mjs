@@ -18,14 +18,35 @@ import { buildPoolMerkleTree } from '../services/pool-merkle-v06.mjs';   // 纯 
 
 const DAA_DOMAIN_MAX = 500_000_000_000n;   // ≥ 此值 = ms-epoch 域 (非 DAA)。assert 用。
 
-/** DAA-score 域断言 — load-bearing 量串到 ms-epoch 域会静默 vacuous, fail-loud 挡死。 */
+/**
+ * DAA-score 域断言 — load-bearing 量串到别的单位域会静默 vacuous, fail-loud 挡死。
+ * ⚠ 局限(Bettor 洞①): 纯层只能挡 ms-epoch(≥500e9)。**unix-ts 秒(~1.75e9)< 500e9 → 滑过**,
+ *   而 bshard 存的 deadline 正是【秒】(见 [[silverscript-tx-time-milliseconds]]: 烤秒~1.75e9 闸才 *1000)。
+ *   秒 与 DAA(~1e8) 在 <500e9 重叠带, 纯函数无法区分 → robust 守 = chain-tip-relative
+ *   (resolutionDaa ≤ tipDaa, 见 assertResolutionDaaVsTip, chain-read 路必传 tipDaa)。
+ *   input 契约(钉死): resolutionDaa 必 = 链读 resolution-block.daaScore, **绝非** 存的 unix-ts deadline。
+ */
 function assertDaaDomain(name, v) {
   const n = BigInt(v);
   if (n < 0n) throw new Error(`${name}=${n} 负值非法`);
   if (n >= DAA_DOMAIN_MAX) {
-    throw new Error(`${name}=${n} ≥ 500e9 = 落进 ms-epoch 域 (疑似误用 close 的 unix-ts deadline; 本 loader 全 DAA-score 域, 见 meta-铁律)`);
+    throw new Error(`${name}=${n} ≥ 500e9 = 落进 ms-epoch 域 (疑似误用 close 的 unix-ts ms deadline; 本 loader 全 DAA-score 域, 见 meta-铁律)`);
   }
   return n;
+}
+
+/**
+ * robust seconds-mixing 守 (Bettor 洞①修): enforce 在 market resolution 后跑 → 链 tip ≥ resolutionDaa 必成立。
+ *   unix-ts 秒(~1.75e9) >> 真 DAA tip(~1e8) → resolutionDaa > tipDaa 触发 = 误把存的秒-deadline 当 DAA 被挡。
+ *   chain-read 路【必传 tipDaa】(= rpc getVirtualDaaScore); 纯单测路 tipDaa 可省(仅得 ms-guard, 见 assertDaaDomain 局限)。
+ */
+export function assertResolutionDaaVsTip(resolutionDaa, tipDaa) {
+  const r = assertDaaDomain('resolutionDaa', resolutionDaa);
+  const t = assertDaaDomain('tipDaa', tipDaa);
+  if (r > t) {
+    throw new Error(`resolutionDaa=${r} > chain tipDaa=${t} → resolutionDaa 非链上 daaScore (疑似误用 unix-ts 秒-deadline~1.75e9 当 DAA; enforce 在 resolution 后跑 tip 必 ≥ resolutionDaa)`);
+  }
+  return r;
 }
 
 /**
@@ -41,7 +62,11 @@ export function canonicalLockUntilDaa(resolutionDaa, cooldownN, margin) {
   const r = assertDaaDomain('resolutionDaa', resolutionDaa);
   const c = BigInt(cooldownN);
   const m = BigInt(margin);
-  if (c < 0n || m < 0n) throw new Error('cooldownN/margin 非负');
+  if (c < 0n) throw new Error('cooldownN 非负');
+  // Bettor 洞②: margin 必 ≥ 1 — 否则 g 产的 canonical lockUntilDaa = resolutionDaa+cooldownN,
+  //   恰被 isEligibleOracleStake 的 strict `>` (lockUntilDaa <= resolutionDaa+cooldownN → false) 自拒 →
+  //   该 oracle 永零权重 (self-reject)。strict 口径两函数对齐: margin≥1 保 g 产 stake 必过资格谓词。
+  if (m < 1n) throw new Error('margin ≥ 1 必须 (否则 g(deadline) 产的 canonical lockUntilDaa 被 isEligibleOracleStake strict> 自拒)');
   return r + c + m;
 }
 
@@ -55,7 +80,11 @@ export function isEligibleOracleStake(stake, ctx) {
   const createdDaa = assertDaaDomain('created_daa', stake.createdDaa);
   const lockUntilDaa = assertDaaDomain('lockUntilDaa', stake.lockUntilDaa);
   const beaconDaa = assertDaaDomain('beaconDaa', ctx.beaconDaa);
-  const resolutionDaa = assertDaaDomain('resolutionDaa', ctx.resolutionDaa);
+  // Bettor 洞①: ctx.tipDaa 提供时(chain-read 路必传)→ robust seconds-mixing 守(resolutionDaa ≤ tipDaa);
+  //   纯单测路 tipDaa 省 → 仅 ms-guard(assertDaaDomain 局限, 见其注释)。
+  const resolutionDaa = ctx.tipDaa != null
+    ? assertResolutionDaaVsTip(ctx.resolutionDaa, ctx.tipDaa)
+    : assertDaaDomain('resolutionDaa', ctx.resolutionDaa);
   const cooldownN = BigInt(ctx.cooldownN);
   const amount = BigInt(stake.amount || 0);
   const minSompi = BigInt(ctx.minSompi);
