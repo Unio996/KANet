@@ -150,7 +150,7 @@ bot.command('faucet', async (ctx) => {
   const r = await api.faucetRequest(addr);
   if (!r.ok) return ctx.reply('领取失败：' + (r.json?.error || r.status));
   faucetCooldown.set(tgUser, now);
-  // KANet-UI 2026-06-23 (Bettor 派修): 数量不硬编——用 API 回的真值 (server env FAUCET_AMOUNT_KAS, 现 10k)。
+  // KANet-UI 2026-06-23 (Bettor 派修): 数量不硬编——用 API 回的真值 (由 server env FAUCET_AMOUNT_KAS 定)。
   const amt = r.json.amount || '测试 KAS';
   return ctx.reply(`✅ 已发 ${amt} 到 ${addr}\ntx ${String(r.json.txid || '').slice(0, 16)}…（约 10 秒到账）\n下一步：/bet 开始押注。`);
 });

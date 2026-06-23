@@ -8,7 +8,7 @@ export function startMessage() {
   // gate D onboarding tour (Bettor Q3: low-friction guided sequence). 无账户无许可 + 每步给下一命令.
   // KANet-UI 2026-06-23 (Owner 真机发现 + Bettor 派修): /start 必列钱包命令 (原漏); custody 口径不可一刀切——
   //   托管钱包 (/wallet) 节点持 key, 非托管 (/link) key 用户掌控 (Bettor 承重警告, 不可写"bot 不持 key"假称).
-  //   faucet 数量绝不硬编 (env FAUCET_AMOUNT_KAS 可调, 现 10k), 故 /start 不写具体数, 领取时由 API 回真值。
+  //   faucet 数量绝不硬编 (由 server env FAUCET_AMOUNT_KAS 定, Owner 可调), 故 /start 不写具体数, 领取时由 API 回真值。
   return [
     '👋 KANet — 用 Kaspa 信任链把 AI agent 接到任何市场。无账户、无许可。',
     '',
