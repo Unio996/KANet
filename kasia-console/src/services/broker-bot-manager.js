@@ -32,8 +32,11 @@ const RESPAWN_DELAY_MS = 4000;
 // KANet-UI 2026-06-23 (Bettor 诊断的真防线): rapid-crash 计数遇 ranMs>=RAPID_CRASH_MS 会清零, 所以【慢速崩溃
 // 循环】(如 409 token 冲突: bot 起来 poll 十几分钟才崩→清零→重生→再崩) 永远逃过 MAX_RAPID_CRASHES disable,
 // 拖垮平台。补一道滚动窗总崩溃帽: WINDOW 内累计崩溃 >= MAX → disable, 不管单次跑多久。快/慢循环都自禁。
-const CRASH_WINDOW_MS = 30 * 60 * 1000;   // 30 分钟滚动窗
-const MAX_CRASHES_IN_WINDOW = 5;          // 窗内崩 5 次 = 坏 token/配置, 停止重生
+// 窗口校准 (Bettor verify-not-echo 算了一遍): 目标 cadence = 实测 409 慢循环 ranMs≈14.6min/cycle。
+// 30min 窗只攒到 ~3 次 (第4次 filter 把首个移除→plateau 3<5) → 抓不住。90min 窗在 14.6min 间隔下到第
+// 5 次 (~58min) 累计=5 触发 disable。保 MAX=5 (非降 3) 避免对偶发三连崩 (网络抖动自愈) 误禁。
+const CRASH_WINDOW_MS = 90 * 60 * 1000;   // 90 分钟滚动窗 (覆盖 14.6min cadence 慢循环)
+const MAX_CRASHES_IN_WINDOW = 5;          // 窗内崩 5 次 = 坏 token/409 循环, 停止重生
 
 // broker_address -> { child, pid, startedAt, username, crashes, disabledBadToken, lastError }
 const bots = new Map();
