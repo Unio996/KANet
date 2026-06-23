@@ -619,10 +619,18 @@ export async function registerChatRoutes(fastify) {
     // Check wallet rate limit (= 永久 1 次)
     const walletRow = sqlite.prepare('SELECT id FROM faucet_grants WHERE wallet_address = ?').get(wallet_address);
     if (walletRow) return reply.code(429).send({ error: 'wallet already granted (= 永久 1 次 limit)' });
-    // Check IP rate limit (= 24h 3 次)
     const day = Math.floor(Date.now() / 1000) - 86400;
-    const ipCount = sqlite.prepare('SELECT COUNT(*) AS cnt FROM faucet_grants WHERE ip_address = ? AND granted_at > ?').get(ip, day).cnt;
-    if (ipCount >= 3) return reply.code(429).send({ error: 'IP rate limit (= 24h 3 次 limit, current ' + ipCount + ')' });
+    // Bettor 根治 2026-06-23 (Owner 真机撞 per-IP 缺陷): bot 代理 faucet 时 request.ip 恒 = 127.0.0.1
+    //   (bot→console localhost), per-IP「24h≤3」把全体 TG 用户绑成一个 IP 共享 3 次 → 第 4 个用户被挡 →
+    //   Owner 钦定零门槛玩 broken。per-IP 对 bot 路径既无效(Sybil 开多 TG 账号仍同 bot IP)又有害(挤掉诚实用户)。
+    //   修: 可信内部代理(带 x-ingest-secret = bot console-api.mjs 已带; 公网网页不带) 豁免 per-IP; Sybil 防护
+    //   对 bot 路径靠 per-wallet 永久 once(托管钱包幂等 = 每 TG 用户一地址一次) + 全局日帽。per-IP 仅对公网网页 faucet 保留。
+    const isTrustedProxy = !!request.headers['x-ingest-secret'];  // bot 带, 公网浏览器不带
+    if (!isTrustedProxy) {
+      // Check IP rate limit (= 24h 3 次, 公网网页 faucet only)
+      const ipCount = sqlite.prepare('SELECT COUNT(*) AS cnt FROM faucet_grants WHERE ip_address = ? AND granted_at > ?').get(ip, day).cnt;
+      if (ipCount >= 3) return reply.code(429).send({ error: 'IP rate limit (= 24h 3 次 limit, current ' + ipCount + ', 公网网页 faucet)' });
+    }
     // KANet-UI 2026-06-23 (Bettor⑥ anti-Sybil·托管钱包零门槛后 faucet 额度抬到 10k → 必加全局日帽,
     //   否则一人多 TG 账号刷干 faucet relay)。全局 24h 笔数帽 = 已有 per-IP/per-wallet 之上的总闸,
     //   env FAUCET_GLOBAL_DAILY_CAP 可调 (默认 50 笔/日 = 上限 ~500k testnet KAS/日, 实由 relay 余额封顶)。
