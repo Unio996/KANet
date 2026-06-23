@@ -106,7 +106,16 @@
           <span>🤝 broker <strong x-text="((feeConfig.brokerBps||160)/100).toFixed(1)+'%'"></strong></span>
           <span>📣 introducer <strong x-text="((feeConfig.introBps||20)/100).toFixed(1)+'%'"></strong> <span class="text-amber-600">(角色待上线)</span></span>
         </div>
-        <div class="mt-1.5 text-ink-400"><strong class="text-emerald-700">收款方地址</strong>（broker / introducer）在市场创建时<strong>链上烤死（命门④，offset-518 on-chain 锚）</strong>，不可篡改；仲裁委员（oracle/node）由链锚 pool 确定性派生。<br><strong class="text-amber-700">⚠ 分账执行</strong>（结算时校验收款方+比例）当前由<strong>结算机制/逻辑保证</strong>（已链上证：改 fee 地址/比例 → 机制重算对不上 → BUST），跑在编排层；<strong>每委员 oracle 签名前自治验证</strong>（对恶意结算方升级为 <strong>trust-minimized</strong>：由 4/5 独立预言机委员守护——仍<strong>非零信任 trustless</strong>，真 trustless 需 ZK 合约自验 payout 内容，见路线图 Track C）<strong>为下一块硬化</strong>，当前 testnet 诚信运营演示。</div>
+        <!-- KANet-UI 2026-06-23 (Owner 产品语言钦定 02:24 + 对抗讨论 5-vantage 收敛): 信任分两层, 永不说整体 trustless。
+             层1 OUTCOME(谁赢)= trust-minimized (去中心委员判, 链外结果永远需信任源, ZK 也不闭=oracle 问题数学不可约);
+             层2 PAYOUT(分账算术)= covenant 链上校验, 路线图升级 optimistic-trustless(fraud-proof+bond+slashing)/ZK。 -->
+        <div class="mt-1.5 text-ink-400">
+          <strong class="text-emerald-700">收款方地址</strong>（broker / introducer）在市场创建时<strong>链上烤死（命门④，offset-518 on-chain 锚）</strong>，不可篡改；仲裁委员（oracle/node）由链锚 pool 确定性派生。<br>
+          <strong class="text-ink-600">信任分两层（诚实口径，不声称整体 trustless）：</strong><br>
+          · <strong class="text-amber-700">结果（谁赢）= trust-minimized</strong>：由去中心预言机委员判定，链外赛果永远需要信任数据源（ZK 也无法消除——预言机问题数学不可约）。<br>
+          · <strong class="text-emerald-700">分账算术（payout）= covenant 链上校验</strong>（改 fee 地址/比例 → 机制重算对不上 → BUST）；路线图升级为 <strong>optimistic-trustless</strong>（结算方押 bond + 任何人可提确定性 fraud-proof 链上证伪 → slash + 冻结坏 root + 奖挑战者）。<br>
+          当前 testnet 诚信运营演示；委员自治-enforce daemon 为下一块硬化（把「信 4/5 不作恶」升级成「4/5 作恶面临可验证损失」）。
+        </div>
       </div>
 
       <div x-show="bet.open" x-transition class="mt-4 space-y-3">
