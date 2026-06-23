@@ -5,7 +5,7 @@ import { encrypt, decrypt } from './lib/crypto.mjs';
 import { deriveAliases } from './lib/alias.mjs';
 import { encodeHandshakePayload, encodeCommPayload, encodeCardPayload, payloadToTransactionHex } from './lib/protocol.mjs';
 import { getIndexer } from './lib/indexer.mjs';
-import { sendKaspa, sendKaspaByAmount, KASIA_MIN_AMOUNT } from './lib/transaction.mjs';
+import { sendKaspa, sendKaspaByAmount, custodialSendKaspa, KASIA_MIN_AMOUNT } from './lib/transaction.mjs';
 
 // ── getConversations ────────────────────────────────────────────────────────
 
@@ -218,3 +218,5 @@ export async function publishCard(params) {
 // ── sendKaspaTransaction ─────────────────────────────────────────────────────
 
 export { sendKaspaByAmount as sendKaspa };
+// KANet-UI 2026-06-23 Path C: TG 托管钱包 /send 用 (relay 唯一链上出口)。
+export { custodialSendKaspa };

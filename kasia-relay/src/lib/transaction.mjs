@@ -11,7 +11,7 @@
 // Transaction building and submission via kaspa-wasm Generator + RPC
 import * as kaspa from 'kaspa-wasm';
 import { getApi } from './api.mjs';
-import { getWallet } from './wallet.mjs';
+import { getWallet, KaspaWallet } from './wallet.mjs';
 import { waitForRpc } from '../rpc-listener.mjs';
 
 const { Generator, Encoding, sompiToKaspaString, Address, PaymentOutput } = kaspa;
@@ -130,8 +130,11 @@ export function sendKaspa(...args) {
   return withSendLock(() => _sendKaspaInner(...args));
 }
 
-async function _sendKaspaInner(to, amountSompi, priorityFee = 0n, payload, _isRetry = false) {
-  const wallet = getWallet();
+async function _sendKaspaInner(to, amountSompi, priorityFee = 0n, payload, _isRetry = false, walletOverride = null) {
+  // KANet-UI 2026-06-23 (Path C, Bettor 拍): walletOverride = TG 托管钱包的 ad-hoc KaspaWallet
+  //   (KaspaWallet.fromPrivateKey)。signs/广播/KIP-9/change/ledger 全 100% 复用此函数, 只换 key+from-addr。
+  //   零新广播码 (Bettor 驳 B: 别在 Console 重造 KIP-9), 守 "Relay 唯一出口"。null = relay 自己的钱包 (原行为)。
+  const wallet = walletOverride || getWallet();
   const senderAddress = wallet.getAddress();
   const api = getApi(wallet.getNetworkId());
   const rpc = await waitForRpc();
@@ -234,7 +237,7 @@ async function _sendKaspaInner(to, amountSompi, priorityFee = 0n, payload, _isRe
         const { triggerReconnect } = await import('../rpc-listener.mjs');
         triggerReconnect('ws_error_in_sendkaspa');
         await new Promise(r => setTimeout(r, 2000));
-        return _sendKaspaInner(to, amountSompi, priorityFee, payload, /* _isRetry= */ true);
+        return _sendKaspaInner(to, amountSompi, priorityFee, payload, /* _isRetry= */ true, walletOverride);
       }
     }
     if (submittedTxIds.length > 0) {
@@ -256,4 +259,28 @@ export async function sendKaspaByAmount(params) {
   }
   const amountSompi = kasToSompi(params.amount);
   return sendKaspa(params.to, amountSompi, BigInt(params.priorityFee || 0), params.payload);
+}
+
+// KANet-UI 2026-06-23 — Path C (Bettor 拍·Owner 钦定托管钱包 /send): 用【传入的托管 privkey】从托管钱包
+// 地址转 KAS。复用 _sendKaspaInner 全套 (KIP-9 安全·change·广播·重试), 只把 wallet 换成 ad-hoc
+// KaspaWallet.fromPrivateKey(privKeyHex)。relay 是唯一链上出口 (Console 经 IPC 把 just-in-time 派生的
+// privkey 塞进来, relay 用完即丢, 绝不 log)。Bettor 重点逐行审此函数。
+//   - sign 前校验 to = 合法 kaspa 地址 (new Address 抛 = 拒非法), 防转到垃圾地址烧币。
+//   - privKeyHex 绝不进任何 log / 错误消息 (catch 只回通用文案, 不 echo privKeyHex)。
+export async function custodialSendKaspa({ privKeyHex, to, amount, network }) {
+  if (!privKeyHex) throw new Error('privKeyHex required');
+  if (!to) throw new Error('recipient (to) required');
+  if (!amount) throw new Error('amount required');
+  // 校验收款地址合法 (Bettor b): 非法地址 new Address 抛, 在签名/花费前拦下。
+  try { new Address(to); } catch { throw new Error('invalid kaspa address (to)'); }
+  const net = network || process.env.KASPA_NETWORK || 'testnet-12';
+  let custodialWallet;
+  try {
+    custodialWallet = KaspaWallet.fromPrivateKey(privKeyHex, net); // 验 64-hex + 构造, 不 log privKeyHex
+  } catch {
+    throw new Error('invalid custodial private key'); // 不 echo privKeyHex
+  }
+  const amountSompi = kasToSompi(amount);
+  // _isRetry=false, walletOverride=custodialWallet → 从托管地址出, change 回托管地址。
+  return sendKaspa(to, amountSompi, 0n, undefined, false, custodialWallet);
 }

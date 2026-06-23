@@ -207,12 +207,33 @@ export function walletView(data) {
   ].join('\n');
 }
 
+// 转账 2 步确认 (Bettor: /send 必 confirm)。第一步显金额+目标+常驻托管警告, 待 /confirm。
+export function walletSendConfirm(to, amountKas) {
+  return [
+    '请确认转账:',
+    `· 金额: ${amountKas} KAS`,
+    `· 收款: ${to}`,
+    '',
+    '回 /confirm 执行, /cancel 取消。',
+    '⚠ 测试网托管钱包 · 真钱请用你自己助记词从未外泄的钱包。',
+  ].join('\n');
+}
+export function walletSendDone(txId, amountKas, to) {
+  return [
+    '✅ 转账已上链:',
+    `· 金额: ${amountKas} KAS → ${to}`,
+    `· TX: ${txId}`,
+    `· 浏览器: https://explorer-tn12.kaspa.org/txs/${txId}`,
+  ].join('\n');
+}
+
 export function help() {
   return [
     '命令:',
     '/start — 介绍 + 三步上手',
     '/wallet — 生成/查看你的测试网托管钱包 (零门槛玩)',
     '/balance — 查钱包余额  /receive — 显收款地址',
+    '/send <地址> <金额> — 从钱包转 KAS (2 步确认)',
     '/link <kaspatest地址> — 绑定你的地址',
     '/faucet — 领测试 KAS（先 /link）',
     '/swap — 兑换 KAS ↔ USDT(经 broker,链上)',

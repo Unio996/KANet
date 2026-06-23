@@ -45,6 +45,8 @@ if (!brokerRelayId) console.warn('[tg-bot] no broker configured — set it in Co
 const linked = new Map();
 // gate D faucet — per-Telegram-user 24h cooldown (in-memory MVP; server guards once-per-address).
 const faucetCooldown = new Map();
+// KANet-UI 2026-06-23 — /send 2 步确认的 pending 暂存 (ephemeral; 重启清空 = 安全, 不会误发).
+const pendingSends = new Map(); // tg_user → { to, amount, ts }
 
 // KANet-UI 2026-06-22 (Owner 实测派修 ②): /start 查 /link 绑定 — 已绑显地址+下一步, 未绑走三步引导。
 bot.command('start', (ctx) => {
@@ -81,6 +83,34 @@ bot.command('receive', async (ctx) => {
   const r = await api.tgWalletGet(String(ctx.from.id));
   if (r.ok && r.json?.exists) return ctx.reply('收款地址 (把它给对方往这转):\n' + r.json.address + '\n⚠ 测试网钱包。');
   return ctx.reply('你还没有钱包。/wallet 生成一个。');
+});
+// /send <地址> <金额> — 2 步确认 (Bettor: /send 必 confirm)。这步只本地校验+暂存, 不碰钱。
+bot.command('send', async (ctx) => {
+  const tgUser = String(ctx.from.id);
+  const parts = (ctx.match || '').trim().split(/\s+/).filter(Boolean);
+  if (parts.length < 2) return ctx.reply('用法: /send <kaspatest地址> <金额KAS>\n例: /send kaspatest:qq... 5');
+  const to = parts[0];
+  const amount = Number(parts[1]);
+  if (!/^kaspa(test)?:[a-z0-9]+$/.test(to)) return ctx.reply('收款地址非法 (须 kaspatest:...)');
+  if (!Number.isFinite(amount) || amount <= 0) return ctx.reply('金额非法, 须正数。');
+  pendingSends.set(tgUser, { to, amount, ts: Date.now() });
+  return ctx.reply(M.walletSendConfirm(to, amount));
+});
+bot.command('confirm', async (ctx) => {
+  const tgUser = String(ctx.from.id);
+  const p = pendingSends.get(tgUser);
+  if (!p) return ctx.reply('没有待确认的转账。/send <地址> <金额> 发起。');
+  if (Date.now() - p.ts > 5 * 60 * 1000) { pendingSends.delete(tgUser); return ctx.reply('确认超时 (>5 分钟), 请重新 /send。'); }
+  pendingSends.delete(tgUser); // 单次, 防重发
+  const r = await api.tgWalletSend(tgUser, p.to, p.amount);
+  if (r.ok && r.json?.ok && r.json.txId) return ctx.reply(M.walletSendDone(r.json.txId, p.amount, p.to));
+  return ctx.reply('转账失败: ' + (r.json?.error || r.status));
+});
+bot.command('cancel', async (ctx) => {
+  const tgUser = String(ctx.from.id);
+  if (pendingSends.delete(tgUser)) return ctx.reply('已取消转账。');
+  PM.exitBetFlow(tgUser);
+  return ctx.reply('已取消。');
 });
 
 bot.command('link', async (ctx) => {
