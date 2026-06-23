@@ -348,9 +348,21 @@ export async function reDeriveCommittee(marketId, ctx, psRedeemHex = null) {
   if (builtRoot !== onChainRoot) {
     throw new Error(`C2: 成员集非完整 — buildPoolMerkleTree ${builtRoot.slice(0, 16)} != 链锚 poolMerkleRoot ${onChainRoot.slice(0, 16)} (子集攻击防, NWT)`);
   }
-  const endBlockHash = await ctx.fetchEndBlockHashCanonical(ctx.chainReader, ctx.deadlineDaa ?? snap.deadline_daa);
+  const deadlineDaa = Number(ctx.deadlineDaa ?? snap.deadline_daa);
+  const endBlockHash = await ctx.fetchEndBlockHashCanonical(ctx.chainReader, deadlineDaa);
   const seed = deriveCommitteeSeed(marketId, endBlockHash, onChainRoot);   // 种子用【链锚 root】(非 DB) → 委员选择 settler 不可 grind
   const exclude = [snap.maker_pk, snap.broker_pk].filter(Boolean).map(p => String(p).toLowerCase());
+  // committee-exclude 必完整匹配 production sampleAndStoreCommittee(v06 L333-362): maker+broker+【BETTORS】(同市场投注 oracle
+  //   不判自己下注的市场, #27a)。原只排 maker/broker 漏 bettor → bettor∈oracle pool 时委员集 != sampling = enforce 误拒/误判
+  //   (J1 2026-06-23 reconcile 抓; ozzeu fresh-key bettor∉pool 被 mask)。chain-anchored: side_lock_daa<=deadline_daa
+  //   (跨节点确定, 同 sample 单源); NULL=fail-loud throw (镜像 sample L359-361 防 cross-node fork)。NWT verify-value-source 钉。
+  if (typeof ctx.loadBettors === 'function' && Number.isFinite(deadlineDaa) && deadlineDaa > 0) {
+    const bettors = await ctx.loadBettors(marketId);
+    for (const b of (bettors || [])) {
+      if (b.side_lock_daa == null) throw new Error(`committee-exclude: bettor ${String(b.pk).slice(0, 10)} 无 side_lock_daa (fail-loud 防 cross-node fork, 镜像 sample L359-361)`);
+      if (Number(b.side_lock_daa) <= deadlineDaa) exclude.push(String(b.pk).toLowerCase());
+    }
+  }
   const sel = selectCommittee(snap.members, seed, { excludePks: exclude });
   return sel.selected.map(c => c.pk_hex);
 }
