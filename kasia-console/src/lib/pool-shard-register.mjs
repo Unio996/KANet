@@ -32,6 +32,8 @@ const W17 = () => Array.from({ length: 17 }, () => ctorInt(0));
 const MIN_BET = 100000;                                   // dust-ticket floor (sompi); matches (d)/helper
 const TICKET_DUST = 20_000_000;                           // 0.2 KAS PoolSide dust ticket (KIP-9 safe, matches helper)
 const PS_SEED = 20_000_000;                               // PayoutShard genesis seed (0.2 KAS sink, matches (d))
+const SHARD_GENESIS_SEED = 20_000_000;                    // A(b): 空 ShardLeaf genesis seed (0.2 KAS, KIP-9 safe). 首注 register_append
+                                                          //   spend 它+fund stake → output weld out==pool_value(0)+stake 过, seed 退 change (不进池, pool_value 起点=0)。
 
 const hex32 = (s) => Buffer.from(blake2b(Buffer.from(s), { dkLen: 32 })).toString('hex');
 const _i64LE = (n) => { const b = Buffer.alloc(8); b.writeBigInt64LE(BigInt(n)); return b; };
@@ -161,15 +163,24 @@ export async function registerBettorOnShard(o) {
     return { action: 'use', shardIndex: shard.shard_index, shardMarketId: shard.shard_market_id, shardP2sh: shard.shard_p2sh, leafTx: regTx, leafOutpoint: `${regTx}:0`, leafState: newState, payoutCovId };
   }
 
-  // ── 'open_new': genesis a new ShardLeaf with this bettor's bet baked (count=1) ─────────────────────────────
+  // ── 'open_new' (A(b) 修, 2026-06-23 J2; 三方收敛 C1 安全洞修): genesis 一个【空】 ShardLeaf (count=0, maker seed, 非 bettor) ──
+  //   再让【本注】落 'use' register_append 路 (count 0→1 + mint PoolSide ticket)。根除旧 open_new 的 C1 安全洞:
+  //   旧版把首注 baked 进 genesis (count=1) 但【不 mint PoolSide ticket】(只 'use'/buildRegisterCommand psOutIdx:1 mint)
+  //   → 每片首注无 per-bettor 链锚 (level2-B anti-swap BUST) + 无法 claim 奖金 (无 claim 票)。A(b) 统一全注走 use-branch。
+  //   ★ Bettor 钉的测点: 空 genesis 地址 genAddr (= p2sh(genRedeem)) 必 == 后续 'use' 对 (0,0,0,0) state 的 leaf 地址
+  //     (= p2sh(spliceLeafState(genRedeem,{0,0,0,0})))。compileShardLeafRedeem 烤的 (0,0,0,0) State 区 ==
+  //     spliceLeafState 写的 (0,0,0,0) 4×PUSH8(i64LE 0) → byte-identical → 同址 (spliceLeafState byte-equal-to-recompile 已验)。
+  //   leafValueSompi 起点: 'use' 传 st.pool_value=0 → buildRegisterCommand newLeafValue=0+stake=stake → 合约 weld
+  //     out==pool_value(0)+stake 过; genesis seed (0.2KAS) 是 relay input, _appendChange 退 change (不进池)。
   const shardIndex = alloc.nextIndex;
   const shardPoolId = hex32(`${logicalMarketId}-shard-${shardIndex}`);
+  // psArtifact = bettor-INDEPENDENT 模板 (4 dust-ticket 字段是 State, register 时 splice); ps_tmpl_hash 进 leaf ctor (bettorPk/dir/stake 只占位求模板, z32 占 shardPoolId 位)。
   const psArtifact = computePoolSideArtifact(join(LIB, 'PoolSide_v08_shard.sil'), [ctorBytes32(bettorPk), ctorInt(direction), ctorInt(stake), ctorBytes32(z32)], silverc);
-  const genState = { local_yes: direction === 0 ? stake : 0, local_no: direction === 1 ? stake : 0, count: 1, pool_value: stake };
-  const genRedeem = compileShardLeafRedeem({ marketIdHash, psTmplHashHex: psArtifact.templateHashHex, shardPoolId, sealCount, payoutCovId, deadline, localYes: genState.local_yes, localNo: genState.local_no, count: genState.count, poolValue: genState.pool_value, silverc });
+  const genState = { local_yes: 0, local_no: 0, count: 0, pool_value: 0 };  // 空 maker seed (非 bettor; level2-A Σcount==loaded 排除它)
+  const genRedeem = compileShardLeafRedeem({ marketIdHash, psTmplHashHex: psArtifact.templateHashHex, shardPoolId, sealCount, payoutCovId, deadline, localYes: 0, localNo: 0, count: 0, poolValue: 0, silverc });
   const genAddr = p2sh(genRedeem);
-  const genTx = await transfer(genAddr, stake);                            // first bet stake locked INTO genesis ShardLeaf (count=1 baked)
-  if (!await landed(genTx, genAddr)) throw new Error('ShardLeaf genesis no land');
+  const genTx = await transfer(genAddr, SHARD_GENESIS_SEED);                // 空 genesis seed (dust, 非 bet stake)
+  if (!await landed(genTx, genAddr)) throw new Error('ShardLeaf empty-genesis no land');
 
   // pool_markets row for this physical shard (UNIQUE shard_market_id in registry) — caller maps shard→market row.
   const shardMarketId = createShardMarketRow ? await createShardMarketRow(shardIndex, genAddr) : `${logicalMarketId}#${shardIndex}`;
@@ -181,8 +192,9 @@ export async function registerBettorOnShard(o) {
     if (/UNIQUE/i.test(e.message)) { o._retry = (o._retry || 0) + 1; if (o._retry > 3) throw new Error('open_new race retry exhausted'); return registerBettorOnShard(o); }
     throw e;
   }
-  if (recordBettor) await recordBettor({ shardMarketId, shardIndex, bettorPk, direction, stakeSompi: stake, leafTx: genTx });
-  onBettorRegistered(db, shardMarketId, { currentLeafOutpoint: `${genTx}:0`, currentLeafState: genState, nowSec: Math.floor(Date.now() / 1000) });
-  await _maybeDefrag(rc);
-  return { action: 'open_new', shardIndex, shardMarketId, shardP2sh: genAddr, leafTx: genTx, leafOutpoint: `${genTx}:0`, leafState: genState, payoutCovId };
+  // 空 genesis 【不】 recordBettor (它是 maker seed count=0, 非 bettor)。本注落 'use' register_append 路: 新空 shard 现 status=open
+  //   有 room (count=0<32) → allocateForRegister 返 'use' → register_append (count 0→1 + mint ticket + recordBettor)。
+  o._openedShard = (o._openedShard || 0) + 1;
+  if (o._openedShard > 3) throw new Error('open_new→use loop guard (empty-genesis 未被 allocateForRegister 认出 open shard?)');
+  return registerBettorOnShard(o);
 }

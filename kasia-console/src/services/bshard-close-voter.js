@@ -120,6 +120,16 @@ export function buildEnforceCtx(voter, voterPk, market) {
       const r = await sendCommandAsync(voter.id, { type: 'check_utxo_landed', address: addr, txid: txid || undefined }, 15000);
       return !!(r?.landed || r?.found);
     },
+    // readOutpointCreatedAddr (J2, level2-A landed-in-history enabler, 对齐 NWT enforce 17ad3f4c 接口):
+    //   读 outpoint 的【创建-tx output 地址】(含 spent leaf, 解 consolidate spend ShardLeaf→PS 后 level2-A leaf-landed 失败)。
+    //   源 = kaspa_tx_log (v60 indexer outputs_json, voter 节点订阅同链自写=跨节点 byte-deterministic 链锚, TN12 无 getTransaction)。
+    //   level2-A 用: readOutpointCreatedAddr(leaf_outpoint) == p2sh(spliceLeafState(shard_redeem=genesis, state)) (绑 genesis lineage)。null=fail-loud。
+    readOutpointCreatedAddr: async (outpoint) => {
+      const [txid, idxStr] = String(outpoint).split(':');
+      const row = sqlite.prepare('SELECT outputs_json FROM kaspa_tx_log WHERE tx_id = ?').get(String(txid));
+      if (!row?.outputs_json) return null;
+      try { const outs = JSON.parse(row.outputs_json); const o = outs[Number(idxStr)]; return o ? o.address : null; } catch { return null; }
+    },
     // C1 级2-B (anti-identity-swap): explicit deriveTicketAddr (NWT 红队建议: 只认显式 hook, 不靠 silverc-fallback 自动触发)。
     //   = Bettor live-proved 路 (market fy1yk-s0, _bettor_ticket_byteeq.mjs: compileSil([pk,dir,stake,shardPoolId])→p2sh
     //   == 链上 15 个 0.2KAS dust ticket UTXO, byte-equal 实证)。register 的 z32 第4 ctor 只为抽 state-excluded 模板;

@@ -131,6 +131,53 @@ function crossNodeCtx({ shards, psConsolidatedPool, onChainTickets }) {
   const r12 = await verifyBettorsCompleteFromChain(MID, honestLoaded, crossNodeCtx({ shards: snapshotShards(), psConsolidatedPool: SEED + 600 }));
   ok(r12.ok === false && /PS-pool/.test(r12.reason), `omit-shard 变体① BUST: ${r12.reason}`);
 
+  // ── level2-A landed-in-history (ozzeu live-catch fix 2026-06-23) ──
+  //    (A)-model close 先 consolidate (spend ShardLeaf→PS) → enforce 时 leaf UTXO spent → checkUtxoLanded(unspent) false
+  //    → 委员诚实拒签 (pipeline 0/4)。fix: ctx.readOutpointCreatedAddr (创建-tx output 地址, 与 spent 无关) 做 landed-in-history。
+  //    leafAddr 与 lib 完全同算 (镜像 _spliceLeafState + mock p2sh = 'L:'+spliced.slice(0,12))。
+  const _pushI64LE = (n) => { const b = Buffer.alloc(8); b.writeBigInt64LE(BigInt(n)); return Buffer.concat([Buffer.from([0x08]), b]); };
+  const _spliceLeafStateTest = (baseHex, st) => {
+    const stateHex = Buffer.concat([_pushI64LE(st.local_yes), _pushI64LE(st.local_no), _pushI64LE(st.count), _pushI64LE(st.pool_value)]);
+    const r = Buffer.from(baseHex, 'hex');
+    return Buffer.concat([r.slice(0, 1), stateHex, r.slice(1 + stateHex.length)]).toString('hex');
+  };
+  const _leafAddrFor = (sh) => 'L:' + _spliceLeafStateTest(sh.shard_redeem_hex, JSON.parse(sh.current_leaf_state)).slice(0, 12);
+  const honestLeafAddrByOutpoint = { 'tx0:0': _leafAddrFor(honestShards()[0]), 'tx1:0': _leafAddrFor(honestShards()[1]) };
+  // leaf 已 spent (consolidate 后): checkUtxoLanded 对 leaf(L:) 返 false, ticket(t:) 仍按真链。
+  const spentLeafLanded = (ticketSet) => async (addr) => {
+    if (String(addr).startsWith('L:')) return false;                         // leaf spent (post-consolidate)
+    if (String(addr).startsWith('t:')) return ticketSet.has(String(addr).slice(2));
+    return false;
+  };
+  const honestTickets = new Set(['aa:0:100', 'bb:0:200', 'cc:1:150']);
+
+  console.log('== T13: landed-in-history — leaf SPENT (post-consolidate) 但创建-tx 地址对 → ok ==');
+  const ctx13 = mockCtx({ shards: honestShards(), rows: honestRows });
+  ctx13.checkUtxoLanded = spentLeafLanded(honestTickets);
+  ctx13.readOutpointCreatedAddr = async (outpoint) => honestLeafAddrByOutpoint[outpoint] || null;
+  const r13 = await verifyBettorsCompleteFromChain(MID, honestLoaded, ctx13);
+  ok(r13.ok === true && r13.perTicketVerified === true, `leaf spent + landed-in-history hook → ok: ${r13.reason || '-'}`);
+
+  console.log('== T14: forge-leaf — 创建-tx 地址 != p2sh(spliceLeafState) (假 state/swap) → BUST (provenance 不丢) ==');
+  const ctx14 = mockCtx({ shards: honestShards(), rows: honestRows });
+  ctx14.checkUtxoLanded = spentLeafLanded(honestTickets);
+  ctx14.readOutpointCreatedAddr = async () => 'L:FORGED_WRONG';              // 指向别处 forge 的同址 leaf → 地址不符
+  const r14 = await verifyBettorsCompleteFromChain(MID, honestLoaded, ctx14);
+  ok(r14.ok === false && /链锚|landed-in-history/.test(r14.reason), `forge-leaf BUST: ${r14.reason}`);
+
+  console.log('== T15: 无 hook + leaf spent → fail-loud (unspent-fallback false, 不静默过) ==');
+  const ctx15 = mockCtx({ shards: honestShards(), rows: honestRows });
+  ctx15.checkUtxoLanded = spentLeafLanded(honestTickets);                    // 无 readOutpointCreatedAddr → 回退 unspent → false
+  const r15 = await verifyBettorsCompleteFromChain(MID, honestLoaded, ctx15);
+  ok(r15.ok === false && /链锚|unspent-fallback|landed-in-history hook/.test(r15.reason), `无 hook + spent leaf fail-loud: ${r15.reason}`);
+
+  console.log('== T16: landed-in-history hook 返 null (outpoint 链上查不到) → BUST ==');
+  const ctx16 = mockCtx({ shards: honestShards(), rows: honestRows });
+  ctx16.checkUtxoLanded = spentLeafLanded(honestTickets);
+  ctx16.readOutpointCreatedAddr = async () => null;                          // 创建-tx 查不到 → 不可链锚
+  const r16 = await verifyBettorsCompleteFromChain(MID, honestLoaded, ctx16);
+  ok(r16.ok === false && /链锚|landed-in-history/.test(r16.reason), `hook null → BUST: ${r16.reason}`);
+
   console.log(`\nRESULT: ${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();

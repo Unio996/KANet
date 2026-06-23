@@ -348,9 +348,23 @@ export async function reDeriveCommittee(marketId, ctx, psRedeemHex = null) {
   if (builtRoot !== onChainRoot) {
     throw new Error(`C2: 成员集非完整 — buildPoolMerkleTree ${builtRoot.slice(0, 16)} != 链锚 poolMerkleRoot ${onChainRoot.slice(0, 16)} (子集攻击防, NWT)`);
   }
-  const endBlockHash = await ctx.fetchEndBlockHashCanonical(ctx.chainReader, ctx.deadlineDaa ?? snap.deadline_daa);
+  const deadlineDaa = Number(ctx.deadlineDaa ?? snap.deadline_daa);
+  const endBlockHash = await ctx.fetchEndBlockHashCanonical(ctx.chainReader, deadlineDaa);
   const seed = deriveCommitteeSeed(marketId, endBlockHash, onChainRoot);   // 种子用【链锚 root】(非 DB) → 委员选择 settler 不可 grind
   const exclude = [snap.maker_pk, snap.broker_pk].filter(Boolean).map(p => String(p).toLowerCase());
+  // committee-exclude 必完整匹配 production sampleAndStoreCommittee(v06 L333-362): maker+broker+【BETTORS】(同市场投注 oracle
+  //   不判自己下注的市场, #27a)。原只排 maker/broker 漏 bettor → bettor∈oracle pool 时委员集 != sampling = enforce 误拒/误判
+  //   (J1 2026-06-23 reconcile 抓; ozzeu fresh-key bettor∉pool 被 mask)。chain-anchored: side_lock_daa<=deadline_daa
+  //   (跨节点确定, 同 sample 单源); NULL=fail-loud throw (镜像 sample L359-361 防 cross-node fork)。NWT verify-value-source 钉。
+  // bettor-exclude MANDATORY (sample 总排 bettors): loadBettors 缺失/deadline 非法 = 无法应用必需 exclude → fail-loud
+  //   (NWT C2 review: 静默 skip 掩盖 wiring misconfig → 委员集发散 != sample → settle 风险)。loadBettors 返 [] = 真无 bettor = graceful。
+  if (typeof ctx.loadBettors !== 'function') throw new Error('committee-exclude: ctx.loadBettors 缺 — 无法应用 sample 同款 bettor-exclude, fail-loud 防静默委员集发散 (NWT)');
+  if (!Number.isFinite(deadlineDaa) || deadlineDaa <= 0) throw new Error(`committee-exclude: deadlineDaa 非法 (${deadlineDaa}) — 无法 chain-anchor bettor-exclude, fail-loud (镜像 sample #27a)`);
+  const bettors = await ctx.loadBettors(marketId);
+  for (const b of (bettors || [])) {
+    if (b.side_lock_daa == null) throw new Error(`committee-exclude: bettor ${String(b.pk).slice(0, 10)} 无 side_lock_daa (fail-loud 防 cross-node fork, 镜像 sample L359-361)`);
+    if (Number(b.side_lock_daa) <= deadlineDaa) exclude.push(String(b.pk).toLowerCase());
+  }
   const sel = selectCommittee(snap.members, seed, { excludePks: exclude });
   return sel.selected.map(c => c.pk_hex);
 }
@@ -409,11 +423,28 @@ export async function verifyBettorsCompleteFromChain(logicalMarketId, bettors, c
     try { st = typeof sh.current_leaf_state === 'string' ? JSON.parse(sh.current_leaf_state || 'null') : (sh.current_leaf_state || null); } catch { st = null; }
     if (!st || st.count == null || st.pool_value == null) return { ok: false, reason: `C1: shard ${sh.shard_index} 无 current_leaf_state — fail-loud` };
     if (!sh.shard_redeem_hex || !sh.current_leaf_outpoint) return { ok: false, reason: `C1: shard ${sh.shard_index} 缺 shard_redeem_hex/current_leaf_outpoint — 无法链锚` };
-    // chain-anchor: per-state leaf 地址 == current_leaf_outpoint 落地址 (state 篡改 → 地址变 → 落地址不符)。
+    // chain-anchor (landed-in-history): per-state leaf 地址 == current_leaf_outpoint 创建-tx output 地址。
+    // ⚠ level2-A 时序 fix (ozzeu live catch 2026-06-23): (A)-model close 流程先 consolidate (spend ShardLeaf→PS),
+    //   enforce 时 leaf UTXO 已 spent → checkUtxoLanded(unspent) 必 false → 委员诚实拒签 (pipeline 卡 0/4)。
+    //   改 landed-in-history: 验 leaf outpoint 的【创建-tx output 地址】== p2sh(spliceLeafState) (与 spent 无关)。
+    //   provenance+full-state 绑不丢 (Bettor forge-leaf 铁律): 假 state / swap yes-no → spliced 地址变 → 不符 → BUST。
+    //   '链上存在但没 consolidate 进本 PS' 的 forge → 由下方 PS-pool 聚合锚抓 (Σloaded != consolidated_pool)。
+    //   与 J1 level2-B (ticket landed-in-history) 同 pattern; chainReader hook = ctx.readOutpointCreatedAddr。
     const leafAddr = ctx.p2sh(_spliceLeafState(sh.shard_redeem_hex, st));
-    const [leafTxid] = String(sh.current_leaf_outpoint).split(':');
-    const landed = await ctx.checkUtxoLanded(leafAddr, leafTxid);
-    if (!landed) return { ok: false, reason: `C1: shard ${sh.shard_index} leaf state 非链锚 (p2sh(spliced)!=落地址 — DB state 篡改?)` };
+    let anchored = false; let anchorMode = '';
+    if (typeof ctx.readOutpointCreatedAddr === 'function') {
+      // landed-in-history: 读 outpoint 创建-tx output 地址 (spent/unspent 均可), 解 consolidate-spend 时序冲突。
+      const createdAddr = await ctx.readOutpointCreatedAddr(sh.current_leaf_outpoint);
+      anchored = !!createdAddr && String(createdAddr).toLowerCase() === String(leafAddr).toLowerCase();
+      anchorMode = 'landed-in-history';
+    } else {
+      // 无 landed-in-history hook → 回退 checkUtxoLanded(unspent), 仅 pre-consolidate 有效。
+      // consolidate 后 leaf 已 spent → 此回退 false → fail-loud (不静默过, 显式提示需 hook)。
+      const [leafTxid] = String(sh.current_leaf_outpoint).split(':');
+      anchored = await ctx.checkUtxoLanded(leafAddr, leafTxid);
+      anchorMode = 'unspent-fallback';
+    }
+    if (!anchored) return { ok: false, reason: `C1: shard ${sh.shard_index} leaf state 非链锚 (${anchorMode}: 创建-tx/落地址 != p2sh(spliced) — DB state 篡改? 或 consolidate 后需 ctx.readOutpointCreatedAddr landed-in-history hook)` };
     chainCount += Number(st.count);
     chainYes += BigInt(st.local_yes);
     chainNo += BigInt(st.local_no);

@@ -1756,7 +1756,11 @@ export async function unlockBshardCloseAttest(args) {
     // ★ pubkey 字节升序 sort 5 委员(pk+sig+idx+8 siblings 同步排)→ 满足合约 require(c0Pk<c1Pk<...) (b0e35141 robust fix)。
     //   build-preimage 模式 w.committee 空(driver 还没签)→ members=[] (psSig 不用, 走 preimage 返回)。
     const members = (w.committee || []).map((m) => ({ pk: m.pk_hex, sig: m.sig_hex, idx: m.idx, sibs: m.siblings_hex }));
-    members.sort((a, b) => (a.pk.toLowerCase() < b.pk.toLowerCase() ? -1 : a.pk.toLowerCase() > b.pk.toLowerCase() ? 1 : 0));
+    // J1/Bettor/NWT 2026-06-23 PINPOINT (ozzeu close LAND): 【不】sort committee slot (close_attest/refund_attest) — c0..c4 必按
+    //   SELECTION 序(pool_committee stored)对齐 committeePkHash=blake2b(witness c0..c4) + sig[i]↔pk[i] 配对 + checkSig 逐 slot。
+    //   .sil = require(ciPk != cjPk) DISTINCTNESS(!=)非 ordering(<)→不要求 sorted (silverc byte[32] 不能 `<` 只能 `!=`, b0e35141)。
+    //   1756 旧 'c0<c1<..' comment 过时。merkle idx/siblings 是 per-pk pool 树位置(committeeMeta 已算)与 slot 序正交不需在此 sort。
+    //   sort 了 → committeePkHash 变(70d9cdbe≠stored 66678d94) + sig↔pk 错位 → ③/checkSig fail。(members 保持传入 selection 序)
 
     const ps = cmd.inputs.payoutshard.state;
     const newState = { consolidated_pool: ps.consolidated_pool, closed: 1, payoutRoot: w.new_payout_root, ..._nw17(ps) };   // closed 0→1 + payoutRoot 写入; 17-word nullifier 透传
@@ -1822,7 +1826,11 @@ export async function unlockBshardCancelAttest(args) {
 
     // ★ pubkey 字节升序 sort 5 委员(同 close_attest, b0e35141 robust fix)。
     const members = (w.committee || []).map((m) => ({ pk: m.pk_hex, sig: m.sig_hex, idx: m.idx, sibs: m.siblings_hex }));
-    members.sort((a, b) => (a.pk.toLowerCase() < b.pk.toLowerCase() ? -1 : a.pk.toLowerCase() > b.pk.toLowerCase() ? 1 : 0));
+    // J1/Bettor/NWT 2026-06-23 PINPOINT (ozzeu close LAND): 【不】sort committee slot (close_attest/refund_attest) — c0..c4 必按
+    //   SELECTION 序(pool_committee stored)对齐 committeePkHash=blake2b(witness c0..c4) + sig[i]↔pk[i] 配对 + checkSig 逐 slot。
+    //   .sil = require(ciPk != cjPk) DISTINCTNESS(!=)非 ordering(<)→不要求 sorted (silverc byte[32] 不能 `<` 只能 `!=`, b0e35141)。
+    //   1756 旧 'c0<c1<..' comment 过时。merkle idx/siblings 是 per-pk pool 树位置(committeeMeta 已算)与 slot 序正交不需在此 sort。
+    //   sort 了 → committeePkHash 变(70d9cdbe≠stored 66678d94) + sig↔pk 错位 → ③/checkSig fail。(members 保持传入 selection 序)
 
     const ps = cmd.inputs.payoutshard.state;
     const newState = { consolidated_pool: ps.consolidated_pool, closed: 2, payoutRoot: w.new_refund_root, ..._nw17(ps) };   // closed 0→2 + refundRoot 进 payoutRoot 槽(复用); 17-word nullifier 透传
