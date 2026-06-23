@@ -5141,5 +5141,28 @@ export function runMigrations() {
     console.log('[migrate] v173: broker_onboarding table (玩家→轻路 broker 自助 onboarding, 地址制, bot_token 加密, 审批复用 identities.trust).');
   }
 
+  // v174 (KANet-UI 2026-06-23, Owner 钦定·紧急 电报 DM 托管钱包): tg_custodial_wallets.
+  //   零门槛玩: DM 生成钱包→faucet→下注。⚠ 托管=节点持私钥(打破现有 0-custody, Owner 钦定换 UX,
+  //   mitigation=测试网 only + "真钱用自己钱包"警告)。Bettor 审过设计 + 逐行审实现。
+  //   mnemonic_encrypted = crypto.encrypt(助记词) aes-256-gcm, CONSOLE_ENCRYPTION_KEY fail-loud 无 fallback
+  //   (NOT bettor.js:595 硬编 fallback); 绝不明文存、任何 GET 都不回明文 (display-once 后纯托管, 无 /export)。
+  //   faucet_total_kas/last_faucet_at = per-user 限流; 全局日帽另在 faucet 端点查 faucet_grants。
+  //   写入方/读取方: src/api/tg-wallet.js (Console 侧托管: 持 key+签名, bot 0-key 只调 API)。
+  {
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS tg_custodial_wallets (
+        tg_user_id          TEXT PRIMARY KEY,
+        kaspa_address       TEXT NOT NULL UNIQUE,
+        mnemonic_encrypted  TEXT NOT NULL,
+        network             TEXT NOT NULL DEFAULT 'testnet-12',
+        faucet_total_kas    REAL NOT NULL DEFAULT 0,
+        last_faucet_at      TEXT,
+        created_at          TEXT NOT NULL,
+        updated_at          TEXT NOT NULL
+      )
+    `);
+    console.log('[migrate] v174: tg_custodial_wallets table (电报 DM 托管钱包, 助记词 aes-256-gcm 加密 fail-loud, display-once 无明文回取, Owner 钦定).');
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
