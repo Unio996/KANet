@@ -472,7 +472,7 @@ export async function registerChatRoutes(fastify) {
   fastify.get('/faucet', async (request, reply) => {
     const lang = parseLang(request.headers.cookie);
     const faucetEnabled = !!process.env.FAUCET_RELAY_ID;
-    const amountKas = parseFloat(process.env.FAUCET_AMOUNT_KAS || '5');
+    const amountKas = parseFloat(process.env.FAUCET_AMOUNT_KAS || '10000');
     reply.header('X-KANet-Disclaimer', 'testnet-only-no-investment-advice');
     return reply.viewAsync('faucet', { lang, faucetEnabled, amountKas });
   });
@@ -623,6 +623,14 @@ export async function registerChatRoutes(fastify) {
     const day = Math.floor(Date.now() / 1000) - 86400;
     const ipCount = sqlite.prepare('SELECT COUNT(*) AS cnt FROM faucet_grants WHERE ip_address = ? AND granted_at > ?').get(ip, day).cnt;
     if (ipCount >= 3) return reply.code(429).send({ error: 'IP rate limit (= 24h 3 次 limit, current ' + ipCount + ')' });
+    // KANet-UI 2026-06-23 (Bettor⑥ anti-Sybil·托管钱包零门槛后 faucet 额度抬到 10k → 必加全局日帽,
+    //   否则一人多 TG 账号刷干 faucet relay)。全局 24h 笔数帽 = 已有 per-IP/per-wallet 之上的总闸,
+    //   env FAUCET_GLOBAL_DAILY_CAP 可调 (默认 50 笔/日 = 上限 ~500k testnet KAS/日, 实由 relay 余额封顶)。
+    const GLOBAL_DAILY_CAP = parseInt(process.env.FAUCET_GLOBAL_DAILY_CAP || '50', 10);
+    const globalCount = sqlite.prepare('SELECT COUNT(*) AS cnt FROM faucet_grants WHERE granted_at > ?').get(day).cnt;
+    if (globalCount >= GLOBAL_DAILY_CAP) {
+      return reply.code(429).send({ error: 'faucet 全局日帽已满 (= 24h ' + GLOBAL_DAILY_CAP + ' 笔上限, 防 Sybil 刷干, 明日再试)' });
+    }
 
     // 2026-05-28 KANet-UI wire (= Tier 1 缺件 fill, 全力推动):
     // env FAUCET_RELAY_ID 配置后启用 (= Owner spawn FaucetRelay-tn 独立 relay + 充值后设 env).
@@ -630,7 +638,8 @@ export async function registerChatRoutes(fastify) {
     // grant amount: 5 KAS (= 500_000_000 sompi). 原 stub 100000_00000000n = 100k KAS 是 bug (= spec §NWT-2 本意小额,
     //   但 1M sompi=0.01 KAS post-fee-bump 不够 1 帖, 5 KAS = ~250-1000 帖 合理 dev faucet 额度).
     const FAUCET_RELAY_ID = process.env.FAUCET_RELAY_ID;
-    const FAUCET_AMOUNT_KAS = parseFloat(process.env.FAUCET_AMOUNT_KAS || '5');
+    // KANet-UI 2026-06-23: Owner 钦定零门槛玩 = 生成钱包→faucet 10k→/bet, 额度 5→10000 (env 可调)。
+    const FAUCET_AMOUNT_KAS = parseFloat(process.env.FAUCET_AMOUNT_KAS || '10000');
     if (!FAUCET_RELAY_ID) {
       return reply.code(503).send({
         error: 'Faucet pending config (= FAUCET_RELAY_ID env 未设, Owner spawn FaucetRelay-tn + 充值后启用).',
