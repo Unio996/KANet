@@ -51,6 +51,16 @@ const expectWith = (ex) => selectCommittee(members, seed, { excludePks: ex }).se
   const c5 = await reDeriveCommittee(MID, mkCtx({ bettors: [] }));
   ok(JSON.stringify(c5) === JSON.stringify(expectWith([MAKER, BROKER])), '无 bettor → exclude=maker+broker');
 
+  console.log('== T6: loadBettors 缺失 → fail-loud throw (NWT: 别静默 skip 必需 exclude) ==');
+  let t6 = false;
+  try { await reDeriveCommittee(MID, mkCtx({ bettors: undefined })); } catch (e) { t6 = /loadBettors|fail-loud|静默/.test(e.message); }
+  ok(t6, 'ctx.loadBettors 缺 → throw (非静默 skip bettor-exclude)');
+
+  console.log('== T7: deadlineDaa 非法 (0) → fail-loud throw ==');
+  let t7 = false;
+  try { await reDeriveCommittee(MID, mkCtx({ bettors: [], deadlineDaa: 0 })); } catch (e) { t7 = /deadlineDaa|非法|fail-loud/.test(e.message); }
+  ok(t7, 'deadlineDaa<=0 → throw (无法 chain-anchor bettor-exclude)');
+
   console.log(`\nRESULT: ${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();

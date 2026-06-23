@@ -356,12 +356,14 @@ export async function reDeriveCommittee(marketId, ctx, psRedeemHex = null) {
   //   不判自己下注的市场, #27a)。原只排 maker/broker 漏 bettor → bettor∈oracle pool 时委员集 != sampling = enforce 误拒/误判
   //   (J1 2026-06-23 reconcile 抓; ozzeu fresh-key bettor∉pool 被 mask)。chain-anchored: side_lock_daa<=deadline_daa
   //   (跨节点确定, 同 sample 单源); NULL=fail-loud throw (镜像 sample L359-361 防 cross-node fork)。NWT verify-value-source 钉。
-  if (typeof ctx.loadBettors === 'function' && Number.isFinite(deadlineDaa) && deadlineDaa > 0) {
-    const bettors = await ctx.loadBettors(marketId);
-    for (const b of (bettors || [])) {
-      if (b.side_lock_daa == null) throw new Error(`committee-exclude: bettor ${String(b.pk).slice(0, 10)} 无 side_lock_daa (fail-loud 防 cross-node fork, 镜像 sample L359-361)`);
-      if (Number(b.side_lock_daa) <= deadlineDaa) exclude.push(String(b.pk).toLowerCase());
-    }
+  // bettor-exclude MANDATORY (sample 总排 bettors): loadBettors 缺失/deadline 非法 = 无法应用必需 exclude → fail-loud
+  //   (NWT C2 review: 静默 skip 掩盖 wiring misconfig → 委员集发散 != sample → settle 风险)。loadBettors 返 [] = 真无 bettor = graceful。
+  if (typeof ctx.loadBettors !== 'function') throw new Error('committee-exclude: ctx.loadBettors 缺 — 无法应用 sample 同款 bettor-exclude, fail-loud 防静默委员集发散 (NWT)');
+  if (!Number.isFinite(deadlineDaa) || deadlineDaa <= 0) throw new Error(`committee-exclude: deadlineDaa 非法 (${deadlineDaa}) — 无法 chain-anchor bettor-exclude, fail-loud (镜像 sample #27a)`);
+  const bettors = await ctx.loadBettors(marketId);
+  for (const b of (bettors || [])) {
+    if (b.side_lock_daa == null) throw new Error(`committee-exclude: bettor ${String(b.pk).slice(0, 10)} 无 side_lock_daa (fail-loud 防 cross-node fork, 镜像 sample L359-361)`);
+    if (Number(b.side_lock_daa) <= deadlineDaa) exclude.push(String(b.pk).toLowerCase());
   }
   const sel = selectCommittee(snap.members, seed, { excludePks: exclude });
   return sel.selected.map(c => c.pk_hex);

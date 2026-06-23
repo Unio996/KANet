@@ -148,6 +148,7 @@ function ctxFullPrimitive() {
     onChainPoolMerkleRoot: honestRoot,                       // 链上真根 (诚实集) — 修后 reDeriveCommittee 应 pin 到它
     fetchEndBlockHashCanonical: async () => 'cc'.repeat(32),  // 固定 endBlockHash (anti-grinding mock)
     chainReader: {}, deadlineDaa: 1000,
+    loadBettors: async () => [],   // J1 2026-06-23: reDeriveCommittee bettor-exclude 现 mandatory (NWT fail-loud), A3 测 C2 无 bettor → 空集 graceful (A3 意图/sybil-TEETH 不变)
   });
   // control: honest snapshot (root==onChain) → 应正常 re-derive
   try {
