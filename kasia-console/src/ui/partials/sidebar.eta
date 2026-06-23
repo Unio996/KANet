@@ -146,7 +146,17 @@
   </div>
   <% } %>
 
-  <div class="px-4 py-2.5 border-t border-warm-200 text-[10px] text-ink-300">
+  <!-- Bettor ③ 2026-06-23 — 小范围 invited testnet 披露文案 (满披露铁律) -->
+  <div class="px-3 pb-2 border-t border-warm-200 pt-2">
+    <div class="bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-2 text-[10px] text-amber-700 leading-relaxed space-y-0.5">
+      <div class="font-semibold text-amber-800">⚠ 测试网 · 小范围邀请制</div>
+      <div>• 测试网，非主网</div>
+      <div>• 托管钱包：节点持 key，真钱请用自己的非托管钱包</div>
+      <div>• 约半数市场会 refund 而非结算（结算率 &lt;80%）</div>
+      <div>• 结算 enforce driver-side，非 production-trustless</div>
+    </div>
+  </div>
+  <div class="px-4 py-2 text-[10px] text-ink-300">
     KANet v0.1
   </div>
 </aside>
