@@ -12,20 +12,16 @@ export function startMessage() {
   return [
     '👋 KANet — 用 Kaspa 信任链把 AI agent 接到任何市场。无账户、无许可。',
     '',
-    '👉 第一次来？两种玩法，挑一个上手:',
+    '👉 三步上手:',
     '',
-    '🅰 零门槛试玩（托管钱包，最快）:',
-    '① /wallet — 节点为你生成一个测试网钱包（⚠ 节点持 key，仅供试玩）',
+    '① 先有个钱包 — 二选一:',
+    '   🅰 /wallet — 节点替你生成，零门槛（⚠ 托管·节点持 key，仅试玩）',
+    '   🅱 /link <你的 kaspatest 地址> — 绑你自己的钱包（非托管·key 只你掌控）',
     '② /faucet — 领测试 KAS（约 10 秒到账）',
     '③ /bet — 押注预测市场（链上锁定，多评判结算），再 /mybets 看赢/输/退款',
     '',
-    '🅱 用你自己的钱包（非托管，key 只你掌控）:',
-    '① /link <你的 kaspatest 地址> — 绑定你自己的地址（用任意 Kaspa testnet 钱包生成）',
-    '② /faucet — 领测试 KAS',
-    '③ /bet — 押注，再 /mybets 看赢/输/退款',
-    '',
     '更多:',
-    '· /balance · /receive · /send <地址> <金额> — 托管钱包收发',
+    '· /balance · /receive · /send <地址> <金额> — 钱包收发',
     '· /swap — 兑换 KAS ↔ USDT（经 broker，链上结算）',
     '· /discover — 浏览开放挂单 / 预测市场',
     '· /broker — 想做撮合者（broker）赚佣金？怎么参与 + 价值分成',
@@ -49,8 +45,7 @@ export function startMessageLinked(addr, custodial = null) {
     `📍 你的地址: ${addr}`,
   ];
   if (custodial === true) lines.push('   (测试网托管钱包·节点持 key — 仅供试玩)');
-  else if (custodial === false) lines.push('   (你自己的非托管地址·改绑: /link <新地址>)');
-  else lines.push('   (改绑: /link <新地址>)');
+  else if (custodial === false) lines.push('   (你自己的非托管地址·key 只你掌控)');
   lines.push(
     '',
     '👉 下一步:',
@@ -59,12 +54,18 @@ export function startMessageLinked(addr, custodial = null) {
     '· /swap — 兑换 KAS ↔ USDT（经 broker，链上结算）',
     '· /broker — 想做撮合者赚佣金？申请当 broker + 价值分成',
     '· /discover · /help',
+    '',
+    '👛 钱包（所有命令任何时候都可用）:',
+    '· /wallet — 查看你的钱包地址 + 余额',
+    '· /balance 查余额 · /receive 收款 · /send <地址> <金额> 转账',
+    '· /link <kaspatest地址> — 改绑成你【自己掌控】的非托管地址（换钱包 / 退出托管用）',
   );
   if (custodial === true) {
-    lines.push('· /balance 查余额 · /receive 收款 · /send <地址> <金额> 转账');
     lines.push('');
     lines.push('⚠ 你用的是测试网【托管钱包】：私钥由节点持有，方便零门槛试玩。');
-    lines.push('   真钱请务必换用你【自己生成、助记词从未外泄】的非托管钱包。');
+    lines.push('   • 助记词只在生成时显示一次——丢了也【不影响用钱】(节点持 key 仍能 /send /bet)，只是无法导出到别的钱包。');
+    lines.push('   • 想完全自主掌控：用任意 Kaspa 钱包生成你自己的地址 → /link 绑定 → /send 把币转过去（不需旧助记词）。');
+    lines.push('   • 真钱请务必换用你【自己生成、助记词从未外泄】的非托管钱包。');
   } else if (custodial === false) {
     lines.push('');
     lines.push('⚠ 这个地址由你自己链上掌控，bot 不持它的 key——每笔付款都你从自己钱包链上发起。');
