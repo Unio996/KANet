@@ -94,6 +94,15 @@ export function myPositions(linkedAddr) {
   return req('GET', `/api/pool/my-positions?linked_addr=${encodeURIComponent(linkedAddr)}`);
 }
 
+// ── TG custodial wallet (Owner 钦定 2026-06-23, 零门槛玩): Console 持 key, bot 0-key 只调 ──
+// create 返助记词【仅一次】(display-once, bot 显给用户存后即弃, 不留); get 永不回助记词。
+export function tgWalletCreate(tgUserId) {
+  return req('POST', '/api/tg-wallet/create', { tg_user_id: tgUserId });
+}
+export function tgWalletGet(tgUserId) {
+  return req('GET', `/api/tg-wallet/${encodeURIComponent(tgUserId)}`);
+}
+
 // ── broker onboarding (Owner 钦定 2026-06-22): user 在 bot 里申请当 broker (地址制) ──
 // 申请落 pending; Owner 经 /identities 批 trust→approved 才激活 (auth 门已落 = 公开自助安全)。
 // 状态查 (token 永不回); 申请提交 (用户的 /link 地址 + 他的 @BotFather token)。

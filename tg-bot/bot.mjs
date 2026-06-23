@@ -55,6 +55,34 @@ bot.command('start', (ctx) => {
 });
 bot.command('help', (ctx) => ctx.reply(M.help()));
 
+// KANet-UI 2026-06-23 (Owner 钦定 托管钱包·零门槛玩): /wallet 生成或查看; /balance; /receive。
+// Console 侧托管(持 key/签名), bot 0-key 只调 API。/send 待 Bettor Q3 后加。NO /export (Bettor⑤)。
+bot.command('wallet', async (ctx) => {
+  const tgUser = String(ctx.from.id);
+  const r = await api.tgWalletCreate(tgUser);
+  if (!r.ok || !r.json?.ok) return ctx.reply('钱包操作失败: ' + (r.json?.error || r.status));
+  if (r.json.created) {
+    // 新生成: auto-link 地址(现有 /bet//broker//earnings 直接可用) + 显助记词【仅此一次】+ 醒目警告。
+    PM.setLinkedAddr(tgUser, r.json.address);
+    linked.set(tgUser, { address: r.json.address, lastTs: Date.now() });
+    return ctx.reply(M.walletGenerated(r.json.address, r.json.mnemonic));
+  }
+  // 已有: 显地址+余额(永不再显助记词)
+  const g = await api.tgWalletGet(tgUser);
+  return ctx.reply(g.ok && g.json?.exists ? M.walletView(g.json) : ('你的钱包: ' + r.json.address));
+});
+bot.command('balance', async (ctx) => {
+  const r = await api.tgWalletGet(String(ctx.from.id));
+  if (!r.ok || !r.json?.ok) return ctx.reply('查询失败: ' + (r.json?.error || r.status));
+  if (!r.json.exists) return ctx.reply('你还没有钱包。/wallet 生成一个 (零门槛玩)。');
+  return ctx.reply(M.walletView(r.json));
+});
+bot.command('receive', async (ctx) => {
+  const r = await api.tgWalletGet(String(ctx.from.id));
+  if (r.ok && r.json?.exists) return ctx.reply('收款地址 (把它给对方往这转):\n' + r.json.address + '\n⚠ 测试网钱包。');
+  return ctx.reply('你还没有钱包。/wallet 生成一个。');
+});
+
 bot.command('link', async (ctx) => {
   const addr = (ctx.match || '').trim();
   if (!/^kaspatest:[a-z0-9]+$/.test(addr)) return ctx.reply('用法: /link <你的 kaspatest 地址>');
