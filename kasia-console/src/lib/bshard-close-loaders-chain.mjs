@@ -39,6 +39,9 @@ function assertDaaDomain(name, v) {
  * robust seconds-mixing 守 (Bettor 洞①修): enforce 在 market resolution 后跑 → 链 tip ≥ resolutionDaa 必成立。
  *   unix-ts 秒(~1.75e9) >> 真 DAA tip(~1e8) → resolutionDaa > tipDaa 触发 = 误把存的秒-deadline 当 DAA 被挡。
  *   chain-read 路【必传 tipDaa】(= rpc getVirtualDaaScore); 纯单测路 tipDaa 可省(仅得 ms-guard, 见 assertDaaDomain 局限)。
+ * 🔴 verify-value-source 铁律 (Bettor 洞①-meta, 钉死给 chain-read): tipDaa 本身必【relay 自取 rpc.getVirtualDaaScore】,
+ *   **绝不可从 caller/不可信 ctx 路喂** — 否则恶意 caller 传假高 tipDaa(配假 res)→ res≤tipDaa 过 → 守 vacuous 洞①复活。
+ *   即: 凡 enforce 用的链值(tipDaa/cov_id/resolutionDaa/poolMerkleRoot...)relay 自取, 不可 caller 传 (= [[verify-enforce-reads-anchor-not-just-covenant-binds]])。
  */
 export function assertResolutionDaaVsTip(resolutionDaa, tipDaa) {
   const r = assertDaaDomain('resolutionDaa', resolutionDaa);
@@ -174,6 +177,8 @@ export function readPoolMerkleRootFromPsRedeem(psRedeemHex) {
  */
 export async function loadOracleStakesFromChain(rpc, memberPks, ctx) {
   const lockUntilDaa = canonicalLockUntilDaa(ctx.resolutionDaa, ctx.cooldownN, ctx.margin);
+  // 🔴 tipDaa 必 relay 自取 (洞①-meta 纪律): const tipDaa = BigInt(await rpc.getVirtualDaaScore());
+  //    传进 isEligibleOracleStake({...}, {..., tipDaa}) — 绝不收 caller 的 tipDaa (否则守 vacuous)。
   const out = [];
   for (const pk of memberPks) {
     // TODO[impl]: const { computeStakeP2SH_v1, ORACLE_STAKE_MIN_SOMPI } = await import('./oracle-stake-v1.mjs');
