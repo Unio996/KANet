@@ -151,32 +151,45 @@ function crossNodeCtx({ shards, psConsolidatedPool, onChainTickets }) {
   };
   const honestTickets = new Set(['aa:0:100', 'bb:0:200', 'cc:1:150']);
 
-  console.log('== T13: landed-in-history — leaf SPENT (post-consolidate) 但创建-tx 地址对 → ok ==');
+  // J2 hook 签名: ctx.readTxOutput(txid, idx) -> {address, amount_sompi} | null (查 kaspa_tx_log.outputs_json[idx])。
+  const honestReadTxOutput = async (txid, idx) => {
+    const a = honestLeafAddrByOutpoint[`${txid}:${idx}`];
+    return a ? { address: a, amount_sompi: '0' } : null;
+  };
+
+  console.log('== T13: landed-in-history — leaf SPENT (post-consolidate) 但创建-tx output[idx] 地址对 → ok ==');
   const ctx13 = mockCtx({ shards: honestShards(), rows: honestRows });
   ctx13.checkUtxoLanded = spentLeafLanded(honestTickets);
-  ctx13.readOutpointCreatedAddr = async (outpoint) => honestLeafAddrByOutpoint[outpoint] || null;
+  ctx13.readTxOutput = honestReadTxOutput;
   const r13 = await verifyBettorsCompleteFromChain(MID, honestLoaded, ctx13);
-  ok(r13.ok === true && r13.perTicketVerified === true, `leaf spent + landed-in-history hook → ok: ${r13.reason || '-'}`);
+  ok(r13.ok === true && r13.perTicketVerified === true, `leaf spent + readTxOutput landed-in-history → ok: ${r13.reason || '-'}`);
 
-  console.log('== T14: forge-leaf — 创建-tx 地址 != p2sh(spliceLeafState) (假 state/swap) → BUST (provenance 不丢) ==');
+  console.log('== T14: forge-leaf — 创建-tx output 地址 != p2sh(spliceLeafState) (假 state/swap) → BUST (provenance 不丢) ==');
   const ctx14 = mockCtx({ shards: honestShards(), rows: honestRows });
   ctx14.checkUtxoLanded = spentLeafLanded(honestTickets);
-  ctx14.readOutpointCreatedAddr = async () => 'L:FORGED_WRONG';              // 指向别处 forge 的同址 leaf → 地址不符
+  ctx14.readTxOutput = async () => ({ address: 'L:FORGED_WRONG', amount_sompi: '0' });  // 指向别处 forge 的同址 leaf → 不符
   const r14 = await verifyBettorsCompleteFromChain(MID, honestLoaded, ctx14);
   ok(r14.ok === false && /链锚|landed-in-history/.test(r14.reason), `forge-leaf BUST: ${r14.reason}`);
 
-  console.log('== T15: 无 hook + leaf spent → fail-loud (unspent-fallback false, 不静默过) ==');
+  console.log('== T15: 无 readTxOutput + leaf spent → fail-loud (unspent-fallback false, 不静默过) ==');
   const ctx15 = mockCtx({ shards: honestShards(), rows: honestRows });
-  ctx15.checkUtxoLanded = spentLeafLanded(honestTickets);                    // 无 readOutpointCreatedAddr → 回退 unspent → false
+  ctx15.checkUtxoLanded = spentLeafLanded(honestTickets);                    // 无 readTxOutput → 回退 unspent → false
   const r15 = await verifyBettorsCompleteFromChain(MID, honestLoaded, ctx15);
   ok(r15.ok === false && /链锚|unspent-fallback|landed-in-history hook/.test(r15.reason), `无 hook + spent leaf fail-loud: ${r15.reason}`);
 
-  console.log('== T16: landed-in-history hook 返 null (outpoint 链上查不到) → BUST ==');
+  console.log('== T16: readTxOutput 返 null (创建-tx 不在本地 indexer) → fail-loud BUST (不盲信) ==');
   const ctx16 = mockCtx({ shards: honestShards(), rows: honestRows });
   ctx16.checkUtxoLanded = spentLeafLanded(honestTickets);
-  ctx16.readOutpointCreatedAddr = async () => null;                          // 创建-tx 查不到 → 不可链锚
+  ctx16.readTxOutput = async () => null;                                     // indexer 查不到 → 不可链锚
   const r16 = await verifyBettorsCompleteFromChain(MID, honestLoaded, ctx16);
-  ok(r16.ok === false && /链锚|landed-in-history/.test(r16.reason), `hook null → BUST: ${r16.reason}`);
+  ok(r16.ok === false && /链锚|landed-in-history/.test(r16.reason), `readTxOutput null → BUST: ${r16.reason}`);
+
+  console.log('== T17: leaf outpoint idx 非法 (无 :idx) → fail-loud ==');
+  const ctx17 = mockCtx({ shards: [{ ...honestShards()[0], current_leaf_outpoint: 'tx0' }, honestShards()[1]], rows: honestRows });
+  ctx17.checkUtxoLanded = spentLeafLanded(honestTickets);
+  ctx17.readTxOutput = honestReadTxOutput;
+  const r17 = await verifyBettorsCompleteFromChain(MID, honestLoaded, ctx17);
+  ok(r17.ok === false && /idx 非法|链锚/.test(r17.reason), `idx 非法 fail-loud: ${r17.reason}`);
 
   console.log(`\nRESULT: ${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);

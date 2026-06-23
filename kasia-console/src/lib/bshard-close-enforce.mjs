@@ -417,20 +417,26 @@ export async function verifyBettorsCompleteFromChain(logicalMarketId, bettors, c
     //   '链上存在但没 consolidate 进本 PS' 的 forge → 由下方 PS-pool 聚合锚抓 (Σloaded != consolidated_pool)。
     //   与 J1 level2-B (ticket landed-in-history) 同 pattern; chainReader hook = ctx.readOutpointCreatedAddr。
     const leafAddr = ctx.p2sh(_spliceLeafState(sh.shard_redeem_hex, st));
+    const [leafTxid, leafIdxRaw] = String(sh.current_leaf_outpoint).split(':');
+    const leafIdx = Number(leafIdxRaw);
     let anchored = false; let anchorMode = '';
-    if (typeof ctx.readOutpointCreatedAddr === 'function') {
-      // landed-in-history: 读 outpoint 创建-tx output 地址 (spent/unspent 均可), 解 consolidate-spend 时序冲突。
-      const createdAddr = await ctx.readOutpointCreatedAddr(sh.current_leaf_outpoint);
-      anchored = !!createdAddr && String(createdAddr).toLowerCase() === String(leafAddr).toLowerCase();
+    if (typeof ctx.readTxOutput === 'function') {
+      // landed-in-history (J2 hook, 查本地 kaspa_tx_log.outputs_json): 读 leaf outpoint【创建-tx output[idx]】地址,
+      //   与 spent 无关。⚠ J1 review 点: 必按 outpoint 的【idx】取对位 output (多 output tx 别取错位)。
+      if (!Number.isInteger(leafIdx) || leafIdx < 0) {
+        return { ok: false, reason: `C1: shard ${sh.shard_index} leaf outpoint idx 非法 (${sh.current_leaf_outpoint})` };
+      }
+      const out = await ctx.readTxOutput(leafTxid, leafIdx);
+      // null = 创建-tx 不在本地 indexer → fail-loud (不盲信; indexer lag = 跨节点 liveness 项, J1 标注)。
+      anchored = !!out && out.address && String(out.address).toLowerCase() === String(leafAddr).toLowerCase();
       anchorMode = 'landed-in-history';
     } else {
-      // 无 landed-in-history hook → 回退 checkUtxoLanded(unspent), 仅 pre-consolidate 有效。
-      // consolidate 后 leaf 已 spent → 此回退 false → fail-loud (不静默过, 显式提示需 hook)。
-      const [leafTxid] = String(sh.current_leaf_outpoint).split(':');
+      // 无 readTxOutput hook → 回退 checkUtxoLanded(unspent), 仅 pre-consolidate 有效 (L399 保证 checkUtxoLanded 存在)。
+      // consolidate 后 leaf 已 spent → 此回退 false → fail-loud (不静默过, reason 提示需 landed-in-history hook)。
       anchored = await ctx.checkUtxoLanded(leafAddr, leafTxid);
       anchorMode = 'unspent-fallback';
     }
-    if (!anchored) return { ok: false, reason: `C1: shard ${sh.shard_index} leaf state 非链锚 (${anchorMode}: 创建-tx/落地址 != p2sh(spliced) — DB state 篡改? 或 consolidate 后需 ctx.readOutpointCreatedAddr landed-in-history hook)` };
+    if (!anchored) return { ok: false, reason: `C1: shard ${sh.shard_index} leaf state 非链锚 (${anchorMode}: 创建-tx output[${leafIdx}]/落地址 != p2sh(spliced) — DB state 篡改? 创建-tx 不在 indexer? 或 consolidate 后缺 ctx.readTxOutput landed-in-history hook)` };
     chainCount += Number(st.count);
     chainYes += BigInt(st.local_yes);
     chainNo += BigInt(st.local_no);
