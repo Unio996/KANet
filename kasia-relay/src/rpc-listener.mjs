@@ -122,7 +122,7 @@ const INDEXED_MAX = 20000;
 // Tracks (hash, daaScore) for every block-added event. Console settler-tick queries via
 // chain_get_blocks_from_daa_score IPC to find the canonical endBlock for VRF seed input.
 // Bettor r170 ③ 接线 — relay 唯一链上出口 (CLAUDE.md), Console 不直碰链.
-const RECENT_BLOCKS_MAX = 50000;  // ~14h @ 1bps testnet-12, plenty for any deadline
+const RECENT_BLOCKS_MAX = 120000;  // J2 2026-06-23: 旧 50000 + comment '~14h @ 1bps' = config bug (testnet-12 ~10BPS → 50000≈83min); 120000≈3.3h. ring buffer 填充慢→今晚靠 backward-walk(MAX_WALK 120000); production verifiable-endBlock 硬化后续.
 const _recentBlocks = [];  // [{ hash, daaScore }] insertion order = block-added order
 const _recentBlockHashes = new Set();  // dedup
 export function getRecentBlocksAtOrAbove(minDaa) {
@@ -199,7 +199,9 @@ export async function getBlockAtDaa(deadlineDaa) {
   // from an SPC block — info.sink is the canonical start.
   const startHash = info?.sink;
   if (!startHash) throw new Error(`cannot resolve SPC tip from getBlockDagInfo (sink missing; got: ${JSON.stringify(Object.keys(info || {}))})`);
-  const MAX_WALK = 50000;
+  const MAX_WALK = 120000;   // J2 2026-06-23 ozzeu close LAND: 50000 @ ~10BPS testnet-12 ≈ 83min walk 窗; 长拖延 close(>83min,
+  //   如调试)→ backward SPC walk 够不着 deadline_daa → enforce committee re-derive fail (getBlockAtDaa)。120000≈3.3h。
+  //   (decouple follow-up: production close 分钟级不撞; MAX_WALK 注释旧假设 1BPS=14h 实 ~10BPS=83min 是 config bug, verifiable-endBlock 硬化是后续。)
   let cursor = startHash;
   let lastEligible = null; // last block where daa >= deadlineDaa during walk
   // J1 #266/#268 (a) boundary seam fix (Bettor r807 批 / J2 r798 闭环核 / r800 caveat moot):
