@@ -1,7 +1,7 @@
 import { loadSeen, saveSeen } from "./state.mjs";
 import { routeMessage } from "./router.mjs";
 import { getAIReply } from "./ai.mjs";
-import { getConversations, getMessages, sendMessage, acceptHandshake, sendKaspa } from "./chain.mjs";
+import { getConversations, getMessages, sendMessage, acceptHandshake, sendKaspa, custodialSendKaspa } from "./chain.mjs";
 import { getWallet } from "./lib/wallet.mjs";
 import { isValidKaspaAddress } from "./lib/crypto.mjs";
 import { ingestMessage, ingestReply, ingestTx, ingestHandshake } from "./ingest.mjs";
@@ -474,6 +474,20 @@ if (process.send) {
           ingestTx({ traceId: sent?.txId, txid: sent?.txId, direction: 'outbound', amount: cmd.amount, fee: sent?.fee, localAddress });
           log(`TRANSFER ${cmd.amount} → ${cmd.target?.slice(-12)} TX: ${sent?.txId || '?'} fee: ${sent?.fee || '?'}`);
           break;
+
+        case 'custodial_transfer': {
+          // KANet-UI 2026-06-23 — Path C (Bettor 拍): TG 托管钱包转账。Console (持 CONSOLE_ENCRYPTION_KEY,
+          // = 托管人) just-in-time 派生 privkey 塞进 cmd.privkeyHex, relay 用 custodialSendKaspa 从托管地址
+          // 出 (复用 _sendKaspaInner 全套 KIP-9/广播/重试, 只换 key)。relay=唯一链上出口。
+          // 🔒 privkeyHex 绝不进 log / ingestTx / 错误消息。用完 cmd 引用即弃 (无持久化)。
+          const r = await custodialSendKaspa({ privKeyHex: cmd.privkeyHex, to: cmd.target, amount: cmd.amount, network: cmd.network });
+          sent = { txId: r?.txId, fee: r?.fee };
+          // ledger 入库用托管地址锚 (= cmd.fromAddress, 非 relay 自己地址), 不含 privkey。
+          ingestTx({ traceId: sent?.txId, txid: sent?.txId, direction: 'outbound', amount: cmd.amount, fee: sent?.fee, localAddress: cmd.fromAddress || localAddress });
+          if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: !!sent?.txId, txId: sent?.txId, fee: sent?.fee } });
+          log(`CUSTODIAL_TRANSFER ${cmd.amount} → ${cmd.target?.slice(-12)} TX: ${sent?.txId || '?'} fee: ${sent?.fee || '?'}`);
+          return; // 短路 generic handler (已 reply requestId)
+        }
 
         case 'split_utxo': {
           // Split UTXOs for concurrent transaction support.

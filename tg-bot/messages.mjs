@@ -174,10 +174,66 @@ export function brokerRole(opts = {}) {
   return lines.join('\n');
 }
 
+// KANet-UI 2026-06-23 (Owner 钦定 托管钱包): 生成时的醒目警告 + 助记词 display-once (Bettor 钦定文案模板,
+// 含③助记词过 Telegram 泄漏 + ④托管=TG账号安全 + 真钱用自己钱包口径; 不能埋)。
+export function walletGenerated(address, mnemonic) {
+  return [
+    '✅ 已为你生成测试网钱包:',
+    `📍 地址: ${address}`,
+    '',
+    '🔑 助记词 (12 词, 现在就备份, 只显示这一次):',
+    `\`${mnemonic}\``,
+    '',
+    '⚠️ 测试网托管钱包 (仅试玩), 务必看清:',
+    '· 助记词显示在这条 Telegram 消息里, Telegram 服务器看得到 → 切勿用于真钱',
+    '· 私钥由节点托管 (服务器持有), 方便直接玩; 但服务器或你的 Telegram 账号被盗 = 此钱包币会失',
+    '· 仅测试币, 零真实价值',
+    '· 真用 Kaspa 请用你【自己生成、助记词从未发给任何人/服务】的钱包',
+    '· 现在就备份助记词, 它只显示这一次, 系统不会再给你看',
+    '',
+    '下一步: /faucet 领测试 KAS → /bet 下注。/wallet 看地址余额。',
+  ].join('\n');
+}
+// 钱包视图 (地址+余额, 永不含助记词) + 测试网页脚。
+export function walletView(data) {
+  const bal = (data.balance_kas == null) ? '查询中/RPC 暂不可用' : (data.balance_kas + ' KAS');
+  return [
+    '👛 你的测试网托管钱包:',
+    `📍 地址: ${data.address}`,
+    `💰 余额: ${bal}`,
+    '',
+    '/receive 收款(给别人转你用此地址) · /faucet 领测试币 · /bet 下注',
+    '⚠ 测试网托管钱包 · 真钱请用你自己助记词从未外泄的钱包。',
+  ].join('\n');
+}
+
+// 转账 2 步确认 (Bettor: /send 必 confirm)。第一步显金额+目标+常驻托管警告, 待 /confirm。
+export function walletSendConfirm(to, amountKas) {
+  return [
+    '请确认转账:',
+    `· 金额: ${amountKas} KAS`,
+    `· 收款: ${to}`,
+    '',
+    '回 /confirm 执行, /cancel 取消。',
+    '⚠ 测试网托管钱包 · 真钱请用你自己助记词从未外泄的钱包。',
+  ].join('\n');
+}
+export function walletSendDone(txId, amountKas, to) {
+  return [
+    '✅ 转账已上链:',
+    `· 金额: ${amountKas} KAS → ${to}`,
+    `· TX: ${txId}`,
+    `· 浏览器: https://explorer-tn12.kaspa.org/txs/${txId}`,
+  ].join('\n');
+}
+
 export function help() {
   return [
     '命令:',
     '/start — 介绍 + 三步上手',
+    '/wallet — 生成/查看你的测试网托管钱包 (零门槛玩)',
+    '/balance — 查钱包余额  /receive — 显收款地址',
+    '/send <地址> <金额> — 从钱包转 KAS (2 步确认)',
     '/link <kaspatest地址> — 绑定你的地址',
     '/faucet — 领测试 KAS（先 /link）',
     '/swap — 兑换 KAS ↔ USDT(经 broker,链上)',

@@ -19,6 +19,10 @@ export const COMMAND_TYPES = Object.freeze({
   PUBLISH_CARD: 'publish_card',
   SEND_BROADCAST: 'send_broadcast',
   TRANSFER: 'transfer',
+  // KANet-UI 2026-06-23 — TG 托管钱包 /send (Path C, Bettor 拍): relay 用传入的托管 privkey 从托管地址转账
+  // (复用 _sendKaspaInner)。三层注册必齐 (KI-49 防坑: COMMAND_TYPES+SCHEMA+FIELD_TYPES, 否则 validateCommandPayload
+  // 静默 reject → "INVALID COMMAND" → /send 503)。
+  CUSTODIAL_TRANSFER: 'custodial_transfer',
   SPLIT_UTXO: 'split_utxo',
   // design-v2 B §2 root-fix (#24): consolidate relay-own fragmented UTXOs N→1 (keep `best` large).
   CONSOLIDATE_UTXO: 'consolidate_utxo',
@@ -98,6 +102,7 @@ export const COMMAND_PAYLOAD_SCHEMA = Object.freeze({
   [COMMAND_TYPES.PUBLISH_CARD]: [],
   [COMMAND_TYPES.SEND_BROADCAST]: ['channel', 'message'],
   [COMMAND_TYPES.TRANSFER]: ['target', 'amount'],
+  [COMMAND_TYPES.CUSTODIAL_TRANSFER]: ['privkeyHex', 'target', 'amount'],  // KANet-UI: TG 托管转账 (Path C)
   [COMMAND_TYPES.SPLIT_UTXO]: [],
   [COMMAND_TYPES.CONSOLIDATE_UTXO]: [],  // #24: no required field (minFragments optional)
   [COMMAND_TYPES.GET_RPC_STATE]: [],  // T-J2-2026-05-12 #2 — read-only, 无 required field
@@ -154,6 +159,8 @@ export const COMMAND_FIELD_TYPES = Object.freeze({
   [COMMAND_TYPES.SEND_MESSAGE]: { target: 'string', message: 'string' },
   [COMMAND_TYPES.SEND_BROADCAST]: { channel: 'string', message: 'string' },
   [COMMAND_TYPES.TRANSFER]: { target: 'string', amount: ['string', 'number'] },
+  // KANet-UI: TG 托管转账 — privkeyHex/target string, amount string|number, network/fromAddress optional string。
+  [COMMAND_TYPES.CUSTODIAL_TRANSFER]: { privkeyHex: 'string', target: 'string', amount: ['string', 'number'] },
   [COMMAND_TYPES.PUBLISH_CARD]: { params: 'object' },
   [COMMAND_TYPES.SPLIT_UTXO]: { targetCount: 'number' },
   [COMMAND_TYPES.CONSOLIDATE_UTXO]: { minFragments: 'number' },  // #24: optional

@@ -94,6 +94,20 @@ export function myPositions(linkedAddr) {
   return req('GET', `/api/pool/my-positions?linked_addr=${encodeURIComponent(linkedAddr)}`);
 }
 
+// ── TG custodial wallet (Owner 钦定 2026-06-23, 零门槛玩): Console 持 key, bot 0-key 只调 ──
+// create 返助记词【仅一次】(display-once, bot 显给用户存后即弃, 不留); get 永不回助记词。
+export function tgWalletCreate(tgUserId) {
+  return req('POST', '/api/tg-wallet/create', { tg_user_id: tgUserId });
+}
+export function tgWalletGet(tgUserId) {
+  return req('GET', `/api/tg-wallet/${encodeURIComponent(tgUserId)}`);
+}
+// Path C 转账 (Bettor 拍): Console 经 relay 唯一出口转账。tg_user_id = ctx.from.id = 属主授权
+// (bot 只用调用者自己的 id, 一人只能从自己钱包转出)。Console 侧 just-in-time 解密派生 privkey, bot 0-key。
+export function tgWalletSend(tgUserId, to, amountKas) {
+  return req('POST', `/api/tg-wallet/${encodeURIComponent(tgUserId)}/send`, { to, amount_kas: amountKas });
+}
+
 // ── broker onboarding (Owner 钦定 2026-06-22): user 在 bot 里申请当 broker (地址制) ──
 // 申请落 pending; Owner 经 /identities 批 trust→approved 才激活 (auth 门已落 = 公开自助安全)。
 // 状态查 (token 永不回); 申请提交 (用户的 /link 地址 + 他的 @BotFather token)。
