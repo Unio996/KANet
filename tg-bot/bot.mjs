@@ -49,11 +49,20 @@ const faucetCooldown = new Map();
 const pendingSends = new Map(); // tg_user → { to, amount, ts }
 
 // KANet-UI 2026-06-22 (Owner 实测派修 ②): /start 查 /link 绑定 — 已绑显地址+下一步, 未绑走三步引导。
-bot.command('start', (ctx) => {
+bot.command('start', async (ctx) => {
   const tgUser = String(ctx.from.id);
   PM.exitBetFlow(tgUser);
   const addr = PM.getLinkedAddr(tgUser) || linked.get(tgUser)?.address;
-  return ctx.reply(addr ? M.startMessageLinked(addr) : M.startMessage());
+  if (!addr) return ctx.reply(M.startMessage());
+  // KANet-UI 2026-06-23 (Bettor 承重 custody 口径): custody-aware /start — 托管钱包(/wallet 生成, 节点持 key)
+  // 与非托管(/link 自己地址, key 用户掌控)的警告不可一刀切。查 tg-wallet: 存在且地址==当前绑定 → 托管。
+  // 查询失败 → custodial=null (显两类并存警告, 绝不假称"bot 不持 key")。
+  let custodial = null;
+  try {
+    const w = await api.tgWalletGet(tgUser);
+    if (w.ok && w.json?.ok) custodial = !!(w.json.exists && w.json.address === addr);
+  } catch { /* Console 暂不可达 → null → 中性 custody 警告 */ }
+  return ctx.reply(M.startMessageLinked(addr, custodial));
 });
 bot.command('help', (ctx) => ctx.reply(M.help()));
 
@@ -141,7 +150,9 @@ bot.command('faucet', async (ctx) => {
   const r = await api.faucetRequest(addr);
   if (!r.ok) return ctx.reply('领取失败：' + (r.json?.error || r.status));
   faucetCooldown.set(tgUser, now);
-  return ctx.reply(`✅ 已发 5 测试 KAS 到 ${addr}\ntx ${String(r.json.txid || '').slice(0, 16)}…（约 10 秒到账）\n下一步：/bet 开始押注。`);
+  // KANet-UI 2026-06-23 (Bettor 派修): 数量不硬编——用 API 回的真值 (server env FAUCET_AMOUNT_KAS, 现 10k)。
+  const amt = r.json.amount || '测试 KAS';
+  return ctx.reply(`✅ 已发 ${amt} 到 ${addr}\ntx ${String(r.json.txid || '').slice(0, 16)}…（约 10 秒到账）\n下一步：/bet 开始押注。`);
 });
 
 // /verify 已废弃 (r275 砍签名挑战). 老用户可能还按旧习惯发, 友好重定向到 /link。

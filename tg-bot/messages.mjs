@@ -5,23 +5,34 @@ import { CONFIG } from './config.mjs';
 export const DISCLAIMER = 'testnet-only · MIT 开源 · 不运营主网 · 非投资建议';
 
 export function startMessage() {
-  // gate D onboarding tour (Bettor Q3: enhance /start into a low-friction guided sequence; copy is
-  // placeholder, Owner待拍 final wording). 无账户无许可 + 每步给下一命令.
+  // gate D onboarding tour (Bettor Q3: low-friction guided sequence). 无账户无许可 + 每步给下一命令.
+  // KANet-UI 2026-06-23 (Owner 真机发现 + Bettor 派修): /start 必列钱包命令 (原漏); custody 口径不可一刀切——
+  //   托管钱包 (/wallet) 节点持 key, 非托管 (/link) key 用户掌控 (Bettor 承重警告, 不可写"bot 不持 key"假称).
+  //   faucet 数量绝不硬编 (env FAUCET_AMOUNT_KAS 可调, 现 10k), 故 /start 不写具体数, 领取时由 API 回真值。
   return [
-    '👋 KANet — 用 Kaspa 信任链把 AI agent 接到任何市场。无账户、无许可，bot 碰不到你的钱。',
+    '👋 KANet — 用 Kaspa 信任链把 AI agent 接到任何市场。无账户、无许可。',
     '',
-    '👉 第一次来？三步上手:',
-    '① /link <你的 kaspatest 地址> — 绑定你的地址（没有就用任意 Kaspa testnet 钱包生成一个）',
-    '② /faucet — 领 5 个测试 KAS（约 10 秒到账）',
-    '③ /bet — 押注一个预测市场（你自己链上锁定，5 个评判结算），再 /mybets 看赢/输/退款',
+    '👉 第一次来？两种玩法，挑一个上手:',
+    '',
+    '🅰 零门槛试玩（托管钱包，最快）:',
+    '① /wallet — 节点为你生成一个测试网钱包（⚠ 节点持 key，仅供试玩）',
+    '② /faucet — 领测试 KAS（约 10 秒到账）',
+    '③ /bet — 押注预测市场（链上锁定，多评判结算），再 /mybets 看赢/输/退款',
+    '',
+    '🅱 用你自己的钱包（非托管，key 只你掌控）:',
+    '① /link <你的 kaspatest 地址> — 绑定你自己的地址（用任意 Kaspa testnet 钱包生成）',
+    '② /faucet — 领测试 KAS',
+    '③ /bet — 押注，再 /mybets 看赢/输/退款',
     '',
     '更多:',
+    '· /balance · /receive · /send <地址> <金额> — 托管钱包收发',
     '· /swap — 兑换 KAS ↔ USDT（经 broker，链上结算）',
     '· /discover — 浏览开放挂单 / 预测市场',
     '· /broker — 想做撮合者（broker）赚佣金？怎么参与 + 价值分成',
     '· /help — 全部命令',
     '',
-    '⚠ 你的钱始终由你自己链上掌控 —— 这个 bot 不持任何 key、碰不到你的资金。每笔付款都是你从自己地址链上发起。',
+    '⚠ /wallet 托管钱包由【节点持 key】，仅供测试网试玩；',
+    '   真钱请务必换用你【自己生成、助记词从未发给任何人/服务】的非托管钱包（/link 绑定）。',
     '想自己 build？KANet 开源（MIT），fork 一个角色（broker / oracle / prediction / exchange）跑你自己的节点。',
     DISCLAIMER,
   ].join('\n');
@@ -29,23 +40,42 @@ export function startMessage() {
 
 // KANet-UI 2026-06-22 (Owner 实测派修): /start 对【已 /link 的用户】不重复三步引导, 改显其绑定地址 +
 // 直接给下一步 (Owner 钦定 'personalize-on-link, 显地址 + 最多一个改绑'). 未绑用户仍走 startMessage()。
-export function startMessageLinked(addr) {
-  return [
+// KANet-UI 2026-06-23 (Bettor 派修·承重 custody 口径): custody 参数 = true(托管/wallet) / false(非托管/link) /
+//   null(查不到 → 不假称任一方, 显两类并存警告)。绝不一刀切写"bot 不持 key"(对托管钱包是假的, 误导用户拿真钱)。
+export function startMessageLinked(addr, custodial = null) {
+  const lines = [
     '👋 KANet — 你已就绪。',
     '',
     `📍 你的地址: ${addr}`,
-    '   (改绑: /link <新地址>)',
+  ];
+  if (custodial === true) lines.push('   (测试网托管钱包·节点持 key — 仅供试玩)');
+  else if (custodial === false) lines.push('   (你自己的非托管地址·改绑: /link <新地址>)');
+  else lines.push('   (改绑: /link <新地址>)');
+  lines.push(
     '',
     '👉 下一步:',
-    '· /bet — 押注预测市场（你自己链上锁定，多评判结算），/mybets 看赢/输/退款',
-    '· /faucet — 领 5 个测试 KAS',
+    '· /bet — 押注预测市场（链上锁定，多评判结算），/mybets 看赢/输/退款',
+    '· /faucet — 领测试 KAS',
     '· /swap — 兑换 KAS ↔ USDT（经 broker，链上结算）',
     '· /broker — 想做撮合者赚佣金？申请当 broker + 价值分成',
     '· /discover · /help',
-    '',
-    '⚠ 你的钱始终由你自己链上掌控 —— bot 不持 key、碰不到你的资金。',
-    DISCLAIMER,
-  ].join('\n');
+  );
+  if (custodial === true) {
+    lines.push('· /balance 查余额 · /receive 收款 · /send <地址> <金额> 转账');
+    lines.push('');
+    lines.push('⚠ 你用的是测试网【托管钱包】：私钥由节点持有，方便零门槛试玩。');
+    lines.push('   真钱请务必换用你【自己生成、助记词从未外泄】的非托管钱包。');
+  } else if (custodial === false) {
+    lines.push('');
+    lines.push('⚠ 这个地址由你自己链上掌控，bot 不持它的 key——每笔付款都你从自己钱包链上发起。');
+    lines.push('   (想零门槛试玩也可 /wallet 生成测试网托管钱包，但托管钱包节点持 key，仅供试玩。)');
+  } else {
+    lines.push('');
+    lines.push('⚠ 若你用 /wallet 托管钱包：私钥由节点持有，仅供测试网试玩；');
+    lines.push('   若你 /link 自己地址：key 只你掌控。真钱请务必用你自己助记词从未外泄的非托管钱包。');
+  }
+  lines.push(DISCLAIMER);
+  return lines.join('\n');
 }
 
 // KANet-UI 2026-06-22 (Owner 钦定 broker 收益统计 DM 显): 格式化 address-keyed 收益。
@@ -235,7 +265,7 @@ export function help() {
     '/balance — 查钱包余额  /receive — 显收款地址',
     '/send <地址> <金额> — 从钱包转 KAS (2 步确认)',
     '/link <kaspatest地址> — 绑定你的地址',
-    '/faucet — 领测试 KAS（先 /link）',
+    '/faucet — 领测试 KAS（先 /wallet 或 /link）',
     '/swap — 兑换 KAS ↔ USDT(经 broker,链上)',
     '/bet — 押注预测市场',
     '/mybets — 看自己的押注 + 状态',
