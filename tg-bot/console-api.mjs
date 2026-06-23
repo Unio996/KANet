@@ -102,6 +102,11 @@ export function tgWalletCreate(tgUserId) {
 export function tgWalletGet(tgUserId) {
   return req('GET', `/api/tg-wallet/${encodeURIComponent(tgUserId)}`);
 }
+// Path C 转账 (Bettor 拍): Console 经 relay 唯一出口转账。tg_user_id = ctx.from.id = 属主授权
+// (bot 只用调用者自己的 id, 一人只能从自己钱包转出)。Console 侧 just-in-time 解密派生 privkey, bot 0-key。
+export function tgWalletSend(tgUserId, to, amountKas) {
+  return req('POST', `/api/tg-wallet/${encodeURIComponent(tgUserId)}/send`, { to, amount_kas: amountKas });
+}
 
 // ── broker onboarding (Owner 钦定 2026-06-22): user 在 bot 里申请当 broker (地址制) ──
 // 申请落 pending; Owner 经 /identities 批 trust→approved 才激活 (auth 门已落 = 公开自助安全)。
