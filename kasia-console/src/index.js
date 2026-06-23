@@ -42,6 +42,7 @@ import { registerStockRoutes } from './api/stocks.js';
 import { registerBettorRoutes } from './api/bettor.js';
 import { registerPoolRoutes } from './api/pool.js';
 import { registerKanetBrokerRoutes } from './api/kanet-broker.js';
+import { registerTgWalletRoutes } from './api/tg-wallet.js'; // TG custodial wallet (Owner 钦定, Bettor 审)
 import { registerKanetMakerRoutes } from './api/kanet-maker.js';
 import { registerOraclePoolRoutes } from './api/oracle-pool.js';
 import { registerTestOracleRoutes } from './api/test-oracle.js';
@@ -187,6 +188,7 @@ await registerAuditPredictionRoutes(fastify);
 await registerBettorRoutes(fastify);
 await registerPoolRoutes(fastify);
 await registerKanetBrokerRoutes(fastify);
+await registerTgWalletRoutes(fastify);
 await registerKanetMakerRoutes(fastify);
 await registerOraclePoolRoutes(fastify);
 await registerTestOracleRoutes(fastify);
