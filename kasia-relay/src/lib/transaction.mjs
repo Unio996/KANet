@@ -154,12 +154,19 @@ async function _sendKaspaInner(to, amountSompi, priorityFee = 0n, payload, _isRe
     let selectedEntries = entries;
     let outputAmount = amountSompi;
 
-    // Full-UTXO self-send mode: pick largest UTXO, send (value - fee) to self.
-    // Single input + single output = zero change = near-zero KIP-9 storage mass.
-    // Used for comm/card/broadcast (self-sends where the payload is what matters).
-    // Fee scales with payload size — dynamic reserve prevents truncation.
+    // Full-UTXO self-send mode: pick largest UTXO, send (value - reserve) to self.
+    // 🔴 FIX (KANet-UI 2026-06-21): this branch USED to be a zero-change 1-in-1-out (the Generator folded
+    // the sub-dust `reserve − minFee` leftover into the fee). On the re-vendored covenant wasm that fold no
+    // longer happens — the Generator emits the ~0.003 KAS leftover as a CHANGE output whose 1/value blows up
+    // KIP-9 storage mass → every self-full broadcast fails "Storage mass exceeds maximum" (reproduced on
+    // f5cf6d85 after restart onto the new wasm; fresh external UTXO also failed → it is the change, not the
+    // UTXO set). Fix = size the reserve so the realized change is a KIP-9-SAFE ~1.5 KAS UTXO (1/1.5KAS mass
+    // ≈ 6.6k ≪ 100k limit), not sub-dust. The change returns to self (a recoverable UTXO consolidate_utxo
+    // can later re-merge), so no value is lost — only the broadcast becomes valid again.
     if (amountSompi === 0n && to === senderAddress) {
-      const feeReserve = estimateFeeReserve(payload);
+      const KIP9_SAFE_CHANGE = 150_000_000n; // 1.5 KAS — change output clears KIP-9 storage-mass floor
+      const baseReserve = estimateFeeReserve(payload);
+      const feeReserve = baseReserve > KIP9_SAFE_CHANGE ? baseReserve : KIP9_SAFE_CHANGE;
       entries.sort((a, b) => (a.amount < b.amount ? 1 : -1)); // descending
       const best = entries[0];
       if (best.amount < feeReserve * 2n) throw new Error(`UTXO too small for payload (need ~${sompiToKaspaString(feeReserve * 2n)} KAS, have ${sompiToKaspaString(best.amount)} KAS)`);

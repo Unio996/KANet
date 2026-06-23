@@ -465,6 +465,11 @@ await startAllRelays();
 import { startTgBotIfConfigured } from './services/tg-bot-manager.js';
 await startTgBotIfConfigured();
 
+// 多-bot tg-manager (Owner 钦定 2026-06-22): per-approved-broker bot (地址制). Boots a bot for every
+// approved broker_onboarding (trust elevated) + 60s reconcile to pick up new approvals / respawn deaths.
+import { startBrokerBotManager } from './services/broker-bot-manager.js';
+startBrokerBotManager();
+
 // Bettor scanner cron — Phase 3a (6h cron, top 10 推荐写入 bettor_recommendations)
 // 5/14 Owner pivot: 数学 Kelly 路线 deprecated, 新 scavenger 接管. 老 scanner 暂保留留 fallback.
 // import { startCron as startBettorCron } from './services/bettor-scanner.js';
@@ -524,14 +529,25 @@ startPredictionSettlerCron();
 import { startPredictionVoterCron } from './services/bettor-prediction-voter.js';
 startPredictionVoterCron();
 
+// Track B (production-trustless 自治-enforce): bshard close_attest voter daemon. 30s cron, scan host-local
+// is_oracle=1 relays + v0.7 markets in 'collecting_sigs' with metadata.bshard_close_request → each committee
+// node INDEPENDENTLY runs enforceCloseAttest (命门①③④ + frozen_evidence 同源 + fix① 链锚 re-derive + C1/C3/D1)
+// before its relay signs (replaces relay blind-sign). E1 ctx hooks wired (J2 2026-06-22).
+import { startBshardCloseVoterCron } from './services/bshard-close-voter.js';
+startBshardCloseVoterCron();
+
 // B2 v0.5 Sub 2d Phase 1 — pool_markets settler (aggregate 3 oracle votes + consensus check).
 // Phase 2 (TX construction + sig orchestration + broadcast) deferred.
 import { startPoolMarketSettlerCron } from './services/pool-market-settler.js';
 startPoolMarketSettlerCron();
 
 // DoD C 收尾 (Bettor r393): 5min cron 自动领 unclaimed bettor refunds for cancelled markets.
+// J1 2026-06-20: env gate (BETTOR_REFUND_CLAIM_ENABLED=0 disable). claimAutoDispatcherTick 在 255-market backlog 上每 tick
+//   重同步 DB 查(better-sqlite3 native)打满 console CPU(node --prof 钉死, 见记忆 console-restart-storm)→ 100% peg 堵死
+//   频道 send/ingest + HTTP。default-on(canonical 无 env 照跑); 我 :3300 kanet.env set 0 止血。
 import { startBettorRefundClaimAutoCron } from './services/bettor-refund-claim-auto.mjs';
-startBettorRefundClaimAutoCron();
+if (process.env.BETTOR_REFUND_CLAIM_ENABLED !== '0') { startBettorRefundClaimAutoCron(); }
+else { console.log('[claimAuto] disabled via BETTOR_REFUND_CLAIM_ENABLED=0 (J1 CPU-hog gate)'); }
 
 // r420 auto-bet (Bettor r433/r436 Owner 钦定 规模化跨域实测): Console-cron 自动押注.
 // 取代外部 _nwt_tn_autobet_loop.mjs daemon (= 不 follow Console restart, KANet-UI r656 surface).

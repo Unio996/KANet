@@ -1,0 +1,110 @@
+// RootClaim.sil — cascade convert-split ROOT-CLAIM 合约 (J1, 2026-06-20; 拆 PoolRoot 降 SIZE).
+//
+// 拆分动因: claim_draw 的 merkle for-loop 是 PoolRoot 字节大头 → 隔离到本合约, 让 seal 目标 RootClose 极简(过 P1)。
+// 职责 = 串行派彩(winner merkle-bound draw-down)。1-entry: claim_draw(self-recreation, single-blake2b ~2.5u/B)。
+// 7-field state {local_yes, local_no, count, pool_value, closed, winningSide, payoutRoot}。
+// **RootClaim 只能经 RootClose.convert_to_claim 创建**(foreign-template, claim_tmpl_hash=本合约模板焊进 RootClose);
+//   convert require(closed==1) → RootClaim 结构上只见 closed==1(§3: 无跨合约 closed race, XOR 留在 RootClose)。
+// 承重 = output-bind weld(claim draw-down -payout)+ dust-ticket spent-once nullifier(R7 防 double-claim)+ Σin==Σout。
+//
+// ⚠ DRAFT (spec docs/2026-06-19-cascade-convert-split-spec.md §2.2/§3 对齐; claim_draw 从 PoolRoot.sil verbatim 港为
+//   独立 1-entry。R7: 读+花 dust-ticket(ticketInIdx)= spent-once。merkle depth-cap=8(256 winner); §4 若 P2 撞墙=降 cap 是合法 lever)。
+
+pragma silverscript ^0.1.0;
+
+contract RootClaim(
+    byte[32] ps_tmpl_hash,        // dust PoolSide-ticket expectedTemplateHash (R7: claim 读 spent-once 凭证)
+    byte[32] shard_pool_id,       // 本 pool 身份 (ticket 记此; per-instance P2SH 唯一性锚)
+    // —— genesis State (7-field; 实际由 RootClose.convert_to_claim 提供, init_* 仅定义 State 布局) ——
+    int      init_local_yes,
+    int      init_local_no,
+    int      init_count,
+    int      init_pool_value,
+    int      init_closed,
+    int      init_winningSide,
+    byte[32] init_payoutRoot,
+    int      init_claimed_bitmap   // R7 re-mint fix: 已领 winner slot 位图 (depth-2=4winner=4bit); convert 创建时 0
+) {
+    int local_yes   = init_local_yes;
+    int local_no    = init_local_no;
+    int count       = init_count;
+    int pool_value  = init_pool_value;
+    int closed      = init_closed;
+    int winningSide = init_winningSide;
+    byte[32] payoutRoot = init_payoutRoot;
+    int claimed_bitmap = init_claimed_bitmap;   // R7: claim 标记 merkle_index slot, re-mint 同 slot 已置位被挡
+
+    // dust PoolSide-ticket State (claim 读 spent-once 凭证)
+    struct Tk {
+        byte[32] bettorPk;
+        int      direction;
+        int      stake;
+        byte[32] shardPoolId;
+    }
+
+    // —— entry 0: claim_draw (winner 串行从 root 取; closed==1; payout merkle-bound draw-down) —— [PoolRoot verbatim]
+    entrypoint function claim_draw(
+        int      rootOutIdx,           // 重建 RootClaim continuation (self)
+        int      payoutOutIdx,         // winner payout output
+        int      payout,               // witness; merkle-prove ∈ payoutRoot
+        int      merkle_index,
+        int      tree_depth,
+        byte[32][] siblings,
+        int      ticketInIdx,          // dust-ticket UTXO 在 inputs 的位 (R7 spent-once)
+        int      ticket_prefix_len,
+        int      ticket_suffix_len
+    ) {
+        require(closed == 1);                              // 仅 settled 可 claim (convert 已 gate, 此为结构保证 + 深度防御)
+        require(tree_depth >= 0); require(tree_depth <= 1);  // ★ DoD cap depth-1 (2 winner/market): claimed-bitmap(R7 fix)加
+        //   +122B template → depth-2+bitmap template ~892B>790 bust(桥模板先破), depth-1+bitmap ~764B<790 ✅(J2/UI dual-vantage
+        //   probe 坐实)。DoD §0=单小市场跑通一次, 2winner 够。winner-scale(recursive-merkle/winner-tree-shard §7)post-DoD。
+        require(merkle_index >= 0);
+        require(payout >= 1000);
+        require(payout <= pool_value);                     // fail-fast (weld+共识本就兜负输出, 此条更快更清晰)
+
+        // 读 dust-ticket (R7 spent-once; 原语验 ps_tmpl_hash + 取 bettorPk/direction/stake/shardPoolId; spend 为 tx input = nullifier)
+        Tk tk = readInputStateWithTemplate(ticketInIdx, ticket_prefix_len, ticket_suffix_len, ps_tmpl_hash);
+        require(tk.shardPoolId == shard_pool_id);          // ticket 属本 pool
+        require(tk.direction == winningSide);              // winner (赢向绑 root.winningSide)
+
+        // merkle-prove payout ∈ payoutRoot: leaf=blake2b(pk‖ser(payout,8)), pk-ASC, running-divisor climb
+        byte[32] cur = blake2b(byte[](tk.bettorPk) + byte[](payout, 8));
+        int div = 1;
+        for (k, 0, tree_depth, 1) {                        // ★ loop bound 1 = unroll 1 iter (DoD depth-1 cap=2winner); bound 控制编译字节非 tree_depth runtime
+            int bit = (merkle_index / div) % 2;
+            if (bit == 0) { cur = blake2b(byte[](cur) + byte[](siblings[k])); }
+            else          { cur = blake2b(byte[](siblings[k]) + byte[](cur)); }
+            div = div * 2;
+        }
+        require(cur == payoutRoot);
+        // ★ R7 aliasing fix(Bettor 抓): climb 后 div=2^tree_depth=叶数。merkle_index 必 <叶数 —— 否则 index=2 与 index=0
+        //   产同 climb(bit=(2/1)%2=0=(0/1)%2)却 mask=2^2=4≠slot0(mask=1)=同票换 alias index 双领。绑死 index∈[0,2^depth)。
+        require(merkle_index < div);
+
+        // ★ R7 re-mint fix: claimed-bitmap nullifier — winner slot merkle_index 领一次。re-mint 假 ticket 同 leaf→同
+        //   merkle_index→同 slot, 已置位被挡(spent-once 真锚=合约 state 的 slot 位, 非可重铸的 ticket UTXO)。
+        //   SS 无 << → mask=2^merkle_index 用 loop(像 merkle div*2); 无 >> → /mask %2 查位; +mask 置位(位已验0=同 |)。
+        int mask = 1;
+        for (b, 0, merkle_index, 2) { mask = mask * 2; }   // mask = 2^merkle_index (depth-1: index 0-1, bound 2 够)
+        require((claimed_bitmap / mask) % 2 == 0);          // slot 未领过
+
+        // payout → bettor P2PK (exact; fee 走 non-pool input + change)
+        byte[34] bettorLock = new ScriptPubKeyP2PK(pubkey(tk.bettorPk));
+        require(tx.outputs[payoutOutIdx].scriptPubKey == byte[](bettorLock));
+        require(tx.outputs[payoutOutIdx].value == payout);
+
+        // 重建 RootClaim-self: pool_value -= payout (draw-down) + claimed_bitmap 置 slot 位; state 余不变
+        validateOutputState(rootOutIdx, {
+            local_yes:  local_yes,
+            local_no:   local_no,
+            count:      count,
+            pool_value: pool_value - payout,
+            closed:     1,
+            winningSide: winningSide,
+            payoutRoot: payoutRoot,
+            claimed_bitmap: claimed_bitmap + mask
+        });
+        // ★ output-bind weld: root value == pool_value - payout
+        require(tx.outputs[rootOutIdx].value == pool_value - payout);
+    }
+}

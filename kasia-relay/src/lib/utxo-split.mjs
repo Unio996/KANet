@@ -173,11 +173,35 @@ export async function consolidateUtxosRelay(opts = {}) {
     if (totalBalance < MIN_BALANCE_FOR_SPLIT) {
       return { ok: false, reason: 'balance_too_low', balance: sompiToKaspaString(totalBalance).toString() };
     }
-    // 1-out consolidate: no explicit output → Generator routes all value (minus fee) to changeAddress
-    // = one big consolidated UTXO. priorityFee floor mirrors splitUtxosRelay (post-Toccata standardness).
+    // 🔴 FIX (KANet-UI 2026-06-21, clean-relay probe-not-model): `outputs: []` does NOT sweep — the
+    // Generator selects the MINIMUM inputs to cover only the fee (~1 entry) → a 1-in-1-out no-op. Proven
+    // on clean quiescent relay f5cf6d85: 546 fragmented UTXOs → consolidate returns consolidated:true but
+    // count stays 546 / best unchanged (only fee spent). The old comment ("routes all value to change")
+    // was a wrong assumption — the Generator minimizes, it does not sweep. To FORCE every entry into one
+    // consolidated UTXO we specify an explicit self-output of (total − feeReserve); the Generator must then
+    // consume all inputs to fund it (mirrors splitUtxosRelay, which forces consumption via its explicit
+    // per-output amounts). For input counts that exceed a single TX's mass the Generator compounds (chains
+    // merge TXs into the final output) — the while-loop submits each round. feeReserve scales with input
+    // count (per-input mass) + the priorityFee floor; any surplus over actual chain fee returns as change.
+    // Consolidate ALL inputs → ONE big output + a deliberately-LARGE change. Four clean-relay probes
+    // (f5cf6d85) pinned the constraints:
+    //  ① outputs:[] → Generator minimizes inputs (~1) → 1-in-1-out no-op (546→546, the original bug).
+    //  ② one output of (total−tiny_reserve) → forces all inputs BUT the leftover change is sub-KAS, whose
+    //     1/value blows up KIP-9 storage mass → "Storage mass exceeds maximum" (24×4400 KAS; change 0.22 KAS).
+    //  ③ too-small reserve under-funds the final compound TX → "Insufficient funds" (N=546, reserve 2.73M).
+    //  ④ a few EQUAL outputs only consumes ~half the inputs (the explicit demand is met with min inputs).
+    // ⑤ FIX: explicit output = total − feeReserve with feeReserve set LARGE (≥CHANGE_FLOOR ≈ 5 KAS) so the
+    //    Generator must consume every input to fund the near-total output, AND the resulting change ≈ 5 KAS
+    //    is itself well above the KIP-9 storage-mass floor (J2: ~1 KAS min; 0.1 KAS fails) → no storage-mass
+    //    blowup, no tiny change. Result = 2 UTXOs: one huge consolidated best + one ~5 KAS change. The
+    //    per-input term covers the compound chain's per-TX fees so the final sweep TX is funded.
+    const CHANGE_FLOOR = 500_000_000n; // ~5 KAS — change lands above KIP-9 storage-mass min, not as dust
+    const feeReserve = CHANGE_FLOOR + BigInt(entries.length * 100_000);
+    if (totalBalance <= feeReserve) return { ok: false, reason: 'balance_too_low_after_fee', balance: sompiToKaspaString(totalBalance).toString() };
+    const sweepAmount = totalBalance - feeReserve;
     const generator = new Generator({
       entries,
-      outputs: [],
+      outputs: [new PaymentOutput(new Address(address), sweepAmount)],
       priorityFee: 500_000n,
       changeAddress: new Address(address),
       networkId,

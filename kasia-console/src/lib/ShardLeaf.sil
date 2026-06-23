@@ -1,0 +1,108 @@
+// ShardLeaf.sil — bshard convert-split REGISTER-side 合约 (J1, 2026-06-19; 解 register SIZE-bound 9999).
+//
+// 动因(probe-B 链上实证 SIZE-bound): register_append validate-调用数恒定(2: ps WithTemplate + leaf self),
+//   register 成本纯∝揭示合约大小。原 PoolLeaf(register+fold+seal 2088B)→register 揭全约→13738u>9999。
+//   convert-split: 把 fold/seal 字节移到 FoldNode 模板, ShardLeaf 只留 register + 轻 convert(1:1→FoldNode) → ~490B
+//   → register 揭小约 → <9999(probe-B 493B 链上实证过 units cap)。
+//
+// 本合约 = ShardLeaf(register-side): register_append(收注, 与原 PoolLeaf byte-identical) + consolidate_to_payout
+//   (关池后本片全额归集进【真 PayoutShard covenant 实例】, cov_id provenance destination-bind, value 守恒)。
+//
+// 🔑 (A) cov_id 重设计(NWT 异质核承重修, 2026-06-20): 原 convert_to_foldnode(fold-tree 路)在 (A)/rolling 整个废弃。
+//   归集 destination 必绑 cov_id PROVENANCE 非 template LOCATION — template-match 可被 recreatable-UTXO 造【同 template
+//   自控 state 的假 PayoutShard】击穿 → 输家片导入假 PS 被 attacker claim = 真 theft。∴ bake 真 payout_cov_id(market
+//   创建 genesis-mint PayoutShard 时已知), consolidate 用 OpInputCovenantId 绑(假 PS 的 cov_id≠baked → BUST)。
+//   单向 DAG 破 circular: PayoutShard 身份独立本片(其 ctor 不 bake 本片任何东西)→ 本片单向 bake payout_cov_id, 无循环。
+//
+// 承重锚: register output-bind weld(leaf value==pool_value+stake) + consolidate cov_id-bind + 全额守恒(out==in+pool_value)。
+// 4-field 无 outcome = 结构上不可结算; 结算经 PayoutShard.close_attest(委员 attest payoutRoot)+ claim(store-payout)。
+
+pragma silverscript ^0.1.0;
+
+contract ShardLeaf(
+    byte[32] market_id,
+    byte[32] ps_tmpl_hash,        // dust PoolSide-ticket expectedTemplateHash (register 造 ticket)
+    byte[32] shard_pool_id,       // 本 pool 身份 (ticket 记此)
+    int      seal_count,          // count==seal_count 才可 consolidate (= 原 PoolLeaf seal 门)
+    int      min_bet,
+    byte[32] payout_cov_id,       // ★ 真 PayoutShard covenant cov_id (genesis-mint 已知; consolidate destination provenance-bind; baked)
+    int      deadline,            // ★件1(J1): partial-shard sweep deadline (Unix ts, ctor-baked immutable=spender 不可伪; partial 片仅 tx.time>=deadline 可归集)
+    // —— genesis State (4-field, 无 outcome) ——
+    int      init_local_yes,
+    int      init_local_no,
+    int      init_count,
+    int      init_pool_value
+) {
+    int local_yes  = init_local_yes;
+    int local_no   = init_local_no;
+    int count      = init_count;
+    int pool_value = init_pool_value;
+
+    // dust PoolSide-ticket State (= PoolSide_v08_shard 4 字段; register 造 ticket 的 validateOutputStateWithTemplate 类型锚)
+    struct Tk {
+        byte[32] bettorPk;
+        int      direction;
+        int      stake;
+        byte[32] shardPoolId;
+    }
+
+    // —— entry 0: register_append (收注; 与原 PoolLeaf entry 0 byte-identical 语义) ——
+    entrypoint function register_append(
+        int      side,
+        int      stake,
+        int      leafOutIdx,
+        int      psOutIdx,
+        byte[32] bettorPk,
+        byte[]   ps_prefix,
+        byte[]   ps_suffix
+    ) {
+        require(count < seal_count);
+        require(side == 0 || side == 1);
+        require(stake >= min_bet);
+
+        // mint dust ticket (spent-once claim/refund 凭证)
+        validateOutputStateWithTemplate(psOutIdx, {
+            bettorPk: bettorPk,
+            direction: side,
+            stake: stake,
+            shardPoolId: shard_pool_id
+        }, ps_prefix, ps_suffix, ps_tmpl_hash);
+
+        // 重建 bumped leaf (stake 真存; ShardLeaf 同模板 recreate)
+        validateOutputState(leafOutIdx, {
+            local_yes:  local_yes + stake * (1 - side),
+            local_no:   local_no + stake * side,
+            count:      count + 1,
+            pool_value: pool_value + stake
+        });
+        // ★ output-bind weld: leaf value == 新 pool_value (KAS 真入池)
+        require(tx.outputs[leafOutIdx].value == pool_value + stake);
+    }
+
+    // —— entry 1: consolidate_to_payout (替废弃 convert_to_foldnode; 本片全额归集进【真 PayoutShard covenant 实例】) ——
+    // NWT 异质核承重: destination 绑 cov_id PROVENANCE 非 template LOCATION (防 recreatable-UTXO 假 PayoutShard 抢归集偷池)。
+    // 双 teeth: ①cov_id-bind(只能进真 PS)②全额守恒(无 skim)。absorb(PS sink 侧)续 cov_id + 验守恒 = 双侧绑。
+    entrypoint function consolidate_to_payout(
+        int psInIdx,        // 真 PayoutShard covenant input 位
+        int psOutIdx        // PayoutShard 延续输出位 (absorb 续锁同 cov_id)
+    ) {
+        // ★件1(J1) rolling-shard partial-sweep: 满片(count==seal_count)随时归集 / partial 片仅截止后归集。
+        //   解最后一片永远 partial(count<seal_count)归集不了→资金卡死 的核心 gap。deadline ctor-baked 不可伪。
+        //   ⚠ tx.time 单位=【毫秒】(链上 LANDED refund precedent p2sh.mjs L7/SS L275 证, 非文档的秒, J2 chain-probe 抓)。
+        //     deadline 烤【秒】(=market.deadline) → 合约 ×1000 转 ms 比对(同 working refund 模式), 否则 ms>=秒 恒 TRUE=vacuous 假牙。
+        //   ⚠ da9fc22 parser 限 tx.time 只能 standalone require(不能进 || 复合)→拆成 if (arithmetic RHS 已由 refund precedent 证可编译):
+        //   sealed: 不进 if→随时 LAND / partial: 进 if→premature(tx.time < deadline*1000)→BUST / deadline 后→LAND。
+        if (count != seal_count) {
+            require(tx.time >= deadline * 1000);
+        }
+        // ★ destination = PROVENANCE: 输入是【真 payout_cov_id 的 PayoutShard 实例】(假 template-PS 的 cov_id≠baked → BUST)
+        byte[32] ps_cov = OpInputCovenantId(psInIdx);
+        require(ps_cov == payout_cov_id);
+        require(OpCovOutputCount(ps_cov) >= 1);            // 0==0 防呆: 非法/零 cov_id 令此 fail (NWT 钉; DECL: OpCovOutputCount 拒非 covenant 数据)
+        // ★ 本片 value 必进【同 cov_id 延续输出】(防导向非延续/假输出)
+        byte[32] out_cov = OpOutputCovenantId(psOutIdx);
+        require(out_cov == payout_cov_id);
+        // ★ 全额守恒: 本片全 pool_value 进 PayoutShard 累加 (one-shard-per-tx, 精确无 skim)
+        require(tx.outputs[psOutIdx].value == tx.inputs[psInIdx].value + pool_value);
+    }
+}

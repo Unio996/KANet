@@ -129,14 +129,18 @@
       </template>
       <template x-for="m in messages" :key="m.txid">
         <div class="dc-msg">
-          <div class="flex items-center justify-between mb-1">
-            <span class="dc-msg-sender" x-text="m.sender_alias || (m.sender_address || '').slice(0, 12) + '…'"></span>
-            <span class="dc-msg-meta" x-text="fmtTime(m.timestamp)"></span>
+          <div class="flex items-center gap-1 flex-wrap mb-1">
+            <span class="font-mono text-xs dc-accent-gold"
+                  :title="m.sender_address"
+                  x-text="m.sender_address || ''"></span>
+            <button type="button" class="text-xs dc-accent-gold hover:underline" @click="copyAddr(m.sender_address)" title="复制地址">📋</button>
+            <button type="button" class="text-xs dc-accent-gold hover:underline" @click="addFriend(m.sender_address)" title="添加好友">🤝</button>
+            <span class="dc-msg-meta ml-auto" x-text="fmtTime(m.block_time_iso || m.timestamp)"></span>
           </div>
-          <div class="dc-msg-body" x-text="m.message_text"></div>
-          <div class="dc-msg-meta mt-2" x-show="m.txid">
-            <span>TX:</span>
-            <a :href="'/api/chain/tx/' + m.txid" target="_blank" x-text="(m.txid || '').slice(0, 16) + '…'" class="font-mono"></a>
+          <div class="dc-msg-body" x-text="m.legacy_content || m.message_text"></div>
+          <div class="dc-msg-meta mt-1">
+            TX: <a :href="'/api/chain/tx/' + m.txid" target="_blank" :title="m.txid"
+               x-text="(m.txid || '').slice(0, 16) + '…'" class="font-mono"></a>
           </div>
         </div>
       </template>
@@ -177,6 +181,24 @@
           } finally {
             this.loading = false;
           }
+        },
+
+        copyAddr(addr) {
+          if (!addr) return;
+          navigator.clipboard.writeText(addr).then(() => {
+            const btn = event.target.closest('button');
+            if (btn) { btn.textContent = '✓'; setTimeout(() => btn.textContent = '📋', 1200); }
+          });
+        },
+
+        addFriend(addr) {
+          if (!addr) return;
+          navigator.clipboard.writeText(addr).then(() => {
+            // flash feedback
+            const btn = event.target.closest('button');
+            if (btn) { btn.textContent = '✓'; setTimeout(() => btn.textContent = '🤝', 1200); }
+          });
+          alert('地址已复制: ' + addr + '\n\n打开 http://127.0.0.1:3200 登录 Console → DM 粘贴地址发送握手。');
         },
 
         fmtTime(iso) {

@@ -26,6 +26,46 @@ let _seedAddress = null;
 let _startedAt = null;
 let _lastLog = '';
 let _scanMode = null;
+// ★ root-cure (J1, 2026-06-21 :3200 ingest-gap incident): scanner child died but Console stayed
+//   false-alive (on('exit') only logged + cleared, never respawned) → cross-node ingest stalled until
+//   manual restart. Auto-respawn on unexpected death, with crash-loop backoff to avoid restart storm.
+let _stopping = false;      // true during intentional stopScanner → suppress respawn
+let _lastSpawnAt = 0;       // for crash-loop detection (died-quick = back off harder)
+let _crashCount = 0;
+let _respawnTimer = null;
+const RESPAWN_BASE_MS = 5000;
+const RESPAWN_MAX_MS  = 60000;
+const CRASH_WINDOW_MS = 30000; // died within 30s of spawn = crash (escalate backoff)
+// ★ root-cure ② (Bettor proposal): authoritative liveness = scout_checkpoint.last_block_time advancing.
+//   Catches every death mode — dead process, WS stall, AND false-alive (running=true but scan stopped,
+//   no exit event so on('exit') respawn can't see it). External watchdog beats per-mode detection.
+let _watchdogTimer = null;
+let _lastWatchdogRestartAt = 0;
+const WATCHDOG_INTERVAL_MS = 45000;
+const SCAN_STALL_MS = 120000;  // checkpoint not advanced in 120s (TN12 ~1 block/s) = stalled → restart
+
+/**
+ * Auto-respawn the scout after an unexpected death (root-cure for the false-alive ingest gap).
+ * Suppressed during intentional stopScanner. Crash-loop guard: a scout that dies within
+ * CRASH_WINDOW_MS of spawning escalates the backoff (5s→60s) so a hard-failing scout does not storm.
+ */
+function _maybeRespawn(reason) {
+  if (_stopping) return; // intentional stop — do not respawn
+  const aliveMs = _lastSpawnAt ? Date.now() - _lastSpawnAt : 0;
+  if (aliveMs > 0 && aliveMs < CRASH_WINDOW_MS) _crashCount++; else _crashCount = 0;
+  const delay = Math.min(RESPAWN_BASE_MS * Math.pow(2, _crashCount), RESPAWN_MAX_MS);
+  console.warn(`[scanner] scout ${reason} — auto-respawn in ${delay / 1000}s (crash#${_crashCount}, aliveMs=${aliveMs})`);
+  if (_respawnTimer) clearTimeout(_respawnTimer);
+  _respawnTimer = setTimeout(async () => {
+    _respawnTimer = null;
+    if (_stopping || _child) return; // stopped meanwhile, or already restarted
+    const enabled = await getConfig('scanner_enabled');
+    if (!enabled || enabled === 'false') return; // operator disabled it
+    console.log('[scanner] auto-respawning scout (child died, Console false-alive guard)');
+    try { await startScanner(); } catch (e) { console.error(`[scanner] auto-respawn failed: ${e.message}`); _maybeRespawn('respawn-fail'); }
+  }, delay);
+  if (_respawnTimer.unref) _respawnTimer.unref();
+}
 
 /**
  * Start the scanner (system-level).
@@ -87,6 +127,9 @@ export async function startScanner() {
 
     _running = true;
     _scanMode = scanMode;
+    _stopping = false;
+    _lastSpawnAt = Date.now();
+    if (_respawnTimer) { clearTimeout(_respawnTimer); _respawnTimer = null; }
 
     // Capture last log line for status display
     _child.stdout.on('data', (data) => {
@@ -103,12 +146,14 @@ export async function startScanner() {
       console.log(`[scanner] scout exited with code ${code}`);
       _running = false;
       _child = null;
+      _maybeRespawn(`exit(code=${code})`);
     });
 
     _child.on('error', (err) => {
       console.error(`[scanner] scout spawn error: ${err.message}`);
       _running = false;
       _child = null;
+      _maybeRespawn(`spawn-error(${err.message})`);
     });
 
     // Save enabled flag for auto-restart
@@ -144,6 +189,8 @@ export async function startScanner() {
  * Stop the scanner (kill scout child process).
  */
 export async function stopScanner() {
+  _stopping = true; // suppress auto-respawn for this intentional stop
+  if (_respawnTimer) { clearTimeout(_respawnTimer); _respawnTimer = null; }
   if (!_child) return { ok: false, reason: 'not_running' };
 
   try {
@@ -204,9 +251,45 @@ export function getScannerStatus() {
  * Auto-start if scanner was enabled before Console restart.
  */
 export async function autoStartIfEnabled() {
+  startScannerWatchdog(); // run for the Console's lifetime; self-gates on scanner_enabled
   const enabled = await getConfig('scanner_enabled');
   if (enabled && enabled !== 'false') {
     console.log('[scanner] auto-starting (was enabled before restart)');
     await startScanner();
   }
+}
+
+/**
+ * Scanner watchdog (root-cure ② for the silent-death ingest gap, 2026-06-21 :3200 incident).
+ * The authoritative liveness signal is scout_checkpoint.last_block_time advancing. A scout can be
+ * dead (no process), WS-stalled, or FALSE-ALIVE (process up, running=true, but scan stopped) — all
+ * three surface as a STALE checkpoint. Every WATCHDOG_INTERVAL, if the scanner is enabled and the
+ * checkpoint is stale beyond SCAN_STALL_MS, force a clean restart. This catches the false-alive mode
+ * that on('exit') respawn (process death) and the scout-internal heartbeat (WS stall) cannot see.
+ */
+export function startScannerWatchdog() {
+  if (_watchdogTimer) return;
+  _watchdogTimer = setInterval(async () => {
+    try {
+      const enabled = await getConfig('scanner_enabled');
+      if (!enabled || enabled === 'false') return; // operator disabled — nothing to guard
+      let lastBlockMs = null;
+      try {
+        const row = sqlite.prepare("SELECT last_block_time FROM scout_checkpoint WHERE address = '_global_'").get();
+        lastBlockMs = row?.last_block_time ? new Date(row.last_block_time).getTime() : null;
+      } catch {}
+      if (!lastBlockMs) return; // no checkpoint yet — give a fresh scout time to write one
+      const staleMs = Date.now() - lastBlockMs;
+      if (staleMs <= SCAN_STALL_MS) return; // healthy — checkpoint advancing
+      if (Date.now() - _lastWatchdogRestartAt < SCAN_STALL_MS) return; // debounce restarts
+      _lastWatchdogRestartAt = Date.now();
+      console.warn(`[scanner:watchdog] scout_checkpoint stale ${Math.round(staleMs / 1000)}s (child=${_child ? 'alive=false-alive/stall' : 'dead'}) — forcing restart`);
+      try { await stopScanner(); } catch {}
+      await startScanner();
+    } catch (e) {
+      console.error(`[scanner:watchdog] tick error: ${e.message}`);
+    }
+  }, WATCHDOG_INTERVAL_MS);
+  if (_watchdogTimer.unref) _watchdogTimer.unref();
+  console.log(`[scanner:watchdog] started — liveness via scout_checkpoint freshness (check ${WATCHDOG_INTERVAL_MS / 1000}s, stall ${SCAN_STALL_MS / 1000}s)`);
 }

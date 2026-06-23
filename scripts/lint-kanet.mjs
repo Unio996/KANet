@@ -52,6 +52,31 @@ const targets = argv.length > 0
 
 console.log(`[lint-kanet] scanning ${targets.length} files...`);
 
+// ── R_NULLIFIER_I64: unbounded-N nullifier/claimed/refunded bitmap 禁单 i64 (= 63-slot cap = 假无限) ──
+// 根因: i64 bitmap 只 63 可用 bit; merkle depth 允许 >63 leaf 时, winner#64+ 的 slot 装不下 → nullifier 失效 → 双领抽干.
+// 出现 2 次 (④ refund-merkle + B2 PayoutShard, J1 复犯) → baked-lint 根治. 解: byte[] 多-slot OR 分桶 ≤63/shard.
+// 配 ANTI-PATTERNS / 记忆 feedback-recreatable-utxo-nullifier-defeatable.
+function checkR_NULLIFIER_I64() {
+  const silDirs = [path.join(ROOT, 'kasia-console/src/lib'), path.join(ROOT, '_j2_probe_branch')];
+  for (const dir of silDirs) {
+    if (!fs.existsSync(dir)) continue;  // exists() 只判 isFile, 目录用 existsSync
+    for (const fp of walk(dir, ['.sil'])) {
+      let content; try { content = read(fp); } catch { continue; }
+      const lines = content.split('\n');
+      // 单-i64 nullifier bitmap 声明 (ctor param 或 local): `int ...(claimed|refunded|nullifier)...bitmap`
+      const i64Bitmap = lines.findIndex(l => /\bint\b[^=;]*?(claimed|refunded|nullifier)\w*bitmap/i.test(l) && !/byte\s*\[/.test(l));
+      if (i64Bitmap < 0) continue;
+      // 该合约 merkle depth 是否允许 >63 leaf (2^6=64>63 → depth>=6) OR 标注无限/unbounded/>63
+      // 精确信号 = merkle tree_depth 上界允许 >63 leaf (2^6=64>63 → depth>=6). depth<=1 (RootClaim depth-1) 正确用 i64, 不误报.
+      const depthM = content.match(/tree_depth\s*<=\s*(\d+)/);
+      const depthOver63 = depthM && parseInt(depthM[1], 10) >= 6;
+      if (depthOver63) {
+        violate('R_NULLIFIER_I64', `单-i64 nullifier bitmap (line ${i64Bitmap + 1}) 但 merkle depth/N 允许 >63 winner → i64 只 63-slot 装不下 → winner#64+ 双领抽干. 必 byte[] 多-slot 或分桶 ≤63/shard (配 feedback-recreatable-utxo-nullifier)`, fp, i64Bitmap + 1);
+      }
+    }
+  }
+}
+
 // ── R9: Qwen LLM caller 必有 chat_template_kwargs.enable_thinking=false ──
 // 检测: fetch 调 /chat/completions 的 body 里没 chat_template_kwargs.enable_thinking=false
 // 排除: openai.com / api.anthropic.com (非 Qwen, 不需此 kwarg)
@@ -671,6 +696,7 @@ for (const fp of targets) {
   checkR40_minerFee_floor(fp, content);  // R40 (G6 批2 红线 7, qlfpv brick sediment 5/31): pool.js create-v06 minerFee 默认下限
 }
 checkR10();
+checkR_NULLIFIER_I64();
 
 // ── 报告 ──
 if (violations.length === 0) {

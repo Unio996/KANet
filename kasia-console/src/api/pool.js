@@ -908,12 +908,25 @@ export async function registerPoolRoutes(fastify) {
     poolMerkleRoot = poolMerkleRoot.toLowerCase();
 
     const makerRow = sqlite.prepare('SELECT id, address FROM relay_nodes WHERE id = ?').get(b.maker_relay_id);
-    const brokerRow = sqlite.prepare('SELECT id, address FROM relay_nodes WHERE id = ?').get(b.broker_relay_id);
-    if (!makerRow?.address || !brokerRow?.address) return reply.code(400).send({ ok: false, error: 'maker or broker relay has no resolvable address' });
-
+    if (!makerRow?.address) return reply.code(400).send({ ok: false, error: 'maker relay has no resolvable address' });
     const makerPk = await deriveXOnlyPubkey(makerRow.address);
-    const brokerPk = await deriveXOnlyPubkey(brokerRow.address);
-    try { await assertBrokerP2PK(brokerPk, brokerRow.address); } catch (e) { return reply.code(e.code || 400).send({ ok: false, error: e.message }); }
+
+    // ── broker 身份 = 地址 (Owner 钦定 2026-06-22 接通外部 broker: 地址涵盖 relay, 向前兼容) ──
+    //   broker_address 提供 → 外部 broker 直接用地址 (无 relay; 玩家绑的地址转 broker 不变, 轻路只有地址制才可能)。
+    //   不提供则走 broker_relay_id relay 路 (relay 有地址 = relay 是"恰好有地址的特例")。两路都 → brokerPk + P2PK
+    //   校验。settle always-pk-derive 从 broker_pk 派生收款址 (pool.js 顶 invariant) → fee 落 brokerPk 对应地址。
+    let brokerPk, _brokerResolvedAddr;
+    if (b.broker_address && String(b.broker_address).trim()) {
+      _brokerResolvedAddr = String(b.broker_address).trim();
+      b.broker_relay_id = null;   // 外部地址 broker 无 relay; DB broker_relay_id 存 null (settle 用 broker_pk 不依赖 relay)
+    } else {
+      const brokerRow = sqlite.prepare('SELECT id, address FROM relay_nodes WHERE id = ?').get(b.broker_relay_id);
+      if (!brokerRow?.address) return reply.code(400).send({ ok: false, error: 'broker relay has no resolvable address' });
+      _brokerResolvedAddr = brokerRow.address;
+    }
+    try { brokerPk = await deriveXOnlyPubkey(_brokerResolvedAddr); }
+    catch (e) { return reply.code(400).send({ ok: false, error: `broker pubkey derive fail (${String(_brokerResolvedAddr).slice(0, 18)}): ${e.message}` }); }
+    try { await assertBrokerP2PK(brokerPk, _brokerResolvedAddr); } catch (e) { return reply.code(e.code || 400).send({ ok: false, error: e.message }); }
     // maker_pk 列 = 实际 relay pk (单源 == broadcast/sentinel, NWT/Bettor r863). ctor 仍 makerPk 不动.
     const maker_relay_pk = await _getMakerRelayPk(b.maker_relay_id);
 
@@ -1073,6 +1086,126 @@ export async function registerPoolRoutes(fastify) {
     });
   });
 
+  // POST /api/pool/market/:id/bettor/register-v07 — (A)-model rolling-shard bettor register (production register wiring (a), J2 2026-06-21).
+  //   :id = logical market id (pool_markets v0.7 row). Routes the bet to the open shard (or opens a new ShardLeaf via genesis),
+  //   register_append (splice, drift-safe), NO-TX accounting (market_shards). Gateway-custody (testnet): bettor relay funds the
+  //   gateway (maker), the gateway builds the register. Wraps pool-shard-register orchestrator (allocator + pool-register-builder).
+  fastify.post('/api/pool/market/:id/bettor/register-v07', async (request, reply) => {
+    const logicalMarketId = request.params.id;
+    const b = request.body || {};
+    if ((!b.bettor_relay_id && !b.bettor_pk) || b.direction === undefined || !b.stake_kas) {
+      return reply.code(400).send({ ok: false, error: 'bettor_relay_id OR bettor_pk (fresh keypair, cross-node fixture), direction, stake_kas required' });
+    }
+    const market = sqlite.prepare('SELECT * FROM pool_markets WHERE id = ?').get(logicalMarketId);
+    if (!market) return reply.code(404).send({ ok: false, error: 'market not found' });
+    if (market.protocol_version !== 'v0.7') return reply.code(409).send({ ok: false, error: `register-v07 requires protocol_version v0.7, got ${market.protocol_version}` });
+    if (market.protocol_status !== 'pending_bettors') return reply.code(409).send({ ok: false, error: `market status=${market.protocol_status}, registration closed` });
+    if (!market.pool_merkle_root) return reply.code(409).send({ ok: false, error: 'v0.7 market missing pool_merkle_root (committee)' });
+
+    const direction = parseInt(b.direction, 10);
+    if (direction !== 0 && direction !== 1) return reply.code(400).send({ ok: false, error: 'direction must be 0 (YES) or 1 (NO)' });
+    const stakeSompi = Math.round(parseFloat(b.stake_kas) * 1e8);
+    if (!Number.isFinite(stakeSompi) || stakeSompi < BETTOR_MIN_STAKE_POLICY) return reply.code(400).send({ ok: false, error: `stake_kas must be >= ${BETTOR_MIN_STAKE_POLICY / 1e8} KAS` });
+
+    // oracle/bettor exclusivity (area-1 invariant) — same as /bettor/register.
+    let oracleIds = [];
+    try { oracleIds = JSON.parse(market.oracle_relay_ids || '[]'); } catch {}
+    // fresh keypair bettor (cross-node 命门③ fixture, NWT 干净地址要求 — 解 (c) gateway-as-bettor 派彩淹没 fixture 教训):
+    //   b.bettor_pk 直传(64-hex x-only), gateway-sponsored 资助(testnet test, 无 bettor relay). 非 fresh 走 relay custody 模型.
+    const freshBettor = !!(b.bettor_pk && !b.bettor_relay_id);
+    let bettorPk, network;
+    if (freshBettor) {
+      if (!/^[0-9a-f]{64}$/i.test(b.bettor_pk)) return reply.code(400).send({ ok: false, error: 'bettor_pk must be 64-hex x-only pubkey' });
+      bettorPk = b.bettor_pk.toLowerCase();
+      network = 'testnet-12';
+    } else {
+      if (oracleIds.includes(b.bettor_relay_id)) return reply.code(403).send({ ok: false, error: 'bettor is in market oracle set (area-1 exclusivity)' });
+      const bettorRow = sqlite.prepare('SELECT id, address FROM relay_nodes WHERE id = ?').get(b.bettor_relay_id);
+      if (!bettorRow?.address) return reply.code(400).send({ ok: false, error: 'bettor relay not found' });
+      bettorPk = await deriveXOnlyPubkey(bettorRow.address);
+      network = bettorRow.address.startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
+    }
+
+    // gateway relay = market host (maker_relay_id); funds genesis/register, custodies bettor stake (testnet ramp).
+    const gatewayRelayId = market.maker_relay_id;
+    if (!isRelayAlive(gatewayRelayId)) return reply.code(503).send({ ok: false, error: 'gateway (maker) relay not alive' });
+    const gw = await sendCommandAsync(gatewayRelayId, { type: 'get_pubkey' });
+    const relayAddr = gw.address;
+    if (!relayAddr) return reply.code(503).send({ ok: false, error: 'gateway relay get_pubkey returned no address' });
+
+    // bettor funds the gateway (custody-bound, like publish): stake + register/genesis fee headroom.
+    //   fresh keypair bettor: gateway sponsors stake from its own balance (testnet fixture, no bettor relay to transfer from).
+    if (!freshBettor) {
+      try { await transferAndConfirm(b.bettor_relay_id, relayAddr, ((stakeSompi + 200_000_000) / 1e8).toFixed(8)); }
+      catch (e) { return reply.code(503).send({ ok: false, error: `bettor→gateway funding failed: ${e.message}` }); }
+    }
+
+    // relay helpers for the orchestrator (all on the gateway relay).
+    const kaspa = await import('kaspa-wasm');
+    const p2sh = (redeemHex) => kaspa.addressFromScriptPublicKey(kaspa.ScriptBuilder.fromScript(new Uint8Array(Buffer.from(redeemHex, 'hex'))).createPayToScriptHashScript(), network).toString();
+    const rc = (cmd) => sendCommandAsync(gatewayRelayId, cmd, 90000);
+    const transfer = async (addr, sompi) => { const r = await transferAndConfirm(gatewayRelayId, addr, (Number(sompi) / 1e8).toFixed(8)); return r.txId; };
+    const landed = async (txid, addr, n = 25) => { for (let i = 0; i < n; i++) { const j = await sendCommandAsync(gatewayRelayId, { type: 'check_utxo_landed', address: addr, txid }, 20000); if (j.landed || j.found) return true; await new Promise(r => setTimeout(r, 2000)); } return false; };
+
+    // shard→pool_markets row: each physical shard is a minimal pool_markets clone (FK shard_market_id REFERENCES pool_markets(id);
+    //   foreign_keys=ON). UI aggregates shards under the logical market via market_shards.logical_market_id. ⚠ DESIGN-FLAG for team:
+    //   (A)-model shards are ShardLeafs not independent markets — clone keeps the v171 FK satisfied; a leaner shard-row schema is a follow-up.
+    const pmCols = sqlite.prepare('PRAGMA table_info(pool_markets)').all().map(c => c.name);
+    const createShardMarketRow = async (shardIndex, shardP2sh) => {
+      const shardMarketId = `${logicalMarketId}-s${shardIndex}`;
+      // protocol_status='shard_internal' (Bettor clean-fix): excludes shard-clone rows from oracle-pool scan / /api/pool/markets
+      //   aggregation / settle sweep (NOT 'pending_bettors' which would double-count). UI aggregates真 market by market_shards.logical_market_id.
+      // maker_stake_amount=0 (Bettor clone-leak fix half-3, NWT 280≠80 discrepancy root): maker stakes ONCE on the parent market
+      //   (outcome_side implicit bettor); shard clones are FK rows — copying parent's maker_stake → aggregation double-counts
+      //   (N shards × maker stake = inflated pool display). Zero it on clones so only the parent carries maker stake.
+      const clone = { ...market, id: shardMarketId, spine_p2sh: shardP2sh, protocol_status: 'shard_internal', maker_stake_amount: 0 };
+      try {
+        sqlite.prepare(`INSERT OR IGNORE INTO pool_markets (${pmCols.join(',')}) VALUES (${pmCols.map(() => '?').join(',')})`).run(...pmCols.map(c => clone[c]));
+      } catch (e) { console.warn(`[register-v07] shard pool_markets clone warn: ${e.message}`); }
+      return shardMarketId;
+    };
+    const recordBettor = async ({ shardMarketId, shardIndex, bettorPk: pk, direction: dir, stakeSompi: st, leafTx }) => {
+      try {
+        sqlite.prepare(`INSERT OR IGNORE INTO pool_bettor_sides (market_id, bettor_pk, bettor_relay_id, direction, stake_amount, side_p2sh, side_lock_tx, merkle_index, side_redeem_script_hex)
+          VALUES (?,?,?,?,?,?,?,?,?)`).run(shardMarketId, pk, b.bettor_relay_id, dir, st, shardP2sh_of(shardMarketId), leafTx, shardIndex, '');
+      } catch (e) { console.warn(`[register-v07] recordBettor warn: ${e.message}`); }
+    };
+    const shardP2sh_of = (smid) => (sqlite.prepare('SELECT shard_p2sh FROM market_shards WHERE shard_market_id = ?').get(smid)?.shard_p2sh) || '';
+
+    try {
+      const { registerBettorOnShard } = await import('../lib/pool-shard-register.mjs');
+      const silverc = process.env.SILVERC_PATH || 'D:/silverscript/target/release/silverc.exe';
+      // 命门① genesis coherence (NWT/Bettor load-bearing): PayoutShard 烤 predicate_commit = blake2b(canonicalPredicate(predicate))
+      //   (单源 computePredicateCommit, 与 enforce 同函数) — 非 market_metadata_hash (= sha256({全市场元}) ≠ blake2b(canonical(predicate))
+      //   → 委员 enforce hash-bind 永假 → close 永 BUST). predicate-less 市场(无结构化判)fallback metadata_hash(无命门③ enforce).
+      const { computePredicateCommit, computeMarketCommit } = await import('../lib/pool-shard-settle.mjs');
+      let _predicate = null;
+      try { _predicate = JSON.parse(market.resolution_rule_spec || '{}')?.resolution_predicate || null; } catch {}
+      // 命门④ v1 fee provenance (NWT 底线): fee 市场烤 computeMarketCommit({predicate, fee_recipients:{broker_pk, introducer_pk}})
+      //   进 PS offset-518 commit slot (折进 predicate_commit 同一 32B, .sil 不变零 re-deploy). 委员 enforce 从被花 PS 读 + 同函数
+      //   验 → settler 改 broker/introducer 地址 → 不符 → BUST. broker_pk/introducer_pk = market row create-baked (链同步).
+      //   predicate-less 市场 fallback market_metadata_hash (无 fee provenance, 无 enforce). 单源 (genesis+enforce 同 computeMarketCommit).
+      const _feeRecipients = { brokerPk: market.broker_pk || null, introducerPk: market.introducer_pk || null };
+      const predicateCommit = _predicate ? computeMarketCommit(_predicate, _feeRecipients) : market.market_metadata_hash;
+      // 件1(J1 deadline-gate, NWT option-a): partial-shard sweep gate = market.deadline (Unix s, = outcome_end floor,
+      //   市场创建时 ctor-baked 非 spender → verify-value-source). ShardLeaf bakes it; partial 片仅 tx.time>=deadline 可归集
+      //   (满片随时). 缺则 registerBettorOnShard fail-closed throw. predicate-less / 旧 .sil(无 deadline 参)则被忽略=无害.
+      if (!Number.isFinite(Number(market.deadline)) || Number(market.deadline) <= 0) {
+        return reply.code(409).send({ ok: false, error: 'v0.7 market missing deadline (partial-shard sweep gate, 件1)' });
+      }
+      const result = await registerBettorOnShard({
+        db: sqlite, rc, transfer, landed, p2sh, logicalMarketId,
+        poolMerkleRoot: market.pool_merkle_root, predicateCommit,
+        bettorPk, direction, stakeSompi, relayAddr, silverc, sealCount: 32, deadline: market.deadline,
+        createShardMarketRow, recordBettor,
+      });
+      return reply.send({ ok: true, logical_market_id: logicalMarketId, bettor_pk: bettorPk, ...result });
+    } catch (e) {
+      console.error(`[pool/register-v07] ${logicalMarketId} fail: ${e.message}`);
+      return reply.code(500).send({ ok: false, error: `register-v07 failed: ${e.message}` });
+    }
+  });
+
   // GET /api/pool/config — static defaults for UI pre-submit preview (D4 wallet浮窗 estimate fee)
   fastify.get('/api/pool/config', async (request, reply) => {
     return reply.send({
@@ -1086,6 +1219,14 @@ export async function registerPoolRoutes(fastify) {
       disagreement_timeout_min: parseInt(process.env.DISAGREEMENT_TIMEOUT_MIN, 10) || 5,
       oracle_silent_timeout_min: parseInt(process.env.ORACLE_SILENT_TIMEOUT_MIN, 10) || 30,
     });
+  });
+
+  // GET /api/pool/fee-config — 价值分成 fee 协议常量 (单源 = pool-shard-settle FEE_CONFIG; UI 收口读此防硬编漂移).
+  //   bps: 押注侧 winners 9700 / [broker 160 + oracle 100 + introducer 20 + node 20 = 300] = 3%. 协议常量非 maker 可调
+  //   (determinism: 委员 deriveFeeLeaves re-derive byte-identical). node→signer-committee 均分, broker/introducer create-committed.
+  fastify.get('/api/pool/fee-config', async (request, reply) => {
+    const { FEE_CONFIG } = await import('../lib/pool-shard-settle.mjs');
+    return reply.send({ ok: true, fee_config: FEE_CONFIG, note: '协议常量 (非 maker 可调); winners 97% / fee 3% = broker1.6%+oracle1%+introducer0.2%+node0.2%; node→5签名委员均分, broker/introducer create-committed pk' });
   });
 
   // POST /api/pool/market/:id/oracle/deposit — oracle 自 locks bond to spine
@@ -1754,6 +1895,10 @@ export async function registerPoolRoutes(fastify) {
       where.push('(LOWER(pool_markets.resolution_rule_spec) LIKE ? OR LOWER(pool_markets.resolution_rule_spec) LIKE ? OR pool_markets.resolution_rule_spec LIKE ?)');
       params.push('%fifa%', '%world cup%', '%世界杯%');
     }
+    // clone-leak fix half-2 (Bettor/NWT): exclude (A)-model shard-clone pool_markets rows (protocol_status='shard_internal')
+    //   from the discovery list — UI shows the LOGICAL market once (aggregated via market_shards.logical_market_id), never the
+    //   per-shard clones. half-1 = oracle-pool status-IN scan exclusion (the 'shard_internal' status itself). Both halves收齐 before (c).
+    if (q.status !== 'shard_internal') { where.push("pool_markets.protocol_status != 'shard_internal'"); }
     const limit = Math.min(Math.max(parseInt(q.limit, 10) || 50, 1), 200);  /* KANet-UI 2026-06-07 r316: cap 退 200 (= r316 backend maker_relay_id filter ship 后, per-agent fetch 单 agent <200 单足够, fetch-all 绕路退) */
     const offset = Math.max(parseInt(q.offset, 10) || 0, 0);
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
@@ -2183,8 +2328,20 @@ export async function registerPoolRoutes(fastify) {
   // Kaspa explorer 深链。前端 NWT verifier 跨节点 fetch 双 host 对比 settle_txid + is_accepted 一致。
   fastify.get('/api/pool/market/:id/settle-audit', async (request, reply) => {
     const marketId = request.params.id;
-    const market = sqlite.prepare('SELECT id, protocol_version, protocol_status, spine_p2sh, settle_txid, refund_txid, pool_merkle_root, maker_relay_id, broker_relay_id, broker_pk, outcome_side, outcome_market_source, resolution_rule_spec, maker_stake_amount, oracle_bond_amount FROM pool_markets WHERE id = ?').get(marketId);
+    const market = sqlite.prepare('SELECT id, protocol_version, protocol_status, spine_p2sh, settle_txid, refund_txid, pool_merkle_root, maker_relay_id, broker_relay_id, broker_pk, outcome_side, outcome_market_source, resolution_rule_spec, maker_stake_amount, oracle_bond_amount, metadata FROM pool_markets WHERE id = ?').get(marketId);
     if (!market) return reply.code(404).send({ ok: false, error: 'market not found' });
+
+    // KANet-UI 2026-06-22 值分成收口 chain-truth reconcile: v0.7 bshard markets settle via
+    // driver-side close_attest + winner claim + value-split fee payout (NOT pool_markets.settle_txid).
+    // Bettors live in shard state, so the v0.6/v0.7 settler can misread pool_bettor_sides as 0-bet
+    // and refund the maker seed → protocol_status='refunded' even though the pool settled on chain.
+    // metadata.settle_evidence (recorded from verified chain truth; Track B autonomous settler will
+    // populate going forward) is the authoritative chain-settled signal. NO TX NO TRUTH.
+    let settleEvidence = null;
+    try {
+      const meta = JSON.parse(market.metadata || '{}');
+      if (meta.settle_evidence && meta.settle_evidence.chain_settled) settleEvidence = meta.settle_evidence;
+    } catch {}
 
     const committee = sqlite.prepare('SELECT committee_pks, committee_pk_hash, threshold, sampled_at, vrf_seed FROM pool_committee WHERE market_id = ?').get(marketId);
     let committeePks = null;
@@ -2236,7 +2393,22 @@ export async function registerPoolRoutes(fastify) {
       market_id: marketId,
       protocol_version: market.protocol_version || 'v0.5',
       protocol_status: market.protocol_status,
-      settled: !!market.settle_txid,
+      // chain-truth reconcile: settled if legacy settle_txid OR v0.7 bshard chain settle evidence present.
+      settled: !!market.settle_txid || !!settleEvidence,
+      chain_settled: !!settleEvidence,
+      settle_evidence: settleEvidence ? {
+        ...settleEvidence,
+        close_explorer_url: txUrl(settleEvidence.close_txid),
+        winner_claim: settleEvidence.winner_claim ? {
+          ...settleEvidence.winner_claim,
+          explorer_url: txUrl(settleEvidence.winner_claim.txid),
+        } : null,
+        fee_payouts: (settleEvidence.fee_payouts || []).map(f => ({ ...f, explorer_url: txUrl(f.txid) })),
+        maker_stake_refund: settleEvidence.maker_stake_refund ? {
+          ...settleEvidence.maker_stake_refund,
+          explorer_url: txUrl(settleEvidence.maker_stake_refund.txid),
+        } : null,
+      } : null,
       refunded: !!market.refund_txid,
       settle_txid: market.settle_txid || null,
       settle_explorer_url: txUrl(market.settle_txid),

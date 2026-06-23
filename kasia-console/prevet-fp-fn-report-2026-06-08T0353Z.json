@@ -1,0 +1,1510 @@
+{
+  "fp_rate": "26.7",
+  "fn_rate": "0.0",
+  "fp_count": 8,
+  "fn_count": 0,
+  "fixtures": 120,
+  "by_category": {
+    "good_clear": {
+      "total": 10,
+      "pass": 8,
+      "warn": 2,
+      "critical": 0,
+      "error": 0
+    },
+    "good_multi": {
+      "total": 10,
+      "pass": 6,
+      "warn": 4,
+      "critical": 0,
+      "error": 0
+    },
+    "good_edge": {
+      "total": 10,
+      "pass": 8,
+      "warn": 2,
+      "critical": 0,
+      "error": 0
+    },
+    "bad_missing": {
+      "total": 10,
+      "pass": 0,
+      "warn": 0,
+      "critical": 10,
+      "error": 0
+    },
+    "bad_vague": {
+      "total": 10,
+      "pass": 0,
+      "warn": 0,
+      "critical": 10,
+      "error": 0
+    },
+    "bad_no_source": {
+      "total": 10,
+      "pass": 0,
+      "warn": 8,
+      "critical": 2,
+      "error": 0
+    },
+    "bait_switch": {
+      "total": 30,
+      "pass": 0,
+      "warn": 30,
+      "critical": 0,
+      "error": 0
+    },
+    "subjective_tail": {
+      "total": 30,
+      "pass": 0,
+      "warn": 1,
+      "critical": 29,
+      "error": 0
+    }
+  },
+  "samples_fp": [
+    {
+      "idx": 1,
+      "category": "good_clear",
+      "expected": "pass",
+      "actual_score": 5,
+      "actual_tier": "warn",
+      "why": [],
+      "ok": true
+    },
+    {
+      "idx": 7,
+      "category": "good_clear",
+      "expected": "pass",
+      "actual_score": 5,
+      "actual_tier": "warn",
+      "why": [],
+      "ok": true
+    },
+    {
+      "idx": 11,
+      "category": "good_multi",
+      "expected": "pass",
+      "actual_score": 4,
+      "actual_tier": "warn",
+      "why": [],
+      "ok": true
+    },
+    {
+      "idx": 14,
+      "category": "good_multi",
+      "expected": "pass",
+      "actual_score": 4,
+      "actual_tier": "warn",
+      "why": [],
+      "ok": true
+    },
+    {
+      "idx": 19,
+      "category": "good_multi",
+      "expected": "pass",
+      "actual_score": 5,
+      "actual_tier": "warn",
+      "why": [],
+      "ok": true
+    }
+  ],
+  "samples_fn": [],
+  "results": [
+    {
+      "idx": 1,
+      "category": "good_clear",
+      "expected": "pass",
+      "actual_score": 5,
+      "actual_tier": "warn",
+      "why": [],
+      "ok": true
+    },
+    {
+      "idx": 2,
+      "category": "good_clear",
+      "expected": "pass",
+      "actual_score": 9,
+      "actual_tier": "pass",
+      "why": [
+        "数据源 (ESPN MLB Scoreboard) 是 MLB 比赛结果的权威且实时来源，截止后结果确定。",
+        "判定规则明确指定了 'Red Sox wins' 为 YES，否则为 NO，逻辑清晰。"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 3,
+      "category": "good_clear",
+      "expected": "pass",
+      "actual_score": 9,
+      "actual_tier": "pass",
+      "why": [
+        "数据源 (ESPN Scoreboard) 是 NBA 官方认可的权威结果来源，截止后结果确定且不可篡改。",
+        "判定规则明确指定了 'Lakers wins' 和 'ESPN final'，消除了关于平局或加时赛的歧义（NBA 无平局，必分胜负）。"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 4,
+      "category": "good_clear",
+      "expected": "pass",
+      "actual_score": 10,
+      "actual_tier": "pass",
+      "why": [
+        "数据源BBC Sport是权威的足球比分和赛程网站，能够提供最终确定的比赛结果。",
+        "裁决标准明确指定了'YES if Liverpool wins'，排除了平局或失败的情况，逻辑清晰。"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 5,
+      "category": "good_clear",
+      "expected": "pass",
+      "actual_score": 9,
+      "actual_tier": "pass",
+      "why": [
+        "数据源 (BBC Sport) 是权威的体育新闻机构，通常能提供准确且及时的最终比分，满足确定性要求。",
+        "判定规则明确指定了 'Real Madrid wins' 为 YES，否则为 NO，逻辑清晰。"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 6,
+      "category": "good_clear",
+      "expected": "pass",
+      "actual_score": 10,
+      "actual_tier": "pass",
+      "why": [
+        "数据源 AP News 是 MLB 官方认可的权威新闻机构，其发布的比赛最终比分具有决定性效力。",
+        "裁决标准明确指定以 'AP News final' 为准，消除了不同数据源（如 ESPN, MLB.com）之间可能存在的细微差异（如加赛局数、时间戳等）。"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 7,
+      "category": "good_clear",
+      "expected": "pass",
+      "actual_score": 5,
+      "actual_tier": "warn",
+      "why": [],
+      "ok": true
+    },
+    {
+      "idx": 8,
+      "category": "good_clear",
+      "expected": "pass",
+      "actual_score": 10,
+      "actual_tier": "pass",
+      "why": [
+        "数据源 BBC Sport 是权威且稳定的体育新闻来源，比赛结束后会发布最终比分和结果，具备可获取性。",
+        "判定规则明确指定了 'YES' 和 'NO' 两种结果，分别对应曼联获胜和不获胜（含平局或输球），逻辑互斥且完备。"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 9,
+      "category": "good_clear",
+      "expected": "pass",
+      "actual_score": 10,
+      "actual_tier": "pass",
+      "why": [
+        "数据源明确指向 ESPN 的特定比赛页面，该页面在比赛结束后会显示最终比分和胜负结果，具有确定性和可验证性。",
+        "解析规则清晰定义了 'YES' 和 'NO' 的条件，即基于 ESPN 最终结果判断 'Yankees over Boston' 是否获胜，无歧义。"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 10,
+      "category": "good_clear",
+      "expected": "pass",
+      "actual_score": 10,
+      "actual_tier": "pass",
+      "why": [
+        "数据源明确指向 ESPN 的特定比赛页面，该页面在比赛结束后会更新最终比分，具备可验证性。",
+        "判定规则清晰定义了 'YES' 和 'NO' 的条件，即基于 ESPN 最终结果判断 Mariners 是否获胜。"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 11,
+      "category": "good_multi",
+      "expected": "pass",
+      "actual_score": 4,
+      "actual_tier": "warn",
+      "why": [],
+      "ok": true
+    },
+    {
+      "idx": 12,
+      "category": "good_multi",
+      "expected": "pass",
+      "actual_score": 10,
+      "actual_tier": "pass",
+      "why": [
+        "问题明确且二元（SPX > 6000 与否），易于判定。",
+        "指定了权威数据源（Reuters），该源在截止后能提供确定的收盘价数据。"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 13,
+      "category": "good_multi",
+      "expected": "pass",
+      "actual_score": 8,
+      "actual_tier": "pass",
+      "why": [
+        "数据源 Yahoo Finance 是权威金融数据源，能够准确提供 AAPL 收盘价，满足确定性要求。",
+        "结果 'close > $200' 是清晰、可量化的二元事件（是/否）。"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 14,
+      "category": "good_multi",
+      "expected": "pass",
+      "actual_score": 4,
+      "actual_tier": "warn",
+      "why": [],
+      "ok": true
+    },
+    {
+      "idx": 15,
+      "category": "good_multi",
+      "expected": "pass",
+      "actual_score": 10,
+      "actual_tier": "pass",
+      "why": [
+        "outcome 清晰二元：价格是否大于 2500 是明确的数学比较，无模糊空间。",
+        "数据源可靠：Reuters 是公认的权威金融市场数据源，其 Commodities 板块能提供确定的现货价格。"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 16,
+      "category": "good_multi",
+      "expected": "pass",
+      "actual_score": 8,
+      "actual_tier": "pass",
+      "why": [
+        "数据源 (CoinGecko API) 是权威且可访问的，能够明确提供 ETH 价格数据。",
+        "结果判定逻辑清晰：比较价格与 4000 美元阈值，属于二元结果。"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 17,
+      "category": "good_multi",
+      "expected": "pass",
+      "actual_score": 8,
+      "actual_tier": "pass",
+      "why": [
+        "数据源 Yahoo Finance 是权威的金融数据源，能够准确提供股票收盘价，满足确定性要求。",
+        "结果 'close > $250' 是清晰的二元判定（是/否），无歧义。"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 18,
+      "category": "good_multi",
+      "expected": "pass",
+      "actual_score": 8,
+      "actual_tier": "pass",
+      "why": [
+        "数据源 (CoinGecko API) 是加密货币价格的标准权威来源，能够提供确定性的数值结果。",
+        "判定条件 'SOL > $200' 是清晰的二元逻辑（是/否），无歧义。"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 19,
+      "category": "good_multi",
+      "expected": "pass",
+      "actual_score": 5,
+      "actual_tier": "warn",
+      "why": [],
+      "ok": true
+    },
+    {
+      "idx": 20,
+      "category": "good_multi",
+      "expected": "pass",
+      "actual_score": 5,
+      "actual_tier": "warn",
+      "why": [],
+      "ok": true
+    },
+    {
+      "idx": 21,
+      "category": "good_edge",
+      "expected": "pass",
+      "actual_score": 10,
+      "actual_tier": "pass",
+      "why": [
+        "数据源 (ESPN NFL Scoreboard) 是 NFL 官方且权威的实时比分来源，比赛结束后数据确定无疑。",
+        "判定条件 'score >= 28' 是明确的数值比较，逻辑清晰。"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 22,
+      "category": "good_edge",
+      "expected": "pass",
+      "actual_score": 10,
+      "actual_tier": "pass",
+      "why": [
+        "数据源 (ESPN) 是 NBA 官方认可的权威数据源，比赛结束后会立即更新最终比分，可裁决性极高。",
+        "判定规则清晰：明确定义了 'YES' (>=100) 和 'NO' (<100) 的条件，且规定了平局（即正好100分）归为 NO，消除了边界歧义。"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 23,
+      "category": "good_edge",
+      "expected": "pass",
+      "actual_score": 10,
+      "actual_tier": "pass",
+      "why": [
+        "数据源明确指向具体的ESPN比赛页面，具备获取最终比分的能力。",
+        "判定规则清晰定义了阈值比较逻辑（>= 10），且明确了平局（Tie）的处理方式（NO），消除了歧义。"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 24,
+      "category": "good_edge",
+      "expected": "pass",
+      "actual_score": 5,
+      "actual_tier": "warn",
+      "why": [],
+      "ok": true
+    },
+    {
+      "idx": 25,
+      "category": "good_edge",
+      "expected": "pass",
+      "actual_score": 10,
+      "actual_tier": "pass",
+      "why": [
+        "数据源 (ESPN MMA Schedule) 是权威的 MMA 赛事结果记录平台，比赛结束后会明确记录比赛结果（如 KO, Submission, Decision）及具体回合数，可获取确定性结果。",
+        "判定规则逻辑清晰：'YES if score >= threshold' 在此语境下隐含了 'Finish in Round 1' 这一特定事件的发生（即结果为 KO/TKO/Submission 且发生在第1回合）。虽然 'score' 一词略显模糊，但结合 'Tie = NO' 和二元选项，可推断其意为 '是否满足结束条件'。"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 26,
+      "category": "good_edge",
+      "expected": "pass",
+      "actual_score": 9,
+      "actual_tier": "pass",
+      "why": [
+        "数据源 (ESPN) 是权威的体育新闻源，赛后通常会发布包含比赛结果（KO/TKO/Decision）的官方战报，可裁决性高。",
+        "规则中 'score >= threshold' 存在逻辑歧义：拳击比赛没有通用的 'score' 概念用于判定 KO，除非特指某家博彩公司的赔率或特定平台的预测分数，但题目未定义该 'score' 的来源和含义。"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 27,
+      "category": "good_edge",
+      "expected": "pass",
+      "actual_score": 9,
+      "actual_tier": "pass",
+      "why": [
+        "数据源 (ESPN) 是权威且实时的，能够准确提供比赛最终比分，满足'截止后取到确定结果'的要求。",
+        "规则核心逻辑清晰：分数 >= 120 为 YES，否则为 NO，且明确了平局（Tie，即正好120分）归为 NO 的边界情况，消除了歧义。"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 28,
+      "category": "good_edge",
+      "expected": "pass",
+      "actual_score": 10,
+      "actual_tier": "pass",
+      "why": [
+        "数据源 (ESPN) 是 NFL 官方认可的权威数据源，比赛结束后会立即更新最终比分，结果确定且不可篡改。",
+        "判定规则清晰明确：'YES if score >= threshold'，阈值 50 是整数，不存在边界模糊情况。"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 29,
+      "category": "good_edge",
+      "expected": "pass",
+      "actual_score": 9,
+      "actual_tier": "pass",
+      "why": [
+        "数据源 (ESPN MLB Scoreboard) 是权威的体育数据源，比赛结束后会明确记录是否进入加时赛 (Extra Innings)，可裁决性高。",
+        "规则中的 'Tie = NO' 处理了平局情况，逻辑闭环完整。"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 30,
+      "category": "good_edge",
+      "expected": "pass",
+      "actual_score": 5,
+      "actual_tier": "warn",
+      "why": [],
+      "ok": true
+    },
+    {
+      "idx": 31,
+      "category": "bad_missing",
+      "expected": "critical",
+      "actual_score": 2,
+      "actual_tier": "critical",
+      "why": [
+        "缺数据源 (data_source_canonical 空)",
+        "题目/规则缺明确 outcome 关键词 (will win / price >= / will close above 等)"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 32,
+      "category": "bad_missing",
+      "expected": "critical",
+      "actual_score": 1,
+      "actual_tier": "critical",
+      "why": [
+        "缺数据源 (data_source_canonical 空)",
+        "题目/规则缺明确 outcome 关键词 (will win / price >= / will close above 等)"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 33,
+      "category": "bad_missing",
+      "expected": "critical",
+      "actual_score": 1,
+      "actual_tier": "critical",
+      "why": [
+        "缺数据源 (data_source_canonical 空)",
+        "题目/规则缺明确 outcome 关键词 (will win / price >= / will close above 等)"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 34,
+      "category": "bad_missing",
+      "expected": "critical",
+      "actual_score": 1,
+      "actual_tier": "critical",
+      "why": [
+        "缺数据源 (data_source_canonical 空)",
+        "题目/规则缺明确 outcome 关键词 (will win / price >= / will close above 等)"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 35,
+      "category": "bad_missing",
+      "expected": "critical",
+      "actual_score": 1,
+      "actual_tier": "critical",
+      "why": [
+        "缺数据源 (data_source_canonical 空)",
+        "题目/规则缺明确 outcome 关键词 (will win / price >= / will close above 等)"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 36,
+      "category": "bad_missing",
+      "expected": "critical",
+      "actual_score": 1,
+      "actual_tier": "critical",
+      "why": [
+        "缺数据源 (data_source_canonical 空)",
+        "题目/规则缺明确 outcome 关键词 (will win / price >= / will close above 等)"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 37,
+      "category": "bad_missing",
+      "expected": "critical",
+      "actual_score": 2,
+      "actual_tier": "critical",
+      "why": [
+        "缺数据源 (data_source_canonical 空)",
+        "题目/规则缺明确 outcome 关键词 (will win / price >= / will close above 等)"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 38,
+      "category": "bad_missing",
+      "expected": "critical",
+      "actual_score": 1,
+      "actual_tier": "critical",
+      "why": [
+        "缺数据源 (data_source_canonical 空)",
+        "题目/规则缺明确 outcome 关键词 (will win / price >= / will close above 等)"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 39,
+      "category": "bad_missing",
+      "expected": "critical",
+      "actual_score": 1,
+      "actual_tier": "critical",
+      "why": [
+        "缺数据源 (data_source_canonical 空)",
+        "题目/规则缺明确 outcome 关键词 (will win / price >= / will close above 等)"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 40,
+      "category": "bad_missing",
+      "expected": "critical",
+      "actual_score": 1,
+      "actual_tier": "critical",
+      "why": [
+        "缺数据源 (data_source_canonical 空)",
+        "题目/规则缺明确 outcome 关键词 (will win / price >= / will close above 等)"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 41,
+      "category": "bad_vague",
+      "expected": "critical",
+      "actual_score": 2,
+      "actual_tier": "critical",
+      "why": [
+        "题目/规则缺明确 outcome 关键词 (will win / price >= / will close above 等)",
+        "截止时间未给 ISO UTC"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 42,
+      "category": "bad_vague",
+      "expected": "critical",
+      "actual_score": 3,
+      "actual_tier": "critical",
+      "why": [
+        "题目/规则缺明确 outcome 关键词 (will win / price >= / will close above 等)",
+        "截止时间未给 ISO UTC"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 43,
+      "category": "bad_vague",
+      "expected": "critical",
+      "actual_score": 3,
+      "actual_tier": "critical",
+      "why": [
+        "题目/规则缺明确 outcome 关键词 (will win / price >= / will close above 等)",
+        "截止时间未给 ISO UTC"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 44,
+      "category": "bad_vague",
+      "expected": "critical",
+      "actual_score": 3,
+      "actual_tier": "critical",
+      "why": [
+        "题目/规则缺明确 outcome 关键词 (will win / price >= / will close above 等)",
+        "截止时间未给 ISO UTC"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 45,
+      "category": "bad_vague",
+      "expected": "critical",
+      "actual_score": 3,
+      "actual_tier": "critical",
+      "why": [
+        "题目/规则缺明确 outcome 关键词 (will win / price >= / will close above 等)",
+        "截止时间未给 ISO UTC"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 46,
+      "category": "bad_vague",
+      "expected": "critical",
+      "actual_score": 3,
+      "actual_tier": "critical",
+      "why": [
+        "题目/规则缺明确 outcome 关键词 (will win / price >= / will close above 等)",
+        "截止时间未给 ISO UTC"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 47,
+      "category": "bad_vague",
+      "expected": "critical",
+      "actual_score": 3,
+      "actual_tier": "critical",
+      "why": [
+        "题目/规则缺明确 outcome 关键词 (will win / price >= / will close above 等)",
+        "截止时间未给 ISO UTC"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 48,
+      "category": "bad_vague",
+      "expected": "critical",
+      "actual_score": 3,
+      "actual_tier": "critical",
+      "why": [
+        "题目/规则缺明确 outcome 关键词 (will win / price >= / will close above 等)",
+        "截止时间未给 ISO UTC"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 49,
+      "category": "bad_vague",
+      "expected": "critical",
+      "actual_score": 3,
+      "actual_tier": "critical",
+      "why": [
+        "题目/规则缺明确 outcome 关键词 (will win / price >= / will close above 等)",
+        "截止时间未给 ISO UTC"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 50,
+      "category": "bad_vague",
+      "expected": "critical",
+      "actual_score": 3,
+      "actual_tier": "critical",
+      "why": [
+        "题目/规则缺明确 outcome 关键词 (will win / price >= / will close above 等)",
+        "截止时间未给 ISO UTC"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 51,
+      "category": "bad_no_source",
+      "expected": "critical",
+      "actual_score": 5,
+      "actual_tier": "warn",
+      "why": [
+        "缺数据源 (data_source_canonical 空)",
+        "标题 'Will Yankees win soon?' 中 'soon'（不久）是高度模糊的时间概念，缺乏明确的截止期限或时间窗口定义。"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 52,
+      "category": "bad_no_source",
+      "expected": "critical",
+      "actual_score": 5,
+      "actual_tier": "warn",
+      "why": [
+        "缺数据源 (data_source_canonical 空)",
+        "数据源缺失：'data_source_canonical' 为空，无法确定比赛的具体对象、时间或官方结果来源。"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 53,
+      "category": "bad_no_source",
+      "expected": "critical",
+      "actual_score": 5,
+      "actual_tier": "warn",
+      "why": [
+        "缺数据源 (data_source_canonical 空)",
+        "数据源缺失：'data_source_canonical' 为空，无法确定具体的比赛、联赛或赛事，导致无法验证结果。"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 54,
+      "category": "bad_no_source",
+      "expected": "critical",
+      "actual_score": 3,
+      "actual_tier": "critical",
+      "why": [
+        "缺数据源 (data_source_canonical 空)",
+        "题目/规则缺明确 outcome 关键词 (will win / price >= / will close above 等)"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 55,
+      "category": "bad_no_source",
+      "expected": "critical",
+      "actual_score": 5,
+      "actual_tier": "warn",
+      "why": [
+        "缺数据源 (data_source_canonical 空)",
+        "数据源缺失 (data_source_canonical为空)，无法验证结果的可获取性。"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 56,
+      "category": "bad_no_source",
+      "expected": "critical",
+      "actual_score": 5,
+      "actual_tier": "warn",
+      "why": [
+        "缺数据源 (data_source_canonical 空)",
+        "数据源缺失 (data_source_canonical为空)，无法验证价格数据。"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 57,
+      "category": "bad_no_source",
+      "expected": "critical",
+      "actual_score": 5,
+      "actual_tier": "warn",
+      "why": [
+        "缺数据源 (data_source_canonical 空)",
+        "占位符 'team X' 未指定具体队伍，导致问题在发布时缺乏具体指代对象，无法执行裁决。"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 58,
+      "category": "bad_no_source",
+      "expected": "critical",
+      "actual_score": 3,
+      "actual_tier": "critical",
+      "why": [
+        "缺数据源 (data_source_canonical 空)",
+        "题目/规则缺明确 outcome 关键词 (will win / price >= / will close above 等)"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 59,
+      "category": "bad_no_source",
+      "expected": "critical",
+      "actual_score": 5,
+      "actual_tier": "warn",
+      "why": [
+        "缺数据源 (data_source_canonical 空)",
+        "变量未定义：'Tournament X' 和 'Y' 为占位符，缺乏具体的赛事名称、组织方或候选人/队伍名称，导致无法确定具体的数据源。"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 60,
+      "category": "bad_no_source",
+      "expected": "critical",
+      "actual_score": 5,
+      "actual_tier": "warn",
+      "why": [
+        "缺数据源 (data_source_canonical 空)",
+        "数据源缺失 (data_source_canonical为空)，无法验证结果的可获取性。"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 61,
+      "category": "bait_switch",
+      "expected": "critical",
+      "actual_score": 5,
+      "actual_tier": "warn",
+      "why": [
+        "数据源 (r/random) 是动态且不可预测的，无法保证在截止时间内产生符合特定条件（显示 'yes'）的结果。",
+        "规则 'score >= threshold' 定义模糊，未指定 'score' 的来源、计算方式及 'threshold' 的具体数值。"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 62,
+      "category": "bait_switch",
+      "expected": "critical",
+      "actual_score": 5,
+      "actual_tier": "warn",
+      "why": [
+        "数据源 'https://twitter.com/explore' 是动态实时页面，不存在固定的历史快照或归档机制，导致截止后无法回溯验证当时的确切状态。",
+        "规则中 'score' 和 'threshold' 未定义具体数值或计算逻辑，导致判定标准完全缺失。"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 63,
+      "category": "bait_switch",
+      "expected": "critical",
+      "actual_score": 5,
+      "actual_tier": "warn",
+      "why": [
+        "数据源 'https://www.tiktok.com/discover' 是动态聚合页面，非特定视频或账号的静态页面，无法提供确定的、可验证的单一数值。",
+        "题目中的 'Y' 未定义具体数值，且未指定具体的 TikTok 视频、账号或聚合指标（如总浏览量、特定视频浏览量等），导致 'score' 指代不明。"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 64,
+      "category": "bait_switch",
+      "expected": "critical",
+      "actual_score": 6,
+      "actual_tier": "warn",
+      "why": [
+        "数据源 Discord 是私有/半私有平台，外部无法通过公开 API 或网页抓取获取特定用户聊天记录的确定性结果，除非有官方授权或截图证据，这导致 'live feed' 不可靠。",
+        "规则中 'score' 和 'threshold' 未定义，缺乏量化标准，导致裁决者无法客观判断是否满足 'YES' 条件。"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 65,
+      "category": "bait_switch",
+      "expected": "critical",
+      "actual_score": 4,
+      "actual_tier": "warn",
+      "why": [],
+      "ok": true
+    },
+    {
+      "idx": 66,
+      "category": "bait_switch",
+      "expected": "critical",
+      "actual_score": 5,
+      "actual_tier": "warn",
+      "why": [
+        "数据源不可靠：YouTube 评论计数是实时动态变化的，不存在一个固定的'截止后'静态值，导致无法确定最终结果。",
+        "规则严重歧义：'match prediction' 未定义预测值来源（是用户输入？平台默认？），且未定义容差范围（exact match 还是 within X%）。"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 67,
+      "category": "bait_switch",
+      "expected": "critical",
+      "actual_score": 6,
+      "actual_tier": "warn",
+      "why": [
+        "数据源 'https://facebook.com/' 过于宽泛，未指定具体的帖子、视频或页面ID，导致无法确定具体的 'reaction count' 对象。",
+        "规则中 'per live feed' 表述模糊，未明确是实时数据快照、最终归档数据还是特定时间点的计数。"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 68,
+      "category": "bait_switch",
+      "expected": "critical",
+      "actual_score": 5,
+      "actual_tier": "warn",
+      "why": [
+        "数据源不可控：Instagram 是私有平台，无法通过公开 API 或自动化脚本在截止后实时抓取特定帖子的点赞数，缺乏可验证的第三方数据源。",
+        "规则严重歧义：'X' 未定义具体数值，'match' 未定义是严格相等还是近似范围，'live feed' 未定义数据更新频率和最终判定时间点。"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 69,
+      "category": "bait_switch",
+      "expected": "critical",
+      "actual_score": 6,
+      "actual_tier": "warn",
+      "why": [
+        "数据源 'gasbuddy.com' 提供的是聚合众包数据，非官方或单一权威实时报价源，存在数据滞后、误差及多站点平均算法的不确定性，难以作为'确定结果'的绝对依据。",
+        "规则中 'X' 为占位符，未指定具体数值、时间窗口（如'当前'、'今日平均'）或具体加油站位置，导致判定条件极度模糊。"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 70,
+      "category": "bait_switch",
+      "expected": "critical",
+      "actual_score": 5,
+      "actual_tier": "warn",
+      "why": [
+        "数据源 'random API' 本质上是不可预测的，无法在截止后通过查询获得一个确定的、预先存在的客观事实结果。预测市场的裁决依赖于验证'是否发生'，而非'生成什么'。",
+        "规则中的 'score' 和 'threshold' 未定义具体数值或来源，导致裁决标准完全模糊。"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 71,
+      "category": "bait_switch",
+      "expected": "critical",
+      "actual_score": 4,
+      "actual_tier": "warn",
+      "why": [],
+      "ok": true
+    },
+    {
+      "idx": 72,
+      "category": "bait_switch",
+      "expected": "critical",
+      "actual_score": 5,
+      "actual_tier": "warn",
+      "why": [
+        "规则中使用了变量 'X' 和 'threshold'，但未在 spec 中定义具体数值，导致判定标准缺失。",
+        "未指定具体的 'live feed' 来源或 ID，存在歧义（例如：哪个直播间？哪个计数器？）。"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 73,
+      "category": "bait_switch",
+      "expected": "critical",
+      "actual_score": 5,
+      "actual_tier": "warn",
+      "why": [
+        "数据源 'Main Page' 是动态变化的，且没有提供具体的 'X' 指代内容，导致无法确定需要监测的具体事实。",
+        "规则中的 'score >= threshold' 完全缺失定义，'score' 指代不明（是编辑次数？浏览量？还是人工评分？），'threshold' 数值未给出。"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 74,
+      "category": "bait_switch",
+      "expected": "critical",
+      "actual_score": 6,
+      "actual_tier": "warn",
+      "why": [
+        "数据源 'https://example.com/rss' 仅为占位符，无法实际访问或验证，导致无法确定截止后能否获取结果。",
+        "规则中的 'item X' 定义模糊，未指定具体的标题、链接或内容特征，导致判定标准不明确。"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 75,
+      "category": "bait_switch",
+      "expected": "critical",
+      "actual_score": 5,
+      "actual_tier": "warn",
+      "why": [
+        "占位符 'X' 未定义具体数值，导致阈值不明确，无法执行判定。",
+        "数据源 'NYC' 过于宽泛，未指定具体观测点（如机场、市中心），不同位置温度可能有显著差异。"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 76,
+      "category": "bait_switch",
+      "expected": "critical",
+      "actual_score": 4,
+      "actual_tier": "warn",
+      "why": [],
+      "ok": true
+    },
+    {
+      "idx": 77,
+      "category": "bait_switch",
+      "expected": "critical",
+      "actual_score": 6,
+      "actual_tier": "warn",
+      "why": [
+        "数据源 (Strawpoll) 缺乏官方 API 或稳定的自动化抓取接口，导致截止后无法保证程序化获取确定结果，依赖人工或不可靠的爬虫。",
+        "规则中 'score' 和 'threshold' 未定义具体数值或计算方式（如平均分、最高票、百分比等），存在严重歧义。"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 78,
+      "category": "bait_switch",
+      "expected": "critical",
+      "actual_score": 4,
+      "actual_tier": "warn",
+      "why": [],
+      "ok": true
+    },
+    {
+      "idx": 79,
+      "category": "bait_switch",
+      "expected": "critical",
+      "actual_score": 6,
+      "actual_tier": "warn",
+      "why": [
+        "数据源 (https://stackoverflow.com/tags) 是动态网页，通常没有提供稳定、可机器读取的实时 API 接口来获取特定标签的精确计数，导致'live feed'难以自动化验证。",
+        "规则中的 'score' 指代不明，未明确说明是指 'question count' (问题数量) 还是其他指标，存在歧义。"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 80,
+      "category": "bait_switch",
+      "expected": "critical",
+      "actual_score": 5,
+      "actual_tier": "warn",
+      "why": [
+        "数据源 'medium.com' 是一个包含数百万篇文章的开放平台，'random'（随机）一词在预测市场中缺乏可操作的定义。裁决者无法确定哪一篇特定的文章被选中，导致无法验证结果。",
+        "规则中提到的 'score' 和 'threshold' 未在题目或规则中定义。裁决者不知道 'score' 是指文章字数、关键词密度还是其他指标，且 'threshold' 的具体数值缺失。"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 81,
+      "category": "bait_switch",
+      "expected": "critical",
+      "actual_score": 4,
+      "actual_tier": "warn",
+      "why": [],
+      "ok": true
+    },
+    {
+      "idx": 82,
+      "category": "bait_switch",
+      "expected": "critical",
+      "actual_score": 5,
+      "actual_tier": "warn",
+      "why": [
+        "数据源 'https://forum.example.com/' 是一个通用占位符域名，并非真实可访问的特定论坛实例，无法验证实际数据获取的可行性。",
+        "关键参数 'N' 和 'threshold' 在规范中未定义具体数值或范围，导致 'score >= threshold' 的逻辑无法执行。"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 83,
+      "category": "bait_switch",
+      "expected": "critical",
+      "actual_score": 4,
+      "actual_tier": "warn",
+      "why": [],
+      "ok": true
+    },
+    {
+      "idx": 84,
+      "category": "bait_switch",
+      "expected": "critical",
+      "actual_score": 5,
+      "actual_tier": "warn",
+      "why": [
+        "数据源 'https://amazon.com' 过于宽泛，未指定具体商品、SKU或库存页面，无法通过单一URL获取确定结果。",
+        "核心变量 'X' 未定义，导致无法判断是否包含。"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 85,
+      "category": "bait_switch",
+      "expected": "critical",
+      "actual_score": 6,
+      "actual_tier": "warn",
+      "why": [
+        "数据源 'ticketmaster.com' 过于宽泛，未指定具体事件（Event ID）或页面，导致无法确定具体的 'ticket sale count' 对象。",
+        "规则中 'X' 和 'threshold' 为占位符，未提供具体数值，导致规则在实例化前无法执行。"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 86,
+      "category": "bait_switch",
+      "expected": "critical",
+      "actual_score": 5,
+      "actual_tier": "warn",
+      "why": [
+        "数据源 'example-exchange.com' 为占位符，非真实可访问的权威数据源，无法验证实时数据。",
+        "变量 'X' 和 'threshold' 未在 spec 中定义具体数值，导致判定标准缺失。"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 87,
+      "category": "bait_switch",
+      "expected": "critical",
+      "actual_score": 4,
+      "actual_tier": "warn",
+      "why": [],
+      "ok": true
+    },
+    {
+      "idx": 88,
+      "category": "bait_switch",
+      "expected": "critical",
+      "actual_score": 5,
+      "actual_tier": "warn",
+      "why": [
+        "数据源不可控：Google Translate 是外部第三方服务，预测市场无法直接访问其内部随机种子或生成逻辑，无法在截止后独立验证结果。",
+        "规则严重歧义：'random translator' 未定义随机性的来源（是用户随机输入？还是系统随机选择翻译结果？），且 'X' 未定义具体字符或模式，导致无法客观判定。"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 89,
+      "category": "bait_switch",
+      "expected": "critical",
+      "actual_score": 5,
+      "actual_tier": "warn",
+      "why": [
+        "核心变量 'Y' 未定义，导致裁决标准完全缺失。",
+        "规则中提到的 'score' 和 'threshold' 未在题目或规范中给出具体数值或计算逻辑。"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 90,
+      "category": "bait_switch",
+      "expected": "critical",
+      "actual_score": 5,
+      "actual_tier": "warn",
+      "why": [
+        "核心变量 'X' 未定义，导致裁决标准完全不可执行。",
+        "规则中的 'score' 和 'threshold' 缺乏数学或逻辑定义，无法判断是否满足条件。"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 91,
+      "category": "subjective_tail",
+      "expected": "critical",
+      "actual_score": 3,
+      "actual_tier": "critical",
+      "why": [
+        "缺数据源 (data_source_canonical 空)",
+        "题目/规则缺明确 outcome 关键词 (will win / price >= / will close above 等)"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 92,
+      "category": "subjective_tail",
+      "expected": "critical",
+      "actual_score": 3,
+      "actual_tier": "critical",
+      "why": [
+        "缺数据源 (data_source_canonical 空)",
+        "题目/规则缺明确 outcome 关键词 (will win / price >= / will close above 等)"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 93,
+      "category": "subjective_tail",
+      "expected": "critical",
+      "actual_score": 5,
+      "actual_tier": "warn",
+      "why": [
+        "缺数据源 (data_source_canonical 空)",
+        "核心概念 'fair price' (公平价格) 是主观且模糊的，缺乏客观的量化标准（如市场成交价、评估报告等）。"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 94,
+      "category": "subjective_tail",
+      "expected": "critical",
+      "actual_score": 3,
+      "actual_tier": "critical",
+      "why": [
+        "缺数据源 (data_source_canonical 空)",
+        "题目/规则缺明确 outcome 关键词 (will win / price >= / will close above 等)"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 95,
+      "category": "subjective_tail",
+      "expected": "critical",
+      "actual_score": 3,
+      "actual_tier": "critical",
+      "why": [
+        "缺数据源 (data_source_canonical 空)",
+        "题目/规则缺明确 outcome 关键词 (will win / price >= / will close above 等)"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 96,
+      "category": "subjective_tail",
+      "expected": "critical",
+      "actual_score": 3,
+      "actual_tier": "critical",
+      "why": [
+        "缺数据源 (data_source_canonical 空)",
+        "题目/规则缺明确 outcome 关键词 (will win / price >= / will close above 等)"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 97,
+      "category": "subjective_tail",
+      "expected": "critical",
+      "actual_score": 2,
+      "actual_tier": "critical",
+      "why": [
+        "缺数据源 (data_source_canonical 空)",
+        "题目/规则缺明确 outcome 关键词 (will win / price >= / will close above 等)"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 98,
+      "category": "subjective_tail",
+      "expected": "critical",
+      "actual_score": 3,
+      "actual_tier": "critical",
+      "why": [
+        "缺数据源 (data_source_canonical 空)",
+        "题目/规则缺明确 outcome 关键词 (will win / price >= / will close above 等)"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 99,
+      "category": "subjective_tail",
+      "expected": "critical",
+      "actual_score": 3,
+      "actual_tier": "critical",
+      "why": [
+        "缺数据源 (data_source_canonical 空)",
+        "题目/规则缺明确 outcome 关键词 (will win / price >= / will close above 等)"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 100,
+      "category": "subjective_tail",
+      "expected": "critical",
+      "actual_score": 2,
+      "actual_tier": "critical",
+      "why": [
+        "缺数据源 (data_source_canonical 空)",
+        "题目/规则缺明确 outcome 关键词 (will win / price >= / will close above 等)"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 101,
+      "category": "subjective_tail",
+      "expected": "critical",
+      "actual_score": 3,
+      "actual_tier": "critical",
+      "why": [
+        "缺数据源 (data_source_canonical 空)",
+        "题目/规则缺明确 outcome 关键词 (will win / price >= / will close above 等)"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 102,
+      "category": "subjective_tail",
+      "expected": "critical",
+      "actual_score": 3,
+      "actual_tier": "critical",
+      "why": [
+        "缺数据源 (data_source_canonical 空)",
+        "题目/规则缺明确 outcome 关键词 (will win / price >= / will close above 等)"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 103,
+      "category": "subjective_tail",
+      "expected": "critical",
+      "actual_score": 3,
+      "actual_tier": "critical",
+      "why": [
+        "缺数据源 (data_source_canonical 空)",
+        "题目/规则缺明确 outcome 关键词 (will win / price >= / will close above 等)"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 104,
+      "category": "subjective_tail",
+      "expected": "critical",
+      "actual_score": 3,
+      "actual_tier": "critical",
+      "why": [
+        "缺数据源 (data_source_canonical 空)",
+        "题目/规则缺明确 outcome 关键词 (will win / price >= / will close above 等)"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 105,
+      "category": "subjective_tail",
+      "expected": "critical",
+      "actual_score": 2,
+      "actual_tier": "critical",
+      "why": [
+        "缺数据源 (data_source_canonical 空)",
+        "题目/规则缺明确 outcome 关键词 (will win / price >= / will close above 等)"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 106,
+      "category": "subjective_tail",
+      "expected": "critical",
+      "actual_score": 3,
+      "actual_tier": "critical",
+      "why": [
+        "缺数据源 (data_source_canonical 空)",
+        "题目/规则缺明确 outcome 关键词 (will win / price >= / will close above 等)"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 107,
+      "category": "subjective_tail",
+      "expected": "critical",
+      "actual_score": 3,
+      "actual_tier": "critical",
+      "why": [
+        "缺数据源 (data_source_canonical 空)",
+        "题目/规则缺明确 outcome 关键词 (will win / price >= / will close above 等)"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 108,
+      "category": "subjective_tail",
+      "expected": "critical",
+      "actual_score": 3,
+      "actual_tier": "critical",
+      "why": [
+        "缺数据源 (data_source_canonical 空)",
+        "题目/规则缺明确 outcome 关键词 (will win / price >= / will close above 等)"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 109,
+      "category": "subjective_tail",
+      "expected": "critical",
+      "actual_score": 3,
+      "actual_tier": "critical",
+      "why": [
+        "缺数据源 (data_source_canonical 空)",
+        "题目/规则缺明确 outcome 关键词 (will win / price >= / will close above 等)"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 110,
+      "category": "subjective_tail",
+      "expected": "critical",
+      "actual_score": 3,
+      "actual_tier": "critical",
+      "why": [
+        "缺数据源 (data_source_canonical 空)",
+        "题目/规则缺明确 outcome 关键词 (will win / price >= / will close above 等)"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 111,
+      "category": "subjective_tail",
+      "expected": "critical",
+      "actual_score": 3,
+      "actual_tier": "critical",
+      "why": [
+        "缺数据源 (data_source_canonical 空)",
+        "题目/规则缺明确 outcome 关键词 (will win / price >= / will close above 等)"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 112,
+      "category": "subjective_tail",
+      "expected": "critical",
+      "actual_score": 3,
+      "actual_tier": "critical",
+      "why": [
+        "缺数据源 (data_source_canonical 空)",
+        "题目/规则缺明确 outcome 关键词 (will win / price >= / will close above 等)"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 113,
+      "category": "subjective_tail",
+      "expected": "critical",
+      "actual_score": 3,
+      "actual_tier": "critical",
+      "why": [
+        "缺数据源 (data_source_canonical 空)",
+        "题目/规则缺明确 outcome 关键词 (will win / price >= / will close above 等)"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 114,
+      "category": "subjective_tail",
+      "expected": "critical",
+      "actual_score": 3,
+      "actual_tier": "critical",
+      "why": [
+        "缺数据源 (data_source_canonical 空)",
+        "题目/规则缺明确 outcome 关键词 (will win / price >= / will close above 等)"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 115,
+      "category": "subjective_tail",
+      "expected": "critical",
+      "actual_score": 3,
+      "actual_tier": "critical",
+      "why": [
+        "缺数据源 (data_source_canonical 空)",
+        "题目/规则缺明确 outcome 关键词 (will win / price >= / will close above 等)"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 116,
+      "category": "subjective_tail",
+      "expected": "critical",
+      "actual_score": 3,
+      "actual_tier": "critical",
+      "why": [
+        "缺数据源 (data_source_canonical 空)",
+        "题目/规则缺明确 outcome 关键词 (will win / price >= / will close above 等)"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 117,
+      "category": "subjective_tail",
+      "expected": "critical",
+      "actual_score": 3,
+      "actual_tier": "critical",
+      "why": [
+        "缺数据源 (data_source_canonical 空)",
+        "题目/规则缺明确 outcome 关键词 (will win / price >= / will close above 等)"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 118,
+      "category": "subjective_tail",
+      "expected": "critical",
+      "actual_score": 3,
+      "actual_tier": "critical",
+      "why": [
+        "缺数据源 (data_source_canonical 空)",
+        "题目/规则缺明确 outcome 关键词 (will win / price >= / will close above 等)"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 119,
+      "category": "subjective_tail",
+      "expected": "critical",
+      "actual_score": 3,
+      "actual_tier": "critical",
+      "why": [
+        "缺数据源 (data_source_canonical 空)",
+        "题目/规则缺明确 outcome 关键词 (will win / price >= / will close above 等)"
+      ],
+      "ok": true
+    },
+    {
+      "idx": 120,
+      "category": "subjective_tail",
+      "expected": "critical",
+      "actual_score": 3,
+      "actual_tier": "critical",
+      "why": [
+        "缺数据源 (data_source_canonical 空)",
+        "题目/规则缺明确 outcome 关键词 (will win / price >= / will close above 等)"
+      ],
+      "ok": true
+    }
+  ]
+}

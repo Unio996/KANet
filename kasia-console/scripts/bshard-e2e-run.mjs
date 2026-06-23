@@ -22,7 +22,7 @@ const CONSOLE_URL = process.env.BSHARD_E2E_CONSOLE_URL || 'http://127.0.0.1:3200
 const TREASURY_RELAY = process.env.BSHARD_E2E_TREASURY_RELAY || 'eb5a5864-a8e0-4376-8f61-38108abb301f';
 const NETWORK = process.env.BSHARD_E2E_NETWORK || 'testnet-12';
 const SILVERC = process.env.SILVERC || 'D:/silverscript/target/release/silverc.exe';
-const POOL_LEAF_SIL = join(LIB, 'PoolLeaf.sil');   // route-split: register+fold (4-field, 36B)
+const POOL_LEAF_SIL = process.env.BSHARD_E2E_LEAF_SIL ? join(LIB, process.env.BSHARD_E2E_LEAF_SIL) : join(LIB, 'PoolLeaf.sil');   // route-split: register+fold (4-field, 36B); probe-B overrides → PoolLeaf_nofold_probe.sil
 const POOL_ROOT_SIL = join(LIB, 'PoolRoot.sil');   // route-split: close+claim+refund (7-field, 87B)
 const POOL_SIDE_SIL = join(LIB, 'PoolSide_v08_shard.sil');
 const ZERO32 = '00'.repeat(32);
@@ -127,15 +127,20 @@ async function main() {
   }
 
   // ── treasury funding: fee P2PK outpoint + register bettor[1] funding outpoint ──
-  log('funding fee outpoint (treasury → fee addr)...');
-  const feeKp = Keypair.random(); const feeAddr = feeKp.toAddress(NETWORK).toString();
-  const feeLock = await lockToP2SH(feeAddr, 50_000_000n, TREASURY_RELAY); // 0.5 KAS fee budget
-  const feeOutpoint = { txid: feeLock.txId, outpointTxid: feeLock.txId, index: 0, address: feeAddr, amountSompi: 50_000_000n };
-  log(`fee outpoint: ${feeOutpoint.txid.slice(0, 12)} @ ${feeAddr}`);
+  // FUNDING FIX (Bettor 2026-06-19, same lesson as ShardLeaf clean-LAND): funding/fee inputs are SIGNED BY THE RELAY's
+  // key (p2sh.mjs createInputSignature wallet.getPrivateKey()), so the funding UTXOs MUST sit at the RELAY's own address —
+  // NOT random feeKp/bettorKp addrs (relay can't sign those → invalid P2PK sig → false-stack on funding input, masking the
+  // real seal SIZE probe). bettorPk stays the identity in the register witness/ticket; only the KAS source moves to relay addr.
+  const changeAddr = (await relayCmd(TREASURY_RELAY, { type: 'get_pubkey' })).address;
+  if (!changeAddr) throw new Error('could not get relay address for funding');
+  const RELAY_ADDR = changeAddr; // tester-1 wallet addr (signs funding inputs)
+  log(`funding fee outpoint (treasury → RELAY addr ${RELAY_ADDR.slice(0,24)}, so relay signs)...`);
+  const feeLock = await lockToP2SH(RELAY_ADDR, 50_000_000n, TREASURY_RELAY); // 0.5 KAS fee budget
+  const feeOutpoint = { txid: feeLock.txId, outpointTxid: feeLock.txId, index: 0, address: RELAY_ADDR, amountSompi: 50_000_000n };
+  log(`fee outpoint: ${feeOutpoint.txid.slice(0, 12)} @ relay`);
 
-  log('funding register bettor[1] (treasury → bettor1 addr)...');
-  const b1Lock = await lockToP2SH(bettorAddrs[bettorPks[1]], STAKE + 60_000_000n, TREASURY_RELAY); // stake + 0.6 KAS (ticket 0.2 + fee + change margin; register Σin must exceed leaf_cont+ticket+fee)
-  const changeAddr = (await relayCmd(TREASURY_RELAY, { type: 'get_pubkey' })).address || feeAddr;
+  log('funding register bettor[1] (treasury → RELAY addr, so relay signs)...');
+  const b1Lock = await lockToP2SH(RELAY_ADDR, STAKE + 60_000_000n, TREASURY_RELAY); // stake + 0.6 KAS (ticket 0.2 + fee + change margin; register Σin must exceed leaf_cont+ticket+fee)
 
   // ── config + run ──
   const config = {
@@ -145,7 +150,7 @@ async function main() {
     ticketDustSompi: 20_000_000n, // 0.2 KAS — NOT true dust: Kaspa storage mass ∝ 1/output_value forbids <~0.1 KAS (1000 sompi → mass 1e9 > max). ticket is a real recoverable UTXO (spent at claim/refund).
     bettors: [
       { bettorPk: bettorPks[0], side: 0, stakeSompi: STAKE.toString(), changeAddress: changeAddr },
-      { bettorPk: bettorPks[1], side: 0, stakeSompi: STAKE.toString(), fundingOutpoint: { txid: b1Lock.txId, address: bettorAddrs[bettorPks[1]] }, changeAddress: changeAddr },
+      { bettorPk: bettorPks[1], side: 0, stakeSompi: STAKE.toString(), fundingOutpoint: { txid: b1Lock.txId, address: RELAY_ADDR }, changeAddress: changeAddr },
     ],
     tickets: {}, bettorAddrs,
     relays: { bettorRelayId: TREASURY_RELAY, committeeRelayIds: [TREASURY_RELAY] },

@@ -1241,7 +1241,7 @@
             <div x-show="!m._chatHistory?.length" class="text-sm text-ink-600 leading-relaxed whitespace-pre-line mb-3" x-text="m._agentReply"></div>
             <!-- Reply input -->
             <div class="flex gap-2">
-              <input type="text" x-model="m._replyInput" @keydown.enter="replyToAgent(m)"
+              <input type="text" x-model="m._replyInput" @keydown.enter="if(!$event.isComposing){replyToAgent(m)}"
                 :disabled="m._asking" placeholder="回复 Agent..."
                 class="flex-1 text-sm border border-warm-300 rounded-lg px-3 py-1.5" />
               <button @click="replyToAgent(m)" :disabled="m._asking || !m._replyInput"

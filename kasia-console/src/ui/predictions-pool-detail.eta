@@ -32,6 +32,16 @@
       </div>
     </div>
 
+    <!-- KANet-UI 2026-06-22 值分成收口 chain-truth reconcile 横幅: v0.7 bshard 池经链上 close+claim 已结算,
+         但 DB 因 settler 把 bshard 押注误读成 0-bet → 退了 maker 本金 → protocol_status='refunded'.
+         页头已按链上真相显 '已结算'; 此横幅诚实交代分歧 (NO TX NO TRUTH). 仅 mismatch 时显. -->
+    <div x-show="chainSettled() && (market?.protocol_status === 'refunded' || market?.protocol_status === 'refunding')"
+         class="mb-4 rounded-lg px-4 py-3 border border-emerald-200 bg-emerald-50 text-[11px] text-ink-600 leading-relaxed">
+      <div class="font-medium text-emerald-700 mb-0.5">✅ 已结算（以链上为准）</div>
+      押注池已在链上完成价值分成（赢家 + broker + 仲裁委员，见下面 💎 证据链）。<br>
+      <span class="text-amber-700">注</span>：数据库状态曾显示「refunded」——那是结算器把分片(bshard)押注误读成「0 注」后<strong>单独退还了 maker 的本金</strong>（<a x-show="settleEvidence()?.maker_stake_refund?.explorer_url" :href="settleEvidence().maker_stake_refund.explorer_url" target="_blank" class="text-brand-500 underline">退本金 TX 🔗</a>），并非池子退款。链上真相 = 已结算。
+    </div>
+
     <!-- state machine viz -->
     <div class="flex items-center gap-1 mb-4 text-[10px]">
       <template x-for="(st, i) in stateMachine" :key="st.key">
@@ -84,6 +94,28 @@
       <!-- KANet-UI r520 (Bettor): 押注当场的诚实边界轻提示 (= dc-disclaimer 那段的 in-context 版, 下注者不用翻 disclaimer) -->
       <div class="mt-2 text-[10px] text-ink-400 bg-warm-50 rounded px-2.5 py-1.5 leading-relaxed">
         ⚖ 若裁决源真的不可得 / 歧义无法判定，仲裁人会<strong>弃权 → 本市场退款</strong>（非保证结算）。这是去中心化预言机的边界，非缺陷。
+      </div>
+
+      <!-- KANet-UI 2026-06-22 值分成收口 (Owner 真北极星): 协议 fee 透明 = 命门④ 链上不可篡改, 让用户看得见'每分钱去哪'. 仅 v0.7 bshard 值分成市场显示 (v06 旧费率系统不同). 单源读 feeConfig 防硬编漂移. introducer 标'待上线' (角色未 wire, 诚实不假装). -->
+      <div x-show="feeConfig && market && market.protocol_version === 'v0.7'"
+           class="mt-2 text-[10px] text-ink-500 bg-emerald-50 border border-emerald-100 rounded px-2.5 py-2 leading-relaxed">
+        <div class="font-medium text-ink-600 mb-1">💎 价值分成 · 协议常量</div>
+        <div class="grid grid-cols-2 gap-x-3 gap-y-0.5">
+          <span>🏆 赢家 <strong x-text="((feeConfig.winnersBps||9700)/100).toFixed(1)+'%'"></strong></span>
+          <span>🛡 仲裁委员 <strong x-text="(((feeConfig.oracleBps||100)+(feeConfig.nodeBps||20))/100).toFixed(1)+'%'"></strong> <span class="text-ink-400">(判决+节点)</span></span>
+          <span>🤝 broker <strong x-text="((feeConfig.brokerBps||160)/100).toFixed(1)+'%'"></strong></span>
+          <span>📣 introducer <strong x-text="((feeConfig.introBps||20)/100).toFixed(1)+'%'"></strong> <span class="text-amber-600">(角色待上线)</span></span>
+        </div>
+        <!-- KANet-UI 2026-06-23 (Owner 产品语言钦定 02:24 + 对抗讨论 5-vantage 收敛): 信任分两层, 永不说整体 trustless。
+             层1 OUTCOME(谁赢)= trust-minimized (去中心委员判, 链外结果永远需信任源, ZK 也不闭=oracle 问题数学不可约);
+             层2 PAYOUT(分账算术)= covenant 链上校验, 路线图升级 optimistic-trustless(fraud-proof+bond+slashing)/ZK。 -->
+        <div class="mt-1.5 text-ink-400">
+          <strong class="text-emerald-700">收款方地址</strong>（broker / introducer）在市场创建时<strong>链上烤死（命门④，offset-518 on-chain 锚）</strong>，不可篡改；仲裁委员（oracle/node）由链锚 pool 确定性派生。<br>
+          <strong class="text-ink-600">信任分两层（诚实口径，不声称整体 trustless）：</strong><br>
+          · <strong class="text-amber-700">结果（谁赢）= trust-minimized</strong>：由去中心预言机委员判定，链外赛果永远需要信任数据源（ZK 也无法消除——预言机问题数学不可约）。<br>
+          · <strong class="text-emerald-700">分账算术（payout）= covenant 链上校验</strong>（改 fee 地址/比例 → 机制重算对不上 → BUST）；路线图升级为 <strong>optimistic-trustless</strong>（结算方押 bond + 任何人可提确定性 fraud-proof 链上证伪 → slash + 冻结坏 root + 奖挑战者）。<br>
+          当前 testnet 诚信运营演示；委员自治-enforce daemon 为下一块硬化（把「信 4/5 不作恶」升级成「4/5 作恶面临可验证损失」）。
+        </div>
       </div>
 
       <div x-show="bet.open" x-transition class="mt-4 space-y-3">
@@ -316,6 +348,59 @@
       </div>
     </div>
 
+    <!-- ===== KANet-UI 2026-06-22 值分成收口: 价值分成 · 已分发 (settle_evidence 链上真分发证据链) =====
+         协议常量 panel (上面 #bet 卡里的 💎) 显的是'未分发'的协议比例; 此 panel 显结算后链上'已分发'的
+         真 TX (winner/broker/委员各一笔 claim, 点 🔗 验). 仅 chainSettled 时显. introducer 角色未 wire → 不假装. -->
+    <div x-show="chainSettled() && settleEvidence()" class="card p-4 mb-4">
+      <div class="flex items-center justify-between mb-1">
+        <span class="text-sm font-medium text-ink-700">💎 价值分成 · 已分发</span>
+        <span class="text-[10px] px-2 py-0.5 rounded font-medium bg-emerald-100 text-emerald-700">链上已分发</span>
+      </div>
+      <div class="text-[11px] text-ink-400 mb-3">押注池 <strong x-text="(settleEvidence()?.pool_kas ?? '?') + ' KAS'"></strong> 已按价值分成分到每一方, 每笔都是链上真 TX, 点 🔗 验。</div>
+
+      <!-- winner -->
+      <div x-show="settleEvidence()?.winner_claim" class="bg-emerald-50 rounded px-3 py-2 text-xs flex items-center gap-2 mb-1.5">
+        <span class="px-1.5 py-0.5 rounded font-medium text-[10px] bg-emerald-100 text-emerald-700 flex-shrink-0">🏆 赢家</span>
+        <span class="text-ink-400 font-mono text-[10px] truncate flex-1" x-text="(settleEvidence()?.winner_claim?.to_address || '').slice(0, 20) + '…'"></span>
+        <span class="text-ink-700 font-medium" x-text="(settleEvidence()?.winner_claim?.amount_kas ?? '?') + ' KAS'"></span>
+        <a x-show="settleEvidence()?.winner_claim?.explorer_url" :href="settleEvidence().winner_claim.explorer_url" target="_blank" class="text-emerald-600" title="领奖 TX">🔗</a>
+      </div>
+
+      <!-- broker + committee fee payouts -->
+      <template x-for="(f, i) in (settleEvidence()?.fee_payouts || [])" :key="f.txid">
+        <div class="bg-warm-50 rounded px-3 py-2 text-xs flex items-center gap-2 mb-1">
+          <span class="px-1.5 py-0.5 rounded font-medium text-[10px] flex-shrink-0"
+                :class="f.role === 'broker' ? 'bg-sky-100 text-sky-700' : 'bg-warm-200 text-ink-600'"
+                x-text="f.role === 'broker' ? '🤝 broker' : '🛡 仲裁委员'"></span>
+          <span class="text-ink-400 font-mono text-[10px] truncate flex-1" x-text="(f.to_address || '').slice(0, 20) + '…'"></span>
+          <span class="text-ink-600" x-text="(f.amount_kas ?? '?') + ' KAS'"></span>
+          <a x-show="f.explorer_url" :href="f.explorer_url" target="_blank" class="text-brand-500" title="分账 TX"><span x-text="f.secondary_output ? '🔗*' : '🔗'"></span></a>
+        </div>
+      </template>
+      <div x-show="(settleEvidence()?.fee_payouts || []).some(f => f.secondary_output)" class="text-[10px] text-ink-400 mt-0.5">
+        * 该委员的费用是该 TX 的次级输出 (explorer 主输出列不显, 需看 outputs 全列)。
+      </div>
+
+      <!-- introducer: 角色未上线, 诚实标注 (0.2% 当前并入赢家) -->
+      <div class="bg-warm-50 rounded px-3 py-2 text-xs flex items-center gap-2 mb-1 opacity-60">
+        <span class="px-1.5 py-0.5 rounded font-medium text-[10px] bg-warm-200 text-ink-500 flex-shrink-0">📣 introducer</span>
+        <span class="text-ink-400 flex-1 text-[10px]">角色待上线 (本市场无 introducer, 该 0.2% 并入赢家)</span>
+      </div>
+
+      <!-- close + payout root anchor -->
+      <div class="border-t border-warm-200 pt-2 mt-2 space-y-1 text-[10px] text-ink-400">
+        <div x-show="settleEvidence()?.close_txid" class="flex items-center gap-1">
+          <span class="flex-shrink-0">close_attest TX:</span>
+          <a :href="settleEvidence().close_explorer_url" target="_blank" class="text-brand-500 font-mono truncate" x-text="settleEvidence().close_txid"></a>
+        </div>
+        <div x-show="settleEvidence()?.payout_root" class="flex items-start gap-1">
+          <span class="flex-shrink-0">payoutRoot:</span>
+          <span class="font-mono break-all text-ink-500" x-text="settleEvidence().payout_root"></span>
+        </div>
+        <div class="text-ink-400 pt-0.5" x-text="'分发来源: ' + (settleEvidence()?.source || '')"></div>
+      </div>
+    </div>
+
     <!-- ===== piece 3 (v0.7+): 三方分账证据链 (= 用户可验机制公正) ===== -->
     <div x-show="audit && (audit.committee || (audit.bettor_sides||[]).length)" class="card p-4 mb-4">
       <div class="text-sm font-medium text-ink-700 mb-1">证据链 · 全程可审计</div>
@@ -404,6 +489,7 @@ function poolDetailPage(marketId) {
     oracleList: [],
     auditHistory: [],
     events: [],             // KANet-UI 2026-06-07 P0-#4: chain_events 时间线 (ORDER ASC)
+    feeConfig: null,        // KANet-UI 2026-06-22 值分成收口: 协议 fee 常量 {brokerBps,oracleBps,introBps,nodeBps,winnersBps,totalFeeBps} (GET /api/pool/fee-config)
     // KANet-UI 2026-06-07 P0-#2 (Bettor r319 关 1 PASS): web 押注 panel state
     bet: {
       open: false,
@@ -445,6 +531,11 @@ function poolDetailPage(marketId) {
 
     async init() {
       await this.load();
+      // KANet-UI 2026-06-22 值分成收口: 读协议 fee 常量 (单源 GET /api/pool/fee-config = pool-shard-settle FEE_CONFIG, 防硬编漂移; 协议常量非 maker 可调)
+      try {
+        const fcR = await fetch('/api/pool/fee-config').then(r => r.json()).catch(() => ({}));
+        if (fcR.ok && fcR.fee_config) this.feeConfig = fcR.fee_config;
+      } catch {}
       // KANet-UI 2026-06-07 P0-#2: 加载自家 agent list (= 同 create form 模式)
       try {
         const agResp = await fetch('/api/agent/profile').then(r => r.json()).catch(() => ({}));
@@ -665,6 +756,7 @@ function poolDetailPage(marketId) {
     },
     // 当前阶段大白话提示 (= 用户不见 jargon)
     currentStageHint() {
+      if (this.chainSettled()) return '已结算 (链上证据链见下面 💎 价值分成已分发).';
       const st = this.market?.protocol_status;
       const total = (this.audit?.committee?.members || []).length || 5;
       const voted = this.votedCount?.() ?? 0;
@@ -739,8 +831,19 @@ function poolDetailPage(marketId) {
       });
     },
 
+    // KANet-UI 2026-06-22 值分成收口 chain-truth reconcile: v0.7 bshard markets settle via
+    // driver-side close_attest + winner claim (NOT pool_markets.settle_txid). The settler can
+    // misread bshard bettors as 0-bet and refund the maker seed → DB protocol_status='refunded'
+    // while the pool actually settled. audit.chain_settled (= metadata.settle_evidence, verified
+    // chain truth) is authoritative. NO TX NO TRUTH.
+    chainSettled() {
+      return !!(this.audit && this.audit.chain_settled);
+    },
+    settleEvidence() {
+      return (this.audit && this.audit.settle_evidence) || null;
+    },
     isSettled() {
-      return this.market && (this.market.protocol_status === 'completed' || this.market.settle_txid);
+      return !!(this.chainSettled() || (this.market && (this.market.protocol_status === 'completed' || this.market.settle_txid)));
     },
     // KANet-UI 2026-06-08 P0-B 三桶 (Bettor r414 + spec §7.2):
     // 判定 (YES/NO 计 4-of-5) / 弃权 (ABSTAIN 不计) / 未响应 (silent forfeit)
@@ -788,9 +891,12 @@ function poolDetailPage(marketId) {
       return src + ' / ' + cond;
     },
     statusLabel() {
+      // chain-truth reconcile: show 已结算 when chain settle evidence exists, even if DB says refunded.
+      if (this.chainSettled()) return '已结算 (链上)';
       return this.market ? (this.market.protocol_status || 'unknown') : '';
     },
     statusBadgeClass() {
+      if (this.chainSettled()) return 'bg-emerald-100 text-emerald-700';
       var s = this.market ? this.market.protocol_status : '';
       if (s === 'completed') return 'bg-emerald-100 text-emerald-700';
       if (s === 'collecting_sigs' || s === 'verifying') return 'bg-amber-100 text-amber-700';

@@ -626,6 +626,17 @@ if (process.send) {
           // Phase 4a v0: TX deserialization + sighash via kaspa-wasm.
           // TODO Sub 8.1 testnet 真 e2e 验: TX hex serialization format compatibility, sighash type selection.
           let unsignedTx;
+          // bshard (A) covenant-tx path (J2 2026-06-21): close_attest/cancel_attest 的 PS output 带 CovenantBinding +
+          //   scriptPublicKey(hex)+ flattened outpoint — manual `new Transaction(parsed)` rehydration 不重建 covenant/spk →
+          //   sighash 错. cmd.safe_json=true → 用 Transaction.deserializeFromSafeJSON(round-trips covenant+utxo+outpoint 全保,
+          //   J2 验结构等价 → sighash 一致). 默认 path 不变(settler 现有 PoolSpine settle 不受影响, backward-compat).
+          if (cmd.safe_json) {
+            try { unsignedTx = Transaction.deserializeFromSafeJSON(cmd.tx_hex); }
+            catch (e) { throw new Error(`sign_input_for_settle safe_json deserialize fail: ${e.message}`); }
+            const signature = createInputSignature(unsignedTx, inputIndex, wallet.getPrivateKey(), SighashType.All);
+            if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, signature, input_index: inputIndex } });
+            return;
+          }
           try {
             // Phase 4a v0 简化: console 直 pass Transaction-shaped object via JSON OR
             // hex full-serialization. kaspa-wasm Transaction constructor expects object spec.
@@ -833,12 +844,72 @@ if (process.send) {
           return;
         }
 
+        case 'bshard_convert_to_foldnode': {
+          // bshard convert-split (J1 2026-06-19): ShardLeaf convert_to_foldnode OP_1. sealed leaf P2SH(no sig)+funding P2PK.
+          // leaf→FoldNode foreign-template 桥 (4-field carry, no outcome). relay 自算 FoldNode 续约地址.
+          const { unlockBshardConvert } = await import('./lib/p2sh.mjs');
+          const wallet = getWallet();
+          const r = await unlockBshardConvert({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) });
+          if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, txId: r.txId } });
+          return;
+        }
+
         case 'bshard_seal_to_root': {
           // bshard M3 route-split: PoolLeaf seal_to_root OP_3, leaf→root foreign-template 桥. leaf P2SH(no sig)+funding. 全池 KAS → PoolRoot.
           const { unlockBshardSeal } = await import('./lib/p2sh.mjs');
           const wallet = getWallet();
           const r = await unlockBshardSeal({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) });
           if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, txId: r.txId } });
+          return;
+        }
+
+        // ── bshard (A) self-contained cov_id-provenance handlers (2026-06-20) ──
+        case 'bshard_genesis_mint_payout': {
+          // market 创建铸空 PayoutShard covenant (populateGenesisCovenants → cov_id). 返回 payoutCovId 供 ShardLeaf ctor bake.
+          const { unlockBshardGenesisMintPayout } = await import('./lib/p2sh.mjs');
+          const wallet = getWallet();
+          const r = await unlockBshardGenesisMintPayout({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) });
+          if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, ...r } });
+          return;
+        }
+        case 'bshard_consolidate': {
+          // 单片全额归集进真 PayoutShard (PS absorb OP_0 + SL consolidate_to_payout OP_1, cov_id-bind destination + CovenantBinding 续).
+          const { unlockBshardConsolidate } = await import('./lib/p2sh.mjs');
+          const wallet = getWallet();
+          const r = await unlockBshardConsolidate({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) });
+          if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, ...r } });
+          return;
+        }
+        case 'bshard_close_attest': {
+          // 委员 4-of-5 (pubkey-distinct, b0e35141) 背书 payoutRoot, closed 0→1 write-once + cov_id 续.
+          const { unlockBshardCloseAttest } = await import('./lib/p2sh.mjs');
+          const wallet = getWallet();
+          const r = await unlockBshardCloseAttest({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) });
+          if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, ...r } });
+          return;
+        }
+        case 'bshard_payout_claim': {
+          // winner store-payout 派彩 (merkle climb + multi-word nullifier + recipient P2PK + cov_id 续, OP_2).
+          const { unlockBshardPayoutClaim } = await import('./lib/p2sh.mjs');
+          const wallet = getWallet();
+          const r = await unlockBshardPayoutClaim({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) });
+          if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, ...r } });
+          return;
+        }
+        case 'bshard_cancel_attest': {
+          // 委员 4-of-5 (pubkey-distinct) 背书 refundRoot, closed 0→2 write-once + cov_id 续 (cancel_attest OP_3, 镜像 close_attest).
+          const { unlockBshardCancelAttest } = await import('./lib/p2sh.mjs');
+          const wallet = getWallet();
+          const r = await unlockBshardCancelAttest({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) });
+          if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, ...r } });
+          return;
+        }
+        case 'bshard_refund_claim': {
+          // bettor store-refund 退款 (merkle climb + multi-word nullifier + recipient P2PK + cov_id 续, closed==2, refund_claim OP_4, 镜像 claim).
+          const { unlockBshardRefundClaim } = await import('./lib/p2sh.mjs');
+          const wallet = getWallet();
+          const r = await unlockBshardRefundClaim({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) });
+          if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, ...r } });
           return;
         }
 

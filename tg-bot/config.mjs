@@ -10,6 +10,16 @@ export const CONFIG = {
   pollMs: parseInt(process.env.TG_POLL_MS || '30000', 10),  // S1 notification poller cadence
   brokerRefreshMs: parseInt(process.env.TG_BROKER_REFRESH_MS || '60000', 10), // re-read broker config
   network: process.env.KASPA_NETWORK || 'testnet-12',
+  // owner-in-dev-channel bridge (pure messaging / 0-custody). Runs in a SEPARATE owner bot process
+  // (owner-bot.mjs), NOT the broker bot — Owner 钦定 两个独立电报面. ownerBotToken = the dedicated owner
+  // bot's @BotFather token (own bot, own getUpdates → no 409 with the broker bot). ownerChatId = the
+  // Owner's Telegram chat id (gate: only plain text from this chat bridges to dev-coord). The "Owner voice"
+  // relay is NOT configured here — resolved at runtime from the owner-classified address
+  // (resolveOwnerVoiceRelayId below), so re-anchoring the address in /identities takes effect with no
+  // restart, no env edit (mirrors resolveBrokerRelayId's DB-config-first design).
+  ownerBotToken: process.env.OWNER_BOT_TOKEN || '',
+  ownerChatId: process.env.OWNER_CHAT_ID || '1437320734',
+  ownerBridgePollMs: parseInt(process.env.OWNER_BRIDGE_POLL_MS || '10000', 10), // dev-coord → Owner cadence
 };
 
 // Resolve which broker the bot represents — prefer UI/DB config (Owner sets it in Settings,
@@ -21,6 +31,19 @@ export async function resolveBrokerRelayId() {
     if (j && j.broker_relay_id) return j.broker_relay_id;
   } catch { /* Console unreachable — use env fallback */ }
   return CONFIG.brokerRelayIdEnv;
+}
+
+// Resolve the "Owner voice" relay for the owner-in-dev-channel bridge — the relay whose ADDRESS is
+// classified trust_level='owner' (Console /api/chat/owner-voice). Returns the relay id, or '' if no
+// address is classified 'owner' yet (bridge Direction A then no-ops — never errors). Re-resolved per
+// use so re-classifying in /identities takes effect with no bot restart (mirrors resolveBrokerRelayId).
+export async function resolveOwnerVoiceRelayId() {
+  try {
+    const res = await fetch(`${CONFIG.consoleUrl}/api/chat/owner-voice`, { signal: AbortSignal.timeout(5000) });
+    const j = await res.json();
+    if (j && j.ownerVoice && j.ownerVoice.id) return j.ownerVoice.id;
+  } catch { /* Console unreachable — bridge skips this tick */ }
+  return '';
 }
 
 // BROKER_RELAY_ID is NOT a hard env requirement anymore (resolved at runtime from DB config/env).

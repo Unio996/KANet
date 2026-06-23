@@ -295,7 +295,7 @@
       <!-- Add channel input -->
       <div class="px-3 py-1.5 border-b border-warm-200">
         <div class="flex gap-1 mb-1">
-          <input x-model="newChannelInput" @keydown.enter="joinChannel()"
+          <input x-model="newChannelInput" @keydown.enter="if(!$event.isComposing){joinChannel()}"
             placeholder="输入频道名..."
             class="flex-1 text-xs border border-warm-200 rounded px-2 py-1.5 bg-white focus:outline-none focus:border-brand-300" />
           <button @click="joinChannel()"
@@ -305,7 +305,7 @@
             </svg>
           </button>
         </div>
-        <input x-model="newChannelDesc" @keydown.enter="joinChannel()"
+        <input x-model="newChannelDesc" @keydown.enter="if(!$event.isComposing){joinChannel()}"
           placeholder="备注（可选）"
           class="w-full text-xs border border-warm-200 rounded px-2 py-1 bg-white focus:outline-none focus:border-brand-300" />
       </div>
@@ -454,7 +454,7 @@
     <!-- Input -->
     <div class="px-5 py-3 border-t border-warm-200 bg-white flex-shrink-0">
       <div class="flex gap-2 items-end">
-        <input type="text" x-model="msgInput" @keydown.enter="send()"
+        <input type="text" x-model="msgInput" @keydown.enter="if(!$event.isComposing){send()}"
           :placeholder="mode!=='local' ? '链上广播...' : selectedAccount==='__all__' ? '对全体 Agent 说...' : '对 ' + displayChannelName(_agentChannel()) + ' 说...'"
           class="flex-1 px-4 py-2.5 border border-warm-200 rounded-xl text-sm text-ink-700 placeholder-ink-300 bg-warm-50/50 focus:outline-none focus:border-brand-400 focus:ring-1 focus:ring-brand-100" />
         <button @click="send()" :disabled="sending || !msgInput.trim()"

@@ -18,12 +18,71 @@ export function startMessage() {
     '更多:',
     '· /swap — 兑换 KAS ↔ USDT（经 broker，链上结算）',
     '· /discover — 浏览开放挂单 / 预测市场',
+    '· /broker — 想做撮合者（broker）赚佣金？怎么参与 + 价值分成',
     '· /help — 全部命令',
     '',
     '⚠ 你的钱始终由你自己链上掌控 —— 这个 bot 不持任何 key、碰不到你的资金。每笔付款都是你从自己地址链上发起。',
     '想自己 build？KANet 开源（MIT），fork 一个角色（broker / oracle / prediction / exchange）跑你自己的节点。',
     DISCLAIMER,
   ].join('\n');
+}
+
+// KANet-UI 2026-06-22 (Owner 实测派修): /start 对【已 /link 的用户】不重复三步引导, 改显其绑定地址 +
+// 直接给下一步 (Owner 钦定 'personalize-on-link, 显地址 + 最多一个改绑'). 未绑用户仍走 startMessage()。
+export function startMessageLinked(addr) {
+  return [
+    '👋 KANet — 你已就绪。',
+    '',
+    `📍 你的地址: ${addr}`,
+    '   (改绑: /link <新地址>)',
+    '',
+    '👉 下一步:',
+    '· /bet — 押注预测市场（你自己链上锁定，多评判结算），/mybets 看赢/输/退款',
+    '· /faucet — 领 5 个测试 KAS',
+    '· /swap — 兑换 KAS ↔ USDT（经 broker，链上结算）',
+    '· /broker — 想做撮合者赚佣金？申请当 broker + 价值分成',
+    '· /discover · /help',
+    '',
+    '⚠ 你的钱始终由你自己链上掌控 —— bot 不持 key、碰不到你的资金。',
+    DISCLAIMER,
+  ].join('\n');
+}
+
+// KANet-UI 2026-06-22 (Owner 钦定 broker 收益统计 DM 显): 格式化 address-keyed 收益。
+// data = /api/kanet-broker/earnings-by-address 返 {address,realized,pending,refunded,by_market}。
+// 链上证: 每已结算单挂 settle_txid explorer 链接。fee=价值分成(后端已用 phase2 实落值)。
+export function brokerEarnings(data) {
+  const explorer = (CONFIG.network === 'mainnet') ? 'https://explorer.kaspa.org' : 'https://explorer-tn12.kaspa.org';
+  const r = data.realized || {}, p = data.pending || {}, rf = data.refunded || {};
+  const by = data.by_market || [];
+  if (!by.length) {
+    return [
+      '💰 你的 broker 收益',
+      `📍 ${data.address || ''}`,
+      '',
+      '还没有经手任何市场。当有市场用你的地址当 broker + 结算后, 1.6% 佣金会落你地址, 这里就能看到。',
+      '想接市场? /broker 申请 / 看状态。',
+    ].join('\n');
+  }
+  const lines = [
+    '💰 你的 broker 收益',
+    `📍 ${data.address || ''}`,
+    '',
+    `✅ 已实现: ${r.pool_kas || '0'} KAS (${r.n_markets || 0} 单已结算)`,
+    `⏳ 待结算: ${p.pool_kas || '0'} KAS (${p.n_markets || 0} 单进行中)`,
+  ];
+  if ((rf.n_markets || 0) > 0) lines.push(`↩ 已退款: ${rf.pool_kas || '0'} KAS (${rf.n_markets} 单 — 市场退款, 未赚到)`);
+  lines.push('', '经手市场 (最近):');
+  const icon = (s) => s === 'settled' ? '✅' : (s === 'refunded' ? '↩' : '⏳');
+  for (const m of by.slice(0, 10)) {
+    const id = String(m.id || '').slice(-12);
+    let line = `${icon(m.status)} …${id}  ${m.fee_kas} KAS`;
+    if (m.settle_txid) line += `  ${explorer}/txs/${m.settle_txid}`;
+    lines.push(line);
+  }
+  if (by.length > 10) lines.push(`… 余 ${by.length - 10} 单 (在 web broker-home 看全部)`);
+  lines.push('', `共经手 ${by.length} 个市场 · 每笔分润落你地址, 链上可验。`);
+  return lines.join('\n');
 }
 
 // 兑换 flow — show broker X's KAS receiving address; the USER pays on-chain from their own wallet.
@@ -73,6 +132,48 @@ export function notifyLine(ev) {
   return `🔔 链上动态: ${t} · tx ${tx}… · ${ev.observed_at || ''}`;
 }
 
+// 成为撮合者 (broker / gateway) — Owner UI gap (2026-06-22): 公开面缺 user 级 'become broker' 入口.
+// 严格 INFO-ONLY (Bettor security gate): 只讲角色 + 价值分成佣金 + 当前怎么参与(经 Owner/dev fork),
+// 【绝不在公开 bot 面给自助注册按钮】—— broker 收 1.6% fee, 公开无 auth 自助注册 = fee 模型被滥用,
+// 须先落 /identities trust auth 硬化(banked). bot 0-key/deep-link only, 此命令纯文字引导.
+// ⚠ Owner待拍 final wording (同 startMessage).
+// KANet-UI 2026-06-22 (Owner 实测派修 + onboarding 闭环已落): /broker 从 INFO-ONLY 升级为真接通自助
+// 申请流 (地址制 onboarding 已落 + Owner trust 审批门 = auth 硬化已满足, 公开自助安全)。opts:
+//   { addr: 用户 /link 地址 (无则提示先 /link), status: onboard/status 返回 (onboarded/status/trust_level) }
+export function brokerRole(opts = {}) {
+  const { addr, status } = opts;
+  const lines = [
+    '🤝 成为撮合者 (broker)',
+    '',
+    'broker = 把预测市场 / 兑换撮合给用户, 按协议内置佣金收费(落你自己的链上地址):',
+    '· 价值分成(协议常量): 赢家 97% / oracle 1% / broker 1.6% / introducer 0.2% / node 0.2%',
+    '· broker 不碰用户资金 —— 用户全程自己链上锁仓+付款, 你只撮合+收佣 (佣金进你地址)',
+    '',
+  ];
+  if (!addr) {
+    lines.push('👉 申请当 broker (3 步):');
+    lines.push('① 先 /link <你的 kaspatest 地址> — 这地址就是你的 broker 收款地址(佣金落这)');
+    lines.push('② 去 @BotFather /newbot 拿一个你自己的 bot token');
+    lines.push('③ /broker_apply <你的 bot token> — 提交申请');
+  } else if (status?.onboarded && status.status === 'approved') {
+    lines.push(`✅ 你已是 approved broker (地址 ${addr})`);
+    lines.push('你的 bot 已(或即将由 KANet 托管)拉起, 对外呈现全部市场, 带量成交的佣金落你地址。');
+    lines.push('· /earnings — 看你的 broker 收益 (经手单/已实现/待结算, 链上可验)');
+    lines.push('· 改 bot token: /broker_apply <新 token>');
+  } else if (status?.onboarded) {
+    lines.push(`⏳ 你的 broker 申请已提交 (地址 ${addr}), 待 Owner 审批。`);
+    lines.push('审批通过后你的 bot 会被 KANet 自动托管拉起。换 token: /broker_apply <新 token>');
+  } else {
+    lines.push(`👉 申请当 broker (你已绑地址 ${addr}):`);
+    lines.push('① 去 @BotFather /newbot 拿一个你自己的 bot token');
+    lines.push('② /broker_apply <你的 bot token> — 提交申请 (待 Owner 审批后激活)');
+  }
+  lines.push('');
+  lines.push('⚠ 申请提交后需 Owner 审批才激活(防佣金滥用/女巫)。你的 bot token 加密存储、绝不外显。');
+  lines.push(DISCLAIMER);
+  return lines.join('\n');
+}
+
 export function help() {
   return [
     '命令:',
@@ -83,6 +184,8 @@ export function help() {
     '/bet — 押注预测市场',
     '/mybets — 看自己的押注 + 状态',
     '/discover — 浏览开放挂单 / 市场',
+    '/broker — 想做撮合者(broker)? 角色 + 佣金 + 申请',
+    '/earnings — broker 收益 (经手单/已实现/待结算, 链上可验)',
     '',
     DISCLAIMER,
   ].join('\n');

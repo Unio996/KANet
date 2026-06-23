@@ -92,11 +92,11 @@ export function allocateForRegister(db, logicalMarketId, nextStakeSompi) {
  * Throws on UNIQUE(logical_market_id, shard_index) — concurrent open_new losers catch this and re-run
  * allocateForRegister (which now sees the winner's open shard). This serializes shard opening across nodes/reqs.
  */
-export function registerShard(db, { logicalMarketId, shardIndex, shardMarketId, shardP2sh, nowSec = null }) {
+export function registerShard(db, { logicalMarketId, shardIndex, shardMarketId, shardP2sh, currentLeafOutpoint = null, currentLeafState = null, shardRedeemHex = null, nowSec = null }) {
   db.prepare(
-    `INSERT INTO market_shards (logical_market_id, shard_index, shard_market_id, shard_p2sh, status, created_at)
-     VALUES (?, ?, ?, ?, 'open', ?)`
-  ).run(logicalMarketId, shardIndex, shardMarketId, shardP2sh, nowSec);
+    `INSERT INTO market_shards (logical_market_id, shard_index, shard_market_id, shard_p2sh, current_leaf_outpoint, current_leaf_state, shard_redeem_hex, status, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?)`
+  ).run(logicalMarketId, shardIndex, shardMarketId, shardP2sh, currentLeafOutpoint, currentLeafState ? JSON.stringify(currentLeafState) : null, shardRedeemHex, nowSec);
 }
 
 /** Mark the previous open shard sealed when a new shard supersedes it (atomic part of open_new). */
@@ -106,11 +106,15 @@ export function sealShard(db, shardMarketId, nowSec = null) {
 }
 
 /**
- * Called AFTER a bettor's side_lock landed (NO TX NO STATE): bump count, recompute projected mass from real
- * on-chain stakes, eager-seal if a cap is reached (so findOpenShard skips it next). Atomic transaction.
+ * Called AFTER a bettor's side_lock (ShardLeaf register_append 续约) landed (NO TX NO STATE): bump count, recompute
+ * projected mass from real on-chain stakes, record the NEW leaf renewal UTXO + state (buildRegisterCommand 下一笔
+ * register 要这个), eager-seal if a cap is reached (so findOpenShard skips it next). Atomic transaction.
+ * @param {object} [opts] { currentLeafOutpoint:'txid:idx', currentLeafState:{count,local_yes,local_no,pool_value}, nowSec }
+ *   — (A) 模型续约: 本笔 register 产的续约 UTXO + state, 下一笔 spliceLeafState 重算 redeem (design (b)). null = 不更新该列.
  * @returns {{ sealed:boolean, bettor_count:number, projected_settle_mass:number }}
  */
-export function onBettorRegistered(db, shardMarketId, nowSec = null) {
+export function onBettorRegistered(db, shardMarketId, opts = {}) {
+  const { currentLeafOutpoint = null, currentLeafState = null, nowSec = null } = (typeof opts === 'number' ? { nowSec: opts } : opts);   // back-compat: 旧 positional nowSec
   const tx = db.transaction(() => {
     const s = db.prepare(`SELECT * FROM market_shards WHERE shard_market_id = ?`).get(shardMarketId);
     if (!s) throw new Error(`market_shards: no registry row for shard ${shardMarketId}`);
@@ -119,8 +123,11 @@ export function onBettorRegistered(db, shardMarketId, nowSec = null) {
     const projMass = projectShardSettleMass(stakes);
     const seal = (newCount >= SHARD_SEAL_COUNT) || (projMass > SHARD_MASS_CEILING);
     db.prepare(
-      `UPDATE market_shards SET bettor_count = ?, projected_settle_mass = ?, status = ?, sealed_at = ? WHERE shard_market_id = ?`
-    ).run(newCount, projMass, seal ? 'sealed' : s.status, seal ? nowSec : s.sealed_at, shardMarketId);
+      `UPDATE market_shards SET bettor_count = ?, projected_settle_mass = ?, status = ?, sealed_at = ?,
+         current_leaf_outpoint = COALESCE(?, current_leaf_outpoint), current_leaf_state = COALESCE(?, current_leaf_state)
+       WHERE shard_market_id = ?`
+    ).run(newCount, projMass, seal ? 'sealed' : s.status, seal ? nowSec : s.sealed_at,
+      currentLeafOutpoint, currentLeafState ? JSON.stringify(currentLeafState) : null, shardMarketId);
     return { sealed: seal, bettor_count: newCount, projected_settle_mass: projMass };
   });
   return tx();

@@ -1,0 +1,75 @@
+// RefundClaim.sil — cascade convert-split REFUND-CLAIM 合约 (J1, 2026-06-20; recursive-split refund 侧).
+//
+// 拆分动因: RootClose 的 refund 完整逻辑(dust-ticket 读 ~578B)是 seal 目标的 bloat → 拆出。RootClose 只留 refund_flip
+//   (closed 0→2, XOR-critical 留 RootClose 保 R1), dust-ticket 退款 payout 移本合约。
+// 职责 = 市场取消后 bettor 退本金(1:1 退 ticket.stake, parimutuel 不适用)。1-entry: refund_payout(self-recreate draw-down)。
+// 7-field state {local_yes, local_no, count, pool_value, closed, winningSide, payoutRoot}。
+// **RefundClaim 只经 RootClose.convert_to_refundclaim 创建**(foreign-template, refundclaim_tmpl_hash 焊进 RootClose);
+//   convert require(closed==2) → RefundClaim 结构上只见 closed==2(取消态)。
+// 承重 = output-bind weld(refund draw-down -stake)+ dust-ticket spent-once nullifier(R7 防 double-refund)+ Σin==Σout。
+//
+// ⚠ DRAFT (spec docs/2026-06-19-cascade-convert-split-spec.md; refund-split [flip 留 RootClose + payout 此] 待 NWT R1-XOR 终审)。
+
+pragma silverscript ^0.1.0;
+
+contract RefundClaim(
+    byte[32] ps_tmpl_hash,        // dust PoolSide-ticket expectedTemplateHash (R7: refund 读 spent-once 凭证)
+    byte[32] shard_pool_id,       // 本 pool 身份 (ticket 记此; per-instance P2SH 唯一性锚)
+    // —— genesis State (7-field; 实际由 RootClose.convert_to_refundclaim 提供, init_* 仅定义 State 布局) ——
+    int      init_local_yes,
+    int      init_local_no,
+    int      init_count,
+    int      init_pool_value,
+    int      init_closed,
+    int      init_winningSide,
+    byte[32] init_payoutRoot
+) {
+    int local_yes   = init_local_yes;
+    int local_no    = init_local_no;
+    int count       = init_count;
+    int pool_value  = init_pool_value;
+    int closed      = init_closed;
+    int winningSide = init_winningSide;
+    byte[32] payoutRoot = init_payoutRoot;
+
+    // dust PoolSide-ticket State (refund 读 spent-once 凭证)
+    struct Tk {
+        byte[32] bettorPk;
+        int      direction;
+        int      stake;
+        byte[32] shardPoolId;
+    }
+
+    // —— entry 0: refund_payout (取消市场 → bettor 退本金; 从 pool draw ticket.stake) —— [PoolRoot.refund_draw payout 部分]
+    entrypoint function refund_payout(
+        int      rootOutIdx,           // 重建 RefundClaim continuation (self)
+        int      payoutOutIdx,         // refund output to bettor
+        int      ticketInIdx,          // dust-ticket UTXO 在 inputs 的位 (R7 spent-once)
+        int      ticket_prefix_len,
+        int      ticket_suffix_len
+    ) {
+        require(closed == 2);                              // 仅 cancelled 可 refund (convert 已 gate, 结构保证 + 深度防御)
+
+        // 读 dust-ticket (R7 spent-once; 原语验 ps_tmpl_hash + 取 bettorPk/direction/stake/shardPoolId; spend 为 tx input = nullifier)
+        Tk tk = readInputStateWithTemplate(ticketInIdx, ticket_prefix_len, ticket_suffix_len, ps_tmpl_hash);
+        require(tk.shardPoolId == shard_pool_id);          // ticket 属本 pool
+
+        // refund = 本人 stake (1:1 退本金, parimutuel 不适用)
+        byte[34] bettorLock = new ScriptPubKeyP2PK(pubkey(tk.bettorPk));
+        require(tx.outputs[payoutOutIdx].scriptPubKey == byte[](bettorLock));
+        require(tx.outputs[payoutOutIdx].value == tk.stake);
+
+        // 重建 RefundClaim-self: pool_value -= stake (draw-down); state 余不变 (single-blake2b self)
+        validateOutputState(rootOutIdx, {
+            local_yes:  local_yes,
+            local_no:   local_no,
+            count:      count,
+            pool_value: pool_value - tk.stake,
+            closed:     2,
+            winningSide: winningSide,
+            payoutRoot: payoutRoot
+        });
+        // ★ output-bind weld: pool value == pool_value - stake
+        require(tx.outputs[rootOutIdx].value == pool_value - tk.stake);
+    }
+}

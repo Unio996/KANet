@@ -1,0 +1,29 @@
+// Blake2bProbe.sil — cost-model discriminator (J1, 2026-06-15).
+//
+// 目的: settle 30× 模型分歧 (pure-∝-bytes vs introspection-fixed-per-call)。
+//   register 13738 链上锚 underdetermined: 两模型都拟合 (取决 "used" 语义)。需 1 实测判别。
+// 设计: 2 entry, 都极简 redeem (baseline 小), 唯一区别 = **raw blake2b() 次数**:
+//   • probe0: 0 个 blake2b (只 require trivial) → 测 baseline (redeem 处理 + require)。
+//   • probe8: 8 个 raw blake2b of 64B (= merkle-climb depth-8 同形) → 测 8 个 raw blake2b 增量。
+// 判别: (probe8.used − probe0.used) / 8 = 单个 raw blake2b 成本。
+//   • pure-∝-bytes → ~128 (64B×2/B) → **merkle-climb 便宜, claim 不必弃 merkle**。
+//   • fixed-per-blake2b → ~3935 → **merkle-climb 是灾难, claim 必弃 merkle-proof**。
+// 这直接答 "claim 的 8-blake2b merkle-climb 是 8×128=1024(可调) 还是 8×3935=灾难"。
+// 注: raw blake2b ≠ validateOutputState(后者含 introspection 周边 ops, 是另一成本站点)。本 probe 只隔离 raw blake2b。
+
+pragma silverscript ^0.1.0;
+
+contract Blake2bProbe(byte[32] seed) {
+    // —— entry 0: probe0 (0 blake2b, baseline) ——
+    entrypoint function probe0() {
+        require(seed == seed);
+    }
+    // —— entry 1: probe8 (8 raw blake2b of 64B, merkle-climb 同形) ——
+    entrypoint function probe8(byte[32] sib) {
+        byte[32] cur = seed;
+        for (k, 0, 8, 8) {
+            cur = blake2b(byte[](cur) + byte[](sib));   // 1 raw blake2b of 64B per iter
+        }
+        require(cur == cur);                            // 用 cur 防编译器删
+    }
+}

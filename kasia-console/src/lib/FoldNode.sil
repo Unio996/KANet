@@ -1,0 +1,100 @@
+// FoldNode.sil — bshard convert-split FOLD-side 合约 (J1, 2026-06-19; 解 register SIZE-bound).
+//
+// 动因(SIZE-bound 链上实证 probe-B 2026-06-19): register 撞 9999 是因 monolithic-reveal 让 register 揭【含 fold
+//   字节】的 leaf(2088B→13738u)。register_append 的 validate-调用数(2: ps WithTemplate + leaf self)恒定,
+//   成本纯∝揭示合约大小 = SIZE-bound(COUNT refuted)。∴ 把 fold/seal 字节从 register 揭示的模板摘出 = register 解。
+//
+// convert-split 双模板:
+//   • ShardLeaf(register-side): register_append + convert_to_foldnode(轻, 1:1→FoldNode)。无 fold/seal 字节 → ~493B
+//     → register 揭小约 → <9999(probe-B 493B 实证过 units cap)。
+//   • FoldNode(本合约, fold-side): fold(covenant k→1) + seal_to_root。重字节在此; fold 是 covenant 跑 1M 预算
+//     (POST_TOCCATA, 非 9999)不受 register cap 限。fold 读【同 FoldNode 模板】输入 = covenant 同 cov_id 成立
+//     (ShardLeaf 先 convert 成 FoldNode, 再 FoldNode 互折 = covenant auto-count 不破; 见记忆 covenant-fold-limits)。
+//
+// ⚠ 下游 SIZE 墙(诚实, 非本合约 blocker): seal_to_root validateOutputStateWithTemplate(PoolRoot ~2940B foreign)
+//   → seal 成本∝PoolRoot 大小 ~19000u > 9999 = 下游待解(PoolRoot 缩 / covenant-seal)。register(当前 blocker)本
+//   convert-split 解; seal 是 register 解后才暴露的【下一道】SIZE 墙, 单列待团队定。
+//
+// 承重锚(与原 PoolLeaf 同): 零豁免 output-bind(parent value==new pool_value)+ induction + Kaspa Σin==Σout。
+// FoldNode 4-field 无 outcome(closed/winningSide/payoutRoot)= 结构上不可结算; canonical-outcome 只在 seal→root literal 硬设。
+
+pragma silverscript ^0.1.0;
+
+contract FoldNode(
+    byte[32] market_id,
+    byte[32] commit_v2,
+    int      shard_count,
+    int      max_fan_in,
+    byte[32] root_tmpl_hash,       // PoolRoot expectedTemplateHash (seal_to_root foreign-template 桥)
+    byte[32] root_init_payoutRoot, // PoolRoot genesis payoutRoot (canonical ZERO)
+    // —— genesis State (4-field, 无 outcome; 实际由 ShardLeaf.convert_to_foldnode 提供, init_* 仅定 State 布局) ——
+    int      init_local_yes,
+    int      init_local_no,
+    int      init_count,
+    int      init_pool_value
+) {
+    int local_yes  = init_local_yes;
+    int local_no   = init_local_no;
+    int count      = init_count;
+    int pool_value = init_pool_value;
+
+    // PoolRoot 7-field State 镜像 (seal_to_root foreign-template 序列化布局; 字段序/类型必 == PoolRoot State)
+    struct RootState {
+        int      local_yes;
+        int      local_no;
+        int      count;
+        int      pool_value;
+        int      closed;
+        int      winningSide;
+        byte[32] payoutRoot;
+    }
+
+    // —— entry 0: fold (k→1 携 value+account 守恒; FoldNode→FoldNode 同合约纯 covenant) ——
+    #[covenant(binding = cov, from = max_fan_in, to = 1, mode = verification)]
+    function fold(State[] prev_states, State[] new_states) {
+        require(new_states.length == 1);
+        int yes_sum = 0;
+        int no_sum = 0;
+        int count_sum = 0;
+        int value_sum = 0;
+        for (i, 0, prev_states.length, max_fan_in) {
+            yes_sum = yes_sum + prev_states[i].local_yes;
+            no_sum = no_sum + prev_states[i].local_no;
+            count_sum = count_sum + prev_states[i].count;
+            value_sum = value_sum + prev_states[i].pool_value;
+        }
+        require(new_states[0].local_yes == yes_sum);
+        require(new_states[0].local_no == no_sum);
+        require(new_states[0].count == count_sum);
+        require(new_states[0].pool_value == value_sum);
+        // ★ output-bind weld: parent value == parent.pool_value (induction: 每 child 创建时已绑真值)
+        require(tx.outputs[0].value == new_states[0].pool_value);
+        // 折满全片 → 验 commit_v2 完整性
+        if (count_sum == shard_count) {
+            byte[] commit_pre0 = byte[](yes_sum, 16) + byte[](no_sum, 16);
+            byte[] commit_pre1 = commit_pre0 + byte[](market_id);
+            byte[] commit_pre2 = commit_pre1 + byte[](shard_count, 4);
+            require(blake2b(commit_pre2) == commit_v2);
+        }
+    }
+
+    // —— entry 1: seal_to_root (唯一受控 FoldNode→root 闸; canonical outcome 硬设 literal/ctor-const; value 守恒) ——
+    entrypoint function seal_to_root(
+        int      rootOutIdx,
+        byte[]   root_prefix,
+        byte[]   root_suffix
+    ) {
+        require(count == shard_count);                     // 仅全片折满的单 FoldNode 可封顶
+        validateOutputStateWithTemplate(rootOutIdx, {
+            local_yes:   local_yes,
+            local_no:    local_no,
+            count:       count,
+            pool_value:  pool_value,
+            closed:      0,
+            winningSide: 0,
+            payoutRoot:  root_init_payoutRoot
+        }, root_prefix, root_suffix, root_tmpl_hash);
+        // ★ output-bind weld (跨合约边界 value 守恒): root value == 全池 pool_value
+        require(tx.outputs[rootOutIdx].value == pool_value);
+    }
+}

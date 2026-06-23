@@ -5070,5 +5070,76 @@ export function runMigrations() {
     console.log('[migrate] v171: market_shards table created (rolling-shard registry for unlimited betting — bshard B + self-claim C).');
   }
 
+  // v172: market_shards.current_leaf_outpoint + current_leaf_state — (A)-model ShardLeaf 续约记账 (production register wiring (b)).
+  //   (A) self-contained 模型: ShardLeaf covenant 续约 register_append, count/local_yes/no/pool_value 烤进 state → 每 register
+  //   续约地址变 (shard_p2sh 只 holds 创世). buildRegisterCommand 下一笔要【当前 leaf 续约 UTXO】:
+  //     current_leaf_outpoint (txid:idx)  = 当前 ShardLeaf 续约 UTXO outpoint (上一笔 register 的续约 output)
+  //     current_leaf_state    (JSON)      = {count, local_yes, local_no, pool_value} → spliceLeafState 重算续约 redeem
+  //                                          (J2 已验 byte-equal, 不必存全 redeem_hex — design (b) J2 缺口2 fold-in)
+  //   NO-TX: 每笔 register landed 后 onBettorRegistered 原子更新 (NO TX NO STATE). design: docs/2026-06-21-bshard-production-register-wiring-design.md (b).
+  {
+    const cols = sqlite.prepare(`PRAGMA table_info(market_shards)`).all().map(c => c.name);
+    if (!cols.includes('current_leaf_outpoint')) {
+      try {
+        sqlite.exec(`ALTER TABLE market_shards ADD COLUMN current_leaf_outpoint TEXT`);
+        console.log('[migrate] v172: market_shards.current_leaf_outpoint (当前 ShardLeaf 续约 UTXO txid:idx, buildRegisterCommand input).');
+      } catch (e) { if (!/duplicate column/i.test(e.message)) console.warn(`[migrate] v172 current_leaf_outpoint fail: ${e.message}`); }
+    }
+    if (!cols.includes('current_leaf_state')) {
+      try {
+        sqlite.exec(`ALTER TABLE market_shards ADD COLUMN current_leaf_state TEXT`);
+        console.log('[migrate] v172: market_shards.current_leaf_state (JSON count/local_yes/local_no/pool_value, spliceLeafState 重算续约 redeem).');
+      } catch (e) { if (!/duplicate column/i.test(e.message)) console.warn(`[migrate] v172 current_leaf_state fail: ${e.message}`); }
+    }
+    if (!cols.includes('shard_redeem_hex')) {
+      try {
+        sqlite.exec(`ALTER TABLE market_shards ADD COLUMN shard_redeem_hex TEXT`);
+        console.log('[migrate] v172: market_shards.shard_redeem_hex (创世 ShardLeaf redeem 基 = canonical-pipeline 编一次存, splice base — register 时 spliceLeafState 纯字节 op 零 silverc 重编, 防 cross-node build drift).');
+      } catch (e) { if (!/duplicate column/i.test(e.message)) console.warn(`[migrate] v172 shard_redeem_hex fail: ${e.message}`); }
+    }
+  }
+
+  // v172: payout_shards — per-logical-market production-shape PayoutShard covenant (the (A) consolidation sink).
+  //   每 logical market 一个 PayoutShard (genesis-mint once at first shard); 每片 ShardLeaf bake 此 payout_cov_id
+  //   (consolidate destination-bind). settle 阶段 consolidate→close_attest→claim 用 payout_redeem_hex + payout_ps_outpoint.
+  //   写入方: src/lib/pool-shard-register.mjs ensurePayoutShard (register-v07 (a)). 读取方: settle 编排 (c) + consolidate.
+  {
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS payout_shards (
+        logical_market_id   TEXT PRIMARY KEY,
+        payout_cov_id       TEXT NOT NULL,
+        payout_ps_addr      TEXT NOT NULL,
+        payout_ps_outpoint  TEXT,
+        payout_redeem_hex   TEXT NOT NULL,
+        pool_merkle_root    TEXT,
+        predicate_commit    TEXT,
+        created_at          INTEGER
+      )
+    `);
+    console.log('[migrate] v172: payout_shards table (per-market (A) PayoutShard covenant sink — cov_id provenance + settle redeem).');
+  }
+
+  // v173 (KANet-UI 2026-06-22, Owner 钦定 玩家→轻路 broker onboarding 骨架): broker_onboarding.
+  //   铁律 = 地址制 (broker 身份 = broker_address, NOT relay_id; 玩家当玩家时绑的地址转 broker 不变).
+  //   bot_token = Telegram bot token (@BotFather), 是 secret → bot_token_encrypted 加密落库 (crypto.encrypt).
+  //   status: pending (提交后) → approved (Owner 经 /identities trust 批 → 派生)。审批门复用 identities.trust_level。
+  //   写入方: POST /api/kanet-broker/onboard。读取方: GET /api/kanet-broker/onboard/* + broker-home.eta onboarding 卡。
+  //   多-bot tg-manager (托管各 broker token 同步呈现市场) = 下一步, 本骨架只做'存+审批'。
+  {
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS broker_onboarding (
+        id                  TEXT PRIMARY KEY,
+        broker_address      TEXT NOT NULL UNIQUE,
+        bot_token_encrypted TEXT,
+        bot_username        TEXT,
+        status              TEXT NOT NULL DEFAULT 'pending',
+        note                TEXT,
+        created_at          TEXT NOT NULL,
+        updated_at          TEXT NOT NULL
+      )
+    `);
+    console.log('[migrate] v173: broker_onboarding table (玩家→轻路 broker 自助 onboarding, 地址制, bot_token 加密, 审批复用 identities.trust).');
+  }
+
   console.log('[migrate] DB migrations complete.');
 }

@@ -1,0 +1,63 @@
+// RootStub_probe_p53.sil — J1 binary-search stub (probe-only, 非生产). pad=53 dummy require → 目标模板尺寸阶梯.
+// J2 :3200 canonical 编译此 + seal→ 探 land/bust, binary-search 最大 fit 模板字节 = THE 阈值. dummy require 不影响语义(纯字节填充).
+pragma silverscript ^0.1.0;
+contract RootStub(int init_local_yes,int init_local_no,int init_count,int init_pool_value,int init_closed,int init_winningSide,byte[32] init_payoutRoot){
+ int local_yes=init_local_yes; int local_no=init_local_no; int count=init_count; int pool_value=init_pool_value; int closed=init_closed; int winningSide=init_winningSide; byte[32] payoutRoot=init_payoutRoot;
+ entrypoint function passthrough(int outIdx){
+  require(count + 0 >= 0);
+  require(count + 1 >= 0);
+  require(count + 2 >= 0);
+  require(count + 3 >= 0);
+  require(count + 4 >= 0);
+  require(count + 5 >= 0);
+  require(count + 6 >= 0);
+  require(count + 7 >= 0);
+  require(count + 8 >= 0);
+  require(count + 9 >= 0);
+  require(count + 10 >= 0);
+  require(count + 11 >= 0);
+  require(count + 12 >= 0);
+  require(count + 13 >= 0);
+  require(count + 14 >= 0);
+  require(count + 15 >= 0);
+  require(count + 16 >= 0);
+  require(count + 17 >= 0);
+  require(count + 18 >= 0);
+  require(count + 19 >= 0);
+  require(count + 20 >= 0);
+  require(count + 21 >= 0);
+  require(count + 22 >= 0);
+  require(count + 23 >= 0);
+  require(count + 24 >= 0);
+  require(count + 25 >= 0);
+  require(count + 26 >= 0);
+  require(count + 27 >= 0);
+  require(count + 28 >= 0);
+  require(count + 29 >= 0);
+  require(count + 30 >= 0);
+  require(count + 31 >= 0);
+  require(count + 32 >= 0);
+  require(count + 33 >= 0);
+  require(count + 34 >= 0);
+  require(count + 35 >= 0);
+  require(count + 36 >= 0);
+  require(count + 37 >= 0);
+  require(count + 38 >= 0);
+  require(count + 39 >= 0);
+  require(count + 40 >= 0);
+  require(count + 41 >= 0);
+  require(count + 42 >= 0);
+  require(count + 43 >= 0);
+  require(count + 44 >= 0);
+  require(count + 45 >= 0);
+  require(count + 46 >= 0);
+  require(count + 47 >= 0);
+  require(count + 48 >= 0);
+  require(count + 49 >= 0);
+  require(count + 50 >= 0);
+  require(count + 51 >= 0);
+  require(count + 52 >= 0);
+  validateOutputState(outIdx,{local_yes:local_yes,local_no:local_no,count:count,pool_value:pool_value,closed:closed,winningSide:winningSide,payoutRoot:payoutRoot});
+  require(tx.outputs[outIdx].value==pool_value);
+ }
+}

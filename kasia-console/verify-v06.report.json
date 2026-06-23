@@ -1,0 +1,716 @@
+{
+  "schema_version": "v0.6-compat-verify-r1",
+  "verified_at": "2026-06-09T12:42:41.536Z",
+  "baseline_ref": {
+    "path": "D:\\kanet-tn12\\kasia-console\\baseline.v0.5.json",
+    "schema": "v0.5-baseline-r1",
+    "captured_at": "2026-06-07T11:05:17.768Z"
+  },
+  "checks": [
+    {
+      "name": "v0.5 PoolSide.sil 字节不变 (spec §7 ADDITIVE)",
+      "pass": true,
+      "detail": {
+        "current": "9331a7c70aa3a0c9acb0977033de122c97cbe3575fef773fe743538caede8481",
+        "baseline": "9331a7c70aa3a0c9acb0977033de122c97cbe3575fef773fe743538caede8481"
+      },
+      "severity": "hard"
+    },
+    {
+      "name": "v0.5 PoolSide entrypoints 不变 (= 4 件)",
+      "pass": true,
+      "detail": {
+        "current": [
+          "claim_winner",
+          "consumed_by_oracle_settlement",
+          "refund_market_cancelled",
+          "settled_via_spine"
+        ],
+        "baseline": [
+          "settled_via_spine",
+          "claim_winner",
+          "consumed_by_oracle_settlement",
+          "refund_market_cancelled"
+        ]
+      },
+      "severity": "hard"
+    },
+    {
+      "name": "v0.5 PoolSide_v07.sil 字节不变 (spec §7 ADDITIVE)",
+      "pass": true,
+      "detail": {
+        "current": "d6c17bd8e43d690b644620a21b59e84d990a5c145ad22d5c9ff0a31536d82732",
+        "baseline": "d6c17bd8e43d690b644620a21b59e84d990a5c145ad22d5c9ff0a31536d82732"
+      },
+      "severity": "hard"
+    },
+    {
+      "name": "v0.5 PoolSide_v07 entrypoints 不变 (= 3 件)",
+      "pass": true,
+      "detail": {
+        "current": [
+          "claim_winner",
+          "refund_market_cancelled",
+          "settled_via_spine"
+        ],
+        "baseline": [
+          "settled_via_spine",
+          "claim_winner",
+          "refund_market_cancelled"
+        ]
+      },
+      "severity": "hard"
+    },
+    {
+      "name": "v0.5 PoolSide_v0_7_1.sil 字节不变 (spec §7 ADDITIVE)",
+      "pass": true,
+      "detail": {
+        "current": "b1692ceff6993e6697aadac0aac7ff8cc370a43ef40cabe7f2259554e3b6c3ca",
+        "baseline": "b1692ceff6993e6697aadac0aac7ff8cc370a43ef40cabe7f2259554e3b6c3ca"
+      },
+      "severity": "hard"
+    },
+    {
+      "name": "v0.5 PoolSide_v0_7_1 entrypoints 不变 (= 3 件)",
+      "pass": true,
+      "detail": {
+        "current": [
+          "claim_winner",
+          "refund_market_cancelled",
+          "settled_via_spine"
+        ],
+        "baseline": [
+          "settled_via_spine",
+          "claim_winner",
+          "refund_market_cancelled"
+        ]
+      },
+      "severity": "hard"
+    },
+    {
+      "name": "v0.5 PoolSpine.sil 字节不变 (spec §7 ADDITIVE)",
+      "pass": true,
+      "detail": {
+        "current": "38ae5c74bc8b1729e590b970c1baaf5953fd02dd4ef57ae04954d0b60b8e39e3",
+        "baseline": "38ae5c74bc8b1729e590b970c1baaf5953fd02dd4ef57ae04954d0b60b8e39e3"
+      },
+      "severity": "hard"
+    },
+    {
+      "name": "v0.5 PoolSpine entrypoints 不变 (= 5 件)",
+      "pass": true,
+      "detail": {
+        "current": [
+          "refund_disagreement",
+          "refund_maker_unjoined",
+          "refund_unanimous_silent",
+          "settle_majority_forfeit_1",
+          "settle_unanimous"
+        ],
+        "baseline": [
+          "settle_unanimous",
+          "settle_majority_forfeit_1",
+          "refund_unanimous_silent",
+          "refund_maker_unjoined",
+          "refund_disagreement"
+        ]
+      },
+      "severity": "hard"
+    },
+    {
+      "name": "v0.5 PoolSpine_v07.sil 字节不变 (spec §7 ADDITIVE)",
+      "pass": true,
+      "detail": {
+        "current": "055778e8a1bd2f91fb8bcc96fdd05b565c27fb80a11c0f625fe36432eb528f58",
+        "baseline": "055778e8a1bd2f91fb8bcc96fdd05b565c27fb80a11c0f625fe36432eb528f58"
+      },
+      "severity": "hard"
+    },
+    {
+      "name": "v0.5 PoolSpine_v07 entrypoints 不变 (= 3 件)",
+      "pass": true,
+      "detail": {
+        "current": [
+          "dispute_reveal",
+          "refund_maker_unjoined",
+          "settle_aggregate"
+        ],
+        "baseline": [
+          "settle_aggregate",
+          "dispute_reveal",
+          "refund_maker_unjoined"
+        ]
+      },
+      "severity": "hard"
+    },
+    {
+      "name": "v0.5 PoolSpine_v0_7_1.sil 字节不变 (spec §7 ADDITIVE)",
+      "pass": true,
+      "detail": {
+        "current": "b7bf6b2f8af300eb9d3558a7fd30aea5ec20f5fba187b6dc4eba9d10f9cbfd68",
+        "baseline": "b7bf6b2f8af300eb9d3558a7fd30aea5ec20f5fba187b6dc4eba9d10f9cbfd68"
+      },
+      "severity": "hard"
+    },
+    {
+      "name": "v0.5 PoolSpine_v0_7_1 entrypoints 不变 (= 3 件)",
+      "pass": true,
+      "detail": {
+        "current": [
+          "dispute_reveal",
+          "refund_maker_unjoined",
+          "settle_aggregate"
+        ],
+        "baseline": [
+          "settle_aggregate",
+          "dispute_reveal",
+          "refund_maker_unjoined"
+        ]
+      },
+      "severity": "hard"
+    },
+    {
+      "name": "v0.6 PoolSide_v06.sil 存在 + ≥1 entrypoint",
+      "pass": true,
+      "detail": {
+        "sha256": "73201887d24055adf1a4596d8eb5ae98746a57947dbd335dd68c8423721ac51b",
+        "entrypoints": [
+          "settled_via_spine",
+          "claim_winner",
+          "refund_market_cancelled"
+        ],
+        "classification": "PoolSide"
+      },
+      "severity": "hard"
+    },
+    {
+      "name": "v0.6 PoolSide_v06 entrypoints 命中 spec hints (PoolSide)",
+      "pass": true,
+      "detail": {
+        "matched": [
+          "settled_via_spine",
+          "claim_winner",
+          "refund_market_cancelled"
+        ],
+        "found": [
+          "settled_via_spine",
+          "claim_winner",
+          "refund_market_cancelled"
+        ],
+        "hints": [
+          "settled_via_spine",
+          "claim_winner",
+          "refund_market_cancelled"
+        ]
+      },
+      "severity": "soft"
+    },
+    {
+      "name": "v0.6 PoolSpine_v06.sil 存在 + ≥1 entrypoint",
+      "pass": true,
+      "detail": {
+        "sha256": "d7006b6dea66f1425bb9f04eeb5221a74383f265c2adf7a090ea17684866773f",
+        "entrypoints": [
+          "settle_aggregate",
+          "dispute_reveal",
+          "refund_maker_unjoined"
+        ],
+        "classification": "PoolSpine"
+      },
+      "severity": "hard"
+    },
+    {
+      "name": "v0.6 PoolSpine_v06 entrypoints 命中 spec hints (PoolSpine)",
+      "pass": true,
+      "detail": {
+        "matched": [
+          "settle_aggregate",
+          "dispute_reveal",
+          "refund_maker_unjoined"
+        ],
+        "found": [
+          "settle_aggregate",
+          "dispute_reveal",
+          "refund_maker_unjoined"
+        ],
+        "hints": [
+          "settle_aggregate",
+          "dispute_reveal",
+          "refund_maker_unjoined",
+          "settle_tofn",
+          "settle_5sig"
+        ]
+      },
+      "severity": "soft"
+    },
+    {
+      "name": "v0.5 ≠ v0.6 SS file hashes 全分 (= protocol_version branch 独立, 派生不同 P2SH)",
+      "pass": true,
+      "detail": {
+        "v05_hashes": [
+          "9331a7c70aa3a0c9acb0977033de122c97cbe3575fef773fe743538caede8481",
+          "d6c17bd8e43d690b644620a21b59e84d990a5c145ad22d5c9ff0a31536d82732",
+          "b1692ceff6993e6697aadac0aac7ff8cc370a43ef40cabe7f2259554e3b6c3ca",
+          "38ae5c74bc8b1729e590b970c1baaf5953fd02dd4ef57ae04954d0b60b8e39e3",
+          "055778e8a1bd2f91fb8bcc96fdd05b565c27fb80a11c0f625fe36432eb528f58",
+          "b7bf6b2f8af300eb9d3558a7fd30aea5ec20f5fba187b6dc4eba9d10f9cbfd68"
+        ],
+        "v06_hashes": [
+          "73201887d24055adf1a4596d8eb5ae98746a57947dbd335dd68c8423721ac51b",
+          "d7006b6dea66f1425bb9f04eeb5221a74383f265c2adf7a090ea17684866773f"
+        ]
+      },
+      "severity": "hard"
+    },
+    {
+      "name": "bond_amount sompi distribution 不变 (= 100M uniform = 1 KAS register-external default)",
+      "pass": true,
+      "detail": {
+        "baseline": {
+          "min": 100000000,
+          "max": 100000000
+        },
+        "current": {
+          "min": 100000000,
+          "max": 100000000
+        }
+      },
+      "severity": "hard"
+    },
+    {
+      "name": "bet TX 历史不丢 (current ≥ baseline)",
+      "pass": true,
+      "detail": {
+        "baseline": 42,
+        "current": 42
+      },
+      "severity": "hard"
+    },
+    {
+      "name": "settle TX events 历史不丢",
+      "pass": true,
+      "detail": {
+        "baseline": 73,
+        "current": 73
+      },
+      "severity": "hard"
+    },
+    {
+      "name": "v158 schema deployed (pool_markets has protocol_version + pool_merkle_root)",
+      "pass": true,
+      "detail": {
+        "has_protocol_version": true,
+        "has_pool_merkle_root": true,
+        "note": "v0.6 ready"
+      },
+      "severity": "soft"
+    },
+    {
+      "name": "/api/pool/market/create-v06 endpoint live (= Console 跑新代码)",
+      "pass": true,
+      "detail": {
+        "http_status": 400,
+        "note": "endpoint registered"
+      },
+      "severity": "soft"
+    },
+    {
+      "name": "v159 schema deployed (oracle_pool_membership + pool_snapshots tables)",
+      "pass": true,
+      "detail": {
+        "found": [
+          "oracle_pool_membership",
+          "pool_snapshots",
+          "pool_committee"
+        ],
+        "expected": [
+          "oracle_pool_membership",
+          "pool_snapshots"
+        ],
+        "missing": [],
+        "note": "J2.1 schema live"
+      },
+      "severity": "soft"
+    },
+    {
+      "name": "pool-merkle-v06.mjs derive 模块存在 (J2.1 byte-align SS climb)",
+      "pass": true,
+      "detail": {
+        "path": "D:\\kanet-tn12\\kasia-console\\src\\services\\pool-merkle-v06.mjs",
+        "exists": true
+      },
+      "severity": "hard"
+    },
+    {
+      "name": "pool-committee-sampler.mjs 存在 (J2.2+J2.3 keyless stake-weighted committee 选拔)",
+      "pass": true,
+      "detail": {
+        "path": "D:\\kanet-tn12\\kasia-console\\src\\services\\pool-committee-sampler.mjs",
+        "exists": true
+      },
+      "severity": "hard"
+    },
+    {
+      "name": "pool-market-settler-v06.mjs 存在 (J2 v0.6 settler with F-S1 canonical endBlockHash + F-S2 256-bit rand)",
+      "pass": true,
+      "detail": {
+        "path": "D:\\kanet-tn12\\kasia-console\\src\\services\\pool-market-settler-v06.mjs",
+        "exists": true
+      },
+      "severity": "hard"
+    },
+    {
+      "name": "API 层 register prep stake<1 KAS reject (= 反机器人三层防御 layer 1)",
+      "pass": true,
+      "detail": {
+        "http_status": 400,
+        "expected": "400/404 reject 不是 200",
+        "note": "Bettor r158 三层防御 + NWT r121 cross-node spec"
+      },
+      "severity": "hard"
+    },
+    {
+      "name": "L11 market spec sanitize (Bettor r230 restored 6/6)",
+      "pass": true,
+      "detail": {
+        "dirty_count": 0,
+        "first_5": []
+      },
+      "severity": "hard"
+    },
+    {
+      "name": "L16 oracle pool 单一源焊死 (Bettor r265 restored / soft until reader 全迁)",
+      "pass": true,
+      "detail": {
+        "offender_count": 0,
+        "offenders": []
+      },
+      "severity": "hard"
+    },
+    {
+      "name": "L17 oracle id/address 一致 (Bettor r276 restored)",
+      "pass": true,
+      "detail": {
+        "active": 7,
+        "missing": 0,
+        "invalid": 0
+      },
+      "severity": "hard"
+    },
+    {
+      "name": "L18 merkle leaf algo 一致 (Bettor r327 restored)",
+      "pass": true,
+      "detail": {
+        "scanner_imports_merkle": true,
+        "scanner_no_sha256": true
+      },
+      "severity": "hard"
+    },
+    {
+      "name": "L19 settle TX 三方分账守恒 (Bettor r373 restored)",
+      "pass": true,
+      "detail": {
+        "note": "_assertTxInvariants 4 守门 (overspend/0-fee/mass/dust)"
+      },
+      "severity": "hard"
+    },
+    {
+      "name": "L20 settler 饥饿根治 (Bettor r366 + J2 c9f5814 restored)",
+      "pass": true,
+      "detail": {
+        "active_priority": true,
+        "exp_backoff": true,
+        "tick_timebox": true
+      },
+      "severity": "hard"
+    },
+    {
+      "name": "L21 refund locktime grace 一致 (Bettor r379 + J1 b25c4ac restored)",
+      "pass": true,
+      "detail": {
+        "grace_lib": true
+      },
+      "severity": "hard"
+    },
+    {
+      "name": "L23 MIN_POT 100KAS 守门 + 前置 refund 路由 (Bettor r216/r217 守 SS L300 不被绕)",
+      "pass": true,
+      "detail": {
+        "ss_has_min_pot_require": true,
+        "settler_has_pre_check": true,
+        "note": "SS L300 require >= 1e10 sompi. settler 前置 pot<MIN_POT → refund 路由不 dispatch fail 死单 (= Bettor r217 精化)"
+      },
+      "severity": "hard"
+    },
+    {
+      "name": "L22 maker stake min 单一源+3 endpoint 强制+不在 NO_LIMITS 块内 (Bettor r383+r388 / 守 KANet-UI f8b64a5)",
+      "pass": true,
+      "detail": {
+        "single_source_const_L33": true,
+        "enforcement_count": 3,
+        "nested_in_no_limits_count": 0,
+        "note": "3 enforce + 全不在 NO_LIMITS 守卫块. 任一脱掉 = env 守卫坑可绕过 = 演示破信"
+      },
+      "severity": "hard"
+    },
+    {
+      "name": "L24 isStructuredSpec ≡ deriveVote ≡ specIsUsable 三端 data_source_canonical 单一源 (Bettor r243/r244b 守 qrv65 病根)",
+      "pass": true,
+      "detail": {
+        "pool_isStructuredSpec_has_canonical": true,
+        "voter_deriveVote_reads_canonical": true,
+        "bot_specIsUsable_has_canonical": true,
+        "note": "三端任一脱钩 → 漂回 qrv65 漏 canonical 病. KANet-UI f83ab1c 修, lint 永守"
+      },
+      "severity": "hard"
+    },
+    {
+      "name": "L25 unit test: isStructuredSpec 5 case 覆全分支 (Bettor r250 第4路 / J2 af74509 export)",
+      "pass": true,
+      "detail": {
+        "cases": [
+          "漏 canonical: expect=false actual=false ✓",
+          "全字段 PASS: expect=true actual=true ✓",
+          "空 spec: expect=false actual=false ✓",
+          "非对象 string: expect=false actual=false ✓",
+          "空 canonical: expect=false actual=false ✓"
+        ],
+        "note": "5 case 全 PASS, 纯函数零 side effect"
+      },
+      "severity": "hard"
+    },
+    {
+      "name": "L26 件1 nav + 预测市场首页: /predictions 服新页 + sidebar 5 中文 + legacy 保 (Bettor r256b/r258/r265, KANet-UI 43ebfdd+b8f62f9)",
+      "pass": true,
+      "detail": {
+        "stocks_predictions_serves_new": true,
+        "stocks_has_legacy_route": true,
+        "predictions_list_eta_exists": true,
+        "sidebar_zh_strings_missing": [],
+        "note": "件1 nav + 首页 守门完整"
+      },
+      "severity": "hard"
+    },
+    {
+      "name": "L27 P0-#5 source_kind 4 enum + backend derive canonical (Bettor R3, KANet-UI 3c5fefe)",
+      "pass": true,
+      "detail": {
+        "has_SOURCE_KIND_DERIVERS": true,
+        "missing_kinds": [],
+        "has_deriveCanonicalFromSourceKind_export": true,
+        "has_maybeDeriveSpec_fn": true,
+        "note": "form 软 + backend strict + derive 4 源齐"
+      },
+      "severity": "hard"
+    },
+    {
+      "name": "L28 P0-#4 chain_events 三阶段 event_type 实名 + /events endpoint (Bettor R3, KANet-UI 3c5fefe)",
+      "pass": true,
+      "detail": {
+        "settler_has_3_types": true,
+        "ui_detail_has_3_types": true,
+        "events_endpoint_registered": true,
+        "types": [
+          "pool_oracle_vote",
+          "pool_oracle_tx_sig",
+          "pool_settle_consensual_dispatched"
+        ],
+        "note": "timeline 三阶段实名 + /events 路存"
+      },
+      "severity": "hard"
+    },
+    {
+      "name": "L29 P0 5 件 UI ship (KANet-UI partner: 建市 form 合一 + web 押 button + my-markets selector + backend maker filter)",
+      "pass": true,
+      "detail": {
+        "create_form_unified_label_judgement_card": true,
+        "list_has_bet_button": true,
+        "my_markets_has_selector": true,
+        "backend_has_maker_filter": true,
+        "note": "5 件 P0 UI 守门完整 (Bettor r322 全 PASS)"
+      },
+      "severity": "hard"
+    },
+    {
+      "name": "L30 P0-#6 G6 mass-aware 动态 fee (J1 6077ccd6, Bettor r298-r303 红线收口)",
+      "pass": true,
+      "detail": {
+        "has_storage_mass_const_1e12": true,
+        "has_dynamic_min_broker_fee_max": true,
+        "has_storage_mass_derivation_ceil_div": true,
+        "passes_dynamic_min_broker_fee": true,
+        "note": "KIP-9 storage_mass aware fee 完整守门"
+      },
+      "severity": "hard"
+    },
+    {
+      "name": "L31 P2 全域 jargon 收尾: 3 UI 中文术语 + 0 旧 jargon + statusLabel + create 费标签 (Bettor r332/r333, KANet-UI 43945cd7+4a40dc40)",
+      "pass": true,
+      "detail": {
+        "detail_has_zh_terms": true,
+        "no_old_jargon_3_files": true,
+        "list_has_statusLabel": true,
+        "my_markets_has_statusLabel": true,
+        "create_has_fee_zh_labels": true,
+        "note": "P2 jargon 收尾守门完整"
+      },
+      "severity": "hard"
+    },
+    {
+      "name": "L32 4 线并行 Track A+B+C: bot specTitle 用 + sidebar 预测市场嵌套 + oracle 中文 3 段 + 钉死无数据 (Bettor r334-r338, KANet-UI ac079464+e1c57d7f+c932cb19)",
+      "pass": true,
+      "detail": {
+        "bot_uses_specTitle_3plus": true,
+        "sidebar_has_predict_nest": true,
+        "oracle_has_zh_terms": true,
+        "oracle_no_old_jargon": true,
+        "note": "4 线并行守门完整"
+      },
+      "severity": "hard"
+    },
+    {
+      "name": "L33 P0-A MVP /api/pool/prevet 锁契约 + 0 false confidence (Bettor r361/r363/r364, J2 c13bba63, KANet-UI 36937d5d+be9202cb)",
+      "pass": true,
+      "detail": {
+        "ui_no_old_oracle_url": true,
+        "ui_has_new_pool_url": true,
+        "ui_no_certified_verified_guaranteed": true,
+        "backend_route_registered": true,
+        "note": "P0-A MVP 锁契约守门完整"
+      },
+      "severity": "hard"
+    },
+    {
+      "name": "L34 DoD 问1 broker 推荐: POST/GET endpoint + UI 🌟 filter (Bettor r367-r372, J2 6b8ea4a3, KANet-UI 7b62de27)",
+      "pass": true,
+      "detail": {
+        "backend_post_recommend": true,
+        "backend_get_recommendations": true,
+        "ui_has_broker_filter": true,
+        "ui_has_recommended_mode": true,
+        "note": "问1 broker 推荐三层制衡守门完整"
+      },
+      "severity": "hard"
+    },
+    {
+      "name": "L35 DoD 问2 VRF 排 broker_pk + maker_pk (Bettor r372, J1 6694d3bf)",
+      "pass": true,
+      "detail": {
+        "sampler_has_excludePks_param": true,
+        "sampler_has_filter_logic": true,
+        "sampler_mentions_broker_maker_pk": true,
+        "note": "VRF 排同 PK 双角色守门完整"
+      },
+      "severity": "hard"
+    },
+    {
+      "name": "L36 DoD §硬 gap 双层 pool guard (Bettor r382/r385/r386, J2 b07b535b + J1 401bc78c)",
+      "pass": true,
+      "detail": {
+        "layer1_chain_view_snapshot_query": true,
+        "layer1_pool_size_reject": true,
+        "layer2_sampler_throw_guard": true,
+        "note": "双层 pool 守门完整 防 7un1d 类 unsettlable 重演"
+      },
+      "severity": "hard"
+    },
+    {
+      "name": "L37 Oracle 判断框架: ABSTAIN-not-guess + 三态 enum + ABSTAIN 永不当 forfeit (Bettor r401-r414, J2 b5113af5+r413+r414)",
+      "pass": true,
+      "detail": {
+        "voter_no_guess_fallback": true,
+        "voter_has_abstain_return": true,
+        "voter_has_outcome_enum_abstain": true,
+        "voter_broadcasts_extractor_kind": true,
+        "settler_has_all_three_sets": true,
+        "settler_abstain_not_in_findSilent": true,
+        "note": "ABSTAIN-not-guess + ABSTAIN 永不当 forfeit (J2 r414 修) 守门完整"
+      },
+      "severity": "hard"
+    },
+    {
+      "name": "L38 三桶 UI 渲染: judged/abstain/silent 分明 + ABSTAIN 不混 silent (Bettor r416, KANet-UI c5ece2c1, spec §7.2)",
+      "pass": true,
+      "detail": {
+        "ui_has_all_three_counts": true,
+        "ui_has_zh_terms": true,
+        "ui_has_abstain_tooltip": true,
+        "ui_distinguishes_abstain_silent": true,
+        "note": "三桶 UI 守门完整 守 spec 5.5 弃权 reputation 中性"
+      },
+      "severity": "hard"
+    },
+    {
+      "name": "L39 跨节点 settle sync: pool_market_settled_v1 producer + consumer (Bettor r427/r428, J2 r418 9bfad844)",
+      "pass": true,
+      "detail": {
+        "filter_has_settled_handler": true,
+        "settler_broadcasts_settled_v1": true,
+        "note": "跨节点 settle 状态同步守门完整"
+      },
+      "severity": "hard"
+    },
+    {
+      "name": "L40 auto-bet 服务 Console cron (Bettor r433 Owner r436, J2 r420 14983c0d)",
+      "pass": true,
+      "detail": {
+        "pool_auto_better_exists": true,
+        "has_startAutoBetterCron_export": true,
+        "index_imports_cron": true,
+        "index_calls_cron": true,
+        "note": "auto-bet cron 守门完整 不再 relay-orphan 致 0 押注"
+      },
+      "severity": "hard"
+    },
+    {
+      "name": "L41 prevet mock-extract + URL-enum 对齐 (Bettor r439-r442, J2 r421 015cbb07 + r422 40751bbe)",
+      "pass": true,
+      "detail": {
+        "endpoint_registered": true,
+        "endpoint_calls_diagnose_with_source": true,
+        "has_isVoterSupportedSource": true,
+        "diagnose_validates_enum": true,
+        "note": "prevet-extract 守门完整 + URL-enum 校验对齐, 防 espn-enum+ESPN-URL 错配"
+      },
+      "severity": "hard"
+    },
+    {
+      "name": "L42 polymarket judge-path GREEN (Bettor r443/r444, J2 r423 42bede3e)",
+      "pass": true,
+      "detail": {
+        "isVoterSupportedSource_accepts_polymarket": true,
+        "diagnoseSource_handles_polymarket_green": true,
+        "note": "polymarket 非-extractor 判路守门完整, 不被误拒 no_extractor"
+      },
+      "severity": "hard"
+    },
+    {
+      "name": "L43 relay-orphan 固化 Console cron (Bettor r433b/r446, J2 r425 a31fefc7)",
+      "pass": true,
+      "detail": {
+        "relay_health_monitor_exists": true,
+        "has_startRelayHealthMonitorCron_export": true,
+        "index_imports": true,
+        "index_calls": true,
+        "note": "relay-orphan cron 守门完整 防 AutoBetter relay-orphan 致 0 押注"
+      },
+      "severity": "hard"
+    },
+    {
+      "name": "L44 CoinGecko extractor 跨域 ramp 第 1 (Bettor r462/r465, J2 r427 af0b25d0)",
+      "pass": true,
+      "detail": {
+        "has_extractCoinGeckoPrice_export": true,
+        "in_KNOWN_EXTRACTORS_registry": true,
+        "isVoterSupportedSource_accepts_coingecko": true,
+        "note": "CoinGecko 跨域 extractor 守门完整 prevet+voter 单一 registry"
+      },
+      "severity": "hard"
+    }
+  ],
+  "pass": 57,
+  "fail": 0,
+  "deploy_pending": 0,
+  "verdict": "PASS",
+  "summary": "57/57 PASS, 0 hard FAIL, 0 deploy pending — verdict PASS"
+}

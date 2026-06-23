@@ -1,0 +1,42 @@
+{
+  "_note": "CANONICAL cascade DoD run (2026-06-20, Owner 直令咬牙跑最后一关). 四方独立强验签 (Bettor/NWT/UI/J1) + UI kaspa_tx_log block-accepted 映射证同一 run + 已报 Owner. 6-phase 端到端 cascade settle 链上跑通一次 (spec §0 机制 DoD).",
+  "slTx": "4b4929e46c7b820a9547defe2ede2ba9fd7dfb196861ec0d4dfc4ba307e895e8",
+  "regTx": "cedcb7fbca5fc35fa92fdf21e5be8b32227de21fce9edfcaff49e869b70e92e7",
+  "cvTx": "77225f26e0efb130c0b229669e51e1c06fc0f61d9821b7514fd09ff3485e3a25",
+  "closeTx": "eb6e2937ce96dd77f6dcdfc324428eb53b6ec92a35e803d6b9d145944e706521",
+  "cv2Tx": "452fc8fbff12a622255f6c9f011f18d048689dea8bfbe03d9e04f3012690f047",
+  "claimTx": "389d87153e2a0b2015bbb1fd99a554a669e6a95f338168c2e95d70dad58ffba6",
+  "blockHashes_UI_kaspa_tx_log": {
+    "_comment": "tx_id→block_hash 映射 (UI kaspa_tx_log join 证 block-accepted 同一 run). block_hash≠tx_id; NWT provenance 🔴=block_hash vs tx_id misread, 三方核实澄清=单一 canonical run 零跨 run.",
+    "genesis_4b4929e4": "18032a05",
+    "register_cedcb7fb": "c8765994",
+    "convert_to_rootclose_77225f26": "82f05b8f",
+    "committee_close_eb6e2937": "2704aa61"
+  },
+  "phases": {
+    "STEP0_genesis": "ShardLeaf_direct(directSeal, 505B canonical, 烤 rootclose_tmpl_hash, seed firstBet side1 count1)",
+    "STEP1_register_append": "winner relay side0 count1→2; probe#2 monolithic SIZE 505B<9999 PASS (skip-fold register 长大不撑爆 9999)",
+    "STEP2_convert_to_rootclose": "ShardLeaf_direct→RootClose closed:0, selector 0x51; probe#1 851B SIZE PASS; skip-fold 跳 FoldNode 1242B WithTemplate 墙",
+    "STEP3_committee_close_commit": "4-of-5 distinct 委员, closed 0→1, winningSide=0; committee_hash 门 positive LAND",
+    "STEP4_convert_to_claim": "RootClose closed:1→RootClaim, selector 0x52, claimed_bitmap:0",
+    "STEP5_claim_draw": "winner relay 领 1.5 KAS payout, RootClaim→payout+continuation(50M)"
+  },
+  "committeeGate_loadBearing": {
+    "positive_LAND": "legit 5 正确 pubkey close LANDED (closed 0→1) = validSigs=4 实签覆盖 preimage + committee_hash MATCH",
+    "negative_teeth_pubkey_swap": "换 1 pubkey close BUST (txid 170dc2c4 'script ran but verification failed' = require(blake2b(5pk)==committee_hash) 挡); 只改 1 变量 LAND→BUST 隔离归因 = pubkey-binding 维度 load-bearing",
+    "negative_teeth_sig_threshold": "POST-DoD tracked follow-up (3-sig→BUST 证 validSigs>=4 阈值维度); 阈值 code-evident + positive validSigs=4 链上验足够 DoD. NEG_SIG 模式已 staged _j2_full_stitch.mjs argv 'negsig'"
+  },
+  "winningSide": 0,
+  "payoutRoot": "fe89a8532c84fd86fc9a9b55d31084a63e9208e79f22d5e04e2073bc09d018e1",
+  "genesisCommitteeHash": "c340406d0dda0531399610e27cba500b132073f3902ce4da9db770f287e91606",
+  "committeePks": [
+    "a66dfa5ad3ff74811b4fb7eac74600e85e9d6159d24f155c07094cd002e4dade",
+    "be180b094171855586ecff5a6b71fc12ea32a066e701f7b11b472bbab65bf18f",
+    "b22cdddcd1970776fe39b5dfed16d303c8062c837d3d9559ca5c530d93c23aa4",
+    "1698977dcab75711eda6eedfed3c9576586576b68784b35284809ec61a9b283e",
+    "ee5307271a805b4d70e56cefa6b575a62f8a14fab5035c23e0dfb273f0b3d501"
+  ],
+  "winnerPayoutKAS": 1.5,
+  "honestScope": "受控单测试市场机制跑通; 信任模型/委员治理/multi-shard fold/mainnet trustless/sig-threshold 负测 = post-DoD (团队共识)",
+  "relatedClosed": "R7 双领 CRITICAL CLOSED (4-result teeth) + refund gate-off 真闸② + SIZE 三墙解 (register/convert/seal) + claim 路 3 单-entry handler bug + 8+ stitch wire bug"
+}

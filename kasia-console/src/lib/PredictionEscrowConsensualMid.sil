@@ -1,0 +1,81 @@
+// PredictionEscrowConsensualMid.sil — Variant A 中配 (per Bettor r87 R2 + NWT r53 + r56 sediment)
+//
+// KANet 5-Layer Trust Stack §7 reference impl = 中配 (300-500B target).
+// L2 SS minimal: settle_consensual happy path + refund_timeout fallback.
+// L3 reputation handles dispute resolution off-chain (= not in SS).
+//
+// Round 2 sediment (Bettor r87 + NWT r52 + r53 + J2 r48):
+// - ctor 8 params (= maker + taker pk MUST in ctor for J1 #C1 winner-binding + checkSig)
+// - 2 entries: settle_consensual + refund_timeout (= role-selected fallback)
+// - cut: settle_dispute (5-sig oracle), refund_unanimous_silent, refund_disagreement, Layer 2 SS storage mass
+// - target byte ~500-600 (per NWT r52 真挑 4 realistic estimate, not 450 optimistic)
+//
+// Adversarial concerns addressed:
+// - J1 #C1 winner-binding: settle_consensual explicit outputs verify (kept from 顶配)
+// - NWT r52 真挑 5 refund rug: role param + predetermined outputs split (= no rug possible)
+// - NWT r52 真挑 1 reputation gate ship-block: deployer responsibility, not in SS
+
+pragma silverscript ^0.1.0;
+
+contract PredictionEscrowConsensualMid(
+    byte[32] makerPk,
+    byte[32] takerPk,
+    byte[32] brokerPk,
+    int deadline,
+    int minerFee,
+    int brokerFeePct,
+    int makerStakeAmount,
+    int takerStakeAmount
+) {
+
+    // settle_consensual — happy path (= 双方 mutual sig + winner agreement)
+    //   broker fee = spendable × brokerFeePct / 10000 (= L2 cost)
+    //   winner gets remainder
+    //   J1 #C1 fix: winner-binding explicit outputs[0] addr + value verify
+    entrypoint function settle_consensual(
+        sig makerSig,
+        sig takerSig,
+        int winner
+    ) {
+        require(checkSig(makerSig, pubkey(makerPk)));
+        require(checkSig(takerSig, pubkey(takerPk)));
+        require(winner == 0 || winner == 1);
+        require(tx.inputs.length == 2);
+        require(tx.outputs.length == 2);
+
+        int spendable = tx.inputs[0].value + tx.inputs[1].value - minerFee;
+        int brokerFeeAmount = spendable * brokerFeePct / 10000;
+        int winnerAmount = spendable - brokerFeeAmount;
+
+        byte[34] makerLock = new ScriptPubKeyP2PK(pubkey(makerPk));
+        byte[34] takerLock = new ScriptPubKeyP2PK(pubkey(takerPk));
+        byte[34] brokerLock = new ScriptPubKeyP2PK(pubkey(brokerPk));
+
+        // J1 #C1 fix: winner-binding explicit outputs verify
+        if (winner == 0) {
+            require(tx.outputs[0].scriptPubKey == byte[](makerLock));
+        } else {
+            require(tx.outputs[0].scriptPubKey == byte[](takerLock));
+        }
+        require(tx.outputs[0].value == winnerAmount);
+        require(tx.outputs[1].scriptPubKey == byte[](brokerLock));
+        require(tx.outputs[1].value == brokerFeeAmount);
+    }
+
+    // refund_timeout — deadline 后 maker single-sig trigger, outputs predetermined split
+    //   trade-off: bilateral refund_timeout_taker entry adds +185 byte → 657 > 520 (= 真测试 sediment)
+    //   final: maker single-sig only, taker rug 风险 mitigated:
+    //     (1) outputs predetermined — maker 不能 redirect taker stake
+    //     (2) L3 reputation gate — maker 拒 settle + 拒 refund = double reputation hit
+    //   适合 Variant A target: high-trust circle (per Bettor r87 spec). adversarial market 用 Variant B (bond slash).
+    entrypoint function refund_timeout(sig makerSig) {
+        require(checkSig(makerSig, pubkey(makerPk)));
+        require(tx.time >= deadline * 1000);
+        require(tx.inputs.length == 2);
+        require(tx.outputs.length == 2);
+        require(tx.outputs[0].scriptPubKey == byte[](new ScriptPubKeyP2PK(pubkey(makerPk))));
+        require(tx.outputs[0].value == makerStakeAmount - minerFee / 2);
+        require(tx.outputs[1].scriptPubKey == byte[](new ScriptPubKeyP2PK(pubkey(takerPk))));
+        require(tx.outputs[1].value == takerStakeAmount - minerFee / 2);
+    }
+}

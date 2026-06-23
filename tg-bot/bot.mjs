@@ -46,7 +46,13 @@ const linked = new Map();
 // gate D faucet — per-Telegram-user 24h cooldown (in-memory MVP; server guards once-per-address).
 const faucetCooldown = new Map();
 
-bot.command('start', (ctx) => { PM.exitBetFlow(String(ctx.from.id)); return ctx.reply(M.startMessage()); });
+// KANet-UI 2026-06-22 (Owner 实测派修 ②): /start 查 /link 绑定 — 已绑显地址+下一步, 未绑走三步引导。
+bot.command('start', (ctx) => {
+  const tgUser = String(ctx.from.id);
+  PM.exitBetFlow(tgUser);
+  const addr = PM.getLinkedAddr(tgUser) || linked.get(tgUser)?.address;
+  return ctx.reply(addr ? M.startMessageLinked(addr) : M.startMessage());
+});
 bot.command('help', (ctx) => ctx.reply(M.help()));
 
 bot.command('link', async (ctx) => {
@@ -84,6 +90,38 @@ bot.command('faucet', async (ctx) => {
 bot.command('verify', (ctx) => ctx.reply('用 /link <你的 kaspatest 地址> 绑定即可。/bet 开始押注。'));
 
 bot.command('swap', async (ctx) => { const broker = await api.brokerInfo(brokerRelayId); return ctx.reply(M.swapFlow(broker)); });
+// /broker — Owner 实测派修 (2026-06-22): 从 INFO-ONLY 升级为真接通自助申请流。auth 硬化已满足
+// (地址制 onboarding + Owner trust 审批门已落), 申请落 pending → Owner 批 trust 才激活, 公开安全。
+// 显用户绑定地址 + 当前 onboard 状态 + 申请路径 (/broker_apply)。0-key 不变 (onboard 不碰资金)。
+bot.command('broker', async (ctx) => {
+  const tgUser = String(ctx.from.id);
+  const addr = PM.getLinkedAddr(tgUser) || linked.get(tgUser)?.address;
+  let status = null;
+  if (addr) { const r = await api.brokerOnboardStatus(addr); if (r.ok) status = r.json; }
+  return ctx.reply(M.brokerRole({ addr, status }));
+});
+// /earnings — broker 收益统计 (Owner 钦定 2026-06-22 DM 显): address-keyed, 用户 /link 地址当 broker 查。
+// 经手 N 单 / 已实现 X / 待结算 Y / 各单 explorer 链接 (价值分成 1.6%, 链上可验)。0-key 只读。
+bot.command('earnings', async (ctx) => {
+  const tgUser = String(ctx.from.id);
+  const addr = PM.getLinkedAddr(tgUser) || linked.get(tgUser)?.address;
+  if (!addr) return ctx.reply('先 /link <你的 kaspatest 地址> 绑定 (= 你的 broker 收款地址), 再 /earnings 看收益。');
+  const r = await api.brokerEarningsByAddress(addr);
+  if (!r.ok || !r.json?.ok) return ctx.reply('收益查询失败: ' + (r.json?.error || r.status));
+  return ctx.reply(M.brokerEarnings(r.json), { disable_web_page_preview: true });
+});
+// /broker_apply <bot token> — 提交 broker 自助申请 (地址制): broker_address = 用户 /link 地址,
+// bot_token = 用户自己的 @BotFather token (加密落库, 永不外显)。落 pending, 待 Owner 批 trust 激活。
+bot.command('broker_apply', async (ctx) => {
+  const tgUser = String(ctx.from.id);
+  const addr = PM.getLinkedAddr(tgUser) || linked.get(tgUser)?.address;
+  if (!addr) return ctx.reply('先 /link <你的 kaspatest 地址> 绑定 (这地址 = 你的 broker 收款地址), 再 /broker_apply。');
+  const token = (ctx.match || '').trim();
+  if (!token || token.length < 20) return ctx.reply('用法: /broker_apply <你的 @BotFather bot token>\n去 @BotFather 发 /newbot 拿 token (形如 123456:ABC-...)。');
+  const r = await api.brokerOnboardApply({ address: addr, token, username: ctx.from.username ? '@' + ctx.from.username : undefined });
+  if (!r.ok || !r.json?.ok) return ctx.reply('申请失败: ' + (r.json?.error || r.status));
+  return ctx.reply(`✅ 申请已提交！\n📍 broker 地址: ${addr}\n⏳ 状态: 待 Owner 审批 (批准后 KANet 自动托管拉起你的 bot, 对外呈现市场, 带量佣金落你地址)。\n查状态: /broker · token 已加密存储绝不外显。`);
+});
 bot.command('bet',  async (ctx) => ctx.reply(await PM.startBet(String(ctx.from.id), brokerRelayId)));  // S-C: in-chat 编号菜单 — broker-scoped (only this broker's 经手 markets)
 // Bettor r78 ① — /mybets: 列自己押注 + 赢/输/退款状态 (= J2 r126 my-positions wire).
 // Bettor r87 ③ 续 — 每 open position 加 inline-keyboard '➕ 加注/反手' (防流失, callback 接 startBetFromMarket).
@@ -219,6 +257,7 @@ async function pollSettleResults() {
     } catch {}
   }
 }
+
 // KANet-UI 2026-06-13: runtime side-effects (Telegram poller + the 3 background pollers, which can send
 // real messages) live in startBot() so `import`ing this module (e.g. from a test) registers the handlers
 // WITHOUT going live. _launch_tg_bot.mjs calls startBot(); tests import { bot } and feed bot.handleUpdate().
