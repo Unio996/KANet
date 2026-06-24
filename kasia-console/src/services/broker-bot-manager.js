@@ -20,6 +20,8 @@ import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { sqlite } from '../db/client.js';
 import { decrypt } from './crypto.js';
+import { listRelayNodes } from '../data/settings/relay-nodes.js';
+import { sendCommandAsync } from './relay-manager.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const KANET_ROOT = process.env.KANET_ROOT || join(__dirname, '..', '..', '..');
@@ -40,6 +42,22 @@ const MAX_CRASHES_IN_WINDOW = 5;          // 窗内崩 5 次 = 坏 token/409 循
 
 // broker_address -> { child, pid, startedAt, username, crashes, disabledBadToken, lastError }
 const bots = new Map();
+
+// Push a channel alert when a broker bot is disabled (Bettor 死点2 2026-06-24).
+// Fire-and-forget — failures silently logged, never break crash handling.
+async function notifyBotDisabled(brokerAddress, why) {
+  try {
+    const relays = listRelayNodes();
+    const relay = relays.find(r => r.name?.toLowerCase().includes('broker')) || relays[0];
+    if (!relay) return;
+    const msg = `[broker-bot-mgr] ⚠ BROKER BOT DISABLED broker=…${brokerAddress.slice(-12)} (${why}). `
+      + `Bot 已自禁, 无法服务该 broker 用户, 直到 Console 重启或 re-onboard 新 token。`
+      + ` GET /api/kanet-broker/bots-status 查详情。`;
+    await sendCommandAsync(relay.id, { type: 'send_broadcast', channel: 'dev-coord-testnet', message: msg });
+  } catch (e) {
+    console.warn('[broker-bot-mgr] notify failed:', e.message);
+  }
+}
 
 function isAlive(rec) {
   return !!(rec?.child && rec.child.exitCode === null && !rec.child.signalCode && !rec.child.killed);
@@ -96,6 +114,7 @@ function startOne(brokerAddress, token, username) {
       const why = cur.crashes >= MAX_RAPID_CRASHES ? `${cur.crashes}× rapidly` : `${cur.crashTimes.length}× in ${CRASH_WINDOW_MS / 60000}min (慢循环)`;
       cur.lastError = `crashed ${why} — disabled (likely bad token OR 409 token-conflict; check token / 单 poller, then re-onboard or reconcile)`;
       console.warn(`[broker-bot-mgr] DISABLED broker=…${brokerAddress.slice(-12)} (${why})`);
+      notifyBotDisabled(brokerAddress, why);  // fire-and-forget channel alert (Bettor 死点2)
       return;
     }
     // respawn after delay if still approved (reconcile would also catch it, this is faster)
