@@ -18,6 +18,13 @@
           <span class="inline-block w-2 h-2 rounded-full" :class="color"></span>
           <span class="text-ink-500" x-text="tip"></span>
         </a>
+        <!-- Bettor ③ 2026-06-23 — canary settle% badge (近7天), 公测就绪 gate 可视化 -->
+        <span x-data="{ pct: null, gate: null, async load() { try { const r = await fetch('/api/system/canary-stats').then(r=>r.json()); this.pct=r.settle_pct; this.gate=r.gate_pass; } catch {} }, get tip() { return this.pct===null ? '结算率加载中' : `近7天结算率 ${this.pct}% (${this.gate?'✅ 可公测':'🔴 <80% gate FAIL'})`; } }"
+              x-init="load(); setInterval(load, 60000)" :title="tip"
+              class="text-[10px] px-1.5 py-0.5 rounded font-mono"
+              :class="pct===null ? 'bg-gray-100 text-gray-400' : gate ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600'">
+          <span x-text="pct===null ? '…' : pct+'%'"></span>
+        </span>
         <% if (it.headerRight) { %><%~ it.headerRight %><% } %>
       </div>
     </header>

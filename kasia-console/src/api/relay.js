@@ -407,6 +407,42 @@ export async function registerRelayRoutes(fastify) {
     return reply.send({ summary, relays: results });
   });
 
+  // Bettor ③ 2026-06-23 — canary settle% for page-header badge + 公测就绪 gate 收口.
+  // Returns settle% of v0.7 bet markets (排 0-bet 退款正确行为) over last 7 days.
+  fastify.get('/api/system/canary-stats', async (_request, reply) => {
+    try {
+      const since7d = Math.floor(Date.now() / 1000) - 86400 * 7;
+      const markets = sqlite.prepare(
+        "SELECT id, protocol_status, settle_txid, metadata FROM pool_markets WHERE protocol_version='v0.7' AND created_at > ?"
+      ).all(new Date(since7d * 1000).toISOString());
+      const shardStmt = sqlite.prepare('SELECT current_leaf_state FROM market_shards WHERE logical_market_id = ?');
+      const betCount = sqlite.prepare('SELECT COUNT(*) c FROM pool_bettor_sides WHERE market_id = ?');
+      function hadBets(m) {
+        if (betCount.get(m.id).c > 0) return true;
+        try {
+          for (const s of shardStmt.all(m.id)) {
+            const st = JSON.parse(s.current_leaf_state || '{}');
+            if ((st.count || 0) > 0) return true;
+          }
+        } catch {}
+        return false;
+      }
+      function isSettled(m) {
+        if (m.settle_txid || m.protocol_status === 'completed') return true;
+        try { const meta = JSON.parse(m.metadata || '{}'); if (meta.settle_evidence?.chain_settled) return true; } catch {}
+        return false;
+      }
+      const bet = markets.filter(hadBets);
+      const settled = bet.filter(isSettled);
+      const refunded = bet.filter(m => !isSettled(m) && (m.protocol_status === 'refunded' || m.protocol_status === 'refunding'));
+      const resolved = settled.length + refunded.length;
+      const pct = resolved > 0 ? Math.round(settled.length * 1000 / resolved) / 10 : null;
+      return reply.send({ settle_pct: pct, settled: settled.length, resolved, bet_markets: bet.length, gate_pass: pct !== null && pct > 80, window: '7d' });
+    } catch (e) {
+      return reply.code(500).send({ error: e.message });
+    }
+  });
+
   // Split UTXOs for concurrent sends
   fastify.post('/api/relay/:id/split-utxos', async (request, reply) => {
     try {

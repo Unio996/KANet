@@ -85,7 +85,9 @@ DM 生成托管钱包 → faucet → /bet 零门槛玩,任意 TG 用户可达。
 - ✅ **LIVE(KANet-UI clean restart :3200)**:new console PID 45088(23:15:56 起 > fix commit 22:53 → fix 载)+ 22 relay 回 + tg-bot 单 poller(无 409)。**deploy 坑**:kanet-stop 按 stale pidfile(console.pid=22509 早死)漏杀真活 console 43496,且其 relay-health-monitor cron respawn relay = 假死实活;解=taskkill /T /PID 43496 树杀 + kanet-start。教训:kanet-stop 后必 verify 真活 console PID 死,别信 pidfile。
 - ✅ **smoke·per-IP 豁免 PROVEN**:bot 路径(带 secret)间隔 8s 连发 4 笔全 200 真 txid,第4笔 count≥3 仍 200=豁免成立(旧码必 429);公网(无 secret)count=5 → 429 IP rate limit=公网仍守;链上验 user1 `0952cc14` + grant#4 `7b7d7708` 各 5 KAS 真到账(500000000 sompi)。报频道 txId `fb5004a5`。
 - ⚠ relay 健壮性观察(非 per-IP,记一笔):faucet relay 刚重启时 <1s 极速连发偶返 no-txid 503(30088 mature UTXO 不缺,warmup/lock);间隔 ≥8s 全成。真实 TG 用户天然间隔不破零门槛流。
-- ⬜ **待 Owner**:`FAUCET_AMOUNT_KAS` 实测=5(非 10k);改 10k 需 Owner 改 env + 确认 faucet relay 余额够 N×用户。
+- ✅ **faucet 余额实测=1,507,580 KAS**(NWT 链上 probe FaucetRelay-tn-2 `qq43angy…363q2rchd36d`)= @5 约 30 万次 / @10k 约 150 次。**不缺币**。
+- ✅ **TN12 挖矿 live 持续供币(Owner 钦定·NWT 搭·2026-06-23)**:bridge **external** 接现有 1.1.1-toc.1 covenant 节点(gRPC 16210,**绝不 rebuild D:/rusty-kaspa / 绝不 inprocess** → 否则覆盖 live 节点二进制崩 bshard)→ coinbase 直打 faucet,实测 ~11,500 KAS/min,余额实涨验通(BLOCK ACCEPTED + confirmed BLUE)。detached watchdog 自愈(`D:/kaspa-tn12-mining/`)。⚠ 共享节点:加算力短期难度↑/BPS↑(长期自调回稳),DAA 进度短期加快——MAX_WALK 等 BPS 标定敏感,已频道告知,要节流喊一声。方法档 `C:/开发过程/测试网挖矿方法/TN12-挖矿方法-faucet供币.md`。
+- ⬜ **待 Owner**:`FAUCET_AMOUNT_KAS` 实测=5(非 10k);改 10k 仅剩 Owner env 决策(供给前提已满足:余额 1.5M + 持续挖矿 ~11.5k/min)。
 - ⬜ **J1**:master sync(deploy→master)+ verify-ship(已 @J1 交接)。
 owner=KANet-UI(deploy 统筹)+ Bettor(per-IP 修已落码,审核盲点自负);reviewer=NWT。
 
@@ -127,6 +129,20 @@ ZK proof 在 TN12 链上验证(OpZkPrecompile),为预测/经济层提供 trustle
 - 🟡 可玩通路:托管钱包 7(测试号)+ faucet 今日修 live + /bet 通;Phase A 证过单市场端到端。
 - ⚠ 信任:结算 enforce driver-side(Track B 线 1 未落)。
 
+### STATUS 更新(KANet-UI 2026-06-23 Bettor③)
+- ✅ **canary-stats API + 页头 badge LIVE** (`e52ab398`):relay.js 加 `GET /api/system/canary-stats`(近7天 settle%,排 0-bet);page-open.eta 全局页头 Alpine badge(60s 轮询,red<80%/green>=80%);sidebar.eta 披露文案四条(测试网/托管/~半数refund/driver-side)。console PID 36304(23:44:12)载新码。
+- 📊 **当前 canary 数据**: 近7天 settle%=**75%**(30/40 resolved)gate FAIL；全时段 v0.7 45.1%(J2 同数)。settle% badge 页头可见，🔴状态(gate FAIL)，诚实反映。
+
+### STATUS 更新(Bettor 实测定论 2026-06-23·读码+跑 fresh 市场,非考古)— 🔑 重大口径修正
+- **settle% 低 = 部分是 settler shard-blind 度量假象 + 真实 bug,但只咬 bshard 路、不咬真实用户路**:
+  - **两条 bet 路**:① register-v06(anonymous-pool,bettor 按 logical 键)= **真实用户 TG /bet 走这条**(console-api.mjs:83 register-v06)→ settler 看得到,正常结算;② register-v07(bshard/无限押注,bettor 按 shard_market_id 键)= 只测试脚本驱动。
+  - **settler bug LIVE 确证**(fresh 市场 51q4e 实测,非历史):settler `getBettorSumSompi`(:143)/MIN_POT(:350)按 logical 查 betCount → bshard 市场=0 → deadline 后误判 0-bet 推 `refund_maker_unjoined`。历史 11 错退**不是噪音=同一 bug**(全有 market_shards+bettor_count>0)。
+  - **影响半径**:只咬 register-v07 bshard 路。**真实用户走 v06,不被咬**。∴ "settler bug 卡公测"之前判错半径,实测纠正。
+  - **伤害边界**:有人 close(driver/Track B 自动)→ winner 拿钱、maker 拿回 seed(B-model maker_stake 独立 UTXO,良性双动作非双花,与 x4kpq 同形)、没人受伤;**无人 close → bettor pool 卡死**。
+  - **跨节点**:market_shards 不跨节点同步(:3300 读不到)→ bshard 委员只能从链上重建 = 强化 D4 必要性(线 1)。
+- **修法(Owner 喊停纪律下,understand-first,未动码)**:settler skip-to-Track-B(loop-top 单 guard);但暴露依赖=bshard 自动 close(`bshard-close-voter.js` 默认关 `BSHARD_CLOSE_VOTER_ENABLED!=1`,gated on D4)。**bshard 无人值守公测真门槛=Track B/D4,不是 settler 补丁**。
+- **方向待 Owner**:A=测真实用户 v06 路可靠性(公测最相关) / B=bshard ② 已测完 / settler 修不修何时修。
+
 ### NEXT(机器可判微 DoD)
 ```
 DoD: 开放公测就绪 = bet-market settle% > 80%(排 0-bet)+ oracle 激活泄漏堵住
@@ -136,6 +152,21 @@ DoD: 开放公测就绪 = bet-market settle% > 80%(排 0-bet)+ oracle 激活泄�
 ```
 owner=J2(settle 管线+deadline-cap,查 309 泄漏)+ J1(:3300 oracle 激活)+ KANet-UI(canary 工具+披露文案);reviewer/验数=Bettor。
 **当前裁决**:🟡 小范围 invited testnet 可开(带满披露);🔴 开放公测 gated on settle%>80%(现 ~54% FAIL)。
+
+---
+
+## 线 7:运营硬化(Owner 真机撞·2026-06-23)
+### TG bot 架构(查全·file:line 锚)
+- **两层 bot**:① 全局主 bot `@KANET_Broker_bot`(`kasia-console/_launch_tg_bot.mjs` → `tg-bot/bot.mjs`,常驻活)= 所有命令(/broker、/bet、/wallet…)在它上;② 每-broker bot(`broker-bot-manager.js` → `_launch_broker_bot.mjs`)= 每个 Owner 批准的外部 broker 一个独立进程跑自己 token。
+- **@KanetBroker_test_bot = 孤儿**(代码/配置/DB 全无引用,broker_onboarding 空)→ 没进程 poll → 死。**不是系统 bot,/broker 不依赖它**(端点 `/api/kanet-broker/onboard/status` 实测 200)。
+
+### 死点1:DM 旧排版(根因=新排版卡未合并分支)
+- 运行 bot 载主 repo `bshard-m3-deploy` 的 `tg-bot/messages.mjs` @ d2872037 = **旧排版**;KANet-UI 新排版 `e89218e6`(custody-aware /start)在 `kanet-ui-tg-wallet` 分支**没合进 bshard-m3-deploy** → 旧排版直因。同"tg-wallet 未进 deploy 分支"同一病。
+- 修(KANet-UI deploy lane,已派工):e89218e6 的 messages.mjs **+ bot.mjs custody-aware 调用一起**合进 bshard-m3-deploy(签名 startMessageLinked(addr,custodial) 必协调,别半截)+ 重启 bot → Bettor DM 实测验。
+
+### 死点2:broker-bot 静默死(规模化前运营灾难)
+- `broker-bot-manager` 崩溃帽 90min 崩 5 次→自禁到 Console 重启**无告警**。现 0 外部 broker 没暴露,broker 规模化前必加 bot 存活监控+告警。
+owner=KANet-UI(deploy+监控);reviewer/验=Bettor。
 
 ---
 
