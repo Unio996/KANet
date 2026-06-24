@@ -1909,9 +1909,12 @@ export async function registerPoolRoutes(fastify) {
              pool_markets.outcome_market_source, pool_markets.outcome_condition_id, pool_markets.created_at,
              pool_markets.maker_relay_id, pool_markets.broker_relay_id, pool_markets.oracle_relay_ids,  /* KANet-UI r308 maker 名显 + J2-tn r741 broker filter/markets-tool */
              rn_maker.name AS maker_name,                       /* LEFT JOIN: 跨节点 maker 不在本表 → NULL, 前端兜底 */
-             (SELECT COUNT(*) FROM pool_bettor_sides s WHERE s.market_id = pool_markets.id) AS bettor_count,
-             (SELECT COALESCE(SUM(stake_amount),0) FROM pool_bettor_sides s WHERE s.market_id = pool_markets.id AND s.direction = 0) AS yes_bettor_stake_sompi,
-             (SELECT COALESCE(SUM(stake_amount),0) FROM pool_bettor_sides s WHERE s.market_id = pool_markets.id AND s.direction = 1) AS no_bettor_stake_sompi
+             (SELECT COUNT(*) FROM pool_bettor_sides s WHERE s.market_id = pool_markets.id)
+             + (SELECT COUNT(*) FROM pool_bettor_sides s WHERE s.market_id IN (SELECT shard_market_id FROM market_shards WHERE logical_market_id = pool_markets.id)) AS bettor_count,
+             (SELECT COALESCE(SUM(stake_amount),0) FROM pool_bettor_sides s WHERE s.market_id = pool_markets.id AND s.direction = 0)
+             + (SELECT COALESCE(SUM(stake_amount),0) FROM pool_bettor_sides s WHERE s.market_id IN (SELECT shard_market_id FROM market_shards WHERE logical_market_id = pool_markets.id) AND s.direction = 0) AS yes_bettor_stake_sompi,
+             (SELECT COALESCE(SUM(stake_amount),0) FROM pool_bettor_sides s WHERE s.market_id = pool_markets.id AND s.direction = 1)
+             + (SELECT COALESCE(SUM(stake_amount),0) FROM pool_bettor_sides s WHERE s.market_id IN (SELECT shard_market_id FROM market_shards WHERE logical_market_id = pool_markets.id) AND s.direction = 1) AS no_bettor_stake_sompi
       FROM pool_markets
       LEFT JOIN relay_nodes rn_maker ON rn_maker.id = pool_markets.maker_relay_id
       ${whereSql}
