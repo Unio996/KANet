@@ -327,7 +327,7 @@ export async function poolSettlerTick() {
     const TICK_TIMEBOX_MS = parseInt(process.env.POOL_SETTLER_TIMEBOX_MS, 10) || 30_000;
     const tickStartMs = Date.now();
 
-    let consensus = 0, pending = 0, refund = 0, errored = 0, doomed = 0, sampledCommittee = 0, disputed = 0;
+    let consensus = 0, pending = 0, refund = 0, errored = 0, doomed = 0, sampledCommittee = 0, disputed = 0, bshardSkipped = 0;
     let processedCount = 0;
     for (const market of markets) {
       // J2-tn r388 #24 time-box check: 处理超 30s 后 break (= 同 tick 内有 stale retry 不阻塞下个 tick).
@@ -337,6 +337,17 @@ export async function poolSettlerTick() {
         break;
       }
       processedCount++;
+      // J2-tn 派工① (2026-06-24 Bettor APPROVE + 2 gate): bshard (rolling-shard) 市场必整体 SKIP 本
+      // anonymous-pool committee settler = HARM-STOPPER (gate②: 非 bshard 结算器 — skip 后 bshard 不被
+      // 误退但也不自动结算, 仍需 close_attest[现 driven / 未来 Track B 自治])。
+      // 根因(live e2e 51q4e 实证, refund 9fb4366c LANDED): bshard bettor 集在链上 shard 状态
+      // (market_shards.current_leaf_state) 不在 pool_bettor_sides → 本 settler systemic shard-blind
+      // (L350 MIN_POT via getBettorSumSompi L143 / L463 0-bet pre-sample / L1573 dispatchPhase2)→ 误判
+      // 0-bet 退 maker。loop-top 单 early-continue 覆盖全部已知+未发现站(Bettor 防打地鼠钦定)。
+      // gate①: guard 只跳有 market_shards 行的 → v0.6/v0.7 anonymous-pool 市场(无 shard 行)照常 settle
+      // 不回归(v0.6 是真实用户路)。判据 = canary 证 logical_market_id==pool_markets.id。
+      const isBshard = !!sqlite.prepare('SELECT 1 FROM market_shards WHERE logical_market_id = ? LIMIT 1').get(market.id);
+      if (isBshard) { bshardSkipped++; continue; }
       // J2-tn r388 #24 exponential backoff: meta.skip_until_ms (epoch ms) set after repeated
       // sample failures. Skip if set + 未到. Active state (collecting_sigs / refunding +
       // refund_dispatched_at) 仍走原 handler 不 skip (= 完成中状态优先).
@@ -969,7 +980,7 @@ export async function poolSettlerTick() {
         console.error(`[pool-settler] process fail market=${market.id?.slice(0,12)}: ${e.message}`);
       }
     }
-    console.log(`[pool-settler] tick: ${markets.length} verifying markets, consensus=${consensus} refund=${refund} dispute=${disputed} pending=${pending} doomed=${doomed} errored=${errored} sampledCommittee=${sampledCommittee}`);
+    console.log(`[pool-settler] tick: ${markets.length} verifying markets, consensus=${consensus} refund=${refund} dispute=${disputed} pending=${pending} doomed=${doomed} errored=${errored} sampledCommittee=${sampledCommittee} bshardSkipped=${bshardSkipped}`);
 
     // J2-tn r401 P0-#1 (Bettor r290+r291 关1 PASS): watchdog phase 加在主 loop 后.
     // 2 watchdogs:
@@ -1097,7 +1108,7 @@ export async function poolSettlerTick() {
       console.warn(`[pool-settler:path-b] phase fail: ${e.message}`);
     }
 
-    return { ok: true, processed: markets.length, consensus, refund, pending, doomed, errored, pathBReconciled };
+    return { ok: true, processed: markets.length, consensus, refund, pending, doomed, errored, pathBReconciled, bshardSkipped };
   } finally {
     running = false;
   }
