@@ -170,6 +170,44 @@ owner=KANet-UI(deploy+监控);reviewer/验=Bettor。
 
 ---
 
+## 🔴 线 8:持续迭代机制 — 根治"改了又坏"(Owner 钦定·2026-06-24·下个 pass 头号 task)
+### GOAL
+让"持续迭代"真正可能 —— 把"改一个坏一个、累计垃圾"用**自维持机制**结构性堵死,而非靠人记得每次查。
+
+### 根因 hypothesis(⚠ 未证, Owner 2026-06-24 纠 narrative-ahead-of-evidence)
+"incomplete migration = 改了又坏的一类根因"**形状成立**(新旧两套 keying 并存只迁 6 处)。但 **"41" 是 grep 命中数 ≠ bug 数**——真 bug 数分类前**未知**。**confirmed 实例 = 2**(settler 误退 A-fix logical→shard skip 修 / "0押注"显示 line 1912 fy1yk logical=0 vs shard=1004 链证);其余 **39 = suspected 待逐处验**。"定时炸弹/亲兄弟"叙事**不准替代逐处证据**。
+⚠ **承重墙(决定 helper 1 vs 2 签名, 表必先答)**: marketId→sharded 可确定性判(查 market_shards), 但**有站点本就该按 shard_market_id 查单片**(register shard-allocator)→ 硬塞一个内部-shard-aware helper 会把 v06/单片-正确站点改坏(重演"别把好东西改坏")。
+⚠ **41 不只 key 异, 查什么也异**(distinct 人数 / side 行数 / status 过滤)→ 单签名 helper 压扁语义。
+
+### STEP 1(下个 pass 唯一动作·read-only·零生产码): 逐处带证据分类表
+**41 grep 命中,每处一行,决策树(先剪 dead 不进表)**。最小 6 列:
+1. `file:line` + 实际 query
+2. 服务市场类型(sharded / v06-anon / both / unknown)
+3. live / dead(dead 直接删,零分析,不往下走)
+4. 查询意图(distinct bettor 人数 / side 行数 / status 过滤 / 其他)
+5. 判决 🔴shard-blind bug / 🟢logical-correct / ⚫dead / ⚪待验 + 证据
+6. 绑定已观测故障(confirmed / suspected / none)
+**表填完才回答承重墙(helper 1 个还是 2 个签名、谁 dispatch 谁本就该按 shard_market_id 不碰)。在那之前不碰任何一行生产代码。**
+
+### STEP 2+(承重墙答完才设计)
+- **收敛 helper**:签名数 = STEP 1 表定(可能 1 个内部 dispatch / 可能 2 个 by-logical + by-shard,看意图分布)。**不默认"内部 shard-aware 就行"**(会改坏 v06/单片-正确站点)。
+- **lint-kanet.mjs 规则**:禁裸写 `pool_bettor_sides WHERE market_id =` → 走 helper(自维持核心,新错 commit 不进);先 warn-mode。
+- **regression test**:**sharded + v06-anon 两个 fixture 各断言**(锁不住 dispatch 混淆只测一个=半个 invariant)。
+- **ANTI-PATTERNS 条目** + 真 bug 逐处迁移(lint 当 checklist 迁到 0)+ 剪死代码。
+- **推广**:一类"新旧并存"一 lint rule(DB-status vs chain-truth 本程撞 3 次,同法)。
+4. **ANTI-PATTERNS.md 条目 + regression test 锁** invariant。
+5. **推广**:同机制套别的"新旧并存"类(如 DB-status vs chain-truth,本程撞 3 次)——一类一 lint rule 堵。
+
+### NEXT(下个清醒 pass·非夜赶)
+```
+DoD: shard-blind 这类 bug 结构性灭绝 + 持续不可复发
+判定: lint-kanet 有 shard-blind 规则 + 41→0 迁移 + helper 单源 + regression test 绿 + ANTI-PATTERNS 有条目
+失败处理: 迁移误改 v06 正确路 → 链上验 bettor count 回归;禁夜赶 money-adjacent 码
+```
+owner=Bettor 牵头机制(lint rule + helper 骨架 + ANTI-PATTERNS)+ KANet-UI/J2 迁移各自域 + reviewer/链验=Bettor。**先 read-only 出 lint 检测(扫 41)再动码,逐个分类不无脑全改(防把 v06 正确路改坏)。**
+
+---
+
 ## 集成 / 部署态(git 真相,Bettor 对账 2026-06-23)
 - **master** tip `ca7e0a66`:含核心 bshard/oracle wave1 LIVE 码(经 bshard-m3-deploy sync)。
 - 🔶 **未进 master(feature ref / 在途)**:D4 loaders(`origin/j1-d4-loaders` aace8f39)/ tg-wallet(`origin/kanet-ui-tg-wallet` df2a9b34)/ **faucet per-IP 修 + bot.mjs custody = uncommitted 工作树**。

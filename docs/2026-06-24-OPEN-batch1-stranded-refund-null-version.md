@@ -1,6 +1,7 @@
-# OPEN: batch-1 stranded refund — null-version legacy-refund SS sig failure
+# CLOSED: batch-1 stranded refund — null-version v0.5 refund path fixed, 9/9 MADE-WHOLE
 
-> Status: **OPEN** (money-path; Bettor 2026-06-24). stuck ≠ lost. J1 leads SS diagnosis; KANet-UI (:3200) lands refunds; Bettor co-verifies 9/9 spent.
+> Status: **CLOSED 2026-06-24** — 9/9 sides refunded, J1+J2+Bettor co-verified SPENT. Commit 07212807.
+> OPEN: 1 orphan UTXO (1596fb62...:0, ~1000 KAS) at shared P2SH prur8h7g...nfk54a2r4d89 — untracked 3rd deposit, no DB side record, bettor=c9b933. Same v0.5 refund path recoverable.
 
 ## What happened
 Batch-1 reconcile flipped 5 dead markets `archived→'refunded'` to trigger settler:224 bettor refunds (4,609.5 KAS, 9 sides). **Chain-verify (getUtxosByAddresses): 9/9 side P2SH still UNSPENT, 0 refunds landed** — DB `status=refunded` is false (fund-criteria 3rd catch).
