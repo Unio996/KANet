@@ -2619,4 +2619,50 @@ qlfpv 实测 5 层 brick:
 
 ---
 
+---
+
+## 规则 50 · pool_bettor_sides 裸按 logical market_id 查 = bshard bettor 全漏 — lint R-SHARD-BLIND [WARN] 自动扫
+
+**触发时机** (线8 STEP2, 2026-06-24 Bettor 钦定): 任何查 `pool_bettor_sides` 的时候，特别是:
+- 显示押注人数 / 总 stake (display bug: 显示 0)
+- settler 判断是否有人押注 (误判 0-bet → 退 maker 本金)
+- bettor-refund-claim 找 side 记录 (refund 404)
+- 任何 `WHERE market_id = logical_market_id` 的 SQL
+
+### Wrong
+```javascript
+// 按 logical market_id 直接查
+const sides = db.prepare(
+  'SELECT * FROM pool_bettor_sides WHERE market_id = ?'
+).all(logicalMarketId);
+// 结果: v06 bettor 有, bshard register-v07 bettor 全漏
+// 根因: bshard 按 shard_market_id 存, 不是 logical_market_id
+```
+
+### Right
+```javascript
+import { getSidesByLogicalMarket, getSidesByShard } from '../lib/pool-bettor-sides-query.mjs';
+
+// 跨-shard 聚合 (display / settler / refund 场景)
+const sides = getSidesByLogicalMarket(logicalMarketId, db);
+
+// 单片操作 (已知 shardMarketId, e.g. shard-allocator)
+const shardSides = getSidesByShard(shardMarketId, db);
+```
+
+SQL 原理: `OR market_id IN (SELECT shard_market_id FROM market_shards WHERE logical_market_id = ?)` 把所有分片 bettor 聚合进来。v06 和 bshard 市场互斥（一个市场只走一条路），OR 无重复。
+
+**逃生舱**: 确认是单-片已知 shardMarketId 操作 → 调 `getSidesByShard(shardId, db)` + 同行加注释 `// lint-allow-shard-blind: 单片操作, shardMarketId 已从 market_shards 取得`。
+
+### Why
+- bshard register-v07 (`kasia-console/src/api/pool.js` 中 register 路径) 写入时 key = `shard_market_id`（如 `ext-pool-...u7hq4-shard-0`），不是 logical `ext-pool-...u7hq4`。
+- 裸 `WHERE market_id = logical_id` 查不到任何 bshard bettor → 41 处定时炸弹全库散落。
+- settler 是最危险的命中点: `pool_bettor_sides` 空 → 误判 0-bet → `handleRefunding` 退 maker 本金 → 链上已 settle 的市场 DB 翻 `refunded`（x4kpq 事故，2026-06-22）。
+
+**前科**: x4kpq close 4123de55 链上真 settle（winner 实领 19.44 KAS），但 DB=`refunded`，因 settler 查到 0 sides → 误判无人押注。同病的 settler A-fix (aff42980) 是 harm-stopper（bshard 跳过），不是根治。"改了又坏"根因 = 不完整迁移，N 处散落定时炸弹逐一浮现（Owner 2026-06-24 元问题）。
+
+**Lint 守**: `lint-kanet.mjs` 规则 `R-SHARD-BLIND` (warn-mode): 扫 `pool_bettor_sides.*WHERE.*market_id =` 在非 shard-allocator、非 pool-bettor-sides-query 文件 → ⚠ WARN（不 block commit，当迁移 checklist）。迁完 42 处后改 hard fail。shard-allocator.mjs 排除（传入的已是 shardMarketId，正确）。
+
+---
+
 *本档案在 v2 spec 第八章元教训基础上独立。spec 聚焦"这次怎么做"，本档案聚焦"下次别再犯"。*

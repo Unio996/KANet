@@ -24,12 +24,17 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 
 const violations = [];
+const warnings = [];  // warn-mode: report without blocking commit
 const file = (rel) => path.join(ROOT, rel);
 const exists = (p) => { try { return fs.statSync(p).isFile(); } catch { return false; } };
 const read = (p) => fs.readFileSync(p, 'utf8');
 
 function violate(rule, msg, file, line) {
   violations.push({ rule, msg, file, line });
+}
+
+function warn(rule, msg, file, line) {
+  warnings.push({ rule, msg, file, line });
 }
 
 function* walk(dir, ext = ['.js', '.mjs']) {
@@ -672,6 +677,46 @@ function checkR40_minerFee_floor(filepath, content) {
   }
 }
 
+// ── R_SHARD_BLIND (线8 STEP2, Bettor 2026-06-24 APPROVED): pool_bettor_sides 裸按 logical market_id 查 ──
+// 根因: bshard register-v07 bettor 按 shard_market_id 存, 不在 logical_market_id 下.
+//       WHERE market_id = logicalId → 0 结果 → settler 误判 0 押注退 maker / display 0 / refund 404.
+// 修法: 用 getSidesByLogicalMarket(logicalId, db) (跨-shard 聚合)
+//       或  getSidesByShard(shardId, db)      (单片, 已知 shard-level 操作)
+//       from: kasia-console/src/lib/pool-bettor-sides-query.mjs
+// 注意: shard-allocator.mjs 传入的 shardMarketId 是 CORRECT, 不改.
+// Escape hatch: 同行或前3行加 // lint-allow-shard-blind: <reason>
+// warn-mode (扫现存 41 命中当 checklist 迁移), 迁完改 error.
+function checkR_SHARD_BLIND(filepath, content) {
+  if (/\.(md|txt)$/.test(filepath)) return;  // docs/comments not code
+  if (/[/\\]test-framework[/\\]/.test(filepath)) return;
+  if (/[/\\]scripts[/\\]/.test(filepath)) return;
+  if (/shard-allocator\.mjs$/.test(filepath)) return;
+  if (/pool-bettor-sides-query\.mjs$/.test(filepath)) return;
+
+  const lines = content.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (/^\s*(?:\/\/|\*|\/\*)/.test(line)) continue;
+    if (!/pool_bettor_sides/i.test(line)) continue;
+    // Match: pool_bettor_sides WHERE market_id = (bare logical query)
+    if (!/pool_bettor_sides\b.*WHERE\b.*\bmarket_id\s*=/.test(line)) continue;
+    // escape hatch: lint-allow-shard-blind in this line or prev 3 lines
+    const windowStart = Math.max(0, i - 3);
+    const windowText = lines.slice(windowStart, i + 1).join('\n');
+    if (/lint-allow-shard-blind/.test(windowText)) continue;
+    warn(
+      'R-SHARD-BLIND [WARN]',
+      '[线8 STEP2] pool_bettor_sides 裸按 market_id 查 — bshard bettor 按 shard_market_id 存, ' +
+      'logical 查不到 → settler 误退 / 显示 0 / refund 404. ' +
+      '改用 getSidesByLogicalMarket(logicalId, db) 或 getSidesByShard(shardId, db) ' +
+      'from lib/pool-bettor-sides-query.mjs. ' +
+      '如确需裸查(已知单片操作), 加 // lint-allow-shard-blind: <reason>.',
+      filepath,
+      i + 1
+    );
+  }
+}
+
 // ── 跑 ──
 for (const fp of targets) {
   let content;
@@ -694,20 +739,38 @@ for (const fp of targets) {
   checkKI32_oracle_channel_mutex(fp, content);  // KI-32 (Oracle v0.3 R7 J2 #9 + J1 #4): oracle-registry NOT 进 COORD_CHANNELS + ORACLE_REGISTRY_CHANNELS 跟 COORD mutex
   checkKI33_trust_score_placeholder(fp, content);  // KI-33 (Oracle v0.3 §9 5/26): broker-llm-agent.js SYSTEM_PROMPT 必含 {{trust_score}}
   checkR40_minerFee_floor(fp, content);  // R40 (G6 批2 红线 7, qlfpv brick sediment 5/31): pool.js create-v06 minerFee 默认下限
+  checkR_SHARD_BLIND(fp, content);       // R-SHARD-BLIND [WARN] (线8 STEP2 2026-06-24): pool_bettor_sides 裸 logical market_id 查
 }
 checkR10();
 checkR_NULLIFIER_I64();
 
 // ── 报告 ──
+// warnings first (non-blocking — WARN rules are migration checklists, not hard blockers)
+if (warnings.length > 0) {
+  const byWarnRule = {};
+  for (const w of warnings) (byWarnRule[w.rule] ||= []).push(w);
+  console.log(`\n[lint-kanet] ⚠  ${warnings.length} warning(s) across ${Object.keys(byWarnRule).length} warn-rule(s) (non-blocking — fix as migration checklist):\n`);
+  for (const [rule, ws] of Object.entries(byWarnRule)) {
+    console.log(`  ${rule}: ${ws.length} hit(s)`);
+    for (const w of ws.slice(0, 5)) {
+      console.log(`    ${path.relative(ROOT, w.file)}:${w.line}`);
+      console.log(`      ${w.msg.slice(0, 200)}`);
+    }
+    if (ws.length > 5) console.log(`    ... ${ws.length - 5} more`);
+  }
+  console.log(`\n  Warnings do NOT block commit. Migrate to suppress. See docs/ANTI-PATTERNS.md.`);
+}
+
 if (violations.length === 0) {
-  console.log(`[lint-kanet] ✓ ${targets.length} files clean`);
+  if (warnings.length === 0) console.log(`[lint-kanet] ✓ ${targets.length} files clean`);
+  else console.log(`[lint-kanet] ✓ ${targets.length} files — 0 errors (${warnings.length} warning(s) above)`);
   process.exit(0);
 }
 
 const byRule = {};
 for (const v of violations) (byRule[v.rule] ||= []).push(v);
 
-console.log(`\n[lint-kanet] ✗ ${violations.length} violations across ${Object.keys(byRule).length} rules:\n`);
+console.log(`\n[lint-kanet] ✗ ${violations.length} violation(s) across ${Object.keys(byRule).length} rule(s):\n`);
 for (const [rule, vs] of Object.entries(byRule)) {
   console.log(`  ${rule}: ${vs.length} hit(s)`);
   for (const v of vs.slice(0, 5)) {

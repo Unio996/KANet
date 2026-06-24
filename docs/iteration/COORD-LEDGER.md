@@ -206,8 +206,12 @@ owner=KANet-UI(deploy+监控);reviewer/验=Bettor。
   - 🔴 10 shard-blind unguarded (detail/positions/sides_merkle/audit/bettor-refund-claim，只影响 register-v07 test-only 路径，真实用户 TG/bet 不受影响)
   - ⚫ 5 dead/DDL/注释
 - ✅ **display bug fix(commit 41a50042)**: list L1912-1914 三 subquery → shard-aware(logical+shard IN 累加);fy1yk bettor_count 0→1004 修正。Owner "0押注"体验修复。
-- ⬜ **STEP 2+**: 承重墙待 Bettor 确认后 → helper 骨架 + lint rule warn-mode + ANTI-PATTERNS 条目 + regression test
-  - 承重墙初步答案(STEP 1 表推导):2 种 helper — `getSidesByLogicalMarket`(跨 shard 聚合) + `getSidesByShard`(单片,现有模式)。待 Bettor 拍板。
+- ✅ **STEP 2 safe(2026-06-24 KANet-UI, Bettor APPROVED)**:
+  - ✅ **helper 骨架** `kasia-console/src/lib/pool-bettor-sides-query.mjs` — 4 函数:`getSidesByLogicalMarket`(跨 shard 聚合)/ `getSidesByShard`(单片)/ `getSideByBettorPk`(cross-shard pk 查,bettor-refund-claim 迁移目标)/ `getSideById`(cross-shard id 查)。lint clean。
+  - ✅ **lint rule `R-SHARD-BLIND` warn-mode** `scripts/lint-kanet.mjs` — 扫 `pool_bettor_sides.*WHERE.*market_id =` 在非 shard-allocator/非 helper 文件 → 42 命中 ⚠ WARN(非 block commit),escape hatch `// lint-allow-shard-blind: <reason>`,`.md` 文件排除。
+  - ✅ **ANTI-PATTERNS.md 规则 50** — Wrong/Right/Why/前科/Lint守 全记。
+  - ✅ **regression test** `test-framework/cases/predictions/pool/shard_blind_query_regression.test.mjs` — 5 步全 PASS: SQL syntax checks × 2 + cross>=bare invariant + COUNT violation=0 + bshard-if-exists check。
+- ⬜ **STEP 2 clear-headed pass(Bettor 指令:money-adjacent 非夜赶)**:10 🔴 shard-blind 迁移,尤其 L2727/2732 bettor-refund-claim → `getSideByBettorPk/getSideById` + Bettor 链验 bettor count 回归。
 
 ### NEXT(下个清醒 pass·非夜赶)
 ```
@@ -223,7 +227,7 @@ owner=Bettor 牵头机制(lint rule + helper 骨架 + ANTI-PATTERNS)+ KANet-UI/J
 - **master** tip `ca7e0a66`:含核心 bshard/oracle wave1 LIVE 码(经 bshard-m3-deploy sync)。
 - **bshard-m3-deploy** tip `0fce7fbe`:含本 session 所有修(null-version refund fix / display fix / line8 STEP1 doc)。
 - 🔶 **未进 master(feature ref / 在途)**:D4 loaders(`origin/j1-d4-loaders` aace8f39)/ tg-wallet(`origin/kanet-ui-tg-wallet` df2a9b34)。faucet per-IP 修(05a0a6c2)已在 bshard-m3-deploy。
-- 🔵 **orphan 1596fb62**(u7hq4 市场 1000 KAS 无 DB record):J1 byte-identical 路确认(复用 id=7 redeem,entry=3,outAmount=99999999000,lockTime=1780303303000,relay 91e2efb1,fee-input)。**待 Bettor 一声令下即执行**。非 batch-1 9 sides 之一，独立 OPEN。
+- ✅ **orphan 1596fb62 DONE**(u7hq4 市场 1000 KAS):Bettor GO 08:57 → 临时 DB id=7816 插入 → bettor-refund-claim endpoint → txId=36522a1f,output=99999999000 sompi。J1(:3300)cross-node UTXO=0 + Bettor(:3200)kaspa_tx_log block 双验。**总计 made-whole: 10 sides, 5,608.8 KAS**(batch-1 9 sides 4,608.8 KAS + orphan 1,000 KAS)。
 - ⬜ 择机 merge 进 master + verify-ship 收齐。J1 gated on NWT FINDING-1 修。
 
 ## ESCALATIONS / 待 Owner 裁
