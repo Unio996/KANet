@@ -2768,9 +2768,12 @@ export async function registerPoolRoutes(fastify) {
     const massEst = feeResult.totalMass;
     const fee = feeResult.dynamicFee;
 
+    // v0.5 hardcodes output == stake - 1000 (1000 sompi in-script constant); actual TX fee paid by
+    // relay fee-input (separate relay-wallet UTXO, no-change). v06/v07 use dynamic KIP-9 fee.
+    const isLegacy = !market.protocol_version || market.protocol_version === 'v0.5';
     const stakeSompi = BigInt(side.stake_amount);
-    const outAmount = stakeSompi - BigInt(fee);
-    if (outAmount <= 1000n) {
+    const outAmount = isLegacy ? stakeSompi - 1000n : stakeSompi - BigInt(fee);
+    if (!isLegacy && outAmount <= 1000n) {
       return reply.code(409).send({ ok: false, error: `output ${outAmount} <= dust 1000 (= fee ${fee} too high for stake ${stakeSompi})` });
     }
 
@@ -2779,7 +2782,6 @@ export async function registerPoolRoutes(fastify) {
     // J2-tn r391 (#28 Bettor ③ APPROVE v2 05:26): legacy v0.5 PoolSide locktime 无 grace (SS L121
     // 严守 tx.time >= deadline*1000 ms), v06/v07 + REFUND_GRACE_SEC (L260/270 grace require).
     // entry index: 3 for legacy (PoolSide.sil 4 entry refund=idx3), 2 for v06/v07 (PoolSide_v06/v07 3 entry refund=idx2).
-    const isLegacy = !market.protocol_version || market.protocol_version === 'v0.5';
     const { REFUND_GRACE_SEC } = await import('../lib/pool-refund-grace.mjs');
     const lockTime = isLegacy
       ? BigInt(market.deadline) * 1000n
@@ -2795,6 +2797,7 @@ export async function registerPoolRoutes(fastify) {
         output: { address: signingRelay.address, amountSompi: outAmount.toString() },
         lock_time: lockTime.toString(),
         entry_index: entryIndex,
+        add_fee_input: isLegacy,
       });
       if (!submitResult?.ok || !submitResult.txId) {
         return reply.code(500).send({ ok: false, error: `relay submit fail: ${submitResult?.error || 'no txId'}` });

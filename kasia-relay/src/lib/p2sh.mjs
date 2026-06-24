@@ -1310,6 +1310,9 @@ export async function unlockPoolSideRefundCancelled(args) {
     // refund_market_cancelled=idx 3 (OP_3='53'); v06/v07 PoolSide 3 entrypoint refund=idx 2 (OP_2='52').
     // 默认 2 (= v06/v07 backward-compat 现 caller 全 v06/v07). 调时显式传 3 for ver=null/v0.5.
     entryIndex = 2,
+    // v0.5 hardcodes output == stake - 1000 (1000 sompi in-script constant), so 1000 sompi TX fee
+    // won't cover actual mempool fee → must add a relay wallet UTXO as fee-input, no-change.
+    addFeeInput = false,
   } = args;
   if (!wallet) throw new Error('unlockPoolSideRefundCancelled: wallet required (= bettor_relay signer)');
   if (!requiredInputOutpoint?.outpointTxid) throw new Error('requiredInputOutpoint.outpointTxid required');
@@ -1327,6 +1330,17 @@ export async function unlockPoolSideRefundCancelled(args) {
 
     const outAmount = typeof output.amountSompi === 'string' ? BigInt(output.amountSompi) : BigInt(output.amountSompi);
     const outSpk = payToAddressScript(new Address(output.address));
+
+    // Fee-input: fetch relay's own UTXO to cover actual TX fee (needed for v0.5 legacy whose
+    // in-script output == stake - 1000 leaves only 1000 sompi for miner, far below mempool floor).
+    let feeEntry = null;
+    if (addFeeInput) {
+      const relayAddress = wallet.getAddress();
+      const { entries: relayEntries } = await rpc.getUtxosByAddresses([relayAddress]);
+      if (!relayEntries?.length) throw new Error(`unlockPoolSideRefundCancelled: no UTXOs at relay wallet ${relayAddress} for fee-input`);
+      // Pick smallest UTXO to minimise overpay (no-change design: entire UTXO amount is fee).
+      feeEntry = relayEntries.reduce((a, b) => BigInt(a.amount) <= BigInt(b.amount) ? a : b);
+    }
 
     // Same sighash field discipline as unlockPoolSpineRefundMakerUnjoined (qlfpv 4-bug sediment):
     //   parsed.lockTime = txLockTime (= match signedTx, not preimage default 0)
@@ -1351,15 +1365,25 @@ export async function unlockPoolSideRefundCancelled(args) {
       parsed.outputs = parsed.outputs.map(o => ({ ...o, value: BigInt(o.value || 0) }));
       unsignedTx = new Transaction(parsed);
     } else {
-      unsignedTx = new Transaction({
-        version: 0,
-        inputs: [{
-          previousOutpoint: { transactionId: matched[0].outpoint.transactionId, index: matched[0].outpoint.index },
+      const inputs = [{
+        previousOutpoint: { transactionId: matched[0].outpoint.transactionId, index: matched[0].outpoint.index },
+        signatureScript: '',
+        sequence: 0n,
+        sigOpCount: 1,
+        utxo: matched[0],
+      }];
+      if (feeEntry) {
+        inputs.push({
+          previousOutpoint: { transactionId: feeEntry.outpoint.transactionId, index: feeEntry.outpoint.index },
           signatureScript: '',
           sequence: 0n,
           sigOpCount: 1,
-          utxo: matched[0],
-        }],
+          utxo: feeEntry,
+        });
+      }
+      unsignedTx = new Transaction({
+        version: 0,
+        inputs,
         outputs: [new TransactionOutput(outAmount, outSpk)],
         lockTime: txLockTime,
         gas: 0n,
@@ -1379,14 +1403,26 @@ export async function unlockPoolSideRefundCancelled(args) {
     const selectorOpHex = (0x50 + entryIndex).toString(16).padStart(2, '0');
     const scriptSigHex = bettorSigHex + selectorOpHex + sideRedeemPushHex;
 
-    const signedTx = new Transaction({
-      version: 0,
-      inputs: [{
-        previousOutpoint: { transactionId: matched[0].outpoint.transactionId, index: matched[0].outpoint.index },
-        signatureScript: scriptSigHex,
+    const signedInputs = [{
+      previousOutpoint: { transactionId: matched[0].outpoint.transactionId, index: matched[0].outpoint.index },
+      signatureScript: scriptSigHex,
+      sequence: 0n,
+      sigOpCount: 1,
+    }];
+    if (feeEntry) {
+      // P2PK fee-input: scriptSig = <sig push> only (no selector, no redeem).
+      const feeSigHex = createInputSignature(unsignedTx, 1, wallet.getPrivateKey(), SighashType.All);
+      signedInputs.push({
+        previousOutpoint: { transactionId: feeEntry.outpoint.transactionId, index: feeEntry.outpoint.index },
+        signatureScript: feeSigHex,
         sequence: 0n,
         sigOpCount: 1,
-      }],
+      });
+    }
+
+    const signedTx = new Transaction({
+      version: 0,
+      inputs: signedInputs,
       outputs: [new TransactionOutput(outAmount, outSpk)],
       lockTime: txLockTime,
       gas: 0n,
@@ -1394,7 +1430,8 @@ export async function unlockPoolSideRefundCancelled(args) {
       payload: '',
     });
 
-    _assertTxInvariants(matched, signedTx, 'unlockPoolSideRefundCancelled', networkId);
+    const assertUtxos = feeEntry ? [...matched, feeEntry] : matched;
+    _assertTxInvariants(assertUtxos, signedTx, 'unlockPoolSideRefundCancelled', networkId);
     const result = await rpc.submitTransaction({ transaction: signedTx, allowOrphan: false });
     return { txId: result.transactionId };
   } finally {
