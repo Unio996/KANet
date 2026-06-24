@@ -198,6 +198,15 @@ owner=KANet-UI(deploy+监控);reviewer/验=Bettor。
 4. **ANTI-PATTERNS.md 条目 + regression test 锁** invariant。
 5. **推广**:同机制套别的"新旧并存"类(如 DB-status vs chain-truth,本程撞 3 次)——一类一 lint rule 堵。
 
+### STATUS(2026-06-24 KANet-UI STEP 1 DONE)
+- ✅ **STEP 1 DONE(2026-06-24 KANet-UI)**: 52 处全分类(src/ 产码，Owner 记忆 41 含 scripts/tg-bot)。文档 `docs/2026-06-24-line8-step1-classification-table.md`。
+  - 🟢 22 logical-correct (注册路径全部，TG/bet 走 register-v06=logical，**不动**)
+  - ✅ 5 shard-aware 已修 (list endpoint L1912-1917 + shard-allocator + close-voter)
+  - 🟡 8 shard-blind + A-fix 护卫 (settler root bug + 5 站 + settler-v06 3 站，Track B 替换时根修)
+  - 🔴 10 shard-blind unguarded (detail/positions/sides_merkle/audit/bettor-refund-claim，只影响 register-v07 test-only 路径，真实用户 TG/bet 不受影响)
+  - ⚫ 5 dead/DDL/注释
+- ⬜ **STEP 2+**: 承重墙待 Bettor 确认后 → helper 骨架 + lint rule warn-mode + ANTI-PATTERNS 条目 + regression test
+
 ### NEXT(下个清醒 pass·非夜赶)
 ```
 DoD: shard-blind 这类 bug 结构性灭绝 + 持续不可复发
