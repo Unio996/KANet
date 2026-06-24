@@ -205,7 +205,9 @@ owner=KANet-UI(deploy+监控);reviewer/验=Bettor。
   - 🟡 8 shard-blind + A-fix 护卫 (settler root bug + 5 站 + settler-v06 3 站，Track B 替换时根修)
   - 🔴 10 shard-blind unguarded (detail/positions/sides_merkle/audit/bettor-refund-claim，只影响 register-v07 test-only 路径，真实用户 TG/bet 不受影响)
   - ⚫ 5 dead/DDL/注释
+- ✅ **display bug fix(commit 41a50042)**: list L1912-1914 三 subquery → shard-aware(logical+shard IN 累加);fy1yk bettor_count 0→1004 修正。Owner "0押注"体验修复。
 - ⬜ **STEP 2+**: 承重墙待 Bettor 确认后 → helper 骨架 + lint rule warn-mode + ANTI-PATTERNS 条目 + regression test
+  - 承重墙初步答案(STEP 1 表推导):2 种 helper — `getSidesByLogicalMarket`(跨 shard 聚合) + `getSidesByShard`(单片,现有模式)。待 Bettor 拍板。
 
 ### NEXT(下个清醒 pass·非夜赶)
 ```
@@ -217,10 +219,12 @@ owner=Bettor 牵头机制(lint rule + helper 骨架 + ANTI-PATTERNS)+ KANet-UI/J
 
 ---
 
-## 集成 / 部署态(git 真相,Bettor 对账 2026-06-23)
+## 集成 / 部署态(git 真相，2026-06-24 KANet-UI 更新)
 - **master** tip `ca7e0a66`:含核心 bshard/oracle wave1 LIVE 码(经 bshard-m3-deploy sync)。
-- 🔶 **未进 master(feature ref / 在途)**:D4 loaders(`origin/j1-d4-loaders` aace8f39)/ tg-wallet(`origin/kanet-ui-tg-wallet` df2a9b34)/ **faucet per-IP 修 + bot.mjs custody = uncommitted 工作树**。
-- ⬜ 择机 merge 进 master + verify-ship 收齐"GitHub 完整含今晚码"。J2 部署待。
+- **bshard-m3-deploy** tip `0fce7fbe`:含本 session 所有修(null-version refund fix / display fix / line8 STEP1 doc)。
+- 🔶 **未进 master(feature ref / 在途)**:D4 loaders(`origin/j1-d4-loaders` aace8f39)/ tg-wallet(`origin/kanet-ui-tg-wallet` df2a9b34)。faucet per-IP 修(05a0a6c2)已在 bshard-m3-deploy。
+- 🔵 **orphan 1596fb62**(u7hq4 市场 1000 KAS 无 DB record):J1 byte-identical 路确认(复用 id=7 redeem,entry=3,outAmount=99999999000,lockTime=1780303303000,relay 91e2efb1,fee-input)。**待 Bettor 一声令下即执行**。非 batch-1 9 sides 之一，独立 OPEN。
+- ⬜ 择机 merge 进 master + verify-ship 收齐。J1 gated on NWT FINDING-1 修。
 
 ## ESCALATIONS / 待 Owner 裁
 - `FAUCET_AMOUNT_KAS` 5→10k?(需 Owner + faucet relay 余额前提)
