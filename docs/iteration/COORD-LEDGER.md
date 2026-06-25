@@ -98,8 +98,10 @@ owner=KANet-UI(deploy 统筹)+ Bettor(per-IP 修已落码,审核盲点自负);re
 ZK proof 在 TN12 链上验证(OpZkPrecompile),为预测/经济层提供 trustless 原语。
 ### STATUS
 - ✅ **链上铁证 active**:OpZkPrecompile(0xa6)真执行 verify_zk(ARK,FUND a18759ca + LOCK 12d8e532 落链),闸=covenants_enabled=always。
-- ⚠ **口径**:Track C 既验证(脆)又解锁(active),≠ production-ready。spike plan:`docs/2026-06-23-track-c-zk-spike-plan.md`。
-- ⬜ NEXT:spike 续(待排期,非当前主线)。
+- ⚠ **口径**:Track C 既验证(脆)又解锁(active),≠ production-ready。只闭层2(payout 算术),层1(outcome)永远需预言机。spike plan:`docs/2026-06-23-track-c-zk-spike-plan.md`。
+- ✅ **PR #953 zk-sdk 深查(Owner 派·2026-06-24·源码实证)**:① verifier 在我们 fork(zk_precompiles,tag Groth16 0x20/140k + R0Succinct 0x21/250k,risc0 3.0.4/4.0.4);② **#953 的 builder(zk-sdk R0ScriptBuilder+WASM)NOT 在我们 fork** = 正是 S2 缺口(silverc 无 zk builtin)的上游解药;③ Groth16 比 R0Succinct 便宜(140k<250k)+ RISC0 可压 Groth16 → S4 guest 目标改 Groth16-compressed。
+- ⬜ **NEXT(S2 改 de-risk)**:**port 上游 zk-sdk WASM**(不 rebuild 节点,同 vendored kaspa-wasm 模式)。🟠 **GATING probe**:上游 zk-sdk 产的脚本格式 == 我们 fork verifier 期望格式?(tag/cost 首信号一致,全编码逐项核;diverge→port 不成立)。详见 spike §5。
+- ⬜ NEXT:S3(trivial RISC0 receipt 链上 LAND + 成本 probe)→ S4(结算 guest 设计)。**优先级**:经济层 fraud-proof 可能仍高于 ZK(不等 6.30);Track C 时间窗=mainnet Toccata 6.30。
 
 ---
 
@@ -168,6 +170,17 @@ owner=J2(settle 管线+deadline-cap,查 309 泄漏)+ J1(:3300 oracle 激活)+ KA
 - `broker-bot-manager` 崩溃帽 90min 崩 5 次→自禁到 Console 重启**无告警**。现 0 外部 broker 没暴露,broker 规模化前必加 bot 存活监控+告警。
 owner=KANet-UI(deploy+监控);reviewer/验=Bettor。
 
+### 死点3:/start 面板重设计(§11 对抗讨论·2026-06-25·进行中)
+- **设计初稿**:`docs/2026-06-25-tg-start-panel-redesign-draft.md`(Bettor 出稿,Owner 4 点+1 命令 catch)。改动:22行→6行,broker收益行,/wallet合并/balance+/receive,多语言。
+- **§11 对抗讨论 2026-06-25(已跑完第一轮,收敛方向)**:
+  - Q1 承重墙: /start 1行 custody 警告 OK ✓ + **❗ NWT BLOCKING: /wallet 合并 /receive 后=存款面,必须同时显 custody 警告 1 行**(KANet-UI v2 设计接受)。
+  - Q2 broker收益代价: onboardStatus~5ms/earnings~50ms,只 onboarded 才查,V1 无需 cache。✓
+  - Q3 多语言: web i18n 已有 zh/en/ar/he/fa,V1=框架+关键串+4-5非RTL,RTL第二阶段。✓
+  - Q4 简洁vs引导: 6行够,首次用户加→/help 1行。✓
+  - **Q5 收益真实性: ❗ NWT+J2 BLOCKING: `brokerEarningsByAddress` 必改查 `kaspa_tx_log.outputs_json` 找已 LAND fee output(fee 常是次级输出,to_address 列抓不到)。两具体缺口(J2): v06 fallback L241=maker_stake×pct 估算非实落(silent 杀)/跨节点 L221 BROKEN(:3200 本地表,:3300 broker market 不 sync→假0)。V1 改读链=同解真实性+跨节点。诚实标"本节点口径"。**
+- ⬜ Bettor 收敛执行方案 → Owner 终裁 → KANet-UI 落码(死点1 一起合并到 bshard-m3-deploy)。
+- 实现总计: Q2 broker收益改链~2.5h / Q3 /lang框架~4h / Q4 简洁+/wallet合并~2.5h。总<1天。
+
 ---
 
 ## 🔴 线 8:持续迭代机制 — 根治"改了又坏"(Owner 钦定·2026-06-24·下个 pass 头号 task)
@@ -211,7 +224,11 @@ owner=KANet-UI(deploy+监控);reviewer/验=Bettor。
   - ✅ **lint rule `R-SHARD-BLIND` warn-mode** `scripts/lint-kanet.mjs` — 扫 `pool_bettor_sides.*WHERE.*market_id =` 在非 shard-allocator/非 helper 文件 → 42 命中 ⚠ WARN(非 block commit),escape hatch `// lint-allow-shard-blind: <reason>`,`.md` 文件排除。
   - ✅ **ANTI-PATTERNS.md 规则 50** — Wrong/Right/Why/前科/Lint守 全记。
   - ✅ **regression test** `test-framework/cases/predictions/pool/shard_blind_query_regression.test.mjs` — 5 步全 PASS: SQL syntax checks × 2 + cross>=bare invariant + COUNT violation=0 + bshard-if-exists check。
-- ⬜ **STEP 2 clear-headed pass(Bettor 指令:money-adjacent 非夜赶)**:10 🔴 shard-blind 迁移,尤其 L2727/2732 bettor-refund-claim → `getSideByBettorPk/getSideById` + Bettor 链验 bettor count 回归。
+- ⬜ **STEP 2 clear-headed pass(Bettor 指令:money-adjacent 非夜赶)**:10 🔴 shard-blind 迁移(9 个,见下)。**#33/#34 L2727/2732 bettor-refund-claim = 🚨 已修正裁决(J1 红队 2026-06-25,Bettor 自认错,KANet-UI/J2 co-verify)**:
+  - **不做 shard-aware 迁移**。404 是安全网(bshard side 在 shard_market_id 下,logical 查不到=正确拒绝)。
+  - bshard 退款是独立合约(PoolShard_fold refund_draw / pool-refund-builder.mjs),≠ 该端点的 standalone PoolSide refund。shard-aware 化=拆第一安全网,fail-safe 变 fail-dangerous。
+  - 正确修=显式 bshard detect + 返回明确错误("bshard 走 bshard 退款路") + 双 fixture test(bshard side 打此端点→必 SAFE 拒绝)。
+  - 剩余 9 🔴 迁移目标: detail/positions/sides_merkle/audit 等(非 bettor-refund-claim) + Bettor 链验 bettor count 回归。
 
 ### NEXT(下个清醒 pass·非夜赶)
 ```
