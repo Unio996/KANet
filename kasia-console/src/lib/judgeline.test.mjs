@@ -1,6 +1,6 @@
 // D-L1 judgeLine 确定性单元测试 (J1, 2026-06-19). 跑: node kasia-console/src/lib/judgeline.test.mjs
 // 守: 纯函数同输入→同输出(byte-equal 复算)/abstain 分支/整数定点边界/op 全覆盖/各 metric case。
-import { judgeLine, __JUDGELINE_INPUT_FIELDS__ } from './judgeline.mjs';
+import { judgeLine, validateResolutionPredicate, buildResolutionPredicate, __JUDGELINE_INPUT_FIELDS__ } from './judgeline.mjs';
 
 let pass = 0, fail = 0;
 function eq(got, want, name) {
@@ -72,6 +72,25 @@ eq(judgeLine({ metric: 'margin', op: '>=', operand: -65, scale: 1, subject: 'DAL
   eq(stable, true, '确定性: 1000次复算同verdict');
   eq(first, 'YES', '确定性 case verdict=YES');
 }
+
+// ── validateResolutionPredicate 半线铁律 (护栏6 · NWT FINDING-1 SEAM 单源折入 validate, 2026-06-27) ──
+// 整数线 (operand 为 10^scale 整数倍) 的 margin/total/score → 净胜/总分/得分可恰好==线 = push → 二元 YES/NO 池
+// 无 void/refund verdict = stranded → 建市 prevet 必拒。半线 (x.5) 必过 (不误杀)。winner 无线 → 不受约束。
+// 单源点: create-v07 (建市 chokepoint) + buildResolutionPredicate (emit) 全经此 → 任何路径整数线必拒。
+const vv = (p) => validateResolutionPredicate(p).valid;
+eq(vv({ metric: 'margin', op: '>', operand: 5, scale: 1, subject: 'BRA' }), true, 'margin 半线 -0.5(op5 sc1) valid');
+eq(vv({ metric: 'margin', op: '>', operand: 15, scale: 1, subject: 'BRA' }), true, 'margin 半线 -1.5(op15 sc1) valid');
+eq(vv({ metric: 'total', op: '>', operand: 25, scale: 1 }), true, 'total 半线 2.5(op25 sc1) valid');
+eq(vv({ metric: 'total', op: '>', operand: 405, scale: 1 }), true, 'total 半线 40.5(op405 sc1) valid (回归: 不误杀)');
+eq(vv({ metric: 'margin', op: '>', operand: 20, scale: 1, subject: 'BRA' }), false, 'margin 整数线 2.0(op20 sc1) REJECT (push)');
+eq(vv({ metric: 'margin', op: '>', operand: 3, scale: 0, subject: 'BRA' }), false, 'margin 整数线 3(op3 sc0) REJECT');
+eq(vv({ metric: 'total', op: '>', operand: 200, scale: 2 }), false, 'total 整数线 2.00(op200 sc2) REJECT');
+eq(vv({ metric: 'score', op: '>', operand: 10, scale: 1, subject: 'WAS' }), false, 'score 整数线 1.0(op10 sc1) REJECT');
+eq(vv({ metric: 'winner', op: '==', operand: 'WAS' }), true, 'winner 无线 valid (不受半线约束)');
+// buildResolutionPredicate 经 validate 自动受保护 (单源点) — 整数线在 emit 侧也拒
+eq(buildResolutionPredicate({ kind: 'spread', line: '-0.5', subject: 'BRA' }).valid, true, 'build spread -0.5 valid (半线)');
+eq(buildResolutionPredicate({ kind: 'spread', line: '-3', subject: 'BRA' }).valid, false, 'build spread -3 INVALID (整数线经 validate 拒)');
+eq(buildResolutionPredicate({ kind: 'total', line: '2' }).valid, false, 'build total 2 INVALID (整数线)');
 
 // ── 输入集 invariant 导出(供 NWT field_hash 集对齐) ──
 eq(JSON.stringify(__JUDGELINE_INPUT_FIELDS__),

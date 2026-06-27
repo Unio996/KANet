@@ -135,7 +135,18 @@ export function validateResolutionPredicate(predicate) {
   if (!NUM_OPS.has(op)) return { valid: false, reason: `${metric} metric 的 op 必须 ∈ {${[...NUM_OPS].join(',')}}, got ${JSON.stringify(op)}` };
   if (!isInt(operand)) return { valid: false, reason: 'operand 必须是整数(定点 ×10^scale, 如线 3.5→operand:35 scale:1); 禁浮点(跨平台不确定)' };
   const scale = predicate.scale === undefined ? 0 : predicate.scale;
-  if (pow10(scale) === null) return { valid: false, reason: 'scale 必须是整数 0..6' };
+  const mul = pow10(scale);
+  if (mul === null) return { valid: false, reason: 'scale 必须是整数 0..6' };
+
+  // 护栏6 半线铁律 — 单源 (J1 settle-gate 压测实证 + NWT FINDING-1 SEAM 折入 validate, 2026-06-27,
+  // judgeline.mjs owner J1 拍定: 折进 validateResolutionPredicate 单函数, create-v07 调它一次 = shape+半线).
+  // line-bearing 数值 metric (margin/total/score) 若是整数线 (operand 为 10^scale 整数倍) → 比分是整数 →
+  // 净胜/总分/得分可恰好 == 线 = push。二元 YES/NO 池无 void/refund verdict → judgeLine 判 NO = 该退款一方
+  // 判输 = un-settleable/stranded。∴ 只允半线 (x.5: operand % 10^scale !== 0)。winner 无线, 上面已 return 不到此。
+  // 单源点: create-v07 (建市 chokepoint) + buildResolutionPredicate (emit) 全经此 validate → 任何路径整数线必拒。
+  if (operand % mul === 0) {
+    return { valid: false, reason: `${metric} 是整数线 (operand ${operand} 为 10^${scale} 整数倍) → push 可能 (净胜/总分/得分可恰好==线), 二元池无 void verdict = stranded。只允半线 (护栏6, J1 settle-gate)` };
+  }
 
   if (metric === 'total') {
     if (predicate.subject !== undefined && predicate.subject !== null) return { valid: false, reason: 'total metric 不应有 subject(它合两队总分)' };
