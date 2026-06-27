@@ -99,27 +99,43 @@ export async function splitUtxosRelay(targetCount = 3, opts = {}) {
     if (splitCount <= 1) return { ok: false, reason: 'balance_too_low_for_kip9_split' };
     const feeReserve = BigInt(Math.max(500_000, splitCount * 200_000));
     const perOutput = (totalBalance - feeReserve) / BigInt(splitCount);
-    const outputs = [];
-    for (let i = 0; i < splitCount - 1; i++) {
-      outputs.push(new PaymentOutput(new Address(address), perOutput));
+    // try/catch retry: Generator 从碎片 UTXO 集挑最少输入时找零可能极小 → KIP-9 "Storage mass exceeds
+    // maximum" 在 submit 才抛。perOutput 预检不能覆盖找零大小，需在 broadcast 失败后减 splitCount 重试。
+    let lastTxId = '', fee = '0';
+    while (splitCount > 1) {
+      const fr = BigInt(Math.max(500_000, splitCount * 200_000));
+      const po = (totalBalance - fr) / BigInt(splitCount);
+      if (po < MIN_OUTPUT_SOMPI) { splitCount--; continue; }
+
+      const outputs = [];
+      for (let i = 0; i < splitCount - 1; i++) {
+        outputs.push(new PaymentOutput(new Address(address), po));
+      }
+      const generator = new Generator({
+        entries, outputs, priorityFee: 500_000n,
+        changeAddress: new Address(address), networkId,
+      });
+
+      try {
+        let pending = null;
+        lastTxId = '';
+        while ((pending = await generator.next())) {
+          await pending.sign([wallet.getPrivateKey()]);
+          lastTxId = await pending.submit(rpc);
+        }
+        fee = sompiToKaspaString(generator.summary().fees).toString();
+        break; // success
+      } catch (e) {
+        const errMsg = String(e?.message ?? e ?? '');
+        if (errMsg.toLowerCase().includes('storage mass')) {
+          splitCount--;
+          continue; // retry with fewer outputs — kaspa-wasm可能抛string非Error
+        }
+        throw e; // other error — propagate
+      }
     }
 
-    const generator = new Generator({
-      entries,
-      outputs,
-      priorityFee: 500_000n,
-      changeAddress: new Address(address),
-      networkId,
-    });
-
-    let pending, lastTxId = '';
-    while ((pending = await generator.next())) {
-      await pending.sign([wallet.getPrivateKey()]);
-      lastTxId = await pending.submit(rpc);
-    }
-
-    if (!lastTxId) return { ok: false, reason: 'no_tx_produced' };
-    const fee = sompiToKaspaString(generator.summary().fees).toString();
+    if (!lastTxId) return { ok: false, reason: splitCount <= 1 ? 'balance_too_low_for_kip9_split' : 'no_tx_produced' };
 
     // Mark every consumed UTXO pending so the next chunk's sendKaspa (after we release the lock) won't
     // reselect one this rebalance just spent before RPC reflects it (mirrors transaction.mjs L214).
