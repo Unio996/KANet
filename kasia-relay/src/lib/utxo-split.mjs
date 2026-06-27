@@ -86,9 +86,10 @@ export async function splitUtxosRelay(targetCount = 3, opts = {}) {
     // → 3-split TX mass ~4500 → required fee ~450000 sompi. Hardcoded 5000n way under floor → "not standard" reject.
     // Fix: feeReserve floor = max(500k, N × 200k) covers structural overhead + per-output mass.
     // priorityFee floor 500_000n same pattern as transaction.mjs iter 4 (= bce1916).
-    // KIP-9 floor (mirrors consolidateUtxosRelay CHANGE_FLOOR): each output ≥ 0.5 KAS to stay above
-    // KIP-9 storage-mass minimum. tiny perOutput (< 0.5 KAS) blows storage mass → "Storage mass exceeds
-    // maximum" at broadcast. Reduce splitCount until perOutput is viable.
+    // KIP-9 floor: each explicit output ≥ 0.5 KAS to stay above KIP-9 storage-mass minimum.
+    // Note: consolidateUtxosRelay's CHANGE_FLOOR=5 KAS is for the change output (different purpose/size).
+    // tiny perOutput (< 0.5 KAS) blows storage mass → "Storage mass exceeds maximum" at broadcast.
+    // Reduce splitCount until perOutput is viable.
     const MIN_OUTPUT_SOMPI = 50_000_000n; // 0.5 KAS
     while (splitCount > 1) {
       const fr = BigInt(Math.max(500_000, splitCount * 200_000));

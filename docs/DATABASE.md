@@ -771,6 +771,9 @@ CEX 交易日志。v51 新增 `exchange` 列记录交易所归属（旧记录为
 ### broker_onboarding（v173, 0 条）
 玩家→轻路 broker 自助 onboarding（Owner 钦定 2026-06-22, 骨架）。**铁律=地址制**：`broker_address`（UNIQUE）是 broker 身份，**非 relay_id**（玩家当玩家时绑的地址转 broker 不变）。字段：`broker_address` / `bot_token_encrypted`（Telegram bot token，crypto.encrypt aes-256-gcm 加密落库，**任何 GET 都不回**）/ `bot_username` / `status`(pending/approved) / `note` / `created_at` / `updated_at`。审批门复用 `identities.trust_level`（Owner 批 trust=recommended/owner → 派生 approved）。写入方 `POST /api/kanet-broker/onboard`；读取方 `GET /api/kanet-broker/onboard/status|list` + `broker-home.eta` onboarding 卡。多-bot tg-manager（托管各 broker token 同步呈现市场）=下一步。
 
+### escrow_states（v175, 0 条）
+Silverscript P2SH 三方托管合约状态表（2026-06-27）。表从 v175 建立；对应路由 `src/api/escrow.js` 早于表存在（v51 注释），build 后长期死路由直到此次复活。**⚠ 建表同时活化了资金操作路由，create/lock/execute 三端点挂 `verifyIngestRequest` 鉴权**。字段：`id`（UUID PK）/ `offer_id`（外键关联 exchange_offers，可 NULL）/ `initiator_relay_id`（发起方 relay_id）/ `buyer_address` / `seller_address` / `arbiter_address`（三方 Kaspa 地址）/ `p2sh_address`（合约地址，relay IPC create_escrow 返回）/ `redeem_script_hex`（赎回脚本，relay 编译结果）/ `amount_sompi`（TEXT，锁定金额 sompi）/ `deadline`（INTEGER，CLTV DAA score，NULL=无超时）/ `status`（TEXT: created/locked/released/refunded/disputed）/ `lock_txid`（锁币 TX）/ `unlock_txid`（解锁 TX）/ `created_at` / `updated_at`。写入方 `POST /api/escrow/create|lock|execute`（均需 ingest-secret）；读取方 `GET /api/escrow/list`（只读，无鉴权）。Relay IPC 依赖：`create_escrow` / `lock_escrow` / `execute_escrow`（白名单需确认）。
+
 ---
 
 ## 索引规范
@@ -787,12 +790,14 @@ CEX 交易日志。v51 新增 `exchange` 列记录交易所归属（旧记录为
 3. 改字段：SQLite 不支持直接改，需建新表→迁移→删旧表
 4. 新表：migrate.js 新版本，加 `IF NOT EXISTS` 保护
 
-**当前最新版本：v157（r281 私钥型 relay — relay_nodes 加 privkey_encrypted + privkey_hint）**
+**当前最新版本：v175（2026-06-27 escrow_states 新表）**
 
 > 注：v125–v156 尚未在本表逐条回填（r281 scope 外）；新增 migration 接 v157 之后。
 
 ## 版本历史（近期）
 
+- **v175 (2026-06-27 escrow_states 新表)**: `escrow_states` 新表（Silverscript P2SH 三方托管合约，15 列）。路由 escrow.js create/lock/execute 挂 verifyIngestRequest 鉴权。见「escrow_states」节。
+- **v174 (2026-06-27 tg custodial wallet)**: `tg_custodial_wallets` 新表（TG 托管钱包，私钥加密存储）。见 tg-wallet 相关节。
 - **v173 (2026-06-22 玩家→轻路 broker onboarding 骨架)**: `broker_onboarding` 新表（地址制自助申请，bot_token 加密落库，审批门复用 identities.trust）。Owner 钦定，KANet-UI task#4 骨架（存+审批）。见上「broker_onboarding」节 + `src/api/kanet-broker.js` onboard 端点 + `broker-home.eta`。
 - **v172 (2026-06-21 bshard 生产 register wiring (b))**: `market_shards` 新加 `current_leaf_outpoint` (txid:idx 当前 ShardLeaf 续约 UTXO) + `current_leaf_state` (JSON count/local_yes/local_no/pool_value)。(A) 自包含模型 ShardLeaf covenant 每 register 续约地址变（count 烤进 state），buildRegisterCommand 下一笔 register 要当前续约 UTXO + state 重算 redeem（spliceLeafState byte-equal，不存全 redeem_hex）。每笔 register landed 后 `onBettorRegistered` 原子更新。见 `docs/2026-06-21-bshard-production-register-wiring-design.md` (b) + `src/lib/shard-allocator.mjs`。
 - **v171 (2026-06-15 bshard 无限押注)**: `market_shards` 新表（滚动分片注册表：logical_market_id ↔ shard_market_id 映射 + UNIQUE(logical,index) 注册竞态锁 + 封片状态）。Owner #1 directive 分片+自取。见「预测市场分片层」节 + `src/lib/shard-allocator.mjs`。

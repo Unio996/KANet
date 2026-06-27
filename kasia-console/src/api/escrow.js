@@ -14,7 +14,10 @@
 import { sqlite } from '../db/client.js';
 import { sendCommandAsync } from '../services/relay-manager.js';
 import { getConfig } from '../data/settings/configs.js';
+import { verifyIngestRequest } from '../services/ingest-auth.js';
 import { randomUUID } from 'crypto';
+
+const AUTH = { preHandler: [async (req, rep) => { await verifyIngestRequest(req, rep); }] };
 
 const VALID_STATUSES = ['created', 'locked', 'released', 'refunded', 'disputed'];
 const BRANCH_NAMES = { 0: 'released', 1: 'refunded', 2: 'released' }; // arbitrate → released
@@ -53,7 +56,7 @@ export async function registerEscrowRoutes(fastify) {
   });
 
   // ── POST /api/escrow/create ───────────────────────────────────
-  fastify.post('/api/escrow/create', async (request, reply) => {
+  fastify.post('/api/escrow/create', AUTH, async (request, reply) => {
     const {
       relayNodeId, buyerPk32, sellerPk32, arbiterPk32,
       buyerAddress, sellerAddress, arbiterAddress,
@@ -102,7 +105,7 @@ export async function registerEscrowRoutes(fastify) {
   });
 
   // ── POST /api/escrow/lock ─────────────────────────────────────
-  fastify.post('/api/escrow/lock', async (request, reply) => {
+  fastify.post('/api/escrow/lock', AUTH, async (request, reply) => {
     const { escrowId, relayNodeId } = request.body || {};
     if (!escrowId) return reply.code(400).send({ error: 'escrowId is required' });
     if (!relayNodeId) return reply.code(400).send({ error: 'relayNodeId is required' });
@@ -132,7 +135,7 @@ export async function registerEscrowRoutes(fastify) {
   });
 
   // ── POST /api/escrow/execute ──────────────────────────────────
-  fastify.post('/api/escrow/execute', async (request, reply) => {
+  fastify.post('/api/escrow/execute', AUTH, async (request, reply) => {
     const { escrowId, relayNodeId, branch, toAddress } = request.body || {};
     if (!escrowId) return reply.code(400).send({ error: 'escrowId is required' });
     if (!relayNodeId) return reply.code(400).send({ error: 'relayNodeId is required' });
