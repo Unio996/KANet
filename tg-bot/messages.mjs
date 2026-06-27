@@ -82,6 +82,32 @@ export function brokerEarnings(data, nodeIncome = null) {
   return lines.join('\n');
 }
 
+// /hot 热门市场 (Owner 热需求 2026-06-27): T5 trending top-N 格式化.
+// markets = trending[]. 返 {text, keyboard} — keyboard = CopyText 深链按钮.
+export function hotMarkets(markets, botUsername) {
+  if (!markets || !markets.length) {
+    return { text: '暂无热门市场 (市场创建中, 稍后再试)。', keyboard: null };
+  }
+  function parseTitle(raw) {
+    try { const p = JSON.parse(raw); return p.title || raw; } catch { return raw; }
+  }
+  const CAT = { sports: '🏆', politics: '🗳', other: '🌐', test: '🧪' };
+  const lines = ['🔥 热门市场 Top ' + markets.length + ' · 活跃度+资金加权', ''];
+  const buttons = [];
+  markets.forEach((m, i) => {
+    const title = parseTitle(m.title);
+    const short = title.length > 40 ? title.slice(0, 38) + '…' : title;
+    const cat = CAT[m.category] || '🌐';
+    const yesOdds = m.yes_implied_prob != null ? Math.round(m.yes_implied_prob * 100) + '%是' : '';
+    lines.push(`${i + 1}. ${cat} ${short}`);
+    lines.push(`   💰${(m.total_pool_kas || 0).toFixed(0)} KAS · 👥${m.bettor_count || 0}人${yesOdds ? ' · ' + yesOdds : ''}`);
+    const shareUrl = `https://t.me/${botUsername || 'KANET_Broker_bot'}?start=${m.id}`;
+    buttons.push([{ text: `🎯 押 #${i + 1} ${short.slice(0, 20)}`, copy_text: { text: shareUrl } }]);
+  });
+  lines.push('', '点按钮复制深链 → 转给朋友/自己打开直接押注');
+  return { text: lines.join('\n'), keyboard: { inline_keyboard: buttons } };
+}
+
 // 兑换 flow — show broker X's KAS receiving address; the USER pays on-chain from their own wallet.
 // bot 0 execute: 只显地址 + 引导 + deep-link。broker-intake-watcher 在链上检测到付款后继续。
 export function swapFlow(broker) {

@@ -68,6 +68,11 @@ export function poolMarkets({ status, category, limit = 50, offset = 0, broker_r
 export function poolMarket(id) {
   return req('GET', `/api/pool/market/${encodeURIComponent(id)}`);
 }
+// T5 trending (Owner 热需求 2026-06-27): activity+commitment 加权 top-N 活跃市场.
+// 返 [{id,title,total_pool_kas,bettor_count,...}], 已过滤 open+deadline>1h+pool≥阈值.
+export function trendingMarkets(limit = 5) {
+  return req('GET', `/api/pool/markets/trending?limit=${limit}`);
+}
 
 // S-C stage4-5 — POOL external bettor registration (design LOCKED Bettor r263; J1 building backend).
 // 0-custody (J1 S5): bot NEVER moves funds — prep computes the deterministic side-P2SH so the bot can
