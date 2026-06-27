@@ -77,7 +77,7 @@ export function brokerEarnings(data, nodeIncome = null) {
     lines.push(`  累计: ${nodeIncome.total_node_income_kas?.toFixed(8) || '0'} KAS (${nodeIncome.total_settled_markets} 个市场, 链验)`);
     if ((nodeIncome.pending_tx_index_count || 0) > 0)
       lines.push(`  ⏳ ${nodeIncome.pending_tx_index_count} 笔待索引 (稍后刷新)`);
-    lines.push('  注: v0.6 按签名 pk / v0.7 按收款地址 pk 分别统计, 两者可能不同 pk。');
+    lines.push('  注: 均用收款地址 pk 查询; v0.6 用独立签名 key 的极少数情况下该部分可能漏统计。');
   }
   return lines.join('\n');
 }

@@ -143,7 +143,7 @@
             <h2 class="rl-display text-base text-ink-800">Node 委员收益</h2>
           </div>
           <div class="px-6 py-5 space-y-4">
-            <p class="text-xs text-ink-400">本机各 relay 作为 oracle 委员参与市场结算所得 fee 分成（链验，parse outputs_json）。注：v0.6 按签名 pk、v0.7 按收款地址 pk 统计，同一 relay 两者可能不同，各 pk 独立可查 /api/node/income/:pk。</p>
+            <p class="text-xs text-ink-400">本机各 relay 作为 oracle 委员参与市场结算所得 fee 分成（链验，parse outputs_json）。均用收款地址 pk 查询；v0.6 使用独立签名 key 的极少数情况下该部分可能漏统计（V2 缺口：relay.ecdsa_pubkey_xonly 统一映射）。</p>
             <span x-show="loading" class="text-xs text-gray-400">加载中…</span>
             <span x-show="error" class="text-xs text-red-500" x-text="'错误: ' + error"></span>
             <template x-if="!loading && relays.length === 0 && !error">
