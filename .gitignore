@@ -20,6 +20,10 @@ _relay_env.txt
 # 确需新增 `_` 前缀的正经文件 → `git add -f <file>`。
 _*
 
+# === scratch/ = 一次性脚本指定家（2026-06-27 Owner 钦定·防根目录堆爆）===
+# 所有一次性诊断/测试脚本写 scratch/，不写根目录（根目录只放 launcher/常驻工具）。详见 CLAUDE.md。
+scratch/
+
 # === 运行时 dump 目录（dump-launch.mjs / 进程日志，含明文密钥）===
 logs/
 

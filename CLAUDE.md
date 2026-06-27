@@ -60,6 +60,8 @@
 
 跳步 SOP = 重复犯错的根因 (Owner 2026-04-26 元问题). NWT 接位漏 ANTI-PATTERNS.md → 漏 QWEN Rule 11 → broker LLM 60-120s timeout 全崩, 是负面教材.
 
+**临时脚本铁律 (Owner 2026-06-27 钦定·防根目录堆爆)**: 一次性诊断/测试/发送脚本 **写 `scratch/`**(gitignored, 用绝对路径如 `D:/kanet-tn12/kasia-console/data/console.db`), **绝不写根目录**。根目录只放 launcher (`_launch_*.mjs`) / 各 agent canonical send (`_<agent>_send.cjs`) / 常驻工具。历史教训: 各 agent 把 scratch 堆根目录 → 821 个临时文件堆爆 (2026-06-27 归档 815 个到 `scratch/_archive_root_20260627/`)。`.gitignore` 已 ignore `_*` + `scratch/`, 但 gitignore 防入库不防物理堆 → 必靠本约定写对目录。
+
 ## 核心原则（违反即退回）
 
 - **NO TX NO STATE CHANGE** — 链上行为铁律。广播/TX 没上链 = 什么都没发生，不准推进本地状态。try-catch 吞掉广播失败 = 乐观写入 = 致命 bug。详见 DEVELOPER-GUIDE "第零条 bis"

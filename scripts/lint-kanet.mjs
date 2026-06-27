@@ -82,6 +82,29 @@ function checkR_NULLIFIER_I64() {
   }
 }
 
+// ── R-SCRATCH-CLUTTER [WARN]: 临时脚本铁律 (Owner 2026-06-27 钦定·防根目录堆爆) ──
+// 一次性诊断/测试脚本写 scratch/ (gitignored, 绝对路径), 不堆仓库根目录. gitignore (`_*`) 防入库不防
+// 物理堆在文件浏览器 → whole-repo warn (每次 commit 跑 lint 都提醒). 历史: 821 临时文件堆爆 (归档 815).
+// keep-list = launcher / 各 agent canonical send (`_<agent>_send.cjs`) / 代码引用的常驻工具. 详见 CLAUDE.md.
+function checkScratchClutter() {
+  const KEEP = new Set([
+    '_bettor_send.cjs', '_bettor_verify.cjs', '_nwt_send.cjs', '_j1_send.cjs',
+    '_j2_send.cjs', '_kanetui_send.cjs', '_j2_ready.cjs',
+    '_launch_tg_bot.mjs', '_launch_broker_bot.mjs', '_launch_owner_bot.mjs',
+    '_autobet_config_parse.mjs', '_bettor_ticket_byteeq.mjs', '_fee_single_source.mjs',
+    '_j2tn_backfill_snapshot_v2.mjs', '_nwt_tn_autobet_loop.mjs',
+  ]);
+  let clutter;
+  try {
+    clutter = fs.readdirSync(ROOT).filter(f => /^_.*\.(cjs|mjs)$/.test(f) && !KEEP.has(f));
+  } catch { return; }
+  if (clutter.length > 0) {
+    warn('R-SCRATCH-CLUTTER',
+      `${clutter.length} 个临时脚本堆在仓库根目录 — 一次性脚本应写 scratch/ (gitignored, 绝对路径). 新增常驻工具→加进本 lint keep-list. 见 CLAUDE.md 临时脚本铁律. 例: ${clutter.slice(0, 5).join(', ')}`,
+      file(clutter[0]), 0);
+  }
+}
+
 // ── R9: Qwen LLM caller 必有 chat_template_kwargs.enable_thinking=false ──
 // 检测: fetch 调 /chat/completions 的 body 里没 chat_template_kwargs.enable_thinking=false
 // 排除: openai.com / api.anthropic.com (非 Qwen, 不需此 kwarg)
@@ -743,6 +766,7 @@ for (const fp of targets) {
 }
 checkR10();
 checkR_NULLIFIER_I64();
+checkScratchClutter();
 
 // ── 报告 ──
 // warnings first (non-blocking — WARN rules are migration checklists, not hard blockers)
