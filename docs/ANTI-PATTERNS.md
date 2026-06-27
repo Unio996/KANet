@@ -2652,6 +2652,22 @@ const shardSides = getSidesByShard(shardMarketId, db);
 
 SQL 原理: `OR market_id IN (SELECT shard_market_id FROM market_shards WHERE logical_market_id = ?)` 把所有分片 bettor 聚合进来。v06 和 bshard 市场互斥（一个市场只走一条路），OR 无重复。
 
+### ⚠ EXCEPTION — bettor-refund-claim 端点 (#33/#34) **不准** shard-aware 迁移 (J1 红队 2026-06-25, §11 裁决 Bettor 认错 + KANet-UI/J2 co-verify)
+
+`POST /api/pool/market/:id/bettor-refund-claim` (`pool.js`) 是上面列表里**唯一不能按"改用 getSidesByLogicalMarket"修的命中点**。原因:
+- bshard register-v07 bettor 在 `pool_bettor_sides` 里**没有独立可退的 side**: `recordBettor` (register-v07, ~L1157) 写 `side_p2sh` = **整片共享的 shard 池 P2SH**, `side_lock_tx` = leaf TX, `side_redeem_script_hex` = `''`(空)。stake 在 fold 聚合池里, 只能走 bshard 退款路 (`PoolShard_fold refund_draw` / `lib/pool-refund-builder.mjs`)。
+- 该端点跑的是 **standalone PoolSide refund** (entry 2/3, `type=pool_side_refund_cancelled_tx`) = 对 bshard **错误的合约**。
+- 把它 shard-aware 化 = 让 query **找到**那行 → 把一个 bshard bettor 的退款指向**共享 shard 聚合池 P2SH** = 一个 bettor 花整池资金 (money-path 灾难)。历史 logical-404 / 空-redeem-409 是**安全网**, 不是 bug。
+
+**正确修 = 显式 bshard detect → 明确拒绝** (不是 shard-aware query):
+```javascript
+const isBshard = sqlite.prepare(
+  'SELECT 1 FROM market_shards WHERE logical_market_id = ? OR shard_market_id = ? LIMIT 1'
+).get(marketId, marketId);
+if (isBshard) return reply.code(409).send({ ok:false, error:'bshard market: 走 fold 退款路...', refund_path:'bshard_fold' });
+```
+守: `test-framework/cases/predictions/pool/bettor_refund_bshard_guard.test.mjs` + `scripts/j1-refund-bshard-guard-test.mjs` (双 fixture: bshard→拒 / v0.5→放行)。**别把这条端点的 logical 查"顺手"迁成 cross-shard。**
+
 **逃生舱**: 确认是单-片已知 shardMarketId 操作 → 调 `getSidesByShard(shardId, db)` + 同行加注释 `// lint-allow-shard-blind: 单片操作, shardMarketId 已从 market_shards 取得`。
 
 ### Why
