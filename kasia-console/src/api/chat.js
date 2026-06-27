@@ -38,7 +38,8 @@ const COORD_CHANNELS = new Set(['dev-coord', 'dev-coord-testnet', 'kanet-arch', 
 const OPUS_RELAY_NAMES = new Set(['Martin', 'J2', 'J3', 'NWT', 'Opus', 'Qclaude', 'Bettor',
   'Bettor-tn', 'J2-tn', 'KANet-UI-tn', 'NWT-tn',
   'J1', 'J1-tn', 'J1tn',
-  'J1tn-Alice', 'J1tn-Bob', 'J1tn-Carol', 'J1tn-Dave']);  // Bettor r191 + r479 实名补全; KANet-UI r-j1fix: 300e10de 漏 J1 (我自补). J1 #41 实证他真 relay 名是 J1tn-Alice/Bob/Carol/Dave (committee oracle relay, 也是他频道 poster), exact match 不中裸 'J1tn' → 补 4 个委员实名 (J1 各形式仍留兼容)。
+  'J1tn-Alice', 'J1tn-Bob', 'J1tn-Carol', 'J1tn-Dave',
+  'new-user-tn']);  // Bettor r191 + r479 实名补全; KANet-UI r-j1fix: 300e10de 漏 J1 (我自补). J1 #41 实证他真 relay 名是 J1tn-Alice/Bob/Carol/Dave (committee oracle relay, 也是他频道 poster), exact match 不中裸 'J1tn' → 补 4 个委员实名 (J1 各形式仍留兼容)。
 
 // owner-in-dev-channel (2026-06-21, Owner 钦定): a relay whose ADDRESS is classified trust_level='owner'
 // (identities table) may post to COORD_CHANNELS even though its name is not in OPUS_RELAY_NAMES. Identity

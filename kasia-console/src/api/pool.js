@@ -8,7 +8,7 @@ import { sendCommandAsync, transferAndConfirm, isRelayAlive } from '../services/
 import { getWorkingRpc } from '../services/rpc-health.js';
 import { estimateStorageMass } from '../services/pool-market-settler.js';
 import { categorizeMarket } from '../lib/market-category.js';
-import { isStructuredSpec } from '../lib/spec-validation.js';
+import { isStructuredSpec, assertSpecPredicateValid } from '../lib/spec-validation.js';
 import { createHash, randomUUID } from 'node:crypto';
 
 // L4 (area-11): create-time invariants. Hardcoded mirrors of the settler constants;
@@ -435,6 +435,8 @@ export async function registerPoolRoutes(fastify) {
     // KANet-UI 2026-06-06 (Bettor ③ APPROVE r546): 创建端 spec 结构化强制 (= 配 bot 入口 filter 双层堵).
     try { _maybeDeriveSpecFromSourceKind(b); } catch (e) { return reply.code(400).send({ ok: false, error: `source_kind derive fail: ${e.message}` }); }
     if (!isStructuredSpec(b.resolution_rule_spec)) return reply.code(400).send({ ok: false, error: 'resolution_rule_spec must be JSON with non-empty title + resolution_criteria + data_source_canonical (= 可填可信源下拉 source_kind 自动 derive, 或自填 canonical URL)' });
+    // SEAM fix (NWT FINDING-1): 建市 chokepoint — spec 带 resolution_predicate 必过 validateResolutionPredicate (shape+护栏6 半线单源)。整数线/畸形 → 400, 不依赖 caller 走 buildSportsCard。
+    { const _pv = assertSpecPredicateValid(b.resolution_rule_spec); if (!_pv.valid) return reply.code(400).send({ ok: false, error: `resolution_predicate 非法 (建市拒, 防 un-settleable): ${_pv.reason}` }); }
     // 5/28 Owner 钦定: testnet 0 limits. Skip dynamic min spendable + softcap when KANET_TESTNET_NO_LIMITS=1.
     if (process.env.KANET_TESTNET_NO_LIMITS !== '1') {
       if (makerStakeKas > MAKER_STAKE_MAX_KAS) return reply.code(400).send({ ok: false, error: `maker_stake_kas must be <= ${MAKER_STAKE_MAX_KAS} KAS (v0.5 testnet per-market softcap, Bettor r444 + Owner钦定 SS-baked)` });
@@ -665,6 +667,8 @@ export async function registerPoolRoutes(fastify) {
     // KANet-UI 2026-06-06 (Bettor ③ APPROVE r546): 创建端 spec 结构化强制 (= 配 bot 入口 filter 双层堵).
     try { _maybeDeriveSpecFromSourceKind(b); } catch (e) { return reply.code(400).send({ ok: false, error: `source_kind derive fail: ${e.message}` }); }
     if (!isStructuredSpec(b.resolution_rule_spec)) return reply.code(400).send({ ok: false, error: 'resolution_rule_spec must be JSON with non-empty title + resolution_criteria + data_source_canonical (= 可填可信源下拉 source_kind 自动 derive, 或自填 canonical URL)' });
+    // SEAM fix (NWT FINDING-1): 建市 chokepoint — spec 带 resolution_predicate 必过 validateResolutionPredicate (shape+护栏6 半线单源)。整数线/畸形 → 400, 不依赖 caller 走 buildSportsCard。
+    { const _pv = assertSpecPredicateValid(b.resolution_rule_spec); if (!_pv.valid) return reply.code(400).send({ ok: false, error: `resolution_predicate 非法 (建市拒, 防 un-settleable): ${_pv.reason}` }); }
     if (process.env.KANET_TESTNET_NO_LIMITS !== '1') {
       if (makerStakeKas > MAKER_STAKE_MAX_KAS) return reply.code(400).send({ ok: false, error: `maker_stake_kas must be <= ${MAKER_STAKE_MAX_KAS} KAS` });
     }
@@ -976,6 +980,8 @@ export async function registerPoolRoutes(fastify) {
     // KANet-UI 2026-06-06 (Bettor ③ APPROVE r546): 创建端 spec 结构化强制 (= 配 bot 入口 filter 双层堵).
     try { _maybeDeriveSpecFromSourceKind(b); } catch (e) { return reply.code(400).send({ ok: false, error: `source_kind derive fail: ${e.message}` }); }
     if (!isStructuredSpec(b.resolution_rule_spec)) return reply.code(400).send({ ok: false, error: 'resolution_rule_spec must be JSON with non-empty title + resolution_criteria + data_source_canonical (= 可填可信源下拉 source_kind 自动 derive, 或自填 canonical URL)' });
+    // SEAM fix (NWT FINDING-1): 建市 chokepoint — spec 带 resolution_predicate 必过 validateResolutionPredicate (shape+护栏6 半线单源)。整数线/畸形 → 400, 不依赖 caller 走 buildSportsCard。
+    { const _pv = assertSpecPredicateValid(b.resolution_rule_spec); if (!_pv.valid) return reply.code(400).send({ ok: false, error: `resolution_predicate 非法 (建市拒, 防 un-settleable): ${_pv.reason}` }); }
     if (process.env.KANET_TESTNET_NO_LIMITS !== '1') {
       if (makerStakeKas > MAKER_STAKE_MAX_KAS) return reply.code(400).send({ ok: false, error: `maker_stake_kas must be <= ${MAKER_STAKE_MAX_KAS} KAS` });
     }

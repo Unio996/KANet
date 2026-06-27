@@ -20,26 +20,17 @@
 // abbr 单源: home_team/away_team/winner operand/spread subject 全过 normalizeAbbr (== ESPN extractor
 //   settle 时产的 abbr), 否则 judgeLine subject!=home/away → ABSTAIN (finding1 seam)。
 
-import { buildResolutionPredicate, parseLineToFixedPoint } from './judgeline.mjs';
+import { buildResolutionPredicate } from './judgeline.mjs';
 import { normalizeAbbr, findExtractor } from './oracle-evidence-extractors.mjs';
 
 // 足球 sport-aware 允许线 (护栏3)。半线 only (护栏6 由 assertNoPushLine 二次硬卡, 这里是 sanity 上界)。
 const SOCCER_SPREAD_LINES = new Set(['-0.5', '-1.5', '-2.5', '0.5', '1.5', '2.5']);
 const SOCCER_TOTAL_LINES = new Set(['1.5', '2.5', '3.5', '4.5']);
 
-// 护栏6 bright-line: 线 → 定点 → 若 operand 是整数倍 (operand % 10^scale === 0) = 整数线 → push 可能 → 拒。
-//   比分是整数 → margin/total 是整数 → 当线==整数时净胜/总分可恰好==线 = push = judgeLine 二元池无法表示。
-//   半线 (x.5) 时 2×operand 为奇 → 永不可能 net==line → 无 push。
-function assertNoPushLine(lineStr) {
-  const fp = parseLineToFixedPoint(lineStr);
-  if (!fp) return { ok: false, reason: `线 ${JSON.stringify(lineStr)} 非法定点格式 (需 [-]整数[.小数], 无 "+"/空格)` };
-  let p = 1;
-  for (let i = 0; i < fp.scale; i++) p *= 10;
-  if (fp.operand % p === 0) {
-    return { ok: false, reason: `线 ${JSON.stringify(lineStr)} 是整数线 → push 可能 (净胜/总分可恰好==线), 二元池无 void verdict = stranded。只造半线 (护栏6)` };
-  }
-  return { ok: true };
-}
+// 护栏6 半线 no-push: 单源已折入 judgeline.mjs validateResolutionPredicate (J1 owner 拍定, NWT FINDING-1 SEAM)。
+//   buildResolutionPredicate 内部已调 validate → 整数线 (operand % 10^scale === 0, 比分整数→净胜/总分可恰好==线=push,
+//   二元池无 void verdict = stranded) 自动返 {valid:false}。∴ 本构建器不再自带 assertNoPushLine
+//   (去重防漂移, 线8 机制哲学: 一类规则一处实现; create-v07 chokepoint 同走 validate, 任何路径整数线必拒)。
 
 /**
  * buildSportsCard — 纯函数: 一场赛事 descriptor → 校验过的完整盘组 (draft 定义, 不入库不碰链)。
@@ -121,9 +112,7 @@ export function buildSportsCard(d) {
     if (d.sport === 'soccer' && !SOCCER_SPREAD_LINES.has(lineStr)) {
       errors.push(`护栏3: 足球 spread 线 ${JSON.stringify(lineStr)} 不在允许集 {${[...SOCCER_SPREAD_LINES].join(',')}}`); continue;
     }
-    const np = assertNoPushLine(lineStr);
-    if (!np.ok) { errors.push(np.reason); continue; }
-    const r = buildResolutionPredicate({ kind: 'spread', line: lineStr, op: '>', subject: fav });
+    const r = buildResolutionPredicate({ kind: 'spread', line: lineStr, op: '>', subject: fav });  // 整数线由 validate(单源)在此内部拒
     if (!r.valid) { errors.push(`spread ${fav} ${lineStr}: ${r.reason}`); continue; }
     const favName = fav === home ? (d.home_name || home) : (d.away_name || away);
     const need = Math.abs(parseFloat(lineStr));
@@ -139,9 +128,7 @@ export function buildSportsCard(d) {
     if (d.sport === 'soccer' && !SOCCER_TOTAL_LINES.has(lineStr)) {
       errors.push(`护栏3: 足球 total 线 ${JSON.stringify(lineStr)} 不在允许集 {${[...SOCCER_TOTAL_LINES].join(',')}}`); continue;
     }
-    const np = assertNoPushLine(lineStr);
-    if (!np.ok) { errors.push(np.reason); continue; }
-    const r = buildResolutionPredicate({ kind: 'total', line: lineStr, op: '>' });
+    const r = buildResolutionPredicate({ kind: 'total', line: lineStr, op: '>' });  // 整数线由 validate(单源)在此内部拒
     if (!r.valid) { errors.push(`total ${lineStr}: ${r.reason}`); continue; }
     pushMarket(`total_o_${lineStr}`, 'total', r.predicate,
       `${d.league_label || ''} ${matchTitle} — Over ${lineStr} goals`.trim(),
