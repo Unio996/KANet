@@ -5164,5 +5164,29 @@ export function runMigrations() {
     console.log('[migrate] v174: tg_custodial_wallets table (电报 DM 托管钱包, 助记词 aes-256-gcm 加密 fail-loud, display-once 无明文回取, Owner 钦定).');
   }
 
+  // v175: escrow_states — Silverscript P2SH 合约状态表 (路由 escrow.js 早存在但表从未建立).
+  {
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS escrow_states (
+        id                  TEXT PRIMARY KEY,
+        offer_id            TEXT,
+        initiator_relay_id  TEXT NOT NULL,
+        buyer_address       TEXT NOT NULL,
+        seller_address      TEXT NOT NULL,
+        arbiter_address     TEXT NOT NULL,
+        p2sh_address        TEXT NOT NULL,
+        redeem_script_hex   TEXT NOT NULL,
+        amount_sompi        TEXT NOT NULL,
+        deadline            INTEGER,
+        status              TEXT NOT NULL DEFAULT 'created',
+        lock_txid           TEXT,
+        unlock_txid         TEXT,
+        created_at          TEXT NOT NULL,
+        updated_at          TEXT NOT NULL
+      )
+    `);
+    console.log('[migrate] v175: escrow_states table (Silverscript P2SH escrow — buyer/seller/arbiter 三方合约, lock/execute via relay IPC).');
+  }
+
   console.log('[migrate] DB migrations complete.');
 }

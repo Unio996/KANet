@@ -27,7 +27,7 @@ export async function fetchJson(url, options = {}) {
     });
     if (!res.ok) {
       const errBody = await res.text().catch(() => '');
-      console.log(`[fetchJson] ${res.status} from ${url}: ${errBody.slice(0, 200)}`);
+      if (res.status !== 404) console.log(`[fetchJson] ${res.status} from ${url}: ${errBody.slice(0, 200)}`);
       throw new Error(`HTTP ${res.status} ${res.statusText}: ${errBody.slice(0, 100)}`);
     }
     return await res.json();
