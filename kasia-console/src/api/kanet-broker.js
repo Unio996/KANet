@@ -221,39 +221,68 @@ export async function registerKanetBrokerRoutes(fastify) {
       FROM pool_markets WHERE LOWER(broker_pk) = ?
     `).all(brokerPk);
 
+    // §11 Phase 2 (J2 2026-06-27, Bettor 钦定 "earnings 必读链"): realized = 只数【链上 landed】的 fee,
+    //   非 DB 记账/估算 (这程证 DB status 三次骗人; 见 reference-refund-verify-chain-not-db-claim-field)。
+    //   逐笔链验: fee_payout txid 必在 kaspa_tx_log (= landed) + parse 它的 outputs_json 取真给 broker
+    //   address 的额 (多输出 aware — broker fee 常是次级输出, to_address 列抓不到, NWT 红队 + 记忆
+    //   reference-verify-covenant-multiout-distribution-via-outputs-json)。⚠ 不能 sum 地址全 receipts:
+    //   broker 地址非 fee-专用 (2b1ecd04 共享 key 收 102M KAS 无关流量), 地址-sum 灾难性 over-count。
+    //   ⚠ 跨节点诚实标: kaspa_tx_log + pool_markets 都是本节点索引 → 他节点产出市场 fee 不可见 (cross_node_note);
+    //   真跨节点需 V2 per-recipient 链 fee-index。杀 maker_stake×pct 估算 (绝不显估算为"已赚")。
+    const brokerAddr = String(address);
+    const txLog = sqlite.prepare('SELECT outputs_json FROM kaspa_tx_log WHERE tx_id = ?');
+    const landedFeeKas = (txid) => {   // null = 未在链索引 = 未确认 landed
+      if (!txid) return null;
+      const lg = txLog.get(txid);
+      if (!lg) return null;
+      let outs = []; try { outs = JSON.parse(lg.outputs_json || '[]'); } catch { return null; }
+      const sompi = outs.filter((o) => (o.script_public_key_address || o.address) === brokerAddr)
+        .reduce((s, o) => s + Number(o.amount ?? o.amount_sompi ?? 0), 0);
+      return sompi / 1e8;
+    };
+
     let realizedKas = 0, pendingKas = 0, refundedKas = 0, realizedN = 0, pendingN = 0, refundedN = 0;
+    let anyUnverifiedClaimed = false;
     const byMarket = [];
     for (const r of poolRows) {
       let meta = null; try { meta = r.metadata ? JSON.parse(r.metadata) : null; } catch {}
-      // KANet-UI 15:45 gap fix: v0.7 bshard 市场走 close_attest → settle_txid=NULL, fee 在 metadata.settle_evidence
-      //   (chain_settled + fee_payouts[role=broker].amount_kas, 链上实分发)。chain-truth 胜过 stale DB status/refund_txid
-      //   (cron 翻 refunding 前链上已 settle, 见 x4kpq status=refunded 但 chain_settled=true)。relay-keyed v06 路不变。
       const se = meta?.settle_evidence;
       const bshardSettled = se && se.chain_settled === true;
-      let feeKas, settleTxid = r.settle_txid || null;
+      let claimedKas = 0, landedKas = 0, verified = false, settleTxid = null;
       if (bshardSettled) {
         const bfees = (se.fee_payouts || []).filter((p) => p && p.role === 'broker');
-        feeKas = bfees.reduce((s, p) => s + (parseFloat(p.amount_kas) || 0), 0);
         settleTxid = se.close_txid || (bfees[0] && bfees[0].txid) || null;
-      } else {
-        let actualFeeSompi = null;   // legacy v06: 实落 phase2_broker_fee_sompi / 回退 maker_stake×pct 估算
-        if (r.settle_txid && meta?.phase2_broker_fee_sompi != null) { try { actualFeeSompi = BigInt(meta.phase2_broker_fee_sompi); } catch {} }
-        const feeSompi = actualFeeSompi != null ? actualFeeSompi : (BigInt(r.maker_stake_amount || 0) * BigInt(r.broker_fee_pct || 0)) / 10000n;
-        feeKas = Number(feeSompi) / 1e8;
+        for (const f of bfees) {
+          claimedKas += parseFloat(f.amount_kas) || 0;
+          const lf = landedFeeKas(f.txid);     // 逐笔链验 + 真额 (多输出)
+          if (lf != null) { landedKas += lf; verified = true; }
+        }
+      } else if (r.settle_txid && meta?.phase2_broker_fee_sompi != null) {
+        settleTxid = r.settle_txid;            // v06: 验 settle tx landed + 取 broker output 真额
+        try { claimedKas = Number(BigInt(meta.phase2_broker_fee_sompi)) / 1e8; } catch {}
+        const lf = landedFeeKas(r.settle_txid);
+        if (lf != null) { landedKas = lf; verified = true; }
       }
-      const isRealized = !!r.settle_txid || bshardSettled;
-      const isRefunded = !isRealized && !!r.refund_txid;   // chain-truth: bshardSettled 胜过 refund_txid (stale)
-      const status = isRealized ? 'settled' : (isRefunded ? 'refunded' : r.protocol_status);
-      if (isRealized) { realizedKas += feeKas; realizedN += 1; }
-      else if (isRefunded) { refundedKas += feeKas; refundedN += 1; }
-      else { pendingKas += feeKas; pendingN += 1; }
-      byMarket.push({ id: r.id, fee_kas: feeKas.toFixed(8), status, settle_txid: isRealized ? settleTxid : null, settled_at: isRealized ? r.updated_at : null });
+      const isRefunded = !!r.refund_txid && !bshardSettled && !r.settle_txid;
+      if (verified && landedKas > 0) {
+        realizedKas += landedKas; realizedN += 1;
+        byMarket.push({ id: r.id, fee_kas: landedKas.toFixed(8), status: 'settled', chain_verified: true, settle_txid: settleTxid, settled_at: r.updated_at });
+      } else if (isRefunded) {
+        refundedN += 1;
+        byMarket.push({ id: r.id, fee_kas: '0.00000000', status: 'refunded', chain_verified: false });
+      } else {   // settled-claimed-but-not-chain-confirmed (可能跨节点/未落链) — 绝不计入 realized
+        pendingKas += claimedKas; pendingN += 1;
+        if (claimedKas > 0 && !verified) anyUnverifiedClaimed = true;
+        byMarket.push({ id: r.id, fee_kas: claimedKas.toFixed(8), status: 'pending', chain_verified: false,
+          note: (claimedKas > 0 && !verified) ? 'claimed fee not confirmed in this node chain index (cross-node or not-yet-landed)' : undefined });
+      }
     }
     return reply.send({
-      ok: true, address: String(address), broker_pk: brokerPk,
-      realized: { pool_kas: realizedKas.toFixed(8), n_markets: realizedN },
+      ok: true, address: brokerAddr, broker_pk: brokerPk,
+      realized: { pool_kas: realizedKas.toFixed(8), n_markets: realizedN, source: 'chain-verified: fee tx in kaspa_tx_log + outputs_json parsed (multi-output aware)' },
       pending: { pool_kas: pendingKas.toFixed(8), n_markets: pendingN },
       refunded: { pool_kas: refundedKas.toFixed(8), n_markets: refundedN },
+      cross_node_note: '本节点链口径: 仅含本节点 pool_markets + kaspa_tx_log 可见 fee。他节点产出市场 fee 未含 (V2 per-recipient fee-index 才全跨节点)。' + (anyUnverifiedClaimed ? ' ⚠ 有 claimed fee 未链确认 (列 pending)。' : ''),
       by_market: byMarket,
     });
   });
