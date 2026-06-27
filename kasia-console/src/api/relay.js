@@ -398,6 +398,16 @@ export async function registerRelayRoutes(fastify) {
     }
   });
 
+  // T4 (2026-06-27) — relay lookup by Kaspa address. Used by TG bot /earnings node-income path.
+  // Returns relay_id + name so caller can proceed to /api/relay/:id/pubkey → /api/node/income/:pk.
+  fastify.get('/api/relay/find', async (request, reply) => {
+    const { address } = request.query;
+    if (!address) return reply.code(400).send({ ok: false, error: 'address required' });
+    const row = sqlite.prepare('SELECT id, name, address FROM relay_nodes WHERE address = ? LIMIT 1').get(address);
+    if (!row) return reply.code(404).send({ ok: false, error: 'relay_not_found' });
+    return reply.send({ ok: true, relay_id: row.id, relay_name: row.name, address: row.address });
+  });
+
   // T-J2-2026-05-12 #4 — system-wide RPC overview (聚合全 relay state, header indicator + dashboard 用).
   fastify.get('/api/system/rpc-overview', async (_request, reply) => {
     const relays = listRelayNodes();

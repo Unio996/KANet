@@ -124,6 +124,20 @@ export function brokerEarningsByAddress(address) {
   return req('GET', `/api/kanet-broker/earnings-by-address/${encodeURIComponent(address)}`);
 }
 
+// T4 (2026-06-27) — node (委员) 收益查询链路 (read-only).
+// Step 1: find relay by kaspa address → relay_id.
+// Step 2: get oracle x-only-pubkey from relay → pk (64-char hex).
+// Step 3: get node income from pool endpoint → total + per_market.
+export function relayFind(address) {
+  return req('GET', `/api/relay/find?address=${encodeURIComponent(address)}`);
+}
+export function relayPubkey(relayId) {
+  return req('GET', `/api/relay/${encodeURIComponent(relayId)}/pubkey`);
+}
+export function nodeIncomeByPk(pk) {
+  return req('GET', `/api/node/income/${encodeURIComponent(pk)}`);
+}
+
 // ── owner-in-dev-channel bridge (Step3) — pure messaging, 0-custody (no key / no value) ──
 // Direction A (Owner Telegram → dev-coord): post the Owner's message via the owner-voice relay
 // (resolveOwnerVoiceRelayId). /api/chat/send mirrors the Console Live Chat send; the relay's address

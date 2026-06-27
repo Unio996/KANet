@@ -5,84 +5,42 @@ import { CONFIG } from './config.mjs';
 export const DISCLAIMER = 'testnet-only · MIT 开源 · 不运营主网 · 非投资建议';
 
 export function startMessage() {
-  // gate D onboarding tour (Bettor Q3: low-friction guided sequence). 无账户无许可 + 每步给下一命令.
-  // KANet-UI 2026-06-23 (Owner 真机发现 + Bettor 派修): /start 必列钱包命令 (原漏); custody 口径不可一刀切——
-  //   托管钱包 (/wallet) 节点持 key, 非托管 (/link) key 用户掌控 (Bettor 承重警告, 不可写"bot 不持 key"假称).
-  //   faucet 数量绝不硬编 (由 server env FAUCET_AMOUNT_KAS 定, Owner 可调), 故 /start 不写具体数, 领取时由 API 回真值。
+  // §11 v2 (Owner 终裁 2026-06-27): 22行→6行精简. 详情移 /help. 首次用户+1行 /help 提示.
+  // custody 警告保留 1 行(NWT 承重 bar: 不可删/弱化). faucet 数量不硬编.
   return [
-    '👋 KANet — 用 Kaspa 信任链把 AI agent 接到任何市场。无账户、无许可。',
+    '👋 KANet — 无账户，无许可。',
     '',
-    '👉 三步上手:',
+    '① /wallet 钱包   ② /faucet 领币   ③ /bet 押注',
+    '▸ /broker 赚佣金   ▸ /help 全部命令   ▸ /link 绑自己钱包',
     '',
-    '① 先有个钱包 — 二选一:',
-    '   🅰 /wallet — 节点替你生成，零门槛（⚠ 托管·节点持 key，仅试玩）',
-    '   🅱 /link <你的 kaspatest 地址> — 绑你自己的钱包（非托管·key 只你掌控）',
-    '② /faucet — 领测试 KAS（约 10 秒到账）',
-    '③ /bet — 押注预测市场（链上锁定，多评判结算），再 /mybets 看赢/输/退款',
-    '',
-    '更多:',
-    '· /balance · /receive · /send <地址> <金额> — 钱包收发',
-    '· /swap — 兑换 KAS ↔ USDT（经 broker，链上结算）',
-    '· /discover — 浏览开放挂单 / 预测市场',
-    '· /broker — 想做撮合者（broker）赚佣金？怎么参与 + 价值分成',
-    '· /help — 全部命令',
-    '',
-    '⚠ /wallet 托管钱包由【节点持 key】，仅供测试网试玩；',
-    '   真钱请务必换用你【自己生成、助记词从未发给任何人/服务】的非托管钱包（/link 绑定）。',
-    '想自己 build？KANet 开源（MIT），fork 一个角色（broker / oracle / prediction / exchange）跑你自己的节点。',
-    DISCLAIMER,
+    '⚠ 托管·节点持 key·真钱请 /link 非托管钱包',
+    '→ /help 完整指南',
   ].join('\n');
 }
 
-// KANet-UI 2026-06-22 (Owner 实测派修): /start 对【已 /link 的用户】不重复三步引导, 改显其绑定地址 +
-// 直接给下一步 (Owner 钦定 'personalize-on-link, 显地址 + 最多一个改绑'). 未绑用户仍走 startMessage()。
-// KANet-UI 2026-06-23 (Bettor 派修·承重 custody 口径): custody 参数 = true(托管/wallet) / false(非托管/link) /
-//   null(查不到 → 不假称任一方, 显两类并存警告)。绝不一刀切写"bot 不持 key"(对托管钱包是假的, 误导用户拿真钱)。
+// §11 v2 (Owner 终裁 2026-06-27): 老用户极简, 无 /help 提示行. custody 双守行永在.
 export function startMessageLinked(addr, custodial = null) {
-  const lines = [
-    '👋 KANet — 你已就绪。',
+  const shortAddr = addr.length > 20 ? addr.slice(0, 17) + '…' : addr;
+  const custLabel = custodial === true ? '托管·仅试玩' : custodial === false ? 'key 你掌控' : '托管/非托管';
+  const custWarn = custodial === false
+    ? '⚠ 你的地址 key 只你掌控。/wallet 也可生成托管测试钱包。'
+    : '⚠ 托管·节点持 key·真钱请 /link 非托管钱包';
+  return [
+    '👋 KANet · 你已就绪',
+    `📍 ${shortAddr}  ${custLabel}`,
     '',
-    `📍 你的地址: ${addr}`,
-  ];
-  if (custodial === true) lines.push('   (测试网托管钱包·节点持 key — 仅供试玩)');
-  else if (custodial === false) lines.push('   (你自己的非托管地址·key 只你掌控)');
-  lines.push(
+    '▸ /bet 押注   ▸ /faucet 领币   ▸ /wallet 钱包',
+    '▸ /broker 赚佣金   ▸ /help 全部命令',
     '',
-    '👉 下一步:',
-    '· /bet — 押注预测市场（链上锁定，多评判结算），/mybets 看赢/输/退款',
-    '· /faucet — 领测试 KAS',
-    '· /swap — 兑换 KAS ↔ USDT（经 broker，链上结算）',
-    '· /broker — 想做撮合者赚佣金？申请当 broker + 价值分成',
-    '· /discover · /help',
-    '',
-    '👛 钱包（所有命令任何时候都可用）:',
-    '· /wallet — 查看你的钱包地址 + 余额',
-    '· /balance 查余额 · /receive 收款 · /send <地址> <金额> 转账',
-    '· /link <kaspatest地址> — 改绑成你【自己掌控】的非托管地址（换钱包 / 退出托管用）',
-  );
-  if (custodial === true) {
-    lines.push('');
-    lines.push('⚠ 你用的是测试网【托管钱包】：私钥由节点持有，方便零门槛试玩。');
-    lines.push('   • 助记词只在生成时显示一次——丢了也【不影响用钱】(节点持 key 仍能 /send /bet)，只是无法导出到别的钱包。');
-    lines.push('   • 想完全自主掌控：用任意 Kaspa 钱包生成你自己的地址 → /link 绑定 → /send 把币转过去（不需旧助记词）。');
-    lines.push('   • 真钱请务必换用你【自己生成、助记词从未外泄】的非托管钱包。');
-  } else if (custodial === false) {
-    lines.push('');
-    lines.push('⚠ 这个地址由你自己链上掌控，bot 不持它的 key——每笔付款都你从自己钱包链上发起。');
-    lines.push('   (想零门槛试玩也可 /wallet 生成测试网托管钱包，但托管钱包节点持 key，仅供试玩。)');
-  } else {
-    lines.push('');
-    lines.push('⚠ 若你用 /wallet 托管钱包：私钥由节点持有，仅供测试网试玩；');
-    lines.push('   若你 /link 自己地址：key 只你掌控。真钱请务必用你自己助记词从未外泄的非托管钱包。');
-  }
-  lines.push(DISCLAIMER);
-  return lines.join('\n');
+    custWarn,
+  ].join('\n');
 }
 
 // KANet-UI 2026-06-22 (Owner 钦定 broker 收益统计 DM 显): 格式化 address-keyed 收益。
 // data = /api/kanet-broker/earnings-by-address 返 {address,realized,pending,refunded,by_market}。
 // 链上证: 每已结算单挂 settle_txid explorer 链接。fee=价值分成(后端已用 phase2 实落值)。
-export function brokerEarnings(data) {
+// T4 (2026-06-27): nodeIncome = /api/node/income/:pk 返回值 (可选). 非 node 用户传 null 静默略过.
+export function brokerEarnings(data, nodeIncome = null) {
   const explorer = (CONFIG.network === 'mainnet') ? 'https://explorer.kaspa.org' : 'https://explorer-tn12.kaspa.org';
   const r = data.realized || {}, p = data.pending || {}, rf = data.refunded || {};
   const by = data.by_market || [];
@@ -113,6 +71,14 @@ export function brokerEarnings(data) {
   }
   if (by.length > 10) lines.push(`… 余 ${by.length - 10} 单 (在 web broker-home 看全部)`);
   lines.push('', `共经手 ${by.length} 个市场 · 每笔分润落你地址, 链上可验。`);
+  // T4: 附加 node 委员收益 (若该地址是本机 relay)
+  if (nodeIncome && nodeIncome.total_settled_markets > 0) {
+    lines.push('', '⚙ Node 委员收益 (你的地址是本机 oracle relay)');
+    lines.push(`  累计: ${nodeIncome.total_node_income_kas?.toFixed(8) || '0'} KAS (${nodeIncome.total_settled_markets} 个市场, 链验)`);
+    if ((nodeIncome.pending_tx_index_count || 0) > 0)
+      lines.push(`  ⏳ ${nodeIncome.pending_tx_index_count} 笔待索引 (稍后刷新)`);
+    lines.push('  注: v0.6 按签名 pk / v0.7 按收款地址 pk 分别统计, 两者可能不同 pk。');
+  }
   return lines.join('\n');
 }
 
@@ -172,7 +138,7 @@ export function notifyLine(ev) {
 // 申请流 (地址制 onboarding 已落 + Owner trust 审批门 = auth 硬化已满足, 公开自助安全)。opts:
 //   { addr: 用户 /link 地址 (无则提示先 /link), status: onboard/status 返回 (onboarded/status/trust_level) }
 export function brokerRole(opts = {}) {
-  const { addr, status } = opts;
+  const { addr, status, earnings } = opts;
   const lines = [
     '🤝 成为撮合者 (broker)',
     '',
@@ -189,7 +155,14 @@ export function brokerRole(opts = {}) {
   } else if (status?.onboarded && status.status === 'approved') {
     lines.push(`✅ 你已是 approved broker (地址 ${addr})`);
     lines.push('你的 bot 已(或即将由 KANet 托管)拉起, 对外呈现全部市场, 带量成交的佣金落你地址。');
-    lines.push('· /earnings — 看你的 broker 收益 (经手单/已实现/待结算, 链上可验)');
+    // T2 (2026-06-27): inline earnings summary for approved brokers.
+    if (earnings) {
+      const r = earnings.realized || {}, p = earnings.pending || {};
+      lines.push(`💰 收益: 已实现 ${r.pool_kas || '0'} KAS (${r.n_markets || 0}单) · 进行中 ${p.pool_kas || '0'} KAS (${p.n_markets || 0}单)`);
+      lines.push('· /earnings — 完整链验详情 (各单/explorer 链接)');
+    } else {
+      lines.push('· /earnings — 看你的 broker 收益 (经手单/已实现/待结算, 链上可验)');
+    }
     lines.push('· 改 bot token: /broker_apply <新 token>');
   } else if (status?.onboarded) {
     lines.push(`⏳ 你的 broker 申请已提交 (地址 ${addr}), 待 Owner 审批。`);
@@ -225,16 +198,16 @@ export function walletGenerated(address, mnemonic) {
     '下一步: /faucet 领测试 KAS → /bet 下注。/wallet 看地址余额。',
   ].join('\n');
 }
-// 钱包视图 (地址+余额, 永不含助记词) + 测试网页脚。
+// 钱包视图 (地址+余额, 永不含助记词). NWT双守: 存款面必带 custody 警告行.
 export function walletView(data) {
   const bal = (data.balance_kas == null) ? '查询中/RPC 暂不可用' : (data.balance_kas + ' KAS');
   return [
-    '👛 你的测试网托管钱包:',
+    '👛 你的钱包',
     `📍 地址: ${data.address}`,
     `💰 余额: ${bal}`,
     '',
-    '/receive 收款(给别人转你用此地址) · /faucet 领测试币 · /bet 下注',
-    '⚠ 测试网托管钱包 · 真钱请用你自己助记词从未外泄的钱包。',
+    '转入用此地址 · /send 转出 · /faucet 领币 · /bet 押注',
+    '⚠ 托管·节点持 key·真钱请 /link 非托管钱包',
   ].join('\n');
 }
 
@@ -262,10 +235,9 @@ export function help() {
   return [
     '命令:',
     '/start — 介绍 + 三步上手',
-    '/wallet — 生成/查看你的测试网托管钱包 (零门槛玩)',
-    '/balance — 查钱包余额  /receive — 显收款地址',
+    '/wallet — 生成/查看钱包 (地址+余额+收款, 零门槛玩)',
     '/send <地址> <金额> — 从钱包转 KAS (2 步确认)',
-    '/link <kaspatest地址> — 绑定你的地址',
+    '/link <kaspatest地址> — 绑定你自己的非托管地址',
     '/faucet — 领测试 KAS（先 /wallet 或 /link）',
     '/swap — 兑换 KAS ↔ USDT(经 broker,链上)',
     '/bet — 押注预测市场',
@@ -273,6 +245,11 @@ export function help() {
     '/discover — 浏览开放挂单 / 市场',
     '/broker — 想做撮合者(broker)? 角色 + 佣金 + 申请',
     '/earnings — broker 收益 (经手单/已实现/待结算, 链上可验)',
+    '',
+    '托管钱包说明:',
+    '① 丢了助记词不影响花费权 — 节点持 key, /send /bet 仍正常用',
+    '② 想自主掌控: /link 绑你自己钱包地址 → /send 把币转过去',
+    '③ 真钱务必用你自己生成、助记词从未外泄的非托管钱包',
     '',
     DISCLAIMER,
   ].join('\n');

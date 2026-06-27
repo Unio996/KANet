@@ -49,9 +49,19 @@ const faucetCooldown = new Map();
 const pendingSends = new Map(); // tg_user → { to, amount, ts }
 
 // KANet-UI 2026-06-22 (Owner 实测派修 ②): /start 查 /link 绑定 — 已绑显地址+下一步, 未绑走三步引导。
+// T1 (2026-06-27): 解析 ctx.match payload — t.me/<bot>?start=<market_id> 深链直跳市场详情。
 bot.command('start', async (ctx) => {
   const tgUser = String(ctx.from.id);
   PM.exitBetFlow(tgUser);
+  // Deep link payload: /start <market_id>
+  const payload = (ctx.match || '').trim();
+  if (payload && /^[a-zA-Z0-9_-]{2,64}$/.test(payload)) {
+    const reply = await PM.startBetFromMarket(tgUser, payload);
+    if (typeof reply === 'object' && reply.text) {
+      return ctx.reply(reply.text, { reply_markup: reply.keyboard });
+    }
+    return ctx.reply(reply);
+  }
   const addr = PM.getLinkedAddr(tgUser) || linked.get(tgUser)?.address;
   if (!addr) return ctx.reply(M.startMessage());
   // KANet-UI 2026-06-23 (Bettor 承重 custody 口径): custody-aware /start — 托管钱包(/wallet 生成, 节点持 key)
@@ -167,17 +177,35 @@ bot.command('broker', async (ctx) => {
   const addr = PM.getLinkedAddr(tgUser) || linked.get(tgUser)?.address;
   let status = null;
   if (addr) { const r = await api.brokerOnboardStatus(addr); if (r.ok) status = r.json; }
-  return ctx.reply(M.brokerRole({ addr, status }));
+  // T2 (2026-06-27): fetch earnings summary for approved brokers to show inline (non-broker = skip).
+  let earnings = null;
+  if (addr && status?.onboarded && status.status === 'approved') {
+    const er = await api.brokerEarningsByAddress(addr);
+    if (er.ok && er.json?.ok) earnings = er.json;
+  }
+  return ctx.reply(M.brokerRole({ addr, status, earnings }), { disable_web_page_preview: true });
 });
-// /earnings — broker 收益统计 (Owner 钦定 2026-06-22 DM 显): address-keyed, 用户 /link 地址当 broker 查。
-// 经手 N 单 / 已实现 X / 待结算 Y / 各单 explorer 链接 (价值分成 1.6%, 链上可验)。0-key 只读。
+// /earnings — broker 收益统计 + T4 node 委员收益 (Owner 钦定 2026-06-22 DM 显): address-keyed.
+// T4 (2026-06-27): 如地址对应本机 relay (节点 operator), 额外显示委员 fee 分成。
 bot.command('earnings', async (ctx) => {
   const tgUser = String(ctx.from.id);
   const addr = PM.getLinkedAddr(tgUser) || linked.get(tgUser)?.address;
   if (!addr) return ctx.reply('先 /link <你的 kaspatest 地址> 绑定 (= 你的 broker 收款地址), 再 /earnings 看收益。');
   const r = await api.brokerEarningsByAddress(addr);
   if (!r.ok || !r.json?.ok) return ctx.reply('收益查询失败: ' + (r.json?.error || r.status));
-  return ctx.reply(M.brokerEarnings(r.json), { disable_web_page_preview: true });
+  // T4: 同时尝试查 node 收益 (链路: 地址→relay→pubkey→node/income, 全静默失败)
+  let nodeIncome = null;
+  try {
+    const rf = await api.relayFind(addr);
+    if (rf.ok && rf.json?.relay_id) {
+      const pkR = await api.relayPubkey(rf.json.relay_id);
+      if (pkR.ok && pkR.json?.x_only_pubkey) {
+        const ni = await api.nodeIncomeByPk(pkR.json.x_only_pubkey);
+        if (ni.ok && ni.json?.ok) nodeIncome = ni.json;
+      }
+    }
+  } catch {}
+  return ctx.reply(M.brokerEarnings(r.json, nodeIncome), { disable_web_page_preview: true });
 });
 // /broker_apply <bot token> — 提交 broker 自助申请 (地址制): broker_address = 用户 /link 地址,
 // bot_token = 用户自己的 @BotFather token (加密落库, 永不外显)。落 pending, 待 Owner 批 trust 激活。
@@ -224,10 +252,10 @@ bot.on('message:text', async (ctx) => {
     // Bettor r63 ①: 优先从持久 link store 取 (= 抗 bot 重启), in-mem 退化 fallback.
     const reply = await PM.handleReply(tgUser, txt, PM.getLinkedAddr(tgUser) || linked.get(tgUser)?.address);
     if (reply) {
-      // Bettor r116 + KANet-UI: prediction-menu confirm 阶段返 { text, parseMode } 支持 HTML
-      // (tap-to-copy 地址 + payment URI). 其余阶段返 string 原路 ctx.reply.
+      // Bettor r116 + KANet-UI: prediction-menu confirm 阶段返 { text, parseMode } 支持 HTML.
+      // T1 (2026-06-27): detail 阶段额外返 { keyboard } — 市场详情分享按钮.
       if (typeof reply === 'object' && reply.text) {
-        await ctx.reply(reply.text, { parse_mode: reply.parseMode });
+        await ctx.reply(reply.text, { parse_mode: reply.parseMode, reply_markup: reply.keyboard });
       } else {
         await ctx.reply(reply);
       }
