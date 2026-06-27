@@ -37,6 +37,15 @@ const SKILLS_DIR = `${KANET_ROOT}/agent-mind/src/skills`;
 const CONSOLE_PORT = process.env.PORT || '3100';
 
 export async function registerRelayRoutes(fastify) {
+  // T3 (2026-06-27): /integrations — TG bot management (moved from /relays, pure UI).
+  fastify.get('/integrations', async (request, reply) => {
+    const lang = parseLang(request.headers.cookie);
+    const t = getT(lang);
+    const dir = isRtl(lang) ? 'rtl' : 'ltr';
+    const langs = LANG_NAMES;
+    return reply.view('integrations', { title: '集成', t, lang, dir, langs });
+  });
+
   fastify.get('/relays', async (request, reply) => {
     const lang = parseLang(request.headers.cookie);
     const t = getT(lang);

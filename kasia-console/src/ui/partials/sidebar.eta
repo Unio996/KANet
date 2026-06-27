@@ -103,7 +103,7 @@
     </div>
 
     <!-- 6. Settings ▶ (= Network / Relays / Adapters / Language / Security / About) -->
-    <% const _isSettings = ['settings','relays','relay','adapters','adapter','events','about','whale-signal'].includes(it._page); %>
+    <% const _isSettings = ['settings','relays','relay','adapters','adapter','events','about','whale-signal','integrations'].includes(it._page); %>
     <div class="pt-4 mt-4 border-t border-warm-200" x-data="{ open: <%= _isSettings ? 'true' : 'false' %> }">
       <button @click="open = !open"
         class="flex items-center justify-between w-full px-3 py-2 rounded-lg text-sm transition-colors <%= _isSettings ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
@@ -118,6 +118,10 @@
         <a href="/relays"
           class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= ['relays','relay'].includes(it._page) ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
           Relays
+        </a>
+        <a href="/integrations"
+          class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._page === 'integrations' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
+          Integrations
         </a>
         <a href="/adapters"
           class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= ['adapters','adapter'].includes(it._page) ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
