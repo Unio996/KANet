@@ -291,7 +291,7 @@ async function _brokerPublishKasOffer(qtyKas, payChain, give_asset = 'KAS', want
         // T-J1-2026-04-27 v1.2 R30: want_asset 参数化 (USDT default → 真 USDC/DAI cross-stable expand).
         relayNodeId: BROKER_RELAY_ID,
         give_asset,  // T-J2 + T-J1 Bug 6 真修: literal 'KAS' → give_asset 参数
-        give_amount: String(qtyKas),
+        give_amount: Number(qtyKas).toFixed(8),
         give_chain: give_asset === 'KAS' ? 'kaspa' : payChain,  // KAS 在 Kaspa, stable 在 EVM (同 payChain)
         want_asset,  // T-J1-2026-04-27 v1.2 R30: literal 'USDT' → want_asset 参数
         want_amount: wantAmount,

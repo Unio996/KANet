@@ -111,7 +111,7 @@ export async function withdrawCex({ cex = 'gateio', asset, amount, toAddr, chain
   const body = JSON.stringify({
     currency: String(asset).toUpperCase(),
     address: String(toAddr),
-    amount: String(amount),
+    amount: Number(amount).toFixed(8),
     chain: gateChain,
   });
   const ts = Math.floor(Date.now() / 1000).toString();

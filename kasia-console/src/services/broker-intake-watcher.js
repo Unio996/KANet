@@ -250,7 +250,7 @@ async function _publishBrokerSellOffer(peer, amount, eventId) {
   try {
     res = await _publishOffer({
       relayNodeId: BROKER_RELAY_ID,
-      give_asset: 'KAS', give_amount: String(netKas),
+      give_asset: 'KAS', give_amount: Number(netKas).toFixed(8),
       want_asset: 'USDT', want_amount: wantUsdt,
       verification: 'cross_chain_tx',
       verification_meta: {
@@ -337,7 +337,7 @@ export async function _publishBrokerBuyOffer(peer, usdtAmount, eventId) {
   try {
     res = await _publishOffer({
       relayNodeId: BROKER_RELAY_ID,
-      give_asset: 'USDT', give_amount: String(netUsdt),
+      give_asset: 'USDT', give_amount: Number(netUsdt).toFixed(8),
       give_chain: 'bnb',
       want_asset: 'KAS', want_amount: wantKas,
       verification: 'kaspa_tx',  // BUY: KAS deliver verification 真 Kaspa chain TX

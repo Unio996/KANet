@@ -438,7 +438,7 @@ export class MatcherSkill extends Skill {
       // user 买 X KAS = matcher 卖 X KAS for X*MID USDT
       // give_amount = X KAS (matcher 给 KAS), want_amount = X*MID USDT (matcher 收 USDT)
       return {
-        give_asset: 'KAS', give_amount: String(qty), give_chain: 'kaspa',
+        give_asset: 'KAS', give_amount: Number(qty).toFixed(8), give_chain: 'kaspa',
         want_asset: 'USDT', want_amount: String((qty * MID).toFixed(4)),
         want_chain: intent.pay_chain || 'BSC',
       };
@@ -446,7 +446,7 @@ export class MatcherSkill extends Skill {
     // sell: user 卖 X KAS = matcher 买 X KAS, give X*MID USDT
     return {
       give_asset: 'USDT', give_amount: String((qty * MID).toFixed(4)), give_chain: intent.pay_chain || 'BSC',
-      want_asset: 'KAS', want_amount: String(qty), want_chain: 'kaspa',
+      want_asset: 'KAS', want_amount: Number(qty).toFixed(8), want_chain: 'kaspa',
     };
   }
 
