@@ -2145,7 +2145,7 @@ export async function registerPoolRoutes(fastify) {
       // can show '你赢了' / '你输了' instead of generic '已结算'.
       let outcomeWinner = null;
       let didWin = null;
-      let actualPayoutKas = null;
+      let actualPayoutKas = null, actualPayoutChainVerified = false;
       try {
         const meta = JSON.parse(p.metadata || '{}');
         if (meta.phase2_winner === 0 || meta.phase2_winner === 1) {
@@ -2159,9 +2159,26 @@ export async function registerPoolRoutes(fastify) {
             // over-states (demo lwrcl: 148.1 projected vs 141.427 on-chain). data-three-role: settler
             // records actual, display reads. Robust to #28 (oracle_bond tuning): reads the real output,
             // no local formula to drift. Fallback to the projection only for legacy settles w/o outputs.
-            const myOnChainSompi = Array.isArray(meta.phase2_outputs)
-              ? meta.phase2_outputs.filter(o => _payoutAddrSet.has(o.address)).reduce((s, o) => s + (Number(o.amountSompi) || 0), 0)
-              : 0;
+            // T6 (Q3, J2 2026-06-27): read ACTUAL payout from CHAIN (kaspa_tx_log.outputs_json of the
+            // claim/settle TX) not DB meta.phase2_outputs — 链验铁律 (这程 DB status 骗 4 次). bshard winner
+            // claims via claim_txid (merkle claim); v0.6 winner paid in settle_txid output. multi-output aware
+            // (复用 broker earnings earnings-by-address L233 同源链验法). DB phase2_outputs = fallback 仅当 tx 未索引.
+            let myOnChainSompi = 0;
+            const _payoutTxid = p.claim_txid || p.settle_txid;
+            if (_payoutTxid) {
+              const _ptx = sqlite.prepare('SELECT outputs_json FROM kaspa_tx_log WHERE tx_id = ?').get(_payoutTxid);
+              if (_ptx && _ptx.outputs_json) {
+                try {
+                  myOnChainSompi = JSON.parse(_ptx.outputs_json)
+                    .filter(o => _payoutAddrSet.has(o.script_public_key_address || o.address))
+                    .reduce((s, o) => s + (Number(o.amount ?? o.amount_sompi ?? o.value) || 0), 0);
+                  if (myOnChainSompi > 0) actualPayoutChainVerified = true;
+                } catch {}
+              }
+            }
+            if (myOnChainSompi <= 0 && Array.isArray(meta.phase2_outputs)) {   // fallback: DB-recorded settle outputs (tx not yet indexed)
+              myOnChainSompi = meta.phase2_outputs.filter(o => _payoutAddrSet.has(o.address)).reduce((s, o) => s + (Number(o.amountSompi) || 0), 0);
+            }
             if (myOnChainSompi > 0) {
               // A bettor may hold multiple winning sides on one market → multiple outputs to one address.
               // Split this side's share by stake so the per-direction sum (formatMyBets) == on-chain total.
@@ -2202,6 +2219,7 @@ export async function registerPoolRoutes(fastify) {
         outcome_side: outcomeWinner === 0 ? 'YES' : (outcomeWinner === 1 ? 'NO' : null),
         did_win: didWin,
         actual_payout_kas: actualPayoutKas,
+        actual_payout_chain_verified: actualPayoutChainVerified,  // T6: true = 链上 claim/settle tx 核证; false = DB fallback/projection
       });
     }
     return reply.send({ ok: true, linked_addr: linkedAddr, bettor_pk: bettorPk, count: out.length, positions: out });
@@ -2565,6 +2583,74 @@ export async function registerPoolRoutes(fastify) {
       total_settled_markets: perMarket.length,
       total_income_sompi: totalIncomeSompi,
       total_income_kas: totalIncomeSompi / 1e8,
+      pending_tx_index_count: pendingTxCount,
+      per_market: perMarket,
+    });
+  });
+
+  // GET /api/node/income/:pk — per-node (signing committee member) income, SPLIT from the combined
+  // committee fee. T6 (Q3, J2 2026-06-27): node 收益现跟 oracle 捆绑 — committee 那笔 fee = oracleBps+nodeBps
+  // 合并 (pool-shard-settle.mjs L84 commBps), node→5 签名委员均分 (FEE_CONFIG). node 份额 = committee_payout
+  // × nodeBps/(oracleBps+nodeBps). 链验铁律 (不信 DB, 这程 DB 骗 4 次): 真值从 kaspa_tx_log.outputs_json parse
+  // (v0.6 = settle_txid output[position+1]; v0.7 bshard = settle_evidence.fee_payouts[committee].txid),
+  // 复用 oracle income (L2521) + broker earnings (earnings-by-address) 同源链验法。
+  fastify.get('/api/node/income/:pk', async (request, reply) => {
+    if (!_v06TablesExist()) return reply.code(503).send({ ok: false, error: 'v159 schema not yet migrated' });
+    const nodePk = String(request.params.pk).toLowerCase();
+    if (!/^[0-9a-f]{64}$/.test(nodePk)) return reply.code(400).send({ ok: false, error: 'pk must be 64-hex (32 bytes)' });
+    const { FEE_CONFIG } = await import('../lib/pool-shard-settle.mjs');
+    const commBps = (FEE_CONFIG.oracleBps || 0) + (FEE_CONFIG.nodeBps || 0);
+    const nodeFrac = commBps > 0 ? (FEE_CONFIG.nodeBps || 0) / commBps : 0;  // = 20/120 with default config
+    // derive node address (for v0.7 fee_payout to_address match)
+    let nodeAddrs = [];
+    try { const kw = await import('kaspa-wasm'); const xo = new kw.XOnlyPublicKey(nodePk); nodeAddrs = [xo.toAddress('testnet-12').toString(), xo.toAddress('mainnet').toString()]; } catch {}
+    const txLog = sqlite.prepare('SELECT outputs_json FROM kaspa_tx_log WHERE tx_id = ?');
+
+    let totalNodeSompi = 0, pendingTxCount = 0;
+    const perMarket = [];
+    // (1) v0.6 committee-position path (mirrors oracle income): committee output = combined fee → node split.
+    const v06 = sqlite.prepare(`
+      SELECT pc.market_id, pc.committee_pks, pm.settle_txid, pm.protocol_status
+      FROM pool_committee pc JOIN pool_markets pm ON pm.id = pc.market_id
+      WHERE pm.protocol_version = 'v0.6' AND pm.settle_txid IS NOT NULL
+    `).all();
+    for (const r of v06) {
+      let pks = []; try { pks = JSON.parse(r.committee_pks); } catch {}
+      const position = pks.map((p) => String(p).toLowerCase()).indexOf(nodePk);
+      if (position < 0) continue;
+      const txRow = txLog.get(r.settle_txid);
+      if (!txRow || !txRow.outputs_json) { pendingTxCount += 1; perMarket.push({ market_id: r.market_id, version: 'v0.6', position, settle_txid: r.settle_txid, node_income_sompi: null, status: 'tx_pending_index' }); continue; }
+      let outputs = []; try { outputs = JSON.parse(txRow.outputs_json); } catch {}
+      const myOut = outputs[position + 1];   // [0]=broker, [1..5]=committee
+      const commSompi = myOut ? (parseInt(myOut.value ?? myOut.amount ?? myOut.amount_sompi, 10) || 0) : 0;
+      const nodeSompi = Math.floor(commSompi * nodeFrac);
+      totalNodeSompi += nodeSompi;
+      perMarket.push({ market_id: r.market_id, version: 'v0.6', position, settle_txid: r.settle_txid, committee_payout_sompi: commSompi, node_income_sompi: nodeSompi, chain_verified: true, status: r.protocol_status });
+    }
+    // (2) v0.7 bshard path: settle_evidence.fee_payouts[committee] matched to node address, chain-verified by fee txid.
+    if (nodeAddrs.length) {
+      const v07 = sqlite.prepare("SELECT id, metadata FROM pool_markets WHERE protocol_version = 'v0.7' AND metadata LIKE '%fee_payouts%'").all();
+      for (const m of v07) {
+        let meta = {}; try { meta = JSON.parse(m.metadata || '{}'); } catch {}
+        const cfees = (meta.settle_evidence?.fee_payouts || []).filter((p) => p && p.role === 'committee' && nodeAddrs.includes(p.to_address));
+        for (const f of cfees) {
+          const lg = f.txid ? txLog.get(f.txid) : null;   // 链验 fee txid landed + 取真额
+          let commSompi = 0;
+          if (lg && lg.outputs_json) { try { const o = JSON.parse(lg.outputs_json); commSompi = o.filter((x) => nodeAddrs.includes(x.script_public_key_address || x.address)).reduce((s, x) => s + Number(x.amount ?? x.amount_sompi ?? x.value ?? 0), 0); } catch {} }
+          if (commSompi <= 0) { pendingTxCount += 1; perMarket.push({ market_id: m.id, version: 'v0.7', fee_txid: f.txid, node_income_sompi: null, status: 'fee_tx_pending_index' }); continue; }
+          const nodeSompi = Math.floor(commSompi * nodeFrac);
+          totalNodeSompi += nodeSompi;
+          perMarket.push({ market_id: m.id, version: 'v0.7', fee_txid: f.txid, committee_payout_sompi: commSompi, node_income_sompi: nodeSompi, chain_verified: true, status: 'completed' });
+        }
+      }
+    }
+    return reply.send({
+      ok: true, node_pk: nodePk,
+      node_fraction_of_committee_fee: nodeFrac,
+      fee_config: { oracleBps: FEE_CONFIG.oracleBps, nodeBps: FEE_CONFIG.nodeBps },
+      total_settled_markets: perMarket.length,
+      total_node_income_sompi: totalNodeSompi,
+      total_node_income_kas: totalNodeSompi / 1e8,
       pending_tx_index_count: pendingTxCount,
       per_market: perMarket,
     });
