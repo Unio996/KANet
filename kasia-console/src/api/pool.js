@@ -2720,6 +2720,28 @@ export async function registerPoolRoutes(fastify) {
     `).get(marketId);
     if (!market) return reply.code(404).send({ ok: false, error: 'market not found' });
 
+    // 🚨 #33/#34 bshard-detect safety net (J1 红队 2026-06-25, §11 裁决 Bettor 认错+全员 co-verify,
+    // ANTI-PATTERNS 规则 50). bshard (register-v07) bettors have NO standalone refundable PoolSide:
+    // recordBettor (register-v07, ~L1157) writes side_p2sh = the SHARED shard pool P2SH, side_lock_tx =
+    // the leaf TX, side_redeem_script_hex = '' — the stake lives in the aggregated fold pool, refundable
+    // ONLY via the bshard path (PoolShard_fold refund_draw, lib/pool-refund-builder.mjs). THIS endpoint
+    // runs the standalone PoolSide refund (entry 2/3) = the wrong contract for bshard. The historic
+    // logical-404 / empty-redeem-409 were incidental fail-safes; this makes the rejection EXPLICIT so a
+    // future "make it shard-aware" migration can't strip the safety and route a bshard bettor's refund at
+    // the shared shard pool (= one bettor spending the aggregate). DO NOT shard-aware-migrate this query;
+    // detect-and-reject is the ruling. (queried by logical id → market_shards.logical_market_id; by a
+    // shard id → market_shards.shard_market_id; either match = bshard.)
+    const isBshard = sqlite.prepare(
+      'SELECT 1 FROM market_shards WHERE logical_market_id = ? OR shard_market_id = ? LIMIT 1'
+    ).get(marketId, marketId);
+    if (isBshard) {
+      return reply.code(409).send({
+        ok: false,
+        error: 'bshard market: bettor refunds use the fold refund path (PoolShard_fold refund_draw, lib/pool-refund-builder.mjs), not the standalone PoolSide refund endpoint — stake is in the aggregated shard pool, not a per-bettor side UTXO.',
+        refund_path: 'bshard_fold',
+      });
+    }
+
     let side;
     if (sideId) {
       side = sqlite.prepare(`
