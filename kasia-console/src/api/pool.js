@@ -1910,11 +1910,17 @@ export async function registerPoolRoutes(fastify) {
       const totalPool = yesPool + noPool;
       const totalPoolKas = totalPool / 1e8;
       const trendingScore = r.bettor_count * BETTOR_WEIGHT + totalPoolKas;
+      let card_group_id = null, leg_key = null;
+      try {
+        const spec = JSON.parse(r.resolution_rule_spec || '');
+        if (spec && typeof spec === 'object') { card_group_id = spec.card_group_id || null; leg_key = spec.leg_key || null; }
+      } catch {}
       return {
         id: r.id, title: r.resolution_rule_spec, category: r.category, deadline: r.deadline,
         bettor_count: r.bettor_count, total_pool_kas: totalPoolKas,
         yes_implied_prob: totalPool > 0 ? yesPool / totalPool : null,
         trending_score: Math.round(trendingScore * 100) / 100,
+        card_group_id, leg_key,
         _totalPool: totalPool,
       };
     }).filter((m) => m._totalPool >= minPoolSompi)   // 防刷量: 池太小不上热榜

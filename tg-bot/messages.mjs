@@ -84,6 +84,7 @@ export function brokerEarnings(data, nodeIncome = null) {
 
 // /hot 热门市场 (Owner 热需求 2026-06-27): T5 trending top-N 格式化.
 // markets = trending[]. 返 {text, keyboard} — keyboard = CopyText 深链按钮.
+// 支持 card_group_id 分组: 同一 card_group_id 的盘组成一块显示(非散盘).
 export function hotMarkets(markets, botUsername) {
   if (!markets || !markets.length) {
     return { text: '暂无热门市场 (市场创建中, 稍后再试)。', keyboard: null };
@@ -91,20 +92,66 @@ export function hotMarkets(markets, botUsername) {
   function parseTitle(raw) {
     try { const p = JSON.parse(raw); return p.title || raw; } catch { return raw; }
   }
+  function fmtDl(deadline) {
+    if (!deadline) return '';
+    const h = Math.round((Number(deadline) * 1000 - Date.now()) / 3600000);
+    return h > 0 ? `${h}h 后截止` : '已过期';
+  }
+  function legLabel(legKey) {
+    if (!legKey) return '';
+    if (legKey.startsWith('winner_')) return legKey.slice(7) + ' 赢';
+    if (legKey.startsWith('spread_')) return legKey.split('_').slice(1).join(' ');
+    if (legKey.startsWith('total_o_')) return '大球 O' + legKey.slice(8);
+    if (legKey.startsWith('total_u_')) return '小球 U' + legKey.slice(8);
+    return legKey;
+  }
   const CAT = { sports: '🏆', politics: '🗳', other: '🌐', test: '🧪' };
+  const BOT = botUsername || 'KANET_Broker_bot';
+  // Separate card-group markets from singles (insertion-order preserved)
+  const groupsMap = new Map();
+  const singles = [];
+  for (const m of markets) {
+    if (m.card_group_id) {
+      if (!groupsMap.has(m.card_group_id)) groupsMap.set(m.card_group_id, []);
+      groupsMap.get(m.card_group_id).push(m);
+    } else {
+      singles.push(m);
+    }
+  }
   const lines = ['🔥 热门市场 Top ' + markets.length + ' · 活跃度+资金加权', ''];
   const buttons = [];
-  markets.forEach((m, i) => {
+  let idx = 1;
+  // Card groups
+  for (const [, gMarkets] of groupsMap) {
+    const firstTitle = parseTitle(gMarkets[0].title || '');
+    const matchHeader = firstTitle.includes(' — ') ? firstTitle.split(' — ')[0].trim() : firstTitle;
+    const totalKas = gMarkets.reduce((s, m) => s + (m.total_pool_kas || 0), 0);
+    const maxBettors = Math.max(...gMarkets.map(m => m.bettor_count || 0));
+    const dl = fmtDl(gMarkets[0].deadline);
+    lines.push(`${idx}. ⚽ ${matchHeader} · ${gMarkets.length} 盘`);
+    lines.push(`   💰${totalKas.toFixed(0)} KAS · 👥${maxBettors}人${dl ? ' · ' + dl : ''}`);
+    for (const m of gMarkets) {
+      const label = m.leg_key ? legLabel(m.leg_key) : parseTitle(m.title || '').split(' — ')[1] || m.id.slice(0, 8);
+      const shareUrl = `https://t.me/${BOT}?start=${m.id}`;
+      buttons.push([{ text: `🎯 ${label}`, copy_text: { text: shareUrl } }]);
+    }
+    lines.push('');
+    idx++;
+  }
+  // Singles
+  for (const m of singles) {
     const title = parseTitle(m.title);
     const short = title.length > 40 ? title.slice(0, 38) + '…' : title;
     const cat = CAT[m.category] || '🌐';
     const yesOdds = m.yes_implied_prob != null ? Math.round(m.yes_implied_prob * 100) + '%是' : '';
-    lines.push(`${i + 1}. ${cat} ${short}`);
+    lines.push(`${idx}. ${cat} ${short}`);
     lines.push(`   💰${(m.total_pool_kas || 0).toFixed(0)} KAS · 👥${m.bettor_count || 0}人${yesOdds ? ' · ' + yesOdds : ''}`);
-    const shareUrl = `https://t.me/${botUsername || 'KANET_Broker_bot'}?start=${m.id}`;
-    buttons.push([{ text: `🎯 押 #${i + 1} ${short.slice(0, 20)}`, copy_text: { text: shareUrl } }]);
-  });
-  lines.push('', '点按钮复制深链 → 转给朋友/自己打开直接押注');
+    const shareUrl = `https://t.me/${BOT}?start=${m.id}`;
+    buttons.push([{ text: `🎯 押 #${idx} ${short.slice(0, 20)}`, copy_text: { text: shareUrl } }]);
+    lines.push('');
+    idx++;
+  }
+  lines.push('点按钮复制深链 → 转给朋友/自己打开直接押注');
   return { text: lines.join('\n'), keyboard: { inline_keyboard: buttons } };
 }
 
