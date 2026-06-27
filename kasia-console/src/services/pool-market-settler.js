@@ -2143,11 +2143,24 @@ export async function dispatchPhase2(market, decision) {
     if (market.protocol_version === 'v0.7') {
       const globalYes = participants.filter(p => p.direction === 0).reduce((s, p) => s + p.stake, 0);
       const globalNo = participants.filter(p => p.direction === 1).reduce((s, p) => s + p.stake, 0);
-      // global_commit_id: SS L322-329 blake2b commit-check is INACTIVE (silverc int-to-byte
-      // unconfirmed) → field is layout-only (attested via committee sighash, not require()'d).
-      // Deterministic placeholder until J1 activates the cross-shard commit check.
-      const crypto = await import('crypto');
-      const globalCommitId = crypto.createHash('sha256').update(market.id).digest('hex');
+      // global_commit_id: NWT FINDING-1 SEAM fix (2026-06-28) — J1 activates the on-chain commit check
+      // in PoolSpine_v07.sil close_attest (blake2b(byte[](globalYes,16)||byte[](globalNo,16)||byte[](market_id,32)
+      // ||byte[](shard_count,4))==global_commit_id), binding market_id on-chain → distinct P2SH/market + 跨市场
+      // close_attest 替换 BUST. 链下侧必 byte-EXACT 同 layout, 否则合法 settle fail。
+      // 🔒 单源: 复用已证 commit_v2 builder foldRootCommitHex(pool-fold.mjs, == PoolShard_fold/FoldNode,
+      //   LE sign-magnitude serialize_i64, byte-match 锁定) — 绝不重造字节序 (线8 机制哲学 + determinism 命门)。
+      // ⚠ market_id = 烤进 spine ctor 的 raw 32-byte v07_market_id_hash (NWT/J1 锁=raw ctor 值), NOT market.id
+      //   字符串 (旧 sha256 占位 hash 错了对象, 那也是 SEAM 链下镜像缺口)。
+      const { foldRootCommitHex } = await import('../lib/pool-fold.mjs');
+      let _v07meta = {};
+      try { _v07meta = JSON.parse(market.metadata || '{}'); } catch {}
+      const _marketIdHex32 = _v07meta.v07_market_id_hash;
+      const _shardCount = Number(_v07meta.v07_shard_count) || 1;
+      if (!_marketIdHex32 || !/^[0-9a-fA-F]{64}$/.test(_marketIdHex32)) {
+        // fail-loud: 没有 ctor market_id 算不出 canonical commit → 不能用错值 settle (NO TX NO STATE 同精神)
+        throw new Error(`v0.7 settle: market ${market.id.slice(0, 16)} missing/invalid v07_market_id_hash in metadata — cannot compute commit_v2 global_commit_id`);
+      }
+      const globalCommitId = foldRootCommitHex(globalYes, globalNo, _marketIdHex32, _shardCount);
       newMeta.phase2_global_yes_sompi = globalYes;
       newMeta.phase2_global_no_sompi = globalNo;
       newMeta.phase2_global_commit_id = globalCommitId;
