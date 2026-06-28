@@ -1108,6 +1108,15 @@ export async function registerPoolRoutes(fastify) {
     if (market.protocol_status !== 'pending_bettors') return reply.code(409).send({ ok: false, error: `market status=${market.protocol_status}, registration closed` });
     if (!market.pool_merkle_root) return reply.code(409).send({ ok: false, error: 'v0.7 market missing pool_merkle_root (committee)' });
 
+    // FINDING-2 (NWT) 入口闸: commingled-spine 盘拒新押注 (单源 isCommingledSpine, J1 pool-commingle-detect, 2026-06-28).
+    //   pre-fix v0.7 markets 没把 market_id 烤进 spine redeem → spine_p2sh 被 >1 市场共享 → 跨市场替换风险.
+    //   entry-block ≠ status-cancel (J1 decoupling 原则): 只拒新押注, 不碰 status/资金; 已有押注走 deadline 自动退款
+    //   (outpoint-precise, 每 side 独立花费, 不受 commingled 影响) → 不 orphan 退款路.
+    const { isCommingledSpine } = await import('../lib/pool-commingle-detect.mjs');
+    if (isCommingledSpine(market.spine_p2sh, sqlite)) {
+      return reply.code(409).send({ ok: false, error: 'market spine commingled (FINDING-2): registration blocked. Existing stakes remain refundable at deadline (outpoint-precise).' });
+    }
+
     const direction = parseInt(b.direction, 10);
     if (direction !== 0 && direction !== 1) return reply.code(400).send({ ok: false, error: 'direction must be 0 (YES) or 1 (NO)' });
     const stakeSompi = Math.round(parseFloat(b.stake_kas) * 1e8);

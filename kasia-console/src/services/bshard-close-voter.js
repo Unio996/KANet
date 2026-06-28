@@ -25,6 +25,7 @@ import { createRelayChainReader } from './relay-chain-reader.mjs';
 import { fetchEndBlockHashCanonical, loadPoolSnapshot } from './pool-market-settler-v06.mjs';
 import { listShards } from '../lib/shard-allocator.mjs';
 import { compileSil, ctorBytes32, ctorInt } from '../lib/pool-bshard-artifacts.mjs';
+import { isCommingledSpine } from '../lib/pool-commingle-detect.mjs';
 
 const TICK_MS = 30_000;   // 30s tick (close_attest 时效性 > 普通 vote; settler 等 quorum)
 let timer = null, running = false;
@@ -182,14 +183,24 @@ export async function bshardCloseVoterTick() {
     const voterRelays = sqlite.prepare(`SELECT id, name, address FROM relay_nodes WHERE is_oracle = 1`).all();
     if (!voterRelays.length) return { ok: true, voters: 0 };
     const enforceCloseAttest = await loadEnforce();
-    let signed = 0, skipped = 0, refused = 0, errored = 0;
+    let signed = 0, skipped = 0, refused = 0, errored = 0, commingledSkipped = 0;
     // pending close-request: v0.7 市场 status='collecting_sigs' + metadata.bshard_close_request 存在 + deadline 内。
     const pending = sqlite.prepare(`
-      SELECT id, metadata, pool_merkle_root, broker_pk, deadline_daa, resolution_rule_spec
+      SELECT id, metadata, pool_merkle_root, broker_pk, deadline_daa, resolution_rule_spec, spine_p2sh
       FROM pool_markets
       WHERE protocol_version = 'v0.7' AND protocol_status = 'collecting_sigs' AND metadata LIKE '%bshard_close_request%'
     `).all();
     for (const market of pending) {
+      // FINDING-2 (NWT) 自治结算闸: commingled-spine 盘禁自治 close (单源 isCommingledSpine, J1 pool-commingle-detect).
+      //   pre-fix v0.7 markets 的 spine_p2sh 被 >1 市场共享 (market_id 没烤进 redeem) → close_attest 可能花到【别市场】
+      //   同址 spine UTXO (跨市场替换)。委员绝不自治签这类 close (隔离不在链上, 全靠链下 settler = 不可信)。
+      //   ⚠ 只闸自治 settle/payout 路; refund 是 outpoint-precise 独立路, 不在此处 (J1 decoupling, 别 orphan 退款)。
+      //   belt-and-suspenders: 现 VOTER_ENABLED 默认 OFF → 防御纵深, 为 Track B 启用铺路。
+      if (isCommingledSpine(market.spine_p2sh, sqlite)) {
+        commingledSkipped++;
+        console.warn(`[bshard-close-voter] ⛔ FINDING-2 commingled spine market=${market.id.slice(-8)} spine=${String(market.spine_p2sh).slice(0,20)} → 禁自治 close (跨市场替换风险)`);
+        continue;
+      }
       let req;
       try { req = JSON.parse(market.metadata || '{}').bshard_close_request; } catch { continue; }
       if (!req || !req.txSafeJson || !req.committee_pks) { skipped++; continue; }
@@ -198,8 +209,8 @@ export async function bshardCloseVoterTick() {
         if (r.signed) signed++; else if (r.refused) refused++; else if (r.errored) errored++; else skipped++;
       }
     }
-    if (signed || refused || errored) console.log(`[bshard-close-voter] tick: ${pending.length} pending | signed=${signed} refused=${refused} skipped=${skipped} errored=${errored}`);
-    return { ok: true, pending: pending.length, signed, refused, skipped, errored };
+    if (signed || refused || errored || commingledSkipped) console.log(`[bshard-close-voter] tick: ${pending.length} pending | signed=${signed} refused=${refused} skipped=${skipped} commingledSkipped=${commingledSkipped} errored=${errored}`);
+    return { ok: true, pending: pending.length, signed, refused, skipped, commingledSkipped, errored };
   } finally { running = false; }
 }
 
