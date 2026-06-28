@@ -36,6 +36,36 @@ const STARTUP_GRACE_MS = 45 * 1000;        // 45s grace (= settler 30s + 15s 错
 let timer = null;
 let running = false;
 
+// J1/NWT 2026-06-28 (gap③ broker-DM settle 根因): relay sign_input_for_settle 默认路用
+// `new Transaction(JSON.parse(plain))` 重建 tx 给 createInputSignature → 新 kaspa-wasm 下 plain-object
+// scriptPublicKey 不被正确注入 sighash → checkSig false → settle "verification failed"(jepu1 8h 卡因)。
+// 修: voter 发 sign_req 前【无条件】把存的 plain phase2_tx_obj 转 safe_json(serializeToSafeJSON·spk 全保)
+// 发 {safe_json:true} → relay 走 deserializeFromSafeJSON 路(bshard 已 proven·relay.mjs L647)。
+// ⚠ bigint rehydration 必须和 relay.mjs L646-666 完全一致(否则 serialize 出的 safeJson 与 relay live 路不符)。
+// NWT 实测: new Transaction(plain).serializeToSafeJSON() round-trip lossless → 覆盖 jepu1 + 所有 stuck 老盘·零 re-dispatch。
+async function toSettleSafeJsonTxHex(txObj) {
+  const { Transaction } = await import('kaspa-wasm');
+  const parsed = JSON.parse(JSON.stringify(txObj)); // deep copy — 不污染 metadata 里的 plain phase2_tx_obj
+  parsed.lockTime = BigInt(parsed.lockTime || 0);
+  parsed.gas = BigInt(parsed.gas || 0);
+  if (Array.isArray(parsed.inputs)) {
+    parsed.inputs = parsed.inputs.map(i => ({
+      ...i,
+      sequence: BigInt(i.sequence || 0),
+      sigOpCount: Number(i.sigOpCount || 0),
+      utxo: i.utxo ? {
+        ...i.utxo,
+        amount: BigInt(i.utxo.amount || 0),
+        blockDaaScore: BigInt(i.utxo.blockDaaScore || 0),
+      } : undefined,
+    }));
+  }
+  if (Array.isArray(parsed.outputs)) {
+    parsed.outputs = parsed.outputs.map(o => ({ ...o, value: BigInt(o.value || 0) }));
+  }
+  return new Transaction(parsed).serializeToSafeJSON();
+}
+
 // Bettor r472 (P0 incident 2026-06-10): per-(key) log throttle. Stuck offers in a permanent
 // condition (e.g. collecting_sigs with invalid/undefined phase2_winner) were re-warned every
 // tick → 201MB log over days → bash fork exhaustion → whole Console tree torn down. Throttle
@@ -575,9 +605,12 @@ async function processPoolTxSign(voter) {
         `).get(voter.address, `%"market_id":"${market.id}"%`, `%"input_index":${inputIdx}%`);
         if (existing) { continue; }
 
+        // J1/NWT 2026-06-28 fix: 转 safe_json 再发 (spk 全保·见 toSettleSafeJsonTxHex 注释)
+        const _safeTxHex = await toSettleSafeJsonTxHex(meta.phase2_tx_obj);
         const signResult = await sendCommandAsync(voter.id, {
           type: 'sign_input_for_settle',
-          tx_hex: JSON.stringify(meta.phase2_tx_obj),
+          tx_hex: _safeTxHex,
+          safe_json: true,
           input_index: inputIdx,
         });
         if (!signResult?.ok || !signResult.signature) {
@@ -1106,9 +1139,12 @@ async function handleTxSignReq(voter, offer) {
   for (let inputIdx = 0; inputIdx < 2; inputIdx++) {
     if (signedInputs.has(inputIdx)) continue;  // already signed this input
     try {
+      // J1/NWT 2026-06-28 fix: 转 safe_json 再发 (spk 全保·见 toSettleSafeJsonTxHex 注释)
+      const _safeTxHex = await toSettleSafeJsonTxHex(meta.phase2_tx_obj);
       const signResult = await sendCommandAsync(voter.id, {
         type: 'sign_input_for_settle',
-        tx_hex: JSON.stringify(meta.phase2_tx_obj),  // relay JSON.parse 还原 tx_obj
+        tx_hex: _safeTxHex,
+        safe_json: true,
         input_index: inputIdx,
       });
       if (!signResult?.ok || !signResult.signature) {
