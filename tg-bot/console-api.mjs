@@ -73,6 +73,15 @@ export function poolMarket(id) {
 export function trendingMarkets(limit = 5) {
   return req('GET', `/api/pool/markets/trending?limit=${limit}`);
 }
+// 赛事聚合卡 (Owner 2026-06-28 首页视觉重构): 散盘按 card_group_id 聚成赛事卡.
+// 返 { ok, card_groups:[{ card_group_id, event_title, home_team, away_team, legs:[...] }] }
+export function cardGroups(limit = 8) {
+  return req('GET', `/api/pool/markets/card_groups?limit=${limit}`);
+}
+// broker fee DM 事件 feed (Phase 1: 托管/link 地址 broker). 返 { events:[{ tg_user_id, fee_sompi, market_title, ... }] }
+export function brokerFeeDmEvents(sinceMs) {
+  return req('GET', `/api/pool/broker-fee-dm?since=${Math.floor(sinceMs)}`);
+}
 
 // S-C stage4-5 — POOL external bettor registration (design LOCKED Bettor r263; J1 building backend).
 // 0-custody (J1 S5): bot NEVER moves funds — prep computes the deterministic side-P2SH so the bot can

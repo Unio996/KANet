@@ -1900,6 +1900,38 @@ export async function registerPoolRoutes(fastify) {
   // status/category 模式. 复用 specIsUsable 一致性 (= Bettor 1要求): 搜索/专题结果也得是结构化有规则,
   // 不把 21 个烂单推给用户. specIsUsable 在 bot 客户端 filter (= 现有 startBet L322 同模式),
   // backend 仅 SQL filter 不再 specIsUsable, 由调用方 (bot) 负责一致性. 单一源是 specIsUsable JS helper.
+  // GET /api/pool/broker-fee-dm?since=<ms> — Phase 1 broker DM 事件 feed (KANet-UI 2026-06-28).
+  // 返 broker_fee_landed 事件 ∩ tg_custodial_wallets (broker 收款地址 = 托管/link 地址的 broker).
+  // bot poller 每隔 pollMs 调; since=0 → 取最近 60s 兜底; 结果按 observed_at ASC 让 bot 按序 DM.
+  fastify.get('/api/pool/broker-fee-dm', async (request, reply) => {
+    const sinceMs = parseInt(request.query?.since, 10) || (Date.now() - 60_000);
+    const rows = sqlite.prepare(`
+      SELECT ce.id, ce.to_address AS broker_address, ce.payload, ce.observed_at,
+             w.tg_user_id
+        FROM chain_events ce
+        INNER JOIN tg_custodial_wallets w ON w.kaspa_address = ce.to_address
+       WHERE ce.event_type = 'broker_fee_landed'
+         AND ce.observed_at > datetime(?, 'unixepoch', 'subsec')
+       ORDER BY ce.observed_at ASC
+       LIMIT 50
+    `).all(sinceMs / 1000);
+    const events = rows.map(r => {
+      let p = {};
+      try { p = JSON.parse(r.payload || '{}'); } catch {}
+      return {
+        id: r.id,
+        tg_user_id: r.tg_user_id,
+        broker_address: r.broker_address,
+        fee_sompi: p.fee_sompi || 0,
+        market_id: p.market_id || null,
+        market_title: p.market_title || p.market_id || null,
+        settle_txid: p.settle_txid || null,
+        observed_at: r.observed_at,
+      };
+    });
+    return reply.send({ ok: true, count: events.length, events });
+  });
+
   // GET /api/pool/markets/trending?limit=5 — T5 (Q4, J2 2026-06-27): 热门市场, activity+commitment 加权
   // (非裸 volume → 防 seeder 刷量). 排序分 = bettor_count(承诺/活跃, 重权) + total_pool_kas(总承诺值);
   // 裸 volume 易刷(seeder 自挂大池), bettor_count(不同押注人数) 才是真活跃. 过滤: status=pending_bettors(开放押注)

@@ -23,7 +23,8 @@ export function startMessage() {
 
 // §11 v2 (Owner 终裁 2026-06-27): 老用户极简, 无 /help 提示行. custody 双守行永在.
 // Owner 2026-06-28: 老用户顶部嵌紧凑 5 热榜(标题+池+人数+深链按钮) + /hot 兜底. trending 传 null→无块.
-export function startMessageLinked(addr, custodial = null, trendingMarkets = null, botUsername = null) {
+// Owner 2026-06-28 UX重构: 加赛事聚合卡区 (sportsGroups != null → ⚽ 赛事区), 热榜/新盘双区.
+export function startMessageLinked(addr, custodial = null, trendingMarkets = null, botUsername = null, sportsGroups = null) {
   const shortAddr = addr.length > 20 ? addr.slice(0, 17) + '…' : addr;
   const custLabel = custodial === true ? '托管·仅试玩' : custodial === false ? 'key 你掌控' : '托管/非托管';
   const custWarn = custodial === false
@@ -39,14 +40,26 @@ export function startMessageLinked(addr, custodial = null, trendingMarkets = nul
     custWarn,
   ];
   const buttons = [];
+
+  // 🔥 热榜区 (bettors>=3 真实热度)
   if (trendingMarkets && trendingMarkets.length > 0) {
     const block = _compactTrendingBlock(trendingMarkets, botUsername);
     lines.splice(2, 0, ...block.lines);  // insert after header, before commands
     buttons.push(...block.buttons);
   } else if (trendingMarkets !== null) {
-    // trending fetch succeeded but empty
     lines.splice(2, 0, '', '🔥 热门市场: 暂无 · /hot 查看', '');
   }
+
+  // ⚽ 赛事聚合卡区 (新盘/冷启动, 信任卡, 无 bettor 门)
+  const sportsBlock = sportsGroups && sportsGroups.length > 0 ? sportsCardBlock(sportsGroups, botUsername) : null;
+  if (sportsBlock) {
+    // 在 commands 行前插赛事区
+    const cmdIdx = lines.indexOf('▸ /bet 押注   ▸ /faucet 领币   ▸ /wallet 钱包');
+    const insertAt = cmdIdx >= 0 ? cmdIdx : lines.length - 2;
+    lines.splice(insertAt, 0, ...sportsBlock.lines);
+    buttons.push(...sportsBlock.buttons);
+  }
+
   return { text: lines.join('\n'), keyboard: buttons.length ? { inline_keyboard: buttons } : null };
 }
 
@@ -110,6 +123,63 @@ function _compactTrendingBlock(markets, botUsername) {
   lines.push('按下方按钮复制深链 → 直接押注 · /hot 完整榜');
   lines.push('');
   return { lines, buttons };
+}
+
+// KANet-UI 2026-06-28 (Owner 钦定 broker 收益 DM): 单笔 fee 到账 DM 文案.
+// ev = { fee_sompi, market_title, market_id, settle_txid } (broker_fee_landed payload).
+export function brokerFeeDmText(ev) {
+  const feeKas = ((ev.fee_sompi || 0) / 1e8).toFixed(4);
+  const title = String(ev.market_title || ev.market_id || '').slice(0, 40);
+  return [
+    '💰 收益到账',
+    `你经手的市场「${title}」已结算`,
+    `本笔 +${feeKas} KAS`,
+    '▸ /earnings 看明细',
+  ].join('\n');
+}
+
+// KANet-UI 2026-06-28 (Owner 钦定首页赛事聚合卡): 赛事卡区文本+按钮.
+// groups = card_groups endpoint 返 [{card_group_id, event_title, home_team, away_team, legs:[{id,leg_key,kind,label,total_pool_kas,bettor_count,yes_implied_prob}]}]
+export function sportsCardBlock(groups, botUsername) {
+  if (!groups || groups.length === 0) return null;
+  const BOT = botUsername || 'KANET_Broker_bot';
+  const lines = ['', '⚽ 赛事押注'];
+  const buttons = [];
+  for (const g of groups) {
+    const teamLine = (g.home_team && g.away_team)
+      ? `${g.home_team} vs ${g.away_team}`
+      : (g.event_title || g.card_group_id || '').slice(0, 30);
+    const totalPool = (g.total_pool_kas || 0).toFixed(0);
+    const totalBettors = g.total_bettor_count || 0;
+    lines.push(`🏟 ${teamLine} · 💰${totalPool}KAS${totalBettors > 0 ? ` · 👥${totalBettors}人` : ' · 新盘'}`);
+    const rowBtns = [];
+    for (const leg of (g.legs || []).slice(0, 3)) {
+      const label = _legLabel(leg);
+      const prob = _legProb(leg);
+      const url = `https://t.me/${BOT}?start=${leg.id}`;
+      rowBtns.push({ text: `${label}${prob}`, copy_text: { text: url } });
+    }
+    if (rowBtns.length) buttons.push(rowBtns);
+  }
+  lines.push('');
+  return { lines, buttons };
+}
+
+function _legLabel(leg) {
+  const lk = String(leg.leg_key || '');
+  if (lk.startsWith('winner_')) {
+    const team = lk.slice(7);
+    return team === 'home' ? '主队赢' : team === 'away' ? '客队赢' : team === 'draw' ? '平局' : team + ' 赢';
+  }
+  if (lk.startsWith('total_o_')) return '大球 O' + lk.slice(8);
+  if (lk.startsWith('total_u_')) return '小球 U' + lk.slice(8);
+  if (lk.startsWith('spread_')) return '让球';
+  return (leg.label || lk).slice(0, 10);
+}
+function _legProb(leg) {
+  if (!(leg.bettor_count > 0) || leg.yes_implied_prob == null) return '';
+  const pct = Math.round(leg.yes_implied_prob * 100);
+  return (pct >= 5 && pct <= 95) ? ` ${pct}%` : '';
 }
 
 // KANet-UI 2026-06-22 (Owner 钦定 broker 收益统计 DM 显): 格式化 address-keyed 收益。

@@ -18,6 +18,7 @@ const pendingPayments = new Map();   // stage5 awaiting on-chain payment, poller
 // Bettor r63 P0 fix ① — link store 必持久化, 否则 bot 重启丢 linkedAddr → pending 里 undefined 字段被
 // JSON.stringify drop → confirm 时 linked_addr 缺 → push 上链失败 silent → Owner 500 KAS 类卡死.
 const linkedAddrs = new Map();       // tg_user → { address, linked_at } — persists across bot restart
+let brokerFeeTs = 0;                 // global cursor (ms): pollBrokerFeeEvents 起点, 跨重启续单
 
 try {
   if (existsSync(STATE_FILE)) {
@@ -25,6 +26,7 @@ try {
     for (const [k, v] of (j.sessions || [])) sessions.set(k, v);
     for (const [k, v] of (j.pendingPayments || [])) pendingPayments.set(k, v);
     for (const [k, v] of (j.linkedAddrs || [])) linkedAddrs.set(k, v);
+    brokerFeeTs = j.brokerFeeTs || 0;
     console.log(`[prediction-menu] state loaded: ${sessions.size} sessions, ${pendingPayments.size} pending payments, ${linkedAddrs.size} linked addrs`);
   }
 } catch (e) { console.warn(`[prediction-menu] state load skipped: ${e.message}`); }
@@ -35,6 +37,7 @@ function _writeAtomic() {
     sessions: [...sessions.entries()],
     pendingPayments: [...pendingPayments.entries()],
     linkedAddrs: [...linkedAddrs.entries()],
+    brokerFeeTs,
   });
   const tmp = STATE_FILE + '.tmp';
   writeFileSync(tmp, data);
@@ -394,6 +397,10 @@ export function getLinkedAddr(tgUser) {
   return v?.address || null;
 }
 export function listLinkedUsers() { return [...linkedAddrs.entries()].map(([tgUser, v]) => ({ tgUser, ...v })); }
+
+// broker fee DM 游标 — poller 跨重启续单 (persist 走 debounce, 可接受 250ms 丢失=最多重发一次 DM)
+export function getBrokerFeeTs() { return brokerFeeTs; }
+export function setBrokerFeeTs(ts) { brokerFeeTs = ts; persist(); }
 
 // Bettor r71 ① — settle-result poller: bot 追踪已押市场, 结算/退款后通知用户.
 // seen_settled = per-user array of marketIds already notified for terminal state (= 防重复 ping).

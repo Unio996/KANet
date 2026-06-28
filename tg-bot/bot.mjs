@@ -72,13 +72,14 @@ bot.command('start', async (ctx) => {
     const w = await api.tgWalletGet(tgUser);
     if (w.ok && w.json?.ok) custodial = !!(w.json.exists && w.json.address === addr);
   } catch { /* Console 暂不可达 → null → 中性 custody 警告 */ }
-  // Owner 2026-06-28: 老用户 /start 顶部嵌紧凑 5 热榜(标题+池+人数+深链按钮). trending null→无块.
-  let trending = null;
+  // Owner 2026-06-28 UX重构: 热榜(bettors>=3) + 赛事聚合卡(新盘/冷启动) 并联拉取.
+  let trending = null, sports = null;
   try {
-    const tr = await api.trendingMarkets(5);
+    const [tr, cg] = await Promise.all([api.trendingMarkets(5), api.cardGroups(5)]);
     if (tr.ok && tr.json?.ok) trending = tr.json.trending || [];
-  } catch { /* Console 暂不可达 → 无热榜块 */ }
-  const startMsg = M.startMessageLinked(addr, custodial, trending, CONFIG.botUsername);
+    if (cg.ok && cg.json?.ok) sports = cg.json.card_groups || [];
+  } catch { /* Console 暂不可达 → 无区块 */ }
+  const startMsg = M.startMessageLinked(addr, custodial, trending, CONFIG.botUsername, sports);
   return ctx.reply(startMsg.text, { reply_markup: startMsg.keyboard || undefined });
 });
 bot.command('help', (ctx) => ctx.reply(M.help()));
@@ -384,6 +385,24 @@ async function pollSettleResults() {
   }
 }
 
+// KANet-UI 2026-06-28: broker fee DM poller — Phase 1: 托管/link 地址的 broker.
+// 轮询 /api/pool/broker-fee-dm?since=<ms>, 对每笔新落链 fee 向 tg_user_id 发 DM.
+// 去重: brokerFeeTs 游标持久化 (_state.json via PM), 重启后续单.
+async function pollBrokerFeeEvents() {
+  const sinceMs = PM.getBrokerFeeTs() || (Date.now() - 60_000);
+  const r = await api.brokerFeeDmEvents(sinceMs);
+  if (!r.ok) return;
+  const evs = r.json?.events || [];
+  for (const ev of evs) {
+    const msg = M.brokerFeeDmText(ev);
+    try { await bot.api.sendMessage(ev.tg_user_id, msg); } catch {}
+  }
+  if (evs.length) {
+    const last = evs[evs.length - 1].observed_at;
+    if (last) PM.setBrokerFeeTs(new Date(last).getTime() + 1);
+  }
+}
+
 // KANet-UI 2026-06-13: runtime side-effects (Telegram poller + the 3 background pollers, which can send
 // real messages) live in startBot() so `import`ing this module (e.g. from a test) registers the handlers
 // WITHOUT going live. _launch_tg_bot.mjs calls startBot(); tests import { bot } and feed bot.handleUpdate().
@@ -392,6 +411,7 @@ export function startBot() {
   setInterval(() => { pollLoop().catch(() => {}); }, CONFIG.pollMs);
   setInterval(() => { pollPendingBets().catch(() => {}); }, CONFIG.pollMs);
   setInterval(() => { pollSettleResults().catch(() => {}); }, CONFIG.pollMs);
+  setInterval(() => { pollBrokerFeeEvents().catch(() => {}); }, CONFIG.pollMs);
   bot.start();
   console.log('[tg-bot] @' + CONFIG.botUsername + ' up (broker=' + (brokerRelayId || 'UNSET — set in Console Settings') + ', 0-key / deep-link only)');
 }
