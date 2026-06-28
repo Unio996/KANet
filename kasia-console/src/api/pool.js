@@ -1884,18 +1884,24 @@ export async function registerPoolRoutes(fastify) {
   // GET /api/pool/markets/trending?limit=5 — T5 (Q4, J2 2026-06-27): 热门市场, activity+commitment 加权
   // (非裸 volume → 防 seeder 刷量). 排序分 = bettor_count(承诺/活跃, 重权) + total_pool_kas(总承诺值);
   // 裸 volume 易刷(seeder 自挂大池), bettor_count(不同押注人数) 才是真活跃. 过滤: status=pending_bettors(开放押注)
-  // + deadline>now+1h(快截止的不上热榜) + created>1h ago(排极新, 防刚建的刷榜) + total_pool≥阈值(挡空/微市场).
-  // 只读端点, 不碰 settle. (TrendingScore 公式注释清楚 = 防后人误判为可 game 的裸热度.)
+  // + deadline>now+1h(快截止的不上热榜) + created>1h ago(排极新, 防刚建的刷榜) + total_pool≥阈值(挡空/微市场)
+  // + 排除 commingled spine(FINDING-2 单源 isCommingledSpine, J1 2026-06-28). 只读端点, 不碰 settle.
   fastify.get('/api/pool/markets/trending', async (request, reply) => {
     const q = request.query || {};
     const limit = Math.min(Math.max(parseInt(q.limit, 10) || 5, 1), 20);
     const minPoolSompi = parseInt(q.min_pool_sompi, 10) || 500_000_000;   // 默认 5 KAS 最小池, 防刷量空市场
     const BETTOR_WEIGHT = 10;   // 每个不同押注人 ≈ 10 KAS 等权 — 让"多人小注"胜过"单人刷大池"(防 volume gaming)
     const now = Math.floor(Date.now() / 1000);
-    const createdCutoffIso = new Date((now - 3600) * 1000).toISOString();   // 创建 >1h ago
+    // created_at stored as local datetime (no TZ suffix). Use local format for comparison, not UTC ISO.
+    const _cd = new Date((now - 3600) * 1000);
+    const _p = n => String(n).padStart(2, '0');
+    const createdCutoffIso = `${_cd.getFullYear()}-${_p(_cd.getMonth()+1)}-${_p(_cd.getDate())} ${_p(_cd.getHours())}:${_p(_cd.getMinutes())}:${_p(_cd.getSeconds())}`;   // 创建 >1h ago (local format)
+    const { commingledSpineSet } = await import('../lib/pool-commingle-detect.mjs');
+    const commingledSpines = commingledSpineSet(sqlite);
     const rows = sqlite.prepare(`
       SELECT pool_markets.id, pool_markets.resolution_rule_spec, pool_markets.category,
              pool_markets.outcome_side, pool_markets.deadline, pool_markets.maker_stake_amount,
+             pool_markets.spine_p2sh,
              (SELECT COUNT(*) FROM pool_bettor_sides s WHERE s.market_id = pool_markets.id)
              + (SELECT COUNT(*) FROM pool_bettor_sides s WHERE s.market_id IN (SELECT shard_market_id FROM market_shards WHERE logical_market_id = pool_markets.id)) AS bettor_count,
              (SELECT COALESCE(SUM(stake_amount),0) FROM pool_bettor_sides s WHERE s.market_id = pool_markets.id AND s.direction = 0)
@@ -1928,12 +1934,14 @@ export async function registerPoolRoutes(fastify) {
         trending_score: Math.round(trendingScore * 100) / 100,
         card_group_id, leg_key,
         _totalPool: totalPool,
+        _spineP2sh: r.spine_p2sh,
       };
     }).filter((m) => m._totalPool >= minPoolSompi)   // 防刷量: 池太小不上热榜
+      .filter((m) => !commingledSpines.has(m._spineP2sh))   // FINDING-2: 排除 commingled spine (J1 单源 helper)
       .sort((a, b) => b.trending_score - a.trending_score)
       .slice(0, limit)
-      .map(({ _totalPool, ...m }) => m);
-    return reply.send({ ok: true, count: scored.length, score_formula: `bettor_count*${BETTOR_WEIGHT} + total_pool_kas (activity+commitment 加权, 非裸 volume)`, filters: { status: 'pending_bettors', deadline_gt: '+1h', created_lt: '-1h', min_pool_kas: minPoolSompi / 1e8 }, trending: scored });
+      .map(({ _totalPool, _spineP2sh, ...m }) => m);
+    return reply.send({ ok: true, count: scored.length, score_formula: `bettor_count*${BETTOR_WEIGHT} + total_pool_kas (activity+commitment 加权, 非裸 volume)`, filters: { status: 'pending_bettors', deadline_gt: '+1h', created_lt: '-1h', min_pool_kas: minPoolSompi / 1e8, exclude_commingled: true }, trending: scored });
   });
 
   fastify.get('/api/pool/markets', async (request, reply) => {
