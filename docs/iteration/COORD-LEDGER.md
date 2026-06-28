@@ -20,6 +20,19 @@
 - **Bettor(协调)= 全执行域 read-only 结构锁**:只写协调文档域(本 ledger / 决议 / 派工卡 / 评估报告),代码域零 write,write 永远派工。
 - 各执行 agent:自己 owner 域 write,跨域升级。
 
+## 🔴 查资产硬门(Owner 钦定·2026-06-28·机制非纪律·破"记下的铁律被无视")
+Owner 元问题:写进文档的铁律(CLAUDE.md 接位 SOP 第5条"设计前查资产防重造")= **被动**·必被忽略(同线8"改了又坏"病)。根治 = 变**主动门禁**(同 `lint-kanet.mjs` pre-commit 硬失败:机制不给突破的机会)。三层,协调人 Bettor 强制执行点:
+1. **接位即查**:每个新 session agent 接位**第一条消息**必报"我的域这几件事**已有没有**(file:line)"——逼真搜·非"我读过"。没交 = **不派活**。
+2. **提案模板**:任何"设计/新建"提案**开头必有**"既有资产核查(查了哪些 doc/表/code·file:line)+ 判定:新建 / 复用 X"。缺 = **打回·不进 co-verify·不让 commit**。
+3. **重造事故记账**(下方):每次差点重造白纸黑字记·让浪费可见、有代价。
+**执行点 = Bettor**:任何 GREEN / greenlight 前,没查资产证据 = 不放行。我失职放过=你钉我·不拿"提醒过"当借口。
+### 重造事故记账(2026-06-28 起)
+- **#27a 委员排除**:J1 差点重写·既有在 `sampleAndStoreCommittee` L343-364(2026-06-14 已 SHIPPED)·verify-before-act 救场。
+- **broker 身份**:J2 差点走 `broker_relay_id` relay 老路·地址制既有在 `broker_onboarding` v173 + `pool.js` L922(Owner 2026-06-22 钦定)·Owner 拦截。
+
+## 测试网成果口径(Owner 钦定·2026-06-28·钉死框架)
+测试网钱=faucet 无价值。**成果 ≠ "安全/没丢钱/退款守恒"**(框反·Owner 不关心)。**成果 = ① 系统端到端真跑通 ② 狠压出更多 bug**(测试网用来炸·非保平安)。报数口径:**"跑通了没 / 又炸出什么 bug"**·禁报"安全/没丢钱"。姿态=主动炸系统逼 bug·非守安全。配 [[feedback-testnet-spend-bettor-decides-coin-plentiful]]。
+
 ## 诚实口径铁律(全线适用)
 现多数 enforce / 经济层 = **driver-side 或设计收敛**。**别 claim production-trustless 直到自治 daemon 真落 + 红队过 + 双节点同证。** 口径跟实 enforcement 成熟度走。报数用级别词:机制证通 < 端到端 demonstrate < 干净验收。
 
@@ -327,6 +340,114 @@ owner=KANet-UI(渲染)+ J2(聚合端点)+ J1(可信呈现)+ NWT(红队 UX);主�
 
 ---
 
+## 🔴 线 12：NUM2BIN settle 回归 + DM-to-phone live-test（2026-06-28·DM 测试逼出今天最大 bug·未收尾）
+### 一句话
+broker DM live-test（"每个 broker 一笔收入到账→电报 DM 通知他·Owner 钦定核心"）反逼系统走完整 settle 链，**炸出今天上午修 FINDING-2（88797d88 commit_v2）引入的回归：global_commit_id 用 `byte[](globalYes/No,16)`→silverc NUM2BIN(16)→Kaspa node 限 ≤8 bytes→所有 post-commit_v2 新 v0.7 盘 settle TX 被 node 拒**。118 个 pre-commit_v2 旧盘 settle 100% landed；commit_v2 后 0 个 settle 过（潜伏，zzwzd/xzztw 炸出）。
+### 状态（HIGH·未真闭）
+- ✅ **regression 找到+全队收敛**：J2 链上验 scope（118 旧 landed / 0 新 settle）+ NWT sweep（byte16 在 3 .sil：PoolSpine_v07:335 / PoolLeaf:113 / FoldNode:74 + JS pool-fold.mjs L35-36 foldRootCommit）。
+- ✅ **fix commit 4ac08fb7（byte16→8 全 4+1 文件·byte-exact）** + J1 定 layout（market_id binding 不动=FINDING-2 隔离保住）。
+- ⚠️ ~~**fix INERT·xzztw 仍 NUM2BIN-16 拒(f169647)·疑编译缓存 cacheHit**~~ **【J2 早先记录·已被 NWT byte-验推翻·见 L355·我 timeline 推断未字节验=违"查了再写"】**：(a) f169647 是 **zzwzd**(16B) 的 TX·非 xzztw；(b) xzztw 是 **8B**(ECDSA 拒·非 NUM2BIN)；(c) cacheHit 不成立——cacheKey = sha256(.sil 内容)+ctor (pool-p2sh.mjs L67-68)·内容变必重编·旧 16B hit 不到·**无需清缓存**。8B fix 编译层已生效(xzztw 即活证)。
+- 🛑 **Bettor 终拍 STOP 疲劳硬搞**（J1/J2/NWT 收敛同意）：手动 metadata surgery race settler RMW（被覆盖）+ xzztw 手术 4-of-5 sig 坏→ECDSA 拒（**更正：xzztw 是 8B 非 16B·失败因我手术 sig 非编码·见 L355**）+ 全队疲劳改 money DB=造新 bug 风险（Owner 红线）。**别在累的时候 racy 改碰钱码**。
+- ✅ **broker DM Phase 1（72596c74）ship**：KANet-UI（07:44）。
+- 🔴 **NWT 红队 PUSH-BACK（07:50·docs/2026-06-28-NWT-redteam-broker-dm-phase1.md）**：B1 BLOCKING = `pollBrokerFeeEvents` catch{} 静默吞 sendMessage 失败 + 游标无条件前进 → DM 永久丢失；P1 CONDITIONAL = /api/pool/broker-fee-dm 无 auth（127.0.0.1 testnet 可过·production 必修）。fee_sompi/broker_addr/去重/唯一写入方 全 PASS。@KANet-UI 修 B1 → NWT 快速复核 → live-test。
+- ✅ **KANet-UI B1+P1+M1 全修（24da268b·08:01）**；NWT 复核 PASS：B1 cursor 成功才进/失败 warn+break ✅；P1 verifyIngestRequest+reply.sent guard ✅；M1 sportsCardBlock copy 引导文案 ✅。
+- ✅ **NWT demo 路径审 PASS**：backfill 不挡 fresh 事件 ✅；fee_sompi 链验 ✅；broker=Owner 无边界问题 ✅；brokerFeeLandedEmitTick wired settler L1179 ✅；Owner tg_user_id=1437320734↔kaspatest:qzhet8m2...gzgdl ✅。Notes: ①bot 重启载 24da268b ②POOL_SETTLER_TICK_SEC=60 提速 ③gap③ live-settle 必先通。
+- ✅ **NWT 澄清 xzztw/zzwzd**：zzwzd(05:50建·fix前)=60cd(16B)→NUM2BIN拒·f169647是它；xzztw(06:30建·fix后)=58cd(8B)→ECDSA拒。COORD-LEDGER 之前混淆两盘·8B fix 确认生效。
+- 🔴 **NWT 通用分润可见层 PUSH-BACK（08:18·docs/2026-06-28-NWT-redteam-universal-revenue-visibility.md）**：DESIGN REJECT=introducer无DB支撑（pool_markets零introducer列·fee/intro表=0·物理不可实现「5角色全可见」是过度承诺）；BLOCKING-1=oracle/node委员地址重叠·按address match无法区分·要分必须重算feeSplit；BLOCKING-2=UNIQUE(txid,event_type)冲突·multi-role INSERT OR IGNORE静默丢失·修法role-specific event_type；BLOCKING-3=single markEmitted stamp封死multi-role retry·需per-role独立stamp。最小可行路：broker可见(已有)+committee合并fee一角色+introducer Phase2。
+- ⚠ **gap③ CONDITIONAL GO（08:26·docs/2026-06-28-NWT-redteam-gap3-execution-design.md）**：3 CONDITIONAL无BLOCKING·等J2贴执行前查3项结果·NWT/Bettor确认→建盘。
+### NEXT（清醒做·非疲劳）
+1. ✅ **8B .sil 已确认生效**（无需清缓存）：cacheKey 已含 .sil content sha256（pool-p2sh.mjs L67-68）→ 内容变必重编；NWT byte-验 xzztw=58cd(8B)=活证；env 无 stale-path 覆盖。gap③ 编译层闭。
+2. **干净 live-settle 验（gap③）**：建全新 8B 盘·**全本地委员（无 cross-node 成员·避免 4/5 sig 卡）+ recognized oracle 源（ESPN-final 已结束赛事·voter 按 findExtractor→deriveKanetNativeVote 自然投票，⚠ test-oracle 不被 findExtractor 认·voter L355-363 预过滤 skip·J2 code-grounded 更正·J1 确认）→ 自然 settle → node-accept（无 NUM2BIN）+ settle_txid landed** = 真闭 gap③。这步过了 NUM2BIN fix 才算 live-证。
+   - ✅ **gap③ pre-check 4/4 全 PASS（08:30）**：[2] POOL_SETTLER_TICK_SEC=60（KANet-UI）[3] MLB 401815924 BOS4-NYY1 Final·findExtractor=espn·winner=BOS ✅（J2 predict-then-verify·NWT 确认）[4] kaspa_tx_log 121k/15min·08:28:46（NWT）。
+   - ⚠ **J1 08:41 自纠·(a)闸结构上错**：committee 在 deadline 用 endBlockHash 采（settler.js L670 sampleAndStoreCommittee），建盘时 pool_committee 空——committee_pks 建盘后不存在。→ 废(a)。
+   - ✅ **option(c) 采纳（08:43）**：J1 4 :3300 oracle(Alice/Bob/Carol/Dave) staker_pk_x 在 :3200 oracle_stake_enrollments 临时标 active=0 → oracle_pool_chain_view 扫 9-local → create 烤 9-local pool_merkle_root → VRF deadline 从 9 选 5 必全本地。NWT 代码实查：scanner L99 `WHERE active=1` + L123 UPDATE 不写 active → DB 标安全不覆写。
+   - ✅ **J2 UPDATE 执行完（08:48）**：4 oracle active=0，oracle_pool_chain_view 08:49:15 新行 pool_size=9 snapshot_daa=48947865（NWT DB 验）。active enrollments=9（全本地）。
+   - ✅ **pool_size=9 三端独立确认**（08:49）：J2 curl :3200/api/oracle-pool/chain-snapshot → snapshotDaa=48947981 pool_size=9；KANet-UI 同验 48948125/9；NWT DB 直查 48948125/9 leaves_count=9。
+   - ⏳ **J2 建盘进行中**（08:50 GO）：J2 查 maker/bettor 资金中·pool_size=9 全本地·NWT 监控新 market 出现+pool_snapshots 烤 9-local root。
+   - 📋 **建盘后 restore SQL（J2 执行）**：`UPDATE oracle_stake_enrollments SET active=1 WHERE staker_pk_x IN('a102fbde...','9e2db8...','7013f1...','e666239...')` — 不影响已烤 9-local root 的 gap③ 盘·仅恢复未来新盘池到 13。
+   - 🔴 **盘1 qkzh6 废（09:0x）**：J2 误用 register-v07(bshard 路·建 market_shards 行)→ isBshard-skip(settler L356)→ 永不委员结算。NWT 5th-vantage 坐实。教训记次要。register(L1310)=非-bshard 正确路。
+   - ⏳ **盘2 jepu1 建成+种注（09:12）**：maker=broker-1(非-oracle)·broker=Owner·8B·df3cd1c4 9-local root·register(L1310)非-shard 双边真注·非-bshard 验过。committee 5/5 全本地(maker-1/broker-2/tester-1/NWT/J2test)。
+   - 🔴 **jepu1 settle 卡 covenant-verify（09:3x-09:5x·全队共诊）**：settle TX f9e64afc 持久被拒 "script ran but verification failed"。**5 假说系统 ruled-out**(commit_v2匹配/merkle对齐/5真签全组进/sig-PK序全selection一致/pk_hash序)。剩前沿 (a)sighash不符 (b)非-sig require。✅ **gap③ 核心证毕**(8B node-exec+委员全本地+commit_v2+merkle+5/5真签)·covenant 在尽职拒非bug。
+   - 📋 **finding 捕（docs/2026-06-28-gap3-broker-dm-settle-covenant-verify-finding.md）**：含 5 假说 ruled-out 全表+J1 钦定 bisect(取1 sig 手动 verify input0 sighash→❌=a/✅=b)+可复用 demo 配方。**清醒诊 handoff·从 bisect 起步·盘 jepu1·tx f9e64afc**。
+   - 次要(独立)：L2767 `||3` latent(jepu1 未触发·oracle_relay_ids=5·建议改读 committee size/threshold+lint)；LLM upstream 宕(ports 3010-3013·影响投票非签名)；register bshard/logical 误用第3次→lint rule(线11)。
+3. **DM-to-phone demo**：同一干净盘 broker_address=Owner 托管地址（kaspatest:qzhet8m2...·已在 PM linkedAddrs·poller 修后 d1f68dd1/9151f81f live）→ settle 出 broker fee → broker_fee_landed → DM 弹 Owner 手机。Bettor 链验 fee+DM。
+4. **迁移（Bettor 协调）**：**16B-spine 坏盘**（zzwzd 等 pre-fix·NUM2BIN unsettleable）→ deadline refund（测试币·盯 refund_txid landed 别 strand）。**xzztw 单列**：它是 8B(非 16B)·仅因我手术 sig 坏 + cross-node 第5委员卡而未 settle·非编码死盘·处置（refund 还是干净重签）由 Bettor 拍（团队已倾向走 fresh 全本地委员盘·xzztw 大概率也 refund）。
+### 🔑 co-verify 3 层教训（今天两次同根：broker-txid + NUM2BIN）
+co-verify 必三层全：① **结构**（spine redeem-bytes recompile 跨节点同 P2SH）② **值匹配**（.sil 重算==JS builder·**注意：今天 .sil-16 vs JS-16 内部一致"对死"了·但两个都错**）③ **live-node 接受**（真链 settle/close TX 广播 landed）。FINDING-2 那轮只做①②（②还都 16=错），漏③。**碰 node 接受的（settle/close TX 实广播）co-verify 必含 live-landed·结构/recompile/值匹配都不够**。+ **fix 提交≠生效**（编译缓存）：fix 后必 live 重证。配 [[feedback-offline-test-must-use-real-schema-with-triggers]]。
+owner=J1（.sil/commit_v2 + 缓存）+ J2（settler/驱动）+ KANet-UI（部署/建盘）+ NWT（红队/scope）·协调/迁移/live-验=Bettor。
+
+### 📌 收口（2026-06-28 午后·Bettor·清醒接位先读这段）
+**broker DM gap③ 当前精确状态（= J1 字节级修的接位起点）:**
+- covenant-verify 根因再收窄：~12 假说 ruled-out + **clear-resign 排除 stale-sig**（清旧 sig 重签仍拒）→ 锁定 **relay sign 算的 sighash ≠ node checkSig 算的 sighash**，**dup-pk（委员重复 pk）头号嫌疑**。
+- **jepu1 处置 = FREEZE 当 sighash 测试台**（不 refund·唯一 dup-pk 盘·修完即测）。tx `f9e64afc`。
+- **J1 正在 active 修字节级 sighash（午后进行时·非 deferred）**（kaspa-wasm standard sighash vs covenant 算的某 prev-output script-code/amount 进 sighash 部分）；J1 记忆 `v07-parimutuel-settle-covenant-debug`（最终诊断+精确 fix 起点）。Bettor 待命验落链（fix 落→jepu1 测试台 settle→broker fee→DM）。
+- broker DM 功能本身（设计 / NWT 审 PASS / B1 修 / emit / poller / 投递）**全 ready**，纯卡此 settle 机器 bug。e2e 没闭。
+
+**🔴 身份混乱事件 + KANet-UI 下线（午后·已固化堵死）:**
+- KANet-UI 会话退化：从自己 relay（`qqnctze0yf`）发一串「[Bettor·...]」决策（clear-resign GO / jepu1 freeze / 5th-vantage）+ **误串韩语** → 制造指挥权混乱（Owner 问"那个 Bettor 是谁？我没看到"）。
+- Bettor 查 `from_address` 坐实**非真 Bettor**（真 Bettor=`qpjhaad7` / relay `5c07f7e5`）→ 频道正身份 + 让 KANet-UI 归位 → **Owner 把 KANet-UI 会话下线**。
+- **固化堵死**：KANet-UI 接位「⛔ 红线」段（不替协调者拍板 / 缺席升级非顶替 / 身份以 relay 为准）+ 框架 **§8.6** 频道身份铁律通则（全 agent 适用）。
+- Bettor 自纠：初判"另一个 Bettor 会话"是**只看内容前缀未查发送方=违 verify-before-act**，查 `from_address` 才纠正。
+- ⚠ **KANet-UI 下线 → UI/operator/部署/首页② 域暂无 owner**（见 ESCALATIONS）。**单一协调者 = Bettor（qpjhaad7）。**
+
+---
+
+## 🔴 线 13：ZK-settle 转向 — payout 算术搬进 RISC0 电路（Owner 钦定·2026-06-28 夜·当前主线）
+### GOAL（Owner 直令 16Z：今晚必须干出 settle-e2e LAND）
+脆性 covenant payout 结算（线 12 一整天炸：NUM2BIN-16 / sighash / dup-pk… 同族脆性反复）→ Owner 钦定转 ZK（一周前既有方向）。把 payout 算术 port 进 RISC0 guest，链上验一个 groth16 proof（OpZkPrecompile 0xa6），根治整类逐字节脆性。**两阶段：verdict 仍 4-of-5 委员（层1 outcome）+ payout 零委员可证（层2 ZK）·仅 bshard 路。**
+### INVARIANTS
+- **verify-value-source 递归**：journal 的 inputs_commit/verdict 必【链上烤死值 introspect·非 witness】非-vacuous（P3 命门）；attested_winner 必从 PS UTXO state byte-decode·零 DB（B1）。
+- **journalHash 三层 byte-equal**：guest journal == golden-ref == covenant 烤的 expected_journal_hash。
+- **绝不回委员路**（prove-fail escape = deadline auto-refund·红线·复盘核心）。
+- NO TX NO STATE；prover de-risked ≠ settle-e2e LAND；P3 审死前绝不 claim trustless-safe。
+### STATUS（2026-06-28 16:4xZ·滚动）
+- ✅ **verifier 侧证**：0xa6 在 TN12 接受 groth16，P1 fixture receipt 消费（txid `160c3b5b`）。
+- ✅ **prover 侧真证（升级·非 trivial）**：真 settle guest（payout 算术 port 进电路）groth16 PROOF EXIT=0，journal 65B zkVM 内 **byte-equal golden-ref**（bets_root `41b7e8e6`==B2 / payout_root `715dfe50`==V2 / winner 00）。journal_hash 候选 `sha256(journal)=71e8b8ab`。中途 WSL OOM → empty-subtree 优化（byte-equal 守恒·V1-V4 对死）。
+- ✅ **journalHash 三方 byte-equal**：J1 实跑 / NWT 独立重算 / J2 真 computeJournalHash（import 非 re-impl）== `71e8b8ab`。⚠ 定版仍 gated J1 gate-build（确认 raw-sha256 还是 RISC0 envelope·attack#8）。
+- ✅ **P4 settler 集成设计审（NWT·CONDITIONAL GO·8 向量 5 PASS）+ Bettor 裁全采纳**（docs/2026-06-28-NWT-redteam-P4-zk-settler-design.md）：
+  - **B1（attested_winner 源）= ACCEPT**：必从 PS UTXO state byte-decode·禁任何 DB 表（verify-value-source·同 fix② vacuous 类）。STUB 用正确路死不走 DB 捷径。J1 给 PS-state offset → J2 byte-decode → P3 covenant 对齐。
+  - **B2（prove-fail escape）= ACCEPT + Bettor 补一维**：escape=deadline auto-refund·**bets>0 strand 用全 bettor refund_draw 非 maker-only refund_maker_unjoined**；bets>1024 → gatherOrderedBets pre-check escape；**绝不回委员路**。demo backstop=既有 deadline CLTV+grace（outpoint-precise）；production 提前退款排 milestone。
+  - **C1（bets 序）= ACCEPT**：demo 明标单节点 db_id≈daa；production 必从 kaspa_tx_log.block_daa_score+tx_idx derive。今晚单片 sequential demo 满足·不阻塞 LAND。
+  - **P3 GATING（safety 完全 gated）**：inputs_commit/verdict covenant introspection 非-vacuous = NWT 下个主战场·不得 defer。
+### NEXT（序列·B1 在 wire 临界路径）
+```
+DoD: settle-e2e LAND = 真 settle guest proof → ZK close TX 链上 LAND（机制 demonstrate）
+序列: J1 [journalHash 定版 + B1 PS-state offset] → J2 wire(替4 stub+B1 byte-decode+B2 guard+自核 journalHash) → Bettor co-verify(journalHash+B1 零-DB 调用链+byte-equal 三层) → KANet-UI 部署建单片 bshard 盘 FUND → ZK close → LAND → 四方 co-verify → 报 Owner(demonstrate 非 trustless)
+通过条件: ZK close TX node-accept + LAND + journal_hash 链上烤死对死 + attested_winner 链源
+失败处理: 同 DoD 连 2 轮 FAIL → ESCALATIONS
+```
+owner=J1（guest/prover/gate-build/B1 layout）+ J2（settler wire/builder/B2）+ KANet-UI（部署/建盘/operator）；reviewer/红队=NWT；P3 审=NWT 下个；协调/裁/co-verify/验落链=Bettor。
+**诚实标**：prover 真 de-risk + 算术 byte-equal·**settle-e2e 未 LAND**（下一个真 LAND）；P3 未审=不 claim trustless-safe；报数级别词=机制 demonstrate。
+
+### 🔴 Owner 裁定 B（2026-06-29 00:1xZ·方向转折·覆盖最简内核路）
+- **背景**：journalHash 三方 byte-equal + P4 设计审裁完后，J1 为赶今晚 LAND 裁出**最简内核路**（non-continuation CloseZk·全 :3300 自包含·砍 bshard 市场/continuation/oracle-attest）。Bettor 采纳并钉 scope，但**透明问 Owner 确认 scope 收窄**。
+- **Owner 拍 B**：要**真实押注盘的完整 ZK 结算 e2e**（真 bshard 盘 register→真押注→4-of-5 委员 attest→ZK 结算 close→真分钱·完整两阶段 verdict 委员+payout ZK），**不要最简内核 smoke**（缩水·没说服力）。**Owner 明确接受今晚大概率 LAND 不了·宁可踏实做对**。
+- **🛑 HALT 最简内核路**：bshard 市场/continuation/oracle-attest **不砍**=Owner 要的真盘路。J1 回 continuation 版 CloseZk（offset-53 layout）。
+- **🔑 解除夜赶压力（Bettor 钉·money-adjacent 不夜赶）**：Owner 接受今晚 LAND 不了 → 不 racy 硬搞·不夜赶碰钱码·真盘 byte-exact co-verify 一维不省。今晚=设计/派工对齐 + 起手稳做（KANet-UI 建真盘+真押注·J1 finalize continuation CloseZk.sil + phase1 attest builder 设计）；LAND=多 pass 踏实工程。
+- **真盘完整序列**：KANet-UI 建真单片盘+真押注落链 → deadline → J1 phase1 委员 attest（4-of-5·产 CloseZk-locked continuation·烤 attested_winner+gate_tmpl_hash·NEW builder）→ J2 gather 真 bets+zkCloseTick 集成（真跑·非只 co-verify）→ J1 prove（over 真 bets）→ build close_zk（花 continuation+gate）→ LAND → 四方真盘 co-verify（predict-then-verify+gate-spk 绑+B1 链源）。
+- **NEW 工作量（临界路径·待 J1 ETA）**：phase1 委员 attest builder（产 CloseZk-locked continuation）+ phase2 close_zk builder + continuation CloseZk.sil finalize。J2 settler zkCloseTick 真集成。
+- ⚠ **已沉的可复用资产（别重造）**：journalHash framing=raw sha256(71e8b8ab·定版) / image_id 335cae6c / gate_tmpl_hash b9d56ce4 / B1 readAttestedWinnerFromState offset-53 continuation 版（9b9804b5·非 non-continuation 版）/ prover de-risk（groth16 from guest byte-equal golden-ref）/ close_attest_zk 两输入格式（in0 CloseZk+in1 0xa6 gate·gate-spk introspect 绑 journal）。
+**复盘**：`docs/2026-06-28-zk-settle-pivot-retrospective.md`（困难/技术失误/教训·Owner 钦定·Bettor 补充时间线+OOM 教训+并行稳定层）。
+
+### 执行进度（真盘完整 LAND 冲刺·2026-06-29·滚动）
+- **Owner 校准（00:1xZ）**：「无论如何抢时间抢进度」+「这是你之前决策失误造成的」。Bettor 收回「不赶」姿态→**全速抢进度 + 真盘完整两者都要**；只保留底线=碰钱 byte-exact co-verify 不为赶而省。关键杠杆=测试网 deadline 设短（5-10min·Bettor 测试网全权）→ 真盘也今晚能走完。
+- **J1 ETA（诚实·新码量）**：① finalize CloseZk.sil ~20min ② phase1 委员 attest builder + 格式给 J2 ~45-60min（~30min 先给格式并行 wire）③ close_zk 2-input assembly + LAND = prove 后 ~45-60min。**全路 ≈2h close_zk LAND**·临界长杆=phase1 builder + 2-input assembly 新码（prove/gate verify/keyless-spend 已 ready 不在长杆）。
+- **职责划分（J1/J2 自厘清）**：J2 zkCloseTick=gather ordered bets(链序+on-chain bets_root 自验)+ self-fetch continuation UTXO outpoint + 读 attested_winner(B1)→ 喂 J1；J1=prove over 真 bets → journal/receipt → gate sig_script → build 2-input close_zk（新 relay handler `unlockBshardZkClose`·异构 2-input）→ broadcast → LAND。
+- ✅ **phase0 LANDED + Bettor 链验 PASS（00:26Z·predict-then-verify·:3200 DB + kaspa_tx_log）**：真盘 `ext-pool-v07-1782667323858-bh01w`（spine pzde7jkcja）·shard-0 bettor_count=2 open·**真押注守恒**：YES `e72d8e7e` 50 KAS(dir0) + NO `4a355a77` 30 KAS(dir1)·三押注 txid 全链上 LANDED（YES 04bb1961 / NO c6a1f990 / maker13.47 d5e173ce）。**真实押注+真 stake 落链·非合成**。leaf outpoint 9de79b2b:0=gatherOrderedBets 起点。absorb 序=YES 先→NO 后·bets_root=fold(ZERO32,YES_leaf,NO_leaf)。deadline 1782667803(00:30Z)→ 过后 phase1。
+- ⏳ **NEXT**：deadline 过 → J1 phase1 builder ready(~01:05) → 委员 attest 真盘(产 continuation·烤 attested_winner+gate_tmpl_hash) → J2 gather+喂 J1 → J1 prove+build close_zk → LAND → 四方 co-verify（Bettor: predict-then-verify payoutRoot + gate-spk 绑定真实非 witness + B1 链源 + payout 分发守恒）。
+
+### ✅ 真盘 bh01w 建成+押注入链（KANet-UI 2026-06-28 ~17:25Z）
+- **market_id**: `ext-pool-v07-1782667323858-bh01w`
+- **spine_p2sh**: `kaspatest:pzde7jkcjapra73x3sy4lkgaq8ld6yuxx0dyf8y2mqcvg0wm3alsugqlrzyfn`
+- **shard-0 P2SH**: `kaspatest:prgl0x6ulrcge4x4h2qj5u994dzux5eq42qpn7uw8jf28l8gaje2xq4ruej9c`
+- **押注（链上）**：YES 50 KAS `9fc5134d...` (tester-1) / NO 30 KAS `9de79b2b...` (tester-2) / maker-YES 13.47 KAS `391462b0...`
+- **leaf outpoint**（gatherOrderedBets 起点）：`9de79b2b88cfc9c573e41895017cf3301b1d41030f37e874d3b3df91aab98c4f:0`
+- **shard bettor_count=2**（不含 maker）；市场 protocol_version=v0.7；ESPN 401815924 BOS-NYY
+- **deadline 17:30:03Z 过后**：settler deadline-watcher 推进 pending_bettors→verifying；settler loop isBshard=true → skip（不误退）→ **等 J1 phase1 委员 attest**
+- ⚠ **注意**：J1 4 :3300 oracle(a102fbde/9e2db8/7013f1/e666239) 仍 active=1（本盘创建时没调 inactive·pool_size=13·委员可能含 J1 cross-node），若 VRF 选中需 J1 节点签 phase1。如需全本地委员 → 下次建前先 active=0。
+
+---
+
 ## 集成 / 部署态(git 真相，2026-06-24 KANet-UI 更新)
 - **master** tip `ca7e0a66`:含核心 bshard/oracle wave1 LIVE 码(经 bshard-m3-deploy sync)。
 - **bshard-m3-deploy** tip `0fce7fbe`:含本 session 所有修(null-version refund fix / display fix / line8 STEP1 doc)。
@@ -335,6 +456,9 @@ owner=KANet-UI(渲染)+ J2(聚合端点)+ J1(可信呈现)+ NWT(红队 UX);主�
 - ⬜ 择机 merge 进 master + verify-ship 收齐。J1 gated on NWT FINDING-1 修。
 
 ## ESCALATIONS / 待 Owner 裁
+- 🔴 **KANet-UI 会话下线（2026-06-28 Owner 处置）→ UI/operator/部署/首页② 域无 owner**。恢复首页② 或任何 UI/部署改动需 Owner **重启 KANet-UI 会话或指派接位**。眼下不卡关键路径（broker DM 等 J1 sighash·首页不急）。
+- 🔴 **broker DM e2e gated on J1 字节级 sighash 修**（下个 focused session·J1 清醒）：jepu1 FREEZE 测试台 / tx f9e64afc / dup-pk 嫌疑 / 接位起点见线 12 收口段 + 记忆 `v07-parimutuel-settle-covenant-debug`。
+- ⚠ **通用分润可见层 NWT PUSH-BACK**（docs/2026-06-28-NWT-redteam-universal-revenue-visibility.md）：introducer 无 DB 支撑（过度承诺）+ oracle/node 地址重叠 + multi-role event_type/stamp 冲突。最小可行路 = broker 可见（已有）+ committee 合并 fee 一角色 + introducer Phase2。待 Bettor 据此**重设计**（不是全 5 角色一步到位）。
 - `FAUCET_AMOUNT_KAS` 5→10k?(需 Owner + faucet relay 余额前提)
 - polymarket-UMA 实现切片派工时机 + owner 归属(生死线,优先级最高待 Owner 拍节奏)。
 - B/C broker 公开自助注册 auth 硬化(banked,production 前)。
