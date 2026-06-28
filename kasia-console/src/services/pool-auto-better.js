@@ -51,6 +51,22 @@ const NEAR_DEADLINE_SEC = (Number(process.env.AUTO_BET_NEAR_DEADLINE_H) || 6) * 
 let timer = null;
 let running = false;
 
+// J2 2026-06-28 (Bettor 派·稳定性): self-call fetch + AbortController timeout. 无 timeout 时·event-loop 饱和期
+//   self-call(打同一 console)挂死 → await 永挂 → running 卡 true → auto-bet 静默停 + 挂的连接占用放大饱和
+//   (Bettor 裁: auto-bet=amplifier 非 root)。timeout fail-fast → throw AbortError → _placeBet catch 接住 →
+//   释放 running → 下 tick 重试。robustness: auto-bet 扛过 transient 饱和不卡死。
+async function fetchWithTimeout(url, opts, ms) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), ms);
+  try {
+    return await fetch(url, { ...(opts || {}), signal: ctrl.signal });
+  } finally {
+    clearTimeout(t);
+  }
+}
+const FETCH_TIMEOUT_FAST_MS = Number(process.env.AUTO_BET_FETCH_TIMEOUT_FAST_MS) || 10_000;   // prep / balance (轻查询)
+const FETCH_TIMEOUT_TX_MS = Number(process.env.AUTO_BET_FETCH_TIMEOUT_TX_MS) || 30_000;       // transfer / confirm (链上 TX)
+
 function _pickRandomSubset(arr, n) {
   const shuffled = [...arr].sort(() => Math.random() - 0.5);
   return shuffled.slice(0, Math.min(n, arr.length));
@@ -73,11 +89,11 @@ async function _placeBet(bot, market) {
 
   try {
     // Step 1: prep — compute side_p2sh + exact stake
-    const prepR = await fetch(`${CONSOLE_BASE}/api/pool/market/${market.id}/bettor/register-v06/prep`, {
+    const prepR = await fetchWithTimeout(`${CONSOLE_BASE}/api/pool/market/${market.id}/bettor/register-v06/prep`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ linked_addr: bot.address, direction, stake_kas: parseFloat(stakeKas) }),
-    });
+    }, FETCH_TIMEOUT_FAST_MS);
     const prep = await prepR.json();
     if (!prep.ok) {
       if (String(prep.error || '').toLowerCase().includes('already')) return { tag, bot: bot.name, status: 'DUP' };
@@ -85,11 +101,11 @@ async function _placeBet(bot, market) {
     }
 
     // Step 2: transfer — relay sends exact_stake_kas to side_p2sh
-    const payR = await fetch(`${CONSOLE_BASE}/api/relay/${bot.id}/transfer`, {
+    const payR = await fetchWithTimeout(`${CONSOLE_BASE}/api/relay/${bot.id}/transfer`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ to: prep.side_p2sh, amount: prep.exact_stake_kas }),
-    });
+    }, FETCH_TIMEOUT_TX_MS);
     const pay = await payR.json();
     if (!pay.ok || !pay.txId) return { tag, bot: bot.name, status: 'PAY_FAIL', error: String(pay.error || '').slice(0, 80) };
 
@@ -98,11 +114,11 @@ async function _placeBet(bot, market) {
     let confirmed = null;
     for (let attempt = 0; attempt < 6; attempt++) {
       await new Promise(r => setTimeout(r, 3000 + attempt * 2000));
-      const confirmR = await fetch(`${CONSOLE_BASE}/api/pool/market/${market.id}/bettor/register-v06/confirm`, {
+      const confirmR = await fetchWithTimeout(`${CONSOLE_BASE}/api/pool/market/${market.id}/bettor/register-v06/confirm`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ linked_addr: bot.address, direction, stake_kas: parseFloat(stakeKas) }),
-      });
+      }, FETCH_TIMEOUT_TX_MS);
       const confirm = await confirmR.json();
       if (confirm.ok) { confirmed = confirm; break; }
     }
@@ -155,7 +171,7 @@ function _fetchRelayBots() {
 // 真 guardrail: 每 relay 每 tick 查一次 balance, < MIN_RESERVE_KAS 则跳过整 relay 本 tick.
 async function _getBalanceKas(relayId) {
   try {
-    const r = await fetch(`${CONSOLE_BASE}/api/relay/${relayId}/balance`);
+    const r = await fetchWithTimeout(`${CONSOLE_BASE}/api/relay/${relayId}/balance`, {}, FETCH_TIMEOUT_FAST_MS);
     const j = await r.json();
     if (!j?.ok) return null;
     // /api/relay/:id/balance 返 { ok, total_sompi, ... } 通常. 兼容 multiple shapes.
