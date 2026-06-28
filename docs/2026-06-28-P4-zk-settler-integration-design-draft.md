@@ -32,7 +32,8 @@ settler bshard close（ZK）:
          → 取 journal.payout_root 烤进 PS continuation P2SH(同现有 closed 0→1 + payoutRoot 机制)
  6. submit → TN12 LAND(NO TX NO TRUTH)→ winners claim 不变(payout_root 同结构·merkle claim 复用)
 ```
-**信任假设变**: 5 委员诚实 → **数学证明 + journal 链锚**。零委员签·零 settler 自由度。
+**信任假设变(两阶段·口径精确·KANet-UI 锁)**: 实为**两阶段**——① `oracle_attest_verdict`(委员/oracle attest winningSide → state attested_winner·**verdict 层 1 仍委员·非消除**·首 demo single-sig 是非命门简化可 defer)② `zk_close`(ZK 证 payout·**payout 层 2 零委员**·消 dup-address/sighash/NUM2BIN 那类脆性)。**绝不报"全零委员"**——只 payout 侧零委员。命门(非-vacuous attested_winner/bets_root 绑定)**绝不 stub**(Bettor 红线)。
+> ⚠ **诚实前置(Bettor 校准·防快-LAND 错觉)**: 设计锁 ≠ e2e LAND。真前置 = P0 zk-sdk WASM port-成-Node-包(settler 调 commit_to_groth16)+ P2 Rust guest(J1 critical-path·未写)+ 本 builder。e2e LAND 是真实现 chunk·非 imminent。
 
 ## 3. journal 构造（命门·必绑链上真相·防 vacuous）
 | 字段 | 值 | provenance（covenant 怎么验·非信 prover） |
