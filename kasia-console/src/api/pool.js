@@ -1894,7 +1894,9 @@ export async function registerPoolRoutes(fastify) {
   // (非裸 volume → 防 seeder 刷量). 排序分 = bettor_count(承诺/活跃, 重权) + total_pool_kas(总承诺值);
   // 裸 volume 易刷(seeder 自挂大池), bettor_count(不同押注人数) 才是真活跃. 过滤: status=pending_bettors(开放押注)
   // + deadline>now+1h(快截止的不上热榜) + created>1h ago(排极新, 防刚建的刷榜) + total_pool≥阈值(挡空/微市场)
-  // + 排除 commingled spine(FINDING-2 单源 isCommingledSpine, J1 2026-06-28). 只读端点, 不碰 settle.
+  // + 排除 commingled spine(FINDING-2 单源 isCommingledSpine, J1 2026-06-28).
+  // + 排除 AutoBetter relay 押注(NWT option A, KANet-UI 2026-06-28): bettor_count + 赔率只计真人押注.
+  //   AutoBetter 识别: relay_nodes.name LIKE 'AutoBetter-%'. 只读端点, 不碰 settle.
   fastify.get('/api/pool/markets/trending', async (request, reply) => {
     const q = request.query || {};
     const limit = Math.min(Math.max(parseInt(q.limit, 10) || 5, 1), 20);
@@ -1907,16 +1909,18 @@ export async function registerPoolRoutes(fastify) {
     const createdCutoffIso = `${_cd.getFullYear()}-${_p(_cd.getMonth()+1)}-${_p(_cd.getDate())} ${_p(_cd.getHours())}:${_p(_cd.getMinutes())}:${_p(_cd.getSeconds())}`;   // 创建 >1h ago (local format)
     const { commingledSpineSet } = await import('../lib/pool-commingle-detect.mjs');
     const commingledSpines = commingledSpineSet(sqlite);
+    // auto-bet exclusion filter: exclude bets placed by AutoBetter relay bots (name LIKE 'AutoBetter-%')
+    const AUTO_BET_EXCL = `AND s.bettor_relay_id NOT IN (SELECT id FROM relay_nodes WHERE name LIKE 'AutoBetter-%')`;
     const rows = sqlite.prepare(`
       SELECT pool_markets.id, pool_markets.resolution_rule_spec, pool_markets.category,
              pool_markets.outcome_side, pool_markets.deadline, pool_markets.maker_stake_amount,
              pool_markets.spine_p2sh,
-             (SELECT COUNT(*) FROM pool_bettor_sides s WHERE s.market_id = pool_markets.id)
-             + (SELECT COUNT(*) FROM pool_bettor_sides s WHERE s.market_id IN (SELECT shard_market_id FROM market_shards WHERE logical_market_id = pool_markets.id)) AS bettor_count,
-             (SELECT COALESCE(SUM(stake_amount),0) FROM pool_bettor_sides s WHERE s.market_id = pool_markets.id AND s.direction = 0)
-             + (SELECT COALESCE(SUM(stake_amount),0) FROM pool_bettor_sides s WHERE s.market_id IN (SELECT shard_market_id FROM market_shards WHERE logical_market_id = pool_markets.id) AND s.direction = 0) AS yes_sompi,
-             (SELECT COALESCE(SUM(stake_amount),0) FROM pool_bettor_sides s WHERE s.market_id = pool_markets.id AND s.direction = 1)
-             + (SELECT COALESCE(SUM(stake_amount),0) FROM pool_bettor_sides s WHERE s.market_id IN (SELECT shard_market_id FROM market_shards WHERE logical_market_id = pool_markets.id) AND s.direction = 1) AS no_sompi
+             (SELECT COUNT(*) FROM pool_bettor_sides s WHERE s.market_id = pool_markets.id ${AUTO_BET_EXCL})
+             + (SELECT COUNT(*) FROM pool_bettor_sides s WHERE s.market_id IN (SELECT shard_market_id FROM market_shards WHERE logical_market_id = pool_markets.id) ${AUTO_BET_EXCL}) AS bettor_count,
+             (SELECT COALESCE(SUM(stake_amount),0) FROM pool_bettor_sides s WHERE s.market_id = pool_markets.id AND s.direction = 0 ${AUTO_BET_EXCL})
+             + (SELECT COALESCE(SUM(stake_amount),0) FROM pool_bettor_sides s WHERE s.market_id IN (SELECT shard_market_id FROM market_shards WHERE logical_market_id = pool_markets.id) AND s.direction = 0 ${AUTO_BET_EXCL}) AS yes_sompi,
+             (SELECT COALESCE(SUM(stake_amount),0) FROM pool_bettor_sides s WHERE s.market_id = pool_markets.id AND s.direction = 1 ${AUTO_BET_EXCL})
+             + (SELECT COALESCE(SUM(stake_amount),0) FROM pool_bettor_sides s WHERE s.market_id IN (SELECT shard_market_id FROM market_shards WHERE logical_market_id = pool_markets.id) AND s.direction = 1 ${AUTO_BET_EXCL}) AS no_sompi
       FROM pool_markets
       WHERE pool_markets.protocol_status = 'pending_bettors'
         AND pool_markets.protocol_status != 'shard_internal'
@@ -1950,7 +1954,7 @@ export async function registerPoolRoutes(fastify) {
       .sort((a, b) => b.trending_score - a.trending_score)
       .slice(0, limit)
       .map(({ _totalPool, _spineP2sh, ...m }) => m);
-    return reply.send({ ok: true, count: scored.length, score_formula: `bettor_count*${BETTOR_WEIGHT} + total_pool_kas (activity+commitment 加权, 非裸 volume)`, filters: { status: 'pending_bettors', deadline_gt: '+1h', created_lt: '-1h', min_pool_kas: minPoolSompi / 1e8, exclude_commingled: true }, trending: scored });
+    return reply.send({ ok: true, count: scored.length, score_formula: `bettor_count*${BETTOR_WEIGHT} + total_pool_kas (activity+commitment 加权, 非裸 volume)`, filters: { status: 'pending_bettors', deadline_gt: '+1h', created_lt: '-1h', min_pool_kas: minPoolSompi / 1e8, exclude_commingled: true, exclude_auto_bet: true }, trending: scored });
   });
 
   fastify.get('/api/pool/markets', async (request, reply) => {
