@@ -2216,10 +2216,11 @@ export async function dispatchPhase2(market, decision) {
     if (market.protocol_version === 'v0.7') {
       const globalYes = participants.filter(p => p.direction === 0).reduce((s, p) => s + p.stake, 0);
       const globalNo = participants.filter(p => p.direction === 1).reduce((s, p) => s + p.stake, 0);
-      // global_commit_id: NWT FINDING-1 SEAM fix (2026-06-28) — J1 activates the on-chain commit check
-      // in PoolSpine_v07.sil close_attest (blake2b(byte[](globalYes,16)||byte[](globalNo,16)||byte[](market_id,32)
+      // global_commit_id: NWT FINDING-1 SEAM fix (2026-06-28) — on-chain commit check
+      // in PoolSpine_v07.sil settle_aggregate (blake2b(byte[](globalYes,8)||byte[](globalNo,8)||byte[](market_id,32)
       // ||byte[](shard_count,4))==global_commit_id), binding market_id on-chain → distinct P2SH/market + 跨市场
-      // close_attest 替换 BUST. 链下侧必 byte-EXACT 同 layout, 否则合法 settle fail。
+      // settle 替换 BUST. 链下侧必 byte-EXACT 同 layout, 否则合法 settle fail。
+      // NOTE: 8B not 16B — Kaspa NUM2BIN target ≤8 (int64). foldRootCommitHex auto-mirrors sil layout.
       // 🔒 单源: 复用已证 commit_v2 builder foldRootCommitHex(pool-fold.mjs, == PoolShard_fold/FoldNode,
       //   LE sign-magnitude serialize_i64, byte-match 锁定) — 绝不重造字节序 (线8 机制哲学 + determinism 命门)。
       // ⚠ market_id = 烤进 spine ctor 的 raw 32-byte v07_market_id_hash (NWT/J1 锁=raw ctor 值), NOT market.id

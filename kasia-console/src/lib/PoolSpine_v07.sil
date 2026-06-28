@@ -329,10 +329,11 @@ contract PoolSpine_v07(
         //    spend 强验 global_commit_id 含【本市场 market_id】(跨市场替换在脚本层 BUST).
         //    🔒 CANONICAL global_commit_id 单源 layout (= FoldNode commit_v2, pool-fold.mjs L8-12; 链下
         //       settler 必 byte-EXACT 镜像此一处):
-        //         blake2b( byte[](globalYes,16) ‖ byte[](globalNo,16) ‖ byte[](market_id)[32B raw ctor]
-        //                  ‖ byte[](shard_count,4) ) , dkLen=32.
+        //         blake2b( byte[](globalYes,8) ‖ byte[](globalNo,8) ‖ byte[](market_id)[32B raw ctor]
+        //                  ‖ byte[](shard_count,4) ) , dkLen=32. Preimage 8+8+32+4=52B.
         //       ENDIAN: byte[](int,N) = rusty-kaspa serialize_i64 = LE sign-magnitude (J2 source-verified).
-        byte[] gcPre0 = byte[](globalYesTotal_sompi, 16) + byte[](globalNoTotal_sompi, 16);
+        //       NOTE: N=8 not 16: Kaspa NUM2BIN target ≤8 (int64 limit). 8B covers max sompi <2^63 ≈9.2e18.
+        byte[] gcPre0 = byte[](globalYesTotal_sompi, 8) + byte[](globalNoTotal_sompi, 8);
         byte[] gcPre1 = gcPre0 + byte[](market_id);
         byte[] gcPre2 = gcPre1 + byte[](shard_count, 4);
         require(blake2b(gcPre2) == global_commit_id);
