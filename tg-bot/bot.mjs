@@ -388,6 +388,7 @@ async function pollSettleResults() {
 // KANet-UI 2026-06-28: broker fee DM poller — Phase 1: 托管/link 地址的 broker.
 // 轮询 /api/pool/broker-fee-dm?since=<ms>, 对每笔新落链 fee 向 tg_user_id 发 DM.
 // 去重: brokerFeeTs 游标持久化 (_state.json via PM), 重启后续单.
+// B1 fix (NWT 红队): 只在 sendMessage 成功后前进游标; 失败 log+break → 下次 tick 重试同一批.
 async function pollBrokerFeeEvents() {
   const sinceMs = PM.getBrokerFeeTs() || (Date.now() - 60_000);
   const r = await api.brokerFeeDmEvents(sinceMs);
@@ -395,11 +396,13 @@ async function pollBrokerFeeEvents() {
   const evs = r.json?.events || [];
   for (const ev of evs) {
     const msg = M.brokerFeeDmText(ev);
-    try { await bot.api.sendMessage(ev.tg_user_id, msg); } catch {}
-  }
-  if (evs.length) {
-    const last = evs[evs.length - 1].observed_at;
-    if (last) PM.setBrokerFeeTs(new Date(last).getTime() + 1);
+    try {
+      await bot.api.sendMessage(ev.tg_user_id, msg);
+      PM.setBrokerFeeTs(new Date(ev.observed_at).getTime() + 1);  // 只在成功后前进
+    } catch (e) {
+      console.warn(`[broker-DM] sendMessage fail uid=${ev.tg_user_id} fee=${ev.fee_sompi}: ${e.message}`);
+      break;  // 停住游标·下次 tick 重试
+    }
   }
 }
 

@@ -143,7 +143,7 @@ export function brokerFeeDmText(ev) {
 export function sportsCardBlock(groups, botUsername) {
   if (!groups || groups.length === 0) return null;
   const BOT = botUsername || 'KANET_Broker_bot';
-  const lines = ['', '⚽ 赛事押注'];
+  const lines = ['', '⚽ 赛事押注', '按下方按钮复制深链 → 直接押注 · /hot 热榜'];
   const buttons = [];
   for (const g of groups) {
     const teamLine = (g.home_team && g.away_team)

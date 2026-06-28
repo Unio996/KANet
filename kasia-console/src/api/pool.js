@@ -13,6 +13,7 @@ import { isStructuredSpec, assertSpecPredicateValid } from '../lib/spec-validati
 // top of EVERY bettor stake-lock handler (6 entries); lint-kanet R-COMMINGLE-GUARD flags any that forgot. 禁内联.
 import { assertNotCommingled } from '../lib/pool-commingle-detect.mjs';
 import { createHash, randomUUID } from 'node:crypto';
+import { verifyIngestRequest } from '../services/ingest-auth.js';  // P1 fix (NWT): broker-fee-dm PII 端点 auth
 
 // L4 (area-11): create-time invariants. Hardcoded mirrors of the settler constants;
 // kept inline rather than imported because they're stable v0.5 protocol values
@@ -1903,7 +1904,10 @@ export async function registerPoolRoutes(fastify) {
   // GET /api/pool/broker-fee-dm?since=<ms> — Phase 1 broker DM 事件 feed (KANet-UI 2026-06-28).
   // 返 broker_fee_landed 事件 ∩ tg_custodial_wallets (broker 收款地址 = 托管/link 地址的 broker).
   // bot poller 每隔 pollMs 调; since=0 → 取最近 60s 兜底; 结果按 observed_at ASC 让 bot 按序 DM.
+  // P1 fix (NWT): verifyIngestRequest 守 PII (tg_user_id↔地址映射); 同 chain-data.js L124 模式.
   fastify.get('/api/pool/broker-fee-dm', async (request, reply) => {
+    await verifyIngestRequest(request, reply);
+    if (reply.sent) return;
     const sinceMs = parseInt(request.query?.since, 10) || (Date.now() - 60_000);
     const rows = sqlite.prepare(`
       SELECT ce.id, ce.to_address AS broker_address, ce.payload, ce.observed_at,
