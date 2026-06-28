@@ -13,6 +13,7 @@
 
 import { sqlite } from '../db/client.js';
 import { createHash } from 'node:crypto';
+import { getSidesByLogicalMarket } from './pool-bettor-sides-query.mjs';
 
 // ── INTERFACE STUBS(待 J1 firm·prove 一通替换实现)─────────────────────────────
 // ③ guest prove API(J1 15:29 预签·真版 prove 通后给):
@@ -42,13 +43,14 @@ export function computeJournalHash(betsRootHex, payoutRootHex, attestedWinner) {
 // bets_root hash-chain 的 absorb 序 = register_append 序 = 注册序。pool_bettor_sides ORDER BY id ASC = 插入序。
 // ⚠ 命门: 链上 bets_root absorb 序 = register_append TX **落链序**。demo 单片顺序注册→DB id 序==落链序;
 //   production 必从链上 register 序列(chain_events/kaspa_tx_log)派生·不可只信 DB id(若 TX 乱序落链)。本 demo 用 id 序+下方校验。
-export function gatherOrderedBets(marketId) {
-  const rows = sqlite.prepare(
-    'SELECT bettor_pk, direction, stake_amount, created_at, side_lock_daa FROM pool_bettor_sides WHERE market_id = ? ORDER BY id ASC'
-  ).all(marketId);
+export function gatherOrderedBets(logicalMarketId) {
+  // shard-aware(命门·线8 STEP2): bshard bettor 存 shard_market_id·裸按 logical market_id 查不到 → 用 getSidesByLogicalMarket。
+  // 该 helper 跨片取但无序 → 这里按 id ASC 排(= pool_bettor_sides 插入序 = register_append 序 = bets_root absorb 序)。
+  const rows = getSidesByLogicalMarket(logicalMarketId, sqlite).sort((a, b) => a.id - b.id);
   // 单片 demo 一致性校验: 若有 side_lock_daa(落链 daa)·按它升序应 == id 升序(否则乱序落链·命门告警)
-  const byDaa = [...rows].filter(r => r.side_lock_daa != null).sort((a, b) => Number(a.side_lock_daa) - Number(b.side_lock_daa));
-  const daaOrderMatchesId = byDaa.every((r, i) => rows.filter(x => x.side_lock_daa != null)[i]?.bettor_pk === r.bettor_pk);
+  const withDaa = rows.filter(r => r.side_lock_daa != null);
+  const byDaa = [...withDaa].sort((a, b) => Number(a.side_lock_daa) - Number(b.side_lock_daa));
+  const daaOrderMatchesId = byDaa.every((r, i) => withDaa[i]?.bettor_pk === r.bettor_pk);
   return {
     bets: rows.map(r => ({ pk: String(r.bettor_pk), stake: String(r.stake_amount), dir: Number(r.direction) })),
     daaOrderMatchesId, // false → 命门告警: DB id 序 ≠ 落链 daa 序·gather 序可能不符 on-chain bets_root → 拒 prove
