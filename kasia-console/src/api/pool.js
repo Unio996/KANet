@@ -1961,10 +1961,11 @@ export async function registerPoolRoutes(fastify) {
       };
     }).filter((m) => m._totalPool >= minPoolSompi)   // 防刷量: 池太小不上热榜
       .filter((m) => !commingledSpines.has(m._spineP2sh))   // FINDING-2: 排除 commingled spine (J1 单源 helper)
+      .filter((m) => m.bettor_count >= 3)   // Owner 2026-06-28: 0/少真人盘不上首页(bettor_count已排 AutoBetter)
       .sort((a, b) => b.trending_score - a.trending_score)
       .slice(0, limit)
       .map(({ _totalPool, _spineP2sh, ...m }) => m);
-    return reply.send({ ok: true, count: scored.length, score_formula: `bettor_count*${BETTOR_WEIGHT} + total_pool_kas (activity+commitment 加权, 非裸 volume)`, filters: { status: 'pending_bettors', deadline_gt: '+1h', created_lt: '-1h', min_pool_kas: minPoolSompi / 1e8, exclude_commingled: true, exclude_auto_bet: true }, trending: scored });
+    return reply.send({ ok: true, count: scored.length, score_formula: `bettor_count*${BETTOR_WEIGHT} + total_pool_kas (activity+commitment 加权, 非裸 volume)`, filters: { status: 'pending_bettors', deadline_gt: '+1h', created_lt: '-1h', min_pool_kas: minPoolSompi / 1e8, exclude_commingled: true, exclude_auto_bet: true, min_bettors: 3 }, trending: scored });
   });
 
   // GET /api/pool/markets/card_groups?limit=8 — 赛事聚合卡 (Owner 钦定 UX 首页·J2 后端·2026-06-28).
@@ -1976,11 +1977,11 @@ export async function registerPoolRoutes(fastify) {
   // 每 leg 带 trust 字段 (data_source_canonical / resolution_criteria / spine_p2sh) 供 UI 信任卡。只读·additive。
   fastify.get('/api/pool/markets/card_groups', async (request, reply) => {
     const q = request.query || {};
-    const limit = Math.min(Math.max(parseInt(q.limit, 10) || 8, 1), 50);
-    const BETTOR_WEIGHT = 10;   // 与 trending 同权 (多人小注 > 单人刷大池)
     const { commingledSpineSet } = await import('../lib/pool-commingle-detect.mjs');
+    const { aggregateCardGroups } = await import('../lib/pool-card-groups.mjs');
     const commingledSpines = commingledSpineSet(sqlite);
     const AUTO_BET_EXCL = `AND s.bettor_relay_id NOT IN (SELECT id FROM relay_nodes WHERE name LIKE 'AutoBetter-%')`;
+    // per-leg 池/人数: 复用 trending 同款 correlated subquery + shard 汇总 + AutoBetter 排除 (一致性单源)。
     const rows = sqlite.prepare(`
       SELECT pool_markets.id, pool_markets.resolution_rule_spec, pool_markets.category,
              pool_markets.outcome_side, pool_markets.deadline, pool_markets.maker_stake_amount,
@@ -1994,66 +1995,8 @@ export async function registerPoolRoutes(fastify) {
       FROM pool_markets
       WHERE pool_markets.protocol_status = 'pending_bettors'
     `).all();
-    const groups = new Map();   // card_group_id → { ...meta, legsByKey: Map<leg_key, leg> }
-    for (const r of rows) {
-      if (commingledSpines.has(r.spine_p2sh)) continue;   // FINDING-2: 排除 commingled spine (单源 helper)
-      let spec;
-      try { spec = JSON.parse(r.resolution_rule_spec || ''); } catch { continue; }
-      if (!spec || typeof spec !== 'object' || !spec.card_group_id) continue;   // 只聚合带 card_group 的赛事盘
-      const cgid = spec.card_group_id;
-      const legKey = spec.leg_key || r.id;
-      const kind = String(legKey).split('_')[0] || 'unknown';   // winner/spread/total (= leg_key 前缀)
-      const makerSompi = r.maker_stake_amount || 0;
-      const makerOnYes = r.outcome_side === 'YES';
-      const yesPool = Number(r.yes_sompi) + (makerOnYes ? makerSompi : 0);
-      const noPool = Number(r.no_sompi) + (!makerOnYes ? makerSompi : 0);
-      const totalPool = yesPool + noPool;
-      const leg = {
-        id: r.id, leg_key: legKey, kind,
-        label: spec.title || legKey,
-        line: spec.line || null, subject: spec.subject || null,
-        deadline: r.deadline,
-        bettor_count: r.bettor_count,
-        total_pool_kas: totalPool / 1e8,
-        yes_implied_prob: totalPool > 0 ? yesPool / totalPool : null,
-        // trust 字段 (UI 信任卡): 可审计来源 + 结算规则 + 链上 spine 锚
-        data_source_canonical: spec.data_source_canonical || null,
-        resolution_criteria: spec.resolution_criteria || null,
-        spine_p2sh: r.spine_p2sh,
-        _activity: r.bettor_count * BETTOR_WEIGHT + totalPool / 1e8,
-      };
-      let g = groups.get(cgid);
-      if (!g) {
-        g = {
-          card_group_id: cgid,
-          event_title: (spec.home_team && spec.away_team)
-            ? `${spec.home_team} vs ${spec.away_team}` : (spec.source_label || cgid),
-          league_label: spec.source_label || null,
-          event_id: spec.event_id || null,
-          home_team: spec.home_team || null, away_team: spec.away_team || null,
-          kickoff: spec.kickoff || null,
-          legsByKey: new Map(),
-        };
-        groups.set(cgid, g);
-      }
-      // dedupe 同 leg_key: 留活跃度高那条 (重复建市)
-      const prev = g.legsByKey.get(legKey);
-      if (!prev || leg._activity > prev._activity) g.legsByKey.set(legKey, leg);
-    }
-    const cards = [...groups.values()].map((g) => {
-      const legs = [...g.legsByKey.values()]
-        .sort((a, b) => b._activity - a._activity)
-        .map(({ _activity, ...l }) => l);
-      const total_bettor_count = legs.reduce((s, l) => s + l.bettor_count, 0);
-      const total_pool_kas = Math.round(legs.reduce((s, l) => s + l.total_pool_kas, 0) * 1e8) / 1e8;
-      const soonest_deadline = legs.reduce((m, l) => (m === null || l.deadline < m ? l.deadline : m), null);
-      const { legsByKey, ...meta } = g;
-      return { ...meta, leg_count: legs.length, total_bettor_count, total_pool_kas, soonest_deadline, legs };
-    })
-      .filter((c) => c.leg_count > 0)
-      .sort((a, b) => (b.total_bettor_count * BETTOR_WEIGHT + b.total_pool_kas) - (a.total_bettor_count * BETTOR_WEIGHT + a.total_pool_kas))
-      .slice(0, limit);
-    return reply.send({ ok: true, count: cards.length, filters: { status: 'pending_bettors', exclude_commingled: true, exclude_auto_bet: true, dedupe_leg_key: 'keep_most_active' }, card_groups: cards });
+    const out = aggregateCardGroups(rows, commingledSpines, { limit: q.limit });   // 聚合逻辑单源 (pool-card-groups.mjs)
+    return reply.send({ ...out, filters: { status: 'pending_bettors', exclude_commingled: true, exclude_auto_bet: true, dedupe_leg_key: 'keep_most_active' } });
   });
 
   fastify.get('/api/pool/markets', async (request, reply) => {
