@@ -118,6 +118,9 @@ async function _placeBet(bot, market) {
 // J2-tn r433 (Bettor r471 真解): 聚焦 near-deadline 单, 不均摊 97+ 远期单 → 押注稀释.
 // 排序 deadline ASC (= 最早过期优先) + LIMIT 20 (= 仅最临近 20 个市场).
 // NEAR_DEADLINE_SEC 通过 AUTO_BET_NEAR_DEADLINE_H env 可调(默认 6h; testnet 常设更大覆盖远期盘).
+// FINDING-2 ③ 止血 (KANet-UI 2026-06-28): 排 commingled-spine v0.7 盘 (spine_p2sh 被 >1 市场共享).
+// 根治=J1 assertNotCommingled 入口闸 (register-v06/register-v07/register); 此处防 auto-bet 持续灌.
+// NULL spine (v0.6 盘) 不受影响 (IS NULL 分支 pass).
 async function _fetchEligibleMarkets() {
   return sqlite.prepare(`
     SELECT id, protocol_version, deadline
@@ -126,6 +129,11 @@ async function _fetchEligibleMarkets() {
       AND (protocol_version = 'v0.6' OR protocol_version = 'v0.7')
       AND deadline > unixepoch() + 120
       AND deadline < unixepoch() + ?
+      AND (spine_p2sh IS NULL OR spine_p2sh NOT IN (
+        SELECT spine_p2sh FROM pool_markets
+        WHERE protocol_version = 'v0.7' AND spine_p2sh IS NOT NULL
+        GROUP BY spine_p2sh HAVING COUNT(*) > 1
+      ))
     ORDER BY deadline ASC
     LIMIT 20
   `).all(NEAR_DEADLINE_SEC);
