@@ -446,6 +446,20 @@ owner=J1（guest/prover/gate-build/B1 layout）+ J2（settler wire/builder/B2）
 - **deadline 17:30:03Z 过后**：settler deadline-watcher 推进 pending_bettors→verifying；settler loop isBshard=true → skip（不误退）→ **等 J1 phase1 委员 attest**
 - ⚠ **注意**：J1 4 :3300 oracle(a102fbde/9e2db8/7013f1/e666239) 仍 active=1（本盘创建时没调 inactive·pool_size=13·委员可能含 J1 cross-node），若 VRF 选中需 J1 节点签 phase1。如需全本地委员 → 下次建前先 active=0。
 
+### 🎯 今晚 ZK-settle 收尾（2026-06-29 ~01:04Z·5 PROVEN + 1 PENDING·Bettor 止损·全队口径一致）
+**Owner 裁定 B 真盘完整路结果**：核心 ZK 结算机制链上 PROVEN + 真盘 5 里程碑 LANDED；但**完整 trustless close_zk 没 LAND**（gate-spk 绑定撞 silverscript 编译器 bug·Bettor 止损·绝不 vacuous LAND）。**诚实定性=「ZK-settle 核心机制链上 PROVEN + 真盘 payout byte-equal + verdict 委员 attest 上链」·NOT「完整 trustless close_zk e2e LAND」。**
+- **今晚 PROVEN（5 项·Bettor 逐项链上 co-verify）**：
+  ① ZK proof 链上 verify — BISECT-A `88e74f91` LANDED（0xa6 groth16 verify in[1] 2-input tx）
+  ② payout byte-equal — betsRoot `467e190f` / payoutRoot `9bfb3c87`（guest==canonical==J2 gather 三方对死）
+  ③ 真盘真押注 phase0 LANDED — bh01w YES 50KAS+NO 30KAS（链验守恒·consolidated_pool=8e9·maker 52.88 B-model 独立非进池）
+  ④ verdict on-chain attest LANDED — `97796e21`（slot4 9e2db852·closed0→1 W=0·genesis `d004f20d`·cov_id `820a6955`）
+  ⑤ 4-of-5 off-chain records — Bettor kaspa-wasm verifyMessage 第二 vantage sig=true（msg=sha256(marketId‖W=0‖endBlock‖pmr)=`83f2f3c9`）
+- 🔴 **PENDING（下个 pass 头号起点）**：gate-spk 非-vacuous binding（防恶意 settler 换 gate 偷 payout）= **silverscript codegen OP_PICK off-by-one bug**（`loc==stack_len`·PICK-computed-value-in-concat 栈深>阈值·2 hash 局部[journal_hash+gateRedeemHash]恒触发·reconstruct 绕不开·J1 反汇编实证非盲目·13 轮 bisect）。**修法=silverc off-by-one fix or 反汇编级 emit**（rusty-kaspa-fork txscript codegen·非 .sil 能绕）。settler 侧（gather/B1/C1/computeBetsRoot/journalHash/zkClosePhase2）**全 ready+测·绑定一通即接 close_zk LAND**。
+- **verdict 成熟度（Bettor 自决档2·诚实修正不藏）**：链上单 oracle attest（slot4）+ 4-of-5 委员 off-chain 授权 records（driver-side·CloseZk 不验委员·**比 Phase A 链上 4-of-5 弱**·Bettor 自决时判乐观已修正口径）。真链上 4-of-5（port `unlockBshardCloseAttest` 进 CloseZk·复用 x4kpq）=下个 pass。
+- **可复用资产（别重造）**：bets_root@**290**（.sil 修后·was 280·加 2B version 前缀）/ attested_winner@53 / gate_tmpl@231 / genesis cov_id 820a6955 / committee `excludePks` 必含 bettor 维（既有只排 maker/broker·J2 补·**production 固化进 sampleAndStoreCommittee**）/ gather 必 `getSidesByShard`（shard 键·非 logical·避 maker 杂质·线8）。
+- **🔑 健康对抗记录（元教训）**：Bettor 提 vacuous workaround「caller-fed witness gate P2SH ==」→ J2 verify-value-source 当场兜住（caller-fed=可控·删 concat=删绑定=vacuous）→ Bettor 大方收回。**非-vacuous 本质=reconstruct**（journal_hash=f(baked bets_root,state winner,payout_root)·绑 payout_root 防 payout-vacuous·cov_id 加固非替代）。= Bettor 疲劳/赶进度时仍会自提 caller-fed 捷径，队友兜=健康（同记忆 [[feedback-relay-blindsign-taxonomy-key-auth-vs-condition-endorse]]）。
+- owner=J1(silverc fix)+J2(settler 全 ready)+KANet-UI(operator/部署)；协调/co-verify/止损/口径=Bettor。复盘 `docs/2026-06-28-zk-settle-pivot-retrospective.md`。
+
 ---
 
 ## 集成 / 部署态(git 真相，2026-06-24 KANet-UI 更新)
@@ -456,7 +470,7 @@ owner=J1（guest/prover/gate-build/B1 layout）+ J2（settler wire/builder/B2）
 - ⬜ 择机 merge 进 master + verify-ship 收齐。J1 gated on NWT FINDING-1 修。
 
 ## ESCALATIONS / 待 Owner 裁
-- 🔴 **KANet-UI 会话下线（2026-06-28 Owner 处置）→ UI/operator/部署/首页② 域无 owner**。恢复首页② 或任何 UI/部署改动需 Owner **重启 KANet-UI 会话或指派接位**。眼下不卡关键路径（broker DM 等 J1 sighash·首页不急）。
+- ✅ **KANet-UI 会话已恢复（2026-06-29 Owner 重启）→ UI/operator/部署/首页② 域恢复 owner**。本 session COORD-LEDGER 已 commit，线13 P4 收尾记录已沉淀。
 - 🔴 **broker DM e2e gated on J1 字节级 sighash 修**（下个 focused session·J1 清醒）：jepu1 FREEZE 测试台 / tx f9e64afc / dup-pk 嫌疑 / 接位起点见线 12 收口段 + 记忆 `v07-parimutuel-settle-covenant-debug`。
 - ⚠ **通用分润可见层 NWT PUSH-BACK**（docs/2026-06-28-NWT-redteam-universal-revenue-visibility.md）：introducer 无 DB 支撑（过度承诺）+ oracle/node 地址重叠 + multi-role event_type/stamp 冲突。最小可行路 = broker 可见（已有）+ committee 合并 fee 一角色 + introducer Phase2。待 Bettor 据此**重设计**（不是全 5 角色一步到位）。
 - `FAUCET_AMOUNT_KAS` 5→10k?(需 Owner + faucet relay 余额前提)
