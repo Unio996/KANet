@@ -261,6 +261,13 @@ export function notifyLine(ev) {
   if (/refund/i.test(t)) {
     return `↩ 你押注的市场退款了 (裁决源不可得 / 仲裁人弃权, 押金退回你地址)。\ntx ${tx}… — /mybets 看详情。`;
   }
+  if (t === 'broker_fee_landed') {
+    let meta = {};
+    try { meta = typeof ev.payload === 'string' ? JSON.parse(ev.payload) : (ev.payload || {}); } catch {}
+    const kas = meta.fee_sompi ? (meta.fee_sompi / 1e8).toFixed(4) : '?';
+    const title = meta.market_title || meta.market_id || '';
+    return `💰 佣金到账 ${kas} KAS · 市场: ${title}\ntx ${tx}… · /earnings 看汇总`;
+  }
   if (t === 'tx') {
     return `💰 你的地址有链上入账 (可能是押注结算赢款或退款)。\ntx ${tx}… — /mybets 看你的押注结果。`;
   }
