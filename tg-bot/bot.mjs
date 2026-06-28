@@ -296,6 +296,12 @@ bot.on('message:text', async (ctx) => {
 
 // S1 reactive notification poller — only polls addresses a user explicitly /link'd (opt-in).
 async function pollLoop() {
+  // Seed from PM-persisted linked users so DMs fire after bot restart (linked Map is ephemeral).
+  for (const u of PM.listLinkedUsers()) {
+    if (!linked.has(String(u.tgUser))) {
+      linked.set(String(u.tgUser), { address: u.address, lastTs: Date.now() - 300_000 });
+    }
+  }
   for (const [tgUser, st] of linked) {
     const r = await api.eventsSince(st.address, st.lastTs);
     const evs = r.json?.events || [];

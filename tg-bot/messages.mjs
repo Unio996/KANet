@@ -54,13 +54,24 @@ export function startMessageLinked(addr, custodial = null, trendingMarkets = nul
 function _compactTrendingBlock(markets, botUsername) {
   const BOT = botUsername || 'KANET_Broker_bot';
   function parseTitle(raw) { try { const p = JSON.parse(raw); return p.title || raw; } catch { return raw; } }
-  function legLabel(legKey) {
+  // §11 v3: extract per-leg human label from JSON title ("Match — Brazil to win" → "Brazil to win")
+  function legButtonLabel(raw, legKey) {
+    try {
+      const p = JSON.parse(raw);
+      if (p.title) { const parts = p.title.split(' — '); if (parts.length > 1) return parts.slice(1).join(' — '); }
+    } catch {}
     if (!legKey) return '';
     if (legKey.startsWith('winner_')) return legKey.slice(7) + ' 赢';
     if (legKey.startsWith('spread_')) return legKey.split('_').slice(1).join(' ');
     if (legKey.startsWith('total_o_')) return '大球 O' + legKey.slice(8);
     if (legKey.startsWith('total_u_')) return '小球 U' + legKey.slice(8);
     return legKey;
+  }
+  // Show implied probability % only when ≥1 real bettor and probability is 5–95% (avoids misleading extremes)
+  function probSuffix(m) {
+    if (!(m.bettor_count > 0) || m.yes_implied_prob == null) return '';
+    const pct = Math.round(m.yes_implied_prob * 100);
+    return (pct >= 5 && pct <= 95) ? ` ${pct}%` : '';
   }
   const lines = ['', '🔥 热门市场 Top ' + markets.length];
   const buttons = [];
@@ -70,10 +81,10 @@ function _compactTrendingBlock(markets, botUsername) {
   for (const m of markets) {
     if (m.card_group_id) {
       if (seen.has(m.card_group_id)) {
-        // Add this leg's button to last group button row
-        const label = m.leg_key ? legLabel(m.leg_key) : parseTitle(m.title || '').slice(0, 16);
+        // Add this leg's button (sibling leg)
+        const label = legButtonLabel(m.title || '', m.leg_key);
         const shareUrl = `https://t.me/${BOT}?start=${m.id}`;
-        buttons.push([{ text: `🎯 ${label}`, copy_text: { text: shareUrl } }]);
+        buttons.push([{ text: `🎯 ${label}${probSuffix(m)}`, copy_text: { text: shareUrl } }]);
         continue;
       }
       seen.add(m.card_group_id);
@@ -84,15 +95,15 @@ function _compactTrendingBlock(markets, botUsername) {
       const firstTitle = parseTitle(m.title || '');
       const matchName = firstTitle.includes(' — ') ? firstTitle.split(' — ')[0].trim() : firstTitle.slice(0, 35);
       lines.push(`${idx}. ⚽ ${matchName} · ${groupSize}盘 · 💰${totalKas.toFixed(0)}KAS · 👥${Math.max(...markets.filter(x=>x.card_group_id===m.card_group_id).map(x=>x.bettor_count||0))}人`);
-      const label = m.leg_key ? legLabel(m.leg_key) : parseTitle(m.title || '').slice(0, 16);
+      const label = legButtonLabel(m.title || '', m.leg_key);
       const shareUrl = `https://t.me/${BOT}?start=${m.id}`;
-      buttons.push([{ text: `🎯 ${label}`, copy_text: { text: shareUrl } }]);
+      buttons.push([{ text: `🎯 ${label}${probSuffix(m)}`, copy_text: { text: shareUrl } }]);
     } else {
       const title = parseTitle(m.title || '');
       const short = title.length > 35 ? title.slice(0, 33) + '…' : title;
       lines.push(`${idx}. ${short} · 💰${(m.total_pool_kas||0).toFixed(0)}KAS · 👥${m.bettor_count||0}人`);
       const shareUrl = `https://t.me/${BOT}?start=${m.id}`;
-      buttons.push([{ text: `🎯 押 #${idx}`, copy_text: { text: shareUrl } }]);
+      buttons.push([{ text: `🎯 押 #${idx}${probSuffix(m)}`, copy_text: { text: shareUrl } }]);
     }
     idx++;
   }
@@ -162,13 +173,24 @@ export function hotMarkets(markets, botUsername) {
     const h = Math.round((Number(deadline) * 1000 - Date.now()) / 3600000);
     return h > 0 ? `${h}h 后截止` : '已过期';
   }
-  function legLabel(legKey) {
+  // §11 v3: extract per-leg label from JSON title, fallback to legKey parsing
+  function legLabel(raw, legKey) {
+    try {
+      const p = JSON.parse(raw);
+      if (p.title) { const parts = p.title.split(' — '); if (parts.length > 1) return parts.slice(1).join(' — '); }
+    } catch {}
     if (!legKey) return '';
     if (legKey.startsWith('winner_')) return legKey.slice(7) + ' 赢';
     if (legKey.startsWith('spread_')) return legKey.split('_').slice(1).join(' ');
     if (legKey.startsWith('total_o_')) return '大球 O' + legKey.slice(8);
     if (legKey.startsWith('total_u_')) return '小球 U' + legKey.slice(8);
     return legKey;
+  }
+  // Show implied probability % only when ≥1 real bettor and probability is 5–95%
+  function probSuffix(m) {
+    if (!(m.bettor_count > 0) || m.yes_implied_prob == null) return '';
+    const pct = Math.round(m.yes_implied_prob * 100);
+    return (pct >= 5 && pct <= 95) ? ` ${pct}%` : '';
   }
   const CAT = { sports: '🏆', politics: '🗳', other: '🌐', test: '🧪' };
   const BOT = botUsername || 'KANET_Broker_bot';
@@ -195,10 +217,12 @@ export function hotMarkets(markets, botUsername) {
     const dl = fmtDl(gMarkets[0].deadline);
     lines.push(`${idx}. ⚽ ${matchHeader} · ${gMarkets.length} 盘`);
     lines.push(`   💰${totalKas.toFixed(0)} KAS · 👥${maxBettors}人${dl ? ' · ' + dl : ''}`);
+    // §11 信任卡 (J1 定版 2026-06-28): 全真原语·不超卖·禁写「自动结算/无法作弊/去信任」(Track B 未完成)
+    lines.push('   💰 资金链上 P2SH 锁定 · 规则公开可审计 · 到期自动退');
     for (const m of gMarkets) {
-      const label = m.leg_key ? legLabel(m.leg_key) : parseTitle(m.title || '').split(' — ')[1] || m.id.slice(0, 8);
+      const label = legLabel(m.title || '', m.leg_key);
       const shareUrl = `https://t.me/${BOT}?start=${m.id}`;
-      buttons.push([{ text: `🎯 ${label}`, copy_text: { text: shareUrl } }]);
+      buttons.push([{ text: `🎯 ${label}${probSuffix(m)}`, copy_text: { text: shareUrl } }]);
     }
     lines.push('');
     idx++;
@@ -208,11 +232,11 @@ export function hotMarkets(markets, botUsername) {
     const title = parseTitle(m.title);
     const short = title.length > 40 ? title.slice(0, 38) + '…' : title;
     const cat = CAT[m.category] || '🌐';
-    const yesOdds = m.yes_implied_prob != null ? Math.round(m.yes_implied_prob * 100) + '%是' : '';
+    const prob = probSuffix(m);
     lines.push(`${idx}. ${cat} ${short}`);
-    lines.push(`   💰${(m.total_pool_kas || 0).toFixed(0)} KAS · 👥${m.bettor_count || 0}人${yesOdds ? ' · ' + yesOdds : ''}`);
+    lines.push(`   💰${(m.total_pool_kas || 0).toFixed(0)} KAS · 👥${m.bettor_count || 0}人${prob ? ' · YES' + prob : ''}`);
     const shareUrl = `https://t.me/${BOT}?start=${m.id}`;
-    buttons.push([{ text: `🎯 押 #${idx} ${short.slice(0, 20)}`, copy_text: { text: shareUrl } }]);
+    buttons.push([{ text: `🎯 押 #${idx} ${short.slice(0, 20)}${prob}`, copy_text: { text: shareUrl } }]);
     lines.push('');
     idx++;
   }
