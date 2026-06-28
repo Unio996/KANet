@@ -115,10 +115,11 @@ export function gatherOrderedBets(logicalMarketId) {
   };
 }
 
-// 读链上 ctor-baked bets_root(CloseZk genesis redeem code-body·J1 17:36 实定位: redeem[280:312]·PUSH32 0x20 @279)。
-// 与 attested_winner(state region @53)同一 self-fetch redeem → verify-value-source(链上自取·非 caller-fed)。
-// gate_tmpl_hash@231 / verdict_oracle_pk@后(本函数只读 bets_root)。值无关·real genesis 同 offset。
-const _CZGEN = { BETSROOT_PUSH: 279, BETSROOT_VAL: 280 };
+// 读链上 ctor-baked bets_root(CloseZk genesis redeem code-body)。
+// ⚠ offset 随 .sil 版本变: J1 17:36 = @280; **J1 18:14 version-prefix fix(expectedSpk 漏 0x0000 2B)后 = @290(PUSH32@289)**。
+// 与 attested_winner(state region @53·fix 不变)同一 self-fetch redeem → verify-value-source(链上自取·非 caller-fed)。
+// gate_tmpl_hash@231 / verdict_oracle_pk@后(本函数只读 bets_root)。值无关·fixed .sil 新 genesis 同 offset。
+const _CZGEN = { BETSROOT_PUSH: 289, BETSROOT_VAL: 290 };
 export function readOnChainBetsRootFromGenesis(genesisRedeemHex) {
   if (typeof genesisRedeemHex !== 'string' || !/^[0-9a-fA-F]+$/.test(genesisRedeemHex)) {
     throw new Error('readOnChainBetsRootFromGenesis: redeem 非 hex');
