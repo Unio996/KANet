@@ -3,7 +3,7 @@
 // 双闸: ① prevet 应拒(创建期窄门) ② deriveVote 应 ABSTAIN(运行期 no-guess)。
 // 测 abstain 校准 = 负样本里 oracle 该弃权时弃权了没(非被迫 YES/NO)。
 const LLM = process.env.QWEN_LLM_URL || 'http://127.0.0.1:8000';
-const MODEL = 'Qwen_Qwen3.6-35B-A3B-Q4_K_M.gguf';
+const MODEL = 'Qwythos-9B-Claude-Mythos-5-1M-Q4_K_M.gguf';
 
 // deriveVote 路负样本: 喂 LLM 该弃权的题(prompt 现强制 YES/NO, 这暴露"被迫判"=校准缺口)
 // 注: 真 abstain 在 daemon 层(low-conf→abstain)+ findExtractor null→no-extractor-match。

@@ -192,7 +192,7 @@ fi
 
 # ── llama-server (本地推理引擎) ──────────────────────────────────────────────
 LLAMA_SERVER="$KANET_ROOT/tools/llama-server/llama-server.exe"
-LLAMA_MODEL="${LLAMA_MODEL_PATH:-$KANET_ROOT/models/Qwen_Qwen3.6-35B-A3B-Q4_K_M.gguf}"
+LLAMA_MODEL="${LLAMA_MODEL_PATH:-$KANET_ROOT/models/Qwythos-9B-Claude-Mythos-5-1M-Q4_K_M.gguf}"
 LLAMA_PORT=8000
 LLAMA_LOG="$LOG_DIR/llama-server.log"
 
@@ -202,13 +202,14 @@ if [ -f "$LLAMA_SERVER" ] && [ -f "$LLAMA_MODEL" ]; then
   if netstat -an 2>/dev/null | grep -q ":${LLAMA_PORT}.*LISTEN"; then
     ok "llama-server 已在运行 (port $LLAMA_PORT)"
   else
-    info "启动 llama-server (Qwen3-30B, RTX 5090)..."
+    info "启动 llama-server (Qwythos-9B, RTX 5090)..."
     > "$LLAMA_LOG"
     (cd "$KANET_ROOT/tools/llama-server" && ./llama-server.exe \
       --model "$LLAMA_MODEL" \
       --host 0.0.0.0 --port $LLAMA_PORT \
-      --n-gpu-layers 99 --ctx-size 262144 --threads 8 \
-      --flash-attn on \
+      --n-gpu-layers 99 --ctx-size 1048576 \
+      --cache-type-k q8_0 --cache-type-v q8_0 \
+      --threads 8 --flash-attn on \
       >> "$LLAMA_LOG" 2>&1) &
     LLAMA_PID=$!
     echo "$LLAMA_PID" > "$PID_DIR/llama-server.pid"

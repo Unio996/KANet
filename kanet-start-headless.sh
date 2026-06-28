@@ -84,7 +84,7 @@ fi
 # 旧默认 $KANET_ROOT/tools|models 在 D: 全是死路 + 版本写错 Qwen3.5 (实际 3.6) → headless 永报
 # 'model file not found'、Console 重启不带 llama. 修: 默认指 C:\KANet 实际路径 (env 可覆盖) + 版本 3.6.
 LLAMA_SERVER="${LLAMA_SERVER_PATH:-C:/KANet/tools/llama-server/llama-server.exe}"
-LLAMA_MODEL="${LLAMA_MODEL_PATH:-C:/KANet/models/Qwen_Qwen3.6-35B-A3B-Q4_K_M.gguf}"
+LLAMA_MODEL="${LLAMA_MODEL_PATH:-C:/KANet/models/Qwythos-9B-Claude-Mythos-5-1M-Q4_K_M.gguf}"
 LLAMA_DIR="$(dirname "$LLAMA_SERVER")"
 LLAMA_LOG="$LOG_DIR/llama-server.log"
 LLAMA_PID=""
@@ -102,8 +102,9 @@ elif [ -f "$LLAMA_SERVER" ] && [ -f "$LLAMA_MODEL" ]; then
   (cd "$LLAMA_DIR" && ./llama-server.exe \
     --model "$LLAMA_MODEL" \
     --host 0.0.0.0 --port $LLAMA_PORT \
-    --n-gpu-layers 99 --ctx-size 262144 --threads 8 \
-    --flash-attn on \
+    --n-gpu-layers 99 --ctx-size 1048576 \
+    --cache-type-k q8_0 --cache-type-v q8_0 \
+    --threads 8 --flash-attn on \
     >> "$LLAMA_LOG" 2>&1) &
   LLAMA_PID=$!
   echo "$LLAMA_PID" > "$PID_DIR/llama-server.pid"

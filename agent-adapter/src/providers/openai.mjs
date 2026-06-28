@@ -243,7 +243,7 @@ export async function ask(message, idempotencyKey, options) {
     // Qwen3 kill switch (QWEN-RULES.md Rule 11): 关 reasoning, /no_think 无效.
     // 仅在 model 名含 Qwen 时加, 防止非 Qwen provider 报字段错.
     const payload = { model, messages };
-    if (/qwen/i.test(model || "")) {
+    if (/qwen|qwythos/i.test(model || "")) {
       payload.chat_template_kwargs = { enable_thinking: false };
     }
     // D2 双向 raw passthrough: tools/tool_choice 不 sanitize (JSON schema fragment 完整传)

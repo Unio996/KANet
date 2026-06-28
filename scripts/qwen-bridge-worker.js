@@ -96,7 +96,7 @@ async function askQwen(system, user) {
     messages.push({ role: 'user', content: userInput });
 
     const body = JSON.stringify({
-      model: 'Qwen3.6-35B-A3B',
+      model: 'Qwythos-9B-Claude-Mythos-5-1M-Q4_K_M.gguf',
       messages,
       max_tokens: MAX_TOKENS,
       temperature: 0.3,

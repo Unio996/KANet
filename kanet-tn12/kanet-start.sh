@@ -159,7 +159,7 @@ fi
 
 # ── llama-server (本地推理引擎) ──────────────────────────────────────────────
 LLAMA_SERVER="$KANET_ROOT/tools/llama-server/llama-server.exe"
-LLAMA_MODEL="${LLAMA_MODEL_PATH:-$KANET_ROOT/models/Qwen_Qwen3.6-35B-A3B-Q4_K_M.gguf}"
+LLAMA_MODEL="${LLAMA_MODEL_PATH:-$KANET_ROOT/models/Qwythos-9B-Claude-Mythos-5-1M-Q4_K_M.gguf}"
 LLAMA_PORT=8000
 LLAMA_LOG="$LOG_DIR/llama-server.log"
 

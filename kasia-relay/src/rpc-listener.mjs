@@ -589,6 +589,8 @@ async function catchUpHistory() {
       }
       for (const record of pendingComms) {
         try {
+          // 请求间隔 150ms，避免 public API 限流
+          await new Promise(r => setTimeout(r, 150));
           // 从链上按 txid 取完整 TX（链是真相源）
           const txRes = await fetch(
             `https://api.kaspa.org/transactions/${record.txid}`,
@@ -596,6 +598,8 @@ async function catchUpHistory() {
           );
           if (!txRes.ok) {
             log(`catch-up comm: API ${txRes.status} for ${record.txid.slice(0, 16)}, skipping`);
+            // 429 限流：中止本轮，等下次 catch-up 再试
+            if (txRes.status === 429) break;
             continue;
           }
           const txData = await txRes.json();
