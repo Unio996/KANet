@@ -740,6 +740,56 @@ function checkR_SHARD_BLIND(filepath, content) {
   }
 }
 
+// R-COMMINGLE-GUARD (FINDING-2 ③, J1 2026-06-28): every bettor stake-lock handler in pool.js must call the
+// single-source assertNotCommingled guard. commit1 inlined the check in register-v07 ONLY and missed the other
+// 5 register handlers (register / register-v06{prep,confirm} / register-external{prep,confirm}) → auto-bet + TG
+// /bet (register-v06 dual-handle) let commingled bets through. (1) flags any /bettor/register* handler missing
+// the guard so a NEW register handler can't silently reopen the hole; (2) warns on inline commingled-detection
+// SQL outside the canonical helper (= the same single-source-drift the guard-call-site rule prevents).
+function checkR_COMMINGLE_GUARD(filepath, content) {
+  // (1) guard-call-site: pool.js /bettor/register* handlers MUST call assertNotCommingled (hard fail).
+  // A handler's body ends at the NEXT route handler (any verb) — not the next register handler — so an
+  // unguarded handler can't false-pass on a guard call that lives in a non-register handler between them.
+  if (/api[\\/]pool\.js$/.test(filepath)) {
+    const anyHandlerRe = /fastify\.(?:post|put|get|delete|patch)\(/g;
+    const bounds = [];
+    let h;
+    while ((h = anyHandlerRe.exec(content)) !== null) bounds.push(h.index);
+    const registerRe = /fastify\.(?:post|put)\(\s*['"`][^'"`]*\/bettor\/register[^'"`]*['"`]/g;
+    let m;
+    while ((m = registerRe.exec(content)) !== null) {
+      const startIdx = m.index;
+      const line = content.slice(0, startIdx).split('\n').length;
+      const nextB = bounds.find((b) => b > startIdx);
+      const body = content.slice(startIdx, nextB !== undefined ? nextB : content.length);
+      if (!/assertNotCommingled\s*\(/.test(body)) {
+        violate(
+          'R-COMMINGLE-GUARD',
+          '[FINDING-2 ③] bettor stake-lock handler 缺 assertNotCommingled 单源守卫 — commingled-spine 盘可漏押 (commit1 只守 register-v07, 漏 register-v06 dual-handle = auto-bet/TG 主路径). market 加载后加一行 `if (assertNotCommingled(market, reply, sqlite)) return;` (lib/pool-commingle-detect.mjs).',
+          filepath, line
+        );
+      }
+    }
+  }
+  // (2) single-source: inline commingled-detection SQL outside the canonical helper = drift risk (warn).
+  // Skip the helper itself (canonical home) AND this lint script (whose regex/message literally contains the
+  // scanned pattern → would self-flag).
+  if (!/pool-commingle-detect\.mjs$/.test(filepath) && !/lint-kanet\.mjs$/.test(filepath)) {
+    const lines = content.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+      if (/^\s*(?:\/\/|\*)/.test(lines[i])) continue;
+      const window = lines.slice(i, i + 3).join(' ');
+      if (/GROUP\s+BY\s+spine_p2sh\b[\s\S]{0,80}HAVING\s+COUNT\(\*\)\s*>\s*1/i.test(window)) {
+        warn(
+          'R-COMMINGLE-SINGLE-SOURCE',
+          '[FINDING-2 单源] 内联 commingled-spine 检测 SQL (GROUP BY spine_p2sh HAVING COUNT(*)>1) — 应 import commingledSpineSet/isCommingledSpine (lib/pool-commingle-detect.mjs) 防与单源判据漂移.',
+          filepath, i + 1
+        );
+      }
+    }
+  }
+}
+
 // ── 跑 ──
 for (const fp of targets) {
   let content;
@@ -755,6 +805,7 @@ for (const fp of targets) {
   checkR_NWT_FRAMEWORK(fp, content);
   checkR_NWT_STATE_MACHINE(fp, content);  // SA-3: retail_dex_orders.state 直 UPDATE → hard fail
   checkBrokerStutter(fp, content);
+  checkR_COMMINGLE_GUARD(fp, content);  // FINDING-2 ③: stake-lock handler 必调单源 assertNotCommingled (防漏 handler)
   checkCommandEnum(fp, content);
   checkABE_A6_protocol_status_owner(fp, content);  // ABE-A.6: protocol_status owner invariant
   checkKI30_chain_amount_precision(fp, content);  // KI-30 (Bettor r181 5/19): chain TX amount 必 toFixed(8)

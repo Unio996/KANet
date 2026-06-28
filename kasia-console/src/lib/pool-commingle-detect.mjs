@@ -7,12 +7,19 @@
 // by >1 v0.7 market; an isolated (post-fix or single) market's spine_p2sh is unique.
 //
 // 单源铁律 (线8 机制哲学, 同 validateResolutionPredicate / 护栏6): the commingled criterion lives HERE, ONCE.
-// All three FINDING-2 entry-gates import this — zero drift, one place to reason about:
-//   ② trending-exclude  (display, non-money, ship now)      — 热榜不显 commingled 盘
-//   ③ register-v07 reject (entry, money-adjacent, next pass) — 用户押不进 commingled bug 盘
-//   ① settler skip       (settle, money-adjacent, next pass) — 自治结算跳过 commingled (BSHARD_SETTLE_HOLD)
+// All FINDING-2 entry-gates import this — zero drift, one place to reason about:
+//   ② trending-exclude  (display, non-money)  — 热榜不显 commingled 盘 (commingledSpineSet)
+//   ③ register reject   (entry, money-adjacent) — 用户押不进 commingled bug 盘 (assertNotCommingled, 全 6 stake-lock 入口)
+//   ① settler skip      (settle, money-adjacent) — 自治结算跳过 commingled (bshard-close-voter)
 // NON-money: this module only READS pool_markets; it never mutates status/funds (entry-block ≠ status-cancel,
 // J1 decoupling 原则 — status='cancelled' would orphan the settler deadline auto-refund).
+//
+// ③ 完整性 (commit1 miss 教训, 2026-06-28): commit1 只守 register-v07 单个 handler, 但 stake-lock 入口有 6 个
+// (register-v07 / register / register-v06{prep,confirm} / register-external{prep,confirm}), auto-bet+TG /bet 走
+// register-v06 dual-handle → commingled 盘漏押。assertNotCommingled = 单源【守卫调用点】, 每个 stake-lock handler
+// 顶部一行调 (call-site 单源, 非 scatter 内联 = 防"新加 handler 又漏守")。lint-kanet R-COMMINGLE-GUARD 自维持。
+// 防御性铁律: register-external 实践只 v0.5 (commingled=v0.7 N/A), 但码不强制 protocol_version → 也 wire,
+// isCommingledSpine 对非 v0.7 spine 返 false = 零害 no-op (别信 'only-used-for-X' 当码不强制 = commit1 同根因)。
 
 const COMMINGLE_SQL =
   "SELECT COUNT(*) AS n FROM pool_markets WHERE spine_p2sh = ? AND protocol_version = 'v0.7'";
@@ -44,4 +51,30 @@ export function isCommingledSpine(spineP2sh, db) {
 export function commingledSpineSet(db) {
   const rows = db.prepare(COMMINGLE_SET_SQL).all();
   return new Set(rows.map(r => r.spine_p2sh));
+}
+
+/**
+ * assertNotCommingled — SINGLE-SOURCE guard call-site for the ③ entry-gate. Call at the top of EVERY
+ * bettor stake-lock handler (after the market row is loaded). Returns true IFF it already rejected the
+ * request (caller must `return` immediately); false = market is clean, proceed.
+ *
+ * Why a shared guard (not inline isCommingledSpine per handler): commit1 inlined the check in register-v07
+ * only and missed the other 5 stake-lock entries (register / register-v06{prep,confirm} /
+ * register-external{prep,confirm}). One call-site fn → adding the guard to a new handler is one line, and
+ * lint-kanet R-COMMINGLE-GUARD flags any pool_bettor_sides-INSERT handler that forgot to call it.
+ *
+ * @param {object} market  pool_markets row (must have spine_p2sh)
+ * @param {object} reply   fastify reply (409 sent on commingled)
+ * @param {object} db      better-sqlite3 handle
+ * @returns {boolean}      true = rejected (caller returns), false = clean
+ */
+export function assertNotCommingled(market, reply, db) {
+  if (market && isCommingledSpine(market.spine_p2sh, db)) {
+    reply.code(409).send({
+      ok: false,
+      error: 'market spine commingled (FINDING-2): registration blocked. Existing stakes remain refundable at deadline (outpoint-precise).',
+    });
+    return true;
+  }
+  return false;
 }

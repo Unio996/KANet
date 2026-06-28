@@ -9,6 +9,9 @@ import { getWorkingRpc } from '../services/rpc-health.js';
 import { estimateStorageMass } from '../services/pool-market-settler.js';
 import { categorizeMarket } from '../lib/market-category.js';
 import { isStructuredSpec, assertSpecPredicateValid } from '../lib/spec-validation.js';
+// FINDING-2 (NWT) ③ entry-gate — SINGLE SOURCE commingled-spine guard. assertNotCommingled is called at the
+// top of EVERY bettor stake-lock handler (6 entries); lint-kanet R-COMMINGLE-GUARD flags any that forgot. 禁内联.
+import { assertNotCommingled } from '../lib/pool-commingle-detect.mjs';
 import { createHash, randomUUID } from 'node:crypto';
 
 // L4 (area-11): create-time invariants. Hardcoded mirrors of the settler constants;
@@ -1108,14 +1111,10 @@ export async function registerPoolRoutes(fastify) {
     if (market.protocol_status !== 'pending_bettors') return reply.code(409).send({ ok: false, error: `market status=${market.protocol_status}, registration closed` });
     if (!market.pool_merkle_root) return reply.code(409).send({ ok: false, error: 'v0.7 market missing pool_merkle_root (committee)' });
 
-    // FINDING-2 (NWT) 入口闸: commingled-spine 盘拒新押注 (单源 isCommingledSpine, J1 pool-commingle-detect, 2026-06-28).
-    //   pre-fix v0.7 markets 没把 market_id 烤进 spine redeem → spine_p2sh 被 >1 市场共享 → 跨市场替换风险.
-    //   entry-block ≠ status-cancel (J1 decoupling 原则): 只拒新押注, 不碰 status/资金; 已有押注走 deadline 自动退款
-    //   (outpoint-precise, 每 side 独立花费, 不受 commingled 影响) → 不 orphan 退款路.
-    const { isCommingledSpine } = await import('../lib/pool-commingle-detect.mjs');
-    if (isCommingledSpine(market.spine_p2sh, sqlite)) {
-      return reply.code(409).send({ ok: false, error: 'market spine commingled (FINDING-2): registration blocked. Existing stakes remain refundable at deadline (outpoint-precise).' });
-    }
+    // FINDING-2 (NWT) ③ 入口闸 — 单源守卫 (commit1 此处内联, 现迁 shared assertNotCommingled = call-site 单源).
+    //   commingled spine_p2sh 被 >1 v0.7 市场共享 → 跨市场替换风险. entry-block ≠ status-cancel (J1 decoupling):
+    //   只拒新押注, 不碰 status/资金; 已有押注走 deadline 自动退款 (outpoint-precise) → 不 orphan 退款路.
+    if (assertNotCommingled(market, reply, sqlite)) return;
 
     const direction = parseInt(b.direction, 10);
     if (direction !== 0 && direction !== 1) return reply.code(400).send({ ok: false, error: 'direction must be 0 (YES) or 1 (NO)' });
@@ -1320,6 +1319,9 @@ export async function registerPoolRoutes(fastify) {
       return reply.code(409).send({ ok: false, error: `market status=${market.protocol_status}, bettor registration closed` });
     }
 
+    // FINDING-2 ③ commingled-spine guard (单源 assertNotCommingled, 见 register-v07). dual-handle v0.6/v0.7.
+    if (assertNotCommingled(market, reply, sqlite)) return;
+
     // Area-1 invariant: oracle ∩ bettor = ∅ (PoolSpine.sil L9-16, pp.txt 1.4). An oracle
     // betting on its own adjudication is a direct manipulation vector. Reject before
     // transferAndConfirm so no stake gets stranded.
@@ -1515,6 +1517,8 @@ export async function registerPoolRoutes(fastify) {
     if (market.protocol_status !== 'pending_bettors') {
       return reply.code(409).send({ ok: false, error: `market status=${market.protocol_status}, bettor registration closed` });
     }
+    // FINDING-2 ③ commingled guard (单源). register-external 不强制 protocol_version → 防御性 wire (v0.5 no-op).
+    if (assertNotCommingled(market, reply, sqlite)) return;
     const bettorCount = sqlite.prepare('SELECT COUNT(*) c FROM pool_bettor_sides WHERE market_id = ?').get(marketId).c;
     if (bettorCount >= 50) return reply.code(409).send({ ok: false, error: 'market full — 50 bettors max per market (PoolSpine.sil L13)' });
     let d;
@@ -1558,6 +1562,8 @@ export async function registerPoolRoutes(fastify) {
     if (market.protocol_status !== 'pending_bettors') {
       return reply.code(409).send({ ok: false, error: `market status=${market.protocol_status}, bettor registration closed` });
     }
+    // FINDING-2 ③ commingled guard (单源). register-external 不强制 protocol_version → 防御性 wire (v0.5 no-op).
+    if (assertNotCommingled(market, reply, sqlite)) return;
     let d;
     try { d = await _extStakeDeriveSide(market, b.linked_addr, v.direction, v.stakeAmount); }
     catch (e) { return reply.code(e.code || 500).send({ ok: false, error: e.message }); }
@@ -1720,6 +1726,8 @@ export async function registerPoolRoutes(fastify) {
     if (market.protocol_status !== 'pending_bettors') {
       return reply.code(409).send({ ok: false, error: `market status=${market.protocol_status}, bettor registration closed` });
     }
+    // FINDING-2 ③ commingled guard (单源). dual-handle v0.6/v0.7 — auto-bet + TG /bet 走这条 (commit1 漏的主路径).
+    if (assertNotCommingled(market, reply, sqlite)) return;
     const bettorCount = sqlite.prepare('SELECT COUNT(*) c FROM pool_bettor_sides WHERE market_id = ?').get(marketId).c;
     if (bettorCount >= 50) return reply.code(409).send({ ok: false, error: 'market full — 50 bettors max per market' });
     let d;
@@ -1755,6 +1763,8 @@ export async function registerPoolRoutes(fastify) {
     if (market.protocol_status !== 'pending_bettors') {
       return reply.code(409).send({ ok: false, error: `market status=${market.protocol_status}, bettor registration closed` });
     }
+    // FINDING-2 ③ commingled guard (单源). dual-handle v0.6/v0.7 — 真锁仓 confirm (INSERT pool_bettor_sides 下方).
+    if (assertNotCommingled(market, reply, sqlite)) return;
     let d;
     try { d = await _extStakeDeriveSide(market, b.linked_addr, v.direction, v.stakeAmount); }
     catch (e) { return reply.code(e.code || 500).send({ ok: false, error: e.message }); }
