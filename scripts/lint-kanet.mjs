@@ -751,22 +751,25 @@ function checkR_COMMINGLE_GUARD(filepath, content) {
   // A handler's body ends at the NEXT route handler (any verb) — not the next register handler — so an
   // unguarded handler can't false-pass on a guard call that lives in a non-register handler between them.
   if (/api[\\/]pool\.js$/.test(filepath)) {
-    const anyHandlerRe = /fastify\.(?:post|put|get|delete|patch)\(/g;
-    const bounds = [];
+    // Enumerate every fastify route handler with its route string, then check each whose body either (a) is a
+    // /bettor/register* route OR (b) writes a stake lock (INSERT ... INTO pool_bettor_sides). Keying on the
+    // INSERT signature — not just the route name (KANet-UI future-proof catch) — means a NEW stake-lock handler
+    // under any path can't silently reopen the hole; the register* condition keeps prep-handler defense coverage.
+    const handlerRe = /fastify\.(?:post|put|get|delete|patch)\(\s*['"`]([^'"`]*)['"`]/g;
+    const handlers = [];
     let h;
-    while ((h = anyHandlerRe.exec(content)) !== null) bounds.push(h.index);
-    const registerRe = /fastify\.(?:post|put)\(\s*['"`][^'"`]*\/bettor\/register[^'"`]*['"`]/g;
-    let m;
-    while ((m = registerRe.exec(content)) !== null) {
-      const startIdx = m.index;
-      const line = content.slice(0, startIdx).split('\n').length;
-      const nextB = bounds.find((b) => b > startIdx);
-      const body = content.slice(startIdx, nextB !== undefined ? nextB : content.length);
-      if (!/assertNotCommingled\s*\(/.test(body)) {
+    while ((h = handlerRe.exec(content)) !== null) {
+      handlers.push({ idx: h.index, route: h[1], line: content.slice(0, h.index).split('\n').length });
+    }
+    for (let i = 0; i < handlers.length; i++) {
+      const body = content.slice(handlers[i].idx, i + 1 < handlers.length ? handlers[i + 1].idx : content.length);
+      const isRegister = /\/bettor\/register/.test(handlers[i].route);
+      const locksStake = /INSERT(?:\s+OR\s+\w+)?\s+INTO\s+pool_bettor_sides\b/i.test(body);
+      if ((isRegister || locksStake) && !/assertNotCommingled\s*\(/.test(body)) {
         violate(
           'R-COMMINGLE-GUARD',
-          '[FINDING-2 ③] bettor stake-lock handler 缺 assertNotCommingled 单源守卫 — commingled-spine 盘可漏押 (commit1 只守 register-v07, 漏 register-v06 dual-handle = auto-bet/TG 主路径). market 加载后加一行 `if (assertNotCommingled(market, reply, sqlite)) return;` (lib/pool-commingle-detect.mjs).',
-          filepath, line
+          '[FINDING-2 ③] bettor stake-lock handler 缺 assertNotCommingled 单源守卫 — commingled-spine 盘可漏押 (commit1 只守 register-v07, 漏 register-v06 dual-handle = auto-bet/TG 主路径; 触发=register* 路由 OR INSERT pool_bettor_sides). market 加载后加一行 `if (assertNotCommingled(market, reply, sqlite)) return;` (lib/pool-commingle-detect.mjs).',
+          filepath, handlers[i].line
         );
       }
     }
