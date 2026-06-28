@@ -20,6 +20,8 @@ import { sendCommandAsync } from './relay-manager.js';
 import { createHash } from 'node:crypto';
 // FINDING-2 (NWT) commingled-spine detection — SINGLE SOURCE (J1 pool-commingle-detect). 禁内联.
 import { isCommingledSpine } from '../lib/pool-commingle-detect.mjs';
+// broker 佣金到账 emit (Owner 主线·链验金额·post-index pass). 设计: docs/2026-06-28-broker-fee-landed-emit-pass-spec.md
+import { brokerFeeLandedEmitTick } from './broker-fee-emit.mjs';
 // J1tn r303 P0-#1 sweep helper refactor (Bettor r346/r366b 钦定 fork 合 1 helper): KIP-9
 // storage_mass 公式 + STORAGE_MASS_C const 抽 lib/kip9-mass.mjs. 5 call sites 不再各抄.
 import {
@@ -360,8 +362,10 @@ export async function poolSettlerTick() {
       //   commingled⊄bshard: 0-bet/未分片 commingled 盘无 market_shards 行 → 照走委员结算)。
       //   route-to-refund (非裸 continue — 裸 continue orphan maker dispatchRefund·昨晚 decoupling 反例): 复用已验
       //   doomed-self-heal/MIN_POT cancel-refund 分支·只换触发条件为 isCommingledSpine. 两部分都退·均 outpoint-precise
-      //   (J1 独立 co-verify safe): maker = dispatchRefund(refund_maker_unjoined·花本盘 spine_lock_tx:0→本盘 maker 地址);
-      //   bettor = per-side bettor_refund_available 事件 + cancelled status → legacyRefundBuilderTick(L171) 自取兜底
+      //   (J1 独立 co-verify safe): maker = dispatchRefund(refund_maker_unjoined·花本盘 spine_lock_tx:0→本盘 maker 地址·
+      //   注: dispatchRefund 把 status cancelled→refunding·盘留主 query→handleRefunding→refunded·maker 不 orphan);
+      //   bettor【即时】路 = per-side bettor_refund_available 事件(outpoint-precise side_lock_tx·self-claim·不依赖 status);
+      //   legacyRefundBuilderTick 是 refunded 后的兜底 pickup(非即时·因 dispatchRefund 已把 status 移出 cancelled·J1 精确化)。
       //   per-side P2SH outpoint-precise 退。盗币向量在 settle (共享 spine 派彩)·退款不从共享地址盲选 → 安全。
       //   filter = settle 态 {verifying, collecting_sigs, disputed} (J1 catch: disputed 也在主 query L319·dispute-resolve
       //   能走到结算=同替换风险)。pending_bettors commingled【不直接碰】→ deadline-watcher 先推进到 verifying 再命中
@@ -1164,7 +1168,20 @@ export async function poolSettlerTick() {
       console.warn(`[pool-settler:path-b] phase fail: ${e.message}`);
     }
 
-    return { ok: true, processed: markets.length, consensus, refund, pending, doomed, errored, pathBReconciled, bshardSkipped, commingledRefund };
+    // broker 佣金到账 emit pass (Owner 主线): completed 盘 settle TX 进 kaspa_tx_log 后·从 outputs_json 按 broker
+    // 地址取链验金额 emit broker_fee_landed (tg-bot DM consumer 消费)。post-index·非 settle-submit 点 (那时没 index)。
+    // try-catch 隔离: emit 失败绝不影响结算主路 (additive·只读 pool_markets/kaspa_tx_log + 写 chain_events + metadata 标记)。
+    let brokerFeeEmit = null;
+    try {
+      const _kw = await import('kaspa-wasm');
+      // deriver 与 settle 路 broker output 同源 (L1681 XOnlyPublicKey(broker_pk).toAddress) → 地址逐字节匹配 outputs_json。
+      const deriveBrokerAddress = (brokerPkHex, network) => new _kw.XOnlyPublicKey(brokerPkHex).toAddress(network).toString();
+      brokerFeeEmit = brokerFeeLandedEmitTick(sqlite, deriveBrokerAddress, (s) => console.log(s));
+    } catch (e) {
+      console.warn(`[broker-fee-emit] phase fail: ${e.message}`);
+    }
+
+    return { ok: true, processed: markets.length, consensus, refund, pending, doomed, errored, pathBReconciled, bshardSkipped, commingledRefund, brokerFeeEmit };
   } finally {
     running = false;
   }

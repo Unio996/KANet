@@ -44,6 +44,9 @@ const MAX_STAKE_KAS = Number(process.env.AUTO_BET_MAX_STAKE_KAS) || 50;
 const MIN_RESERVE_KAS = Number(process.env.AUTO_BET_MIN_RESERVE_KAS) || 10;
 const RELAYS = parseRelays(process.env.AUTO_BET_RELAYS);
 const CONSOLE_BASE = process.env.AUTO_BET_CONSOLE_BASE || 'http://127.0.0.1:3200';
+// NEAR_DEADLINE_SEC: only bet on markets expiring within this window. Default 6h (prod focus); testnet
+// can set AUTO_BET_NEAR_DEADLINE_H env to cover longer-horizon markets.
+const NEAR_DEADLINE_SEC = (Number(process.env.AUTO_BET_NEAR_DEADLINE_H) || 6) * 3600;
 
 let timer = null;
 let running = false;
@@ -114,9 +117,8 @@ async function _placeBet(bot, market) {
 
 // J2-tn r433 (Bettor r471 真解): 聚焦 near-deadline 单, 不均摊 97+ 远期单 → 押注稀释.
 // 排序 deadline ASC (= 最早过期优先) + LIMIT 20 (= 仅最临近 20 个市场).
-// 远期单 (deadline > now + 6h) 不优先, 留给 ramp 拆分.
+// NEAR_DEADLINE_SEC 通过 AUTO_BET_NEAR_DEADLINE_H env 可调(默认 6h; testnet 常设更大覆盖远期盘).
 async function _fetchEligibleMarkets() {
-  const NEAR_DEADLINE_SEC = 6 * 3600;  // 仅押 < 6h 之内 deadline 的市场
   return sqlite.prepare(`
     SELECT id, protocol_version, deadline
     FROM pool_markets
