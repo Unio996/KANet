@@ -19,14 +19,18 @@ ZK 算 payout_root（已三方对死 9bfb3c87）→ 现有 bshard 委员 close_a
 - **委员独立验 ZK = defense-in-depth 好实践（非 load-bearing·但做）**：每委员签前自己跑 GATE_VERIFY=OK + 比 `new_payout_root`==9bfb3c87 才签（J1 槽 9e2db852 已 fresh 跑承诺·J1 给 :3200 三委员验证料 receipt-hex/image_id/验法 → 三委员也非盲）。降低委员集体作恶概率·但**不是 interim B 的安全根**（根是公开 detection）。
 - **production**：纯-ZK 自锚（gate-spk binding·下个 pass 修编译器）= payout_root 链上 ZK-enforced prevention（那才是 on-chain load-bearing）。
 
-## 4. 流程（复用 Phase A ozzeu bshard close 路·每步 NO TX NO STATE + co-verify）
-1. **consolidate**（J1 bshard covenant 域）：bh01w ShardLeaf → PayoutShard → PoolRoot（`unlockBshardConsolidate`）。LAND 后 co-verify PoolRoot 落链。**前置链验**（KANet-UI 已做 ①：shard pool 8e9 unspent ✅）。
-2. **J2 产 close_commit preimage**（`pool-close-builder.mjs buildCloseCommitWitness`）：
-   - 入：`{ rootOutIdx, winningSide:0, payoutRoot:9bfb3c87, currentRootState }`（currentRootState 从 consolidate 出的 PoolRoot state 读）。
-   - 出：close_commit witness（closed:1 + winningSide:0 + payoutRoot:9bfb3c87）+ tx_obj_preimage。committee_hash = blake2b(c0‖c1‖c2‖c3‖c4)·**5 委员 = 无 bettor idx0/3/5/7/11**（sortedPks 序）。
-3. **委员签**（命门 §3·非盲签）：每委员独立验 GATE_VERIFY + payout_root==9bfb3c87 → 签 tx_obj_preimage。J1 签他槽 + KANet-UI 触发 :3200 三委员（broker-2/NWT/OwnerTest）。relay `unlockBshardClose` 收 4-of-5 + push 5 pubkey + recreate root continuation。
-4. **submit close_commit → LAND**（NO TX NO STATE·check_utxo_landed）。PoolRoot closed:1 + winningSide:0 + payoutRoot:9bfb3c87 锚上链。
-5. **赢家自取**（claim builder 现成）：YES winner e72d8e7e merkle proof against payout_root → claim → 领 pool。
+## 4. 流程（🔧 J1 23:04 纠正模型一致性：**A-model close_attest·非 close_commit/PoolRoot**·全 x4kpq 证）
+> ⚠ **我原稿引错 close_commit(pool-close-builder·PoolRoot v07 模型)**。x4kpq 证的是 **close_attest(PayoutShard·A-model)**。consolidate 目标=PayoutShard → close 必用 close_attest(同目标)·否则锚不上。**改用 A-model 全程**：consolidate→PayoutShard→close_attest→bshard_payout_claim（全 x4kpq PROVEN）。
+1. **建 PayoutShard + consolidate**（J1·covenant 域·**全现成 PROVEN 非新码·零 OP_PICK**）—— J1 23:05 surface bh01w 无 PayoutShard(payout_shards 空)→ 实际两子步：
+   - ①a **genesis-mint PayoutShard**（`unlockBshardGenesisMintPayout`·需 bh01w poolMerkleRoot **32a8c91d** + predicate/feeRecipients commit）= 为 bh01w logical market 建 PayoutShard。
+   - ①b **consolidate**（`unlockBshardConsolidate`）：bh01w ShardLeaf → **PayoutShard**（A-model·无 PoolRoot）。
+   - LAND 后 co-verify PayoutShard 落链 + pool 守恒 8e9。前置①KANet-UI 已验 shard pool 8e9 unspent ✅。
+2. **close_attest dispatch**（J2 settler·复用 `bshard-close-transport.publishCloseRequest`·x4kpq 路）：
+   - settler 发 close_attest sign-request（payoutRoot=**9bfb3c87**·winningSide=0·5 委员=无 bettor idx0/3/5/7/11）+ **带 ZK receipt**（委员独立验料）。
+   - **委员 enforce(命门③·已有·load-bearing)**：`bshard-close-enforce.enforceCloseAttest` 各委员独立 re-derive payoutRoot（judgeLine predicate+ESPN 快照→computePariMutuelPayout）→ 验 tx claimedPayoutRoot==自己 re-derive==9bfb3c87 才 `sign_input_for_settle{safe_json}`。**= 委员级 prevention 本就有**（委员不签任意 root）。interim B 加 ZK = 委员可【额外】验 ZK receipt（defense-in-depth）+ 公开 detection（§3）。
+3. **collect 4-of-5 + submit**（J2 `collectCloseSigs` → J1 relay `unlockBshardCloseAttest`）：PayoutShard closed 0→1 + winningSide:0 + payoutRoot:9bfb3c87 锚上链。
+4. **submit close_attest → LAND**（NO TX NO STATE·check_utxo_landed）。
+5. **赢家自取**（`bshard_payout_claim`·x4kpq 证·现成）：YES winner e72d8e7e merkle proof against payout_root → claim → 领 pool。
 
 ## 5. 分工
 - **J1**: consolidate（ShardLeaf→PayoutShard→PoolRoot）+ 提供 ZK receipt + 签他委员槽 + relay `unlockBshardClose`。
