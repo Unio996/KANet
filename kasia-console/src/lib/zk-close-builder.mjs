@@ -15,20 +15,45 @@ import { sqlite } from '../db/client.js';
 import { createHash } from 'node:crypto';
 import { getSidesByLogicalMarket } from './pool-bettor-sides-query.mjs';
 
-// ── INTERFACE STUBS(待 J1 firm·prove 一通替换实现)─────────────────────────────
-// ③ guest prove API(J1 15:29 预签·真版 prove 通后给):
-//    proveZkClose({ bets:[{pk:hex32,stake:u64,dir:0|1}], winner:0|1, feeConfig, marketId })
-//      → { receiptGroth16:hex(borsh), journalHash:hex32, betsRoot:hex32, payoutRoot:hex32 }
-// 调法待定(CLI 子进程 / WASM / Bonsai)·J1 prover 通后定。
-async function proveZkClose(/* { bets, winner, feeConfig, marketId } */) {
-  throw new Error('proveZkClose: INTERFACE STUB — 待 J1 firm prover API(Docker/Bonsai groth16 通后对接)');
-}
-// ② gate prefix/suffix(J1 P1 emit 工具 diff 出·700B groth16 witness 框架·烤 gate_tmpl_hash 32B):
+// ── ZK_GATE(J1 firm 16:50/16:52·gate-verify EXIT=0 实证·定版常量)──────────────
+// gate redeem = prefix(1B 0x20 = push32)‖ journal_hash(32B·per-settle 变)‖ suffix(800B)。
+// gate_tmpl_hash = blake2b(prefix‖suffix)(固定-per-image_id·烤进 CloseZk ctor·covenant 自省比对)。
+// prefix/suffix 的实字节 = builder 在建 close_attest_zk tx 时从 zk-sdk
+//   commit_to_groth16_with_fixed_journal(imageId, journalHash).finalize_with_proof(receipt) 取(作 witness·非烤)。
 const ZK_GATE = {
-  // gateTmplHash: 32B(烤进 close_attest_zk redeem·covenant 自省比对)— J1 给
-  // groth16WitnessPrefix / Suffix: 700B 框架(witness·非烤)— J1 emit
-  STUB: true,
+  imageId: '335cae6c34c5d4049f92b8fd33da491de2a11d321cbaf5a543a0490977328c7d',     // 结算 guest image_id(改 guest=改此=新 covenant)
+  gateTmplHash: 'b9d56ce469c375c139bae90f5dd409d79807b81c69027a3d44c31bd6a74bdbd5', // blake2b(prefix‖suffix)·烤 CloseZk ctor
 };
+
+// ── INTERFACE STUB(proveZkClose·契约已 firm·transport 待定·见下）─────────────────
+// ③ guest prove API 契约(J1 firm 16:52):
+//    proveZkClose({ bets:[{pk:hex32,stake:u64,dir:0|1}], winner:0|1, feeConfig, marketId })
+//      flat input = [n:4LE][n×(pk32 ‖ stake8LE ‖ dir1)][winner:1]
+//      → { receiptGroth16:hex(borsh·482B), journalHash:hex32(=sha256(journal)), betsRoot:hex32, payoutRoot:hex32, imageId }
+// transport(Bettor 裁 16:54): 今晚 demo = Option ② **receipt-injection**(J1 手动 prove over ACTUAL gathered bets →
+//   receipt borsh hex 注入)。production = Option ① :3300 programmatic prove service(下个 pass)。
+// 口径: operator-driven 手动·NOT 全自动·prover 仍真 guest 算真盘 payout·链上 0xa6 covenant 仍密码学验·
+//   journal.inputs_commit 必==链上 baked bets_root 否则拒 → manual 注入偷不了钱(covenant 兜底)·机制不打折。
+// flat input = [n:4LE][n×(pk32 ‖ stake8LE ‖ dir1)][winner:1] → journal[65]=bets_root‖payout_root‖winner。
+async function proveZkClose({ bets, winner, feeConfig, marketId }, opts = {}) {
+  const { injectedReceipt } = opts;
+  if (!injectedReceipt) {
+    throw new Error('proveZkClose: 今晚 demo=receipt-injection·需 opts.injectedReceipt(J1 手动 prove 的 receipt);production :3300 prove service 待下个 pass');
+  }
+  const { receiptGroth16, journalHash, betsRoot, payoutRoot, imageId } = injectedReceipt;
+  // 自核①: imageId 必 == 钉死结算 guest(改 guest=改 image_id=新 covenant·防换电路)。
+  if (imageId !== ZK_GATE.imageId) {
+    throw new Error(`proveZkClose: receipt imageId=${String(imageId).slice(0, 16)}≠钉死 ${ZK_GATE.imageId.slice(0, 16)}`);
+  }
+  // 自核②: journal_hash 三层 byte-equal(我 computeJournalHash(betsRoot,payoutRoot,winner) == receipt.journalHash·漂则停)。
+  const recomputed = computeJournalHash(betsRoot, payoutRoot, winner);
+  if (recomputed !== journalHash) {
+    throw new Error(`proveZkClose: journal_hash 漂! 我算=${recomputed.slice(0, 16)} receipt=${String(journalHash).slice(0, 16)}(winner=${winner})`);
+  }
+  // 注: bets_root == 链上 ctor-baked bets_root 由 P3 covenant 兜底验(非本函数·manual 注入偷不了钱)。
+  //     强化(可选·TODO): 从我 gatherOrderedBets 的 bets 独立重算 bets_root == receipt.betsRoot(确保 J1 prove 的就是我这盘 bets)。
+  return { receiptGroth16, journalHash, betsRoot, payoutRoot, imageId };
+}
 
 // ── 稳定层: journal_hash(外层 sha256·命门字节·J1 RISC0 framing 锁后核对)──────────
 // journal_hash = sha256(bets_root ‖ payout_root ‖ attested_winner)  (RISC0 journal digest·非 blake2b)
@@ -70,10 +95,31 @@ export function gatherOrderedBets(logicalMarketId) {
 // ── 稳定层: phase 检测(两阶段编排·continuation-chain 天然保序)───────────────────
 // phase1 oracle_attest_verdict 落链 → PS UTXO state closed=1 + attested_winner。phase2 zk_close 花该 UTXO。
 // ❶(NWT)天然满足: zk_close 花 phase1 continuation UTXO → phase1 必已落链(UTXO 存在才能花)。
-export function readAttestedWinnerFromState(/* psRedeemHex */) {
-  // attested_winner 在 PS P2SH scriptPubKey/redeem state 区(J1 close_attest_zk validateOutputState 锁)。
-  // STUB: 待 J1 PS state layout(closed 字段 offset + attested_winner offset)— 我 byte-read。
-  throw new Error('readAttestedWinnerFromState: STUB — 待 J1 PS state layout(attested_winner offset)');
+// B1(NWT BLOCKING·Bettor ACCEPT·零-DB·verify-value-source): attested_winner 必从【链上 PS UTXO redeem state 区】
+// byte-decode·禁从任何 DB 表读(pool_markets.winning_side/execution_states/任何 sqlite)·恶意 settler 改不了链上 UTXO。
+// J1 firm layout(16:55·CloseZk redeem·state_start=1·bshard 编码 int=[0x08]+8B LE / byte32=[0x20]+32B):
+//   consolidated_pool 9B(push@1·val@2-9)· closed 9B(push@10·val@11-18)
+//   · payoutRoot 33B(push@19=0x20·val@20-51)· attested_winner 9B(push@52=0x08·val@53-60·8B LE)
+//   → winner = redeem 绝对 offset 53 起 8B LE 的低字节(0x00=YES→0 / 0x01=NO→1)。
+// psRedeemHex = phase2 即将花费的 phase1 continuation UTXO 的 redeem(relay 自取·非 caller-fed·同 covenant readInputState)。
+const _PSZK = { CONSOL_PUSH: 1, CLOSED_PUSH: 10, PAYOUTROOT_PUSH: 19, AW_PUSH: 52, AW_VAL: 53 };
+export function readAttestedWinnerFromState(psRedeemHex) {
+  if (typeof psRedeemHex !== 'string' || !/^[0-9a-fA-F]+$/.test(psRedeemHex)) {
+    throw new Error('readAttestedWinnerFromState: psRedeemHex 非 hex');
+  }
+  const r = Buffer.from(psRedeemHex, 'hex');
+  if (r.length < _PSZK.AW_VAL + 8) throw new Error(`readAttestedWinnerFromState: redeem 太短 len=${r.length} < ${_PSZK.AW_VAL + 8}`);
+  // 结构校验(verify-value-source: 切点对不上 = 拒·绝不解码垃圾): 4 field push 标记必匹配 J1 layout。
+  if (r[_PSZK.CONSOL_PUSH] !== 0x08) throw new Error(`PS layout mismatch: consolidated_pool push@${_PSZK.CONSOL_PUSH}=0x${r[_PSZK.CONSOL_PUSH].toString(16)}≠0x08`);
+  if (r[_PSZK.CLOSED_PUSH] !== 0x08) throw new Error(`PS layout mismatch: closed push@${_PSZK.CLOSED_PUSH}=0x${r[_PSZK.CLOSED_PUSH].toString(16)}≠0x08`);
+  if (r[_PSZK.PAYOUTROOT_PUSH] !== 0x20) throw new Error(`PS layout mismatch: payoutRoot push@${_PSZK.PAYOUTROOT_PUSH}=0x${r[_PSZK.PAYOUTROOT_PUSH].toString(16)}≠0x20`);
+  if (r[_PSZK.AW_PUSH] !== 0x08) throw new Error(`PS layout mismatch: attested_winner push@${_PSZK.AW_PUSH}=0x${r[_PSZK.AW_PUSH].toString(16)}≠0x08`);
+  // attested_winner = val@53-60 8B LE·winner=低字节·高 7 字节必 0(winner∈{0,1})。
+  const aw = r.subarray(_PSZK.AW_VAL, _PSZK.AW_VAL + 8);
+  const winner = aw[0];
+  for (let i = 1; i < 8; i++) if (aw[i] !== 0) throw new Error(`attested_winner 高字节非0 (aw=${aw.toString('hex')}) — winner 应∈{0,1}`);
+  if (winner !== 0 && winner !== 1) throw new Error(`attested_winner 低字节=${winner} 非 0/1(0x00=YES/0x01=NO)`);
+  return winner; // 0=YES, 1=NO
 }
 
 // ── 主编排: settler tick(扫 ready 单片 bshard 盘 → 两阶段驱动)───────────────────
