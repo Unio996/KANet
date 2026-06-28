@@ -8,7 +8,7 @@
 
 ## 1. 命门(guest 必守)
 - **byte-equal**: Rust guest 算的 `payout_root` 必 == 现 JS `settlePayoutRoot` 逐字节(本文向量是闸)。漂一 bit = 链上 covenant 验 `journal.payout_root` 不符 = 白证。
-- **journal 绑链上真相**(plan P2/P3·防 vacuous): journal 公开 `inputs_commit`(押注集 merkle==covenant 已 commit)/ `verdict`(预言机判决)/ `fee_rules_commit`(==genesis 烤 feeRules)/ `payout_root`(本算术输出)。**covenant 校验时必读得到那些 commit**(verify-value-source 的 ZK 版·NWT 红队死盯)。
+- **journal 绑链上真相**(plan P2/P3·防 vacuous): journal 公开 `inputs_commit`(=押注集 **bets_root hash-chain**·见 §6.5·== 链上 PayoutShard covenant 逐笔 ENFORCE 累积的 state·**非 caller/prover 自报**)/ `verdict`(预言机判决)/ `fee_rules_commit`(==genesis 烤 feeRules)/ `payout_root`(本算术输出·见 §3)。**covenant 校验时必从【链上烤死/累积态】读 bets_root 比 journal**(verify-value-source 的 ZK 版·NWT 红队死盯 introspection 路径必链上非 witness)。本 doc 覆盖 **输入侧(§6.5 bets_root)+ 输出侧(§3-6 payout_root)** 两头 byte-equal 锚。
 - **整数零浮点**: 全 BigInt floor 除。dust 确定性归位(见下)。
 
 ## 2. 原语(byte-critical·先对死这两个)
@@ -101,6 +101,39 @@ leaves 顺序(canonical·确定):
 ```
 (测试 pk = 单字节 padStart 重复 32 次·见生成器)
 
+## 6.5 INPUT 侧 — bets-leaf + betsRoot(P3 inputs_commit·J1 三层锁定 2026-06-28)
+guest 不只算输出(payoutRoot)·还要从 **inputs_commit(=链上 PayoutShard 累积的 bets_root)** 读押注集·验 `journal.inputs_commit == 链上 bets_root`(防假押注·NWT 攻击#1 命门)。**bets-leaf 与 payout-leaf 是不同 preimage**·guest 输入侧必同样 byte-equal。
+
+### 6.5.1 bets-leaf(41B preimage·≠ payout-leaf)
+```
+bets_leaf = blake2b( pk32 ‖ serializeI64(stake,8) ‖ serializeI64(dir,1) , dkLen=32 )
+  pk32   : 32B x-only         stake : 8B LE(同 §2.1 serializeI64·sompi)        dir : 1B(0x00=YES / 0x01=NO)
+  preimage = 32+8+1 = 41B
+```
+dir 编码自测: `serializeI64(0,1)=00` · `serializeI64(1,1)=01`。
+例: pk=`01`×32, stake=`2065000000`, dir=0 → leaf=`5a5082e95758f1f7599ac7db0e940af133a42d1ab495c6befd94c419b7f58f9a`
+
+### 6.5.2 betsRoot — hash-CHAIN(非 merkle·O(1) absorb·order-敏感)
+```
+genesis  = ZERO32 (32×0x00·= init_payoutRoot canonical ZERO)
+每笔 absorb: bets_root = blake2b( old_bets_root ‖ bets_leaf , dkLen=32 )    // covenant 每笔 require new==此式·非-vacuous
+betsRoot(orderedBets) = bets.reduce((acc,b)=>blake2b(acc ‖ bets_leaf(b)), ZERO32)
+```
+- **非 merkle-tree·无 depth/pad**(guest 读全 bets re-walk chain·不需 membership proof)。
+- 🔴 **order 敏感**(hash-chain 致命): 同一组 bets 不同顺序 → 不同 betsRoot。total-order 由 PayoutShard continuation 链强制(absorb 的链上顺序)。covenant/guest/off-chain **三层必同序**·否则 betsRoot 漂 = journal.inputs_commit 锚错。
+- 单片首 ship: 该 PayoutShard betsRoot **直接 = global inputs_commit**。多片: per-shard betsRoot → fold(FoldNode→PoolRoot)合并 global(scale 路)。
+
+### 6.5.3 betsRoot golden 向量(输入侧·与输出侧同 bets 集配对)
+| case | ordered bets | **betsRoot** |
+|---|---|---|
+| B1 (=V1 的 bets) | (01,1e9,0)(02,1e9,0)(03,1e9,1) | `98d2fbeac6b89b959c422158e0067db354c0c047c5fc586cc671f3bded37d33d` |
+| B2 (=V2/V3 的 bets) | (01,2.065e9,0)(02,5e9,0)(03,1e10,1) | `41b7e8e6e891da7eb4f17467e2297f06954b59c7035efbc6df37ce1dbb9dece9` |
+| B4 (=V4 的 bets) | (01,3e9,0)(03,7e9,1) | `162c20b6b597d21a51ef3ba3bebaa012ac5f5d343c304e5bef232a39d299557e` |
+| B_single (1 笔) | (01,2.065e9,0) | `9493df04ff4f5a56109c1cbb836964ecd0ca9b50b38ca78a35b0103255d825f5` (= blake2b(ZERO32‖leaf_0)) |
+| B_order (=B2 乱序) | (02,5e9,0)(01,2.065e9,0)(03,1e10,1) | `2696b616d5296b869d566e0ed4b610c6e621bd7077973b3164bc0ff1624fceea` |
+**B2 ≠ B_order(同 bets 不同序 → betsRoot 不同)= order-敏感铁证**·三层必同 absorb 序。
+**端到端锚**: guest 对 B2 → betsRoot=`41b7e8e6..`(输入 commit)·同组 bets 算 payout → payoutRoot=`715dfe50..`(V2 输出)。两头都对死 = guest 全链路 byte-equal。
+
 ## 7. 复现(确定性·勿手抄)
 生成器: `scratch/_j2_gen_golden_vectors.mjs`(import 真 JS fn → 跑 → 出 `scratch/_j2_golden_vectors.json`)。
 ```
@@ -116,3 +149,7 @@ cd kasia-console && node ../scratch/_j2_gen_golden_vectors.mjs > ../scratch/_j2_
 - **fee leaf 顺序**: broker→introducer→committee(pk lowercase 排序)。winner‖fee 拼接顺序固定。
 - **pk lowercase**: fee pk 全 lowercase 再 hash/排序。
 - **整数除**: BigInt floor·非浮点 round。
+- **(输入侧)bets-leaf ≠ payout-leaf**: bets preimage = pk‖stake(8)‖**dir(1)**(41B)·payout preimage = pk‖amount(8)(40B)。别混用。
+- **(输入侧)dir = serializeI64(dir,1) = 1 byte**(0x00/0x01)·非 int32/不省略。
+- **(输入侧)betsRoot = hash-CHAIN 非 merkle**: blake2b(acc‖leaf) 逐笔·无 depth/pad climb。**order 敏感**——三层(covenant absorb / guest / off-chain)必同 total-order·否则 betsRoot 漂 = inputs_commit 锚错(最易栽)。
+- **(输入侧)genesis betsRoot = ZERO32**·首笔 = blake2b(ZERO32‖leaf_0)。
