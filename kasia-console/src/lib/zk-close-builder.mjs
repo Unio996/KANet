@@ -138,22 +138,56 @@ export function readAttestedWinnerFromState(psRedeemHex) {
   return winner; // 0=YES, 1=NO
 }
 
-// ── 主编排: settler tick(扫 ready 单片 bshard 盘 → 两阶段驱动)───────────────────
-// PRE-WRITE: 结构就位·prove/tx-build/.sil-dispatch 接口点待 J1 firm。
-export async function zkCloseTick(/* ctx: { dispatchPhase1, dispatchPhase2, landed, p2sh } */) {
-  // 1. 扫 ready 单片 bshard 盘(deadline 到 + shard_count=1 + 未 ZK-closed)
-  // 2. for each:
-  //    a. phase1: 若 PS state closed==0 → dispatch oracle_attest_verdict(委员 attest winner)→ 等 continuation LAND
-  //    b. phase2: 若 closed==1(attested_winner 在 state)→
-  //         - winner = readAttestedWinnerFromState(...)  ← B1: 必从链上 PS UTXO state byte-decode·零 DB(verify-value-source)
-  //         - { bets, daaOrderMatchesId, overCap } = gatherOrderedBets(marketId)
-  //         - B2 escape pre-prove: if(overCap) → 禁 prove·escape 退款(bets>0=refund_draw / 0-bet=refund_maker_unjoined·§8.B2)
-  //         - if(!daaOrderMatchesId) 拒(命门告警·retry·C1 demo canary)
-  //         - { receiptGroth16, journalHash, betsRoot, payoutRoot } = await proveZkClose({ bets, winner, feeConfig, marketId })
-  //         - 自核: computeJournalHash(betsRoot, payoutRoot, winner) === journalHash(三层 sha256 对死·漂则停)
-  //         - 建 close_attest_zk tx(两输入: PS continuation UTXO + 0xa6 P2SH(ZK_GATE)·gate-spk·witness=groth16 prefix‖receipt‖suffix)
-  //         - submit → landed() 才算闭(NO TX NO STATE)
-  //    c. prove-fail(infra 宕/guest panic): retry ≤ N_MAX·**绝不回委员路**(Bettor 红线·回 fragile = 假消脆性);
-  //       耗尽/到 deadline → escape 退款(B2·bets>0=refund_draw·非 maker-only)·绝不 status='cancelled'(断退款路·教训)
-  throw new Error('zkCloseTick: PRE-WRITE 骨架 — 待 J1 firm(proveZkClose / ZK_GATE prefix-suffix / PS state layout / .sil dispatch)对接');
+// ── phase2 编排(J2 域·per J1 ③-C 17:23 分工: 我 gather+order+fold 自验+dispatch+LAND 验; J1 prove+gate+2-input build+broadcast)──
+// J2 不碰链·不组 scriptSig·不 prove → 全走 ctx hook(relay/db boundary)。只调 J1 unlockBshardZkClose builder。
+// ctx hooks(J1/relay/db 提供·签名见各处注释):
+//   ctx.fetchCloseZkContinuation(market) → { outpoint:{txid,index}, redeemHex, valueSompi } | null
+//        — relay self-fetch CloseZk continuation UTXO(closed=1)·B1 call-site 命门: redeem 从链上自取·非 caller-fed。
+//        — null = phase1 未产/未落链(continuation UTXO 不存在)→ skip(天然保序: 花它必先有它)。
+//   ctx.readOnChainBetsRoot(redeemHex) → hex32  — 从 CloseZk redeem code-body 读 ctor-baked bets_root(J1 offset)。
+//   ctx.dispatchUnlockZkClose({ marketId, orderedBets, betsRoot, continuationOutpoint, attestedWinner }) → { ok, txid, error }
+//        — sendCommandAsync → J1 unlockBshardZkClose handler(prove+gate+FUND+2-input build+broadcast)。
+//   ctx.checkLanded(txid) → bool  — relay check_utxo_landed(NO TX NO STATE)。
+//   ctx.escapeRefund(market, reason) → { escaped }  — B2: bets>0→refund_draw / 0-bet→refund_maker_unjoined·绝不回委员路·绝不 status-cancel。
+//   ctx.reconcile(market, { txid, winner, betsRoot }) → void  — 仅 LAND 后: closed=2 + settle_evidence(metadata·非 status-cancel)。
+export async function zkClosePhase2(market, ctx) {
+  // 1. fetch CloseZk continuation UTXO(closed=1)·B1 call-site self-fetch(链上自取·非 caller-fed)。
+  const cont = await ctx.fetchCloseZkContinuation(market);
+  if (!cont || !cont.redeemHex) return { skip: 'no CloseZk continuation UTXO(phase1 未产/未落链)' };
+  // 2. attested_winner W ← 链上 redeem byte-decode(B1·offset 53·零 DB·verify-value-source)。
+  const attestedWinner = readAttestedWinnerFromState(cont.redeemHex);
+  // 3. gather ordered bets(链序)+ fold betsRoot。
+  const g = gatherOrderedBets(market.id);
+  if (g.betCount === 0) return ctx.escapeRefund(market, '0-bet ZK market → refund_maker_unjoined(B2)');
+  // 4. B2 escape pre-prove: bets 投影超 1024 payout-leaf cap → 禁 prove·refund_draw。
+  if (g.overCap) return ctx.escapeRefund(market, `bets>1024 cap(count=${g.betCount})→refund_draw(B2)`);
+  // 5. C1 predict-then-verify: 我 fold betsRoot == 链上 ctor-baked bets_root 才放行(序错立抓·prove 前廉价守门)。
+  const onChainBetsRoot = ctx.readOnChainBetsRoot(cont.redeemHex);
+  const v = verifyGatherOrderAgainstChain(g.betsRootHex, onChainBetsRoot);
+  if (!v.ok) return { abort: `betsRoot mismatch(gather 序错·不 prove): fold=${v.gatherBetsRoot.slice(0, 12)} chain=${String(onChainBetsRoot).slice(0, 12)}` };
+  // 6. dispatch J1 unlockBshardZkClose(J1: prove over 真 bets→gate→FUND→2-input build→broadcast)。我不组 scriptSig。
+  const r = await ctx.dispatchUnlockZkClose({
+    marketId: market.id, orderedBets: g.bets, betsRoot: g.betsRootHex,
+    continuationOutpoint: cont.outpoint, attestedWinner,
+  });
+  // 7. prove/build-fail: 不推进·不回委员路(Bettor 红线)·交 B2 deadline escape(retry/refund)。
+  if (!r || !r.ok || !r.txid) return { fail: `unlockBshardZkClose: ${r?.error || 'no txid'}`, proveOrBuildFailed: true };
+  // 8. NO TX NO STATE: LAND 验过才推进本地状态。
+  const landed = await ctx.checkLanded(r.txid);
+  if (!landed) return { fail: `close_zk ${String(r.txid).slice(0, 12)} 广播但未 LAND — NO TX NO STATE·不推进` };
+  // 9. reconcile(仅 LAND 后): closed=2 + settle_evidence。
+  await ctx.reconcile(market, { txid: r.txid, winner: attestedWinner, betsRoot: g.betsRootHex });
+  return { ok: true, txid: r.txid, winner: attestedWinner, betsRoot: g.betsRootHex };
+}
+
+// ── settler tick 扫描包装(扫 ready ZK 盘 → 逐盘 zkClosePhase2)──────────────────────
+// ctx.scanReadyZkMarkets() → [market]  (单片 + ZK-aware + closed==1 phase1 已产 + 未 ZK-closed)。settler 集成点。
+export async function zkCloseTick(ctx) {
+  const markets = await ctx.scanReadyZkMarkets();
+  const out = [];
+  for (const m of markets) {
+    try { out.push({ marketId: m.id, ...(await zkClosePhase2(m, ctx)) }); }
+    catch (e) { out.push({ marketId: m.id, error: e.message }); }
+  }
+  return out;
 }
