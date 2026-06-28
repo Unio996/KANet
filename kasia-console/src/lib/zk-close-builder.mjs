@@ -43,6 +43,11 @@ export function computeJournalHash(betsRootHex, payoutRootHex, attestedWinner) {
 // bets_root hash-chain 的 absorb 序 = register_append 序 = 注册序。pool_bettor_sides ORDER BY id ASC = 插入序。
 // ⚠ 命门: 链上 bets_root absorb 序 = register_append TX **落链序**。demo 单片顺序注册→DB id 序==落链序;
 //   production 必从链上 register 序列(chain_events/kaspa_tx_log)派生·不可只信 DB id(若 TX 乱序落链)。本 demo 用 id 序+下方校验。
+// payout-leaf cap(NWT 攻击#5 第2路·B2·golden-ref depth-10 merkle = 1024 leaf 上限·winners>1024 guest 抛)。
+// cheap pre-check(Bettor 授权"现在加"): projected payout-leaves = bettors(winners≤bettors) + fee-leaves reserve。
+// 超 → overCap=true → zkCloseTick 不进 prove·直接 escape 退款(bets>0 走 refund_draw·见 §8.B2)。
+const ZK_MAX_PAYOUT_LEAVES = 1024;
+const ZK_FEE_LEAVES_RESERVE = 8; // broker/oracle/node/intro fee-leaf 上限保守预留(实 4-6)
 export function gatherOrderedBets(logicalMarketId) {
   // shard-aware(命门·线8 STEP2): bshard bettor 存 shard_market_id·裸按 logical market_id 查不到 → 用 getSidesByLogicalMarket。
   // 该 helper 跨片取但无序 → 这里按 id ASC 排(= pool_bettor_sides 插入序 = register_append 序 = bets_root absorb 序)。
@@ -51,9 +56,14 @@ export function gatherOrderedBets(logicalMarketId) {
   const withDaa = rows.filter(r => r.side_lock_daa != null);
   const byDaa = [...withDaa].sort((a, b) => Number(a.side_lock_daa) - Number(b.side_lock_daa));
   const daaOrderMatchesId = byDaa.every((r, i) => withDaa[i]?.bettor_pk === r.bettor_pk);
+  // B2 cap pre-check: winners≤bettors → 保守用 bettors 数 + fee reserve 投影 payout-leaf 上界。
+  const projectedMaxLeaves = rows.length + ZK_FEE_LEAVES_RESERVE;
+  const overCap = projectedMaxLeaves > ZK_MAX_PAYOUT_LEAVES;
   return {
     bets: rows.map(r => ({ pk: String(r.bettor_pk), stake: String(r.stake_amount), dir: Number(r.direction) })),
     daaOrderMatchesId, // false → 命门告警: DB id 序 ≠ 落链 daa 序·gather 序可能不符 on-chain bets_root → 拒 prove
+    overCap,           // true → bets 投影超 1024 payout-leaf cap → 禁进 prove·escape 退款(bets>0=refund_draw·B2)
+    betCount: rows.length,
   };
 }
 
@@ -73,12 +83,15 @@ export async function zkCloseTick(/* ctx: { dispatchPhase1, dispatchPhase2, land
   // 2. for each:
   //    a. phase1: 若 PS state closed==0 → dispatch oracle_attest_verdict(委员 attest winner)→ 等 continuation LAND
   //    b. phase2: 若 closed==1(attested_winner 在 state)→
-  //         - winner = readAttestedWinnerFromState(...)
-  //         - { bets, daaOrderMatchesId } = gatherOrderedBets(marketId); if(!daaOrderMatchesId) 拒(命门告警·retry)
+  //         - winner = readAttestedWinnerFromState(...)  ← B1: 必从链上 PS UTXO state byte-decode·零 DB(verify-value-source)
+  //         - { bets, daaOrderMatchesId, overCap } = gatherOrderedBets(marketId)
+  //         - B2 escape pre-prove: if(overCap) → 禁 prove·escape 退款(bets>0=refund_draw / 0-bet=refund_maker_unjoined·§8.B2)
+  //         - if(!daaOrderMatchesId) 拒(命门告警·retry·C1 demo canary)
   //         - { receiptGroth16, journalHash, betsRoot, payoutRoot } = await proveZkClose({ bets, winner, feeConfig, marketId })
   //         - 自核: computeJournalHash(betsRoot, payoutRoot, winner) === journalHash(三层 sha256 对死·漂则停)
   //         - 建 close_attest_zk tx(两输入: PS continuation UTXO + 0xa6 P2SH(ZK_GATE)·gate-spk·witness=groth16 prefix‖receipt‖suffix)
   //         - submit → landed() 才算闭(NO TX NO STATE)
-  //    c. prove-fail: retry + alert·**绝不回委员路**(Bettor 红线·回 fragile = 假消脆性)
+  //    c. prove-fail(infra 宕/guest panic): retry ≤ N_MAX·**绝不回委员路**(Bettor 红线·回 fragile = 假消脆性);
+  //       耗尽/到 deadline → escape 退款(B2·bets>0=refund_draw·非 maker-only)·绝不 status='cancelled'(断退款路·教训)
   throw new Error('zkCloseTick: PRE-WRITE 骨架 — 待 J1 firm(proveZkClose / ZK_GATE prefix-suffix / PS state layout / .sil dispatch)对接');
 }
