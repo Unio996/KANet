@@ -13,7 +13,7 @@
 
 import { sqlite } from '../db/client.js';
 import { createHash } from 'node:crypto';
-import { getSidesByLogicalMarket } from './pool-bettor-sides-query.mjs';
+import { getSidesByShard } from './pool-bettor-sides-query.mjs';
 import { computeBetsRoot } from './pool-payout-root.mjs';
 
 // ── ZK_GATE(J1 firm 16:50/16:52·gate-verify EXIT=0 实证·定版常量)──────────────
@@ -75,9 +75,24 @@ export function computeJournalHash(betsRootHex, payoutRootHex, attestedWinner) {
 const ZK_MAX_PAYOUT_LEAVES = 1024;
 const ZK_FEE_LEAVES_RESERVE = 8; // broker/oracle/node/intro fee-leaf 上限保守预留(实 4-6)
 export function gatherOrderedBets(logicalMarketId) {
-  // shard-aware(命门·线8 STEP2): bshard bettor 存 shard_market_id·裸按 logical market_id 查不到 → 用 getSidesByLogicalMarket。
-  // 该 helper 跨片取但无序 → 这里按 id ASC 排(= pool_bettor_sides 插入序 = register_append 序 = bets_root absorb 序)。
-  const rows = getSidesByLogicalMarket(logicalMarketId, sqlite).sort((a, b) => a.id - b.id);
+  // 🔴 ZK gather = bshard SHARD 的 register_append 押注(covenant bets_root 吸收的就是 shard 押注)。
+  // ⚠ 不用 getSidesByLogicalMarket(它聚合 logical market_id 行 + shard 行)——logical market_id 下的行**非 covenant
+  //   吸收链**(杂质)。实证 ext-..bh01w(2026-06-28 verify-before-act): logical 下 2 杂质 f5bb64c6(dup-pk·非 shard)
+  //   + shard 真押注 2 → getSidesByLogicalMarket 误得 4·而 on-chain bets_root 只 fold shard 2。必只取 shard。
+  const shards = sqlite.prepare(
+    'SELECT shard_market_id, shard_index FROM market_shards WHERE logical_market_id = ? ORDER BY shard_index ASC',
+  ).all(logicalMarketId);
+  if (!shards.length) {
+    // 无 shard = 非 bshard → ZK-settle 只 fit bshard(设计 scope)→ 非 ZK-eligible·拒(非 0-bet·别误退)。
+    return { bets: [], betsRootHex: null, betCount: 0, overCap: false, daaOrderMatchesId: true, notBshard: true };
+  }
+  if (shards.length > 1) {
+    // 多片 rolling shard: per-shard betsRoot → fold(FoldNode→PoolRoot)合并 global = production 路。
+    // demo 单片(golden-ref: 单片 betsRoot 直接=global inputs_commit)。多片直接拒(防错算 global·非 0-bet)。
+    return { bets: [], betsRootHex: null, betCount: 0, overCap: false, daaOrderMatchesId: true, multiShardTodo: shards.length };
+  }
+  // 单片: 该 shard 的 register_append 押注·按 id ASC = absorb(append)序(= 链上 continuation-spend 链序·单节点顺序注册)。
+  const rows = getSidesByShard(shards[0].shard_market_id, sqlite).sort((a, b) => a.id - b.id);
   // 单片 demo 一致性校验: 若有 side_lock_daa(落链 daa)·按它升序应 == id 升序(否则乱序落链·命门告警)
   const withDaa = rows.filter(r => r.side_lock_daa != null);
   const byDaa = [...withDaa].sort((a, b) => Number(a.side_lock_daa) - Number(b.side_lock_daa));
@@ -156,8 +171,10 @@ export async function zkClosePhase2(market, ctx) {
   if (!cont || !cont.redeemHex) return { skip: 'no CloseZk continuation UTXO(phase1 未产/未落链)' };
   // 2. attested_winner W ← 链上 redeem byte-decode(B1·offset 53·零 DB·verify-value-source)。
   const attestedWinner = readAttestedWinnerFromState(cont.redeemHex);
-  // 3. gather ordered bets(链序)+ fold betsRoot。
+  // 3. gather ordered bets(链序·只取 shard 押注=covenant 吸收链)+ fold betsRoot。
   const g = gatherOrderedBets(market.id);
+  if (g.notBshard) return { abort: '非 bshard market(无 shard)→ ZK-settle 只 fit bshard·不处理' };
+  if (g.multiShardTodo) return { abort: `多片 market(${g.multiShardTodo} shards)→ per-shard fold production 路·demo 单片·不处理` };
   if (g.betCount === 0) return ctx.escapeRefund(market, '0-bet ZK market → refund_maker_unjoined(B2)');
   // 4. B2 escape pre-prove: bets 投影超 1024 payout-leaf cap → 禁 prove·refund_draw。
   if (g.overCap) return ctx.escapeRefund(market, `bets>1024 cap(count=${g.betCount})→refund_draw(B2)`);
