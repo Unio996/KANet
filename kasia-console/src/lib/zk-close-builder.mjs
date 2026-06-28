@@ -115,6 +115,20 @@ export function gatherOrderedBets(logicalMarketId) {
   };
 }
 
+// 读链上 ctor-baked bets_root(CloseZk genesis redeem code-body·J1 17:36 实定位: redeem[280:312]·PUSH32 0x20 @279)。
+// 与 attested_winner(state region @53)同一 self-fetch redeem → verify-value-source(链上自取·非 caller-fed)。
+// gate_tmpl_hash@231 / verdict_oracle_pk@后(本函数只读 bets_root)。值无关·real genesis 同 offset。
+const _CZGEN = { BETSROOT_PUSH: 279, BETSROOT_VAL: 280 };
+export function readOnChainBetsRootFromGenesis(genesisRedeemHex) {
+  if (typeof genesisRedeemHex !== 'string' || !/^[0-9a-fA-F]+$/.test(genesisRedeemHex)) {
+    throw new Error('readOnChainBetsRootFromGenesis: redeem 非 hex');
+  }
+  const r = Buffer.from(genesisRedeemHex, 'hex');
+  if (r.length < _CZGEN.BETSROOT_VAL + 32) throw new Error(`CloseZk genesis redeem 太短 len=${r.length} < ${_CZGEN.BETSROOT_VAL + 32}`);
+  if (r[_CZGEN.BETSROOT_PUSH] !== 0x20) throw new Error(`CloseZk layout mismatch: bets_root PUSH32@${_CZGEN.BETSROOT_PUSH}=0x${r[_CZGEN.BETSROOT_PUSH].toString(16)}≠0x20`);
+  return r.subarray(_CZGEN.BETSROOT_VAL, _CZGEN.BETSROOT_VAL + 32).toString('hex');
+}
+
 // C1 predict-then-verify 门(zkCloseTick prove 前调): gather 序算的 betsRoot == 链上烤死 bets_root 才放行。
 // onChainBetsRootHex = J1 phase1 烤进 leaf/CloseZk continuation redeem 的 bets_root(relay self-fetch·非 caller-fed)。
 export function verifyGatherOrderAgainstChain(betsRootHex, onChainBetsRootHex) {
@@ -179,7 +193,8 @@ export async function zkClosePhase2(market, ctx) {
   // 4. B2 escape pre-prove: bets 投影超 1024 payout-leaf cap → 禁 prove·refund_draw。
   if (g.overCap) return ctx.escapeRefund(market, `bets>1024 cap(count=${g.betCount})→refund_draw(B2)`);
   // 5. C1 predict-then-verify: 我 fold betsRoot == 链上 ctor-baked bets_root 才放行(序错立抓·prove 前廉价守门)。
-  const onChainBetsRoot = ctx.readOnChainBetsRoot(cont.redeemHex);
+  //    on-chain bets_root 从同一 self-fetch redeem code-body 直接 byte-decode(redeem[280:312])·verify-value-source。
+  const onChainBetsRoot = readOnChainBetsRootFromGenesis(cont.redeemHex);
   const v = verifyGatherOrderAgainstChain(g.betsRootHex, onChainBetsRoot);
   if (!v.ok) return { abort: `betsRoot mismatch(gather 序错·不 prove): fold=${v.gatherBetsRoot.slice(0, 12)} chain=${String(onChainBetsRoot).slice(0, 12)}` };
   // 6. dispatch J1 unlockBshardZkClose(J1: prove over 真 bets→gate→FUND→2-input build→broadcast)。我不组 scriptSig。
