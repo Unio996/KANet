@@ -7,11 +7,14 @@ export const DISCLAIMER = 'testnet-only · MIT 开源 · 不运营主网 · 非�
 export function startMessage() {
   // §11 v2 (Owner 终裁 2026-06-27): 22行→6行精简. 详情移 /help. 首次用户+1行 /help 提示.
   // custody 警告保留 1 行(NWT 承重 bar: 不可删/弱化). faucet 数量不硬编.
+  // Owner 2026-06-28: 首次用户加 /hot 指针(老用户嵌 5 热榜, 首次用户给指针兜底).
   return [
     '👋 KANet — 无账户，无许可。',
     '',
     '① /wallet 钱包   ② /faucet 领币   ③ /bet 押注',
     '▸ /broker 赚佣金   ▸ /help 全部命令   ▸ /link 绑自己钱包',
+    '',
+    '🔥 /hot — 看热门市场, 直接押注',
     '',
     '⚠ 托管·节点持 key·真钱请 /link 非托管钱包',
     '→ /help 完整指南',
@@ -19,13 +22,14 @@ export function startMessage() {
 }
 
 // §11 v2 (Owner 终裁 2026-06-27): 老用户极简, 无 /help 提示行. custody 双守行永在.
-export function startMessageLinked(addr, custodial = null) {
+// Owner 2026-06-28: 老用户顶部嵌紧凑 5 热榜(标题+池+人数+深链按钮) + /hot 兜底. trending 传 null→无块.
+export function startMessageLinked(addr, custodial = null, trendingMarkets = null, botUsername = null) {
   const shortAddr = addr.length > 20 ? addr.slice(0, 17) + '…' : addr;
   const custLabel = custodial === true ? '托管·仅试玩' : custodial === false ? 'key 你掌控' : '托管/非托管';
   const custWarn = custodial === false
     ? '⚠ 你的地址 key 只你掌控。/wallet 也可生成托管测试钱包。'
     : '⚠ 托管·节点持 key·真钱请 /link 非托管钱包';
-  return [
+  const lines = [
     '👋 KANet · 你已就绪',
     `📍 ${shortAddr}  ${custLabel}`,
     '',
@@ -33,7 +37,68 @@ export function startMessageLinked(addr, custodial = null) {
     '▸ /broker 赚佣金   ▸ /help 全部命令',
     '',
     custWarn,
-  ].join('\n');
+  ];
+  const buttons = [];
+  if (trendingMarkets && trendingMarkets.length > 0) {
+    const block = _compactTrendingBlock(trendingMarkets, botUsername);
+    lines.splice(2, 0, ...block.lines);  // insert after header, before commands
+    buttons.push(...block.buttons);
+  } else if (trendingMarkets !== null) {
+    // trending fetch succeeded but empty
+    lines.splice(2, 0, '', '🔥 热门市场: 暂无 · /hot 查看', '');
+  }
+  return { text: lines.join('\n'), keyboard: buttons.length ? { inline_keyboard: buttons } : null };
+}
+
+// Compact 5-market block for /start embed: title+pool+bettors per market, deeplink buttons.
+function _compactTrendingBlock(markets, botUsername) {
+  const BOT = botUsername || 'KANET_Broker_bot';
+  function parseTitle(raw) { try { const p = JSON.parse(raw); return p.title || raw; } catch { return raw; } }
+  function legLabel(legKey) {
+    if (!legKey) return '';
+    if (legKey.startsWith('winner_')) return legKey.slice(7) + ' 赢';
+    if (legKey.startsWith('spread_')) return legKey.split('_').slice(1).join(' ');
+    if (legKey.startsWith('total_o_')) return '大球 O' + legKey.slice(8);
+    if (legKey.startsWith('total_u_')) return '小球 U' + legKey.slice(8);
+    return legKey;
+  }
+  const lines = ['', '🔥 热门市场 Top ' + markets.length];
+  const buttons = [];
+  // Deduplicate card_groups: show once per group
+  const seen = new Set();
+  let idx = 1;
+  for (const m of markets) {
+    if (m.card_group_id) {
+      if (seen.has(m.card_group_id)) {
+        // Add this leg's button to last group button row
+        const label = m.leg_key ? legLabel(m.leg_key) : parseTitle(m.title || '').slice(0, 16);
+        const shareUrl = `https://t.me/${BOT}?start=${m.id}`;
+        buttons.push([{ text: `🎯 ${label}`, copy_text: { text: shareUrl } }]);
+        continue;
+      }
+      seen.add(m.card_group_id);
+      // Count siblings in this group
+      const groupSize = markets.filter(x => x.card_group_id === m.card_group_id).length;
+      const totalKas = markets.filter(x => x.card_group_id === m.card_group_id)
+        .reduce((s, x) => s + (x.total_pool_kas || 0), 0);
+      const firstTitle = parseTitle(m.title || '');
+      const matchName = firstTitle.includes(' — ') ? firstTitle.split(' — ')[0].trim() : firstTitle.slice(0, 35);
+      lines.push(`${idx}. ⚽ ${matchName} · ${groupSize}盘 · 💰${totalKas.toFixed(0)}KAS · 👥${Math.max(...markets.filter(x=>x.card_group_id===m.card_group_id).map(x=>x.bettor_count||0))}人`);
+      const label = m.leg_key ? legLabel(m.leg_key) : parseTitle(m.title || '').slice(0, 16);
+      const shareUrl = `https://t.me/${BOT}?start=${m.id}`;
+      buttons.push([{ text: `🎯 ${label}`, copy_text: { text: shareUrl } }]);
+    } else {
+      const title = parseTitle(m.title || '');
+      const short = title.length > 35 ? title.slice(0, 33) + '…' : title;
+      lines.push(`${idx}. ${short} · 💰${(m.total_pool_kas||0).toFixed(0)}KAS · 👥${m.bettor_count||0}人`);
+      const shareUrl = `https://t.me/${BOT}?start=${m.id}`;
+      buttons.push([{ text: `🎯 押 #${idx}`, copy_text: { text: shareUrl } }]);
+    }
+    idx++;
+  }
+  lines.push('按下方按钮复制深链 → 直接押注 · /hot 完整榜');
+  lines.push('');
+  return { lines, buttons };
 }
 
 // KANet-UI 2026-06-22 (Owner 钦定 broker 收益统计 DM 显): 格式化 address-keyed 收益。

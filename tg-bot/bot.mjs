@@ -72,7 +72,14 @@ bot.command('start', async (ctx) => {
     const w = await api.tgWalletGet(tgUser);
     if (w.ok && w.json?.ok) custodial = !!(w.json.exists && w.json.address === addr);
   } catch { /* Console 暂不可达 → null → 中性 custody 警告 */ }
-  return ctx.reply(M.startMessageLinked(addr, custodial));
+  // Owner 2026-06-28: 老用户 /start 顶部嵌紧凑 5 热榜(标题+池+人数+深链按钮). trending null→无块.
+  let trending = null;
+  try {
+    const tr = await api.trendingMarkets(5);
+    if (tr.ok && tr.json?.ok) trending = tr.json.trending || [];
+  } catch { /* Console 暂不可达 → 无热榜块 */ }
+  const startMsg = M.startMessageLinked(addr, custodial, trending, CONFIG.botUsername);
+  return ctx.reply(startMsg.text, { reply_markup: startMsg.keyboard || undefined });
 });
 bot.command('help', (ctx) => ctx.reply(M.help()));
 
