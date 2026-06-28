@@ -13,7 +13,9 @@
 //
 // DI 设计 (offline 可测): db + deriveBrokerAddress 注入·test 用 temp DB + stub deriver。
 
-const SENTINEL_EVENT = 'broker_fee_emit_backfill';
+// ⚠ event_type 必【不以 'broker_' 开头】: migrate v83 trigger chain_events_txid_format_check 对 broker_* 事件
+//   强制 txid=64-hex chain hash (禁 placeholder)。sentinel 是内部标记无真 txid → 用非 broker_ 前缀绕开 trigger。
+const SENTINEL_EVENT = 'fee_emit_backfill_done';
 
 /**
  * 一次性 backfill-suppress: 把现存 completed (broker_pk 非空·无 emit 标记) 盘标记已 emit (不 emit DM)。
@@ -105,10 +107,12 @@ export function brokerFeeLandedEmitTick(db, deriveBrokerAddress, log = () => {})
       market_title: marketTitle,
       landed_at: new Date().toISOString(),
     });
+    // 🔴 txid = settle_txid (真 64-hex chain hash·满足 v83 trigger broker_* 禁 placeholder + 语义=fee 所在 settle TX)。
+    //   UNIQUE(txid,event_type): 每盘 settle_txid 各异 → (settle_txid,'broker_fee_landed') 唯一·INSERT OR IGNORE 防竞态重 emit。
     db.prepare(`
-      INSERT INTO chain_events (id, txid, event_type, from_address, to_address, payload, observed_by, observed_at)
+      INSERT OR IGNORE INTO chain_events (id, txid, event_type, from_address, to_address, payload, observed_by, observed_at)
       VALUES (lower(hex(randomblob(16))), ?, 'broker_fee_landed', ?, ?, ?, 'pool-settler', CURRENT_TIMESTAMP)
-    `).run(`broker_fee_landed:${m.id.slice(0, 12)}:${String(m.settle_txid).slice(0, 12)}`, m.spine_p2sh || null, brokerAddress, payload);
+    `).run(String(m.settle_txid), m.spine_p2sh || null, brokerAddress, payload);
     markEmitted(db, m.id, { emitted_fee_sompi: feeSompi, settle_txid: m.settle_txid });
     emitted++;
     log(`[broker-fee-emit] 💰 market=${m.id.slice(0, 12)} broker fee ${(feeSompi / 1e8).toFixed(4)} KAS LANDED (settle ${String(m.settle_txid).slice(0, 12)} out#${idx}) → broker_fee_landed emit`);
