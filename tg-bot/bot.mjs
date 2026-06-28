@@ -246,7 +246,11 @@ bot.callbackQuery(/^mybet:addmore:(.+)$/, async (ctx) => {
   await ctx.answerCallbackQuery();
   const marketId = ctx.match[1];
   const reply = await PM.startBetFromMarket(String(ctx.from.id), marketId);
-  await ctx.reply(reply);
+  if (typeof reply === 'object' && reply.text) {
+    await ctx.reply(reply.text, { reply_markup: reply.keyboard });
+  } else {
+    await ctx.reply(reply);
+  }
 });
 bot.command('discover', (ctx) => ctx.reply('浏览:\n· /bet — 押注预测市场 (全菜单选品类/市场)\n· /hot — 热门市场 Top5 (活跃度+资金加权)\n· /swap — 兑换 KAS ↔ USDT (经 broker)\n· /mybets — 看自己的押注 + 状态'));
 

@@ -336,6 +336,12 @@ export async function buildMyBetsKeyboard(linkedAddr) {
 
 // Bettor r87 ③ 续 — 用户点 '加注/反手' callback → 跳进 detail stage (= 已知 market, 直问方向).
 // 复用 _handleReplyImpl detail stage UX, 但需先 poolMarket(id) 拉全量记录构造 session.
+// T1 (2026-06-27): 市场详情分享按钮 — Bot API 7.7 CopyTextButton, 一键复制深链.
+function _shareKeyboard(marketId) {
+  const shareUrl = `https://t.me/${CONFIG.botUsername}?start=${marketId}`;
+  return { inline_keyboard: [[{ text: '🔗 分享此市场', copy_text: { text: shareUrl } }]] };
+}
+
 export async function startBetFromMarket(tgUser, marketId) {
   const dr = await api.poolMarket(marketId);
   const market = (dr.json && (dr.json.market || (dr.json.id ? dr.json : null))) || null;
@@ -368,7 +374,7 @@ export async function startBetFromMarket(tgUser, marketId) {
     }
   }
   lines.push('', '🔮 由 KANet 去中心化委员预言机按上述规则裁决、链上结算。', '⚠ 押注前请看清【完整结算规则】— 这是判定输赢的唯一依据。', '你押哪边?  回复 1 = YES   ·   2 = NO');
-  return lines.join('\n');
+  return { text: lines.join('\n'), keyboard: _shareKeyboard(market.id) };
 }
 
 export function inBetFlow(tgUser) { return sessions.has(tgUser) || pendingPayments.has(tgUser); }
@@ -544,7 +550,7 @@ async function _handleReplyImpl(tgUser, text, linkedAddr) {
       }
     }
     lines.push('', '🔮 由 KANet 去中心化委员预言机按上述规则裁决、链上结算。', '⚠ 押注前请看清【完整结算规则】— 这是判定输赢的唯一依据。', '你押哪边?  回复 1 = YES   ·   2 = NO');
-    return lines.join('\n');
+    return { text: lines.join('\n'), keyboard: _shareKeyboard(full.id) };
   }
 
   if (s.stage === 'detail') {

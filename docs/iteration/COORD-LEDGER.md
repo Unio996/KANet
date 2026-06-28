@@ -3,7 +3,7 @@
 > 按 OIL-v0.3 §8.4 建:**频道=传输层,本 Ledger=状态层。频道滚走,状态活这里。**
 > 协调 agent:Bettor(全执行域 read-only 结构锁)。回写分级:关键决策/关2关3/§11决议必沉淀。
 > **接位文档(`C:\开发过程\…\开发智能体接位\*-接位.md`)= 稳定层,零烤状态;当前进度只读本文件。**
-> 最近刷新:2026-06-23(断电后接位重整 + Owner 今晚总账对账)。
+> 最近刷新:2026-06-28(J2 补线 9 今晚收口残项:FINDING-2 真闭 + 旧5 cancel→revert catch + J2 clean-pass 残项 + Owner 00:55 开干 /start+trending 排除)。
 
 ---
 
@@ -237,6 +237,93 @@ DoD: shard-blind 这类 bug 结构性灭绝 + 持续不可复发
 失败处理: 迁移误改 v06 正确路 → 链上验 bettor count 回归;禁夜赶 money-adjacent 码
 ```
 owner=Bettor 牵头机制(lint rule + helper 骨架 + ANTI-PATTERNS)+ KANet-UI/J2 迁移各自域 + reviewer/链验=Bettor。**先 read-only 出 lint 检测(扫 41)再动码,逐个分类不无脑全改(防把 v06 正确路改坏)。**
+
+---
+
+## 线 9:热门完整盘组(Owner 钦定·2026-06-27·当前优先级最高)
+### GOAL
+把热门赛事(England/Argentina/巴西日本…)做成**完整盘组**:胜负(Polymarket 源)+ 让球(spread/margin)+ 大小球(total),DM 首页放 ≥5 个热门单子。日本巴西=Owner 举例,真需求='热门赛完整盘组上首页'。
+
+### INVARIANTS / 护栏(对抗讨论收敛·硬约束)
+- 🔴 **半线铁律(护栏6·J1 harness 实证)**:让球/大小球只造**半线**(-0.5/-1.5/2.5/45.5…),绝不造整数线。judgeLine 只判 YES/NO 无 push/refund → 整数线 = 误判。J1 settle-verify 收到整数线 operand 直接 BUST。
+- 🔴 **score 源(护栏2)**:spread/total 靠 judgeLine 判,需真实比分(home_score/away_score + home/away_team 映射)→ **必绑 ESPN(给比分),不是 Polymarket 二元盘**(无比分 → judgeLine ABSTAIN = un-settleable,J1 拒)。operand 必 = 线×10^scale 整数(scale 对齐),subject 必匹配队 abbr。
+- 🔴 **护栏1/3(防 stranded)**:盘必可结算才上线(J1 逐盘验);draft 态先建,过 J1 关才翻 open。
+- 🟡 **护栏4(质 over 量)**:先 top 5-10 热门赛(每场 winner+2 spread+1 total ≈ 4-5 盘),不批量灌库。
+- 🟡 **护栏5(鸡生蛋)**:新盘 0 押注 → T5 trending(按 bettor_count 加权)排不进'热门' → '拉热门赛建盘'与'首页热榜'需分别解。
+- **序列不变**:J2 建(draft)→ J1 验 settle-correctness + score 源 → 翻 open → KANet-UI 显。任一段不过不进下一段。
+
+### STATUS / NEXT(滚动·2026-06-27)
+- ✅ **协调三定 + 6 护栏 locked**(Bettor 主持,J1/J2/KANet-UI 收敛)。J1 settle-correctness = 硬门(judgeLine 作者把关)。
+- ✅ **J2 现状调查扎实**:judgeLine.buildResolutionPredicate 功能态✓(winner/spread→margin/total,sign 语义对,有校验);create-v07 能创 spread 盘(14 个 margin 先例如 SF -3.5);**bettor-scanner ≠ 创建路径**(Phase3a 推荐扫描器,零代码调 buildResolutionPredicate),现有 spread/total 多是 polymarket 散盘(cancelled/refunded 居多),可押仅 15 零散非完整卡组。可行性=高(组件全齐)。
+- ✅ **J1 gate prep 完**:build→judge round-trip 全验(ARG-3.5 / JPN+3.5 判对),半线铁律 + operand-scale + subject-abbr 三关待逐盘卡。
+- ✅ **KANet-UI /hot 命令 ship**(`5ad98d16`):调 T5 trending top-5,CopyText 深链复用 T1,静默失败。gated on J2 出盘。
+- ✅ **巴西日本 canary draft 出**(J2 `3f7357d4`):构建器 `kasia-console/src/lib/sports-card-builder.mjs`(纯函数 buildSportsCard + I/O fetchEspnMatchDescriptor,27/27 回归 test 锁 6 护栏,可复用放量)+ 5 盘 card_group(espn-FIFA_WC-760487:winner BRA/JPN + spread -0.5/-1.5 + total o2.5)。
+- ✅ **门1 = J1 settle-correctness PASS**(2026-06-27 16:20·:3300 独立验真构建器非自测):byte-exact 5/5(pull 3f7357d4 跑真输出 == spec)+ judgeLine 50/50(5盘×10终局)+ ESPN score 源独立 fetch ACCEPTED + 整数线双层防御。标准硬门。
+- ✅ **门2 = J2 create-v07 instantiate 落链**(2026-06-27 ~23:20·Owner 钦定测试网"直接上1万"):5 盘 LANDED,maker-1 各锁 **10000 KAS = 50000 守恒**(Bettor :3200 + J1 :3300 链上验)。predicate/半线/ESPN 760487 全对。**Bettor 代 operator 放行**(Owner 钦定测试网花钱 Bettor 全权拍,见记忆 `feedback-testnet-spend-bettor-decides-coin-plentiful`)。
+- ✅ **SEAM FINDING-2 = spine commingle / 跨市场替换(系统性·全 v0.7·真闭合 2026-06-28·见本条末尾)**:门2 后 co-verify 抓出 5 盘 **spine_p2sh 全相同**(predicate/market_id 各异但 redeem byte-identical 2092B)。根因(NWT verify-value-source):**PoolSpine_v07.sil 的 market_id 在 ctor 声明但函数体从未引用** → silverc 不烤未引用 ctor 参数 → 不同市场塌成同一 P2SH → close_attest 不验 UTXO 属哪个市场 → **跨市场替换**(市场 A 的 attest 能花 B 的同址 UTXO,隔离全靠链下 settler,L329 自认 'relies on off-chain settler')。= **verify-value-source vacuous-binding 类**(锚声明了但决策时脚本读不到,同 fix② 49817c18,见 [[feedback-verify-value-source-checker-must-access-binding-at-decision-time]])。**影响半径**:全 v0.7 200+ 测试市场 commingled 在 14 簇(94/46/41-市场簇有大量真实押注);**canary 簇 0 押注无实际风险**。**当前受控**(资金没丢-outpoint 各异可花退 / close voter 关-无自动 close / 测试网),但 mainnet 前必修。**修法(Bettor 裁·四方确认)**:J1 改 .sil 把 market_id 引入 `global_commit_id` 函数体实际引用(复用 **FoldNode commit_v2 已 source-verify layout**:blake2b dkLen32 LE sign-magnitude·determinism 命门复用解除)→ 烤进 redeem → distinct P2SH + 链上验市场身份。**序列**:J1 .sil+silverc → NWT 双向回归(同参数不同 P2SH + 跨市场 close_attest BUST)→ J2 settler L2150 镜像 builder commit_v2 换 sha256 占位 → **Bettor byte-exact co-verify**(链上期望 vs 链下产 global_commit_id 对死)→ J2 重 instantiate canary 5 盘(新 spine)→ Bettor+J1 co-verify 补 **P2SH 唯一性维度**。**50000 KAS + 旧 200+ 簇 fix 后统一 refund+清理**(测试币)。**双验 PASS = 真闭合(2026-06-28)**:J1 .sil(4904ea62)+ J2 settler L2150 commit_v2 重建 → ① **五方 distinctness**(新 5 盘 5 distinct P2SH·≠旧 pqksfuks2·Bettor/KANet-UI/NWT/J2/J1 DB)② **四方 reproducibility**(J1 独立 silverc / NWT 4904ea62 / J2 空缓存 fresh / Bettor :3200 — 同 ctor recompile → 同 P2SH `ppa46k3..752`·2108B = determinism 真闭, 非只 distinctness)③ Bettor byte-exact commit_v2(market_id 真绑·改 1 字节 commit 变)。**30B 红旗坐实 = int 变长编码(不同参数), 非 build 破**。**Bettor 两次差点早收口(漏资金隔离 → 漏 reproducibility)→ J1/NWT 守 distinctness≠reproducibility 红线·Bettor 撤回 → 四方 recompile 验 = 健康对抗文化(无护短/无橡皮图章)**。canary 解 HOLD。**settler-HOLD 闸 = next clean pass**(J2 判据 = P2SH 共享检测自维持: spine_p2sh 被 >1 市场共享=旧 commingled→skip / 新盘唯一→放行·env POOL_V07_COMMINGLE_HOLD·类 aff42980)+ 旧 200+ 簇 refund/清理一起做(belt-and-suspenders·非紧急·money-adjacent 不夜赶)。
+- ⚠ **Bettor co-verify 教训**:首次门2 报 PASS 只验 status/stake/predicate/event,**漏 P2SH 唯一性/资金隔离**(查链锚补查才发现 spine 相同+主动 flag)。**co-verify checklist 必含资金隔离唯一性·主动≠草率**。
+- ✅ **门3 = KANet-UI 显示代码 ready**(`9e7617ba`):pool.js T5 trending 从 resolution_rule_spec 提 card_group_id + leg_key,messages.mjs hotMarkets 按 card_group_id 成组。等盘 open 验真拉到(门3 hold)。
+- ✅ **关3-A 逻辑层红队 DONE**(NWT·72 PASS / 4 FAIL=测试期望写错代码无误):4 向量(assertNoPushLine 绕过 / 让球 sign / scale 跨档 / findExtractor 欺骗)全 BLOCKED。
+- 🔴 **NWT FINDING-1 = 真 SEAM(ship-blocking·修复中)**:create-v07/v06/create 入口**零 predicate 线校验**(只 isStructuredSpec)→ 整数线 raw 注入绕过 buildSportsCard → un-settleable stranded(护栏1 真缺口)。三方坐实(NWT 红队 + KANet-UI L789 + Bettor 读码 L789-928)。**风险分级**:canary 单场不阻塞(走 builder 安全)/ 放量·开放前必闭。**修法(Bettor 裁·两层单源)**:① J1 judgeline.mjs 单源 push-line 校验(接口形态 J1 owner 拍·禁两处实现漂移)② J2 pool.js 三端 create-time chokepoint wire(import 调用·不 inline)。序列:J1 push → J2 wire+重构 builder+regression → J1 verify 三条 → NWT 回归 4 条 → 才 instantiate。
+- ⬜ **关3-B 集成层**(门3 后):bshard 押注面 + 浏览器实操 + 真盘 settle。
+- ✅ **maker stake 审批 = 批准**(Bettor):5 盘 × 100 KAS(POOL_MAKER_STAKE_MIN_KAS 硬底)= 500 KAS 总锁仓;条件 instantiate 实查 maker 余额 + 报 5 stake-lock txid,Bettor+J1 co-verify 守恒。
+- ⬜ **放量(top5-10)+ 护栏5 鸡生蛋**(Bettor 拍):等这 1 场 instantiate→open→显示端到端验通,再对齐 A featured / B 种子流动性,不抢跑。
+- ⬜ **待 Owner**:`/start` 首页嵌 5 场热榜形状(Bettor 荐:老用户 /start 顶显紧凑热榜 + 首次给指针 + /hot 兜底)vs KANet-UI 现 /hot 单独命令方案。
+### 今晚收口(2026-06-28 ~00:44)+ next clean pass 残项
+- ✅ **canary 端到端实质达成**:SEAM FINDING-2 真闭(五方 distinctness + 四方 reproducibility + byte-exact)+ 新 5 盘 distinct spine(8fcyw/nhuj9/dq2j4/ov48g/jo9tp)+ 种子押 5/5 押对新盘 bettor_count=1 + 门3 card_group 渲染验(FIFA-760487 5 legs 聚 1 块)。新 canary ~01:06 设计性自然进热榜(created_lt -1h 时间过滤·NWT/KANet-UI 盯)。
+- ⚠ **旧 canary 5 盘(1mcy7/z1627/3hens/0qm5d/pq6gu·pqksfuks2·0 押注)**:今晚 Bettor 误裁 cancel → **J2 settler 域 catch**(status='cancelled' 断 50k deadline 自动退款路·settler L299 只 advance pending_bettors)→ revert 回 pending_bettors(50k 6-29 自动退保·J1 读码独立验)。显示泄漏(在 trending)defer next pass。**教训**:堵显示用**入口闸 ≠ 改 status**(status 别背 entry-block 的锅·entry-block≠cancel·J1 decoupling 原则·见 [[feedback-coverify-checklist-multidimensional]])。
+- 🔲 **next clean pass 残项(全非紧急·money-adjacent 不夜赶)**:
+  ① **FINDING-2 暴露面三处堵 = `isCommingledSpine(spine_p2sh, db)` 单源 helper**(settler 结算 skip + trending 排除 commingled + register-v07 拒押 commingled)= 一处判据三处 wire 零漂移(J1 架构)。
+  ② 旧 canary 5 + 174 历史 commingled 簇(94/46/41 有押注谨慎)同 helper 堵入口;退款归 deadline 自治(outpoint-precise)解耦,不碰 status。
+  ③ settler-HOLD 闸(belt-and-suspenders·outpoint-precise 已是诚实第一层·env POOL_V07_COMMINGLE_HOLD)。
+  ④ **broker 收益可见性主线(Owner 钦定·整夜被 canary 占)** — 见线 below;Bettor 已 informed(数据层 earnings-by-address 有/通知层缺/tg映射 tg_custodial_wallets 托管有非托管缺/挂 kaspa_tx_log indexer + liveness+backfill)。
+  ⑤ **J2 域 clean-pass wire(money-adjacent 不夜赶)**:**复用 J1 单源 helper `commingledSpineSet(db)`(J1 pool-commingle-detect lib·00:59 落·禁两处实现)** → register-v07 拒押 commingled + settler 结算 skip commingled。判据 = spine_p2sh 被 >1 市场共享 = 旧 commingled。
+  ⑥ **J2 6-29 deadline 自动退监盯(别忘=别 strand)**:旧 canary 5(pending_bettors·pqksfuks2·50k)+ 新 canary 5(各 distinct spine·50k)= deadline 6-29 自动退款到位确认(outpoint-precise·deadline-watcher pending_bettors→verifying→refund_maker_unjoined CLTV deadline+grace)。旧5 revert 后退款路已保(别再 status-cancel)。
+
+### 门3 /hot 显示 PASS + Owner 00:55 开干(显示面·非 defer)
+- ✅ **门3 /hot 实际显示 PASS**(NWT 2026-06-28 00:57·比估算早 8min):/api/pool/markets/trending 新 canary 5 盘入热榜(8fcyw score=10015 pool=10005 KAS 等)+ fy1yk(11200/1004 注)。**线9 canary 端到端三关(settle-correctness/SEAM/显示)全通**。⚠ commingled 旧盘仍 #7-10,待 isCommingledSpine 排除。
+- 🟢 **Owner 2026-06-28 00:55 钦定开干(显示面·非 defer)**:`/start` 首页嵌 5 热门 + trending 排除 commingled。序列 = **J1 isCommingledSpine helper → KANet-UI trending 排除(显示/查询面·非 money-adjacent)→ /start 嵌 5 热门**(Bettor 拍形状·Owner 全权:老用户 /start 顶显紧凑 5 热榜[标题+池+人数+深链]+ 首次给指针 + /hot 兜底)。**= 上方 next-pass 残项①的【显示半边】提前到现在做;J2 押注/结算半边(残项⑤ register-v07 拒/settler skip·money-adjacent)仍 clean pass,复用同一 helper。** owner=J1(helper)+ KANet-UI(trending 排除 + /start)。
+
+owner=J2(创建器)+ J1(settle-correctness 硬门)+ KANet-UI(/hot + 显示);reviewer/协调/验落链=Bettor。
+
+### 🔴 线 9.5:预测市场对人类的呈现(Owner 钦定·§11 HALT·2026-06-28 01:26·UX 重设计·明天清醒深做)
+Owner 验 /start 反馈**呈现不合格**:1 场赛事 5 leg 平铺成 5 个近乎一样的链接,新人看不懂是同一场。核心命题 = 对人类(尤其新人)①友好(看懂)②可信任(敢押)③可操作(会押)。**HALT·不夜赶·明天清醒对抗收敛 → Owner 终裁**。今晚各 owner 摆视角(已到齐):
+- **J2(数据)**:数据**已支持赛事级**(card_group_id 绑 5 legs·home/away/kind/线全有)='没聚'非'缺数据'。明天出 3 件 backend 形状:① trending 按 card_group 聚合返"赛事卡"(event→nested legs·灭 NWT 陷阱① card_group 可见性=0)② 事件级 score 排赛事非排 leg(Top5=5 不同赛事·广)③ per-leg 信任字段进数据(池/真实人数/yes_implied_prob 赔率/ESPN 源/deadline/spine_p2sh 合约址)。**接 J1 per-leg 铁律:聚合只在显示层·数据层每 leg 独立(各自 spine/池/赔率/结算)不被掩盖**。接 NWT 陷阱②:数据可标记 seeder / 门槛 bettors>=N(别让 1 人池上首页暗示局)。
+- **J1(结算可信)**:铁律 **呈现信任级别 == 真实信任级别·禁超卖**。真原语(敢押硬底):P2SH 链上锁(explorer 可见)/ judgeLine 公开确定多节点重算 / 全链 txid 可审计 / 到期能退。🔴 **禁写"无法作弊/完全去信任/链上自动结算"**——Track B autonomous-enforce 未完成期间 relay 仍盲签 payout,理论上恶意 settler 能伪造 payoutRoot,这个保证**现在不成立**。框成"钱锁链上+规则公开+全程可查+到期能退"(全真)。
+- **NWT(红队·UX 攻)三陷阱**:① 同场 5 链接=card_group 可见性=0=主动诱导重复押注(实凶非"头晕"症状)② bettors=1=社会信任杀手(新人疑"庄家自导自演"·**当场挑 Bettor 种子押裁定·Bettor 认**)③ 无赔率=操作盲猜 + 按钮标签 'BRA -1.5'=外星语,**必自解释**'🇧🇷巴西赢2球以上 赔1.95× →'(TG 按钮=唯一信息载体)。三项叠加=新人 0 转化=根本可用性危机非细节。
+- **广 vs 深**:J2/J1/NWT 同站**广**(Top5=5 不同赛事·点开才深)。
+owner=Bettor 主持收敛 + 明天各 owner 深做(J2 聚合端点 spec / J1 信任卡字段 / KANet-UI 渲染 / NWT 误导面)→ Owner 产品方向终裁。
+
+---
+
+## 线 T1-T7:5问架构审查任务波(2026-06-27·已收口)
+- ✅ **T1-T4 收口**(Bettor 签收):T3 TG bot 管理迁 /relays→/integrations(`3a418a3b`);T4 node 委员收益 DM + UI(`59c0fa0e`,smoke maker-3 markets=4 kas=2.11 链验,/earnings 显'⚙ Node 委员收益')。
+- ✅ **T4 pk 语义收口**(J2 指正 → 共识):/api/relay/:id/pubkey 用 XOnlyPublicKey.fromAddress 从 relay 地址 derive = **收款地址 pk**(v0.7 必中,v0.6 通常中,xfu62 验过)。注释改'均用收款地址 pk'(`8168b6bf`)。V2 全统一 = 填 relay.ecdsa_pubkey_xonly 建 pk↔地址映射(待 Owner 拍)。
+- ✅ **T5/T6 ship**:GET /api/pool/markets/trending(activity+commitment 加权,`e963bc25`);node income endpoint + bettor payout chain-verify(`ec1d1b69`)。
+- ✅ **#33/#34 收口**(J1 独立验):`2c74ec51` 已是 origin/bshard-m3-deploy 祖先(经 `0055e753` no-ff merge),explicit bshard-detect 409 guard 在 canonical pool.js + 双 fixture + ANTI-PATTERNS 规则50。
+- ⬜ **/start 6 行版**:smoke 等 Owner 真机。
+- 📌 **fy1yk 结算(deadline 6/30,1004 未 claim sides)= 看板项**,临近需驱动(KANet-UI 15:14 提)。
+
+---
+
+## 线 10:§11 UX 呈现对抗讨论(Owner 钦定·2026-06-28·摆视角完成·明天收敛)
+### GOAL
+预测市场对人类(尤其新人)呈现 = ①友好(看懂)②可信任(敢押)③可操作(会押)。Owner 验 /start 反馈"呈现完全不合格·太差"(1 场赛事 5 leg 平铺成 5 个近乎一样链接·新人头晕·card_group 可见性=0)。
+### 四方视角(摆视角完成 ~01:30)
+- **NWT 三陷阱**:① 同场 5 链接=card_group 可见性=0(诱导重复押注·最大洞)② bettors=1=社会信任杀手(暗示局·挑 Bettor 种子押注裁定)③ 无赔率=操作盲猜。
+- **J2 数据**:数据已支持赛事级(card_group_id 绑 legs)='没聚'非'缺数据';按钮必自解释('🇧🇷巴西赢2球 赔1.95×' 非 'BRA-1.5');广优;明天出聚合端点 spec(保 per-leg)。
+- **🔴 J1 假信任 finding(本轮最重要·NWT co-sign)**:**呈现信任级别必 == 真实信任级别·绝不超卖**。Track B autonomous-enforce 未完成·payout relay 盲签·UI 绝不写'无法作弊/链上自动结算'(假·恶意 settler 能伪造 payoutRoot 偷池)·框'钱锁链上 P2SH + 规则公开 + 全程可查 + 到期能退'(全真)。= 诚实口径铁律在 UX 延伸。+ 信任卡 per-leg(聚合只显示层·数据层每 leg 独立 P2SH/结算/退款)+ 必显字段(池=合约地址 / 真实人数 / 结算时间+规则 / 到期退)。
+- **KANet-UI 实现方**:根因=`_compactTrendingBlock` flat-list 无 card_group 感知(渲染层 bug·她写的);单 card_group 最多 2 leg 按钮(moneyline+1)+'更多玩法'(避免 1 卡 5 按钮);可信渲染边界(显真实原语·不写假信任)。
+### 收敛方向(成形·明天深入)
+- **友好** = 赛事聚合卡 + 自解释按钮 + 广(5 不同赛事)+ 单卡 ≤2 按钮
+- **可信** = 不超卖(J1 铁律)+ 真实原语 + per-leg 独立 + 信任卡字段
+- **可操作** = 赔率(yes_implied_prob 配门槛)+ 几步 + deep link
+- **冷启动** = bettors=1 信任杀手 → 门槛(>=3 不上榜)vs featured vs 真实流动性(明天定·Bettor 种子押注裁定被 NWT 挑·已认)
+### NEXT
+- ⬜ **明天清醒 Bettor 主持深入对抗收敛 → 整理清晰议题 + 派工 → Owner 拍产品方向**。
+- ⬜ J2 出 card_group 聚合端点 spec(保 per-leg)→ KANet-UI 渲染赛事卡(限按钮+信任卡)→ J1 信任呈现验(不超卖)→ NWT 红队攻 UX 陷阱。
+- 🛑 **HALT Bettor 半成品聚合方案**(不做让新人头晕的次品)。
+owner=KANet-UI(渲染)+ J2(聚合端点)+ J1(可信呈现)+ NWT(红队 UX);主持/收敛=Bettor;产品方向终裁=Owner。
 
 ---
 
