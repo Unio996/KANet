@@ -14,6 +14,7 @@
 import { sqlite } from '../db/client.js';
 import { createHash } from 'node:crypto';
 import { getSidesByLogicalMarket } from './pool-bettor-sides-query.mjs';
+import { computeBetsRoot } from './pool-payout-root.mjs';
 
 // ── ZK_GATE(J1 firm 16:50/16:52·gate-verify EXIT=0 实证·定版常量)──────────────
 // gate redeem = prefix(1B 0x20 = push32)‖ journal_hash(32B·per-settle 变)‖ suffix(800B)。
@@ -84,12 +85,27 @@ export function gatherOrderedBets(logicalMarketId) {
   // B2 cap pre-check: winners≤bettors → 保守用 bettors 数 + fee reserve 投影 payout-leaf 上界。
   const projectedMaxLeaves = rows.length + ZK_FEE_LEAVES_RESERVE;
   const overCap = projectedMaxLeaves > ZK_MAX_PAYOUT_LEAVES;
+  // canonical bets(直接喂 guest flat-input 用·field 名 direction 对齐 golden-ref/computeBetsRoot)。
+  const bets = rows.map(r => ({ pk: String(r.bettor_pk), stake: String(r.stake_amount), direction: Number(r.direction) }));
+  // C1 predict-then-verify(命门·prove 前廉价守门·J1 17:17 锚): 按 gather 序 fold betsRoot →
+  //   必 == on-chain bets_root(烤在 leaf continuation redeem·offset J1 给)。mismatch=序错立刻抓·拒 prove。
+  //   单源 lib computeBetsRoot(与 guest byte-equal·golden-ref 9/9 自测)·gather 序写错=betsRoot 漂=此处抓。
+  const betsRootHex = computeBetsRoot(bets).toString('hex');
   return {
-    bets: rows.map(r => ({ pk: String(r.bettor_pk), stake: String(r.stake_amount), dir: Number(r.direction) })),
+    bets,              // [{pk,stake,direction}] in gather(absorb)序
+    betsRootHex,       // 按 gather 序算的 betsRoot → zkCloseTick 必对 on-chain bets_root(C1 predict-then-verify)
     daaOrderMatchesId, // false → 命门告警: DB id 序 ≠ 落链 daa 序·gather 序可能不符 on-chain bets_root → 拒 prove
     overCap,           // true → bets 投影超 1024 payout-leaf cap → 禁进 prove·escape 退款(bets>0=refund_draw·B2)
     betCount: rows.length,
   };
+}
+
+// C1 predict-then-verify 门(zkCloseTick prove 前调): gather 序算的 betsRoot == 链上烤死 bets_root 才放行。
+// onChainBetsRootHex = J1 phase1 烤进 leaf/CloseZk continuation redeem 的 bets_root(relay self-fetch·非 caller-fed)。
+export function verifyGatherOrderAgainstChain(betsRootHex, onChainBetsRootHex) {
+  const ok = typeof onChainBetsRootHex === 'string'
+    && betsRootHex.toLowerCase() === onChainBetsRootHex.toLowerCase();
+  return { ok, gatherBetsRoot: betsRootHex, onChainBetsRoot: onChainBetsRootHex };
 }
 
 // ── 稳定层: phase 检测(两阶段编排·continuation-chain 天然保序)───────────────────

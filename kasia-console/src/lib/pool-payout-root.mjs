@@ -43,6 +43,29 @@ export function payoutLeaf(pkHex, amountSompi) {
   return Buffer.from(blake2b(Buffer.concat([pk, serializeI64(BigInt(amountSompi), 8)]), { dkLen: 32 }));
 }
 
+// ── INPUT side (P3 inputs_commit·J1 三层锁定 golden-ref §6.5)──────────────────────
+// bets-leaf = blake2b(pk32 ‖ serializeI64(stake,8) ‖ serializeI64(dir,1))[32] — 41B preimage (≠ payoutLeaf 40B).
+//   dir 1B: 0x00=YES / 0x01=NO. 用于 ZK guest inputs_commit + settler gather 自验门 (predict-then-verify)。
+export function betsLeaf(pkHex, stakeSompi, dir) {
+  const pk = Buffer.from(pkHex, 'hex');
+  if (pk.length !== 32) throw new Error(`bets pk must be 32B, got ${pk.length}`);
+  if (BigInt(stakeSompi) <= 0n) throw new Error(`bet stake must be > 0, got ${stakeSompi}`);
+  if (dir !== 0 && dir !== 1) throw new Error(`bet dir must be 0(YES)/1(NO), got ${dir}`);
+  return Buffer.from(blake2b(Buffer.concat([pk, serializeI64(BigInt(stakeSompi), 8), serializeI64(BigInt(dir), 1)]), { dkLen: 32 }));
+}
+
+// betsRoot = fold blake2b(acc ‖ bets_leaf)[32] from genesis ZERO32 — covenant 每笔 require new==此式 (非-vacuous)。
+// 🔴 ORDER-SENSITIVE (hash-CHAIN·非 merkle): 同一组 bets 不同序 → 不同 betsRoot。total-order = PayoutShard
+//    continuation 链序 (absorb 的链上顺序)。covenant/guest/off-chain 三层必同序·否则 betsRoot 漂 = inputs_commit 锚错。
+// orderedBets: [{ pk:hex32, stake:sompi(string|bigint), direction:0|1 }] in absorb (continuation-chain) order.
+// 单片首 ship: 该 PayoutShard betsRoot 直接 = global inputs_commit。
+export function computeBetsRoot(orderedBets) {
+  return orderedBets.reduce(
+    (acc, b) => Buffer.from(blake2b(Buffer.concat([acc, betsLeaf(b.pk, b.stake, b.direction)]), { dkLen: 32 })),
+    ZERO32,
+  );
+}
+
 function levelsOf(winners) {
   if (winners.length > CAP) throw new Error(`>${CAP} winners needs depth>${DEPTH} (SS climb is depth-${DEPTH}; >${CAP} → rolling payout-shard)`);
   const levels = [];
