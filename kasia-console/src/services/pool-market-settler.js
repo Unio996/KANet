@@ -18,6 +18,8 @@
 import { sqlite } from '../db/client.js';
 import { sendCommandAsync } from './relay-manager.js';
 import { createHash } from 'node:crypto';
+// FINDING-2 (NWT) commingled-spine detection — SINGLE SOURCE (J1 pool-commingle-detect). 禁内联.
+import { isCommingledSpine } from '../lib/pool-commingle-detect.mjs';
 // J1tn r303 P0-#1 sweep helper refactor (Bettor r346/r366b 钦定 fork 合 1 helper): KIP-9
 // storage_mass 公式 + STORAGE_MASS_C const 抽 lib/kip9-mass.mjs. 5 call sites 不再各抄.
 import {
@@ -327,7 +329,10 @@ export async function poolSettlerTick() {
     const TICK_TIMEBOX_MS = parseInt(process.env.POOL_SETTLER_TIMEBOX_MS, 10) || 30_000;
     const tickStartMs = Date.now();
 
-    let consensus = 0, pending = 0, refund = 0, errored = 0, doomed = 0, sampledCommittee = 0, disputed = 0, bshardSkipped = 0;
+    let consensus = 0, pending = 0, refund = 0, errored = 0, doomed = 0, sampledCommittee = 0, disputed = 0, bshardSkipped = 0, commingledRefund = 0;
+    // FINDING-2 (NWT) 主 settler HOLD 闸 (残项③): commingled-spine 盘禁委员结算·route-to-refund. 默认 ON,
+    //   POOL_V07_COMMINGLE_HOLD=0 可关 (受控 dry-run / 回滚)。env 单源读一次。
+    const COMMINGLE_HOLD = process.env.POOL_V07_COMMINGLE_HOLD !== '0';
     let processedCount = 0;
     for (const market of markets) {
       // J2-tn r388 #24 time-box check: 处理超 30s 后 break (= 同 tick 内有 stale retry 不阻塞下个 tick).
@@ -348,6 +353,57 @@ export async function poolSettlerTick() {
       // 不回归(v0.6 是真实用户路)。判据 = canary 证 logical_market_id==pool_markets.id。
       const isBshard = !!sqlite.prepare('SELECT 1 FROM market_shards WHERE logical_market_id = ? LIMIT 1').get(market.id);
       if (isBshard) { bshardSkipped++; continue; }
+
+      // FINDING-2 (NWT) 主 settler 闸 (J1+NWT+Bettor co-design/co-verify, 2026-06-28): commingled-spine 盘禁委员结算.
+      //   根因: pre-fix v0.7 spine redeem 没烤 market_id → spine_p2sh 被 >1 市场共享 → close_attest payoutRoot 未绑
+      //   market_id → 可花【别市场】同址 spine UTXO 派彩 = 跨市场替换盗币路 (主 settler 这条活路径·isBshard-skip 不挡,
+      //   commingled⊄bshard: 0-bet/未分片 commingled 盘无 market_shards 行 → 照走委员结算)。
+      //   route-to-refund (非裸 continue — 裸 continue orphan maker dispatchRefund·昨晚 decoupling 反例): 复用已验
+      //   doomed-self-heal/MIN_POT cancel-refund 分支·只换触发条件为 isCommingledSpine. 两部分都退·均 outpoint-precise
+      //   (J1 独立 co-verify safe): maker = dispatchRefund(refund_maker_unjoined·花本盘 spine_lock_tx:0→本盘 maker 地址);
+      //   bettor = per-side bettor_refund_available 事件 + cancelled status → legacyRefundBuilderTick(L171) 自取兜底
+      //   per-side P2SH outpoint-precise 退。盗币向量在 settle (共享 spine 派彩)·退款不从共享地址盲选 → 安全。
+      //   filter = settle 态 {verifying, collecting_sigs, disputed} (J1 catch: disputed 也在主 query L319·dispute-resolve
+      //   能走到结算=同替换风险)。pending_bettors commingled【不直接碰】→ deadline-watcher 先推进到 verifying 再命中
+      //   (避开昨晚 status-cancel-断-deadline trap)。单源 isCommingledSpine·env POOL_V07_COMMINGLE_HOLD 默认 ON。
+      if (COMMINGLE_HOLD
+          && (market.protocol_status === 'verifying' || market.protocol_status === 'collecting_sigs' || market.protocol_status === 'disputed')
+          && isCommingledSpine(market.spine_p2sh, sqlite)) {
+        let cmMeta = {};
+        try { cmMeta = JSON.parse(market.metadata || '{}'); } catch {}
+        cmMeta.cancel_reason = 'commingled_spine_finding2';
+        cmMeta.commingled_cancelled_at = new Date().toISOString();
+        delete cmMeta.skip_until_ms;   // 清 backoff 防退款路被卡 (同 MIN_POT/doomed)
+        sqlite.prepare("UPDATE pool_markets SET protocol_status = 'cancelled', metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+          .run(JSON.stringify(cmMeta), market.id);
+        sqlite.prepare(`
+          INSERT INTO chain_events (id, txid, event_type, from_address, to_address, payload, observed_by, observed_at)
+          VALUES (lower(hex(randomblob(16))), ?, 'market_cancelled', NULL, NULL, ?, 'pool-settler', CURRENT_TIMESTAMP)
+        `).run(`market_cancelled:${market.id.slice(0,12)}:${Date.now()}`, JSON.stringify({
+          market_id: market.id, reason: 'commingled_spine_finding2', spine_p2sh: market.spine_p2sh, cancelled_at: new Date().toISOString(),
+        }));
+        // maker refund (outpoint-precise spine_lock_tx:0 → 本盘 maker 地址; J1 独立 co-verify commingle-safe). in-place·不 orphan.
+        await dispatchRefund(market, { action: 'refund', reason: 'commingled_spine (FINDING-2): structurally-invalid market — refund not settle (cross-market substitution risk)' });
+        // per-bettor refund-available (per-side outpoint-precise; legacyRefundBuilderTick 实退). 镜像 doomed self-heal.
+        // lint-allow-shard-blind: commingled 盘是 non-bshard (上面 isBshard-skip 已早退·commingled⊄bshard) → bettor 按 logical market_id 存·无 shard 可漏
+        const cmSides = sqlite.prepare(`
+          SELECT bettor_pk, side_p2sh, side_lock_tx, stake_amount, direction
+          FROM pool_bettor_sides WHERE market_id = ? AND side_lock_tx IS NOT NULL
+        `).all(market.id);
+        for (const side of cmSides) {
+          sqlite.prepare(`
+            INSERT INTO chain_events (id, txid, event_type, from_address, to_address, payload, observed_by, observed_at)
+            VALUES (lower(hex(randomblob(16))), ?, 'bettor_refund_available', NULL, NULL, ?, 'pool-settler', CURRENT_TIMESTAMP)
+          `).run(`bettor_refund:${market.id.slice(0,12)}:${String(side.bettor_pk).slice(0,12)}:${Date.now()}`, JSON.stringify({
+            market_id: market.id, bettor_pk: side.bettor_pk, side_p2sh: side.side_p2sh, side_lock_tx: side.side_lock_tx,
+            stake: side.stake_amount, direction: side.direction,
+            reason: 'market_cancelled_commingled_spine_finding2', claim_entry: 'PoolSide_v07 entry 2 refund_market_cancelled',
+          }));
+        }
+        console.warn(`[pool-settler] ⛔ FINDING-2 commingled market=${market.id.slice(0,12)} spine=${String(market.spine_p2sh).slice(0,20)} status=${market.protocol_status} → CANCELLED + maker_refund + ${cmSides.length} bettor_refund_available (禁委员结算·跨市场替换风险·route-to-refund)`);
+        commingledRefund++;
+        continue;
+      }
       // J2-tn r388 #24 exponential backoff: meta.skip_until_ms (epoch ms) set after repeated
       // sample failures. Skip if set + 未到. Active state (collecting_sigs / refunding +
       // refund_dispatched_at) 仍走原 handler 不 skip (= 完成中状态优先).
@@ -980,7 +1036,7 @@ export async function poolSettlerTick() {
         console.error(`[pool-settler] process fail market=${market.id?.slice(0,12)}: ${e.message}`);
       }
     }
-    console.log(`[pool-settler] tick: ${markets.length} verifying markets, consensus=${consensus} refund=${refund} dispute=${disputed} pending=${pending} doomed=${doomed} errored=${errored} sampledCommittee=${sampledCommittee} bshardSkipped=${bshardSkipped}`);
+    console.log(`[pool-settler] tick: ${markets.length} verifying markets, consensus=${consensus} refund=${refund} dispute=${disputed} pending=${pending} doomed=${doomed} errored=${errored} sampledCommittee=${sampledCommittee} bshardSkipped=${bshardSkipped} commingledRefund=${commingledRefund}`);
 
     // J2-tn r401 P0-#1 (Bettor r290+r291 关1 PASS): watchdog phase 加在主 loop 后.
     // 2 watchdogs:
@@ -1108,7 +1164,7 @@ export async function poolSettlerTick() {
       console.warn(`[pool-settler:path-b] phase fail: ${e.message}`);
     }
 
-    return { ok: true, processed: markets.length, consensus, refund, pending, doomed, errored, pathBReconciled, bshardSkipped };
+    return { ok: true, processed: markets.length, consensus, refund, pending, doomed, errored, pathBReconciled, bshardSkipped, commingledRefund };
   } finally {
     running = false;
   }
