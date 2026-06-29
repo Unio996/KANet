@@ -2269,6 +2269,7 @@ export async function registerPoolRoutes(fastify) {
     try { metaParsed = JSON.parse(market.metadata || '{}'); } catch {}
     // 详情计数 honestCountSql 单源: shard-aware (修 v07 logical-only 漏 shard 押注 bug) + 排 AutoBetter (= 与 list/trending 一口径)。
     const bettorCount = sqlite.prepare(`SELECT ${honestCountSql('?')} AS c`).get(marketId, marketId).c;
+    const rawBettorCount = sqlite.prepare('SELECT COUNT(*) c FROM pool_bettor_sides WHERE market_id = ?').get(marketId).c;
     const sigsCollected = sqlite.prepare(`
       SELECT COUNT(*) c FROM chain_events
       WHERE event_type IN ('pool_oracle_tx_sig', 'pool_oracle_refund_disagreement_tx_sig')
@@ -2297,6 +2298,7 @@ export async function registerPoolRoutes(fastify) {
       },
       protocol_status: market.protocol_status,
       bettor_count: bettorCount,
+      raw_bettor_count: rawBettorCount,
       sigs_collected: sigsCollected,
     });
   });

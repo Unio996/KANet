@@ -278,12 +278,12 @@ bot.callbackQuery(/^bet:side:(1|2)$/, async (ctx) => {
 });
 bot.command('discover', (ctx) => ctx.reply('浏览:\n· /bet — 押注预测市场 (全菜单选品类/市场)\n· /hot — 热门市场 Top5 (活跃度+资金加权)\n· /swap — 兑换 KAS ↔ USDT (经 broker)\n· /mybets — 看自己的押注 + 状态'));
 
-// /hot (Owner 热需求 2026-06-27): 热门市场 Top5, T5 trending 端点, 每个市场带 CopyText 深链.
-// /start 是否内嵌此列表待 Owner 拍(Bettor 协调中); /hot 先建可复用.
+// /hot (Owner 热需求 2026-06-27): 热门市场 Top5. 换 availableMarkets(raw<50 滤满盘·同 /start 口径).
+// startBetFromMarket guard 是 catch-all (任何入口按钮都过); /hot 源换是额外 UX 保障.
 bot.command('hot', async (ctx) => {
-  const r = await api.trendingMarkets(5);
+  const r = await api.availableMarkets(5);
   if (!r.ok || !r.json?.ok) return ctx.reply('热门市场加载失败, 稍后再试。');
-  const result = M.hotMarkets(r.json.trending || [], CONFIG.botUsername);
+  const result = M.hotMarkets(r.json.markets || [], CONFIG.botUsername);
   if (result.keyboard) {
     return ctx.reply(result.text, { reply_markup: result.keyboard });
   }
