@@ -1,0 +1,133 @@
+{
+  "committeePool_daa": 49434343,
+  "poolMembers": [
+    {
+      "pk_x": "20a0accd5c343a27f7b67eb01818fcbceaf01b9bf4d625b997853dce4afa7e66",
+      "stake_sompi": "150000000",
+      "lock_until_daa": 50000000,
+      "p2sh": "kaspatest:prwhdgjpxz6rar6du952xlr4m2plk7j67r9z0vgwcejzh4mgvfl8cy306tvdy",
+      "outpoint_txid": "4ed37cd4017b731505fea2218497c94e7cd0c9431f5a4c582f2804f3dd80e75d",
+      "outpoint_index": 0
+    },
+    {
+      "pk_x": "20f208b765fe9d61e50e68231cb851c725e6637189df4ba0ef5213a814d81fb6",
+      "stake_sompi": "3000000000",
+      "lock_until_daa": 50000000,
+      "p2sh": "kaspatest:ppzpq0w2g555qn7m962rc34ywddd0s66vcl8ctll0fmzg5nezvrhx7haacvyl",
+      "outpoint_txid": "e55d1fb368805e526f5f8db0eb7cec4ca900e791b1ab6996944b8fa35406a2e5",
+      "outpoint_index": 0
+    },
+    {
+      "pk_x": "4a355a772446add9a98f92344059f36878b0d841e7d508aa27bc4ffe2d3a57b1",
+      "stake_sompi": "150000000",
+      "lock_until_daa": 50000000,
+      "p2sh": "kaspatest:pp29flc6p5dqft6cxrj9wjeezyz2es950j74xkn08xge2tuty8l57cjzkpc6x",
+      "outpoint_txid": "58b239f5c99471478e8d5bfe87743dfba6871e07619944b52b3ac87550da1a41",
+      "outpoint_index": 0
+    },
+    {
+      "pk_x": "6a9bc5222a2879630334878d72c927c259a111e256bceeca763d84ca2d734b4c",
+      "stake_sompi": "150000000",
+      "lock_until_daa": 50000000,
+      "p2sh": "kaspatest:pqz5qqjae699nh52hymuasp89pj8vpshkpk28vpgse4335thv0qfsj9qk4dgw",
+      "outpoint_txid": "6801f83f26563ba98c6082c691a360634c97e847cca211f0fb9ac4b9e4c40096",
+      "outpoint_index": 0
+    },
+    {
+      "pk_x": "7013f11892b7c45c88af8701e73e4305be2512d728feb7f4b44b7d2434c38355",
+      "stake_sompi": "100000000",
+      "lock_until_daa": 50000000,
+      "p2sh": "kaspatest:pqk46cyfym56wua29u4sm4fequ958h6va0s5e83l2h44gkzspd8tqwvu4a0j4",
+      "outpoint_txid": "c06d2cdea04bd2459eb6d58d67e4f87641b79bb986d81d8231e330f8af8bace1",
+      "outpoint_index": 0
+    },
+    {
+      "pk_x": "7b515693370015a0f8665c422ceb2ed90f2f03bd3ea23345252001de843ec8ec",
+      "stake_sompi": "3000000000",
+      "lock_until_daa": 50000000,
+      "p2sh": "kaspatest:pz054vuztrsk88xqdr8ehgp26mwe98q877pvxfkslal5emsptk34kgnyx07y4",
+      "outpoint_txid": "f4142986402a97aab140c3bf8c5a43d16427e60bbb6f5bdd5bfbcea2b7eaff48",
+      "outpoint_index": 0
+    },
+    {
+      "pk_x": "8dc765248c2d69ef96155560c3d74bd0e3a174fd5963ae3c32426a2d1c2bffc5",
+      "stake_sompi": "100000000",
+      "lock_until_daa": 50000000,
+      "p2sh": "kaspatest:pz2jxpg9fr87l5t5y85r7x3jgcz34t4rt3p00rr5vgljeg4zvkmjym7u0l8y3",
+      "outpoint_txid": "3b37ccb84cf26fdc32397f8990ec7d4b674f58142b91fdd59be2c4f3f9f1eead",
+      "outpoint_index": 0
+    },
+    {
+      "pk_x": "9e2db8525f2e8803f0b87d7a5c19c0845b6bb4173fed52b407dce47d1aedbe25",
+      "stake_sompi": "100000000",
+      "lock_until_daa": 50000000,
+      "p2sh": "kaspatest:prtcjatp2m5xzyea59hd6dq78fzzdpzm0mvy5jxjk2lrq9wmay0pkf5y5227t",
+      "outpoint_txid": "f797eeeebae60e7c6844e3ef835270ba0b880fbdc17cd555036f1e4125d811eb",
+      "outpoint_index": 0
+    },
+    {
+      "pk_x": "a102fbde59f8a07933d5c7165718a4b366248805a5bdafc606d0e2d60ba4a297",
+      "stake_sompi": "100000000",
+      "lock_until_daa": 50000000,
+      "p2sh": "kaspatest:pzjm0tc5n8z2jl8yrx7d6mu97996s0l2rc0893etn3axtuwreqa2cet3uvc9c",
+      "outpoint_txid": "fb08228aa8a7a2a474ef99d8b40c11f19da6a1a72e757a3436fb410958d312d7",
+      "outpoint_index": 0
+    },
+    {
+      "pk_x": "e666239ef88c2008f816ea24056ecbc435a10a1f7a73494051a077ed7a7c989e",
+      "stake_sompi": "100000000",
+      "lock_until_daa": 50000000,
+      "p2sh": "kaspatest:pq482e23t4qrjh6ng2xfqepv8enfryg9xhnch8p2qtydsfev0hw374e226fnc",
+      "outpoint_txid": "5dd318d6b01fe8a3b08a1370f62c1cec7bd97fd1e82ce4b16c869f44f2e3a121",
+      "outpoint_index": 0
+    },
+    {
+      "pk_x": "e72d8e7ea88a53d6d11e71d91e2a149dc8d4dc45f501b1651953997d1c731667",
+      "stake_sompi": "3000000000",
+      "lock_until_daa": 50000000,
+      "p2sh": "kaspatest:prq57g7f8t84mhj3hhn7l89n9syc04g6q87aw3n2v4nd8hr6pjgp5ms6y33c6",
+      "outpoint_txid": "6bf52c83067e6c6875f860d39400bcd819a32b096fd1ccf77ab95b2378569d99",
+      "outpoint_index": 0
+    },
+    {
+      "pk_x": "e8e8d8278278033dfb641503cdf0102c32f59598522e06d38c64de9155839470",
+      "stake_sompi": "3000000000",
+      "lock_until_daa": 50000000,
+      "p2sh": "kaspatest:pp0sxyktdycngqu3wlg5kshgztdhhfuelz8znas7sg4l2ssheft9gryaqantq",
+      "outpoint_txid": "5154a357e81c9c5ef5a82c3a040f928d79654ef4cbc2d92324b11ef65d8d5a91",
+      "outpoint_index": 0
+    },
+    {
+      "pk_x": "e92cf4a304ee15a75015505cdb15d7125cf2d1de65298d222a2ec4cab19de533",
+      "stake_sompi": "150000000",
+      "lock_until_daa": 50000000,
+      "p2sh": "kaspatest:prnttlec0nux60na8l6ee95ya30llt48nya7mc6nxu827znz6fwtcuj2v9tph",
+      "outpoint_txid": "b0d899d0c87b7d83c38951fa6618ba1c28a2e67007fd21bafa95fafdb042c0ce",
+      "outpoint_index": 0
+    }
+  ],
+  "markets": {
+    "ext-pool-v07-1782695079888-qi37q": {
+      "maker_pk": "20f208b765fe9d61e50e68231cb851c725e6637189df4ba0ef5213a814d81fb6",
+      "broker_pk": "20f208b765fe9d61e50e68231cb851c725e6637189df4ba0ef5213a814d81fb6",
+      "deadline_daa": 49422291,
+      "bettor_pks": [
+        "1d7321340c191df7d2cec04295a5a4ddffcd76742a3c6c816de4f945c3c20cc2",
+        "b02231daded51457143d4cc8e62969356569d7b9c517638275b72fd0ae15be9e"
+      ],
+      "winner_pk": "1d7321340c191df7d2cec04295a5a4ddffcd76742a3c6c816de4f945c3c20cc2",
+      "winner_amount": "1000000000"
+    },
+    "ext-pool-v07-1782695105811-ioaoc": {
+      "maker_pk": "20f208b765fe9d61e50e68231cb851c725e6637189df4ba0ef5213a814d81fb6",
+      "broker_pk": "20f208b765fe9d61e50e68231cb851c725e6637189df4ba0ef5213a814d81fb6",
+      "deadline_daa": 49422240,
+      "bettor_pks": [
+        "c7acd4caa6ec2df26f00d38909f604531ccc775406af76941033f54a615c13fc",
+        "672c31fd16dc366b1ca12bd8f014b9eaf1f504610f9d9efcb60cdbbc84bb7254"
+      ],
+      "winner_pk": "c7acd4caa6ec2df26f00d38909f604531ccc775406af76941033f54a615c13fc",
+      "winner_amount": "1000000000"
+    }
+  }
+}
