@@ -54,7 +54,12 @@
 4. **memory 相关 feedback**: `grep -ri <topic> ~/.claude/projects/*/memory/feedback_*.md`
 5. **设计前查资产（铁律,违=重造/绕路,第3次同病的根治）**: 任何**领域设计 / SS / 链上机制**动手前——(a) 必读 `D:\KANet-Knowledge-Base` 该领域目录 + 既有设计文档(防重造已设计系统);(b) 写 SS/链上前**必查 silverscript 官方 `docs/DECL.md`+`TUTORIAL.md` 确认可用原语**(introspection `tx.outputs[i].value/scriptPubKey` / covenant `OpInputCovenantId` / `byte[](int,int)` int-to-byte / `blake2b` / `for` 循环——TN12 全有,见记忆 `reference-silverscript-real-capabilities`)。**撞到"这原语好像没有/做不了"的假设,必先去文档/源码验证再决定绕不绕——禁止凭印象判定限制然后搭链下 fallback**(漏 KB / 漏既有 §2.A 滚动分片设计 / 漏 silverscript 工具 = 同一个病)。
 
-**写完 commit 前必跑**: `node scripts/lint-kanet.mjs <changed-files>` — 失败一条 commit 都不让 (git pre-commit hook 强制).
+**写完 commit 前必跑**: `node scripts/lint-kanet.mjs <changed-files>` — 失败一条 commit 都不让。
+
+**pre-commit hook 真实配置 (2026-06-29 真装·非虚声明)**:
+- Hook 在 `.githooks/pre-commit` (已入库)。**新 clone 必跑一次**: `git config core.hooksPath .githooks`
+- 内容: ① `lint-kanet` staged 文件 (block on fail) ② `check-tree-fresh` (warn-not-block·落后 canonical 超 20 commits LOUD warn)
+- doc-lint 规则内置于 lint-kanet: date-prefix 设计文档必住 `docs/` 根目录·同名多路径 → block
 
 **改 broker / agent 业务代码后必跑**: `cd kasia-console && node scripts/test.mjs --domain=<相关 domain>` — framework 一键回归。修 bug 必同步加 regression case 进 `kasia-console/test-framework/cases/<domain>/` 守住，永不退化。详见 `docs/TEST-FRAMEWORK.md`.
 

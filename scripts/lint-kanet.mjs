@@ -793,6 +793,65 @@ function checkR_COMMINGLE_GUARD(filepath, content) {
   }
 }
 
+// ── R-DOC-PATH / R-DOC-DUPLICATE (③ doc-lint, Bettor 2026-06-29):
+//   设计文档(date-prefix *.md)必住 docs/ 根目录·同名多路径 → fail.
+//   根因: 今晚 KANet-UI UX doc 误提 kasia-console/docs/ → grep 扫 docs/ 看不到 → 假阴性.
+//   同族: J1 stale-local 假阴性(代码同名但版本不同). 此 lint 堵"同名 doc 多路径"变体.
+//   Escape hatch: 不支持 (文档无理由散落多路径; 必归 docs/).
+function checkDocPath() {
+  const DOCS_ROOT = path.join(ROOT, 'docs');
+  const datePrefix = /^\d{4}-\d{2}-\d{2}-/;
+  // 不走嵌套副本目录 / 无关目录 (kanet-tn12 = 嵌套同名目录, 非本 repo 范围)
+  const mdSkip = new Set(['node_modules', '.git', 'logs', 'dist', 'build', 'out', '.cache',
+    'scratch', 'tmp', '_archive_root_20260627', 'kasia-console-archive', 'kanet-tn12']);
+
+  const mdFiles = [];
+  function walkMd(dir, depth) {
+    if (depth > 7) return;
+    let entries;
+    try { entries = fs.readdirSync(dir); } catch { return; }
+    for (const name of entries) {
+      if (mdSkip.has(name) || name.startsWith('.')) continue;
+      const full = path.join(dir, name);
+      let st;
+      try { st = fs.statSync(full); } catch { continue; }
+      if (st.isDirectory()) walkMd(full, depth + 1);
+      else if (st.isFile() && name.endsWith('.md')) mdFiles.push(full);
+    }
+  }
+  walkMd(ROOT, 0);
+
+  // Rule 1: date-prefixed design doc NOT under docs/ hierarchy → block
+  // 允许 docs/ 任何子目录 (archived/plans/spec 等); 不允 kasia-console/docs/、根目录 等。
+  const docsHierarchy = DOCS_ROOT + path.sep;
+  for (const fp of mdFiles) {
+    const name = path.basename(fp);
+    if (!datePrefix.test(name)) continue;
+    if (fp.startsWith(docsHierarchy) || path.dirname(fp) === DOCS_ROOT) continue;
+    violate('R-DOC-PATH',
+      `设计文档 "${name}" 不在 docs/ 层次下 (当前: ${path.relative(ROOT, fp)}). ` +
+      `必 git mv → docs/${name}. Owner 单路径原则·防 grep 假阴性 (今晚教训).`,
+      fp, 0);
+  }
+
+  // Rule 2: same-basename date-prefix .md in multiple paths → block
+  // 只查 date-prefix 设计文档 (排除 README.md / broker-test-guide.md 等通用名).
+  const byBasename = {};
+  for (const fp of mdFiles) {
+    const name = path.basename(fp);
+    if (!datePrefix.test(name)) continue;  // skip non-design-doc
+    (byBasename[name] ||= []).push(fp);
+  }
+  for (const [name, fps] of Object.entries(byBasename)) {
+    if (fps.length <= 1) continue;
+    violate('R-DOC-DUPLICATE',
+      `设计文档 "${name}" 散落 ${fps.length} 个路径: ` +
+      `${fps.map(f => path.relative(ROOT, f)).join(' + ')} → grep 假阴性. ` +
+      `保留 docs/ 一份·删其余.`,
+      fps[0], 0);
+  }
+}
+
 // ── 跑 ──
 for (const fp of targets) {
   let content;
@@ -821,6 +880,7 @@ for (const fp of targets) {
 checkR10();
 checkR_NULLIFIER_I64();
 checkScratchClutter();
+checkDocPath();                          // R-DOC-PATH/R-DOC-DUPLICATE (③ doc-lint 2026-06-29): date-prefixed doc 必住 docs/ 根·同名多路径 → fail
 
 // ── 报告 ──
 // warnings first (non-blocking — WARN rules are migration checklists, not hard blockers)
