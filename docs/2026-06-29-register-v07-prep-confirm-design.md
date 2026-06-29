@@ -90,5 +90,37 @@ prep(算 side_p2sh+shard_market_id) → [用户付款] → confirm(链上验付�
 - getMarketBets shard-aware 读已存在(显示/结算正确)。
 - bshard-auto-settler + ZK 执行卡(close+claim) 已 ready·B 落地后任意盘可结算。
 
-## 9. 待 J1 covenant section 合并
-J1 section(`.claude-scripts/j2-review/register-v07-prep-confirm-J1-covenant-section.md`·当前在 J1 节点未入 canonical) 覆盖: side_p2sh 派生(§3 命门答案)·ShardLeaf splice covenant 守恒·auto-roll 封片机制·committee/pool_merkle_root 绑定。合并成单 canonical 文档后 fresh 会话照完整版实现。
+## 9. J1 covenant/分片 section（已合并·实现照此）
+
+> §3 命门答案 + custody 真名见 §3（J1 已背书）。本节补 covenant 调用序列 + 安全边界 + 复用清单 + co-verify 判据。
+
+### 9.1 prep step（covenant 侧·算地址·NO TX）
+1. 校验 `protocol_version=='v0.7'` + `status=='pending_bettors'` + `pool_merkle_root` 非空 + `deadline` 非空（partial-shard sweep gate 件1）。
+2. 返回 **bettor 的 P2PK 收款地址**（linked wallet·**shard-无关**）+ `exact_stake_sompi` + `shard_index`（仅 hint·informational·confirm 不盲用）。
+3. **不在 prep allocate/锁片**（§3 结论）·shard 在 confirm 才选。
+
+### 9.2 confirm step（covenant 侧·验付款→splice 上片）
+1. detect bettor 付款落 P2PK 收款地址（mirror v06 confirm payment detect）。
+2. **allocate-at-confirm**（§3 命门·不锁不 TTL）: `registerBettorOnShard` 内部 `allocateForRegister` 选【当前 open 片】（满则 roll·prep hint 可能 stale 别盲用）。
+3. **register_append 上链·funding input = bettor 付的 P2PK UTXO**: spend 它折进当前 open 片 leaf（`leaf.pool_value += stake`·`leaf UTXO value += stake`）→ ShardLeaf state-splice 续体（count++）→ 新 SL 地址 + 产出 dust PoolSide ticket（claim 标记）。**NO TX NO STATE**: append tx LANDED（`kaspa_tx_log.block_hash` 非空）才记 DB。
+4. 记 `pool_bettor_sides` 带【实际落的】`shard_market_id`（shard-aware·非 logical·非 prep stale）。
+5. **封片检测**: append 后 `count==SHARD_SEAL_COUNT(32)` → 标该 shard 封（下次 allocate 开新片）。
+
+### 9.3 covenant 安全边界（J1 守·co-verify 验）
+- **无 50-cap**: 滚动路径不设硬 reject·`SHARD_SEAL_COUNT=32` 是【封片开新】阈值非【拒绝】阈值 → 无限押注。
+- **每 ShardLeaf ≤32 bettor** < PoolSide depth-6 = 64 merkle 槽（留半余量·shard-allocator L27）→ 单片 `settle_aggregate` 一 TX 不 chunk·不撞 mass-cap → 每片 covenant 永不溢出。
+- **deadline gate**: ShardLeaf bake deadline（件1·partial 片 `tx.time >= deadline*1000` 才归集·tx.time 是【毫秒】单位铁律）。
+- **committee/pool_merkle_root 绑定**: side_p2sh 派生入参含 `pool_merkle_root`（委员根·deadline 时 VRF 采样烤进）·非 node-local relay 集。
+
+### 9.4 复用既有资产（非从零·"编排非造新机制"）
+- `allocateForRegister` / `SHARD_SEAL_COUNT=32` / `SHARD_MASS_CEILING=380k` = `shard-allocator.mjs` 已有。
+- `registerBettorOnShard`（register_append 编排·`bettorFunding` P2PK 入参）= `pool-shard-register.mjs` 已有（register-v07 L1163 在用）。
+- `spliceLeafState`（state-splice·byte-equal 验）= console `pool-shard-register.mjs` + relay `_spliceLeafState`（J1 41b90ac9）已有。
+- ∴ prep+confirm = 把现成原语编排成 relay-assisted 两步流 + 把 funding 源从 gateway 换成 bettor 付的 P2PK UTXO。
+
+### 9.5 co-verify 判据（J1 门·实现后验）
+1. **shard 守恒**: `Σ shard pool_bettor_sides == Σ 链上 ShardLeaf splice pool_value`（无 strand/无 double）。
+2. **funding-input 谁签**: 验 register_append 的 funding input 来源 = bettor 付的 P2PK（custody 真名 = relay-assisted·非号称 0-custody）。
+3. **auto-roll 正确**: 满 32 自动开新片（非 reject）。
+4. **side_p2sh 落点一致**: prep 返回地址 == bettor 实付地址·confirm 落的 shard == 实际 open 片（非 prep stale）。
+5. **无 50-cap 回归**: 第 51 注不撞 "market full"（撞了=路由没切 v07 滚动）。
