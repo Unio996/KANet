@@ -1943,6 +1943,22 @@ export async function registerPoolRoutes(fastify) {
   // + 排除 commingled spine(FINDING-2 单源 isCommingledSpine, J1 2026-06-28).
   // + 排除 AutoBetter relay 押注(NWT option A, KANet-UI 2026-06-28): bettor_count + 赔率只计真人押注.
   //   AutoBetter 识别: relay_nodes.name LIKE 'AutoBetter-%'. 只读端点, 不碰 settle.
+  // ── 诚实显示计数 SQL · 单源 (Bettor 2026-06-29 审定·收敛单源·禁三处各写一套·= 不完整迁移的根治) ──
+  //   两件套 (Bettor scope): ① AUTO_BET_EXCL 排 AutoBetter 假押注 ② shard-aware union (logical key + 各 shard key)。
+  //   commingledSpine 排除【不在此】= trending 首页"选哪些盘上榜"的 filter·非单盘计数口径。
+  //   消费方: trending / card_groups / markets-list / market-detail → 一个口径 (修 Owner '51人假数据' 抱怨)。
+  //   honestCountSql/StakeSql 返回纯 SQL 表达式 (call-site 自加 AS <alias>)。mExpr = logical market id 的 SQL 表达式:
+  //     'pool_markets.id' (相关子查询·list/trending/card_groups) 或 '?' (单盘 detail·该 expr 出现 2 次 → 须绑 2 次)。
+  const AUTO_BET_EXCL = `AND s.bettor_relay_id NOT IN (SELECT id FROM relay_nodes WHERE name LIKE 'AutoBetter-%')`;
+  function honestCountSql(mExpr) {
+    return `((SELECT COUNT(*) FROM pool_bettor_sides s WHERE s.market_id = ${mExpr} ${AUTO_BET_EXCL})`
+      + ` + (SELECT COUNT(*) FROM pool_bettor_sides s WHERE s.market_id IN (SELECT shard_market_id FROM market_shards WHERE logical_market_id = ${mExpr}) ${AUTO_BET_EXCL}))`;
+  }
+  function honestStakeSql(mExpr, dir) {
+    return `((SELECT COALESCE(SUM(stake_amount),0) FROM pool_bettor_sides s WHERE s.market_id = ${mExpr} AND s.direction = ${dir} ${AUTO_BET_EXCL})`
+      + ` + (SELECT COALESCE(SUM(stake_amount),0) FROM pool_bettor_sides s WHERE s.market_id IN (SELECT shard_market_id FROM market_shards WHERE logical_market_id = ${mExpr}) AND s.direction = ${dir} ${AUTO_BET_EXCL}))`;
+  }
+
   fastify.get('/api/pool/markets/trending', async (request, reply) => {
     const q = request.query || {};
     const limit = Math.min(Math.max(parseInt(q.limit, 10) || 5, 1), 20);
@@ -1955,18 +1971,14 @@ export async function registerPoolRoutes(fastify) {
     const createdCutoffIso = `${_cd.getFullYear()}-${_p(_cd.getMonth()+1)}-${_p(_cd.getDate())} ${_p(_cd.getHours())}:${_p(_cd.getMinutes())}:${_p(_cd.getSeconds())}`;   // 创建 >1h ago (local format)
     const { commingledSpineSet } = await import('../lib/pool-commingle-detect.mjs');
     const commingledSpines = commingledSpineSet(sqlite);
-    // auto-bet exclusion filter: exclude bets placed by AutoBetter relay bots (name LIKE 'AutoBetter-%')
-    const AUTO_BET_EXCL = `AND s.bettor_relay_id NOT IN (SELECT id FROM relay_nodes WHERE name LIKE 'AutoBetter-%')`;
+    // bettor_count/yes_sompi/no_sompi → honestCountSql/StakeSql 单源 (排 AutoBetter + shard-aware union)。
     const rows = sqlite.prepare(`
       SELECT pool_markets.id, pool_markets.resolution_rule_spec, pool_markets.category,
              pool_markets.outcome_side, pool_markets.deadline, pool_markets.maker_stake_amount,
              pool_markets.spine_p2sh,
-             (SELECT COUNT(*) FROM pool_bettor_sides s WHERE s.market_id = pool_markets.id ${AUTO_BET_EXCL})
-             + (SELECT COUNT(*) FROM pool_bettor_sides s WHERE s.market_id IN (SELECT shard_market_id FROM market_shards WHERE logical_market_id = pool_markets.id) ${AUTO_BET_EXCL}) AS bettor_count,
-             (SELECT COALESCE(SUM(stake_amount),0) FROM pool_bettor_sides s WHERE s.market_id = pool_markets.id AND s.direction = 0 ${AUTO_BET_EXCL})
-             + (SELECT COALESCE(SUM(stake_amount),0) FROM pool_bettor_sides s WHERE s.market_id IN (SELECT shard_market_id FROM market_shards WHERE logical_market_id = pool_markets.id) AND s.direction = 0 ${AUTO_BET_EXCL}) AS yes_sompi,
-             (SELECT COALESCE(SUM(stake_amount),0) FROM pool_bettor_sides s WHERE s.market_id = pool_markets.id AND s.direction = 1 ${AUTO_BET_EXCL})
-             + (SELECT COALESCE(SUM(stake_amount),0) FROM pool_bettor_sides s WHERE s.market_id IN (SELECT shard_market_id FROM market_shards WHERE logical_market_id = pool_markets.id) AND s.direction = 1 ${AUTO_BET_EXCL}) AS no_sompi
+             ${honestCountSql('pool_markets.id')} AS bettor_count,
+             ${honestStakeSql('pool_markets.id', 0)} AS yes_sompi,
+             ${honestStakeSql('pool_markets.id', 1)} AS no_sompi
       FROM pool_markets
       WHERE pool_markets.protocol_status = 'pending_bettors'
         AND pool_markets.protocol_status != 'shard_internal'
@@ -2016,18 +2028,14 @@ export async function registerPoolRoutes(fastify) {
     const { commingledSpineSet } = await import('../lib/pool-commingle-detect.mjs');
     const { aggregateCardGroups } = await import('../lib/pool-card-groups.mjs');
     const commingledSpines = commingledSpineSet(sqlite);
-    const AUTO_BET_EXCL = `AND s.bettor_relay_id NOT IN (SELECT id FROM relay_nodes WHERE name LIKE 'AutoBetter-%')`;
-    // per-leg 池/人数: 复用 trending 同款 correlated subquery + shard 汇总 + AutoBetter 排除 (一致性单源)。
+    // per-leg 池/人数: honestCountSql/StakeSql 单源 (排 AutoBetter + shard-aware union·一致性同 trending)。
     const rows = sqlite.prepare(`
       SELECT pool_markets.id, pool_markets.resolution_rule_spec, pool_markets.category,
              pool_markets.outcome_side, pool_markets.deadline, pool_markets.maker_stake_amount,
              pool_markets.spine_p2sh,
-             (SELECT COUNT(*) FROM pool_bettor_sides s WHERE s.market_id = pool_markets.id ${AUTO_BET_EXCL})
-             + (SELECT COUNT(*) FROM pool_bettor_sides s WHERE s.market_id IN (SELECT shard_market_id FROM market_shards WHERE logical_market_id = pool_markets.id) ${AUTO_BET_EXCL}) AS bettor_count,
-             (SELECT COALESCE(SUM(stake_amount),0) FROM pool_bettor_sides s WHERE s.market_id = pool_markets.id AND s.direction = 0 ${AUTO_BET_EXCL})
-             + (SELECT COALESCE(SUM(stake_amount),0) FROM pool_bettor_sides s WHERE s.market_id IN (SELECT shard_market_id FROM market_shards WHERE logical_market_id = pool_markets.id) AND s.direction = 0 ${AUTO_BET_EXCL}) AS yes_sompi,
-             (SELECT COALESCE(SUM(stake_amount),0) FROM pool_bettor_sides s WHERE s.market_id = pool_markets.id AND s.direction = 1 ${AUTO_BET_EXCL})
-             + (SELECT COALESCE(SUM(stake_amount),0) FROM pool_bettor_sides s WHERE s.market_id IN (SELECT shard_market_id FROM market_shards WHERE logical_market_id = pool_markets.id) AND s.direction = 1 ${AUTO_BET_EXCL}) AS no_sompi
+             ${honestCountSql('pool_markets.id')} AS bettor_count,
+             ${honestStakeSql('pool_markets.id', 0)} AS yes_sompi,
+             ${honestStakeSql('pool_markets.id', 1)} AS no_sompi
       FROM pool_markets
       WHERE pool_markets.protocol_status = 'pending_bettors'
     `).all();
@@ -2069,12 +2077,9 @@ export async function registerPoolRoutes(fastify) {
              pool_markets.outcome_market_source, pool_markets.outcome_condition_id, pool_markets.created_at,
              pool_markets.maker_relay_id, pool_markets.broker_relay_id, pool_markets.oracle_relay_ids,  /* KANet-UI r308 maker 名显 + J2-tn r741 broker filter/markets-tool */
              rn_maker.name AS maker_name,                       /* LEFT JOIN: 跨节点 maker 不在本表 → NULL, 前端兜底 */
-             (SELECT COUNT(*) FROM pool_bettor_sides s WHERE s.market_id = pool_markets.id)
-             + (SELECT COUNT(*) FROM pool_bettor_sides s WHERE s.market_id IN (SELECT shard_market_id FROM market_shards WHERE logical_market_id = pool_markets.id)) AS bettor_count,
-             (SELECT COALESCE(SUM(stake_amount),0) FROM pool_bettor_sides s WHERE s.market_id = pool_markets.id AND s.direction = 0)
-             + (SELECT COALESCE(SUM(stake_amount),0) FROM pool_bettor_sides s WHERE s.market_id IN (SELECT shard_market_id FROM market_shards WHERE logical_market_id = pool_markets.id) AND s.direction = 0) AS yes_bettor_stake_sompi,
-             (SELECT COALESCE(SUM(stake_amount),0) FROM pool_bettor_sides s WHERE s.market_id = pool_markets.id AND s.direction = 1)
-             + (SELECT COALESCE(SUM(stake_amount),0) FROM pool_bettor_sides s WHERE s.market_id IN (SELECT shard_market_id FROM market_shards WHERE logical_market_id = pool_markets.id) AND s.direction = 1) AS no_bettor_stake_sompi
+             ${honestCountSql('pool_markets.id')} AS bettor_count,
+             ${honestStakeSql('pool_markets.id', 0)} AS yes_bettor_stake_sompi,
+             ${honestStakeSql('pool_markets.id', 1)} AS no_bettor_stake_sompi
       FROM pool_markets
       LEFT JOIN relay_nodes rn_maker ON rn_maker.id = pool_markets.maker_relay_id
       ${whereSql}
@@ -2203,19 +2208,16 @@ export async function registerPoolRoutes(fastify) {
     market.maker_name = _makerRow?.name || null;
     let metaParsed = {};
     try { metaParsed = JSON.parse(market.metadata || '{}'); } catch {}
-    const bettorCount = sqlite.prepare('SELECT COUNT(*) c FROM pool_bettor_sides WHERE market_id = ?').get(marketId).c;
+    // 详情计数 honestCountSql 单源: shard-aware (修 v07 logical-only 漏 shard 押注 bug) + 排 AutoBetter (= 与 list/trending 一口径)。
+    const bettorCount = sqlite.prepare(`SELECT ${honestCountSql('?')} AS c`).get(marketId, marketId).c;
     const sigsCollected = sqlite.prepare(`
       SELECT COUNT(*) c FROM chain_events
       WHERE event_type IN ('pool_oracle_tx_sig', 'pool_oracle_refund_disagreement_tx_sig')
         AND payload LIKE ?
     `).get(`%"market_id":"${marketId}"%`).c;
-    // Bettor r70 A: pool distribution on detail too (same model as list).
-    const yesBettorSompi = sqlite.prepare(
-      'SELECT COALESCE(SUM(stake_amount),0) AS s FROM pool_bettor_sides WHERE market_id = ? AND direction = 0'
-    ).get(marketId).s;
-    const noBettorSompi = sqlite.prepare(
-      'SELECT COALESCE(SUM(stake_amount),0) AS s FROM pool_bettor_sides WHERE market_id = ? AND direction = 1'
-    ).get(marketId).s;
+    // Bettor r70 A: pool distribution on detail too (same model as list). honestStakeSql 单源 (shard-aware + 排 AutoBetter)。
+    const yesBettorSompi = sqlite.prepare(`SELECT ${honestStakeSql('?', 0)} AS s`).get(marketId, marketId).s;
+    const noBettorSompi = sqlite.prepare(`SELECT ${honestStakeSql('?', 1)} AS s`).get(marketId, marketId).s;
     const makerSompi = market.maker_stake_amount || 0;
     const makerOnYes = market.outcome_side === 'YES';
     const yesPoolSompi = Number(yesBettorSompi) + (makerOnYes ? makerSompi : 0);
