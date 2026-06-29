@@ -2088,16 +2088,18 @@ export async function registerPoolRoutes(fastify) {
     const { aggregateCardGroups } = await import('../lib/pool-card-groups.mjs');
     const commingledSpines = commingledSpineSet(sqlite);
     // per-leg 池/人数: honestCountSql/StakeSql 单源 (排 AutoBetter + shard-aware union·一致性同 trending)。
+    // raw_bettor_count: raw COUNT(*) 含 AutoBetter — 用于 raw<50 过滤(同 availableMarkets·同 prep L1524)。
     const rows = sqlite.prepare(`
       SELECT pool_markets.id, pool_markets.resolution_rule_spec, pool_markets.category,
              pool_markets.outcome_side, pool_markets.deadline, pool_markets.maker_stake_amount,
              pool_markets.spine_p2sh,
              ${honestCountSql('pool_markets.id')} AS bettor_count,
              ${honestStakeSql('pool_markets.id', 0)} AS yes_sompi,
-             ${honestStakeSql('pool_markets.id', 1)} AS no_sompi
+             ${honestStakeSql('pool_markets.id', 1)} AS no_sompi,
+             (SELECT COUNT(*) FROM pool_bettor_sides WHERE market_id = pool_markets.id) AS raw_bettor_count
       FROM pool_markets
       WHERE pool_markets.protocol_status = 'pending_bettors'
-    `).all();
+    `).all().filter(r => r.raw_bettor_count < 50);  // 同 availableMarkets·排满盘·防 /start card_groups 按钮误导
     const out = aggregateCardGroups(rows, commingledSpines, { limit: q.limit });   // 聚合逻辑单源 (pool-card-groups.mjs)
     return reply.send({ ...out, filters: { status: 'pending_bettors', exclude_commingled: true, exclude_auto_bet: true, dedupe_leg_key: 'keep_most_active' } });
   });
