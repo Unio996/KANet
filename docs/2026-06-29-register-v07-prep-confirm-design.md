@@ -43,10 +43,16 @@
 - **(a) side_p2sh shard-无关**(只由 bettor_pk+direction+stake+market 派生·不含 shard id): 则 prep 算地址安全·confirm 落哪片都用同地址 → **无 race·首选**。
 - **(b) side_p2sh shard-specific**(含 shard 的 ShardLeaf 状态): 则 prep 算的是 shard N 的地址·若 prep→confirm 间 shard N 被别人填满 → confirm 的 registerBettorOnShard roll 到 N+1 → **side_p2sh mismatch**(用户付到 N 的地址·bet 该在 N+1) = **race·要处理**。
 
-**race 处理选项**(若是 b):
-- prep **预留 slot**(allocateForRegister 在 prep 时占位·confirm 兑现·超时释放)。
-- confirm **按 prep 锁的 shard_market_id 落**(不重新 allocate·若该片真满则报错让用户重 prep)。
-- **J1 定**: PoolSide P2SH 与 shard ShardLeaf 的关系 = (a) 还是 (b)? 现有 register-v07(gateway-custody)是 gateway 自己 transfer 后 build(无预付地址)·所以这个 0-custody 预付地址问题是**新的**·必 J1 covenant 侧确认 side_p2sh 派生是否含 shard 状态。**这是实现前必锁的头号问题**。
+**🟢 §3 已解 = shard-无关付款地址·allocate-at-confirm·无 race·无 TTL**(J1 covenant 2026-06-29 读真实 register_append 定·背书进文档):
+
+**🔴 covenant 事实修正(关键·改我原假设)**: ShardLeaf register = **stake 折进 state-spliced leaf**(pool-register-builder: `leaf.pool_value += stake`·`leaf UTXO value += stake`)。**stake 在 leaf·不在 PoolSide**(dust PoolSide ticket 只是 spent-once claim 标记)。register_append = relay 原子构造(reveal 当前 leaf → 折 stake 进 → 新 leaf 续体 + dust ticket)。∵ leaf 地址 state-spliced 随 append 变 → **bettor 无固定地址直付进 covenant**。∴ side_p2sh【非】v06 式 PoolSide 地址。
+
+- **prep 付款地址 = shard-无关的中间持有 UTXO**(relay 控制·bettor 付到它·relay 在 confirm fold 时折进选中的 leaf)。非 shard 叶地址(那个 append 时变)·非 v06 PoolSide。**∵ shard-无关 + shard 在 fold 时才选 → 不存在"付到某片然后片满"的 strand**(prep↔confirm 间该片封了·confirm allocate 别的/新片·bettor 付款不受影响)。
+- **confirm = allocate-at-fold·无锁无 TTL**(J1 背书·最简 strand-free): detect 付款到 prep 中间地址 → `allocateForRegister`(此刻选 open 片·满则 roll) → `register_append` 原子折入 leaf → 插 pool_bettor_sides@**实际落的** shard_market_id(非 prep stale)。现成 serialize 够: allocator `UNIQUE(logical,shard_index)` race-lock + single-spend leaf UTXO 天然串行·**无需新锁**。
+- **🔑 custody 决策(J1 交 J2 拍·= confirm funding-input 来源)**: register_append 折 stake 进 leaf(`leaf.value += stake`)·这个增量的 **funding input** 来源定 custody 口径:
+  - **首选(J2 拍)= 真 0-custody**: confirm 直接 spend **bettor 付到 side_p2sh 的那个 UTXO** 作 register_append 的 funding input → bettor 资金直入 leaf·relay 只构造 tx 不经手/不托管。匹配 v06 0-custody 模型·口径可诚实称 0-custody。**前置: J1 covenant 确认 PoolSide/side_p2sh UTXO 可作 register_append 输入被花(covenant 允许)**。
+  - **fallback(若 0-custody covenant 这 sprint 不可行)= 半托管**: bettor 付到 relay 控制的中间 UTXO·relay fold 时折进 leaf。**口径必诚实标"半托管·测试网·relay 经手付款"·绝不宣称纯非托管**(J1 钉: 纯 bettor-direct 是 TODO custody-hardening follow-up·别假装做到)。
+  - **实现时锁**: J1 confirm PoolSide-UTXO-as-append-input 可行性 → 可行走 0-custody·不可行走 fallback 半托管(口径诚实)。两路都 strand-free(allocate-at-confirm)。
 
 ## 4. State Machine
 ```
