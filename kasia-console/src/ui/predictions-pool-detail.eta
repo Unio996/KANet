@@ -554,18 +554,24 @@ function poolDetailPage(marketId) {
         const agResp = await fetch('/api/agent/profile').then(r => r.json()).catch(() => ({}));
         const allRelays = Array.isArray(agResp) ? agResp : (agResp.agents || []);
         this.bet.agents = allRelays.filter(a => !a.is_dex_broker);
-        // 详情页 TG 押注深链: broker_relay_id → relay.address → onboard/status → bot_username
+        // 详情页 TG 押注深链: broker onboard/status(地址制) → fallback 全局 tg-bot/status(broker_onboarding 空表时恒显 CTA)
         const brokerRelayId = this.market?.broker_relay_id;
+        let botUsername = null;
         if (brokerRelayId) {
           const brokerRelay = allRelays.find(r => r.id === brokerRelayId);
           if (brokerRelay?.address) {
             const ob = await fetch('/api/kanet-broker/onboard/status?address=' + encodeURIComponent(brokerRelay.address))
               .then(r => r.json()).catch(() => ({}));
-            if (ob.ok && ob.bot_username) {
-              const u = ob.bot_username.replace(/^@/, '');
-              this.tgBetLink = 'https://t.me/' + u + '?start=' + encodeURIComponent(this.marketId);
-            }
+            if (ob.ok && ob.bot_username) botUsername = ob.bot_username;
           }
+        }
+        if (!botUsername) {
+          const bs = await fetch('/api/tg-bot/status').then(r => r.json()).catch(() => ({}));
+          if (bs.username) botUsername = bs.username;
+        }
+        if (botUsername) {
+          const u = botUsername.replace(/^@/, '');
+          this.tgBetLink = 'https://t.me/' + u + '?start=' + encodeURIComponent(this.marketId);
         }
       } catch {}
       // 详情页 #bet 锚跳: /predictions 行点'押 →' 跳进来自动展开

@@ -242,12 +242,12 @@
                     x-show="thisBrokerAddress" x-text="thisBotRunning ? '✓ 本 broker bot 运行中' : '○ 本 broker bot 未启动'"></span>
             </div>
             <div class="flex items-center gap-2">
-              <!-- 地址制 broker 用 bots/reconcile+bots/stop(address-keyed)·无 onboarding 用旧 tg-bot/start|stop -->
-              <button x-show="thisBrokerAddress ? !thisBotRunning : !tgBotRunning"
-                      @click="thisBrokerAddress ? reconcileBot() : toggleBot(true)" :disabled="tgBotBusy"
+              <!-- 地址制 broker(broker_onboarding 已录入) → bots/reconcile+stop; 无录入 → relay-keyed tg-bot/start|stop -->
+              <button x-show="hasAddressKeyedBot ? !thisBotRunning : !tgBotRunning"
+                      @click="hasAddressKeyedBot ? reconcileBot() : toggleBot(true)" :disabled="tgBotBusy"
                       class="px-2 py-1 rounded bg-emerald-500 hover:bg-emerald-600 disabled:opacity-40 text-white text-[11px] font-medium">启动 bot</button>
-              <button x-show="thisBrokerAddress ? thisBotRunning : tgBotRunning"
-                      @click="thisBrokerAddress ? stopBot() : toggleBot(false)" :disabled="tgBotBusy"
+              <button x-show="hasAddressKeyedBot ? thisBotRunning : tgBotRunning"
+                      @click="hasAddressKeyedBot ? stopBot() : toggleBot(false)" :disabled="tgBotBusy"
                       class="px-2 py-1 rounded bg-warm-200 hover:bg-warm-300 disabled:opacity-40 text-ink-700 text-[11px] font-medium">停止 bot</button>
             </div>
           </div>
@@ -321,11 +321,17 @@ function brokerHome() {
     //   Settings 页保全局权威; broker 页此面板=便捷视图+快捷操作, 同源现有 API 不双写真相.
     tgBotBrokerId: '', tgBotStatus: null, tgBotBusy: false, tgBotMsg: '', tgBotError: '',
     botStatuses: null,  // GET /api/kanet-broker/bots/status → {broker_address: {running, ...}}
-    // 地址制 broker 身份 (onboard.result.broker_address) + 对应 bot 状态
-    get thisBrokerAddress() { return this.onboard?.result?.broker_address || null; },
+    // 地址制 broker 身份: 优先 broker_onboarding 显式登记; 空表时从 relay.address 派生(地址即身份)
+    get thisBrokerAddress() { return this.onboard?.result?.broker_address || this.agent?.address || null; },
+    // 是否有地址制 bot 条目(broker_onboarding 已录入): 决定 start/stop 走地址制还是 relay-keyed 路
+    get hasAddressKeyedBot() {
+      return !!(this.botStatuses && this.thisBrokerAddress && this.thisBrokerAddress in this.botStatuses);
+    },
     get thisBotRunning() {
-      if (!this.thisBrokerAddress || !this.botStatuses) return false;
-      return !!(this.botStatuses[this.thisBrokerAddress]?.running);
+      if (!this.thisBrokerAddress) return false;
+      if (this.hasAddressKeyedBot) return !!(this.botStatuses[this.thisBrokerAddress]?.running);
+      // broker_onboarding 空时 → 回落全局 tgBotStatus(地址派生自 relay·若 relay 就是 TG bot broker 则状态即 tgBotRunning)
+      return this.tgBotRunning;
     },
     // 必改 (Bettor): 只允许有 adapter 的 broker 设为 DM bot broker (否则 bot LLM dialog 调不通 — identity blocker).
     get agentHasAdapter() {
