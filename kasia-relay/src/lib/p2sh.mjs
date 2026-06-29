@@ -1526,6 +1526,16 @@ function _serializeLeafStateHex(s) {
     + _encodePushDataHex(_i64LE(s.pool_value));
 }
 
+// Splice current 4-field state 进 ShardLeaf base(genesis) redeem → 当前 SL 续约 redeem(state_layout{start:1,len:36})。
+// 镜像 console pool-shard-register.spliceLeafState (silverc-INDEPENDENT·无重编)。daemon consolidate auto-splice 用:
+// ShardLeaf 是 state-spliced covenant·地址随 state 变(register_append 续约)·当前未花 SL UTXO 在【current_leaf_state 派生地址】
+// 非 genesis 地址(今晚 J1 自解锁实证: genesis 地址 0 UTXO·spliced 地址 pqfnd77s 持 c8ad7bad)。
+function _spliceLeafState(baseRedeemHex, st) {
+  const stateBytes = Buffer.from(_serializeLeafStateHex(st), 'hex');     // 36B (= _LEAF_STATE_LEN)
+  const redeem = Buffer.from(baseRedeemHex, 'hex');
+  return Buffer.concat([redeem.slice(0, 1), stateBytes, redeem.slice(1 + stateBytes.length)]).toString('hex');
+}
+
 // 序列化 PoolRoot 7-field State → 87B hex (固定 PUSH8/PUSH32, State 声明序). NWT 2-impl byte-match 此格式.
 function _serializeRootStateHex(s) {
   let out = _encodePushDataHex(_i64LE(s.local_yes))
@@ -1680,7 +1690,18 @@ export async function unlockBshardConsolidate(args) {
   const rpc = await connectRpc(networkId);
   try {
     const psUtxo = await _matchUtxo(rpc, _addressFromRedeem(cmd.inputs.payoutshard.redeem_hex, networkId), cmd.inputs.payoutshard.outpointTxid, cmd.inputs.payoutshard.index);
-    const slUtxo = await _matchUtxo(rpc, _addressFromRedeem(cmd.inputs.shardleaf.redeem_hex, networkId), cmd.inputs.shardleaf.outpointTxid);
+    // daemon auto-splice(J1 ① helper): 传 current_leaf_state{local_yes,local_no,count,pool_value}(daemon 编排路·DB 字段)
+    //   → _spliceLeafState 进 base redeem 派生【当前 SL 地址】(ShardLeaf state-spliced covenant·地址随 state 变·register_append 续约)。
+    //   backward-compat: 只传 redeem_hex(已 splice·今晚手驱路) → 用原值不变。
+    //   ⚠ deadline 闸: current_leaf_state 路必传 lock_time=deadline_ms(SL covenant require locktime>=deadline·否则节点拒 "mismatched locktime types"·今晚实证坑)。
+    const _slIn = cmd.inputs.shardleaf;
+    const slRedeemHex = _slIn.current_leaf_state
+      ? _spliceLeafState(_slIn.base_redeem_hex || _slIn.redeem_hex, _slIn.current_leaf_state)
+      : _slIn.redeem_hex;
+    if (_slIn.current_leaf_state && BigInt(lockTime) === 0n) {
+      throw new Error('consolidate auto-splice: lock_time=deadline_ms 必传 (SL covenant deadline 闸·否则节点拒 mismatched locktime types)');
+    }
+    const slUtxo = await _matchUtxo(rpc, _addressFromRedeem(slRedeemHex, networkId), cmd.inputs.shardleaf.outpointTxid);
     if (!cmd.inputs.fee) throw new Error('consolidate: fee input 必需 (PS+SL value 全 weld 进 continuation 无余付 fee)');
     const feeUtxo = await _matchUtxo(rpc, cmd.inputs.fee.address, cmd.inputs.fee.outpointTxid, cmd.inputs.fee.index);
     const matched = [psUtxo, slUtxo, feeUtxo];
@@ -1701,7 +1722,7 @@ export async function unlockBshardConsolidate(args) {
 
     // no-sig scriptSig: PS@0 absorb [selfOutIdx=0, shardInIdx=1] OP_0; SL@1 consolidate [psInIdx=0, psOutIdx=0] OP_1
     const psSig = _pushInt(0) + _pushInt(1) + '00' + _encodePushDataHex(Buffer.from(cmd.inputs.payoutshard.redeem_hex, 'hex'));
-    const slSig = _pushInt(0) + _pushInt(0) + '51' + _encodePushDataHex(Buffer.from(cmd.inputs.shardleaf.redeem_hex, 'hex'));
+    const slSig = _pushInt(0) + _pushInt(0) + '51' + _encodePushDataHex(Buffer.from(slRedeemHex, 'hex'));   // slRedeemHex = auto-spliced(daemon) 或 redeem_hex(手驱)·两处(地址派生+scriptSig reveal)必同一
 
     const baseIn = (ss) => matched.map((u, i) => ({ previousOutpoint: { transactionId: u.outpoint.transactionId, index: u.outpoint.index }, signatureScript: ss[i], sequence: 0n, sigOpCount: 0, computeBudget: _BSHARD_COMPUTE_BUDGET, ...(ss[i] === '' ? { utxo: u } : {}) }));
     const unsigned = new Transaction({ version: 1, inputs: matched.map(u => ({ previousOutpoint: { transactionId: u.outpoint.transactionId, index: u.outpoint.index }, signatureScript: '', sequence: 0n, sigOpCount: 0, computeBudget: _BSHARD_COMPUTE_BUDGET, utxo: u })), outputs, lockTime: BigInt(lockTime), gas: 0n, subnetworkId: '0000000000000000000000000000000000000000', payload: '' });
