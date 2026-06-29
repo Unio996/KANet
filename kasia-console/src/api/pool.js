@@ -2009,6 +2009,10 @@ export async function registerPoolRoutes(fastify) {
       };
     }).filter((m) => m._totalPool >= minPoolSompi)   // 防刷量: 池太小不上热榜
       .filter((m) => !commingledSpines.has(m._spineP2sh))   // FINDING-2: 排除 commingled spine (J1 单源 helper)
+      .filter((m) => isStructuredSpec(m.title))   // usability (Owner 2026-06-29 '首页一坨屎'): 只显配齐规则可押盘。
+      //   m.title = raw resolution_rule_spec (L1990)。isStructuredSpec (lib/spec-validation.js·= bot specIsUsable
+      //   三端单一源·Bettor r243) = JSON 含非空 title+resolution_criteria+data_source_canonical。镜像盘缺 title/criteria
+      //   → false → 源头从热门藏掉。非裸 json_extract (非 JSON spec 会 throw malformed JSON 崩整 query + title 有 fallback 误过滤)。
       .filter((m) => m.bettor_count >= 3)   // Owner 2026-06-28: 0/少真人盘不上首页(bettor_count已排 AutoBetter)
       .sort((a, b) => b.trending_score - a.trending_score)
       .slice(0, limit)
