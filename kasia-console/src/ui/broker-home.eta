@@ -242,9 +242,12 @@
                     x-show="thisBrokerAddress" x-text="thisBotRunning ? '✓ 本 broker bot 运行中' : '○ 本 broker bot 未启动'"></span>
             </div>
             <div class="flex items-center gap-2">
-              <button x-show="!tgBotRunning" @click="toggleBot(true)" :disabled="tgBotBusy"
+              <!-- 地址制 broker 用 bots/reconcile+bots/stop(address-keyed)·无 onboarding 用旧 tg-bot/start|stop -->
+              <button x-show="thisBrokerAddress ? !thisBotRunning : !tgBotRunning"
+                      @click="thisBrokerAddress ? reconcileBot() : toggleBot(true)" :disabled="tgBotBusy"
                       class="px-2 py-1 rounded bg-emerald-500 hover:bg-emerald-600 disabled:opacity-40 text-white text-[11px] font-medium">启动 bot</button>
-              <button x-show="tgBotRunning" @click="toggleBot(false)" :disabled="tgBotBusy"
+              <button x-show="thisBrokerAddress ? thisBotRunning : tgBotRunning"
+                      @click="thisBrokerAddress ? stopBot() : toggleBot(false)" :disabled="tgBotBusy"
                       class="px-2 py-1 rounded bg-warm-200 hover:bg-warm-300 disabled:opacity-40 text-ink-700 text-[11px] font-medium">停止 bot</button>
             </div>
           </div>
@@ -483,6 +486,30 @@ function brokerHome() {
         const j = await r.json();
         this.botStatuses = j.ok ? (j.bots || j) : null;
       } catch (e) { this.botStatuses = null; }
+    },
+    async reconcileBot() {
+      this.tgBotBusy = true; this.tgBotMsg = ''; this.tgBotError = '';
+      try {
+        const r = await fetch('/api/kanet-broker/bots/reconcile', { method: 'POST' });
+        const j = await r.json().catch(() => ({}));
+        this.tgBotMsg = '已触发 bot 对齐(所有 approved broker bot 将启动)';
+      } catch (e) { this.tgBotError = '启动失败: ' + (e?.message || e); }
+      finally { this.tgBotBusy = false; await this.loadTgBot(); }
+    },
+    async stopBot() {
+      if (!this.thisBrokerAddress) return;
+      if (!confirm('停止本 broker bot？')) return;
+      this.tgBotBusy = true; this.tgBotMsg = ''; this.tgBotError = '';
+      try {
+        const r = await fetch('/api/kanet-broker/bots/stop', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ broker_address: this.thisBrokerAddress }),
+        });
+        const j = await r.json().catch(() => ({}));
+        if (!j.ok) { this.tgBotError = j.error || ('停止失败 HTTP ' + r.status); }
+        else { this.tgBotMsg = '本 broker bot 已停止'; }
+      } catch (e) { this.tgBotError = '停止失败: ' + (e?.message || e); }
+      finally { this.tgBotBusy = false; await this.loadTgBot(); }
     },
     copyTgLink(marketId) {
       const bot = this.onboard?.result?.bot_username;
