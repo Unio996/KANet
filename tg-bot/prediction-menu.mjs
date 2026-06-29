@@ -3,6 +3,7 @@
 // 0-key/0-custody (J1 S5): bot 只读 + 显; 价值步 (stage4-5: escrow 地址 + 用户自钱包付 + 链上检测)
 //   待 J2/J1 taker-stake-external backend, 此处先 stub + 错付预防文案.
 import * as api from './console-api.mjs';
+import { t, detectLang } from './i18n.mjs';
 import { CONFIG } from './config.mjs';
 import { readFileSync, writeFileSync, existsSync, renameSync } from 'fs';
 import { dirname, join } from 'path';
@@ -18,6 +19,7 @@ const pendingPayments = new Map();   // stage5 awaiting on-chain payment, poller
 // Bettor r63 P0 fix ① — link store 必持久化, 否则 bot 重启丢 linkedAddr → pending 里 undefined 字段被
 // JSON.stringify drop → confirm 时 linked_addr 缺 → push 上链失败 silent → Owner 500 KAS 类卡死.
 const linkedAddrs = new Map();       // tg_user → { address, linked_at } — persists across bot restart
+const userLangs = new Map();         // tg_user → 'en'|'zh' — language preference, persists across restart
 let brokerFeeTs = 0;                 // global cursor (ms): pollBrokerFeeEvents 起点, 跨重启续单
 
 try {
@@ -26,6 +28,7 @@ try {
     for (const [k, v] of (j.sessions || [])) sessions.set(k, v);
     for (const [k, v] of (j.pendingPayments || [])) pendingPayments.set(k, v);
     for (const [k, v] of (j.linkedAddrs || [])) linkedAddrs.set(k, v);
+    for (const [k, v] of (j.userLangs || [])) userLangs.set(k, v);
     brokerFeeTs = j.brokerFeeTs || 0;
     console.log(`[prediction-menu] state loaded: ${sessions.size} sessions, ${pendingPayments.size} pending payments, ${linkedAddrs.size} linked addrs`);
   }
@@ -37,6 +40,7 @@ function _writeAtomic() {
     sessions: [...sessions.entries()],
     pendingPayments: [...pendingPayments.entries()],
     linkedAddrs: [...linkedAddrs.entries()],
+    userLangs: [...userLangs.entries()],
     brokerFeeTs,
   });
   const tmp = STATE_FILE + '.tmp';
@@ -66,10 +70,10 @@ const SOMPI_PER_KAS = 1e8;
 const DEADLINE_BUFFER_SEC = 600;
 function sompiToKasStr(sompi) { return (Number(sompi) / SOMPI_PER_KAS).toFixed(8); }
 
-function fmtDeadline(unixSec) {
+function fmtDeadline(unixSec, lang) {
   if (!unixSec) return '?';
   const h = Math.round((unixSec * 1000 - Date.now()) / 3600000);
-  return h > 0 ? `${h}h 后截止` : '已过期';
+  return h > 0 ? t(lang, 'deadline_hours', { h }) : t(lang, 'deadline_expired');
 }
 
 // 列表里截短标题 (resolution_rule_spec 可能含完整结算规则全文, Bettor r256). 详情页给全文.
@@ -345,53 +349,54 @@ function _shareKeyboard(marketId) {
   return { inline_keyboard: [[{ text: '🔗 分享此市场', copy_text: { text: shareUrl } }]] };
 }
 // YES/NO 选边 + 分享 keyboard (详情页用).
-function _detailKeyboard(marketId) {
+function _detailKeyboard(marketId, lang = 'en') {
   const shareUrl = `https://t.me/${CONFIG.botUsername}?start=${marketId}`;
   return { inline_keyboard: [
-    [{ text: '🟢 押 YES', callback_data: 'bet:side:1' }, { text: '🔴 押 NO', callback_data: 'bet:side:2' }],
-    [{ text: '🔗 分享此市场', copy_text: { text: shareUrl } }],
+    [{ text: t(lang, 'btn_yes'), callback_data: 'bet:side:1' }, { text: t(lang, 'btn_no'), callback_data: 'bet:side:2' }],
+    [{ text: t(lang, 'btn_share'), copy_text: { text: shareUrl } }],
   ]};
 }
 
 export async function startBetFromMarket(tgUser, marketId) {
+  const lang = getUserLang(tgUser);
   const dr = await api.poolMarket(marketId);
   const market = (dr.json && (dr.json.market || (dr.json.id ? dr.json : null))) || null;
-  if (!market) return '市场未找到。/bet 重选。';
+  if (!market) return t(lang, 'market_not_found');
   // 质量防御: 同 list filter (2026-06-06 Owner 实证 voo3z) — 缺规则不让进押注流程, 不糊弄用户.
   if (!specIsUsable(market.resolution_rule_spec)) {
-    return '这个市场缺完整结算规则, 不让押 (= 押了你不知道凭什么判输赢)。/bet 选别的。';
+    return t(lang, 'market_bad_spec');
   }
   // 满员早拒: inline-keyboard 按钮跨 bot 重启持久存在, 用户可能点旧 /start 里已满盘进来.
   // raw_bettor_count = raw COUNT(*) 含 AutoBetter (== prep L1524 同源); 缺失 fail-closed → 999.
   const rawCount = dr.json.raw_bettor_count ?? 999; // fail-closed: missing raw → treat as full
   if (rawCount >= 50) {
-    return '⚠ 这个市场已满员 (50 人上限)，无法再押。/bet 或 /start 选其他市场。';
+    return t(lang, 'market_full');
   }
   // 直接进 detail 复用同 UI
   sessions.set(tgUser, { stage: 'detail', market });
   persist();
   const lines = [
     `📊 ${specTitle(market.resolution_rule_spec)}`,
-    `出单人: ${makerLabel(market)}`,
-    `${fmtDeadline(market.deadline)} · 已 ${market.bettor_count || 0} 人押 · maker stake ${market.maker_stake_kas ?? '?'} KAS`,
+    t(lang, 'bet_detail_maker', { maker: makerLabel(market) }),
+    t(lang, 'bet_detail_deadline_count', { deadline: fmtDeadline(market.deadline, lang), count: market.bettor_count || 0, stake: market.maker_stake_kas ?? '?' }),
   ];
   const _crit = specCriteria(market.resolution_rule_spec);
-  if (_crit) lines.push('', '📋 结算规则:', _crit);
+  if (_crit) lines.push('', t(lang, 'bet_detail_rules_header'), _crit);
   if (market.yes_pool_kas != null && market.no_pool_kas != null) {
     const yp = Number(market.yes_pool_kas).toFixed(4);
     const np = Number(market.no_pool_kas).toFixed(4);
     const ypp = market.yes_implied_prob != null ? (market.yes_implied_prob * 100).toFixed(1) + '%' : '?';
     const npp = market.no_implied_prob != null ? (market.no_implied_prob * 100).toFixed(1) + '%' : '?';
-    lines.push(`押注池分布: YES ${yp} KAS (${ypp})  ·  NO ${np} KAS (${npp})`);
-    lines.push('赔率 = 对方池 / 自方池 (押对越少人, 赢得越多)。');
+    lines.push(t(lang, 'bet_detail_odds', { yp, np, ypp, npp }));
+    lines.push(t(lang, 'bet_detail_odds_explain'));
     // KANet-UI 2026-06-06 #25/L23 Bettor ③ APPROVE r562: 同 detail stage MIN_POT 警告.
     const totalPool = Number(market.yes_pool_kas) + Number(market.no_pool_kas);
     if (totalPool < 100) {
-      lines.push(`⚠ 总池 ${totalPool.toFixed(2)} KAS < 100 KAS, 不到结算门, 押了 deadline 后无法结算。`);
+      lines.push(t(lang, 'bet_detail_low_pool', { total: totalPool.toFixed(2) }));
     }
   }
-  lines.push('', '🔮 由 KANet 去中心化委员预言机按上述规则裁决、链上结算。', '⚠ 押注前请看清【完整结算规则】— 这是判定输赢的唯一依据。', '你押哪边?');
-  return { text: lines.join('\n'), keyboard: _detailKeyboard(market.id) };
+  lines.push('', t(lang, 'bet_detail_oracle'), t(lang, 'bet_detail_warn'), t(lang, 'bet_detail_question'));
+  return { text: lines.join('\n'), keyboard: _detailKeyboard(market.id, lang) };
 }
 
 export function inBetFlow(tgUser) { return sessions.has(tgUser) || pendingPayments.has(tgUser); }
@@ -411,6 +416,14 @@ export function getLinkedAddr(tgUser) {
   return v?.address || null;
 }
 export function listLinkedUsers() { return [...linkedAddrs.entries()].map(([tgUser, v]) => ({ tgUser, ...v })); }
+
+// Language preference store — persisted in _state.json.
+export function setUserLang(tgUser, lang) { userLangs.set(tgUser, lang); persist(); }
+export function getUserLang(tgUser) { return userLangs.get(tgUser) || 'en'; }
+// Auto-detect on first interaction; /lang override calls setUserLang explicitly.
+export function maybeSetLang(tgUser, lang) {
+  if (!userLangs.has(tgUser)) { userLangs.set(tgUser, lang); persist(); }
+}
 
 // broker fee DM 游标 — poller 跨重启续单 (persist 走 debounce, 可接受 250ms 丢失=最多重发一次 DM)
 export function getBrokerFeeTs() { return brokerFeeTs; }
@@ -441,6 +454,7 @@ async function _startBetImpl(tgUser, brokerRelayId) {
   // only at bet-settle (fee attribution to the broker's address), NOT at the display面. brokerRelayId
   // kept in signature (callers pass it) but no longer filters the list. = multi-bot ② 同一呈现.
   void brokerRelayId;
+  const lang = getUserLang(tgUser);
   // Switch to availableMarkets: server-side raw<50 + deadline>+10min + isStructuredSpec + non-commingled.
   // Fixes: /bet was using poolMarkets (no raw<50 guard) → users could select full markets → prep rejected.
   // availableMarkets already exposes protocol_version + resolution_rule_spec (pool.js update 2026-06-29).
@@ -450,7 +464,7 @@ async function _startBetImpl(tgUser, brokerRelayId) {
   const markets = allMarkets.filter(m =>
     m.protocol_version === 'v0.6' || m.protocol_version === 'v0.7'
   );
-  if (!markets.length) { sessions.delete(tgUser); return '现在没有可押注的市场。稍后再来,或 /discover 看看。'; }
+  if (!markets.length) { sessions.delete(tgUser); return t(lang, 'bet_no_markets'); }
   const byCat = {};
   for (const m of markets) { const c = m.category || 'other'; (byCat[c] = byCat[c] || []).push(m); }
   const categories = Object.keys(byCat).sort();
@@ -465,19 +479,19 @@ async function _startBetImpl(tgUser, brokerRelayId) {
   // KANet-UI 2026-06-06 Owner 钦定: 顺序 1.🏆专题 → 2-N.categories (浏览) → 末.🔍搜索 (兜底).
   const entries = [];
   if (worldCupMarkets.length > 0) {
-    menu.push(`🏆 世界杯专题 (${worldCupMarkets.length} 个市场)`);
+    menu.push(`${t(lang, 'bet_worldcup_label')} (${t(lang, 'market_count', { n: worldCupMarkets.length })})`);
     entries.push({ type: 'worldcup', markets: worldCupMarkets });
   }
   for (const cat of categories) {
-    menu.push(`${cat} (${byCat[cat].length} 个市场)`);
+    menu.push(`${cat} (${t(lang, 'market_count', { n: byCat[cat].length })})`);
     entries.push({ type: 'category', cat, markets: byCat[cat] });
   }
-  menu.push('🔍 搜索市场 (回复关键词找)');
+  menu.push(t(lang, 'bet_search_label'));
   entries.push({ type: 'search' });
   sessions.set(tgUser, { stage: 'category', entries });
-  const lines = ['🎲 押注预测市场 — 选(回复编号):', ''];
+  const lines = [t(lang, 'bet_category_title'), ''];
   menu.forEach((label, i) => lines.push(`${i + 1}. ${label}`));
-  lines.push('', '回复数字选项。随时 /start 退出。');
+  lines.push('', t(lang, 'bet_category_footer'));
   return lines.join('\n');
 }
 
@@ -486,34 +500,35 @@ export async function handleReply(tgUser, text, linkedAddr) {
   try { return await _handleReplyImpl(tgUser, text, linkedAddr); } finally { persist(); }
 }
 async function _handleReplyImpl(tgUser, text, linkedAddr) {
+  const lang = getUserLang(tgUser);
   const s = sessions.get(tgUser);
   const raw = (text || '').trim();
   if (!s) {
     const pp = pendingPayments.get(tgUser);
-    if (pp) return `仍在等待你的付款入账:\n金额 ${sompiToKasStr(pp.exact_sompi)} KAS → 地址 ${pp.side_p2sh}\n付款后我会自动确认。/start 取消等待。`;
+    if (pp) return t(lang, 'bet_still_pending', { kas: sompiToKasStr(pp.exact_sompi), addr: pp.side_p2sh });
     return null;
   }
 
   if (s.stage === 'category') {
     const n = parseInt(raw, 10);
     const entry = Number.isFinite(n) && s.entries && s.entries[n - 1];
-    if (!entry) return `请回复有效编号 (1-${s.entries ? s.entries.length : 0})。`;
+    if (!entry) return t(lang, 'bet_invalid_number', { max: s.entries ? s.entries.length : 0 });
     if (entry.type === 'search') {
       s.stage = 'search_input';
-      return '🔍 回复关键词 (= 题干含的字, 比如 "FIFA" / "Bitcoin" / "Mariners")。/start 退出。';
+      return t(lang, 'bet_search_prompt');
     }
     s.stage = 'market';
     s.markets = entry.markets;
-    const head = entry.type === 'worldcup' ? '🏆 世界杯专题' : `📂 ${entry.cat}`;
-    const lines = [`${head} — 选市场(回复编号):`, ''];
-    s.markets.forEach((m, i) => lines.push(`${i + 1}. ${trunc(specTitle(m.resolution_rule_spec), 56)}  · 出单人 ${makerLabel(m)} · ${fmtDeadline(m.deadline)} · ${m.bettor_count || 0} 人已押`));
-    lines.push('', '回复数字选市场(看完整结算规则)。');
+    const head = entry.type === 'worldcup' ? t(lang, 'bet_market_worldcup_head') : `📂 ${entry.cat}`;
+    const lines = [t(lang, 'bet_market_list_head', { head }), ''];
+    s.markets.forEach((m, i) => lines.push(`${i + 1}. ${trunc(specTitle(m.resolution_rule_spec), 56)}  · ${makerLabel(m)} · ${fmtDeadline(m.deadline, lang)} · ${m.bettor_count || 0}`));
+    lines.push('', t(lang, 'bet_market_list_footer'));
     return lines.join('\n');
   }
 
   if (s.stage === 'search_input') {
     const term = raw.trim();
-    if (!term) return '回复关键词 (至少 1 个字)。';
+    if (!term) return t(lang, 'bet_search_prompt');
     // 调 backend ?q= 全文 LIKE NOCASE + 客户端 specIsUsable filter (= Bettor 1要求一致性).
     const r = await api.poolMarkets({ status: 'pending_bettors', limit: 50 });
     const all = (r.json && r.json.markets) || [];
@@ -525,62 +540,62 @@ async function _handleReplyImpl(tgUser, text, linkedAddr) {
       specIsUsable(m.resolution_rule_spec) &&
       String(m.resolution_rule_spec || '').toLowerCase().includes(lowerTerm)
     );
-    if (!matches.length) return `🔍 "${term}" 没找到符合的市场。回复别的关键词, 或 /start 退出后 /bet 看品类。`;
+    if (!matches.length) return t(lang, 'bet_search_none', { term });
     s.stage = 'market'; s.markets = matches;
-    const lines = [`🔍 搜 "${term}" — ${matches.length} 个市场(回复编号):`, ''];
-    matches.forEach((m, i) => lines.push(`${i + 1}. ${trunc(specTitle(m.resolution_rule_spec), 56)}  · 出单人 ${makerLabel(m)} · ${fmtDeadline(m.deadline)} · ${m.bettor_count || 0} 人已押`));
-    lines.push('', '回复数字选市场(看完整结算规则)。');
+    const lines = [t(lang, 'bet_search_head', { term, count: matches.length }), ''];
+    matches.forEach((m, i) => lines.push(`${i + 1}. ${trunc(specTitle(m.resolution_rule_spec), 56)}  · ${makerLabel(m)} · ${fmtDeadline(m.deadline, lang)} · ${m.bettor_count || 0}`));
+    lines.push('', t(lang, 'bet_market_list_footer'));
     return lines.join('\n');
   }
 
   if (s.stage === 'market') {
     const n = parseInt(raw, 10);
     const m = Number.isFinite(n) && s.markets[n - 1];
-    if (!m) return `请回复有效市场编号 (1-${s.markets.length})。`;
+    if (!m) return t(lang, 'bet_invalid_market', { max: s.markets.length });
     // 拉完整记录给精确结算判据 (Bettor r256 finding: 用户押注前须见完整规则+结算源, 否则吞钱风险).
     const dr = await api.poolMarket(m.id);
     const full = (dr.json && (dr.json.market || (dr.json.id ? dr.json : null))) || m;
     s.stage = 'detail'; s.market = full;
     const lines = [
       `📊 ${specTitle(full.resolution_rule_spec)}`,
-      `出单人: ${makerLabel(full)}`,
-      `${fmtDeadline(full.deadline)} · 已 ${full.bettor_count || 0} 人押 · maker stake ${full.maker_stake_kas ?? '?'} KAS`,
+      t(lang, 'bet_detail_maker', { maker: makerLabel(full) }),
+      t(lang, 'bet_detail_deadline_count', { deadline: fmtDeadline(full.deadline, lang), count: full.bettor_count || 0, stake: full.maker_stake_kas ?? '?' }),
     ];
     const _critF = specCriteria(full.resolution_rule_spec);
-    if (_critF) lines.push('', '📋 结算规则:', _critF);
+    if (_critF) lines.push('', t(lang, 'bet_detail_rules_header'), _critF);
     // Bettor r78 ②: 显示池子分布 + 隐含赔率 (= Bettor r70 A 数据底座). pari-mutuel.
     if (full.yes_pool_kas != null && full.no_pool_kas != null) {
       const yp = Number(full.yes_pool_kas).toFixed(4);
       const np = Number(full.no_pool_kas).toFixed(4);
       const ypp = full.yes_implied_prob != null ? (full.yes_implied_prob * 100).toFixed(1) + '%' : '?';
       const npp = full.no_implied_prob != null ? (full.no_implied_prob * 100).toFixed(1) + '%' : '?';
-      lines.push(`押注池分布: YES ${yp} KAS (${ypp})  ·  NO ${np} KAS (${npp})`);
-      lines.push('赔率 = 对方池 / 自方池 (押对越少人, 赢得越多)。');
+      lines.push(t(lang, 'bet_detail_odds', { yp, np, ypp, npp }));
+      lines.push(t(lang, 'bet_detail_odds_explain'));
       // KANet-UI 2026-06-06 #25/L23 (Bettor ③ APPROVE r562 + r219 文案精化): SS L300 钦定 MIN_POT 1e10 sompi
       // = 100 KAS 总池才能结算. <100 = 卡死无法结算 (J2 refund 路由未 ship → 文案不说自动退款).
       const totalPool = Number(full.yes_pool_kas) + Number(full.no_pool_kas);
       if (totalPool < 100) {
-        lines.push(`⚠ 总池 ${totalPool.toFixed(2)} KAS < 100 KAS, 不到结算门, 押了 deadline 后无法结算。`);
+        lines.push(t(lang, 'bet_detail_low_pool', { total: totalPool.toFixed(2) }));
       }
     }
-    lines.push('', '🔮 由 KANet 去中心化委员预言机按上述规则裁决、链上结算。', '⚠ 押注前请看清【完整结算规则】— 这是判定输赢的唯一依据。', '你押哪边?');
-    return { text: lines.join('\n'), keyboard: _detailKeyboard(full.id) };
+    lines.push('', t(lang, 'bet_detail_oracle'), t(lang, 'bet_detail_warn'), t(lang, 'bet_detail_question'));
+    return { text: lines.join('\n'), keyboard: _detailKeyboard(full.id, lang) };
   }
 
   if (s.stage === 'detail') {
     const n = parseInt(raw, 10);
-    if (n !== 1 && n !== 2) return '请回复 1 (YES) 或 2 (NO)。';
+    if (n !== 1 && n !== 2) return t(lang, 'bet_side_invalid');
     s.side = n === 1 ? 'YES' : 'NO'; s.stage = 'amount';
-    return `你选 ${s.side}。回复要押的 KAS 金额(数字), 最低 ${MIN_STAKE_KAS} KAS, 例如 5。`;
+    return t(lang, 'bet_amount_prompt', { side: s.side, min: MIN_STAKE_KAS });
   }
 
   if (s.stage === 'amount') {
     const amt = parseFloat(raw);
-    if (!Number.isFinite(amt) || amt <= 0) return '请回复有效的 KAS 金额(正数)。';
-    if (amt < MIN_STAKE_KAS) return `最低押注 ${MIN_STAKE_KAS} KAS (合约 storage-mass 下限)。请回复更大的金额。`;
+    if (!Number.isFinite(amt) || amt <= 0) return t(lang, 'bet_amount_invalid');
+    if (amt < MIN_STAKE_KAS) return t(lang, 'bet_amount_min', { min: MIN_STAKE_KAS });
     if (!linkedAddr) {
       sessions.delete(tgUser);
-      return '押注前需先绑定你的 Kaspa 地址: /link <你的 kaspatest 地址>。绑定后重新 /bet。';
+      return t(lang, 'bet_amount_no_link');
     }
     s.amount = amt;
     // G4 防资损 C (最后硬门, Bettor r283 LOCK): /prep 出地址前再 check deadline —
@@ -588,13 +603,13 @@ async function _handleReplyImpl(tgUser, text, linkedAddr) {
     const nowSec = Math.floor(Date.now() / 1000);
     if (s.market.deadline && Number(s.market.deadline) - nowSec < DEADLINE_BUFFER_SEC) {
       sessions.delete(tgUser);
-      return `⌛ 这个市场快截止了 (剩 <10 分钟), 转账+入账来不及。请 /bet 选别的市场。`;
+      return t(lang, 'bet_amount_expired');
     }
     const direction = s.side === 'YES' ? 0 : 1;   // PoolSide ctor: 0=YES 1=NO
     const pr = await api.poolRegisterPrep(s.market.id, { linkedAddr, direction, stakeKas: amt });
     if (!pr.ok || !pr.json || !pr.json.side_p2sh || pr.json.exact_stake_sompi == null) {
       sessions.delete(tgUser);
-      return `押注准备失败: ${(pr.json && pr.json.error) || ('HTTP ' + pr.status)}`;
+      return t(lang, 'bet_amount_prep_fail', { error: (pr.json && pr.json.error) || ('HTTP ' + pr.status) });
     }
     s.prep = { side_p2sh: pr.json.side_p2sh, exact_sompi: pr.json.exact_stake_sompi, direction };
     s.stage = 'confirm';
@@ -603,39 +618,34 @@ async function _handleReplyImpl(tgUser, text, linkedAddr) {
     // 地址手抄风险高 → 用 Telegram HTML <code> 包成 monospace + tap-to-copy 块.
     // URI 也用 <code> tap-to-copy (Telegram HTML <a href> 限 http/https/tg, kaspatest: 自定义 scheme 不保险).
     // resolution_rule_spec 可能含 HTML 特殊字符, 必须 escape (HTML mode 整条解析).
-    //
-    // 文案语气 (Owner 看 ed355da 提): 当前合约仍把 stake 烤进 P2SH (= 精确金额硬要求),
-    // 但 Bettor r119/r120/r122 + NWT r119 + J2 r148 三方已收敛方案 (d) committee-attest-totals
-    // = 下版按实际锁入额自动建仓, 多/少都按真值. 排 Phase-2 (② functional PASS 后启动).
-    // 现版仍要求精确, 文案改"建议精确"软化语气 + 加 "下版自动适应实际额" 提示, 不用"必须/铁律".
     const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     const addr = s.prep.side_p2sh;
     const uri = `${addr}?amount=${kas}`;
     return {
       text: [
-        `📝 押注复核 — ${esc(specTitle(s.market.resolution_rule_spec))}`,
-        `方向 ${s.side} · 金额 ${kas} KAS`,
+        t(lang, 'bet_confirm_header', { title: esc(specTitle(s.market.resolution_rule_spec)) }),
+        t(lang, 'bet_confirm_direction', { side: s.side, kas }),
         '',
-        '下一步: <b>从你自己钱包</b>转 KAS 到下面地址 (bot 全程不持钥、不碰你的钱).',
+        t(lang, 'bet_confirm_step'),
         '',
-        `💰 建议金额 (点一下复制): <code>${kas}</code> KAS`,
-        `   = <code>${s.prep.exact_sompi}</code> sompi`,
+        t(lang, 'bet_confirm_amount_label', { kas }),
+        t(lang, 'bet_confirm_sompi', { sompi: s.prep.exact_sompi }),
         '',
-        `📮 地址 (点一下复制):`,
+        t(lang, 'bet_confirm_addr_label'),
         `<code>${addr}</code>`,
         '',
-        `📲 或复制此 URI 粘到钱包 (一键填好地址+金额):`,
+        t(lang, 'bet_confirm_uri_label'),
         `<code>${uri}</code>`,
         '',
-        '⚠ 这地址是为你这一笔单子生成的, 用任意钱包付都行:',
-        '· 最低 <b>1 KAS</b>。低于 1 KAS 不入账, 钱会卡在地址里等 refund。',
-        '· 金额可以高于建议值 — 实际转多少, 仓位就按你转入的金额算。',
-        '建议: 用 tap-to-copy 复制地址, 钱包粘贴再发。',
+        t(lang, 'bet_confirm_warn1'),
+        t(lang, 'bet_confirm_warn2'),
+        t(lang, 'bet_confirm_warn3'),
+        t(lang, 'bet_confirm_tip'),
         '',
-        '· 任意钱包都能付; 但中奖要用你<b>绑定地址</b>的钥匙领取。',
+        t(lang, 'bet_confirm_key_warn'),
         '',
-        `回复 <b>1</b> = 确认转 ${kas} KAS 到这个地址`,
-        '回复 <b>0</b> = 取消',
+        t(lang, 'bet_confirm_prompt', { kas }),
+        t(lang, 'bet_confirm_cancel_hint'),
       ].join('\n'),
       parseMode: 'HTML',
     };
@@ -644,16 +654,16 @@ async function _handleReplyImpl(tgUser, text, linkedAddr) {
   if (s.stage === 'confirm') {
     // Bettor r9 ③ 数字确认: 全流程数字一致 + exact-match 脆弱 (CONFIRM_WORDS 撞「确认了」不命中) 已修.
     // 收兼容老指引: 1 / 确认 / yes / y 都接.
-    const t = raw.toLowerCase();
-    const ok = raw === '1' || raw === '确认' || t === 'yes' || t === 'y';
-    if (!ok) { sessions.delete(tgUser); return '已取消, 未发生任何付款。随时 /bet 重新开始。'; }
+    const rawLc = raw.toLowerCase();
+    const ok = raw === '1' || raw === '确认' || rawLc === 'yes' || rawLc === 'y';
+    if (!ok) { sessions.delete(tgUser); return t(lang, 'bet_confirm_cancelled'); }
     // Bettor r63 ② guard: linkedAddr 缺则别建 pending — 否则 poller confirm 调用 linked_addr 缺 silent fail.
     // 优先从持久 link store 取 (= 抗 bot 重启), 退到 caller 传入的 (= 旧路径兼容).
     const resolvedLinkedAddr = getLinkedAddr(tgUser) || linkedAddr || null;
     if (!resolvedLinkedAddr) {
       sessions.delete(tgUser);
       persistNow();
-      return '⚠ 还没绑定你的 kaspatest 地址 — 请先 /link <你的 kaspatest 地址>, 再 /bet 重来。中奖时需要绑定地址的钥匙领。';
+      return t(lang, 'bet_confirm_no_link');
     }
     const kas = sompiToKasStr(s.prep.exact_sompi);
     const exactPayKas = Number(kas); // prep exact (baked), NOT user s.amount
@@ -673,23 +683,23 @@ async function _handleReplyImpl(tgUser, text, linkedAddr) {
       if (payRes.ok && payRes.json?.ok) {
         sessions.delete(tgUser);
         persistNow();
-        return `✅ 已从托管钱包自动付 ${exactPayKas} KAS。\n等链上确认 (~1-2 分钟)…\n⚠ 托管已发出，取消等待不退款。`;
+        return t(lang, 'bet_autopay_success', { kas: exactPayKas });
       }
       pendingPayments.delete(tgUser); // 付款失败 → delete + fallthrough 手动
     }
     // 手动路径: 非托管 / 余额不足 / auto-pay 失败
     const faucetHint = hasCustodial && walletBal < exactPayKas
-      ? `\n💡 托管余额不足 (${walletBal} KAS)，/faucet 领测试币后重试一键付。` : '';
+      ? t(lang, 'bet_autopay_faucet_hint', { bal: walletBal }) : '';
     pendingPayments.set(tgUser, pendingRecord);
     sessions.delete(tgUser);
     persistNow();  // Bettor r9 F1: 资金关键步同步 flush, 不走 debounce — 250ms 窗口崩 = 监控丢
     return [
-      '✅ 已记录。请现在【从你的钱包】付款:',
-      `金额: ${kas} KAS  (= ${s.prep.exact_sompi} sompi)`,
-      `地址: ${s.prep.side_p2sh}`,
+      t(lang, 'bet_manual_pay_header'),
+      t(lang, 'bet_manual_pay_amount', { kas, sompi: s.prep.exact_sompi }),
+      t(lang, 'bet_manual_pay_addr', { addr: s.prep.side_p2sh }),
       '',
-      '我在盯这个地址的链上到账, 检测到 ≥1 KAS 到账后通知你押注已入账。',
-      '任意 ≥1 KAS 都接受 — 实际仓位按你转入额算。/start 取消等待 (若已付款, 取消不退款)。',
+      t(lang, 'bet_manual_pay_watching'),
+      t(lang, 'bet_manual_pay_min'),
     ].join('\n') + faucetHint;
   }
   return null;

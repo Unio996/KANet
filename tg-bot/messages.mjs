@@ -1,40 +1,46 @@
 // TG bot user-facing text + flow builders. v1.3: builder voice, testnet/MIT, reactive-only.
 // Value/trust steps → the USER acts on-chain via Console/their relay. bot 0 持钥 / 0 execute (J1 S5).
 import { CONFIG } from './config.mjs';
+import { t } from './i18n.mjs';
 
 export const DISCLAIMER = 'testnet-only · MIT 开源 · 不运营主网 · 非投资建议';
 
-export function startMessage() {
+export function startMessage(lang = 'en') {
   // §11 v2 (Owner 终裁 2026-06-27): 22行→6行精简. 详情移 /help. 首次用户+1行 /help 提示.
   // custody 警告保留 1 行(NWT 承重 bar: 不可删/弱化). faucet 数量不硬编.
   // Owner 2026-06-28: 首次用户加 /hot 指针(老用户嵌 5 热榜, 首次用户给指针兜底).
   return [
-    '👋 KANet — 无账户，无许可。',
+    t(lang, 'start_title'),
     '',
-    '① /wallet 钱包   ② /faucet 领币   ③ /bet 押注',
-    '▸ /broker 赚佣金   ▸ /help 全部命令   ▸ /link 绑自己钱包',
+    t(lang, 'start_commands'),
+    t(lang, 'start_commands_extra'),
     '',
-    '🔥 /hot — 看热门市场, 直接押注',
+    t(lang, 'start_hot'),
     '',
-    '⚠ 托管·节点持 key·真钱请 /link 非托管钱包',
-    '→ /help 完整指南',
+    t(lang, 'start_custody_warn'),
+    t(lang, 'start_help'),
   ].join('\n');
 }
 
 // §11 v2 (Owner 终裁 2026-06-27): 老用户极简, 无 /help 提示行. custody 双守行永在.
 // Owner 2026-06-28: 老用户顶部嵌紧凑 5 热榜(标题+池+人数+深链按钮) + /hot 兜底. trending 传 null→无块.
 // Owner 2026-06-28 UX重构: 加赛事聚合卡区 (sportsGroups != null → ⚽ 赛事区), 热榜/新盘双区.
-export function startMessageLinked(addr, custodial = null, trendingMarkets = null, botUsername = null, sportsGroups = null) {
+export function startMessageLinked(addr, custodial = null, trendingMarkets = null, botUsername = null, sportsGroups = null, lang = 'en') {
   const shortAddr = addr.length > 20 ? addr.slice(0, 17) + '…' : addr;
-  const custLabel = custodial === true ? '托管·仅试玩' : custodial === false ? 'key 你掌控' : '托管/非托管';
+  const custLabel = custodial === true
+    ? t(lang, 'start_linked_custodial_label')
+    : custodial === false
+      ? t(lang, 'start_linked_non_custodial_label')
+      : t(lang, 'start_linked_mixed_label');
   const custWarn = custodial === false
-    ? '⚠ 你的地址 key 只你掌控。/wallet 也可生成托管测试钱包。'
-    : '⚠ 托管·节点持 key·真钱请 /link 非托管钱包';
+    ? t(lang, 'start_linked_non_custodial_warn')
+    : t(lang, 'start_linked_custody_warn');
+  const cmdLine = t(lang, 'start_linked_commands');
   const lines = [
-    '👋 KANet · 你已就绪',
+    t(lang, 'start_linked_title'),
     `📍 ${shortAddr}  ${custLabel}`,
     '',
-    '/bet 更多市场 · /faucet 领币 · /wallet 钱包 · /help',
+    cmdLine,
     '',
     custWarn,
   ];
@@ -42,20 +48,20 @@ export function startMessageLinked(addr, custodial = null, trendingMarkets = nul
 
   // 🔥 热榜区 (bettors>=3 真实热度)
   if (trendingMarkets && trendingMarkets.length > 0) {
-    const block = _compactTrendingBlock(trendingMarkets, botUsername);
+    const block = _compactTrendingBlock(trendingMarkets, botUsername, lang);
     lines.splice(2, 0, ...block.lines);  // insert after header, before commands
     buttons.push(...block.buttons);
   } else if (trendingMarkets !== null) {
-    lines.splice(2, 0, '', '🔥 热门市场: 暂无 · /hot 查看', '');
+    lines.splice(2, 0, '', t(lang, 'start_trending_empty'), '');
   }
 
   // ⚽ 赛事聚合卡区 (新盘/冷启动, 信任卡, 无 bettor 门)
-  const sportsBlock = sportsGroups && sportsGroups.length > 0 ? sportsCardBlock(sportsGroups, botUsername) : null;
+  const sportsBlock = sportsGroups && sportsGroups.length > 0 ? sportsCardBlock(sportsGroups, botUsername, lang) : null;
   if (sportsBlock) {
     // 在 commands 行前插赛事区
-    const cmdIdx = lines.indexOf('/bet 更多市场 · /faucet 领币 · /wallet 钱包 · /help');
-    const insertAt = cmdIdx >= 0 ? cmdIdx : lines.length - 2;
-    lines.splice(insertAt, 0, ...sportsBlock.lines);
+    const insertAt = lines.indexOf(cmdLine);
+    const at = insertAt >= 0 ? insertAt : lines.length - 2;
+    lines.splice(at, 0, ...sportsBlock.lines);
     buttons.push(...sportsBlock.buttons);
   }
 
@@ -63,7 +69,7 @@ export function startMessageLinked(addr, custodial = null, trendingMarkets = nul
 }
 
 // Compact 5-market block for /start embed: title+pool+bettors per market, deeplink buttons.
-function _compactTrendingBlock(markets, botUsername) {
+function _compactTrendingBlock(markets, botUsername, lang = 'en') {
   const BOT = botUsername || 'KANET_Broker_bot';
   function parseTitle(raw) { try { const p = JSON.parse(raw); return p.title || raw; } catch { return raw; } }
   // §11 v3: extract per-leg human label from JSON title ("Match — Brazil to win" → "Brazil to win")
@@ -85,7 +91,7 @@ function _compactTrendingBlock(markets, botUsername) {
     const pct = Math.round(m.yes_implied_prob * 100);
     return (pct >= 5 && pct <= 95) ? ` ${pct}%` : '';
   }
-  const lines = ['', '🔥 热门可押市场 — 点下方按钮进入:'];
+  const lines = ['', t(lang, 'trending_header')];
   const buttons = [];
   // Deduplicate card_groups: show once per group
   const seen = new Set();
@@ -114,7 +120,7 @@ function _compactTrendingBlock(markets, botUsername) {
     }
     idx++;
   }
-  lines.push('/hot 看更多市场');
+  lines.push(t(lang, 'trending_more'));
   lines.push('');
   return { lines, buttons };
 }
@@ -134,10 +140,10 @@ export function brokerFeeDmText(ev) {
 
 // KANet-UI 2026-06-28 (Owner 钦定首页赛事聚合卡): 赛事卡区文本+按钮.
 // groups = card_groups endpoint 返 [{card_group_id, event_title, home_team, away_team, legs:[{id,leg_key,kind,label,total_pool_kas,bettor_count,yes_implied_prob}]}]
-export function sportsCardBlock(groups, botUsername) {
+export function sportsCardBlock(groups, botUsername, lang = 'en') {
   if (!groups || groups.length === 0) return null;
   const BOT = botUsername || 'KANET_Broker_bot';
-  const lines = ['', '⚽ 赛事押注', '按下方按钮复制深链 → 直接押注 · /hot 热榜'];
+  const lines = ['', t(lang, 'sports_header'), t(lang, 'sports_subheader')];
   const buttons = [];
   for (const g of groups) {
     const teamLine = (g.home_team && g.away_team)
@@ -145,7 +151,7 @@ export function sportsCardBlock(groups, botUsername) {
       : (g.event_title || g.card_group_id || '').slice(0, 30);
     const totalPool = (g.total_pool_kas || 0).toFixed(0);
     const totalBettors = g.total_bettor_count || 0;
-    lines.push(`🏟 ${teamLine} · 💰${totalPool}KAS${totalBettors > 0 ? ` · 👥${totalBettors}人` : ' · 新盘'}`);
+    lines.push(`🏟 ${teamLine} · 💰${totalPool}KAS${totalBettors > 0 ? ` · 👥${totalBettors}人` : ` · ${t(lang, 'sports_new')}` }`);
     const rowBtns = [];
     for (const leg of (g.legs || []).slice(0, 3)) {
       const label = _legLabel(leg);
@@ -224,9 +230,9 @@ export function brokerEarnings(data, nodeIncome = null) {
 // /hot 热门市场 (Owner 热需求 2026-06-27): T5 trending top-N 格式化.
 // markets = trending[]. 返 {text, keyboard} — keyboard = CopyText 深链按钮.
 // 支持 card_group_id 分组: 同一 card_group_id 的盘组成一块显示(非散盘).
-export function hotMarkets(markets, botUsername) {
+export function hotMarkets(markets, botUsername, lang = 'en') {
   if (!markets || !markets.length) {
-    return { text: '暂无热门市场 (市场创建中, 稍后再试)。', keyboard: null };
+    return { text: t(lang, 'hot_empty'), keyboard: null };
   }
   function parseTitle(raw) {
     try { const p = JSON.parse(raw); return p.title || raw; } catch { return raw; }
@@ -268,7 +274,7 @@ export function hotMarkets(markets, botUsername) {
       singles.push(m);
     }
   }
-  const lines = ['🔥 热门市场 Top ' + markets.length + ' · 活跃度+资金加权', ''];
+  const lines = [t(lang, 'hot_title', { n: markets.length }), ''];
   const buttons = [];
   let idx = 1;
   // Card groups
@@ -281,7 +287,7 @@ export function hotMarkets(markets, botUsername) {
     lines.push(`${idx}. ⚽ ${matchHeader} · ${gMarkets.length} 盘`);
     lines.push(`   💰${totalKas.toFixed(0)} KAS · 👥${maxBettors}人${dl ? ' · ' + dl : ''}`);
     // §11 信任卡 (J1 定版 2026-06-28): 全真原语·不超卖·禁写「自动结算/无法作弊/去信任」(Track B 未完成)
-    lines.push('   💰 资金链上 P2SH 锁定 · 规则公开可审计 · 到期自动退');
+    lines.push(`   ${t(lang, 'hot_trust_card')}`);
     for (const m of gMarkets) {
       const label = legLabel(m.title || '', m.leg_key);
       buttons.push([{ text: `🎯 ${label}${probSuffix(m)}`, callback_data: 'bet:market:' + m.id }]);
@@ -301,7 +307,7 @@ export function hotMarkets(markets, botUsername) {
     lines.push('');
     idx++;
   }
-  lines.push('点按钮进市场详情押注 · /bet 全部市场');
+  lines.push(t(lang, 'hot_footer'));
   return { text: lines.join('\n'), keyboard: { inline_keyboard: buttons } };
 }
 

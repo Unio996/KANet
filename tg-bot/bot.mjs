@@ -6,6 +6,7 @@ import { CONFIG, missingConfig, resolveBrokerRelayId } from './config.mjs';
 import * as api from './console-api.mjs';
 import * as M from './messages.mjs';
 import * as PM from './prediction-menu.mjs';
+import { t, detectLang, SUPPORTED_LANGS } from './i18n.mjs';
 
 const missing = missingConfig();
 if (missing.length) { console.error('[tg-bot] missing env:', missing.join(', ')); process.exit(1); }
@@ -48,10 +49,17 @@ const faucetCooldown = new Map();
 // KANet-UI 2026-06-23 — /send 2 步确认的 pending 暂存 (ephemeral; 重启清空 = 安全, 不会误发).
 const pendingSends = new Map(); // tg_user → { to, amount, ts }
 
+// Lang helper: stored pref (set by /lang or auto-detected on first interaction) → fall back to auto-detect.
+function getLang(ctx) { return PM.getUserLang(String(ctx.from.id)); }
+// Auto-detect + persist on first use (non-blocking, uses debounce-persist).
+function initLang(ctx) { PM.maybeSetLang(String(ctx.from.id), detectLang(ctx.from?.language_code)); }
+
 // KANet-UI 2026-06-22 (Owner 实测派修 ②): /start 查 /link 绑定 — 已绑显地址+下一步, 未绑走三步引导。
 // T1 (2026-06-27): 解析 ctx.match payload — t.me/<bot>?start=<market_id> 深链直跳市场详情。
 bot.command('start', async (ctx) => {
   const tgUser = String(ctx.from.id);
+  initLang(ctx);
+  const lang = getLang(ctx);
   PM.exitBetFlow(tgUser);
   // Deep link payload: /start <market_id>
   const payload = (ctx.match || '').trim();
@@ -63,7 +71,7 @@ bot.command('start', async (ctx) => {
     return ctx.reply(reply);
   }
   const addr = PM.getLinkedAddr(tgUser) || linked.get(tgUser)?.address;
-  if (!addr) return ctx.reply(M.startMessage());
+  if (!addr) return ctx.reply(M.startMessage(lang));
   // KANet-UI 2026-06-23 (Bettor 承重 custody 口径): custody-aware /start — 托管钱包(/wallet 生成, 节点持 key)
   // 与非托管(/link 自己地址, key 用户掌控)的警告不可一刀切。查 tg-wallet: 存在且地址==当前绑定 → 托管。
   // 查询失败 → custodial=null (显两类并存警告, 绝不假称"bot 不持 key")。
@@ -79,10 +87,21 @@ bot.command('start', async (ctx) => {
     if (av.ok && av.json?.ok) trending = av.json.markets || [];
     if (cg.ok && cg.json?.ok) sports = cg.json.card_groups || [];
   } catch { /* Console 暂不可达 → 无区块 */ }
-  const startMsg = M.startMessageLinked(addr, custodial, trending, CONFIG.botUsername, sports);
+  const startMsg = M.startMessageLinked(addr, custodial, trending, CONFIG.botUsername, sports, lang);
   return ctx.reply(startMsg.text, { reply_markup: startMsg.keyboard || undefined });
 });
 bot.command('help', (ctx) => ctx.reply(M.help()));
+
+// /lang en|zh — set language preference persistently.
+bot.command('lang', (ctx) => {
+  const tgUser = String(ctx.from.id);
+  const arg = (ctx.match || '').trim().toLowerCase();
+  if (!SUPPORTED_LANGS.includes(arg)) {
+    return ctx.reply(t(PM.getUserLang(tgUser), 'lang_usage'));
+  }
+  PM.setUserLang(tgUser, arg);
+  return ctx.reply(t(arg, arg === 'zh' ? 'lang_set_zh' : 'lang_set_en'));
+});
 
 // KANet-UI 2026-06-23 (Owner 钦定 托管钱包·零门槛玩): /wallet 生成或查看; /balance; /receive。
 // Console 侧托管(持 key/签名), bot 0-key 只调 API。/send 待 Bettor Q3 后加。NO /export (Bettor⑤)。
@@ -257,6 +276,7 @@ bot.callbackQuery(/^mybet:addmore:(.+)$/, async (ctx) => {
 // /start 热门市场按钮 callback — callback_data='bet:market:<id>' → 市场详情+押注按钮.
 bot.callbackQuery(/^bet:market:(.+)$/, async (ctx) => {
   await ctx.answerCallbackQuery();
+  initLang(ctx);
   const reply = await PM.startBetFromMarket(String(ctx.from.id), ctx.match[1]);
   if (typeof reply === 'object' && reply.text) {
     await ctx.reply(reply.text, { reply_markup: reply.keyboard });
@@ -281,9 +301,11 @@ bot.command('discover', (ctx) => ctx.reply('浏览:\n· /bet — 押注预测市
 // /hot (Owner 热需求 2026-06-27): 热门市场 Top5. 换 availableMarkets(raw<50 滤满盘·同 /start 口径).
 // startBetFromMarket guard 是 catch-all (任何入口按钮都过); /hot 源换是额外 UX 保障.
 bot.command('hot', async (ctx) => {
+  initLang(ctx);
+  const lang = getLang(ctx);
   const r = await api.availableMarkets(5);
-  if (!r.ok || !r.json?.ok) return ctx.reply('热门市场加载失败, 稍后再试。');
-  const result = M.hotMarkets(r.json.markets || [], CONFIG.botUsername);
+  if (!r.ok || !r.json?.ok) return ctx.reply(t(lang, 'hot_fail'));
+  const result = M.hotMarkets(r.json.markets || [], CONFIG.botUsername, lang);
   if (result.keyboard) {
     return ctx.reply(result.text, { reply_markup: result.keyboard });
   }
@@ -293,6 +315,8 @@ bot.command('hot', async (ctx) => {
 // S-C menu navigation — plain-text numeric replies advance the bet flow (commands handled above).
 bot.on('message:text', async (ctx) => {
   const tgUser = String(ctx.from.id);
+  initLang(ctx);
+  const lang = getLang(ctx);
   const txt = ctx.message?.text || '';
   if (txt.startsWith('/')) return;            // commands handled by bot.command
   if (PM.inBetFlow(tgUser)) {
@@ -311,11 +335,11 @@ bot.on('message:text', async (ctx) => {
   }
   // Bettor r8 即时止血: 用户输看似押注续单的词 (确认/yes/纯数字), 但本地已无 bet 流程态
   // (bot 重启 / 会话超时), 明示而非甩裸菜单, 避免用户以为「确认」生效付了钱。
-  const t = (txt || '').trim().toLowerCase();
-  if (t === '确认' || t === 'yes' || t === 'y' || /^[0-9]+$/.test(t)) {
-    return ctx.reply('⌛ 这句像是回前次押注流程的话, 但本地会话已不存在(bot 重启或会话过期)。\n之前那笔押注没续上, 也没启动付款监控。请重新 /bet 走一遍。');
+  const tl = (txt || '').trim().toLowerCase();
+  if (tl === '确认' || tl === 'yes' || tl === 'y' || /^[0-9]+$/.test(tl)) {
+    return ctx.reply(t(lang, 'stale_session'));
   }
-  await ctx.reply('用 /help 看命令 · /bet 押注 · /swap 兑换 · /link 绑定地址');
+  await ctx.reply(t(lang, 'generic_help'));
 });
 
 // S1 reactive notification poller — only polls addresses a user explicitly /link'd (opt-in).
