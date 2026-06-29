@@ -160,12 +160,12 @@ function fmtLockedAt(s) {
 //   实证 Owner c9b933 在 pg1ab 有 3 单 (NO 2000 + NO 100 + YES 5) → 旧版列 3 条, 新版 1 block:
 //   YES 5 KAS (1 笔), NO 2100 KAS (2 笔). 一市场 = 一条 block, 不再每笔 1 条. 后端不动.
 //   铁律: 合并显示, 绝不删/清除任何押注行 (后端照样返全部).
-export async function formatMyBets(linkedAddr) {
-  if (!linkedAddr) return '⚠ 还没绑定地址。先 /link <你的 kaspatest 地址>, 再 /mybets 看自己的押注。';
+export async function formatMyBets(linkedAddr, lang = 'en') {
+  if (!linkedAddr) return t(lang, 'mybets_no_link');
   const r = await api.myPositions(linkedAddr);
-  if (!r.ok) return `查询失败: ${r.json?.error || r.status}`;
+  if (!r.ok) return t(lang, 'mybets_fail', { error: r.json?.error || r.status });
   const positions = r.json?.positions || [];
-  if (!positions.length) return '你还没有押注记录。/bet 开始押。';
+  if (!positions.length) return t(lang, 'mybets_empty');
 
   // 按 market_id 分组保序 (Map 按 insertion order)
   const byMarket = new Map();
@@ -221,19 +221,19 @@ export async function formatMyBets(linkedAddr) {
   }
   const netKas = totals.payoutBackTotal - totals.stakeInTotal;
   const netSign = netKas >= 0 ? '+' : '';
-  const lines = [`📋 你的押注 (${positions.length} 笔, ${byMarket.size} 个市场)`];
+  const lines = [t(lang, 'mybets_header', { n: positions.length, m: byMarket.size })];
   // 三个核心数字 (永显):
-  lines.push(`💰 投入总: ${totals.stakeInTotal.toFixed(4)} KAS`);
-  lines.push(`🔁 返回总: ${totals.payoutBackTotal.toFixed(4)} KAS (赢实拿 ${totals.wonKas.toFixed(4)} + 退款 ${totals.refundKas.toFixed(4)})`);
-  lines.push(`📍 在押总: ${totals.stakeOpenTotal.toFixed(4)} KAS (还在系统里的钱)`);
-  lines.push(`📊 净 ${netSign}${netKas.toFixed(4)} KAS  ${netKas >= 0 ? '🎉' : '😞'}`);
+  lines.push(t(lang, 'mybets_total_in', { kas: totals.stakeInTotal.toFixed(4) }));
+  lines.push(t(lang, 'mybets_total_back', { kas: totals.payoutBackTotal.toFixed(4), won: totals.wonKas.toFixed(4), refunded: totals.refundKas.toFixed(4) }));
+  lines.push(t(lang, 'mybets_total_active', { kas: totals.stakeOpenTotal.toFixed(4) }));
+  lines.push(t(lang, 'mybets_net', { sign: netSign, kas: netKas.toFixed(4) }) + `  ${netKas >= 0 ? '🎉' : '😞'}`);
   // 明细分布 (按状态拆):
   const detail = [];
-  if (totals.openCnt > 0)            detail.push(`押注中 ${totals.openCnt} 笔 (${totals.openStake.toFixed(4)} KAS)`);
-  if (totals.awaitingResultCnt > 0)  detail.push(`等开奖 ${totals.awaitingResultCnt} 笔 (${totals.awaitingResultStake.toFixed(4)} KAS)`);
-  if (totals.settledPendingCnt > 0)  detail.push(`待入账 ${totals.settledPendingCnt} 笔 (${totals.settledPendingStake.toFixed(4)} KAS)`);
-  if (totals.lostStakeKas > 0)       detail.push(`已输 ${totals.lostStakeKas.toFixed(4)} KAS`);
-  if (detail.length) lines.push(`明细: ${detail.join(' · ')}`);
+  if (totals.openCnt > 0)            detail.push(t(lang, 'mybets_detail_open', { n: totals.openCnt, kas: totals.openStake.toFixed(4) }));
+  if (totals.awaitingResultCnt > 0)  detail.push(t(lang, 'mybets_detail_awaiting', { n: totals.awaitingResultCnt, kas: totals.awaitingResultStake.toFixed(4) }));
+  if (totals.settledPendingCnt > 0)  detail.push(t(lang, 'mybets_detail_settled_pending', { n: totals.settledPendingCnt, kas: totals.settledPendingStake.toFixed(4) }));
+  if (totals.lostStakeKas > 0)       detail.push(t(lang, 'mybets_detail_lost', { kas: totals.lostStakeKas.toFixed(4) }));
+  if (detail.length) lines.push(t(lang, 'mybets_detail_prefix', { detail: detail.join(' · ') }));
   lines.push('');
 
   for (const [marketId, group] of byMarket) {
@@ -275,18 +275,18 @@ export async function formatMyBets(linkedAddr) {
       const onlyRefund = s.refunded === a.count;
       let statusStr;
       const onlySettledPending = s.settled_pending === a.count;
-      if (onlyWon)        statusStr = `🎉 赢 +${a.actualPayoutSum.toFixed(4)} KAS`;
-      else if (onlyLost)  statusStr = `😞 输 -${a.stakeSum.toFixed(4)} KAS`;
-      else if (onlyRefund) statusStr = `💸 已退款`;
-      else if (onlySettledPending) statusStr = `⚖ 已结算 · 待入账 (链上 settle TX 已上)`;
-      else if (onlyOpen)  statusStr = (sample.deadline_unix && Number(sample.deadline_unix) < Math.floor(Date.now() / 1000)) ? `⏳ 已截止 · 等委员投票出结果` : `📍 已押注 · 截止后开奖`;
-      else                statusStr = `📊 混合 (赢 ${s.won} · 输 ${s.lost} · 等 ${s.open} · 退 ${s.refunded} · 待入账 ${s.settled_pending})`;
-      const cnt = a.count > 1 ? ` (${a.count} 笔)` : '';
+      if (onlyWon)        statusStr = t(lang, 'mybets_status_win', { kas: a.actualPayoutSum.toFixed(4) });
+      else if (onlyLost)  statusStr = t(lang, 'mybets_status_lose', { kas: a.stakeSum.toFixed(4) });
+      else if (onlyRefund) statusStr = t(lang, 'mybets_status_refunded');
+      else if (onlySettledPending) statusStr = t(lang, 'mybets_status_settled_chain');
+      else if (onlyOpen)  statusStr = (sample.deadline_unix && Number(sample.deadline_unix) < Math.floor(Date.now() / 1000)) ? t(lang, 'mybets_status_deadline_vote') : t(lang, 'mybets_status_active');
+      else                statusStr = t(lang, 'mybets_status_mixed', { won: s.won, lost: s.lost, open: s.open, refunded: s.refunded, pending: s.settled_pending });
+      const cnt = a.count > 1 ? t(lang, 'mybets_dir_cnt', { n: a.count }) : '';
       lines.push(`• ${dir} ${a.stakeSum.toFixed(4)} KAS${cnt} · ${statusStr}`);
       // 若赢可拿 = 直接加总每笔 payout_if_win_kas. 后端 endpoint 是 query-time 同池子快照统一算每笔
       // (Bettor r147 实证 + 我 r345 多想一层的 pari-mutuel 反向算同分母 = 数学等价).
       // → 简单加总即正确, 不需要 disclaimer "未来变" (现池就是 query 时的池).
-      if (onlyOpen && a.payoutWin > 0) lines.push(`  若赢可拿 ${a.payoutWin.toFixed(4)} KAS`);
+      if (onlyOpen && a.payoutWin > 0) lines.push(t(lang, 'mybets_if_win', { kas: a.payoutWin.toFixed(4) }));
     }
 
     // 共享 meta (odds + 押注时间 + 截止)
@@ -297,7 +297,7 @@ export async function formatMyBets(linkedAddr) {
     if (firstLocked) {
       const t1 = fmtLockedAt(firstLocked);
       const t2 = lastLocked && lastLocked !== firstLocked ? `..${fmtLockedAt(lastLocked)}` : '';
-      lines.push(`  押注于 ${t1}${t2}`);
+      lines.push(t(lang, 'mybets_placed_at', { time: t1 + t2 }));
     }
     // 截止 (Bettor r86 ② + r91 fix: 用 deadline_unix)
     if (sample.deadline_unix) {
@@ -305,7 +305,7 @@ export async function formatMyBets(linkedAddr) {
       if (!Number.isNaN(+d)) {
         const pad = n => n < 10 ? '0' + n : '' + n;
         const ymd = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-        lines.push(`  截止 ${ymd} · 开奖后自动结算到账绑定地址`);
+        lines.push(t(lang, 'mybets_deadline', { deadline: ymd }));
       }
     }
     // KANet-UI 2026-06-06 Owner 实证: P1.1 ship 的"看怎么定的" URL = 127.0.0.1 局内网, 用户外部点不开
@@ -318,7 +318,7 @@ export async function formatMyBets(linkedAddr) {
 // InlineKeyboard 显在 /mybets 消息下. callbackQuery handler 收 'mybet:addmore:<id>' →
 // 直接进该 market 的押注 flow (= 跳过 stage0/1 类目选 + 市场选, 直接 stage='detail').
 // Bettor r143/r144 (Owner P0): 按 market_id 去重 — 每市场 1 个按钮 (原每笔 1 个 = Owner 看着重复).
-export async function buildMyBetsKeyboard(linkedAddr) {
+export async function buildMyBetsKeyboard(linkedAddr, lang = 'en') {
   if (!linkedAddr) return [];
   const r = await api.myPositions(linkedAddr);
   if (!r.ok) return [];
@@ -332,9 +332,10 @@ export async function buildMyBetsKeyboard(linkedAddr) {
     if (p.deadline && p.deadline < now) continue;
     if (seenMarkets.has(p.market_id)) continue;     // 已加过这市场, 跳
     seenMarkets.add(p.market_id);
+    const title = (p.question || p.market_id).slice(0, 30);
     buttons.push({
       market_id: p.market_id,
-      label: `➕ 加注/反手: ${(p.question || p.market_id).slice(0, 30)}`,
+      label: t(lang, 'mybets_addmore', { title }),
       callback_data: `mybet:addmore:${p.market_id}`,
     });
   }
