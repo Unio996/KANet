@@ -460,6 +460,16 @@ owner=J1（guest/prover/gate-build/B1 layout）+ J2（settler wire/builder/B2）
 - **🔑 健康对抗记录（元教训）**：Bettor 提 vacuous workaround「caller-fed witness gate P2SH ==」→ J2 verify-value-source 当场兜住（caller-fed=可控·删 concat=删绑定=vacuous）→ Bettor 大方收回。**非-vacuous 本质=reconstruct**（journal_hash=f(baked bets_root,state winner,payout_root)·绑 payout_root 防 payout-vacuous·cov_id 加固非替代）。= Bettor 疲劳/赶进度时仍会自提 caller-fed 捷径，队友兜=健康（同记忆 [[feedback-relay-blindsign-taxonomy-key-auth-vs-condition-endorse]]）。
 - owner=J1(silverc fix)+J2(settler 全 ready)+KANet-UI(operator/部署)；协调/co-verify/止损/口径=Bettor。复盘 `docs/2026-06-28-zk-settle-pivot-retrospective.md`。
 
+### 🎉🎯 interim B 真盘完整 ZK 结算 e2e 达成（2026-06-29 ~00:47Z·Owner 钦定"干"→真盘端到端全链上 LAND·三 vantage co-verify PASS）
+**止损后 Owner 点醒「赢家自取早有解（cascade-convert-split-spec self-claim·我大白话"发钱"误导）」→ interim B（ZK 算账 + 现有委员 close_attest 锚 + 赢家自取·避开纯 ZK 自锚的 OP_PICK 编译器墙）→ 真盘 bh01w 端到端全链上 LAND。**
+- **6 步全 LANDED（三 vantage：KANet-UI :17210 + J2 :3200 + Bettor :3200/暂代 NWT·守恒 EXACT）**：① 真押注 YES50(e72d8e7e)+NO30(4a355a77) ② ZK 算 payout_root `9bfb3c87`(三方对死) ③ 委员 4-of-5 真 attest(excludePks 排 bettor) ④ consolidate ShardLeaf 8e9→PayoutShard `71000bb2`(守恒 8.02e9) ⑤ close_attest 委员锚 payoutRoot 9bfb3c87 `106f8326`(continuation pqg4gvyw·closed=1) ⑥ **赢家自取 `abbefe70`·winner e72d8e7e(qrnjmrn74z)领 8e9=80KAS**(seed 0.02e9 留·守恒分毫不差)。
+- **claim-merkle-binding（最强 co-verify）**：claim LANDED=链共识接受=blake2b(e72d8e7e‖8e9) merkle proof against 9bfb3c87 成立=链共识自证 attested root。
+- **🔑 诚实口径（钉死）**：interim B = ZK 算账(公开可验·脆性算术消失=Owner 转 ZK 核心目的达成)+委员门槛锚(prevention·同现状 bshard·全恶意 4-of-5 能作恶)+**insider-detection**(今晚内部复算·真公开需发 bets-decoder=下个 pass)+赢家自取。**NOT 纯 trustless**(纯 ZK 自锚 prevention=撞 OP_PICK 编译器 bug=下个 pass)。
+- **健康对抗**：Bettor 提 vacuous workaround→J2 兜；Bettor 换帽红队代审(Owner 钦定·NWT 沉默)抓 attack2(detection 前提 bets 明细公开性·今晚 insider)；J1 引 stale 注释(8 siblings)→J2 .sil 实证 depth-10 兜；Bettor 催 stale(indexer lag 误判)→纠(跨节点信 5th vantage)。
+- **Bettor 协调反思**：主动盯反复没到位(NWT 14min/consolidate 11min/多步 build 被动等·催 1 次 stale)·Owner 多次问"卡哪/落没"才动·已纠(bg fallback 每步主动 check·indexer lag 信 5th vantage)。
+- **部署 preserve-check（J1·防反向 sync 灾难）**：interim-B handlers(bshard_payout_claim/close_attest)早在 canonical origin/bshard-m3-deploy·:3300 是 159 commits behind 非 ahead·**无需 push**(否则覆盖 canonical 真 fix)。注释欠债清理等测试间隙。
+- **NEXT（Owner "部署，测试·争分夺秒"）**：部署=确认 canonical 已有 handlers(✅J1 preserve-check)；测试=KANet-UI 建多 fresh 真盘(短 deadline·不同赛事/押注)+ J2 驱 close_attest+claim 复测(半自动)+ Bettor 每盘 co-verify(payout_root 三方对死+守恒+claim-merkle-binding+委员无 bettor)+ **狠压 bug**(测试网成果口径)。下个 pass：silverc OP_PICK fix→纯 ZK 自锚 trustless + bets-decoder 发布(真公开 detection)+ 真链上 4-of-5 attest。
+
 ### ✅ bh01w interim-B 真盘端到端 LAND（2026-06-29 ~00:48Z · OP_PICK 阻断 ZK 全路→止损 interim-B）
 ZK gate-spk binding 撞 silverc OP_PICK off-by-one codegen bug → Bettor 裁定止损 → 走 interim-B（close_attest 委员锚·同 Phase A ozzeu 同款机制）→ 真盘 bh01w ESPN MLB 401815924 BOS 赢 W=0=YES 完整 6 步端到端全 LAND。
 

@@ -34,8 +34,7 @@ export function startMessageLinked(addr, custodial = null, trendingMarkets = nul
     '👋 KANet · 你已就绪',
     `📍 ${shortAddr}  ${custLabel}`,
     '',
-    '▸ /bet 押注   ▸ /faucet 领币   ▸ /wallet 钱包',
-    '▸ /broker 赚佣金   ▸ /help 全部命令',
+    '/bet 更多市场 · /faucet 领币 · /wallet 钱包 · /help',
     '',
     custWarn,
   ];
@@ -54,7 +53,7 @@ export function startMessageLinked(addr, custodial = null, trendingMarkets = nul
   const sportsBlock = sportsGroups && sportsGroups.length > 0 ? sportsCardBlock(sportsGroups, botUsername) : null;
   if (sportsBlock) {
     // 在 commands 行前插赛事区
-    const cmdIdx = lines.indexOf('▸ /bet 押注   ▸ /faucet 领币   ▸ /wallet 钱包');
+    const cmdIdx = lines.indexOf('/bet 更多市场 · /faucet 领币 · /wallet 钱包 · /help');
     const insertAt = cmdIdx >= 0 ? cmdIdx : lines.length - 2;
     lines.splice(insertAt, 0, ...sportsBlock.lines);
     buttons.push(...sportsBlock.buttons);
@@ -86,7 +85,7 @@ function _compactTrendingBlock(markets, botUsername) {
     const pct = Math.round(m.yes_implied_prob * 100);
     return (pct >= 5 && pct <= 95) ? ` ${pct}%` : '';
   }
-  const lines = ['', '🔥 热门市场 Top ' + markets.length];
+  const lines = ['', '🔥 热门可押市场 — 点下方按钮进入:'];
   const buttons = [];
   // Deduplicate card_groups: show once per group
   const seen = new Set();
@@ -96,8 +95,7 @@ function _compactTrendingBlock(markets, botUsername) {
       if (seen.has(m.card_group_id)) {
         // Add this leg's button (sibling leg)
         const label = legButtonLabel(m.title || '', m.leg_key);
-        const shareUrl = `https://t.me/${BOT}?start=${m.id}`;
-        buttons.push([{ text: `🎯 ${label}${probSuffix(m)}`, copy_text: { text: shareUrl } }]);
+        buttons.push([{ text: `🎯 ${label}${probSuffix(m)}`, callback_data: 'bet:market:' + m.id }]);
         continue;
       }
       seen.add(m.card_group_id);
@@ -107,20 +105,16 @@ function _compactTrendingBlock(markets, botUsername) {
         .reduce((s, x) => s + (x.total_pool_kas || 0), 0);
       const firstTitle = parseTitle(m.title || '');
       const matchName = firstTitle.includes(' — ') ? firstTitle.split(' — ')[0].trim() : firstTitle.slice(0, 35);
-      lines.push(`${idx}. ⚽ ${matchName} · ${groupSize}盘 · 💰${totalKas.toFixed(0)}KAS · 👥${Math.max(...markets.filter(x=>x.card_group_id===m.card_group_id).map(x=>x.bettor_count||0))}人`);
       const label = legButtonLabel(m.title || '', m.leg_key);
-      const shareUrl = `https://t.me/${BOT}?start=${m.id}`;
-      buttons.push([{ text: `🎯 ${label}${probSuffix(m)}`, copy_text: { text: shareUrl } }]);
+      buttons.push([{ text: `🎯 ${label}${probSuffix(m)}`, callback_data: 'bet:market:' + m.id }]);
     } else {
       const title = parseTitle(m.title || '');
-      const short = title.length > 35 ? title.slice(0, 33) + '…' : title;
-      lines.push(`${idx}. ${short} · 💰${(m.total_pool_kas||0).toFixed(0)}KAS · 👥${m.bettor_count||0}人`);
-      const shareUrl = `https://t.me/${BOT}?start=${m.id}`;
-      buttons.push([{ text: `🎯 押 #${idx}${probSuffix(m)}`, copy_text: { text: shareUrl } }]);
+      const short = title.length > 22 ? title.slice(0, 20) + '…' : title;
+      buttons.push([{ text: `🎯 ${short}${probSuffix(m)}`, callback_data: 'bet:market:' + m.id }]);
     }
     idx++;
   }
-  lines.push('按下方按钮复制深链 → 直接押注 · /hot 完整榜');
+  lines.push('/hot 看更多市场');
   lines.push('');
   return { lines, buttons };
 }
@@ -156,8 +150,7 @@ export function sportsCardBlock(groups, botUsername) {
     for (const leg of (g.legs || []).slice(0, 3)) {
       const label = _legLabel(leg);
       const prob = _legProb(leg);
-      const url = `https://t.me/${BOT}?start=${leg.id}`;
-      rowBtns.push({ text: `${label}${prob}`, copy_text: { text: url } });
+      rowBtns.push({ text: `${label}${prob}`, callback_data: 'bet:market:' + leg.id });
     }
     if (rowBtns.length) buttons.push(rowBtns);
   }
@@ -291,8 +284,7 @@ export function hotMarkets(markets, botUsername) {
     lines.push('   💰 资金链上 P2SH 锁定 · 规则公开可审计 · 到期自动退');
     for (const m of gMarkets) {
       const label = legLabel(m.title || '', m.leg_key);
-      const shareUrl = `https://t.me/${BOT}?start=${m.id}`;
-      buttons.push([{ text: `🎯 ${label}${probSuffix(m)}`, copy_text: { text: shareUrl } }]);
+      buttons.push([{ text: `🎯 ${label}${probSuffix(m)}`, callback_data: 'bet:market:' + m.id }]);
     }
     lines.push('');
     idx++;
@@ -305,12 +297,11 @@ export function hotMarkets(markets, botUsername) {
     const prob = probSuffix(m);
     lines.push(`${idx}. ${cat} ${short}`);
     lines.push(`   💰${(m.total_pool_kas || 0).toFixed(0)} KAS · 👥${m.bettor_count || 0}人${prob ? ' · YES' + prob : ''}`);
-    const shareUrl = `https://t.me/${BOT}?start=${m.id}`;
-    buttons.push([{ text: `🎯 押 #${idx} ${short.slice(0, 20)}${prob}`, copy_text: { text: shareUrl } }]);
+    buttons.push([{ text: `🎯 押 #${idx} ${short.slice(0, 20)}${prob}`, callback_data: 'bet:market:' + m.id }]);
     lines.push('');
     idx++;
   }
-  lines.push('点按钮复制深链 → 转给朋友/自己打开直接押注');
+  lines.push('点按钮进市场详情押注 · /bet 全部市场');
   return { text: lines.join('\n'), keyboard: { inline_keyboard: buttons } };
 }
 

@@ -344,6 +344,14 @@ function _shareKeyboard(marketId) {
   const shareUrl = `https://t.me/${CONFIG.botUsername}?start=${marketId}`;
   return { inline_keyboard: [[{ text: '🔗 分享此市场', copy_text: { text: shareUrl } }]] };
 }
+// YES/NO 选边 + 分享 keyboard (详情页用).
+function _detailKeyboard(marketId) {
+  const shareUrl = `https://t.me/${CONFIG.botUsername}?start=${marketId}`;
+  return { inline_keyboard: [
+    [{ text: '🟢 押 YES', callback_data: 'bet:side:1' }, { text: '🔴 押 NO', callback_data: 'bet:side:2' }],
+    [{ text: '🔗 分享此市场', copy_text: { text: shareUrl } }],
+  ]};
+}
 
 export async function startBetFromMarket(tgUser, marketId) {
   const dr = await api.poolMarket(marketId);
@@ -376,8 +384,8 @@ export async function startBetFromMarket(tgUser, marketId) {
       lines.push(`⚠ 总池 ${totalPool.toFixed(2)} KAS < 100 KAS, 不到结算门, 押了 deadline 后无法结算。`);
     }
   }
-  lines.push('', '🔮 由 KANet 去中心化委员预言机按上述规则裁决、链上结算。', '⚠ 押注前请看清【完整结算规则】— 这是判定输赢的唯一依据。', '你押哪边?  回复 1 = YES   ·   2 = NO');
-  return { text: lines.join('\n'), keyboard: _shareKeyboard(market.id) };
+  lines.push('', '🔮 由 KANet 去中心化委员预言机按上述规则裁决、链上结算。', '⚠ 押注前请看清【完整结算规则】— 这是判定输赢的唯一依据。', '你押哪边?');
+  return { text: lines.join('\n'), keyboard: _detailKeyboard(market.id) };
 }
 
 export function inBetFlow(tgUser) { return sessions.has(tgUser) || pendingPayments.has(tgUser); }
@@ -556,8 +564,8 @@ async function _handleReplyImpl(tgUser, text, linkedAddr) {
         lines.push(`⚠ 总池 ${totalPool.toFixed(2)} KAS < 100 KAS, 不到结算门, 押了 deadline 后无法结算。`);
       }
     }
-    lines.push('', '🔮 由 KANet 去中心化委员预言机按上述规则裁决、链上结算。', '⚠ 押注前请看清【完整结算规则】— 这是判定输赢的唯一依据。', '你押哪边?  回复 1 = YES   ·   2 = NO');
-    return { text: lines.join('\n'), keyboard: _shareKeyboard(full.id) };
+    lines.push('', '🔮 由 KANet 去中心化委员预言机按上述规则裁决、链上结算。', '⚠ 押注前请看清【完整结算规则】— 这是判定输赢的唯一依据。', '你押哪边?');
+    return { text: lines.join('\n'), keyboard: _detailKeyboard(full.id) };
   }
 
   if (s.stage === 'detail') {

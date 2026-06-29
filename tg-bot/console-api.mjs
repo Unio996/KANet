@@ -73,6 +73,12 @@ export function poolMarket(id) {
 export function trendingMarkets(limit = 5) {
   return req('GET', `/api/pool/markets/trending?limit=${limit}`);
 }
+// 可押市场 (Bettor 2026-06-29): usable+有空位(<50 raw)+deadline>+10min, 无活跃人数门.
+// 区别 trendingMarkets(>=3真人活跃门). 用于 /start 首页展示"能押的盘".
+// 返 { ok, count, markets:[{id,title,bettor_count,total_pool_kas,...}] }
+export function availableMarkets(limit = 8) {
+  return req('GET', `/api/pool/markets/available?limit=${limit}`);
+}
 // 赛事聚合卡 (Owner 2026-06-28 首页视觉重构): 散盘按 card_group_id 聚成赛事卡.
 // 返 { ok, card_groups:[{ card_group_id, event_title, home_team, away_team, legs:[...] }] }
 export function cardGroups(limit = 8) {

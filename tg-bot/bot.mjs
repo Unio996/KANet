@@ -72,11 +72,11 @@ bot.command('start', async (ctx) => {
     const w = await api.tgWalletGet(tgUser);
     if (w.ok && w.json?.ok) custodial = !!(w.json.exists && w.json.address === addr);
   } catch { /* Console 暂不可达 → null → 中性 custody 警告 */ }
-  // Owner 2026-06-28 UX重构: 热榜(bettors>=3) + 赛事聚合卡(新盘/冷启动) 并联拉取.
+  // Bettor 2026-06-29: 首页从"热榜(>=3真人)"换"可押市场(usable+有空位)": 用户要能押的盘不是最热的盘.
   let trending = null, sports = null;
   try {
-    const [tr, cg] = await Promise.all([api.trendingMarkets(5), api.cardGroups(5)]);
-    if (tr.ok && tr.json?.ok) trending = tr.json.trending || [];
+    const [av, cg] = await Promise.all([api.availableMarkets(8), api.cardGroups(5)]);
+    if (av.ok && av.json?.ok) trending = av.json.markets || [];
     if (cg.ok && cg.json?.ok) sports = cg.json.card_groups || [];
   } catch { /* Console 暂不可达 → 无区块 */ }
   const startMsg = M.startMessageLinked(addr, custodial, trending, CONFIG.botUsername, sports);
@@ -250,6 +250,29 @@ bot.callbackQuery(/^mybet:addmore:(.+)$/, async (ctx) => {
   if (typeof reply === 'object' && reply.text) {
     await ctx.reply(reply.text, { reply_markup: reply.keyboard });
   } else {
+    await ctx.reply(reply);
+  }
+});
+
+// /start 热门市场按钮 callback — callback_data='bet:market:<id>' → 市场详情+押注按钮.
+bot.callbackQuery(/^bet:market:(.+)$/, async (ctx) => {
+  await ctx.answerCallbackQuery();
+  const reply = await PM.startBetFromMarket(String(ctx.from.id), ctx.match[1]);
+  if (typeof reply === 'object' && reply.text) {
+    await ctx.reply(reply.text, { reply_markup: reply.keyboard });
+  } else {
+    await ctx.reply(reply);
+  }
+});
+
+// 详情页 YES/NO 押注按钮 callback — callback_data='bet:side:1'(YES)/'bet:side:2'(NO) → 复用 handleReply 进金额输入流程.
+bot.callbackQuery(/^bet:side:(1|2)$/, async (ctx) => {
+  await ctx.answerCallbackQuery();
+  const tgUser = String(ctx.from.id);
+  const reply = await PM.handleReply(tgUser, ctx.match[1], PM.getLinkedAddr(tgUser));
+  if (typeof reply === 'object' && reply.text) {
+    await ctx.reply(reply.text, { reply_markup: reply.keyboard });
+  } else if (reply) {
     await ctx.reply(reply);
   }
 });

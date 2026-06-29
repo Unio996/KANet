@@ -8,10 +8,12 @@ bh01w（真盘·真押注 YES 5e9 + NO 3e9 = 8e9 在 ShardLeaf·完好·verdict 
 ZK 算 payout_root（已三方对死 9bfb3c87）→ 现有 bshard 委员 close_attest 锚 → 赢家自取（claim builder 现成）。
 **避开** 纯-ZK 自锚的 gate-spk binding（撞 silverscript OP_PICK 编译器墙·下个 pass）。
 
-## 2. 信任模型（诚实·精确·报 Owner 照此·J1 红队 + Bettor 钉死）
-- **on-chain prevention = 委员 4-of-5 门槛**（close_attest .sil 只验 4-of-5 distinct 委员签 + committee_hash·**不验 payout_root 对不对**）= **同 Phase A 信任级**（driver-side / 委员门槛）。
-- **ZK 的价值 = ① 消脆性算术**（payout 算术从链上 covenant 搬进 ZK·根除 dup-address/sighash/NUM2BIN）**② 公开可验 detection**：payout_root 9bfb3c87 任何人能独立复算（groth16 over 公开 bets → 对 root）·**委员若锚假根（链上 != 9bfb3c87）= 公开可检测·当场抓**。= detection（事后公开审）·**非 on-chain prevention**。
-- **🔴 绝不 claim**：纯 ZK 全 trustless / payout 链上 ZK-enforced。**那是纯-ZK 自锚（gate-spk binding）= 下个 pass**。interim B = **ZK 算账 + 委员锚（门槛 prevention）+ 公开可验（detection）+ 赢家自取**。
+## 2. 信任模型（诚实·精确·报 Owner 照此·J1 红队 + Bettor 钉死 + J2 精化 23:09）
+**两层·分清"链上"vs"委员级"load-bearing**：
+- **prevention = 诚实委员多数 each-enforce（committee-level load-bearing）**：close_attest .sil **链上**只验 4-of-5 distinct 签 + committee_hash（不验 payout_root 内容）→ **链上**不挡假根；但**委员级**现有 enforce（命门③·pool-shard-settle L120）**每委员各 re-derive payoutRoot（judgeLine+computePariMutuelPayout）才签·不签任意 root** = 真 prevention（要偷必 ≥4 委员合谋·连诚实多数都没）。= **同 Phase A 信任级**（委员门槛）。
+  - **interim B 改进**：委员 enforce 从【脆性链上算术 re-derive】升级到【ZK 公开可验】（委员额外验 ZK receipt·账由 ZK 证非各自脆性重算）。
+- **detection = 公开复算（deterrent / accountability·非 fund-recovery 保证）**：payout_root 9bfb3c87 任何人独立复算（groth16 over 公开 on-chain bets）→ 委员若合谋锚假根 = **公开可检测当场抓**。⚠ **精确**：detection 是【事后公开审计 + 威慑 + 快抓可拦 claim】·**若 ≥4 委员合谋 + 赢家抢在 detection 前 claim → 钱已走·detection 只能事后问责**（非保证追回）。∴ detection **强化**信任（旧版委员算 payout 无 ZK·锚假无法公开抓；interim B 锚假公开可抓）·但**安全根仍是委员门槛 prevention**。
+- **🔴 绝不 claim**：纯 ZK 全 trustless / payout 链上 ZK-enforced prevention。**那是纯-ZK 自锚（gate-spk binding·链上 load-bearing）= 下个 pass**。interim B = **ZK 算账（消脆性算术·公开可验）+ 诚实委员多数 enforce 锚（门槛 prevention·同 Phase A）+ 公开 detection（deterrent）+ 赢家自取**。
 
 ## 3. 🔴 真 load-bearing 兜底 = 公开 detection（Bettor 精确化·22:58·我接受）
 > ⚠ **精确（红队纠正·我原稿把'委员盲签'当 load-bearing 是错的）**：close_attest .sil **链上只验 4-of-5 委员签 + merkle·不验 payout_root 内容** → 委员"独立验 ZK"在【链上】**NOT load-bearing**（链上挡不住委员锚假根）。
