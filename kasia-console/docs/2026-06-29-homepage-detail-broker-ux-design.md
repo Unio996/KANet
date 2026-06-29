@@ -110,10 +110,12 @@ DM/bot 面板与 relay 解耦，只认 broker_address。
 
 ### 改动
 
-**新 API 端点（已存在，可复用）**：
-- `GET /api/kanet-broker/bots/status` → 返回各 broker bot 状态（按 broker_address 键）
-- `POST /api/kanet-broker/bots/stop` body `{broker_address}` → 停 bot
-- `POST /api/kanet-broker/bots/reconcile` → 触发多-bot 对齐（审批后立即拉起）
+**新 API 端点（已存在，可复用）** — grep 实证（`kasia-console/src/api/kanet-broker.js`）：
+- L374: `GET /api/kanet-broker/bots/status` → 返回各 broker bot 状态（按 broker_address 键）
+- L379: `POST /api/kanet-broker/bots/stop` body `{broker_address}` → 停 bot
+- L368: `POST /api/kanet-broker/bots/reconcile` → 触发多-bot 对齐（审批后立即拉起）
+
+> NWT 验：`grep -n "bots/status\|bots/stop\|bots/reconcile" kasia-console/src/api/kanet-broker.js`
 
 **broker-home.eta JS 改动**：
 
