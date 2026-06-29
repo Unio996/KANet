@@ -32,6 +32,18 @@
       </div>
     </div>
 
+    <!-- 去 TG 押注主 CTA (Owner UX 主线·用户看懂市场后的就地下单入口·仅未结算+有深链时显) -->
+    <div x-show="!isSettled() && tgBetLink" class="mb-4 rounded-lg px-4 py-3 bg-brand-500 text-white flex items-center justify-between gap-3">
+      <div>
+        <div class="text-sm font-medium">去 TG 押注 →</div>
+        <div class="text-[11px] opacity-75 mt-0.5 font-mono truncate" x-text="tgBetLink || ''"></div>
+      </div>
+      <a :href="tgBetLink" target="_blank" rel="noopener"
+         class="shrink-0 px-4 py-2 bg-white text-brand-600 text-sm font-medium rounded hover:bg-warm-50 transition-colors">
+        立即押注
+      </a>
+    </div>
+
     <!-- KANet-UI 2026-06-22 值分成收口 chain-truth reconcile 横幅: v0.7 bshard 池经链上 close+claim 已结算,
          但 DB 因 settler 把 bshard 押注误读成 0-bet → 退了 maker 本金 → protocol_status='refunded'.
          页头已按链上真相显 '已结算'; 此横幅诚实交代分歧 (NO TX NO TRUTH). 仅 mismatch 时显. -->
@@ -517,6 +529,7 @@ function poolDetailPage(marketId) {
       error: '',
       _pollTimer: null,
     },
+    tgBetLink: null,        // 去 TG 押注深链 = https://t.me/<bot>?start=<marketId>  (broker.bot_username → onboard/status)
     mapping: null,          // condition_id_mapping row (mirror_only / independent_source) OR null=未映射
     audit: null,            // /api/pool/market/:id/settle-audit (= 证据链 v0.7 全链路, KANet-UI #12 P0.1)
     explorerBase: 'https://explorer-tn12.kaspa.org',   // fallback, audit.explorer_base overrides
@@ -539,7 +552,21 @@ function poolDetailPage(marketId) {
       // KANet-UI 2026-06-07 P0-#2: 加载自家 agent list (= 同 create form 模式)
       try {
         const agResp = await fetch('/api/agent/profile').then(r => r.json()).catch(() => ({}));
-        this.bet.agents = (agResp.agents || agResp || []).filter(a => !a.is_dex_broker);
+        const allRelays = Array.isArray(agResp) ? agResp : (agResp.agents || []);
+        this.bet.agents = allRelays.filter(a => !a.is_dex_broker);
+        // 详情页 TG 押注深链: broker_relay_id → relay.address → onboard/status → bot_username
+        const brokerRelayId = this.market?.broker_relay_id;
+        if (brokerRelayId) {
+          const brokerRelay = allRelays.find(r => r.id === brokerRelayId);
+          if (brokerRelay?.address) {
+            const ob = await fetch('/api/kanet-broker/onboard/status?address=' + encodeURIComponent(brokerRelay.address))
+              .then(r => r.json()).catch(() => ({}));
+            if (ob.ok && ob.bot_username) {
+              const u = ob.bot_username.replace(/^@/, '');
+              this.tgBetLink = 'https://t.me/' + u + '?start=' + encodeURIComponent(this.marketId);
+            }
+          }
+        }
       } catch {}
       // 详情页 #bet 锚跳: /predictions 行点'押 →' 跳进来自动展开
       if (window.location.hash === '#bet') {

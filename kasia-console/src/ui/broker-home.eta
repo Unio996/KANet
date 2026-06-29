@@ -232,27 +232,23 @@
           </div>
         </div>
 
-        <!-- 电报 DM bot 便捷面板 (KANet-UI 2026-06-20, Owner 直令 / Bettor APPROVE option b: Settings 留全局权威, 此处=便捷视图+快捷操作, 同源 API) -->
+        <!-- 电报 DM bot 便捷面板 (地址制·废弃 relay-keyed '设为代表' 按钮·多-bot 模型每 approved broker 自有 bot) -->
         <div class="mt-4 pt-3 border-t border-warm-200">
           <div class="flex items-center justify-between flex-wrap gap-2">
             <div class="text-xs">
               <span class="rh-stat-label">电报 DM bot</span>
               <span class="ml-2" :class="tgBotRunning ? 'text-emerald-600' : 'text-ink-400'" x-text="tgBotRunning ? '● 运行中' : '○ 已停'"></span>
-              <span class="ml-2" :class="isThisBrokerBot ? 'text-brand-600' : 'text-ink-400'"
-                    x-text="isThisBrokerBot ? '✓ DM bot 当前代表本 broker' : (tgBotBrokerId ? 'DM bot 现代表其他 broker' : 'DM bot 未设 broker')"></span>
+              <span class="ml-2 text-[10px]" :class="thisBotRunning ? 'text-emerald-600' : 'text-ink-400'"
+                    x-show="thisBrokerAddress" x-text="thisBotRunning ? '✓ 本 broker bot 运行中' : '○ 本 broker bot 未启动'"></span>
             </div>
             <div class="flex items-center gap-2">
-              <button x-show="!isThisBrokerBot" @click="setBotBroker()" :disabled="tgBotBusy || !agentHasAdapter"
-                      class="px-2 py-1 rounded bg-brand-500 hover:bg-brand-600 disabled:opacity-40 text-white text-[11px] font-medium"
-                      :title="agentHasAdapter ? '把 DM bot 切到本 broker' : '本 broker 无 adapter, 不能当 DM bot broker'">设为 DM bot 的 broker</button>
               <button x-show="!tgBotRunning" @click="toggleBot(true)" :disabled="tgBotBusy"
                       class="px-2 py-1 rounded bg-emerald-500 hover:bg-emerald-600 disabled:opacity-40 text-white text-[11px] font-medium">启动 bot</button>
               <button x-show="tgBotRunning" @click="toggleBot(false)" :disabled="tgBotBusy"
                       class="px-2 py-1 rounded bg-warm-200 hover:bg-warm-300 disabled:opacity-40 text-ink-700 text-[11px] font-medium">停止 bot</button>
             </div>
           </div>
-          <div x-show="!agentHasAdapter" class="text-[10px] text-amber-600 mt-1">⚠ 本 broker 无 adapter, 不能设为 DM bot broker (先在 /agent 页分配 adapter). bot LLM dialog 需 adapter.</div>
-          <div class="text-[10px] text-ink-400 mt-1">节点/账户管理在 <a href="/relays" class="text-brand-600 underline">系统设置</a> 页; 此面板=DM bot 便捷快捷操作 (同源 API).</div>
+          <div class="text-[10px] text-ink-400 mt-1">节点/账户管理在 <a href="/relays" class="text-brand-600 underline">系统设置</a> 页; 此面板=DM bot 便捷快捷操作.</div>
           <div x-show="tgBotMsg" class="text-[10px] text-emerald-600 mt-0.5" x-text="tgBotMsg"></div>
           <div x-show="tgBotError" class="text-[10px] text-red-500 mt-0.5" x-text="tgBotError"></div>
         </div>
@@ -269,14 +265,18 @@
             </div>
             <div class="space-y-1.5">
               <template x-for="m in (markets.pool_markets || []).slice(0, 10)" :key="m.id">
-                <div class="flex items-center justify-between text-xs py-1.5 border-b border-warm-100 last:border-0">
+                <a :href="'/predictions/pool/' + m.id"
+                   class="flex items-center justify-between text-xs py-1.5 border-b border-warm-100 last:border-0 hover:bg-warm-50 cursor-pointer transition-colors no-underline text-inherit">
                   <div class="flex-1 min-w-0">
                     <div class="text-ink-700 truncate" :title="specTitle(m.resolution_rule_spec) || m.id" x-text="(specTitle(m.resolution_rule_spec) || m.id).slice(0, 64)"></div>
                     <div class="text-[10px] text-ink-400 mt-0.5">
                       <span class="uppercase">POOL</span> · <span x-text="m.protocol_status"></span> · stake <span x-text="m.maker_stake_kas ?? '?'"></span> KAS · fee <span x-text="((m.broker_fee_pct ?? 0)/100).toFixed(2)"></span>%
                     </div>
                   </div>
-                </div>
+                  <button @click.stop="copyTgLink(m.id)"
+                          class="ml-2 shrink-0 text-[10px] px-1.5 py-0.5 rounded border border-warm-200 text-ink-400 hover:text-blue-500 hover:border-blue-300"
+                          title="复制 TG 分享链接">TG</button>
+                </a>
               </template>
               <template x-for="o in (markets.retail_dex_orders || []).slice(0, 5)" :key="o.id">
                 <div class="flex items-center justify-between text-xs py-1.5 border-b border-warm-100 last:border-0">
@@ -317,8 +317,13 @@ function brokerHome() {
     // tg-bot/DM 便捷面板 (KANet-UI 2026-06-20, Owner 直令 broker UI 缺 DM 设置 / Bettor APPROVE option b):
     //   Settings 页保全局权威; broker 页此面板=便捷视图+快捷操作, 同源现有 API 不双写真相.
     tgBotBrokerId: '', tgBotStatus: null, tgBotBusy: false, tgBotMsg: '', tgBotError: '',
-    // 本 broker 是不是 DM bot 当前代表的 broker:
-    get isThisBrokerBot() { return !!(this.agent && this.tgBotBrokerId && this.agent.id === this.tgBotBrokerId); },
+    botStatuses: null,  // GET /api/kanet-broker/bots/status → {broker_address: {running, ...}}
+    // 地址制 broker 身份 (onboard.result.broker_address) + 对应 bot 状态
+    get thisBrokerAddress() { return this.onboard?.result?.broker_address || null; },
+    get thisBotRunning() {
+      if (!this.thisBrokerAddress || !this.botStatuses) return false;
+      return !!(this.botStatuses[this.thisBrokerAddress]?.running);
+    },
     // 必改 (Bettor): 只允许有 adapter 的 broker 设为 DM bot broker (否则 bot LLM dialog 调不通 — identity blocker).
     get agentHasAdapter() {
       const a = this.agent; if (!a) return false;
@@ -473,6 +478,21 @@ function brokerHome() {
         const r = await fetch('/api/tg-bot/status');
         this.tgBotStatus = await r.json();
       } catch (e) { this.tgBotStatus = null; }
+      try {
+        const r = await fetch('/api/kanet-broker/bots/status');
+        const j = await r.json();
+        this.botStatuses = j.ok ? (j.bots || j) : null;
+      } catch (e) { this.botStatuses = null; }
+    },
+    copyTgLink(marketId) {
+      const bot = this.onboard?.result?.bot_username;
+      if (!bot) { alert('该 broker 无 TG bot 用户名·请先填写并提交 onboarding'); return; }
+      const username = bot.replace(/^@/, '');
+      const link = 'https://t.me/' + username + '?start=' + encodeURIComponent(marketId);
+      navigator.clipboard.writeText(link).then(() => {
+        this.tgBotMsg = '已复制 TG 分享链接';
+        setTimeout(() => { this.tgBotMsg = ''; }, 2000);
+      }).catch(() => { alert(link); });
     },
     async setBotBroker() {
       const a = this.agent;
