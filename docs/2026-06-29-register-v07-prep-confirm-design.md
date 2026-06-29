@@ -124,3 +124,21 @@ prep(算 side_p2sh+shard_market_id) → [用户付款] → confirm(链上验付�
 3. **auto-roll 正确**: 满 32 自动开新片（非 reject）。
 4. **side_p2sh 落点一致**: prep 返回地址 == bettor 实付地址·confirm 落的 shard == 实际 open 片（非 prep stale）。
 5. **无 50-cap 回归**: 第 51 注不撞 "market full"（撞了=路由没切 v07 滚动）。
+
+## 10. 一键托管押注 auto-pay 层（Owner 2026-06-29 建议·团队对齐·跟 B 捆 fresh 实现·一份活两轨用）
+
+**洞察(J1/J2/Bettor 同)**: 一键托管自动付 = register 流【之上一层】(prep 算地址+精确额 → 托管钱包 auto-pay → confirm 检测付款→register)。**v06(单片)+ B(v07 滚动)同源·一份 auto-pay 活两轨复用**(B 接上=同一套 auto-pay 指到 v07 prep 算的 P2PK 地址)。∴ 跟 B 一起 fresh 会话实现一次搞定两轨·别分开做(重复+可能对不齐)。
+
+**机制(复用 shipped·非新)**: TG 托管 /send 的 `tgWalletSend(tgUserId, to, amountKas)`(console-api.mjs L121·已 smoke 验)。bot confirm 阶段(prediction-menu.mjs ~L645):
+- **托管用户**(有托管钱包+余额够): `tgWalletGet` 查 balance_kas ≥ stakeKas+费用余量 → `tgWalletSend(tgUser, side_p2sh, stakeKas)` **自动付** → poller 独立检测 LANDED → register。**一键·零手动**。
+- **非托管用户**(/link 外部钱包): 留**手动付**(用户自己钱包·Console 不持 key)。
+- 余额不够 → 提示 `/faucet`。
+
+**🔴 J1 no-strand 排序铁律(实现必守·money-path 命门)**:
+1. **prep 先校验**(v06: cap<50 / B: 有 open 片或可 roll) → **通过才** auto-pay。**prep 失败别 auto-pay**(别先扣钱再发现押不了=strand)。
+2. auto-pay **LANDED 才**进 confirm·confirm append **LANDED 才**记 bet(**NO TX NO STATE 两段都守**)。
+3. auto-pay 目标 = **side_p2sh(用户自己的 PoolSide·stake 锁那·settle 可 claim)** → confirm-失败/race-满 也可恢复·**非黑洞**。
+
+**custody 口径(J1 钉·同 B)**: 一键托管自动付 = Console 持用户 key 代付 = **relay-assisted**(= B 的 custody 真名·钱包 UI 已诚实标"⚠托管·节点持 key·真钱请 /link 非托管")。口径不漂·**绝不号称纯 0-custody**。纯 bettor-自签 = follow-up custody-hardening。
+
+**实现归属**: v06 一键 = bot 层 swap(prediction-menu.mjs·KANet-UI 域·手动转→tgWalletSend 转·下游 poller→register 字字不变)。B 一键 = 同层指到 v07 prep 的 P2PK 地址(本 fresh 会话 register-v07 实现时一并接)。J1 co-verify 排序铁律 + custody 口径。
