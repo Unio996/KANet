@@ -3,7 +3,7 @@
 > 按 OIL-v0.3 §8.4 建:**频道=传输层,本 Ledger=状态层。频道滚走,状态活这里。**
 > 协调 agent:Bettor(全执行域 read-only 结构锁)。回写分级:关键决策/关2关3/§11决议必沉淀。
 > **接位文档(`C:\开发过程\…\开发智能体接位\*-接位.md`)= 稳定层,零烤状态;当前进度只读本文件。**
-> 最近刷新:2026-06-28(J2 补线 9 今晚收口残项:FINDING-2 真闭 + 旧5 cancel→revert catch + J2 clean-pass 残项 + Owner 00:55 开干 /start+trending 排除)。
+> 最近刷新:2026-06-29(KANet-UI 补线13 bh01w interim-B 真盘端到端 LAND — consolidate+close_attest+PAYOUT_CLAIM 四方 co-verify PASS)。
 
 ---
 
@@ -459,6 +459,19 @@ owner=J1（guest/prover/gate-build/B1 layout）+ J2（settler wire/builder/B2）
 - **可复用资产（别重造）**：bets_root@**290**（.sil 修后·was 280·加 2B version 前缀）/ attested_winner@53 / gate_tmpl@231 / genesis cov_id 820a6955 / committee `excludePks` 必含 bettor 维（既有只排 maker/broker·J2 补·**production 固化进 sampleAndStoreCommittee**）/ gather 必 `getSidesByShard`（shard 键·非 logical·避 maker 杂质·线8）。
 - **🔑 健康对抗记录（元教训）**：Bettor 提 vacuous workaround「caller-fed witness gate P2SH ==」→ J2 verify-value-source 当场兜住（caller-fed=可控·删 concat=删绑定=vacuous）→ Bettor 大方收回。**非-vacuous 本质=reconstruct**（journal_hash=f(baked bets_root,state winner,payout_root)·绑 payout_root 防 payout-vacuous·cov_id 加固非替代）。= Bettor 疲劳/赶进度时仍会自提 caller-fed 捷径，队友兜=健康（同记忆 [[feedback-relay-blindsign-taxonomy-key-auth-vs-condition-endorse]]）。
 - owner=J1(silverc fix)+J2(settler 全 ready)+KANet-UI(operator/部署)；协调/co-verify/止损/口径=Bettor。复盘 `docs/2026-06-28-zk-settle-pivot-retrospective.md`。
+
+### ✅ bh01w interim-B 真盘端到端 LAND（2026-06-29 ~00:48Z · OP_PICK 阻断 ZK 全路→止损 interim-B）
+ZK gate-spk binding 撞 silverc OP_PICK off-by-one codegen bug → Bettor 裁定止损 → 走 interim-B（close_attest 委员锚·同 Phase A ozzeu 同款机制）→ 真盘 bh01w ESPN MLB 401815924 BOS 赢 W=0=YES 完整 6 步端到端全 LAND。
+
+| 步骤 | tx | 摘要 |
+|---|---|---|
+| phase0 押注 | `04bb1961`(YES 50K)/`c6a1f990`(NO 30K)/`d5e173ce`(maker) | 真押注链上守恒 ✅ |
+| consolidate ShardLeaf→PayoutShard | `71000bb24f41...` | 8.02e9 sompi 守恒 ✅ |
+| close_attest 4-of-5 委员锚 payoutRoot | `106f8326e520...` | payoutRoot=`9bfb3c87` ZK 算三方对死 ✅ |
+| PAYOUT_CLAIM winner 自取 | `abbefe70de6c...` | e72d8e7e 收 80 KAS(8e9) ✅ |
+
+**四方 co-verify PASS**（KANet-UI 5th vantage DB + J1:3300 + J2:3200 indexer + Bettor 独立链验）· 守恒 2e7+8e9=8.02e9 分毫不差。
+**诚实口径**：ZK 算账（公开可验脆性消失）+ 委员门槛锚（同现状 bshard·诚实多数）≠ production-trustless（ZK gate-spk 绑定 gated on OP_PICK codegen fix）。
 
 ---
 
