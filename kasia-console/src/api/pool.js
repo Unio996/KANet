@@ -1978,7 +1978,8 @@ export async function registerPoolRoutes(fastify) {
              pool_markets.spine_p2sh,
              ${honestCountSql('pool_markets.id')} AS bettor_count,
              ${honestStakeSql('pool_markets.id', 0)} AS yes_sompi,
-             ${honestStakeSql('pool_markets.id', 1)} AS no_sompi
+             ${honestStakeSql('pool_markets.id', 1)} AS no_sompi,
+             (SELECT COUNT(*) FROM pool_bettor_sides WHERE market_id = pool_markets.id) AS raw_bettor_count
       FROM pool_markets
       WHERE pool_markets.protocol_status = 'pending_bettors'
         AND pool_markets.protocol_status != 'shard_internal'
@@ -2006,6 +2007,7 @@ export async function registerPoolRoutes(fastify) {
         card_group_id, leg_key,
         _totalPool: totalPool,
         _spineP2sh: r.spine_p2sh,
+        _rawBettorCount: r.raw_bettor_count,
       };
     }).filter((m) => m._totalPool >= minPoolSompi)   // 防刷量: 池太小不上热榜
       .filter((m) => !commingledSpines.has(m._spineP2sh))   // FINDING-2: 排除 commingled spine (J1 单源 helper)
@@ -2014,10 +2016,61 @@ export async function registerPoolRoutes(fastify) {
       //   三端单一源·Bettor r243) = JSON 含非空 title+resolution_criteria+data_source_canonical。镜像盘缺 title/criteria
       //   → false → 源头从热门藏掉。非裸 json_extract (非 JSON spec 会 throw malformed JSON 崩整 query + title 有 fallback 误过滤)。
       .filter((m) => m.bettor_count >= 3)   // Owner 2026-06-28: 0/少真人盘不上首页(bettor_count已排 AutoBetter)
+      .filter((m) => m._rawBettorCount < 50)   // 排链上满盘: pool_bettor_sides raw count(含 AutoBetter=真 covenant 叶)>=50 → register-v06 必拒。J1: cap count 必含 AutoBetter·不能混用 honestCount。
       .sort((a, b) => b.trending_score - a.trending_score)
       .slice(0, limit)
-      .map(({ _totalPool, _spineP2sh, ...m }) => m);
+      .map(({ _totalPool, _spineP2sh, _rawBettorCount, ...m }) => m);
     return reply.send({ ok: true, count: scored.length, score_formula: `bettor_count*${BETTOR_WEIGHT} + total_pool_kas (activity+commitment 加权, 非裸 volume)`, filters: { status: 'pending_bettors', deadline_gt: '+1h', created_lt: '-1h', min_pool_kas: minPoolSompi / 1e8, exclude_commingled: true, exclude_auto_bet: true, min_bettors: 3 }, trending: scored });
+  });
+
+  // GET /api/pool/markets/available?limit=8 — 可押市场 (Bettor 2026-06-29): usable+raw<50+非commingled+deadline>+10min,
+  // 按 total_pool_kas+recency 排, 无活跃人数门 (区别 trending 的 >=3 真人门)。只读展示端点·不碰钱。
+  // raw<50 用 raw COUNT(*) 非 honestCount (J1/Bettor no-strand line: AutoBetter 的 bet 是真 covenant leaf).
+  // 消费方: bot /start 首页 (替换 trending 作为"能押的盘"入口)。
+  fastify.get('/api/pool/markets/available', async (request, reply) => {
+    const q = request.query || {};
+    const limit = Math.min(Math.max(parseInt(q.limit, 10) || 8, 1), 30);
+    const now = Math.floor(Date.now() / 1000);
+    const _cd = new Date((now - 3600) * 1000);
+    const _p = n => String(n).padStart(2, '0');
+    const createdCutoffIso = `${_cd.getFullYear()}-${_p(_cd.getMonth()+1)}-${_p(_cd.getDate())} ${_p(_cd.getHours())}:${_p(_cd.getMinutes())}:${_p(_cd.getSeconds())}`;
+    const { commingledSpineSet } = await import('../lib/pool-commingle-detect.mjs');
+    const commingledSpines = commingledSpineSet(sqlite);
+    const rows = sqlite.prepare(`
+      SELECT pool_markets.id, pool_markets.resolution_rule_spec, pool_markets.category,
+             pool_markets.outcome_side, pool_markets.deadline, pool_markets.maker_stake_amount,
+             pool_markets.spine_p2sh, pool_markets.created_at AS market_created_at,
+             ${honestCountSql('pool_markets.id')} AS bettor_count,
+             ${honestStakeSql('pool_markets.id', 0)} AS yes_sompi,
+             ${honestStakeSql('pool_markets.id', 1)} AS no_sompi,
+             (SELECT COUNT(*) FROM pool_bettor_sides WHERE market_id = pool_markets.id) AS raw_bettor_count
+      FROM pool_markets
+      WHERE pool_markets.protocol_status = 'pending_bettors'
+        AND pool_markets.protocol_status != 'shard_internal'
+        AND pool_markets.deadline > ?
+        AND pool_markets.created_at < ?
+    `).all(now + 600, createdCutoffIso);   // deadline > +10min (用户还来得及押)
+    const available = rows.map((r) => {
+      const makerSompi = r.maker_stake_amount || 0;
+      const makerOnYes = r.outcome_side === 'YES';
+      const yesPool = Number(r.yes_sompi) + (makerOnYes ? makerSompi : 0);
+      const noPool = Number(r.no_sompi) + (!makerOnYes ? makerSompi : 0);
+      const totalPool = yesPool + noPool;
+      return {
+        id: r.id, title: r.resolution_rule_spec, category: r.category, deadline: r.deadline,
+        bettor_count: r.bettor_count, total_pool_kas: totalPool / 1e8,
+        yes_implied_prob: totalPool > 0 ? yesPool / totalPool : null,
+        _totalPool: totalPool, _spineP2sh: r.spine_p2sh,
+        _rawBettorCount: r.raw_bettor_count, _createdAt: r.market_created_at,
+      };
+    })
+      .filter((m) => !commingledSpines.has(m._spineP2sh))
+      .filter((m) => isStructuredSpec(m.title))
+      .filter((m) => m._rawBettorCount < 50)   // has available slots (raw cap — must use raw not honestCount, J1/Bettor no-strand line)
+      .sort((a, b) => (b._totalPool - a._totalPool) || (b._createdAt > a._createdAt ? 1 : -1))
+      .slice(0, limit)
+      .map(({ _totalPool, _spineP2sh, _rawBettorCount, _createdAt, ...m }) => m);
+    return reply.send({ ok: true, count: available.length, markets: available });
   });
 
   // GET /api/pool/markets/card_groups?limit=8 — 赛事聚合卡 (Owner 钦定 UX 首页·J2 后端·2026-06-28).
