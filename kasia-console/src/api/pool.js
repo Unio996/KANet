@@ -2029,7 +2029,7 @@ export async function registerPoolRoutes(fastify) {
   // 消费方: bot /start 首页 (替换 trending 作为"能押的盘"入口)。
   fastify.get('/api/pool/markets/available', async (request, reply) => {
     const q = request.query || {};
-    const limit = Math.min(Math.max(parseInt(q.limit, 10) || 8, 1), 30);
+    const limit = Math.min(Math.max(parseInt(q.limit, 10) || 8, 1), 100);
     const now = Math.floor(Date.now() / 1000);
     const _cd = new Date((now - 3600) * 1000);
     const _p = n => String(n).padStart(2, '0');
@@ -2039,6 +2039,7 @@ export async function registerPoolRoutes(fastify) {
     const rows = sqlite.prepare(`
       SELECT pool_markets.id, pool_markets.resolution_rule_spec, pool_markets.category,
              pool_markets.outcome_side, pool_markets.deadline, pool_markets.maker_stake_amount,
+             pool_markets.protocol_version,
              pool_markets.spine_p2sh, pool_markets.created_at AS market_created_at,
              ${honestCountSql('pool_markets.id')} AS bettor_count,
              ${honestStakeSql('pool_markets.id', 0)} AS yes_sompi,
@@ -2057,7 +2058,8 @@ export async function registerPoolRoutes(fastify) {
       const noPool = Number(r.no_sompi) + (!makerOnYes ? makerSompi : 0);
       const totalPool = yesPool + noPool;
       return {
-        id: r.id, title: r.resolution_rule_spec, category: r.category, deadline: r.deadline,
+        id: r.id, title: r.resolution_rule_spec, resolution_rule_spec: r.resolution_rule_spec,
+        protocol_version: r.protocol_version, category: r.category, deadline: r.deadline,
         bettor_count: r.bettor_count, total_pool_kas: totalPool / 1e8,
         yes_implied_prob: totalPool > 0 ? yesPool / totalPool : null,
         _totalPool: totalPool, _spineP2sh: r.spine_p2sh,

@@ -435,21 +435,14 @@ async function _startBetImpl(tgUser, brokerRelayId) {
   // only at bet-settle (fee attribution to the broker's address), NOT at the display面. brokerRelayId
   // kept in signature (callers pass it) but no longer filters the list. = multi-bot ② 同一呈现.
   void brokerRelayId;
-  const r = await api.poolMarkets({ status: 'pending_bettors', limit: 200 });
-  // Bettor r68 P0 fix: bot 走 register-external (v0.5 only) — v0.6 市场用 register-v06/confirm,
-  // bot 还没接. 不滤会拒 → 用户选中 v0.6 市场 register-external 拒 protocol mismatch = broken path.
-  // 等 bot v0.6 wire 完成再删此过滤.
+  // Switch to availableMarkets: server-side raw<50 + deadline>+10min + isStructuredSpec + non-commingled.
+  // Fixes: /bet was using poolMarkets (no raw<50 guard) → users could select full markets → prep rejected.
+  // availableMarkets already exposes protocol_version + resolution_rule_spec (pool.js update 2026-06-29).
+  const r = await api.availableMarkets(100);
   const allMarkets = (r.json && r.json.markets) || [];
-  // G4 防资损 A: 列表过滤掉 deadline 离现在 <10min 的 market — 给用户足够时间复核+开钱包+转账+register
-  // (Bettor r283 LOCK; Owner 100 KAS 卡因: 选了 deadline 临界 market, 转账期间 deadline 过 confirm 拒, 钱卡 side_p2sh)
-  // DoD #1.3 (Bettor r316): v0.7 markets dual-handled by backend register-v06/{prep,confirm} endpoint
-  // (PoolSide_v07 ctor identical to v0.6, helper switches by version). v0.5 still excluded — needs
-  // separate register-external path. Markets without protocol_version are legacy v0.5.
-  const nowSec = Math.floor(Date.now() / 1000);
+  // Only v0.6/v0.7 — v0.5 needs legacy register-external path; deadline+specIsUsable already server-side.
   const markets = allMarkets.filter(m =>
-    (m.protocol_version === 'v0.6' || m.protocol_version === 'v0.7') &&
-    (!m.deadline || Number(m.deadline) - nowSec > DEADLINE_BUFFER_SEC) &&
-    specIsUsable(m.resolution_rule_spec)   // 2026-06-06 Owner 实证 voo3z 缺 criteria = 用户玩儿毛, 拦
+    m.protocol_version === 'v0.6' || m.protocol_version === 'v0.7'
   );
   if (!markets.length) { sessions.delete(tgUser); return '现在没有可押注的市场。稍后再来,或 /discover 看看。'; }
   const byCat = {};
@@ -657,12 +650,31 @@ async function _handleReplyImpl(tgUser, text, linkedAddr) {
       return '⚠ 还没绑定你的 kaspatest 地址 — 请先 /link <你的 kaspatest 地址>, 再 /bet 重来。中奖时需要绑定地址的钥匙领。';
     }
     const kas = sompiToKasStr(s.prep.exact_sompi);
-    pendingPayments.set(tgUser, {
+    const exactPayKas = Number(kas); // prep exact (baked), NOT user s.amount
+    const pendingRecord = {
       marketId: s.market.id, direction: s.prep.direction, stakeKas: s.amount, linkedAddr: resolvedLinkedAddr,
       side_p2sh: s.prep.side_p2sh, exact_sompi: s.prep.exact_sompi,
       question: s.market.resolution_rule_spec, side: s.side,
       deadline: s.market.deadline || null, since: Date.now(),
-    });
+    };
+    // 托管一键付: 查余额 → 够 → set-pending-first → auto-pay → 失败则 delete + fallthrough
+    const wRes = await api.tgWalletGet(tgUser);
+    const hasCustodial = wRes.ok && wRes.json?.ok && wRes.json.exists;
+    const walletBal = hasCustodial ? (wRes.json.balance_kas ?? 0) : 0;
+    if (hasCustodial && walletBal >= exactPayKas + 0.01) {
+      pendingPayments.set(tgUser, pendingRecord); // set-pending-first (J2+Bettor 加固)
+      const payRes = await api.tgWalletSend(tgUser, s.prep.side_p2sh, exactPayKas);
+      if (payRes.ok && payRes.json?.ok) {
+        sessions.delete(tgUser);
+        persistNow();
+        return `✅ 已从托管钱包自动付 ${exactPayKas} KAS。\n等链上确认 (~1-2 分钟)…\n⚠ 托管已发出，取消等待不退款。`;
+      }
+      pendingPayments.delete(tgUser); // 付款失败 → delete + fallthrough 手动
+    }
+    // 手动路径: 非托管 / 余额不足 / auto-pay 失败
+    const faucetHint = hasCustodial && walletBal < exactPayKas
+      ? `\n💡 托管余额不足 (${walletBal} KAS)，/faucet 领测试币后重试一键付。` : '';
+    pendingPayments.set(tgUser, pendingRecord);
     sessions.delete(tgUser);
     persistNow();  // Bettor r9 F1: 资金关键步同步 flush, 不走 debounce — 250ms 窗口崩 = 监控丢
     return [
@@ -672,7 +684,7 @@ async function _handleReplyImpl(tgUser, text, linkedAddr) {
       '',
       '我在盯这个地址的链上到账, 检测到 ≥1 KAS 到账后通知你押注已入账。',
       '任意 ≥1 KAS 都接受 — 实际仓位按你转入额算。/start 取消等待 (若已付款, 取消不退款)。',
-    ].join('\n');
+    ].join('\n') + faucetHint;
   }
   return null;
 }
