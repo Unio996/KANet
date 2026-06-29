@@ -362,7 +362,7 @@ export async function startBetFromMarket(tgUser, marketId) {
     return '这个市场缺完整结算规则, 不让押 (= 押了你不知道凭什么判输赢)。/bet 选别的。';
   }
   // 满员早拒: inline-keyboard 按钮跨 bot 重启持久存在, 用户可能点旧 /start 里已满盘进来.
-  // 用 raw_bettor_count (≥ honest count); 无该字段时 fallback bettor_count。
+  // raw_bettor_count = raw COUNT(*) 含 AutoBetter (== prep L1524 同源); 缺失 fail-closed → 999.
   const rawCount = dr.json.raw_bettor_count ?? 999; // fail-closed: missing raw → treat as full
   if (rawCount >= 50) {
     return '⚠ 这个市场已满员 (50 人上限)，无法再押。/bet 或 /start 选其他市场。';
