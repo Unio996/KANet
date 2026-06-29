@@ -1823,7 +1823,11 @@ export async function unlockBshardCloseAttest(args) {
     const un = new Transaction({ version: 1, inputs: matched.map(u => ({ previousOutpoint: { transactionId: u.outpoint.transactionId, index: u.outpoint.index }, signatureScript: '', sequence: 0n, sigOpCount: 0, computeBudget: _BSHARD_COMPUTE_BUDGET, utxo: u })), outputs: orderedOut, lockTime: BigInt(lockTime), gas: 0n, subnetworkId: '0000000000000000000000000000000000000000', payload: '' });
     if (!w.committee || w.committee.length === 0) {
       // build-preimage 模式: 返回 canonical un 结构(地址-based, 含 PS output 的 cov_id covenant)供 committee 签 input 0。
+      //   + unSafeJson = un.serializeToSafeJSON() (round-trips covenant+utxo+outpoint) → 跨节点 committee 直接
+      //   sign_input_for_settle{safe_json:true} byte-exact 签同一 un (== submit 重构 un, 无复制 fragility)。
+      //   J1 settler-daemon prereq(2026-06-29): 没它 :3200 canonical build 只返地址-based preimage, daemon 跨节点收 sig 死锁。
       return { ok: true, mode: 'preimage', psContAddress: psContAddr, psInputIdx: 0, payoutCovId: psCovId,
+        unSafeJson: un.serializeToSafeJSON(),
         preimage: {
           version: 1,
           inputs: [{ previousOutpoint: { transactionId: psUtxo.outpoint.transactionId, index: Number(psUtxo.outpoint.index) }, address: psAddrIn, amountSompi: _utxoValue(psUtxo).toString() },
@@ -1889,7 +1893,9 @@ export async function unlockBshardCancelAttest(args) {
     const un = new Transaction({ version: 1, inputs: matched.map(u => ({ previousOutpoint: { transactionId: u.outpoint.transactionId, index: u.outpoint.index }, signatureScript: '', sequence: 0n, sigOpCount: 0, computeBudget: _BSHARD_COMPUTE_BUDGET, utxo: u })), outputs: orderedOut, lockTime: BigInt(lockTime), gas: 0n, subnetworkId: '0000000000000000000000000000000000000000', payload: '' });
     if (!w.committee || w.committee.length === 0) {
       // build-preimage 模式: 返回 canonical un 供 committee 签 input 0(同 close_attest)。
+      //   + unSafeJson = un.serializeToSafeJSON() (镜像 close_attest·跨节点 committee byte-exact 签·daemon prereq)。
       return { ok: true, mode: 'preimage', psContAddress: psContAddr, psInputIdx: 0, payoutCovId: psCovId,
+        unSafeJson: un.serializeToSafeJSON(),
         preimage: {
           version: 1,
           inputs: [{ previousOutpoint: { transactionId: psUtxo.outpoint.transactionId, index: Number(psUtxo.outpoint.index) }, address: psAddrIn, amountSompi: _utxoValue(psUtxo).toString() },
