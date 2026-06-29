@@ -49,10 +49,14 @@
 
 - **prep 付款地址 = shard-无关的中间持有 UTXO**(relay 控制·bettor 付到它·relay 在 confirm fold 时折进选中的 leaf)。非 shard 叶地址(那个 append 时变)·非 v06 PoolSide。**∵ shard-无关 + shard 在 fold 时才选 → 不存在"付到某片然后片满"的 strand**(prep↔confirm 间该片封了·confirm allocate 别的/新片·bettor 付款不受影响)。
 - **confirm = allocate-at-fold·无锁无 TTL**(J1 背书·最简 strand-free): detect 付款到 prep 中间地址 → `allocateForRegister`(此刻选 open 片·满则 roll) → `register_append` 原子折入 leaf → 插 pool_bettor_sides@**实际落的** shard_market_id(非 prep stale)。现成 serialize 够: allocator `UNIQUE(logical,shard_index)` race-lock + single-spend leaf UTXO 天然串行·**无需新锁**。
-- **🔑 custody 决策(J1 交 J2 拍·= confirm funding-input 来源)**: register_append 折 stake 进 leaf(`leaf.value += stake`)·这个增量的 **funding input** 来源定 custody 口径:
-  - **首选(J2 拍)= 真 0-custody**: confirm 直接 spend **bettor 付到 side_p2sh 的那个 UTXO** 作 register_append 的 funding input → bettor 资金直入 leaf·relay 只构造 tx 不经手/不托管。匹配 v06 0-custody 模型·口径可诚实称 0-custody。**前置: J1 covenant 确认 PoolSide/side_p2sh UTXO 可作 register_append 输入被花(covenant 允许)**。
-  - **fallback(若 0-custody covenant 这 sprint 不可行)= 半托管**: bettor 付到 relay 控制的中间 UTXO·relay fold 时折进 leaf。**口径必诚实标"半托管·测试网·relay 经手付款"·绝不宣称纯非托管**(J1 钉: 纯 bettor-direct 是 TODO custody-hardening follow-up·别假装做到)。
-  - **实现时锁**: J1 confirm PoolSide-UTXO-as-append-input 可行性 → 可行走 0-custody·不可行走 fallback 半托管(口径诚实)。两路都 strand-free(allocate-at-confirm)。
+- **🔑 funding-input + custody 决策(J1 纠错后定·= confirm 的真实付款机制)**:
+  - **🔴 J1 纠概念(我原写错·实现前救)**: **PoolSide【不是】bettor 付款地址**——它是 register_append **创建的 dust ticket 输出**(value=dust·State{bettorPk,direction,stake,shardPoolId}=spent-once claim 标记)。**没有"付进 PoolSide"这回事**·PoolSide 是产出不是入口。
+  - **真实 funding 机制**(pool-register-builder L77): register_append 的 funding input 是 **P2PK wallet UTXO**(`bettorFunding:[{outpointTxid,address}]`·relay finds + wallet-signs)·stake 从这个 P2PK UTXO 折进 leaf。
+  - **∴ 正确写法**: **prep 返回一个 P2PK 收款地址**(bettor 的 linked wallet 或 holding P2PK·**shard-无关**·非 PoolSide P2SH) → bettor 付到它 → confirm: 验付款落该 P2PK → allocateForRegister 选当前 open 片 → register_append **用该 P2PK UTXO 作 funding input** 折进 leaf → 插 pool_bettor_sides@实际 shard。§3(shard 在 confirm 选·地址 shard-无关)不变。
+  - **🔴 custody 口径(J1 钉·必诚实)**: 谁签 funding P2PK UTXO 定 custody:
+    - **现机制 = relay wallet-signs**(relay 持 wallet key)→ **relay-assisted / semi-custodial**(relay 在 fold 时碰 bettor 转入的 P2PK)。**测试网决断建议(J1)**: 用此现成 plumbing·最小改能跑。**口径诚实叫 "relay-assisted" 绝不叫 "0-custody"**。
+    - **纯 0-custody = bettor 自签** funding input(需签名 round-trip)= 更难的 **follow-up**(现有 TODO custody-hardening·**别在这 sprint 假装做到**)。
+  - **实现锁**: 用 relay-assisted(relay finds+wallet-signs bettor 付的 P2PK)·口径标 relay-assisted·strand-free(allocate-at-confirm)。纯 0-custody 留 follow-up。
 
 ## 4. State Machine
 ```
