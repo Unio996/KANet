@@ -102,7 +102,13 @@ export function getMarketBets(logicalMarketId, db) {
       'SELECT shard_market_id FROM market_shards WHERE logical_market_id = ? ORDER BY shard_index'
     ).all(logicalMarketId);
     if (shards.length === 0) { rows = []; }
-    else if (shards.length > 1) { multiShard = shards.length; rows = []; }   // 多片 = fold 路·caller 处理
+    else if (shards.length > 1) {
+      // 多片 rolling shard fold-gather (J2 2026-06-30 Phase 1·Owner 钦定装配无限+ZK):
+      //   union 跨全片 getSidesByShard (每注属唯一 shard_market_id·无重叠·nnd1g 实证 52=32+20 distinct overlap=0)。
+      //   settle 需全片 winner 全进 payoutRoot (命门·四源 co-verify Σ各片 winner 无掉片)。multiShard 保留作 info。
+      multiShard = shards.length;
+      rows = shards.flatMap((s) => getSidesByShard(s.shard_market_id, db));
+    }
     else { rows = getSidesByShard(shards[0].shard_market_id, db); }
   } else {
     // v06 anonymous: 押注直接在 logical 键 (保旧·v06 PoolSide 模型独立)。
