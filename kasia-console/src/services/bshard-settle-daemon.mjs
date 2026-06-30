@@ -21,6 +21,7 @@ import { compilePayoutShardRedeem } from '../lib/pool-shard-register.mjs';
 import { fetchEndBlockHashCanonical } from './pool-market-settler-v06.mjs';
 import { judgeLine } from '../lib/judgeline.mjs';
 import { extractStructuredFields } from '../lib/oracle-evidence-extractors.mjs';
+import { makeCtfReader } from '../lib/uma-ctf-reader.mjs';   // #20 UMA: polymarket 盘读链上 CTF 判定 (P1 binding-verified 30/30·Bettor)
 
 const CONSOLE = process.env.SETTLE_DAEMON_CONSOLE_BASE || 'http://127.0.0.1:3200';
 const RPC_URL = process.env.SETTLE_DAEMON_RPC_URL || 'ws://127.0.0.1:17210';
@@ -31,6 +32,11 @@ const FINALITY_BUFFER = 60;   // deadline_daa + buffer 才 ripe (endBlockHash fi
 const TICK_MS = parseInt(process.env.SETTLE_DAEMON_TICK_MS, 10) || 60000;
 const MAX_PER_TICK = parseInt(process.env.SETTLE_DAEMON_MAX_PER_TICK, 10) || 1;   // canary 默认 1
 const ENABLED = process.env.SETTLE_DAEMON_ENABLED === '1';
+// #20 UMA judge: polymarket 盘 winDir 读链上 Polymarket CTF (payoutNumerators/payoutDenominator by conditionId).
+// multi-RPC cross-check (RPC-trust·≥2 源同值才认)·finality (payoutDenominator>0 才 resolved·否则 ABSTAIN fail-closed)。
+const UMA_POLYGON_RPCS = (process.env.UMA_POLYGON_RPCS || 'https://polygon-bor-rpc.publicnode.com,https://polygon.drpc.org,https://1rpc.io/matic').split(',').map((s) => s.trim()).filter(Boolean);
+let _ctfReader = null;
+function ctfReader() { if (!_ctfReader) _ctfReader = makeCtfReader({ rpcs: UMA_POLYGON_RPCS }); return _ctfReader; }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const log = (...a) => console.log('[settle-daemon]', new Date().toISOString().slice(11, 19), ...a);
 
@@ -81,6 +87,16 @@ async function buildPkMap() {
   return _pkMap;
 }
 async function judgeWinDir(market) {
+  // #20 UMA path: polymarket 盘判定走链上 Polymarket CTF (非 HTTP data source·非 gamma price·bonded on-chain truth)。
+  //   conditionId = outcome_condition_id (66-char 0x bytes32·三源 verify-value-source·329/329 pending polymarket 实证)。
+  //   readResolution multi-RPC cross-check + finality(payoutDenominator>0)·未 resolved/异常/不一致 → ABSTAIN → throw skip。
+  if (market.outcome_market_source === 'polymarket') {
+    const conditionId = market.outcome_condition_id;
+    const res = await ctfReader().readResolution(conditionId);
+    if (res.final !== 'YES' && res.final !== 'NO') throw new Error(`UMA judge ABSTAIN: ${res.final} (conditionId ${String(conditionId).slice(0, 12)})`);
+    return res.final === 'YES' ? 0 : 1;   // YES→winDir0 / NO→winDir1 (value-mapping 与 ESPN 一致)
+  }
+  // ESPN/HTTP path (原路·不变): resolution_rule_spec.data_source_canonical = HTTP URL → extract + judgeLine。
   const spec = JSON.parse(market.resolution_rule_spec);
   const raw = await (await fetch(spec.data_source_canonical, { signal: AbortSignal.timeout(30000) })).text();
   const ev = extractStructuredFields(spec.data_source_canonical, raw);
