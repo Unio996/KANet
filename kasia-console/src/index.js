@@ -589,6 +589,11 @@ startOraclePoolScannerCron();
 import { startOraclePoolRenewalCron } from './services/oracle-pool-renewal-cron.mjs';
 startOraclePoolRenewalCron();
 
+// bshard 自治结算 daemon (Owner 2026-06-30 钦定 A·SETTLE_DAEMON_ENABLED=1 才跑, 默认 OFF).
+// canary: MAX_PER_TICK=1, TICK=60s → 验 → ramp。J1 covenant 是真安全网, DB lease = best-effort。
+import { startSettleDaemonCron } from './services/bshard-settle-daemon.mjs';
+startSettleDaemonCron();
+
 // design-v2 (B) broadcaster N-medium-UTXO maintainer (KANet-UI, 880 settle-throughput; Bettor r489b APPROVE).
 // Proactive cron keeps settle broadcasters (local oracle signers + hot seeder maker) topped at N confirmed
 // medium UTXOs → settle sign_req chunks pick the next pre-confirmed UTXO instead of waiting each chunk's
