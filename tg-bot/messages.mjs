@@ -322,6 +322,8 @@ export function swapFlow(broker, lang = 'en') {
   return [
     t(lang, 'swap_title', { name }),
     '',
+    t(lang, 'swap_testnet_note'),
+    '',
     t(lang, 'swap_step1'),
     `   ${addr}`,
     t(lang, 'swap_step2'),
@@ -486,6 +488,7 @@ export function help(lang = 'en') {
     t(lang, 'help_discover'),
     t(lang, 'help_broker'),
     t(lang, 'help_earnings'),
+    t(lang, 'help_lang'),
     '',
     t(lang, 'help_custody_note'),
     t(lang, 'help_custody_1'),

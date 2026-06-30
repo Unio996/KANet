@@ -152,6 +152,7 @@ export const LANGS = {
     help_link: '/link <kaspatest addr> — Bind your own non-custodial address',
     help_faucet: '/faucet — Get testnet KAS (first /wallet or /link)',
     help_swap: '/swap — Exchange KAS ↔ USDT (via broker, on-chain)',
+    help_lang: '/lang en|zh — Switch display language',
     help_bet: '/bet — Place bets on prediction markets',
     help_mybets: '/mybets — View your bets + status',
     help_discover: '/discover — Browse open markets / listings',
@@ -236,7 +237,8 @@ export const LANGS = {
     broker_apply_ok: '✅ Application submitted!\n📍 Broker address: {addr}\n⏳ Status: Pending Owner approval (once approved, KANet auto-manages your bot, shows markets, fees go to your address).\nCheck status: /broker · Token is encrypted, never shown.',
 
     // /swap function (messages.mjs)
-    swap_title: '💱 Exchange KAS ↔ USDT — via broker {name}',
+    swap_title: '💱 Exchange KAS ↔ USDT — via {name}',
+    swap_testnet_note: '⚠ Swap not available on testnet (code tested; available after mainnet launch).',
     swap_step1: '1) From your own wallet, send the KAS you want to exchange on-chain to the broker receive address:',
     swap_step2: '2) The broker will ask for your USDT receive chain + address (reply "use bnb 0x..." etc.), then sends payment on-chain.',
     swap_warn: '⚠ Your funds are under your control at all times: you initiate payment from your own address, bot never touches your funds.',
@@ -479,6 +481,7 @@ export const LANGS = {
     help_link: '/link <kaspatest地址> — 绑定你自己的非托管地址',
     help_faucet: '/faucet — 领测试 KAS（先 /wallet 或 /link）',
     help_swap: '/swap — 兑换 KAS ↔ USDT(经 broker,链上)',
+    help_lang: '/lang en|zh — 切换显示语言',
     help_bet: '/bet — 押注预测市场',
     help_mybets: '/mybets — 看自己的押注 + 状态',
     help_discover: '/discover — 浏览开放挂单 / 市场',
@@ -563,7 +566,8 @@ export const LANGS = {
     broker_apply_ok: '✅ 申请已提交！\n📍 broker 地址: {addr}\n⏳ 状态: 待 Owner 审批 (批准后 KANet 自动托管拉起你的 bot, 对外呈现市场, 带量佣金落你地址)。\n查状态: /broker · token 已加密存储绝不外显。',
 
     // /swap function
-    swap_title: '💱 兑换 KAS ↔ USDT — 经 broker {name}',
+    swap_title: '💱 兑换 KAS ↔ USDT — 经 {name}',
+    swap_testnet_note: '⚠ 测试网暂不开放兑换(功能代码已测试·主网上线后开放)。',
     swap_step1: '1) 从你自己的钱包,把要兑换的 KAS 链上转到 broker 收款地址:',
     swap_step2: '2) broker 会问你 USDT 收哪条链 + 地址(回复 "用 bnb 0x..." 之类),然后链上回款。',
     swap_warn: '⚠ 钱全程你自己链上掌控:你从自己地址发起付款,bot 不经手、碰不到你的钱。',
