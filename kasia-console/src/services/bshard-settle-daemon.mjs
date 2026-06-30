@@ -241,12 +241,13 @@ async function settleOneMarket(marketId) {
   //   🔴 BETTOR 守门铁律1: **纯记录·永不碰结算**——settle 已完成(上方 writeback)·本块吞所有错·绝不阻断 return。
   //   plan.winDir = computeSettlePlan 实际用于结算的权威判定(polymarket→UMA / ESPN→judgeLine)·复用不重判。
   //   our_oracle 当前多为 NULL(领域判 registry 空=路线图)·NWT 滚动 registerDomainJudge 后真对比 materialize。
-  try {
-    if (plan.winDir === 0 || plan.winDir === 1) {
-      const s = await recordShadowJudgment(sqlite, { market, authorityWinDir: plan.winDir, settleTxid: r.closeTxid });
-      if (s.recorded) log(`📒 shadow ${marketId.slice(-8)}: ${s.agree == null ? '∅无独立源(路线图)' : s.agree ? '✓我方一致' : '✗我方分歧'}${s.reason ? ' · ' + s.reason : ''}`);
-    }
-  } catch (e) { log(`📒 shadow ${marketId.slice(-8)} skip (不影响结算): ${String(e?.message || e).slice(0, 80)}`); }
+  //   🟡 J2 forward-looking 守门: **fire-and-forget·不在 settle 路 await**——即便 NWT 域判做慢/挂的网络调用,
+  //   也零拖延结算(record 内部 per-judge timeout 8s 兜底)。把"shadow 永不碰结算"延伸到"永不拖时延"。
+  if (plan.winDir === 0 || plan.winDir === 1) {
+    recordShadowJudgment(sqlite, { market, authorityWinDir: plan.winDir, settleTxid: r.closeTxid })
+      .then((s) => { if (s.recorded) log(`📒 shadow ${marketId.slice(-8)}: ${s.agree == null ? '∅无独立源(路线图)' : s.agree ? '✓我方一致' : '✗我方分歧'}${s.reason ? ' · ' + s.reason : ''}`); })
+      .catch((e) => log(`📒 shadow ${marketId.slice(-8)} skip (不影响结算): ${String(e?.message || e).slice(0, 80)}`));   // 内部已永不throw·belt-and-suspenders
+  }
 
   return { ok: true, closeTxid: r.closeTxid, claims: r.claims };
 }

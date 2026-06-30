@@ -19,6 +19,14 @@
 
 const _domainJudges = [];
 
+// 🟡 J2 forward-looking 守门(域判上线前硬化): 领域判可能做慢/挂的网络调用(抓 crypto 价等)。
+//   per-judge timeout = shadow 不拖慢结算(把 Bettor 铁律1 从"不碰决策"延伸到"不拖时延")。挂→ABSTAIN(记下不阻断)。
+const JUDGE_TIMEOUT_MS = Number(process.env.SHADOW_JUDGE_TIMEOUT_MS) || 8000;
+const _withTimeout = (p, ms) => Promise.race([
+  Promise.resolve(p),
+  new Promise((_, rej) => setTimeout(() => rej(new Error(`judge timeout ${ms}ms`)), ms)),
+]);
+
 /** 注册一个领域判 (NWT 域序滚动调用)。judge.judge(market) 必须用独立源·非市场价(#50)。 */
 export function registerDomainJudge(judge) {
   if (!judge || typeof judge.judge !== 'function' || typeof judge.appliesTo !== 'function' || !judge.id) {
@@ -43,7 +51,7 @@ async function computeOurOracleVerdict(market) {
     try { applies = !!dj.appliesTo(market); } catch { applies = false; }
     if (!applies) continue;
     try {
-      const v = await dj.judge(market);
+      const v = await _withTimeout(dj.judge(market), JUDGE_TIMEOUT_MS);   // 慢/挂 judge → reject → ABSTAIN(不拖结算)
       const verdict = v === 'YES' || v === 'NO' ? v : 'ABSTAIN';
       return { source: dj.id, verdict, windir: _verdictToWindir(verdict) };
     } catch (e) {
