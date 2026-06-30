@@ -183,9 +183,30 @@ export async function consolidateUtxosRelay(opts = {}) {
   return withSendLock(async () => {
     const { entries: rawEntries } = await rpc.getUtxosByAddresses([new Address(address)]);
     if (!rawEntries || rawEntries.length === 0) return { ok: false, reason: 'no_utxos' };
-    const entries = filterPendingUtxos(rawEntries);
+    const entries0 = filterPendingUtxos(rawEntries);
+    // 🔴 #28 (J1 2026-06-30·Owner money-path): defrag 跳过【young UTXO】= 保护还没被 confirm 注册的 bettor 付款。
+    //   根因(Martin w7lcx 实证·三源对死): 一键托管 bettor 付款到 relay 址 → confirm 等 D=20 才认领 → 这窗口内
+    //   defrag(每 40 注触发 _maybeDefrag) consolidate 把那笔 exact-amount UTXO 合并进 best → confirm 按 exact 找不到
+    //   → bet 永注册不上("付了没单")。修: consolidate 只归集 depth≥DEFRAG_MIN_DEPTH 的【老】funding 碎片·跳过 young
+    //   (含 in-flight bet 付款·confirm 取走前保护)。fund-safe-by-construction: 【不合并某 UTXO 永不丢钱】(只留着不动)·
+    //   失败模式仅 defrag 少合并一轮(880-wall 容一轮 skip·young 下轮变老再合并)=benign。复用 checkUtxoLanded 的
+    //   depth 算法(p2sh.mjs L1475·同 D=20 锚·4 级 blockDaaScore fallback)。
+    const DEFRAG_MIN_DEPTH = Number(process.env.DEFRAG_MIN_DEPTH) || 30;
+    let entries;
+    try {
+      const dag = await rpc.getBlockDagInfo();
+      const vdaa = Number(dag.virtualDaaScore);
+      entries = entries0.filter((e) => {
+        const bds = e.blockDaaScore ?? e.utxoEntry?.blockDaaScore ?? e.entry?.blockDaaScore ?? e.entry?.utxoEntry?.blockDaaScore;
+        if (bds == null) return false;                          // 无 blockDaaScore → 不合并(age 未知·安全不碰)
+        return (vdaa - Number(bds)) >= DEFRAG_MIN_DEPTH;        // 只合并 depth≥阈值的老 UTXO; young(含 bet 付款)跳过
+      });
+    } catch (e) {
+      // getBlockDagInfo 失败 → 跳过本轮 consolidate(不冒险合并 young 付款·下轮重试)。
+      return { ok: true, consolidated: false, reason: `daa_unavailable_skip (${String(e?.message || e).slice(0, 60)})`, utxosBefore: entries0.length };
+    }
     if (entries.length < minFragments) {
-      return { ok: true, consolidated: false, reason: 'not_fragmented', utxosBefore: entries.length };
+      return { ok: true, consolidated: false, reason: 'not_fragmented', utxosBefore: entries.length, youngSkipped: entries0.length - entries.length };
     }
     // §5b disjoint regression guard: every input MUST be from this relay's own P2PK address (the
     // query already scopes to it; assert so a future refactor that widens the input set is caught).
