@@ -483,6 +483,17 @@ ZK gate-spk binding 撞 silverc OP_PICK off-by-one codegen bug → Bettor 裁定
 **四方 co-verify PASS**（KANet-UI 5th vantage DB + J1:3300 + J2:3200 indexer + Bettor 独立链验）· 守恒 2e7+8e9=8.02e9 分毫不差。
 **诚实口径**：ZK 算账（公开可验脆性消失）+ 委员门槛锚（同现状 bshard·诚实多数）≠ production-trustless（ZK gate-spk 绑定 gated on OP_PICK codegen fix）。
 
+### ✅ pb73v interim-B ZK settle e2e 第二盘 LAND（2026-06-30 ~04:24Z · 四源 co-verify PASS）
+J2 fresh session 驱·auto-settler 初次集成测试·market pb73v ESPN 401815943 WSH 赢(W=0=YES)·委员 5-of-5。
+- **pool**: consolidate PS 620000000=6.2KAS(6注+0.2seed) @pzf3jm9v close_attest tx=4d0e1ed7 LANDED ✅
+- **winners**: 9f866061(dir0·2KAS) + 248fb1f9(dir0·2KAS) → pari-mutuel 各 3KAS·loser 60e8c735(dir1) 不进树 ✅
+- **claim**: winner1 b81e4445(3KAS→qz0cvcr..u5uyf5k9ky) + winner2(3KAS→248fb1f9 P2PK) 链上 LANDED ✅
+- **守恒**: 3+3.2=6.2(close)→3+3=6(claim)+0.2(seed留) ✅ 四方 co-verify PASS
+- **📌 auto-settler 两 bug(Bettor 记 task·非阻 e2e)**:
+  - ① `verifyClosedLanded` 单发 RPC false-negative(submit+~1s 未确认→false·真相=LANDED)·需 retry/poll
+  - ② claim loop 多-winner 不 thread continuation/nullifier·需修
+- **诚实口径**: J2 driver-driven(手跑·非全自治 daemon)·auto-settler bug 修后才是真自动·e2e 机制 PROVEN
+
 ---
 
 ## 集成 / 部署态(git 真相，2026-06-24 KANet-UI 更新)

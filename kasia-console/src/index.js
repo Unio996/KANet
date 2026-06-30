@@ -585,6 +585,10 @@ startOracleVoterHealthMonitorCron();
 import { startOraclePoolScannerCron } from './services/oracle-pool-chain-scanner-cron.mjs';
 startOraclePoolScannerCron();
 
+// oracle 锁自动续期 (task#13 Bettor 2026-06-30·28h urgency): 1h cron, lock_until_daa 到期前 3M DAA 续 10M.
+import { startOraclePoolRenewalCron } from './services/oracle-pool-renewal-cron.mjs';
+startOraclePoolRenewalCron();
+
 // design-v2 (B) broadcaster N-medium-UTXO maintainer (KANet-UI, 880 settle-throughput; Bettor r489b APPROVE).
 // Proactive cron keeps settle broadcasters (local oracle signers + hot seeder maker) topped at N confirmed
 // medium UTXOs → settle sign_req chunks pick the next pre-confirmed UTXO instead of waiting each chunk's
