@@ -55,8 +55,10 @@ export async function computeSettlePlan(marketId, ctx) {
   // 1. shard-aware bets (排杂质·防 0-bet 误判)
   const { bets, betCount, poolSompi, isBshard, multiShard } = getMarketBets(marketId, db);
   if (!isBshard) return { ok: false, reason: 'non-bshard (v06/v05)·此 settler 只 bshard', isBshard: false };
-  if (multiShard > 0) return { ok: false, reason: `多片 ${multiShard} shards·fold 路 production·此 minimal 单片`, isBshard };
-  if (betCount === 0) return { ok: false, reason: '真 0-bet → refund 路 (非 strand)', isBshard, betCount: 0, degenerate: true };
+  // 多片 rolling shard: getMarketBets 现 fold-gather 跨全片 union (Phase 1·2026-06-30)·bets 含全片注·
+  //   poolSompi=Σ全片·payoutRoot 覆盖全片 winner。consolidate 侧 consolidateAllShards 已逐片折进单 PS (体积有界·
+  //   迭代委员签证路·非 on-chain fold·不撞 9999 SIZE 墙·2026-06-20 pivot)。∴ 不再拒多片。multiShard 仍返作 info。
+  if (betCount === 0) return { ok: false, reason: '真 0-bet → refund 路 (非 strand)', isBshard, betCount: 0, degenerate: true, multiShard };
 
   // 1b. 🔴 cleanliness 闸 (S5 运行时·J1 建议·防 commingled strand·今晚 ioaoc f5bb64c6 34KAS 教训):
   //   v07 bshard 盘若 logical 键也有押注 (v06 PoolSide 路) → commingled → 跳过挂 alert (别 shard-only settle strand logical bet)。
@@ -191,39 +193,96 @@ export async function settleMarketLive(marketId, ctx) {
   if (!landed) { ctx.alert?.(marketId, `close ${closeTxid} 未 verify LANDED (NO TX NO STATE)`); return { ok: false, reason: 'close not landed', closeTxid }; }
 
   // 7. CLAIM per winner (NO-SIG·merkle 授权·round-trip 验 addr)
+  //   #15 fix (2026-06-30·多-winner threaded): 每笔 thread outpoint(closeTxid:0→claim_i:1)+consolidated_pool(-=payout)
+  //   +w-bitmap(set merkle_index bit)·续约 input redeem 经 splicePayoutContinuation·每笔验 winner 实收 + my-splice==handler psContAddress 才 thread 下一笔。
+  //   旧码复用 closeTxid:0 + closedState w=0 每 winner → 第2 winner 花已 spent 的 closeTxid:0 必失败 (单 winner 侥幸过)。
   const claimData = winnerClaimData(plan.winners);
-  const closedRedeem = compilePayoutShardRedeem({ poolMerkleRoot: ps.poolMerkleRoot, predicateCommit: ps.predicateCommit, consolidatedPool: String(ps.consolidatedPool), closed: 1, payoutRoot: plan.payoutRoot });
-  const closedState = { consolidated_pool: String(ps.consolidatedPool), closed: 1, payoutRoot: plan.payoutRoot };
-  for (let i = 0; i < 17; i++) closedState['w' + i] = 0;
+  let psOutTxid = closeTxid, psOutIdx = 0;
+  let curPool = BigInt(ps.consolidatedPool);
+  let curState = { consolidated_pool: curPool.toString(), closed: 1, payoutRoot: plan.payoutRoot };
+  for (let i = 0; i < 17; i++) curState['w' + i] = 0;
+  let curRedeem = compilePayoutShardRedeem({ poolMerkleRoot: ps.poolMerkleRoot, predicateCommit: ps.predicateCommit, consolidatedPool: String(ps.consolidatedPool), closed: 1, payoutRoot: plan.payoutRoot });
   const claims = [];
   for (const cd of claimData) {
-    if (!cd.climbOk) { ctx.alert?.(marketId, `claim climb fail winner ${cd.pk.slice(0, 8)}`); continue; }
+    if (!cd.climbOk) { ctx.alert?.(marketId, `claim climb fail winner ${cd.pk.slice(0, 8)}`); claims.push({ pk: cd.pk, amount: cd.amount, error: 'climb fail' }); continue; }
     const winnerAddr = ctx.p2pkAddr(cd.pk);
     if (ctx.p2pkSpk && ctx.p2pkSpk(winnerAddr).toLowerCase() !== ('20' + cd.pk + 'ac').toLowerCase()) {
-      ctx.alert?.(marketId, `winner P2PK round-trip fail ${cd.pk.slice(0, 8)}`); continue;   // 防 hex 双编码 (今晚撞)
+      ctx.alert?.(marketId, `winner P2PK round-trip fail ${cd.pk.slice(0, 8)}`); claims.push({ pk: cd.pk, amount: cd.amount, error: 'round-trip fail' }); continue;   // 防 hex 双编码
     }
     const claimRes = await ctx.relayPost(ctx.feeRelay.id, {
       type: 'bshard_payout_claim',
       witness: { self_out_idx: 1, payout_out_idx: 0, bettor_pk: cd.pk, payout: cd.amount, merkle_index: cd.merkle_index, siblings_hex: cd.siblings_hex },
-      inputs: { payoutshard: { redeem_hex: closedRedeem, outpointTxid: closeTxid, index: 0, state: closedState }, fee: await ctx.feeUtxo() },
+      inputs: { payoutshard: { redeem_hex: curRedeem, outpointTxid: psOutTxid, index: psOutIdx, state: curState }, fee: await ctx.feeUtxo() },
       outputs: { payout: { address: winnerAddr }, change_address: ctx.feeRelay.address },
     });
-    claims.push({ pk: cd.pk, amount: cd.amount, txId: claimRes?.txId, error: claimRes?.error });
+    const claimTx = claimRes?.txId;
+    if (!claimTx) { ctx.alert?.(marketId, `claim submit fail ${cd.pk.slice(0, 8)}: ${claimRes?.error}`); claims.push({ pk: cd.pk, amount: cd.amount, error: claimRes?.error || 'no txId' }); break; }
+    const received = await verifyClaimLanded(ctx, winnerAddr, claimTx);
+    if (!received) {
+      ctx.alert?.(marketId, `claim not landed ${cd.pk.slice(0, 8)} — STOP threading (NO-TX-NO-STATE)`);
+      claims.push({ pk: cd.pk, amount: cd.amount, txId: claimTx, received: false, error: 'not landed' }); break;
+    }
+    // thread continuation: pool-=payout · w[merkle_index/63] set bit(merkle_index%63)
+    const newState = { consolidated_pool: (curPool - BigInt(cd.amount)).toString(), closed: 1, payoutRoot: plan.payoutRoot };
+    for (let i = 0; i < 17; i++) newState['w' + i] = curState['w' + i];
+    const word = Math.floor(Number(cd.merkle_index) / 63), bit = Number(cd.merkle_index) % 63;
+    newState['w' + word] = (BigInt(newState['w' + word]) + (1n << BigInt(bit))).toString();
+    const contRedeem = splicePayoutContinuation(curRedeem, newState);
+    if (ctx.p2shAddr && claimRes.psContAddress && ctx.p2shAddr(contRedeem) !== claimRes.psContAddress) {
+      ctx.alert?.(marketId, `claim continuation splice mismatch ${cd.pk.slice(0, 8)} — STOP threading`);
+      claims.push({ pk: cd.pk, amount: cd.amount, txId: claimTx, received, error: 'splice mismatch' }); break;
+    }
+    claims.push({ pk: cd.pk, amount: cd.amount, txId: claimTx, received });
+    psOutTxid = claimTx; psOutIdx = 1; curPool = curPool - BigInt(cd.amount); curState = newState; curRedeem = contRedeem;
   }
   return { ok: true, closeTxid, claims, plan };
 }
 
 // NO TX NO STATE: 查 closed PS @ 应锚地址·来自 close tx·value==consolidatedPool
+// #14 fix (2026-06-30): poll·非单发 (submit≠landed·单发 ~1s 未确认假阴·我单片 close 撞过)。
+const _sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function verifyClosedLanded(ctx, expectedAddr, closeTxid, consolidatedPool) {
-  try {
-    const entries = await ctx.getUtxos(expectedAddr);
-    return entries.some(e => {
-      const j = JSON.parse(JSON.stringify(e, (k, v) => typeof v === 'bigint' ? v.toString() : v));
-      const op = j.entry?.outpoint || j.outpoint;
-      const amt = j.entry?.amount ?? j.amount;
-      return op?.transactionId === closeTxid && String(amt) === String(consolidatedPool);
-    });
-  } catch { return false; }
+  for (let attempt = 0; attempt < 10; attempt++) {
+    try {
+      const entries = await ctx.getUtxos(expectedAddr);
+      const ok = entries.some(e => {
+        const j = JSON.parse(JSON.stringify(e, (k, v) => typeof v === 'bigint' ? v.toString() : v));
+        const op = j.entry?.outpoint || j.outpoint;
+        const amt = j.entry?.amount ?? j.amount;
+        return op?.transactionId === closeTxid && String(amt) === String(consolidatedPool);
+      });
+      if (ok) return true;
+    } catch { /* transient·retry */ }
+    await _sleep(4000);
+  }
+  return false;
 }
 
-export { COMMITTEE_DUMMY_SIG, QUORUM, ZERO32 };
+// #15 helper: claim 后 winner P2PK 实收链验 (NO TX NO STATE·thread 下一笔前确认)。
+async function verifyClaimLanded(ctx, winnerAddr, claimTx) {
+  for (let attempt = 0; attempt < 8; attempt++) {
+    try {
+      const entries = await ctx.getUtxos(winnerAddr);
+      if (entries.some(e => { const j = JSON.parse(JSON.stringify(e, (k, v) => typeof v === 'bigint' ? v.toString() : v)); return (j.entry?.outpoint || j.outpoint)?.transactionId === claimTx; })) return true;
+    } catch { /* retry */ }
+    await _sleep(4000);
+  }
+  return false;
+}
+
+// #15 multi-winner claim 续约 splice (复刻 relay p2sh.mjs _serializePayoutStateHex + _continuationAddress·_POOL_STATE_START=1)。
+//   PayoutShard state 区在 redeem offset 1: PUSH8(i64 pool)+PUSH8(i64 closed)+PUSH32(payoutRoot)+17×PUSH8(i64 w0..16)。
+function _i64LE(x) { const b = Buffer.alloc(8); b.writeBigInt64LE(BigInt(x)); return b; }
+function _pushData(buf) { return Buffer.concat([Buffer.from([buf.length]), buf]); }
+function _serializePayoutStateHex(s) {
+  const parts = [_pushData(_i64LE(s.consolidated_pool)), _pushData(_i64LE(s.closed)), _pushData(Buffer.from(String(s.payoutRoot).replace(/^0x/, ''), 'hex'))];
+  for (let i = 0; i < 17; i++) parts.push(_pushData(_i64LE(s['w' + i] ?? 0)));
+  return Buffer.concat(parts);
+}
+function splicePayoutContinuation(inputRedeemHex, newState, stateStart = 1) {
+  const redeem = Buffer.from(inputRedeemHex, 'hex');
+  const sb = _serializePayoutStateHex(newState);
+  return Buffer.concat([redeem.slice(0, stateStart), sb, redeem.slice(stateStart + sb.length)]).toString('hex');
+}
+
+export { COMMITTEE_DUMMY_SIG, QUORUM, ZERO32, splicePayoutContinuation };
