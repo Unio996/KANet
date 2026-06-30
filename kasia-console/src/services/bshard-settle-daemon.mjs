@@ -22,6 +22,7 @@ import { fetchEndBlockHashCanonical } from './pool-market-settler-v06.mjs';
 import { judgeLine } from '../lib/judgeline.mjs';
 import { extractStructuredFields } from '../lib/oracle-evidence-extractors.mjs';
 import { makeCtfReader } from '../lib/uma-ctf-reader.mjs';   // #20 UMA: polymarket 盘读链上 CTF 判定 (P1 binding-verified 30/30·Bettor)
+import { recordShadowJudgment } from '../lib/oracle-shadow-ledger.mjs';   // #26 自我进化: 影子台账(我们 oracle vs 权威·纯记录·永不碰结算·Owner 2026-06-30)
 
 const CONSOLE = process.env.SETTLE_DAEMON_CONSOLE_BASE || 'http://127.0.0.1:3200';
 const RPC_URL = process.env.SETTLE_DAEMON_RPC_URL || 'ws://127.0.0.1:17210';
@@ -235,6 +236,18 @@ async function settleOneMarket(marketId) {
     })();
   } catch (e) { log(`${marketId.slice(-8)} writeback warn: ${e.message} (on-chain settle is truth)`); }
   log(`✅ ${marketId.slice(-8)} SETTLED close=${r.closeTxid.slice(0, 12)} winners=${(r.claims || []).filter(c => c.txId).length}`);
+
+  // 📒 影子台账 (#26 自我进化·J1·Owner 2026-06-30): 记"我们 oracle 独立判定 vs 权威判定(plan.winDir·已结钱)"。
+  //   🔴 BETTOR 守门铁律1: **纯记录·永不碰结算**——settle 已完成(上方 writeback)·本块吞所有错·绝不阻断 return。
+  //   plan.winDir = computeSettlePlan 实际用于结算的权威判定(polymarket→UMA / ESPN→judgeLine)·复用不重判。
+  //   our_oracle 当前多为 NULL(领域判 registry 空=路线图)·NWT 滚动 registerDomainJudge 后真对比 materialize。
+  try {
+    if (plan.winDir === 0 || plan.winDir === 1) {
+      const s = await recordShadowJudgment(sqlite, { market, authorityWinDir: plan.winDir, settleTxid: r.closeTxid });
+      if (s.recorded) log(`📒 shadow ${marketId.slice(-8)}: ${s.agree == null ? '∅无独立源(路线图)' : s.agree ? '✓我方一致' : '✗我方分歧'}${s.reason ? ' · ' + s.reason : ''}`);
+    }
+  } catch (e) { log(`📒 shadow ${marketId.slice(-8)} skip (不影响结算): ${String(e?.message || e).slice(0, 80)}`); }
+
   return { ok: true, closeTxid: r.closeTxid, claims: r.claims };
 }
 

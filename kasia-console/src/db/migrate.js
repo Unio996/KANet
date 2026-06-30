@@ -5188,5 +5188,35 @@ export function runMigrations() {
     console.log('[migrate] v175: escrow_states table (Silverscript P2SH escrow — buyer/seller/arbiter 三方合约, lock/execute via relay IPC).');
   }
 
+  // v176 (J1, Owner 钦定 2026-06-30 "自我进化"·槽位 #26): oracle_shadow_ledger — 影子判定台账.
+  //   目的: 每个盘结算时记一行 = {权威判定(UMA/judgeLine), 我们自己 oracle 的独立判定, 是否一致, 领域}.
+  //   纯记录·**永不碰结算**(Bettor 守门铁律1): settle 照常只走权威; 台账在旁边攒"我们 vs 权威"命中率历史.
+  //   our_oracle_* 为 NULL = 该领域尚无独立数据源(=路线图: 该给哪个领域先配源, NWT 排域序滚动建).
+  //   写入方: src/lib/oracle-shadow-ledger.mjs recordShadowJudgment (settle daemon judgeWinDir 捕获点 defensive 调用).
+  //   读取方: shadowAccuracyReport (按领域命中率报表 → Owner 定先攻哪个领域升授权).
+  {
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS oracle_shadow_ledger (
+        id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+        market_id           TEXT NOT NULL UNIQUE,
+        domain              TEXT,                  -- pool_markets.category: sports|crypto|politics|economy|other
+        market_source       TEXT,                  -- pool_markets.outcome_market_source: polymarket|espn|kanet_v07...
+        authority_source    TEXT NOT NULL,         -- 'uma_ctf' | 'espn_judgeline' (谁结的钱)
+        authority_verdict   TEXT NOT NULL,         -- 'YES' | 'NO'
+        authority_windir    INTEGER NOT NULL,      -- 0=YES | 1=NO (与 judgeWinDir 同口径)
+        our_oracle_source   TEXT,                  -- 领域判 id (e.g. 'espn_judgeline'/'onchain_price'); NULL=无独立源
+        our_oracle_verdict  TEXT,                  -- 'YES'|'NO'|'ABSTAIN'; NULL=未独立判(无源)
+        our_oracle_windir   INTEGER,               -- 0|1; NULL
+        agree               INTEGER,               -- 1=一致 0=分歧; NULL=无我方判定可对比
+        divergence_reason   TEXT,                  -- 分歧时记原因(领域判 vs 权威 差异)
+        settle_txid         TEXT,
+        deadline            INTEGER,
+        recorded_at         TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+    try { sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_shadow_ledger_domain ON oracle_shadow_ledger(domain, agree)`); } catch {}
+    console.log('[migrate] v176: oracle_shadow_ledger table (影子判定台账 — 我们 oracle vs 权威 命中率历史, 纯记录不碰结算, Owner 自我进化 #26).');
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
