@@ -496,14 +496,43 @@ J2 fresh session 驱·auto-settler 初次集成测试·market pb73v ESPN 4018159
 
 ---
 
-## 集成 / 部署态(git 真相，2026-06-24 KANet-UI 更新)
+## 🎉 线 14：bshard-settle-daemon 生产上线 + 公测就绪（2026-06-30 08:00Z）
+### 一句话
+bshard 无人值守自动结算 daemon 冷启生产·双 canary GREEN（含 idx-63 跨 word 边界 J1 链上独立验）·Owner"可以公测了？"→ 广播确认·公测开放。
+
+### LANDED（五方 co-verify）
+- **canary #1（4p0f6·4 注·2 winner）**：J2 standalone 06:49 结算 PASS ✅
+- **canary #2（mf0o4·90 注·83 winner·3 shard）**：daemon 自治 07:46:13 结算·settle_txid=9bd4f3a7·payoutRoot=65a7dead·83 claim_txid 全 LANDED ✅
+  - payoutRoot pre-commit 四源 byte-equal：KANet-UI + J1:3300 + J2:3200 + Bettor ✅
+  - **idx-63 跨 word 边界 J1 独立链验**：winner 701b289680ca 在 J1 :3300 节点收 108433734 sompi ✅（w0→w1 crossing 确认无 off-by-one）
+  - 最终 PS continuation = 20000000 sompi = seed（83 claim 全领完）✅ 守恒
+  - ⚠ **首轮 settle_failed（UTXO timing）**：TX 0f28520b 入 kaspa_tx_log 后 ~4s 查 getUtxosByAddresses=0·daemon 标 settle_failed·J2 手动 reset verifying → 次 tick 成功。**根因未锁（block 红/孤块 or UTXO set delay）**·daemon 需加 retry/poll 防止未来重现（记 ESCALATIONS）。
+- **生产冷启**：kanet-start.sh 07:58:05Z·SETTLE_DAEMON_ENABLED=1·日志 `[settle-daemon] 07:58:05 starting·tick=60000ms·MAX_PER_TICK=1·feeRelay=8f104e2d` ✅
+- **公测广播**：dev-coord-testnet txId=3c1b8011 ✅；Owner 钦定"增加单子·增加押注"→ J2 建 fresh 盘·J1+NWT standby 首盘 co-verify。
+
+### 关键 commits（已进 bshard-m3-deploy）
+- `b47d21df` feat(auto-settler): settleMarketLive relay + committee deadline-pin + cleanliness 闸
+- `c2409a71` feat(auto-settler): computeSettlePlan 编排核心
+- `3c9d56dc`/`e33005cd` daemon + index.js wire-up + kanet.env SETTLE_DAEMON_ENABLED=1
+
+### NEXT（Owner "增加单子增加押注"）
+1. J2 建 10-20 个 fresh 干净 v0.7 bshard 盘（短 deadline·多样题目·非镜像）
+2. 真公测用户 DM bot 押注；daemon 自动结到期盘
+3. J1+NWT+Bettor 首批公测盘四源抽检（同 mf0o4 co-verify 标准）
+4. **UTXO timing retry**：daemon settle_failed → 重试 N 次（poll getUtxosByAddresses）而非立即标死（见 ESCALATIONS）
+5. oracle auto-renewal cron task#13（ESCALATIONS 已升优先级）
+
+---
+
+## 集成 / 部署态(git 真相，2026-06-30 KANet-UI 更新)
 - **master** tip `ca7e0a66`:含核心 bshard/oracle wave1 LIVE 码(经 bshard-m3-deploy sync)。
-- **bshard-m3-deploy** tip `0fce7fbe`:含本 session 所有修(null-version refund fix / display fix / line8 STEP1 doc)。
+- **bshard-m3-deploy** tip `b47d21df`:含本 session 所有修含 daemon(settle-daemon wire + computeSettlePlan + settleMarketLive + cleanliness 闸 + SETTLE_DAEMON_ENABLED=1)。
 - 🔶 **未进 master(feature ref / 在途)**:D4 loaders(`origin/j1-d4-loaders` aace8f39)/ tg-wallet(`origin/kanet-ui-tg-wallet` df2a9b34)。faucet per-IP 修(05a0a6c2)已在 bshard-m3-deploy。
 - ✅ **orphan 1596fb62 DONE**(u7hq4 市场 1000 KAS):Bettor GO 08:57 → 临时 DB id=7816 插入 → bettor-refund-claim endpoint → txId=36522a1f,output=99999999000 sompi。J1(:3300)cross-node UTXO=0 + Bettor(:3200)kaspa_tx_log block 双验。**总计 made-whole: 10 sides, 5,608.8 KAS**(batch-1 9 sides 4,608.8 KAS + orphan 1,000 KAS)。
 - ⬜ 择机 merge 进 master + verify-ship 收齐。J1 gated on NWT FINDING-1 修。
 
 ## ESCALATIONS / 待 Owner 裁
+- 🔴 **daemon settle_failed UTXO timing retry（线14 首次遇·2026-06-30）**：mf0o4 首轮 settle_failed 因 TX 入 kaspa_tx_log ~4s 后 getUtxosByAddresses 仍返 0（UTXO set delay 或 block 孤块）。当前行为=立即标 settle_failed → 需 operator 手动 reset。**修法**：daemon settle_failed 路改为重试 N 次（如 3×10s poll）再标死·否则公测高频下会产生 operator 维护负担。域=KANet-UI·不急阻塞·建议首批 spot-check 后做。
 - 🔴 **oracle auto-renewal cron — 28h 内必落(2026-06-30 Bettor 升级优先级)**：J2 re-enroll 用 lock=51200000≈28h(current 50193771)→ **~DAA 51200000 锁再过期 → create-v07 再 block 新盘**。task#13 auto-renewal cron 从"下个 pass"升为 **ZK drive 收口后立即做**·否则公测窗口破。域 = KANet-UI + J2 协。手动修触发点:oracle_pool_chain_view 最新 snapshot_daa + lock_until_daa diff < 500000 → 触发 re-enroll flow。
 - ✅ **KANet-UI 会话已恢复（2026-06-29 Owner 重启）→ UI/operator/部署/首页② 域恢复 owner**。本 session COORD-LEDGER 已 commit，线13 P4 收尾记录已沉淀。
 - 🔴 **broker DM e2e gated on J1 字节级 sighash 修**（下个 focused session·J1 清醒）：jepu1 FREEZE 测试台 / tx f9e64afc / dup-pk 嫌疑 / 接位起点见线 12 收口段 + 记忆 `v07-parimutuel-settle-covenant-debug`。
