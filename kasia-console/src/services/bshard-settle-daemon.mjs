@@ -119,7 +119,7 @@ function _p2pkAddrSync(pkHex) { return new _k.PublicKey(pkHex).toAddress(_k.Netw
 function _p2pkSpkSync(addr) { const s = _k.payToAddressScript(new _k.Address(addr)); return (s.script ?? s).toString(); }
 
 // ripe = v0.7 + deadline_daa+buffer passed + 未结算 + 非 settle_failed + betCount>0 + 非 commingled。
-function selectRipeMarkets(currentDaa, limit) {
+function selectRipeMarkets(currentDaa, pmt, limit) {
   // 只结 active-未结 (pending_bettors/verifying)·排终态 (cancelled/completed/refunded/refunding/settle_failed)。
   const rows = sqlite.prepare(`
     SELECT * FROM pool_markets
@@ -133,6 +133,10 @@ function selectRipeMarkets(currentDaa, limit) {
   const ripe = [];
   for (const m of rows) {
     if (_leases.has(m.id)) continue;
+    // 🔴 consolidate lockTime gate (partial-shard ShardLeaf 件1: tx.time>=deadline*1000): MTP(pastMedianTime)
+    //   滞后实时 ~2-3min·过早 settle → consolidate TX "input not finalized" rejected (live daemon A/u6ry7 实撞)。
+    //   只在 MTP >= deadline*1000 才 settle (consolidate 才 final)。sealed-only 盘其实不需·但统一 gate 无害(稍延)。
+    if (Number(m.deadline) * 1000 > pmt) continue;
     try {
       const { betCount, multiShard, isBshard } = getMarketBets(m.id, sqlite);
       if (!isBshard || betCount === 0) continue;
@@ -224,7 +228,9 @@ export async function settleDaemonTick() {
   try {
     _k = await kaspa(); await buildPkMap();
     const currentDaa = await chainReader.getCurrentDaaScore();
-    const ripe = selectRipeMarkets(currentDaa, MAX_PER_TICK);
+    await rpcEnsure();
+    const pmt = Number((await _rpc.getBlockDagInfo()).pastMedianTime);   // MTP·consolidate lockTime(deadline*1000) final gate
+    const ripe = selectRipeMarkets(currentDaa, pmt, MAX_PER_TICK);
     if (ripe.length === 0) return;
     log(`tick: ${ripe.length} ripe market(s) (MAX_PER_TICK=${MAX_PER_TICK})`);
     for (const { market, betCount, multiShard } of ripe) {
