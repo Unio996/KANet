@@ -1469,7 +1469,10 @@ export async function checkUtxoLanded(address, txid, networkId, minDepth = 0) {
     const entry = (entries || []).find(e => e.outpoint?.transactionId === txid);
     if (!entry) return { landed: false };
     if (!(Number(minDepth) > 0)) return { landed: true };           // legacy first-seen (minDepth 0/未传)
-    const bds = entry.utxoEntry?.blockDaaScore;
+    // ⚠ 字段路径(Bettor BLOCKING 抓·我活对象实测纠 + 用既有生产惯用法 trade-protocol-filter.js L1097 的 4 级 fallback·
+    //   别自创单路径赌 wasm 序列化形态: kaspa-wasm UTXO entry 上 utxoEntry getter 不存在(=undefined)·blockDaaScore
+    //   在顶层 e.blockDaaScore·实测 BigInt; 原 e.utxoEntry?.blockDaaScore=undefined→fail-closed→全 register 崩):
+    const bds = entry.blockDaaScore ?? entry.utxoEntry?.blockDaaScore ?? entry.entry?.blockDaaScore ?? entry.entry?.utxoEntry?.blockDaaScore;
     if (bds == null) return { landed: false, depth: null };         // fail-closed: 无 blockDaaScore 无法验深度
     const dag = await rpc.getBlockDagInfo();
     const depth = Number(dag.virtualDaaScore) - Number(bds);
