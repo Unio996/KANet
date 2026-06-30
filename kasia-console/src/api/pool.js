@@ -2230,6 +2230,7 @@ export async function registerPoolRoutes(fastify) {
              pool_markets.outcome_side, pool_markets.deadline, pool_markets.maker_stake_amount,
              pool_markets.protocol_version,
              pool_markets.spine_p2sh, pool_markets.created_at AS market_created_at,
+             pool_markets.outcome_condition_id,
              ${honestCountSql('pool_markets.id')} AS bettor_count,
              ${honestStakeSql('pool_markets.id', 0)} AS yes_sompi,
              ${honestStakeSql('pool_markets.id', 1)} AS no_sompi,
@@ -2253,14 +2254,26 @@ export async function registerPoolRoutes(fastify) {
         yes_implied_prob: totalPool > 0 ? yesPool / totalPool : null,
         _totalPool: totalPool, _spineP2sh: r.spine_p2sh,
         _rawBettorCount: r.raw_bettor_count, _createdAt: r.market_created_at,
+        _conditionId: r.outcome_condition_id || null,
       };
     })
       .filter((m) => !commingledSpines.has(m._spineP2sh))
       .filter((m) => isStructuredSpec(m.title))
       .filter((m) => m._rawBettorCount < 50)   // has available slots (raw cap — must use raw not honestCount, J1/Bettor no-strand line)
+      // conditionId 去重 — 同一真实问题只保留流动性最高那条(Bettor #27·Owner "重复盘·母子盘 display-dedup")
+      .reduce((acc, m) => {
+        const cid = m._conditionId;
+        if (!cid) { acc.push(m); return acc; }
+        const i = acc.findIndex((x) => x._conditionId === cid);
+        if (i < 0) { acc.push(m); return acc; }
+        if (m._totalPool > acc[i]._totalPool || (m._totalPool === acc[i]._totalPool && m._createdAt < acc[i]._createdAt)) {
+          acc[i] = m;
+        }
+        return acc;
+      }, [])
       .sort((a, b) => (b._totalPool - a._totalPool) || (b._createdAt > a._createdAt ? 1 : -1))
       .slice(0, limit)
-      .map(({ _totalPool, _spineP2sh, _rawBettorCount, _createdAt, ...m }) => m);
+      .map(({ _totalPool, _spineP2sh, _rawBettorCount, _createdAt, _conditionId, ...m }) => ({ ...m, condition_id: _conditionId }));
     return reply.send({ ok: true, count: available.length, markets: available });
   });
 
