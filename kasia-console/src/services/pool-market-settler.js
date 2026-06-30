@@ -1065,6 +1065,12 @@ export async function poolSettlerTick() {
         let meta = {};
         try { meta = JSON.parse(wm.metadata || '{}'); } catch {}
         const ageSinceDeadlineMin = Math.floor((nowSec2 - wm.deadline) / 60);
+        // 🔴 shard-blind fix (2026-06-30·z3xar/p7xmw/yo18h 误退实撞): bshard 盘的注在 shards(market_shards)·
+        //   watchdog 看 LOGICAL 层 = 0-bet → 误判"0-bet past deadline"force-refund·RACE 掉 bshard-settle-daemon
+        //   (DAA-gated·deadline_daa 慢于 wall-clock·尤其 UMA 盘 deploy 延迟)。bshard 盘的 settle/refund 由
+        //   bshard-settle-daemon 独家负责 → watchdog 对 bshard 盘全跳(main loop L356 同 isBshard skip·此处补齐)。
+        const isBshardWatchdog = sqlite.prepare('SELECT 1 FROM market_shards WHERE logical_market_id = ? LIMIT 1').get(wm.id);
+        if (isBshardWatchdog) continue;
         // (a) verifying + 无 phase2_dispatched_at + ageSinceDeadlineMin > 30
         if (wm.protocol_status === 'verifying' && !meta.phase2_dispatched_at && ageSinceDeadlineMin > 30) {
           // Bettor r472: back off markets that can't make local progress (re-attempted within
