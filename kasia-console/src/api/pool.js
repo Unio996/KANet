@@ -1392,7 +1392,11 @@ export async function registerPoolRoutes(fastify) {
       const transfer = async (addr, sompi) => { const r = await transferAndConfirm(gatewayRelayId, addr, (Number(sompi) / 1e8).toFixed(8)); return r.txId; };
       // minDepth: 20 (J1 phantom-leaf 根治) — reorg-safe DAA-深度门: 浅确认 UTXO(被 reorg 退)不算 landed → register land-gate 不记 phantom leaf。poll 到 depth≥20 才 true; 超时返 false → caller throw(NO-TX-NO-STATE 不推进 leaf)。
     const landed = async (txid, addr, n = 25) => { for (let i = 0; i < n; i++) { const j = await sendCommandAsync(gatewayRelayId, { type: 'check_utxo_landed', address: addr, txid, minDepth: 20 }, 20000); if (j.landed || j.found) return true; await new Promise(r => setTimeout(r, 2000)); } return false; };
-      const relayAddr = payAddr;
+      // 🔴 #28 (B) REGRESSION FIX (J1 2026-07-01): register_append funding 必用【gateway 主址】不是 payAddr。
+      //   payAddr 现已改为 per-bet 独立 P2SH(只有 bettor 这一笔付款·无 gateway 运营余额)。registerBettorOnShard
+      //   从 relayAddr 选币垫 stake 进 leaf → 若用 per-bet 址(余额=单笔付款)→ 选不出 funding/签名错"failed to verify
+      //   signature script"(部署后全盘注册+结算挂的真因)。gateway 主址 = p.relayAddr(prelude 返回的 gw.address)。
+      const relayAddr = p.relayAddr;
 
       // shard→pool_markets clone row (FK shard_market_id REFERENCES pool_markets(id)) — identical to monolithic register-v07.
       const pmCols = sqlite.prepare('PRAGMA table_info(pool_markets)').all().map(c => c.name);
