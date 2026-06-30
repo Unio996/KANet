@@ -8,6 +8,7 @@ export const CONFIG = {
   consoleUrl: process.env.CONSOLE_URL || 'http://127.0.0.1:3200',
   ingestSecret: process.env.INGEST_SECRET || '',            // x-ingest-secret on S1/S2 endpoints
   pollMs: parseInt(process.env.TG_POLL_MS || '30000', 10),  // S1 notification poller cadence
+  pendingBetPollMs: parseInt(process.env.TG_PENDING_BET_POLL_MS || '3000', 10),  // #28: pending custodial bet poll — fast (3s) to stay within DEFRAG_MIN_DEPTH protection window
   brokerRefreshMs: parseInt(process.env.TG_BROKER_REFRESH_MS || '60000', 10), // re-read broker config
   network: process.env.KASPA_NETWORK || 'testnet-12',
   // owner-in-dev-channel bridge (pure messaging / 0-custody). Runs in a SEPARATE owner bot process

@@ -517,7 +517,7 @@ async function pollBrokerFeeEvents() {
 export function startBot() {
   setInterval(async () => { brokerRelayId = await resolveBrokerRelayId(); }, CONFIG.brokerRefreshMs);
   setInterval(() => { pollLoop().catch(() => {}); }, CONFIG.pollMs);
-  setInterval(() => { pollPendingBets().catch(() => {}); }, CONFIG.pollMs);
+  setInterval(() => { pollPendingBets().catch(() => {}); }, CONFIG.pendingBetPollMs);  // #28: fast poll (3s default) — protects in-flight custodial bet payments from defrag window
   setInterval(() => { pollSettleResults().catch(() => {}); }, CONFIG.pollMs);
   setInterval(() => { pollBrokerFeeEvents().catch(() => {}); }, CONFIG.pollMs);
   bot.start();
