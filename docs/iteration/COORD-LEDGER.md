@@ -493,6 +493,7 @@ ZK gate-spk binding 撞 silverc OP_PICK off-by-one codegen bug → Bettor 裁定
 - ⬜ 择机 merge 进 master + verify-ship 收齐。J1 gated on NWT FINDING-1 修。
 
 ## ESCALATIONS / 待 Owner 裁
+- 🔴 **oracle auto-renewal cron — 28h 内必落(2026-06-30 Bettor 升级优先级)**：J2 re-enroll 用 lock=51200000≈28h(current 50193771)→ **~DAA 51200000 锁再过期 → create-v07 再 block 新盘**。task#13 auto-renewal cron 从"下个 pass"升为 **ZK drive 收口后立即做**·否则公测窗口破。域 = KANet-UI + J2 协。手动修触发点:oracle_pool_chain_view 最新 snapshot_daa + lock_until_daa diff < 500000 → 触发 re-enroll flow。
 - ✅ **KANet-UI 会话已恢复（2026-06-29 Owner 重启）→ UI/operator/部署/首页② 域恢复 owner**。本 session COORD-LEDGER 已 commit，线13 P4 收尾记录已沉淀。
 - 🔴 **broker DM e2e gated on J1 字节级 sighash 修**（下个 focused session·J1 清醒）：jepu1 FREEZE 测试台 / tx f9e64afc / dup-pk 嫌疑 / 接位起点见线 12 收口段 + 记忆 `v07-parimutuel-settle-covenant-debug`。
 - ⚠ **通用分润可见层 NWT PUSH-BACK**（docs/2026-06-28-NWT-redteam-universal-revenue-visibility.md）：introducer 无 DB 支撑（过度承诺）+ oracle/node 地址重叠 + multi-role event_type/stamp 冲突。最小可行路 = broker 可见（已有）+ committee 合并 fee 一角色 + introducer Phase2。待 Bettor 据此**重设计**（不是全 5 角色一步到位）。
