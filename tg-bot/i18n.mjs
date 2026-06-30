@@ -112,7 +112,7 @@ export const LANGS = {
     bet_confirm_cancelled: 'Cancelled, no payment occurred. /bet anytime to start over.',
 
     // Auto-pay (custodial)
-    bet_autopay_success: '✅ Auto-paid {kas} KAS from custodial wallet.\nWaiting for on-chain confirmation (~1-2 min)…\n⚠ Payment sent — cancelling does not refund.',
+    bet_autopay_success: '✅ Auto-paid {kas} KAS from custodial wallet.\nWaiting for on-chain confirmation (~10 sec)…\n⚠ Payment sent — cancelling does not refund.',
     bet_autopay_faucet_hint: '\n💡 Custodial balance too low ({bal} KAS). /faucet to get test coins then try again.',
 
     // Manual pay
@@ -443,7 +443,7 @@ export const LANGS = {
     bet_confirm_cancelled: '已取消, 未发生任何付款。随时 /bet 重新开始。',
 
     // Auto-pay (custodial)
-    bet_autopay_success: '✅ 已从托管钱包自动付 {kas} KAS。\n等链上确认 (~1-2 分钟)…\n⚠ 托管已发出，取消等待不退款。',
+    bet_autopay_success: '✅ 已从托管钱包自动付 {kas} KAS。\n等链上确认 (~10 秒)…\n⚠ 托管已发出，取消等待不退款。',
     bet_autopay_faucet_hint: '\n💡 托管余额不足 ({bal} KAS)，/faucet 领测试币后重试一键付。',
 
     // Manual pay
