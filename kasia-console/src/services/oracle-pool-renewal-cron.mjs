@@ -34,9 +34,11 @@ async function _pollUtxoLanded(rpcUrl, networkId, address, expectedMinSompi) {
     const rpc = new RpcClient({ url: rpcUrl, encoding: Encoding.Borsh, networkId });
     await rpc.connect();
     try {
-      const result = await rpc.getUtxosByAddresses([address]);
-      const utxos = result?.entries || [];
-      const total = utxos.reduce((s, e) => s + Number(e?.utxo?.amount || 0), 0);
+      const { entries } = await rpc.getUtxosByAddresses([address]);
+      const utxos = entries || [];
+      // kaspa-wasm entries: each entry.amount is the sompi value (BigInt/number).
+      // mirror oracle-pool-chain-scanner.mjs L113: utxo.amount || utxo.entry?.amount
+      const total = utxos.reduce((s, e) => s + Number(BigInt(e?.amount || e?.entry?.amount || 0)), 0);
       if (total >= expectedMinSompi) {
         console.log(`[oracle-renewal] UTXO landed at ${address.slice(-20)} total=${total} (attempt ${attempt + 1})`);
         return { total };
