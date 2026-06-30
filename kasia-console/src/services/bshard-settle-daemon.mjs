@@ -22,7 +22,9 @@ import { fetchEndBlockHashCanonical } from './pool-market-settler-v06.mjs';
 import { judgeLine } from '../lib/judgeline.mjs';
 import { extractStructuredFields } from '../lib/oracle-evidence-extractors.mjs';
 import { makeCtfReader } from '../lib/uma-ctf-reader.mjs';   // #20 UMA: polymarket 盘读链上 CTF 判定 (P1 binding-verified 30/30·Bettor)
-import { recordShadowJudgment } from '../lib/oracle-shadow-ledger.mjs';   // #26 自我进化: 影子台账(我们 oracle vs 权威·纯记录·永不碰结算·Owner 2026-06-30)
+import { recordShadowJudgment, registerDomainJudge } from '../lib/oracle-shadow-ledger.mjs';   // #26 自我进化: 影子台账(我们 oracle vs 权威·纯记录·永不碰结算·Owner 2026-06-30)
+import { espnSportsJudge } from '../lib/nwt-espn-sports-judge.mjs';   // NWT域判v1: polymarket体育盘ESPN独立判
+registerDomainJudge(espnSportsJudge);
 
 const CONSOLE = process.env.SETTLE_DAEMON_CONSOLE_BASE || 'http://127.0.0.1:3200';
 const RPC_URL = process.env.SETTLE_DAEMON_RPC_URL || 'ws://127.0.0.1:17210';
