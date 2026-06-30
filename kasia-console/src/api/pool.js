@@ -800,6 +800,25 @@ export async function registerPoolRoutes(fastify) {
     for (const k of required) {
       if (b[k] === undefined || b[k] === null || b[k] === '') return reply.code(400).send({ ok: false, error: `missing ${k}` });
     }
+    // 🔴 #27 层A (Owner 钦定 2026-06-30 "大胆修·测试网无妨"): pre-broadcast conditionId 去重闸 — 止重复盘。
+    //   根因(六层查实): 重复盘今天密集成簇产生(0xf161×5/32秒)·seeder 早有 dedup(L92)但 check-then-act RACE
+    //   (DB查在前·create-v07 异步锁链落库在后·burst-builder/多实例发得比落库快→同 conditionId 重复 create)。
+    //   create-v07 是【所有建市 chokepoint】(seeder/burst/手动全走此)→ 在此【锁 stake 前】查重 = path-independent 根治
+    //   (非只改 seeder JS)。active 同 conditionId 已存 → 409 拒·一分钱不花(spine lock TX 在下方·此处在其前)。
+    if (b.outcome_condition_id) {
+      try {
+        const _condStr = String(b.outcome_condition_id);
+        const _dup = sqlite.prepare(
+          "SELECT id FROM pool_markets WHERE outcome_condition_id = ? AND protocol_status IN ('pending_bettors','verifying') LIMIT 1"
+        ).get(_condStr);
+        if (_dup) {
+          return reply.code(409).send({
+            ok: false, duplicate: true, existing_market_id: _dup.id,
+            error: `duplicate market: conditionId ${_condStr.slice(0, 14)}.. 已有 active 盘 ${String(_dup.id).slice(0, 12)} (#27 dedup·不重复建·不烧 stake)`,
+          });
+        }
+      } catch (e) { console.warn(`[create-v07] #27 dedup-gate query fail (放行不挡建市): ${e.message}`); }
+    }
     // J2-tn r411 DoD-E Bettor r383 关1 PASS — 源头堵 oracle pool < 5 卡死单 gap.
     // 现状: 委员从建市时 pool_snapshots 定格. snapshot eligible < COMMITTEE_SIZE (5) →
     // 委员永远抽不出 → 市场永卡 + 资金锁死 (= 7un1d 实证).
