@@ -33,17 +33,28 @@ async function _renewEnrollment({ stakerPkX, relayId, relayAddress, amountSompi,
     stakerPkX, lockUntilDaa: newLockUntilDaa, network,
   });
 
-  // 2. DELETE old row — necessary because enroll API 409s on staker_pk_x with different lock_until_daa
-  sqlite.prepare('DELETE FROM oracle_stake_enrollments WHERE staker_pk_x = ?').run(stakerPkX);
+  // 2. Transfer stake KAS to new P2SH FIRST — NO-TX-NO-STATE: DB update only after TX broadcast.
+  //    If transfer fails: throw (old enrollment stays in DB intact → next tick retries = self-healing).
+  const stakeKas = amountSompi ? (Number(amountSompi) / 1e8) : DEFAULT_STAKE_KAS;
+  const txRes = await sendCommandAsync(relayId, {
+    type: 'transfer', target: newP2shAddr, amount: stakeKas.toFixed(8),
+  });
+  if (!txRes) throw new Error('relay not running — no response to transfer command');
+  if (txRes.error) throw new Error(`transfer rejected: ${txRes.error}`);
+  const transferTxId = txRes.txId;
+  if (!transferTxId) throw new Error('transfer returned no txId — aborting DB update (NO-TX-NO-STATE)');
 
-  // 3. INSERT new enrollment record
-  sqlite.prepare(`
-    INSERT INTO oracle_stake_enrollments
-      (staker_pk_x, lock_until_daa, p2sh_addr, p2sh_hash, redeem_script_hex, source, active, relay_address)
-    VALUES (?, ?, ?, ?, ?, 'chain_envelope', 1, ?)
-  `).run(stakerPkX, newLockUntilDaa, newP2shAddr, p2shHash, redeemScript, relayAddress);
+  // 3. TX broadcast confirmed — NOW update DB atomically (DELETE old + INSERT new in one transaction)
+  sqlite.transaction(() => {
+    sqlite.prepare('DELETE FROM oracle_stake_enrollments WHERE staker_pk_x = ?').run(stakerPkX);
+    sqlite.prepare(`
+      INSERT INTO oracle_stake_enrollments
+        (staker_pk_x, lock_until_daa, p2sh_addr, p2sh_hash, redeem_script_hex, source, active, relay_address)
+      VALUES (?, ?, ?, ?, ?, 'chain_envelope', 1, ?)
+    `).run(stakerPkX, newLockUntilDaa, newP2shAddr, p2shHash, redeemScript, relayAddress);
+  })();
 
-  // 4. Broadcast enrollment envelope (best-effort; local INSERT already valid)
+  // 4. Broadcast enrollment envelope — best-effort; transfer TX + DB already valid without it.
   let broadcastTxId = null;
   try {
     const pkRes = await sendCommandAsync(relayId, { type: 'get_pubkey' });
@@ -67,23 +78,7 @@ async function _renewEnrollment({ stakerPkX, relayId, relayAddress, amountSompi,
     broadcastTxId = bcastResult?.txId;
     if (!broadcastTxId) throw new Error(`broadcast no txId: ${JSON.stringify(bcastResult).slice(0, 100)}`);
   } catch (bcErr) {
-    console.warn(`[oracle-renewal] broadcast fail staker=${stakerPkX.slice(0, 8)} relay=${relayId.slice(0, 8)}: ${bcErr.message} (local INSERT valid; renewal proceeds)`);
-  }
-
-  // 5. Transfer stake KAS to new P2SH from relay wallet
-  const stakeKas = amountSompi ? (Number(amountSompi) / 1e8) : DEFAULT_STAKE_KAS;
-  let transferTxId = null;
-  try {
-    const txRes = await sendCommandAsync(relayId, {
-      type: 'transfer',
-      target: newP2shAddr,
-      amount: stakeKas.toFixed(8),
-    });
-    if (txRes?.error) throw new Error(String(txRes.error));
-    if (!txRes) throw new Error('relay not running or no response');
-    transferTxId = txRes?.txId;
-  } catch (txErr) {
-    console.warn(`[oracle-renewal] stake transfer fail staker=${stakerPkX.slice(0, 8)}: ${txErr.message}`);
+    console.warn(`[oracle-renewal] envelope broadcast fail staker=${stakerPkX.slice(0, 8)} relay=${relayId.slice(0, 8)}: ${bcErr.message} (transfer TX+DB valid; cross-node convergence deferred)`);
   }
 
   return { newLockUntilDaa, newP2shAddr, broadcastTxId, transferTxId };
