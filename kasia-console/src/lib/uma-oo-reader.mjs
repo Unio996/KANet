@@ -43,15 +43,65 @@ export function makeMockOoReader(fixtures) {
   };
 }
 
-// makeRpcOoReader (slice-2 STUB) — 真 ethers + Polygon/Amoy RPC → OptimisticOracleV2/V3 + DVM。
-//   契约同 mock: readOoResolution(ancillaryId, atBlock) → OoResolution。slice-2 实现:
-//   - multi-RPC cross-check + 区块头验 (J1-E): 多 RPC 读同 blockTag, 值不一致/区块头不一致 → settled=false (不信).
-//   - finality: 查 OO request state == Settled (非 Proposed/Disputed) + dispute window 过 + 保守 margin.
-//   现 slice-1: throw (未实现, 防误用真路径).
-export function makeRpcOoReader(/* { rpcs, ooAddress, dvmAddress } */) {
+// ── slice-2 (J1, 2026-06-30, Bettor GREENLIGHT mainnet read-only) ─────────────────────────────────
+// 真读路径 (查码定·非 OO-V3-bool): Polymarket 市场结果 = **UmaCtfAdapter.getExpectedPayouts(questionId)**
+//   → uint256[2] [YES,NO]: [1,0]=YES / [0,1]=NO / [1,1]=50-50/UNKNOWN→ABSTAIN. (OO V3 getAssertion 返
+//   settlementResolution=bool 是"断言是否成立"·非 YES/NO·对二元市场不够 → 读 adapter 的 resolved payouts 才是真结果.)
+//   verified: UmaCtfAdapter v3.0 @ 0x157Ce2d672854c848c9b79C49a8Cc6cc89176a49 (Polygon mainnet, chain 137).
+//   ancillaryId 参 = questionId (bytes32 hex; = keccak256(appendAncillaryData(adapterCreator, ancillaryData))).
+//   ⚠ ingestion 前置 (J2 实证 uma_assertion_id 现空): condition_id_mapping 须先 populate 该 questionId — 另起 slice.
+//
+// 红队 5 轴 (J1):
+//   - finality (A): 只消费 definitive [1,0]/[0,1]; [1,1]/revert/未 resolved → ABSTAIN (settled=false).
+//     ★ 硬化 TODO: 加 questions(questionId).resolved==true 双确认 (现 fail-closed: 非 definitive payout 即不消费).
+//     finality 基线 = 读在【已 final 的 Polygon block】(atBlock 选在市场预期 resolve + UMA dispute 窗之后) + definitive payout.
+//   - determinism (B): 全 RPC 读【同一 atBlock】(blockTag); 任一 RPC 值不一致 → settled=false (不信单源).
+//   - ancillary (C): 按 questionId 读, 错 id → adapter 返非 definitive / revert → ABSTAIN (reader + extractor 双守).
+//   - value-mapping: payouts→{UMA_YES/UMA_NO/UMA_INDETERMINATE} (喂 slice-1 extractor 不变; 冻结映射).
+//   - RPC-trust (E): rpcs 多源并读 cross-check (公共+provider). 单 RPC 撒谎 → 与他源不符 → 不信.
+
+const _UMA_CTF_ADAPTER_MAINNET = '0x157Ce2d672854c848c9b79C49a8Cc6cc89176a49'; // Polygon v3.0 (WebFetch-verified)
+const _ADAPTER_ABI = [
+  'function getExpectedPayouts(bytes32 questionID) view returns (uint256[])',
+];
+
+// payouts [YES,NO] → reader value (slice-1 extractor 数值约定). null = 非 definitive (未 resolved / 50-50 / 异常) → ABSTAIN.
+function _payoutsToValue(p) {
+  if (!Array.isArray(p) || p.length < 2) return null;
+  const yes = BigInt(p[0]), no = BigInt(p[1]);
+  if (yes === 1n && no === 0n) return UMA_YES;
+  if (yes === 0n && no === 1n) return UMA_NO;
+  if (yes === 1n && no === 1n) return UMA_INDETERMINATE; // 50-50/unknown → extractor ABSTAIN
+  return null;                                            // 异常/未 resolved → ABSTAIN (abstain-not-guess)
+}
+
+/**
+ * makeRpcOoReader — 真 ethers + Polygon mainnet multi-RPC, 读 UmaCtfAdapter.getExpectedPayouts.
+ * @param {{ rpcs: string[], adapterAddress?: string }} o  rpcs = Polygon RPC URL 数组 (≥2 防单点); adapterAddress 默认 mainnet v3.0.
+ * 返 { readOoResolution(questionId, atBlock) → OoResolution }. atBlock 必传 (determinism 锚, 各委员同 block).
+ */
+export function makeRpcOoReader({ rpcs, adapterAddress = _UMA_CTF_ADAPTER_MAINNET } = {}) {
+  if (!Array.isArray(rpcs) || rpcs.length === 0) throw new Error('makeRpcOoReader: rpcs (Polygon RPC URL[]) required');
   return {
-    readOoResolution() {
-      throw new Error('uma-oo-reader: RPC reader is slice-2 (ethers + multi-RPC + 区块头验); slice-1 mock-only');
+    async readOoResolution(questionId, atBlock) {
+      const miss = { value: null, settled: false, settled_block: null, ancillary_id: questionId };
+      if (!questionId || atBlock == null) return miss; // determinism: 无 block 锚 → 不读 (各委员须同 block)
+      const { ethers } = await import('ethers');
+      const blockTag = Number(atBlock);
+      // multi-RPC cross-check (RPC-trust 轴): 每 RPC 读同 questionId@同 blockTag.
+      const reads = await Promise.all(rpcs.map(async (url) => {
+        try {
+          const provider = new ethers.JsonRpcProvider(url, undefined, { staticNetwork: true });
+          const adapter = new ethers.Contract(adapterAddress, _ADAPTER_ABI, provider);
+          const payouts = await adapter.getExpectedPayouts(questionId, { blockTag }); // revert(未resolved) → catch
+          return _payoutsToValue(payouts.map((x) => BigInt(x)));
+        } catch { return null; } // revert / RPC fail → 该源 null (finality: 未 resolved 即 ABSTAIN)
+      }));
+      // finality + RPC-trust: 须【所有源都成功且同值且 definitive(非 null)】才消费; 任一不符 → ABSTAIN (fail-closed).
+      const first = reads[0];
+      const allAgree = first !== null && reads.every((r) => r === first);
+      if (!allAgree) return miss;
+      return { value: first, settled: true, settled_block: blockTag, ancillary_id: questionId };
     },
   };
 }
