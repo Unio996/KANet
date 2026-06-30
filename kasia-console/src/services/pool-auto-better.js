@@ -8,7 +8,7 @@
 //   2. For each bettor relay (= AUTO_BET_RELAYS env list):
 //      a. Pick random subset N=AUTO_BET_PER_TICK markets (default 2)
 //      b. For each: random direction (50/50 YES/NO) + random stake (= [MIN_STAKE_KAS, MAX_STAKE_KAS])
-//      c. Call register-v06/prep → relay transfer → register-v06/confirm
+//      c. Call register-v07/prep (+bet_id nonce) → relay transfer exact → register-v07/confirm (shard-aware)
 //   3. Idempotent: relay × market uniqueness 自然由 side_p2sh UNIQUE 守 (= 同 direction 同 bettor 同 market 同 stake = 同 P2SH).
 //
 // Guardrails:
@@ -17,6 +17,7 @@
 //   - deadline < 120s skip 防 race
 //   - per-cycle / per-relay 上限 PER_TICK 防资金过快烧
 
+import { randomBytes } from 'node:crypto';
 import { sqlite } from '../db/client.js';
 import { isRelayAlive, sendCommandAsync } from './relay-manager.js';
 
@@ -81,18 +82,25 @@ function _randomDirection() {
   return Math.random() < 0.5 ? 0 : 1;  // 0=YES, 1=NO
 }
 
+// J2-tn 2026-06-30 (Owner "删老代码" + Bettor commingle 根治): auto-bet 改走 register-v07/prep+confirm
+//   (shard-aware 路·第一注 open_new 建 shard·满 32 自动滚片)。**删 v06 logical 押注路** = commingling 物理
+//   不可能(v07 永远落 shard·pool_bettor_sides.market_id = shard_market_id·非 logical)。
+//   v07 与 v06 的关键差异: ① 必带 bet_id(nonce 熵源·解同 relay 同向复押碰撞)② confirm 返 `registered`(非 `ok`·
+//   ok:true 仍可能 registered:false/pending/ambiguous)③ prep 返 exact_stake_kas 已含 nonce(8 位精度·KAS↔sompi 精确往返)。
+//   验收(Bettor): 1 注 → market_shards 出记录 + pool_bettor_sides.market_id = shard_market_id(-s0)。
 async function _placeBet(bot, market) {
   const direction = _randomDirection();
   const stakeKas = _randomStakeKas();
   const dirLabel = direction === 0 ? 'YES' : 'NO';
   const tag = market.id.slice(-12);
+  const betId = randomBytes(8).toString('hex');   // 每笔唯一 nonce 熵源 (复押去碰撞)
 
   try {
-    // Step 1: prep — compute side_p2sh + exact stake
-    const prepR = await fetchWithTimeout(`${CONSOLE_BASE}/api/pool/market/${market.id}/bettor/register-v06/prep`, {
+    // Step 1: prep (v07) — compute side_p2sh + exact stake (含 nonce)
+    const prepR = await fetchWithTimeout(`${CONSOLE_BASE}/api/pool/market/${market.id}/bettor/register-v07/prep`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ linked_addr: bot.address, direction, stake_kas: parseFloat(stakeKas) }),
+      body: JSON.stringify({ linked_addr: bot.address, direction, stake_kas: parseFloat(stakeKas), bet_id: betId }),
     }, FETCH_TIMEOUT_FAST_MS);
     const prep = await prepR.json();
     if (!prep.ok) {
@@ -100,7 +108,7 @@ async function _placeBet(bot, market) {
       return { tag, bot: bot.name, status: 'PREP_FAIL', error: String(prep.error || '').slice(0, 80) };
     }
 
-    // Step 2: transfer — relay sends exact_stake_kas to side_p2sh
+    // Step 2: transfer — relay sends exact_stake_kas (含 nonce·8 位精度) to side_p2sh
     const payR = await fetchWithTimeout(`${CONSOLE_BASE}/api/relay/${bot.id}/transfer`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -109,23 +117,26 @@ async function _placeBet(bot, market) {
     const pay = await payR.json();
     if (!pay.ok || !pay.txId) return { tag, bot: bot.name, status: 'PAY_FAIL', error: String(pay.error || '').slice(0, 80) };
 
-    // Step 3: confirm — register side row + broadcast pool_bet_registered_v1
+    // Step 3: confirm (v07) — detect payment → registerBettorOnShard splice (落 shard·非 logical)
     // Try confirm a few times because UTXO needs to land in indexer/mempool.
+    // v07: 检 `registered`(非 `ok`); ambiguous=同额多 UTXO 碰撞→停(bet_id 唯一时不该发生)。
     let confirmed = null;
     for (let attempt = 0; attempt < 6; attempt++) {
       await new Promise(r => setTimeout(r, 3000 + attempt * 2000));
-      const confirmR = await fetchWithTimeout(`${CONSOLE_BASE}/api/pool/market/${market.id}/bettor/register-v06/confirm`, {
+      const confirmR = await fetchWithTimeout(`${CONSOLE_BASE}/api/pool/market/${market.id}/bettor/register-v07/confirm`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ linked_addr: bot.address, direction, stake_kas: parseFloat(stakeKas) }),
+        body: JSON.stringify({ linked_addr: bot.address, direction, stake_kas: parseFloat(stakeKas), bet_id: betId }),
       }, FETCH_TIMEOUT_TX_MS);
       const confirm = await confirmR.json();
-      if (confirm.ok) { confirmed = confirm; break; }
+      if (confirm.registered) { confirmed = confirm; break; }
+      if (confirm.ambiguous) return { tag, bot: bot.name, status: 'AMBIGUOUS', pay_tx: pay.txId.slice(0, 16) };
     }
     if (!confirmed) {
       return { tag, bot: bot.name, status: 'PAID_NOT_CONFIRMED', pay_tx: pay.txId.slice(0, 16), stake: prep.exact_stake_kas, dir: dirLabel };
     }
-    return { tag, bot: bot.name, status: 'CONFIRMED', side_tx: pay.txId.slice(0, 16), stake: prep.exact_stake_kas, dir: dirLabel };
+    const shardId = confirmed.shard_market_id || confirmed.shardMarketId || '?';
+    return { tag, bot: bot.name, status: 'CONFIRMED', side_tx: pay.txId.slice(0, 16), stake: prep.exact_stake_kas, dir: dirLabel, shard: shardId };
   } catch (e) {
     return { tag, bot: bot.name, status: 'EXCEPTION', error: String(e.message || '').slice(0, 80) };
   }
@@ -142,7 +153,7 @@ async function _fetchEligibleMarkets() {
     SELECT id, protocol_version, deadline
     FROM pool_markets
     WHERE protocol_status = 'pending_bettors'
-      AND (protocol_version = 'v0.6' OR protocol_version = 'v0.7')
+      AND protocol_version = 'v0.7'
       AND deadline > unixepoch() + 120
       AND deadline < unixepoch() + ?
       AND (spine_p2sh IS NULL OR spine_p2sh NOT IN (
