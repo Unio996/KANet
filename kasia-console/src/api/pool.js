@@ -1160,7 +1160,8 @@ export async function registerPoolRoutes(fastify) {
     const p2sh = (redeemHex) => kaspa.addressFromScriptPublicKey(kaspa.ScriptBuilder.fromScript(new Uint8Array(Buffer.from(redeemHex, 'hex'))).createPayToScriptHashScript(), network).toString();
     const rc = (cmd) => sendCommandAsync(gatewayRelayId, cmd, 90000);
     const transfer = async (addr, sompi) => { const r = await transferAndConfirm(gatewayRelayId, addr, (Number(sompi) / 1e8).toFixed(8)); return r.txId; };
-    const landed = async (txid, addr, n = 25) => { for (let i = 0; i < n; i++) { const j = await sendCommandAsync(gatewayRelayId, { type: 'check_utxo_landed', address: addr, txid }, 20000); if (j.landed || j.found) return true; await new Promise(r => setTimeout(r, 2000)); } return false; };
+    // minDepth: 20 (J1 phantom-leaf 根治) — reorg-safe DAA-深度门: 浅确认 UTXO(被 reorg 退)不算 landed → register land-gate 不记 phantom leaf。poll 到 depth≥20 才 true; 超时返 false → caller throw(NO-TX-NO-STATE 不推进 leaf)。
+    const landed = async (txid, addr, n = 25) => { for (let i = 0; i < n; i++) { const j = await sendCommandAsync(gatewayRelayId, { type: 'check_utxo_landed', address: addr, txid, minDepth: 20 }, 20000); if (j.landed || j.found) return true; await new Promise(r => setTimeout(r, 2000)); } return false; };
 
     // shard→pool_markets row: each physical shard is a minimal pool_markets clone (FK shard_market_id REFERENCES pool_markets(id);
     //   foreign_keys=ON). UI aggregates shards under the logical market via market_shards.logical_market_id. ⚠ DESIGN-FLAG for team:
@@ -1358,7 +1359,8 @@ export async function registerPoolRoutes(fastify) {
       const p2sh = (redeemHex) => kaspa.addressFromScriptPublicKey(kaspa.ScriptBuilder.fromScript(new Uint8Array(Buffer.from(redeemHex, 'hex'))).createPayToScriptHashScript(), network).toString();
       const rc = (cmd) => sendCommandAsync(gatewayRelayId, cmd, 90000);
       const transfer = async (addr, sompi) => { const r = await transferAndConfirm(gatewayRelayId, addr, (Number(sompi) / 1e8).toFixed(8)); return r.txId; };
-      const landed = async (txid, addr, n = 25) => { for (let i = 0; i < n; i++) { const j = await sendCommandAsync(gatewayRelayId, { type: 'check_utxo_landed', address: addr, txid }, 20000); if (j.landed || j.found) return true; await new Promise(r => setTimeout(r, 2000)); } return false; };
+      // minDepth: 20 (J1 phantom-leaf 根治) — reorg-safe DAA-深度门: 浅确认 UTXO(被 reorg 退)不算 landed → register land-gate 不记 phantom leaf。poll 到 depth≥20 才 true; 超时返 false → caller throw(NO-TX-NO-STATE 不推进 leaf)。
+    const landed = async (txid, addr, n = 25) => { for (let i = 0; i < n; i++) { const j = await sendCommandAsync(gatewayRelayId, { type: 'check_utxo_landed', address: addr, txid, minDepth: 20 }, 20000); if (j.landed || j.found) return true; await new Promise(r => setTimeout(r, 2000)); } return false; };
       const relayAddr = payAddr;
 
       // shard→pool_markets clone row (FK shard_market_id REFERENCES pool_markets(id)) — identical to monolithic register-v07.

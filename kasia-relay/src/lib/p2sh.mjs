@@ -1448,17 +1448,33 @@ export async function unlockPoolSideRefundCancelled(args) {
  * double-spend race → is_accepted=false → no UTXO. Callers that record success on the
  * returned txId alone violate "NO TX NO STATE CHANGE". This confirms the UTXO is real.
  *
+ * ★ reorg-safe confirmation depth (J1, 2026-06-30 phantom-leaf 根治): first-seen UTXO can be
+ *   shallow (depth-0/1) then removed by a reorg → caller (register_append land-gate) records a
+ *   phantom leaf outpoint → later settle "consolidate UTXO not found" (hcxu3/clycz 2 实例). TN12
+ *   实测 (Bettor): reorg ~26% 恒常但 always depth=1. Gate: require DAA-depth
+ *   = virtualDaaScore − utxoEntry.blockDaaScore ≥ minDepth (默认 20 = 20× 实测 max·~2.5s@8BPS).
+ *   minDepth=0 → legacy first-seen (backward-compat·其余 caller 不传则不变). fail-closed: blockDaaScore
+ *   缺失/depth<minDepth → landed:false (浅确认不放行·NO-TX-NO-STATE·不记 phantom).
+ *
  * @param {string} address - target address (P2SH or P2PK) the transfer paid to
  * @param {string} txid - the transfer TX id
  * @param {string} networkId
- * @returns {Promise<{ landed: boolean }>}
+ * @param {number} [minDepth=0] - min DAA-depth (virtualDaaScore − blockDaaScore) to count as landed
+ * @returns {Promise<{ landed: boolean, depth?: number|null }>}
  */
-export async function checkUtxoLanded(address, txid, networkId) {
+export async function checkUtxoLanded(address, txid, networkId, minDepth = 0) {
   const rpc = await connectRpc(networkId);
   try {
     const { entries } = await rpc.getUtxosByAddresses([address]);
-    const landed = (entries || []).some(e => e.outpoint?.transactionId === txid);
-    return { landed };
+    const entry = (entries || []).find(e => e.outpoint?.transactionId === txid);
+    if (!entry) return { landed: false };
+    if (!(Number(minDepth) > 0)) return { landed: true };           // legacy first-seen (minDepth 0/未传)
+    const bds = entry.utxoEntry?.blockDaaScore;
+    if (bds == null) return { landed: false, depth: null };         // fail-closed: 无 blockDaaScore 无法验深度
+    const dag = await rpc.getBlockDagInfo();
+    const depth = Number(dag.virtualDaaScore) - Number(bds);
+    // 浅确认 (depth < minDepth) = 可能被 reorg 退 → 尚未 landed (caller poll loop 继续等深确认)
+    return depth >= Number(minDepth) ? { landed: true, depth } : { landed: false, depth };
   } finally {
     try { await rpc.disconnect(); } catch {}
   }

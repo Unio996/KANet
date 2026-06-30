@@ -1042,9 +1042,10 @@ if (process.send) {
           // A mempool-accepted TX can lose a double-spend race (is_accepted=false) → no UTXO.
           const { checkUtxoLanded } = await import('./lib/p2sh.mjs');
           const wallet = getWallet();
-          const r = await checkUtxoLanded(cmd.address, cmd.txid, wallet.getNetworkId());
+          // ★ minDepth (J1 phantom-leaf 根治): caller (register land-gate) 传 ≥20 → reorg-safe 深度门; 未传=0 legacy first-seen
+          const r = await checkUtxoLanded(cmd.address, cmd.txid, wallet.getNetworkId(), cmd.minDepth);
           if (cmd.requestId && process.send) {
-            process.send({ requestId: cmd.requestId, result: { ok: true, landed: r.landed } });
+            process.send({ requestId: cmd.requestId, result: { ok: true, landed: r.landed, depth: r.depth } });
           }
           return;
         }
