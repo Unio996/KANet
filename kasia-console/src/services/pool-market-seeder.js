@@ -106,6 +106,15 @@ export async function pickGammaMarkets(limit = 1) {
     if (m.questionID) specObj.uma_question_id = m.questionID;
     if (m.negRisk != null) specObj.neg_risk = !!m.negRisk;
     if (m.negRiskMarketID) specObj.neg_risk_market_id = m.negRiskMarketID;
+    // #27 层B (Owner 钦定 2026-06-30 母子盘): 存 Polymarket event_id (赛事原生分组·gamma events[0]·100% 覆盖)。
+    //   bot 按 event_id 把同赛事多玩法子盘归并到母盘显示(非单列)。实证: "Will Morocco win WC?" events[0]=id 30615 "World Cup Winner"。
+    //   覆盖 100% (每 market 都有 events) > 标题前缀 22%。event_title/slug 供 bot 母盘显示名。
+    const _ev = (Array.isArray(m.events) && m.events[0]) ? m.events[0] : null;
+    if (_ev && _ev.id) {
+      specObj.event_id = String(_ev.id);
+      if (_ev.title) specObj.event_title = String(_ev.title).trim().slice(0, 200);
+      if (_ev.slug) specObj.event_slug = String(_ev.slug);
+    }
     seen.add(condStr);
     out.push({
       conditionId: condStr,
