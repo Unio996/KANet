@@ -191,7 +191,12 @@ export async function consolidateUtxosRelay(opts = {}) {
     //   (含 in-flight bet 付款·confirm 取走前保护)。fund-safe-by-construction: 【不合并某 UTXO 永不丢钱】(只留着不动)·
     //   失败模式仅 defrag 少合并一轮(880-wall 容一轮 skip·young 下轮变老再合并)=benign。复用 checkUtxoLanded 的
     //   depth 算法(p2sh.mjs L1475·同 D=20 锚·4 级 blockDaaScore fallback)。
-    const DEFRAG_MIN_DEPTH = Number(process.env.DEFRAG_MIN_DEPTH) || 30;
+    //   🔴 阈值必 ≥【保护窗】= confirm 轮询间隔 + splice 处理(NWT/Bettor BLOCKING 算账·原 30 太低): bot
+    //   pollPendingBets=CONFIG.pollMs(config.mjs·默认 30000ms=30s)·TN12 ~10 BPS → 30s=300 块·付款最坏到
+    //   depth ~300 才被下轮 confirm 认领。∴ 默认 = D=20 + 300(30s 窗) + 80 margin = 400(覆盖 30s 轮询·env 可配)。
+    //   ⚠ 与 pollMs 耦合: 若 KANet-UI 给 pending-bet 加快轮询(2-5s·治本+真人 UX)→ 窗口降到 ~30-50 块·DEFRAG_MIN_DEPTH
+    //   可降到 ~60(env 设)。高默认 fund-safe(只是 defrag 少合并 <40s 的 young·健康 relay 大块多·无碍)。
+    const DEFRAG_MIN_DEPTH = Number(process.env.DEFRAG_MIN_DEPTH) || 400;
     let entries;
     try {
       const dag = await rpc.getBlockDagInfo();
