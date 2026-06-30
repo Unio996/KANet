@@ -32,6 +32,8 @@ export const COMMAND_TYPES = Object.freeze({
   ECDSA_SIGN: 'ecdsa_sign',
   GET_PUBKEY: 'get_pubkey',
   SIGN_INPUT_FOR_SETTLE: 'sign_input_for_settle',
+  GET_PER_BET_ADDRESS: 'get_per_bet_address',   // #28 (B) wire: 派生 per-bet 独立 P2SH 收款址 (relay.mjs handler·三层 KI-49)
+  SWEEP_PER_BET: 'sweep_per_bet',                // #28 (B) wire: sweep per-bet P2SH 扫回 gateway 报销 (relay.mjs handler·三层 KI-49)
   PREDICTION_SETTLE_BUILD_PREIMAGE: 'prediction_settle_build_preimage',
   // Oracle v0.3 sub 5c (J2 r21 ship 730b910) — 1V1 escrow settle_consensual maker+taker mutual sig preimage build.
   // KI sediment per feedback_ipc_double_enforce_register_both_layers 5/20: relay.mjs L688 case 漏 commands.mjs register
@@ -110,6 +112,8 @@ export const COMMAND_PAYLOAD_SCHEMA = Object.freeze({
   [COMMAND_TYPES.ECDSA_SIGN]: ['message'],
   [COMMAND_TYPES.GET_PUBKEY]: [],
   [COMMAND_TYPES.SIGN_INPUT_FOR_SETTLE]: ['tx_hex', 'input_index'],
+  [COMMAND_TYPES.GET_PER_BET_ADDRESS]: ['marketId', 'bettorPk', 'direction', 'payAmountSompi', 'betId'],  // #28 (B) per-bet 唯一性必传
+  [COMMAND_TYPES.SWEEP_PER_BET]: ['per_bet_address', 'redeem_hex'],  // #28 (B) sweep 必传
   [COMMAND_TYPES.PREDICTION_SETTLE_BUILD_PREIMAGE]: ['p2sh_address', 'required_input_outpoints', 'outputs'],
   // Oracle v0.3 sub 5c — 1V1 escrow settle_consensual maker+taker mutual sig preimage build.
   // KI sediment 5/20: COMMAND_PAYLOAD_SCHEMA missing entry → validateCommandPayload throws "required is not iterable".
@@ -169,6 +173,8 @@ export const COMMAND_FIELD_TYPES = Object.freeze({
   [COMMAND_TYPES.ECDSA_SIGN]: { message: 'string' },
   [COMMAND_TYPES.GET_PUBKEY]: {},
   [COMMAND_TYPES.SIGN_INPUT_FOR_SETTLE]: { tx_hex: 'string', input_index: 'number' },
+  [COMMAND_TYPES.GET_PER_BET_ADDRESS]: { marketId: 'string', bettorPk: 'string', direction: 'number', payAmountSompi: 'string', betId: 'string' },  // #28 (B)
+  [COMMAND_TYPES.SWEEP_PER_BET]: { per_bet_address: 'string', redeem_hex: 'string' },  // #28 (B)
   // p2sh_address allows array for pool multi-p2sh (= spine + N side) per B2 v0.5 Sub 2d Phase 2a-1.
   // sig_op_counts optional per-input array (Phase 3 bug 5 — preimage/final sighash consistency).
   [COMMAND_TYPES.PREDICTION_SETTLE_BUILD_PREIMAGE]: { p2sh_address: ['string', 'array'], required_input_outpoints: 'array', outputs: 'array', sig_op_counts: 'array' },
