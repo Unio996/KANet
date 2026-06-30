@@ -1062,6 +1062,12 @@ export async function poolSettlerTick() {
           AND deadline <= ?
       `).all(nowSec2);
       for (const wm of wmarkets) {
+        // ★ (J1 2026-06-30 BLOCKING fix): bshard 盘 skip — bshard bets 在 market_shards(shard layer)非 logical layer·
+        //   此 legacy watchdog 看 logical 0-bet + 过 deadline 误判"0-bet 空盘"→ force refund·误退【干净 bshard 盘】
+        //   (z3xar/p7xmw/yo18h live 实证·正被 UMA/judgeLine daemon 要结时被此 watchdog 抢退)。bshard 盘由
+        //   bshard-settle-daemon 结·非此 legacy settler。主循环 L356 已 isBshard skip·此 watchdog 漏 = 系统性误退根因。
+        const isBshard = sqlite.prepare('SELECT 1 FROM market_shards WHERE logical_market_id = ? LIMIT 1').get(wm.id);
+        if (isBshard) continue;
         let meta = {};
         try { meta = JSON.parse(wm.metadata || '{}'); } catch {}
         const ageSinceDeadlineMin = Math.floor((nowSec2 - wm.deadline) / 60);
