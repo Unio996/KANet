@@ -13,6 +13,7 @@ export const LANGS = {
     start_hot: '🔥 /hot — See open markets, bet directly',
     start_custody_warn: '⚠ Custodial · Node holds key · Use /link for real funds',
     start_help: '→ /help Full guide',
+    start_lang_btn_zh: '🌐 中文',
 
     // /start (linked)
     start_linked_title: '👋 KANet · You\'re ready',
@@ -343,6 +344,7 @@ export const LANGS = {
     start_hot: '🔥 /hot — 看热门市场, 直接押注',
     start_custody_warn: '⚠ 托管·节点持 key·真钱请 /link 非托管钱包',
     start_help: '→ /help 完整指南',
+    start_lang_btn_en: '🌐 English',
 
     // /start (linked)
     start_linked_title: '👋 KANet · 你已就绪',

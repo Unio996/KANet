@@ -71,7 +71,7 @@ bot.command('start', async (ctx) => {
     return ctx.reply(reply);
   }
   const addr = PM.getLinkedAddr(tgUser) || linked.get(tgUser)?.address;
-  if (!addr) return ctx.reply(M.startMessage(lang));
+  if (!addr) { const sm = M.startMessage(lang); return ctx.reply(sm.text, { reply_markup: sm.keyboard || undefined }); }
   // KANet-UI 2026-06-23 (Bettor 承重 custody 口径): custody-aware /start — 托管钱包(/wallet 生成, 节点持 key)
   // 与非托管(/link 自己地址, key 用户掌控)的警告不可一刀切。查 tg-wallet: 存在且地址==当前绑定 → 托管。
   // 查询失败 → custodial=null (显两类并存警告, 绝不假称"bot 不持 key")。
@@ -101,6 +101,36 @@ bot.command('lang', (ctx) => {
   }
   PM.setUserLang(tgUser, arg);
   return ctx.reply(t(arg, arg === 'zh' ? 'lang_set_zh' : 'lang_set_en'));
+});
+
+// /start 语言切换按钮 — 一键 EN↔ZH, 直接 editMessageText 无需重发.
+bot.callbackQuery('lang:toggle', async (ctx) => {
+  const tgUser = String(ctx.from.id);
+  const curLang = PM.getUserLang(tgUser) || 'en';
+  const newLang = curLang === 'en' ? 'zh' : 'en';
+  PM.setUserLang(tgUser, newLang);
+  await ctx.answerCallbackQuery();
+  const addr = PM.getLinkedAddr(tgUser) || linked.get(tgUser)?.address;
+  try {
+    if (addr) {
+      let custodial = null;
+      try {
+        const w = await api.tgWalletGet(tgUser);
+        if (w.ok && w.json?.ok) custodial = !!(w.json.exists && w.json.address === addr);
+      } catch { /* ignore */ }
+      let trending = null, sports = null;
+      try {
+        const [av, cg] = await Promise.all([api.availableMarkets(8), api.cardGroups(5)]);
+        if (av.ok && av.json?.ok) trending = av.json.markets || [];
+        if (cg.ok && cg.json?.ok) sports = cg.json.card_groups || [];
+      } catch { /* ignore */ }
+      const msg = M.startMessageLinked(addr, custodial, trending, CONFIG.botUsername, sports, newLang);
+      await ctx.editMessageText(msg.text, { reply_markup: msg.keyboard || undefined });
+    } else {
+      const msg = M.startMessage(newLang);
+      await ctx.editMessageText(msg.text, { reply_markup: msg.keyboard || undefined });
+    }
+  } catch { /* editMessageText fails if content unchanged — silent */ }
 });
 
 // KANet-UI 2026-06-23 (Owner 钦定 托管钱包·零门槛玩): /wallet 生成或查看; /balance; /receive。

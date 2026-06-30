@@ -9,7 +9,7 @@ export function startMessage(lang = 'en') {
   // §11 v2 (Owner 终裁 2026-06-27): 22行→6行精简. 详情移 /help. 首次用户+1行 /help 提示.
   // custody 警告保留 1 行(NWT 承重 bar: 不可删/弱化). faucet 数量不硬编.
   // Owner 2026-06-28: 首次用户加 /hot 指针(老用户嵌 5 热榜, 首次用户给指针兜底).
-  return [
+  const text = [
     t(lang, 'start_title'),
     '',
     t(lang, 'start_commands'),
@@ -20,6 +20,8 @@ export function startMessage(lang = 'en') {
     t(lang, 'start_custody_warn'),
     t(lang, 'start_help'),
   ].join('\n');
+  const langBtnKey = lang === 'en' ? 'start_lang_btn_zh' : 'start_lang_btn_en';
+  return { text, keyboard: { inline_keyboard: [[{ text: t(lang, langBtnKey), callback_data: 'lang:toggle' }]] } };
 }
 
 // §11 v2 (Owner 终裁 2026-06-27): 老用户极简, 无 /help 提示行. custody 双守行永在.
@@ -65,7 +67,9 @@ export function startMessageLinked(addr, custodial = null, trendingMarkets = nul
     buttons.push(...sportsBlock.buttons);
   }
 
-  return { text: lines.join('\n'), keyboard: buttons.length ? { inline_keyboard: buttons } : null };
+  const langBtnKey = lang === 'en' ? 'start_lang_btn_zh' : 'start_lang_btn_en';
+  buttons.push([{ text: t(lang, langBtnKey), callback_data: 'lang:toggle' }]);
+  return { text: lines.join('\n'), keyboard: { inline_keyboard: buttons } };
 }
 
 // Compact 5-market block for /start embed: title+pool+bettors per market, deeplink buttons.
