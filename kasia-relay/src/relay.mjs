@@ -620,6 +620,49 @@ if (process.send) {
           return;
         }
 
+        case 'get_per_bet_address': {
+          // #28 (B) piece② wire (J1 2026-07-01·Owner money-path 根治): 派生【per-bet 独立 P2SH 收款址】
+          //   替共享 relay P2PK → 付款根隔离·免并发花费(defrag/transfer 等碰不到·Martin paid-no-bet 根治)。
+          //   复用 per-bet-p2sh.mjs(派生 4 源验·spendability 3 源链证) + 本 relay x-only pubkey(gw key·sweep_per_bet 时签)。
+          //   confirm 检测此址有付款即 register(gateway 已垫)·sweep_per_bet 异步报销(J2 已链证可花)。
+          const kaspa = await import('kaspa-wasm');
+          const { derivePerBet } = await import('./lib/per-bet-p2sh.mjs');
+          const wallet = getWallet();
+          const addr = wallet.getAddress();
+          const xOnlyHex = kaspa.XOnlyPublicKey.fromAddress(new kaspa.Address(addr)).toString();
+          const networkId = String(addr).startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
+          const { marketId, bettorPk, direction, payAmountSompi, betId } = cmd;
+          if (!marketId || !bettorPk || direction == null || !payAmountSompi || !betId) {
+            throw new Error('get_per_bet_address: marketId/bettorPk/direction/payAmountSompi/betId 必传 (per-bet 唯一性)');
+          }
+          const d = derivePerBet(kaspa, { marketId, bettorPk, direction, payAmountSompi, betId, gwXOnlyHex: xOnlyHex, networkId });
+          if (cmd.requestId && process.send) {
+            process.send({ requestId: cmd.requestId, result: { ok: true, address: d.address, redeem_hex: d.redeemHex, nonce_hex: d.nonceHex, gw_x_only_pubkey: xOnlyHex } });
+          }
+          return;
+        }
+
+        case 'sweep_per_bet': {
+          // #28 (B) wire-2/3 (J1 2026-07-01): sweep per-bet P2SH 付款【扫回 gateway 自己】= 异步报销
+          //   (gateway 已用余额垫 stake 进 leaf·Bettor 读 recordBettorOnShard L148; sweep 补偿。sweep 失败不 strand
+          //   bet·未 sweep 由 reconciliation daemon(J2 piece④)重试防失血)。
+          //   🔑 复用 unlockP2SH_SingleEntry(proven no-selector P2SH spend·OracleStake timeout_unlock 同款·= J2
+          //   spendability harness 链证那套逐行: 单 in/out·无 fee-input·无 selector·createInputSignature SighashType.All·
+          //   scriptSig=sig+redeem-push)。零创新=零新签名险。per-bet redeem 单 CHECKSIG → single-entry no-selector 正解。
+          const { unlockP2SH_SingleEntry } = await import('./lib/p2sh.mjs');
+          const wallet = getWallet();
+          const gwAddr = wallet.getAddress();   // 扫回 gateway 自己 P2PK = 报销
+          if (!cmd.per_bet_address || !cmd.redeem_hex) {
+            throw new Error('sweep_per_bet: per_bet_address + redeem_hex 必传');
+          }
+          const redeem = new Uint8Array(Buffer.from(cmd.redeem_hex, 'hex'));
+          const r = await unlockP2SH_SingleEntry(wallet, cmd.per_bet_address, redeem, gwAddr, 0n);
+          if (cmd.requestId && process.send) {
+            process.send({ requestId: cmd.requestId, result: { ok: true, sweep_txid: r.txId, amount: String(r.amount), to: gwAddr } });
+          }
+          return;
+        }
+
         case 'sign_input_for_settle': {
           // Phase 4a Sub 8 (Bettor r238 Path A two-phase sign) — oracle signs a specific TX input.
           //

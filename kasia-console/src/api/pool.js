@@ -1280,12 +1280,24 @@ export async function registerPoolRoutes(fastify) {
     const gatewayRelayId = market.maker_relay_id;
     if (!isRelayAlive(gatewayRelayId)) { reply.code(503).send({ ok: false, error: 'gateway (maker) relay not alive' }); return null; }
     const gw = await sendCommandAsync(gatewayRelayId, { type: 'get_pubkey' });
-    const payAddr = gw.address;
-    if (!payAddr) { reply.code(503).send({ ok: false, error: 'gateway relay get_pubkey returned no address' }); return null; }
-    const network = payAddr.startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
+    const relayAddr = gw.address;
+    if (!relayAddr) { reply.code(503).send({ ok: false, error: 'gateway relay get_pubkey returned no address' }); return null; }
+    const network = relayAddr.startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
     const nonce = _v07PayNonce(logicalMarketId, bettorPk, v.direction, b.bet_id);
     const payAmountSompi = v.stakeAmount + nonce;
-    return { v, market, bettorPk, gatewayRelayId, payAddr, network, payAmountSompi };
+    // 🔴 #28 (B) wire-3/3 (J1 2026-07-01·Owner money-path 根治): payAddr = 【per-bet 独立 P2SH】(替共享 gw relayAddr)。
+    //   付款根隔离 → relay 通用选币(defrag/transfer 等 17 路)物理碰不到 → 免并发花费(Martin paid-no-bet 根治)。
+    //   ⚠ 确定性 by construction (Bettor wire-3/3 命门 option a): prep 与 confirm 【共用本 _v07PrepConfirmPrelude】·
+    //   同参数(marketId|bettorPk|direction|payAmountSompi|betId·单源)→ get_per_bet_address 派生【同址】(perBetNonce 确定性)。
+    //   per-bet 址唯一 → 该址只有这一笔付款·confirm exact-amount-match 在唯一址仍 work(零 commingle/零并发竞态)。
+    //   perBetRedeem 带回供 confirm 后 sweep_per_bet 报销 gateway(gateway 已垫·sweep 异步·失败不 strand bet·daemon 重试)。
+    const perBet = await sendCommandAsync(gatewayRelayId, {
+      type: 'get_per_bet_address',
+      marketId: logicalMarketId, bettorPk, direction: v.direction, payAmountSompi: String(payAmountSompi), betId: b.bet_id,
+    });
+    if (!perBet?.address || !perBet?.redeem_hex) { reply.code(503).send({ ok: false, error: `gateway relay get_per_bet_address failed (per-bet P2SH 派生): ${JSON.stringify(perBet).slice(0, 120)}` }); return null; }
+    const payAddr = perBet.address;
+    return { v, market, bettorPk, gatewayRelayId, payAddr, perBetRedeem: perBet.redeem_hex, relayAddr, network, payAmountSompi };
   }
 
   // POST /api/pool/market/:id/bettor/register-v07/prep — B step 1: compute pay address + exact pay amount (NO TX, no state change).
@@ -1322,7 +1334,7 @@ export async function registerPoolRoutes(fastify) {
     const logicalMarketId = request.params.id;
     const p = await _v07PrepConfirmPrelude(logicalMarketId, request.body || {}, reply);
     if (!p) return;
-    const { v, market, bettorPk, gatewayRelayId, payAddr, network, payAmountSompi } = p;
+    const { v, market, bettorPk, gatewayRelayId, payAddr, perBetRedeem, network, payAmountSompi } = p;
     // FINDING-2 ③ commingled guard (单源·inline per R-COMMINGLE-GUARD convention).
     if (assertNotCommingled(market, reply, sqlite)) return;
 
@@ -1417,6 +1429,15 @@ export async function registerPoolRoutes(fastify) {
         bettorPk, direction: v.direction, stakeSompi: v.stakeAmount, relayAddr, silverc, sealCount: 32, deadline: market.deadline,
         createShardMarketRow, recordBettor,
       });
+      // 🔴 #28 (B) wire-3/3 报销: bet 已注册 → sweep per-bet P2SH 付款回 gateway(补偿 gateway 垫的 stake)。
+      //   **fire-and-forget·best-effort**: 不 await(不阻 success 返回)·sweep 失败【绝不 strand bet】(bet 已注册·gateway
+      //   已垫·链上真相已成)·未 sweep 由 reconciliation daemon(J2 piece④)扫描重试防 gateway 失血。perBetRedeem 来自
+      //   prelude(prep/confirm 同源派生·byte-identical)。per-bet 唯一址 → sweep 只扫这一笔付款·不碰别的。
+      if (perBetRedeem) {
+        sendCommandAsync(gatewayRelayId, { type: 'sweep_per_bet', per_bet_address: payAddr, redeem_hex: perBetRedeem }, 90000)
+          .then((sr) => { if (!sr?.ok) console.warn(`[confirm] sweep_per_bet ${logicalMarketId} not-ok: ${JSON.stringify(sr).slice(0, 100)} (bet 已注册·daemon 重试报销)`); })
+          .catch((e) => console.warn(`[confirm] sweep_per_bet ${logicalMarketId} fail: ${e.message} (bet 已注册·daemon 重试报销)`));
+      }
       return reply.send({
         ok: true, registered: true, protocol_version: 'v0.7', logical_market_id: logicalMarketId,
         bettor_pk: bettorPk, direction: v.direction,
