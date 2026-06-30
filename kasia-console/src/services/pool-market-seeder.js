@@ -102,6 +102,10 @@ export async function pickGammaMarkets(limit = 1) {
     const specObj = { title: cleanTitle, data_source_canonical: dataSource, source: 'polymarket' };
     if (cleanCriteria) specObj.resolution_criteria = cleanCriteria;
     if (cleanSource) specObj.resolution_source_url = cleanSource;
+    // UMA adapter fields (J1 ingestion 2026-06-30): negRisk→adapter 路由·questionID→UMA OO reader join key
+    if (m.questionID) specObj.uma_question_id = m.questionID;
+    if (m.negRisk != null) specObj.neg_risk = !!m.negRisk;
+    if (m.negRiskMarketID) specObj.neg_risk_market_id = m.negRiskMarketID;
     seen.add(condStr);
     out.push({
       conditionId: condStr,
