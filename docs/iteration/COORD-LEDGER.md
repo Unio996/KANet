@@ -526,8 +526,11 @@ bshard 无人值守自动结算 daemon 冷启生产·双 canary GREEN（含 idx-
 
 ## 集成 / 部署态(git 真相，2026-06-30 KANet-UI 更新)
 - **master** tip `ca7e0a66`:含核心 bshard/oracle wave1 LIVE 码(经 bshard-m3-deploy sync)。
-- **bshard-m3-deploy** tip `b47d21df`:含本 session 所有修含 daemon(settle-daemon wire + computeSettlePlan + settleMarketLive + cleanliness 闸 + SETTLE_DAEMON_ENABLED=1)。
-- 🔶 **未进 master(feature ref / 在途)**:D4 loaders(`origin/j1-d4-loaders` aace8f39)/ tg-wallet(`origin/kanet-ui-tg-wallet` df2a9b34)。faucet per-IP 修(05a0a6c2)已在 bshard-m3-deploy。
+- **bshard-m3-deploy** tip(本 session 更新 `merge phantom-leaf fix`):
+  - `b47d21df` daemon wire-up（上个 session）
+  - `068330f4` **phantom-leaf 根治 landed() D=20 + BLOCKING 字段路径修（J1·KANet-UI merge 2026-06-30 12:29 deploy）**
+  - AUTO_BET_TICK_MS=60000 per_tick=3 恢复（Bettor 12:28 授权·5源 co-verify GREEN·Owner"基本做通了"）
+- 🔶 **未进 master(feature ref / 在途)**:D4 loaders(`origin/j1-d4-loaders` aace8f39)/ tg-wallet(`origin/kanet-ui-tg-wallet` df2a9b34)。
 - ✅ **orphan 1596fb62 DONE**(u7hq4 市场 1000 KAS):Bettor GO 08:57 → 临时 DB id=7816 插入 → bettor-refund-claim endpoint → txId=36522a1f,output=99999999000 sompi。J1(:3300)cross-node UTXO=0 + Bettor(:3200)kaspa_tx_log block 双验。**总计 made-whole: 10 sides, 5,608.8 KAS**(batch-1 9 sides 4,608.8 KAS + orphan 1,000 KAS)。
 - ⬜ 择机 merge 进 master + verify-ship 收齐。J1 gated on NWT FINDING-1 修。
 
