@@ -5,6 +5,7 @@
 import * as api from './console-api.mjs';
 import { t, detectLang } from './i18n.mjs';
 import { CONFIG } from './config.mjs';
+import { randomUUID } from 'crypto';
 import { readFileSync, writeFileSync, existsSync, renameSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
@@ -369,8 +370,9 @@ export async function startBetFromMarket(tgUser, marketId) {
   }
   // 满员早拒: inline-keyboard 按钮跨 bot 重启持久存在, 用户可能点旧 /start 里已满盘进来.
   // raw_bettor_count = raw COUNT(*) 含 AutoBetter (== prep L1524 同源); 缺失 fail-closed → 999.
+  // v0.7 市场滚动分片无上限·跳过 50-cap (J2 spec 2026-06-30).
   const rawCount = dr.json.raw_bettor_count ?? 999; // fail-closed: missing raw → treat as full
-  if (rawCount >= 50) {
+  if (rawCount >= 50 && market.protocol_version !== 'v0.7') {
     return t(lang, 'market_full');
   }
   // 直接进 detail 复用同 UI
@@ -607,12 +609,16 @@ async function _handleReplyImpl(tgUser, text, linkedAddr) {
       return t(lang, 'bet_amount_expired');
     }
     const direction = s.side === 'YES' ? 0 : 1;   // PoolSide ctor: 0=YES 1=NO
-    const pr = await api.poolRegisterPrep(s.market.id, { linkedAddr, direction, stakeKas: amt });
-    if (!pr.ok || !pr.json || !pr.json.side_p2sh || pr.json.exact_stake_sompi == null) {
+    // v0.7: betId feeds nonce=hash(market|pk|dir|bet_id) to prevent same-person same-direction collision.
+    const betId = randomUUID();
+    const pr = await api.poolRegisterPrep(s.market.id, { linkedAddr, direction, stakeKas: amt, protocolVersion: s.market.protocol_version, betId });
+    // v07 prep returns exact_stake_kas (float KAS); v06 returns exact_stake_sompi. Handle both.
+    const exactSompi = pr.json?.exact_stake_sompi ?? Math.round((pr.json?.exact_stake_kas ?? 0) * 1e8);
+    if (!pr.ok || !pr.json || !pr.json.side_p2sh || exactSompi === 0) {
       sessions.delete(tgUser);
       return t(lang, 'bet_amount_prep_fail', { error: (pr.json && pr.json.error) || ('HTTP ' + pr.status) });
     }
-    s.prep = { side_p2sh: pr.json.side_p2sh, exact_sompi: pr.json.exact_stake_sompi, direction };
+    s.prep = { side_p2sh: pr.json.side_p2sh, exact_sompi: exactSompi, direction, betId };
     s.stage = 'confirm';
     const kas = sompiToKasStr(s.prep.exact_sompi);
     // Owner P0 (Bettor r116 spec, KANet-UI ship): tap-to-copy 地址 + 精确金额 + Kaspa payment URI.
@@ -673,6 +679,8 @@ async function _handleReplyImpl(tgUser, text, linkedAddr) {
       side_p2sh: s.prep.side_p2sh, exact_sompi: s.prep.exact_sompi,
       question: s.market.resolution_rule_spec, side: s.side,
       deadline: s.market.deadline || null, since: Date.now(),
+      protocolVersion: s.market.protocol_version || 'v0.6',
+      betId: s.prep.betId || null,
     };
     // 托管一键付: 查余额 → 够 → set-pending-first → auto-pay → 失败则 delete + fallthrough
     const wRes = await api.tgWalletGet(tgUser);

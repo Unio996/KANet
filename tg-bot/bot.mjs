@@ -432,7 +432,7 @@ async function pollPendingBets() {
       try { await bot.api.sendMessage(p.tgUser, t(uLang, 'poll_no_linkedaddr')); } catch {}
       continue;
     }
-    const r = await api.poolRegisterConfirm(p.marketId, { linkedAddr: p.linkedAddr, direction: p.direction, stakeKas: p.stakeKas });
+    const r = await api.poolRegisterConfirm(p.marketId, { linkedAddr: p.linkedAddr, direction: p.direction, stakeKas: p.stakeKas, protocolVersion: p.protocolVersion, betId: p.betId });
     const j = r.json || {};
     if (r.ok && (j.registered || j.already_registered || j.side_lock_tx || j.merkle_index != null)) {
       PM.clearPendingPayment(p.tgUser);

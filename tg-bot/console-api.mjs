@@ -96,16 +96,20 @@ export function brokerFeeDmEvents(sinceMs) {
 // confirm = bot reports it's awaiting payment; backend runs the 3 validations (dest==side_p2sh +
 //   amount==exact_sompi + UNIQUE tx) against on-chain state → inserts pool_bettor_sides when detected.
 // Path mirrors the existing /api/pool/market/:id/bettor/register convention; exact -external path pending J1 ship.
-// DoD #1.3 (Bettor r316): switched from register-external (v0.5 only) to register-v06 endpoint, which
-// now dual-handles v0.6 + v0.7 markets (PoolSide ctor identical, helper switches by version internally).
+// DoD #1.3 (Bettor r316): switched from register-external (v0.5 only) to register-v06 endpoint.
+// v0.7 markets route to register-v07 which uses amount-nonce attribution (betId → nonce entropy).
 // v0.5 markets are no longer offered via /bet (filter in prediction-menu.mjs excludes them).
-export function poolRegisterPrep(marketId, { linkedAddr, direction, stakeKas }) {
-  return req('POST', `/api/pool/market/${encodeURIComponent(marketId)}/bettor/register-v06/prep`,
-    { linked_addr: linkedAddr, direction, stake_kas: stakeKas });
+export function poolRegisterPrep(marketId, { linkedAddr, direction, stakeKas, protocolVersion, betId }) {
+  const v07 = String(protocolVersion || '').startsWith('v0.7');
+  const ep = v07 ? 'register-v07' : 'register-v06';
+  return req('POST', `/api/pool/market/${encodeURIComponent(marketId)}/bettor/${ep}/prep`,
+    { linked_addr: linkedAddr, direction, stake_kas: stakeKas, ...(v07 ? { bet_id: betId } : {}) });
 }
-export function poolRegisterConfirm(marketId, { linkedAddr, direction, stakeKas }) {
-  return req('POST', `/api/pool/market/${encodeURIComponent(marketId)}/bettor/register-v06/confirm`,
-    { linked_addr: linkedAddr, direction, stake_kas: stakeKas });
+export function poolRegisterConfirm(marketId, { linkedAddr, direction, stakeKas, protocolVersion, betId }) {
+  const v07 = String(protocolVersion || '').startsWith('v0.7');
+  const ep = v07 ? 'register-v07' : 'register-v06';
+  return req('POST', `/api/pool/market/${encodeURIComponent(marketId)}/bettor/${ep}/confirm`,
+    { linked_addr: linkedAddr, direction, stake_kas: stakeKas, ...(v07 ? { bet_id: betId } : {}) });
 }
 
 // Bettor r70 B (Owner P0): /mybets data source. Returns positions[] with
