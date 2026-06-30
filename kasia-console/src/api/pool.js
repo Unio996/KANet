@@ -1334,7 +1334,7 @@ export async function registerPoolRoutes(fastify) {
     const logicalMarketId = request.params.id;
     const p = await _v07PrepConfirmPrelude(logicalMarketId, request.body || {}, reply);
     if (!p) return;
-    const { v, market, bettorPk, gatewayRelayId, payAddr, network, payAmountSompi } = p;
+    const { v, market, bettorPk, gatewayRelayId, payAddr, perBetRedeem, network, payAmountSompi } = p;
     // FINDING-2 ③ commingled guard (单源·inline per R-COMMINGLE-GUARD convention).
     if (assertNotCommingled(market, reply, sqlite)) return;
 
@@ -1429,6 +1429,15 @@ export async function registerPoolRoutes(fastify) {
         bettorPk, direction: v.direction, stakeSompi: v.stakeAmount, relayAddr, silverc, sealCount: 32, deadline: market.deadline,
         createShardMarketRow, recordBettor,
       });
+      // 🔴 #28 (B) wire-3/3 报销: bet 已注册 → sweep per-bet P2SH 付款回 gateway(补偿 gateway 垫的 stake)。
+      //   **fire-and-forget·best-effort**: 不 await(不阻 success 返回)·sweep 失败【绝不 strand bet】(bet 已注册·gateway
+      //   已垫·链上真相已成)·未 sweep 由 reconciliation daemon(J2 piece④)扫描重试防 gateway 失血。perBetRedeem 来自
+      //   prelude(prep/confirm 同源派生·byte-identical)。per-bet 唯一址 → sweep 只扫这一笔付款·不碰别的。
+      if (perBetRedeem) {
+        sendCommandAsync(gatewayRelayId, { type: 'sweep_per_bet', per_bet_address: payAddr, redeem_hex: perBetRedeem }, 90000)
+          .then((sr) => { if (!sr?.ok) console.warn(`[confirm] sweep_per_bet ${logicalMarketId} not-ok: ${JSON.stringify(sr).slice(0, 100)} (bet 已注册·daemon 重试报销)`); })
+          .catch((e) => console.warn(`[confirm] sweep_per_bet ${logicalMarketId} fail: ${e.message} (bet 已注册·daemon 重试报销)`));
+      }
       return reply.send({
         ok: true, registered: true, protocol_version: 'v0.7', logical_market_id: logicalMarketId,
         bettor_pk: bettorPk, direction: v.direction,
