@@ -80,6 +80,29 @@ function fmtDeadline(unixSec, lang) {
 // 列表里截短标题 (resolution_rule_spec 可能含完整结算规则全文, Bettor r256). 详情页给全文.
 function trunc(s, n) { s = String(s || ''); return s.length > n ? s.slice(0, n - 1) + '…' : s; }
 
+// #27 层B (695ce499·Owner 母子盘): 按 spec.event_id 归并同赛事子盘。
+// 返 [{type:'event_group', eventId, eventTitle, markets}, {type:'market', market}]。
+// 单盘 event = 不分组(直接显示避免多余层级)。无 event_id = 直接显示。
+function _groupMarketEntries(markets) {
+  const eventMap = new Map();
+  const direct = [];
+  for (const m of markets) {
+    let spec = null;
+    try { spec = JSON.parse(m.resolution_rule_spec); } catch {}
+    const eid = spec && spec.event_id;
+    if (eid) {
+      if (!eventMap.has(eid)) eventMap.set(eid, { type: 'event_group', eventId: eid, eventTitle: String(spec.event_title || eid).trim().slice(0, 80), markets: [] });
+      eventMap.get(eid).markets.push(m);
+    } else { direct.push({ type: 'market', market: m }); }
+  }
+  const result = [];
+  for (const eg of eventMap.values()) {
+    if (eg.markets.length >= 2) result.push(eg);
+    else direct.push({ type: 'market', market: eg.markets[0] });
+  }
+  return [...result, ...direct];
+}
+
 // KANet-UI 2026-06-07 r308: market 出单人 label. backend /api/pool/markets LEFT JOIN relay_nodes
 // 返 maker_name; 跨节点 maker (= relay_nodes 本节点无 record) → name=null, fallback 短 id.
 function makerLabel(m) {
@@ -522,9 +545,17 @@ async function _handleReplyImpl(tgUser, text, linkedAddr) {
     }
     s.stage = 'market';
     s.markets = entry.markets;
+    s.marketEntries = _groupMarketEntries(entry.markets);
     const head = entry.type === 'worldcup' ? t(lang, 'bet_market_worldcup_head') : `📂 ${entry.cat}`;
     const lines = [t(lang, 'bet_market_list_head', { head }), ''];
-    s.markets.forEach((m, i) => lines.push(`${i + 1}. ${trunc(specTitle(m.resolution_rule_spec), 56)}  · ${makerLabel(m)} · ${fmtDeadline(m.deadline, lang)} · ${m.bettor_count || 0}`));
+    s.marketEntries.forEach((e, i) => {
+      if (e.type === 'event_group') {
+        lines.push(`${i + 1}. 🎯 ${trunc(e.eventTitle, 54)} (${e.markets.length})`);
+      } else {
+        const m = e.market;
+        lines.push(`${i + 1}. ${trunc(specTitle(m.resolution_rule_spec), 56)}  · ${makerLabel(m)} · ${fmtDeadline(m.deadline, lang)} · ${m.bettor_count || 0}`);
+      }
+    });
     lines.push('', t(lang, 'bet_market_list_footer'));
     return lines.join('\n');
   }
@@ -544,7 +575,7 @@ async function _handleReplyImpl(tgUser, text, linkedAddr) {
       String(m.resolution_rule_spec || '').toLowerCase().includes(lowerTerm)
     );
     if (!matches.length) return t(lang, 'bet_search_none', { term });
-    s.stage = 'market'; s.markets = matches;
+    s.stage = 'market'; s.markets = matches; s.marketEntries = null;
     const lines = [t(lang, 'bet_search_head', { term, count: matches.length }), ''];
     matches.forEach((m, i) => lines.push(`${i + 1}. ${trunc(specTitle(m.resolution_rule_spec), 56)}  · ${makerLabel(m)} · ${fmtDeadline(m.deadline, lang)} · ${m.bettor_count || 0}`));
     lines.push('', t(lang, 'bet_market_list_footer'));
@@ -553,8 +584,28 @@ async function _handleReplyImpl(tgUser, text, linkedAddr) {
 
   if (s.stage === 'market') {
     const n = parseInt(raw, 10);
-    const m = Number.isFinite(n) && s.markets[n - 1];
-    if (!m) return t(lang, 'bet_invalid_market', { max: s.markets.length });
+    let m;
+    if (s.marketEntries) {
+      if (!Number.isFinite(n) || n < 1 || n > s.marketEntries.length)
+        return t(lang, 'bet_invalid_market', { max: s.marketEntries.length });
+      const picked = s.marketEntries[n - 1];
+      if (picked.type === 'event_group') {
+        // 展开母盘→子盘列表
+        s.marketEntries = picked.markets.map(mm => ({ type: 'market', market: mm }));
+        const head = `🎯 ${picked.eventTitle}`;
+        const lines = [t(lang, 'bet_market_list_head', { head }), ''];
+        s.marketEntries.forEach((e, i) => {
+          const mm = e.market;
+          lines.push(`${i + 1}. ${trunc(specTitle(mm.resolution_rule_spec), 56)}  · ${makerLabel(mm)} · ${fmtDeadline(mm.deadline, lang)} · ${mm.bettor_count || 0}`);
+        });
+        lines.push('', t(lang, 'bet_market_list_footer'));
+        return lines.join('\n');
+      }
+      m = picked.market;
+    } else {
+      m = Number.isFinite(n) && s.markets[n - 1];
+      if (!m) return t(lang, 'bet_invalid_market', { max: s.markets.length });
+    }
     // 拉完整记录给精确结算判据 (Bettor r256 finding: 用户押注前须见完整规则+结算源, 否则吞钱风险).
     const dr = await api.poolMarket(m.id);
     const full = (dr.json && (dr.json.market || (dr.json.id ? dr.json : null))) || m;
