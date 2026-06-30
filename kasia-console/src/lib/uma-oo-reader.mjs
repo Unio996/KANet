@@ -61,8 +61,13 @@ export function makeMockOoReader(fixtures) {
 //   - RPC-trust (E): rpcs 多源并读 cross-check (公共+provider). 单 RPC 撒谎 → 与他源不符 → 不信.
 
 const _UMA_CTF_ADAPTER_MAINNET = '0x157Ce2d672854c848c9b79C49a8Cc6cc89176a49'; // Polygon v3.0 (WebFetch-verified)
+// ★ finality (Axis A, NWT BLOCKING 修): getExpectedPayouts 【不】查 resolved — dispute window(~2h)内
+//   就从 getRequest().resolvedPrice 返 proposed 价 = 非终局 → 结在可争议结果=错付. 必读 questions(qid).resolved
+//   (adapter 仅在 OO settle 后 _resolve() 置 resolved=true = DVM/challenge 窗过的终局). questions() getter
+//   返 12-field tuple, resolved = 第 6 字段(idx 5, bool) — 字段序 WebFetch-verified Structs.sol _saveQuestion.
 const _ADAPTER_ABI = [
   'function getExpectedPayouts(bytes32 questionID) view returns (uint256[])',
+  'function questions(bytes32) view returns (uint256 requestTimestamp, uint256 reward, uint256 proposalBond, uint256 liveness, uint256 manualResolutionTimestamp, bool resolved, bool paused, bool reset, bool refund, address rewardToken, address creator, bytes ancillaryData)',
 ];
 
 // payouts [YES,NO] → reader value (slice-1 extractor 数值约定). null = 非 definitive (未 resolved / 50-50 / 异常) → ABSTAIN.
@@ -81,7 +86,8 @@ function _payoutsToValue(p) {
  * 返 { readOoResolution(questionId, atBlock) → OoResolution }. atBlock 必传 (determinism 锚, 各委员同 block).
  */
 export function makeRpcOoReader({ rpcs, adapterAddress = _UMA_CTF_ADAPTER_MAINNET } = {}) {
-  if (!Array.isArray(rpcs) || rpcs.length === 0) throw new Error('makeRpcOoReader: rpcs (Polygon RPC URL[]) required');
+  // RPC-trust 轴 (Bettor/NWT): ≥2 源硬 require — 单 RPC 可撒谎, 无第二源对死则无 cross-check 意义.
+  if (!Array.isArray(rpcs) || rpcs.length < 2) throw new Error('makeRpcOoReader: rpcs needs ≥2 Polygon RPC URLs (single-source 无 cross-check)');
   return {
     async readOoResolution(questionId, atBlock) {
       const miss = { value: null, settled: false, settled_block: null, ancillary_id: questionId };
@@ -93,11 +99,15 @@ export function makeRpcOoReader({ rpcs, adapterAddress = _UMA_CTF_ADAPTER_MAINNE
         try {
           const provider = new ethers.JsonRpcProvider(url, undefined, { staticNetwork: true });
           const adapter = new ethers.Contract(adapterAddress, _ADAPTER_ABI, provider);
-          const payouts = await adapter.getExpectedPayouts(questionId, { blockTag }); // revert(未resolved) → catch
+          // ★ finality (Axis A, NWT BLOCKING 修): 先验 adapter.resolved==true (OO settle 后才置 = 终局).
+          //   getExpectedPayouts 自身不查 resolved → dispute 窗内返 proposed 价 = 非终局; 不读 resolved 会错付.
+          const q = await adapter.questions(questionId, { blockTag });
+          if (q.resolved !== true) return null;          // 未终局 (proposed/dispute 窗内/未提案) → ABSTAIN
+          const payouts = await adapter.getExpectedPayouts(questionId, { blockTag });
           return _payoutsToValue(payouts.map((x) => BigInt(x)));
-        } catch { return null; } // revert / RPC fail → 该源 null (finality: 未 resolved 即 ABSTAIN)
+        } catch { return null; } // revert(PriceNotAvailable)/RPC fail → 该源 null (fail-closed → ABSTAIN)
       }));
-      // finality + RPC-trust: 须【所有源都成功且同值且 definitive(非 null)】才消费; 任一不符 → ABSTAIN (fail-closed).
+      // finality + RPC-trust: 须【所有源都 resolved 且同值且 definitive(非 null)】才消费; 任一不符 → ABSTAIN (fail-closed).
       const first = reads[0];
       const allAgree = first !== null && reads.every((r) => r === first);
       if (!allAgree) return miss;
