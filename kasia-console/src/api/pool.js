@@ -1949,7 +1949,7 @@ export async function registerPoolRoutes(fastify) {
   //   消费方: trending / card_groups / markets-list / market-detail → 一个口径 (修 Owner '51人假数据' 抱怨)。
   //   honestCountSql/StakeSql 返回纯 SQL 表达式 (call-site 自加 AS <alias>)。mExpr = logical market id 的 SQL 表达式:
   //     'pool_markets.id' (相关子查询·list/trending/card_groups) 或 '?' (单盘 detail·该 expr 出现 2 次 → 须绑 2 次)。
-  const AUTO_BET_EXCL = `AND s.bettor_relay_id NOT IN (SELECT id FROM relay_nodes WHERE name LIKE 'AutoBetter-%')`;
+  const AUTO_BET_EXCL = `AND (s.bettor_relay_id IS NULL OR s.bettor_relay_id NOT IN (SELECT id FROM relay_nodes WHERE name LIKE 'AutoBetter-%'))`;
   function honestCountSql(mExpr) {
     return `((SELECT COUNT(*) FROM pool_bettor_sides s WHERE s.market_id = ${mExpr} ${AUTO_BET_EXCL})`
       + ` + (SELECT COUNT(*) FROM pool_bettor_sides s WHERE s.market_id IN (SELECT shard_market_id FROM market_shards WHERE logical_market_id = ${mExpr}) ${AUTO_BET_EXCL}))`;
