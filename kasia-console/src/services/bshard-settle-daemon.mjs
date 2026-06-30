@@ -147,6 +147,8 @@ function selectRipeMarkets(currentDaa, limit) {
 
 // per-market: consolidate (if needed) → settle → writeback。failure → settle_failed flag。
 async function settleOneMarket(marketId) {
+  _k = await kaspa();   // ensure kaspa-wasm loaded before sync p2sh/p2pk helpers (direct-call + tick safety)
+  if (!_pkMap) await buildPkMap();   // ensure committee pk→relay map (direct-call safety; tick also builds it)
   const ctx = buildCtx();
   const ps = sqlite.prepare('SELECT * FROM payout_shards WHERE logical_market_id = ?').get(marketId);
   if (!ps) { ctx.alert(marketId, 'no payout_shards row'); return { ok: false, reason: 'no PS' }; }

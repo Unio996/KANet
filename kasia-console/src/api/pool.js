@@ -1221,6 +1221,193 @@ export async function registerPoolRoutes(fastify) {
     }
   });
 
+  // ── B (无限滚动分片押注) 0-custody 两步流: register-v07/prep + register-v07/confirm (J2 2026-06-30, Owner 钦定 fresh 实现) ──
+  //   缺口: register-v07 (单体 L1103) 是 gateway-custody 一步 (无 /prep /confirm); bot 0-custody 用户自付流用不了 → 回退 v06 (单片 50-cap).
+  //   本两步流 = 把现成 registerBettorOnShard (allocate-at-confirm·满 SHARD_SEAL_COUNT=32 自动开新片·无限) 包装成 0-custody-风格两步 (编排非造新机制).
+  //   §3 命门 (J1 covenant·代码实证): relay handler unlockBshardRegister(p2sh.mjs:2024) 用 wallet.getPrivateKey() 签 funding input
+  //     → funding 地址只能是 gateway relay 自己钱包地址 → 口径 = relay-assisted (relay 持 funds + 签); 纯 0-custody (bettor 自签) = follow-up.
+  //   付款 attribution (shared relayAddr 防误吞): pay_amount = 注金 + per-(market,bettor,direction) deterministic nonce
+  //     (sha256(market|pk|dir) % 9000 + 1000 sompi, <0.0001 KAS) → confirm 按 exact pay_amount 匹配 UTXO; 注金本身 = 注的整额 (nonce 不进池/不进 DB stake).
+  //   经济守恒: bettor 付 pay_amount 到 relayAddr → gateway 余额 +pay_amount → registerBettorOnShard 从 gateway 余额垫 stake 进 leaf → gateway 净平 (+nonce 吸收 fee).
+  //   betId = 可选 caller idempotency key (bot 每笔押注生成 UUID, 传 prep+confirm 两步) → 额外熵: 解同 bettor 同向【复押】碰撞
+  //   (Bettor flag: hash(market+pk+dir) 对复押同 nonce → 同额 → 歧义). 无 betId 退化为 deterministic per (market,pk,dir).
+  //   残余碰撞 (不同 betId hash 撞同 tag) → confirm 的 >1-match 拒绝/挂起 (J1 no-strand #1) 兜住, 非 strand.
+  function _v07PayNonce(logicalMarketId, bettorPk, direction, betId) {
+    const h = createHash('sha256').update(`${logicalMarketId}|${bettorPk}|${direction}|${betId || ''}`).digest();
+    return 1000 + (h.readUInt32BE(0) % 89000);   // 1000..89999 sompi (<0.0009 KAS) attribution tag (relay 吸收, 不进池/DB stake)
+  }
+  // shared prelude for prep+confirm: validate + market gates + bettor_pk + area-1 exclusivity + gateway pay address.
+  async function _v07PrepConfirmPrelude(logicalMarketId, b, reply) {
+    const v = _extStakeValidate(b);
+    if (v.error) { reply.code(v.code).send({ ok: false, error: v.error }); return null; }
+    const market = sqlite.prepare('SELECT * FROM pool_markets WHERE id = ?').get(logicalMarketId);
+    if (!market) { reply.code(404).send({ ok: false, error: 'market not found' }); return null; }
+    if (market.protocol_version !== 'v0.7') { reply.code(409).send({ ok: false, error: `register-v07 requires protocol_version v0.7, got ${market.protocol_version}` }); return null; }
+    if (market.protocol_status !== 'pending_bettors') { reply.code(409).send({ ok: false, error: `market status=${market.protocol_status}, registration closed` }); return null; }
+    if (!market.pool_merkle_root) { reply.code(409).send({ ok: false, error: 'v0.7 market missing pool_merkle_root (committee)' }); return null; }
+    // 件1 (J1 deadline-gate): ShardLeaf bakes deadline as the partial-shard sweep gate. fail-closed if missing.
+    if (!Number.isFinite(Number(market.deadline)) || Number(market.deadline) <= 0) { reply.code(409).send({ ok: false, error: 'v0.7 market missing deadline (partial-shard sweep gate, 件1)' }); return null; }
+    // NOTE: FINDING-2 ③ commingled guard is enforced INLINE in each register* handler (R-COMMINGLE-GUARD convention —
+    //   the guard must be visible in the handler body, not hidden in a helper; see prep/confirm below).
+    let bettorPk;
+    try { bettorPk = await deriveXOnlyPubkey(b.linked_addr); }
+    catch (e) { reply.code(400).send({ ok: false, error: `linked_addr → pubkey failed: ${e.message}` }); return null; }
+    // area-1 exclusivity: oracle/maker cannot bet (mirror _extStakeDeriveSide guards).
+    if ([market.oracle1_pk, market.oracle2_pk, market.oracle3_pk].includes(bettorPk)) { reply.code(403).send({ ok: false, error: 'linked address is an oracle of this market — oracle/bettor exclusivity (area-1)' }); return null; }
+    const makerRow = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(market.maker_relay_id);
+    if (makerRow?.address && (await deriveXOnlyPubkey(makerRow.address)) === bettorPk) { reply.code(403).send({ ok: false, error: 'linked address is the market maker — maker bets implicitly via outcome_side (area-1)' }); return null; }
+    // gateway relay = market host (maker_relay_id); its P2PK wallet address = relay-signable funding/payment address (§3 relay-assisted).
+    const gatewayRelayId = market.maker_relay_id;
+    if (!isRelayAlive(gatewayRelayId)) { reply.code(503).send({ ok: false, error: 'gateway (maker) relay not alive' }); return null; }
+    const gw = await sendCommandAsync(gatewayRelayId, { type: 'get_pubkey' });
+    const payAddr = gw.address;
+    if (!payAddr) { reply.code(503).send({ ok: false, error: 'gateway relay get_pubkey returned no address' }); return null; }
+    const network = payAddr.startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
+    const nonce = _v07PayNonce(logicalMarketId, bettorPk, v.direction, b.bet_id);
+    const payAmountSompi = v.stakeAmount + nonce;
+    return { v, market, bettorPk, gatewayRelayId, payAddr, network, payAmountSompi };
+  }
+
+  // POST /api/pool/market/:id/bettor/register-v07/prep — B step 1: compute pay address + exact pay amount (NO TX, no state change).
+  fastify.post('/api/pool/market/:id/bettor/register-v07/prep', async (request, reply) => {
+    const logicalMarketId = request.params.id;
+    const p = await _v07PrepConfirmPrelude(logicalMarketId, request.body || {}, reply);
+    if (!p) return;   // prelude already sent the error reply
+    const { v, market, bettorPk, payAddr, network, payAmountSompi } = p;
+    // FINDING-2 ③ commingled guard (单源·inline per R-COMMINGLE-GUARD convention).
+    if (assertNotCommingled(market, reply, sqlite)) return;
+    // 🔴 NO 50-cap (B 无限滚动: SHARD_SEAL_COUNT=32 是封片开新阈值, 非拒绝阈值 → 无限押注).
+    return reply.send({
+      ok: true,
+      protocol_version: 'v0.7',
+      market_id: logicalMarketId,
+      direction: v.direction,
+      bettor_pk: bettorPk,
+      side_p2sh: payAddr,                                  // bot 复用 v06 渲染字段 ("付到 side_p2sh"); 这里 = relay P2PK 收款地址
+      pay_to_address: payAddr,
+      bet_stake_sompi: v.stakeAmount,                      // 实际下注额 (进池/进 DB)
+      bet_stake_kas: (v.stakeAmount / 1e8).toFixed(8),
+      exact_stake_sompi: payAmountSompi,                   // 实付额 = 注金 + 唯一 nonce (attribution); bot/用户付这个
+      exact_stake_kas: (payAmountSompi / 1e8).toFixed(8),
+      pool_merkle_root: market.pool_merkle_root,
+      network,
+      deadline: market.deadline,
+      custody: 'relay-assisted',
+      warning: 'Pay EXACTLY exact_stake_kas to side_p2sh. relay-assisted custody: the gateway relay holds & signs the funding input — this is NOT non-custodial; for real funds use your own /link wallet. Your bet routes to the open rolling shard (auto-opens a new shard past 32 bets per shard — no per-market cap). The small amount above bet_stake_kas is a per-bettor payment tag absorbed by the gateway.',
+    });
+  });
+
+  // POST /api/pool/market/:id/bettor/register-v07/confirm — B step 2: detect payment → registerBettorOnShard splice (NO TX NO STATE).
+  fastify.post('/api/pool/market/:id/bettor/register-v07/confirm', async (request, reply) => {
+    const logicalMarketId = request.params.id;
+    const p = await _v07PrepConfirmPrelude(logicalMarketId, request.body || {}, reply);
+    if (!p) return;
+    const { v, market, bettorPk, gatewayRelayId, payAddr, network, payAmountSompi } = p;
+    // FINDING-2 ③ commingled guard (单源·inline per R-COMMINGLE-GUARD convention).
+    if (assertNotCommingled(market, reply, sqlite)) return;
+
+    // ── detect payment: query relayAddr UTXOs, find one == payAmountSompi (exact, bettor-unique) not yet consumed ──
+    let utxos;
+    try {
+      const { url: rpcUrl } = await getWorkingRpc();
+      if (!rpcUrl) return reply.code(503).send({ ok: false, error: 'no working Kaspa RPC node — retry shortly' });
+      const { RpcClient, Encoding, Address } = await import('kaspa-wasm');
+      const rpc = new RpcClient({ url: rpcUrl, encoding: Encoding.Borsh, networkId: network });
+      await Promise.race([rpc.connect({}), new Promise((_, rej) => setTimeout(() => rej(new Error('RPC connect timeout')), 4000))]);
+      try { ({ entries: utxos } = await rpc.getUtxosByAddresses([new Address(payAddr)])); }
+      finally { await rpc.disconnect().catch(() => {}); }
+    } catch (e) {
+      return reply.code(503).send({ ok: false, error: `RPC UTXO query failed (${e.message}) — retry shortly` });
+    }
+    utxos = utxos || [];
+    // consumed = payment txids already registered across this logical market's shards (idempotent dedup).
+    const consumed = new Set(
+      sqlite.prepare(`SELECT pbs.side_lock_tx t FROM pool_bettor_sides pbs JOIN market_shards ms ON pbs.market_id = ms.shard_market_id WHERE ms.logical_market_id = ?`)
+        .all(logicalMarketId).map(r => r.t)
+    );
+    const amtOf = (u) => { try { return BigInt(u.amount); } catch { return null; } };
+    const txidOf = (u) => { const op = u.outpoint || u.entry?.outpoint; return op && (op.transactionId || op.transaction_id); };
+    // 🔴 no-strand #1 (J1): 一额一 UTXO 唯一才注册. 多个 unconsumed UTXO 撞同 exact 额 (碰撞/重复付) → 绝不盲取一个 attribute
+    //    (误吞=strand) → 拒绝/挂起, 款留 relayAddr (relay 控·可退·非黑洞), 让付款方改额重押.
+    const matches = utxos.filter(u => amtOf(u) === BigInt(payAmountSompi) && txidOf(u) && !consumed.has(txidOf(u)));
+    if (matches.length > 1) {
+      return reply.send({ ok: true, registered: false, ambiguous: true, side_p2sh: payAddr, pay_to_address: payAddr,
+        matching_unconsumed: matches.length, exact_stake_sompi: payAmountSompi, exact_stake_kas: (payAmountSompi / 1e8).toFixed(8),
+        note: `${matches.length} unconsumed payments of exactly ${(payAmountSompi / 1e8).toFixed(8)} KAS detected at side_p2sh — refusing to auto-attribute (no-strand). Pass a distinct bet_id (idempotency key) per bet and pay its unique amount; funds at side_p2sh are relay-held and recoverable.` });
+    }
+    const candidate = matches[0];
+    if (!candidate) {
+      // all matching payments already consumed → idempotent already_registered; else still pending.
+      const hasMatchingUtxo = utxos.some(u => amtOf(u) === BigInt(payAmountSompi));
+      const mine = sqlite.prepare(`SELECT pbs.market_id shard_market_id, pbs.side_lock_tx, pbs.merkle_index, pbs.stake_amount
+          FROM pool_bettor_sides pbs JOIN market_shards ms ON pbs.market_id = ms.shard_market_id
+          WHERE ms.logical_market_id = ? AND pbs.bettor_pk = ? AND pbs.direction = ? ORDER BY pbs.id DESC LIMIT 1`)
+        .get(logicalMarketId, bettorPk, v.direction);
+      if (hasMatchingUtxo && mine) {
+        return reply.send({ ok: true, registered: true, already_registered: true, shard_market_id: mine.shard_market_id, side_lock_tx: mine.side_lock_tx, merkle_index: mine.merkle_index, stake_sompi: mine.stake_amount });
+      }
+      return reply.send({ ok: true, registered: false, pending: true, side_p2sh: payAddr, pay_to_address: payAddr, exact_stake_sompi: payAmountSompi, exact_stake_kas: (payAmountSompi / 1e8).toFixed(8), note: `no payment of exactly ${(payAmountSompi / 1e8).toFixed(8)} KAS detected at side_p2sh yet — pay the exact amount and retry confirm.` });
+    }
+    const paymentTxid = txidOf(candidate);
+    if (!paymentTxid) return reply.code(500).send({ ok: false, error: 'payment UTXO outpoint.transactionId missing' });
+
+    // ── registerBettorOnShard wiring (relay-assisted; gateway funds stake into the leaf from its own balance, which the
+    //    bettor's payment to payAddr=relayAddr has just replenished → economics conserved). NO TX NO STATE: splice must land. ──
+    try {
+      const kaspa = await import('kaspa-wasm');
+      const p2sh = (redeemHex) => kaspa.addressFromScriptPublicKey(kaspa.ScriptBuilder.fromScript(new Uint8Array(Buffer.from(redeemHex, 'hex'))).createPayToScriptHashScript(), network).toString();
+      const rc = (cmd) => sendCommandAsync(gatewayRelayId, cmd, 90000);
+      const transfer = async (addr, sompi) => { const r = await transferAndConfirm(gatewayRelayId, addr, (Number(sompi) / 1e8).toFixed(8)); return r.txId; };
+      const landed = async (txid, addr, n = 25) => { for (let i = 0; i < n; i++) { const j = await sendCommandAsync(gatewayRelayId, { type: 'check_utxo_landed', address: addr, txid }, 20000); if (j.landed || j.found) return true; await new Promise(r => setTimeout(r, 2000)); } return false; };
+      const relayAddr = payAddr;
+
+      // shard→pool_markets clone row (FK shard_market_id REFERENCES pool_markets(id)) — identical to monolithic register-v07.
+      const pmCols = sqlite.prepare('PRAGMA table_info(pool_markets)').all().map(c => c.name);
+      const shardP2sh_of = (smid) => (sqlite.prepare('SELECT shard_p2sh FROM market_shards WHERE shard_market_id = ?').get(smid)?.shard_p2sh) || '';
+      const createShardMarketRow = async (shardIndex, shardP2sh) => {
+        const shardMarketId = `${logicalMarketId}-s${shardIndex}`;
+        const clone = { ...market, id: shardMarketId, spine_p2sh: shardP2sh, protocol_status: 'shard_internal', maker_stake_amount: 0 };
+        try { sqlite.prepare(`INSERT OR IGNORE INTO pool_markets (${pmCols.join(',')}) VALUES (${pmCols.map(() => '?').join(',')})`).run(...pmCols.map(c => clone[c])); }
+        catch (e) { console.warn(`[register-v07/confirm] shard pool_markets clone warn: ${e.message}`); }
+        return shardMarketId;
+      };
+      // recordBettor: side_lock_tx = bettor's PAYMENT txid (= idempotent dedup key + audit anchor; mirrors v06 semantics),
+      //   stake_amount = the bet stake (round, nonce excluded), side_p2sh = the shard's p2sh (shard-aware read parity).
+      const recordBettor = async ({ shardMarketId, shardIndex, bettorPk: pk, direction: dir, stakeSompi: st }) => {
+        try {
+          sqlite.prepare(`INSERT OR IGNORE INTO pool_bettor_sides (market_id, bettor_pk, bettor_relay_id, direction, stake_amount, side_p2sh, side_lock_tx, merkle_index, side_redeem_script_hex)
+            VALUES (?,?,?,?,?,?,?,?,?)`).run(shardMarketId, pk, null, dir, st, shardP2sh_of(shardMarketId), paymentTxid, shardIndex, '');
+        } catch (e) { console.warn(`[register-v07/confirm] recordBettor warn: ${e.message}`); }
+      };
+
+      // 命门①③④ genesis coherence: predicate_commit = computeMarketCommit({predicate, fee_recipients}) (单源, 与 enforce 同函数);
+      //   predicate-less 市场 fallback market_metadata_hash (无 enforce). 同 monolithic register-v07.
+      const { computeMarketCommit } = await import('../lib/pool-shard-settle.mjs');
+      let _predicate = null;
+      try { _predicate = JSON.parse(market.resolution_rule_spec || '{}')?.resolution_predicate || null; } catch {}
+      const _feeRecipients = { brokerPk: market.broker_pk || null, introducerPk: market.introducer_pk || null };
+      const predicateCommit = _predicate ? computeMarketCommit(_predicate, _feeRecipients) : market.market_metadata_hash;
+
+      const { registerBettorOnShard } = await import('../lib/pool-shard-register.mjs');
+      const silverc = process.env.SILVERC_PATH || 'D:/silverscript/target/release/silverc.exe';
+      const result = await registerBettorOnShard({
+        db: sqlite, rc, transfer, landed, p2sh, logicalMarketId,
+        poolMerkleRoot: market.pool_merkle_root, predicateCommit,
+        bettorPk, direction: v.direction, stakeSompi: v.stakeAmount, relayAddr, silverc, sealCount: 32, deadline: market.deadline,
+        createShardMarketRow, recordBettor,
+      });
+      return reply.send({
+        ok: true, registered: true, protocol_version: 'v0.7', logical_market_id: logicalMarketId,
+        bettor_pk: bettorPk, direction: v.direction,
+        side_lock_tx: paymentTxid, stake_sompi: v.stakeAmount, stake_kas: (v.stakeAmount / 1e8).toFixed(8),
+        custody: 'relay-assisted', ...result,
+      });
+    } catch (e) {
+      console.error(`[pool/register-v07/confirm] ${logicalMarketId} fail: ${e.message}`);
+      return reply.code(500).send({ ok: false, error: `register-v07/confirm failed: ${e.message}` });
+    }
+  });
+
   // GET /api/pool/config — static defaults for UI pre-submit preview (D4 wallet浮窗 estimate fee)
   fastify.get('/api/pool/config', async (request, reply) => {
     return reply.send({
