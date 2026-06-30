@@ -620,6 +620,28 @@ if (process.send) {
           return;
         }
 
+        case 'get_per_bet_address': {
+          // #28 (B) piece② wire (J1 2026-07-01·Owner money-path 根治): 派生【per-bet 独立 P2SH 收款址】
+          //   替共享 relay P2PK → 付款根隔离·免并发花费(defrag/transfer 等碰不到·Martin paid-no-bet 根治)。
+          //   复用 per-bet-p2sh.mjs(派生 4 源验·spendability 3 源链证) + 本 relay x-only pubkey(gw key·sweep_per_bet 时签)。
+          //   confirm 检测此址有付款即 register(gateway 已垫)·sweep_per_bet 异步报销(J2 已链证可花)。
+          const kaspa = await import('kaspa-wasm');
+          const { derivePerBet } = await import('./lib/per-bet-p2sh.mjs');
+          const wallet = getWallet();
+          const addr = wallet.getAddress();
+          const xOnlyHex = kaspa.XOnlyPublicKey.fromAddress(new kaspa.Address(addr)).toString();
+          const networkId = String(addr).startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
+          const { marketId, bettorPk, direction, payAmountSompi, betId } = cmd;
+          if (!marketId || !bettorPk || direction == null || !payAmountSompi || !betId) {
+            throw new Error('get_per_bet_address: marketId/bettorPk/direction/payAmountSompi/betId 必传 (per-bet 唯一性)');
+          }
+          const d = derivePerBet(kaspa, { marketId, bettorPk, direction, payAmountSompi, betId, gwXOnlyHex: xOnlyHex, networkId });
+          if (cmd.requestId && process.send) {
+            process.send({ requestId: cmd.requestId, result: { ok: true, address: d.address, redeem_hex: d.redeemHex, nonce_hex: d.nonceHex, gw_x_only_pubkey: xOnlyHex } });
+          }
+          return;
+        }
+
         case 'sign_input_for_settle': {
           // Phase 4a Sub 8 (Bettor r238 Path A two-phase sign) — oracle signs a specific TX input.
           //
