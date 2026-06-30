@@ -21,12 +21,15 @@ const OP_CHECKSIG = 0xac;
 const PUSH32 = 0x20;
 
 /**
- * per-bet nonce = sha256(market|bettorPk|direction|payAmountSompi) → 32B。
- *   确定性(同 bet 参数→同 nonce·prep/confirm 跨调一致) + 每注唯一(含 bettorPk → 绝不两注同址=不重引 commingle bug)。
+ * per-bet nonce = sha256(market|bettorPk|direction|payAmountSompi|betId) → 32B。
+ *   确定性(同 bet 参数→同 nonce·prep/confirm 跨调一致) + 每注唯一。
+ *   🔑 betId 显式拼入(Bettor co-verify 建议): payAmountSompi 的 nonce-dust 用 %9000 截断·同(market,pk,dir,stake)
+ *   ~300 笔有生日碰撞理论边。直接拼【全 betId 幂等键】= 全 256bit 无截断·彻底消除碰撞 → 绝不两注同址(commingle
+ *   bug 不复活)。不靠 payAmountSompi 传递性含 betId(fragile)·显式 > 传递。
  */
-export function perBetNonce({ marketId, bettorPk, direction, payAmountSompi }) {
+export function perBetNonce({ marketId, bettorPk, direction, payAmountSompi, betId }) {
   return createHash('sha256')
-    .update(`${marketId}|${bettorPk}|${direction}|${payAmountSompi}`)
+    .update(`${marketId}|${bettorPk}|${direction}|${payAmountSompi}|${betId}`)
     .digest(); // 32B Buffer
 }
 
@@ -58,8 +61,8 @@ export function perBetAddr(kw, redeem, networkId) {
 }
 
 /** 一步: bet 参数 + gw xonly → { nonceHex, redeemHex, address }。prep/sweep 共用单一真相。 */
-export function derivePerBet(kw, { marketId, bettorPk, direction, payAmountSompi, gwXOnlyHex, networkId }) {
-  const nonce = perBetNonce({ marketId, bettorPk, direction, payAmountSompi });
+export function derivePerBet(kw, { marketId, bettorPk, direction, payAmountSompi, betId, gwXOnlyHex, networkId }) {
+  const nonce = perBetNonce({ marketId, bettorPk, direction, payAmountSompi, betId });
   const redeem = perBetRedeem(nonce, gwXOnlyHex);
   return { nonceHex: nonce.toString('hex'), redeemHex: redeem.toString('hex'), address: perBetAddr(kw, redeem, networkId) };
 }
