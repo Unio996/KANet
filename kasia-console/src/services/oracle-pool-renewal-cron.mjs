@@ -1,11 +1,11 @@
 // oracle-pool-renewal-cron.mjs — oracle 质押锁 auto-renewal (task#13 Bettor 2026-06-30 钦定·28h urgency)
 //
-// 背景: oracle enrollment lock_until_daa 到期 → scanAndDerivePool 剔除 → pool_size=0 → create-v07 block 新盘.
 // 解法: cron 监测 lock_until_daa - currentDaa < RENEWAL_THRESHOLD_DAA 时:
-//   1. 删旧 enrollment 记录 (允许 re-insert 新 lock)
-//   2. 计算新 P2SH (lock += NEW_LOCK_DURATION_DAA)
-//   3. INSERT 新 enrollment + 广播 envelope (跨节点收敛)
-//   4. relay 向新 P2SH 转 stake KAS
+//   1. 计算新 P2SH (lock += NEW_LOCK_DURATION_DAA)
+//   2. relay transfer stake KAS 到新 P2SH
+//   3. 链上 UTXO 到账确认 (poll getUtxosByAddresses) — NO-TX-NO-STATE
+//   4. 仅 UTXO 到账后: atomic DELETE+INSERT DB + 广播 envelope
+//   transfer/poll 失败 → throw → 旧 enrollment 留 DB 完整 → 下 tick 重试 = 自愈
 //
 // 只对本节点控制的 relay (relay_address 在 relay_nodes 表) 自动续期.
 // 外节点的 enrollment 到期 = warn 日志·手动续.
@@ -19,22 +19,45 @@ const STARTUP_GRACE_MS = 2 * 60 * 1000;    // 2 min (let scanner run first)
 const RENEWAL_THRESHOLD_DAA = 3_000_000;   // ~3.5d at 10 BPS — trigger renewal before expiry
 const NEW_LOCK_DURATION_DAA = 10_000_000;  // ~11.5d at 10 BPS — new lock length
 const DEFAULT_STAKE_KAS = 2;               // KAS to send to new P2SH if amount_sompi not set
+const UTXO_POLL_RETRIES = 8;              // poll up to 8 × 10s = 80s for TX to land
+const UTXO_POLL_DELAY_MS = 10_000;
 
 let timer = null;
 let running = false;
 
-async function _renewEnrollment({ stakerPkX, relayId, relayAddress, amountSompi, currentDaa }) {
+// Poll getUtxosByAddresses until stake appears at address — NO-TX-NO-STATE gate.
+// Throws if UTXO not found within timeout.
+async function _pollUtxoLanded(rpcUrl, networkId, address, expectedMinSompi) {
+  const { RpcClient, Encoding } = await import('kaspa-wasm');
+  for (let attempt = 0; attempt < UTXO_POLL_RETRIES; attempt++) {
+    if (attempt > 0) await new Promise(r => setTimeout(r, UTXO_POLL_DELAY_MS));
+    const rpc = new RpcClient({ url: rpcUrl, encoding: Encoding.Borsh, networkId });
+    await rpc.connect();
+    try {
+      const result = await rpc.getUtxosByAddresses([address]);
+      const utxos = result?.entries || [];
+      const total = utxos.reduce((s, e) => s + Number(e?.utxo?.amount || 0), 0);
+      if (total >= expectedMinSompi) {
+        console.log(`[oracle-renewal] UTXO landed at ${address.slice(-20)} total=${total} (attempt ${attempt + 1})`);
+        return { total };
+      }
+    } finally {
+      try { await rpc.disconnect(); } catch {}
+    }
+  }
+  throw new Error(`stake UTXO not found at ${address.slice(-20)} after ${UTXO_POLL_RETRIES} attempts (${UTXO_POLL_RETRIES * UTXO_POLL_DELAY_MS / 1000}s) — aborting DB update`);
+}
+
+async function _renewEnrollment({ rpcUrl, networkId, stakerPkX, relayId, relayAddress, amountSompi, currentDaa }) {
   const { computeStakeP2SH_v1 } = await import('../lib/oracle-stake-v1.mjs');
-  const network = process.env.KASPA_NETWORK || 'testnet-12';
   const newLockUntilDaa = currentDaa + NEW_LOCK_DURATION_DAA;
 
   // 1. Compute new P2SH with extended lock
   const { p2shAddr: newP2shAddr, redeemScript, p2shHash } = await computeStakeP2SH_v1({
-    stakerPkX, lockUntilDaa: newLockUntilDaa, network,
+    stakerPkX, lockUntilDaa: newLockUntilDaa, network: networkId,
   });
 
-  // 2. Transfer stake KAS to new P2SH FIRST — NO-TX-NO-STATE: DB update only after TX broadcast.
-  //    If transfer fails: throw (old enrollment stays in DB intact → next tick retries = self-healing).
+  // 2. Transfer stake KAS to new P2SH
   const stakeKas = amountSompi ? (Number(amountSompi) / 1e8) : DEFAULT_STAKE_KAS;
   const txRes = await sendCommandAsync(relayId, {
     type: 'transfer', target: newP2shAddr, amount: stakeKas.toFixed(8),
@@ -42,9 +65,14 @@ async function _renewEnrollment({ stakerPkX, relayId, relayAddress, amountSompi,
   if (!txRes) throw new Error('relay not running — no response to transfer command');
   if (txRes.error) throw new Error(`transfer rejected: ${txRes.error}`);
   const transferTxId = txRes.txId;
-  if (!transferTxId) throw new Error('transfer returned no txId — aborting DB update (NO-TX-NO-STATE)');
+  if (!transferTxId) throw new Error('transfer returned no txId');
 
-  // 3. TX broadcast confirmed — NOW update DB atomically (DELETE old + INSERT new in one transaction)
+  // 3. NO-TX-NO-STATE gate: poll until stake UTXO confirmed on chain at new P2SH.
+  //    If poll times out → throw → old enrollment stays in DB → next tick retries = self-healing.
+  const expectedMinSompi = Math.floor(stakeKas * 1e8);
+  await _pollUtxoLanded(rpcUrl, networkId, newP2shAddr, expectedMinSompi);
+
+  // 4. Stake landed on chain — NOW update DB atomically
   sqlite.transaction(() => {
     sqlite.prepare('DELETE FROM oracle_stake_enrollments WHERE staker_pk_x = ?').run(stakerPkX);
     sqlite.prepare(`
@@ -54,7 +82,7 @@ async function _renewEnrollment({ stakerPkX, relayId, relayAddress, amountSompi,
     `).run(stakerPkX, newLockUntilDaa, newP2shAddr, p2shHash, redeemScript, relayAddress);
   })();
 
-  // 4. Broadcast enrollment envelope — best-effort; transfer TX + DB already valid without it.
+  // 5. Broadcast enrollment envelope — best-effort; transfer+DB already valid without it.
   let broadcastTxId = null;
   try {
     const pkRes = await sendCommandAsync(relayId, { type: 'get_pubkey' });
@@ -78,7 +106,7 @@ async function _renewEnrollment({ stakerPkX, relayId, relayAddress, amountSompi,
     broadcastTxId = bcastResult?.txId;
     if (!broadcastTxId) throw new Error(`broadcast no txId: ${JSON.stringify(bcastResult).slice(0, 100)}`);
   } catch (bcErr) {
-    console.warn(`[oracle-renewal] envelope broadcast fail staker=${stakerPkX.slice(0, 8)} relay=${relayId.slice(0, 8)}: ${bcErr.message} (transfer TX+DB valid; cross-node convergence deferred)`);
+    console.warn(`[oracle-renewal] envelope broadcast fail staker=${stakerPkX.slice(0, 8)} relay=${relayId.slice(0, 8)}: ${bcErr.message} (transfer+DB valid; cross-node convergence deferred)`);
   }
 
   return { newLockUntilDaa, newP2shAddr, broadcastTxId, transferTxId };
@@ -128,7 +156,7 @@ export async function oraclePoolRenewalTick() {
     const external = expiring.filter(e => !e.relay_id);
 
     if (external.length > 0) {
-      console.warn(`[oracle-renewal] ${external.length} expiring enrollment(s) from EXTERNAL nodes (no controlling relay here) — manual renewal needed: ${external.map(e => e.staker_pk_x.slice(0, 12)).join(', ')}`);
+      console.warn(`[oracle-renewal] ${external.length} expiring enrollment(s) from EXTERNAL nodes — manual renewal needed: ${external.map(e => e.staker_pk_x.slice(0, 12)).join(', ')}`);
     }
 
     if (local.length === 0) {
@@ -144,13 +172,14 @@ export async function oraclePoolRenewalTick() {
       try {
         console.log(`[oracle-renewal] renewing staker=${enr.staker_pk_x.slice(0, 12)} relay=${enr.relay_name}(${enr.relay_id.slice(0, 8)}) remaining=${daaRemaining} DAA`);
         const res = await _renewEnrollment({
+          rpcUrl, networkId,
           stakerPkX: enr.staker_pk_x,
           relayId: enr.relay_id,
           relayAddress: enr.relay_address,
           amountSompi: enr.amount_sompi,
           currentDaa,
         });
-        console.log(`[oracle-renewal] renewed staker=${enr.staker_pk_x.slice(0, 12)} newLock=${res.newLockUntilDaa} broadcast=${res.broadcastTxId?.slice(0, 16) ?? 'FAIL'} transfer=${res.transferTxId?.slice(0, 16) ?? 'FAIL'}`);
+        console.log(`[oracle-renewal] renewed staker=${enr.staker_pk_x.slice(0, 12)} newLock=${res.newLockUntilDaa} transfer=${res.transferTxId?.slice(0, 16)} broadcast=${res.broadcastTxId?.slice(0, 16) ?? 'pending'}`);
         results.push({ stakerPkX: enr.staker_pk_x, ok: true, ...res });
       } catch (err) {
         console.error(`[oracle-renewal] renewal fail staker=${enr.staker_pk_x.slice(0, 12)}: ${err.message}`);
@@ -171,7 +200,7 @@ export async function oraclePoolRenewalTick() {
 
 export function startOraclePoolRenewalCron() {
   if (timer) return;
-  console.log('[oracle-renewal] started — 1h cron, auto-renew expiring oracle enrollments (threshold=3M DAA ≈3.5d, new_lock=10M DAA ≈11.5d).');
+  console.log('[oracle-renewal] started — 1h cron, auto-renew expiring oracle enrollments (threshold=3M DAA ≈3.5d, new_lock=10M DAA ≈11.5d). Transfer → UTXO-landed gate → DB update (NO-TX-NO-STATE).');
   setTimeout(() => {
     oraclePoolRenewalTick().catch(e => console.error('[oracle-renewal] startup tick:', e.message));
   }, STARTUP_GRACE_MS);
