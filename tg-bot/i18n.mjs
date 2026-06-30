@@ -162,6 +162,7 @@ export const LANGS = {
     help_custody_1: '① Lost mnemonic still works — node holds key, /send /bet still work',
     help_custody_2: '② Want full control: /link bind your own wallet → /send transfer funds there',
     help_custody_3: '③ For real funds, use your own non-custodial wallet (mnemonic never shared)',
+    help_disclaimer: 'testnet-only · MIT open source · no mainnet operations · not investment advice',
 
     // /wallet — generated (new wallet)
     wallet_gen_title: '✅ Testnet wallet created:',
@@ -491,6 +492,7 @@ export const LANGS = {
     help_custody_1: '① 丢了助记词不影响花费权 — 节点持 key, /send /bet 仍正常用',
     help_custody_2: '② 想自主掌控: /link 绑你自己钱包地址 → /send 把币转过去',
     help_custody_3: '③ 真钱务必用你自己生成、助记词从未外泄的非托管钱包',
+    help_disclaimer: 'testnet-only · MIT 开源 · 不运营主网 · 非投资建议',
 
     // /wallet — generated
     wallet_gen_title: '✅ 已为你生成测试网钱包:',

@@ -415,7 +415,7 @@ export function brokerRole(opts = {}, lang = 'en') {
   }
   lines.push('');
   lines.push(t(lang, 'broker_role_warn'));
-  lines.push(DISCLAIMER);
+  lines.push(t(lang, 'help_disclaimer'));
   return lines.join('\n');
 }
 
@@ -495,6 +495,6 @@ export function help(lang = 'en') {
     t(lang, 'help_custody_2'),
     t(lang, 'help_custody_3'),
     '',
-    DISCLAIMER,
+    t(lang, 'help_disclaimer'),
   ].join('\n');
 }
