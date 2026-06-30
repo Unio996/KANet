@@ -379,7 +379,7 @@ export async function startBetFromMarket(tgUser, marketId) {
   const lines = [
     `📊 ${specTitle(market.resolution_rule_spec)}`,
     t(lang, 'bet_detail_maker', { maker: makerLabel(market) }),
-    t(lang, 'bet_detail_deadline_count', { deadline: fmtDeadline(market.deadline, lang), count: market.bettor_count || 0, stake: market.maker_stake_kas ?? '?' }),
+    t(lang, 'bet_detail_deadline_count', { deadline: fmtDeadline(market.deadline, lang), count: dr.json.bettor_count || 0, stake: market.maker_stake_kas ?? '?' }),
   ];
   const _crit = specCriteria(market.resolution_rule_spec);
   if (_crit) lines.push('', t(lang, 'bet_detail_rules_header'), _crit);
@@ -560,7 +560,7 @@ async function _handleReplyImpl(tgUser, text, linkedAddr) {
     const lines = [
       `📊 ${specTitle(full.resolution_rule_spec)}`,
       t(lang, 'bet_detail_maker', { maker: makerLabel(full) }),
-      t(lang, 'bet_detail_deadline_count', { deadline: fmtDeadline(full.deadline, lang), count: full.bettor_count || 0, stake: full.maker_stake_kas ?? '?' }),
+      t(lang, 'bet_detail_deadline_count', { deadline: fmtDeadline(full.deadline, lang), count: dr.json.bettor_count || 0, stake: full.maker_stake_kas ?? '?' }),
     ];
     const _critF = specCriteria(full.resolution_rule_spec);
     if (_critF) lines.push('', t(lang, 'bet_detail_rules_header'), _critF);
