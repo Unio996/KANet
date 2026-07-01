@@ -2514,9 +2514,19 @@ export async function registerPoolRoutes(fastify) {
   });
 
   fastify.get('/api/pool/market/:id', async (request, reply) => {
-    const marketId = request.params.id;
-    const market = sqlite.prepare('SELECT * FROM pool_markets WHERE id = ?').get(marketId);
+    let marketId = request.params.id;
+    let market = sqlite.prepare('SELECT * FROM pool_markets WHERE id = ?').get(marketId);
     if (!market) return reply.code(404).send({ ok: false, error: 'market not found' });
+    // Auto-redirect shard clones → logical parent: shard_internal rows are not user-facing.
+    // /mybets addmore button passes pool_bettor_sides.market_id = shard market ID (shard-blind bug);
+    // transparently resolve to the logical parent so all callers get the correct market context.
+    if (market.protocol_status === 'shard_internal') {
+      const sr = sqlite.prepare('SELECT logical_market_id FROM market_shards WHERE shard_market_id = ?').get(marketId);
+      if (sr?.logical_market_id) {
+        const logicalMarket = sqlite.prepare('SELECT * FROM pool_markets WHERE id = ?').get(sr.logical_market_id);
+        if (logicalMarket) { market = logicalMarket; marketId = sr.logical_market_id; }
+      }
+    }
     // KANet-UI 2026-06-07 r308 maker 名显: LEFT JOIN relay_nodes 取 maker_name (跨节点 NULL, 前端兜底)
     const _makerRow = market.maker_relay_id
       ? sqlite.prepare('SELECT name FROM relay_nodes WHERE id = ?').get(market.maker_relay_id)
