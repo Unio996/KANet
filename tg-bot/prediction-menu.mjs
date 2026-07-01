@@ -748,19 +748,22 @@ async function _handleReplyImpl(tgUser, text, linkedAddr) {
       pendingPayments.delete(tgUser); // 付款失败 → delete + fallthrough 手动
     }
     // 手动路径: 非托管 / 余额不足 / auto-pay 失败
+    // 余额不足时置顶显示原因(防用户误以为一键功能坏了·Bettor UX obs #31)
     const faucetHint = hasCustodial && walletBal < exactPayKas
       ? t(lang, 'bet_autopay_faucet_hint', { bal: walletBal }) : '';
     pendingPayments.set(tgUser, pendingRecord);
     sessions.delete(tgUser);
     persistNow();  // Bettor r9 F1: 资金关键步同步 flush, 不走 debounce — 250ms 窗口崩 = 监控丢
-    return [
+    const manualLines = [
       t(lang, 'bet_manual_pay_header'),
       t(lang, 'bet_manual_pay_amount', { kas, sompi: s.prep.exact_sompi }),
       t(lang, 'bet_manual_pay_addr', { addr: s.prep.side_p2sh }),
       '',
       t(lang, 'bet_manual_pay_watching'),
       t(lang, 'bet_manual_pay_min'),
-    ].join('\n') + faucetHint;
+    ];
+    if (faucetHint) manualLines.unshift(faucetHint.trim(), '');
+    return manualLines.join('\n');
   }
   return null;
 }
