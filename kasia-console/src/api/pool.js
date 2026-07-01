@@ -2447,16 +2447,17 @@ export async function registerPoolRoutes(fastify) {
                 WHERE s.market_id IN (SELECT shard_market_id FROM market_shards WHERE logical_market_id = lm.logical_market_id AND status != 'refunded')) AS bettor_count
       FROM (
         SELECT ms.logical_market_id,
-               COUNT(DISTINCT ms.shard_market_id)      AS shard_count,
-               COALESCE(SUM(pm.maker_stake_amount), 0) AS maker_stake_sompi,
-               MAX(pm.outcome_side)                    AS outcome_side,
-               MAX(pm.resolution_rule_spec)            AS resolution_rule_spec,
-               MAX(pm.deadline)                        AS deadline,
-               MAX(pm.category)                        AS category,
-               MAX(pm.protocol_version)                AS protocol_version,
-               MIN(pm.created_at)                      AS created_at
+               COUNT(DISTINCT ms.shard_market_id)           AS shard_count,
+               COALESCE(MAX(pm_parent.maker_stake_amount), 0) AS maker_stake_sompi,
+               MAX(pm.outcome_side)                         AS outcome_side,
+               MAX(pm.resolution_rule_spec)                 AS resolution_rule_spec,
+               MAX(pm.deadline)                             AS deadline,
+               MAX(pm.category)                             AS category,
+               MAX(pm.protocol_version)                     AS protocol_version,
+               MIN(pm.created_at)                           AS created_at
         FROM market_shards ms
         LEFT JOIN pool_markets pm ON pm.id = ms.shard_market_id
+        LEFT JOIN pool_markets pm_parent ON pm_parent.id = ms.logical_market_id
         ${whereSql}
         GROUP BY ms.logical_market_id
       ) lm
