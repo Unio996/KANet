@@ -1260,6 +1260,12 @@ export async function registerPoolRoutes(fastify) {
   async function _v07PrepConfirmPrelude(logicalMarketId, b, reply) {
     const v = _extStakeValidate(b);
     if (v.error) { reply.code(v.code).send({ ok: false, error: v.error }); return null; }
+    // 🔴 #28-followup (2026-07-01, Owner "第二次押注失败"): bot mybets/add-more reuses the POSITION's market_id, which is
+    //   the SHARD id (pool_bettor_sides.market_id = shard_market_id, status=shard_internal) → prep/confirm would reject
+    //   "market status=shard_internal, registration closed". Resolve a shard id → its logical parent so a re-bet routes to
+    //   the open rolling shard exactly like a first bet. No-op for a real logical id (not in market_shards.shard_market_id).
+    const _shardParent = sqlite.prepare('SELECT logical_market_id FROM market_shards WHERE shard_market_id = ?').get(logicalMarketId);
+    if (_shardParent && _shardParent.logical_market_id) logicalMarketId = _shardParent.logical_market_id;
     const market = sqlite.prepare('SELECT * FROM pool_markets WHERE id = ?').get(logicalMarketId);
     if (!market) { reply.code(404).send({ ok: false, error: 'market not found' }); return null; }
     if (market.protocol_version !== 'v0.7') { reply.code(409).send({ ok: false, error: `register-v07 requires protocol_version v0.7, got ${market.protocol_version}` }); return null; }
@@ -1297,14 +1303,15 @@ export async function registerPoolRoutes(fastify) {
     });
     if (!perBet?.address || !perBet?.redeem_hex) { reply.code(503).send({ ok: false, error: `gateway relay get_per_bet_address failed (per-bet P2SH 派生): ${JSON.stringify(perBet).slice(0, 120)}` }); return null; }
     const payAddr = perBet.address;
-    return { v, market, bettorPk, gatewayRelayId, payAddr, perBetRedeem: perBet.redeem_hex, relayAddr, network, payAmountSompi };
+    return { v, market, bettorPk, gatewayRelayId, payAddr, perBetRedeem: perBet.redeem_hex, relayAddr, network, payAmountSompi, logicalMarketId };
   }
 
   // POST /api/pool/market/:id/bettor/register-v07/prep — B step 1: compute pay address + exact pay amount (NO TX, no state change).
   fastify.post('/api/pool/market/:id/bettor/register-v07/prep', async (request, reply) => {
-    const logicalMarketId = request.params.id;
+    let logicalMarketId = request.params.id;
     const p = await _v07PrepConfirmPrelude(logicalMarketId, request.body || {}, reply);
     if (!p) return;   // prelude already sent the error reply
+    logicalMarketId = p.logicalMarketId;   // #28-followup: prelude resolved a shard id → its logical parent (re-bet routing)
     const { v, market, bettorPk, payAddr, network, payAmountSompi } = p;
     // FINDING-2 ③ commingled guard (单源·inline per R-COMMINGLE-GUARD convention).
     if (assertNotCommingled(market, reply, sqlite)) return;
@@ -1331,9 +1338,10 @@ export async function registerPoolRoutes(fastify) {
 
   // POST /api/pool/market/:id/bettor/register-v07/confirm — B step 2: detect payment → registerBettorOnShard splice (NO TX NO STATE).
   fastify.post('/api/pool/market/:id/bettor/register-v07/confirm', async (request, reply) => {
-    const logicalMarketId = request.params.id;
+    let logicalMarketId = request.params.id;
     const p = await _v07PrepConfirmPrelude(logicalMarketId, request.body || {}, reply);
     if (!p) return;
+    logicalMarketId = p.logicalMarketId;   // #28-followup: prelude resolved a shard id → its logical parent (re-bet routing)
     const { v, market, bettorPk, gatewayRelayId, payAddr, perBetRedeem, network, payAmountSompi } = p;
     // FINDING-2 ③ commingled guard (单源·inline per R-COMMINGLE-GUARD convention).
     if (assertNotCommingled(market, reply, sqlite)) return;
