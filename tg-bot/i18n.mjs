@@ -240,7 +240,7 @@ export const LANGS = {
 
     // /swap function (messages.mjs)
     swap_title: '💱 Exchange KAS ↔ USDT — via {name}',
-    swap_testnet_note: '⚠ Swap not available on testnet (code tested; available after mainnet launch).',
+    swap_testnet_note: '⚠ Swap is fully implemented and ready — mainnet only. This is a testnet preview: do NOT send KAS here.',
     swap_step1: '1) From your own wallet, send the KAS you want to exchange on-chain to the broker receive address:',
     swap_step2: '2) The broker will ask for your USDT receive chain + address (reply "use bnb 0x..." etc.), then sends payment on-chain.',
     swap_warn: '⚠ Your funds are under your control at all times: you initiate payment from your own address, bot never touches your funds.',
@@ -571,7 +571,7 @@ export const LANGS = {
 
     // /swap function
     swap_title: '💱 兑换 KAS ↔ USDT — 经 {name}',
-    swap_testnet_note: '⚠ 测试网暂不开放兑换(功能代码已测试·主网上线后开放)。',
+    swap_testnet_note: '⚠ 兑换功能已完整实现，仅在主网运行。这是测试网预览，请勿在此发送 KAS。',
     swap_step1: '1) 从你自己的钱包,把要兑换的 KAS 链上转到 broker 收款地址:',
     swap_step2: '2) broker 会问你 USDT 收哪条链 + 地址(回复 "用 bnb 0x..." 之类),然后链上回款。',
     swap_warn: '⚠ 钱全程你自己链上掌控:你从自己地址发起付款,bot 不经手、碰不到你的钱。',

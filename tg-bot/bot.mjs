@@ -241,7 +241,7 @@ bot.command('faucet', async (ctx) => {
 // /verify 已废弃 (r275 砍签名挑战). 老用户可能还按旧习惯发, 友好重定向到 /link。
 bot.command('verify', (ctx) => { initLang(ctx); return ctx.reply(t(getLang(ctx), 'verify_redirect')); });
 
-bot.command('swap', async (ctx) => { initLang(ctx); const lang = getLang(ctx); const broker = await api.brokerInfo(brokerRelayId); return ctx.reply(M.swapFlow(broker, lang)); });
+bot.command('swap', async (ctx) => { initLang(ctx); const lang = getLang(ctx); const broker = await api.brokerInfo(brokerRelayId); return ctx.reply(M.swapFlow(broker, lang, CONFIG.network)); });
 // /broker — Owner 实测派修 (2026-06-22): 从 INFO-ONLY 升级为真接通自助申请流。auth 硬化已满足
 // (地址制 onboarding + Owner trust 审批门已落), 申请落 pending → Owner 批 trust 才激活, 公开安全。
 // 显用户绑定地址 + 当前 onboard 状态 + 申请路径 (/broker_apply)。0-key 不变 (onboard 不碰资金)。

@@ -320,13 +320,16 @@ export function hotMarkets(markets, botUsername, lang = 'en') {
 
 // 兑换 flow — show broker X's KAS receiving address; the USER pays on-chain from their own wallet.
 // bot 0 execute: 只显地址 + 引导 + deep-link。broker-intake-watcher 在链上检测到付款后继续。
-export function swapFlow(broker, lang = 'en') {
+export function swapFlow(broker, lang = 'en', network = 'testnet-12') {
   const name = broker?.name || 'broker';
+  // Testnet gate: hide send-KAS steps entirely to prevent accidental fund loss.
+  // Feature is implemented and tested; exchange only runs on mainnet.
+  if (network !== 'mainnet') {
+    return [t(lang, 'swap_title', { name }), '', t(lang, 'swap_testnet_note')].join('\n');
+  }
   const addr = broker?.address || '(broker 未配置 — Owner 在 Console 设置页选)';
   return [
     t(lang, 'swap_title', { name }),
-    '',
-    t(lang, 'swap_testnet_note'),
     '',
     t(lang, 'swap_step1'),
     `   ${addr}`,
