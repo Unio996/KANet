@@ -156,6 +156,7 @@ export const LANGS = {
     help_lang: '/lang en|zh — Switch display language',
     help_bet: '/bet — Place bets on prediction markets',
     help_mybets: '/mybets — View your bets + status',
+    help_record: '/record — Your win rate + net P&L summary card',
     help_discover: '/discover — Browse open markets / listings',
     help_broker: '/broker — Want to be a matcher (broker)? Role + fees + apply',
     help_earnings: '/earnings — Broker earnings (handled/realized/pending, chain-verifiable)',
@@ -336,6 +337,17 @@ export const LANGS = {
     mybets_placed_at: '  Placed: {time}',
     mybets_deadline: '  Closes {deadline} · Auto-settles after close to linked address',
     mybets_addmore: '➕ More/reverse: {title}',
+
+    // /record (formatRecordCard, prediction-menu.mjs) — 世界杯玩法 UI 战绩卡
+    record_empty: 'No bet history yet. /bet to start.',
+    record_title: '🏆 Your Record',
+    record_bets_markets: '{n} bets across {m} markets',
+    record_winrate: 'Win rate: {pct}% ({won}W-{lost}L)',
+    record_winrate_none: 'Win rate: no settled bets yet',
+    record_net: 'Net {sign}{kas} KAS',
+    record_open: '📍 {n} still active',
+    record_refunded: '💸 {n} refunded',
+    record_footer: 'ℹ testnet KAS only — not real money, not investment advice.',
   },
 
   zh: {
@@ -489,6 +501,7 @@ export const LANGS = {
     help_lang: '/lang en|zh — 切换显示语言',
     help_bet: '/bet — 押注预测市场',
     help_mybets: '/mybets — 看自己的押注 + 状态',
+    help_record: '/record — 你的胜率 + 净盈亏战绩卡',
     help_discover: '/discover — 浏览开放挂单 / 市场',
     help_broker: '/broker — 想做撮合者(broker)? 角色 + 佣金 + 申请',
     help_earnings: '/earnings — broker 收益 (经手单/已实现/待结算, 链上可验)',
@@ -669,6 +682,17 @@ export const LANGS = {
     mybets_placed_at: '  押注于 {time}',
     mybets_deadline: '  截止 {deadline} · 开奖后自动结算到账绑定地址',
     mybets_addmore: '➕ 加注/反手: {title}',
+
+    // /record (战绩卡)
+    record_empty: '还没有押注记录。/bet 开始押注。',
+    record_title: '🏆 你的战绩',
+    record_bets_markets: '{n} 笔押注 · {m} 个市场',
+    record_winrate: '胜率: {pct}% ({won}胜{lost}负)',
+    record_winrate_none: '胜率: 暂无已结算押注',
+    record_net: '净盈亏 {sign}{kas} KAS',
+    record_open: '📍 {n} 笔押注中',
+    record_refunded: '💸 {n} 笔已退款',
+    record_footer: 'ℹ 仅测试网 KAS · 非真钱 · 非投资建议。',
   },
 };
 

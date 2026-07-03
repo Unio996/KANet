@@ -338,6 +338,47 @@ export async function formatMyBets(linkedAddr, lang = 'en') {
   return lines.join('\n');
 }
 
+// 世界杯玩法 UI — 战绩卡 (Bettor 2026-07-04, 不依赖 G1, 复用 my-positions 既有数据).
+// /mybets 已经算总投入/总返回/净盈亏, 但没有"胜率"这个数, 也没有一张独立、精简、可截图分享的
+// 摘要卡 (跟 /mybets 完整逐笔列表是两回事). 只对已结算(赢/输/退款)的仓位计胜率分母 — 未决的不算.
+export async function formatRecordCard(linkedAddr, lang = 'en') {
+  if (!linkedAddr) return t(lang, 'mybets_no_link');
+  const r = await api.myPositions(linkedAddr);
+  if (!r.ok) return t(lang, 'mybets_fail', { error: r.json?.error || r.status });
+  const positions = r.json?.positions || [];
+  if (!positions.length) return t(lang, 'record_empty');
+
+  let wonCount = 0, lostCount = 0, refundedCount = 0, openCount = 0;
+  let stakeInTotal = 0, payoutBackTotal = 0;
+  const marketIds = new Set();
+  for (const p of positions) {
+    marketIds.add(p.market_id);
+    const stake = Number(p.stake_kas) || 0;
+    stakeInTotal += stake;
+    if (p.settle_txid && p.did_win === true) { wonCount++; payoutBackTotal += Number(p.actual_payout_kas) || 0; }
+    else if (p.settle_txid && p.did_win === false) { lostCount++; }
+    else if (p.refund_txid) { refundedCount++; payoutBackTotal += stake; }
+    else { openCount++; }
+  }
+  const decidedCount = wonCount + lostCount; // win-rate denominator: 只算真出胜负的, 退款/未决不算
+  const winRatePct = decidedCount > 0 ? Math.round((wonCount / decidedCount) * 100) : null;
+  const netKas = payoutBackTotal - stakeInTotal;
+  const netSign = netKas >= 0 ? '+' : '';
+
+  const lines = [
+    t(lang, 'record_title'),
+    t(lang, 'record_bets_markets', { n: positions.length, m: marketIds.size }),
+    winRatePct !== null
+      ? t(lang, 'record_winrate', { pct: winRatePct, won: wonCount, lost: lostCount })
+      : t(lang, 'record_winrate_none'),
+    t(lang, 'record_net', { sign: netSign, kas: netKas.toFixed(4) }) + `  ${netKas >= 0 ? '🎉' : '😞'}`,
+  ];
+  if (openCount > 0) lines.push(t(lang, 'record_open', { n: openCount }));
+  if (refundedCount > 0) lines.push(t(lang, 'record_refunded', { n: refundedCount }));
+  lines.push('', t(lang, 'record_footer'));
+  return lines.join('\n');
+}
+
 // Bettor r87 ③ 防流失 — 给 /mybets 每个 open position 返按钮配置. bot.mjs 拿这个用
 // InlineKeyboard 显在 /mybets 消息下. callbackQuery handler 收 'mybet:addmore:<id>' →
 // 直接进该 market 的押注 flow (= 跳过 stage0/1 类目选 + 市场选, 直接 stage='detail').

@@ -497,6 +497,7 @@ export function help(lang = 'en') {
     t(lang, 'help_swap'),
     t(lang, 'help_bet'),
     t(lang, 'help_mybets'),
+    t(lang, 'help_record'),
     t(lang, 'help_discover'),
     t(lang, 'help_broker'),
     t(lang, 'help_earnings'),

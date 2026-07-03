@@ -315,6 +315,16 @@ bot.command('mybets', async (ctx) => {
   });
 });
 
+// 世界杯玩法 UI (Bettor 2026-07-04, 不依赖 G1) — /record: 精简战绩卡(胜率+净盈亏), 跟 /mybets
+// 逐笔列表是两回事, 复用同一份 my-positions 数据.
+bot.command('record', async (ctx) => {
+  initLang(ctx);
+  const lang = getLang(ctx);
+  const tgUser = String(ctx.from.id);
+  const addr = PM.getLinkedAddr(tgUser) || linked.get(tgUser)?.address;
+  return ctx.reply(await PM.formatRecordCard(addr, lang));
+});
+
 // Bettor r87 ③ — '➕ 加注/反手' callback handler: 进该 market 的 detail stage (= 跳过类目/市场选).
 bot.callbackQuery(/^mybet:addmore:(.+)$/, async (ctx) => {
   await ctx.answerCallbackQuery();
