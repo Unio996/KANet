@@ -2313,6 +2313,10 @@ export async function registerPoolRoutes(fastify) {
   fastify.get('/api/pool/markets/available', async (request, reply) => {
     const q = request.query || {};
     const limit = Math.min(Math.max(parseInt(q.limit, 10) || 8, 1), 100);
+    // ?tag=champions (世界杯玩法UI, Bettor 2026-07-04): 冠军长线盘(polymarket "Will X win the 2026
+    // FIFA World Cup?" futures, 118 行历史导入含重复快照)。不需要 G1 cron(静态盘, 已存在)。复用本
+    // endpoint 的既有过滤(usable spec/非commingled/有空位/conditionId去重), 只加一层标题过滤缩到冠军盘。
+    const championsFilter = q.tag === 'champions';
     const now = Math.floor(Date.now() / 1000);
     const _cd = new Date((now - 3600) * 1000);
     const _p = n => String(n).padStart(2, '0');
@@ -2354,6 +2358,10 @@ export async function registerPoolRoutes(fastify) {
       .filter((m) => !commingledSpines.has(m._spineP2sh))
       .filter((m) => isStructuredSpec(m.title))
       .filter((m) => m._rawBettorCount < 50)   // has available slots (raw cap — must use raw not honestCount, J1/Bettor no-strand line)
+      .filter((m) => {
+        if (!championsFilter) return true;
+        try { return /win the 2026 fifa world cup/i.test(JSON.parse(m.title || '{}').title || ''); } catch { return false; }
+      })
       // conditionId 去重 — 同一真实问题只保留流动性最高那条(Bettor #27·Owner "重复盘·母子盘 display-dedup")
       .reduce((acc, m) => {
         const cid = m._conditionId;
