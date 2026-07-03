@@ -118,10 +118,16 @@
           this.loading = true;
           this.result = null;
           try {
+            // G4 轻量指纹(2026-07-04): 只发时区偏移+屏幕分辨率(user-agent/accept-language 服务端从
+            // header 自己取), 拼进服务端的 hash 第二把钥匙(同 per-IP 平行 24h≤3, 防随手换IP多领).
             const r = await fetch('/api/faucet/request', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ wallet_address: this.addr.trim() }),
+              body: JSON.stringify({
+                wallet_address: this.addr.trim(),
+                tz_offset: new Date().getTimezoneOffset(),
+                screen_res: `${screen.width}x${screen.height}`,
+              }),
             });
             const j = await r.json();
             this.result = r.ok ? { ok: true, txid: j.txid, amount: j.amount } : { ok: false, error: j.error || ('HTTP ' + r.status) };

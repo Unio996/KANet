@@ -1479,7 +1479,11 @@ function agentApp() {
         const r = await fetch('/api/faucet/request', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ wallet_address: this.agent.address }),
+          body: JSON.stringify({
+            wallet_address: this.agent.address,
+            tz_offset: new Date().getTimezoneOffset(),
+            screen_res: `${screen.width}x${screen.height}`,
+          }),
         });
         const j = await r.json();
         if (!r.ok || !j.ok) {

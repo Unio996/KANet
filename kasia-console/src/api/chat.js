@@ -3,7 +3,7 @@ import { getRelayNode, listRelayNodes } from '../data/settings/relay-nodes.js';
 import { sendCommandAsync } from '../services/relay-manager.js';
 import { verifyIngestRequest, isValidIngestSecret } from '../services/ingest-auth.js';
 import { parseLang, getT, isRtl, LANG_NAMES } from '../i18n/index.js';
-import { randomUUID } from 'crypto';
+import { randomUUID, createHash } from 'crypto';
 import { nowIso } from '../lib/time.js';
 import { getReply } from '../services/mind-manager.js';
 import { onBroadcastWritten } from '../services/trade-protocol-filter.js';
@@ -612,7 +612,7 @@ export async function registerChatRoutes(fastify) {
   // Rate limit: same IP 24h ≤ 3 req, same wallet 永久 ≤ 1 req
   // Owner 充值 dedicated faucet wallet 后启用. Tier 1 阶段 wallet 未配置则 503.
   fastify.post('/api/faucet/request', async (request, reply) => {
-    const { wallet_address } = request.body || {};
+    const { wallet_address, tz_offset, screen_res } = request.body || {};
     // G4 harden (2026-07-04, 世界杯上线门): 别直接读 x-forwarded-for 头当 IP 兜底 — 那是客户端可任意
     // 伪造的值(每次请求换一个假 IP 就绕过下面的 24h≤3 per-IP 限制)。fastify 的 trustProxy:'127.0.0.1'
     // (index.js) 已经安全地把该头解析进 request.ip(只在真正的本地反代那一跳才信, 否则回落原始 socket
@@ -631,10 +631,25 @@ export async function registerChatRoutes(fastify) {
     //   修: 可信内部代理(带 x-ingest-secret = bot console-api.mjs 已带; 公网网页不带) 豁免 per-IP; Sybil 防护
     //   对 bot 路径靠 per-wallet 永久 once(托管钱包幂等 = 每 TG 用户一地址一次) + 全局日帽。per-IP 仅对公网网页 faucet 保留。
     const isTrustedProxy = await isValidIngestSecret(request);  // 验值(timingSafeEqual), 非仅验存在
+    // G4 lightweight fingerprint (2026-07-04, Bettor 钦定): 测试网币零价值, 目标"防随手换IP多领"非
+    // "防专业女巫"——不装重型设备指纹库, 就 user-agent+accept-language(服务端已有的 header)+客户端传的
+    // 时区偏移+屏幕分辨率拼一个 hash, 当第二把钥匙同样 24h≤3(跟 per-IP 平行, 独立判定, 任一超限即拒)。
+    // bot 代理路径(trusted proxy)不发这两个浏览器字段, fingerprintHash 会退化成只含 UA+lang 的弱 hash——
+    // 但 trusted proxy 路径本就跳过下面的限速判断(靠 per-wallet+全局帽), 不受影响。
+    let fingerprintHash = null;
     if (!isTrustedProxy) {
+      const fpRaw = [
+        request.headers['user-agent'] || '',
+        request.headers['accept-language'] || '',
+        tz_offset ?? '',
+        screen_res || '',
+      ].join('|');
+      fingerprintHash = createHash('sha256').update(fpRaw).digest('hex');
       // Check IP rate limit (= 24h 3 次, 公网网页 faucet only)
       const ipCount = sqlite.prepare('SELECT COUNT(*) AS cnt FROM faucet_grants WHERE ip_address = ? AND granted_at > ?').get(ip, day).cnt;
       if (ipCount >= 3) return reply.code(429).send({ error: 'IP rate limit (= 24h 3 次 limit, current ' + ipCount + ', 公网网页 faucet)' });
+      const fpCount = sqlite.prepare('SELECT COUNT(*) AS cnt FROM faucet_grants WHERE fingerprint_hash = ? AND granted_at > ?').get(fingerprintHash, day).cnt;
+      if (fpCount >= 3) return reply.code(429).send({ error: 'device rate limit (= 24h 3 次 limit, current ' + fpCount + ', 公网网页 faucet)' });
     }
     // KANet-UI 2026-06-23 (Bettor⑥ anti-Sybil·托管钱包零门槛后 faucet 额度抬到 10k → 必加全局日帽,
     //   否则一人多 TG 账号刷干 faucet relay)。全局 24h 笔数帽 = 已有 per-IP/per-wallet 之上的总闸,
@@ -670,9 +685,9 @@ export async function registerChatRoutes(fastify) {
       if (!txid) {
         return reply.code(503).send({ error: 'faucet transfer 未上链 (= relay 返回无 txId, 可能余额不足 OR relay down)' });
       }
-      sqlite.prepare(`INSERT INTO faucet_grants (ip_address, wallet_address, granted_at, amount_sompi, txid, status)
-                      VALUES (?, ?, ?, ?, ?, 'sent')`)
-        .run(ip, wallet_address, Math.floor(Date.now() / 1000), Math.round(FAUCET_AMOUNT_KAS * 1e8), txid);
+      sqlite.prepare(`INSERT INTO faucet_grants (ip_address, wallet_address, granted_at, amount_sompi, txid, status, fingerprint_hash)
+                      VALUES (?, ?, ?, ?, ?, 'sent', ?)`)
+        .run(ip, wallet_address, Math.floor(Date.now() / 1000), Math.round(FAUCET_AMOUNT_KAS * 1e8), txid, fingerprintHash);
       return reply.send({ ok: true, txid, amount: `${FAUCET_AMOUNT_KAS} testnet KAS` });
     } catch (err) {
       return reply.code(500).send({ error: `faucet transfer fail: ${err.message}` });

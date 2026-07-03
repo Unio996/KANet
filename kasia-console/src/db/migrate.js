@@ -5238,5 +5238,22 @@ export function runMigrations() {
     }
   }
 
+  // v178 (KANet-UI, G4 世界杯上线门, 2026-07-04 Bettor 钦定轻量指纹): faucet_grants += fingerprint_hash.
+  //   目标"防随手换IP多领"非"防专业女巫"(测试网币零价值,不值得防死磕攻击者)。主防线仍是 per-IP(24h≤3)+
+  //   全局日帽; 这是第二把钥匙同样 24h≤3, 用 hash(user-agent+accept-language+timezone offset+屏幕分辨率)
+  //   当稳定字段拼 key, 不装重型设备指纹库。NULL = 旧行(迁移前授予, 无指纹数据, 不回填, 不影响新行判定)。
+  {
+    const cols = sqlite.prepare("PRAGMA table_info(faucet_grants)").all();
+    if (!cols.some(c => c.name === 'fingerprint_hash')) {
+      try {
+        sqlite.exec(`ALTER TABLE faucet_grants ADD COLUMN fingerprint_hash TEXT`);
+        sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_faucet_grants_fingerprint ON faucet_grants(fingerprint_hash, granted_at)`);
+        console.log('[migrate] v178: faucet_grants += fingerprint_hash TEXT + index (G4 lightweight fingerprint throttle, secondary key alongside per-IP).');
+      } catch (e) {
+        console.warn(`[migrate] v178 fingerprint_hash fail: ${e.message}`);
+      }
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }

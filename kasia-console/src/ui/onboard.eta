@@ -216,7 +216,11 @@ function onboardApp() {
       try {
         const r = await fetch(this.apiBase + '/api/faucet/request', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ wallet_address: this.faucetAddr.trim() }),
+          body: JSON.stringify({
+            wallet_address: this.faucetAddr.trim(),
+            tz_offset: new Date().getTimezoneOffset(),
+            screen_res: `${screen.width}x${screen.height}`,
+          }),
         });
         const j = await r.json().catch(() => ({}));
         if (r.ok && j.txid) {
