@@ -479,7 +479,11 @@ export async function registerRelayRoutes(fastify) {
       // amount" — a relay with 1 giant UTXO + 8 dust already reads as "9 >= 8, sufficient" and no-ops.
       // Allow caller to override for cases needing more/larger chunks (e.g. faucet relay pre-burst prep).
       const targetCount = Number.isFinite(Number(request.body?.targetCount)) ? Number(request.body.targetCount) : undefined;
-      const result = await splitUtxos(request.params.id, targetCount);
+      // force=true → REBALANCE (consolidate + re-split to N fresh equal UTXOs) even when current count
+      // already >= targetCount — needed to fix an over-fragmented set (many too-small chunks), not just
+      // grow an under-fragmented one.
+      const force = request.body?.force === true;
+      const result = await splitUtxos(request.params.id, targetCount, { force });
       return reply.send(result);
     } catch (err) {
       return reply.code(500).send({ error: err.message });
