@@ -393,10 +393,19 @@ export async function startBetFromMarket(tgUser, marketId) {
   }
   // 满员早拒: inline-keyboard 按钮跨 bot 重启持久存在, 用户可能点旧 /start 里已满盘进来.
   // raw_bettor_count = raw COUNT(*) 含 AutoBetter (== prep L1524 同源); 缺失 fail-closed → 999.
-  // v0.7 市场滚动分片无上限·跳过 50-cap (J2 spec 2026-06-30).
+  // v0.6 及更早: 50-cap 硬顶(PoolSpine.sil). v0.7 bshard 滚动分片本身无片级上限 (J2 spec 2026-06-30),
+  // 但 G3(世界杯上线门, 2026-07-04): 结算侧 PayoutShard 1024-leaf 硬顶(#18 rolling 未建)→ pool.js
+  // 加了市场级 900-leaf 软顶(MARKET_MAX_LEAVES_G3, register-v07/prep 侧真正拦截)。这里提前用
+  // bettor_count(shard-aware honestCountSql, 按叶子数非人数, 跟 pool.js 同口径)早拒·省一趟押注流程,
+  // 真正的防线在 prep 端点(即使这里漏判, prep 仍会 409)。raw_bettor_count 对 v0.7 是 shard-blind
+  // (漏分片押注), 不能用来判 v0.7 满员 — 只对 v0.6 生效。
   const rawCount = dr.json.raw_bettor_count ?? 999; // fail-closed: missing raw → treat as full
   if (rawCount >= 50 && market.protocol_version !== 'v0.7') {
     return t(lang, 'market_full');
+  }
+  if (market.protocol_version === 'v0.7') {
+    const leafCount = dr.json.bettor_count ?? 900; // fail-closed: missing honest count → treat as at-cap
+    if (leafCount >= 900) return t(lang, 'market_full');
   }
   // 直接进 detail 复用同 UI
   sessions.set(tgUser, { stage: 'detail', market });
