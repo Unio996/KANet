@@ -281,12 +281,14 @@ export const LANGS = {
     earnings_node_total: '  Total: {kas} KAS ({n} markets, chain-verified)',
     earnings_node_pending: '  ⏳ {n} tx(s) pending index (refresh soon)',
     earnings_node_note: '  Note: queried by receive address pk; for rare v0.6 separate signing-key cases this may undercount.',
+    earnings_testnet_note: 'ℹ testnet KAS only — not real money, not investment advice.',
 
     // brokerFeeDmText function (messages.mjs)
     fee_dm_title: '💰 Fee received',
     fee_dm_body: 'Your market "{title}" has settled',
     fee_dm_amount: 'This payment: +{kas} KAS',
     fee_dm_link: '▸ /earnings for details',
+    fee_dm_testnet_note: 'ℹ testnet KAS only — not real money, not investment advice.',
 
     // notifyLine function (messages.mjs)
     notify_settle: '🎉 Your prediction market bet settled! If you won, KAS is at your /link address.\ntx {tx}… — /mybets to see how much you won.',
@@ -612,12 +614,14 @@ export const LANGS = {
     earnings_node_total: '  累计: {kas} KAS ({n} 个市场, 链验)',
     earnings_node_pending: '  ⏳ {n} 笔待索引 (稍后刷新)',
     earnings_node_note: '  注: 均用收款地址 pk 查询; v0.6 用独立签名 key 的极少数情况下该部分可能漏统计。',
+    earnings_testnet_note: 'ℹ 仅测试网 KAS · 非真钱 · 非投资建议。',
 
     // brokerFeeDmText
     fee_dm_title: '💰 收益到账',
     fee_dm_body: '你经手的市场「{title}」已结算',
     fee_dm_amount: '本笔 +{kas} KAS',
     fee_dm_link: '▸ /earnings 看明细',
+    fee_dm_testnet_note: 'ℹ 仅测试网 KAS · 非真钱 · 非投资建议。',
 
     // notifyLine
     notify_settle: '🎉 你押注的预测市场结算了! 押中的话 KAS 已到你 /link 地址。\ntx {tx}… — 回 /mybets 看你赢了多少。',

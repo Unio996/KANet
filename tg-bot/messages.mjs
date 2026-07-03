@@ -139,6 +139,8 @@ export function brokerFeeDmText(ev, lang = 'en') {
     t(lang, 'fee_dm_body', { title }),
     t(lang, 'fee_dm_amount', { kas: feeKas }),
     t(lang, 'fee_dm_link'),
+    '',
+    t(lang, 'fee_dm_testnet_note'),
   ].join('\n');
 }
 
@@ -203,6 +205,8 @@ export function brokerEarnings(data, nodeIncome = null, lang = 'en') {
       '',
       t(lang, 'earnings_no_markets'),
       t(lang, 'earnings_no_markets_apply'),
+      '',
+      t(lang, 'earnings_testnet_note'),
     ].join('\n');
   }
   const lines = [
@@ -231,6 +235,7 @@ export function brokerEarnings(data, nodeIncome = null, lang = 'en') {
       lines.push(t(lang, 'earnings_node_pending', { n: nodeIncome.pending_tx_index_count }));
     lines.push(t(lang, 'earnings_node_note'));
   }
+  lines.push('', t(lang, 'earnings_testnet_note'));
   return lines.join('\n');
 }
 
