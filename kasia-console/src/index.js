@@ -41,6 +41,7 @@ import { registerChainDataRoutes } from './api/chain-data.js';
 import { registerStockRoutes } from './api/stocks.js';
 import { registerBettorRoutes } from './api/bettor.js';
 import { registerPoolRoutes } from './api/pool.js';
+import { registerAdminDedupRoutes } from './api/admin-dedup.js'; // #27 dedup 存量清理 admin endpoint
 import { registerKanetBrokerRoutes } from './api/kanet-broker.js';
 import { registerTgWalletRoutes } from './api/tg-wallet.js'; // TG custodial wallet (Owner 钦定, Bettor 审)
 import { registerKanetMakerRoutes } from './api/kanet-maker.js';
@@ -188,6 +189,7 @@ await registerExchangeRoutes(fastify);
 await registerAuditPredictionRoutes(fastify);
 await registerBettorRoutes(fastify);
 await registerPoolRoutes(fastify);
+await registerAdminDedupRoutes(fastify);
 await registerKanetBrokerRoutes(fastify);
 await registerTgWalletRoutes(fastify);
 await registerKanetMakerRoutes(fastify);
