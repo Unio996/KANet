@@ -5218,5 +5218,25 @@ export function runMigrations() {
     console.log('[migrate] v176: oracle_shadow_ledger table (影子判定台账 — 我们 oracle vs 权威 命中率历史, 纯记录不碰结算, Owner 自我进化 #26).');
   }
 
+  // v177 (J2, task#32, 2026-07-03 Owner 500 卡死根因修): pool_bettor_sides += pay_amount_sompi.
+  //   问题: register-v07/confirm 的"已注册"幂等判定原靠 hasMatchingUtxo(payAddr 当前是否还有匹配 UTXO)
+  //   ——但注册成功后立刻 fire-and-forget sweep_per_bet 把该 UTXO 扫走, 任何 sweep 之后的重复 poll 会
+  //   看到 hasMatchingUtxo=false, 即使 DB 早已真实注册, 也照样返回 pending:true(Owner 那笔 Cabo Verde
+  //   500KAS = pool_bettor_sides.id=11913 实证)。且旧 mine 查询只按 pk+direction+market 取最新一条,
+  //   同方向多笔押注场景可能认错笔。
+  //   修法: 记录 payAmountSompi(=stake+bet_id 派生 nonce, 每笔押注唯一且确定性可重算) → confirm 幂等判定
+  //   只信 DB、精确匹配这一笔 payAmountSompi, 不再依赖 UTXO 是否还在原地。
+  {
+    const cols = sqlite.prepare("PRAGMA table_info(pool_bettor_sides)").all();
+    if (!cols.some(c => c.name === 'pay_amount_sompi')) {
+      try {
+        sqlite.exec(`ALTER TABLE pool_bettor_sides ADD COLUMN pay_amount_sompi INTEGER`);
+        console.log('[migrate] v177: pool_bettor_sides += pay_amount_sompi INTEGER (task#32 confirm-idempotency fix, NULL for pre-existing rows = falls back to old latest-match behavior).');
+      } catch (e) {
+        console.warn(`[migrate] v177 pay_amount_sompi fail: ${e.message}`);
+      }
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }

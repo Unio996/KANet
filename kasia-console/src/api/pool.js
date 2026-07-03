@@ -1377,14 +1377,29 @@ export async function registerPoolRoutes(fastify) {
     }
     const candidate = matches[0];
     if (!candidate) {
-      // all matching payments already consumed → idempotent already_registered; else still pending.
-      const hasMatchingUtxo = utxos.some(u => amtOf(u) === BigInt(payAmountSompi));
+      // #task32 fix (2026-07-03, Owner 500KAS 卡死根因): 已注册判定改成只信 DB, 不再依赖 hasMatchingUtxo
+      // (payAddr 当前是否还有匹配 UTXO) — 注册成功后 L1448 附近的 sweep_per_bet 会把该 UTXO 扫走, 任何
+      // sweep 之后的重复 poll 都会看到"UTXO 不在了"从而误判 pending(即使这笔早已真实注册, 实证见
+      // pool_bettor_sides.id=11913)。精确匹配 pay_amount_sompi(=这一笔押注的确定性唯一 exact 付款额,
+      // 每次 confirm 用同一个 bet_id 重算必得同值) — 不再用"pk+direction+market 取最新一条"这种可能
+      // 认错笔的模糊匹配。
       const mine = sqlite.prepare(`SELECT pbs.market_id shard_market_id, pbs.side_lock_tx, pbs.merkle_index, pbs.stake_amount
           FROM pool_bettor_sides pbs JOIN market_shards ms ON pbs.market_id = ms.shard_market_id
-          WHERE ms.logical_market_id = ? AND pbs.bettor_pk = ? AND pbs.direction = ? ORDER BY pbs.id DESC LIMIT 1`)
-        .get(logicalMarketId, bettorPk, v.direction);
-      if (hasMatchingUtxo && mine) {
+          WHERE ms.logical_market_id = ? AND pbs.bettor_pk = ? AND pbs.direction = ? AND pbs.pay_amount_sompi = ?
+          ORDER BY pbs.id DESC LIMIT 1`)
+        .get(logicalMarketId, bettorPk, v.direction, payAmountSompi);
+      if (mine) {
         return reply.send({ ok: true, registered: true, already_registered: true, shard_market_id: mine.shard_market_id, side_lock_tx: mine.side_lock_tx, merkle_index: mine.merkle_index, stake_sompi: mine.stake_amount });
+      }
+      // legacy fallback: rows registered before v177(pay_amount_sompi 列)落地, 该列为 NULL — 退回旧的
+      // "pk+direction+market 取最新一条"模糊匹配(仍是纯 DB 判定, 不依赖 UTXO), 缩小窗口只咬 pre-fix 数据。
+      const legacyMine = sqlite.prepare(`SELECT pbs.market_id shard_market_id, pbs.side_lock_tx, pbs.merkle_index, pbs.stake_amount
+          FROM pool_bettor_sides pbs JOIN market_shards ms ON pbs.market_id = ms.shard_market_id
+          WHERE ms.logical_market_id = ? AND pbs.bettor_pk = ? AND pbs.direction = ? AND pbs.pay_amount_sompi IS NULL
+          ORDER BY pbs.id DESC LIMIT 1`)
+        .get(logicalMarketId, bettorPk, v.direction);
+      if (legacyMine) {
+        return reply.send({ ok: true, registered: true, already_registered: true, shard_market_id: legacyMine.shard_market_id, side_lock_tx: legacyMine.side_lock_tx, merkle_index: legacyMine.merkle_index, stake_sompi: legacyMine.stake_amount });
       }
       return reply.send({ ok: true, registered: false, pending: true, side_p2sh: payAddr, pay_to_address: payAddr, exact_stake_sompi: payAmountSompi, exact_stake_kas: (payAmountSompi / 1e8).toFixed(8), note: `no payment of exactly ${(payAmountSompi / 1e8).toFixed(8)} KAS detected at side_p2sh yet — pay the exact amount and retry confirm.` });
     }
@@ -1418,10 +1433,12 @@ export async function registerPoolRoutes(fastify) {
       };
       // recordBettor: side_lock_tx = bettor's PAYMENT txid (= idempotent dedup key + audit anchor; mirrors v06 semantics),
       //   stake_amount = the bet stake (round, nonce excluded), side_p2sh = the shard's p2sh (shard-aware read parity).
+      //   pay_amount_sompi = this bet's exact deterministic paid amount(v177, task#32) — the confirm-idempotency
+      //   re-poll lookup above matches on this, not on whether the payment UTXO is still sitting at payAddr.
       const recordBettor = async ({ shardMarketId, shardIndex, bettorPk: pk, direction: dir, stakeSompi: st }) => {
         try {
-          sqlite.prepare(`INSERT OR IGNORE INTO pool_bettor_sides (market_id, bettor_pk, bettor_relay_id, direction, stake_amount, side_p2sh, side_lock_tx, merkle_index, side_redeem_script_hex)
-            VALUES (?,?,?,?,?,?,?,?,?)`).run(shardMarketId, pk, null, dir, st, shardP2sh_of(shardMarketId), paymentTxid, shardIndex, '');
+          sqlite.prepare(`INSERT OR IGNORE INTO pool_bettor_sides (market_id, bettor_pk, bettor_relay_id, direction, stake_amount, side_p2sh, side_lock_tx, merkle_index, side_redeem_script_hex, pay_amount_sompi)
+            VALUES (?,?,?,?,?,?,?,?,?,?)`).run(shardMarketId, pk, null, dir, st, shardP2sh_of(shardMarketId), paymentTxid, shardIndex, '', payAmountSompi);
         } catch (e) { console.warn(`[register-v07/confirm] recordBettor warn: ${e.message}`); }
       };
 

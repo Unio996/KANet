@@ -101,6 +101,21 @@ export async function ensurePayoutShard({ db, rc, transfer, landed, p2sh, logica
   return { payoutCovId, psAddr, psOutpoint: `${psTx}:0`, psRedeemGenesis: redeem };
 }
 
+// #task32 (2026-07-03, Bettor 结构性发现): 'use' 分支(append 到已开分片的当前 leaf, 最常见路径)读
+//   current_leaf_outpoint/current_leaf_state 后建 register_append 花它——两个并发 confirm 落在同一
+//   shard 会读到同一个 outpoint 抢 splice, 后到者链上花费被拒(安全失败非丢钱, 但合法请求报错需重试)。
+//   'open_new' 分支已有 DB UNIQUE(logical_market_id,shard_index) 约束 + 递归重试兜底(见下 L192 附近),
+//   'use' 分支没有对应保护。修法: 单进程内按 logicalMarketId 排队(Promise 链, 无外部依赖), 同一市场
+//   的并发注册请求串行化——不拒绝, 排队等前一个完成再走, 两笔请求最终都能成功(非"一个赢一个错")。
+const _marketLocks = new Map();   // logicalMarketId -> tail Promise (chain)
+function _withMarketLock(marketId, fn) {
+  const prev = _marketLocks.get(marketId) || Promise.resolve();
+  const run = prev.then(fn, fn);   // run fn regardless of prior success/failure, chained after it
+  const tail = run.catch(() => {}); // don't let a rejection break the chain for the NEXT waiter
+  _marketLocks.set(marketId, tail);
+  return run;
+}
+
 /**
  * Register one bettor's bet into the (A)-model rolling-shard set. Core (a) orchestration.
  * @param {object} o {
@@ -112,6 +127,13 @@ export async function ensurePayoutShard({ db, rc, transfer, landed, p2sh, logica
  * @returns {{ action, shardIndex, shardMarketId, shardP2sh, leafTx, leafOutpoint, leafState, payoutCovId }}
  */
 export async function registerBettorOnShard(o) {
+  // 只在【最外层调用】排队, 内部递归自调(_retry/open_new→use)复用同一把已持有的锁位置, 不重复排队
+  // (否则递归自调会在已持有的锁后面排自己的队 = 自锁死)。用 o._locked 标记"已在锁内"。
+  if (o._locked) return _registerBettorOnShardInner(o);
+  return _withMarketLock(o.logicalMarketId, () => _registerBettorOnShardInner({ ...o, _locked: true }));
+}
+
+async function _registerBettorOnShardInner(o) {
   const {
     db, rc, transfer, landed, p2sh, logicalMarketId, poolMerkleRoot, predicateCommit,
     bettorPk, direction, stakeSompi, relayAddr, silverc, sealCount, deadline, createShardMarketRow, recordBettor,
