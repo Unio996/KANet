@@ -350,9 +350,12 @@ export async function registerRelayRoutes(fastify) {
           rpc.connect({}),
           new Promise((_, rej) => setTimeout(() => rej(new Error('RPC connect timeout')), 3000)),
         ]);
-        const { balance } = await rpc.getBalanceByAddress({ address: new Address(relay.address) });
+        // plural (not singular getBalanceByAddress — throws "invalid type: floating point,
+        // expected a string" on this vendored kaspa-wasm build) + direct node-side sum, not
+        // per-UTXO fetch — stays fast on massive-UTXO addresses (mining/faucet, millions of coinbase UTXOs).
+        const { entries } = await rpc.getBalancesByAddresses([new Address(relay.address)]);
         await rpc.disconnect();
-        const kas = Number(balance || 0n) / 1e8;
+        const kas = Number(entries?.[0]?.balance || 0n) / 1e8;
         return reply.send({ balance: Math.round(kas * 1000) / 1000 });
       } catch {}
     }
@@ -622,9 +625,9 @@ export async function registerRelayRoutes(fastify) {
           rpc.connect({}),
           new Promise((_, rej) => setTimeout(() => rej(new Error('RPC connect timeout')), 3000)),
         ]);
-        const { balance } = await rpc.getBalanceByAddress({ address: new Address(relay.address) });
+        const { entries } = await rpc.getBalancesByAddresses([new Address(relay.address)]);
         await rpc.disconnect();
-        return Math.round(Number(balance || 0n) / 1e8 * 1000) / 1000;
+        return Math.round(Number(entries?.[0]?.balance || 0n) / 1e8 * 1000) / 1000;
       } catch {}
     }
     try {
