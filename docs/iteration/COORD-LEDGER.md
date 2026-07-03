@@ -596,6 +596,13 @@ owner=KANet-UI;co-verify=Bettor(待回)。
 - **根因一句**：主库 10万+ coinbase UTXO → `sendKaspa` 拉全部建 tx 崩(跟余额显示 bug 同根,但 SEND 更难修——不能只求和,必须真选币+可能需 consolidate,且 `getUtxosByAddresses` 拉 10万+ 本身就崩,与 fee/amount 无关)。
 - **状态**：待派工(owner 未定,下个 pass 设计)。别重复踩坑——任何人再遇到"主库/挖矿地址发不出"直接引用本记录,不用重新六层查一遍。
 
+### 🔴🔴 追加(2026-07-03 17:00·G4 百人冒烟测试炸出)：水龙头 100% 失败 = 同根因升级为发布拦截项
+- **场景**：世界杯上线门 G4(水龙头防线)要求 100 人冒烟测试。KANet-UI 用 100 个真实生成地址、20 并发批次跑 `/api/faucet/request`(trusted-proxy 路径,模拟真实 bot 用户)。
+- **结果**：**100/100 全部失败**(60 笔 `Relay command timeout after 30s` + 40 笔 `Relay not running`)。console.log 实锤 `FaucetRelay-tn-2` relay 子进程崩溃,报同一个 `RuntimeError: unreachable` wasm trap(与本线主库发送崩溃**完全同根因**——`FAUCET_RELAY_ID` 就是 FaucetRelay-tn-2,同一个百万级 coinbase UTXO 地址)。
+- **health-monitor 熔断器已放弃自动恢复**：日志 `FaucetRelay-tn-2 died but 3 restarts in last hour ≥ MAX(3) — skip (manual investigation needed)`。KANet-UI 手动 `POST /api/relay/:id/restart` 拉回服务(PID 59844 已连上),但**下一次任何人真实领水龙头币,同样的崩溃会立刻重演**(与金额无关,崩在 UTXO fetch 这一步,非选币/构造阶段)。
+- **影响升级**：本线原判定"主库发不出 1 笔大额 = 独立架构 task,不赶",现因水龙头(=所有新用户唯一入口)复用同一崩溃地址,**变成发布拦截级问题**——G4 门无法过,世界杯 7/8 上线时任何真实用户点 /faucet 大概率撞同一崩溃。
+- **状态**：已报告频道,待 Bettor/团队定夺。KANet-UI 提议的临时缓解 = 切 `FAUCET_RELAY_ID` 到别的可发送账户(牺牲总池子换活着),或提前 #34 根治优先级。**未擅自执行,等团队拍。**
+
 ---
 
 ## 归档(已收敛旧线,留索引)
