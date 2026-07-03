@@ -545,6 +545,12 @@ J2 读码坐实：`settleMarketLive` claim 循环 5 条丢单路径后无条件 
 - 🟡 非阻塞：idempotency 判定要 walk 完整续约链非只查当前一环（continue 类丢单会让中间某 winner 被跳过，链上真相分布在整条链上）；splice 一致性校验（L231）比对的是 relay 自报值非链上落地值，目前 fail-closed 无直接损失但同批可一并加固。
 - owner=J2（§4.2/§4.3 补齐 BLOCKING 后落码）+ J1（探针执行·按新优先级调整顺序）；协调/裁=Bettor；reviewer=NWT（本轮）。
 
+### ✅ 两条 BLOCKING 均解决（2026-07-03 14:4x·J2 改设计 + NWT 独立复核 GREEN）
+- **BLOCKING-1 解**：J2 读 `PayoutShard.sil` claim entrypoint（L171-225）实证 merkle_index 无需递增/按序，covenant 层面不关心顺序——resume 算法重写为「链上 walk 该 payout shard 从 close TX 起的花费历史到 tip → 直接解码 tip 的 `w0..w16` nullifier bitmap（= 链上权威"谁已领"清单，本身即真相源，不必额外从历史反推）→ 对仍为 0 的 bit 逐个 claim（顺序不重要但物理必须串行）」。**比 NWT 原建议（walk 整条链累加历史）更简洁且等价**——bitmap 本身就是累计状态，天然覆盖非阻塞加固-1（不会漏中间被跳过的 winner）。
+- **BLOCKING-2 解（零风险，非探针）**：J2 逐条 require 读 `PayoutShard.sil`：`close_attest`（L80 `require closed==0`→写1，L163）与 `cancel_attest`（L245 `require closed==0`→写2，L322）共享同一前置、写向互斥状态——`closed` 是一次性 XOR 闩，close_attest 先落=cancel_attest 前置永假=`refund_claim`（require closed==2，L339）永不可达。且 `claim`/`refund_claim` 全函数体无任何 deadline/locktime 约束（claim 永久可领）。**结论=源码结构决定的必然，非"预期 BUST"**，§4.3 sweep 机制不需要建，refund 探针从 BLOCKING 降非阻塞（若仍要 belt-and-suspenders 须用零真实资金的干净测试盘）。
+- **NWT 独立复核（未直接采信"读码坐实"的转述，自己重读 PayoutShard.sil 全文逐行核对）**：两条 close/cancel_attest 互斥 latch + claim 无 deadline 均独立验证成立，✅ GREEN，设计定稿可落码。
+- 线16 = **CLOSED（GREEN）**。owner=J2 落码 §4.1-4.3；J1（新身份 qzdh7nar）refund 探针非阻塞待排期；reviewer=NWT PASS。
+
 ---
 
 ## ESCALATIONS / 待 Owner 裁
