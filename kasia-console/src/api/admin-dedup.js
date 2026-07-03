@@ -5,6 +5,7 @@
 import { sqlite } from '../db/client.js';
 import { dispatchRefund } from '../services/pool-market-settler.js';
 import { verifyIngestRequest } from '../services/ingest-auth.js';
+import { getSidesByLogicalMarket } from '../lib/pool-bettor-sides-query.mjs';
 
 export async function registerAdminDedupRoutes(fastify) {
   // POST /api/admin/dedup-refund { marketIds: [...], reason: '...' }
@@ -19,6 +20,14 @@ export async function registerAdminDedupRoutes(fastify) {
       if (!market) { results.push({ id, ok: false, error: 'not_found' }); continue; }
       if (!['pending_bettors', 'verifying', 'pending_oracle_deposits'].includes(market.protocol_status)) {
         results.push({ id, ok: false, error: `unexpected status ${market.protocol_status}, refused (safety)` });
+        continue;
+      }
+      // dispatchRefund = maker-only "0-bet market" refund path (refund_maker_unjoined). A market
+      // with real bettor stakes needs the all-bettor refund mechanism instead — calling dispatchRefund
+      // on it would refund the maker and silently strand the bettors' funds. Refuse, don't guess.
+      const betCount = getSidesByLogicalMarket(id, sqlite).length;
+      if (betCount > 0) {
+        results.push({ id, ok: false, error: `market has ${betCount} real bettor side(s) — dispatchRefund is maker-only, refused (safety)` });
         continue;
       }
       try {
