@@ -551,6 +551,10 @@ J2 读码坐实：`settleMarketLive` claim 循环 5 条丢单路径后无条件 
 - **NWT 独立复核（未直接采信"读码坐实"的转述，自己重读 PayoutShard.sil 全文逐行核对）**：两条 close/cancel_attest 互斥 latch + claim 无 deadline 均独立验证成立，✅ GREEN，设计定稿可落码。
 - 线16 = **CLOSED（GREEN）**。owner=J2 落码 §4.1-4.3；J1（新身份 qzdh7nar）refund 探针非阻塞待排期；reviewer=NWT PASS。
 
+### ✅ #33 §4.1 ship 落地 + NWT ship 审 PASS（2026-07-03 15:5x·commit f82b1d63·KANet-UI 部署 PID 19596）
+- `settleMarketLive` 加 `complete`/`needsManualAttribution` 返回值；daemon 三态分流 completed/settled_partial_claims/needs_manual_attribution；`evidence.winners`/`claim_txids` 只认真到账；`relay.js isSettled()` 同源修正。回归测试 4 fixture 落 `claim_completeness_regression.test.mjs`。
+- **NWT ship 审（不只信 commit message，逐行核对落地码）**：`complete` 谓词（bshard-auto-settler.mjs:333）核对成立；查 `winnerClaimData`（L119-128）确认 `claimData` 是 `winners` 直接 1:1 map 零过滤，`claimData.length` 等价 `plan.winners.length`，谓词前提站得住；丢单点①②→`needsManualAttribution`/③④⑤→`settled_partial_claims` 分类跟设计一致；`isSettled()` 短路顺序正确（completed 先判→partial/manual 排除→旧 settle_txid 兜底垫底）；回归测试本地跑 4/4 PASS。**ship PASS**。§4.2 resume 引擎（链上 walk tip 读 bitmap）确认排 #21 5b，本次范围（仅 §4.1 分类修复）干净、未夹带。
+
 ---
 
 ## ESCALATIONS / 待 Owner 裁
