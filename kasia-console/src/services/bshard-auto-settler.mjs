@@ -202,12 +202,18 @@ export async function settleMarketLive(marketId, ctx) {
   let curState = { consolidated_pool: curPool.toString(), closed: 1, payoutRoot: plan.payoutRoot };
   for (let i = 0; i < 17; i++) curState['w' + i] = 0;
   let curRedeem = compilePayoutShardRedeem({ poolMerkleRoot: ps.poolMerkleRoot, predicateCommit: ps.predicateCommit, consolidatedPool: String(ps.consolidatedPool), closed: 1, payoutRoot: plan.payoutRoot });
+  // #task33 (2026-07-03·NWT GREEN·docs/2026-07-03-bshard-claim-completeness-and-retry-design.md):
+  //   丢单点①②(climb-fail/round-trip-fail, continue) = 数据/编码问题非时序问题, 独立标记 needsManualAttribution,
+  //   不进 settled_partial_claims 重试队列(见 §4.2.1 🟡风险-1)。丢单点③④⑤(submit-fail/not-landed/splice-mismatch,
+  //   break) = 可重试类, 走 settled_partial_claims。complete 谓词(§4.1 🟡风险-2): 全部 claims 条目
+  //   received===true 且无 error 字段, 且 claims.length===claimData.length(无遗漏 attempt)。
   const claims = [];
+  let needsManualAttribution = false;
   for (const cd of claimData) {
-    if (!cd.climbOk) { ctx.alert?.(marketId, `claim climb fail winner ${cd.pk.slice(0, 8)}`); claims.push({ pk: cd.pk, amount: cd.amount, error: 'climb fail' }); continue; }
+    if (!cd.climbOk) { ctx.alert?.(marketId, `claim climb fail winner ${cd.pk.slice(0, 8)}`); claims.push({ pk: cd.pk, amount: cd.amount, error: 'climb fail' }); needsManualAttribution = true; continue; }
     const winnerAddr = ctx.p2pkAddr(cd.pk);
     if (ctx.p2pkSpk && ctx.p2pkSpk(winnerAddr).toLowerCase() !== ('20' + cd.pk + 'ac').toLowerCase()) {
-      ctx.alert?.(marketId, `winner P2PK round-trip fail ${cd.pk.slice(0, 8)}`); claims.push({ pk: cd.pk, amount: cd.amount, error: 'round-trip fail' }); continue;   // 防 hex 双编码
+      ctx.alert?.(marketId, `winner P2PK round-trip fail ${cd.pk.slice(0, 8)}`); claims.push({ pk: cd.pk, amount: cd.amount, error: 'round-trip fail' }); needsManualAttribution = true; continue;   // 防 hex 双编码
     }
     const claimRes = await ctx.relayPost(ctx.feeRelay.id, {
       type: 'bshard_payout_claim',
@@ -235,7 +241,10 @@ export async function settleMarketLive(marketId, ctx) {
     claims.push({ pk: cd.pk, amount: cd.amount, txId: claimTx, received });
     psOutTxid = claimTx; psOutIdx = 1; curPool = curPool - BigInt(cd.amount); curState = newState; curRedeem = contRedeem;
   }
-  return { ok: true, closeTxid, claims, plan };
+  // completed 不变量(task33 §4.1): 每个 claimData 条目都有 attempt 记录 + 全部 received===true + 全部无 error。
+  const complete = claims.length === claimData.length && claims.every(c => c.received === true && !c.error);
+  if (!complete) ctx.alert?.(marketId, `claim 未完整: attempted=${claims.length}/${claimData.length}, received=${claims.filter(c => c.received === true && !c.error).length} — settled_partial_claims${needsManualAttribution ? ' + needs_manual_attribution' : ''}`);
+  return { ok: true, closeTxid, claims, plan, complete, needsManualAttribution };
 }
 
 // NO TX NO STATE: 查 closed PS @ 应锚地址·来自 close tx·value==consolidatedPool

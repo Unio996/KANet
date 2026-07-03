@@ -227,17 +227,30 @@ async function settleOneMarket(marketId) {
   if (!r.ok || !r.closeTxid) { ctx.alert(marketId, `settle fail: ${r.reason || 'no closeTxid'}`); return { ok: false, reason: r.reason, closeTxid: r.closeTxid }; }
 
   // 4. writeback (task#17·status + settle_txid + settle_evidence)
+  //    #task33 (2026-07-03·NWT GREEN): completed 不变量 = 每个 winner 都有链上确认(received===true 且无 error)的
+  //    claim TX。r.complete 由 settleMarketLive 精确计算(claims.length===plan.winners.length 且全部 received && !error)。
+  //    不完整 → settled_partial_claims(可重入重试队列, 见 §4.2)；其中若含 climb-fail/round-trip-fail(数据/编码问题
+  //    非时序问题) → needs_manual_attribution(独立终态, 不进自动重试, 见 §4.2.1 🟡风险-1)。
+  //    evidence.winners/claim_txids 只认真到账(txId && received===true && !error)——旧字段把失败-但-带-txId 的条目
+  //    也计入是本 bug 产物, 不再重蹈(Bettor co-verify 指正)。
+  const newStatus = r.complete ? 'completed' : (r.needsManualAttribution ? 'needs_manual_attribution' : 'settled_partial_claims');
   try {
-    const claims = (r.claims || []).filter(c => c.txId);
-    const evidence = { settled_by: 'bshard-settle-daemon', close_txid: r.closeTxid, payout_root: r.plan?.payoutRoot, winners: claims.length, claim_txids: claims.map(c => c.txId), chain_settled: true, settled_at: new Date().toISOString() };
+    const allClaims = r.claims || [];
+    const landedClaims = allClaims.filter(c => c.txId && c.received === true && !c.error);
+    const evidence = {
+      settled_by: 'bshard-settle-daemon', close_txid: r.closeTxid, payout_root: r.plan?.payoutRoot,
+      winners: landedClaims.length, claim_txids: landedClaims.map(c => c.txId),
+      expected_winners: r.plan?.winners?.length ?? null, attempted: allClaims.length, complete: !!r.complete,
+      chain_settled: true, settled_at: new Date().toISOString(),
+    };
     let meta = {}; try { meta = JSON.parse(market.metadata || '{}'); } catch {}
     meta.settle_evidence = evidence;
     sqlite.transaction(() => {
-      sqlite.prepare("UPDATE pool_markets SET protocol_status = 'completed', settle_txid = ?, metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(r.closeTxid, JSON.stringify(meta), marketId);
-      sqlite.prepare("UPDATE market_shards SET status = 'settled' WHERE logical_market_id = ?").run(marketId);
+      sqlite.prepare("UPDATE pool_markets SET protocol_status = ?, settle_txid = ?, metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(newStatus, r.closeTxid, JSON.stringify(meta), marketId);
+      if (r.complete) sqlite.prepare("UPDATE market_shards SET status = 'settled' WHERE logical_market_id = ?").run(marketId);
     })();
   } catch (e) { log(`${marketId.slice(-8)} writeback warn: ${e.message} (on-chain settle is truth)`); }
-  log(`✅ ${marketId.slice(-8)} SETTLED close=${r.closeTxid.slice(0, 12)} winners=${(r.claims || []).filter(c => c.txId).length}`);
+  log(`${r.complete ? '✅' : '🟠'} ${marketId.slice(-8)} ${newStatus} close=${r.closeTxid.slice(0, 12)} winners=${(r.claims || []).filter(c => c.txId && c.received === true && !c.error).length}/${r.plan?.winners?.length ?? '?'}`);
 
   // 📒 影子台账 (#26 自我进化·J1·Owner 2026-06-30): 记"我们 oracle 独立判定 vs 权威判定(plan.winDir·已结钱)"。
   //   🔴 BETTOR 守门铁律1: **纯记录·永不碰结算**——settle 已完成(上方 writeback)·本块吞所有错·绝不阻断 return。

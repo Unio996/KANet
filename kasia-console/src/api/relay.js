@@ -449,7 +449,13 @@ export async function registerRelayRoutes(fastify) {
         return false;
       }
       function isSettled(m) {
-        if (m.settle_txid || m.protocol_status === 'completed') return true;
+        // #task33 (2026-07-03): settled_partial_claims/needs_manual_attribution 也会写 settle_txid
+        // (close TX 真上链, 只是不是每个 winner 都到账) — 不能再用裸 settle_txid 判"已结算",
+        // 否则 canary settle% 又把 completed 不变量修好前那批"部分领取误标 completed"的病, 换个
+        // 位置在这个 display metric 上重演。completed 是唯一权威。
+        if (m.protocol_status === 'completed') return true;
+        if (m.protocol_status === 'settled_partial_claims' || m.protocol_status === 'needs_manual_attribution') return false;
+        if (m.settle_txid) return true;   // 非 bshard 路径的旧字段兜底(v0.7 但不经此 daemon 结算的场景)
         try { const meta = JSON.parse(m.metadata || '{}'); if (meta.settle_evidence?.chain_settled) return true; } catch {}
         return false;
       }
