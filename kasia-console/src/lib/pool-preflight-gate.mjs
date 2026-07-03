@@ -10,14 +10,22 @@
 //
 // 只做纯校验计算 + 一个 DB 写入 helper, 不碰建市主流程(由 caller 在 create-v07 里挂钩调用)。
 
+// #G1 NWT 审(2026-07-04, ab84985a CONDITIONAL PASS·1个实洞): 点球归类字段必须三态显式区分, 不能用
+// 同一个 null 表示"类型上不适用"和"查不到/解析失败"——后者若被静默当"不适用"放行, 正好放过这份设计
+// 唯一要防的东西(点球归类不一致→ABSTAIN)。
+// 三态: 'N/A'(字符串·调用方明确判定"此盘类型不涉及点球语义", 如 §1.2/§1.3 win 式单场盘, 双边必须都传
+//   'N/A' 才算合法跳过) / true|false(布尔·真实核对到的值) / null|undefined(未提供=查不到/解析失败=
+//   fail-closed, 不静默通过)。
+const NOT_APPLICABLE = 'N/A';
+
 /**
  * checkMirrorSourceEquivalence — NWT BLOCKING-2 修法: 三属性逻辑等价, 非字面文本比对。
  * @param {object} o {
  *   ourMatchId, ourTeamA, ourTeamB, ourKickoffUtc(unix sec),
  *   ourResolutionSource(string, e.g. 'official_fifa_result'),
- *   ourPenaltyCountsAsAdvance(bool|null, null=此盘不涉及点球语义如冠军长线/win式单场盘),
+ *   ourPenaltyCountsAsAdvance(true|false|'N/A'|null/undefined — 见上方三态说明),
  *   mirrorMatchId, mirrorTeamA, mirrorTeamB, mirrorKickoffUtc,
- *   mirrorResolutionSource, mirrorPenaltyCountsAsAdvance(bool|null)
+ *   mirrorResolutionSource, mirrorPenaltyCountsAsAdvance(同三态)
  * }
  * @returns {{ pass, reasons: string[] }}
  */
@@ -35,11 +43,19 @@ export function checkMirrorSourceEquivalence(o) {
   if (!o.ourResolutionSource || !o.mirrorResolutionSource || o.ourResolutionSource !== o.mirrorResolutionSource) {
     reasons.push(`resolution 源不一致: ours="${o.ourResolutionSource}" mirror="${o.mirrorResolutionSource}"`);
   }
-  // ③ 点球晋级归类一致(仅当双方都定义了这个语义时才比对; null=此盘类型不涉及, 视为通过——如 §1.2/§1.3 win 式单场盘)
-  if (o.ourPenaltyCountsAsAdvance !== null && o.mirrorPenaltyCountsAsAdvance !== null) {
-    if (o.ourPenaltyCountsAsAdvance !== o.mirrorPenaltyCountsAsAdvance) {
-      reasons.push(`点球晋级归类不一致: ours=${o.ourPenaltyCountsAsAdvance} mirror=${o.mirrorPenaltyCountsAsAdvance}`);
-    }
+  // ③ 点球晋级归类一致 — 三态 fail-closed 判定:
+  const ourNA = o.ourPenaltyCountsAsAdvance === NOT_APPLICABLE;
+  const mirrorNA = o.mirrorPenaltyCountsAsAdvance === NOT_APPLICABLE;
+  if (ourNA && mirrorNA) {
+    // 双边都明确判定"此盘类型不涉及"(如 §1.2/§1.3) → 合法跳过。
+  } else if (ourNA !== mirrorNA) {
+    // 一边说不适用一边说适用 = 盘类型判定本身就分歧, 必须 fail(不能有一边说了算)。
+    reasons.push(`点球语义适用性判定不一致: ours=${JSON.stringify(o.ourPenaltyCountsAsAdvance)} mirror=${JSON.stringify(o.mirrorPenaltyCountsAsAdvance)}(一边判'N/A'一边判有值, 盘类型认定本身分歧)`);
+  } else if (o.ourPenaltyCountsAsAdvance == null || o.mirrorPenaltyCountsAsAdvance == null) {
+    // 未提供(null/undefined) = 查不到/解析失败, fail-closed, 绝不静默放行。
+    reasons.push(`点球归类无法核对: ours=${JSON.stringify(o.ourPenaltyCountsAsAdvance)} mirror=${JSON.stringify(o.mirrorPenaltyCountsAsAdvance)}(未提供≠不适用, caller 必须显式传 true/false/'${NOT_APPLICABLE}', 空值一律 fail)`);
+  } else if (o.ourPenaltyCountsAsAdvance !== o.mirrorPenaltyCountsAsAdvance) {
+    reasons.push(`点球晋级归类不一致: ours=${o.ourPenaltyCountsAsAdvance} mirror=${o.mirrorPenaltyCountsAsAdvance}`);
   }
   return { pass: reasons.length === 0, reasons };
 }

@@ -29,9 +29,9 @@ import {
 {
   const r = checkMirrorSourceEquivalence({
     ourMatchId: null, ourTeamA: 'Argentina', ourTeamB: 'France', ourKickoffUtc: 1000000,
-    ourResolutionSource: 'espn_final', ourPenaltyCountsAsAdvance: null,
+    ourResolutionSource: 'espn_final', ourPenaltyCountsAsAdvance: 'N/A',
     mirrorMatchId: 'polymarket-xyz', mirrorTeamA: 'france', mirrorTeamB: 'ARGENTINA', mirrorKickoffUtc: 1000500, // case-insensitive, order-insensitive, 500s apart
-    mirrorResolutionSource: 'espn_final', mirrorPenaltyCountsAsAdvance: null,
+    mirrorResolutionSource: 'espn_final', mirrorPenaltyCountsAsAdvance: 'N/A',
   });
   assert.equal(r.pass, true, 'team-pair match (case/order-insensitive) + kickoff within 30min tolerance must pass without matchId');
 }
@@ -58,15 +58,35 @@ import {
   assert.equal(r.pass, false, 'penalty-shootout classification disagreement must fail — this is exactly the ABSTAIN-inducing gap the gate exists to catch');
 }
 
-// ── win-style markets (final/3rd-place, §1.3): penalty semantics null on both sides → must PASS (not applicable, not a mismatch) ──
+// ── win-style markets (final/3rd-place, §1.3): both sides explicitly 'N/A' → must PASS (legitimately not applicable) ──
 {
   const r = checkMirrorSourceEquivalence({
     ourMatchId: 'final', ourTeamA: 'A', ourTeamB: 'B', ourKickoffUtc: 1000000,
-    ourResolutionSource: 'official_fifa_result', ourPenaltyCountsAsAdvance: null,
+    ourResolutionSource: 'official_fifa_result', ourPenaltyCountsAsAdvance: 'N/A',
     mirrorMatchId: 'final', mirrorTeamA: 'A', mirrorTeamB: 'B', mirrorKickoffUtc: 1000000,
-    mirrorResolutionSource: 'official_fifa_result', mirrorPenaltyCountsAsAdvance: null,
+    mirrorResolutionSource: 'official_fifa_result', mirrorPenaltyCountsAsAdvance: 'N/A',
   });
-  assert.equal(r.pass, true, '§1.3 win-style markets (final/3rd-place) have no advance/penalty semantics — null on both sides must not be treated as a mismatch');
+  assert.equal(r.pass, true, "§1.3 win-style markets (final/3rd-place) — both sides explicitly 'N/A' must pass (legitimately not applicable, not a mismatch)");
+}
+
+// ── NWT 审 ab84985a 抓的洞: null/undefined (未提供) 必须 fail-closed, 不能被静默当"不适用"放行 ──
+{
+  const r = checkMirrorSourceEquivalence({
+    ourMatchId: 'a', ourTeamA: 'X', ourTeamB: 'Y', ourKickoffUtc: 1000000,
+    ourResolutionSource: 's', ourPenaltyCountsAsAdvance: null,   // 镜像源 criteria 解析失败, caller 没能确定值
+    mirrorMatchId: 'a', mirrorTeamA: 'X', mirrorTeamB: 'Y', mirrorKickoffUtc: 1000000,
+    mirrorResolutionSource: 's', mirrorPenaltyCountsAsAdvance: null,
+  });
+  assert.equal(r.pass, false, "未提供(null) != 不适用('N/A') — 两边都是 null 必须 fail(查不到不能默认放行), 这正是 NWT 抓的洞: 若镜像源解析失败返回 null, 旧实现会静默通过, 恰好放过设计唯一要防的东西");
+}
+{
+  const r = checkMirrorSourceEquivalence({
+    ourMatchId: 'a', ourTeamA: 'X', ourTeamB: 'Y', ourKickoffUtc: 1000000,
+    ourResolutionSource: 's', ourPenaltyCountsAsAdvance: 'N/A',
+    mirrorMatchId: 'a', mirrorTeamA: 'X', mirrorTeamB: 'Y', mirrorKickoffUtc: 1000000,
+    mirrorResolutionSource: 's', mirrorPenaltyCountsAsAdvance: true,   // 一边说不适用一边说适用
+  });
+  assert.equal(r.pass, false, "一边判'N/A'(类型不适用) 一边判 true/false(类型适用) = 盘类型认定本身分歧, 必须 fail, 不能有一边说了算");
 }
 
 // ── §2 item 2: deadline sufficiency ──
@@ -86,7 +106,7 @@ import {
 
 // ── runPreflightGate: all three must be green for overall pass; any one red fails the whole gate ──
 {
-  const goodMirror = { ourMatchId: 'a', ourTeamA: 'X', ourTeamB: 'Y', ourKickoffUtc: 1000000, ourResolutionSource: 's', ourPenaltyCountsAsAdvance: null, mirrorMatchId: 'a', mirrorTeamA: 'X', mirrorTeamB: 'Y', mirrorKickoffUtc: 1000000, mirrorResolutionSource: 's', mirrorPenaltyCountsAsAdvance: null };
+  const goodMirror = { ourMatchId: 'a', ourTeamA: 'X', ourTeamB: 'Y', ourKickoffUtc: 1000000, ourResolutionSource: 's', ourPenaltyCountsAsAdvance: 'N/A', mirrorMatchId: 'a', mirrorTeamA: 'X', mirrorTeamB: 'Y', mirrorKickoffUtc: 1000000, mirrorResolutionSource: 's', mirrorPenaltyCountsAsAdvance: 'N/A' };
   const goodDeadline = { deadlineUnixSec: 1000000 + 4 * 3600, kickoffUtcUnixSec: 1000000 };
   const goodJudge = { judgeDelayMinutes: 15 };
   const allGreen = runPreflightGate({ mirrorCheck: goodMirror, deadlineCheck: goodDeadline, judgeTimingCheck: goodJudge });
