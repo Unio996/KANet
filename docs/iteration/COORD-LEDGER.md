@@ -546,6 +546,18 @@ bshard 无人值守自动结算 daemon 冷启生产·双 canary GREEN（含 idx-
 
 ---
 
+## 线 15:主库/海量-UTXO 地址余额显示 LANDED(2026-07-03·KANet-UI)
+### 一句话
+Owner 报 FaucetRelay-tn-2(主库 2.5亿+ KAS)console 显示不出/加载不动。Bettor 派工根因实证(relay.js:353 `getUtxosByAddresses` 逐 UTXO 拉取,该地址 265万笔tx/上百万 coinbase UTXO → 超时,curl 实测 30s 返空)。
+### LANDED
+- `e3b85afb` 首版改 `getBalanceByAddress`(单数)→ 真机验发现撞**当前 vendored kaspa-wasm build 反序列化 bug**("invalid type: floating point, expected a string")→ 静默被 catch{} 吞掉 → balance:null(未真正修好,记教训:改完≠验完,真机测才发现单数 API 坏)。
+- `026bf78c` 改用 `getBalancesByAddresses`(**复数**,数组入参,同为节点直返总和不逐 UTXO)→ **真机验 PASS**:FaucetRelay-tn-2(d9a8fffb) `{"balance":256180525.883}` TIME:1.07s(此前超时);`/wallets` 端点同源 helper 一并修;回归验普通地址(KANet-UI-tn f5cf6d85) `{"balance":3265.833}` TIME:0.004s 无退化。
+- 两 commit 已 push origin/bshard-m3-deploy;console 已重启加载(taskkill 真活 PID 树杀 + kanet-start,非信 stale pidfile)。频道已报 `#4wqu12` 请 co-verify。
+- **教训沉淀**:此 vendored kaspa-wasm build 的 `getBalanceByAddress`(单数)有反序列化 bug,后续任何余额相关改动**用复数 `getBalancesByAddresses`**,别踩同坑第二次。
+owner=KANet-UI;co-verify=Bettor(待回)。
+
+---
+
 ## 归档(已收敛旧线,留索引)
 - **scale-test backend-20**(2026-06-10):干净 demonstrate 20 并发 settle,框架 §10.2/§9.3 活案例。已收敛。
 - **tg-bot-web-user-e2e**(§14 首个受控运行):演化为线 3 可玩 demo。
