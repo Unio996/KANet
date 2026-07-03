@@ -555,6 +555,13 @@ J2 读码坐实：`settleMarketLive` claim 循环 5 条丢单路径后无条件 
 - `settleMarketLive` 加 `complete`/`needsManualAttribution` 返回值；daemon 三态分流 completed/settled_partial_claims/needs_manual_attribution；`evidence.winners`/`claim_txids` 只认真到账；`relay.js isSettled()` 同源修正。回归测试 4 fixture 落 `claim_completeness_regression.test.mjs`。
 - **NWT ship 审（不只信 commit message，逐行核对落地码）**：`complete` 谓词（bshard-auto-settler.mjs:333）核对成立；查 `winnerClaimData`（L119-128）确认 `claimData` 是 `winners` 直接 1:1 map 零过滤，`claimData.length` 等价 `plan.winners.length`，谓词前提站得住；丢单点①②→`needsManualAttribution`/③④⑤→`settled_partial_claims` 分类跟设计一致；`isSettled()` 短路顺序正确（completed 先判→partial/manual 排除→旧 settle_txid 兜底垫底）；回归测试本地跑 4/4 PASS。**ship PASS**。§4.2 resume 引擎（链上 walk tip 读 bitmap）确认排 #21 5b，本次范围（仅 §4.1 分类修复）干净、未夹带。
 
+### 🔴 21 盘链上取证完成（2026-07-03 16:5x·NWT，在 16:53 任务重派前完成）
+- **方法论**：不信 DB claim_txids，自建候选 continuation state 链（复用 `compilePayoutShardRedeem`/`splicePayoutContinuation`/`getMarketBets`/`computePariMutuelPayout`/`buildPayoutRoot` 生产函数，零重造数学）+ 对全部候选地址做真实 RPC `getUtxosByAddresses` 查活 UTXO，命中的候选状态 = 链上权威到账数；另从真实历史 close_attest TX 的 signatureScript 字节级解码委员实际签署的 `new_payout_root`（必改-4），跟 DB 存的 `payout_root` byte-exact 比对。NWT 亲自独立复现 `jcdu1` 一盘验证方法论（自己写脚本、自己 RPC 连接，候选 i=8/9/11/12 均无 UTXO，仅 i=10 命中且金额/outpoint 与 DB 最后一条 claim_txid 精确吻合）。
+- **结果**：tier1 20 盘 = **全部确认漏付**（链上到账数与 DB 记录数精确相等，DB 记账准，缺口真实存在）——合计 **169 个 winner-slot 未付，8509.17 KAS**（跟设计 §2.1 缺口数字吻合），close 于 6/30-7/1，已过 2-3 天，§4.2 resume 引擎未建前无人重试。`2pu1o`(tier2) 降级为虚惊（链上确认 2/2 全到账，日志告警是 `verifyClaimLanded` 瞬时假阴性）。`db_root_match` 21/21 全 true（无"DB 存的 root 本身错"这类更严重问题）。
+- **副发现**：全部触发过"not landed"告警的场景交叉核实后 100% 是瞬时验证超时误报（钱其实到账），真正缺口 100% 来自"break 之后再没被尝试过的 winner"——§4.2 resume 引擎不需要处理"号称成功但链上没到账"的反向情形。
+- 完整明细 + 脚本在 `D:/kanet-tn12/scratch/_nwt_final_report.json` / `_nwt_all21_results.json` / `_nwt_close_witness_results.json`（只读，未碰任何 DB 写入/relay 命令）。
+- **紧急**：169 个 winner 的 8509 KAS 是真实欠款，需要 §4.2 resume 引擎（#21-5b）尽快落地才能把钱发出去。owner=NWT（本轮完成）；后续 resume 引擎落码=J2（#21-5b）。
+
 ---
 
 ## ESCALATIONS / 待 Owner 裁
