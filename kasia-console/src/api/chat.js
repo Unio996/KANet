@@ -613,7 +613,11 @@ export async function registerChatRoutes(fastify) {
   // Owner 充值 dedicated faucet wallet 后启用. Tier 1 阶段 wallet 未配置则 503.
   fastify.post('/api/faucet/request', async (request, reply) => {
     const { wallet_address } = request.body || {};
-    const ip = request.ip || request.headers['x-forwarded-for'] || 'unknown';
+    // G4 harden (2026-07-04, 世界杯上线门): 别直接读 x-forwarded-for 头当 IP 兜底 — 那是客户端可任意
+    // 伪造的值(每次请求换一个假 IP 就绕过下面的 24h≤3 per-IP 限制)。fastify 的 trustProxy:'127.0.0.1'
+    // (index.js) 已经安全地把该头解析进 request.ip(只在真正的本地反代那一跳才信, 否则回落原始 socket
+    // 地址) — request.ip 正常情况下永远非空, 不该再有第二条不受信任的兜底路径。
+    const ip = request.ip || 'unknown';
     if (!wallet_address || !/^kaspatest:[a-z0-9]+$/.test(wallet_address)) {
       return reply.code(400).send({ error: 'wallet_address invalid, must be kaspatest:...' });
     }
