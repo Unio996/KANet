@@ -168,8 +168,43 @@ function selectRipeMarkets(currentDaa, pmt, limit) {
   return ripe;
 }
 
-// per-market: consolidate (if needed) → settle → writeback。failure → settle_failed flag。
+// #G5-5a (2026-07-04, task#33 §2.2 找到的原始证据基础): 瞬态 RPC/consolidate 查询有界重试。
+//   #33 全量重放 ALERT 日志分类过这类失败: "plan threw (fetch failed)"(3例) + "build fail: UTXO
+//   not found"(5例, 3例仍卡 settle_failed) —— 都是 RPC/网络层瞬时问题, 不是业务/安全判定, 重试大概率
+//   自愈(节点还没索引到刚广播的 UTXO / 一次性网络抖动)。白名单严格: 只匹配这几类瞬态错误签名, 不匹配
+//   ABSTAIN(oracle 判定拿不到, 重试无意义, 走 re-judge 通道 G7)/climb-fail/round-trip-fail(数据问题非
+//   时序问题)/needs_rolling(架构上限)/enforce mismatch(安全判定, 绝不重试掩盖)。
+const TRANSIENT_RE = /UTXO not found|fetch failed|ECONNREFUSED|RPC connect timeout|not synced|no working Kaspa RPC|ETIMEDOUT|network.*(timeout|error)|no land\b|not landed/i;
+// ⚠ 已知权衡(非阻塞,记录不隐藏): "not landed" 类重试有极小窗口——若第1次的 close_attest 实际已上链
+// 只是 verifyClosedLanded 假阴性(见 #33 NWT 发现的 verifyClaimLanded 32s 窗口同类问题), 重试会再发一笔
+// close_attest。covenant 自身 require(closed==0) 是真安全网(第2笔在链上被拒·非双花/双付), 只是浪费一笔
+// fee + alert 噪音。可接受: fail-safe 优于 fail-open, 且此重试跟 §4.2 resume 引擎(读链上 tip 而非盲重试)
+// 是互补关系, 不是替代——真正的幂等重试属于 resume 引擎范畴(排 #21-5b, 见 task33 设计文档)。
+const RETRY_MAX_ATTEMPTS = 3;
+const RETRY_BASE_DELAY_MS = 2000;
+const _sleepRetry = (ms) => new Promise((r) => setTimeout(r, ms));
+
 async function settleOneMarket(marketId) {
+  let lastResult = null;
+  for (let attempt = 1; attempt <= RETRY_MAX_ATTEMPTS; attempt++) {
+    // consolidateAllShards 内部可能直接 throw(非 {ok:false} 返回形态)——统一收口成同形状, 否则瞬态异常
+    // (如 landed() polling 超时/transfer RPC 失败)会绕过下面的白名单分类直接冒泡崩掉整个 tick。
+    try { lastResult = await _settleOneMarketAttempt(marketId); }
+    catch (e) { lastResult = { ok: false, reason: e.message || String(e) }; }
+    if (lastResult.ok) return lastResult;
+    const reason = String(lastResult.reason || '');
+    if (!TRANSIENT_RE.test(reason)) return lastResult;   // non-transient (business/security) → fail fast, no retry
+    if (attempt === RETRY_MAX_ATTEMPTS) break;
+    const delay = RETRY_BASE_DELAY_MS * attempt;   // 2s, 4s (linear backoff, bounded — this is a settle daemon tick, not a hot loop)
+    log(`${marketId.slice(-8)} 瞬态失败(${attempt}/${RETRY_MAX_ATTEMPTS}): ${reason.slice(0, 80)} — 退避 ${delay}ms 重试`);
+    await _sleepRetry(delay);
+  }
+  log(`${marketId.slice(-8)} 瞬态重试耗尽(${RETRY_MAX_ATTEMPTS}次) — 标 settle_failed: ${String(lastResult.reason || '').slice(0, 80)}`);
+  return lastResult;
+}
+
+// per-market: consolidate (if needed) → settle → writeback。failure → settle_failed flag。
+async function _settleOneMarketAttempt(marketId) {
   _k = await kaspa();   // ensure kaspa-wasm loaded before sync p2sh/p2pk helpers (direct-call + tick safety)
   if (!_pkMap) await buildPkMap();   // ensure committee pk→relay map (direct-call safety; tick also builds it)
   const ctx = buildCtx();

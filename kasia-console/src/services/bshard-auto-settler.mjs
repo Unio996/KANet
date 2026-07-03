@@ -154,7 +154,9 @@ export async function settleMarketLive(marketId, ctx) {
     type: 'bshard_close_attest', witness: { ...baseWitness, committee: [] },
     inputs: baseInputs, outputs: { change_address: ctx.feeRelay.address },
   });
-  if (buildRes?.error || !buildRes?.unSafeJson) { ctx.alert?.(marketId, `build fail: ${buildRes?.error || 'no unSafeJson'}`); return { ok: false, reason: 'build fail' }; }
+  // #G5-5a: reason 必须带上游真实错误签名(非只'build fail'泛化字符串)——daemon 层瞬态重试白名单
+  // 靠这个字符串区分'UTXO not found'(瞬态·值得重试) vs 其它 build 失败(非瞬态·不重试)。
+  if (buildRes?.error || !buildRes?.unSafeJson) { const detail = buildRes?.error || 'no unSafeJson'; ctx.alert?.(marketId, `build fail: ${detail}`); return { ok: false, reason: `build fail: ${detail}` }; }
 
   // 2. 🔴 driver enforce 硬闸 (命门·NO submit if mismatch): build output 地址 == 应锚 (= re-derive payoutRoot 烤死)
   if (buildRes.psContAddress !== plan.expectedClosedAddr) {
@@ -185,7 +187,7 @@ export async function settleMarketLive(marketId, ctx) {
     type: 'bshard_close_attest', witness: { ...baseWitness, committee: committee5 },
     inputs: baseInputs, outputs: { change_address: ctx.feeRelay.address },
   });
-  if (submitRes?.error || !submitRes?.txId) { ctx.alert?.(marketId, `submit fail: ${submitRes?.error}`); return { ok: false, reason: 'submit fail' }; }
+  if (submitRes?.error || !submitRes?.txId) { const detail = submitRes?.error || 'no txId'; ctx.alert?.(marketId, `submit fail: ${detail}`); return { ok: false, reason: `submit fail: ${detail}` }; }
   const closeTxid = submitRes.txId;
 
   // 6. NO TX NO STATE: verify close LANDED (closed PS @ 应锚地址·value==consolidatedPool)
