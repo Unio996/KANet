@@ -474,7 +474,12 @@ export async function registerRelayRoutes(fastify) {
   fastify.post('/api/relay/:id/split-utxos', async (request, reply) => {
     try {
       const { splitUtxos } = await import('../services/utxo-splitter.js');
-      const result = await splitUtxos(request.params.id);
+      // #G4 (2026-07-04, faucet UTXO topology fix): default targetCount=8 (TARGET_UTXO_COUNT, tuned for
+      // broker high-frequency small-msg use-case, 2026-04-25) doesn't fit "many UTXOs each >= faucet grant
+      // amount" — a relay with 1 giant UTXO + 8 dust already reads as "9 >= 8, sufficient" and no-ops.
+      // Allow caller to override for cases needing more/larger chunks (e.g. faucet relay pre-burst prep).
+      const targetCount = Number.isFinite(Number(request.body?.targetCount)) ? Number(request.body.targetCount) : undefined;
+      const result = await splitUtxos(request.params.id, targetCount);
       return reply.send(result);
     } catch (err) {
       return reply.code(500).send({ error: err.message });
