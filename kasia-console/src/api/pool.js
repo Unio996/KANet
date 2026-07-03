@@ -12,6 +12,7 @@ import { isStructuredSpec, assertSpecPredicateValid } from '../lib/spec-validati
 // FINDING-2 (NWT) ③ entry-gate — SINGLE SOURCE commingled-spine guard. assertNotCommingled is called at the
 // top of EVERY bettor stake-lock handler (6 entries); lint-kanet R-COMMINGLE-GUARD flags any that forgot. 禁内联.
 import { assertNotCommingled } from '../lib/pool-commingle-detect.mjs';
+import { getSidesByLogicalMarket } from '../lib/pool-bettor-sides-query.mjs';
 import { createHash, randomUUID } from 'node:crypto';
 import { verifyIngestRequest } from '../services/ingest-auth.js';  // P1 fix (NWT): broker-fee-dm PII 端点 auth
 
@@ -31,6 +32,12 @@ const BETTOR_MIN_STAKE_PHYS_FLOOR = 100_000;     // 0.001 KAS — KIP-9 storage 
 const BETTOR_MIN_STAKE_POLICY = 100_000_000;     // 1 KAS — anti-bot product floor (Bettor r158/Owner P0).
 const BETTOR_MIN_STAKE_L4 = BETTOR_MIN_STAKE_POLICY;  // Back-compat alias for existing callers — points to current active floor.
 const MAX_BETTORS_L4 = 50;                       // PoolSpine.sil L13 cap
+// G3 (Owner 世界杯上线门, 2026-07-04, Bettor+NWT 钦定): bshard 无限押注(SHARD_SEAL_COUNT=32 无限开新片)
+// 没有市场级上限, 但 PayoutShard 结算侧硬顶 1024 leaf/片(pool-payout-root.mjs CAP, 需 #18 rolling-payout-shard
+// 才能 >1024, 该功能公测前未建)。900 = 留 12% 安全边界的软顶(按 distinct bet/叶子数计, 非人数——一人多笔=
+// 多叶子, NWT 澄清-2)。到顶后 register-v07/prep 拒绝新押注(NO TX NO STATE, 未付款前拒·非退款), 已存在的
+// 押注不受影响。#18 rolling 落地后此软顶可解除/抬高。
+const MARKET_MAX_LEAVES_G3 = 900;
 // 5/28 Owner 钦定: 押注 softcap 拆除 (= 之前 4 KAS testnet 限制阻 UI form 真用户测试). 改 Infinity = 0 cap.
 // Per-market math guards (= storage mass / oracle fee floor) still enforce at L1 console + SS contract.
 // Env override 保留可 ops set finite cap if needed.
@@ -1136,6 +1143,15 @@ export async function registerPoolRoutes(fastify) {
     //   只拒新押注, 不碰 status/资金; 已有押注走 deadline 自动退款 (outpoint-precise) → 不 orphan 退款路.
     if (assertNotCommingled(market, reply, sqlite)) return;
 
+    // G3 (世界杯上线门): 同 register-v07/prep 的市场级总 leaf 上限(结算侧 PayoutShard 1024 硬顶, #18 rolling 未建).
+    const existingLeafCountG3 = getSidesByLogicalMarket(logicalMarketId, sqlite).length;
+    if (existingLeafCountG3 >= MARKET_MAX_LEAVES_G3) {
+      return reply.code(409).send({
+        ok: false, error: 'market_full',
+        message: `This market has reached its bet capacity (${existingLeafCountG3}/${MARKET_MAX_LEAVES_G3}) and cannot accept new bets. Please choose another market.`,
+      });
+    }
+
     const direction = parseInt(b.direction, 10);
     if (direction !== 0 && direction !== 1) return reply.code(400).send({ ok: false, error: 'direction must be 0 (YES) or 1 (NO)' });
     const stakeSompi = Math.round(parseFloat(b.stake_kas) * 1e8);
@@ -1315,7 +1331,16 @@ export async function registerPoolRoutes(fastify) {
     const { v, market, bettorPk, payAddr, network, payAmountSompi } = p;
     // FINDING-2 ③ commingled guard (单源·inline per R-COMMINGLE-GUARD convention).
     if (assertNotCommingled(market, reply, sqlite)) return;
-    // 🔴 NO 50-cap (B 无限滚动: SHARD_SEAL_COUNT=32 是封片开新阈值, 非拒绝阈值 → 无限押注).
+    // G3 (世界杯上线门): SHARD_SEAL_COUNT=32 仍是无限开新片(片级无 cap), 但整个 logical market 的
+    // 总 leaf 数(跨全部 shard)顶 MARKET_MAX_LEAVES_G3 — 结算侧 PayoutShard 硬顶 1024, #18 rolling
+    // 未建前必须挡在这里(未付款前拒, NO TX NO STATE, 不是退款)。
+    const existingLeafCount = getSidesByLogicalMarket(logicalMarketId, sqlite).length;
+    if (existingLeafCount >= MARKET_MAX_LEAVES_G3) {
+      return reply.code(409).send({
+        ok: false, error: 'market_full',
+        message: `This market has reached its bet capacity (${existingLeafCount}/${MARKET_MAX_LEAVES_G3}) and cannot accept new bets. Please choose another market.`,
+      });
+    }
     return reply.send({
       ok: true,
       protocol_version: 'v0.7',
