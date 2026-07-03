@@ -280,7 +280,7 @@ export const LANGS = {
     earnings_node_title: '⚙ Node committee earnings (your address is this node\'s oracle relay)',
     earnings_node_total: '  Total: {kas} KAS ({n} markets, chain-verified)',
     earnings_node_pending: '  ⏳ {n} tx(s) pending index (refresh soon)',
-    earnings_node_note: '  Note: queried by receive address pk; for rare v0.6 separate signing-key cases this may undercount.',
+    earnings_node_note: '  Note: queried by receive address pk.',
     earnings_testnet_note: 'ℹ testnet KAS only — not real money, not investment advice.',
 
     // brokerFeeDmText function (messages.mjs)
@@ -613,7 +613,7 @@ export const LANGS = {
     earnings_node_title: '⚙ Node 委员收益 (你的地址是本机 oracle relay)',
     earnings_node_total: '  累计: {kas} KAS ({n} 个市场, 链验)',
     earnings_node_pending: '  ⏳ {n} 笔待索引 (稍后刷新)',
-    earnings_node_note: '  注: 均用收款地址 pk 查询; v0.6 用独立签名 key 的极少数情况下该部分可能漏统计。',
+    earnings_node_note: '  注: 均用收款地址 pk 查询。',
     earnings_testnet_note: 'ℹ 仅测试网 KAS · 非真钱 · 非投资建议。',
 
     // brokerFeeDmText
