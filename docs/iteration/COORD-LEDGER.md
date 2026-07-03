@@ -569,6 +569,16 @@ Owner 报 FaucetRelay-tn-2(主库 2.5亿+ KAS)console 显示不出/加载不动�
 - **教训沉淀**:此 vendored kaspa-wasm build 的 `getBalanceByAddress`(单数)有反序列化 bug,后续任何余额相关改动**用复数 `getBalancesByAddresses`**,别踩同坑第二次。
 owner=KANet-UI;co-verify=Bettor(待回)。
 
+### 追加(2026-07-03 14:xx)：主库【发送】崩溃 — 与余额显示同根但更深，定为独立架构 task
+- **场景**：Owner 试从 FaucetRelay-tn-2(主库)发 100万 KAS 给新接位智能体(qzdh7nar8w..,接替 J1 covenant/settlement/relay 域)启动资金,`Relay command timeout after 30s`失败。
+- **KANet-UI 六层查证坐实**：① `kaspa_tx_log` 该地址 270万+ 笔进账/**零笔出账**=钱没丢,是发送本身没成功过 ② console.log 显示 FaucetRelay-tn-2 relay 子进程已崩溃重启 2 次(exit code 1,health-monitor 自动拉起) ③ 独立脚本复现:`sendKaspa()`内部 `rpc.getUtxosByAddresses`一次性拉该地址全部 UTXO(10万+coinbase),客户端反序列化阶段 kaspa-wasm 硬崩溃(`RuntimeError: unreachable`) ④ Kaspa RPC 无分页/限量参数,选币前必须整批拉全部 UTXO,无法绕开 ⑤ 跟金额无关——此路径现对该地址任何金额发送都会崩。
+- **Bettor 定路(2026-07-03 14:45)**：
+  1. 不用主库发;钱安全(256M 零出账)。
+  2. 应急启动资金改用 **Bettor-tn**(935K KAS·10 UTXO·可正常发)发给新身份,授权口径=协调运营金非用户钱。
+  3. 主库发送崩溃 = **单独架构 task 根治**(chunked consolidate 缩 UTXO 数 + 挖矿收益别再无限堆单地址,加 coinbase 分散收款或定期归集)。**money-path 不鲁莽·单独 pass 设计·别赶**,不并入本次紧急处理。
+- **根因一句**：主库 10万+ coinbase UTXO → `sendKaspa` 拉全部建 tx 崩(跟余额显示 bug 同根,但 SEND 更难修——不能只求和,必须真选币+可能需 consolidate,且 `getUtxosByAddresses` 拉 10万+ 本身就崩,与 fee/amount 无关)。
+- **状态**：待派工(owner 未定,下个 pass 设计)。别重复踩坑——任何人再遇到"主库/挖矿地址发不出"直接引用本记录,不用重新六层查一遍。
+
 ---
 
 ## 归档(已收敛旧线,留索引)
