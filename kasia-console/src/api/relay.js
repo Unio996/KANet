@@ -350,10 +350,9 @@ export async function registerRelayRoutes(fastify) {
           rpc.connect({}),
           new Promise((_, rej) => setTimeout(() => rej(new Error('RPC connect timeout')), 3000)),
         ]);
-        const { entries } = await rpc.getUtxosByAddresses([new Address(relay.address)]);
+        const { balance } = await rpc.getBalanceByAddress({ address: new Address(relay.address) });
         await rpc.disconnect();
-        const sompi = (entries || []).reduce((sum, e) => sum + e.amount, 0n);
-        const kas = Number(sompi) / 1e8;
+        const kas = Number(balance || 0n) / 1e8;
         return reply.send({ balance: Math.round(kas * 1000) / 1000 });
       } catch {}
     }
@@ -623,10 +622,9 @@ export async function registerRelayRoutes(fastify) {
           rpc.connect({}),
           new Promise((_, rej) => setTimeout(() => rej(new Error('RPC connect timeout')), 3000)),
         ]);
-        const { entries } = await rpc.getUtxosByAddresses([new Address(relay.address)]);
+        const { balance } = await rpc.getBalanceByAddress({ address: new Address(relay.address) });
         await rpc.disconnect();
-        const sompi = (entries || []).reduce((sum, e) => sum + e.amount, 0n);
-        return Math.round(Number(sompi) / 1e8 * 1000) / 1000;
+        return Math.round(Number(balance || 0n) / 1e8 * 1000) / 1000;
       } catch {}
     }
     try {
