@@ -348,6 +348,12 @@ export const LANGS = {
     record_open: '📍 {n} still active',
     record_refunded: '💸 {n} refunded',
     record_footer: 'ℹ testnet KAS only — not real money, not investment advice.',
+
+    // /champions (championMarkets, messages.mjs) — 世界杯冠军长线盘
+    champions_empty: '🏆 No champion markets open yet — check back soon as the tournament bracket fills in.',
+    champions_title: '🏆 World Cup Champion — Top {n}',
+    champions_footer: 'Tap a team to bet they win the whole tournament. ℹ testnet KAS only — not real money.',
+    help_champions: '/champions — Bet on who wins the World Cup',
   },
 
   zh: {
@@ -693,6 +699,12 @@ export const LANGS = {
     record_open: '📍 {n} 笔押注中',
     record_refunded: '💸 {n} 笔已退款',
     record_footer: 'ℹ 仅测试网 KAS · 非真钱 · 非投资建议。',
+
+    // /champions (冠军长线盘)
+    champions_empty: '🏆 暂无冠军盘开放——世界杯赛程晋级确定后陆续开放,过会再看。',
+    champions_title: '🏆 世界杯冠军 · 前 {n}',
+    champions_footer: '点击球队押它夺冠。ℹ 仅测试网 KAS · 非真钱。',
+    help_champions: '/champions — 押谁能夺得世界杯冠军',
   },
 };
 

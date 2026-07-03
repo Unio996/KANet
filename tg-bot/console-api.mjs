@@ -79,6 +79,12 @@ export function trendingMarkets(limit = 5) {
 export function availableMarkets(limit = 8) {
   return req('GET', `/api/pool/markets/available?limit=${limit}`);
 }
+// 世界杯冠军长线盘 (Bettor 2026-07-04, 世界杯玩法UI): "Will X win the 2026 FIFA World Cup?" futures,
+// 复用 availableMarkets 同一 endpoint 的 ?tag=champions 过滤(usable+非commingled+conditionId去重).
+// 数据壳: J2 还没建新的干净盘时返回 count=0, /champions 命令走 record_empty 式空态文案, 不报错.
+export function championMarkets(limit = 20) {
+  return req('GET', `/api/pool/markets/available?tag=champions&limit=${limit}`);
+}
 // 赛事聚合卡 (Owner 2026-06-28 首页视觉重构): 散盘按 card_group_id 聚成赛事卡.
 // 返 { ok, card_groups:[{ card_group_id, event_title, home_team, away_team, legs:[...] }] }
 export function cardGroups(limit = 8) {

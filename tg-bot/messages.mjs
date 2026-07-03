@@ -323,6 +323,34 @@ export function hotMarkets(markets, botUsername, lang = 'en') {
   return { text: lines.join('\n'), keyboard: { inline_keyboard: buttons } };
 }
 
+// 世界杯冠军长线盘 (Bettor 2026-07-04, 世界杯玩法UI·数据无关壳): "Will X win the 2026 FIFA World
+// Cup?" futures 列表。壳先搭好(J2 走 create-v07 安全管线建新盘前, count=0 走空态文案不报错), 新盘
+// 建好后本函数直接就能渲染(靠 console-api.mjs championMarkets() 的 ?tag=champions 过滤, 该过滤已
+// 排除 commingled 历史脏数据·见 pool.js d395897d)。
+export function championMarkets(markets, lang = 'en') {
+  if (!markets || !markets.length) {
+    return { text: t(lang, 'champions_empty'), keyboard: null };
+  }
+  function extractTeam(raw) {
+    try {
+      const p = JSON.parse(raw);
+      const m = /^will (.+?) win the 2026 fifa world cup\??$/i.exec((p.title || '').trim());
+      return m ? m[1] : (p.title || raw);
+    } catch { return raw; }
+  }
+  const sorted = [...markets].sort((a, b) => (b.total_pool_kas || 0) - (a.total_pool_kas || 0));
+  const lines = [t(lang, 'champions_title', { n: sorted.length }), ''];
+  const buttons = [];
+  sorted.forEach((m, i) => {
+    const team = extractTeam(m.title || '');
+    const pct = m.yes_implied_prob != null ? ` · ${Math.round(m.yes_implied_prob * 100)}%` : '';
+    lines.push(`${i + 1}. 🏆 ${team}  💰${(m.total_pool_kas || 0).toFixed(0)} KAS${pct}`);
+    buttons.push([{ text: `🏆 ${team}${pct}`, callback_data: 'bet:market:' + m.id }]);
+  });
+  lines.push('', t(lang, 'champions_footer'));
+  return { text: lines.join('\n'), keyboard: { inline_keyboard: buttons } };
+}
+
 // 兑换 flow — show broker X's KAS receiving address; the USER pays on-chain from their own wallet.
 // bot 0 execute: 只显地址 + 引导 + deep-link。broker-intake-watcher 在链上检测到付款后继续。
 export function swapFlow(broker, lang = 'en', network = 'testnet-12') {
@@ -498,6 +526,7 @@ export function help(lang = 'en') {
     t(lang, 'help_bet'),
     t(lang, 'help_mybets'),
     t(lang, 'help_record'),
+    t(lang, 'help_champions'),
     t(lang, 'help_discover'),
     t(lang, 'help_broker'),
     t(lang, 'help_earnings'),

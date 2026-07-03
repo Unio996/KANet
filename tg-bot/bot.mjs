@@ -325,6 +325,18 @@ bot.command('record', async (ctx) => {
   return ctx.reply(await PM.formatRecordCard(addr, lang));
 });
 
+// 世界杯冠军长线盘 UI 壳 (Bettor 2026-07-04): 数据无关, J2 走 create-v07 建新盘前 count=0 走空态,
+// 建好后本命令直接就能显示(靠 console-api.mjs championMarkets 的 ?tag=champions 过滤).
+bot.command('champions', async (ctx) => {
+  initLang(ctx);
+  const lang = getLang(ctx);
+  const r = await api.championMarkets(20);
+  if (!r.ok || !r.json?.ok) return ctx.reply(t(lang, 'champions_empty'));
+  const result = M.championMarkets(r.json.markets || [], lang);
+  if (result.keyboard) return ctx.reply(result.text, { reply_markup: result.keyboard });
+  return ctx.reply(result.text);
+});
+
 // Bettor r87 ③ — '➕ 加注/反手' callback handler: 进该 market 的 detail stage (= 跳过类目/市场选).
 bot.callbackQuery(/^mybet:addmore:(.+)$/, async (ctx) => {
   await ctx.answerCallbackQuery();
