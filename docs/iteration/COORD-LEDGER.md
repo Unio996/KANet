@@ -534,6 +534,19 @@ bshard 无人值守自动结算 daemon 冷启生产·双 canary GREEN（含 idx-
 - ✅ **orphan 1596fb62 DONE**(u7hq4 市场 1000 KAS):Bettor GO 08:57 → 临时 DB id=7816 插入 → bettor-refund-claim endpoint → txId=36522a1f,output=99999999000 sompi。J1(:3300)cross-node UTXO=0 + Bettor(:3200)kaspa_tx_log block 双验。**总计 made-whole: 10 sides, 5,608.8 KAS**(batch-1 9 sides 4,608.8 KAS + orphan 1,000 KAS)。
 - ⬜ 择机 merge 进 master + verify-ship 收齐。J1 gated on NWT FINDING-1 修。
 
+## 线 16：bshard claim-completeness 正确性 bug + 有界重试（2026-07-03·J2 起草·NWT 审）
+### 一句话
+J2 读码坐实：`settleMarketLive` claim 循环 5 条丢单路径后无条件 `return ok:true`，daemon 只查 `ok+closeTxid` 就写 `protocol_status=completed`，从未校验 `claims.length===plan.winners.length`。全量重放 85 个 completed bshard 市场：20 tier1（计数缺口）+1 tier2（2pu1o 计数对但曾报到账疑虑）=21 需链验，60 clean_provisional（仅"未发现已知疑点"非证明干净），4 无法验证（driver-script 手驱历史盘）。
+
+### NWT 红队审（2026-07-03·`docs/2026-07-03-NWT-redteam-claim-completeness-design.md`）
+**裁决：CONDITIONAL GO — 2 BLOCKING + 2 非阻塞加固**。诊断/证据分级/必改1-4/风险1-2 全站得住，打不穿；两条 BLOCKING 都在"§4.2/§4.3 落码层面"：
+- 🔴 **BLOCKING-1**：读码实证（bshard-auto-settler.mjs:199-237）`psOutTxid`/`curState`/`curPool`/`curRedeem`（续约起点）只在 claim 完全成功后前进，只活在函数栈里从未持久化。设计没写重试第一步"重建续接点"的数据来源——若图省事从 DB `claims[]`/`settle_evidence` 回放，就是让重试信任"DB==链上真相"，正是本 bug 病根。**修法**：重试必须链上 walk continuation 链到 tip、直接从 UTXO 脚本字节解 state，不经 DB 中间层；可复用 `pool-market-settler.js`~L1128 已有的"查 kaspa_tx_log spend 记录分流"同族模式，非从零造。
+- 🔴 **BLOCKING-2**：§4.3① refund-臂 post-close 探针是真实构造+广播的花费尝试，若"预期 BUST"假设错了，探针本身就会**真实执行那个漏洞**（把钱转出）。设计没交代：①拿哪个市场做探针（不该挑 21/60 个还有真实未领 winner 的盘去实弹测试）②探针输出地址是否团队可控（BUST 失败时钱能否找回）③优先级——文档自认"比漏付更大的攻击面"却排在 J1 任务卡第 3 项，若成立=81 个市场此刻存在任何人可发起的真实攻击面，应最优先探，不该等 21 盘核对完再排。
+- 🟡 非阻塞：idempotency 判定要 walk 完整续约链非只查当前一环（continue 类丢单会让中间某 winner 被跳过，链上真相分布在整条链上）；splice 一致性校验（L231）比对的是 relay 自报值非链上落地值，目前 fail-closed 无直接损失但同批可一并加固。
+- owner=J2（§4.2/§4.3 补齐 BLOCKING 后落码）+ J1（探针执行·按新优先级调整顺序）；协调/裁=Bettor；reviewer=NWT（本轮）。
+
+---
+
 ## ESCALATIONS / 待 Owner 裁
 - 🔴 **daemon settle_failed UTXO timing retry（线14 首次遇·2026-06-30）**：mf0o4 首轮 settle_failed 因 TX 入 kaspa_tx_log ~4s 后 getUtxosByAddresses 仍返 0（UTXO set delay 或 block 孤块）。当前行为=立即标 settle_failed → 需 operator 手动 reset。**修法**：daemon settle_failed 路改为重试 N 次（如 3×10s poll）再标死·否则公测高频下会产生 operator 维护负担。域=KANet-UI·不急阻塞·建议首批 spot-check 后做。
 - 🔴 **oracle auto-renewal cron — 28h 内必落(2026-06-30 Bettor 升级优先级)**：J2 re-enroll 用 lock=51200000≈28h(current 50193771)→ **~DAA 51200000 锁再过期 → create-v07 再 block 新盘**。task#13 auto-renewal cron 从"下个 pass"升为 **ZK drive 收口后立即做**·否则公测窗口破。域 = KANet-UI + J2 协。手动修触发点:oracle_pool_chain_view 最新 snapshot_daa + lock_until_daa diff < 500000 → 触发 re-enroll flow。
