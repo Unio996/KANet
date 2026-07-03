@@ -605,6 +605,16 @@ owner=KANet-UI;co-verify=Bettor(待回)。
 
 ---
 
+### ✅ #41 oracle liveness / 体育盘完整自动判定 PASS(2026-07-04·世界杯 go/no-go 前置门·NWT+J2）
+- **背景**：G7 扫描抓出历史"33 盘 mass-ABSTAIN"疑虑,世界杯要用的 ESPN/kanet_v07 bshard 判定链路近期无真实流量验证过(最近 3 天新建市场全是 polymarket 源,零 ESPN 源 bshard 盘)——这是唯一还没端到端验过的 launch 风险,Bettor 派 NWT+新J1(qzdh7nar)认领。
+- **NWT 委员 liveness 检查**：10 个 `is_oracle=1` relay(J2test/NWT/maker-1/2/3/broker-2/tester-1/2/3/OwnerTest)当前全部存活响应(balance 查询全 HTTP 200),排除"委员进程挂了导致沉默"风险。
+- **J2 建真实测试盘验证完整链路**：`ext-pool-v07-1783106656453-0rrm8`(ESPN MLB CHW@CLE,已完赛 CLE 主场赢 6-5,J2 押 YES=CLE赢 10KAS)。deadline 后 daemon 19:28:40 tick 自动拾取 → consolidate → judgeLine 读 ESPN 真实数据判 YES(非 ABSTAIN) → committee 签 close_attest → claim 自动派彩,全程零人工介入。
+- **NWT 独立链上复核**（不信 DB evidence）：`close_txid`(cf4e567d)+ `claim_txid`(e7f8ddc4)均在 `kaspa_tx_log` 有真实 block_hash;claim outputs 确认真实支付 1,000,000,000 sompi(=10KAS)给 winner 地址。`settle_evidence`: `{winners:1, expected_winners:1, attempted:1, complete:true}`。
+- **结论**：ESPN 真数据 → judgeLine 正确判定 → committee 签名 → close_attest 落链 → claim 自动派彩,全链条在今天 G4(faucet UTXO拓扑)/G5-5a(瞬态重试)改动之后依然完整可用。**#41 = PASS**。世界杯正式盘量产仍需 G1(措辞模板等 Owner 点头)+ 赛程 cron 落地,但底层判定机制本身已证实跑通,不是 launch 阻塞。
+- owner=NWT(liveness+链验)+ J2(建测试盘+daemon co-verify);协调=Bettor。
+
+---
+
 ## 归档(已收敛旧线,留索引)
 - **scale-test backend-20**(2026-06-10):干净 demonstrate 20 并发 settle,框架 §10.2/§9.3 活案例。已收敛。
 - **tg-bot-web-user-e2e**(§14 首个受控运行):演化为线 3 可玩 demo。
