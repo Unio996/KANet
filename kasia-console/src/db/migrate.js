@@ -5255,5 +5255,33 @@ export function runMigrations() {
     }
   }
 
+  // v179 (J2, #35 世界杯造盘管线, 2026-07-04 Owner 钦定头号): worldcup_schedule 表.
+  //   目的: G1 设计 §3 赛程 config + 自动开盘 —— ESPN 自己为未来轮次(QF/SF/3rd/Final)预先发布了
+  //   带真实 event id + kickoff 的"占位符"赛事(队伍名形如 'RD16 W1'/'QFW2'/'SF L1', 上一轮结果出来后
+  //   ESPN 自己把占位符换成真队名, 同一个 event id 不变)——不需要我们自己搭桥接/追踪谁晋级, cron 只需
+  //   定期重新 fetch 同一个 espn_event_id, 检测队伍名是否已从占位符变成真实队伍缩写(真队伍缩写从不含
+  //   数字, 占位符都含数字, 用这个当判定谓词), 一旦双边都解析出真队伍 → 走 create-v07(#41/R16 验过的
+  //   安全管线)建盘, 记 market_id 回这行, 防重复建。
+  {
+    const exists = sqlite.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='worldcup_schedule'").get();
+    if (!exists) {
+      sqlite.exec(`
+        CREATE TABLE worldcup_schedule (
+          id                INTEGER PRIMARY KEY AUTOINCREMENT,
+          espn_event_id     TEXT NOT NULL UNIQUE,
+          stage             TEXT NOT NULL,              -- 'r16'|'qf'|'sf'|'third_place'|'final'
+          kickoff_utc       INTEGER NOT NULL,            -- unix seconds
+          market_id         TEXT,                        -- 建盘后回填, NULL = 未建
+          status            TEXT NOT NULL DEFAULT 'pending_teams',  -- pending_teams|created|skipped
+          skip_reason       TEXT,
+          created_at        TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at        TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+      `);
+      sqlite.exec(`CREATE INDEX idx_worldcup_schedule_status ON worldcup_schedule(status)`);
+      console.log('[migrate] v179: worldcup_schedule table (#35 世界杯赛程 config, ESPN 占位符解析驱动自动开盘).');
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }

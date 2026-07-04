@@ -618,6 +618,12 @@ startMiningConsolidateCron();
 import { startVariantExpanderCron as startBettorVariantExpander } from './services/bettor-variant-expander.js';
 startBettorVariantExpander();
 
+// #35 世界杯赛程自动开盘 (J2, 2026-07-04, Owner 钦定头号任务·G1 §3).
+// ESPN 自己为 QF/SF/3rd/Final 预先发布占位符赛事(真 event id + kickoff), cron 定期检测占位符是否已
+// 解析成真队伍(真队伍缩写从不含数字), 解析后按 G1 措辞模板+ #41/R16 验过的安全 create-v07 管线自动建盘。
+import { startWorldcupScheduleCron } from './services/worldcup-schedule-cron.mjs';
+startWorldcupScheduleCron();
+
 // Pre-split UTXOs via Relay IPC (after relays are running)
 import { autoSplitAll } from './services/utxo-splitter.js';
 await autoSplitAll();
