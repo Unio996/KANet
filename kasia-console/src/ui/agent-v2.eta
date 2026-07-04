@@ -174,7 +174,7 @@
               <select x-model="roleEditValue" class="w-full text-sm border border-warm-300 rounded px-3 py-2 bg-white">
                 <option value="broker">broker — 撮合 service (Trader-A/B)</option>
                 <option value="trader">trader — 专业交易 agent (maker/taker)</option>
-                <option value="predictor">predictor — 预测市场 (Polymarket)</option>
+                <option value="predictor">predictor — 预测市场 (UMA 去中心化预言机)</option>
                 <option value="general">general — 通用 agent (无交易 skill)</option>
                 <option value="user">user — 真实 Kasia user</option>
               </select>

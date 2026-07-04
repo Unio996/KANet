@@ -917,11 +917,16 @@ function poolDetailPage(marketId) {
       if (['refunded'].includes(s)) return null;
       return { label: '⏳ 待验证 · 验证时校验 UMA 48h 最终化', cls: 'bg-amber-50 border-amber-200 text-amber-700' };
     },
+    // Owner 2026-07-04 (杜绝内部 source 字段泄漏给用户, 如 'polymarket'): 之前直接拼
+    // outcome_market_source(内部溯源, 非用户面文案) + condition_id 当页面主标题——改显清洁的
+    // 市场题干(resolution_rule_spec.title, 跟 bot specTitle() 同一套), 内部字段不再对用户可见.
     marketLabel() {
       if (!this.market) return '';
-      var src = this.market.outcome_market_source || 'market';
-      var cond = (this.market.outcome_condition_id || '').slice(0, 40);
-      return src + ' / ' + cond;
+      try {
+        var spec = JSON.parse(this.market.resolution_rule_spec || '{}');
+        if (spec && spec.title) return spec.title;
+      } catch (e) {}
+      return '市场详情';
     },
     statusLabel() {
       // chain-truth reconcile: show 已结算 when chain settle evidence exists, even if DB says refunded.

@@ -201,7 +201,7 @@
 
   <!-- 数据来源 -->
   <div class="text-[10px] text-ink-300 text-center">
-    数据来源: Forex Factory · CoinGecko · MEXC · Yahoo Finance · Polymarket · Binance Futures · Alternative.me
+    数据来源: Forex Factory · CoinGecko · MEXC · Yahoo Finance · UMA · Binance Futures · Alternative.me
     <span x-show="summary" class="ml-2" x-text="'(' + sourcesOk + '/' + sourcesTotal + ' 源在线)'"></span>
   </div>
 </div>
