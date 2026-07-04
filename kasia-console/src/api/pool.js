@@ -2651,14 +2651,19 @@ export async function registerPoolRoutes(fastify) {
     let bettorPk;
     try { bettorPk = await deriveXOnlyPubkey(linkedAddr); }
     catch (e) { return reply.code(400).send({ ok: false, error: `linked_addr derive pubkey fail: ${e.message}` }); }
+    // #48 shard-blind fix (NWT/J2 2026-07-04): bshard bettor 行 s.market_id 是 SHARD 的 market_id
+    // (非 logical parent) — 裸 JOIN pool_markets m ON m.id=s.market_id 会拿到 shard_internal 状态的行
+    // (settle_evidence 写在 logical 市场, 拿不到), 导致所有 bshard 盘赢输永远显不出。
+    // 通过 market_shards 解析 shard→logical(v0.6 无 shard 行, COALESCE 落回 s.market_id 原逻辑不变)。
     const positions = sqlite.prepare(`
       SELECT s.market_id, s.direction, s.stake_amount, s.side_p2sh, s.side_lock_tx, s.claim_txid, s.merkle_index,
              s.created_at AS locked_at,
              m.resolution_rule_spec, m.outcome_side, m.protocol_status, m.deadline, m.category,
              m.maker_stake_amount, m.broker_fee_pct, m.oracle_bond_amount, m.miner_fee, m.settle_txid, m.refund_txid,
-             m.metadata
+             m.metadata, m.protocol_version
       FROM pool_bettor_sides s
-      LEFT JOIN pool_markets m ON m.id = s.market_id
+      LEFT JOIN market_shards ms ON ms.shard_market_id = s.market_id
+      LEFT JOIN pool_markets m ON m.id = COALESCE(ms.logical_market_id, s.market_id)
       WHERE s.bettor_pk = ?
       ORDER BY s.created_at DESC
     `).all(bettorPk);
@@ -2708,7 +2713,24 @@ export async function registerPoolRoutes(fastify) {
       let actualPayoutKas = null, actualPayoutChainVerified = false;
       try {
         const meta = JSON.parse(p.metadata || '{}');
-        if (meta.phase2_winner === 0 || meta.phase2_winner === 1) {
+        // #48 (NWT/J2 2026-07-04): bshard(v0.7) 盘从没写 phase2_winner(v0.6 专属字段) — 结算后所有
+        // bshard/世界杯盘 /mybets 永远显不出输赢。改读 settle_evidence.winner_details(daemon writeback
+        // 时存的 per-bettor 明细, 已链验 received===true, 比反查 kaspa_tx_log 更直接)。
+        const ev = meta.settle_evidence;
+        if (p.protocol_version === 'v0.7' && ev && Array.isArray(ev.winner_details)) {
+          const myWin = ev.winner_details.find(w => String(w.pk).toLowerCase() === String(bettorPk).toLowerCase());
+          if (myWin) {
+            outcomeWinner = myDirection;   // 这个 bettor 在 winner_details 里 = 赢了(方向就是自己下的那个方向)
+            didWin = true;
+            actualPayoutKas = Number(myWin.amount) / 1e8;
+            actualPayoutChainVerified = true;   // winner_details 只收 received===true 的条目(daemon writeback 过滤过)
+          } else if (ev.win_direction === 0 || ev.win_direction === 1) {
+            // 已结算·知道哪边赢了·这个 bettor 不在赢家名单 = 真输了(非"待结算")
+            outcomeWinner = ev.win_direction;
+            didWin = false;
+          }
+          // ev 存在但 win_direction 缺失(老结构/尚在写入中) → outcomeWinner/didWin 留 null(继续显示"待结算", 不误判)。
+        } else if (meta.phase2_winner === 0 || meta.phase2_winner === 1) {
           outcomeWinner = meta.phase2_winner;
           didWin = (myDirection === outcomeWinner);
           if (didWin) {

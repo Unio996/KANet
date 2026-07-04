@@ -280,6 +280,12 @@ async function _settleOneMarketAttempt(marketId) {
     const evidence = {
       settled_by: 'bshard-settle-daemon', close_txid: r.closeTxid, payout_root: r.plan?.payoutRoot,
       winners: landedClaims.length, claim_txids: landedClaims.map(c => c.txId),
+      // #DM-UI-gap (NWT 2026-07-04 抓: my-positions 靠 v0.6 metadata.phase2_winner 判赢输, bshard 从没写过
+      // 这字段·所有 bshard/世界杯盘结算后用户 /mybets 看不到"你赢了/输了"): 补 per-bettor 明细(pk→{amount,
+      // txId}), 供 my-positions 直接按 bettorPk 匹配判赢(landedClaims 已链验 received===true, 不用再反查
+      // kaspa_tx_log)。winDir 一并存(哪个方向赢了, 没赢的 bettor 靠这个判"你输了"非"待结算")。
+      winner_details: landedClaims.map(c => ({ pk: c.pk, amount: c.amount, txId: c.txId })),
+      win_direction: r.plan?.winDir ?? null,
       expected_winners: r.plan?.winners?.length ?? null, attempted: allClaims.length, complete: !!r.complete,
       chain_settled: true, settled_at: new Date().toISOString(),
     };
