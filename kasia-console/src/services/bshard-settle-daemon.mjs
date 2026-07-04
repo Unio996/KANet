@@ -377,4 +377,4 @@ export function startSettleDaemonCron() {
 }
 export function stopSettleDaemonCron() { if (_timer) { clearInterval(_timer); _timer = null; } }
 async function ensureReady() { _k = await kaspa(); if (!_pkMap) await buildPkMap(); }
-export { selectRipeMarkets, settleOneMarket, judgeWinDir, buildCtx, consolidateAndBuildPsState, ensureReady };
+export { selectRipeMarkets, settleOneMarket, judgeWinDir, buildCtx, consolidateAndBuildPsState, ensureReady, TRANSIENT_RE };
