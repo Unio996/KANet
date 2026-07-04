@@ -12,6 +12,12 @@
 //   推 DM (历史佣金走 /earnings 汇总)。restart-safe: 一次性 backfill 由 sentinel chain_event 'broker_fee_emit_backfill' 守。
 //
 // DI 设计 (offline 可测): db + deriveBrokerAddress 注入·test 用 temp DB + stub deriver。
+//
+// 查漏补缺(2026-07-04, Owner 点破"多路并行没模块化"): 这个文件跟 lib/broker-fee-chain.mjs 曾各自
+// 维护一份"在 kaspa_tx_log.outputs_json 里找给某地址的 output 金额"逻辑——收拢成 findAddressOutputSompi
+// 单一权威, 这里只保留 emit 侧独有的东西(候选筛选/幂等标记/DM 事件写入)。
+
+import { getIndexedTxOutputs } from '../lib/broker-fee-chain.mjs';
 
 // ⚠ event_type 必【不以 'broker_' 开头】: migrate v83 trigger chain_events_txid_format_check 对 broker_* 事件
 //   强制 txid=64-hex chain hash (禁 placeholder)。sentinel 是内部标记无真 txid → 用非 broker_ 前缀绕开 trigger。
@@ -65,12 +71,10 @@ export function brokerFeeLandedEmitTick(db, deriveBrokerAddress, log = () => {})
   let emitted = 0, pendingIndex = 0, noBrokerOutput = 0;
   for (const m of candidates) {
     // settle TX indexed? (NO TX NO STATE: 没 index 就不 emit·下 tick 重试)
-    const txRow = db.prepare('SELECT outputs_json FROM kaspa_tx_log WHERE tx_id = ?').get(m.settle_txid);
-    if (!txRow || !txRow.outputs_json) { pendingIndex++; continue; }
-
-    let outs;
-    try { outs = JSON.parse(txRow.outputs_json); } catch { pendingIndex++; continue; }
-    if (!Array.isArray(outs) || !outs.length) { pendingIndex++; continue; }
+    // 共享原语(lib/broker-fee-chain.mjs::getIndexedTxOutputs) — 这里跟 earnings endpoint 曾各写
+    // 一份等价的 raw SQL + JSON.parse, 收拢成一份(Owner 点破"多路并行"后的整顿第一刀)。
+    const outs = getIndexedTxOutputs(m.settle_txid, db);
+    if (!outs || !outs.length) { pendingIndex++; continue; }
 
     const network = String(m.spine_p2sh || '').startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
     let brokerAddress;
