@@ -148,22 +148,43 @@ async function _placeBet(bot, market) {
 // FINDING-2 ③ 止血 (KANet-UI 2026-06-28): 排 commingled-spine v0.7 盘 (spine_p2sh 被 >1 市场共享).
 // 根治=J1 assertNotCommingled 入口闸 (register-v06/register-v07/register); 此处防 auto-bet 持续灌.
 // NULL spine (v0.6 盘) 不受影响 (IS NULL 分支 pass).
+// #42 (Bettor 2026-07-04, KANet-UI 二次根因 + Bettor union 方案): 世界杯盘(卡片洞见/公开 demo 活跃度命脉)
+// deadline 40-68h·排在 top-20-by-deadline 之外, 永远抽不到. 不改 r433 的防稀释设计(top-20 仍是主池)——
+// 加一路 UNION: card_group_id LIKE 'fifa-2026%' 的市场无条件补进候选池(不受 deadline 排名限制, 但仍走
+// 同一套 pending_bettors/v0.7/deadline-window/非-commingled 安全过滤), 世界杯盘永远在池里能被随机抽到.
 async function _fetchEligibleMarkets() {
   return sqlite.prepare(`
-    SELECT id, protocol_version, deadline
-    FROM pool_markets
-    WHERE protocol_status = 'pending_bettors'
-      AND protocol_version = 'v0.7'
-      AND deadline > unixepoch() + 120
-      AND deadline < unixepoch() + ?
-      AND (spine_p2sh IS NULL OR spine_p2sh NOT IN (
-        SELECT spine_p2sh FROM pool_markets
-        WHERE protocol_version = 'v0.7' AND spine_p2sh IS NOT NULL
-        GROUP BY spine_p2sh HAVING COUNT(*) > 1
-      ))
-    ORDER BY deadline ASC
-    LIMIT 20
-  `).all(NEAR_DEADLINE_SEC);
+    SELECT id, protocol_version, deadline FROM (
+      SELECT id, protocol_version, deadline
+      FROM pool_markets
+      WHERE protocol_status = 'pending_bettors'
+        AND protocol_version = 'v0.7'
+        AND deadline > unixepoch() + 120
+        AND deadline < unixepoch() + ?
+        AND (spine_p2sh IS NULL OR spine_p2sh NOT IN (
+          SELECT spine_p2sh FROM pool_markets
+          WHERE protocol_version = 'v0.7' AND spine_p2sh IS NOT NULL
+          GROUP BY spine_p2sh HAVING COUNT(*) > 1
+        ))
+      ORDER BY deadline ASC
+      LIMIT 20
+    )
+    UNION
+    SELECT id, protocol_version, deadline FROM (
+      SELECT id, protocol_version, deadline
+      FROM pool_markets
+      WHERE protocol_status = 'pending_bettors'
+        AND protocol_version = 'v0.7'
+        AND deadline > unixepoch() + 120
+        AND deadline < unixepoch() + ?
+        AND resolution_rule_spec LIKE '%"card_group_id":"fifa-2026%'
+        AND (spine_p2sh IS NULL OR spine_p2sh NOT IN (
+          SELECT spine_p2sh FROM pool_markets
+          WHERE protocol_version = 'v0.7' AND spine_p2sh IS NOT NULL
+          GROUP BY spine_p2sh HAVING COUNT(*) > 1
+        ))
+    )
+  `).all(NEAR_DEADLINE_SEC, NEAR_DEADLINE_SEC);
 }
 
 function _fetchRelayBots() {
