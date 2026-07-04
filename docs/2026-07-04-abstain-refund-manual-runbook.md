@@ -62,3 +62,11 @@ sqlite.prepare("UPDATE pool_markets SET metadata = json_set(metadata, '$.manual_
 - **别在没人工确认"真永久判不了"之前就跑这个**——一旦 cancel_attest 上链，这个盘再也不能正常结算了。
 - 先 dry-run（只调 `computeRefundPlan`，不调 `cancelMarketLive`）核对退款金额，再真正执行。
 - 出问题找 J2（结算域）。
+
+## 额外 case（NWT 2026-07-04 daemon 审计发现，极小概率但记一笔）
+
+如果一个市场是走**正常结算路径**（非 ABSTAIN），`settleMarketLive` 的 close_attest 已经成功上链（covenant 真实 `closed=1`），但紧接着 daemon 的 writeback（DB 写 `settle_evidence`）这一步本身失败（比如 DB 锁）——这种情况下市场会卡在 `settle_failed`，但**跟这份 runbook 的"永久 ABSTAIN 退款"场景完全不同**：
+
+- **别对这类市场跑 `cancelMarketLive`**——它已经 `closed=1` 了（正常结算方向），不是该退款的场景（退款是给"判不出结果"的市场用的，判定结果已经有了不该走这条路）。
+- 先查链上真相：spine/PS 地址的实际 `closed` 值是 0 还是 1（直接查 PS UTXO 的 redeem script 状态，或问 J2 复用 #21/tdz3v 那次的链上验证方法）。
+- 若确认 `closed=1`（close 已成功，只是 claim/writeback 没走完）：需要手动 resume **claim 循环**（不是重新 cancel/close），参考 `bshard-auto-settler.mjs` 里 `settleMarketLive` 第 7 步的 claim 逻辑（跟 `cancelMarketLive` 第 7 步的 refund_claim 结构一样，只是调 `bshard_payout_claim` 不是 `bshard_refund_claim`）。问 J2。
