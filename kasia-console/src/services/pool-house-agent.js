@@ -1,15 +1,20 @@
-// pool-house-agent.js — #42 头号2 主路 (Bettor 2026-07-04 派工·qzdh7nar 判断源+KANet-UI 下注执行).
+// pool-house-agent.js — #42 头号2 主路 (Bettor 2026-07-04 派工·qzdh7nar 预测源+KANet-UI 下注执行).
 //
-// "击败 Agent" 玩法: house agent 对每场世界杯淘汰赛盘公开判断(晋级方向)+真实下注(链上可查),
-// 玩家可以选跟它同边或反着押。跟 pool-auto-better.js(随机方向, 多 relay, 全市场)是两回事:
-// house agent 只押世界杯盘(card_group_id LIKE 'fifa-2026%'), 方向来自
-// qzdh7nar 的判断接口(GET /api/oracle-pool/house-judgment/:marketId, 同 bshard-settle-daemon
-// judgeWinDir 同源, 非独立复刻), 单一固定身份(HouseAgent relay), 每盘只押一次(去重).
+// "击败 Agent" 玩法: house agent 对每场世界杯淘汰赛盘赛前公开预测(晋级方向)+真实下注(链上可查),
+// 玩家可以选跟它同边或反着押,赛后可能被打脸(upset)="击败 Agent"的乐趣所在。跟 pool-auto-better.js
+// (随机方向, 多 relay, 全市场)是两回事: house agent 只押世界杯盘(card_group_id LIKE 'fifa-2026%'),
+// 单一固定身份(HouseAgent relay), 每盘只押一次(去重)。
+//
+// 预测≠结算(Bettor 2026-07-04 红线, 关键): house-judgment 接口两种 verdict, 不可混用——
+//   - PREDICTED_YES/PREDICTED_NO = 赛前预测(qzdh7nar predictPreMatch: ESPN pickcenter 赔率主,
+//     KANet-UI FIFA 排名 fallback) → 触发下注的信号, Agent 在这里才可能猜错。
+//   - YES/NO = 赛后真结果(judgeWinDir, 跟结算同源) → 不触发下注(比赛已定, 押已无意义),
+//     只用于日后对账"Agent 预测 vs 真结果"算战绩/上榜。
 //
 // Tick:
 //   1. 找世界杯盘(pending_bettors + v0.7 + card_group_id fifa-2026% + deadline > now+120s)
 //   2. 排除 HouseAgent 已经押过的(pool_bettor_sides 查 bettor_relay_id=HouseAgent)
-//   3. 对每盘调用 house-judgment; verdict='ABSTAIN' 跳过(比赛没到能判的阶段); YES/NO 才下注
+//   3. 对每盘调用 house-judgment; 只 PREDICTED_YES/PREDICTED_NO 下注, ABSTAIN/YES/NO 跳过
 //   4. 复用 auto-bet 同一套 register-v07 prep→transfer→confirm 三步(shard-aware, 非重造)
 
 import { randomBytes } from 'node:crypto';
@@ -113,18 +118,21 @@ export async function houseAgentTick() {
     const markets = _fetchUnjudgedWorldCupMarkets(bot.id);
     if (markets.length === 0) return { ok: true, processed: 0, note: 'no unjudged world cup markets' };
 
+    // #42 预测≠结算红线 (Bettor 2026-07-04): 下注只对 PREDICTED_YES/PREDICTED_NO(赛前预测, house-judgment
+    // 的 predictPreMatch, ESPN pickcenter 赔率或 FIFA 排名 fallback) 反应. 'YES'/'NO'(judgeWinDir 赛后
+    // 真结果)不触发下注——那时比赛已经/接近结束, 再"押"没有预测意义, 只用于以后对账 Agent 战绩.
     const results = [];
     for (const m of markets) {
       const j = await _getJudgment(m.id);
-      if (!j?.ok || j.verdict === 'ABSTAIN') {
+      if (!j?.ok || j.verdict === 'ABSTAIN' || j.verdict === 'YES' || j.verdict === 'NO') {
         results.push({ market: m.id.slice(-12), verdict: j?.verdict || 'ERROR', bet: false });
         continue;
       }
-      const direction = j.verdict === 'YES' ? 0 : 1;
+      const direction = j.verdict === 'PREDICTED_YES' ? 0 : 1;
       const r = await _placeJudgedBet(bot, m.id, direction);
-      results.push({ market: m.id.slice(-12), verdict: j.verdict, bet: true, ...r });
+      results.push({ market: m.id.slice(-12), verdict: j.verdict, bet: true, favored: j.favored, provider: j.provider, ...r });
       if (r.status === 'CONFIRMED') {
-        console.log(`[house-agent] judged+bet ${m.id.slice(-12)} → ${j.verdict} (${STAKE_KAS} KAS) tx=${r.side_tx}`);
+        console.log(`[house-agent] predicted+bet ${m.id.slice(-12)} → ${j.verdict} (favored=${j.favored}, ${j.provider}) ${STAKE_KAS} KAS tx=${r.side_tx}`);
       }
     }
     return { ok: true, processed: results.length, results };

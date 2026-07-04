@@ -546,6 +546,25 @@ export async function registerOraclePoolRoutes(fastify) {
   // NOT parseEspnSummary (oracle-evidence-extractors.mjs) — that helper hard-gates on
   // status.type.completed===true (by design, for post-match judging), so it always returns null
   // pre-kickoff. Minimal standalone parse here instead of weakening that gate for an unrelated need.
+  // FIFA World Ranking fallback (KANet-UI 2026-07-04, per Bettor 分工: qzdh7nar 赔率主 + 我 fallback).
+  // 来源: FIFA/Coca-Cola Men's World Ranking 2026-06-11 官方更新(下次更新 2026-07-20, 本届赛事期间不变) -
+  // https://inside.fifa.com/fifa-world-ranking/men + ESPN Top-50 复核(非猜, WebSearch 实查两源对齐)。
+  // 只收 2026 世界杯16强 + 2个待定席位候选队(共19队), 非全量200+队排名表 — 够用即可, 别过度工程.
+  // 排名数字越小=越强(FIFA 惯例); 用于 pickcenter 缺失/pick'em 时的 tiebreaker, 非首选信号(odds 优先).
+  const FIFA_RANKING_JUN2026 = {
+    ARG: 1, ESP: 2, FRA: 3, ENG: 4, POR: 5, BRA: 6, MAR: 7, BEL: 9, COL: 13,
+    MEX: 14, USA: 17, SUI: 19, AUS: 27, EGY: 29, CAN: 30, NOR: 31, PAR: 41, CPV: 67, GHA: 73,
+  };
+  function predictByFifaRanking(homeAbbr, awayAbbr, operand) {
+    const homeRank = FIFA_RANKING_JUN2026[String(homeAbbr).toUpperCase()];
+    const awayRank = FIFA_RANKING_JUN2026[String(awayAbbr).toUpperCase()];
+    if (homeRank == null || awayRank == null) return { verdict: 'ABSTAIN', reason: 'fifa_ranking_unknown_team' };
+    if (homeRank === awayRank) return { verdict: 'ABSTAIN', reason: 'fifa_ranking_tie' };
+    const favoredAbbr = homeRank < awayRank ? homeAbbr : awayAbbr; // 排名数字小 = 更强
+    const predictedYes = String(favoredAbbr).toUpperCase() === String(operand).toUpperCase();
+    return { verdict: predictedYes ? 'PREDICTED_YES' : 'PREDICTED_NO', favored: favoredAbbr, provider: 'fifa-ranking-2026-06-11-fallback' };
+  }
+
   async function predictPreMatch(dataSourceUrl, operand) {
     let data;
     try {
@@ -560,12 +579,12 @@ export async function registerOraclePoolRoutes(fastify) {
     const away = competitors.find(c => c.homeAway === 'away');
     if (!home || !away) return { verdict: 'ABSTAIN', reason: 'no_competitors' };
     const pick = data?.pickcenter?.[0] || data?.odds?.[0];
-    if (!pick) return { verdict: 'ABSTAIN', reason: 'no_odds_available' };  // KANet-UI FIFA-ranking fallback slots in here
+    if (!pick) return predictByFifaRanking(home.team?.abbreviation, away.team?.abbreviation, operand);
     const homeFav = pick.homeTeamOdds?.favorite === true;
     const awayFav = pick.awayTeamOdds?.favorite === true;
-    if (homeFav === awayFav) return { verdict: 'ABSTAIN', reason: 'no_clear_favorite' }; // pick'em / missing flags
+    if (homeFav === awayFav) return predictByFifaRanking(home.team?.abbreviation, away.team?.abbreviation, operand); // pick'em / missing flags
     const favoredAbbr = homeFav ? home.team?.abbreviation : away.team?.abbreviation;
-    if (!favoredAbbr) return { verdict: 'ABSTAIN', reason: 'no_favored_abbreviation' };
+    if (!favoredAbbr) return predictByFifaRanking(home.team?.abbreviation, away.team?.abbreviation, operand);
     const predictedYes = String(favoredAbbr).toUpperCase() === String(operand).toUpperCase();
     return { verdict: predictedYes ? 'PREDICTED_YES' : 'PREDICTED_NO', favored: favoredAbbr, provider: pick.provider?.name || null };
   }
