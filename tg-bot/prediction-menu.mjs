@@ -219,11 +219,18 @@ export async function formatMyBets(linkedAddr, lang = 'en') {
   for (const p of positions) {
     const stake = Number(p.stake_kas) || 0;
     totals.stakeInTotal += stake;
-    if (p.settle_txid && p.did_win === true) {
-      const payout = Number(p.actual_payout_kas) || 0;
+    if (p.settle_txid && p.did_win === true && p.actual_payout_kas != null) {
+      const payout = Number(p.actual_payout_kas);
       totals.wonKas += payout;
       totals.wonStakeKas += stake;
       totals.payoutBackTotal += payout;
+    } else if (p.settle_txid && p.did_win === true) {
+      // 查漏补缺(2026-07-04, #48): 赢了但金额还没链验(claim 还没到账/未索引)——不知道具体数字前绝不
+      // 当 0 算进 Net(会把真赢家的净盈亏拉低), 归进"结算中·钱还在系统里"这桶, 跟 settledPendingCnt
+      // 语义一致(链上已判但本地/展示还没拿到确切数)。
+      totals.settledPendingCnt++;
+      totals.settledPendingStake += stake;
+      totals.stakeOpenTotal += stake;
     } else if (p.settle_txid && p.did_win === false) {
       totals.lostStakeKas += stake;
     } else if (p.settle_txid) {
@@ -274,11 +281,17 @@ export async function formatMyBets(linkedAddr, lang = 'en') {
     const byDir = new Map();
     for (const p of group) {
       const dir = p.my_side || (p.direction === 0 ? 'YES' : p.direction === 1 ? 'NO' : '?');
-      if (!byDir.has(dir)) byDir.set(dir, { stakeSum: 0, count: 0, statuses: { won: 0, lost: 0, settled_pending: 0, refunded: 0, open: 0, unchain: 0 }, payoutWin: 0, actualPayoutSum: 0 });
+      if (!byDir.has(dir)) byDir.set(dir, { stakeSum: 0, count: 0, statuses: { won: 0, won_pending: 0, lost: 0, settled_pending: 0, refunded: 0, open: 0, unchain: 0 }, payoutWin: 0, actualPayoutSum: 0 });
       const a = byDir.get(dir);
       a.stakeSum += Number(p.stake_kas) || 0;
       a.count++;
-      if (p.settle_txid && p.did_win === true) { a.statuses.won++; a.actualPayoutSum += Number(p.actual_payout_kas) || 0; }
+      // 查漏补缺(2026-07-04, #48 NWT 假阴性审后 J2 修): bshard 赢家如果 claim 还没链验(actual_payout_kas
+      // 为 null), 只知道"赢了"但不知道具体金额——绝不能当 0 KAS 显示(会读成"赢了但拿到0"这种荒谬结果,
+      // 比之前的模糊 pending 还伤信任), 单独一个状态桶 won_pending 处理。
+      if (p.settle_txid && p.did_win === true) {
+        if (p.actual_payout_kas == null) { a.statuses.won_pending++; }
+        else { a.statuses.won++; a.actualPayoutSum += Number(p.actual_payout_kas) || 0; }
+      }
       else if (p.settle_txid && p.did_win === false) a.statuses.lost++;
       else if (p.settle_txid) a.statuses.settled_pending++;
       else if (p.refund_txid) a.statuses.refunded++;
@@ -304,16 +317,18 @@ export async function formatMyBets(linkedAddr, lang = 'en') {
       const s = a.statuses;
       const onlyOpen = s.open === a.count;
       const onlyWon = s.won === a.count;
+      const onlyWonPending = s.won_pending === a.count;
       const onlyLost = s.lost === a.count;
       const onlyRefund = s.refunded === a.count;
       let statusStr;
       const onlySettledPending = s.settled_pending === a.count;
       if (onlyWon)        statusStr = t(lang, 'mybets_status_win', { kas: a.actualPayoutSum.toFixed(4) });
+      else if (onlyWonPending) statusStr = t(lang, 'mybets_status_win_pending');
       else if (onlyLost)  statusStr = t(lang, 'mybets_status_lose', { kas: a.stakeSum.toFixed(4) });
       else if (onlyRefund) statusStr = t(lang, 'mybets_status_refunded');
       else if (onlySettledPending) statusStr = t(lang, 'mybets_status_settled_chain');
       else if (onlyOpen)  statusStr = (sample.deadline_unix && Number(sample.deadline_unix) < Math.floor(Date.now() / 1000)) ? t(lang, 'mybets_status_deadline_vote') : t(lang, 'mybets_status_active');
-      else                statusStr = t(lang, 'mybets_status_mixed', { won: s.won, lost: s.lost, open: s.open, refunded: s.refunded, pending: s.settled_pending });
+      else                statusStr = t(lang, 'mybets_status_mixed', { won: s.won + s.won_pending, lost: s.lost, open: s.open, refunded: s.refunded, pending: s.settled_pending });
       const cnt = a.count > 1 ? t(lang, 'mybets_dir_cnt', { n: a.count }) : '';
       lines.push(`• ${dir} ${a.stakeSum.toFixed(4)} KAS${cnt} · ${statusStr}`);
       // 若赢可拿 = 直接加总每笔 payout_if_win_kas. 后端 endpoint 是 query-time 同池子快照统一算每笔
@@ -367,9 +382,14 @@ export async function formatRecordCard(linkedAddr, lang = 'en') {
     marketIds.add(p.market_id);
     const stake = Number(p.stake_kas) || 0;
     if (p.settle_txid && p.did_win === true) {
+      // 胜率分母算"赢了"不管payout是否已链验(结果已定,跟钱到没到账无关);
+      // 但 Net 金额(wonKas/payoutBackTotal) 只在金额确认后才加,查漏补缺(2026-07-04,#48同款修法):
+      // 金额未知时当 0 算会拉低真赢家的净盈亏显示。
       wonCount++; wonStakeKas += stake;
-      const payout = Number(p.actual_payout_kas) || 0;
-      wonKas += payout; payoutBackTotal += payout;
+      if (p.actual_payout_kas != null) {
+        const payout = Number(p.actual_payout_kas);
+        wonKas += payout; payoutBackTotal += payout;
+      }
     }
     else if (p.settle_txid && p.did_win === false) { lostCount++; lostStakeKas += stake; }
     else if (p.refund_txid) { refundedCount++; payoutBackTotal += stake; }
