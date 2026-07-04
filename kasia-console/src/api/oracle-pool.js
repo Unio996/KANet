@@ -528,4 +528,40 @@ export async function registerOraclePoolRoutes(fastify) {
       return reply.code(503).send({ ok: false, error: `IPC stake_unlock fail: ${ipcErr.message}` });
     }
   });
+
+  // #42 house agent (2026-07-04, Owner head-priority-2 — 人机对抗玩法): read-only judgment endpoint.
+  // qzdh7nar 域 = 出判断源; KANet-UI 域 = 拿这个结果去真下注(register-v07 prep→transfer→confirm)。
+  //
+  // 实测纠偏(2026-07-04): 原计划复用 #26 的 espnSportsJudge——但今天新造的 kanet_v07 世界杯盘(J2 create-v07
+  // 管线)outcome_market_source='kanet_v07' 非 'polymarket'，且措辞是 G1 定的"advance"非"win"，espnSportsJudge
+  // 的 appliesTo/WIN_RE 两处都对不上(实测 applies:false)。这些原生盘 resolution_rule_spec 本身已经是干净结构化
+  // 数据(data_source_canonical=ESPN URL 直给 + resolution_predicate={metric,op,operand} 直给)，不需要 espnSportsJudge
+  // 那套给嘈杂 polymarket 文本做的标题解析/球队名匹配。改直接复用 bshard-settle-daemon.mjs 的 judgeWinDir()——
+  // 那就是【结算实际用的同一份判定逻辑】，house agent 的"预测"跟真结算永远同源，不会出现两边判不一样的尴尬分裂。
+  fastify.get('/api/oracle-pool/house-judgment/:marketId', async (request, reply) => {
+    const { marketId } = request.params;
+    const market = sqlite.prepare(
+      `SELECT id, category, outcome_market_source, outcome_condition_id, resolution_rule_spec FROM pool_markets WHERE id = ?`
+    ).get(marketId);
+    if (!market) return reply.code(404).send({ ok: false, error: 'market_not_found' });
+
+    let spec = {};
+    try { spec = JSON.parse(market.resolution_rule_spec || '{}'); } catch {}
+
+    const { judgeWinDir } = await import('../services/bshard-settle-daemon.mjs');
+    try {
+      const winDir = await judgeWinDir(market);   // 0 = YES, 1 = NO (同 settle daemon 的 value-mapping)
+      return reply.send({
+        ok: true,
+        applies: true,
+        market_id: marketId,
+        verdict: winDir === 0 ? 'YES' : 'NO',
+        source: 'bshard-settle-daemon.judgeWinDir',  // 跟真结算同源，非独立复刻的判断逻辑
+        title: spec.title || null,
+      });
+    } catch (e) {
+      // judgeWinDir throws on ABSTAIN / not-yet-resolvable(比赛没打完等) — house agent 该跳过这盘，不下注。
+      return reply.send({ ok: true, applies: true, market_id: marketId, verdict: 'ABSTAIN', source: 'bshard-settle-daemon.judgeWinDir', reason: String(e?.message || e).slice(0, 160) });
+    }
+  });
 }

@@ -341,4 +341,4 @@ export function startSettleDaemonCron() {
   settleDaemonTick().catch(e => log(`startup tick: ${e.message}`));   // immediate first tick
 }
 export function stopSettleDaemonCron() { if (_timer) { clearInterval(_timer); _timer = null; } }
-export { selectRipeMarkets, settleOneMarket };
+export { selectRipeMarkets, settleOneMarket, judgeWinDir };
