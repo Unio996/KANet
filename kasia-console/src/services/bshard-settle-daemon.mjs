@@ -118,6 +118,40 @@ const chainReader = {
 };
 async function endBlockHash(daa) { return (await fetchEndBlockHashCanonical(chainReader, daa)).hash; }
 
+// consolidate(如需要) + psState 构造 — settle 路径和 ABSTAIN 退款路径共用(两者都需要"折片进 PayoutShard 之后
+// 的 closed=0 redeem 起点", 只是之后一个走 close_attest 一个走 cancel_attest)。抽出自 _settleOneMarketAttempt
+// 原 inline 逻辑(J2 2026-07-04 抽取, 逻辑一字不动, 见 git blame 迁移前版本)。
+async function consolidateAndBuildPsState(marketId, ps, ctx) {
+  const shards = sqlite.prepare('SELECT shard_index, status FROM market_shards WHERE logical_market_id = ?').all(marketId);
+  const needConsolidate = shards.some(s => s.status === 'sealed' || s.status === 'open');
+  const market = sqlite.prepare('SELECT * FROM pool_markets WHERE id = ?').get(marketId);
+
+  let psOutpointTxid, psIdx, consolidatedPool;
+  if (needConsolidate) {
+    const res = await consolidateAllShards({
+      db: sqlite, rc: (cmd) => relayPost(FEE_RELAY_ID, cmd),
+      landed: async (txid, addr) => { for (let i = 0; i < 30; i++) { if ((await getUtxos(addr)).some(e => (norm(e).entry?.outpoint || norm(e).outpoint)?.transactionId === txid)) return true; await sleep(3000); } return false; },
+      p2sh: _p2shCache, logicalMarketId: marketId,
+      payoutShard: { payout_redeem_hex: ps.payout_redeem_hex, payout_ps_outpoint: ps.payout_ps_outpoint, payout_cov_id: ps.payout_cov_id },
+      relayAddr: feeRelayAddr(),
+      transfer: async (addr, sompi) => { const t = await apiTransfer(addr, (sompi / 1e8).toFixed(8)); const tx = t.txId || t.tx_id; if (!tx) throw new Error('fee transfer fail'); await sleep(3000); return tx; },
+      deadline: Number(market.deadline),
+    });
+    [psOutpointTxid, psIdx] = res.psOutpoint.split(':'); psIdx = Number(psIdx);
+    consolidatedPool = res.consolidatedPool;
+    try { sqlite.prepare('UPDATE payout_shards SET payout_ps_outpoint = ? WHERE logical_market_id = ?').run(res.psOutpoint, marketId); } catch {}
+    log(`${marketId.slice(-8)} consolidated ${res.consolidatedShards} shard(s) → ${res.psOutpoint} pool=${consolidatedPool}`);
+  } else {
+    [psOutpointTxid, psIdx] = String(ps.payout_ps_outpoint).split(':'); psIdx = Number(psIdx);
+    const { poolSompi } = getMarketBets(marketId, sqlite);
+    consolidatedPool = (BigInt(poolSompi) + BigInt(PS_SEED_SOMPI)).toString();
+    log(`${marketId.slice(-8)} already consolidated → ${ps.payout_ps_outpoint} pool=${consolidatedPool}`);
+  }
+
+  const redeem0 = compilePayoutShardRedeem({ poolMerkleRoot: ps.pool_merkle_root, predicateCommit: ps.predicate_commit, consolidatedPool, closed: 0 });
+  return { outpointTxid: psOutpointTxid, index: psIdx, redeem_hex: redeem0, consolidatedPool, poolMerkleRoot: ps.pool_merkle_root, predicateCommit: ps.predicate_commit };
+}
+
 function buildCtx() {
   return {
     db: sqlite, psSeedSompi: PS_SEED_SOMPI,
@@ -223,38 +257,9 @@ async function _settleOneMarketAttempt(marketId) {
   if (!plan.ok) { ctx.alert(marketId, `plan not ok: ${plan.reason} — skip·不动钱`); return { ok: false, reason: plan.reason }; }
   if (plan.winners && plan.winners.length > 1024) { ctx.alert(marketId, `${plan.winners.length} winners >1024 — skip·待 rolling`); return { ok: false, reason: 'needs_rolling', needsRolling: true }; }
 
-  // 1. consolidate 状态判定: shards 任一 sealed/open = 未 consolidate。
-  const shards = sqlite.prepare('SELECT shard_index, status FROM market_shards WHERE logical_market_id = ?').all(marketId);
-  const needConsolidate = shards.some(s => s.status === 'sealed' || s.status === 'open');
-  const market = sqlite.prepare('SELECT * FROM pool_markets WHERE id = ?').get(marketId);
-
-  let psOutpointTxid, psIdx, consolidatedPool;
-  if (needConsolidate) {
-    const res = await consolidateAllShards({
-      db: sqlite, rc: (cmd) => relayPost(FEE_RELAY_ID, cmd),
-      landed: async (txid, addr) => { for (let i = 0; i < 30; i++) { if ((await getUtxos(addr)).some(e => (norm(e).entry?.outpoint || norm(e).outpoint)?.transactionId === txid)) return true; await sleep(3000); } return false; },
-      p2sh: _p2shCache, logicalMarketId: marketId,
-      payoutShard: { payout_redeem_hex: ps.payout_redeem_hex, payout_ps_outpoint: ps.payout_ps_outpoint, payout_cov_id: ps.payout_cov_id },
-      relayAddr: feeRelayAddr(),
-      transfer: async (addr, sompi) => { const t = await apiTransfer(addr, (sompi / 1e8).toFixed(8)); const tx = t.txId || t.tx_id; if (!tx) throw new Error('fee transfer fail'); await sleep(3000); return tx; },
-      deadline: Number(market.deadline),
-    });
-    [psOutpointTxid, psIdx] = res.psOutpoint.split(':'); psIdx = Number(psIdx);
-    consolidatedPool = res.consolidatedPool;
-    // 持久化 consolidated outpoint (resume·writeback)
-    try { sqlite.prepare('UPDATE payout_shards SET payout_ps_outpoint = ? WHERE logical_market_id = ?').run(res.psOutpoint, marketId); } catch {}
-    log(`${marketId.slice(-8)} consolidated ${res.consolidatedShards} shard(s) → ${res.psOutpoint} pool=${consolidatedPool}`);
-  } else {
-    // 已 consolidate (resume): payout_ps_outpoint = folded·pool = poolSompi + seed
-    [psOutpointTxid, psIdx] = String(ps.payout_ps_outpoint).split(':'); psIdx = Number(psIdx);
-    const { poolSompi } = getMarketBets(marketId, sqlite);
-    consolidatedPool = (BigInt(poolSompi) + BigInt(PS_SEED_SOMPI)).toString();
-    log(`${marketId.slice(-8)} already consolidated → ${ps.payout_ps_outpoint} pool=${consolidatedPool}`);
-  }
-
-  // 2. psState (closed=0 redeem) for settleMarketLive
-  const redeem0 = compilePayoutShardRedeem({ poolMerkleRoot: ps.pool_merkle_root, predicateCommit: ps.predicate_commit, consolidatedPool, closed: 0 });
-  const psState = { outpointTxid: psOutpointTxid, index: psIdx, redeem_hex: redeem0, consolidatedPool, poolMerkleRoot: ps.pool_merkle_root, predicateCommit: ps.predicate_commit };
+  // 1-2. consolidate(如需要) + psState 构造 — 抽成可复用 helper (J2 2026-07-04, ABSTAIN 退款路复用同一步骤,
+  //   见 cancelMarketLive caller: consolidate 判断/psState 形状跟结算路径完全一致, 只是之后走 cancel_attest 非 close_attest)。
+  const psState = await consolidateAndBuildPsState(marketId, ps, ctx);
 
   // 3. settle (close + threaded claim·已证)
   const ctx2 = { ...ctx, psState: () => psState };
@@ -341,4 +346,5 @@ export function startSettleDaemonCron() {
   settleDaemonTick().catch(e => log(`startup tick: ${e.message}`));   // immediate first tick
 }
 export function stopSettleDaemonCron() { if (_timer) { clearInterval(_timer); _timer = null; } }
-export { selectRipeMarkets, settleOneMarket, judgeWinDir };
+async function ensureReady() { _k = await kaspa(); if (!_pkMap) await buildPkMap(); }
+export { selectRipeMarkets, settleOneMarket, judgeWinDir, buildCtx, consolidateAndBuildPsState, ensureReady };

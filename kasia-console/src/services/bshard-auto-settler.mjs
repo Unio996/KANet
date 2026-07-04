@@ -296,4 +296,203 @@ function splicePayoutContinuation(inputRedeemHex, newState, stateStart = 1) {
   return Buffer.concat([redeem.slice(0, stateStart), sb, redeem.slice(stateStart + sb.length)]).toString('hex');
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════════
+// ABSTAIN 退款路 (J2, 2026-07-04, Bettor 拍板"补漏·接通已有 covenant 能力"·非新造机制)。
+//
+// 背景: PayoutShard.sil 的 cancel_attest/refund_claim entry 早就存在(镜像 close_attest/claim,
+//   committee 4-of-5 背书 refundRoot, closed 0→2 write-once, 之后 bettor 各自 refund_claim 拿回原始
+//   stake) — relay 层 unlockBshardCancelAttest/unlockBshardRefundClaim(p2sh.mjs) 也早就实现好了,
+//   只是 driver(bshard-settle-daemon.mjs) 从没调用过, ABSTAIN 目前只 re-judge 不退款。这里补上 driver
+//   编排层(计算 + build/sign/submit + claim 循环), 结构完全镜像 computeSettlePlan/settleMarketLive,
+//   唯一本质区别: 退款不需要 judgeWinDir(谁赢), 每个 bettor 拿回自己那笔的原始 stake, leaf 公式跟
+//   payoutLeaf 相同(blake2b(pk‖ser(amount,8))), 因为 PayoutShard.sil 的 refund_claim 用同一个哈希式
+//   (line 343: blake2b(bettorPk‖ser(refund,8))) —— 复用 pool-payout-root.mjs 的 payoutRoot/merkleProof/
+//   climbProof 零改动, 只是喂 {pk, amount: stake} 而非 {pk, amount: payout}。
+//
+// ⚠ 触发条件是命门(Bettor 2026-07-04 强调): closed 是一次性 XOR 闩(0→1 或 0→2, 互斥, 不可逆)。一旦
+//   cancel_attest 锁 closed=2, 这个市场永远不能再 close_attest 正常结算——哪怕之后 UMA/ESPN 出了真实
+//   结果也晚了。所以调用 cancelMarketLive 前, caller(daemon)必须已确认"真·永久无解"(比如连续 N 次
+//   judge 都 ABSTAIN 且已过 deadline+宽限期), 绝不能因为一次 ABSTAIN 就退款——这里只提供计算+执行原语,
+//   何时调用的判断留给 daemon 层(未来若要接自动触发, 需要额外的 abstain 计数/宽限期逻辑, 本次先只给
+//   人工/operator 可手动调用的安全原语, 触发时机判断本身可能需要更多讨论, 不在这次范围内)。
+
+/**
+ * computeRefundPlan — 纯计算 (镜像 computeSettlePlan, 无 judgeWinDir, 每个 bettor 拿回自己的 stake)。
+ * @returns {ok, reason?, isBshard, betCount, refundRoot, refunds, committee, committeeMeta,
+ *           committeePkHash, expectedCancelledAddr}
+ */
+export async function computeRefundPlan(marketId, ctx) {
+  const { db } = ctx;
+  const market = db.prepare('SELECT * FROM pool_markets WHERE id = ?').get(marketId);
+  if (!market) return { ok: false, reason: 'market 不存在' };
+
+  const { bets, betCount, poolSompi, isBshard } = getMarketBets(marketId, db);
+  if (!isBshard) return { ok: false, reason: 'non-bshard (v06/v05)·此 settler 只 bshard', isBshard: false };
+  if (betCount === 0) return { ok: false, reason: '真 0-bet, 无需退款', isBshard, betCount: 0, degenerate: true };
+
+  const logicalBets = db.prepare('SELECT COUNT(*) c FROM pool_bettor_sides WHERE market_id = ?').get(marketId).c;
+  if (logicalBets > 0) {
+    return { ok: false, reason: `commingled: logical 键有 ${logicalBets} bet·shard-only refund 会 strand·跳过挂 alert`, isBshard, commingled: true };
+  }
+
+  // 退款 leaf = 每笔 bet 原样退还自己的 stake (无需 winDir 判断, 每个 bettor 都退, 非只赢家)。
+  //   一 bet 一 leaf (同一 pk 多笔各自独立退, 跟 computePariMutuelPayout 的 winner-per-bet 惯例一致)。
+  const refundLeaves = bets.map(b => ({ pk: b.pk, amount: String(b.stake) }));
+  const refundRootHex = buildPayoutRoot(refundLeaves).toString('hex');
+
+  // committee VRF — 跟 computeSettlePlan 完全同款逻辑(确定性 seed, excludePks 含 bettor)。
+  const poolMerkleRoot = market.pool_merkle_root;
+  const endBlockHash = await ctx.endBlockHash(Number(market.deadline_daa));
+  const members = await ctx.poolMembers(poolMerkleRoot, Number(market.deadline_daa));
+  const bettorPks = [...new Set(bets.map(b => b.pk.toLowerCase()))];
+  const excludePks = [String(market.maker_pk).toLowerCase(), String(market.broker_pk).toLowerCase(), ...bettorPks];
+  const seed = deriveCommitteeSeed(marketId, endBlockHash, poolMerkleRoot);
+  const sel = selectCommittee(members, seed, { excludePks });
+  const asc = [...sel.selected].map(c => c.pk_hex).sort();
+  const committeePkHash = Buffer.from(blake2b(Buffer.concat(asc.map(p => Buffer.from(p, 'hex'))), { dkLen: 32 })).toString('hex');
+  const tree = buildPoolMerkleTree(members.map(m => m.pk_hex));
+  const committeeMeta = asc.map(pk => {
+    const idx = tree.sortedPks.indexOf(pk);
+    return { pk_hex: pk, idx, siblings_hex: getPoolMerkleProof(tree, idx).map(b => b.toString('hex')) };
+  });
+
+  // predicted cancelled-PS 地址 (closed=2, payoutRoot 槽复用装 refundRoot·driver enforce 应锚地址)。
+  const psRow = db.prepare('SELECT pool_merkle_root, predicate_commit FROM payout_shards WHERE logical_market_id = ?').get(marketId);
+  let expectedCancelledAddr = null;
+  if (psRow) {
+    const consolidatedPool = (BigInt(poolSompi) + BigInt(ctx.psSeedSompi ?? 20000000)).toString();
+    const cancelledRedeem = compilePayoutShardRedeem({ poolMerkleRoot: psRow.pool_merkle_root, predicateCommit: psRow.predicate_commit, consolidatedPool, closed: 2, payoutRoot: refundRootHex });
+    expectedCancelledAddr = ctx.p2shAddr ? ctx.p2shAddr(cancelledRedeem) : null;
+  }
+
+  return {
+    ok: true, isBshard, betCount, refundRoot: refundRootHex, refunds: refundLeaves,
+    poolSompi, committee: asc, committeeMeta, committeePkHash, expectedCancelledAddr,
+    _dbg: { seed: seed.toString('hex'), endBlockHash, poolMerkleRoot, memberCount: members.length, excludePks },
+  };
+}
+
+/**
+ * refundClaimData — 每个 refund 的 depth-10 merkle proof (refund_claim 用·climb 自核)。
+ *   镜像 winnerClaimData 一字不动的逻辑(叶子公式相同, 只是语义是"退款"非"派彩")。
+ */
+export function refundClaimData(refunds) {
+  const root = buildPayoutRoot(refunds).toString('hex');
+  return refunds.map((r, idx) => {
+    const leaf = payoutLeaf(r.pk, r.amount);
+    const sibs = merkleProof(refunds, idx);
+    const climbed = climbProof(leaf, idx, sibs).toString('hex');
+    return { pk: r.pk, amount: r.amount, merkle_index: idx, siblings_hex: sibs.map(s => s.toString('hex')), climbOk: climbed === root };
+  });
+}
+
+/**
+ * cancelMarketLive — relay 驱动编排 (build cancel_attest→enforce→sign→assemble→submit→refund_claim 循环)。
+ *   镜像 settleMarketLive 逐步骤, 换 bshard_close_attest→bshard_cancel_attest / bshard_payout_claim→
+ *   bshard_refund_claim / new_payout_root→new_refund_root / closed:1→closed:2。
+ *   ⚠ caller(daemon)必须已确认触发条件成立(见上方注释)才调用此函数——本函数自身不判断"该不该退款",
+ *   只负责"确认要退时, 安全地把钱退回去"。
+ */
+export async function cancelMarketLive(marketId, ctx) {
+  const plan = await computeRefundPlan(marketId, ctx);
+  if (!plan.ok) { ctx.alert?.(marketId, `refund plan: ${plan.reason}`); return { ok: false, skipped: true, reason: plan.reason, plan }; }
+  if (ctx.dryRun) return { ok: true, dryRun: true, plan };
+
+  const ps = await ctx.psState(marketId);
+  if (!ps?.outpointTxid || !ps?.redeem_hex) { ctx.alert?.(marketId, 'PS 未 consolidate / psState 缺'); return { ok: false, reason: 'no consolidated PS' }; }
+
+  const state = { consolidated_pool: String(ps.consolidatedPool), closed: 0, payoutRoot: ZERO32 };
+  for (let i = 0; i < 17; i++) state['w' + i] = 0;
+  const fee = await ctx.feeUtxo();
+  const baseInputs = { payoutshard: { redeem_hex: ps.redeem_hex, outpointTxid: ps.outpointTxid, index: ps.index ?? 0, state }, fee };
+  const baseWitness = { self_out_idx: 0, new_refund_root: plan.refundRoot, committee_pk_hash: plan.committeePkHash };
+
+  // 1. BUILD cancel_attest (committee:[] → preimage + unSafeJson)
+  const buildRes = await ctx.relayPost(ctx.feeRelay.id, {
+    type: 'bshard_cancel_attest', witness: { ...baseWitness, committee: [] },
+    inputs: baseInputs, outputs: { change_address: ctx.feeRelay.address },
+  });
+  if (buildRes?.error || !buildRes?.unSafeJson) { const detail = buildRes?.error || 'no unSafeJson'; ctx.alert?.(marketId, `cancel build fail: ${detail}`); return { ok: false, reason: `build fail: ${detail}` }; }
+
+  // 2. driver enforce 硬闸 (命门·同 close_attest 同款逻辑, 换成 cancelled 地址)
+  if (buildRes.psContAddress !== plan.expectedCancelledAddr) {
+    ctx.alert?.(marketId, `🔴 enforce FAIL (cancel): build psContAddress ${buildRes.psContAddress} != expected ${plan.expectedCancelledAddr} — NO submit`);
+    return { ok: false, reason: 'enforce mismatch (driver-side 硬闸)' };
+  }
+  const unSafeJson = buildRes.unSafeJson;
+
+  // 3. SIGN per committee (同 close_attest 同款: 4-of-5 各自签同一 unSafeJson)
+  const sigs = {};
+  for (const m of plan.committeeMeta) {
+    const relayId = ctx.pkToRelay(m.pk_hex);
+    if (!relayId) continue;
+    try {
+      const r = await ctx.relayPost(relayId, { type: 'sign_input_for_settle', tx_hex: unSafeJson, input_index: 0, safe_json: true });
+      if (r?.signature && r.signature.length === 132) sigs[m.pk_hex] = r.signature;
+    } catch { /* skip·下个 */ }
+  }
+  if (Object.keys(sigs).length < QUORUM) { ctx.alert?.(marketId, `< 4-of-5 sig (cancel, got ${Object.keys(sigs).length})`); return { ok: false, reason: '委员缺席 < 4-of-5' }; }
+
+  // 4. ASSEMBLE + 自核 committee_pk_hash
+  const committee5 = plan.committeeMeta.map(m => ({ pk_hex: m.pk_hex, sig_hex: sigs[m.pk_hex] || COMMITTEE_DUMMY_SIG, idx: m.idx, siblings_hex: m.siblings_hex }));
+  const cph = Buffer.from(blake2b(Buffer.concat(committee5.map(c => Buffer.from(c.pk_hex, 'hex'))), { dkLen: 32 })).toString('hex');
+  if (cph !== plan.committeePkHash) { ctx.alert?.(marketId, `🔴 assemble committee_pk_hash ${cph} != plan ${plan.committeePkHash} (cancel)`); return { ok: false, reason: 'committee_pk_hash 自核失败' }; }
+
+  // 5. SUBMIT cancel_attest
+  const submitRes = await ctx.relayPost(ctx.feeRelay.id, {
+    type: 'bshard_cancel_attest', witness: { ...baseWitness, committee: committee5 },
+    inputs: baseInputs, outputs: { change_address: ctx.feeRelay.address },
+  });
+  if (submitRes?.error || !submitRes?.txId) { const detail = submitRes?.error || 'no txId'; ctx.alert?.(marketId, `cancel submit fail: ${detail}`); return { ok: false, reason: `submit fail: ${detail}` }; }
+  const cancelTxid = submitRes.txId;
+
+  // 6. NO TX NO STATE: verify cancel LANDED (cancelled PS @ 应锚地址·value==consolidatedPool 不变)
+  const landed = await verifyClosedLanded(ctx, plan.expectedCancelledAddr, cancelTxid, ps.consolidatedPool);
+  if (!landed) { ctx.alert?.(marketId, `cancel ${cancelTxid} 未 verify LANDED (NO TX NO STATE)`); return { ok: false, reason: 'cancel not landed', cancelTxid }; }
+
+  // 7. REFUND_CLAIM per bettor (镜像 claim 循环, closed==2, bshard_refund_claim, 同款 thread 逻辑)。
+  const claimData = refundClaimData(plan.refunds);
+  let psOutTxid = cancelTxid, psOutIdx = 0;
+  let curPool = BigInt(ps.consolidatedPool);
+  let curState = { consolidated_pool: curPool.toString(), closed: 2, payoutRoot: plan.refundRoot };
+  for (let i = 0; i < 17; i++) curState['w' + i] = 0;
+  let curRedeem = compilePayoutShardRedeem({ poolMerkleRoot: ps.poolMerkleRoot, predicateCommit: ps.predicateCommit, consolidatedPool: String(ps.consolidatedPool), closed: 2, payoutRoot: plan.refundRoot });
+  const claims = [];
+  let needsManualAttribution = false;
+  for (const cd of claimData) {
+    if (!cd.climbOk) { ctx.alert?.(marketId, `refund climb fail bettor ${cd.pk.slice(0, 8)}`); claims.push({ pk: cd.pk, amount: cd.amount, error: 'climb fail' }); needsManualAttribution = true; continue; }
+    const bettorAddr = ctx.p2pkAddr(cd.pk);
+    if (ctx.p2pkSpk && ctx.p2pkSpk(bettorAddr).toLowerCase() !== ('20' + cd.pk + 'ac').toLowerCase()) {
+      ctx.alert?.(marketId, `refund P2PK round-trip fail ${cd.pk.slice(0, 8)}`); claims.push({ pk: cd.pk, amount: cd.amount, error: 'round-trip fail' }); needsManualAttribution = true; continue;
+    }
+    const claimRes = await ctx.relayPost(ctx.feeRelay.id, {
+      type: 'bshard_refund_claim',
+      witness: { self_out_idx: 1, refund_out_idx: 0, bettor_pk: cd.pk, refund: cd.amount, merkle_index: cd.merkle_index, siblings_hex: cd.siblings_hex },
+      inputs: { payoutshard: { redeem_hex: curRedeem, outpointTxid: psOutTxid, index: psOutIdx, state: curState }, fee: await ctx.feeUtxo() },
+      outputs: { refund: { address: bettorAddr }, change_address: ctx.feeRelay.address },
+    });
+    const claimTx = claimRes?.txId;
+    if (!claimTx) { ctx.alert?.(marketId, `refund submit fail ${cd.pk.slice(0, 8)}: ${claimRes?.error}`); claims.push({ pk: cd.pk, amount: cd.amount, error: claimRes?.error || 'no txId' }); break; }
+    const received = await verifyClaimLanded(ctx, bettorAddr, claimTx);
+    if (!received) {
+      ctx.alert?.(marketId, `refund not landed ${cd.pk.slice(0, 8)} — STOP threading (NO-TX-NO-STATE)`);
+      claims.push({ pk: cd.pk, amount: cd.amount, txId: claimTx, received: false, error: 'not landed' }); break;
+    }
+    const newState = { consolidated_pool: (curPool - BigInt(cd.amount)).toString(), closed: 2, payoutRoot: plan.refundRoot };
+    for (let i = 0; i < 17; i++) newState['w' + i] = curState['w' + i];
+    const word = Math.floor(Number(cd.merkle_index) / 63), bit = Number(cd.merkle_index) % 63;
+    newState['w' + word] = (BigInt(newState['w' + word]) + (1n << BigInt(bit))).toString();
+    const contRedeem = splicePayoutContinuation(curRedeem, newState);
+    if (ctx.p2shAddr && claimRes.psContAddress && ctx.p2shAddr(contRedeem) !== claimRes.psContAddress) {
+      ctx.alert?.(marketId, `refund continuation splice mismatch ${cd.pk.slice(0, 8)} — STOP threading`);
+      claims.push({ pk: cd.pk, amount: cd.amount, txId: claimTx, received, error: 'splice mismatch' }); break;
+    }
+    claims.push({ pk: cd.pk, amount: cd.amount, txId: claimTx, received });
+    psOutTxid = claimTx; psOutIdx = 1; curPool = curPool - BigInt(cd.amount); curState = newState; curRedeem = contRedeem;
+  }
+  const complete = claims.length === claimData.length && claims.every(c => c.received === true && !c.error);
+  if (!complete) ctx.alert?.(marketId, `refund 未完整: attempted=${claims.length}/${claimData.length}, received=${claims.filter(c => c.received === true && !c.error).length} — needs_manual_refund${needsManualAttribution ? ' + needs_manual_attribution' : ''}`);
+  return { ok: true, cancelTxid, claims, plan, complete, needsManualAttribution };
+}
+
 export { COMMITTEE_DUMMY_SIG, QUORUM, ZERO32, splicePayoutContinuation };
