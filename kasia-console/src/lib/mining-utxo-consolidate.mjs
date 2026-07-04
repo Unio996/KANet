@@ -16,7 +16,16 @@
 
 import { sendCommandAsync } from '../services/relay-manager.js';
 
-const TICK_INTERVAL_MS = Number(process.env.MINING_CONSOLIDATE_TICK_MS) || 30 * 60_000; // 30min default (Bettor #5zm2y2)
+// Bettor #609yos keep-up soundness catch (2026-07-04): consolidateUtxosRelay already internally loops
+// across as many Generator compound rounds as needed to fully merge whatever it fetches (utxo-split.mjs
+// L263-268 while loop) — one call handles unbounded ROUND count. The real constraint is the single
+// getUtxosByAddresses FETCH at the start of that call (utxo-split.mjs L184): it must stay far below the
+// 2.947M count that crashes the wasm client. Math: mining ≈230 coinbase UTXO/min (KANet-UI #5e04ny
+// measurement). A 30min tick would let ~6900 accumulate before each fetch — no confirmed crash threshold
+// exists below 2.947M (546 is the largest empirically-tested clean fetch in this codebase, utxo-split.mjs
+// L232), so 6900 is unverified territory this close to a launch-critical path. 5min tick caps accumulation
+// at ~1150/cycle — solidly inside known-safe order of magnitude, ~2600x below the crash point.
+const TICK_INTERVAL_MS = Number(process.env.MINING_CONSOLIDATE_TICK_MS) || 5 * 60_000; // 5min (revised from initial 30min per keep-up math)
 const STARTUP_GRACE_MS = 60_000;
 const MIN_FRAGMENTS = Number(process.env.MINING_CONSOLIDATE_MIN_FRAGMENTS) || 20; // don't bother consolidating below this count
 
