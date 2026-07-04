@@ -197,6 +197,13 @@ export async function consolidateUtxosRelay(opts = {}) {
     //   ⚠ 与 pollMs 耦合: 若 KANet-UI 给 pending-bet 加快轮询(2-5s·治本+真人 UX)→ 窗口降到 ~30-50 块·DEFRAG_MIN_DEPTH
     //   可降到 ~60(env 设)。高默认 fund-safe(只是 defrag 少合并 <40s 的 young·健康 relay 大块多·无碍)。
     const DEFRAG_MIN_DEPTH = Number(process.env.DEFRAG_MIN_DEPTH) || 400;
+    // #34 (KANet-UI/NWT/Bettor 2026-07-04, qzdh7nar 实证): consolidate 试图花未成熟 coinbase 被 RPC 拒
+    // ('ImmatureCoinbaseSpend')。根因: rusty-kaspa consensus 层 coinbase_maturity = BPS×100s，testnet-12
+    // 跟 mainnet 同用 10 BPS → 1000 DAA-score 深度(consensus/core/src/config/{bps.rs,constants.rs}，
+    // enforced at transaction_validator/tx_validation_in_utxo_context.rs)。DEFRAG_MIN_DEPTH=400 是给
+    // #28 保护 in-flight bettor 付款设的，从没考虑过 coinbase 成熟度，400 < 1000 完全不够。coinbase 类
+    // UTXO 单独用更严格阈值(留安全余量)，非 coinbase(bettor 付款等)维持原 400 不退化 #28 保护。
+    const COINBASE_MIN_DEPTH = Number(process.env.COINBASE_MIN_DEPTH) || 1050; // 1000 协议要求 + 50 余量
     let entries;
     try {
       const dag = await rpc.getBlockDagInfo();
@@ -204,7 +211,9 @@ export async function consolidateUtxosRelay(opts = {}) {
       entries = entries0.filter((e) => {
         const bds = e.blockDaaScore ?? e.utxoEntry?.blockDaaScore ?? e.entry?.blockDaaScore ?? e.entry?.utxoEntry?.blockDaaScore;
         if (bds == null) return false;                          // 无 blockDaaScore → 不合并(age 未知·安全不碰)
-        return (vdaa - Number(bds)) >= DEFRAG_MIN_DEPTH;        // 只合并 depth≥阈值的老 UTXO; young(含 bet 付款)跳过
+        const isCoinbase = e.isCoinbase ?? e.utxoEntry?.isCoinbase ?? e.entry?.isCoinbase ?? e.entry?.utxoEntry?.isCoinbase ?? false;
+        const minDepth = isCoinbase ? COINBASE_MIN_DEPTH : DEFRAG_MIN_DEPTH;
+        return (vdaa - Number(bds)) >= minDepth;                // coinbase 用更严格阈值; 非 coinbase(bet 付款等) 维持原 400
       });
     } catch (e) {
       // getBlockDagInfo 失败 → 跳过本轮 consolidate(不冒险合并 young 付款·下轮重试)。
