@@ -562,6 +562,12 @@ else { console.log('[claimAuto] disabled via BETTOR_REFUND_CLAIM_ENABLED=0 (J1 C
 import { startAutoBetterCron } from './services/pool-auto-better.js';
 startAutoBetterCron();
 
+// #42 (Bettor 2026-07-04 头号2, qzdh7nar 判断源 + KANet-UI 下注执行): house agent 公开判断+真押
+// 世界杯淘汰赛盘("击败 Agent" 玩法), 单一固定身份(HouseAgent relay), 每盘只押一次(去重), 方向来自
+// judgeWinDir 同源判断(非独立复刻)。env: HOUSE_AGENT_TICK_MS (5min default), HOUSE_AGENT_STAKE_KAS (20).
+import { startHouseAgentCron } from './services/pool-house-agent.js';
+startHouseAgentCron();
+
 // J1 #27d (Owner public-testnet hardening sprint 2026-06-14): boot catch-up for market_publishes
 // missed by in-mem chunk reassembly (LRU-evicted under sign_req re-broadcast flood, or lost across a
 // restart). Rebuilds pre-restart misses from the DURABLE broadcast_messages store (idempotent: the
