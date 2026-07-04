@@ -24,6 +24,7 @@ import { extractStructuredFields } from '../lib/oracle-evidence-extractors.mjs';
 import { makeCtfReader } from '../lib/uma-ctf-reader.mjs';   // #20 UMA: polymarket 盘读链上 CTF 判定 (P1 binding-verified 30/30·Bettor)
 import { recordShadowJudgment, registerDomainJudge } from '../lib/oracle-shadow-ledger.mjs';   // #26 自我进化: 影子台账(我们 oracle vs 权威·纯记录·永不碰结算·Owner 2026-06-30)
 import { espnSportsJudge } from '../lib/nwt-espn-sports-judge.mjs';   // NWT域判v1: polymarket体育盘ESPN独立判
+import { classifyFailure, shouldKeepStatus } from '../lib/bshard-failure-classifier.mjs';   // #49 模块①
 registerDomainJudge(espnSportsJudge);
 
 const CONSOLE = process.env.SETTLE_DAEMON_CONSOLE_BASE || 'http://127.0.0.1:3200';
@@ -219,22 +220,34 @@ const RETRY_BASE_DELAY_MS = 2000;
 const _sleepRetry = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function settleOneMarket(marketId) {
+  // #49 模块① (2026-07-04, docs/2026-07-04-daemon-error-handling-modular-design.md v2):
+  // 分类需要 market 行(BUSINESS_PENDING 判定要看 outcome_market_source)——读一次, 便宜(单行 PK 查询),
+  // 供本函数末尾分类使用。注意: 这是"读取失败原因用的辅助信息", 不是结算逻辑本身, 读不到也不阻断。
+  const marketRow = sqlite.prepare('SELECT outcome_market_source FROM pool_markets WHERE id = ?').get(marketId);
   let lastResult = null;
   for (let attempt = 1; attempt <= RETRY_MAX_ATTEMPTS; attempt++) {
     // consolidateAllShards 内部可能直接 throw(非 {ok:false} 返回形态)——统一收口成同形状, 否则瞬态异常
     // (如 landed() polling 超时/transfer RPC 失败)会绕过下面的白名单分类直接冒泡崩掉整个 tick。
     try { lastResult = await _settleOneMarketAttempt(marketId); }
-    catch (e) { lastResult = { ok: false, reason: e.message || String(e) }; }
+    catch (e) { lastResult = { ok: false, reason: e.message || String(e), _rawError: e }; }
     if (lastResult.ok) return lastResult;
     const reason = String(lastResult.reason || '');
-    if (!TRANSIENT_RE.test(reason)) return lastResult;   // non-transient (business/security) → fail fast, no retry
+    if (!TRANSIENT_RE.test(reason)) break;   // non-transient (business/security/code-bug) → fail fast, classify below, no more retry
     if (attempt === RETRY_MAX_ATTEMPTS) break;
     const delay = RETRY_BASE_DELAY_MS * attempt;   // 2s, 4s (linear backoff, bounded — this is a settle daemon tick, not a hot loop)
     log(`${marketId.slice(-8)} 瞬态失败(${attempt}/${RETRY_MAX_ATTEMPTS}): ${reason.slice(0, 80)} — 退避 ${delay}ms 重试`);
     await _sleepRetry(delay);
   }
-  log(`${marketId.slice(-8)} 瞬态重试耗尽(${RETRY_MAX_ATTEMPTS}次) — 标 settle_failed: ${String(lastResult.reason || '').slice(0, 80)}`);
-  return lastResult;
+  // #49 模块①: 分类最终失败原因, 附在返回值里供 settleDaemonTick 决定要不要覆盖 protocol_status。
+  //   注意: lastResult.reason 是字符串(经过 `plan throw: ${e.message}` 这类包装), classifyFailure
+  //   的 instanceof 检查用 lastResult._rawError(若有, 未被包装过的原始异常对象); 若 _settleOneMarketAttempt
+  //   走的是正常 return {ok:false, reason} 路径(非 throw), 没有原始异常对象, classifyFailure 退化成
+  //   只靠字符串正则判断(仍然安全, 只是 instanceof 那层结构化判定用不上)。
+  const classification = classifyFailure(lastResult._rawError || new Error(String(lastResult.reason || '')), marketRow, TRANSIENT_RE);
+  if (String(lastResult.reason || '').match(TRANSIENT_RE)) {
+    log(`${marketId.slice(-8)} 瞬态重试耗尽(${RETRY_MAX_ATTEMPTS}次): ${String(lastResult.reason || '').slice(0, 80)} — 分类=${classification.type}`);
+  }
+  return { ...lastResult, classification };
 }
 
 // per-market: consolidate (if needed) → settle → writeback。failure → settle_failed flag。
@@ -355,13 +368,30 @@ export async function settleDaemonTick() {
         log(`settling ${market.id.slice(-8)} betCount=${betCount} shards=${multiShard || 1}`);
         const r = await settleOneMarket(market.id);
         if (!r.ok) {
+          // #49 模块① (2026-07-04, NWT 抓到的关键接线缺口·实现清单第一个验证点): 原来这里
+          // 无条件写 settle_failed, 完全不看 classifyFailure 算出的分类——分类器写了但没接通,
+          // 等于没做(#25/KI-49 同源模式)。现在: CODE_BUG/UNCLASSIFIED/TRANSIENT(重试已耗尽)
+          // 都 shouldKeepStatus===true, 跳过 UPDATE(不武断覆盖状态), 只走告警; 只有真正确认的
+          // 失败(needsRolling 或分类结果不要求保留状态)才改 protocol_status。
           const flag = r.needsRolling ? 'needs_rolling' : 'settle_failed';   // needs_rolling=>1024·待 task#18·非错
-          try { sqlite.prepare('UPDATE pool_markets SET protocol_status = ? WHERE id = ?').run(flag, market.id); } catch {}
-          log(`🔴 ${market.id.slice(-8)} → ${flag} (operator review): ${r.reason}`);
+          const keep = !r.needsRolling && r.classification && shouldKeepStatus(r.classification);
+          if (keep) {
+            log(`🟡 ${market.id.slice(-8)} 失败但保留状态(分类=${r.classification.type}, 不误标 settle_failed): ${r.reason}`);
+          } else {
+            try { sqlite.prepare('UPDATE pool_markets SET protocol_status = ? WHERE id = ?').run(flag, market.id); } catch {}
+            log(`🔴 ${market.id.slice(-8)} → ${flag} (operator review): ${r.reason}`);
+          }
         }
       } catch (e) {
-        log(`🔴 ${market.id.slice(-8)} settle threw: ${e.message}`);
-        try { sqlite.prepare("UPDATE pool_markets SET protocol_status = 'settle_failed' WHERE id = ?").run(market.id); } catch {}
+        // 同款分类(这里的 e 是 settleOneMarket 本身抛出的意外异常, 不是 _settleOneMarketAttempt 内部
+        // 已经收口过的 {ok:false} 形态——理论上少见, 但同样不该无条件武断标 settle_failed)。
+        const classification = classifyFailure(e, market, TRANSIENT_RE);
+        if (shouldKeepStatus(classification)) {
+          log(`🟡 ${market.id.slice(-8)} settle threw 但保留状态(分类=${classification.type}): ${e.message}`);
+        } else {
+          log(`🔴 ${market.id.slice(-8)} settle threw: ${e.message}`);
+          try { sqlite.prepare("UPDATE pool_markets SET protocol_status = 'settle_failed' WHERE id = ?").run(market.id); } catch {}
+        }
       } finally { _leases.delete(market.id); }
     }
   } catch (e) { log(`tick error: ${e.message}`); }
