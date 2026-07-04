@@ -37,10 +37,13 @@ export async function relayHealthMonitorTick() {
   if (running) return { skipped: true };
   running = true;
   try {
+    // 2026-07-04 (查漏补缺·qzdh7nar/KANet-UI): 原 INNER JOIN adapter_nodes 把没绑 adapter 的 relay
+    // 排除在健康监控外——但 startRelay()(relay-manager.js) 本身用 LEFT JOIN，压根不需要 adapter 才能跑。
+    // 这条件比实际需求严，导致无 adapter 的 relay 被孤儿化(挂了没人重启)。#34 挖矿 relay today 撞过这个坑
+    // (临时靠手动绑 adapter 绕过，根没修)。改成不要求 adapter，跟 startRelay() 的资格条件对齐。
     const eligible = sqlite.prepare(`
       SELECT r.id, r.name
       FROM relay_nodes r
-      JOIN adapter_nodes a ON a.id = r.adapter_node_id
       WHERE r.address IS NOT NULL
         AND (r.mnemonic_encrypted IS NOT NULL OR r.privkey_encrypted IS NOT NULL)
     `).all();
