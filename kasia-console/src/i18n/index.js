@@ -773,7 +773,9 @@ const T = {
 export function parseLang(cookieHeader = '') {
   const m = (cookieHeader || '').match(/kanet_lang=([a-z]{2})/);
   const l = m?.[1];
-  return (l && T[l]) ? l : 'zh';
+  // Owner 2026-07-04 抓 (:3200 中英混搭): 首访(无 kanet_lang cookie)默认 EN, 非 ZH。
+  // ZH 用户 /lang 切一次即落 cookie, 后续访问按 cookie 走 (此默认只影响首访)。
+  return (l && T[l]) ? l : 'en';
 }
 
 export function isRtl(lang) { return RTL.has(lang); }
