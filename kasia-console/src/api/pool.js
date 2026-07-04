@@ -974,6 +974,25 @@ export async function registerPoolRoutes(fastify) {
       return reply.code(400).send({ ok: false, error: `outcome_end_date must be <= now + ${maxDeadlineDay} days` });
     }
     const deadline = Math.floor(outcomeEndMs / 1000);
+
+    // #35/G1 pre-flight gate (J2, 2026-07-04, Bettor 决策·opt-in 非全局强制): 只在 caller 显式传
+    // b.preflight_check 时才跑三项核对(镜像源逻辑等价/deadline充足/judge时机)——create-v07 是全体
+    // v0.7 建市 chokepoint(polymarket 镜像盘/ESPN spread-total 盘等都走这条路), 这些市场类型没有
+    // "镜像源逻辑等价"这个概念, 强制跑会误伤。只有世界杯 advance/win 盘(本 cron)主动传入这个字段
+    // 才受 gate 约束, 其它建市路径零影响(向后兼容)。
+    if (b.preflight_check) {
+      try {
+        const { runPreflightGate } = await import('../lib/pool-preflight-gate.mjs');
+        const gateResult = runPreflightGate(b.preflight_check);
+        if (!gateResult.pass) {
+          const failed = Object.entries(gateResult.checks).filter(([, c]) => !c.pass).map(([k, c]) => `${k}: ${c.reasons.join('; ')}`);
+          return reply.code(409).send({ ok: false, error: `preflight gate failed: ${failed.join(' | ')}`, preflight: gateResult });
+        }
+        b._preflightGateResult = gateResult; // 建市成功后落 metadata (下方 writeback 处读取)
+      } catch (e) {
+        return reply.code(500).send({ ok: false, error: `preflight gate check threw: ${e.message}` });
+      }
+    }
     // v0.7 SS refund_maker_unjoined L370-373 uses fee 范围 [MIN_FEE=50_000, MAX_FEE=100M]. ctor
     // minerFee 仍 in ctor for backward compat / settle entry but refund 不读. 5M floor 仍 safe
     // (= L284-285 ctor validate 0<minerFee<1e8, 5M 通过) + 不打架 (R241 verify, Bettor ack).
@@ -1068,6 +1087,7 @@ export async function registerPoolRoutes(fastify) {
         v07_shard_id: shard_id,
         v07_shard_count: shard_count,
         v07_market_id_hash: market_id_hash,
+        ...(b._preflightGateResult ? { preflight: b._preflightGateResult } : {}),
       });
       sqlite.prepare(`INSERT INTO pool_markets (
         id, maker_relay_id, maker_pk, spine_p2sh, spine_lock_tx, market_metadata_hash,

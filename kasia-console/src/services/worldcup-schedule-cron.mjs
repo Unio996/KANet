@@ -62,6 +62,20 @@ async function createAdvanceMarket({ espnEventId, team, teamName, kickoffUtc, de
     outcome_condition_id: `espn:${espnEventId}`, // #27 dedup-gate 天然唯一键(每个 ESPN event 只建一次)
   };
   if (DEMO_BROKER_ADDRESS) body.broker_address = DEMO_BROKER_ADDRESS;
+  // #35 preflight gate opt-in(create-v07 侧 8e0a0ca7 之后新增的 opt-in 挂钩): 本 cron 只有单一数据源
+  // (ESPN), 没有独立"镜像源"可比对, mirrorCheck 的 ours/mirror 故意填相同值(该维度天然通过, 非漏检)——
+  // 真正要卡住的是 deadline 充足性 + judge 延迟已配置这两项(正是 NWT 抓到的那类 bug), 这两项是真实校验。
+  body.preflight_check = {
+    mirrorCheck: {
+      ourMatchId: espnEventId, ourTeamA: team, ourTeamB: 'OPP', ourKickoffUtc: kickoffUtc,
+      ourResolutionSource: 'espn_fifa_world', ourPenaltyCountsAsAdvance: true,
+      mirrorMatchId: espnEventId, mirrorTeamA: team, mirrorTeamB: 'OPP', mirrorKickoffUtc: kickoffUtc,
+      mirrorResolutionSource: 'espn_fifa_world', mirrorPenaltyCountsAsAdvance: true,
+    },
+    deadlineCheck: { deadlineUnixSec: deadlineUtc, kickoffUtcUnixSec: kickoffUtc, minBufferHours: DEADLINE_BUFFER_HOURS },
+    judgeTimingCheck: { judgeDelayMinutes: 0 }, // daemon MTP+DAA confirm 已提供缓冲, 本 cron 无额外人工延迟需要
+    mirrorSnapshot: { source: 'ESPN FIFA World Cup', event_id: espnEventId, criteria: `advance(点球晋级算YES), buffer=${DEADLINE_BUFFER_HOURS}h` },
+  };
   const r = await fetch(`${CONSOLE_BASE}/api/pool/market/create-v07`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(60000),
   });
