@@ -129,7 +129,7 @@
             <div class="flex items-center justify-between text-xs py-1 border-b border-warm-100">
               <span class="font-mono text-ink-500" x-text="m.id.slice(0, 22) + '…'"></span>
               <span class="flex items-center gap-3">
-                <span class="text-ink-400" x-text="m.status"></span>
+                <span class="text-ink-400" x-text="statusLabel(m.status)"></span>
                 <span class="tabular-nums" :class="m.pnl_kas == null ? 'text-ink-300' : (parseFloat(m.pnl_kas) < 0 ? 'text-red-600' : 'text-emerald-700')"
                       x-text="m.pnl_kas == null ? ('押 ' + fmtKas(m.stake_kas)) : fmtSignedKas(m.pnl_kas)"></span>
               </span>
@@ -161,6 +161,26 @@ function makerHome() {
       const x = parseFloat(n);
       if (!Number.isFinite(x)) return '0';
       return (x >= 0 ? '+' : '') + x.toFixed(4);
+    },
+    // 查漏补缺(2026-07-04): 之前裸显 protocol_status 原始枚举给 maker——broker-home.eta/my-markets.eta
+    // 早有同一套翻译, 这里没有(kanet-maker.js by_market 的 m.status 就是 protocol_status 原值)。
+    statusLabel(s) {
+      const m = {
+        pending_oracle_deposits: '等仲裁人接单',
+        pending_oracle_sampling: '抽仲裁人中',
+        pending_oracle_sample: '抽仲裁人中',
+        pending_bettors: '押注中',
+        verifying: '等仲裁人投票',
+        collecting_sigs: '收仲裁人签名',
+        completed: '已结算',
+        cancelled: '已取消',
+        refunded: '已退款',
+        settle_failed: '结算重试中',
+        needs_manual_attribution: '结算核对中',
+        settled_partial_claims: '已结算·部分待领',
+        shard_internal: '押注中',
+      };
+      return m[s] || s || '?';
     },
 
     async init() {

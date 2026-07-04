@@ -273,7 +273,7 @@
                   <div class="flex-1 min-w-0">
                     <div class="text-ink-700 truncate" :title="specTitle(m.resolution_rule_spec) || m.id" x-text="(specTitle(m.resolution_rule_spec) || m.id).slice(0, 64)"></div>
                     <div class="text-[10px] text-ink-400 mt-0.5">
-                      <span class="uppercase">POOL</span> · <span x-text="m.protocol_status"></span> · stake <span x-text="m.maker_stake_kas ?? '?'"></span> KAS · fee <span x-text="((m.broker_fee_pct ?? 0)/100).toFixed(2)"></span>%
+                      <span class="uppercase">POOL</span> · <span x-text="statusLabel(m.protocol_status)"></span> · stake <span x-text="m.maker_stake_kas ?? '?'"></span> KAS · fee <span x-text="((m.broker_fee_pct ?? 0)/100).toFixed(2)"></span>%
                     </div>
                   </div>
                   <button @click.stop="copyTgLink(m.id)"
@@ -286,7 +286,7 @@
                   <div class="flex-1 min-w-0">
                     <div class="text-ink-700 truncate" x-text="(o.label || o.id).slice(0, 64)"></div>
                     <div class="text-[10px] text-ink-400 mt-0.5">
-                      <span class="uppercase">RETAIL</span> · <span x-text="o.state"></span> · fee <span x-text="o.broker_fee_kas ?? '?'"></span> KAS
+                      <span class="uppercase">RETAIL</span> · <span x-text="statusLabel(o.state)"></span> · fee <span x-text="o.broker_fee_kas ?? '?'"></span> KAS
                     </div>
                   </div>
                 </div>
@@ -378,6 +378,29 @@ function brokerHome() {
     shortAddr(a) {
       if (!a) return '';
       return a.slice(0, 14) + '...' + a.slice(-6);
+    },
+    // 查漏补缺(2026-07-04): 之前裸显 protocol_status/state 原始枚举给 broker——my-markets.eta 早有
+    // 同一套翻译, 这里没复用。
+    statusLabel(s) {
+      const m = {
+        pending_oracle_deposits: '等仲裁人接单',
+        pending_oracle_sampling: '抽仲裁人中',
+        pending_oracle_sample: '抽仲裁人中',
+        pending_bettors: '押注中',
+        verifying: '等仲裁人投票',
+        collecting_sigs: '收仲裁人签名',
+        completed: '已结算',
+        cancelled: '已取消',
+        refunded: '已退款',
+        settle_failed: '结算重试中',
+        needs_manual_attribution: '结算核对中',
+        settled_partial_claims: '已结算·部分待领',
+        shard_internal: '押注中',
+        // retail_dex_orders.state (查代码确认实际值, 非猜): expired/completed/paid
+        expired: '已过期',
+        paid: '已付款',
+      };
+      return m[s] || s || '?';
     },
     copyAddr() {
       if (!this.agent?.address) return;

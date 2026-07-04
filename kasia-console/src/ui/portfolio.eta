@@ -264,7 +264,7 @@
   <div x-show="loading && !data" class="flex-1 flex items-center justify-center text-xs text-ink-400">
     <div class="text-center">
       <svg class="animate-spin w-6 h-6 mx-auto mb-2 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke-width="3" opacity="0.3"/><path d="M12 2 A10 10 0 0 1 22 12" stroke-width="3" stroke-linecap="round"/></svg>
-      正在聚合 10 个数据源 (Kaspa / 多链钱包 / Aave / Hyperliquid / Aevo / Polymarket / 交易锁定)...
+      正在聚合数据源 (Kaspa / 多链钱包 / Aave / Hyperliquid / Aevo / 交易锁定)...
     </div>
   </div>
   <div x-show="error" class="flex-1 flex items-center justify-center">
