@@ -14,6 +14,10 @@
 import { sqlite } from '../db/client.js';
 
 const MAKER_RELAY_ID = process.env.WORLDCUP_MAKER_RELAY_ID || '15593e10-fe63-4806-a7b5-cae062699de8'; // broker-1, #41/R16 已验证 maker
+// #35 demo broker 挂靠(Bettor 决策1 GO, 2026-07-04): Owner 自己的 broker 地址(地址制外部 broker,
+// 无 relay, 见 pool.js:948-961 "broker 身份=地址" 机制) — 结算时 1.6% broker fee 落这个地址,
+// 世界杯盘量产 = 生产端真实收益 demo。留空(env 不设)则 create-v07 默认 broker=maker(自 broker)。
+const DEMO_BROKER_ADDRESS = process.env.WORLDCUP_DEMO_BROKER_ADDRESS || 'kaspatest:qzhet8m2kkpxs0vu4xeylzp97m38s2n33uek6lfsq0dfec88hse8xqg7gzgdl';
 const CONSOLE_BASE = process.env.WORLDCUP_CONSOLE_BASE || 'http://127.0.0.1:3200';
 const TICK_MS = parseInt(process.env.WORLDCUP_SCHEDULE_TICK_MS, 10) || 1800000; // 30min — 非高频需求, 省资源
 const CREATE_WINDOW_HOURS = 48; // G1 §3: kickoff 前 24-48h 自动建盘
@@ -53,6 +57,7 @@ async function createAdvanceMarket({ espnEventId, team, teamName, kickoffUtc, de
     resolution_rule_spec: JSON.stringify(spec), maker_stake_kas: 100, pool_merkle_root: 'auto',
     outcome_condition_id: `espn:${espnEventId}`, // #27 dedup-gate 天然唯一键(每个 ESPN event 只建一次)
   };
+  if (DEMO_BROKER_ADDRESS) body.broker_address = DEMO_BROKER_ADDRESS;
   const r = await fetch(`${CONSOLE_BASE}/api/pool/market/create-v07`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(60000),
   });
