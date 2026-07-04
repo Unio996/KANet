@@ -358,21 +358,28 @@ export async function formatRecordCard(linkedAddr, lang = 'en') {
   if (!positions.length) return t(lang, 'record_empty');
 
   let wonCount = 0, lostCount = 0, refundedCount = 0, openCount = 0;
-  let wonStakeKas = 0, lostStakeKas = 0, payoutBackTotal = 0; // #Bettor 2026-07-04 误导bug修(同 mybets)
+  // #Bettor 2026-07-04 误导bug修(同 mybets) + follow-up 修(退款漏进 Net):
+  // wonKas 只放实际赢盘 payout(算净盈亏用), 别跟 payoutBackTotal(展示用, 含退款)混——退款是
+  // 拿回原样(净零), 混进 Net 计算会让 Net 虚高(refund stake 被当"赚到"算).
+  let wonStakeKas = 0, lostStakeKas = 0, wonKas = 0, payoutBackTotal = 0;
   const marketIds = new Set();
   for (const p of positions) {
     marketIds.add(p.market_id);
     const stake = Number(p.stake_kas) || 0;
-    if (p.settle_txid && p.did_win === true) { wonCount++; wonStakeKas += stake; payoutBackTotal += Number(p.actual_payout_kas) || 0; }
+    if (p.settle_txid && p.did_win === true) {
+      wonCount++; wonStakeKas += stake;
+      const payout = Number(p.actual_payout_kas) || 0;
+      wonKas += payout; payoutBackTotal += payout;
+    }
     else if (p.settle_txid && p.did_win === false) { lostCount++; lostStakeKas += stake; }
     else if (p.refund_txid) { refundedCount++; payoutBackTotal += stake; }
     else { openCount++; }
   }
   const decidedCount = wonCount + lostCount; // win-rate denominator: 只算真出胜负的, 退款/未决不算
   const winRatePct = decidedCount > 0 ? Math.round((wonCount / decidedCount) * 100) : null;
-  // Net 只算已结算(赢盈利-输损失), 未决仓位不计入(还在盘里非亏损) — 同 mybets 误导bug修.
+  // Net 只算已结算(赢盈利-输损失), 未决/退款仓位不计入(还在盘里/拿回原样都非亏损或盈利) — 同 mybets 误导bug修.
   const hasSettled = wonCount > 0 || lostCount > 0;
-  const netKas = (payoutBackTotal - wonStakeKas) - lostStakeKas;
+  const netKas = (wonKas - wonStakeKas) - lostStakeKas;
   const netSign = netKas >= 0 ? '+' : '';
 
   const lines = [
@@ -406,10 +413,15 @@ export async function buildMyBetsKeyboard(linkedAddr, lang = 'en') {
   const buttons = [];
   for (const p of positions) {
     if (p.settle_txid || p.refund_txid) continue;
-    if (p.deadline && p.deadline < now) continue;
+    // 查漏补缺(2026-07-04): 字段名错了(p.deadline 恒 undefined, my-positions 实际字段是
+    // deadline_unix, 见 pool.js my-positions endpoint) — 这个 guard 之前从没生效过, 过期/已截止
+    // 市场的"加注"按钮一直照常显示(点了在金额阶段才会被拦, 非资损, 但体验是死胡同)。
+    if (p.deadline_unix && p.deadline_unix < now) continue;
     if (seenMarkets.has(p.market_id)) continue;     // 已加过这市场, 跳
     seenMarkets.add(p.market_id);
-    const title = (p.question || p.market_id).slice(0, 30);
+    // 查漏补缺: p.question 是原始 resolution_rule_spec(JSON 字符串/带 URL), 之前裸用会把
+    // 内部 JSON 片段或 URL 泄漏进按钮文案 — 跟本文件其它地方一样统一走 specTitle() 清洗.
+    const title = specTitle(p.question || p.market_id).slice(0, 30) || String(p.market_id).slice(0, 30);
     buttons.push({
       market_id: p.market_id,
       label: t(lang, 'mybets_addmore', { title }),

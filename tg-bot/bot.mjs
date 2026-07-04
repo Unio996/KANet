@@ -231,7 +231,15 @@ bot.command('faucet', async (ctx) => {
     return ctx.reply(t(lang, 'faucet_cooldown', { hrs }));
   }
   const r = await api.faucetRequest(addr);
-  if (!r.ok) return ctx.reply(t(lang, 'faucet_fail', { error: r.json?.error || r.status }));
+  if (!r.ok) {
+    // 查漏补缺(2026-07-04): 服务端是【永久 1 次/钱包】上限(chat.js walletRow check), 非 24h 冷却.
+    // 之前 faucet_cooldown 文案暗示"等 24h 再试"会成功, 但已领过的钱包 24h 后再试只会撞这条永久
+    // 拒绝, 且之前直接把服务端原始英文错误字符串(混语言)透传给用户 — 现在识别这个具体 case 给清楚提示.
+    if (String(r.json?.error || '').includes('already granted')) {
+      return ctx.reply(t(lang, 'faucet_already_claimed'));
+    }
+    return ctx.reply(t(lang, 'faucet_fail', { error: r.json?.error || r.status }));
+  }
   faucetCooldown.set(tgUser, now);
   // KANet-UI 2026-06-23 (Bettor 派修): 数量不硬编——用 API 回的真值 (由 server env FAUCET_AMOUNT_KAS 定)。
   const amt = r.json.amount || 'testnet KAS';

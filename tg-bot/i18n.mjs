@@ -219,8 +219,9 @@ export const LANGS = {
 
     // /faucet
     faucet_no_link: 'First /link <your kaspatest address> or /wallet to create one, then /faucet.',
-    faucet_cooldown: 'You already claimed today — try again in about {hrs}h.',
+    faucet_cooldown: "You've already requested recently — please wait about {hrs}h before trying again.",
     faucet_fail: 'Claim failed: {error}',
+    faucet_already_claimed: "This wallet has already claimed its one-time testnet KAS grant. Each wallet gets exactly one faucet grant — link a different address if you need more testnet KAS.",
     faucet_ok: '✅ Sent {amt} to {addr}\ntx {tx}… (~10 sec to arrive)\nNext: /bet to place bets.',
 
     // /verify (deprecated)
@@ -578,8 +579,9 @@ export const LANGS = {
 
     // /faucet
     faucet_no_link: '先 /link <你的 kaspatest 地址> 绑定，再 /faucet 领测试币。',
-    faucet_cooldown: '你今天已领过测试币，约 {hrs} 小时后可再领。',
+    faucet_cooldown: '你最近已经请求过，约 {hrs} 小时后再试。',
     faucet_fail: '领取失败：{error}',
+    faucet_already_claimed: '这个钱包已经领过一次性测试币了。每个钱包只能领一次——如果还需要测试币，绑定一个不同的地址。',
     faucet_ok: '✅ 已发 {amt} 到 {addr}\ntx {tx}…（约 10 秒到账）\n下一步：/bet 开始押注。',
 
     // /verify (deprecated)
