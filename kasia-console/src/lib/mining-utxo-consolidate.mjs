@@ -40,12 +40,12 @@ function _miningRelayId() {
   return (process.env.MINING_RELAY_ID || '').trim() || null;
 }
 
-function _writeAlertEvent(eventType, summary, payload) {
+function _writeAlertEvent(eventType, summary, payload, level = 'warn') {
   try {
     sqlite.prepare(`
       INSERT INTO events (id, event_scope, event_type, source, level, summary, payload_json, created_at)
-      VALUES (?, 'system', ?, 'mining-utxo-consolidate', 'warn', ?, ?, datetime('now'))
-    `).run(randomUUID(), eventType, summary, JSON.stringify(payload));
+      VALUES (?, 'system', ?, 'mining-utxo-consolidate', ?, ?, ?, datetime('now'))
+    `).run(randomUUID(), eventType, level, summary, JSON.stringify(payload));
   } catch (e) { console.warn(`[mining-consolidate] events insert fail (non-fatal): ${e.message}`); }
 }
 
@@ -71,9 +71,11 @@ let _fetchFailAlerted = false;
 function _alertOnCommandFailure(relayId, errMessage) {
   if (_fetchFailAlerted) return; // de-dupe: one events row per stall episode
   _fetchFailAlerted = true;
+  // Bettor #60y4nx: higher severity than the count-drift warn — a thrown command means the tripwire
+  // itself may already be blind (can't read the address to know the count), so this needs 'error'.
   _writeAlertEvent('mining_consolidate_command_failure',
     `Mining address ${relayId.slice(0, 8)} consolidate_utxo command threw (${String(errMessage).slice(0, 160)}) instead of returning a result. This may mean the underlying UTXO fetch is starting to fail as the address grows — the same failure mode the 400-UTXO tripwire exists to prevent. Investigate immediately.`,
-    { relayId, error: String(errMessage).slice(0, 300) });
+    { relayId, error: String(errMessage).slice(0, 300) }, 'error');
 }
 
 export async function miningConsolidateTick() {
