@@ -2681,4 +2681,32 @@ if (isBshard) return reply.code(409).send({ ok:false, error:'bshard market: 走 
 
 ---
 
+## 规则 51 · 重构抽取 helper 函数后残留变量引用 → catch-all 把"代码 bug"误判成"业务失败"，覆写已成功的状态
+
+**触发时机**（#48, 2026-07-04, NWT 独立复核 + J2 修）: 重构时把函数体一部分抽成新的 helper 函数（如 `consolidateAndBuildPsState`），原函数体**后半段**仍引用被抽走的局部变量。
+
+### Wrong
+```javascript
+async function _settleOneMarketAttempt(marketId) {
+  // consolidateAndBuildPsState() 抽取时把 market 变量声明搬进了它的局部作用域
+  const { psState } = await consolidateAndBuildPsState(marketId, ...);
+  // ... settleMarketLive 成功、writeback 成功 ...
+  let meta = {}; try { meta = JSON.parse(market.metadata || '{}'); } catch {}   // ← market 已不在作用域
+  // ...
+  recordShadowJudgment(sqlite, { market, authorityWinDir: plan.winDir, ... }); // ← 同样引用不到
+}
+```
+结果：`ReferenceError: market is not defined` 抛在 **writeback 成功之后**（`protocol_status='completed'` 已经真的写进 DB、evidence 已经真的记完整、钱已经真的到账）。外层 G5-5a 瞬态重试包装器 `catch(e) { lastResult = { ok:false, reason: e.message } }` 把这个纯语法级异常当成"这次结算失败"，重试耗尽后把 **刚写对的 `completed` 覆盖回 `settle_failed`**——DB 状态与链上真相完全对不上，operator 会误判"这盘还没结算"去手动重新结算一个其实已经结完的盘。
+
+### Right
+1. **重构抽取时**：把被抽走变量在原函数体内**所有**引用点一起搬迁/改参数传入，不能只改前半段编译能跑通就当作测过了（JS 只在实际执行到那一行时才抛 `ReferenceError`，happy-path 测试如果没走到 shadow-ledger 那类"锦上添花"分支，看着是绿的）。
+2. **更根本的设计修**：daemon 的重试/错误处理不能把**所有**异常一视同仁当"业务失败"处理。写库前必须完成的动作（judge/consolidate/close/claim）失败 = 真业务失败，可以重试/标记；**写库成功之后**发生的异常（如可观测性/影子台账这类 non-critical 收尾代码）应该 `try/catch` **局部吞掉+记警告日志**，绝不能让它冒泡到外层，把已经正确落库的终态状态覆盖成失败态。
+
+### Why
+- 危险级比"真结算失败"更高：真失败时 DB 状态和链上状态一致（都没成），operator 能看懂要做什么；这种"假失败"是 DB 撒谎，掩盖了一个真实成功的结算，且**没有报错以外任何信号**能告诉 operator 钱其实已经到账了。
+- 本次是 fresh e2e 测试盘（8v0w1）暴露的——如果只用旧盘（如 5984o，恰好在重启前用旧 daemon 结算）验证，**这类"重启后新逻辑" bug 天生测不出**（旧盘走的是旧代码路径），配 `feedback-coverify-checklist-multidimensional`：co-verify 必须用 **fresh 场景**触发新代码路径，不能只验证旧数据能读对。
+- **不建议靠 lint-kanet.mjs 正则堵这一类**：变量作用域分析需要真正的 AST（JS 的函数提升/闭包/块作用域规则复杂），正则匹配"变量是否在作用域内声明"的误报/漏报都会很严重，本身不是 lint-kanet.mjs 定位的"KANet-specific 模式"。真正对症的工具是 **ESLint `no-undef` 规则**（本项目目前未接入 ESLint）——如果之后要引入，`no-undef` 会在 lint 阶段直接抓出这类问题，比运行时才炸出来更早。当前阶段没有 ESLint，只能靠 ①重构后跑一遍相关业务路径（不能只信语法检查/编译通过）②上面"写库后异常不覆盖终态"的设计纪律做纵深防御。
+
+---
+
 *本档案在 v2 spec 第八章元教训基础上独立。spec 聚焦"这次怎么做"，本档案聚焦"下次别再犯"。*
