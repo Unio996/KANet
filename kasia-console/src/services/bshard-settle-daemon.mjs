@@ -302,7 +302,17 @@ async function _settleOneMarketAttempt(marketId) {
       sqlite.prepare("UPDATE pool_markets SET protocol_status = ?, settle_txid = ?, metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(newStatus, r.closeTxid, JSON.stringify(meta), marketId);
       if (r.complete) sqlite.prepare("UPDATE market_shards SET status = 'settled' WHERE logical_market_id = ?").run(marketId);
     })();
-  } catch (e) { log(`${marketId.slice(-8)} writeback warn: ${e.message} (on-chain settle is truth)`); }
+  } catch (e) {
+    // #daemon-audit-② (NWT 2026-07-04 红队审计抓到): 原来这里只 log warning 就吞掉, 函数照样往下走到
+    // 最后 return{ok:true}——如果 writeback 这个 DB UPDATE 本身失败(比如 DB 锁), daemon 会**误报成功**,
+    // 但 DB 里 protocol_status 其实还停在 verifying(既不是 completed 也不是 settle_failed, 没人会去查
+    // 的诡异中间态)。链上钱是安全的(settleMarketLive 已经成功), 但这个"看起来没事但其实卡住"的假信号
+    // 比明确的 settle_failed 更危险(后者至少有 KANet-UI 的告警 monitor 能发现)。改成: 返回失败, 让外层
+    // G5-5a 重试(retry 时 settleMarketLive 会因为链上已 closed 而快速/安全地再失败一次, 最终落地 settle_
+    // failed——可见、可告警, 好过静默卡死)。
+    log(`${marketId.slice(-8)} 🔴 writeback FAIL: ${e.message} (on-chain settle 已成功但 DB 没写进去, close=${r.closeTxid.slice(0, 12)} — 不再静默吞, 走失败路径让外层能看见/重试)`);
+    return { ok: false, reason: `writeback fail: ${e.message}`, closeTxid: r.closeTxid };
+  }
   log(`${r.complete ? '✅' : '🟠'} ${marketId.slice(-8)} ${newStatus} close=${r.closeTxid.slice(0, 12)} winners=${(r.claims || []).filter(c => c.txId && c.received === true && !c.error).length}/${r.plan?.winners?.length ?? '?'}`);
 
   // 📒 影子台账 (#26 自我进化·J1·Owner 2026-06-30): 记"我们 oracle 独立判定 vs 权威判定(plan.winDir·已结钱)"。
@@ -311,11 +321,18 @@ async function _settleOneMarketAttempt(marketId) {
   //   our_oracle 当前多为 NULL(领域判 registry 空=路线图)·NWT 滚动 registerDomainJudge 后真对比 materialize。
   //   🟡 J2 forward-looking 守门: **fire-and-forget·不在 settle 路 await**——即便 NWT 域判做慢/挂的网络调用,
   //   也零拖延结算(record 内部 per-judge timeout 8s 兜底)。把"shadow 永不碰结算"延伸到"永不拖时延"。
-  if (plan.winDir === 0 || plan.winDir === 1) {
-    recordShadowJudgment(sqlite, { market, authorityWinDir: plan.winDir, settleTxid: r.closeTxid })
-      .then((s) => { if (s.recorded) log(`📒 shadow ${marketId.slice(-8)}: ${s.agree == null ? '∅无独立源(路线图)' : s.agree ? '✓我方一致' : '✗我方分歧'}${s.reason ? ' · ' + s.reason : ''}`); })
-      .catch((e) => log(`📒 shadow ${marketId.slice(-8)} skip (不影响结算): ${String(e?.message || e).slice(0, 80)}`));   // 内部已永不throw·belt-and-suspenders
-  }
+  // #daemon-audit-① (NWT 2026-07-04 红队审计抓到): 原来这行裸调用完全靠 recordShadowJudgment 内部"永不
+  // throw"的注释承诺(belt-and-suspenders 是信任假设, 不是结构性保证)——万一以后有人改内部逻辑不小心引入
+  // 同步 throw(比如访问了 market 或其它变量的属性但那个变量是 undefined, 正是 #48 撞过的那种坑), 这行本身
+  // 没有独立 try/catch 兜底, 会重演#48"结算成功之后的收尾代码抛错·被外层当整体失败"那一幕。这里加一层不
+  // 依赖被调函数承诺的独立防护。
+  try {
+    if (plan.winDir === 0 || plan.winDir === 1) {
+      recordShadowJudgment(sqlite, { market, authorityWinDir: plan.winDir, settleTxid: r.closeTxid })
+        .then((s) => { if (s.recorded) log(`📒 shadow ${marketId.slice(-8)}: ${s.agree == null ? '∅无独立源(路线图)' : s.agree ? '✓我方一致' : '✗我方分歧'}${s.reason ? ' · ' + s.reason : ''}`); })
+        .catch((e) => log(`📒 shadow ${marketId.slice(-8)} skip (不影响结算): ${String(e?.message || e).slice(0, 80)}`));   // 内部已永不throw·belt-and-suspenders
+    }
+  } catch (e) { log(`📒 shadow ${marketId.slice(-8)} sync throw caught (不影响结算, 独立防护生效): ${String(e?.message || e).slice(0, 80)}`); }
 
   return { ok: true, closeTxid: r.closeTxid, claims: r.claims };
 }
