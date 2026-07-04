@@ -656,6 +656,22 @@ owner=Bettor(框架收敛两轮)+ J2(covenant/委员/fee 三处代码实证)+ NW
 
 ---
 
+## 🔴 线：查漏补缺(Owner 2026-07-04 钦定"停新功能,梳理+补漏") — money-path 红队 + gap 清单
+### 背景
+Owner 令全队停一切新功能，转向梳理现有系统、查漏补缺。Bettor 分域：KANet-UI=用户面/bot、qzdh7nar=基础设施、J2=结算域、**NWT=红队复查 money-path(托管押注/结算payout/faucet节流/cap硬顶/签名路径)**、Bettor=协调+gap清单汇总。
+
+### #25 lint rule 落地(NWT，commit 27df4433)
+新增 `R-COMMAND-REGISTRATION` 规则：relay.mjs 的 command case 必须在 commands.mjs 三层(COMMAND_TYPES/PAYLOAD_SCHEMA/FIELD_TYPES)注册——根治 KI-49 复刻 5+ 次(sign_input_for_settle/pool_side_refund_cancelled_tx/get_per_bet_address 等历史坑)。全库跑通 0 error，warn-mode 顺手抓出 3 个历史遗留半截注册(CHAIN_GET_* 系列缺 FIELD_TYPES 条目，非新增回归)。
+
+### NWT money-path 扫描结果
+- **托管押注(custodial_transfer)**：干净。privkey just-in-time 解密+用完置 null、错误分支不 echo、AUTH 用 timing-safe 版 verifyIngestRequest。tg_user_id 取自 URL 的信任模型已被代码注释明确记录(靠 ingest-secret 非 tg_user_id 绑定)，已知边界非新洞。
+- **#21 settle_failed 102 盘诊断（NWT 独立链上核对 + J2/Bettor 三方收敛）**：canary 重试(tdz3v)揭示"closed=0 安全无双花"≠"重试能成功结算"——原始失败是 UMA judge ABSTAIN(业务层，非瞬态)，重试新失败是 `getBlockAtDaa` MAX_WALK=120000 结构性耗尽(99/102 盘因 deadline 太老、block-walk 成本 O(gap) 撞墙，非挖矿加速导致——KANet-UI/J2 纠正 Bettor 的错误归因)。定性：99 盘是历史遗留、公开不阻(新盘 deadline 在窗口内正常结)，钱安全；J1 提出"一趟摊销 backward-walk 缓存"把批量修复重新定性为补漏(非新工程)，待逐盘链验+分类(MAX_WALK/UMA-ABSTAIN/真瞬态三类分别处置)。
+- **🔴 发现 launch-critical gap：faucet 节流域无健康监控**——公开 `/api/faucet/request`(FaucetRelay-tn 7c4cb102)是真实用户第一触点，今早 G4 刚因 UTXO 碎片化/成熟度问题崩过，但当天新增的 `pool-bot-autofund.js` 只监控内部机器人 relay(AutoBetter/HouseAgent/UnderdogBot)，**完全没覆盖公开 faucet relay**——若它退化会对真实用户静默失败，无自动发现机制。KANet-UI 认领纯只读 UTXO 健康监控(复用 #34 alert 模式，不碰 consolidate 避免撞用户 transfer)。
+- **🔴🔴 发现更严重的 launch-critical gap：bshard/v0.7 盘 UMA-ABSTAIN 无退款路径**——qzdh7nar 发现 + J2 grep 验证(daemon 三文件 zero 匹配 `cancel_attest`)：PayoutShard.sil 的 `cancel_attest`/`refund_claim` 覆约原语 + kasia-relay/p2sh.mjs 的 `unlockBshardCancelAttest`/`unlockBshardRefundClaim` 交易构造器**全部已造好，但从未被 daemon/orchestration 层调用**——ABSTAIN 时只能无限重判，卡死盘的本金没有退款出口。NWT 补充机制细节(closed 一次性 XOR 闩，cancel_attest 跟 close_attest 镜像，refundRoot 复用 claim 的 merkle 机制换 leaf 内容)：钱链上确定安全(closed=0 未被锁死)，retrofit 是"接线不是重造"，J2 估时 4-6h(镜像 settleMarketLive→cancelMarketLive + refund 循环同构 claim 循环)，现在开工。**这条也回接了今天的诚实框架**："判不了原样退款(ABSTAIN)"这句诚实话，机制没接线之前讲了就是过度声称。
+- owner=Bettor(协调+拍板)+ J2(ABSTAIN-refund 实现)+ KANet-UI(faucet健康监控)+ qzdh7nar(#21基础设施配合)+ NWT(红队扫描+co-verify)。
+
+---
+
 ## 归档(已收敛旧线,留索引)
 - **scale-test backend-20**(2026-06-10):干净 demonstrate 20 并发 settle,框架 §10.2/§9.3 活案例。已收敛。
 - **tg-bot-web-user-e2e**(§14 首个受控运行):演化为线 3 可玩 demo。
