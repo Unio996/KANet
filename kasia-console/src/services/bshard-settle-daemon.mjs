@@ -244,6 +244,13 @@ async function _settleOneMarketAttempt(marketId) {
   const ctx = buildCtx();
   const ps = sqlite.prepare('SELECT * FROM payout_shards WHERE logical_market_id = ?').get(marketId);
   if (!ps) { ctx.alert(marketId, 'no payout_shards row'); return { ok: false, reason: 'no PS' }; }
+  // #48 regression fix (J2 2026-07-04 co-verify 抓到, 真实撞过一次): consolidateAndBuildPsState 抽取时
+  // 把 market 变量的声明也一起搬进了那个 helper 的局部作用域——但下方 writeback(market.metadata)和
+  // shadow ledger(收窄 { market, ... })两处仍在【本函数】里用 market, 抽取后变成 ReferenceError。危险处:
+  // 这个错发生在 settleMarketLive 成功 + writeback 成功【之后】(shadow ledger 那行), 被外层 G5-5a 重试
+  // 包装器当作整体失败, 把刚写对的 protocol_status 覆盖成 settle_failed——DB 状态跟链上真相(已结算成功)
+  // 完全对不上, 比"没结算"更危险(会让 operator 误以为要重新结算一个其实已经结完的盘)。
+  const market = sqlite.prepare('SELECT * FROM pool_markets WHERE id = ?').get(marketId);
 
   // 0. 🔴 pre-flight plan (J1 covenant gate): winners≤1024 + plan.ok 验在【动钱前】。
   //   >1024 → buildPayoutRoot 抛 → 这里 catch → skip·**不 consolidate 不动钱**(避免半结·钱留 ShardLeaf 安全)。
