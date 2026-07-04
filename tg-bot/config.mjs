@@ -19,7 +19,10 @@ export const CONFIG = {
   // (resolveOwnerVoiceRelayId below), so re-anchoring the address in /identities takes effect with no
   // restart, no env edit (mirrors resolveBrokerRelayId's DB-config-first design).
   ownerBotToken: process.env.OWNER_BOT_TOKEN || '',
-  ownerChatId: process.env.OWNER_CHAT_ID || '1437320734',
+  // 查漏补缺(2026-07-04): 没有硬编码 fallback(之前默认值是 Owner 真实 chat id, PII 泄露风险——
+  // 本文件进 git history, 面向公开仓库不合适)。未配置时 owner-bot.mjs 已有优雅降级(bridge OFF, 见
+  // 该文件 L57/L62), 所以留空不会崩, 只是 bridge 不启用。真实值移到 gitignored 的 kanet.env。
+  ownerChatId: process.env.OWNER_CHAT_ID || '',
   ownerBridgePollMs: parseInt(process.env.OWNER_BRIDGE_POLL_MS || '10000', 10), // dev-coord → Owner cadence
 };
 

@@ -242,7 +242,11 @@ bot.command('faucet', async (ctx) => {
   }
   faucetCooldown.set(tgUser, now);
   // KANet-UI 2026-06-23 (Bettor 派修): 数量不硬编——用 API 回的真值 (由 server env FAUCET_AMOUNT_KAS 定)。
-  const amt = r.json.amount || 'testnet KAS';
+  // 查漏补缺(2026-07-04): 后端 amount 字段是 "${N} testnet KAS" 英文单位写死的字符串(web faucet.eta
+  // 也在用这个字段直接显示, 不能改后端格式), 之前 ZH 模板直接拼接会显示"已发 10000 testnet KAS"这种
+  // 混语言——这里只取数字部分, 单位交给 i18n 模板自己按语言给("testnet KAS" / "测试网 KAS")。
+  const amtMatch = String(r.json.amount || '').match(/[\d.]+/);
+  const amt = amtMatch ? amtMatch[0] : String(r.json.amount || '?');
   return ctx.reply(t(lang, 'faucet_ok', { amt, addr, tx: String(r.json.txid || '').slice(0, 16) }));
 });
 
@@ -340,7 +344,11 @@ bot.command('champions', async (ctx) => {
   initLang(ctx);
   const lang = getLang(ctx);
   const r = await api.championMarkets(20);
-  if (!r.ok || !r.json?.ok) return ctx.reply(t(lang, 'champions_empty'));
+  // 查漏补缺(2026-07-04): 之前网络失败(r.ok=false)跟"确实没有冠军盘"(r.json.ok但markets=[])共用
+  // 同一条'暂无'文案——后端瞬时故障时用户会以为盘真的没了(永久性语气), 不是"再试一次"。/hot 早就
+  // 用 hot_fail 区分了这两种情况, /champions 漏做, 现在对齐.
+  if (!r.ok) return ctx.reply(t(lang, 'champions_fail'));
+  if (!r.json?.ok) return ctx.reply(t(lang, 'champions_empty'));
   const result = M.championMarkets(r.json.markets || [], lang);
   if (result.keyboard) return ctx.reply(result.text, { reply_markup: result.keyboard });
   return ctx.reply(result.text);

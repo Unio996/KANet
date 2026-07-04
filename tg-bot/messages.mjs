@@ -297,7 +297,7 @@ export function hotMarkets(markets, botUsername, lang = 'en') {
     const maxBettors = Math.max(...gMarkets.map(m => m.bettor_count || 0));
     const dl = fmtDl(gMarkets[0].deadline);
     lines.push(`${idx}. ⚽ ${matchHeader} · ${gMarkets.length} ${t(lang, 'markets_unit')}`);
-    lines.push(`   💰${totalKas.toFixed(0)} KAS · 👥${maxBettors}人${dl ? ' · ' + dl : ''}`);
+    lines.push(`   💰${totalKas.toFixed(0)} KAS · 👥${maxBettors}${t(lang, 'people_unit')}${dl ? ' · ' + dl : ''}`);
     // §11 信任卡 (J1 定版 2026-06-28): 全真原语·不超卖·禁写「自动结算/无法作弊/去信任」(Track B 未完成)
     lines.push(`   ${t(lang, 'hot_trust_card')}`);
     for (const m of gMarkets) {
@@ -314,7 +314,7 @@ export function hotMarkets(markets, botUsername, lang = 'en') {
     const cat = CAT[m.category] || '🌐';
     const prob = probSuffix(m);
     lines.push(`${idx}. ${cat} ${short}`);
-    lines.push(`   💰${(m.total_pool_kas || 0).toFixed(0)} KAS · 👥${m.bettor_count || 0}人${prob ? ' · YES' + prob : ''}`);
+    lines.push(`   💰${(m.total_pool_kas || 0).toFixed(0)} KAS · 👥${m.bettor_count || 0}${t(lang, 'people_unit')}${prob ? ' · YES' + prob : ''}`);
     buttons.push([{ text: `🎯 押 #${idx} ${short.slice(0, 20)}${prob}`, callback_data: 'bet:market:' + m.id }]);
     lines.push('');
     idx++;
@@ -369,20 +369,6 @@ export function swapFlow(broker, lang = 'en', network = 'testnet-12') {
     t(lang, 'swap_step2'),
     '',
     t(lang, 'swap_warn'),
-  ].join('\n');
-}
-
-// 押注 flow — deep-link 到预测市场;用户自己链上锁仓 + 签名,bot 0 execute。
-export function betFlow(broker) {
-  const name = broker?.name || 'broker';
-  return [
-    `🎲 押注预测市场 — 经 broker ${name}`,
-    '',
-    '在 Console 选市场押注:你自己链上锁定,5 个 oracle 投票结算,全程链上可审计。',
-    'broker 只撮合/引导,收协议内置的 broker 佣金(落 broker 链上地址)。',
-    '',
-    '⚠ 你自己链上锁定 + 签名,bot 不碰你的钱。',
-    '直接 /bet 开始押注 (全 Telegram 菜单交互, 不跳网页)。',
   ].join('\n');
 }
 

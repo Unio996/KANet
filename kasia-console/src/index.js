@@ -624,6 +624,12 @@ startBroadcasterUtxoMaintainerCron();
 import { startMiningConsolidateCron } from './lib/mining-utxo-consolidate.mjs';
 startMiningConsolidateCron();
 
+// 查漏补缺 (NWT 2026-07-04 挖到的 gap, Bettor 裁定 launch 前必补): 公开 FaucetRelay-tn 之前完全没有
+// 持续健康监控, 今早 G4 炸过一次(UTXO 碎片化), 退化了会对真实公开用户静默失败。纯只读监控+告警,
+// 不做任何自动 consolidate/split(避免跟正在进行的用户 faucet transfer 撞车)。
+import { startFaucetHealthCron } from './lib/faucet-utxo-health.mjs';
+startFaucetHealthCron();
+
 // Phase B Variant Expander 3-tier (Owner 5/16 钦定 "B" + Bettor r141 spec) — 30 min cron.
 // per scanner rec → auto-find related markets → 3 档 variant (激进/适中/保守) INSERT.
 // Phase 1 skeleton + UI surface, Phase 2 will integrate depth-500 /book API real-time.

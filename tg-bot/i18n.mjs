@@ -222,7 +222,7 @@ export const LANGS = {
     faucet_cooldown: "You've already requested recently — please wait about {hrs}h before trying again.",
     faucet_fail: 'Claim failed: {error}',
     faucet_already_claimed: "This wallet has already claimed its one-time testnet KAS grant. Each wallet gets exactly one faucet grant — link a different address if you need more testnet KAS.",
-    faucet_ok: '✅ Sent {amt} to {addr}\ntx {tx}… (~10 sec to arrive)\nNext: /bet to place bets.',
+    faucet_ok: '✅ Sent {amt} testnet KAS to {addr}\ntx {tx}… (~10 sec to arrive)\nNext: /bet to place bets.',
 
     // /verify (deprecated)
     verify_redirect: 'Use /link <your kaspatest address> to bind. Then /bet to start betting.',
@@ -355,6 +355,7 @@ export const LANGS = {
 
     // /champions (championMarkets, messages.mjs) — 世界杯冠军长线盘
     champions_empty: '🏆 No champion markets open yet — check back soon as the tournament bracket fills in.',
+    champions_fail: 'Failed to load champion markets, try again later.',
     champions_title: '🏆 World Cup Champion — Top {n}',
     champions_footer: 'Tap a team to bet they win the whole tournament. ℹ testnet KAS only — not real money.',
     help_champions: '/champions — Bet on who wins the World Cup',
@@ -582,7 +583,7 @@ export const LANGS = {
     faucet_cooldown: '你最近已经请求过，约 {hrs} 小时后再试。',
     faucet_fail: '领取失败：{error}',
     faucet_already_claimed: '这个钱包已经领过一次性测试币了。每个钱包只能领一次——如果还需要测试币，绑定一个不同的地址。',
-    faucet_ok: '✅ 已发 {amt} 到 {addr}\ntx {tx}…（约 10 秒到账）\n下一步：/bet 开始押注。',
+    faucet_ok: '✅ 已发 {amt} 测试网 KAS 到 {addr}\ntx {tx}…（约 10 秒到账）\n下一步：/bet 开始押注。',
 
     // /verify (deprecated)
     verify_redirect: '用 /link <你的 kaspatest 地址> 绑定即可。/bet 开始押注。',
@@ -715,6 +716,7 @@ export const LANGS = {
 
     // /champions (冠军长线盘)
     champions_empty: '🏆 暂无冠军盘开放——世界杯赛程晋级确定后陆续开放,过会再看。',
+    champions_fail: '冠军盘加载失败,稍后再试。',
     champions_title: '🏆 世界杯冠军 · 前 {n}',
     champions_footer: '点击球队押它夺冠。ℹ 仅测试网 KAS · 非真钱。',
     help_champions: '/champions — 押谁能夺得世界杯冠军',
