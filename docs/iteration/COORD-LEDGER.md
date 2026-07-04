@@ -689,6 +689,29 @@ owner=J2(数据源)+ KANet-UI(display，待结构定稿接手)；co-verify=Betto
 
 ---
 
+## 🔴 daemon 错误处理系统性红队审计(NWT, 响应 Owner"机制不够强壮"质疑, 2026-07-04)
+### 背景
+Owner 看到 #21(99盘老账)后追问："以后新盘会不会也卡死？现在机制如何？感觉不够强壮，经常退化"。全队诚实收敛：新盘(准时结算)风险低(MAX_WALK 只在拖久了才撞)，但结构脆性是真的——settle 失败恢复 = 同 tick 内重试 3 次(几秒)不成→永久标 settle_failed→SQL 排除→靠人工 operator review(今天全靠 Owner 自己发现某盘卡住)。三层修法：①立即做(补漏)settle_failed 告警(KANet-UI) ②NWT 系统审计现有 daemon 容错路径(查漏补缺，非造新机制) ③跨 tick 自动重试(唯一"新机制"项)——放到审计之后再拍。
+
+### NWT 审计结果：4 个 landmine，#48 不是孤例
+逐行梳理 `bshard-settle-daemon.mjs` 全部 catch 边界，发现同一上游病根(catch-all conflate 业务失败/瞬态故障/纯代码 bug)的 4 处症状：
+- **①(高影响)** post-writeback 裸调用无独立 try/catch(影子台账 `recordShadowJudgment` 调用，L314-318)：完全靠被调函数"永不 throw"的口头承诺，非结构性保证——#48 就是这么撞的(market 变量作用域丢失)，只修了那一次具体撞车，模式本身没变。
+- **②(高影响)** writeback 失败被静默吞掉还报告成功(L284-305)：`sqlite.transaction` 失败(如 DB 锁)catch 只 log warning 不 rethrow，函数照样 return `{ok:true}`——daemon 以为成功，DB 其实卡在原状态(既不 completed 也不 settle_failed)，永不进重试也永不告警，比"真失败"更隐蔽的静默中间态。
+- **③(低)** 标记 settle_failed 这个 UPDATE 本身失败被空 `catch{}` 吞掉，连日志都没有。
+- **④(根)** G5-5a 重试 wrapper(L227)是宽泛 catch-all，把 `_settleOneMarketAttempt` 任意位置抛出的任意异常(业务/瞬态/代码 bug)一视同仁处理——①②是它的下游症状，这是上游根。
+
+### 处置(J2 领 ①②，commit b4256926)
+- ①改为独立 try/catch 包裹调用表达式本身(不止靠 `.catch()` 处理 async rejection，同时兜住同步 throw)。
+- ②改为 `return {ok:false, reason: 'writeback fail: ...'}`，让外层 G5-5a 正确判定失败→落地可见的 settle_failed(能被 KANet-UI 新告警抓到)，好过静默卡死。
+- ③④暂缓：④是根本设计问题，认可但排后面，需要更大改动再讨论；跨 tick 自动重试(Owner 关心的"根治")留到审计之后再拍，不过度。
+
+### NWT ship 审出的边缘 case(J2 确认，commit ea830c61 记入 #47 runbook，不改代码)
+②修复后有一个理论存在但概率极低的 edge case：若 writeback 失败恰好发生在 close_attest 已上链成功之后(closed=1)，retry 重跑 settleMarketLive 会用硬编码的 closed=0 假设去 build，链上实际是 closed=1 → 交易会因 UTXO-not-found 类错误安全失败(不会误动钱)，但市场会落地 settle_failed 而实际上链上已经结算完成，需要人工查链上 PS 地址状态后走 #47 runbook 的 resume-claim(非重新 close)。J2 判定：writeback DB 写失败本身就罕见，又要卡在这个精确窗口，概率极低——记入 runbook 当一个 case，不现在改代码。Bettor 确认②仍是净改善("从 silent 卡死变 visible 卡·operator 能救")。
+
+owner=NWT(审计)+ J2(①②实现+边缘case分析)+ KANet-UI(settle_failed 告警监控，配合验证)+ Bettor(协调+co-verify)。
+
+---
+
 ## 归档(已收敛旧线,留索引)
 - **scale-test backend-20**(2026-06-10):干净 demonstrate 20 并发 settle,框架 §10.2/§9.3 活案例。已收敛。
 - **tg-bot-web-user-e2e**(§14 首个受控运行):演化为线 3 可玩 demo。
