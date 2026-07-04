@@ -630,6 +630,13 @@ startMiningConsolidateCron();
 import { startFaucetHealthCron } from './lib/faucet-utxo-health.mjs';
 startFaucetHealthCron();
 
+// 查漏补缺 (Owner 2026-07-04 追问"以后新盘会不会也卡死"·团队诚实答"机制设计本身脆, 靠人工
+// review 救但今天证明这个人工环节从没真正发生过"): 不改 daemon 核心逻辑(跨tick自动重试是另一条
+// 待 Owner 批的根治线), 只做"一进 settle_failed 立刻告警"这一步, operator 第一时间知道不用等
+// 事后翻查/公开用户投诉/Owner 自己撞见。
+import { startSettleFailedAlertCron } from './lib/settle-failed-alert.mjs';
+startSettleFailedAlertCron();
+
 // Phase B Variant Expander 3-tier (Owner 5/16 钦定 "B" + Bettor r141 spec) — 30 min cron.
 // per scanner rec → auto-find related markets → 3 档 variant (激进/适中/保守) INSERT.
 // Phase 1 skeleton + UI surface, Phase 2 will integrate depth-500 /book API real-time.
