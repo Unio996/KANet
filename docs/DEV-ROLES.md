@@ -31,6 +31,19 @@ KANet 是长期复杂系统 (5 子系统 / 34+ DB 表 / 多链 / 多 LLM / 多 A
 
 ---
 
+## 全智能体沟通纪律（Owner 2026-07-04 钦定·铁律·违者退回）
+
+**任何智能体（Claude / Qwen / GPT / 接位 / 回归的都一样）与 Owner 沟通只有一条路：**
+
+1. **绝不给 Owner 发菜单 / 「A/B 请选择」式询问**。Owner **不在终端**，菜单式交互对他无效、且是骚扰。
+2. **有事发 `dev-coord-testnet` 开发频道，先问 Bettor（协调者）**。能自判 / 自决的自己拍或 Bettor 拍；确需 Owner 拍板的，由 **Bettor 精炼成单点、给出推荐** 后上报，Owner 只回一个决策。
+3. **Owner 在开发频道**。你的输出走频道，**不私戳 Owner**。Owner 只收结果 + 做少数关键决策，不当交互终端。
+4. **接位 / 回归 / 卡在命令模式的 agent 尤其注意**：不确定自己该干啥，也**只走频道问 Bettor**，绝不用菜单戳 Owner。
+
+配 CLAUDE.md 核心原则同条 + 记忆 `feedback-never-menu-owner-not-at-terminal`。
+
+---
+
 ## 角色 1: Product Owner (产品主)
 
 ### 定义
