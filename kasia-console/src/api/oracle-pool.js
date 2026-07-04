@@ -538,6 +538,38 @@ export async function registerOraclePoolRoutes(fastify) {
   // 数据(data_source_canonical=ESPN URL 直给 + resolution_predicate={metric,op,operand} 直给)，不需要 espnSportsJudge
   // 那套给嘈杂 polymarket 文本做的标题解析/球队名匹配。改直接复用 bshard-settle-daemon.mjs 的 judgeWinDir()——
   // 那就是【结算实际用的同一份判定逻辑】，house agent 的"预测"跟真结算永远同源，不会出现两边判不一样的尴尬分裂。
+  // Pre-match prediction (2026-07-04, Bettor/KANet-UI co-verify #42): judgeWinDir only knows the
+  // ACTUAL result (post-match) — a house agent needs a pre-match GUESS so it can actually be wrong
+  // and be "beaten". Primary signal = the same ESPN summary URL's sportsbook odds (pickcenter),
+  // available before kickoff — deliberately a DIFFERENT field/moment than judgeWinDir's post-match
+  // read, so prediction and settlement never collapse into the same self-confirming source.
+  // NOT parseEspnSummary (oracle-evidence-extractors.mjs) — that helper hard-gates on
+  // status.type.completed===true (by design, for post-match judging), so it always returns null
+  // pre-kickoff. Minimal standalone parse here instead of weakening that gate for an unrelated need.
+  async function predictPreMatch(dataSourceUrl, operand) {
+    let data;
+    try {
+      const raw = await (await fetch(dataSourceUrl, { signal: AbortSignal.timeout(15000) })).text();
+      data = JSON.parse(raw);
+    } catch (e) {
+      return { verdict: 'ABSTAIN', reason: `fetch/parse fail: ${String(e?.message || e).slice(0, 120)}` };
+    }
+    const comp = data?.header?.competitions?.[0];
+    const competitors = comp?.competitors || [];
+    const home = competitors.find(c => c.homeAway === 'home');
+    const away = competitors.find(c => c.homeAway === 'away');
+    if (!home || !away) return { verdict: 'ABSTAIN', reason: 'no_competitors' };
+    const pick = data?.pickcenter?.[0] || data?.odds?.[0];
+    if (!pick) return { verdict: 'ABSTAIN', reason: 'no_odds_available' };  // KANet-UI FIFA-ranking fallback slots in here
+    const homeFav = pick.homeTeamOdds?.favorite === true;
+    const awayFav = pick.awayTeamOdds?.favorite === true;
+    if (homeFav === awayFav) return { verdict: 'ABSTAIN', reason: 'no_clear_favorite' }; // pick'em / missing flags
+    const favoredAbbr = homeFav ? home.team?.abbreviation : away.team?.abbreviation;
+    if (!favoredAbbr) return { verdict: 'ABSTAIN', reason: 'no_favored_abbreviation' };
+    const predictedYes = String(favoredAbbr).toUpperCase() === String(operand).toUpperCase();
+    return { verdict: predictedYes ? 'PREDICTED_YES' : 'PREDICTED_NO', favored: favoredAbbr, provider: pick.provider?.name || null };
+  }
+
   fastify.get('/api/oracle-pool/house-judgment/:marketId', async (request, reply) => {
     const { marketId } = request.params;
     const market = sqlite.prepare(
@@ -555,12 +587,16 @@ export async function registerOraclePoolRoutes(fastify) {
         ok: true,
         applies: true,
         market_id: marketId,
-        verdict: winDir === 0 ? 'YES' : 'NO',
-        source: 'bshard-settle-daemon.judgeWinDir',  // 跟真结算同源，非独立复刻的判断逻辑
+        verdict: winDir === 0 ? 'YES' : 'NO',       // 赛后真结果(结算同源) — 用于算 Agent 战绩，不是下注触发信号
+        source: 'bshard-settle-daemon.judgeWinDir',
         title: spec.title || null,
       });
     } catch (e) {
-      // judgeWinDir throws on ABSTAIN / not-yet-resolvable(比赛没打完等) — house agent 该跳过这盘，不下注。
+      // judgeWinDir ABSTAIN(比赛没打完等)→ 落到赛前预测(下注真正用的信号)。
+      if (spec.data_source_canonical && spec.resolution_predicate?.operand) {
+        const pred = await predictPreMatch(spec.data_source_canonical, spec.resolution_predicate.operand);
+        return reply.send({ ok: true, applies: true, market_id: marketId, verdict: pred.verdict, source: 'espn-pickcenter-odds', title: spec.title || null, ...pred });
+      }
       return reply.send({ ok: true, applies: true, market_id: marketId, verdict: 'ABSTAIN', source: 'bshard-settle-daemon.judgeWinDir', reason: String(e?.message || e).slice(0, 160) });
     }
   });
