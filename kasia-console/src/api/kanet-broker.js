@@ -87,9 +87,11 @@ export async function registerKanetBrokerRoutes(fastify) {
     const { relay_id } = request.params;
     if (!relay_id) return reply.code(400).send({ ok: false, error: 'relay_id required' });
 
+    // shard-blind display fix (Bettor 2026-07-04, Owner 抓 via earnings-by-address 同源 bug): 排除
+    // shard_internal 内部克隆, 只显逻辑/用户面盘 (母盘的 per-shard 副本不该单独列一行)。
     const poolRows = sqlite.prepare(`
       SELECT id, broker_fee_pct, maker_stake_amount, protocol_status, settle_txid, refund_txid, updated_at, metadata
-      FROM pool_markets WHERE broker_relay_id = ?
+      FROM pool_markets WHERE broker_relay_id = ? AND protocol_status != 'shard_internal'
     `).all(relay_id);
 
     // Same retail-broker scope as above: system-wide broker config, return all if configured.
@@ -216,9 +218,12 @@ export async function registerKanetBrokerRoutes(fastify) {
     try { const kaspa = await import('kaspa-wasm'); brokerPk = kaspa.XOnlyPublicKey.fromAddress(new kaspa.Address(String(address))).toString().toLowerCase(); }
     catch (e) { return reply.code(400).send({ ok: false, error: `address→pubkey derive fail: ${e.message}` }); }
 
+    // shard-blind display fix (Bettor 2026-07-04, Owner 抓): shard_internal 是内部克隆(母盘的 per-shard 副本,
+    // maker_stake=0), 不该跟母盘一起列进用户面"经手市场"——排除它, 只显逻辑/用户面盘。收益数字本身不受影响
+    // (fee 只落在真实结算, 克隆盘从不会单独结算/退款)。
     const poolRows = sqlite.prepare(`
       SELECT id, broker_fee_pct, maker_stake_amount, protocol_status, settle_txid, refund_txid, updated_at, metadata
-      FROM pool_markets WHERE LOWER(broker_pk) = ?
+      FROM pool_markets WHERE LOWER(broker_pk) = ? AND protocol_status != 'shard_internal'
     `).all(brokerPk);
 
     // §11 Phase 2 (J2 2026-06-27, Bettor 钦定 "earnings 必读链"): realized = 只数【链上 landed】的 fee,
