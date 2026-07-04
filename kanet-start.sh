@@ -21,6 +21,13 @@ CONSOLE_PORT=${CONSOLE_PORT:-3400}  # KANet-UI ops r38: env override default for
 
 mkdir -p "$LOG_DIR" "$PID_DIR"
 
+# 自重定向 launcher 输出 (2026-07-04 事故 #52: 调用方手动把 stdout 重定向到 C 盘 Temp 的各种一次性
+# 文件名, 反复重启一天攒了 43 个 2-3GB 文件把 C 盘写满 0 字节, 阻断全队。脚本自己接管顶层输出——
+# 不管调用方有没有重定向/往哪重定向, 都固定写进项目自己的 LOG_DIR (不在 C 盘); 每次启动截断
+# (> 非 >>) 只留最新一次, 不无限增长 (旧运行的错误已经靠今天新建的 events 表告警/频道通知捕获,
+# 不需要在这个 launcher log 里累积长期历史)。
+exec > >(tee "$LOG_DIR/kanet-start-launcher.log") 2>&1
+
 # ── 颜色 ────────────────────────────────────────────────────────────────────
 C_RESET='\033[0m'; C_BOLD='\033[1m'; C_DIM='\033[2m'
 C_GREEN='\033[32m'; C_YELLOW='\033[33m'; C_CYAN='\033[36m'
