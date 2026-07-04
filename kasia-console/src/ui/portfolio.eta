@@ -264,7 +264,7 @@
   <div x-show="loading && !data" class="flex-1 flex items-center justify-center text-xs text-ink-400">
     <div class="text-center">
       <svg class="animate-spin w-6 h-6 mx-auto mb-2 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke-width="3" opacity="0.3"/><path d="M12 2 A10 10 0 0 1 22 12" stroke-width="3" stroke-linecap="round"/></svg>
-      正在聚合 10 个数据源 (Kaspa / 多链钱包 / Aave / Hyperliquid / Aevo / UMA / 交易锁定)...
+      正在聚合 10 个数据源 (Kaspa / 多链钱包 / Aave / Hyperliquid / Aevo / Polymarket / 交易锁定)...
     </div>
   </div>
   <div x-show="error" class="flex-1 flex items-center justify-center">
@@ -302,7 +302,7 @@
         <div class="pf-card-editorial p-4">
           <div class="pf-stat-label">开仓数</div>
           <div class="pf-display text-2xl text-ink-800 tabular-nums mt-1" x-text="(data?.totals?.openPositionCount || 0)"></div>
-          <div class="text-[10px] text-ink-400 mt-1">HL + Aevo + UMA + Aave</div>
+          <div class="text-[10px] text-ink-400 mt-1">HL + Aevo + Polymarket + Aave</div>
         </div>
       </div>
 
@@ -444,11 +444,12 @@
               </div>
               <div x-show="!agent.aevo || !agent.aevo.connected" class="text-[10px] text-ink-300">Aevo 未配置凭证</div>
 
-              <!-- UMA (显示名, 内部变量/API仍是 polymarket — Owner 2026-07-04 杜绝品牌暴露, 只改用户面文案)
+              <!-- Polymarket (Bettor 2026-07-04 纠偏: 这是真交易持仓集成非预言机结算标签, 标'UMA'反而
+                   是虚假标注——归入 predictions.eta 同一个"隐藏 or 保留真名"待 Owner 决定, 先 revert 回真名)
                    — always visible with state (configured / not configured / no Polygon wallet) -->
               <div class="mt-2 pt-2 border-t border-warm-100">
                 <div class="flex items-center justify-between text-[11px]">
-                  <a href="/predictions" class="text-ink-600 font-medium hover:text-brand-600">UMA</a>
+                  <a href="/predictions" class="text-ink-600 font-medium hover:text-brand-600">Polymarket</a>
                   <span x-show="agent.polymarket?.configured" class="tabular-nums text-ink-700 font-medium" x-text="fmt(agent.polymarket?.approxValueUsd || 0)" title="持仓价值 + USDC.e + pUSD 合计"></span>
                 </div>
                 <!-- breakdown: 持仓 / pUSD / USDC.e -->
