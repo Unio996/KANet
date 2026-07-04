@@ -59,25 +59,41 @@ try {
 }
 ```
 
-`classifyFailure(e, market)` 的判定依据（初稿，需要红队审）：
-- 错误信息匹配 `/is not defined|is not a function|Cannot read propert/i` → `CODE_BUG`（JS 运行时错误的典型特征）。
-- 错误信息匹配现有 G5-5a 的 `TRANSIENT_RE` 正则（UTXO not found / fetch failed / ECONNREFUSED 等）→ `TRANSIENT`。
-- 错误信息匹配 `/UMA judge ABSTAIN|judge ABSTAIN/` **且** `market.outcome_market_source === 'polymarket'` → `BUSINESS_PENDING`（UMA 专属，ESPN 的 ABSTAIN 目前没有慢速裁决场景，正常判不出就是判不出，仍走 #47 人工评估退款路，不进 re-judge 调度器）。
-- 其它 → 保守当 `CODE_BUG`（fail-safe：宁可多告警，不可误判成"业务正常等待"而实际是代码坏了）。
+`classifyFailure(e, market)` 的判定依据（**Bettor + NWT review 后修订版**）：
+
+**判定顺序（NWT 指出顺序敏感，显式写死，别在实现时随意调换）**：
+
+1. **先查 `TRANSIENT`**：错误信息匹配现有 G5-5a 的 `TRANSIENT_RE` 常量（**直接 import 同一个常量，不重新定义等价的一份**——NWT 指出：分开维护两份"哪些算瞬态"的规则，以后各自改动会跑偏，一个说是瞬态一个说不是。单一 source of truth）。
+2. **再查 `BUSINESS_PENDING`**：错误信息匹配 `/UMA judge ABSTAIN|judge ABSTAIN/` **且** `market.outcome_market_source === 'polymarket'` → `BUSINESS_PENDING`（UMA 专属。ESPN 的 ABSTAIN 目前没有慢速裁决场景，正常判不出就是判不出，仍走 #47 人工评估退款路，不进 re-judge 调度器）。
+3. **再查 `CODE_BUG`**：**优先用结构化类型判定**（Bettor 指出：`e instanceof TypeError || e instanceof ReferenceError` ——JS 运行时错误的类型是确定的，比字符串正则稳，错误文案会变但 instanceof 不会）。字符串正则（`/is not defined|is not a function|Cannot read propert/i`）只作**次要信号**，用于 instanceof 判定不出来时的兜底（比如某些库把错误包装成普通 Error 对象而不是原生 TypeError/ReferenceError）。
+4. **兜底 `UNCLASSIFIED`** → 保守当 `CODE_BUG` 同款处置（告警 + 不动状态）。
+
+**为什么顺序是 TRANSIENT → BUSINESS_PENDING → CODE_BUG，不是反过来**（NWT 指出）：畸形 RPC 响应可能导致代码访问某个不存在的字段，抛出看起来像 `Cannot read property` 的错误——这本质是瞬态基础设施问题（RPC 返回不完整），不是我们代码坏了。如果先判 CODE_BUG 会错分类成"代码 bug"（结果只是多一次不必要的高优先级告警，不碰钱/状态，后果不严重，但会有噪音）。先查 TRANSIENT_RE 能把这类情况正确分流。
+
+**⚠ 关键：外层调用方必须同步改造（NWT 抓到的接线缺口，这次不能再犯）**
+
+`classifyFailure` 返回的 `keepStatus` 字段目前**只是伪代码里的意图表达**——现有 `settleDaemonTick`（`bshard-settle-daemon.mjs:340-369`）的外层调用逻辑（第 356-364 行）**完全不检查任何 keepStatus 字段**，`r.ok===false` 就无条件 `UPDATE protocol_status = 'settle_failed'`。如果只实现 `classifyFailure` 函数本身，不同步修改 `settleDaemonTick` 的调用点去读取并遵循 `keepStatus`，那么整个分类器算出来的判断会被现有逻辑直接无视——**这正是今天 #25（KI-49 同源模式）反复出现的"新字段/新逻辑加了但没有全链路接通"那类坑**。
+
+**实现清单必须显式包含**：
+- `_settleOneMarketAttempt` 内部改造（本设计 §2.2 的伪代码位置）。
+- `settleDaemonTick` 第 357-360 行 **和** 第 362-364 行的 catch 块都要同步改：读 `r.keepStatus`（或者 `classifyFailure` 抛出的分类结果），为 true 则跳过 `UPDATE protocol_status`，只走告警路径。
+- `settleOneMarket`（G5-5a 的外层重试包装器，如果它自己也有类似的无条件写 `settle_failed` 的逻辑）同样要检查。
 
 **⚠ 待红队审的开放问题**：
-1. `TRANSIENT` 重试耗尽后"留 verifying 不标记"——会不会导致这个市场被**每个 tick 反复重新尝试**（如果 RPC 长期挂，daemon 会一直重复扫到它、重复失败），浪费资源？需要一个"重试次数跨 tick 累加"的软上限（比如连续 20 个 tick 都失败 → 才升级成真正告警，但仍不是 settle_failed，是新增一个 `stuck_transient` 状态给人看）。
-2. "分类不出来当代码 bug"这个 fail-safe 会不会太保守，导致某些其实是正常业务失败的场景被过度告警？需要看实际运行数据调整。
+1. `TRANSIENT` 重试耗尽后"留 verifying 不标记"——会不会导致这个市场被**每个 tick 反复重新尝试**（如果 RPC 长期挂，daemon 会一直重复扫到它、重复失败），浪费资源？**采纳 Bettor 方案**：加跨 tick 重试计数（存 `metadata.transient_retry_count`），超过软上限（比如连续 20 个 tick 都失败）→ 升级成新状态 `stuck_transient`（**不是 settle_failed**，仍会被 daemon 继续尝试自愈，只是告警级别提高让人知道"这个卡了挺久了"）。
+2. "分类不出来当代码 bug"这个 fail-safe 会不会太保守？——**NWT 认可这个默认值选得对**：不管误判成哪一类，只要默认路径不改 `protocol_status`/不碰钱，出错代价就只是"多告警"，不会造成资金/状态风险。**实现时必须有对应测试用例**：一个"完全无法识别的错误类型"输入，验证 `classifyFailure` 的返回结果不会导致 `protocol_status` 被意外改写（锁住这个 fail-safe 属性）。
 
 ## 3. 模块② — UMA Re-judge 调度器
 
 ### 3.1 核心行为
 
 UMA-pending 的市场（`outcome_market_source==='polymarket'` 且最近一次 judge 返回 ABSTAIN）：
-- **不进 `settle_failed`**，进一个新状态 `uma_pending`（或复用 `verifying` 加 metadata 标记，具体哪个更好待定，见开放问题）。
+- **不进 `settle_failed`**，复用 `verifying` + `metadata.uma_pending_since`（首次 ABSTAIN 时间戳）——最小改动（NWT/Bettor 背书）。
 - daemon 按退避间隔重新尝试判定，直到：
   - UMA finalize（`res.final === 'YES'|'NO'`）→ 正常走现有结算流程，完全复用 `settleMarketLive`。
   - 或者超过 **genuine-timeout 门槛** → 判定"真的长期无解"，转 `settle_failed`（这时候才是 #47 手动退款 runbook 该介入的场景）。
+
+**⚠ 关键（NWT 指出，跟 §2.2 的接线缺口同类）**：`selectRipeMarkets`（`bshard-settle-daemon.mjs` 现有函数）目前的 SQL 只按 `deadline_daa` 判断"该不该 settle"，**不知道退避表这回事**——如果不改，daemon 每 60 秒 tick 都会把 `uma_pending` 的市场重新选进来尝试判定，对着 UMA 狂打请求（0-2 小时那档设计意图是"每 15 分钟"而不是"每 60 秒"）。`selectRipeMarkets` 必须读 `metadata.uma_pending_since` + 当前退避表所在档位，计算"距离上次尝试是否已经过了对应的间隔"，没过就跳过这个市场（不进 `ripe` 列表）。
 
 ### 3.2 退避间隔设计（草案，基于 UMA 实际协议参数）
 
@@ -104,11 +120,27 @@ UMA-pending 的市场（`outcome_market_source==='polymarket'` 且最近一次 j
 - `scheduleUmaRejudge(marketId, abstainReason) → { ok, action: 'scheduled'|'timeout_exceeded' }` — 读/写一个新表或 `pool_markets.metadata` 字段记录"第一次 ABSTAIN 的时间戳 + 已重试次数"，用于计算退避间隔和 genuine-timeout。
 - 现有 `computeSettlePlan` / `settleMarketLive` / `cancelMarketLive`（#47）**零改动**，模块①②只影响它们**外层的调度和失败处置**。
 
-## 5. 开放问题（等 NWT/J1/Bettor review）
+## 5. 开放问题状态（NWT + Bettor review 后，2026-07-04 v2 收敛）
 
-1. `uma_pending` 是新状态还是复用 `verifying` + metadata 标记？新状态需要改 `selectRipeMarkets` 的 SQL（排除/包含逻辑要重新设计），复用 `verifying` 更小改动但语义不够清晰（跟"还没到 deadline 的正常等待"混在一起，需要在 metadata 里区分）。倾向复用 `verifying` + `metadata.uma_pending_since` 时间戳，最小改动，但要确认 `selectRipeMarkets` 不会因为退避间隔没到就浪费重试（需要在 SQL 或扫描逻辑里加时间判断，别每 60 秒 tick 都重新尝试 UMA，浪费 RPC 调用）。
-2. 模块①的 `CODE_BUG` 告警渠道跟现有 `settle_failed` 告警（KANet-UI 今天建的）是同一个 events 表 + 频道通知，还是需要更高优先级的独立通道？建议同表不同 `event_type`，复用现有 alerting 基础设施。
-3. TRANSIENT 长期失败（开放问题①提到的"重试耗尽但不标记，会不会一直被重扫浪费资源"）需要一个软上限设计，具体阈值待定。
+**已收敛（不再是开放问题）**：
+1. ~~`uma_pending` 新状态还是复用 `verifying`~~ → **复用 `verifying` + `metadata.uma_pending_since`**（NWT/Bettor 背书，最小改动）。**但 `selectRipeMarkets` 必须同步改**（见 §3.1 关键提示）——这条本身不再"开放"，但**实现清单必须包含它**，不能只改 `_settleOneMarketAttempt` 却漏了 `selectRipeMarkets` 的退避判断（跟 §2.2 的 keepStatus 接线缺口是同一类"新逻辑没全链路接通"的坑，两处都要显式列进实现清单）。
+2. ~~TRANSIENT 长期失败的软上限~~ → **已采纳 Bettor 方案**：跨 tick 重试计数存 `metadata.transient_retry_count`，超过 N（初定 20，实现时可调）→ 升级 `stuck_transient` 告警（非 settle_failed，daemon 仍继续自愈尝试）。
+3. ~~v0.6 老系统要不要同款改良~~ → **Bettor 背书不动**，非本轮范围。
+
+**仍待定（实现时确认）**：
+4. 模块①的 `CODE_BUG` 告警渠道跟现有 `settle_failed` 告警（KANet-UI 今天建的 `settle-failed-alert.mjs`）是同一个 events 表 + 频道通知，还是需要更高优先级的独立通道？倾向**同表不同 `event_type`**，复用现有 alerting 基础设施（不新造监控机制）。
+
+## 6. 实现清单（v2，整合 NWT + Bettor review）
+
+供实现时对照，避免"新逻辑写了但没全链路接通"（今天已经在 #25/KI-49/#48 撞过三次同类坑）：
+
+- [ ] `classifyFailure(error, market)` 纯函数：判定顺序 TRANSIENT_RE（import 复用 G5-5a 现有常量，不重新定义）→ BUSINESS_PENDING（UMA-ABSTAIN 专属）→ CODE_BUG（`instanceof TypeError/ReferenceError` 优先，正则次要兜底）→ UNCLASSIFIED（当 CODE_BUG 同款处置）。
+- [ ] `_settleOneMarketAttempt` 顶层 catch 改造，调用 `classifyFailure`，按分类走不同分支（§2.2 伪代码位置）。
+- [ ] **`settleDaemonTick`（`bshard-settle-daemon.mjs:340-369`）第 357-360 行 + 第 362-364 行两处 catch 都要同步改**：检查 `r.keepStatus`（或分类结果），为 true 跳过 `UPDATE protocol_status`，只走告警。**这是 NWT 抓到的关键接线缺口，实现时第一个验证点**。
+- [ ] `scheduleUmaRejudge(marketId, abstainReason)`：写 `metadata.uma_pending_since`（首次）+ 更新重试计数。
+- [ ] `selectRipeMarkets` 改造：读 `metadata.uma_pending_since` + 退避表当前档位，未到间隔的市场不进 `ripe` 列表。**这是第二个容易漏的接线点**。
+- [ ] TRANSIENT 跨 tick 计数 + `stuck_transient` 告警状态。
+- [ ] 测试用例：①一个"完全无法识别的错误类型"输入 `classifyFailure`，验证不会导致 `protocol_status` 被意外改写（锁住 fail-safe 属性，NWT 认可的设计点）。②模拟畸形 RPC 响应触发的 `Cannot read property` 类错误，验证被分类成 TRANSIENT 而不是 CODE_BUG（验证判定顺序生效）。③UMA re-judge 全链路：ABSTAIN → 退避等待 → finalize → 正常结算，验证 `verifying` 状态在整个等待期间不被误标记。
 4. 这份设计目前只覆盖 `bshard-settle-daemon.mjs`（v0.7 bshard 结算路径）。`pool-market-settler.js`（v0.6 老系统）是否需要同款改良？范围待定，倾向不动（v0.6 是遗留系统，非本轮重点）。
 
 ---
