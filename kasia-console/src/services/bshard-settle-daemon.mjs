@@ -172,6 +172,62 @@ function _p2shCache(redeemHex) { return _k.addressFromScriptPublicKey(_k.ScriptB
 function _p2pkAddrSync(pkHex) { return new _k.PublicKey(pkHex).toAddress(_k.NetworkType.Testnet).toString(); }
 function _p2pkSpkSync(addr) { const s = _k.payToAddressScript(new _k.Address(addr)); return (s.script ?? s).toString(); }
 
+// #49 模块② (2026-07-04, docs/2026-07-04-daemon-error-handling-modular-design.md v2 §3.2):
+// UMA re-judge 退避表——数字来自真实查证的 UMA/Polymarket 协议参数(2h 常规 dispute window,
+// 最长 96h DVM 投票升级), 不是拍脑袋。Owner 钦定方向"充分嫁接 UMA"(耐心等它 finalize, 不是
+// 绕过它用别的数据源抢跑)。
+const UMA_REJUDGE_BACKOFF_TABLE = [
+  { maxAgeHours: 2, intervalMinutes: 15 },   // 常规无 dispute 路径, 2h 内应该 finalize
+  { maxAgeHours: 6, intervalMinutes: 30 },   // 可能刚好卡在 propose 边缘或短暂 dispute
+  { maxAgeHours: 96, intervalMinutes: 120 }, // DVM 投票升级场景, 最长约 4 天
+];
+const UMA_GENUINE_TIMEOUT_HOURS = 96; // 超过这个还 ABSTAIN = 真正长期无解, 转 settle_failed 走 #47
+
+// 该市场是不是 UMA-pending(metadata.uma_pending_since 已设, 上次尝试距今是否已经过了退避表
+// 对应档位的间隔)。true = 这次 tick 可以重新尝试判定; false = 还没到该重试的时候, 跳过(省 RPC)。
+// 非 UMA-pending 的市场(没有这个 metadata 字段)一律放行(不受此函数影响, 保持原有 ripe 行为)。
+function _umaBackoffAllowsRetryNow(marketRow) {
+  let meta = {}; try { meta = JSON.parse(marketRow.metadata || '{}'); } catch {}
+  const pendingSince = meta.uma_pending_since;
+  if (!pendingSince) return true; // 不是 UMA-pending 市场, 不受退避表限制
+  const nowMs = Date.now();
+  const ageHours = (nowMs - new Date(pendingSince).getTime()) / 3_600_000;
+  const lastAttemptMs = meta.uma_last_attempt_at ? new Date(meta.uma_last_attempt_at).getTime() : new Date(pendingSince).getTime();
+  const sinceLastAttemptMinutes = (nowMs - lastAttemptMs) / 60_000;
+  const tier = UMA_REJUDGE_BACKOFF_TABLE.find((t) => ageHours <= t.maxAgeHours) || UMA_REJUDGE_BACKOFF_TABLE[UMA_REJUDGE_BACKOFF_TABLE.length - 1];
+  return sinceLastAttemptMinutes >= tier.intervalMinutes;
+}
+
+// scheduleUmaRejudge — BUSINESS_PENDING(UMA ABSTAIN)分类命中时调用。首次调用写
+// metadata.uma_pending_since(标记进入 UMA-pending 状态); 每次调用更新 uma_last_attempt_at
+// (供 _umaBackoffAllowsRetryNow 计算退避间隔) + 重试计数。超过 genuine-timeout 门槛则返回
+// timeout_exceeded, 调用方(settleDaemonTick)据此转 settle_failed(#47 人工评估退款路的入口)。
+function scheduleUmaRejudge(marketId, market) {
+  let meta = {}; try { meta = JSON.parse(market.metadata || '{}'); } catch {}
+  const nowIso = new Date().toISOString();
+  const isFirst = !meta.uma_pending_since;
+  if (isFirst) meta.uma_pending_since = nowIso;
+  meta.uma_last_attempt_at = nowIso;
+  meta.uma_retry_count = (meta.uma_retry_count || 0) + 1;
+  const ageHours = (Date.now() - new Date(meta.uma_pending_since).getTime()) / 3_600_000;
+  const timedOut = ageHours > UMA_GENUINE_TIMEOUT_HOURS;
+  try {
+    if (timedOut) {
+      // 真超时: metadata + protocol_status 一次写, 别只更新 metadata 漏了状态转换(#48 那种
+      // "新逻辑写了一半没接通"的坑, 这里两个字段一起原子写, 不留中间态)。
+      sqlite.prepare("UPDATE pool_markets SET metadata = ?, protocol_status = 'settle_failed' WHERE id = ?").run(JSON.stringify(meta), marketId);
+    } else {
+      sqlite.prepare('UPDATE pool_markets SET metadata = ? WHERE id = ?').run(JSON.stringify(meta), marketId);
+    }
+  } catch (e) { log(`${marketId.slice(-8)} scheduleUmaRejudge writeback warn: ${e.message}`); }
+  if (timedOut) {
+    log(`${marketId.slice(-8)} UMA-pending 超过 genuine-timeout(${UMA_GENUINE_TIMEOUT_HOURS}h, 实际 ${ageHours.toFixed(1)}h) — 转 settle_failed, 走 #47 人工评估退款`);
+    return { ok: false, action: 'timeout_exceeded', keepStatus: false };
+  }
+  log(`${marketId.slice(-8)} UMA-pending${isFirst ? '(首次)' : ''}, 第 ${meta.uma_retry_count} 次尝试, 年龄 ${ageHours.toFixed(2)}h — 保留 verifying, 等下次退避窗口`);
+  return { ok: false, action: 'scheduled', keepStatus: true };
+}
+
 // ripe = v0.7 + deadline_daa+buffer passed + 未结算 + 非 settle_failed + betCount>0 + 非 commingled。
 function selectRipeMarkets(currentDaa, pmt, limit) {
   // 只结 active-未结 (pending_bettors/verifying)·排终态 (cancelled/completed/refunded/refunding/settle_failed)。
@@ -196,6 +252,10 @@ function selectRipeMarkets(currentDaa, pmt, limit) {
       if (!isBshard || betCount === 0) continue;
       const logicalBets = sqlite.prepare('SELECT COUNT(*) c FROM pool_bettor_sides WHERE market_id = ?').get(m.id).c;
       if (logicalBets > 0) continue;   // commingled → skip (cleanliness 闸·settleMarketLive 也会拦)
+      // #49 模块② (2026-07-04): UMA-pending 市场(metadata.uma_pending_since 已设)按退避表判断
+      // 该不该这次 tick 就重新尝试——不改这里的话, daemon 会对每个 UMA-pending 盘每 60 秒 tick 都
+      // 重新尝试判定, 意图"0-2h 每 15 分钟"变成"每 60 秒", 浪费 UMA RPC 调用(NWT review 指出)。
+      if (!_umaBackoffAllowsRetryNow(m)) continue;
       ripe.push({ market: m, betCount, multiShard });
       if (ripe.length >= limit) break;
     } catch (e) { log(`ripe-scan skip ${m.id.slice(-8)}: ${e.message}`); }
@@ -373,6 +433,12 @@ export async function settleDaemonTick() {
           // 等于没做(#25/KI-49 同源模式)。现在: CODE_BUG/UNCLASSIFIED/TRANSIENT(重试已耗尽)
           // 都 shouldKeepStatus===true, 跳过 UPDATE(不武断覆盖状态), 只走告警; 只有真正确认的
           // 失败(needsRolling 或分类结果不要求保留状态)才改 protocol_status。
+          // #49 模块②: BUSINESS_PENDING(UMA ABSTAIN)不查 shouldKeepStatus(它总是走独立的
+          // scheduleUmaRejudge 判断——退避未到/genuine-timeout 未到 = 保留, 真超时 = 转 settle_failed)。
+          if (!r.needsRolling && r.classification?.type === 'BUSINESS_PENDING') {
+            scheduleUmaRejudge(market.id, market); // 内部已 log + 决定是否 timeout, writeback metadata
+            continue; // 跳过下面的 settle_failed 通用写入路径, 已由 scheduleUmaRejudge 处理完
+          }
           const flag = r.needsRolling ? 'needs_rolling' : 'settle_failed';   // needs_rolling=>1024·待 task#18·非错
           const keep = !r.needsRolling && r.classification && shouldKeepStatus(r.classification);
           if (keep) {
@@ -407,4 +473,4 @@ export function startSettleDaemonCron() {
 }
 export function stopSettleDaemonCron() { if (_timer) { clearInterval(_timer); _timer = null; } }
 async function ensureReady() { _k = await kaspa(); if (!_pkMap) await buildPkMap(); }
-export { selectRipeMarkets, settleOneMarket, judgeWinDir, buildCtx, consolidateAndBuildPsState, ensureReady, TRANSIENT_RE };
+export { selectRipeMarkets, settleOneMarket, judgeWinDir, buildCtx, consolidateAndBuildPsState, ensureReady, TRANSIENT_RE, _umaBackoffAllowsRetryNow, scheduleUmaRejudge, UMA_REJUDGE_BACKOFF_TABLE, UMA_GENUINE_TIMEOUT_HOURS };
