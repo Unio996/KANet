@@ -237,7 +237,7 @@ export const LANGS = {
     broker_apply_no_link: 'First /link <your kaspatest address> (this address = your broker receive address), then /broker_apply.',
     broker_apply_usage: 'Usage: /broker_apply <your @BotFather bot token>\nGet token from @BotFather with /newbot (looks like 123456:ABC-...).',
     broker_apply_fail: 'Application failed: {error}',
-    broker_apply_ok: '✅ Application submitted!\n📍 Broker address: {addr}\n⏳ Status: Pending Owner approval (once approved, KANet auto-manages your bot, shows markets, fees go to your address).\nCheck status: /broker · Token is encrypted, never shown.',
+    broker_apply_ok: '✅ Application submitted — active now!\n📍 Broker address: {addr}\nKANet auto-manages your bot, shows markets, fees go to your address.\nCheck status: /broker · Token is encrypted, never shown.',
 
     // /swap function (messages.mjs)
     swap_title: '💱 Exchange KAS ↔ USDT — via {name}',
@@ -261,12 +261,12 @@ export const LANGS = {
     broker_role_earnings_link: '· /earnings — Full chain-verified details (per market / explorer links)',
     broker_role_earnings_no_data: '· /earnings — View your broker earnings (handled/realized/pending, chain-verifiable)',
     broker_role_change_token: '· Change bot token: /broker_apply <new token>',
-    broker_role_pending: '⏳ Your broker application is submitted (address {addr}), pending Owner approval.',
-    broker_role_pending_note: 'Once approved your bot will be auto-managed by KANet. Change token: /broker_apply <new token>',
+    broker_role_pending: '⏳ Your broker application is submitted (address {addr}) but not yet active — check /broker for status.',
+    broker_role_pending_note: 'Once active your bot will be auto-managed by KANet. Change token: /broker_apply <new token>',
     broker_role_apply_has_addr: '👉 Apply to be a broker (you have address {addr}):',
     broker_role_apply_step1_hasaddr: '① Get a bot token from @BotFather with /newbot',
-    broker_role_apply_step2_hasaddr: '② /broker_apply <your bot token> — submit application (pending Owner approval to activate)',
-    broker_role_warn: '⚠ Application requires Owner approval before activation (prevents fee abuse/sybil). Your bot token is encrypted and never shown.',
+    broker_role_apply_step2_hasaddr: '② /broker_apply <your bot token> — submit, activates instantly',
+    broker_role_warn: 'ℹ testnet: permissionless, activates instantly. Your bot token is encrypted and never shown.',
 
     // brokerEarnings function (messages.mjs)
     earnings_title: '💰 Your broker earnings',
@@ -588,7 +588,7 @@ export const LANGS = {
     broker_apply_no_link: '先 /link <你的 kaspatest 地址> 绑定 (这地址 = 你的 broker 收款地址), 再 /broker_apply。',
     broker_apply_usage: '用法: /broker_apply <你的 @BotFather bot token>\n去 @BotFather 发 /newbot 拿 token (形如 123456:ABC-...)。',
     broker_apply_fail: '申请失败: {error}',
-    broker_apply_ok: '✅ 申请已提交！\n📍 broker 地址: {addr}\n⏳ 状态: 待 Owner 审批 (批准后 KANet 自动托管拉起你的 bot, 对外呈现市场, 带量佣金落你地址)。\n查状态: /broker · token 已加密存储绝不外显。',
+    broker_apply_ok: '✅ 申请已提交，即时生效！\n📍 broker 地址: {addr}\nKANet 自动托管拉起你的 bot, 对外呈现市场, 带量佣金落你地址。\n查状态: /broker · token 已加密存储绝不外显。',
 
     // /swap function
     swap_title: '💱 兑换 KAS ↔ USDT — 经 {name}',
@@ -612,12 +612,12 @@ export const LANGS = {
     broker_role_earnings_link: '· /earnings — 完整链验详情 (各单/explorer 链接)',
     broker_role_earnings_no_data: '· /earnings — 看你的 broker 收益 (经手单/已实现/待结算, 链上可验)',
     broker_role_change_token: '· 改 bot token: /broker_apply <新 token>',
-    broker_role_pending: '⏳ 你的 broker 申请已提交 (地址 {addr}), 待 Owner 审批。',
-    broker_role_pending_note: '审批通过后你的 bot 会被 KANet 自动托管拉起。换 token: /broker_apply <新 token>',
+    broker_role_pending: '⏳ 你的 broker 申请已提交 (地址 {addr}) 但还没激活——用 /broker 查状态。',
+    broker_role_pending_note: '激活后你的 bot 会被 KANet 自动托管拉起。换 token: /broker_apply <新 token>',
     broker_role_apply_has_addr: '👉 申请当 broker (你已绑地址 {addr}):',
     broker_role_apply_step1_hasaddr: '① 去 @BotFather /newbot 拿一个你自己的 bot token',
-    broker_role_apply_step2_hasaddr: '② /broker_apply <你的 bot token> — 提交申请 (待 Owner 审批后激活)',
-    broker_role_warn: '⚠ 申请提交后需 Owner 审批才激活(防佣金滥用/女巫)。你的 bot token 加密存储、绝不外显。',
+    broker_role_apply_step2_hasaddr: '② /broker_apply <你的 bot token> — 提交即激活',
+    broker_role_warn: 'ℹ 测试网无许可·提交即激活。你的 bot token 加密存储、绝不外显。',
 
     // brokerEarnings function
     earnings_title: '💰 你的 broker 收益',

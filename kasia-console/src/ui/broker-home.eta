@@ -56,10 +56,10 @@
 
   <!-- KANet-UI 2026-06-22 (Owner 钦定 玩家→轻路 broker onboarding 骨架, task#4): 地址制自助申请。
        区别于上面 S-A (relay 制 gateway): 此卡 re-key 到【地址】= broker 本质身份 (玩家当玩家时绑的地址转 broker 不变)。
-       骨架 = 存 + 审批门 (Owner 经 /identities 批 trust→approved)。多-bot tg-manager 同步呈现市场 = 下一步。 -->
+       提交即激活 (Owner 2026-07-04 钦定移除人工审批门, 测试网无许可自由进出)。多-bot tg-manager 同步呈现市场 = 下一步。 -->
   <div x-show="!loading" class="rh-block mb-5">
     <div class="rh-block-title"><span class="rh-block-dot bg-emerald-500"></span>玩家轻路 · 成为 broker（地址制）</div>
-    <p class="text-xs text-ink-500 mb-3">用<strong>你的 Kaspa 地址</strong>（当玩家时绑的地址，转 broker 不变）+ 你的 <strong>Telegram bot token</strong>（@BotFather 拿）申请当 broker。Owner 审批后，你的 bot 对外呈现同一批市场/同规则，差别只在带量的分润进<strong>你的地址</strong>（broker 1.6%）。<span class="text-amber-600">骨架阶段：先存+等审批，多-bot 同步呈现为下一步。</span></p>
+    <p class="text-xs text-ink-500 mb-3">用<strong>你的 Kaspa 地址</strong>（当玩家时绑的地址，转 broker 不变）+ 你的 <strong>Telegram bot token</strong>（@BotFather 拿）申请当 broker。提交即激活，你的 bot 对外呈现同一批市场/同规则，差别只在带量的分润进<strong>你的地址</strong>（broker 1.6%）。<span class="text-amber-600">骨架阶段：多-bot 同步呈现为下一步。</span></p>
     <div class="space-y-3 max-w-xl">
       <div>
         <label class="rh-stat-label block mb-1">你的 Kaspa 地址（broker 收款 = 此地址）</label>
@@ -83,8 +83,8 @@
       <div x-show="onboard.error" class="text-xs text-red-500" x-text="onboard.error"></div>
       <div x-show="onboard.result" class="text-xs rounded-lg px-3 py-2"
            :class="onboard.result && onboard.result.status === 'approved' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'">
-        <span x-show="onboard.result && onboard.result.status === 'approved'">✅ 已审批：该地址是 approved broker，可对外呈现市场吃 1.6% 分润。</span>
-        <span x-show="onboard.result && onboard.result.status === 'pending'">⏳ 待审批：申请已存，等 Owner 在 /identities 给该地址设 trust(recommended/owner)。</span>
+        <span x-show="onboard.result && onboard.result.status === 'approved'">✅ 已激活：该地址是 approved broker，可对外呈现市场吃 1.6% 分润。</span>
+        <span x-show="onboard.result && onboard.result.status === 'pending'">⏳ 未激活：地址被标记 blocked，需 Owner 在 /identities 手动放行。</span>
         <span x-show="onboard.result && onboard.result.onboarded === false">该地址还没提交过申请。</span>
         <span class="block text-ink-400 mt-0.5" x-show="onboard.result && onboard.result.trust_level" x-text="'当前 trust: ' + (onboard.result && onboard.result.trust_level)"></span>
       </div>

@@ -285,7 +285,8 @@ bot.command('earnings', async (ctx) => {
   return ctx.reply(M.brokerEarnings(r.json, nodeIncome, lang), { disable_web_page_preview: true });
 });
 // /broker_apply <bot token> — 提交 broker 自助申请 (地址制): broker_address = 用户 /link 地址,
-// bot_token = 用户自己的 @BotFather token (加密落库, 永不外显)。落 pending, 待 Owner 批 trust 激活。
+// bot_token = 用户自己的 @BotFather token (加密落库, 永不外显)。提交即激活 (Owner 2026-07-04 钦定
+// 测试网无许可自由进出, 移除人工审批门, 见 kanet-broker.js onboard endpoint)。
 bot.command('broker_apply', async (ctx) => {
   initLang(ctx);
   const lang = getLang(ctx);

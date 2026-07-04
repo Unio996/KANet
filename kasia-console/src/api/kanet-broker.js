@@ -321,11 +321,20 @@ export async function registerKanetBrokerRoutes(fastify) {
         VALUES (?,?,?,?,?,?,?)`).run(randomUUID(), broker_address, tokenEnc, bot_username || null, 'pending', now, now);
     }
 
-    // 确保该地址在 identities 有行 → Owner 才能在 /identities UI 给它设 trust (审批门)。已存在则不动。
-    sqlite.prepare(`INSERT OR IGNORE INTO identities (id, network, address, display_name, identity_type, created_at, updated_at)
-      VALUES (?,?,?,?,?,?,?)`).run(randomUUID(), net, broker_address, bot_username || 'broker applicant', 'remote', now, now);
+    // Permissionless broker onboarding (Owner 2026-07-04 钦定: 测试网无许可自由进出, 移除人工审批门,
+    // Bettor 拍板 #5zftp1 — 只放行 broker 申请这一条路径, 不动 identities.trust_level 在别处的语义/含义):
+    // 提交即视为 recommended (= reconcileBrokerBots() 单源判定 trust_level IN ('owner','recommended') 直接放行)。
+    // 不降级既有更高信任(owner 不动)·不解封 blocked 地址(Owner 显式拉黑的另有原因, 申请 broker 不该悄悄解封)。
+    const existingIdn = sqlite.prepare('SELECT trust_level FROM identities WHERE address = ?').get(broker_address);
+    if (!existingIdn) {
+      sqlite.prepare(`INSERT INTO identities (id, network, address, display_name, identity_type, trust_level, created_at, updated_at)
+        VALUES (?,?,?,?,?,?,?,?)`).run(randomUUID(), net, broker_address, bot_username || 'broker applicant', 'remote', 'recommended', now, now);
+    } else if (existingIdn.trust_level === 'normal') {
+      sqlite.prepare('UPDATE identities SET trust_level = ?, updated_at = ? WHERE address = ?').run('recommended', now, broker_address);
+    }
+    // existingIdn.trust_level in ('owner','recommended') → 已放行不动; 'blocked' → 不解封.
 
-    return reply.send({ ok: true, broker_address, status: 'pending', note: '已提交。等待 Owner 审批 (在 /identities 给该地址设 trust=recommended/owner 即 approved)。' });
+    return reply.send({ ok: true, broker_address, status: 'approved', note: '已提交, 即时激活 (testnet 无许可进出, 无需人工审批)。' });
   });
 
   // GET /api/kanet-broker/onboard/status?address=… — 查单个地址 onboarding 状态 (token 永不回)。

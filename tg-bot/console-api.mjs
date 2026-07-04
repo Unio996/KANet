@@ -139,7 +139,8 @@ export function tgWalletSend(tgUserId, to, amountKas) {
 }
 
 // ── broker onboarding (Owner 钦定 2026-06-22): user 在 bot 里申请当 broker (地址制) ──
-// 申请落 pending; Owner 经 /identities 批 trust→approved 才激活 (auth 门已落 = 公开自助安全)。
+// 提交即激活 (Owner 2026-07-04 钦定移除人工审批门, 测试网无许可自由进出; trust_level 自动设
+// recommended, 不降级已有 owner/不解封 blocked, 见 kanet-broker.js onboard endpoint)。
 // 状态查 (token 永不回); 申请提交 (用户的 /link 地址 + 他的 @BotFather token)。
 export function brokerOnboardStatus(address) {
   return req('GET', `/api/kanet-broker/onboard/status?address=${encodeURIComponent(address)}`);
