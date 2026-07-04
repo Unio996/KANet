@@ -40,23 +40,40 @@ function _miningRelayId() {
   return (process.env.MINING_RELAY_ID || '').trim() || null;
 }
 
+function _writeAlertEvent(eventType, summary, payload) {
+  try {
+    sqlite.prepare(`
+      INSERT INTO events (id, event_scope, event_type, source, level, summary, payload_json, created_at)
+      VALUES (?, 'system', ?, 'mining-utxo-consolidate', 'warn', ?, ?, datetime('now'))
+    `).run(randomUUID(), eventType, summary, JSON.stringify(payload));
+  } catch (e) { console.warn(`[mining-consolidate] events insert fail (non-fatal): ${e.message}`); }
+}
+
 function _alertIfOverThreshold(relayId, utxosBefore) {
   if (utxosBefore == null) return;
   if (utxosBefore > ALERT_THRESHOLD) {
     if (_alerted) return; // already alerted this episode
     _alerted = true;
     console.warn(`[mining-consolidate] ALERT: ${relayId.slice(0, 8)} pre-consolidate UTXO count ${utxosBefore} > threshold ${ALERT_THRESHOLD} — cron may be stalled or mining rate spiked, intervene before it approaches the unknown crash zone`);
-    try {
-      sqlite.prepare(`
-        INSERT INTO events (id, event_scope, event_type, source, level, summary, payload_json, created_at)
-        VALUES (?, 'system', 'mining_consolidate_utxo_drift', 'mining-utxo-consolidate', 'warn', ?, ?, datetime('now'))
-      `).run(randomUUID(),
-        `Mining address ${relayId.slice(0, 8)} UTXO count (${utxosBefore}) exceeded the ${ALERT_THRESHOLD} tripwire (known-clean ceiling is ${546}). Cron may be stalled or mining rate increased — investigate before the address approaches the unverified crash zone.`,
-        JSON.stringify({ relayId, utxosBefore, threshold: ALERT_THRESHOLD }));
-    } catch (e) { console.warn(`[mining-consolidate] events insert fail (non-fatal): ${e.message}`); }
+    _writeAlertEvent('mining_consolidate_utxo_drift',
+      `Mining address ${relayId.slice(0, 8)} UTXO count (${utxosBefore}) exceeded the ${ALERT_THRESHOLD} tripwire (known-clean ceiling is 546). Cron may be stalled or mining rate increased — investigate before the address approaches the unverified crash zone.`,
+      { relayId, utxosBefore, threshold: ALERT_THRESHOLD });
   } else if (_alerted) {
     _alerted = false; // recovered — clear so a future breach alerts again
   }
+}
+
+// NWT #34 final review (2026-07-04): the utxosBefore check above only fires on a SUCCESSFUL
+// consolidate_utxo result — but the most dangerous failure mode (the getUtxosByAddresses fetch itself
+// starting to fail/crash as the address grows) throws instead, landing in the catch block. That's
+// exactly the case this whole alert system exists to catch, so it must not be silent there either.
+let _fetchFailAlerted = false;
+function _alertOnCommandFailure(relayId, errMessage) {
+  if (_fetchFailAlerted) return; // de-dupe: one events row per stall episode
+  _fetchFailAlerted = true;
+  _writeAlertEvent('mining_consolidate_command_failure',
+    `Mining address ${relayId.slice(0, 8)} consolidate_utxo command threw (${String(errMessage).slice(0, 160)}) instead of returning a result. This may mean the underlying UTXO fetch is starting to fail as the address grows — the same failure mode the 400-UTXO tripwire exists to prevent. Investigate immediately.`,
+    { relayId, error: String(errMessage).slice(0, 300) });
 }
 
 export async function miningConsolidateTick() {
@@ -70,9 +87,11 @@ export async function miningConsolidateTick() {
     if (r?.consolidated) {
       console.log(`[mining-consolidate] ${relayId.slice(0, 8)} consolidated ${r.utxosBefore}→1 (${r.rounds} round) tx=${(r.txId || '').slice(0, 12)}`);
     }
+    if (r?.ok !== false) _fetchFailAlerted = false; // command returned cleanly — clear any prior failure-alert latch
     return r || { ok: false, reason: 'no_result' };
   } catch (e) {
     console.warn(`[mining-consolidate] ${relayId.slice(0, 8)} tick fail (non-fatal, retry next cycle): ${e.message}`);
+    _alertOnCommandFailure(relayId, e.message);
     return { ok: false, reason: e.message };
   } finally {
     running = false;
