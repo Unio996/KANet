@@ -2725,9 +2725,15 @@ export async function registerPoolRoutes(fastify) {
             actualPayoutKas = Number(myWin.amount) / 1e8;
             actualPayoutChainVerified = true;   // winner_details 只收 received===true 的条目(daemon writeback 过滤过)
           } else if (ev.win_direction === 0 || ev.win_direction === 1) {
-            // 已结算·知道哪边赢了·这个 bettor 不在赢家名单 = 真输了(非"待结算")
+            // NWT 审(2026-07-04, 部署前抓到): 不在 winner_details 里≠真输了——若 myDirection===win_direction
+            // 但没进 winner_details, 是"赢了但 claim 失败没到账"(#21 settled_partial_claims 那种), 不是"你输了"。
+            // 必须先比对方向, 真不同方向才是真输; 同方向缺席 = 赢了待发放(不误判成假阴性, 比模糊 pending 更危险)。
             outcomeWinner = ev.win_direction;
-            didWin = false;
+            if (myDirection === ev.win_direction) {
+              didWin = true; actualPayoutKas = null; actualPayoutChainVerified = false;   // 赢了·claim 未到账·金额未知不瞎猜
+            } else {
+              didWin = false;
+            }
           }
           // ev 存在但 win_direction 缺失(老结构/尚在写入中) → outcomeWinner/didWin 留 null(继续显示"待结算", 不误判)。
         } else if (meta.phase2_winner === 0 || meta.phase2_winner === 1) {
