@@ -21,7 +21,11 @@ const DEMO_BROKER_ADDRESS = process.env.WORLDCUP_DEMO_BROKER_ADDRESS || 'kaspate
 const CONSOLE_BASE = process.env.WORLDCUP_CONSOLE_BASE || 'http://127.0.0.1:3200';
 const TICK_MS = parseInt(process.env.WORLDCUP_SCHEDULE_TICK_MS, 10) || 1800000; // 30min — 非高频需求, 省资源
 const CREATE_WINDOW_HOURS = 48; // G1 §3: kickoff 前 24-48h 自动建盘
-const DEADLINE_BUFFER_HOURS = 4; // G1 决策1: deadline = kickoff + 4h
+// #NWT审(2026-07-04, b3f41655): 原硬编码 4h 是 G1 §2 初稿数字, 已被同日晚些时候的 G7 扫描精化
+// 结论覆盖(小组赛+3.5h/淘汰赛+4.5h, kickoff+3.5h前judge撞ABSTAIN的历史盘实证)——本 cron 的
+// schedule 全是淘汰赛阶段(R16起, 无小组赛), 统一用淘汰赛的 4.5h(90'+加时30'+点球+ESPN更新延迟
+// +判定缓冲), 原 4h 对可能进点球大战的场次偏紧, 有过早判定撞 ABSTAIN 的实risk。
+const DEADLINE_BUFFER_HOURS = 4.5; // G7 扫描结论(淘汰赛), 非 G1 §2 初稿的 4h
 
 // 占位符检测: 真实 FIFA 队伍缩写(ESPN team.abbreviation)从不含数字; 占位符(RD16 W1/QFW2/SF L1)全含数字。
 function isPlaceholder(abbr) {
