@@ -615,6 +615,24 @@ owner=KANet-UI;co-verify=Bettor(待回)。
 
 ---
 
+### 🎉 世界杯 G1-G9 上线门冲刺 + #34 主库/挖矿 mega-UTXO 根治(2026-07-04·公开 7/9 唯一硬 blocker 收口)
+#### G1-G9 门状态收口
+- **G4(faucet 拓扑)**：百人冒烟从 100/100 全崩 → 三层根因(mega-UTXO wasm 崩溃/`markUtxoSpent`字段路径死代码从未生效/split-utxos 端点硬编码 targetCount)逐个修完,最终冒烟 44/100 成功+56 笔优雅"余额不足"报错、0 崩溃 0 超时 = PASS。NWT 提供 runtime 实测的 `entry.entry?.outpoint.X` 字段路径帮 J2 定位第二层根因。
+- **G1(措辞 pre-flight)**：NWT 审两轮(设计 CONDITIONAL GO 2 BLOCKING → 落码 CONDITIONAL PASS 1 洞,均被 J2/Bettor 采纳修复)。核心修法:决赛/季军赛拆独立 win 模板(非 advance)+ pre-flight 镜像源核对改逻辑等价三态 fail-closed(非字面 text-equals)。NWT 补测 soccer/fifa.world event id + 点球战场景(ESPN `winner:true` 官方标记,非比分推算)双双验证通过,世界杯判定链路 de-risk 完成。
+- **G5-5a(瞬态重试)**：NWT ship 审 PASS,附一条 best-effort DB 写入吞错的非阻塞观察。
+- **#41(oracle liveness)**：见上条,独立 PASS。
+- **G3/G6/G7/G8**:各自完成(cap 按叶子数非人数、operator runbook、45 个 ABSTAIN 盘分类、i18n EN默认)。
+
+#### #34 主库 256M/294.7万-UTXO 根治(三轮迭代,NWT 全程 co-verify)
+- **根因**(qzdh7nar 协议层实证,读 rusty-kaspa 源码):`GetUtxosByAddresses` 在 Borsh/gRPC/wRPC-JSON 任何编码下都没有分页/游标,服务端必须先物化全量结果——主库(FaucetRelay-tn-2)294.7万 UTXO 已达到协议级不可读的墙,consolidate 该地址本身需要先读它,无解(Direction A 不可行)。
+- **Direction C 定案**:挖矿收款迁到全新地址,靠 cron 让新地址 UTXO 数永远处在有界安全区(不追求"找到精确崩溃点",而是待在已知干净区之下)。
+- **NWT 三轮红队审**:①机制安全审 PASS(复用 design-v2 B 时期已加固的 `consolidateUtxosRelay`,`withSendLock`原子互斥/`minFragments`阈值真生效/disjoint-address 自检)②抓到告警覆盖缺口(`catch`异常分支——即最危险的"fetch 本身开始崩"场景——原本不写 `events` 表只有 `console.warn`,被 Bettor 升级为启用前必须补,qzdh7nar 当场修复,NWT 复核 PASS)③上线时暴露的 coinbase 成熟度真实 bug(`DEFRAG_MIN_DEPTH=400` < 协议要求的 1000,导致 consolidate 100% 被节点拒绝),NWT 对正在挖矿的地址做真实 RPC 查询验证 `isCoinbase` 字段路径确实可读(非 fallback 到默认值,修复非空心)。
+- **最终验证**:console 重启后 cron 连续成功 tick(1755→1/21round、115→1/3round),新地址稳定在 262 UTXO(远低于已知安全线),余额守恒无损。Bettor 24h 观察期收尾。
+- **副产物**:transaction.mjs 的 `markUtxoSpent`/`filterPendingUtxos` 死代码 bug(G4 期间修)获得跨节点(J1tn 独立节点连发验证)cross-node 二次实证。
+- owner=qzdh7nar(设计+落码)+ KANet-UI(主机执行/相关调研);reviewer/红队=NWT(三轮);协调/co-verify=Bettor。
+
+---
+
 ## 归档(已收敛旧线,留索引)
 - **scale-test backend-20**(2026-06-10):干净 demonstrate 20 并发 settle,框架 §10.2/§9.3 活案例。已收敛。
 - **tg-bot-web-user-e2e**(§14 首个受控运行):演化为线 3 可玩 demo。
