@@ -166,9 +166,12 @@ export async function stopRelay(relayNodeId) {
  * relays (e.g. Owner-qrymjvc-tn) down — operator hit it manually 2026-05-30 ~10:00.
  */
 export async function startAll() {
+  // 2026-07-04 (查漏补缺·qzdh7nar/KANet-UI): 原 INNER JOIN adapter_nodes 排除没绑 adapter 的 relay——
+  // 但 startRelay() 本身(上方)用 LEFT JOIN，adapter 只是可选的 http_port 来源，不是启动必要条件。
+  // 条件比实际需求严 = 无 adapter 的 relay 在 Console 重启后永远不会自动拉起(#34 挖矿 relay 撞过)。
+  // 改成跟 startRelay() 资格条件一致，不要求 adapter。
   const accounts = sqlite.prepare(
     `SELECT r.id FROM relay_nodes r
-     JOIN adapter_nodes a ON a.id = r.adapter_node_id
      WHERE r.address IS NOT NULL
        AND (r.mnemonic_encrypted IS NOT NULL OR r.privkey_encrypted IS NOT NULL)`
   ).all();
