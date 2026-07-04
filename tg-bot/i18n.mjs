@@ -244,6 +244,7 @@ export const LANGS = {
     swap_testnet_note: '⚠ Swap is fully implemented and ready — mainnet only. This is a testnet preview: do NOT send KAS here.',
     swap_step1: '1) From your own wallet, send the KAS you want to exchange on-chain to the broker receive address:',
     swap_step2: '2) The broker will ask for your USDT receive chain + address (reply "use bnb 0x..." etc.), then sends payment on-chain.',
+    swap_broker_not_configured: '(broker not configured — Owner picks one on the Console settings page)',
     swap_warn: '⚠ Your funds are under your control at all times: you initiate payment from your own address, bot never touches your funds.',
 
     // /broker role function (messages.mjs)
@@ -336,6 +337,8 @@ export const LANGS = {
     mybets_dir_cnt: ' ({n} bets)',
     mybets_placed_at: '  Placed: {time}',
     mybets_deadline: '  Closes {deadline} · Auto-settles after close to linked address',
+    mybets_pool_odds: 'Pool: YES {yes}% / NO {no}%',
+    cross_node_maker: 'cross-node',
     mybets_addmore: '➕ More/reverse: {title}',
 
     // /record (formatRecordCard, prediction-menu.mjs) — 世界杯玩法 UI 战绩卡
@@ -354,6 +357,11 @@ export const LANGS = {
     champions_title: '🏆 World Cup Champion — Top {n}',
     champions_footer: 'Tap a team to bet they win the whole tournament. ℹ testnet KAS only — not real money.',
     help_champions: '/champions — Bet on who wins the World Cup',
+
+    // people-count unit suffix (Owner 2026-07-04 抓: EN 面板出现硬编码中文"人") — EN 无后缀 (👥N 本身够读),
+    // ZH 加"人"(数字后缀习惯)。hotMarkets/sportsCardBlock 用, 别再裸写 '人'。
+    people_unit: '',
+    markets_unit: 'markets',
   },
 
   zh: {
@@ -595,6 +603,7 @@ export const LANGS = {
     swap_testnet_note: '⚠ 兑换功能已完整实现，仅在主网运行。这是测试网预览，请勿在此发送 KAS。',
     swap_step1: '1) 从你自己的钱包,把要兑换的 KAS 链上转到 broker 收款地址:',
     swap_step2: '2) broker 会问你 USDT 收哪条链 + 地址(回复 "用 bnb 0x..." 之类),然后链上回款。',
+    swap_broker_not_configured: '(broker 未配置 — Owner 在 Console 设置页选)',
     swap_warn: '⚠ 钱全程你自己链上掌控:你从自己地址发起付款,bot 不经手、碰不到你的钱。',
 
     // /broker role function
@@ -687,6 +696,8 @@ export const LANGS = {
     mybets_dir_cnt: ' ({n} 笔)',
     mybets_placed_at: '  押注于 {time}',
     mybets_deadline: '  截止 {deadline} · 开奖后自动结算到账绑定地址',
+    mybets_pool_odds: '池: YES {yes}% / NO {no}%',
+    cross_node_maker: '跨节点',
     mybets_addmore: '➕ 加注/反手: {title}',
 
     // /record (战绩卡)
@@ -705,6 +716,9 @@ export const LANGS = {
     champions_title: '🏆 世界杯冠军 · 前 {n}',
     champions_footer: '点击球队押它夺冠。ℹ 仅测试网 KAS · 非真钱。',
     help_champions: '/champions — 押谁能夺得世界杯冠军',
+
+    people_unit: '人',
+    markets_unit: '盘',
   },
 };
 

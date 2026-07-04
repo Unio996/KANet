@@ -105,9 +105,9 @@ function _groupMarketEntries(markets) {
 
 // KANet-UI 2026-06-07 r308: market 出单人 label. backend /api/pool/markets LEFT JOIN relay_nodes
 // 返 maker_name; 跨节点 maker (= relay_nodes 本节点无 record) → name=null, fallback 短 id.
-function makerLabel(m) {
+function makerLabel(m, lang = 'en') {
   if (m && m.maker_name) return m.maker_name;
-  if (m && m.maker_relay_id) return '跨节点 ' + String(m.maker_relay_id).slice(0, 8);
+  if (m && m.maker_relay_id) return t(lang, 'cross_node_maker') + ' ' + String(m.maker_relay_id).slice(0, 8);
   return '?';
 }
 
@@ -205,6 +205,7 @@ export async function formatMyBets(linkedAddr, lang = 'en') {
     payoutBackTotal: 0, // 返回总 = 赢实拿 + 退款拿回 (实际收到 KAS)
     stakeOpenTotal: 0,  // 在押总 = 押注中 + 已截止等开奖 + 待入账 (= 还在系统里的钱)
     wonKas: 0,
+    wonStakeKas: 0,     // #Bettor 2026-07-04 误导bug修: 赢盘那部分的原始投入(算真实盈利要减掉这个,非整场stakeInTotal)
     lostStakeKas: 0,
     refundKas: 0,
     settledPendingCnt: 0,
@@ -221,6 +222,7 @@ export async function formatMyBets(linkedAddr, lang = 'en') {
     if (p.settle_txid && p.did_win === true) {
       const payout = Number(p.actual_payout_kas) || 0;
       totals.wonKas += payout;
+      totals.wonStakeKas += stake;
       totals.payoutBackTotal += payout;
     } else if (p.settle_txid && p.did_win === false) {
       totals.lostStakeKas += stake;
@@ -243,14 +245,21 @@ export async function formatMyBets(linkedAddr, lang = 'en') {
       totals.stakeOpenTotal += stake;
     }
   }
-  const netKas = totals.payoutBackTotal - totals.stakeInTotal;
-  const netSign = netKas >= 0 ? '+' : '';
+  // Bettor 2026-07-04 误导bug修 (公开劝退级): Net 之前 = payoutBackTotal - stakeInTotal, 把还在盘里
+  // 没结算的 active stake 也算进"亏损"——全 active 用户(常态: 刚押完盘没打)看到"净亏-6000😞"=以为钱输光。
+  // 改: Net 只算已结算部分(赢盘净盈利 - 输盘损失), 退款不算盈亏(拿回原样)。没有任何盘结算过时,
+  // 不显示 Net 行(数字上不存在"净"这回事), 用中性的 mybets_total_active 已经说清"钱还在系统里".
+  const hasSettled = totals.wonKas > 0 || totals.lostStakeKas > 0;
+  const settledNetKas = (totals.wonKas - totals.wonStakeKas) - totals.lostStakeKas;
+  const netSign = settledNetKas >= 0 ? '+' : '';
   const lines = [t(lang, 'mybets_header', { n: positions.length, m: byMarket.size })];
   // 三个核心数字 (永显):
   lines.push(t(lang, 'mybets_total_in', { kas: totals.stakeInTotal.toFixed(4) }));
   lines.push(t(lang, 'mybets_total_back', { kas: totals.payoutBackTotal.toFixed(4), won: totals.wonKas.toFixed(4), refunded: totals.refundKas.toFixed(4) }));
   lines.push(t(lang, 'mybets_total_active', { kas: totals.stakeOpenTotal.toFixed(4) }));
-  lines.push(t(lang, 'mybets_net', { sign: netSign, kas: netKas.toFixed(4) }) + `  ${netKas >= 0 ? '🎉' : '😞'}`);
+  if (hasSettled) {
+    lines.push(t(lang, 'mybets_net', { sign: netSign, kas: settledNetKas.toFixed(4) }) + `  ${settledNetKas >= 0 ? '🎉' : '😞'}`);
+  }
   // 明细分布 (按状态拆):
   const detail = [];
   if (totals.openCnt > 0)            detail.push(t(lang, 'mybets_detail_open', { n: totals.openCnt, kas: totals.openStake.toFixed(4) }));
@@ -315,7 +324,7 @@ export async function formatMyBets(linkedAddr, lang = 'en') {
 
     // 共享 meta (odds + 押注时间 + 截止)
     const odds = sample.yes_implied_prob != null
-      ? `池: YES ${(sample.yes_implied_prob * 100).toFixed(0)}% / NO ${(100 - sample.yes_implied_prob * 100).toFixed(0)}%`
+      ? t(lang, 'mybets_pool_odds', { yes: (sample.yes_implied_prob * 100).toFixed(0), no: (100 - sample.yes_implied_prob * 100).toFixed(0) })
       : '';
     if (odds) lines.push(`  ${odds}`);
     if (firstLocked) {
@@ -349,20 +358,21 @@ export async function formatRecordCard(linkedAddr, lang = 'en') {
   if (!positions.length) return t(lang, 'record_empty');
 
   let wonCount = 0, lostCount = 0, refundedCount = 0, openCount = 0;
-  let stakeInTotal = 0, payoutBackTotal = 0;
+  let wonStakeKas = 0, lostStakeKas = 0, payoutBackTotal = 0; // #Bettor 2026-07-04 误导bug修(同 mybets)
   const marketIds = new Set();
   for (const p of positions) {
     marketIds.add(p.market_id);
     const stake = Number(p.stake_kas) || 0;
-    stakeInTotal += stake;
-    if (p.settle_txid && p.did_win === true) { wonCount++; payoutBackTotal += Number(p.actual_payout_kas) || 0; }
-    else if (p.settle_txid && p.did_win === false) { lostCount++; }
+    if (p.settle_txid && p.did_win === true) { wonCount++; wonStakeKas += stake; payoutBackTotal += Number(p.actual_payout_kas) || 0; }
+    else if (p.settle_txid && p.did_win === false) { lostCount++; lostStakeKas += stake; }
     else if (p.refund_txid) { refundedCount++; payoutBackTotal += stake; }
     else { openCount++; }
   }
   const decidedCount = wonCount + lostCount; // win-rate denominator: 只算真出胜负的, 退款/未决不算
   const winRatePct = decidedCount > 0 ? Math.round((wonCount / decidedCount) * 100) : null;
-  const netKas = payoutBackTotal - stakeInTotal;
+  // Net 只算已结算(赢盈利-输损失), 未决仓位不计入(还在盘里非亏损) — 同 mybets 误导bug修.
+  const hasSettled = wonCount > 0 || lostCount > 0;
+  const netKas = (payoutBackTotal - wonStakeKas) - lostStakeKas;
   const netSign = netKas >= 0 ? '+' : '';
 
   const lines = [
@@ -371,8 +381,10 @@ export async function formatRecordCard(linkedAddr, lang = 'en') {
     winRatePct !== null
       ? t(lang, 'record_winrate', { pct: winRatePct, won: wonCount, lost: lostCount })
       : t(lang, 'record_winrate_none'),
-    t(lang, 'record_net', { sign: netSign, kas: netKas.toFixed(4) }) + `  ${netKas >= 0 ? '🎉' : '😞'}`,
   ];
+  if (hasSettled) {
+    lines.push(t(lang, 'record_net', { sign: netSign, kas: netKas.toFixed(4) }) + `  ${netKas >= 0 ? '🎉' : '😞'}`);
+  }
   if (openCount > 0) lines.push(t(lang, 'record_open', { n: openCount }));
   if (refundedCount > 0) lines.push(t(lang, 'record_refunded', { n: refundedCount }));
   lines.push('', t(lang, 'record_footer'));
@@ -453,7 +465,7 @@ export async function startBetFromMarket(tgUser, marketId) {
   persist();
   const lines = [
     `📊 ${specTitle(market.resolution_rule_spec)}`,
-    t(lang, 'bet_detail_maker', { maker: makerLabel(market) }),
+    t(lang, 'bet_detail_maker', { maker: makerLabel(market, lang) }),
     t(lang, 'bet_detail_deadline_count', { deadline: fmtDeadline(market.deadline, lang), count: dr.json.bettor_count || 0, stake: market.maker_stake_kas ?? '?' }),
   ];
   const _crit = specCriteria(market.resolution_rule_spec);
@@ -603,7 +615,7 @@ async function _handleReplyImpl(tgUser, text, linkedAddr) {
         lines.push(`${i + 1}. 🎯 ${trunc(e.eventTitle, 54)} (${e.markets.length})`);
       } else {
         const m = e.market;
-        lines.push(`${i + 1}. ${trunc(specTitle(m.resolution_rule_spec), 56)}  · ${makerLabel(m)} · ${fmtDeadline(m.deadline, lang)} · ${m.bettor_count || 0}`);
+        lines.push(`${i + 1}. ${trunc(specTitle(m.resolution_rule_spec), 56)}  · ${makerLabel(m, lang)} · ${fmtDeadline(m.deadline, lang)} · ${m.bettor_count || 0}`);
       }
     });
     lines.push('', t(lang, 'bet_market_list_footer'));
@@ -627,7 +639,7 @@ async function _handleReplyImpl(tgUser, text, linkedAddr) {
     if (!matches.length) return t(lang, 'bet_search_none', { term });
     s.stage = 'market'; s.markets = matches; s.marketEntries = null;
     const lines = [t(lang, 'bet_search_head', { term, count: matches.length }), ''];
-    matches.forEach((m, i) => lines.push(`${i + 1}. ${trunc(specTitle(m.resolution_rule_spec), 56)}  · ${makerLabel(m)} · ${fmtDeadline(m.deadline, lang)} · ${m.bettor_count || 0}`));
+    matches.forEach((m, i) => lines.push(`${i + 1}. ${trunc(specTitle(m.resolution_rule_spec), 56)}  · ${makerLabel(m, lang)} · ${fmtDeadline(m.deadline, lang)} · ${m.bettor_count || 0}`));
     lines.push('', t(lang, 'bet_market_list_footer'));
     return lines.join('\n');
   }
@@ -646,7 +658,7 @@ async function _handleReplyImpl(tgUser, text, linkedAddr) {
         const lines = [t(lang, 'bet_market_list_head', { head }), ''];
         s.marketEntries.forEach((e, i) => {
           const mm = e.market;
-          lines.push(`${i + 1}. ${trunc(specTitle(mm.resolution_rule_spec), 56)}  · ${makerLabel(mm)} · ${fmtDeadline(mm.deadline, lang)} · ${mm.bettor_count || 0}`);
+          lines.push(`${i + 1}. ${trunc(specTitle(mm.resolution_rule_spec), 56)}  · ${makerLabel(mm, lang)} · ${fmtDeadline(mm.deadline, lang)} · ${mm.bettor_count || 0}`);
         });
         lines.push('', t(lang, 'bet_market_list_footer'));
         return lines.join('\n');
@@ -662,7 +674,7 @@ async function _handleReplyImpl(tgUser, text, linkedAddr) {
     s.stage = 'detail'; s.market = full;
     const lines = [
       `📊 ${specTitle(full.resolution_rule_spec)}`,
-      t(lang, 'bet_detail_maker', { maker: makerLabel(full) }),
+      t(lang, 'bet_detail_maker', { maker: makerLabel(full, lang) }),
       t(lang, 'bet_detail_deadline_count', { deadline: fmtDeadline(full.deadline, lang), count: dr.json.bettor_count || 0, stake: full.maker_stake_kas ?? '?' }),
     ];
     const _critF = specCriteria(full.resolution_rule_spec);

@@ -157,7 +157,7 @@ export function sportsCardBlock(groups, botUsername, lang = 'en') {
       : (g.event_title || g.card_group_id || '').slice(0, 30);
     const totalPool = (g.total_pool_kas || 0).toFixed(0);
     const totalBettors = g.total_bettor_count || 0;
-    lines.push(`🏟 ${teamLine} · 💰${totalPool}KAS${totalBettors > 0 ? ` · 👥${totalBettors}人` : ` · ${t(lang, 'sports_new')}` }`);
+    lines.push(`🏟 ${teamLine} · 💰${totalPool}KAS${totalBettors > 0 ? ` · 👥${totalBettors}${t(lang, 'people_unit')}` : ` · ${t(lang, 'sports_new')}` }`);
     const rowBtns = [];
     for (const leg of (g.legs || []).slice(0, 3)) {
       const label = _legLabel(leg, lang);
@@ -296,7 +296,7 @@ export function hotMarkets(markets, botUsername, lang = 'en') {
     const totalKas = gMarkets.reduce((s, m) => s + (m.total_pool_kas || 0), 0);
     const maxBettors = Math.max(...gMarkets.map(m => m.bettor_count || 0));
     const dl = fmtDl(gMarkets[0].deadline);
-    lines.push(`${idx}. ⚽ ${matchHeader} · ${gMarkets.length} 盘`);
+    lines.push(`${idx}. ⚽ ${matchHeader} · ${gMarkets.length} ${t(lang, 'markets_unit')}`);
     lines.push(`   💰${totalKas.toFixed(0)} KAS · 👥${maxBettors}人${dl ? ' · ' + dl : ''}`);
     // §11 信任卡 (J1 定版 2026-06-28): 全真原语·不超卖·禁写「自动结算/无法作弊/去信任」(Track B 未完成)
     lines.push(`   ${t(lang, 'hot_trust_card')}`);
@@ -360,7 +360,7 @@ export function swapFlow(broker, lang = 'en', network = 'testnet-12') {
   if (network !== 'mainnet') {
     return [t(lang, 'swap_title', { name }), '', t(lang, 'swap_testnet_note')].join('\n');
   }
-  const addr = broker?.address || '(broker 未配置 — Owner 在 Console 设置页选)';
+  const addr = broker?.address || t(lang, 'swap_broker_not_configured');
   return [
     t(lang, 'swap_title', { name }),
     '',
