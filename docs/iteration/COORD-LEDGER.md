@@ -672,6 +672,23 @@ Owner 令全队停一切新功能，转向梳理现有系统、查漏补缺。Be
 
 ---
 
+## 🔴🔴 #48：bshard 盘 /mybets 显示不出输赢(NWT 发现，DM/UI 查漏补缺阶段，launch-critical)
+### 发现
+NWT 查 `/api/pool/my-positions`(pool.js:2706-2713)：`did_win`/`outcome_winner` 判定依赖 `metadata.phase2_winner` 字段，但 grep 确认**只有 v0.6 时代的 `pool-market-settler.js` 写这个字段，`bshard-settle-daemon.mjs`/`bshard-auto-settler.mjs` 从来没写过**。实测验证：今天亲自验证过完全正确结算+付款的 `0rrm8`(#41 测试盘，`complete:true`，winner 真实到账 10KAS)metadata 里也完全没有任何输赢相关字段。**影响面 = 所有 bshard/kanet_v07 盘**(含全部世界杯盘)，不是 #21/#33 那类"钱没发出去"，是纯粹"钱可能 100% 到账但用户在 /mybets 永远看不到你赢了/你输了"，卡在模糊的 settledPendingCnt 分类。
+
+### J2 深挖根因（比 my-positions 读错字段更深一层）
+`settle_evidence` 现在只存聚合数(winners 计数 + claim_txids 数组)，**没有 per-bettor 明细**(谁赢的、谁的 claim_txid 是哪个)——要显示"这个 bettor 赢没赢"必须知道该 bettor 自己的判定结果，不是市场级聚合数。`settleMarketLive` 的 `r.claims` 已有完整 `{pk, amount}` 明细，只是没落库持久化。
+
+### 处置（Bettor 协调，#48 顶置）
+- **launch-critical = 新盘(世界杯)结算后正确显输赢**，7/5 首场(Brazil v Norway)前必修——真实用户第一眼看到的东西。
+- **历史 backfill(187 老完成盘)= follow-up**，不阻新盘先修。
+- 分工：J2 定数据源(daemon writeback 补 per-bettor 明细，复用现成 `r.claims`)→ KANet-UI 接前端 display → **Bettor+NWT co-verify**(造 1 赢 1 输的真实结算 bshard 盘，验 /mybets 正确显示"赢+金额"/"输"，不卡 pending)。
+- 撞车记录：KANet-UI 一度想直接改 my-positions 读 `pool_bettor_sides.claim_txid`，但 J2 验证该列从未被 bshard daemon/settler 写过(只退款路径用)——KANet-UI 主动 git checkout 撤回错误方案，让给 J2(settle_evidence 结构的建造者)先定数据源。
+
+owner=J2(数据源)+ KANet-UI(display，待结构定稿接手)；co-verify=Bettor+NWT。
+
+---
+
 ## 归档(已收敛旧线,留索引)
 - **scale-test backend-20**(2026-06-10):干净 demonstrate 20 并发 settle,框架 §10.2/§9.3 活案例。已收敛。
 - **tg-bot-web-user-e2e**(§14 首个受控运行):演化为线 3 可玩 demo。
