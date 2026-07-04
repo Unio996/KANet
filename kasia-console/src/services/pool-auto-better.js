@@ -20,6 +20,13 @@
 import { randomBytes } from 'node:crypto';
 import { sqlite } from '../db/client.js';
 import { isRelayAlive, sendCommandAsync } from './relay-manager.js';
+import { getSidesByLogicalMarket } from '../lib/pool-bettor-sides-query.mjs';
+
+// #42 加大方案 cap 安全 (Bettor 2026-07-04): 8+ bot 高频押·世界杯盘会很快填满 900 叶子上限
+// (G3 register-v07/prep 的硬顶, pool.js MARKET_MAX_LEAVES_G3)。满的盘该自动被 bot 跳过换下一个,
+// 不是撞 PREP_FAIL 空转。跟 create-v07 cap-check 同一个 shard-aware helper(非裸查 market_id,
+// 防 shard-blind 漏计——bshard 押注按 shard_market_id 存, 裸查 logical id 会漏, 见 ANTI-PATTERNS).
+const AUTO_BET_MAX_LEAVES = 900;
 
 // J2-tn r428 (Bettor r466 Owner 钦定火力全开): tick 60s→20s, PER_TICK 2→50 (= 押所有开放市场).
 // 8 单并发 0-bet 饿死 surface → 调猛 3x 频率 + 每 tick 全市场扫.
@@ -153,7 +160,7 @@ async function _placeBet(bot, market) {
 // 加一路 UNION: card_group_id LIKE 'fifa-2026%' 的市场无条件补进候选池(不受 deadline 排名限制, 但仍走
 // 同一套 pending_bettors/v0.7/deadline-window/非-commingled 安全过滤), 世界杯盘永远在池里能被随机抽到.
 async function _fetchEligibleMarkets() {
-  return sqlite.prepare(`
+  const rows = sqlite.prepare(`
     SELECT id, protocol_version, deadline FROM (
       SELECT id, protocol_version, deadline
       FROM pool_markets
@@ -185,6 +192,8 @@ async function _fetchEligibleMarkets() {
         ))
     )
   `).all(NEAR_DEADLINE_SEC, NEAR_DEADLINE_SEC);
+  // cap 安全: 跳过已达 900 叶子上限的盘(shard-aware 跨 shard 计数, 非裸 market_id 查).
+  return rows.filter((r) => getSidesByLogicalMarket(r.id, sqlite).length < AUTO_BET_MAX_LEAVES);
 }
 
 function _fetchRelayBots() {

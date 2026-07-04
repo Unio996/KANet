@@ -568,6 +568,12 @@ startAutoBetterCron();
 import { startHouseAgentCron } from './services/pool-house-agent.js';
 startHouseAgentCron();
 
+// #42 加大方案·治本 (Bettor 2026-07-04 "别再充一次跑几单又干"): 自动巡检 AutoBetter/HouseAgent
+// relay 余额, 低于阈值从 mining 储备(#34 consolidate 出的 faucet reserve)自动补, 不用再手动 curl
+// transfer。env: BOT_AUTOFUND_SOURCE_RELAY_ID(必设才启动) / THRESHOLD_KAS(500) / AMOUNT_KAS(3000).
+import { startBotAutofundCron } from './services/pool-bot-autofund.js';
+startBotAutofundCron();
+
 // J1 #27d (Owner public-testnet hardening sprint 2026-06-14): boot catch-up for market_publishes
 // missed by in-mem chunk reassembly (LRU-evicted under sign_req re-broadcast flood, or lost across a
 // restart). Rebuilds pre-restart misses from the DURABLE broadcast_messages store (idempotent: the

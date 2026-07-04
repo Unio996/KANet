@@ -25,6 +25,11 @@ const TICK_INTERVAL_MS = Number(process.env.HOUSE_AGENT_TICK_MS) || 300_000; // 
 const STAKE_KAS = Number(process.env.HOUSE_AGENT_STAKE_KAS) || 20;
 const RELAY_NAME = process.env.HOUSE_AGENT_RELAY_NAME || 'HouseAgent';
 const CONSOLE_BASE = process.env.HOUSE_AGENT_CONSOLE_BASE || 'http://127.0.0.1:3200';
+// #42 加大方案 (Bettor 2026-07-04 推荐"加对赌张力"): 散户 bot 押 house agent 反面(underdog)——
+// 形成真两边下注张力 + 演示"散户能击败 Agent"。UNDERDOG_RELAY_NAME 未设/relay 不存在则整段跳过
+// (house agent 自己的判断+押注不受影响, 这是独立可选层)。
+const UNDERDOG_RELAY_NAME = process.env.UNDERDOG_BOT_RELAY_NAME || 'UnderdogBot';
+const UNDERDOG_STAKE_KAS = Number(process.env.UNDERDOG_BOT_STAKE_KAS) || 15;
 const FETCH_TIMEOUT_FAST_MS = 10_000;
 const FETCH_TIMEOUT_TX_MS = 30_000;
 
@@ -39,6 +44,14 @@ async function fetchWithTimeout(url, opts, ms) {
   } finally {
     clearTimeout(t);
   }
+}
+
+function _fetchUnderdogBotRelay() {
+  const row = sqlite.prepare('SELECT id, address, name FROM relay_nodes WHERE name = ?').get(UNDERDOG_RELAY_NAME);
+  if (!row) return null;
+  const aliveCheck = isRelayAlive(row.id);
+  if (!aliveCheck?.alive) return null;
+  return row;
 }
 
 function _fetchHouseAgentRelay() {
@@ -70,14 +83,14 @@ async function _getJudgment(marketId) {
 }
 
 // 复用 pool-auto-better.js 同一套 register-v07 三步(prep→transfer→confirm, shard-aware) — 非重造.
-async function _placeJudgedBet(bot, marketId, direction) {
+async function _placeJudgedBet(bot, marketId, direction, stakeKas = STAKE_KAS) {
   const tag = marketId.slice(-12);
   const betId = randomBytes(8).toString('hex');
   try {
     const prepR = await fetchWithTimeout(`${CONSOLE_BASE}/api/pool/market/${marketId}/bettor/register-v07/prep`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ linked_addr: bot.address, direction, stake_kas: STAKE_KAS, bet_id: betId }),
+      body: JSON.stringify({ linked_addr: bot.address, direction, stake_kas: stakeKas, bet_id: betId }),
     }, FETCH_TIMEOUT_FAST_MS);
     const prep = await prepR.json();
     if (!prep.ok) return { tag, status: 'PREP_FAIL', error: String(prep.error || '').slice(0, 80) };
@@ -96,7 +109,7 @@ async function _placeJudgedBet(bot, marketId, direction) {
       const confirmR = await fetchWithTimeout(`${CONSOLE_BASE}/api/pool/market/${marketId}/bettor/register-v07/confirm`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ linked_addr: bot.address, direction, stake_kas: STAKE_KAS, bet_id: betId }),
+        body: JSON.stringify({ linked_addr: bot.address, direction, stake_kas: stakeKas, bet_id: betId }),
       }, FETCH_TIMEOUT_TX_MS);
       const confirm = await confirmR.json();
       if (confirm.registered) { confirmed = confirm; break; }
@@ -133,6 +146,16 @@ export async function houseAgentTick() {
       results.push({ market: m.id.slice(-12), verdict: j.verdict, bet: true, favored: j.favored, provider: j.provider, ...r });
       if (r.status === 'CONFIRMED') {
         console.log(`[house-agent] predicted+bet ${m.id.slice(-12)} → ${j.verdict} (favored=${j.favored}, ${j.provider}) ${STAKE_KAS} KAS tx=${r.side_tx}`);
+        // #42 加大方案 (Bettor 2026-07-04 推荐): 散户 bot 押 house agent 反面, 同一盘形成真两边张力
+        // + 演示"散户能击败 Agent"(favorite 爆冷不是没可能——世界杯淘汰赛本来就有 upset)。
+        const underdogBot = _fetchUnderdogBotRelay();
+        if (underdogBot) {
+          const underdogDirection = direction === 0 ? 1 : 0;
+          const ur = await _placeJudgedBet(underdogBot, m.id, underdogDirection, UNDERDOG_STAKE_KAS);
+          if (ur.status === 'CONFIRMED') {
+            console.log(`[house-agent] underdog counter-bet ${m.id.slice(-12)} → opposite of ${j.verdict} ${UNDERDOG_STAKE_KAS} KAS tx=${ur.side_tx}`);
+          }
+        }
       }
     }
     return { ok: true, processed: results.length, results };
