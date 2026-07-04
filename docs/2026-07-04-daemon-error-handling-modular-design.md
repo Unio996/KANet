@@ -141,7 +141,8 @@ UMA-pending 的市场（`outcome_market_source==='polymarket'` 且最近一次 j
 - [ ] `selectRipeMarkets` 改造：读 `metadata.uma_pending_since` + 退避表当前档位，未到间隔的市场不进 `ripe` 列表。**这是第二个容易漏的接线点**。
 - [ ] TRANSIENT 跨 tick 计数 + `stuck_transient` 告警状态。
 - [ ] 测试用例：①一个"完全无法识别的错误类型"输入 `classifyFailure`，验证不会导致 `protocol_status` 被意外改写（锁住 fail-safe 属性，NWT 认可的设计点）。②模拟畸形 RPC 响应触发的 `Cannot read property` 类错误，验证被分类成 TRANSIENT 而不是 CODE_BUG（验证判定顺序生效）。③UMA re-judge 全链路：ABSTAIN → 退避等待 → finalize → 正常结算，验证 `verifying` 状态在整个等待期间不被误标记。
-4. 这份设计目前只覆盖 `bshard-settle-daemon.mjs`（v0.7 bshard 结算路径）。`pool-market-settler.js`（v0.6 老系统）是否需要同款改良？范围待定，倾向不动（v0.6 是遗留系统，非本轮重点）。
+
+**范围声明（已在 §5 收敛，此处不再重复）**：本设计只覆盖 `bshard-settle-daemon.mjs`（v0.7 bshard 结算路径），`pool-market-settler.js`（v0.6 老系统）不动，非本轮范围。
 
 ---
 
