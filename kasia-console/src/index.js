@@ -605,6 +605,13 @@ startSettleDaemonCron();
 import { startBroadcasterUtxoMaintainerCron } from './lib/broadcaster-utxo.mjs';
 startBroadcasterUtxoMaintainerCron();
 
+// #34 Direction C (2026-07-04, qzdh7nar design + Bettor/NWT co-verify): mining payout moved off the
+// old 294.7万-UTXO address (protocol-level unreadable, GetUtxosByAddresses has no pagination — see
+// mining-utxo-consolidate.mjs header) to a fresh address. This cron keeps the NEW address's UTXO
+// count bounded so it never regrows into the same wall. No-op until MINING_RELAY_ID is set in kanet.env.
+import { startMiningConsolidateCron } from './lib/mining-utxo-consolidate.mjs';
+startMiningConsolidateCron();
+
 // Phase B Variant Expander 3-tier (Owner 5/16 钦定 "B" + Bettor r141 spec) — 30 min cron.
 // per scanner rec → auto-find related markets → 3 档 variant (激进/适中/保守) INSERT.
 // Phase 1 skeleton + UI surface, Phase 2 will integrate depth-500 /book API real-time.
