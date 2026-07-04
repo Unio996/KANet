@@ -637,6 +637,12 @@ startFaucetHealthCron();
 import { startSettleFailedAlertCron } from './lib/settle-failed-alert.mjs';
 startSettleFailedAlertCron();
 
+// 查漏补缺(2026-07-04晚, J2撞见C盘0字节可用·curl全炸): disk full会静默拖垮全系统,之前没有任何
+// 监控(全靠J2手动碰见)。跟faucet-health/settle-failed-alert同款模式: 只读监控+告警,不做任何自动
+// 清理(删文件风险高,交operator判断哪些安全删)。
+import { startDiskSpaceAlertCron } from './lib/disk-space-alert.mjs';
+startDiskSpaceAlertCron();
+
 // Phase B Variant Expander 3-tier (Owner 5/16 钦定 "B" + Bettor r141 spec) — 30 min cron.
 // per scanner rec → auto-find related markets → 3 档 variant (激进/适中/保守) INSERT.
 // Phase 1 skeleton + UI surface, Phase 2 will integrate depth-500 /book API real-time.
