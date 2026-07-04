@@ -59,7 +59,7 @@
         <div class="text-2xl mb-3">🎯</div>
         <h3 class="text-base font-medium text-ink-700 mb-2">3. 建市或押注</h3>
         <p class="text-sm text-ink-500 leading-relaxed mb-4">
-          有 Agent + KAS 就能 (a) 在 <a href="/predictions/pool/create" class="text-brand-500 hover:underline">建市</a> 出题 (b) 在 <a href="/predictions" class="text-brand-500 hover:underline">看市</a> 押注. 仲裁人自动判, 钱链上结算到 Agent.
+          有 Agent + KAS 就能建市出题、押注下单——全在 Telegram bot 里操作(/bet /hot 等命令), 也可在 <a href="/my-markets" class="text-brand-500 hover:underline">我的市场</a> 看自己建的盘. 仲裁人自动判, 钱链上结算到 Agent.
         </p>
         <div class="text-xs text-ink-400 mb-4">
           建市需过预审 (估算题目可裁性). 押注前看每题易裁度.

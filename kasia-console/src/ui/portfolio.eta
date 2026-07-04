@@ -444,10 +444,10 @@
               </div>
               <div x-show="!agent.aevo || !agent.aevo.connected" class="text-[10px] text-ink-300">Aevo 未配置凭证</div>
 
-              <!-- Polymarket (Bettor 2026-07-04 纠偏: 这是真交易持仓集成非预言机结算标签, 标'UMA'反而
-                   是虚假标注——归入 predictions.eta 同一个"隐藏 or 保留真名"待 Owner 决定, 先 revert 回真名)
-                   — always visible with state (configured / not configured / no Polygon wallet) -->
-              <div class="mt-2 pt-2 border-t border-warm-100">
+              <!-- Polymarket 持仓卡片 — Owner+Bettor 2026-07-04 决定: 旧"工具化接入 Polymarket 交易 API"
+                   遗留(跟现在 KANet 预测系统两回事), 公开面隐藏(x-show=false, 不删代码/数据/API, 只不再
+                   渲染)。若未来要恢复此功能, 把 x-show="false" 改回原有条件即可. -->
+              <div x-show="false" class="mt-2 pt-2 border-t border-warm-100">
                 <div class="flex items-center justify-between text-[11px]">
                   <a href="/predictions" class="text-ink-600 font-medium hover:text-brand-600">Polymarket</a>
                   <span x-show="agent.polymarket?.configured" class="tabular-nums text-ink-700 font-medium" x-text="fmt(agent.polymarket?.approxValueUsd || 0)" title="持仓价值 + USDC.e + pUSD 合计"></span>

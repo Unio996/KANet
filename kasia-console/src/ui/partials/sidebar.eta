@@ -77,7 +77,12 @@
           class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= it._page === 'exchange' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
           兑换
         </a>
-        <!-- 预测市场 ▶ 嵌套 -->
+        <!-- 预测市场 ▶ 嵌套
+             Owner+Bettor 2026-07-04 决定: "看市场"(/predictions)+"建市场"(/predictions/pool/create)
+             是旧的"工具化接入 Polymarket 交易 API"遗留(pUSD/USDC.e/SS trustless escrow 等), 跟现在
+             KANet 预测系统(世界杯 bshard + create-v07 + tg-bot)是两回事(Owner 原话)。公开面隐藏这两个
+             入口(不删代码/不动 predictions.eta 内部逻辑, 只不再从导航可达)。"我的市场"(/my-markets)
+             保留——那是 KANet 自己 maker 视角市场管理, 不属于这批遗留。 -->
         <div x-data="{ pred: <%= _isPrediction ? 'true' : 'false' %> }">
           <button @click="pred = !pred"
             class="flex items-center justify-between w-full px-3 py-1.5 rounded-lg text-xs transition-colors pl-5 <%= _isPrediction ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
@@ -85,14 +90,6 @@
             <span class="text-[9px] transition-transform" :class="pred ? 'rotate-90' : ''">›</span>
           </button>
           <div x-show="pred" x-transition class="mt-0.5 space-y-0.5">
-            <a href="/predictions"
-              class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-8 <%= ['predictions','predictions-pool-detail'].includes(it._page) ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
-              看市场
-            </a>
-            <a href="/predictions/pool/create"
-              class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-8 <%= it._page === 'predictions-pool-create' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
-              建市场
-            </a>
             <a href="/my-markets"
               class="flex items-center px-3 py-1.5 rounded-lg text-xs transition-colors pl-8 <%= it._page === 'my-markets' ? 'bg-brand-50 text-brand-600 font-medium' : 'text-ink-400 hover:bg-warm-100 hover:text-ink-600' %>">
               我的市场

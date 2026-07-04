@@ -183,7 +183,7 @@
     <div class="card">
       <div class="text-[10px] text-ink-300 uppercase mb-2 flex items-center justify-between">
         <span>预测市场</span>
-        <a href="/predictions" class="text-brand-500 hover:text-brand-700 normal-case">详情 &rarr;</a>
+        <a href="/my-markets" class="text-brand-500 hover:text-brand-700 normal-case">详情 &rarr;</a>
       </div>
       <template x-if="predictions.length > 0">
         <div class="space-y-2">
