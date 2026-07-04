@@ -740,6 +740,90 @@ function checkR_SHARD_BLIND(filepath, content) {
   }
 }
 
+// ── R-COMMAND-REGISTRATION (#25, NWT 2026-07-04): relay.mjs command case 必在 commands.mjs 三层注册 ──
+// 根因(KI-49, 复刻 5+ 次实录·commands.mjs 头部自己列了教训): 有人加 relay.mjs 一个新 case 'x' handler,
+// 但忘了在 commands.mjs 里同步注册 COMMAND_TYPES/COMMAND_PAYLOAD_SCHEMA/COMMAND_FIELD_TYPES 三层 —
+// validateCommandPayload 在 switch 前查 COMMAND_TYPE_SET 找不到 → 静默 reject "unknown/invalid command
+// type" → 调用方(settler/daemon/broker)看到的是"Relay not running"或"INVALID COMMAND"这类误导性错误,
+// 真因是白名单没登记。今天(2026-07-04) #28 B(get_per_bet_address+sweep_per_bet)和历史上 sign_input_
+// for_settle / pool_side_refund_cancelled_tx / pool_refund_maker_unjoined_tx 等至少 5 次复刻同一个坑。
+// 这条 lint 做静态一次性核对: relay.mjs 里所有 case 字符串字面量, 必须都在 commands.mjs 的
+// COMMAND_TYPES 值集合里(第一层); COMMAND_TYPES 每个 key 必须在 COMMAND_PAYLOAD_SCHEMA 和
+// COMMAND_FIELD_TYPES 里都有对应条目(第二三层, 防只补了枚举没补 schema/field-types 这种半截注册)。
+function checkR_COMMAND_REGISTRATION() {
+  const relayFile = file('kasia-relay/src/relay.mjs');
+  const commandsFile = file('kasia-relay/src/lib/commands.mjs');
+  if (!exists(relayFile) || !exists(commandsFile)) return;
+  const relayContent = read(relayFile);
+  const commandsContent = read(commandsFile);
+
+  // relay.mjs case 字符串字面量(只认 case 'literal': 形态, 不含 case CONST: 这种间接引用 — 现状全库
+  // relay.mjs 命令 case 都是裸字符串字面量, 见 commands.mjs 头部注释 "2. Add case in relay.mjs switch").
+  const relayLines = relayContent.split('\n');
+  const relayCases = [];
+  for (let i = 0; i < relayLines.length; i++) {
+    const m = relayLines[i].match(/^\s*case\s+['"]([a-z][a-z0-9_]*)['"]\s*:/);
+    if (m) relayCases.push({ type: m[1], line: i + 1 });
+  }
+
+  // commands.mjs 三层: COMMAND_TYPES { KEY: 'value', ... } / COMMAND_PAYLOAD_SCHEMA { [COMMAND_TYPES.KEY]: [...] }
+  // / COMMAND_FIELD_TYPES { [COMMAND_TYPES.KEY]: {...} }。抓 block 用 Object.freeze({ ... }); 边界(找不到就空).
+  function extractBlock(varName) {
+    const re = new RegExp(`export const ${varName}\\s*=\\s*Object\\.freeze\\(\\{`);
+    const m = re.exec(commandsContent);
+    if (!m) return '';
+    // 从匹配点数括号找配对的 }); (block 内不会有更深层嵌套的 { 使这个简单计数失配 — 三个 export 都是扁平对象)
+    let depth = 1, i = m.index + m[0].length;
+    const start = i;
+    while (i < commandsContent.length && depth > 0) {
+      if (commandsContent[i] === '{') depth++;
+      else if (commandsContent[i] === '}') depth--;
+      i++;
+    }
+    return commandsContent.slice(start, i - 1);
+  }
+  const typesBlock = extractBlock('COMMAND_TYPES');
+  const schemaBlock = extractBlock('COMMAND_PAYLOAD_SCHEMA');
+  const fieldTypesBlock = extractBlock('COMMAND_FIELD_TYPES');
+
+  // COMMAND_TYPES: KEY: 'value' 对 (跳注释行)
+  const typeEntries = [...typesBlock.matchAll(/^\s*([A-Z][A-Z0-9_]*)\s*:\s*['"]([a-z][a-z0-9_]*)['"]/gm)];
+  const typeKeyToValue = new Map(typeEntries.map((m) => [m[1], m[2]]));
+  const typeValueSet = new Set(typeEntries.map((m) => m[2]));
+
+  // ① relay.mjs 每个 case 必须在 COMMAND_TYPES 值集合里 — 这是历史上真正咬人的那一层.
+  for (const { type, line } of relayCases) {
+    if (!typeValueSet.has(type)) {
+      violate(
+        'R-COMMAND-REGISTRATION (#25, KI-49 第 N 次复刻)',
+        `relay.mjs case '${type}' 没在 commands.mjs COMMAND_TYPES 注册 — validateCommandPayload 会静默 reject "unknown command type", 调用方只会看到"Relay not running"/"INVALID COMMAND"这类误导性错误(真因是白名单没登记)。加 COMMAND_TYPES.${type.toUpperCase()}: '${type}' + 同步 COMMAND_PAYLOAD_SCHEMA/COMMAND_FIELD_TYPES(三层缺一不可)。`,
+        relayFile, line
+      );
+    }
+  }
+
+  // ②③ COMMAND_TYPES 每个 key 必须在 SCHEMA / FIELD_TYPES 里有 [COMMAND_TYPES.KEY]: 条目 — 防"加了枚举
+  // 没加后两层"这种半截注册(validateCommandPayload 对 SCHEMA 里没有的 type 会 skip 必填字段校验,
+  // 不是硬拒绝, 但意味着这个命令的必填参数完全不受检查, 静默数据缺陷比硬拒绝更隐蔽).
+  for (const [key] of typeKeyToValue) {
+    const ref = `[COMMAND_TYPES.${key}]`;
+    if (!schemaBlock.includes(ref)) {
+      warn(
+        'R-COMMAND-REGISTRATION [WARN]',
+        `commands.mjs COMMAND_TYPES.${key} 没在 COMMAND_PAYLOAD_SCHEMA 里注册对应 [COMMAND_TYPES.${key}] 条目 — 这个命令类型的必填字段完全不受 validateCommandPayload 校验(半截注册, 比硬拒绝更隐蔽)。`,
+        commandsFile, 0
+      );
+    }
+    if (!fieldTypesBlock.includes(ref)) {
+      warn(
+        'R-COMMAND-REGISTRATION [WARN]',
+        `commands.mjs COMMAND_TYPES.${key} 没在 COMMAND_FIELD_TYPES 里注册对应 [COMMAND_TYPES.${key}] 条目 — 这个命令类型的字段类型完全不受校验(半截注册)。`,
+        commandsFile, 0
+      );
+    }
+  }
+}
+
 // R-COMMINGLE-GUARD (FINDING-2 ③, J1 2026-06-28): every bettor stake-lock handler in pool.js must call the
 // single-source assertNotCommingled guard. commit1 inlined the check in register-v07 ONLY and missed the other
 // 5 register handlers (register / register-v06{prep,confirm} / register-external{prep,confirm}) → auto-bet + TG
@@ -879,6 +963,7 @@ for (const fp of targets) {
 }
 checkR10();
 checkR_NULLIFIER_I64();
+checkR_COMMAND_REGISTRATION();  // R-COMMAND-REGISTRATION (#25, KI-49 防重复): relay.mjs case 必在 commands.mjs 三层注册
 checkScratchClutter();
 checkDocPath();                          // R-DOC-PATH/R-DOC-DUPLICATE (③ doc-lint 2026-06-29): date-prefixed doc 必住 docs/ 根·同名多路径 → fail
 
