@@ -81,9 +81,11 @@ bot.command('start', async (ctx) => {
     if (w.ok && w.json?.ok) custodial = !!(w.json.exists && w.json.address === addr);
   } catch { /* Console 暂不可达 → null → 中性 custody 警告 */ }
   // Bettor 2026-06-29: 首页从"热榜(>=3真人)"换"可押市场(usable+有空位)": 用户要能押的盘不是最热的盘.
+  // 查漏补缺(2026-07-05 晚, Owner 精确纠正"不加不减·只收真实膨胀点"): 热榜条数曾从设计值 5
+  // 悄悄涨到 8(唯一该动的地方, 收回 5), 赛事卡组数原本就是 5, 不动(不是新猜的数字)。
   let trending = null, sports = null;
   try {
-    const [av, cg] = await Promise.all([api.availableMarkets(8), api.cardGroups(5)]);
+    const [av, cg] = await Promise.all([api.availableMarkets(5), api.cardGroups(5)]);
     if (av.ok && av.json?.ok) trending = av.json.markets || [];
     if (cg.ok && cg.json?.ok) sports = cg.json.card_groups || [];
   } catch { /* Console 暂不可达 → 无区块 */ }
@@ -120,7 +122,7 @@ bot.callbackQuery('lang:toggle', async (ctx) => {
       } catch { /* ignore */ }
       let trending = null, sports = null;
       try {
-        const [av, cg] = await Promise.all([api.availableMarkets(8), api.cardGroups(5)]);
+        const [av, cg] = await Promise.all([api.availableMarkets(5), api.cardGroups(5)]);
         if (av.ok && av.json?.ok) trending = av.json.markets || [];
         if (cg.ok && cg.json?.ok) sports = cg.json.card_groups || [];
       } catch { /* ignore */ }
