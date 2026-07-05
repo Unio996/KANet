@@ -199,8 +199,13 @@ export async function getBlockAtDaa(deadlineDaa) {
   // from an SPC block — info.sink is the canonical start.
   const startHash = info?.sink;
   if (!startHash) throw new Error(`cannot resolve SPC tip from getBlockDagInfo (sink missing; got: ${JSON.stringify(Object.keys(info || {}))})`);
-  const MAX_WALK = 120000;   // J2 2026-06-23 ozzeu close LAND: 50000 @ ~10BPS testnet-12 ≈ 83min walk 窗; 长拖延 close(>83min,
-  //   如调试)→ backward SPC walk 够不着 deadline_daa → enforce committee re-derive fail (getBlockAtDaa)。120000≈3.3h。
+  const MAX_WALK = 250000;   // J2 2026-07-05 世界杯首场 7rztt 卡死案例: 120000(≈3.3h@10BPS)被 settle-daemon
+  //   队列积压(130+老盘排在前面)挡住, 4.3h 后才轮到轮到7rztt, 窗口已过, backward-walk 从 tip 够不着 deadline
+  //   → 永久卡死(排队优先级救不了它, 只能扩大窗口)。250000≈6.9h@10BPS, 给队列积压留更大容错余量。
+  //   (根本收敛: bshard-settle-daemon.mjs selectRipeMarkets 需要优先级排序防止新盘被老盘挡住, 249000 只是
+  //   扩大安全窗, 双管齐下。)
+  //   J2 2026-06-23 ozzeu close LAND: 50000 @ ~10BPS testnet-12 ≈ 83min walk 窗; 长拖延 close(>83min,
+  //   如调试)→ backward SPC walk 够不着 deadline_daa → enforce committee re-derive fail (getBlockAtDaa)。
   //   (decouple follow-up: production close 分钟级不撞; MAX_WALK 注释旧假设 1BPS=14h 实 ~10BPS=83min 是 config bug, verifiable-endBlock 硬化是后续。)
   let cursor = startHash;
   let lastEligible = null; // last block where daa >= deadlineDaa during walk

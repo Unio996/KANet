@@ -231,6 +231,13 @@ function scheduleUmaRejudge(marketId, market) {
 // ripe = v0.7 + deadline_daa+buffer passed + 未结算 + 非 settle_failed + betCount>0 + 非 commingled。
 function selectRipeMarkets(currentDaa, pmt, limit) {
   // 只结 active-未结 (pending_bettors/verifying)·排终态 (cancelled/completed/refunded/refunding/settle_failed)。
+  // 优先级排序 (J2 2026-07-05, 世界杯首场 7rztt 被 130+ polymarket 镜像盘积压堵住的案例·Bettor 拍):
+  // outcome_market_source='kanet_v07'(KANet 自有盘, 如世界杯) 排最前, 同优先级内再按 deadline_daa ASC。
+  // 之前纯 deadline ASC 排序会让"最老的积压盘"永远排最前——如果那些老盘本身卡在慢速 MAX_WALK 路径
+  // (每个 27-30s) 或长期 UMA-pending, 新的自有盘(如世界杯)会被无限期挤到后面, 即使 MAX_PER_TICK
+  // 调大也救不了(它们仍排在慢盘后面, 而 tick 内是串行处理)。KANet 自有盘数量少(个位数到几十)、
+  // 用户可见、demo/展示价值高, 理应优先; polymarket 镜像盘数量大(百+)、UMA-pending 本身有自己的
+  // 退避机制保护(不会被无限重试消耗每个 tick 的处理量), 排后面不影响其正确性只影响相对速度。
   const rows = sqlite.prepare(`
     SELECT * FROM pool_markets
     WHERE protocol_version = 'v0.7'
@@ -238,7 +245,7 @@ function selectRipeMarkets(currentDaa, pmt, limit) {
       AND deadline_daa IS NOT NULL
       AND deadline_daa + ? <= ?
       AND protocol_status IN ('pending_bettors', 'verifying')
-    ORDER BY deadline_daa ASC
+    ORDER BY (CASE WHEN outcome_market_source = 'kanet_v07' THEN 0 ELSE 1 END) ASC, deadline_daa ASC
   `).all(FINALITY_BUFFER, currentDaa);
   const ripe = [];
   for (const m of rows) {
