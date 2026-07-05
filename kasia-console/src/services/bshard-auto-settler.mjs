@@ -334,7 +334,13 @@ async function verifyClosedLanded(ctx, expectedAddr, closeTxid, consolidatedPool
         });
         if (ok) return true;
       }
-    } catch { /* transient·retry */ }
+    } catch (e) {
+      // #33 followup (2026-07-05, NWT co-verify 抓到): 之前这里静默吞掉所有异常, 不区分"真的没落地"
+      // (预期的瞬态情况, 会一直重试到 depth 够) vs "relayPost 本身抛出代码 bug"(比如签名变了/字段解构
+      // 错误)——后者会白白烧完 20×3s=60s 全部重试预算才返回 false, 且外层拿不到任何线索。这里只加日志
+      // (不改变控制流/不改变返回值), 留诊断痕迹, 出问题时能快速判断是链上真没落地还是代码本身坏了。
+      console.warn(`[verifyClosedLanded] attempt ${attempt + 1}/20 threw (非落地判定失败, 诊断用): ${e?.message || e}`);
+    }
     await _sleep(3000);
   }
   return false;
@@ -347,7 +353,10 @@ async function verifyClaimLanded(ctx, winnerAddr, claimTx) {
     try {
       const r = await ctx.relayPost(ctx.feeRelay.id, { type: 'check_utxo_landed', address: winnerAddr, txid: claimTx, minDepth: REORG_SAFE_MIN_DEPTH });
       if (r?.landed) return true;
-    } catch { /* retry */ }
+    } catch (e) {
+      // 同 verifyClosedLanded 上方注释: 只加诊断日志, 不改变控制流/返回值。
+      console.warn(`[verifyClaimLanded] attempt ${attempt + 1}/20 threw (非落地判定失败, 诊断用): ${e?.message || e}`);
+    }
     await _sleep(3000);
   }
   return false;
