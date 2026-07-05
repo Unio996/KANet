@@ -45,15 +45,27 @@ async function fetchEspnTeams(espnEventId) {
   return { home: home.team?.abbreviation, homeName: home.team?.displayName, away: away.team?.abbreviation, awayName: away.team?.displayName };
 }
 
-async function createAdvanceMarket({ espnEventId, team, teamName, kickoffUtc, deadlineUtc }) {
+async function createAdvanceMarket({ espnEventId, team, teamName, awayName, kickoffUtc, deadlineUtc }) {
   const spec = {
     title: `Will ${teamName} advance?`,
     title_zh: `${teamName} 能晋级下一轮吗?`,
-    resolution_criteria: `以${teamName}是否晋级为准。90分钟战平→加时→点球大战，点球晋级也算「是/YES」。以赛事官方最终晋级结果为准（ESPN event ${espnEventId}）。`,
+    // 查漏补缺(2026-07-05, Owner 亲测撞见英文DM面板显示中文规则): 之前 resolution_criteria 只写了
+    // 中文版, 忽略了title/title_zh已经建立的双语约定——现在补齐, 英文盘主字段 resolution_criteria
+    // 用英文(跟 title 主字段是英文一致), resolution_criteria_zh 放中文版(tg-bot prediction-menu.mjs
+    // specCriteria() 按用户 lang 选择正确版本)。
+    resolution_criteria: `Resolves based on whether ${teamName} advances to the next round. If tied after 90 minutes, extra time and then a penalty shootout apply — advancing via penalties still counts as YES. Based on the official final advancement result (ESPN event ${espnEventId}).`,
+    resolution_criteria_zh: `以${teamName}是否晋级为准。90分钟战平→加时→点球大战，点球晋级也算「是/YES」。以赛事官方最终晋级结果为准（ESPN event ${espnEventId}）。`,
     data_source_canonical: `https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/summary?event=${espnEventId}`,
     resolution_predicate: { metric: 'winner', op: '==', operand: team },
     source_label: 'ESPN FIFA World Cup',
     card_group_id: `fifa-2026-${espnEventId}`,
+    // #27 层B 归并元数据补齐(2026-07-05, Owner 亲测撞见"Mexico advance"没跟同赛事归并·qzdh7nar 查实
+    // 根因: 本脚本从没写 event_id/event_title, tg-bot _groupMarketEntries() 归并键是 spec.event_id
+    // 不是 card_group_id——这两个字段命名跟 sports-card-builder.mjs(6/27 那批 8-market-type 赛事卡的
+    // 建造器, 已测试, event_id=String(d.event_id))保持一致, 不是本脚本自创一套。event_title 给"XX vs
+    // YY"格式(awayName 若缺失退化为只显示主队名, 不崩)。
+    event_id: String(espnEventId),
+    event_title: awayName ? `${teamName} vs ${awayName}` : teamName,
   };
   const body = {
     maker_relay_id: MAKER_RELAY_ID, outcome_side: 'YES',
@@ -112,6 +124,7 @@ export async function worldcupScheduleTick() {
       // home team 作为"晋级方"标的(跟已建的 4 场 R16 盘一致的约定)。
       const res = await createAdvanceMarket({
         espnEventId: row.espn_event_id, team: teams.home, teamName: teams.homeName || teams.home,
+        awayName: teams.awayName || teams.away,
         kickoffUtc: row.kickoff_utc, deadlineUtc,
       });
       if (res.ok) {
