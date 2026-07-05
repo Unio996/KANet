@@ -2330,6 +2330,18 @@ export async function registerPoolRoutes(fastify) {
     return reply.send({ ok: true, count: scored.length, score_formula: `bettor_count*${BETTOR_WEIGHT} + total_pool_kas (activity+commitment 加权, 非裸 volume)`, filters: { status: 'pending_bettors', deadline_gt: '+1h', created_lt: '-1h', min_pool_kas: minPoolSompi / 1e8, exclude_commingled: true, exclude_auto_bet: true, min_bettors: 3 }, trending: scored });
   });
 
+  // 查漏补缺(2026-07-05 晚, Owner 实测撞见"首页全巴西"): 从 title/resolution_rule_spec 提取球队名
+  // 一类的专有名词, 当"事件主体"标识, 供跨数据源(ESPN 原生盘/Polymarket 镜像盘)选品多样化用。
+  // 简单启发式: 抓 event_title(更规整, "TeamA vs TeamB" 格式)优先, 没有则退 title 本身; 抓大写开头
+  // 连续字母的词, 排除掉常见非球队名的英文常用词(问句/连接词)。
+  function _extractSubjectTokens(rawSpec) {
+    let spec;
+    try { spec = JSON.parse(rawSpec); } catch { return []; }
+    const text = spec.event_title || spec.title || '';
+    const stop = new Set(['Will', 'The', 'Team', 'To', 'Win', 'Advance', 'More', 'Markets', 'On', 'End', 'In', 'A', 'Draw', 'Reach']);
+    return [...new Set((text.match(/[A-Z][a-zA-Z]+/g) || []).filter((w) => !stop.has(w)))];
+  }
+
   // GET /api/pool/markets/available?limit=8 — 可押市场 (Bettor 2026-06-29): usable+raw<50+非commingled+deadline>+10min,
   // 按 total_pool_kas+recency 排, 无活跃人数门 (区别 trending 的 >=3 真人门)。只读展示端点·不碰钱。
   // raw<50 用 raw COUNT(*) 非 honestCount (J1/Bettor no-strand line: AutoBetter 的 bet 是真 covenant leaf).
@@ -2362,7 +2374,7 @@ export async function registerPoolRoutes(fastify) {
         AND pool_markets.deadline > ?
         AND pool_markets.created_at < ?
     `).all(now + 600, createdCutoffIso);   // deadline > +10min (用户还来得及押)
-    const available = rows.map((r) => {
+    const sorted = rows.map((r) => {
       const makerSompi = r.maker_stake_amount || 0;
       const makerOnYes = r.outcome_side === 'YES';
       const yesPool = Number(r.yes_sompi) + (makerOnYes ? makerSompi : 0);
@@ -2403,8 +2415,28 @@ export async function registerPoolRoutes(fastify) {
         }
         return acc;
       }, [])
-      .sort((a, b) => (b._totalPool - a._totalPool) || (b._createdAt > a._createdAt ? 1 : -1))
-      .slice(0, limit)
+      .sort((a, b) => (b._totalPool - a._totalPool) || (b._createdAt > a._createdAt ? 1 : -1));
+    // 查漏补缺(2026-07-05 晚, Owner 实测撞见: 首页热榜 5 条 4 条巴西, 且 ESPN 原生盘("Will Brazil
+    // advance?")跟 Polymarket 镜像盘("Brazil vs. Norway: Team to Advance")是同一场真实比赛却当成
+    // 两条不同内容推荐)。上面那段 conditionId 去重只挡得住"同一 conditionId"的重复, 挡不住"同一真实
+    // 事件、跨数据源、不同 conditionId"这种情况。加一层贪心多样性选择: 提取标题里的专有名词(球队名等)
+    // 当"事件主体"标识, 优先选主体不重叠的市场, 主体不够多样才回填剩下热度最高的(不砍数量, 只调顺序)。
+    const _selected = [];
+    const _usedSubjects = new Set();
+    const _backup = [];
+    for (const m of sorted) {
+      const tokens = _extractSubjectTokens(m.title);
+      const overlaps = tokens.length > 0 && tokens.some((t) => _usedSubjects.has(t));
+      if (!overlaps) {
+        _selected.push(m);
+        tokens.forEach((t) => _usedSubjects.add(t));
+      } else {
+        _backup.push(m);
+      }
+      if (_selected.length >= limit) break;
+    }
+    while (_selected.length < limit && _backup.length > 0) _selected.push(_backup.shift());
+    const available = _selected
       .map(({ _totalPool, _spineP2sh, _leafCount, _createdAt, _conditionId, ...m }) => ({ ...m, condition_id: _conditionId }));
     return reply.send({ ok: true, count: available.length, markets: available });
   });
