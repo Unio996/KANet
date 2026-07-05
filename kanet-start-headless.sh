@@ -14,6 +14,10 @@ START_MS=$(date +%s%3N 2>/dev/null || echo 0)
 
 mkdir -p "$LOG_DIR" "$PID_DIR"
 
+# 自重定向 launcher 输出 (2026-07-04 事故 #52, 见 kanet-start.sh 同款注释): 调用方手动重定向到
+# C 盘 Temp 一次性文件名, 反复重启攒满 C 盘。脚本自己接管, 固定写项目 LOG_DIR, 每次启动截断。
+exec > >(tee "$LOG_DIR/kanet-start-headless-launcher.log") 2>&1
+
 # ── 加载 kanet.env ─────────────────────────────────────────────────────────
 CONSOLE_ENCRYPTION_KEY=""
 OPENCLAW_TOKEN=""
