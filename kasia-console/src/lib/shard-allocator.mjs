@@ -45,7 +45,21 @@ export function projectShardSettleMass(stakeValuesSompi) {
 
 /** Would adding one more bettor (with `nextStakeSompi`) keep the shard within both caps? */
 export function shardHasRoom(shard, currentStakes, nextStakeSompi) {
-  const nextCount = (shard.bettor_count || 0) + 1;
+  // #fxcva (2026-07-05, 公测 live 撞见 J2 查实): 容量门必须读 current_leaf_state.count(真实烤进链上
+  // covenant 脚本的计数), 不能读 bettor_count(pool_bettor_sides 行数, 曾观察到跟链上真实 state 脱钩
+  // 3 笔——recordBettor() DB 写入没跟上但 register_append TX 已经落链推进了链上 count)。用脱钩的
+  // bettor_count 判断"有没有房"会让 allocator 继续往一个链上已经满员(count==SHARD_SEAL_COUNT)的
+  // leaf 路由新注册, covenant 自身的容量校验会拒(script ran but verification failed), 用户押注失败。
+  // 取 current_leaf_state.count 作为权威值, bettor_count 仅作 diagnostic fallback(理论不该走到, fail-closed
+  // 用较大值防止误判"有房")。
+  let leafCount = shard.bettor_count || 0;
+  if (shard.current_leaf_state) {
+    try {
+      const st = JSON.parse(shard.current_leaf_state);
+      if (Number.isFinite(st.count)) leafCount = Math.max(leafCount, st.count);
+    } catch { /* malformed state — fall back to bettor_count, other checks will catch data issues */ }
+  }
+  const nextCount = leafCount + 1;
   if (nextCount > SHARD_SEAL_COUNT) return false;
   const projMass = projectShardSettleMass([...currentStakes, nextStakeSompi]);
   if (projMass > SHARD_MASS_CEILING) return false;
