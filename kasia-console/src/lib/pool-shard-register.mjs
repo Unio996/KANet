@@ -158,38 +158,60 @@ async function _registerBettorOnShardInner(o) {
 
   // ── 'use': register_append on the open shard's current renewal leaf ────────────────────────────────────────
   if (alloc.action === 'use') {
-    const shard = alloc.shard;
+    let shard = alloc.shard;
     if (!shard.current_leaf_outpoint || !shard.current_leaf_state) {
       throw new Error(`shard ${shard.shard_market_id} missing current_leaf_outpoint/state (v172) — cannot register_append`);
     }
-    const st = JSON.parse(shard.current_leaf_state);                       // {local_yes, local_no, count, pool_value}
+    if (!shard.shard_redeem_hex) throw new Error(`shard ${shard.shard_market_id} missing shard_redeem_hex — genesis 应存; fail-closed 防 silverc-drift recompile (data-missing bug)`);
     const shardPoolId = hex32(`${logicalMarketId}-shard-${shard.shard_index}`);
     // bettor-independent ps template (4 dust-ticket fields are State, spliced per register)
     const psArtifact = computePoolSideArtifact(join(LIB, 'PoolSide_v08_shard.sil'), [ctorBytes32(bettorPk), ctorInt(direction), ctorInt(stake), ctorBytes32(z32)], silverc);
-    // current leaf redeem: splice current state into the stored genesis redeem (silverc-INDEPENDENT, drift-safe).
-    //   fail-closed (Bettor/NWT/UI convergent): shard_redeem_hex MUST be set at genesis (open_new). null = data-missing bug →
-    //   THROW, never silent recompile (recompile bets determinism on Console silverc==canonical = drift risk).
-    if (!shard.shard_redeem_hex) throw new Error(`shard ${shard.shard_market_id} missing shard_redeem_hex — genesis 应存; fail-closed 防 silverc-drift recompile (data-missing bug)`);
-    const curRedeem = spliceLeafState(shard.shard_redeem_hex, st);
-    const newState = { local_yes: st.local_yes + (direction === 0 ? stake : 0), local_no: st.local_no + (direction === 1 ? stake : 0), count: st.count + 1, pool_value: st.pool_value + stake };
+    const fundTx = await transfer(relayAddr, stake + 100_000_000);         // gateway funds stake-into-leaf + fee headroom (built once, reused across retries below — independent of which leaf-state we're appending onto)
 
-    const [leafTxid] = String(shard.current_leaf_outpoint).split(':');
-    const fundTx = await transfer(relayAddr, stake + 100_000_000);         // gateway funds stake-into-leaf + fee headroom
-    const witness = buildRegisterWitness({ side: direction, stake: BigInt(stake), leafOutIdx: 0, psOutIdx: 1, bettorPk, psArtifact });
-    const cmd = buildRegisterCommand({
-      witness, leafOutpointTxid: leafTxid, leafRedeemHex: curRedeem, currentLeafState: st,
-      bettorFunding: [{ outpointTxid: fundTx, address: relayAddr, index: 0 }], leafValueSompi: BigInt(st.pool_value),
-      leafContinuationState: newState, ticketDustSompi: TICKET_DUST, shardPoolId, changeAddress: relayAddr,
-    });
-    const rj = await rc(cmd);
-    const regTx = rj.txId || rj.txid;
-    const leafContAddr = rj.leafContinuationAddress || p2sh(spliceLeafState(shard.shard_redeem_hex, newState));
-    if (!regTx || !await landed(regTx, leafContAddr)) throw new Error(`register_append no land: ${JSON.stringify(rj).slice(0, 160)}`);
+    // #tip-lag retry (2026-07-05, Bettor 拍板·公测流量下 race 更频繁): register_append 撞
+    // "UTXO not found"(相当于打到一个刚被别的并发赢家抢先花掉的 stale outpoint)时, 不直接
+    // throw 让用户看到失败——重新从 DB 读一次这个 shard 的【当前】current_leaf_outpoint/state
+    // (若刚才是并发输家, 这次会读到赢家写完之后的新 tip), 用新 state 重建 witness/cmd 重试。
+    // 安全性: fundTx(付款进 gateway 的那笔转账)已经完成、金额只取决于 stake 不取决于具体
+    // outpoint, 不需要重来; "UTXO not found" 这个报错在 relay 侧(p2sh.mjs)是【构建阶段】
+    // 检查不到要花的 UTXO 就直接 throw, 从没广播过 TX, retry 不会双花/双register。有界 3 次
+    // (给两三个并发赢家轮流写完 DB 的时间), 每次之间不 sleep(重新读 DB 就是最新的, 不需要等)。
+    const MAX_TIP_RETRY = 3;
+    let lastErr = null;
+    for (let attempt = 0; attempt < MAX_TIP_RETRY; attempt++) {
+      if (attempt > 0) {
+        const fresh = db.prepare(`SELECT * FROM market_shards WHERE shard_market_id = ?`).get(shard.shard_market_id);
+        if (!fresh || !fresh.current_leaf_outpoint || !fresh.current_leaf_state) throw lastErr || new Error(`shard ${shard.shard_market_id} tip-retry: no fresh state to retry with`);
+        shard = fresh;
+      }
+      const st = JSON.parse(shard.current_leaf_state);                     // {local_yes, local_no, count, pool_value}
+      const curRedeem = spliceLeafState(shard.shard_redeem_hex, st);
+      const newState = { local_yes: st.local_yes + (direction === 0 ? stake : 0), local_no: st.local_no + (direction === 1 ? stake : 0), count: st.count + 1, pool_value: st.pool_value + stake };
+      const [leafTxid] = String(shard.current_leaf_outpoint).split(':');
+      const witness = buildRegisterWitness({ side: direction, stake: BigInt(stake), leafOutIdx: 0, psOutIdx: 1, bettorPk, psArtifact });
+      const cmd = buildRegisterCommand({
+        witness, leafOutpointTxid: leafTxid, leafRedeemHex: curRedeem, currentLeafState: st,
+        bettorFunding: [{ outpointTxid: fundTx, address: relayAddr, index: 0 }], leafValueSompi: BigInt(st.pool_value),
+        leafContinuationState: newState, ticketDustSompi: TICKET_DUST, shardPoolId, changeAddress: relayAddr,
+      });
+      try {
+        const rj = await rc(cmd);
+        const regTx = rj.txId || rj.txid;
+        const leafContAddr = rj.leafContinuationAddress || p2sh(spliceLeafState(shard.shard_redeem_hex, newState));
+        if (!regTx || !await landed(regTx, leafContAddr)) throw new Error(`register_append no land: ${JSON.stringify(rj).slice(0, 160)}`);
 
-    if (recordBettor) await recordBettor({ shardMarketId: shard.shard_market_id, shardIndex: shard.shard_index, bettorPk, direction, stakeSompi: stake, leafTx: regTx });
-    onBettorRegistered(db, shard.shard_market_id, { currentLeafOutpoint: `${regTx}:0`, currentLeafState: newState, nowSec: Math.floor(Date.now() / 1000) });
-    await _maybeDefrag(rc);
-    return { action: 'use', shardIndex: shard.shard_index, shardMarketId: shard.shard_market_id, shardP2sh: shard.shard_p2sh, leafTx: regTx, leafOutpoint: `${regTx}:0`, leafState: newState, payoutCovId };
+        if (recordBettor) await recordBettor({ shardMarketId: shard.shard_market_id, shardIndex: shard.shard_index, bettorPk, direction, stakeSompi: stake, leafTx: regTx });
+        onBettorRegistered(db, shard.shard_market_id, { currentLeafOutpoint: `${regTx}:0`, currentLeafState: newState, nowSec: Math.floor(Date.now() / 1000) });
+        await _maybeDefrag(rc);
+        return { action: 'use', shardIndex: shard.shard_index, shardMarketId: shard.shard_market_id, shardP2sh: shard.shard_p2sh, leafTx: regTx, leafOutpoint: `${regTx}:0`, leafState: newState, payoutCovId };
+      } catch (e) {
+        lastErr = e;
+        const isTipLag = /UTXO not found/i.test(e.message || '');
+        if (!isTipLag || attempt === MAX_TIP_RETRY - 1) throw e;
+        console.warn(`[registerBettorOnShard] tip-lag retry ${attempt + 1}/${MAX_TIP_RETRY} on ${shard.shard_market_id}: ${e.message}`);
+      }
+    }
+    throw lastErr;
   }
 
   // ── 'open_new' (A(b) 修, 2026-06-23 J2; 三方收敛 C1 安全洞修): genesis 一个【空】 ShardLeaf (count=0, maker seed, 非 bettor) ──
