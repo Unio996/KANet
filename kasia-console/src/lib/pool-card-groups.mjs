@@ -54,8 +54,14 @@ export function aggregateCardGroups(rows, commingledSpines, opts = {}) {
     if (!g) {
       g = {
         card_group_id: cgid,
+        // #876ohs fix (2026-07-05, Owner 实测撞见两张赛事卡都显"ESPN FIFA World Cup"联赛名):
+        //   sports-card-builder.mjs(6/27 多leg赛事卡建造器)的spec带home_team/away_team(缩写队名),
+        //   worldcup-schedule-cron.mjs(J2 7/4 简单advance盘脚本)的spec不带这两个字段,只带
+        //   event_title(完整"TeamA vs TeamB"字符串, 见#27归并那次backfill)——之前这里只认
+        //   home_team/away_team, worldcup-schedule-cron.mjs产的盘全部落到source_label(=同一个
+        //   联赛名字符串)兜底, 导致不同赛事的卡片标题看着一样。加一层event_title优先。
         event_title: (spec.home_team && spec.away_team)
-          ? `${spec.home_team} vs ${spec.away_team}` : (spec.source_label || cgid),
+          ? `${spec.home_team} vs ${spec.away_team}` : (spec.event_title || spec.source_label || cgid),
         league_label: spec.source_label || null,
         event_id: spec.event_id || null,
         home_team: spec.home_team || null, away_team: spec.away_team || null,
