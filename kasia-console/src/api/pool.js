@@ -15,6 +15,7 @@ import { assertNotCommingled } from '../lib/pool-commingle-detect.mjs';
 import { getSidesByLogicalMarket } from '../lib/pool-bettor-sides-query.mjs';
 import { createHash, randomUUID } from 'node:crypto';
 import { verifyIngestRequest } from '../services/ingest-auth.js';  // P1 fix (NWT): broker-fee-dm PII 端点 auth
+import { REORG_SAFE_MIN_DEPTH } from '../lib/pool-shard-register.mjs';  // #33 整顿(NWT review): 单一具名常量取代多处硬编码 20
 
 // L4 (area-11): create-time invariants. Hardcoded mirrors of the settler constants;
 // kept inline rather than imported because they're stable v0.5 protocol values
@@ -1216,7 +1217,7 @@ export async function registerPoolRoutes(fastify) {
     const rc = (cmd) => sendCommandAsync(gatewayRelayId, cmd, 90000);
     const transfer = async (addr, sompi) => { const r = await transferAndConfirm(gatewayRelayId, addr, (Number(sompi) / 1e8).toFixed(8)); return r.txId; };
     // minDepth: 20 (J1 phantom-leaf 根治) — reorg-safe DAA-深度门: 浅确认 UTXO(被 reorg 退)不算 landed → register land-gate 不记 phantom leaf。poll 到 depth≥20 才 true; 超时返 false → caller throw(NO-TX-NO-STATE 不推进 leaf)。
-    const landed = async (txid, addr, n = 25) => { for (let i = 0; i < n; i++) { const j = await sendCommandAsync(gatewayRelayId, { type: 'check_utxo_landed', address: addr, txid, minDepth: 20 }, 20000); if (j.landed || j.found) return true; await new Promise(r => setTimeout(r, 2000)); } return false; };
+    const landed = async (txid, addr, n = 25) => { for (let i = 0; i < n; i++) { const j = await sendCommandAsync(gatewayRelayId, { type: 'check_utxo_landed', address: addr, txid, minDepth: REORG_SAFE_MIN_DEPTH }, 20000); if (j.landed || j.found) return true; await new Promise(r => setTimeout(r, 2000)); } return false; };
 
     // shard→pool_markets row: each physical shard is a minimal pool_markets clone (FK shard_market_id REFERENCES pool_markets(id);
     //   foreign_keys=ON). UI aggregates shards under the logical market via market_shards.logical_market_id. ⚠ DESIGN-FLAG for team:
@@ -1459,7 +1460,7 @@ export async function registerPoolRoutes(fastify) {
       const rc = (cmd) => sendCommandAsync(gatewayRelayId, cmd, 90000);
       const transfer = async (addr, sompi) => { const r = await transferAndConfirm(gatewayRelayId, addr, (Number(sompi) / 1e8).toFixed(8)); return r.txId; };
       // minDepth: 20 (J1 phantom-leaf 根治) — reorg-safe DAA-深度门: 浅确认 UTXO(被 reorg 退)不算 landed → register land-gate 不记 phantom leaf。poll 到 depth≥20 才 true; 超时返 false → caller throw(NO-TX-NO-STATE 不推进 leaf)。
-    const landed = async (txid, addr, n = 25) => { for (let i = 0; i < n; i++) { const j = await sendCommandAsync(gatewayRelayId, { type: 'check_utxo_landed', address: addr, txid, minDepth: 20 }, 20000); if (j.landed || j.found) return true; await new Promise(r => setTimeout(r, 2000)); } return false; };
+    const landed = async (txid, addr, n = 25) => { for (let i = 0; i < n; i++) { const j = await sendCommandAsync(gatewayRelayId, { type: 'check_utxo_landed', address: addr, txid, minDepth: REORG_SAFE_MIN_DEPTH }, 20000); if (j.landed || j.found) return true; await new Promise(r => setTimeout(r, 2000)); } return false; };
       // 🔴 #28 (B) REGRESSION FIX (J1 2026-07-01): register_append funding 必用【gateway 主址】不是 payAddr。
       //   payAddr 现已改为 per-bet 独立 P2SH(只有 bettor 这一笔付款·无 gateway 运营余额)。registerBettorOnShard
       //   从 relayAddr 选币垫 stake 进 leaf → 若用 per-bet 址(余额=单笔付款)→ 选不出 funding/签名错"failed to verify

@@ -35,6 +35,13 @@ const PS_SEED = 20_000_000;                               // PayoutShard genesis
 const SHARD_GENESIS_SEED = 20_000_000;                    // A(b): 空 ShardLeaf genesis seed (0.2 KAS, KIP-9 safe). 首注 register_append
                                                           //   spend 它+fund stake → output weld out==pool_value(0)+stake 过, seed 退 change (不进池, pool_value 起点=0)。
 
+// REORG_SAFE_MIN_DEPTH (NWT 2026-07-05 review, #33 设计整顿): checkUtxoLanded(kasia-relay/src/lib/p2sh.mjs)
+// 的 minDepth 参数, 2026-06-30 phantom-leaf 根治时为 register_append land-gate 校准(TN12 实测 reorg 深度恒定
+// 1, 20 = 20× 安全余量)。之前 pool.js 两处(register/refund-maker-unjoined landed() helper)各自硬编码字面量
+// 20, #33(claim 确认深度门)又要加两处——四处独立维护同一个数字正是 Owner 点破的"并行维护"反模式。收敛成
+// 单一具名常量, 供 pool.js + bshard-auto-settler.mjs 都 import, 只改一处维护点, 行为不变(纯常量提取)。
+export const REORG_SAFE_MIN_DEPTH = 20;
+
 const hex32 = (s) => Buffer.from(blake2b(Buffer.from(s), { dkLen: 32 })).toString('hex');
 const _i64LE = (n) => { const b = Buffer.alloc(8); b.writeBigInt64LE(BigInt(n)); return b; };
 

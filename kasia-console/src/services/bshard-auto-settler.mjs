@@ -20,9 +20,10 @@ import { getMarketBets } from '../lib/pool-bettor-sides-query.mjs';
 import { computePariMutuelPayout } from '../lib/pool-shard-settle.mjs';
 import { payoutRoot as buildPayoutRoot, payoutLeaf, merkleProof, climbProof } from '../lib/pool-payout-root.mjs';
 import { deriveCommitteeSeed, selectCommittee } from './pool-committee-sampler.mjs';
-import { compilePayoutShardRedeem } from '../lib/pool-shard-register.mjs';
+import { compilePayoutShardRedeem, REORG_SAFE_MIN_DEPTH } from '../lib/pool-shard-register.mjs';
 import { buildPoolMerkleTree, getPoolMerkleProof } from './pool-merkle-v06.mjs';
 import { blake2b } from '@noble/hashes/blake2b';
+import { sqlite } from '../db/client.js';
 
 const COMMITTEE_DUMMY_SIG = '41' + '00'.repeat(64) + '01';   // 66B placeholder 未签槽 (4-of-5 容 1)
 const QUORUM = 4;
@@ -139,71 +140,92 @@ export async function settleMarketLive(marketId, ctx) {
   if (!plan.ok) { ctx.alert?.(marketId, `plan: ${plan.reason}`); return { ok: false, skipped: true, reason: plan.reason, plan }; }
   if (ctx.dryRun) return { ok: true, dryRun: true, plan };
 
-  // 0. consolidated PS (须先 consolidate·此 minimal 假定已 consolidate·ctx.psState 取链上态)
-  const ps = await ctx.psState(marketId);
-  if (!ps?.outpointTxid || !ps?.redeem_hex) { ctx.alert?.(marketId, 'PS 未 consolidate / psState 缺'); return { ok: false, reason: 'no consolidated PS' }; }
+  // #task33-followup (2026-07-05, 世界杯首场 7rztt 卡死案例·NWT/Bettor co-verify 抓出):
+  // RESUME-AWARE close: 之前每次调用 settleMarketLive 都无条件重跑 步骤0-6(build/sign/submit/verify
+  // close_attest)——但 close_attest 是一次性 write-once 闩(closed 0→1), 第一次成功之后 ps.outpointTxid
+  // (consolidate 输出) 已经被那笔 close_attest TX 花掉, 再用它当 input 必然 "UTXO not found"(重复花已花
+  // UTXO)。之前只在"部分 claim 失败"时暴露(settled_partial_claims 后任何重跑都会撞这个), 大盘(171 winner,
+  // 单笔 claim 走不完一次 tick)首次真实撞见。
+  // 修法: 若 metadata.settle_evidence.close_txid 已存在(=上次已经成功 close_attest 落链), 直接复用它,
+  // 跳过 0-6, 进 claim 循环(而非重新 build/submit close)。
+  let closeTxid, priorWinnerDetails = [];
+  const priorRow = sqlite.prepare('SELECT metadata FROM pool_markets WHERE id = ?').get(marketId);
+  let priorMeta = {}; try { priorMeta = JSON.parse(priorRow?.metadata || '{}'); } catch {}
+  const priorEvidence = priorMeta.settle_evidence;
+  if (priorEvidence?.close_txid) {
+    closeTxid = priorEvidence.close_txid;
+    priorWinnerDetails = Array.isArray(priorEvidence.winner_details) ? priorEvidence.winner_details : [];
+  } else {
+    // 0. consolidated PS (须先 consolidate·此 minimal 假定已 consolidate·ctx.psState 取链上态)
+    const ps = await ctx.psState(marketId);
+    if (!ps?.outpointTxid || !ps?.redeem_hex) { ctx.alert?.(marketId, 'PS 未 consolidate / psState 缺'); return { ok: false, reason: 'no consolidated PS' }; }
 
-  const state = { consolidated_pool: String(ps.consolidatedPool), closed: 0, payoutRoot: ZERO32 };
-  for (let i = 0; i < 17; i++) state['w' + i] = 0;
-  const fee = await ctx.feeUtxo();
-  const baseInputs = { payoutshard: { redeem_hex: ps.redeem_hex, outpointTxid: ps.outpointTxid, index: ps.index ?? 0, state }, fee };
-  const baseWitness = { self_out_idx: 0, new_payout_root: plan.payoutRoot, committee_pk_hash: plan.committeePkHash };
+    const state = { consolidated_pool: String(ps.consolidatedPool), closed: 0, payoutRoot: ZERO32 };
+    for (let i = 0; i < 17; i++) state['w' + i] = 0;
+    const fee = await ctx.feeUtxo();
+    const baseInputs = { payoutshard: { redeem_hex: ps.redeem_hex, outpointTxid: ps.outpointTxid, index: ps.index ?? 0, state }, fee };
+    const baseWitness = { self_out_idx: 0, new_payout_root: plan.payoutRoot, committee_pk_hash: plan.committeePkHash };
 
-  // 1. BUILD close (committee:[] → preimage + unSafeJson)
-  const buildRes = await ctx.relayPost(ctx.feeRelay.id, {
-    type: 'bshard_close_attest', witness: { ...baseWitness, committee: [] },
-    inputs: baseInputs, outputs: { change_address: ctx.feeRelay.address },
-  });
-  // #G5-5a: reason 必须带上游真实错误签名(非只'build fail'泛化字符串)——daemon 层瞬态重试白名单
-  // 靠这个字符串区分'UTXO not found'(瞬态·值得重试) vs 其它 build 失败(非瞬态·不重试)。
-  if (buildRes?.error || !buildRes?.unSafeJson) { const detail = buildRes?.error || 'no unSafeJson'; ctx.alert?.(marketId, `build fail: ${detail}`); return { ok: false, reason: `build fail: ${detail}` }; }
+    // 1. BUILD close (committee:[] → preimage + unSafeJson)
+    const buildRes = await ctx.relayPost(ctx.feeRelay.id, {
+      type: 'bshard_close_attest', witness: { ...baseWitness, committee: [] },
+      inputs: baseInputs, outputs: { change_address: ctx.feeRelay.address },
+    });
+    // #G5-5a: reason 必须带上游真实错误签名(非只'build fail'泛化字符串)——daemon 层瞬态重试白名单
+    // 靠这个字符串区分'UTXO not found'(瞬态·值得重试) vs 其它 build 失败(非瞬态·不重试)。
+    if (buildRes?.error || !buildRes?.unSafeJson) { const detail = buildRes?.error || 'no unSafeJson'; ctx.alert?.(marketId, `build fail: ${detail}`); return { ok: false, reason: `build fail: ${detail}` }; }
 
-  // 2. 🔴 driver enforce 硬闸 (命门·NO submit if mismatch): build output 地址 == 应锚 (= re-derive payoutRoot 烤死)
-  if (buildRes.psContAddress !== plan.expectedClosedAddr) {
-    ctx.alert?.(marketId, `🔴 enforce FAIL: build psContAddress ${buildRes.psContAddress} != expected ${plan.expectedClosedAddr} — NO submit`);
-    return { ok: false, reason: 'enforce mismatch (driver-side 硬闸)' };
+    // 2. 🔴 driver enforce 硬闸 (命门·NO submit if mismatch): build output 地址 == 应锚 (= re-derive payoutRoot 烤死)
+    if (buildRes.psContAddress !== plan.expectedClosedAddr) {
+      ctx.alert?.(marketId, `🔴 enforce FAIL: build psContAddress ${buildRes.psContAddress} != expected ${plan.expectedClosedAddr} — NO submit`);
+      return { ok: false, reason: 'enforce mismatch (driver-side 硬闸)' };
+    }
+    const unSafeJson = buildRes.unSafeJson;
+
+    // 3. SIGN per committee (4-of-5·各 committee relay 用自 key 签同 unSafeJson)
+    const sigs = {};
+    for (const m of plan.committeeMeta) {
+      const relayId = ctx.pkToRelay(m.pk_hex);
+      if (!relayId) continue;   // uncontrollable → skip (需 ≥4)
+      try {
+        const r = await ctx.relayPost(relayId, { type: 'sign_input_for_settle', tx_hex: unSafeJson, input_index: 0, safe_json: true });
+        if (r?.signature && r.signature.length === 132) sigs[m.pk_hex] = r.signature;
+      } catch { /* skip·下个 */ }
+    }
+    if (Object.keys(sigs).length < QUORUM) { ctx.alert?.(marketId, `< 4-of-5 sig (got ${Object.keys(sigs).length})`); return { ok: false, reason: '委员缺席 < 4-of-5' }; }
+
+    // 4. ASSEMBLE committee[5] (asc·sigs·dummy 未签槽) + 自核 committee_pk_hash
+    const committee5 = plan.committeeMeta.map(m => ({ pk_hex: m.pk_hex, sig_hex: sigs[m.pk_hex] || COMMITTEE_DUMMY_SIG, idx: m.idx, siblings_hex: m.siblings_hex }));
+    const cph = Buffer.from(blake2b(Buffer.concat(committee5.map(c => Buffer.from(c.pk_hex, 'hex'))), { dkLen: 32 })).toString('hex');
+    if (cph !== plan.committeePkHash) { ctx.alert?.(marketId, `🔴 assemble committee_pk_hash ${cph} != plan ${plan.committeePkHash}`); return { ok: false, reason: 'committee_pk_hash 自核失败' }; }
+
+    // 5. SUBMIT close
+    const submitRes = await ctx.relayPost(ctx.feeRelay.id, {
+      type: 'bshard_close_attest', witness: { ...baseWitness, committee: committee5 },
+      inputs: baseInputs, outputs: { change_address: ctx.feeRelay.address },
+    });
+    if (submitRes?.error || !submitRes?.txId) { const detail = submitRes?.error || 'no txId'; ctx.alert?.(marketId, `submit fail: ${detail}`); return { ok: false, reason: `submit fail: ${detail}` }; }
+    closeTxid = submitRes.txId;
+
+    // 6. NO TX NO STATE: verify close LANDED (closed PS @ 应锚地址·value==consolidatedPool)
+    const landed = await verifyClosedLanded(ctx, plan.expectedClosedAddr, closeTxid, ps.consolidatedPool);
+    if (!landed) { ctx.alert?.(marketId, `close ${closeTxid} 未 verify LANDED (NO TX NO STATE)`); return { ok: false, reason: 'close not landed', closeTxid }; }
   }
-  const unSafeJson = buildRes.unSafeJson;
-
-  // 3. SIGN per committee (4-of-5·各 committee relay 用自 key 签同 unSafeJson)
-  const sigs = {};
-  for (const m of plan.committeeMeta) {
-    const relayId = ctx.pkToRelay(m.pk_hex);
-    if (!relayId) continue;   // uncontrollable → skip (需 ≥4)
-    try {
-      const r = await ctx.relayPost(relayId, { type: 'sign_input_for_settle', tx_hex: unSafeJson, input_index: 0, safe_json: true });
-      if (r?.signature && r.signature.length === 132) sigs[m.pk_hex] = r.signature;
-    } catch { /* skip·下个 */ }
-  }
-  if (Object.keys(sigs).length < QUORUM) { ctx.alert?.(marketId, `< 4-of-5 sig (got ${Object.keys(sigs).length})`); return { ok: false, reason: '委员缺席 < 4-of-5' }; }
-
-  // 4. ASSEMBLE committee[5] (asc·sigs·dummy 未签槽) + 自核 committee_pk_hash
-  const committee5 = plan.committeeMeta.map(m => ({ pk_hex: m.pk_hex, sig_hex: sigs[m.pk_hex] || COMMITTEE_DUMMY_SIG, idx: m.idx, siblings_hex: m.siblings_hex }));
-  const cph = Buffer.from(blake2b(Buffer.concat(committee5.map(c => Buffer.from(c.pk_hex, 'hex'))), { dkLen: 32 })).toString('hex');
-  if (cph !== plan.committeePkHash) { ctx.alert?.(marketId, `🔴 assemble committee_pk_hash ${cph} != plan ${plan.committeePkHash}`); return { ok: false, reason: 'committee_pk_hash 自核失败' }; }
-
-  // 5. SUBMIT close
-  const submitRes = await ctx.relayPost(ctx.feeRelay.id, {
-    type: 'bshard_close_attest', witness: { ...baseWitness, committee: committee5 },
-    inputs: baseInputs, outputs: { change_address: ctx.feeRelay.address },
-  });
-  if (submitRes?.error || !submitRes?.txId) { const detail = submitRes?.error || 'no txId'; ctx.alert?.(marketId, `submit fail: ${detail}`); return { ok: false, reason: `submit fail: ${detail}` }; }
-  const closeTxid = submitRes.txId;
-
-  // 6. NO TX NO STATE: verify close LANDED (closed PS @ 应锚地址·value==consolidatedPool)
-  const landed = await verifyClosedLanded(ctx, plan.expectedClosedAddr, closeTxid, ps.consolidatedPool);
-  if (!landed) { ctx.alert?.(marketId, `close ${closeTxid} 未 verify LANDED (NO TX NO STATE)`); return { ok: false, reason: 'close not landed', closeTxid }; }
 
   // 7. CLAIM per winner (NO-SIG·merkle 授权·round-trip 验 addr)
   //   #15 fix (2026-06-30·多-winner threaded): 每笔 thread outpoint(closeTxid:0→claim_i:1)+consolidated_pool(-=payout)
   //   +w-bitmap(set merkle_index bit)·续约 input redeem 经 splicePayoutContinuation·每笔验 winner 实收 + my-splice==handler psContAddress 才 thread 下一笔。
   //   旧码复用 closeTxid:0 + closedState w=0 每 winner → 第2 winner 花已 spent 的 closeTxid:0 必失败 (单 winner 侥幸过)。
   const claimData = winnerClaimData(plan.winners);
+  // psRow(poolMerkleRoot/predicateCommit) + consolidatedPool 独立于 ps(fresh-close 分支专属变量)重算——
+  // resume 分支没有 ps, 且这两条本身就是 market 级不变量(跟是不是第一次 close 无关), 统一取一次更简单可靠。
+  const psRow = ctx.db.prepare('SELECT pool_merkle_root, predicate_commit FROM payout_shards WHERE logical_market_id = ?').get(marketId);
+  const consolidatedPool = (BigInt(plan.poolSompi) + BigInt(ctx.psSeedSompi ?? 20000000)).toString();
   let psOutTxid = closeTxid, psOutIdx = 0;
-  let curPool = BigInt(ps.consolidatedPool);
+  let curPool = BigInt(consolidatedPool);
   let curState = { consolidated_pool: curPool.toString(), closed: 1, payoutRoot: plan.payoutRoot };
   for (let i = 0; i < 17; i++) curState['w' + i] = 0;
-  let curRedeem = compilePayoutShardRedeem({ poolMerkleRoot: ps.poolMerkleRoot, predicateCommit: ps.predicateCommit, consolidatedPool: String(ps.consolidatedPool), closed: 1, payoutRoot: plan.payoutRoot });
+  let curRedeem = compilePayoutShardRedeem({ poolMerkleRoot: psRow.pool_merkle_root, predicateCommit: psRow.predicate_commit, consolidatedPool, closed: 1, payoutRoot: plan.payoutRoot });
   // #task33 (2026-07-03·NWT GREEN·docs/2026-07-03-bshard-claim-completeness-and-retry-design.md):
   //   丢单点①②(climb-fail/round-trip-fail, continue) = 数据/编码问题非时序问题, 独立标记 needsManualAttribution,
   //   不进 settled_partial_claims 重试队列(见 §4.2.1 🟡风险-1)。丢单点③④⑤(submit-fail/not-landed/splice-mismatch,
@@ -211,7 +233,45 @@ export async function settleMarketLive(marketId, ctx) {
   //   received===true 且无 error 字段, 且 claims.length===claimData.length(无遗漏 attempt)。
   const claims = [];
   let needsManualAttribution = false;
-  for (const cd of claimData) {
+
+  // #task33-followup (2026-07-05, 7rztt resume 修复的另一半): 之前已经成功落链的 claim(priorWinnerDetails,
+  // 来自上一次跑到一半的 settle_evidence)必须原样保留在 claims 数组最前面 + 跳过重复 claim(claimData 里对应
+  // 的条目)+ 把 psOutTxid/psOutIdx/curPool/curState/curRedeem thread 到"上次跑到哪"的续接点——否则每次
+  // 重跑都会拿 claimData[0] 去 claim, 而 claimData[0] 若已经在上次跑成功过, 对应的 outpoint(closeTxid:0)
+  // 早被那笔 claim TX 花掉, "UTXO not found" 复现(7rztt 撞的就是这个)。
+  // 🔴 按【位置】匹配(claimData[i] ↔ priorWinnerDetails[i]), 不能按 pk 匹配——同一 pk 可能有多笔独立中奖
+  // 下注(同一人押多次), pk 匹配用 Set/find 会把"这个 pk 已完成"误判成全部同 pk 条目都完成, 且 Array.find
+  // 永远命中第一条 → 状态 thread 卡在第 1 笔的 txId 不动(7rztt 实测撞到: resume 后 psOutTxid 停在 claim#1
+  // 而非 claim#4, 第 5 笔仍报 UTXO not found)。claimData 由 winnerClaimData(plan.winners) 确定性生成(同一
+  // plan 内顺序稳定), 位置匹配是唯一正确对应关系; 加 pk+amount 双重校验, 任一不符立即拒绝 resume(fail-safe,
+  // 宁可整体重跑失败也不能用错的 continuation 状态误 claim)。
+  if (priorWinnerDetails.length) {
+    if (priorWinnerDetails.length > claimData.length) {
+      ctx.alert?.(marketId, `🔴 resume 校验失败: priorWinnerDetails(${priorWinnerDetails.length}) > claimData(${claimData.length}), plan 跟上次不一致 — 拒绝 resume`);
+      return { ok: false, reason: 'resume mismatch: prior winner count exceeds current plan winner count' };
+    }
+    for (let i = 0; i < priorWinnerDetails.length; i++) {
+      const w = priorWinnerDetails[i], cd = claimData[i];
+      if (String(w.pk).toLowerCase() !== String(cd.pk).toLowerCase() || String(w.amount) !== String(cd.amount)) {
+        ctx.alert?.(marketId, `🔴 resume 校验失败: claimData[${i}] pk/amount 跟 priorWinnerDetails[${i}] 不一致 — 拒绝 resume(plan 可能变了)`);
+        return { ok: false, reason: `resume mismatch at index ${i}: plan winners changed since last partial run` };
+      }
+      claims.push({ pk: w.pk, amount: w.amount, txId: w.txId, received: true });
+      // replay 状态转移(纯本地计算, 不碰链): 每个已完成 winner 都让 curPool/curState 往前走一步, 最后一步的
+      // txId 变成新的 psOutTxid(index=1, 对应 claim TX 的 continuation output 位)。
+      const newState = { consolidated_pool: (curPool - BigInt(cd.amount)).toString(), closed: 1, payoutRoot: plan.payoutRoot };
+      for (let k = 0; k < 17; k++) newState['w' + k] = curState['w' + k];
+      const word = Math.floor(Number(cd.merkle_index) / 63), bit = Number(cd.merkle_index) % 63;
+      newState['w' + word] = (BigInt(newState['w' + word]) + (1n << BigInt(bit))).toString();
+      curRedeem = splicePayoutContinuation(curRedeem, newState);
+      psOutTxid = w.txId; psOutIdx = 1; curPool = curPool - BigInt(cd.amount); curState = newState;
+    }
+    ctx.alert?.(marketId, `resume: 跳过已完成 ${priorWinnerDetails.length} 个 claim, 从 ${psOutTxid.slice(0, 12)}:${psOutIdx} 续接剩余 ${claimData.length - priorWinnerDetails.length} 个`);
+  }
+
+  for (let idx = 0; idx < claimData.length; idx++) {
+    const cd = claimData[idx];
+    if (idx < priorWinnerDetails.length) continue;   // 已在上面按位置 replay 过, 跳过重复 claim
     if (!cd.climbOk) { ctx.alert?.(marketId, `claim climb fail winner ${cd.pk.slice(0, 8)}`); claims.push({ pk: cd.pk, amount: cd.amount, error: 'climb fail' }); needsManualAttribution = true; continue; }
     const winnerAddr = ctx.p2pkAddr(cd.pk);
     if (ctx.p2pkSpk && ctx.p2pkSpk(winnerAddr).toLowerCase() !== ('20' + cd.pk + 'ac').toLowerCase()) {
@@ -251,32 +311,44 @@ export async function settleMarketLive(marketId, ctx) {
 
 // NO TX NO STATE: 查 closed PS @ 应锚地址·来自 close tx·value==consolidatedPool
 // #14 fix (2026-06-30): poll·非单发 (submit≠landed·单发 ~1s 未确认假阴·我单片 close 撞过)。
+// #33 fix (2026-07-05, J2 设计+NWT review): 之前只查"当下有没有这个 UTXO"(浅确认), 跟 2026-06-30
+// phantom-leaf 事故同源——TN12 高 reorg 率下, 浅确认判定"落地"的 TX 之后仍可能被踢出主链, 下一笔
+// claim 依赖的 continuation outpoint 因此变成幽灵引用(昨晚 7rztt/i044k 案例)。复用 register_append
+// land-gate 同款的 checkUtxoLanded(minDepth) 深度确认(kasia-relay/src/lib/p2sh.mjs, 已通过
+// check_utxo_landed 命令暴露, REORG_SAFE_MIN_DEPTH=20 是当时 TN12 实测校准值, 不是新拍的数字)。
+// fail-closed: depth 不足/查不到都不算 landed, 不提前放行。
 const _sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function verifyClosedLanded(ctx, expectedAddr, closeTxid, consolidatedPool) {
-  for (let attempt = 0; attempt < 10; attempt++) {
+  for (let attempt = 0; attempt < 20; attempt++) {
     try {
-      const entries = await ctx.getUtxos(expectedAddr);
-      const ok = entries.some(e => {
-        const j = JSON.parse(JSON.stringify(e, (k, v) => typeof v === 'bigint' ? v.toString() : v));
-        const op = j.entry?.outpoint || j.outpoint;
-        const amt = j.entry?.amount ?? j.amount;
-        return op?.transactionId === closeTxid && String(amt) === String(consolidatedPool);
-      });
-      if (ok) return true;
+      const r = await ctx.relayPost(ctx.feeRelay.id, { type: 'check_utxo_landed', address: expectedAddr, txid: closeTxid, minDepth: REORG_SAFE_MIN_DEPTH });
+      if (r?.landed) {
+        // 深度确认通过后仍要验金额(合约不变量 out==consolidatedPool)——depth 只保证"这笔 TX 够深不会被 reorg 退",
+        // 不代表金额对; 两个校验都过才真正判定 landed。
+        const entries = await ctx.getUtxos(expectedAddr);
+        const ok = entries.some(e => {
+          const j = JSON.parse(JSON.stringify(e, (k, v) => typeof v === 'bigint' ? v.toString() : v));
+          const op = j.entry?.outpoint || j.outpoint;
+          const amt = j.entry?.amount ?? j.amount;
+          return op?.transactionId === closeTxid && String(amt) === String(consolidatedPool);
+        });
+        if (ok) return true;
+      }
     } catch { /* transient·retry */ }
-    await _sleep(4000);
+    await _sleep(3000);
   }
   return false;
 }
 
 // #15 helper: claim 后 winner P2PK 实收链验 (NO TX NO STATE·thread 下一笔前确认)。
+// #33 fix (2026-07-05): 同 verifyClosedLanded, 换深度确认(见上方注释), 不再是"当下存不存在"的浅确认。
 async function verifyClaimLanded(ctx, winnerAddr, claimTx) {
-  for (let attempt = 0; attempt < 8; attempt++) {
+  for (let attempt = 0; attempt < 20; attempt++) {
     try {
-      const entries = await ctx.getUtxos(winnerAddr);
-      if (entries.some(e => { const j = JSON.parse(JSON.stringify(e, (k, v) => typeof v === 'bigint' ? v.toString() : v)); return (j.entry?.outpoint || j.outpoint)?.transactionId === claimTx; })) return true;
+      const r = await ctx.relayPost(ctx.feeRelay.id, { type: 'check_utxo_landed', address: winnerAddr, txid: claimTx, minDepth: REORG_SAFE_MIN_DEPTH });
+      if (r?.landed) return true;
     } catch { /* retry */ }
-    await _sleep(4000);
+    await _sleep(3000);
   }
   return false;
 }
@@ -495,4 +567,4 @@ export async function cancelMarketLive(marketId, ctx) {
   return { ok: true, cancelTxid, claims, plan, complete, needsManualAttribution };
 }
 
-export { COMMITTEE_DUMMY_SIG, QUORUM, ZERO32, splicePayoutContinuation };
+export { COMMITTEE_DUMMY_SIG, QUORUM, ZERO32, splicePayoutContinuation, verifyClosedLanded, verifyClaimLanded };
