@@ -816,8 +816,12 @@ export async function registerPoolRoutes(fastify) {
     if (b.outcome_condition_id) {
       try {
         const _condStr = String(b.outcome_condition_id);
+        // #15 查漏补缺(2026-07-05, o70vh/2ua7d真实重复盘案例): 白名单IN('pending_bettors','verifying')
+        // 只覆盖v0.7两个状态, 漏了v0.6专属'pending_oracle_deposits'等非终态——反转成黑名单排除真终态
+        // (cancelled/archived/refunded=市场从没真正跑起来或已清理干净), 其余一律算 active 挡重复
+        // (含completed/settled_partial_claims: 真实赛事结果已产生过一次, 不该允许同conditionId再建新盘)。
         const _dup = sqlite.prepare(
-          "SELECT id FROM pool_markets WHERE outcome_condition_id = ? AND protocol_status IN ('pending_bettors','verifying') LIMIT 1"
+          "SELECT id FROM pool_markets WHERE outcome_condition_id = ? AND protocol_status NOT IN ('cancelled','archived','refunded') LIMIT 1"
         ).get(_condStr);
         if (_dup) {
           return reply.code(409).send({
@@ -2282,8 +2286,7 @@ export async function registerPoolRoutes(fastify) {
              pool_markets.spine_p2sh,
              ${honestCountSql('pool_markets.id')} AS bettor_count,
              ${honestStakeSql('pool_markets.id', 0)} AS yes_sompi,
-             ${honestStakeSql('pool_markets.id', 1)} AS no_sompi,
-             (SELECT COUNT(*) FROM pool_bettor_sides WHERE market_id = pool_markets.id) AS raw_bettor_count
+             ${honestStakeSql('pool_markets.id', 1)} AS no_sompi
       FROM pool_markets
       WHERE pool_markets.protocol_status = 'pending_bettors'
         AND pool_markets.protocol_status != 'shard_internal'
@@ -2311,7 +2314,7 @@ export async function registerPoolRoutes(fastify) {
         card_group_id, leg_key,
         _totalPool: totalPool,
         _spineP2sh: r.spine_p2sh,
-        _rawBettorCount: r.raw_bettor_count,
+        _leafCount: getSidesByLogicalMarket(r.id, sqlite).length,   // #14 fix: shard-aware leaf count, 同 availableMarkets
       };
     }).filter((m) => m._totalPool >= minPoolSompi)   // 防刷量: 池太小不上热榜
       .filter((m) => !commingledSpines.has(m._spineP2sh))   // FINDING-2: 排除 commingled spine (J1 单源 helper)
@@ -2320,7 +2323,7 @@ export async function registerPoolRoutes(fastify) {
       //   三端单一源·Bettor r243) = JSON 含非空 title+resolution_criteria+data_source_canonical。镜像盘缺 title/criteria
       //   → false → 源头从热门藏掉。非裸 json_extract (非 JSON spec 会 throw malformed JSON 崩整 query + title 有 fallback 误过滤)。
       .filter((m) => m.bettor_count >= 3)   // Owner 2026-06-28: 0/少真人盘不上首页(bettor_count已排 AutoBetter)
-      .filter((m) => m._rawBettorCount < 50)   // 排链上满盘: pool_bettor_sides raw count(含 AutoBetter=真 covenant 叶)>=50 → register-v06 必拒。J1: cap count 必含 AutoBetter·不能混用 honestCount。
+      .filter((m) => m._leafCount < MARKET_MAX_LEAVES_G3 - 50)   // 排链上满盘(shard-aware, 409 同源)——之前用 raw COUNT(*) WHERE market_id=id 对 bshard 永远查不到东西
       .sort((a, b) => b.trending_score - a.trending_score)
       .slice(0, limit)
       .map(({ _totalPool, _spineP2sh, _rawBettorCount, ...m }) => m);
@@ -2352,8 +2355,7 @@ export async function registerPoolRoutes(fastify) {
              pool_markets.outcome_condition_id,
              ${honestCountSql('pool_markets.id')} AS bettor_count,
              ${honestStakeSql('pool_markets.id', 0)} AS yes_sompi,
-             ${honestStakeSql('pool_markets.id', 1)} AS no_sompi,
-             (SELECT COUNT(*) FROM pool_bettor_sides WHERE market_id = pool_markets.id) AS raw_bettor_count
+             ${honestStakeSql('pool_markets.id', 1)} AS no_sompi
       FROM pool_markets
       WHERE pool_markets.protocol_status = 'pending_bettors'
         AND pool_markets.protocol_status != 'shard_internal'
@@ -2366,19 +2368,26 @@ export async function registerPoolRoutes(fastify) {
       const yesPool = Number(r.yes_sompi) + (makerOnYes ? makerSompi : 0);
       const noPool = Number(r.no_sompi) + (!makerOnYes ? makerSompi : 0);
       const totalPool = yesPool + noPool;
+      // #14 fix (2026-07-05, Owner 实测撞见: dyljb 900 笔满盘仍被推荐, NWT/J2 查实根因):
+      //   之前用 `SELECT COUNT(*) FROM pool_bettor_sides WHERE market_id = pool_markets.id` 算 raw_bettor_count——
+      //   对 v0.7 bshard 市场这是永远查不到东西的 shard-blind 查询(下注实际存在各个 shard 的 market_id 下,
+      //   不是 logical parent 的 id), 导致 900 笔满盘的市场也被算成 raw_bettor_count=0, filter<50 恒过。
+      //   换成 getSidesByLogicalMarket(跨 shard 聚合的单源 helper, 跟 register-v07/prep 那个真正拒绝
+      //   下注的 409 逻辑同源)算真实 leaf 数, 跟 MARKET_MAX_LEAVES_G3 留安全余量比较。
+      const leafCount = getSidesByLogicalMarket(r.id, sqlite).length;
       return {
         id: r.id, title: r.resolution_rule_spec, resolution_rule_spec: r.resolution_rule_spec,
         protocol_version: r.protocol_version, category: r.category, deadline: r.deadline,
         bettor_count: r.bettor_count, total_pool_kas: totalPool / 1e8,
         yes_implied_prob: totalPool > 0 ? yesPool / totalPool : null,
         _totalPool: totalPool, _spineP2sh: r.spine_p2sh,
-        _rawBettorCount: r.raw_bettor_count, _createdAt: r.market_created_at,
+        _leafCount: leafCount, _createdAt: r.market_created_at,
         _conditionId: r.outcome_condition_id || null,
       };
     })
       .filter((m) => !commingledSpines.has(m._spineP2sh))
       .filter((m) => isStructuredSpec(m.title))
-      .filter((m) => m._rawBettorCount < 50)   // has available slots (raw cap — must use raw not honestCount, J1/Bettor no-strand line)
+      .filter((m) => m._leafCount < MARKET_MAX_LEAVES_G3 - 50)   // has available slots — leaf-count(shard-aware, 409 同源), 留 50 笔安全余量
       .filter((m) => {
         if (!championsFilter) return true;
         try { return /win the 2026 fifa world cup/i.test(JSON.parse(m.title || '{}').title || ''); } catch { return false; }
@@ -2396,7 +2405,7 @@ export async function registerPoolRoutes(fastify) {
       }, [])
       .sort((a, b) => (b._totalPool - a._totalPool) || (b._createdAt > a._createdAt ? 1 : -1))
       .slice(0, limit)
-      .map(({ _totalPool, _spineP2sh, _rawBettorCount, _createdAt, _conditionId, ...m }) => ({ ...m, condition_id: _conditionId }));
+      .map(({ _totalPool, _spineP2sh, _leafCount, _createdAt, _conditionId, ...m }) => ({ ...m, condition_id: _conditionId }));
     return reply.send({ ok: true, count: available.length, markets: available });
   });
 
@@ -2413,18 +2422,19 @@ export async function registerPoolRoutes(fastify) {
     const { aggregateCardGroups } = await import('../lib/pool-card-groups.mjs');
     const commingledSpines = commingledSpineSet(sqlite);
     // per-leg 池/人数: honestCountSql/StakeSql 单源 (排 AutoBetter + shard-aware union·一致性同 trending)。
-    // raw_bettor_count: raw COUNT(*) 含 AutoBetter — 用于 raw<50 过滤(同 availableMarkets·同 prep L1524)。
+    // #14 fix (2026-07-05, 同 availableMarkets 同源 shard-blind 坑): raw COUNT(*) WHERE market_id=pool_markets.id
+    //   对 v0.7 bshard 永远查不到东西(下注存在各 shard 的 id 下), 换成 getSidesByLogicalMarket 跨 shard
+    //   聚合真实 leaf 数, 跟 409 拒绝逻辑同源, 留安全余量。
     const rows = sqlite.prepare(`
       SELECT pool_markets.id, pool_markets.resolution_rule_spec, pool_markets.category,
              pool_markets.outcome_side, pool_markets.deadline, pool_markets.maker_stake_amount,
              pool_markets.spine_p2sh,
              ${honestCountSql('pool_markets.id')} AS bettor_count,
              ${honestStakeSql('pool_markets.id', 0)} AS yes_sompi,
-             ${honestStakeSql('pool_markets.id', 1)} AS no_sompi,
-             (SELECT COUNT(*) FROM pool_bettor_sides WHERE market_id = pool_markets.id) AS raw_bettor_count
+             ${honestStakeSql('pool_markets.id', 1)} AS no_sompi
       FROM pool_markets
       WHERE pool_markets.protocol_status = 'pending_bettors'
-    `).all().filter(r => r.raw_bettor_count < 50);  // 同 availableMarkets·排满盘·防 /start card_groups 按钮误导
+    `).all().filter(r => getSidesByLogicalMarket(r.id, sqlite).length < MARKET_MAX_LEAVES_G3 - 50);  // 同 availableMarkets·排满盘·防 /start card_groups 按钮误导
     const out = aggregateCardGroups(rows, commingledSpines, { limit: q.limit });   // 聚合逻辑单源 (pool-card-groups.mjs)
     return reply.send({ ...out, filters: { status: 'pending_bettors', exclude_commingled: true, exclude_auto_bet: true, dedupe_leg_key: 'keep_most_active' } });
   });
