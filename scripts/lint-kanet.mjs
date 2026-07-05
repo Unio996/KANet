@@ -824,6 +824,49 @@ function checkR_COMMAND_REGISTRATION() {
   }
 }
 
+// R-PHANTOM-FIELD (2026-07-05, qzdh7nar/J1, following #48/#50/maker-P&L 三例同根): metadata fields written
+// ONLY by the legacy v0.6 settler (pool-market-settler.js) are read unconditionally elsewhere as if they're
+// always populated — but bshard(v0.7)/create-v07 markets never write them (deriveFeeLeaves/phase2_* writeback
+// live only in the old settler), so an unguarded read silently gets `undefined` for every v0.7 market and either
+// crashes or (worse) produces a wrong display (win shown as loss, fee shown as 0, P&L shown as "pending" forever).
+// Three real incidents hit this exact pattern in 48h (phase2_winner #48, phase2_broker_fee_sompi #50,
+// phase2_maker_payout_sompi maker-P&L) — this rule stops a 4th field from repeating it. Heuristic, not full AST:
+// any `phase2_<word>` property read outside the writer file must have a same-line null/undefined/equality guard
+// (`!= null`, `!== undefined`, `=== 0`, `=== 1`, optional chaining `?.`) — mirroring the exact pattern the three
+// fixes converged on. WARN not error: some phase2_ references are plain comments/docs, not live reads.
+// pool-market-settler.js = the actual v0.6→v0.7 migration risk this rule targets (pool_markets.metadata).
+// bettor-prediction-{settler,voter}.js reuse the same "phase2_*" name for an unrelated, self-contained
+// exchange_offers writer/reader pair (own dispatchPhase2 write at bettor-prediction-settler.js:338) — same
+// field NAMES, different table/feature, not a v0.6/v0.7 split. Excluded to keep signal on the real risk.
+const PHANTOM_FIELD_WRITER_FILE = 'services/pool-market-settler.js';
+const PHANTOM_FIELD_EXCLUDE_FILES = ['services/bettor-prediction-settler.js', 'services/bettor-prediction-voter.js'];
+// property-access only (`.phase2_x` / `['phase2_x']`) — excludes bare mentions inside strings/comments/log messages
+// (e.g. migrate.js console.log("... phase2_tx_obj ...") is prose, not a live read).
+const PHANTOM_FIELD_ACCESS_RE = /[.\[]['"]?(phase2_[a-z0-9_]+)\b/g;
+const PHANTOM_FIELD_GUARD_RE = /!=\s*null|!==\s*null|!=\s*undefined|!==\s*undefined|===\s*0|===\s*1|\?\.|Array\.isArray|![\w.]*phase2_/;
+function checkR_PHANTOM_FIELD(filepath, content) {
+  const relPath = filepath.replace(/\\/g, '/');
+  if (relPath.endsWith(PHANTOM_FIELD_WRITER_FILE)) return;  // the legitimate writer — no read-guard needed
+  if (PHANTOM_FIELD_EXCLUDE_FILES.some((f) => relPath.endsWith(f))) return;  // unrelated self-contained phase2_ writer/reader pair
+  const lines = content.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+    if (trimmed.startsWith('//') || trimmed.startsWith('*')) continue;  // comment/doc line, not a live read
+    const matches = [...line.matchAll(PHANTOM_FIELD_ACCESS_RE)];
+    if (matches.length === 0) continue;
+    // guard may be on this line or either of the two preceding lines (enclosing `if (x.phase2_y != null) {` block) —
+    // matches the codebase's actual fixed pattern (#48 pool.js:2739-2740: guard on the `if`, use on the next line).
+    const window = [lines[i - 2], lines[i - 1], line].filter(Boolean).join('\n');
+    if (PHANTOM_FIELD_GUARD_RE.test(window)) continue;
+    warn(
+      'R-PHANTOM-FIELD [WARN]',
+      `'${matches[0][1]}' 是 v0.6 老settler(pool-market-settler.js)专属字段, bshard(v0.7)/create-v07 盘从没写过(#48/#50/maker-P&L 三例同根)——这行读它但附近(本行+前两行)看不到 null/undefined/等值/Array.isArray/可选链守卫, 对 v0.7 盘会静默读到 undefined。确认这个读取点是不是也要区分 v0.6/v0.7(仿 #48/#50 fix 的守卫写法), 或者本身就在 v0.6-only 代码路径里(此时可忽略此告警)。`,
+      filepath, i + 1
+    );
+  }
+}
+
 // R-COMMINGLE-GUARD (FINDING-2 ③, J1 2026-06-28): every bettor stake-lock handler in pool.js must call the
 // single-source assertNotCommingled guard. commit1 inlined the check in register-v07 ONLY and missed the other
 // 5 register handlers (register / register-v06{prep,confirm} / register-external{prep,confirm}) → auto-bet + TG
@@ -960,6 +1003,7 @@ for (const fp of targets) {
   checkKI33_trust_score_placeholder(fp, content);  // KI-33 (Oracle v0.3 §9 5/26): broker-llm-agent.js SYSTEM_PROMPT 必含 {{trust_score}}
   checkR40_minerFee_floor(fp, content);  // R40 (G6 批2 红线 7, qlfpv brick sediment 5/31): pool.js create-v06 minerFee 默认下限
   checkR_SHARD_BLIND(fp, content);       // R-SHARD-BLIND [WARN] (线8 STEP2 2026-06-24): pool_bettor_sides 裸 logical market_id 查
+  checkR_PHANTOM_FIELD(fp, content);     // R-PHANTOM-FIELD [WARN] (2026-07-05, qzdh7nar): v0.6-only phase2_* 字段无守卫读取 — 防第4例(#48/#50/maker-P&L 同根)
 }
 checkR10();
 checkR_NULLIFIER_I64();
