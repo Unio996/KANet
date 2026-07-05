@@ -128,13 +128,22 @@ export function specTitle(spec) {
   return s.replace(/https?:\/\/\S+/g, '').trim();
 }
 // 真规则 (resolution_criteria) — 押注前用户必须看到的判定依据。KANet 委员预言机按这条裁决。
-function specCriteria(spec) {
+// 查漏补缺(2026-07-05, Owner 亲测撞见: 英文DM面板里规则文字是中文): 之前裸读 resolution_criteria,
+// 忽略了 lang——worldcup-schedule-cron.mjs 这类建盘脚本把规则写死中文(title/title_zh 双语约定建过,
+// resolution_criteria 没跟上, 这是同一族"约定没被全部字段落实"的不完整迁移)。现在按 lang 选:
+// zh 用户优先 resolution_criteria_zh(没有则退 resolution_criteria); 非 zh 用户优先 resolution_criteria
+// (英文, 建盘脚本已经在改成主字段), 没有则退 resolution_criteria_zh(总比空白/报错强, 好过完全看不到规则)。
+function specCriteria(spec, lang = 'en') {
   if (!spec) return null;
   const s = String(spec).trim();
   if (!s.startsWith('{')) return null;
   try {
     const obj = JSON.parse(s);
-    return (typeof obj.resolution_criteria === 'string' && obj.resolution_criteria.trim()) ? obj.resolution_criteria.trim() : null;
+    const primary = lang === 'zh' ? obj.resolution_criteria_zh : obj.resolution_criteria;
+    const fallback = lang === 'zh' ? obj.resolution_criteria : obj.resolution_criteria_zh;
+    const pick = (typeof primary === 'string' && primary.trim()) ? primary.trim()
+      : (typeof fallback === 'string' && fallback.trim()) ? fallback.trim() : null;
+    return pick;
   } catch { return null; }
 }
 // 质量门槛: spec 必须是干净结构化 JSON 含 title + resolution_criteria + data_source_canonical.
@@ -500,7 +509,7 @@ export async function startBetFromMarket(tgUser, marketId) {
     t(lang, 'bet_detail_maker', { maker: makerLabel(market, lang) }),
     t(lang, 'bet_detail_deadline_count', { deadline: fmtDeadline(market.deadline, lang), count: dr.json.bettor_count || 0, stake: market.maker_stake_kas ?? '?' }),
   ];
-  const _crit = specCriteria(market.resolution_rule_spec);
+  const _crit = specCriteria(market.resolution_rule_spec, lang);
   if (_crit) lines.push('', t(lang, 'bet_detail_rules_header'), _crit);
   if (market.yes_pool_kas != null && market.no_pool_kas != null) {
     const yp = Number(market.yes_pool_kas).toFixed(4);
@@ -709,7 +718,7 @@ async function _handleReplyImpl(tgUser, text, linkedAddr) {
       t(lang, 'bet_detail_maker', { maker: makerLabel(full, lang) }),
       t(lang, 'bet_detail_deadline_count', { deadline: fmtDeadline(full.deadline, lang), count: dr.json.bettor_count || 0, stake: full.maker_stake_kas ?? '?' }),
     ];
-    const _critF = specCriteria(full.resolution_rule_spec);
+    const _critF = specCriteria(full.resolution_rule_spec, lang);
     if (_critF) lines.push('', t(lang, 'bet_detail_rules_header'), _critF);
     // Bettor r78 ②: 显示池子分布 + 隐含赔率 (= Bettor r70 A 数据底座). pari-mutuel.
     if (full.yes_pool_kas != null && full.no_pool_kas != null) {
@@ -835,6 +844,12 @@ async function _handleReplyImpl(tgUser, text, linkedAddr) {
       pendingPayments.set(tgUser, pendingRecord); // set-pending-first (J2+Bettor 加固)
       const payRes = await api.tgWalletSend(tgUser, s.prep.side_p2sh, exactPayKas);
       if (payRes.ok && payRes.json?.ok) {
+        // #16 查漏补缺(2026-07-05, Owner实测撞见'重复押注不成功'): 这里之前只 delete session 不 delete
+        // pendingPayments, 残留记录会被 pollPendingBets 轮询清掉但存在几秒到十几秒的窗口——用户紧接着
+        // 开始第二笔操作会被 line 636 的 '!s 时检查 pendingPayments' 门禁拦住, 提示'还在等确认', 实际是
+        // 第一笔已经成功的付款还没被 poller 确认清空, 误导成"第二笔失败"。auto-pay 成功后立刻清掉
+        // pendingPayments(轮询改成靠 register-v07/confirm 自身幂等，不需要 pendingPayments 兜底重试)。
+        pendingPayments.delete(tgUser);
         sessions.delete(tgUser);
         persistNow();
         return t(lang, 'bet_autopay_success', { kas: exactPayKas });
