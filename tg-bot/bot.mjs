@@ -217,7 +217,9 @@ bot.command('link', async (ctx) => {
 // gate D onboarding (Bettor APPROVE bot-DM): /faucet — send the linked address 5 testnet KAS via the
 // internal localhost faucet (FaucetRelay). Backend never exposed; the bot DM is the only public surface.
 // per-Telegram-user 24h cooldown stops address-rotation drain on top of the server once-per-address guard.
-bot.command('faucet', async (ctx) => {
+// #18 (2026-07-05, Owner /start 精简: 13→4 按钮, Bettor 批): 提取成具名函数, 供 /faucet 命令 +
+// /start 精简后的"💧 领水"按钮共用同一份逻辑(不复制, 按钮≈打这条命令的快捷方式)。
+async function faucetHandler(ctx) {
   initLang(ctx);
   const lang = getLang(ctx);
   const tgUser = String(ctx.from.id);
@@ -248,7 +250,8 @@ bot.command('faucet', async (ctx) => {
   const amtMatch = String(r.json.amount || '').match(/[\d.]+/);
   const amt = amtMatch ? amtMatch[0] : String(r.json.amount || '?');
   return ctx.reply(t(lang, 'faucet_ok', { amt, addr, tx: String(r.json.txid || '').slice(0, 16) }));
-});
+}
+bot.command('faucet', faucetHandler);
 
 // /verify 已废弃 (r275 砍签名挑战). 老用户可能还按旧习惯发, 友好重定向到 /link。
 bot.command('verify', (ctx) => { initLang(ctx); return ctx.reply(t(getLang(ctx), 'verify_redirect')); });
@@ -314,7 +317,8 @@ bot.command('broker_apply', async (ctx) => {
 bot.command('bet',  async (ctx) => ctx.reply(await PM.startBet(String(ctx.from.id), brokerRelayId)));  // S-C: in-chat 编号菜单 — broker-scoped (only this broker's 经手 markets)
 // Bettor r78 ① — /mybets: 列自己押注 + 赢/输/退款状态 (= J2 r126 my-positions wire).
 // Bettor r87 ③ 续 — 每 open position 加 inline-keyboard '➕ 加注/反手' (防流失, callback 接 startBetFromMarket).
-bot.command('mybets', async (ctx) => {
+// #18 (2026-07-05): 具名函数, /mybets 命令 + /start 精简后"📋 我的下注"按钮共用。
+async function mybetsHandler(ctx) {
   initLang(ctx);
   const lang = getLang(ctx);
   const tgUser = String(ctx.from.id);
@@ -326,7 +330,8 @@ bot.command('mybets', async (ctx) => {
   return ctx.reply(text, {
     reply_markup: { inline_keyboard: buttons.map(b => [{ text: b.label, callback_data: b.callback_data }]) },
   });
-});
+}
+bot.command('mybets', mybetsHandler);
 
 // 世界杯玩法 UI (Bettor 2026-07-04, 不依赖 G1) — /record: 精简战绩卡(胜率+净盈亏), 跟 /mybets
 // 逐笔列表是两回事, 复用同一份 my-positions 数据.
@@ -393,7 +398,9 @@ bot.command('discover', (ctx) => { initLang(ctx); return ctx.reply(t(getLang(ctx
 
 // /hot (Owner 热需求 2026-06-27): 热门市场 Top5. 换 availableMarkets(raw<50 滤满盘·同 /start 口径).
 // startBetFromMarket guard 是 catch-all (任何入口按钮都过); /hot 源换是额外 UX 保障.
-bot.command('hot', async (ctx) => {
+// #18 (2026-07-05): 具名函数, /hot 命令 + /start 精简后"🎲 去押注"按钮共用(复用现有 available
+// markets 浏览流程, 不新造入口, 见 J2 review)。
+async function hotHandler(ctx) {
   initLang(ctx);
   const lang = getLang(ctx);
   const r = await api.availableMarkets(5);
@@ -403,7 +410,15 @@ bot.command('hot', async (ctx) => {
     return ctx.reply(result.text, { reply_markup: result.keyboard });
   }
   return ctx.reply(result.text);
-});
+}
+bot.command('hot', hotHandler);
+
+// #18 nav buttons (2026-07-05, Owner /start 精简批): /start 首页 4 按钮里 3 个复用命令同款逻辑
+// (领水/我的下注/去押注), 只是入口从打字变成点按钮——按钮回调必须先 answerCallbackQuery(否则
+// Telegram 客户端一直转圈), 再走跟命令一样的 handler(单源, 不复制业务逻辑)。
+bot.callbackQuery('nav:faucet', async (ctx) => { await ctx.answerCallbackQuery(); return faucetHandler(ctx); });
+bot.callbackQuery('nav:mybets', async (ctx) => { await ctx.answerCallbackQuery(); return mybetsHandler(ctx); });
+bot.callbackQuery('nav:hot', async (ctx) => { await ctx.answerCallbackQuery(); return hotHandler(ctx); });
 
 // S-C menu navigation — plain-text numeric replies advance the bet flow (commands handled above).
 bot.on('message:text', async (ctx) => {

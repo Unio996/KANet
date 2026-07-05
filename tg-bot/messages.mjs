@@ -24,9 +24,12 @@ export function startMessage(lang = 'en') {
   return { text, keyboard: { inline_keyboard: [[{ text: t(lang, langBtnKey), callback_data: 'lang:toggle' }]] } };
 }
 
-// §11 v2 (Owner 终裁 2026-06-27): 老用户极简, 无 /help 提示行. custody 双守行永在.
-// Owner 2026-06-28: 老用户顶部嵌紧凑 5 热榜(标题+池+人数+深链按钮) + /hot 兜底. trending 传 null→无块.
-// Owner 2026-06-28 UX重构: 加赛事聚合卡区 (sportsGroups != null → ⚽ 赛事区), 热榜/新盘双区.
+// #18 (2026-07-05, Owner 亲测撞见 13 按钮堆叠·Bettor 批样图): 首页从"嵌 5 热榜+赛事卡"精简成
+// 4 个核心按钮(去押注/我的下注/领水/语言) + 地址一行, 不占首页刷屏。热榜/赛事卡浏览挪进 /hot
+// 命令的常规响应流程(点"🎲 去押注"按钮 = 直接触发 /hot 同款逻辑, 单源不复制, 见 bot.mjs
+// hotHandler), 不在 /start 首页堆叠展示。trendingMarkets/sportsGroups 参数保留(向后兼容调用签名,
+// 未来若要在首页加提示行可复用), 当前实现不再消费它们构建内嵌区块。
+// §11 v2 (Owner 终裁 2026-06-27) 历史: 老用户极简, 无 /help 提示行. custody 双守行永在(NWT 承重, 不可删)。
 export function startMessageLinked(addr, custodial = null, trendingMarkets = null, botUsername = null, sportsGroups = null, lang = 'en') {
   const shortAddr = addr.length > 20 ? addr.slice(0, 17) + '…' : addr;
   const custLabel = custodial === true
@@ -37,38 +40,19 @@ export function startMessageLinked(addr, custodial = null, trendingMarkets = nul
   const custWarn = custodial === false
     ? t(lang, 'start_linked_non_custodial_warn')
     : t(lang, 'start_linked_custody_warn');
-  const cmdLine = t(lang, 'start_linked_commands');
   const lines = [
     t(lang, 'start_linked_title'),
     `📍 ${shortAddr}  ${custLabel}`,
     '',
-    cmdLine,
-    '',
     custWarn,
   ];
-  const buttons = [];
-
-  // 🔥 热榜区 (bettors>=3 真实热度)
-  if (trendingMarkets && trendingMarkets.length > 0) {
-    const block = _compactTrendingBlock(trendingMarkets, botUsername, lang);
-    lines.splice(2, 0, ...block.lines);  // insert after header, before commands
-    buttons.push(...block.buttons);
-  } else if (trendingMarkets !== null) {
-    lines.splice(2, 0, '', t(lang, 'start_trending_empty'), '');
-  }
-
-  // ⚽ 赛事聚合卡区 (新盘/冷启动, 信任卡, 无 bettor 门)
-  const sportsBlock = sportsGroups && sportsGroups.length > 0 ? sportsCardBlock(sportsGroups, botUsername, lang) : null;
-  if (sportsBlock) {
-    // 在 commands 行前插赛事区
-    const insertAt = lines.indexOf(cmdLine);
-    const at = insertAt >= 0 ? insertAt : lines.length - 2;
-    lines.splice(at, 0, ...sportsBlock.lines);
-    buttons.push(...sportsBlock.buttons);
-  }
-
   const langBtnKey = lang === 'en' ? 'start_lang_btn_zh' : 'start_lang_btn_en';
-  buttons.push([{ text: t(lang, langBtnKey), callback_data: 'lang:toggle' }]);
+  const buttons = [
+    [{ text: t(lang, 'start_btn_bet'), callback_data: 'nav:hot' }],
+    [{ text: t(lang, 'start_btn_mybets'), callback_data: 'nav:mybets' }],
+    [{ text: t(lang, 'start_btn_faucet'), callback_data: 'nav:faucet' }],
+    [{ text: t(lang, langBtnKey), callback_data: 'lang:toggle' }],
+  ];
   return { text: lines.join('\n'), keyboard: { inline_keyboard: buttons } };
 }
 

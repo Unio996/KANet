@@ -14,6 +14,10 @@ export const LANGS = {
     start_custody_warn: '⚠ Custodial · Node holds key · Use /link for real funds',
     start_help: '→ /help Full guide',
     start_lang_btn_zh: '🌐 中文',
+    // #18 (2026-07-05, Owner /start 精简 13→4 按钮)
+    start_btn_bet: '🎲 Bet now',
+    start_btn_mybets: '📋 My bets',
+    start_btn_faucet: '💧 Faucet',
 
     // /start (linked)
     start_linked_title: '👋 KANet · You\'re ready',
@@ -376,6 +380,10 @@ export const LANGS = {
     start_custody_warn: '⚠ 托管·节点持 key·真钱请 /link 非托管钱包',
     start_help: '→ /help 完整指南',
     start_lang_btn_en: '🌐 English',
+    // #18 (2026-07-05, Owner /start 精简 13→4 按钮)
+    start_btn_bet: '🎲 去押注',
+    start_btn_mybets: '📋 我的下注',
+    start_btn_faucet: '💧 领水',
 
     // /start (linked)
     start_linked_title: '👋 KANet · 你已就绪',
