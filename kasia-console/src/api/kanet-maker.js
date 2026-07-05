@@ -45,7 +45,7 @@ export async function registerKanetMakerRoutes(fastify) {
     if (!relay_id) return reply.code(400).send({ ok: false, error: 'relay_id required' });
 
     const rows = sqlite.prepare(`
-      SELECT id, maker_stake_amount, settle_txid, refund_txid, protocol_status, metadata, updated_at
+      SELECT id, maker_stake_amount, settle_txid, refund_txid, protocol_status, protocol_version, metadata, updated_at
       FROM pool_markets WHERE maker_relay_id = ?
       ORDER BY updated_at DESC
     `).all(relay_id);
@@ -61,8 +61,15 @@ export async function registerKanetMakerRoutes(fastify) {
       const stake = BigInt(r.maker_stake_amount || 0);
       const isSettled = !!r.settle_txid;
       const isRefunded = !!r.refund_txid;
+      // 查漏补缺(2026-07-05, #51 同族显示症状): bshard(v0.7)结算从没实现 maker-reclaim(computeSettlePlan
+      // 从没调用 deriveFeeLeaves) —— phase2_maker_payout_sompi 这个字段对 v0.7 盘永远不会被写入,
+      // 不是"等 backfill", 是这条经济层链路本身还没接通(covenant 缺 entry, #51 在做, 几天工程)。
+      // 之前 'settled_pending_payout' 文案暗示"快了/等回填", 对 bshard 盘是误导——诚实标成经济层
+      // 未上线状态, 别让 maker 误以为钱在路上。v0.6 老盘逻辑不动(它是真的有 phase2_maker_payout_sompi
+      // 写入, 只是有些历史盘在 backfill 前那个窗口期)。
+      const isBshard = r.protocol_version === 'v0.7';
 
-      // J2 settler 记的实际 maker payout (winner output 额, 输=0). 无 = backfill 前.
+      // J2 settler 记的实际 maker payout (winner output 额, 输=0). 无 = backfill 前(v0.6) / 从没实现(v0.7).
       let payoutSompi = null;
       if (isSettled && r.metadata) {
         try { const _m = JSON.parse(r.metadata); if (_m.phase2_maker_payout_sompi != null) payoutSompi = BigInt(_m.phase2_maker_payout_sompi); } catch {}
@@ -79,8 +86,11 @@ export async function registerKanetMakerRoutes(fastify) {
         payoutKas = (Number(payoutSompi) / 1e8).toFixed(8);
         realizedNetSompi += pnlSompi;
         realizedN += 1;
+      } else if (isSettled && isBshard) {
+        // bshard 结算了, 但 maker-reclaim 机制在 v0.7 从没实现(#51) —— 诚实标, 不是"待回填"
+        status = 'economic_layer_pending';
       } else if (isSettled) {
-        // settled 但 J2 还没记 payout (backfill 前): 不瞎估, 标待回填
+        // v0.6 老盘: settled 但 J2 还没记 payout(真的是 backfill 前窗口期): 不瞎估, 标待回填
         status = 'settled_pending_payout';
       } else {
         // active: 在押
