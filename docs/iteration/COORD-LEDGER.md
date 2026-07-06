@@ -8,12 +8,40 @@
 
 ---
 
+## 🟢 fresh 接手第一动作(2026-07-06 restart·全队 fresh session)
+> **背景**: 26h+ 马拉松·Owner 令 restart 换 fresh 上下文攻 silverc emit-fix(不停·airtight handoff·治"停出幺蛾子")。ZK 已推到"就差 OP_PICK emit-fix"。
+- **fresh J2/J1(双人攻)**: 读 memory `project-j2-oppick-investigation-handoff-2026-07-06`(byte 级 locus offset143/opcode 语义坑/排除 .sil 死路) → **实现 silverc emit-fix**(StackBindings pop 后正确重算 PICK index·gateSuffix 双引用+CAT/SHA256 两次 pop 后 idx 没 +2·该 8 用了 9)·**emit 侧修·脚本在不变 live VM 跑通·绝不改 VM(硬分叉+D-005)**。隔离 clone: silverc + `D:/rusty-kaspa-zksdk-isolated`(zk-sdk WASM)。
+- **fresh Bettor(协调·我)**: 读本文件 + DECISIONS.md(D-001 ZK committed / D-005 隔离铁律) + 接位 → **协调 J2/J1 silverc emit-fix → NWT co-verify 修法(改对侧) → 重编覆约 → 执行过 → 接 J1 真 proof(image_id `c9918501...`·65B env::commit_slice·非作废 815db584) → 广播落链(三重核·八命门·Owner 批闸)**。目标: 今天干通完整真 ZK settle。
+- **fresh NWT**: co-verify silverc 修法 + 八命门 + 落链守恒。**fresh KANet-UI**: 保公测 live(押注深夜低谷·infra 健康·待主动 bot-path 实测) + ZK JS wire。
+- **两 UTXO 已落链待重试**(OP_PICK 修好后重编覆约再广播): covenant `kaspatest:prrgnrfl...` + gate(见下方 ZK 检查点节 txId)。
+
+### 🎯 OP_PICK 根因定位(2026-07-06 12:50·J1 源码级最小复现·NWT GREEN)
+- **方案**：`docs/2026-07-06-oppick-codegen-team-attack-plan.md` v2(Bettor 出稿+Claude 高级架构审合并)——**NWT 二审 GREEN**(Tier2 符号栈追踪一处实现细节待 J2/J1 落地时写清楚，不阻塞)。
+- **🔴 根因定位(J1 源码级 7 行最小复现，取代早前 `compile_introspection_expr`/`compile_runtime_variable_definition` 两个待验候选)**：`lower_inline_functions.rs` 的 alpha-renaming 管线——局部变量下游被引用 ≥2 次时（重命名成 `__inline_0_a` 那条管线），编译器把变量自己的净栈效应多算了 1（诊断报 `net stack_depth=2, expected 1`，指向变量**自己的定义语句**，不是下游引用语句）。**这个"重命名管线多算1"的定位站得住**；⚠ **但"必须 3 项 concat+cast 才触发"这个具体形状描述 12:52 J1 自查出 confound——待重新核实(见下)**。
+  - **⚠ confound(2026-07-06 12:52·J1 自查)**：`locals.rs:41 lower_local_aliases`——变量被引用 **≤1 次**时会被别名消除(RHS 直接文本代入下游，完全不生成真实 stack binding，不走 `compile_runtime_variable_definition`)。这意味着之前"逐项试出不触发"的对照组(只引用1次的变体)根本没进入真实编译路径——不是"concat 形状导致不触发"，可能仅仅"引用≥2次"本身就是触发条件，跟 concat 链长度/cast 位置无关。**J1 正在用"强制引用2次"重测每个 concat 形状变体，几分钟出真正触发条件**，此条目待更新，别把"3项concat+cast"当钉死细节引用。
+- **下一步**：J2/J1 落 `lower_inline_functions.rs` 实际 emit 修复 → NWT 第二次审(落码前代码审，跟设计审分开)→ Tier 0 最小复现 + 完整 covenant 双重验证(§5 v2 四层：bounds+符号标签/预注册diff/恒等式/live-node，`computeBudget=1500`)→ 重编覆约 → 接 J1 真 proof(image_id `c9918501...`)→ 广播落链(八命门+Owner批闸)。
+- **🔴 落码前三步核对(2026-07-06 12:5x·第二轮架构审·方案 §1.5，J2 落码前必做)**：① 算术对账("多算1"×触发次数是否精确=观测偏差−2，机制推导出预期 diff 而非只写 offset143) ② 触发条件三元组(cast/concat数/引用次数)消融矩阵(3用例,注意跟 `lower_local_aliases` 别名消除假阴性交叉核对) ③ 潜伏面扫描(全量现有 `.sil` grep同款位点,命中但未越界=静默取错值候选,合并进 Tier2 模拟器 corpus 验证)。**diff budget 收紧**：落码预声明只碰 `lower_inline_functions.rs`，顺手改 `stack_bindings.rs`/`compile.rs` 需单独解释。三步过 → §5 v2 四层验收 → 广播闸不变。
+
+---
+
 ## 🔴 当前状态速览(2026-07-06·接位第一读·配 docs/DECISIONS.md)
 > **战略决策口径一律以 `docs/DECISIONS.md`(D-001~D-004)为准·防炒陈饭。本区只记当前进度锚点。**
 - **公测已开(7/5 X 公布 tg DM)**: 世界杯盘 live。真人流量压出"链上推进/DB 滞后"这族 bug(phantom-leaf/时序/僵尸/孤儿脚本 race)。
 - **结算实证(公测三场全闭合·2026-07-06)**: lv3rz(Brazil-Norway 442/442)+ k3cnf(Mexico-England 64/64·England 晋级)+ dyljb(Will Mexico advance? 449/449·NO 赢·守恒 27837.32 分毫不差)= **955 赢家全付·三场守恒闭合·判定逻辑闭合**(k3cnf England 晋级↔dyljb Mexico 不晋级)。**covenant 保证钱一分没丢·可链上追付对**。dyljb 经历 J2 孤儿脚本混战(20+)→DB-lag 自愈 v3 自动恢复 264 假阴性→跑完 = **自愈机制真 work 实证**。
 - **daemon 自治结算**: settle-daemon(每 tick 自动判定+consolidate+PUSH 付赢家)~6/30 建·今晚修可靠性(5cfd215c 自愈 / 98a85f7e #33-③ settled_partial_claims 纳入 ripe / multi-step 探测)。
-- **🔴 战略方向(D-001·Owner 2026-07-06 钦定)**: covenant/committee-sig 结算实践脆·**方向=攻真·密码学 ZK 多片替 committee-sig·ZK 唯一路径**。现状=covenant 在跑(非 ZK)。**待办: J2 核实 silverc OP_PICK blocker 能否绕**。
+- **🔴 战略方向(D-001·Owner 2026-07-06 钦定·CLAUDE.md 铁律0.5)**: **ZK=committed 目标结算架构·rolling/covenant 跨节点=死路(不投任何资源)**。现状=rolling 维持 live 公测过渡·ZK 全力攻。
+- **🔥 ZK 攻坚进展(2026-07-06·全力攻坚)**: **三大技术风险全消**——①OP_PICK 可绕(新 silverc 编过 + R0ScriptBuilder 不用 silverc) ②ZkScriptBuilder 产兼容 gate script(WASM 隔离 build+JS 可调) ③verifier 真验(zk-sdk 14/14 含篡改拒·同 live verifier 代码)。**🎉 历史性 LANDED(txId bfd3d0e2)**: **TN12 活链第一次 0xa6 真验证接受 groth16 证明**(computeBudget~14M units·双验证 J2+NWT :3200·待跨节点)。**precise scope**: 证的=0xa6 活链验 ZK 证明·**非完整 ZK settle**(差真 CloseZk 两-input binding + 真 guest proof)。
+- **ZK 检查点(2026-07-06·team 共识暂停·下次 fresh 秒接)**:
+  - ✅ **non-vacuous binding 焊死**: WASM 补 `commitToGroth16WithFixedJournal`(~40 行·隔离 clone `D:/rusty-kaspa-zksdk-isolated`)·不同 journal_hash→不同 gate P2SH。
+  - ✅ **covenant 重构 byte-equal**: `blake2b(gatePrefix+journalHash+gateSuffix)` == `blake2b(完整 799B redeem)`·CloseZkRepro3.sil 骨架(NWT 八命门审过·`scratch/_j2_closezk_repro3.sil`)。
+  - ✅ **两 UTXO 落链待完整测**: covenant 地址 `kaspatest:prrgnrfl66r06dlp2dktsr2tvrxdcndeen0hqjj4420knnwlfhpszewu0z4ut`(state: attestedWinner=1,closed=1,待 zk_close·txId 1b29291e) + gate 地址 `kaspatest:pqcd63...`(带 groth16 proof·journalHash 匹配 baked·txId 971f2f69)。
+  - ⏸ **下次 fresh 接的一步(error-prone·勿疲劳赶)**: 手工按 SilverScript 栈序编码 zk_close sigScript(3 参数: gateSuffix/guestPayoutRoot/selfOutIdx 按声明序 push·单 entrypoint 无 selector)→ 构造 2-input zk_close TX → NWT 八命门审 → 广播 → 完整 CloseZk non-vacuous binding 上链。
+  - ✅ **真 guest 环境就绪(J1·2026-07-06 verify-first EXIT=0)**: J1 机器(独立 :3300 节点·非 live 主机)装好 **Ubuntu WSL2 + Rust 1.96.1 + RISC0(cargo-risczero 3.0.5/r0vm 3.0.5/rzup)**·实测真 RISC0 guest EXIT=0。**下步**: 按 golden-ref(`docs/2026-06-28-P2-payout-guest-golden-reference.md`)写真 payout guest→真 groth16 proof(替 fixture)。写 guest=安全可迭代(非不可逆)·可推进。**live 主机绝不装 WSL(D-005)**。
+  - ✅ **真 guest proof LANDED(J1·2026-07-06)**: 真 RISC0 guest(payout 算术 13/13 byte-equal golden-ref·computePariMutuelPayout/deriveFeeLeaves/settlePayoutRoot/computeBetsRoot)生成**真 groth16 proof(非 dev-mode·journal 双锚 bets_root+payout_root)**。替 fixture 的真货·待汇合。
+  - ✅ **OP_PICK codegen 根因找到+修复+验证(J1 单行修复·2026-07-06 深夜)**: 根因在 `compile.rs` `compile_byte_sequence_cast_call`(2-arg `byte[](val,size)` 动态 cast 分支)一行多余的 `*ctx.stack_depth += 1;`(无对应 opcode)。删除该行,`cargo test --release` 55 测试全绿零回归,D-005 合规(纯 silverc 编译器 emit 侧,零碰 live VM)。J2 code-review 通过后落码进 shared `D:/silverscript`,本地 commit `8065184`(分支 `j2-oppick-fix-2026-07-06`,**尚未 push**)。活链验证进度: `pick at invalid location`(修前)→ OP_PICK 通过、`non-vacuous binding` EQUAL 校验 byte-exact 通过(修后,fixture proof)。**J2 covenant journalHash 公式(SilverScript)与 J1 guest(Rust)独立实现数学互通**: 两边各自算出同一 journal_digest `b7b89b3e9490c96b525b970adb83a7015ee48b2c00beaca32d10fa2360acb1d4`,交叉验证通过。
+  - 🔴 **(已解除,见下)曾经的硬 blocker = J1 本机 Docker Desktop WSL2 集成 bug**: risc0-groth16 的 STARK→Groth16 压缩步骤需要 WSL 内跑 docker 容器,J1 机器上 docker-desktop 内部 distro 到消费 distro(Ubuntu)的跨 distro 共享挂载(`/mnt/wsl/docker-desktop/docker-desktop-user-distro`)把 23MB 的桥接二进制读成 0 字节,完整卸载重装 Docker Desktop 也没修好(settings 读取那层修好了,但这个更深的挂载层没有)。J2(live 主机,D-005 禁装 WSL)、NWT(无 Docker)都排查过绕不开,团队 7/6 13:58 共识"机制已证通(OP_PICK 修复+non-vacuous binding+continuation 活链验证 byte-exact PASS),真实 Groth16 proof 接入留后续任务,不阻塞今晚里程碑"。J1 判断唯一干净修法是真机重启(`wsl --shutdown` 不够,试过)。
+  - ✅ **Docker/WSL2 bug 被真机重启修好 + 真实 Groth16 proof LANDED(J1·2026-07-06 21:3x·fresh session 接位后首要动作)**: 机器 21:24 重启完成后验证 `docker version` + `docker run hello-world`(真拉镜像真跑容器,非仅 settings 读对)在 `wsl -d Ubuntu` 里跑通,跨 distro 挂载 bug 解除。随即用 `ProverOpts::groth16()` 重跑真实(非 dev-mode、非 fixture)proving:`receipt.verify(PAYOUT_ID)` 本地验证通过,journal byte-equal golden-ref V3/B2(bets_root=`41b7e8e6...`/payout_root=`759b6e26...`/attested_winner=0),`image_id(PAYOUT_ID)=c9918501d90bf0aeaaf7970816078c81e8286c08293ccf388e87a7cab023ce30`,`journal_digest=b7b89b3e9490c96b525b970adb83a7015ee48b2c00beaca32d10fa2360acb1d4`(跟 J2 昨晚独立算出的 covenant 公式结果一字不差,零漂移)。borsh 序列化 `Groth16Receipt<ReceiptClaim>` 导出 482 字节,已贴进 `dev-coord-testnet` 频道供 J2 组装最终交易。**J1 未自行推进到交易组装/广播**——按域分工那是 J2 的域,J1 只交付 receipt 数据,等 J2 确认收到 + Bettor 走完整确认点(资金守恒/non-vacuous binding/continuation/receipt 格式校验)再 GO。
+  - **汇合 = 完整 ZK settle**(真 CloseZk 两-input + 真 guest proof)。**OP_PICK 已修好 + 真 Groth16 receipt 已交付**——剩下: J2 用真 receipt 组装最终 2-input zk_close TX → NWT 八命门审 → 广播 → 完整 CloseZk non-vacuous binding 上链。上链走 co-verify 八命门+Owner 批闸,老规矩不因"最后一步"抢跑。工具链: silverc 隔离·zk-sdk WASM `D:/rusty-kaspa-zksdk-isolated`。
 - **🔴 "ZK 标签正名"(D-001)**: 现跑的"多片 ZK"实为 committee-sig covenant·真密码学 ZK 只单片 pb73v·多片从未交付。勿混。
 - **框架反漂移(D-002/003/004)**: 迭代回路(执法阶梯 L1-L4)+ 记忆反增殖 + 统一知识框架(KB=durable 唯一家·DECISIONS.md=决策口径·接位路由补 KB+DECISIONS)。FRAMEWORK-RETRO-TEMPLATE 锚 7/8 首轮 retro。
 
