@@ -648,6 +648,14 @@ startSettleFailedAlertCron();
 import { startDiskSpaceAlertCron } from './lib/disk-space-alert.mjs';
 startDiskSpaceAlertCron();
 
+// 查漏补缺(2026-07-06 晚, 三前置之一, wiring doc §2.6 写死的 escape 上线硬前置): zk_prove_jobs
+// 卡死无自动告警(v1 已知限制)。escape entrypoint 上线前必须堵住"卡死无人发现→GRACE窗口静默打开→
+// 输家躺赢"这条路。跟 settle-failed-alert/disk-space-alert 同款只读监控模式，但去重落 events 表
+// (非内存态)，防重启吞掉已卡死的 job(Bettor+NWT 审出的范围继承坑，settle-failed-alert 的 baseline
+// 哲学在这里不成立)。
+import { startZkProveJobStuckAlertCron } from './lib/zk-prove-job-stuck-alert.mjs';
+startZkProveJobStuckAlertCron();
+
 // Phase B Variant Expander 3-tier (Owner 5/16 钦定 "B" + Bettor r141 spec) — 30 min cron.
 // per scanner rec → auto-find related markets → 3 档 variant (激进/适中/保守) INSERT.
 // Phase 1 skeleton + UI surface, Phase 2 will integrate depth-500 /book API real-time.

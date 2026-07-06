@@ -8,11 +8,22 @@
 // 认证: bearer token (ZK_PROVE_SERVER_TOKEN, 存 kanet.env, 不进 git)。内网 agent 间调用, 非
 // 面向公网用户, proportional threat model 不需要 mTLS。
 import Fastify from 'fastify';
+import { timingSafeEqual } from 'node:crypto';
 import { sqlite } from '../db/client.js';
 
 const TOKEN = process.env.ZK_PROVE_SERVER_TOKEN;
 const HOST = process.env.ZK_PROVE_SERVER_HOST || '100.99.147.101'; // Tailscale interface only, not 0.0.0.0
 const PORT = Number(process.env.ZK_PROVE_SERVER_PORT || 3201);
+
+// 常量时间比较(NWT 2026-07-06 审出: `!==` 逐字节短路比较有理论时序攻击面, 同 isTrustedProxy
+// 那类 auth 比较问题同一模式类别)。长度不等直接 false(不喂进 timingSafeEqual, 它要求等长 buffer
+// 否则抛异常) —— token 长度本身不是需要隐藏的秘密, 内网 Tailscale 场景下这个残余量可忽略。
+function _safeTokenEqual(a, b) {
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  if (bufA.length !== bufB.length) return false;
+  return timingSafeEqual(bufA, bufB);
+}
 
 export async function startZkProveServer() {
   if (!TOKEN) {
@@ -24,7 +35,7 @@ export async function startZkProveServer() {
 
   app.addHook('preHandler', async (request, reply) => {
     const auth = request.headers.authorization || '';
-    if (auth !== `Bearer ${TOKEN}`) {
+    if (!_safeTokenEqual(auth, `Bearer ${TOKEN}`)) {
       reply.code(401).send({ error: 'unauthorized' });
     }
   });
