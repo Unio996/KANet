@@ -16,6 +16,10 @@
   2. **③三前置基础设施**(escape entrypoint 服务真实市场的硬前置,wiring 文档 §2.6): 出证备份机(J1 已认领 SPOF 评估)+ proving job 卡死告警 + `ESCAPE_GRACE` 按"出证环境全损到重建最坏时长"定标。
   3. **④kill switch 端到端测试**: `ZK_CLOSE_TICK_ENABLED` 打开后的真实链上测试——碰钱广播,完整确认点,排最后。
 - **非阻塞待办队列(昨晚遗留,不丢)**: `_j2_closezk_repro4.sil` 归位改名(移出根目录 `_*` 约定) / `_PSZK` 幻影 layout 清理(`readAttestedWinnerFromState` L146-169 四维 grep 定性) / `PayoutShard.sil` dust 同款缺口独立跟进 / `bh01w` zombie_quarantine 处置 / zk-prove-server bearer token 补 constant-time 比较 / **7/8 首轮框架 retro(D-002,明天,FRAMEWORK-RETRO-TEMPLATE)**。
+- **🔴🔴 Owner 钦定今日终极目标(2026-07-07)**: **"今天就一个终极目标,ZK 要并入预测系统运行!"** —— 主线优先级锁生效,今天所有切片服务此目标。
+  - **DoD(Bettor 译,报数级别词)**: settle daemon 在 kill switch ON 下,对至少一个符合准入政策(世界杯 pool ≤900 人)的真实市场,**全自动**走完 ZK 结算路径(enqueue proving job → J1 机器出真 Groth16 → relay handler 组装广播 zk_close → 落链 → reconcile 转 `zk_settled`),predict-then-verify 确认点全过,双重独立核实落链 = **端到端 demonstrate**。不越界 claim"全量迁移/生产就绪"。
+  - **关键路径(依赖序)**: T1 卡死告警(J2,落码中,NWT GREEN 已给) → ②relay handler `unlockBshardZkClose`(J1 域,今天最大缺件) + `dispatchUnlockZkClose` ctx hook 接线(J2) → 隔离全链测试 → kill switch ON(§2.6: escape 未上时卡死无经济后果,可先开) → Bettor 手动标记一个准入市场 `zk_ready` → daemon 自动结算 → 双重核实。
+  - **今日范围外(不因赶目标偷渡)**: escape_trigger/escape_claim 上真实市场(三前置未齐:备份 proving 机+GRACE 定标未完成)——escapeRefund ctx hook 可接线但保持 fail-closed,不服务真实市场。
 - **⚠ 双节点 ledger 分叉合并(2026-07-07 Bettor)**: origin 侧(J1 机器)7/6 深夜并行补记了 3 个 docs commit(16a7e60a/e10d8ec5/ea2f5f87,含 Docker 修复细节+汇合完成条目),与本机 ledger 冲突。合并原则: 时间线详版保本机,"ZK 检查点"节保 origin 更新版(OP_PICK✅/Docker解除/汇合完成),origin 尾部"⏸卡点"条目已过时(本机 18:2x/20:0x 突破条目取代),加标注保留。
 
 ## 🟢 fresh 接手第一动作(2026-07-06 restart·全队 fresh session)
