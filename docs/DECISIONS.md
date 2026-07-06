@@ -92,6 +92,7 @@
 - **🟢 rolling 处置**: **保持 live 公测运行(不停·真人钱在里面·三场 955 赢家已闭合)·但不再追加投入**——降为过渡/live-continuity·非目标架构。
 - **⚠ 慎重铁律(D-005)**: 全隔离开发·live 节点原地不动·ZK 真上线 = 充分测试后 Owner 拍的独立迁移决策。
 - **supersedes 链**: 6/28 Owner 钦定 ZK → 6/30 单片/多片 PROVEN(委员签名) → 7/3 rolling(过渡) → **7/6 Owner 拍板 ZK committed(本条·最终·rolling 降过渡)**。
+- **✅ 执行路径实证达成(2026-07-06 14:44)**：选项 A(自修 silverc OP_PICK codegen bug)完成——根因定位(`compile.rs:3754`)+单行修复+cargo test全绿+§5四层验收全过。**KANet 历史上第一笔完整真实 ZK settle 交易 LANDED**(txId `4ec9ddd1d89b144bfec50e386be0221ab44e2f58f1c4f63207358a2eb80f3545`，NWT 独立核实)——OP_PICK 修复+non-vacuous binding+continuation state转换+J1真实RISC0 guest算出的真实Groth16 proof(非fixture)全部环节首次同时在活链验证通过，零资金损失。详见 COORD-LEDGER 对应里程碑条目 + memory `project-first-complete-real-zk-settle-landed-2026-07-06`。**诚实标注**：这是"机制端到端跑通"的第一笔实证，尚未讨论生产化/规模化路线(委员共识层/多片等)，不越界声称"生产就绪"。
 
 ---
 

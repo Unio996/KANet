@@ -2736,4 +2736,42 @@ async function _settleOneMarketAttempt(marketId) {
 
 ---
 
+## 规则 53 · 递减资金池 covenant 的最后一笔 claim 精确清零 → 撞 Kaspa dust 策略拒绝，生产合约(PayoutShard.sil)潜伏同款缺口从未被真实触发
+
+**触发时机**（2026-07-06，NWT 隔离链上测试中抓出）：新写的 `escape_claim`(`consolidated_pool` 逐笔递减 + `validateOutputState` 无条件产生 continuation output)第一次跑单 bettor 全额 claim，广播报 `"transaction output #0: payment of 0 is dust"`。J2 最初判断"生产环境多 bettor 分批 claim 不会撞到这个边界"——**这个推理站不住，NWT 当场纠正**：不管一个市场有多少个 bettor，只要全部人最终都 claim 完，池子总和精确等于所有已注册 stake 之和（这本来就是它的烤法）——**排在队尾的最后一个 claimant，`consolidated_pool - stake` 必然精确等于 0**，导致 continuation 的 0 值 output 撞 dust 下限。**这不是"单 bettor 测试才会撞"的边缘场景，是每个市场都会撞到的同一个结构性缺口，不因 bettor 数量而改变**。
+
+Owner 事后凭印象要求"先查现有解法，这个应该修过很多次"——**三方(Bettor+NWT+J2)独立查代码库+memory，确认这个精确场景从未有过既有修法**。更严重的发现：生产环境 `PayoutShard.sil` 的 `claim`/`refund_claim`(今晚 955 个赢家实际走的路)是**完全相同的无条件模式**，同样没有"最后一笔"特殊分支——只是 955 人里从没人恰好撞上 `payout == consolidated_pool` 这个精确边界（费用/舍入让每次都留了残余），**不是问题已解决，是从未被真实触发**。
+
+### Wrong
+```
+entrypoint function claim/refund_claim/escape_claim(...) {
+    ...授权检查...
+    require(tx.outputs[selfOutIdx].value == consolidated_pool - payout);
+    validateOutputState(selfOutIdx, { consolidated_pool: consolidated_pool - payout, ... });  // 无条件产生 continuation
+}
+```
+任何"逐笔递减到 0 就该结束"的资金池 covenant，只要不显式处理 `剩余 == 0` 这个边界，最后一个 claimant 必然构造出 0 值 output，被 Kaspa 标准 dust 策略拒绝——这不是随机概率事件，是这类递减模式的数学必然。
+
+### Right
+```
+entrypoint function escape_claim(...) {
+    ...merkle proof / nullifier / recipient-bind / value check 全部无条件先执行，零豁免...
+    if (consolidated_pool == stake) {
+        // 最后一笔：覆约生命周期在这笔 tx 结束，不留 continuation，不调用 validateOutputState
+    } else {
+        // 原有分支：产生 continuation output，逐笔递减
+        validateOutputState(selfOutIdx, { consolidated_pool: consolidated_pool - stake, ... });
+        require(tx.outputs[selfOutIdx].value == consolidated_pool - stake);
+    }
+}
+```
+关键约束（写审核 checklist）：①分支判断必须放在全部授权检查(merkle/nullifier/recipient-bind)**之后**，不能因为走了某个分支就跳过任何检查；②`consolidated_pool == stake` 这个判据不可被伪造——stake 经 merkle proof 绑定到真实注册的这个 claimant，数学上此条件成立当且仅当此人确实是最后一个未领取者(否则 remaining 必然严格大于自己的 stake)；③"最后一笔"分支的资金流出只能有一个 output(退款本身)，不能留任何其它 output 给攻击者可乘之机。
+
+### Why
+- **递减资金池 + 逐笔 claim 的 covenant 设计模式，本身自带这个边界，不是某一次实现疏忽**——凡是见到 `consolidated_pool - X` 这类递减 state 字段配 `validateOutputState` 无条件续约，就该反射性问一句"最后一笔怎么办"，不用等真被撞到才发现。
+- **潜伏 bug 比显性 bug 更危险**：`PayoutShard.sil` 是已部署、正在服务真实市场的活字节码，955 个赢家安全走完是因为"运气"（费用/舍入让最后一笔总有残余），不是因为设计正确——下一个市场未必这么走运。这类"设计缺陷因数值巧合从未触发"的情况，跟"代码有 bug 但从没被测试覆盖到"是同一类风险，都需要主动排查，不能等生产事故倒逼。
+- **Owner 凭印象说"应该修过"这类提醒必须先查证再行动**（不是照单全收也不是直接反驳）——这次查证的产出不只是"确认没有既有修法"，还意外挖出了生产合约里的同款潜伏缺口，是**认真查证本身带来的额外收益**，不是走过场。
+
+---
+
 *本档案在 v2 spec 第八章元教训基础上独立。spec 聚焦"这次怎么做"，本档案聚焦"下次别再犯"。*

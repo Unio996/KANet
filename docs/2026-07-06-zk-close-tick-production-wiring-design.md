@@ -1,6 +1,6 @@
 # zkCloseTick 生产装配设计（跨机器 proving job-queue）
 
-**作者**: J2 · **日期**: 2026-07-06 · **Status**: CURRENT — job表/server/settler三步接入+3个hook(checkLanded/fetchCloseZkContinuation/reconcile)已落码，NWT GREEN(2026-07-06 15:53)。escapeRefund/dispatchUnlockZkClose 仍 TODO stub（依赖未设计的 ZK 退款 entrypoint，见下）。kill switch(ZK_CLOSE_TICK_ENABLED)默认 OFF，未做端到端真实测试。
+**作者**: J2 · **日期**: 2026-07-06 · **Status**: CURRENT — job表/server/settler三步接入+3个hook(checkLanded/fetchCloseZkContinuation/reconcile)已落码，NWT GREEN(2026-07-06 15:53)。escapeRefund/dispatchUnlockZkClose 仍 TODO stub（依赖未设计的 ZK 退款 entrypoint，见下）。kill switch(ZK_CLOSE_TICK_ENABLED)默认 OFF，未做端到端真实测试。**🔴 第二轮架构审(16:2x)升级**：journal digest 对账升级为硬闸(§2.3)；新增状态词汇表(§2.5，防settleMarketLive旧病复发)；新增跨文档复合风险+上线顺序硬约束(§2.6，escape entrypoint 上线前置=出证备份机+卡死告警+GRACE按最坏重建时长)。
 
 **触发**: Owner 拍板"现在开工"覆盖"留到下次 session"的建议，把今晚已手工验证过的完整真 ZK settle 流程（[[project-first-complete-real-zk-settle-landed-2026-07-06]]）装配进 settler 生产主循环。这是新架构决策（proving 只在 J1 机器跑，settler 主循环在 J2 机器跑），不是纯装配，走完整审核。
 
@@ -61,6 +61,8 @@ CREATE UNIQUE INDEX idx_zk_prove_jobs_market_active
 - `GET /zk-prove/poll`（J1 侧轮询 daemon 调）：返回一个 `status='pending'` 的 job（若有），并原子性地把它标成 `in_progress`（`UPDATE ... WHERE status='pending' LIMIT 1 RETURNING *` 或等效的 SQLite 事务模式，防止并发轮询取到同一行）。
 - `POST /zk-prove/complete`（J1 侧调，proving 跑完后）：body `{jobId, receiptHex, journalDigestHex}` 或 `{jobId, error}` → 写回 `receipt_hex`/`journal_digest_hex`/`status='done'` 或 `status='failed', error`。
 
+**🔴 硬闸（第二轮跨文档架构审·2026-07-06 16:2x 升级，MUST 非注释）**：`journal_digest_hex` 不是"对账用"这么轻——**J1 回传的 digest 与 J2 covenant 侧独立算出的 journalHash 必须 byte-equal 比对，不过 = job 直接标 `failed` + 频道告警，绝不 dispatch**。这是 C1 predict-then-verify 在"跨机器边界"上的同款应用（今晚 journalHash 三方 byte-equal 那条纪律的延伸），一行代码但必须写成硬性拒绝逻辑，不是留作记录的字段。
+
 ### 2.4 失败/超时语义
 
 **同意 Bettor 的判断**：settler 这边只管"发请求 + 等结果 + 没结果就这 tick 先不动"。`zkClosePhase2` 本来就是 no-tx-no-state（[[project-first-complete-real-zk-settle-landed-2026-07-06]] 已验证的 covenant 机制本身没有"部分执行"状态）——proving 没完成，`zkCloseTick` 这次直接 `continue`/跳过这个 market，**不改 `protocol_status`，不判失败，不退款**，下个 tick 重新检查 job 状态。
@@ -70,6 +72,25 @@ CREATE UNIQUE INDEX idx_zk_prove_jobs_market_active
 **可观测性（Bettor 要求③确认）**：`zk_prove_jobs.updated_at` 每次状态变更都会更新，足以看出一个 job 卡了多久（`(julianday('now') - julianday(updated_at)) * 24 * 60` 算分钟数）。
 
 **恢复脚本已提交（Bettor 要求②，非口头描述）**：`kasia-console/scripts/zk-prove-job-recover.mjs` ——`--list` 列出所有非 terminal job + 卡了多久，`--unstick <jobId>` 执行上面那条 UPDATE 并打印确认。
+
+### 2.5 状态词汇表（第二轮架构审补·MUST）
+
+**🔴 别把 `settleMarketLive` 的旧病带进新路径**：旧路径有个已知 bug——没赔完也标 `completed`（此前已要求跟 ZK 接入同批修，未蒸发，仍是欠账）。ZK 路径是张白纸，第一天就写对：
+
+- **`completed` 只在全部赢家 claim 链上核验后写入**——不是 `zk_close` 一落链就标 completed。
+- **中间态给显式名字**：`zk_close` 落链之后、全部 claim 完成之前 = `zk_closed_claims_pending`（占位命名，具体实现时确认），不是直接跳到 `completed`。
+- 旧路径(`settleMarketLive`)的那个 bug 修复仍按原计划跟 ZK 接入同批捆绑，不因为这是两份新文档就当作已经处理。
+
+### 2.6 🔴 跨文档复合风险 — "卡死的 proving job" × "deadline 逃生舱" = 输家躺赢通道（第二轮架构审，MUST 读）
+
+单看本文档 §2.4 的 v1 已知限制（job 卡 `in_progress`，手动 `--unstick`，"非紧急"）和 `docs/2026-07-06-zk-escape-refund-covenant-design-draft.md` 的 deadline-only 逃生舱设计，各自都成立。**合起来读就变了**：proving job 一旦卡死且无人发现，市场停在 `closed==1`，`attestedAtSeconds + ESCAPE_GRACE` 的钟却在走——窗口一过，输家甚至不需要"抢跑"（§NWT 经济激励发现），等着按一下就把本该归零的注变成全额退款，赢家的应得被基础设施故障没收。**今天 Docker 坏掉那几个小时就是这个场景的活彩排**。
+
+**两个结论（上线顺序硬约束）**：
+
+1. **GRACE 的选取标准再收紧一档**：不是"覆盖正常 proving 延迟"，也不只是"假设窗口即开即被抢"，而是**必须覆盖出证环境从全损到重建的最坏时长**（今天实测数据点：单机、Docker 坏、重装整套环境按小时计，最坏情况可能到天）。这个数字诚实算出来会很大——这本身就是结论：**出证冗余（第二台隔离出证机）从"运维待办"升级为 escape 上线的硬前置**，否则 GRACE 要么大到退款形同虚设，要么小到今天这种故障就足以触发全场退款。
+2. **v1 的"卡死无自动告警、手动恢复"限制，在 escape 上线那一刻自动失效**。escape 未上线时卡死只是"钱多锁一会"；escape 上线后卡死是"进入退款倒计时"。不要求今晚做自动重发，但**卡死告警**（job 超过 X 分钟无状态变更 → 频道报警）**必须在打开 escape 之前落地**——恢复脚本已有 `--list`，加个定时喊话是小活。
+
+**上线顺序约束（写死，不是建议）**：`ZK_CLOSE_TICK_ENABLED` **可以先开**（没有 escape 时卡死无经济后果，NO-TX-NO-STATE abstain 语义兜着）；**`escape_trigger`/`escape_claim` entrypoint 上链的前置条件 = 出证备份机就位 + 卡死告警落地 + GRACE 按最坏重建时长定标**——三者缺一不可，不能因为设计/代码审都过了就默认可以上线。
 
 ## 3. Relay handler（J1 域，②，本文档不重复设计，见 J1 自己的方案帖）
 
