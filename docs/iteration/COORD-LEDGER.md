@@ -31,6 +31,9 @@
     - **开放点定向**: CloseZk ctor 的 betsRootBaked/refundRootBaked 来源——**(i)优先**(close_attest 时委员一并 attest 进 V2 state,verify-value-source 全链);**(ii)兜底**(driver-baked+C2 byte-equal 门+大声标注信任降级,显式退路含触发条件)。
     - **候选市场新标准(NWT)**: 必须**从现在起新建**的盘(用 V2 模板开),任何已用旧 ShardLeaf 收注的现存盘(哪怕未 attest)一律不合格。KANet-UI 只备创建参数不执行。
     - **J1 应急线预置**: J1 若持续缺席,J2 临时跨域顶 relay 侧+NWT 双倍审力,单独报 Owner 批后才动。
+  - **✅ V2 设计稿 v2.1 设计层闭合(2026-07-07 22:2x)**: `docs/2026-07-07-zk-genesis-mint-pipeline-design.md`。Bettor 方向审抓 3 洞(①zk_handoff 模板锚缺失——witness 段无锚=caller 可喂恶意模板卷全池,w0in 同族 CRITICAL;②attestedAtSeconds 写入路径断链;③size 预警),NWT 交叉独立确认,J2 全部修复:①加 `closeZkTmplAnchor` ctor 字段+blake2b(prefix+suffix)==anchor 锚定 ②改 `attestedAtMs` 委员 5 签 witness(同其余 attest 字段信任模型) ③PayoutShard 基线实测 11098B、增量小、终验留实编译。claim entry 物理删除(双路径分配数学错配,Bettor 拍板)+refund_claim 仅 closed==2 cancel 路径与 zk_handoff(closed==1)互斥。NWT 读实际 doc 独立复核三洞修复,**设计层 GREEN 放行落码**,代码级四层验收不省。
+  - **🔬 durable 发现(silverc parser,J2 4 组 probe 实测)**: `tx.time` 唯一合法形式=孤立 `require(tx.time >= X)`,**不能赋值/不能算术/不能 ==/不能复合表达式**(da9fc22 parser 限制,源码级坐实非推测)。任何"covenant 自读时间"设计都不可行,时间值只能 witness 供+签名覆盖。
+  - **📋 今日剩余工件清单(W1-W5)**: W1=V2.sil diff(J2 进行中)→NWT 四层;W2=委员 judge/签名工具链扩展(sighash 多覆盖 4 新字段,横跨 J1 oracle 域,J1 缺席 J2 可 draft voter 侧不合并);W3=市场创建接 V2 模板(genesis-mint V2+shards 烤 cov_id);W4=relay 侧 handoff 组装+zk_close 命令(J1 域);W5=daemon dispatchUnlockZkClose hook 接 W4。J1 时限:W1 过审时仍缺席→应急评估报 Owner。
 - **⚠ 双节点 ledger 分叉合并(2026-07-07 Bettor)**: origin 侧(J1 机器)7/6 深夜并行补记了 3 个 docs commit(16a7e60a/e10d8ec5/ea2f5f87,含 Docker 修复细节+汇合完成条目),与本机 ledger 冲突。合并原则: 时间线详版保本机,"ZK 检查点"节保 origin 更新版(OP_PICK✅/Docker解除/汇合完成),origin 尾部"⏸卡点"条目已过时(本机 18:2x/20:0x 突破条目取代),加标注保留。
 
 ## 🟢 fresh 接手第一动作(2026-07-06 restart·全队 fresh session)
