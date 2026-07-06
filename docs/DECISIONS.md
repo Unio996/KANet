@@ -24,6 +24,14 @@
 
 ## 🔴 当前有效的战略决策 (CURRENT)
 
+### D-005 ZK/工具链研究隔离铁律 — 绝不碰 live 节点 (2026-07-06 · Owner 钦定·灾难级约束)
+- **Owner 警告**: "这个不能轻易迭代·换了整个系统都会塌·慎重" + "你们自己去搜索研究"。
+- **铁律**: ZK feasibility / silverc / rusty-kaspa 工具链研究 = **纯隔离**(独立 checkout / 测试环境)。**绝不 rebuild、绝不替换 live 节点的 rusty-kaspa build(1.1.1-toc.1 Toccata)**——覆盖 live 二进制 = 崩 bshard + 全部 live 市场 + 结算 daemon(配 memory reference-tn12-mining-external-bridge / covenant-wasm-breaks-selffull:绝不 rebuild D:/rusty-kaspa / 绝不 inprocess)。
+- **可行性 ≠ 采用**: 就算 OP_PICK 在 silverc v2.0.x 修了 = 只是"ZK 技术可行"的证据。**采用/迁移 live 节点 = 另一个慎重的、充分测试的、Owner 拍板的独立决策·live 在那之前原地不动。** 研究归研究·迁移归迁移。
+- **研究产出边界**: Track1 = 可行性结论(能编/不能编 + 证据)·零 live 触碰。
+
+
+
 ### D-004 统一知识框架 — KB 做成唯一 durable 家·知识层上单一真值纪律 (2026-07-06 · Owner "把 KB 统一" · Bettor 出方案)
 - **根因(读完 OIL-v0.3 框架后定位)**: 框架的**状态层(Ledger)有单一真值纪律**(§8.4 频道→Ledger 铁律),但**知识层(KB + 265 memory + 散 docs)从没上同纪律** → 知识散在四处、无单一入口、KB 烂尾在 6/28 → 每轮新 agent 拼碎片 → 漂移/炒陈饭。
 - **方案: 每类知识一个家·分层定死**:
@@ -74,14 +82,14 @@
 - **触发本条的元事件**: 规则 49(整页重写)其实早有前科(retail-dex 1990 行/规则 1)却拖到 7 月才升硬闸——周期太长,正是本回路要治的。
 
 
-### D-001 结算验证机制 — 现行执行口径 + 战略方向 (2026-07-06 · supersedes 链见下)
-> **下轮 agent 查这条·不要读 KB §9 史料自己推断现行方向。KB §9 = 震荡史料;本条 = 现行执行口径。**
+### D-001 结算验证机制 — ZK 为 committed 目标架构 (2026-07-06 · Owner 拍板翻案 · 取代 7/3 rolling)
+> **下轮 agent 查这条=现行决策。ZK 是 committed 方向·别再当'待定'重新讨论(炒陈饭 Owner 已数落两次)。KB §9 = 震荡史料·本条=最终决策。**
 
-- **🟢 现行执行口径 = rolling/committee-sig(2026-07-03 Owner+Bettor 决策·仍生效)**: 当前公测跑的是 bshard 滚动分片(consolidateAllShards + settleMarketLive + merkle-proof + 4-of-5 委员盲签)。代码核实全库无 groth16 prover 调用。**"ZK 规模决策门关闭·选 rolling 解 >1024 规模"这条 7/3 决策仍是现行执行。**
-- **🟡 战略方向(2026-07-06 Owner 重开·gated·尚非可执行翻案)**: Owner 因公测暴露 covenant/rolling 可靠性 bug(DB-lag 族) → 重开方向"攻密码学 ZK 替 committee-sig·ZK 唯一路径"。**但这是方向重开·不是对 7/3 的正式可执行翻案**——因密码学 ZK 卡 silverc OP_PICK blocker、**当前无可切换的 ZK**。
-- **翻案触发条件(明确)**: J2 实测 OP_PICK/gate-spk blocker **可绕** → 才出**新 D-记录正式 supersede 7/3 rolling** → 切 ZK。**不可绕 → 现行仍 rolling**(方向重开不自动改执行)。
-- **待办(前置)**: J2 实测 blocker 能否绕(换代码模式/工具链更新/SS 原语替代·实测不靠旧印象) → 出可行性 → 据此决定是否翻案。
-- **supersedes 链**: 6/28 Owner 钦定 ZK(§8) →(6/30 单片/多片 PROVEN=委员签名)→ **7/3 选 rolling(现行执行)** → 7/6 方向重开(gated·未翻案)。史料全文见 `KB/architecture/zk-track-c §9`。
+- **🔴 战略决策(2026-07-06 Owner 拍板·正式翻案 7/3)**: **ZK = committed 目标架构。** 理由(Owner 原话+技术依据): **"rolling 联机跨节点根本没戏·实践已验证"**——bshard rolling shard `market_shards` **不跨节点同步**(:3300 读不到·COORD-LEDGER 线6 记载)·去中心委员无法独立跨节点重建验 → cross-node/production 死路。**ZK proof 每节点独立验·不需跨节点同步 → 解此死结。** (Owner 强调此为"之前共识"·被团队 drift 遗忘·= 本 DECISIONS.md 反炒陈饭要根治的正是这个。)
+- **🔧 执行路径 = 选项 A**: **自修 silverc `pick_from_depth` off-by-one codegen bug**(OP_PICK·有源码 `/d/silverscript`·13 轮 bisect 定位过·targeted 补丁)→ 生成调**协议原生 ZK opcode**(OpZkPrecompile·TN12 已 live)的 covenant → ZK 结算。**J2 主·J1 回来有 13 轮记录加速。**
+- **🟢 rolling 处置**: **保持 live 公测运行(不停·真人钱在里面·三场 955 赢家已闭合)·但不再追加投入**——降为过渡/live-continuity·非目标架构。
+- **⚠ 慎重铁律(D-005)**: 全隔离开发·live 节点原地不动·ZK 真上线 = 充分测试后 Owner 拍的独立迁移决策。
+- **supersedes 链**: 6/28 Owner 钦定 ZK → 6/30 单片/多片 PROVEN(委员签名) → 7/3 rolling(过渡) → **7/6 Owner 拍板 ZK committed(本条·最终·rolling 降过渡)**。
 
 ---
 

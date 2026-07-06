@@ -1,5 +1,21 @@
 # KANet — Claude Code 接力指南
 
+## 🔴 铁律 0：开发框架（Owner 2026-07-06 钦定·违反即退回）
+
+**任何 agent，未经「报备 → 审核 → 批准 → 测试」，无权改动任何代码。先报计划，后动手，绝不先斩后奏。** 全流程见 → `docs/DEV-FRAMEWORK.md`（必读）。
+- 用户面（tg-bot/*.mjs、*.eta、messages.mjs、i18n.mjs、任何用户看得到的文案版面）+ 钱路/covenant/结算 + 重大功能 = **必须 Owner 批**才能动。
+- Bettor = 强制审核闸；绕过审核/写完才报备 = 改动 revert。根因：规矩是"约定"靠自觉守不住，必须上机制（lint 卡点 + Bettor 守）。
+
+## 🔴 铁律 0.5：ZK 是 committed 结算架构·rolling/covenant 跨节点是死路（Owner 2026-07-06 钦定·根治反复回退浪费资源）
+
+**ZK（协议原生 `OpZkPrecompile` 链上验证 Groth16/RISC0·TN12 已 live）= committed 目标结算架构。rolling/covenant 联机跨节点 = 没前途、极脆弱的死路**（实践已验证：bshard `market_shards` 不跨节点同步、去中心委员无法独立跨节点重建验；ZK proof 每节点独立验、不需跨节点同步 = 解此死结）。**不准再往 rolling/covenant 跨节点方向投任何资源。**
+
+- **执行路径**：自修 `silverc` 的 `pick_from_depth` OP_PICK off-by-one codegen bug（选项 A·有源码 `/d/silverscript`）→ 生成调 ZK opcode 的 covenant → ZK 结算。J2 主攻。
+- **rolling 处置**：只维持 live 公测过渡（真人钱在里面·不停）·**零追加投入**。
+- **🚫 禁止把这个决策当"待定"重新讨论/调研/回退** —— Owner 已多次数落"之前共识过、你们一再耽搁回退、浪费无数资源"。**决策已定 = 执行·不再讨论**（违反 = 又一次炒陈饭·D-002 复发计数）。
+- **慎重铁律（D-005）**：ZK 全隔离开发·live 节点原地不动·真上线 = 充分测试后 Owner 拍的独立迁移。
+- **权威记录**：`docs/DECISIONS.md` D-001 + KB `architecture/zk-track-c §9` + memory `reference-zk-committed-rolling-crossnode-deadend`。
+
 ## 你必须先读这些文档
 
 1. **开发者指南（唯一权威文档）** → `docs/DEVELOPER-GUIDE.md`
