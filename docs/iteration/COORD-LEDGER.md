@@ -3,7 +3,21 @@
 > 按 OIL-v0.3 §8.4 建:**频道=传输层,本 Ledger=状态层。频道滚走,状态活这里。**
 > 协调 agent:Bettor(全执行域 read-only 结构锁)。回写分级:关键决策/关2关3/§11决议必沉淀。
 > **接位文档(`C:\开发过程\…\开发智能体接位\*-接位.md`)= 稳定层,零烤状态;当前进度只读本文件。**
-> 最近刷新:2026-06-29(KANet-UI 补线13 bh01w interim-B 真盘端到端 LAND — consolidate+close_attest+PAYOUT_CLAIM 四方 co-verify PASS)。
+> 最近刷新:**2026-07-06(Bettor 恢复状态层·§8.4 断档 6/29→7/06 补回)**。此前刷新 2026-06-29。
+> ⚠ **断档教训(2026-07-06 Owner+J1 抓)**: 7/1-7/06 公测一周激烈工作(结算/daemon/ZK-covenant/框架决策)**全没回写本 ledger、活在会滚走的频道** = §8.4 铁律违反(频道当记忆)。协调者(Bettor)失职。**恢复纪律: 每决议回写本 ledger + DECISIONS.md。**
+
+---
+
+## 🔴 当前状态速览(2026-07-06·接位第一读·配 docs/DECISIONS.md)
+> **战略决策口径一律以 `docs/DECISIONS.md`(D-001~D-004)为准·防炒陈饭。本区只记当前进度锚点。**
+- **公测已开(7/5 X 公布 tg DM)**: 世界杯盘 live。真人流量压出"链上推进/DB 滞后"这族 bug(phantom-leaf/时序/僵尸/孤儿脚本 race)。
+- **结算实证(公测三场全闭合·2026-07-06)**: lv3rz(Brazil-Norway 442/442)+ k3cnf(Mexico-England 64/64·England 晋级)+ dyljb(Will Mexico advance? 449/449·NO 赢·守恒 27837.32 分毫不差)= **955 赢家全付·三场守恒闭合·判定逻辑闭合**(k3cnf England 晋级↔dyljb Mexico 不晋级)。**covenant 保证钱一分没丢·可链上追付对**。dyljb 经历 J2 孤儿脚本混战(20+)→DB-lag 自愈 v3 自动恢复 264 假阴性→跑完 = **自愈机制真 work 实证**。
+- **daemon 自治结算**: settle-daemon(每 tick 自动判定+consolidate+PUSH 付赢家)~6/30 建·今晚修可靠性(5cfd215c 自愈 / 98a85f7e #33-③ settled_partial_claims 纳入 ripe / multi-step 探测)。
+- **🔴 战略方向(D-001·Owner 2026-07-06 钦定)**: covenant/committee-sig 结算实践脆·**方向=攻真·密码学 ZK 多片替 committee-sig·ZK 唯一路径**。现状=covenant 在跑(非 ZK)。**待办: J2 核实 silverc OP_PICK blocker 能否绕**。
+- **🔴 "ZK 标签正名"(D-001)**: 现跑的"多片 ZK"实为 committee-sig covenant·真密码学 ZK 只单片 pb73v·多片从未交付。勿混。
+- **框架反漂移(D-002/003/004)**: 迭代回路(执法阶梯 L1-L4)+ 记忆反增殖 + 统一知识框架(KB=durable 唯一家·DECISIONS.md=决策口径·接位路由补 KB+DECISIONS)。FRAMEWORK-RETRO-TEMPLATE 锚 7/8 首轮 retro。
+
+---
 
 ---
 
