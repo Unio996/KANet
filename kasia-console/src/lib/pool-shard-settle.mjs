@@ -239,7 +239,12 @@ export async function consolidateAllShards({ db, rc, landed, p2sh, logicalMarket
   //   sealed 片跳闸(满片随时 LAND), lock_time 无害. 单位三处一致: register 烤秒 / 合约 *1000 / 此处 *1000ms.
   if (!Number.isFinite(Number(deadline)) || Number(deadline) <= 0) throw new Error(`consolidateAllShards: deadline (Unix s, partial-sweep gate) required, got ${deadline}`);
   const consolidateLockTimeMs = Math.floor(Number(deadline)) * 1000;
-  const allShards = db.prepare(`SELECT * FROM market_shards WHERE logical_market_id = ? ORDER BY shard_index ASC`).all(logicalMarketId);
+  // manual_recovery_refunded(2026-07-06, lv3rz shard6 phantom-leaf 事故·Bettor 拍板①经济完整性):
+  //   shard 自身 leaf 因为更早的 tip-lag 事故变 phantom(链上真花过, 但溯源代价太高), 团队走手动 runbook
+  //   直接从 gateway 原路退款给对应 bettor(见 dev-coord-testnet #7/6凌晨), 这个 shard 不再参与
+  //   consolidate(它的 stake 已经不在池子里, 退给 bettor 了不是赢家池的一部分)。exclude 掉, 否则
+  //   会重新尝试 consolidate 它已经 phantom 的 leaf outpoint 撞同一个 UTXO-not-found 卡住整条链。
+  const allShards = db.prepare(`SELECT * FROM market_shards WHERE logical_market_id = ? AND status != 'manual_recovery_refunded' ORDER BY shard_index ASC`).all(logicalMarketId);
   // resume(部分 consolidate 后续跑): 跳 shard_index < resume.fromShardIdx, PS 从 resume.psTx/pool 起(已 consolidate 片的 leaf 已花).
   const shards = resume ? allShards.filter(s => s.shard_index >= resume.fromShardIdx) : allShards;
   let psTx = resume ? resume.psTx : String(payoutShard.payout_ps_outpoint).split(':')[0];
