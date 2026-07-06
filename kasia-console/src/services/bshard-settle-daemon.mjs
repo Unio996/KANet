@@ -104,6 +104,21 @@ async function judgeWinDir(market) {
     if (res.final !== 'YES' && res.final !== 'NO') throw new Error(`UMA judge ABSTAIN: ${res.final} (conditionId ${String(conditionId).slice(0, 12)})`);
     return res.final === 'YES' ? 0 : 1;   // YES→winDir0 / NO→winDir1 (value-mapping 与 ESPN 一致)
   }
+  // ZK-native 首证 demo(2026-07-07，纯新增分支，不改动 polymarket/ESPN 判定路径一个字符)：
+  // 区块哈希奇偶——目标 DAA score 的真实链上区块哈希最后一字节奇偶，纯链上可验证，verify-value-source
+  // 最干净路径(委员直接读自家链拿哈希，零外部 API 信任面)。复用既有 chainReader.getBlockAtDaa(同
+  // bshard deadline_daa 链锚机制，非新发明)。resolution_rule_spec = {target_daa: number}。
+  if (market.outcome_market_source === 'blockhash_parity') {
+    const spec = JSON.parse(market.resolution_rule_spec);
+    const targetDaa = Number(spec.target_daa);
+    if (!Number.isFinite(targetDaa) || targetDaa <= 0) throw new Error(`blockhash_parity: invalid target_daa in resolution_rule_spec`);
+    const cur = await chainReader.getCurrentDaaScore();
+    if (cur < targetDaa) throw new Error(`blockhash_parity judge ABSTAIN: target DAA ${targetDaa} 未到(当前 ${cur})`);
+    const { hash } = await chainReader.getBlockAtDaa(targetDaa);
+    const lastByte = parseInt(String(hash).slice(-2), 16);
+    if (!Number.isFinite(lastByte)) throw new Error(`blockhash_parity: cannot parse last byte of hash ${String(hash).slice(0, 12)}`);
+    return lastByte % 2 === 0 ? 0 : 1;   // 偶→YES(winDir0) / 奇→NO(winDir1)，跟 ESPN/polymarket 同一 value-mapping
+  }
   // ESPN/HTTP path (原路·不变): resolution_rule_spec.data_source_canonical = HTTP URL → extract + judgeLine。
   const spec = JSON.parse(market.resolution_rule_spec);
   const raw = await (await fetch(spec.data_source_canonical, { signal: AbortSignal.timeout(30000) })).text();

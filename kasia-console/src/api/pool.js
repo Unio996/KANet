@@ -1249,8 +1249,23 @@ export async function registerPoolRoutes(fastify) {
     const shardP2sh_of = (smid) => (sqlite.prepare('SELECT shard_p2sh FROM market_shards WHERE shard_market_id = ?').get(smid)?.shard_p2sh) || '';
 
     try {
-      const { registerBettorOnShard } = await import('../lib/pool-shard-register.mjs');
+      const { registerBettorOnShard, computeCloseZkTmplAnchor } = await import('../lib/pool-shard-register.mjs');
       const silverc = process.env.SILVERC_PATH || 'D:/silverscript/target/release/silverc.exe';
+      // ZK-native 结算(2026-07-07，Owner"ZK走到底"钦定首证市场)。Bettor 拍板(#9ufcxq)：zk_native 必须是
+      // resolution_rule_spec 里一个独立、显式的顶层布尔字段——不能从 outcome_market_source(judge类型，
+      // 怎么判输赢)推断 covenant 版本(钱走 PayoutShard 还是 PayoutShardV2)，这两者是正交的两件事，今天
+      // 恰好一对一是巧合(首证市场用区块哈希奇偶判定+同时是唯一的ZK-native盘)，未来 ESPN/UMA 判定的市场
+      // 也可能想走 ZK-native，届时不该因为 judge 类型不是 blockhash_parity 就被这条推断挡住。
+      let _zkNative = false, _closeZkTmplAnchor = null;
+      try { _zkNative = JSON.parse(market.resolution_rule_spec || '{}')?.zk_native === true; } catch {}
+      if (_zkNative) {
+        // ⚠ gateTmplHash 绑定具体 guest image_id，昨晚 LANDED 交易(txId 4ec9ddd1...)定版值，见
+        // _j2_final_gate_data_v2.json。CloseZkRepro4.sil 路径归位(移出根目录 _* 命名约定)是独立非阻塞
+        // 待办(Bettor 记录过)，今天先引用它现在的真实位置，不假装已经归位。
+        const gateTmplHash = process.env.ZK_GATE_TMPL_HASH || '511b0eadf9b4421bca9b00b19262b02bc656faaebfe8c2b5821ddcf98353bfc1';
+        const closeZkSilPath = process.env.ZK_CLOSEZK_SIL_PATH || 'D:/kanet-tn12/_j2_closezk_repro4.sil';
+        _closeZkTmplAnchor = computeCloseZkTmplAnchor(closeZkSilPath, gateTmplHash, silverc).anchorHex;
+      }
       // 命门① genesis coherence (NWT/Bettor load-bearing): PayoutShard 烤 predicate_commit = blake2b(canonicalPredicate(predicate))
       //   (单源 computePredicateCommit, 与 enforce 同函数) — 非 market_metadata_hash (= sha256({全市场元}) ≠ blake2b(canonical(predicate))
       //   → 委员 enforce hash-bind 永假 → close 永 BUST). predicate-less 市场(无结构化判)fallback metadata_hash(无命门③ enforce).
@@ -1274,6 +1289,7 @@ export async function registerPoolRoutes(fastify) {
         poolMerkleRoot: market.pool_merkle_root, predicateCommit,
         bettorPk, direction, stakeSompi, relayAddr, silverc, sealCount: 32, deadline: market.deadline,
         createShardMarketRow, recordBettor,
+        zkNative: _zkNative, closeZkTmplAnchor: _closeZkTmplAnchor,   // 非 zkNative 市场: false/null，等价于不传，行为不变
       });
       return reply.send({ ok: true, logical_market_id: logicalMarketId, bettor_pk: bettorPk, ...result });
     } catch (e) {
