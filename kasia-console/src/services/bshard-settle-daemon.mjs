@@ -268,6 +268,16 @@ function selectRipeMarkets(currentDaa, pmt, limit) {
   // 都是这样手动接力结完的, 现存 25 个盘卡在这个状态)。settleOneMarket() 内部本来就支持从这个状态正确
   // resume(见 settleMarketLive() 的 priorWinnerDetails 回放, 复用已有 close_txid 不会重跑 consolidate/
   // close_attest)——缺的只是让它被 selectRipeMarkets 选中。加一个 OR 分支, 不动原逻辑(未结盘走原路径)。
+  // 🔴 反向结构隔离(2026-07-06 Bettor 推演抓出，开盘前必堵): resolution_rule_spec.zk_native===true
+  // 的市场只该被 ZK 管线(scanReadyZkMarkets/zkCloseTick)处理——老 committee-sig settle 路径不认识
+  // zk_native 字段，若不排除会照常把它捡进来，用 V1 attest 工具(22参 close_attest witness)去打
+  // 一个实际是 PayoutShardV2(26参 close_attest)的 covenant，fail-closed 会反复失败重试(污染
+  // events/浪费 tick，还可能撞 #33 类僵尸状态)。
+  // ⚠ J2 实测(scratch 隔离 DB，非假设): 这条数据库里 resolution_rule_spec 不保证永远是合法 JSON——
+  // 直接用 json_extract(...) IS NOT 1 在遇到畸形 JSON 的行时会让 sqlite 整条 SELECT 抛异常(不是
+  // 该行返回 NULL 那么温和)，会让 selectRipeMarkets() 整体报错、结算 tick 彻底停摆——比不排除
+  // zk_native 市场这个原洞严重得多。改用 json_valid() 先短路判断，非法 JSON 视为"未标记"(不排除，
+  // 走原逻辑，行为不变)，只有合法 JSON 且 zk_native 字段确实是 true 时才排除。
   const rows = sqlite.prepare(`
     SELECT * FROM pool_markets
     WHERE protocol_version = 'v0.7'
@@ -277,6 +287,7 @@ function selectRipeMarkets(currentDaa, pmt, limit) {
         (settle_txid IS NULL AND protocol_status IN ('pending_bettors', 'verifying'))
         OR protocol_status = 'settled_partial_claims'
       )
+      AND (json_valid(resolution_rule_spec) = 0 OR json_extract(resolution_rule_spec, '$.zk_native') IS NOT 1)
     ORDER BY (CASE WHEN outcome_market_source = 'kanet_v07' THEN 0 ELSE 1 END) ASC, deadline_daa ASC
   `).all(FINALITY_BUFFER, currentDaa);
   const ripe = [];
