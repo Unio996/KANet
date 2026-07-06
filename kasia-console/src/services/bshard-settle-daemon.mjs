@@ -25,6 +25,8 @@ import { makeCtfReader } from '../lib/uma-ctf-reader.mjs';   // #20 UMA: polymar
 import { recordShadowJudgment, registerDomainJudge } from '../lib/oracle-shadow-ledger.mjs';   // #26 自我进化: 影子台账(我们 oracle vs 权威·纯记录·永不碰结算·Owner 2026-06-30)
 import { espnSportsJudge } from '../lib/nwt-espn-sports-judge.mjs';   // NWT域判v1: polymarket体育盘ESPN独立判
 import { classifyFailure, shouldKeepStatus } from '../lib/bshard-failure-classifier.mjs';   // #49 模块①
+import { zkCloseTick } from '../lib/zk-close-builder.mjs';   // 2026-07-06 J2: ZK settle 生产装配, 见 docs/2026-07-06-zk-close-tick-production-wiring-design.md
+import { randomUUID } from 'crypto';
 registerDomainJudge(espnSportsJudge);
 
 const CONSOLE = process.env.SETTLE_DAEMON_CONSOLE_BASE || 'http://127.0.0.1:3200';
@@ -36,6 +38,8 @@ const FINALITY_BUFFER = 60;   // deadline_daa + buffer 才 ripe (endBlockHash fi
 const TICK_MS = parseInt(process.env.SETTLE_DAEMON_TICK_MS, 10) || 60000;
 const MAX_PER_TICK = parseInt(process.env.SETTLE_DAEMON_MAX_PER_TICK, 10) || 1;   // canary 默认 1
 const ENABLED = process.env.SETTLE_DAEMON_ENABLED === '1';
+// 2026-07-06 J2: ZK settle 生产装配 kill switch — 默认 OFF, 出意外行为可立刻关(照搬 SETTLE_DAEMON_ENABLED 模式)。
+const ZK_CLOSE_TICK_ENABLED = process.env.ZK_CLOSE_TICK_ENABLED === '1';
 // #20 UMA judge: polymarket 盘 winDir 读链上 Polymarket CTF (payoutNumerators/payoutDenominator by conditionId).
 // multi-RPC cross-check (RPC-trust·≥2 源同值才认)·finality (payoutDenominator>0 才 resolved·否则 ABSTAIN fail-closed)。
 const UMA_POLYGON_RPCS = (process.env.UMA_POLYGON_RPCS || 'https://polygon-bor-rpc.publicnode.com,https://polygon.drpc.org,https://1rpc.io/matic').split(',').map((s) => s.trim()).filter(Boolean);
@@ -283,6 +287,65 @@ function selectRipeMarkets(currentDaa, pmt, limit) {
   return ripe;
 }
 
+// 2026-07-06 J2: ZK-eligible 市场选择 — 全新专属 protocol_status='zk_ready' 值, 跟上面
+// selectRipeMarkets() 的选择条件(pending_bettors/verifying/settled_partial_claims)字符串层面
+// 互斥, 结构性隔离(非逻辑判断)。见 docs/2026-07-06-zk-close-tick-production-wiring-design.md §1。
+// 市场要进这条路径必须被显式标记 zk_ready(不自动推断/不继承其他状态) — 标记动作是独立的、
+// 后续才做的运维/判定步骤, 不在本次范围内。
+async function scanReadyZkMarkets() {
+  return sqlite.prepare("SELECT * FROM pool_markets WHERE protocol_status = 'zk_ready'").all();
+}
+
+// 2026-07-06 J2: zkCloseTick ctx — B1/B2/C1 命门 hook(见 zk-close-builder.mjs 顶部注释)。
+// ⚠ 范围(2026-07-06 J2, NWT/Bettor 二次确认 GREEN, 见频道 15:47-15:49 讨论): 今晚发现 phase1
+// (oracle_attest_verdict 委员 attest 机制) 在代码库里完全不存在(只有设计注释) —— fetchCloseZkContinuation
+// 因此不可能有"真实 phase1 产出"可 fetch, 只能读 market.metadata.zk_continuation 这个**手动模拟**字段
+// (跟今晚一路的手法一致: 手动构造 covenant/gate, 不是走真实committee attest流程)。同样, CloseZk covenant
+// (_j2_closezk_repro3.sil) 只有 zk_close 一个 entrypoint, 没有退款路径 —— escapeRefund 需要新设计一个
+// ZK 版退款 entrypoint(独立于现有 committee-sig 的 cancel_attest, 两个 covenant 不同 entrypoint 集合),
+// 今晚仍是 stub。dispatchUnlockZkClose 是 J1 域的 relay handler(未落码, 真实碰钱 broadcast, 留给下个
+// clean session)。checkLanded/reconcile 是纯读写(查 UTXO / 写 DB), 今晚真实实现。
+const _zkCloseCtx = {
+  scanReadyZkMarkets,
+  // 手动模拟(非真实 phase1): 读 market.metadata.zk_continuation(测试时手动写入该字段模拟"phase1 已产出"),
+  // 格式 { outpoint: {txid, index}, redeemHex, valueSompi }。真实市场没这个字段 → 返回 null(zkClosePhase2
+  // 会 skip, 不会往下走)。
+  fetchCloseZkContinuation: async (market) => {
+    let meta = {}; try { meta = JSON.parse(market.metadata || '{}'); } catch {}
+    return meta.zk_continuation || null;
+  },
+  dispatchUnlockZkClose: async () => { throw new Error('TODO: dispatchUnlockZkClose 未实现(J1 relay handler, 下一步独立工作)'); },
+  // 真实实现: 查目标 UTXO 是否存在(landed = 有对应 UTXO, 复用今晚反复验证过的 rpc.getUtxosByAddresses 模式)。
+  checkLanded: async (txid) => {
+    try {
+      await rpcEnsure();
+      const k = await kaspa();
+      // txid 本身不是地址, 无法直接按地址查 —— 用 kaspa_tx_log(今晚一路验证落链的标准做法, 见
+      // reference-chain-verify-via-relay-check-utxo-landed) 判定这笔 tx 是否已被节点索引确认。
+      const row = sqlite.prepare('SELECT tx_id FROM kaspa_tx_log WHERE tx_id = ?').get(txid);
+      return !!row;
+    } catch (e) { log(`checkLanded(${String(txid).slice(0,12)}) error: ${e.message}`); return false; }
+  },
+  escapeRefund: async () => { throw new Error('TODO: escapeRefund 未实现(ZK covenant 退款 entrypoint 未设计, 下一步独立工作)'); },
+  // 真实实现: LAND 后才调(zkClosePhase2 保证), 写 closed=2 状态语义 + settle_evidence, 复用现有
+  // writeback 惯例(见上面 settleOneMarket 里同款模式), 用独立的 protocol_status 值(zk_settled)
+  // 保持跟 committee-sig 路径的 completed/settled_partial_claims 语义区分, 不冲突。
+  reconcile: async (market, { txid, winner, betsRoot }) => {
+    let meta = {}; try { meta = JSON.parse(market.metadata || '{}'); } catch {}
+    meta.zk_settle_evidence = { settled_by: 'zkCloseTick', close_txid: txid, attested_winner: winner, bets_root: betsRoot, chain_settled: true, settled_at: new Date().toISOString() };
+    sqlite.prepare("UPDATE pool_markets SET protocol_status = 'zk_settled', settle_txid = ?, metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(txid, JSON.stringify(meta), market.id);
+  },
+};
+
+function _writeZkCloseTickErrorEvent(message) {
+  try {
+    sqlite.prepare(`
+      INSERT INTO events (id, event_scope, event_type, source, level, summary, payload_json, created_at)
+      VALUES (?, 'system', 'zk_close_tick_error', 'bshard-settle-daemon', 'warn', ?, ?, datetime('now'))
+    `).run(randomUUID(), `zkCloseTick error (不影响 committee-sig 结算路径): ${message}`, JSON.stringify({ message }));
+  } catch (e) { log(`events insert fail for zkCloseTick error (non-fatal): ${e.message}`); }
+}
+
 // #G5-5a (2026-07-04, task#33 §2.2 找到的原始证据基础): 瞬态 RPC/consolidate 查询有界重试。
 //   #33 全量重放 ALERT 日志分类过这类失败: "plan threw (fetch failed)"(3例) + "build fail: UTXO
 //   not found"(5例, 3例仍卡 settle_failed) —— 都是 RPC/网络层瞬时问题, 不是业务/安全判定, 重试大概率
@@ -438,6 +501,17 @@ export async function settleDaemonTick() {
     const currentDaa = await chainReader.getCurrentDaaScore();
     await rpcEnsure();
     const pmt = Number((await _rpc.getBlockDagInfo()).pastMedianTime);   // MTP·consolidate lockTime(deadline*1000) final gate
+
+    // 2026-07-06 J2: ZK settle tick — 独立于下面的 committee-sig ripe 处理, 必须放在
+    // "if (ripe.length === 0) return" 早退**之前**(否则 committee-sig 市场为 0 时这条新路径永远
+    // 跑不到, 见 docs/2026-07-06-zk-close-tick-production-wiring-design.md §4.1 隔离性验证)。
+    // 独立 try-catch: ZK 路径出错既不静默吞掉(写 events 表, Bettor 要求①)也不影响下面
+    // committee-sig 的 ripe 处理循环。kill switch(ZK_CLOSE_TICK_ENABLED, Bettor 要求②)默认 OFF。
+    if (ZK_CLOSE_TICK_ENABLED) {
+      try { await zkCloseTick(_zkCloseCtx); }
+      catch (e) { log(`zkCloseTick error(不影响 committee-sig 路径): ${e.message}`); _writeZkCloseTickErrorEvent(e.message); }
+    }
+
     const ripe = selectRipeMarkets(currentDaa, pmt, MAX_PER_TICK);
     if (ripe.length === 0) return;
     log(`tick: ${ripe.length} ripe market(s) (MAX_PER_TICK=${MAX_PER_TICK})`);

@@ -443,6 +443,11 @@ await ensureIngestSecret();
 await fastify.listen({ port: PORT, host: process.env.HOST || '127.0.0.1' });
 console.log(`[kasia-console] running at http://localhost:${PORT}`);
 
+// zk-prove-server: 独立 Fastify 实例(不共用主 fastify/不共用 HOST 绑定), 只服务跨机器 ZK proving
+// job-queue 的 3 个 endpoint (Tailscale-scoped)。见 docs/2026-07-06-zk-close-tick-production-wiring-design.md。
+import { startZkProveServer } from './services/zk-prove-server.mjs';
+await startZkProveServer();
+
 // Tier 2.1 pair ingestor — scans broadcast_messages for pair_invite/pair_ack envelopes + writes agent_pairs.
 // 30s tick, idempotent re-scan, boot catch-up from id 0.
 import { startPeriodicIngest } from './services/pair-ingestor.mjs';

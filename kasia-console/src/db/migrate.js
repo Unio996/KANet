@@ -5283,5 +5283,37 @@ export function runMigrations() {
     }
   }
 
+  // v180 (J2, ZK settle 生产装配 job-queue, 2026-07-06, 见 docs/2026-07-06-zk-close-tick-production-wiring-design.md):
+  //   zk_prove_jobs 表 —— 跨机器 proving 任务队列(settler 在 J2 host 侧 enqueue, J1 机器的 RISC0/Docker
+  //   环境轮询+完成)。partial unique index 是持久化幂等锁(NWT 要求: 不能只在内存里, daemon 重启会丢锁)。
+  //   v1 已知限制(NWT 审过接受): job 若长期卡在 in_progress(J1 机器崩溃/网络断), 需手动
+  //   UPDATE zk_prove_jobs SET status='failed' WHERE id=X 解锁重新入队; 自动超时恢复留待下个迭代。
+  {
+    const exists = sqlite.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='zk_prove_jobs'").get();
+    if (!exists) {
+      sqlite.exec(`
+        CREATE TABLE zk_prove_jobs (
+          id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+          market_id           TEXT NOT NULL,
+          status              TEXT NOT NULL DEFAULT 'pending',  -- pending|in_progress|done|failed
+          ordered_bets_json   TEXT NOT NULL,
+          bets_root_hex       TEXT,
+          attested_winner     INTEGER,
+          receipt_hex         TEXT,
+          journal_digest_hex  TEXT,
+          error               TEXT,
+          created_at          TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at          TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+      `);
+      sqlite.exec(`
+        CREATE UNIQUE INDEX idx_zk_prove_jobs_market_active
+          ON zk_prove_jobs(market_id)
+          WHERE status IN ('pending', 'in_progress')
+      `);
+      console.log('[migrate] v180: zk_prove_jobs table (跨机器ZK proving job-queue, partial unique index做持久化幂等锁).');
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
