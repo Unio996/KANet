@@ -185,10 +185,15 @@ export async function bshardCloseVoterTick() {
     const enforceCloseAttest = await loadEnforce();
     let signed = 0, skipped = 0, refused = 0, errored = 0, commingledSkipped = 0;
     // pending close-request: v0.7 市场 status='collecting_sigs' + metadata.bshard_close_request 存在 + deadline 内。
+    // 防御性 guard(2026-07-06 NWT 横扫④，Bettor 拍板"即使当前靠 VOTER_ENABLED 默认 OFF + publishCloseRequest()
+    // 零调用点两道间接 gate 挡住，也要补"): ZK-native(resolution_rule_spec.zk_native===true)市场该走
+    // W2 扩展的 close_attest(26 参，多签 4 个新字段)，不该被这条经典 22 参 close_attest 的自治签路径捡到。
+    // json_valid() 短路防畸形 JSON 让整条 SELECT 抛异常(同 ANTI-PATTERNS 规则54 教训)。
     const pending = sqlite.prepare(`
       SELECT id, metadata, pool_merkle_root, broker_pk, deadline_daa, resolution_rule_spec, spine_p2sh
       FROM pool_markets
       WHERE protocol_version = 'v0.7' AND protocol_status = 'collecting_sigs' AND metadata LIKE '%bshard_close_request%'
+        AND (json_valid(resolution_rule_spec) = 0 OR json_extract(resolution_rule_spec, '$.zk_native') IS NOT 1)
     `).all();
     for (const market of pending) {
       // FINDING-2 (NWT) 自治结算闸: commingled-spine 盘禁自治 close (单源 isCommingledSpine, J1 pool-commingle-detect).
