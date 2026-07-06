@@ -20,6 +20,10 @@
   - **DoD(Bettor 译,报数级别词)**: settle daemon 在 kill switch ON 下,对至少一个符合准入政策(世界杯 pool ≤900 人)的真实市场,**全自动**走完 ZK 结算路径(enqueue proving job → J1 机器出真 Groth16 → relay handler 组装广播 zk_close → 落链 → reconcile 转 `zk_settled`),predict-then-verify 确认点全过,双重独立核实落链 = **端到端 demonstrate**。不越界 claim"全量迁移/生产就绪"。
   - **关键路径(依赖序)**: T1 卡死告警(J2,落码中,NWT GREEN 已给) → ②relay handler `unlockBshardZkClose`(J1 域,今天最大缺件) + `dispatchUnlockZkClose` ctx hook 接线(J2) → 隔离全链测试 → kill switch ON(§2.6: escape 未上时卡死无经济后果,可先开) → Bettor 手动标记一个准入市场 `zk_ready` → daemon 自动结算 → 双重核实。
   - **今日范围外(不因赶目标偷渡)**: escape_trigger/escape_claim 上真实市场(三前置未齐:备份 proving 机+GRACE 定标未完成)——escapeRefund ctx hook 可接线但保持 fail-closed,不服务真实市场。
+  - **🔴 关键路径重排(2026-07-07 21:5x·J2+NWT 双独立缺口地图坐实两层缺口,都在 relay handler 之前)**:
+    - **缺口 A(最重,新增)**: **ZK covenant genesis-mint 生产管线完全不存在**——grep 全库 `zk_continuation` 零写入点(只有 daemon.mjs 3 处读)。昨晚 LANDED 全靠手工脚本一次性构造。需新建:attest 完成(复用既有 `judgeWinDir`,955 赢家在用)→ 建 ctor(attestedWinner/attestedAtSeconds(读 kaspa_tx_log attest tx.time)/betsRootBaked/refundRootBaked/consolidated_pool/17-word nullifier 全 0)→ 编译 mint CloseZkRepro4 covenant → 写 `market.metadata.zk_continuation`。**真实市场 mint = 把市场池子真金搬进 ZK covenant UTXO,今天最重 money-path 步,确认点全走**。
+    - **缺口 B(下游,fail-closed 非资损)**: `zk-close-builder.mjs:151` `_PSZK` 幻影 layout 字段序整个反了+少算 17 个 w 字段(NWT 对照 repro4.sil 20-46 行实际 ctor 序坐实)——今天任何真实 settle 会在 `zkClosePhase2:188` 结构校验 throw 卡死。修法:ctor-baked 模式下 attestedWinner 从 mint 步骤产出的 metadata 直读,废除 `readAttestedWinnerFromState` 幻影解码。
+    - **重排后序**: J2 出缺口 A+B 一份设计稿(`zk_continuation` metadata schema 作为 J1/J2 接口契约优先定稿)→ NWT 红队审 → J2 落码;J1 handler 设计**并行**(靠 schema 解耦,不等 A 落完)→ 汇合隔离全链测试 → kill switch ON → zk_ready → demonstrate。
 - **⚠ 双节点 ledger 分叉合并(2026-07-07 Bettor)**: origin 侧(J1 机器)7/6 深夜并行补记了 3 个 docs commit(16a7e60a/e10d8ec5/ea2f5f87,含 Docker 修复细节+汇合完成条目),与本机 ledger 冲突。合并原则: 时间线详版保本机,"ZK 检查点"节保 origin 更新版(OP_PICK✅/Docker解除/汇合完成),origin 尾部"⏸卡点"条目已过时(本机 18:2x/20:0x 突破条目取代),加标注保留。
 
 ## 🟢 fresh 接手第一动作(2026-07-06 restart·全队 fresh session)
