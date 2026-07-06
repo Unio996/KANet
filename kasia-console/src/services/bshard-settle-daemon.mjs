@@ -242,13 +242,22 @@ function selectRipeMarkets(currentDaa, pmt, limit) {
   // 调大也救不了(它们仍排在慢盘后面, 而 tick 内是串行处理)。KANet 自有盘数量少(个位数到几十)、
   // 用户可见、demo/展示价值高, 理应优先; polymarket 镜像盘数量大(百+)、UMA-pending 本身有自己的
   // 退避机制保护(不会被无限重试消耗每个 tick 的处理量), 排后面不影响其正确性只影响相对速度。
+  // #33-③ (2026-07-06, lv3rz/k3cnf/dyljb 手动救场后收编·Bettor/NWT co-review): settled_partial_claims
+  // (close_attest 已成功, settle_txid 已非空, 但 claim 循环中途因 landed()假阴性/mempool竞争/僵尸盘等
+  // 原因未跑完)之前完全不在这条 WHERE 里(原来的 settle_txid IS NULL 天然把它排除了)——导致这类盘一旦
+  // 卡住就永远躺在 settled_partial_claims, 需要人工重新调 settleOneMarket() 才会继续(今晚 lv3rz/k3cnf
+  // 都是这样手动接力结完的, 现存 25 个盘卡在这个状态)。settleOneMarket() 内部本来就支持从这个状态正确
+  // resume(见 settleMarketLive() 的 priorWinnerDetails 回放, 复用已有 close_txid 不会重跑 consolidate/
+  // close_attest)——缺的只是让它被 selectRipeMarkets 选中。加一个 OR 分支, 不动原逻辑(未结盘走原路径)。
   const rows = sqlite.prepare(`
     SELECT * FROM pool_markets
     WHERE protocol_version = 'v0.7'
-      AND settle_txid IS NULL
       AND deadline_daa IS NOT NULL
       AND deadline_daa + ? <= ?
-      AND protocol_status IN ('pending_bettors', 'verifying')
+      AND (
+        (settle_txid IS NULL AND protocol_status IN ('pending_bettors', 'verifying'))
+        OR protocol_status = 'settled_partial_claims'
+      )
     ORDER BY (CASE WHEN outcome_market_source = 'kanet_v07' THEN 0 ELSE 1 END) ASC, deadline_daa ASC
   `).all(FINALITY_BUFFER, currentDaa);
   const ripe = [];
