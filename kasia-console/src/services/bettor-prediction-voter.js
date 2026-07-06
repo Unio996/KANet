@@ -330,6 +330,11 @@ async function processPoolMarket(voter) {
   // 之前 L283/L291 用 voter.id (UUID) 匹配 → 永不命中 → voted=0 settle 永卡. 改 voter.address
   // 匹 oracle_relay_ids 数组 (= addresses). voter.id 保留给 IPC (get_pubkey/sendCommandAsync/
   // ecdsa_sign). 同 r337 e1468f0 设计未传到所有 reader, 这是 r337 漏迁的 reader.
+  // 🔴 反向结构隔离(2026-07-06 NWT 自动进程横扫抓出，开盘前必堵): bshard(v0.7·含 ZK-native)市场
+  // 用 close_attest 4-of-5 委员多签一笔 tx 背书，不是这里的"每个委员各自广播一笔 pool_oracle_vote"
+  // 机制——这个 voter 若捡到 bshard 市场并广播投票，对该市场是废票(下游 settler/bshard-settle-daemon
+  // 从不读它)，纯浪费真实链上手续费 + 污染 chain_events/oracle_history。用跟 selectRipeMarkets/
+  // pool-market-settler 同款 market_shards 存在性排除，不是新发明的判据。
   const markets = sqlite.prepare(`
     SELECT id, maker_relay_id, outcome_market_source, outcome_token_id, outcome_condition_id, outcome_side,
            resolution_rule_spec, protocol_status, deadline, oracle_relay_ids
@@ -337,6 +342,7 @@ async function processPoolMarket(voter) {
     WHERE oracle_relay_ids LIKE ?
       AND protocol_status = 'verifying'
       AND deadline <= ?
+      AND id NOT IN (SELECT logical_market_id FROM market_shards)
   `).all(`%"${voter.address}"%`, Math.floor(Date.now() / 1000));
   if (!markets.length) return { voted, skipped, errored };
 
