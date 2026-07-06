@@ -544,11 +544,16 @@ async function processPoolMarket(voter) {
 async function processPoolTxSign(voter) {
   let signed = 0, skipped = 0, errored = 0;
   // J2-tn r357: 同 processPoolMarket — r337 后 oracle_relay_ids 存 addresses, 匹 voter.address.
+  // 防御性 guard(2026-07-06 NWT 横扫③，Bettor 拍板"即使当前靠上游间接安全也要补"): bshard 市场
+  // 目前没有代码会把它写成 collecting_sigs+phase2_tx_obj 组合(间接安全，非本函数结构自证)，但若
+  // 以后有别的代码改变了这个上游前提，这里会立刻暴露成跟 processPoolMarket 同款的废票/污染问题。
+  // 补齐同款 market_shards 排除，不依赖"现在没人触发"这个隐含假设。
   const markets = sqlite.prepare(`
     SELECT id, oracle_relay_ids, metadata
     FROM pool_markets
     WHERE protocol_status = 'collecting_sigs'
       AND oracle_relay_ids LIKE ?
+      AND id NOT IN (SELECT logical_market_id FROM market_shards)
   `).all(`%"${voter.address}"%`);
   if (!markets.length) return { signed, skipped, errored };
 
@@ -667,11 +672,14 @@ async function processPoolTxSign(voter) {
 async function processPoolRefundDisagreementTxSign(voter) {
   let signed = 0, skipped = 0, errored = 0;
   // J2-tn r357: 同 processPoolMarket / processPoolTxSign — r337 后 oracle_relay_ids 存 addresses.
+  // 防御性 guard(2026-07-06 NWT 横扫③，同 processPoolTxSign 那份理由): bshard 市场目前不会被
+  // 写成这个函数依赖的 collecting_sigs 组合(间接安全)，补齐 market_shards 排除防未来上游前提变化。
   const markets = sqlite.prepare(`
     SELECT id, oracle_relay_ids, metadata
     FROM pool_markets
     WHERE protocol_status = 'collecting_sigs'
       AND oracle_relay_ids LIKE ?
+      AND id NOT IN (SELECT logical_market_id FROM market_shards)
   `).all(`%"${voter.address}"%`);
   if (!markets.length) return { signed, skipped, errored };
 
