@@ -98,8 +98,11 @@ export function getMarketBets(logicalMarketId, db) {
   let multiShard = 0;
   if (isBshard) {
     // v07 bshard: 押注在 shard_market_id 键·只取 shard (排 maker_stake/commingled 杂质)。
+    // manual_recovery_refunded(2026-07-06, lv3rz shard6 phantom-leaf 事故同款排除·见 pool-shard-settle.mjs
+    // consolidateAllShards 同一次改动): 这个 shard 的 stake 已经手动退还给 bettor, 不再是池子里的钱,
+    // 必须排除, 否则总池计算会比链上 PayoutShard 实际值多出这个 shard 的金额(守恒对不上)。
     const shards = db.prepare(
-      'SELECT shard_market_id FROM market_shards WHERE logical_market_id = ? ORDER BY shard_index'
+      "SELECT shard_market_id FROM market_shards WHERE logical_market_id = ? AND status != 'manual_recovery_refunded' ORDER BY shard_index"
     ).all(logicalMarketId);
     if (shards.length === 0) { rows = []; }
     else if (shards.length > 1) {
