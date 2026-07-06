@@ -1,0 +1,162 @@
+pragma silverscript ^0.1.0;
+
+// _j2_closezk_repro4.sil — CloseZkRepro3 + escapeRefund(escape_trigger/escape_claim)。
+// 设计文档: docs/2026-07-06-zk-escape-refund-covenant-design-draft.md(v3, NWT+Bettor 结构层面 GREEN)。
+// 相对 CloseZkRepro3 的改动(诚实列清单,方便 NWT diff 审, 不是"整份重写"):
+//   ① ctor 新增 3 字段: refundRootBaked(洞③新merkle根) / attestedAtSeconds(洞②修正锚点) / init_consolidated_pool + 17-word nullifier(escape_claim/未来claim共用)。
+//   ② closed 三态(0/1/2)扩四态(0/1/2/3) — 3 = escape 已触发, 跟 zk_close 的 2 互斥(write-once)。
+//   ③ zk_close 本身逻辑一字不动(#NWT①③④⑤ 全部保留), 只是 validateOutputState 补齐新增字段的透传(consolidated_pool/w0-w16 不变)。
+//   ④ 新增 escape_trigger(permissionless deadline flag-flip, 不动钱) + escape_claim(逐bettor可重复调, 镜像 PayoutShard.sil refund_claim)。
+//
+// #NWT-checklist ①③④⑤(继承自 repro3, 未变): attested_winner/betsRootBaked 都是本合约自己的STATE(continuation里的, 非witness/非caller自报);
+//   groth16 proof本体不进redeem(只有gate_tmpl_hash 32B烤); journalHash用sha256(RISC0 digest), betsRoot/payoutRoot本身blake2b。
+contract CloseZkRepro4(
+    byte[32] gateTmplHash,          // blake2b(gatePrefix||gateSuffix), 烤死(改guest image_id=新covenant=新hash)
+    byte[32] betsRootBaked,         // genesis烤: 本市场bets的hash-chain根(zk_close journalHash用, 非merkle, 不可做membership proof — 见洞③)
+    byte[32] refundRootBaked,       // 洞③新增: genesis-mint时用既有 payoutRoot()/levelsOf() depth-10 merkle 构造烤(喂{pk,amount:stake}), escape_claim 用
+    int      attestedAtSeconds,     // 洞②修正: genesis-mint时 off-chain builder 读 kaspa_tx_log 里 close_attest 落链时间烤入(ctor常量, 不进state, 不可变)
+    int      init_attestedWinner,   // phase1 oracle_attest_verdict已经写入的STATE(0=还没attest/1=YES/2=NO, 本例用int简化)
+    int      init_closed,           // 0=待attest / 1=已attest待zk_close或待escape / 2=zk_close完成 / 3=escape已触发待逐bettor领(洞①新增)
+    byte[32] init_payoutRootField,
+    int      init_consolidated_pool,   // 洞①/escape_claim需要: genesis-mint时读phase1 continuation实际UTXO金额烤入
+    int init_w0, int init_w1, int init_w2, int init_w3, int init_w4, int init_w5, int init_w6, int init_w7, int init_w8,
+    int init_w9, int init_w10, int init_w11, int init_w12, int init_w13, int init_w14, int init_w15, int init_w16  // 17-word nullifier(escape_claim用, 镜像PayoutShard.sil)
+) {
+    int attestedWinner = init_attestedWinner;
+    int closed = init_closed;
+    byte[32] payoutRootField = init_payoutRootField;
+    int consolidated_pool = init_consolidated_pool;
+    int w0 = init_w0; int w1 = init_w1; int w2 = init_w2; int w3 = init_w3; int w4 = init_w4; int w5 = init_w5;
+    int w6 = init_w6; int w7 = init_w7; int w8 = init_w8; int w9 = init_w9; int w10 = init_w10; int w11 = init_w11;
+    int w12 = init_w12; int w13 = init_w13; int w14 = init_w14; int w15 = init_w15; int w16 = init_w16;
+
+    // phase2: zk_close — 只读本合约自己的state(attestedWinner/betsRootBaked), 不接受任何witness喂的winner值(#NWT③)
+    // [REGRESSION: 逻辑一字不动, 只是 validateOutputState 补齐 consolidated_pool/w0-w16 透传(新增字段, 本entry不碰)]
+    entrypoint function zk_close(
+        byte[] gateSuffix,           // witness喂: gate redeem的后缀部分(不含journal_hash, 不含groth16 proof本体#NWT④)
+        byte[32] guestPayoutRoot,    // witness喂: guest算出的payout_root(将被烤进PS continuation, 同现有close_attest机制)
+        int selfOutIdx
+    ) {
+        require(closed == 1);   // write-once: 必须已经过phase1 attest, 与 escape_trigger 的 1→3 互斥
+
+        // journal_hash: 覆盖本合约STATE的attestedWinner + betsRootBaked (sha256, RISC0 digest格式 #NWT⑤)
+        byte[32] journalHash = sha256(betsRootBaked + byte[](attestedWinner, 1) + guestPayoutRoot);
+
+        byte[1] gatePrefix = byte[1](0x20);
+        // 非-vacuous binding核心: 验证witness喂的gateSuffix确实匹配ctor烤死的gate_tmpl_hash(#NWT①)
+        require(blake2b(gatePrefix + gateSuffix) == gateTmplHash);
+
+        byte[32] gateRedeemHash = blake2b(gatePrefix + journalHash + gateSuffix);
+        // #NWT-correction(9/48): gate UTXO 是本笔tx的一个INPUT(跟PayoutShard一起被消费, 它自己的sigScript触发
+        // OpZkPrecompile验证groth16 proof)——非output。验tx.inputs[1](gate的前置spk)== 重构值, 证明"这笔tx确实
+        // 消费了这个精确的gate UTXO"(=这个gate的脚本确实带着这个journal_hash执行过验证)。
+        require(tx.inputs[1].scriptPubKey == new ScriptPubKeyP2SH(gateRedeemHash));
+
+        // continuation: closed 1→2, payoutRoot写入(供后续claim复用现有merkle机制, 未在本次范围内实现)
+        validateOutputState(selfOutIdx, {
+            attestedWinner: attestedWinner,
+            closed: 2,
+            payoutRootField: guestPayoutRoot,
+            consolidated_pool: consolidated_pool,   // 新增字段透传, zk_close本身不碰资金归集
+            w0: w0, w1: w1, w2: w2, w3: w3, w4: w4, w5: w5, w6: w6, w7: w7, w8: w8, w9: w9, w10: w10, w11: w11, w12: w12, w13: w13, w14: w14, w15: w15, w16: w16
+        });
+        require(tx.outputs[selfOutIdx].value == consolidated_pool);   // ★ 守恒: zk_close 本身不动资金(payout 是后续claim entry的事, 本次范围外)
+    }
+
+    // escape entry (a): escape_trigger — permissionless flag-flip, 不碰钱, 一次性 closed 1→3(洞①修法, 拆两阶段)
+    // ⚠ ESCAPE_GRACE = 21600(6小时) 是**未审的占位数**, 不是拍定值——Bettor 要求"有论证的数字"(参考J1今晚Docker
+    //   重装实际耗时+groth16 proving耗时量级), NWT 16:21 补充"必须假设窗口一开就被有动机方抢跑, zk_close 必须
+    //   在grace窗口打开前就已落链完成"。这两条在真正落码/广播前必须有人明确签字确认这个数字, 不能带着占位数上链。
+    entrypoint function escape_trigger(int selfOutIdx) {
+        require(closed == 1);                                            // 同 zk_close 前置, 与其 1→2 互斥
+        require(tx.time >= (attestedAtSeconds + 21600) * 1000);          // ⚠ 21600 占位, 见上注释, 未经团队签字确认
+        require(tx.outputs[selfOutIdx].value == consolidated_pool);      // ★ 守恒: trigger 不动资金
+        validateOutputState(selfOutIdx, {
+            attestedWinner: attestedWinner,
+            closed: 3,
+            payoutRootField: payoutRootField,
+            consolidated_pool: consolidated_pool,
+            w0: w0, w1: w1, w2: w2, w3: w3, w4: w4, w5: w5, w6: w6, w7: w7, w8: w8, w9: w9, w10: w10, w11: w11, w12: w12, w13: w13, w14: w14, w15: w15, w16: w16
+        });
+    }
+
+    // escape entry (b): escape_claim — 逐bettor可重复调用, precondition closed==3(不是1), postcondition closed不变
+    //   镜像 PayoutShard.sil refund_claim(L334-390), 验证对象换成 refundRootBaked(真merkle树, 非betsRootBaked这个hash-chain, 见洞③)。
+    entrypoint function escape_claim(
+        int selfOutIdx, int refundOutIdx,
+        byte[32] bettorPk, int stake, int merkle_index,
+        byte[32] s0, byte[32] s1, byte[32] s2, byte[32] s3, byte[32] s4, byte[32] s5, byte[32] s6, byte[32] s7, byte[32] s8, byte[32] s9
+        // ⚠ NWT CRITICAL fix(16:28): 原来这里多声明了一组 w0in..w16in witness 参数,以为要"避免跟contract顶层
+        // state变量w0..w16 shadowing"——这个顾虑是错的(refund_claim/claim/zk_close/escape_trigger都直接用
+        // 顶层state变量,不需要重声明),而且引入的这组witness参数完全不受P2SH约束(caller sigScript随便填),
+        // 导致require((w_in/mask)%2==0)形同虚设,可无限重复claim抽干consolidated_pool。已删除,下方直接用w0..w16。
+    ) {
+        require(closed == 3);                                             // ★ 精确 ==3, 消歧于 zk_close 的 closed==2, 与其互斥
+        require(merkle_index >= 0); require(merkle_index < 1024);         // depth-10 cap, 同 refund_claim/claim
+        require(stake >= 1); require(stake <= consolidated_pool);
+        // ★ 授权来源 = refundRootBaked(genesis 烤死的merkle根, 不需要委员签名/groth16 — 洞③修法)
+        byte[32] cur = blake2b(byte[](bettorPk) + byte[](stake, 8));
+        int div = 1;
+        int b0 = (merkle_index / div) % 2; if (b0 == 0) { cur = blake2b(byte[](cur) + byte[](s0)); } else { cur = blake2b(byte[](s0) + byte[](cur)); } div = div * 2;
+        int b1 = (merkle_index / div) % 2; if (b1 == 0) { cur = blake2b(byte[](cur) + byte[](s1)); } else { cur = blake2b(byte[](s1) + byte[](cur)); } div = div * 2;
+        int b2 = (merkle_index / div) % 2; if (b2 == 0) { cur = blake2b(byte[](cur) + byte[](s2)); } else { cur = blake2b(byte[](s2) + byte[](cur)); } div = div * 2;
+        int b3 = (merkle_index / div) % 2; if (b3 == 0) { cur = blake2b(byte[](cur) + byte[](s3)); } else { cur = blake2b(byte[](s3) + byte[](cur)); } div = div * 2;
+        int b4 = (merkle_index / div) % 2; if (b4 == 0) { cur = blake2b(byte[](cur) + byte[](s4)); } else { cur = blake2b(byte[](s4) + byte[](cur)); } div = div * 2;
+        int b5 = (merkle_index / div) % 2; if (b5 == 0) { cur = blake2b(byte[](cur) + byte[](s5)); } else { cur = blake2b(byte[](s5) + byte[](cur)); } div = div * 2;
+        int b6 = (merkle_index / div) % 2; if (b6 == 0) { cur = blake2b(byte[](cur) + byte[](s6)); } else { cur = blake2b(byte[](s6) + byte[](cur)); } div = div * 2;
+        int b7 = (merkle_index / div) % 2; if (b7 == 0) { cur = blake2b(byte[](cur) + byte[](s7)); } else { cur = blake2b(byte[](s7) + byte[](cur)); } div = div * 2;
+        int b8 = (merkle_index / div) % 2; if (b8 == 0) { cur = blake2b(byte[](cur) + byte[](s8)); } else { cur = blake2b(byte[](s8) + byte[](cur)); } div = div * 2;
+        int b9 = (merkle_index / div) % 2; if (b9 == 0) { cur = blake2b(byte[](cur) + byte[](s9)); } else { cur = blake2b(byte[](s9) + byte[](cur)); } div = div * 2;
+        require(cur == refundRootBaked);                                  // ★ 洞③: 验对象是 refundRootBaked, 不是 betsRootBaked
+        int word_idx = merkle_index / 63;
+        int bit_in   = merkle_index % 63;
+        int mask = 1;
+        for (b, 0, bit_in, 63) { mask = mask * 2; }
+        int nw0 = w0; int nw1 = w1; int nw2 = w2; int nw3 = w3; int nw4 = w4; int nw5 = w5; int nw6 = w6; int nw7 = w7; int nw8 = w8;
+        int nw9 = w9; int nw10 = w10; int nw11 = w11; int nw12 = w12; int nw13 = w13; int nw14 = w14; int nw15 = w15; int nw16 = w16;
+        // ★ nullifier 防重复领: 读写的是 contract 顶层 state 变量 w0..w16(ctor 绑定, caller 无法伪造),
+        //   不是 witness——先 require 位未置, 再标记, 跟 refund_claim(PayoutShard.sil L362-378)逐行一致。
+        if (word_idx == 0)       { require((w0 / mask) % 2 == 0); nw0 = w0 + mask; }
+        else if (word_idx == 1)  { require((w1 / mask) % 2 == 0); nw1 = w1 + mask; }
+        else if (word_idx == 2)  { require((w2 / mask) % 2 == 0); nw2 = w2 + mask; }
+        else if (word_idx == 3)  { require((w3 / mask) % 2 == 0); nw3 = w3 + mask; }
+        else if (word_idx == 4)  { require((w4 / mask) % 2 == 0); nw4 = w4 + mask; }
+        else if (word_idx == 5)  { require((w5 / mask) % 2 == 0); nw5 = w5 + mask; }
+        else if (word_idx == 6)  { require((w6 / mask) % 2 == 0); nw6 = w6 + mask; }
+        else if (word_idx == 7)  { require((w7 / mask) % 2 == 0); nw7 = w7 + mask; }
+        else if (word_idx == 8)  { require((w8 / mask) % 2 == 0); nw8 = w8 + mask; }
+        else if (word_idx == 9)  { require((w9 / mask) % 2 == 0); nw9 = w9 + mask; }
+        else if (word_idx == 10) { require((w10 / mask) % 2 == 0); nw10 = w10 + mask; }
+        else if (word_idx == 11) { require((w11 / mask) % 2 == 0); nw11 = w11 + mask; }
+        else if (word_idx == 12) { require((w12 / mask) % 2 == 0); nw12 = w12 + mask; }
+        else if (word_idx == 13) { require((w13 / mask) % 2 == 0); nw13 = w13 + mask; }
+        else if (word_idx == 14) { require((w14 / mask) % 2 == 0); nw14 = w14 + mask; }
+        else if (word_idx == 15) { require((w15 / mask) % 2 == 0); nw15 = w15 + mask; }
+        else                     { require((w16 / mask) % 2 == 0); nw16 = w16 + mask; }
+        // ★ recipient-bind: 退款必去 bettor 自己的 P2PK(bettorPk)(真退款给真注册者)
+        byte[34] refundLock = new ScriptPubKeyP2PK(pubkey(bettorPk));
+        require(tx.outputs[refundOutIdx].scriptPubKey == byte[](refundLock));
+        require(tx.outputs[refundOutIdx].value == stake);
+        // ⚠ 洞④修法(NWT 2026-07-06 19:xx 抓出的结构性缺口,Owner 令立刻修):不管有多少 bettor,
+        //   排队最后一个 claimant 必然把 consolidated_pool 精确清零——continuation output 若仍
+        //   照常产生,value 精确等于 0,会被 Kaspa dust 策略拒绝(今晚 v1 满额 claim 实测撞到)。
+        //   修法:consolidated_pool==stake 时(=这是最后一笔)不产生 continuation output,不调用
+        //   validateOutputState——覆约在这笔 tx 里彻底关闭,资金流出只有 refundOutIdx 这一个 output
+        //   (== stake == 清零前的 consolidated_pool 全部剩余),没有其它 output 需要来自这个 input。
+        if (consolidated_pool == stake) {
+            // 最后一笔:覆约生命周期在这笔 tx 结束,不留 continuation,不约束 selfOutIdx。
+            // ★ 显式守恒(Bettor 要求,防御性写法,虽然此刻 stake 已被 if 条件保证 == consolidated_pool,
+            //   但语义上应该讲清楚"退款金额 == 清零前的 pool 全部剩余",不是偷懒复用上面 line139 的 stake 检查):
+            require(tx.outputs[refundOutIdx].value == consolidated_pool);
+        } else {
+            require(tx.outputs[selfOutIdx].value == consolidated_pool - stake);  // ★ 守恒 weld, 逐笔递减
+            validateOutputState(selfOutIdx, {
+                attestedWinner: attestedWinner,
+                closed: 3,   // ★ 不变, 靠这个值 stay 住让下一个 bettor 还能调, 不靠 closed 本身变化分辨"谁领过"(洞①修法核心)
+                payoutRootField: payoutRootField,
+                consolidated_pool: consolidated_pool - stake,
+                w0: nw0, w1: nw1, w2: nw2, w3: nw3, w4: nw4, w5: nw5, w6: nw6, w7: nw7, w8: nw8, w9: nw9, w10: nw10, w11: nw11, w12: nw12, w13: nw13, w14: nw14, w15: nw15, w16: nw16
+            });
+        }
+    }
+}
