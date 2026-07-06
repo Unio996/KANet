@@ -226,12 +226,62 @@ export function settlePayoutRoot(winners) {
 }
 
 /**
+ * #DB-lag自愈 (2026-07-06, lv3rz/dyljb 公测首两场结算实战暴露: consolidate 每一步落链后只在【全部
+ * shard 循环成功完成】才把最终 payout_ps_outpoint 写回 payout_shards 表——如果中途任何一步失败
+ * (常见: 某个 shard 自身撞了不相关的 tip-lag/phantom), 已经【真实链上完成】的前面几步全部白白
+ * 不被记录, 下次重试还是从 DB 记的 genesis/旧值开始, 立刻在 shard0 撞"UTXO not found"(因为那个
+ * outpoint早被这次没记上账的中途进度花掉了)。J2 今晚手动做的诊断(逐步splice consolidated_pool
+ * 重算每一跳地址查UTXO)证明为可靠、纯计算(不需要区块扫描)、可自动化——这里收编成通用探测函数。
+ *
+ * 探测方法: 从 DB 记录的 genesis payout_redeem_hex 出发, 按 shard_index 升序逐个尝试 splice 新的
+ * consolidated_pool 算出对应地址查 UTXO, 找到第一个"有 UTXO"的即为当前真实 tip。找不到(genesis 本身
+ * 就有 UTXO)说明还没开始consolidate过, 走原逻辑(resume=null 从零开始)。
+ *
+ * @param {object} o { db, getUtxos(addr)→[{outpoint,amount}], p2sh, logicalMarketId, payoutShard }
+ * @returns {null | { fromShardIdx, psTx, psIdx, pool }} null = 不需要 resume(from genesis 正常走或已探测不到任何进度)
+ */
+export async function autoDetectConsolidateResume({ db, getUtxos, p2sh, logicalMarketId, payoutShard }) {
+  const allShards = db.prepare(`SELECT * FROM market_shards WHERE logical_market_id = ? AND status != 'manual_recovery_refunded' ORDER BY shard_index ASC`).all(logicalMarketId);
+  let psRedeem = Buffer.from(payoutShard.payout_redeem_hex, 'hex');
+  let consolidatedPool = psRedeem.readBigInt64LE(2);
+  // genesis 本身有没有 UTXO(=从没 consolidate 过, 不需要 resume)先探一次, 省一轮不必要的 shard0 尝试.
+  const genesisAddr = p2sh(psRedeem.toString('hex'));
+  const genesisUtxos = await getUtxos(genesisAddr);
+  if (genesisUtxos.length > 0) return null;   // genesis 完好未花, 从零开始正常走(不是这次要修的场景)
+
+  let found = null;
+  for (const shard of allShards) {
+    let st = {}; try { st = JSON.parse(shard.current_leaf_state || '{}'); } catch { break; }   // 数据缺失 fail-closed, 别猜
+    consolidatedPool += BigInt(st.pool_value || 0);
+    const rbuf = Buffer.from(psRedeem);
+    rbuf.writeBigInt64LE(consolidatedPool, 2);
+    psRedeem = rbuf;
+    const addr = p2sh(psRedeem.toString('hex'));
+    const utxos = await getUtxos(addr);
+    if (utxos.length > 0) {
+      const op = utxos[0].outpoint;
+      found = { fromShardIdx: shard.shard_index + 1, psTx: op.transactionId, psIdx: Number(op.index || 0), pool: consolidatedPool.toString() };
+      break;
+    }
+  }
+  // 探测完所有 shard 都没找到活着的 UTXO = 探测失败(比 genesis 更深的问题, 比如真 phantom 或数据缺失),
+  // fail-closed 返回 null 让调用方走原逻辑照常报错, 不能编造一个假 resume 点。
+  return found;
+}
+
+/**
  * Consolidate all shards of a logical market into its PayoutShard, then return the final PS outpoint + consolidated_pool.
  * Iterative: each shard's CURRENT ShardLeaf (spliced from shard_redeem_hex + current_leaf_state) → bshard_consolidate.
- * @param {object} o { db, rc, landed, p2sh, logicalMarketId, payoutShard:{payout_redeem_hex, payout_ps_outpoint, payout_cov_id}, relayAddr, transfer }
+ * @param {object} o { db, rc, landed, p2sh, logicalMarketId, payoutShard:{payout_redeem_hex, payout_ps_outpoint, payout_cov_id}, relayAddr, transfer,
+ *   getUtxos(addr)→[{outpoint,amount}] (optional — enables DB-lag 自愈自动 resume, 见 autoDetectConsolidateResume) }
  * @returns {{ psOutpoint, consolidatedPool, consolidatedShards }}
  */
-export async function consolidateAllShards({ db, rc, landed, p2sh, logicalMarketId, payoutShard, relayAddr, transfer, deadline, resume = null }) {
+export async function consolidateAllShards({ db, rc, landed, p2sh, logicalMarketId, payoutShard, relayAddr, transfer, deadline, resume = null, getUtxos = null }) {
+  // DB-lag 自愈: 没传显式 resume 且调用方给了 getUtxos, 先探测一次"DB 记的 payout_ps_outpoint 是不是
+  // 已经过期(链上真实进度比它超前)"——探到了自动用探测结果当 resume, 不用每次卡住都手动介入。
+  if (!resume && getUtxos) {
+    resume = await autoDetectConsolidateResume({ db, getUtxos, p2sh, logicalMarketId, payoutShard });
+  }
   // 件1(J1 deadline-gate, J2 ms-unit fix b98e0112): partial 片(count<seal_count)consolidate 触发 ShardLeaf
   //   `require(tx.time >= deadline * 1000)` → consolidate tx 必须 set lockTime = deadline*1000(ms, ≥ Kaspa
   //   LOCK_TIME_THRESHOLD 5e11 → ms-epoch 模式, tx.time=lockTime literal=ms 比对). 否则默认 lockTime=0 →

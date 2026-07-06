@@ -129,6 +129,9 @@ async function consolidateAndBuildPsState(marketId, ps, ctx) {
 
   let psOutpointTxid, psIdx, consolidatedPool;
   if (needConsolidate) {
+    // #DB-lag自愈(2026-07-06, lv3rz/dyljb 手动马拉松式恢复后收编): getUtxos 探测每个 entry 归一成
+    // {outpoint,amount} 供 autoDetectConsolidateResume 直接用(跟 landed() 的 norm 模式一致, 单源不重写).
+    const probeUtxos = async (addr) => (await getUtxos(addr)).map(e => { const n = norm(e); return { outpoint: n.entry?.outpoint || n.outpoint, amount: n.entry?.amount || n.amount }; });
     const res = await consolidateAllShards({
       db: sqlite, rc: (cmd) => relayPost(FEE_RELAY_ID, cmd),
       landed: async (txid, addr) => { for (let i = 0; i < 30; i++) { if ((await getUtxos(addr)).some(e => (norm(e).entry?.outpoint || norm(e).outpoint)?.transactionId === txid)) return true; await sleep(3000); } return false; },
@@ -137,6 +140,7 @@ async function consolidateAndBuildPsState(marketId, ps, ctx) {
       relayAddr: feeRelayAddr(),
       transfer: async (addr, sompi) => { const t = await apiTransfer(addr, (sompi / 1e8).toFixed(8)); const tx = t.txId || t.tx_id; if (!tx) throw new Error('fee transfer fail'); await sleep(3000); return tx; },
       deadline: Number(market.deadline),
+      getUtxos: probeUtxos,
     });
     [psOutpointTxid, psIdx] = res.psOutpoint.split(':'); psIdx = Number(psIdx);
     consolidatedPool = res.consolidatedPool;

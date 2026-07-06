@@ -267,6 +267,39 @@ export async function settleMarketLive(marketId, ctx) {
       psOutTxid = w.txId; psOutIdx = 1; curPool = curPool - BigInt(cd.amount); curState = newState;
     }
     ctx.alert?.(marketId, `resume: 跳过已完成 ${priorWinnerDetails.length} 个 claim, 从 ${psOutTxid.slice(0, 12)}:${psOutIdx} 续接剩余 ${claimData.length - priorWinnerDetails.length} 个`);
+
+    // #DB-lag自愈(2026-07-06, lv3rz claim#22 手动马拉松式恢复后收编): replay 出来的续接点(psOutTxid:psOutIdx)
+    // 有可能已经过期——上一次那笔 claim 的 verifyClaimLanded() 假阴性超时返回 false(TX 其实几分钟后真的
+    // confirm 了), 于是 settle_evidence.winner_details 没记上这笔, 但链上真实已经推进了一步。探测一次:
+    // 续接点没有活着的 UTXO 时, 用 claimData[priorWinnerDetails.length](= 下一个还没记录的 winner)的确定性
+    // payout/merkle_index 计算"如果这笔也成功了会推进到哪"，查那个地址；找到了就当它已完成一样纳入 replay
+    // (跟前面的位置匹配 replay 同一个不变量, 只是这一步的 txId 来自链上查证不是 DB 记录)。只探一步(不递归
+    // 探测更远——tonight 观察到的模式是"最后一笔假阴性", 不是连续多笔; 一步探测不到就正常走下面的循环,
+    // 该失败还是会正常失败, fail-closed 不过度自动化。
+    if (ctx.getUtxos && ctx.p2shAddr && priorWinnerDetails.length < claimData.length) {
+      const _norm = (e) => { const j = JSON.parse(JSON.stringify(e, (k, v) => typeof v === 'bigint' ? v.toString() : v)); return { outpoint: j.entry?.outpoint || j.outpoint, amount: j.entry?.amount ?? j.amount }; };
+      try {
+        const curAddr = ctx.p2shAddr(curRedeem);
+        const curLive = (await ctx.getUtxos(curAddr)).length > 0;
+        if (!curLive) {
+          const nextCd = claimData[priorWinnerDetails.length];
+          const nextState = { consolidated_pool: (curPool - BigInt(nextCd.amount)).toString(), closed: 1, payoutRoot: plan.payoutRoot };
+          for (let k = 0; k < 17; k++) nextState['w' + k] = curState['w' + k];
+          const word = Math.floor(Number(nextCd.merkle_index) / 63), bit = Number(nextCd.merkle_index) % 63;
+          nextState['w' + word] = (BigInt(nextState['w' + word]) + (1n << BigInt(bit))).toString();
+          const nextRedeem = splicePayoutContinuation(curRedeem, nextState);
+          const nextAddr = ctx.p2shAddr(nextRedeem);
+          const nextEntries = (await ctx.getUtxos(nextAddr)).map(_norm);
+          if (nextEntries.length > 0) {
+            const foundTxId = nextEntries[0].outpoint?.transactionId;
+            ctx.alert?.(marketId, `DB-lag自愈: claim[${priorWinnerDetails.length}](${nextCd.pk.slice(0, 8)}) 续接点探测到已落链(${foundTxId?.slice(0, 12)}) 但 DB 没记录 — 自动纳入 replay`);
+            claims.push({ pk: nextCd.pk, amount: nextCd.amount, txId: foundTxId, received: true });
+            priorWinnerDetails = [...priorWinnerDetails, { pk: nextCd.pk, amount: nextCd.amount, txId: foundTxId }];
+            curRedeem = nextRedeem; psOutTxid = foundTxId; psOutIdx = 1; curPool = curPool - BigInt(nextCd.amount); curState = nextState;
+          }
+        }
+      } catch (e) { ctx.alert?.(marketId, `DB-lag自愈探测失败(非致命, 走原逻辑): ${e.message}`); }
+    }
   }
 
   for (let idx = 0; idx < claimData.length; idx++) {
