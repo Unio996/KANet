@@ -268,20 +268,23 @@ export async function settleMarketLive(marketId, ctx) {
     }
     ctx.alert?.(marketId, `resume: 跳过已完成 ${priorWinnerDetails.length} 个 claim, 从 ${psOutTxid.slice(0, 12)}:${psOutIdx} 续接剩余 ${claimData.length - priorWinnerDetails.length} 个`);
 
-    // #DB-lag自愈(2026-07-06, lv3rz claim#22 手动马拉松式恢复后收编): replay 出来的续接点(psOutTxid:psOutIdx)
-    // 有可能已经过期——上一次那笔 claim 的 verifyClaimLanded() 假阴性超时返回 false(TX 其实几分钟后真的
-    // confirm 了), 于是 settle_evidence.winner_details 没记上这笔, 但链上真实已经推进了一步。探测一次:
-    // 续接点没有活着的 UTXO 时, 用 claimData[priorWinnerDetails.length](= 下一个还没记录的 winner)的确定性
-    // payout/merkle_index 计算"如果这笔也成功了会推进到哪"，查那个地址；找到了就当它已完成一样纳入 replay
-    // (跟前面的位置匹配 replay 同一个不变量, 只是这一步的 txId 来自链上查证不是 DB 记录)。只探一步(不递归
-    // 探测更远——tonight 观察到的模式是"最后一笔假阴性", 不是连续多笔; 一步探测不到就正常走下面的循环,
-    // 该失败还是会正常失败, fail-closed 不过度自动化。
-    if (ctx.getUtxos && ctx.p2shAddr && priorWinnerDetails.length < claimData.length) {
-      const _norm = (e) => { const j = JSON.parse(JSON.stringify(e, (k, v) => typeof v === 'bigint' ? v.toString() : v)); return { outpoint: j.entry?.outpoint || j.outpoint, amount: j.entry?.amount ?? j.amount }; };
+    // #DB-lag自愈(2026-07-06, lv3rz claim#22 起步·dyljb claim186+187 连续两笔假阴性收编升级, v2 修正):
+    // 续接点(psOutTxid:psOutIdx)有可能已经过期——某笔 claim 的 verifyClaimLanded() 假阴性超时返回 false(TX
+    // 其实几分钟后真的 confirm 了), 于是 settle_evidence.winner_details 没记上, 但链上真实已经推进了。
+    // 🔴 v1 bug(dyljb 实测抓到): 用 getUtxos(nextAddr).length>0 判断"这步是否发生过"——但如果紧接着下一步
+    // (claim187)也已经发生, nextAddr 的 UTXO 早被claim187 花掉, getUtxos 查到 0, v1 就误判"这步没发生"提前
+    // 停手(实际两步都发生了, 只是当前 UTXO 集只反映最新tip, 反映不出"中间站是否存在过")。
+    // 修法: 判断"这一步是否发生过"改查本地 kaspa_tx_log 的 to_address(有没有历史上任何 TX 给这个地址转过
+    // 账, 不管现在是不是已经被后续 TX 花掉)——这是持久历史记录, 不会因为后续花费而消失。找到历史记录就
+    // 纳入 replay 继续往下探, 找不到才停手(genuinely 没发生 或 本地索引没追上, 两种情况都 fail-closed 交
+    // 给下面的正常 claim 循环, 不会瞎猜更远的状态)。
+    const MAX_PROBE_STEPS = 10;
+    if (ctx.getUtxos && ctx.p2shAddr && ctx.db && priorWinnerDetails.length < claimData.length) {
       try {
-        const curAddr = ctx.p2shAddr(curRedeem);
-        const curLive = (await ctx.getUtxos(curAddr)).length > 0;
-        if (!curLive) {
+        for (let step = 0; step < MAX_PROBE_STEPS && priorWinnerDetails.length < claimData.length; step++) {
+          const curAddr = ctx.p2shAddr(curRedeem);
+          const curLive = (await ctx.getUtxos(curAddr)).length > 0;
+          if (curLive) break;   // 找到真正当前 tip, 停止探测
           const nextCd = claimData[priorWinnerDetails.length];
           const nextState = { consolidated_pool: (curPool - BigInt(nextCd.amount)).toString(), closed: 1, payoutRoot: plan.payoutRoot };
           for (let k = 0; k < 17; k++) nextState['w' + k] = curState['w' + k];
@@ -289,14 +292,20 @@ export async function settleMarketLive(marketId, ctx) {
           nextState['w' + word] = (BigInt(nextState['w' + word]) + (1n << BigInt(bit))).toString();
           const nextRedeem = splicePayoutContinuation(curRedeem, nextState);
           const nextAddr = ctx.p2shAddr(nextRedeem);
-          const nextEntries = (await ctx.getUtxos(nextAddr)).map(_norm);
-          if (nextEntries.length > 0) {
-            const foundTxId = nextEntries[0].outpoint?.transactionId;
-            ctx.alert?.(marketId, `DB-lag自愈: claim[${priorWinnerDetails.length}](${nextCd.pk.slice(0, 8)}) 续接点探测到已落链(${foundTxId?.slice(0, 12)}) 但 DB 没记录 — 自动纳入 replay`);
-            claims.push({ pk: nextCd.pk, amount: nextCd.amount, txId: foundTxId, received: true });
-            priorWinnerDetails = [...priorWinnerDetails, { pk: nextCd.pk, amount: nextCd.amount, txId: foundTxId }];
-            curRedeem = nextRedeem; psOutTxid = foundTxId; psOutIdx = 1; curPool = curPool - BigInt(nextCd.amount); curState = nextState;
+          // 历史记录查(不受"后续是否已花掉"影响) — kaspa_tx_log.to_address 只记第一个/主输出地址(通常是
+          // 赢家收款地址, 非续约地址), 续约地址(output index 1)只出现在 outputs_json 里——必须搜 outputs_json
+          // 而非 to_address(v2 首版漏了这个, dyljb 实测撞到: to_address 永远搜不到续约地址导致继续误判).
+          const histRow = ctx.db.prepare(`SELECT tx_id FROM kaspa_tx_log WHERE outputs_json LIKE ? ORDER BY block_time ASC LIMIT 1`).get(`%${nextAddr}%`);
+          let foundTxId = histRow?.tx_id;
+          if (!foundTxId) {
+            const nextEntries = (await ctx.getUtxos(nextAddr)).map(e => { const j = JSON.parse(JSON.stringify(e, (k, v) => typeof v === 'bigint' ? v.toString() : v)); return j.entry?.outpoint || j.outpoint; });
+            foundTxId = nextEntries[0]?.transactionId;
           }
+          if (!foundTxId) break;   // 历史索引 + 当前 UTXO 都查不到, 停止探测(genuinely 没发生 或本地索引没追上)
+          ctx.alert?.(marketId, `DB-lag自愈: claim[${priorWinnerDetails.length}](${nextCd.pk.slice(0, 8)}) 续接点探测到已落链(${foundTxId.slice(0, 12)}) 但 DB 没记录 — 自动纳入 replay(第${step + 1}步)`);
+          claims.push({ pk: nextCd.pk, amount: nextCd.amount, txId: foundTxId, received: true });
+          priorWinnerDetails = [...priorWinnerDetails, { pk: nextCd.pk, amount: nextCd.amount, txId: foundTxId }];
+          curRedeem = nextRedeem; psOutTxid = foundTxId; psOutIdx = 1; curPool = curPool - BigInt(nextCd.amount); curState = nextState;
         }
       } catch (e) { ctx.alert?.(marketId, `DB-lag自愈探测失败(非致命, 走原逻辑): ${e.message}`); }
     }
