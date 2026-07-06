@@ -29,6 +29,8 @@
 - **铁律**: ZK feasibility / silverc / rusty-kaspa 工具链研究 = **纯隔离**(独立 checkout / 测试环境)。**绝不 rebuild、绝不替换 live 节点的 rusty-kaspa build(1.1.1-toc.1 Toccata)**——覆盖 live 二进制 = 崩 bshard + 全部 live 市场 + 结算 daemon(配 memory reference-tn12-mining-external-bridge / covenant-wasm-breaks-selffull:绝不 rebuild D:/rusty-kaspa / 绝不 inprocess)。
 - **可行性 ≠ 采用**: 就算 OP_PICK 在 silverc v2.0.x 修了 = 只是"ZK 技术可行"的证据。**采用/迁移 live 节点 = 另一个慎重的、充分测试的、Owner 拍板的独立决策·live 在那之前原地不动。** 研究归研究·迁移归迁移。
 - **研究产出边界**: Track1 = 可行性结论(能编/不能编 + 证据)·零 live 触碰。
+- **🔴 具体路径钉死(2026-07-06 near-miss·J2 自查拦下)**: **`D:/rusty-kaspa` = LIVE TN12 节点 `kaspad.exe` 的实际运行目录**(`D:\rusty-kaspa\target\release\kaspad.exe`)。**绝不在此目录 cherry-pick/build/任何写操作**——会污染 live 二进制、崩全 TN12 + 所有 live 市场。J2 差点在此 cherry-pick zk-sdk·例行查路径发现是活目录·及时停手。**R0ScriptBuilder/zk-sdk 等 → 全新独立 clone 目录**(如 `D:/rusty-kaspa-zksdk-clone`·独立 target/·跟 live 零关系)。
+- **🔴 通用习惯(NWT 提·记 memory 族F)**: **任何写/build 操作前先查目标路径是不是活进程的目录**(tasklist/wmic 查 kaspad.exe/node.exe 实际路径)——"操作前查目标是否活"·别凭'我以为隔离'的印象(J2 一度错判 D:/rusty-kaspa 已隔离=只读·实为 live)。
 
 
 
