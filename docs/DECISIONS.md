@@ -74,10 +74,14 @@
 - **触发本条的元事件**: 规则 49(整页重写)其实早有前科(retail-dex 1990 行/规则 1)却拖到 7 月才升硬闸——周期太长,正是本回路要治的。
 
 
-### D-001 结算验证机制 (2026-07-06 · Owner 钦定 · 取代所有旧口径)
-- **Owner 决策 (2026-07-06)**: covenant/committee-sig 结算**实践证明脆弱**(7/5-7/6 公测一夜 DB-lag/时序/僵尸 bug 反复、多次人工救场)。**方向 = 攻克真·密码学 ZK 多片证明,替掉 committee-sig covenant。ZK 是唯一路径。**
-- **现状 (代码核实 2026-07-06)**: **当前运行的是 covenant/committee-sig 多片结算**(consolidateAllShards + settleMarketLive + merkle-proof + 委员盲签),**不是密码学 ZK**。全库无 groth16 prover 实际调用。
-- **待办**: J2 实测密码学 ZK 攻多片的 blocker(silverc 编译器 OP_PICK/gate-spk bug)能否绕 → 出可行性 → 规划回真 ZK。
+### D-001 结算验证机制 — 现行执行口径 + 战略方向 (2026-07-06 · supersedes 链见下)
+> **下轮 agent 查这条·不要读 KB §9 史料自己推断现行方向。KB §9 = 震荡史料;本条 = 现行执行口径。**
+
+- **🟢 现行执行口径 = rolling/committee-sig(2026-07-03 Owner+Bettor 决策·仍生效)**: 当前公测跑的是 bshard 滚动分片(consolidateAllShards + settleMarketLive + merkle-proof + 4-of-5 委员盲签)。代码核实全库无 groth16 prover 调用。**"ZK 规模决策门关闭·选 rolling 解 >1024 规模"这条 7/3 决策仍是现行执行。**
+- **🟡 战略方向(2026-07-06 Owner 重开·gated·尚非可执行翻案)**: Owner 因公测暴露 covenant/rolling 可靠性 bug(DB-lag 族) → 重开方向"攻密码学 ZK 替 committee-sig·ZK 唯一路径"。**但这是方向重开·不是对 7/3 的正式可执行翻案**——因密码学 ZK 卡 silverc OP_PICK blocker、**当前无可切换的 ZK**。
+- **翻案触发条件(明确)**: J2 实测 OP_PICK/gate-spk blocker **可绕** → 才出**新 D-记录正式 supersede 7/3 rolling** → 切 ZK。**不可绕 → 现行仍 rolling**(方向重开不自动改执行)。
+- **待办(前置)**: J2 实测 blocker 能否绕(换代码模式/工具链更新/SS 原语替代·实测不靠旧印象) → 出可行性 → 据此决定是否翻案。
+- **supersedes 链**: 6/28 Owner 钦定 ZK(§8) →(6/30 单片/多片 PROVEN=委员签名)→ **7/3 选 rolling(现行执行)** → 7/6 方向重开(gated·未翻案)。史料全文见 `KB/architecture/zk-track-c §9`。
 
 ---
 
