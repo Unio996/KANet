@@ -13,7 +13,15 @@
 - **公测已开(7/5 X 公布 tg DM)**: 世界杯盘 live。真人流量压出"链上推进/DB 滞后"这族 bug(phantom-leaf/时序/僵尸/孤儿脚本 race)。
 - **结算实证(公测三场全闭合·2026-07-06)**: lv3rz(Brazil-Norway 442/442)+ k3cnf(Mexico-England 64/64·England 晋级)+ dyljb(Will Mexico advance? 449/449·NO 赢·守恒 27837.32 分毫不差)= **955 赢家全付·三场守恒闭合·判定逻辑闭合**(k3cnf England 晋级↔dyljb Mexico 不晋级)。**covenant 保证钱一分没丢·可链上追付对**。dyljb 经历 J2 孤儿脚本混战(20+)→DB-lag 自愈 v3 自动恢复 264 假阴性→跑完 = **自愈机制真 work 实证**。
 - **daemon 自治结算**: settle-daemon(每 tick 自动判定+consolidate+PUSH 付赢家)~6/30 建·今晚修可靠性(5cfd215c 自愈 / 98a85f7e #33-③ settled_partial_claims 纳入 ripe / multi-step 探测)。
-- **🔴 战略方向(D-001·Owner 2026-07-06 钦定)**: covenant/committee-sig 结算实践脆·**方向=攻真·密码学 ZK 多片替 committee-sig·ZK 唯一路径**。现状=covenant 在跑(非 ZK)。**待办: J2 核实 silverc OP_PICK blocker 能否绕**。
+- **🔴 战略方向(D-001·Owner 2026-07-06 钦定·CLAUDE.md 铁律0.5)**: **ZK=committed 目标结算架构·rolling/covenant 跨节点=死路(不投任何资源)**。现状=rolling 维持 live 公测过渡·ZK 全力攻。
+- **🔥 ZK 攻坚进展(2026-07-06·全力攻坚)**: **三大技术风险全消**——①OP_PICK 可绕(新 silverc 编过 + R0ScriptBuilder 不用 silverc) ②ZkScriptBuilder 产兼容 gate script(WASM 隔离 build+JS 可调) ③verifier 真验(zk-sdk 14/14 含篡改拒·同 live verifier 代码)。**🎉 历史性 LANDED(txId bfd3d0e2)**: **TN12 活链第一次 0xa6 真验证接受 groth16 证明**(computeBudget~14M units·双验证 J2+NWT :3200·待跨节点)。**precise scope**: 证的=0xa6 活链验 ZK 证明·**非完整 ZK settle**(差真 CloseZk 两-input binding + 真 guest proof)。
+- **ZK 检查点(2026-07-06·team 共识暂停·下次 fresh 秒接)**:
+  - ✅ **non-vacuous binding 焊死**: WASM 补 `commitToGroth16WithFixedJournal`(~40 行·隔离 clone `D:/rusty-kaspa-zksdk-isolated`)·不同 journal_hash→不同 gate P2SH。
+  - ✅ **covenant 重构 byte-equal**: `blake2b(gatePrefix+journalHash+gateSuffix)` == `blake2b(完整 799B redeem)`·CloseZkRepro3.sil 骨架(NWT 八命门审过·`scratch/_j2_closezk_repro3.sil`)。
+  - ✅ **两 UTXO 落链待完整测**: covenant 地址 `kaspatest:prrgnrfl66r06dlp2dktsr2tvrxdcndeen0hqjj4420knnwlfhpszewu0z4ut`(state: attestedWinner=1,closed=1,待 zk_close·txId 1b29291e) + gate 地址 `kaspatest:pqcd63...`(带 groth16 proof·journalHash 匹配 baked·txId 971f2f69)。
+  - ⏸ **下次 fresh 接的一步(error-prone·勿疲劳赶)**: 手工按 SilverScript 栈序编码 zk_close sigScript(3 参数: gateSuffix/guestPayoutRoot/selfOutIdx 按声明序 push·单 entrypoint 无 selector)→ 构造 2-input zk_close TX → NWT 八命门审 → 广播 → 完整 CloseZk non-vacuous binding 上链。
+  - ⏳ **真 guest(并行·J1)**: J1 机器有 WSL(仅 docker-desktop distro)·需装 Ubuntu distro + RISC0(rzup/cargo-risczero)→ 按 golden-ref(`docs/2026-06-28-P2-payout-guest-golden-reference.md`)写真 payout guest→真 groth16 proof(替 fixture)。**live 主机绝不装 WSL(D-005)**。
+  - **汇合 = 完整 ZK settle**(真 CloseZk 两-input + 真 guest proof)。上链走 co-verify 八命门+Owner 批闸。工具链: silverc 隔离 checkpoint·zk-sdk WASM `D:/rusty-kaspa-zksdk-isolated`。
 - **🔴 "ZK 标签正名"(D-001)**: 现跑的"多片 ZK"实为 committee-sig covenant·真密码学 ZK 只单片 pb73v·多片从未交付。勿混。
 - **框架反漂移(D-002/003/004)**: 迭代回路(执法阶梯 L1-L4)+ 记忆反增殖 + 统一知识框架(KB=durable 唯一家·DECISIONS.md=决策口径·接位路由补 KB+DECISIONS)。FRAMEWORK-RETRO-TEMPLATE 锚 7/8 首轮 retro。
 
