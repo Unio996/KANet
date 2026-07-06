@@ -20,6 +20,7 @@
 //   funding input is a follow-up (TODO custody-hardening).
 
 import { compileSil, computePoolSideArtifact, ctorBytes32, ctorInt } from './pool-bshard-artifacts.mjs';
+import { extractTemplateArtifact } from './pool-template-artifact.mjs';
 import { buildRegisterWitness, buildRegisterCommand } from './pool-register-builder.mjs';
 import { allocateForRegister, registerShard, sealShard, onBettorRegistered } from './shard-allocator.mjs';
 import { blake2b } from '@noble/hashes/blake2b';
@@ -108,6 +109,104 @@ export async function ensurePayoutShard({ db, rc, transfer, landed, p2sh, logica
   return { payoutCovId, psAddr, psOutpoint: `${psTx}:0`, psRedeemGenesis: redeem };
 }
 
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// ZK-native 结算(2026-07-07，W1/W3，Owner"ZK走到底"钦定)——结构性平行函数，不碰上面 compilePayoutShardRedeem/
+// ensurePayoutShard 一个字节。committee-sig 市场继续走原函数零风险；只有显式调用下面这两个函数的
+// ZK-native 市场才会走 PayoutShardV2.sil。选择哪个函数由上层调用方(市场类型判断)决定，不是隐式推断。
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+
+// closeZkTmplAnchor 的 4 段固定模板切分点(J2 2026-07-06 实测，cli-debugger 执行级验证，非估算)：
+// state_layout={start:1,len:213}(CloseZkRepro4 自己的 state 区，跟 PayoutShardV2 无关)；非-state 后缀
+// (extractTemplateArtifact 的 templateSuffix，从绝对偏移 214 开始)内部再切出 4 段固定模板，跳过
+// betsRootBaked/refundRootBaked(各32B)/attestedAtMs(marker+6B LE=7B，仅在 2^40≤v<2^47 时宽度稳定，
+// 见 PayoutShardV2.sil zk_handoff 的 bounds guard) 这 3 个 per-market 变量的位置。
+const _CLOSEZK_SUFFIX_BASE = 214; // = state_layout.start(1) + state_layout.len(213)
+const _CLOSEZK_BETSROOT_ABS = [273, 305];
+const _CLOSEZK_REFUNDROOT_ABS = [1396, 1428];
+const _CLOSEZK_ATMS_ABS = [641, 648]; // marker(1B)+6B LE，仅在稳定值域内有效——见下方 dummyAtMs 选值理由
+const _rel = ([a, b]) => [a - _CLOSEZK_SUFFIX_BASE, b - _CLOSEZK_SUFFIX_BASE];
+
+/**
+ * 计算 PayoutShardV2 ctor 需要的 closeZkTmplAnchor = blake2b(4 段固定模板拼接)。CloseZkRepro4.sil 零改动，
+ * 编译一次(dummy ctor，模板跟 betsRoot/refundRoot/attestedWinner/consolidated_pool 具体值无关，只有
+ * gateTmplHash 会真实嵌入模板——它绑定具体 guest image_id，必须传真实值，不能用占位符)即可，不需要每个
+ * 市场重算(同一个 guest image 的所有 ZK-native 市场共用同一个 anchor)。
+ * @param {string} closeZkSilPath 指向 _j2_closezk_repro4.sil(或其归位后的正式路径)
+ * @param {string} gateTmplHash 真实 gate 模板 hash(32B hex，绑定具体 guest image_id，昨晚 LANDED 交易用的
+ *   511b0ead...定版值，见 _j2_final_gate_data_v2.json——不能传占位符，会导致 anchor 算错)
+ */
+export function computeCloseZkTmplAnchor(closeZkSilPath, gateTmplHash, silverc) {
+  // dummyAtMs 必须落在 J2 实测的稳定值域 [2^40, 2^47) 内(同 PayoutShardV2.sil zk_handoff 的 bounds guard)，
+  // 否则 minimal-push 变长编码会让模板切分点跟真实 market 用的值对不上。用一个具体真实量级(非边界值)。
+  const dummyAtMs = 1783500000000;
+  // ⚠ NWT 核实确认(2026-07-07): init_attestedWinner/init_closed/init_consolidated_pool 这三个值(下面写
+  // 0/1/0)可以随便填、不影响算出的 anchor —— 它们全部落在 CloseZkRepro4 自己的 state_layout 区域内，
+  // extractTemplateArtifact 会把整个 state 区域从 templateSuffix 里切掉(不进最终 hash)。之所以这里仍写
+  // 具体值(而非全 0)，纯粹是为了让 dummy ctor 数组形状/类型跟真实 ctor 一致，不是这些值本身有意义。
+  const ctor = [
+    ctorBytes32(gateTmplHash), ctorBytes32(z32), ctorBytes32(z32), // betsRootBaked/refundRootBaked不影响模板(落在变量区)
+    ctorInt(dummyAtMs), ctorInt(0), ctorInt(1), ctorBytes32(z32), ctorInt(0),
+    ...W17(),
+  ];
+  const compiled = compileSil(closeZkSilPath, ctor, silverc);
+  const { templatePrefix, templateSuffix } = extractTemplateArtifact(compiled); // prefix=script[0:1], suffix=script[214:end]
+  const [betsA, betsB] = _rel(_CLOSEZK_BETSROOT_ABS);
+  const [refA, refB] = _rel(_CLOSEZK_REFUNDROOT_ABS);
+  const [atA, atB] = _rel(_CLOSEZK_ATMS_ABS);
+  const templateA = templateSuffix.subarray(0, betsA);
+  const templateB = templateSuffix.subarray(betsB, atA);
+  const templateC = templateSuffix.subarray(atB, refA);
+  const templateD = templateSuffix.subarray(refB);
+  return {
+    anchorHex: Buffer.from(blake2b(Buffer.concat([templateA, templateB, templateC, templateD]), { dkLen: 32 })).toString('hex'),
+    genesisMarkerByte: templatePrefix[0], // = 107, 硬编进 zk_handoff 的 byte[1](107)，随手核对不变
+  };
+}
+
+/**
+ * Compile a ZK-native PayoutShardV2 redeem (27-param ctor，比 PayoutShard 多 closeZkTmplAnchor + 4 个 ZK state 初值)。
+ * ctor 参数序精确对照 PayoutShardV2.sil:35-49(NWT diff 审过)：
+ *   poolMerkleRoot, predicate_commit, closeZkTmplAnchor, init_consolidated_pool, init_closed, init_payoutRoot,
+ *   init_w0..init_w16(17), init_attestedWinner, init_attestedAtMs, init_betsRootBaked, init_refundRootBaked。
+ * @param {object} o { poolMerkleRoot(hex), predicateCommit(hex), closeZkTmplAnchor(hex), consolidatedPool(int), silverc }
+ */
+export function compilePayoutShardV2Redeem({ poolMerkleRoot, predicateCommit, closeZkTmplAnchor, consolidatedPool, silverc }) {
+  const ctor = [
+    ctorBytes32(poolMerkleRoot), ctorBytes32(predicateCommit), ctorBytes32(closeZkTmplAnchor),
+    ctorInt(Number(consolidatedPool)), ctorInt(0), ctorBytes32(z32),
+    ...W17(),
+    ctorInt(-1),        // init_attestedWinner: -1=待attest
+    ctorInt(0),         // init_attestedAtMs: 0=待attest
+    ctorBytes32(z32),   // init_betsRootBaked: ZERO32=待attest
+    ctorBytes32(z32),   // init_refundRootBaked: ZERO32=待attest
+  ];
+  return Buffer.from(compileSil(join(LIB, 'PayoutShardV2.sil'), ctor, silverc).script).toString('hex');
+}
+
+/**
+ * ZK-native 市场版 ensurePayoutShard——镜像 ensurePayoutShard，只是目标合约 PayoutShardV2.sil + 27 参数 ctor。
+ * 上层调用方(市场类型判断，非本函数内部推断)必须显式知道这是 ZK-native 市场才调用这个函数。
+ * @returns {{ payoutCovId, psAddr, psOutpoint, psRedeemGenesis }}
+ */
+export async function ensurePayoutShardV2({ db, rc, transfer, landed, p2sh, logicalMarketId, poolMerkleRoot, predicateCommit, closeZkTmplAnchor, relayAddr, silverc }) {
+  const existing = db.prepare(`SELECT * FROM payout_shards WHERE logical_market_id = ?`).get(logicalMarketId);
+  if (existing) return { payoutCovId: existing.payout_cov_id, psAddr: existing.payout_ps_addr, psOutpoint: existing.payout_ps_outpoint, psRedeemGenesis: existing.payout_redeem_hex };
+
+  const redeem = compilePayoutShardV2Redeem({ poolMerkleRoot, predicateCommit, closeZkTmplAnchor, consolidatedPool: PS_SEED, silverc });
+  const fundTx = await transfer(relayAddr, PS_SEED + 100_000_000);
+  const gj = await rc({ type: 'bshard_genesis_mint_payout', payoutshard: { redeem_hex: redeem, seedSompi: String(PS_SEED) }, inputs: { funding: { address: relayAddr, outpointTxid: fundTx, index: 0 } }, outputs: { change_address: relayAddr } });
+  const payoutCovId = gj.payoutCovId, psTx = gj.txId || gj.txid, psAddr = p2sh(redeem);
+  if (!payoutCovId || payoutCovId === z32) throw new Error('PayoutShardV2 genesis-mint cov_id 0 — covenant provenance fail');
+  if (!await landed(psTx, psAddr)) throw new Error('PayoutShardV2 genesis no land');
+
+  // ⚠ payout_shards 表(migrate v172)目前无 V1/V2 区分列——今天范围只加这两个函数，不加 schema。
+  // 下游若需要区分本行是 V1 还是 V2 shaped redeem，靠调用方自己的市场类型记录(如 pool_markets.protocol_status
+  // ='zk_ready')判断，不靠 introspect 这张表。若后续需要，独立小工单加列，非本次范围。
+  db.prepare(`INSERT INTO payout_shards (logical_market_id, payout_cov_id, payout_ps_addr, payout_ps_outpoint, payout_redeem_hex, pool_merkle_root, predicate_commit, created_at)
+    VALUES (?,?,?,?,?,?,?,?)`).run(logicalMarketId, payoutCovId, psAddr, `${psTx}:0`, redeem, poolMerkleRoot, predicateCommit, Math.floor(Date.now() / 1000));
+  return { payoutCovId, psAddr, psOutpoint: `${psTx}:0`, psRedeemGenesis: redeem };
+}
+
 // #task32 (2026-07-03, Bettor 结构性发现): 'use' 分支(append 到已开分片的当前 leaf, 最常见路径)读
 //   current_leaf_outpoint/current_leaf_state 后建 register_append 花它——两个并发 confirm 落在同一
 //   shard 会读到同一个 outpoint 抢 splice, 后到者链上花费被拒(安全失败非丢钱, 但合法请求报错需重试)。
@@ -144,15 +243,23 @@ async function _registerBettorOnShardInner(o) {
   const {
     db, rc, transfer, landed, p2sh, logicalMarketId, poolMerkleRoot, predicateCommit,
     bettorPk, direction, stakeSompi, relayAddr, silverc, sealCount, deadline, createShardMarketRow, recordBettor,
+    zkNative = false, closeZkTmplAnchor,   // 2026-07-07 新增: ZK-native 市场显式开关。默认 false——
+    // 不传这两个字段的既有 committee-sig 调用方行为一字不变(走原 ensurePayoutShard)。这是显式参数，
+    // 不是本函数内部推断——上层市场创建流程必须自己知道"这是 ZK-native 市场"才传 zkNative:true，
+    // ShardLeaf/register 主体逻辑本身不感知/不判断市场类型(NWT W3 审核重点②)。
   } = o;
   if (!Number.isFinite(Number(deadline)) || Number(deadline) <= 0) throw new Error(`registerBettorOnShard: deadline (Unix ts, ctor-baked partial-sweep gate) required, got ${deadline}`);
   if (direction !== 0 && direction !== 1) throw new Error(`direction must be 0|1, got ${direction}`);
   if (!(BigInt(stakeSompi) > 0n)) throw new Error(`stakeSompi must be > 0`);
+  if (zkNative && !closeZkTmplAnchor) throw new Error('registerBettorOnShard: zkNative=true requires closeZkTmplAnchor (fail-closed, no silent placeholder)');
   const stake = Number(stakeSompi);
   const marketIdHash = hex32(logicalMarketId);
 
   // Per-market PayoutShard (genesis-mint once at first shard) — the consolidation sink every ShardLeaf bakes by cov_id.
-  const { payoutCovId } = await ensurePayoutShard({ db, rc, transfer, landed, p2sh, logicalMarketId, poolMerkleRoot, predicateCommit, relayAddr, silverc });
+  // zkNative 显式 true 才走 V2；committee-sig 市场(zkNative 未传/false)连这个分支的调用点都摸不到。
+  const { payoutCovId } = zkNative
+    ? await ensurePayoutShardV2({ db, rc, transfer, landed, p2sh, logicalMarketId, poolMerkleRoot, predicateCommit, closeZkTmplAnchor, relayAddr, silverc })
+    : await ensurePayoutShard({ db, rc, transfer, landed, p2sh, logicalMarketId, poolMerkleRoot, predicateCommit, relayAddr, silverc });
 
   const alloc = allocateForRegister(db, logicalMarketId, stake);
 
