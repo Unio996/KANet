@@ -24,6 +24,13 @@
     - **缺口 A(最重,新增)**: **ZK covenant genesis-mint 生产管线完全不存在**——grep 全库 `zk_continuation` 零写入点(只有 daemon.mjs 3 处读)。昨晚 LANDED 全靠手工脚本一次性构造。需新建:attest 完成(复用既有 `judgeWinDir`,955 赢家在用)→ 建 ctor(attestedWinner/attestedAtSeconds(读 kaspa_tx_log attest tx.time)/betsRootBaked/refundRootBaked/consolidated_pool/17-word nullifier 全 0)→ 编译 mint CloseZkRepro4 covenant → 写 `market.metadata.zk_continuation`。**真实市场 mint = 把市场池子真金搬进 ZK covenant UTXO,今天最重 money-path 步,确认点全走**。
     - **缺口 B(下游,fail-closed 非资损)**: `zk-close-builder.mjs:151` `_PSZK` 幻影 layout 字段序整个反了+少算 17 个 w 字段(NWT 对照 repro4.sil 20-46 行实际 ctor 序坐实)——今天任何真实 settle 会在 `zkClosePhase2:188` 结构校验 throw 卡死。修法:ctor-baked 模式下 attestedWinner 从 mint 步骤产出的 metadata 直读,废除 `readAttestedWinnerFromState` 幻影解码。
     - **重排后序**: J2 出缺口 A+B 一份设计稿(`zk_continuation` metadata schema 作为 J1/J2 接口契约优先定稿)→ NWT 红队审 → J2 落码;J1 handler 设计**并行**(靠 schema 解耦,不等 A 落完)→ 汇合隔离全链测试 → kill switch ON → zk_ready → demonstrate。
+  - **🔴🔴 §11 决议:中途迁移死路 → ZK-native 定案选项(a) PayoutShardV2+zk_handoff(2026-07-07 22:0x·对抗讨论收敛·Owner 定调"zk走到底!毫无疑问")**:
+    - **坐实(三方独立源码级)**: PayoutShard.sil 全部 5 entry(absorb/close_attest/cancel_attest/claim/refund_claim)无一能整池交接异族 covenant(claim/refund_claim 硬锁 merkle 证明的 bettor 地址逐个领);state-in-address→改源码也救不了已 genesis 的存量盘。**存量/在途市场永久走 committee-sig 老路**(与 Owner 已拍准入政策一致)。
+    - **关键事实链**: ShardLeaf.sil `consolidate_to_payout`(85-107) destination=covenant 硬绑 `payout_cov_id`(ctor 烤值,opaque instance-id 非 bytecode 类型)→ 目标 covenant 必须**先于 shards genesis**(ordering)→ 这恰是现产线既有顺序 → **(a) 零 ShardLeaf/零 CloseZkRepro4 改动可行**。
+    - **定案(a)**: 新文件 `PayoutShardV2.sil`(仅服务新市场,零 live 风险)= 战阵 PayoutShard 原样 + ①close_attest 后置条件多存 `attestedWinner`+`attestedAtSeconds` 进 state ②新 `zk_handoff` entry(require closed==1,一次性,用自身 state 重构期望 CloseZk redeem hash 验 destination(non-vacuous binding 同款,post-attest state 已终值,不重蹈 06-20 template-vs-cov_id 坑),value==consolidated_pool 整池交接)。**(b)(CloseZk 自带 absorb+attest)被 J2 主动收回**——要动 shard 共用模板+重构 CloseZk 两个源,风险面大一个数量级。
+    - **开放点定向**: CloseZk ctor 的 betsRootBaked/refundRootBaked 来源——**(i)优先**(close_attest 时委员一并 attest 进 V2 state,verify-value-source 全链);**(ii)兜底**(driver-baked+C2 byte-equal 门+大声标注信任降级,显式退路含触发条件)。
+    - **候选市场新标准(NWT)**: 必须**从现在起新建**的盘(用 V2 模板开),任何已用旧 ShardLeaf 收注的现存盘(哪怕未 attest)一律不合格。KANet-UI 只备创建参数不执行。
+    - **J1 应急线预置**: J1 若持续缺席,J2 临时跨域顶 relay 侧+NWT 双倍审力,单独报 Owner 批后才动。
 - **⚠ 双节点 ledger 分叉合并(2026-07-07 Bettor)**: origin 侧(J1 机器)7/6 深夜并行补记了 3 个 docs commit(16a7e60a/e10d8ec5/ea2f5f87,含 Docker 修复细节+汇合完成条目),与本机 ledger 冲突。合并原则: 时间线详版保本机,"ZK 检查点"节保 origin 更新版(OP_PICK✅/Docker解除/汇合完成),origin 尾部"⏸卡点"条目已过时(本机 18:2x/20:0x 突破条目取代),加标注保留。
 
 ## 🟢 fresh 接手第一动作(2026-07-06 restart·全队 fresh session)
