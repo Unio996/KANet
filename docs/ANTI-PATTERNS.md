@@ -2774,4 +2774,31 @@ entrypoint function escape_claim(...) {
 
 ---
 
+## 规则 54 · SQLite `json_extract` 对畸形 JSON 抛异常非返回 NULL —— 生产数据不保证干净，处理 JSON 字段前必须 `json_valid` guard
+
+**触发时机**（2026-07-06，J2 给 `selectRipeMarkets()` 加 zk_native 市场排除条件时抓出，NWT 独立复现确认）：想加一条 `AND json_extract(resolution_rule_spec, '$.zk_native') IS NOT 1` 排除 ZK-native 市场，动手前先用只读连接对生产 DB(`kasia-console/data/console.db`)做验证，发现两件事：①这个 SQLite build 的 `json_extract` 遇到畸形 JSON 直接抛 `SqliteError: malformed JSON`，**不是该行温和返回 NULL**；②生产库里现在就真实存在 5 个市场的 `resolution_rule_spec` 是畸形 JSON(`ext-pool-1779936049539-8ay8j` 等)。若不加 guard 直接上线，`selectRipeMarkets()` 一旦扫描到这些行会让整条 `SELECT` 抛异常——**结算 daemon 的 tick 彻底停摆，把所有真实市场的自动结算全部打崩**，比"没排除 zk_native 市场"这个原始目标问题严重得多。
+
+### Wrong
+```sql
+SELECT * FROM pool_markets
+WHERE ...
+  AND json_extract(resolution_rule_spec, '$.zk_native') IS NOT 1   -- 假设畸形 JSON 返回 NULL，实际抛异常
+```
+
+### Right
+```sql
+SELECT * FROM pool_markets
+WHERE ...
+  AND (json_valid(resolution_rule_spec) = 0 OR json_extract(resolution_rule_spec, '$.zk_native') IS NOT 1)
+  -- json_valid() 短路在前：畸形 JSON 视为"未标记"(不排除，走原逻辑，行为不变)，
+  -- 只有合法 JSON 且字段确实为 true 才排除。零风险改变现有行为。
+```
+
+### Why
+- **"生产数据永远是干净 JSON"是一个未经验证的假设，不是事实**——这条数据库运行了几个月，各种历史遗留/半成品/手工改动都可能在某个字段留下不合法 JSON，SQL 层面处理任何 TEXT 存 JSON 的字段之前，先假设它可能是脏的，用 `json_valid()` 挡一道，而不是等生产事故倒逼。
+- **这类 guard 的成本几乎为零**（一次 `json_valid()` 调用），但省下的是"一次新增的 WHERE 条件让整条 daemon 停摆"这种级别的事故——性价比上没有不加的理由。
+- **验证方式**：改动前对生产 DB 开只读连接(`new Database(path, {readonly:true})`)跑一次目标查询的简化版，亲眼看它在真实数据上不抛错，而不是假设"这种情况不会发生"。这条本身也是 `feedback-read-actual-code-not-assumed-canonical` 同一纪律在 SQL 层面的应用。
+
+---
+
 *本档案在 v2 spec 第八章元教训基础上独立。spec 聚焦"这次怎么做"，本档案聚焦"下次别再犯"。*
