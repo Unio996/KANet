@@ -1142,6 +1142,14 @@ export async function poolSettlerTick() {
           AND refund_txid IS NULL
       `).all();
       for (const sm of stuckMarkets) {
+        // 🔴 反向结构隔离(2026-07-06 NWT 自动进程横扫抓出，开盘前必堵): 这个 Path B reconcile 块漏了
+        // main loop(L356)/watchdog(L1072)都有的 isBshard-skip——bshard 市场(含今天新增的 ZK-native)
+        // 归 bshard-settle-daemon.mjs 独家负责终态判定，不该被这里按 spine_p2sh 上任意一笔花费的
+        // output 数量强行猜成 completed/refunded。若不排除，一旦 ZK 管线自己的 consolidate/zk_handoff
+        // 交易花了 spine_p2sh，这段代码会误读成"最终结算"，跟真正的 zk_settled 写入抢跑/冲突——不是
+        // 浪费费用，是状态被写错。补齐跟另外两处同款的 guard，不是新逻辑，是补齐既有纪律的漏网之鱼。
+        const isBshardPathB = !!sqlite.prepare('SELECT 1 FROM market_shards WHERE logical_market_id = ? LIMIT 1').get(sm.id);
+        if (isBshardPathB) continue;
         const chainTx = sqlite.prepare(`
           SELECT tx_id, outputs_json, block_time
           FROM kaspa_tx_log
