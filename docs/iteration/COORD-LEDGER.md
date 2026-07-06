@@ -8,6 +8,15 @@
 
 ---
 
+## 🟢 fresh 接手第一动作(2026-07-06 restart·全队 fresh session)
+> **背景**: 26h+ 马拉松·Owner 令 restart 换 fresh 上下文攻 silverc emit-fix(不停·airtight handoff·治"停出幺蛾子")。ZK 已推到"就差 OP_PICK emit-fix"。
+- **fresh J2/J1(双人攻)**: 读 memory `project-j2-oppick-investigation-handoff-2026-07-06`(byte 级 locus offset143/opcode 语义坑/排除 .sil 死路) → **实现 silverc emit-fix**(StackBindings pop 后正确重算 PICK index·gateSuffix 双引用+CAT/SHA256 两次 pop 后 idx 没 +2·该 8 用了 9)·**emit 侧修·脚本在不变 live VM 跑通·绝不改 VM(硬分叉+D-005)**。隔离 clone: silverc + `D:/rusty-kaspa-zksdk-isolated`(zk-sdk WASM)。
+- **fresh Bettor(协调·我)**: 读本文件 + DECISIONS.md(D-001 ZK committed / D-005 隔离铁律) + 接位 → **协调 J2/J1 silverc emit-fix → NWT co-verify 修法(改对侧) → 重编覆约 → 执行过 → 接 J1 真 proof(image_id `c9918501...`·65B env::commit_slice·非作废 815db584) → 广播落链(三重核·八命门·Owner 批闸)**。目标: 今天干通完整真 ZK settle。
+- **fresh NWT**: co-verify silverc 修法 + 八命门 + 落链守恒。**fresh KANet-UI**: 保公测 live(押注深夜低谷·infra 健康·待主动 bot-path 实测) + ZK JS wire。
+- **两 UTXO 已落链待重试**(OP_PICK 修好后重编覆约再广播): covenant `kaspatest:prrgnrfl...` + gate(见下方 ZK 检查点节 txId)。
+
+---
+
 ## 🔴 当前状态速览(2026-07-06·接位第一读·配 docs/DECISIONS.md)
 > **战略决策口径一律以 `docs/DECISIONS.md`(D-001~D-004)为准·防炒陈饭。本区只记当前进度锚点。**
 - **公测已开(7/5 X 公布 tg DM)**: 世界杯盘 live。真人流量压出"链上推进/DB 滞后"这族 bug(phantom-leaf/时序/僵尸/孤儿脚本 race)。
