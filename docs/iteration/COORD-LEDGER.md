@@ -45,6 +45,27 @@
 - **🔴 "ZK 标签正名"(D-001)**: 现跑的"多片 ZK"实为 committee-sig covenant·真密码学 ZK 只单片 pb73v·多片从未交付。勿混。
 - **框架反漂移(D-002/003/004)**: 迭代回路(执法阶梯 L1-L4)+ 记忆反增殖 + 统一知识框架(KB=durable 唯一家·DECISIONS.md=决策口径·接位路由补 KB+DECISIONS)。FRAMEWORK-RETRO-TEMPLATE 锚 7/8 首轮 retro。
 
+### 🔧 生产装配三件套 LANDED(2026-07-06 15:xx·J2 commit `f3060ff3`·NWT 双重独立复核 GREEN)
+- job 表(`zk_prove_jobs` v180)+ 独立 `zk-prove-server.mjs`(Tailscale 绑定+bearer token+fail-closed)+ `bshard-settle-daemon.mjs` 接入 `zkCloseTick`(**kill switch `ZK_CLOSE_TICK_ENABLED` 默认 OFF**·`scanReadyZkMarkets` 真实现·其余 5 hook 是 throw-TODO stub)。`selectRipeMarkets()` 逐字节零改动·真实数据 copy 测试证明 0 个 zk_ready 市场时 stub **物理上跑不到**(非"应该没事")。
+- **fresh NWT 独立复核**(不信前一 session 自报,自己 `git show 8065184` + 重读 diff):GREEN,一个非阻塞发现(bearer token 用 `!==` 非 timingSafeEqual,内网 Tailscale 场景可接受,记账待补)。
+- **zk_ready 市场准入政策(Owner 正式拍板·D 级效力)**: 首批准入=世界杯 pool 市场·参与人数 ≤900;大规模赢家场景及既有 committee-sig 市场维持原路径不变;标记由 Bettor 手动执行,禁止自动推断。
+
+### 🔴 escapeRefund 逃生舱设计 + CRITICAL 漏洞修复(2026-07-06 16:xx·J2 设计+落码·NWT 红队)
+- **架构缺口**: `zk-close-builder.mjs` 引用的 `_PSZK` layout(6/28 KANet-UI commit `9b9804b5`,引用"旧 J1 firm 16:55")**假设 PayoutShard.sil 有独立 `attested_winner` 字段,但直接读源码确认该字段从未存在**(PayoutShard.sil 只有 `consolidated_pool`/`closed`/`payoutRoot` 三个 state 变量,winner 隐含在 payoutRoot merkle 树里)——J1 查证(`git blame`+源码),J2 确认今晚 LANDED 那笔用的是 demo repro3(ctor 直接烤 `init_attestedWinner`),从未走真实路径,非资金安全事故。
+- **v1→v3 设计迭代**(NWT 红队,每轮抓到真洞): v1 state machine 一次性焊死(第二个 bettor 永久锁死)→ 拆 `escape_trigger`(permissionless flag-flip,closed 1→3)+`escape_claim`(可重复调,closed==3 precondition,镜像 `refund_claim`);deadline 锚点用错(genesis-baked `deadline_daa` 而非 attest 完成时刻)→ 改用 `attestedAtSeconds`(mint 时 off-chain 读 `kaspa_tx_log` 观测值烤入 ctor,不碰 PayoutShard.sil);`betsRootBaked` 是 hash-chain 非 merkle 树,无法做单笔 membership proof → 新增独立 `refundRootBaked` 字段(genesis-mint 时复用既有 `payoutRoot()` depth-10 merkle 构造)。
+- **🔴 CRITICAL(NWT 代码审逮到,纯代码审阶段拦下,未进任何链上测试)**: `_j2_closezk_repro4.sil` 的 `escape_claim` 自己声明了一套 `w0in..w16in` witness 参数(caller 自填,不受 P2SH 约束),nullifier 检查全部基于这套假值——单人反复提交同一笔 escape_claim 可抽干整个 `consolidated_pool`。**修法**(一行改名级别但性质 CRITICAL): 删除 `w0in..w16in`,全部改回读 P2SH 绑定的真实 `w0..w16` state(跟 `zk_close`/`escape_trigger` 已用的方式一致)。NWT 逐行复核 GREEN。
+- **经济激励发现(NWT,非阻塞已写入 §2.1.2)**: permissionless deadline 逃生舱 = 基础设施故障本身就会自动触发全场退款(不需要任何人主动作恶)。GRACE 标准收紧为"覆盖出证环境全损重建最坏时长"(非仅覆盖正常 proving 延迟),出证备份机需求升级。
+- **上线三前置(§2.6·写死不可绕)**: escape_trigger/escape_claim 真正服务真实市场前,缺一不可:①出证备份机就位(J1 认领,今晚 Docker 坏机 3 小时是活彩排)②卡死告警落地③GRACE 按最坏重建时长定标。**三前置只挡真实市场资金,不挡纯隔离假数据测试**(Bettor 划清边界)。
+
+### ⏸ escape_trigger 隔离测试 — 卡在编译器 dispatch 层,Owner 要求今晚继续查(不下沉)
+- **genesis mint LANDED**(2 KAS,txId `81772662bcdf21f4d7312840be01bec7d93f9d85b800150c51a6544ddb46629b`,P2SH `kaspatest:prs48jd232dmsqh45t8z82xxrusphx3l5cgxeh7pa0pmvt7cqllxq8uzkxpc8`,J1 独立节点直查 UTXO 核实)。
+- J1 重组 redeemScript(11 段频道分块)+ 双方法交叉验证(手工 blake2b256 vs kaspa-wasm 官方 `payToScriptHashScript`,byte-exact)+ 先验证原始 redeem 能复现已知地址的健全性检查通过。escape_trigger 组装(splice closed:1→3,新 continuation 地址 `kaspatest:pqyfa3tz826fmp43wykjna778qqrnm33q8ev9sxkejxt00phgam4zpymh9607`)三方(J1+Bettor+NWT)独立核实守恒数学 GREEN,J2 广播。
+- **广播踩 3 层协议错误**(规则 45 whack-a-mole 模式,J1 引用先例): `sig_op_count inconsistent` → 修 sigOpCount=0+computeBudget=70 → `mismatched locktime types` → 补 ms-epoch lockTime → **现卡在 `false stack entry at end of script execution`**(某 require 干净判 false,非 crash)。deadline 数字三方独立核算一致(attestedAtSeconds=1700000000s+GRACE=21600s→阈值 ms=1700021600000,tx.lockTime=1700021600001 满足),output scriptPubKey 字节验证过——**问题定位到 escape_trigger 的 `validateOutputState` 内部 state 重建 concat,尚未坐实具体行**。
+- **🔴 Owner 拍板不下沉(2026-07-06 17:47)**: 团队原判"记录进度留给下个 session"(NWT/Bettor 确认无资金/状态风险——tx 被拒未落链,测试钱无损,kill switch 仍 OFF),**Owner 要求继续查,不能轻易归为下一步**。召集对抗性假设讨论(非碎片汇报,互相攻击对方假设):
+  - **Bettor 假设**: repro4 新增 `attestedWinner` 字段(PayoutShard 从未有过,排 state 首位)= 这套 21 字段布局第一次真正上链,不是"复用已验证模式"而是"看似复用实为新组合"(同 J2 CRITICAL bug 同一根因类别)。
+  - **J1 假设(独立角度,基于亲自定位 OP_PICK 根因的经验)**: escape_trigger 的 `validateOutputState` 要重建 213 字节 state(20 个 8 字节字段+1 个 32 字节字段混合宽度 concat)——结构上与 OP_PICK 原始触发模式(混合宽度 cast 链)相似;今晚只修了 `compile_byte_sequence_cast_call` 一处具体实例,不排除同一类 stack_depth 记账漏算在不同 concat 形状下换脸复发(呼应 13 轮 OP_PICK 排查教训"confound 可以藏在没试过的具体形状里")。**待验证**:①贴 escape_trigger `validateOutputState` 源码原文②确认是否整条大 concat 拼装(非分字段)③过 Tier2 模拟器/ablation 矩阵看这个具体"8B×20+32B×1"形状测过没有。
+  - **状态**: 验证进行中(J1 17:48 后下线约 3 小时,交接完整,J2/NWT/Bettor 继续,无需等待)。
+
 ---
 
 ---
