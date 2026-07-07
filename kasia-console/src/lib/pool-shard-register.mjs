@@ -34,8 +34,14 @@ const LIB = dirname(fileURLToPath(import.meta.url));
 // faaa074(引入 validateOutputStateWithTemplate 新 codegen)之后的 binary 编译产物已证实形状会漂移
 // (ShardLeaf 直接编译报错；CloseZkRepro4 byte长度不同，8528 vs 8662——同一类风险，只是 PayoutShard.sil
 // 用 validateOutputState 非 WithTemplate 变体，暂未证实是否同样受影响，默认保守当作受影响处理)。
-// ZK 专属函数(compilePayoutShardV2Redeem/computeCloseZkTmplAnchor)不受此影响，继续用调用方传入的 silverc。
+// ZK 专属函数(compilePayoutShardV2Redeem/computeCloseZkTmplAnchor)不受这条影响——它们硬编码走下面的
+// SILVERC_ZK，见其后紧跟的注释(第二轮加固，同一晚)。
 const SILVERC_LEGACY = process.env.SILVERC_LEGACY_PATH || 'D:/silverscript/versioned-builds/silverc-legacy-2c46231.exe';
+// 🔴 NWT 事故复盘顺手抓到的潜伏 footgun(2026-07-07 深夜，同一事故的第二处硬化): computeCloseZkTmplAnchor/
+// compilePayoutShardV2Redeem 原来完全依赖调用方显式传对 silverc——生产代码(pool.js register-v07)传对了，
+// 但 NWT 自己写验证脚本时忘了传，结果默默吃了 compileSil 的模块级默认值(刚被本次事故修复从 ZK 改成
+// legacy)，编出错误字节都不会报错。跟 ShardLeaf/PayoutShard V1 同款处理：硬编码，不依赖调用方传参正确。
+const SILVERC_ZK = process.env.SILVERC_ZK_PATH || 'D:/silverscript/versioned-builds/silverc-zk-8065184.exe';
 const z32 = '00'.repeat(32);
 const W17 = () => Array.from({ length: 17 }, () => ctorInt(0));
 const MIN_BET = 100000;                                   // dust-ticket floor (sompi); matches (d)/helper
@@ -143,7 +149,7 @@ const _rel = ([a, b]) => [a - _CLOSEZK_SUFFIX_BASE, b - _CLOSEZK_SUFFIX_BASE];
  * @param {string} gateTmplHash 真实 gate 模板 hash(32B hex，绑定具体 guest image_id，昨晚 LANDED 交易用的
  *   511b0ead...定版值，见 _j2_final_gate_data_v2.json——不能传占位符，会导致 anchor 算错)
  */
-export function computeCloseZkTmplAnchor(closeZkSilPath, gateTmplHash, silverc) {
+export function computeCloseZkTmplAnchor(closeZkSilPath, gateTmplHash) {
   // dummyAtMs 必须落在 J2 实测的稳定值域 [2^40, 2^47) 内(同 PayoutShardV2.sil zk_handoff 的 bounds guard)，
   // 否则 minimal-push 变长编码会让模板切分点跟真实 market 用的值对不上。用一个具体真实量级(非边界值)。
   const dummyAtMs = 1783500000000;
@@ -156,7 +162,7 @@ export function computeCloseZkTmplAnchor(closeZkSilPath, gateTmplHash, silverc) 
     ctorInt(dummyAtMs), ctorInt(0), ctorInt(1), ctorBytes32(z32), ctorInt(0),
     ...W17(),
   ];
-  const compiled = compileSil(closeZkSilPath, ctor, silverc);
+  const compiled = compileSil(closeZkSilPath, ctor, SILVERC_ZK);
   const { templatePrefix, templateSuffix } = extractTemplateArtifact(compiled); // prefix=script[0:1], suffix=script[214:end]
   const [betsA, betsB] = _rel(_CLOSEZK_BETSROOT_ABS);
   const [refA, refB] = _rel(_CLOSEZK_REFUNDROOT_ABS);
@@ -178,7 +184,7 @@ export function computeCloseZkTmplAnchor(closeZkSilPath, gateTmplHash, silverc) 
  *   init_w0..init_w16(17), init_attestedWinner, init_attestedAtMs, init_betsRootBaked, init_refundRootBaked。
  * @param {object} o { poolMerkleRoot(hex), predicateCommit(hex), closeZkTmplAnchor(hex), consolidatedPool(int), silverc }
  */
-export function compilePayoutShardV2Redeem({ poolMerkleRoot, predicateCommit, closeZkTmplAnchor, consolidatedPool, silverc }) {
+export function compilePayoutShardV2Redeem({ poolMerkleRoot, predicateCommit, closeZkTmplAnchor, consolidatedPool }) {
   const ctor = [
     ctorBytes32(poolMerkleRoot), ctorBytes32(predicateCommit), ctorBytes32(closeZkTmplAnchor),
     ctorInt(Number(consolidatedPool)), ctorInt(0), ctorBytes32(z32),
@@ -188,7 +194,7 @@ export function compilePayoutShardV2Redeem({ poolMerkleRoot, predicateCommit, cl
     ctorBytes32(z32),   // init_betsRootBaked: ZERO32=待attest
     ctorBytes32(z32),   // init_refundRootBaked: ZERO32=待attest
   ];
-  return Buffer.from(compileSil(join(LIB, 'PayoutShardV2.sil'), ctor, silverc).script).toString('hex');
+  return Buffer.from(compileSil(join(LIB, 'PayoutShardV2.sil'), ctor, SILVERC_ZK).script).toString('hex');
 }
 
 /**
