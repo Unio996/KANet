@@ -90,3 +90,27 @@
 - 表 1/2/3 数据：（复盘时填，取本周真实事件，重点包含：/start 精准继承事故、SQLite 时间戳 bug 两次独立复发、lv3rz/k3cnf/dyljb 三场结算的 DB-lag 系列问题、J2 孤儿脚本冲突事件）
 - 本轮升级/合并/降载决定：（复盘时填）
 - 下一轮待办：（复盘时填）
+
+#### 素材 pre-fill（Bettor 2026-07-08 卡4·只收集素材，判定复盘时做，出处均在 COORD-LEDGER 对应条目）
+
+**A. 复发类（表 1 候选行，7/7~7/8 新增）**
+1. **共享进程重启撞车 ×3**（7/7 11:59 三方 launcher 各自独立跑 / 07:31 J2 先动手后报 / 08:29 J2 规范占坑=协议首次生效）——"先频道占坑再动共享进程"从口头(L1)走到行为改变，但同日复发 2 次后才生效。
+2. **stale pidfile 复发第 N 次**（Phase0 停栈时 kanet-stop 按过时 pidfile 漏杀真活 console 62756，KANet-UI 手动补杀）——已有 memory 记载(复发 2 次+)，仍停在 L1，符合"连续 2 轮复发→自动升级"触发条件。
+3. **J1 心跳纪律违反 ×2**（15:20 33min 静默触发应急线，实为埋头 infra 未报；T2b(ii) 期间第 2 回）——"长活 30-45min 一行进度"目前 L1；7/8 凌晨第 3 次窗口 J1 主动恢复（20:42Z 认领即声明心跳照办），可观察是否已自愈。
+4. **"genesis 烤错值"同族 ×2**：51.11KAS 出生即焊死（escape ms/s 单位错位+claim 缺失，未拦住=学费）→ mint ctor 槽位错置（NWT 审查拦在钱前=CRITICAL 拦截 2 号）。同坑第二次被流程挡住 = 新硬门（exit-path 矩阵 genesis 前+互异哨兵逐槽断言）初步生效的正面证据。
+5. **"注释声明 vs 运行时校验"**（fee_leaves 空数组 guard 只在注释声称，NWT 追问 J2 认账实修 405982e8）——与"编译不报错≠产物 byte 相同"同母题：口头/纸面保证不算数。
+
+**B. 拦截成功类（流程正面案例，判定"新硬门是否该固化"用）**
+- **HALT 51.11KAS 焊死拦截**（zk_close 广播前 Bettor 出题"钱怎么出来"→NWT 枚举 exit path→禁广播）→ 催生硬门"收真钱前必验 exit-path 矩阵(genesis 前)"。
+- **dust 先行价值实证**（gateTmplHash 旧值 bug 撞在 1KAS 玩具而非真池）。
+- **_i64LE landmine 当小时回本**（"便宜的 fail-closed 立即折入"被同日真实撞上验证）。
+- **Bettor 盲算命中**（3o6cs attestedWinner 落链前公开预测 winDir=1，predict-then-verify 零 confirmation bias）。
+- **json_extract THROW near-miss**（裸 json_extract 对畸形 JSON 直接 THROW 差点打崩全线结算 tick，DB copy 实测抓住→规则 54）——防线="DB copy 实测非 code review"。
+- **LIVE 事故 3h 闭环**（silverc binary in-place 覆盖→全线新押注中断→双 binary 按族 pin+versioned-builds 机制化根治）——事故本身是"无版本 pin"L1 缺失的代价，修复直接落到 L4 级（禁 in-place 覆盖）。
+
+**C. 方法论沉淀（档案化候选）**
+- "双人收敛 ≠ 已验证"（echo vs 消融反证，7/6 OP_PICK 根因误认事件）。
+- D-006"技术性不确定直接问 Bettor"当日两实证。
+- "链上烤死值是装配分歧的唯一裁判，禁互相猜拼法"（zk_handoff 三方收敛过程沉淀）。
+
+**D. 表 2 快照素材**：ANTI-PATTERNS.md 当前 54 条（规则 54 为本周新增 json_extract）；CLAUDE.md"必读"区编号混乱（两组 5/6/7 重号）本身是待修项；本周新增硬门若干（exit-path 矩阵/哨兵逐槽/versioned-builds）尚未逐条落 ANTI-PATTERNS 编号。
