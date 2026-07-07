@@ -18,12 +18,20 @@ import { computeBetsRoot } from './pool-payout-root.mjs';
 
 // ── ZK_GATE(J1 firm 16:50/16:52·gate-verify EXIT=0 实证·定版常量)──────────────
 // gate redeem = prefix(1B 0x20 = push32)‖ journal_hash(32B·per-settle 变)‖ suffix(800B)。
-// gate_tmpl_hash = blake2b(prefix‖suffix)(固定-per-image_id·烤进 CloseZk ctor·covenant 自省比对)。
+// gate_tmpl_hash = blake2b(prefix‖suffix)(固定-per-image_id·烤进 CloseZk ctor·covenant 自省比对·目前本文件内未被
+//   实际引用/校验,留待 zk_close 组装真正用到 CloseZk ctor 时接线,不在这次修法范围)。
 // prefix/suffix 的实字节 = builder 在建 close_attest_zk tx 时从 zk-sdk
 //   commit_to_groth16_with_fixed_journal(imageId, journalHash).finalize_with_proof(receipt) 取(作 witness·非烤)。
+// 🔴 修复(2026-07-07, Bettor 裁定 #afw8pg): imageId 之前是更早版本 guest 遗留的陈旧值(335cae6c...),既不等于
+// J1机器也不等于J2机器今天的真实编译产物——canonical 值 = c9918501...(J1机器自 2026-07-06 晚首次真实 groth16
+// proof 起持续沿用, 今天 3o6cs 真实 receipt 同款, 见 zk-payout-guest/proofs/3o6cs-attest-0a358fa0/3o6cs_receipt.summary.json)。
+// J2 机器今天独立编译同一份 guest 源码(sha256 逐字节相同)却产出不同 image_id(04be05f2...)——根因非源码差异,是
+// RISC0 image_id 对编译产物(含全部依赖树)敏感,而 Cargo.lock 被 .gitignore 排除 → 跨机 cargo resolve 未锁定依赖
+// 版本 → 编译产物不可复现。Phase2 补课项(挂账): 提交 J1 机器产出的 Cargo.lock(root+methods/guest 两份,канonical
+// 出证机那份, 不是 J2 的), 换 docker 固定镜像 build 达成真正可复现构建。
 const ZK_GATE = {
-  imageId: '335cae6c34c5d4049f92b8fd33da491de2a11d321cbaf5a543a0490977328c7d',     // 结算 guest image_id(改 guest=改此=新 covenant)
-  gateTmplHash: 'b9d56ce469c375c139bae90f5dd409d79807b81c69027a3d44c31bd6a74bdbd5', // blake2b(prefix‖suffix)·烤 CloseZk ctor
+  imageId: 'c9918501d90bf0aeaaf7970816078c81e8286c08293ccf388e87a7cab023ce30',     // 结算 guest image_id(改 guest=改此=新 covenant)
+  gateTmplHash: 'b9d56ce469c375c139bae90f5dd409d79807b81c69027a3d44c31bd6a74bdbd5', // blake2b(prefix‖suffix)·烤 CloseZk ctor(未接线,见上)
 };
 
 // ── INTERFACE STUB(proveZkClose·契约已 firm·transport 待定·见下）─────────────────
