@@ -1,4 +1,6 @@
 .DS_Store
-Cargo.lock
-methods/guest/Cargo.lock
 target/
+# Cargo.lock 与 methods/guest/Cargo.lock 故意提交(2026-07-07 Bettor 裁定)——RISC0 guest 的 image_id 是编译产物
+# (guest ELF)的加密承诺,依赖树任何一个包版本漂移都会导致不同机器编不出同一个 image_id(J2 新机器实测复现失败的
+# 根因)。这两份 lock 是 J1 机器产出 c9918501...(canonical,7/6 晚起沿用至今)的那份,不是随便哪台机器的 resolve
+# 结果——别在其他机器上重新 cargo update/换成本机 resolve 出的版本。
