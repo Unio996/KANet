@@ -180,6 +180,45 @@ export function _splicePayoutV2CloseRedeem(psv2RedeemHex, { newPayoutRootHex, ne
 }
 
 /**
+ * readPayoutShardV2AttestedState — T2b(ii) driver 侧读取入口(J1, Bettor 2026-07-07 15:53 分工裁定:
+ *   J1=attestedAtMs 读取路径/J2=anchor 重算+Σleaf 断言+ctor 组装, 接口契约见 closezk-v2-mint.mjs)。
+ *   从【已落链】的 close_attest_v2 continuation redeem(closed 已被委员 5 签写成 1)原样读出 5 个
+ *   committee-attested 字段, 喂给 compileCloseZkV2Redeem 组装 CloseZkV2 genesis ctor。
+ *   复用跟 _splicePayoutV2CloseRedeem 完全同一套 offset 常量(单一真值, 不新开一份 offset 表——
+ *   今晚已经因为"沿用旧值/新开一套映射"同形状 bug 连撞两次, 这里直接读写共享同一份常量从根避免)。
+ *   §4 硬门②(Bettor 钦定, compileCloseZkV2Redeem JSDoc 同一句话): 读出即原值烤入, 本函数内绝不做
+ *   任何 *1000//1000 等单位转换——attestedAtMs 就是 PayoutShardV2 committee 签名时用的同一个毫秒值。
+ * @param {string} psv2RedeemHex 已落链的 PayoutShardV2 continuation redeem hex
+ * @returns {{consolidatedPool:bigint, closed:number, payoutRootHex:string, attestedWinner:number,
+ *   attestedAtMs:number, betsRootHex:string, refundRootHex:string}}
+ */
+export function readPayoutShardV2AttestedState(psv2RedeemHex) {
+  const b = Buffer.from(String(psv2RedeemHex || ''), 'hex');
+  if (b.length < _PSV2_STATE_END_OFF) {
+    throw new Error(`readPayoutShardV2AttestedState: redeem 太短 (${b.length}B, 需 ≥ ${_PSV2_STATE_END_OFF}) — 非 PayoutShardV2 redeem?`);
+  }
+  const consolidatedPool = b.readBigInt64LE(_PS_STATE_START + 1);   // skip PUSH8 len byte, 同 _readPsConsolidatedPool 约定
+  const closed = Number(b.readBigInt64LE(_PSV2_CLOSED_OFF + 1));
+  if (closed !== 1) {
+    // 只服务 close_attest_v2 刚落链、zk_handoff 还没执行的窗口——closed!=1 说明还没 attest 或状态已经往后走了,
+    // 喂旧/超前的值给 mint 会重蹈"沿用不该用的值"同形状坑, 拒绝而非猜测调用方意图。
+    throw new Error(`readPayoutShardV2AttestedState: closed=${closed} != 1 — close_attest_v2 还没落链, 或状态已经推进(不该再读这份 redeem 喂 mint), 拒绝读取`);
+  }
+  const payoutRootHex = b.slice(_PSV2_PAYOUTROOT_OFF + 1, _PSV2_PAYOUTROOT_OFF + 1 + 32).toString('hex');
+  const attestedWinner = Number(b.readBigInt64LE(_PSV2_ATTESTEDWINNER_OFF + 1));
+  const attestedAtMs = Number(b.readBigInt64LE(_PSV2_ATTESTEDATMS_OFF + 1));   // §4 硬门②: 原样返回, 调用方不得再转换
+  const betsRootHex = b.slice(_PSV2_BETSROOT_OFF + 1, _PSV2_BETSROOT_OFF + 1 + 32).toString('hex');
+  const refundRootHex = b.slice(_PSV2_REFUNDROOT_OFF + 1, _PSV2_REFUNDROOT_OFF + 1 + 32).toString('hex');
+  if (attestedWinner !== 0 && attestedWinner !== 1) {
+    throw new Error(`readPayoutShardV2AttestedState: attestedWinner=${attestedWinner} 不是 0/1 — 解码位置很可能错位(offset 常量跟实际 redeem 布局不匹配), 拒绝往下传递可疑值`);
+  }
+  if (!Number.isFinite(attestedAtMs) || attestedAtMs < _ATTESTED_AT_MS_MIN || attestedAtMs >= _ATTESTED_AT_MS_MAX) {
+    throw new Error(`readPayoutShardV2AttestedState: attestedAtMs=${attestedAtMs} 越界 [${_ATTESTED_AT_MS_MIN},${_ATTESTED_AT_MS_MAX}) — 同 W2 committee bounds guard 口径, 拒绝往下传递`);
+  }
+  return { consolidatedPool, closed, payoutRootHex, attestedWinner, attestedAtMs, betsRootHex, refundRootHex };
+}
+
+/**
  * D2-V2 (W2): 验【被签 tx 实际 commit 的全部 5 个新/改值】(payoutRoot + attestedWinner + betsRoot + refundRoot +
  * attestedAtMs), 不是 caller 旁路标量。跟 V1 verifyClosePayoutRootBinding 同一防线, 扩展到 V2 新增字段
  * (D2 草稿 §"D2-style tx-binding 扩展": 逐个反解比对, 任一不匹配 fail-closed)。

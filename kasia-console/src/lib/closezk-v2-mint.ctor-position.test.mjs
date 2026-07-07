@@ -7,9 +7,9 @@
 //   This script differentially recompiles with one field swapped at a time and asserts ONLY that field's
 //   bytes change in the output (byte-for-byte containment check, not just "didn't throw").
 //
-// Run: cd kasia-console && node scratch/_j2_closezk_v2_mint_ctor_position_test.mjs
+// Run: cd kasia-console && node src/lib/closezk-v2-mint.ctor-position.test.mjs
 
-import { compileCloseZkV2Redeem } from '../src/lib/closezk-v2-mint.mjs';
+import { compileCloseZkV2Redeem } from './closezk-v2-mint.mjs';
 
 let fails = 0;
 const ok = (cond, label) => { if (cond) console.log(`  ✅ ${label}`); else { console.error(`  ❌ ${label}`); fails++; } };
