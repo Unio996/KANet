@@ -43,25 +43,32 @@ export function assertPayoutLeavesConserved(leaves, consolidatedPool) {
 }
 
 /**
- * compileCloseZkV2Redeem — 装配 CloseZkV2 genesis ctor(25 参数, 精确对照 CloseZkV2.sil:13-24)。
- *   closeZkTmplAnchor 由调用方传入(必须是 computeCloseZkTmplAnchor(CLOSEZK_V2_SIL, gateTmplHash) 当次算出的新值,
- *   §4 硬门⑥——本函数不自己算 anchor, 强制调用方走这条路径, 防止有人手滑传个缓存的旧 repro4 anchor 进来)。
+ * compileCloseZkV2Redeem — 装配 CloseZkV2 genesis ctor(精确对照 CloseZkV2.sil:13-24)。
+ *
+ * 🔴 修复(NWT 15:59 CRITICAL BLOCKING 发现, 2026-07-07): 上一版此函数把 closeZkTmplAnchor 错误地塞进了
+ *   ctor 第一个槽(应为 gateTmplHash), gateTmplHash 参数被静默丢弃——铸出的市场 zk_close 会永久失败
+ *   (require(blake2b(gatePrefix+gateSuffix)==gateTmplHash) 验的是错值, 真实 gate 永远对不上, closed 卡死
+ *   在 1, claim 永远够不着, 51.11KAS 那种"双出口出生皆断"同类事故)。根因: closeZkTmplAnchor 根本不是
+ *   CloseZkV2 自己的 ctor 字段——它是 PayoutShardV2 的 ctor 字段(§2.1, `docs/2026-07-07-zk-genesis-mint-
+ *   pipeline-design.md`), 由 PayoutShardV2 的 zk_handoff entry 在【花费时】witness 验证目标 CloseZkV2 的
+ *   template prefix/suffix 是否匹配这个锚——不是 CloseZkV2 自身编译时需要的输入。修复=从本函数签名彻底删除
+ *   这个参数, 不再让调用方有机会传错值进来(比"多加一层校验"更彻底: 消除攻击面而非拦截)。
+ *
  * @param {object} o
- * @param {string} o.gateTmplHash 32B hex
+ * @param {string} o.gateTmplHash 32B hex(CloseZkV2 自己的 ctor 字段, zk_close entry 验 gate 用)
  * @param {string} o.betsRootBaked 32B hex(genesis 时 W2 committee-attest 已产出, hash-chain 根, zk_close journalHash 用)
  * @param {string} o.refundRootBaked 32B hex(genesis 时委员 attest 一并产出, escape_claim 用)
  * @param {number} o.attestedAtMs J1 那段 state-splice 读出的原值, 严禁做任何 *1000//1000 转换(§4 硬门②)
  * @param {number} o.attestedWinner 0|1, 委员判定值
- * @param {string} o.closeZkTmplAnchor 32B hex, 必须是对 CloseZkV2.sil 当次编译产物重算的值
  * @param {number|string} o.consolidatedPool
  * @returns {string} compiled redeem hex
  */
-export function compileCloseZkV2Redeem({ gateTmplHash, betsRootBaked, refundRootBaked, attestedAtMs, attestedWinner, closeZkTmplAnchor, consolidatedPool }) {
-  if (!/^[0-9a-f]{64}$/i.test(String(closeZkTmplAnchor || ''))) {
-    throw new Error('compileCloseZkV2Redeem: closeZkTmplAnchor 必须是 32B hex — 调用方须先跑 computeCloseZkTmplAnchor(CLOSEZK_V2_SIL, gateTmplHash), 不接受省略/复用旧值');
+export function compileCloseZkV2Redeem({ gateTmplHash, betsRootBaked, refundRootBaked, attestedAtMs, attestedWinner, consolidatedPool }) {
+  if (!/^[0-9a-f]{64}$/i.test(String(gateTmplHash || ''))) {
+    throw new Error('compileCloseZkV2Redeem: gateTmplHash 必须是 32B hex');
   }
   const ctor = [
-    ctorBytes32(closeZkTmplAnchor), ctorBytes32(betsRootBaked), ctorBytes32(refundRootBaked),
+    ctorBytes32(gateTmplHash), ctorBytes32(betsRootBaked), ctorBytes32(refundRootBaked),
     ctorInt(Number(attestedAtMs)),      // §4 硬门②: 原值直接烤入, 调用方保证零转换
     ctorInt(Number(attestedWinner)),
     ctorInt(1),                          // init_closed: 恒为 1(§4 硬门①, closed==0 是理论态, mint 只产 closed==1 实例)
