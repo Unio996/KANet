@@ -977,6 +977,25 @@ function checkDocPath() {
       `保留 docs/ 一份·删其余.`,
       fps[0], 0);
   }
+
+  // Rule 3 (R-DOC-STATUS, WARN, 2026-07-07 卡3 KANet-UI+Bettor+NWT): date-prefix 设计文档缺 Status 头
+  // → 亮灯不 block(现存 123/129 篇无头, hard-block 会瘫掉几乎所有 docs/ commit)。
+  // 目的同 D-004 知识分层:接位者一眼看清这篇是 CURRENT/SUPERSEDED/ARCHIVED,不用翻 ledger 猜。
+  // 只查 docs/ 根(不含子目录,archived/等子目录本身已经是状态声明,不强制加头)。
+  const statusRe = /^\s*>\s*\*\*Status\*\*\s*:\s*(CURRENT|SUPERSEDED|ARCHIVED)/mi;
+  for (const fp of mdFiles) {
+    const name = path.basename(fp);
+    if (!datePrefix.test(name)) continue;
+    if (path.dirname(fp) !== DOCS_ROOT) continue;  // 只查 docs/ 根, 子目录已分类不重复要求
+    let head;
+    try { head = fs.readFileSync(fp, 'utf8').slice(0, 2000); } catch { continue; }
+    if (!statusRe.test(head)) {
+      warn('R-DOC-STATUS',
+        `设计文档 "${name}" 缺 Status 头(> **Status**: CURRENT|SUPERSEDED|ARCHIVED,标题下方几行内). ` +
+        `接位者翻 docs/ 时无法一眼判断这篇还作不作数. 加一行, 见任意近期文档示例.`,
+        fp, 0);
+    }
+  }
 }
 
 // ── 跑 ──
