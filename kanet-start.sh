@@ -198,10 +198,17 @@ if [ -f "$WS_PROXY_SCRIPT" ]; then
 fi
 
 # ── llama-server (本地推理引擎) ──────────────────────────────────────────────
-LLAMA_SERVER="$KANET_ROOT/tools/llama-server/llama-server.exe"
+# LLAMA_SERVER_PATH: host-specific override (= 同 LLAMA_MODEL_PATH 既有先例, kanet.env 里配)。
+# 2026-07-07 事故: 这台机器 llama-server.exe 实装在 C:/KANet/tools/llama-server/, 跟默认
+# $KANET_ROOT/tools/... 不一致, 重启后 [ -f ] 判假静默跳过整个启动块, 无任何 WARN, 只有肉眼盯 UI 才发现。
+LLAMA_SERVER="${LLAMA_SERVER_PATH:-$KANET_ROOT/tools/llama-server/llama-server.exe}"
 LLAMA_MODEL="${LLAMA_MODEL_PATH:-$KANET_ROOT/models/Qwythos-9B-Claude-Mythos-5-1M-Q4_K_M.gguf}"
 LLAMA_PORT=8000
 LLAMA_LOG="$LOG_DIR/llama-server.log"
+
+if [ ! -f "$LLAMA_SERVER" ] || [ ! -f "$LLAMA_MODEL" ]; then
+  warn "llama-server 跳过: exe=$LLAMA_SERVER $([ -f "$LLAMA_SERVER" ] && echo 存在 || echo 缺失), model=$LLAMA_MODEL $([ -f "$LLAMA_MODEL" ] && echo 存在 || echo 缺失) — 本机若确实有 GPU 推理机, 检查 kanet.env 的 LLAMA_SERVER_PATH/LLAMA_MODEL_PATH"
+fi
 
 if [ -f "$LLAMA_SERVER" ] && [ -f "$LLAMA_MODEL" ]; then
   echo ""
@@ -211,7 +218,9 @@ if [ -f "$LLAMA_SERVER" ] && [ -f "$LLAMA_MODEL" ]; then
   else
     info "启动 llama-server (Qwythos-9B, RTX 5090)..."
     > "$LLAMA_LOG"
-    (cd "$KANET_ROOT/tools/llama-server" && ./llama-server.exe \
+    # cd 目标必须跟 LLAMA_SERVER 本身一起走 override (2026-07-07 回归: 之前这行硬编码默认路径,
+    # LLAMA_SERVER_PATH 覆盖后 exe 路径对了但 cd 还是走旧默认值, 目录不存在直接炸)。
+    (cd "$(dirname "$LLAMA_SERVER")" && "./$(basename "$LLAMA_SERVER")" \
       --model "$LLAMA_MODEL" \
       --host 0.0.0.0 --port $LLAMA_PORT \
       --n-gpu-layers 99 --ctx-size 1048576 \
@@ -338,6 +347,19 @@ elif [ -f "$KANET_ROOT/scripts/channel-bridge.mjs" ]; then
   CH_BRIDGE_PID=$!
   echo "$CH_BRIDGE_PID" > "$PID_DIR/channel-bridge.pid"
   ok "channel-bridge 就绪  (PID $CH_BRIDGE_PID, 7 channels)"
+fi
+
+# owner-bot — Owner 专属 dev-coord 远程指挥 bot (跟押注用的 broker bot 分离, 独立 token)。
+# 2026-07-07 事故: _launch_owner_bot.mjs 头部注释早就说"kanet-start.sh 能无条件拉起它", 但从未真接线,
+# 今天几次重启都没人补起来导致 Owner 的 dev-coord bot 用不了。脚本自身 no-op-safe (OWNER_BOT_TOKEN 未
+# 设时打日志退出, 不崩), 幂等检查跟 channel-bridge 同款。
+if proc_running "_launch_owner_bot\.mjs"; then
+  ok "owner-bot 已在运行"
+elif [ -f "$CONSOLE_DIR/_launch_owner_bot.mjs" ]; then
+  (cd "$CONSOLE_DIR" && node _launch_owner_bot.mjs > "$LOG_DIR/owner-bot.log" 2>&1) &
+  OWNER_BOT_PID=$!
+  echo "$OWNER_BOT_PID" > "$PID_DIR/owner-bot.pid"
+  ok "owner-bot 就绪  (PID $OWNER_BOT_PID, no-op 若 OWNER_BOT_TOKEN 未配置)"
 fi
 
 # test-cron — 定时跑 test-framework, 失败 broadcast dev-coord (Owner 钦定 4 台阶 #4)
