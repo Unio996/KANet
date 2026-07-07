@@ -10,6 +10,12 @@
 
 ## 🟢 fresh 接位(2026-07-07·Owner 令全队重启,接昨晚 20:41 收官)
 > **背景**: 昨晚 escapeRefund 全线闭环收官后,团队三方(Bettor/J2/NWT)自评 session 过长、独立收敛一致建议重启,Owner 20:38 拍板"我会给你们整个重启"。J1 满月恢复归队。
+
+### ✅ Phase1 前半:整机 reboot 后 live 栈恢复 GREEN(2026-07-07 11:54-12:05 本地·Bettor fresh 接位执行+记账)
+- **恢复序(照 checkpoint 计划+memory SOP)**: ①kaspad detached 拉起(PID 21176,canonical 命令含 `--enable-unsynced-mining` 命门 flag)→ ②挖矿 watchdog detached(`tn12-mining-watchdog.ps1`,bridge 内置 CPU 2 线程),BLOCK ACCEPTED+confirmed BLUE,isSynced=true,DAA 54894671 推进 → ③`bash -lc kanet-start.sh` detached → console :3200 UP,29 relay 挂新 PID(J2 树杀验证无孤儿),settle daemon 自启。
+- **⚠ 三方 launcher 撞车(教训·retro 素材)**: Bettor/J2/KANet-UI 三个 fresh 会话在 11:59-12:00 各自独立跑了 kanet-start.sh(都没先核对频道认领)——脚本"杀旧起新"设计让终态收敛到单 console(PID 7248)无损害,副作用 test-cron 双开(Bettor 杀旧留新 32004)。**教训=共享进程生命周期操作必须先频道认领再动手**(与 Phase0 备份认领同款,KANet-UI 主动透明报告)。
+- **watch 项(非阻塞)**: ①x6ll8 一笔 register confirm 在重启窗口输 double-spend race(mempool 收但 UTXO 未落,fail-closed 未推进状态)——需确认用户资金侧无影响;②settle daemon 对深过期老 ripe 盘(deadlineDaa 比 tip 深 >250k)`getBlockAtDaa MAX_WALK=250000 耗尽` throw → fail-closed skip 不动钱(54-3hipq/64-7rztt/82-i044k),无资损但占 tick 吞吐,J2 settler 域评估(跳过分类 or 加 deep-walk);③FaucetRelay-tn-2 `RuntimeError: unreachable` = 已知 294 万 UTXO 冻结地址噪音;④llama-server 本机无 binary/model,脚本按设计跳过(qwen-worker 相应跳过)。
+- **Phase1 后半(装机)**: J2 认领推进——Ubuntu `wsl --import` 直接进 D 盘(C 盘仅 19.3GB 硬坑)+Docker Desktop(data-root 指 D)+RISC0;交互步骤(installer GUI/WSL 首用户)喊 Owner 配合。KANet-UI/Bettor 不并行动装机。
 - **Bettor fresh 接位(2026-07-07)**: 已读 DECISIONS(D-001~D-005)+本 ledger+频道尾部+git(HEAD `7cdf09a7`),状态无漂移。频道 Monitor 已设,接位广播已发(#9qfa1p),等 J1/J2/NWT/KANet-UI fresh 回执+查资产硬门报告。
 - **当前主线(ZK 结算生产化剩余三项,承接昨晚收官口径)**:
   1. **②生产 relay handler**(J1 域): `unlockBshardZkClose`——prove+gate+2-input build+broadcast,包装昨晚已验证的真实流程。
