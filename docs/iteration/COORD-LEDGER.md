@@ -1043,4 +1043,40 @@ owner=NWT(审计)+ J2(①②实现+边缘case分析)+ KANet-UI(settle_failed 告
 
 ## 归档(已收敛旧线,留索引)
 - **scale-test backend-20**(2026-06-10):干净 demonstrate 20 并发 settle,框架 §10.2/§9.3 活案例。已收敛。
+
+---
+
+## 卡2/T2b(i):close_attest_v2 自治接线 LANDED + zk_continuation schema 定稿(2026-07-07 晚·J2 主·NWT 审)
+
+### 背景
+Owner 钦定"ZK 装配进生产线"主线升格后,Bettor 派工四卡,J2 领卡2(close_attest 自治接线)+ 自报 W3/W5/kill switch 现状 + 顺带发现缺口 A(见下)。
+
+### 卡2 LANDED(commit `a43d526c`,2 文件,已 push)
+- `bshard-close-transport.mjs`:①`publishCloseRequestV2` 新增 `closeInputs` 字段(submit 阶段必需, 禁止重新推导, 保证 submit 广播的 tx 跟委员 enforce 过 hash 的是同一笔)②`clearCloseRequest` 改通用函数, 同时清 V1(`bshard_close_request`)/V2(`bshard_close_request_v2`)两个 key(NWT 卡2审时抓出, 之前只清 V1)。
+- `bshard-close-voter.js`:①`startBshardCloseVoterV2Cron()` 把已跑通(今晚 0a358fa0 落链用的同一套)`bshardCloseVoterV2Tick` 挂进持续 cron, kill switch `BSHARD_CLOSE_VOTER_V2_ENABLED`(默认 OFF)②`buildCommitteeWitness`/`computeCommitteePkHash`(纯函数, 从今晚驱动脚本 `_j2_3o6cs_close_attest_v2.mjs` 步骤8 逐行抽出, 非重新发明)+ `submitCloseAttestV2`(settler 侧编排:collect sigs → 建 witness → 调已注册的 relay 命令 `bshard_close_attest_v2` → 确认 landed 才推进 status)+ `bshardCloseSubmitV2Tick` + cron, kill switch `BSHARD_CLOSE_SUBMIT_V2_ENABLED`(默认 OFF)。running mutex 防并发, NO TX NO STATE(未 landed 不清 request/不推进 status)。
+- **offline byte-exact test**(`kasia-console/scratch/_j2_card2_submit_v2_byteexact_test.mjs`, gitignored):用 3o6cs 真实 0a358fa0 落链数据(5 委员真实 pks + 5 笔真实 chain_events 签名)做 fixture, 10/10 断言 PASS(witness 顺序/每 slot sig byte-exact/idx/siblings_hex 全部跟真实数据吻合, committeePkHash 纯函数确定性验证, submitCloseAttestV2 对缺 closeInputs 的历史数据 fail-closed 拒绝)。lint-kanet 0 error。
+- **NWT tree-diff 终审**(commit 前直接读 working tree, 同今天 a3ddd4cf 流程):①②GREEN;③(`bshardCloseSubmitV2Tick`)抓到 1 个真问题——broadcast 成功拿到 txId 后, 若 30s×15 次 landed-check 窗口内未确认(可能只是 RPC 瞬时延迟 false-negative), txId 未持久化, market 留在 `collecting_sigs`, 下次 tick 会重新走 collect+submit 全流程(=**又提交一次**, 不是幂等重查)。若第一笔已真落链, 第二笔会因 UTXO 已花安全失败, 但 market 会永久卡死在 `collecting_sigs`(链上其实已 attest 成功, 无人发现)。**不阻今晚 commit**(kill switch OFF=零运行时风险), 但**必须在 `BSHARD_CLOSE_SUBMIT_V2_ENABLED=1` 真上 live e2e 前修完**——修法: broadcast 成功立刻写 `bshard_close_submit_v2_pending_txid` 进 metadata, 下次 tick 先查这个具体 txId 状态, 不重新走全流程。owner=J2, reviewer=NWT。
+- Bettor 裁定: commit 先行(kill switch 全 OFF + 10/10 byte-exact test + lint 0 error 证据在先), NWT pull 后树上终审 finding 走 follow-up commit 修, 不 revert 流程。
+
+### W5(`dispatchUnlockZkClose` daemon hook)重新定性 → 并入 T2b(Bettor 批准)
+J2 读码坐实(`kasia-relay/src/lib/p2sh.mjs:2140` `unlockBshardZkClose` 真实签名 vs `zk-close-builder.mjs:221-224` `ctx.dispatchUnlockZkClose` 调用点):真 relay handler 需要 `cmd.inputs.gate`(带真实 Groth16 proof 的 UTXO)+ `cmd.witness.guest_payout_root_hex`, 但当前 `zkClosePhase2` 的 ctx 调用点只传 `{marketId, orderedBets, betsRoot, continuationOutpoint, attestedWinner}`, 完全没有 gate/proof/guestPayoutRoot 的来源——**不是"接个 stub"能解决的小接线, 是缺口 A(genesis-mint/proving 管线不存在)同一个洞的另一面**。Bettor 认可判断, W5 从"顺手接"移入 T2b 范围(proving 管线→gate/receipt→dispatch hook 一体), owner 仍 J2, 实现节奏同 T2b(等卡1 CloseZk claim-complete `.sil` 设计 GREEN 后动工)。BOM 更新: ③④合并, 总件数 6→5, 仍无未知件。
+
+### T2b(i) `zk_continuation` metadata schema 定稿(J1/J2 接口契约, NWT GREEN)
+底子 = 昨晚 `docs/2026-07-07-zk-genesis-mint-pipeline-design.md` §4 原稿 8 基础字段不变(`outpoint`/`redeemHex`/`valueSompi`/`attestedWinner`/`attestedAtMs`/`mintedAt`/`sourceCloseAttestTxid`/`sourceZkHandoffTxid`), 新增 `proving` 子对象覆盖 W5 并入后缺的 gate/proof/guestPayoutRoot:
+
+```jsonc
+zk_continuation.proving = {
+  status: 'pending'|'proving'|'ready'|'failed',   // 分阶段状态机, zkClosePhase2 只在 ready 才敢调 dispatchUnlockZkClose(取代现在单一 null/non-null 判断)
+  guestPayoutRootHex: null|string,   // guest RISC0 算出的 pari-mutuel payoutRoot, 喂 unlockBshardZkClose witness.guest_payout_root_hex(p2sh.mjs:2159 字段名照抄, 非新起名)
+  journalHash: null|string,          // computeJournalHash(betsRoot,payoutRoot,winner) 复用 zk-close-builder.mjs 既有函数
+  imageId: null|string,               // RISC0 guest image id(今天验证过的 c9918501...)
+  gate: null|{ address, outpointTxid, index, fundedAtMs },   // gate UTXO 位置, 字段名同今天 `_j2_real_gate_data.json`(gateAddr→address)
+  provingError: null|string,          // NWT 建议①: failed 时记原因, 免得 daemon 只知道'挂了'要翻log(今晚 daemon audit 那几条同款教训)
+}
+```
+
+- **mint 跟 proving 是两个独立异步阶段**(mint 可以先于 proving 完成, 今晚实际发生过的时序, 非假设) — zk_handoff LAND 后先写 8 基础字段(`proving` 缺省 `{status:'pending', ...null}`), proving job 跑完再补 `proving` 整体。
+- **原子性**(NWT 建议②, J2 确认): `proving` 整体是单条 SQLite UPDATE 写入 metadata JSON(同 `publishCloseRequestV2` 模式), `status='ready'` 落地那次必然同时带着 `guestPayoutRootHex`/`journalHash`/`gate`, 不会出现 `ready` 但 `gate` 还是 `null` 的中间态。
+- **解耦确认**(NWT): 不需要等卡1(J1 域 = covenant 逻辑本身, claim entry 怎么验 merkle/怎么消费)现在即可定稿——但卡1 落地后大概率还要在此 schema 上再加一个子对象(类似 proving 这次的增量做法), 记预期, 非现在做。
+- owner=J2(设计+落码待 T2b(ii))、reviewer=NWT(GREEN)、协调=Bettor。
 - **tg-bot-web-user-e2e**(§14 首个受控运行):演化为线 3 可玩 demo。
