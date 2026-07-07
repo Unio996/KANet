@@ -56,12 +56,17 @@ async function proveZkClose({ bets, winner, feeConfig, marketId }, opts = {}) {
   return { receiptGroth16, journalHash, betsRoot, payoutRoot, imageId };
 }
 
-// ── 稳定层: journal_hash(外层 sha256·命门字节·J1 RISC0 framing 锁后核对)──────────
-// journal_hash = sha256(bets_root ‖ payout_root ‖ attested_winner)  (RISC0 journal digest·非 blake2b)
-// ⚠ 精确 framing(三个 32B 拼接序 + 是否有 RISC0 envelope 前缀)= J1 RISC0 framing 锁后必三层 byte-equal 核。
+// ── 稳定层: journal_hash(外层 sha256·命门字节·2026-07-07 J2/NWT/Bettor 用 3o6cs 真实guest输出定框架)──────────
+// journal_hash = sha256(bets_root(32B) ‖ attested_winner(1B) ‖ payout_root(32B))  (RISC0 journal digest·raw sha256非blake2b)
+// 🔴 修复(2026-07-07, 之前 betsRoot‖payoutRoot‖winner 顺序错——NWT 用3o6cs真实guest输出核对时发现算不出实
+// journal_digest, 拦下命门②误报): 框架从 zk-payout-guest/host/src/main.rs 源码逐字节读出(非凑数字):
+// `journal_bytes[0..32]=bets_root`, `journal_bytes[32]=attested_winner`, `journal_bytes[33..65]=payout_root`,
+// `journal_digest = risc0_zkvm::sha::Impl::hash_bytes(journal_bytes)`(= 标准 raw sha256, 无 RISC0 envelope/padding)。
+// 双证:①源码字节切片顺序 ②用3o6cs真实值(betsRoot=9a92dcd1.../winner=1/payoutRoot=7674d6c2...)算出的sha256跟J1真实
+// guest 输出的journal_digest(50c26d35...)逐字节一致。
 export function computeJournalHash(betsRootHex, payoutRootHex, attestedWinner) {
-  const winnerByte = Buffer.from([attestedWinner & 0xff]); // ⚠ winner 字节宽/位置待 J1 framing 确认(暂 1B)
-  const pre = Buffer.concat([Buffer.from(betsRootHex, 'hex'), Buffer.from(payoutRootHex, 'hex'), winnerByte]);
+  const winnerByte = Buffer.from([attestedWinner & 0xff]);
+  const pre = Buffer.concat([Buffer.from(betsRootHex, 'hex'), winnerByte, Buffer.from(payoutRootHex, 'hex')]);
   return createHash('sha256').update(pre).digest('hex');
 }
 
