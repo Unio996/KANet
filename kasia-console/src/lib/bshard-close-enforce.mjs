@@ -416,9 +416,12 @@ export async function enforceCloseAttestV2(signRequest, ctx) {
   }
 
   // ── new_refundRoot: 同批 bettor 数据(pk+stake=自己的全额退款), 复用 payoutRoot 的 depth-10 merkle 公式(refund=100%退) ──
+  //   ⚠ 自查补(J2, 同 betsRoot 一样的跨节点分叉风险): payoutRoot 是 position-aware merkle(叶子落哪个 index 由数组序决定),
+  //   非 hash-chain,但序依然影响结果——必须用同一份 canonicalBetOrder(链锚序), 不能用 ctx.loadBettors 的本地/DB 返回序
+  //   (差点在这里重蹈 betsRoot 已修过的同一个坑, 落码时自己抓到, 复用上面已算好的 `ordered`)。
   let refundRootHex;
   try {
-    const winners = bettors.map(b => ({ pk: b.pk, amount: b.stake }));
+    const winners = ordered.map(b => ({ pk: b.pk, amount: b.stake }));
     refundRootHex = computeMerkleRoot(winners).toString('hex');
   } catch (e) {
     return { pass: false, reason: `W2: refundRoot 重算 fail (${e.message}) — 弃签(不猜)` };
