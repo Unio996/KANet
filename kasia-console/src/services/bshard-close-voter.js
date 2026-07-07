@@ -93,10 +93,16 @@ export function buildEnforceCtx(voter, voterPk, market) {
   const network = String(voter.address || '').startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
   const chainReader = createRelayChainReader(voter.id);
   const deadlineDaa = (market.deadline_daa != null && Number.isFinite(Number(market.deadline_daa))) ? Number(market.deadline_daa) : null;
+  // W2 blockhash_parity(J2 2026-07-07·Bettor 钉①): daemon 自己本地 market 行的 resolution_rule_spec, 供
+  //   enforceCloseAttestV2/enforceCloseAttest 核心链的 judge_type 分支读 target_daa —— 绝不能从 signRequest/
+  //   proposal 字段读(那是 settler 可控输入), 只信这个 daemon 自查的本地 DB 值(同 deadlineDaa 的信任级别)。
+  let resolutionRuleSpec = null;
+  try { resolutionRuleSpec = JSON.parse(market.resolution_rule_spec || '{}'); } catch { resolutionRuleSpec = null; }
   return {
     myOracleKeys: [String(voterPk).toLowerCase()],
     chainReader,
     deadlineDaa,
+    resolutionRuleSpec,
     db: sqlite,
     // lib passes the result straight into deriveCommitteeSeed(marketId, endBlockHash, root) → must return the HASH STRING.
     fetchEndBlockHashCanonical: async (reader, daa) => {

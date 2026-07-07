@@ -195,7 +195,8 @@ function verifyClosePayoutV2Binding({ txSafeJson, psv2RedeemHex, reDerivedRoot, 
  *
  * @returns {Promise<{pass:true, verdict, winningDirection, committee, bettors, reDerivedRoot}|{pass:false, reason}|{skip:true, reason}>}
  */
-async function _enforceCloseAttestCore(signRequest, ctx) {
+// test-only export (blockhash_parity 分支单测用, NWT/Bettor DoD): production 内部只经 enforceCloseAttest/V2 调用。
+export async function _enforceCloseAttestCore(signRequest, ctx) {
   const {
     market_id, predicate, proposed_evidence, psRedeemHex,
     committee_pk, broker_pk, introducer_pk = null, data_source_canonical = null,
@@ -220,24 +221,56 @@ async function _enforceCloseAttestCore(signRequest, ctx) {
   // chain-bound check (redeem 不可伪): daemon should also verify p2sh(psRedeemHex) == the signed PS input's
   //   on-chain address via ctx.rcOn check_utxo_landed (= 命门① 的链锚, 同今天手动流). [daemon ctx hook]
 
-  // 3. frozen_evidence 同源 (J1 lead) — verify the proposed snapshot against MY OWN canonical fetch.
-  //    ⚠ 载重一致性 (NWT inner-一致性的 fetch-面延伸, J1 12:59 实测): 命门① computeMarketCommit/judgeLine 用的是
-  //      【inner predicate {metric,op,operand}】(create-v07 pool.js:1183 烤的, 无 data_source_canonical), 但
-  //      verifyFrozenEvidence→fetchCanonicalEvidence 需 data_source_canonical 取源(它在 wrapper resolution_rule_spec
-  //      不在 inner)。∴ data_source_canonical 必【单独传】(daemon 从 market wrapper 取); commit/judge 用纯 inner
-  //      (匹配链上烤), fetch 用 inner+data_source 合并。否则: predicate 含 data_source 烤 commit→不符链上; 缺则 fetch 弃签。
-  const evidencePredicate = (data_source_canonical && !predicate?.data_source_canonical)
-    ? { ...predicate, data_source_canonical }
-    : predicate;   // 向后兼容: predicate 已含 data_source(旧/合并测试) 直接用
-  const ev = await verifyFrozenEvidence(evidencePredicate, proposed_evidence, ctx);
-  if (!ev.match) return { pass: false, reason: `frozen_evidence: ${ev.reason}` };
+  // 3-4. winningSide 判定 — 按 judge_type 分两条路径 (W2 blockhash_parity 分支, J2 2026-07-07, Bettor 批):
+  //   ⚠ 这不是新判定权——bshard-settle-daemon.mjs judgeWinDir 的 driver-side 旧路径早就有 blockhash_parity 分支,
+  //   本次只是把它接进【自治委员验证链】(V1 从设计起从未覆盖这个 judge_type, 3o6cs 是第一个走到这里的市场)。
+  let verdict, winningDirection;
+  const judgeType = ctx.resolutionRuleSpec?.judge_type;
+  if (judgeType === 'blockhash_parity') {
+    // 纯链上区块哈希奇偶——委员各自读自己链, 零外部信任面(比 HTTP evidence 路径更干净的 verify-value-source)。
+    // 🔴 钉①(Bettor 2026-07-07): target_daa 只从 ctx.resolutionRuleSpec 读(daemon 自己本地 market 行, 非 signRequest/
+    //   proposal 字段)——否则 settler 换 target_daa 就能换判定结果, 3o6cs 的 predicate 本身是 null(resolution_predicate
+    //   未设置, 命门①已核对匹配链上烤值), target_daa 天然没有 hash-bind 载体, daemon 自己的可信本地读是唯一防线。
+    const targetDaa = Number(ctx.resolutionRuleSpec.target_daa);
+    if (!Number.isFinite(targetDaa) || targetDaa <= 0) {
+      return { pass: false, reason: `blockhash_parity: 非法 target_daa (来自本地 market.resolution_rule_spec, 弃签)` };
+    }
+    if (typeof ctx.chainReader?.getCurrentDaaScore !== 'function' || typeof ctx.chainReader?.getBlockAtDaa !== 'function') {
+      return { pass: false, reason: 'blockhash_parity: ctx.chainReader 缺 getCurrentDaaScore/getBlockAtDaa (弃签)' };
+    }
+    const curDaa = await ctx.chainReader.getCurrentDaaScore();
+    // 🔴 钉②(Bettor 2026-07-07): 未到期(cur_daa < target_daa) 必须拒签, 镜像 judgeWinDir 的 ABSTAIN throw——
+    //   不是默认放行, 任何人在市场到期前发起 close_request, 委员都必须拒(防抢跑判定)。
+    if (curDaa < targetDaa) {
+      return { pass: false, reason: `blockhash_parity 命门③: target DAA ${targetDaa} 未到 (当前 ${curDaa}) — 未到期拒签 (镜像 judgeWinDir ABSTAIN)` };
+    }
+    const { hash } = await ctx.chainReader.getBlockAtDaa(targetDaa);
+    const lastByte = parseInt(String(hash).slice(-2), 16);
+    if (!Number.isFinite(lastByte)) {
+      return { pass: false, reason: `blockhash_parity: 无法解析区块哈希末字节 ${String(hash).slice(0, 12)} (弃签)` };
+    }
+    winningDirection = lastByte % 2 === 0 ? 0 : 1;   // 偶→YES(0)/奇→NO(1), 跟 judgeWinDir/ESPN/polymarket 同一 value-mapping
+    verdict = winningDirection === 0 ? 'YES' : 'NO';
+  } else {
+    // 既有 HTTP evidence 路径(一字不改) — frozen_evidence 同源 (J1 lead) + judgeLine。
+    //    ⚠ 载重一致性 (NWT inner-一致性的 fetch-面延伸, J1 12:59 实测): 命门① computeMarketCommit/judgeLine 用的是
+    //      【inner predicate {metric,op,operand}】(create-v07 pool.js:1183 烤的, 无 data_source_canonical), 但
+    //      verifyFrozenEvidence→fetchCanonicalEvidence 需 data_source_canonical 取源(它在 wrapper resolution_rule_spec
+    //      不在 inner)。∴ data_source_canonical 必【单独传】(daemon 从 market wrapper 取); commit/judge 用纯 inner
+    //      (匹配链上烤), fetch 用 inner+data_source 合并。否则: predicate 含 data_source 烤 commit→不符链上; 缺则 fetch 弃签。
+    const evidencePredicate = (data_source_canonical && !predicate?.data_source_canonical)
+      ? { ...predicate, data_source_canonical }
+      : predicate;   // 向后兼容: predicate 已含 data_source(旧/合并测试) 直接用
+    const ev = await verifyFrozenEvidence(evidencePredicate, proposed_evidence, ctx);
+    if (!ev.match) return { pass: false, reason: `frozen_evidence: ${ev.reason}` };
 
-  // 4. 命门③ winningSide — judgeLine on MY OWN fetched evidence (not the proposed; defense against poison).
-  const verdict = judgeLine(predicate, ev.ownFetch);
-  if (verdict !== 'YES' && verdict !== 'NO') {
-    return { pass: false, reason: `judgeLine=${verdict} (abstain-not-guess: 字段不足/无法判, 弃签)` };
+    const v = judgeLine(predicate, ev.ownFetch);
+    if (v !== 'YES' && v !== 'NO') {
+      return { pass: false, reason: `judgeLine=${v} (abstain-not-guess: 字段不足/无法判, 弃签)` };
+    }
+    winningDirection = v === 'YES' ? 0 : 1;
+    verdict = v;
   }
-  const winningDirection = verdict === 'YES' ? 0 : 1;
 
   // 5. fix① committee chain-anchored re-derive (ZERO caller/DB trust) — DON'T trust signRequest.committeePks.
   //    seed = deriveCommitteeSeed(market_id, endBlockHash[自算], pool_merkle_root[链上读]); members verified ∈ root.
