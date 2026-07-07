@@ -98,7 +98,9 @@ payout_root(&leaves)
 
 **守恒链**:`Σ(winner payout leaves) == distributable`(整除余数已被 `payouts[0]` 吸收,精确无余)+ `Σ(fee leaves) == fee_sompi`(fee leaves 是直接传入的既定金额,非再分配)⟹ `Σ(payoutRootField 全部 leaf) == distributable + fee_sompi == pool == consolidated_pool`,**精确成立**,不是概率意义上"大概率对齐"。`payouts[0]`(拿 dust 的那个 winner)在 `payout_root()` 建树时数组下标 0,对应最终 `merkle_index == 0`——跟 J2 最初设想的"remainder 归 merkle_index 最小的 winner"规则**结果一致**,但权威规则来源是 guest 电路本身(main.rs:172-173),非本设计新提议。
 
-**§2.4 dust 边界分支因此成立**:只要 driver genesis-mint 时构造的 `payoutRootField` 真是这份 guest journal committed 的同一棵树(§4 硬门第⑤条新增断言保这一点),`consolidated_pool == payout` 精确成立必然发生在最后一个 claimant(不管顺序),不会有"永远走不到精确清零分支"的情形。
+**🔴 真实断裂分支(Bettor 15:33 独立源码核验,main.rs L152-156)**:上面"精确成立"的推导有一个前提没写出来——`fee_sompi` 的计算有两条路:`fee_leaves` 非空时直接取 `Σfee_leaves`(此时 L175 `leaves.extend(fee_leaves)` 把这些 leaf 真实放进树,守恒链成立);但**若调用方 `fee_leaves` 传空且 `fee_bps > 0`,`fee_sompi` 走 bps fallback(`pool * fee_bps / 10000`,整数截断)算出一个值从 `distributable` 里扣掉(L157),但 L175 `extend` 的是这个空的 `fee_leaves` = 没有任何 leaf 承载这笔 `fee_sompi`**——`Σ(payoutRootField 全部 leaf) == distributable == pool - fee_sompi < pool`,**fee 部分在 `closed==2` 永久无主(没有任何 merkle proof 能证明这笔钱归谁,claim 机制物理上够不到它)**。**结论:"Σleaf == pool 精确成立"只在(`fee_bps==0` 或 `fee_leaves` 显式非空提供)时为真,不是在任何输入组合下都成立的不变量。**
+
+**§2.4 dust 边界分支的成立前提因此收紧**:①`consolidated_pool == payout` 精确清零仍然会在"最后一个 claimant"发生(不管顺序),但**仅当 mint 时构造的树真实覆盖了 `pool` 全额**——若上游用了 bps-fallback 空 `fee_leaves`,树本身就先天不完整(少了 `fee_sompi` 那部分),claim 全部走完后会剩一个 `fee_sompi` 大小、没人能证明归属的 `closed==2` continuation,永久卡死(§3 closed==2 无逃生舱这条风险因此实际发生)。②因此 **§4 硬门第⑤条(driver 独立断言 `Σleaf == consolidated_pool`)不是防御性/锦上添花,是承重件**——它是唯一能在 genesis 前拦住"用了 bps-fallback 导致树先天不完整"这个真实断裂分支的检查点,必须 **BLOCKING**(断言失败 = 拒绝 mint,不是警告)且必须有对应测试用例(§4.1)。③**mint 政策二选一,推荐禁 bps-fallback**:genesis-mint driver 一律要求调用方显式提供完整 `fee_leaves`(哪怕金额为 0 也要显式传空数组走"零 fee 场景",不允许依赖 guest 内部的 bps 隐式计算路径)——这样从**输入层面直接消除**这个断裂分支的触发条件,比"事后用断言拦"更彻底(断言是最后一道防线,禁用触发条件是从根切断攻击面)。
 
 ### 2.4 新增 `claim` entrypoint(NWT checklist ③④⑤ 全部落地)
 
@@ -223,7 +225,9 @@ payout_root(&leaves)
 2. `attestedAtMs` 直接从 PayoutShardV2 close_attest state 读原值烤入,**不做任何单位转换**(genesis-mint driver 代码里如果出现 `*1000`/`/1000` 就是 bug,红队审必查)。
 3. `ESCAPE_GRACE_MS` 常量在真实市场 genesis 前必须由 Bettor/Owner 显式签字确认数值(本设计只修单位, 不重新论证时长——21600000ms=6h 仍是占位, 见 `_j2_closezk_repro4.sil` L67-69 原始占位说明)。
 4. genesis-mint 完成后,立刻(同一 review 窗口内)过一遍本文档 §3 exit-path 矩阵,确认这次具体市场的参数(尤其 `consolidated_pool`/`attestedAtMs`)没有引入新的单位/边界问题——**checklist 走一遍,不是"文档存在即等于走过"**。
-5. **driver 硬断言 `Σ(payoutRootField 全部 leaf) == consolidated_pool`,不等即拒绝 mint**(Bettor 15:28 方向审必答洞③,防御纵深——guest 电路本身已保证精确相等,§2.3.1,但 driver 独立重算比对能拦住"driver 读取的 leaf 集跟 guest journal 实际 commit 的不是同一份"这类更上游的数据传递 bug,不信任"guest 那边应该是对的"这种口头保证)。
+5. **🔴 承重件(非防御性,Bettor 15:33 独立源码核验升级)——driver 硬断言 `Σ(payoutRootField 全部 leaf) == consolidated_pool`,不等即 BLOCKING 拒绝 mint,且必须有对应测试用例覆盖**:main.rs L152-156 存在真实断裂分支——`fee_leaves` 传空 + `fee_bps>0` 时走 bps-fallback,`fee_sompi` 从 `distributable` 扣除但没有任何 leaf 承载它,`Σleaf == pool - fee_sompi < pool`,树先天不完整,claim 走完会剩一笔无主的 `fee_sompi`,`closed==2` 永久卡死(§3 closed==2 无逃生舱风险因此实际触发,非假设)。此断言是**唯一能在 genesis 前拦住这个真实断裂分支的检查点**(Bettor+NWT 三方独立收敛确认,非误读)。
+   - **配套 mint 政策(推荐,不只是断言拦截)**:genesis-mint driver **一律禁止 bps-fallback 模式**——调用方必须显式提供完整 `fee_leaves`(哪怕零 fee 场景也显式传空数组走"零 fee"路径,不依赖 guest 内部隐式 bps 计算)。从输入层面直接消除断裂分支的触发条件,比"事后断言拦"更彻底(断言是最后一道防线,禁用触发条件是从根切断攻击面)。
+   - **配套测试用例(T2b(ii)/dust E2E 落码时必含)**:①`fee_leaves` 非空场景,全部 winner + fee 收款人依次 `claim`,验证最后一笔精确清零 `consolidated_pool`,continuation 正确终止(不产生 0-value output)②故意构造 `fee_leaves` 传空 + `fee_bps>0` 的 mint 请求,验证 driver 硬断言正确拒绝(负向测试,证明拦截真的生效非纸面)。
 6. **`closeZkTmplAnchor` 必须对 `CloseZkV2` 当次实际编译字节重新计算,不得读取/复用任何 `_j2_closezk_repro4.sil` 时代缓存的旧值**(NWT 红队发现,15:29-15:30——`CloseZkV2` 跟 `CloseZkRepro4` 是不同字节码(多了 `claim` entry),anchor 必须绑定新产物;这跟今晚 `gateTmplHash` 撞的坑同一个 bug 形状——"沿用旧缓存值而非对新产物重新算",红队审必查这一点)。
 
 ---
