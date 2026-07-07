@@ -28,6 +28,14 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const LIB = dirname(fileURLToPath(import.meta.url));
+// 🔴 事故修复(2026-07-07，Bettor/NWT 裁定，家族口径终案): compilePayoutShardRedeem(PayoutShard.sil V1)
+// + compileShardLeafRedeem(ShardLeaf.sil) 硬编码走 legacy binary，无视调用方传的 silverc 参数——不是信任
+// caller 会传对，是这两个函数编译的合约本身就属于 V1 家族，续约地址必须跟 genesis 时的字节 byte-exact，
+// faaa074(引入 validateOutputStateWithTemplate 新 codegen)之后的 binary 编译产物已证实形状会漂移
+// (ShardLeaf 直接编译报错；CloseZkRepro4 byte长度不同，8528 vs 8662——同一类风险，只是 PayoutShard.sil
+// 用 validateOutputState 非 WithTemplate 变体，暂未证实是否同样受影响，默认保守当作受影响处理)。
+// ZK 专属函数(compilePayoutShardV2Redeem/computeCloseZkTmplAnchor)不受此影响，继续用调用方传入的 silverc。
+const SILVERC_LEGACY = process.env.SILVERC_LEGACY_PATH || 'D:/silverscript/versioned-builds/silverc-legacy-2c46231.exe';
 const z32 = '00'.repeat(32);
 const W17 = () => Array.from({ length: 17 }, () => ctorInt(0));
 const MIN_BET = 100000;                                   // dust-ticket floor (sompi); matches (d)/helper
@@ -70,23 +78,23 @@ export function spliceLeafState(baseRedeemHex, st) {
  * Compile a production-shape PayoutShard redeem (22-param ctor incl predicate_commit 2nd).
  * @param {object} o { poolMerkleRoot(hex), predicateCommit(hex), consolidatedPool(int), closed(int), payoutRoot(hex), silverc }
  */
-export function compilePayoutShardRedeem({ poolMerkleRoot, predicateCommit, consolidatedPool, closed = 0, payoutRoot = z32, silverc }) {
+export function compilePayoutShardRedeem({ poolMerkleRoot, predicateCommit, consolidatedPool, closed = 0, payoutRoot = z32 }) {
   const ctor = [ctorBytes32(poolMerkleRoot), ctorBytes32(predicateCommit), ctorInt(Number(consolidatedPool)), ctorInt(closed), ctorBytes32(payoutRoot), ...W17()];
-  return Buffer.from(compileSil(join(LIB, 'PayoutShard.sil'), ctor, silverc).script).toString('hex');
+  return Buffer.from(compileSil(join(LIB, 'PayoutShard.sil'), ctor, SILVERC_LEGACY).script).toString('hex');
 }
 
 /**
  * Compile a ShardLeaf redeem with the given (A) 4-field state baked.
  * @returns {{ redeemHex, psTmplHashHex }}
  */
-export function compileShardLeafRedeem({ marketIdHash, psTmplHashHex, shardPoolId, sealCount, payoutCovId, deadline, localYes, localNo, count, poolValue, silverc }) {
+export function compileShardLeafRedeem({ marketIdHash, psTmplHashHex, shardPoolId, sealCount, payoutCovId, deadline, localYes, localNo, count, poolValue }) {
   // ★件1(J1): deadline 加在常量区(payoutCovId 后, init State 前) — State 区仍 offset 1/4×PUSH8 不变 (spliceLeafState byte-equal 保持)。
   const ctor = [
     ctorBytes32(marketIdHash), ctorBytes32(psTmplHashHex), ctorBytes32(shardPoolId),
     ctorInt(sealCount), ctorInt(MIN_BET), ctorBytes32(payoutCovId), ctorInt(deadline),
     ctorInt(localYes), ctorInt(localNo), ctorInt(count), ctorInt(poolValue),
   ];
-  return Buffer.from(compileSil(join(LIB, 'ShardLeaf.sil'), ctor, silverc).script).toString('hex');
+  return Buffer.from(compileSil(join(LIB, 'ShardLeaf.sil'), ctor, SILVERC_LEGACY).script).toString('hex');
 }
 
 /**
@@ -272,7 +280,9 @@ async function _registerBettorOnShardInner(o) {
     if (!shard.shard_redeem_hex) throw new Error(`shard ${shard.shard_market_id} missing shard_redeem_hex — genesis 应存; fail-closed 防 silverc-drift recompile (data-missing bug)`);
     const shardPoolId = hex32(`${logicalMarketId}-shard-${shard.shard_index}`);
     // bettor-independent ps template (4 dust-ticket fields are State, spliced per register)
-    const psArtifact = computePoolSideArtifact(join(LIB, 'PoolSide_v08_shard.sil'), [ctorBytes32(bettorPk), ctorInt(direction), ctorInt(stake), ctorBytes32(z32)], silverc);
+    // 🔴 事故修复(2026-07-07): 强制 SILVERC_LEGACY——这个 artifact 直接烤进 ShardLeaf ctor(psTmplHashHex)，
+    // 属于 V1 家族续约链条一环，默认保守(同 compileShardLeafRedeem 那份理由)，不依赖调用方传入的 silverc。
+    const psArtifact = computePoolSideArtifact(join(LIB, 'PoolSide_v08_shard.sil'), [ctorBytes32(bettorPk), ctorInt(direction), ctorInt(stake), ctorBytes32(z32)], SILVERC_LEGACY);
     const fundTx = await transfer(relayAddr, stake + 100_000_000);         // gateway funds stake-into-leaf + fee headroom (built once, reused across retries below — independent of which leaf-state we're appending onto)
 
     // #tip-lag retry (2026-07-05, Bettor 拍板·公测流量下 race 更频繁): register_append 撞
@@ -333,7 +343,8 @@ async function _registerBettorOnShardInner(o) {
   const shardIndex = alloc.nextIndex;
   const shardPoolId = hex32(`${logicalMarketId}-shard-${shardIndex}`);
   // psArtifact = bettor-INDEPENDENT 模板 (4 dust-ticket 字段是 State, register 时 splice); ps_tmpl_hash 进 leaf ctor (bettorPk/dir/stake 只占位求模板, z32 占 shardPoolId 位)。
-  const psArtifact = computePoolSideArtifact(join(LIB, 'PoolSide_v08_shard.sil'), [ctorBytes32(bettorPk), ctorInt(direction), ctorInt(stake), ctorBytes32(z32)], silverc);
+  // 🔴 事故修复(2026-07-07): 同上处理，强制 SILVERC_LEGACY，不依赖调用方传入的 silverc。
+  const psArtifact = computePoolSideArtifact(join(LIB, 'PoolSide_v08_shard.sil'), [ctorBytes32(bettorPk), ctorInt(direction), ctorInt(stake), ctorBytes32(z32)], SILVERC_LEGACY);
   const genState = { local_yes: 0, local_no: 0, count: 0, pool_value: 0 };  // 空 maker seed (非 bettor; level2-A Σcount==loaded 排除它)
   const genRedeem = compileShardLeafRedeem({ marketIdHash, psTmplHashHex: psArtifact.templateHashHex, shardPoolId, sealCount, payoutCovId, deadline, localYes: 0, localNo: 0, count: 0, poolValue: 0, silverc });
   const genAddr = p2sh(genRedeem);

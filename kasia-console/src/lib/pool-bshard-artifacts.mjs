@@ -21,7 +21,13 @@ import { tmpdir } from 'node:os';
 import { blake2b } from '@noble/hashes/blake2b';
 import { extractTemplateArtifact } from './pool-template-artifact.mjs';
 
-const SILVERC = process.env.SILVERC_PATH || 'D:/silverscript/target/release/silverc.exe';
+// 🔴 事故修复(2026-07-07，Bettor/NWT 裁定): 这个模块级默认被 bshard-settle-daemon.mjs/bshard-auto-settler.mjs
+// 多处隐式依赖(调 compilePayoutShardRedeem 不传 silverc 参数 → 落到这个默认) — 今晚 KANet-UI 重启把
+// D:/silverscript/target/release/silverc.exe 原地覆盖成 j2-oppick-fix 分支(含 faaa074，改了
+// validateOutputStateWithTemplate 的 codegen 形状)，而 settle daemon 结算的是 PayoutShard V1(committee-sig)
+// 市场，V1 续约地址必须跟 genesis 时的字节 byte-exact，不能用这个新 binary 重算。默认改保守(legacy)，
+// ZK 专属函数(compilePayoutShardV2Redeem/computeCloseZkTmplAnchor)由调用方(pool.js)显式传参不受此默认影响。
+const SILVERC = process.env.SILVERC_LEGACY_PATH || 'D:/silverscript/versioned-builds/silverc-legacy-2c46231.exe';
 
 /** Compile a .sil with ctor JSON via silverc → {script:number[], state_layout:{start,len}} (silverc -o JSON). */
 export function compileSil(silPath, ctorArr, silvercPath = SILVERC) {
