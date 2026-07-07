@@ -58,6 +58,16 @@ const NEAR_DEADLINE_SEC = (Number(process.env.AUTO_BET_NEAR_DEADLINE_H) || 6) * 
 
 let timer = null;
 let running = false;
+// Watchdog (2026-07-08, Bettor 派工·卡2 KANet-UI): running 锁曾在无超时保护下静默卡死一整晚
+// (根因分析见频道/ledger — 疑似被①JsonRpcProvider 泄漏拥堵 event loop 连带拖慢内部 fetchWithTimeout
+// 的 abort 计时器)。runningEpoch 是这个watchdog的核心安全阀: 强放行时 bump epoch, 让卡住的旧 tick
+// 在下一次"要不要下注"判断点自己发现 epoch 过期、干净退出 —— 防止"旧 tick 其实还在跑 + 新 tick 也在跑"
+// 同时对同一批 relay/market 双开下注这种资金层面的并发风险。watchdog 本身只强放锁, 不 kill 旧 tick 的
+// in-flight 请求(fetchWithTimeout 自己最终会让旧 tick 走到它自己的 finally); finally 里用 epoch 比对
+// 防旧 tick 事后把新 tick 的 running/tickStartedAt 状态踩掉。
+let runningEpoch = 0;
+let tickStartedAt = 0;
+const WATCHDOG_TIMEOUT_MS = Number(process.env.AUTO_BET_WATCHDOG_TIMEOUT_MS) || 900_000; // 15min 默认(远高于健康tick实测耗时, 见频道调查记录)
 
 // J2 2026-06-28 (Bettor 派·稳定性): self-call fetch + AbortController timeout. 无 timeout 时·event-loop 饱和期
 //   self-call(打同一 console)挂死 → await 永挂 → running 卡 true → auto-bet 静默停 + 挂的连接占用放大饱和
@@ -223,9 +233,31 @@ async function _getBalanceKas(relayId) {
   } catch { return null; }
 }
 
+// _watchdogCheck: 每次 interval 触发时(不管 running 是不是 true)先跑这个。如果发现 running 已经卡了
+// 超过 WATCHDOG_TIMEOUT_MS, 判定死锁 → 打日志+写 events 表告警 + bump epoch(=旧 tick 的下一次
+// epoch 自检会失败, 干净退出, 不会跟新 tick 抢着下注)+ 强制 running=false 放行下一次 autoBetterTick()。
+function _watchdogCheck() {
+  if (!running || !tickStartedAt) return;
+  const stuckMs = Date.now() - tickStartedAt;
+  if (stuckMs <= WATCHDOG_TIMEOUT_MS) return;
+  const staleEpoch = runningEpoch;
+  console.error(`[auto-bet] 🔴 WATCHDOG: tick(epoch=${staleEpoch}) stuck for ${Math.round(stuckMs / 1000)}s (> ${Math.round(WATCHDOG_TIMEOUT_MS / 1000)}s threshold) — force-releasing lock, bumping epoch`);
+  try {
+    sqlite.prepare(`
+      INSERT INTO events (id, event_scope, event_type, source, level, summary, payload_json, created_at)
+      VALUES (?, 'system', 'autobet_tick_watchdog_release', 'pool-auto-better', 'error', ?, ?, datetime('now'))
+    `).run(randomBytes(16).toString('hex'), `auto-bet tick(epoch=${staleEpoch}) 卡死 ${Math.round(stuckMs / 1000)}s, watchdog 强制释放锁`, JSON.stringify({ staleEpoch, stuckMs, thresholdMs: WATCHDOG_TIMEOUT_MS }));
+  } catch (e) { console.warn(`[auto-bet] watchdog events insert fail (non-fatal): ${e.message}`); }
+  runningEpoch++;      // bump 在先: 旧 tick 循环里的下一次 epoch 自检会看到自己已过期
+  running = false;
+  tickStartedAt = 0;
+}
+
 export async function autoBetterTick() {
   if (running) return { skipped: true };
   running = true;
+  const myEpoch = ++runningEpoch;
+  tickStartedAt = Date.now();
   try {
     const markets = await _fetchEligibleMarkets();
     if (markets.length === 0) return { ok: true, processed: 0, note: 'no eligible markets' };
@@ -234,7 +266,14 @@ export async function autoBetterTick() {
 
     const summary = { prep_fail: 0, pay_fail: 0, paid_not_confirmed: 0, confirmed: 0, dup: 0, exception: 0, low_balance_skip: 0 };
     const placements = [];
+    botLoop:
     for (const bot of bots) {
+      // watchdog 可能在本 tick 处理中途强放行(卡了>15min)——bump 过 epoch 后本 tick 已不是当前 owner,
+      // 后续每笔真实下注前都要重新确认还是不是, 不能对同一批市场/relay 跟新起的 tick 并发下注。
+      if (myEpoch !== runningEpoch) {
+        console.warn(`[auto-bet] tick(epoch=${myEpoch}) 发现自己已被 watchdog 强放行(当前 epoch=${runningEpoch}), 干净退出不再下注`);
+        break botLoop;
+      }
       // r431 (NWT r362 audit catch): real balance guardrail. < MIN_RESERVE 整 relay skip 本 tick.
       const balKas = await _getBalanceKas(bot.id);
       if (balKas !== null && balKas < MIN_RESERVE_KAS) {
@@ -244,6 +283,10 @@ export async function autoBetterTick() {
       }
       const picks = _pickRandomSubset(markets, PER_TICK);
       for (const m of picks) {
+        if (myEpoch !== runningEpoch) {
+          console.warn(`[auto-bet] tick(epoch=${myEpoch}) 发现自己已被 watchdog 强放行(当前 epoch=${runningEpoch}), 干净退出不再下注`);
+          break botLoop;
+        }
         const r = await _placeBet(bot, m);
         placements.push(r);
         if (r.status === 'CONFIRMED') summary.confirmed++;
@@ -261,7 +304,12 @@ export async function autoBetterTick() {
     console.error('[auto-bet] tick fail:', e.message);
     return { ok: false, error: e.message };
   } finally {
-    running = false;
+    // 只有还是当前 epoch 的 owner 才清自己的状态——如果 watchdog 已经在本 tick 跑到这里之前强放行过
+    // (bump 了 epoch 给了新 tick), 这个旧 tick 的 finally 绝不能把新 tick 的 running/tickStartedAt 踩掉。
+    if (myEpoch === runningEpoch) {
+      running = false;
+      tickStartedAt = 0;
+    }
   }
 }
 
@@ -271,12 +319,14 @@ export function startAutoBetterCron() {
     return;
   }
   if (timer) return;
-  console.log(`[auto-bet] started — tick=${TICK_INTERVAL_MS}ms per_tick=${PER_TICK} stake=[${MIN_STAKE_KAS},${MAX_STAKE_KAS}] reserve=${MIN_RESERVE_KAS} relays=${RELAYS.join(',')}`);
+  console.log(`[auto-bet] started — tick=${TICK_INTERVAL_MS}ms per_tick=${PER_TICK} stake=[${MIN_STAKE_KAS},${MAX_STAKE_KAS}] reserve=${MIN_RESERVE_KAS} relays=${RELAYS.join(',')} watchdog=${WATCHDOG_TIMEOUT_MS}ms`);
   // Defer first tick 60s so Console + relays settle.
   setTimeout(() => {
+    _watchdogCheck();
     autoBetterTick().catch(e => console.error('[auto-bet] startup tick:', e.message));
   }, 60_000);
   timer = setInterval(() => {
+    _watchdogCheck();
     autoBetterTick().catch(e => console.error('[auto-bet] tick:', e.message));
   }, TICK_INTERVAL_MS);
 }
