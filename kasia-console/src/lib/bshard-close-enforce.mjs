@@ -30,10 +30,23 @@ import { canonicalBetOrder, computeBetsRoot, payoutRoot as computeMerkleRoot } f
 const _PREDICATE_COMMIT_REDEEM_OFFSET = 518;
 const _hex32 = (s) => Buffer.from(blake2b(Buffer.from(s), { dkLen: 32 })).toString('hex');
 // canonical (A) 4-field ShardLeaf state splice (= pool-shard-register.spliceLeafState 单源, byte-equal to recompile, J2 已验)。
-// ⚠ landmine(NWT 2026-07-07 实测坐实): writeBigInt64LE=两补数, 但真 silverc/rusty-kaspa byte[](int,size) 对负数用
-// sign-magnitude(同 pool-payout-root.mjs serializeI64)——两者不是同一编码。今天全部调用点只写非负值(closed/attestedWinner
-// 0|1/attestedAtMs), 不触发这个分歧, 但负数直接 throw 防未来静默错字节(便宜 fail-closed, Bettor 裁定本轮折入)。
-const _i64LE = (n) => { const v = BigInt(n); if (v < 0n) throw new Error(`_i64LE: 负数(${v}) 会产出两补数字节, 跟真 silverc sign-magnitude 编码不一致——不支持, 需走真编译或显式实现 sign-magnitude 分支`); const b = Buffer.alloc(8); b.writeBigInt64LE(v); return b; };
+// ⚠ landmine 修正(NWT 2026-07-07 实测坐实+紧急抓漏): 真 silverc/rusty-kaspa byte[](int,size) 对负数用
+// sign-magnitude(同 pool-payout-root.mjs serializeI64, 已 self-test 7/7 验证 -1→0100000000000080), 不是两补数。
+// absorb 透传 attestedWinner(genesis 占位符 -1, 未 attest 前恒负) 是真实调用点——NWT 抓到"负数直接 throw"这个防御
+// 反而会让 absorb 崩(3o6cs 现在正需要这个值), 必须真支持负数, 不能只 throw。固定 8B LE 从 magnitude 直接填充
+// (跟 serializeI64 的 minimal-encode+pad 殊途同归, 对 fixed-8B 场景更直接, 无需 lastSaturated 特判): sign bit 落在
+// byte[7](符合 magnitude < 2^63 时不会跟数值位冲突)。
+const _i64LE = (n) => {
+  const v = BigInt(n);
+  const neg = v < 0n;
+  let mag = neg ? -v : v;
+  const MAX_MAG = 1n << 63n;
+  if (mag >= MAX_MAG) throw new Error(`_i64LE: magnitude(${mag}) 超出 sign-magnitude 8B 可表示范围(需 < 2^63)`);
+  const b = Buffer.alloc(8);
+  for (let i = 0; i < 8; i++) { b[i] = Number(mag & 0xffn); mag >>= 8n; }
+  if (neg) b[7] |= 0x80;
+  return b;
+};
 const _push8 = (buf) => Buffer.concat([Buffer.from([buf.length]), buf]);
 function _spliceLeafState(baseRedeemHex, st) {
   const stateHex = Buffer.concat([_push8(_i64LE(st.local_yes)), _push8(_i64LE(st.local_no)), _push8(_i64LE(st.count)), _push8(_i64LE(st.pool_value))]);

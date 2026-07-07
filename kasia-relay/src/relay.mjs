@@ -938,6 +938,15 @@ if (process.send) {
           if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, ...r } });
           return;
         }
+        case 'bshard_consolidate_v2': {
+          // W2 (J2 2026-07-07): PayoutShardV2/ZK-native absorb — 镜像 bshard_consolidate 一字不动的调用形状,
+          // ShardLeaf.sil 侧零改动, 只有 PS 侧 state 序列化换成 V2(288B, 多 4 字段透传)。
+          const { unlockBshardConsolidateV2 } = await import('./lib/p2sh.mjs');
+          const wallet = getWallet();
+          const r = await unlockBshardConsolidateV2({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) });
+          if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, ...r } });
+          return;
+        }
         case 'bshard_close_attest': {
           // 委员 4-of-5 (pubkey-distinct, b0e35141) 背书 payoutRoot, closed 0→1 write-once + cov_id 续.
           const { unlockBshardCloseAttest } = await import('./lib/p2sh.mjs');

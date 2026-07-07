@@ -1511,16 +1511,19 @@ const _PAYOUTSHARD_STATE_LEN = 204; // (A) depth-10 PayoutShard: consolidated_po
 //   跟 console 侧 bshard-close-enforce.mjs _splicePayoutV2CloseRedeem 同一套字节偏移(NWT 2026-07-07 review 独立核实过·D2 铁律 byte-exact)。
 const _PAYOUTSHARDV2_STATE_LEN = 288;
 
-// ⚠ landmine(NWT 2026-07-07 实测坐实, W2 review 顺手抓到): 这里之前对负数做两补数, 但真 silverc/rusty-kaspa
-// byte[](int,size) 对负数用 sign-magnitude(同 pool-payout-root.mjs serializeI64)——两者不是同一编码, 两补数字节会跟
-// 真链上编译产出不符。State 字段目前所有真实调用点都非负(genesis 的 -1 sentinel 走真编译, 不经此函数), 负数直接
-// throw 防未来静默错字节(Bettor 裁定本轮折入, 便宜 fail-closed)。
-function _i64LE(v) {               // BigInt/number → 8-byte LE Buffer (固定 i64, 非最小; 仅非负)
+// ⚠ landmine 修正(NWT 2026-07-07 实测坐实+紧急抓漏): 真 silverc/rusty-kaspa byte[](int,size) 对负数用
+// sign-magnitude(同 pool-payout-root.mjs serializeI64, self-test 7/7 验证 -1→0100000000000080), 不是两补数。
+// PayoutShardV2 absorb 透传 attestedWinner(genesis 占位符 -1, 未 attest 前恒负) 是真实调用点——"负数直接 throw"这个
+// 防御反而会让 absorb 崩溃, 必须真支持负数(固定 8B, magnitude 直填 + sign bit 落 byte[7], 同 console 侧实现)。
+function _i64LE(v) {               // BigInt/number → 8-byte LE Buffer (固定 i64, 非最小; sign-magnitude)
   const n = BigInt(v);
-  if (n < 0n) throw new Error(`_i64LE: 负数(${n}) 会产出两补数字节, 跟真 silverc sign-magnitude 编码不一致——不支持, 需走真编译或显式实现 sign-magnitude 分支`);
+  const neg = n < 0n;
+  let mag = neg ? -n : n;
+  const MAX_MAG = 1n << 63n;
+  if (mag >= MAX_MAG) throw new Error(`_i64LE: magnitude(${mag}) 超出 sign-magnitude 8B 可表示范围(需 < 2^63)`);
   const b = Buffer.alloc(8);
-  let m = n;
-  for (let i = 0; i < 8; i++) { b[i] = Number(m & 0xffn); m >>= 8n; }
+  for (let i = 0; i < 8; i++) { b[i] = Number(mag & 0xffn); mag >>= 8n; }
+  if (neg) b[7] |= 0x80;
   return b;
 }
 
@@ -1765,6 +1768,55 @@ export async function unlockBshardConsolidate(args) {
     const sigs = [psSig, slSig, createInputSignature(unsigned, 2, wallet.getPrivateKey(), SighashType.All)];
     const signedTx = new Transaction({ version: 1, inputs: baseIn(sigs), outputs, lockTime: BigInt(lockTime), gas: 0n, subnetworkId: '0000000000000000000000000000000000000000', payload: '' });
     _assertTxInvariants(matched, signedTx, 'unlockBshardConsolidate', networkId);
+    const r = await rpc.submitTransaction({ transaction: signedTx, allowOrphan: false });
+    return { txId: r.transactionId, psContAddress: psContAddr, newConsolidatedPool: newConsolidated.toString(), psSeedCovId: psCovId };
+  } finally { try { await rpc.disconnect(); } catch {} }
+}
+
+/**
+ * unlockBshardConsolidateV2 — PayoutShardV2(ZK-native) absorb OP_0 + SL consolidate_to_payout OP_1 (W2, J2 2026-07-07)。
+ * ★ 镜像 unlockBshardConsolidate byte-identical 结构(PayoutShardV2.sil 头注释②: "absorb 逻辑一字不动, 仅
+ *   validateOutputState 补齐新增4字段透传")——差异仅 state 用 _serializePayoutV2StateHex/_continuationAddressV2。
+ *   ShardLeaf.sil 侧完全不碰(redeem hex 原样读取, 零 recompile, 跟 V1 一样的读法, D-005 隔离铁律遵守)。
+ * ⚠ 不改 unlockBshardConsolidate 一字(single-author 分离, 同 close_attest V2 拆分哲学)。
+ */
+export async function unlockBshardConsolidateV2(args) {
+  const { wallet, cmd, networkId, lockTime = 0n } = args;
+  const rpc = await connectRpc(networkId);
+  try {
+    const psUtxo = await _matchUtxo(rpc, _addressFromRedeem(cmd.inputs.payoutshard.redeem_hex, networkId), cmd.inputs.payoutshard.outpointTxid, cmd.inputs.payoutshard.index);
+    const slUtxo = await _matchUtxo(rpc, _addressFromRedeem(cmd.inputs.shardleaf.redeem_hex, networkId), cmd.inputs.shardleaf.outpointTxid);
+    if (!cmd.inputs.fee) throw new Error('consolidate_v2: fee input 必需 (PS+SL value 全 weld 进 continuation 无余付 fee)');
+    const feeUtxo = await _matchUtxo(rpc, cmd.inputs.fee.address, cmd.inputs.fee.outpointTxid, cmd.inputs.fee.index);
+    const matched = [psUtxo, slUtxo, feeUtxo];
+    const psCovId = _psInputCovId(psUtxo);
+
+    const poolValue = BigInt(cmd.inputs.shardleaf.pool_value);
+    const ps = cmd.inputs.payoutshard.state;   // {consolidated_pool, closed, payoutRoot, w0..w16, attestedWinner, attestedAtMs, betsRootBaked, refundRootBaked}
+    const newConsolidated = BigInt(ps.consolidated_pool) + poolValue;
+    // absorb 逻辑一字不动: closed/payoutRoot/w0-w16/attestedWinner/attestedAtMs/betsRootBaked/refundRootBaked 全透传不变,
+    // 只有 consolidated_pool 变(+poolValue)。
+    const newState = {
+      consolidated_pool: newConsolidated.toString(), closed: ps.closed, payoutRoot: ps.payoutRoot, ..._nw17(ps),
+      attestedWinner: ps.attestedWinner, attestedAtMs: ps.attestedAtMs, betsRootBaked: ps.betsRootBaked, refundRootBaked: ps.refundRootBaked,
+    };
+    const psContAddr = _continuationAddressV2(cmd.inputs.payoutshard.redeem_hex, _serializePayoutV2StateHex(newState), networkId, cmd.inputs.payoutshard.state_start ?? _POOL_STATE_START);
+    let psOutValue = _utxoValue(psUtxo) + poolValue;
+    if (cmd.forge_skim) { const skim = BigInt(cmd.forge_skim); psOutValue = psOutValue - skim; console.error(`[FORGE_SKIM] psOutValue 少付 ${skim} → 期望合约守恒 BUST`); }
+
+    const outputs = [new TransactionOutput(psOutValue, payToAddressScript(new Address(psContAddr)), new CovenantBinding(0, new Hash(psCovId)))];
+    _appendChange(outputs, matched, cmd.outputs?.change_address, _bshardFeeV1(matched.length));
+
+    // no-sig scriptSig — 同 V1: PS@0 absorb [selfOutIdx=0, shardInIdx=1] OP_0; SL@1 consolidate [psInIdx=0, psOutIdx=0] OP_1
+    //   (PayoutShardV2.sil absorb 形参跟 V1 一字不差: absorb(int selfOutIdx, int shardInIdx), ShardLeaf.sil 侧零改动)。
+    const psSig = _pushInt(0) + _pushInt(1) + '00' + _encodePushDataHex(Buffer.from(cmd.inputs.payoutshard.redeem_hex, 'hex'));
+    const slSig = _pushInt(0) + _pushInt(0) + '51' + _encodePushDataHex(Buffer.from(cmd.inputs.shardleaf.redeem_hex, 'hex'));
+
+    const baseIn = (ss) => matched.map((u, i) => ({ previousOutpoint: { transactionId: u.outpoint.transactionId, index: u.outpoint.index }, signatureScript: ss[i], sequence: 0n, sigOpCount: 0, computeBudget: _BSHARD_COMPUTE_BUDGET, ...(ss[i] === '' ? { utxo: u } : {}) }));
+    const unsigned = new Transaction({ version: 1, inputs: matched.map(u => ({ previousOutpoint: { transactionId: u.outpoint.transactionId, index: u.outpoint.index }, signatureScript: '', sequence: 0n, sigOpCount: 0, computeBudget: _BSHARD_COMPUTE_BUDGET, utxo: u })), outputs, lockTime: BigInt(lockTime), gas: 0n, subnetworkId: '0000000000000000000000000000000000000000', payload: '' });
+    const sigs = [psSig, slSig, createInputSignature(unsigned, 2, wallet.getPrivateKey(), SighashType.All)];
+    const signedTx = new Transaction({ version: 1, inputs: baseIn(sigs), outputs, lockTime: BigInt(lockTime), gas: 0n, subnetworkId: '0000000000000000000000000000000000000000', payload: '' });
+    _assertTxInvariants(matched, signedTx, 'unlockBshardConsolidateV2', networkId);
     const r = await rpc.submitTransaction({ transaction: signedTx, allowOrphan: false });
     return { txId: r.transactionId, psContAddress: psContAddr, newConsolidatedPool: newConsolidated.toString(), psSeedCovId: psCovId };
   } finally { try { await rpc.disconnect(); } catch {} }
