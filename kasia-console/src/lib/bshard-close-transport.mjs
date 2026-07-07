@@ -134,7 +134,12 @@ export function collectCloseSigs(marketId, payoutRoot) {
  * collectCloseSigsV2 — 同 collectCloseSigs, 读独立 event_type 'bshard_close_sig_v2'(跟 V1 结构隔离,防混淆)。
  * 额外带回 attestedWinner/betsRoot/refundRoot/attestedAtMs(委员各自独立重算确认过的值, 供 submit 时组装 witness)。
  */
-export function collectCloseSigsV2(marketId, payoutRoot) {
+// 🔴 fix (Bettor+NWT 2026-07-08 23:2x, uqmp8 fee-input churn 死锁 #ba7z2c/#ba8vcr, 3 处同 key 之①):
+// payout_root 单独当匹配 key 会跨 propose 轮次(仅 fee input 换新, root 巧合不变)把旧 image 的签名收进新
+// image 广播——SighashType.All 下 preimage 不同, 链上验签必败。加 attestedAtMs 参数收窄成 (root, attestedAtMs)
+// 复合 key, 保证收上来的每个 sig 都是【同一次 propose request 实例】签的, 不会跨 image 混装。
+// attestedAtMs 可选(向后兼容旧调用点/离线诊断脚本): 缺省时退化回旧的 root-only 行为(调用方需自知风险)。
+export function collectCloseSigsV2(marketId, payoutRoot, attestedAtMs = null) {
   const rows = sqlite.prepare(`
     SELECT payload FROM chain_events WHERE event_type = 'bshard_close_sig_v2'
       AND payload LIKE ? AND payload LIKE ?
@@ -142,6 +147,7 @@ export function collectCloseSigsV2(marketId, payoutRoot) {
   const byPk = new Map();
   for (const r of rows) {
     let p; try { p = JSON.parse(r.payload); } catch { continue; }
+    if (attestedAtMs != null && String(p?.attestedAtMs) !== String(attestedAtMs)) continue;   // 跨 image 的旧签, 不收
     if (p?.committee_pk && p?.signature && !byPk.has(p.committee_pk)) {
       byPk.set(p.committee_pk, {
         committee_pk: p.committee_pk, signature: p.signature, idx: p.idx, siblings_hex: p.siblings_hex, verdict: p.verdict,

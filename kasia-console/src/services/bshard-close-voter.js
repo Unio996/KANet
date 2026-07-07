@@ -274,6 +274,8 @@ async function processCloseRequest(voter, market, req, enforceCloseAttest) {
 
     // 2. D1 dedup-by-MARKET (NWT 红队, equivocation 防御纵深): 本 voter 对同 market 已签【某根】→ 拒签【不同根】(等价
     //    repeat→idempotent skip)。比旧 (market,root) dedup 严: 旧 key 允许同节点对同市场签两个不同根。
+    // (V1 payload 没有 attestedAtMs 字段/W2 概念——下方 V2 版本才是 uqmp8 fee-input churn 死锁的实际修复位置,
+    // V1 这里维持原 root-only 语义不动, 避免在没有该字段的路径引入 undefined===undefined 误判。)
     const priorSigs = sqlite.prepare(`
       SELECT payload FROM chain_events WHERE event_type = 'bshard_close_sig' AND from_address = ? AND payload LIKE ?
     `).all(voter.address, `%"market_id":"${market.id}"%`);
@@ -390,13 +392,25 @@ async function processCloseRequestV2(voter, market, req, enforceCloseAttestV2) {
     if (committeePks.length && !committeePks.includes(voterPk)) return { skipped: true };
 
     // D1 dedup-by-MARKET (同 V1): 本 voter 对同 market 已签【某根】→ 拒签【不同根】。
+    // 🔴 fix (Bettor+NWT 2026-07-08 23:2x, uqmp8 fee-input churn 死锁 #ba7z2c/#ba8vcr): payout_root 是
+    // claimedPayoutRoot 的确定性函数(committee+bets+winner+fees), 跨 propose 轮次(仅 fee input 换新, root
+    // 巧合不变)算出同一个值——旧 key(root-only)把"同根不同 image(不同 fee outpoint→不同 SighashType.All
+    // preimage)"误判成幂等重复而 skip, 导致旧签名(对旧 image 算的)被 collectCloseSigsV2 收进新 image 广播,
+    // 链上验签必败(script ran, but verification failed), 且 D1 永远拒绝重签 → 永久死锁(今晚实测坐实: 5 签
+    // observed_at 全落在旧 attestedAtMs=1783465981208 那轮, 新 attestedAtMs=1783466801925 那轮零签)。
+    // 改 (root, attestedAtMs) 复合 key: 同根同 attestedAtMs = 真幂等(同一次 propose 的重复 tick)→ skip;
+    // 同根不同 attestedAtMs = image 换代(合法重签, 如本次 fee 现选)→ 放行往下真签; 不同根 = 保留原 equivocation
+    // 拒签(防伪本义不变, NWT 红队过: 同委员对同 root 不同 attestedAtMs 签两次不算 equivocation, 对不同 root 仍挡)。
     const priorSigs = sqlite.prepare(`
       SELECT payload FROM chain_events WHERE event_type = 'bshard_close_sig_v2' AND from_address = ? AND payload LIKE ?
     `).all(voter.address, `%"market_id":"${market.id}"%`);
     for (const ps of priorSigs) {
       let pp; try { pp = JSON.parse(ps.payload); } catch { continue; }
-      if (String(pp.payout_root) === String(req.claimedPayoutRoot)) return { skipped: true };
-      return { refused: true, reason: `D1 equivocation(V2): 已对 market 签过不同 root ${String(pp.payout_root).slice(0, 10)}, 拒签 ${String(req.claimedPayoutRoot).slice(0, 10)}` };
+      if (String(pp.payout_root) !== String(req.claimedPayoutRoot)) {
+        return { refused: true, reason: `D1 equivocation(V2): 已对 market 签过不同 root ${String(pp.payout_root).slice(0, 10)}, 拒签 ${String(req.claimedPayoutRoot).slice(0, 10)}` };
+      }
+      if (String(pp.attestedAtMs) === String(req.new_attestedAtMs)) return { skipped: true };
+      // 同根不同 attestedAtMs → 不 skip, 往下走真实重签(旧签名留档不删, 只是 D1 判定层面不再当它挡新 image)。
     }
 
     await ensureKaspaWasm();
@@ -442,7 +456,11 @@ async function processCloseRequestV2(voter, market, req, enforceCloseAttestV2) {
       // W2 新增 4 字段回填(供 settler submit 时组装 witness, 委员已独立验过, 这里回传的是委员自己重算确认过的值):
       attestedWinner: req.new_attestedWinner, betsRoot: verdict.betsRootHex, refundRoot: verdict.refundRootHex, attestedAtMs: req.new_attestedAtMs,
     });
-    const synthTxid = `bshard_close_sig_v2:${voter.id.slice(0, 8)}:${market.id.slice(-6)}:${String(req.claimedPayoutRoot).slice(0, 8)}`;
+    // 🔴 fix (Bettor+NWT 2026-07-08 23:2x, #ba7z2c/#ba8vcr 3 处同 key 之②): synthTxid 必须带 attestedAtMs——
+    // 否则同 root 跨 image 重签会撞同一个 txid(UNIQUE(txid,event_type)), INSERT OR IGNORE 静默丢弃新 image
+    // 的签名(changes=0 但行"存在"是旧 image 那条, fail-closed accounting 会误判成幂等而不报错, 实则内容是
+    // 旧 image 的、attestedAtMs 对不上)。加 attestedAtMs 前 8 位, 让每个 request 实例有自己独立的 sig 行空间。
+    const synthTxid = `bshard_close_sig_v2:${voter.id.slice(0, 8)}:${market.id.slice(-6)}:${String(req.claimedPayoutRoot).slice(0, 8)}:${String(req.new_attestedAtMs).slice(-8)}`;
     // 🔴 fix (J2+NWT catch 2026-07-08 23:0x, uqmp8 首次真实 voter cron 运行: signed++ 计数打了但 chain_events
     // 零行落地): chain_events.observed_at 是 TEXT NOT NULL 无 default, 这条 INSERT 漏了这一列——INSERT OR IGNORE
     // 静默吞掉 NOT NULL 违规, tick 日志"✅ 签了"是假象, collectCloseSigsV2 永远查到 0 sigs, submit 永远 notReady。
@@ -648,7 +666,7 @@ export async function bshardCloseSubmitV2Tick() {
         continue;
       }
 
-      const { ready, sigs } = collectCloseSigsV2(market.id, req.claimedPayoutRoot);
+      const { ready, sigs } = collectCloseSigsV2(market.id, req.claimedPayoutRoot, req.new_attestedAtMs);
       if (!ready) { notReady++; continue; }
       if (!SETTLER_RELAY_ID) { errored++; console.error('[bshard-close-submit-v2] BSHARD_SETTLER_RELAY_ID unset — 无法 submit'); continue; }
       let changeAddress;
