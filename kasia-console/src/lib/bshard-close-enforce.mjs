@@ -222,14 +222,27 @@ export async function _enforceCloseAttestCore(signRequest, ctx) {
   }
 
   // 2. 命门① predicate hash-bind — verify against ON-CHAIN commit (PS redeem offset-518), NOT a caller param.
-  //    fee markets bake computeMarketCommit(predicate, fee_recipients); predicate-only markets computePredicateCommit.
+  //    fee markets bake computeMarketCommit(predicate, fee_recipients); predicate-only markets computePredicateCommit;
+  //    🔴 predicate-null 市场(blockhash_parity/zk_native 首证 3o6cs 坐实, W2 2026-07-07·Bettor 批第3处窄修): 创建侧
+  //    (pool.js:1517) `predicateCommit = _predicate ? computeMarketCommit(...) : market.market_metadata_hash` ——
+  //    predicate 为 null 时根本不走 computeMarketCommit/computePredicateCommit, 而是直接烤 market_metadata_hash。
+  //    这条既有的两分支判定(feeMarket?computeMarketCommit:computePredicateCommit)从设计起没覆盖这个第三种情况——
+  //    3o6cs 是第一个真正走到这里的 predicate-null 市场, 之前没人撞过。
+  //    比对基准 = ctx.marketMetadataHash(daemon 本地 market 行, buildEnforceCtx 注入, 同 deadlineDaa/resolutionRuleSpec
+  //    一样的信任边界——委员自己查的本地 DB, 绝不从 signRequest/proposal 读)。HTTP/feeMarket 两条既有分支逐字不动。
   const onChainCommit = String(psRedeemHex).slice(_PREDICATE_COMMIT_REDEEM_OFFSET * 2, (_PREDICATE_COMMIT_REDEEM_OFFSET + 32) * 2);
   const feeMarket = !!broker_pk;
-  const expectedCommit = feeMarket
-    ? computeMarketCommit(predicate, { brokerPk: broker_pk, introducerPk: introducer_pk })
-    : computePredicateCommit(predicate);
+  let expectedCommit;
+  if (predicate == null) {
+    if (!ctx.marketMetadataHash) return { pass: false, reason: '命门①: predicate=null 但 ctx.marketMetadataHash 缺 (daemon 未注入本地 market_metadata_hash, 拒签)' };
+    expectedCommit = String(ctx.marketMetadataHash).toLowerCase();
+  } else {
+    expectedCommit = feeMarket
+      ? computeMarketCommit(predicate, { brokerPk: broker_pk, introducerPk: introducer_pk })
+      : computePredicateCommit(predicate);
+  }
   if (expectedCommit !== onChainCommit) {
-    return { pass: false, reason: `命门① hash-bind FAIL: ${expectedCommit.slice(0, 14)} != on-chain redeem[518] ${onChainCommit.slice(0, 14)} (假 predicate/fee 地址)` };
+    return { pass: false, reason: `命门① hash-bind FAIL: ${expectedCommit.slice(0, 14)} != on-chain redeem[518] ${onChainCommit.slice(0, 14)} (假 predicate/fee 地址/market_metadata_hash)` };
   }
   // chain-bound check (redeem 不可伪): daemon should also verify p2sh(psRedeemHex) == the signed PS input's
   //   on-chain address via ctx.rcOn check_utxo_landed (= 命门① 的链锚, 同今天手动流). [daemon ctx hook]
