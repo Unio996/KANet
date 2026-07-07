@@ -342,6 +342,9 @@ export async function bshardCloseVoterV2Tick() {
     for (const voter of voterRelays) {
       const r = await processCloseRequestV2(voter, market, req, enforceCloseAttestV2);
       if (r.signed) signed++; else if (r.refused) refused++; else if (r.errored) errored++; else skipped++;
+      // 观察性缺口修(J2 2026-07-08 22:1x, tick 汇总只有计数没有明细, uqmp8 首次真实场景卡住排查不了根因)——
+      // 只加 log, 不改判定逻辑。refused/errored 才打(signed/skipped 是正常态, 不刷屏)。
+      if (r.refused || r.errored) console.warn(`[bshard-close-voter-v2]   market=${market.id.slice(0,12)} voter=${voter.name || voter.id.slice(0,8)} ${r.refused ? 'REFUSED' : 'ERRORED'}: ${r.reason || '(no reason)'}`);
     }
   }
   console.log(`[bshard-close-voter-v2] tick: ${pending.length} pending | signed=${signed} refused=${refused} skipped=${skipped} errored=${errored}`);
