@@ -54,6 +54,29 @@ export function betsLeaf(pkHex, stakeSompi, dir) {
   return Buffer.from(blake2b(Buffer.concat([pk, serializeI64(BigInt(stakeSompi), 8), serializeI64(BigInt(dir), 1)]), { dkLen: 32 }));
 }
 
+// ── canonical absorb-order (W2, Bettor 2026-07-07 钉·单一定义单一实现) ──────────────────────────────
+// 🔴 全系统只此一处定义 bets 的 canonical 序：driver gather(zk-close-builder.mjs gatherOrderedBets)/committee
+// 独立重算(bshard-close-enforce.mjs enforceCloseAttestV2)/未来 guest-feed 三处必须调**同一个函数**,不准
+// 各自实现一套排序逻辑(两套序 = 跨节点/跨调用点 betsRoot 分叉,order-sensitive hash-chain 对此零容忍)。
+// 排序键: side_lock_daa ASC(链上共识事实·接受块 DAA·跨节点收敛,非 node-local DB insertion id)。
+// tiebreak: side_lock_daa 相同(同一 DAA 内双注)时按 side_lock_tx 字典序 ASC(锁仓 tx id·同样链锚,确定性打破)。
+// fail-loud: 任一 bettor 缺 side_lock_daa/side_lock_tx(未链锚)→ throw,不静默回退 id 序(NWT W2 review 钉)。
+// rows 字段兼容 {pk|bettor_pk, side_lock_daa, side_lock_tx}(committee 重算传 loadBettors 行 / driver gather 传
+// pool_bettor_sides 行, 两边字段名不完全一致, 只认这三个 key 的其中一种命名)。
+export function canonicalBetOrder(rows) {
+  if (!Array.isArray(rows)) throw new Error('canonicalBetOrder: rows must be array');
+  for (const r of rows) {
+    const idLabel = String(r.pk ?? r.bettor_pk ?? '?').slice(0, 10);
+    if (r.side_lock_daa == null) throw new Error(`canonicalBetOrder: bettor ${idLabel} 无 side_lock_daa (未链锚, fail-loud, 不回退本地序)`);
+    if (r.side_lock_tx == null) throw new Error(`canonicalBetOrder: bettor ${idLabel} 无 side_lock_tx (无法 tiebreak, fail-loud)`);
+  }
+  return [...rows].sort((a, b) => {
+    const da = Number(a.side_lock_daa), dbb = Number(b.side_lock_daa);
+    if (da !== dbb) return da - dbb;
+    return String(a.side_lock_tx).localeCompare(String(b.side_lock_tx));
+  });
+}
+
 // betsRoot = fold blake2b(acc ‖ bets_leaf)[32] from genesis ZERO32 — covenant 每笔 require new==此式 (非-vacuous)。
 // 🔴 ORDER-SENSITIVE (hash-CHAIN·非 merkle): 同一组 bets 不同序 → 不同 betsRoot。total-order = PayoutShard
 //    continuation 链序 (absorb 的链上顺序)。covenant/guest/off-chain 三层必同序·否则 betsRoot 漂 = inputs_commit 锚错。

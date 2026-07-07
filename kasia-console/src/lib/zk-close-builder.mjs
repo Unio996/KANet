@@ -69,6 +69,12 @@ export function computeJournalHash(betsRootHex, payoutRootHex, attestedWinner) {
 // bets_root hash-chain 的 absorb 序 = register_append 序 = 注册序。pool_bettor_sides ORDER BY id ASC = 插入序。
 // ⚠ 命门: 链上 bets_root absorb 序 = register_append TX **落链序**。demo 单片顺序注册→DB id 序==落链序;
 //   production 必从链上 register 序列(chain_events/kaspa_tx_log)派生·不可只信 DB id(若 TX 乱序落链)。本 demo 用 id 序+下方校验。
+// 🔴 W2(J2 2026-07-07·Bettor 钉): 单节点 driver-gather 用本地 id 序尚可(单点无跨节点分叉风险),但committee
+//   侧独立重算(bshard-close-enforce.mjs enforceCloseAttestV2)必须用链锚序(否则 5 委员各自不同 DB 插入序 →
+//   各自算出不同 betsRoot → 凑不齐签名)——已建 pool-payout-root.mjs canonicalBetOrder(side_lock_daa ASC +
+//   side_lock_tx tiebreak)。**W4(relay/prove-path 接线, J1 域)把本函数接进真实 prove 流程时,必须切到调用
+//   canonicalBetOrder 而非这里的 id ASC**,不能留两套序并存(Bettor 单一定义单一实现钉子)——本轮(W2/committee
+//   域)不动这个函数本体(风险面限定在新增 committee 路径,不碰已有 driver-gather 行为)。
 // payout-leaf cap(NWT 攻击#5 第2路·B2·golden-ref depth-10 merkle = 1024 leaf 上限·winners>1024 guest 抛)。
 // cheap pre-check(Bettor 授权"现在加"): projected payout-leaves = bettors(winners≤bettors) + fee-leaves reserve。
 // 超 → overCap=true → zkCloseTick 不进 prove·直接 escape 退款(bets>0 走 refund_draw·见 §8.B2)。
