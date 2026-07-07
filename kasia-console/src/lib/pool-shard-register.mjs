@@ -174,6 +174,10 @@ export function computeCloseZkTmplAnchor(closeZkSilPath, gateTmplHash) {
   return {
     anchorHex: Buffer.from(blake2b(Buffer.concat([templateA, templateB, templateC, templateD]), { dkLen: 32 })).toString('hex'),
     genesisMarkerByte: templatePrefix[0], // = 107, 硬编进 zk_handoff 的 byte[1](107)，随手核对不变
+    // 2026-07-07(J2, W4a 需要): J1 落码 unlockBshardZkHandoff/unlockBshardZkClose 时要拼装真实
+    // betsRootBaked/refundRootBaked/attestedAtMs 进这 4 段固定模板之间, 补充导出(纯加字段, 唯一既有
+    // 调用点 pool.js:1267 只解构 .anchorHex, 不受影响)。
+    templateA, templateB, templateC, templateD,
   };
 }
 
