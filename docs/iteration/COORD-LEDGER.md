@@ -58,6 +58,14 @@
 - **✅ llama-server 路径根治(KANet-UI·05:31 Bettor 独立探针验收 PASS)**: 根因=这台机器 llama 实际装 `C:/KANet/tools/`,脚本按 `$KANET_ROOT/tools/` 找不到静默跳过(重启必哑,靠 Owner UI 肉眼发现)。修=kanet-start.sh 加 `LLAMA_SERVER_PATH` env 覆盖(host-specific 进 kanet.env 既有约定,拒 symlink 隐形魔法)+cd 行 dirname 动态取(第一版 cd 硬编码 bug 被真实回归测试抓出)。diff 待 NWT 复核后 commit。watch 项④关闭。
 - **Bettor fresh 接位(2026-07-07)**: 已读 DECISIONS(D-001~D-005)+本 ledger+频道尾部+git(HEAD `7cdf09a7`),状态无漂移。频道 Monitor 已设,接位广播已发(#9qfa1p),等 J1/J2/NWT/KANet-UI fresh 回执+查资产硬门报告。
 - **Bettor fresh 接位·晚班(2026-07-07 21:4x 本地)**: 收官后接位,状态层全读(D-001~D-006/ledger/频道/git HEAD `63480bc8`)无漂移,全队 push 干净已核。Monitor 已布,接位广播 #areh9g。明天两卡口径确认不变(①claim-complete 设计 J1 主导/NWT 红队 ②7/8 首轮 retro,模板 `docs/FRAMEWORK-RETRO-TEMPLATE.md` 在位)。J1 缺席应急线沿用(J2 跨域顶+NWT 双倍审+报 Owner 批)。
+
+## 🔴🔴 Owner 钦定令(2026-07-07 21:5x 晚班): "不能耽搁了,把 ZK 装配进生产线" —— 两卡提前今晚全速开
+> J1 21:47 归队报道(IBD 追平中)→ Bettor 同步包(#arkdt6)+召集派工(#arm6qm)→ Owner 下令升格(#arngdj 传达)。主线优先级锁: **ZK 并入生产结算线 = 唯一主线**。
+
+- **生产线关键路径(Bettor 重排)**: T0=卡1 claim-complete CloseZk 设计**今晚全稿**(J1 主导,五件套: claim entry 复用 PS merkle claim/exit-path 矩阵 genesis 前全枚举/跨 .sil ms-s 单位一致性显式表/NWT 2 非阻塞发现折入/escape-anchor 单位统一)→ NWT 稿到即连夜红队(质量闸不省·零等待间隙)→ T2=新 CloseZk .sil 落码 → cli-debugger+exit-path 矩阵验收 → dust 全链 E2E → 首个准入真实市场(V2 模板**全新建盘**,旧 ShardLeaf 收注盘一律不合格)genesis 走 ZK 线 → kill switch ON → daemon 全自动结算 demonstrate。
+- **并行卡**: 卡2(J2)close_attest 自治接线简稿(propose/collect+broadcast 自治,inline 禁晋升钉,库版 processCloseRequestV2)+ **W3/W5 现状自报**(市场创建接 V2 模板/daemon dispatchUnlockZkClose hook/zk_close_tick kill switch OFF 缺件清单)= 生产线缺口准数;卡3(KANet-UI)4 untracked 文档 Status 头收编 + lint Status 头卡点 + **首个 V2+ZK 真实市场创建参数备齐(只备不执行)**;卡4(Bettor)7/8 retro 素材 pre-fill(降为次线,不挤主线)。
+- **DoD(报数口径)**: settle daemon 在 kill switch ON 下对 ≥1 个准入真实市场全自动走完 ZK 结算(enqueue→真 Groth16→zk_close 落链→reconcile `zk_settled`),predict-then-verify+双独立核实 = **端到端 demonstrate**,不越界 claim 全量迁移。
+- **回执**: J2 ✅(14:50)/KANet-UI ✅(14:50)/NWT ✅(14:50,双卡审人+checklist 在备)/J1 ⏳(IBD 追平中)。
 - **当前主线(ZK 结算生产化剩余三项,承接昨晚收官口径)**:
   1. **②生产 relay handler**(J1 域): `unlockBshardZkClose`——prove+gate+2-input build+broadcast,包装昨晚已验证的真实流程。
   2. **③三前置基础设施**(escape entrypoint 服务真实市场的硬前置,wiring 文档 §2.6): 出证备份机(J1 已认领 SPOF 评估)+ proving job 卡死告警 + `ESCAPE_GRACE` 按"出证环境全损到重建最坏时长"定标。
