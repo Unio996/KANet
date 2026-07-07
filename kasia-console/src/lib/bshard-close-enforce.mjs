@@ -439,11 +439,21 @@ export async function enforceCloseAttestV2(signRequest, ctx) {
     return { pass: false, reason: `W2: new_attestedAtMs 跟委员自己 wall-clock 偏差 ${clockDeltaMs}ms > 容差 ${_ATTESTED_AT_MS_CLOCK_TOLERANCE_MS}ms (driver 可能喂了远离真实 attest 时刻的值, escapeRefund GRACE 锚点被扭曲风险, 弃签)` };
   }
 
+  // ── canonicalBetOrder 算一次, betsRoot/refundRoot 共用(NWT finding①/自查补的跨节点分叉修法, 都依赖同一份序)──
+  //   ⚠ 自查修复(第一次 live 跑撞到 ReferenceError): 之前 `ordered` 声明在 betsRoot 的 try{} 块内(JS block-scope),
+  //   refundRoot 的 try{} 引用不到——offline test 从没端到端调用过 enforceCloseAttestV2(只单测拆开的 helper),
+  //   漏了这个作用域 bug, 直到真实委员跑才炸出来。提到两个 try 之外, 一次算好两处共用。
+  let ordered;
+  try {
+    ordered = canonicalBetOrder(bettors);
+  } catch (e) {
+    return { pass: false, reason: `W2: canonicalBetOrder fail (${e.message}) — 弃签(不猜)` };
+  }
+
   // ── new_betsRoot: 委员自己按 canonical 链锚序(side_lock_daa+side_lock_tx tiebreak)重算, 非 driver 喂的本地 id 序 ──
   //   (NWT finding①: gatherOrderedBets 本地 id 序在多节点独立重算场景会跨节点分叉, 必须用链锚可收敛序)。
   let betsRootHex;
   try {
-    const ordered = canonicalBetOrder(bettors);
     const bets = ordered.map(b => ({ pk: b.pk, stake: b.stake, direction: b.direction }));
     betsRootHex = computeBetsRoot(bets).toString('hex');
   } catch (e) {
@@ -454,9 +464,8 @@ export async function enforceCloseAttestV2(signRequest, ctx) {
   }
 
   // ── new_refundRoot: 同批 bettor 数据(pk+stake=自己的全额退款), 复用 payoutRoot 的 depth-10 merkle 公式(refund=100%退) ──
-  //   ⚠ 自查补(J2, 同 betsRoot 一样的跨节点分叉风险): payoutRoot 是 position-aware merkle(叶子落哪个 index 由数组序决定),
-  //   非 hash-chain,但序依然影响结果——必须用同一份 canonicalBetOrder(链锚序), 不能用 ctx.loadBettors 的本地/DB 返回序
-  //   (差点在这里重蹈 betsRoot 已修过的同一个坑, 落码时自己抓到, 复用上面已算好的 `ordered`)。
+  //   payoutRoot 是 position-aware merkle(叶子落哪个 index 由数组序决定), 非 hash-chain, 但序依然影响结果——
+  //   必须用同一份 canonicalBetOrder(链锚序), 不能用 ctx.loadBettors 的本地/DB 返回序(同 betsRoot 一样的跨节点分叉风险)。
   let refundRootHex;
   try {
     const winners = ordered.map(b => ({ pk: b.pk, amount: b.stake }));
