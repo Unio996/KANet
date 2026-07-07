@@ -112,6 +112,53 @@ export function writeZkContinuation(marketId, o) {
 }
 
 /**
+ * updateProvingReady — zk-prove-worker(缺件②)proving job 跑完后, 单条原子 UPDATE 把 zk_continuation.proving
+ *   从 'pending' 推进到 'ready', 全字段一次写齐(NWT GREEN 要求的原子性: 不会出现 status='ready' 但 gate 还是
+ *   null 的中间态)。前置: market.metadata.zk_continuation 必须已存在(writeZkContinuation 先跑过)。
+ * @param {string} marketId
+ * @param {{guestPayoutRootHex:string, journalHash:string, imageId:string, gate:{address:string,outpointTxid:string,index:number,fundedAtMs:number}}} o
+ */
+export function updateProvingReady(marketId, o) {
+  if (!o?.guestPayoutRootHex || !o?.journalHash || !o?.imageId || !o?.gate?.address) {
+    throw new Error('updateProvingReady: guestPayoutRootHex/journalHash/imageId/gate 必需(全字段原子落, 不接受部分写)');
+  }
+  const row = sqlite.prepare('SELECT metadata FROM pool_markets WHERE id = ?').get(marketId);
+  if (!row) throw new Error(`updateProvingReady: market ${marketId} 不存在`);
+  let meta; try { meta = JSON.parse(row.metadata || '{}'); } catch { meta = {}; }
+  if (!meta.zk_continuation) throw new Error(`updateProvingReady: market ${marketId} 没有 zk_continuation — writeZkContinuation 必须先跑过`);
+  meta.zk_continuation.proving = {
+    status: 'ready',
+    guestPayoutRootHex: o.guestPayoutRootHex,
+    journalHash: o.journalHash,
+    imageId: o.imageId,
+    gate: { address: o.gate.address, outpointTxid: o.gate.outpointTxid, index: Number(o.gate.index), fundedAtMs: Number(o.gate.fundedAtMs) },
+    provingError: null,
+  };
+  sqlite.prepare(`UPDATE pool_markets SET metadata = ? WHERE id = ?`).run(JSON.stringify(meta), marketId);
+  return { ok: true };
+}
+
+/**
+ * updateProvingFailed — proving job 任一步失败时调用(NWT 18:59 pre-review 要求③: 不能只记 zk_prove_jobs 表,
+ *   必须同步回写 zk_continuation.proving——J1 的 dispatchUnlockZkClose(缺件③)只读 schema 这边的 proving.status
+ *   判断能不能推进, 若只记 job 表, schema 侧会永远卡在 'pending', J1 那边看不出这个市场 proving 已经死了)。
+ * @param {string} marketId
+ * @param {string} errorMessage
+ */
+export function updateProvingFailed(marketId, errorMessage) {
+  const row = sqlite.prepare('SELECT metadata FROM pool_markets WHERE id = ?').get(marketId);
+  if (!row) throw new Error(`updateProvingFailed: market ${marketId} 不存在`);
+  let meta; try { meta = JSON.parse(row.metadata || '{}'); } catch { meta = {}; }
+  if (!meta.zk_continuation) throw new Error(`updateProvingFailed: market ${marketId} 没有 zk_continuation`);
+  meta.zk_continuation.proving = {
+    status: 'failed', guestPayoutRootHex: null, journalHash: null, imageId: null, gate: null,
+    provingError: String(errorMessage || 'unknown error'),
+  };
+  sqlite.prepare(`UPDATE pool_markets SET metadata = ? WHERE id = ?`).run(JSON.stringify(meta), marketId);
+  return { ok: true };
+}
+
+/**
  * buildCloseZkV2GenesisFromAttestedState — 合体入口(J1+J2 切片对接, Bettor 18:45 合体序①)。
  *   编排: readPayoutShardV2AttestedState(J1, 从落链的 close_attest_v2 continuation 读 5 个 committee-attested
  *   字段) → computeCloseZkTmplAnchor(对 CLOSEZK_V2_SIL 当次编译重算, §4 硬门①) → compileCloseZkV2Redeem(J2,

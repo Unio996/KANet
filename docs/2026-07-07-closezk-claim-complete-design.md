@@ -229,6 +229,7 @@ payout_root(&leaves)
    - **配套 mint 政策(推荐,不只是断言拦截)**:genesis-mint driver **一律禁止 bps-fallback 模式**——调用方必须显式提供完整 `fee_leaves`(哪怕零 fee 场景也显式传空数组走"零 fee"路径,不依赖 guest 内部隐式 bps 计算)。从输入层面直接消除断裂分支的触发条件,比"事后断言拦"更彻底(断言是最后一道防线,禁用触发条件是从根切断攻击面)。
    - **配套测试用例(T2b(ii)/dust E2E 落码时必含)**:①`fee_leaves` 非空场景,全部 winner + fee 收款人依次 `claim`,验证最后一笔精确清零 `consolidated_pool`,continuation 正确终止(不产生 0-value output)②故意构造 `fee_leaves` 传空 + `fee_bps>0` 的 mint 请求,验证 driver 硬断言正确拒绝(负向测试,证明拦截真的生效非纸面)。
 6. **`closeZkTmplAnchor` 必须对 `CloseZkV2` 当次实际编译字节重新计算,不得读取/复用任何 `_j2_closezk_repro4.sil` 时代缓存的旧值**(NWT 红队发现,15:29-15:30——`CloseZkV2` 跟 `CloseZkRepro4` 是不同字节码(多了 `claim` entry),anchor 必须绑定新产物;这跟今晚 `gateTmplHash` 撞的坑同一个 bug 形状——"沿用旧缓存值而非对新产物重新算",红队审必查这一点)。
+7. **brokered 市场(`broker_relay_id` 非空)genesis 时 `fee_leaves` 必含 broker 那份**(按 `broker_fee_pct` 换算, 收款 pk = broker relay pubkey——Bettor 2026-07-07 19:01 裁定:broker fee 真实到账是 ZK-native 管线的原生属性, 不往老 committee-sig 路径补 fee 机制(D-001 锁), `fee_leaves` 机制本来就是为这个建的)。跟第⑤条硬门(禁 bps-fallback, 必须显式提供完整 `fee_leaves`)是同一个输入面的两条约束, mint driver 落码时一并核对。
 
 ---
 
