@@ -72,6 +72,9 @@
 - **装配 BOM(无未知件)**: ①claim-complete .sil(J1 设计中)②attest 自治三段(J2)③W5 hook(J2)④T2b mint 管线(J2·schema 先行)⑤准入市场参数(KANet-UI)⑥开关序+demonstrate(Bettor 确认点)。
 - **✅ 卡2③ NWT verdict=GO(14:59,四问全答附 file:line)**: Q1 verify-value-source PASS(enforceCloseAttestV2 L416-493 委员独立重算全 5 字段+D2 逐值核对,=今晚 0a358fa0 实跑同一套代码,委员机制未架空);Q3 并发 PASS(running mutex+同步执行流);Q2 基本 PASS 差一句确认(metadata 标记写在广播前/后——若卡'先写标记 vs NO TX NO STATE CHANGE'张力,Bettor 预备裁定:走 pending_actions 意图/事实分离既有模式);Q4 CONDITIONAL=唯一必做——console glue 写成有名字的独立函数+**offline test 用 0a358fa0 真实 broadcast 输入输出 byte-exact 比对**。写完直接落码不用再等一轮。
 - **KANet-UI ⑤参数草案(14:57,方向稳)**: blockhash_parity judge(3o6cs 已验最简类型/零 HTTP 依赖)/仅团队内部测试注(51.11 教训未闭环前不放真实用户资金)/deadline 30-60min 短周期/stake 1-2KAS/cap≤900;执行前置=卡1 GREEN+exit-path 矩阵验收+T2b ready,不抢跑。
+- **✅ 卡2 ①②③全落码+10/10 offline test PASS(15:07 J2)**: 三文件(transport 加 closeInputs 字段+clearCloseRequest 通用双 key/voter V2 cron/submitCloseAttestV2 编排+buildCommitteeWitness+computeCommitteePkHash 纯函数从驱动脚本逐行抽出),三 kill switch 全默认 OFF;test 用 3o6cs 真实 DB fixture(5 真实 committee_pks+5 真实 sig 行,0a358fa0 落链前那份)byte-exact 10 断言全 PASS+fail-closed 断言;lint 0 error。**Bettor 裁:先 commit 后 NWT 树上终审**(a3ce 同款先例,OFF=零运行时风险,真闸=开关 ON 确认点)。
+- **🔴 W5 重新定性→并入 T2b(15:08 J2 抓,Bettor 批)**: dispatchUnlockZkClose 调用点(zk-close-builder.mjs:221-224)完全没有 gate/proof/guestPayoutRoot 字段来源——需要 proving job 真实产出才能喂,=缺口A 同洞另一面;单独接 stub=编译过但永远拿不到真参数的**假接线**。W5 移入 T2b 一体(proving 管线→gate/receipt→dispatch hook),owner J2,节奏同 T2b(等卡1 GREEN)。BOM 6→5 件。J2 下一步=T2b(i) zk_continuation schema 半页(gate/receipt/guestPayoutRoot 字段一并覆盖)。
+- **⏳ J1 死线(15:08 设)**: 归队(14:47)后 21 分钟无回执、两次点名无应答 → **15:20 前无回音=Bettor 启动应急线预案评估**(J2 跨域顶卡1 设计+NWT 双倍审,按预置报 Owner 批)。
 - **当前主线(ZK 结算生产化剩余三项,承接昨晚收官口径)**:
   1. **②生产 relay handler**(J1 域): `unlockBshardZkClose`——prove+gate+2-input build+broadcast,包装昨晚已验证的真实流程。
   2. **③三前置基础设施**(escape entrypoint 服务真实市场的硬前置,wiring 文档 §2.6): 出证备份机(J1 已认领 SPOF 评估)+ proving job 卡死告警 + `ESCAPE_GRACE` 按"出证环境全损到重建最坏时长"定标。
