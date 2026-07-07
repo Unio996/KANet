@@ -28,6 +28,15 @@ import { findExtractor, extractStructuredFields } from './oracle-evidence-extrac
 import { listShards } from './shard-allocator.mjs';                                          // C1 cross-shard iteration (单源, register/consolidate 同表)
 import { canonicalBetOrder, computeBetsRoot, payoutRoot as computeMerkleRoot } from './pool-payout-root.mjs';   // W2: committee 独立重算 betsRoot/refundRoot
 const _PREDICATE_COMMIT_REDEEM_OFFSET = 518;
+// 🔴 V2 offset(W2, J2 2026-07-07·NWT 实测 indexOf + 源码引用次数双证坐实, Bettor 批): PayoutShardV2.sil 多一个
+// closeZkTmplAnchor ctor 字段(+absorb/close_attest 的 validateOutputState 多 4 字段透传)→ 整个 ctor-常量池段系统性
+// 后移 +124B(predicate_commit/committee-check offset 全部受影响; state 区_PS_STATE_START/_PSV2_* 不受影响,
+// 那些已 byte-exact 测过)。双证: ①indexOf 在真实 3o6cs redeem 里搜 predicate_commit 命中 642(=518+124)
+// ②结构推导: .sil 源码 predicate_commit 被引用 2 次(close_attest/cancel_attest 各一次, 每次 tautology check
+// 内用 2 次), 4 份 inline copy(642/676 close_attest 一对, 2623/2657 cancel_attest 一对)——取每对第一份(642)
+// 跟 V1(518)同一"entry 内第一次出现"选取逻辑, 非巧合碰撞。V1/V2 两套常量按 ctx.resolutionRuleSpec.zk_native 显式选择
+// (同 silverc 双 binary 按族 pin 同款哲学), V1 路径(955 真实赢家)逐字节不变。
+const _PREDICATE_COMMIT_REDEEM_OFFSET_V2 = 642;
 const _hex32 = (s) => Buffer.from(blake2b(Buffer.from(s), { dkLen: 32 })).toString('hex');
 // canonical (A) 4-field ShardLeaf state splice (= pool-shard-register.spliceLeafState 单源, byte-equal to recompile, J2 已验)。
 // ⚠ landmine 修正(NWT 2026-07-07 实测坐实+紧急抓漏): 真 silverc/rusty-kaspa byte[](int,size) 对负数用
@@ -230,7 +239,10 @@ export async function _enforceCloseAttestCore(signRequest, ctx) {
   //    3o6cs 是第一个真正走到这里的 predicate-null 市场, 之前没人撞过。
   //    比对基准 = ctx.marketMetadataHash(daemon 本地 market 行, buildEnforceCtx 注入, 同 deadlineDaa/resolutionRuleSpec
   //    一样的信任边界——委员自己查的本地 DB, 绝不从 signRequest/proposal 读)。HTTP/feeMarket 两条既有分支逐字不动。
-  const onChainCommit = String(psRedeemHex).slice(_PREDICATE_COMMIT_REDEEM_OFFSET * 2, (_PREDICATE_COMMIT_REDEEM_OFFSET + 32) * 2);
+  // 🔴 V1/V2 offset 表按 ctx.resolutionRuleSpec.zk_native 显式选择(daemon-trusted, 已是 W2 既有信任边界), 不隐式推断。
+  const _isV2Layout = ctx.resolutionRuleSpec?.zk_native === true;
+  const _predicateCommitOffset = _isV2Layout ? _PREDICATE_COMMIT_REDEEM_OFFSET_V2 : _PREDICATE_COMMIT_REDEEM_OFFSET;
+  const onChainCommit = String(psRedeemHex).slice(_predicateCommitOffset * 2, (_predicateCommitOffset + 32) * 2);
   const feeMarket = !!broker_pk;
   let expectedCommit;
   if (predicate == null) {
@@ -242,7 +254,7 @@ export async function _enforceCloseAttestCore(signRequest, ctx) {
       : computePredicateCommit(predicate);
   }
   if (expectedCommit !== onChainCommit) {
-    return { pass: false, reason: `命门① hash-bind FAIL: ${expectedCommit.slice(0, 14)} != on-chain redeem[518] ${onChainCommit.slice(0, 14)} (假 predicate/fee 地址/market_metadata_hash)` };
+    return { pass: false, reason: `命门① hash-bind FAIL: ${expectedCommit.slice(0, 14)} != on-chain redeem[${_predicateCommitOffset}] ${onChainCommit.slice(0, 14)} (假 predicate/fee 地址/market_metadata_hash)` };
   }
   // chain-bound check (redeem 不可伪): daemon should also verify p2sh(psRedeemHex) == the signed PS input's
   //   on-chain address via ctx.rcOn check_utxo_landed (= 命门① 的链锚, 同今天手动流). [daemon ctx hook]
@@ -546,12 +558,17 @@ export async function verifyFrozenEvidence(predicate, proposedSnapshot, ctx = {}
 //   ⚠ .sil-pinned (= offset-518 predicate_commit 同款 fragility): PayoutShard 22-arg shape。 .sil 变则 offsets 变 → cross-check
 //     自动 fail-loud (安全降级, 非静默错读)。J2 daemon 应优先用 ctx.onChainPoolMerkleRoot (scout 链读 PS state) 绕过 offset 依赖。
 const _PMR_COMMITTEE_CHECK_OFFSETS = [1002, 1266, 1530, 1794, 2058];
-export function extractOnChainPoolMerkleRoot(psRedeemHex) {
+// 🔴 V2 offset(W2, J2 2026-07-07·双证同 _PREDICATE_COMMIT_REDEEM_OFFSET_V2 一致坐实): close_attest 的 5 committee-check
+// inlined poolMerkleRoot copies, PayoutShardV2 因 ctor 常量池 +124B 后移到这组(cancel_attest 自己另一组
+// [3107,3371,3635,3899,4163] 今天 close_attest 路径用不到, 不在此表)。
+const _PMR_COMMITTEE_CHECK_OFFSETS_V2 = [1126, 1390, 1654, 1918, 2182];
+export function extractOnChainPoolMerkleRoot(psRedeemHex, isV2 = false) {
   const redeem = Buffer.from(String(psRedeemHex), 'hex');
+  const offsets = isV2 ? _PMR_COMMITTEE_CHECK_OFFSETS_V2 : _PMR_COMMITTEE_CHECK_OFFSETS;
   const reads = [];
-  for (const o of _PMR_COMMITTEE_CHECK_OFFSETS) {
+  for (const o of offsets) {
     if (redeem.length < o + 32 || redeem[o - 1] !== 0x20) {
-      throw new Error(`poolMerkleRoot offset ${o} 非 PUSH32 / redeem 太短 (${redeem.length}B) — 非 canonical PayoutShard redeem (.sil drift?)`);
+      throw new Error(`poolMerkleRoot offset ${o} 非 PUSH32 / redeem 太短 (${redeem.length}B) — 非 canonical Payout${isV2 ? 'ShardV2' : 'Shard'} redeem (.sil drift?)`);
     }
     reads.push(redeem.slice(o, o + 32).toString('hex').toLowerCase());
   }
@@ -579,7 +596,9 @@ export async function reDeriveCommittee(marketId, ctx, psRedeemHex = null) {
   const redeemForRoot = psRedeemHex || ctx.psRedeemHex || null;
   let onChainRoot = ctx.onChainPoolMerkleRoot != null ? String(ctx.onChainPoolMerkleRoot).toLowerCase() : null;
   if (!onChainRoot && redeemForRoot) {
-    try { onChainRoot = extractOnChainPoolMerkleRoot(redeemForRoot); } catch (e) { throw new Error(`C2-anchor: poolMerkleRoot 链读失败 (${e.message})`); }
+    // 🔴 V1/V2 offset 表选择(同命门①一致, ctx.resolutionRuleSpec.zk_native 显式分派, W2 2026-07-07)。
+    const _isV2Layout = ctx.resolutionRuleSpec?.zk_native === true;
+    try { onChainRoot = extractOnChainPoolMerkleRoot(redeemForRoot, _isV2Layout); } catch (e) { throw new Error(`C2-anchor: poolMerkleRoot 链读失败 (${e.message})`); }
   }
   if (!onChainRoot) throw new Error('C2-anchor: 无 chain-anchored poolMerkleRoot (ctx.onChainPoolMerkleRoot / psRedeemHex 都缺) — 拒静默信 DB root (fail-loud)');
   const dbRoot = String(snap.pool_merkle_root || '').toLowerCase();
