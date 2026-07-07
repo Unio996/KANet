@@ -27,6 +27,7 @@ import { listShards } from '../lib/shard-allocator.mjs';
 import { compileSil, ctorBytes32, ctorInt } from '../lib/pool-bshard-artifacts.mjs';
 import { isCommingledSpine } from '../lib/pool-commingle-detect.mjs';
 import { collectCloseSigsV2, clearCloseRequest, markSubmittedV2, QUORUM } from '../lib/bshard-close-transport.mjs';
+import { enqueueZkProveJob } from '../lib/zk-prove-enqueue.mjs';
 
 const TICK_MS = 30_000;   // 30s tick (close_attest 时效性 > 普通 vote; settler 等 quorum)
 let timer = null, running = false;
@@ -462,6 +463,24 @@ export function computeCommitteePkHash(committeePks) {
   return Buffer.from(blake2b(Buffer.concat(committeePks.map((p) => Buffer.from(p, 'hex'))), { dkLen: 32 })).toString('hex');
 }
 
+/**
+ * _deriveCloseFeeLeaves — 缺件①的 fee 政策边界(J1tn 2026-07-08, 显式声明非隐式假设):
+ *   当前只支持"单一 broker fee leaf"这个最简政策(market.broker_pk + market.broker_fee_pct, 两者都是
+ *   create-committed 的真实 pool_markets 列, 非本函数派生——今晚频道 broker fee 讨论用的就是这个市场专属
+ *   值(1.9%), 不是 pool-shard-settle.mjs 的协议固定 FEE_CONFIG 常量)。oracle/node 份额(FEE_CONFIG 里的
+ *   oracleBps/nodeBps)要不要也在 ZK-native 管线里发, 是团队还没定案的政策问题(委员链锚重算 vs 单一
+ *   broker 简化模型, 两者取舍未拍板)——本函数不越权替团队做这个决定, 只覆盖已经明确讨论过的 broker 这一份。
+ *   market 没配 broker_pk/broker_fee_pct=0 → 返回 null(zk_prove_jobs §4硬门⑤要求非空 fee_leaves, 现状下
+ *   这类市场暂不进 ZK-native prove 管线, 不是本函数该静默造一个假 leaf 糊弄过去)。
+ */
+function _deriveCloseFeeLeaves(marketId, consolidatedPool) {
+  const market = sqlite.prepare('SELECT broker_pk, broker_fee_pct FROM pool_markets WHERE id = ?').get(marketId);
+  const bps = Number(market?.broker_fee_pct || 0);
+  if (!market?.broker_pk || bps <= 0) return null;
+  const amount = (BigInt(consolidatedPool) * BigInt(bps) / 10000n).toString();
+  return [{ pk: String(market.broker_pk).toLowerCase(), amount, type: 'broker' }];
+}
+
 const SETTLER_RELAY_ID = process.env.BSHARD_SETTLER_RELAY_ID || null;   // 广播身份(付 fee input + 收找零), 显式配置非猜测。
 
 /**
@@ -514,6 +533,35 @@ export function startBshardCloseSubmitV2Cron() {
 }
 export function stopBshardCloseSubmitV2Cron() { if (submitTimer) { clearInterval(submitTimer); submitTimer = null; } }
 
+/**
+ * _tryEnqueueZkProve — 缺件①落地口(J1tn): close_attest_v2 确认 LANDED 后调用, 自动 enqueue 进 zk_prove_jobs
+ *   (缺件②·zk-prove-worker.mjs 轮询消费)。**失败不影响 close_attest_v2 本身的已落链状态**——attest 是钱路
+ *   已完成的既定事实(closed 0→1 已经落链), enqueue 只是"排队等 ZK 结算"这个下游步骤, enqueue 失败(比如
+ *   Σleaf 不守恒/市场未配置 broker fee)应该被看见(alert)而不是让整个 tick 或已经成立的 attest 状态受影响。
+ */
+function _tryEnqueueZkProve(market, req) {
+  try {
+    const attestValues = {
+      newPayoutRootHex: req.claimedPayoutRoot, newAttestedWinner: req.new_attestedWinner,
+      newBetsRootHex: req.new_betsRoot, newRefundRootHex: req.new_refundRoot, newAttestedAtMs: req.new_attestedAtMs,
+    };
+    // consolidatedPool 还没从链上读出来(readPayoutShardV2AttestedState 在 enqueueZkProveJob 内部才做那步)——
+    // 这里只需要它算 broker fee 金额, 用 req.closeInputs.payoutshard.state.consolidated_pool(跟 D2-V2 binding
+    // 已核实过的同一个 propose 阶段值, 委员签名时已验过这个字段没被 driver 篡改)。
+    const consolidatedPool = req.closeInputs.payoutshard.state.consolidated_pool;
+    const feeLeaves = _deriveCloseFeeLeaves(market.id, consolidatedPool);
+    if (!feeLeaves) {
+      console.log(`[bshard-close-submit-v2] market=${market.id.slice(-8)} 未配置 broker_pk/broker_fee_pct — 暂不支持 ZK-native prove enqueue(§4硬门⑤要求非空fee_leaves), 跳过`);
+      return;
+    }
+    const r = enqueueZkProveJob(sqlite, market.id, req.closeInputs.payoutshard.redeem_hex, attestValues, feeLeaves);
+    if (r.skipped) console.log(`[bshard-close-submit-v2] market=${market.id.slice(-8)} zk-prove enqueue skipped: ${r.skipped}`);
+    else console.log(`[bshard-close-submit-v2] ✅ market=${market.id.slice(-8)} zk_prove_jobs enqueued jobId=${r.jobId}`);
+  } catch (e) {
+    console.error(`[bshard-close-submit-v2] 🔴 market=${market.id.slice(-8)} zk-prove enqueue FAILED (attest 本身已落链, 不受影响): ${e.message}`);
+  }
+}
+
 async function _pollLanded(address, txid, attempts = 15, intervalMs = 2_000) {
   for (let i = 0; i < attempts; i++) {
     try {
@@ -546,6 +594,7 @@ export async function bshardCloseSubmitV2Tick() {
         const landedNow = await _pollLanded(pendingTx.psContAddress, pendingTx.txid, 1, 0);
         if (landedNow) {
           clearCloseRequest(market.id, 'attested_v2');
+          _tryEnqueueZkProve(market, req);
           submitted++;
           console.log(`[bshard-close-submit-v2] ✅ (resumed) market=${market.id.slice(-8)} close_attest_v2 LANDED txId=${pendingTx.txid}`);
         } else {
@@ -572,6 +621,7 @@ export async function bshardCloseSubmitV2Tick() {
       const landedOk = await _pollLanded(r.psContAddress, r.txId);
       if (!landedOk) { failed++; console.warn(`[bshard-close-submit-v2] market=${market.id.slice(-8)} txId=${r.txId} broadcast OK 但等待窗口内未确认 landed — txId 已持久化(bshard_close_submit_v2_pending_txid), 下轮 tick 只查这一笔, 不重复 broadcast`); continue; }
       clearCloseRequest(market.id, 'attested_v2');   // 独立 status 值, 跟 V1 completed/refunding 区分——后续链条(zk_handoff)接手。
+      _tryEnqueueZkProve(market, req);
       submitted++;
       console.log(`[bshard-close-submit-v2] ✅ market=${market.id.slice(-8)} close_attest_v2 LANDED txId=${r.txId}`);
     }
