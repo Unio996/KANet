@@ -5315,5 +5315,20 @@ export function runMigrations() {
     }
   }
 
+  // v181 (2026-07-08, J2, 缺件②prove worker): zk_prove_jobs 补 fee_leaves_json/pool_total_sompi 两列——
+  //   v180 建表时只覆盖了 winner payout 侧(ordered_bets_json/bets_root_hex/attested_winner), 没有 fee_leaves
+  //   字段, 但今天的设计文档 §4 硬门⑤(禁 bps-fallback, 生产路径必须显式提供完整 fee_leaves)要求 GuestInput
+  //   必须带这两项, enqueue 侧(缺件①, J1 域)写入这两列, prove worker(本文件调用方)读取喂给 RISC0 guest。
+  {
+    const cols = sqlite.pragma('table_info(zk_prove_jobs)').map((c) => c.name);
+    if (!cols.includes('fee_leaves_json')) {
+      sqlite.exec(`ALTER TABLE zk_prove_jobs ADD COLUMN fee_leaves_json TEXT NOT NULL DEFAULT '[]'`);
+    }
+    if (!cols.includes('pool_total_sompi')) {
+      sqlite.exec(`ALTER TABLE zk_prove_jobs ADD COLUMN pool_total_sompi TEXT`);
+    }
+    console.log('[migrate] v181: zk_prove_jobs 补 fee_leaves_json/pool_total_sompi(§4硬门⑤禁bps-fallback, guest需要完整fee_leaves).');
+  }
+
   console.log('[migrate] DB migrations complete.');
 }

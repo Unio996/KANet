@@ -448,6 +448,11 @@ console.log(`[kasia-console] running at http://localhost:${PORT}`);
 import { startZkProveServer } from './services/zk-prove-server.mjs';
 await startZkProveServer();
 
+// zk-prove-worker(缺件②, Bettor 2026-07-08 派工): 轮询 zk_prove_jobs 真跑 RISC0 proving + 铸 gate 注资。
+// ZK_PROVE_WORKER_ENABLED=1 才跑(默认 OFF, 真实 proving+真 KAS 注资, 同 SETTLE_DAEMON_ENABLED 模式)。
+import { startZkProveWorkerCron } from './services/zk-prove-worker.mjs';
+startZkProveWorkerCron();
+
 // Tier 2.1 pair ingestor — scans broadcast_messages for pair_invite/pair_ack envelopes + writes agent_pairs.
 // 30s tick, idempotent re-scan, boot catch-up from id 0.
 import { startPeriodicIngest } from './services/pair-ingestor.mjs';
