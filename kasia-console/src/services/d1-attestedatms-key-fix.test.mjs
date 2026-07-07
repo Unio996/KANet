@@ -25,34 +25,42 @@ function insertSig(pk, attestedAtMs) {
 }
 
 function main() {
-  // round A: 3 committee members sign the old image.
-  insertSig('pkA', ROUND_A_MS);
-  insertSig('pkB', ROUND_A_MS);
-  insertSig('pkC', ROUND_A_MS);
+  // 🔴 offline-test 铁律 (Bettor 2026-07-08 23:4x catch): 这份测试用的是生产 db/client.js 单例(跟今晚其它
+  // "用实实DB实实schema"测试同款, 那是刻意的——但 cleanup 必须 try/finally 保证【无论断言/异常】都执行,
+  // 否则一次崩溃(今晚第一次跑就崩过, 列名打错)会把哨兵行(pkA..pkE)永久留在生产 chain_events 里,
+  // 污染以后任何按 txid LIKE / market_id 的查询。这是最小闭合修复(不是换 in-memory db, 那需要给
+  // collectCloseSigsV2 加 db 注入参数, 更大改动, 明天再评估要不要做)。
+  try {
+    // round A: 3 committee members sign the old image.
+    insertSig('pkA', ROUND_A_MS);
+    insertSig('pkB', ROUND_A_MS);
+    insertSig('pkC', ROUND_A_MS);
 
-  // scoped by (root, attestedAtMs=ROUND_A_MS): finds exactly the 3 old-round sigs.
-  const oldRound = collectCloseSigsV2(MARKET_ID, ROOT, ROUND_A_MS);
-  ok(oldRound.count === 3, `round A scoped query finds exactly its 3 sigs (got ${oldRound.count})`);
+    // scoped by (root, attestedAtMs=ROUND_A_MS): finds exactly the 3 old-round sigs.
+    const oldRound = collectCloseSigsV2(MARKET_ID, ROOT, ROUND_A_MS);
+    ok(oldRound.count === 3, `round A scoped query finds exactly its 3 sigs (got ${oldRound.count})`);
 
-  // scoped by (root, attestedAtMs=ROUND_B_MS): must find ZERO — round B hasn't signed yet, and round
-  // A's sigs (same root, different attestedAtMs) must NOT leak in (this is the exact bug).
-  const newRoundBeforeSigning = collectCloseSigsV2(MARKET_ID, ROOT, ROUND_B_MS);
-  ok(newRoundBeforeSigning.count === 0, `round B scoped query finds 0 sigs before anyone signs round B (was leaking round A's 3 sigs pre-fix)`);
-  ok(newRoundBeforeSigning.ready === false, 'round B correctly not ready (0 < quorum) — no false-ready from stale round A sigs');
+    // scoped by (root, attestedAtMs=ROUND_B_MS): must find ZERO — round B hasn't signed yet, and round
+    // A's sigs (same root, different attestedAtMs) must NOT leak in (this is the exact bug).
+    const newRoundBeforeSigning = collectCloseSigsV2(MARKET_ID, ROOT, ROUND_B_MS);
+    ok(newRoundBeforeSigning.count === 0, `round B scoped query finds 0 sigs before anyone signs round B (was leaking round A's 3 sigs pre-fix)`);
+    ok(newRoundBeforeSigning.ready === false, 'round B correctly not ready (0 < quorum) — no false-ready from stale round A sigs');
 
-  // round B: 2 members sign the new image (same root, new attestedAtMs).
-  insertSig('pkD', ROUND_B_MS);
-  insertSig('pkE', ROUND_B_MS);
-  const newRoundAfterSigning = collectCloseSigsV2(MARKET_ID, ROOT, ROUND_B_MS);
-  ok(newRoundAfterSigning.count === 2, `round B scoped query finds exactly its own 2 sigs after signing (got ${newRoundAfterSigning.count})`);
-  ok(newRoundAfterSigning.sigs.every(s => ['pkD', 'pkE'].includes(s.committee_pk)), 'round B sigs contain only round B signers, no round A cross-contamination');
+    // round B: 2 members sign the new image (same root, new attestedAtMs).
+    insertSig('pkD', ROUND_B_MS);
+    insertSig('pkE', ROUND_B_MS);
+    const newRoundAfterSigning = collectCloseSigsV2(MARKET_ID, ROOT, ROUND_B_MS);
+    ok(newRoundAfterSigning.count === 2, `round B scoped query finds exactly its own 2 sigs after signing (got ${newRoundAfterSigning.count})`);
+    ok(newRoundAfterSigning.sigs.every(s => ['pkD', 'pkE'].includes(s.committee_pk)), 'round B sigs contain only round B signers, no round A cross-contamination');
 
-  // backward-compat: omitting attestedAtMs falls back to root-only (old behavior) — sees all 5.
-  const legacyCall = collectCloseSigsV2(MARKET_ID, ROOT);
-  ok(legacyCall.count === 5, `omitting attestedAtMs falls back to root-only match (sees all 5 across both rounds), backward-compat preserved`);
-
-  // cleanup
-  sqlite.prepare(`DELETE FROM chain_events WHERE txid LIKE ?`).run(`${MARKET_ID}%`);
+    // backward-compat: omitting attestedAtMs falls back to root-only (old behavior) — sees all 5.
+    const legacyCall = collectCloseSigsV2(MARKET_ID, ROOT);
+    ok(legacyCall.count === 5, `omitting attestedAtMs falls back to root-only match (sees all 5 across both rounds), backward-compat preserved`);
+  } finally {
+    // cleanup — ALWAYS runs, even if an assertion helper or collectCloseSigsV2 itself throws.
+    const cleaned = sqlite.prepare(`DELETE FROM chain_events WHERE txid LIKE ?`).run(`${MARKET_ID}%`);
+    console.log(`  (cleanup: removed ${cleaned.changes} sentinel rows for ${MARKET_ID})`);
+  }
 
   console.log(fails === 0 ? '\n✅✅ ALL PASS — (root, attestedAtMs) compound key prevents cross-round sig contamination' : `\n❌ ${fails} assertions failed`);
   process.exit(fails === 0 ? 0 : 1);
