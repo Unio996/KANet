@@ -1,0 +1,11 @@
+{
+  "attested_winner": 0,
+  "bets_root_hex": "41b7e8e6e891da7eb4f17467e2297f06954b59c7035efbc6df37ce1dbb9dece9",
+  "demo_mode": true,
+  "image_id": "c9918501d90bf0aeaaf7970816078c81e8286c08293ccf388e87a7cab023ce30",
+  "journal_digest": "b7b89b3e9490c96b525b970adb83a7015ee48b2c00beaca32d10fa2360acb1d4",
+  "payout_root_hex": "759b6e2682d053f7fa18e9b6b2498f30afbc429cc53a6307fe03fbe5b722e669",
+  "receipt_borsh_bytes_len": 482,
+  "receipt_borsh_path": "/root/payout-guest/groth16_receipt.borsh",
+  "receipt_hex_path": "/root/payout-guest/groth16_receipt.hex"
+}
