@@ -147,11 +147,11 @@ export function buildEnforceCtx(voter, voterPk, market) {
         const r = await sendCommandAsync(voter.id, { type: 'check_utxo_landed', address: addr, txid }, 15000);
         return !!(r?.landed || r?.found);
       }
-      // level2-B per-ticket anti-swap 用法(txid 缺省): live 查一次(relay 瞬时故障也走历史 fallback,
-      // 不因 IPC 抖动误拒一个可能真实 landed 的 ticket), 没有就退化到 kaspa_tx_log(landed-in-history)。
-      let r = null;
-      try { r = await sendCommandAsync(voter.id, { type: 'check_utxo_landed', address: addr }, 15000); } catch { /* fall through to history */ }
-      if (r?.landed || r?.found) return true;
+      // 🔴 fix² (Bettor+KANet-UI catch 2026-07-08 22:4x): check_utxo_landed 的 relay 端命令 schema
+      // (kasia-relay/src/lib/commands.mjs:136/202) 把 txid 定为必填字段——txid=null 时压根没有"live 查"
+      // 这回事可发(发了就是 INVALID COMMAND, 不是"查了没找到"), 上一版试图先 live 再 fallback 是徒劳的
+      // 空转。level2-B per-ticket anti-swap 用法(无具体已知 txid, 只问"这地址曾否出现在任一 output 里")
+      // 直接查 kaspa_tx_log(landed-in-history, indexer 从真块写, node-local 可信边界), 不发不合法的 live 命令。
       const row = sqlite.prepare(`SELECT 1 FROM kaspa_tx_log WHERE outputs_json LIKE ? LIMIT 1`).get(`%"${addr}"%`);
       return !!row;
     },
@@ -331,8 +331,16 @@ async function processCloseRequest(voter, market, req, enforceCloseAttest) {
     const meta = req.committee_meta && req.committee_meta[voterPk] ? req.committee_meta[voterPk] : { idx: req.idx, siblings_hex: req.siblings_hex };
     const payload = JSON.stringify({ t: 'bshard_close_sig', market_id: market.id, committee_pk: voterPk, payout_root: req.claimedPayoutRoot, input_index: req.input_index ?? 0, idx: meta.idx, siblings_hex: meta.siblings_hex, signature, verdict: verdict.verdict });
     const synthTxid = `bshard_close_sig:${voter.id.slice(0, 8)}:${market.id.slice(-6)}:${String(req.claimedPayoutRoot).slice(0, 8)}`;
-    sqlite.prepare(`INSERT OR IGNORE INTO chain_events (txid, from_address, event_type, payload, observed_by, is_public) VALUES (?, ?, 'bshard_close_sig', ?, ?, 1)`)
-      .run(synthTxid, voter.address, payload, voter.id);
+    // 🔴 fix (同下方 V2 同款坑, 2026-07-08 23:0x): chain_events.observed_at 是 TEXT NOT NULL 无 default,
+    // 漏这一列会被 INSERT OR IGNORE 静默吞掉——signed++/console.log 仍打印成功但行没真的落地。V1/V2 是同一
+    // 作者写的姊妹函数, 同一个 bug 存在于两处, 一并修(同族修复不同步的反面: 这次揪出来就两处一起补)。
+    const insertResult = sqlite.prepare(`INSERT OR IGNORE INTO chain_events (txid, from_address, event_type, payload, observed_by, observed_at, is_public) VALUES (?, ?, 'bshard_close_sig', ?, ?, ?, 1)`)
+      .run(synthTxid, voter.address, payload, voter.id, new Date().toISOString());
+    // fail-closed 记账(同下方 V2 同款): changes===0 时必须查真实是否已存在(幂等 OK), 不能笼统当"签了"。
+    if (insertResult.changes === 0) {
+      const exists = sqlite.prepare('SELECT 1 FROM chain_events WHERE txid = ? AND event_type = ?').get(synthTxid, 'bshard_close_sig');
+      if (!exists) return { errored: true, reason: `sig INSERT changes=0 且该 txid 查无此行 — 静默失败(非幂等重复), 不能计入 signed` };
+    }
     console.log(`[bshard-close-voter] ✅ ${voter.name} 自治 enforce PASS (verdict=${verdict.verdict}) → 签 close_attest market=${market.id.slice(-8)}`);
     return { signed: true };
   } catch (e) {
@@ -435,8 +443,21 @@ async function processCloseRequestV2(voter, market, req, enforceCloseAttestV2) {
       attestedWinner: req.new_attestedWinner, betsRoot: verdict.betsRootHex, refundRoot: verdict.refundRootHex, attestedAtMs: req.new_attestedAtMs,
     });
     const synthTxid = `bshard_close_sig_v2:${voter.id.slice(0, 8)}:${market.id.slice(-6)}:${String(req.claimedPayoutRoot).slice(0, 8)}`;
-    sqlite.prepare(`INSERT OR IGNORE INTO chain_events (txid, from_address, event_type, payload, observed_by, is_public) VALUES (?, ?, 'bshard_close_sig_v2', ?, ?, 1)`)
-      .run(synthTxid, voter.address, payload, voter.id);
+    // 🔴 fix (J2+NWT catch 2026-07-08 23:0x, uqmp8 首次真实 voter cron 运行: signed++ 计数打了但 chain_events
+    // 零行落地): chain_events.observed_at 是 TEXT NOT NULL 无 default, 这条 INSERT 漏了这一列——INSERT OR IGNORE
+    // 静默吞掉 NOT NULL 违规, tick 日志"✅ 签了"是假象, collectCloseSigsV2 永远查到 0 sigs, submit 永远 notReady。
+    // 3o6cs 今晚早些时候的 5 条真实签名是我 driver 脚本手写的 7 列 INSERT(含 observed_at), 没踩这个坑——这条
+    // 生产 cron 路径(bshardCloseVoterV2Tick)是今晚才第一次真实激活, 这个 bug 从写出来就在, 从未被真实执行过。
+    const insertResult = sqlite.prepare(`INSERT OR IGNORE INTO chain_events (txid, from_address, event_type, payload, observed_by, observed_at, is_public) VALUES (?, ?, 'bshard_close_sig_v2', ?, ?, ?, 1)`)
+      .run(synthTxid, voter.address, payload, voter.id, new Date().toISOString());
+    // 🔴 fail-closed 记账 (Bettor 2026-07-08 23:0x): OR IGNORE 吞掉的不只是 NOT NULL 违规, 也吞 UNIQUE(txid,event_type)
+    // 冲突(正常幂等重试场景)——changes===0 时不能笼统当"签了", 必须查真是否已经有这行(幂等 OK)还是真插入失败
+    // (才是该报的错)。signed++ 只能锚定在"这行现在确实存在", 不能锚定在"INSERT 语句跑完没报错"。
+    if (insertResult.changes === 0) {
+      const exists = sqlite.prepare('SELECT 1 FROM chain_events WHERE txid = ? AND event_type = ?').get(synthTxid, 'bshard_close_sig_v2');
+      if (!exists) return { errored: true, reason: `sig INSERT changes=0 且该 txid 查无此行 — 静默失败(非幂等重复), 不能计入 signed` };
+      // exists=true: 幂等重试撞了自己上一轮已成功的行, 这不是错误, 正常 signed。
+    }
     console.log(`[bshard-close-voter-v2] ✅ ${voter.name} 自治 enforce PASS (verdict=${verdict.verdict}) → 签 close_attest_v2 market=${market.id.slice(-8)}`);
     return { signed: true };
   } catch (e) {
