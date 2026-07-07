@@ -154,6 +154,23 @@ export function collectCloseSigsV2(marketId, payoutRoot) {
 }
 
 /**
+ * markSubmittedV2 — 卡2③ landed-check 超时 crash-recovery 修复 (NWT tree-diff 终审发现, 2026-07-07)。
+ *   submitCloseAttestV2 广播成功拿到 txId 后立刻调用(不等 landed-check 窗口结束), 把 txId 持久化进
+ *   metadata.bshard_close_request_v2.bshard_close_submit_v2_pending_txid — 若 30s 轮询窗口内没确认落链
+ *   (可能只是 RPC 瞬时延迟 false-negative), 下次 tick 靠这个字段直接查这一笔的现状, 不重新走 collect+submit
+ *   全流程(=不会又构造+广播一笔新 tx)。单条同步 SQLite UPDATE, 同 publishCloseRequestV2 的原子性纪律。
+ */
+export function markSubmittedV2(marketId, txid, psContAddress) {
+  const row = sqlite.prepare('SELECT metadata FROM pool_markets WHERE id = ?').get(marketId);
+  if (!row) return { ok: false };
+  let meta; try { meta = JSON.parse(row.metadata || '{}'); } catch { meta = {}; }
+  if (!meta.bshard_close_request_v2) return { ok: false, reason: 'no bshard_close_request_v2 in metadata' };
+  meta.bshard_close_request_v2.bshard_close_submit_v2_pending_txid = { txid, psContAddress };
+  sqlite.prepare(`UPDATE pool_markets SET metadata = ? WHERE id = ?`).run(JSON.stringify(meta), marketId);
+  return { ok: true };
+}
+
+/**
  * clearCloseRequest — submit LANDED 后清 request + 推进 status (settled/refunding by caller)。
  * 通用函数 (2026-07-07 J2, NWT 卡2 red-team 抓出的发现): 同时删 V1 key `bshard_close_request` 和 V2 key
  * `bshard_close_request_v2` — 两个 key 结构隔离(各自 publishCloseRequest/publishCloseRequestV2 独立写),

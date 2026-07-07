@@ -26,7 +26,7 @@ import { fetchEndBlockHashCanonical, loadPoolSnapshot } from './pool-market-sett
 import { listShards } from '../lib/shard-allocator.mjs';
 import { compileSil, ctorBytes32, ctorInt } from '../lib/pool-bshard-artifacts.mjs';
 import { isCommingledSpine } from '../lib/pool-commingle-detect.mjs';
-import { collectCloseSigsV2, clearCloseRequest, QUORUM } from '../lib/bshard-close-transport.mjs';
+import { collectCloseSigsV2, clearCloseRequest, markSubmittedV2, QUORUM } from '../lib/bshard-close-transport.mjs';
 
 const TICK_MS = 30_000;   // 30s tick (close_attest 时效性 > 普通 vote; settler 等 quorum)
 let timer = null, running = false;
@@ -514,6 +514,17 @@ export function startBshardCloseSubmitV2Cron() {
 }
 export function stopBshardCloseSubmitV2Cron() { if (submitTimer) { clearInterval(submitTimer); submitTimer = null; } }
 
+async function _pollLanded(address, txid, attempts = 15, intervalMs = 2_000) {
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const chk = await sendCommandAsync(SETTLER_RELAY_ID, { type: 'check_utxo_landed', address, txid }, 15_000);
+      if (chk?.landed || chk?.found) return true;
+    } catch { /* transient, retry */ }
+    if (i < attempts - 1) await new Promise((res) => setTimeout(res, intervalMs));
+  }
+  return false;
+}
+
 export async function bshardCloseSubmitV2Tick() {
   if (submitRunning) return { skipped: true };
   submitRunning = true;
@@ -522,11 +533,28 @@ export async function bshardCloseSubmitV2Tick() {
       SELECT id, metadata FROM pool_markets
       WHERE protocol_version = 'v0.7' AND protocol_status = 'collecting_sigs' AND metadata LIKE '%bshard_close_request_v2%'
     `).all();
-    let submitted = 0, notReady = 0, failed = 0, errored = 0;
+    let submitted = 0, notReady = 0, failed = 0, errored = 0, resumed = 0;
     for (const market of pending) {
       let req;
       try { req = JSON.parse(market.metadata || '{}').bshard_close_request_v2; } catch { errored++; continue; }
       if (!req || !req.claimedPayoutRoot || !req.closeInputs) { errored++; continue; }
+
+      // 崩溃恢复分支(NWT tree-diff 终审发现, 2026-07-07): 上一轮已经 broadcast 成功过(txId 已持久化)但
+      // landed-check 窗口内没确认——只查这一笔具体 txId 的现状, 不重新走 collect+submit(不会又构造+广播一笔新 tx)。
+      const pendingTx = req.bshard_close_submit_v2_pending_txid;
+      if (pendingTx?.txid) {
+        const landedNow = await _pollLanded(pendingTx.psContAddress, pendingTx.txid, 1, 0);
+        if (landedNow) {
+          clearCloseRequest(market.id, 'attested_v2');
+          submitted++;
+          console.log(`[bshard-close-submit-v2] ✅ (resumed) market=${market.id.slice(-8)} close_attest_v2 LANDED txId=${pendingTx.txid}`);
+        } else {
+          resumed++;
+          console.log(`[bshard-close-submit-v2] market=${market.id.slice(-8)} 上轮已 submit(txId=${String(pendingTx.txid).slice(0,12)}) 仍未 landed — 本轮只查不重 broadcast`);
+        }
+        continue;
+      }
+
       const { ready, sigs } = collectCloseSigsV2(market.id, req.claimedPayoutRoot);
       if (!ready) { notReady++; continue; }
       if (!SETTLER_RELAY_ID) { errored++; console.error('[bshard-close-submit-v2] BSHARD_SETTLER_RELAY_ID unset — 无法 submit'); continue; }
@@ -535,19 +563,19 @@ export async function bshardCloseSubmitV2Tick() {
       if (!changeAddress) { errored++; continue; }
       const r = await submitCloseAttestV2(market.id, req, sigs, { relayId: SETTLER_RELAY_ID, changeAddress });
       if (!r.ok) { failed++; console.warn(`[bshard-close-submit-v2] market=${market.id.slice(-8)} submit fail: ${r.reason}`); continue; }
+      // 持久化 txId(NWT 修复要求): 广播成功即写, 不等 landed-check 窗口结束——否则窗口内 false-negative(RPC 瞬时
+      // 延迟)会导致下轮 tick 重新走 collect+submit, 真广播了第二笔 tx(NO TX NO STATE 之外的另一类问题: 不是钱丢了,
+      // 是同一市场可能产生多笔冲突 broadcast, 且若第一笔其实已经 landed, market 会永久卡在 collecting_sigs 没人发现)。
+      markSubmittedV2(market.id, r.txId, r.psContAddress);
       // NO TX NO STATE CHANGE (CLAUDE.md 第零条 bis): 广播成功不等于落链——必须确认 landed 才推进 status/清 request,
       // 否则 broadcast 声称成功但 tx 被节点拒绝/mempool 丢弃时, DB 会乐观地记成"已提交"而链上其实什么都没发生。
-      let landedOk = false;
-      for (let i = 0; i < 15 && !landedOk; i++) {
-        try { const chk = await sendCommandAsync(SETTLER_RELAY_ID, { type: 'check_utxo_landed', address: r.psContAddress, txid: r.txId }, 15_000); landedOk = !!(chk?.landed || chk?.found); } catch { /* transient, retry */ }
-        if (!landedOk) await new Promise((res) => setTimeout(res, 2_000));
-      }
-      if (!landedOk) { failed++; console.warn(`[bshard-close-submit-v2] market=${market.id.slice(-8)} txId=${r.txId} broadcast OK 但等待窗口内未确认 landed — 留 collecting_sigs, 下轮 tick 重查(不重复 broadcast, collectCloseSigsV2 幂等)`); continue; }
+      const landedOk = await _pollLanded(r.psContAddress, r.txId);
+      if (!landedOk) { failed++; console.warn(`[bshard-close-submit-v2] market=${market.id.slice(-8)} txId=${r.txId} broadcast OK 但等待窗口内未确认 landed — txId 已持久化(bshard_close_submit_v2_pending_txid), 下轮 tick 只查这一笔, 不重复 broadcast`); continue; }
       clearCloseRequest(market.id, 'attested_v2');   // 独立 status 值, 跟 V1 completed/refunding 区分——后续链条(zk_handoff)接手。
       submitted++;
       console.log(`[bshard-close-submit-v2] ✅ market=${market.id.slice(-8)} close_attest_v2 LANDED txId=${r.txId}`);
     }
-    if (submitted || failed || errored) console.log(`[bshard-close-submit-v2] tick: ${pending.length} pending | submitted=${submitted} notReady=${notReady} failed=${failed} errored=${errored}`);
-    return { ok: true, pending: pending.length, submitted, notReady, failed, errored };
+    if (submitted || failed || errored || resumed) console.log(`[bshard-close-submit-v2] tick: ${pending.length} pending | submitted=${submitted} notReady=${notReady} failed=${failed} errored=${errored} resumed=${resumed}`);
+    return { ok: true, pending: pending.length, submitted, notReady, failed, errored, resumed };
   } finally { submitRunning = false; }
 }
