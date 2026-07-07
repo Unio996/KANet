@@ -51,5 +51,38 @@ assertFieldLandsInOwnSlot('betsRootBaked', 'ee'.repeat(32));
 console.log('[test] refundRootBaked positional isolation:');
 assertFieldLandsInOwnSlot('refundRootBaked', 'ff'.repeat(32));
 
+// ── state-region [1,214) offset guard (Bettor 2026-07-08 20:49, non-blocking hardening after J1's
+//    unlockBshardZkClose risk flag): unlockBshardZkClose(kasia-relay/src/lib/p2sh.mjs:2140, written for
+//    CloseZkRepro4) splices byte[1..214) as a fixed 213B state region (attestedWinner/closed/payoutRootField/
+//    consolidated_pool/w0-16), assumed unchanged for CloseZkV2. Verified byte-exact 2026-07-08 (two
+//    independent derives, J2+NWT, converged — COORD-LEDGER 20:48-20:49). This test pins that layout so
+//    any future CloseZkV2.sil edit that silently shifts the state region breaks CI, not a live market.
+console.log('[test] unlockBshardZkClose byte[1,214) state-region layout (pins the 2026-07-08 verified assumption):');
+{
+  function i64(n) { const b = Buffer.alloc(8); b.writeBigInt64LE(BigInt(n)); return b; }
+  const push8 = Buffer.from([8]), push32 = Buffer.from([32]);
+  const zeroWord = Buffer.concat([push8, i64(0)]);
+  const attestedWinner = 1, consolidatedPool = 123456789;
+  const redeemHex = compileCloseZkV2Redeem({ ...BASE, attestedWinner, consolidatedPool });
+  const buf = Buffer.from(redeemHex, 'hex');
+
+  ok(buf[0] === 107, `byte[0] genesis marker == 107 (got ${buf[0]})`);
+  const expectedStateBytes = Buffer.concat([
+    push8, i64(attestedWinner),
+    push8, i64(1),   // compileCloseZkV2Redeem hardcodes init_closed=1 at mint time
+    push32, Buffer.alloc(32),   // init_payoutRootField = ZERO32 placeholder pre-zk_close
+    push8, i64(consolidatedPool),
+    ...Array(17).fill(zeroWord),
+  ]);
+  ok(expectedStateBytes.length === 213, `reconstructed state region is exactly 213B (got ${expectedStateBytes.length})`);
+  ok(expectedStateBytes.equals(buf.slice(1, 1 + 213)), 'byte[1,214) state region byte-exact matches unlockBshardZkClose\'s newStateBytes construction');
+
+  // template zone [214,end) must be invariant across different state values (splice isolation).
+  const redeemHex2 = compileCloseZkV2Redeem({ ...BASE, attestedWinner: 0, consolidatedPool: 999999999 });
+  const buf2 = Buffer.from(redeemHex2, 'hex');
+  ok(buf.slice(214).equals(buf2.slice(214)), 'template zone [214,end) byte-identical across different state values (splice isolation holds)');
+  ok(!buf.slice(1, 214).equals(buf2.slice(1, 214)), 'state zone [1,214) correctly differs when state values differ');
+}
+
 console.log(fails === 0 ? '\n✅✅ ALL PASS — ctor field mapping is byte-position-correct (differential test, not just compile-success)' : `\n❌ ${fails} assertions failed`);
 process.exit(fails === 0 ? 0 : 1);
