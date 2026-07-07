@@ -60,11 +60,18 @@ export function publishCloseRequest(marketId, req) {
  *   new_refundRoot/new_attestedAtMs 的 PROPOSED 值 (委员通过 enforceCloseAttestV2 各自独立重算验证, 这里存的只是
  *   settler 提议值供 daemon 读取比对, 非权威 — 权威判定权全在委员侧, 同 V1 claimedPayoutRoot 的定位)。
  * @param {string} marketId
- * @param {object} req 同 publishCloseRequest 的字段 + { new_attestedWinner, new_betsRoot, new_refundRoot, new_attestedAtMs }
+ * @param {object} req 同 publishCloseRequest 的字段 + { new_attestedWinner, new_betsRoot, new_refundRoot, new_attestedAtMs,
+ *   closeInputs }。closeInputs (卡2③ submit 阶段必需, J2 2026-07-07): { payoutshard:{redeem_hex,outpointTxid,index,
+ *   state,state_start}, fee:{address,outpointTxid,index} } — 跟 build txSafeJson 时用的【同一份】raw inputs, 原样存下
+ *   供 submitCloseAttestV2 重放 (禁止 submit 阶段重新推导/猜这些值 — 必须 byte-exact 等于 propose 阶段委员已 enforce
+ *   过 hash 的那份 inputs, 否则 submit 广播的 tx 可能跟委员签的不是同一笔)。
  */
 export function publishCloseRequestV2(marketId, req) {
   if (!req?.txSafeJson || !req?.claimedPayoutRoot || !Array.isArray(req.committee_pks)) {
     throw new Error('publishCloseRequestV2: txSafeJson + claimedPayoutRoot + committee_pks 必需');
+  }
+  if (!req?.closeInputs?.payoutshard || !req?.closeInputs?.fee) {
+    throw new Error('publishCloseRequestV2: closeInputs.payoutshard + closeInputs.fee 必需 (卡2③ submit 阶段依赖)');
   }
   if (req.new_attestedWinner == null || !req.new_betsRoot || !req.new_refundRoot || req.new_attestedAtMs == null) {
     throw new Error('publishCloseRequestV2: new_attestedWinner/new_betsRoot/new_refundRoot/new_attestedAtMs 必需 (W2 4 新字段)');
@@ -96,6 +103,7 @@ export function publishCloseRequestV2(marketId, req) {
     new_betsRoot: String(req.new_betsRoot),
     new_refundRoot: String(req.new_refundRoot),
     new_attestedAtMs: Number(req.new_attestedAtMs),
+    closeInputs: req.closeInputs,   // raw inputs used to build txSafeJson — submit 阶段原样重放, 不重新推导。
   };
   sqlite.prepare(`UPDATE pool_markets SET metadata = ?, protocol_status = 'collecting_sigs' WHERE id = ?`).run(JSON.stringify(meta), marketId);
   return { ok: true, market_id: marketId, committee: req.committee_pks.length, status: 'collecting_sigs' };
@@ -145,12 +153,18 @@ export function collectCloseSigsV2(marketId, payoutRoot) {
   return { ready: sigs.length >= QUORUM, sigs, count: sigs.length, quorum: QUORUM };
 }
 
-/** clearCloseRequest — submit LANDED 后清 request + 推进 status (settled/refunding by caller)。 */
+/**
+ * clearCloseRequest — submit LANDED 后清 request + 推进 status (settled/refunding by caller)。
+ * 通用函数 (2026-07-07 J2, NWT 卡2 red-team 抓出的发现): 同时删 V1 key `bshard_close_request` 和 V2 key
+ * `bshard_close_request_v2` — 两个 key 结构隔离(各自 publishCloseRequest/publishCloseRequestV2 独立写),
+ * 但清理时不需要调用方知道自己在清哪个版本, 双 key 都 delete 是幂等操作 (不存在的 key delete 无副作用)。
+ */
 export function clearCloseRequest(marketId, finalStatus = 'completed') {
   const row = sqlite.prepare('SELECT metadata FROM pool_markets WHERE id = ?').get(marketId);
   if (!row) return { ok: false };
   let meta; try { meta = JSON.parse(row.metadata || '{}'); } catch { meta = {}; }
   delete meta.bshard_close_request;
+  delete meta.bshard_close_request_v2;
   sqlite.prepare(`UPDATE pool_markets SET metadata = ?, protocol_status = ? WHERE id = ?`).run(JSON.stringify(meta), finalStatus, marketId);
   return { ok: true, status: finalStatus };
 }

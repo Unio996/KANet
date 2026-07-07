@@ -26,6 +26,7 @@ import { fetchEndBlockHashCanonical, loadPoolSnapshot } from './pool-market-sett
 import { listShards } from '../lib/shard-allocator.mjs';
 import { compileSil, ctorBytes32, ctorInt } from '../lib/pool-bshard-artifacts.mjs';
 import { isCommingledSpine } from '../lib/pool-commingle-detect.mjs';
+import { collectCloseSigsV2, clearCloseRequest, QUORUM } from '../lib/bshard-close-transport.mjs';
 
 const TICK_MS = 30_000;   // 30s tick (close_attest 时效性 > 普通 vote; settler 等 quorum)
 let timer = null, running = false;
@@ -417,4 +418,136 @@ async function processCloseRequestV2(voter, market, req, enforceCloseAttestV2) {
   } catch (e) {
     return { errored: true, reason: e.message };
   }
+}
+
+// ── 卡2② (2026-07-07 J2, Bettor GO): bshardCloseVoterV2Tick 挂进持续 cron (今晚之前只被一次性驱动脚本手调过一次,
+// 见 kasia-console/scratch/_j2_3o6cs_close_attest_v2.mjs)。镜像 startBshardCloseVoterCron(V1) 结构, 零新签名逻辑
+// (只是把已经今晚跑通+NWT审过的 bshardCloseVoterV2Tick 接上循环), 独立 kill switch 默认 OFF。
+const VOTER_V2_ENABLED = process.env.BSHARD_CLOSE_VOTER_V2_ENABLED === '1';
+let voterV2Timer = null;
+
+export function startBshardCloseVoterV2Cron() {
+  if (voterV2Timer) return;
+  if (!VOTER_V2_ENABLED) {
+    console.log('[bshard-close-voter-v2] cron NOT started — BSHARD_CLOSE_VOTER_V2_ENABLED!=1 (默认不自动签, 设=1 供受控 live e2e)');
+    return;
+  }
+  setTimeout(() => { bshardCloseVoterV2Tick().catch(e => console.error('[bshard-close-voter-v2] startup tick:', e.message)); }, 5_000);
+  voterV2Timer = setInterval(() => { bshardCloseVoterV2Tick().catch(e => console.error('[bshard-close-voter-v2] tick:', e.message)); }, TICK_MS);
+  console.log(`[bshard-close-voter-v2] cron started (${TICK_MS / 1000}s tick) — BSHARD_CLOSE_VOTER_V2_ENABLED=1 (受控 live e2e 模式)`);
+}
+export function stopBshardCloseVoterV2Cron() { if (voterV2Timer) { clearInterval(voterV2Timer); voterV2Timer = null; } }
+
+// ── 卡2③ (2026-07-07 J2, NWT CONDITIONAL GO → 4问答完, 唯一新造 money-path 代码): collect+broadcast 自治接线 ──
+//   settler 侧组装+广播 close_attest_v2, 委托已审过的 relay 命令 'bshard_close_attest_v2' (kasia-relay/src/lib/p2sh.mjs:1969
+//   unlockBshardCloseAttestV2, 今晚 0a358fa0 真实调用过) 做实际 covenant script 组装 — 本文件只编排数据(收集 sigs→
+//   映射 committee 顺序→调命令→确认落链), 不重实现签名/covenant 逻辑(NWT 卡2③④'inline 禁晋升钉'满足条件)。
+//   镜像今晚驱动脚本 _j2_3o6cs_close_attest_v2.mjs 步骤8 SUBMIT 段, 逐行对照抽出。
+
+/**
+ * buildCommitteeWitness — 纯函数(零 IO): 把 collectCloseSigsV2 收集到的 sigs 映射回 committee_pks 顺序的 witness 数组。
+ *   committee slot 序 = SELECTION 序(不 sort) — 跟 relay 侧假设一致(p2sh.mjs:1981 committeePkHash/sig↔pk 配对/checkSig
+ *   逐 slot 依赖原序)。抽成独立纯函数是为了 offline byte-exact test 能不碰 relay/DB 直接验证这段映射逻辑本身。
+ */
+export function buildCommitteeWitness(committeePks, committeeMeta, sigs) {
+  return committeePks.map((pk) => {
+    const s = sigs.find((x) => String(x.committee_pk).toLowerCase() === String(pk).toLowerCase());
+    const cm = (committeeMeta && committeeMeta[pk]) || {};
+    return { pk_hex: pk, sig_hex: s ? s.signature : '00', idx: s ? s.idx : cm.idx, siblings_hex: s ? s.siblings_hex : cm.siblings_hex };
+  });
+}
+
+/** computeCommitteePkHash — 纯函数, 跟今晚驱动脚本 blake2b(concat(committeePks)) 完全一致算法 (今晚验证过落链值)。 */
+export function computeCommitteePkHash(committeePks) {
+  return Buffer.from(blake2b(Buffer.concat(committeePks.map((p) => Buffer.from(p, 'hex'))), { dkLen: 32 })).toString('hex');
+}
+
+const SETTLER_RELAY_ID = process.env.BSHARD_SETTLER_RELAY_ID || null;   // 广播身份(付 fee input + 收找零), 显式配置非猜测。
+
+/**
+ * submitCloseAttestV2 — settler 侧组装+广播 close_attest_v2 (卡2③)。前置: collectCloseSigsV2 已 ready(≥QUORUM)。
+ * @param {string} marketId
+ * @param {object} req  bshard_close_request_v2(publishCloseRequestV2 存的那份, 含 closeInputs — 跟 propose 阶段委员
+ *   enforce 过 hash 的【同一份】raw inputs, 不重新推导)。
+ * @param {Array}  sigs collectCloseSigsV2 返回的 sigs 数组。
+ * @param {{relayId?:string, changeAddress:string}} opts
+ * @returns {Promise<{ok:boolean, txId?:string, psContAddress?:string, reason?:string}>}
+ */
+export async function submitCloseAttestV2(marketId, req, sigs, opts = {}) {
+  const relayId = opts.relayId || SETTLER_RELAY_ID;
+  if (!relayId) return { ok: false, reason: 'submitCloseAttestV2: no relayId (BSHARD_SETTLER_RELAY_ID unset)' };
+  if (!opts.changeAddress) return { ok: false, reason: 'submitCloseAttestV2: changeAddress 必需' };
+  if (!req?.closeInputs?.payoutshard || !req?.closeInputs?.fee) return { ok: false, reason: 'submitCloseAttestV2: req.closeInputs 缺失(旧格式 request, 无法 submit)' };
+  const committeeWitness = buildCommitteeWitness(req.committee_pks, req.committee_meta, sigs);
+  const committeePkHash = computeCommitteePkHash(req.committee_pks);
+  let sj;
+  try {
+    sj = await sendCommandAsync(relayId, {
+      type: 'bshard_close_attest_v2',
+      inputs: req.closeInputs,
+      witness: {
+        self_out_idx: 0, new_payout_root: req.claimedPayoutRoot, new_attested_winner: req.new_attestedWinner,
+        new_bets_root: req.new_betsRoot, new_refund_root: req.new_refundRoot, new_attested_at_ms: req.new_attestedAtMs,
+        committee: committeeWitness, committee_pk_hash: committeePkHash,
+      },
+      outputs: { change_address: opts.changeAddress },
+    }, 90_000);
+  } catch (e) { return { ok: false, reason: `relay broadcast fail: ${e.message}` }; }
+  const txId = sj?.txId || sj?.txid;
+  if (!txId) return { ok: false, reason: `no txId in relay response: ${JSON.stringify(sj).slice(0, 200)}` };
+  return { ok: true, txId, psContAddress: sj.psContAddress };
+}
+
+const SUBMIT_TICK_MS = 30_000;
+let submitTimer = null, submitRunning = false;
+const SUBMIT_V2_ENABLED = process.env.BSHARD_CLOSE_SUBMIT_V2_ENABLED === '1';
+
+export function startBshardCloseSubmitV2Cron() {
+  if (submitTimer) return;
+  if (!SUBMIT_V2_ENABLED) {
+    console.log('[bshard-close-submit-v2] cron NOT started — BSHARD_CLOSE_SUBMIT_V2_ENABLED!=1 (唯一新造 money-path tick, 默认不自动广播)');
+    return;
+  }
+  setTimeout(() => { bshardCloseSubmitV2Tick().catch(e => console.error('[bshard-close-submit-v2] startup tick:', e.message)); }, 5_000);
+  submitTimer = setInterval(() => { bshardCloseSubmitV2Tick().catch(e => console.error('[bshard-close-submit-v2] tick:', e.message)); }, SUBMIT_TICK_MS);
+  console.log(`[bshard-close-submit-v2] cron started (${SUBMIT_TICK_MS / 1000}s tick) — BSHARD_CLOSE_SUBMIT_V2_ENABLED=1 (受控 live e2e 模式)`);
+}
+export function stopBshardCloseSubmitV2Cron() { if (submitTimer) { clearInterval(submitTimer); submitTimer = null; } }
+
+export async function bshardCloseSubmitV2Tick() {
+  if (submitRunning) return { skipped: true };
+  submitRunning = true;
+  try {
+    const pending = sqlite.prepare(`
+      SELECT id, metadata FROM pool_markets
+      WHERE protocol_version = 'v0.7' AND protocol_status = 'collecting_sigs' AND metadata LIKE '%bshard_close_request_v2%'
+    `).all();
+    let submitted = 0, notReady = 0, failed = 0, errored = 0;
+    for (const market of pending) {
+      let req;
+      try { req = JSON.parse(market.metadata || '{}').bshard_close_request_v2; } catch { errored++; continue; }
+      if (!req || !req.claimedPayoutRoot || !req.closeInputs) { errored++; continue; }
+      const { ready, sigs } = collectCloseSigsV2(market.id, req.claimedPayoutRoot);
+      if (!ready) { notReady++; continue; }
+      if (!SETTLER_RELAY_ID) { errored++; console.error('[bshard-close-submit-v2] BSHARD_SETTLER_RELAY_ID unset — 无法 submit'); continue; }
+      let changeAddress;
+      try { changeAddress = (await sendCommandAsync(SETTLER_RELAY_ID, { type: 'get_pubkey' }))?.address; } catch (e) { errored++; console.error(`[bshard-close-submit-v2] get_pubkey fail: ${e.message}`); continue; }
+      if (!changeAddress) { errored++; continue; }
+      const r = await submitCloseAttestV2(market.id, req, sigs, { relayId: SETTLER_RELAY_ID, changeAddress });
+      if (!r.ok) { failed++; console.warn(`[bshard-close-submit-v2] market=${market.id.slice(-8)} submit fail: ${r.reason}`); continue; }
+      // NO TX NO STATE CHANGE (CLAUDE.md 第零条 bis): 广播成功不等于落链——必须确认 landed 才推进 status/清 request,
+      // 否则 broadcast 声称成功但 tx 被节点拒绝/mempool 丢弃时, DB 会乐观地记成"已提交"而链上其实什么都没发生。
+      let landedOk = false;
+      for (let i = 0; i < 15 && !landedOk; i++) {
+        try { const chk = await sendCommandAsync(SETTLER_RELAY_ID, { type: 'check_utxo_landed', address: r.psContAddress, txid: r.txId }, 15_000); landedOk = !!(chk?.landed || chk?.found); } catch { /* transient, retry */ }
+        if (!landedOk) await new Promise((res) => setTimeout(res, 2_000));
+      }
+      if (!landedOk) { failed++; console.warn(`[bshard-close-submit-v2] market=${market.id.slice(-8)} txId=${r.txId} broadcast OK 但等待窗口内未确认 landed — 留 collecting_sigs, 下轮 tick 重查(不重复 broadcast, collectCloseSigsV2 幂等)`); continue; }
+      clearCloseRequest(market.id, 'attested_v2');   // 独立 status 值, 跟 V1 completed/refunding 区分——后续链条(zk_handoff)接手。
+      submitted++;
+      console.log(`[bshard-close-submit-v2] ✅ market=${market.id.slice(-8)} close_attest_v2 LANDED txId=${r.txId}`);
+    }
+    if (submitted || failed || errored) console.log(`[bshard-close-submit-v2] tick: ${pending.length} pending | submitted=${submitted} notReady=${notReady} failed=${failed} errored=${errored}`);
+    return { ok: true, pending: pending.length, submitted, notReady, failed, errored };
+  } finally { submitRunning = false; }
 }
