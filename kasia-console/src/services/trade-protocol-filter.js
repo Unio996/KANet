@@ -1057,45 +1057,46 @@ const BETTOR_MIN_STAKE_POLICY_SOMPI = 100_000_000n;
  * the daa a fresh ingest would have written — zero cross-node divergence in the committee bettor-exclude set.
  *
  * Chain truth: getUtxosByAddresses(side_p2sh) returns the UNSPENT UTXO for an OPEN position; we match it by
- * stake_amount + side_lock_tx (a spent/missing UTXO = already settled or never paid → not capturable here).
- * The daaScore is the CANONICAL accepting-block daa (chain consensus fact, identical on every node).
- * kaspa-wasm UtxoEntryReference shape varies (cross-chain-verify.mjs L545 same defensive pattern).
+ * stake_amount + side_lock_tx.
  *
- * @returns {Promise<{daa:number|null, reason:'ok'|'daa-unresolved'|'no-unspent-utxo'|'no-rpc'|string}>}
- *   reason 'rpc-fail: ...' is transient (replay later); 'no-unspent-utxo' = settled/unpaid; 'daa-unresolved'
- *   = UTXO found but shape unknown (daa null, fail-loud at sample). NEVER guesses — null over a non-canonical value.
+ * 🔴 method switch (Bettor 2026-07-08 22:04, #b75exc, 四条件批): 原实现靠查 side_p2sh 上"未花费 UTXO"反推
+ * DAA, 但一笔 bet 一落地就可能被 register-v07 自己吸收进 shard 聚合 leaf(pool_value 更新), UTXO 不再"未花费"
+ * → 假阴性(uqmp8 两笔真实 bet 实测撞到, 不是边角场景)。改用 kaspa_tx_log.block_hash(indexer 落链时写入的
+ * 真实 accepting block) → RPC getBlock(hash).header.daaScore(链真相, rpc-listener.mjs:223-226 同款调用)——
+ * 对"未花费"和"已被吸收"两态通用, 单一路径不分叉(3o6cs 当时手动 UPDATE 3 行绕过的正是这同一个洞, 这次把
+ * 一次性绕路升级成生产修复)。
+ *
+ * ① 链锚纯度: DAA 只能来自 getBlock(block_hash).header.daaScore, block_hash 只能来自 kaspa_tx_log —
+ *    禁任何 DB 猜测值/时间换算值。
+ * ② fail-loud 不降级: kaspa_tx_log 查无该 tx 的 block_hash = 拒(null), 不静默回退瞎猜——side_lock_daa
+ *    定的是 betsRoot canonical 序, attest 承重字段, 错值比拒绝更危险。
+ *
+ * @returns {Promise<{daa:number|null, reason:'ok'|'daa-unresolved'|'no-block-hash'|'rpc-fail: ...'}>}
+ *   NEVER guesses — null over a non-canonical value.
  */
 export async function captureSideLockDaa({ side_p2sh, side_lock_tx, stake_amount, network }) {
+  const row = sqlite.prepare('SELECT block_hash FROM kaspa_tx_log WHERE tx_id = ?').get(side_lock_tx);
+  if (!row?.block_hash) return { daa: null, reason: 'no-block-hash' };
   const { getWorkingRpc } = await import('./rpc-health.js');
   const { url: rpcUrl } = await getWorkingRpc();
   if (!rpcUrl) return { daa: null, reason: 'no-rpc' };
-  const { RpcClient, Encoding, Address } = await import('kaspa-wasm');
+  const { RpcClient, Encoding } = await import('kaspa-wasm');
   const rpc = new RpcClient({ url: rpcUrl, encoding: Encoding.Borsh, networkId: network });
-  let utxos;
+  let blkResp;
   try {
     await Promise.race([rpc.connect({}), new Promise((_, rej) => setTimeout(() => rej(new Error('RPC connect timeout')), 4000))]);
-    ({ entries: utxos } = await rpc.getUtxosByAddresses([new Address(side_p2sh)]));
+    blkResp = await rpc.getBlock({ hash: row.block_hash, includeTransactions: false });
   } catch (e) {
     try { await rpc.disconnect(); } catch {}
     return { daa: null, reason: `rpc-fail: ${e.message}` };
   } finally {
     try { await rpc.disconnect(); } catch {}
   }
-  utxos = utxos || [];
-  const wantSompi = BigInt(stake_amount);
-  const exactUtxo = utxos.find(u => {
-    try {
-      if (BigInt(u.amount) !== wantSompi) return false;
-      const op = u.outpoint || u.entry?.outpoint;
-      const txid = op && (op.transactionId || op.transaction_id);
-      return txid === side_lock_tx;
-    } catch { return false; }
-  });
-  if (!exactUtxo) return { daa: null, reason: 'no-unspent-utxo' };
+  const blk = blkResp?.block || blkResp;
   let daa = null;
   try {
-    const rawDaa = exactUtxo.blockDaaScore ?? exactUtxo.utxoEntry?.blockDaaScore ?? exactUtxo.entry?.blockDaaScore ?? exactUtxo.entry?.utxoEntry?.blockDaaScore;
-    if (rawDaa !== undefined && rawDaa !== null) daa = Number(BigInt(rawDaa));  // daa ~38M fits Number safely
+    const rawDaa = blk?.header?.daaScore;
+    if (rawDaa !== undefined && rawDaa !== null) daa = Number(BigInt(rawDaa));  // daa ~55M fits Number safely
   } catch { daa = null; }
   return { daa, reason: daa === null ? 'daa-unresolved' : 'ok' };
 }
