@@ -131,9 +131,29 @@ export function buildEnforceCtx(voter, voterPk, market) {
     loadBettors: async (marketId) => loadBettorsCrossShard(marketId),
     // C1 level2-A chain-anchor primitives.
     p2sh: (redeemHex) => p2shFromRedeemSync(redeemHex, network),
+    // 🔴 fix (Bettor+NWT+J2 2026-07-08 22:2x, uqmp8 C1 anti-swap 首次真实场景误拒): 原实现只查 relay 的
+    // check_utxo_landed(= live unspent UTXO 集), 对无 txid 的调用(level2-B per-ticket anti-swap, 823 行)
+    // 是致命的——ticket UTXO 一旦被后续 tx 花掉(如 absorb 把整个 ShardLeaf 连同其上的 ticket 一并消费),
+    // live-only 查询必返 false, 委员诚实拒签一个【曾经真实落链、只是现在花了】的合法 ticket。level2-A(738-743
+    // 行注释)已经踩过同一个坑并改用 landed-in-history(readOutpointCreatedAddr), 但 level2-B 没跟着改——
+    // 这次修 checkUtxoLanded 本身(共享给两处), 而非只改调用点, 避免"同族修复不同步"再发生同类坑。
+    // 语义: txid 给定 → 精确匹配(原行为, 命门①chain-bound 那类用法不变); txid 缺省(level2-B 用法) →
+    // live 查一次, 没有就退化到 kaspa_tx_log(indexer 从真块写, node-local 可信边界, 同 target_daa 那条口径)
+    // 搜该地址是否曾出现在任一 tx 的 output 里, 与 spent 状态无关(landed-in-history, 不是"现在还在")。
     checkUtxoLanded: async (addr, txid) => {
-      const r = await sendCommandAsync(voter.id, { type: 'check_utxo_landed', address: addr, txid: txid || undefined }, 15000);
-      return !!(r?.landed || r?.found);
+      if (txid) {
+        // 命门①chain-bound 等场景: 精确 txid 匹配, 行为完全不变(relay 抛错照样往外抛, errored≠refused
+        // 的既有分流不受影响, 不因这次修复悄悄改变 retriable-vs-permanent 的既定语义)。
+        const r = await sendCommandAsync(voter.id, { type: 'check_utxo_landed', address: addr, txid }, 15000);
+        return !!(r?.landed || r?.found);
+      }
+      // level2-B per-ticket anti-swap 用法(txid 缺省): live 查一次(relay 瞬时故障也走历史 fallback,
+      // 不因 IPC 抖动误拒一个可能真实 landed 的 ticket), 没有就退化到 kaspa_tx_log(landed-in-history)。
+      let r = null;
+      try { r = await sendCommandAsync(voter.id, { type: 'check_utxo_landed', address: addr }, 15000); } catch { /* fall through to history */ }
+      if (r?.landed || r?.found) return true;
+      const row = sqlite.prepare(`SELECT 1 FROM kaspa_tx_log WHERE outputs_json LIKE ? LIMIT 1`).get(`%"${addr}"%`);
+      return !!row;
     },
     // readOutpointCreatedAddr (J2, level2-A landed-in-history enabler, 对齐 NWT enforce 17ad3f4c 接口):
     //   读 outpoint 的【创建-tx output 地址】(含 spent leaf, 解 consolidate spend ShardLeaf→PS 后 level2-A leaf-landed 失败)。
