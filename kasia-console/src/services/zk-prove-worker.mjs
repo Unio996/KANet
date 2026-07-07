@@ -129,14 +129,26 @@ export async function zkProveWorkerTick() {
     const inputPath = join(SCRATCH_DIR, `job${job.id}-${runId}-input.json`);
     const outputBase = join(SCRATCH_DIR, `job${job.id}-${runId}-out`);
 
+    // 🔴 fail-closed guard(NWT 19:09 review 问出的真缺口: 之前只在注释里"声称"enqueue 侧保证非空, 代码里
+    //   零运行时校验——这就是"沿用口头承诺非结构性保证"同一形状的坑, 今晚已经因为这个模式撞过好几次了)。
+    //   §4 硬门⑤ mint 政策(禁 bps-fallback)在这里补上真实拦截: fee_leaves 空 = 直接拒绝, 不浪费 4 分钟
+    //   proving 时间去跑一个已知会撞 main.rs L152-156 断裂分支的输入。**完整 Σleaf 守恒验证(driver 侧独立
+    //   重算 pari-mutuel 逐笔金额跟 guest 一致)仍然是缺件①(J1 enqueue 域)的职责**——本函数拿不到
+    //   winner 侧每笔精确 payout 金额(guest 才算, 受托 ZK 保密), 只能做"非空"这一层最基础的输入面校验,
+    //   不是完整替代 §4 硬门⑤ 的 Σleaf == consolidated_pool 断言。
+    const feeLeavesRaw = JSON.parse(job.fee_leaves_json || '[]');
+    if (!Array.isArray(feeLeavesRaw) || feeLeavesRaw.length === 0) {
+      _fail(job, 'fee_leaves 为空数组 — §4 硬门⑤禁 bps-fallback: enqueue 侧(缺件①)必须显式提供完整 fee_leaves, 拒绝在空 fee_leaves 上浪费 proving 时间');
+      return { ok: false };
+    }
+
     // GuestInput 形状照抄 zk-payout-guest/host/src/main.rs 的 Bet/FeeLeafIn/GuestInput struct, 非重发明。
-    // fee_leaves 必须显式非空(§4 硬门⑤ mint 政策: 禁 bps-fallback), caller(daemon 侧 enqueue 时)保证。
     const guestInput = {
       bettors: orderedBets.map((b) => ({ pk: Array.from(Buffer.from(b.pk, 'hex')), stake: Number(b.stake), direction: Number(b.direction) })),
       winning_direction: Number(job.attested_winner),
       pool_total_sompi: job.pool_total_sompi != null ? Number(job.pool_total_sompi) : null,
       fee_bps: 0,   // 硬门⑤: 禁 bps-fallback, 生产路径永远走显式 fee_leaves, fee_bps 恒 0
-      fee_leaves: (JSON.parse(job.fee_leaves_json || '[]')).map((f) => ({ pk: Array.from(Buffer.from(f.pk, 'hex')), amount: Number(f.amount) })),
+      fee_leaves: feeLeavesRaw.map((f) => ({ pk: Array.from(Buffer.from(f.pk, 'hex')), amount: Number(f.amount) })),
     };
     writeFileSync(inputPath, JSON.stringify(guestInput));
 
