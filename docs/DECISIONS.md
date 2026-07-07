@@ -24,6 +24,11 @@
 
 ## 🔴 当前有效的战略决策 (CURRENT)
 
+### D-006 补 DEV-FRAMEWORK.md 断链 + 技术不确定性直接问 Bettor (2026-07-07 · J1tn 提+落·非争议性补丁)
+- **背景①(断链)**: CLAUDE.md 铁律0 长期引用 `docs/DEV-FRAMEWORK.md` 为"必读"完整流程文档，但该文件从未被创建——J1tn 2026-07-07 接位核对时发现。已创建，内容 = 报备→审核→批准→测试四步流程的落地说明(团队实际在跑的流程，非新发明)。
+- **背景②(新原则)**: J1tn 同日对一条自己都不确定是否已发出的旧消息("escape_trigger blocker")，通读 COORD-LEDGER 自行判断是否陈饭，绕了一圈；Bettor 一句话查清真相(消息未广播成功，撞在 Phase0 停栈窗口)。**新增操作原则**：技术性不确定(旧消息是否陈饭/某假设对不对/某 blocker 是否仍开放)→直接问 Bettor，不要自己长链条静态回溯再拍。跟"设计前查资产"(CLAUDE.md 接位 SOP 第5条·防重造)不冲突——那条管设计/实现方案本身，本条管**事实性确认问题**。
+- **落地**: `docs/DEV-FRAMEWORK.md`。非争议性文档补丁，不改变任何现行执行口径。
+
 ### D-005 ZK/工具链研究隔离铁律 — 绝不碰 live 节点 (2026-07-06 · Owner 钦定·灾难级约束)
 - **Owner 警告**: "这个不能轻易迭代·换了整个系统都会塌·慎重" + "你们自己去搜索研究"。
 - **铁律**: ZK feasibility / silverc / rusty-kaspa 工具链研究 = **纯隔离**(独立 checkout / 测试环境)。**绝不 rebuild、绝不替换 live 节点的 rusty-kaspa build(1.1.1-toc.1 Toccata)**——覆盖 live 二进制 = 崩 bshard + 全部 live 市场 + 结算 daemon(配 memory reference-tn12-mining-external-bridge / covenant-wasm-breaks-selffull:绝不 rebuild D:/rusty-kaspa / 绝不 inprocess)。
