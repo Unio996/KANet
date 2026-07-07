@@ -8,6 +8,19 @@
 
 ---
 
+## 🔴 J1tn 机器强制下线交接(2026-07-07 09:49·W4a 执行中断,零风险,J2 已接手)
+> **背景**: J1tn 当天完成 W4a 全部设计+落码+真实 proof 之后,在 Bettor GO 执行 zk_handoff 那一刻,机器被告知几分钟内要关机(非本人可控)。已确认零风险后交接,不抢在强制下线前赶广播。
+
+- ✅ **W4a 落码**: `unlockBshardZkHandoff`(commit `f053e5ff`,kasia-relay/src/lib/p2sh.mjs)+ 三层命令注册(commands.mjs+relay.mjs)。落码前自查抓到一个 double-hash bug(手工 blake2b 后又喂进 payToScriptHashScript,该函数内部已 hash)并修复,NWT 独立复核确认。
+- ✅ **3o6cs 真实 Groth16 proof LANDED**: `zk-payout-guest/proofs/3o6cs-attest-0a358fa0/`(commit `6979f0ae`)。bets_root/attested_winner/payout_root 与链上 committee attest 值 byte-exact。
+- ✅ **Phase2 guest parity 补课项闭环**: 提交 J1 机器的 canonical `Cargo.lock`(commit `68822fff`),根治 image_id 跨机不可复现(根因 = lockfile 缺失,非 toolchain 本身不可复现)。J2 新出证机重编后收敛到同一 image_id `c9918501...`——J1 单点在**证明能力层**正式消除。
+- ✅ **journalHash 顺序 bug 抓到 + 修复**: `zk-close-builder.mjs` 的 `computeJournalHash` 字段序原来是 `betsRoot+payoutRoot+winner`,应为 `betsRoot+winner+payoutRoot`(跟 `.sil` 合约自己的公式一致)。三方(J1/NWT/J2)独立收敛到同一结论,J2 落码修复。
+- ✅ **3 方 byte-exact 收敛 zk_handoff 目标地址**: J1/J2/NWT 三套独立实现一度得到 3 个不同答案,逐一排查:①`attestedAtMs`(committee-witnessed state 值,ms,6B)vs `attestedAtSeconds`(旧合约 block_time 语义)——NWT 引 `.sil` 源文 + `tx.time` parser 限制定案,J1 的 ms 做法对;②`consolidated_pool` 应为 `5111000000`(= genesis seed 20000000 + bets 5091000000,state==value 不变量全程维持,NWT 两次独立 RPC 验证坐实),J2 handoff json 误填了 poolSompi(5091000000)。修正后三方收敛到同一地址 `kaspatest:pp6x3st0yp6y6wfv340puh886j8m77x88hkzxfswmnzw95279uugqxws3mh2t`。
+- ⏸ **执行中断点**: Bettor GO 后 J1 尝试广播 `bshard_zk_handoff`,relay 进程未重启(老代码没注册新命令类型)被拒——**零风险,没有任何 UTXO 被消费**。J1 机器随即被告知强制下线,交接给 J2 执行(所有依据数据已在共享 commit:`zk-payout-guest/handoff-data/3o6cs-zk-handoff-input.json` commit `253f6189` + `3o6cs-closezk-templates.json` commit `026e5bfc`,不依赖 J1 本机 scratch)。
+- **下一步(J2 执行)**: 用同一收敛参数(目标地址+state+templateA-D+期望输出 5111000000)重建 `bshard_zk_handoff` 命令广播 → Bettor 独立链验 → 推进到今天最后一环 `zk_close`(gate 已铸+已注资,txId `917077bf...`)。
+
+---
+
 ## 🟢 fresh 接位(2026-07-07·Owner 令全队重启,接昨晚 20:41 收官)
 > **背景**: 昨晚 escapeRefund 全线闭环收官后,团队三方(Bettor/J2/NWT)自评 session 过长、独立收敛一致建议重启,Owner 20:38 拍板"我会给你们整个重启"。J1 满月恢复归队。
 
