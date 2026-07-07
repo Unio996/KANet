@@ -93,6 +93,8 @@ export const COMMAND_TYPES = Object.freeze({
   BSHARD_CONSOLIDATE_V2: 'bshard_consolidate_v2',             // PayoutShardV2 absorb OP_0 + SL consolidate_to_payout OP_1, 同 BSHARD_CONSOLIDATE + V2 state(288B)
   // ── W4a (2026-07-07, J1): PayoutShardV2 zk_handoff — 一次性把 consolidated_pool 交给新铸 CloseZkRepro4 genesis ──
   BSHARD_ZK_HANDOFF: 'bshard_zk_handoff',                     // PayoutShardV2 zk_handoff OP_4, 无 continuation(生命周期终点)
+  // ── W4a (2026-07-07, J2 应急代写 J1 domain, NWT 双倍审, Bettor/Owner 批): CloseZkRepro4 zk_close ──
+  BSHARD_ZK_CLOSE: 'bshard_zk_close',                          // CloseZkRepro4 zk_close OP_0, closed 1→2 + payoutRoot 写入
 });
 
 export const COMMAND_TYPE_SET = new Set(Object.values(COMMAND_TYPES));
@@ -156,6 +158,7 @@ export const COMMAND_PAYLOAD_SCHEMA = Object.freeze({
   [COMMAND_TYPES.BSHARD_CLOSE_ATTEST_V2]: ['witness', 'inputs', 'outputs'],
   [COMMAND_TYPES.BSHARD_CONSOLIDATE_V2]: ['inputs', 'outputs'],
   [COMMAND_TYPES.BSHARD_ZK_HANDOFF]: ['witness', 'inputs', 'outputs'],
+  [COMMAND_TYPES.BSHARD_ZK_CLOSE]: ['witness', 'inputs'],
 });
 
 // R38 (Z23 sediment): typeof spec per field. Bug-Z23 真根因 — broker enqueue amount: number,
@@ -216,6 +219,7 @@ export const COMMAND_FIELD_TYPES = Object.freeze({
   [COMMAND_TYPES.BSHARD_CLOSE_ATTEST_V2]: { witness: 'object', inputs: 'object', outputs: 'object' },
   [COMMAND_TYPES.BSHARD_CONSOLIDATE_V2]: { inputs: 'object', outputs: 'object' },
   [COMMAND_TYPES.BSHARD_ZK_HANDOFF]: { witness: 'object', inputs: 'object', outputs: 'object' },
+  [COMMAND_TYPES.BSHARD_ZK_CLOSE]: { witness: 'object', inputs: 'object' },
 });
 
 export function validateCommandPayload(cmd) {

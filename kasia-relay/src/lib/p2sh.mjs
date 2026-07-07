@@ -2113,6 +2113,81 @@ export async function unlockBshardZkHandoff(args) {
   } finally { try { await rpc.disconnect(); } catch {} }
 }
 
+// v1 TOCCATA computeBudget for OpZkPrecompile groth16 verify(实测昨晚4ec9ddd1/bfd3d0e2 需 1500, 远超普通
+// covenant 的 _BSHARD_COMPUTE_BUDGET=70——groth16 密码学验证计算量级不同, 见 [[project-first-onchain-zk-precompile-landed-2026-07-06]]
+// computeBudget 教训)。只用在 gate input 上, CloseZkRepro4 侧仍走普通 _BSHARD_COMPUTE_BUDGET。
+const _ZK_GATE_COMPUTE_BUDGET = 1500;
+
+/**
+ * unlockBshardZkClose — CloseZkRepro4 zk_close(OP_0='00')。2026-07-07 J2(NWT 双倍红队审, J1 domain 应急代写,
+ * Owner/Bettor 批准, 见 COORD-LEDGER #ahkx23)。镜像 unlockBshardZkHandoff 的 no-sig 单驱动模式——zk_close 只读
+ * 本合约自己的 state(attestedWinner/betsRootBaked), 不接受 witness 喂的 winner 值(#NWT③, _j2_closezk_repro4.sil
+ * 35-64 行原文)。
+ * ⚠ 范围限定(Bettor HALT, 2026-07-07): 已真实 genesis 且已 committee-attest 过的实例(如 3o6cs, 51.11KAS)因
+ *   attestedAtSeconds 字段 ms/秒单位冲突(escape_trigger 阈值算出公元 58484 年不可达)+ claim entry 未实现,
+ *   closed==2 后无任何 entry 接受 precondition——broadcast zk_close = 物理永久焊死, 该实例上禁止调用本函数!
+ *   仅限于新铸的、明确知道其 attestedAtSeconds 编码单位且已核实 exit-path 矩阵可达的实例(如 dust demo)。
+ * @param {object} args.cmd.inputs.closezk { redeem_hex, outpointTxid, index,
+ *   state: { attestedWinner, consolidated_pool } } — closed/payoutRootField/w0-16 从 redeem_hex 本身固定布局读,
+ *   不需 caller 传(zk_close 只透传, 不接受 caller 喂的当前值——防喂假 state 绕过 require)。
+ * @param {object} args.cmd.inputs.gate { address, outpointTxid, index, sig_script_hex } — 已铸+已注资的 gate
+ *   UTXO, sig_script_hex = ZkScriptBuilder.finalizeWithGroth16FixedJournalProof() 产出的真实 groth16 proof witness
+ *   (非签名, 不走 createInputSignature——这个 input 本身就是"已完成"的, 直接原样喂)。
+ * @param {object} args.cmd.witness { self_out_idx, gate_suffix_hex, guest_payout_root_hex }
+ *   gate_suffix_hex = gate redeem 的 800B 固定后缀(finalize 时 ZkScriptBuilder 产出的 redeemScript 去掉 prefix(1B)
+ *   +journal_hash(32B)剩下部分); guest_payout_root_hex = guest 算出的 payout_root(32B, 将写入新 continuation state)。
+ */
+export async function unlockBshardZkClose(args) {
+  const { wallet, cmd, networkId, lockTime = 0n } = args;
+  const w = cmd.witness;
+  const rpc = await connectRpc(networkId);
+  try {
+    const czUtxo = await _matchUtxo(rpc, _addressFromRedeem(cmd.inputs.closezk.redeem_hex, networkId), cmd.inputs.closezk.outpointTxid, cmd.inputs.closezk.index);
+    if (!cmd.inputs.gate) throw new Error('zk_close: gate input 必需(带真实 groth16 proof 的 P2SH, 自己 sigScript 触发 OpZkPrecompile)');
+    const gateUtxo = await _matchUtxo(rpc, cmd.inputs.gate.address, cmd.inputs.gate.outpointTxid, cmd.inputs.gate.index);
+    const matched = [czUtxo, gateUtxo];
+
+    const cz = cmd.inputs.closezk.state;
+    const consolidatedPool = BigInt(cz.consolidated_pool);
+
+    // ── continuation: splice stateBytes 区(closed 1→2, payoutRootField=guestPayoutRoot, 其余不变) ──
+    //   .sil zk_close 的 validateOutputState 语义 = 固定宽度 stateBytes(genesisMarker(1B)+stateBytes(213B))内部
+    //   splice, templateA-D(offset 214 起)不变——不需要重编译, 直接 splice 输入 redeem 的 [1:214) 区。
+    const inputRedeem = Buffer.from(cmd.inputs.closezk.redeem_hex, 'hex');
+    const i64 = (n) => { const b = Buffer.alloc(8); b.writeBigInt64LE(BigInt(n)); return b; };
+    const push8 = Buffer.from([8]), push32 = Buffer.from([32]);
+    const guestPayoutRoot = Buffer.from(w.guest_payout_root_hex, 'hex');
+    const zeroWord = Buffer.concat([push8, i64(0)]);
+    const newStateBytes = Buffer.concat([
+      push8, i64(cz.attestedWinner),
+      push8, i64(2), // closed: 1→2 write-once(zk_close 完成)
+      push32, guestPayoutRoot,
+      push8, i64(consolidatedPool),
+      ...Array(17).fill(zeroWord), // w0-16 透传不变(escape_claim 未触发过的实例全 0)
+    ]);
+    if (newStateBytes.length !== 213) throw new Error(`zk_close stateBytes ${newStateBytes.length}B != 213B(布局漂移?)`);
+    const spliced = Buffer.concat([inputRedeem.slice(0, 1), newStateBytes, inputRedeem.slice(1 + 213)]);
+    const closeZkContAddr = addressFromScriptPublicKey(payToScriptHashScript(new Uint8Array(spliced)), networkId).toString();
+
+    const outputs = [];
+    outputs[w.self_out_idx] = new TransactionOutput(consolidatedPool, payToAddressScript(new Address(closeZkContAddr)));
+    const orderedOut = outputs.filter(o => o !== undefined);
+    _appendChange(orderedOut, matched, cmd.outputs?.change_address, _bshardFeeV1(matched.length));
+
+    // scriptSig 声明序须与 CloseZkRepro4.sil zk_close 形参声明序一致: gateSuffix, guestPayoutRoot, selfOutIdx + OP_0 + redeem
+    const czSig = _pushBytes(w.gate_suffix_hex) + _pushBytes(w.guest_payout_root_hex) + _pushInt(w.self_out_idx)
+      + '00' + _encodePushDataHex(Buffer.from(cmd.inputs.closezk.redeem_hex, 'hex'));
+
+    const signedTx = new Transaction({ version: 1, inputs: [
+      { previousOutpoint: { transactionId: czUtxo.outpoint.transactionId, index: czUtxo.outpoint.index }, signatureScript: czSig, sequence: 0n, sigOpCount: 0, computeBudget: _BSHARD_COMPUTE_BUDGET },
+      { previousOutpoint: { transactionId: gateUtxo.outpoint.transactionId, index: gateUtxo.outpoint.index }, signatureScript: cmd.inputs.gate.sig_script_hex, sequence: 0n, sigOpCount: 0, computeBudget: _ZK_GATE_COMPUTE_BUDGET },
+    ], outputs: orderedOut, lockTime: BigInt(lockTime), gas: 0n, subnetworkId: '0000000000000000000000000000000000000000', payload: '' });
+    _assertTxInvariants(matched, signedTx, 'unlockBshardZkClose', networkId);
+    const r = await rpc.submitTransaction({ transaction: signedTx, allowOrphan: false });
+    return { txId: r.transactionId, closeZkContinuationAddress: closeZkContAddr };
+  } finally { try { await rpc.disconnect(); } catch {} }
+}
+
 /**
  * unlockBshardCancelAttest — 委员 4-of-5 在 PayoutShard 内背书 refundRoot (cancel_attest OP_3, closed 0→2 write-once)。
  *   ★ 镜像 unlockBshardCloseAttest byte-identical(委员门同款 pubkey-sort + preimage/submit 双模)→ 仅: closed 0→2(非 0→1) + new_refundRoot 进 payoutRoot 槽(复用) + 选择子 OP_3='53'。

@@ -973,6 +973,15 @@ if (process.send) {
           if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, ...r } });
           return;
         }
+        case 'bshard_zk_close': {
+          // W4a (J2 2026-07-07, 应急代写 J1 domain, NWT 双倍审): CloseZkRepro4 zk_close — closed 1→2 + payoutRoot
+          // 写入 continuation state, 2-input(CloseZkRepro4 + 真实 groth16 proof gate)。
+          const { unlockBshardZkClose } = await import('./lib/p2sh.mjs');
+          const wallet = getWallet();
+          const r = await unlockBshardZkClose({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) });
+          if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, ...r } });
+          return;
+        }
         case 'bshard_payout_claim': {
           // winner store-payout 派彩 (merkle climb + multi-word nullifier + recipient P2PK + cov_id 续, OP_2).
           const { unlockBshardPayoutClaim } = await import('./lib/p2sh.mjs');
