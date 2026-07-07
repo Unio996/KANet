@@ -62,11 +62,13 @@ export function loadBettorsCrossShard(logicalMarketId) {
   const marketIds = shards.length ? shards.map(s => s.shard_market_id) : [logicalMarketId];
   const out = [];
   for (const mid of marketIds) {
+    // side_lock_tx 加 (W2, J2 2026-07-07): canonicalBetOrder tiebreak 需要 (同 side_lock_daa 双注确定性打破)。
+    //   只加 SELECT 列 + 透传, 不改现有字段/顺序, V1 enforceCloseAttest 不读它 (向后兼容, 零行为变化)。
     const rows = sqlite.prepare(
-      `SELECT bettor_pk, direction, stake_amount, side_lock_daa FROM pool_bettor_sides WHERE market_id = ?`
+      `SELECT bettor_pk, direction, stake_amount, side_lock_daa, side_lock_tx FROM pool_bettor_sides WHERE market_id = ?`
     ).all(mid);
     for (const r of rows) {
-      out.push({ pk: String(r.bettor_pk), direction: Number(r.direction), stake: String(r.stake_amount), side_lock_daa: r.side_lock_daa });
+      out.push({ pk: String(r.bettor_pk), direction: Number(r.direction), stake: String(r.stake_amount), side_lock_daa: r.side_lock_daa, side_lock_tx: r.side_lock_tx });
     }
   }
   return out;

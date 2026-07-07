@@ -26,6 +26,7 @@ import { deriveCommitteeSeed, selectCommittee } from '../services/pool-committee
 import { buildPoolMerkleTree } from '../services/pool-merkle-v06.mjs';   // C2: complete-set verify
 import { findExtractor, extractStructuredFields } from './oracle-evidence-extractors.mjs';   // verifyFrozenEvidence canonical fetch (J1)
 import { listShards } from './shard-allocator.mjs';                                          // C1 cross-shard iteration (单源, register/consolidate 同表)
+import { canonicalBetOrder, computeBetsRoot, payoutRoot as computeMerkleRoot } from './pool-payout-root.mjs';   // W2: committee 独立重算 betsRoot/refundRoot
 const _PREDICATE_COMMIT_REDEEM_OFFSET = 518;
 const _hex32 = (s) => Buffer.from(blake2b(Buffer.from(s), { dkLen: 32 })).toString('hex');
 // canonical (A) 4-field ShardLeaf state splice (= pool-shard-register.spliceLeafState 单源, byte-equal to recompile, J2 已验)。
@@ -112,20 +113,88 @@ export function verifyClosePayoutRootBinding({ txSafeJson, psRedeemHex, reDerive
   return { ok: true, expectedSpk, matchedOutputs: covOuts.length };
 }
 
+// ── W2 (J2 2026-07-07): PayoutShardV2 close_attest continuation splice — 字节偏移坐实于实际 PayoutShardV2.sil
+//   源码 (consolidated_pool/closed/payoutRoot/w0-w16/attestedWinner/attestedAtMs/betsRootBaked/refundRootBaked
+//   顺序声明, state_start=1, int=PUSH8+i64LE=9B, byte32=PUSH32+32B=33B — 跟 V1 _splicePayoutCloseRedeem 同编码
+//   约定)。NWT 独立按源码 derive 核实一致(2026-07-07 review), 但**这仍是源码级推导, 落码后必须再用真实编译的
+//   PayoutShardV2 实例 + 真实 close_attest 测试 tx 做 byte-exact diff**(NWT/Bettor DoD 钉死, D2 铁律 = byte-exact
+//   判据非 code review, 不能只信这次推导)。
+const _PSV2_CLOSED_OFF = _PS_STATE_START + 9;     // consolidated_pool(9) 之后 = 10
+const _PSV2_PAYOUTROOT_OFF = _PS_STATE_START + 18;  // + closed(9) = 19
+const _PSV2_ATTESTEDWINNER_OFF = _PS_STATE_START + 204;  // + payoutRoot(33) + w0..w16(17×9=153) = 19+33+153 = 205
+const _PSV2_ATTESTEDATMS_OFF = _PS_STATE_START + 213;    // + attestedWinner(9) = 214
+const _PSV2_BETSROOT_OFF = _PS_STATE_START + 222;        // + attestedAtMs(9) = 223
+const _PSV2_REFUNDROOT_OFF = _PS_STATE_START + 255;      // + betsRoot(33) = 256
+const _PSV2_STATE_END_OFF = _PS_STATE_START + 288;       // + refundRoot(33) = 289
+
+// test-only export (byte-exact diff 验收用, NWT/Bettor DoD): production 内部只经 verifyClosePayoutV2Binding 调用。
+export function _splicePayoutV2CloseRedeem(psv2RedeemHex, { newPayoutRootHex, newAttestedWinner, newBetsRootHex, newRefundRootHex, newAttestedAtMs }) {
+  const redeem = Buffer.from(String(psv2RedeemHex), 'hex');
+  const root = Buffer.from(String(newPayoutRootHex).replace(/^0x/, ''), 'hex');
+  const betsRoot = Buffer.from(String(newBetsRootHex).replace(/^0x/, ''), 'hex');
+  const refundRoot = Buffer.from(String(newRefundRootHex).replace(/^0x/, ''), 'hex');
+  if (root.length !== 32) throw new Error(`newPayoutRoot 非 32B (got ${root.length})`);
+  if (betsRoot.length !== 32) throw new Error(`newBetsRoot 非 32B (got ${betsRoot.length})`);
+  if (refundRoot.length !== 32) throw new Error(`newRefundRoot 非 32B (got ${refundRoot.length})`);
+  if (redeem.length < _PSV2_STATE_END_OFF) throw new Error(`psv2Redeem 太短 (${redeem.length}B, 需 ≥ ${_PSV2_STATE_END_OFF}) — 非 PayoutShardV2 redeem?`);
+  const closedField = Buffer.concat([Buffer.from([0x08]), _i64LE(1)]);
+  const rootField = Buffer.concat([Buffer.from([0x20]), root]);
+  const attestedWinnerField = Buffer.concat([Buffer.from([0x08]), _i64LE(newAttestedWinner)]);
+  const attestedAtMsField = Buffer.concat([Buffer.from([0x08]), _i64LE(newAttestedAtMs)]);
+  const betsRootField = Buffer.concat([Buffer.from([0x20]), betsRoot]);
+  const refundRootField = Buffer.concat([Buffer.from([0x20]), refundRoot]);
+  return Buffer.concat([
+    redeem.slice(0, _PSV2_CLOSED_OFF), closedField,
+    redeem.slice(_PSV2_CLOSED_OFF + 9, _PSV2_PAYOUTROOT_OFF), rootField,
+    redeem.slice(_PSV2_PAYOUTROOT_OFF + 33, _PSV2_ATTESTEDWINNER_OFF), attestedWinnerField,
+    redeem.slice(_PSV2_ATTESTEDWINNER_OFF + 9, _PSV2_ATTESTEDATMS_OFF), attestedAtMsField,
+    redeem.slice(_PSV2_ATTESTEDATMS_OFF + 9, _PSV2_BETSROOT_OFF), betsRootField,
+    redeem.slice(_PSV2_BETSROOT_OFF + 33, _PSV2_REFUNDROOT_OFF), refundRootField,
+    redeem.slice(_PSV2_REFUNDROOT_OFF + 33),
+  ]).toString('hex');
+}
+
 /**
- * Autonomous close_attest enforce. Returns {pass, reason?, verdict?, skip?}.
- *  - skip:true  → this node isn't a committee member for this market (daemon: not-my-business, no sig, not a fail).
- *  - pass:false → enforce rejected (daemon: 弃签, don't broadcast sig — the load-bearing defense).
- *  - pass:true  → daemon proceeds to sign_input_for_settle on the local relay.
- *
- * @param {object} signRequest {market_id, predicate, proposed_evidence, claimedPayoutRoot, psRedeemHex,
- *                              committee_pk, broker_pk, introducer_pk?}  (from metadata.bshard_close_request)
- * @param {object} ctx {myOracleKeys:string[](lowercase x-only), chainReader, db, fetchEndBlockHashCanonical,
- *                       loadPoolSnapshot, loadBettors, deadlineDaa}  (daemon-injected)
+ * D2-V2 (W2): 验【被签 tx 实际 commit 的全部 5 个新/改值】(payoutRoot + attestedWinner + betsRoot + refundRoot +
+ * attestedAtMs), 不是 caller 旁路标量。跟 V1 verifyClosePayoutRootBinding 同一防线, 扩展到 V2 新增字段
+ * (D2 草稿 §"D2-style tx-binding 扩展": 逐个反解比对, 任一不匹配 fail-closed)。
+ * ⚠ version>=1 malleability gate 照抄 V1(NWT finding④: 不能丢) — covenant binding 仅 sighash 覆盖于 tx.version>=1。
  */
-export async function enforceCloseAttest(signRequest, ctx) {
+function verifyClosePayoutV2Binding({ txSafeJson, psv2RedeemHex, reDerivedRoot, attestedWinner, betsRootHex, refundRootHex, attestedAtMs }) {
+  let signedTx;
+  try { signedTx = JSON.parse(String(txSafeJson || '')); } catch { return { ok: false, reason: 'D2-V2: txSafeJson parse fail — 无法验被签 tx commit 的值 (弃签)' }; }
+  const _ver = signedTx.version;
+  if (typeof _ver !== 'number' || !Number.isInteger(_ver) || _ver < 1) return { ok: false, reason: `D2-V2: tx.version=${JSON.stringify(_ver)} 非 native-int 或 <1 — covenant binding 仅 v>=1 被 sighash 覆盖, fail-closed 弃签` };
+  let expectedSpk;
+  try {
+    expectedSpk = _p2shSpkHex(_splicePayoutV2CloseRedeem(psv2RedeemHex, {
+      newPayoutRootHex: reDerivedRoot, newAttestedWinner: attestedWinner,
+      newBetsRootHex: betsRootHex, newRefundRootHex: refundRootHex, newAttestedAtMs: attestedAtMs,
+    }));
+  } catch (e) { return { ok: false, reason: `D2-V2: continuation redeem splice fail (${e.message})` }; }
+  const covOuts = (Array.isArray(signedTx.outputs) ? signedTx.outputs : []).filter(o => o && o.covenant && o.covenant.covenantId);
+  if (covOuts.length === 0) return { ok: false, reason: 'D2-V2: 被签 tx 无 covenant continuation output — 非合法 close_attest (弃签)' };
+  for (const o of covOuts) {
+    if (String(o.scriptPublicKey || '').toLowerCase() !== expectedSpk) {
+      return { ok: false, reason: `D2-V2 REJECT: 被签 tx continuation output commit 的值 != re-derive (payoutRoot/attestedWinner/betsRoot/refundRoot/attestedAtMs 任一漂) — settler 旁路标量伪装 (spk ${String(o.scriptPublicKey).slice(0, 24)}.. != expected ${expectedSpk.slice(0, 24)}..)`, expectedSpk };
+    }
+  }
+  return { ok: true, expectedSpk, matchedOutputs: covOuts.length };
+}
+
+/**
+ * ⚠ 共享核心验证链 (V1/V2 分叉防护, W2 2026-07-07): 这段逻辑是 enforceCloseAttest(V1)/enforceCloseAttestV2 共用的
+ * 委员归属→predicate hash-bind→frozen evidence→judgeLine→committee链锚→bettor集验证→payoutRoot重导出 全链。
+ * **改这条验证链必须同步检查 V1(enforceCloseAttest)/V2(enforceCloseAttestV2) 两侧调用点是否都要跟着变**
+ * (同 PayoutShard.sil↔PayoutShardV2.sil 现有的 REGRESSION-safe 关系标注手法)。V1/V2 各自只处理自己专属的最后一段
+ * (V1 到 payoutRoot D2/C3 为止；V2 额外核 4 个新字段 + 扩展 D2, 见 enforceCloseAttestV2)。
+ * 后续工单(非今天): 等 ZK-native 跑稳后再抽出更薄的 wrapper, 现阶段两个导出函数各自完整以防漂移。
+ *
+ * @returns {Promise<{pass:true, verdict, winningDirection, committee, bettors, reDerivedRoot}|{pass:false, reason}|{skip:true, reason}>}
+ */
+async function _enforceCloseAttestCore(signRequest, ctx) {
   const {
-    market_id, predicate, proposed_evidence, claimedPayoutRoot, psRedeemHex,
+    market_id, predicate, proposed_evidence, psRedeemHex,
     committee_pk, broker_pk, introducer_pk = null, data_source_canonical = null,
   } = signRequest;
 
@@ -211,6 +280,29 @@ export async function enforceCloseAttest(signRequest, ctx) {
   if (pm.degenerate) return { pass: false, reason: `degenerate (${pm.reason}) — 单边池需 refund 路` };
   const reDerivedRoot = settlePayoutRoot(pm.payoutLeaves && pm.payoutLeaves.length ? pm.payoutLeaves : pm.winners);
 
+  return { pass: true, verdict, winningDirection, committee, bettors, reDerivedRoot };
+}
+
+/**
+ * Autonomous close_attest enforce (V1 / PayoutShard). Returns {pass, reason?, verdict?, skip?}.
+ *  - skip:true  → this node isn't a committee member for this market (daemon: not-my-business, no sig, not a fail).
+ *  - pass:false → enforce rejected (daemon: 弃签, don't broadcast sig — the load-bearing defense).
+ *  - pass:true  → daemon proceeds to sign_input_for_settle on the local relay.
+ *
+ * ⚠ V1/V2 分叉防护: 委员归属→...→payoutRoot 重导出这段逻辑现在活在 _enforceCloseAttestCore (见上)。改这段
+ * 必须同步检查 enforceCloseAttestV2 是否也要跟着变。本函数只处理 V1 专属的最后一段 (D2/C3 payoutRoot binding)。
+ *
+ * @param {object} signRequest {market_id, predicate, proposed_evidence, claimedPayoutRoot, psRedeemHex,
+ *                              committee_pk, broker_pk, introducer_pk?}  (from metadata.bshard_close_request)
+ * @param {object} ctx {myOracleKeys:string[](lowercase x-only), chainReader, db, fetchEndBlockHashCanonical,
+ *                       loadPoolSnapshot, loadBettors, deadlineDaa}  (daemon-injected)
+ */
+export async function enforceCloseAttest(signRequest, ctx) {
+  const core = await _enforceCloseAttestCore(signRequest, ctx);
+  if (core.skip || core.pass === false) return core;
+  const { verdict, reDerivedRoot } = core;
+  const { claimedPayoutRoot, psRedeemHex } = signRequest;
+
   // ── D2 FIX (NWT 红队最承重 = verify-value-source): 验【被签 txSafeJson 实际 commit 的根】, 不是 caller 旁路标量 ──
   //   旧码只 `reDerivedRoot != claimedPayoutRoot` (标量) → settler 给匹配标量 + 输出含恶意根的 tx 即可绕过。
   //   D2 = 从被签 tx 的 covenant continuation output 反解 P2SH-embedded payoutRoot 验它 == re-derive (sighash 覆盖)。
@@ -226,6 +318,93 @@ export async function enforceCloseAttest(signRequest, ctx) {
   //    (D2+C3 合: verifiedTxHash 绑的正是 D2 验过 continuation-root 的同一 txSafeJson 串。)
   const verifiedTxHash = Buffer.from(blake2b(Buffer.from(String(signRequest.txSafeJson || '')), { dkLen: 32 })).toString('hex');
   return { pass: true, verdict, verifiedTxHash };
+}
+
+// attestedAtMs 值域下限/上限 (zk_handoff 同款 bounds guard, PayoutShardV2.sil `require(attestedAtMs>=2^40); require(<2^47)`)。
+const _ATTESTED_AT_MS_MIN = 1099511627776;      // 2^40 (~2004)
+const _ATTESTED_AT_MS_MAX = 140737488355328;    // 2^47 (~4453) — 上限极宽, 只防位宽溢出, 非合理性判据
+// wall-clock sanity 容差 (NWT finding② + Bettor 裁定 10min, 配 5-委员签名流程时长, 可调)。
+const _ATTESTED_AT_MS_CLOCK_TOLERANCE_MS = 10 * 60 * 1000;
+
+/**
+ * Autonomous close_attest enforce (V2 / PayoutShardV2, ZK-native, W2 2026-07-07). Returns {pass, reason?, verdict?, skip?}.
+ * 同 enforceCloseAttest(V1) 的 skip/pass 语义, 但对 4 个新增 witness 字段 (new_attestedWinner/new_betsRoot/
+ * new_refundRoot/new_attestedAtMs) 做委员独立重算/范围核对 (NWT 2026-07-07 review GREEN-with-2-findings,
+ * 已折进本实现: gatherOrderedBets 本地 id 序改用链锚 canonicalBetOrder + attestedAtMs 加 wall-clock sanity)。
+ *
+ * ⚠ V1/V2 分叉防护: 共用验证链在 _enforceCloseAttestCore (见上), 改那段必须同步检查 V1 是否也要跟着变。
+ *
+ * @param {object} signRequest {market_id, predicate, proposed_evidence, claimedPayoutRoot, psRedeemHex(=V2 redeem),
+ *                              committee_pk, broker_pk, introducer_pk?, txSafeJson,
+ *                              new_attestedWinner, new_betsRoot, new_refundRoot, new_attestedAtMs}
+ * @param {object} ctx 同 enforceCloseAttest ctx
+ */
+export async function enforceCloseAttestV2(signRequest, ctx) {
+  const core = await _enforceCloseAttestCore(signRequest, ctx);
+  if (core.skip || core.pass === false) return core;
+  const { verdict, winningDirection, bettors, reDerivedRoot } = core;
+  const {
+    claimedPayoutRoot, psRedeemHex, new_attestedWinner, new_betsRoot, new_refundRoot, new_attestedAtMs,
+  } = signRequest;
+
+  // ── new_attestedWinner: 已经算出来了(core.winningDirection), 直接复用, 非新逻辑, 只核一致 ──
+  const attestedWinner = Number(new_attestedWinner);
+  if (attestedWinner !== winningDirection) {
+    return { pass: false, reason: `W2: new_attestedWinner=${attestedWinner} != 委员自判 winningDirection=${winningDirection} (假赢家)` };
+  }
+
+  // ── new_attestedAtMs: (a) bounds check [2^40,2^47) 同 zk_handoff 链上 guard 值域 (b) wall-clock sanity ──
+  //   (a)(b) 都是"独立核对", 不止位宽 check (NWT finding②: 光位宽通过不代表值合理, 必核跟委员自己 wall-clock 的偏差)。
+  const attestedAtMs = Number(new_attestedAtMs);
+  if (!Number.isFinite(attestedAtMs) || attestedAtMs < _ATTESTED_AT_MS_MIN || attestedAtMs >= _ATTESTED_AT_MS_MAX) {
+    return { pass: false, reason: `W2: new_attestedAtMs=${new_attestedAtMs} 越界 [${_ATTESTED_AT_MS_MIN},${_ATTESTED_AT_MS_MAX}) (非法值域/位宽溢出风险)` };
+  }
+  const nowMs = ctx.nowMs != null ? Number(ctx.nowMs) : Date.now();   // ctx.nowMs 可注入(offline 自测), 缺省真实时钟
+  const clockDeltaMs = Math.abs(attestedAtMs - nowMs);
+  if (clockDeltaMs > _ATTESTED_AT_MS_CLOCK_TOLERANCE_MS) {
+    return { pass: false, reason: `W2: new_attestedAtMs 跟委员自己 wall-clock 偏差 ${clockDeltaMs}ms > 容差 ${_ATTESTED_AT_MS_CLOCK_TOLERANCE_MS}ms (driver 可能喂了远离真实 attest 时刻的值, escapeRefund GRACE 锚点被扭曲风险, 弃签)` };
+  }
+
+  // ── new_betsRoot: 委员自己按 canonical 链锚序(side_lock_daa+side_lock_tx tiebreak)重算, 非 driver 喂的本地 id 序 ──
+  //   (NWT finding①: gatherOrderedBets 本地 id 序在多节点独立重算场景会跨节点分叉, 必须用链锚可收敛序)。
+  let betsRootHex;
+  try {
+    const ordered = canonicalBetOrder(bettors);
+    const bets = ordered.map(b => ({ pk: b.pk, stake: b.stake, direction: b.direction }));
+    betsRootHex = computeBetsRoot(bets).toString('hex');
+  } catch (e) {
+    return { pass: false, reason: `W2: betsRoot 重算 fail (${e.message}) — 弃签(不猜)` };
+  }
+  if (betsRootHex !== String(new_betsRoot).replace(/^0x/, '').toLowerCase()) {
+    return { pass: false, reason: `W2 REJECT: betsRoot re-derive ${betsRootHex.slice(0, 14)} != claimed ${String(new_betsRoot).slice(0, 14)} (假 bets 集/序)` };
+  }
+
+  // ── new_refundRoot: 同批 bettor 数据(pk+stake=自己的全额退款), 复用 payoutRoot 的 depth-10 merkle 公式(refund=100%退) ──
+  let refundRootHex;
+  try {
+    const winners = bettors.map(b => ({ pk: b.pk, amount: b.stake }));
+    refundRootHex = computeMerkleRoot(winners).toString('hex');
+  } catch (e) {
+    return { pass: false, reason: `W2: refundRoot 重算 fail (${e.message}) — 弃签(不猜)` };
+  }
+  if (refundRootHex !== String(new_refundRoot).replace(/^0x/, '').toLowerCase()) {
+    return { pass: false, reason: `W2 REJECT: refundRoot re-derive ${refundRootHex.slice(0, 14)} != claimed ${String(new_refundRoot).slice(0, 14)} (假 bettor 集/stake)` };
+  }
+
+  // ── D2-V2: 验被签 tx 实际 commit 的全部 5 个值(payoutRoot+attestedWinner+betsRoot+refundRoot+attestedAtMs) ──
+  const d2 = verifyClosePayoutV2Binding({
+    txSafeJson: signRequest.txSafeJson, psv2RedeemHex: psRedeemHex, reDerivedRoot,
+    attestedWinner, betsRootHex, refundRootHex, attestedAtMs,
+  });
+  if (!d2.ok) return { pass: false, reason: d2.reason };
+  // defense-in-depth (非 load-bearing, D2 上面已绑被签 tx): caller 标量也须一致。
+  if (String(claimedPayoutRoot) !== reDerivedRoot) {
+    return { pass: false, reason: `命门③/④ payoutRoot REJECT: re-derive ${reDerivedRoot.slice(0, 14)} != claimed scalar ${String(claimedPayoutRoot).slice(0, 14)} (假 winningSide/委员/fee)` };
+  }
+
+  // ── C3 (同 V1): 返【我 D2-验过的那个 tx 的 hash】, daemon 签前必核 == 此值 ──
+  const verifiedTxHash = Buffer.from(blake2b(Buffer.from(String(signRequest.txSafeJson || '')), { dkLen: 32 })).toString('hex');
+  return { pass: true, verdict, verifiedTxHash, betsRootHex, refundRootHex };
 }
 
 // ── per-URL FINAL-cache (crossnode-oracle-liveness 铁律: 防 voter 403 self-DoS / 限流风暴) ──
