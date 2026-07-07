@@ -964,6 +964,15 @@ if (process.send) {
           if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, ...r } });
           return;
         }
+        case 'bshard_zk_handoff': {
+          // W4a (J1 2026-07-07): PayoutShardV2 zk_handoff — 一次性把 consolidated_pool 交给新铸 CloseZkRepro4
+          // genesis output, 无 continuation(生命周期终点)。NWT 逻辑级 GREEN(478de1b0→b34ce1ba, 侧分支 j1-w4a-draft)。
+          const { unlockBshardZkHandoff } = await import('./lib/p2sh.mjs');
+          const wallet = getWallet();
+          const r = await unlockBshardZkHandoff({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) });
+          if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, ...r } });
+          return;
+        }
         case 'bshard_payout_claim': {
           // winner store-payout 派彩 (merkle climb + multi-word nullifier + recipient P2PK + cov_id 续, OP_2).
           const { unlockBshardPayoutClaim } = await import('./lib/p2sh.mjs');

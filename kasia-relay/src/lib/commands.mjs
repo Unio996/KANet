@@ -91,6 +91,8 @@ export const COMMAND_TYPES = Object.freeze({
   // ── W2 (2026-07-07): PayoutShardV2 / ZK-native close_attest (4 新字段, 委员 pubkey-distinct 背书 + zk_handoff 前置) ──
   BSHARD_CLOSE_ATTEST_V2: 'bshard_close_attest_v2',           // PayoutShardV2 close_attest OP_1, 同 BSHARD_CLOSE_ATTEST + attestedWinner/betsRoot/refundRoot/attestedAtMs
   BSHARD_CONSOLIDATE_V2: 'bshard_consolidate_v2',             // PayoutShardV2 absorb OP_0 + SL consolidate_to_payout OP_1, 同 BSHARD_CONSOLIDATE + V2 state(288B)
+  // ── W4a (2026-07-07, J1): PayoutShardV2 zk_handoff — 一次性把 consolidated_pool 交给新铸 CloseZkRepro4 genesis ──
+  BSHARD_ZK_HANDOFF: 'bshard_zk_handoff',                     // PayoutShardV2 zk_handoff OP_4, 无 continuation(生命周期终点)
 });
 
 export const COMMAND_TYPE_SET = new Set(Object.values(COMMAND_TYPES));
@@ -153,6 +155,7 @@ export const COMMAND_PAYLOAD_SCHEMA = Object.freeze({
   [COMMAND_TYPES.BSHARD_REFUND_CLAIM]: ['witness', 'inputs', 'outputs'],
   [COMMAND_TYPES.BSHARD_CLOSE_ATTEST_V2]: ['witness', 'inputs', 'outputs'],
   [COMMAND_TYPES.BSHARD_CONSOLIDATE_V2]: ['inputs', 'outputs'],
+  [COMMAND_TYPES.BSHARD_ZK_HANDOFF]: ['witness', 'inputs', 'outputs'],
 });
 
 // R38 (Z23 sediment): typeof spec per field. Bug-Z23 真根因 — broker enqueue amount: number,
@@ -212,6 +215,7 @@ export const COMMAND_FIELD_TYPES = Object.freeze({
   [COMMAND_TYPES.BSHARD_REFUND_CLAIM]: { witness: 'object', inputs: 'object', outputs: 'object' },
   [COMMAND_TYPES.BSHARD_CLOSE_ATTEST_V2]: { witness: 'object', inputs: 'object', outputs: 'object' },
   [COMMAND_TYPES.BSHARD_CONSOLIDATE_V2]: { inputs: 'object', outputs: 'object' },
+  [COMMAND_TYPES.BSHARD_ZK_HANDOFF]: { witness: 'object', inputs: 'object', outputs: 'object' },
 });
 
 export function validateCommandPayload(cmd) {
