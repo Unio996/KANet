@@ -7,6 +7,7 @@
 import { sqlite } from '../db/client.js';
 import { compileSil, ctorBytes32, ctorInt } from './pool-bshard-artifacts.mjs';
 import { computeCloseZkTmplAnchor } from './pool-shard-register.mjs';
+import { readPayoutShardV2AttestedState } from './bshard-close-enforce.mjs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -108,6 +109,33 @@ export function writeZkContinuation(marketId, o) {
   };
   sqlite.prepare(`UPDATE pool_markets SET metadata = ? WHERE id = ?`).run(JSON.stringify(meta), marketId);
   return { ok: true };
+}
+
+/**
+ * buildCloseZkV2GenesisFromAttestedState — 合体入口(J1+J2 切片对接, Bettor 18:45 合体序①)。
+ *   编排: readPayoutShardV2AttestedState(J1, 从落链的 close_attest_v2 continuation 读 5 个 committee-attested
+ *   字段) → computeCloseZkTmplAnchor(对 CLOSEZK_V2_SIL 当次编译重算, §4 硬门①) → compileCloseZkV2Redeem(J2,
+ *   §4 硬门⑥不接受省略 anchor —— 注意: anchor 本身不进 CloseZkV2 ctor, 见 compileCloseZkV2Redeem CRITICAL 修复
+ *   记录; 这里算 anchor 是为了返回给调用方去更新/校验 PayoutShardV2 侧的 closeZkTmplAnchor 期望值, 不是喂给本函数)。
+ *   字段名桥接(J1 读出用 `Hex` 后缀反映"原始读取", J2 组装用 `Baked` 后缀反映"ctor 烤入语义" — 命名差异非
+ *   bug, 两个模块各自的既有惯例, 这里做唯一的映射点)。
+ * @param {string} psv2RedeemHex 已落链的 PayoutShardV2 continuation redeem hex(closed 已被委员写成 1)
+ * @param {string} gateTmplHash 32B hex — CloseZkV2 自己的 ctor 字段, 来自 guest image 绑定的 gate 模板哈希(跟
+ *   committee-attested 值无关, 调用方显式传入, 不从 psv2 state 推导)
+ * @returns {{redeemHex:string, anchorHex:string, consolidatedPool:bigint, attestedWinner:number, attestedAtMs:number}}
+ */
+export function buildCloseZkV2GenesisFromAttestedState(psv2RedeemHex, gateTmplHash) {
+  const state = readPayoutShardV2AttestedState(psv2RedeemHex);   // J1 的切片, fail-closed 四项已在函数内部核过
+  const anchor = computeCloseZkTmplAnchor(CLOSEZK_V2_SIL, gateTmplHash);   // §4 硬门①: 每次对 CloseZkV2 当次编译重算
+  const redeemHex = compileCloseZkV2Redeem({
+    gateTmplHash,
+    betsRootBaked: state.betsRootHex,
+    refundRootBaked: state.refundRootHex,
+    attestedAtMs: state.attestedAtMs,
+    attestedWinner: state.attestedWinner,
+    consolidatedPool: state.consolidatedPool,
+  });
+  return { redeemHex, anchorHex: anchor.anchorHex, consolidatedPool: state.consolidatedPool, attestedWinner: state.attestedWinner, attestedAtMs: state.attestedAtMs };
 }
 
 export { CLOSEZK_V2_SIL };
