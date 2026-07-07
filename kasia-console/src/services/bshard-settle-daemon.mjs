@@ -26,7 +26,18 @@ import { recordShadowJudgment, registerDomainJudge } from '../lib/oracle-shadow-
 import { espnSportsJudge } from '../lib/nwt-espn-sports-judge.mjs';   // NWT域判v1: polymarket体育盘ESPN独立判
 import { classifyFailure, shouldKeepStatus } from '../lib/bshard-failure-classifier.mjs';   // #49 模块①
 import { zkCloseTick } from '../lib/zk-close-builder.mjs';   // 2026-07-06 J2: ZK settle 生产装配, 见 docs/2026-07-06-zk-close-tick-production-wiring-design.md
+import { dispatchUnlockZkClose as _dispatchUnlockZkCloseImpl } from '../lib/zk-close-dispatch.mjs';   // 缺件③(J1tn 2026-07-08)
 import { randomUUID } from 'crypto';
+import { createRequire } from 'node:module';
+const _require = createRequire(import.meta.url);
+// 同 zk-prove-worker.mjs 完全一致的 isolated zk-sdk WASM 路径(D-005 隔离铁律: ZK 工具链绝不碰 live kaspa-wasm,
+// 独立 clone 出的 zk-sdk 构建)——gate witness 重建需要跟铸 gate 时同一份 ZkScriptBuilder API。
+const ZKSDK_WASM_PATH = process.env.ZKSDK_WASM_PATH || 'D:/rusty-kaspa-zksdk-isolated/wasm/nodejs/kaspa/kaspa.js';
+let _kaspaZkMod = null;
+function kaspaZk() { if (!_kaspaZkMod) _kaspaZkMod = _require(ZKSDK_WASM_PATH); return _kaspaZkMod; }
+// 跟 zk-prove-worker.mjs buildAndFundGate 用的同一个 relay 身份(铸+注资 gate 的那个 relay, 花它自己铸的
+// gate UTXO 天然该用同一身份广播——不用 SETTLE_DAEMON_FEE_RELAY_ID, 那是 committee-sig 老路径的身份)。
+const ZK_SETTLER_RELAY_ID = process.env.BSHARD_SETTLER_RELAY_ID || null;
 registerDomainJudge(espnSportsJudge);
 
 const CONSOLE = process.env.SETTLE_DAEMON_CONSOLE_BASE || 'http://127.0.0.1:3200';
@@ -340,7 +351,18 @@ const _zkCloseCtx = {
     let meta = {}; try { meta = JSON.parse(market.metadata || '{}'); } catch {}
     return meta.zk_continuation || null;
   },
-  dispatchUnlockZkClose: async () => { throw new Error('TODO: dispatchUnlockZkClose 未实现(J1 relay handler, 下一步独立工作)'); },
+  // 缺件③落地(J1tn 2026-07-08): 真实实现搬进 zk-close-dispatch.mjs(独立可单测, mock ctx 覆盖全部
+  // fail-closed 分支), 这里只做 ctx 绑定(getMarket/getDoneJob 用真实 sqlite, kaspaZk 用同 zk-prove-worker.mjs
+  // 一致的 isolated zk-sdk WASM, relayCall 走本文件既有 relayPost 惯例)。
+  dispatchUnlockZkClose: async (args) => {
+    if (!ZK_SETTLER_RELAY_ID) return { ok: false, error: 'BSHARD_SETTLER_RELAY_ID unset — 无法广播 zk_close' };
+    return _dispatchUnlockZkCloseImpl(args, {
+      getMarket: (marketId) => sqlite.prepare('SELECT metadata FROM pool_markets WHERE id = ?').get(marketId),
+      getDoneJob: (marketId) => sqlite.prepare("SELECT receipt_hex FROM zk_prove_jobs WHERE market_id = ? AND status = 'done' ORDER BY id DESC LIMIT 1").get(marketId),
+      kaspaZk,
+      relayCall: (cmd) => relayPost(ZK_SETTLER_RELAY_ID, cmd),
+    });
+  },
   // 真实实现: 查目标 UTXO 是否存在(landed = 有对应 UTXO, 复用今晚反复验证过的 rpc.getUtxosByAddresses 模式)。
   checkLanded: async (txid) => {
     try {
