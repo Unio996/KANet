@@ -1726,7 +1726,10 @@ export async function registerRelayRoutes(fastify) {
   fastify.post('/api/relay/:id/send-command', async (request, reply) => {
     const body = request.body || {};
     if (!body.type) return reply.code(400).send({ error: 'type is required' });
-    const timeoutMs = body.type === 'chain_get_block_at_daa' ? 120000 : 30000;
+    // 2026-07-07(J2·Bettor批): 120000→400000. MAX_WALK=250000@~1000块/s≈250s上限, 400s留余量——3o6cs(zk_native
+    // 首证市场)的walk深度随chain tip推进每天变深(target_daa固定不变), 之前120s在target较近时够用, 现在walk距离
+    // 已超ring buffer窗口必须慢速fallback, 120s不够。运维参数改动, 非逻辑变更。
+    const timeoutMs = body.type === 'chain_get_block_at_daa' ? 400000 : 30000;
     try {
       const result = await sendCommandAsync(request.params.id, body, timeoutMs);
       return reply.send({ ok: true, ...result });
