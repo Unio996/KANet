@@ -158,6 +158,15 @@ async function loadEnforce() {
   return m.enforceCloseAttest;
 }
 
+// W2 (J2 2026-07-07): enforceCloseAttestV2 (PayoutShardV2/ZK-native) 同款 fail-loud 加载, 同 loadEnforce 理由。
+async function loadEnforceV2() {
+  const m = await import('../lib/bshard-close-enforce.mjs');
+  if (typeof m.enforceCloseAttestV2 !== 'function') {
+    throw new Error('bshard-close-enforce.mjs 缺 enforceCloseAttestV2 export — W2 enforce lib 未 ship, 拒签');
+  }
+  return m.enforceCloseAttestV2;
+}
+
 // ⚠ opt-in gate (default OFF). E1 已闭 (ctx 全 wire 含 C1 级2-B deriveTicketAddr, Bettor live byte-equal 实证), daemon
 //   逻辑可跑。但 Track B 整体仍待【live e2e 实证】才能宣称 production-trustless:
 //   - D2/C2: J1 逻辑层闭 (86523223/f4d2a7ee, NWT 11 TEETH 红队验), 但尚未在【活 (A)-model 自治 settle】端到端跑过。
@@ -293,6 +302,107 @@ async function processCloseRequest(voter, market, req, enforceCloseAttest) {
     sqlite.prepare(`INSERT OR IGNORE INTO chain_events (txid, from_address, event_type, payload, observed_by, is_public) VALUES (?, ?, 'bshard_close_sig', ?, ?, 1)`)
       .run(synthTxid, voter.address, payload, voter.id);
     console.log(`[bshard-close-voter] ✅ ${voter.name} 自治 enforce PASS (verdict=${verdict.verdict}) → 签 close_attest market=${market.id.slice(-8)}`);
+    return { signed: true };
+  } catch (e) {
+    return { errored: true, reason: e.message };
+  }
+}
+
+// ── W2 (J2 2026-07-07): PayoutShardV2 / ZK-native close_attest 自治-enforce (镜像 V1 骨架, 分派到 enforceCloseAttestV2) ──
+// ⚠ 今天(2026-07-07)诚实标注: 这是 driver-driven 首证的一部分 (Bettor 裁定 (a)+结构化), 不挂进 startBshardCloseVoterCron
+// 自动循环 — 由 3o6cs 一次性驱动脚本直接调用一次。①②③自治接线(含此 tick 挂进持续 cron)留后续任务, 不是今天范围。
+export async function bshardCloseVoterV2Tick() {
+  const voterRelays = sqlite.prepare(`SELECT id, name, address FROM relay_nodes WHERE is_oracle = 1`).all();
+  if (!voterRelays.length) return { ok: true, voters: 0 };
+  const enforceCloseAttestV2 = await loadEnforceV2();
+  let signed = 0, skipped = 0, refused = 0, errored = 0;
+  // pending V2 close-request: zk_native 市场(跟 V1 pending 查询互斥, 反向 filter) + collecting_sigs + metadata 带 bshard_close_request_v2。
+  const pending = sqlite.prepare(`
+    SELECT id, metadata, pool_merkle_root, broker_pk, deadline_daa, resolution_rule_spec, spine_p2sh
+    FROM pool_markets
+    WHERE protocol_version = 'v0.7' AND protocol_status = 'collecting_sigs' AND metadata LIKE '%bshard_close_request_v2%'
+      AND json_valid(resolution_rule_spec) = 1 AND json_extract(resolution_rule_spec, '$.zk_native') IS 1
+  `).all();
+  for (const market of pending) {
+    let req;
+    try { req = JSON.parse(market.metadata || '{}').bshard_close_request_v2; } catch { continue; }
+    if (!req || !req.txSafeJson || !req.committee_pks) { skipped++; continue; }
+    for (const voter of voterRelays) {
+      const r = await processCloseRequestV2(voter, market, req, enforceCloseAttestV2);
+      if (r.signed) signed++; else if (r.refused) refused++; else if (r.errored) errored++; else skipped++;
+    }
+  }
+  console.log(`[bshard-close-voter-v2] tick: ${pending.length} pending | signed=${signed} refused=${refused} skipped=${skipped} errored=${errored}`);
+  return { ok: true, pending: pending.length, signed, refused, skipped, errored };
+}
+
+// 镜像 processCloseRequest(V1), 差异: 分派 enforceCloseAttestV2 + 传 4 新字段 + 写独立 event_type 'bshard_close_sig_v2'
+// (跟 V1 'bshard_close_sig' 结构隔离, collectCloseSigsV2 只读这个 type, 防跟 V1 sig 混淆)。
+async function processCloseRequestV2(voter, market, req, enforceCloseAttestV2) {
+  try {
+    let voterPk;
+    try { voterPk = String((await sendCommandAsync(voter.id, { type: 'get_pubkey' }))?.x_only_pubkey || '').toLowerCase(); } catch { return { errored: true }; }
+    if (!voterPk || voterPk.length !== 64) return { skipped: true };
+    const committeePks = (req.committee_pks || []).map(p => String(p).toLowerCase());
+    if (committeePks.length && !committeePks.includes(voterPk)) return { skipped: true };
+
+    // D1 dedup-by-MARKET (同 V1): 本 voter 对同 market 已签【某根】→ 拒签【不同根】。
+    const priorSigs = sqlite.prepare(`
+      SELECT payload FROM chain_events WHERE event_type = 'bshard_close_sig_v2' AND from_address = ? AND payload LIKE ?
+    `).all(voter.address, `%"market_id":"${market.id}"%`);
+    for (const ps of priorSigs) {
+      let pp; try { pp = JSON.parse(ps.payload); } catch { continue; }
+      if (String(pp.payout_root) === String(req.claimedPayoutRoot)) return { skipped: true };
+      return { refused: true, reason: `D1 equivocation(V2): 已对 market 签过不同 root ${String(pp.payout_root).slice(0, 10)}, 拒签 ${String(req.claimedPayoutRoot).slice(0, 10)}` };
+    }
+
+    await ensureKaspaWasm();
+    const ctx = buildEnforceCtx(voter, voterPk, market);
+    if (Array.isArray(req.snapshot?.shards) && req.snapshot.shards.length) ctx.shards = req.snapshot.shards;
+    const verdict = await enforceCloseAttestV2({
+      ...req, committee_pk: voterPk, market_id: req.market_id || market.id,
+      new_attestedWinner: req.new_attestedWinner, new_betsRoot: req.new_betsRoot,
+      new_refundRoot: req.new_refundRoot, new_attestedAtMs: req.new_attestedAtMs,
+    }, ctx);
+    if (verdict?.skip) return { skipped: true };
+    if (!verdict?.pass) return { refused: true, reason: verdict?.reason };
+
+    // 命门① chain-bound (同 V1): psRedeemHex(V2 redeem) 真是【被签 PS input】的 redeem。
+    try {
+      const txObj = JSON.parse(req.txSafeJson);
+      const psInputTxid = txObj?.inputs?.[req.input_index ?? 0]?.transactionId;
+      if (!psInputTxid) return { errored: true, reason: '命门① chain-bound(V2): txSafeJson 无 PS input transactionId' };
+      const psAddr = ctx.p2sh(req.psRedeemHex);
+      const landed = await ctx.checkUtxoLanded(psAddr, psInputTxid);
+      if (!landed) return { refused: true, reason: `命门① chain-bound(V2): p2sh(psRedeem)=${psAddr.slice(0, 16)} != 被签 PS input 链上地址` };
+    } catch (e) {
+      return { errored: true, reason: `命门① chain-bound(V2) check fail: ${e.message}` };
+    }
+
+    // C3 TOCTOU (同 V1)。
+    const txToSign = req.txSafeJson;
+    if (verdict.verifiedTxHash && _blake2bHex(txToSign) !== verdict.verifiedTxHash) {
+      return { refused: true, reason: `C3 TOCTOU(V2): 要签 tx hash != enforce verifiedTxHash` };
+    }
+
+    let signature = verdict._signature;
+    if (!signature) {
+      const sj = await sendCommandAsync(voter.id, { type: 'sign_input_for_settle', tx_hex: txToSign, input_index: req.input_index ?? 0, safe_json: true });
+      if (!sj?.signature) return { errored: true, reason: `sign_input_for_settle no sig(V2): ${JSON.stringify(sj).slice(0, 80)}` };
+      signature = sj.signature;
+    }
+
+    const meta = req.committee_meta && req.committee_meta[voterPk] ? req.committee_meta[voterPk] : { idx: req.idx, siblings_hex: req.siblings_hex };
+    const payload = JSON.stringify({
+      t: 'bshard_close_sig_v2', market_id: market.id, committee_pk: voterPk, payout_root: req.claimedPayoutRoot,
+      input_index: req.input_index ?? 0, idx: meta.idx, siblings_hex: meta.siblings_hex, signature, verdict: verdict.verdict,
+      // W2 新增 4 字段回填(供 settler submit 时组装 witness, 委员已独立验过, 这里回传的是委员自己重算确认过的值):
+      attestedWinner: req.new_attestedWinner, betsRoot: verdict.betsRootHex, refundRoot: verdict.refundRootHex, attestedAtMs: req.new_attestedAtMs,
+    });
+    const synthTxid = `bshard_close_sig_v2:${voter.id.slice(0, 8)}:${market.id.slice(-6)}:${String(req.claimedPayoutRoot).slice(0, 8)}`;
+    sqlite.prepare(`INSERT OR IGNORE INTO chain_events (txid, from_address, event_type, payload, observed_by, is_public) VALUES (?, ?, 'bshard_close_sig_v2', ?, ?, 1)`)
+      .run(synthTxid, voter.address, payload, voter.id);
+    console.log(`[bshard-close-voter-v2] ✅ ${voter.name} 自治 enforce PASS (verdict=${verdict.verdict}) → 签 close_attest_v2 market=${market.id.slice(-8)}`);
     return { signed: true };
   } catch (e) {
     return { errored: true, reason: e.message };

@@ -946,6 +946,15 @@ if (process.send) {
           if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, ...r } });
           return;
         }
+        case 'bshard_close_attest_v2': {
+          // W2 (J2 2026-07-07): PayoutShardV2/ZK-native close_attest — 委员 4-of-5 背书 payoutRoot + attestedWinner/
+          // betsRoot/refundRoot/attestedAtMs, closed 0→1 write-once + cov_id 续. 镜像 bshard_close_attest 一字不动的调用形状。
+          const { unlockBshardCloseAttestV2 } = await import('./lib/p2sh.mjs');
+          const wallet = getWallet();
+          const r = await unlockBshardCloseAttestV2({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) });
+          if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, ...r } });
+          return;
+        }
         case 'bshard_payout_claim': {
           // winner store-payout 派彩 (merkle climb + multi-word nullifier + recipient P2PK + cov_id 续, OP_2).
           const { unlockBshardPayoutClaim } = await import('./lib/p2sh.mjs');

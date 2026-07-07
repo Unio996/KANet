@@ -1506,12 +1506,21 @@ const _LEAF_STATE_LEN = 36;        // PoolLeaf state_layout.len = 4×(PUSH8+8)
 const _ROOT_STATE_LEN = 87;        // PoolRoot state_layout.len = 6×(PUSH8+8) + (PUSH32+32)
 const _ROOTCLAIM_STATE_LEN = 96;   // RootClaim 8-field (R7 nullifier): _ROOT_STATE_LEN 87 + claimed_bitmap (PUSH8+8) (KANet-UI 2026-06-20)
 const _PAYOUTSHARD_STATE_LEN = 204; // (A) depth-10 PayoutShard: consolidated_pool+closed (2×9) + payoutRoot (PUSH32+32=33) + w0..w16 (17×9=153) = 204 (J2 2026-06-21 depth-10 sync; 旧 depth-8=96 已 superseded)
+// W2 (J2 2026-07-07): PayoutShardV2 state = _PAYOUTSHARD_STATE_LEN(204) + attestedWinner(9) + attestedAtMs(9) + betsRootBaked(33) + refundRootBaked(33) = 288.
+//   声明序(PayoutShardV2.sil): consolidated_pool, closed, payoutRoot, w0..w16, attestedWinner, attestedAtMs, betsRootBaked, refundRootBaked.
+//   跟 console 侧 bshard-close-enforce.mjs _splicePayoutV2CloseRedeem 同一套字节偏移(NWT 2026-07-07 review 独立核实过·D2 铁律 byte-exact)。
+const _PAYOUTSHARDV2_STATE_LEN = 288;
 
-function _i64LE(v) {               // BigInt/number → 8-byte LE Buffer (固定 i64, 非最小)
+// ⚠ landmine(NWT 2026-07-07 实测坐实, W2 review 顺手抓到): 这里之前对负数做两补数, 但真 silverc/rusty-kaspa
+// byte[](int,size) 对负数用 sign-magnitude(同 pool-payout-root.mjs serializeI64)——两者不是同一编码, 两补数字节会跟
+// 真链上编译产出不符。State 字段目前所有真实调用点都非负(genesis 的 -1 sentinel 走真编译, 不经此函数), 负数直接
+// throw 防未来静默错字节(Bettor 裁定本轮折入, 便宜 fail-closed)。
+function _i64LE(v) {               // BigInt/number → 8-byte LE Buffer (固定 i64, 非最小; 仅非负)
+  const n = BigInt(v);
+  if (n < 0n) throw new Error(`_i64LE: 负数(${n}) 会产出两补数字节, 跟真 silverc sign-magnitude 编码不一致——不支持, 需走真编译或显式实现 sign-magnitude 分支`);
   const b = Buffer.alloc(8);
-  let n = BigInt(v);
-  if (n < 0n) n = (1n << 64n) + n;   // two's complement (State 值非负, 防御)
-  for (let i = 0; i < 8; i++) { b[i] = Number(n & 0xffn); n >>= 8n; }
+  let m = n;
+  for (let i = 0; i < 8; i++) { b[i] = Number(m & 0xffn); m >>= 8n; }
   return b;
 }
 
@@ -1570,6 +1579,35 @@ function _serializePayoutStateHex(s) {
     + _encodePushDataHex(Buffer.from(String(s.payoutRoot).replace(/^0x/, ''), 'hex'));   // PUSH32 + 32B
   for (let i = 0; i < _NULLIFIER_WORDS; i++) h += _encodePushDataHex(_i64LE(s['w' + i] ?? 0));   // w0..w16
   return h;
+}
+
+// W2: PayoutShardV2 state serializer (8 字段, 声明序见上方 _PAYOUTSHARDV2_STATE_LEN 注释)。V1 _serializePayoutStateHex
+//   本体不动(single-author V1/V2 分离哲学, 同 PayoutShard.sil/PayoutShardV2.sil 全拷贝手法) — 独立函数, 不共用/不改共享代码。
+// test-only export (byte-exact cross-check vs console 侧 bshard-close-enforce.mjs _splicePayoutV2CloseRedeem)。
+export function _serializePayoutV2StateHex(s) {
+  let h = _encodePushDataHex(_i64LE(s.consolidated_pool))
+    + _encodePushDataHex(_i64LE(s.closed))
+    + _encodePushDataHex(Buffer.from(String(s.payoutRoot).replace(/^0x/, ''), 'hex'));
+  for (let i = 0; i < _NULLIFIER_WORDS; i++) h += _encodePushDataHex(_i64LE(s['w' + i] ?? 0));
+  h += _encodePushDataHex(_i64LE(s.attestedWinner))
+    + _encodePushDataHex(_i64LE(s.attestedAtMs))
+    + _encodePushDataHex(Buffer.from(String(s.betsRootBaked).replace(/^0x/, ''), 'hex'))
+    + _encodePushDataHex(Buffer.from(String(s.refundRootBaked).replace(/^0x/, ''), 'hex'));
+  return h;
+}
+
+// W2: PayoutShardV2 续约地址 — 镜像 _continuationAddress splice 逻辑, 独立函数(专认 _PAYOUTSHARDV2_STATE_LEN, 不碰
+//   V1 allowlist/共享函数体, 避免任何跨版本回归风险)。
+export function _continuationAddressV2(inputRedeemHex, newStateHex, networkId, stateStart = _POOL_STATE_START) {
+  const redeem = Buffer.from(inputRedeemHex, 'hex');
+  const stateBytes = Buffer.from(newStateHex, 'hex');
+  if (stateBytes.length !== _PAYOUTSHARDV2_STATE_LEN) {
+    throw new Error(`PayoutShardV2 state ser ${stateBytes.length}B != 期望 ${_PAYOUTSHARDV2_STATE_LEN}B`);
+  }
+  const len = stateBytes.length;
+  const spliced = Buffer.concat([redeem.slice(0, stateStart), stateBytes, redeem.slice(stateStart + len)]);
+  const spk = payToScriptHashScript(new Uint8Array(spliced));
+  return addressFromScriptPublicKey(spk, networkId).toString();
 }
 
 // per-state 续约 P2SH 地址: splice input redeem 的 state 区[start : start+len] → new state → payToScriptHash.
@@ -1861,6 +1899,79 @@ export async function unlockBshardCloseAttest(args) {
       { previousOutpoint: { transactionId: feeUtxo.outpoint.transactionId, index: feeUtxo.outpoint.index }, signatureScript: feeSig, sequence: 0n, sigOpCount: 0, computeBudget: _BSHARD_COMPUTE_BUDGET },
     ], outputs: orderedOut, lockTime: BigInt(lockTime), gas: 0n, subnetworkId: '0000000000000000000000000000000000000000', payload: '' });
     _assertTxInvariants(matched, signedTx, 'unlockBshardCloseAttest', networkId);
+    const r = await rpc.submitTransaction({ transaction: signedTx, allowOrphan: false });
+    return { txId: r.transactionId, psContAddress: psContAddr, sortedCommitteePks: members.map(m => m.pk.slice(0, 8)) };
+  } finally { try { await rpc.disconnect(); } catch {} }
+}
+
+/**
+ * unlockBshardCloseAttestV2 — PayoutShardV2(ZK-native) close_attest OP_1 (W2, J2 2026-07-07).
+ * ★ 镜像 unlockBshardCloseAttest byte-identical 结构(two-phase preimage/submit, committee pubkey-distinctness 门,
+ *   canonical un 单一源 sighash 一致性)——差异仅: (a) witness 多 4 个新字段(new_attested_winner/new_bets_root/
+ *   new_refund_root/new_attested_at_ms), 按 PayoutShardV2.sil close_attest 形参声明序插在 new_payout_root 之后、
+ *   committee 签名段之前; (b) state 用 _serializePayoutV2StateHex/_continuationAddressV2(独立函数, 见上)。
+ * ⚠ 不改 unlockBshardCloseAttest 一字(single-author 分离, 同 PayoutShard.sil/PayoutShardV2.sil 全拷贝哲学)。
+ * @param {object} args.cmd.witness { self_out_idx, new_payout_root, new_attested_winner, new_bets_root,
+ *   new_refund_root, new_attested_at_ms, committee:[{pk_hex,sig_hex,idx,siblings_hex}](空=preimage模式), committee_pk_hash }
+ */
+export async function unlockBshardCloseAttestV2(args) {
+  const { wallet, cmd, networkId, lockTime = 0n } = args;
+  const w = cmd.witness;
+  const rpc = await connectRpc(networkId);
+  try {
+    const psUtxo = await _matchUtxo(rpc, _addressFromRedeem(cmd.inputs.payoutshard.redeem_hex, networkId), cmd.inputs.payoutshard.outpointTxid, cmd.inputs.payoutshard.index);
+    if (!cmd.inputs.fee) throw new Error('close_attest_v2: fee input 必需');
+    const feeUtxo = await _matchUtxo(rpc, cmd.inputs.fee.address, cmd.inputs.fee.outpointTxid, cmd.inputs.fee.index);
+    const matched = [psUtxo, feeUtxo];
+    const psCovId = _psInputCovId(psUtxo);
+
+    // committee slot 序 = SELECTION 序(同 V1 unlockBshardCloseAttest, 不 sort — committeePkHash/sig↔pk 配对/checkSig 逐 slot 依赖原序)。
+    const members = (w.committee || []).map((m) => ({ pk: m.pk_hex, sig: m.sig_hex, idx: m.idx, sibs: m.siblings_hex }));
+
+    const ps = cmd.inputs.payoutshard.state;
+    const newState = {
+      consolidated_pool: ps.consolidated_pool, closed: 1, payoutRoot: w.new_payout_root, ..._nw17(ps),
+      attestedWinner: w.new_attested_winner, attestedAtMs: w.new_attested_at_ms,
+      betsRootBaked: w.new_bets_root, refundRootBaked: w.new_refund_root,
+    };
+    const psContAddr = _continuationAddressV2(cmd.inputs.payoutshard.redeem_hex, _serializePayoutV2StateHex(newState), networkId, cmd.inputs.payoutshard.state_start ?? _POOL_STATE_START);
+    const psOutValue = _utxoValue(psUtxo);   // close 不动 value(consolidated_pool 不变, 同 V1)
+
+    const outputs = [];
+    outputs[w.self_out_idx] = new TransactionOutput(psOutValue, payToAddressScript(new Address(psContAddr)), new CovenantBinding(0, new Hash(psCovId)));
+    const orderedOut = outputs.filter(o => o !== undefined);
+    _appendChange(orderedOut, matched, cmd.outputs?.change_address, _bshardFeeV1(matched.length));
+
+    // close_attest scriptSig — witness push 序必与 PayoutShardV2.sil close_attest 形参声明序一致:
+    //   selfOutIdx, new_payoutRoot, new_attestedWinner, new_betsRoot, new_refundRoot, new_attestedAtMs,
+    //   c0..c4Sig, committeePkHash, c0..c4Pk, c0..c4Idx, c0..c4 siblings(40) + OP_1 + redeem。
+    let sigPush = '', pkPush = '', idxPush = '', sibPush = '';
+    for (const m of members) { sigPush += m.sig; pkPush += _pushBytes(m.pk); idxPush += _pushInt(m.idx); for (const s of m.sibs) sibPush += _pushBytes(s); }
+    const psSig = _pushInt(w.self_out_idx) + _pushBytes(w.new_payout_root)
+      + _pushInt(w.new_attested_winner) + _pushBytes(w.new_bets_root) + _pushBytes(w.new_refund_root) + _pushInt(w.new_attested_at_ms)
+      + sigPush + _pushBytes(w.committee_pk_hash) + pkPush + idxPush + sibPush
+      + '51' + _encodePushDataHex(Buffer.from(cmd.inputs.payoutshard.redeem_hex, 'hex'));   // close_attest=OP_1='51'(同 PayoutShardV2.sil entry 1)
+
+    const psAddrIn = _addressFromRedeem(cmd.inputs.payoutshard.redeem_hex, networkId);
+    const un = new Transaction({ version: 1, inputs: matched.map(u => ({ previousOutpoint: { transactionId: u.outpoint.transactionId, index: u.outpoint.index }, signatureScript: '', sequence: 0n, sigOpCount: 0, computeBudget: _BSHARD_COMPUTE_BUDGET, utxo: u })), outputs: orderedOut, lockTime: BigInt(lockTime), gas: 0n, subnetworkId: '0000000000000000000000000000000000000000', payload: '' });
+    if (!w.committee || w.committee.length === 0) {
+      // build-preimage 模式(同 V1): 返回 canonical un + unSafeJson 供 committee 各自 sign_input_for_settle{safe_json:true}。
+      return { ok: true, mode: 'preimage', psContAddress: psContAddr, psInputIdx: 0, payoutCovId: psCovId,
+        unSafeJson: un.serializeToSafeJSON(),
+        preimage: {
+          version: 1,
+          inputs: [{ previousOutpoint: { transactionId: psUtxo.outpoint.transactionId, index: Number(psUtxo.outpoint.index) }, address: psAddrIn, amountSompi: _utxoValue(psUtxo).toString() },
+                   { previousOutpoint: { transactionId: feeUtxo.outpoint.transactionId, index: Number(feeUtxo.outpoint.index) }, address: cmd.inputs.fee.address, amountSompi: _utxoValue(feeUtxo).toString() }],
+          outputs: orderedOut.map((o, i) => ({ value: o.value.toString(), address: (i === w.self_out_idx ? psContAddr : cmd.outputs?.change_address), covenantId: (i === w.self_out_idx ? psCovId : null) })),
+        } };
+    }
+    // submit 模式(同 V1): 委员 sig 注入同一 canonical un + fee 签 + 广播。
+    const feeSig = createInputSignature(un, 1, wallet.getPrivateKey(), SighashType.All);
+    const signedTx = new Transaction({ version: 1, inputs: [
+      { previousOutpoint: { transactionId: psUtxo.outpoint.transactionId, index: psUtxo.outpoint.index }, signatureScript: psSig, sequence: 0n, sigOpCount: 0, computeBudget: _BSHARD_COMPUTE_BUDGET },
+      { previousOutpoint: { transactionId: feeUtxo.outpoint.transactionId, index: feeUtxo.outpoint.index }, signatureScript: feeSig, sequence: 0n, sigOpCount: 0, computeBudget: _BSHARD_COMPUTE_BUDGET },
+    ], outputs: orderedOut, lockTime: BigInt(lockTime), gas: 0n, subnetworkId: '0000000000000000000000000000000000000000', payload: '' });
+    _assertTxInvariants(matched, signedTx, 'unlockBshardCloseAttestV2', networkId);
     const r = await rpc.submitTransaction({ transaction: signedTx, allowOrphan: false });
     return { txId: r.transactionId, psContAddress: psContAddr, sortedCommitteePks: members.map(m => m.pk.slice(0, 8)) };
   } finally { try { await rpc.disconnect(); } catch {} }

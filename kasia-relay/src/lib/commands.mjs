@@ -88,6 +88,8 @@ export const COMMAND_TYPES = Object.freeze({
   BSHARD_PAYOUT_CLAIM: 'bshard_payout_claim',                 // PayoutShard claim OP_2, store-payout merkle+nullifier+recipient
   BSHARD_CANCEL_ATTEST: 'bshard_cancel_attest',               // PayoutShard cancel_attest OP_3, 委员 pubkey-distinct 背书 refundRoot, closed 0→2 (market-cancel)
   BSHARD_REFUND_CLAIM: 'bshard_refund_claim',                 // PayoutShard refund_claim OP_4, store-refund merkle+nullifier+recipient (closed==2)
+  // ── W2 (2026-07-07): PayoutShardV2 / ZK-native close_attest (4 新字段, 委员 pubkey-distinct 背书 + zk_handoff 前置) ──
+  BSHARD_CLOSE_ATTEST_V2: 'bshard_close_attest_v2',           // PayoutShardV2 close_attest OP_1, 同 BSHARD_CLOSE_ATTEST + attestedWinner/betsRoot/refundRoot/attestedAtMs
 });
 
 export const COMMAND_TYPE_SET = new Set(Object.values(COMMAND_TYPES));
@@ -148,6 +150,7 @@ export const COMMAND_PAYLOAD_SCHEMA = Object.freeze({
   [COMMAND_TYPES.BSHARD_PAYOUT_CLAIM]: ['witness', 'inputs', 'outputs'],
   [COMMAND_TYPES.BSHARD_CANCEL_ATTEST]: ['witness', 'inputs', 'outputs'],
   [COMMAND_TYPES.BSHARD_REFUND_CLAIM]: ['witness', 'inputs', 'outputs'],
+  [COMMAND_TYPES.BSHARD_CLOSE_ATTEST_V2]: ['witness', 'inputs', 'outputs'],
 });
 
 // R38 (Z23 sediment): typeof spec per field. Bug-Z23 真根因 — broker enqueue amount: number,
@@ -205,6 +208,7 @@ export const COMMAND_FIELD_TYPES = Object.freeze({
   [COMMAND_TYPES.BSHARD_PAYOUT_CLAIM]: { witness: 'object', inputs: 'object', outputs: 'object' },
   [COMMAND_TYPES.BSHARD_CANCEL_ATTEST]: { witness: 'object', inputs: 'object', outputs: 'object' },
   [COMMAND_TYPES.BSHARD_REFUND_CLAIM]: { witness: 'object', inputs: 'object', outputs: 'object' },
+  [COMMAND_TYPES.BSHARD_CLOSE_ATTEST_V2]: { witness: 'object', inputs: 'object', outputs: 'object' },
 });
 
 export function validateCommandPayload(cmd) {

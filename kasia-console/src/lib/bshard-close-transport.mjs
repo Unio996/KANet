@@ -54,6 +54,54 @@ export function publishCloseRequest(marketId, req) {
 }
 
 /**
+ * publishCloseRequestV2 — settler 发布 PayoutShardV2(ZK-native) close_attest sign-request (W2, J2 2026-07-07)。
+ * 镜像 publishCloseRequest, 但: (a) 存进独立 key `bshard_close_request_v2` (跟 V1 `bshard_close_request` 结构隔离,
+ *   同 PayoutShardV2.sil 全拷贝哲学, 防两种 shape 混淆); (b) 多 4 个新字段 new_attestedWinner/new_betsRoot/
+ *   new_refundRoot/new_attestedAtMs 的 PROPOSED 值 (委员通过 enforceCloseAttestV2 各自独立重算验证, 这里存的只是
+ *   settler 提议值供 daemon 读取比对, 非权威 — 权威判定权全在委员侧, 同 V1 claimedPayoutRoot 的定位)。
+ * @param {string} marketId
+ * @param {object} req 同 publishCloseRequest 的字段 + { new_attestedWinner, new_betsRoot, new_refundRoot, new_attestedAtMs }
+ */
+export function publishCloseRequestV2(marketId, req) {
+  if (!req?.txSafeJson || !req?.claimedPayoutRoot || !Array.isArray(req.committee_pks)) {
+    throw new Error('publishCloseRequestV2: txSafeJson + claimedPayoutRoot + committee_pks 必需');
+  }
+  if (req.new_attestedWinner == null || !req.new_betsRoot || !req.new_refundRoot || req.new_attestedAtMs == null) {
+    throw new Error('publishCloseRequestV2: new_attestedWinner/new_betsRoot/new_refundRoot/new_attestedAtMs 必需 (W2 4 新字段)');
+  }
+  const row = sqlite.prepare('SELECT metadata, protocol_version FROM pool_markets WHERE id = ?').get(marketId);
+  if (!row) throw new Error(`publishCloseRequestV2: market ${marketId} 不存在`);
+  if (row.protocol_version !== 'v0.7') throw new Error(`publishCloseRequestV2: 需 v0.7, got ${row.protocol_version}`);
+  let meta; try { meta = JSON.parse(row.metadata || '{}'); } catch { meta = {}; }
+  meta.bshard_close_request_v2 = {
+    txSafeJson: req.txSafeJson,
+    predicate: req.predicate ?? null,
+    proposed_evidence: req.proposed_evidence ?? null,
+    claimedPayoutRoot: String(req.claimedPayoutRoot),
+    psRedeemHex: req.psRedeemHex,
+    committee_pks: req.committee_pks.map(p => String(p).toLowerCase()),
+    committee_meta: req.committee_meta || null,
+    input_index: req.input_index ?? 0,
+    broker_pk: req.broker_pk ? String(req.broker_pk).toLowerCase() : null,
+    introducer_pk: req.introducer_pk ? String(req.introducer_pk).toLowerCase() : null,
+    maker_pk: req.maker_pk ? String(req.maker_pk).toLowerCase() : null,
+    data_source_canonical: req.data_source_canonical ?? null,
+    snapshot: req.snapshot ?? null,
+    pool_members: Array.isArray(req.pool_members) ? req.pool_members : null,
+    end_block_hash: req.end_block_hash ?? null,
+    deadline_daa: req.deadline_daa ?? null,
+    published_at_daa: req.published_at_daa ?? null,
+    // W2 新增 4 字段 (proposed, 非权威 — 委员各自重算+D2 splice 比对):
+    new_attestedWinner: Number(req.new_attestedWinner),
+    new_betsRoot: String(req.new_betsRoot),
+    new_refundRoot: String(req.new_refundRoot),
+    new_attestedAtMs: Number(req.new_attestedAtMs),
+  };
+  sqlite.prepare(`UPDATE pool_markets SET metadata = ?, protocol_status = 'collecting_sigs' WHERE id = ?`).run(JSON.stringify(meta), marketId);
+  return { ok: true, market_id: marketId, committee: req.committee_pks.length, status: 'collecting_sigs' };
+}
+
+/**
  * collectCloseSigs — settler 收委员 daemon 写的 sig (chain_events 'bshard_close_sig')。
  * @returns {{ ready:bool, sigs: Array<{committee_pk, signature, idx, siblings_hex, verdict}>, count, quorum }}
  *   ready = count ≥ QUORUM (distinct committee_pk)。 settler ready 时组装 close_attest submit。
@@ -68,6 +116,29 @@ export function collectCloseSigs(marketId, payoutRoot) {
     let p; try { p = JSON.parse(r.payload); } catch { continue; }
     if (p?.committee_pk && p?.signature && !byPk.has(p.committee_pk)) {
       byPk.set(p.committee_pk, { committee_pk: p.committee_pk, signature: p.signature, idx: p.idx, siblings_hex: p.siblings_hex, verdict: p.verdict });
+    }
+  }
+  const sigs = [...byPk.values()];
+  return { ready: sigs.length >= QUORUM, sigs, count: sigs.length, quorum: QUORUM };
+}
+
+/**
+ * collectCloseSigsV2 — 同 collectCloseSigs, 读独立 event_type 'bshard_close_sig_v2'(跟 V1 结构隔离,防混淆)。
+ * 额外带回 attestedWinner/betsRoot/refundRoot/attestedAtMs(委员各自独立重算确认过的值, 供 submit 时组装 witness)。
+ */
+export function collectCloseSigsV2(marketId, payoutRoot) {
+  const rows = sqlite.prepare(`
+    SELECT payload FROM chain_events WHERE event_type = 'bshard_close_sig_v2'
+      AND payload LIKE ? AND payload LIKE ?
+  `).all(`%"market_id":"${marketId}"%`, `%"payout_root":"${payoutRoot}"%`);
+  const byPk = new Map();
+  for (const r of rows) {
+    let p; try { p = JSON.parse(r.payload); } catch { continue; }
+    if (p?.committee_pk && p?.signature && !byPk.has(p.committee_pk)) {
+      byPk.set(p.committee_pk, {
+        committee_pk: p.committee_pk, signature: p.signature, idx: p.idx, siblings_hex: p.siblings_hex, verdict: p.verdict,
+        attestedWinner: p.attestedWinner, betsRoot: p.betsRoot, refundRoot: p.refundRoot, attestedAtMs: p.attestedAtMs,
+      });
     }
   }
   const sigs = [...byPk.values()];

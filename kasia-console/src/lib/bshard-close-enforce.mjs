@@ -30,7 +30,10 @@ import { canonicalBetOrder, computeBetsRoot, payoutRoot as computeMerkleRoot } f
 const _PREDICATE_COMMIT_REDEEM_OFFSET = 518;
 const _hex32 = (s) => Buffer.from(blake2b(Buffer.from(s), { dkLen: 32 })).toString('hex');
 // canonical (A) 4-field ShardLeaf state splice (= pool-shard-register.spliceLeafState 单源, byte-equal to recompile, J2 已验)。
-const _i64LE = (n) => { const b = Buffer.alloc(8); b.writeBigInt64LE(BigInt(n)); return b; };
+// ⚠ landmine(NWT 2026-07-07 实测坐实): writeBigInt64LE=两补数, 但真 silverc/rusty-kaspa byte[](int,size) 对负数用
+// sign-magnitude(同 pool-payout-root.mjs serializeI64)——两者不是同一编码。今天全部调用点只写非负值(closed/attestedWinner
+// 0|1/attestedAtMs), 不触发这个分歧, 但负数直接 throw 防未来静默错字节(便宜 fail-closed, Bettor 裁定本轮折入)。
+const _i64LE = (n) => { const v = BigInt(n); if (v < 0n) throw new Error(`_i64LE: 负数(${v}) 会产出两补数字节, 跟真 silverc sign-magnitude 编码不一致——不支持, 需走真编译或显式实现 sign-magnitude 分支`); const b = Buffer.alloc(8); b.writeBigInt64LE(v); return b; };
 const _push8 = (buf) => Buffer.concat([Buffer.from([buf.length]), buf]);
 function _spliceLeafState(baseRedeemHex, st) {
   const stateHex = Buffer.concat([_push8(_i64LE(st.local_yes)), _push8(_i64LE(st.local_no)), _push8(_i64LE(st.count)), _push8(_i64LE(st.pool_value))]);
