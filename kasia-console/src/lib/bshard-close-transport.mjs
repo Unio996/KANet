@@ -430,7 +430,10 @@ export async function buildProposeCloseRequestV2(marketId, judged) {
  * @returns {object} relay 返回值(dryRun:true 时 broadcasted:false + 可核字段; 否则含 txId)
  */
 export async function buildZkHandoffRequestV2(marketId, args) {
-  const { settlerRelayId, dryRun = false } = args || {};
+  // 🔴 NWT footgun catch(2026-07-08): 默认 dryRun=true(安全默认), 跟 admin endpoint 层的
+  //   `dry_run !== false` 默认值方向对齐——本函数是 exported 的, 未来若有人绕过 endpoint 直接
+  //   import 调用忘记传 dryRun, 也默认走安全的 dry-run 而非误触发真广播, 两层防御一致不单靠调用方记参。
+  const { settlerRelayId, dryRun = true } = args || {};
   if (!settlerRelayId) throw new Error('buildZkHandoffRequestV2: settlerRelayId 必需');
 
   const { sendCommandAsync } = await import('../services/relay-manager.js');
