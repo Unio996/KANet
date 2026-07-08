@@ -33,6 +33,7 @@
 
 ### T1 — 彩排场(市场5R):最小真实市场完整生命周期(敞口 ~4.5KAS+maker spine 可回收)
 - T1.1 create-v07(ZK-native: `resolution_rule_spec.zk_native=true`,**brokered**: create-v07 默认路自动挂 broker-1,J1 已核 GREEN);maker 100KAS spine(Owner skin-in-game 硬校验,不绕;refund 路可回收);**短押注窗**(~15-30min,8.0 DAA/s 换算);**create 后回读 DB 实际 deadline_daa**;
+  - **BLOCKING 检查(05:29 ldtyn 废弃教训,首个 5R create 实撞)**: parity 判定块 `target_daa` 必须 **> 实际回读 deadline_daa + 安全边距(≥2400 DAA≈5min)**——判定块先于关盘出 = 窗口尾部可先看结果再下注(7jy3s 同款语义错)。create 后回读实际 deadline_daa 验证此不等式,不满足 = 废弃重建,**下注令只在此检查过后发**。根源=server 端 deadline 公式内置速率假设与 caller 估算分歧(工单在案),故必须以回读实际值为准做后验校验。
 - T1.2 **双边各注 1.5KAS**(两只团队 relay,经 gateway)——保证必有赢家 leaf+输家,claim 真实可触发且非 degenerate;
   - **claim 分支覆盖依赖 brokered 事实(NWT 复审观察,显式记录非隐性前提)**: 赢家 leaf+broker-1 fee leaf = ≥2 个独立 claimant,顺序 claim 天然覆盖 `else` 续锁分支+`if` 精确清零终结分支两条(正式场大概率撞的就是 else 路)。**谁先 claim 顺序不定,两种顺序都算过关。复用 5R 脚本者若改成 non-brokered 会悄悄弄丢 else 分支覆盖——禁改。**
 - T1.3 deadline 到 → propose(driver 薄壳踢)→ voter/submit cron 自治 attest(closed 0→1,**真状态**)→ 自动 enqueue → prove worker **~4min 真 Groth16**(禁 fixture,NWT ③裁定采纳)→ gate 铸造注资;
