@@ -473,7 +473,7 @@ async function pollLoop() {
 // S-C stage5 — poll backend confirm for users awaiting on-chain bet payment (design LOCKED Bettor r263).
 // confirm runs server-side 3-validation (dest==side_p2sh + amount==exact_sompi + UNIQUE tx) → insert pool_bettor_sides.
 // 0-custody: bot only reports + notifies; it never moves funds. Stops watching past the market deadline.
-async function pollPendingBets() {
+export async function pollPendingBets() {
   const nowSec = Date.now() / 1000;
   for (const p of PM.listPendingPayments()) {
     const uLang = PM.getUserLang(p.tgUser);
