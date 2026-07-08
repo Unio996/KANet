@@ -225,9 +225,9 @@ export async function buildProposeCloseRequestV2(marketId, judged) {
   const { computePariMutuelPayout, settlePayoutRoot, deriveFeeLeaves, FEE_CONFIG } = await import('./pool-shard-settle.mjs');
   const { buildPoolMerkleTree, getPoolMerkleProof } = await import('../services/pool-merkle-v06.mjs');
 
-  const market = sqlite.prepare('SELECT id, deadline_daa, maker_pk, broker_pk, pool_merkle_root, resolution_rule_spec, market_metadata_hash FROM pool_markets WHERE id = ?').get(marketId);
+  const market = sqlite.prepare('SELECT id, deadline, deadline_daa, maker_pk, broker_pk, pool_merkle_root, resolution_rule_spec, market_metadata_hash FROM pool_markets WHERE id = ?').get(marketId);
   if (!market) throw new Error(`buildProposeCloseRequestV2: market ${marketId} not found`);
-  const ps = sqlite.prepare('SELECT payout_redeem_hex, payout_ps_outpoint FROM payout_shards WHERE logical_market_id = ?').get(marketId);
+  let ps = sqlite.prepare('SELECT payout_redeem_hex, payout_ps_outpoint, payout_cov_id, pool_merkle_root, predicate_commit FROM payout_shards WHERE logical_market_id = ?').get(marketId);
   if (!ps) throw new Error(`buildProposeCloseRequestV2: no payout_shards row for ${marketId}`);
   const [psTx, psIdxStr] = String(ps.payout_ps_outpoint).split(':');
 
@@ -252,6 +252,40 @@ export async function buildProposeCloseRequestV2(marketId, judged) {
     if (r?.ok === false) { const e = new Error(cmd.type); e.relayErr = r.error; throw e; }
     return r;
   };
+
+  // 事故修复(2026-07-08, pxvml首次实战propose撞到委员C1 BUST): payout_shards.payout_redeem_hex 是
+  // genesis-only 静态列, 从没被 UPDATE 过——若该市场的 shard 还没"absorb"(consolidateAllShards, 把 shard
+  // leaf 折进 PayoutShard covenant on-chain), 这一列的 consolidated_pool 永远停在 genesis 的 PS_SEED,
+  // 不管 bettor 实际下了多少注, 委员独立重算(PS_SEED+Σ已注册stake)会跟这个假值对不上, 正确 REFUSE。
+  // 镜像 bshard-settle-daemon.mjs:155-184 consolidateAndBuildPsState 的 needConsolidate 判断: 只有当真
+  // 需要 absorb 时才发起链上 splice tx(有成本), 已 consolidate 过则纯读, 不重复上链。
+  {
+    const { consolidateAllShards } = await import('./pool-shard-settle.mjs');
+    const shardRows = sqlite.prepare('SELECT status FROM market_shards WHERE logical_market_id = ?').all(marketId);
+    const needConsolidate = shardRows.some(s => s.status === 'sealed' || s.status === 'open');
+    if (needConsolidate) {
+      const relayAddrForConsolidate = (await rc({ type: 'get_pubkey' })).address;
+      const kaspaForP2sh = await import('kaspa-wasm');
+      const p2shFn = (redeemHex) => kaspaForP2sh.addressFromScriptPublicKey(kaspaForP2sh.ScriptBuilder.fromScript(new Uint8Array(Buffer.from(redeemHex, 'hex'))).createPayToScriptHashScript(), relayAddrForConsolidate.startsWith('kaspatest:') ? 'testnet-12' : 'mainnet').toString();
+      const { transferAndConfirm } = await import('../services/relay-manager.js');
+      const { REORG_SAFE_MIN_DEPTH } = await import('./pool-shard-register.mjs');
+      const landedFn = async (txid, addr) => { for (let i = 0; i < 25; i++) { const j = await sendCommandAsync(settlerRelayId, { type: 'check_utxo_landed', address: addr, txid, minDepth: REORG_SAFE_MIN_DEPTH }, 20000); if (j.landed || j.found) return true; await new Promise(r => setTimeout(r, 2000)); } return false; };
+      const transferFn = async (addr, sompi) => { const r = await transferAndConfirm(settlerRelayId, addr, (Number(sompi) / 1e8).toFixed(8), { minDepth: REORG_SAFE_MIN_DEPTH, maxWaitMs: 60000 }); return r.txId; };
+      const consolidateRes = await consolidateAllShards({
+        db: sqlite, rc, landed: landedFn, p2sh: p2shFn, logicalMarketId: marketId,
+        payoutShard: { payout_redeem_hex: ps.payout_redeem_hex, payout_ps_outpoint: ps.payout_ps_outpoint, payout_cov_id: ps.payout_cov_id },
+        relayAddr: relayAddrForConsolidate, transfer: transferFn, deadline: Number(market.deadline),
+      });
+      const [newPsTx, newPsIdx] = consolidateRes.psOutpoint.split(':');
+      try { sqlite.prepare('UPDATE payout_shards SET payout_ps_outpoint = ? WHERE logical_market_id = ?').run(consolidateRes.psOutpoint, marketId); } catch {}
+      // ps.payout_redeem_hex 本身仍是 DB 里 genesis-only 静态列(不改这条既有事实), 但 consolidateAllShards
+      // 返回的 consolidatedPool 是链上现值——重新拼一份反映 absorb 后 consolidated_pool 的 redeem_hex 供下游用,
+      // 不依赖再读那列静态值。
+      const { compilePayoutShardRedeem } = await import('./pool-shard-register.mjs');
+      const absorbedRedeemHex = compilePayoutShardRedeem({ poolMerkleRoot: ps.pool_merkle_root, predicateCommit: ps.predicate_commit, consolidatedPool: consolidateRes.consolidatedPool, closed: 0 });
+      ps = { ...ps, payout_redeem_hex: absorbedRedeemHex, payout_ps_outpoint: consolidateRes.psOutpoint };
+    }
+  }
 
   const chainReader = {
     async getCurrentDaaScore() { const r = await rc({ type: 'chain_get_current_daa_score' }); return Number(r.daa_score); },
