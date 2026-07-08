@@ -275,7 +275,6 @@ export async function buildProposeCloseRequestV2(marketId, judged) {
         payoutShard: { payout_redeem_hex: ps.payout_redeem_hex, payout_ps_outpoint: ps.payout_ps_outpoint, payout_cov_id: ps.payout_cov_id },
         relayAddr: relayAddrForConsolidate, transfer: transferFn, deadline: Number(market.deadline),
       });
-      try { sqlite.prepare('UPDATE payout_shards SET payout_ps_outpoint = ? WHERE logical_market_id = ?').run(consolidateRes.psOutpoint, marketId); } catch {}
       // 🔴 STOP修正(NWT红队抓到, 2026-07-08): 第一版这里错调了 compilePayoutShardRedeem(V1专属, silverc
       // 重新走ctor编译)——pxvml是V2市场, V1重编译出的redeem字节结构跟链上实际V2 P2SH对不上, 且V1编译器
       // 还会把V2专属状态字段(attestedWinner/attestedAtMs/betsRootBaked/refundRootBaked)全部按V1的genesis
@@ -285,7 +284,14 @@ export async function buildProposeCloseRequestV2(marketId, judged) {
       // 新值, 不碰其余任何字节(V1/V2差异全部在这个offset之外, 这个offset两版本通用)。
       const absorbedRedeemBuf = Buffer.from(ps.payout_redeem_hex, 'hex');
       absorbedRedeemBuf.writeBigInt64LE(BigInt(consolidateRes.consolidatedPool), 2);
-      ps = { ...ps, payout_redeem_hex: absorbedRedeemBuf.toString('hex'), payout_ps_outpoint: consolidateRes.psOutpoint };
+      const absorbedRedeemHex = absorbedRedeemBuf.toString('hex');
+      // 🔴 二次事故修复(2026-07-08, pqpt85ts/pqqqra89地址混淆撞出): 上面只更新了本次调用内的局部变量 ps,
+      // 从没把 splice 后的 payout_redeem_hex 写回 DB——payout_shards.payout_redeem_hex 这一列本次仍停在
+      // genesis 字节, 任何下游独立读这一列的代码(诊断脚本/committee voter 若也走 DB 重建)会算出错误的
+      // genesis 地址(consolidated_pool=旧值), 找不到钱(钱其实在正确的 post-splice 地址, 一分没丢, 只是
+      // 地址算错了)。必须把 absorbedRedeemHex 也 UPDATE 回表, 不能只更新 payout_ps_outpoint。
+      try { sqlite.prepare('UPDATE payout_shards SET payout_redeem_hex = ?, payout_ps_outpoint = ? WHERE logical_market_id = ?').run(absorbedRedeemHex, consolidateRes.psOutpoint, marketId); } catch {}
+      ps = { ...ps, payout_redeem_hex: absorbedRedeemHex, payout_ps_outpoint: consolidateRes.psOutpoint };
     }
   }
   // 🔴 STOP修正(第二次propose实战撞到, 2026-07-08): psTx/psIdxStr 必须从上面 consolidation 之后的 ps
