@@ -37,7 +37,14 @@ export function compileSil(silPath, ctorArr, silvercPath = SILVERC) {
   try {
     execFileSync(silvercPath, [silPath, '--ctor', ctorPath, '-o', outPath], { stdio: 'pipe' });
   } catch (e) {
-    throw new Error(`silverc compile ${silPath} fail: ${(e.stderr ? e.stderr.toString() : e.message).slice(0, 300)}`);
+    // 观测性 fix(2026-07-08 backlog 调查发现): e.stderr 是空 Buffer(spawn 失败/子进程无输出崩溃等场景)
+    // 时仍是 truthy 对象(Buffer 非空字符串才是空)——旧写法 `e.stderr ? ... : e.message` 会选中空 stderr,
+    // 把真正有用的 e.message(如 spawn ENOMEM/ETIMEDOUT/ENOENT)盖成空字符串, 生产日志出现过"fail: "
+    // 后面啥都没有的情况, 排障时看不到真实原因。改成: stderr 非空文本优先, 否则退到 e.message, 再否则退到
+    // e.code/errno, 确保至少有一项非空。
+    const stderrText = e.stderr ? e.stderr.toString().trim() : '';
+    const detail = stderrText || e.message || `errno=${e.errno ?? '?'} code=${e.code ?? '?'} signal=${e.signal ?? '?'}`;
+    throw new Error(`silverc compile ${silPath} fail: ${detail.slice(0, 300)}`);
   }
   const o = JSON.parse(readFileSync(outPath, 'utf8'));
   if (!Array.isArray(o.script) || !o.state_layout) throw new Error(`silverc output missing script/state_layout for ${silPath}`);
