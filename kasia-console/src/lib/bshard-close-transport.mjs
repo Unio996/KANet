@@ -229,7 +229,6 @@ export async function buildProposeCloseRequestV2(marketId, judged) {
   if (!market) throw new Error(`buildProposeCloseRequestV2: market ${marketId} not found`);
   let ps = sqlite.prepare('SELECT payout_redeem_hex, payout_ps_outpoint, payout_cov_id, pool_merkle_root, predicate_commit FROM payout_shards WHERE logical_market_id = ?').get(marketId);
   if (!ps) throw new Error(`buildProposeCloseRequestV2: no payout_shards row for ${marketId}`);
-  const [psTx, psIdxStr] = String(ps.payout_ps_outpoint).split(':');
 
   const loadBettorsFlat = () => {
     const shards = sqlite.prepare('SELECT shard_market_id FROM market_shards WHERE logical_market_id = ? ORDER BY shard_index ASC').all(marketId);
@@ -289,6 +288,10 @@ export async function buildProposeCloseRequestV2(marketId, judged) {
       ps = { ...ps, payout_redeem_hex: absorbedRedeemBuf.toString('hex'), payout_ps_outpoint: consolidateRes.psOutpoint };
     }
   }
+  // 🔴 STOP修正(第二次propose实战撞到, 2026-07-08): psTx/psIdxStr 必须从上面 consolidation 之后的 ps
+  // (可能已被 absorb 更新 payout_ps_outpoint)派生, 不能在 consolidation 块之前提前解构——否则下游构造
+  // close request 的 tx input 会引用consolidation花掉的旧 outpoint("UTXO not found"), 这正是刚撞到的坑。
+  const [psTx, psIdxStr] = String(ps.payout_ps_outpoint).split(':');
 
   const chainReader = {
     async getCurrentDaaScore() { const r = await rc({ type: 'chain_get_current_daa_score' }); return Number(r.daa_score); },
