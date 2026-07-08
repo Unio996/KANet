@@ -1391,6 +1391,19 @@ export async function registerPoolRoutes(fastify) {
     });
     if (!perBet?.address || !perBet?.redeem_hex) { reply.code(503).send({ ok: false, error: `gateway relay get_per_bet_address failed (per-bet P2SH 派生): ${JSON.stringify(perBet).slice(0, 120)}` }); return null; }
     const payAddr = perBet.address;
+    // #19 根治(2026-07-08, Martin孤儿单事故, 设计稿 docs/2026-07-08-betid-persistence-and-pending-
+    // lifecycle-design.md, NWT审GREEN 0297e50e): 服务端持久化betId+payAddr, 不再让它只活在bot进程内存
+    // pendingPayments里——console/bot任一重启, 这笔在途付款仍可按(marketId,bettorPk,direction)反查恢复。
+    // UNIQUE建在bet_id本身(不是三元组), 允许同用户同方向多笔独立在途加注并存, 不覆盖冲掉彼此。
+    try {
+      sqlite.prepare(`
+        INSERT INTO pool_bet_preps (logical_market_id, bettor_pk, direction, bet_id, pay_addr, exact_stake_sompi, stake_kas, created_at)
+        VALUES (?,?,?,?,?,?,?,?)
+        ON CONFLICT(bet_id) DO UPDATE SET
+          pay_addr=excluded.pay_addr, exact_stake_sompi=excluded.exact_stake_sompi,
+          stake_kas=excluded.stake_kas, created_at=excluded.created_at
+      `).run(logicalMarketId, bettorPk, v.direction, String(b.bet_id || ''), payAddr, payAmountSompi, v.stakeAmount / 1e8, Math.floor(Date.now() / 1000));
+    } catch (e) { console.warn(`[pool.js#19] pool_bet_preps持久化失败(不阻断prep/confirm主流程): ${e.message}`); }
     return { v, market, bettorPk, gatewayRelayId, payAddr, perBetRedeem: perBet.redeem_hex, relayAddr, network, payAmountSompi, logicalMarketId };
   }
 
@@ -1577,6 +1590,8 @@ export async function registerPoolRoutes(fastify) {
           .then((sr) => { if (!sr?.ok) console.warn(`[confirm] sweep_per_bet ${logicalMarketId} not-ok: ${JSON.stringify(sr).slice(0, 100)} (bet 已注册·daemon 重试报销)`); })
           .catch((e) => console.warn(`[confirm] sweep_per_bet ${logicalMarketId} fail: ${e.message} (bet 已注册·daemon 重试报销)`));
       }
+      // #19: 注册成功 = 这笔已有归宿, 回写confirmed_at(区分'仍在途待恢复'vs'已完成', 恢复工具按confirmed_at IS NULL筛)。
+      try { sqlite.prepare(`UPDATE pool_bet_preps SET confirmed_at = ? WHERE bet_id = ?`).run(Math.floor(Date.now() / 1000), String((request.body || {}).bet_id || '')); } catch {}
       return reply.send({
         ok: true, registered: true, protocol_version: 'v0.7', logical_market_id: logicalMarketId,
         bettor_pk: bettorPk, direction: v.direction,
