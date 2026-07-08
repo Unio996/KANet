@@ -15,6 +15,37 @@
 // 确定性重新推出(纯函数, 非重新 prove, 零新增信任假设), 不需要改 J2 的 mint/prove-worker 文件。
 
 /**
+ * rebuildZkCloseGateWitness — 缺件③抽出的共享函数(J1tn, 2026-07-08 市场5彩排 harness §4缺件3 门②对接前抽出)。
+ *   确定性重建 gate 的 sigScript/redeemScript+gate_suffix_hex(纯函数, 跟 zk-prove-worker.mjs buildAndFundGate
+ *   完全相同调用, 同一份 receipt+imageId+journalHash 输入 → 同一份输出, 非重新 prove/非新增信任假设)。
+ *   单独导出的原因(市场5 设计稿 §1.2 反 vacuous 承重原则): 5R 彩排门②(zk_close pre-broadcast gate)必须复用
+ *   跟 dispatchUnlockZkClose 完全同一条 witness 构造代码路, 禁止 harness 另写一套拼装逻辑(NWT 2026-07-08
+ *   04:06 verdict 已认可这个抽法, COORD-LEDGER #bk28lo)——本函数抽出前 dispatchUnlockZkClose 内联这段逻辑,
+ *   harness 若照抄会造出"两套并行实现", 正是昨晚 anchor 硬门 vacuous 事故(72.31KAS 学费)的同型坑。
+ * @param {{imageId:string, journalHash:string}} proving
+ * @param {string} receiptHex
+ * @param {() => object} kaspaZk  ctx.kaspaZk() 同款签名
+ * @returns {{ok:boolean, sigScript?:string, redeemScript?:string, gateSuffixHex?:string, error?:string}}
+ */
+export function rebuildZkCloseGateWitness(proving, receiptHex, kaspaZk) {
+  let sigScript, redeemScript;
+  try {
+    const kaspa = kaspaZk();
+    const builder = kaspa.ZkScriptBuilder.newR0({ flags: { covenantsEnabled: true } });
+    builder.commitToGroth16WithFixedJournal(proving.imageId, proving.journalHash);
+    ({ sigScript, redeemScript } = builder.finalizeWithGroth16FixedJournalProof(receiptHex));
+  } catch (e) { return { ok: false, error: `gate witness 重建 fail: ${e.message}` }; }
+
+  // gate_suffix_hex = redeemScript 去掉 prefix(1B, 0x20=push32)+journal_hash(32B)剩下部分
+  // (unlockBshardZkClose docstring 约定, zk-close-builder.mjs ZK_GATE 注释同款: prefix‖journal_hash(32B·变)‖suffix(800B))。
+  const redeemBuf = Buffer.from(redeemScript, 'hex');
+  if (redeemBuf.length <= 33) return { ok: false, error: `redeemScript 太短(${redeemBuf.length}B) — 无法切出 gate_suffix` };
+  const gateSuffixHex = redeemBuf.subarray(33).toString('hex');
+
+  return { ok: true, sigScript, redeemScript, gateSuffixHex };
+}
+
+/**
  * dispatchUnlockZkClose — zkClosePhase2 既有 ctx.dispatchUnlockZkClose({marketId, continuationOutpoint,
  *   attestedWinner}) 接口契约的真实实现(orderedBets/betsRoot 由 zk-close-builder.mjs 既有 gather 逻辑提供,
  *   本函数不用, 只用来满足调用签名——本函数自己的数据来源是 zk_continuation + zk_prove_jobs, 不是 caller
@@ -49,21 +80,9 @@ export async function dispatchUnlockZkClose({ marketId, continuationOutpoint, at
   const job = ctx.getDoneJob(marketId);
   if (!job?.receipt_hex) return { ok: false, error: 'zk_prove_jobs.receipt_hex missing for done job — 无法重建 gate witness' };
 
-  // 确定性重建 gate 的 sigScript/redeemScript(纯函数, 跟 zk-prove-worker.mjs buildAndFundGate 完全相同调用,
-  // 同一份 receipt+imageId+journalHash 输入 → 同一份输出, 非重新 prove/非新增信任假设)。
-  let sigScript, redeemScript;
-  try {
-    const kaspa = ctx.kaspaZk();
-    const builder = kaspa.ZkScriptBuilder.newR0({ flags: { covenantsEnabled: true } });
-    builder.commitToGroth16WithFixedJournal(proving.imageId, proving.journalHash);
-    ({ sigScript, redeemScript } = builder.finalizeWithGroth16FixedJournalProof(job.receipt_hex));
-  } catch (e) { return { ok: false, error: `gate witness 重建 fail: ${e.message}` }; }
-
-  // gate_suffix_hex = redeemScript 去掉 prefix(1B, 0x20=push32)+journal_hash(32B)剩下部分
-  // (unlockBshardZkClose docstring 约定, zk-close-builder.mjs ZK_GATE 注释同款: prefix‖journal_hash(32B·变)‖suffix(800B))。
-  const redeemBuf = Buffer.from(redeemScript, 'hex');
-  if (redeemBuf.length <= 33) return { ok: false, error: `redeemScript 太短(${redeemBuf.length}B) — 无法切出 gate_suffix` };
-  const gateSuffixHex = redeemBuf.subarray(33).toString('hex');
+  const witness = rebuildZkCloseGateWitness(proving, job.receipt_hex, ctx.kaspaZk);
+  if (!witness.ok) return { ok: false, error: witness.error };
+  const { sigScript, gateSuffixHex } = witness;
 
   const cmd = {
     type: 'bshard_zk_close',

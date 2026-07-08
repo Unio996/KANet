@@ -2042,7 +2042,7 @@ export async function unlockBshardCloseAttestV2(args) {
  *   四段固定模板 = computeCloseZkTmplAnchor()(pool-shard-register.mjs)的输出,per-image_id 固定,driver 算好传入。
  */
 export async function unlockBshardZkHandoff(args) {
-  const { wallet, cmd, networkId, lockTime = 0n } = args;
+  const { wallet, cmd, networkId, lockTime = 0n, dryRun = false } = args;
   const w = cmd.witness;
   const rpc = await connectRpc(networkId);
   try {
@@ -2108,6 +2108,17 @@ export async function unlockBshardZkHandoff(args) {
       { previousOutpoint: { transactionId: feeUtxo.outpoint.transactionId, index: feeUtxo.outpoint.index }, signatureScript: feeSig, sequence: 0n, sigOpCount: 0, computeBudget: _BSHARD_COMPUTE_BUDGET },
     ], outputs: orderedOut, lockTime: BigInt(lockTime), gas: 0n, subnetworkId: '0000000000000000000000000000000000000000', payload: '' });
     _assertTxInvariants(matched, signedTx, 'unlockBshardZkHandoff', networkId);
+    // 🔴 dryRun 分支(J1tn, 2026-07-08 市场5彩排 §4缺件3 门①·Bettor #bk7kbx 六条件批文, NWT diff pure-additive 审):
+    //   opt-in(缺省 false, live 广播路径分毫不改, 唯一插入点=invariants 校验后/submitTransaction 前)。
+    //   仍走完 UTXO 现读+组签名 tx+invariants 校验全套(NWT: "彩排验的是生产代码本身"这条不打折扣), 只跳最后
+    //   广播这一步。返回 shape 显式区分(无 txId 字段+broadcasted:false marker), 防下游把 dry-run 结果误当
+    //   成实广播成功。签名产物(psSig/feeSig/signedTx)只在本次调用栈内存里, 本分支不写盘持久化(Bettor 条件)。
+    if (dryRun) {
+      return {
+        broadcasted: false, closeZkAddress: closeZkAddr, closeZkRedeemHex: fullRedeem.toString('hex'),
+        psSig, feeSig,
+      };
+    }
     const r = await rpc.submitTransaction({ transaction: signedTx, allowOrphan: false });
     return { txId: r.transactionId, closeZkAddress: closeZkAddr, closeZkRedeemHex: fullRedeem.toString('hex') };
   } finally { try { await rpc.disconnect(); } catch {} }
