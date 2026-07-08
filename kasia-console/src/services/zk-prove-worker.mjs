@@ -156,6 +156,21 @@ export async function zkProveWorkerTick() {
       return { ok: false };
     }
 
+    // 🔴 fix (Bettor+NWT+KANet-UI 2026-07-08 深夜, job5/3o0a6 事故坐实): 从源头挡——updateProvingReady
+    // (proving 成功后)有个 precondition, 要求 market.metadata.zk_continuation 必须已存在(即 zk_handoff
+    // 已经成功广播过)。之前这条只在 proving 跑完之后才被动撞上(4 分钟 CPU + 1KAS gate 注资全部浪费,
+    // 撞上未捕获异常还卡死 job 状态)。这里在花任何钱/CPU 之前先查一遍, 缺失就直接 _fail(便宜、即时),
+    // 不再让"zk_handoff 死路"这类市场偷跑进昂贵的 proving 阶段。
+    {
+      const marketRow = sqlite.prepare('SELECT metadata FROM pool_markets WHERE id = ?').get(job.market_id);
+      let hasZkContinuation = false;
+      try { hasZkContinuation = !!JSON.parse(marketRow?.metadata || '{}').zk_continuation; } catch { /* malformed metadata falls through to fail-closed below */ }
+      if (!hasZkContinuation) {
+        _fail(job, `market ${job.market_id} 还没有 zk_continuation(zk_handoff 还没成功广播过)— 拒绝在花 4 分钟 proving+1KAS gate 注资之前跑一个下游必炸的 job`);
+        return { ok: false };
+      }
+    }
+
     // GuestInput 形状照抄 zk-payout-guest/host/src/main.rs 的 Bet/FeeLeafIn/GuestInput struct, 非重发明。
     const guestInput = {
       bettors: orderedBets.map((b) => ({ pk: Array.from(Buffer.from(b.pk, 'hex')), stake: Number(b.stake), direction: Number(b.direction) })),
@@ -188,12 +203,24 @@ export async function zkProveWorkerTick() {
       gate = await buildAndFundGate(summary.image_id, summary.journal_digest, receiptHex, SETTLER_RELAY_ID);
     } catch (e) { _fail(job, `gate 铸造/注资 fail: ${e.message}`); return { ok: false }; }
 
-    updateProvingReady(job.market_id, {
-      guestPayoutRootHex: summary.payout_root_hex, journalHash: recomputedJournalHash, imageId: summary.image_id,
-      gate: { address: gate.gateAddr, outpointTxid: gate.outpointTxid, index: gate.index, fundedAtMs: gate.fundedAtMs },
-    });
-    sqlite.prepare("UPDATE zk_prove_jobs SET status = 'done', receipt_hex = ?, journal_digest_hex = ?, updated_at = datetime('now') WHERE id = ?")
-      .run(receiptHex, recomputedJournalHash, job.id);
+    // 🔴 fix (Bettor+NWT+KANet-UI 2026-07-08 深夜, job5/3o0a6 事故坐实): 这段之前没包 try/catch——
+    // updateProvingReady 内部有 precondition (market 必须已有 zk_continuation, 即 zk_handoff 已成功)，
+    // 如果 market 的 zk_handoff 从未成功(3o0a6 的 anchor 死结那类), 这里必 throw；但 gate 在上面
+    // buildAndFundGate 那步已经真花钱铸出来了——异常一旦不捕获, job 永远卡 in_progress(既不算 done
+    // 也不算 failed), 而且这笔已经真实注资的 gate UTXO 从此没有任何记录, 变孤儿资金(呼应 task#17 的
+    // 顾虑, 这次真实撞上)。包 try/catch, 失败时把 gate 地址/outpoint/金额写进 error 里, 不再让钱花了
+    // 却连个能查的错误信息都没有。
+    try {
+      updateProvingReady(job.market_id, {
+        guestPayoutRootHex: summary.payout_root_hex, journalHash: recomputedJournalHash, imageId: summary.image_id,
+        gate: { address: gate.gateAddr, outpointTxid: gate.outpointTxid, index: gate.index, fundedAtMs: gate.fundedAtMs },
+      });
+      sqlite.prepare("UPDATE zk_prove_jobs SET status = 'done', receipt_hex = ?, journal_digest_hex = ?, updated_at = datetime('now') WHERE id = ?")
+        .run(receiptHex, recomputedJournalHash, job.id);
+    } catch (e) {
+      _fail(job, `proving 成功+gate 已注资(addr=${gate.gateAddr} outpoint=${gate.outpointTxid}:${gate.index}), 但 updateProvingReady/job状态写入失败: ${e.message} — gate UTXO 需人工核查是否孤儿`);
+      return { ok: false };
+    }
     console.log(`[zk-prove-worker] ✅ job=${job.id} market=${job.market_id.slice(-8)} proving.status=ready gate=${gate.gateAddr.slice(0, 20)}`);
     return { ok: true, jobId: job.id, marketId: job.market_id };
   } finally { running = false; }
