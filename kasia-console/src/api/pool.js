@@ -1665,7 +1665,10 @@ export async function registerPoolRoutes(fastify) {
     } catch (e) {
       return reply.code(503).send({ ok: false, error: `RPC 查询失败: ${e.message}` });
     }
-    const NONCE_MIN = 1000n, NONCE_MAX = 9999n;
+    // 事故修复(2026-07-08, Martin救单实战撞到): NONCE_MAX原写9999是记错的——真实_v07PayNonce(pool.js:1345)
+    // 公式是 nonce = 1000 + (h.readUInt32BE(0) % 89000), 真实区间是[1000, 89999], 不是[1000,9999]。
+    // 常量单源: 直接从NONCE_MIN/MAX不再手写数字, 而是精确复刻公式本身的边界(1000 + 89000 - 1 = 89999)。
+    const NONCE_MIN = 1000n, NONCE_MAX = 1000n + 89000n - 1n;
     const delta = matchedAmount - BigInt(stakeSompi);
     if (delta < NONCE_MIN || delta > NONCE_MAX) {
       return reply.code(400).send({ ok: false, error: `精确匹配失败: 观测金额${matchedAmount} - 期望注额${stakeSompi} = ${delta}, 不在合法 nonce 区间 [${NONCE_MIN},${NONCE_MAX}] 内(条件①), 拒绝登记` });
