@@ -29,9 +29,14 @@ import { computeBetsRoot } from './pool-payout-root.mjs';
 // RISC0 image_id 对编译产物(含全部依赖树)敏感,而 Cargo.lock 被 .gitignore 排除 → 跨机 cargo resolve 未锁定依赖
 // 版本 → 编译产物不可复现。Phase2 补课项(挂账): 提交 J1 机器产出的 Cargo.lock(root+methods/guest 两份,канonical
 // 出证机那份, 不是 J2 的), 换 docker 固定镜像 build 达成真正可复现构建。
+// 🔴 修复(2026-07-08, Bettor 门②诊断 #cbjvjq): 7/7 imageId 335cae6c→c9918501 那次裁定(#afw8pg)只改了
+// imageId, gateTmplHash 没跟着同步更新——半更新残留旧 imageId(335cae6c)配对的锚值, pxvml genesis 因此
+// 烤进一个跟当前 guest binary 不匹配的 gateTmplHash, zk_close 的 require(blake2b(prefix‖suffix)==gateTmplHash)
+// 物理不可能通过(门②ре-broadcast dry-run 正确拦下, 0 成本; scratch/_bettor_pxvml_gate_tmplhash_diag.mjs
+// 独立重算 + 链上已注资 gate 地址逐字节吻合双证)。新值绑定当前 imageId=c9918501, 后续改 imageId 必须同步改这个。
 const ZK_GATE = {
   imageId: 'c9918501d90bf0aeaaf7970816078c81e8286c08293ccf388e87a7cab023ce30',     // 结算 guest image_id(改 guest=改此=新 covenant)
-  gateTmplHash: 'b9d56ce469c375c139bae90f5dd409d79807b81c69027a3d44c31bd6a74bdbd5', // blake2b(prefix‖suffix)·烤 CloseZk ctor(未接线,见上)
+  gateTmplHash: '4ec7ca3d46db552d87f90636ebefe681f9995249423d52ac30b8c7f258043ac7', // blake2b(prefix‖suffix), 绑定上面这个 imageId(改一个必须同改另一个)
 };
 
 // ── INTERFACE STUB(proveZkClose·契约已 firm·transport 待定·见下）─────────────────
