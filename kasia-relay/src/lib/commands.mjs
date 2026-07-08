@@ -95,6 +95,8 @@ export const COMMAND_TYPES = Object.freeze({
   BSHARD_ZK_HANDOFF: 'bshard_zk_handoff',                     // PayoutShardV2 zk_handoff OP_4, 无 continuation(生命周期终点)
   // ── W4a (2026-07-07, J2 应急代写 J1 domain, NWT 双倍审, Bettor/Owner 批): CloseZkRepro4 zk_close ──
   BSHARD_ZK_CLOSE: 'bshard_zk_close',                          // CloseZkRepro4 zk_close OP_0, closed 1→2 + payoutRoot 写入
+  // ── 缺件1 (2026-07-08, J2, NWT GREEN-with-conditions + Bettor 终GO): CloseZkV2 claim ──
+  CLOSEZK_V2_CLAIM: 'closezk_v2_claim',                        // CloseZkV2 claim OP_3(待T0.3实测确认), closed==2 前置, payoutRootField merkle+17-word nullifier+P2PK payout
 });
 
 export const COMMAND_TYPE_SET = new Set(Object.values(COMMAND_TYPES));
@@ -159,6 +161,7 @@ export const COMMAND_PAYLOAD_SCHEMA = Object.freeze({
   [COMMAND_TYPES.BSHARD_CONSOLIDATE_V2]: ['inputs', 'outputs'],
   [COMMAND_TYPES.BSHARD_ZK_HANDOFF]: ['witness', 'inputs', 'outputs'],
   [COMMAND_TYPES.BSHARD_ZK_CLOSE]: ['witness', 'inputs'],
+  [COMMAND_TYPES.CLOSEZK_V2_CLAIM]: ['witness', 'inputs', 'outputs'],
 });
 
 // R38 (Z23 sediment): typeof spec per field. Bug-Z23 真根因 — broker enqueue amount: number,
@@ -220,6 +223,7 @@ export const COMMAND_FIELD_TYPES = Object.freeze({
   [COMMAND_TYPES.BSHARD_CONSOLIDATE_V2]: { inputs: 'object', outputs: 'object' },
   [COMMAND_TYPES.BSHARD_ZK_HANDOFF]: { witness: 'object', inputs: 'object', outputs: 'object' },
   [COMMAND_TYPES.BSHARD_ZK_CLOSE]: { witness: 'object', inputs: 'object' },
+  [COMMAND_TYPES.CLOSEZK_V2_CLAIM]: { witness: 'object', inputs: 'object', outputs: 'object' },
 });
 
 export function validateCommandPayload(cmd) {

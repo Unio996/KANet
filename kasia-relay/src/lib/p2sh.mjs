@@ -2200,6 +2200,107 @@ export async function unlockBshardZkClose(args) {
 }
 
 /**
+ * unlockCloseZkV2Claim — CloseZkV2 claim(缺件1, J2 2026-07-08。设计文档
+ * docs/2026-07-08-closezkv2-claim-driver-design.md, NWT GREEN-with-conditions + Bettor 终GO)。
+ * 结构 = unlockBshardZkClose 的 splice 续约模式(state-in-address, 213B 固定状态区, 不重编译)+
+ * unlockBshardPayoutClaim 的 nullifier bit-set/dust 边界/fee-input 逻辑(word_idx=merkle_index/63)的合体。
+ * ⚠ verify-value-source(Bettor #bjucwr 直接指令, 落码条件之一): 不信任 cmd.inputs.closezk.state(即使
+ *   caller 传了)——本函数自己对当前活 UTXO 的 redeem_hex 重新 parse 当前状态(纵深防御第二道; console 侧
+ *   closezk-v2-claim-builder.mjs 的 parseCloseZkV2State 已经现读现验过一次, 这里独立再验, 两处 offset 表
+ *   互相独立实现, 靠 round-trip 测试互证正确性, 不是"共享一份代码"意义上的单源, 而是"两次独立验证都必须过"
+ *   意义上的纵深防御)。
+ * ⚠ OP_3 selector(落码条件之一, 不得当已确认结论用): CloseZkV2.sil entry 声明序 0:zk_close/1:escape_trigger/
+ *   2:escape_claim/3:claim, 按既有 OP_i=0x50+i 惯例(cancel_attest/refund_claim 等已用此惯例)claim 应为
+ *   OP_3='53', 但落码前必须过市场5设计稿 T0.3 selector dispatch 实测(cli-debugger 全 entry 路由验证),
+ *   本函数当前值是设计推导非实测确认。
+ * @param {object} args.cmd.inputs.closezk { redeem_hex, outpointTxid, index } — 当前活 CloseZkV2 UTXO(不接受
+ *   caller 传 state, handler 自己 parse redeem_hex 拿现读值)。
+ * @param {object} args.cmd.inputs.fee { address, outpointTxid, index } — 必需(claim 的 consolidated_pool
+ *   精确分给 payout+continuation, 无 slack 付 fee, 同 unlockBshardPayoutClaim:1840 纪律)。
+ * @param {object} args.cmd.witness { self_out_idx, payout_out_idx, bettor_pk, payout, merkle_index, siblings_hex }
+ *   siblings_hex 必须 pad 到 10 个(depth-10 固定展开步数, 同 escape_claim/claim .sil 逻辑)。
+ */
+export async function unlockCloseZkV2Claim(args) {
+  const { wallet, cmd, networkId, lockTime = 0n } = args;
+  const w = cmd.witness;
+  const rpc = await connectRpc(networkId);
+  try {
+    const czUtxo = await _matchUtxo(rpc, _addressFromRedeem(cmd.inputs.closezk.redeem_hex, networkId), cmd.inputs.closezk.outpointTxid, cmd.inputs.closezk.index);
+    if (!cmd.inputs.fee) throw new Error('closezk_v2_claim: fee input 必需(consolidated_pool 精确分给 payout+continuation, 无 slack 付 fee)');
+    const feeUtxo = await _matchUtxo(rpc, cmd.inputs.fee.address, cmd.inputs.fee.outpointTxid, cmd.inputs.fee.index);
+    const matched = [czUtxo, feeUtxo];
+
+    // ── verify-value-source 纵深防御第二道: 不信 cmd.inputs.closezk.state, 自己对当前 redeem_hex 现 parse ──
+    const inputRedeem = Buffer.from(cmd.inputs.closezk.redeem_hex, 'hex');
+    const _STATE_START = 1, _STATE_LEN = 213, _NW = 17;
+    const region = inputRedeem.slice(_STATE_START, _STATE_START + _STATE_LEN);
+    if (region.length !== _STATE_LEN) throw new Error(`closezk_v2_claim: state region ${region.length}B != ${_STATE_LEN}B(redeem 太短/offset 表脱节)`);
+    const readI64 = (off, marker) => {
+      if (region[off] !== marker) throw new Error(`closezk_v2_claim: offset ${off} marker 0x${region[off]?.toString(16)} != 期望 0x${marker.toString(16)}(offset 表跟实际 redeem 布局脱节, 拒绝往下读)`);
+      return region.readBigInt64LE(off + 1);
+    };
+    const attestedWinner = readI64(0, 0x08);
+    const closed = Number(readI64(9, 0x08));
+    if (closed !== 2) throw new Error(`closezk_v2_claim: closed=${closed} != 2 — 不是 claim 该处理的状态(escape_claim 是 closed==3, 走独立命令)`);
+    if (region[18] !== 0x20) throw new Error(`closezk_v2_claim: offset 18 marker 0x${region[18]?.toString(16)} != 0x20(push32)`);
+    const payoutRootField = region.slice(19, 51);
+    const consolidatedPool = readI64(51, 0x08);
+    const wWords = []; for (let i = 0; i < _NW; i++) wWords.push(readI64(60 + 9 * i, 0x08));
+
+    const payout = BigInt(w.payout);
+    const idx = Number(w.merkle_index);
+    if (idx < 0 || idx >= 1024) throw new Error(`closezk_v2_claim: merkle_index ${idx} out of [0,1024)`);
+    if (payout < 1n || payout > consolidatedPool) throw new Error(`closezk_v2_claim: payout ${payout} 不在 [1, ${consolidatedPool}]`);
+    const wordIdx = Math.floor(idx / 63), bitIn = idx % 63;
+    if (wordIdx >= _NW) throw new Error(`closezk_v2_claim: word_idx ${wordIdx} 越界(cap ${_NW} words)`);
+    if (((wWords[wordIdx] >> BigInt(bitIn)) & 1n) === 1n) throw new Error(`closezk_v2_claim: nullifier bit 已置位(merkle_index ${idx} 已 claim 过)`);
+    wWords[wordIdx] = wWords[wordIdx] + (1n << BigInt(bitIn));
+
+    const newPool = consolidatedPool - payout;
+    const isLast = newPool === 0n;   // 最后一个 claimant: 精确清零, 不留 continuation(同 escape_claim/claim .sil dust 分支)
+
+    const i64 = (n) => { const b = Buffer.alloc(8); b.writeBigInt64LE(BigInt(n)); return b; };
+    const push8 = Buffer.from([8]), push32 = Buffer.from([32]);
+    let closeZkContAddr = null;
+    if (!isLast) {
+      const newStateBytes = Buffer.concat([
+        push8, i64(attestedWinner),
+        push8, i64(2),   // closed 不变: 靠这个值 stay 住让下一个 winner 还能调, 不靠 closed 变化分辨"谁领过"
+        push32, payoutRootField,
+        push8, i64(newPool),
+        ...wWords.map(v => Buffer.concat([push8, i64(v)])),
+      ]);
+      if (newStateBytes.length !== 213) throw new Error(`closezk_v2_claim: newStateBytes ${newStateBytes.length}B != 213B(布局漂移?)`);
+      const spliced = Buffer.concat([inputRedeem.slice(0, 1), newStateBytes, inputRedeem.slice(1 + 213)]);
+      closeZkContAddr = addressFromScriptPublicKey(payToScriptHashScript(new Uint8Array(spliced)), networkId).toString();
+    }
+
+    const outputs = [];
+    outputs[w.payout_out_idx] = new TransactionOutput(payout, payToAddressScript(new Address(cmd.outputs.payout.address)));
+    if (!isLast) outputs[w.self_out_idx] = new TransactionOutput(newPool, payToAddressScript(new Address(closeZkContAddr)));
+    const orderedOut = outputs.filter(o => o !== undefined);
+    _appendChange(orderedOut, matched, cmd.outputs?.change_address, _bshardFeeV1(matched.length));
+
+    // scriptSig 声明序(claim 形参): selfOutIdx, payoutOutIdx, bettorPk, payout, merkle_index, s0..s9 + OP_3 + redeem(no-sig)
+    let sibPush = '';
+    for (const s of w.siblings_hex) sibPush += _pushBytes(s);   // s0..s9 forward 序(individual byte[32], caller 必 pad 到 10)
+    const czSig = _pushInt(w.self_out_idx) + _pushInt(w.payout_out_idx) + _pushBytes(w.bettor_pk)
+      + _pushInt(w.payout) + _pushInt(w.merkle_index) + sibPush
+      + '53' + _encodePushDataHex(Buffer.from(cmd.inputs.closezk.redeem_hex, 'hex'));   // claim=OP_3='53'(entry idx 3, 待 T0.3 实测)
+
+    const unsigned = new Transaction({ version: 1, inputs: matched.map(u => ({ previousOutpoint: { transactionId: u.outpoint.transactionId, index: u.outpoint.index }, signatureScript: '', sequence: 0n, sigOpCount: 0, computeBudget: _BSHARD_COMPUTE_BUDGET, utxo: u })), outputs: orderedOut, lockTime: BigInt(lockTime), gas: 0n, subnetworkId: '0000000000000000000000000000000000000000', payload: '' });
+    const feeSig = createInputSignature(unsigned, 1, wallet.getPrivateKey(), SighashType.All);
+    const signedTx = new Transaction({ version: 1, inputs: [
+      { previousOutpoint: { transactionId: czUtxo.outpoint.transactionId, index: czUtxo.outpoint.index }, signatureScript: czSig, sequence: 0n, sigOpCount: 0, computeBudget: _BSHARD_COMPUTE_BUDGET },
+      { previousOutpoint: { transactionId: feeUtxo.outpoint.transactionId, index: feeUtxo.outpoint.index }, signatureScript: feeSig, sequence: 0n, sigOpCount: 0, computeBudget: _BSHARD_COMPUTE_BUDGET },
+    ], outputs: orderedOut, lockTime: BigInt(lockTime), gas: 0n, subnetworkId: '0000000000000000000000000000000000000000', payload: '' });
+    _assertTxInvariants(matched, signedTx, 'unlockCloseZkV2Claim', networkId);
+    const r = await rpc.submitTransaction({ transaction: signedTx, allowOrphan: false });
+    return { txId: r.transactionId, closeZkContinuationAddress: closeZkContAddr, payoutSompi: payout.toString(), isLastClaimant: isLast };
+  } finally { try { await rpc.disconnect(); } catch {} }
+}
+
+/**
  * unlockBshardCancelAttest — 委员 4-of-5 在 PayoutShard 内背书 refundRoot (cancel_attest OP_3, closed 0→2 write-once)。
  *   ★ 镜像 unlockBshardCloseAttest byte-identical(委员门同款 pubkey-sort + preimage/submit 双模)→ 仅: closed 0→2(非 0→1) + new_refundRoot 进 payoutRoot 槽(复用) + 选择子 OP_3='53'。
  *   contract cancel_attest(58 形参)= close_attest 形参序仅 pos2 new_payoutRoot→new_refundRoot. closed 0→2 与 close 0→1 互斥 latch(require(closed==0))。

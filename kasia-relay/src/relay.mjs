@@ -1006,6 +1006,15 @@ if (process.send) {
           if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, ...r } });
           return;
         }
+        case 'closezk_v2_claim': {
+          // 缺件1 (J2 2026-07-08, NWT GREEN-with-conditions + Bettor 终GO): CloseZkV2 claim — payoutRootField
+          // merkle climb + 17-word nullifier + P2PK payout + splice 续约(state-in-address, 213B 状态区), closed==2 前置.
+          const { unlockCloseZkV2Claim } = await import('./lib/p2sh.mjs');
+          const wallet = getWallet();
+          const r = await unlockCloseZkV2Claim({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) });
+          if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, ...r } });
+          return;
+        }
 
         case 'pool_v07_compute_refund_mass': {
           // G6 批 3 段① Bettor r311 钦定: Console 手搓 UtxoEntry 喂 calculateTransactionMass
