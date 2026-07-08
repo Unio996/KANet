@@ -535,6 +535,24 @@ export function exitBetFlow(tgUser) { sessions.delete(tgUser); pendingPayments.d
 export function listPendingPayments() { return [...pendingPayments.entries()].map(([tgUser, p]) => ({ tgUser, ...p })); }
 export function clearPendingPayment(tgUser) { pendingPayments.delete(tgUser); persist(); }
 
+// 根治(2026-07-08, KANet-UI grep 坐实的 7291bd66 死循环, Owner "查根因根治" 指令): pollPendingBets 之前
+// 对 register-v07/confirm 的【任何非终态响应】(包括真正的 500 错误, 比如 registerBettorOnShard tip-lag
+// 重试耗尽)都当成"还在等付款落地"静默继续 poll——一个已经彻底死掉的 tx(链上永远查不到对应 UTXO)会被
+// 无熔断地每 3 秒重试一次, KANet-UI 实测撞见过持续 6 小时+的案例。这两个函数给 bot.mjs 提供失败计数
+// 能力: confirm 端点返回真错误(!r.ok, 非 linkedAddr 已处理分支)时 bump, 返回真实"pending"(付款还没
+// 检测到)时 reset(区分"还在等" vs "反复报错")。达到阈值后 bot.mjs 停止对这笔的重试 + 诚实告知用户。
+export function bumpPendingPaymentFailCount(tgUser) {
+  const p = pendingPayments.get(tgUser);
+  if (!p) return 0;
+  p.failCount = (p.failCount || 0) + 1;
+  persist();
+  return p.failCount;
+}
+export function resetPendingPaymentFailCount(tgUser) {
+  const p = pendingPayments.get(tgUser);
+  if (p && p.failCount) { p.failCount = 0; persist(); }
+}
+
 // Bettor r63 ① link store 持久化 — bot.mjs /link 调 setLinkedAddr, 任何使用 linkedAddr 的步骤调 getLinkedAddr.
 export function setLinkedAddr(tgUser, address) {
   linkedAddrs.set(tgUser, { address, linked_at: Date.now(), seen_settled: [] });

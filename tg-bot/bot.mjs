@@ -501,8 +501,23 @@ async function pollPendingBets() {
       // Bettor r63 ③ 不静默: confirm 端硬错 (linked_addr 缺/无效) → 通知用户重 /link, 停盯.
       PM.clearPendingPayment(p.tgUser);
       try { await bot.api.sendMessage(p.tgUser, t(uLang, 'poll_linkedaddr_error', { error: j.error })); } catch {}
+    } else if (r.ok && j.pending === true) {
+      // 真·还在等付款落地检测(confirm 端点明确说'还没查到这笔付款') — 正常状态, 不计入失败, 继续静默 poll.
+      PM.resetPendingPaymentFailCount(p.tgUser);
+    } else {
+      // 根治(2026-07-08, KANet-UI grep 坐实 7291bd66 死循环案例, Owner "查根因根治" 指令): 走到这里的情况
+      // (!r.ok 的其它错误 / j.ambiguous 等) 之前被静默当成"还在等付款"无限重试——但这些是 confirm 端点
+      // 明确报了"这次调用本身出问题"(不是"还没检测到付款"), 无熔断重试会像 KANet-UI 实测的那样卡 6 小时+。
+      // 达到阈值(20 次连续真错误, ~1 分钟 @3s poll interval, 容忍短暂 tip-lag 抖动)后停止重试 + 诚实告知
+      // 用户资金没丢但需要人工处理 + LOUD console.error 供 ops 发现(不是静默失败)。
+      const fc = PM.bumpPendingPaymentFailCount(p.tgUser);
+      if (fc >= 20) {
+        console.error(`[pollPendingBets] 🔴 STUCK: tgUser=${p.tgUser} market=${p.marketId} betId=${String(p.betId).slice(0, 8)} confirm 连续失败 ${fc} 次(${(fc * (CONFIG.pendingBetPollMs || 3000) / 1000).toFixed(0)}s), 停止自动重试. last error: ${JSON.stringify(j).slice(0, 200)}`);
+        PM.clearPendingPayment(p.tgUser);
+        try { await bot.api.sendMessage(p.tgUser, t(uLang, 'poll_registration_stuck', { question: PM.specTitle(p.question) || p.marketId || '' })); } catch {}
+      }
+      // 未到阈值: 继续静默 poll(容忍偶发抖动), 不打扰用户.
     }
-    // else (pending / not ok / soft fail): payment not yet detected — keep polling silently.
   }
 }
 // pollPendingBets interval moved into startBot() (below).

@@ -310,6 +310,7 @@ export const LANGS = {
     poll_wrong_payment: '⚠ A payment with incorrect amount was detected at this address.\nPer contract rules, wrong-amount payments cannot be registered, and underpayments are permanently locked with no refund.\nYour bet is not registered. Do not send more to this address (further payments are also unrecoverable).',
     poll_linkedaddr_error: '⚠ Bet order error (backend: {error}).\nPlease /link <kaspatest address> first, then /bet again.\n(If you already paid to the address shown, that bet is unrecoverable — do not pay again.)',
     poll_no_linkedaddr: '⚠ This bet order has an error: missing linked address (old session data lost). Bet was not registered and will not auto-confirm. Please /link <kaspatest address> first, then /bet again through the full flow.\n(If you already paid to the address shown last time, that bet is unrecoverable — do not pay again.)',
+    poll_registration_stuck: '⚠ Your payment for {question} could not be registered automatically after repeated attempts.\nYour funds are held at a relay-controlled address and are not lost — the team has been notified and will investigate and resolve this manually.\nDo not send another payment for this bet. Contact support with this market and the approximate time you paid.',
 
     // pollSettleResults messages
     poll_win: '🎉 [{question}]\nYou won! Bet {side} {stake} KAS → expecting {payout} KAS payout (settle TX: {tx}...)\nFunds sent to your linked address — check wallet.',
@@ -676,6 +677,7 @@ export const LANGS = {
     poll_wrong_payment: '⚠ 检测到一笔金额不符的付款到该地址。\n按合约规则, 金额不符的付款无法被正确入账, 且【少付会被永久锁死、无法退回】。\n你的押注未成立。请勿再向此地址付款 (重复付款同样无法挽回)。',
     poll_linkedaddr_error: '⚠ 押注单异常 (后端: {error})。\n请先 /link <kaspatest 地址> 重新绑定, 再 /bet 重走流程。\n(此前显示的付款地址若已付, 押注无法挽回 — 别再付了。)',
     poll_no_linkedaddr: '⚠ 这笔押注单异常: 缺绑定地址 (bot 旧版会话丢失). 押注未成立, 也不会自动确认。请先 /link <kaspatest 地址>, 再 /bet 重新走完整流程。\n(若已付款到上次显示的地址, 押注无法挽回 — 别再付了。)',
+    poll_registration_stuck: '⚠ 你对 {question} 的付款反复重试后仍无法自动入账。\n资金在 relay 控制的地址上, 没有丢失 — 团队已收到通知, 会人工核实处理。\n请勿再向这笔押注重复付款。联系客服时请提供市场名+大致付款时间。',
 
     // pollSettleResults messages
     poll_win: '🎉 [{question}]\n你赢了! 押 {side} {stake} KAS → 应到账 {payout} KAS (settle TX: {tx}...)\n钱已发到你的绑定地址 — 钱包查看到账.',
