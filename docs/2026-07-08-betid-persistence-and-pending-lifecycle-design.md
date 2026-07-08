@@ -31,6 +31,12 @@ console 的子进程)重启, 这个值永久丢失, 已经据此付款的用户�
 
 ### 2.1 新表 `pool_bet_preps`(建议名, 实现时可调整)
 
+**⚠ 本节 2026-07-08 08:06 已按 NWT 红队意见修正**(初版用 (market,bettorPk,direction) 三元组当 UNIQUE
+索引 UPSERT, NWT 抓到这会在"同三元组二次加注、第一笔还没确认"场景把第一笔的 betId/payAddr **覆盖冲掉**——
+betId 存在的唯一目的就是解决"同 bettor 同方向允许多笔独立追加下注"的碰撞, 三元组唯一索引恰好摧毁了这个语义,
+会重新引入 Martin 案同一个 bug。修正: 唯一性建在 `bet_id` 本身(每笔 prep 都是一条独立记录, 不覆盖), 恢复
+时按三元组查"最近若干条未确认记录"而非假设只有一条。)
+
 ```sql
 CREATE TABLE pool_bet_preps (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -41,13 +47,17 @@ CREATE TABLE pool_bet_preps (
   pay_addr TEXT NOT NULL,
   exact_stake_sompi INTEGER NOT NULL,
   stake_kas REAL NOT NULL,
+  confirmed_at INTEGER,           -- NULL = 未确认(仍在途); confirm 成功后回写此列, 非 NULL = 已有归宿
   created_at INTEGER NOT NULL
 );
-CREATE UNIQUE INDEX idx_pool_bet_preps_triple ON pool_bet_preps(logical_market_id, bettor_pk, direction);
+CREATE UNIQUE INDEX idx_pool_bet_preps_betid ON pool_bet_preps(bet_id);
+CREATE INDEX idx_pool_bet_preps_triple ON pool_bet_preps(logical_market_id, bettor_pk, direction, confirmed_at);
 ```
 
-**唯一索引语义**: 同一 (market, bettor, direction) 三元组重复 prep = UPSERT(覆盖为最新 betId), 不是报错——
-镜像 bot 侧"允许用户反复重走流程, 以最后一次为准"的既有行为(prep 本来就可以被多次调用)。
+**唯一索引语义(修正后)**: 唯一性建在 `bet_id`(每次 prep 都是一条独立 INSERT, 同一 bet_id 重复 prep 用
+`ON CONFLICT(bet_id) DO UPDATE`覆盖同一笔的重算——这是安全的, 因为 bet_id 相同代表调用方明确是"重试同一笔",
+不是"追加新一笔")。三元组 (market,bettorPk,direction) 上只建普通索引(非唯一), 允许同一用户同方向存在多条
+未确认(confirmed_at IS NULL)记录, 对应"允许无限次追加下注"这个既有语义。
 
 ### 2.2 `_v07PrepConfirmPrelude` 落码点(pool.js)
 
@@ -58,22 +68,30 @@ CREATE UNIQUE INDEX idx_pool_bet_preps_triple ON pool_bet_preps(logical_market_i
 sqlite.prepare(`
   INSERT INTO pool_bet_preps (logical_market_id, bettor_pk, direction, bet_id, pay_addr, exact_stake_sompi, stake_kas, created_at)
   VALUES (?,?,?,?,?,?,?,?)
-  ON CONFLICT(logical_market_id, bettor_pk, direction) DO UPDATE SET
-    bet_id=excluded.bet_id, pay_addr=excluded.pay_addr, exact_stake_sompi=excluded.exact_stake_sompi,
+  ON CONFLICT(bet_id) DO UPDATE SET
+    pay_addr=excluded.pay_addr, exact_stake_sompi=excluded.exact_stake_sompi,
     stake_kas=excluded.stake_kas, created_at=excluded.created_at
 `).run(logicalMarketId, bettorPk, v.direction, b.bet_id, payAddr, payAmountSompi, v.stakeAmount / 1e8, Math.floor(Date.now() / 1000));
 ```
 
-**关键**: 这行写在 prep 和 confirm 共用的 prelude 里, 两个 endpoint 都会自动持久化(不需要分别改), 且是
-"每次调用都覆盖式写"(不是"只在第一次 prep 时写一次"), 因为 confirm 重试时也会重新算一遍相同的 betId/payAddr
-(betId 来自 caller 传入的 `b.bet_id`, 不是每次重新生成), 幂等安全。
+confirm 成功注册后(`pool_bettor_sides` 写入成功那一刻), 补一行:
+```js
+sqlite.prepare(`UPDATE pool_bet_preps SET confirmed_at = ? WHERE bet_id = ?`).run(Math.floor(Date.now() / 1000), b.bet_id);
+```
+这样"未确认"(孤儿嫌疑)记录 = `confirmed_at IS NULL` 且超过合理等待窗口(如 deadline 已过或若干分钟无进展)
+的行, 恢复/巡检工具按这个条件扫描, 不需要假设"每个三元组只有一条"。
+
+**关键**: 写入这两行的地方分别在 prep/confirm 共用的 prelude 与 confirm 成功分支, 每次调用都独立记录
+(不覆盖历史), 幂等安全(同 bet_id 的 UPSERT 只更新自己, 不影响其它 bet_id 的记录)。
 
 ### 2.3 恢复路径
 
-console/tg-bot 重启后, 若 `pendingPayments`(内存)里没有某个 tgUser 的记录但 DB 里 `pool_bet_preps` 有,
-可以用 (market, bettorPk, direction) 反查最近一次 prep 用的 betId + payAddr, 重建 `pendingRecord`, 让
-`pollPendingBets()` 继续盯这笔——**这是 #19 真正根治的效果: betId 不再是"用完就扔的一次性随机数", 而是
-有服务端存根可查的确定性映射输入**。
+console/tg-bot 重启后, 若 `pendingPayments`(内存)里没有某个 tgUser 的记录但 DB 里 `pool_bet_preps` 有
+`confirmed_at IS NULL` 的行, 用 (market, bettorPk, direction) 查出**全部**未确认记录(可能不止一条, 见
+§2.1 修正)、按各自 `pay_addr` 逐条核实链上是否已有付款(有则用该行的 betId 重建 confirm 请求; 多条都有
+付款则每条独立重建, 不假设只处理一条), 重建 `pendingRecord`, 让 `pollPendingBets()` 继续盯这些——**这是
+#19 真正根治的效果: betId 不再是"用完就扔的一次性随机数", 而是有服务端存根可查的确定性映射输入, 且支持
+同一用户同方向存在多笔独立在途记录这个既有语义**。
 
 ### 2.4 是否要移除 randomUUID, 改用确定性 betId?
 
