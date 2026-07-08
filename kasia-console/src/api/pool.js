@@ -545,7 +545,13 @@ export async function registerPoolRoutes(fastify) {
     // surfaces the real transfer error (= not a generic "failed after 3 attempts").
     let spineTxId = null;
     try {
-      const r = await transferAndConfirm(b.maker_relay_id, spineResult.p2shAddr, makerStakeStr);
+      // 事故硬化(2026-07-08, yxllc spine 100KAS 追踪战役): 落库(下面 INSERT INTO pool_markets)前的
+      // landed 确认必须是深确认(minDepth=REORG_SAFE_MIN_DEPTH), 不能停在浅/mempool-accepted 级——
+      // block 是 blue 不代表这笔 tx 本身赢了 acceptance(同一源 UTXO 可能被 gateway 自己另一笔并发 tx
+      // 竞争抢先, 浅确认看不出来, 一旦落库就把从未真正确权的 spine_lock_tx 当权威记录, DB 有记录但链上
+      // 没钱)。maxWaitMs 相应放宽到 60s, 给 20 个确认累积的时间(即使按今晚测到的最低速率也够)。这个坑
+      // 三处 create 端点(v0.6 legacy ×2 + v0.7 一处)字面同一段代码, 一次性堵完(不留同形状副本)。
+      const r = await transferAndConfirm(b.maker_relay_id, spineResult.p2shAddr, makerStakeStr, { minDepth: REORG_SAFE_MIN_DEPTH, maxWaitMs: 60000 });
       spineTxId = r.txId;
     } catch (err) {
       return reply.code(503).send({ ok: false, error: `maker stake lock failed: ${err.message} (spine_p2sh=${spineResult.p2shAddr})` });
@@ -743,7 +749,13 @@ export async function registerPoolRoutes(fastify) {
     // Maker stake lock — NO TX NO STATE CHANGE.
     let spineTxId = null;
     try {
-      const r = await transferAndConfirm(b.maker_relay_id, spineResult.p2shAddr, makerStakeStr);
+      // 事故硬化(2026-07-08, yxllc spine 100KAS 追踪战役): 落库(下面 INSERT INTO pool_markets)前的
+      // landed 确认必须是深确认(minDepth=REORG_SAFE_MIN_DEPTH), 不能停在浅/mempool-accepted 级——
+      // block 是 blue 不代表这笔 tx 本身赢了 acceptance(同一源 UTXO 可能被 gateway 自己另一笔并发 tx
+      // 竞争抢先, 浅确认看不出来, 一旦落库就把从未真正确权的 spine_lock_tx 当权威记录, DB 有记录但链上
+      // 没钱)。maxWaitMs 相应放宽到 60s, 给 20 个确认累积的时间(即使按今晚测到的最低速率也够)。这个坑
+      // 三处 create 端点(v0.6 legacy ×2 + v0.7 一处)字面同一段代码, 一次性堵完(不留同形状副本)。
+      const r = await transferAndConfirm(b.maker_relay_id, spineResult.p2shAddr, makerStakeStr, { minDepth: REORG_SAFE_MIN_DEPTH, maxWaitMs: 60000 });
       spineTxId = r.txId;
     } catch (err) {
       return reply.code(503).send({ ok: false, error: `maker stake lock failed: ${err.message} (spine_p2sh=${spineResult.p2shAddr})` });
@@ -1101,7 +1113,13 @@ export async function registerPoolRoutes(fastify) {
 
     let spineTxId = null;
     try {
-      const r = await transferAndConfirm(b.maker_relay_id, spineResult.p2shAddr, makerStakeStr);
+      // 事故硬化(2026-07-08, yxllc spine 100KAS 追踪战役): 落库(下面 INSERT INTO pool_markets)前的
+      // landed 确认必须是深确认(minDepth=REORG_SAFE_MIN_DEPTH), 不能停在浅/mempool-accepted 级——
+      // block 是 blue 不代表这笔 tx 本身赢了 acceptance(同一源 UTXO 可能被 gateway 自己另一笔并发 tx
+      // 竞争抢先, 浅确认看不出来, 一旦落库就把从未真正确权的 spine_lock_tx 当权威记录, DB 有记录但链上
+      // 没钱)。maxWaitMs 相应放宽到 60s, 给 20 个确认累积的时间(即使按今晚测到的最低速率也够)。这个坑
+      // 三处 create 端点(v0.6 legacy ×2 + v0.7 一处)字面同一段代码, 一次性堵完(不留同形状副本)。
+      const r = await transferAndConfirm(b.maker_relay_id, spineResult.p2shAddr, makerStakeStr, { minDepth: REORG_SAFE_MIN_DEPTH, maxWaitMs: 60000 });
       spineTxId = r.txId;
     } catch (err) {
       return reply.code(503).send({ ok: false, error: `maker stake lock failed: ${err.message} (spine_p2sh=${spineResult.p2shAddr})` });
@@ -1241,7 +1259,9 @@ export async function registerPoolRoutes(fastify) {
     const kaspa = await import('kaspa-wasm');
     const p2sh = (redeemHex) => kaspa.addressFromScriptPublicKey(kaspa.ScriptBuilder.fromScript(new Uint8Array(Buffer.from(redeemHex, 'hex'))).createPayToScriptHashScript(), network).toString();
     const rc = (cmd) => sendCommandAsync(gatewayRelayId, cmd, 90000);
-    const transfer = async (addr, sompi) => { const r = await transferAndConfirm(gatewayRelayId, addr, (Number(sompi) / 1e8).toFixed(8)); return r.txId; };
+    // 事故硬化(2026-07-08, yxllc追踪): 这笔transfer的产物(fundTx)被喂进genesis-mint(ensurePayoutShardV2)
+    // 当funding input, 最终落payout_shards表——同create-v07 spine那条纪律, 也升级深确认。
+    const transfer = async (addr, sompi) => { const r = await transferAndConfirm(gatewayRelayId, addr, (Number(sompi) / 1e8).toFixed(8), { minDepth: REORG_SAFE_MIN_DEPTH, maxWaitMs: 60000 }); return r.txId; };
     // minDepth: 20 (J1 phantom-leaf 根治) — reorg-safe DAA-深度门: 浅确认 UTXO(被 reorg 退)不算 landed → register land-gate 不记 phantom leaf。poll 到 depth≥20 才 true; 超时返 false → caller throw(NO-TX-NO-STATE 不推进 leaf)。
     const landed = async (txid, addr, n = 25) => { for (let i = 0; i < n; i++) { const j = await sendCommandAsync(gatewayRelayId, { type: 'check_utxo_landed', address: addr, txid, minDepth: REORG_SAFE_MIN_DEPTH }, 20000); if (j.landed || j.found) return true; await new Promise(r => setTimeout(r, 2000)); } return false; };
 
@@ -1489,7 +1509,9 @@ export async function registerPoolRoutes(fastify) {
       const kaspa = await import('kaspa-wasm');
       const p2sh = (redeemHex) => kaspa.addressFromScriptPublicKey(kaspa.ScriptBuilder.fromScript(new Uint8Array(Buffer.from(redeemHex, 'hex'))).createPayToScriptHashScript(), network).toString();
       const rc = (cmd) => sendCommandAsync(gatewayRelayId, cmd, 90000);
-      const transfer = async (addr, sompi) => { const r = await transferAndConfirm(gatewayRelayId, addr, (Number(sompi) / 1e8).toFixed(8)); return r.txId; };
+      // 事故硬化(2026-07-08, yxllc追踪): 这笔transfer的产物(fundTx)被喂进genesis-mint(ensurePayoutShardV2)
+      // 当funding input, 最终落payout_shards表——同create-v07 spine那条纪律, 也升级深确认。
+      const transfer = async (addr, sompi) => { const r = await transferAndConfirm(gatewayRelayId, addr, (Number(sompi) / 1e8).toFixed(8), { minDepth: REORG_SAFE_MIN_DEPTH, maxWaitMs: 60000 }); return r.txId; };
       // minDepth: 20 (J1 phantom-leaf 根治) — reorg-safe DAA-深度门: 浅确认 UTXO(被 reorg 退)不算 landed → register land-gate 不记 phantom leaf。poll 到 depth≥20 才 true; 超时返 false → caller throw(NO-TX-NO-STATE 不推进 leaf)。
     const landed = async (txid, addr, n = 25) => { for (let i = 0; i < n; i++) { const j = await sendCommandAsync(gatewayRelayId, { type: 'check_utxo_landed', address: addr, txid, minDepth: REORG_SAFE_MIN_DEPTH }, 20000); if (j.landed || j.found) return true; await new Promise(r => setTimeout(r, 2000)); } return false; };
       // 🔴 #28 (B) REGRESSION FIX (J1 2026-07-01): register_append funding 必用【gateway 主址】不是 payAddr。
