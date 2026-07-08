@@ -129,25 +129,26 @@ export async function ensurePayoutShard({ db, rc, transfer, landed, p2sh, logica
 // ZK-native 市场才会走 PayoutShardV2.sil。选择哪个函数由上层调用方(市场类型判断)决定，不是隐式推断。
 // ══════════════════════════════════════════════════════════════════════════════════════════════
 
-// closeZkTmplAnchor 的 4 段固定模板切分点(J2 2026-07-06 实测，cli-debugger 执行级验证，非估算)：
-// state_layout={start:1,len:213}(CloseZkRepro4 自己的 state 区，跟 PayoutShardV2 无关)；非-state 后缀
-// (extractTemplateArtifact 的 templateSuffix，从绝对偏移 214 开始)内部再切出 4 段固定模板，跳过
-// betsRootBaked/refundRootBaked(各32B)/attestedAtMs(marker+6B LE=7B，仅在 2^40≤v<2^47 时宽度稳定，
-// 见 PayoutShardV2.sil zk_handoff 的 bounds guard) 这 3 个 per-market 变量的位置。
-const _CLOSEZK_SUFFIX_BASE = 214; // = state_layout.start(1) + state_layout.len(213)
-const _CLOSEZK_BETSROOT_ABS = [273, 305];
-const _CLOSEZK_REFUNDROOT_ABS = [1396, 1428];
-const _CLOSEZK_ATMS_ABS = [641, 648]; // marker(1B)+6B LE，仅在稳定值域内有效——见下方 dummyAtMs 选值理由
-const _rel = ([a, b]) => [a - _CLOSEZK_SUFFIX_BASE, b - _CLOSEZK_SUFFIX_BASE];
+// closeZkTmplAnchor 的 4 段固定模板切分点。
+// 🔴 事故修复(2026-07-08 深夜, J2+Bettor+NWT, 3o0a6 zk_handoff 撞锚点死结坐实): 原来这里是硬编码绝对
+// offset(J2 2026-07-06 实测), CloseZkV2.sil 07-07 那次 NUM2BIN byte[32](0) 修复之后没人重新量, 硬编码
+// 常量过期 2 字节(_CLOSEZK_REFUNDROOT_ABS 应为 [1394,1426] 不是 [1396,1428])——静默烤出一个【错的】
+// anchor 进 PayoutShardV2 ctor(ctor-baked, 不可变), 导致 zk_handoff 在 line 378 的 anchor 校验永远拒签
+// (真实 refundRootBaked 非零, 用错误 offset 切模板会带进真实值的前 2 字节, 永远凑不出跟 dummy z32 算出的
+// 旧 anchor 一致的哈希)。3o0a6 69.11KAS 卡死案例的根因就是这个。
+// 根治: 弃硬编码, 改用 live indexOf 定位(同 handoff driver 脚本硬化过的 findUnique 手法搬进库函数单源)+
+// round-trip 自证(4 段模板+dummy state 拼回必须 byte-exact 等于 compiled 原始产物, 不 match 直接 throw,
+// 不静默产出错 anchor)。这样即使未来 .sil 源码再改动导致 offset 漂移, 也会在这里 fail-loud, 不会再悄悄
+// 烤一个错的值进任何市场的 ctor。
+const _CLOSEZK_SUFFIX_BASE = 214; // = state_layout.start(1) + state_layout.len(213), state 区固定宽度编码, 不随市场值变
 
 /**
- * 计算 PayoutShardV2 ctor 需要的 closeZkTmplAnchor = blake2b(4 段固定模板拼接)。CloseZkRepro4.sil 零改动，
- * 编译一次(dummy ctor，模板跟 betsRoot/refundRoot/attestedWinner/consolidated_pool 具体值无关，只有
+ * 计算 PayoutShardV2 ctor 需要的 closeZkTmplAnchor = blake2b(4 段固定模板拼接)。CloseZkRepro4.sil/CloseZkV2.sil
+ * 零改动，编译一次(dummy ctor，模板跟 betsRoot/refundRoot/attestedWinner/consolidated_pool 具体值无关，只有
  * gateTmplHash 会真实嵌入模板——它绑定具体 guest image_id，必须传真实值，不能用占位符)即可，不需要每个
  * 市场重算(同一个 guest image 的所有 ZK-native 市场共用同一个 anchor)。
- * @param {string} closeZkSilPath 指向 _j2_closezk_repro4.sil(或其归位后的正式路径)
- * @param {string} gateTmplHash 真实 gate 模板 hash(32B hex，绑定具体 guest image_id，昨晚 LANDED 交易用的
- *   511b0ead...定版值，见 _j2_final_gate_data_v2.json——不能传占位符，会导致 anchor 算错)
+ * @param {string} closeZkSilPath 指向 CloseZkV2.sil(或归位后的正式路径)
+ * @param {string} gateTmplHash 真实 gate 模板 hash(32B hex，绑定具体 guest image_id——不能传占位符，会导致 anchor 算错)
  */
 export function computeCloseZkTmplAnchor(closeZkSilPath, gateTmplHash) {
   // dummyAtMs 必须落在 J2 实测的稳定值域 [2^40, 2^47) 内(同 PayoutShardV2.sil zk_handoff 的 bounds guard)，
@@ -157,20 +158,57 @@ export function computeCloseZkTmplAnchor(closeZkSilPath, gateTmplHash) {
   // 0/1/0)可以随便填、不影响算出的 anchor —— 它们全部落在 CloseZkRepro4 自己的 state_layout 区域内，
   // extractTemplateArtifact 会把整个 state 区域从 templateSuffix 里切掉(不进最终 hash)。之所以这里仍写
   // 具体值(而非全 0)，纯粹是为了让 dummy ctor 数组形状/类型跟真实 ctor 一致，不是这些值本身有意义。
+  // 🔴 distinct non-zero dummy markers (fix): z32 用于两个 dummy 槽会跟 ctor 里其它全零字段(init_payoutRoot
+  // 等)碰撞, live findUnique 的"精确出现 1 次"断言会 fail-loud 拦下——这正是硬门该做的事(NWT 测试中用的
+  // 0x2222.../0x3333... 同款手法, 避免任何看似合理的占位值意外撞见).
+  const dummyBetsRoot = '11'.repeat(32), dummyRefundRoot = '22'.repeat(32);
   const ctor = [
-    ctorBytes32(gateTmplHash), ctorBytes32(z32), ctorBytes32(z32), // betsRootBaked/refundRootBaked不影响模板(落在变量区)
+    ctorBytes32(gateTmplHash), ctorBytes32(dummyBetsRoot), ctorBytes32(dummyRefundRoot),
     ctorInt(dummyAtMs), ctorInt(0), ctorInt(1), ctorBytes32(z32), ctorInt(0),
     ...W17(),
   ];
   const compiled = compileSil(closeZkSilPath, ctor, SILVERC_ZK);
   const { templatePrefix, templateSuffix } = extractTemplateArtifact(compiled); // prefix=script[0:1], suffix=script[214:end]
-  const [betsA, betsB] = _rel(_CLOSEZK_BETSROOT_ABS);
-  const [refA, refB] = _rel(_CLOSEZK_REFUNDROOT_ABS);
-  const [atA, atB] = _rel(_CLOSEZK_ATMS_ABS);
-  const templateA = templateSuffix.subarray(0, betsA);
-  const templateB = templateSuffix.subarray(betsB, atA);
-  const templateC = templateSuffix.subarray(atB, refA);
-  const templateD = templateSuffix.subarray(refB);
+  const fullBuf = Buffer.from(compiled.script);
+
+  // live 定位(不信硬编码常量): 在完整编译产物里搜索 dummy betsRoot/refundRoot 的字节位置, 各自必须
+  // 精确出现 1 次——出现 0 次或 >=2 次都 fail-loud(同 handoff driver 的 findUnique 纪律, 不猜第一个)。
+  function findUnique(buf, needle, label) {
+    const first = buf.indexOf(needle);
+    if (first < 0) throw new Error(`computeCloseZkTmplAnchor: findUnique(${label}) 找不到 marker — .sil 源码/silverc 产物跟预期结构不符`);
+    const second = buf.indexOf(needle, first + 1);
+    if (second >= 0) throw new Error(`computeCloseZkTmplAnchor: findUnique(${label}) marker 出现 >=2 次(offset ${first},${second}) — offset 碰撞风险, 拒绝猜第一个`);
+    return first;
+  }
+  const dummyBetsBuf = Buffer.from(dummyBetsRoot, 'hex');
+  const dummyRefundBuf = Buffer.from(dummyRefundRoot, 'hex');
+  const atMsBuf6 = Buffer.alloc(6); atMsBuf6.writeUIntLE(dummyAtMs, 0, 6);
+  const atMsMarkerAndData = Buffer.concat([Buffer.from([6]), atMsBuf6]);
+  const betsAbs = findUnique(fullBuf, dummyBetsBuf, 'betsRoot');
+  const atMsAbs = findUnique(fullBuf, atMsMarkerAndData, 'atMs-marker+data');
+  const refundAbs = findUnique(fullBuf, dummyRefundBuf, 'refundRoot');
+
+  const _rel = (abs) => abs - _CLOSEZK_SUFFIX_BASE;
+  const templateA = templateSuffix.subarray(0, _rel(betsAbs));
+  const templateB = templateSuffix.subarray(_rel(betsAbs) + 32, _rel(atMsAbs));
+  const templateC = templateSuffix.subarray(_rel(atMsAbs) + 7, _rel(refundAbs));
+  const templateD = templateSuffix.subarray(_rel(refundAbs) + 32);
+
+  // round-trip 自证(built into 这次 run, 非事后单独验证): genesisMarker+state(全 0 dummy 值)+4 段模板+
+  // dummy betsRoot/refundRoot/atMs 拼回, 必须 byte-exact 等于原始 compiled.script, 不 match 直接 throw
+  // (防未来 .sil 结构改动时这里静默产出一个跟真实编译产物脱节的 anchor)。
+  {
+    const push8 = Buffer.from([8]), push32 = Buffer.from([32]);
+    const i64 = (n) => { const b = Buffer.alloc(8); b.writeBigInt64LE(BigInt(n)); return b; };
+    const zeroWord = Buffer.concat([push8, i64(0)]);
+    const stateBytes = Buffer.concat([
+      push8, i64(0), push8, i64(1), push32, Buffer.alloc(32), push8, i64(0),
+      ...Array(17).fill(zeroWord),
+    ]);
+    const reconstructed = Buffer.concat([Buffer.from([templatePrefix[0]]), stateBytes, templateA, dummyBetsBuf, templateB, atMsMarkerAndData, templateC, dummyRefundBuf, templateD]);
+    if (!reconstructed.equals(fullBuf)) throw new Error('computeCloseZkTmplAnchor: round-trip 自证 FAIL — 4 段模板+state 拼回不等于原始编译产物, 拒绝产出可能错误的 anchor');
+  }
+
   return {
     anchorHex: Buffer.from(blake2b(Buffer.concat([templateA, templateB, templateC, templateD]), { dkLen: 32 })).toString('hex'),
     genesisMarkerByte: templatePrefix[0], // = 107, 硬编进 zk_handoff 的 byte[1](107)，随手核对不变
