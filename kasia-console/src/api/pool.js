@@ -1823,6 +1823,59 @@ export async function registerPoolRoutes(fastify) {
     }
   });
 
+  // POST /api/admin/pool/zk-close-gate-debugger — 门②(J1tn, 2026-07-08 市场5彩排 T1.5): 用生产共享函数
+  // rebuildZkCloseGateWitness(zk-close-dispatch.mjs, 跟真广播 dispatchUnlockZkClose 完全同一条 witness
+  // 构造代码路, §1.2 反vacuous 铁律)重建 gate witness, 拼 cli-debugger test-case 跑 --run-all, 只读不广播。
+  // 同 propose-close-v2/zk-handoff-v2 款 secret+IP allowlist + 窄路由默认 OFF。
+  fastify.post('/api/admin/pool/zk-close-gate-debugger', async (request, reply) => {
+    if (process.env.ADMIN_ZK_CLOSE_GATE_DEBUGGER_ENABLED !== '1') {
+      return reply.code(503).send({ ok: false, error: 'admin endpoint disabled (ADMIN_ZK_CLOSE_GATE_DEBUGGER_ENABLED != 1)' });
+    }
+    const adminSecret = process.env.ADMIN_SECRET;
+    if (!adminSecret) return reply.code(503).send({ ok: false, error: 'admin endpoint disabled (ADMIN_SECRET env 未设)' });
+    const provided = request.headers['x-kanet-admin-secret'];
+    if (!provided || provided !== adminSecret) {
+      return reply.code(403).send({ ok: false, error: 'admin auth fail (X-KANet-Admin-Secret 缺失/不匹配)' });
+    }
+    const ipAllowlist = (process.env.ADMIN_IP_ALLOWLIST || '127.0.0.1,::1,::ffff:127.0.0.1').split(',').map(s => s.trim());
+    if (!ipAllowlist.includes(request.ip)) {
+      return reply.code(403).send({ ok: false, error: `admin auth fail (source IP ${request.ip} 不在 ADMIN_IP_ALLOWLIST)` });
+    }
+    const { market_id, gate_utxo_value_sompi } = request.body || {};
+    if (!market_id || gate_utxo_value_sompi == null) {
+      return reply.code(400).send({ ok: false, error: 'market_id, gate_utxo_value_sompi 全部必需' });
+    }
+    try {
+      const { gateZkClose } = await import('../lib/rehearsal-pre-broadcast-gate.mjs');
+      const { readPayoutShardV2AttestedState } = await import('../lib/bshard-close-enforce.mjs');
+      const kaspa = await import('kaspa-wasm');
+      const ZERO32 = '00'.repeat(32);
+
+      // beforeState: 跟门①(zk_handoff)读的同一份来源(payout_shards, 自 attest 落链后没被 handoff 动过,
+      // 门①用它铸出了当前这个 CloseZkV2 genesis)——不新起一套 closed==1 状态解析器, 复用单一真值来源。
+      const ps = sqlite.prepare('SELECT payout_redeem_hex FROM payout_shards WHERE logical_market_id = ?').get(market_id);
+      if (!ps) return reply.code(404).send({ ok: false, error: `no payout_shards row for ${market_id}` });
+      const state = readPayoutShardV2AttestedState(ps.payout_redeem_hex);
+      const gateTmplHash = process.env.ZK_GATE_TMPL_HASH || '511b0eadf9b4421bca9b00b19262b02bc656faaebfe8c2b5821ddcf98353bfc1';
+      const beforeState = {
+        gateTmplHash, betsRootBaked: state.betsRootHex, refundRootBaked: state.refundRootHex,
+        attestedAtMs: state.attestedAtMs, attestedWinner: state.attestedWinner, closed: 1,
+        payoutRootHex: ZERO32, consolidatedPool: state.consolidatedPool,
+      };
+
+      const ctx = {
+        getMarket: (mid) => sqlite.prepare('SELECT metadata FROM pool_markets WHERE id = ?').get(mid),
+        getDoneJob: (mid) => sqlite.prepare(`SELECT receipt_hex FROM zk_prove_jobs WHERE market_id = ? AND status = 'done' ORDER BY id DESC LIMIT 1`).get(mid),
+        kaspaZk: () => kaspa,
+      };
+      const result = gateZkClose(market_id, ctx, beforeState, { gateUtxoValueSompi: gate_utxo_value_sompi });
+      return reply.send({ ok: true, ...result });
+    } catch (e) {
+      console.error(`[admin/zk-close-gate-debugger] ${market_id} fail: ${e.message}`);
+      return reply.code(500).send({ ok: false, error: `zk-close-gate-debugger failed: ${e.message}` });
+    }
+  });
+
   fastify.get('/api/pool/config', async (request, reply) => {
     return reply.send({
       ok: true,
