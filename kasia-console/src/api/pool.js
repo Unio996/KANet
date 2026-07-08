@@ -1589,6 +1589,153 @@ export async function registerPoolRoutes(fastify) {
     }
   });
 
+  // POST /api/admin/pool/register-v07/confirm-by-address — betId 不可恢复时的登记逃生路(#19,
+  // 2026-07-08 Martin 孤儿单事故, Bettor 七条件批准 #bqifty)。跳过 prep/confirm 的 nonce 唯一性密码学证明,
+  // 改用运营方人工核实的 (txid, address, amount) 三元组直接登记——这是一次信任模型让步, 每笔都要 Bettor 批
+  // txid + NWT 独立核三元组(流程纪律, 不在代码里强制, 由知道 ADMIN_SECRET 的人自律执行), 代码只负责:
+  // ①txid:output 精确匹配(非地址扫描/非"够就行") ②内部 secret+IP allowlist 双闸 ③审计硬写 events 表
+  // ④窄路由默认 OFF ⑤幂等 fail-closed。
+  // ⚠ 已知的、接受的窄范围代码重复:下面 rc/transfer/landed/p2sh/createShardMarketRow/recordBettor 六个
+  // closure 与 confirm endpoint(上面)里的同名 closure 逻辑一致——这条是罕用救急工具(不是常规业务路径),
+  // 且每处改动都要过 NWT 审, 权衡后不为它抽共享 helper(避免过度设计一个几乎不会被调用第二次的路径)。
+  fastify.post('/api/admin/pool/register-v07/confirm-by-address', async (request, reply) => {
+    if (process.env.ADMIN_CONFIRM_BY_ADDRESS_ENABLED !== '1') {
+      return reply.code(503).send({ ok: false, error: 'admin endpoint disabled (ADMIN_CONFIRM_BY_ADDRESS_ENABLED != 1, 救单窗口外默认关, 条件⑥)' });
+    }
+    const adminSecret = process.env.ADMIN_SECRET;
+    if (!adminSecret) return reply.code(503).send({ ok: false, error: 'admin endpoint disabled (ADMIN_SECRET env 未设)' });
+    const provided = request.headers['x-kanet-admin-secret'];
+    if (!provided || provided !== adminSecret) {
+      return reply.code(403).send({ ok: false, error: 'admin auth fail (X-KANet-Admin-Secret 缺失/不匹配, 条件②)' });
+    }
+    const ipAllowlist = (process.env.ADMIN_IP_ALLOWLIST || '127.0.0.1,::1,::ffff:127.0.0.1').split(',').map(s => s.trim());
+    if (!ipAllowlist.includes(request.ip)) {
+      return reply.code(403).send({ ok: false, error: `admin auth fail (source IP ${request.ip} 不在 ADMIN_IP_ALLOWLIST, 条件②)` });
+    }
+
+    const b = request.body || {};
+    const { market_id, linked_addr, direction, stake_kas, pay_addr, payment_txid, approved_by, evidence_source } = b;
+    if (!market_id || !linked_addr || direction === undefined || !stake_kas || !pay_addr || !payment_txid || !approved_by || !evidence_source) {
+      return reply.code(400).send({ ok: false, error: 'market_id, linked_addr, direction, stake_kas, pay_addr, payment_txid, approved_by(谁批的txid), evidence_source(证据来源, 如"Owner转发Martin付款指引原文") 全部必需' });
+    }
+    const dir = parseInt(direction, 10);
+    if (dir !== 0 && dir !== 1) return reply.code(400).send({ ok: false, error: 'direction must be 0|1' });
+    const stakeSompi = Math.round(parseFloat(stake_kas) * 1e8);
+    if (!Number.isFinite(stakeSompi) || stakeSompi <= 0) return reply.code(400).send({ ok: false, error: 'stake_kas must be positive finite' });
+
+    let logicalMarketId = market_id;
+    const shardParent = sqlite.prepare('SELECT logical_market_id FROM market_shards WHERE shard_market_id = ?').get(logicalMarketId);
+    if (shardParent?.logical_market_id) logicalMarketId = shardParent.logical_market_id;
+    const market = sqlite.prepare('SELECT * FROM pool_markets WHERE id = ?').get(logicalMarketId);
+    if (!market) return reply.code(404).send({ ok: false, error: 'market not found' });
+    if (assertNotCommingled(market, reply, sqlite)) return;
+
+    let bettorPk;
+    try { bettorPk = await deriveXOnlyPubkey(linked_addr); }
+    catch (e) { return reply.code(400).send({ ok: false, error: `linked_addr → pubkey failed: ${e.message}` }); }
+
+    // 幂等 fail-closed(条件⑤): 同(logicalMarketId, bettorPk, dir)已注册则原样返回, 拒绝重复登记。
+    const existing = sqlite.prepare(`
+      SELECT pbs.market_id shard_market_id, pbs.side_lock_tx, pbs.stake_amount FROM pool_bettor_sides pbs
+      JOIN market_shards ms ON pbs.market_id = ms.shard_market_id
+      WHERE ms.logical_market_id = ? AND pbs.bettor_pk = ? AND pbs.direction = ?
+      ORDER BY pbs.id DESC LIMIT 1`).get(logicalMarketId, bettorPk, dir);
+    if (existing) {
+      return reply.send({ ok: true, already_registered: true, shard_market_id: existing.shard_market_id, side_lock_tx: existing.side_lock_tx, stake_sompi: existing.stake_amount });
+    }
+
+    // 条件①: txid:output 精确匹配(非地址扫描)——直连 RPC 查这个具体 txid 的 output 是否确实落在 pay_addr,
+    // 金额是否落在 [stakeSompi+1000, stakeSompi+9999](= _v07PayNonce 的产出区间)内——不是宽松">=够就行"。
+    let matchedAmount = null;
+    try {
+      const { url: rpcUrl } = await getWorkingRpc();
+      if (!rpcUrl) return reply.code(503).send({ ok: false, error: 'no working Kaspa RPC node — retry shortly' });
+      const kaspa = await import('kaspa-wasm');
+      const network = pay_addr.startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
+      const rpc = new kaspa.RpcClient({ url: rpcUrl, encoding: kaspa.Encoding.Borsh, networkId: network });
+      await rpc.connect({});
+      try {
+        const { entries } = await rpc.getUtxosByAddresses([new kaspa.Address(pay_addr)]);
+        const hit = (entries || []).find(e => e.outpoint.transactionId === payment_txid);
+        if (!hit) {
+          return reply.code(404).send({ ok: false, error: `payment_txid ${payment_txid} 的 output 未在 pay_addr ${pay_addr} 当前 UTXO 集里找到(可能已被 spend, 或 txid/地址不匹配)` });
+        }
+        matchedAmount = BigInt(hit.amount);
+      } finally { await rpc.disconnect().catch(() => {}); }
+    } catch (e) {
+      return reply.code(503).send({ ok: false, error: `RPC 查询失败: ${e.message}` });
+    }
+    const NONCE_MIN = 1000n, NONCE_MAX = 9999n;
+    const delta = matchedAmount - BigInt(stakeSompi);
+    if (delta < NONCE_MIN || delta > NONCE_MAX) {
+      return reply.code(400).send({ ok: false, error: `精确匹配失败: 观测金额${matchedAmount} - 期望注额${stakeSompi} = ${delta}, 不在合法 nonce 区间 [${NONCE_MIN},${NONCE_MAX}] 内(条件①), 拒绝登记` });
+    }
+
+    // 条件③: 审计硬写 events 表(登记动作发生前落笔, 无论后续成功与否都留痕)。
+    sqlite.prepare(`INSERT INTO events (event_scope, event_type, source, level, summary, payload_json, created_at)
+      VALUES (?,?,?,?,?,?,?)`).run(
+      'admin', 'admin_confirm_by_address', 'pool.js:admin-confirm-by-address', 'warn',
+      `admin override: market=${logicalMarketId} bettor=${bettorPk.slice(0, 10)} dir=${dir} pay_addr=${pay_addr} txid=${payment_txid} approved_by=${approved_by}`,
+      JSON.stringify({ market_id: logicalMarketId, bettorPk, direction: dir, pay_addr, payment_txid, stake_sompi: stakeSompi, matched_amount_sompi: matchedAmount.toString(), approved_by, evidence_source }),
+      Math.floor(Date.now() / 1000),
+    );
+
+    try {
+      const gatewayRelayId = market.maker_relay_id;
+      if (!isRelayAlive(gatewayRelayId)) return reply.code(503).send({ ok: false, error: 'gateway (maker) relay not alive' });
+      const gw = await sendCommandAsync(gatewayRelayId, { type: 'get_pubkey' });
+      const relayAddr = gw.address;
+      if (!relayAddr) return reply.code(503).send({ ok: false, error: 'gateway relay get_pubkey returned no address' });
+      const network = relayAddr.startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
+      const kaspa = await import('kaspa-wasm');
+      const p2sh = (redeemHex) => kaspa.addressFromScriptPublicKey(kaspa.ScriptBuilder.fromScript(new Uint8Array(Buffer.from(redeemHex, 'hex'))).createPayToScriptHashScript(), network).toString();
+      const rc = (cmd) => sendCommandAsync(gatewayRelayId, cmd, 90000);
+      const transfer = async (addr, sompi) => { const r = await transferAndConfirm(gatewayRelayId, addr, (Number(sompi) / 1e8).toFixed(8), { minDepth: REORG_SAFE_MIN_DEPTH, maxWaitMs: 60000 }); return r.txId; };
+      const landed = async (txid, addr, n = 25) => { for (let i = 0; i < n; i++) { const j = await sendCommandAsync(gatewayRelayId, { type: 'check_utxo_landed', address: addr, txid, minDepth: REORG_SAFE_MIN_DEPTH }, 20000); if (j.landed || j.found) return true; await new Promise(r => setTimeout(r, 2000)); } return false; };
+      const pmCols = sqlite.prepare('PRAGMA table_info(pool_markets)').all().map(c => c.name);
+      const shardP2sh_of = (smid) => (sqlite.prepare('SELECT shard_p2sh FROM market_shards WHERE shard_market_id = ?').get(smid)?.shard_p2sh) || '';
+      const createShardMarketRow = async (shardIndex, shardP2sh) => {
+        const shardMarketId = `${logicalMarketId}-s${shardIndex}`;
+        const clone = { ...market, id: shardMarketId, spine_p2sh: shardP2sh, protocol_status: 'shard_internal', maker_stake_amount: 0 };
+        try { sqlite.prepare(`INSERT OR IGNORE INTO pool_markets (${pmCols.join(',')}) VALUES (${pmCols.map(() => '?').join(',')})`).run(...pmCols.map(c => clone[c])); }
+        catch (e) { console.warn(`[admin-confirm-by-address] shard pool_markets clone warn: ${e.message}`); }
+        return shardMarketId;
+      };
+      const recordBettor = async ({ shardMarketId, shardIndex, bettorPk: pk, direction: rdir, stakeSompi: st }) => {
+        try {
+          sqlite.prepare(`INSERT OR IGNORE INTO pool_bettor_sides (market_id, bettor_pk, bettor_relay_id, direction, stake_amount, side_p2sh, side_lock_tx, merkle_index, side_redeem_script_hex, pay_amount_sompi)
+            VALUES (?,?,?,?,?,?,?,?,?,?)`).run(shardMarketId, pk, null, rdir, st, shardP2sh_of(shardMarketId), payment_txid, shardIndex, '', matchedAmount.toString());
+        } catch (e) { console.warn(`[admin-confirm-by-address] recordBettor warn: ${e.message}`); }
+      };
+
+      const { computeMarketCommit } = await import('../lib/pool-shard-settle.mjs');
+      let _predicate = null;
+      try { _predicate = JSON.parse(market.resolution_rule_spec || '{}')?.resolution_predicate || null; } catch {}
+      const _feeRecipients = { brokerPk: market.broker_pk || null, introducerPk: market.introducer_pk || null };
+      const predicateCommit = _predicate ? computeMarketCommit(_predicate, _feeRecipients) : market.market_metadata_hash;
+
+      const { registerBettorOnShard, computeCloseZkTmplAnchor } = await import('../lib/pool-shard-register.mjs');
+      const silverc = process.env.SILVERC_LEGACY_PATH || 'D:/silverscript/versioned-builds/silverc-legacy-2c46231.exe';
+      const { zkNative: _zkNative, closeZkTmplAnchor: _closeZkTmplAnchor } = _resolveZkNativeCtorExtras(market, silverc, computeCloseZkTmplAnchor);
+      const result = await registerBettorOnShard({
+        db: sqlite, rc, transfer, landed, p2sh, logicalMarketId,
+        poolMerkleRoot: market.pool_merkle_root, predicateCommit,
+        bettorPk, direction: dir, stakeSompi, relayAddr, silverc, sealCount: 32, deadline: market.deadline,
+        createShardMarketRow, recordBettor,
+        zkNative: _zkNative, closeZkTmplAnchor: _closeZkTmplAnchor,
+      });
+      return reply.send({
+        ok: true, registered: true, protocol_version: 'v0.7', logical_market_id: logicalMarketId,
+        bettor_pk: bettorPk, direction: dir,
+        side_lock_tx: payment_txid, stake_sompi: stakeSompi, stake_kas: (stakeSompi / 1e8).toFixed(8),
+        custody: 'relay-assisted-admin-override', ...result,
+      });
+    } catch (e) {
+      console.error(`[admin-confirm-by-address] ${logicalMarketId} fail: ${e.message}`);
+      return reply.code(500).send({ ok: false, error: `admin-confirm-by-address failed: ${e.message}` });
+    }
+  });
+
   // GET /api/pool/config — static defaults for UI pre-submit preview (D4 wallet浮窗 estimate fee)
   fastify.get('/api/pool/config', async (request, reply) => {
     return reply.send({
