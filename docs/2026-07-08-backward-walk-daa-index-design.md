@@ -53,12 +53,33 @@ if (indexed) return indexed;
 
 **零改动现有两层的行为**——只是在前面插一层更快的路径，查不到才照旧退化，这是纯粹的加速优化，不改变任何正确性语义（返回值 shape 完全一致，仍是 `{hash, daaScore, timestamp_ms, isChainBlock}`）。
 
+## §2.5 索引空洞防线（NWT 红队 05:31 抓出，BLOCKING 补丁——跟今晚 target_daa 错位同族"用错块判定"风险，不能留白到以后）
+
+relay 重启/短暂下线（今晚就发生过好几次）会在 block-added 订阅停摆期间产生索引空洞。若空洞恰好卡在某市场 deadline 附近，§2.4 的查询可能返回一个"凑巧 daa_score >= deadline 但不是真正最靠近 deadline 的那个块"的错误结果——直接喂给 judge/settle，是 correctness-critical 路径，不能假设索引连续无洞就上。
+
+**最小防线**：新增一张覆盖区间表，只信"确认连续覆盖"的范围内的索引结果：
+
+```sql
+CREATE TABLE spc_daa_index_coverage (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  start_daa INTEGER NOT NULL,
+  end_daa INTEGER NOT NULL   -- 水位线：本区间内 [start_daa, end_daa] 每个 SPC 块都已写入 spc_daa_index，无空洞
+);
+```
+
+- **backfill** 写入时插入一条覆盖区间 `[oldest_backlog_daa, tip_at_backfill_time]`（这段是一次 walk 连续产出的，天然无洞）。
+- **live 写入**（relay block-added 回调）：每次写入新块前，检查新块 daa 是否紧接当前最新覆盖区间的 `end_daa`（即新块 daa 与 end_daa 之间没有被跳过的 SPC 块——用现有 `_recentBlocks` 同款相邻性判断，或简单检查 `new_daa - end_daa` 是否等于两块间正常 DAA 步进量级）。是则 `UPDATE ... SET end_daa = new_daa` 延伸区间；不是（relay 刚重启、中间有空档）则开一条新的覆盖区间 `[new_daa, new_daa]`，旧区间保持原样不动（诚实标注"这段之后到重启前有洞，不再延伸"）。
+- **查询时**（§2.4 那层）：先查 `deadlineDaa` 是否落在某条 `spc_daa_index_coverage` 区间的 `[start_daa, end_daa]` 内——**在**则信任 `spc_daa_index` 的查表结果直接返回；**不在**（落在洞里，或超出所有已知区间）则不查表，直接走现有 forward ring / backward walk 逻辑（不额外验证成本，就是原来的路径，等于查表命中失败时的自然 fallback，零新增复杂度）。
+
+这样"索引有洞"不会导致返回错误结果——要么落在确认无洞的区间内直接可信，要么老老实实退化回今天已经在跑的正确路径，两条路径不存在中间态的"半信半疑"。
+
 ## §3 范围边界（防止过度设计）
 
 - **不改** `selectRipeMarkets` 的优先级排序逻辑（那是独立的、已有既定设计的模块，不在这次范围）。
 - **不改** MAX_WALK 数值本身、不改 backward walk 算法本身——只是给它加一层缓存前置，backward walk 代码逐字节不动。
 - **不处理** "为什么这些老盘一开始没能及时结算"这个更早的历史成因——那是过去的事，这次只解决"现在卡住了、每次重试都白付一次代价"这个当下问题。
-- backfill 脚本是**一次性运维工具**，跑完这次积压就完成任务，不是常驻服务；未来新市场的 deadline 会随 relay 正常运行、block-added 订阅持续写入索引，自然覆盖，不需要重复 backfill（除非 relay 长时间下线导致索引出现空洞，那种情况另立 case 处理，非本次范围）。
+- backfill 脚本是**一次性运维工具**，跑完这次积压就完成任务，不是常驻服务；未来新市场的 deadline 会随 relay 正常运行、block-added 订阅持续写入索引 + 覆盖区间机制（§2.5）自动处理重启造成的空洞，不需要重复 backfill。
+- **NWT 05:31 结构性发现（另案，不并入本次落码）**：`blockhash_parity` judge 直接用 `resolution_rule_spec.target_daa` 判定，若 `target_daa` 系统性早于市场实际 `deadline_daa`，存在"下注窗口关闭前结果可推算"的信息不对称（今晚 5R create 两次因此被废弃重建）。这条是 judge 逻辑本身的参数正确性问题，跟本设计稿"索引查表加速"是两个不同层面的修复（一个管"查得对不对"，一个管"查得快不快"），记同一批清单但落码时分开改，避免一次改动混两条独立风险面。
 
 ## §4 验收锚
 
