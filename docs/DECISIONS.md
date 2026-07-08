@@ -24,6 +24,13 @@
 
 ## 🔴 当前有效的战略决策 (CURRENT)
 
+### D-008 ZK 线 payout 真相源 = guest circuit·fee 政策单源收敛 (2026-07-08 · pxvml 门② 盲算不中挖出 · NWT 红队定论 + Bettor 按接位授权拍板 · Owner 在线未否决)
+- **架构定论(NWT 源码级)**: CloseZkV2 `zk_close` 对 guestPayoutRoot **零链上校验 vs 委员值**=by-design——委员 attest 只锁 winner/betsRoot/refundRoot/atMs,payout 分配的 binding authority 在 **guest circuit**(Groth16 经 gateTmplHash 验)。`claimedPayoutRoot` 在 ZK-native 路径=historical artifact(V1 committee-settle 遗留),propose 侧仅"预告"非 binding。
+- **实弹分叉(触发本条)**: propose 侧 pool=Σ注(漏 seed)+FEE_CONFIG 3%(broker160+委员120bps)签出 e170e003(Σ=300M,若用于 claim 会焊死 0.2KAS);prove 侧 job=consolidatedPool+broker_fee_pct(Σ=320M 可精确清零)。同一市场两棵树三处三说法(FEE_CONFIG vs broker_fee_pct vs D-007 池×pct)。
+- **拍板**: ①pool 基数=**consolidatedPool**(守恒硬要求非政策:Σleaf==链上池才能精确清零);②费率=**D-007 口径 池×broker_fee_pct**(市场级);③FEE_CONFIG 委员 120bps 分成=**份额政策卡挂起待 Owner 确认份额表**,确认后并入单源函数(诚实口径:当前费率≠最终份额定案)。guest 免重编(fee_leaves 是输入,main.rs:151-155,image_id 不变)。
+- **正式场前 BLOCKING 收敛卡(J2/NWT 审)**: 单源 leaf 派生函数,propose/enqueue/guest-input 三侧必调同一份;propose 侧 pool 基数修为 realConsolidatedPool;claimedPayoutRoot 标注 non-binding。
+- **方法论沉淀**: 重跑 N 次一致只证确定性不证正确性(e170e003 五次 propose 一致仍整树不守恒);钱路关键值必须独立第二路盲算(memory `feedback-retry-consistency-proves-determinism-not-correctness`)。
+
 ### D-007 correctness/liveness 分界 + broker-fee 独立对账器 (2026-07-08 · Owner 钦定架构指令 · J1 转达 · Bettor 记账派卡)
 - **分界(Owner 原话要义)**: **ZK 只证 correctness**(落链那笔算对了),**不证 liveness**(结算真发生了没——daemon 死/卡/anchor 死锁不会有 proof 告诉你"该收的三笔少了一笔")。团队此前感受的"不可靠"大部分= liveness 侧管线病,不是 ZK 的药能治的。
 - **方案**: 独立 broker-fee 对账器(J1 shadow-ledger 域):定时扫 broker 地址 UTXO(链=唯一真相)→按 txid 关联市场→核 expected=池×pct→三态输出(✅到账且对 / 🔴到账但金额不符=电路漏洞级警报 / 🟠过 deadline+grace 无 fee 落链=daemon 卡死警报)→每笔频道回执+日终汇总。**全程只读链,daemon 全灭照样准。**
