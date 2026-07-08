@@ -389,9 +389,22 @@ export async function buildProposeCloseRequestV2(marketId, judged) {
   const txSafeJson = un.serializeToSafeJSON();
 
   const poolMembers = snap.pool_pks.map((pk, i) => ({ pk_hex: String(pk).toLowerCase(), stake_sompi: String(snap.pool_stakes[i]) }));
+  // 事故修复(2026-07-08, pxvml实战撞到C1 anti-swap"per-ticket行数0!=链上Σcount2"): 上一版这里漏了
+  // shard_pool_id/bettors 两个字段——按接口注释(本文件 L16-17)snapshot.shards[i] 本该带
+  // {...,shard_pool_id, bettors:[{pk,direction,stake}]}, 委员 C1 用 sh.bettors 做 anti-swap 逐 ticket
+  // 链锚(bshard-close-enforce.mjs:815-817); 漏了 bettors 就退到用 sh.shard_market_id 查 DB, 但那字段
+  // 也没带, 两条路都空手, per-ticket 循环零迭代。committee 仍会独立 checkUtxoLanded 重验(snapshot 只指路
+  // 不受信), 这里只是把"指路"信息补齐, 不影响链锚验证的独立性。
   const snapshot = {
     shards: sqlite.prepare('SELECT shard_market_id, shard_index, shard_redeem_hex, current_leaf_state, current_leaf_outpoint FROM market_shards WHERE logical_market_id = ? ORDER BY shard_index ASC').all(marketId)
-      .map(s => ({ shard_index: s.shard_index, shard_redeem_hex: s.shard_redeem_hex, current_leaf_state: s.current_leaf_state, current_leaf_outpoint: s.current_leaf_outpoint })),
+      .map(s => ({
+        // shard_pool_id 不在这里算: bshard-close-enforce.mjs 消费端本就有 fallback(sh.shard_pool_id ||
+        // _hex32(`${marketId}-shard-${idx}`)), 省一份可能不一致的重复计算, 让唯一那份计算逻辑负责。
+        shard_index: s.shard_index, shard_market_id: s.shard_market_id,
+        shard_redeem_hex: s.shard_redeem_hex, current_leaf_state: s.current_leaf_state, current_leaf_outpoint: s.current_leaf_outpoint,
+        bettors: sqlite.prepare('SELECT bettor_pk pk, direction, stake_amount stake FROM pool_bettor_sides WHERE market_id = ?').all(s.shard_market_id)
+          .map(r => ({ pk: String(r.pk).toLowerCase(), direction: Number(r.direction), stake: String(r.stake) })),
+      })),
   };
   const req = {
     txSafeJson, predicate: null, proposed_evidence: null, claimedPayoutRoot, psRedeemHex: ps.payout_redeem_hex,
