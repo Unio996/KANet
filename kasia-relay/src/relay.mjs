@@ -967,9 +967,11 @@ if (process.send) {
         case 'bshard_zk_handoff': {
           // W4a (J1 2026-07-07): PayoutShardV2 zk_handoff — 一次性把 consolidated_pool 交给新铸 CloseZkRepro4
           // genesis output, 无 continuation(生命周期终点)。NWT 逻辑级 GREEN(478de1b0→b34ce1ba, 侧分支 j1-w4a-draft)。
+          // dryRun(J1tn 2026-07-08 市场5彩排门① Bettor #bk7kbx 六条件批文): cmd.dryRun 显式 true 才透传,
+          // 缺省/falsy 走原 live 广播路径分毫不变(cmd.dryRun 是 console 侧新加的可选字段, 老 caller 不传=无感知)。
           const { unlockBshardZkHandoff } = await import('./lib/p2sh.mjs');
           const wallet = getWallet();
-          const r = await unlockBshardZkHandoff({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) });
+          const r = await unlockBshardZkHandoff({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0), dryRun: cmd.dryRun === true });
           if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, ...r } });
           return;
         }
