@@ -62,10 +62,13 @@ check('L2b startBot() runs without throwing', threw === null, threw && threw.mes
 // THE critical one: dropping bot.start() = bot registers handlers but never polls = silently dead.
 check('L2b startBot() calls bot.start() (poller launched — guards "registered but not polling = dead bot")',
   botStartCalled === 1, `bot.start called ${botStartCalled}x`);
-// the 4 background pollers (broker-refresh + pollLoop + pollPendingBets + pollSettleResults). Exact count
-// is intentional: dropping/adding one should be a conscious change that updates this guard.
-check('L2b startBot() registers its 4 background pollers (setInterval x4)',
-  intervalCount === 4, `got ${intervalCount} setInterval(s)`);
+// the 5 background pollers (broker-refresh + pollLoop + pollPendingBets + pollSettleResults +
+// pollBrokerFeeEvents). Exact count is intentional: dropping/adding one should be a conscious
+// change that updates this guard. (2026-07-08 KANet-UI real-token run: pollBrokerFeeEvents 早前
+// 加进 bot.mjs 时没人同步这条断言, 之前一直是过期的"4"——J1tn getMe 校验改动本身不碰 setInterval
+// 调用, 不是回归源, 是这次真机跑通才第一次暴露的既有 staleness, 顺手改对。)
+check('L2b startBot() registers its 5 background pollers (setInterval x5)',
+  intervalCount === 5, `got ${intervalCount} setInterval(s)`);
 
 console.log(`\nL2b: ${pass}/${pass + fail} PASS`);
 
