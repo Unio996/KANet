@@ -151,14 +151,13 @@ export function gateZkClose(marketId, ctx, beforeState, amounts) {
   const witness = rebuildZkCloseGateWitness(proving, job.receipt_hex, ctx.kaspaZk);
   if (!witness.ok) return { ok: false, gate: 'error', error: witness.error };
 
-  // 事故修复(2026-07-08, pxvml实战撞出): payToScriptHashScript() 返回 ScriptPublicKey 对象(非原始字节),
-  //   不能直接 Buffer.from(该对象)——同 p2sh.mjs 既有惯用法(payToScriptHashScript 结果只喂给
+  // 事故修复(2026-07-08, pxvml实战撞出+KANet-UI live验证): payToScriptHashScript() 返回 ScriptPublicKey
+  //   对象, 不能直接 Buffer.from(该对象)——同 p2sh.mjs 既有惯用法(payToScriptHashScript 结果只喂给
   //   addressFromScriptPublicKey, 从不直接序列化), 这里第一次需要序列化成 hex 喂给 debugger test-case。
-  //   .script 取原始脚本字节(跟 CloseZkV2.test.json 既有回归用例的 utxo_script_hex 值格式核对一致:
-  //   OP_BLAKE2B(aa) push32(20) <32B hash> OP_EQUAL(87), 无 version 前缀)。
+  //   .script getter 直接返回最终 hex 字符串(非 raw bytes, 不需要再包 Buffer.from()——live 实测过:
+  //   "aa20<32B hash>87" 格式, 跟 CloseZkV2.test.json 既有回归用例的 utxo_script_hex 值格式核对一致)。
   const kaspa = ctx.kaspaZk();
-  const gateSpk = kaspa.payToScriptHashScript(new Uint8Array(Buffer.from(witness.redeemScript, 'hex')));
-  const gateScriptHex = Buffer.from(gateSpk.script).toString('hex');
+  const gateScriptHex = kaspa.payToScriptHashScript(new Uint8Array(Buffer.from(witness.redeemScript, 'hex'))).script;
 
   const testCase = buildZkCloseDebuggerCase({
     beforeState, witness, guestPayoutRootHex: proving.guestPayoutRootHex, selfOutIdx: 0,
