@@ -1848,7 +1848,13 @@ export async function registerPoolRoutes(fastify) {
     try {
       const { gateZkClose } = await import('../lib/rehearsal-pre-broadcast-gate.mjs');
       const { readPayoutShardV2AttestedState } = await import('../lib/bshard-close-enforce.mjs');
-      const kaspa = await import('kaspa-wasm');
+      // 🔴 STOP修正(2026-07-08, KANet-UI实战撞出): ZkScriptBuilder不在常规 kaspa-wasm 包里, 是独立的
+      //   ZK-SDK isolated build(同 zk-prove-worker.mjs:34/41 kaspaZk() 既有惯用法, CommonJS require 非
+      //   ESM import) —— 之前误用常规 kaspa-wasm 导致 kaspa.ZkScriptBuilder undefined, newR0 调用炸。
+      const { createRequire } = await import('node:module');
+      const _require = createRequire(import.meta.url);
+      const ZKSDK_WASM_PATH = process.env.ZKSDK_WASM_PATH || 'D:/rusty-kaspa-zksdk-isolated/wasm/nodejs/kaspa/kaspa.js';
+      const kaspa = _require(ZKSDK_WASM_PATH);
       const ZERO32 = '00'.repeat(32);
 
       // beforeState: 跟门①(zk_handoff)读的同一份来源(payout_shards, 自 attest 落链后没被 handoff 动过,
