@@ -276,14 +276,17 @@ export async function buildProposeCloseRequestV2(marketId, judged) {
         payoutShard: { payout_redeem_hex: ps.payout_redeem_hex, payout_ps_outpoint: ps.payout_ps_outpoint, payout_cov_id: ps.payout_cov_id },
         relayAddr: relayAddrForConsolidate, transfer: transferFn, deadline: Number(market.deadline),
       });
-      const [newPsTx, newPsIdx] = consolidateRes.psOutpoint.split(':');
       try { sqlite.prepare('UPDATE payout_shards SET payout_ps_outpoint = ? WHERE logical_market_id = ?').run(consolidateRes.psOutpoint, marketId); } catch {}
-      // ps.payout_redeem_hex 本身仍是 DB 里 genesis-only 静态列(不改这条既有事实), 但 consolidateAllShards
-      // 返回的 consolidatedPool 是链上现值——重新拼一份反映 absorb 后 consolidated_pool 的 redeem_hex 供下游用,
-      // 不依赖再读那列静态值。
-      const { compilePayoutShardRedeem } = await import('./pool-shard-register.mjs');
-      const absorbedRedeemHex = compilePayoutShardRedeem({ poolMerkleRoot: ps.pool_merkle_root, predicateCommit: ps.predicate_commit, consolidatedPool: consolidateRes.consolidatedPool, closed: 0 });
-      ps = { ...ps, payout_redeem_hex: absorbedRedeemHex, payout_ps_outpoint: consolidateRes.psOutpoint };
+      // 🔴 STOP修正(NWT红队抓到, 2026-07-08): 第一版这里错调了 compilePayoutShardRedeem(V1专属, silverc
+      // 重新走ctor编译)——pxvml是V2市场, V1重编译出的redeem字节结构跟链上实际V2 P2SH对不上, 且V1编译器
+      // 还会把V2专属状态字段(attestedWinner/attestedAtMs/betsRootBaked/refundRootBaked)全部按V1的genesis
+      // 占位符清零重置, 抹掉可能已存在的attest状态。改法: 不重新编译, 直接照抄consolidateAllShards内部
+      // (pool-shard-settle.mjs:304-305)自己的splice手法——在原始ps.payout_redeem_hex(V2字节, genesis-baked,
+      // 版本无关地保留)上, 同一个固定offset(state_start=1的[2..9]字节=consolidated_pool i64LE)原位写入
+      // 新值, 不碰其余任何字节(V1/V2差异全部在这个offset之外, 这个offset两版本通用)。
+      const absorbedRedeemBuf = Buffer.from(ps.payout_redeem_hex, 'hex');
+      absorbedRedeemBuf.writeBigInt64LE(BigInt(consolidateRes.consolidatedPool), 2);
+      ps = { ...ps, payout_redeem_hex: absorbedRedeemBuf.toString('hex'), payout_ps_outpoint: consolidateRes.psOutpoint };
     }
   }
 
