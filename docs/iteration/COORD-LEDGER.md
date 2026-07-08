@@ -8,6 +8,13 @@
 
 ---
 
+## 💸 7/8 白班·真实用户 Martin 孤儿单事故总账(2026-07-08 13:4x-14:1x 本地·真沉没成本·Owner make-whole 待决)
+> **诚实定性(NWT 挖出·不许'资金安全'糊弄)**: '钱没被盗' ≠ '钱回得来'。Martin 一人今天 3 笔押注(各 1000KAS custodial)、2 笔卡孤儿(06:08 `00409d2c`/06:44 `6e241dc0`)。全量扫 22 托管用户仅他撞上(4 次重启窗口高频下单)。
+- **根因链(三 bug 叠加)**: ①**betId=randomUUID 只活内存**(per-bet 地址确定性推导塞了从不持久化的随机数,J1 定性=设计错非'清太早')→重启即不可重建赎回见证;②pendingPayments 在'未注册成功'态被重启④误清(只该 registered/refunded 清);③pollPendingBets catch-all 静默吞错(同 EVM 泄漏事故家族)。
+- **真沉没成本(计入总账·非'安全'能盖)**: adminConfirmByAddress(2839e5e1,七条件+NWT GREEN)能**登记押注生效**(Martin 能正常赢/输/赔付),但**源 pay_addr 那笔 ~1000KAS/笔永久锁死**——sweep 需 betId 重建 perBetRedeem,物理不可重建。**两笔 ~2000KAS testnet KAS 真沉没**+gateway 为两笔垫的 stake(独立资金)。**Owner make-whole 待决**: 只登记 / 登记+国库补源额。
+- **admin endpoint 七条件(BLOCKING 全绿)**: ①精确金额(delta∈[1000,9999] 同 nonce 精度非>=)②锚定 txid:output 非地址扫描③双人闸(ADMIN_SECRET 仅 Bettor 持=物理串双人:Bettor 批 txid+NWT 核三元组+KANet-UI 调+即关)④审计硬写 events/chain_events⑤内部 secret+IP allowlist 真认证(非'开关关着=安全')⑥窄路由默认 OFF⑦幂等 fail-closed。**执行等 Owner**(源 UTXO 沉没不可逆,不抢跑)。
+- **衍生根治**: #19 CRITICAL(betId 持久化/不用随机数进推导公式)+#10(pending 生命周期+pollit 吞错+regression case)+admin confirm=未来所有孤儿逃生通道。**Martin 第1笔(04:14)已注册正常**,第2/3笔待 Owner 决。
+
 ## 🚀 7/8 白班·市场5 两场制设计闭合+落码执行中(2026-07-08 10:4x-11:1x 本地·Bettor 白班接位)
 > **班组**: Bettor/NWT/J1tn/J2tn/KANet-UI 全员 fresh 接位(10:46-10:50),Owner 在线(市场5 执行条件满足)。
 - **⚖️ 市场5 设计 v1.0→v1.1 两场制(关键决策·NWT verdict ②③根治)**: `docs/2026-07-08-market5-first-bet-rehearsal-design.md`(a2b50ac1→77b8d5da)。v1.0"首注后立即彩排"被 NWT 抓死:zk_handoff 生产 builder 对 closed!=1 fail-closed throw(bshard-close-enforce.mjs:202-205,J1 作者+Bettor 双源码实证)+zk_close builder 强制真 receipt——字面走不通,会逼实现者造假输入(vacuous 诱导)。**根治=两场制**:市场5R 彩排场(最小真实市场,双边各注 1.5KAS,短窗,走完 create→attest→真 prove→三个 pre-broadcast 门→claim landed,焊死上限 ~4.5KAS)→ 5R 闭合才开正式场市场5(~104KAS 内,closed==2 选A 不变)。**pre-broadcast 门**=每个 money-entry 广播前,生产 builder witness 过 cli-debugger run-all+Bettor 盲算比对+确认令。brokered-coverage 显式条款:赢家+broker-1 ≥2 claimant 天然覆盖 claim 两分支,禁改 non-brokered(NWT 观察,防隐性前提丢失)。
