@@ -21,7 +21,7 @@
 `ZkScriptBuilder.newR0().commitToGroth16WithFixedJournal(imageId, <任意合法 journalHash>).finalizeWithGroth16FixedJournalProof(<任意该 imageId 的合法 receipt>)`
 的 `redeemScript`(去掉 prefix+journalHash 剩下的 suffix 部分——跟 `rebuildZkCloseGateWitness` 已经在用的同一条切法,不新开一套)。
 
-**关键洞察**: `suffix` 只依赖 `imageId`,不依赖具体 `journalHash`/`receipt` 的内容(这也是"fixed-per-image_id"这句注释的字面意思)——所以任何一份该 imageId 的合法 receipt(哪怕是旧的、别的市场用过的)都能用来推出同一个 `gateTmplHash`,不需要为每个新市场单独跑一次真实 proving。
+**关键洞察**: `suffix` 只依赖 `imageId`,不依赖具体 `journalHash`/`receipt` 的内容(这也是"fixed-per-image_id"这句注释的字面意思)——所以任何一份该 imageId 的合法 receipt(哪怕是旧的、别的市场用过的)都能用来推出同一个 `gateTmplHash`,不需要为每个新市场单独跑一次真实 proving。**已双锚经验证实(NWT 审确认不需要再验)**: Bettor 用两份完全不同的 receipt/journalHash(pxvml 的 journalHash 3d320acb + 7/7 3o6cs 那笔)、同一个 imageId,各自独立推出同一个 4ec7ca3d——不是单一样本巧合。
 
 新函数 `computeGateTmplHash(imageId, sampleReceiptHex, sampleJournalHash, kaspaZk)`(建议放 `zk-close-builder.mjs` 或独立 `gate-tmpl-hash.mjs`,单一权威计算点,`rebuildZkCloseGateWitness`/mint 流程都调它,不各自维护一份):
 ```js
@@ -39,15 +39,22 @@ export function computeGateTmplHash(imageId, sampleReceiptHex, sampleJournalHash
 
 ### §2.2 自证侧:round-trip 校验,跟 computeCloseZkTmplAnchor 同一副药
 
-`ZK_GATE` 常量对象**不再手动填 gateTmplHash 数字**,改成启动时(console 进程起来那一刻,一次性)跑：
+🔴 **STOP 修正(Bettor 注3 + NWT 审必须折入, 非可选建议)**: 不能在 console 进程启动那一刻无条件跑这段检查——ZKSDK_WASM_PATH 指向的隔离 WASM build 不是所有 console 实例都装了/都打算用(非 ZK 节点), 无条件启动时跑会让这些实例因为一个跟它们无关的新增强校验直接炸掉整个进程启动, 是"根治一个 drift 风险却引入一个更大的可用性风险"(#22 族教训)。改成 **lazy, gate 在既有的 `ZK_PROVE_WORKER_ENABLED` 开关后面**(zk-prove-worker.mjs:116/120 已有生产开关, 默认 OFF, 复用不新开一个):
+
 ```js
-const _computedGateTmplHash = computeGateTmplHash(ZK_GATE.imageId, CANONICAL_SAMPLE_RECEIPT_HEX, CANONICAL_SAMPLE_JOURNAL_HASH, kaspaZk);
-if (process.env.ZK_GATE_TMPL_HASH && process.env.ZK_GATE_TMPL_HASH !== _computedGateTmplHash) {
-  throw new Error(`gateTmplHash 配置漂移: env=${process.env.ZK_GATE_TMPL_HASH} != 现算=${_computedGateTmplHash}(imageId=${ZK_GATE.imageId})——env 常量已过期或 imageId 刚变过, fail-loud 不静默沿用可能错的值`);
+let _zkGateVerified = false;
+function _ensureGateTmplHashFresh() {
+  if (_zkGateVerified || process.env.ZK_PROVE_WORKER_ENABLED !== '1') return;   // 非 ZK 节点直接跳过, 零影响
+  const computed = computeGateTmplHash(ZK_GATE.imageId, CANONICAL_SAMPLE_RECEIPT_HEX, CANONICAL_SAMPLE_JOURNAL_HASH, kaspaZk);
+  if (ZK_GATE.gateTmplHash !== computed) {
+    throw new Error(`gateTmplHash 配置漂移: 烤死值=${ZK_GATE.gateTmplHash} != 现算=${computed}(imageId=${ZK_GATE.imageId})——常量已过期或 imageId 刚变过, fail-loud 不静默沿用可能错的值`);
+  }
+  _zkGateVerified = true;
 }
-export const ZK_GATE = { imageId: 'c9918501...', gateTmplHash: _computedGateTmplHash };
+// 调用点: zkProveWorkerTick() 首次真正跑 proving 之前 / rebuildZkCloseGateWitness 首次被调用之前(两个 ZK 功能
+//   真正被使用的入口, 而非"进程启动"这个跟是否使用 ZK 无关的时间点)。
 ```
-**效果**: 只要 `imageId` 换了(guest 重编译)、`gateTmplHash` 却没人手动跟着改,进程直接**拒绝启动**(fail-loud),不会再出现"配对关系悄悄脱节、潜伏一天多才在结算阶段炸"这种情况——把"手动记得同步两个数字"这个人力纪律,换成"程序自己算,任何漂移直接炸给你看"。
+**效果**: 只要 `imageId` 换了(guest 重编译)、`gateTmplHash` 却没人手动跟着改,**下次真正要用到 ZK 功能时**直接拒绝(fail-loud),不会再出现"配对关系悄悄脱节、潜伏一天多才在结算阶段炸"这种情况——同时不给任何不使用 ZK 功能的 console 实例增加新的启动失败风险面。
 
 ## §3 范围边界
 
@@ -59,9 +66,10 @@ export const ZK_GATE = { imageId: 'c9918501...', gateTmplHash: _computedGateTmpl
 
 1. `computeGateTmplHash` 函数落码(zk-close-builder.mjs 或独立文件)。
 2. 固定一份 canonical sample receipt/journalHash(7/7 3o6cs 那笔,写死引用路径,不是每次现找)。
-3. `ZK_GATE` 常量改成程序化计算+启动时 round-trip 校验(env drift 直接 throw)。
+3. `ZK_GATE` 常量改成程序化计算+lazy round-trip 校验(§2.2, gate 在 ZK_PROVE_WORKER_ENABLED 后面, env drift 直接 throw)。
 4. pxvml 当前烤错值的 genesis 无法挽回(§0 已定案 STOP,走 escape 退款),这条只防未来新 mint 的市场再犯。
-5. NWT 审此设计,J2/我按分工落码(具体 owner 待 Bettor 派工确认)。
+5. **清除全部同族 stale fallback(Bettor 注2, 一次性扫清不留残留)**: `pool.js:127`(511b0ead 硬编码 fallback)、`pool.js:128` 与 `bshard-close-transport.mjs:454` 的 `_j2_closezk_repro4.sil` 默认路径(Repro4 永久禁铸令的残留代码路径)——统一改成"无 env 即 throw"或直接用 §2.1 的计算值,不留任何会静默兜底的过期常量。
+6. NWT 审此设计,J2/我按分工落码(具体 owner 待 Bettor 派工确认)。
 
 ## §5 签字区
 
