@@ -38,7 +38,10 @@ const GATE_FUND_SOMPI = Number(process.env.ZK_GATE_FUND_SOMPI || 100_000_000);  
 const PROVE_TIMEOUT_MS = Number(process.env.ZK_PROVE_TIMEOUT_MS || 15 * 60_000);   // 真实 proving ~4min, 留 15min 上限防挂死
 
 let _kaspaZk = null;
-function kaspaZk() { if (!_kaspaZk) _kaspaZk = _require(ZKSDK_WASM_PATH); return _kaspaZk; }
+// exported(2026-07-08, Bettor #cb42af 顺手抓到"门②debugger endpoint 自己重开一份 ZKSDK_WASM_PATH
+//   路径常量"这颗同族雷)——单一加载器, 别处需要同一个 ZK-SDK isolated build(gate witness 重建等)复用这个,
+//   不新起第二份路径常量/require 调用。
+export function kaspaZk() { if (!_kaspaZk) _kaspaZk = _require(ZKSDK_WASM_PATH); return _kaspaZk; }
 
 /**
  * spawnCargoProve — 异步执行 RISC0 host 出证(NWT pre-review②: 绝不同步阻塞)。

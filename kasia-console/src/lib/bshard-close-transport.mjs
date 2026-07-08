@@ -450,8 +450,14 @@ export async function buildZkHandoffRequestV2(marketId, args) {
 
   // gateTmplHash/closeZkSilPath 必须跟这个市场 genesis-mint 时烤入 closeZkTmplAnchor 用的同一份值
   // (pool.js:_resolveZkNativeCtorExtras 同源常量), 不能另起一份——否则四段模板跟链上已烤的 anchor 对不上。
-  const gateTmplHash = process.env.ZK_GATE_TMPL_HASH || '511b0eadf9b4421bca9b00b19262b02bc656faaebfe8c2b5821ddcf98353bfc1';
-  const closeZkSilPath = process.env.ZK_CLOSEZK_SIL_PATH || 'D:/kanet-tn12/_j2_closezk_repro4.sil';
+  // 🔴 STOP修正(2026-07-08, Bettor #cb42af 顺手抓到的同族雷): 硬编码 fallback 默认值会悄悄过期(511b0ead
+  // 是 repro4 时代旧值, env 现在设了才没炸)——"默认值从没跟上"是今晚已经点过名的病, 这两个值本身跟哪个
+  // guest image_id 绑定是money-path正确性的一部分, 不该允许在 env 缺失时静默沿用一个可能早过期的猜测值。
+  // 缺 env 直接 throw, 逼调用方显式配置, 不留"看起来能跑但值可能不对"的窗口。
+  if (!process.env.ZK_GATE_TMPL_HASH) throw new Error('buildZkHandoffRequestV2: ZK_GATE_TMPL_HASH env 必需(不接受硬编码 fallback, 该值随 guest image 变化易过期)');
+  if (!process.env.ZK_CLOSEZK_SIL_PATH) throw new Error('buildZkHandoffRequestV2: ZK_CLOSEZK_SIL_PATH env 必需(不接受硬编码 fallback, 路径随归位进度变化)');
+  const gateTmplHash = process.env.ZK_GATE_TMPL_HASH;
+  const closeZkSilPath = process.env.ZK_CLOSEZK_SIL_PATH;
   const { templateA, templateB, templateC, templateD } = computeCloseZkTmplAnchor(closeZkSilPath, gateTmplHash);
 
   const rc = (cmd, t = 90000) => sendCommandAsync(settlerRelayId, cmd, t);

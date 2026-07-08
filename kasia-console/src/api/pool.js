@@ -1848,13 +1848,11 @@ export async function registerPoolRoutes(fastify) {
     try {
       const { gateZkClose } = await import('../lib/rehearsal-pre-broadcast-gate.mjs');
       const { readPayoutShardV2AttestedState } = await import('../lib/bshard-close-enforce.mjs');
-      // 🔴 STOP修正(2026-07-08, KANet-UI实战撞出): ZkScriptBuilder不在常规 kaspa-wasm 包里, 是独立的
-      //   ZK-SDK isolated build(同 zk-prove-worker.mjs:34/41 kaspaZk() 既有惯用法, CommonJS require 非
-      //   ESM import) —— 之前误用常规 kaspa-wasm 导致 kaspa.ZkScriptBuilder undefined, newR0 调用炸。
-      const { createRequire } = await import('node:module');
-      const _require = createRequire(import.meta.url);
-      const ZKSDK_WASM_PATH = process.env.ZKSDK_WASM_PATH || 'D:/rusty-kaspa-zksdk-isolated/wasm/nodejs/kaspa/kaspa.js';
-      const kaspa = _require(ZKSDK_WASM_PATH);
+      // 🔴 STOP修正(2026-07-08, KANet-UI实战撞出, Bettor #cb42af 顺手要求收拢单一加载器): ZkScriptBuilder
+      //   不在常规 kaspa-wasm 包里, 是独立的 ZK-SDK isolated build——不在这里第二次声明 ZKSDK_WASM_PATH
+      //   路径常量/require 调用, 直接复用 zk-prove-worker.mjs 已导出的 kaspaZk()(唯一加载器, 同一份缓存)。
+      const { kaspaZk } = await import('../services/zk-prove-worker.mjs');
+      const kaspa = kaspaZk();
       const ZERO32 = '00'.repeat(32);
 
       // beforeState: 跟门①(zk_handoff)读的同一份来源(payout_shards, 自 attest 落链后没被 handoff 动过,
@@ -1862,7 +1860,10 @@ export async function registerPoolRoutes(fastify) {
       const ps = sqlite.prepare('SELECT payout_redeem_hex FROM payout_shards WHERE logical_market_id = ?').get(market_id);
       if (!ps) return reply.code(404).send({ ok: false, error: `no payout_shards row for ${market_id}` });
       const state = readPayoutShardV2AttestedState(ps.payout_redeem_hex);
-      const gateTmplHash = process.env.ZK_GATE_TMPL_HASH || '511b0eadf9b4421bca9b00b19262b02bc656faaebfe8c2b5821ddcf98353bfc1';
+      // 🔴 STOP修正(2026-07-08, Bettor #cb42af 抓到同族雷): 不接受硬编码 fallback(会悄悄过期, 511b0ead
+      // 是 repro4 时代旧值) —— 缺 env 直接 throw, 不留"看起来能跑但值可能不对"的窗口。
+      if (!process.env.ZK_GATE_TMPL_HASH) return reply.code(503).send({ ok: false, error: 'ZK_GATE_TMPL_HASH env 未设(不接受硬编码 fallback)' });
+      const gateTmplHash = process.env.ZK_GATE_TMPL_HASH;
       const beforeState = {
         gateTmplHash, betsRootBaked: state.betsRootHex, refundRootBaked: state.refundRootHex,
         attestedAtMs: state.attestedAtMs, attestedWinner: state.attestedWinner, closed: 1,
