@@ -2209,10 +2209,12 @@ export async function unlockBshardZkClose(args) {
  *   closezk-v2-claim-builder.mjs 的 parseCloseZkV2State 已经现读现验过一次, 这里独立再验, 两处 offset 表
  *   互相独立实现, 靠 round-trip 测试互证正确性, 不是"共享一份代码"意义上的单源, 而是"两次独立验证都必须过"
  *   意义上的纵深防御)。
- * ⚠ OP_3 selector(落码条件之一, 不得当已确认结论用): CloseZkV2.sil entry 声明序 0:zk_close/1:escape_trigger/
- *   2:escape_claim/3:claim, 按既有 OP_i=0x50+i 惯例(cancel_attest/refund_claim 等已用此惯例)claim 应为
- *   OP_3='53', 但落码前必须过市场5设计稿 T0.3 selector dispatch 实测(cli-debugger 全 entry 路由验证),
- *   本函数当前值是设计推导非实测确认。
+ * ✅ OP_3 selector(T0.3 实测确认, 2026-07-08 J2): 双重坐实——①源码级: silverc `compile.rs:259-262`
+ *   逐 entry `builder.add_i64(entrypoint_index)` + `OpNumEqual` if/else 链, entrypoint_index 按 .sil 声明序
+ *   0-based(CloseZkV2 声明序 0:zk_close/1:escape_trigger/2:escape_claim/3:claim), `add_i64(3)` 编码为标准
+ *   script-number push OP_3='53'。②实测级: `cli-debugger --run-all` 对 `CloseZkV2.test.json` 8/8 通过, 含
+ *   claim 3 个负向用例(wrong-merkle-proof/closed==3 应拒绝[证不会误路由到 escape_claim]/double-claim),
+ *   证 claim 分支正确路由且与相邻 entry 不串。OP_3='53' 已确认, 非设计推导。
  * @param {object} args.cmd.inputs.closezk { redeem_hex, outpointTxid, index } — 当前活 CloseZkV2 UTXO(不接受
  *   caller 传 state, handler 自己 parse redeem_hex 拿现读值)。
  * @param {object} args.cmd.inputs.fee { address, outpointTxid, index } — 必需(claim 的 consolidated_pool

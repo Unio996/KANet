@@ -68,7 +68,7 @@
   3. nullifier bit-set:照抄 `unlockBshardPayoutClaim:1847-1851` 的 `word_idx/bitIn/mask` 逻辑。
   4. dust 边界:照抄 `.sil` claim entry §2.4 的 if/else(`consolidated_pool==payout` 时不留 continuation)。
   5. scriptSig:`_pushInt(selfOutIdx) + _pushInt(payoutOutIdx) + _pushBytes(bettorPk) + _pushInt(payout) + _pushInt(merkle_index) + [s0..s9 各 _pushBytes] + OP_3('53') + redeem`。
-     - **OP_3 待验证**:`CloseZkV2.sil` entry 声明序 = 0:zk_close, 1:escape_trigger, 2:escape_claim, 3:claim。按既有约定(`OP_0='00'` 空 push,`OP_i=0x50+i` for i≥1,已见于 V1 PayoutShard 的 OP_2/OP_3/OP_4 用法)claim 应为 `OP_3='53'`,但**这是设计推导,不是实测**——市场5设计稿 T0.3(4-entry selector dispatch 显式验证)是本设计的前置依赖,不在此重复,落码时必须先过 T0.3 才能用这个值。
+     - **OP_3 已确认(T0.3 实测,2026-07-08 J2)**:双重坐实——①源码级:silverc `compile.rs:259-262` 逐 entry `add_i64(entrypoint_index)`+`OpNumEqual` if/else 链,`entrypoint_index` 按 `.sil` 声明序 0-based(0:zk_close/1:escape_trigger/2:escape_claim/3:claim),`add_i64(3)` 编码为标准 script-number push `OP_3='53'`。②实测级:`cli-debugger --run-all` 对既有 `CloseZkV2.test.json` 8/8 通过,含 claim 3 个负向用例(wrong-merkle-proof/`closed==3` 应拒绝[证不会误路由到 `escape_claim`]/double-claim),证 claim 分支正确路由、与相邻 entry 不串。`OP_3='53'` 不再是设计推导,是实测确认值。
 
 ### C. 命令注册(R-COMMAND-REGISTRATION,`lint-kanet.mjs` 强制)
 
@@ -97,7 +97,7 @@
 ## 5. 风险/边界(诚实标注)
 
 - 本设计**只补 JS 侧 driver**,`CloseZkV2.sil` 零改动(claim entry 已冻结)。
-- OP_3 selector 值待市场5设计稿 T0.3 独立验证,本设计不能单独当作已确认结论使用。
+- OP_3 selector 值已经 T0.3 独立验证确认(源码+实测双重坐实,见 §3.B),不再是待定项。
 - `closed==2` 无 deadline 级逃生舱(市场5设计稿 §3.1 选项A)不因本设计改变——本设计让 claim **能被正确调用**,不改变"claim 本身若有边界 bug 则无退路"这条已知风险,那条风险的缓解手段(dust E2E 先行 + cli-debugger 验证)仍按市场5设计稿 §1 走。
 - propose 薄壳(缺件2)只固化"手动踢一次"的调用面,不包含自治 cron——按上游设计稿保持诚实边界。
 
