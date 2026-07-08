@@ -53,8 +53,9 @@
 ### A. `kasia-console/src/lib/closezk-v2-claim-builder.mjs`(新文件)
 
 - `parseCloseZkV2State(redeemHex)` → `{attestedWinner, closed, payoutRootField, consolidated_pool, w0..w16}`(见 §2 offset 表,共享常量)。
-- `buildClaimWitness(payouts, winnerPkHex, pos, currentState)`:
-  - self-verify climb(`payouts`+`winnerPkHex`)== `currentState.payoutRootField`(镜像 `pool-claim-builder.mjs:36-39`),不等直接 throw,不喂给 relay。
+- `buildClaimWitness(winnerPkHex, pos, currentState, {bettors, feeLeaves})`(**Bettor #bk28lo 裁定,权威源钉死**):
+  - **`payouts`(全量 leaf 列表)禁止从任何 DB payout 缓存表直读当权威**——必须调用 `computePariMutuelPayout({bettors, winningDirection: currentState.attestedWinner, poolTotalSompi: <genesis 时烤入的 pool 值>, feeLeaves})`(`pool-shard-settle.mjs`,与 guest 电路、`zk-prove-enqueue.mjs:75` 同一份公开确定性算法,同函数同参数形状)独立重算出 `payoutLeaves`。
+  - self-verify climb(重算出的 `payoutLeaves` + `winnerPkHex`)== `currentState.payoutRootField`(链上现读,§2)——**"重算+链根双锁"**:leaf 集合来自独立重算(同 J1 `zk-prove-enqueue.mjs` L79-84 的 Σleaf 校验纪律),树根来自链上现读绑定,两条独立来源相互印证,不等直接 throw,不喂给 relay。
   - 检查目标 `merkle_index` 对应的 nullifier bit **在 `currentState`(刚才链上现读的)里确实是 0**——本地提前挡重复 claim,不留给链上 `require` 才发现(省一笔失败 tx 的 fee)。
   - `payout ∈ [1, currentState.consolidated_pool]` 守恒前置校验(镜像 zk-genesis-mint 设计 §4 硬门⑤ Σleaf 承重件同一纪律:本地先拦,链上 require 是最后一道防线非唯一防线)。
 - `buildClaimCommand({...})` → `{action:'closezk_v2_claim', witness:{...}, inputs:{closezk:{...}, fee:{...}}, outputs:{payout:{...}, change_address}}`,字段命名对齐 `.sil` 形参声明序(`selfOutIdx/payoutOutIdx/bettorPk/payout/merkle_index/s0..s9`)。
@@ -78,6 +79,7 @@
 
 - `bshard-close-transport.mjs` 新增 `buildProposeCloseRequestV2(marketId)`:读 DB 实况(PayoutShardV2 当前 UTXO/state、deadline、betsRoot 等,同 `_j2_3o6cs_close_attest_v2.mjs` 第194行前的手搓逻辑,改成从 `pool_markets`/live UTXO 读而非硬编码),组好 `req` 后调用既有 `publishCloseRequestV2(marketId, req)`(零改动,只是不再手搓 req)。
 - 定位为**薄壳**:可被 Bettor/操作者手动踢一次调用(市场5 T2.2),也可被未来 propose 自治 cron 调用(cron 本身仍是排在市场5之后的独立卡,不在本设计范围,同市场5设计稿 §2 T2.2 措辞"driver 薄壳踢一次,诚实口径")。
+- **Bettor #bk28lo③非阻塞裁定**:读 DB 组 req 本身可接受(voter 层 C1 链锚 fail-closed 是真执法者,昨晚已实证拒得对——同一纪律精神),但**能便宜链推导的字段优先链推导、不图省事直读 DB**——具体到本函数:`betsRoot` 用 `computeBetsRoot(canonicalBetOrder(bettors))`(`pool-payout-root.mjs`,`zk-prove-enqueue.mjs:19` 同款调用)现推导,不读 `pool_markets` 里 driver 可能写错/过期的缓存字段;`deadline_daa`/当前 UTXO outpoint 这类必须查 DB 才知道"哪一个"的字段(定位性质,非可推导值)维持读 DB。
 
 ---
 

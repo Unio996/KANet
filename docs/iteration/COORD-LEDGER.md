@@ -8,6 +8,14 @@
 
 ---
 
+## 🚀 7/8 白班·市场5 两场制设计闭合+落码执行中(2026-07-08 10:4x-11:1x 本地·Bettor 白班接位)
+> **班组**: Bettor/NWT/J1tn/J2tn/KANet-UI 全员 fresh 接位(10:46-10:50),Owner 在线(市场5 执行条件满足)。
+- **⚖️ 市场5 设计 v1.0→v1.1 两场制(关键决策·NWT verdict ②③根治)**: `docs/2026-07-08-market5-first-bet-rehearsal-design.md`(a2b50ac1→77b8d5da)。v1.0"首注后立即彩排"被 NWT 抓死:zk_handoff 生产 builder 对 closed!=1 fail-closed throw(bshard-close-enforce.mjs:202-205,J1 作者+Bettor 双源码实证)+zk_close builder 强制真 receipt——字面走不通,会逼实现者造假输入(vacuous 诱导)。**根治=两场制**:市场5R 彩排场(最小真实市场,双边各注 1.5KAS,短窗,走完 create→attest→真 prove→三个 pre-broadcast 门→claim landed,焊死上限 ~4.5KAS)→ 5R 闭合才开正式场市场5(~104KAS 内,closed==2 选A 不变)。**pre-broadcast 门**=每个 money-entry 广播前,生产 builder witness 过 cli-debugger run-all+Bettor 盲算比对+确认令。brokered-coverage 显式条款:赢家+broker-1 ≥2 claimant 天然覆盖 claim 两分支,禁改 non-brokered(NWT 观察,防隐性前提丢失)。
+- **✅ 缺件1/2 设计 GREEN·终GO落码(J2)**: `docs/2026-07-08-closezkv2-claim-driver-design.md`(0687f2b6→5d2be9de 吸收 Bettor 裁定)。缺件1=unlockCloseZkV2Claim(relay,splice 模式)+closezk-v2-claim-builder.mjs(console)+三层注册;脊柱=parseCloseZkV2State 从活 UTXO redeem 现读现解(w0-16/pool/closed/root 全链上权威,DB 只定位不定值)+offset 共享常量+round-trip BLOCKING test(72.31KAS 教训直接落地)。leaf 权威源钉死=computePariMutuelPayout 重算+climb==链根双锁。OP_3 selector=T0.3 实测前不当结论。缺件2=buildProposeCloseRequestV2 薄壳(betsRoot 链推导)。双审:Bettor 方向审 GREEN-with-notes+NWT GREEN-with-conditions。
+- **⚖️ 门① dry-run 裁定(relay 钱路小改·Bettor 按接位授权拍·Owner 在线可否决)**: unlockBshardZkHandoff 加显式 opt-in dryRun 分支(signedTx 组好后、submitTransaction 前唯一 early-return,witness 原样返回禁重拼,flag 不传=行为零变化,既有测试全绿+NWT diff 审"纯插入无逻辑变化")。替代方案=console 重抄 witness 拼装=两套并行实现,§1.2 明令禁,故 dry-run 是唯一正解。J1 落码门①②(门② dispatchUnlockZkClose 抽共享函数,逐字节等价+17/17 保绿)。
+- **✅ §3 硬门积分板**: 1✅⚠(gateway UTXO 92 健康,无 cron 覆盖=跟进卡,KANet-UI 哨兵>200 报警在岗)/2✅(开关矩阵:daemon/voterV2/submitV2/proveWorker=ON,ZK_CLOSE_TICK=OFF 确认令制)/4✅(Σleaf BLOCKING 在 enqueue 生产路+fee_leaves broker-1 自动挂,J1 核;非阻塞:assertPayoutLeavesConserved 死导出收敛卡)/5✅(anchor live-derive 机制)/8✅(stuck-alert 01:28 真触发实证)。在途:3(exit-path 走查,Bettor+NWT,点火前)/6(ESCAPE_GRACE_MS 定标签字,Bettor)/7(缺件落码 GREEN)。
+- **接力顺位不变**: 落码→T0(含 T0.3 selector 实测)→硬门3/6→5R 点火→正式场。回收卡/retro 排后。
+
 ## 🏁 今晚 checkpoint·ZK 生产线装配战役收工(2026-07-08 08:45 本地·Bettor 收尾·三方无异议·下次接力从这读)
 > **背景**: Owner 钦定"把 ZK 装配进生产线"→深夜连续作战~5.5h。跑通批A(委员 attest 自治)+批B(真 Groth16 proof 管线),市场5(第一个含 zk_close+claim 的真实市场完整端到端=Owner DoD)Bettor 拍板排下一班 fresh+Owner 在线做——理由: claim 环全链唯一从未真实触发+closed==2 选A 无逃生舱,凌晨疲劳态不碰钱路终环(止损纪律),J2/NWT 无异议,公测线扫查干净无碰伤。
 
