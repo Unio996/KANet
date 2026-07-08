@@ -34,6 +34,7 @@
 ### T1 — 彩排场(市场5R):最小真实市场完整生命周期(敞口 ~4.5KAS+maker spine 可回收)
 - T1.1 create-v07(ZK-native: `resolution_rule_spec.zk_native=true`,**brokered**: create-v07 默认路自动挂 broker-1,J1 已核 GREEN);maker 100KAS spine(Owner skin-in-game 硬校验,不绕;refund 路可回收);**短押注窗**(~15-30min,8.0 DAA/s 换算);**create 后回读 DB 实际 deadline_daa**;
 - T1.2 **双边各注 1.5KAS**(两只团队 relay,经 gateway)——保证必有赢家 leaf+输家,claim 真实可触发且非 degenerate;
+  - **claim 分支覆盖依赖 brokered 事实(NWT 复审观察,显式记录非隐性前提)**: 赢家 leaf+broker-1 fee leaf = ≥2 个独立 claimant,顺序 claim 天然覆盖 `else` 续锁分支+`if` 精确清零终结分支两条(正式场大概率撞的就是 else 路)。**谁先 claim 顺序不定,两种顺序都算过关。复用 5R 脚本者若改成 non-brokered 会悄悄弄丢 else 分支覆盖——禁改。**
 - T1.3 deadline 到 → propose(driver 薄壳踢)→ voter/submit cron 自治 attest(closed 0→1,**真状态**)→ 自动 enqueue → prove worker **~4min 真 Groth16**(禁 fixture,NWT ③裁定采纳)→ gate 铸造注资;
 - T1.4 **pre-broadcast 门①(zk_handoff)**: 生产 builder(buildCloseZkV2GenesisFromAttestedState)读真 attested PS(closed==1)构造 witness → cli-debugger run-all 全绿 + Bettor 盲算比对 → 确认令 → 广播 → landed;
 - T1.5 **pre-broadcast 门②(zk_close)**: dispatchUnlockZkClose 用真 receipt_hex 确定性重建 → debugger run-all → 确认令 → 广播 → landed;
@@ -64,7 +65,7 @@
 
 1. **ZK claim 生产 driver**(witness builder + relay 命令接线): 勘察显示 claim entry 设计已定但生产入口疑未落码(pool-claim-builder.mjs 是旧 M3 路)。owner J2、NWT 审。**这是今天最大的落码件。**
 2. **propose driver 薄壳**(踢一次 publishCloseRequestV2): 已有应急线脚本,固化为可复用 driver;propose 自治 tick 仍立卡排市场5 后。owner J2。
-3. 彩排 harness(把 §2 T1.3-1.5 串起来的驱动,只准调生产 builder,见 §1.2)。owner J1 或 J2,NWT 审"是否偷造 witness"。
+3. 彩排 harness = 三个 pre-broadcast 门 wrapper(§2 T1.4-T1.6,只准调生产 builder,harness 只读不广播,见 §1.2)。owner J1(门①②先行,门③等缺件1),NWT 审"是否偷造 witness"。
 
 ## §5 资金账与 worst-case
 
@@ -85,7 +86,7 @@
 
 ## §8 签字区
 
-- Bettor(设计): ✅ 2026-07-08
-- NWT(红队 verdict): 待
+- Bettor(设计): ✅ 2026-07-08(v1.1)
+- NWT(红队 verdict): ✅ 2026-07-08 v1.1 GREEN-GO(①缺件1坐实/②closed!=1 洞→两场制根治/③fixture 禁→真 prove/④盲算独立性口头确认;附 brokered-coverage 显式记录,已吸收进 T1.2)
 - J2 / J1(缺件认领+可行性): 待
 - Owner(知情: ~103KAS 敞口 + closed==2 选A 残余风险): 口头在线知情,频道记录为准
