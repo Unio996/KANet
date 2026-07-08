@@ -18,6 +18,31 @@
 // 单一权威, 这里只保留 emit 侧独有的东西(候选筛选/幂等标记/DM 事件写入)。
 
 import { getIndexedTxOutputs } from '../lib/broker-fee-chain.mjs';
+import { sqlite } from '../db/client.js';
+
+// J1tn 2026-07-08 (§2.1 broker-fee-reconciler-design 启用件): 本模块此前写好但零调用点(index.js 从没
+//   import 过) — Owner 直接指令"之前有这个模块没启用,查!"坐实。这里只做"接上一根已经焊好的线",
+//   不改 brokerFeeLandedEmitTick 本体一个字。deriveBrokerAddress 用跟 pool.js:143 同源的
+//   XOnlyPublicKey(pk).toAddress(network) 派生(逐字节同一算法,不新开一套)。
+const TICK_MS = 5 * 60 * 1000;   // 同 broker-state-reconciler.js 既有 5min 档,同类只读链 cron 惯例
+let _interval = null;
+let _kaspaWasm = null;   // kaspa-wasm 全库只 dynamic import 一次(codebase 既有惯例, 非静态 import), 缓存复用
+
+async function _tick() {
+  try {
+    if (!_kaspaWasm) _kaspaWasm = await import('kaspa-wasm');
+    const deriveBrokerAddress = (brokerPkHex, network) => new _kaspaWasm.XOnlyPublicKey(brokerPkHex).toAddress(network).toString();
+    brokerFeeLandedEmitTick(sqlite, deriveBrokerAddress, (msg) => console.log(msg));
+  } catch (e) { console.error(`[broker-fee-emit] tick error: ${e.message}`); }
+}
+
+export function startBrokerFeeEmitCron() {
+  if (_interval) return;
+  console.log(`[broker-fee-emit] cron start, tick=${TICK_MS}ms`);
+  _interval = setInterval(_tick, TICK_MS);
+  setTimeout(_tick, 5000);   // startup pass (同 broker-buy-completion-watcher 等既有 cron 惯例, 不等第一个 tick 周期)
+}
+export function stopBrokerFeeEmitCron() { if (_interval) { clearInterval(_interval); _interval = null; } }
 
 // ⚠ event_type 必【不以 'broker_' 开头】: migrate v83 trigger chain_events_txid_format_check 对 broker_* 事件
 //   强制 txid=64-hex chain hash (禁 placeholder)。sentinel 是内部标记无真 txid → 用非 broker_ 前缀绕开 trigger。

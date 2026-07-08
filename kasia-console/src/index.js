@@ -725,6 +725,12 @@ startReconcileCron();
 import { startStateReconciler } from './services/broker-state-reconciler.js';
 startStateReconciler();
 
+// J1tn 2026-07-08 (docs/2026-07-08-broker-fee-reconciler-design.md §2.1): 启用早就写好但零调用点的
+//   broker-fee-emit.mjs(Owner 直接指令查出的死代码)——纯只读链+chain_event 写入,不碰 money-path 决策,
+//   跟上面 broker-state-reconciler 同档 5min cron。
+import { startBrokerFeeEmitCron } from './services/broker-fee-emit.mjs';
+startBrokerFeeEmitCron();
+
 // Phase 4 (T-J2-09): broker-buy-completion-watcher — BUY 闭环, broker 代 accept 后 DM user KAS 到账
 import { startCompletionWatcher } from './services/broker-buy-completion-watcher.js';
 startCompletionWatcher();
