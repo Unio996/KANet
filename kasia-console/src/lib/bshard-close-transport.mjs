@@ -192,4 +192,171 @@ export function clearCloseRequest(marketId, finalStatus = 'completed') {
   return { ok: true, status: finalStatus };
 }
 
+/**
+ * buildProposeCloseRequestV2 — propose 驱动薄壳固化(缺件2, J2 2026-07-08。设计文档
+ * docs/2026-07-08-closezkv2-claim-driver-design.md §3.D)。是 _j2_uqmp8_propose_v2.mjs/_j2_3o0a6_propose_v2.mjs
+ * 已两次真实验证过的模式(committee re-derivation/fee-leaves/preimage 组装/publishCloseRequestV2 调用)固化成
+ * 可复用函数——去掉那两份脚本里逐市场手搓的一次性硬编码(post-absorb outpoint 补丁/固定 poolSompi/block hash
+ * STOP-check 字面量), 换成读 DB/链实况。
+ *
+ * ⚠ 范围边界(不越界): 本函数**不做судить(judge)**——winningDirection/endBlockHash 由调用方显式提供(该市场的
+ * judge_type 对应的裁决已经做完, 例如 blockhash_parity 独立复核/ESPN judgeLine 等, 那是一套独立的裁决管线,
+ * 不是"propose 薄壳"该重新发明的东西, 见设计文档§3.D"薄壳只固化调用面, 不含自治判定")。
+ *
+ * @param {string} marketId  logical market id
+ * @param {{winningDirection:0|1, endBlockHash:string, settlerRelayId:string, feeUtxo?:{outpointTxid,index}}} judged
+ *   - winningDirection/endBlockHash: 该市场judge_type对应裁决的产物(调用方负责, 不在本函数内推导)
+ *   - settlerRelayId: 发 relay 命令用哪个 relay(镜像既有脚本 SETTLER_RELAY 常量, 不硬编码进本函数)
+ *   - feeUtxo: 可选, 复用已 fund 好的 fee UTXO(省一次 transfer+landed 等待, 同既有脚本 REUSE_FEE_TX 用法); 缺省
+ *     则本函数自己 transfer 0.5 KAS 给 relay 自己地址做 fee input
+ * @returns {Promise<{ok:boolean, marketId:string, claimedPayoutRoot:string}>}
+ */
+export async function buildProposeCloseRequestV2(marketId, judged) {
+  const { winningDirection, endBlockHash, settlerRelayId, feeUtxo } = judged || {};
+  if (winningDirection !== 0 && winningDirection !== 1) throw new Error('buildProposeCloseRequestV2: judged.winningDirection must be 0|1(调用方裁决产物, 本函数不推导)');
+  if (!endBlockHash) throw new Error('buildProposeCloseRequestV2: judged.endBlockHash 必需');
+  if (!settlerRelayId) throw new Error('buildProposeCloseRequestV2: judged.settlerRelayId 必需');
+
+  const { sendCommandAsync } = await import('../services/relay-manager.js');
+  const { reDeriveCommittee } = await import('./bshard-close-enforce.mjs');
+  const { computeCommitteePkHash } = await import('../services/bshard-close-voter.js');
+  const { fetchEndBlockHashCanonical, loadPoolSnapshot, recaptureSideLockDaaForMarket } = await import('../services/pool-market-settler-v06.mjs');
+  const { canonicalBetOrder, computeBetsRoot, payoutRoot: computeMerkleRoot } = await import('./pool-payout-root.mjs');
+  const { computePariMutuelPayout, settlePayoutRoot, deriveFeeLeaves, FEE_CONFIG } = await import('./pool-shard-settle.mjs');
+  const { buildPoolMerkleTree, getPoolMerkleProof } = await import('../services/pool-merkle-v06.mjs');
+
+  const market = sqlite.prepare('SELECT id, deadline_daa, maker_pk, broker_pk, pool_merkle_root, resolution_rule_spec, market_metadata_hash FROM pool_markets WHERE id = ?').get(marketId);
+  if (!market) throw new Error(`buildProposeCloseRequestV2: market ${marketId} not found`);
+  const ps = sqlite.prepare('SELECT payout_redeem_hex, payout_ps_outpoint FROM payout_shards WHERE logical_market_id = ?').get(marketId);
+  if (!ps) throw new Error(`buildProposeCloseRequestV2: no payout_shards row for ${marketId}`);
+  const [psTx, psIdxStr] = String(ps.payout_ps_outpoint).split(':');
+
+  const loadBettorsFlat = () => {
+    const shards = sqlite.prepare('SELECT shard_market_id FROM market_shards WHERE logical_market_id = ? ORDER BY shard_index ASC').all(marketId);
+    const mids = shards.length ? shards.map(s => s.shard_market_id) : [marketId];
+    const out = [];
+    for (const mid of mids) {
+      for (const r of sqlite.prepare('SELECT bettor_pk, direction, stake_amount, side_lock_daa, side_lock_tx FROM pool_bettor_sides WHERE market_id = ?').all(mid)) {
+        out.push({ pk: String(r.bettor_pk).toLowerCase(), direction: Number(r.direction), stake: String(r.stake_amount), side_lock_daa: r.side_lock_daa, side_lock_tx: r.side_lock_tx });
+      }
+    }
+    return out;
+  };
+
+  // recapture(同既有脚本纪律, mempool-NULL side_lock_daa 补齐, 否则 canonicalBetOrder fail-loud)
+  const shardIds = sqlite.prepare('SELECT shard_market_id FROM market_shards WHERE logical_market_id = ? ORDER BY shard_index ASC').all(marketId).map(s => s.shard_market_id);
+  for (const sid of (shardIds.length ? shardIds : [marketId])) await recaptureSideLockDaaForMarket(sid);
+
+  const rc = async (cmd, t = 90000) => {
+    const r = await sendCommandAsync(settlerRelayId, cmd, t);
+    if (r?.ok === false) { const e = new Error(cmd.type); e.relayErr = r.error; throw e; }
+    return r;
+  };
+
+  const chainReader = {
+    async getCurrentDaaScore() { const r = await rc({ type: 'chain_get_current_daa_score' }); return Number(r.daa_score); },
+    async getBlockAtDaa(minDaa) { const r = await rc({ type: 'chain_get_block_at_daa', min_daa_score: minDaa }, 300000); return { hash: String(r.hash), daaScore: Number(r.daaScore) }; },
+  };
+  const resolutionRuleSpec = JSON.parse(market.resolution_rule_spec || '{}');
+  const enforceCtx = {
+    deadlineDaa: Number(market.deadline_daa), resolutionRuleSpec, chainReader,
+    fetchEndBlockHashCanonical: async (reader, daa) => (await fetchEndBlockHashCanonical(reader, daa)).hash,
+    loadPoolSnapshot: async (mid) => {
+      const s = loadPoolSnapshot(mid);
+      const mrow = sqlite.prepare('SELECT maker_pk, broker_pk, deadline_daa FROM pool_markets WHERE id = ?').get(mid);
+      return {
+        pool_merkle_root: s.pool_merkle_root,
+        members: s.pool_pks.map((pk, i) => ({ pk_hex: String(pk).toLowerCase(), stake_sompi: s.pool_stakes[i] })),
+        maker_pk: mrow?.maker_pk ? String(mrow.maker_pk).toLowerCase() : null,
+        broker_pk: mrow?.broker_pk ? String(mrow.broker_pk).toLowerCase() : null,
+        deadline_daa: mrow?.deadline_daa != null ? Number(mrow.deadline_daa) : Number(market.deadline_daa),
+      };
+    },
+    loadBettors: async () => loadBettorsFlat(),
+  };
+  const committeePks = await reDeriveCommittee(marketId, enforceCtx, ps.payout_redeem_hex);
+
+  const snap = loadPoolSnapshot(marketId);
+  const tree = buildPoolMerkleTree(snap.pool_pks);
+  const committeeMeta = {};
+  for (const pk of committeePks) {
+    const idx = tree.sortedPks.indexOf(pk);
+    if (idx < 0) continue;
+    committeeMeta[pk] = { idx, siblings_hex: getPoolMerkleProof(tree, idx).map(s => s.toString('hex')) };
+  }
+
+  const bettors = loadBettorsFlat();
+  const nullDaa = bettors.filter(b => b.side_lock_daa == null).length;
+  if (nullDaa) throw new Error(`buildProposeCloseRequestV2: ${nullDaa}/${bettors.length} bettors 仍 side_lock_daa NULL — 不能继续`);
+  const ordered = canonicalBetOrder(bettors);
+  // betsRoot/refundRoot 从 bettors 链推导(Bettor #bk28lo③ 教训: 能便宜链推导的字段优先链推导, 不图省事直读 DB)
+  const newBetsRoot = computeBetsRoot(ordered.map(b => ({ pk: b.pk, stake: b.stake, direction: b.direction }))).toString('hex');
+  const newRefundRoot = computeMerkleRoot(ordered.map(b => ({ pk: b.pk, amount: b.stake }))).toString('hex');
+  const newAttestedAtMs = Date.now();
+
+  const poolSompi = bettors.reduce((s, b) => s + BigInt(b.stake), 0n).toString();
+  const { feeLeaves } = deriveFeeLeaves({ poolSompi, feeConfig: FEE_CONFIG, brokerPk: market.broker_pk, introducerPk: null, committeePks });
+  const pm = computePariMutuelPayout({ bettors, winningDirection, feeLeaves });
+  if (pm.degenerate) throw new Error(`buildProposeCloseRequestV2: degenerate payout(${pm.reason})`);
+  const claimedPayoutRoot = settlePayoutRoot(pm.payoutLeaves && pm.payoutLeaves.length ? pm.payoutLeaves : pm.winners);
+
+  // 命门①(既有脚本纪律): market_metadata_hash 必须 == genesis redeem[642] baked 值, 不吻合拒绝继续
+  const onChainCommitAtV2Offset = ps.payout_redeem_hex.slice(642 * 2, (642 + 32) * 2);
+  if (market.market_metadata_hash && String(market.market_metadata_hash).toLowerCase() !== onChainCommitAtV2Offset) {
+    throw new Error(`buildProposeCloseRequestV2: 命门①mismatch — market_metadata_hash ${market.market_metadata_hash} != genesis redeem[642] ${onChainCommitAtV2Offset}`);
+  }
+
+  const relayAddr = (await rc({ type: 'get_pubkey' })).address;
+  // verify-value-source: consolidated_pool 从当前活 redeem_hex 现读(不信 payout_shards 表可能过期的缓存字段)
+  const realConsolidatedPool = Buffer.from(ps.payout_redeem_hex, 'hex').readBigInt64LE(2).toString();
+  const z32 = '00'.repeat(32);
+  const currentState = { consolidated_pool: realConsolidatedPool, closed: 0, payoutRoot: z32, attestedWinner: -1, attestedAtMs: 0, betsRootBaked: z32, refundRootBaked: z32 };
+
+  const landed = async (txid, address, n = 30) => {
+    for (let i = 0; i < n; i++) { const j = await rc({ type: 'check_utxo_landed', address, txid }, 20000); if (j.landed || j.found) return true; await new Promise(r => setTimeout(r, 2000)); }
+    return false;
+  };
+  let feeTx = feeUtxo?.outpointTxid;
+  if (!feeTx) {
+    feeTx = (await rc({ type: 'transfer', target: relayAddr, amount: 0.5 })).txId;
+    if (!await landed(feeTx, relayAddr)) throw new Error(`buildProposeCloseRequestV2: close fee fund ${feeTx} no land`);
+  }
+  const closeInputs = {
+    payoutshard: { redeem_hex: ps.payout_redeem_hex, outpointTxid: psTx, index: Number(psIdxStr), state: currentState, state_start: 1 },
+    fee: { address: relayAddr, outpointTxid: feeTx, index: feeUtxo?.index ?? 0 },
+  };
+
+  const { Transaction, TransactionOutput, payToAddressScript, Address, CovenantBinding, Hash } = await import('kaspa-wasm');
+  const pre = await rc({
+    type: 'bshard_close_attest_v2', inputs: closeInputs,
+    witness: { self_out_idx: 0, new_payout_root: claimedPayoutRoot, new_attested_winner: winningDirection, new_bets_root: newBetsRoot, new_refund_root: newRefundRoot, new_attested_at_ms: newAttestedAtMs, committee: [], committee_pk_hash: computeCommitteePkHash(committeePks) },
+    outputs: { change_address: relayAddr },
+  });
+  if (!pre?.preimage) throw new Error(`buildProposeCloseRequestV2: pre.preimage missing — ${JSON.stringify(pre).slice(0, 300)}`);
+  const preimg = pre.preimage;
+  const un = new Transaction({
+    version: 1,
+    inputs: preimg.inputs.map(i => ({ previousOutpoint: { transactionId: i.previousOutpoint.transactionId, index: i.previousOutpoint.index }, signatureScript: '', sequence: 0n, sigOpCount: 0, computeBudget: 70, utxo: { outpoint: { transactionId: i.previousOutpoint.transactionId, index: i.previousOutpoint.index }, amount: BigInt(i.amountSompi), scriptPublicKey: payToAddressScript(new Address(i.address)), blockDaaScore: 0n } })),
+    outputs: preimg.outputs.map(o => new TransactionOutput(BigInt(o.value), payToAddressScript(new Address(o.address)), o.covenantId ? new CovenantBinding(0, new Hash(o.covenantId)) : undefined)),
+    lockTime: 0n, gas: 0n, subnetworkId: '0'.repeat(40), payload: '',
+  });
+  const txSafeJson = un.serializeToSafeJSON();
+
+  const poolMembers = snap.pool_pks.map((pk, i) => ({ pk_hex: String(pk).toLowerCase(), stake_sompi: String(snap.pool_stakes[i]) }));
+  const snapshot = {
+    shards: sqlite.prepare('SELECT shard_market_id, shard_index, shard_redeem_hex, current_leaf_state, current_leaf_outpoint FROM market_shards WHERE logical_market_id = ? ORDER BY shard_index ASC').all(marketId)
+      .map(s => ({ shard_index: s.shard_index, shard_redeem_hex: s.shard_redeem_hex, current_leaf_state: s.current_leaf_state, current_leaf_outpoint: s.current_leaf_outpoint })),
+  };
+  const req = {
+    txSafeJson, predicate: null, proposed_evidence: null, claimedPayoutRoot, psRedeemHex: ps.payout_redeem_hex,
+    committee_pks: committeePks, committee_meta: committeeMeta, snapshot, input_index: 0,
+    broker_pk: market.broker_pk, introducer_pk: null, maker_pk: market.maker_pk,
+    data_source_canonical: null, pool_members: poolMembers, end_block_hash: endBlockHash, deadline_daa: Number(market.deadline_daa),
+    new_attestedWinner: winningDirection, new_betsRoot: newBetsRoot, new_refundRoot: newRefundRoot, new_attestedAtMs: newAttestedAtMs,
+    closeInputs,
+  };
+  publishCloseRequestV2(marketId, req);
+  return { ok: true, marketId, claimedPayoutRoot };
+}
+
 export { QUORUM };
