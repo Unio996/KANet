@@ -1737,6 +1737,40 @@ export async function registerPoolRoutes(fastify) {
   });
 
   // GET /api/pool/config — static defaults for UI pre-submit preview (D4 wallet浮窗 estimate fee)
+  // POST /api/admin/pool/propose-close-v2 — buildProposeCloseRequestV2 的活进程调用入口(2026-07-08,
+  // market5/pxvml 首次实战 propose)。只是执行位置的 wiring(standalone 脚本连不到 relay-manager.js 的
+  // 活 relay 注册表), 不是新业务逻辑——buildProposeCloseRequestV2 本身已设计+落码(缺件② thin-shell),
+  // 复用 adminConfirmByAddress 同款 secret+IP allowlist 认证(条件②⑤同款), 窄路由默认 OFF。
+  fastify.post('/api/admin/pool/propose-close-v2', async (request, reply) => {
+    if (process.env.ADMIN_PROPOSE_CLOSE_V2_ENABLED !== '1') {
+      return reply.code(503).send({ ok: false, error: 'admin endpoint disabled (ADMIN_PROPOSE_CLOSE_V2_ENABLED != 1)' });
+    }
+    const adminSecret = process.env.ADMIN_SECRET;
+    if (!adminSecret) return reply.code(503).send({ ok: false, error: 'admin endpoint disabled (ADMIN_SECRET env 未设)' });
+    const provided = request.headers['x-kanet-admin-secret'];
+    if (!provided || provided !== adminSecret) {
+      return reply.code(403).send({ ok: false, error: 'admin auth fail (X-KANet-Admin-Secret 缺失/不匹配)' });
+    }
+    const ipAllowlist = (process.env.ADMIN_IP_ALLOWLIST || '127.0.0.1,::1,::ffff:127.0.0.1').split(',').map(s => s.trim());
+    if (!ipAllowlist.includes(request.ip)) {
+      return reply.code(403).send({ ok: false, error: `admin auth fail (source IP ${request.ip} 不在 ADMIN_IP_ALLOWLIST)` });
+    }
+    const { market_id, winning_direction, end_block_hash, settler_relay_id } = request.body || {};
+    if (!market_id || (winning_direction !== 0 && winning_direction !== 1) || !end_block_hash || !settler_relay_id) {
+      return reply.code(400).send({ ok: false, error: 'market_id, winning_direction(0|1), end_block_hash, settler_relay_id 全部必需' });
+    }
+    try {
+      const { buildProposeCloseRequestV2 } = await import('../lib/bshard-close-transport.mjs');
+      const result = await buildProposeCloseRequestV2(market_id, {
+        winningDirection: winning_direction, endBlockHash: end_block_hash, settlerRelayId: settler_relay_id,
+      });
+      return reply.send({ ok: true, ...result });
+    } catch (e) {
+      console.error(`[admin/propose-close-v2] ${market_id} fail: ${e.message}`);
+      return reply.code(500).send({ ok: false, error: `propose-close-v2 failed: ${e.message}` });
+    }
+  });
+
   fastify.get('/api/pool/config', async (request, reply) => {
     return reply.send({
       ok: true,
