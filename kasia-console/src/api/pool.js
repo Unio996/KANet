@@ -109,6 +109,28 @@ function deriveXOnlyPubkey(address) {
   });
 }
 
+// ZK-native 结算(2026-07-07，Owner"ZK走到底"钦定首证市场)。Bettor 拍板(#9ufcxq)：zk_native 必须是
+// resolution_rule_spec 里一个独立、显式的顶层布尔字段——不能从 outcome_market_source(judge类型，怎么判输赢)
+// 推断 covenant 版本(钱走 PayoutShard 还是 PayoutShardV2)，这两者是正交的两件事，今天恰好一对一是巧合
+// (首证市场用区块哈希奇偶判定+同时是唯一的ZK-native盘)，未来 ESPN/UMA 判定的市场也可能想走 ZK-native，
+// 届时不该因为 judge 类型不是 blockhash_parity 就被这条推断挡住。
+// 🔴 单一真值(2026-07-08, Bettor #bo75z6): 曾经两处调用点(monolithic /register-v07 + /register-v07/confirm)
+// 各自独立读取这段逻辑, 后者漏抄导致 cswib 首证撞见的 zk_native=true 市场静默铸成 V1 PayoutShard 事故——
+// 抽成这一个共享函数, 两处调用同一份, 不再各自维护各自的副本(今晚已两次撞"两套并行实现同族病"教训)。
+function _resolveZkNativeCtorExtras(market, silverc, computeCloseZkTmplAnchor) {
+  let zkNative = false, closeZkTmplAnchor = null;
+  try { zkNative = JSON.parse(market.resolution_rule_spec || '{}')?.zk_native === true; } catch {}
+  if (zkNative) {
+    // ⚠ gateTmplHash 绑定具体 guest image_id，昨晚 LANDED 交易(txId 4ec9ddd1...)定版值，见
+    // _j2_final_gate_data_v2.json。CloseZkRepro4.sil 路径归位(移出根目录 _* 命名约定)是独立非阻塞
+    // 待办(Bettor 记录过)，今天先引用它现在的真实位置，不假装已经归位。
+    const gateTmplHash = process.env.ZK_GATE_TMPL_HASH || '511b0eadf9b4421bca9b00b19262b02bc656faaebfe8c2b5821ddcf98353bfc1';
+    const closeZkSilPath = process.env.ZK_CLOSEZK_SIL_PATH || 'D:/kanet-tn12/_j2_closezk_repro4.sil';
+    closeZkTmplAnchor = computeCloseZkTmplAnchor(closeZkSilPath, gateTmplHash, silverc).anchorHex;
+  }
+  return { zkNative, closeZkTmplAnchor };
+}
+
 // KANet-UI 2026-06-11 (Bettor r606/r607 + J1 #143 chokepoint + NWT r66): broker/gateway 收款址必 P2PK.
 // 否则 settle always-pk-derive (J2 ca5e8658) 从 broker_pk 派生的地址 ≠ 意图收款址 → fee 到错处.
 // 所有 create 函数 derive brokerPk 后必经此校验 = chokepoint 覆盖全 gateway-设置路径 (无旁路).
@@ -1254,21 +1276,7 @@ export async function registerPoolRoutes(fastify) {
       // silverc.exe，会随任意 cargo build 原地漂移，07-07 事故的确切病灶), 改跟 pool-bshard-artifacts.mjs
       // 已修的那行同一模式——固定 versioned-builds 下按族 pin 的已知良性文件, 不再吃 target/release 默认。
       const silverc = process.env.SILVERC_LEGACY_PATH || 'D:/silverscript/versioned-builds/silverc-legacy-2c46231.exe';
-      // ZK-native 结算(2026-07-07，Owner"ZK走到底"钦定首证市场)。Bettor 拍板(#9ufcxq)：zk_native 必须是
-      // resolution_rule_spec 里一个独立、显式的顶层布尔字段——不能从 outcome_market_source(judge类型，
-      // 怎么判输赢)推断 covenant 版本(钱走 PayoutShard 还是 PayoutShardV2)，这两者是正交的两件事，今天
-      // 恰好一对一是巧合(首证市场用区块哈希奇偶判定+同时是唯一的ZK-native盘)，未来 ESPN/UMA 判定的市场
-      // 也可能想走 ZK-native，届时不该因为 judge 类型不是 blockhash_parity 就被这条推断挡住。
-      let _zkNative = false, _closeZkTmplAnchor = null;
-      try { _zkNative = JSON.parse(market.resolution_rule_spec || '{}')?.zk_native === true; } catch {}
-      if (_zkNative) {
-        // ⚠ gateTmplHash 绑定具体 guest image_id，昨晚 LANDED 交易(txId 4ec9ddd1...)定版值，见
-        // _j2_final_gate_data_v2.json。CloseZkRepro4.sil 路径归位(移出根目录 _* 命名约定)是独立非阻塞
-        // 待办(Bettor 记录过)，今天先引用它现在的真实位置，不假装已经归位。
-        const gateTmplHash = process.env.ZK_GATE_TMPL_HASH || '511b0eadf9b4421bca9b00b19262b02bc656faaebfe8c2b5821ddcf98353bfc1';
-        const closeZkSilPath = process.env.ZK_CLOSEZK_SIL_PATH || 'D:/kanet-tn12/_j2_closezk_repro4.sil';
-        _closeZkTmplAnchor = computeCloseZkTmplAnchor(closeZkSilPath, gateTmplHash, silverc).anchorHex;
-      }
+      const { zkNative: _zkNative, closeZkTmplAnchor: _closeZkTmplAnchor } = _resolveZkNativeCtorExtras(market, silverc, computeCloseZkTmplAnchor);
       // 命门① genesis coherence (NWT/Bettor load-bearing): PayoutShard 烤 predicate_commit = blake2b(canonicalPredicate(predicate))
       //   (单源 computePredicateCommit, 与 enforce 同函数) — 非 market_metadata_hash (= sha256({全市场元}) ≠ blake2b(canonical(predicate))
       //   → 委员 enforce hash-bind 永假 → close 永 BUST). predicate-less 市场(无结构化判)fallback metadata_hash(无命门③ enforce).
@@ -1528,15 +1536,9 @@ export async function registerPoolRoutes(fastify) {
       // resolution_rule_spec.zk_native——registerBettorOnShard 的 zkNative 参数缺省 false, 导致任何标记
       // zk_native=true 的市场经这条路径首注 genesis-mint 时静默铸成 V1 PayoutShard(committee-sig), 不是
       // PayoutShardV2——市场从 genesis 起物理上没有 zk_handoff/zk_close/claim 三个 entry, ZK 彩排/结算走不通。
-      // 老的单体 /register-v07 endpoint(L1257-1271)一直有这段逻辑, 只是没人发现两条路径分叉了。这里原样
-      // 镜像那段逻辑(不是重写, 同一份读取+计算), 让 confirm 路径跟单体路径行为对齐。
-      let _zkNative = false, _closeZkTmplAnchor = null;
-      try { _zkNative = JSON.parse(market.resolution_rule_spec || '{}')?.zk_native === true; } catch {}
-      if (_zkNative) {
-        const gateTmplHash = process.env.ZK_GATE_TMPL_HASH || '511b0eadf9b4421bca9b00b19262b02bc656faaebfe8c2b5821ddcf98353bfc1';
-        const closeZkSilPath = process.env.ZK_CLOSEZK_SIL_PATH || 'D:/kanet-tn12/_j2_closezk_repro4.sil';
-        _closeZkTmplAnchor = computeCloseZkTmplAnchor(closeZkSilPath, gateTmplHash, silverc).anchorHex;
-      }
+      // 老的单体 /register-v07 endpoint 一直有这段逻辑, 只是没人发现两条路径分叉了。Bettor 裁定(#bo75z6):
+      // 不抄一段重复代码(今晚已两次撞"两套并行实现"同族病), 抽共享函数 _resolveZkNativeCtorExtras, 两处调用同一份。
+      const { zkNative: _zkNative, closeZkTmplAnchor: _closeZkTmplAnchor } = _resolveZkNativeCtorExtras(market, silverc, computeCloseZkTmplAnchor);
       const result = await registerBettorOnShard({
         db: sqlite, rc, transfer, landed, p2sh, logicalMarketId,
         poolMerkleRoot: market.pool_merkle_root, predicateCommit,
