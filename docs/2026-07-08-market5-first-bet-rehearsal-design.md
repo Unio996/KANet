@@ -36,7 +36,8 @@
 - T1.2 **双边各注 1.5KAS**(两只团队 relay,经 gateway)——保证必有赢家 leaf+输家,claim 真实可触发且非 degenerate;
   - **claim 分支覆盖依赖 brokered 事实(NWT 复审观察,显式记录非隐性前提)**: 赢家 leaf+broker-1 fee leaf = ≥2 个独立 claimant,顺序 claim 天然覆盖 `else` 续锁分支+`if` 精确清零终结分支两条(正式场大概率撞的就是 else 路)。**谁先 claim 顺序不定,两种顺序都算过关。复用 5R 脚本者若改成 non-brokered 会悄悄弄丢 else 分支覆盖——禁改。**
 - T1.3 deadline 到 → propose(driver 薄壳踢)→ voter/submit cron 自治 attest(closed 0→1,**真状态**)→ 自动 enqueue → prove worker **~4min 真 Groth16**(禁 fixture,NWT ③裁定采纳)→ gate 铸造注资;
-- T1.4 **pre-broadcast 门①(zk_handoff)**: 生产 builder(buildCloseZkV2GenesisFromAttestedState)读真 attested PS(closed==1)构造 witness → cli-debugger run-all 全绿 + Bettor 盲算比对 → 确认令 → 广播 → landed;
+- T1.4 **pre-broadcast 门①(zk_handoff)**: 生产 relay 代码 dryRun(unlockBshardZkHandoff 六条件 dry-run 分支:UTXO 现读+组 tx+_assertTxInvariants,broadcasted:false)+ Bettor 盲算比对 → 确认令 → 广播 → landed。
+  - **门①范围裁定(04:1x·Bettor 裁,NWT verdict 待)**: 不含 cli-debugger require 级模拟——那需要现造 PayoutShardV2 27-param ctor 解码器(今天 72.31KAS 同族 offset 高危新代码,风险不对称拒绝)。受理前提=**门的严格度∝身后状态不可恢复性**: 门①失败最坏=witness 被拒,资金仍在 closed==1(有 escape_trigger 兜底,可恢复);genesis 天生无解风险已由 T0.1/T0.2 在 create 前拦截。**此逻辑不适用于门③(closed==2 无逃生舱)——门③ debugger 层不可降级。** 27-param 解码器=市场5后硬化卡。
 - T1.5 **pre-broadcast 门②(zk_close)**: dispatchUnlockZkClose 用真 receipt_hex 确定性重建 → debugger run-all → 确认令 → 广播 → landed;
 - T1.6 **pre-broadcast 门③(claim,全链首次)**: 生产 claim builder(缺件1)构造赢家 witness → debugger run-all(**含最后一笔精确清零分支**)→ 确认令 → 广播 → claim landed + 守恒验证;
 - T1.7 5R 全链闭合 → 频道贴三门证据(每门 require 清单+关键值+txid)→ **正式场放行令**。任何门红 = STOP(§6),5R 走 daemon 自动退款路。
