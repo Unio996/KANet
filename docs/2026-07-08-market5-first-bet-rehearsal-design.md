@@ -54,10 +54,10 @@
 |---|---|---|---|
 | 1 | gateway(KANet-UI-tn)UTXO consolidate 完成+链验(昨晚押注线断因) | KANet-UI | COORD-LEDGER 线(3) |
 | 2 | 开关矩阵核实(SETTLE_DAEMON/ZK_CLOSE_TICK/ZK_PROVE_WORKER/VOTER_V2/SUBMIT_V2 当前态+放行计划) | J2 | index.js 接线 |
-| 3 | exit-path 矩阵走查证据贴频道(closed==2 选A 4 绑定条件复述) | Bettor+NWT | #b5cnrk |
-| 4 | Σleaf==pool BLOCKING 断言 + fee_leaves 非空(broker-1)确认 | J1 | 硬门⑤ |
-| 5 | anchor 对当次实际编译重算(禁缓存) | J2 | 硬门⑥ |
-| 6 | ESCAPE_GRACE_MS 定标签字(占位 6h 未签) | Bettor 裁+Owner 知情 | 硬门③ |
+| 3 | exit-path 矩阵走查证据贴频道(closed==2 选A 4 绑定条件复述)| Bettor+NWT | ✅前半 #bk9qoh+NWT 联签(04:13);后半=5R mint 后带实参复走,并入 T1.4 确认令,NWT 复核防占位值糊弄 |
+| 4 | Σleaf==pool BLOCKING 断言 + fee_leaves 非空(broker-1)确认 | J1 | ✅(enqueue 生产路 L79-84+create-v07 自动挂 broker-1;死导出收敛=跟进卡) |
+| 5 | anchor 对当次实际编译重算(禁缓存) | J2 | ✅机制(live-derive 4b712f50+tripwire;genesis 时核对) |
+| 6 | ESCAPE_GRACE_MS=21600000(6h)定标签字 | Bettor 提案+J1 second+NWT 验算 三票✅(04:12) | 推导:15min stuck-alert(实证)+3h 环境重建(实证)+4min prove,×1.7 系数;NWT 非阻塞注:人响应隐含 11min 偏乐观,系数余量 +2.45h 覆盖。**仅签团队资金市场;外部用户资金市场 GRACE 重定标=Owner 级决策** |
 | 7 | 落码缺件(§4)全部 GREEN+NWT 审过 | 各 owner | — |
 | 8 | 卡死告警(zk-prove-job-stuck-alert)活性确认 | KANet-UI | §2.6 复合风险 |
 
