@@ -1519,16 +1519,30 @@ export async function registerPoolRoutes(fastify) {
       const _feeRecipients = { brokerPk: market.broker_pk || null, introducerPk: market.introducer_pk || null };
       const predicateCommit = _predicate ? computeMarketCommit(_predicate, _feeRecipients) : market.market_metadata_hash;
 
-      const { registerBettorOnShard } = await import('../lib/pool-shard-register.mjs');
+      const { registerBettorOnShard, computeCloseZkTmplAnchor } = await import('../lib/pool-shard-register.mjs');
       // 事故硬化(2026-07-08 backlog 调查, Bettor④指令): 这两处曾各自独立声明危险默认(target/release/
       // silverc.exe，会随任意 cargo build 原地漂移，07-07 事故的确切病灶), 改跟 pool-bshard-artifacts.mjs
       // 已修的那行同一模式——固定 versioned-builds 下按族 pin 的已知良性文件, 不再吃 target/release 默认。
       const silverc = process.env.SILVERC_LEGACY_PATH || 'D:/silverscript/versioned-builds/silverc-legacy-2c46231.exe';
+      // 🔴 事故修复(2026-07-08, cswib 首证撞见): 本 endpoint(prep+confirm 两步流, #28)此前完全没有读
+      // resolution_rule_spec.zk_native——registerBettorOnShard 的 zkNative 参数缺省 false, 导致任何标记
+      // zk_native=true 的市场经这条路径首注 genesis-mint 时静默铸成 V1 PayoutShard(committee-sig), 不是
+      // PayoutShardV2——市场从 genesis 起物理上没有 zk_handoff/zk_close/claim 三个 entry, ZK 彩排/结算走不通。
+      // 老的单体 /register-v07 endpoint(L1257-1271)一直有这段逻辑, 只是没人发现两条路径分叉了。这里原样
+      // 镜像那段逻辑(不是重写, 同一份读取+计算), 让 confirm 路径跟单体路径行为对齐。
+      let _zkNative = false, _closeZkTmplAnchor = null;
+      try { _zkNative = JSON.parse(market.resolution_rule_spec || '{}')?.zk_native === true; } catch {}
+      if (_zkNative) {
+        const gateTmplHash = process.env.ZK_GATE_TMPL_HASH || '511b0eadf9b4421bca9b00b19262b02bc656faaebfe8c2b5821ddcf98353bfc1';
+        const closeZkSilPath = process.env.ZK_CLOSEZK_SIL_PATH || 'D:/kanet-tn12/_j2_closezk_repro4.sil';
+        _closeZkTmplAnchor = computeCloseZkTmplAnchor(closeZkSilPath, gateTmplHash, silverc).anchorHex;
+      }
       const result = await registerBettorOnShard({
         db: sqlite, rc, transfer, landed, p2sh, logicalMarketId,
         poolMerkleRoot: market.pool_merkle_root, predicateCommit,
         bettorPk, direction: v.direction, stakeSompi: v.stakeAmount, relayAddr, silverc, sealCount: 32, deadline: market.deadline,
         createShardMarketRow, recordBettor,
+        zkNative: _zkNative, closeZkTmplAnchor: _closeZkTmplAnchor,   // 非 zkNative 市场: false/null，等价于不传，行为不变
       });
       // 🔴 #28 (B) wire-3/3 报销: bet 已注册 → sweep per-bet P2SH 付款回 gateway(补偿 gateway 垫的 stake)。
       //   **fire-and-forget·best-effort**: 不 await(不阻 success 返回)·sweep 失败【绝不 strand bet】(bet 已注册·gateway
