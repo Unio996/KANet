@@ -5330,5 +5330,36 @@ export function runMigrations() {
     console.log('[migrate] v181: zk_prove_jobs 补 fee_leaves_json/pool_total_sompi(§4硬门⑤禁bps-fallback, guest需要完整fee_leaves).');
   }
 
+  // v182 (2026-07-08, J2, #19 根治: betId 服务端持久化, 见设计稿 docs/2026-07-08-betid-persistence-and-
+  // pending-lifecycle-design.md, NWT 审 GREEN 0297e50e): tg-bot 的 betId(randomUUID, 派生 per-bet 地址的
+  // 关键参数)此前只活在 bot 进程内存 pendingPayments 里——console/tg-bot 任一重启, 已付款用户的 betId
+  // 永久丢失, per-bet 地址无法重建, 变成不可恢复孤儿单(2026-07-08 Martin 事故实例)。prep 时把
+  // (marketId,bettorPk,direction,betId,payAddr,金额) 持久化进这张表, 重启后可反查恢复。
+  //   UNIQUE 建在 bet_id 本身(不是三元组)——同一 bettor 同方向允许多笔独立在途加注(betId 存在的意义
+  //   就是解这个碰撞), 三元组唯一会在"二次加注、第一笔还没确认"场景把第一笔覆盖冲掉, 重新造孤儿
+  //   (NWT 红队初版设计时抓到这条, 已按此修正)。
+  {
+    const tables = sqlite.pragma("table_list").map((t) => t.name);
+    if (!tables.includes('pool_bet_preps')) {
+      sqlite.exec(`
+        CREATE TABLE pool_bet_preps (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          logical_market_id TEXT NOT NULL,
+          bettor_pk TEXT NOT NULL,
+          direction INTEGER NOT NULL,
+          bet_id TEXT NOT NULL,
+          pay_addr TEXT NOT NULL,
+          exact_stake_sompi INTEGER NOT NULL,
+          stake_kas REAL NOT NULL,
+          confirmed_at INTEGER,
+          created_at INTEGER NOT NULL
+        )
+      `);
+      sqlite.exec(`CREATE UNIQUE INDEX idx_pool_bet_preps_betid ON pool_bet_preps(bet_id)`);
+      sqlite.exec(`CREATE INDEX idx_pool_bet_preps_triple ON pool_bet_preps(logical_market_id, bettor_pk, direction, confirmed_at)`);
+      console.log('[migrate] v182: pool_bet_preps 建表(#19 根治, betId 服务端持久化防孤儿单).');
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
