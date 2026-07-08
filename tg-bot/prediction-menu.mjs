@@ -844,12 +844,14 @@ async function _handleReplyImpl(tgUser, text, linkedAddr) {
       pendingPayments.set(tgUser, pendingRecord); // set-pending-first (J2+Bettor 加固)
       const payRes = await api.tgWalletSend(tgUser, s.prep.side_p2sh, exactPayKas);
       if (payRes.ok && payRes.json?.ok) {
-        // #16 查漏补缺(2026-07-05, Owner实测撞见'重复押注不成功'): 这里之前只 delete session 不 delete
-        // pendingPayments, 残留记录会被 pollPendingBets 轮询清掉但存在几秒到十几秒的窗口——用户紧接着
-        // 开始第二笔操作会被 line 636 的 '!s 时检查 pendingPayments' 门禁拦住, 提示'还在等确认', 实际是
-        // 第一笔已经成功的付款还没被 poller 确认清空, 误导成"第二笔失败"。auto-pay 成功后立刻清掉
-        // pendingPayments(轮询改成靠 register-v07/confirm 自身幂等，不需要 pendingPayments 兜底重试)。
-        pendingPayments.delete(tgUser);
+        // 事故修复(2026-07-08, Owner升级反馈'auto-paid后卡住无法完成注册'): #16(2026-07-05)在这里加了
+        // pendingPayments.delete——但 register-v07/confirm 在整个 tg-bot 里【唯一】的调用点就是
+        // pollPendingBets(bot.mjs:491), 删掉 pendingPayments = 再也没有任何东西会去调 confirm 完成注册。
+        // payRes.ok 只代表转账广播调用本身没报错, 不代表这笔付款已经落链+完成 register-v07/confirm 注册
+        // ——中间这段窗口(几秒到几十秒)如果提前删记录, 这笔 bet 就永久停在"已扣款但未注册"。
+        // #16 原本要防的问题(残留几秒误导用户"还在等确认")是纯 UX 摩擦, 比"注册可能永久不发生"这个资金
+        // 追踪风险轻得多——改法: 不再提前 delete pendingPayments, 让它留着给 pollPendingBets 自然轮询,
+        // 既有的成功分支(bot.mjs 里 registered/already_registered 判定)本来就会在真正确认后清空它。
         sessions.delete(tgUser);
         persistNow();
         return t(lang, 'bet_autopay_success', { kas: exactPayKas });
