@@ -47,8 +47,11 @@ let botStartCalled = 0;
 const realBotStart = bot.start;
 bot.start = async () => { botStartCalled++; };
 
+// startBot() 现在是 async(2026-07-08 根治: 内部先 await verifyAndSyncBotUsername() 才走 bot.start()/
+// setInterval), 必须 await 完整个 promise, 否则 setInterval/bot.start 的桩替换窗口(下面 restore 那两行)
+// 会在真正调用发生前就提前收回, 造成未桩替换的 setInterval/bot.start 泄漏到测试窗口外真的触发。
 let threw = null;
-try { startBot(); } catch (e) { threw = e; }
+try { await startBot(); } catch (e) { threw = e; }
 
 // restore globals immediately
 globalThis.setInterval = realSetInterval;

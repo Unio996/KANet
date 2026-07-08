@@ -50,6 +50,32 @@ export async function resolveOwnerVoiceRelayId() {
   return '';
 }
 
+// 根治(2026-07-08, Owner "找根治问题" 指令): bot 之前完全信任 TELEGRAM_BOT_USERNAME env var 自报的
+// 用户名(CONFIG.botUsername 静态值, 从没验过跟 bot_token 是不是真的对应同一个 bot)——env 配错/过期,
+// 分享链接就指向一个完全不同的 bot(实况: Owner 转的真实用户会话暴露此坑, 链接打不开)。根治 = 用
+// Telegram 自己的 getMe API(唯一权威源, 传 bot_token 拿它自己认的 username, 不是"猜"或"配置")校验。
+// 调用一次即可(username 跟 token 绑定固定不会变), 在 startBot() 里、真正开始服务用户前调用, 成功则
+// 覆写 CONFIG.botUsername(所有现有读取点——bot.mjs/messages.mjs/prediction-menu.mjs 全部只读这个
+// 属性, 零改动自动拿到校验后的真值)。getMe 失败(网络/token 无效)→ 保留 env fallback 值 + LOUD warn,
+// 不阻断启动(bot 仍可能可用, 只是分享链接可能错——比硬失败更接近"诚实降级"这个既有原则)。
+export async function verifyAndSyncBotUsername() {
+  if (!CONFIG.botToken) { console.warn('[config] verifyAndSyncBotUsername: botToken 未配置, 跳过 getMe 校验'); return; }
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${CONFIG.botToken}/getMe`, { signal: AbortSignal.timeout(8000) });
+    const j = await res.json();
+    const realUsername = j?.result?.username;
+    if (!j?.ok || !realUsername) { console.warn(`[config] getMe 返回异常(不校验, 沿用 env 值 @${CONFIG.botUsername}): ${JSON.stringify(j).slice(0, 200)}`); return; }
+    if (realUsername !== CONFIG.botUsername) {
+      console.warn(`[config] 🔴 TELEGRAM_BOT_USERNAME 配错! env=@${CONFIG.botUsername} 但 getMe 真值=@${realUsername} — 已自动纠正(所有分享链接/消息现在用真值)`);
+      CONFIG.botUsername = realUsername;
+    } else {
+      console.log(`[config] getMe 校验通过: @${CONFIG.botUsername} 确实是这个 bot_token 对应的 bot`);
+    }
+  } catch (e) {
+    console.warn(`[config] getMe 调用失败(网络/超时, 沿用 env 值 @${CONFIG.botUsername}, 不阻断启动): ${e.message}`);
+  }
+}
+
 // BROKER_RELAY_ID is NOT a hard env requirement anymore (resolved at runtime from DB config/env).
 export function missingConfig() {
   const need = { TELEGRAM_BOT_TOKEN: CONFIG.botToken, INGEST_SECRET: CONFIG.ingestSecret };

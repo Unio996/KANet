@@ -29,4 +29,4 @@ console.log('[launch] token=' + (kv.TELEGRAM_BOT_TOKEN ? 'set' : 'MISSING') +
             ' broker=15593e10(broker-1) console=:3200');
 
 const { startBot } = await import('../tg-bot/bot.mjs'); // import registers handlers (no side-effects)…
-startBot();                                              // …startBot() goes live (grammy bot.start + pollers)
+await startBot();                                        // …startBot() goes live (grammy bot.start + pollers; now async — 根治 getMe 校验先跑完再 bot.start())

@@ -2,7 +2,7 @@
 // 价值/信任步 NEVER executed here; bot deep-links the USER to Console/relay to act + pay on-chain.
 // Run:  TELEGRAM_BOT_TOKEN=.. BROKER_RELAY_ID=.. INGEST_SECRET=.. node tg-bot/bot.mjs
 import { Bot } from 'grammy';
-import { CONFIG, missingConfig, resolveBrokerRelayId } from './config.mjs';
+import { CONFIG, missingConfig, resolveBrokerRelayId, verifyAndSyncBotUsername } from './config.mjs';
 import * as api from './console-api.mjs';
 import * as M from './messages.mjs';
 import * as PM from './prediction-menu.mjs';
@@ -570,7 +570,10 @@ async function pollBrokerFeeEvents() {
 // KANet-UI 2026-06-13: runtime side-effects (Telegram poller + the 3 background pollers, which can send
 // real messages) live in startBot() so `import`ing this module (e.g. from a test) registers the handlers
 // WITHOUT going live. _launch_tg_bot.mjs calls startBot(); tests import { bot } and feed bot.handleUpdate().
-export function startBot() {
+export async function startBot() {
+  // 根治(2026-07-08): 真正开始服务用户前先校验 CONFIG.botUsername(见 config.mjs verifyAndSyncBotUsername
+  // 注释) —— 覆写发生在这里, bot.start() 之后所有分享链接/消息构造读的都是校验后的真值。
+  await verifyAndSyncBotUsername();
   setInterval(async () => { brokerRelayId = await resolveBrokerRelayId(); }, CONFIG.brokerRefreshMs);
   setInterval(() => { pollLoop().catch(() => {}); }, CONFIG.pollMs);
   setInterval(() => { pollPendingBets().catch(() => {}); }, CONFIG.pendingBetPollMs);  // #28: fast poll (3s default) — protects in-flight custodial bet payments from defrag window

@@ -270,18 +270,38 @@ export async function registerKanetBrokerRoutes(fastify) {
     if (!bot_token || String(bot_token).trim().length < 20) {
       return reply.code(400).send({ ok: false, error: 'bot_token (Telegram @BotFather token) required' });
     }
+    // 根治(2026-07-08, Owner "找根治问题" 指令, #12): bot_username 之前是 broker 自报字段, 从没验过跟
+    // bot_token 是不是真的对应同一个 bot——broker 填错/填别人的 username, 下游(市场详情页/分享链接)会
+    // 指向一个完全不同的 bot, 只有真的点开才会暴露。用 Telegram 自己的 getMe API(唯一权威源, 传
+    // bot_token 换它自己认的 username)校验, 同时顺手验了 token 本身是不是真的有效(之前只查字符串长度
+    // ≥20, 连是不是真 token 都没验)。getMe 失败(token 无效/网络问题)直接拒绝 onboarding, 不静默放行。
+    let verifiedUsername;
+    try {
+      const meRes = await fetch(`https://api.telegram.org/bot${String(bot_token).trim()}/getMe`, { signal: AbortSignal.timeout(8000) });
+      const meJson = await meRes.json();
+      verifiedUsername = meJson?.result?.username;
+      if (!meJson?.ok || !verifiedUsername) {
+        return reply.code(400).send({ ok: false, error: `bot_token 校验失败(getMe 返回: ${meJson?.description || 'invalid token'}) — 请确认这是从 @BotFather 拿到的真实 token` });
+      }
+    } catch (e) {
+      return reply.code(502).send({ ok: false, error: `bot_token 校验失败(无法连接 Telegram API: ${e.message}) — 请稍后重试` });
+    }
+    if (bot_username && String(bot_username).replace(/^@/, '') !== verifiedUsername) {
+      console.warn(`[kanet-broker/onboard] broker=${broker_address} 提交的 bot_username=@${bot_username} 跟 getMe 真值 @${verifiedUsername} 不符 — 已用真值覆盖, 不信自报`);
+    }
     const now = new Date().toISOString();
     const tokenEnc = encrypt(String(bot_token).trim());
     const net = broker_address.startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
 
     // upsert by address (地址制 UNIQUE)。重复提交 = 更新 token/username, status 保持 (approved 不回退到 pending)。
+    // bot_username 存 verifiedUsername(getMe 真值), 不存 broker 自报的 bot_username 参数(防止 §上方 mismatch)。
     const existing = sqlite.prepare('SELECT id, status FROM broker_onboarding WHERE broker_address = ?').get(broker_address);
     if (existing) {
-      sqlite.prepare('UPDATE broker_onboarding SET bot_token_encrypted = ?, bot_username = COALESCE(?, bot_username), updated_at = ? WHERE broker_address = ?')
-        .run(tokenEnc, bot_username || null, now, broker_address);
+      sqlite.prepare('UPDATE broker_onboarding SET bot_token_encrypted = ?, bot_username = ?, updated_at = ? WHERE broker_address = ?')
+        .run(tokenEnc, verifiedUsername, now, broker_address);
     } else {
       sqlite.prepare(`INSERT INTO broker_onboarding (id, broker_address, bot_token_encrypted, bot_username, status, created_at, updated_at)
-        VALUES (?,?,?,?,?,?,?)`).run(randomUUID(), broker_address, tokenEnc, bot_username || null, 'pending', now, now);
+        VALUES (?,?,?,?,?,?,?)`).run(randomUUID(), broker_address, tokenEnc, verifiedUsername, 'pending', now, now);
     }
 
     // Permissionless broker onboarding (Owner 2026-07-04 钦定: 测试网无许可自由进出, 移除人工审批门,
@@ -291,13 +311,13 @@ export async function registerKanetBrokerRoutes(fastify) {
     const existingIdn = sqlite.prepare('SELECT trust_level FROM identities WHERE address = ?').get(broker_address);
     if (!existingIdn) {
       sqlite.prepare(`INSERT INTO identities (id, network, address, display_name, identity_type, trust_level, created_at, updated_at)
-        VALUES (?,?,?,?,?,?,?,?)`).run(randomUUID(), net, broker_address, bot_username || 'broker applicant', 'remote', 'recommended', now, now);
+        VALUES (?,?,?,?,?,?,?,?)`).run(randomUUID(), net, broker_address, verifiedUsername, 'remote', 'recommended', now, now);
     } else if (existingIdn.trust_level === 'normal') {
       sqlite.prepare('UPDATE identities SET trust_level = ?, updated_at = ? WHERE address = ?').run('recommended', now, broker_address);
     }
     // existingIdn.trust_level in ('owner','recommended') → 已放行不动; 'blocked' → 不解封.
 
-    return reply.send({ ok: true, broker_address, status: 'approved', note: '已提交, 即时激活 (testnet 无许可进出, 无需人工审批)。' });
+    return reply.send({ ok: true, broker_address, bot_username: verifiedUsername, status: 'approved', note: '已提交, 即时激活 (testnet 无许可进出, 无需人工审批)。bot_username 已经 getMe 校验为真值。' });
   });
 
   // GET /api/kanet-broker/onboard/status?address=… — 查单个地址 onboarding 状态 (token 永不回)。
