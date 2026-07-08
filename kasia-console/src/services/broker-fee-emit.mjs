@@ -122,6 +122,14 @@ export function brokerFeeLandedEmitTick(db, deriveBrokerAddress, log = () => {})
     const feeSompi = Number(outs[idx].amount_sompi || 0);
     if (!Number.isFinite(feeSompi) || feeSompi <= 0) { markEmitted(db, m.id, { skipped: 'zero_fee' }); noBrokerOutput++; continue; }
 
+    // §2.2(金额精确核对)暂缓落码(J1tn 2026-07-08 撞到真复杂度, 诚实标注不硬写):
+    //   真实 broker fee 公式在 pool-market-settler.js:computePoolPayouts() —— brokerFeePct 是【调用方传入
+    //   的参数】(非固定读某一列, market.broker_fee_pct 只是其中一种传法) + 有 minBrokerFee 底价 floor
+    //   (MIN_BROKER_FEE_SOMPI, 薄池场景会把 floor 值顶到比 pct 算出来的高)。要精确复现"这次结算实际用的
+    //   期望值", 必须完整重建 computePoolPayouts 的 participants/winner/minerFee 等全部输入调用它本体,
+    //   不是"pool × bps / 10000"这一行能糊弄的——写一个简化公式进钱路告警系统, 算出来的"期望值"本身就
+    //   可能是错的, 会制造比"没有这层检查"更糟的假警报噪音。排非阻塞待办, 需要跟 settle domain owner
+    //   (J2)对齐"复用 computePoolPayouts 本体需要重建哪些输入"这条再往下写, 不猜公式硬上。
     let marketTitle = m.id;
     try { const spec = JSON.parse(m.resolution_rule_spec || '{}'); marketTitle = spec.title || spec.question || m.id; } catch {}
 
