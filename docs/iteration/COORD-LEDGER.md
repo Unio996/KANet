@@ -8,6 +8,12 @@
 
 ---
 
+## 🔄 7/8 晚班·Bettor 中断接位+auto-pay 危机根治+门① 放行(2026-07-08 22:5x-23:1x 本地 / 15:5x-16:1x Z·Bettor 接位记账)
+- **Bettor 会话中断>1h(门① 盲算放行卡死在协调者身上)**: 前 Bettor 会话在 zk_handoff dryRun GREEN(09:49Z)后失联,新 Bettor 15:53Z 接位认账。**代价=escape grace 窗口被耗掉**(见下门① 发现①)。retro 素材:单点协调者失联=主线停摆,接位 SOP 这次从状态层+地面核实(git/DB/链/频道)完整走通,未吃陈饭。
+- **🔴 auto-pay 孤儿单危机(真实用户 KANetguy 触发,Owner 四连严批)**: 根因=51a1ad1c(7/5,#16 UX 修复)在 auto-pay 成功分支提前删 pendingPayments,而 register-v07/confirm 全库唯一调用点=pollPendingBets 靠该记录驱动 → **payRes.ok 即断链,confirm 100%永不发生**(NWT 坐实非概率性)。三修复部署:4385d633(移除提前删,根治)+6a9a6d14(#19 betId write-side)+f378458d(pollPendingBets 熔断防真错误无限重试),全 NWT GREEN,第十二次重启生效。影响面摸底:24 托管钱包全扫,真实用户 8,**受影响=1(tg 7202335035≈KANetguy,余额耗至 0.97KAS 零注册)**+候选2(6/24 老号,余额 0,待一句话排除)。
+- **⚖️ Bettor 裁定(Owner"不要救火,根修"令后)**: 救单/资金追回降级挂起(测试网口径,Owner 要 make-whole 再启);摸底简报收口后该线关闭;**根修主线=test-framework 补托管钱包 auto-pay 全链真实 E2E**(旧 dm-bet-e2e 走的是外部手动付款路径,从未覆盖 hasCustodial 分支=bug 三天不被发现的根因)。J2 先落 stub 版 regression(073da3e4,NWT 复核=净增量但不算收口),全链版(真钱包+真上链+断言 pool_bettor_sides)J2+KANet-UI 搭建中。Owner 追加钦定:今后要 browser 级真实测试,挂既有 test-framework 不新造轮子(卡立案待半页方案)。
+- **⚖️ 门①(pxvml zk_handoff)Bettor 盲算 PASS→确认令已发(16:08Z #c9vm3i)**: 独立第二路(委员 4 签共识值+链上 UTXO 实额 320000000+env gateTmplHash 三源核对+自组 ctor 直调 pinned silverc)推导 CloseZkV2 genesis 地址 byte-exact 吻合生产 dryRun `pzlfp5f9...s0tc`;硬门3 后半实参复走=4 entry 无焊死态,escape 阈值纯 ms 域 15:30:49Z。脚本 `scratch/_bettor_pxvml_gate1_blind.mjs`。**发现②=payout_ps_addr 列 genesis 陈旧(实 UTXO 在 spliced 推导地址),并入 #22 写侧持久化纪律**;发现①=escape 窗口已开,无 daemon 自动调 escape_trigger(grep 证),handoff 落链后 prove→gate→zk_close 需紧凑推进。等 NWT 复核→KANet-UI 真广播→Bettor 链验守恒。
+
 ## 💸 7/8 白班·真实用户 Martin 孤儿单事故总账(2026-07-08 13:4x-14:1x 本地·真沉没成本·Owner make-whole 待决)
 > **诚实定性(NWT 挖出·不许'资金安全'糊弄)**: '钱没被盗' ≠ '钱回得来'。Martin 一人今天 3 笔押注(各 1000KAS custodial)、2 笔卡孤儿(06:08 `00409d2c`/06:44 `6e241dc0`)。全量扫 22 托管用户仅他撞上(4 次重启窗口高频下单)。
 - **根因链(三 bug 叠加)**: ①**betId=randomUUID 只活内存**(per-bet 地址确定性推导塞了从不持久化的随机数,J1 定性=设计错非'清太早')→重启即不可重建赎回见证;②pendingPayments 在'未注册成功'态被重启④误清(只该 registered/refunded 清);③pollPendingBets catch-all 静默吞错(同 EVM 泄漏事故家族)。
