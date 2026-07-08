@@ -27,6 +27,7 @@ import { listShards } from '../lib/shard-allocator.mjs';
 import { compileSil, ctorBytes32, ctorInt } from '../lib/pool-bshard-artifacts.mjs';
 import { isCommingledSpine } from '../lib/pool-commingle-detect.mjs';
 import { collectCloseSigsV2, clearCloseRequest, markSubmittedV2, QUORUM } from '../lib/bshard-close-transport.mjs';
+import { _splicePayoutV2CloseRedeem } from '../lib/bshard-close-enforce.mjs';
 import { enqueueZkProveJob } from '../lib/zk-prove-enqueue.mjs';
 
 const TICK_MS = 30_000;   // 30s tick (close_attest 时效性 > 普通 vote; settler 等 quorum)
@@ -599,6 +600,31 @@ export function startBshardCloseSubmitV2Cron() {
 export function stopBshardCloseSubmitV2Cron() { if (submitTimer) { clearInterval(submitTimer); submitTimer = null; } }
 
 /**
+ * _persistAttestedPsState — 事故修复(2026-07-08, pxvml首次实战门①撞到): close_attest_v2 广播+确认
+ *   landed 后, 此前【没有任何代码】把 attest 写入的新状态(closed 0→1 + payoutRoot/attestedWinner/
+ *   attestedAtMs/betsRootBaked/refundRootBaked)持久化回 payout_shards 表——跟今晚 absorb 那次(J2 修复
+ *   1ffe32db)同一根问题的第 4 次现身(NWT #22 命名扩大范围)。复用 _splicePayoutV2CloseRedeem
+ *   (bshard-close-enforce.mjs, D2 铁律 byte-exact 已验的单一拼接实现, 不新写一套 offset 逻辑)在
+ *   attest 前的 psRedeemHex 上原位写入 5 个新值, 新 outpoint = attest txId:0(self_out_idx 恒 0, 本
+ *   witness 结构固定)。写失败不影响 attest 本身已落链的事实(try/catch, 只 log 不 throw, 镜像
+ *   _tryEnqueueZkProve 同款"钱路已成立, 记账失败不倒灌回钱路状态"纪律)。
+ */
+function _persistAttestedPsState(marketId, req, txId) {
+  try {
+    const preRedeemHex = req.closeInputs.payoutshard.redeem_hex;
+    const spliced = _splicePayoutV2CloseRedeem(preRedeemHex, {
+      newPayoutRootHex: req.claimedPayoutRoot, newAttestedWinner: req.new_attestedWinner,
+      newBetsRootHex: req.new_betsRoot, newRefundRootHex: req.new_refundRoot, newAttestedAtMs: req.new_attestedAtMs,
+    });
+    sqlite.prepare('UPDATE payout_shards SET payout_redeem_hex = ?, payout_ps_outpoint = ? WHERE logical_market_id = ?')
+      .run(spliced, `${txId}:0`, marketId);
+    console.log(`[bshard-close-submit-v2] ✅ market=${marketId.slice(-8)} payout_shards 状态持久化(closed=1, outpoint=${txId}:0)`);
+  } catch (e) {
+    console.error(`[bshard-close-submit-v2] 🔴 market=${marketId.slice(-8)} payout_shards 状态持久化 FAILED (attest 本身已落链, 不受影响, 但下游 zk_handoff 会读到 stale 值): ${e.message}`);
+  }
+}
+
+/**
  * _tryEnqueueZkProve — 缺件①落地口(J1tn): close_attest_v2 确认 LANDED 后调用, 自动 enqueue 进 zk_prove_jobs
  *   (缺件②·zk-prove-worker.mjs 轮询消费)。**失败不影响 close_attest_v2 本身的已落链状态**——attest 是钱路
  *   已完成的既定事实(closed 0→1 已经落链), enqueue 只是"排队等 ZK 结算"这个下游步骤, enqueue 失败(比如
@@ -658,6 +684,7 @@ export async function bshardCloseSubmitV2Tick() {
       if (pendingTx?.txid) {
         const landedNow = await _pollLanded(pendingTx.psContAddress, pendingTx.txid, 1, 0);
         if (landedNow) {
+          _persistAttestedPsState(market.id, req, pendingTx.txid);
           clearCloseRequest(market.id, 'attested_v2');
           _tryEnqueueZkProve(market, req);
           submitted++;
@@ -685,6 +712,7 @@ export async function bshardCloseSubmitV2Tick() {
       // 否则 broadcast 声称成功但 tx 被节点拒绝/mempool 丢弃时, DB 会乐观地记成"已提交"而链上其实什么都没发生。
       const landedOk = await _pollLanded(r.psContAddress, r.txId);
       if (!landedOk) { failed++; console.warn(`[bshard-close-submit-v2] market=${market.id.slice(-8)} txId=${r.txId} broadcast OK 但等待窗口内未确认 landed — txId 已持久化(bshard_close_submit_v2_pending_txid), 下轮 tick 只查这一笔, 不重复 broadcast`); continue; }
+      _persistAttestedPsState(market.id, req, r.txId);
       clearCloseRequest(market.id, 'attested_v2');   // 独立 status 值, 跟 V1 completed/refunding 区分——后续链条(zk_handoff)接手。
       _tryEnqueueZkProve(market, req);
       submitted++;
