@@ -8,6 +8,23 @@
 
 ---
 
+## 🏁 今晚 checkpoint·ZK 生产线装配战役收工(2026-07-08 08:45 本地·Bettor 收尾·三方无异议·下次接力从这读)
+> **背景**: Owner 钦定"把 ZK 装配进生产线"→深夜连续作战~5.5h。跑通批A(委员 attest 自治)+批B(真 Groth16 proof 管线),市场5(第一个含 zk_close+claim 的真实市场完整端到端=Owner DoD)Bettor 拍板排下一班 fresh+Owner 在线做——理由: claim 环全链唯一从未真实触发+closed==2 选A 无逃生舱,凌晨疲劳态不碰钱路终环(止损纪律),J2/NWT 无异议,公测线扫查干净无碰伤。
+
+### ✅ 今晚战果(诚实口径分级)
+- **批A close_attest_v2 全自治×2 落链**: uqmp8 `52c0de5d`(4/5 委员 quorum)+3o0a6 `77b51987`(5/5)——propose 后 voter/submit cron 零人工,Bettor 盲算双命中(winDir=1/0),守恒分毫不差,六 vantage 验。
+- **批B 真 Groth16 proof 生产管线机制验证**: attest→J1 enqueue 自动→WSL worker→~4min 真 proof(job5 receipt 482B 真产出,非 fixture)全自治跑通。诚实边界: 机制级 PROVEN,close 环因 3o0a6 anchor 死锁未落,**未达真实市场完整端到端**。
+- **≥13 生产 bug 根治(全带 regression/tripwire)**: 委员派生单源化(bettor-exclude 闸从未生效 131/255 审计)/D1 root+attestedAtMs 实例池/voter sig INSERT 静默丢失+fail-closed 记账/level2-B landed-in-history/BSHARD_SETTLER_RELAY_ID/V2 cron 启动接线/captureSideLockDaa 链锚化/prove worker WSL spawn+下游 try/catch/ticket-indexer 漏块回填(VSPC 定位)/computeCloseZkTmplAnchor live-derive(4 处硬编码 offset 收口)/kaspa_tx_log LIKE 性能雷+indexer 完整性缺口。
+
+### 💸 学费账(全团队/faucet 资金·零真实用户·零 live 碰伤)
+- **焊死 3 笔=72.31KAS**: uqmp8 3.2(env stale anchor)+3o0a6 69.11(computeCloseZkTmplAnchor offset 过期+**Bettor anchor 硬门被同函数复算架空=vacuous·门责在 Bettor·retro 最高级**);孤儿 gate 1KAS(updateProvingReady 缺 try/catch,已修+确定性 gateAddr 可回收)。maker spine×2=200KAS **可回收**(refund_maker_unjoined,各 deadline+2h grace 后·立卡)。
+
+### ⏭ 下次接力点(严格序)
+1. **市场5=首注彩排制**(Bettor 设计待出): create+首注 1.5KAS 铸 PS 后**立即 cli-debugger 用真实 PS redeem 全链彩排 zk_handoff+zk_close+claim**,过彩排才放后续注——debugger 从验尸前移到 1.7KAS 体检;走通=第一个真实市场完整端到端(Owner DoD)。
+2. **回收卡**: maker spine×2 (200KAS·grace 到点)+孤儿 gate 1KAS+7jy3s daemon 自动退款核验(J2 带跟踪)。
+3. **明天正常流程卡**: kaspa_tx_log 630万行治理(反查索引表+同步慢查离 event loop)/indexer 完整性巡检+backfill 机制/②④offset live-derive 真重构(今晚仅绊线守)/fee 单一真相源收敛+份额政策 Owner 追认/broker fee ZK 线兑现(dust E2E 未达故未验)/propose+mint/handoff 自治 tick(补齐才发真实市场 demonstrate ON)/admin 窄路由退款端点(有 bettor 盘)/stuck-alert 阈值校准/chain_events deadbeef 哨兵已清+测试 try/finally 加固已落。
+4. **7/8 首轮框架 retro**(D-002·素材已 pre-fill FRAMEWORK-RETRO-TEMPLATE·今晚新增巨量: 库函数GREEN≠接线(6例)/driver ctx对production落后/observability说谎/双人收敛≠已验证(anchor门vacuous)/E2E=生产线体检器)。
+
 ## 🔴 J1tn 机器强制下线交接(2026-07-07 09:49·W4a 执行中断,零风险,J2 已接手)
 > **背景**: J1tn 当天完成 W4a 全部设计+落码+真实 proof 之后,在 Bettor GO 执行 zk_handoff 那一刻,机器被告知几分钟内要关机(非本人可控)。已确认零风险后交接,不抢在强制下线前赶广播。
 
