@@ -41,6 +41,7 @@
   - 曾试 NWT 第三选项(DB genesis 值+生产函数重编译+byte-exact 自证,免字节反解):J1 勘察=genesis/attest 两段可重建,**absorb 段无 splice 重建函数**=需新写 money-path 逻辑,1 轮时间盒触发按裁定回退。市场5后硬化卡=27-param 解码器 或 absorb-splice 重建(二选一即可补齐门① require 级)。
 - T1.5 **pre-broadcast 门②(zk_close)**: dispatchUnlockZkClose 用真 receipt_hex 确定性重建 → debugger run-all → 确认令 → 广播 → landed;
 - T1.6 **pre-broadcast 门③(claim,全链首次)**: 生产 claim builder(缺件1)构造赢家 witness → debugger run-all(**含最后一笔精确清零分支**)→ 确认令 → 广播 → claim landed + 守恒验证;
+  - **broker output 电路内 enforce 核实(Owner 2026-07-08 钦定,D-007 动作①)**: 门③走查时显式核实 broker-1 fee leaf 在 payoutRoot 树内(=电路 enforce 的一部分,claim 时链上验 membership),并在 broker fee claim 落链后对账 expected=池×pct——不是"到账了就行",金额必须精确匹配。
 - T1.7 5R 全链闭合 → 频道贴三门证据(每门 require 清单+关键值+txid)→ **正式场放行令**。任何门红 = STOP(§6),5R 走 daemon 自动退款路。
 
 ### T2 — 正式场(市场5):彩排过关后开盘
