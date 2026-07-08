@@ -34,7 +34,10 @@ let timer = null, running = false;
 
 // C1 级2-B (anti-identity-swap): canonical silverc + PoolSide sil = 必与 register/relay 铸 ticket 同源 build
 //   (记忆 silverc-build-determinism-pin: 跨节点必 pin 同一 silverc, 否则 bytecode 差→p2sh 差→false-BUST 杀 liveness)。
-const SILVERC = process.env.SILVERC_PATH || 'D:/silverscript/target/release/silverc.exe';
+// 事故硬化(2026-07-08 backlog 调查, Bettor④指令): target/release/silverc.exe 会随任意 cargo build 原地漂移
+// (07-07/07-08 两次事故的确切病灶——本文件是委员投票/enforce daemon, 编译 PayoutShard V1 家族合约必须 byte-exact),
+// 改跟 pool-bshard-artifacts.mjs 已修的那行同一模式, 固定按族 pin 的已知良性 legacy 文件。
+const SILVERC = process.env.SILVERC_LEGACY_PATH || 'D:/silverscript/versioned-builds/silverc-legacy-2c46231.exe';
 const POOLSIDE_SIL = join(dirname(fileURLToPath(import.meta.url)), '../lib/PoolSide_v08_shard.sil');
 
 // kaspa-wasm lazy-load (p2sh-from-redeem = pure crypto, no chain; mirrors pool-p2sh.mjs compileAndComputeP2SH).

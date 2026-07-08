@@ -24,6 +24,12 @@
 
 ## 🔴 当前有效的战略决策 (CURRENT)
 
+### D-007 correctness/liveness 分界 + broker-fee 独立对账器 (2026-07-08 · Owner 钦定架构指令 · J1 转达 · Bettor 记账派卡)
+- **分界(Owner 原话要义)**: **ZK 只证 correctness**(落链那笔算对了),**不证 liveness**(结算真发生了没——daemon 死/卡/anchor 死锁不会有 proof 告诉你"该收的三笔少了一笔")。团队此前感受的"不可靠"大部分= liveness 侧管线病,不是 ZK 的药能治的。
+- **方案**: 独立 broker-fee 对账器(J1 shadow-ledger 域):定时扫 broker 地址 UTXO(链=唯一真相)→按 txid 关联市场→核 expected=池×pct→三态输出(✅到账且对 / 🔴到账但金额不符=电路漏洞级警报 / 🟠过 deadline+grace 无 fee 落链=daemon 卡死警报)→每笔频道回执+日终汇总。**全程只读链,daemon 全灭照样准。**
+- **定位口径**: 对账器=broker 角色的协议能力(Track B 协议完整性一部分,任何第三方 fork 部署者当 broker 都需要),测试网收测试 KAS 不改定位。
+- **落地两动作(Owner 今日钦定)**: ①市场5 彩排验证清单加"broker output 电路内 enforce 核实"(已进 2026-07-08 市场5 设计稿 T1.6);②J1 对账器任务卡(读链+对账+频道通知,~1 天量,与 claim-complete 预注册验收标准同批,不单开线)。
+
 ### D-006 补 DEV-FRAMEWORK.md 断链 + 技术不确定性直接问 Bettor (2026-07-07 · J1tn 提 · Bettor 审后合并批准全队生效)
 - **背景①(断链·事实更正 by Bettor 审)**: ~~"该文件从未被创建"~~ **不实**——文件 2026-07-06 Owner 钦定当天已创建(含 Owner 原话/六步流程/lint 卡点机制)，但**一直未 commit、躺主机未跟踪**,J1tn 从自己节点静态查不到 → 误判"从未创建"重写四步简版(ff4d3b06)。Bettor 合并两版(原稿为基底+J1 增补 byte-exact 审核语言/问 Bettor 原则/参考区)为最终版。**此误判本身 = 背景②原则的同日第二实证**(静态回溯误判,问一句就清楚)。
 - **背景②(新原则)**: J1tn 同日对一条自己都不确定是否已发出的旧消息("escape_trigger blocker")，通读 COORD-LEDGER 自行判断是否陈饭，绕了一圈；Bettor 一句话查清真相(消息未广播成功，撞在 Phase0 停栈窗口)。**新增操作原则**：技术性不确定(旧消息是否陈饭/某假设对不对/某 blocker 是否仍开放)→直接问 Bettor，不要自己长链条静态回溯再拍。跟"设计前查资产"(CLAUDE.md 接位 SOP 第5条·防重造)不冲突——那条管设计/实现方案本身，本条管**事实性确认问题**。

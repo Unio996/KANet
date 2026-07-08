@@ -1250,7 +1250,10 @@ export async function registerPoolRoutes(fastify) {
 
     try {
       const { registerBettorOnShard, computeCloseZkTmplAnchor } = await import('../lib/pool-shard-register.mjs');
-      const silverc = process.env.SILVERC_PATH || 'D:/silverscript/target/release/silverc.exe';
+      // 事故硬化(2026-07-08 backlog 调查, Bettor④指令): 这两处曾各自独立声明危险默认(target/release/
+      // silverc.exe，会随任意 cargo build 原地漂移，07-07 事故的确切病灶), 改跟 pool-bshard-artifacts.mjs
+      // 已修的那行同一模式——固定 versioned-builds 下按族 pin 的已知良性文件, 不再吃 target/release 默认。
+      const silverc = process.env.SILVERC_LEGACY_PATH || 'D:/silverscript/versioned-builds/silverc-legacy-2c46231.exe';
       // ZK-native 结算(2026-07-07，Owner"ZK走到底"钦定首证市场)。Bettor 拍板(#9ufcxq)：zk_native 必须是
       // resolution_rule_spec 里一个独立、显式的顶层布尔字段——不能从 outcome_market_source(judge类型，
       // 怎么判输赢)推断 covenant 版本(钱走 PayoutShard 还是 PayoutShardV2)，这两者是正交的两件事，今天
@@ -1517,7 +1520,10 @@ export async function registerPoolRoutes(fastify) {
       const predicateCommit = _predicate ? computeMarketCommit(_predicate, _feeRecipients) : market.market_metadata_hash;
 
       const { registerBettorOnShard } = await import('../lib/pool-shard-register.mjs');
-      const silverc = process.env.SILVERC_PATH || 'D:/silverscript/target/release/silverc.exe';
+      // 事故硬化(2026-07-08 backlog 调查, Bettor④指令): 这两处曾各自独立声明危险默认(target/release/
+      // silverc.exe，会随任意 cargo build 原地漂移，07-07 事故的确切病灶), 改跟 pool-bshard-artifacts.mjs
+      // 已修的那行同一模式——固定 versioned-builds 下按族 pin 的已知良性文件, 不再吃 target/release 默认。
+      const silverc = process.env.SILVERC_LEGACY_PATH || 'D:/silverscript/versioned-builds/silverc-legacy-2c46231.exe';
       const result = await registerBettorOnShard({
         db: sqlite, rc, transfer, landed, p2sh, logicalMarketId,
         poolMerkleRoot: market.pool_merkle_root, predicateCommit,

@@ -14,7 +14,9 @@ import { blake2b } from '@noble/hashes/blake2b';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-const SILVERC = process.env.SILVERC_PATH || 'D:/silverscript/target/release/silverc.exe';
+// 事故硬化(2026-07-08 backlog 调查, Bettor④指令): target/release/silverc.exe 会随任意 cargo build 原地漂移,
+// 改跟 pool-bshard-artifacts.mjs 已修的那行同一模式, 固定按族 pin 的已知良性 legacy 文件。
+const SILVERC = process.env.SILVERC_LEGACY_PATH || 'D:/silverscript/versioned-builds/silverc-legacy-2c46231.exe';
 const SPINE_SIL = process.env.POOL_SPINE_SIL_PATH || join(__dirname, 'PoolSpine.sil');
 const SIDE_SIL = process.env.POOL_SIDE_SIL_PATH || join(__dirname, 'PoolSide.sil');
 const CACHE_DIR = process.env.SS_ARTIFACT_CACHE_DIR || join(tmpdir(), 'kanet-ss-artifact-cache');

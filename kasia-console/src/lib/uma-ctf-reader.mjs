@@ -54,8 +54,12 @@ export function makeCtfReader({ rpcs, ctfAddress = _CTF_POLYGON } = {}) {
       const overrides = atBlock != null ? { blockTag: Number(atBlock) } : {};
       // multi-RPC cross-check (RPC-trust): 每 RPC 读同 conditionId@同 block.
       const reads = await Promise.all(rpcs.map(async (url) => {
+        // 2026-07-08 泄漏修复(backlog事故实证, KANet-UI逐文件核实唯一裸奔点): provider 每次读都新建、
+        // 从未 destroy() — 本函数被 judge 轮询反复调用, 长期跑下来累积泄漏 EVM provider 连接/句柄(chains.js
+        // withProvider/withFallbackRpc 等 8 处均已有 finally{provider?.destroy?.()} 同款防护, 这里之前漏了)。
+        let provider;
         try {
-          const provider = new ethers.JsonRpcProvider(url, undefined, { staticNetwork: true });
+          provider = new ethers.JsonRpcProvider(url, undefined, { staticNetwork: true });
           const ctf = new ethers.Contract(ctfAddress, _CTF_ABI, provider);
           const den = BigInt(await ctf.payoutDenominator(conditionId, overrides));
           if (den === 0n) return { resolved: false, outcome: CTF_ABSTAIN };           // finality: 未 resolved → ABSTAIN
@@ -63,6 +67,7 @@ export function makeCtfReader({ rpcs, ctfAddress = _CTF_POLYGON } = {}) {
           const no = BigInt(await ctf.payoutNumerators(conditionId, 1, overrides));
           return { resolved: true, outcome: _payoutsToOutcome(yes, no), yes: yes.toString(), no: no.toString() };
         } catch { return null; }                                                       // RPC fail → null (fail-closed)
+        finally { try { provider?.destroy?.(); } catch {} }
       }));
       // finality + RPC-trust: 须【≥2 成功源 + 所有成功源同 resolved 且同 outcome 且 definitive(YES/NO 非 ABSTAIN)】才认.
       //   容忍部分 RPC down(filter null·单 RPC 宕不堵结算)·但 <2 成功源 → ABSTAIN(无 cross-check 不信单源)·成功源分歧 → ABSTAIN(有源说谎/stale).
