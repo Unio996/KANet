@@ -46,10 +46,24 @@ function kaspaZk() { if (!_kaspaZk) _kaspaZk = _require(ZKSDK_WASM_PATH); return
  * @param {string} outputBasename
  * @returns {Promise<{summary:object, receiptHex:string}>}
  */
+// 🔴 fix (Bettor 2026-07-08 00:0x, job 4 首次真实 proving 撞 LNK2019): RISC0 zkvm 工具链(rzup/cargo)装在
+// WSL Ubuntu-24.04 里(D-005 Phase1 验收环境, 今晚所有手动出证的 3o6cs proof 都是 WSL shell 跑的), 不是
+// 原生 Windows cargo——这条 spawn 之前直接调 Windows 'cargo', 链接器缺 risc0_zkvm_platform 的 syscall 符号
+// (Windows 侧从没装过完整 RISC0 toolchain)。改成通过 wsl.exe 在 WSL 里跑, 路径需要 Windows→WSL 转换
+// (D:\... → /mnt/d/...), 用 `-l`(login shell)确保拿到 rzup 装的 PATH(/root/.cargo/bin 等)。
+function toWslPath(winPath) {
+  const m = /^([A-Za-z]):[\\/](.*)$/.exec(winPath);
+  if (!m) throw new Error(`toWslPath: 非绝对 Windows 路径 (${winPath})`);
+  return `/mnt/${m[1].toLowerCase()}/${m[2].replace(/\\/g, '/')}`;
+}
 export function spawnCargoProve(inputJsonPath, outputBasename) {
   return new Promise((resolve, reject) => {
-    // 不用 shell:true(Node DEP0190 警告 + 非必要注入面——args 全部本函数自己拼的路径, shell 包装纯增风险无收益)。
-    const child = spawn('cargo', ['run', '--release', '--', inputJsonPath, outputBasename], { cwd: GUEST_HOST_DIR });
+    const wslCwd = toWslPath(GUEST_HOST_DIR);
+    const wslInput = toWslPath(inputJsonPath);
+    const wslOutputBase = toWslPath(outputBasename);
+    // 不用 shell:true(Node DEP0190 警告 + 非必要注入面)——wsl.exe 本身的 args 数组已经安全传递,
+    // -lc 后面那一整条命令字符串是唯一必须拼接的地方, 全部值来自本函数自己构造的路径(非外部输入)。
+    const child = spawn('wsl.exe', ['-e', 'bash', '-lc', `cd '${wslCwd}' && cargo run --release -- '${wslInput}' '${wslOutputBase}'`]);
     let stderr = '';
     const timer = setTimeout(() => { child.kill('SIGKILL'); reject(new Error(`spawnCargoProve: timeout after ${PROVE_TIMEOUT_MS}ms, killed`)); }, PROVE_TIMEOUT_MS);
     child.stderr.on('data', (d) => { stderr += d.toString(); });
