@@ -16,6 +16,14 @@
 - **✅ §3 硬门积分板**: 1✅⚠(gateway UTXO 92 健康,无 cron 覆盖=跟进卡,KANet-UI 哨兵>200 报警在岗)/2✅(开关矩阵:daemon/voterV2/submitV2/proveWorker=ON,ZK_CLOSE_TICK=OFF 确认令制)/4✅(Σleaf BLOCKING 在 enqueue 生产路+fee_leaves broker-1 自动挂,J1 核;非阻塞:assertPayoutLeavesConserved 死导出收敛卡)/5✅(anchor live-derive 机制)/8✅(stuck-alert 01:28 真触发实证)。在途:3(exit-path 走查,Bettor+NWT,点火前)/6(ESCAPE_GRACE_MS 定标签字,Bettor)/7(缺件落码 GREEN)。
 - **接力顺位不变**: 落码→T0(含 T0.3 selector 实测)→硬门3/6→5R 点火→正式场。回收卡/retro 排后。
 
+### 🔴 live 线事故(7/8 白班 11:4x-12:2x 本地·真实用户触发·根因三跳·全链修复验证)
+- **入口**: 真实用户 Martin DM(Owner 转)→ ①7 市场卡 Awaiting committee vote 一周 ②**1000KAS 真实转账落链但押注无记录**(有TX无STATE)。资金 30min 内链上定位=100%安全未花(per-bet P2SH,exact_sompi 分毫匹配)。
+- **根因三跳(两个假线索被系统性证伪)**: silverc binary 假说(KANet-UI 裸调没传 ctor 参数产生的 mismatch=假线索;J2 双 binary 正确参数实测全过=证伪)→ 资源耗尽方向(生产真报错=空字符串,日志掩蔽 bug)→ **真根因 = uma-ctf-reader.mjs:58 ethers provider 泄漏**(每次 UMA judge 重试泄 ≥2 个 provider 零 destroy,00:47 起 225 万行 JsonRpcProvider 刷屏,句柄耗尽 → 01:10 起 silverc spawn 全败 → register/confirm/voter 断 4h,期间零成功注册,Martin=首个撞上的真实用户)。
+- **修复(da1f75ce+0ab036ec,NWT 审 GREEN)**: ①uma-ctf-reader try/finally+destroy(照 chains.js withProvider 模板)②5 处 SILVERC 声明 pin versioned-builds(target/release 默认退役,L4)③观测性:空 stderr 不再掩 e.message ④一次安全重启清存量泄漏。**验证**: repro 编译 PASS/刷屏 0 PASS/**Martin 1000KAS 重启后首 tick 自动注册成功(id=33248)** PASS/新鲜盘 voter 签名并入 5R 兼验。
+- **事故中的纪律记账**: ✅KANet-UI 拦截 kill 提案(PID 实为 kaspad 本体+console 主进程,杀=TN12 全崩)→ **进程 kill 三件套纪律钉死**(PID身份+父子关系+Bettor批);✅NWT 两次自纠撤回+认账(kaspa wRPC 假说/kill 建议跳过身份核查);⚠ 未解之谜:04:48:52Z target/release/silverc.exe 被写为 legacy-2c46231(四 agent 全部举证排除,疑 Owner 手动,已终端求证挂起);⚠ supervisor 已死一天(硬化清单);⚠ NWT 审与重启时序轻微重叠。
+- **衍生卡**: MAX_WALK 老盘处置(backward-walk 摊销缓存,J1 方案,Martin 7 卡盘解药)/pollPendingBets 静默吞错硬化+regression case/gateway consolidate cron/kaspa wRPC 466 连接观察/UMA endpoint 健康。
+- **D-007 活教材**: correctness 线(批A/B)全绿的同一晚,liveness 线断 4h 无告警——broker-fee 对账器(J1 卡)的必要性被这次事故实证。
+
 ## 🏁 今晚 checkpoint·ZK 生产线装配战役收工(2026-07-08 08:45 本地·Bettor 收尾·三方无异议·下次接力从这读)
 > **背景**: Owner 钦定"把 ZK 装配进生产线"→深夜连续作战~5.5h。跑通批A(委员 attest 自治)+批B(真 Groth16 proof 管线),市场5(第一个含 zk_close+claim 的真实市场完整端到端=Owner DoD)Bettor 拍板排下一班 fresh+Owner 在线做——理由: claim 环全链唯一从未真实触发+closed==2 选A 无逃生舱,凌晨疲劳态不碰钱路终环(止损纪律),J2/NWT 无异议,公测线扫查干净无碰伤。
 
