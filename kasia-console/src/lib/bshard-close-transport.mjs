@@ -482,7 +482,21 @@ export async function buildZkHandoffRequestV2(marketId, args) {
     },
     outputs: { change_address: relayAddr },
   };
-  return rc(cmd, 90000);
+  const result = await rc(cmd, 90000);
+  // 🔴 事故修复(2026-07-08, pxvml实战撞出, 跟今晚#22族"状态转换后不持久化"同一个坑): 真广播(非dryRun)成功
+  //   拿到 txId 后, 之前没有任何代码把这次 handoff 产出的 CloseZkV2 genesis 写进
+  //   pool_markets.metadata.zk_continuation(closezk-v2-mint.mjs:writeZkContinuation)——prove worker 靠这份
+  //   metadata 才知道去哪个 outpoint 读 attested state, 不写 = job 排了也白排。psTx(上面已提取, 此刻仍是
+  //   attest 前的 ps.payout_ps_outpoint, 即 close_attest_v2 落链的那笔 txid)作为 sourceCloseAttestTxid 溯源锚。
+  if (!dryRun && result?.txId) {
+    const { writeZkContinuation } = await import('./closezk-v2-mint.mjs');
+    writeZkContinuation(marketId, {
+      outpointTxid: result.txId, outpointIndex: 0, redeemHex: result.closeZkRedeemHex,
+      valueSompi: state.consolidatedPool, attestedWinner: state.attestedWinner, attestedAtMs: state.attestedAtMs,
+      sourceCloseAttestTxid: psTx, sourceZkHandoffTxid: result.txId,
+    });
+  }
+  return result;
 }
 
 export { QUORUM };
