@@ -8,6 +8,13 @@
 
 ---
 
+## 💸 7/8 白班·真实用户 Martin 孤儿单事故总账(2026-07-08 13:4x-14:1x 本地·真沉没成本·Owner make-whole 待决)
+> **诚实定性(NWT 挖出·不许'资金安全'糊弄)**: '钱没被盗' ≠ '钱回得来'。Martin 一人今天 3 笔押注(各 1000KAS custodial)、2 笔卡孤儿(06:08 `00409d2c`/06:44 `6e241dc0`)。全量扫 22 托管用户仅他撞上(4 次重启窗口高频下单)。
+- **根因链(三 bug 叠加)**: ①**betId=randomUUID 只活内存**(per-bet 地址确定性推导塞了从不持久化的随机数,J1 定性=设计错非'清太早')→重启即不可重建赎回见证;②pendingPayments 在'未注册成功'态被重启④误清(只该 registered/refunded 清);③pollPendingBets catch-all 静默吞错(同 EVM 泄漏事故家族)。
+- **真沉没成本(计入总账·非'安全'能盖)**: adminConfirmByAddress(2839e5e1,七条件+NWT GREEN)能**登记押注生效**(Martin 能正常赢/输/赔付),但**源 pay_addr 那笔 ~1000KAS/笔永久锁死**——sweep 需 betId 重建 perBetRedeem,物理不可重建。**两笔 ~2000KAS testnet KAS 真沉没**+gateway 为两笔垫的 stake(独立资金)。**Owner make-whole 待决**: 只登记 / 登记+国库补源额。
+- **admin endpoint 七条件(BLOCKING 全绿)**: ①精确金额(delta∈[1000,9999] 同 nonce 精度非>=)②锚定 txid:output 非地址扫描③双人闸(ADMIN_SECRET 仅 Bettor 持=物理串双人:Bettor 批 txid+NWT 核三元组+KANet-UI 调+即关)④审计硬写 events/chain_events⑤内部 secret+IP allowlist 真认证(非'开关关着=安全')⑥窄路由默认 OFF⑦幂等 fail-closed。**执行等 Owner**(源 UTXO 沉没不可逆,不抢跑)。
+- **衍生根治**: #19 CRITICAL(betId 持久化/不用随机数进推导公式)+#10(pending 生命周期+pollit 吞错+regression case)+admin confirm=未来所有孤儿逃生通道。**Martin 第1笔(04:14)已注册正常**,第2/3笔待 Owner 决。
+
 ## 🚀 7/8 白班·市场5 两场制设计闭合+落码执行中(2026-07-08 10:4x-11:1x 本地·Bettor 白班接位)
 > **班组**: Bettor/NWT/J1tn/J2tn/KANet-UI 全员 fresh 接位(10:46-10:50),Owner 在线(市场5 执行条件满足)。
 - **⚖️ 市场5 设计 v1.0→v1.1 两场制(关键决策·NWT verdict ②③根治)**: `docs/2026-07-08-market5-first-bet-rehearsal-design.md`(a2b50ac1→77b8d5da)。v1.0"首注后立即彩排"被 NWT 抓死:zk_handoff 生产 builder 对 closed!=1 fail-closed throw(bshard-close-enforce.mjs:202-205,J1 作者+Bettor 双源码实证)+zk_close builder 强制真 receipt——字面走不通,会逼实现者造假输入(vacuous 诱导)。**根治=两场制**:市场5R 彩排场(最小真实市场,双边各注 1.5KAS,短窗,走完 create→attest→真 prove→三个 pre-broadcast 门→claim landed,焊死上限 ~4.5KAS)→ 5R 闭合才开正式场市场5(~104KAS 内,closed==2 选A 不变)。**pre-broadcast 门**=每个 money-entry 广播前,生产 builder witness 过 cli-debugger run-all+Bettor 盲算比对+确认令。brokered-coverage 显式条款:赢家+broker-1 ≥2 claimant 天然覆盖 claim 两分支,禁改 non-brokered(NWT 观察,防隐性前提丢失)。
@@ -15,6 +22,12 @@
 - **⚖️ 门① dry-run 裁定(relay 钱路小改·Bettor 按接位授权拍·Owner 在线可否决)**: unlockBshardZkHandoff 加显式 opt-in dryRun 分支(signedTx 组好后、submitTransaction 前唯一 early-return,witness 原样返回禁重拼,flag 不传=行为零变化,既有测试全绿+NWT diff 审"纯插入无逻辑变化")。替代方案=console 重抄 witness 拼装=两套并行实现,§1.2 明令禁,故 dry-run 是唯一正解。J1 落码门①②(门② dispatchUnlockZkClose 抽共享函数,逐字节等价+17/17 保绿)。
 - **✅ §3 硬门积分板**: 1✅⚠(gateway UTXO 92 健康,无 cron 覆盖=跟进卡,KANet-UI 哨兵>200 报警在岗)/2✅(开关矩阵:daemon/voterV2/submitV2/proveWorker=ON,ZK_CLOSE_TICK=OFF 确认令制)/4✅(Σleaf BLOCKING 在 enqueue 生产路+fee_leaves broker-1 自动挂,J1 核;非阻塞:assertPayoutLeavesConserved 死导出收敛卡)/5✅(anchor live-derive 机制)/8✅(stuck-alert 01:28 真触发实证)。在途:3(exit-path 走查,Bettor+NWT,点火前)/6(ESCAPE_GRACE_MS 定标签字,Bettor)/7(缺件落码 GREEN)。
 - **接力顺位不变**: 落码→T0(含 T0.3 selector 实测)→硬门3/6→5R 点火→正式场。回收卡/retro 排后。
+
+### 🔴 市场5 点火五连击(7/8 白班 12:2x-13:4x 本地·三场废弃两次HALT·每击都在钱前拦截)
+- **击1 ldtyn 废弃**: target_daa(判定块)<deadline_daa(关盘)5.5min=7jy3s 同款语义错(窗口尾可先看结果再下注)→ T1.1 新增 BLOCKING 检查(target>回读deadline+2400,公平性在 DAA 序空间与速率无关)。**击2 8xykm 废弃**: 差 119 DAA 没过门,门守住(边距用法纠偏:2400=验收底线,8000=预留)。**击3 cswib 变形**: AutoBetter 自家 bot 扫到公开市场灌 98KAS(池 4.5→102.55)+KANet-UI direction footgun(0=YES 误当 NO)→按 #b5cnrk 判例 GO 带五强化条件(claim 最小额先行等);**随后彩排逮到今天最大鱼:生产 create/confirm 两步流 zkNative 路由从未生效**(cswib 的 PS 实为 V1,poolMerkleRoot 在 V1 offset 精确命中;昨夜 V2 市场全是 driver 脚本直造)→ 修复=共享函数 _resolveZkNativeCtorExtras(64c95ca7,NWT GREEN)+regression case+AutoBetter env 停(恢复条款在案);cswib 降级老委员路结算(102.55KAS 团队钱安全)。**击4 yxllc 幻影 spine**: create 落库的 spine_lock_tx(ea6eeaff)在 acceptance 层被 gateway 自身并发 tx 抢赢=**从未生效,100KAS 从未离开 gateway,零损失**(判别链:三节点 0 UTXO→双独立块扫描 12753+3496 块零花费+tx 本体不在块宇宙→console.log 证内部零花费→blue 块≠tx 被接受机制收敛;中途 red-block/reorg/盗币假说全部对照实验证伪)。**击5 链速率乱流**: 块时间戳实测 52 DAA/s vs 昨日校准 8.0/s(TN12 单矿机方差),连带 isChainBlock 语义误用集体纠偏(J1 源码坐实:=SPC 祖先判定,非有效性;DAG 大多数合法块都 false)。
+- **根因定格(全天最大课)**: ①gateway 单地址身兼通信/建市/垫资/找零=竞态之源(Martin 案 confirm 失败同根);②钱路 landed 判定浅确认(mempool-accepted/首见即信)= NO TX NO STATE 的 acceptance 版,双向都咬过(Martin=有TX无STATE,yxllc=无TX有STATE)。
+- **复飞前置**: (A)create/confirm 深确认 REORG_SAFE_MIN_DEPTH=20 共享 helper(J2 落码中)+NWT 审+重启④;(B)执行窗纪律=gateway 串行化+KANet-UI 频道静默;(C)分址结构卡排后。**新增卡**: #14 direction footgun/#15 bot 排他+恢复条款/#17 tg-bot 深链身份/indexer acceptance 记账/create 落库前深确认。
+- **纪律记账**: KANet-UI 对照实验两次自证自纠(reorg 论/静默窗)+J1 时间盒止损+J2 撤回 flaky 判断+NWT 撤回 kill 建议并认账+Bettor 撤回'8~52都真'综合与 red-block 统一论(被 blue 判定证伪)——全员含协调者今天共 6 次公开撤回,均以证据为界。
 
 ### 🔴 live 线事故(7/8 白班 11:4x-12:2x 本地·真实用户触发·根因三跳·全链修复验证)
 - **入口**: 真实用户 Martin DM(Owner 转)→ ①7 市场卡 Awaiting committee vote 一周 ②**1000KAS 真实转账落链但押注无记录**(有TX无STATE)。资金 30min 内链上定位=100%安全未花(per-bet P2SH,exact_sompi 分毫匹配)。
