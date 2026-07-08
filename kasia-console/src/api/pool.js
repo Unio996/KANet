@@ -1774,6 +1774,40 @@ export async function registerPoolRoutes(fastify) {
     }
   });
 
+  // POST /api/admin/pool/zk-handoff-v2 — 门①(J1tn, 2026-07-08 市场5彩排): buildZkHandoffRequestV2 的
+  // 活进程调用入口。同 propose-close-v2 同款理由(standalone 脚本连不到活 relay 注册表)+同款认证
+  // (secret+IP allowlist)+窄路由默认 OFF。dryRun 默认 true(彩排门①纪律: 先 dry-run 核对再真广播,
+  // caller 必须显式传 dry_run:false 才会真花钱广播——防止默认值意外真广播)。
+  fastify.post('/api/admin/pool/zk-handoff-v2', async (request, reply) => {
+    if (process.env.ADMIN_ZK_HANDOFF_V2_ENABLED !== '1') {
+      return reply.code(503).send({ ok: false, error: 'admin endpoint disabled (ADMIN_ZK_HANDOFF_V2_ENABLED != 1)' });
+    }
+    const adminSecret = process.env.ADMIN_SECRET;
+    if (!adminSecret) return reply.code(503).send({ ok: false, error: 'admin endpoint disabled (ADMIN_SECRET env 未设)' });
+    const provided = request.headers['x-kanet-admin-secret'];
+    if (!provided || provided !== adminSecret) {
+      return reply.code(403).send({ ok: false, error: 'admin auth fail (X-KANet-Admin-Secret 缺失/不匹配)' });
+    }
+    const ipAllowlist = (process.env.ADMIN_IP_ALLOWLIST || '127.0.0.1,::1,::ffff:127.0.0.1').split(',').map(s => s.trim());
+    if (!ipAllowlist.includes(request.ip)) {
+      return reply.code(403).send({ ok: false, error: `admin auth fail (source IP ${request.ip} 不在 ADMIN_IP_ALLOWLIST)` });
+    }
+    const { market_id, settler_relay_id, dry_run } = request.body || {};
+    if (!market_id || !settler_relay_id) {
+      return reply.code(400).send({ ok: false, error: 'market_id, settler_relay_id 全部必需' });
+    }
+    try {
+      const { buildZkHandoffRequestV2 } = await import('../lib/bshard-close-transport.mjs');
+      const result = await buildZkHandoffRequestV2(market_id, {
+        settlerRelayId: settler_relay_id, dryRun: dry_run !== false,
+      });
+      return reply.send({ ok: true, marketId: market_id, ...result });
+    } catch (e) {
+      console.error(`[admin/zk-handoff-v2] ${market_id} fail: ${e.message}`);
+      return reply.code(500).send({ ok: false, error: `zk-handoff-v2 failed: ${e.message}` });
+    }
+  });
+
   fastify.get('/api/pool/config', async (request, reply) => {
     return reply.send({
       ok: true,

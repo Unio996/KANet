@@ -418,4 +418,68 @@ export async function buildProposeCloseRequestV2(marketId, judged) {
   return { ok: true, marketId, claimedPayoutRoot };
 }
 
+/**
+ * buildZkHandoffRequestV2 — 门①(J1tn, 2026-07-08 市场5彩排): 触发 PayoutShardV2 → CloseZkRepro4 的
+ *   zk_handoff(entry 4)。close_attest_v2 落链后(closed=1)才能调, prove worker 需要这一步产出的
+ *   zk_continuation 才会真正跑 job(今晚 pxvml 实战撞出的缺环: propose→attest 走完但没人触发这步)。
+ *   复用 readPayoutShardV2AttestedState(bshard-close-enforce.mjs, J1 已有切片) + computeCloseZkTmplAnchor
+ *   (pool-shard-register.mjs, J1 已有切片)——不重新实现任何字节构造逻辑, 只是把已经存在的两个函数接到
+ *   一次真实 relay 调用上(同 propose 那次 gap 的形状: 函数写好了零调用点)。
+ * @param {string} marketId
+ * @param {object} args { settlerRelayId, dryRun? }
+ * @returns {object} relay 返回值(dryRun:true 时 broadcasted:false + 可核字段; 否则含 txId)
+ */
+export async function buildZkHandoffRequestV2(marketId, args) {
+  const { settlerRelayId, dryRun = false } = args || {};
+  if (!settlerRelayId) throw new Error('buildZkHandoffRequestV2: settlerRelayId 必需');
+
+  const { sendCommandAsync } = await import('../services/relay-manager.js');
+  const { readPayoutShardV2AttestedState } = await import('./bshard-close-enforce.mjs');
+  const { computeCloseZkTmplAnchor } = await import('./pool-shard-register.mjs');
+
+  const market = sqlite.prepare('SELECT id FROM pool_markets WHERE id = ?').get(marketId);
+  if (!market) throw new Error(`buildZkHandoffRequestV2: market ${marketId} not found`);
+  // verify-value-source: PS 当前 redeem 现读(不信任何缓存字段, 今晚三次 stale-read 教训) — closed==1
+  // 由 readPayoutShardV2AttestedState 内部 fail-closed 校验(不是 close_attest_v2 刚落链的窗口会直接拒绝)。
+  const ps = sqlite.prepare('SELECT payout_redeem_hex, payout_ps_outpoint FROM payout_shards WHERE logical_market_id = ?').get(marketId);
+  if (!ps) throw new Error(`buildZkHandoffRequestV2: no payout_shards row for ${marketId}`);
+  const state = readPayoutShardV2AttestedState(ps.payout_redeem_hex);   // throws if closed != 1(还没 attest / 状态已推进)
+
+  // gateTmplHash/closeZkSilPath 必须跟这个市场 genesis-mint 时烤入 closeZkTmplAnchor 用的同一份值
+  // (pool.js:_resolveZkNativeCtorExtras 同源常量), 不能另起一份——否则四段模板跟链上已烤的 anchor 对不上。
+  const gateTmplHash = process.env.ZK_GATE_TMPL_HASH || '511b0eadf9b4421bca9b00b19262b02bc656faaebfe8c2b5821ddcf98353bfc1';
+  const closeZkSilPath = process.env.ZK_CLOSEZK_SIL_PATH || 'D:/kanet-tn12/_j2_closezk_repro4.sil';
+  const { templateA, templateB, templateC, templateD } = computeCloseZkTmplAnchor(closeZkSilPath, gateTmplHash);
+
+  const rc = (cmd, t = 90000) => sendCommandAsync(settlerRelayId, cmd, t);
+  const relayAddr = (await rc({ type: 'get_pubkey' })).address;
+
+  // fee input 必须精确 == consolidated_pool(unlockBshardZkHandoff 硬性要求, PS output 本身无余付空间) —
+  // 先转账精确这个数额到 relay 自己地址, 深确认(REORG_SAFE_MIN_DEPTH)落地后才喂进去(NO TX NO STATE)。
+  const { transferAndConfirm } = await import('../services/relay-manager.js');
+  const { REORG_SAFE_MIN_DEPTH } = await import('./pool-shard-register.mjs');
+  const feeSompi = state.consolidatedPool;
+  const feeTx = await transferAndConfirm(settlerRelayId, relayAddr, (Number(feeSompi) / 1e8).toFixed(8), { minDepth: REORG_SAFE_MIN_DEPTH, maxWaitMs: 90000 });
+
+  const [psTx, psIdxStr] = String(ps.payout_ps_outpoint).split(':');
+  const cmd = {
+    type: 'bshard_zk_handoff',
+    dryRun: dryRun === true,
+    inputs: {
+      payoutshard: {
+        redeem_hex: ps.payout_redeem_hex, outpointTxid: psTx, index: Number(psIdxStr),
+        state: { consolidated_pool: state.consolidatedPool.toString(), attestedWinner: state.attestedWinner, attestedAtMs: state.attestedAtMs, betsRootBaked: state.betsRootHex, refundRootBaked: state.refundRootHex },
+      },
+      fee: { address: relayAddr, outpointTxid: feeTx.txId, index: 0 },
+    },
+    witness: {
+      self_out_idx: 0,
+      template_a_hex: templateA.toString('hex'), template_b_hex: templateB.toString('hex'),
+      template_c_hex: templateC.toString('hex'), template_d_hex: templateD.toString('hex'),
+    },
+    outputs: { change_address: relayAddr },
+  };
+  return rc(cmd, 90000);
+}
+
 export { QUORUM };
