@@ -24,6 +24,12 @@
 
 ## 🔴 当前有效的战略决策 (CURRENT)
 
+### D-009 imageId/guest circuit 变更冻结门 (2026-07-08 · gateTmplHash 半更新事故 · Owner 复盘直接指令"更新开发框架相关内容")
+- **触发**: pxvml genesis 出生缺陷根因坐实——commit `9b9804b5`（7/7）把 ZK guest 的 `imageId` 从 `335cae6c...` 切到 `c9918501...` 时，配对的 `gateTmplHash`（`blake2b(prefix‖suffix)`）没同步重算，仍烤着配对旧 imageId 的值，`zk_close` 的链上校验从此物理不可能通过。7/8 当晚已用 Bettor 独立重算值（`4ec7ca3d...`）打了一次修值补丁（commit `7afd18e3`），J1 已出 live-derive+round-trip 根修方案（`docs/2026-07-08-gate-tmplhash-live-derive-design.md`，Bettor 方向审 GREEN-with-notes + NWT 红队 GREEN，落码 GO）。
+- **硬约束（本条即该 gate 的正式记录，不再靠"大家知道"）**: **在 live-derive+round-trip 落码并验证通过之前，冻结一切 imageId/guest circuit 变更**——修值补丁只是过渡，不是根治；任何人在这个约束解除前再次改动 imageId，必须先确认配对的 gateTmplHash（以及任何其它跟这个编译产物绑定的手工维护常量）是否也需要同步更新，且必须走本文档 D-006 的"技术不确定性直接问 Bettor"流程逐项核实，不能凭记忆判断"应该没别的配对值了"。
+- **同族参考**: `docs/ANTI-PATTERNS.md` 规则 55(手工配对常量必失同步)+ 规则 56(vacuous same-source verification，两条"独立"验证路径若共享同一常量来源不构成真正独立)。
+- **解除条件**: `docs/2026-07-08-gate-tmplhash-live-derive-design.md` 落码完成 + NWT 复核 GREEN + 一次真实 round-trip 自证跑通（不是"重跑一致"，是从当前 imageId 现场推导出的值跟硬编码值比对一致）。解除时在本条追加一行 SUPERSEDED 说明，不删除本条（保留事故记录）。
+
 ### D-008 ZK 线 payout 真相源 = guest circuit·fee 政策单源收敛 (2026-07-08 · pxvml 门② 盲算不中挖出 · NWT 红队定论 + Bettor 按接位授权拍板 · Owner 在线未否决)
 - **架构定论(NWT 源码级)**: CloseZkV2 `zk_close` 对 guestPayoutRoot **零链上校验 vs 委员值**=by-design——委员 attest 只锁 winner/betsRoot/refundRoot/atMs,payout 分配的 binding authority 在 **guest circuit**(Groth16 经 gateTmplHash 验)。`claimedPayoutRoot` 在 ZK-native 路径=historical artifact(V1 committee-settle 遗留),propose 侧仅"预告"非 binding。
 - **实弹分叉(触发本条)**: propose 侧 pool=Σ注(漏 seed)+FEE_CONFIG 3%(broker160+委员120bps)签出 e170e003(Σ=300M,若用于 claim 会焊死 0.2KAS);prove 侧 job=consolidatedPool+broker_fee_pct(Σ=320M 可精确清零)。同一市场两棵树三处三说法(FEE_CONFIG vs broker_fee_pct vs D-007 池×pct)。

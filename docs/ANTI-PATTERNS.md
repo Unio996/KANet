@@ -2801,4 +2801,61 @@ WHERE ...
 
 ---
 
+## 规则 55 · 手工配对常量必失同步 —— 改一个源值时,跟它配对烤死的派生常量不会自动跟着变,禁手工维护"配对值",改用 live-derive+round-trip 自证
+
+**触发时机**（2026-07-08，market5(pxvml) 门② zk_close pre-broadcast dry-run 抓到，Bettor 独立重算+链上已注资 gate 地址逐字节吻合双证坐实）：commit `9b9804b5`（2026-07-07）裁定把 ZK guest 的 `imageId` 从旧版本（`335cae6c...`）切到新版本（`c9918501...`），改动只更新了 `imageId` 这一个字段——但 `gateTmplHash`（`blake2b(prefix‖suffix)`，跟 `imageId` 是"同一个编译产物的两个不同哈希视角"，必须成对更新）**没有跟着重算**，仍停留在配对旧 `imageId` 时钉死的值（`b9d56ce4...`）。这个半更新的值随后被 pxvml 市场 genesis-mint 烤进链上 covenant——`zk_close` 入口的 `require(blake2b(prefix‖suffix)==gateTmplHash)` 从此**物理上永远无法通过**（不是重试/修复能解的运行时 bug，是这个市场从出生那一刻起就带着的永久性缺陷）。同族先例：`reference-hardcoded-sil-offset-staleness-live-derive-required`（硬编码 `.sil` 字节 offset 过期）——两者共同的结构性特征是**"从某个会变化的编译产物/源头派生出的常量，被当作独立的手工维护值烤进代码/链上"，源头一变，配对值必然脱钩，而且脱钩本身不会报错，只会在下游校验时才炸**。
+
+### Wrong
+```js
+// 改 guest 版本时只改了这一半
+const ZK_GATE = {
+  imageId: 'c9918501...',        // 已更新
+  gateTmplHash: 'b9d56ce4...',   // 忘了同步重算 —— 仍是配对旧 imageId 的值
+};
+```
+
+### Right
+```js
+// 启动时(或首次使用时, gate 在功能开关内防炸非 ZK 节点) round-trip 自证：
+// 从当前 imageId 现场推导 gateTmplHash，跟硬编码值比对，不一致就 fail-loud，不是让 stale 值悄悄流通。
+// 详见 docs/2026-07-08-gate-tmplhash-live-derive-design.md（J1 落码方案，NWT 红队 GREEN）。
+if (process.env.ZK_PROVE_WORKER_ENABLED === '1') {
+  const derived = computeGateTmplHashFromImageId(ZK_GATE.imageId);
+  if (derived !== ZK_GATE.gateTmplHash) throw new Error(`gateTmplHash 跟当前 imageId 不匹配: derived=${derived} != hardcoded=${ZK_GATE.gateTmplHash}`);
+}
+```
+
+### Why
+- **"改一个值时记得也改另一个"是靠人记性，人记性会忘**——尤其是配对关系不在同一行代码/同一次 diff 里可见时（这次两个常量确实在同一个对象里，仍然漏改，说明"就在旁边"都防不住，何况分散在不同文件的配对值）。
+- **过渡期风险**：修正一次配对值（本次改成 `4ec7ca3d...`）只是打了一次补丁，不是根治——下次任何人再改 `imageId`，同一颗雷会原样重埋。**硬约束：live-derive+round-trip 落码验证通过之前，冻结一切 imageId/guest circuit 变更**（这条本身应作为显式 gate 记进协调记录，不能靠"大家知道"）。
+- 这条不是新的错误类别，是**"手工同步的配对常量"这个反模式**的又一次现身（跟规则里其它"半更新/不完整迁移"案例同根）：只要允许"从某个源头派生的值，被当独立字段手工维护"，就必然有人在某次改动时漏改其中一个，而且这类 bug 在写下那一刻不会报错，只会在下游校验时才现形，排查成本远高于当场写对。
+
+## 规则 56 · "两条独立路径算出同一个值"不足以证明正确 —— 若两条路径共享同一个上游常量/配置来源，必须先画信源图，同源=按一源计（vacuous verification）
+
+**触发时机**（2026-07-08，market5 门①/门② 事故复盘，Bettor 主动认账 + NWT 独立复核也漏掉同一处）：门①（zk_handoff 广播前）阶段，Bettor 的"盲算算出的 closeZkAddress 跟 production dry-run 返回的地址 byte-exact 吻合"被当作独立验证的强证据，写进"无异议可以真广播"的结论——但 builder 代码跟 Bettor 的盲算脚本**读的是同一个 `ZK_GATE_TMPL_HASH` 环境变量**（当时已经是规则 55 描述的那个过期配对值），两边"独立算出同一个地址"只是"两边用了同一个错误常量，算出同一个错误结果"的必然结果，不是独立验证证明了正确性。**NWT 当时的复核也没抓到这一点**——红队复核走了和被审方相同的信源拓扑，复核就退化成了 echo，不是真正的第二路验证。
+
+### Wrong
+```
+路径A(builder):        读 env ZK_GATE_TMPL_HASH → 算出地址X
+路径B(盲算脚本):        读 env ZK_GATE_TMPL_HASH → 算出地址X
+结论: "两条独立路径吻合，可信" —— 错，两条路径的输入常量同源，这不是独立验证
+```
+
+### Right
+```
+盲算/独立验证开始前，先画一张信源图：
+- 路径A的每一个输入常量/配置，来自哪个 env var / config 文件 / builder 缓存？
+- 路径B同样列一遍。
+- 凡两条"独立"路径最终汇到同一上游（同 env、同 builder、同 config 文件），按同一个信源计——
+  这种情况下的"吻合"只能证明"常量被一致地传播/使用了"，不能证明"常量本身正确"。
+- 真正的独立验证要求至少一条路径从更底层的事实重新推导（比如从链上原始数据/密码学基础事实），
+  不能是"读取同一个缓存值再算一遍"。
+```
+
+### Why
+- 跟规则 55 是同一个事故里揪出的两个层面：规则 55 是"常量本身会过期"，本规则是"验证方法论没能抓住常量过期"——**审查任何"独立盲算/独立第二路验证"类证据时，除了确认计算逻辑/代码路径不同源，必须额外确认关键常量的输入来源是不是也真的独立**。
+- 这条不只对 gateTmplHash/closeZkTmplAnchor 这类"跟编译产物绑定"的常量有用，任何"多方独立验证"设计（预言机多签、委员盲算比对、跨节点 co-verify）都适用同一条纪律：验证设计者必须先问"这几条路径的输入常量物理上是不是来自不同源"，再决定这个验证能不能真正抓住"常量本身错了"这类 bug（vs 只能抓住"计算逻辑写错了"这类 bug）。
+
+---
+
 *本档案在 v2 spec 第八章元教训基础上独立。spec 聚焦"这次怎么做"，本档案聚焦"下次别再犯"。*
