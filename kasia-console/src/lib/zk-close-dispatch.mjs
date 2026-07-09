@@ -34,8 +34,11 @@ export function rebuildZkCloseGateWitness(proving, receiptHex, kaspaZk) {
   // 根修(2026-07-09, docs/2026-07-08-gate-tmplhash-live-derive-design.md 落码): 这是 zk_close 真广播/
   // 门②彩排 dry-run 共用的唯一 witness 重建入口(本文件头注)——gateTmplHash 是否跟当前 ZK_GATE.imageId
   // 配对新鲜, 在这里一处检查覆盖两条下游路径, 不用在每个调用方各自补一遍(同 D-009/规则55 根治的病灶:
-  // 别把"必须同步更新的配对值"留给人肉记性)。lazy+gate 在 ZK_PROVE_WORKER_ENABLED, 非 ZK 节点零影响。
-  ensureGateTmplHashFresh(ZK_GATE, kaspaZk);
+  // 别把"必须同步更新的配对值"留给人肉记性)。
+  // force=true(NWT finding②MED): 本函数走到这一行时 kaspaZk 参数已经必须真实可用(下面立刻用它 new 一个
+  // builder)——ZK_PROVE_WORKER_ENABLED 这个 flag 挡在这里没有"防炸非 ZK 节点"的意义, 只会在 proving/
+  // dispatch 分机部署(worker flag 只开在出证机, 广播机 flag=OFF)时让钱路最后一环的检查静默 no-op。
+  ensureGateTmplHashFresh(ZK_GATE, kaspaZk, { force: true });
   let sigScript, redeemScript;
   try {
     const kaspa = kaspaZk();

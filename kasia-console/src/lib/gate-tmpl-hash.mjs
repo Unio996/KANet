@@ -56,12 +56,32 @@ export function computeGateTmplHash(imageId, sampleReceiptHex, sampleJournalHash
 // round-trip 自证(§2.2, Bettor 注3 + NWT 审强制折入): 不在 console 进程启动那一刻无条件跑——非 ZK 节点
 // 没装 ZKSDK_WASM_PATH,无条件跑会让这些实例因为一个跟它们无关的新增强校验直接炸掉整个进程启动(#22族
 // 教训: 根治一个 drift 风险不该引入一个更 broad 的可用性风险)。改成 lazy,gate 在既有生产开关
-// ZK_PROVE_WORKER_ENABLED 后面(zk-prove-worker.mjs 已有,默认 OFF,复用不新开一个)。
-// 调用点(设计稿钉死): zkProveWorkerTick() 首次真正跑 proving 之前 / rebuildZkCloseGateWitness 首次被调用之前
-// (两个 ZK 功能真正被使用的入口,而非"进程启动"这个跟是否使用 ZK 无关的时间点)。
+// ZK_PROVE_WORKER_ENABLED 后面(zk-prove-worker.mjs 已有,默认 OFF,复用不新开一个)——除非调用方传
+// opts.force=true(genesis-bake/witness-rebuild 三个调用点专用: 这三处本身就要 WASM 才能继续往下走,
+// 到这里 WASM 必然可用,flag 在这几处没有"炸非 ZK 节点"的可用性意义,不该被它挡住检查,见 finding②)。
+//
+// 🔴 根修(2026-07-09, NWT 红队 finding①HIGH·docs/2026-07-09-NWT-redteam-gate-tmplhash-live-derive-66de59c6.md):
+// 首版只验了同文件内 ZK_GATE.imageId↔ZK_GATE.gateTmplHash 是否配对新鲜,但真正被烤进 covenant genesis 的值
+// 读的是 process.env.ZK_GATE_TMPL_HASH(kanet.env,三处消费点: bshard-close-transport.mjs buildZkHandoffRequestV2
+// /pool.js _resolveZkNativeCtorExtras/pool.js debugger endpoint)——ZK_GATE 常量本身新鲜不代表 env 也新鲜,
+// 两者是纯人肉同步的两份拷贝(7/8 J2 修值就是手动改两处)。下次改 imageId 若只改一处漏另一处,guard 会全绿
+// (它验的那份确实新鲜),但 stale 的那份照样烤进新 genesis——比没检查更糟(假安全感)。加一条跨源断言堵死。
+//
+// 调用点(设计稿钉死 + finding①(b) 补齐 genesis 上游两处): zkProveWorkerTick() 真正跑 proving 之前(lazy,
+// 走 ZK_PROVE_WORKER_ENABLED 开关,这是后台 cron,每个节点无论是否用 ZK 都会跑,必须 lazy 防炸非 ZK 节点)/
+// _resolveZkNativeCtorExtras 的 zkNative 分支内(force=true,mint 侧 genesis-bake,非 ZK 节点走不进这个分支)/
+// buildZkHandoffRequestV2 的 gateTmplHash 读取处(force=true,handoff 侧 genesis-bake)/
+// rebuildZkCloseGateWitness 首次被调用之前(force=true,zk_close 真广播+门②彩排共用入口)。
 let _zkGateVerified = false;
-export function ensureGateTmplHashFresh(ZK_GATE, kaspaZk) {
-  if (_zkGateVerified || process.env.ZK_PROVE_WORKER_ENABLED !== '1') return;
+export function ensureGateTmplHashFresh(ZK_GATE, kaspaZk, opts = {}) {
+  const { force = false } = opts;
+  if (_zkGateVerified) return;
+  if (!force && process.env.ZK_PROVE_WORKER_ENABLED !== '1') return;
+  // finding①(a): 跨源漂移断言——env(若已设)必须跟 ZK_GATE 常量一致。这条堵的是"两份拷贝各自看着都新鲜,
+  // 但彼此不一致"这个 ZK_GATE 内部一致性检查照不到的盲区(env 才是真正烤进 genesis 的那份)。
+  if (process.env.ZK_GATE_TMPL_HASH && process.env.ZK_GATE_TMPL_HASH !== ZK_GATE.gateTmplHash) {
+    throw new Error(`gateTmplHash 跨源漂移: kanet.env ZK_GATE_TMPL_HASH=${process.env.ZK_GATE_TMPL_HASH.slice(0, 16)}... != zk-close-builder.mjs ZK_GATE.gateTmplHash=${ZK_GATE.gateTmplHash.slice(0, 16)}... — 两处是手动同步的两份拷贝,改一处漏另一处即复发(规则55同族雷), fail-loud 不静默沿用任一方`);
+  }
   const { receiptHex, journalHash } = loadCanonicalSample();
   const computed = computeGateTmplHash(ZK_GATE.imageId, receiptHex, journalHash, kaspaZk);
   if (computed !== ZK_GATE.gateTmplHash) {

@@ -65,7 +65,40 @@ try {
 } catch (e) { ok(false, `real pair unexpectedly threw: ${e.message}`); }
 if (prevEnabled === undefined) delete process.env.ZK_PROVE_WORKER_ENABLED; else process.env.ZK_PROVE_WORKER_ENABLED = prevEnabled;
 
+console.log('[test] ④ 跨源一致性(NWT finding①HIGH 修复验证): kanet.env ZK_GATE_TMPL_HASH == ZK_GATE.gateTmplHash == 现场推导值:');
+if (process.env.ZK_GATE_TMPL_HASH) {
+  ok(process.env.ZK_GATE_TMPL_HASH === ZK_GATE.gateTmplHash, `env ZK_GATE_TMPL_HASH(${process.env.ZK_GATE_TMPL_HASH.slice(0, 16)}...) == ZK_GATE.gateTmplHash(${ZK_GATE.gateTmplHash.slice(0, 16)}...) — 三处消费点(buildZkHandoffRequestV2/_resolveZkNativeCtorExtras/debugger endpoint)实际读的是这份 env, 不是 ZK_GATE 常量本身`);
+  ok(process.env.ZK_GATE_TMPL_HASH === derived, `env ZK_GATE_TMPL_HASH == 现场推导值(三源闭环: env==ZK_GATE==derived)`);
+} else {
+  console.log('  ⏭️  跳过(此机 kanet.env 未设 ZK_GATE_TMPL_HASH — 非静默忽略, 显式记录跳过原因: 需在已配置 ZK env 的节点跑才能验这条)');
+}
+
+console.log('[test] ⑤ 跨源漂移 fail-loud(finding①(a) 修复验证): env 跟 ZK_GATE 不一致时必须 throw, 不能只验 ZK_GATE 内部自洽:');
+_resetVerifiedForTest();
+const prevEnvVal = process.env.ZK_GATE_TMPL_HASH;
+process.env.ZK_PROVE_WORKER_ENABLED = '1';
+process.env.ZK_GATE_TMPL_HASH = 'ff'.repeat(32); // 故意跟 ZK_GATE.gateTmplHash(真值)不一致
+try {
+  ensureGateTmplHashFresh(ZK_GATE, kaspaZk); // ZK_GATE 本身没问题(imageId/gateTmplHash 仍配对), 但 env 漂了
+  ok(false, 'env/ZK_GATE 不一致应该 throw, 没有throw — 说明只验了 ZK_GATE 内部自洽, finding①的洞还在');
+} catch (e) {
+  ok(/跨源漂移/.test(e.message), `env≠ZK_GATE 正确拒绝(不是"ZK_GATE 自己新鲜就放行"的假安全感): ${e.message.slice(0, 90)}...`);
+}
+if (prevEnvVal === undefined) delete process.env.ZK_GATE_TMPL_HASH; else process.env.ZK_GATE_TMPL_HASH = prevEnvVal;
+
+console.log('[test] ⑥ force:true 绕开 ZK_PROVE_WORKER_ENABLED 门(finding②MED 修复验证,genesis-bake 三个调用点用这个):');
+_resetVerifiedForTest();
+const prevEnabled2 = process.env.ZK_PROVE_WORKER_ENABLED;
+delete process.env.ZK_PROVE_WORKER_ENABLED; // 模拟 proving 在 A 机/dispatch 在 B 机, B 机 flag=OFF 的分机部署场景
+let forceRan = false;
+try {
+  ensureGateTmplHashFresh({ imageId: ZK_GATE.imageId, gateTmplHash: '00'.repeat(32) }, kaspaZk, { force: true });
+} catch (e) { forceRan = /配置漂移/.test(e.message); }
+ok(forceRan, 'force:true 时即使 flag 未设也真的执行了检查(用错配对值验证抛错, 证明没有被 flag 挡住 no-op)');
+_resetVerifiedForTest();
+if (prevEnabled2 === undefined) delete process.env.ZK_PROVE_WORKER_ENABLED; else process.env.ZK_PROVE_WORKER_ENABLED = prevEnabled2;
+
 console.log(fails === 0
-  ? '\n✅✅ ALL PASS — gateTmplHash 跟当前 imageId 配对新鲜, 两条切法路径一致'
+  ? '\n✅✅ ALL PASS — gateTmplHash 跟当前 imageId 配对新鲜, 两条切法路径一致, 跨源(env↔ZK_GATE)一致性+force 绕开门 均验证通过'
   : `\n❌ ${fails} assertions failed — gateTmplHash 配置漂移或切法分叉, 不能当 D-009 解除证据`);
 process.exit(fails === 0 ? 0 : 1);

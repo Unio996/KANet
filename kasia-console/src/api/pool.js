@@ -16,6 +16,9 @@ import { getSidesByLogicalMarket } from '../lib/pool-bettor-sides-query.mjs';
 import { createHash, randomUUID } from 'node:crypto';
 import { verifyIngestRequest } from '../services/ingest-auth.js';  // P1 fix (NWT): broker-fee-dm PII 端点 auth
 import { REORG_SAFE_MIN_DEPTH } from '../lib/pool-shard-register.mjs';  // #33 整顿(NWT review): 单一具名常量取代多处硬编码 20
+import { ZK_GATE } from '../lib/zk-close-builder.mjs';
+import { ensureGateTmplHashFresh } from '../lib/gate-tmpl-hash.mjs';
+import { kaspaZk } from '../services/zk-prove-worker.mjs';
 
 // L4 (area-11): create-time invariants. Hardcoded mirrors of the settler constants;
 // kept inline rather than imported because they're stable v0.5 protocol values
@@ -127,6 +130,11 @@ function _resolveZkNativeCtorExtras(market, silverc, computeCloseZkTmplAnchor) {
     // bshard-close-transport.mjs:453-461 已落地的同款纪律对齐, 不留"看起来能跑但值可能不对"的窗口。
     if (!process.env.ZK_GATE_TMPL_HASH) throw new Error('_resolveZkNativeCtorExtras: ZK_GATE_TMPL_HASH env 必需(不接受硬编码 fallback, 该值随 guest image 变化易过期)');
     if (!process.env.ZK_CLOSEZK_SIL_PATH) throw new Error('_resolveZkNativeCtorExtras: ZK_CLOSEZK_SIL_PATH env 必需(不接受硬编码 fallback, 路径随归位进度变化)');
+    // 根修(2026-07-09, NWT finding①(b)HIGH): 这是 zkNative 市场 genesis-mint 的 ctor 组装点——之前的
+    // guard 只在 prove/close(genesis 下游)才检查, 这里(genesis 本身)从来没人验过 env 跟 ZK_GATE 是否
+    // 配对新鲜。force=true: 走进这个 if 分支已经确定 zkNative=true(真在铸 ZK-native genesis), 非 ZK 节点
+    // 根本不会进这里, flag 在这没有可用性风险; 没装 WASM 的节点 fail-loud 拒铸, 好过烤一个没法验证的值。
+    ensureGateTmplHashFresh(ZK_GATE, kaspaZk, { force: true });
     const gateTmplHash = process.env.ZK_GATE_TMPL_HASH;
     const closeZkSilPath = process.env.ZK_CLOSEZK_SIL_PATH;
     closeZkTmplAnchor = computeCloseZkTmplAnchor(closeZkSilPath, gateTmplHash, silverc).anchorHex;

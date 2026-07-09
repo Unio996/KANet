@@ -456,6 +456,14 @@ export async function buildZkHandoffRequestV2(marketId, args) {
   // 缺 env 直接 throw, 逼调用方显式配置, 不留"看起来能跑但值可能不对"的窗口。
   if (!process.env.ZK_GATE_TMPL_HASH) throw new Error('buildZkHandoffRequestV2: ZK_GATE_TMPL_HASH env 必需(不接受硬编码 fallback, 该值随 guest image 变化易过期)');
   if (!process.env.ZK_CLOSEZK_SIL_PATH) throw new Error('buildZkHandoffRequestV2: ZK_CLOSEZK_SIL_PATH env 必需(不接受硬编码 fallback, 路径随归位进度变化)');
+  // 根修(2026-07-09, NWT finding①(b)HIGH·docs/2026-07-09-NWT-redteam-gate-tmplhash-live-derive-66de59c6.md):
+  // 这是 zk_handoff 铸 CloseZkV2 genesis 的实际调用点——pxvml 出生缺陷的历史事发路径原文("错值经 kanet.env
+  // 烤进 pxvml genesis")。之前的 guard 只在 prove/close(genesis 下游)检查, genesis 本身这个点从没验过。
+  // force=true: 走到这里已经是真实 zk_handoff 广播准备, 非 ZK 节点根本不会调这个函数, flag 没有可用性意义。
+  const { ZK_GATE } = await import('./zk-close-builder.mjs');
+  const { ensureGateTmplHashFresh } = await import('./gate-tmpl-hash.mjs');
+  const { kaspaZk } = await import('../services/zk-prove-worker.mjs');
+  ensureGateTmplHashFresh(ZK_GATE, kaspaZk, { force: true });
   const gateTmplHash = process.env.ZK_GATE_TMPL_HASH;
   const closeZkSilPath = process.env.ZK_CLOSEZK_SIL_PATH;
   const { templateA, templateB, templateC, templateD } = computeCloseZkTmplAnchor(closeZkSilPath, gateTmplHash);
