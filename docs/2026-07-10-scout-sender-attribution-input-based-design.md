@@ -54,13 +54,20 @@ const sender = outputAddresses[0] || null;
 
 // Right:
 const publisher = inputAddresses[0] || null;   // fail-loud: 没有 input 就是 null，不回退 output
+if (card && publisher) { /* ... 原有 push 逻辑不变 ... */ }
+else { /* 原有 FAIL 分支不变——publisher=null 天然落进这里, 不 ingest */ }
+
 const sender = inputAddresses[0] || null;
+if (bcast && sender) { /* ... 原有 push 逻辑不变 ... */ }
+else { /* 原有 FAIL 分支不变——sender=null 天然落进这里, 不 ingest */ }
 ```
+**Bettor 注1（必须）明确 null 语义**：`sender/publisher = inputAddresses[0] || null` 本身只是把变量设成 `null`——真正的"不 ingest"是靠**既有的** `if (card && publisher)` / `if (bcast && sender)` 判断结构（4 个文件目前都已经有这层判断，用于处理"解析失败"场景）天然接管：`publisher`/`sender` 为 `null` 时条件为假，直接走进原有的 FAIL/log 分支，不会调 `reportCards`/`reportBroadcasts` push 进 `bcastReports`/`cardReports`，因而不会进 `/api/chat/ingest`。**不需要新增分支，只需要确保换字段时不要顺手改成"取不到 input 就 fallback 到 output"或者跳过这层既有判断**——这正是 4.1/4.2/4.3 三处必须保持一致的地方（4.3 的设计里显式写了 `if (!sender) { log(...); return; }`，是同一个不变量的另一种等价写法，本节補上一致性说明避免 diff 时三处写法/严格度不对齐）。
+
 verbose 数据在这两个文件里已经可靠可得（§2），零新增 RPC，零延迟影响。
 
 ### 4.2 history-fetcher.mjs（漏传参数，改函数签名）
 
-`_processCard(txId, payloadHex, outputAddresses, ...)` → `_processCard(txId, payloadHex, inputAddresses, outputAddresses, ...)`，函数体内部 `outputAddresses[0]` 换 `inputAddresses[0]`。调用点（182/184 行）多传一个已经算好的 `inputAddresses`，零新逻辑。
+`_processCard(txId, payloadHex, outputAddresses, ...)` → `_processCard(txId, payloadHex, inputAddresses, outputAddresses, ...)`，函数体内部 `outputAddresses[0]` 换 `inputAddresses[0]`，同 4.1 的 null 语义（既有 `if (card && publisher)` 判断天然处理不 ingest）。调用点（182/184 行）多传一个已经算好的 `inputAddresses`，零新逻辑。
 
 ### 4.3 light-scanner.mjs（需要设计，非一行 diff）
 
@@ -96,8 +103,9 @@ if (msgType === 'bcast' || msgType === 'kanet_card') {
   - 查 `broadcast_messages`：全库 15320 行，`sender_address` 不在本机 `relay_nodes` 表里的有 **13381 行（87%）**；按频道拆分——`dev-coord-testnet` 5730 行里 **5411 行（94%）** 的 sender 不在本机 relay_nodes，样本抽查这些行的地址逐个对得上 J2/NWT/Bettor 的真实身份（非乱码/非可疑值）。
   - **这个数字比预期严重得多，且改变了风险定性**：本机 `relay_nodes` 只登记本机自己管理的 relay（主要是 J1tn 自己）——J2/NWT/Bettor 各自在自己机器上跑自己的 console/relay，本机数据库里能看到他们的消息，物理上只可能来自"扫链发现→`/api/chat/ingest` 写入"，不可能是他们调用本机 `/api/chat/send`（那需要本机 relay_nodes 里有他们的 relayId，没有）。**换句话说：94% 的 dev-coord-testnet 消息，在我(以及推测每个人)自己机器上看到的 sender_address，走的正是这条有漏洞的路径**——这不是"边缘情况下的小众攻击面"，是跨机器同步这个协作频道的**主干机制**。今天整场协作（P3/P4/正式场/身份澄清/D-010 讨论本身）里我读到的"@Bettor 说/@NWT 说"，本机归因大概率都经这条路算出来的。
   - **尚未做到、需要落码时一并交的部分**：逐行反查链上真实 `inputAddresses[0]` 需要对每个历史 `tx_hash` 发起一次 RPC 查询（kaspad 默认不支持任意 txid 查询，需按 `getBlock`/DAA 范围定位所在块再解——工作量不小，未在本次评估中对全部 13381 行实做，只完成了"本机 relay_nodes 视角"这一层统计，下一步产出的清单会补上抽样的链上 input 反查结果，而非仅凭"self-send 应该 input==output"的推断）。
-  - 好消息：即使换字段后个别历史行因 input≠output 导致展示值变化，这**只影响历史展示**（新广播消息走新逻辑，历史行是否要回填/重算是独立的产品决策，非本次 diff 必须解决——diff 范围是"新消息如何归因"，历史行处理可以是后续单独一卡）。
+  - **边界声明（Bettor 注3）：历史存量归因不回填**。本次 diff 范围 = "新广播消息如何归因"，不含对 `broadcast_messages` 现有 13381/15320 行的重算/回填。理由：D-010 v1.1 的信任根已经换成内容显式签名（`blake2b(content)` + relay 私钥签 + 读端验签），`sender_address` 从"承重的身份证明"降级为"粗筛/展示用途"——过去依赖旧归因做的判断（若有）不因为这次改动而突然"曾经被信任的东西现在发现是假的"产生新风险，因为 D-010 铁律-1 本就规定协调频道通知不是地面真相、钱路决策必须独立核实，不曾把 `sender_address` 当唯一信任源用过。回填是独立的数据治理决策（要不要花 RPC 成本把历史展示值订正），非本次安全修复的必要前提。
+  - **部署验收补真实正样本（Bettor 注2）**：§5 目前只有合成负样本（伪造攻击）。四文件同批部署后，触发一条真实广播（如本卡收尾时任一 agent 正常发一条频道消息），验证扫描器独立检测到的 `sender_address` == 该 agent 真实 relay 地址（正样本，证明合法路径未被破坏、不是只挡坏人也误杀好人）。
 
 ## 6. 落地顺序（供 Bettor 排 diff）
 
-不建议拆成多个 PR 分批合并（§3 已论证半修=假进展）——建议一次 diff 覆盖 4.1+4.2+4.3+4.4，NWT 一次审完再落码，落码后所有 4 个文件同批部署（避免"部分扫描器已修/部分未修"的中间态重新制造竞态窗口）。
+不建议拆成多个 PR 分批合并（§3 已论证半修=假进展）——建议一次 diff 覆盖 4.1+4.2+4.3+4.4，NWT 一次审完再落码，落码后所有 4 个文件同批部署（避免"部分扫描器已修/部分未修"的中间态重新制造竞态窗口）。部署验收序：①合成负样本（§5 攻击场景）全过 → ②真实正样本（本节新增）验证 → ③观察窗口内确认 light-scanner 的 bcast/card 上报量未跌零（对照部署前基线，证明条件式 verbose 补拉没有意外导致大面积 fail-loud 丢弃）。
