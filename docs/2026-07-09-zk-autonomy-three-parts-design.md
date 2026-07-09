@@ -1,6 +1,6 @@
 # ZK 自治化三件（landed-gated 持久化 / zk_close 自治 tick / claim 自治 tick）
 
-> **Status**: DRAFT（Bettor 派工 #dfjcy6·待 Bettor+NWT 审·落码前不开任何开关）
+> **Status**: DRAFT（Bettor+NWT 方向审 GREEN-with-notes 2026-07-09·六注已折入·(a)+debugger 正则修今天落，(b)(c) 落码留下一班·落码前不开任何开关）
 > 依据：Owner 2026-07-09"部署 ZK 不等拍窗"钦定（D-001 增补）执行序 ③"zk_close 自治化（ZK_CLOSE_TICK=ON）"。前置：正式场市场5（tyr91，104.5KAS）三门全绿 claim landed，全程门①②③由 J2 手动驱动+每步 Bettor/NWT 盲算比对+确认令。本方案把这套人工把关翻译成机器把关，**不是简单去掉确认令**。
 
 ## 0. 今天人工把关 → 机器等价物（NWT #df... 明确要求的映射表，缺一不可）
@@ -32,9 +32,12 @@
 
 **方案**：不修补旧骨架，按今天真实驱动逻辑重写 `zkCloseTickV2`（新函数名，避免跟旧的语义混淆）：
 - 扫描条件：`zk_continuation.proving.status='ready'`（今天真实用的判据，`gateZkClose`/`dispatchUnlockZkClose` 已经在读这个字段）且 `zk_continuation.exhausted` 不为 true。
+- **注1（Bettor 必须项）**：`proving.status='ready' && !exhausted` 对 closed==1（待 zk_close）和 closed==2（待 claim）两种态**都成立**——`zkCloseTickV2` 必须额外用 `parseCloseZkV2State`（同今天 claim driver 用的函数）现读 `closed==1` 才处理，与 (c) 的 `closed==2` 守卫对称，否则两个 tick 会抢同一个市场（各自以为轮到自己）。
 - `checkLanded`：直连 RPC，同 (a)。
 - 广播：`dispatchUnlockZkClose`（已是今天验证过的生产函数，零改动）。
 - 落地判定 + 持久化：走 (a) 修好的 landed-gated 路径。
+- **注3（Bettor，并发/幂等）**：tick 与人工 driver 可能并跑（今天两条线并存的过渡期）——广播前必须现读 `zk_continuation` 当前活 outpoint（链上态自愈：若已被人工 driver 领先一步花掉，tick 现读会拿到新值，不会拿旧值去广播必然失败的 tx），同时防止把"链上自然拒绝"当成 error 噪音报出去（区分"这笔已经被处理过=正常 skip"和"真失败=报警"）。
+- **注（NWT，并发/幂等 mutex）**：`zkCloseTickV2`/`claimAutonomousTick` 挂 cron 后必须有 per-market running mutex，防止同一 tick 下一轮/另一个 tick 实例对同一市场重复触发广播——直接复用 `bshardCloseSubmitV2Tick`（T2b 卡2）已有的 running 布尔互斥模式，不新发明。
 - **BLOCKING 前置（表格里标了）**：`gateZkClose`/debugger 正则 bug 必须先修，否则自治 tick 会在链上真的能过的场景里，因为工具误判直接跳过广播（fail-closed 本身没错，但今天靠人读 stdout 兜底纠正，tick 没有人）。
 
 ## 3. (c) claim 自治 tick（全新，今天不存在）
@@ -44,11 +47,20 @@
 **方案**：新 `claimAutonomousTick`：
 - 扫描：`zk_continuation.proving.status='ready'` 且 `zk_continuation.redeemHex` 现读 `closed==2`（`parseCloseZkV2State`，已有）。
 - 每个市场：`computePariMutuelPayout` 重算 `payoutLeaves`（单源，P4 已验证），逐个 leaf 检查对应 nullifier bit 是否已置位（未领的才广播）。
+- **注2（Bettor 必须项）**：nullifier bit 索引（`word_idx=merkleIndex/63, bit_in=merkleIndex%63`）必须直接复用今天 claim driver 用的同一个函数/算法（`closezk-v2-claim-builder.mjs` 内），禁止自治 tick 自己重新手写一份位运算——两份独立实现即使今天算对了，未来任一方漂移就是静默错位领错钱的风险（同规则55族）。
 - 复用今天的 `buildClaimWitness`/`buildClaimCommand`（零改动，今天全程验证过）。
-- 落地判定 + 持久化：走 (a)。
+- 落地判定 + 持久化：走 (a)。**注（NWT，边界 case）**：last-claimant（`isLast=true`）场景没有 continuation output，(a) 描述的 spk 原像断言针对"有新 continuation"场景——`advanceZkContinuationAfterSpend` 已经正确处理 `exhausted=true` 分支（`outpointTxid:null`，P2 审过），但落码时必须显式处理"广播成功+landed 确认，但没有 continuation 可做 spk 断言"这条路径（不能因为没有新地址就跳过 landed 确认本身）。
 - **权限边界**：只领已经在 payoutLeaves 里的 leaf（pk 由委员共识的 bettors 集合派生，非 tick 自己决定谁该拿钱）——不新增任何"谁该收钱"的判断逻辑，纯执行层。
 
-## 4. 排序 + 验收
+## 4. 排序 + 验收（Bettor 执行节奏裁定）
 
-序：(a) 先修（阻塞 b/c）→ debugger 正则 bug 修（阻塞 b/c 的 BLOCKING 前置）→ (b)(c) 可并行落码 → 每个开关默认 OFF，offline test 全绿 + 至少一次真实市场手动触发验证等价机器把关生效，才允许 Bettor/NWT 双签开 ON。
-验收：offline test 覆盖表格中每一行"机器等价物"的存在性断言（不是只测试 happy path）；开 ON 后第一个真实市场，J2 仍手动逐步核对（不因为自治就停止链验），确认自治产出与手动驱动历史数据一致。
+**今天落**：(a) landed-gated 持久化修复 + debugger 正则 bug 修（两者都是已判例的小改，风险低）。
+**下一班落**：(b)(c) 实际 tick 代码（手动制今天两个市场已证明可用，不抢深夜赶工）。
+**注4（Bettor）**：开 `ZK_CLOSE_TICK_ENABLED`/新 claim tick 开关 = 配置变更，走重启窗 + ledger 记账 + Bettor/NWT 双签，不是普通代码合并。
+
+验收（(b)(c) 落码时，NWT 落码复核会点名核对）：
+1. offline test 覆盖 §0 表格中每一行"机器等价物"的存在性断言（不是只测试 happy path）。
+2. **显式覆盖 last-claimant/exhausted 边界**（NWT 注①）：不能默认继承 (a) 的断言，必须单独一条"last-claimant 场景 tick 跑过"的测试。
+3. **per-market running mutex 测试**（NWT 注②）：模拟 tick 并发触发，断言同一市场不会被重复广播。
+4. **注2 nullifier bit 索引复用断言**：claim tick 与 driver 手写脚本用同一份位运算函数（非独立实现两次算出一致结果这种弱验证）。
+5. 开 ON 后第一个真实市场，J2 仍手动逐步核对（不因为自治就停止链验），确认自治产出与手动驱动历史数据一致。
