@@ -12,18 +12,27 @@
 //
 // 同 claim_completeness_regression.test.mjs 惯例: 纯 node assert, 直接 `node <file>` 跑, 不接测试框架
 // runner(zkCloseTickV2/claimAutonomousTick 是 ctx 注入的纯编排函数, 跟 broker/DM 模拟是不同测试形状)。
-// DB_PATH 指向 scratch 隔离拷贝(feedback-offline-test-must-use-real-schema-with-triggers: 用真 schema
+// DB_PATH 指向全新建的隔离库(feedback-offline-test-must-use-real-schema-with-triggers: 用真 schema
 // 含 triggers, 不用裸建表 mock schema), 不碰真实 console.db。
-
+//
+// 🔴 修复(2026-07-09, Bettor+NWT 独立复现均撞 SQLITE_CORRUPT/SQLITE_BUSY, #ds95g5.2/二方确认):
+// 第一版用 copyFileSync 整份拷贝活的 console.db——该库是活 WAL-mode(真实 console 进程持续写入)+5.6GB
+// 体量, 拷贝那一刻若恰有未 checkpoint 的已提交页仍躺在 -wal 边车文件里, 主文件字节级拷贝出来就是撕裂
+// 快照(SQLITE_CORRUPT, 非确定性, 取决于拷贝那一刻的 checkpoint 状态)。改用 better-sqlite3 `.backup()`
+// (SQLite 官方在线一致性备份 API)解决了撕裂问题, 但对 5.6GB 全量数据做逐页拷贝在这台机器上要 30+ 分钟
+// ——对"offline regression test 应该秒级跑完"这个基本要求是不可接受的, 且从头就没必要: 本测试只需要
+// **真实 schema(含 triggers)**, 不需要真实生产数据量。改用 `runMigrations()`(src/db/migrate.js, 全项目
+// 唯一权威 schema 定义源, index.js 启动时也调这个)在全新空文件上建表——零生产数据、零 WAL 撕裂风险、
+// 秒级完成, 且 schema/triggers 与生产环境保证同源(不是另一套手搓 CREATE TABLE mock)。
 import assert from 'node:assert/strict';
-import { copyFileSync, existsSync, mkdirSync } from 'node:fs';
+import { mkdirSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 
-const REAL_DB = 'D:/kanet-tn12/kasia-console/data/console.db';
-const TEST_DB = 'D:/kanet-tn12/scratch/_zk_autonomy_ticks_test.db';
+const TEST_DB = `D:/kanet-tn12/scratch/_zk_autonomy_ticks_test_${randomUUID().slice(0, 8)}.db`;
 mkdirSync('D:/kanet-tn12/scratch', { recursive: true });
-copyFileSync(REAL_DB, TEST_DB);
 process.env.DB_PATH = TEST_DB;
+const { runMigrations } = await import('file:///D:/kanet-tn12/kasia-console/src/db/migrate.js');
+runMigrations();
 
 const { sqlite } = await import('file:///D:/kanet-tn12/kasia-console/src/db/client.js');
 const {
