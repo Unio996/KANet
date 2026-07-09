@@ -14,6 +14,9 @@
 // proving.imageId/journalHash 三者(全部已持久化)用跟 buildAndFundGate 完全相同的 zk-sdk WASM 调用
 // 确定性重新推出(纯函数, 非重新 prove, 零新增信任假设), 不需要改 J2 的 mint/prove-worker 文件。
 
+import { ZK_GATE } from './zk-close-builder.mjs';
+import { ensureGateTmplHashFresh } from './gate-tmpl-hash.mjs';
+
 /**
  * rebuildZkCloseGateWitness — 缺件③抽出的共享函数(J1tn, 2026-07-08 市场5彩排 harness §4缺件3 门②对接前抽出)。
  *   确定性重建 gate 的 sigScript/redeemScript+gate_suffix_hex(纯函数, 跟 zk-prove-worker.mjs buildAndFundGate
@@ -28,6 +31,11 @@
  * @returns {{ok:boolean, sigScript?:string, redeemScript?:string, gateSuffixHex?:string, error?:string}}
  */
 export function rebuildZkCloseGateWitness(proving, receiptHex, kaspaZk) {
+  // 根修(2026-07-09, docs/2026-07-08-gate-tmplhash-live-derive-design.md 落码): 这是 zk_close 真广播/
+  // 门②彩排 dry-run 共用的唯一 witness 重建入口(本文件头注)——gateTmplHash 是否跟当前 ZK_GATE.imageId
+  // 配对新鲜, 在这里一处检查覆盖两条下游路径, 不用在每个调用方各自补一遍(同 D-009/规则55 根治的病灶:
+  // 别把"必须同步更新的配对值"留给人肉记性)。lazy+gate 在 ZK_PROVE_WORKER_ENABLED, 非 ZK 节点零影响。
+  ensureGateTmplHashFresh(ZK_GATE, kaspaZk);
   let sigScript, redeemScript;
   try {
     const kaspa = kaspaZk();

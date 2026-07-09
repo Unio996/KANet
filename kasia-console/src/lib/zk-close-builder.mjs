@@ -34,7 +34,12 @@ import { computeBetsRoot } from './pool-payout-root.mjs';
 // 烤进一个跟当前 guest binary 不匹配的 gateTmplHash, zk_close 的 require(blake2b(prefix‖suffix)==gateTmplHash)
 // 物理不可能通过(门②ре-broadcast dry-run 正确拦下, 0 成本; scratch/_bettor_pxvml_gate_tmplhash_diag.mjs
 // 独立重算 + 链上已注资 gate 地址逐字节吻合双证)。新值绑定当前 imageId=c9918501, 后续改 imageId 必须同步改这个。
-const ZK_GATE = {
+// 🔴 根修(2026-07-09, docs/2026-07-08-gate-tmplhash-live-derive-design.md 落码): gateTmplHash 不再是纯手工
+// 配对的孤立常量——gate-tmpl-hash.mjs 的 ensureGateTmplHashFresh() 在 ZK_PROVE_WORKER_ENABLED=1 时会现场
+// 从 imageId 程序化推导并跟这里烤死的值比对,漂移直接 fail-loud(调用点: zk-prove-worker.mjs
+// zkProveWorkerTick / zk-close-dispatch.mjs rebuildZkCloseGateWitness,详见该文件头注)。此常量本身仍需
+// 手动维护(改 imageId 必须同改这个),但下次半更新会在下次真实使用时立刻被抓,不会再潜伏。
+export const ZK_GATE = {
   imageId: 'c9918501d90bf0aeaaf7970816078c81e8286c08293ccf388e87a7cab023ce30',     // 结算 guest image_id(改 guest=改此=新 covenant)
   gateTmplHash: '4ec7ca3d46db552d87f90636ebefe681f9995249423d52ac30b8c7f258043ac7', // blake2b(prefix‖suffix), 绑定上面这个 imageId(改一个必须同改另一个)
 };

@@ -25,8 +25,9 @@ import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { sqlite } from '../db/client.js';
 import { sendCommandAsync } from './relay-manager.js';
-import { computeJournalHash } from '../lib/zk-close-builder.mjs';
+import { computeJournalHash, ZK_GATE } from '../lib/zk-close-builder.mjs';
 import { updateProvingReady, updateProvingFailed } from '../lib/closezk-v2-mint.mjs';
+import { ensureGateTmplHashFresh } from '../lib/gate-tmpl-hash.mjs';
 
 const _require = createRequire(import.meta.url);
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -137,6 +138,11 @@ export async function zkProveWorkerTick() {
     })();
     if (!job) return { ok: true, pending: 0 };
     if (!SETTLER_RELAY_ID) { _fail(job, 'BSHARD_SETTLER_RELAY_ID unset — 无法注资 gate'); return { ok: false }; }
+
+    // 根修(2026-07-09, docs/2026-07-08-gate-tmplhash-live-derive-design.md 落码): 真正跑 proving 之前
+    // 现场核对 ZK_GATE.gateTmplHash 跟当前 ZK_GATE.imageId 仍配对(D-009 冻结门解除前置条件之一)——
+    // ~4min 真实 proving 开跑前拒绝一个注定在 zk_close 阶段才会炸的漂移配置, 早拒绝早止损。
+    try { ensureGateTmplHashFresh(ZK_GATE, kaspaZk); } catch (e) { _fail(job, e.message); return { ok: false }; }
 
     let orderedBets, betsRootHex;
     try { orderedBets = JSON.parse(job.ordered_bets_json); betsRootHex = job.bets_root_hex; } catch (e) { _fail(job, `ordered_bets_json parse fail: ${e.message}`); return { ok: false }; }

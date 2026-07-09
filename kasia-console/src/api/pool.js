@@ -121,11 +121,14 @@ function _resolveZkNativeCtorExtras(market, silverc, computeCloseZkTmplAnchor) {
   let zkNative = false, closeZkTmplAnchor = null;
   try { zkNative = JSON.parse(market.resolution_rule_spec || '{}')?.zk_native === true; } catch {}
   if (zkNative) {
-    // ⚠ gateTmplHash 绑定具体 guest image_id，昨晚 LANDED 交易(txId 4ec9ddd1...)定版值，见
-    // _j2_final_gate_data_v2.json。CloseZkRepro4.sil 路径归位(移出根目录 _* 命名约定)是独立非阻塞
-    // 待办(Bettor 记录过)，今天先引用它现在的真实位置，不假装已经归位。
-    const gateTmplHash = process.env.ZK_GATE_TMPL_HASH || '511b0eadf9b4421bca9b00b19262b02bc656faaebfe8c2b5821ddcf98353bfc1';
-    const closeZkSilPath = process.env.ZK_CLOSEZK_SIL_PATH || 'D:/kanet-tn12/_j2_closezk_repro4.sil';
+    // 🔴 STOP修正(2026-07-09, 规则55同族雷·docs/2026-07-08-gate-tmplhash-live-derive-design.md §4 落地清单
+    // 第5条): 不接受硬编码 fallback('511b0ead...'是 repro4 时代旧值、'_j2_closezk_repro4.sil' 是 Repro4
+    // 永久禁铸令的残留路径, 两者都会悄悄过期)——缺 env 直接 throw, 跟 pool.js:1863-1866/
+    // bshard-close-transport.mjs:453-461 已落地的同款纪律对齐, 不留"看起来能跑但值可能不对"的窗口。
+    if (!process.env.ZK_GATE_TMPL_HASH) throw new Error('_resolveZkNativeCtorExtras: ZK_GATE_TMPL_HASH env 必需(不接受硬编码 fallback, 该值随 guest image 变化易过期)');
+    if (!process.env.ZK_CLOSEZK_SIL_PATH) throw new Error('_resolveZkNativeCtorExtras: ZK_CLOSEZK_SIL_PATH env 必需(不接受硬编码 fallback, 路径随归位进度变化)');
+    const gateTmplHash = process.env.ZK_GATE_TMPL_HASH;
+    const closeZkSilPath = process.env.ZK_CLOSEZK_SIL_PATH;
     closeZkTmplAnchor = computeCloseZkTmplAnchor(closeZkSilPath, gateTmplHash, silverc).anchorHex;
   }
   return { zkNative, closeZkTmplAnchor };
