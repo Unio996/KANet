@@ -79,6 +79,7 @@ if (process.env.ZK_GATE_TMPL_HASH) {
 console.log('[test] ⑤ 跨源漂移 fail-loud(finding①(a) 修复验证): env 跟 ZK_GATE 不一致时必须 throw, 不能只验 ZK_GATE 内部自洽:');
 _resetVerifiedForTest();
 const prevEnvVal = process.env.ZK_GATE_TMPL_HASH;
+const prevEnabled3 = process.env.ZK_PROVE_WORKER_ENABLED; // 🔴 修复(2026-07-09, J2 diff 审 nit): 之前只存 prevEnvVal 没存这个, 跟③⑥不一致——单跑本脚本因末尾 process.exit 无害(J2 核实), 但补上跟其它两处同款 save/restore, 防日后有人在同进程内复用/新增测试时踩现成 env 污染。
 process.env.ZK_PROVE_WORKER_ENABLED = '1';
 process.env.ZK_GATE_TMPL_HASH = 'ff'.repeat(32); // 故意跟 ZK_GATE.gateTmplHash(真值)不一致
 try {
@@ -88,6 +89,7 @@ try {
   ok(/跨源漂移/.test(e.message), `env≠ZK_GATE 正确拒绝(不是"ZK_GATE 自己新鲜就放行"的假安全感): ${e.message.slice(0, 90)}...`);
 }
 if (prevEnvVal === undefined) delete process.env.ZK_GATE_TMPL_HASH; else process.env.ZK_GATE_TMPL_HASH = prevEnvVal;
+if (prevEnabled3 === undefined) delete process.env.ZK_PROVE_WORKER_ENABLED; else process.env.ZK_PROVE_WORKER_ENABLED = prevEnabled3;
 
 console.log('[test] ⑥ force:true 绕开 ZK_PROVE_WORKER_ENABLED 门(finding②MED 修复验证,genesis-bake 三个调用点用这个):');
 _resetVerifiedForTest();
