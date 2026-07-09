@@ -619,8 +619,12 @@ startOraclePoolRenewalCron();
 
 // bshard 自治结算 daemon (Owner 2026-06-30 钦定 A·SETTLE_DAEMON_ENABLED=1 才跑, 默认 OFF).
 // canary: MAX_PER_TICK=1, TICK=60s → 验 → ramp。J1 covenant 是真安全网, DB lease = best-effort。
-import { startSettleDaemonCron } from './services/bshard-settle-daemon.mjs';
+import { startSettleDaemonCron, startZkCloseTickV2Cron, startClaimAutonomousTickCron } from './services/bshard-settle-daemon.mjs';
 startSettleDaemonCron();
+// (b)(c) 2026-07-09 J2: docs/2026-07-09-zk-autonomy-three-parts-design.md — 各自独立 kill switch(默认 OFF,
+// ZK_CLOSE_TICK_V2_ENABLED / ZK_CLAIM_TICK_ENABLED), 开关本身是配置变更(Bettor 注4: 走重启窗+ledger记账+双签)。
+startZkCloseTickV2Cron();
+startClaimAutonomousTickCron();
 
 // design-v2 (B) broadcaster N-medium-UTXO maintainer (KANet-UI, 880 settle-throughput; Bettor r489b APPROVE).
 // Proactive cron keeps settle broadcasters (local oracle signers + hot seeder maker) topped at N confirmed

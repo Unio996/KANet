@@ -35,10 +35,19 @@ const _NULLIFIER_WORDS = 17;
 /**
  * parseCloseZkV2State — 从当前活 CloseZkV2 UTXO 的 redeem_hex 现读现解状态区(verify-value-source 铁律落地)。
  * @param {string} redeemHex  当前活 UTXO 的完整 redeem script hex(链上实况, 非 DB 缓存字段)
+ * @param {{expectedClosed?:number|null}} [opts]  期望的 closed 值(默认 2, 保持现有调用方 zero-diff 行为)——
+ *   docs/2026-07-09-zk-autonomy-three-parts-design.md (b): zkCloseTickV2 现读 closed==1(待 zk_close)时传 1,
+ *   与 claim 侧 closed==2 守卫对称(Bettor GO: mismatch 必须 throw fail-closed, 不接受 warn-continue)。
+ *   传 `null` = 仅做 marker/offset fail-closed 校验, 跳过 closed 值比对(routing 阶段"这个市场现在归哪个
+ *   tick 管"的一次性 peek 用途——**不**用于处理阶段, 处理阶段必须传具体期望值让 mismatch 真正 throw)。
  * @returns {{attestedWinner:number, closed:number, payoutRootField:string, consolidated_pool:string,
  *   w0..w16:string}}
  */
-export function parseCloseZkV2State(redeemHex) {
+export function parseCloseZkV2State(redeemHex, opts = {}) {
+  // ⚠ 不能用 `opts.expectedClosed ?? 2` — `??`把显式传入的 null 也当 undefined 处理, 会静默把 peek 模式
+  // (故意传 null 跳过值比对)吃成默认值 2, 峰值检测测试当场抓到过这个坑(zk_autonomy_ticks_regression.test.mjs
+  // §1)。必须用 'in' 显式区分"没传"vs"传了 null"。
+  const expectedClosed = 'expectedClosed' in opts ? opts.expectedClosed : 2;
   const redeem = Buffer.from(String(redeemHex || ''), 'hex');
   if (redeem.length < _STATE_START + _STATE_LEN) {
     throw new Error(`parseCloseZkV2State: redeem 太短(${redeem.length}B, 需 >= ${_STATE_START + _STATE_LEN}) — 非 CloseZkV2 redeem?`);
@@ -64,22 +73,34 @@ export function parseCloseZkV2State(redeemHex) {
   if (attestedWinner !== 0 && attestedWinner !== 1) {
     throw new Error(`parseCloseZkV2State: attestedWinner=${attestedWinner} 不是 0/1 — 解码位置可能错位, 拒绝往下传递可疑值(同 readPayoutShardV2AttestedState 同款 fail-closed 纪律)`);
   }
-  if (closed !== 2) {
-    throw new Error(`parseCloseZkV2State: closed=${closed} != 2 — claim 只服务 zk_close 已完成待 claim 的窗口(closed==2), 拒绝读取(escape_claim 域是 closed==3, 走独立路径)`);
+  if (expectedClosed !== null && closed !== expectedClosed) {
+    throw new Error(`parseCloseZkV2State: closed=${closed} != 期望值 ${expectedClosed} — fail-closed 拒绝读取(claim 只服务 closed==2 待 claim 窗口, zk_close tick 只服务 closed==1 待 zk_close 窗口, escape_claim 域是 closed==3 走独立路径; mismatch 一律 throw, 不接受静默 continue)`);
   }
   return { attestedWinner, closed, payoutRootField, consolidated_pool: consolidated_pool.toString(), ...w };
 }
 
 /**
- * nullifier bit 当前是否已置位(逐 word: word_idx=merkleIndex/63, bit_in=merkleIndex%63, 同 .sil claim entry
- * 逻辑/unlockBshardPayoutClaim word_idx/bitIn 算法一致)。
+ * nullifierBitPosition — merkle_index → {wordIdx, bitIn}(word_idx=merkleIndex/63, bit_in=merkleIndex%63, 同
+ * .sil claim entry 逻辑/unlockBshardPayoutClaim word_idx/bitIn 算法一致)。
+ *
+ * 🔴 单源导出(2026-07-09, J2·docs/2026-07-09-zk-autonomy-three-parts-design.md (b)(c) 注2/Bettor GO 补充):
+ * 此前这份位运算在本文件(读侧, 内部)和 scratch driver 脚本(写侧, 每次都手写内联)里各自独立实现了一遍——
+ * 今天都算对了, 但两份独立实现漂移是静默错位领错钱的风险(同规则55族)。claimAutonomousTick 和一切未来
+ * 生产路径/driver 一律必须调用这一份, 禁止重新手写。
  */
-function _nullifierBitSet(state, merkleIndex) {
+export function nullifierBitPosition(merkleIndex) {
   const wordIdx = Math.floor(merkleIndex / 63), bitIn = merkleIndex % 63;
   if (wordIdx >= _NULLIFIER_WORDS) throw new Error(`merkle_index ${merkleIndex} → word_idx ${wordIdx} 越界(cap ${_NULLIFIER_WORDS} words)`);
+  return { wordIdx, bitIn };
+}
+
+/** nullifier bit 当前是否已置位(读侧, 复用 nullifierBitPosition 单源位置计算)。 */
+export function isNullifierBitSet(state, merkleIndex) {
+  const { wordIdx, bitIn } = nullifierBitPosition(merkleIndex);
   const w = BigInt(state['w' + wordIdx] ?? 0);
   return ((w >> BigInt(bitIn)) & 1n) === 1n;
 }
+const _nullifierBitSet = isNullifierBitSet;   // 内部沿用旧名, 避免下方调用点改名 churn
 
 /**
  * buildClaimWitness — 组装单个 winner 的 claim witness, self-verify 后才返回(不自验通过绝不喂给 relay)。
@@ -126,6 +147,55 @@ export function buildClaimWitness(winnerPkHex, merkleIndex, currentState, { bett
     throw new Error(`buildClaimWitness: merkle_index ${merkleIndex} 的 nullifier bit 已置位 — ${winnerPkHex.slice(0, 12)} 已经 claim 过, 拒绝重复组装`);
   }
   return { bettorPk: winnerPkHex, payout, merkle_index: merkleIndex, siblings, payoutRootFieldHex: currentState.payoutRootField };
+}
+
+/**
+ * spliceClaimContinuationRedeem — claim 落链后新 continuation 的 redeem_hex 拼接(写侧, 单源导出)。
+ *
+ * 🔴 单源导出(2026-07-09, J2·zk-autonomy-three-parts-design.md 注2/Bettor GO): 此前这段字节级拼接只在
+ * scratch driver(_j2_tyr91_claim_driver.mjs)里手写内联, 且同一脚本内出现两遍(广播前预测 contAddr + 广播后
+ * 实际持久化) —— claimAutonomousTick 和一切未来 driver 一律必须调用这一份, 禁止重新手搓字节偏移。
+ * 保留字段(attestedWinner/closed/payoutRootField)原样透传, 只改 consolidated_pool(扣减 payout)+ 对应
+ * nullifier word 置位——跟 CloseZkV2.sil claim entry 的状态转移语义一致(非 mint, 不重置 proving/其余字段,
+ * 那是 caller advanceZkContinuationAfterSpend 的职责)。
+ * @param {string} redeemHex  当前活 CloseZkV2 UTXO 的 redeem_hex(claim 花费的那笔 input)
+ * @param {number} merkleIndex  这个 winner/fee-recipient 的 canonical 下标
+ * @param {bigint|string|number} payout  这次 claim 的金额(sompi)
+ * @param {object} [currentState]  可选, 已 parseCloseZkV2State(redeemHex,{expectedClosed:2}) 过的现读产物
+ *   (避免重复 parse; 不传则本函数自己现读一遍)
+ * @returns {{isLast:boolean, redeemHex:string|null, newPool:bigint}}  isLast=true(精确清零)时 redeemHex=null
+ *   (无 continuation output, 同 CloseZkV2.sil claim entry 的 exhausted 分支——covenant 层面无需再产生续约地址)。
+ */
+export function spliceClaimContinuationRedeem(redeemHex, merkleIndex, payout, currentState = null) {
+  const state = currentState || parseCloseZkV2State(redeemHex, { expectedClosed: 2 });
+  const { wordIdx, bitIn } = nullifierBitPosition(merkleIndex);
+  if (isNullifierBitSet(state, merkleIndex)) {
+    throw new Error(`spliceClaimContinuationRedeem: merkle_index ${merkleIndex} 的 nullifier bit 已置位 — 拒绝二次拼接(已 claim 过)`);
+  }
+  const payoutBig = BigInt(payout);
+  const pool = BigInt(state.consolidated_pool);
+  if (payoutBig < 1n || payoutBig > pool) {
+    throw new Error(`spliceClaimContinuationRedeem: payout ${payoutBig} 越界(池剩 ${pool})`);
+  }
+  const newPool = pool - payoutBig;
+  if (newPool === 0n) return { isLast: true, redeemHex: null, newPool: 0n };
+
+  const inputRedeem = Buffer.from(String(redeemHex || ''), 'hex');
+  const region = inputRedeem.slice(_STATE_START, _STATE_START + _STATE_LEN);
+  const i64 = (n) => { const b = Buffer.alloc(8); b.writeBigInt64LE(BigInt(n)); return b; };
+  const p8 = Buffer.from([8]);
+  const wWords = [];
+  for (let i = 0; i < _NULLIFIER_WORDS; i++) wWords.push(BigInt(state['w' + i]));
+  wWords[wordIdx] = wWords[wordIdx] | (1n << BigInt(bitIn));
+  const newState = Buffer.concat([
+    p8, region.slice(1, 9),                                    // attestedWinner 原样透传
+    p8, i64(2),                                                 // closed 保持 2(仍在 claim 窗口)
+    region.slice(18, 51),                                       // payoutRootField(marker+32B) 原样透传
+    p8, i64(newPool),
+    ...wWords.map((v) => Buffer.concat([p8, i64(v)])),
+  ]);
+  const newRedeem = Buffer.concat([inputRedeem.slice(0, 1), newState, inputRedeem.slice(_STATE_START + _STATE_LEN)]);
+  return { isLast: false, redeemHex: newRedeem.toString('hex'), newPool };
 }
 
 /**

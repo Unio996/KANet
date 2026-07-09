@@ -549,6 +549,10 @@ function _deriveCloseFeeLeaves(marketId, consolidatedPool) {
   const { feeLeaves } = deriveSettlementFeeLeaves({ brokerPk: market.broker_pk, brokerFeePctBps: market.broker_fee_pct }, consolidatedPool);
   return feeLeaves;
 }
+// 单源导出(2026-07-09, J2·zk-autonomy-three-parts-design.md (c)): claimAutonomousTick 重算 payoutRoot 时
+// 必须用跟 zk_close mint 那一刻【同一份】fee-leaf 派生(否则本地重算 root 对不上链上 payoutRootField, 见
+// buildClaimWitness 权威源双锁①)——导出而非在新 tick 文件里重新拼一遍 market.broker_pk/broker_fee_pct 取值逻辑。
+export { _deriveCloseFeeLeaves as deriveCloseFeeLeaves };
 
 const SETTLER_RELAY_ID = process.env.BSHARD_SETTLER_RELAY_ID || null;   // 广播身份(付 fee input + 收找零), 显式配置非猜测。
 

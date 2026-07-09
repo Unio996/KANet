@@ -134,6 +134,15 @@ export function advanceZkContinuationAfterSpend(marketId, o) {
   if (!row) throw new Error(`advanceZkContinuationAfterSpend: market ${marketId} 不存在`);
   let meta; try { meta = JSON.parse(row.metadata || '{}'); } catch { meta = {}; }
   if (!meta.zk_continuation) throw new Error(`advanceZkContinuationAfterSpend: market ${marketId} 没有 zk_continuation — 本函数只推进既有记录, 不创建(mint 走 writeZkContinuation)`);
+  // 稳定快照(2026-07-09, J2·zk-autonomy-three-parts-design.md (c) 落码时发现的缺口): buildClaimWitness 需要
+  // "zk_close 落链那一刻"的 consolidated_pool 重算 payoutRoot(那一刻的树, 不随后续 claim 递减)——但
+  // zk_continuation.valueSompi 是活值, 每个 claim entry 落地都会把它推进到新的剩余池。closed 1→2 这一次
+  // (spentEntry==='zk_close')落地时, 本次持久化的 valueSompi 正是那一刻的池值(zk_close 本身不动钱, 只转移
+  // 状态)——在此仅此一次 stamp 成不可变字段, 后续 claim entry 调用本函数时(spentEntry!=='zk_close')不会碰它。
+  // guard(!=null)防重复 stamp(理论上 spentEntry='zk_close' 只会调用一次, 但防呆不依赖调用方只调一次的承诺)。
+  if (o.spentEntry === 'zk_close' && meta.zk_continuation.poolAtZkCloseSompi == null) {
+    meta.zk_continuation.poolAtZkCloseSompi = String(o.valueSompi);
+  }
   if (hasCont) {
     meta.zk_continuation.outpoint = { txid: o.outpointTxid, index: Number(o.outpointIndex) };
     meta.zk_continuation.redeemHex = o.redeemHex;
