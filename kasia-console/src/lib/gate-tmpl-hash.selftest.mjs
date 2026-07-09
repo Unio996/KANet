@@ -56,7 +56,10 @@ try {
   ensureGateTmplHashFresh({ imageId: ZK_GATE.imageId, gateTmplHash: '00'.repeat(32) }, kaspaZk);
   ok(false, 'mismatched gateTmplHash should have thrown, did not');
 } catch (e) {
-  ok(/配置漂移/.test(e.message), `mismatched pair correctly rejected: ${e.message.slice(0, 80)}...`);
+  // 同 test⑥ 的 test bug(NWT diff 审+KANet-UI 实跑双确认): 若此机 env 已配置真实 ZK_GATE_TMPL_HASH,
+  // fake 对象的 gateTmplHash='00'x32 会先撞上跨源断言("跨源漂移"), 不一定走到 imageId↔gateTmplHash
+  // 那条"配置漂移"检查——两条抛错路径都同样证明 guard 正确拒绝了 mismatched pair, 不该只认一条文案。
+  ok(/跨源漂移|配置漂移/.test(e.message), `mismatched pair correctly rejected: ${e.message.slice(0, 80)}...`);
 }
 _resetVerifiedForTest();
 try {
@@ -93,8 +96,15 @@ delete process.env.ZK_PROVE_WORKER_ENABLED; // 模拟 proving 在 A 机/dispatch
 let forceRan = false;
 try {
   ensureGateTmplHashFresh({ imageId: ZK_GATE.imageId, gateTmplHash: '00'.repeat(32) }, kaspaZk, { force: true });
-} catch (e) { forceRan = /配置漂移/.test(e.message); }
-ok(forceRan, 'force:true 时即使 flag 未设也真的执行了检查(用错配对值验证抛错, 证明没有被 flag 挡住 no-op)');
+} catch (e) {
+  // 🔴 修复(2026-07-09, NWT diff 审抓到的 test bug, 非 force 机制本身坏): 若此机 kanet.env 已配置真实
+  // ZK_GATE_TMPL_HASH(如 KANet-UI operator 节点——本测试唯一有意义的运行环境), test⑤ 结束时已把 env
+  // 还原成真值, 此处传入的 fake ZK_GATE 对象(gateTmplHash='00'x32)会先撞上 finding①(a) 的跨源断言
+  // (env 真值 != fake 值 → "跨源漂移"), 根本走不到 imageId↔gateTmplHash 那条"配置漂移"检查——两条抛错
+  // 路径都同样证明了"force 真的执行了检查、没被 flag 挡住 no-op", 不该只认其中一条消息文案。
+  forceRan = /跨源漂移|配置漂移/.test(e.message);
+}
+ok(forceRan, 'force:true 时即使 flag 未设也真的执行了检查(用错配对值验证抛错——不论是跨源断言还是 live-derive 断言先触发,都证明没被 flag 挡住 no-op)');
 _resetVerifiedForTest();
 if (prevEnabled2 === undefined) delete process.env.ZK_PROVE_WORKER_ENABLED; else process.env.ZK_PROVE_WORKER_ENABLED = prevEnabled2;
 
