@@ -114,3 +114,24 @@
 - "链上烤死值是装配分歧的唯一裁判，禁互相猜拼法"（zk_handoff 三方收敛过程沉淀）。
 
 **D. 表 2 快照素材**：ANTI-PATTERNS.md 当前 54 条（规则 54 为本周新增 json_extract）；CLAUDE.md"必读"区编号混乱（两组 5/6/7 重号）本身是待修项；本周新增硬门若干（exit-path 矩阵/哨兵逐槽/versioned-builds）尚未逐条落 ANTI-PATTERNS 编号。
+
+#### 素材 pre-fill 增补 · 7/8 晚班~7/9 凌晨（Bettor 7/9 接位班 pre-fill·出处 COORD-LEDGER 7/8 晚班条目 + DECISIONS D-008/D-009）
+
+**A+. 复发类增补**
+6. **手工配对常量失同步(规则 55 母题)第 2 例**：7/7 imageId 切换时 gateTmplHash 没同步（半更新）→ 错值烤进 pxvml genesis = 出生缺陷。同族第 1 例=hardcoded .sil offset 过期（72.31KAS 学费）。第 2 例被门② dry-run 以 0 成本拦截 → 从 L1（memory 记载）实质升级到 L2/L3（D-009 冻结门 + 规则 55 档案化 + live-derive 根修落码中）。
+7. **vacuous 验证同族第 2 例(规则 56)**：门① 盲算"三源核对"实为 env==builder 同一血统（gateTmplHash 维度 vacuous）；同族第 1 例=3o6cs anchor 硬门被同函数复算架空。**两例協调者（Bettor）都是当事人，门责在 Bettor**——判定项：纯档案化(L1)够不够，还是"独立"定义要落 checklist(L2)。
+8. **catch-all 静默吞错族再 +2**：pollPendingBets 吞真错误无限重试（f378458d 熔断）+ uma-ctf-reader provider 泄漏 4h 无告警（D-007 liveness 线活教材）。该族已 ≥4 例（EVM 泄漏/updateProvingReady/本两例），建议 retro 判定升 L3（lint 扫裸 catch）。
+9. **"提前删状态记录断链"结构性 bug**：auto-pay 成功分支提前删 pendingPayments → confirm 100% 永不发生（真实用户 KANetguy 受影响，Owner 四连严批）。根因=51a1ad1c（7/5 #16 UX 修复）引入 = **"修 UX 顺手动状态生命周期"未过独立审**——判定项：状态生命周期字段变更是否要 BLOCKING 审核门。
+10. **旧 E2E 测试从未覆盖主真实路径**：dm-bet-e2e 只走外部手动付款，hasCustodial 分支零覆盖 = bug 存活 3 天根因。Owner 新标准落地：l2d 全链真实 E2E（真钱包+真上链）= 21e5397c。
+
+**B+. 拦截成功类增补**
+- **门② pre-broadcast dry-run 拦截制度首胜**：pxvml gateTmplHash 出生缺陷被 cli-debugger run-all 在广播前抓死（require@48 FAIL），0 成本 vs 3o6cs 同族病 69KAS 验尸 = **彩排制度回本的直接量化证据**。
+- **门② 盲算不中触发设计 STOP 条款**：payoutRoot 盲算 ❌ 挖出 fee 政策三处三说法（propose/prove/D-007）实弹分叉 → HALT → D-008 定论（guest circuit=唯一真相源）。"盲算不中=STOP 不 hack"条款首次实弹执行且有产出。
+- **深夜止损纪律执行 ×2**：7/8 收束令推迟 escape 退款+5R-2 到 fresh 班（7/7 同款判例照抄）——判定项：已可视为行为固化。
+
+**C+. 方法论沉淀增补**
+- "重跑 N 次一致只证确定性不证正确性"（e170e003 五次 propose 一致仍整树不守恒）。
+- "两条独立路径吻合若共享同一常量来源 = vacuous"（规则 56 + memory 双条）。
+- 长会话幻觉污染防线（Bettor 接位文件铁律 -1·7/8 实测失败案例·跨 agent 通用：断言 X 已发生前必独立地面核实）——判定项:是否升全员接位文件标配。
+
+**D+. 表 2 快照增补**：ANTI-PATTERNS 54→56 条（规则 55/56 新增）；DECISIONS 新增 D-008/D-009；本周期新增 BLOCKING 卡=fee 单源收敛（D-008）+live-derive（D-009 解除条件）。规则总数逼近 60 条强制精简线,本轮 retro 应跑一次合并判定（catch-all 族/配对常量族/vacuous 族均有合并空间）。
