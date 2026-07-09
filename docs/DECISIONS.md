@@ -29,6 +29,7 @@
 - **硬约束（本条即该 gate 的正式记录，不再靠"大家知道"）**: **在 live-derive+round-trip 落码并验证通过之前，冻结一切 imageId/guest circuit 变更**——修值补丁只是过渡，不是根治；任何人在这个约束解除前再次改动 imageId，必须先确认配对的 gateTmplHash（以及任何其它跟这个编译产物绑定的手工维护常量）是否也需要同步更新，且必须走本文档 D-006 的"技术不确定性直接问 Bettor"流程逐项核实，不能凭记忆判断"应该没别的配对值了"。
 - **同族参考**: `docs/ANTI-PATTERNS.md` 规则 55(手工配对常量必失同步)+ 规则 56(vacuous same-source verification，两条"独立"验证路径若共享同一常量来源不构成真正独立)。
 - **解除条件**: `docs/2026-07-08-gate-tmplhash-live-derive-design.md` 落码完成 + NWT 复核 GREEN + 一次真实 round-trip 自证跑通（不是"重跑一致"，是从当前 imageId 现场推导出的值跟硬编码值比对一致）。解除时在本条追加一行 SUPERSEDED 说明，不删除本条（保留事故记录）。
+- **✅ 已解除（2026-07-09 04:2xZ · Bettor 终验宣布）**: 三条件全满足——①落码 `66de59c6→b3710f7a→c741275a`（live-derive+round-trip+跨源断言 env==ZK_GATE+四调用点 mint/handoff/witness-rebuild force + prove-worker lazy）；②NWT 终 GREEN（finding①HIGH guard验错对象+②MED 全闭合，`docs/2026-07-09-NWT-redteam-gate-tmplhash-live-derive-66de59c6.md`）+J2 核 GREEN；③KANet-UI operator 节点实 kanet.env 现场推导 selftest **6/6 ALL PASS**（现场推导 c9918501→4ec7ca3d==烤死值==env 三源闭环）。**⚠ 运行时生效需重启部署（与 P2 共用重启窗），5R-2 点火前必须部署到位。imageId 变更 runbook 固定成本：canonical sample 随 imageId 过期，需新 image 重出一份 sample receipt（NWT 备忘,防绕 guard）。**
 
 ### D-008 ZK 线 payout 真相源 = guest circuit·fee 政策单源收敛 (2026-07-08 · pxvml 门② 盲算不中挖出 · NWT 红队定论 + Bettor 按接位授权拍板 · Owner 在线未否决)
 - **架构定论(NWT 源码级)**: CloseZkV2 `zk_close` 对 guestPayoutRoot **零链上校验 vs 委员值**=by-design——委员 attest 只锁 winner/betsRoot/refundRoot/atMs,payout 分配的 binding authority 在 **guest circuit**(Groth16 经 gateTmplHash 验)。`claimedPayoutRoot` 在 ZK-native 路径=historical artifact(V1 committee-settle 遗留),propose 侧仅"预告"非 binding。
