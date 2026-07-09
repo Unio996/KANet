@@ -27,7 +27,7 @@
 ### D-010 接位状态频道(coord-status)+ COORD-LEDGER 活跃窗口制 (2026-07-10 · Owner 7/9 方向点头 + 无异议窗终裁通过 · Bettor 拟/NWT 红队)
 - **决策**: 采纳 `docs/2026-07-10-d010-handoff-status-channel-proposal.md` **v1.1**——①链上频道 `coord-status`,Bettor 单写自足全量状态摘要(班次收束+重大变化时);**信任根=内容显式签名**(blake2b(content)+Bettor relay 私钥签+读端验签),sender_address 过滤仅减噪粗筛零信任功能;②锚(git HEAD/txid)只证新鲜度不证正文,禁"核锚过⇒信正文"推断链,正文一律地面复核(铁律-1 不动摇);③COORD-LEDGER 按月切档 `docs/iteration/archive/` + lint >100KB WARN,跨段引用禁行号。
 - **审计链**: v1.0 被 NWT 红队 🔴RED 打穿(`78161b7d`,finding①CRITICAL: bcast sender 归因=output[0] 攻击者自选,"密码学锚"vacuous)→v1.1 换签名门(`024c4e56`)→NWT 复审 GREEN(可行性核实: relay 既有 schnorr 原语复用)→升 Owner 无异议窗通过。
-- **副产出(已另行闭环)**: scout 归因 spoofability 系统性修复(4 文件 7 处改 input-based,J1tn `60a79543`,双审 GREEN,详见 COORD-LEDGER 7/9 晚班段);derivePeers output 兜底同源问题挂卡在账。
+- **副产出(终局=WONT-FIX,2026-07-10 更新)**: scout 归因 input-based 修复(`60a79543`)部署后实弹证伪——**rusty-kaspa 标准 RPC 对 tx input 硬编码 `verbose_data:None`(源码级坐实),被动扫链拿密码学 input 归因=结构性死路,已 revert(`d944416c`)并终裁 WONT-FIX**;scout sender_address 永久定性为"display 级粗筛非密码学信任",derivePeers 挂卡同理由销;频道消息身份验证的正路=本条的内容签名方案(第二步推广到全团队 send 脚本,立卡待排)。**🚫 禁止将来再立"改 input 归因"卡重查**——死路证据链: Bettor 实测 repro+J1 源码(consensus.rs/tx.rs:183)+NWT 复核,事故全程见 COORD-LEDGER 7/9"scout 归因部署事故"段。
 - **落地序(正常队列,不占自治化主线)**: ①签名/验签工具(relay sign 命令+读端验签 helper,owner=J1tn,reviewer=NWT)→②建 coord-status 频道+lint WARN 规则(owner=KANet-UI)→③各 `*-接位.md` 加 step 0(验签命令模板+Bettor 公钥,owner=Bettor)→④首次 ledger 切档(6 月及以前→archive/,owner=Bettor)→⑤Bettor 发首条签名摘要+负测试(伪造消息验签失败)试跑一个班次周期。
 
 ### D-009 imageId/guest circuit 变更冻结门 (2026-07-08 · gateTmplHash 半更新事故 · Owner 复盘直接指令"更新开发框架相关内容")
