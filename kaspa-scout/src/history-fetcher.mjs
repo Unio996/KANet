@@ -179,9 +179,9 @@ async function _fetchAndProcess(address, sinceTime, reporter, seenTxIds) {
       if (msgType !== 'comm') {
 
         if (msgType === 'kanet_card') {
-          await _processCard(txId, payloadHex, inputAddresses, reporter, blockTimeIso);
+          await _processCard(txId, payloadHex, outputAddresses, reporter, blockTimeIso);
         } else if (msgType === 'bcast') {
-          await _processBcast(txId, payloadHex, inputAddresses, reporter);
+          await _processBcast(txId, payloadHex, outputAddresses, reporter);
         } else if (msgType === 'handshake') {
           await _processHandshake(txId, inputAddresses, outputAddresses, reporter, address, blockTimeIso);
         } else {
@@ -205,12 +205,9 @@ async function _fetchAndProcess(address, sinceTime, reporter, seenTxIds) {
   return stats;
 }
 
-// D-010 finding①根修(2026-07-10): 参数从 outputAddresses 改 inputAddresses——publisher/sender 必须
-// 是签名者(密码学绑定), 不是广播者自选的 output 字段。本文件源数据(公共索引 API)每个 input 自带
-// previous_outpoint_address(见调用点 155-160 行), 不需要额外查询, 纯粹是漏传参数, 非数据不可得。
-async function _processCard(txId, payloadHex, inputAddresses, reporter, blockTime) {
+async function _processCard(txId, payloadHex, outputAddresses, reporter, blockTime) {
   const { card, error } = parseCardPayload(payloadHex);
-  const publisher = inputAddresses[0] || null;
+  const publisher = outputAddresses[0] || null;
   if (card && publisher) {
     try {
       await reporter.reportCards([{ address: publisher, txHash: txId, cardData: card, network: KASPA_NETWORK }]);
@@ -218,9 +215,9 @@ async function _processCard(txId, payloadHex, inputAddresses, reporter, blockTim
   }
 }
 
-async function _processBcast(txId, payloadHex, inputAddresses, reporter) {
+async function _processBcast(txId, payloadHex, outputAddresses, reporter) {
   const { bcast } = parseBcastPayload(payloadHex);
-  const sender = inputAddresses[0] || null;
+  const sender = outputAddresses[0] || null;
   if (bcast && sender) {
     try {
       await reporter.reportBroadcasts([{

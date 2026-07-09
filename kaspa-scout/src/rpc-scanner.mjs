@@ -253,7 +253,7 @@ export function parseBcastPayload(payloadHex) {
  * Block-added events lack verboseData on outputs; getBlock() provides it.
  * Returns Map<txId, verboseTx> or null.
  */
-export async function fetchVerboseBlock(blockHash) {
+async function fetchVerboseBlock(blockHash) {
   if (!_rpc || !blockHash) return null;
   _stats.verboseFetch++;
   try {
@@ -494,11 +494,7 @@ async function handleBlock(event, reporter) {
     // ── KANet Agent Card ──────────────────────────────────────────────
     if (msgType === 'kanet_card') {
       const { card, error, raw } = parseCardPayload(payloadHex);
-      // D-010 finding①根修(2026-07-10): sender/publisher 改用 inputAddresses[0](签名者,密码学
-      // 绑定)——output[0] 是广播者自选字段, 任何人指定成任意目标地址都能冒充身份, 见
-      // docs/2026-07-10-scout-sender-attribution-input-based-design.md。fail-loud: 取不到 input
-      // 就是 null, 不回退 output——下方既有 if(card && publisher) 判断天然处理"不 ingest"。
-      const publisher = inputAddresses[0] || null;
+      const publisher = outputAddresses[0] || null;
 
       if (card && publisher) {
         _stats.cardOk++;
@@ -520,8 +516,7 @@ async function handleBlock(event, reporter) {
     // ── Broadcast message ─────────────────────────────────────────────
     if (msgType === 'bcast') {
       const { bcast, error, raw } = parseBcastPayload(payloadHex);
-      // D-010 finding①根修(2026-07-10): 同上 kanet_card——sender 改 inputAddresses[0], fail-loud。
-      const sender = inputAddresses[0] || null;
+      const sender = outputAddresses[0] || null;
 
       if (bcast && sender) {
         _stats.bcastOk++;

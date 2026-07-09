@@ -1,6 +1,6 @@
 # kaspa-scout sender/publisher 归因改 input-based（D-010 finding① 根修）
 
-> **Status**: CURRENT（NWT 设计审 GREEN，2026-07-10——J1tn 落码中，diff 覆盖 4.1/4.2/4.3/4.4+§5 回归测试，含 NWT nit 修复）
+> **Status**: DRAFT（J1tn 出稿，待 NWT 设计审）
 > 依据：NWT 2026-07-09 D-010 红队 finding①CRITICAL——coord-status 提案的"密码学锚"承重墙实为 `outputAddresses[0]`（任何广播者自由指定的字段），非签名者绑定值，verify-value-source 违反。Bettor 裁定：不落半截（两扫描器同批块竞态，只修一个=归因不一致+攻击路径仍开），查完全部路径出完整设计，NWT 审过再落码。
 
 ## 0. 问题本质（一句话）

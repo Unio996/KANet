@@ -17,7 +17,7 @@
 import * as kaspa from 'kaspa-wasm';
 import { classifyPayload, MIN_PAYLOAD_HEX } from './lib/protocol.mjs';
 import { tryIndex, updateCheckpoint } from './message-indexer.mjs';
-import { extractAddresses, derivePeers, parseCardPayload, parseBcastPayload, fetchVerboseBlock } from './rpc-scanner.mjs';
+import { extractAddresses, derivePeers, parseCardPayload, parseBcastPayload } from './rpc-scanner.mjs';
 import { resolveRpcUrl as _sharedResolveRpcUrl } from '../../shared/lib/rpc-utils.mjs';
 
 const { RpcClient, Encoding } = kaspa;
@@ -172,9 +172,7 @@ async function _connect() {
 
   _rpc.addEventListener('block-added', async (event) => {
     try {
-      // NWT nit(2026-07-10 归因红队审): _handleBlockAdded 改 async 后必须 await, 否则 verbose
-      // 补拉阶段的异常会跨过这层 await 边界变成 unhandled rejection, 绕过下面的 catch。
-      await _handleBlockAdded(event);
+      _handleBlockAdded(event);
     } catch (err) {
       log('ERROR in block handler:', err.message);
     }
@@ -229,17 +227,13 @@ function _scheduleReconnect() {
 
 // ── Block handler: 维护 TX 缓存 ─────────────────────────────────────────────
 
-async function _handleBlockAdded(event) {
+function _handleBlockAdded(event) {
   const block = event?.data?.block;
   if (!block) return;
 
   _stats.blocks++;
   const now = Date.now();
   const transactions = block.transactions || block.body?.transactions || [];
-  // D-010 finding①根修(2026-07-10): 本块的 hash, 供下面 bcast 归因用条件式 verbose 补拉——
-  // block-added 事件本身不带 input 的 verboseData, 需要用这个 hash 另外 getBlock() 一次才能
-  // 拿到可信的签名者地址。见 docs/2026-07-10-scout-sender-attribution-input-based-design.md §4.3(A)。
-  const blockHash = block?.verboseData?.hash || null;
 
   for (const tx of transactions) {
     const txId = tx?.verboseData?.transactionId || tx?.id;
@@ -255,8 +249,8 @@ async function _handleBlockAdded(event) {
     if (_pending.has(txId) && payloadHex) {
       _pending.delete(txId);
       _stats.pendingRecovered++;
-      // 直接处理（此时 blockHash 可靠可得，§4.3(B) pending-recovery 分支）
-      await _processTxPayload(txId, tx, payloadHex, 'pending-recovery', blockHash);
+      // 直接处理
+      _processTxPayload(txId, tx, payloadHex, 'pending-recovery');
     }
 
     // ── 全块广播扫描：捕获外部 Agent 的 broadcast ────────────────────
@@ -268,12 +262,8 @@ async function _handleBlockAdded(event) {
       if (msgType === 'bcast') {
         _processed.add(txId);
         const { bcast, error } = parseBcastPayload(payloadHex);
-        // D-010 finding①根修: sender 改用 inputAddresses[0]（签名者），block-added 事件本身
-        // 没有 input 的 verboseData，需要用 blockHash 条件式补拉一次才能拿到可信值。
-        const verboseTxMap = blockHash ? await fetchVerboseBlock(blockHash) : null;
-        const effectiveTx = verboseTxMap?.get(txId) || tx;
-        const { inputAddresses } = extractAddresses(effectiveTx);
-        const sender = inputAddresses[0] || null;
+        const { outputAddresses } = extractAddresses(tx);
+        const sender = outputAddresses[0] || null;
         if (bcast && sender) {
           _stats.kasiaHits++;
           _stats.byType['bcast'] = (_stats.byType['bcast'] || 0) + 1;
@@ -285,8 +275,6 @@ async function _handleBlockAdded(event) {
           }]).then(r => { if (r.reported > 0) _stats.reportOk++; })
             .catch(() => { _stats.reportFail++; });
           log(`  bcast(block-scan): #${bcast.channelName} from=${sender.slice(-8)} "${bcast.message.slice(0, 60)}..."`);
-        } else {
-          log(`  bcast(block-scan) DROP: tx=${txId.slice(0, 16)}... no verified input address (verbose ${verboseTxMap ? 'ok-no-input' : 'unavailable'})`);
         }
       }
     }
@@ -353,9 +341,7 @@ async function _resolveTxAndProcess(txId) {
   const cached = _txCache.get(txId);
   if (cached) {
     _stats.cacheHits++;
-    // blockHash=null: cache 写入(_handleBlockAdded)从不存 blockHash——bcast/kanet_card 分支会
-    // 在 _processTxPayload 内因 source!=='pending-recovery' 直接 defer 进 _pending, 不用到这个值。
-    await _processTxPayload(txId, cached.tx, cached.payload, 'cache', null);
+    _processTxPayload(txId, cached.tx, cached.payload, 'cache');
     return;
   }
 
@@ -371,9 +357,7 @@ async function _resolveTxAndProcess(txId) {
       const payload = tx?.payload;
       if (payload && payload.length >= MIN_PAYLOAD_HEX) {
         _stats.mempoolHits++;
-        // blockHash=null: mempool 阶段这笔 tx 还没上链，blockHash 结构性不存在（不是没传参，是这个
-        // 值现在物理上不存在）——bcast/kanet_card 分支会 defer 进 _pending，不用到这个值。
-        await _processTxPayload(txId, tx, payload, 'mempool', null);
+        _processTxPayload(txId, tx, payload, 'mempool');
         return;
       }
       // TX 在 mempool 但没有 Kasia payload — 普通转账，不需要处理
@@ -391,31 +375,9 @@ async function _resolveTxAndProcess(txId) {
 
 // ── TX 分类和上报（核心逻辑，和 rpc-scanner handleBlock 对齐）──────────────
 
-/**
- * D-010 finding①根修(Bettor 候选A, 2026-07-10): bcast/kanet_card 的身份归因需要可信的
- * input 地址，而 cache/mempool 来源没有可靠的 blockHash（cache 从未存过；mempool 阶段这笔
- * tx 还没上链，结构性不存在）——判定为真时应 defer 给未来 pending-recovery（有 blockHash）
- * 处理，本次不做归因判断/不上报。"不会永久丢失"：_handleBlockAdded 249 行的 pending 检查
- * 无条件覆盖每块每笔 tx，该 tx 一旦确认必被 pending-recovery 或全块扫描捡到，只是从
- * "mempool 阶段可见"退化成"确认后可见"——非钱路，不影响正确性。见设计文档 §4.3(B)。
- * 抽成纯函数导出，方便 selftest 不需要 mock 整个 RPC/reporter 就能验证判定逻辑本身。
- * @param {string} msgType
- * @param {string} source  'pending-recovery'|'cache'|'mempool'
- * @returns {boolean}
- */
-export function shouldDeferForBlockContext(msgType, source) {
-  return (msgType === 'bcast' || msgType === 'kanet_card') && source !== 'pending-recovery';
-}
-
-async function _processTxPayload(txId, tx, payloadHex, source, blockHash) {
+function _processTxPayload(txId, tx, payloadHex, source) {
   const msgType = classifyPayload(payloadHex);
   if (!msgType) return; // 不是 Kasia 协议消息
-
-  if (shouldDeferForBlockContext(msgType, source)) {
-    _pending.add(txId);
-    log(`[${msgType}] deferred to pending-recovery (source=${source}, no verified block context yet)`);
-    return;
-  }
 
   _stats.kasiaHits++;
   _stats.byType[msgType] = (_stats.byType[msgType] || 0) + 1;
@@ -433,13 +395,9 @@ async function _processTxPayload(txId, tx, payloadHex, source, blockHash) {
   }
 
   // ── KANet Agent Card ──────────────────────────────────────────────────
-  // 走到这里 = source==='pending-recovery'（上面的 defer guard 已经拦掉 cache/mempool），
-  // blockHash 通常可得，但仍按 null-safe 处理（block-added 事件本身也可能缺 verboseData.hash）。
   if (msgType === 'kanet_card') {
     const { card, error } = parseCardPayload(payloadHex);
-    const verboseTxMap = blockHash ? await fetchVerboseBlock(blockHash) : null;
-    const effectiveTx = verboseTxMap?.get(txId) || tx;
-    const publisher = extractAddresses(effectiveTx).inputAddresses[0] || null;
+    const publisher = outputAddresses[0] || null;
     if (card && publisher) {
       _reporter.reportCards([{
         address: publisher,
@@ -450,7 +408,7 @@ async function _processTxPayload(txId, tx, payloadHex, source, blockHash) {
         .catch(() => { _stats.reportFail++; });
       log(`  card: name="${card.name || '(private)'}" mode=${card.mode}`);
     } else {
-      log(`  card FAIL: ${error || 'no-publisher'} (verbose ${verboseTxMap ? 'ok' : 'unavailable'})`);
+      log(`  card FAIL: ${error || 'no-publisher'}`);
     }
     return;
   }
@@ -458,9 +416,7 @@ async function _processTxPayload(txId, tx, payloadHex, source, blockHash) {
   // ── Broadcast ─────────────────────────────────────────────────────────
   if (msgType === 'bcast') {
     const { bcast, error } = parseBcastPayload(payloadHex);
-    const verboseTxMap = blockHash ? await fetchVerboseBlock(blockHash) : null;
-    const effectiveTx = verboseTxMap?.get(txId) || tx;
-    const sender = extractAddresses(effectiveTx).inputAddresses[0] || null;
+    const sender = outputAddresses[0] || null;
     if (bcast && sender) {
       _reporter.reportBroadcasts([{
         channelName: bcast.channelName,
@@ -471,7 +427,7 @@ async function _processTxPayload(txId, tx, payloadHex, source, blockHash) {
         .catch(() => { _stats.reportFail++; });
       log(`  bcast: #${bcast.channelName} "${bcast.message.slice(0, 60)}..."`);
     } else {
-      log(`  bcast FAIL: ${error || 'no-sender'} (verbose ${verboseTxMap ? 'ok' : 'unavailable'})`);
+      log(`  bcast FAIL: ${error || 'no-sender'}`);
     }
     return;
   }
