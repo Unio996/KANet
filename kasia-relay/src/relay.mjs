@@ -1017,6 +1017,24 @@ if (process.send) {
           if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, ...r } });
           return;
         }
+        case 'closezk_v2_escape_trigger': {
+          // P2 pxvml escape 退款 (J2 2026-07-09, Bettor GREEN-with-notes + NWT GREEN-with-conditions):
+          // escape_trigger OP_1 — closed 1→3 write-once flag-flip, 守恒不动钱, tx.time 阈值链上机械裁决.
+          const { unlockCloseZkV2EscapeTrigger } = await import('./lib/p2sh.mjs');
+          const wallet = getWallet();
+          const r = await unlockCloseZkV2EscapeTrigger({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) });
+          if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, ...r } });
+          return;
+        }
+        case 'closezk_v2_escape_claim': {
+          // P2 pxvml escape 退款 (同上): escape_claim OP_2 — refundRootBaked merkle climb + 17-word nullifier
+          // + P2PK(bettorPk) 原额退款(地址 handler 自推, 不信 caller 标量) + splice 续约, closed==3 前置.
+          const { unlockCloseZkV2EscapeClaim } = await import('./lib/p2sh.mjs');
+          const wallet = getWallet();
+          const r = await unlockCloseZkV2EscapeClaim({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) });
+          if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, ...r } });
+          return;
+        }
 
         case 'pool_v07_compute_refund_mass': {
           // G6 批 3 段① Bettor r311 钦定: Console 手搓 UtxoEntry 喂 calculateTransactionMass
