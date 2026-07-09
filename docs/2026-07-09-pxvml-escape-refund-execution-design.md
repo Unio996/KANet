@@ -1,5 +1,6 @@
 # pxvml escape 退款执行序设计（7/9 P2·J2 带·Bettor 逐步链验）
 
+> **Status**: CURRENT（待 Bettor 核 + NWT 审，GO 前不执行）
 > 主线依据：7/9 日计划令 #czbkto P2。pxvml（`ext-pool-v07-1783496295800-pxvml`）genesis 出生缺陷（gateTmplHash 半更新，7/8 门② FAIL 定案）→ zk_close 物理不可过、claim 不可达；资金走设计内 escape 路退回。
 > 状态：**设计稿·待 Bettor 核 + NWT 审，拿 GO 才动**。零广播已做的只有只读预验证。
 
