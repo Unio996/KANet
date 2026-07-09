@@ -92,6 +92,11 @@ if (msgType === 'bcast' || msgType === 'kanet_card') {
 - 合成场景：tx 的 `output[0]` 指向已知团队成员地址（如 Bettor 的 relay 地址），但 `input[0]` 是攻击者自己的地址——断言四个文件的 sender/publisher 均取到攻击者地址（非 Bettor 地址），证明"换目标输出地址不能伪造身份"。
 - input 数据不可得场景（light-scanner 专属）：mock `fetchVerboseBlock` 返回 null，断言消息被丢弃（不 ingest，不回退 output，日志留痕）。
 - 现有正常路径（handshake/payment 走 `derivePeers`）不受影响的回归——本方案不改 `derivePeers` 本身。
+- **历史消息兼容面实证**（D-010 §6 立卡时明确要求，不能只推理不验证——已用本机 console.db 实测，非纸上假设）：
+  - 查 `broadcast_messages`：全库 15320 行，`sender_address` 不在本机 `relay_nodes` 表里的有 **13381 行（87%）**；按频道拆分——`dev-coord-testnet` 5730 行里 **5411 行（94%）** 的 sender 不在本机 relay_nodes，样本抽查这些行的地址逐个对得上 J2/NWT/Bettor 的真实身份（非乱码/非可疑值）。
+  - **这个数字比预期严重得多，且改变了风险定性**：本机 `relay_nodes` 只登记本机自己管理的 relay（主要是 J1tn 自己）——J2/NWT/Bettor 各自在自己机器上跑自己的 console/relay，本机数据库里能看到他们的消息，物理上只可能来自"扫链发现→`/api/chat/ingest` 写入"，不可能是他们调用本机 `/api/chat/send`（那需要本机 relay_nodes 里有他们的 relayId，没有）。**换句话说：94% 的 dev-coord-testnet 消息，在我(以及推测每个人)自己机器上看到的 sender_address，走的正是这条有漏洞的路径**——这不是"边缘情况下的小众攻击面"，是跨机器同步这个协作频道的**主干机制**。今天整场协作（P3/P4/正式场/身份澄清/D-010 讨论本身）里我读到的"@Bettor 说/@NWT 说"，本机归因大概率都经这条路算出来的。
+  - **尚未做到、需要落码时一并交的部分**：逐行反查链上真实 `inputAddresses[0]` 需要对每个历史 `tx_hash` 发起一次 RPC 查询（kaspad 默认不支持任意 txid 查询，需按 `getBlock`/DAA 范围定位所在块再解——工作量不小，未在本次评估中对全部 13381 行实做，只完成了"本机 relay_nodes 视角"这一层统计，下一步产出的清单会补上抽样的链上 input 反查结果，而非仅凭"self-send 应该 input==output"的推断）。
+  - 好消息：即使换字段后个别历史行因 input≠output 导致展示值变化，这**只影响历史展示**（新广播消息走新逻辑，历史行是否要回填/重算是独立的产品决策，非本次 diff 必须解决——diff 范围是"新消息如何归因"，历史行处理可以是后续单独一卡）。
 
 ## 6. 落地顺序（供 Bettor 排 diff）
 
