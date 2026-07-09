@@ -13,6 +13,11 @@
 - **今日序(主线=ZK 装配不变,GO)**: P1 live-derive 落码交付验收(J1 交/J2 核/NWT 审,D-009 解除+5R-2 唯一前置)/ P2 并行 pxvml escape 退款(J2 带,escape_trigger→双 escape_claim 各 1.5KAS,广播前 Bettor 链验)/ P3 5R-2 全链重走(前置 P1+Owner 在线窗,走通=正式场放行)/ P4 fee 单源收敛卡(J2,正式场前 BLOCKING)/ P5 7/8 首轮框架 retro(Bettor pre-fill)。**DoD=5R-2 三门全绿 claim landed(六 vantage+守恒)**。
 - **用户沟通裁定**: Martin/KANetguy 状态说明=用户面文案,铁律0 必 Owner 批——Bettor 拟稿发频道,Owner 批后才发,禁先斩。claim 域剩余设计按 D-007 原批次跟 J1 对账器卡,不插队。
 
+### 交付 P1 live-derive 落码(2026-07-09 04:0x Z·J1tn·已push 66de59c6,待 J2 核+NWT 审+D-009 解除)
+- 按 `docs/2026-07-08-gate-tmplhash-live-derive-design.md` §4 落地清单交付: 新 `gate-tmpl-hash.mjs`(computeGateTmplHash 复用固定 canonical sample=7/7 3o6cs 真实 receipt+ensureGateTmplHashFresh lazy round-trip,gate 在 `ZK_PROVE_WORKER_ENABLED==1`,注3 强制折入)。调用点钉在设计稿指定两处: `zk-prove-worker.mjs zkProveWorkerTick` 真实 proving 前 / `zk-close-dispatch.mjs rebuildZkCloseGateWitness`(zk_close 真广播+门②彩排 dry-run 共用唯一入口,一处覆盖两条下游路径)。清 stale fallback(注2): `pool.js:127-129` 511b0ead 硬编码+repro4 路径改缺 env 直接 throw——核实 `bshard-close-transport.mjs` 当时已修过(非重复修,只 pool.js 这一处待清,跟设计稿字面"三处"不符,已逐处核实说明)。
+- selftest(`gate-tmpl-hash.selftest.mjs`)三项断言: ①computeGateTmplHash(当前 imageId)==烤死 gateTmplHash(D-009 核心断言)②跟 rebuildZkCloseGateWitness 独立切法交叉核对一致(drift tripwire)③ensureGateTmplHashFresh fail-loud guard 真实抛出验证。
+- **⚠ 诚实边界(未 claim 已验收)**: J1tn 本机未装 ZK-SDK isolated WASM(`ZKSDK_WASM_PATH` 指向路径不存在)——canonical sample 加载+image_id 匹配前置断言+语法/lint 全过,但 `kaspaZk()` 往后的真实 round-trip 断言本机跑不了。D-009"一次真实 round-trip 自证跑通"这个证据需 J2/KANet-UI(已验收过 ZK 环境的机器)拉最新代码跑一遍 selftest,已频道请求,本条不预支未完成的验证结果。
+
 ## 🔄 7/8 晚班·Bettor 中断接位+auto-pay 危机根治+门① 放行(2026-07-08 22:5x-23:1x 本地 / 15:5x-16:1x Z·Bettor 接位记账)
 - **Bettor 会话中断>1h(门① 盲算放行卡死在协调者身上)**: 前 Bettor 会话在 zk_handoff dryRun GREEN(09:49Z)后失联,新 Bettor 15:53Z 接位认账。**代价=escape grace 窗口被耗掉**(见下门① 发现①)。retro 素材:单点协调者失联=主线停摆,接位 SOP 这次从状态层+地面核实(git/DB/链/频道)完整走通,未吃陈饭。
 - **🔴 auto-pay 孤儿单危机(真实用户 KANetguy 触发,Owner 四连严批)**: 根因=51a1ad1c(7/5,#16 UX 修复)在 auto-pay 成功分支提前删 pendingPayments,而 register-v07/confirm 全库唯一调用点=pollPendingBets 靠该记录驱动 → **payRes.ok 即断链,confirm 100%永不发生**(NWT 坐实非概率性)。三修复部署:4385d633(移除提前删,根治)+6a9a6d14(#19 betId write-side)+f378458d(pollPendingBets 熔断防真错误无限重试),全 NWT GREEN,第十二次重启生效。影响面摸底:24 托管钱包全扫,真实用户 8,**受影响=1(tg 7202335035≈KANetguy,余额耗至 0.97KAS 零注册)**+候选2(6/24 老号,余额 0,待一句话排除)。
