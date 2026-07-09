@@ -1834,6 +1834,78 @@ export async function registerPoolRoutes(fastify) {
     }
   });
 
+  // POST /api/admin/pool/zk-close-v2 — 门②真广播(J2, 2026-07-09 市场5R-2彩排): dispatchUnlockZkClose 的
+  // 活进程调用入口。同 propose-close-v2/zk-handoff-v2 一字不差理由(standalone 脚本连不到活 relay 注册表,
+  // 纯执行位置 wiring, 零新业务逻辑)+同款认证(secret+IP allowlist)+窄路由默认 OFF。ZK_CLOSE_TICK_ENABLED
+  // 自治 daemon 分支仍留 OFF(确认令制)——本端点是 money-entry 广播前贴预期值→盲算比对→GO 纪律下的手动
+  // 触发口, 不是自治 tick。ctx 复用 dispatchUnlockZkClose 既定契约(zk-close-dispatch.mjs:65-70): kaspaZk
+  // 单一加载器(zk-prove-worker.mjs, #cb42af 纪律)+ relayCall 走 sendCommandAsync(活 relay 注册表)。
+  // dry_run(Bettor 批文约束①要求, 镜像 zk-handoff-v2 契约): dispatchUnlockZkClose 本身/kasia-relay
+  // unlockBshardZkClose 都没有原生 dryRun 分支(跟 unlockBshardZkHandoff 不同, 不碰更高风险的 covenant
+  // 广播代码新增分支)——dry_run!==false(含未传, 安全默认同 zk-handoff-v2)时改走已审查过的
+  // gateZkClose 彩排模拟路径(rehearsal-pre-broadcast-gate.mjs, 跟 zk-close-gate-debugger 端点同函数,
+  // 零广播); 只有显式传 dry_run:false 才真调 dispatchUnlockZkClose 广播。
+  fastify.post('/api/admin/pool/zk-close-v2', async (request, reply) => {
+    if (process.env.ADMIN_ZK_CLOSE_V2_ENABLED !== '1') {
+      return reply.code(503).send({ ok: false, error: 'admin endpoint disabled (ADMIN_ZK_CLOSE_V2_ENABLED != 1)' });
+    }
+    const adminSecret = process.env.ADMIN_SECRET;
+    if (!adminSecret) return reply.code(503).send({ ok: false, error: 'admin endpoint disabled (ADMIN_SECRET env 未设)' });
+    const provided = request.headers['x-kanet-admin-secret'];
+    if (!provided || provided !== adminSecret) {
+      return reply.code(403).send({ ok: false, error: 'admin auth fail (X-KANet-Admin-Secret 缺失/不匹配)' });
+    }
+    const ipAllowlist = (process.env.ADMIN_IP_ALLOWLIST || '127.0.0.1,::1,::ffff:127.0.0.1').split(',').map(s => s.trim());
+    if (!ipAllowlist.includes(request.ip)) {
+      return reply.code(403).send({ ok: false, error: `admin auth fail (source IP ${request.ip} 不在 ADMIN_IP_ALLOWLIST)` });
+    }
+    const { market_id, settler_relay_id, dry_run, gate_utxo_value_sompi } = request.body || {};
+    if (!market_id || !settler_relay_id) {
+      return reply.code(400).send({ ok: false, error: 'market_id, settler_relay_id 全部必需' });
+    }
+    try {
+      const market = sqlite.prepare('SELECT metadata FROM pool_markets WHERE id = ?').get(market_id);
+      if (!market) return reply.code(404).send({ ok: false, error: `market ${market_id} not found` });
+      const meta = JSON.parse(market.metadata || '{}');
+      const zkCont = meta.zk_continuation;
+      if (!zkCont) return reply.code(409).send({ ok: false, error: 'zk_continuation missing (zk_handoff 未完成)' });
+      const { kaspaZk } = await import('../services/zk-prove-worker.mjs');
+      if (dry_run !== false) {
+        if (gate_utxo_value_sompi == null) return reply.code(400).send({ ok: false, error: 'dry_run 模式需 gate_utxo_value_sompi(同 zk-close-gate-debugger)' });
+        // beforeState 来源与 zk-close-gate-debugger 端点(pool.js:1938-1942)一字不差: payout_shards 是
+        // attest 落链后没被 handoff 动过的单一真值来源, 门①用它铸出了当前这个 CloseZkV2 genesis。
+        const { gateZkClose } = await import('../lib/rehearsal-pre-broadcast-gate.mjs');
+        const { readPayoutShardV2AttestedState } = await import('../lib/bshard-close-enforce.mjs');
+        const ps = sqlite.prepare('SELECT payout_redeem_hex FROM payout_shards WHERE logical_market_id = ?').get(market_id);
+        if (!ps) return reply.code(404).send({ ok: false, error: `no payout_shards row for ${market_id}` });
+        const state = readPayoutShardV2AttestedState(ps.payout_redeem_hex);
+        if (!process.env.ZK_GATE_TMPL_HASH) return reply.code(503).send({ ok: false, error: 'ZK_GATE_TMPL_HASH env 未设(不接受硬编码 fallback)' });
+        const ZERO32 = '00'.repeat(32);
+        const beforeState = {
+          gateTmplHash: process.env.ZK_GATE_TMPL_HASH, betsRootBaked: state.betsRootHex, refundRootBaked: state.refundRootHex,
+          attestedAtMs: state.attestedAtMs, attestedWinner: state.attestedWinner, closed: 1,
+          payoutRootHex: ZERO32, consolidatedPool: state.consolidatedPool,
+        };
+        const ctx = { getMarket: (mid) => sqlite.prepare('SELECT metadata FROM pool_markets WHERE id = ?').get(mid), getDoneJob: (mid) => sqlite.prepare(`SELECT receipt_hex FROM zk_prove_jobs WHERE market_id = ? AND status = 'done' ORDER BY id DESC LIMIT 1`).get(mid), kaspaZk: () => kaspaZk() };
+        const result = gateZkClose(market_id, ctx, beforeState, { gateUtxoValueSompi: gate_utxo_value_sompi });
+        return reply.send({ ok: true, marketId: market_id, broadcasted: false, ...result });
+      }
+      const { dispatchUnlockZkClose } = await import('../lib/zk-close-dispatch.mjs');
+      const ctx = {
+        getMarket: (mid) => sqlite.prepare('SELECT metadata FROM pool_markets WHERE id = ?').get(mid),
+        getDoneJob: (mid) => sqlite.prepare(`SELECT receipt_hex FROM zk_prove_jobs WHERE market_id = ? AND status = 'done' ORDER BY id DESC LIMIT 1`).get(mid),
+        kaspaZk: () => kaspaZk(),
+        relayCall: (cmd) => sendCommandAsync(settler_relay_id, cmd, 90000),
+      };
+      const result = await dispatchUnlockZkClose({ marketId: market_id, continuationOutpoint: zkCont.outpoint, attestedWinner: zkCont.attestedWinner }, ctx);
+      if (!result.ok) return reply.code(500).send({ ok: false, error: result.error });
+      return reply.send({ ok: true, marketId: market_id, broadcasted: true, txId: result.txid });
+    } catch (e) {
+      console.error(`[admin/zk-close-v2] ${market_id} fail: ${e.message}`);
+      return reply.code(500).send({ ok: false, error: `zk-close-v2 failed: ${e.message}` });
+    }
+  });
+
   // POST /api/admin/pool/zk-close-gate-debugger — 门②(J1tn, 2026-07-08 市场5彩排 T1.5): 用生产共享函数
   // rebuildZkCloseGateWitness(zk-close-dispatch.mjs, 跟真广播 dispatchUnlockZkClose 完全同一条 witness
   // 构造代码路, §1.2 反vacuous 铁律)重建 gate witness, 拼 cli-debugger test-case 跑 --run-all, 只读不广播。
