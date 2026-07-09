@@ -112,6 +112,42 @@ export function writeZkContinuation(marketId, o) {
 }
 
 /**
+ * advanceZkContinuationAfterSpend — CloseZkV2 续约 UTXO 被合法花费(escape_trigger/escape_claim/zk_close/claim
+ *   任一 entry landed)后, 把 zk_continuation 的 outpoint/redeemHex/valueSompi 推进到新 continuation, 其余字段
+ *   (proving/mintedAt/source* 等)原样保留——与 writeZkContinuation(mint 专用, 会整体重置 proving='pending')
+ *   语义区分, 防止续约更新把已 ready/failed 的 proving 状态静默抹掉。
+ *   P2 pxvml escape 退款(2026-07-09, docs/2026-07-09-pxvml-escape-refund-execution-design.md T4 写侧持久化)
+ *   首个消费方; #22 族纪律: 每步 landed 后必须调本函数持久化+readback, 禁 driver 手写 SQL。
+ *   同时在 meta.zk_escape_audit 追加一条审计记录(txid/entry/时间), 终态可溯。
+ * @param {string} marketId
+ * @param {{outpointTxid:string, outpointIndex:number, redeemHex:string, valueSompi:string|number,
+ *   spentEntry:string, spentTxid:string}} o  redeemHex/valueSompi = 新 continuation 的; 最后一步无 continuation
+ *   时传 redeemHex=null/valueSompi=0 + outpointTxid=null, zk_continuation.exhausted=true 显式标记。
+ */
+export function advanceZkContinuationAfterSpend(marketId, o) {
+  if (!o?.spentEntry || !o?.spentTxid) throw new Error('advanceZkContinuationAfterSpend: spentEntry/spentTxid 必需(审计不可省)');
+  const hasCont = o.outpointTxid != null;
+  if (hasCont && (o.outpointIndex == null || !o.redeemHex || o.valueSompi == null)) {
+    throw new Error('advanceZkContinuationAfterSpend: 有 continuation 时 outpointIndex/redeemHex/valueSompi 必需');
+  }
+  const row = sqlite.prepare('SELECT metadata FROM pool_markets WHERE id = ?').get(marketId);
+  if (!row) throw new Error(`advanceZkContinuationAfterSpend: market ${marketId} 不存在`);
+  let meta; try { meta = JSON.parse(row.metadata || '{}'); } catch { meta = {}; }
+  if (!meta.zk_continuation) throw new Error(`advanceZkContinuationAfterSpend: market ${marketId} 没有 zk_continuation — 本函数只推进既有记录, 不创建(mint 走 writeZkContinuation)`);
+  if (hasCont) {
+    meta.zk_continuation.outpoint = { txid: o.outpointTxid, index: Number(o.outpointIndex) };
+    meta.zk_continuation.redeemHex = o.redeemHex;
+    meta.zk_continuation.valueSompi = String(o.valueSompi);
+  } else {
+    meta.zk_continuation.exhausted = true;   // 显式终态, 不删对象(历史 outpoint/redeem 留档可溯)
+  }
+  if (!Array.isArray(meta.zk_escape_audit)) meta.zk_escape_audit = [];
+  meta.zk_escape_audit.push({ entry: o.spentEntry, txid: o.spentTxid, at: new Date().toISOString(), newValueSompi: hasCont ? String(o.valueSompi) : '0' });
+  sqlite.prepare(`UPDATE pool_markets SET metadata = ? WHERE id = ?`).run(JSON.stringify(meta), marketId);
+  return { ok: true };
+}
+
+/**
  * updateProvingReady — zk-prove-worker(缺件②)proving job 跑完后, 单条原子 UPDATE 把 zk_continuation.proving
  *   从 'pending' 推进到 'ready', 全字段一次写齐(NWT GREEN 要求的原子性: 不会出现 status='ready' 但 gate 还是
  *   null 的中间态)。前置: market.metadata.zk_continuation 必须已存在(writeZkContinuation 先跑过)。
