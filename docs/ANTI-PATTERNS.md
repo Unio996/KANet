@@ -2858,4 +2858,35 @@ if (process.env.ZK_PROVE_WORKER_ENABLED === '1') {
 
 ---
 
+## 规则 57 · Git Bash 传 Windows 反斜杠路径给原生 exe 会被吞 —— 一律用正斜杠 + 启动后验证进程实际收到的 argv
+
+**触发时机**（2026-07-10，J1tn 重新拉起本机独立 TN12 kaspad 节点，用户追问"是否严格执行了接位文件的同步经验教训"才揪出）：用 Bash 工具（Git Bash，当次会话 PowerShell 工具本身不可用）执行 `nohup .../kaspad.exe --appdir=D:\\kaspa-tn12-data ... & disown`。预期反斜杠转义后进程收到单个 `\`，但实际进程收到的 `--appdir` 是 `D:kaspa-tn12-data`——反斜杠整个消失，变成一个 **drive-relative 路径**（不带前导分隔符）。启动前 `cd` 到了 `/d/kaspa-tn12-data`（对应 `D:\kaspa-tn12-data`），这个 drive-relative 路径被解析成"D: 盘当前目录下的子目录"，实际新建/写入了嵌套的 `D:\kaspa-tn12-data\kaspa-tn12-data\`，而不是原来存有 9GB 已同步链数据的 `D:\kaspa-tn12-data\`。后果：节点没有走"本地重验证"（复用已有数据），而是从零开始网络下载 header（下载了 20 多万个 header），浪费约 30 分钟才被发现。**更严重的一层**：诊断过程中已经用 `Get-CimInstance Win32_Process ... | select CommandLine` 亲眼看到实际参数就是 `--appdir=D:kaspa-tn12-data`（缺失反斜杠），但当时被当成"日志显示问题"一带而过，没有停下来推敲会不会导致路径解析错误——这是比转义本身更严重的失职：验证时已经看到了异常信号，却没把它当信号处理。
+
+### Wrong
+```bash
+cd /d/kaspa-tn12-data
+nohup /d/rusty-kaspa/target/release/kaspad.exe --appdir=D:\\kaspa-tn12-data ... &
+# 进程实际收到 --appdir=D:kaspa-tn12-data(反斜杠消失, drive-relative 路径)
+# cwd 恰好也在这个目录 → 解析成嵌套子目录, 不是绝对路径, 复用已有数据失败, 从零同步
+```
+
+### Right
+```bash
+# Windows 路径传给原生 exe, 一律用正斜杠——Windows API 原生支持, 不会被 Git Bash 转义吞掉:
+nohup /d/rusty-kaspa/target/release/kaspad.exe --appdir=D:/kaspa-tn12-data ... &
+
+# 启动后必须验证进程实际收到的参数, 不能只信自己转义对了:
+powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name='kaspad.exe'\" | Select CommandLine"
+# 并核对启动日志自己回显的路径行(如 kaspad 的 "Application directory: ...")跟预期是否一致,
+# 以及日志里有没有"current sink is/current pruning point is/syncing ahead"这类"复用已有数据"的信号
+# (若看到的是从 0 开始"Downloaded N headers", 说明没有复用到已有数据, 路径大概率不对)。
+```
+
+### Why
+- Git Bash 对含反斜杠的 Windows 风格路径参数传给原生（非 MSYS）exe 时，转义/翻译行为不可靠——本次实测反斜杠被整个吃掉，而不是保留单个 `\`（哪怕命令本身写的是 `\\` 双转义）。这不是"记得转义"能保证对的，根治办法是压根不用反斜杠。
+- **任何验证输出里出现"看起来有点不对"的路径/字符串，都是信号，不是噪音**——本次事故里，路径缺失反斜杠这个证据在诊断的第一次输出里就已经出现，但被当成日志格式问题放过了。跟规则 46（下强结论前必验对对象）同一母题：验证的意义在于真的去看，不是走个流程。
+- 这条不止对 kaspad 适用——任何 agent 用 Bash 工具在 Windows 上拉起原生 exe、传 Windows 风格路径参数，都可能踩同一个坑；PowerShell 工具不可用时（本次遇到的情况）尤其容易被忽略，因为少了 PowerShell 原生处理路径的直觉。
+
+---
+
 *本档案在 v2 spec 第八章元教训基础上独立。spec 聚焦"这次怎么做"，本档案聚焦"下次别再犯"。*
