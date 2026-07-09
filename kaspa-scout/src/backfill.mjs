@@ -211,7 +211,9 @@ export async function runBackfill(reporter, opts) {
         // ── KANet Agent Card ──
         if (msgType === 'kanet_card') {
           const { card, error, raw } = parseCardPayload(payloadHex);
-          const publisher = outputAddresses[0] || null;
+          // D-010 finding①根修(2026-07-10): sender/publisher 改用 inputAddresses[0](签名者), 见
+          // docs/2026-07-10-scout-sender-attribution-input-based-design.md。fail-loud 不回退 output。
+          const publisher = inputAddresses[0] || null;
           if (card && publisher) {
             stats.cardOk++;
             cardReports.push({ address: publisher, txHash: txId, cardData: card, network });
@@ -226,7 +228,8 @@ export async function runBackfill(reporter, opts) {
         // ── Broadcast ──
         if (msgType === 'bcast') {
           const { bcast, error, raw } = parseBcastPayload(payloadHex);
-          const sender = outputAddresses[0] || null;
+          // D-010 finding①根修(2026-07-10): 同上 kanet_card——sender 改 inputAddresses[0], fail-loud。
+          const sender = inputAddresses[0] || null;
           if (bcast && sender) {
             stats.bcastOk++;
             bcastReports.push({ channelName: bcast.channelName, senderAddress: sender, content: bcast.message, txHash: txId });
