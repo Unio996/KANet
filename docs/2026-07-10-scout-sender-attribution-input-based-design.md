@@ -69,26 +69,51 @@ verbose 数据在这两个文件里已经可靠可得（§2），零新增 RPC�
 
 `_processCard(txId, payloadHex, outputAddresses, ...)` → `_processCard(txId, payloadHex, inputAddresses, outputAddresses, ...)`，函数体内部 `outputAddresses[0]` 换 `inputAddresses[0]`，同 4.1 的 null 语义（既有 `if (card && publisher)` 判断天然处理不 ingest）。调用点（182/184 行）多传一个已经算好的 `inputAddresses`，零新逻辑。
 
-### 4.3 light-scanner.mjs（需要设计，非一行 diff）
+### 4.3 light-scanner.mjs（NWT 红队 MUST-FIX 后修订版，非最初稿）
 
-**条件式 verbose 补拉**：只在 `classifyPayload(payloadHex)` 判定为 `'bcast'` 或 `'kanet_card'` 时才触发一次 `fetchVerboseBlock(blockHash)`（rpc-scanner.mjs 现状是纯内部 `function`，未 `export`——落码时顺手加 `export`，复用同一份实现，不新造第二份——`backfill.mjs` 已经违反过这条，不再添一个第三份实现）。绝大多数块不含这两种消息类型（bcast/card 是稀疏事件，日常流量以 handshake/payment/comm 为主），触发频率低，不改变"light"的整体特性。
+**两条独立路径，数据可得性不同，不能用同一套处理**：
+
+**(A) `_handleBlockAdded` 自身的全块扫描**（266 行附近，"捕获外部 Agent broadcast"那段）：这段代码本身就在处理 `block-added` 事件、`blockHash` 在函数作用域内直接可得——条件式 verbose 补拉照直接生效：
 
 ```js
-// _handleBlockAdded (266 行附近) 和 _processTxPayload (400/419 行附近) 统一改成：
-if (msgType === 'bcast' || msgType === 'kanet_card') {
-  const blockHash = /* 从 event/tx 上下文取, 两处入参已带 */;
-  const verboseTxMap = await fetchVerboseBlock(blockHash);   // 复用 rpc-scanner.mjs 导出
+// 266 行附近, msgType === 'bcast'（kanet_card 同款）:
+if (msgType === 'bcast') {
+  const blockHash = block?.verboseData?.hash || null;
+  const verboseTxMap = blockHash ? await fetchVerboseBlock(blockHash) : null;  // 复用 rpc-scanner.mjs 导出（现状未 export，落码时补）
   const effectiveTx = verboseTxMap?.get(txId) || tx;
   const { inputAddresses } = extractAddresses(effectiveTx);
   const sender = inputAddresses[0] || null;
-  if (!sender) { log(`[bcast/card] DROP tx=${txId.slice(0,16)}... no verified input address (verbose fetch ${verboseTxMap ? 'ok-no-input' : 'failed'})`); return; }
-  // ... 沿用现有 report 逻辑
+  if (bcast && sender) { /* 原有 report 逻辑不变 */ }
+  else { /* 不 ingest, log 留痕 */ }
 }
 ```
 
-**延迟面**：每次触发多一次 `getBlock({includeTransactions:true})` 往返（同网络内, 参考 rpc-scanner.mjs 实测量级，通常 <1s），只发生在检测到 bcast/card 时，不是每块都付这个成本——对"light"整体吞吐/延迟的影响可忽略。
+**(B) `_processTxPayload`（400/419 行，被 `_resolveTxAndProcess` 调用）——NWT 找到的真问题**：这个函数实际有 **3 条调用来源**（`source` 参数）：
+- `'pending-recovery'`（253 行，`_handleBlockAdded` 内部直接调用）——**有 blockHash**，同 (A) 一样可以做 verbose 补拉。
+- `'cache'`（344 行）——`_txCache` 写入时（245 行）从未存过 blockHash，无法回填。
+- `'mempool'`（360 行，`getMempoolEntry` 命中）——**结构性不存在 blockHash**：这笔 tx 还没上链，不属于任何区块，不是"没传参"，是这个值现在物理上不存在。
 
-**失败面**：`fetchVerboseBlock` 返回 null（RPC 失败/超时）或返回了但目标 tx 的 input 仍无 `verboseData`（理论上不应该，getBlock verbose 模式下 kaspad 应该解析所有 input——若发生说明节点本身有异常）→ 一律 `sender=null` → 直接丢弃这条上报（不 ingest，不回退 output）。**这条消息不会永久丢失**：backfill.mjs 的历史回扫路径本来就会覆盖到同一笔 tx（虽然 ingest 是 dedup-by-first-arrival，若 light-scanner 这次因验证失败没有 ingest，之后 rpc-scanner/backfill 用可靠数据首次 ingest 会成功记录正确归因）——**这也是为什么"宁可丢弃不可信归因"是安全的**：真消息会被更可靠的路径捡回来，伪造消息则被正确挡在门外。
+若对 cache/mempool 强行 fail-loud，会让这两个来源的 bcast/kanet_card 上报永久清零（同 (A) 曾经踩的坑，换个位置复发）；若给这两个来源开"没 blockHash 就退回 output"的口子，直接重开这次要关的洞——且 mempool 分支的攻击窗口比原来更精确：攻击者可以故意让伪造 tx 只在 mempool 阶段被抓（若那时还回退 output），一旦确认，`/api/chat/ingest` 的 `tx_hash` dedup（§3）会挡掉 rpc-scanner/backfill 后续用可靠数据纠正的机会——"稍后会被更可靠路径捡回来"这句安全论证对 mempool 分支根本不成立。
+
+**裁定（Bettor #dstzfe，候选A）**：`_processTxPayload` 里，当 `msgType === 'bcast' || msgType === 'kanet_card'` 且 `source !== 'pending-recovery'`（即 cache/mempool 命中）时，**统一不在此处理，把 `txId` 塞进 `_pending` 队列**，交给 (A) 未来自然发生的确认流程处理：
+
+```js
+// _processTxPayload 内, bcast/kanet_card 分支起手:
+if ((msgType === 'bcast' || msgType === 'kanet_card') && source !== 'pending-recovery') {
+  _pending.add(txId);   // 交还给 pending-recovery 路径(有 blockHash), 本次不作身份归因判断
+  log(`[${msgType}] deferred to pending-recovery (source=${source}, no verified block context yet)`);
+  return;
+}
+// 走到这里 = source === 'pending-recovery', blockHash 可得, 同 (A) 逻辑处理
+```
+
+**"不会永久丢失"论证**：cache/mempool 命中被推迟后，这笔 tx 一旦真正确认上链，**两条独立机制都会捡到它**——① `_handleBlockAdded` 249 行本来就有的 pending 检查（`_pending.has(txId) && payloadHex`）会触发 `pending-recovery` 走完整 verbose 流程；② 就算 `_pending` 因为 `PENDING_MAX` 溢出被清（534-538 行既有逻辑），(A) 的全块扫描本来就无条件处理块里的**每一笔** tx（不依赖 `_pending`/地址追踪），同一笔 tx 确认时一定会被 (A) 看到并正确归因。唯一的代价是**这条消息从"mempool 阶段就能看到"退化成"确认后才能看到"**——对 bcast/kanet_card 这两种"协调消息/身份广播"场景，晚几秒钟看到不影响正确性（不是钱路，D-010 信任根已经换成内容签名，这条修复关的是日常协调可信度的洞，不是资金安全的洞），换取"没有任何路径会写入不可信 sender"这条不变量真正成立。
+
+**延迟面**：(A) 每次触发多一次 `getBlock({includeTransactions:true})` 往返（同网络内，参考 rpc-scanner.mjs 实测量级，通常 <1s），只发生在检测到 bcast/card 时。(B) 的 cache/mempool 分支不再做任何补拉，反而**减少**了这两个来源原有的处理开销（直接 defer，零 RPC）。
+
+**失败面**：(A) 里 `fetchVerboseBlock` 返回 null，或返回了但目标 tx 的 input 仍无 `verboseData`（理论上不应该，getBlock verbose 模式下 kaspad 应解析所有 input——若发生说明节点本身有异常）→ 一律 `sender=null` → 不 ingest，log 留痕，同 §4.1 的既有 `if(bcast && sender)` 判断天然处理。
+
+**范围外记账（Bettor 明确排除，防将来误当新发现重查）**：`derivePeers()`（172-181 行，handshake/payment 消息）的 `sender = inputAddresses[0] || outputAddresses[1] || outputAddresses[0] || null` 同样带 output 兜底，理论上跟本卡是同一族问题——但这两种消息类型不是 D-010 finding① 的对象（handshake/payment 不是"频道身份广播"语义），且改动面更大（涉及 receiver 推导），本卡不动，记 COORD-LEDGER 挂卡，需要时单独立卡处理，不混进本次 diff。
 
 ### 4.4 §3 竞态问题的处理
 
@@ -99,6 +124,9 @@ if (msgType === 'bcast' || msgType === 'kanet_card') {
 - 合成场景：tx 的 `output[0]` 指向已知团队成员地址（如 Bettor 的 relay 地址），但 `input[0]` 是攻击者自己的地址——断言四个文件的 sender/publisher 均取到攻击者地址（非 Bettor 地址），证明"换目标输出地址不能伪造身份"。
 - input 数据不可得场景（light-scanner 专属）：mock `fetchVerboseBlock` 返回 null，断言消息被丢弃（不 ingest，不回退 output，日志留痕）。
 - 现有正常路径（handshake/payment 走 `derivePeers`）不受影响的回归——本方案不改 `derivePeers` 本身。
+- **light-scanner 三 source 路径分拆测**（NWT 要求，不能只测一个通用 case）：`_processTxPayload` 的 `source='pending-recovery'`（断言走 verbose 补拉，能拿到正确 input 归因）/`source='cache'`（断言不处理，直接 `_pending.add`，不发出任何 report 调用）/`source='mempool'`（同 cache，断言 defer，且额外断言**不因为"tx 是本地追踪地址触发的"就信任任何提示值**——defer 逻辑不应该有例外分支）三条分别覆盖，不能只测其中一条就当整个函数过了。
+- **竞态整合测试**（NWT 要求，验证 §4.4"不存在写入不可信归因路径"这句结论的组合效果，不是分别测每个文件就够）：构造同一笔攻击者伪造 tx（output=已知团队地址，input=攻击者地址），分别喂给 rpc-scanner/backfill/history-fetcher/light-scanner 四条路径（含 light-scanner 的 mempool→pending-recovery 完整两阶段），断言无论哪条路径先"响应"，最终写入 `/api/chat/ingest` 的 `sender_address` 要么是攻击者地址（若 verbose 数据可得，暴露真实签名者）要么完全不写入（deferred/dropped）——**不存在任何一条路径的中间态会把攻击者伪造的 output 值当 sender 落库**，哪怕只是短暂存在于 `_pending`/cache 里（这两处只存 txId/tx 原始数据，不存派生出的 sender 值，所以不构成"临时错误归因"）。
+- **rpc-scanner 的 per-tx verbose-miss 边界**（NWT 要求，483 行 `effectiveTx = verboseTxMap?.get(txId) || tx`）：构造 `fetchVerboseBlock` 对整个块成功返回了 `verboseTxMap`，但该 map 里**不包含**目标 `txId`（例如该 tx 在两次 RPC 之间被重组/节点返回不一致）这种边界场景——断言此时 `effectiveTx` 回退到原始 `tx`（block-added 事件的原始对象，无 verboseData），`inputAddresses` 因而为空，`sender=null`，同样触发不 ingest（不能因为"block 级别 verbose 拿到了"就误以为这一笔 tx 也一定有 input 数据）。
 - **历史消息兼容面实证**（D-010 §6 立卡时明确要求，不能只推理不验证——已用本机 console.db 实测，非纸上假设）：
   - 查 `broadcast_messages`：全库 15320 行，`sender_address` 不在本机 `relay_nodes` 表里的有 **13381 行（87%）**；按频道拆分——`dev-coord-testnet` 5730 行里 **5411 行（94%）** 的 sender 不在本机 relay_nodes，样本抽查这些行的地址逐个对得上 J2/NWT/Bettor 的真实身份（非乱码/非可疑值）。
   - **这个数字比预期严重得多，且改变了风险定性**：本机 `relay_nodes` 只登记本机自己管理的 relay（主要是 J1tn 自己）——J2/NWT/Bettor 各自在自己机器上跑自己的 console/relay，本机数据库里能看到他们的消息，物理上只可能来自"扫链发现→`/api/chat/ingest` 写入"，不可能是他们调用本机 `/api/chat/send`（那需要本机 relay_nodes 里有他们的 relayId，没有）。**换句话说：94% 的 dev-coord-testnet 消息，在我(以及推测每个人)自己机器上看到的 sender_address，走的正是这条有漏洞的路径**——这不是"边缘情况下的小众攻击面"，是跨机器同步这个协作频道的**主干机制**。今天整场协作（P3/P4/正式场/身份澄清/D-010 讨论本身）里我读到的"@Bettor 说/@NWT 说"，本机归因大概率都经这条路算出来的。
