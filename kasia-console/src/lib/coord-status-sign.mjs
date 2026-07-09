@@ -17,13 +17,26 @@ import { blake2b } from '@noble/hashes/blake2b';
 const SIG_LINE_PREFIX = 'SIG:';
 
 /**
- * computeContentHashHex — blake2b(content, dkLen=32) 转 hex,项目既有惯例
- * (同 gate-tmpl-hash.mjs 的 Buffer.from(blake2b(...)).toString('hex') 写法)。
+ * canonicalizeContent — 唯一的正文规范化入口:去掉尾部空白(空格/换行等)。
+ * splitSignedMessage 读端提取 content 时用同一条规则——两处必须共用这一个函数,
+ * 不能各自维护一份"去尾部空白"的逻辑(NWT 2026-07-10 审查坐实:一处 trim 一处不 trim
+ * 会导致签名覆盖的字符串跟读端重建出的字符串不 byte-exact 一致,合法签名验签失败)。
+ * @param {string} content
+ * @returns {string}
+ */
+function canonicalizeContent(content) {
+  return String(content).replace(/\s+$/, '');
+}
+
+/**
+ * computeContentHashHex — blake2b(canonicalizeContent(content), dkLen=32) 转 hex,项目既有惯例
+ * (同 gate-tmpl-hash.mjs 的 Buffer.from(blake2b(...)).toString('hex') 写法)。内部先规范化,
+ * 调用方不需要自己记得 trim——这是"签的是什么"跟"读端提取出的是什么"保持一致的唯一保证点。
  * @param {string} content
  * @returns {string} 64 字符 hex
  */
 export function computeContentHashHex(content) {
-  return Buffer.from(blake2b(Buffer.from(content, 'utf8'), { dkLen: 32 })).toString('hex');
+  return Buffer.from(blake2b(Buffer.from(canonicalizeContent(content), 'utf8'), { dkLen: 32 })).toString('hex');
 }
 
 /**
@@ -39,22 +52,27 @@ export function splitSignedMessage(fullText) {
     const line = lines[i];
     if (line.startsWith(SIG_LINE_PREFIX)) {
       const signature = line.slice(SIG_LINE_PREFIX.length).trim();
-      const content = lines.slice(0, i).join('\n').replace(/\s+$/, '');
+      const content = canonicalizeContent(lines.slice(0, i).join('\n'));
       return { content, signature: signature || null };
     }
     if (line.trim() !== '') break; // 非空行且不是 SIG: 开头 → 从末尾起没有签名行, 停止往上找
   }
-  return { content: String(fullText || '').replace(/\s+$/, ''), signature: null };
+  return { content: canonicalizeContent(fullText || ''), signature: null };
 }
 
 /**
  * buildSignedMessage — 拼装"正文 + SIG 行"的完整消息文本(签名产出侧用)。
+ * NWT 审查坐实的 bug(2026-07-10,GREEN-with-nit):这里若不对 content 做跟
+ * splitSignedMessage 同款的尾部空白裁剪,签名覆盖的字符串跟读端重建出的字符串
+ * 不 byte-exact 一致(content 尾部带空白时,读端会把它裁掉,验签必然失败)——
+ * 两处裁剪逻辑必须对称,不能只在一处做。这里补裁剪,保证"签的是什么"=
+ * "读端提取出的是什么",不依赖调用方自己先 trim 好。
  * @param {string} content
  * @param {string} signatureHex
  * @returns {string}
  */
 export function buildSignedMessage(content, signatureHex) {
-  return `${content}\n${SIG_LINE_PREFIX}${signatureHex}`;
+  return `${canonicalizeContent(content)}\n${SIG_LINE_PREFIX}${signatureHex}`;
 }
 
 /**

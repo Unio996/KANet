@@ -57,6 +57,14 @@ const withTrailingNewline = built + '\n\n';
 const r6 = await verifyCoordStatusMessage(withTrailingNewline, REAL_PUBKEY);
 ok(r6.valid === true, '消息尾部多余空行不影响验签结果(splitSignedMessage 正确定位最后一行 SIG:)');
 
+console.log('\n[test] NWT 2026-07-10 审查坐实的 bug 回归锁死:content 本身尾部带空白,签名侧和读端提取侧哈希必须一致:');
+const contentWithTrailingSpace = '【回归测试】\n正文末尾带一个空格 ';
+const hashAtSignTime = computeContentHashHex(contentWithTrailingSpace);
+const signedWithTrailing = buildSignedMessage(contentWithTrailingSpace, 'deadbeef');
+const { content: extractedContent } = splitSignedMessage(signedWithTrailing);
+const hashAfterExtraction = computeContentHashHex(extractedContent);
+ok(hashAtSignTime === hashAfterExtraction, '签名时对 content 算的 hash,与读端 splitSignedMessage 提取后重算的 hash byte-exact 一致(此前 buildSignedMessage 不 trim/splitSignedMessage 会 trim,两者不对称导致这条曾经会失败)');
+
 console.log(fails === 0
   ? '\n✅✅ ALL PASS — coord-status 签名/验签: 真实relay schnorr签名验证通过, 篡改/错误公钥/缺签名/参数缺失均fail-closed'
   : `\n❌ ${fails} 项失败`);
