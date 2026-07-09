@@ -118,8 +118,13 @@ export function runCliDebugger(testCaseJson, silPath = CLOSEZK_V2_SIL) {
   writeFileSync(testFilePath, JSON.stringify(testCaseJson, null, 2));
   const r = spawnSync(CLI_DEBUGGER, [silPath, '--test-file', testFilePath, '--run-all'], { encoding: 'utf8' });
   const stdout = r.stdout || '', stderr = r.stderr || '';
-  // cli-debugger 约定(同今晚既有 cli-debugger 8/8 用法): 退出码 0 且 stdout 不含 FAIL/red 标记 = 全绿。
-  const pass = r.status === 0 && !/FAIL|❌|red/i.test(stdout);
+  // 🔴 修复(2026-07-09, J2, 正式场市场5实撞两次): 原判定 `!/FAIL|❌|red/i.test(stdout)` 是大小写不敏感
+  // 子串匹配——cli-debugger 汇总行"N tests: N passed, 0 failed"里的"failed"照样命中 /FAIL/i(fail 是 failed
+  // 的子串), 把 0 个失败的全绿结果误判成 fail。这是"从没被真验证过的检查逻辑分支"(成功路径从未被实跑到
+  // 过, 直到今天正式场撞了两次)——改成结构化解析汇总行, 只认"X tests: Y passed, Z failed"里 Z==0, 不再用
+  // 宽松子串匹配。找不到汇总行(cli-debugger 输出格式变化/异常退出)= fail-closed 不猜通过。
+  const summaryMatch = stdout.match(/(\d+)\s+tests:\s*(\d+)\s+passed,\s*(\d+)\s+failed/);
+  const pass = r.status === 0 && !!summaryMatch && Number(summaryMatch[3]) === 0;
   return { pass, stdout, stderr, exitCode: r.status, testFilePath };
 }
 

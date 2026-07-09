@@ -499,12 +499,22 @@ export async function buildZkHandoffRequestV2(marketId, args) {
     outputs: { change_address: relayAddr },
   };
   const result = await rc(cmd, 90000);
-  // 🔴 事故修复(2026-07-08, pxvml实战撞出, 跟今晚#22族"状态转换后不持久化"同一个坑): 真广播(非dryRun)成功
-  //   拿到 txId 后, 之前没有任何代码把这次 handoff 产出的 CloseZkV2 genesis 写进
-  //   pool_markets.metadata.zk_continuation(closezk-v2-mint.mjs:writeZkContinuation)——prove worker 靠这份
-  //   metadata 才知道去哪个 outpoint 读 attested state, 不写 = job 排了也白排。psTx(上面已提取, 此刻仍是
-  //   attest 前的 ps.payout_ps_outpoint, 即 close_attest_v2 落链的那笔 txid)作为 sourceCloseAttestTxid 溯源锚。
+  // 🔴 landed-gated 持久化(2026-07-09, J2·docs/2026-07-09-zk-autonomy-three-parts-design.md (a)): 原逻辑拿到
+  //   relay 广播 ack(result.txId)就立即持久化, 是 RPC 提交成功 != 链上真落地(NO TX NO STATE 铁律)。改用
+  //   check_utxo_landed(minDepth=20, 走 relay, 不碰链——Console 不直连链是既有铁律)确认——该 relay 命令内部
+  //   用 getUtxosByAddresses(address 过滤)找 outpoint, 找到即隐含"该 UTXO 的 scriptPubKey 确实属于这个地址"
+  //   (服务端按地址过滤, 不会返回属于别的地址的 UTXO), 天然是 spk 原像断言, 不需要额外再验一遍。
   if (!dryRun && result?.txId) {
+    let landedOk = false;
+    for (let i = 0; i < 30; i++) {
+      const j = await rc({ type: 'check_utxo_landed', address: result.closeZkAddress, txid: result.txId, minDepth: 20 }, 20000);
+      if (j.landed || j.found) { landedOk = true; break; }
+      await new Promise(r => setTimeout(r, 3000));
+    }
+    if (!landedOk) {
+      console.error(`[buildProposeCloseRequestV2/handoff] 🔴 market=${marketId.slice(-8)} txId=${result.txId} 广播 OK 但 landed 确认超时 — 零持久化(#22 族纪律: 广播成功不等于落链), 需人工核实链上实况后再定`);
+      return result;
+    }
     const { writeZkContinuation } = await import('./closezk-v2-mint.mjs');
     writeZkContinuation(marketId, {
       outpointTxid: result.txId, outpointIndex: 0, redeemHex: result.closeZkRedeemHex,

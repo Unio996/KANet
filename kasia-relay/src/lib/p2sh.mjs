@@ -2195,7 +2195,10 @@ export async function unlockBshardZkClose(args) {
     ], outputs: orderedOut, lockTime: BigInt(lockTime), gas: 0n, subnetworkId: '0000000000000000000000000000000000000000', payload: '' });
     _assertTxInvariants(matched, signedTx, 'unlockBshardZkClose', networkId);
     const r = await rpc.submitTransaction({ transaction: signedTx, allowOrphan: false });
-    return { txId: r.transactionId, closeZkContinuationAddress: closeZkContAddr };
+    // 纯附加(2026-07-09, J2·docs/2026-07-09-zk-autonomy-three-parts-design.md (a)): 透传 spliced redeem hex,
+    // caller(console 侧 landed-gated 持久化)需要它写 zk_continuation.redeemHex, 不该在 console 侧重新 splice
+    // 算一遍(避免同一份 splice 逻辑出现两份独立实现)。零行为变化, 只多返回一个已经算好的本地变量。
+    return { txId: r.transactionId, closeZkContinuationAddress: closeZkContAddr, closeZkContinuationRedeemHex: spliced.toString('hex') };
   } finally { try { await rpc.disconnect(); } catch {} }
 }
 

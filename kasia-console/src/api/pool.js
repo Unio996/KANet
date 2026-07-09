@@ -1899,7 +1899,31 @@ export async function registerPoolRoutes(fastify) {
       };
       const result = await dispatchUnlockZkClose({ marketId: market_id, continuationOutpoint: zkCont.outpoint, attestedWinner: zkCont.attestedWinner }, ctx);
       if (!result.ok) return reply.code(500).send({ ok: false, error: result.error });
-      return reply.send({ ok: true, marketId: market_id, broadcasted: true, txId: result.txid });
+      // 🔴 landed-gated 持久化(2026-07-09, J2·docs/2026-07-09-zk-autonomy-three-parts-design.md (a)): 这条
+      // 端点今天上午上线时(41b34dca)完全没写持久化, 靠我手动跑 advanceZkContinuationAfterSpend 补——正式场
+      // 市场5 门②当天真撞过这个 gap。改成: check_utxo_landed(minDepth=20)确认 landed(该 relay 命令内部按地址
+      // 过滤 UTXO, 找到即隐含 spk 原像绑定, 不需要额外再验), 过了才调 advanceZkContinuationAfterSpend。
+      let landedOk = false;
+      for (let i = 0; i < 30; i++) {
+        const j = await sendCommandAsync(settler_relay_id, { type: 'check_utxo_landed', address: result.closeZkContinuationAddress, txid: result.txid, minDepth: 20 }, 20000).catch(() => ({}));
+        if (j.landed || j.found) { landedOk = true; break; }
+        await new Promise(r => setTimeout(r, 3000));
+      }
+      if (!landedOk) {
+        console.error(`[admin/zk-close-v2] ${market_id} 广播 OK(txId=${result.txid}) 但 landed 确认超时 — 零持久化, 需人工核实链上实况`);
+        return reply.send({ ok: true, marketId: market_id, broadcasted: true, txId: result.txid, persisted: false, persistError: 'landed 确认超时' });
+      }
+      try {
+        const { advanceZkContinuationAfterSpend } = await import('../lib/closezk-v2-mint.mjs');
+        advanceZkContinuationAfterSpend(market_id, {
+          outpointTxid: result.txid, outpointIndex: 0, redeemHex: result.closeZkContinuationRedeemHex,
+          valueSompi: zkCont.valueSompi, spentEntry: 'zk_close', spentTxid: result.txid,
+        });
+      } catch (e) {
+        console.error(`[admin/zk-close-v2] ${market_id} landed 但持久化 FAILED(资金已安全, 链上是真相源): ${e.message}`);
+        return reply.send({ ok: true, marketId: market_id, broadcasted: true, txId: result.txid, persisted: false, persistError: e.message });
+      }
+      return reply.send({ ok: true, marketId: market_id, broadcasted: true, txId: result.txid, persisted: true });
     } catch (e) {
       console.error(`[admin/zk-close-v2] ${market_id} fail: ${e.message}`);
       return reply.code(500).send({ ok: false, error: `zk-close-v2 failed: ${e.message}` });

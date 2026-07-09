@@ -112,5 +112,8 @@ export async function dispatchUnlockZkClose({ marketId, continuationOutpoint, at
   try { sj = await ctx.relayCall(cmd); } catch (e) { return { ok: false, error: `relay dispatch fail: ${e.message}` }; }
   const txid = sj?.txId || sj?.txid;
   if (!txid) return { ok: false, error: `relay 响应无 txId: ${JSON.stringify(sj).slice(0, 200)}` };
-  return { ok: true, txid };
+  // P4 收尾(2026-07-09, J2·docs/2026-07-09-zk-autonomy-three-parts-design.md (a)): 透传 relay 已算好的
+  // continuation 地址(unlockBshardZkClose 返回值原有字段, 之前被本函数丢弃)——caller 做 landed-gated 持久化
+  // 时需要这个值核对/写入 zk_continuation, 不该让 caller 自己重新 splice 算一遍(同一份计算不要有第二份实现)。
+  return { ok: true, txid, closeZkContinuationAddress: sj.closeZkContinuationAddress, closeZkContinuationRedeemHex: sj.closeZkContinuationRedeemHex };
 }
