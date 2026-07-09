@@ -82,6 +82,22 @@ function checkR_NULLIFIER_I64() {
   }
 }
 
+// ── R-LEDGER-SIZE [WARN]: COORD-LEDGER 活跃窗口制 (D-010 2026-07-10, Bettor 拟稿+NWT GREEN) ──
+// docs/iteration/COORD-LEDGER.md 单文件无界膨胀过 (7/9 实测 301KB, 接位一次读不进要分段翻).
+// >100KB 提醒切档到 docs/iteration/archive/COORD-LEDGER-YYYY-MM.md, warn-not-block (不阻 commit,
+// 切档是有意识动作非自动触发). 见 docs/2026-07-10-d010-handoff-status-channel-proposal.md §2.3。
+function checkLedgerSize() {
+  const ledgerFile = file('docs/iteration/COORD-LEDGER.md');
+  if (!exists(ledgerFile)) return;
+  const sizeBytes = fs.statSync(ledgerFile).size;
+  const THRESHOLD = 100 * 1024;
+  if (sizeBytes > THRESHOLD) {
+    warn('R-LEDGER-SIZE',
+      `COORD-LEDGER.md 现 ${(sizeBytes / 1024).toFixed(0)}KB > ${THRESHOLD / 1024}KB 阈值 — 建议按月切档到 docs/iteration/archive/COORD-LEDGER-YYYY-MM.md (活跃文件只留当月内容+归档索引). 见 D-010 §2.3.`,
+      ledgerFile, 0);
+  }
+}
+
 // ── R-SCRATCH-CLUTTER [WARN]: 临时脚本铁律 (Owner 2026-06-27 钦定·防根目录堆爆) ──
 // 一次性诊断/测试脚本写 scratch/ (gitignored, 绝对路径), 不堆仓库根目录. gitignore (`_*`) 防入库不防
 // 物理堆在文件浏览器 → whole-repo warn (每次 commit 跑 lint 都提醒). 历史: 821 临时文件堆爆 (归档 815).
@@ -1061,6 +1077,7 @@ checkR_NULLIFIER_I64();
 checkR_COMMAND_REGISTRATION();  // R-COMMAND-REGISTRATION (#25, KI-49 防重复): relay.mjs case 必在 commands.mjs 三层注册
 checkR_FEE_LEAVES_BYPASS();     // R-FEE-LEAVES-BYPASS [WARN] (P4/D-008, 2026-07-09): ZK 线禁直调 deriveFeeLeaves/FEE_CONFIG
 checkScratchClutter();
+checkLedgerSize();               // R-LEDGER-SIZE [WARN] (D-010 2026-07-10): COORD-LEDGER.md >100KB 提醒切档
 checkDocPath();                          // R-DOC-PATH/R-DOC-DUPLICATE (③ doc-lint 2026-06-29): date-prefixed doc 必住 docs/ 根·同名多路径 → fail
 
 // ── 报告 ──
