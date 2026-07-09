@@ -824,6 +824,38 @@ function checkR_COMMAND_REGISTRATION() {
   }
 }
 
+// ── R-FEE-LEAVES-BYPASS [WARN] (P4/D-008, 2026-07-09, J2): ZK 线文件禁直调 deriveFeeLeaves/FEE_CONFIG ──
+// 根因(7/8 门②实弹分叉): propose/enqueue/委员 voter 三处各自手搓 fee 派生, 同一市场三处三说法(pool 基数漏
+// seed/费率用协议常量非市场级 broker_fee_pct)。P4 收敛为单源 deriveSettlementFeeLeaves(pool-shard-settle.mjs),
+// deriveFeeLeaves/FEE_CONFIG 收窄为 V1(PayoutShard/committee-settle)专属——ZK 线文件(bshard-close-transport.mjs
+// /zk-prove-enqueue.mjs/zk-prove-worker.mjs)若出现 deriveFeeLeaves(/FEE_CONFIG 直调 = 复发同一坑, WARN 标记。
+// ⚠ 不含 bshard-close-enforce.mjs: 该文件 V1(enforceCloseAttest)/V2(enforceCloseAttestV2)共存, V1 分支
+// 合法保留 deriveFeeLeaves/FEE_CONFIG(P4 只抽出了 V2 分支), 文件级静态扫无法可靠区分函数边界, 不纳入本规则
+// (人工 review 覆盖, 见设计文档 §2 四侧接线)。
+const _FEE_LEAVES_BYPASS_FILES = [
+  'kasia-console/src/lib/bshard-close-transport.mjs',
+  'kasia-console/src/lib/zk-prove-enqueue.mjs',
+  'kasia-console/src/services/zk-prove-worker.mjs',
+];
+function checkR_FEE_LEAVES_BYPASS() {
+  for (const rel of _FEE_LEAVES_BYPASS_FILES) {
+    const fp = file(rel);
+    if (!exists(fp)) continue;
+    const content = read(fp);
+    const lines = content.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (/\bderiveFeeLeaves\s*\(/.test(line) || /\bFEE_CONFIG\b/.test(line)) {
+        warn(
+          'R-FEE-LEAVES-BYPASS [WARN]',
+          `ZK 线文件直用 deriveFeeLeaves()/FEE_CONFIG(V1 协议常量口径)——P4/D-008 单源收敛后 ZK 线一律走 deriveSettlementFeeLeaves(pool-shard-settle.mjs, 市场级 broker_fee_pct+consolidatedPool 含seed), 否则复发 7/8 门②"同一市场三处三说法"同族坑。`,
+          fp, i + 1
+        );
+      }
+    }
+  }
+}
+
 // R-PHANTOM-FIELD (2026-07-05, qzdh7nar/J1, following #48/#50/maker-P&L 三例同根): metadata fields written
 // ONLY by the legacy v0.6 settler (pool-market-settler.js) are read unconditionally elsewhere as if they're
 // always populated — but bshard(v0.7)/create-v07 markets never write them (deriveFeeLeaves/phase2_* writeback
@@ -1027,6 +1059,7 @@ for (const fp of targets) {
 checkR10();
 checkR_NULLIFIER_I64();
 checkR_COMMAND_REGISTRATION();  // R-COMMAND-REGISTRATION (#25, KI-49 防重复): relay.mjs case 必在 commands.mjs 三层注册
+checkR_FEE_LEAVES_BYPASS();     // R-FEE-LEAVES-BYPASS [WARN] (P4/D-008, 2026-07-09): ZK 线禁直调 deriveFeeLeaves/FEE_CONFIG
 checkScratchClutter();
 checkDocPath();                          // R-DOC-PATH/R-DOC-DUPLICATE (③ doc-lint 2026-06-29): date-prefixed doc 必住 docs/ 根·同名多路径 → fail
 

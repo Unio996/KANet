@@ -222,10 +222,10 @@ export async function buildProposeCloseRequestV2(marketId, judged) {
   const { computeCommitteePkHash } = await import('../services/bshard-close-voter.js');
   const { fetchEndBlockHashCanonical, loadPoolSnapshot, recaptureSideLockDaaForMarket } = await import('../services/pool-market-settler-v06.mjs');
   const { canonicalBetOrder, computeBetsRoot, payoutRoot: computeMerkleRoot } = await import('./pool-payout-root.mjs');
-  const { computePariMutuelPayout, settlePayoutRoot, deriveFeeLeaves, FEE_CONFIG } = await import('./pool-shard-settle.mjs');
+  const { computePariMutuelPayout, settlePayoutRoot, deriveSettlementFeeLeaves } = await import('./pool-shard-settle.mjs');
   const { buildPoolMerkleTree, getPoolMerkleProof } = await import('../services/pool-merkle-v06.mjs');
 
-  const market = sqlite.prepare('SELECT id, deadline, deadline_daa, maker_pk, broker_pk, pool_merkle_root, resolution_rule_spec, market_metadata_hash FROM pool_markets WHERE id = ?').get(marketId);
+  const market = sqlite.prepare('SELECT id, deadline, deadline_daa, maker_pk, broker_pk, broker_fee_pct, pool_merkle_root, resolution_rule_spec, market_metadata_hash FROM pool_markets WHERE id = ?').get(marketId);
   if (!market) throw new Error(`buildProposeCloseRequestV2: market ${marketId} not found`);
   let ps = sqlite.prepare('SELECT payout_redeem_hex, payout_ps_outpoint, payout_cov_id, pool_merkle_root, predicate_commit FROM payout_shards WHERE logical_market_id = ?').get(marketId);
   if (!ps) throw new Error(`buildProposeCloseRequestV2: no payout_shards row for ${marketId}`);
@@ -340,9 +340,13 @@ export async function buildProposeCloseRequestV2(marketId, judged) {
   const newRefundRoot = computeMerkleRoot(ordered.map(b => ({ pk: b.pk, amount: b.stake }))).toString('hex');
   const newAttestedAtMs = Date.now();
 
-  const poolSompi = bettors.reduce((s, b) => s + BigInt(b.stake), 0n).toString();
-  const { feeLeaves } = deriveFeeLeaves({ poolSompi, feeConfig: FEE_CONFIG, brokerPk: market.broker_pk, introducerPk: null, committeePks });
-  const pm = computePariMutuelPayout({ bettors, winningDirection, feeLeaves });
+  // P4/D-008(2026-07-09, J2): fee 单源派生, pool 基数=链上 PS 实额(含 seed), 非 Σ注(7/8 门②三说法之一的
+  // 病根)。verify-value-source: consolidated_pool 从当前活 redeem_hex 现读(不信 payout_shards 表可能过期的
+  // 缓存字段) —— propose 侧独立链读路径(设计文档 docs/2026-07-09-fee-single-source-leaf-derivation-design.md
+  // §2, 与 enqueue/委员 voter 两侧各自独立现读, 禁互相透传值)。
+  const realConsolidatedPool = Buffer.from(ps.payout_redeem_hex, 'hex').readBigInt64LE(2).toString();
+  const { feeLeaves } = deriveSettlementFeeLeaves({ brokerPk: market.broker_pk, brokerFeePctBps: market.broker_fee_pct }, realConsolidatedPool);
+  const pm = computePariMutuelPayout({ bettors, winningDirection, poolTotalSompi: realConsolidatedPool, feeLeaves });
   if (pm.degenerate) throw new Error(`buildProposeCloseRequestV2: degenerate payout(${pm.reason})`);
   const claimedPayoutRoot = settlePayoutRoot(pm.payoutLeaves && pm.payoutLeaves.length ? pm.payoutLeaves : pm.winners);
 
@@ -353,8 +357,6 @@ export async function buildProposeCloseRequestV2(marketId, judged) {
   }
 
   const relayAddr = (await rc({ type: 'get_pubkey' })).address;
-  // verify-value-source: consolidated_pool 从当前活 redeem_hex 现读(不信 payout_shards 表可能过期的缓存字段)
-  const realConsolidatedPool = Buffer.from(ps.payout_redeem_hex, 'hex').readBigInt64LE(2).toString();
   const z32 = '00'.repeat(32);
   const currentState = { consolidated_pool: realConsolidatedPool, closed: 0, payoutRoot: z32, attestedWinner: -1, attestedAtMs: 0, betsRootBaked: z32, refundRootBaked: z32 };
 

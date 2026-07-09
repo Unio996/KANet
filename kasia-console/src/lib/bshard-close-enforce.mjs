@@ -20,7 +20,7 @@ import { blake2b } from '@noble/hashes/blake2b';
 import { judgeLine } from './judgeline.mjs';
 import {
   canonicalPredicate, computePredicateCommit, computeMarketCommit,
-  computePariMutuelPayout, deriveFeeLeaves, settlePayoutRoot, FEE_CONFIG,
+  computePariMutuelPayout, deriveFeeLeaves, settlePayoutRoot, FEE_CONFIG, deriveSettlementFeeLeaves,
 } from './pool-shard-settle.mjs';
 import { deriveCommitteeSeed, selectCommittee } from '../services/pool-committee-sampler.mjs';
 import { buildPoolMerkleTree } from '../services/pool-merkle-v06.mjs';   // C2: complete-set verify
@@ -385,15 +385,13 @@ export async function _enforceCloseAttestCore(signRequest, ctx) {
     : ctx;
   const cs = await completeFn(market_id, bettors, completeCtx);
   if (!cs || cs.ok !== true) return { pass: false, reason: `C1: ${cs?.reason || 'bettor 集不完整 (链上 shard 重建 != loaded)'}` };
-  const poolSompi = bettors.reduce((s, b) => s + BigInt(b.stake), 0n).toString();
-  const { feeLeaves } = deriveFeeLeaves({
-    poolSompi, feeConfig: FEE_CONFIG, brokerPk: broker_pk, introducerPk: introducer_pk, committeePks: committee,
-  });
-  const pm = computePariMutuelPayout({ bettors, winningDirection, feeLeaves });
-  if (pm.degenerate) return { pass: false, reason: `degenerate (${pm.reason}) — 单边池需 refund 路` };
-  const reDerivedRoot = settlePayoutRoot(pm.payoutLeaves && pm.payoutLeaves.length ? pm.payoutLeaves : pm.winners);
 
-  return { pass: true, verdict, winningDirection, committee, bettors, reDerivedRoot };
+  // P4/D-008 分叉防护(2026-07-09, Bettor #dcndfw 裁定"干净版"): fee-leaf 派生+payoutRoot 重导出 V1/V2 口径
+  // 不同(V1=FEE_CONFIG 协议常量/Σ注, V2=D-008 市场级 broker_fee_pct/consolidatedPool 含seed)——不在共用核心
+  // 里二选一, 改为各自调用方(enforceCloseAttest/enforceCloseAttestV2)分别计算, 核心只把算 reDerivedRoot
+  // 所需的原始材料(bettors/winningDirection/committee + 链锚的 psConsolidatedPool, 即 completeCtx 上面刚现读
+  // 过的值, C1(ii) 已算, 非重新读)传出去。V1 路径不受影响(下方 enforceCloseAttest 内联旧逻辑字节不变)。
+  return { pass: true, verdict, winningDirection, committee, bettors, broker_pk, introducer_pk, psConsolidatedPool: completeCtx.psConsolidatedPool };
 }
 
 /**
@@ -413,8 +411,18 @@ export async function _enforceCloseAttestCore(signRequest, ctx) {
 export async function enforceCloseAttest(signRequest, ctx) {
   const core = await _enforceCloseAttestCore(signRequest, ctx);
   if (core.skip || core.pass === false) return core;
-  const { verdict, reDerivedRoot } = core;
+  const { verdict, winningDirection, bettors, committee, broker_pk, introducer_pk } = core;
   const { claimedPayoutRoot, psRedeemHex } = signRequest;
+
+  // V1 payoutRoot 重导出(P4 抽出前的原逻辑, 一字不动, 只是从共用核心挪到这里——FEE_CONFIG 协议常量口径不受
+  // D-008/P4 影响): poolSompi=Σ注(V1 从未有 seed 概念), fee=FEE_CONFIG(broker160+委员120bps 均分)。
+  const poolSompi = bettors.reduce((s, b) => s + BigInt(b.stake), 0n).toString();
+  const { feeLeaves } = deriveFeeLeaves({
+    poolSompi, feeConfig: FEE_CONFIG, brokerPk: broker_pk, introducerPk: introducer_pk, committeePks: committee,
+  });
+  const pm = computePariMutuelPayout({ bettors, winningDirection, feeLeaves });
+  if (pm.degenerate) return { pass: false, reason: `degenerate (${pm.reason}) — 单边池需 refund 路` };
+  const reDerivedRoot = settlePayoutRoot(pm.payoutLeaves && pm.payoutLeaves.length ? pm.payoutLeaves : pm.winners);
 
   // ── D2 FIX (NWT 红队最承重 = verify-value-source): 验【被签 txSafeJson 实际 commit 的根】, 不是 caller 旁路标量 ──
   //   旧码只 `reDerivedRoot != claimedPayoutRoot` (标量) → settler 给匹配标量 + 输出含恶意根的 tx 即可绕过。
@@ -455,10 +463,22 @@ const _ATTESTED_AT_MS_CLOCK_TOLERANCE_MS = 10 * 60 * 1000;
 export async function enforceCloseAttestV2(signRequest, ctx) {
   const core = await _enforceCloseAttestCore(signRequest, ctx);
   if (core.skip || core.pass === false) return core;
-  const { verdict, winningDirection, bettors, reDerivedRoot } = core;
+  const { verdict, winningDirection, bettors, broker_pk, psConsolidatedPool } = core;
   const {
     claimedPayoutRoot, psRedeemHex, new_attestedWinner, new_betsRoot, new_refundRoot, new_attestedAtMs,
   } = signRequest;
+
+  // P4/D-008(2026-07-09, Bettor #dcndfw"干净版"分支法): V2 专属 payoutRoot 重导出——pool 基数=
+  // psConsolidatedPool(core 已从被签 tx 的 PS input redeem 链锚现读, 委员本来就是独立验证人, 天然构成
+  // 第三条独立值链, 非 propose 转发)/费率=市场级 broker_fee_pct(ctx.marketBrokerFeePct, daemon 自查本地
+  // DB 注入, 同 marketMetadataHash/deadlineDaa 信任级别, 绝不从 signRequest 读)。
+  // 语义(Bettor 裁定②): 这里的 match = sanity 交叉核, 非 binding 授权——binding 权威仍在 guest circuit
+  // (D-008 architecture 定论), 委员没签就没 payout, 但签的对象也不能是团队自己都没独立验过的数。
+  if (psConsolidatedPool == null) return { pass: false, reason: 'W2: psConsolidatedPool 缺失(核心链锚现读失败, 拒签)' };
+  const { feeLeaves: v2FeeLeaves } = deriveSettlementFeeLeaves({ brokerPk: broker_pk, brokerFeePctBps: ctx.marketBrokerFeePct }, psConsolidatedPool);
+  const pmV2 = computePariMutuelPayout({ bettors, winningDirection, poolTotalSompi: psConsolidatedPool.toString(), feeLeaves: v2FeeLeaves });
+  if (pmV2.degenerate) return { pass: false, reason: `degenerate (${pmV2.reason}) — 单边池需 refund 路` };
+  const reDerivedRoot = settlePayoutRoot(pmV2.payoutLeaves && pmV2.payoutLeaves.length ? pmV2.payoutLeaves : pmV2.winners);
 
   // ── new_attestedWinner: 已经算出来了(core.winningDirection), 直接复用, 非新逻辑, 只核一致 ──
   const attestedWinner = Number(new_attestedWinner);

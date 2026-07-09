@@ -27,7 +27,8 @@ import { listShards } from '../lib/shard-allocator.mjs';
 import { compileSil, ctorBytes32, ctorInt } from '../lib/pool-bshard-artifacts.mjs';
 import { isCommingledSpine } from '../lib/pool-commingle-detect.mjs';
 import { collectCloseSigsV2, clearCloseRequest, markSubmittedV2, QUORUM } from '../lib/bshard-close-transport.mjs';
-import { _splicePayoutV2CloseRedeem } from '../lib/bshard-close-enforce.mjs';
+import { _splicePayoutV2CloseRedeem, readPayoutShardV2AttestedState } from '../lib/bshard-close-enforce.mjs';
+import { deriveSettlementFeeLeaves } from '../lib/pool-shard-settle.mjs';
 import { enqueueZkProveJob } from '../lib/zk-prove-enqueue.mjs';
 
 const TICK_MS = 30_000;   // 30s tick (close_attest 时效性 > 普通 vote; settler 等 quorum)
@@ -107,12 +108,16 @@ export function buildEnforceCtx(voter, voterPk, market) {
   // W2 predicate-null 命门①(J2 2026-07-07·Bettor 批第3处窄修): 同 resolutionRuleSpec 一样, daemon 自查本地 market
   // 行的 market_metadata_hash, 供 predicate=null 市场的 hash-bind 比对基准(绝不从 signRequest 读)。
   const marketMetadataHash = market.market_metadata_hash ? String(market.market_metadata_hash).toLowerCase() : null;
+  // P4/D-008(2026-07-09, J2): enforceCloseAttestV2 专属 fee 费率, 同 marketMetadataHash/deadlineDaa 信任级别
+  // (daemon 自查本地 pool_markets 行, 绝不从 signRequest 读)——V1 路径不消费此字段, undefined 无害。
+  const marketBrokerFeePct = market.broker_fee_pct != null ? Number(market.broker_fee_pct) : null;
   return {
     myOracleKeys: [String(voterPk).toLowerCase()],
     chainReader,
     deadlineDaa,
     resolutionRuleSpec,
     marketMetadataHash,
+    marketBrokerFeePct,
     db: sqlite,
     // lib passes the result straight into deriveCommitteeSeed(marketId, endBlockHash, root) → must return the HASH STRING.
     fetchEndBlockHashCanonical: async (reader, daa) => {
@@ -364,7 +369,7 @@ export async function bshardCloseVoterV2Tick() {
   let signed = 0, skipped = 0, refused = 0, errored = 0;
   // pending V2 close-request: zk_native 市场(跟 V1 pending 查询互斥, 反向 filter) + collecting_sigs + metadata 带 bshard_close_request_v2。
   const pending = sqlite.prepare(`
-    SELECT id, metadata, pool_merkle_root, broker_pk, deadline_daa, resolution_rule_spec, spine_p2sh, market_metadata_hash
+    SELECT id, metadata, pool_merkle_root, broker_pk, broker_fee_pct, deadline_daa, resolution_rule_spec, spine_p2sh, market_metadata_hash
     FROM pool_markets
     WHERE protocol_version = 'v0.7' AND protocol_status = 'collecting_sigs' AND metadata LIKE '%bshard_close_request_v2%'
       AND json_valid(resolution_rule_spec) = 1 AND json_extract(resolution_rule_spec, '$.zk_native') IS 1
@@ -530,21 +535,19 @@ export function computeCommitteePkHash(committeePks) {
 }
 
 /**
- * _deriveCloseFeeLeaves — 缺件①的 fee 政策边界(J1tn 2026-07-08, 显式声明非隐式假设):
- *   当前只支持"单一 broker fee leaf"这个最简政策(market.broker_pk + market.broker_fee_pct, 两者都是
- *   create-committed 的真实 pool_markets 列, 非本函数派生——今晚频道 broker fee 讨论用的就是这个市场专属
- *   值(1.9%), 不是 pool-shard-settle.mjs 的协议固定 FEE_CONFIG 常量)。oracle/node 份额(FEE_CONFIG 里的
- *   oracleBps/nodeBps)要不要也在 ZK-native 管线里发, 是团队还没定案的政策问题(委员链锚重算 vs 单一
- *   broker 简化模型, 两者取舍未拍板)——本函数不越权替团队做这个决定, 只覆盖已经明确讨论过的 broker 这一份。
+ * _deriveCloseFeeLeaves — 缺件①的 fee 政策边界(J1tn 2026-07-08, 显式声明非隐式假设)。
+ * P4/D-008 收敛(2026-07-09, J2): 算法改调单源 `deriveSettlementFeeLeaves`(pool-shard-settle.mjs), 不再
+ * 手搓 bps 乘法——跟 propose/委员 voter 两侧用同一个函数, 但值源(consolidatedPool)本函数自己独立提供
+ * (caller 传, 见下方 _tryEnqueueZkProve 的独立链读改动), 不共享 propose 的计算结果(反 vacuous 铁律,
+ * 设计文档 docs/2026-07-09-fee-single-source-leaf-derivation-design.md)。
  *   market 没配 broker_pk/broker_fee_pct=0 → 返回 null(zk_prove_jobs §4硬门⑤要求非空 fee_leaves, 现状下
  *   这类市场暂不进 ZK-native prove 管线, 不是本函数该静默造一个假 leaf 糊弄过去)。
  */
 function _deriveCloseFeeLeaves(marketId, consolidatedPool) {
   const market = sqlite.prepare('SELECT broker_pk, broker_fee_pct FROM pool_markets WHERE id = ?').get(marketId);
-  const bps = Number(market?.broker_fee_pct || 0);
-  if (!market?.broker_pk || bps <= 0) return null;
-  const amount = (BigInt(consolidatedPool) * BigInt(bps) / 10000n).toString();
-  return [{ pk: String(market.broker_pk).toLowerCase(), amount, type: 'broker' }];
+  if (!market?.broker_pk || Number(market?.broker_fee_pct || 0) <= 0) return null;
+  const { feeLeaves } = deriveSettlementFeeLeaves({ brokerPk: market.broker_pk, brokerFeePctBps: market.broker_fee_pct }, consolidatedPool);
+  return feeLeaves;
 }
 
 const SETTLER_RELAY_ID = process.env.BSHARD_SETTLER_RELAY_ID || null;   // 广播身份(付 fee input + 收找零), 显式配置非猜测。
@@ -636,11 +639,13 @@ function _tryEnqueueZkProve(market, req) {
       newPayoutRootHex: req.claimedPayoutRoot, newAttestedWinner: req.new_attestedWinner,
       newBetsRootHex: req.new_betsRoot, newRefundRootHex: req.new_refundRoot, newAttestedAtMs: req.new_attestedAtMs,
     };
-    // consolidatedPool 还没从链上读出来(readPayoutShardV2AttestedState 在 enqueueZkProveJob 内部才做那步)——
-    // 这里只需要它算 broker fee 金额, 用 req.closeInputs.payoutshard.state.consolidated_pool(跟 D2-V2 binding
-    // 已核实过的同一个 propose 阶段值, 委员签名时已验过这个字段没被 driver 篡改)。
-    const consolidatedPool = req.closeInputs.payoutshard.state.consolidated_pool;
-    const feeLeaves = _deriveCloseFeeLeaves(market.id, consolidatedPool);
+    // P4/D-008(2026-07-09, J2 反 vacuous 修复): 原先直接读 req.closeInputs.payoutshard.state.consolidated_pool
+    // (propose 阶段提交的标量, 即便已过 D2-V2 binding 核实)——为满足"enqueue 侧独立链读, 不透传 propose 值"
+    // 铁律, 改成跟 enqueueZkProveJob 内部同款算法(splice+现读, zk-prove-enqueue.mjs:69)自己独立算一遍,
+    // 只共享算法不共享数值。两次调用互不知情, 若结果不一致(offset 表脱节/redeem 损坏)在此提前 throw。
+    const splicedForFee = _splicePayoutV2CloseRedeem(req.closeInputs.payoutshard.redeem_hex, attestValues);
+    const independentConsolidatedPool = readPayoutShardV2AttestedState(splicedForFee).consolidatedPool;
+    const feeLeaves = _deriveCloseFeeLeaves(market.id, independentConsolidatedPool);
     if (!feeLeaves) {
       console.log(`[bshard-close-submit-v2] market=${market.id.slice(-8)} 未配置 broker_pk/broker_fee_pct — 暂不支持 ZK-native prove enqueue(§4硬门⑤要求非空fee_leaves), 跳过`);
       return;

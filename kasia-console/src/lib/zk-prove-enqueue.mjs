@@ -9,11 +9,13 @@
 // pool-shard-settle.mjs, 非重发明)独立重算一遍, 在花 4 分钟 RISC0 proving 之前就拦住输入错误, 而不是让
 // prove-worker 跑完才通过 assertPayoutLeavesConserved 发现。
 //
-// 🔴 范围声明: fee 政策来源(协议固定常量 FEE_CONFIG vs market.broker_fee_pct 市场自定义值)是团队还没定案的
-// 政策问题(pool-shard-settle.mjs 注释明确写"协议常量非maker可调", 但今晚频道 broker fee 讨论用的是
-// market-specific 1.9%——两者不一致, 不是本函数该替团队拍板的事)。本函数因此不内部派生 feeLeaves, 而是要求
-// 调用方显式传入已经决定好的 feeLeaves——本函数只负责验证"给定的 feeLeaves 加 winner payouts 精确 ==
-// consolidatedPool", 不负责"这个 feeLeaves 该怎么算"这个政策判断。
+// ✅ 范围声明更新(P4/D-008, 2026-07-09 已拍板, 取代下方旧口径不定案的记录): fee 政策 = 市场级
+// market.broker_fee_pct(D-007 口径), 非旧协议固定常量口径(V1 committee-settle 专属, ZK 线不再直调,
+// 见 pool-shard-settle.mjs 旁路封死注释)——单源函数 `deriveSettlementFeeLeaves`(pool-shard-settle.mjs)
+// 已落地, 调用方(propose/委员 voter)各自独立
+// 链读 consolidatedPool 后调用它产出 feeLeaves。本函数(enqueueZkProveJob)职责不变: 仍不内部派生
+// feeLeaves, 只验证"调用方传入的 feeLeaves 加 winner payouts 精确 == consolidatedPool"(守恒把关,
+// 跟"这个 feeLeaves 该怎么算"的政策问题解耦——那部分现在有了单源答案, 但答案的执行仍在 caller 侧)。
 
 import { getSidesByShard } from './pool-bettor-sides-query.mjs';
 import { canonicalBetOrder, computeBetsRoot } from './pool-payout-root.mjs';

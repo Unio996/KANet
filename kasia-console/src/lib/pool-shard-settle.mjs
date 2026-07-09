@@ -66,6 +66,11 @@ export function computePariMutuelPayout({ bettors, winningDirection, poolTotalSo
  * 价值分成 fee-leaf 单源派生 (J1 co-verify 边界①单源②整数③provenance). claim builder + enforceCommitteeSign re-derive 两处
  * 【必调此一个函数】否则 bind 永假. 所有 fee-recipient pk 必【链锚派生】(broker/introducer = market create-committed,
  * oracle+node = pool_merkle_root 派生委员集) — caller 绑 provenance, 本 fn 纯算 (BigInt floor, fee-dust→committee[0] 确定性).
+ *
+ * 🔴 旁路封死(P4·D-008, 2026-07-09)：**本函数是 V1(PayoutShard/committee-settle)专属**——ZK 线(V2/
+ * PayoutShardV2/CloseZkV2)禁止直调本函数，一律走 `deriveSettlementFeeLeaves`（pool 基数=consolidatedPool
+ * 含seed、费率=市场级 broker_fee_pct，非本函数的 FEE_CONFIG 协议常量口径）。V1 语义不受 P4 影响，本函数
+ * 及其 `FEE_CONFIG` 一字不动。
  * @param {object} o {
  *   poolSompi, feeConfig:{ brokerBps, oracleBps, introBps, nodeBps }, brokerPk(hex32), introducerPk(hex32|null),
  *   committeePks(hex32[] 签 close 的链上派生委员, oracle+node reward 均分)
@@ -88,6 +93,48 @@ export function deriveFeeLeaves({ poolSompi, feeConfig, brokerPk, introducerPk =
     const each = total / BigInt(sorted.length);
     sorted.forEach((pk, i) => leaves.push({ pk, amount: each + (i === 0 ? total - each * BigInt(sorted.length) : 0n), type: 'committee' }));   // fee-dust → committee[0] 确定性
   }
+  const feeSompi = leaves.reduce((s, l) => s + l.amount, 0n);
+  return { feeLeaves: leaves.map(l => ({ pk: l.pk, amount: l.amount.toString(), type: l.type })), feeSompi: feeSompi.toString() };
+}
+
+/**
+ * deriveSettlementFeeLeaves — ZK 线单源 fee-leaf 派生函数(P4·D-008 BLOCKING 收敛卡, J2 2026-07-09)。
+ * 设计文档 docs/2026-07-09-fee-single-source-leaf-derivation-design.md(Bettor 方向审 GREEN-with-notes +
+ * NWT 红队)。取代 propose/enqueue/enforceCloseAttestV2 三个调用点各自手搓的 `deriveFeeLeaves({poolSompi:
+ * Σ注(漏seed), feeConfig: FEE_CONFIG})` 旧口径(7/8 门②同一市场三处三说法的病根)。
+ *
+ * 🔴 反 vacuous 铁律（每个 caller 必读，不是可选建议）：本函数只单源"派生算法"，**不单源"值源"**——
+ * `consolidatedPoolSompi` 形参必须由每个 caller 各自独立链读，禁止任何一侧把自己算好的值转发/透传给另一侧
+ * "图省事保持一致"。当前三个合法读取路径（互不共享代码，互不透传数值）：
+ *   - propose 侧（bshard-close-transport.mjs）：zk_handoff 之前，continuation 还不存在——读
+ *     `payout_shards.payout_redeem_hex` 当前活 UTXO 现读的 consolidated_pool（= realConsolidatedPool，
+ *     既有 verify-value-source 现读逻辑，含 seed）。
+ *   - enqueue 侧（zk-prove-enqueue.mjs）：zk_handoff 已完成——`readPayoutShardV2AttestedState` 对
+ *     `zk_continuation.redeemHex` 现读的 consolidatedPool。
+ *   - 委员 voter 侧（bshard-close-enforce.mjs enforceCloseAttestV2）：对被签 tx 的 PS input redeem
+ *     （`psRedeemHex`，链锚、非 caller 喂）现读的 `_readPsConsolidatedPool`——委员本来就是独立验证人，
+ *     这一读天然构成第三条独立值链（Bettor #dcndfw 裁定：比 propose 转发强）。
+ * 若两个 caller 传入同一个已经算好的数字（哪怕形参名相同），§3 三侧 byte-exact 验收会全绿，但只证明了
+ * "传递链路没打错字"，证明不了"每一侧真的独立读对了源头"——同 7/8 门①"同 env 同源三处一致=vacuous"同一个坑
+ * （规则56）。
+ *
+ * @param {{brokerPk:string, brokerFeePctBps:number}} market  create-committed 市场级字段（D-007 口径）。
+ *   brokerFeePctBps = market.broker_fee_pct 列原值（已是 bps 单位，非百分比），无 broker_pk/pct<=0 → 无 broker leaf。
+ * @param {string|number|bigint} consolidatedPoolSompi  caller 独立链读的 pool 实额（含 seed），函数内断言 >0。
+ * @returns {{feeLeaves:[{pk,amount,type}], feeSompi:string}}
+ */
+export function deriveSettlementFeeLeaves(market, consolidatedPoolSompi) {
+  const pool = BigInt(consolidatedPoolSompi);
+  if (pool <= 0n) throw new Error(`deriveSettlementFeeLeaves: consolidatedPoolSompi=${consolidatedPoolSompi} 必须 >0(caller 链读值可疑, 拒绝派生)`);
+  const leaves = [];
+  const bps = Number(market?.brokerFeePctBps || 0);
+  if (bps > 0 && market?.brokerPk) {
+    const amount = pool * BigInt(bps) / 10000n;   // BigInt floor, 同既有 deriveFeeLeaves 惯例
+    leaves.push({ pk: String(market.brokerPk).toLowerCase(), amount, type: 'broker' });
+  }
+  // committeeShare: 'pending-D-008-owner-policy' — FEE_CONFIG 120bps(oracle+node)委员分成暂不并入本函数。
+  //   D-008(docs/DECISIONS.md)明确挂起待 Owner 确认份额表；确认后在【本函数内】加, 不接受调用方自行追加委员 leaf
+  //   (旁路封死同一铁律: 单源函数是唯一权威, 不是"调用方可以自己补几条"的模板)。
   const feeSompi = leaves.reduce((s, l) => s + l.amount, 0n);
   return { feeLeaves: leaves.map(l => ({ pk: l.pk, amount: l.amount.toString(), type: l.type })), feeSompi: feeSompi.toString() };
 }
