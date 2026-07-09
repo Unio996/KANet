@@ -139,7 +139,12 @@ export function advanceZkContinuationAfterSpend(marketId, o) {
     meta.zk_continuation.redeemHex = o.redeemHex;
     meta.zk_continuation.valueSompi = String(o.valueSompi);
   } else {
-    meta.zk_continuation.exhausted = true;   // 显式终态, 不删对象(历史 outpoint/redeem 留档可溯)
+    // 显式终态(Bettor #d7bjdn nit, 2026-07-09): exhausted=true 且 outpoint=null/redeemHex=null/valueSompi='0'
+    // 一并写, 不留旧 outpoint/redeemHex 陈值——对账工具若只看这几个字段(不额外检查 exhausted)会误读成"还有活续约"。
+    meta.zk_continuation.exhausted = true;
+    meta.zk_continuation.outpoint = null;
+    meta.zk_continuation.redeemHex = null;
+    meta.zk_continuation.valueSompi = '0';
   }
   if (!Array.isArray(meta.zk_escape_audit)) meta.zk_escape_audit = [];
   meta.zk_escape_audit.push({ entry: o.spentEntry, txid: o.spentTxid, at: new Date().toISOString(), newValueSompi: hasCont ? String(o.valueSompi) : '0' });
