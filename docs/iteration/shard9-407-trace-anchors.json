@@ -1,0 +1,19 @@
+{
+  "purpose": "J1溯源shard9 bet22-32 407.37KAS去向: 这11个per-bet锁outpoint已被花, 追花费tx定位钱现在在哪",
+  "shard": "ext-pool-v07-1783455512843-28mln-s9",
+  "scan_window": "花费tx必在 2026-07-08T06:08:00Z 之后(锁最晚创建06:07:57)",
+  "total_sompi": 40737000000,
+  "spent_locks": [
+    {"bet_id":33444,"spent_outpoint":"810469a1622cd75e:0","lock_addr":"kaspatest:pq997j889q","amt":5000005862},
+    {"bet_id":33446,"spent_outpoint":"e042a738a74abb4e:0","lock_addr":"kaspatest:pp9duarcwx","amt":1500050094},
+    {"bet_id":33449,"spent_outpoint":"49dc8534aafe6950:0","lock_addr":"kaspatest:pr5emy0cxg","amt":4881045630},
+    {"bet_id":33450,"spent_outpoint":"6339712e542ce0f6:0","lock_addr":"kaspatest:pqx30l7hes","amt":5000071553},
+    {"bet_id":33452,"spent_outpoint":"20ea7c2bdf624e36:0","lock_addr":"kaspatest:pzpqxp6wlc","amt":1500070132},
+    {"bet_id":33458,"spent_outpoint":"8f665e09d6c65fc1:0","lock_addr":"kaspatest:pp0uc90vyy","amt":5000002783},
+    {"bet_id":33459,"spent_outpoint":"35a50964f9b63b14:0","lock_addr":"kaspatest:pp7zn3jjfz","amt":1500037678},
+    {"bet_id":33460,"spent_outpoint":"9df3b71382c05a16:0","lock_addr":"kaspatest:prkhmrmghv","amt":4856028019},
+    {"bet_id":33467,"spent_outpoint":"65ea06ba35e8f173:0","lock_addr":"kaspatest:ppsx6n4w9t","amt":5000031160},
+    {"bet_id":33468,"spent_outpoint":"fd6be6ff732b05a5:0","lock_addr":"kaspatest:ppg9td7nfd","amt":1500006005},
+    {"bet_id":33471,"spent_outpoint":"7272f21ce46669ca:0","lock_addr":"kaspatest:prkvykyy8g","amt":5000061701}
+  ]
+}
