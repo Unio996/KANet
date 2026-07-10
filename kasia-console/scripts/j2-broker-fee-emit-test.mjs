@@ -111,6 +111,56 @@ check('4b pending_idx fee_sompi chain-verified (150000000) + txid==settle_txid',
   const p = JSON.parse(e.payload); return p.market_id === 'pending_idx' && p.fee_sompi === 150000000 && e.txid === TX_MISSING;
 }));
 
+// ── ZK-native path (KANet-UI, 2026-07-10·C线①): settle_txid IS NULL/protocol_status untouched — the only
+//   terminal signal is metadata.zk_continuation.exhausted=1. Broker fee is its own claim tx among
+//   metadata.zk_escape_audit[] (entry='claim'), not a secondary output on a shared settle_txid. Regression
+//   case for the "0 rows" bug (emit query only recognized V1 shape) — mirrors real bvh2c market structure
+//   (verified live 2026-07-10: zk_escape_audit[1].txid was independently found by NWT via block-scan, this
+//   test's synthetic version proves the address-matching algorithm converges on the same txid mechanically).
+const insZkMarket = (id, brokerPk, zc, escapeAudit) =>
+  db.prepare(`INSERT INTO pool_markets (id, protocol_status, settle_txid, broker_pk, spine_p2sh, resolution_rule_spec, metadata)
+              VALUES (?,?,?,?,?,?,?)`).run(
+    id, 'verifying', null, brokerPk, 'kaspatest:spine_' + id, JSON.stringify({ title: 'ZK Market ' + id, zk_native: true }),
+    JSON.stringify({ zk_continuation: zc, zk_escape_audit: escapeAudit }));
+
+const TX_ZKCLOSE = HEX('1'), TX_CLAIM_WINNER = HEX('2'), TX_CLAIM_BROKER = HEX('3'), TX_CLAIM_UNINDEXED = HEX('4');
+insZkMarket('zk_settled', 'pkZK', { exhausted: true }, [
+  { entry: 'zk_close', txid: TX_ZKCLOSE, at: '2026-07-09T20:00:00Z' },
+  { entry: 'claim', txid: TX_CLAIM_WINNER, at: '2026-07-09T20:01:00Z' },
+  { entry: 'claim', txid: TX_CLAIM_BROKER, at: '2026-07-09T20:02:00Z' },
+]);
+insTx(TX_CLAIM_WINNER, [{ address: 'kaspatest:winnerZK', amount_sompi: 900000000 }]);
+insTx(TX_CLAIM_BROKER, [{ address: ADDR('pkZK'), amount_sompi: 41300000 }]);
+
+// ── ZK-native, broker leaf not yet claimed (one claim txid still unindexed) — must retry (pendingIndex), NOT terminal.
+insZkMarket('zk_pending_claim', 'pkZKP', { exhausted: true }, [
+  { entry: 'zk_close', txid: HEX('5'), at: '2026-07-09T20:00:00Z' },
+  { entry: 'claim', txid: TX_CLAIM_UNINDEXED, at: '2026-07-09T20:01:00Z' },   // broker's claim, not indexed yet
+]);
+
+// ── ZK-native, broker has zero fee leaf (all claim tx indexed, none pays broker) — terminal, not endless retry.
+const TX_ZK_NOFEE_WINNER = HEX('6');
+insZkMarket('zk_no_broker_leaf', 'pkZKN', { exhausted: true }, [
+  { entry: 'zk_close', txid: HEX('7'), at: '2026-07-09T20:00:00Z' },
+  { entry: 'claim', txid: TX_ZK_NOFEE_WINNER, at: '2026-07-09T20:01:00Z' },
+]);
+insTx(TX_ZK_NOFEE_WINNER, [{ address: 'kaspatest:winnerNOFEE', amount_sompi: 1000000000 }]);
+
+const r5 = brokerFeeLandedEmitTick(db, deriveBrokerAddress, log);
+const ev5 = events();
+check('5a zk_settled emitted (found broker claim among zk_escape_audit)', ev5.some(e => JSON.parse(e.payload).market_id === 'zk_settled'));
+const zkPayload = JSON.parse(ev5.find(e => JSON.parse(e.payload).market_id === 'zk_settled').payload);
+check('5b zk_settled fee_sompi == the ZK claim tx broker output (41300000)', zkPayload.fee_sompi === 41300000);
+check('5c zk_settled emitted txid == the specific broker claim tx (TX_CLAIM_BROKER), not zk_close/winner claim', ev5.find(e => JSON.parse(e.payload).market_id === 'zk_settled').txid === TX_CLAIM_BROKER);
+check('5d zk_pending_claim NOT marked (broker claim tx not indexed yet — retry next tick)', marker('zk_pending_claim') === undefined);
+check('5e zk_pending_claim counted pendingIndex (not silently dropped)', r5.pendingIndex >= 1);
+check('5f zk_no_broker_leaf marked skipped (terminal — all claims indexed, none is broker, no endless retry)', !!marker('zk_no_broker_leaf'));
+check('5g zk_no_broker_leaf emitted no event', !ev5.some(e => JSON.parse(e.payload).market_id === 'zk_no_broker_leaf'));
+
+// ── Run 6: idempotent for ZK path too.
+const r6 = brokerFeeLandedEmitTick(db, deriveBrokerAddress, log);
+check('6a zk_settled idempotent: no re-emit', events().filter(e => JSON.parse(e.payload).market_id === 'zk_settled').length === 1);
+
 console.log(`\n[j2-broker-fee-emit-test] ${pass} PASS / ${fail} FAIL`);
 db.close();
 process.exit(fail ? 1 : 0);

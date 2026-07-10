@@ -83,24 +83,25 @@ export function ensureBackfillSuppressed(db) {
 export function brokerFeeLandedEmitTick(db, deriveBrokerAddress, log = () => {}) {
   const backfillSuppressed = ensureBackfillSuppressed(db);
 
-  // 候选: completed + 有 settle_txid + broker_pk·尚未 emit (无 metadata 标记)。
+  // 候选: broker_pk·尚未 emit (无 metadata 标记), 且满足以下两条落地形态之一——
+  //   V1/legacy: protocol_status='completed' + settle_txid (单笔 settle tx, broker fee 是其次级 output)。
+  //   ZK-native: zk_continuation.exhausted=1 (bshard-settle-daemon.mjs:520 completed/settle_txid 这两个字段
+  //     ZK 路径从不写, closezk-v2-mint.mjs:advanceZkContinuationAfterSpend 只推进 zk_continuation——0 行根因,
+  //     见 2026-07-10 频道排查+docs/2026-07-09-zk-autonomy-three-parts-design.md)。ZK 路 broker fee 是独立
+  //     一笔 claim tx(feeLeaves 之一, 跟 winner payout 分开广播), 下方按 metadata.zk_escape_audit[] 逐笔核对。
   const candidates = db.prepare(`
-    SELECT id, broker_pk, settle_txid, spine_p2sh, resolution_rule_spec
+    SELECT id, broker_pk, settle_txid, spine_p2sh, resolution_rule_spec, metadata
       FROM pool_markets
-     WHERE protocol_status = 'completed'
-       AND settle_txid IS NOT NULL
-       AND broker_pk IS NOT NULL
+     WHERE broker_pk IS NOT NULL
        AND json_extract(COALESCE(metadata, '{}'), '$.broker_fee_landed_emitted_at') IS NULL
+       AND (
+         (protocol_status = 'completed' AND settle_txid IS NOT NULL)
+         OR json_extract(COALESCE(metadata, '{}'), '$.zk_continuation.exhausted') = 1
+       )
   `).all();
 
   let emitted = 0, pendingIndex = 0, noBrokerOutput = 0;
   for (const m of candidates) {
-    // settle TX indexed? (NO TX NO STATE: 没 index 就不 emit·下 tick 重试)
-    // 共享原语(lib/broker-fee-chain.mjs::getIndexedTxOutputs) — 这里跟 earnings endpoint 曾各写
-    // 一份等价的 raw SQL + JSON.parse, 收拢成一份(Owner 点破"多路并行"后的整顿第一刀)。
-    const outs = getIndexedTxOutputs(m.settle_txid, db);
-    if (!outs || !outs.length) { pendingIndex++; continue; }
-
     const network = String(m.spine_p2sh || '').startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
     let brokerAddress;
     // 🔴 broker_pk 传【as-stored】(不 lowercase) — 与 settle 路 L1681 `XOnlyPublicKey(market.broker_pk).toAddress`
@@ -109,13 +110,43 @@ export function brokerFeeLandedEmitTick(db, deriveBrokerAddress, log = () => {})
     catch (e) { log(`[broker-fee-emit] broker pk→addr fail market=${m.id.slice(0, 12)}: ${e.message}`); noBrokerOutput++; continue; }
     if (!brokerAddress) { noBrokerOutput++; continue; }
 
+    // 落地 txid 解析: V1 = 单笔 settle_txid(既有逻辑不变); ZK-native = settle_txid 为空, 从
+    //   metadata.zk_escape_audit[] 里 entry==='claim' 的每笔 txid 里找 outputs 命中 broker 地址的那笔
+    //   (跟 V1 同一套"按地址匹配"原语, 只是候选 txid 从"1笔"变成"逐笔扫 claim 列表")。
+    let landedTxid = null, outs = null;
+    if (m.settle_txid) {
+      // settle TX indexed? (NO TX NO STATE: 没 index 就不 emit·下 tick 重试)
+      // 共享原语(lib/broker-fee-chain.mjs::getIndexedTxOutputs) — 这里跟 earnings endpoint 曾各写
+      // 一份等价的 raw SQL + JSON.parse, 收拢成一份(Owner 点破"多路并行"后的整顿第一刀)。
+      outs = getIndexedTxOutputs(m.settle_txid, db);
+      if (!outs || !outs.length) { pendingIndex++; continue; }
+      landedTxid = m.settle_txid;
+    } else {
+      let meta; try { meta = JSON.parse(m.metadata || '{}'); } catch { meta = {}; }
+      const claimTxids = (meta.zk_escape_audit || []).filter(e => e && e.entry === 'claim').map(e => e.txid);
+      let anyUnindexed = false;
+      for (const txid of claimTxids) {
+        const candOuts = getIndexedTxOutputs(txid, db);
+        if (!candOuts) { anyUnindexed = true; continue; }
+        if (candOuts.some(o => o && o.address === brokerAddress)) { outs = candOuts; landedTxid = txid; break; }
+      }
+      if (!landedTxid) {
+        if (anyUnindexed) { pendingIndex++; continue; }   // 还有 claim tx 未 index — 下 tick 重试
+        // 全部 claim tx 已 index, 没有一笔付给 broker(= broker_fee_pct=0/无 broker leaf) — 终态标记, 不再每 tick 空扫。
+        markEmitted(db, m.id, { skipped: 'no_broker_output_zk' });
+        noBrokerOutput++;
+        log(`[broker-fee-emit] market=${m.id.slice(0, 12)} (zk-native) 全部 claim tx 已 index 但无 broker output (addr=${brokerAddress.slice(0, 16)}) → 标记跳过`);
+        continue;
+      }
+    }
+
     // 按【地址】匹配 broker output (fee 常是次级 output·非 to_address 列 — reference-verify-covenant-multiout-distribution)。
     const idx = outs.findIndex(o => o && o.address === brokerAddress);
     if (idx < 0) {
       // broker fee 没单独 output (=0 / below-floor / 无 broker) — 标记已 emit 防每 tick 重扫·不 emit 幻象。
       markEmitted(db, m.id, { skipped: 'no_broker_output' });
       noBrokerOutput++;
-      log(`[broker-fee-emit] market=${m.id.slice(0, 12)} settle_txid=${String(m.settle_txid).slice(0, 12)} 无 broker output (addr=${brokerAddress.slice(0, 16)}) → 标记跳过`);
+      log(`[broker-fee-emit] market=${m.id.slice(0, 12)} settle_txid=${String(landedTxid).slice(0, 12)} 无 broker output (addr=${brokerAddress.slice(0, 16)}) → 标记跳过`);
       continue;
     }
 
@@ -139,20 +170,20 @@ export function brokerFeeLandedEmitTick(db, deriveBrokerAddress, log = () => {})
       broker_pk: String(m.broker_pk).toLowerCase(),
       broker_address: brokerAddress,
       fee_sompi: feeSompi,                 // 🔴 链验真金额 (kaspa_tx_log.outputs_json)·非 DB 估
-      settle_txid: m.settle_txid,
+      settle_txid: landedTxid,             // V1: 共享 settle tx; ZK-native: broker 自己那笔 claim tx(见上方解析)
       output_index: idx,
       market_title: marketTitle,
       landed_at: new Date().toISOString(),
     });
-    // 🔴 txid = settle_txid (真 64-hex chain hash·满足 v83 trigger broker_* 禁 placeholder + 语义=fee 所在 settle TX)。
-    //   UNIQUE(txid,event_type): 每盘 settle_txid 各异 → (settle_txid,'broker_fee_landed') 唯一·INSERT OR IGNORE 防竞态重 emit。
+    // 🔴 txid = landedTxid (真 64-hex chain hash·满足 v83 trigger broker_* 禁 placeholder + 语义=fee 实际落地那笔 tx)。
+    //   UNIQUE(txid,event_type): 每盘 landedTxid 各异 → (landedTxid,'broker_fee_landed') 唯一·INSERT OR IGNORE 防竞态重 emit。
     db.prepare(`
       INSERT OR IGNORE INTO chain_events (id, txid, event_type, from_address, to_address, payload, observed_by, observed_at)
       VALUES (lower(hex(randomblob(16))), ?, 'broker_fee_landed', ?, ?, ?, 'pool-settler', CURRENT_TIMESTAMP)
-    `).run(String(m.settle_txid), m.spine_p2sh || null, brokerAddress, payload);
-    markEmitted(db, m.id, { emitted_fee_sompi: feeSompi, settle_txid: m.settle_txid });
+    `).run(String(landedTxid), m.spine_p2sh || null, brokerAddress, payload);
+    markEmitted(db, m.id, { emitted_fee_sompi: feeSompi, settle_txid: landedTxid });
     emitted++;
-    log(`[broker-fee-emit] 💰 market=${m.id.slice(0, 12)} broker fee ${(feeSompi / 1e8).toFixed(4)} KAS LANDED (settle ${String(m.settle_txid).slice(0, 12)} out#${idx}) → broker_fee_landed emit`);
+    log(`[broker-fee-emit] 💰 market=${m.id.slice(0, 12)} broker fee ${(feeSompi / 1e8).toFixed(4)} KAS LANDED (tx ${String(landedTxid).slice(0, 12)} out#${idx}) → broker_fee_landed emit`);
   }
 
   if (backfillSuppressed || emitted || noBrokerOutput) {
