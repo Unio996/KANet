@@ -165,7 +165,20 @@ async function consolidateAndBuildPsState(marketId, ps, ctx) {
     const probeUtxos = async (addr) => (await getUtxos(addr)).map(e => { const n = norm(e); return { outpoint: n.entry?.outpoint || n.outpoint, amount: n.entry?.amount || n.amount }; });
     const res = await consolidateAllShards({
       db: sqlite, rc: (cmd) => relayPost(FEE_RELAY_ID, cmd),
-      landed: async (txid, addr) => { for (let i = 0; i < 30; i++) { if ((await getUtxos(addr)).some(e => (norm(e).entry?.outpoint || norm(e).outpoint)?.transactionId === txid)) return true; await sleep(3000); } return false; },
+      // 🔴 修复(2026-07-10, Bettor GO·NWT+J1 低风险评估: 复用6/30已验证的D=20深度门到这条consolidate
+      // 专属 landed 检查——之前是纯存在性检查(getUtxos查到就算数, 零确认深度), 对 reorg/race 没有防护。
+      // 改走跟其余 landed-gated 路径(见(a)/zk-autonomy-ticks.mjs)同款 relay `check_utxo_landed` 命令,
+      // minDepth=20——不是发明新机制, 是把已证有效的深度门搬进这条之前漏掉的路径。参数注意(J1 提醒):
+      // 本函数签名是 landed(txid, addr)(consolidateAllShards 既有调用约定, 不改), relay 命令字段是
+      // {address, txid, minDepth} ——显式映射, 不能位置直传。
+      landed: async (txid, addr) => {
+        for (let i = 0; i < 30; i++) {
+          const j = await relayPost(FEE_RELAY_ID, { type: 'check_utxo_landed', address: addr, txid, minDepth: 20 }).catch(() => ({}));
+          if (j.landed || j.found) return true;
+          await sleep(3000);
+        }
+        return false;
+      },
       p2sh: _p2shCache, logicalMarketId: marketId,
       payoutShard: { payout_redeem_hex: ps.payout_redeem_hex, payout_ps_outpoint: ps.payout_ps_outpoint, payout_cov_id: ps.payout_cov_id },
       relayAddr: feeRelayAddr(),
