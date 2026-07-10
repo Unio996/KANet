@@ -30,7 +30,16 @@ Status: DRAFT — J1(shard域)起稿, 待J2(settler域)补settlement-pipeline影
 
 **🔴 更正(J2自查撤回)**: 上面"按`merkle_index<count`过滤"这条建议是错的——直查shard9全32行实际数据, `merkle_index`字段值**全部是常量9**, 不是按片内注册顺序分配的0-31。查了`recordBettor`实际INSERT语句(pool.js:1574-1575)确认这一列写入的其实是`shardIndex`(=9, 分片序号), 不是片内下注序号——列名带"merkle"但语义与这次需求无关, 是我没先查值就假设了字段语义。撤回, 不采用。
 
-**改用方案(范围收紧, 不碰共享函数)**: 已知这11笔的具体`pool_bettor_sides.id`(33444/33446/33449/33450/33452/33458/33459/33460/33467/33468/33471)——payout/结算计算读取shard9的bettor列表这一步, 按这个显式id列表排除, **不改`getSidesByShard`/`getMarketBets`这两个全库共用入口**(避免像NWT提醒的"通用改动不该跟这次操作绑在一起"; 若未来再遇到类似情形再评估是否值得补通用机制)。这11行仍标记refunded(记录退款时间, 供审计/防重复退款), 但**结算侧排除靠显式id列表, 不靠这个标记**——避免"结算正确性依赖有没有人记得去读某个标记"这个隐患。
+**改用方案(精确版, 已核实可行性)**: 原计划"完全不碰`getSidesByShard`/`getMarketBets`"经核实**做不到**——`getMarketBets`的`bets`映射(pool-bettor-sides-query.mjs:121)只保留`{pk, stake, direction}`, **丢弃了`id`列**, 调用方拿到结果后已经无法按row id过滤。改为最小侵入方案:
+  1. 给`getSidesByShard(shardMarketId, db, excludeIds=null)`加一个**可选**参数: 传了就在SQL加`AND id NOT IN (...)`, 不传(现有全部调用点)行为完全不变——这是新增可选参数默认关闭, 不是复用/改写现有字段语义, 跟merkle_index那次的错误性质不同。
+  2. `getMarketBets`同样加可选`excludeIds`透传给内部的`getSidesByShard`调用。
+  3. 28mln的settle/consolidate driver调用`getMarketBets`时, 对shard9传入`excludeIds=[33444,33446,33449,33450,33452,33458,33459,33460,33467,33468,33471]`(这11个具体row id, 来自本文档已核实的数据, 非临时现算)。其余任何市场/任何shard的调用不传此参数, 行为零变化。
+  这11行仍标记refunded(记录退款时间, 供审计/防重复退款), 但**结算侧排除靠显式excludeIds, 不靠这个标记**——避免"结算正确性依赖有没有人记得去读某个标记"这个隐患。
+
+**验收(按Bettor③硬门, 落地前必过, 不是可选优化)**:
+  (i) 对真实28mln数据跑一遍: 传excludeIds后`getMarketBets`返回的`betCount`必须精确=21、`poolSompi`精确=64824000000; 不传的旧调用路径(shard0-8/10及其他市场)结果必须逐字节不变(before/after diff=空)。
+  (ii) test-framework补regression case, 覆盖"传excludeIds时精确排除"+"不传时零副作用"两个断言。
+  (iii) 这两处代码改动(getSidesByShard/getMarketBets)+28mln driver调用点改动, 完整走"设计→NWT审→Bettor验"再落地, 不因为是"加可选参数"简化流程。
 
 **refund runbook适配**: lv3rz(2026-06-30)先例是整片shard排除+退款, 28mln这次是"片内部分排除"——机制不同但退款本身(gateway原路退stake给bettor_pk对应linked_addr)是同一个原语, 复用没有结构性障碍, 只是触发范围从"整片"变成上面11个具体row id对应的bettor_pk列表(从`pool_bettor_sides`原样读, 不受结算侧id排除影响, 退款走的是另一条读路径)。
 
