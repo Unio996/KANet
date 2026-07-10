@@ -36,10 +36,16 @@ Status: DRAFT — J1(shard域)起稿, 待J2(settler域)补settlement-pipeline影
   3. 28mln的settle/consolidate driver调用`getMarketBets`时, 对shard9传入`excludeIds=[33444,33446,33449,33450,33452,33458,33459,33460,33467,33468,33471]`(这11个具体row id, 来自本文档已核实的数据, 非临时现算)。其余任何市场/任何shard的调用不传此参数, 行为零变化。
   这11行仍标记refunded(记录退款时间, 供审计/防重复退款), 但**结算侧排除靠显式excludeIds, 不靠这个标记**——避免"结算正确性依赖有没有人记得去读某个标记"这个隐患。
 
+**🔴 Bettor①问的答案(枚举V1结算数学全部读shard9 bettor行的消费点)**——派Explore子agent查完, 比原设想多两个独立raw-SQL消费点, 不是只有`getMarketBets`一处:
+  1. `getSidesByShard`/`getMarketBets`(pool-bettor-sides-query.mjs) — feeds `bshard-auto-settler.mjs`的`computeSettlePlan`(payoutRoot)/`computeRefundPlan`(refund root)/`bshard-settle-daemon.mjs`的consolidate预测PS地址+`selectRipeMarkets`门槛。**需要排除**。
+  2. `loadBettorsCrossShard`(bshard-close-voter.js:67-82, 独立raw SQL, 不经过①) — 喂给`bshard-close-enforce.mjs`两处: `_enforceCloseAttestCore`→`enforceCloseAttest`(委员签名重算payout, **需要排除**)以及`reDeriveCommittee`(委员抽样时排除`side_lock_daa<=deadline`的bettor, 用途不同但同样读了这11笔——**这11笔虽是phantom但side_lock_daa字段仍是它们付款时链上真实值**, 需要核实排除后是否影响委员抽样池, 已确认这4个bettor_pk全是内部bot非委员候选, 无影响, 但机制上仍需排除以防将来复用到有委员资格的场景)。
+  3. `verifyBettorsCompleteFromChain`里的fallback raw query(bshard-close-enforce.mjs:837, 逐片查`WHERE market_id=?`, 只在跨节点签名请求没带`sh.bettors`快照时才触发) — 喂per-ticket反掉包链锚检查(对每个bettor派生ticket地址查UTXO-landed)。**需要排除**, 否则会对11个从未真实mint的ticket地址查UTXO, 大概率查到空进而fail-loud拒签(比多算份额更容易发现, 但仍需堵)。
+  **结论**: 三个独立raw-SQL消费点都要同步加排除, 不是一处。三处分别加**同一模式**(可选`excludeIds`参数, 不传=现有行为零变化), 不做"消费点合一"式重构(今晚已经因为一次'临时通用化'(merkle_index)吃过亏, 三处各自最小加一行AND过滤, 分开验证, 比合并成一个新共享函数风险小)。
+
 **验收(按Bettor③硬门, 落地前必过, 不是可选优化)**:
-  (i) 对真实28mln数据跑一遍: 传excludeIds后`getMarketBets`返回的`betCount`必须精确=21、`poolSompi`精确=64824000000; 不传的旧调用路径(shard0-8/10及其他市场)结果必须逐字节不变(before/after diff=空)。
-  (ii) test-framework补regression case, 覆盖"传excludeIds时精确排除"+"不传时零副作用"两个断言。
-  (iii) 这两处代码改动(getSidesByShard/getMarketBets)+28mln driver调用点改动, 完整走"设计→NWT审→Bettor验"再落地, 不因为是"加可选参数"简化流程。
+  (i) 对真实28mln数据跑一遍上面三处: 传excludeIds后`getMarketBets`的`betCount`精确=21/`poolSompi`精确=64824000000; `loadBettorsCrossShard`返回数组精确剩21个元素; `verifyBettorsCompleteFromChain`路径同理(离线可复现测试, 不必等真触发跨节点缺快照场景)。三处**不传**excludeIds的既有调用点(shard0-8/10及其他任何市场)结果必须逐字节不变(before/after diff=空)。
+  (ii) test-framework补regression case, 覆盖三处各自"传excludeIds时精确排除"+"不传时零副作用"两组断言(共6个)。
+  (iii) 三处代码改动+28mln driver调用点(哪里传这11个具体id, 逐点写清)完整走"设计→NWT审→Bettor验"再落地, 不因为是"加可选参数"简化流程。id列表(33444/33446/33449/33450/33452/33458/33459/33460/33467/33468/33471)硬编码进一次性纠正调用点, 注释钉死"仅28mln-s9本次事故处置, 不通用", 防误复用(Bettor④要求)。
 
 **refund runbook适配**: lv3rz(2026-06-30)先例是整片shard排除+退款, 28mln这次是"片内部分排除"——机制不同但退款本身(gateway原路退stake给bettor_pk对应linked_addr)是同一个原语, 复用没有结构性障碍, 只是触发范围从"整片"变成上面11个具体row id对应的bettor_pk列表(从`pool_bettor_sides`原样读, 不受结算侧id排除影响, 退款走的是另一条读路径)。
 
