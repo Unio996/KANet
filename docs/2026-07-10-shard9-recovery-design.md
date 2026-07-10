@@ -11,8 +11,8 @@ Status: DRAFT — J1(shard域)起稿, 待J2(settler域)补settlement-pipeline影
 
 ## 方案A: DB纠正 + 11笔按refund处理(J1推荐)
 1. 纠正`market_shards`(shard9行): `current_leaf_outpoint`='67ebc76a1ab623b6b2256aa06c257b022cc1544fcf883820cd89123f9831d51c:0', `current_leaf_state`=step21状态`{"local_yes":46102000000,"local_no":18722000000,"count":21,"pool_value":64824000000}`(取自J1 rewind脚本docs/iteration/shard9-leaf-rewind-result.json的step21输出,非手写)。
-2. `bettor_count`/`projected_settle_mass`按step21的21笔bettor重算(shard-allocator.mjs的onBettorRegistered同款公式,不新写逻辑)。
-3. bet22-32这11笔`pool_bettor_sides`行标记为refunded(不删除,留审计痕迹+关联gateway托管的本金),走既有lv3rz(2026-06-30)phantom-leaf退款runbook(gateway原路退stake给11个bettor_pk对应地址)。
+2. **(NWT红队MUST-FIX后修正)** `bettor_count`/`projected_settle_mass`**不经过onBettorRegistered**(该函数内部调shardStakes()无refund过滤,会把32笔全算进去,数字错)。直接手动UPDATE为对应第21笔为止的真值:`bettor_count=21`,`projected_settle_mass=9647`(用kip9-mass.mjs的真实estimateStorageMass()对前21笔bet_sequence的stake_amount逐笔算的,非估算——脚本可复现)。这4个字段(current_leaf_outpoint/current_leaf_state/bettor_count/projected_settle_mass)是这次纠正唯一要动的列,一次UPDATE写死,不调用任何现有注册路径函数。
+3. bet22-32这11笔`pool_bettor_sides`行标记为refunded(不删除,留审计痕迹+关联gateway托管的本金),走既有lv3rz(2026-06-30)phantom-leaf退款runbook(gateway原路退stake给11个bettor_pk对应地址)。**注**: 因为步骤2已经不再依赖shardStakes()的实时聚合,这里标不标refunded不影响current_leaf_state/bettor_count的正确性,但仍要标,防止未来任何代码路径(如canary-stats的hadBets)重新用shardStakes()误算出32笔。
 4. shard9之后按正常consolidate流程(帶D=20新修复b3a6e420)推进,纳入28mln整体结算。
 
 ## 是否可以"纠正后重新advance"这11笔(而非refund)? ——论证,非默认
