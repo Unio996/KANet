@@ -404,8 +404,12 @@ export async function buildProposeCloseRequestV2(marketId, judged) {
         // _hex32(`${marketId}-shard-${idx}`)), 省一份可能不一致的重复计算, 让唯一那份计算逻辑负责。
         shard_index: s.shard_index, shard_market_id: s.shard_market_id,
         shard_redeem_hex: s.shard_redeem_hex, current_leaf_state: s.current_leaf_state, current_leaf_outpoint: s.current_leaf_outpoint,
-        bettors: sqlite.prepare('SELECT bettor_pk pk, direction, stake_amount stake FROM pool_bettor_sides WHERE market_id = ?').all(s.shard_market_id)
-          .map(r => ({ pk: String(r.pk).toLowerCase(), direction: Number(r.direction), stake: String(r.stake) })),
+        // side_lock_tx 加 (2026-07-11, 28mln shard9 phantom-leaf recovery, docs/2026-07-10-shard9-recovery-
+        //   design.md, Bettor审计抓漏): bshard-close-enforce.mjs 的 excludeSideLockTx 排除只在 side_lock_tx
+        //   字段存在时才能生效——之前这里没带这一列, cross-node snapshot 分支(sh.bettors)结构性拿不到
+        //   判别值, 排除会静默失效。只加 SELECT 列 + 透传, 不改现有字段/顺序 (向后兼容, 零行为变化)。
+        bettors: sqlite.prepare('SELECT bettor_pk pk, direction, stake_amount stake, side_lock_tx FROM pool_bettor_sides WHERE market_id = ?').all(s.shard_market_id)
+          .map(r => ({ pk: String(r.pk).toLowerCase(), direction: Number(r.direction), stake: String(r.stake), side_lock_tx: r.side_lock_tx })),
       })),
   };
   const req = {

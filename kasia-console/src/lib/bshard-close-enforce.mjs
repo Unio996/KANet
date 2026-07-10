@@ -833,13 +833,17 @@ export async function verifyBettorsCompleteFromChain(logicalMarketId, bettors, c
       // rows 来源: cross-node = sh.bettors (snapshot per-shard, 只 hint 指路); local = ctx.db pool_bettor_sides。
       //   字段兼容 snapshot {pk,direction,stake} 与 DB {bettor_pk,direction,stake_amount}。链锚: addr 必 landed (不信 snapshot)。
       // excludeSideLockTx (optional, 2026-07-11, 28mln shard9 phantom-leaf recovery, docs/2026-07-10-
-      //   shard9-recovery-design.md): threaded via ctx (set by buildEnforceCtx) so this DB fallback stays
-      //   consistent with loadBettorsCrossShard's exclusion — otherwise this would try to derive/verify
-      //   ticket addresses for bettors whose register_append never landed (fail-loud BUST for the wrong reason).
+      //   shard9-recovery-design.md): threaded via ctx (set by buildEnforceCtx) so this stays consistent
+      //   with loadBettorsCrossShard's exclusion — otherwise this would try to derive/verify ticket
+      //   addresses for bettors whose register_append never landed (fail-loud BUST for the wrong reason).
+      //   🔴 Bettor审计抓漏(commit 9446cd80后): 原先只过滤了local-DB fallback分支, 漏了cross-node
+      //   snapshot分支(sh.bettors)——若签名请求的snapshot里这11笔仍在, 照样会漏过滤。改为对rows统一
+      //   过滤(两个来源都过), 不分支特判。
       const _excludeSet = ctx.excludeSideLockTx && ctx.excludeSideLockTx.length ? new Set(ctx.excludeSideLockTx) : null;
-      const rows = Array.isArray(sh.bettors)
+      const rawRows = Array.isArray(sh.bettors)
         ? sh.bettors
-        : (ctx.db ? ctx.db.prepare(`SELECT bettor_pk, direction, stake_amount, side_lock_tx FROM pool_bettor_sides WHERE market_id = ?`).all(sh.shard_market_id).filter((r) => !_excludeSet || !_excludeSet.has(r.side_lock_tx)) : []);
+        : (ctx.db ? ctx.db.prepare(`SELECT bettor_pk, direction, stake_amount, side_lock_tx FROM pool_bettor_sides WHERE market_id = ?`).all(sh.shard_market_id) : []);
+      const rows = _excludeSet ? rawRows.filter((r) => !_excludeSet.has(r.side_lock_tx ?? r.sideLockTx)) : rawRows;
       for (const r of rows) {
         const rpk = String(r.bettor_pk ?? r.pk ?? '');
         const rdir = Number(r.direction);
