@@ -1,0 +1,298 @@
+{
+  "shard9": {
+    "shard_redeem_hex": "6b0800000000000000000800000000000000000800000000000000000800000000000000006c76009c63757801209f695a79009c5b79519c9b69597903a08601a269557955797e203c8432702165ef4976c509ecbe2b51253351d7786746b84b0237159290f753287caa8769567901207c7e5b7958cd01087c7e5b7958cd01087c7e20344ef71433ab7886fdde189302cd4df7227f92822016e300459c39f2a8f77c0301207c7e7e7e7e56797c7e55797eaa02000001aa7e01207e7c7e01877e5879c3876953795a79515d7994959358cd01087c7e53795b795d79959358cd01087c7e5379519358cd01087c7e53795d799358cd01087c7e7e7e7eb976c902c20194765193bc7c7eb976c97602c201940125937cbc7eaa02000001aa7e01207e7c7e01877e5979c387695879c2785b79939c697575757575757575757575516776519c63757801209e6304083d506a02e80395b0685579cf7620164f74bb3ad6a47840445a0653dc5c136cb3188d2fcd0bb9cab605eb9f97fd16876976d251a2695579d520164f74bb3ad6a47840445a0653dc5c136cb3188d2fcd0bb9cab605eb9f97fd1687695579c25779be5379939c69007a7575757575757551677500696868",
+    "current_leaf_state": "{\"local_yes\":80839000000,\"local_no\":24722000000,\"count\":32,\"pool_value\":105561000000}",
+    "current_leaf_outpoint": "821c8cb3c04789d93abcd76b00367b11207b03863c605938c2602b3faf851851:0"
+  },
+  "bet_sequence": [
+    {
+      "id": 33353,
+      "bettor_pk": "81101a71428619cba1e9e9b93f67268047974364ed319deaecc88337686e7e34",
+      "direction": 1,
+      "stake_amount": 1500000000,
+      "side_lock_tx": "7b3cb7a62e7d5c4880c26703b0c44eaaa0f14e79117622c6b15dc70cf276b2eb",
+      "side_lock_daa": 55599759,
+      "created_at": "2026-07-08 05:35:16"
+    },
+    {
+      "id": 33361,
+      "bettor_pk": "4173a91cef12f00530d47408b37823ac483999024f2f1184fca8f334a8525373",
+      "direction": 0,
+      "stake_amount": 5000000000,
+      "side_lock_tx": "ac90f90aa5f974c54fc112d85cc73cae9e90af35f28001691a4925bda7b26266",
+      "side_lock_daa": 55600635,
+      "created_at": "2026-07-08 05:37:02"
+    },
+    {
+      "id": 33362,
+      "bettor_pk": "81101a71428619cba1e9e9b93f67268047974364ed319deaecc88337686e7e34",
+      "direction": 1,
+      "stake_amount": 1500000000,
+      "side_lock_tx": "cb99d6a49ed9c276945c87f36610e5a27096ee91e235a855c1394e78916a0878",
+      "side_lock_daa": 55600717,
+      "created_at": "2026-07-08 05:37:12"
+    },
+    {
+      "id": 33368,
+      "bettor_pk": "4173a91cef12f00530d47408b37823ac483999024f2f1184fca8f334a8525373",
+      "direction": 0,
+      "stake_amount": 5000000000,
+      "side_lock_tx": "bd266e52727c3f0b0151e324e3bf1a471527bb69d4a8da552185283c40c9a214",
+      "side_lock_daa": 55601595,
+      "created_at": "2026-07-08 05:39:02"
+    },
+    {
+      "id": 33369,
+      "bettor_pk": "81101a71428619cba1e9e9b93f67268047974364ed319deaecc88337686e7e34",
+      "direction": 1,
+      "stake_amount": 1500000000,
+      "side_lock_tx": "ac6b4369c3fddc02347513344e5d7dacb0864135aa57c1e1224f1abde590856b",
+      "side_lock_daa": 55601679,
+      "created_at": "2026-07-08 05:39:13"
+    },
+    {
+      "id": 33376,
+      "bettor_pk": "4173a91cef12f00530d47408b37823ac483999024f2f1184fca8f334a8525373",
+      "direction": 0,
+      "stake_amount": 5000000000,
+      "side_lock_tx": "d861a0e2f2aed07a47d59eaf3bbc46804e51c0fdb41f2e64c7082776e9e0c684",
+      "side_lock_daa": 55602555,
+      "created_at": "2026-07-08 05:41:02"
+    },
+    {
+      "id": 33378,
+      "bettor_pk": "81101a71428619cba1e9e9b93f67268047974364ed319deaecc88337686e7e34",
+      "direction": 1,
+      "stake_amount": 1500000000,
+      "side_lock_tx": "6186748ae0d2102c413d36dffe628c1ebc49b4dbf92b83a3badc385eebf72e22",
+      "side_lock_daa": 55602637,
+      "created_at": "2026-07-08 05:41:13"
+    },
+    {
+      "id": 33388,
+      "bettor_pk": "4173a91cef12f00530d47408b37823ac483999024f2f1184fca8f334a8525373",
+      "direction": 0,
+      "stake_amount": 5000000000,
+      "side_lock_tx": "649a0a102c7a53ac5600fb5a3486aeba2e847864897929ff853c1f7699e6966b",
+      "side_lock_daa": 55603517,
+      "created_at": "2026-07-08 05:43:02"
+    },
+    {
+      "id": 33390,
+      "bettor_pk": "81101a71428619cba1e9e9b93f67268047974364ed319deaecc88337686e7e34",
+      "direction": 1,
+      "stake_amount": 1500000000,
+      "side_lock_tx": "1e4bb0c8841b25dd68a06582de4b84339495186ce815dd0af5675154bb7ca939",
+      "side_lock_daa": 55603597,
+      "created_at": "2026-07-08 05:43:12"
+    },
+    {
+      "id": 33395,
+      "bettor_pk": "47b609bc27adc2e33700cf1861b212c2f51a97c9bcae5744f0238bb71bbffb57",
+      "direction": 0,
+      "stake_amount": 1102000000,
+      "side_lock_tx": "4d00207fa29e633a7d98c792402da7ab1ad360032ad8b5b5b764d9739cba9ab9",
+      "side_lock_daa": null,
+      "created_at": "2026-07-08 05:44:33"
+    },
+    {
+      "id": 33398,
+      "bettor_pk": "4173a91cef12f00530d47408b37823ac483999024f2f1184fca8f334a8525373",
+      "direction": 0,
+      "stake_amount": 5000000000,
+      "side_lock_tx": "5e508bfb35151ac9cdc05f790cd84714e781b2b14c41b696fdd79e7caa63bb20",
+      "side_lock_daa": null,
+      "created_at": "2026-07-08 05:45:02"
+    },
+    {
+      "id": 33400,
+      "bettor_pk": "81101a71428619cba1e9e9b93f67268047974364ed319deaecc88337686e7e34",
+      "direction": 1,
+      "stake_amount": 1500000000,
+      "side_lock_tx": "70ca14a36e43af9062aeab26cf89a23eb9eccebe9a80e5b1af7a467fce9f9655",
+      "side_lock_daa": 55604557,
+      "created_at": "2026-07-08 05:45:12"
+    },
+    {
+      "id": 33406,
+      "bettor_pk": "4173a91cef12f00530d47408b37823ac483999024f2f1184fca8f334a8525373",
+      "direction": 0,
+      "stake_amount": 5000000000,
+      "side_lock_tx": "e84cb95309593e7b0d324584ce0d2f656f345ac383c4c8cd628afb90829d789e",
+      "side_lock_daa": 55605435,
+      "created_at": "2026-07-08 05:47:02"
+    },
+    {
+      "id": 33407,
+      "bettor_pk": "81101a71428619cba1e9e9b93f67268047974364ed319deaecc88337686e7e34",
+      "direction": 1,
+      "stake_amount": 1500000000,
+      "side_lock_tx": "76ae80d4ddcced9f8cf7e366f346b7ed669b1fc1741a448a429f7c8aa8fd324e",
+      "side_lock_daa": 55605517,
+      "created_at": "2026-07-08 05:47:12"
+    },
+    {
+      "id": 33418,
+      "bettor_pk": "4173a91cef12f00530d47408b37823ac483999024f2f1184fca8f334a8525373",
+      "direction": 0,
+      "stake_amount": 5000000000,
+      "side_lock_tx": "e121a7947b18ff8e3e12e624e2c6ffb844fe3c7e7a04df8ef9a59e64ec9253cf",
+      "side_lock_daa": 55606395,
+      "created_at": "2026-07-08 05:49:02"
+    },
+    {
+      "id": 33419,
+      "bettor_pk": "81101a71428619cba1e9e9b93f67268047974364ed319deaecc88337686e7e34",
+      "direction": 1,
+      "stake_amount": 1500000000,
+      "side_lock_tx": "e635c539d5cf9145aac45d90a1526dd0fac70943a861310eba48cf91e554c0cf",
+      "side_lock_daa": 55606477,
+      "created_at": "2026-07-08 05:49:13"
+    },
+    {
+      "id": 33432,
+      "bettor_pk": "4173a91cef12f00530d47408b37823ac483999024f2f1184fca8f334a8525373",
+      "direction": 0,
+      "stake_amount": 5000000000,
+      "side_lock_tx": "1ff3ad0a0e7bb480777ceb179793d9dda9e3a19d8ac2a7e746253577bdaca57d",
+      "side_lock_daa": 55609368,
+      "created_at": "2026-07-08 05:51:23"
+    },
+    {
+      "id": 33434,
+      "bettor_pk": "81101a71428619cba1e9e9b93f67268047974364ed319deaecc88337686e7e34",
+      "direction": 1,
+      "stake_amount": 1500000000,
+      "side_lock_tx": "79e7dd0c79b38a803f6e6d6b91ebc34d5c0cd74219ea0743c45da7029629befe",
+      "side_lock_daa": 55611196,
+      "created_at": "2026-07-08 05:51:43"
+    },
+    {
+      "id": 33436,
+      "bettor_pk": "4173a91cef12f00530d47408b37823ac483999024f2f1184fca8f334a8525373",
+      "direction": 0,
+      "stake_amount": 5000000000,
+      "side_lock_tx": "081e2d5add939ddac309495241fb47a5c332373fa0eb268c10ced306e2d8bb43",
+      "side_lock_daa": 55615106,
+      "created_at": "2026-07-08 05:53:16"
+    },
+    {
+      "id": 33438,
+      "bettor_pk": "81101a71428619cba1e9e9b93f67268047974364ed319deaecc88337686e7e34",
+      "direction": 1,
+      "stake_amount": 1500000000,
+      "side_lock_tx": "5a608dc0e37299970433420b11dafd2318fba7b9dd66e517f41522cea259af6a",
+      "side_lock_daa": 55616460,
+      "created_at": "2026-07-08 05:53:33"
+    },
+    {
+      "id": 33440,
+      "bettor_pk": "2b07c6e8221019c86f2431034235f473cc43bb902b86147dd064fd45e3b32c66",
+      "direction": 1,
+      "stake_amount": 3722000000,
+      "side_lock_tx": "261e9963b7950805c3a0de861f73dcf42822e1e3ff3cb6c5bafdeca828055d8b",
+      "side_lock_daa": 55616674,
+      "created_at": "2026-07-08 05:53:49"
+    },
+    {
+      "id": 33444,
+      "bettor_pk": "4173a91cef12f00530d47408b37823ac483999024f2f1184fca8f334a8525373",
+      "direction": 0,
+      "stake_amount": 5000000000,
+      "side_lock_tx": "810469a1622cd75eba9387f7759044494572aea50022ce3351e9c18750400d4f",
+      "side_lock_daa": 55622046,
+      "created_at": "2026-07-08 05:57:11"
+    },
+    {
+      "id": 33446,
+      "bettor_pk": "81101a71428619cba1e9e9b93f67268047974364ed319deaecc88337686e7e34",
+      "direction": 1,
+      "stake_amount": 1500000000,
+      "side_lock_tx": "e042a738a74abb4ee4063c9fa401e77ac4829717c431f9d20a13cb877080f7ef",
+      "side_lock_daa": 55623794,
+      "created_at": "2026-07-08 05:57:20"
+    },
+    {
+      "id": 33449,
+      "bettor_pk": "f5bb64c6e7afad8c042fe6c571f983b8eaea9dd4a58b1705d1b0587c2c026f08",
+      "direction": 0,
+      "stake_amount": 4881000000,
+      "side_lock_tx": "49dc8534aafe6950a2463ba835fb59ac70948da7a1bc2ef3f3e50fbb16f9de40",
+      "side_lock_daa": 55642408,
+      "created_at": "2026-07-08 06:00:56"
+    },
+    {
+      "id": 33450,
+      "bettor_pk": "4173a91cef12f00530d47408b37823ac483999024f2f1184fca8f334a8525373",
+      "direction": 0,
+      "stake_amount": 5000000000,
+      "side_lock_tx": "6339712e542ce0f6a5081165fc69284f99871f0927995e028395e1d92d572b2d",
+      "side_lock_daa": 55642460,
+      "created_at": "2026-07-08 06:01:03"
+    },
+    {
+      "id": 33452,
+      "bettor_pk": "81101a71428619cba1e9e9b93f67268047974364ed319deaecc88337686e7e34",
+      "direction": 1,
+      "stake_amount": 1500000000,
+      "side_lock_tx": "20ea7c2bdf624e362453436ab47786bac745b5b83e966321e0d83cdab4e390b2",
+      "side_lock_daa": 55642546,
+      "created_at": "2026-07-08 06:01:13"
+    },
+    {
+      "id": 33458,
+      "bettor_pk": "4173a91cef12f00530d47408b37823ac483999024f2f1184fca8f334a8525373",
+      "direction": 0,
+      "stake_amount": 5000000000,
+      "side_lock_tx": "8f665e09d6c65fc1da03c67949197215ede3389fc3949177072e45839c207254",
+      "side_lock_daa": 55643420,
+      "created_at": "2026-07-08 06:03:03"
+    },
+    {
+      "id": 33459,
+      "bettor_pk": "81101a71428619cba1e9e9b93f67268047974364ed319deaecc88337686e7e34",
+      "direction": 1,
+      "stake_amount": 1500000000,
+      "side_lock_tx": "35a50964f9b63b14b5b7899f2e627629d59a614328f9baf3971a74cefc419445",
+      "side_lock_daa": 55643500,
+      "created_at": "2026-07-08 06:03:13"
+    },
+    {
+      "id": 33460,
+      "bettor_pk": "606be169d935e9460bc9a1665210e7d2fadd43823574aac1f1dd9e38ff3248cf",
+      "direction": 0,
+      "stake_amount": 4856000000,
+      "side_lock_tx": "9df3b71382c05a166ef17d94d16a4bf53e77a8cc2c012ee4be9ebadd1cea22ae",
+      "side_lock_daa": 55643714,
+      "created_at": "2026-07-08 06:03:39"
+    },
+    {
+      "id": 33467,
+      "bettor_pk": "4173a91cef12f00530d47408b37823ac483999024f2f1184fca8f334a8525373",
+      "direction": 0,
+      "stake_amount": 5000000000,
+      "side_lock_tx": "65ea06ba35e8f173a1c708415de76b3231aa89c604fd0a436bfce9216623e70e",
+      "side_lock_daa": 55644380,
+      "created_at": "2026-07-08 06:05:03"
+    },
+    {
+      "id": 33468,
+      "bettor_pk": "81101a71428619cba1e9e9b93f67268047974364ed319deaecc88337686e7e34",
+      "direction": 1,
+      "stake_amount": 1500000000,
+      "side_lock_tx": "fd6be6ff732b05a5db39403f7f037f619a663bc3f7e778eabe2e1f9a572ee55e",
+      "side_lock_daa": 55644460,
+      "created_at": "2026-07-08 06:05:13"
+    },
+    {
+      "id": 33471,
+      "bettor_pk": "4173a91cef12f00530d47408b37823ac483999024f2f1184fca8f334a8525373",
+      "direction": 0,
+      "stake_amount": 5000000000,
+      "side_lock_tx": "7272f21ce46669caf476d9ee4604d8f3d09d9e8ec6e937a7a57b1f632beb1884",
+      "side_lock_daa": 55645854,
+      "created_at": "2026-07-08 06:08:07"
+    }
+  ],
+  "exported_at": "2026-07-10T07:53:20.000Z"
+}
