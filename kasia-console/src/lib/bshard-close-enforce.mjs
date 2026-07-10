@@ -832,9 +832,14 @@ export async function verifyBettorsCompleteFromChain(logicalMarketId, bettors, c
       const shardPoolId = sh.shard_pool_id || _hex32(`${logicalMarketId}-shard-${sh.shard_index}`);
       // rows 来源: cross-node = sh.bettors (snapshot per-shard, 只 hint 指路); local = ctx.db pool_bettor_sides。
       //   字段兼容 snapshot {pk,direction,stake} 与 DB {bettor_pk,direction,stake_amount}。链锚: addr 必 landed (不信 snapshot)。
+      // excludeSideLockTx (optional, 2026-07-11, 28mln shard9 phantom-leaf recovery, docs/2026-07-10-
+      //   shard9-recovery-design.md): threaded via ctx (set by buildEnforceCtx) so this DB fallback stays
+      //   consistent with loadBettorsCrossShard's exclusion — otherwise this would try to derive/verify
+      //   ticket addresses for bettors whose register_append never landed (fail-loud BUST for the wrong reason).
+      const _excludeSet = ctx.excludeSideLockTx && ctx.excludeSideLockTx.length ? new Set(ctx.excludeSideLockTx) : null;
       const rows = Array.isArray(sh.bettors)
         ? sh.bettors
-        : (ctx.db ? ctx.db.prepare(`SELECT bettor_pk, direction, stake_amount FROM pool_bettor_sides WHERE market_id = ?`).all(sh.shard_market_id) : []);
+        : (ctx.db ? ctx.db.prepare(`SELECT bettor_pk, direction, stake_amount, side_lock_tx FROM pool_bettor_sides WHERE market_id = ?`).all(sh.shard_market_id).filter((r) => !_excludeSet || !_excludeSet.has(r.side_lock_tx)) : []);
       for (const r of rows) {
         const rpk = String(r.bettor_pk ?? r.pk ?? '');
         const rdir = Number(r.direction);

@@ -62,11 +62,17 @@ const _blake2bHex = (s) => Buffer.from(blake2b(Buffer.from(String(s)), { dkLen: 
  *   pool_bettor_sides keyed by the SHARD market id. Union across all shards → complete loaded bettor set for the logical
  *   market. side_lock_daa = chain-anchored accepting-block daa (enforce C1 per-bettor guard; NULL → fail-loud in lib).
  *   No shards (non-(A) / fee-only market) → fall back to the logical id itself.
+ * @param {string[]|null} excludeSideLockTx — optional (2026-07-11, 28mln shard9 phantom-leaf recovery,
+ *   docs/2026-07-10-shard9-recovery-design.md): side_lock_tx values to drop from the result. Default
+ *   null = zero behavior change. Filters on side_lock_tx (chain-anchored, identical on every node) rather
+ *   than the local `id` primary key, because this function runs independently per committee-voter node
+ *   (separate machines, no shared DB) — a local SQLite id is insert-order-dependent per node.
  * @returns {Array<{pk, direction, stake, side_lock_daa}>}
  */
-export function loadBettorsCrossShard(logicalMarketId) {
+export function loadBettorsCrossShard(logicalMarketId, excludeSideLockTx = null) {
   const shards = listShards(sqlite, logicalMarketId);
   const marketIds = shards.length ? shards.map(s => s.shard_market_id) : [logicalMarketId];
+  const excludeSet = excludeSideLockTx && excludeSideLockTx.length ? new Set(excludeSideLockTx) : null;
   const out = [];
   for (const mid of marketIds) {
     // side_lock_tx 加 (W2, J2 2026-07-07): canonicalBetOrder tiebreak 需要 (同 side_lock_daa 双注确定性打破)。
@@ -75,10 +81,34 @@ export function loadBettorsCrossShard(logicalMarketId) {
       `SELECT bettor_pk, direction, stake_amount, side_lock_daa, side_lock_tx FROM pool_bettor_sides WHERE market_id = ?`
     ).all(mid);
     for (const r of rows) {
+      if (excludeSet && excludeSet.has(r.side_lock_tx)) continue;
       out.push({ pk: String(r.bettor_pk), direction: Number(r.direction), stake: String(r.stake_amount), side_lock_daa: r.side_lock_daa, side_lock_tx: r.side_lock_tx });
     }
   }
   return out;
+}
+
+// 🔴 一次性事故处置(2026-07-11, 28mln shard9 phantom-leaf recovery, docs/2026-07-10-shard9-recovery-design.md):
+//   11笔bet22-32的register_append曾短暂landed但被reorg踢出选定链(A线定案, 见设计doc)——bettor付款本身(side_lock_tx)
+//   真实landed, 但对应的leaf续约从未成为canonical状态, 结算数学必须排除这11笔, 否则payoutRoot凭空多11人份额。
+//   仅服务这一个市场这一次纠正, 不是通用机制——不要复用/扩展这张表给别的市场/别的事故。
+const _SHARD9_PHANTOM_EXCLUDE_SIDE_LOCK_TX = {
+  'ext-pool-v07-1783455512843-28mln': [
+    '810469a1622cd75eba9387f7759044494572aea50022ce3351e9c18750400d4f',
+    'e042a738a74abb4ee4063c9fa401e77ac4829717c431f9d20a13cb877080f7ef',
+    '49dc8534aafe6950a2463ba835fb59ac70948da7a1bc2ef3f3e50fbb16f9de40',
+    '6339712e542ce0f6a5081165fc69284f99871f0927995e028395e1d92d572b2d',
+    '20ea7c2bdf624e362453436ab47786bac745b5b83e966321e0d83cdab4e390b2',
+    '8f665e09d6c65fc1da03c67949197215ede3389fc3949177072e45839c207254',
+    '35a50964f9b63b14b5b7899f2e627629d59a614328f9baf3971a74cefc419445',
+    '9df3b71382c05a166ef17d94d16a4bf53e77a8cc2c012ee4be9ebadd1cea22ae',
+    '65ea06ba35e8f173a1c708415de76b3231aa89c604fd0a436bfce9216623e70e',
+    'fd6be6ff732b05a5db39403f7f037f619a663bc3f7e778eabe2e1f9a572ee55e',
+    '7272f21ce46669caf476d9ee4604d8f3d09d9e8ec6e937a7a57b1f632beb1884',
+  ],
+};
+function _shard9PhantomExcludeFor(marketId) {
+  return _SHARD9_PHANTOM_EXCLUDE_SIDE_LOCK_TX[marketId] || null;
 }
 
 /**
@@ -137,7 +167,11 @@ export function buildEnforceCtx(voter, voterPk, market) {
         deadline_daa: mrow?.deadline_daa != null ? Number(mrow.deadline_daa) : deadlineDaa,
       };
     },
-    loadBettors: async (marketId) => loadBettorsCrossShard(marketId),
+    loadBettors: async (marketId) => loadBettorsCrossShard(marketId, _shard9PhantomExcludeFor(marketId)),
+    // threaded through to verifyBettorsCompleteFromChain's local-DB fallback (bshard-close-enforce.mjs) so
+    // the level2-B per-ticket check stays consistent with the loadBettors exclusion above — same one-off
+    // 28mln-s9 lookup, not a new mechanism (docs/2026-07-10-shard9-recovery-design.md).
+    excludeSideLockTx: _shard9PhantomExcludeFor(market.id),
     // C1 level2-A chain-anchor primitives.
     p2sh: (redeemHex) => p2shFromRedeemSync(redeemHex, network),
     // 🔴 fix (Bettor+NWT+J2 2026-07-08 22:2x, uqmp8 C1 anti-swap 首次真实场景误拒): 原实现只查 relay 的

@@ -34,8 +34,22 @@ export function getSidesByLogicalMarket(logicalMarketId, db) {
 // Returns pool_bettor_sides rows for ONE specific shard_market_id.
 // Use when you already have the concrete shard ID (e.g. shard-allocator, per-shard settler).
 // This is the existing correct pattern — expose it explicitly so callers name their intent.
+//
+// excludeSideLockTx (optional, 2026-07-11, 28mln shard9 phantom-leaf recovery, docs/2026-07-10-
+//   shard9-recovery-design.md): array of side_lock_tx (bettor payment txid, chain-anchored) to
+//   exclude from the result. Default null/empty = current behavior, zero change for every existing
+//   caller. Filters on side_lock_tx (NOT the local `id` primary key) because enforceCloseAttest runs
+//   independently per committee-voter node (separate machines, no shared filesystem/DB) — a local
+//   SQLite id is insert-order-dependent per node and would NOT identify the same row across nodes;
+//   side_lock_tx is a chain value and is identical everywhere.
 // ────────────────────────────────────────────────────────────────────────────
-export function getSidesByShard(shardMarketId, db) {
+export function getSidesByShard(shardMarketId, db, excludeSideLockTx = null) {
+  if (excludeSideLockTx && excludeSideLockTx.length) {
+    const placeholders = excludeSideLockTx.map(() => '?').join(',');
+    return db.prepare(
+      `SELECT * FROM pool_bettor_sides WHERE market_id = ? AND side_lock_tx NOT IN (${placeholders})`
+    ).all(shardMarketId, ...excludeSideLockTx);
+  }
   return db.prepare(
     'SELECT * FROM pool_bettor_sides WHERE market_id = ?'
   ).all(shardMarketId);
@@ -89,8 +103,13 @@ export function getSideById(sideId, logicalMarketId, db) {
 //   bets = [{ pk, stake, direction }] (stake/direction normalized)·poolSompi = Σstake (BigInt string)。
 //   multiShard>0 → 多片 rolling shard (production fold 路·caller 须 fold per-shard·非单读)。
 // 所有 settler/daemon 的 bet-count/pool/payout 读必经此·禁裸读 logical pool_bettor_sides 聚合 (lint-kanet 堵)。
+//
+// excludeSideLockTx (optional, 2026-07-11, 28mln shard9 phantom-leaf recovery): see getSidesByShard
+// doc above — threaded through unchanged to every getSidesByShard call. Applying the same set across
+// all shards of a multi-shard market is safe: a txid absent from a given shard simply matches nothing
+// there (no-op), so this only affects the shard(s) that actually contain those side_lock_tx values.
 // ────────────────────────────────────────────────────────────────────────────
-export function getMarketBets(logicalMarketId, db) {
+export function getMarketBets(logicalMarketId, db, excludeSideLockTx = null) {
   const mkt = db.prepare('SELECT protocol_version FROM pool_markets WHERE id = ?').get(logicalMarketId);
   const isBshard = !!mkt && String(mkt.protocol_version || '').startsWith('v0.7');
 
@@ -110,9 +129,9 @@ export function getMarketBets(logicalMarketId, db) {
       //   union 跨全片 getSidesByShard (每注属唯一 shard_market_id·无重叠·nnd1g 实证 52=32+20 distinct overlap=0)。
       //   settle 需全片 winner 全进 payoutRoot (命门·四源 co-verify Σ各片 winner 无掉片)。multiShard 保留作 info。
       multiShard = shards.length;
-      rows = shards.flatMap((s) => getSidesByShard(s.shard_market_id, db));
+      rows = shards.flatMap((s) => getSidesByShard(s.shard_market_id, db, excludeSideLockTx));
     }
-    else { rows = getSidesByShard(shards[0].shard_market_id, db); }
+    else { rows = getSidesByShard(shards[0].shard_market_id, db, excludeSideLockTx); }
   } else {
     // v06 anonymous: 押注直接在 logical 键 (保旧·v06 PoolSide 模型独立)。
     rows = db.prepare('SELECT * FROM pool_bettor_sides WHERE market_id = ?').all(logicalMarketId);
