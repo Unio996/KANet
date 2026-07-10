@@ -28,12 +28,11 @@ Status: DRAFT — J1(shard域)起稿, 待J2(settler域)补settlement-pipeline影
 
 **🔴 方案A步骤3的一个缺口(必须堵, 否则守恒会假绿又真崩)**: "标记为refunded"这个动作本身**不会**把这11笔从结算计算里排除——查了`getMarketBets`(pool-bettor-sides-query.mjs:93, 全库settler/daemon读bet-count/pool/payout的**唯一合法入口**, lint-kanet堵裸读): 它对bshard市场的排除粒度是**整片shard**(`WHERE status != 'manual_recovery_refunded'`, 见L104-105), 片内的`getSidesByShard`(L38-42)是**裸`SELECT * WHERE market_id=?`, 没有任何按行过滤的手段**(pool_bettor_sides本身也没有一个"排除出池"的列)。也就是说: 只要这11行还在`pool_bettor_sides`里且shard9不是整片被排除, `getMarketBets`会原样把32个bettor都读回来算payout_root——跟纠正后covenant实际只backing 21个bettor(648.24KAS)对不上, 会在settle/consolidate某一步撞守恒不符(比J1提的"重新advance风险"更隐蔽, 因为它不会立刻报错, 而是让payout_root算出一个链上验不过的假值, 委员会拒签或更糟——委员如果没做这层交叉验证会签出一个凭空多了11人份额的错误分配)。
 
-**必须新增的一环(建议加成方案A步骤3.5)**: 在shard9纠正`current_leaf_state.count=21`的同时, 需要让这11笔行在`getSidesByShard`层面被排除。两个选项, 推荐②:
-  ① 直接从`pool_bettor_sides`物理删除这11行——丢审计痕迹, 不符合KANet"每笔链上交易必须入库"的底线, 不推荐。
-  ② **给`getSidesByShard`加一个基于`merkle_index`的下界过滤**: `WHERE market_id=? AND merkle_index < (对应shard.current_leaf_state.count)`。`merkle_index`在注册时就是按leaf count顺序分配的(bet22-32的merkle_index分别是21-31), 纠正后count=21意味着"merkle_index<21"精确等于"真实落链的21笔", 天然排除这11笔, 不删行、留审计、不需要新schema列。**这不是shard9专属hack, 是补一条通用正确性不变式**("DB里的bettor行必须≤covenant实际committed的count")——以后任何一次类似phantom(即使概率低, D=20已根治大部分场景)都会被这条不变式自动兜住, 不需要每次重新设计排除机制。落地时需确认这个过滤不影响shard0-8/shard10(它们count==实际行数, `merkle_index<count`对它们是全集, 无副作用)。
-  这11行本身仍然是"标记refunded"(增加一个字段或复用`refund_attempted_at`记录退款时间), 但**排除出结算计算靠merkle_index过滤, 不靠这个标记**——标记只是给退款流程/审计用, 结算的守恒正确性不应该依赖"有没有人记得去读这个标记"。
+**🔴 更正(J2自查撤回)**: 上面"按`merkle_index<count`过滤"这条建议是错的——直查shard9全32行实际数据, `merkle_index`字段值**全部是常量9**, 不是按片内注册顺序分配的0-31。查了`recordBettor`实际INSERT语句(pool.js:1574-1575)确认这一列写入的其实是`shardIndex`(=9, 分片序号), 不是片内下注序号——列名带"merkle"但语义与这次需求无关, 是我没先查值就假设了字段语义。撤回, 不采用。
 
-**refund runbook适配**: lv3rz(2026-06-30)先例是整片shard排除+退款, 28mln这次是"片内部分排除"——机制不同但退款本身(gateway原路退stake给bettor_pk对应linked_addr)是同一个原语, 复用没有结构性障碍, 只是触发范围从"整片"变成"11个具体bettor_pk列表"(已知: bet 33444/33446/33449/33450/33452/33458/33459/33460/33467/33468/33471的bettor_pk, 需要从`pool_bettor_sides`原样读, 不受merkle_index过滤影响因为退款走的是另一条读路径, 不经`getSidesByShard`的结算用途)。
+**改用方案(范围收紧, 不碰共享函数)**: 已知这11笔的具体`pool_bettor_sides.id`(33444/33446/33449/33450/33452/33458/33459/33460/33467/33468/33471)——payout/结算计算读取shard9的bettor列表这一步, 按这个显式id列表排除, **不改`getSidesByShard`/`getMarketBets`这两个全库共用入口**(避免像NWT提醒的"通用改动不该跟这次操作绑在一起"; 若未来再遇到类似情形再评估是否值得补通用机制)。这11行仍标记refunded(记录退款时间, 供审计/防重复退款), 但**结算侧排除靠显式id列表, 不靠这个标记**——避免"结算正确性依赖有没有人记得去读某个标记"这个隐患。
+
+**refund runbook适配**: lv3rz(2026-06-30)先例是整片shard排除+退款, 28mln这次是"片内部分排除"——机制不同但退款本身(gateway原路退stake给bettor_pk对应linked_addr)是同一个原语, 复用没有结构性障碍, 只是触发范围从"整片"变成上面11个具体row id对应的bettor_pk列表(从`pool_bettor_sides`原样读, 不受结算侧id排除影响, 退款走的是另一条读路径)。
 
 ## Bettor方向审notes(已核,折入)
 - **身份新地面(Bettor独立核实)**: 11笔的4个bettor_pk全部是内部bot relay——HouseAgent(5笔×50KAS)/UnderdogBot(4笔×15KAS)/AutoBetter-1(48.81KAS)/AutoBetter-2(48.56KAS),custodial地址零命中真实用户。**零真实用户受影响**,退款面全内部,不需要用户面文案/Owner批沟通稿。
