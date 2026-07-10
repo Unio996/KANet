@@ -35,5 +35,11 @@ Status: DRAFT — J1(shard域)起稿, 待J2(settler域)补settlement-pipeline影
 
 **refund runbook适配**: lv3rz(2026-06-30)先例是整片shard排除+退款, 28mln这次是"片内部分排除"——机制不同但退款本身(gateway原路退stake给bettor_pk对应linked_addr)是同一个原语, 复用没有结构性障碍, 只是触发范围从"整片"变成"11个具体bettor_pk列表"(已知: bet 33444/33446/33449/33450/33452/33458/33459/33460/33467/33468/33471的bettor_pk, 需要从`pool_bettor_sides`原样读, 不受merkle_index过滤影响因为退款走的是另一条读路径, 不经`getSidesByShard`的结算用途)。
 
+## Bettor方向审notes(已核,折入)
+- **身份新地面(Bettor独立核实)**: 11笔的4个bettor_pk全部是内部bot relay——HouseAgent(5笔×50KAS)/UnderdogBot(4笔×15KAS)/AutoBetter-1(48.81KAS)/AutoBetter-2(48.56KAS),custodial地址零命中真实用户。**零真实用户受影响**,退款面全内部,不需要用户面文案/Owner批沟通稿。
+- **(a) payout基数值源核实**: 28mln整体payout计算必须以纠正后shard9(21注/648.24KAS)为准——J2需在其补充节明确payout实际读的pool基数来自链上`consolidatedPool`(自然只含真实21注)还是任何DB侧`projected_settle_mass`/`pool_value`等缓存值(后者若还是32笔口径必须先排除, 不能直接用)。这条待J2最终确认后NWT才能给收尾GREEN。
+- **(b) 退款执行纪律**: 走lv3rz runbook, 但退款txid必须链上验证+写回`pool_bettor_sides`的退款记录字段(非空手认领); 广播前Bettor会predict-then-verify预钉这11行/4个bettor_pk/Σ=40737000000 sompi逐分对上, 不接受近似值。
+- **执行序(不跳步)**: J2补完两问(已完成,见J2补充节)→NWT终GREEN(收尾(a)后)→Bettor终验→才动手执行,退款环节同样遵守"设计先行"纪律,不因为是退款就简化流程。
+
 ## 落地纪律
 纯设计,不动DB/不广播交易。NWT红队后交Bettor终验,批准后按方案执行,执行本身也要走"设计→NWT审→Bettor验"同一节奏,不因为是"退款"就跳过。
