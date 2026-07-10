@@ -1078,6 +1078,17 @@ export async function registerPoolRoutes(fastify) {
     if (makerStakeKas < POOL_MAKER_STAKE_MIN_KAS) return reply.code(400).send({ ok: false, error: `maker_stake_kas must be >= ${POOL_MAKER_STAKE_MIN_KAS} KAS (Owner 钦定 demo 实质押 skin-in-game, 单一源 L33)` });
     // KANet-UI 2026-06-06 (Bettor ③ APPROVE r546): 创建端 spec 结构化强制 (= 配 bot 入口 filter 双层堵).
     try { _maybeDeriveSpecFromSourceKind(b); } catch (e) { return reply.code(400).send({ ok: false, error: `source_kind derive fail: ${e.message}` }); }
+    // 🔴 Owner "ZK走到底"钦定(2026-07-10, Bettor #f9ckoz DoD·D-001 committed架构): create-v07 新盘默认
+    // zk_native=true——此前 caller 不显式传该字段时静默落回旧 V1(PayoutShard committee-sig)路径,
+    // 残留自 CloseZkV2 定名前的旧默认值, 没跟上"ZK是committed目标"的决策。只在 caller 显式传 false
+    // 时保留 V1(渐进迁移/明确退回 legacy 的逃生口), 缺省/未提及一律默认 ZK。genesis-mint 时
+    // _resolveZkNativeCtorExtras 对 zkNative=true 分支本就 fail-loud(缺 ZK_GATE_TMPL_HASH/
+    // ZK_CLOSEZK_SIL_PATH env 直接 throw, 不静默降级)——这条路径已被 uqmp8/3o0a6 等实盘验证过。
+    try {
+      const _spec = JSON.parse(b.resolution_rule_spec || '{}') || {};
+      if (_spec.zk_native !== false) _spec.zk_native = true;
+      b.resolution_rule_spec = JSON.stringify(_spec);
+    } catch (e) { return reply.code(400).send({ ok: false, error: `resolution_rule_spec zk_native default-fill fail: ${e.message}` }); }
     if (!isStructuredSpec(b.resolution_rule_spec)) return reply.code(400).send({ ok: false, error: 'resolution_rule_spec must be JSON with non-empty title + resolution_criteria + data_source_canonical (= 可填可信源下拉 source_kind 自动 derive, 或自填 canonical URL)' });
     // SEAM fix (NWT FINDING-1): 建市 chokepoint — spec 带 resolution_predicate 必过 validateResolutionPredicate (shape+护栏6 半线单源)。整数线/畸形 → 400, 不依赖 caller 走 buildSportsCard。
     { const _pv = assertSpecPredicateValid(b.resolution_rule_spec); if (!_pv.valid) return reply.code(400).send({ ok: false, error: `resolution_predicate 非法 (建市拒, 防 un-settleable): ${_pv.reason}` }); }
