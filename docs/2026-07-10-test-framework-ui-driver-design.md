@@ -1,6 +1,6 @@
 # 测试框架拟人化·全 UI 实战化设计(在既有 test-framework 上加 UI-driver 层)
 
-> **Status**: DRAFT(Bettor 拟稿 2026-07-10·待 NWT 设计审→派工实现)
+> **Status**: DRAFT v1.1(Bettor 拟稿 2026-07-10·**NWT 设计审 GREEN-with-MUST-FIX(6b330eba)·三条 must-fix 已折入 §2.4,Phase1 必带**→派工实现)
 > 依据:Owner 2026-07-10 钦定长线主线"测试框架拟人化,更贴近实战,完全通过 UI 实现";Owner 7/8 已钦定"browser 级真实测试挂既有 test-framework 不新造轮子"。本方案**不动**既有 lib/personas/cases 结构,只**加一层 driver**。
 
 ## 0. 铁律:不造新轮子(先查的结论)
@@ -42,6 +42,15 @@ persona 意图 "我要押注法国赢"
 
 ### 2.3 personas 零改动
 现有 9 个 persona 的 `initialState/nextMessage` 接口不变,driver 层在它们和 bot 之间。cn_real_human 那种"怒骂纠错"trace 直接能在 UI 路径重放。
+
+### 2.4 三条 MUST-FIX(NWT 设计审钉死·Phase1 一起交,不留 Phase2/3——它们是"这套测试会不会重演 broker-fee-emit 式假绿"的核心防线)
+- **MF1 状态隔离必须 DI 注入(非只标风险)**:driver 必须像 broker-fee-emit 那样把 state(_state.json/会话)作为**注入依赖**喂给 bot,用隔离 fixture,不碰生产 _state.json。**落码前先核实 bot.mjs 现状是不是硬编码 state 路径**——若是,先改成可注入(这本身是前置改动,不是测试代码能绕的)。
+- **MF2 `ui_expect_dm` 必须复用生产 poller,禁平行实现**:DM 到达的判定必须走 tg-bot 生产 poller(notifyLine `broker_fee_landed`)的**同一条路径**,不能在测试里另写一套"查事件→算该不该发 DM"的判断。否则=用一条平行判断路径验证另一条,**同一个病根验证病根本身有没有治好,结果无意义**(broker-fee-emit 0 行就是"以为在跑其实没通水"的活教训)。
+- **MF3 否定断言必须读 skip 证据字段,禁纯超时判定**:`ui_expect_dm` 断言"没收到 DM=正常"时,必须能区分**业务规则合理抑制**(backfill-suppress / no_broker_output / below-floor,这些都有 metadata 证据字段)vs **管道静默失败**(emit 根本没扫到/事件没写/poller 没跑)。判定必须读那个证据字段确认是"合理抑制"——**纯靠"等了 N 秒没 DM 就算对"= 正是 broker-fee-emit 那种"零证据的活跃覆盖"假绿**,禁用。
+
+### 2.5 两条补充(NWT 补,非阻塞但记)
+- 合成 Update 对象绕过输入侧真实性:若 bot 有 webhook 中间件(鉴权/去重),handleUpdate 直喂会跳过它——落码时顺手核实,标注这层没覆盖(可接受边界或补)。
+- Phase1 落码时 MF1-3 与主线① consumer 侧(J2 emit + KANet-UI poller)必须对齐同一 poller 实例,别各测各的。
 
 ## 3. 分期(先能立刻验主线①,再全覆盖)
 - **Phase 1(眼前·配合 broker DM 主线)**: 只落 `ui_expect_dm` + driver 的 bot-出口捕获器。够验"结算→broker_fee_landed→真 DM 文案到达"端到端。工作量小,今天可与主线①联调同步落。
