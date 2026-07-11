@@ -160,20 +160,20 @@ chat.eta renders as blue data card + summary text below.
 
 ```bash
 # Query intent
-curl -X POST http://localhost:3100/api/agent/reply \
+curl -X POST http://localhost:3200/api/agent/reply \
   -H 'Content-Type: application/json' \
   -d '{"relayNodeId":"ID","peer":"owner:test","message":"balance"}'
 
 # Execute intent (returns confirm card)
-curl -X POST http://localhost:3100/api/agent/reply \
+curl -X POST http://localhost:3200/api/agent/reply \
   -H 'Content-Type: application/json' \
   -d '{"relayNodeId":"ID","peer":"owner:test","message":"send 10 KAS to kaspa:qtest"}'
 
 # Preflight check
-curl -X POST http://localhost:3100/api/trade/preflight \
+curl -X POST http://localhost:3200/api/trade/preflight \
   -H 'Content-Type: application/json' \
   -d '{"agentId":"ID","action":"PLACE_ORDER","amount":100,"side":"sell"}'
 
 # Pending approvals
-curl http://localhost:3100/api/trade/pending-approvals
+curl http://localhost:3200/api/trade/pending-approvals
 ```

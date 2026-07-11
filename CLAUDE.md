@@ -214,6 +214,6 @@ bash kanet-stop.sh
 ## 关键配置
 
 - Adapter 端口从 3010 起
-- Console 端口 3100
+- Console 端口 3200（kanet.env `PORT=3200`；旧文档写 3100 是过期默认值，2026-07-11 KANet-UI 勘误）
 - CONSOLE_ENCRYPTION_KEY 必须持久化（丢失 = 所有加密数据不可恢复）
 - kanet.env 持久化配置

@@ -107,7 +107,7 @@ bash kanet-start.sh
 sleep 5
 
 # Verify process up + listening port
-curl -sf http://localhost:3100/api/health > /dev/null && echo console OK
+curl -sf http://localhost:3200/api/health > /dev/null && echo console OK
 curl -sf http://localhost:3015/api/health > /dev/null && echo adapter OK
 
 # Cron sanity test (e.g. R33 active LLM call)
