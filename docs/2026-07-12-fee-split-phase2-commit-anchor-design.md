@@ -34,7 +34,18 @@
 
 ```
 commit_v2 = blake2b(canonicalPredicate({ fee_rules_commit: computeFeeRulesCommit(feeRules), predicate }))
+// predicate-null(如 blockhash_parity)市场(NWT P1 折入): 折入原 identity 锚, 不再走裸 metadata_hash——
+commit_v2_nullpred = blake2b(canonicalPredicate({ fee_rules_commit, market_metadata_hash }))
 ```
+- **🔴 P1(NWT 红队,设计缺口修正)**:enforce 原是**三分支**——predicate-null 市场 commit 槽 = 裸
+  `market_metadata_hash`(pool.js:1517 / enforce:287-289),完全不经 computeMarketCommit,v1/v2 判别对它失效
+  → settler 可对 predicate-null+fee 市场喂任意假 feeRules 零 BUST。**修法:fee_rules 市场一律烤 v2 公式**,
+  predicate-null 时 preimage 折入原 identity 锚(上式第二行);委员判别式"载荷带 feeRules → v2 公式"对
+  null/非 null 统一覆盖。论证表第三行:predicate-null+篡改 → fee_rules_commit 不符 BUST;predicate-null+
+  隐瞒 → 裸 metadata_hash ≠ 链上 v2 BUST。regression case 补 predicate-null 篡改负例。
+- **类型 pin(NWT 注4c)**:`fee_rules_commit` 以 **lowercase hex string** 进 preimage(禁 Buffer——
+  canonicalPredicate(Buffer) 序列化成 {"data":[…],"type":"Buffer"},两侧一 string 一 Buffer = commit 永假);
+  preimage key 名钉死 `fee_rules_commit` / `market_metadata_hash`。
 - **折 hash 进 preimage 而非全文**:feeRules 全文尺寸可变,commit slot 固定 32B;两级 hash(rules→32B,再与 predicate 合)保持 offset-518 机制零变(`.sil` 不变、零 re-deploy,同命门④先例)。
 - **判别式 = DB `fee_rules` 列有无**(fail-closed 论证):enforce 见 `fee_rules` 非空 → 算 v2 commit;被篡改(改文本/换 bps)→ hash 不符 → BUST;被删(NULL)→ enforce 走 v1 commit ≠ 链上烤的 v2 → BUST。**两个方向都撞墙,判别式本身不需要可信**。
 - 老市场(fee_rules NULL + 链上 v1 commit)走既有 `computeMarketCommit(predicate, fee_recipients)` 分支,函数保留不删。
@@ -42,7 +53,14 @@ commit_v2 = blake2b(canonicalPredicate({ fee_rules_commit: computeFeeRulesCommit
 ### 2.3 V1 线接费(新建非-zk 市场)
 
 - create(pool.js 三处烤点):非 zk_native 市场从 `FEE_PRESETS.prediction` 注入 broker/introducer 地址构造 feeRules → **烤 commit 前必跑 `validateFeeRules`**(NWT 落1 F2 闭合:create API 收 0-9999 bps 与组件 5000 上限错位,建单时即 fail-loud,消灭"settle 时才炸"的延迟雷)→ 存列 + 烤 commit v2。V1 注入的 rules 中委员/节点叶 **bps=0 + 代码注释写明"挂 D-008 政策卡"**(Bettor 注3:防将来当 bug;份额表列 Owner 单点上报清单)。
-- driver(computeSettlePlan):`fee_rules` 非空 → **先选委员再算 payout**(现顺序是 3-payout→4-committee,委员派生 fee 叶需要 committeePks,顺序对调;委员选择本身零输入变化)→ `deriveRoleFeeLeaves(rules, poolSompi, {committeePks})` → `computePariMutuelPayout({..., feeLeaves})`。
+- driver(computeSettlePlan):`fee_rules` 非空 → **先选委员再算 payout**(现顺序是 3-payout→4-committee,委员派生 fee 叶需要 committeePks,顺序对调;委员选择零输入依赖 payout 输出,NWT 注4a CONFIRMED)→ `deriveRoleFeeLeaves(rules, poolSompi, {committeePks})` → `computePariMutuelPayout({..., feeLeaves})`。
+- **🟠 P2(NWT,对调副作用)**:degenerate 判定必须**前置到选委员之前**,且改为从 bets+winDir 直判
+  (`winners = bets.filter(direction==winDir)` 为空 → refund 早退,不需要 pm 不需要委员)——否则单边盘在
+  members 除 exclude 后 <COMMITTEE_SIZE 时 selectCommittee throw(sampler:95-96)先于 degenerate 判定,
+  本该 refund 的盘变 stuck-throw。
+- **🟠 P3(NWT,verify-value-source)**:委员侧 v2 路径派生 fee 叶**只读通过 hash-bind 验证的 feeRules**;
+  signRequest.broker_pk/introducer_pk(enforce:263)降级为 hint,与 feeRules.roles[].address **显式交叉断言
+  相等,不等 fail-closed 拒签**——否则"commit 验的是 A,叶算的是 B"同族 vacuous。
 - 委员(enforceCloseAttest):同 commit 内加同款 re-derive(委员自己派生自己的 committee 集,既有确定性)。
 - **🔴 委员侧 feeRules 全文来源 = attest 请求载荷携带(Bettor 注1 折入,2026-07-12)**:同 predicate 先例
   (caller-fed + 链上 commit hash-bind = 安全,`bshard-close-enforce.mjs:272-292` 现状即此形)。**禁走委员本地
@@ -64,13 +82,28 @@ commit_v2 = blake2b(canonicalPredicate({ fee_rules_commit: computeFeeRulesCommit
 - **为什么两级 hash**:全文进 preimage 也行(canonicalPredicate 能序列化嵌套),但 fee_rules_commit 单独成锚可被第三方(对账器/UI)独立引用验证,且与落1 的 computeFeeRulesCommit 单源直接复用。
 - **回归铁律怎么守**(spec §5-4):老市场(NULL)路径 = 现有 fee-single-source/bshard-auto-settler 两套 test 原样过;新市场路径 = 新 regression case(commit v2 round-trip + 篡改/删除双向 BUST + V1 带费 root 守恒)。
 
+## 3.5 interim preset 形状(NWT P5:显式定义,防"构造"两处各自理解)
+
+V1 注入产物命名 **`prediction-v1-interim`**,与 `FEE_PRESETS.prediction` 显式区分:
+- roles = provider **9820** + broker 160(注 create-committed 地址)+ introducer 20(optional,有则注入)
+  + oracle/node **保留但 bps=0**(自 documenting 挂 D-008 政策卡,derive 层对 bps=0 天然零叶)。
+- introducer 缺席时该角色整个剔除,provider 相应 +20 = 9840(Σ==10000 硬不变量)。
+- 此形状 + 两种变体(有/无 introducer)进单测钉死。
+
+## 3.6 全文可得性(NWT P4,落3 前必解、本落留 runbook)
+
+链上只有 32B hash,feeRules 全文只活 :3200 `fee_rules` 一列。丢列 = fail-closed 永锁(不可 settle)。
+本落(标准 preset 盘)可从 broker_pk/introducer_pk 列 + `prediction-v1-interim` 常量**确定性重构**——runbook
+一句进 DoD;custom 规则开放(落3)前必须解决全文可得性(链上 payload/多节点副本,落3 设计项)。
+
 ## 4. 验收(DoD)
 
-1. v184 migration + DATABASE.md 同步更新。
-2. 单测:commit v2 round-trip / 篡改 feeRules → enforce 拒 / 删 feeRules → enforce 拒 / NULL 老市场 byte-equal 现状(既有两套 test 全绿)。
+1. v184 migration(fee_rules 列 + Bettor 注2 BEFORE-UPDATE trigger)+ DATABASE.md 同步更新。
+2. 单测:commit v2 round-trip / 篡改 feeRules → enforce 拒 / 删 feeRules → enforce 拒 / **predicate-null 篡改 → BUST(P1 负例)** / degenerate 单边盘 refund 早退不撞 selectCommittee(P2)/ hint 与 feeRules 地址不等 → 拒签(P3)/ NULL 老市场 byte-equal 现状(既有两套 test 全绿)。
 3. 实弹:建一个非-zk 测试盘(小额)→ 自然结算 → broker 叶实收链验 + Σ守恒精确 + Bettor 盲算命中。
-4. driver/委员同 commit 同重启窗装载(KANet-UI 执行,照例)。
+4. driver/委员同 commit 同重启窗装载,**显式含 :3300 委员节点**(V1 enforce 双节点都跑,漏 :3300 = 半更新窗实弹;KANet-UI 执行,照例)。
 5. lint:R-FEERULES-CANON-BYPASS 已在(落1);落码若发现第二形状旁路再补规则。
+6. runbook 一句:标准 preset 盘 fee_rules 列丢失时按 §3.6 确定性重构(dry-run diff 报 Bettor 后写回)。
 
 ## 5. 开放问题(审时请显式裁)
 
