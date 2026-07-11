@@ -15,7 +15,7 @@ import { payoutRoot as buildPayoutRoot, merkleProof } from './pool-payout-root.m
 import { spliceLeafState } from './pool-shard-register.mjs';
 import { blake2b } from '@noble/hashes/blake2b';
 import { deriveCommitteeSeed, selectCommittee } from '../services/pool-committee-sampler.mjs';
-import { deriveRoleFeeLeaves, FEE_RULES_SCHEMA_V } from './fee-split.mjs';
+import { deriveRoleFeeLeaves, FEE_RULES_SCHEMA_V, computeFeeRulesCommit } from './fee-split.mjs';
 
 // 价值分成 fee 协议常量 (单源 = 真相源; UI 收口 + deriveFeeLeaves + create-v07 都读此, 防硬编漂移). bps = basis points (1% = 100).
 //   押注侧: winners 9700bps (97%) / fee 300bps (3%) = broker 160 + oracle 100 + introducer 20 + node 20.
@@ -213,6 +213,55 @@ export function computeMarketCommit(predicate, feeRecipients) {
 
 export function computePredicateCommit(predicate) {
   return Buffer.from(blake2b(Buffer.from(canonicalPredicate(predicate)), { dkLen: 32 })).toString('hex');
+}
+
+/**
+ * computeMarketCommitV2 — B线落2(设计 docs/2026-07-12-fee-split-phase2-commit-anchor-design.md v1.2,
+ * Bettor 注1-4 + NWT P1-P3 折入): fee_rules 市场的 commit 槽公式。两级 hash——fee_rules_commit(组件单源
+ * computeFeeRulesCommit, 32B)折进 preimage, 保持 offset-518 槽机制零变(.sil 不变零 re-deploy)。
+ *
+ * 🔴 P1(NWT 红队): fee_rules 市场【一律】烤本公式——predicate-null(如 blockhash_parity)市场不再走裸
+ * market_metadata_hash(那条第三分支对 feeRules 零绑定 = settler 可喂任意假规则重定向 fee 零 BUST),
+ * preimage 折入原 identity 锚 {fee_rules_commit, market_metadata_hash}。
+ * 🔴 类型 pin(NWT 注4c): fee_rules_commit / market_metadata_hash 均以 lowercase hex string 进 preimage,
+ * 禁 Buffer(canonicalPredicate(Buffer) 会序列化成 {"data":[…],"type":"Buffer"} 形状 = 两侧一 string 一
+ * Buffer commit 永假)。preimage key 名钉死: `fee_rules_commit` / `predicate` / `market_metadata_hash`。
+ * 双向 BUST(论证表, 设计 §2.2): 篡改规则→fee_rules_commit 不符; 隐瞒规则(委员按无 feeRules 走 legacy
+ * 分支)→legacy commit ≠ 链上 v2; predicate-null 两方向同理。
+ *
+ * @param {object} feeRules 全文规则(内部 computeFeeRulesCommit 会跑 validateFeeRules 双验)
+ * @param {{predicate?:object|null, marketMetadataHash?:string|null}} anchors predicate 优先; null 时必须给 marketMetadataHash
+ */
+export function computeMarketCommitV2(feeRules, { predicate = null, marketMetadataHash = null } = {}) {
+  const feeRulesCommit = computeFeeRulesCommit(feeRules);   // lowercase hex string(组件产出即 hex string)
+  let obj;
+  if (predicate != null) {
+    obj = { fee_rules_commit: feeRulesCommit, predicate };
+  } else {
+    if (!marketMetadataHash) throw new Error('computeMarketCommitV2: predicate-null 市场必须提供 marketMetadataHash(P1 identity 锚, 缺失拒烤)');
+    obj = { fee_rules_commit: feeRulesCommit, market_metadata_hash: String(marketMetadataHash).toLowerCase() };
+  }
+  return Buffer.from(blake2b(Buffer.from(canonicalPredicate(obj)), { dkLen: 32 })).toString('hex');
+}
+
+/**
+ * deriveMarketPredicateCommit — 市场行 → commit 槽值的唯一派生函数(B线落2)。取代 pool.js 三处烤点各自
+ * 手搓的同型四行(1333/1585/1755——"两套并行实现"家族病, 同 _resolveZkNativeCtorExtras 收敛先例)。
+ * 分支(与 enforce 侧 _enforceCloseAttestCore 命门① 判别严格镜像):
+ *   fee_rules 非空 → computeMarketCommitV2(一律, 含 predicate-null, P1)
+ *   fee_rules NULL + predicate → 既有 computeMarketCommit(predicate, fee_recipients)【字节不动】
+ *   fee_rules NULL + predicate-null → 既有裸 market_metadata_hash【字节不动】
+ * @param {object} market pool_markets 行(需 resolution_rule_spec/fee_rules/broker_pk/introducer_pk/market_metadata_hash)
+ */
+export function deriveMarketPredicateCommit(market) {
+  let predicate = null;
+  try { predicate = JSON.parse(market.resolution_rule_spec || '{}')?.resolution_predicate || null; } catch {}
+  if (market.fee_rules) {
+    const feeRules = JSON.parse(market.fee_rules);   // 坏 JSON = fail-loud throw(committed 规则不可解析绝不静默降级)
+    return computeMarketCommitV2(feeRules, { predicate, marketMetadataHash: market.market_metadata_hash });
+  }
+  if (!predicate) return market.market_metadata_hash;
+  return computeMarketCommit(predicate, { brokerPk: market.broker_pk || null, introducerPk: market.introducer_pk || null });
 }
 
 // PayoutShard.sil (canonical 873e799e) ctor-baked predicate_commit 在 redeem 的 byte offset (J2 probe: 两 predicate_commit

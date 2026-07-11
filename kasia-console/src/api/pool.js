@@ -1113,6 +1113,24 @@ export async function registerPoolRoutes(fastify) {
     });
     const marketMetadataHash = createHash('sha256').update(metaInput).digest('hex');
 
+    // B线落2(2026-07-12, 设计 docs/2026-07-12-fee-split-phase2-commit-anchor-design.md v1.2): 非 zk_native
+    // 市场建单即 commit 分润规则(prediction-v1-interim: broker 160bps/委员叶 bps=0 挂 D-008 政策卡)。
+    // 生效边界=新建市场起(存量 fee_rules NULL 走既有路径字节不动)。build 内部跑 validateFeeRules =
+    // NWT F2 闭合(坏 bps/坏地址建单时 fail-loud, 且在 spine 花钱之前, 不产生 settle 时才炸的延迟雷)。
+    // zk_native 判定与 selectRipeMarkets 同口径: rule_spec 非法 JSON 视为"未标记"= V1 路径。
+    let feeRulesJson = null;
+    {
+      let _rrs = {}; try { _rrs = JSON.parse(b.resolution_rule_spec || '{}') || {}; } catch {}
+      if (_rrs.zk_native !== true && brokerPk) {
+        const { buildPredictionV1InterimRules } = await import('../lib/fee-split.mjs');
+        try {
+          feeRulesJson = JSON.stringify(buildPredictionV1InterimRules({ brokerPk }));
+        } catch (e) {
+          return reply.code(400).send({ ok: false, error: `fee_rules 构造失败(建单时 fail-loud, F2): ${e.message}` });
+        }
+      }
+    }
+
     // Generate marketId FIRST so we can derive market_id hash for SS ctor.
     const marketId = 'ext-pool-v07-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7);
     const network = makerRow.address.startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
@@ -1162,14 +1180,14 @@ export async function registerPoolRoutes(fastify) {
         deadline, miner_fee, broker_fee_pct, oracle_bond_amount, maker_stake_amount,
         outcome_market_source, outcome_condition_id, outcome_token_id, outcome_side, resolution_rule_spec,
         protocol_status, sides_merkle_root, oracle_relay_ids, broker_relay_id, metadata, category,
-        protocol_version, pool_merkle_root, deadline_daa
-      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+        protocol_version, pool_merkle_root, deadline_daa, fee_rules
+      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
         marketId, b.maker_relay_id, maker_relay_pk, spineResult.p2shAddr, spineTxId, marketMetadataHash,
         null, null, null, brokerPk,
         deadline, minerFee, brokerFeePct, oracleBondAmount, makerStakeAmount,
         b.outcome_market_source, b.outcome_condition_id, b.outcome_token_id, b.outcome_side, b.resolution_rule_spec,
         'pending_bettors', '', '[]', b.broker_relay_id, initialMetadata, b.category,
-        'v0.7', poolMerkleRoot, b._deadline_daa || null,
+        'v0.7', poolMerkleRoot, b._deadline_daa || null, feeRulesJson,
       );
     } catch (e) {
       console.error(`[pool/create-v07] DB insert fail: ${e.message}`);
@@ -1319,18 +1337,12 @@ export async function registerPoolRoutes(fastify) {
       // 已修的那行同一模式——固定 versioned-builds 下按族 pin 的已知良性文件, 不再吃 target/release 默认。
       const silverc = process.env.SILVERC_LEGACY_PATH || 'D:/silverscript/versioned-builds/silverc-legacy-2c46231.exe';
       const { zkNative: _zkNative, closeZkTmplAnchor: _closeZkTmplAnchor } = _resolveZkNativeCtorExtras(market, silverc, computeCloseZkTmplAnchor);
-      // 命门① genesis coherence (NWT/Bettor load-bearing): PayoutShard 烤 predicate_commit = blake2b(canonicalPredicate(predicate))
-      //   (单源 computePredicateCommit, 与 enforce 同函数) — 非 market_metadata_hash (= sha256({全市场元}) ≠ blake2b(canonical(predicate))
-      //   → 委员 enforce hash-bind 永假 → close 永 BUST). predicate-less 市场(无结构化判)fallback metadata_hash(无命门③ enforce).
-      const { computePredicateCommit, computeMarketCommit } = await import('../lib/pool-shard-settle.mjs');
-      let _predicate = null;
-      try { _predicate = JSON.parse(market.resolution_rule_spec || '{}')?.resolution_predicate || null; } catch {}
-      // 命门④ v1 fee provenance (NWT 底线): fee 市场烤 computeMarketCommit({predicate, fee_recipients:{broker_pk, introducer_pk}})
-      //   进 PS offset-518 commit slot (折进 predicate_commit 同一 32B, .sil 不变零 re-deploy). 委员 enforce 从被花 PS 读 + 同函数
-      //   验 → settler 改 broker/introducer 地址 → 不符 → BUST. broker_pk/introducer_pk = market row create-baked (链同步).
-      //   predicate-less 市场 fallback market_metadata_hash (无 fee provenance, 无 enforce). 单源 (genesis+enforce 同 computeMarketCommit).
-      const _feeRecipients = { brokerPk: market.broker_pk || null, introducerPk: market.introducer_pk || null };
-      const predicateCommit = _predicate ? computeMarketCommit(_predicate, _feeRecipients) : market.market_metadata_hash;
+      // 命门①④ genesis coherence: commit 槽派生收敛为单源 deriveMarketPredicateCommit(B线落2, 2026-07-12,
+      //   取代此处与 confirm/admin-confirm 两处的同型四行拷贝——"两套并行实现"家族病, 同 _resolveZkNativeCtorExtras
+      //   收敛先例)。分支: fee_rules 非空→computeMarketCommitV2(P1: 含 predicate-null 折 identity 锚);
+      //   NULL→既有 computeMarketCommit/metadata_hash 分支字节不动。与 enforce 命门① 判别严格镜像。
+      const { deriveMarketPredicateCommit } = await import('../lib/pool-shard-settle.mjs');
+      const predicateCommit = deriveMarketPredicateCommit(market);
       // 件1(J1 deadline-gate, NWT option-a): partial-shard sweep gate = market.deadline (Unix s, = outcome_end floor,
       //   市场创建时 ctor-baked 非 spender → verify-value-source). ShardLeaf bakes it; partial 片仅 tx.time>=deadline 可归集
       //   (满片随时). 缺则 registerBettorOnShard fail-closed throw. predicate-less / 旧 .sil(无 deadline 参)则被忽略=无害.
@@ -1576,13 +1588,9 @@ export async function registerPoolRoutes(fastify) {
         } catch (e) { console.warn(`[register-v07/confirm] recordBettor warn: ${e.message}`); }
       };
 
-      // 命门①③④ genesis coherence: predicate_commit = computeMarketCommit({predicate, fee_recipients}) (单源, 与 enforce 同函数);
-      //   predicate-less 市场 fallback market_metadata_hash (无 enforce). 同 monolithic register-v07.
-      const { computeMarketCommit } = await import('../lib/pool-shard-settle.mjs');
-      let _predicate = null;
-      try { _predicate = JSON.parse(market.resolution_rule_spec || '{}')?.resolution_predicate || null; } catch {}
-      const _feeRecipients = { brokerPk: market.broker_pk || null, introducerPk: market.introducer_pk || null };
-      const predicateCommit = _predicate ? computeMarketCommit(_predicate, _feeRecipients) : market.market_metadata_hash;
+      // 命门①③④ genesis coherence: 单源 deriveMarketPredicateCommit(B线落2 收敛, 见 register-v07 处注释)。
+      const { deriveMarketPredicateCommit } = await import('../lib/pool-shard-settle.mjs');
+      const predicateCommit = deriveMarketPredicateCommit(market);
 
       const { registerBettorOnShard, computeCloseZkTmplAnchor } = await import('../lib/pool-shard-register.mjs');
       // 事故硬化(2026-07-08 backlog 调查, Bettor④指令): 这两处曾各自独立声明危险默认(target/release/
@@ -1748,11 +1756,9 @@ export async function registerPoolRoutes(fastify) {
         } catch (e) { console.warn(`[admin-confirm-by-address] recordBettor warn: ${e.message}`); }
       };
 
-      const { computeMarketCommit } = await import('../lib/pool-shard-settle.mjs');
-      let _predicate = null;
-      try { _predicate = JSON.parse(market.resolution_rule_spec || '{}')?.resolution_predicate || null; } catch {}
-      const _feeRecipients = { brokerPk: market.broker_pk || null, introducerPk: market.introducer_pk || null };
-      const predicateCommit = _predicate ? computeMarketCommit(_predicate, _feeRecipients) : market.market_metadata_hash;
+      // 命门①④: 单源 deriveMarketPredicateCommit(B线落2 收敛, 见 register-v07 处注释)。
+      const { deriveMarketPredicateCommit } = await import('../lib/pool-shard-settle.mjs');
+      const predicateCommit = deriveMarketPredicateCommit(market);
 
       const { registerBettorOnShard, computeCloseZkTmplAnchor } = await import('../lib/pool-shard-register.mjs');
       const silverc = process.env.SILVERC_LEGACY_PATH || 'D:/silverscript/versioned-builds/silverc-legacy-2c46231.exe';

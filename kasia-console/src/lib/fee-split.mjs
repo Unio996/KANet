@@ -46,6 +46,31 @@ const _TOP_KEYS = new Set(['schema_v', 'preset', 'roles']);
 const _ROLE_KEYS = new Set(['name', 'bps', 'address', 'derive', 'optional']);
 
 /**
+ * buildPredictionV1InterimRules — V1 委员线接费的 interim 规则(B线落2, NWT P5: 形状显式定义防"构造"两处各自理解)。
+ * 命名 `prediction-v1-interim`, 与 FEE_PRESETS.prediction 显式区分:
+ *   - broker 160bps(create-committed 地址) + introducer 20bps(optional, 缺席整个角色剔除, bps 归 provider)
+ *   - oracle/node 角色【保留但 bps=0】——挂 D-008 政策卡(Owner 份额表未确认, bps=0 = 未定政策的诚实呈现,
+ *     非 bug; 份额表定后新市场换新 preset, 存量按建单承诺不追溯)。derive 层对 bps=0 天然零叶。
+ *   - provider = 9820(有 introducer)/9840(无), Σ==10000 硬不变量。
+ * @param {{brokerPk:string, introducerPk?:string|null}} o
+ * @returns {object} 已过 validateFeeRules 的规则(可直接存列/烤 commit)
+ */
+export function buildPredictionV1InterimRules({ brokerPk, introducerPk = null }) {
+  if (!brokerPk) throw new Error('buildPredictionV1InterimRules: brokerPk 必需(无 broker 的市场不建 fee_rules, 走 legacy 0费路径)');
+  const hasIntro = !!introducerPk;
+  const roles = [
+    { name: 'provider', bps: hasIntro ? 9820 : 9840 },
+    { name: 'broker', bps: 160, address: String(brokerPk).toLowerCase() },
+  ];
+  if (hasIntro) roles.push({ name: 'introducer', bps: 20, optional: true, address: String(introducerPk).toLowerCase() });
+  roles.push({ name: 'oracle', bps: 0, derive: 'committee' });   // bps=0 挂 D-008 政策卡(见函数头), 勿当 bug
+  roles.push({ name: 'node', bps: 0, derive: 'committee' });
+  const rules = { schema_v: FEE_RULES_SCHEMA_V, preset: 'prediction-v1-interim', roles };
+  validateFeeRules(rules);
+  return rules;
+}
+
+/**
  * validateFeeRules — schema 层硬不变量(spec §2, 组件入口 + commit 前双验的那一份)。
  * 不合法 → throw(fail-loud, 防恶意预设上链)。版本不符 → err.code='FEE_RULES_SCHEMA_V_UNSUPPORTED'(可辨识,
  * spec v1.2-3: 非静默算错非裸 BUST——委员 re-derive 前先查版本支持集)。

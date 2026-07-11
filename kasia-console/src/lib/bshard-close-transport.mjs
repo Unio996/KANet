@@ -38,6 +38,9 @@ export function publishCloseRequest(marketId, req) {
     input_index: req.input_index ?? 0,
     broker_pk: req.broker_pk ? String(req.broker_pk).toLowerCase() : null,
     introducer_pk: req.introducer_pk ? String(req.introducer_pk).toLowerCase() : null,
+    // B线落2(Bettor 注1): fee_rules 全文载荷携带(委员禁本地 DB 读, 列不跨节点同步)——enforce 对全文
+    //   canonicalize+hash == 链上 v2 commit 才继续(hash-bind, 同 predicate caller-fed 先例)。
+    fee_rules: req.fee_rules ?? null,
     maker_pk: req.maker_pk ? String(req.maker_pk).toLowerCase() : null,           // J1 cross-node: reDeriveCommittee exclude
     data_source_canonical: req.data_source_canonical ?? null,   // c77bb356: wrapper-source 市场单独传; source-in-inner 可省
     snapshot: req.snapshot ?? null,                              // 94cfef67 cross-node hint: {shards:[{...,bettors:[]}]}

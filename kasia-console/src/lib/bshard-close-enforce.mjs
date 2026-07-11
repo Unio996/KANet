@@ -19,9 +19,10 @@
 import { blake2b } from '@noble/hashes/blake2b';
 import { judgeLine } from './judgeline.mjs';
 import {
-  canonicalPredicate, computePredicateCommit, computeMarketCommit,
+  canonicalPredicate, computePredicateCommit, computeMarketCommit, computeMarketCommitV2,
   computePariMutuelPayout, deriveFeeLeaves, settlePayoutRoot, FEE_CONFIG, deriveSettlementFeeLeaves,
 } from './pool-shard-settle.mjs';
+import { deriveRoleFeeLeaves } from './fee-split.mjs';
 import { deriveCommitteeSeed, selectCommittee } from '../services/pool-committee-sampler.mjs';
 import { buildPoolMerkleTree } from '../services/pool-merkle-v06.mjs';   // C2: complete-set verify
 import { findExtractor, extractStructuredFields } from './oracle-evidence-extractors.mjs';   // verifyFrozenEvidence canonical fetch (J1)
@@ -283,8 +284,38 @@ export async function _enforceCloseAttestCore(signRequest, ctx) {
   const _predicateCommitOffset = _isV2Layout ? _PREDICATE_COMMIT_REDEEM_OFFSET_V2 : _PREDICATE_COMMIT_REDEEM_OFFSET;
   const onChainCommit = String(psRedeemHex).slice(_predicateCommitOffset * 2, (_predicateCommitOffset + 32) * 2);
   const feeMarket = !!broker_pk;
+  // B线落2(2026-07-12, NWT P1/P3): fee_rules 市场判别式 = 【载荷有无 feeRules】(Bettor 注1: 全文载荷携带
+  //   同 predicate 先例, 禁委员本地 DB 读——fee_rules 列不跨节点同步)。载荷带 → 一律 v2 公式(含 predicate-null
+  //   折 identity 锚, P1 第三分支闭合); 载荷不带但链上烤的是 v2 commit → 下面 legacy 分支算出的值 ≠ onChain
+  //   → BUST(settler 隐瞒规则也撞墙, 双向论证)。篡改规则 → fee_rules_commit 不符 → BUST。
+  let feeRules = null;
+  if (signRequest.fee_rules != null) {
+    try {
+      feeRules = typeof signRequest.fee_rules === 'string' ? JSON.parse(signRequest.fee_rules) : signRequest.fee_rules;
+    } catch (e) {
+      return { pass: false, reason: `B线落2: 载荷 fee_rules 非法 JSON(${e.message}), 拒签` };
+    }
+  }
   let expectedCommit;
-  if (predicate == null) {
+  if (feeRules != null) {
+    if (predicate == null && !ctx.marketMetadataHash) {
+      return { pass: false, reason: '命门①(v2): predicate=null 且 ctx.marketMetadataHash 缺 (identity 锚无源, 拒签)' };
+    }
+    try {
+      expectedCommit = computeMarketCommitV2(feeRules, { predicate, marketMetadataHash: ctx.marketMetadataHash });
+    } catch (e) {
+      return { pass: false, reason: `B线落2: fee_rules 不合法(validateFeeRules/commit 派生 throw: ${e.message}), 拒签` };
+    }
+    // 🔴 P3(verify-value-source): signRequest.broker_pk/introducer_pk 与 hash-bound 规则是两个来源——
+    //   fee 叶只从验过 commit 的 feeRules 派生(下方 V1 tail), hint 必须与规则地址显式相等, 不等 fail-closed
+    //   ("commit 验的是 A, 叶算的是 B"同族 vacuous 封死)。
+    const _rulesBroker = feeRules.roles?.find?.(r => r?.name === 'broker')?.address ?? null;
+    const _rulesIntro = feeRules.roles?.find?.(r => r?.name === 'introducer')?.address ?? null;
+    const _hintBroker = broker_pk ? String(broker_pk).toLowerCase() : null;
+    const _hintIntro = introducer_pk ? String(introducer_pk).toLowerCase() : null;
+    if (_hintBroker !== _rulesBroker) return { pass: false, reason: `P3 交叉断言 FAIL: signRequest.broker_pk(${String(_hintBroker).slice(0, 10)}) != feeRules.broker(${String(_rulesBroker).slice(0, 10)}), 双来源分叉拒签` };
+    if (_hintIntro !== _rulesIntro) return { pass: false, reason: `P3 交叉断言 FAIL: signRequest.introducer_pk != feeRules.introducer, 双来源分叉拒签` };
+  } else if (predicate == null) {
     if (!ctx.marketMetadataHash) return { pass: false, reason: '命门①: predicate=null 但 ctx.marketMetadataHash 缺 (daemon 未注入本地 market_metadata_hash, 拒签)' };
     expectedCommit = String(ctx.marketMetadataHash).toLowerCase();
   } else {
@@ -391,7 +422,7 @@ export async function _enforceCloseAttestCore(signRequest, ctx) {
   // 里二选一, 改为各自调用方(enforceCloseAttest/enforceCloseAttestV2)分别计算, 核心只把算 reDerivedRoot
   // 所需的原始材料(bettors/winningDirection/committee + 链锚的 psConsolidatedPool, 即 completeCtx 上面刚现读
   // 过的值, C1(ii) 已算, 非重新读)传出去。V1 路径不受影响(下方 enforceCloseAttest 内联旧逻辑字节不变)。
-  return { pass: true, verdict, winningDirection, committee, bettors, broker_pk, introducer_pk, psConsolidatedPool: completeCtx.psConsolidatedPool };
+  return { pass: true, verdict, winningDirection, committee, bettors, broker_pk, introducer_pk, psConsolidatedPool: completeCtx.psConsolidatedPool, feeRules };
 }
 
 /**
@@ -414,12 +445,19 @@ export async function enforceCloseAttest(signRequest, ctx) {
   const { verdict, winningDirection, bettors, committee, broker_pk, introducer_pk } = core;
   const { claimedPayoutRoot, psRedeemHex } = signRequest;
 
-  // V1 payoutRoot 重导出(P4 抽出前的原逻辑, 一字不动, 只是从共用核心挪到这里——FEE_CONFIG 协议常量口径不受
-  // D-008/P4 影响): poolSompi=Σ注(V1 从未有 seed 概念), fee=FEE_CONFIG(broker160+委员120bps 均分)。
+  // V1 payoutRoot 重导出: poolSompi=Σ注(V1 从未有 seed 概念)。
+  // B线落2 分叉: fee_rules 市场(core.feeRules = 已过 commit hash-bind 验证的规则)从组件单源派生 fee 叶
+  //   (P3: 只读 hash-bound 规则, 不读 signRequest hint——hint 已在 core 交叉断言相等)。
+  //   fee_rules 缺席(全部存量市场)→ 下面 legacy 分支【一字不动】: fee=FEE_CONFIG(broker160+委员120bps 均分)。
+  //   ⚠ 现状陷阱注意: legacy 分支的 FEE_CONFIG 叶只出现在【委员 re-derive】, driver(computeSettlePlan)对
+  //   legacy 市场从不传 feeLeaves——两侧一致依赖"legacy 市场从不走 voter 路径"(28mln 实测 fee=0 双侧一致)。
+  //   fee_rules 市场两侧同源(组件+committed 规则), 不再依赖这个巧合。
   const poolSompi = bettors.reduce((s, b) => s + BigInt(b.stake), 0n).toString();
-  const { feeLeaves } = deriveFeeLeaves({
-    poolSompi, feeConfig: FEE_CONFIG, brokerPk: broker_pk, introducerPk: introducer_pk, committeePks: committee,
-  });
+  const { feeLeaves } = core.feeRules
+    ? deriveRoleFeeLeaves(core.feeRules, poolSompi, { committeePks: committee })
+    : deriveFeeLeaves({
+      poolSompi, feeConfig: FEE_CONFIG, brokerPk: broker_pk, introducerPk: introducer_pk, committeePks: committee,
+    });
   const pm = computePariMutuelPayout({ bettors, winningDirection, feeLeaves });
   if (pm.degenerate) return { pass: false, reason: `degenerate (${pm.reason}) — 单边池需 refund 路` };
   const reDerivedRoot = settlePayoutRoot(pm.payoutLeaves && pm.payoutLeaves.length ? pm.payoutLeaves : pm.winners);

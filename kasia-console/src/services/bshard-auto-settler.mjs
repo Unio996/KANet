@@ -19,6 +19,7 @@
 import { getMarketBets } from '../lib/pool-bettor-sides-query.mjs';
 import { _shard9PhantomExcludeFor } from './bshard-close-voter.js';
 import { computePariMutuelPayout } from '../lib/pool-shard-settle.mjs';
+import { deriveRoleFeeLeaves } from '../lib/fee-split.mjs';
 import { payoutRoot as buildPayoutRoot, payoutLeaf, merkleProof, climbProof } from '../lib/pool-payout-root.mjs';
 import { deriveCommitteeSeed, selectCommittee } from './pool-committee-sampler.mjs';
 import { compilePayoutShardRedeem, REORG_SAFE_MIN_DEPTH } from '../lib/pool-shard-register.mjs';
@@ -76,12 +77,15 @@ export async function computeSettlePlan(marketId, ctx) {
   const winDir = await ctx.judgeWinDir(market, bets);
   if (winDir !== 0 && winDir !== 1) return { ok: false, reason: `judgeLine winDir 无效: ${winDir}`, isBshard };
 
-  // 3. payoutRoot (driver re-derive·命门)
-  const pm = computePariMutuelPayout({ bettors: bets.map(b => ({ pk: b.pk, stake: b.stake, direction: b.direction })), winningDirection: winDir });
-  if (pm.degenerate) return { ok: false, reason: 'degenerate (无 winning side) → refund 判定·别误退/strand', isBshard, degenerate: true };
-  const payoutRootHex = buildPayoutRoot(pm.payoutLeaves).toString('hex');
+  // 2b. 🔴 degenerate 前置直判(B线落2 NWT P2, 2026-07-12): 从 bets+winDir 直判, 必须发生在 selectCommittee
+  //   之前——步骤对调(fee 叶需要 committeePks)后, 单边盘若 members 除 exclude 后不够 COMMITTEE_SIZE,
+  //   selectCommittee 会先 throw, 本该 refund 的盘变 stuck-throw。直判不需要 pm 不需要委员。
+  if (!bets.some(b => Number(b.direction) === winDir)) {
+    return { ok: false, reason: 'degenerate (无 winning side) → refund 判定·别误退/strand', isBshard, degenerate: true };
+  }
 
-  // 4. committee VRF (确定性·excludePks 含 bettor)
+  // 3(原4). committee VRF (确定性·excludePks 含 bettor)——B线落2 与 payout 对调: fee 叶派生需要 committeePks。
+  //   对调安全前提(NWT 注4a CONFIRMED): seed/members/excludePks 无一输入依赖 payout 输出。
   const poolMerkleRoot = market.pool_merkle_root;
   const endBlockHash = await ctx.endBlockHash(Number(market.deadline_daa));
   // 🔴 determinism: poolMembers 必 pin 到 deadline_daa snapshot (oracle stakes 随时间变·同 root 多 snapshot 不同 stake
@@ -100,6 +104,18 @@ export async function computeSettlePlan(marketId, ctx) {
     const idx = tree.sortedPks.indexOf(pk);
     return { pk_hex: pk, idx, siblings_hex: getPoolMerkleProof(tree, idx).map(b => b.toString('hex')) };
   });
+
+  // 4(原3). payoutRoot (driver re-derive·命门)——B线落2: fee_rules 市场从 committed 规则派生 fee 叶
+  //   (组件单源 deriveRoleFeeLeaves, 委员集=刚选出的 asc; interim 规则委员叶 bps=0 天然零叶)。
+  //   fee_rules NULL(全部存量+zk 市场) → feeLeaves=[] → computePariMutuelPayout 行为与改前字节不动。
+  //   pool 基数=V1 口径 Σ注(poolSompi, 与委员 enforce 同源同基数; V2 的 consolidatedPool 含 seed 口径不适用)。
+  let feeLeaves = [];
+  if (market.fee_rules) {
+    ({ feeLeaves } = deriveRoleFeeLeaves(JSON.parse(market.fee_rules), poolSompi, { committeePks: asc }));
+  }
+  const pm = computePariMutuelPayout({ bettors: bets.map(b => ({ pk: b.pk, stake: b.stake, direction: b.direction })), winningDirection: winDir, feeLeaves });
+  if (pm.degenerate) return { ok: false, reason: 'degenerate (无 winning side) → refund 判定·别误退/strand', isBshard, degenerate: true };
+  const payoutRootHex = buildPayoutRoot(pm.payoutLeaves).toString('hex');
 
   // 5. predicted closed-PS 地址 (driver enforce 的应锚地址·= 今晚 pzmm5hg7 predict)
   const psRow = db.prepare('SELECT pool_merkle_root, predicate_commit FROM payout_shards WHERE logical_market_id = ?').get(marketId);
@@ -154,7 +170,15 @@ export function deriveResumePlanFromEvidence(marketId, ctx) {
   const { bets, betCount, poolSompi, isBshard } = getMarketBets(marketId, db, _shard9PhantomExcludeFor(marketId));
   if (!isBshard || betCount === 0) return { ok: false, reason: `resume 场景下 bets 异常(isBshard=${isBshard}, betCount=${betCount}) — 拒绝, 回退 computeSettlePlan 走原路径` };
 
-  const pm = computePariMutuelPayout({ bettors: bets.map(b => ({ pk: b.pk, stake: b.stake, direction: b.direction })), winningDirection: evidence.win_direction });
+  // B线落2: fee_rules 市场 resume 重算同样带 fee 叶(否则重算 root 必不吻合→永远 fail-closed 回退=fee 市场
+  //   resume 结构性失效, 同桶A win_direction 缺失族)。committeePks 传 []——interim 规则委员叶 bps=0 不受影响;
+  //   将来若有委员 bps>0 的规则, [] 会导致 root 不吻合→fail-closed 回退 computeSettlePlan(安全非静默错)。
+  let resumeFeeLeaves = [];
+  if (market.fee_rules) {
+    try { ({ feeLeaves: resumeFeeLeaves } = deriveRoleFeeLeaves(JSON.parse(market.fee_rules), poolSompi, { committeePks: [] })); }
+    catch (e) { return { ok: false, reason: `fee_rules 解析/派生失败(${e.message}) — 拒绝 resume, 回退 computeSettlePlan fail-loud` }; }
+  }
+  const pm = computePariMutuelPayout({ bettors: bets.map(b => ({ pk: b.pk, stake: b.stake, direction: b.direction })), winningDirection: evidence.win_direction, feeLeaves: resumeFeeLeaves });
   if (pm.degenerate) return { ok: false, reason: 'resume 场景下重算 degenerate — 与已落链的 close 状态矛盾, 拒绝' };
   const recomputedRootHex = buildPayoutRoot(pm.payoutLeaves).toString('hex');
   if (evidence.payout_root && recomputedRootHex !== evidence.payout_root) {

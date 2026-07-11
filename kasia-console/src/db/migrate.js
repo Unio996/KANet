@@ -5390,5 +5390,31 @@ export function runMigrations() {
     }
   }
 
+  // v184 (2026-07-12, J2, B线落2: feeRules 上链锚定, 见设计稿 docs/2026-07-12-fee-split-phase2-commit-anchor-
+  // design.md v1.2, Bettor 注1-4+NWT P1-P3 折入, 双审 GREEN): pool_markets.fee_rules 新列——市场建单时的分润
+  // 规则全文 JSON(canonical 化前原始结构含 schema_v), 委员 settle 时对全文 canonicalizeFeeRules+hash == 链上
+  // commit 才继续。write-once: 独立列(不进 settler read-modify-write 的 metadata 域, xzztw 教训)+ BEFORE
+  // UPDATE trigger(Bettor 注2: 从"约定不 UPDATE"L1 升为结构性不可能 L4——已有值的行禁止改写, NULL→值 允许
+  // 一次)。老市场 fee_rules IS NULL → 全部走既有路径字节不动(生效边界=新建非-zk 市场起, 不追溯)。
+  {
+    const cols = sqlite.pragma('table_info(pool_markets)').map((c) => c.name);
+    if (!cols.includes('fee_rules')) {
+      sqlite.exec(`ALTER TABLE pool_markets ADD COLUMN fee_rules TEXT`);
+      console.log('[migrate] v184a: pool_markets.fee_rules 列(B线落2 分润规则全文, write-once).');
+    }
+    const trg = sqlite.prepare(`SELECT name FROM sqlite_master WHERE type='trigger' AND name='trg_pool_markets_fee_rules_write_once'`).get();
+    if (!trg) {
+      sqlite.exec(`
+        CREATE TRIGGER trg_pool_markets_fee_rules_write_once
+        BEFORE UPDATE OF fee_rules ON pool_markets
+        WHEN OLD.fee_rules IS NOT NULL AND (NEW.fee_rules IS NULL OR NEW.fee_rules != OLD.fee_rules)
+        BEGIN
+          SELECT RAISE(ABORT, 'fee_rules is write-once (B线落2 Bettor 注2): committed 分润规则禁止改写/清空');
+        END
+      `);
+      console.log('[migrate] v184b: fee_rules write-once trigger(Bettor 注2, L4 结构性不可变).');
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
