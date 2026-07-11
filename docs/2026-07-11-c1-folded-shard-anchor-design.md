@@ -36,7 +36,9 @@ C1现有代码里【已经存在】一个聚合层链锚(bshard-close-enforce.mj
 
 **验收(i)按Bettor钉的加一步实测**: 对28mln全部303张ticket地址跑一次真实`getUtxosByAddresses`(不经kaspa_tx_log),确认全部unspent/存在——这个实测结果本身就能证明"ticket没丢,只是查询机制查不到",是这版设计成立的关键证据,不是可选项。
 
-**(更新,J2实测中)** 抽样7个(跨shard0/2/4/6/8/9/10,含folded+shard9纠正后+未折叠)现有`checkUtxoLanded(addr,null)`(即现状kaspa_tx_log路径)**7/7命中true**,零false——数据目前**不支持**"级2-B从没被watch过"这个假设,倾向支持**方案A: 级2-B维持现状,不需要relay侧改动**。下面的"修复方向"(addr-only live查询)保留作为方案B,视全量303张的结果二选一——若扩大样本后出现任何false,则采用方案B;若303张全部命中,级2-B这一节可以整体划掉,只需在doc里留痕"已验证过、结论是不需要动"。等J2跑完全量结果,由NWT/Bettor拍二选一,我不预判。
+**(定稿,J2全量303笔扫描完成)** 全量303笔(排除11个已知phantom后)扫kaspa_tx_log: 300命中/3 miss(shard4-id32935/shard6-id33054/shard9-id33395)。对3个miss逐个做live`getUtxosByAddresses`: **全部live=1(unspent,链上实实存在)**,零"从没存在过"、零"合法但已花"的第三种case。同步核实协议层语义(J1查PoolLeaf.sil): ticket只在bettor实际claim/refund时才被spend,fold/consolidate操作完全不touch ticket UTXO——28mln当前仍在committee verifying阶段(未进入claim/payout),所以"live=false"在这个时间点没有NWT顾虑的那种歧义(不存在"合法但已花"的干扰项)。
+
+**定案: 采用方案B(relay侧加live-primary查询),不需要例外清单/双旁证框架**——303笔ticket全部链上实实存在,live-check-primary(有UTXO则PASS,live无+kaspa_tx_log都无才拒签)能100%覆盖,比方案A(维持现状)更安全(方案A对3个miss会误判BUST,不是保守是错判),比"双旁证例外清单"更简单(不需要人工逐张过目签字)。
 
 ## 落地范围
 - 改动文件①(级2-A,J1范围): `bshard-close-enforce.mjs`(verifyBettorsCompleteFromChain的级2-A循环,加`sh.status==='settling'`分支)。
