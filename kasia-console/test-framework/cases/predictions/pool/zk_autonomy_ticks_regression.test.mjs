@@ -38,9 +38,10 @@ const { sqlite } = await import('file:///D:/kanet-tn12/kasia-console/src/db/clie
 const {
   parseCloseZkV2State, nullifierBitPosition, isNullifierBitSet, spliceClaimContinuationRedeem,
 } = await import('file:///D:/kanet-tn12/kasia-console/src/lib/closezk-v2-claim-builder.mjs');
-const { advanceZkContinuationAfterSpend } = await import('file:///D:/kanet-tn12/kasia-console/src/lib/closezk-v2-mint.mjs');
+const { advanceZkContinuationAfterSpend, writeZkContinuation } = await import('file:///D:/kanet-tn12/kasia-console/src/lib/closezk-v2-mint.mjs');
+const { _splicePayoutV2CloseRedeem } = await import('file:///D:/kanet-tn12/kasia-console/src/lib/bshard-close-enforce.mjs');
 const {
-  zkCloseTickV2, claimAutonomousTick, _zkAutonomyLeasesForTest,
+  zkCloseTickV2, claimAutonomousTick, zkHandoffAutonomousTick, _zkAutonomyLeasesForTest,
 } = await import('file:///D:/kanet-tn12/kasia-console/src/lib/zk-autonomy-ticks.mjs');
 
 let failures = 0;
@@ -243,6 +244,168 @@ function buildRedeem({ attestedWinner = 0, closed, payoutRootFieldHex = ZERO32, 
   check(eventCountAfter === eventCountBefore + 1, '缺失快照写入 events 表告警(operator 可见, 非静默吞掉)');
 
   sqlite.prepare('DELETE FROM pool_markets WHERE id = ?').run(marketId);
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// §7 — zkHandoffAutonomousTick(第五件, 2026-07-11, docs/2026-07-11-zk-autonomy-fifth-piece-
+//   handoff-broadcast-design.md, Bettor+NWT 双 GREEN #gljs86.2)。PayoutShardV2(非 CloseZkV2)
+//   字节层构造, 精确对照 bshard-close-enforce.psv2-read.test.mjs 的既有 offset 表, 复用
+//   production 的 _splicePayoutV2CloseRedeem(不重新手搓 offset 逻辑)。
+// ══════════════════════════════════════════════════════════════════════════
+function pushInt64(n) {
+  const neg = n < 0n; let mag = neg ? -n : n;
+  const b = Buffer.alloc(8);
+  for (let i = 0; i < 8; i++) { b[i] = Number(mag & 0xffn); mag >>= 8n; }
+  if (neg) b[7] |= 0x80;
+  return Buffer.concat([Buffer.from([0x08]), b]);
+}
+function pushRoot32Hex(hex) { return Buffer.concat([Buffer.from([0x20]), Buffer.from(hex, 'hex')]); }
+function buildPsv2BaseRedeem(consolidatedPool) {
+  const parts = [
+    Buffer.from([0x00]),
+    pushInt64(consolidatedPool), pushInt64(0n), pushRoot32Hex(ZERO32),
+    ...Array.from({ length: 17 }, () => pushInt64(0n)),
+    pushInt64(-1n), pushInt64(0n), pushRoot32Hex(ZERO32), pushRoot32Hex(ZERO32),
+    Buffer.from('deadbeef', 'hex'),
+  ];
+  return Buffer.concat(parts).toString('hex');
+}
+function insertMarket(marketId, metadata) {
+  sqlite.prepare(`
+    INSERT INTO pool_markets (id, maker_relay_id, spine_p2sh, market_metadata_hash, deadline, protocol_version, metadata)
+    VALUES (?, 'test-relay', 'test-p2sh', 'test-hash', 9999999999, 'v0.7', ?)
+  `).run(marketId, JSON.stringify(metadata || {}));
+}
+function insertPs(marketId, redeemHex, outpoint = 'genesistxid:0') {
+  sqlite.prepare(`
+    INSERT INTO payout_shards (logical_market_id, payout_cov_id, payout_ps_addr, payout_ps_outpoint, payout_redeem_hex, pool_merkle_root, predicate_commit, created_at)
+    VALUES (?, 'test-cov', 'test-ps-addr', ?, ?, 'test-root', 'test-predicate', datetime('now'))
+  `).run(marketId, outpoint, redeemHex);
+}
+function cleanup(marketId) {
+  sqlite.prepare('DELETE FROM pool_markets WHERE id = ?').run(marketId);
+  sqlite.prepare('DELETE FROM payout_shards WHERE logical_market_id = ?').run(marketId);
+}
+
+{
+  console.log('[§7a] 扫描条件: 已 attest(closed==1)+无 zk_continuation → 命中; 已有 zk_continuation → 不命中; 未 attest(closed==0) → 不命中:');
+  const mCandidate = `zktest-handoff-cand-${randomUUID().slice(0, 8)}`;
+  const mAlreadyDone = `zktest-handoff-done-${randomUUID().slice(0, 8)}`;
+  const mNotAttested = `zktest-handoff-preattest-${randomUUID().slice(0, 8)}`;
+
+  const base = buildPsv2BaseRedeem(500n);
+  const closed1 = _splicePayoutV2CloseRedeem(base, {
+    newPayoutRootHex: ZERO32, newAttestedWinner: 1, newBetsRootHex: '11'.repeat(32), newRefundRootHex: '22'.repeat(32), newAttestedAtMs: 1783413621808,
+  });
+
+  insertMarket(mCandidate, {});
+  insertPs(mCandidate, closed1);
+
+  insertMarket(mAlreadyDone, { zk_continuation: { outpoint: { txid: 'x', index: 0 }, redeemHex: 'aa', valueSompi: '500', attestedWinner: 1, attestedAtMs: 1, proving: { status: 'pending' } } });
+  insertPs(mAlreadyDone, closed1);
+
+  insertMarket(mNotAttested, {});
+  insertPs(mNotAttested, base); // closed==0, 还没 attest
+
+  let called = [];
+  const ctxNoop = {
+    settlerRelayId: 'test-settler',
+    buildZkHandoffRequestV2: async ({ marketId }) => { called.push(marketId); return { txId: null }; },
+    checkLanded: async () => false,
+  };
+  const res = await zkHandoffAutonomousTick(ctxNoop);
+  check(called.includes(mCandidate), '已 attest+无 zk_continuation 的市场被扫描到并尝试(cooldown 首次为 0, 不拦)');
+  check(!called.includes(mAlreadyDone), '已有 zk_continuation 的市场不被当作候选(不会跟 (b)(c) 抢同一市场)');
+  check(!called.includes(mNotAttested), '还没 attest(closed==0)的市场不被当作候选');
+
+  cleanup(mCandidate); cleanup(mAlreadyDone); cleanup(mNotAttested);
+}
+
+{
+  console.log('[§7b] landed-timeout → pending marker 写入; 下轮 pending+checkLanded=true → 智能恢复(不重新广播):');
+  const marketId = `zktest-handoff-recover-${randomUUID().slice(0, 8)}`;
+  const base = buildPsv2BaseRedeem(700n);
+  const closed1 = _splicePayoutV2CloseRedeem(base, {
+    newPayoutRootHex: ZERO32, newAttestedWinner: 0, newBetsRootHex: '33'.repeat(32), newRefundRootHex: '44'.repeat(32), newAttestedAtMs: 1783413621999,
+  });
+  insertMarket(marketId, {});
+  insertPs(marketId, closed1, 'sourcetxid:0');
+
+  // 第一轮: buildZkHandoffRequestV2 模拟 landed-check 超时(返回 result 但不写 zk_continuation, 同生产函数
+  // 真实行为——本 mock 不调 writeZkContinuation, 精确复刻"超时分支不持久化"这个关键行为)。
+  const ctxTimeout = {
+    settlerRelayId: 'test-settler',
+    buildZkHandoffRequestV2: async () => ({ txId: 'handofftx1', closeZkAddress: 'closezkaddr1', closeZkRedeemHex: 'deadbeef' }),
+    checkLanded: async () => false, // 无 pending 存在, 这个 checkLanded 调不到; 首轮直接走 broadcast
+  };
+  const res1 = await zkHandoffAutonomousTick(ctxTimeout);
+  check(res1.errored >= 1, '首轮广播成功但未持久化(模拟超时), 计入 errored');
+  const row1 = sqlite.prepare('SELECT metadata FROM pool_markets WHERE id = ?').get(marketId);
+  const meta1 = JSON.parse(row1.metadata);
+  check(meta1.zk_handoff_pending?.txId === 'handofftx1', 'pending marker 写入(txId/closeZkAddress/closeZkRedeemHex), 供下轮智能恢复');
+  check(!meta1.zk_continuation, '仍无 zk_continuation(超时分支确实没有持久化, mock 精确复刻生产行为)');
+
+  // 第二轮: pending 存在 + checkLanded=true → 智能恢复, 不应该再调 buildZkHandoffRequestV2。
+  let rebroadcastCalled = false;
+  const ctxRecover = {
+    settlerRelayId: 'test-settler',
+    buildZkHandoffRequestV2: async () => { rebroadcastCalled = true; return { txId: 'should-not-happen' }; },
+    checkLanded: async (addr, txid) => addr === 'closezkaddr1' && txid === 'handofftx1',
+  };
+  const res2 = await zkHandoffAutonomousTick(ctxRecover);
+  check(res2.recovered === 1, '第二轮识别 pending+landed=true, 走智能恢复路径(recovered 计数)');
+  check(rebroadcastCalled === false, '智能恢复不重新调用 buildZkHandoffRequestV2(零新增 fee 消耗——这是 Bettor #gljs86.2 裁定②必须做的核心行为)');
+  const row2 = sqlite.prepare('SELECT metadata FROM pool_markets WHERE id = ?').get(marketId);
+  const meta2 = JSON.parse(row2.metadata);
+  check(!!meta2.zk_continuation, 'zk_continuation 补齐写入(writeZkContinuation 生效)');
+  check(meta2.zk_continuation.outpoint.txid === 'handofftx1', 'zk_continuation.outpoint.txid 用的是 pending marker 里记录的原始 txId(不是重新广播的新值)');
+  check(!meta2.zk_handoff_pending, 'pending marker 已清除');
+
+  cleanup(marketId);
+}
+
+{
+  console.log('[§7c] 冷却间隔: 上一次尝试距今 < 冷却窗口 → 跳过, 不重新广播:');
+  const marketId = `zktest-handoff-cooldown-${randomUUID().slice(0, 8)}`;
+  const base = buildPsv2BaseRedeem(300n);
+  const closed1 = _splicePayoutV2CloseRedeem(base, {
+    newPayoutRootHex: ZERO32, newAttestedWinner: 1, newBetsRootHex: '55'.repeat(32), newRefundRootHex: '66'.repeat(32), newAttestedAtMs: 1783413622000,
+  });
+  // 模拟"刚刚尝试过"(last_attempt_at = 现在), 落在冷却窗口内(§4① 默认 5 分钟量级, 未到期)。
+  insertMarket(marketId, { zk_handoff_last_attempt_at: new Date().toISOString() });
+  insertPs(marketId, closed1);
+
+  let calledDuringCooldown = false;
+  const ctx = {
+    settlerRelayId: 'test-settler',
+    buildZkHandoffRequestV2: async () => { calledDuringCooldown = true; return { txId: 'should-not-broadcast' }; },
+    checkLanded: async () => false,
+  };
+  const res = await zkHandoffAutonomousTick(ctx);
+  check(calledDuringCooldown === false, '冷却窗口内不重新调用 buildZkHandoffRequestV2');
+  check(res.cooling >= 1, '计入 cooling 计数(可观测, 非静默跳过)');
+
+  cleanup(marketId);
+}
+
+{
+  console.log('[§7d] running mutex: 市场被 (b)(c) 的 lease 占用时, zkHandoffAutonomousTick 跳过不触碰:');
+  const marketId = `zktest-handoff-lease-${randomUUID().slice(0, 8)}`;
+  const base = buildPsv2BaseRedeem(400n);
+  const closed1 = _splicePayoutV2CloseRedeem(base, {
+    newPayoutRootHex: ZERO32, newAttestedWinner: 0, newBetsRootHex: '77'.repeat(32), newRefundRootHex: '88'.repeat(32), newAttestedAtMs: 1783413622111,
+  });
+  insertMarket(marketId, {});
+  insertPs(marketId, closed1);
+
+  _zkAutonomyLeasesForTest().add(marketId);
+  let called = false;
+  const res = await zkHandoffAutonomousTick({ settlerRelayId: 't', buildZkHandoffRequestV2: async () => { called = true; return {}; }, checkLanded: async () => false });
+  check(called === false, '市场被其他 tick 的 lease 占用时, zkHandoffAutonomousTick 跳过不触碰(共享 _zkAutonomyLeases, 同 (b)(c) 互斥模式)');
+  check(res.skipped >= 1, '计入 skipped(可观测)');
+  _zkAutonomyLeasesForTest().delete(marketId);
+
+  cleanup(marketId);
 }
 
 console.log(`\n${failures === 0 ? '✅ ALL PASS' : `❌ ${failures} FAILURE(S)`}`);

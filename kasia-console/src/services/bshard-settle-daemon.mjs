@@ -28,7 +28,8 @@ import { espnSportsJudge } from '../lib/nwt-espn-sports-judge.mjs';   // NWT域�
 import { classifyFailure, shouldKeepStatus } from '../lib/bshard-failure-classifier.mjs';   // #49 模块①
 import { zkCloseTick } from '../lib/zk-close-builder.mjs';   // 2026-07-06 J2: ZK settle 生产装配, 见 docs/2026-07-06-zk-close-tick-production-wiring-design.md
 import { dispatchUnlockZkClose as _dispatchUnlockZkCloseImpl } from '../lib/zk-close-dispatch.mjs';   // 缺件③(J1tn 2026-07-08)
-import { zkCloseTickV2, claimAutonomousTick } from '../lib/zk-autonomy-ticks.mjs';   // (b)(c) 2026-07-09 J2: 见 docs/2026-07-09-zk-autonomy-three-parts-design.md, 独立于上面旧 zkCloseTick 骨架, 各自 kill switch
+import { zkCloseTickV2, claimAutonomousTick, zkHandoffAutonomousTick } from '../lib/zk-autonomy-ticks.mjs';   // (b)(c) 2026-07-09 J2: 见 docs/2026-07-09-zk-autonomy-three-parts-design.md, 独立于上面旧 zkCloseTick 骨架, 各自 kill switch; 第五件(zkHandoffAutonomousTick) 2026-07-11 见 docs/2026-07-11-zk-autonomy-fifth-piece-handoff-broadcast-design.md
+import { buildZkHandoffRequestV2 } from '../lib/bshard-close-transport.mjs';   // 第五件 ctx 注入(dispatchUnlockZkClose 同惯例, 本 daemon 不重新实现门①逻辑)
 import { randomUUID } from 'crypto';
 import { createRequire } from 'node:module';
 const _require = createRequire(import.meta.url);
@@ -706,5 +707,29 @@ export function startClaimAutonomousTickCron() {
   _claimTickTimer = setInterval(() => { claimAutonomousTick(_claimAutonomousCtx()).catch(e => log(`claimAutonomousTick uncaught: ${e.message}`)); }, ZK_CLAIM_TICK_MS);
 }
 export function stopClaimAutonomousTickCron() { if (_claimTickTimer) { clearInterval(_claimTickTimer); _claimTickTimer = null; } }
+
+// ── 第五件(zkHandoffAutonomousTick) 2026-07-11 J2: docs/2026-07-11-zk-autonomy-fifth-piece-
+// handoff-broadcast-design.md(Bettor+NWT 双 GREEN #gljs86.2)。同 (b)(c) 风格: 独立 tick + 独立
+// kill switch(默认 OFF, 开关=配置变更, 走重启窗+ledger记账+Bettor/NWT双签)、独立 timer。
+const ZK_HANDOFF_TICK_ENABLED = process.env.ZK_HANDOFF_TICK_ENABLED === '1';
+const ZK_HANDOFF_TICK_MS = parseInt(process.env.ZK_HANDOFF_TICK_MS, 10) || 30000;
+
+function _zkHandoffTickCtx() {
+  return {
+    settlerRelayId: ZK_SETTLER_RELAY_ID,
+    buildZkHandoffRequestV2: ({ marketId, settlerRelayId }) => buildZkHandoffRequestV2(marketId, { settlerRelayId, dryRun: false }),
+    checkLanded: _checkLandedViaRelay,
+  };
+}
+
+let _zkHandoffTickTimer = null;
+export function startZkHandoffAutonomousTickCron() {
+  if (!ZK_HANDOFF_TICK_ENABLED) { log('zkHandoffAutonomousTick disabled (ZK_HANDOFF_TICK_ENABLED!=1)·not starting'); return; }
+  if (_zkHandoffTickTimer) return;
+  if (!ZK_SETTLER_RELAY_ID) { log('zkHandoffAutonomousTick NOT starting — BSHARD_SETTLER_RELAY_ID unset'); return; }
+  log(`zkHandoffAutonomousTick starting·tick=${ZK_HANDOFF_TICK_MS}ms`);
+  _zkHandoffTickTimer = setInterval(() => { zkHandoffAutonomousTick(_zkHandoffTickCtx()).catch(e => log(`zkHandoffAutonomousTick uncaught: ${e.message}`)); }, ZK_HANDOFF_TICK_MS);
+}
+export function stopZkHandoffAutonomousTickCron() { if (_zkHandoffTickTimer) { clearInterval(_zkHandoffTickTimer); _zkHandoffTickTimer = null; } }
 
 export { selectRipeMarkets, settleOneMarket, judgeWinDir, buildCtx, consolidateAndBuildPsState, ensureReady, TRANSIENT_RE, _umaBackoffAllowsRetryNow, scheduleUmaRejudge, UMA_REJUDGE_BACKOFF_TABLE, UMA_GENUINE_TIMEOUT_HOURS };

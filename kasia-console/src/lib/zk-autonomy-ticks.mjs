@@ -18,7 +18,8 @@ import {
   spliceClaimContinuationRedeem, isNullifierBitSet,
 } from './closezk-v2-claim-builder.mjs';
 import { computePariMutuelPayout } from './pool-shard-settle.mjs';
-import { advanceZkContinuationAfterSpend } from './closezk-v2-mint.mjs';
+import { advanceZkContinuationAfterSpend, writeZkContinuation } from './closezk-v2-mint.mjs';
+import { readPayoutShardV2AttestedState } from './bshard-close-enforce.mjs';
 import { getMarketBets } from './pool-bettor-sides-query.mjs';
 import { deriveCloseFeeLeaves } from '../services/bshard-close-voter.js';
 import { randomUUID } from 'crypto';
@@ -218,6 +219,115 @@ export async function claimAutonomousTick(ctx) {
     if (claimed || errored) log(`tick: ${candidates.length} candidate(s) | claimed=${claimed} notMine=${notMine} skipped=${skipped} errored=${errored}`);
     return { ok: true, candidates: candidates.length, claimed, notMine, skipped, errored };
   } finally { _claimTickRunning = false; }
+}
+
+// ── (fifth piece, 2026-07-11) zkHandoffAutonomousTick ──
+// 设计: docs/2026-07-11-zk-autonomy-fifth-piece-handoff-broadcast-design.md
+// (Bettor 方向审+NWT 红队双 GREEN #gljs86.2)。自治链最后一格: attest landed 后自动广播门①
+// (buildZkHandoffRequestV2), 不再需要人工 POST /api/admin/pool/zk-handoff-v2。
+//
+// ctx = { buildZkHandoffRequestV2({marketId, settlerRelayId}) → 同 bshard-close-transport.mjs
+//         buildZkHandoffRequestV2 的返回值(不在本文件重新实现任何 relay/kaspa-wasm 逻辑, 同
+//         dispatchUnlockZkClose 惯例注入), checkLanded(address,txid,minDepth), settlerRelayId }
+
+const HANDOFF_COOLDOWN_MS = Number(process.env.ZK_HANDOFF_TICK_COOLDOWN_MS || 300_000); // §4① 5min 量级
+
+function _scanHandoffCandidates() {
+  const rows = sqlite.prepare(`
+    SELECT pm.id as marketId, ps.payout_redeem_hex as redeemHex, pm.metadata as metadata
+    FROM payout_shards ps JOIN pool_markets pm ON pm.id = ps.logical_market_id
+  `).all();
+  const out = [];
+  for (const row of rows) {
+    let meta; try { meta = JSON.parse(row.metadata || '{}'); } catch { continue; }
+    if (meta.zk_continuation) continue; // 已经 handoff 过(或在 (b)(c) 管辖态), 不是本 tick 候选
+    try { readPayoutShardV2AttestedState(row.redeemHex); }
+    catch { continue; } // 非 closed==1(还没 attest, 或 redeem 非法) — 跳过, 不是错误
+    out.push({ marketId: row.marketId, meta });
+  }
+  return out;
+}
+
+function _writeMarketMeta(marketId, mutator) {
+  const row = sqlite.prepare('SELECT metadata FROM pool_markets WHERE id = ?').get(marketId);
+  let meta; try { meta = JSON.parse(row?.metadata || '{}'); } catch { meta = {}; }
+  mutator(meta);
+  sqlite.prepare('UPDATE pool_markets SET metadata = ? WHERE id = ?').run(JSON.stringify(meta), marketId);
+}
+function _setHandoffPending(marketId, pending) { _writeMarketMeta(marketId, (m) => { m.zk_handoff_pending = pending; }); }
+function _clearHandoffPending(marketId) { _writeMarketMeta(marketId, (m) => { delete m.zk_handoff_pending; }); }
+function _markHandoffAttempt(marketId) { _writeMarketMeta(marketId, (m) => { m.zk_handoff_last_attempt_at = new Date().toISOString(); }); }
+function _hasZkContinuationNow(marketId) {
+  const row = sqlite.prepare('SELECT metadata FROM pool_markets WHERE id = ?').get(marketId);
+  try { return !!JSON.parse(row?.metadata || '{}').zk_continuation; } catch { return false; }
+}
+
+let _zkHandoffTickRunning = false;
+export async function zkHandoffAutonomousTick(ctx) {
+  if (_zkHandoffTickRunning) return { skipped: true };
+  _zkHandoffTickRunning = true;
+  try {
+    const candidates = _scanHandoffCandidates();
+    let dispatched = 0, recovered = 0, cooling = 0, skipped = 0, errored = 0;
+    for (const { marketId, meta } of candidates) {
+      if (_zkAutonomyLeases.has(marketId)) { skipped++; continue; }
+      _zkAutonomyLeases.add(marketId);
+      try {
+        // §4②(mandatory, Bettor #gljs86.2 推演): pending marker 存在 → 先做零成本的 landed-check,
+        // 不受冷却限制(这一步不广播不花钱)——不做这步的话, "真落链但轮询窗口错过"的市场会永久死锁
+        // (每轮都拿已花 outpoint 建新 tx 永远撞 UTXO-not-found), 不是"安全空转"。
+        const pending = meta.zk_handoff_pending;
+        if (pending?.txId) {
+          const landedOk = await ctx.checkLanded(pending.closeZkAddress, pending.txId, 20);
+          if (landedOk) {
+            // 智能恢复: 上次广播其实成功了, 只是轮询窗口内没等到——现读 PS(同 buildZkHandoffRequestV2
+            // 本身用的同一份 readPayoutShardV2AttestedState, 不缓存不透传旧值)补齐 writeZkContinuation,
+            // 不重新广播(零新增 fee 消耗)。
+            const row = sqlite.prepare('SELECT payout_redeem_hex, payout_ps_outpoint FROM payout_shards WHERE logical_market_id = ?').get(marketId);
+            let state;
+            try { state = readPayoutShardV2AttestedState(row.payout_redeem_hex); }
+            catch (e) { errored++; _writeZkAutonomyErrorEvent('zkHandoffTick_recover_state', marketId, e.message); continue; }
+            const [psTx] = String(row.payout_ps_outpoint).split(':');
+            writeZkContinuation(marketId, {
+              outpointTxid: pending.txId, outpointIndex: 0, redeemHex: pending.closeZkRedeemHex,
+              valueSompi: state.consolidatedPool, attestedWinner: state.attestedWinner, attestedAtMs: state.attestedAtMs,
+              sourceCloseAttestTxid: psTx, sourceZkHandoffTxid: pending.txId,
+            });
+            _clearHandoffPending(marketId);
+            recovered++;
+            log(`✅ market=${marketId.slice(-8)} zk_handoff 智能恢复(上次广播 txId=${pending.txId} 确实已 landed, 补齐持久化, 零新增广播)`);
+            continue;
+          }
+          _clearHandoffPending(marketId); // 没 landed — 清 pending, 往下走正常冷却判断决定要不要重新广播。
+        }
+
+        // §4①: 上次尝试距今 < 冷却间隔 → 跳过, 不烧新的一笔 fee 转账(纯限速阀门, 非 resume-marker)。
+        const lastAttempt = meta.zk_handoff_last_attempt_at ? new Date(meta.zk_handoff_last_attempt_at).getTime() : 0;
+        if (Date.now() - lastAttempt < HANDOFF_COOLDOWN_MS) { cooling++; continue; }
+
+        _markHandoffAttempt(marketId);
+        let result;
+        try { result = await ctx.buildZkHandoffRequestV2({ marketId, settlerRelayId: ctx.settlerRelayId }); }
+        catch (e) { errored++; _writeZkAutonomyErrorEvent('zkHandoffTick_broadcast', marketId, e.message); continue; }
+
+        if (!result?.txId) { errored++; _writeZkAutonomyErrorEvent('zkHandoffTick_no_txid', marketId, `no txId in response: ${JSON.stringify(result).slice(0, 200)}`); continue; }
+        if (_hasZkContinuationNow(marketId)) {
+          dispatched++;
+          log(`✅ market=${marketId.slice(-8)} zk_handoff dispatched+landed txId=${result.txId}`);
+        } else {
+          // buildZkHandoffRequestV2 内部的 landed-check 超时分支(函数本身不区分成功/超时都 return
+          // 同一个 result——这里用 zk_continuation 有没有被写入来判别) — 存 pending marker 供下轮智能恢复。
+          _setHandoffPending(marketId, { txId: result.txId, closeZkAddress: result.closeZkAddress, closeZkRedeemHex: result.closeZkRedeemHex });
+          errored++;
+          _writeZkAutonomyErrorEvent('zkHandoffTick_landed_timeout', marketId, `广播 OK(txId=${result.txId}) 但 landed 确认超时 — 已存 pending marker, 下轮先智能恢复检查`);
+        }
+      } catch (e) {
+        errored++; _writeZkAutonomyErrorEvent('zkHandoffTick', marketId, e.message);
+      } finally { _zkAutonomyLeases.delete(marketId); }
+    }
+    if (dispatched || recovered || errored) log(`tick: ${candidates.length} candidate(s) | dispatched=${dispatched} recovered=${recovered} cooling=${cooling} skipped=${skipped} errored=${errored}`);
+    return { ok: true, candidates: candidates.length, dispatched, recovered, cooling, skipped, errored };
+  } finally { _zkHandoffTickRunning = false; }
 }
 
 // 测试专用(仅供 offline test 断言 mutex 状态, 不供生产代码调用)。
