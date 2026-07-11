@@ -9,7 +9,9 @@
 // completely unaffected (regression: their per-shard anchor check must still fire and can still BUST).
 import assert from 'node:assert/strict';
 
-const { verifyBettorsCompleteFromChain } = await import('file:///D:/kanet/KANet/kasia-console/src/lib/bshard-close-enforce.mjs');
+// relative import (not a hardcoded absolute path — each agent's checkout lives at a different
+// local path, e.g. D:/kanet/KANet vs D:/kanet-tn12; NWT caught this on 99b224ee, fixed here).
+const { verifyBettorsCompleteFromChain } = await import('../../../../src/lib/bshard-close-enforce.mjs');
 
 let failures = 0;
 function check(cond, msg) { if (!cond) { failures++; console.error(`❌ ${msg}`); } else { console.log(`✅ ${msg}`); } }
