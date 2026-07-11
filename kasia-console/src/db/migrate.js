@@ -5361,5 +5361,34 @@ export function runMigrations() {
     }
   }
 
+  // v183 (2026-07-11, J2, MAX_WALK 老盘卡死根治: 见设计稿 docs/2026-07-08-backward-walk-daa-index-design.md,
+  // J1 设计+NWT 红队 GREEN+Bettor GO #g4mz41.2, 28mln 卡在 getBlockAtDaa backward walk gap=637115 > MAX_WALK
+  // 250000 触发): 持久化 SPC(selected-parent-chain)块 DAA→hash 索引, backfill 一次性摊销覆盖老市场的
+  // deadline_daa, getBlockAtDaa 查表优先(O(log n)), 查不到才退化现有 forward-ring/backward-walk(逐字节不动)。
+  // §2.5 索引空洞防线: spc_daa_index_coverage 只信"确认连续覆盖"区间内的查表结果, 落洞老实退化, 无半信态。
+  {
+    const tables = sqlite.pragma('table_list').map((t) => t.name);
+    if (!tables.includes('spc_daa_index')) {
+      sqlite.exec(`
+        CREATE TABLE spc_daa_index (
+          daa_score INTEGER PRIMARY KEY,
+          block_hash TEXT NOT NULL,
+          timestamp_ms INTEGER NOT NULL
+        )
+      `);
+      console.log('[migrate] v183a: spc_daa_index 建表(SPC块DAA→hash索引, MAX_WALK老盘根治).');
+    }
+    if (!tables.includes('spc_daa_index_coverage')) {
+      sqlite.exec(`
+        CREATE TABLE spc_daa_index_coverage (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          start_daa INTEGER NOT NULL,
+          end_daa INTEGER NOT NULL
+        )
+      `);
+      console.log('[migrate] v183b: spc_daa_index_coverage 建表(索引空洞防线, §2.5).');
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }

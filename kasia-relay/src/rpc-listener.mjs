@@ -158,6 +158,25 @@ export async function getBlockAtDaa(deadlineDaa) {
   // :3300) + J2 r667 (:3200 backward == J1 forward 4/4 cross-node). endBlock feeds committee_pk_hash
   // (cross-node consensus), so equivalence is mandatory before switching. 69-93x faster at the
   // danger zone. Backward walk retained as fallback for deadlines older than the ring window (rare).
+  // v183 index-lookup layer (backward-walk-daa-index-design.md, J1设计/NWT红队GREEN/Bettor GO):
+  // 插在现有 forward ring buffer 之前, 老盘(deadline 落后 tip 超 MAX_WALK 的 backlog)一次 O(1) 查表命中。
+  // 只信 console 侧"确认连续覆盖"区间内的查表结果(§2.5 空洞防线), 未覆盖/relay 不可达/任何失败 →
+  // 原样落到下面现有的 forward-ring/backward-walk 逻辑, 零改动。
+  if (CONSOLE_URL) {
+    try {
+      const res = await fetch(`${CONSOLE_URL}/api/chain/spc-daa-index?daa=${deadlineDaa}`, {
+        signal: AbortSignal.timeout(3000),
+      });
+      if (res.ok) {
+        const idx = await res.json();
+        if (idx?.covered && idx.hash) {
+          return { hash: idx.hash, daaScore: idx.daaScore, timestamp_ms: idx.timestamp_ms, isChainBlock: true };
+        }
+      }
+    } catch (e) {
+      log(`getBlockAtDaa index-lookup failed (${e.message}); falling back to forward-ring/backward-walk`);
+    }
+  }
   let anchor = null; // ring block with highest daa strictly below deadlineDaa
   for (const b of _recentBlocks) {
     if (b.daaScore < deadlineDaa && (!anchor || b.daaScore > anchor.daaScore)) anchor = b;
