@@ -1,8 +1,27 @@
 # 模块化分润组件 spec —— 即插即用 · 行业无关 · 先替代现有硬编分润
 
-**作者**: Bettor (架构) · **日期**: 2026-06-22 · **状态**: 草案, 待全 vantage 对抗审
+**作者**: Bettor (架构) · **日期**: 2026-06-22 · **v1.1 更新**: 2026-07-11 · **状态**: v1.1 重启对抗审(Owner 7/11 直令"都搞,并行"),NWT 红队在途
 **Owner 钦定**: 分润模型强化成【第三方独立组件】, 模块化 + 即插即用, **先替代我们自己目前的分润组件**(= 系统优化). 任何现实行业可用。
 **配**: [[project-economic-split-real-northstar]] · [[project-fee-model-adversarial-hardened-design]] · [[feedback-ss-attack-review-verify-value-source]]
+
+---
+
+## v1.1 现实对齐(2026-07-11 Bettor·6/22 后世界变了,落地条件反而更好)
+
+**A. D-008 单源派生已落码 = 迁移锚点现成**(2026-07-09,commit 15cb070d):`deriveSettlementFeeLeaves` 单源函数+**四侧接线**(propose/enqueue/committee-voter/guest-input)+lint R-FEE-LEAVES-BYPASS 旁路封死已在生产。§5 迁移路径更新:**组件替代的目标就是这一个函数**(6/22 时还是"三处调用点"的散状,现在是单一 chokepoint)——`feeSplit()` 落码后只需替换 deriveSettlementFeeLeaves 内部实现,四侧接线与 lint 门自动继承,迁移面比 6/22 设想小一个量级。**反 vacuous 铁律随之继承**:单源的是派生算法,值源四侧各自独立链读禁透传(D-008 原文)。
+
+**B. 实测费语义现状(2026-07-11 实弹数据,设计必须如实面对的双轨)**:
+- **V2/ZK 线**: fee 真实生效——bvh2c broker 实收 5,130,000 sompi(claim leaf)、tyr91/1dv70 各 6,080,000,按市场 `broker_fee_pct`(bps)池× 费率,claim tx 链上可验(zk_escape_audit 记录 claim txid)。
+- **V1 委员线**: **fee=0**——28mln(17,613.9KAS 史上最大盘)结算实测 Σ154 赢家实付=全部池值,零 broker 费。根因:`computeSettlePlan`(bshard-auto-settler.mjs:76)调 `computePariMutuelPayout` 不传 feeLeaves/feeBps,V1 委员 enforce"字节不动"口径一致,双侧一致所以不是 bug 是**未实现**。
+- **∴ 本组件落地即顺带统一双轨**:prediction 预设按 fee-on-total LOCKED 模型(见 C)接入 V1+V2 两线,"V1 broker 零收入"这个 broker 招募硬伤一并修复(Owner 6/13: "没人当 broker 这产品只有死")。V1 接入必须走独立回归(§5 铁律 4 的 byte-equal 检验对 V1 改为"新费下守恒精确+委员双侧同步升级",不是 byte-equal——V1 现状是 0 费,加费必然变 root,**委员 enforce 与 driver 必须同一 commit 升级否则 BUST**,同今晚 driver/committee 排除漏配家族教训)。
+- V1 语义变更(0 费→有费)= 经济政策变更,**费率生效边界必须"新建市场起"**(存量在飞盘保持建单时承诺,规则链锚精神——建单时无费承诺的盘不得追溯收费)。
+
+**C. 费率模型已 LOCKED**: fee-on-total(Owner 6/13 r791 终裁,见 `docs/iteration/fee-model-detailed-spec.md`)——prediction 预设的 bps 结构照 §2/§4,总抽成基数=总押注额,settle-time 计算。
+
+**D. 新增对抗硬化点(今晚战役的直接输入,并入 §6)**:
+6. **消费点枚举铁律**: 任何"改分润读/算路径"的落码,必须枚举**全部**消费点逐一接线并 NWT 全库扫尽确认无第 N+1 处——今晚同形状漏配(driver/committee/snapshot/enforce fallback)一夜炸了五处,家族性风险最高。
+7. **终态语义**: 费用未实际转移不得记"已分润"(NO TX NO STATE;今晚 `pruned_expired_waived` 命名判例)。
+8. **跨节点确定性**: feeRules 的任何判别值禁本地 id/本地时间,全部链锚(side_lock_tx 判别式判例)。
 
 ---
 
