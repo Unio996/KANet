@@ -27,6 +27,7 @@
 
 - 存 feeRules **全文 JSON**(canonical 化前的原始结构,含 schema_v)。委员 settle 时对全文重新 `canonicalizeFeeRules()+hash` == 链上 commit 才继续(spec v1.2-1)。
 - **为什么独立列不进 metadata**:`pool_markets.metadata` 是 settler read-modify-write 域(xzztw 事故案例),feeRules 必须 write-once 不可变;独立列 + 不出现在任何 UPDATE 路径 = 机制上免疫覆盖。
+- **write-once 升机制(Bettor 注2 折入)**:v184 同 migration 加 SQLite trigger——`BEFORE UPDATE OF fee_rules ON pool_markets WHEN OLD.fee_rules IS NOT NULL → RAISE(ABORT)`,从"约定不 UPDATE"(L1)升为结构性不可能(L4)。
 - 老市场 `fee_rules IS NULL` → 全部走现状路径**字节不动**(生效边界=新建市场起,spec v1.1-B 铁律:建单时无费承诺的盘不得追溯收费)。
 
 ### 2.2 commit v2:computeMarketCommit 扩 preimage(新市场)
@@ -40,9 +41,15 @@ commit_v2 = blake2b(canonicalPredicate({ fee_rules_commit: computeFeeRulesCommit
 
 ### 2.3 V1 线接费(新建非-zk 市场)
 
-- create(pool.js 三处烤点):非 zk_native 市场从 `FEE_PRESETS.prediction` 注入 broker/introducer 地址构造 feeRules → 存列 + 烤 commit v2。
+- create(pool.js 三处烤点):非 zk_native 市场从 `FEE_PRESETS.prediction` 注入 broker/introducer 地址构造 feeRules → **烤 commit 前必跑 `validateFeeRules`**(NWT 落1 F2 闭合:create API 收 0-9999 bps 与组件 5000 上限错位,建单时即 fail-loud,消灭"settle 时才炸"的延迟雷)→ 存列 + 烤 commit v2。V1 注入的 rules 中委员/节点叶 **bps=0 + 代码注释写明"挂 D-008 政策卡"**(Bettor 注3:防将来当 bug;份额表列 Owner 单点上报清单)。
 - driver(computeSettlePlan):`fee_rules` 非空 → **先选委员再算 payout**(现顺序是 3-payout→4-committee,委员派生 fee 叶需要 committeePks,顺序对调;委员选择本身零输入变化)→ `deriveRoleFeeLeaves(rules, poolSompi, {committeePks})` → `computePariMutuelPayout({..., feeLeaves})`。
 - 委员(enforceCloseAttest):同 commit 内加同款 re-derive(委员自己派生自己的 committee 集,既有确定性)。
+- **🔴 委员侧 feeRules 全文来源 = attest 请求载荷携带(Bettor 注1 折入,2026-07-12)**:同 predicate 先例
+  (caller-fed + 链上 commit hash-bind = 安全,`bshard-close-enforce.mjs:272-292` 现状即此形)。**禁走委员本地
+  DB 读**——`fee_rules` 新列不跨节点同步,:3300 委员结构性 NULL → 判别式回落 v1 commit → 所有新 V1 市场必
+  BUST(fail-closed 变 fail-always)。判别式(§2.2)在委员侧相应改为**载荷有无 feeRules 字段**:载荷带 →
+  验 v2 commit;载荷不带但链上是 v2 commit → hash 不符 BUST(settler 隐瞒规则也撞墙,双向论证不变)。
+  NWT 红队必核此通道。
 - **🔴 driver + 委员必须同一 commit 落码同一重启窗装载**(spec v1.1-B:否则 root 分叉必 BUST;7/11 排除漏配五处同族教训)。
 - **消费点枚举(spec v1.1-D6 铁律)**:落码时 J2 全库扫 `computePariMutuelPayout(` 全部调用点逐一核对哪些属 V1 结算路径,NWT 独立扫尽确认无第 N+1 处——本设计先挂占位,落码 diff 里出全清单。
 
