@@ -67,6 +67,14 @@ close 签名请求）**，让 ZK-native 市场从 deadline 到 attest 全程零�
   资金操作（`publishCloseRequestV2` 只是写 DB 供委员 daemon 后续去读，不碰链），**不需要第五件
   那种 pending-marker 智能恢复机制**——失败了直接下次冷却期满重来即可，无"已经真实广播成功"
   的中间态需要追踪。
+- **超长卡死告警（Bettor n1，#gotdnc.2，"stuck forever" 家族最后一个已知窝点）**：纯冷却+重试
+  只解决"会自愈"的失败，不解决"持续失败很久都没人注意到"——市场若超过一个长阈值（如 2 小时，
+  同 V1 `UMA_GENUINE_TIMEOUT_HOURS` 精神但不是同一份代码）仍然停留在"候选但从未成功 propose"
+  的态，本 tick 需要额外发一条**高可见度**（比日常 debug log 更显眼，同 events 表但 level 用
+  `'warn'`/`'critical'`，供频道/监控抓取）的告警——**只是告警，不改变市场状态**（不误标任何
+  终态，不猜是不是该退款，人工判断介入之前市场原样待着）。判断"超过阈值"需要一个"这个市场第一次
+  成为候选是什么时候"的锚点——用 `market.deadline_daa` 对应的实际时间（同 `attestedAtMs` 类推导
+  方式，或直接用 `deadline`（Unix 秒字段，市场已有）算距今小时数，不新增字段）。
 
 ## 4. 验收
 
