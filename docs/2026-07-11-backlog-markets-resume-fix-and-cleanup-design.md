@@ -87,7 +87,20 @@ protocol_status='settled_partial_claims') AND 非 zk_native`）命中 174 个市
 - fail-closed 而非 fail-open：重算不一致时退回原路径撞 MAX_WALK 失败（今天已知、可见、可告警的失败
   模式），不是"将就用一个可能错的 resume plan 继续 claim 真钱"。
 
-## 2. 桶 B（115）：终局批量退款——判据死线
+## 2. 桶 B（执行时现测=127，非固定115）：终局批量豁免——判据死线
+
+> **执行结果更新（#gk8mq3.2，Bettor 终裁，取代本节原"批量转账退款"设计）**：dry-run 现测命中 127
+> 个市场（vs NWT ~25 分钟前的 115——差值=剪裁点持续推进，符合下方"活值执行时重测"的设计预期），
+> **distinct bettor pk 只有 10 个（NWT 全量核实为 11 个），三方独立身份核实（Bettor 逐 pk 推地址核
+> `relay_nodes` 表 / NWT 全量核 / KANet-UI 跟 28mln 已知 bettor 集合交叉比对）全部映射到已知内部 bot
+> 身份（`AutoBetter-1~8`/`HouseAgent`/`UnderdogBot`/`tester-1`），零 `tg_custodial_wallets` 匹配，零
+> UNRESOLVED——**127 个市场全部是内部测试数据，无真实用户资金**。**终裁：零转账，纯状态终结**（bot
+> 钱=庄家自己的钱，127 盘互转只增加 churn 和审计噪音，不解决任何问题）。终态标名 **`pruned_expired_waived`**
+> （NWT 边界②：不带 `refunded` 字样——没有转账发生就不能叫"退款"，否则违反 NO TX NO STATE 语义；
+> 名字本身可再议，语义边界不可议）。maker spine（127/127 仍 `covenant_locked`，Σ≈12700 KAS）维持
+> 现状不动，收回走独立 escape 设计卡（同 §1 后的 maker spine 结论）。下方原设计（真实批量转账退款）
+> 保留存档，作为**若未来真撞到桶 B 里混有真实用户资金时**的处置模板——本次因全员内部 bot 身份坐实
+> 而未启用。
 
 **判据**：`protocol_status IN ('pending_bettors','verifying') AND settle_txid IS NULL`（从未 attest）
 **且** `deadline_daa < 剪裁点`（执行时现测：`getBlockDagInfo().pruningPointHash` 对应块的
