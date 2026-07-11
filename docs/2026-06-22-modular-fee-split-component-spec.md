@@ -67,6 +67,12 @@ feeSplit(feeRules, poolSompi, winners) → { feeLeaves[], payoutLeaves[] }
 - settle: 委员从 **committed feeRules** re-derive feeLeaves + payoutRoot, `claimed != re-derived → BUST`。
 - ∴ settler 改任何 bps/地址 → commit 不符 → 委员拒签。**可配 + trustless 同时成立**。
 
+## 3.1 v1.2 机制钉死(2026-07-11 NWT 红队三点,全采纳)
+
+1. **commit 形态澄清(答 NWT 结构问)**: feeRules **hash-commit**——`commit = blake2b(canonicalize(feeRules))` 固定 32 字节,烤 redeem 固定 offset(与 predicate_commit 同模式)。roles 数量可变不影响 commit 长度;settle 时委员对 DB 存的 feeRules 全文重新 canonicalize+hash,== 链上 commit 才继续(原文"烤进 redeem"未写死 hash 形态=表述债,此处钉死)。
+2. **canonicalize = 单一共享函数,非"两处各自实现同一规范"**: create-time commit 与 settle-time re-derive **必须 import 同一个 `canonicalizeFeeRules()`**(嵌套 roles 数组按 role name 字典序+顶层 sorted-key+固定字段序,全部在该函数内实现)。两处独立实现同一规范=今晚 driver/committee 四处漏配家族的根,机制上不给复发机会(lint 可加 R-FEERULES-CANON-BYPASS 同 D-008 旁路封死模式)。
+3. **schema 版本号进 canonicalize 载荷**: feeRules 顶层必含 `schema_v`(int),参与 hash。委员 re-derive 前先检查 `schema_v` 是否在本节点支持集——不支持则报**可辨识的版本不符错误**(非静默算错非裸 BUST);版本变更天然改变 commit=旧新版本物理不可混。driver/committee 同 commit 升级从"流程纪律"升为"机制保障"。
+
 ## 4. 行业预设 (证明行业无关 + 替代性)
 | 预设 | provider | facilitator | affiliate | verifier | infra |
 |---|---|---|---|---|---|
