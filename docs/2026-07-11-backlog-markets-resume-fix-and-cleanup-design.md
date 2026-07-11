@@ -68,6 +68,16 @@ protocol_status='settled_partial_claims') AND 非 zk_native`）命中 174 个市
   ——**这是本次要修的两个调用点，缺一个 29 个市场里凡是先撞 `_settleOneMarketAttempt` 那层 pre-flight
   的还是会卡住**（两处都要改，同一份判断逻辑抽成共享 helper，不写两遍）。
 
+### 纵深防御论证（Bettor n1，#gjorob.2）：resume plan 即使被污染的 evidence 误导也偷不走钱
+
+`deriveResumePlanFromEvidence` 读的是 DB 里的 `settle_evidence`（本质是"DB-sourced value"，不是链上
+现读）——但这不是一个新的信任风险面：即便这个函数被一份被污染/损坏的 evidence 误导（比如 `payout_root`
+字段被意外改写），claim 阶段的每一笔广播都必须过**链上已经 closed 的 PayoutShardV2 covenant 自己的
+`payout_root` merkle 验证**（`.sil` 的 require 条件，非本函数能绕过的东西）——claim tx 只要 leaf/proof
+跟链上 committed 的 root 对不上就会被节点拒绝。**链是终审，DB 只是"这次该算哪笔"的路由信息，不是
+授权信息**——本函数的 fail-closed 比对（§1 第 2 步）是提前拦截的优化，不是唯一防线；即使这道比对本身
+被绕过（假设性最坏情形），下游链上验证仍然挡得住任何试图 claim 错误金额/错误 leaf 的尝试。
+
 ### 边界
 
 - 不改 `computeSettlePlan` 本身一个字——它对"从未 attest 过"的市场（桶 B/C 和所有正常新市场）仍然是
@@ -88,11 +98,15 @@ protocol_status='settled_partial_claims') AND 非 zk_native`）命中 174 个市
 
 **处置**：复用 lv3rz/shard9/shard10 已验证的 `manual_recovery_refunded` 精神（同一 runbook，只是这次
 是"整个市场从未 attest 就死"而非"部分 shard phantom"）——批量退款：每个市场按 `getMarketBets` 现读
-全部 bettor（无需 winDir，无胜负判定，纯"钱原样退回"）逐笔转回对应 bettor 的托管地址，`protocol_status`
-转一个新终态标（沿用现有惯例，与 `settle_failed` 区分开——那个还留重试希望，这个已经判死；具体标名
-留给 NWT/Bettor 裁定，不在本文档抢先定，防止跟其它终态语义冲突）。**115 个市场逐个跑同一份 runbook**
-（批处理脚本，非手写 115 次），每笔转账前后核对余额，同 Martin/shard9/shard10 三次退款执行的纪律
-（三方独立核对+audit trail 进 events 表）。
+全部 bettor（无需 winDir，无胜负判定，纯"钱原样退回"）逐笔转回对应 bettor 的托管地址（**地址推导=
+pk→XOnlyPublicKey 直接推导，同 shard9 退款执行同款方法**——Bettor n3，#gjorob.2：bot 身份地址已知的
+情况下也走这条推导路径，**禁止查 display_name/托管钱包展示表**，那是给 UI 看的缓存字段，不是链锚，
+同 Martin 案"内部代号与 tg 真实身份零映射"教训的镜像——地址永远从 pk 密码学推导，不从任何展示层字段
+读）。`protocol_status` 转 **`deadline_pruned_refunded`**（Bettor n2 定名，#gjorob.2——与 `settle_failed`
+区分：那个还留重试希望，这个已经判死；**本状态是新引入值，落码时必须同步更新 `docs/DATABASE.md`**，
+CLAUDE.md 数据库修改规范硬性要求）。**115 个市场逐个跑同一份 runbook**（批处理脚本，非手写 115 次），
+每笔转账前后核对余额，同 Martin/shard9/shard10 三次退款执行的纪律（三方独立核对+audit trail 进
+events 表）。
 
 **maker_stake（spine）——退回 Bettor #gjn4kc.2 拦截，本节撤回原提议**：J2 原提议"同一份 runbook 把
 maker 当特殊 bettor 转账退回"**物理不成立**——bettor 侧 `side_lock` 早已被 sweep 回 gateway 钱包（钱
@@ -129,7 +143,10 @@ judge+attest，只是这次 `getBlockAtDaa` 能查表命中，不再撞 MAX_WALK
    fail-closed 回退（负例，防止"将就用"退化）。
 2. §1：29 个桶 A 市场里挑 1-2 个真实跑一次，daemon tick 不再抛 MAX_WALK，直接进 claim 循环续跑完成，
    J2 手动核对全链（同今晚纪律）。
-3. §2：115 个市场批量退款 runbook 先 dry-run 出全量清单（bettor+地址+金额）给 Bettor/NWT 过一遍再
-   真执行，任何一笔金额跟链上 UTXO 对不上就整体不动（fail-closed，不做部分执行）。
+3. §2：115 个市场批量退款 runbook 先 dry-run 出全量清单（bettor+地址+金额+**每盘 maker spine 链上
+   实测在哪一列**：gateway 已 sweep / covenant locked / 其他——Bettor #gjpm1m.2"链是唯一真相不凭
+   custody 推理"，spine 是否已 landed 必须逐盘链验，不能假设"maker_pk==relay 地址就是 self-transfer
+   不用管"）给 Bettor/NWT 过一遍再真执行，任何一笔金额跟链上 UTXO 对不上就整体不动（fail-closed，
+   不做部分执行）。
 4. §3：backfill 跑完后现查 `spc_daa_index_coverage` 是否真覆盖这 18 个市场的 `deadline_daa`，读回
    验证（同今晚 9b04d535 backfill 脚本尾部的 sanity check 模式）。
