@@ -423,14 +423,17 @@ export async function recaptureSideLockDaaForMarket(marketId) {
   ).all(marketId);
   if (!nullBets.length) return { recaptured: 0, remaining: 0 };
   const { captureSideLockDaa } = await import('./trade-protocol-filter.js');
-  const marketRow = sqlite.prepare('SELECT spine_p2sh FROM pool_markets WHERE id = ?').get(marketId);
+  const marketRow = sqlite.prepare('SELECT spine_p2sh, deadline_daa FROM pool_markets WHERE id = ?').get(marketId);
   const network = String(marketRow?.spine_p2sh || '').startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
+  // approxDaaHint(2026-07-12, #gry4yj.2): bet 必然发生在 deadline 之前, deadline_daa 是天然的"≥ 真实
+  // daa"上界, 喂给 captureSideLockDaa 当 backward-scan 锚点提示——查 v183 spc_daa_index 命中的话几十步
+  // 内就能找到, 不用从 tip 硬走(registration 到 recapture 之间隔多久跟这条无关)。
   const upd = sqlite.prepare('UPDATE pool_bettor_sides SET side_lock_daa = ? WHERE id = ? AND side_lock_daa IS NULL');
   let recaptured = 0;
   for (const b of nullBets) {
     let cap;
     try {
-      cap = await captureSideLockDaa({ side_p2sh: b.side_p2sh, side_lock_tx: b.side_lock_tx, stake_amount: b.stake_amount, network });
+      cap = await captureSideLockDaa({ side_p2sh: b.side_p2sh, side_lock_tx: b.side_lock_tx, stake_amount: b.stake_amount, network, approxDaaHint: marketRow?.deadline_daa });
     } catch { cap = { daa: null }; }
     if (cap && cap.daa !== null && cap.daa !== undefined) { upd.run(cap.daa, b.id); recaptured++; }
   }

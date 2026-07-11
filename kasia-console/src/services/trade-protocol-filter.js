@@ -1074,25 +1074,80 @@ const BETTOR_MIN_STAKE_POLICY_SOMPI = 100_000_000n;
  * @returns {Promise<{daa:number|null, reason:'ok'|'daa-unresolved'|'no-block-hash'|'rpc-fail: ...'}>}
  *   NEVER guesses — null over a non-canonical value.
  */
-export async function captureSideLockDaa({ side_p2sh, side_lock_tx, stake_amount, network }) {
+export async function captureSideLockDaa({ side_p2sh, side_lock_tx, stake_amount, network, approxDaaHint }) {
   const row = sqlite.prepare('SELECT block_hash FROM kaspa_tx_log WHERE tx_id = ?').get(side_lock_tx);
-  if (!row?.block_hash) return { daa: null, reason: 'no-block-hash' };
   const { getWorkingRpc } = await import('./rpc-health.js');
   const { url: rpcUrl } = await getWorkingRpc();
   if (!rpcUrl) return { daa: null, reason: 'no-rpc' };
   const { RpcClient, Encoding } = await import('kaspa-wasm');
   const rpc = new RpcClient({ url: rpcUrl, encoding: Encoding.Borsh, networkId: network });
-  let blkResp;
+
+  // 🔴 fix (2026-07-12, 第六件大考 a4343 撞出, #gry4yj.2·ESCALATIONS 已挂账缺口): kaspa_tx_log 是本地
+  // indexer, 有已知完整性缺口(reference-kaspa-tx-log-indexer-completeness-gap——同族问题今晚已在
+  // checkUtxoLanded level2-B/claim1 两处撞过)——原实现命中缺口就直接 {daa:null, reason:'no-block-hash'}
+  // 永久放弃, 无重试无退化, 是 a4343 propose 被卡住的根因。**不走"查 side_p2sh 未花费 UTXO 反推"那条
+  // 路**(2026-07-08 method switch 注释里明确记录的历史假阴性: bet 落地后可能被 register-v07 吸收进
+  // shard 聚合 leaf, UTXO 不再"未花费"——对已吸收的合法 bet 会误判查无此 tx)。改用今晚已验证的方法论:
+  // indexer 未命中时, 从一个尽量近的锚点沿 selectedParentHash 有界回走(读 block 内容, 非 UTXO 集合
+  // 状态, 不受"是否已花费"影响), 逐块核对 verboseData.transactionId 匹配 side_lock_tx。
+  //
+  // 锚点选择(复用今晚 v183 backward-walk-daa-index 基建, 同一个 DB, 不新起一套):
+  //   若调用方给了 approxDaaHint(例如市场 deadline_daa——bet 必然发生在 deadline 之前, 是天然的
+  //   "≥ 真实 daa"上界), 先查 spc_daa_index_coverage 有没有覆盖到这个区间, 有就直接从索引查表拿到
+  //   一个非常靠近的锚块 hash 开始走(几十到几百步内必中, 不看 tip 到 deadline 之间隔了多久)。
+  //   没有 hint 或索引没覆盖 → 退化到从当前 tip 走(同 §原方案), 但那样对"registration 到 recapture
+  //   之间隔了很久"的市场(今晚验证局连环修复正撞上这个)会力不从心——诚实反映在 MAX_STEPS 里, 不假装
+  //   兜得住所有情况。
+  // 实测校准(2026-07-12, a4343 现场验证): 从 v183 索引锚点(≈deadline_daa)回走到真实 bet 落链块
+  // 实测 5839 步(≈11600 DAA, ~2 DAA/步实测速率)——bet 通常在 deadline 前"一段时间"下注, 具体多久
+  // 取决于市场生命周期长度。10000 步留出安全余量(约两倍实测距离), 覆盖典型验证盘/短生命周期市场;
+  // 极端长生命周期市场若 bet 下得早、deadline 拖得晚, 仍可能落在此界外(fail-loud, 不是无界搜索)。
+  const MAX_STEPS = 10000;
+  async function _resolveStartCursor() {
+    if (approxDaaHint != null && Number.isFinite(Number(approxDaaHint))) {
+      try {
+        const cov = sqlite.prepare('SELECT block_hash FROM spc_daa_index WHERE daa_score >= ? ORDER BY daa_score ASC LIMIT 1').get(Number(approxDaaHint));
+        const covRange = sqlite.prepare('SELECT 1 FROM spc_daa_index_coverage WHERE start_daa <= ? AND end_daa >= ? LIMIT 1').get(Number(approxDaaHint), Number(approxDaaHint));
+        if (cov?.block_hash && covRange) return cov.block_hash;
+      } catch { /* spc_daa_index tables may not exist pre-v183 DBs — fall through to tip */ }
+    }
+    const info = await rpc.getBlockDagInfo();
+    return info?.sink || null;
+  }
+  async function _scanBackwardForTx() {
+    let cursor = await _resolveStartCursor();
+    if (!cursor) return null;
+    for (let i = 0; i < MAX_STEPS; i++) {
+      const blkResp = await rpc.getBlock({ hash: cursor, includeTransactions: true });
+      const blk = blkResp?.block || blkResp;
+      const txs = blk?.transactions || [];
+      const hit = txs.find(t => (t?.verboseData?.transactionId || t?.id) === side_lock_tx);
+      if (hit) return blk;
+      const sp = blk?.verboseData?.selectedParentHash;
+      if (!sp || sp === '0'.repeat(64)) return null;
+      cursor = sp;
+    }
+    return null;
+  }
+
+  let blk;
   try {
     await Promise.race([rpc.connect({}), new Promise((_, rej) => setTimeout(() => rej(new Error('RPC connect timeout')), 4000))]);
-    blkResp = await rpc.getBlock({ hash: row.block_hash, includeTransactions: false });
+    if (row?.block_hash) {
+      const blkResp = await rpc.getBlock({ hash: row.block_hash, includeTransactions: false });
+      blk = blkResp?.block || blkResp;
+    } else {
+      blk = await _scanBackwardForTx();
+      // reason 字符串保持 'no-block-hash'(向后兼容既有调用方/测试的精确匹配, 语义仍是"无法解出
+      // block hash"——只是现在多了一条 fallback 路径没找到, 不是历史那种"根本没试第二条路")。
+      if (!blk) { try { await rpc.disconnect(); } catch {} return { daa: null, reason: 'no-block-hash' }; }
+    }
   } catch (e) {
     try { await rpc.disconnect(); } catch {}
     return { daa: null, reason: `rpc-fail: ${e.message}` };
   } finally {
     try { await rpc.disconnect(); } catch {}
   }
-  const blk = blkResp?.block || blkResp;
   let daa = null;
   try {
     const rawDaa = blk?.header?.daaScore;
