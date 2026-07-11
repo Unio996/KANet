@@ -1789,8 +1789,9 @@ export async function registerPoolRoutes(fastify) {
       const market = sqlite.prepare('SELECT * FROM pool_markets WHERE id = ?').get(marketId);
       if (!market) return reply.code(404).send({ ok: false, error: `market ${marketId} not found` });
       const voter = sqlite.prepare("SELECT id, name, address FROM relay_nodes WHERE address LIKE 'kaspatest:%' LIMIT 1").get();
-      const { buildEnforceCtx } = await import('../services/bshard-close-voter.js');
+      const { buildEnforceCtx, ensureKaspaWasm } = await import('../services/bshard-close-voter.js');
       const { verifyBettorsCompleteFromChain } = await import('../lib/bshard-close-enforce.mjs');
+      await ensureKaspaWasm(); // buildEnforceCtx's p2sh hook needs kaspa-wasm loaded first (fresh process may not have it yet)
       const ctx = buildEnforceCtx(voter, '00'.repeat(32), market);
       const bettors = await ctx.loadBettors(marketId);
       const result = await verifyBettorsCompleteFromChain(marketId, bettors, ctx);
