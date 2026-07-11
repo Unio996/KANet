@@ -218,7 +218,10 @@ export async function getBlockAtDaa(deadlineDaa) {
   // from an SPC block — info.sink is the canonical start.
   const startHash = info?.sink;
   if (!startHash) throw new Error(`cannot resolve SPC tip from getBlockDagInfo (sink missing; got: ${JSON.stringify(Object.keys(info || {}))})`);
-  const MAX_WALK = 250000;   // J2 2026-07-05 世界杯首场 7rztt 卡死案例: 120000(≈3.3h@10BPS)被 settle-daemon
+  // env override(2026-07-12 合卡设计 Bettor 注4): 与 driver 侧 bshard-settle-daemon.mjs PREGATE_MAX_WALK
+  //   同名 env 联动——改一处 env 两侧同步, 降手工配对常量失同步面(规则55)。默认值两侧必同 250000,
+  //   且 driver 侧宁大勿小(NWT F2 非对称: driver<rpc = 可达盘被 gate = liveness 误伤)。
+  const MAX_WALK = parseInt(process.env.GETBLOCKATDAA_MAX_WALK, 10) || 250000;   // J2 2026-07-05 世界杯首场 7rztt 卡死案例: 120000(≈3.3h@10BPS)被 settle-daemon
   //   队列积压(130+老盘排在前面)挡住, 4.3h 后才轮到轮到7rztt, 窗口已过, backward-walk 从 tip 够不着 deadline
   //   → 永久卡死(排队优先级救不了它, 只能扩大窗口)。250000≈6.9h@10BPS, 给队列积压留更大容错余量。
   //   (根本收敛: bshard-settle-daemon.mjs selectRipeMarkets 需要优先级排序防止新盘被老盘挡住, 249000 只是

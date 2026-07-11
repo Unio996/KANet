@@ -286,6 +286,40 @@ function scheduleUmaRejudge(marketId, market) {
 }
 
 // ripe = v0.7 + deadline_daa+buffer passed + 未结算 + 非 settle_failed + betCount>0 + 非 commingled。
+// ── 不可达 pre-gate(合卡设计 docs/2026-07-12-bucketA-windir-backfill-and-unreachable-pregate-design.md §3,
+//    Bettor 三硬边界+注1 修层+NWT F2, 2026-07-12)──
+// 双条件同时成立才 gate(可达的一律照走): ①deadline_daa < coverage floor(spc_daa_index_coverage 最早覆盖起点)
+// ②gap = currentDaa - deadline_daa > MAX_WALK(严格 >: rpc-listener.mjs:240-262 语义是 walk MAX_WALK 步,
+//   exhaust 时 daa==deadline 属正确 crossing 返回成功——等值不 gate, 与 rpc 边界严格一致, F2 off-by-one)。
+// 有 settle_evidence.close_txid 的盘不 gate(照进 selection 走 resume 快路, 零 walk)。
+// skip = 纯跳过零状态变化(挂账), 首次 gate 发 events 审计 + tick 计数 log(禁静默消失, silent-truncation 族)。
+// 🔴 MAX_WALK 配对常量(ANTI-PATTERNS 规则55 + NWT F2 非对称): 必须 ≥ kasia-relay/src/rpc-listener.mjs:221
+//   的 MAX_WALK——**宁大勿小**: 偏大=少 gate 仍撞重锤(次优但安全); 偏小=实际可达盘被跳=liveness 误伤。
+//   同名 env GETBLOCKATDAA_MAX_WALK 两侧联动(Bettor 注4), regression case 双向钉值。
+const PREGATE_MAX_WALK = parseInt(process.env.GETBLOCKATDAA_MAX_WALK, 10) || 250000;
+const _pregateAudited = new Set();   // 进程内首次去重(重启后重发一条, 可接受——审计宁多勿漏)
+function _coverageFloor() {
+  try { return sqlite.prepare('SELECT MIN(start_daa) f FROM spc_daa_index_coverage').get()?.f ?? null; } catch { return null; }
+}
+function unreachablePreGate(m, currentDaa, floor) {
+  if (floor == null || m.deadline_daa == null) return false;
+  if (!(Number(m.deadline_daa) < Number(floor))) return false;
+  if (!((Number(currentDaa) - Number(m.deadline_daa)) > PREGATE_MAX_WALK)) return false;
+  let hasEvidence = false;
+  try { hasEvidence = !!JSON.parse(m.metadata || '{}')?.settle_evidence?.close_txid; } catch {}
+  if (hasEvidence) return false;   // resume 可用盘不 gate(Fix-A 域)
+  if (!_pregateAudited.has(m.id)) {
+    _pregateAudited.add(m.id);
+    try {
+      sqlite.prepare(`
+        INSERT INTO events (id, event_scope, event_type, source, level, summary, payload_json, created_at)
+        VALUES (?, 'system', 'unreachable_gated', 'bshard-settle-daemon', 'warn', ?, ?, datetime('now'))
+      `).run(randomUUID(), `market=${String(m.id).slice(-8)} pre-gate: deadline_daa=${m.deadline_daa} < coverage floor ${floor} 且 gap>${PREGATE_MAX_WALK} 物理不可达, 零walk skip(挂账, 终局走 L628 另案)`, JSON.stringify({ marketId: m.id, deadlineDaa: m.deadline_daa, coverageFloor: floor, gap: Number(currentDaa) - Number(m.deadline_daa) }));
+    } catch (e) { log(`pre-gate events insert fail (non-fatal): ${e.message}`); }
+  }
+  return true;
+}
+
 function selectRipeMarkets(currentDaa, pmt, limit) {
   // 只结 active-未结 (pending_bettors/verifying)·排终态 (cancelled/completed/refunded/refunding/settle_failed)。
   // 优先级排序 (J2 2026-07-05, 世界杯首场 7rztt 被 130+ polymarket 镜像盘积压堵住的案例·Bettor 拍):
@@ -325,8 +359,13 @@ function selectRipeMarkets(currentDaa, pmt, limit) {
     ORDER BY (CASE WHEN outcome_market_source = 'kanet_v07' THEN 0 ELSE 1 END) ASC, deadline_daa ASC
   `).all(FINALITY_BUFFER, currentDaa);
   const ripe = [];
+  const _floor = _coverageFloor();   // 每 tick 查一次(Bettor 注1: 循环内每行纯算术零 DB 写)
+  let _gated = 0;
   for (const m of rows) {
     if (_leases.has(m.id)) continue;
+    // 🔴 pre-gate 主闸(合卡设计 §3, Bettor 注1 修层): push 进 ripe 前判——不占 MAX_PER_TICK slot,
+    //    桶C 才真解饿死(v1.0 放 attempt 层被 Bettor 实读驳回: gate 盘无 lease 下一 tick 原样再入选)。
+    if (unreachablePreGate(m, currentDaa, _floor)) { _gated++; continue; }
     // 🔴 consolidate lockTime gate (partial-shard ShardLeaf 件1: tx.time>=deadline*1000): MTP(pastMedianTime)
     //   滞后实时 ~2-3min·过早 settle → consolidate TX "input not finalized" rejected (live daemon A/u6ry7 实撞)。
     //   只在 MTP >= deadline*1000 才 settle (consolidate 才 final)。sealed-only 盘其实不需·但统一 gate 无害(稍延)。
@@ -344,6 +383,7 @@ function selectRipeMarkets(currentDaa, pmt, limit) {
       if (ripe.length >= limit) break;
     } catch (e) { log(`ripe-scan skip ${m.id.slice(-8)}: ${e.message}`); }
   }
+  if (_gated > 0) log(`[pre-gate] ${_gated} market(s) gated this tick (unreachable: deadline<coverage-floor ${_floor} && gap>${PREGATE_MAX_WALK}, 零walk零slot, 挂账待 L628 另案)`);
   return ripe;
 }
 
@@ -490,7 +530,15 @@ async function _settleOneMarketAttempt(marketId) {
   try {
     let priorMeta = {}; try { priorMeta = JSON.parse(market.metadata || '{}'); } catch {}
     plan = priorMeta.settle_evidence?.close_txid ? deriveResumePlanFromEvidence(marketId, ctx) : { ok: false };
-    if (!plan.ok) plan = await computeSettlePlan(marketId, ctx);
+    if (!plan.ok) {
+      // pre-gate 纵深(合卡设计 §3, 主闸在 selectRipeMarkets——此处防其它入口绕过 selection 直调本函数)。
+      // currentDaa 近似 = spc_daa_index MAX(本地表零 RPC, 滞后 tip 分钟级 vs 250k 判据余量 = 无影响)。
+      const _curApprox = sqlite.prepare('SELECT MAX(daa_score) m FROM spc_daa_index').get()?.m;
+      if (_curApprox != null && unreachablePreGate(market, _curApprox, _coverageFloor())) {
+        return { ok: false, reason: `unreachable_gated (纵深 pre-gate: deadline<coverage-floor 且 gap>${PREGATE_MAX_WALK}, 零walk skip)` };
+      }
+      plan = await computeSettlePlan(marketId, ctx);
+    }
   } catch (e) {
     const rolling = /1024|rolling/i.test(e.message);
     ctx.alert(marketId, `plan threw (${rolling ? '>1024 winner·待 rolling payout-shard task#18' : e.message}) — skip·不动钱`);
@@ -764,4 +812,4 @@ export function startZkJudgeProposeAutonomousTickCron() {
 }
 export function stopZkJudgeProposeAutonomousTickCron() { if (_zkJudgeProposeTickTimer) { clearInterval(_zkJudgeProposeTickTimer); _zkJudgeProposeTickTimer = null; } }
 
-export { selectRipeMarkets, settleOneMarket, judgeWinDir, endBlockHash, buildCtx, consolidateAndBuildPsState, ensureReady, TRANSIENT_RE, _umaBackoffAllowsRetryNow, scheduleUmaRejudge, UMA_REJUDGE_BACKOFF_TABLE, UMA_GENUINE_TIMEOUT_HOURS };
+export { selectRipeMarkets, settleOneMarket, judgeWinDir, endBlockHash, buildCtx, consolidateAndBuildPsState, ensureReady, TRANSIENT_RE, _umaBackoffAllowsRetryNow, scheduleUmaRejudge, UMA_REJUDGE_BACKOFF_TABLE, UMA_GENUINE_TIMEOUT_HOURS, unreachablePreGate, PREGATE_MAX_WALK };
