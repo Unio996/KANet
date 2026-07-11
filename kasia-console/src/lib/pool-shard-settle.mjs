@@ -15,6 +15,7 @@ import { payoutRoot as buildPayoutRoot, merkleProof } from './pool-payout-root.m
 import { spliceLeafState } from './pool-shard-register.mjs';
 import { blake2b } from '@noble/hashes/blake2b';
 import { deriveCommitteeSeed, selectCommittee } from '../services/pool-committee-sampler.mjs';
+import { deriveRoleFeeLeaves, FEE_RULES_SCHEMA_V } from './fee-split.mjs';
 
 // 价值分成 fee 协议常量 (单源 = 真相源; UI 收口 + deriveFeeLeaves + create-v07 都读此, 防硬编漂移). bps = basis points (1% = 100).
 //   押注侧: winners 9700bps (97%) / fee 300bps (3%) = broker 160 + oracle 100 + introducer 20 + node 20.
@@ -126,17 +127,22 @@ export function deriveFeeLeaves({ poolSompi, feeConfig, brokerPk, introducerPk =
 export function deriveSettlementFeeLeaves(market, consolidatedPoolSompi) {
   const pool = BigInt(consolidatedPoolSompi);
   if (pool <= 0n) throw new Error(`deriveSettlementFeeLeaves: consolidatedPoolSompi=${consolidatedPoolSompi} 必须 >0(caller 链读值可疑, 拒绝派生)`);
-  const leaves = [];
+  // B线落1(2026-07-12, spec v1.1-A): 内部实现替换为 fee-split 组件——本函数收窄为"V2 市场字段 → feeRules 映射"
+  //   的薄壳, 分配数学单源在组件里。产出 byte-equal 既有实现(fee-single-source.test.mjs ①-⑥ 守), 四侧接线
+  //   与 lint R-FEE-LEAVES-BYPASS 门自动继承。
+  // committeeShare: 'pending-D-008-owner-policy' — FEE_CONFIG 120bps(oracle+node)委员分成暂不并入。
+  //   D-008(docs/DECISIONS.md)明确挂起待 Owner 确认份额表；确认后在【feeRules 映射内】加 derive:'committee'
+  //   角色, 不接受调用方自行追加委员 leaf(旁路封死同一铁律: 单源是唯一权威, 不是"调用方可以自己补几条"的模板)。
   const bps = Number(market?.brokerFeePctBps || 0);
-  if (bps > 0 && market?.brokerPk) {
-    const amount = pool * BigInt(bps) / 10000n;   // BigInt floor, 同既有 deriveFeeLeaves 惯例
-    leaves.push({ pk: String(market.brokerPk).toLowerCase(), amount, type: 'broker' });
-  }
-  // committeeShare: 'pending-D-008-owner-policy' — FEE_CONFIG 120bps(oracle+node)委员分成暂不并入本函数。
-  //   D-008(docs/DECISIONS.md)明确挂起待 Owner 确认份额表；确认后在【本函数内】加, 不接受调用方自行追加委员 leaf
-  //   (旁路封死同一铁律: 单源函数是唯一权威, 不是"调用方可以自己补几条"的模板)。
-  const feeSompi = leaves.reduce((s, l) => s + l.amount, 0n);
-  return { feeLeaves: leaves.map(l => ({ pk: l.pk, amount: l.amount.toString(), type: l.type })), feeSompi: feeSompi.toString() };
+  const hasBroker = bps > 0 && !!market?.brokerPk;
+  const feeRules = {
+    schema_v: FEE_RULES_SCHEMA_V,
+    preset: 'prediction-v2-market',   // 市场级 broker_fee_pct 口径(D-008), 非 FEE_PRESETS.prediction 协议常量口径
+    roles: hasBroker
+      ? [{ name: 'provider', bps: 10000 - bps }, { name: 'broker', address: String(market.brokerPk).toLowerCase(), bps }]
+      : [{ name: 'provider', bps: 10000 }],
+  };
+  return deriveRoleFeeLeaves(feeRules, pool);
 }
 
 /**

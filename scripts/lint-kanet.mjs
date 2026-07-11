@@ -876,6 +876,32 @@ function checkR_FEE_LEAVES_BYPASS() {
   }
 }
 
+// ── R-FEERULES-CANON-BYPASS [WARN] (B线落1, 2026-07-12, J2): feeRules canonicalize/hash 单源封旁路 ──
+// 根因(spec 2026-06-22-modular-fee-split-component-spec.md v1.2-2): create-time commit 与 settle-time
+// re-derive 若各自实现"同一"canonical 规范 = driver/committee 漏配家族的根(7/11 一夜炸五处同形状)。
+// canonicalizeFeeRules()/computeFeeRulesCommit() 唯一家 = kasia-console/src/lib/fee-split.mjs。
+// 其它文件出现 ①canonicalizeFeeRules 重定义 或 ②对 feeRules 直接 blake2b = 旁路, WARN 标记。
+const _FEERULES_CANON_HOME = 'kasia-console/src/lib/fee-split.mjs';
+function checkR_FEERULES_CANON_BYPASS(fp, content) {
+  const rel = path.relative(ROOT, fp).replace(/\\/g, '/');
+  if (rel === _FEERULES_CANON_HOME) return;
+  if (!/\.(mjs|js|cjs)$/.test(fp)) return;
+  const lines = content.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (/(?:function\s+canonicalizeFeeRules|(?:const|let|var)\s+canonicalizeFeeRules\s*=)/.test(line)) {
+      warn('R-FEERULES-CANON-BYPASS [WARN]',
+        `canonicalizeFeeRules 重定义——feeRules canonical 序列化唯一家=${_FEERULES_CANON_HOME}(spec v1.2-2 单一共享函数), 两处各自实现同一规范=commit 永假/永真同族坑, import 组件的那份。`,
+        fp, i + 1);
+    }
+    if (/blake2b\s*\([^)]*fee_?[Rr]ules/.test(line)) {
+      warn('R-FEERULES-CANON-BYPASS [WARN]',
+        `对 feeRules 直接 blake2b——hash-commit 必走 computeFeeRulesCommit(${_FEERULES_CANON_HOME})单源, 自 hash = canonical 规范旁路。`,
+        fp, i + 1);
+    }
+  }
+}
+
 // R-PHANTOM-FIELD (2026-07-05, qzdh7nar/J1, following #48/#50/maker-P&L 三例同根): metadata fields written
 // ONLY by the legacy v0.6 settler (pool-market-settler.js) are read unconditionally elsewhere as if they're
 // always populated — but bshard(v0.7)/create-v07 markets never write them (deriveFeeLeaves/phase2_* writeback
@@ -1075,6 +1101,7 @@ for (const fp of targets) {
   checkR40_minerFee_floor(fp, content);  // R40 (G6 批2 红线 7, qlfpv brick sediment 5/31): pool.js create-v06 minerFee 默认下限
   checkR_SHARD_BLIND(fp, content);       // R-SHARD-BLIND [WARN] (线8 STEP2 2026-06-24): pool_bettor_sides 裸 logical market_id 查
   checkR_PHANTOM_FIELD(fp, content);     // R-PHANTOM-FIELD [WARN] (2026-07-05, qzdh7nar): v0.6-only phase2_* 字段无守卫读取 — 防第4例(#48/#50/maker-P&L 同根)
+  checkR_FEERULES_CANON_BYPASS(fp, content);  // R-FEERULES-CANON-BYPASS [WARN] (B线落1 2026-07-12): feeRules canonicalize/hash 单源封旁路(spec v1.2-2)
 }
 checkR10();
 checkR_NULLIFIER_I64();
