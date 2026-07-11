@@ -77,7 +77,7 @@ feeSplit(feeRules, poolSompi, winners) → { feeLeaves[], payoutLeaves[] }
 
 Owner verbatim: "站在人类, 特别是**个体经济利益驱动**角度设计构建; 理论上可应用于**人类任何领域**; **怎么才能好被其他人/其他系统使用**要不断迭代; **使用方便, 信息及时推送**很关键。" 折入为组件的第三维(①分得对+②看得见+**③好用**):
 - **采用性=一等设计目标**: 独立 package(`@kanet/fee-split`)+接入文档+最小 example, 目标"不懂链的开发者十分钟跑通 demo";预设制是采用性的核心接口(§4)。
-- **信息及时推送进组件边界**: 每笔分润落链→实时推收款角色(tg DM/webhook/事件流)——broker-fee-emit(7/11 live 验证)为原型, 落码时事件 emit 接口作为组件输出的一部分设计(非外挂), 全角色泛化。
+- **信息及时推送进组件边界(NWT 边界修正 2026-07-12: 推送在 package 不在纯函数)**: `feeSplit()` 本身保持**纯函数零副作用**(determinism/跨节点 byte-equal 的根基, §1 不变量不动摇——委员 settle-time re-derive 是纯计算, **永不触发推送**)。推送=package 内**独立 notify 层**: 订阅**落链事件**(landed 后), 单点 emit 推收款角色(tg DM/webhook/事件流)——即 broker-fee-emit(7/11 live 验证)的"landed 后单源 emit"同款模式泛化, 计算与通知解耦, 同一笔分润全网只推一次。"作为组件输出"指 package 交付物含这层, 非 feeSplit() 函数内部动作。
 - **持续迭代姿态**: 本 spec 随实弹/采用反馈滚动升版, 非一次性交付。
 
 ## 4. 行业预设 (证明行业无关 + 替代性)
