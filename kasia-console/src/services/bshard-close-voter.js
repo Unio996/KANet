@@ -70,7 +70,12 @@ const _blake2bHex = (s) => Buffer.from(blake2b(Buffer.from(String(s)), { dkLen: 
  * @returns {Array<{pk, direction, stake, side_lock_daa}>}
  */
 export function loadBettorsCrossShard(logicalMarketId, excludeSideLockTx = null) {
-  const shards = listShards(sqlite, logicalMarketId);
+  // 🔴 修复(2026-07-11, shard10 phantom事故坐实): listShards()裸查没有manual_recovery_refunded排除——
+  // getMarketBets/consolidateAllShards(pool-shard-settle.mjs:291,344 + pool-bettor-sides-query.mjs:124)
+  // 三处早就用WHERE status != 'manual_recovery_refunded'过滤, 这里(committee/enforce侧读入口)漏了同一个
+  // 过滤, 导致已经标记整片排除的shard(如shard10)的bettor仍被算进委员的bettors集, C1 anti-swap对其ticket
+  // 查不到时误报"pk/dir/stake被换/伪造"(实为已知reorg-excluded phantom, 不是伪造)。补齐同款过滤, 单源对齐。
+  const shards = listShards(sqlite, logicalMarketId).filter((s) => s.status !== 'manual_recovery_refunded');
   const marketIds = shards.length ? shards.map(s => s.shard_market_id) : [logicalMarketId];
   const excludeSet = excludeSideLockTx && excludeSideLockTx.length ? new Set(excludeSideLockTx) : null;
   const out = [];
