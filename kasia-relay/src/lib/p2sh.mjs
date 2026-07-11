@@ -1466,6 +1466,12 @@ export async function checkUtxoLanded(address, txid, networkId, minDepth = 0) {
   const rpc = await connectRpc(networkId);
   try {
     const { entries } = await rpc.getUtxosByAddresses([address]);
+    // addr-only mode(txid 缺省, 2026-07-11 level2-B live-check升级, docs/2026-07-11-c1-folded-shard-anchor-design.md):
+    //   没有具体txid可比对时(per-ticket anti-swap用法, 只问"这地址上有没有UTXO"), 不做txid精确匹配(对undefined
+    //   永远匹配不到), 改判"该地址当前UTXO集非空"——live UTXO不受历史块剪裁影响(剪裁删的是历史区块记录,
+    //   不删活UTXO集), 覆盖kaspa_tx_log漏记的老tx(303张ticket实测: 3张indexer漏了, 全部live存在)。minDepth
+    //   对这个模式无意义(不是在验证"某笔最近tx的重组深度", 是在问"这个UTXO现在还在不在"), 忽略。
+    if (txid == null) return { landed: (entries || []).length > 0 };
     const entry = (entries || []).find(e => e.outpoint?.transactionId === txid);
     if (!entry) return { landed: false };
     if (!(Number(minDepth) > 0)) return { landed: true };           // legacy first-seen (minDepth 0/未传)

@@ -174,15 +174,14 @@ export function buildEnforceCtx(voter, voterPk, market) {
     excludeSideLockTx: _shard9PhantomExcludeFor(market.id),
     // C1 level2-A chain-anchor primitives.
     p2sh: (redeemHex) => p2shFromRedeemSync(redeemHex, network),
-    // 🔴 fix (Bettor+NWT+J2 2026-07-08 22:2x, uqmp8 C1 anti-swap 首次真实场景误拒): 原实现只查 relay 的
-    // check_utxo_landed(= live unspent UTXO 集), 对无 txid 的调用(level2-B per-ticket anti-swap, 823 行)
-    // 是致命的——ticket UTXO 一旦被后续 tx 花掉(如 absorb 把整个 ShardLeaf 连同其上的 ticket 一并消费),
-    // live-only 查询必返 false, 委员诚实拒签一个【曾经真实落链、只是现在花了】的合法 ticket。level2-A(738-743
-    // 行注释)已经踩过同一个坑并改用 landed-in-history(readOutpointCreatedAddr), 但 level2-B 没跟着改——
-    // 这次修 checkUtxoLanded 本身(共享给两处), 而非只改调用点, 避免"同族修复不同步"再发生同类坑。
-    // 语义: txid 给定 → 精确匹配(原行为, 命门①chain-bound 那类用法不变); txid 缺省(level2-B 用法) →
-    // live 查一次, 没有就退化到 kaspa_tx_log(indexer 从真块写, node-local 可信边界, 同 target_daa 那条口径)
-    // 搜该地址是否曾出现在任一 tx 的 output 里, 与 spent 状态无关(landed-in-history, 不是"现在还在")。
+    // 🔴 fix³ (2026-07-11, level2-B live-check升级, docs/2026-07-11-c1-folded-shard-anchor-design.md, 复原
+    // fix²被迫放弃的live路): fix²放弃live查是因为relay端check_utxo_landed命令schema(kasia-relay/src/lib/
+    // commands.mjs)把txid定为必填字段, txid缺省会被直接拒(INVALID COMMAND), 不是"查了没找到"——这次把
+    // txid从必填列表移除(kasia-relay/src/lib/commands.mjs的CHECK_UTXO_LANDED entry), relay侧checkUtxoLanded
+    // (p2sh.mjs)加addr-only分支(txid==null→判"该地址当前UTXO集非空", 不做txid精确匹配)。语义: txid给定→
+    // 精确匹配(原行为, 命门①chain-bound不变); txid缺省(level2-B用法)→**live为主**(不受历史块剪裁影响,
+    // 303张ticket实测覆盖了3张kaspa_tx_log漏记但live存在的case)→relay不可用/查询失败时**退化到kaspa_tx_log**
+    // (indexer landed-in-history兜底, 同一份地址existence语义, 不是新增第三种判据)。
     checkUtxoLanded: async (addr, txid) => {
       if (txid) {
         // 命门①chain-bound 等场景: 精确 txid 匹配, 行为完全不变(relay 抛错照样往外抛, errored≠refused
@@ -190,11 +189,11 @@ export function buildEnforceCtx(voter, voterPk, market) {
         const r = await sendCommandAsync(voter.id, { type: 'check_utxo_landed', address: addr, txid }, 15000);
         return !!(r?.landed || r?.found);
       }
-      // 🔴 fix² (Bettor+KANet-UI catch 2026-07-08 22:4x): check_utxo_landed 的 relay 端命令 schema
-      // (kasia-relay/src/lib/commands.mjs:136/202) 把 txid 定为必填字段——txid=null 时压根没有"live 查"
-      // 这回事可发(发了就是 INVALID COMMAND, 不是"查了没找到"), 上一版试图先 live 再 fallback 是徒劳的
-      // 空转。level2-B per-ticket anti-swap 用法(无具体已知 txid, 只问"这地址曾否出现在任一 output 里")
-      // 直接查 kaspa_tx_log(landed-in-history, indexer 从真块写, node-local 可信边界), 不发不合法的 live 命令。
+      // level2-B per-ticket anti-swap 用法(无具体已知 txid, 只问"这地址上有没有UTXO")——live为主。
+      try {
+        const r = await sendCommandAsync(voter.id, { type: 'check_utxo_landed', address: addr }, 15000);
+        if (r && typeof r.landed === 'boolean') return r.landed;
+      } catch { /* relay 不可用/超时 → 退化到 kaspa_tx_log, 不 fail-loud 拦委员 */ }
       const row = sqlite.prepare(`SELECT 1 FROM kaspa_tx_log WHERE outputs_json LIKE ? LIMIT 1`).get(`%"${addr}"%`);
       return !!row;
     },

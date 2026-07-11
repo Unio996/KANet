@@ -138,7 +138,10 @@ export const COMMAND_PAYLOAD_SCHEMA = Object.freeze({
   [COMMAND_TYPES.POOL_REFUND_MAKER_UNJOINED_TX]: ['spine_p2sh_address', 'spine_redeem_script_hex', 'required_input_outpoint', 'output'],
   [COMMAND_TYPES.POOL_SIDE_REFUND_CANCELLED_TX]: ['side_p2sh_address', 'side_redeem_script_hex', 'required_input_outpoint', 'output'],
   [COMMAND_TYPES.POOL_V07_COMPUTE_REFUND_MASS]: ['spine_p2sh', 'spine_lock_tx', 'spine_redeem_script_hex', 'maker_address', 'maker_stake', 'deadline'],
-  [COMMAND_TYPES.CHECK_UTXO_LANDED]: ['address', 'txid'],
+  // txid 可选(2026-07-11, level2-B live-check升级, docs/2026-07-11-c1-folded-shard-anchor-design.md):
+  //   caller 省 txid = addr-only 存在性查询(per-ticket anti-swap 用法, 不比对特定 tx, 只问"这地址现在有没有
+  //   UTXO"); 传 txid = 精确匹配(原行为, 命门①chain-bound 等场景不变)。
+  [COMMAND_TYPES.CHECK_UTXO_LANDED]: ['address'],
   // ③ committee chainReader — get current DAA score 不需 payload field; get blocks 需 min_daa_score.
   [COMMAND_TYPES.CHAIN_GET_CURRENT_DAA_SCORE]: [],
   [COMMAND_TYPES.CHAIN_GET_BLOCKS_FROM_DAA_SCORE]: ['min_daa_score'],
