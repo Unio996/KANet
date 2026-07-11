@@ -621,7 +621,7 @@ startOraclePoolRenewalCron();
 
 // bshard 自治结算 daemon (Owner 2026-06-30 钦定 A·SETTLE_DAEMON_ENABLED=1 才跑, 默认 OFF).
 // canary: MAX_PER_TICK=1, TICK=60s → 验 → ramp。J1 covenant 是真安全网, DB lease = best-effort。
-import { startSettleDaemonCron, startZkCloseTickV2Cron, startClaimAutonomousTickCron, startZkHandoffAutonomousTickCron } from './services/bshard-settle-daemon.mjs';
+import { startSettleDaemonCron, startZkCloseTickV2Cron, startClaimAutonomousTickCron, startZkHandoffAutonomousTickCron, startZkJudgeProposeAutonomousTickCron } from './services/bshard-settle-daemon.mjs';
 startSettleDaemonCron();
 // (b)(c) 2026-07-09 J2: docs/2026-07-09-zk-autonomy-three-parts-design.md — 各自独立 kill switch(默认 OFF,
 // ZK_CLOSE_TICK_V2_ENABLED / ZK_CLAIM_TICK_ENABLED), 开关本身是配置变更(Bettor 注4: 走重启窗+ledger记账+双签)。
@@ -630,6 +630,9 @@ startClaimAutonomousTickCron();
 // 第五件 2026-07-11 J2: docs/2026-07-11-zk-autonomy-fifth-piece-handoff-broadcast-design.md — 同款独立
 // kill switch(默认 OFF, ZK_HANDOFF_TICK_ENABLED), 自治链最后一格(attest landed 后自动广播门①)。
 startZkHandoffAutonomousTickCron();
+// 第六件 2026-07-11 J2: docs/2026-07-11-zk-autonomy-sixth-piece-judge-propose-design.md — 同款独立
+// kill switch(默认 OFF, ZK_JUDGE_PROPOSE_TICK_ENABLED), 真正最后一格(deadline 到了自动 judge+propose)。
+startZkJudgeProposeAutonomousTickCron();
 
 // design-v2 (B) broadcaster N-medium-UTXO maintainer (KANet-UI, 880 settle-throughput; Bettor r489b APPROVE).
 // Proactive cron keeps settle broadcasters (local oracle signers + hot seeder maker) topped at N confirmed

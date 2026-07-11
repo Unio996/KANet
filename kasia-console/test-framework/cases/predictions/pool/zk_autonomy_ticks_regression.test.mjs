@@ -41,7 +41,7 @@ const {
 const { advanceZkContinuationAfterSpend, writeZkContinuation } = await import('file:///D:/kanet-tn12/kasia-console/src/lib/closezk-v2-mint.mjs');
 const { _splicePayoutV2CloseRedeem } = await import('file:///D:/kanet-tn12/kasia-console/src/lib/bshard-close-enforce.mjs');
 const {
-  zkCloseTickV2, claimAutonomousTick, zkHandoffAutonomousTick, _zkAutonomyLeasesForTest,
+  zkCloseTickV2, claimAutonomousTick, zkHandoffAutonomousTick, zkJudgeProposeAutonomousTick, _zkAutonomyLeasesForTest,
 } = await import('file:///D:/kanet-tn12/kasia-console/src/lib/zk-autonomy-ticks.mjs');
 
 let failures = 0;
@@ -406,6 +406,128 @@ function cleanup(marketId) {
   _zkAutonomyLeasesForTest().delete(marketId);
 
   cleanup(marketId);
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// §8 — zkJudgeProposeAutonomousTick(第六件, 2026-07-11, docs/2026-07-11-zk-autonomy-sixth-piece-
+//   judge-propose-design.md, Bettor+NWT 双 GREEN #gotdnc.2)。b0uoi 验收局炸出的真缺口。
+// ══════════════════════════════════════════════════════════════════════════
+function insertJudgeProposeMarket(marketId, { zkNative = true, deadline = 1000, deadlineDaa = 100, protocolStatus = 'verifying', metadata = {} } = {}) {
+  sqlite.prepare(`
+    INSERT INTO pool_markets (id, maker_relay_id, spine_p2sh, market_metadata_hash, deadline, deadline_daa, protocol_version, protocol_status, resolution_rule_spec, metadata)
+    VALUES (?, 'test-relay', 'test-p2sh', 'test-hash', ?, ?, 'v0.7', ?, ?, ?)
+  `).run(marketId, deadline, deadlineDaa, protocolStatus, JSON.stringify({ zk_native: zkNative, judge_type: 'blockhash_parity', target_daa: deadlineDaa }), JSON.stringify(metadata));
+}
+function cleanupJudgeProposeMarket(marketId) { sqlite.prepare('DELETE FROM pool_markets WHERE id = ?').run(marketId); }
+
+{
+  console.log('[§8a] 双向隔离: zk_native+未propose → 命中; zk_native+已propose → 不命中; 非zk_native → 不命中(不碰V1候选池):');
+  const mCandidate = `zktest-jp-cand-${randomUUID().slice(0, 8)}`;
+  const mAlreadyProposed = `zktest-jp-done-${randomUUID().slice(0, 8)}`;
+  const mNonZkNative = `zktest-jp-v1-${randomUUID().slice(0, 8)}`;
+
+  insertJudgeProposeMarket(mCandidate);
+  insertJudgeProposeMarket(mAlreadyProposed, { metadata: { bshard_close_request_v2: { claimedPayoutRoot: 'x' } } });
+  insertJudgeProposeMarket(mNonZkNative, { zkNative: false });
+
+  const proposedIds = [];
+  const ctx = {
+    settlerRelayId: 'test-settler', getCurrentDaaScore: async () => 1000,
+    judgeWinDir: async () => 0,
+    endBlockHash: async () => 'deadbeef'.repeat(8),
+    buildProposeCloseRequestV2: async ({ marketId }) => { proposedIds.push(marketId); return { ok: true }; },
+  };
+  const res = await zkJudgeProposeAutonomousTick(ctx);
+  check(proposedIds.includes(mCandidate), 'zk_native+未propose 的市场被扫描到并成功 propose');
+  check(!proposedIds.includes(mAlreadyProposed), '已 propose 过(metadata 有 bshard_close_request_v2)的市场不重复命中');
+  check(!proposedIds.includes(mNonZkNative), '非 zk_native 市场不被本 tick 碰(双向隔离, V1 selectRipeMarkets 继续独占非 zk_native 候选池)');
+
+  cleanupJudgeProposeMarket(mCandidate); cleanupJudgeProposeMarket(mAlreadyProposed); cleanupJudgeProposeMarket(mNonZkNative);
+}
+
+{
+  console.log('[§8b] judge ABSTAIN(throw) → errored, 不误标终态, propose 不被调用:');
+  const marketId = `zktest-jp-abstain-${randomUUID().slice(0, 8)}`;
+  insertJudgeProposeMarket(marketId);
+
+  let proposeCalled = false;
+  const ctx = {
+    settlerRelayId: 'test-settler', getCurrentDaaScore: async () => 1000,
+    judgeWinDir: async () => { throw new Error('judge ABSTAIN: UMA pending'); },
+    endBlockHash: async () => 'deadbeef'.repeat(8),
+    buildProposeCloseRequestV2: async () => { proposeCalled = true; return { ok: true }; },
+  };
+  const res = await zkJudgeProposeAutonomousTick(ctx);
+  check(res.errored >= 1, 'judge ABSTAIN 计入 errored');
+  check(proposeCalled === false, 'judge 失败时不会继续调用 buildProposeCloseRequestV2');
+  const row = sqlite.prepare('SELECT protocol_status FROM pool_markets WHERE id = ?').get(marketId);
+  check(row.protocol_status === 'verifying', 'ABSTAIN 不误标任何终态, protocol_status 原样保留');
+
+  cleanupJudgeProposeMarket(marketId);
+}
+
+{
+  console.log('[§8c] 冷却间隔: 上次尝试距今 < 冷却窗口 → 跳过, 不重新 judge/propose:');
+  const marketId = `zktest-jp-cooldown-${randomUUID().slice(0, 8)}`;
+  insertJudgeProposeMarket(marketId, { metadata: { zk_judge_propose_last_attempt_at: new Date().toISOString() } });
+
+  let called = false;
+  const ctx = {
+    settlerRelayId: 'test-settler', getCurrentDaaScore: async () => 1000,
+    judgeWinDir: async () => { called = true; return 0; },
+    endBlockHash: async () => 'deadbeef'.repeat(8),
+    buildProposeCloseRequestV2: async () => ({ ok: true }),
+  };
+  const res = await zkJudgeProposeAutonomousTick(ctx);
+  check(called === false, '冷却窗口内不重新调用 judgeWinDir');
+  check(res.cooling >= 1, '计入 cooling 计数(可观测)');
+
+  cleanupJudgeProposeMarket(marketId);
+}
+
+{
+  console.log('[§8d] running mutex: 市场被其他 tick 的 lease 占用时跳过不触碰:');
+  const marketId = `zktest-jp-lease-${randomUUID().slice(0, 8)}`;
+  insertJudgeProposeMarket(marketId);
+
+  _zkAutonomyLeasesForTest().add(marketId);
+  let called = false;
+  const ctx = {
+    settlerRelayId: 'test-settler', getCurrentDaaScore: async () => 1000,
+    judgeWinDir: async () => { called = true; return 0; },
+    endBlockHash: async () => 'deadbeef'.repeat(8),
+    buildProposeCloseRequestV2: async () => ({ ok: true }),
+  };
+  const res = await zkJudgeProposeAutonomousTick(ctx);
+  check(called === false, '市场被其他 tick 的 lease 占用时, zkJudgeProposeAutonomousTick 跳过不触碰');
+  check(res.skipped >= 1, '计入 skipped(可观测)');
+  _zkAutonomyLeasesForTest().delete(marketId);
+
+  cleanupJudgeProposeMarket(marketId);
+}
+
+{
+  console.log('[§8e] 超长卡死高可见度告警(Bettor n1, #gotdnc.2): deadline 已过阈值仍未 propose → 写 critical events, 不改状态:');
+  const marketId = `zktest-jp-stuck-${randomUUID().slice(0, 8)}`;
+  const oldDeadlineUnixSeconds = Math.floor(Date.now() / 1000) - 3 * 3600; // 3小时前(超过默认2h阈值)
+  // 冷却窗口内也要能触发告警(告警跟"是否正在冷却"无关, 只跟"deadline 过了多久"有关)——
+  // 用一个刚设的 last_attempt_at 模拟"一直在冷却循环但从没成功过"的卡死场景。
+  insertJudgeProposeMarket(marketId, { deadline: oldDeadlineUnixSeconds, metadata: { zk_judge_propose_last_attempt_at: new Date().toISOString() } });
+
+  const eventCountBefore = sqlite.prepare("SELECT COUNT(*) c FROM events WHERE event_type='zkJudgeProposeTick_stuck'").get().c;
+  const ctx = {
+    settlerRelayId: 'test-settler', getCurrentDaaScore: async () => 1000,
+    judgeWinDir: async () => 0, endBlockHash: async () => 'deadbeef'.repeat(8), buildProposeCloseRequestV2: async () => ({ ok: true }),
+  };
+  const res = await zkJudgeProposeAutonomousTick(ctx);
+  const eventCountAfter = sqlite.prepare("SELECT COUNT(*) c FROM events WHERE event_type='zkJudgeProposeTick_stuck'").get().c;
+  check(eventCountAfter === eventCountBefore + 1, '超过卡死阈值(3h > 默认2h)写入 critical events 告警');
+  const evt = sqlite.prepare("SELECT level FROM events WHERE event_type='zkJudgeProposeTick_stuck' ORDER BY rowid DESC LIMIT 1").get();
+  check(evt.level === 'critical', '告警 level=critical(高可见度, 非日常 debug log)');
+  const row = sqlite.prepare('SELECT protocol_status FROM pool_markets WHERE id = ?').get(marketId);
+  check(row.protocol_status === 'verifying', '告警只告警不改状态, 不误标终态');
+
+  cleanupJudgeProposeMarket(marketId);
 }
 
 console.log(`\n${failures === 0 ? '✅ ALL PASS' : `❌ ${failures} FAILURE(S)`}`);

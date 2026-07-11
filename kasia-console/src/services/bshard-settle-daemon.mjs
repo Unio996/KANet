@@ -28,8 +28,8 @@ import { espnSportsJudge } from '../lib/nwt-espn-sports-judge.mjs';   // NWT域�
 import { classifyFailure, shouldKeepStatus } from '../lib/bshard-failure-classifier.mjs';   // #49 模块①
 import { zkCloseTick } from '../lib/zk-close-builder.mjs';   // 2026-07-06 J2: ZK settle 生产装配, 见 docs/2026-07-06-zk-close-tick-production-wiring-design.md
 import { dispatchUnlockZkClose as _dispatchUnlockZkCloseImpl } from '../lib/zk-close-dispatch.mjs';   // 缺件③(J1tn 2026-07-08)
-import { zkCloseTickV2, claimAutonomousTick, zkHandoffAutonomousTick } from '../lib/zk-autonomy-ticks.mjs';   // (b)(c) 2026-07-09 J2: 见 docs/2026-07-09-zk-autonomy-three-parts-design.md, 独立于上面旧 zkCloseTick 骨架, 各自 kill switch; 第五件(zkHandoffAutonomousTick) 2026-07-11 见 docs/2026-07-11-zk-autonomy-fifth-piece-handoff-broadcast-design.md
-import { buildZkHandoffRequestV2 } from '../lib/bshard-close-transport.mjs';   // 第五件 ctx 注入(dispatchUnlockZkClose 同惯例, 本 daemon 不重新实现门①逻辑)
+import { zkCloseTickV2, claimAutonomousTick, zkHandoffAutonomousTick, zkJudgeProposeAutonomousTick } from '../lib/zk-autonomy-ticks.mjs';   // (b)(c) 2026-07-09 J2: 见 docs/2026-07-09-zk-autonomy-three-parts-design.md, 独立于上面旧 zkCloseTick 骨架, 各自 kill switch; 第五件(zkHandoffAutonomousTick) 2026-07-11 见 docs/2026-07-11-zk-autonomy-fifth-piece-handoff-broadcast-design.md; 第六件(zkJudgeProposeAutonomousTick) 2026-07-11 见 docs/2026-07-11-zk-autonomy-sixth-piece-judge-propose-design.md
+import { buildZkHandoffRequestV2, buildProposeCloseRequestV2 } from '../lib/bshard-close-transport.mjs';   // 第五/六件 ctx 注入(dispatchUnlockZkClose 同惯例, 本 daemon 不重新实现门①/propose 逻辑)
 import { randomUUID } from 'crypto';
 import { createRequire } from 'node:module';
 const _require = createRequire(import.meta.url);
@@ -732,4 +732,31 @@ export function startZkHandoffAutonomousTickCron() {
 }
 export function stopZkHandoffAutonomousTickCron() { if (_zkHandoffTickTimer) { clearInterval(_zkHandoffTickTimer); _zkHandoffTickTimer = null; } }
 
-export { selectRipeMarkets, settleOneMarket, judgeWinDir, buildCtx, consolidateAndBuildPsState, ensureReady, TRANSIENT_RE, _umaBackoffAllowsRetryNow, scheduleUmaRejudge, UMA_REJUDGE_BACKOFF_TABLE, UMA_GENUINE_TIMEOUT_HOURS };
+// ── 第六件(zkJudgeProposeAutonomousTick) 2026-07-11 J2: docs/2026-07-11-zk-autonomy-sixth-piece-
+// judge-propose-design.md(Bettor+NWT 双 GREEN #gotdnc.2)。b0uoi 验收局炸出的真缺口: judge+propose
+// 从未被任何一件自治化覆盖过——同 (b)(c)(e) 风格: 独立 tick + 独立 kill switch + 独立 timer。
+const ZK_JUDGE_PROPOSE_TICK_ENABLED = process.env.ZK_JUDGE_PROPOSE_TICK_ENABLED === '1';
+const ZK_JUDGE_PROPOSE_TICK_MS = parseInt(process.env.ZK_JUDGE_PROPOSE_TICK_MS, 10) || 30000;
+
+function _zkJudgeProposeTickCtx() {
+  return {
+    settlerRelayId: ZK_SETTLER_RELAY_ID,
+    judgeWinDir,
+    endBlockHash,
+    getCurrentDaaScore: () => chainReader.getCurrentDaaScore(),
+    buildProposeCloseRequestV2: ({ marketId, winningDirection, endBlockHash: ebh, settlerRelayId: relayId }) =>
+      buildProposeCloseRequestV2(marketId, { winningDirection, endBlockHash: ebh, settlerRelayId: relayId }),
+  };
+}
+
+let _zkJudgeProposeTickTimer = null;
+export function startZkJudgeProposeAutonomousTickCron() {
+  if (!ZK_JUDGE_PROPOSE_TICK_ENABLED) { log('zkJudgeProposeAutonomousTick disabled (ZK_JUDGE_PROPOSE_TICK_ENABLED!=1)·not starting'); return; }
+  if (_zkJudgeProposeTickTimer) return;
+  if (!ZK_SETTLER_RELAY_ID) { log('zkJudgeProposeAutonomousTick NOT starting — BSHARD_SETTLER_RELAY_ID unset'); return; }
+  log(`zkJudgeProposeAutonomousTick starting·tick=${ZK_JUDGE_PROPOSE_TICK_MS}ms`);
+  _zkJudgeProposeTickTimer = setInterval(() => { zkJudgeProposeAutonomousTick(_zkJudgeProposeTickCtx()).catch(e => log(`zkJudgeProposeAutonomousTick uncaught: ${e.message}`)); }, ZK_JUDGE_PROPOSE_TICK_MS);
+}
+export function stopZkJudgeProposeAutonomousTickCron() { if (_zkJudgeProposeTickTimer) { clearInterval(_zkJudgeProposeTickTimer); _zkJudgeProposeTickTimer = null; } }
+
+export { selectRipeMarkets, settleOneMarket, judgeWinDir, endBlockHash, buildCtx, consolidateAndBuildPsState, ensureReady, TRANSIENT_RE, _umaBackoffAllowsRetryNow, scheduleUmaRejudge, UMA_REJUDGE_BACKOFF_TABLE, UMA_GENUINE_TIMEOUT_HOURS };

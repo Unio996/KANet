@@ -330,5 +330,102 @@ export async function zkHandoffAutonomousTick(ctx) {
   } finally { _zkHandoffTickRunning = false; }
 }
 
+// ── (sixth piece, 2026-07-11) zkJudgeProposeAutonomousTick ──
+// 设计: docs/2026-07-11-zk-autonomy-sixth-piece-judge-propose-design.md
+// (Bettor 方向审+NWT 红队双 GREEN #gotdnc.2/#go7ihf.2)。b0uoi 验收局炸出的真缺口: judge+propose
+// 从未被任何一件自治化工作覆盖——zk_native 市场 deadline 到了也不会自动判定+发起 close 签名请求。
+//
+// ctx = { judgeWinDir(market) → 0|1(throw=ABSTAIN), endBlockHash(deadlineDaa) → hex,
+//         getCurrentDaaScore() → number, buildProposeCloseRequestV2({marketId, winningDirection,
+//         endBlockHash, settlerRelayId}), settlerRelayId }
+// 全部注入, 复用 bshard-settle-daemon.mjs 已 export 的 judgeWinDir/endBlockHash + bshard-close-
+// transport.mjs 的 buildProposeCloseRequestV2, 本文件零重新实现判定/propose 逻辑。
+
+const JUDGE_PROPOSE_FINALITY_BUFFER = 60; // 同 V1 selectRipeMarkets 既有口径, 不用更松的门槛
+const JUDGE_PROPOSE_COOLDOWN_MS = Number(process.env.ZK_JUDGE_PROPOSE_TICK_COOLDOWN_MS || 300_000); // 同第五件 5min 量级
+const JUDGE_PROPOSE_STUCK_ALERT_HOURS = Number(process.env.ZK_JUDGE_PROPOSE_STUCK_ALERT_HOURS || 2); // Bettor n1
+
+function _scanJudgeProposeCandidates(currentDaa) {
+  const rows = sqlite.prepare(`
+    SELECT id, deadline, deadline_daa, metadata FROM pool_markets
+    WHERE protocol_version = 'v0.7'
+      AND deadline_daa IS NOT NULL
+      AND deadline_daa + ? <= ?
+      AND protocol_status IN ('pending_bettors', 'verifying')
+  `).all(JUDGE_PROPOSE_FINALITY_BUFFER, currentDaa);
+  const out = [];
+  for (const row of rows) {
+    let meta; try { meta = JSON.parse(row.metadata || '{}'); } catch { continue; }
+    // 双向隔离(§2): 只服务 zk_native===true 的市场——非 zk_native 市场继续走 V1 selectRipeMarkets
+    // 原路径(bshard-settle-daemon.mjs:319 那条既有排除是正确设计, 本 tick 不碰 V1 的候选池)。
+    let rrs; try { rrs = JSON.parse(sqlite.prepare('SELECT resolution_rule_spec FROM pool_markets WHERE id = ?').get(row.id)?.resolution_rule_spec || '{}'); } catch { continue; }
+    if (rrs.zk_native !== true) continue;
+    if (meta.bshard_close_request_v2) continue; // 已经 propose 过, 不是本 tick 候选
+    out.push({ marketId: row.id, deadline: row.deadline, deadlineDaa: row.deadline_daa, meta });
+  }
+  return out;
+}
+
+function _writeMarketMetaJudgeAttempt(marketId) {
+  const row = sqlite.prepare('SELECT metadata FROM pool_markets WHERE id = ?').get(marketId);
+  let meta; try { meta = JSON.parse(row?.metadata || '{}'); } catch { meta = {}; }
+  meta.zk_judge_propose_last_attempt_at = new Date().toISOString();
+  sqlite.prepare('UPDATE pool_markets SET metadata = ? WHERE id = ?').run(JSON.stringify(meta), marketId);
+}
+
+function _maybeWriteStuckAlert(marketId, deadlineUnixSeconds) {
+  if (!deadlineUnixSeconds) return;
+  const ageHours = (Date.now() - Number(deadlineUnixSeconds) * 1000) / 3_600_000;
+  if (ageHours < JUDGE_PROPOSE_STUCK_ALERT_HOURS) return;
+  try {
+    // 高可见度告警(warn/critical, 非日常 debug log)——只告警不改状态, 不误标终态不猜是否该退款。
+    sqlite.prepare(`
+      INSERT INTO events (id, event_scope, event_type, source, level, summary, payload_json, created_at)
+      VALUES (?, 'system', 'zkJudgeProposeTick_stuck', 'zk-autonomy-ticks', 'critical', ?, ?, datetime('now'))
+    `).run(randomUUID(), `market=${String(marketId).slice(-8)} deadline 已过 ${ageHours.toFixed(1)}h 仍未成功 propose(judge ABSTAIN 或 propose 反复失败) — 需人工核查, stuck-forever 家族窝点`, JSON.stringify({ marketId, ageHours }));
+  } catch (e) { log(`events insert fail for stuck alert (non-fatal): ${e.message}`); }
+}
+
+let _zkJudgeProposeTickRunning = false;
+export async function zkJudgeProposeAutonomousTick(ctx) {
+  if (_zkJudgeProposeTickRunning) return { skipped: true };
+  _zkJudgeProposeTickRunning = true;
+  try {
+    const currentDaa = await ctx.getCurrentDaaScore();
+    const candidates = _scanJudgeProposeCandidates(currentDaa);
+    let proposed = 0, cooling = 0, skipped = 0, errored = 0;
+    for (const { marketId, deadline, deadlineDaa, meta } of candidates) {
+      if (_zkAutonomyLeases.has(marketId)) { skipped++; continue; }
+      _zkAutonomyLeases.add(marketId);
+      try {
+        const lastAttempt = meta.zk_judge_propose_last_attempt_at ? new Date(meta.zk_judge_propose_last_attempt_at).getTime() : 0;
+        if (Date.now() - lastAttempt < JUDGE_PROPOSE_COOLDOWN_MS) { cooling++; _maybeWriteStuckAlert(marketId, deadline); continue; }
+
+        _writeMarketMetaJudgeAttempt(marketId);
+        const market = sqlite.prepare('SELECT * FROM pool_markets WHERE id = ?').get(marketId);
+
+        let winningDirection;
+        try { winningDirection = await ctx.judgeWinDir(market); }
+        catch (e) { errored++; _writeZkAutonomyErrorEvent('zkJudgeProposeTick_judge', marketId, e.message); _maybeWriteStuckAlert(marketId, deadline); continue; }
+
+        let endBlockHashHex;
+        try { endBlockHashHex = await ctx.endBlockHash(deadlineDaa); }
+        catch (e) { errored++; _writeZkAutonomyErrorEvent('zkJudgeProposeTick_endblockhash', marketId, e.message); _maybeWriteStuckAlert(marketId, deadline); continue; }
+
+        try {
+          await ctx.buildProposeCloseRequestV2({ marketId, winningDirection, endBlockHash: endBlockHashHex, settlerRelayId: ctx.settlerRelayId });
+        } catch (e) { errored++; _writeZkAutonomyErrorEvent('zkJudgeProposeTick_propose', marketId, e.message); _maybeWriteStuckAlert(marketId, deadline); continue; }
+
+        proposed++;
+        log(`✅ market=${marketId.slice(-8)} judge+propose dispatched(winDir=${winningDirection}, endBlockHash=${endBlockHashHex.slice(0, 12)}...)`);
+      } catch (e) {
+        errored++; _writeZkAutonomyErrorEvent('zkJudgeProposeTick', marketId, e.message);
+      } finally { _zkAutonomyLeases.delete(marketId); }
+    }
+    if (proposed || errored) log(`tick: ${candidates.length} candidate(s) | proposed=${proposed} cooling=${cooling} skipped=${skipped} errored=${errored}`);
+    return { ok: true, candidates: candidates.length, proposed, cooling, skipped, errored };
+  } finally { _zkJudgeProposeTickRunning = false; }
+}
+
 // 测试专用(仅供 offline test 断言 mutex 状态, 不供生产代码调用)。
 export function _zkAutonomyLeasesForTest() { return _zkAutonomyLeases; }
