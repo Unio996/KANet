@@ -135,3 +135,29 @@
 - 长会话幻觉污染防线（Bettor 接位文件铁律 -1·7/8 实测失败案例·跨 agent 通用：断言 X 已发生前必独立地面核实）——判定项:是否升全员接位文件标配。
 
 **D+. 表 2 快照增补**：ANTI-PATTERNS 54→56 条（规则 55/56 新增）；DECISIONS 新增 D-008/D-009；本周期新增 BLOCKING 卡=fee 单源收敛（D-008）+live-derive（D-009 解除条件）。规则总数逼近 60 条强制精简线,本轮 retro 应跑一次合并判定（catch-all 族/配对常量族/vacuous 族均有合并空间）。
+
+#### 素材 pre-fill 增补 · 7/9~7/12(Bettor 7/12 fresh 班 pre-fill·出处 COORD-LEDGER 7/9-7/12 各条 + DECISIONS D-010 + memory 对应族)
+
+**A++. 复发类增补**
+11. **fixture 假绿族已 ≥4 例(fixture-must-mirror-production 母题)**：③scout 归因 selftest 手工塞 `verboseData` 未复刻真实 RPC 形状→部署即炸 40min 双向脑裂(7/9,revert d944416c);④resume-fix §1 验收 abc 未覆盖"存量 evidence 缺 win_direction"历史形状→落码"生效"实际 22/27 盘照撞 MAX_WALK 空转(7/11 晚 Bettor 本班撞破,含 Bettor 自己"27/27 有 close_txid=resume 路全通"错误外推一次)。近亲:J2 offline test 热拷 5.6GB 活 WAL 库=撕裂快照(7/9)。**判定项:是否升 L2——验收清单强制加"存量数据形状扫描"步(对照设计所有 fail-closed 分支逐个查存量命中数)。**
+12. **"先报警/先修复,后验证目标实际路径"族 ×3+**：28mln 一晚三次同族(Bettor zombie 误诊/J2 V2 缺口套 V1 恐慌/ripe 时间外推),六层调查第 4 层(执行逻辑在哪个文件)跳步——memory `feedback-verify-actual-code-path-before-applying-finding` 已录,仍复发。**判定项:L1→L2(诊断报告模板强制"目标路径 file:function 已实读"栏)。**
+13. **浅确认/观测≠canonical 族(历史存量结构性遗产)**：shard8/9/10 三片共 19 笔 phantom(正反双向)全系 D=20 深确认门(7/8)上线**前**的历史窗口存量;kaspa_tx_log hit≠canonical 已入 memory。门本身 7/9 后零新增=门生效。**判定项:是否立"一次性全库历史 phantom 扫描"卡(把存量雷排完),还是接受按需爆雷+成熟 runbook(phantom 定案方法论已固化)。**
+14. **scope-drift 丢件(设计稿替换原始需求未被双审抓)**：自治化第四件"handoff-landed enqueue 重试"7/9 立卡→设计成稿时被替换为 landed-gated 持久化,双审未抓,7/10 bvh2c 局 J2+NWT 双 grep 才证实从未存在。修复=§0 原始需求核销表制度(72ea9f29 首用,a4343 第六件沿用)。**判定项:核销表是否已可判"固化",进设计稿模板标配。**
+15. **静默回退无诊断日志(catch-all 吞错族近亲,本班新例)**：deriveResumePlanFromEvidence {ok:false} 回退不落 reason→ALERT 只见 MAX_WALK,根因绕路 40min 才定位。**判定项:并入 catch-all 族升 L3 一并裁(裸 catch+静默回退同族 lint)。**
+
+**B++. 拦截成功类增补**
+- **大考=生产线体检器再证(最硬案例)**：a4343 六环大考实弹连逼三真 bug 当场根治(judgeWinDir 读错字段=写入后从未被真实路径调用过的休眠 bug/capture 一次性缺口 ESCALATIONS 老账/propose 人工边界),fail-loud 零资金事故——"验收局逼 bug"从 5R 彩排制一路复利。
+- **盲钉+双签深挖纪律连续命中**:b0uoi/a4343 两局盲钉三值逐位全中;NWT 签前深挖 claim tx 三输出形状(continuation/找零/金额巧合)→J2 输入级链证——"签前多挖一层"两次防住"数字对了就签"。
+- **gate②b 连环回本第 5-7 次**:排除漏配同形状洞 3 处在真 attest 前提前拔除(lv3rz 先例其实一直带洞)。
+- **Bettor 守恒盲算预备逮出 shard8 反向 phantom 7 笔**(7000KAS 有链无 DB,gate②b 本会炸出,提前定案)。
+- **红队设计层拦截(本班)**:NWT P1 三分支盲区——DoD#3 实弹盘惯例恰是 vulnerable 形状(非zk+blockhash_parity+fee),实弹前在设计稿层面拦死;同班 F1(未知键静默剥除→同 commit 不同行为)实测 repro 拦在 commit 上链前。
+- **协调者当班自纠闭环(本班)**:Bettor"resume 路全通"错误外推 40min 内被自己的日志验收翻盘,公开认账+ledger 更正——铁律-1"不把自己上一轮断言当既成事实"的正面执行例。
+
+**C++. 方法论沉淀增补**
+- **"字段存在≠语义完备"**:close_txid 在≠resume 通(本班);与"核实了值没核实值含义"(7/11 merkle_index)同母题第 2 例——存量数据形状必须实测。
+- **单向频道断裂双侧自我认知全错**(7/9 脑裂,memory 已录):追人前先自检外部消息 ingest 管线。
+- **幻觉防线首次实证有效+过度拒绝=反向失败**(7/10 持续注入局,~8 次注入含假钱路 GO 零错误操作;"每项各自独立落地核,不搞连坐"5 条新教训已入 Bettor 接位文件)。**判定项:4 个识破锚是否升全员接位标配(现仅 Bettor 文件有)。**
+- **排除语义单源化候选卡**(5 消费点各自带过滤=漏点温床,7/11 立卡未排)——与 D-008 四侧接线同母题:凡"多消费点各自实现同一判定"皆是漏配温床。
+- **结构性饿死诊断范式**(本班 J2 桶C trace):排序键+并发上限+空转盘三要素读码坐实,非猜——调度类"为什么轮不到"问题的标准答案形状。
+
+**D++. 表 2/3 快照增补**:ANTI-PATTERNS 56→57+(规则 57 Git Bash 反斜杠);DECISIONS 新增 D-010(签名门+切档);ledger 首次切档(320KB→66KB)。**表 3 最硬数据**:ZK 线六环全自治 a4343 全程零 sanctioned 步(judge/propose/attest/handoff/enqueue/close/claim 人工介入=0)——对照 7/8"批A 委员 attest 自治×2"时代,自动化率结构性跃迁;28mln(公测史上最大盘 154 赢家 17613.9KAS)结算人工介入=1 次根治型(MAX_WALK 索引落码),非重复性擦表。**规则总数已过 60 精简线,本轮 retro 必须跑合并判定**(候选族:fixture 假绿/catch-all+静默回退/浅确认观测/手工配对常量+vacuous)。
