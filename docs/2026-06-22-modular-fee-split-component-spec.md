@@ -73,6 +73,13 @@ feeSplit(feeRules, poolSompi, winners) → { feeLeaves[], payoutLeaves[] }
 2. **canonicalize = 单一共享函数,非"两处各自实现同一规范"**: create-time commit 与 settle-time re-derive **必须 import 同一个 `canonicalizeFeeRules()`**(嵌套 roles 数组按 role name 字典序+顶层 sorted-key+固定字段序,全部在该函数内实现)。两处独立实现同一规范=今晚 driver/committee 四处漏配家族的根,机制上不给复发机会(lint 可加 R-FEERULES-CANON-BYPASS 同 D-008 旁路封死模式)。
 3. **schema 版本号进 canonicalize 载荷**: feeRules 顶层必含 `schema_v`(int),参与 hash。委员 re-derive 前先检查 `schema_v` 是否在本节点支持集——不支持则报**可辨识的版本不符错误**(非静默算错非裸 BUST);版本变更天然改变 commit=旧新版本物理不可混。driver/committee 同 commit 升级从"流程纪律"升为"机制保障"。
 
+## 3.2 v1.3 ③好用层(2026-07-12 Owner 钦定,详见 KB `00-position/value-split-social-coordination-infra.md` v3 §6.5)
+
+Owner verbatim: "站在人类, 特别是**个体经济利益驱动**角度设计构建; 理论上可应用于**人类任何领域**; **怎么才能好被其他人/其他系统使用**要不断迭代; **使用方便, 信息及时推送**很关键。" 折入为组件的第三维(①分得对+②看得见+**③好用**):
+- **采用性=一等设计目标**: 独立 package(`@kanet/fee-split`)+接入文档+最小 example, 目标"不懂链的开发者十分钟跑通 demo";预设制是采用性的核心接口(§4)。
+- **信息及时推送进组件边界**: 每笔分润落链→实时推收款角色(tg DM/webhook/事件流)——broker-fee-emit(7/11 live 验证)为原型, 落码时事件 emit 接口作为组件输出的一部分设计(非外挂), 全角色泛化。
+- **持续迭代姿态**: 本 spec 随实弹/采用反馈滚动升版, 非一次性交付。
+
 ## 4. 行业预设 (证明行业无关 + 替代性)
 | 预设 | provider | facilitator | affiliate | verifier | infra |
 |---|---|---|---|---|---|
