@@ -36,6 +36,8 @@ C1现有代码里【已经存在】一个聚合层链锚(bshard-close-enforce.mj
 
 **验收(i)按Bettor钉的加一步实测**: 对28mln全部303张ticket地址跑一次真实`getUtxosByAddresses`(不经kaspa_tx_log),确认全部unspent/存在——这个实测结果本身就能证明"ticket没丢,只是查询机制查不到",是这版设计成立的关键证据,不是可选项。
 
+**(更新,J2实测中)** 抽样7个(跨shard0/2/4/6/8/9/10,含folded+shard9纠正后+未折叠)现有`checkUtxoLanded(addr,null)`(即现状kaspa_tx_log路径)**7/7命中true**,零false——数据目前**不支持**"级2-B从没被watch过"这个假设,倾向支持**方案A: 级2-B维持现状,不需要relay侧改动**。下面的"修复方向"(addr-only live查询)保留作为方案B,视全量303张的结果二选一——若扩大样本后出现任何false,则采用方案B;若303张全部命中,级2-B这一节可以整体划掉,只需在doc里留痕"已验证过、结论是不需要动"。等J2跑完全量结果,由NWT/Bettor拍二选一,我不预判。
+
 ## 落地范围
 - 改动文件①(级2-A,J1范围): `bshard-close-enforce.mjs`(verifyBettorsCompleteFromChain的级2-A循环,加`sh.status==='settling'`分支)。
 - 改动文件②(级2-B,J2范围,本次纳入不留follow-up): `kasia-relay`的`check_utxo_landed`命令handler(加地址-only live查询模式)+ `bshard-close-voter.js`的`checkUtxoLanded`闭包(txid=null分支改调用新live模式,不再回退kaspa_tx_log)。
