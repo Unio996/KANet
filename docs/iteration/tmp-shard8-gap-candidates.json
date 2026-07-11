@@ -1,0 +1,2555 @@
+{
+  "purpose": "J1 shard8 gap reconstruction: candidate leaf addresses for 7 missing NO bets under the 1000KAS-each hypothesis (UNPROVEN). For each of 26 gap positions x k=1..7 inserted bets, this is the spliced leaf address that WOULD exist on-chain if exactly k hypothetical 1000KAS NO bets landed at that point in the sequence (before continuing with the next known bet). Check each against kaspa_tx_log (landed-in-history, outputs_json LIKE) — a hit pins down the true insertion point(s) and bet count per gap.",
+  "hypothesis": "7 missing bets are each exactly 100000000000 sompi (1000 KAS), NO side — UNPROVEN, only tested because it is numerically self-consistent (7x1000=7000KAS exact gap)",
+  "total_candidates": 182,
+  "candidates": [
+    {
+      "gap_before_bet_id": 33260,
+      "gap_after_bet_id": null,
+      "gap_after_created_at": null,
+      "gap_before_created_at": "2026-07-08 05:13:02",
+      "inserted_no_bets": 1,
+      "hypothetical_state": {
+        "local_yes": 0,
+        "local_no": 100000000000,
+        "count": 1,
+        "pool_value": 100000000000
+      },
+      "address": "kaspatest:pz4duzj5lf6mvcv266zztreeact5ezw8gq0ty5xf4x0q9xy6srgguv6pehl8q"
+    },
+    {
+      "gap_before_bet_id": 33260,
+      "gap_after_bet_id": null,
+      "gap_after_created_at": null,
+      "gap_before_created_at": "2026-07-08 05:13:02",
+      "inserted_no_bets": 2,
+      "hypothetical_state": {
+        "local_yes": 0,
+        "local_no": 200000000000,
+        "count": 2,
+        "pool_value": 200000000000
+      },
+      "address": "kaspatest:ppy6y49m6ehlsnna7e4r7n7k5kx7wy4535dgwvw8tw47drxf7nuhcvxeffuzx"
+    },
+    {
+      "gap_before_bet_id": 33260,
+      "gap_after_bet_id": null,
+      "gap_after_created_at": null,
+      "gap_before_created_at": "2026-07-08 05:13:02",
+      "inserted_no_bets": 3,
+      "hypothetical_state": {
+        "local_yes": 0,
+        "local_no": 300000000000,
+        "count": 3,
+        "pool_value": 300000000000
+      },
+      "address": "kaspatest:pr753pkpasak2ntmju54u7w8vzqdq3c0jre2ue43s7h8750ekjz86jpt95scq"
+    },
+    {
+      "gap_before_bet_id": 33260,
+      "gap_after_bet_id": null,
+      "gap_after_created_at": null,
+      "gap_before_created_at": "2026-07-08 05:13:02",
+      "inserted_no_bets": 4,
+      "hypothetical_state": {
+        "local_yes": 0,
+        "local_no": 400000000000,
+        "count": 4,
+        "pool_value": 400000000000
+      },
+      "address": "kaspatest:prz5rdldkx8kss0q372ql4flg7dnld233mpdrlmmp3lt2hy55nvjuxlfdplg2"
+    },
+    {
+      "gap_before_bet_id": 33260,
+      "gap_after_bet_id": null,
+      "gap_after_created_at": null,
+      "gap_before_created_at": "2026-07-08 05:13:02",
+      "inserted_no_bets": 5,
+      "hypothetical_state": {
+        "local_yes": 0,
+        "local_no": 500000000000,
+        "count": 5,
+        "pool_value": 500000000000
+      },
+      "address": "kaspatest:ppasn2sc67a05wzj0sl24sv52q4ju4mza3hfneulmvewcjkkvp7j2vxqzamac"
+    },
+    {
+      "gap_before_bet_id": 33260,
+      "gap_after_bet_id": null,
+      "gap_after_created_at": null,
+      "gap_before_created_at": "2026-07-08 05:13:02",
+      "inserted_no_bets": 6,
+      "hypothetical_state": {
+        "local_yes": 0,
+        "local_no": 600000000000,
+        "count": 6,
+        "pool_value": 600000000000
+      },
+      "address": "kaspatest:pzmf8q98lnzkpmmesfl3harxujdpfs8rcgselrndevuv23lay6gdgl0ccs2aa"
+    },
+    {
+      "gap_before_bet_id": 33260,
+      "gap_after_bet_id": null,
+      "gap_after_created_at": null,
+      "gap_before_created_at": "2026-07-08 05:13:02",
+      "inserted_no_bets": 7,
+      "hypothetical_state": {
+        "local_yes": 0,
+        "local_no": 700000000000,
+        "count": 7,
+        "pool_value": 700000000000
+      },
+      "address": "kaspatest:pp9j6naxatf8x4sc6zlh7vne8zfham6c67f8wmnq0c5z7l7afzf8ckqycq7jh"
+    },
+    {
+      "gap_before_bet_id": 33261,
+      "gap_after_bet_id": 33260,
+      "gap_after_created_at": "2026-07-08 05:13:02",
+      "gap_before_created_at": "2026-07-08 05:13:09",
+      "inserted_no_bets": 1,
+      "hypothetical_state": {
+        "local_yes": 5000000000,
+        "local_no": 100000000000,
+        "count": 2,
+        "pool_value": 105000000000
+      },
+      "address": "kaspatest:pqrmqff30uyep8j6ezrrms23epm026k9rwthvdk57qshhs03r8rhwvf3eqmcz"
+    },
+    {
+      "gap_before_bet_id": 33261,
+      "gap_after_bet_id": 33260,
+      "gap_after_created_at": "2026-07-08 05:13:02",
+      "gap_before_created_at": "2026-07-08 05:13:09",
+      "inserted_no_bets": 2,
+      "hypothetical_state": {
+        "local_yes": 5000000000,
+        "local_no": 200000000000,
+        "count": 3,
+        "pool_value": 205000000000
+      },
+      "address": "kaspatest:pppwz38he9zx8ezx89h4ptsyul8wftfc9t3gxq4kxpds3xwyn7xrsdycrmsl2"
+    },
+    {
+      "gap_before_bet_id": 33261,
+      "gap_after_bet_id": 33260,
+      "gap_after_created_at": "2026-07-08 05:13:02",
+      "gap_before_created_at": "2026-07-08 05:13:09",
+      "inserted_no_bets": 3,
+      "hypothetical_state": {
+        "local_yes": 5000000000,
+        "local_no": 300000000000,
+        "count": 4,
+        "pool_value": 305000000000
+      },
+      "address": "kaspatest:pqpz9hp36348x2fw9d9tvngcalnz8djrwlhhu29wcv0gt5hnynzl6nzgsyxhz"
+    },
+    {
+      "gap_before_bet_id": 33261,
+      "gap_after_bet_id": 33260,
+      "gap_after_created_at": "2026-07-08 05:13:02",
+      "gap_before_created_at": "2026-07-08 05:13:09",
+      "inserted_no_bets": 4,
+      "hypothetical_state": {
+        "local_yes": 5000000000,
+        "local_no": 400000000000,
+        "count": 5,
+        "pool_value": 405000000000
+      },
+      "address": "kaspatest:pqgnm3rn0s5xvr5jj4jxprwwch6ev4h0ju3yhre6rxtjfgfu0ugw2j0dwyjkp"
+    },
+    {
+      "gap_before_bet_id": 33261,
+      "gap_after_bet_id": 33260,
+      "gap_after_created_at": "2026-07-08 05:13:02",
+      "gap_before_created_at": "2026-07-08 05:13:09",
+      "inserted_no_bets": 5,
+      "hypothetical_state": {
+        "local_yes": 5000000000,
+        "local_no": 500000000000,
+        "count": 6,
+        "pool_value": 505000000000
+      },
+      "address": "kaspatest:prsqv0rj7plg3zlmd3pyvt22jqzg22v5ajj87m6qjrrvx8cq95vuv9e4v45ks"
+    },
+    {
+      "gap_before_bet_id": 33261,
+      "gap_after_bet_id": 33260,
+      "gap_after_created_at": "2026-07-08 05:13:02",
+      "gap_before_created_at": "2026-07-08 05:13:09",
+      "inserted_no_bets": 6,
+      "hypothetical_state": {
+        "local_yes": 5000000000,
+        "local_no": 600000000000,
+        "count": 7,
+        "pool_value": 605000000000
+      },
+      "address": "kaspatest:pz9833u0qk8mua9saud8y63gqv9fy48nffg0hhjfpsg5rcu8evycs4fz6g2r9"
+    },
+    {
+      "gap_before_bet_id": 33261,
+      "gap_after_bet_id": 33260,
+      "gap_after_created_at": "2026-07-08 05:13:02",
+      "gap_before_created_at": "2026-07-08 05:13:09",
+      "inserted_no_bets": 7,
+      "hypothetical_state": {
+        "local_yes": 5000000000,
+        "local_no": 700000000000,
+        "count": 8,
+        "pool_value": 705000000000
+      },
+      "address": "kaspatest:prp3eysneg8xhj59prpsaf5ljypv7vy9lrh7tv04vww87emjmlnnz69sxl4jk"
+    },
+    {
+      "gap_before_bet_id": 33262,
+      "gap_after_bet_id": 33261,
+      "gap_after_created_at": "2026-07-08 05:13:09",
+      "gap_before_created_at": "2026-07-08 05:13:16",
+      "inserted_no_bets": 1,
+      "hypothetical_state": {
+        "local_yes": 5000000000,
+        "local_no": 104059000000,
+        "count": 3,
+        "pool_value": 109059000000
+      },
+      "address": "kaspatest:przgug8hz85pkdja5yksvhvl9vy658malxutfl80fk9egmnzvg3h6l8uun0np"
+    },
+    {
+      "gap_before_bet_id": 33262,
+      "gap_after_bet_id": 33261,
+      "gap_after_created_at": "2026-07-08 05:13:09",
+      "gap_before_created_at": "2026-07-08 05:13:16",
+      "inserted_no_bets": 2,
+      "hypothetical_state": {
+        "local_yes": 5000000000,
+        "local_no": 204059000000,
+        "count": 4,
+        "pool_value": 209059000000
+      },
+      "address": "kaspatest:prudsuca3qpqjzejqakxg5aqlagc0lmwfdy4dkanzkrneq8fpff6jsypk0zru"
+    },
+    {
+      "gap_before_bet_id": 33262,
+      "gap_after_bet_id": 33261,
+      "gap_after_created_at": "2026-07-08 05:13:09",
+      "gap_before_created_at": "2026-07-08 05:13:16",
+      "inserted_no_bets": 3,
+      "hypothetical_state": {
+        "local_yes": 5000000000,
+        "local_no": 304059000000,
+        "count": 5,
+        "pool_value": 309059000000
+      },
+      "address": "kaspatest:pzkn5vjv9hcgy5ryyqhx5q088qwfcrawe9ram34epvldmpzqu7kskxwq9n32g"
+    },
+    {
+      "gap_before_bet_id": 33262,
+      "gap_after_bet_id": 33261,
+      "gap_after_created_at": "2026-07-08 05:13:09",
+      "gap_before_created_at": "2026-07-08 05:13:16",
+      "inserted_no_bets": 4,
+      "hypothetical_state": {
+        "local_yes": 5000000000,
+        "local_no": 404059000000,
+        "count": 6,
+        "pool_value": 409059000000
+      },
+      "address": "kaspatest:pp8g7l4pk5ym3p3jq5jacg9g9d4c6qvxt3jj8ulhmd8qxptwmz0js4798h0mn"
+    },
+    {
+      "gap_before_bet_id": 33262,
+      "gap_after_bet_id": 33261,
+      "gap_after_created_at": "2026-07-08 05:13:09",
+      "gap_before_created_at": "2026-07-08 05:13:16",
+      "inserted_no_bets": 5,
+      "hypothetical_state": {
+        "local_yes": 5000000000,
+        "local_no": 504059000000,
+        "count": 7,
+        "pool_value": 509059000000
+      },
+      "address": "kaspatest:pzuk465jg90m95qnjxekuh9sqxzc3aukrmd5hc3fjyf7xtvedvd6uuzr7pu5j"
+    },
+    {
+      "gap_before_bet_id": 33262,
+      "gap_after_bet_id": 33261,
+      "gap_after_created_at": "2026-07-08 05:13:09",
+      "gap_before_created_at": "2026-07-08 05:13:16",
+      "inserted_no_bets": 6,
+      "hypothetical_state": {
+        "local_yes": 5000000000,
+        "local_no": 604059000000,
+        "count": 8,
+        "pool_value": 609059000000
+      },
+      "address": "kaspatest:pp350z82r5gyjkdqmuu0n4qk5gpqwcrct2z9xrkwmkmw25kk858372ffq3hz5"
+    },
+    {
+      "gap_before_bet_id": 33262,
+      "gap_after_bet_id": 33261,
+      "gap_after_created_at": "2026-07-08 05:13:09",
+      "gap_before_created_at": "2026-07-08 05:13:16",
+      "inserted_no_bets": 7,
+      "hypothetical_state": {
+        "local_yes": 5000000000,
+        "local_no": 704059000000,
+        "count": 9,
+        "pool_value": 709059000000
+      },
+      "address": "kaspatest:ppp3tz5etg3y7qgv52n4lthzdkdh8f4tua7c003zgjluzfx330ezxvxkf767k"
+    },
+    {
+      "gap_before_bet_id": 33267,
+      "gap_after_bet_id": 33262,
+      "gap_after_created_at": "2026-07-08 05:13:16",
+      "gap_before_created_at": "2026-07-08 05:15:01",
+      "inserted_no_bets": 1,
+      "hypothetical_state": {
+        "local_yes": 5000000000,
+        "local_no": 105559000000,
+        "count": 4,
+        "pool_value": 110559000000
+      },
+      "address": "kaspatest:prk7phy2san95arh8eujhcqa032u8shd7gn8yqxdju24ravggtvszdc8r5f9x"
+    },
+    {
+      "gap_before_bet_id": 33267,
+      "gap_after_bet_id": 33262,
+      "gap_after_created_at": "2026-07-08 05:13:16",
+      "gap_before_created_at": "2026-07-08 05:15:01",
+      "inserted_no_bets": 2,
+      "hypothetical_state": {
+        "local_yes": 5000000000,
+        "local_no": 205559000000,
+        "count": 5,
+        "pool_value": 210559000000
+      },
+      "address": "kaspatest:pzglrs44n3m8j7s4kkwhf539uj7qr9ayusy8hehjqa2hwl0s8myc2xq0arm3k"
+    },
+    {
+      "gap_before_bet_id": 33267,
+      "gap_after_bet_id": 33262,
+      "gap_after_created_at": "2026-07-08 05:13:16",
+      "gap_before_created_at": "2026-07-08 05:15:01",
+      "inserted_no_bets": 3,
+      "hypothetical_state": {
+        "local_yes": 5000000000,
+        "local_no": 305559000000,
+        "count": 6,
+        "pool_value": 310559000000
+      },
+      "address": "kaspatest:ppryu7674pt2s4jpdlcx88t6vnxwzncjpwxdl4t8mfevgwg60qqx5l7gdytwq"
+    },
+    {
+      "gap_before_bet_id": 33267,
+      "gap_after_bet_id": 33262,
+      "gap_after_created_at": "2026-07-08 05:13:16",
+      "gap_before_created_at": "2026-07-08 05:15:01",
+      "inserted_no_bets": 4,
+      "hypothetical_state": {
+        "local_yes": 5000000000,
+        "local_no": 405559000000,
+        "count": 7,
+        "pool_value": 410559000000
+      },
+      "address": "kaspatest:pr27d3lh3xzak7jerjy8j3n4ake8s4sv38nwr4g4qlchma2tr6ntgt568rne0"
+    },
+    {
+      "gap_before_bet_id": 33267,
+      "gap_after_bet_id": 33262,
+      "gap_after_created_at": "2026-07-08 05:13:16",
+      "gap_before_created_at": "2026-07-08 05:15:01",
+      "inserted_no_bets": 5,
+      "hypothetical_state": {
+        "local_yes": 5000000000,
+        "local_no": 505559000000,
+        "count": 8,
+        "pool_value": 510559000000
+      },
+      "address": "kaspatest:prmp8ujekw8yrc4rk0hwnjnvpr354cmrs94mgen7he9wevc5klkp2jy0nmc4c"
+    },
+    {
+      "gap_before_bet_id": 33267,
+      "gap_after_bet_id": 33262,
+      "gap_after_created_at": "2026-07-08 05:13:16",
+      "gap_before_created_at": "2026-07-08 05:15:01",
+      "inserted_no_bets": 6,
+      "hypothetical_state": {
+        "local_yes": 5000000000,
+        "local_no": 605559000000,
+        "count": 9,
+        "pool_value": 610559000000
+      },
+      "address": "kaspatest:pr2vqnekuvk9hjx9380vlsmk44zmc6pahlc4c0r874zmvqyny3sew6vwvtdat"
+    },
+    {
+      "gap_before_bet_id": 33267,
+      "gap_after_bet_id": 33262,
+      "gap_after_created_at": "2026-07-08 05:13:16",
+      "gap_before_created_at": "2026-07-08 05:15:01",
+      "inserted_no_bets": 7,
+      "hypothetical_state": {
+        "local_yes": 5000000000,
+        "local_no": 705559000000,
+        "count": 10,
+        "pool_value": 710559000000
+      },
+      "address": "kaspatest:prjg22pc6zj5gqxmqlrl7yxg0tk6uzgmj07htvcynxg370rqp9h82lq8n2qzr"
+    },
+    {
+      "gap_before_bet_id": 33268,
+      "gap_after_bet_id": 33267,
+      "gap_after_created_at": "2026-07-08 05:15:01",
+      "gap_before_created_at": "2026-07-08 05:15:11",
+      "inserted_no_bets": 1,
+      "hypothetical_state": {
+        "local_yes": 10000000000,
+        "local_no": 105559000000,
+        "count": 5,
+        "pool_value": 115559000000
+      },
+      "address": "kaspatest:ppeyk5etzeapz4r9vm7j9utw7x06s8vcc6u5aygwser0n5ksfs85q0t6hqfrz"
+    },
+    {
+      "gap_before_bet_id": 33268,
+      "gap_after_bet_id": 33267,
+      "gap_after_created_at": "2026-07-08 05:15:01",
+      "gap_before_created_at": "2026-07-08 05:15:11",
+      "inserted_no_bets": 2,
+      "hypothetical_state": {
+        "local_yes": 10000000000,
+        "local_no": 205559000000,
+        "count": 6,
+        "pool_value": 215559000000
+      },
+      "address": "kaspatest:pztzqf7dyth05paazdnz95e7klalf5ysp89nmmntm9agez5aqlezktlgxr2xx"
+    },
+    {
+      "gap_before_bet_id": 33268,
+      "gap_after_bet_id": 33267,
+      "gap_after_created_at": "2026-07-08 05:15:01",
+      "gap_before_created_at": "2026-07-08 05:15:11",
+      "inserted_no_bets": 3,
+      "hypothetical_state": {
+        "local_yes": 10000000000,
+        "local_no": 305559000000,
+        "count": 7,
+        "pool_value": 315559000000
+      },
+      "address": "kaspatest:prnuk6q3sfra58scrp43h54hhdg66v76upaan05zlzucmjha07a5xmwpfk5cx"
+    },
+    {
+      "gap_before_bet_id": 33268,
+      "gap_after_bet_id": 33267,
+      "gap_after_created_at": "2026-07-08 05:15:01",
+      "gap_before_created_at": "2026-07-08 05:15:11",
+      "inserted_no_bets": 4,
+      "hypothetical_state": {
+        "local_yes": 10000000000,
+        "local_no": 405559000000,
+        "count": 8,
+        "pool_value": 415559000000
+      },
+      "address": "kaspatest:pzcx759chp8dfr2xwj2gqn8hhlt5p04nuymmjltukfhvvs0pzx7a5fx0x6y28"
+    },
+    {
+      "gap_before_bet_id": 33268,
+      "gap_after_bet_id": 33267,
+      "gap_after_created_at": "2026-07-08 05:15:01",
+      "gap_before_created_at": "2026-07-08 05:15:11",
+      "inserted_no_bets": 5,
+      "hypothetical_state": {
+        "local_yes": 10000000000,
+        "local_no": 505559000000,
+        "count": 9,
+        "pool_value": 515559000000
+      },
+      "address": "kaspatest:pr4kk08z67fm87zsqefdn9cjlrd8e6nd3nacqe4t0nzgvawq9jum5r2a9ywjk"
+    },
+    {
+      "gap_before_bet_id": 33268,
+      "gap_after_bet_id": 33267,
+      "gap_after_created_at": "2026-07-08 05:15:01",
+      "gap_before_created_at": "2026-07-08 05:15:11",
+      "inserted_no_bets": 6,
+      "hypothetical_state": {
+        "local_yes": 10000000000,
+        "local_no": 605559000000,
+        "count": 10,
+        "pool_value": 615559000000
+      },
+      "address": "kaspatest:pzcrat393jquhlhg8jsjes89z650swlmscv3cx964x25dsjhj9aqwdmftevt9"
+    },
+    {
+      "gap_before_bet_id": 33268,
+      "gap_after_bet_id": 33267,
+      "gap_after_created_at": "2026-07-08 05:15:01",
+      "gap_before_created_at": "2026-07-08 05:15:11",
+      "inserted_no_bets": 7,
+      "hypothetical_state": {
+        "local_yes": 10000000000,
+        "local_no": 705559000000,
+        "count": 11,
+        "pool_value": 715559000000
+      },
+      "address": "kaspatest:pqqu0pvazepm4r3n7hf7sgvd4707nefsd3tfmwk795dqgstjtlhm73a4lhc6p"
+    },
+    {
+      "gap_before_bet_id": 33273,
+      "gap_after_bet_id": 33268,
+      "gap_after_created_at": "2026-07-08 05:15:11",
+      "gap_before_created_at": "2026-07-08 05:17:01",
+      "inserted_no_bets": 1,
+      "hypothetical_state": {
+        "local_yes": 10000000000,
+        "local_no": 107059000000,
+        "count": 6,
+        "pool_value": 117059000000
+      },
+      "address": "kaspatest:pr3quvx0mgp9cn8rdkz9xad5hdgc834sxna9ctf42e4xuy85lp56y0gcg9e8x"
+    },
+    {
+      "gap_before_bet_id": 33273,
+      "gap_after_bet_id": 33268,
+      "gap_after_created_at": "2026-07-08 05:15:11",
+      "gap_before_created_at": "2026-07-08 05:17:01",
+      "inserted_no_bets": 2,
+      "hypothetical_state": {
+        "local_yes": 10000000000,
+        "local_no": 207059000000,
+        "count": 7,
+        "pool_value": 217059000000
+      },
+      "address": "kaspatest:pquglskehz50ueqe48q5nx9jd2eq4ynl54y386gcrkrreunumk8g7ttj5xpv9"
+    },
+    {
+      "gap_before_bet_id": 33273,
+      "gap_after_bet_id": 33268,
+      "gap_after_created_at": "2026-07-08 05:15:11",
+      "gap_before_created_at": "2026-07-08 05:17:01",
+      "inserted_no_bets": 3,
+      "hypothetical_state": {
+        "local_yes": 10000000000,
+        "local_no": 307059000000,
+        "count": 8,
+        "pool_value": 317059000000
+      },
+      "address": "kaspatest:pzg23l3fvkddhu0k4zjj5uvy28nzvcs7yrk5pk2n7lstd5slnz3jywrldfs03"
+    },
+    {
+      "gap_before_bet_id": 33273,
+      "gap_after_bet_id": 33268,
+      "gap_after_created_at": "2026-07-08 05:15:11",
+      "gap_before_created_at": "2026-07-08 05:17:01",
+      "inserted_no_bets": 4,
+      "hypothetical_state": {
+        "local_yes": 10000000000,
+        "local_no": 407059000000,
+        "count": 9,
+        "pool_value": 417059000000
+      },
+      "address": "kaspatest:ppwedr8mcer9pve42whvsk2uqnfahvp5un0lg4x3lvv0khu3erhrqqws9ey42"
+    },
+    {
+      "gap_before_bet_id": 33273,
+      "gap_after_bet_id": 33268,
+      "gap_after_created_at": "2026-07-08 05:15:11",
+      "gap_before_created_at": "2026-07-08 05:17:01",
+      "inserted_no_bets": 5,
+      "hypothetical_state": {
+        "local_yes": 10000000000,
+        "local_no": 507059000000,
+        "count": 10,
+        "pool_value": 517059000000
+      },
+      "address": "kaspatest:pp6uyv48sfk2ya7h4ar8eupjlhnlp060sja8v4ggzq4q96r9wyu8x5fv6ja5q"
+    },
+    {
+      "gap_before_bet_id": 33273,
+      "gap_after_bet_id": 33268,
+      "gap_after_created_at": "2026-07-08 05:15:11",
+      "gap_before_created_at": "2026-07-08 05:17:01",
+      "inserted_no_bets": 6,
+      "hypothetical_state": {
+        "local_yes": 10000000000,
+        "local_no": 607059000000,
+        "count": 11,
+        "pool_value": 617059000000
+      },
+      "address": "kaspatest:pqflxrd7t64vhp7s58l2kp4atfl3wtlfjaghwp28k32p2ewzuz5nvzpd9mwwj"
+    },
+    {
+      "gap_before_bet_id": 33273,
+      "gap_after_bet_id": 33268,
+      "gap_after_created_at": "2026-07-08 05:15:11",
+      "gap_before_created_at": "2026-07-08 05:17:01",
+      "inserted_no_bets": 7,
+      "hypothetical_state": {
+        "local_yes": 10000000000,
+        "local_no": 707059000000,
+        "count": 12,
+        "pool_value": 717059000000
+      },
+      "address": "kaspatest:pqla02ljgz7yl8p53w99tgrl3fvv6fgp0ca9adxmh86h9jyakrepcejn4du35"
+    },
+    {
+      "gap_before_bet_id": 33275,
+      "gap_after_bet_id": 33273,
+      "gap_after_created_at": "2026-07-08 05:17:01",
+      "gap_before_created_at": "2026-07-08 05:17:11",
+      "inserted_no_bets": 1,
+      "hypothetical_state": {
+        "local_yes": 15000000000,
+        "local_no": 107059000000,
+        "count": 7,
+        "pool_value": 122059000000
+      },
+      "address": "kaspatest:ppn4ujaw2fpscfxy6lyyd306n0x4m2gsrt6fuufukkwrttwy8prxw8r57dvut"
+    },
+    {
+      "gap_before_bet_id": 33275,
+      "gap_after_bet_id": 33273,
+      "gap_after_created_at": "2026-07-08 05:17:01",
+      "gap_before_created_at": "2026-07-08 05:17:11",
+      "inserted_no_bets": 2,
+      "hypothetical_state": {
+        "local_yes": 15000000000,
+        "local_no": 207059000000,
+        "count": 8,
+        "pool_value": 222059000000
+      },
+      "address": "kaspatest:pp8pruy0975kun4gduc0k423t29yhyqa760hystf9kts20afy4zsz4dae2m4z"
+    },
+    {
+      "gap_before_bet_id": 33275,
+      "gap_after_bet_id": 33273,
+      "gap_after_created_at": "2026-07-08 05:17:01",
+      "gap_before_created_at": "2026-07-08 05:17:11",
+      "inserted_no_bets": 3,
+      "hypothetical_state": {
+        "local_yes": 15000000000,
+        "local_no": 307059000000,
+        "count": 9,
+        "pool_value": 322059000000
+      },
+      "address": "kaspatest:ppcgrf2ge2gl4ff76eaj9lp0zmjc3l2mm23jfhsjeqx9ndy849l8z9lwz4vzt"
+    },
+    {
+      "gap_before_bet_id": 33275,
+      "gap_after_bet_id": 33273,
+      "gap_after_created_at": "2026-07-08 05:17:01",
+      "gap_before_created_at": "2026-07-08 05:17:11",
+      "inserted_no_bets": 4,
+      "hypothetical_state": {
+        "local_yes": 15000000000,
+        "local_no": 407059000000,
+        "count": 10,
+        "pool_value": 422059000000
+      },
+      "address": "kaspatest:ppvg0r66zgg03p0sdh509qg9tpknwdpmf2cp9d93s78t4nm0wa59k3x9cyr08"
+    },
+    {
+      "gap_before_bet_id": 33275,
+      "gap_after_bet_id": 33273,
+      "gap_after_created_at": "2026-07-08 05:17:01",
+      "gap_before_created_at": "2026-07-08 05:17:11",
+      "inserted_no_bets": 5,
+      "hypothetical_state": {
+        "local_yes": 15000000000,
+        "local_no": 507059000000,
+        "count": 11,
+        "pool_value": 522059000000
+      },
+      "address": "kaspatest:prdh76d00kwfda4snj0zl4xjv49z6uunnszxst8grdndep9tzsxnu8m837ddp"
+    },
+    {
+      "gap_before_bet_id": 33275,
+      "gap_after_bet_id": 33273,
+      "gap_after_created_at": "2026-07-08 05:17:01",
+      "gap_before_created_at": "2026-07-08 05:17:11",
+      "inserted_no_bets": 6,
+      "hypothetical_state": {
+        "local_yes": 15000000000,
+        "local_no": 607059000000,
+        "count": 12,
+        "pool_value": 622059000000
+      },
+      "address": "kaspatest:pqwvydlpgtqp9dr46z9fzgr6nu05827qqacyu54dzdcl7lr546fdqu2xanvs5"
+    },
+    {
+      "gap_before_bet_id": 33275,
+      "gap_after_bet_id": 33273,
+      "gap_after_created_at": "2026-07-08 05:17:01",
+      "gap_before_created_at": "2026-07-08 05:17:11",
+      "inserted_no_bets": 7,
+      "hypothetical_state": {
+        "local_yes": 15000000000,
+        "local_no": 707059000000,
+        "count": 13,
+        "pool_value": 722059000000
+      },
+      "address": "kaspatest:pzks9pax3apy0em7wtc2zjr0g5p8g55ndepcnzy5ppnpftjvqfsxcm4tnz6h9"
+    },
+    {
+      "gap_before_bet_id": 33283,
+      "gap_after_bet_id": 33275,
+      "gap_after_created_at": "2026-07-08 05:17:11",
+      "gap_before_created_at": "2026-07-08 05:18:50",
+      "inserted_no_bets": 1,
+      "hypothetical_state": {
+        "local_yes": 15000000000,
+        "local_no": 108559000000,
+        "count": 8,
+        "pool_value": 123559000000
+      },
+      "address": "kaspatest:pr00zsh7aay38rxuagzuj60kr3g7ztqvknq4vjp38t28d9j4f5dwxp9wpclja"
+    },
+    {
+      "gap_before_bet_id": 33283,
+      "gap_after_bet_id": 33275,
+      "gap_after_created_at": "2026-07-08 05:17:11",
+      "gap_before_created_at": "2026-07-08 05:18:50",
+      "inserted_no_bets": 2,
+      "hypothetical_state": {
+        "local_yes": 15000000000,
+        "local_no": 208559000000,
+        "count": 9,
+        "pool_value": 223559000000
+      },
+      "address": "kaspatest:pqwfjgpyu8gtheezshx0j4x5wem7zgav3zuqqz6q07cmwc3kj9y22tfwtray5"
+    },
+    {
+      "gap_before_bet_id": 33283,
+      "gap_after_bet_id": 33275,
+      "gap_after_created_at": "2026-07-08 05:17:11",
+      "gap_before_created_at": "2026-07-08 05:18:50",
+      "inserted_no_bets": 3,
+      "hypothetical_state": {
+        "local_yes": 15000000000,
+        "local_no": 308559000000,
+        "count": 10,
+        "pool_value": 323559000000
+      },
+      "address": "kaspatest:pqwjqvfa9km4z8zacgmhgww50ftzt0yr7wuey2jnnwaygtafknuu5yhduug6a"
+    },
+    {
+      "gap_before_bet_id": 33283,
+      "gap_after_bet_id": 33275,
+      "gap_after_created_at": "2026-07-08 05:17:11",
+      "gap_before_created_at": "2026-07-08 05:18:50",
+      "inserted_no_bets": 4,
+      "hypothetical_state": {
+        "local_yes": 15000000000,
+        "local_no": 408559000000,
+        "count": 11,
+        "pool_value": 423559000000
+      },
+      "address": "kaspatest:prm6vdmydnrmrnajhzvuw8c87m2qeu6y8w9dmmgas3kcugn2lq40gsw360tms"
+    },
+    {
+      "gap_before_bet_id": 33283,
+      "gap_after_bet_id": 33275,
+      "gap_after_created_at": "2026-07-08 05:17:11",
+      "gap_before_created_at": "2026-07-08 05:18:50",
+      "inserted_no_bets": 5,
+      "hypothetical_state": {
+        "local_yes": 15000000000,
+        "local_no": 508559000000,
+        "count": 12,
+        "pool_value": 523559000000
+      },
+      "address": "kaspatest:pqkakxaqtan5sgr7pluyxpcyam7v087wsu9ctj40kxjt4qvh94mrj6ked58ax"
+    },
+    {
+      "gap_before_bet_id": 33283,
+      "gap_after_bet_id": 33275,
+      "gap_after_created_at": "2026-07-08 05:17:11",
+      "gap_before_created_at": "2026-07-08 05:18:50",
+      "inserted_no_bets": 6,
+      "hypothetical_state": {
+        "local_yes": 15000000000,
+        "local_no": 608559000000,
+        "count": 13,
+        "pool_value": 623559000000
+      },
+      "address": "kaspatest:ppvyx8hj7jc0fdev2ra3almnw4axj9vulfkg9hz99xrwxn6t43egjjjlxxu79"
+    },
+    {
+      "gap_before_bet_id": 33283,
+      "gap_after_bet_id": 33275,
+      "gap_after_created_at": "2026-07-08 05:17:11",
+      "gap_before_created_at": "2026-07-08 05:18:50",
+      "inserted_no_bets": 7,
+      "hypothetical_state": {
+        "local_yes": 15000000000,
+        "local_no": 708559000000,
+        "count": 14,
+        "pool_value": 723559000000
+      },
+      "address": "kaspatest:pqv5n2tn728d9fpzkn848m0s9q69gcajerhk4tx6fy27pystxn0cqsw3mdnz6"
+    },
+    {
+      "gap_before_bet_id": 33284,
+      "gap_after_bet_id": 33283,
+      "gap_after_created_at": "2026-07-08 05:18:50",
+      "gap_before_created_at": "2026-07-08 05:19:01",
+      "inserted_no_bets": 1,
+      "hypothetical_state": {
+        "local_yes": 17525000000,
+        "local_no": 108559000000,
+        "count": 9,
+        "pool_value": 126084000000
+      },
+      "address": "kaspatest:ppv2reu8jx79px3yk2kushk2hrvzh9pmjej90c6gdwzt4644adz4jgq2h6lu3"
+    },
+    {
+      "gap_before_bet_id": 33284,
+      "gap_after_bet_id": 33283,
+      "gap_after_created_at": "2026-07-08 05:18:50",
+      "gap_before_created_at": "2026-07-08 05:19:01",
+      "inserted_no_bets": 2,
+      "hypothetical_state": {
+        "local_yes": 17525000000,
+        "local_no": 208559000000,
+        "count": 10,
+        "pool_value": 226084000000
+      },
+      "address": "kaspatest:ppnch8zkws3rx9dcrk4ewtyfm4y8yk22nep7ca7lsfdudx43zu0zxx3lj4mhn"
+    },
+    {
+      "gap_before_bet_id": 33284,
+      "gap_after_bet_id": 33283,
+      "gap_after_created_at": "2026-07-08 05:18:50",
+      "gap_before_created_at": "2026-07-08 05:19:01",
+      "inserted_no_bets": 3,
+      "hypothetical_state": {
+        "local_yes": 17525000000,
+        "local_no": 308559000000,
+        "count": 11,
+        "pool_value": 326084000000
+      },
+      "address": "kaspatest:praafrgjx95g23dj8swwkn5v274ddnunqmw9g22kykcvf85peryrzzag7e47d"
+    },
+    {
+      "gap_before_bet_id": 33284,
+      "gap_after_bet_id": 33283,
+      "gap_after_created_at": "2026-07-08 05:18:50",
+      "gap_before_created_at": "2026-07-08 05:19:01",
+      "inserted_no_bets": 4,
+      "hypothetical_state": {
+        "local_yes": 17525000000,
+        "local_no": 408559000000,
+        "count": 12,
+        "pool_value": 426084000000
+      },
+      "address": "kaspatest:pqawpj280wqldndurg5nkuq5rdqlzdke3427x3n0nzakn4rrddejug2rvsdga"
+    },
+    {
+      "gap_before_bet_id": 33284,
+      "gap_after_bet_id": 33283,
+      "gap_after_created_at": "2026-07-08 05:18:50",
+      "gap_before_created_at": "2026-07-08 05:19:01",
+      "inserted_no_bets": 5,
+      "hypothetical_state": {
+        "local_yes": 17525000000,
+        "local_no": 508559000000,
+        "count": 13,
+        "pool_value": 526084000000
+      },
+      "address": "kaspatest:pq577wp8sskxy0zacyxq9uj6sqf4ktad53alyegzl8cqfer67k2pwt0ssny4z"
+    },
+    {
+      "gap_before_bet_id": 33284,
+      "gap_after_bet_id": 33283,
+      "gap_after_created_at": "2026-07-08 05:18:50",
+      "gap_before_created_at": "2026-07-08 05:19:01",
+      "inserted_no_bets": 6,
+      "hypothetical_state": {
+        "local_yes": 17525000000,
+        "local_no": 608559000000,
+        "count": 14,
+        "pool_value": 626084000000
+      },
+      "address": "kaspatest:pzswa2ey6uqfjz4n4j50z896adlwgmstxeq2vpa2sxwa3d96qpmxkr69ta65h"
+    },
+    {
+      "gap_before_bet_id": 33284,
+      "gap_after_bet_id": 33283,
+      "gap_after_created_at": "2026-07-08 05:18:50",
+      "gap_before_created_at": "2026-07-08 05:19:01",
+      "inserted_no_bets": 7,
+      "hypothetical_state": {
+        "local_yes": 17525000000,
+        "local_no": 708559000000,
+        "count": 15,
+        "pool_value": 726084000000
+      },
+      "address": "kaspatest:pq4yw4s53tcjk5mv3s5u2uajnzdza7834e4fema9pkru8dg5ydxe65zhur77e"
+    },
+    {
+      "gap_before_bet_id": 33286,
+      "gap_after_bet_id": 33284,
+      "gap_after_created_at": "2026-07-08 05:19:01",
+      "gap_before_created_at": "2026-07-08 05:19:11",
+      "inserted_no_bets": 1,
+      "hypothetical_state": {
+        "local_yes": 22525000000,
+        "local_no": 108559000000,
+        "count": 10,
+        "pool_value": 131084000000
+      },
+      "address": "kaspatest:pp24te8pyrrf0amgkpv2n6ucd3m2f3pqaplgw5vdg05jz4cev7yykh3vkddys"
+    },
+    {
+      "gap_before_bet_id": 33286,
+      "gap_after_bet_id": 33284,
+      "gap_after_created_at": "2026-07-08 05:19:01",
+      "gap_before_created_at": "2026-07-08 05:19:11",
+      "inserted_no_bets": 2,
+      "hypothetical_state": {
+        "local_yes": 22525000000,
+        "local_no": 208559000000,
+        "count": 11,
+        "pool_value": 231084000000
+      },
+      "address": "kaspatest:ppzchx690zxm3nysl0c07yl26dkckzzflaratjsmy7w5tkmne8hlu0rs2tpc6"
+    },
+    {
+      "gap_before_bet_id": 33286,
+      "gap_after_bet_id": 33284,
+      "gap_after_created_at": "2026-07-08 05:19:01",
+      "gap_before_created_at": "2026-07-08 05:19:11",
+      "inserted_no_bets": 3,
+      "hypothetical_state": {
+        "local_yes": 22525000000,
+        "local_no": 308559000000,
+        "count": 12,
+        "pool_value": 331084000000
+      },
+      "address": "kaspatest:pzzdprxy8a6axducwfxxjdu0lj588ag2x4z08kpv3yykrvqtfmqr7rteqz7gj"
+    },
+    {
+      "gap_before_bet_id": 33286,
+      "gap_after_bet_id": 33284,
+      "gap_after_created_at": "2026-07-08 05:19:01",
+      "gap_before_created_at": "2026-07-08 05:19:11",
+      "inserted_no_bets": 4,
+      "hypothetical_state": {
+        "local_yes": 22525000000,
+        "local_no": 408559000000,
+        "count": 13,
+        "pool_value": 431084000000
+      },
+      "address": "kaspatest:pzat9pjhwdy0s3ew9k2cadwfd3hlff5mvvlwg49sag9mewfvnlufsdceeflj6"
+    },
+    {
+      "gap_before_bet_id": 33286,
+      "gap_after_bet_id": 33284,
+      "gap_after_created_at": "2026-07-08 05:19:01",
+      "gap_before_created_at": "2026-07-08 05:19:11",
+      "inserted_no_bets": 5,
+      "hypothetical_state": {
+        "local_yes": 22525000000,
+        "local_no": 508559000000,
+        "count": 14,
+        "pool_value": 531084000000
+      },
+      "address": "kaspatest:praqz244psffzq8rmhyym09ws9g0fwxgu6lkslfj4qzm8hkeh8dvs2x9xv53j"
+    },
+    {
+      "gap_before_bet_id": 33286,
+      "gap_after_bet_id": 33284,
+      "gap_after_created_at": "2026-07-08 05:19:01",
+      "gap_before_created_at": "2026-07-08 05:19:11",
+      "inserted_no_bets": 6,
+      "hypothetical_state": {
+        "local_yes": 22525000000,
+        "local_no": 608559000000,
+        "count": 15,
+        "pool_value": 631084000000
+      },
+      "address": "kaspatest:pqt0hlsgcd4ykmtmyu3qekm9afu6azm657fv5n8pdvynezjzvacmu4wqrym8y"
+    },
+    {
+      "gap_before_bet_id": 33286,
+      "gap_after_bet_id": 33284,
+      "gap_after_created_at": "2026-07-08 05:19:01",
+      "gap_before_created_at": "2026-07-08 05:19:11",
+      "inserted_no_bets": 7,
+      "hypothetical_state": {
+        "local_yes": 22525000000,
+        "local_no": 708559000000,
+        "count": 16,
+        "pool_value": 731084000000
+      },
+      "address": "kaspatest:pqm5j6zc3fyldrxmv55jltndmnt43564rjuhcfs0cct33utp2cg3xknwt37lg"
+    },
+    {
+      "gap_before_bet_id": 33293,
+      "gap_after_bet_id": 33286,
+      "gap_after_created_at": "2026-07-08 05:19:11",
+      "gap_before_created_at": "2026-07-08 05:21:03",
+      "inserted_no_bets": 1,
+      "hypothetical_state": {
+        "local_yes": 22525000000,
+        "local_no": 110059000000,
+        "count": 11,
+        "pool_value": 132584000000
+      },
+      "address": "kaspatest:prwgvdc6fc7ajfz3lpg0x75ur46ln6va4877zmasrmj800h42zxmcan6ageg3"
+    },
+    {
+      "gap_before_bet_id": 33293,
+      "gap_after_bet_id": 33286,
+      "gap_after_created_at": "2026-07-08 05:19:11",
+      "gap_before_created_at": "2026-07-08 05:21:03",
+      "inserted_no_bets": 2,
+      "hypothetical_state": {
+        "local_yes": 22525000000,
+        "local_no": 210059000000,
+        "count": 12,
+        "pool_value": 232584000000
+      },
+      "address": "kaspatest:pzckvwr94ydh3xfwtrjs6fg4m2dgyzvdtefvy2vurn85vumjrv7z7dmx5f6l7"
+    },
+    {
+      "gap_before_bet_id": 33293,
+      "gap_after_bet_id": 33286,
+      "gap_after_created_at": "2026-07-08 05:19:11",
+      "gap_before_created_at": "2026-07-08 05:21:03",
+      "inserted_no_bets": 3,
+      "hypothetical_state": {
+        "local_yes": 22525000000,
+        "local_no": 310059000000,
+        "count": 13,
+        "pool_value": 332584000000
+      },
+      "address": "kaspatest:pz53ay086xzrq5mzeze3fmefjyxyvnfrswr9q9039er3amqxzsw9k6yr84qy2"
+    },
+    {
+      "gap_before_bet_id": 33293,
+      "gap_after_bet_id": 33286,
+      "gap_after_created_at": "2026-07-08 05:19:11",
+      "gap_before_created_at": "2026-07-08 05:21:03",
+      "inserted_no_bets": 4,
+      "hypothetical_state": {
+        "local_yes": 22525000000,
+        "local_no": 410059000000,
+        "count": 14,
+        "pool_value": 432584000000
+      },
+      "address": "kaspatest:ppd366ut87wjgld6fjj6j3nwwhd0mla9gfyugf92symrsfvu3cjnuzxz2ys0r"
+    },
+    {
+      "gap_before_bet_id": 33293,
+      "gap_after_bet_id": 33286,
+      "gap_after_created_at": "2026-07-08 05:19:11",
+      "gap_before_created_at": "2026-07-08 05:21:03",
+      "inserted_no_bets": 5,
+      "hypothetical_state": {
+        "local_yes": 22525000000,
+        "local_no": 510059000000,
+        "count": 15,
+        "pool_value": 532584000000
+      },
+      "address": "kaspatest:prda255kc3y7axl9th3csyg5y9rjp9ccyr3uhckkcvggrsx6tggaqhag6hrla"
+    },
+    {
+      "gap_before_bet_id": 33293,
+      "gap_after_bet_id": 33286,
+      "gap_after_created_at": "2026-07-08 05:19:11",
+      "gap_before_created_at": "2026-07-08 05:21:03",
+      "inserted_no_bets": 6,
+      "hypothetical_state": {
+        "local_yes": 22525000000,
+        "local_no": 610059000000,
+        "count": 16,
+        "pool_value": 632584000000
+      },
+      "address": "kaspatest:prq9e57pknce4qhpxyfrmhzs4fq84qlws45xxt760deus7tnscj3s8m7e9242"
+    },
+    {
+      "gap_before_bet_id": 33293,
+      "gap_after_bet_id": 33286,
+      "gap_after_created_at": "2026-07-08 05:19:11",
+      "gap_before_created_at": "2026-07-08 05:21:03",
+      "inserted_no_bets": 7,
+      "hypothetical_state": {
+        "local_yes": 22525000000,
+        "local_no": 710059000000,
+        "count": 17,
+        "pool_value": 732584000000
+      },
+      "address": "kaspatest:ppguwtxvzffrpj4je8qwg5z7m39233qvsthfzw8vjrz0pn3n4g38xntkek8hx"
+    },
+    {
+      "gap_before_bet_id": 33295,
+      "gap_after_bet_id": 33293,
+      "gap_after_created_at": "2026-07-08 05:21:03",
+      "gap_before_created_at": "2026-07-08 05:21:14",
+      "inserted_no_bets": 1,
+      "hypothetical_state": {
+        "local_yes": 27525000000,
+        "local_no": 110059000000,
+        "count": 12,
+        "pool_value": 137584000000
+      },
+      "address": "kaspatest:prj3csjfgk4g4lx9qgkkkmdt9qytuv227ufqve3a0zlfk07zpzpn7rqm4t7h6"
+    },
+    {
+      "gap_before_bet_id": 33295,
+      "gap_after_bet_id": 33293,
+      "gap_after_created_at": "2026-07-08 05:21:03",
+      "gap_before_created_at": "2026-07-08 05:21:14",
+      "inserted_no_bets": 2,
+      "hypothetical_state": {
+        "local_yes": 27525000000,
+        "local_no": 210059000000,
+        "count": 13,
+        "pool_value": 237584000000
+      },
+      "address": "kaspatest:pzk3md76kp75smlghwc4v6zefrh3ta9kqnz864zpz57m8rep7adjqalv5u5us"
+    },
+    {
+      "gap_before_bet_id": 33295,
+      "gap_after_bet_id": 33293,
+      "gap_after_created_at": "2026-07-08 05:21:03",
+      "gap_before_created_at": "2026-07-08 05:21:14",
+      "inserted_no_bets": 3,
+      "hypothetical_state": {
+        "local_yes": 27525000000,
+        "local_no": 310059000000,
+        "count": 14,
+        "pool_value": 337584000000
+      },
+      "address": "kaspatest:pq20ga0wldqn4wa66hr8087xzcx9ul03ayxg5xk5636sg9ehdw6qx9p6yupez"
+    },
+    {
+      "gap_before_bet_id": 33295,
+      "gap_after_bet_id": 33293,
+      "gap_after_created_at": "2026-07-08 05:21:03",
+      "gap_before_created_at": "2026-07-08 05:21:14",
+      "inserted_no_bets": 4,
+      "hypothetical_state": {
+        "local_yes": 27525000000,
+        "local_no": 410059000000,
+        "count": 15,
+        "pool_value": 437584000000
+      },
+      "address": "kaspatest:ppzrqhw459x44jrrufudu4qfcaeapdwgf8lwyy6aa22vn4x0d296g2mqks6y3"
+    },
+    {
+      "gap_before_bet_id": 33295,
+      "gap_after_bet_id": 33293,
+      "gap_after_created_at": "2026-07-08 05:21:03",
+      "gap_before_created_at": "2026-07-08 05:21:14",
+      "inserted_no_bets": 5,
+      "hypothetical_state": {
+        "local_yes": 27525000000,
+        "local_no": 510059000000,
+        "count": 16,
+        "pool_value": 537584000000
+      },
+      "address": "kaspatest:pqregrzf8s32cusqdz8qf6gufuytnkgc2zu0ntaaz5judgdchq0ljevvmf9va"
+    },
+    {
+      "gap_before_bet_id": 33295,
+      "gap_after_bet_id": 33293,
+      "gap_after_created_at": "2026-07-08 05:21:03",
+      "gap_before_created_at": "2026-07-08 05:21:14",
+      "inserted_no_bets": 6,
+      "hypothetical_state": {
+        "local_yes": 27525000000,
+        "local_no": 610059000000,
+        "count": 17,
+        "pool_value": 637584000000
+      },
+      "address": "kaspatest:pzrqxtkrwygrh7vx3el6y6q25asr9matngjxs668ug26znt64tdww2zs8frcu"
+    },
+    {
+      "gap_before_bet_id": 33295,
+      "gap_after_bet_id": 33293,
+      "gap_after_created_at": "2026-07-08 05:21:03",
+      "gap_before_created_at": "2026-07-08 05:21:14",
+      "inserted_no_bets": 7,
+      "hypothetical_state": {
+        "local_yes": 27525000000,
+        "local_no": 710059000000,
+        "count": 18,
+        "pool_value": 737584000000
+      },
+      "address": "kaspatest:pqtxeewgay2h3dde97guf4392568h5druy0z0vqgket2tcvereyjshuamx7vd"
+    },
+    {
+      "gap_before_bet_id": 33304,
+      "gap_after_bet_id": 33295,
+      "gap_after_created_at": "2026-07-08 05:21:14",
+      "gap_before_created_at": "2026-07-08 05:23:04",
+      "inserted_no_bets": 1,
+      "hypothetical_state": {
+        "local_yes": 27525000000,
+        "local_no": 111559000000,
+        "count": 13,
+        "pool_value": 139084000000
+      },
+      "address": "kaspatest:pzemgutcch34xp973p33m6wxpr6p094afmjtwhvzvdyzev32xdn6q7vudumum"
+    },
+    {
+      "gap_before_bet_id": 33304,
+      "gap_after_bet_id": 33295,
+      "gap_after_created_at": "2026-07-08 05:21:14",
+      "gap_before_created_at": "2026-07-08 05:23:04",
+      "inserted_no_bets": 2,
+      "hypothetical_state": {
+        "local_yes": 27525000000,
+        "local_no": 211559000000,
+        "count": 14,
+        "pool_value": 239084000000
+      },
+      "address": "kaspatest:ppfj2rf24tjchd9pg6mld0kmjdze7ra3w7dvg435ltjkkt6uw4ngw9q33dxe4"
+    },
+    {
+      "gap_before_bet_id": 33304,
+      "gap_after_bet_id": 33295,
+      "gap_after_created_at": "2026-07-08 05:21:14",
+      "gap_before_created_at": "2026-07-08 05:23:04",
+      "inserted_no_bets": 3,
+      "hypothetical_state": {
+        "local_yes": 27525000000,
+        "local_no": 311559000000,
+        "count": 15,
+        "pool_value": 339084000000
+      },
+      "address": "kaspatest:pqx6326gqvprmu0vy3cstw32rrfc43fcu2sfh5adf3eercwxgq7mjn2lgx083"
+    },
+    {
+      "gap_before_bet_id": 33304,
+      "gap_after_bet_id": 33295,
+      "gap_after_created_at": "2026-07-08 05:21:14",
+      "gap_before_created_at": "2026-07-08 05:23:04",
+      "inserted_no_bets": 4,
+      "hypothetical_state": {
+        "local_yes": 27525000000,
+        "local_no": 411559000000,
+        "count": 16,
+        "pool_value": 439084000000
+      },
+      "address": "kaspatest:prj7pyu0jpe5u3phue4q8sm8pdl73hsjn3zljn5tpwcsn3kmv752ydrl8p4kf"
+    },
+    {
+      "gap_before_bet_id": 33304,
+      "gap_after_bet_id": 33295,
+      "gap_after_created_at": "2026-07-08 05:21:14",
+      "gap_before_created_at": "2026-07-08 05:23:04",
+      "inserted_no_bets": 5,
+      "hypothetical_state": {
+        "local_yes": 27525000000,
+        "local_no": 511559000000,
+        "count": 17,
+        "pool_value": 539084000000
+      },
+      "address": "kaspatest:ppazxs485v77q37gusa4psvq45v0spakfgj7heg7nu0qr3mxqweesldz80dz5"
+    },
+    {
+      "gap_before_bet_id": 33304,
+      "gap_after_bet_id": 33295,
+      "gap_after_created_at": "2026-07-08 05:21:14",
+      "gap_before_created_at": "2026-07-08 05:23:04",
+      "inserted_no_bets": 6,
+      "hypothetical_state": {
+        "local_yes": 27525000000,
+        "local_no": 611559000000,
+        "count": 18,
+        "pool_value": 639084000000
+      },
+      "address": "kaspatest:pp3zfp2m5v4h9jjqv7d6qt4kwu92x9zmmklg6z2txusk06q0mxmk5taa3gqka"
+    },
+    {
+      "gap_before_bet_id": 33304,
+      "gap_after_bet_id": 33295,
+      "gap_after_created_at": "2026-07-08 05:21:14",
+      "gap_before_created_at": "2026-07-08 05:23:04",
+      "inserted_no_bets": 7,
+      "hypothetical_state": {
+        "local_yes": 27525000000,
+        "local_no": 711559000000,
+        "count": 19,
+        "pool_value": 739084000000
+      },
+      "address": "kaspatest:pqqte9k9hult2zf500v56vwjncl3p9m58kh36eg949hk3wegp8t6s3cc3jlue"
+    },
+    {
+      "gap_before_bet_id": 33305,
+      "gap_after_bet_id": 33304,
+      "gap_after_created_at": "2026-07-08 05:23:04",
+      "gap_before_created_at": "2026-07-08 05:23:14",
+      "inserted_no_bets": 1,
+      "hypothetical_state": {
+        "local_yes": 32525000000,
+        "local_no": 111559000000,
+        "count": 14,
+        "pool_value": 144084000000
+      },
+      "address": "kaspatest:pr4445zq8vwgdurx8dm6epl8a0hap87et6u5znl3yh8zht4gqu83qxyazzykg"
+    },
+    {
+      "gap_before_bet_id": 33305,
+      "gap_after_bet_id": 33304,
+      "gap_after_created_at": "2026-07-08 05:23:04",
+      "gap_before_created_at": "2026-07-08 05:23:14",
+      "inserted_no_bets": 2,
+      "hypothetical_state": {
+        "local_yes": 32525000000,
+        "local_no": 211559000000,
+        "count": 15,
+        "pool_value": 244084000000
+      },
+      "address": "kaspatest:pq3q3thk8ksnktarnpvn7039m98qyqzqqlkxsrypqy833g0p2x9jj75wn0fle"
+    },
+    {
+      "gap_before_bet_id": 33305,
+      "gap_after_bet_id": 33304,
+      "gap_after_created_at": "2026-07-08 05:23:04",
+      "gap_before_created_at": "2026-07-08 05:23:14",
+      "inserted_no_bets": 3,
+      "hypothetical_state": {
+        "local_yes": 32525000000,
+        "local_no": 311559000000,
+        "count": 16,
+        "pool_value": 344084000000
+      },
+      "address": "kaspatest:pzyrx0j75p96z2rd0x68pv9zzuxef0e46r9j58deq96nch7u6fngw7765yxs9"
+    },
+    {
+      "gap_before_bet_id": 33305,
+      "gap_after_bet_id": 33304,
+      "gap_after_created_at": "2026-07-08 05:23:04",
+      "gap_before_created_at": "2026-07-08 05:23:14",
+      "inserted_no_bets": 4,
+      "hypothetical_state": {
+        "local_yes": 32525000000,
+        "local_no": 411559000000,
+        "count": 17,
+        "pool_value": 444084000000
+      },
+      "address": "kaspatest:pq6satx3jztsucpjsjh9aepvdc40rmj6nhwth3yh4qnakvzeq5ym6e8naakwv"
+    },
+    {
+      "gap_before_bet_id": 33305,
+      "gap_after_bet_id": 33304,
+      "gap_after_created_at": "2026-07-08 05:23:04",
+      "gap_before_created_at": "2026-07-08 05:23:14",
+      "inserted_no_bets": 5,
+      "hypothetical_state": {
+        "local_yes": 32525000000,
+        "local_no": 511559000000,
+        "count": 18,
+        "pool_value": 544084000000
+      },
+      "address": "kaspatest:pp42l8nrxd9vaz60j4r9na6p6er4p22kls3e53m62mhgtvg9z8rky9g3fum80"
+    },
+    {
+      "gap_before_bet_id": 33305,
+      "gap_after_bet_id": 33304,
+      "gap_after_created_at": "2026-07-08 05:23:04",
+      "gap_before_created_at": "2026-07-08 05:23:14",
+      "inserted_no_bets": 6,
+      "hypothetical_state": {
+        "local_yes": 32525000000,
+        "local_no": 611559000000,
+        "count": 19,
+        "pool_value": 644084000000
+      },
+      "address": "kaspatest:prjhhzf3afahlq9kwnj9ae8w7vqtl952dryeqky9tppm63qr8fv5yefeewmn7"
+    },
+    {
+      "gap_before_bet_id": 33305,
+      "gap_after_bet_id": 33304,
+      "gap_after_created_at": "2026-07-08 05:23:04",
+      "gap_before_created_at": "2026-07-08 05:23:14",
+      "inserted_no_bets": 7,
+      "hypothetical_state": {
+        "local_yes": 32525000000,
+        "local_no": 711559000000,
+        "count": 20,
+        "pool_value": 744084000000
+      },
+      "address": "kaspatest:prlce45ccu0zp6phttf5x0yphh56mnffaqscu0u69as324tf66spsf6067pt5"
+    },
+    {
+      "gap_before_bet_id": 33312,
+      "gap_after_bet_id": 33305,
+      "gap_after_created_at": "2026-07-08 05:23:14",
+      "gap_before_created_at": "2026-07-08 05:25:03",
+      "inserted_no_bets": 1,
+      "hypothetical_state": {
+        "local_yes": 32525000000,
+        "local_no": 113059000000,
+        "count": 15,
+        "pool_value": 145584000000
+      },
+      "address": "kaspatest:ppgrwk8uxpzz8r9qdgttzft9qxdve8xaxprc2kz3mys8zvyggp6mqk8a2sssw"
+    },
+    {
+      "gap_before_bet_id": 33312,
+      "gap_after_bet_id": 33305,
+      "gap_after_created_at": "2026-07-08 05:23:14",
+      "gap_before_created_at": "2026-07-08 05:25:03",
+      "inserted_no_bets": 2,
+      "hypothetical_state": {
+        "local_yes": 32525000000,
+        "local_no": 213059000000,
+        "count": 16,
+        "pool_value": 245584000000
+      },
+      "address": "kaspatest:pztwarrxvwvv57s9tjh9nl6e6jjd8atpx9e6wha7e342xzkdtynm68gk0j7p0"
+    },
+    {
+      "gap_before_bet_id": 33312,
+      "gap_after_bet_id": 33305,
+      "gap_after_created_at": "2026-07-08 05:23:14",
+      "gap_before_created_at": "2026-07-08 05:25:03",
+      "inserted_no_bets": 3,
+      "hypothetical_state": {
+        "local_yes": 32525000000,
+        "local_no": 313059000000,
+        "count": 17,
+        "pool_value": 345584000000
+      },
+      "address": "kaspatest:pq482atvq0mgpducl9ap4u3dh0wsqc5x2txj8nzjquq5mg5vcszcvu7d79mep"
+    },
+    {
+      "gap_before_bet_id": 33312,
+      "gap_after_bet_id": 33305,
+      "gap_after_created_at": "2026-07-08 05:23:14",
+      "gap_before_created_at": "2026-07-08 05:25:03",
+      "inserted_no_bets": 4,
+      "hypothetical_state": {
+        "local_yes": 32525000000,
+        "local_no": 413059000000,
+        "count": 18,
+        "pool_value": 445584000000
+      },
+      "address": "kaspatest:ppu8lz89rdsn5jysuvc7ygy5p02yts3q22adgln7l3xpc3vpe4zdcdh94n090"
+    },
+    {
+      "gap_before_bet_id": 33312,
+      "gap_after_bet_id": 33305,
+      "gap_after_created_at": "2026-07-08 05:23:14",
+      "gap_before_created_at": "2026-07-08 05:25:03",
+      "inserted_no_bets": 5,
+      "hypothetical_state": {
+        "local_yes": 32525000000,
+        "local_no": 513059000000,
+        "count": 19,
+        "pool_value": 545584000000
+      },
+      "address": "kaspatest:pr6ujhssaz9c88dxpdfvg5dqkzzfslgm6yrxay6ajvmk473ecw5yu9cewnl6t"
+    },
+    {
+      "gap_before_bet_id": 33312,
+      "gap_after_bet_id": 33305,
+      "gap_after_created_at": "2026-07-08 05:23:14",
+      "gap_before_created_at": "2026-07-08 05:25:03",
+      "inserted_no_bets": 6,
+      "hypothetical_state": {
+        "local_yes": 32525000000,
+        "local_no": 613059000000,
+        "count": 20,
+        "pool_value": 645584000000
+      },
+      "address": "kaspatest:pq5vkupppq4tkcmwy3g805mw2t5kadrrmchdk7y9h22y5wsjf8upsr2pvqhtz"
+    },
+    {
+      "gap_before_bet_id": 33312,
+      "gap_after_bet_id": 33305,
+      "gap_after_created_at": "2026-07-08 05:23:14",
+      "gap_before_created_at": "2026-07-08 05:25:03",
+      "inserted_no_bets": 7,
+      "hypothetical_state": {
+        "local_yes": 32525000000,
+        "local_no": 713059000000,
+        "count": 21,
+        "pool_value": 745584000000
+      },
+      "address": "kaspatest:pz8p96j3axwlzqltmsa6x57peww4rw59adhq0a66uwy276tnee9w7t374wpct"
+    },
+    {
+      "gap_before_bet_id": 33313,
+      "gap_after_bet_id": 33312,
+      "gap_after_created_at": "2026-07-08 05:25:03",
+      "gap_before_created_at": "2026-07-08 05:25:13",
+      "inserted_no_bets": 1,
+      "hypothetical_state": {
+        "local_yes": 37525000000,
+        "local_no": 113059000000,
+        "count": 16,
+        "pool_value": 150584000000
+      },
+      "address": "kaspatest:pqqmaa6rv7upygy4zu5zufpmdgp48gmdhwatsmur7qr9a4tky34nq24ewduqg"
+    },
+    {
+      "gap_before_bet_id": 33313,
+      "gap_after_bet_id": 33312,
+      "gap_after_created_at": "2026-07-08 05:25:03",
+      "gap_before_created_at": "2026-07-08 05:25:13",
+      "inserted_no_bets": 2,
+      "hypothetical_state": {
+        "local_yes": 37525000000,
+        "local_no": 213059000000,
+        "count": 17,
+        "pool_value": 250584000000
+      },
+      "address": "kaspatest:pr9mtq4pjlw9z0kyc2dmxew6pdxxgup9tc8ftnkpzquskeka9vkg6e4ffuw4e"
+    },
+    {
+      "gap_before_bet_id": 33313,
+      "gap_after_bet_id": 33312,
+      "gap_after_created_at": "2026-07-08 05:25:03",
+      "gap_before_created_at": "2026-07-08 05:25:13",
+      "inserted_no_bets": 3,
+      "hypothetical_state": {
+        "local_yes": 37525000000,
+        "local_no": 313059000000,
+        "count": 18,
+        "pool_value": 350584000000
+      },
+      "address": "kaspatest:pp88eqflzlrunzzh8aug232yepkf5p22hge62qrc2djrvez56jds6f4wpszwp"
+    },
+    {
+      "gap_before_bet_id": 33313,
+      "gap_after_bet_id": 33312,
+      "gap_after_created_at": "2026-07-08 05:25:03",
+      "gap_before_created_at": "2026-07-08 05:25:13",
+      "inserted_no_bets": 4,
+      "hypothetical_state": {
+        "local_yes": 37525000000,
+        "local_no": 413059000000,
+        "count": 19,
+        "pool_value": 450584000000
+      },
+      "address": "kaspatest:pzu0w2q2dg6jc8erp60lnqa0wrxgk9uj2wdy3cw42n5qh4t2t5maufrpxxnzr"
+    },
+    {
+      "gap_before_bet_id": 33313,
+      "gap_after_bet_id": 33312,
+      "gap_after_created_at": "2026-07-08 05:25:03",
+      "gap_before_created_at": "2026-07-08 05:25:13",
+      "inserted_no_bets": 5,
+      "hypothetical_state": {
+        "local_yes": 37525000000,
+        "local_no": 513059000000,
+        "count": 20,
+        "pool_value": 550584000000
+      },
+      "address": "kaspatest:pz5fmysfmmtzka3dzn55y5hrnmm9geg2r6ep7gn7nu4lrw0v9dq67pljvngu3"
+    },
+    {
+      "gap_before_bet_id": 33313,
+      "gap_after_bet_id": 33312,
+      "gap_after_created_at": "2026-07-08 05:25:03",
+      "gap_before_created_at": "2026-07-08 05:25:13",
+      "inserted_no_bets": 6,
+      "hypothetical_state": {
+        "local_yes": 37525000000,
+        "local_no": 613059000000,
+        "count": 21,
+        "pool_value": 650584000000
+      },
+      "address": "kaspatest:prz4x9z74dcnlwkf6gndqv3lkl0zmm7mdtqz9s86jd627k48l5h4z87p9hfqh"
+    },
+    {
+      "gap_before_bet_id": 33313,
+      "gap_after_bet_id": 33312,
+      "gap_after_created_at": "2026-07-08 05:25:03",
+      "gap_before_created_at": "2026-07-08 05:25:13",
+      "inserted_no_bets": 7,
+      "hypothetical_state": {
+        "local_yes": 37525000000,
+        "local_no": 713059000000,
+        "count": 22,
+        "pool_value": 750584000000
+      },
+      "address": "kaspatest:pz8a2es7vnj4962tq3y9k4eatzva8l8uyygnf7dny2jm8gysuw63v9uuehjns"
+    },
+    {
+      "gap_before_bet_id": 33319,
+      "gap_after_bet_id": 33313,
+      "gap_after_created_at": "2026-07-08 05:25:13",
+      "gap_before_created_at": "2026-07-08 05:27:02",
+      "inserted_no_bets": 1,
+      "hypothetical_state": {
+        "local_yes": 37525000000,
+        "local_no": 114559000000,
+        "count": 17,
+        "pool_value": 152084000000
+      },
+      "address": "kaspatest:pq3urc9efjp37h4drlt4wk3mwlne7cadrvhgfxhvzypj63ssuruvz8q70cpth"
+    },
+    {
+      "gap_before_bet_id": 33319,
+      "gap_after_bet_id": 33313,
+      "gap_after_created_at": "2026-07-08 05:25:13",
+      "gap_before_created_at": "2026-07-08 05:27:02",
+      "inserted_no_bets": 2,
+      "hypothetical_state": {
+        "local_yes": 37525000000,
+        "local_no": 214559000000,
+        "count": 18,
+        "pool_value": 252084000000
+      },
+      "address": "kaspatest:pr8s3arzn9n94365dyu3xwgy8r6dyxlc4rkgy47suv3eetwdzl93uzry7zszj"
+    },
+    {
+      "gap_before_bet_id": 33319,
+      "gap_after_bet_id": 33313,
+      "gap_after_created_at": "2026-07-08 05:25:13",
+      "gap_before_created_at": "2026-07-08 05:27:02",
+      "inserted_no_bets": 3,
+      "hypothetical_state": {
+        "local_yes": 37525000000,
+        "local_no": 314559000000,
+        "count": 19,
+        "pool_value": 352084000000
+      },
+      "address": "kaspatest:ppjv6vjjtzh9cg4945p4gdq9ceztddmdn04xfc0tgddr7n9vg8mng22wf7u6m"
+    },
+    {
+      "gap_before_bet_id": 33319,
+      "gap_after_bet_id": 33313,
+      "gap_after_created_at": "2026-07-08 05:25:13",
+      "gap_before_created_at": "2026-07-08 05:27:02",
+      "inserted_no_bets": 4,
+      "hypothetical_state": {
+        "local_yes": 37525000000,
+        "local_no": 414559000000,
+        "count": 20,
+        "pool_value": 452084000000
+      },
+      "address": "kaspatest:pzwng6apejrdqdzjew9s6wgcnzy5fpdz4rezza3nmt30mxa7ur42g9v68jmex"
+    },
+    {
+      "gap_before_bet_id": 33319,
+      "gap_after_bet_id": 33313,
+      "gap_after_created_at": "2026-07-08 05:25:13",
+      "gap_before_created_at": "2026-07-08 05:27:02",
+      "inserted_no_bets": 5,
+      "hypothetical_state": {
+        "local_yes": 37525000000,
+        "local_no": 514559000000,
+        "count": 21,
+        "pool_value": 552084000000
+      },
+      "address": "kaspatest:pqjfh95fnnc4xxzxuw3g2xtyvk74gkq098ng70m5fxrhc6nxuwpuu0laufktp"
+    },
+    {
+      "gap_before_bet_id": 33319,
+      "gap_after_bet_id": 33313,
+      "gap_after_created_at": "2026-07-08 05:25:13",
+      "gap_before_created_at": "2026-07-08 05:27:02",
+      "inserted_no_bets": 6,
+      "hypothetical_state": {
+        "local_yes": 37525000000,
+        "local_no": 614559000000,
+        "count": 22,
+        "pool_value": 652084000000
+      },
+      "address": "kaspatest:prkmgl9jce4fku58v3kr4h25pquph43zcw8av8yzetrzg6c8g8z2snkpq7hw9"
+    },
+    {
+      "gap_before_bet_id": 33319,
+      "gap_after_bet_id": 33313,
+      "gap_after_created_at": "2026-07-08 05:25:13",
+      "gap_before_created_at": "2026-07-08 05:27:02",
+      "inserted_no_bets": 7,
+      "hypothetical_state": {
+        "local_yes": 37525000000,
+        "local_no": 714559000000,
+        "count": 23,
+        "pool_value": 752084000000
+      },
+      "address": "kaspatest:pra2fshr7gck4mchec3h9c7hems6aj7dd3jusu5jw7jwrnwuatrpxmh793vvj"
+    },
+    {
+      "gap_before_bet_id": 33321,
+      "gap_after_bet_id": 33319,
+      "gap_after_created_at": "2026-07-08 05:27:02",
+      "gap_before_created_at": "2026-07-08 05:27:12",
+      "inserted_no_bets": 1,
+      "hypothetical_state": {
+        "local_yes": 42525000000,
+        "local_no": 114559000000,
+        "count": 18,
+        "pool_value": 157084000000
+      },
+      "address": "kaspatest:ppfnrwh9f94garxjrkvlu92qa5mtqkljcdwazah0lvw43d0ycj9zy3mhhje8t"
+    },
+    {
+      "gap_before_bet_id": 33321,
+      "gap_after_bet_id": 33319,
+      "gap_after_created_at": "2026-07-08 05:27:02",
+      "gap_before_created_at": "2026-07-08 05:27:12",
+      "inserted_no_bets": 2,
+      "hypothetical_state": {
+        "local_yes": 42525000000,
+        "local_no": 214559000000,
+        "count": 19,
+        "pool_value": 257084000000
+      },
+      "address": "kaspatest:ppdg9tqwsnhfk0lxs0kmjkx55rc5w2ea085gup9gxwe8g4wzcevjgp9gdc8v0"
+    },
+    {
+      "gap_before_bet_id": 33321,
+      "gap_after_bet_id": 33319,
+      "gap_after_created_at": "2026-07-08 05:27:02",
+      "gap_before_created_at": "2026-07-08 05:27:12",
+      "inserted_no_bets": 3,
+      "hypothetical_state": {
+        "local_yes": 42525000000,
+        "local_no": 314559000000,
+        "count": 20,
+        "pool_value": 357084000000
+      },
+      "address": "kaspatest:pp0ujrs95ufrkml3k660tc9ykazc59703hu66dz2hgua4ev8w4u8xqk96053d"
+    },
+    {
+      "gap_before_bet_id": 33321,
+      "gap_after_bet_id": 33319,
+      "gap_after_created_at": "2026-07-08 05:27:02",
+      "gap_before_created_at": "2026-07-08 05:27:12",
+      "inserted_no_bets": 4,
+      "hypothetical_state": {
+        "local_yes": 42525000000,
+        "local_no": 414559000000,
+        "count": 21,
+        "pool_value": 457084000000
+      },
+      "address": "kaspatest:ppfjwgwj0ewqqr5etzn37jz2gw5esfepyh9a5nlshp5aswz0jv3dgr4enmhu6"
+    },
+    {
+      "gap_before_bet_id": 33321,
+      "gap_after_bet_id": 33319,
+      "gap_after_created_at": "2026-07-08 05:27:02",
+      "gap_before_created_at": "2026-07-08 05:27:12",
+      "inserted_no_bets": 5,
+      "hypothetical_state": {
+        "local_yes": 42525000000,
+        "local_no": 514559000000,
+        "count": 22,
+        "pool_value": 557084000000
+      },
+      "address": "kaspatest:pq9g727ux79y3kqqxf2gps286cjuv2l7kcw9zm8sj0s02lwz9dnqk3869rut6"
+    },
+    {
+      "gap_before_bet_id": 33321,
+      "gap_after_bet_id": 33319,
+      "gap_after_created_at": "2026-07-08 05:27:02",
+      "gap_before_created_at": "2026-07-08 05:27:12",
+      "inserted_no_bets": 6,
+      "hypothetical_state": {
+        "local_yes": 42525000000,
+        "local_no": 614559000000,
+        "count": 23,
+        "pool_value": 657084000000
+      },
+      "address": "kaspatest:ppa5wg5z2yjypypdlqljy8fsmhwy0xv025hsap8c0y58hhstlw2s2zdgk9jn5"
+    },
+    {
+      "gap_before_bet_id": 33321,
+      "gap_after_bet_id": 33319,
+      "gap_after_created_at": "2026-07-08 05:27:02",
+      "gap_before_created_at": "2026-07-08 05:27:12",
+      "inserted_no_bets": 7,
+      "hypothetical_state": {
+        "local_yes": 42525000000,
+        "local_no": 714559000000,
+        "count": 24,
+        "pool_value": 757084000000
+      },
+      "address": "kaspatest:prm6yc7gp820f7j0zyuk5t8uxklk8jpfte8t7xu4eygdmtm4l422u4hkf2ect"
+    },
+    {
+      "gap_before_bet_id": 33325,
+      "gap_after_bet_id": 33321,
+      "gap_after_created_at": "2026-07-08 05:27:12",
+      "gap_before_created_at": "2026-07-08 05:29:03",
+      "inserted_no_bets": 1,
+      "hypothetical_state": {
+        "local_yes": 42525000000,
+        "local_no": 116059000000,
+        "count": 19,
+        "pool_value": 158584000000
+      },
+      "address": "kaspatest:pzt3zkpkz5uzvmg55j72t9s2uxs7m4gdvhp8tg5g3ggtr94xkwj8jgxhzyasr"
+    },
+    {
+      "gap_before_bet_id": 33325,
+      "gap_after_bet_id": 33321,
+      "gap_after_created_at": "2026-07-08 05:27:12",
+      "gap_before_created_at": "2026-07-08 05:29:03",
+      "inserted_no_bets": 2,
+      "hypothetical_state": {
+        "local_yes": 42525000000,
+        "local_no": 216059000000,
+        "count": 20,
+        "pool_value": 258584000000
+      },
+      "address": "kaspatest:prjja9lr5traqfl0nwshh5kqjj0lp9zzpa0j49v8cvc9mevtzlnakpnqzyren"
+    },
+    {
+      "gap_before_bet_id": 33325,
+      "gap_after_bet_id": 33321,
+      "gap_after_created_at": "2026-07-08 05:27:12",
+      "gap_before_created_at": "2026-07-08 05:29:03",
+      "inserted_no_bets": 3,
+      "hypothetical_state": {
+        "local_yes": 42525000000,
+        "local_no": 316059000000,
+        "count": 21,
+        "pool_value": 358584000000
+      },
+      "address": "kaspatest:pqsl404gmfy7f3wlhym9gynpcny6neam99r7umk4c4qjkmx5w6ruzqhlhvn4l"
+    },
+    {
+      "gap_before_bet_id": 33325,
+      "gap_after_bet_id": 33321,
+      "gap_after_created_at": "2026-07-08 05:27:12",
+      "gap_before_created_at": "2026-07-08 05:29:03",
+      "inserted_no_bets": 4,
+      "hypothetical_state": {
+        "local_yes": 42525000000,
+        "local_no": 416059000000,
+        "count": 22,
+        "pool_value": 458584000000
+      },
+      "address": "kaspatest:prh544khdehzpc4kwp8x7v0y7psvyzjy9rsdr4uzcdn78vp9ggvtygq9fl99q"
+    },
+    {
+      "gap_before_bet_id": 33325,
+      "gap_after_bet_id": 33321,
+      "gap_after_created_at": "2026-07-08 05:27:12",
+      "gap_before_created_at": "2026-07-08 05:29:03",
+      "inserted_no_bets": 5,
+      "hypothetical_state": {
+        "local_yes": 42525000000,
+        "local_no": 516059000000,
+        "count": 23,
+        "pool_value": 558584000000
+      },
+      "address": "kaspatest:prs6r5jh8jwagfmuz7zml93ftm5gzykqlyg0any836vhkrgfk20n2atytk2q2"
+    },
+    {
+      "gap_before_bet_id": 33325,
+      "gap_after_bet_id": 33321,
+      "gap_after_created_at": "2026-07-08 05:27:12",
+      "gap_before_created_at": "2026-07-08 05:29:03",
+      "inserted_no_bets": 6,
+      "hypothetical_state": {
+        "local_yes": 42525000000,
+        "local_no": 616059000000,
+        "count": 24,
+        "pool_value": 658584000000
+      },
+      "address": "kaspatest:pq2caehjzj7zvavxl0yu8xauafse8qm83gu7qu5n8c9j8wq96k875ueu0j7r8"
+    },
+    {
+      "gap_before_bet_id": 33325,
+      "gap_after_bet_id": 33321,
+      "gap_after_created_at": "2026-07-08 05:27:12",
+      "gap_before_created_at": "2026-07-08 05:29:03",
+      "inserted_no_bets": 7,
+      "hypothetical_state": {
+        "local_yes": 42525000000,
+        "local_no": 716059000000,
+        "count": 25,
+        "pool_value": 758584000000
+      },
+      "address": "kaspatest:pz22fwhdjlwr9c54jlg9kkpeuwe3u5y8sc77hldqk9vjslr62r0jzwyycmqgs"
+    },
+    {
+      "gap_before_bet_id": 33326,
+      "gap_after_bet_id": 33325,
+      "gap_after_created_at": "2026-07-08 05:29:03",
+      "gap_before_created_at": "2026-07-08 05:29:14",
+      "inserted_no_bets": 1,
+      "hypothetical_state": {
+        "local_yes": 47525000000,
+        "local_no": 116059000000,
+        "count": 20,
+        "pool_value": 163584000000
+      },
+      "address": "kaspatest:pqmf6y5dymk088pfsd0l7hyvdq5u6pqcf9vmnth5dcepdxn6n9czxm0839kyn"
+    },
+    {
+      "gap_before_bet_id": 33326,
+      "gap_after_bet_id": 33325,
+      "gap_after_created_at": "2026-07-08 05:29:03",
+      "gap_before_created_at": "2026-07-08 05:29:14",
+      "inserted_no_bets": 2,
+      "hypothetical_state": {
+        "local_yes": 47525000000,
+        "local_no": 216059000000,
+        "count": 21,
+        "pool_value": 263584000000
+      },
+      "address": "kaspatest:pra7dxxhpvm7n322g5ks777yeaxklrz25hlf8z74dl9n4gtu5dhzvmupa6560"
+    },
+    {
+      "gap_before_bet_id": 33326,
+      "gap_after_bet_id": 33325,
+      "gap_after_created_at": "2026-07-08 05:29:03",
+      "gap_before_created_at": "2026-07-08 05:29:14",
+      "inserted_no_bets": 3,
+      "hypothetical_state": {
+        "local_yes": 47525000000,
+        "local_no": 316059000000,
+        "count": 22,
+        "pool_value": 363584000000
+      },
+      "address": "kaspatest:ppz0ga93gnffdzdf2dlvm6479l99uhfzade05lqv9mqj8e60x29jxzk8qwnd0"
+    },
+    {
+      "gap_before_bet_id": 33326,
+      "gap_after_bet_id": 33325,
+      "gap_after_created_at": "2026-07-08 05:29:03",
+      "gap_before_created_at": "2026-07-08 05:29:14",
+      "inserted_no_bets": 4,
+      "hypothetical_state": {
+        "local_yes": 47525000000,
+        "local_no": 416059000000,
+        "count": 23,
+        "pool_value": 463584000000
+      },
+      "address": "kaspatest:ppg6ezm8gnqd6mqjls5tnr0sswraamzskwtdq0lsp2j8jszya2tdsyudj65ww"
+    },
+    {
+      "gap_before_bet_id": 33326,
+      "gap_after_bet_id": 33325,
+      "gap_after_created_at": "2026-07-08 05:29:03",
+      "gap_before_created_at": "2026-07-08 05:29:14",
+      "inserted_no_bets": 5,
+      "hypothetical_state": {
+        "local_yes": 47525000000,
+        "local_no": 516059000000,
+        "count": 24,
+        "pool_value": 563584000000
+      },
+      "address": "kaspatest:pr4fvnpysw63due93nm9vd9dwm4wlhevn3fzjz7ce77pplrul5gfkn07rp67r"
+    },
+    {
+      "gap_before_bet_id": 33326,
+      "gap_after_bet_id": 33325,
+      "gap_after_created_at": "2026-07-08 05:29:03",
+      "gap_before_created_at": "2026-07-08 05:29:14",
+      "inserted_no_bets": 6,
+      "hypothetical_state": {
+        "local_yes": 47525000000,
+        "local_no": 616059000000,
+        "count": 25,
+        "pool_value": 663584000000
+      },
+      "address": "kaspatest:pry0hvv45rzfq32lcgz87jqv5y0l4stz76rwrhwa82l5ys3e2a9luqnmxjax9"
+    },
+    {
+      "gap_before_bet_id": 33326,
+      "gap_after_bet_id": 33325,
+      "gap_after_created_at": "2026-07-08 05:29:03",
+      "gap_before_created_at": "2026-07-08 05:29:14",
+      "inserted_no_bets": 7,
+      "hypothetical_state": {
+        "local_yes": 47525000000,
+        "local_no": 716059000000,
+        "count": 26,
+        "pool_value": 763584000000
+      },
+      "address": "kaspatest:pp7s9wvkmtap8f923mz2tek2hh6y8chf53jfefdrjl9dllcy0jpe6ngnf4hm4"
+    },
+    {
+      "gap_before_bet_id": 33335,
+      "gap_after_bet_id": 33326,
+      "gap_after_created_at": "2026-07-08 05:29:14",
+      "gap_before_created_at": "2026-07-08 05:31:03",
+      "inserted_no_bets": 1,
+      "hypothetical_state": {
+        "local_yes": 47525000000,
+        "local_no": 117559000000,
+        "count": 21,
+        "pool_value": 165084000000
+      },
+      "address": "kaspatest:pzkq8czf0ek9wxg9058x2ksn3dlur340suvgn4j7gwttm8majhp6w25qscuxh"
+    },
+    {
+      "gap_before_bet_id": 33335,
+      "gap_after_bet_id": 33326,
+      "gap_after_created_at": "2026-07-08 05:29:14",
+      "gap_before_created_at": "2026-07-08 05:31:03",
+      "inserted_no_bets": 2,
+      "hypothetical_state": {
+        "local_yes": 47525000000,
+        "local_no": 217559000000,
+        "count": 22,
+        "pool_value": 265084000000
+      },
+      "address": "kaspatest:ppf9w708xlhhhvfuqwxfhdkj7d7n0s39khfu2ljap7lmddl2ek6w7gcea50x4"
+    },
+    {
+      "gap_before_bet_id": 33335,
+      "gap_after_bet_id": 33326,
+      "gap_after_created_at": "2026-07-08 05:29:14",
+      "gap_before_created_at": "2026-07-08 05:31:03",
+      "inserted_no_bets": 3,
+      "hypothetical_state": {
+        "local_yes": 47525000000,
+        "local_no": 317559000000,
+        "count": 23,
+        "pool_value": 365084000000
+      },
+      "address": "kaspatest:pzfpg8rpksqzphs5hgakm8f2vn9zusvn5egx0zej04w5cxc5nugau89mwxcsv"
+    },
+    {
+      "gap_before_bet_id": 33335,
+      "gap_after_bet_id": 33326,
+      "gap_after_created_at": "2026-07-08 05:29:14",
+      "gap_before_created_at": "2026-07-08 05:31:03",
+      "inserted_no_bets": 4,
+      "hypothetical_state": {
+        "local_yes": 47525000000,
+        "local_no": 417559000000,
+        "count": 24,
+        "pool_value": 465084000000
+      },
+      "address": "kaspatest:pzu5mc2u5fhedxj9tme3evylaxnjnvn7dknx8w5572c2seaj667yvedesu8mm"
+    },
+    {
+      "gap_before_bet_id": 33335,
+      "gap_after_bet_id": 33326,
+      "gap_after_created_at": "2026-07-08 05:29:14",
+      "gap_before_created_at": "2026-07-08 05:31:03",
+      "inserted_no_bets": 5,
+      "hypothetical_state": {
+        "local_yes": 47525000000,
+        "local_no": 517559000000,
+        "count": 25,
+        "pool_value": 565084000000
+      },
+      "address": "kaspatest:pqptayffpq3atc6ncwmla5fhkunjvmmuh8g7fpeqyvq0gu0qwzn4vjqydmz6e"
+    },
+    {
+      "gap_before_bet_id": 33335,
+      "gap_after_bet_id": 33326,
+      "gap_after_created_at": "2026-07-08 05:29:14",
+      "gap_before_created_at": "2026-07-08 05:31:03",
+      "inserted_no_bets": 6,
+      "hypothetical_state": {
+        "local_yes": 47525000000,
+        "local_no": 617559000000,
+        "count": 26,
+        "pool_value": 665084000000
+      },
+      "address": "kaspatest:pqkdjjje7s0xq69xycfkyx6yt232y7jcqqnencw6ym28ffrl295d5l9fzce9r"
+    },
+    {
+      "gap_before_bet_id": 33335,
+      "gap_after_bet_id": 33326,
+      "gap_after_created_at": "2026-07-08 05:29:14",
+      "gap_before_created_at": "2026-07-08 05:31:03",
+      "inserted_no_bets": 7,
+      "hypothetical_state": {
+        "local_yes": 47525000000,
+        "local_no": 717559000000,
+        "count": 27,
+        "pool_value": 765084000000
+      },
+      "address": "kaspatest:prgp574yu0tdxtgjj5df7mj9t3ylr4prjjvku4l0hfv0ly0nku7kwsa3dwpz3"
+    },
+    {
+      "gap_before_bet_id": 33337,
+      "gap_after_bet_id": 33335,
+      "gap_after_created_at": "2026-07-08 05:31:03",
+      "gap_before_created_at": "2026-07-08 05:31:13",
+      "inserted_no_bets": 1,
+      "hypothetical_state": {
+        "local_yes": 52525000000,
+        "local_no": 117559000000,
+        "count": 22,
+        "pool_value": 170084000000
+      },
+      "address": "kaspatest:pzhefmpaq2qruw4rhvxwxukdnkvwh280v858d4glu00m3trxrz3tyqejzstt4"
+    },
+    {
+      "gap_before_bet_id": 33337,
+      "gap_after_bet_id": 33335,
+      "gap_after_created_at": "2026-07-08 05:31:03",
+      "gap_before_created_at": "2026-07-08 05:31:13",
+      "inserted_no_bets": 2,
+      "hypothetical_state": {
+        "local_yes": 52525000000,
+        "local_no": 217559000000,
+        "count": 23,
+        "pool_value": 270084000000
+      },
+      "address": "kaspatest:pzgas4vhge7n3uz6t6nty5sdqs3rvafg6nhsts4q97r4uvnjaeh57669shpuf"
+    },
+    {
+      "gap_before_bet_id": 33337,
+      "gap_after_bet_id": 33335,
+      "gap_after_created_at": "2026-07-08 05:31:03",
+      "gap_before_created_at": "2026-07-08 05:31:13",
+      "inserted_no_bets": 3,
+      "hypothetical_state": {
+        "local_yes": 52525000000,
+        "local_no": 317559000000,
+        "count": 24,
+        "pool_value": 370084000000
+      },
+      "address": "kaspatest:pq7p7rtl6446gkshgezvqhvarstyu9e745elhq6wpwmxlan3ph43jr979mt3n"
+    },
+    {
+      "gap_before_bet_id": 33337,
+      "gap_after_bet_id": 33335,
+      "gap_after_created_at": "2026-07-08 05:31:03",
+      "gap_before_created_at": "2026-07-08 05:31:13",
+      "inserted_no_bets": 4,
+      "hypothetical_state": {
+        "local_yes": 52525000000,
+        "local_no": 417559000000,
+        "count": 25,
+        "pool_value": 470084000000
+      },
+      "address": "kaspatest:pzk4zu469h73w7hswtpkjcuzufcxynvd2ldgzkdrm9346mcycvxpsylf0s9yd"
+    },
+    {
+      "gap_before_bet_id": 33337,
+      "gap_after_bet_id": 33335,
+      "gap_after_created_at": "2026-07-08 05:31:03",
+      "gap_before_created_at": "2026-07-08 05:31:13",
+      "inserted_no_bets": 5,
+      "hypothetical_state": {
+        "local_yes": 52525000000,
+        "local_no": 517559000000,
+        "count": 26,
+        "pool_value": 570084000000
+      },
+      "address": "kaspatest:pp2wg5z0wngnvjvpnf4s8ku4hkns9jx50x7vj7j2czg0r4re4luzq3vpedavg"
+    },
+    {
+      "gap_before_bet_id": 33337,
+      "gap_after_bet_id": 33335,
+      "gap_after_created_at": "2026-07-08 05:31:03",
+      "gap_before_created_at": "2026-07-08 05:31:13",
+      "inserted_no_bets": 6,
+      "hypothetical_state": {
+        "local_yes": 52525000000,
+        "local_no": 617559000000,
+        "count": 27,
+        "pool_value": 670084000000
+      },
+      "address": "kaspatest:pz6uax9ke9he320d23fyh666kr5w9q7vnmetf2cugkwfydl298h320u7rwgzg"
+    },
+    {
+      "gap_before_bet_id": 33337,
+      "gap_after_bet_id": 33335,
+      "gap_after_created_at": "2026-07-08 05:31:03",
+      "gap_before_created_at": "2026-07-08 05:31:13",
+      "inserted_no_bets": 7,
+      "hypothetical_state": {
+        "local_yes": 52525000000,
+        "local_no": 717559000000,
+        "count": 28,
+        "pool_value": 770084000000
+      },
+      "address": "kaspatest:prx2mlykkyleprfz8yw2pmqme0mg0md8pypnftedhr599vmcmyagszrfszmts"
+    },
+    {
+      "gap_before_bet_id": 33342,
+      "gap_after_bet_id": 33337,
+      "gap_after_created_at": "2026-07-08 05:31:13",
+      "gap_before_created_at": "2026-07-08 05:33:02",
+      "inserted_no_bets": 1,
+      "hypothetical_state": {
+        "local_yes": 52525000000,
+        "local_no": 119059000000,
+        "count": 23,
+        "pool_value": 171584000000
+      },
+      "address": "kaspatest:pr0zsa5efq4e2zmjjppuap98wypkpq7teuee5kug3h7n6ad0sdsccq4u2juvz"
+    },
+    {
+      "gap_before_bet_id": 33342,
+      "gap_after_bet_id": 33337,
+      "gap_after_created_at": "2026-07-08 05:31:13",
+      "gap_before_created_at": "2026-07-08 05:33:02",
+      "inserted_no_bets": 2,
+      "hypothetical_state": {
+        "local_yes": 52525000000,
+        "local_no": 219059000000,
+        "count": 24,
+        "pool_value": 271584000000
+      },
+      "address": "kaspatest:ppq0vup295vdcdkue5l43qcqrqqp3t8v2enyx8kvu4c9ep3u54p3v3hq7nfhf"
+    },
+    {
+      "gap_before_bet_id": 33342,
+      "gap_after_bet_id": 33337,
+      "gap_after_created_at": "2026-07-08 05:31:13",
+      "gap_before_created_at": "2026-07-08 05:33:02",
+      "inserted_no_bets": 3,
+      "hypothetical_state": {
+        "local_yes": 52525000000,
+        "local_no": 319059000000,
+        "count": 25,
+        "pool_value": 371584000000
+      },
+      "address": "kaspatest:pqww3ax54uncj0arjw3xq6dq5h8fqld6ljx9ufzvpuvj5cw7tdj82v4tg48zn"
+    },
+    {
+      "gap_before_bet_id": 33342,
+      "gap_after_bet_id": 33337,
+      "gap_after_created_at": "2026-07-08 05:31:13",
+      "gap_before_created_at": "2026-07-08 05:33:02",
+      "inserted_no_bets": 4,
+      "hypothetical_state": {
+        "local_yes": 52525000000,
+        "local_no": 419059000000,
+        "count": 26,
+        "pool_value": 471584000000
+      },
+      "address": "kaspatest:ppfctruurpx3m8rgmaukp2cu83qc348nktx9uackw9rfsx5guc9ckwdxymncf"
+    },
+    {
+      "gap_before_bet_id": 33342,
+      "gap_after_bet_id": 33337,
+      "gap_after_created_at": "2026-07-08 05:31:13",
+      "gap_before_created_at": "2026-07-08 05:33:02",
+      "inserted_no_bets": 5,
+      "hypothetical_state": {
+        "local_yes": 52525000000,
+        "local_no": 519059000000,
+        "count": 27,
+        "pool_value": 571584000000
+      },
+      "address": "kaspatest:prl8mp4ns5rz7g9akxjwhuaw86rz59zch6kfhgex29dkdygp4c64s2axq9ck0"
+    },
+    {
+      "gap_before_bet_id": 33342,
+      "gap_after_bet_id": 33337,
+      "gap_after_created_at": "2026-07-08 05:31:13",
+      "gap_before_created_at": "2026-07-08 05:33:02",
+      "inserted_no_bets": 6,
+      "hypothetical_state": {
+        "local_yes": 52525000000,
+        "local_no": 619059000000,
+        "count": 28,
+        "pool_value": 671584000000
+      },
+      "address": "kaspatest:prfd7mjej6wh0quw73t8m8a0tupmfa2p0lvutzdsdaanlntp72g45tfsmuj7t"
+    },
+    {
+      "gap_before_bet_id": 33342,
+      "gap_after_bet_id": 33337,
+      "gap_after_created_at": "2026-07-08 05:31:13",
+      "gap_before_created_at": "2026-07-08 05:33:02",
+      "inserted_no_bets": 7,
+      "hypothetical_state": {
+        "local_yes": 52525000000,
+        "local_no": 719059000000,
+        "count": 29,
+        "pool_value": 771584000000
+      },
+      "address": "kaspatest:prapuzp2tkghwxxprupcjdag6gw20cjrs79tecywumk2f20lr7y6kwsj3hy4e"
+    },
+    {
+      "gap_before_bet_id": 33343,
+      "gap_after_bet_id": 33342,
+      "gap_after_created_at": "2026-07-08 05:33:02",
+      "gap_before_created_at": "2026-07-08 05:33:12",
+      "inserted_no_bets": 1,
+      "hypothetical_state": {
+        "local_yes": 57525000000,
+        "local_no": 119059000000,
+        "count": 24,
+        "pool_value": 176584000000
+      },
+      "address": "kaspatest:prq2fepy0w3y4e8279dacgfrks896qukuvenshvxyfze440gp2sjjflahxphw"
+    },
+    {
+      "gap_before_bet_id": 33343,
+      "gap_after_bet_id": 33342,
+      "gap_after_created_at": "2026-07-08 05:33:02",
+      "gap_before_created_at": "2026-07-08 05:33:12",
+      "inserted_no_bets": 2,
+      "hypothetical_state": {
+        "local_yes": 57525000000,
+        "local_no": 219059000000,
+        "count": 25,
+        "pool_value": 276584000000
+      },
+      "address": "kaspatest:pzg3yw3aqqcfdsy8shlgfwr3x75cxhp6whrwcm5wrpkxlsh7aq7gzjnk9upfk"
+    },
+    {
+      "gap_before_bet_id": 33343,
+      "gap_after_bet_id": 33342,
+      "gap_after_created_at": "2026-07-08 05:33:02",
+      "gap_before_created_at": "2026-07-08 05:33:12",
+      "inserted_no_bets": 3,
+      "hypothetical_state": {
+        "local_yes": 57525000000,
+        "local_no": 319059000000,
+        "count": 26,
+        "pool_value": 376584000000
+      },
+      "address": "kaspatest:ppa7n7mmeermptvdflsa5vse573ta5a2taysd25vky7n870jl70ukgln8flm7"
+    },
+    {
+      "gap_before_bet_id": 33343,
+      "gap_after_bet_id": 33342,
+      "gap_after_created_at": "2026-07-08 05:33:02",
+      "gap_before_created_at": "2026-07-08 05:33:12",
+      "inserted_no_bets": 4,
+      "hypothetical_state": {
+        "local_yes": 57525000000,
+        "local_no": 419059000000,
+        "count": 27,
+        "pool_value": 476584000000
+      },
+      "address": "kaspatest:pq429xxpktgvljtwmnkay8uwfsysp5wamkz0wtygsqn7kwyql3a8ygzp4nsg0"
+    },
+    {
+      "gap_before_bet_id": 33343,
+      "gap_after_bet_id": 33342,
+      "gap_after_created_at": "2026-07-08 05:33:02",
+      "gap_before_created_at": "2026-07-08 05:33:12",
+      "inserted_no_bets": 5,
+      "hypothetical_state": {
+        "local_yes": 57525000000,
+        "local_no": 519059000000,
+        "count": 28,
+        "pool_value": 576584000000
+      },
+      "address": "kaspatest:pzz6dr80uuetfnc246jqwzmt2jjlak7tcszj559hsxtn0mcdklt9yjyx08c9n"
+    },
+    {
+      "gap_before_bet_id": 33343,
+      "gap_after_bet_id": 33342,
+      "gap_after_created_at": "2026-07-08 05:33:02",
+      "gap_before_created_at": "2026-07-08 05:33:12",
+      "inserted_no_bets": 6,
+      "hypothetical_state": {
+        "local_yes": 57525000000,
+        "local_no": 619059000000,
+        "count": 29,
+        "pool_value": 676584000000
+      },
+      "address": "kaspatest:pqqez2h75nu83f0ztfs4etzw725gz9s09yqt7fnakfawcqksgtxczd4vcvhzf"
+    },
+    {
+      "gap_before_bet_id": 33343,
+      "gap_after_bet_id": 33342,
+      "gap_after_created_at": "2026-07-08 05:33:02",
+      "gap_before_created_at": "2026-07-08 05:33:12",
+      "inserted_no_bets": 7,
+      "hypothetical_state": {
+        "local_yes": 57525000000,
+        "local_no": 719059000000,
+        "count": 30,
+        "pool_value": 776584000000
+      },
+      "address": "kaspatest:pzmkpn07jr7vsf8wac0m8vd900qevsqj2ggg80mumv4aw6982psz5wcfldrh8"
+    },
+    {
+      "gap_before_bet_id": 33352,
+      "gap_after_bet_id": 33343,
+      "gap_after_created_at": "2026-07-08 05:33:12",
+      "gap_before_created_at": "2026-07-08 05:35:02",
+      "inserted_no_bets": 1,
+      "hypothetical_state": {
+        "local_yes": 57525000000,
+        "local_no": 120559000000,
+        "count": 25,
+        "pool_value": 178084000000
+      },
+      "address": "kaspatest:pzau03mml29k4y94q7qjy5k0qylvfykke64muz6vcypny8qqcrkr63cr2j04u"
+    },
+    {
+      "gap_before_bet_id": 33352,
+      "gap_after_bet_id": 33343,
+      "gap_after_created_at": "2026-07-08 05:33:12",
+      "gap_before_created_at": "2026-07-08 05:35:02",
+      "inserted_no_bets": 2,
+      "hypothetical_state": {
+        "local_yes": 57525000000,
+        "local_no": 220559000000,
+        "count": 26,
+        "pool_value": 278084000000
+      },
+      "address": "kaspatest:pz07kf6mm4gyv8zq5gz8syfa4433xg5jyx9h7lylyqw3f8596cthcsw8cjya2"
+    },
+    {
+      "gap_before_bet_id": 33352,
+      "gap_after_bet_id": 33343,
+      "gap_after_created_at": "2026-07-08 05:33:12",
+      "gap_before_created_at": "2026-07-08 05:35:02",
+      "inserted_no_bets": 3,
+      "hypothetical_state": {
+        "local_yes": 57525000000,
+        "local_no": 320559000000,
+        "count": 27,
+        "pool_value": 378084000000
+      },
+      "address": "kaspatest:pqzpfuey88mjf4h49v39hfu6rkw2nqqr4z6pxca60c94zhyk8x89gy645esls"
+    },
+    {
+      "gap_before_bet_id": 33352,
+      "gap_after_bet_id": 33343,
+      "gap_after_created_at": "2026-07-08 05:33:12",
+      "gap_before_created_at": "2026-07-08 05:35:02",
+      "inserted_no_bets": 4,
+      "hypothetical_state": {
+        "local_yes": 57525000000,
+        "local_no": 420559000000,
+        "count": 28,
+        "pool_value": 478084000000
+      },
+      "address": "kaspatest:pzr4j9zemrm83a0rxwmyzr2uhdv7fykj4lham8nl58rmzsqhststunazw2hlj"
+    },
+    {
+      "gap_before_bet_id": 33352,
+      "gap_after_bet_id": 33343,
+      "gap_after_created_at": "2026-07-08 05:33:12",
+      "gap_before_created_at": "2026-07-08 05:35:02",
+      "inserted_no_bets": 5,
+      "hypothetical_state": {
+        "local_yes": 57525000000,
+        "local_no": 520559000000,
+        "count": 29,
+        "pool_value": 578084000000
+      },
+      "address": "kaspatest:pr3p4yphxh4dg6hvgs6tu0cmhaqm0ma09572fen2hzcafdl2edz9kra70ntvr"
+    },
+    {
+      "gap_before_bet_id": 33352,
+      "gap_after_bet_id": 33343,
+      "gap_after_created_at": "2026-07-08 05:33:12",
+      "gap_before_created_at": "2026-07-08 05:35:02",
+      "inserted_no_bets": 6,
+      "hypothetical_state": {
+        "local_yes": 57525000000,
+        "local_no": 620559000000,
+        "count": 30,
+        "pool_value": 678084000000
+      },
+      "address": "kaspatest:pqne7gng26tug0wkkt5hvsyehslvr52y7fpkusruwp072euuqkdr5gq9mvm4u"
+    },
+    {
+      "gap_before_bet_id": 33352,
+      "gap_after_bet_id": 33343,
+      "gap_after_created_at": "2026-07-08 05:33:12",
+      "gap_before_created_at": "2026-07-08 05:35:02",
+      "inserted_no_bets": 7,
+      "hypothetical_state": {
+        "local_yes": 57525000000,
+        "local_no": 720559000000,
+        "count": 31,
+        "pool_value": 778084000000
+      },
+      "address": "kaspatest:pz4tcppand2drk9ufx6umvn28rtv54ngrd8kuqt8lc4va5ew00dfu365sw05j"
+    },
+    {
+      "gap_before_bet_id": null,
+      "gap_after_bet_id": 33352,
+      "gap_after_created_at": "2026-07-08 05:35:02",
+      "gap_before_created_at": null,
+      "inserted_no_bets": 1,
+      "hypothetical_state": {
+        "local_yes": 62525000000,
+        "local_no": 120559000000,
+        "count": 26,
+        "pool_value": 183084000000
+      },
+      "address": "kaspatest:pq8a36aa2tgu95f0gdpxpxzk2ewntl7svm7gx696h9rysz7uqp2tuprm5qwk6"
+    },
+    {
+      "gap_before_bet_id": null,
+      "gap_after_bet_id": 33352,
+      "gap_after_created_at": "2026-07-08 05:35:02",
+      "gap_before_created_at": null,
+      "inserted_no_bets": 2,
+      "hypothetical_state": {
+        "local_yes": 62525000000,
+        "local_no": 220559000000,
+        "count": 27,
+        "pool_value": 283084000000
+      },
+      "address": "kaspatest:pp3qp8k5mqxqxkpchcfzn53ypv2gwgnk2yr9ejp0sqtlmv74qj29wmzj4ygt0"
+    },
+    {
+      "gap_before_bet_id": null,
+      "gap_after_bet_id": 33352,
+      "gap_after_created_at": "2026-07-08 05:35:02",
+      "gap_before_created_at": null,
+      "inserted_no_bets": 3,
+      "hypothetical_state": {
+        "local_yes": 62525000000,
+        "local_no": 320559000000,
+        "count": 28,
+        "pool_value": 383084000000
+      },
+      "address": "kaspatest:pz2eht5kyaweccckfcd6uypm8t2vy5vr39qg5r0utrlynzfwe3c0qwf77pay9"
+    },
+    {
+      "gap_before_bet_id": null,
+      "gap_after_bet_id": 33352,
+      "gap_after_created_at": "2026-07-08 05:35:02",
+      "gap_before_created_at": null,
+      "inserted_no_bets": 4,
+      "hypothetical_state": {
+        "local_yes": 62525000000,
+        "local_no": 420559000000,
+        "count": 29,
+        "pool_value": 483084000000
+      },
+      "address": "kaspatest:pq5wvwncslqy2erjyg3z6ay3mc9erzvp9k50ek4dxfqgmcnd75yvzz32xcncl"
+    },
+    {
+      "gap_before_bet_id": null,
+      "gap_after_bet_id": 33352,
+      "gap_after_created_at": "2026-07-08 05:35:02",
+      "gap_before_created_at": null,
+      "inserted_no_bets": 5,
+      "hypothetical_state": {
+        "local_yes": 62525000000,
+        "local_no": 520559000000,
+        "count": 30,
+        "pool_value": 583084000000
+      },
+      "address": "kaspatest:presx5du4qkt8tht2jlcyf2ft7stshnr6lqxwplpme74hrkra0h6qknakq7m6"
+    },
+    {
+      "gap_before_bet_id": null,
+      "gap_after_bet_id": 33352,
+      "gap_after_created_at": "2026-07-08 05:35:02",
+      "gap_before_created_at": null,
+      "inserted_no_bets": 6,
+      "hypothetical_state": {
+        "local_yes": 62525000000,
+        "local_no": 620559000000,
+        "count": 31,
+        "pool_value": 683084000000
+      },
+      "address": "kaspatest:prcmzsctaftm5a424yzvlfh36dz0z2thfskyr7yafk56nd2srt0ay9f2lduhc"
+    },
+    {
+      "gap_before_bet_id": null,
+      "gap_after_bet_id": 33352,
+      "gap_after_created_at": "2026-07-08 05:35:02",
+      "gap_before_created_at": null,
+      "inserted_no_bets": 7,
+      "hypothetical_state": {
+        "local_yes": 62525000000,
+        "local_no": 720559000000,
+        "count": 32,
+        "pool_value": 783084000000
+      },
+      "address": "kaspatest:pqt39djdgnpfqqtqe6k3c3w4kj69u3yad2pycjrlyvj0lptf4pq666435rw6s"
+    }
+  ]
+}
