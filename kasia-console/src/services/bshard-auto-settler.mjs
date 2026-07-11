@@ -17,6 +17,7 @@
 //   J1 consolidate auto-splice helper。
 
 import { getMarketBets } from '../lib/pool-bettor-sides-query.mjs';
+import { _shard9PhantomExcludeFor } from './bshard-close-voter.js';
 import { computePariMutuelPayout } from '../lib/pool-shard-settle.mjs';
 import { payoutRoot as buildPayoutRoot, payoutLeaf, merkleProof, climbProof } from '../lib/pool-payout-root.mjs';
 import { deriveCommitteeSeed, selectCommittee } from './pool-committee-sampler.mjs';
@@ -54,7 +55,10 @@ export async function computeSettlePlan(marketId, ctx) {
   if (!market) return { ok: false, reason: 'market 不存在' };
 
   // 1. shard-aware bets (排杂质·防 0-bet 误判)
-  const { bets, betCount, poolSompi, isBshard, multiShard } = getMarketBets(marketId, db);
+  // excludeSideLockTx(2026-07-11, Bettor #g3x7lm.2 抓漏): committee侧(bshard-close-voter.js loadBettors/
+  // excludeSideLockTx)早接了这份排除表, driver侧(这里)漏接过——不接会算出320笔而非309笔, propose builder
+  // 跟committee各算各的payoutRoot, 必分叉BUST。单一真相源(_shard9PhantomExcludeFor), 不在这里复制表。
+  const { bets, betCount, poolSompi, isBshard, multiShard } = getMarketBets(marketId, db, _shard9PhantomExcludeFor(marketId));
   if (!isBshard) return { ok: false, reason: 'non-bshard (v06/v05)·此 settler 只 bshard', isBshard: false };
   // 多片 rolling shard: getMarketBets 现 fold-gather 跨全片 union (Phase 1·2026-06-30)·bets 含全片注·
   //   poolSompi=Σ全片·payoutRoot 覆盖全片 winner。consolidate 侧 consolidateAllShards 已逐片折进单 PS (体积有界·
@@ -449,7 +453,7 @@ export async function computeRefundPlan(marketId, ctx) {
   const market = db.prepare('SELECT * FROM pool_markets WHERE id = ?').get(marketId);
   if (!market) return { ok: false, reason: 'market 不存在' };
 
-  const { bets, betCount, poolSompi, isBshard } = getMarketBets(marketId, db);
+  const { bets, betCount, poolSompi, isBshard } = getMarketBets(marketId, db, _shard9PhantomExcludeFor(marketId));
   if (!isBshard) return { ok: false, reason: 'non-bshard (v06/v05)·此 settler 只 bshard', isBshard: false };
   if (betCount === 0) return { ok: false, reason: '真 0-bet, 无需退款', isBshard, betCount: 0, degenerate: true };
 

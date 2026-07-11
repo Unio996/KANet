@@ -17,6 +17,7 @@ import { sqlite } from '../db/client.js';
 import { getMarketBets } from '../lib/pool-bettor-sides-query.mjs';
 import { computeSettlePlan, settleMarketLive } from './bshard-auto-settler.mjs';
 import { consolidateAllShards } from '../lib/pool-shard-settle.mjs';
+import { _shard9PhantomExcludeFor } from './bshard-close-voter.js';
 import { compilePayoutShardRedeem } from '../lib/pool-shard-register.mjs';
 import { fetchEndBlockHashCanonical } from './pool-market-settler-v06.mjs';
 import { judgeLine } from '../lib/judgeline.mjs';
@@ -192,7 +193,9 @@ async function consolidateAndBuildPsState(marketId, ps, ctx) {
     log(`${marketId.slice(-8)} consolidated ${res.consolidatedShards} shard(s) → ${res.psOutpoint} pool=${consolidatedPool}`);
   } else {
     [psOutpointTxid, psIdx] = String(ps.payout_ps_outpoint).split(':'); psIdx = Number(psIdx);
-    const { poolSompi } = getMarketBets(marketId, sqlite);
+    // excludeSideLockTx(2026-07-11, Bettor #g3x7lm.2 抓漏同族点): 不接会预测出含phantom份额的假
+    // consolidatedPool, 跟真实链上(已排除shard9/10)值不符。
+    const { poolSompi } = getMarketBets(marketId, sqlite, _shard9PhantomExcludeFor(marketId));
     consolidatedPool = (BigInt(poolSompi) + BigInt(PS_SEED_SOMPI)).toString();
     log(`${marketId.slice(-8)} already consolidated → ${ps.payout_ps_outpoint} pool=${consolidatedPool}`);
   }

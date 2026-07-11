@@ -112,7 +112,10 @@ const _SHARD9_PHANTOM_EXCLUDE_SIDE_LOCK_TX = {
     '7272f21ce46669caf476d9ee4604d8f3d09d9e8ec6e937a7a57b1f632beb1884',
   ],
 };
-function _shard9PhantomExcludeFor(marketId) {
+// exported (2026-07-11, Bettor #g3x7lm.2 抓漏): driver侧(bshard-auto-settler.mjs computeSettlePlan/
+// computeRefundPlan)之前没接这份排除表, 会算出320笔而非309笔, 跟committee侧(本文件loadBettors/
+// excludeSideLockTx)算的309笔对不上, propose必BUST——单一真相源, 不在第二个文件里复制这张表。
+export function _shard9PhantomExcludeFor(marketId) {
   return _SHARD9_PHANTOM_EXCLUDE_SIDE_LOCK_TX[marketId] || null;
 }
 
