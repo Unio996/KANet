@@ -1776,6 +1776,30 @@ export async function registerPoolRoutes(fastify) {
     }
   });
 
+  // 🔴 一次性临时测试端点(2026-07-11, J2写+KANet-UI装载/删除, Bettor #g2qbor.2批准): 验证
+  // verifyBettorsCompleteFromChain(C1级2-A降级+级2-B live-primary)对28mln real ctx的实跑结果——
+  // standalone脚本连不到活relay child-process(同propose-close-v2那条注释的老问题), 必须在console
+  // 活进程内跑才能让level2-B真走live路径。测完KANet-UI删这段+重启确认干净, 不是永久业务端点。
+  fastify.get('/api/admin/pool/test-verify-bettors-complete', async (request, reply) => {
+    if (process.env.KANET_TEST_MODE !== '1') {
+      return reply.code(503).send({ ok: false, error: 'test endpoint disabled (KANET_TEST_MODE != 1, 临时测试用, 用完删)' });
+    }
+    const marketId = request.query.market_id || 'ext-pool-v07-1783455512843-28mln';
+    try {
+      const market = sqlite.prepare('SELECT * FROM pool_markets WHERE id = ?').get(marketId);
+      if (!market) return reply.code(404).send({ ok: false, error: `market ${marketId} not found` });
+      const voter = sqlite.prepare("SELECT id, name, address FROM relay_nodes WHERE address LIKE 'kaspatest:%' LIMIT 1").get();
+      const { buildEnforceCtx } = await import('../services/bshard-close-voter.js');
+      const { verifyBettorsCompleteFromChain } = await import('../lib/bshard-close-enforce.mjs');
+      const ctx = buildEnforceCtx(voter, '00'.repeat(32), market);
+      const bettors = await ctx.loadBettors(marketId);
+      const result = await verifyBettorsCompleteFromChain(marketId, bettors, ctx);
+      return reply.send({ ok: true, market_id: marketId, bettors_count: bettors.length, result });
+    } catch (e) {
+      return reply.code(500).send({ ok: false, error: e.message });
+    }
+  });
+
   // GET /api/pool/config — static defaults for UI pre-submit preview (D4 wallet浮窗 estimate fee)
   // POST /api/admin/pool/propose-close-v2 — buildProposeCloseRequestV2 的活进程调用入口(2026-07-08,
   // market5/pxvml 首次实战 propose)。只是执行位置的 wiring(standalone 脚本连不到 relay-manager.js 的
@@ -2000,6 +2024,30 @@ export async function registerPoolRoutes(fastify) {
       return reply.code(500).send({ ok: false, error: `zk-close-gate-debugger failed: ${e.message}` });
     }
   });
+
+  // 🔴 临时(2026-07-11, KANet-UI 代管J1域·gate②b 28mln终验): standalone脚本(scratch/_j2_gate2b_...)碰不到
+  //   console进程内的relay child-process(sendCommandAsync 'Relay not running')，verifyBettorsCompleteFromChain
+  //   平时只在daemon自己的tick里跑，没有对外HTTP入口——加这条临时route在console进程内真实触达relay，
+  //   跑完即删（同今晚J1的KANET_TEST_MODE临时路由先例）。只读，不广播，不写DB。
+  if (process.env.KANET_TEST_MODE === '1') {
+    fastify.post('/api/test/gate2b-verify', async (request, reply) => {
+      try {
+        const { buildEnforceCtx } = await import('../services/bshard-close-voter.js');
+        const { verifyBettorsCompleteFromChain } = await import('../lib/bshard-close-enforce.mjs');
+        const marketId = request.body?.market_id || 'ext-pool-v07-1783455512843-28mln';
+        const market = sqlite.prepare('SELECT * FROM pool_markets WHERE id = ?').get(marketId);
+        if (!market) return reply.code(404).send({ ok: false, error: `market ${marketId} not found` });
+        const voter = sqlite.prepare("SELECT id, name, address FROM relay_nodes WHERE address LIKE 'kaspatest:%' LIMIT 1").get();
+        if (!voter) return reply.code(503).send({ ok: false, error: 'no local relay identity available' });
+        const ctx = buildEnforceCtx(voter, '00'.repeat(32), market);
+        const bettors = await ctx.loadBettors(marketId);
+        const result = await verifyBettorsCompleteFromChain(marketId, bettors, ctx);
+        return reply.send({ ok: true, market_id: marketId, bettors_loaded: bettors.length, result });
+      } catch (e) {
+        return reply.code(500).send({ ok: false, error: e.message, stack: e.stack });
+      }
+    });
+  }
 
   fastify.get('/api/pool/config', async (request, reply) => {
     return reply.send({
