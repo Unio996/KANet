@@ -17,6 +17,7 @@
 // feeLeaves, 只验证"调用方传入的 feeLeaves 加 winner payouts 精确 == consolidatedPool"(守恒把关,
 // 跟"这个 feeLeaves 该怎么算"的政策问题解耦——那部分现在有了单源答案, 但答案的执行仍在 caller 侧)。
 
+import { randomUUID } from 'node:crypto';
 import { getSidesByShard } from './pool-bettor-sides-query.mjs';
 import { canonicalBetOrder, computeBetsRoot } from './pool-payout-root.mjs';
 import { computePariMutuelPayout } from './pool-shard-settle.mjs';
@@ -124,5 +125,17 @@ export function retryZkProveJobAfterHandoffLanded(db, marketId) {
     return { ok: true, retried: false, reason: `failed job ${row.id} error 不匹配 liveness 缺口子串, 不自动重试(需人工看): ${row.error}` };
   }
   db.prepare(`UPDATE zk_prove_jobs SET status = 'pending', error = NULL, updated_at = datetime('now') WHERE id = ?`).run(row.id);
+  // 审计留痕(NWT diff 审抓出设计 §2 步骤3 与实现落差, 已补——同 _writeZkCloseTickErrorEvent 既有模式,
+  // 不新造 events 写法, try/catch 只影响记账不影响已经生效的 job 重置)。
+  try {
+    db.prepare(`
+      INSERT INTO events (id, event_scope, event_type, source, level, summary, payload_json, created_at)
+      VALUES (?, 'system', 'zk_prove_job_retried_after_handoff', 'zk-prove-enqueue.retryZkProveJobAfterHandoffLanded', 'info', ?, ?, datetime('now'))
+    `).run(
+      randomUUID(),
+      `market=${marketId.slice(-8)} zk_prove_jobs id=${row.id} 因 zk_handoff-landed 重置回 pending(此前因 liveness 缺口 failed)`,
+      JSON.stringify({ marketId, jobId: row.id, previousError: row.error }),
+    );
+  } catch (e) { /* audit-only, non-fatal — job reset above already committed */ }
   return { ok: true, retried: true, jobId: row.id };
 }

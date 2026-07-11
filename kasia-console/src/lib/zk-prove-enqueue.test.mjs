@@ -25,6 +25,7 @@ function freshDb() {
       fee_leaves_json TEXT NOT NULL DEFAULT '[]', pool_total_sompi TEXT
     );
     CREATE UNIQUE INDEX idx_zk_prove_jobs_market_active ON zk_prove_jobs(market_id) WHERE status IN ('pending', 'in_progress');
+    CREATE TABLE events (id TEXT, event_scope TEXT, event_type TEXT, source TEXT, level TEXT, summary TEXT, payload_json TEXT, created_at TEXT);
   `);
   return db;
 }
@@ -153,6 +154,9 @@ console.log('[test] retryZkProveJobAfterHandoffLanded (缺件④, docs/2026-07-1
   const row = db.prepare('SELECT status, error FROM zk_prove_jobs WHERE id = ?').get(r.jobId);
   ok(row.status === 'pending', 'job reset to pending');
   ok(row.error === null, 'error cleared');
+  const auditEvt = db.prepare(`SELECT * FROM events WHERE event_type = 'zk_prove_job_retried_after_handoff'`).get();
+  ok(!!auditEvt, 'audit event row written (NWT diff-review finding: design §2 步骤3 要求, 实现之前漏了)');
+  ok(JSON.parse(auditEvt.payload_json).jobId === r.jobId, 'audit payload references correct jobId');
 
   console.log('  [negative] real data error must NOT be auto-retried (防退化成 blanket retry):');
   const db2 = freshDb();
