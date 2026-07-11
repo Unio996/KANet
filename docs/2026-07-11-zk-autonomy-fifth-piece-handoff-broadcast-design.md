@@ -41,8 +41,10 @@ cron）+ zk_close + claim 三环自治，judge/propose/**handoff**/enqueue 人�
 - per-market running 互斥：复用 `_zkAutonomyLeases`（现有 Set，`zk-autonomy-ticks.mjs:60`）——这个市场
   在 zk_close/claim tick 眼里此刻还没有 `zk_continuation`，天然不会跟它们抢占同一把锁；反过来本 tick
   跑的时候也把市场 id 加进同一个 Set，防止本 tick 自己的下一轮 tick 跟这一轮重叠。
-- 命中即调 `buildZkHandoffRequestV2(marketId, {settlerRelayId: SETTLER_RELAY_ID, dryRun: false})`，
-  成功/失败都记 `events`（同 `_writeZkAutonomyErrorEvent` 既有模式）。
+- 命中即调 `buildZkHandoffRequestV2(marketId, {settlerRelayId, dryRun: false})`。**relay id 解析**
+  （Bettor n2，#glhaey.2）：daemon 自己解析 `process.env.BSHARD_SETTLER_RELAY_ID`（同 `bshard-settle-
+  daemon.mjs:42` 的 `ZK_SETTLER_RELAY_ID` 既有模式——每个文件各自读同一个 env var 派生自己的常量，不
+  跨模块 import 别处的常量），成功/失败都记 `events`（同 `_writeZkAutonomyErrorEvent` 既有模式）。
 - kill switch 独立：`ZK_HANDOFF_TICK_ENABLED`（默认 OFF，同 (b)(c) 上线纪律——offline test 全绿 + 一个
   真实市场手动验证 + Bettor/NWT 双签才 ON）。
 
@@ -65,10 +67,15 @@ enqueue→（既有）zk-prove-worker 捡起→（(b)）zk_close 自治→（(c)
   代价是浪费一次 `transferAndConfirm`（多转一笔 fee dust 到 relay 自己地址，钱没丢，下次还能用，只是
   空转）。
 
-**本文档倾向**：v1 接受这个"安全但可能空转"的边界（有界、不丢钱、同 `_tryEnqueueZkProve`
-"钱路已成立、记账/触发失败不倒灌回钱路状态"的既有纪律同类），不在本次引入类似
-`bshard_close_submit_v2_pending_txid` 的 resume-marker 机制（+代码量、+复杂度）。**NWT 红队请重点判断
-这条是否可以接受，还是必须先补 resume-marker 才能上线**——这是本设计唯一没有拍死的开放问题。
+**裁定（Bettor n1，#glhaey.2，取代上面"v1 直接接受空转"的原倾向）**：纯无条件重试的空转代价不是
+一次性的——tick 30s 一轮，市场卡在这个态的每一轮都会烧一笔真实 fee dust 转账，卡数小时 = 可观 churn
+（既浪费又在 `events`/链上留一堆噪音记录）。**采用中间方案：per-market 尝试冷却**——`events` 表已有
+本市场上次 `zkHandoffAutonomousTick` 尝试的时间戳（每次尝试无论成败都记一条，见 §2），扫描时对每个
+候选市场先查"上次尝试距今是否 ≥ 冷却间隔"（数值同 tick 周期同量级，比如 5 分钟量级，具体值 NWT/落码
+时定，不是本文档的架构决策点），未到冷却时间的候选跳过，不发起新的 `buildZkHandoffRequestV2` 调用。
+**这不是 resume-marker**（不追踪"上一笔具体 txid 是否已 landed"这种精确状态），只是限速——之前空转的
+物理成因（花钱操作可能因窗口内轮询超时而被误判失败）依然存在，冷却只是把"每 30s 烧一次"降到"每
+冷却周期烧一次"，用更小的代价换同样的自愈能力。
 
 ## 5. 验收
 
