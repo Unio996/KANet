@@ -398,12 +398,17 @@ export async function buildProposeCloseRequestV2(marketId, judged) {
   // 也没带, 两条路都空手, per-ticket 循环零迭代。committee 仍会独立 checkUtxoLanded 重验(snapshot 只指路
   // 不受信), 这里只是把"指路"信息补齐, 不影响链锚验证的独立性。
   const snapshot = {
-    shards: sqlite.prepare('SELECT shard_market_id, shard_index, shard_redeem_hex, current_leaf_state, current_leaf_outpoint FROM market_shards WHERE logical_market_id = ? ORDER BY shard_index ASC').all(marketId)
+    shards: sqlite.prepare('SELECT shard_market_id, shard_index, shard_redeem_hex, current_leaf_state, current_leaf_outpoint, status FROM market_shards WHERE logical_market_id = ? ORDER BY shard_index ASC').all(marketId)
       .map(s => ({
         // shard_pool_id 不在这里算: bshard-close-enforce.mjs 消费端本就有 fallback(sh.shard_pool_id ||
         // _hex32(`${marketId}-shard-${idx}`)), 省一份可能不一致的重复计算, 让唯一那份计算逻辑负责。
         shard_index: s.shard_index, shard_market_id: s.shard_market_id,
         shard_redeem_hex: s.shard_redeem_hex, current_leaf_state: s.current_leaf_state, current_leaf_outpoint: s.current_leaf_outpoint,
+        // status 加 (2026-07-11, C1 folded-shard 链锚降级, docs/2026-07-11-c1-folded-shard-anchor-design.md):
+        //   bshard-close-enforce.mjs 级2-A 循环需要 sh.status==='settling' 判定是否跳过个体链锚——没这一列
+        //   cross-node snapshot 分支会永远判定为"未折叠", 对已折叠 shard 照样跑 readOutpointCreatedAddr
+        //   (剪裁墙 BUST)。只加 SELECT 列 + 透传, 不改现有字段/顺序 (向后兼容, 零行为变化)。
+        status: s.status,
         // side_lock_tx 加 (2026-07-11, 28mln shard9 phantom-leaf recovery, docs/2026-07-10-shard9-recovery-
         //   design.md, Bettor审计抓漏): bshard-close-enforce.mjs 的 excludeSideLockTx 排除只在 side_lock_tx
         //   字段存在时才能生效——之前这里没带这一列, cross-node snapshot 分支(sh.bettors)结构性拿不到

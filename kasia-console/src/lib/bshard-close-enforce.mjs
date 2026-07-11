@@ -761,6 +761,21 @@ export async function verifyBettorsCompleteFromChain(logicalMarketId, bettors, c
     //   provenance+full-state 绑不丢 (Bettor forge-leaf 铁律): 假 state / swap yes-no → spliced 地址变 → 不符 → BUST。
     //   '链上存在但没 consolidate 进本 PS' 的 forge → 由下方 PS-pool 聚合锚抓 (Σloaded != consolidated_pool)。
     //   与 J1 level2-B (ticket landed-in-history) 同 pattern; chainReader hook = ctx.readOutpointCreatedAddr。
+    // 🔴 folded-shard 降级 (2026-07-11, C1链锚pruning-wall事故, docs/2026-07-11-c1-folded-shard-anchor-design.md):
+    //   已折叠(status==='settling')shard的leaf-creation tx物理上可能早于kaspad剪裁点+早于kaspa_tx_log indexer
+    //   覆盖窗口(28mln 7/7-7/8下注期双重验证过够不到)——readOutpointCreatedAddr结构性查不到不是bug是"老block两条
+    //   读路径都够不到"的事实,不能当BUST。跳过这类shard的个体链锚,只信任current_leaf_state参与下方(811-817行)
+    //   聚合层psConsolidatedPool锚(近期块,活UTXO,两条读路径都够得到)——聚合锚仍然兜住"folded shard们state总和
+    //   跟PayoutShard实际吸收金额一致"这条底线。残留风险(已折叠shard间yes/no对调但总和不变=聚合层抓不住)已在
+    //   设计doc里显式披露,Bettor以协调身份接受,follow-up方向留档不做本次。未折叠(open/sealed)shard不受影响,
+    //   逐片链锚检查原样保留。
+    if (sh.status === 'settling') {
+      chainCount += Number(st.count);
+      chainYes += BigInt(st.local_yes);
+      chainNo += BigInt(st.local_no);
+      chainPool += BigInt(st.pool_value);
+      continue;
+    }
     const leafAddr = ctx.p2sh(_spliceLeafState(sh.shard_redeem_hex, st));
     let anchored = false; let anchorMode = '';
     if (typeof ctx.readOutpointCreatedAddr === 'function') {
