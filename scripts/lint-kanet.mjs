@@ -179,6 +179,10 @@ function checkR10() {
 // ── R11: 中文 deterministic 完成动作 regex 必含 (?:了)? 后缀 ──
 // 检测: const X_REGEX = /^(...|完成|付了|转完|done|...)\s*[!！。.…]*\s*$/  无 (?:了)?
 function checkR11(filepath, content) {
+  // R11 只查真实 source 里的 const X_REGEX 声明. .md 文档(如 ANTI-PATTERNS.md 自己规则11的
+  // "### Wrong" 教学代码块)会把示例性缺后缀 regex 字面量误判成真实违规, 导致自身规则文档永远
+  // 过不了自己的 lint (2026-07-11 KANet-UI 发现, 见 memory). 文档示例不是要被 lint 的源码.
+  if (filepath.endsWith('.md')) return;
   const lines = content.split('\n');
   // 看变量名含 PAID/FINISH/DONE 的 regex literal
   const re = /const\s+(\w*(?:PAID|FINISH|DONE|COMPLETE)\w*_REGEX)\s*=\s*(\/[^\n]+\/[gimsu]*)/gi;
