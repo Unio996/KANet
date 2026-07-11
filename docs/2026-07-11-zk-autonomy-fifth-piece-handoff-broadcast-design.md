@@ -77,6 +77,27 @@ enqueue→（既有）zk-prove-worker 捡起→（(b)）zk_close 自治→（(c)
 物理成因（花钱操作可能因窗口内轮询超时而被误判失败）依然存在，冷却只是把"每 30s 烧一次"降到"每
 冷却周期烧一次"，用更小的代价换同样的自愈能力。
 
+**②裁定为 v1 必做，非可选（Bettor #gljs86.2，推演补刀）**：若某次 handoff 广播**真落链但轮询窗口
+错过**，`zk_continuation` 永远不会被写（landed-gated 纪律本身没错）——此后每轮不做智能恢复的话，都会
+拿已经被那笔真实落链 tx 花掉的 `ps.payout_ps_outpoint` 去 build 新 tx，永远撞 "UTXO not found"，**这个
+市场永久死锁**，不是"安全空转"——恰好把这套自治化本来要消灭的"卡死等人工"换个形态留下，跟今晚整晚
+在解的同一类问题（stuck forever）复发。成本评估如下（不需要完整 resume-marker 状态机）：
+`buildZkHandoffRequestV2` 在
+landed-check 超时的分支（`bshard-close-transport.mjs:527-528`）仍然 `return result`，**`result.txId`/
+`result.closeZkAddress` 对调用方可见**（函数本身不用改一个字）。本 tick 自己在捕获到"广播成功但超时"
+这个返回值时，把 `{txId, closeZkAddress}` 存进一个轻量 metadata 字段（例如 `zk_handoff_pending`，跟
+`bshard_close_submit_v2_pending_txid` 同精神，非同一份）。下一轮扫描时，若候选市场带这个 pending
+字段，**先** `checkUtxoLanded(closeZkAddress, txId)` 而非直接重新广播：
+- landed=true：说明上次广播其实真的成功了，只是轮询窗口内没等到——直接调 `writeZkContinuation`（用
+  pending 字段里存的同一批值，不重新推导）补齐持久化 + 清掉 pending 字段，**不发起新广播**（"智能恢复"，
+  零新增 fee 消耗）。
+- landed=false：清掉 pending 字段，走正常路径重新调 `buildZkHandoffRequestV2`（这次是真安全的重新
+  广播，同上面的分析）。
+成本可控：不需要重建 witness/build-preimage（那是 resume-marker 完整状态机才要做的事），只需一次
+`checkUtxoLanded` 命令 + 复用已有的 `writeZkContinuation`——两者都是现成函数。**①（冷却）+②（智能
+恢复）一起落码**，互补而非二选一：②处理"确实只是超时"这类可以零成本恢复的情形，①兜底"网络持续
+拥堵、连② 也没法在合理时间内确认"这类更差情形下的限速阀门。
+
 ## 5. 验收
 
 1. offline test：(a) 扫描条件命中"已 attest 且无 zk_continuation"的市场；(b) 已有 `zk_continuation`
