@@ -25,6 +25,7 @@ import { deriveCommitteeSeed, selectCommittee } from './pool-committee-sampler.m
 import { compilePayoutShardRedeem, REORG_SAFE_MIN_DEPTH } from '../lib/pool-shard-register.mjs';
 import { buildPoolMerkleTree, getPoolMerkleProof } from './pool-merkle-v06.mjs';
 import { blake2b } from '@noble/hashes/blake2b';
+import { randomUUID } from 'crypto';
 import { sqlite } from '../db/client.js';
 
 const COMMITTEE_DUMMY_SIG = '41' + '00'.repeat(64) + '01';   // 66B placeholder 未签槽 (4-of-5 容 1)
@@ -161,8 +162,28 @@ export function deriveResumePlanFromEvidence(marketId, ctx) {
   let meta; try { meta = JSON.parse(market.metadata || '{}'); } catch { meta = {}; }
   const evidence = meta.settle_evidence;
   if (!evidence?.close_txid) return { ok: false, reason: 'no settle_evidence.close_txid — 非 resume 场景' };
-  if (evidence.win_direction !== 0 && evidence.win_direction !== 1) {
-    return { ok: false, reason: `settle_evidence.win_direction 无效(${evidence.win_direction}) — 拒绝 resume` };
+  let winDirection = evidence.win_direction;
+  if (winDirection !== 0 && winDirection !== 1) {
+    // ── Fix-A: win_direction root-match 推断(合卡设计 v1.2 §2, 2026-07-12)——老版本 evidence 缺
+    //   win_direction(桶A 22/27 根因)。链读①路(NWT F1: 靶=链非 DB): dir∈{0,1} 各重算 root → 编译候选
+    //   closed redeem → p2sh 地址, 与 close_txid 链上 output0 地址比对——地址承诺 redeem 承诺 root,
+    //   恰一吻合即链锚判定(pzmm5hg7 expectedClosedAddr predict 方法学倒用)。零/双吻合→fail-closed
+    //   响亮报(evidence/链漂移信号, Bettor 注3, 与 pre-gate 分开计数)。禁裸信 evidence.payout_root。
+    const inferred = _inferWinDirectionFromChain(marketId, market, evidence, ctx);
+    if (!inferred.ok) return inferred;   // reason 已带 [resume-infer] 前缀, 上游 [resume-skip] log 可见
+    winDirection = inferred.winDir;
+    // 回写(优化非前提, Bettor 注2): SQLite 单语句原子 json_set, 幂等 WHERE 只填 NULL——零 JS RMW 窗口,
+    //   写失败不回滚推断结果本 tick 照用(下 tick 重推断一样对)。
+    try {
+      db.prepare(`
+        UPDATE pool_markets SET metadata = json_set(metadata, '$.settle_evidence.win_direction', ?)
+        WHERE id = ? AND json_extract(metadata, '$.settle_evidence.win_direction') IS NULL
+      `).run(winDirection, marketId);
+      db.prepare(`
+        INSERT INTO events (id, event_scope, event_type, source, level, summary, payload_json, created_at)
+        VALUES (?, 'system', 'backfill_windir_inferred', 'bshard-auto-settler', 'info', ?, ?, datetime('now'))
+      `).run(randomUUID(), `market=${marketId.slice(-8)} win_direction=${winDirection} 由链上 closed-PS 地址 root-match 推断回补(合卡 Fix-A)`, JSON.stringify({ marketId, winDirection, closeTxid: evidence.close_txid, matchedAddr: inferred.matchedAddr }));
+    } catch (e) { console.warn(`[resume-infer] 回写/审计失败(非致命, 本 tick 照用推断值): ${e.message}`); }
   }
 
   // 独立重算(不透传 evidence 里的 winners/poolSompi 数字本身)——同源 getMarketBets/computePariMutuelPayout,
@@ -178,7 +199,7 @@ export function deriveResumePlanFromEvidence(marketId, ctx) {
     try { ({ feeLeaves: resumeFeeLeaves } = deriveRoleFeeLeaves(JSON.parse(market.fee_rules), poolSompi, { committeePks: [] })); }
     catch (e) { return { ok: false, reason: `fee_rules 解析/派生失败(${e.message}) — 拒绝 resume, 回退 computeSettlePlan fail-loud` }; }
   }
-  const pm = computePariMutuelPayout({ bettors: bets.map(b => ({ pk: b.pk, stake: b.stake, direction: b.direction })), winningDirection: evidence.win_direction, feeLeaves: resumeFeeLeaves });
+  const pm = computePariMutuelPayout({ bettors: bets.map(b => ({ pk: b.pk, stake: b.stake, direction: b.direction })), winningDirection: winDirection, feeLeaves: resumeFeeLeaves });
   if (pm.degenerate) return { ok: false, reason: 'resume 场景下重算 degenerate — 与已落链的 close 状态矛盾, 拒绝' };
   const recomputedRootHex = buildPayoutRoot(pm.payoutLeaves).toString('hex');
   if (evidence.payout_root && recomputedRootHex !== evidence.payout_root) {
@@ -186,9 +207,71 @@ export function deriveResumePlanFromEvidence(marketId, ctx) {
   }
 
   return {
-    ok: true, isBshard, betCount, poolSompi, winDir: evidence.win_direction,
+    ok: true, isBshard, betCount, poolSompi, winDir: winDirection,
     payoutRoot: recomputedRootHex, winners: pm.payoutLeaves.map(w => ({ pk: w.pk, amount: w.amount })),
   };
+}
+
+/**
+ * _inferWinDirectionFromChain — Fix-A 链读推断(合卡设计 v1.2 §2, NWT F1 修法①路)。
+ * 对 dir∈{0,1}: 重算 root_dir(同 resume 重算逻辑含 fee 叶)→ compilePayoutShardRedeem(closed=1,
+ * payoutRoot=root_dir)→ p2sh 候选地址; 与 close_txid 的链上 output0 地址(kaspa_tx_log 观测)比对。
+ * 地址(P2SH hash)承诺 redeem 承诺 root——匹配地址=匹配 root=链锚判定, DB 的 psRow 字段若被篡改则两个
+ * 候选地址都不匹配 = 自锚 fail-closed。任一材料缺失/零匹配/双匹配 → {ok:false} 响亮报(Bettor 注3:
+ * zero-match=evidence/链漂移信号, 单独 event_type 不与 pre-gate 混桶)。
+ */
+export function _inferWinDirectionFromChain(marketId, market, evidence, ctx) {
+  const { db } = ctx;
+  const fail = (reason, drift = false) => {
+    const msg = `[resume-infer] ${reason}`;
+    if (drift) {
+      console.error(`🔴 ${msg} — root 双向不吻合=evidence/链漂移信号(bettor 集漂移/refund-root 盘族), 非"不可推断", 单独查`);
+      try {
+        db.prepare(`INSERT INTO events (id, event_scope, event_type, source, level, summary, payload_json, created_at)
+          VALUES (?, 'system', 'windir_infer_drift', 'bshard-auto-settler', 'warn', ?, ?, datetime('now'))`)
+          .run(randomUUID(), `market=${marketId.slice(-8)} ${reason.slice(0, 200)}`, JSON.stringify({ marketId, closeTxid: evidence.close_txid }));
+      } catch {}
+    }
+    return { ok: false, reason: msg };
+  };
+  // V2/zk 市场不走本推断(closed redeem 布局不同, V1 专属; zk 市场有自己的 tick 链)
+  let rrs = null; try { rrs = JSON.parse(market.resolution_rule_spec || '{}'); } catch {}
+  if (rrs?.zk_native === true) return fail('zk_native 市场不适用 V1 closed-redeem 推断, 拒绝 resume');
+  if (typeof ctx.p2shAddr !== 'function') return fail('ctx.p2shAddr 缺(需 daemon ctx), 无法编译候选地址, fail-closed');
+  const psRow = db.prepare('SELECT pool_merkle_root, predicate_commit FROM payout_shards WHERE logical_market_id = ?').get(marketId);
+  if (!psRow) return fail('payout_shards 行缺, 无法编译候选 closed redeem, fail-closed');
+  // 链读靶: close_txid 的 output0 地址(kaspa_tx_log 本地观测——indexer 有缺口族, 缺=fail-closed 落 F3 账)
+  const txRow = db.prepare('SELECT outputs_json FROM kaspa_tx_log WHERE tx_id = ?').get(evidence.close_txid);
+  if (!txRow?.outputs_json) return fail(`close_txid ${String(evidence.close_txid).slice(0, 12)}… 不在 kaspa_tx_log(indexer 缺口), 链读靶缺, fail-closed(F3 账)`);
+  let chainAddr = null;
+  try {
+    const outs = JSON.parse(txRow.outputs_json);
+    const o0 = Array.isArray(outs) ? outs[0] : null;
+    chainAddr = o0?.address || o0?.verboseData?.scriptPublicKeyAddress || o0?.scriptPublicKeyAddress || null;
+  } catch {}
+  if (!chainAddr) return fail('close tx outputs_json 无法取 output0 地址(形状不识), fail-closed');
+
+  const { bets, betCount, poolSompi, isBshard } = getMarketBets(marketId, db, _shard9PhantomExcludeFor(marketId));
+  if (!isBshard || betCount === 0) return fail(`推断场景 bets 异常(isBshard=${isBshard}, betCount=${betCount}), fail-closed`);
+  let feeLeaves = [];
+  if (market.fee_rules) {
+    try { ({ feeLeaves } = deriveRoleFeeLeaves(JSON.parse(market.fee_rules), poolSompi, { committeePks: [] })); }
+    catch (e) { return fail(`fee_rules 解析/派生失败(${e.message}), fail-closed`); }
+  }
+  const consolidatedPool = (BigInt(poolSompi) + BigInt(ctx.psSeedSompi ?? 20000000)).toString();
+  const matches = [];
+  for (const dir of [0, 1]) {
+    const pm = computePariMutuelPayout({ bettors: bets.map(b => ({ pk: b.pk, stake: b.stake, direction: b.direction })), winningDirection: dir, feeLeaves });
+    if (pm.degenerate) continue;   // 单边方向天然无 root(refund-root 盘两方向都进不来 = zero-match, F3)
+    const rootDir = buildPayoutRoot(pm.payoutLeaves).toString('hex');
+    const redeem = compilePayoutShardRedeem({ poolMerkleRoot: psRow.pool_merkle_root, predicateCommit: psRow.predicate_commit, consolidatedPool, closed: 1, payoutRoot: rootDir });
+    const addr = ctx.p2shAddr(redeem);
+    if (addr && addr === chainAddr) matches.push({ dir, addr, rootDir });
+  }
+  if (matches.length !== 1) {
+    return fail(`root-match ${matches.length === 0 ? '零' : '双'}吻合(候选地址 vs 链上 ${String(chainAddr).slice(0, 14)}…), fail-closed 不救`, true);
+  }
+  return { ok: true, winDir: matches[0].dir, matchedAddr: matches[0].addr };
 }
 
 /**
@@ -223,7 +306,11 @@ export async function settleMarketLive(marketId, ctx) {
   const priorRow0 = sqlite.prepare('SELECT metadata FROM pool_markets WHERE id = ?').get(marketId);
   let priorMeta0 = {}; try { priorMeta0 = JSON.parse(priorRow0?.metadata || '{}'); } catch {}
   let plan = priorMeta0.settle_evidence?.close_txid ? deriveResumePlanFromEvidence(marketId, ctx) : { ok: false };
-  if (!plan.ok) plan = await computeSettlePlan(marketId, ctx);
+  if (!plan.ok) {
+    // 诊断可见性(合卡 Fix-A, Bettor #gukbiu 副发现(a)): derive 拒绝原因不再静默——之前 ALERT 只见下游 MAX_WALK。
+    if (priorMeta0.settle_evidence?.close_txid) console.warn(`[resume-skip] ${marketId.slice(-8)}: ${plan.reason} → 回退 computeSettlePlan`);
+    plan = await computeSettlePlan(marketId, ctx);
+  }
   if (!plan.ok) { ctx.alert?.(marketId, `plan: ${plan.reason}`); return { ok: false, skipped: true, reason: plan.reason, plan }; }
   if (ctx.dryRun) return { ok: true, dryRun: true, plan };
 

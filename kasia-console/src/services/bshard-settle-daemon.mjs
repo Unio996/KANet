@@ -531,6 +531,8 @@ async function _settleOneMarketAttempt(marketId) {
     let priorMeta = {}; try { priorMeta = JSON.parse(market.metadata || '{}'); } catch {}
     plan = priorMeta.settle_evidence?.close_txid ? deriveResumePlanFromEvidence(marketId, ctx) : { ok: false };
     if (!plan.ok) {
+      // 诊断可见性(合卡 Fix-A, Bettor #gukbiu 副发现(a)): derive 拒绝原因落 log 不再静默。
+      if (priorMeta.settle_evidence?.close_txid) log(`[resume-skip] ${marketId.slice(-8)}: ${plan.reason} → 回退 computeSettlePlan`);
       // pre-gate 纵深(合卡设计 §3, 主闸在 selectRipeMarkets——此处防其它入口绕过 selection 直调本函数)。
       // currentDaa 近似 = spc_daa_index MAX(本地表零 RPC, 滞后 tip 分钟级 vs 250k 判据余量 = 无影响)。
       const _curApprox = sqlite.prepare('SELECT MAX(daa_score) m FROM spc_daa_index').get()?.m;
