@@ -373,11 +373,27 @@ function _writeMarketMetaJudgeAttempt(marketId) {
   sqlite.prepare('UPDATE pool_markets SET metadata = ? WHERE id = ?').run(JSON.stringify(meta), marketId);
 }
 
+// NWT 审 28ff57d7 抓出的缺口: 原版无节流, 卡住的市场每 30s tick 都插一条新 critical event, 数小时
+// = 几百条重复告警, 高可见度告警本身变成噪音源(违背"高可见度"初衷——刷屏后没人会真的看)。加节流:
+// 每市场每 STUCK_ALERT_THROTTLE_HOURS(默认同 STUCK_ALERT_HOURS 量级, 2h)最多告警一次, 用一个独立
+// 的 zk_judge_propose_last_stuck_alert_at 时间戳(跟 zk_judge_propose_last_attempt_at 分开追踪——
+// 业务操作的冷却和告警的节流是两件独立的事, 混用同一个时间戳会让"跳过 judge 这次"跟"跳过告警这次"
+// 耦合, 不是本意)。
+const JUDGE_PROPOSE_STUCK_ALERT_THROTTLE_MS = Number(process.env.ZK_JUDGE_PROPOSE_STUCK_ALERT_THROTTLE_MS || 7_200_000); // 2h 量级
+
 function _maybeWriteStuckAlert(marketId, deadlineUnixSeconds) {
   if (!deadlineUnixSeconds) return;
   const ageHours = (Date.now() - Number(deadlineUnixSeconds) * 1000) / 3_600_000;
   if (ageHours < JUDGE_PROPOSE_STUCK_ALERT_HOURS) return;
+
+  const row0 = sqlite.prepare('SELECT metadata FROM pool_markets WHERE id = ?').get(marketId);
+  let meta0; try { meta0 = JSON.parse(row0?.metadata || '{}'); } catch { meta0 = {}; }
+  const lastAlert = meta0.zk_judge_propose_last_stuck_alert_at ? new Date(meta0.zk_judge_propose_last_stuck_alert_at).getTime() : 0;
+  if (Date.now() - lastAlert < JUDGE_PROPOSE_STUCK_ALERT_THROTTLE_MS) return; // 节流窗口内, 不重复插入
+
   try {
+    meta0.zk_judge_propose_last_stuck_alert_at = new Date().toISOString();
+    sqlite.prepare('UPDATE pool_markets SET metadata = ? WHERE id = ?').run(JSON.stringify(meta0), marketId);
     // 高可见度告警(warn/critical, 非日常 debug log)——只告警不改状态, 不误标终态不猜是否该退款。
     sqlite.prepare(`
       INSERT INTO events (id, event_scope, event_type, source, level, summary, payload_json, created_at)

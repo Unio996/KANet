@@ -527,6 +527,13 @@ function cleanupJudgeProposeMarket(marketId) { sqlite.prepare('DELETE FROM pool_
   const row = sqlite.prepare('SELECT protocol_status FROM pool_markets WHERE id = ?').get(marketId);
   check(row.protocol_status === 'verifying', '告警只告警不改状态, 不误标终态');
 
+  // NWT 审 28ff57d7 抓出的节流缺口(#gpXXXX): 卡住的市场每 30s tick 都会命中这个分支, 未节流的话
+  // 每次都插一条新 critical event——数小时 = 几百条重复告警, 高可见度告警本身变成噪音源。
+  // 第二次紧接着再跑一次 tick(模拟下一个 30s tick), 断言事件数不再增加(节流生效, 不是重复插入)。
+  const res2 = await zkJudgeProposeAutonomousTick(ctx);
+  const eventCountAfterSecondTick = sqlite.prepare("SELECT COUNT(*) c FROM events WHERE event_type='zkJudgeProposeTick_stuck'").get().c;
+  check(eventCountAfterSecondTick === eventCountAfter, '节流生效: 紧接着的下一次 tick 不会重复插入告警(高可见度告警不能自己变成噪音源)');
+
   cleanupJudgeProposeMarket(marketId);
 }
 
