@@ -37,6 +37,16 @@ deriveResumePlanFromEvidence 改(:148 附近):
 ```
 - **为什么推断不是猜**:payout_root 是当年委员 4-of-5 attest 上链的值(claim 时链上 covenant 再终审),
   推断只是"解一元二选一方程",authority 仍在链。**不手插 DB、不人工判方向**(xzztw 反例的合规版)。
+- **🔴 匹配靶=链读非 DB(v1.2, NWT F1 折入——verify-value-source)**:v1.0 拿 `evidence.payout_root`(DB)当靶
+  = 重算==DB claim 的规则56 近亲。改为**链读优先序**(任一步取不到 → fail-closed 落 F3 账,不降级信 DB):
+  ① 对 dir∈{0,1} 各编译候选 closed redeem(`compilePayoutShardRedeem(poolMerkleRoot, predicateCommit,
+     consolidatedPool, closed=1, payoutRoot=root_dir)`)→ p2sh 地址,与 close_txid 的链上 output0 地址
+     (kaspa_tx_log 观测→必要时块扫)比对——地址承诺 redeem 承诺 root,恰一吻合即链锚判定
+     (= pzmm5hg7 expectedClosedAddr predict 同款方法学倒用);
+  ② 若有已落链 claim tx:其 input sigscript 揭示 closed redeem 全文 → offset 直读 root == root_dir(最强链读);
+  ③ 至少断言 `evidence.payout_root == 链读值` 后才允许它参与比对——**禁裸信 evidence**。
+  matchTarget 值源为 NWT 落码 diff 复审重点,机制选型(①/②优先)以落码时实测哪路对 22 盘覆盖率高定,
+  两路都实现则互为 sanity。
 - 诊断缺口顺手补(Bettor #gukbiu 副发现(a)):derive 拒绝原因 log 落 `[resume-skip]` 行,不再静默。
 
 ## 3. Fix-B:不可达 pre-gate(Bettor 三硬边界逐条落;v1.1 按方向审注1 MUST-FIX 改层)
@@ -60,8 +70,11 @@ selectRipeMarkets(currentDaa, pmt, limit) 内:
 - `_settleOneMarketAttempt` 内保留同双条件 gate 作**纵深**(防其它入口绕过 selection 直调)。
 - **resume-可用盘不被 gate**:有 evidence.close_txid 的盘(桶A 全部)照进 selection——Fix-A 让它们走
   resume 快路零 walk;gate 只拦"无 evidence 且物理不可达"的残余(终局=既有 L628 超龄退款另案)。
-- MAX_WALK 配对常量(Bettor 注4):driver 侧常量 + 注释"必须 == rpc-listener.mjs:221" + regression 双钉,
-  另加 **同名 env override 读法**(`process.env.` 同 rpc-listener 用的名字)降失同步面。
+- MAX_WALK 配对常量(Bettor 注4 + NWT F2 非对称钉死):driver 侧常量 + 注释 + regression 双钉 + 同名 env
+  override。**失效方向非对称(F2)**:driver > rpc 真值 = gate 少触发(次优但安全);driver < rpc 真值 =
+  可达盘被跳(liveness 误伤)——**安全约束 = driver_MAX_WALK ≥ rpc_MAX_WALK,注释钉死"宁大勿小"**。
+  **落码前必查** rpc-listener.mjs:264 的 gap==MAX_WALK 边界语义(walk 成功还是 throw),gate 判据 `>` vs `>=`
+  与之严格一致 + 边界 off-by-one regression case(F2 修法②)。
 - currentDaa 源:selectRipeMarkets 既有入参,零新链读。
 
 ## 3.5 注2/注3 折入(v1.1)
@@ -85,6 +98,11 @@ selectRipeMarkets(currentDaa, pmt, limit) 内:
 2. 实弹:装载后观察 daemon 一轮 tick——桶A ≥20 盘从 MAX_WALK 空转转为 resume 续跑(claim 落链计数),
    桶C 首次进 tick(日志出现桶C id);KANet-UI 每小时数与 gate 计数对账。
 3. 报数口径:桶A 恢复计数按"resume 续跑成功/claim landed"分级,不 claim"27 全清"直到逐盘落账。
+   **F3(NWT)加严**:两类盘 root-match 必 fail-closed 不救——bettor 集漂移(attest 后 exclude 逻辑演进,
+   = 注3 的 evidence 漂移信号)+ refund-root 盘(degenerate 退款市场两个 pari-mutuel 方向都不吻合)。
+   **禁宣"root-match 救全部 22"**,救不回的落 L628 另案。
+   **F4(NWT)scope**:pre-gate 收益 = "floor 以下不可达盘"的重锤;coverage **洞**内盘(deadline ≥ floor
+   但落索引空段)不被 gate、仍可能撞线性 walk——洞是 §2.5 另一维,本 gate 不治,报数别夸大。
 
 ## 5. 边界自问
 
