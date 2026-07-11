@@ -533,6 +533,17 @@ export async function buildZkHandoffRequestV2(marketId, args) {
       valueSompi: state.consolidatedPool, attestedWinner: state.attestedWinner, attestedAtMs: state.attestedAtMs,
       sourceCloseAttestTxid: psTx, sourceZkHandoffTxid: result.txId,
     });
+    // 缺件④(2026-07-11, docs/2026-07-11-zk-autonomy-fourth-piece-handoff-enqueue-retry-design.md):
+    // 门①落地这一刻是 zk_continuation 从不存在→存在的唯一转折点, 触发一次性 retry——若此前有
+    // job 因"zk_handoff 还没成功广播过"这个具体 liveness 缺口 fail 掉(job#7/#9 复发的那类), 这里
+    // 把它重置回 pending, worker 下一 tick 正常捡起。失败只 log, 不影响 handoff 本身已落链的事实。
+    try {
+      const { retryZkProveJobAfterHandoffLanded } = await import('./zk-prove-enqueue.mjs');
+      const r = retryZkProveJobAfterHandoffLanded(sqlite, marketId);
+      if (r.retried) console.log(`[buildProposeCloseRequestV2/handoff] ✅ market=${marketId.slice(-8)} zk_prove_jobs id=${r.jobId} 因 handoff-landed 重置回 pending`);
+    } catch (e) {
+      console.error(`[buildProposeCloseRequestV2/handoff] 🔴 market=${marketId.slice(-8)} retryZkProveJobAfterHandoffLanded FAILED(handoff 本身已落链, 不受影响): ${e.message}`);
+    }
   }
   return result;
 }

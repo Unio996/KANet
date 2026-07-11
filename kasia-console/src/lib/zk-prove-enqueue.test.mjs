@@ -7,7 +7,7 @@
 // Run: cd kasia-console && node src/lib/zk-prove-enqueue.test.mjs
 
 import Database from 'better-sqlite3';
-import { enqueueZkProveJob } from './zk-prove-enqueue.mjs';
+import { enqueueZkProveJob, retryZkProveJobAfterHandoffLanded } from './zk-prove-enqueue.mjs';
 import { computeBetsRoot } from './pool-payout-root.mjs';
 
 let fails = 0;
@@ -143,7 +143,36 @@ console.log('[test] degenerate market (no winners on the attested side) skips cl
   ok(count === 0, 'no job row inserted for degenerate market');
 }
 
+console.log('[test] retryZkProveJobAfterHandoffLanded (缺件④, docs/2026-07-11-zk-autonomy-fourth-piece-handoff-enqueue-retry-design.md):');
+{
+  const db = freshDb();
+  db.prepare(`INSERT INTO zk_prove_jobs (market_id, status, ordered_bets_json, error) VALUES (?, 'failed', '[]', ?)`)
+    .run(MARKET_ID, `market ${MARKET_ID} 还没有 zk_continuation(zk_handoff 还没成功广播过)— 拒绝在花 4 分钟 proving+1KAS gate 注资之前跑一个下游必炸的 job`);
+  const r = retryZkProveJobAfterHandoffLanded(db, MARKET_ID);
+  ok(r.ok && r.retried === true, `liveness-gap failed job retried: ${JSON.stringify(r)}`);
+  const row = db.prepare('SELECT status, error FROM zk_prove_jobs WHERE id = ?').get(r.jobId);
+  ok(row.status === 'pending', 'job reset to pending');
+  ok(row.error === null, 'error cleared');
+
+  console.log('  [negative] real data error must NOT be auto-retried (防退化成 blanket retry):');
+  const db2 = freshDb();
+  db2.prepare(`INSERT INTO zk_prove_jobs (market_id, status, ordered_bets_json, error) VALUES (?, 'failed', '[]', ?)`)
+    .run(MARKET_ID, `enqueueZkProveJob: Σleaf(999) != consolidatedPool(1000) — 独立重算不守恒, 拒绝 enqueue`);
+  const r2 = retryZkProveJobAfterHandoffLanded(db2, MARKET_ID);
+  ok(r2.ok && r2.retried === false, `real data error not retried: ${JSON.stringify(r2)}`);
+  const row2 = db2.prepare('SELECT status, error FROM zk_prove_jobs WHERE market_id = ?').get(MARKET_ID);
+  ok(row2.status === 'failed', 'job stays failed');
+  ok(row2.error != null, 'error preserved (not cleared)');
+
+  console.log('  [no-op] no failed job for market → no-op, no throw, no new row:');
+  const db3 = freshDb();
+  const r3 = retryZkProveJobAfterHandoffLanded(db3, MARKET_ID);
+  ok(r3.ok && r3.retried === false, `no failed job → clean no-op: ${JSON.stringify(r3)}`);
+  const count3 = db3.prepare('SELECT COUNT(*) c FROM zk_prove_jobs').get().c;
+  ok(count3 === 0, 'no job row created');
+}
+
 console.log(fails === 0
-  ? '\n✅✅ ALL PASS — enqueueZkProveJob: canonical order, Σleaf conservation, verify-value-source betsRoot cross-check, idempotent lock, degenerate skip all hold'
+  ? '\n✅✅ ALL PASS — enqueueZkProveJob: canonical order, Σleaf conservation, verify-value-source betsRoot cross-check, idempotent lock, degenerate skip; retryZkProveJobAfterHandoffLanded: liveness-gap retry, real-error non-retry, no-op safety all hold'
   : `\n❌ ${fails} assertions failed`);
 process.exit(fails === 0 ? 0 : 1);

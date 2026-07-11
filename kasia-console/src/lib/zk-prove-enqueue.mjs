@@ -97,3 +97,32 @@ export function enqueueZkProveJob(db, marketId, psRedeemHexPreAttest, attestValu
     throw e;
   }
 }
+
+// 缺件④(J2 2026-07-11, docs/2026-07-11-zk-autonomy-fourth-piece-handoff-enqueue-retry-design.md,
+// 7/9 原始"自治化三件"(a)的真身, scope-drift 补件——NWT+Bettor 双审 GREEN #gj8kzn.2/.3): attest 落链
+// 时 _tryEnqueueZkProve 立即建 pending job, 但门① zk_handoff 目前仍人工, worker 轮询往往先于 handoff
+// 落地判 job failed(zk-prove-worker.mjs:178 固定文案), 从无自动重试(job#7/#9 两市场实际复发)。
+// 本函数在 writeZkContinuation(门① landed 确认后)成功调用之后触发, 把因这一具体 liveness 缺口失败的
+// job 重置回 pending, 让 worker 下一 tick 正常捡起——不改 worker 的 fail-closed 检查本身。
+//
+// 只匹配 zk-prove-worker.mjs:178 那条固定错误子串(全代码库唯一来源, grep 已确认)——不 blanket-retry
+// 所有 failed job: 真实数据错误(Σleaf 不守恒/fee_leaves 空等)不该被本机制悄悄吃掉, 需要人工看见。
+const NO_CONTINUATION_ERROR_SUBSTR = '还没有 zk_continuation';
+
+/**
+ * retryZkProveJobAfterHandoffLanded
+ * @param {import('better-sqlite3').Database} db
+ * @param {string} marketId
+ * @returns {{ok:boolean, retried?:boolean, jobId?:number|bigint, reason?:string}}
+ */
+export function retryZkProveJobAfterHandoffLanded(db, marketId) {
+  const row = db.prepare(
+    `SELECT id, error FROM zk_prove_jobs WHERE market_id = ? AND status = 'failed' ORDER BY id DESC LIMIT 1`,
+  ).get(marketId);
+  if (!row) return { ok: true, retried: false, reason: 'no failed job for this market' };
+  if (!String(row.error || '').includes(NO_CONTINUATION_ERROR_SUBSTR)) {
+    return { ok: true, retried: false, reason: `failed job ${row.id} error 不匹配 liveness 缺口子串, 不自动重试(需人工看): ${row.error}` };
+  }
+  db.prepare(`UPDATE zk_prove_jobs SET status = 'pending', error = NULL, updated_at = datetime('now') WHERE id = ?`).run(row.id);
+  return { ok: true, retried: true, jobId: row.id };
+}

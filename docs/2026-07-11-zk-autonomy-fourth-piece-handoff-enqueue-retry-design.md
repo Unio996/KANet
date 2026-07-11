@@ -84,3 +84,14 @@ NWT 建议归属）：
 5. 开 ON 后第一个真实市场：如实观察一次 attest→（若 handoff 滞后）job 变 failed→handoff 落地→job
    自动变回 pending→worker 下一 tick 捡起→proving 正常跑完，J2 手动核对一次全链（不因为自治就停止
    链验，同 (b)(c) 上线时的纪律）。
+
+## 5. 方向审记录（Bettor+NWT，#gj8kzn.2/#gj8kzn.3，防未来重新发现同一权衡）
+
+n1（Bettor 提出，NWT 独立审时也想到同一点）：字符串子串匹配确实比 `error_code` 机器可读字段脆——
+备选是给 `_fail()` 调用处加一列 `error_code`（如 `'NO_CONTINUATION'`），2 行改动。**本轮裁定：维持
+子串匹配，`error_code` 列为非阻塞 follow-up，不在本次落码范围**——理由：本设计的失效退化路径是
+"安全的慢"（匹配失效 = 退回今天的人工模式），不是"危险的错"（不会误判/误重试真实数据错误），
+风险不对称本身就允许非完美方案先上线（同 [[feedback-risk-asymmetry-dont-touch-working-code-under-pressure]]
+的判断标准）。NWT 逐条核过：①`zk-prove-worker.mjs:178` 错误文案与本设计引用逐字匹配，grep 全库确认
+唯一来源；②`_fail()` 把 reason 原样写入 `job.error` 列，匹配逻辑成立；③`writeZkContinuation` 单一
+调用点确认，幂等/无并发论证成立。**方向审 GREEN，红队 GREEN，落码 GO。**
