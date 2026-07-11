@@ -439,48 +439,63 @@ export async function settleMarketLive(marketId, ctx) {
       psOutTxid = w.txId; psOutIdx = 1; curPool = curPool - BigInt(cd.amount); curState = newState;
     }
     ctx.alert?.(marketId, `resume: 跳过已完成 ${priorWinnerDetails.length} 个 claim, 从 ${psOutTxid.slice(0, 12)}:${psOutIdx} 续接剩余 ${claimData.length - priorWinnerDetails.length} 个`);
+  }
 
-    // #DB-lag自愈(2026-07-06, lv3rz claim#22 起步·dyljb claim186+187 连续两笔假阴性收编升级, v2 修正):
-    // 续接点(psOutTxid:psOutIdx)有可能已经过期——某笔 claim 的 verifyClaimLanded() 假阴性超时返回 false(TX
-    // 其实几分钟后真的 confirm 了), 于是 settle_evidence.winner_details 没记上, 但链上真实已经推进了。
-    // 🔴 v1 bug(dyljb 实测抓到): 用 getUtxos(nextAddr).length>0 判断"这步是否发生过"——但如果紧接着下一步
-    // (claim187)也已经发生, nextAddr 的 UTXO 早被claim187 花掉, getUtxos 查到 0, v1 就误判"这步没发生"提前
-    // 停手(实际两步都发生了, 只是当前 UTXO 集只反映最新tip, 反映不出"中间站是否存在过")。
-    // 修法: 判断"这一步是否发生过"改查本地 kaspa_tx_log 的 to_address(有没有历史上任何 TX 给这个地址转过
-    // 账, 不管现在是不是已经被后续 TX 花掉)——这是持久历史记录, 不会因为后续花费而消失。找到历史记录就
-    // 纳入 replay 继续往下探, 找不到才停手(genuinely 没发生 或 本地索引没追上, 两种情况都 fail-closed 交
-    // 给下面的正常 claim 循环, 不会瞎猜更远的状态)。
-    const MAX_PROBE_STEPS = 10;
-    if (ctx.getUtxos && ctx.p2shAddr && ctx.db && priorWinnerDetails.length < claimData.length) {
-      try {
-        for (let step = 0; step < MAX_PROBE_STEPS && priorWinnerDetails.length < claimData.length; step++) {
-          const curAddr = ctx.p2shAddr(curRedeem);
-          const curLive = (await ctx.getUtxos(curAddr)).length > 0;
-          if (curLive) break;   // 找到真正当前 tip, 停止探测
-          const nextCd = claimData[priorWinnerDetails.length];
-          const nextState = { consolidated_pool: (curPool - BigInt(nextCd.amount)).toString(), closed: 1, payoutRoot: plan.payoutRoot };
-          for (let k = 0; k < 17; k++) nextState['w' + k] = curState['w' + k];
-          const word = Math.floor(Number(nextCd.merkle_index) / 63), bit = Number(nextCd.merkle_index) % 63;
-          nextState['w' + word] = (BigInt(nextState['w' + word]) + (1n << BigInt(bit))).toString();
-          const nextRedeem = splicePayoutContinuation(curRedeem, nextState);
-          const nextAddr = ctx.p2shAddr(nextRedeem);
-          // 历史记录查(不受"后续是否已花掉"影响) — kaspa_tx_log.to_address 只记第一个/主输出地址(通常是
-          // 赢家收款地址, 非续约地址), 续约地址(output index 1)只出现在 outputs_json 里——必须搜 outputs_json
-          // 而非 to_address(v2 首版漏了这个, dyljb 实测撞到: to_address 永远搜不到续约地址导致继续误判).
-          const histRow = ctx.db.prepare(`SELECT tx_id FROM kaspa_tx_log WHERE outputs_json LIKE ? ORDER BY block_time ASC LIMIT 1`).get(`%${nextAddr}%`);
-          let foundTxId = histRow?.tx_id;
-          if (!foundTxId) {
-            const nextEntries = (await ctx.getUtxos(nextAddr)).map(e => { const j = JSON.parse(JSON.stringify(e, (k, v) => typeof v === 'bigint' ? v.toString() : v)); return j.entry?.outpoint || j.outpoint; });
-            foundTxId = nextEntries[0]?.transactionId;
+  // #DB-lag自愈 → thread-walk 泛化(2026-07-12 合卡二层, 设计 docs/2026-07-12-claim-thread-walk-resume-design.md,
+  // Bettor GRANTED #gxk1l7 + NWT 红队 GREEN)。原探测(2026-07-06 lv3rz claim#22·dyljb 两连假阴性收编 v2)被
+  // `if (priorWinnerDetails.length)` 门死——桶A 22 盘 winner_details 全空(claim_txid 零持久化老账)探测永不
+  // 运行, replay 从 closeTxid:0 起跳必撞已花。un-gate: resume 场景(priorEvidence.close_txid 在)一律先探测,
+  // 空 details 从位置 0 起走(起点初始化 :396-400 现状零改)。
+  // 机制(dyljb v2 原样): 判断"这一步是否发生过"查本地 kaspa_tx_log.outputs_json(持久历史, 不受后续花费影响;
+  // to_address 只记主输出=赢家地址, 续约地址 index 1 只在 outputs_json——v2 实测修正)+ live UTXO 兜底。
+  // 找到历史记录就纳入 replay 继续往下探, 找不到才停手(genuinely 没发生 或本地索引没追上/claimData 序漂移,
+  // 全部 fail-closed 交给下面正常 claim 循环, 不猜更远状态)。步数上限=claimData.length(真实界=第二条件,
+  // 每步递增必终止, NWT 核; 桶A 实际 ≤26)。
+  const MAX_PROBE_STEPS = claimData.length;
+  if (priorEvidence?.close_txid && ctx.getUtxos && ctx.p2shAddr && ctx.db && priorWinnerDetails.length < claimData.length) {
+    try {
+      let probed = 0;
+      for (let step = 0; step < MAX_PROBE_STEPS && priorWinnerDetails.length < claimData.length; step++) {
+        const curAddr = ctx.p2shAddr(curRedeem);
+        const curEntries = (await ctx.getUtxos(curAddr)).map(e => { const j = JSON.parse(JSON.stringify(e, (k, v) => typeof v === 'bigint' ? v.toString() : v)); return { outpoint: j.entry?.outpoint || j.outpoint, amount: String(j.entry?.amount ?? j.amount ?? '') }; });
+        if (curEntries.length > 0) {
+          // 🔴 H2 断言(NWT 背书, 设计必答③): 找到 live tip 还必须核"链上余额 == 推演剩余池"——原探测只看
+          //   有无 UTXO 不核余额, 巧合路径走到错 tip 会带错 curPool 续跑。不等 = STOP fail-closed(非 warn)。
+          const tipEntry = curEntries.find(en => en.outpoint?.transactionId === psOutTxid) || curEntries[0];
+          if (String(tipEntry.amount) !== curPool.toString()) {
+            ctx.alert?.(marketId, `🔴 thread-walk STOP: live tip ${curAddr.slice(0, 18)}… amount=${tipEntry.amount} != 推演 curPool=${curPool}(走错链/形状变, fail-closed 不续跑)`);
+            return { ok: false, reason: `thread-walk amount 断言 FAIL: live=${tipEntry.amount} != derived=${curPool}` };
           }
-          if (!foundTxId) break;   // 历史索引 + 当前 UTXO 都查不到, 停止探测(genuinely 没发生 或本地索引没追上)
-          ctx.alert?.(marketId, `DB-lag自愈: claim[${priorWinnerDetails.length}](${nextCd.pk.slice(0, 8)}) 续接点探测到已落链(${foundTxId.slice(0, 12)}) 但 DB 没记录 — 自动纳入 replay(第${step + 1}步)`);
-          claims.push({ pk: nextCd.pk, amount: nextCd.amount, txId: foundTxId, received: true });
-          priorWinnerDetails = [...priorWinnerDetails, { pk: nextCd.pk, amount: nextCd.amount, txId: foundTxId }];
-          curRedeem = nextRedeem; psOutTxid = foundTxId; psOutIdx = 1; curPool = curPool - BigInt(nextCd.amount); curState = nextState;
+          break;   // 找到真正当前 tip(余额链上闭环核过), 停止探测
         }
-      } catch (e) { ctx.alert?.(marketId, `DB-lag自愈探测失败(非致命, 走原逻辑): ${e.message}`); }
-    }
+        const nextCd = claimData[priorWinnerDetails.length];
+        const nextState = { consolidated_pool: (curPool - BigInt(nextCd.amount)).toString(), closed: 1, payoutRoot: plan.payoutRoot };
+        for (let k = 0; k < 17; k++) nextState['w' + k] = curState['w' + k];
+        const word = Math.floor(Number(nextCd.merkle_index) / 63), bit = Number(nextCd.merkle_index) % 63;
+        nextState['w' + word] = (BigInt(nextState['w' + word]) + (1n << BigInt(bit))).toString();
+        const nextRedeem = splicePayoutContinuation(curRedeem, nextState);
+        const nextAddr = ctx.p2shAddr(nextRedeem);
+        const histRow = ctx.db.prepare(`SELECT tx_id FROM kaspa_tx_log WHERE outputs_json LIKE ? ORDER BY block_time ASC LIMIT 1`).get(`%${nextAddr}%`);
+        let foundTxId = histRow?.tx_id;
+        if (!foundTxId) {
+          const nextEntries = (await ctx.getUtxos(nextAddr)).map(e => { const j = JSON.parse(JSON.stringify(e, (k, v) => typeof v === 'bigint' ? v.toString() : v)); return j.entry?.outpoint || j.outpoint; });
+          foundTxId = nextEntries[0]?.transactionId;
+        }
+        if (!foundTxId) break;   // 历史索引 + 当前 UTXO 都查不到, 停止探测(索引盲区/序漂移, F3 三桶分开记账)
+        ctx.alert?.(marketId, `DB-lag自愈: claim[${priorWinnerDetails.length}](${nextCd.pk.slice(0, 8)}) 续接点探测到已落链(${foundTxId.slice(0, 12)}) 但 DB 没记录 — 自动纳入 replay(第${step + 1}步)`);
+        claims.push({ pk: nextCd.pk, amount: nextCd.amount, txId: foundTxId, received: true });
+        priorWinnerDetails = [...priorWinnerDetails, { pk: nextCd.pk, amount: nextCd.amount, txId: foundTxId }];
+        curRedeem = nextRedeem; psOutTxid = foundTxId; psOutIdx = 1; curPool = curPool - BigInt(nextCd.amount); curState = nextState;
+        probed++;
+      }
+      if (probed > 0) {
+        try {
+          ctx.db.prepare(`INSERT INTO events (id, event_scope, event_type, source, level, summary, payload_json, created_at)
+            VALUES (?, 'system', 'claim_thread_recovered', 'bshard-auto-settler', 'info', ?, ?, datetime('now'))`)
+            .run(randomUUID(), `market=${marketId.slice(-8)} thread-walk 恢复 ${probed} 笔链上已落 DB 未记的 claim(零持久化历史账补平, 位置推进到 ${priorWinnerDetails.length}/${claimData.length})`, JSON.stringify({ marketId, recovered: probed, position: priorWinnerDetails.length, total: claimData.length }));
+        } catch {}
+      }
+    } catch (e) { ctx.alert?.(marketId, `thread-walk 探测失败(非致命, 走原逻辑): ${e.message}`); }
   }
 
   for (let idx = 0; idx < claimData.length; idx++) {
