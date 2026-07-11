@@ -89,6 +89,6 @@ CREATE TABLE spc_daa_index_coverage (
 ## §5 签字区
 
 - J1tn（设计）：✅ 2026-07-08
-- NWT（红队审）：待
-- Bettor（GO）：待
-- 排期：设计过审后，落码排市场5收官后（Bettor #bmxpnr 裁定）
+- NWT（红队审）：✅ 2026-07-11 08:52Z GREEN（频道记录：§2.5 防洞是核心看点已堵死；无索引节点自然退化不出错）
+- Bettor（GO）：✅ 2026-07-11 08:53Z #g4mz41（今晚范围收紧：backfill 只覆盖 28mln 区间 [57211579-ε, tip]，断点续跑必做；129 老积压盘 deadline 在剪裁点下走 L628 超龄退款另案）
+- 排期：2026-07-11 立即落码（28mln 放行结算被 MAX_WALK 卡住触发；J1 离线，J2 落码/KANet-UI 代管域 reviewer+operator/NWT 审 diff）
