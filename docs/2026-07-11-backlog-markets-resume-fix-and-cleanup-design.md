@@ -94,10 +94,16 @@ protocol_status='settled_partial_claims') AND 非 zk_native`）命中 174 个市
 （批处理脚本，非手写 115 次），每笔转账前后核对余额，同 Martin/shard9/shard10 三次退款执行的纪律
 （三方独立核对+audit trail 进 events 表）。
 
-**maker_stake（spine）一并退**（Bettor #gjknx9.2 裁定，桶①②的 5 盘先验证的原则，桶 B 同样适用）：
-市场整体作废时，maker 的 spine 出资跟 bettor 的下注同一性质——都是"没被合法赢走的钱"，原样退回 maker
-地址，不留在 covenant 里变孤儿资金。同一份 runbook 把 maker 当成一笔特殊"bettor"（金额=spine，方向
-无关）处理，不新开一套机制。
+**maker_stake（spine）——退回 Bettor #gjn4kc.2 拦截，本节撤回原提议**：J2 原提议"同一份 runbook 把
+maker 当特殊 bettor 转账退回"**物理不成立**——bettor 侧 `side_lock` 早已被 sweep 回 gateway 钱包（钱
+物理在 gateway，转账退款=正常出账，成立）；但 maker 的 spine **锁在 `spine_p2sh` covenant 里，从未被
+sweep 出来**。用 gateway 钱包"转账"退 maker，是国库额外掏 100KAS/盘，而 covenant 里原本的 spine 继续
+搁浅——双重支出，资金冻结问题完全没解决，只是多花了一笔钱制造账面上"看起来退了"的假象。**桶 B/桶
+①②的 maker spine 收回需要真实 covenant 花费交易（unlock spine_p2sh 的 escape/cancel 路径），不是本
+设计范围内的"同一 runbook"能顺手带的——留作独立卡，需要先设计具体走哪条 covenant 出口（若该市场
+的 .sil 有 maker-side escape 分支）**。本文档 §2 的批量退款 runbook **只覆盖 bettor 侧**（已经在
+gateway 的钱），不含 maker spine。NWT 红队新增必查点："钱在哪三分类"（gateway 已 sweep / covenant
+locked / 其他）——本设计已按此重新核对，bettor 侧退款可执行，maker spine 侧待独立设计。
 
 ## 3. 桶 C（18）：backfill 扩覆盖，复用既有 v183 机制零新代码
 
