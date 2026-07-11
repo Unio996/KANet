@@ -39,25 +39,41 @@ deriveResumePlanFromEvidence 改(:148 附近):
   推断只是"解一元二选一方程",authority 仍在链。**不手插 DB、不人工判方向**(xzztw 反例的合规版)。
 - 诊断缺口顺手补(Bettor #gukbiu 副发现(a)):derive 拒绝原因 log 落 `[resume-skip]` 行,不再静默。
 
-## 3. Fix-B:不可达 pre-gate(Bettor 三硬边界逐条落)
+## 3. Fix-B:不可达 pre-gate(Bettor 三硬边界逐条落;v1.1 按方向审注1 MUST-FIX 改层)
 
-**位置**:两个 resume 调用点之后、computeSettlePlan 之前(resume 成功的盘零影响——resume 根本不走
-getBlockAtDaa):
+**🔴 位置(v1.1 更正,Bettor 注1)**:主 gate **下沉进 `selectRipeMarkets` 循环内(daemon:328-346),push
+进 ripe 之前判**——v1.0 放在 resume 调用点后是错层:被 gate 盘无 lease 无状态变化,deadline ASC 稳定
+排序下一 tick 原样再入选,照占 MAX_PER_TICK slot,桶C 仍永不入选("先行=立即解饿死"claim 在 v1.0 层
+不成立,只消节点重锤)。改法:
 
 ```
-resume {ok:false} 时:
-  floor = SELECT MIN(start_daa) FROM spc_daa_index_coverage   (无行 → 不 gate, 照走)
-  ① deadline_daa < floor 且 (currentDaa - deadline_daa) > 250000 双条件同时成立 → gate:
-     skip 本盘(状态不动=挂账), 计数器+1;单条件不满足 → 照走 computeSettlePlan(可达的一律照走)
-  ② 每 tick 末 log: `[pre-gate] N market(s) gated (unreachable: deadline<coverage-floor && gap>MAX_WALK)`
-     + 每盘首次被 gate 时发一条 events 审计(unreachable_gated, 有账可对 KANet-UI 每小时数)
-  ③ 落地序: pre-gate 可先行独立 commit(独立正确, 立即解桶C 饿死+消 ~44min/轮×250k 块节点重锤)
+selectRipeMarkets(currentDaa, pmt, limit) 内:
+  floor = SELECT MIN(start_daa) FROM spc_daa_index_coverage   (每 tick 查一次; 无行 → 不 gate)
+  循环内 push 前(每行纯算术, 零 DB 写, 状态照旧不动):
+    m.deadline_daa < floor 且 (currentDaa - m.deadline_daa) > MAX_WALK 双条件同时成立
+      且 无 settle_evidence.close_txid 可 resume(有 evidence 的盘照进——resume 不走 getBlockAtDaa)
+      → 不 push(不占 slot), gatedCount++
+  ① 可达的一律照走(单条件不满足 → 照 push)
+  ② tick log: `[pre-gate] N gated (unreachable)` + 每盘首次 gate 发 events 审计(unreachable_gated)
+  ③ 落地序: pre-gate 先行独立 commit 仍成立(在正确层, 才真解桶C 饿死+消 ~44min/轮节点重锤)
 ```
-- MAX_WALK 常量:driver 侧新增同值常量并注明"必须 == rpc-listener.mjs:221"(跨进程无法 import;
-  ANTI-PATTERNS 规则55 手工配对——lint 卡点做不到跨 repo,注释+regression case 双向钉)。
-- currentDaa 源:tick 已有 currentDaa(selectRipeMarkets 入参),零新链读。
-- 被 gate 盘的终局:Fix-A 修好 22 盘走 resume(不再撞 gate);真·无 evidence 且不可达的残余 = 既有
-  L628 超龄退款另案卡(本设计不扩权,只止血)。
+- `_settleOneMarketAttempt` 内保留同双条件 gate 作**纵深**(防其它入口绕过 selection 直调)。
+- **resume-可用盘不被 gate**:有 evidence.close_txid 的盘(桶A 全部)照进 selection——Fix-A 让它们走
+  resume 快路零 walk;gate 只拦"无 evidence 且物理不可达"的残余(终局=既有 L628 超龄退款另案)。
+- MAX_WALK 配对常量(Bettor 注4):driver 侧常量 + 注释"必须 == rpc-listener.mjs:221" + regression 双钉,
+  另加 **同名 env override 读法**(`process.env.` 同 rpc-listener 用的名字)降失同步面。
+- currentDaa 源:selectRipeMarkets 既有入参,零新链读。
+
+## 3.5 注2/注3 折入(v1.1)
+
+- **回写点(注2,NWT 必核)**:推断成功回写 evidence.win_direction **不走 JS read-modify-write**——用
+  SQLite 单语句原子 `UPDATE pool_markets SET metadata = json_set(metadata, '$.settle_evidence.win_direction', ?)
+  WHERE id = ? AND json_extract(metadata, '$.settle_evidence.win_direction') IS NULL`(幂等:已有值不覆盖;
+  单语句 = 无 RMW 窗口,与 settler 其它 metadata 写互斥由 SQLite 语句原子性保证,tick 串行再加一层)。
+  **写失败不回滚推断结果,本 tick 照用**(写是优化非前提,下 tick 重推断一样对)。
+- **zero-match 单独报(注3)**:推断双向都不吻合 ≠ "不可推断"——是 **evidence 漂移信号**(今日 bet 集与
+  当年 attest 叶集不一致,phantom/排除表变动族)。单独计数 + 响亮 log(`🔴 [resume-infer] root 双向不吻合`),
+  与 pre-gate 计数分开报,不混桶。
 
 ## 4. 验收(DoD)
 
