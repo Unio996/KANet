@@ -398,7 +398,10 @@ export async function buildProposeCloseRequestV2(marketId, judged) {
   // 也没带, 两条路都空手, per-ticket 循环零迭代。committee 仍会独立 checkUtxoLanded 重验(snapshot 只指路
   // 不受信), 这里只是把"指路"信息补齐, 不影响链锚验证的独立性。
   const snapshot = {
-    shards: sqlite.prepare('SELECT shard_market_id, shard_index, shard_redeem_hex, current_leaf_state, current_leaf_outpoint, status FROM market_shards WHERE logical_market_id = ? ORDER BY shard_index ASC').all(marketId)
+    // manual_recovery_refunded 排除(2026-07-11, shard10事故同族洞, 同8d2f9c28/bshard-close-enforce.mjs
+    // 那两处): 不排除的话跨节点委员(读这份snapshot, 走ctx.shards分支)会拿到已排除shard的假leaf数据,
+    // 跟本地:3200(已加过滤)算出不同的bettors/聚合值, 委员间payoutRoot分叉。四处消费点单源对齐。
+    shards: sqlite.prepare("SELECT shard_market_id, shard_index, shard_redeem_hex, current_leaf_state, current_leaf_outpoint, status FROM market_shards WHERE logical_market_id = ? AND status != 'manual_recovery_refunded' ORDER BY shard_index ASC").all(marketId)
       .map(s => ({
         // shard_pool_id 不在这里算: bshard-close-enforce.mjs 消费端本就有 fallback(sh.shard_pool_id ||
         // _hex32(`${marketId}-shard-${idx}`)), 省一份可能不一致的重复计算, 让唯一那份计算逻辑负责。

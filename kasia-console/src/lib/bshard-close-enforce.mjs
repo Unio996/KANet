@@ -732,7 +732,11 @@ export async function verifyBettorsCompleteFromChain(logicalMarketId, bettors, c
   let shards = Array.isArray(ctx.shards) ? ctx.shards : null;
   if (!shards) {
     if (!ctx.db) return { ok: false, reason: 'C1: ctx.shards(snapshot) 与 ctx.db 都缺 — 无 shard 来源 (fail-loud)' };
-    shards = listShards(ctx.db, logicalMarketId);
+    // 🔴 修复(2026-07-11, shard10事故, 同8d2f9c28那条NWT抓的同族洞): listShards()本身不带
+    // manual_recovery_refunded过滤(shard-allocator.mjs没有), 全靠各调用点自己加——这里(级2-A
+    // 本地DB读入口)之前漏了, 已排除的shard(如shard10)仍会被逐片链锚检查, 对它已知不存在的
+    // leaf撞BUST。补齐同款过滤, 跟getMarketBets/consolidateAllShards/loadBettorsCrossShard对齐。
+    shards = listShards(ctx.db, logicalMarketId).filter((s) => s.status !== 'manual_recovery_refunded');
   }
   // (A)-model 判定: 无 shard → 非 rolling-shard (fee-only/旧) → 级2 N/A; 但有 PayoutShard 却 shard 空 → 篡改 fail-loud。
   if (!shards.length) {
