@@ -41,6 +41,9 @@ export const FEE_PRESETS = Object.freeze({
 });
 
 const HEX64 = /^[0-9a-f]{64}$/;
+// F1 白名单(NWT 落1 红队): canonicalize 拾取的键集与此必须一致——validate 拒绝白名单外的一切。
+const _TOP_KEYS = new Set(['schema_v', 'preset', 'roles']);
+const _ROLE_KEYS = new Set(['name', 'bps', 'address', 'derive', 'optional']);
 
 /**
  * validateFeeRules — schema 层硬不变量(spec §2, 组件入口 + commit 前双验的那一份)。
@@ -50,6 +53,12 @@ const HEX64 = /^[0-9a-f]{64}$/;
  */
 export function validateFeeRules(feeRules) {
   if (!feeRules || typeof feeRules !== 'object' || Array.isArray(feeRules)) throw new Error('feeRules 必须是 object');
+  // 🔴 strict whitelist(NWT 落1 红队 F1, CONFIRMED repro): 未知键必 fail-loud——canonicalize 只拾取已知键,
+  //   未知键若放行会被静默剥除 → 两份语义不同的 feeRules 同 commit(链上 commit 验证被旁路)。白名单强制
+  //   "加字段必 bump schema_v" 从流程纪律升为机制(spec v1.2-3 的版本保障靠这里闭合)。
+  for (const k of Object.keys(feeRules)) {
+    if (!_TOP_KEYS.has(k)) throw new Error(`feeRules 未知顶层键 '${k}'(白名单 ${[..._TOP_KEYS]}; 扩展字段必须 bump schema_v 走新版本, 禁静默附加)`);
+  }
   if (!Number.isInteger(feeRules.schema_v)) throw new Error('feeRules.schema_v 必须是 int(spec v1.2-3: 版本进载荷)');
   if (!SUPPORTED_SCHEMA_VERSIONS.has(feeRules.schema_v)) {
     const e = new Error(`feeRules schema_v=${feeRules.schema_v} 不在本节点支持集 [${[...SUPPORTED_SCHEMA_VERSIONS]}](可辨识版本不符, 非配置非法)`);
@@ -63,6 +72,9 @@ export function validateFeeRules(feeRules) {
   let providers = 0;
   for (const r of roles) {
     if (!r || typeof r !== 'object') throw new Error('role 必须是 object');
+    for (const k of Object.keys(r)) {
+      if (!_ROLE_KEYS.has(k)) throw new Error(`role 未知键 '${k}'(白名单 ${[..._ROLE_KEYS]}; F1 同上, 扩展必 bump schema_v)`);
+    }
     if (typeof r.name !== 'string' || !r.name) throw new Error('role.name 必须是非空 string');
     if (names.has(r.name)) throw new Error(`role name 重复: ${r.name}(canonical 序/leaf 归属都靠 name 唯一)`);
     names.add(r.name);
@@ -92,7 +104,8 @@ export function validateFeeRules(feeRules) {
 }
 
 // 递归 sorted-key canonical JSON(同 canonicalPredicate 规范, pool-shard-settle.mjs:182 先例——本文件不 import 它:
-// 组件零 console 依赖, 但两者对同一 object 产出 byte-identical, fee-split.test.mjs ⑧ 有守护断言)。
+// 组件零 console 依赖, 但两者对同一 object 产出 byte-identical, fee-split.test.mjs ② 有 fixpoint 等价断言
+// canonicalPredicate(JSON.parse(canonicalizeFeeRules(r))) === canonicalizeFeeRules(r)(NWT F3))。
 function _canonicalJson(v) {
   if (v === null || typeof v !== 'object') return JSON.stringify(v);
   if (Array.isArray(v)) return '[' + v.map(_canonicalJson).join(',') + ']';

@@ -43,6 +43,13 @@ console.log('[test] ① validateFeeRules 硬不变量(spec §2 防恶意配置):
   ok(throws(() => validateFeeRules({ schema_v: 1, roles: [{ name: 'provider', bps: 9000 }, { name: 'broker', bps: 1000 }] }), /缺 address/), '非 optional 地址角色缺 address 拒');
   ok(throws(() => validateFeeRules({ schema_v: 1, roles: [{ name: 'provider', bps: 9000 }, { name: 'oracle', bps: 1000, derive: 'committee', address: BROKER_PK }] }), /禁 caller 供 address/), 'derive 角色带 caller 地址 拒(命门④)');
   ok(throws(() => validateFeeRules({ ...predictionRulesWithAddrs(), schema_v: 99 }), /FEE_RULES_SCHEMA_V_UNSUPPORTED/), 'schema_v 不支持 → 可辨识 err.code(spec v1.2-3, 非静默算错)');
+  // F1(NWT 落1 红队 CONFIRMED repro): 未知键静默丢弃 → 两份语义不同的 feeRules 同 commit。白名单后必拒。
+  const evilTop = { ...predictionRulesWithAddrs(), settlement_mode: 'evil-top-level' };
+  ok(throws(() => validateFeeRules(evilTop), /未知顶层键/), 'F1: 未知顶层键(settlement_mode) 拒——canonicalize 剥除面封死');
+  const evilRole = predictionRulesWithAddrs();
+  evilRole.roles[1].refund_policy = 'attacker-extension';
+  ok(throws(() => validateFeeRules(evilRole), /未知键/), 'F1: role 未知键(refund_policy) 拒——NWT repro 原样负测试');
+  ok(throws(() => computeFeeRulesCommit(evilRole)), 'F1: commit 碰撞路径死(computeFeeRulesCommit 对 evil 输入直接 throw, 不再产出与 base 同 hash)');
 }
 
 console.log('[test] ② canonicalizeFeeRules 单源序列化(spec v1.2-2):');
@@ -58,6 +65,10 @@ console.log('[test] ② canonicalizeFeeRules 单源序列化(spec v1.2-2):');
   const obj = { z: 1, a: [{ y: 2, x: 3 }], m: null };
   const viaCanonPred = canonicalPredicate(obj);
   ok(viaCanonPred === '{"a":[{"x":3,"y":2}],"m":null,"z":1}', 'canonicalPredicate 规范锚(递归 sorted-key)');
+  // F3(NWT): fixpoint 跨实现等价守护——canonicalizeFeeRules 产物再过 canonicalPredicate 必须逐字节不动,
+  //   _canonicalJson(私有)与 canonicalPredicate 边角(非ASCII键/数字形态)漂移时此断言即报。
+  const canon = canonicalizeFeeRules(predictionRulesWithAddrs());
+  ok(canonicalPredicate(JSON.parse(canon)) === canon, 'F3 fixpoint: canonicalPredicate(parse(canonical)) === canonical(两序列化实现等价守护)');
 }
 
 console.log('[test] ③ computeFeeRulesCommit(blake2b-256 hash-commit, spec v1.2-1):');
