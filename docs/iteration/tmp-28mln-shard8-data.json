@@ -1,0 +1,212 @@
+{
+ "shard8": {
+  "shard_market_id": "ext-pool-v07-1783455512843-28mln-s8",
+  "shard_redeem_hex": "6b0800000000000000000800000000000000000800000000000000000800000000000000006c76009c63757801209f695a79009c5b79519c9b69597903a08601a269557955797e203c8432702165ef4976c509ecbe2b51253351d7786746b84b0237159290f753287caa8769567901207c7e5b7958cd01087c7e5b7958cd01087c7e20f0771aa524dbdd1960969fcfb3db9c4024c7b962a626c8af5d3221d3731e041301207c7e7e7e7e56797c7e55797eaa02000001aa7e01207e7c7e01877e5879c3876953795a79515d7994959358cd01087c7e53795b795d79959358cd01087c7e5379519358cd01087c7e53795d799358cd01087c7e7e7e7eb976c902c20194765193bc7c7eb976c97602c201940125937cbc7eaa02000001aa7e01207e7c7e01877e5979c387695879c2785b79939c697575757575757575757575516776519c63757801209e6304083d506a02e80395b0685579cf7620164f74bb3ad6a47840445a0653dc5c136cb3188d2fcd0bb9cab605eb9f97fd16876976d251a2695579d520164f74bb3ad6a47840445a0653dc5c136cb3188d2fcd0bb9cab605eb9f97fd1687695579c25779be5379939c69007a7575757575757551677500696868",
+  "current_leaf_state": "{\"local_yes\":62525000000,\"local_no\":720559000000,\"count\":32,\"pool_value\":783084000000}",
+  "created_at": 1783487467,
+  "sealed_at": 1783488909
+ },
+ "known_bets": [
+  {
+   "id": 33260,
+   "bettor_pk": "4173a91cef12f00530d47408b37823ac483999024f2f1184fca8f334a8525373",
+   "direction": 0,
+   "stake_amount": 5000000000,
+   "side_lock_tx": "6d204c3a79b13bfa81782a39e957bf0bdbeb3d69f7610f4f030f84f2f245096b",
+   "created_at": "2026-07-08 05:13:02"
+  },
+  {
+   "id": 33261,
+   "bettor_pk": "f5bb64c6e7afad8c042fe6c571f983b8eaea9dd4a58b1705d1b0587c2c026f08",
+   "direction": 1,
+   "stake_amount": 4059000000,
+   "side_lock_tx": "5d46370a4e98558fea5cc5fd959b881c1826645c65abbc6089cb62b38adea6a4",
+   "created_at": "2026-07-08 05:13:09"
+  },
+  {
+   "id": 33262,
+   "bettor_pk": "81101a71428619cba1e9e9b93f67268047974364ed319deaecc88337686e7e34",
+   "direction": 1,
+   "stake_amount": 1500000000,
+   "side_lock_tx": "f08b90101da09ec5d28c9fd2507ab3a3d0b4bd788a78b0d6cc6d49714e0453d2",
+   "created_at": "2026-07-08 05:13:16"
+  },
+  {
+   "id": 33267,
+   "bettor_pk": "4173a91cef12f00530d47408b37823ac483999024f2f1184fca8f334a8525373",
+   "direction": 0,
+   "stake_amount": 5000000000,
+   "side_lock_tx": "06aaba8b516d519b1458c2b27c28465fdcc978c1264cd15043294284bd9a08e2",
+   "created_at": "2026-07-08 05:15:01"
+  },
+  {
+   "id": 33268,
+   "bettor_pk": "81101a71428619cba1e9e9b93f67268047974364ed319deaecc88337686e7e34",
+   "direction": 1,
+   "stake_amount": 1500000000,
+   "side_lock_tx": "913626ebec4821634ae8ac9a4809a3b7ca3729710ac968a66d875629c7cd2b9d",
+   "created_at": "2026-07-08 05:15:11"
+  },
+  {
+   "id": 33273,
+   "bettor_pk": "4173a91cef12f00530d47408b37823ac483999024f2f1184fca8f334a8525373",
+   "direction": 0,
+   "stake_amount": 5000000000,
+   "side_lock_tx": "12d5798c08d3eec9d03335dc88aea423a0754657c584a0b6620b6169e0a3347f",
+   "created_at": "2026-07-08 05:17:01"
+  },
+  {
+   "id": 33275,
+   "bettor_pk": "81101a71428619cba1e9e9b93f67268047974364ed319deaecc88337686e7e34",
+   "direction": 1,
+   "stake_amount": 1500000000,
+   "side_lock_tx": "fdbce62e0fd41048544c591a3f4ece55b8fe4c01796f49d7688f9fec6aeb1170",
+   "created_at": "2026-07-08 05:17:11"
+  },
+  {
+   "id": 33283,
+   "bettor_pk": "19d3289cb0046c9fe35be66b45ecdeb33c29d0c95f004ebe8fa3c2ee9c32da27",
+   "direction": 0,
+   "stake_amount": 2525000000,
+   "side_lock_tx": "9f068b52d689589c42b78e70d2a03488964aca95fe78a19ae6caf51a11dc9f39",
+   "created_at": "2026-07-08 05:18:50"
+  },
+  {
+   "id": 33284,
+   "bettor_pk": "4173a91cef12f00530d47408b37823ac483999024f2f1184fca8f334a8525373",
+   "direction": 0,
+   "stake_amount": 5000000000,
+   "side_lock_tx": "03cdaca165857f4c7bc477e53d3769c7311f88aa377bd82c4bde83f2bfe21005",
+   "created_at": "2026-07-08 05:19:01"
+  },
+  {
+   "id": 33286,
+   "bettor_pk": "81101a71428619cba1e9e9b93f67268047974364ed319deaecc88337686e7e34",
+   "direction": 1,
+   "stake_amount": 1500000000,
+   "side_lock_tx": "492a2c8235b8e33eb3271b9a404a2438f0f8ad7adad087fd7464d47c87a91269",
+   "created_at": "2026-07-08 05:19:11"
+  },
+  {
+   "id": 33293,
+   "bettor_pk": "4173a91cef12f00530d47408b37823ac483999024f2f1184fca8f334a8525373",
+   "direction": 0,
+   "stake_amount": 5000000000,
+   "side_lock_tx": "b3cc5e7ae7706a34732a959da068e7be388d554ecea9f2dde5db6f55795be12d",
+   "created_at": "2026-07-08 05:21:03"
+  },
+  {
+   "id": 33295,
+   "bettor_pk": "81101a71428619cba1e9e9b93f67268047974364ed319deaecc88337686e7e34",
+   "direction": 1,
+   "stake_amount": 1500000000,
+   "side_lock_tx": "c4b3bab0defc0de3069613aa1f192539ebca4fdfe5adc098a97c4f63ce7d92a0",
+   "created_at": "2026-07-08 05:21:14"
+  },
+  {
+   "id": 33304,
+   "bettor_pk": "4173a91cef12f00530d47408b37823ac483999024f2f1184fca8f334a8525373",
+   "direction": 0,
+   "stake_amount": 5000000000,
+   "side_lock_tx": "241e3942f076e5ff53ae193fb1aed9c66d64fdde82f98a18e2e65bb06312f17f",
+   "created_at": "2026-07-08 05:23:04"
+  },
+  {
+   "id": 33305,
+   "bettor_pk": "81101a71428619cba1e9e9b93f67268047974364ed319deaecc88337686e7e34",
+   "direction": 1,
+   "stake_amount": 1500000000,
+   "side_lock_tx": "ea31960e231fd35f1d884e8316e15d057eb63b2f0222867c0ee9d38c53252345",
+   "created_at": "2026-07-08 05:23:14"
+  },
+  {
+   "id": 33312,
+   "bettor_pk": "4173a91cef12f00530d47408b37823ac483999024f2f1184fca8f334a8525373",
+   "direction": 0,
+   "stake_amount": 5000000000,
+   "side_lock_tx": "83e24a1f0aa1ebf5aef33442d9ce29fead54ed387b952e0d7136e4f3f989ace5",
+   "created_at": "2026-07-08 05:25:03"
+  },
+  {
+   "id": 33313,
+   "bettor_pk": "81101a71428619cba1e9e9b93f67268047974364ed319deaecc88337686e7e34",
+   "direction": 1,
+   "stake_amount": 1500000000,
+   "side_lock_tx": "c2db4649d759eefb367819b5757838614430d61cf30a6220a70079a99ce3a5b9",
+   "created_at": "2026-07-08 05:25:13"
+  },
+  {
+   "id": 33319,
+   "bettor_pk": "4173a91cef12f00530d47408b37823ac483999024f2f1184fca8f334a8525373",
+   "direction": 0,
+   "stake_amount": 5000000000,
+   "side_lock_tx": "899e000485708761da9b99bdd7f75d12e41477efacdefc13ee09d1b6eba15b11",
+   "created_at": "2026-07-08 05:27:02"
+  },
+  {
+   "id": 33321,
+   "bettor_pk": "81101a71428619cba1e9e9b93f67268047974364ed319deaecc88337686e7e34",
+   "direction": 1,
+   "stake_amount": 1500000000,
+   "side_lock_tx": "88be58477c21228fae789fea2b65b3f8947735936835df8cea8a31ec94ba2225",
+   "created_at": "2026-07-08 05:27:12"
+  },
+  {
+   "id": 33325,
+   "bettor_pk": "4173a91cef12f00530d47408b37823ac483999024f2f1184fca8f334a8525373",
+   "direction": 0,
+   "stake_amount": 5000000000,
+   "side_lock_tx": "6e3eff5d4c76b0e4bca821587de276ffb2150e5e6d997155a3b9f07de9925e01",
+   "created_at": "2026-07-08 05:29:03"
+  },
+  {
+   "id": 33326,
+   "bettor_pk": "81101a71428619cba1e9e9b93f67268047974364ed319deaecc88337686e7e34",
+   "direction": 1,
+   "stake_amount": 1500000000,
+   "side_lock_tx": "e38f7e5767afac6635ffbf5ed827a30128a90d0338880d6af6454f9ac8240bf3",
+   "created_at": "2026-07-08 05:29:14"
+  },
+  {
+   "id": 33335,
+   "bettor_pk": "4173a91cef12f00530d47408b37823ac483999024f2f1184fca8f334a8525373",
+   "direction": 0,
+   "stake_amount": 5000000000,
+   "side_lock_tx": "222960d33d3644740acc8a999d750e768012d04f743ea7161c7bcfdf4d190f79",
+   "created_at": "2026-07-08 05:31:03"
+  },
+  {
+   "id": 33337,
+   "bettor_pk": "81101a71428619cba1e9e9b93f67268047974364ed319deaecc88337686e7e34",
+   "direction": 1,
+   "stake_amount": 1500000000,
+   "side_lock_tx": "f3c23f591c80986d2be7032b4289ffde1fdb1f23338cf59a60a6bf9f9d148198",
+   "created_at": "2026-07-08 05:31:13"
+  },
+  {
+   "id": 33342,
+   "bettor_pk": "4173a91cef12f00530d47408b37823ac483999024f2f1184fca8f334a8525373",
+   "direction": 0,
+   "stake_amount": 5000000000,
+   "side_lock_tx": "62ab5a0f2db1d8af253256532c7f7d3827ff829018a8a7fa356866d9220e8a52",
+   "created_at": "2026-07-08 05:33:02"
+  },
+  {
+   "id": 33343,
+   "bettor_pk": "81101a71428619cba1e9e9b93f67268047974364ed319deaecc88337686e7e34",
+   "direction": 1,
+   "stake_amount": 1500000000,
+   "side_lock_tx": "20eb4c0c91fb664327cbcc4884563324d13973658fc639eca5f04ab554b7669b",
+   "created_at": "2026-07-08 05:33:12"
+  },
+  {
+   "id": 33352,
+   "bettor_pk": "4173a91cef12f00530d47408b37823ac483999024f2f1184fca8f334a8525373",
+   "direction": 0,
+   "stake_amount": 5000000000,
+   "side_lock_tx": "bb26559811837bdbd5370fd422149b7941a5319bb7a3c3bd78aae0312029151a",
+   "created_at": "2026-07-08 05:35:02"
+  }
+ ],
+ "note": "KANet-UI供J1做leaf重放/gap分析,25笔已知按id升序,shard_redeem_hex完整"
+}
