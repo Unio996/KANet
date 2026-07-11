@@ -119,6 +119,55 @@ export async function computeSettlePlan(marketId, ctx) {
 }
 
 /**
+ * deriveResumePlanFromEvidence — resume-fix (2026-07-11, docs/2026-07-11-backlog-markets-resume-fix-
+ *   and-cleanup-design.md §1，NWT红队GREEN·Bettor方向审GREEN #gj8kzn 系同批·#gjorob.2)。
+ *
+ *   桶 A(29 个市场，settled_partial_claims)根因: 无论市场是否已经 attest 过，_settleOneMarketAttempt
+ *   和 settleMarketLive 都无条件调用 computeSettlePlan——内部 ctx.endBlockHash(deadline_daa) 无条件走
+ *   getBlockAtDaa backward walk，老市场撞 MAX_WALK。但已 attest 的市场根本不需要重新 judge/选委员
+ *   (settleMarketLive 自己的 resume 分支只用 plan.winners/payoutRoot/poolSompi，从不碰
+ *   committeeMeta/expectedClosedAddr/committeePkHash —— 那些字段只有 fresh-close 分支用得到)。
+ *
+ *   本函数从 metadata.settle_evidence(已经链上 attest 落链时写入的记录)直接派生一份轻量 plan，
+ *   零 judgeWinDir/committee VRF/getBlockAtDaa。**纵深防御(Bettor n1, #gjorob.2)**: 即使这份 DB
+ *   evidence 被污染，claim tx 广播时仍必须过链上已 closed 的 PayoutShardV2 covenant 自己的
+ *   payout_root merkle 验证(.sil require 条件)——链是终审，DB 只是"这次该算哪笔"的路由信息，不是
+ *   授权信息。本函数的一致性比对(下方)是提前拦截的优化，不是唯一防线。
+ *
+ * @param {string} marketId
+ * @param {object} ctx  同 computeSettlePlan 的 ctx 契约(只用到 ctx.db)
+ * @returns {{ok:boolean, reason?:string, betCount?, poolSompi?, winDir?, payoutRoot?, winners?}}
+ */
+export function deriveResumePlanFromEvidence(marketId, ctx) {
+  const { db } = ctx;
+  const market = db.prepare('SELECT * FROM pool_markets WHERE id = ?').get(marketId);
+  if (!market) return { ok: false, reason: 'market 不存在' };
+  let meta; try { meta = JSON.parse(market.metadata || '{}'); } catch { meta = {}; }
+  const evidence = meta.settle_evidence;
+  if (!evidence?.close_txid) return { ok: false, reason: 'no settle_evidence.close_txid — 非 resume 场景' };
+  if (evidence.win_direction !== 0 && evidence.win_direction !== 1) {
+    return { ok: false, reason: `settle_evidence.win_direction 无效(${evidence.win_direction}) — 拒绝 resume` };
+  }
+
+  // 独立重算(不透传 evidence 里的 winners/poolSompi 数字本身)——同源 getMarketBets/computePariMutuelPayout,
+  // 跟 computeSettlePlan 完全一样的算法, 只是 winDir 用已经 attest 过的值(不重新 judge)。
+  const { bets, betCount, poolSompi, isBshard } = getMarketBets(marketId, db, _shard9PhantomExcludeFor(marketId));
+  if (!isBshard || betCount === 0) return { ok: false, reason: `resume 场景下 bets 异常(isBshard=${isBshard}, betCount=${betCount}) — 拒绝, 回退 computeSettlePlan 走原路径` };
+
+  const pm = computePariMutuelPayout({ bettors: bets.map(b => ({ pk: b.pk, stake: b.stake, direction: b.direction })), winningDirection: evidence.win_direction });
+  if (pm.degenerate) return { ok: false, reason: 'resume 场景下重算 degenerate — 与已落链的 close 状态矛盾, 拒绝' };
+  const recomputedRootHex = buildPayoutRoot(pm.payoutLeaves).toString('hex');
+  if (evidence.payout_root && recomputedRootHex !== evidence.payout_root) {
+    return { ok: false, reason: `独立重算 payoutRoot(${recomputedRootHex}) != settle_evidence.payout_root(${evidence.payout_root}) — fail-closed 拒绝 resume, 回退 computeSettlePlan` };
+  }
+
+  return {
+    ok: true, isBshard, betCount, poolSompi, winDir: evidence.win_direction,
+    payoutRoot: recomputedRootHex, winners: pm.payoutLeaves.map(w => ({ pk: w.pk, amount: w.amount })),
+  };
+}
+
+/**
  * winnerClaimData — 每 winner 的 depth-10 merkle proof (claim 用·climb 自核)。
  */
 export function winnerClaimData(winners) {
@@ -140,7 +189,17 @@ export function winnerClaimData(winners) {
  * @returns {ok, reason?, skipped?, dryRun?, plan?, closeTxid?, claims?}
  */
 export async function settleMarketLive(marketId, ctx) {
-  const plan = await computeSettlePlan(marketId, ctx);
+  // resume-fix (2026-07-11, docs/2026-07-11-backlog-markets-resume-fix-and-cleanup-design.md §1,
+  // NWT红队GREEN·Bettor方向审GREEN #gjorob.2): priorEvidence 提前到 plan 计算之前读一次(下面第217行
+  // resume 分支本来就要读, 不重复查询)——若市场已经 attest 过(close_txid 存在), 优先用
+  // deriveResumePlanFromEvidence(零 judgeWinDir/committee VRF/getBlockAtDaa)代替 computeSettlePlan,
+  // 避免老市场 resume 时无谓撞 MAX_WALK。deriveResumePlanFromEvidence 内部 fail-closed(重算不一致就
+  // {ok:false})时仍回退 computeSettlePlan——宁可撞一次 MAX_WALK 走到人工可见的失败, 也不用一个自己
+  // 都不信任的 resume plan 继续往下 claim。
+  const priorRow0 = sqlite.prepare('SELECT metadata FROM pool_markets WHERE id = ?').get(marketId);
+  let priorMeta0 = {}; try { priorMeta0 = JSON.parse(priorRow0?.metadata || '{}'); } catch {}
+  let plan = priorMeta0.settle_evidence?.close_txid ? deriveResumePlanFromEvidence(marketId, ctx) : { ok: false };
+  if (!plan.ok) plan = await computeSettlePlan(marketId, ctx);
   if (!plan.ok) { ctx.alert?.(marketId, `plan: ${plan.reason}`); return { ok: false, skipped: true, reason: plan.reason, plan }; }
   if (ctx.dryRun) return { ok: true, dryRun: true, plan };
 
@@ -153,9 +212,7 @@ export async function settleMarketLive(marketId, ctx) {
   // 修法: 若 metadata.settle_evidence.close_txid 已存在(=上次已经成功 close_attest 落链), 直接复用它,
   // 跳过 0-6, 进 claim 循环(而非重新 build/submit close)。
   let closeTxid, priorWinnerDetails = [];
-  const priorRow = sqlite.prepare('SELECT metadata FROM pool_markets WHERE id = ?').get(marketId);
-  let priorMeta = {}; try { priorMeta = JSON.parse(priorRow?.metadata || '{}'); } catch {}
-  const priorEvidence = priorMeta.settle_evidence;
+  const priorEvidence = priorMeta0.settle_evidence;
   if (priorEvidence?.close_txid) {
     closeTxid = priorEvidence.close_txid;
     priorWinnerDetails = Array.isArray(priorEvidence.winner_details) ? priorEvidence.winner_details : [];

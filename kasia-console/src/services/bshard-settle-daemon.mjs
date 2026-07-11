@@ -15,7 +15,7 @@
 
 import { sqlite } from '../db/client.js';
 import { getMarketBets } from '../lib/pool-bettor-sides-query.mjs';
-import { computeSettlePlan, settleMarketLive } from './bshard-auto-settler.mjs';
+import { computeSettlePlan, settleMarketLive, deriveResumePlanFromEvidence } from './bshard-auto-settler.mjs';
 import { consolidateAllShards } from '../lib/pool-shard-settle.mjs';
 import { _shard9PhantomExcludeFor } from './bshard-close-voter.js';
 import { compilePayoutShardRedeem } from '../lib/pool-shard-register.mjs';
@@ -475,9 +475,17 @@ async function _settleOneMarketAttempt(marketId) {
 
   // 0. 🔴 pre-flight plan (J1 covenant gate): winners≤1024 + plan.ok 验在【动钱前】。
   //   >1024 → buildPayoutRoot 抛 → 这里 catch → skip·**不 consolidate 不动钱**(避免半结·钱留 ShardLeaf 安全)。
+  // resume-fix (2026-07-11, docs/2026-07-11-backlog-markets-resume-fix-and-cleanup-design.md §1):
+  // 已 attest 过的市场(metadata.settle_evidence.close_txid 存在)优先用 deriveResumePlanFromEvidence
+  // (零 judgeWinDir/committee VRF/getBlockAtDaa)——这个 pre-flight 只是为了 winners≤1024 gate, 不需要
+  // computeSettlePlan 完整重新 judge+选委员那一套(settleMarketLive 自己下游也会走同一份 resume-aware
+  // 逻辑)。fail-closed: derive 不 ok 就回退 computeSettlePlan, 原样撞 MAX_WALK 是可见失败, 不是"将就用"。
   let plan;
-  try { plan = await computeSettlePlan(marketId, ctx); }
-  catch (e) {
+  try {
+    let priorMeta = {}; try { priorMeta = JSON.parse(market.metadata || '{}'); } catch {}
+    plan = priorMeta.settle_evidence?.close_txid ? deriveResumePlanFromEvidence(marketId, ctx) : { ok: false };
+    if (!plan.ok) plan = await computeSettlePlan(marketId, ctx);
+  } catch (e) {
     const rolling = /1024|rolling/i.test(e.message);
     ctx.alert(marketId, `plan threw (${rolling ? '>1024 winner·待 rolling payout-shard task#18' : e.message}) — skip·不动钱`);
     return { ok: false, reason: rolling ? 'needs_rolling' : `plan throw: ${e.message}`, needsRolling: rolling };
