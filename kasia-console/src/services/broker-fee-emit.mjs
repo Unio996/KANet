@@ -26,7 +26,14 @@ import { sqlite } from '../db/client.js';
 // packages/fee-split/notify.mjs 存在(package 原生功能, 无 kasia-console 内部副本——单源两个家各司其职)。
 import { deriveRoleFeeLeaves } from '../lib/fee-split.mjs';
 import { matchLandedFeeOutputs, emitLandedNotification } from '../../../packages/fee-split/notify.mjs';
-import { getSidesByLogicalMarket } from '../lib/pool-bettor-sides-query.mjs';
+// 🔴 poolSompi 单源修正(NWT 红队 2026-07-12 7pori 实盘撞见, #hm0tdn 追加): 初版误用
+// maker_stake_amount + Σ(pool_bettor_sides), 抄的是 pool-shard-settle.mjs ZK V2 consolidatedPool 惯例
+// (含 maker/seed)——但 V1 bshard 真实结算(computeSettlePlan, bshard-auto-settler.mjs:112 注释"pool 基数=
+// V1 口径 Σ注")的权威单源是 getMarketBets(pool-bettor-sides-query.mjs), 其注释明写"排 maker_stake/
+// commingled 杂质" — 故意不含 maker 自己的 stake。两条惯例基数不同(V1 只算 bettor 注, ZK V2 含 seed),
+// 混用 = 独立断言拿错基数, 触发假 CRITICAL mismatch(安全网接住不花错钱, 但断言本身算错)。改调用与
+// computeSettlePlan 完全同源的 getMarketBets, 不再自己拼基数。
+import { getMarketBets } from '../lib/pool-bettor-sides-query.mjs';
 
 // J1tn 2026-07-08 (§2.1 broker-fee-reconciler-design 启用件): 本模块此前写好但零调用点(index.js 从没
 //   import 过) — Owner 直接指令"之前有这个模块没启用,查!"坐实。这里只做"接上一根已经焊好的线",
@@ -226,14 +233,10 @@ export function brokerFeeLandedEmitTick(db, deriveBrokerAddress, log = () => {})
 
       let feeLeaves, leafAddresses, verification;
       if (feeRules) {
-        // §2.1: consolidatedPool 独立链读(同结算时口径, 镜像 pool-shard-settle.mjs L309 既有模式)——
-        //   maker_stake_amount + Σ pool_bettor_sides.stake_amount(已上链锁定的), 非透传/非从 settle output 反推。
-        //   getSidesByLogicalMarket (非裸 market_id 查, R-SHARD-BLIND 守): bshard 市场 bettor 挂在
-        //   shard_market_id 下·裸 WHERE market_id=? 在 bshard 场景查不到, 这里统一走 logical-market-aware 查询。
-        const sides = getSidesByLogicalMarket(m.id, db).filter(s => s.side_lock_tx);
-        const sidesSum = sides.reduce((s, r) => s + (Number(r.stake_amount) || 0), 0);
-        const poolSompi = BigInt(Number(m.maker_stake_amount) || 0) + BigInt(sidesSum);
-        const derived = deriveRoleFeeLeaves(feeRules, poolSompi.toString());
+        // §2.1: poolSompi 独立链读(同结算时口径)——单源 getMarketBets(与 computeSettlePlan 完全同源
+        //   同基数, 见文件头 import 注释), 非自拼 maker_stake_amount+sides(V1 真实基数不含 maker)。
+        const { poolSompi: poolSompiStr } = getMarketBets(m.id, db);
+        const derived = deriveRoleFeeLeaves(feeRules, poolSompiStr);
         const brokerLeaf = derived.feeLeaves.find(l => l.type === 'broker');
         if (!brokerLeaf) throw new Error(`fee_rules 无 broker leaf(bps=0/角色缺席) 但已发现链上 broker output — 结构不一致, 降级`);
         feeLeaves = [brokerLeaf];

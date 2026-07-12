@@ -80,20 +80,22 @@ console.log('[test] ① §2.2 discover-then-trust 族(无 fee_rules) — 1dv70 �
   ok(p.verification === 'discovered', `verification=${p.verification}(§2.2 诚实标注 vacuous-pass, Bettor 注1 MUST)`);
 }
 
-console.log('[test] ② §2.1 独立断言族(fee_rules matched) — 独立链读 consolidatedPool 推出的期望值与真实 output 相符:');
+console.log('[test] ② §2.1 独立断言族(fee_rules matched) — 独立链读 poolSompi(单源 getMarketBets, 与 computeSettlePlan 同基数):');
 {
   const rules = buildPredictionV1InterimRules({ brokerPk: PK_B });   // provider=9840, broker=160bps
-  const poolSompi = 380000000;   // 380000000 * 160 / 10000 = 6080000(同①真实值, 巧合验证不同族殊途同归)
+  // 🔴 NWT 红队 7pori 实盘撞见(#hm0tdn 追加): poolSompi = 仅 bettor_sides(getMarketBets 排 maker_stake),
+  //   非 maker+bettor(V1 真实基数不含 maker——本测试 maker_stake_amount 故意设一个不相干的值, 断言基数
+  //   确实只吃 bettor 侧, 不误把 maker 拉进来)。380000000 * 160/10000 = 6080000(同①真实值, 殊途同归)。
   const brokerAddr = deriveBrokerAddress(PK_B);
-  seedMarket('mkt-B', { broker_pk: PK_B, settle_txid: TX_B, fee_rules: JSON.stringify(rules), maker_stake_amount: 200000000 });
+  seedMarket('mkt-B', { broker_pk: PK_B, settle_txid: TX_B, fee_rules: JSON.stringify(rules), maker_stake_amount: 999000000 });
   sqlite.prepare(`INSERT INTO pool_bettor_sides (market_id, bettor_pk, direction, stake_amount, side_p2sh, side_lock_tx) VALUES (?, ?, ?, ?, ?, ?)`)
-    .run('mkt-B', 'bettor-b1', 0, 180000000, 'p2sh-dummy', 'sideB'.padEnd(64, '0'));
+    .run('mkt-B', 'bettor-b1', 0, 380000000, 'p2sh-dummy', 'sideB'.padEnd(64, '0'));
   insertTx(TX_B, [
-    { address: 'addr:other-winner-out', amount_sompi: poolSompi - 6080000 },
+    { address: 'addr:other-winner-out', amount_sompi: 380000000 - 6080000 },
     { address: brokerAddr, amount_sompi: 6080000 },
   ]);
   const res = brokerFeeLandedEmitTick(sqlite, deriveBrokerAddress, () => {});
-  ok(res.emitted === 1 && res.packageFallback === 0, `emitted=${res.emitted} fallback=${res.packageFallback}(独立断言 matched, 零 fallback)`);
+  ok(res.emitted === 1 && res.packageFallback === 0, `emitted=${res.emitted} fallback=${res.packageFallback}(独立断言 matched, 零 fallback, maker 999000000 未被误算入基数)`);
   const ev = sqlite.prepare(`SELECT payload FROM chain_events WHERE event_type='broker_fee_landed' AND to_address=?`).get(brokerAddr);
   const p = JSON.parse(ev.payload);
   ok(p.fee_sompi === 6080000 && p.verification === 'independent', `fee_sompi=${p.fee_sompi} verification=${p.verification}(真 amount 断言过, Bettor 注1 MUST 标注强信任)`);
@@ -106,7 +108,7 @@ console.log('[test] ③ §2.1 独立断言族(mismatch) — 真实链上金额�
   const WRONG_REAL_FEE = 6000000;   // 真实 output 金额(蓄意跟期望值 6080000 不符, 模拟 bps 配置漂移/配置错误场景)
   seedMarket('mkt-C', { broker_pk: PK_C, settle_txid: TX_C, fee_rules: JSON.stringify(rules), maker_stake_amount: 200000000 });
   sqlite.prepare(`INSERT INTO pool_bettor_sides (market_id, bettor_pk, direction, stake_amount, side_p2sh, side_lock_tx) VALUES (?, ?, ?, ?, ?, ?)`)
-    .run('mkt-C', 'bettor-c1', 0, 180000000, 'p2sh-dummy', 'sideC'.padEnd(64, '0'));
+    .run('mkt-C', 'bettor-c1', 0, 380000000, 'p2sh-dummy', 'sideC'.padEnd(64, '0'));
   insertTx(TX_C, [{ address: brokerAddr, amount_sompi: WRONG_REAL_FEE }]);
   const logs = [];
   const res = brokerFeeLandedEmitTick(sqlite, deriveBrokerAddress, (m) => logs.push(m));
