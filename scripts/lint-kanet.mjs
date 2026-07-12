@@ -98,6 +98,28 @@ function checkLedgerSize() {
   }
 }
 
+// ── R-FEE-SPLIT-PKG-DRIFT [ERROR, 硬阻塞]: packages/fee-split/fee-split.mjs 必与源同步 ──
+// (B线落3, NWT G1 修法②, 2026-07-12): packages/fee-split/fee-split.mjs 是
+// kasia-console/src/lib/fee-split.mjs 的构建产物(packages/fee-split/scripts/sync.mjs 生成, 逐字节复制
+// +生成头), 单源策略靠这条规则机制化(手改/漏同步 = commit 卡点, 非 WARN——落1 F1 就在源文件修过一次,
+// 若产物 drift, 第三方会拿到已知有漏洞的旧快照, 比不做这个包更糟)。
+function checkR_FEE_SPLIT_PKG_DRIFT() {
+  const srcFile = file('kasia-console/src/lib/fee-split.mjs');
+  const pkgFile = file('packages/fee-split/fee-split.mjs');
+  if (!exists(srcFile) || !exists(pkgFile)) return;   // 包未建/源已删, 不在本规则职责内
+  const src = read(srcFile);
+  const pkg = read(pkgFile);
+  // 生成头 = sync.mjs 写的固定两行 + 空行, 剥掉后剩余内容必须逐字节 == 源文件。
+  const HEADER_RE = /^\/\/ ⚠ 自动生成 — 勿手改[^\n]*\n\/\/ 手改会被 lint-kanet[^\n]*\n\n/;
+  const stripped = pkg.replace(HEADER_RE, '');
+  if (stripped !== src) {
+    violate('R-FEE-SPLIT-PKG-DRIFT',
+      `packages/fee-split/fee-split.mjs 与源 kasia-console/src/lib/fee-split.mjs 不一致(drift)——第三方
+会拿到过期/错误的分润组件快照。重新同步: node packages/fee-split/scripts/sync.mjs, 然后 git add 两处一起提交。`,
+      pkgFile, 0);
+  }
+}
+
 // ── R-SCRATCH-CLUTTER [WARN]: 临时脚本铁律 (Owner 2026-06-27 钦定·防根目录堆爆) ──
 // 一次性诊断/测试脚本写 scratch/ (gitignored, 绝对路径), 不堆仓库根目录. gitignore (`_*`) 防入库不防
 // 物理堆在文件浏览器 → whole-repo warn (每次 commit 跑 lint 都提醒). 历史: 821 临时文件堆爆 (归档 815).
@@ -882,9 +904,12 @@ function checkR_FEE_LEAVES_BYPASS() {
 // canonicalizeFeeRules()/computeFeeRulesCommit() 唯一家 = kasia-console/src/lib/fee-split.mjs。
 // 其它文件出现 ①canonicalizeFeeRules 重定义 或 ②对 feeRules 直接 blake2b = 旁路, WARN 标记。
 const _FEERULES_CANON_HOME = 'kasia-console/src/lib/fee-split.mjs';
+// packages/fee-split/fee-split.mjs(B线落3)是 _FEERULES_CANON_HOME 的 sync 构建产物(R-FEE-SPLIT-PKG-DRIFT
+// 守内容一致), 不是独立实现——同源排除, 否则每次 sync 都会在这条 WARN 上噪音。
+const _FEERULES_CANON_HOME_SYNCED_COPIES = new Set(['packages/fee-split/fee-split.mjs']);
 function checkR_FEERULES_CANON_BYPASS(fp, content) {
   const rel = path.relative(ROOT, fp).replace(/\\/g, '/');
-  if (rel === _FEERULES_CANON_HOME) return;
+  if (rel === _FEERULES_CANON_HOME || _FEERULES_CANON_HOME_SYNCED_COPIES.has(rel)) return;
   if (!/\.(mjs|js|cjs)$/.test(fp)) return;
   const lines = content.split('\n');
   for (let i = 0; i < lines.length; i++) {
@@ -1108,6 +1133,7 @@ checkR_NULLIFIER_I64();
 checkR_COMMAND_REGISTRATION();  // R-COMMAND-REGISTRATION (#25, KI-49 防重复): relay.mjs case 必在 commands.mjs 三层注册
 checkR_FEE_LEAVES_BYPASS();     // R-FEE-LEAVES-BYPASS [WARN] (P4/D-008, 2026-07-09): ZK 线禁直调 deriveFeeLeaves/FEE_CONFIG
 checkScratchClutter();
+checkR_FEE_SPLIT_PKG_DRIFT();     // R-FEE-SPLIT-PKG-DRIFT [ERROR] (B线落3 2026-07-12): packages/fee-split/fee-split.mjs 必与源同步(硬阻塞非WARN)
 checkLedgerSize();               // R-LEDGER-SIZE [WARN] (D-010 2026-07-10): COORD-LEDGER.md >100KB 提醒切档
 checkDocPath();                          // R-DOC-PATH/R-DOC-DUPLICATE (③ doc-lint 2026-06-29): date-prefixed doc 必住 docs/ 根·同名多路径 → fail
 
