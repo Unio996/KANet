@@ -26,13 +26,20 @@ L2 全空(J2,4342 候选零命中,身份 100% 内部)。
 ```sql
 UPDATE pool_markets SET protocol_status = 'pruned_expired_waived',
   metadata = json_set(metadata, '$.waived_reason', ?, '$.waived_at', ?)
-WHERE id IN (/* 精确 14 个 id 字面量, 一次性生成清单, 非 WHERE 条件式批量 */)
-  AND protocol_status NOT IN ('completed', 'pruned_expired_waived', 'manual_recovery_refunded', 'settle_failed', 'cancelled')
+WHERE id IN (/* 精确 13 个 id 字面量(9 NULL-deadline + 4 第五层, fy1yk 不在其中, 见 §4), 一次性生成清单,
+                非 WHERE 条件式批量 */)
+  AND protocol_status IN ('verifying', 'pending_bettors')
 ```
 
-**第二个 WHERE 子句是安全闸**(NWT 红队应重点核):即使 id 清单意外含了一个其实已经终结的盘(人为失误),
-这条 guard 防止把一个已完成的盘状态覆写坏。**每个 id 精确来自本设计 §1 表 + KANet-UI/NWT 的身份核实
-输出,不用任何 LIKE/pattern 匹配生成清单**(dry-run 先跑 SELECT 核对 14 行精确匹配,再执行 UPDATE)。
+**🔴 第二个 WHERE 子句是安全闸(NWT 红队 H1 MUST-FIX 修正,活库实测驱动)**:v1.0 用黑名单
+(`NOT IN ('completed', 'pruned_expired_waived', ...)`)——NWT 查活库 `pool_markets` 全部 distinct
+`protocol_status` 发现真实存在 15 种值(`refunded`/907 行、`refunding`/51 行进行中转账、`disputed`/
+`archived`/`settle_zombie_quarantine` 等),黑名单只列了 5 个,**结构性不完备**(今晚第三次撞同一模式:
+反馈工具 allow-list/trading.js type 排除表/这里——枚举"不该碰的状态"天生漏,枚举"该碰的状态"才封闭)。
+**改白名单**:`protocol_status IN ('verifying', 'pending_bettors')`(= §1 表已明确的两族目标市场应处状态)
+——无论 id 清单意外混进什么状态的市场,不精确匹配"理应处于的状态"就不会被碰,不需要穷举所有不该碰的值。
+每个 id 精确来自本设计 §1 表 + KANet-UI/NWT 的身份核实输出,不用任何 LIKE/pattern 匹配生成清单
+(dry-run 先跑 SELECT 核对 13 行精确匹配,再执行 UPDATE)。
 
 沿用桶B 命名(`pruned_expired_waived`,NWT 边界②:不带 `refunded` 字样——没有转账发生就不能叫"退款",
 NO TX NO STATE 语义)。`waived_reason` 区分两族("null_deadline_internal" / "shardleaf_fifth_layer_internal_l2exhausted")。
@@ -53,7 +60,8 @@ NO TX NO STATE 语义)。`waived_reason` 区分两族("null_deadline_internal" /
 
 ### 2.4 maker spine reclaim(单列,不与 §2.1-2.3 同批执行)
 
-14 盘 maker_stake Σ(第五层 4×100KAS=400KAS + NULL-deadline 族待 KANet-UI 补充精确数字)锁在各自 spine
+§2.1 的 13 盘(bettor 资金豁免)+ fy1yk 自己的 maker spine(§4 单列,与其 1004 笔 bettor 资金处置分开的
+另一个问题)= 最多 14 盘的 maker_stake Σ 锁在各自 spine
 P2SH。**本设计只标记"该回收",不在本卡执行**——回收动作(`refund_maker_unjoined` 覆约路径,同 §2.3
 理由 + 桶B 先例"maker bond reclaim 走独立 B 卡")本身需要:①逐盘 covenant exit-path 验证(D-005 族
 "资金进 covenant 前必验 exit-path 矩阵"精神反向应用:资金已在 covenant 里,回收前也要重新过一遍这条
@@ -82,7 +90,7 @@ Bettor 06:04 预裁"豁免收口口径"但留了一问:register-v07 bulk 脚本�
 
 ## 5. DoD
 
-1. NWT 红队:§2.1 SQL 安全闸(guard WHERE 子句)+ 14 个 id 清单精确性(dry-run SELECT 逐行核对)+
+1. NWT 红队:§2.1 SQL 安全闸(guard WHERE 子句)+ 13 个 id 清单精确性(dry-run SELECT 逐行核对)+
    `pruned_expired_waived` 是否与桶B 127 盘的既有语义完全一致(无隐性差异)。
 2. dry-run(`SELECT id, protocol_status FROM pool_markets WHERE id IN (...)`)输出报 Bettor 核对后,
    再执行真 UPDATE(桶B 同款"dry-run→Bettor 批→写"两人闸纪律)。

@@ -98,6 +98,26 @@ function checkLedgerSize() {
   }
 }
 
+// ── R-STATUS-GUARD-BLACKLIST [WARN]: UPDATE ...protocol_status 的安全闸用黑名单(NOT IN)启发式提醒换白名单 ──
+// (处置设计红队 2026-07-12, NWT H1 + Bettor 钉死"今晚第三次撞同一模式"后要求补的启发式规则): 黑名单
+// (NOT IN (...))枚举"不该碰的状态"天生不完备(活库状态集持续增长, 设计者凭记忆写的黑名单会漏, NWT 处置
+// 设计红队现场撞到——5 项黑名单漏了 refunded/refunding/disputed 等 10 项活库真实状态)。同一行/相邻窗口
+// 内出现 IN(...) 白名单则不告警(已用推荐写法)。启发式非精确 AST, 只在同段 SQL 文本内粗判, 误报可接受
+// (WARN 不阻塞, "随手写不强求"精神——Bettor #hgmhxf.2)。
+function checkR_STATUS_GUARD_BLACKLIST(fp, content) {
+  if (!/\.(mjs|js|cjs)$/.test(fp)) return;
+  const lines = content.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    if (!/UPDATE\s+\w+\s+SET[^;]*protocol_status/i.test(lines[i])) continue;
+    const windowText = lines.slice(i, Math.min(lines.length, i + 6)).join('\n');
+    if (!/protocol_status\s*NOT\s+IN\s*\(/i.test(windowText)) continue;
+    if (/protocol_status\s+IN\s*\(/i.test(windowText.replace(/NOT\s+IN/i, ''))) continue;   // 同段也有白名单写法, 不告警
+    warn('R-STATUS-GUARD-BLACKLIST [WARN]',
+      `UPDATE ...protocol_status 的安全闸用黑名单(NOT IN)——枚举"不该碰的状态"天生不完备(活库状态集会持续增长/漏项), 改白名单(AND protocol_status IN (目标市场理应处的状态)), 同 R-FEE-SPLIT-PKG-DRIFT/反馈工具 allow-list 同一封闭式防护原则(处置设计 NWT 红队 H1, 2026-07-12)。`,
+      fp, i + 1);
+  }
+}
+
 // ── R-FEE-SPLIT-PKG-DRIFT [ERROR, 硬阻塞]: packages/fee-split/fee-split.mjs 必与源同步 ──
 // (B线落3, NWT G1 修法②, 2026-07-12): packages/fee-split/fee-split.mjs 是
 // kasia-console/src/lib/fee-split.mjs 的构建产物(packages/fee-split/scripts/sync.mjs 生成, 逐字节复制
@@ -1127,6 +1147,7 @@ for (const fp of targets) {
   checkR_SHARD_BLIND(fp, content);       // R-SHARD-BLIND [WARN] (线8 STEP2 2026-06-24): pool_bettor_sides 裸 logical market_id 查
   checkR_PHANTOM_FIELD(fp, content);     // R-PHANTOM-FIELD [WARN] (2026-07-05, qzdh7nar): v0.6-only phase2_* 字段无守卫读取 — 防第4例(#48/#50/maker-P&L 同根)
   checkR_FEERULES_CANON_BYPASS(fp, content);  // R-FEERULES-CANON-BYPASS [WARN] (B线落1 2026-07-12): feeRules canonicalize/hash 单源封旁路(spec v1.2-2)
+  checkR_STATUS_GUARD_BLACKLIST(fp, content);  // R-STATUS-GUARD-BLACKLIST [WARN] (处置设计红队 2026-07-12): protocol_status UPDATE 安全闸黑名单启发式→建议白名单
 }
 checkR10();
 checkR_NULLIFIER_I64();
