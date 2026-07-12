@@ -285,12 +285,17 @@ export async function formatMyBets(linkedAddr, lang = 'en') {
   if (detail.length) lines.push(t(lang, 'mybets_detail_prefix', { detail: detail.join(' · ') }));
   lines.push('');
 
-  for (const [marketId, group] of byMarket) {
+  // mybets v1.2 §2: 分页保护, cap 15 market (复用 messages.mjs earnings_more 公式), 无 web 跳转落点.
+  const MYBETS_MARKET_CAP = 15;
+  const marketEntries = [...byMarket];
+  const shownEntries = marketEntries.slice(0, MYBETS_MARKET_CAP);
+
+  for (const [marketId, group] of shownEntries) {
     // 按 direction 二次聚合 (YES / NO 各加总 stake, 累计 count, 收集状态)
     const byDir = new Map();
     for (const p of group) {
       const dir = p.my_side || (p.direction === 0 ? 'YES' : p.direction === 1 ? 'NO' : '?');
-      if (!byDir.has(dir)) byDir.set(dir, { stakeSum: 0, count: 0, statuses: { won: 0, won_pending: 0, lost: 0, settled_pending: 0, refunded: 0, open: 0, unchain: 0 }, payoutWin: 0, actualPayoutSum: 0 });
+      if (!byDir.has(dir)) byDir.set(dir, { stakeSum: 0, count: 0, statuses: { won: 0, won_pending: 0, lost: 0, settled_pending: 0, refunded: 0, open: 0, unchain: 0 }, payoutWin: 0, actualPayoutSum: 0, wonTxid: null, refundTxid: null });
       const a = byDir.get(dir);
       a.stakeSum += Number(p.stake_kas) || 0;
       a.count++;
@@ -299,11 +304,11 @@ export async function formatMyBets(linkedAddr, lang = 'en') {
       // 比之前的模糊 pending 还伤信任), 单独一个状态桶 won_pending 处理。
       if (p.settle_txid && p.did_win === true) {
         if (p.actual_payout_kas == null) { a.statuses.won_pending++; }
-        else { a.statuses.won++; a.actualPayoutSum += Number(p.actual_payout_kas) || 0; }
+        else { a.statuses.won++; a.actualPayoutSum += Number(p.actual_payout_kas) || 0; a.wonTxid = p.bshard_claim_txid || p.claim_txid || p.settle_txid || null; }
       }
       else if (p.settle_txid && p.did_win === false) a.statuses.lost++;
       else if (p.settle_txid) a.statuses.settled_pending++;
-      else if (p.refund_txid) a.statuses.refunded++;
+      else if (p.refund_txid) { a.statuses.refunded++; a.refundTxid = p.refund_txid || null; }
       else if (p.side_lock_tx) { a.statuses.open++; a.payoutWin += Number(p.payout_if_win_kas) || 0; }
       else a.statuses.unchain++;
     }
@@ -340,6 +345,10 @@ export async function formatMyBets(linkedAddr, lang = 'en') {
       else                statusStr = t(lang, 'mybets_status_mixed', { won: s.won + s.won_pending, lost: s.lost, open: s.open, refunded: s.refunded, pending: s.settled_pending });
       const cnt = a.count > 1 ? t(lang, 'mybets_dir_cnt', { n: a.count }) : '';
       lines.push(`• ${dir} ${a.stakeSum.toFixed(4)} KAS${cnt} · ${statusStr}`);
+      // mybets v1.2 §1: 赔付凭证 txid 纯文本(非链接, TN12 无公网 explorer). 退款单笔对单笔无歧义直接显示;
+      // 赢单 H2 收窄——同市场同方向 >1 笔赢单时金额-交易不可消歧, 只在 count===1 时显示.
+      if (onlyRefund && a.refundTxid) lines.push(t(lang, 'mybets_tx_line', { txid: a.refundTxid }));
+      else if (onlyWon && a.count === 1 && a.wonTxid) lines.push(t(lang, 'mybets_tx_line', { txid: a.wonTxid }));
       // 若赢可拿 = 直接加总每笔 payout_if_win_kas. 后端 endpoint 是 query-time 同池子快照统一算每笔
       // (Bettor r147 实证 + 我 r345 多想一层的 pari-mutuel 反向算同分母 = 数学等价).
       // → 简单加总即正确, 不需要 disclaimer "未来变" (现池就是 query 时的池).
@@ -367,6 +376,10 @@ export async function formatMyBets(linkedAddr, lang = 'en') {
     }
     // KANet-UI 2026-06-06 Owner 实证: P1.1 ship 的"看怎么定的" URL = 127.0.0.1 局内网, 用户外部点不开
     // = 我违 [[no-impl-jargon]] + Owner r250 全菜单交互 0 网页跳转纪律. 删 URL.
+  }
+  if (marketEntries.length > MYBETS_MARKET_CAP) {
+    lines.push('');
+    lines.push(t(lang, 'mybets_more', { n: marketEntries.length - MYBETS_MARKET_CAP, shown: MYBETS_MARKET_CAP }));
   }
   return lines.join('\n');
 }

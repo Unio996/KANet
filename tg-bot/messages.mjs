@@ -1,6 +1,5 @@
 // TG bot user-facing text + flow builders. v1.3: builder voice, testnet/MIT, reactive-only.
 // Value/trust steps → the USER acts on-chain via Console/their relay. bot 0 持钥 / 0 execute (J1 S5).
-import { CONFIG } from './config.mjs';
 import { t } from './i18n.mjs';
 
 export const DISCLAIMER = 'testnet-only · MIT 开源 · 不运营主网 · 非投资建议';
@@ -197,10 +196,11 @@ function _legProb(leg) {
 
 // KANet-UI 2026-06-22 (Owner 钦定 broker 收益统计 DM 显): 格式化 address-keyed 收益。
 // data = /api/kanet-broker/earnings-by-address 返 {address,realized,pending,refunded,by_market}。
-// 链上证: 每已结算单挂 settle_txid explorer 链接。fee=价值分成(后端已用 phase2 实落值)。
+// 链上证: 每已结算单挂 settle_txid 纯文本凭证。fee=价值分成(后端已用 phase2 实落值)。
+// mybets v1.2 §3 (2026-07-12): explorer-tn12.kaspa.org DNS 不存在(Owner 实测 ENOTFOUND), TN12 无公网
+// explorer, 此前一直是死链——降级为 txid 纯文本(可复制留存的原始凭证, 非"点开即验").
 // T4 (2026-06-27): nodeIncome = /api/node/income/:pk 返回值 (可选). 非 node 用户传 null 静默略过.
 export function brokerEarnings(data, nodeIncome = null, lang = 'en') {
-  const explorer = (CONFIG.network === 'mainnet') ? 'https://explorer.kaspa.org' : 'https://explorer-tn12.kaspa.org';
   const r = data.realized || {}, p = data.pending || {}, rf = data.refunded || {};
   const by = data.by_market || [];
   if (!by.length) {
@@ -227,7 +227,7 @@ export function brokerEarnings(data, nodeIncome = null, lang = 'en') {
   for (const m of by.slice(0, 10)) {
     const id = String(m.id || '').slice(-12);
     let line = `${icon(m.status)} …${id}  ${m.fee_kas} KAS`;
-    if (m.settle_txid) line += `  ${explorer}/txs/${m.settle_txid}`;
+    if (m.settle_txid) line += `  TX: ${m.settle_txid}`;
     lines.push(line);
   }
   if (by.length > 10) lines.push(t(lang, 'earnings_more', { n: by.length - 10 }));

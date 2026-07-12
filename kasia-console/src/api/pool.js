@@ -3251,6 +3251,7 @@ export async function registerPoolRoutes(fastify) {
       let outcomeWinner = null;
       let didWin = null;
       let actualPayoutKas = null, actualPayoutChainVerified = false;
+      let bshardClaimTxid = null;
       try {
         const meta = JSON.parse(p.metadata || '{}');
         // #48 (NWT/J2 2026-07-04): bshard(v0.7) 盘从没写 phase2_winner(v0.6 专属字段) — 结算后所有
@@ -3264,6 +3265,7 @@ export async function registerPoolRoutes(fastify) {
             didWin = true;
             actualPayoutKas = Number(myWin.amount) / 1e8;
             actualPayoutChainVerified = true;   // winner_details 只收 received===true 的条目(daemon writeback 过滤过)
+            bshardClaimTxid = myWin.txId || null;  // 权威源: settle_evidence.winner_details[].txId, 已链验 received===true (mybets v1.2 §0.1)
           } else if (ev.win_direction === 0 || ev.win_direction === 1) {
             // NWT 审(2026-07-04, 部署前抓到): 不在 winner_details 里≠真输了——若 myDirection===win_direction
             // 但没进 winner_details, 是"赢了但 claim 失败没到账"(#21 settled_partial_claims 那种), 不是"你输了"。
@@ -3342,6 +3344,7 @@ export async function registerPoolRoutes(fastify) {
         claim_txid: p.claim_txid,
         settle_txid: p.settle_txid,
         refund_txid: p.refund_txid,
+        bshard_claim_txid: bshardClaimTxid,  // mybets v1.2 §0.1: v0.7 赢家 claim 权威源 (H1, claim_txid 列只写退款专属)
         // F-N1: settled outcome surface (NULL if not settled or oracle still voting).
         outcome_winner: outcomeWinner,
         outcome_side: outcomeWinner === 0 ? 'YES' : (outcomeWinner === 1 ? 'NO' : null),
