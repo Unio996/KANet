@@ -50,6 +50,11 @@ pool_bettor_sides)已经乐观前进"。**方向与 claim thread-walk 相反**:c
 - **remove-1**(11 个候选,每个候选=去掉 1 笔已知 bet 后的 state → splice → live 查):**0 命中**。
 - **remove-2**(C(11,2)=55 个候选):**0 命中**。
 
+**🔴 前提校验(Bettor 方向审已核):remove-k 结构成立的依据 = `spliceLeafState`(`pool-shard-register.mjs:77-81`)
+的 state 是 4 个**聚合字段**(local_yes/local_no/count/pool_value)的纯集合聚合(Σ和/计数),不依赖登记顺序——
+子集搜索(去掉任意 k 笔的组合)结构上等价于"链上真实登记集合是 DB 已知集合的某个大小 N-k 子集",这个假设
+成立(已亲读代码确认)。
+
 **两层都不中**——排除"最后 1-2 笔乐观写入未落链"这个最简单假设。剩余可能:①k≥3(组合数增长快,
 C(11,3)=165 尚可跑,C(19,3)=969/C(22,3)=1540 仍可跑,但需设计明确上限+时间预算);②某笔 bet 的 DB 记录
 (stake_amount/direction)本身与链上实际广播值不符(非"缺笔"而是"记错笔",remove-k 搜不到);③真 phantom
@@ -62,14 +67,30 @@ L0 round-trip 自证(已做, 见 §1.1)——校准方法论, 每次 triage 跑�
 L1 genesis + tip(DB最终态) 双锚 live 查(已做, 见 §1.2)——两者皆空 → 进 L2；genesis空+tip活 = 正常(不该在
    队列里, 数据不一致另案)；genesis活 = 从未注册过任何东西, 走别的已知路径(不属本设计)
 L2 remove-k 有界组合搜索(k=1,2,...K_MAX; K_MAX=3 起步, 候选数 C(N,k) 超过预算(建议 2000)才升 k 前停):
-   任一候选 live 命中 → 【②可救】: 命中状态 = 真实 tip, 缺失的 k 笔登记视为"未落链的乐观 DB 写"——
-   这 k 笔 bettor 的 stake **未进池**(链上没收到), 对应 bettor 需要退款路(非误算, 未确认的 bet 不该算进赢家池)。
+   **🔴 注1(Bettor MUST-FIX)**: 候选地址 live 命中**不等于**状态命中——必须加 amount 断言:命中 UTXO 的
+   金额 == 该候选 state 的 `pool_value`,且该 UTXO 是该地址**唯一** UTXO(dust/杂币防线,同 thread-walk H2
+   同族的"找到 tip 还要核余额"纪律)。地址碰撞 + 金额不符 = 假命中,不能当真结论用。
+   任一候选(通过 amount 断言)live 命中 → 【②可救】: 命中状态 = 真实 tip,缺失的 k 笔**候选**bettor
+   进入 §2.1 逐笔链验(不直接判定,见下)。
    全部候选查完仍 0 命中 → 进 L3(记录已尝试的 K_MAX, 挂账不猜)
+
+### 2.1 ②命中后的退款语义(Bettor 注2 MUST-FIX:禁一律退)
+
+L2 命中后,"缺失的 k 笔" 只是**候选**——每一笔必须**逐笔独立链验 `side_lock_tx`**(该 bettor 下注时的
+支付交易),三分(同 refund-verify-chain-not-db-claim 铁律,链是终审非 DB claim):
+- **side P2SH UTXO 仍 live(未花)** → 真退款候选,钱确实卡在半路,可退;
+- **side P2SH UTXO 已被花**(付过款但后续被消费,如被 gateway sweep 走)→ 另案追踪(钱去哪了,非本卡);
+- **side P2SH UTXO 从未落链**(bettor 从没真正付过这笔)→ **零退款**(DB 记录的这笔本身就是假/未完成的
+  下注意图,没有钱可退)。
+禁止对 k 笔候选做"整批退款"的简化处理。
 L3 block-scan 正推(28mln/shard9 先例方法论, 只读零钱动): 从 shard 创建 DAA(market_shards.created_at)开始
    正扫区块, 找"花费 genesis outpoint(genTx:0)的 tx"→ 若找到, 解出它的输出地址(=第1次register后的地址,
    已知state=1笔bet的splice, 可现算比对确认)→ 递归找"花费这个新outpoint的tx"→ 一路正推到链真正的尽头。
    这是【definitive】方法(不依赖 DB 任何字段, 纯链正推), 但扫描范围可能跨数周(28mln 先例扫过 30万+行),
    需要分批/限速, 非本设计一次性完成的量级。
+   **Bettor 注4(弱先验,非判据)**: L3 正式起跑前,可先查 `kaspa_tx_log` 里 genTx 及各 register tx 的历史
+   观测记录,粗圈扫描范围(缩小 block-scan 窗口,省时间)。**命中只证"当时观测过",不证 canonical**(同
+   `kaspa-tx-log-hit-is-not-canonical-chain-proof` 铁律)——只能当先验缩小范围,不能替代 L3 本身的判定。
    L3 走到底(链正推停在某个 outpoint 后再没有任何 spend, 且 kaspa_tx_log/live UTXO 都验证该 outpoint
    现在无 live UTXO——即该 outpoint 本身也是 phantom)→【①phantom】: 从该点起的登记序列整体从未落链或已被
    reorg 剪掉, 挂 manual_recovery_refunded 退款路(lv3rz 先例, Bettor 拍板②经济完整性)。
@@ -78,6 +99,25 @@ L3 block-scan 正推(28mln/shard9 先例方法论, 只读零钱动): 从 shard �
 **穷尽性纪律(NWT 前置要求)**:L2 未跑满预算前不得下③indexer-gap 结论(indexer 已被 live RPC 绕过,
 本设计从 L1 起就是 live-only,③在这个 triage 序列里已经天然排除,不需要单独判);**判①phantom 前必须
 走完 L3**(不能停在"L2 没找到"就下 phantom 结论——同 refund-verify-chain-not-db-claim 铁律)。
+
+**🔴 Bettor 注3(报数口径,MUST 遵守)**:L2 全空**只能说**"排除了 DB 已知集合内 k≤K_MAX 的乐观写假设",
+**禁止说**"排除了 front-advanced"——若真实情况是"链比 DB 多"(某笔 register 落链了但 DB 从未记录,即
+真正的"未持久化"那一侧,跟 claim thread-walk 同方向而非本设计假设的反方向),remove-k(在 DB 已知集合的
+子集里搜)**结构性搜不到这种情况**(候选集合根本不包含"DB 未知的第 N+1 笔"这个可能性)。definitive 结论
+只有 L3(block-scan 正推,不依赖 DB 已知集合,能发现 DB 完全不知道的登记)才能给。
+
+## 2.2 身份定性(NWT F1,续卡处置输入,不改本轮设计范围)
+
+**4 盘全部 100% 内部身份**:maker_pk 与全部 8 个唯一 bettor_pk(71 笔下注,同 8 个内部 pk 重复参与)逐一命中
+`relay_nodes`,0 外部;4 盘创建时间集中 2026-07-06~07 同一时段,同一 maker 建全部四盘——**固定小集合内部
+relay 重复参与的测试/彩排批次**,与今晚已定性的 fy1yk(一次性 fresh pk bulk demo)形态不同、族同(内部
+资金,非真实用户暴露)。
+
+**影响续卡优先级**(处置决策输入,非本设计裁定):若 L2 全跑仍空,继续投入 L3(独立重活,28mln 先例
+30万+行扫描量级)前,应先问是否有比 L3 更便宜的路径——同今晚桶B/fy1yk 已立的豁免收口先例("没转账不叫
+refunded",内部测试资金零外部权利主张)可能同样适用于这 4 盘的最终处置,不必然要求 L3 definitive 结论
+才能处置。**triage 本身仍该做**(搞清链上真相是任何处置决策的前提,不因内部资金就跳过诊断),只是"L2
+全空后是否值得砸 L3"这一步的成本/收益判断需要把这个身份事实喂给处置决策方。
 
 ## 3. 本卡范围(诚实边界)
 
@@ -91,8 +131,8 @@ L3 block-scan 正推(28mln/shard9 先例方法论, 只读零钱动): 从 shard �
 
 ## 4. 验收(DoD,分阶段)
 
-1. **本轮**:L0+L1 diagnostic script 定稿入库(`scratch/` 只读脚本,不落 production 代码);w07cw remove-1/2
-   结果记账(0 命中);其余 3 盘至少跑 L1(已做)。
+1. **本轮**:L0+L1 诊断脚本留存 `scratch/`(gitignored,只读,不进库)；关键结果(splice 修正/round-trip
+   自证/四盘双锚状态/w07cw remove-1-2 结果)记入本设计 §1 + ledger,不依赖脚本文件本身留存。
 2. **续卡**(排队,非本轮 BLOCKING):4 盘 L2 跑满(w07cw 到 k=3,sbg5h/0ac0q/yaq0d k=1-2 起);任一②命中→
    退款四方核对 runbook;全部 L2 空 → 排 L3 block-scan(独立卡,量级预估+分工)。
 3. 报数口径:本设计产出前,4 盘继续挂 TRANSIENT 状态,daemon 重试不误标 settle_failed(现状已如此,不变)。
