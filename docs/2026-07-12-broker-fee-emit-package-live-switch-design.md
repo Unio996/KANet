@@ -44,6 +44,19 @@ matched → emitLandedNotification(matched, {onLanded: 写 chain_events broker_f
 即使在单角色场景也提供纵深(万一未来同一笔结算 tx 里混进第二个 output 巧合撞了 broker 地址,这层保护
 生效),③**不引入新的失败模式**——discover-then-trust 场景下断言必过,新旧行为 byte-equal。
 
+**🔴 Bettor 注1(MUST,防 vacuous 口径)**:discover-then-trust 路径的 amount 断言"数学上必过"是
+**vacuous 断言**——比对的是同一个数(`shared-source-verification-is-vacuous` 同族),不是真验证。
+`payload`/log 必须带族标字段区分:`assert_mode: 'true_expectation'`(§2.1,独立期望值真比对)vs
+`'discover_trust'`(§2.2,自比对不算验证)。**报数口径永远禁止说"存量市场金额断言已上"**——防将来审计
+把 vacuous-pass 当真验证读。
+
+**🔴 Bettor 注3(转 NWT 红队核实):分族判据边界矩阵**——判据 `fee_rules IS NOT NULL` × `zk_native` 标志
+的组合:落2 接费范围 = "新建非-zk 市场"(`fee_rules` 写入条件本就带 `zk_native !== true` 检查,见
+`pool.js` create-v07)。**但**若未来 zk 市场也开始带 `fee_rules`(§4 落2 设计 §3 留的远期账,当下未落码),
+§2.1 的 `consolidatedPool` 独立链读口径与 ZK 池语义(含 seed、claim 分次结算)是否吻合需要重新核?
+判据可能该收紧为 `fee_rules IS NOT NULL AND zk_native != true`,而非单看 `fee_rules` 是否非空。
+NWT 红队核实此矩阵(现状是否已天然满足,还是需要显式加这个 AND 条件)。
+
 ## 3. 回归护栏(Bettor 要求,MUST)
 
 **对照测试**:用 `fee-single-source.test.mjs` 的真实历史数据(1dv70,broker fee 6,080,000 sompi 真实 landed
@@ -58,6 +71,11 @@ matched → emitLandedNotification(matched, {onLanded: 写 chain_events broker_f
 emit**(fallback 到旧的直接 `db.prepare(...).run(...)` 写 `chain_events` 路径,记一条 warn log)。理由:
 broker DM 通知是用户体感功能,不该因为一次"结构升级"的代码路径异常就让 broker 收不到钱到账通知——旧路径
 是 fallback 安全网,不是被彻底删除的死代码(至少过渡期保留)。
+
+**🔴 Bettor 注2(MUST,双路径日落条件)**:fallback 安全网若无限期保留 = 双路径长期共存 = drift 温床
+(规则55族——两份逻辑各自维护,迟早出现只改一处的漏配)。**设计现在就钉日落触发器**:连续 N 笔(建议
+20 笔或 7 天,取先到者)live emit **全部走新路径、零次触发 fallback** → 立 follow-up 卡删除旧路径
+(§4 的 `db.prepare` 直写分支)。"过渡期"不允许静默变成永久双份实现。
 
 ## 5. DoD
 
