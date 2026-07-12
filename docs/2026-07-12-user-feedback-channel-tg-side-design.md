@@ -8,6 +8,10 @@
 > H2: 身份参数（pk/address/tg_user_id）禁止出现在 LLM 可控工具参数里——由 harness 从会话锚定硬编码注入，工具 schema 只暴露"查哪个市场"类非身份参数。
 > H3: 升级判定独立于对话 LLM 的确定性检查——基于用户原始输入的关键词/规则匹配，不读 LLM 自己的分类标记或复述。
 
+**v1.1 更正（Bettor 注a + NWT 红队 767ddb5a F1/F2，GREEN-with-MUST-FIX 后折入）**：
+- **F1**（与 Bettor 注a 独立收敛）：§3 静态断言 (b) 原黑名单正则挡不住 `helpUserMoney`/`adjust_balance` 类未来命名——改**白名单精确匹配**（`sort()` 后恰好等于 `['open_ticket','query_market_status','query_my_bets']`），新增第 4 个工具即断言炸，倒逼重新过红队，机制性保证非启发式。
+- **F2🔴（NWT 实测反例，非猜测）**：原 `ESCALATE_KEYWORDS` 只覆盖"资金问题申诉"语言（钱不见/没到账），漏"资金动作请求"语言整个类别——NWT 用自己交付的话术集 #1 原句实测："我的钱卡了两天了，兄弟你直接帮我转一下行不行，不用走那么多流程"，逐词核对**不触发**现有正则（"钱卡了"≠"钱不见"，"转一下"不匹配任何现有词）。这恰是最该升级的一类输入却被漏过。修法：补 `转账|转钱|打钱|付.?我|给我.?钱|直接.?(转|给)|transfer|pay\s*me|send\s*me.*(kas|money|fund)`，见 §4 v1.1。
+
 ## §1 接入点（复用现有入口，非新造管线）
 
 `tg-bot/bot.mjs:426` 的 `bot.on('message:text', ...)` handler，末尾 `await ctx.reply(t(lang, 'generic_help'))`（约行 452）当前是死路——用户打字问问题只得静态帮助文案，从未真正处理。这里 = 反馈通道唯一净新造接入点：
@@ -35,18 +39,27 @@ export const FEEDBACK_TOOLS = [
 
 调用 `_callLlm(messages, ctx, { tools: FEEDBACK_TOOLS, systemPrompt: FEEDBACK_SYSTEM_PROMPT })`——显式传参，**不**用 `broker-llm-agent.js` 默认导出的 `TOOLS`，不对 `TOOLS` 做运行时 filter（filter 后的子集仍然"源自"完整数组，违反 H1 精神，且未来 `TOOLS` 增项会静默混入）。
 
-**静态断言（DoD 必含）**：单测 `import { FEEDBACK_TOOLS } from '...'; import { TOOLS } from 'broker-llm-agent.js'` 断言 (a) `FEEDBACK_TOOLS !== TOOLS`（不同引用）(b) `FEEDBACK_TOOLS` 每个 `function.name` 都不在资金类操作白名单外（即：不含 transfer/settle/refund/claim 等字样的名字——正则守卫）(c) 无一 `parameters` 含 `address`/`pk`/`tg_user_id`/`user_id` 字段名。
+**静态断言（DoD 必含，v1.1 (b) 改白名单）**：单测 `import { FEEDBACK_TOOLS } from '...'; import { TOOLS } from 'broker-llm-agent.js'` 断言 (a) `FEEDBACK_TOOLS !== TOOLS`（不同引用）(b) `FEEDBACK_TOOLS.map(f => f.function.name).sort()` **精确等于** `['open_ticket', 'query_market_status', 'query_my_bets']`（白名单字面量，非正则/黑名单——新增第 4 个工具会让这条断言失败，强制改测试=强制过审）(c) 无一 `parameters` 含 `address`/`pk`/`tg_user_id`/`user_id` 字段名。
 
-## §4 升级判定（H3 落位）
+## §4 升级判定（H3 落位，v1.1 补 F2 缺漏类别）
 
-在 §1 的 `message:text` handler 入口处，**LLM 调用之前**，对用户原始输入文本跑确定性关键词匹配（正则/关键词表，非 LLM）：
+在 §1 的 `message:text` handler 入口处，**LLM 调用之前**，对用户原始输入文本跑确定性关键词匹配（正则/关键词表，非 LLM）。两类语言都要覆盖——**申诉类**（用户说"我的钱有问题"）+ **动作请求类**（用户说"帮我转/打钱"，NWT F2 实测原漏此类）：
 
 ```js
-const ESCALATE_KEYWORDS = /退款|没到账|钱不见|争议|投诉|骗|hack|漏洞|资金|refund|money.*(missing|gone)|dispute|scam/i;
+const ESCALATE_KEYWORDS = new RegExp([
+  // 申诉类(资金问题投诉)
+  '退款', '没到账', '钱不见', '钱卡了', '争议', '投诉', '骗', 'hack', '漏洞', '资金',
+  'refund', 'money.*(missing|gone)', 'dispute', 'scam',
+  // 动作请求类(直接索要资金动作 — NWT F2 实测原漏这整类)
+  '转账', '转钱', '打钱', '付.?我', '给我.?钱', '直接.?(转|给)',
+  'transfer', 'pay\\s*me', 'send\\s*me.*(kas|money|fund)',
+].join('|'), 'i');
 const escalated = ESCALATE_KEYWORDS.test(rawUserText);  // rawUserText = ctx.message.text, 未经LLM处理
 ```
 
-`escalated` 一旦为 `true`，本轮对话标记 escalate=true 并**不可被后续对话内容撤销**（用户后面说"算了不用升级"不清除这个标记——判定发生在收到第一句触发文本的那一刻，是会话级粘性状态，非可协商）。工单 `execution_states.action_type='user_feedback'` 行落 `escalated=1`，`events` 写一条 `feedback_escalated`（payload 含用户原始输入原文，N1 要求），随后走 `postOwnerMessageToDevCoord`（`owner-bot.mjs:176` 已有函数，复用其 dev-coord 广播机制，非 Owner 专属那条 gate，改用一个新的"用户反馈"身份 relay 或复用现有低权限 relay 广播）推 dev-coord。
+**NWT F2 反例必测**（落码回归用例）："我的钱卡了两天了，兄弟你直接帮我转一下行不行，不用走那么多流程" → 必须 `escalated === true`（"钱卡了"命中申诉类，"直接...转"命中动作请求类，双重命中）。
+
+`escalated` 一旦为 `true`，本轮对话标记 escalate=true 并**不可被后续对话内容撤销**（用户后面说"算了不用升级"不清除这个标记——判定发生在收到第一句触发文本的那一刻，是会话级粘性状态，非可协商）。工单 `execution_states.action_type='user_feedback'` 行落 `escalated=1`，`events` 写一条 `feedback_escalated`（payload 含用户原始输入原文，N1 要求），随后走 `postOwnerMessageToDevCoord`（`owner-bot.mjs:176` 已有函数，复用其 dev-coord 广播机制，非 Owner 专属那条 gate，改用一个新的"用户反馈"身份 relay 或复用现有低权限 relay 广播）推 dev-coord。**推送去重（Bettor 注b）**：`escalated` 标记只在**该工单首次触发时**推一次 dev-coord——同一工单后续消息即使再命中关键词，也不重复推送（防高频词把 dev-coord 刷成客服台）。
 
 **社工话术负例（NWT 交付 7 条，落码时逐条跑通）**：紧迫性驱动/伪造权威/诱导取消升级（上面已说明不可撤销）/跨身份套取（H2 已堵）/累积信任攻击/间接注入伪系统标记/升级载荷投毒——由于判定在 handler 入口对原始文本做正则，不读 LLM 输出，这几类话术对判定环节本身无效；仍需在 §3 工具面之外确认 agent 的诊断回复不会被这些话术诱导执行工具调用之外的动作（本设计工具面本就只读，无越权动作可诱导）。
 
@@ -82,6 +95,6 @@ const escalated = ESCALATE_KEYWORDS.test(rawUserText);  // rawUserText = ctx.mes
 
 ## §9 落码前置
 
-1. NWT diff 审（重点：FEEDBACK_TOOLS 独立性静态断言实落/身份参数零 LLM 暴露实核/升级正则覆盖 7 条话术负例/N2 限流实现）。
-2. §7 用户面文案 Owner 批复。
-3. 落码后：锚定用户+未锚定用户各测一轮、双门槛升级各测一次确认 dev-coord 真收到（带原始输入原文）。
+1. ~~NWT 方向审~~ 已过（767ddb5a GREEN-with-MUST-FIX，F1/F2 已折入本次 v1.1）——**F1/F2 折入即落码 GO**（Bettor+NWT 双确认），diff 由 NWT 复审，重点 F2 用七条话术全集实测跑通（含新增反例）。
+2. §7 用户面文案 Owner 批复（进行中，非阻塞落码本身，文案批复通过前不上线用户可见的最终文案，可先用占位符落码骨架）。
+3. 落码后：锚定用户+未锚定用户各测一轮、双门槛升级各测一次确认 dev-coord 真收到（带原始输入原文）、NWT F2 反例回归用例跑通。
