@@ -53,6 +53,17 @@ const deriveBrokerAddress = (pkHex) => `addr:${String(pkHex).toLowerCase().slice
 function insertTx(txid, outputs) {
   sqlite.prepare(`INSERT INTO kaspa_tx_log (tx_id, outputs_json, observed_at) VALUES (?, ?, CURRENT_TIMESTAMP)`).run(txid, JSON.stringify(outputs));
 }
+// 🔴 NWT 红队坐实(2026-07-12, "fixture 必复刻 production 结构"同族教训): seedMarket 默认 protocol_version=
+//   'v0.7' → getMarketBets 走 bshard 分支, 只认 market_shards.shard_market_id 下的 pool_bettor_sides,
+//   裸 market_id=logical_id 的 sides 查不到(R-SHARD-BLIND 同一坑, 这次撞在自己的测试 fixture 而非生产代码)。
+//   本 helper 建一行 market_shards + 用它返回的 shardMarketId 插 sides, 复刻 real create-v07/register-v07
+//   写出来的真实表结构(而非只插逻辑 market_id 图省事)。
+function seedShard(logicalId) {
+  const shardMarketId = `${logicalId}-s0`;
+  sqlite.prepare(`INSERT INTO market_shards (logical_market_id, shard_index, shard_market_id, shard_p2sh, bettor_count, projected_settle_mass, status, created_at) VALUES (?, 0, ?, ?, 1, 0, 'open', ?)`)
+    .run(logicalId, shardMarketId, 'kaspatest:shard-dummy', Math.floor(Date.now() / 1000));
+  return shardMarketId;
+}
 
 const PK_A = '11'.repeat(32);   // §2.2 discover-then-trust(无 fee_rules)
 const PK_B = '22'.repeat(32);   // §2.1 独立断言(matched)
@@ -88,8 +99,9 @@ console.log('[test] ② §2.1 独立断言族(fee_rules matched) — 独立链�
   //   确实只吃 bettor 侧, 不误把 maker 拉进来)。380000000 * 160/10000 = 6080000(同①真实值, 殊途同归)。
   const brokerAddr = deriveBrokerAddress(PK_B);
   seedMarket('mkt-B', { broker_pk: PK_B, settle_txid: TX_B, fee_rules: JSON.stringify(rules), maker_stake_amount: 999000000 });
+  const shardB = seedShard('mkt-B');
   sqlite.prepare(`INSERT INTO pool_bettor_sides (market_id, bettor_pk, direction, stake_amount, side_p2sh, side_lock_tx) VALUES (?, ?, ?, ?, ?, ?)`)
-    .run('mkt-B', 'bettor-b1', 0, 380000000, 'p2sh-dummy', 'sideB'.padEnd(64, '0'));
+    .run(shardB, 'bettor-b1', 0, 380000000, 'p2sh-dummy', 'sideB'.padEnd(64, '0'));
   insertTx(TX_B, [
     { address: 'addr:other-winner-out', amount_sompi: 380000000 - 6080000 },
     { address: brokerAddr, amount_sompi: 6080000 },
@@ -107,8 +119,9 @@ console.log('[test] ③ §2.1 独立断言族(mismatch) — 真实链上金额�
   const brokerAddr = deriveBrokerAddress(PK_C);
   const WRONG_REAL_FEE = 6000000;   // 真实 output 金额(蓄意跟期望值 6080000 不符, 模拟 bps 配置漂移/配置错误场景)
   seedMarket('mkt-C', { broker_pk: PK_C, settle_txid: TX_C, fee_rules: JSON.stringify(rules), maker_stake_amount: 200000000 });
+  const shardC = seedShard('mkt-C');
   sqlite.prepare(`INSERT INTO pool_bettor_sides (market_id, bettor_pk, direction, stake_amount, side_p2sh, side_lock_tx) VALUES (?, ?, ?, ?, ?, ?)`)
-    .run('mkt-C', 'bettor-c1', 0, 380000000, 'p2sh-dummy', 'sideC'.padEnd(64, '0'));
+    .run(shardC, 'bettor-c1', 0, 380000000, 'p2sh-dummy', 'sideC'.padEnd(64, '0'));
   insertTx(TX_C, [{ address: brokerAddr, amount_sompi: WRONG_REAL_FEE }]);
   const logs = [];
   const res = brokerFeeLandedEmitTick(sqlite, deriveBrokerAddress, (m) => logs.push(m));
