@@ -277,9 +277,9 @@
 
       <!-- ─── Hero card (= Editorial 总资产 + sub 4 stat) ─── -->
       <div class="pf-hero p-6">
-        <div class="pf-stat-label mb-2">总资产 · <span x-text="unit === 'kas' ? 'KAS 计价' : 'USD 计价'"></span></div>
+        <div class="pf-stat-label mb-2">总资产 · <span x-text="(unit === 'kas' || !hasPrice) ? 'KAS 计价' : 'USD 计价'"></span></div>
         <div class="pf-display text-5xl text-ink-800 tabular-nums" x-text="grandTotal()"></div>
-        <div class="text-xs text-ink-500 mt-2" x-text="unit === 'kas' ? '≈ $' + (data?.totals?.grandTotalUsd || 0).toFixed(2) + ' USD + ' + (data?.totals?.kas || 0).toFixed(2) + ' 原生 KAS' : '稳定币 + 其他资产 + DeFi + 永续 + KAS 等值'"></div>
+        <div class="text-xs text-ink-500 mt-2" x-text="!hasPrice ? '暂无 KAS 报价源, 按原生 KAS 显示' : (unit === 'kas' ? '≈ $' + (data?.totals?.grandTotalUsd || 0).toFixed(2) + ' USD + ' + (data?.totals?.kas || 0).toFixed(2) + ' 原生 KAS' : '稳定币 + 其他资产 + DeFi + 永续 + KAS 等值')"></div>
       </div>
 
       <!-- ─── 4 sub-stat row (= KAS / Stable / Other / Open) ─── -->
@@ -672,6 +672,8 @@ function portfolioApp() {
       txHash: '',
     },
     get kasPriceUsd() { return this.data?.kasPriceUsd || null; },
+    // testnet KAS 无真实报价源时 kasPriceUsd=0——此时 USD 计价不可能算, 各处应统一降级显示 KAS 原值
+    get hasPrice() { return !!(this.kasPriceUsd && this.kasPriceUsd > 0); },
 
     // Native-token symbol per EVM chain (MATIC for polygon, ETH for L2s, etc.)
     nativeSymbol(chain) {
@@ -694,20 +696,21 @@ function portfolioApp() {
     fmtAgentTotal(agent) {
       const usd = (agent.stableTotalUsd || 0) + (agent.defiTotalUsd || 0) + (agent.perpEquityUsd || 0);
       const nativeKas = agent.kaspa?.balance || 0;
-      if (this.unit === 'kas' && this.kasPriceUsd && this.kasPriceUsd > 0) {
-        const total = nativeKas + (usd / this.kasPriceUsd);
+      if (this.unit === 'kas' || !this.hasPrice) {
+        const usdAsKas = this.hasPrice ? (usd / this.kasPriceUsd) : 0;
+        const total = nativeKas + usdAsKas;
         return total >= 10
           ? Math.round(total).toLocaleString() + ' KAS'
           : total.toFixed(2) + ' KAS';
       }
-      const totalUsd = usd + nativeKas * (this.kasPriceUsd || 0);
+      const totalUsd = usd + nativeKas * this.kasPriceUsd;
       return '$' + totalUsd.toFixed(2);
     },
 
     // Format any USD amount according to current unit selection
     fmt(usd) {
       const n = parseFloat(usd) || 0;
-      if (this.unit === 'kas' && this.kasPriceUsd && this.kasPriceUsd > 0) {
+      if (this.unit === 'kas' && this.hasPrice) {
         const kas = n / this.kasPriceUsd;
         // KAS amounts are usually large integers — no decimals needed unless < 10
         return kas >= 10
@@ -718,15 +721,19 @@ function portfolioApp() {
     },
 
     // Big grand-total string (used by headline card)
+    // 事故修复(2026-07-12): kasPriceUsd 价格源不可用时(=0, 如 testnet KAS 无实际报价)原逻辑落进
+    // else 分支把 nativeKas(已经是 KAS 单位, 换算无关) 乘以 0 价格归零, 导致真实持有几十万 KAS
+    // 却显示"总资产 $0.00"——nativeKas 本身不需要价格就能在 KAS 模式下显示, 只有把 USD 计价的
+    // 子资产(稳定币/DeFi/永续)折算成 KAS 才需要价格, 价格缺失时那部分按 0 贡献而非拖累整体清零。
     grandTotal() {
       const usd = this.data?.totals?.grandTotalUsd || 0;
       const nativeKas = this.data?.totals?.kas || 0;
-      if (this.unit === 'kas' && this.kasPriceUsd && this.kasPriceUsd > 0) {
-        // In KAS mode, grand total = native KAS + (USD equivalent / KAS price)
-        const total = nativeKas + (usd / this.kasPriceUsd);
+      if (this.unit === 'kas' || !this.hasPrice) {
+        const usdAsKas = this.hasPrice ? (usd / this.kasPriceUsd) : 0;
+        const total = nativeKas + usdAsKas;
         return Math.round(total).toLocaleString() + ' KAS';
       }
-      return '$' + (usd + nativeKas * (this.kasPriceUsd || 0)).toFixed(2);
+      return '$' + (usd + nativeKas * this.kasPriceUsd).toFixed(2);
     },
 
     async init() {
