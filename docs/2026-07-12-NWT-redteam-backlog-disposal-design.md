@@ -2,7 +2,8 @@
 
 > **Status**: CURRENT
 > **对象**: docs/2026-07-12-backlog-null-deadline-and-fifth-layer-disposal-design.md(J2)
-> **verdict**: **RED——SQL 安全闸不完整(活库实测,非假设),漏排除多个真实存在的终态/进行中状态;数字矛盾(13 vs 14)必须先厘清才能 dry-run。MUST-FIX 后重审**
+> **verdict**: **首审 RED → J2 折入 MUST-FIX(commit e4e7084c)→ NWT 重审 GREEN,可进 dry-run**(重审结果见文末【重审记录】)
+> **原始首审 verdict(存档,保留记录)**: RED——SQL 安全闸不完整(活库实测,非假设),漏排除多个真实存在的终态/进行中状态;数字矛盾(13 vs 14)必须先厘清才能 dry-run。
 
 ---
 
@@ -46,6 +47,20 @@ AND protocol_status IN ('verifying', 'pending_bettors')
 
 ## 结论
 
-**verdict = RED**,非 GREEN-with-notes——H1(安全闸真实缺口,活库验证)是这个"targeted UPDATE + 安全闸"设计的核心防线,缺口意味着安全闸目前**防不住**它自己声称要防的那类失误(id 清单误差)。H2(数字矛盾)必须在 dry-run 前解决,否则 dry-run 的 SELECT 核对本身就可能核对错误数量。**两点都不难改**(guard 换白名单/文本数字改一致),但落码/dry-run 前必须先修,不能带着这两个问题进桶B 同款"dry-run→Bettor 批→写"两人闸——两人闸的前提是被验证的东西本身逻辑自洽,不能指望人工 review 一遍 SELECT 输出就能补上"guard 结构性不完整"这种系统性缺口。
+**首审 verdict = RED**,非 GREEN-with-notes——H1(安全闸真实缺口,活库验证)是这个"targeted UPDATE + 安全闸"设计的核心防线,缺口意味着安全闸目前**防不住**它自己声称要防的那类失误(id 清单误差)。H2(数字矛盾)必须在 dry-run 前解决,否则 dry-run 的 SELECT 核对本身就可能核对错误数量。
 
-— NWT 2026-07-12
+---
+
+## 【重审记录,2026-07-12】J2 折入 MUST-FIX(commit e4e7084c)→ NWT 重审 GREEN
+
+**H1(白名单)✅**:§2.1 改 `AND protocol_status IN ('verifying', 'pending_bettors')`——精确匹配 §1 两族目标市场应处的状态,不再依赖穷举"不该碰"的黑名单,结构性防护到位。
+
+**H2(数字)✅**:SQL 注释 + DoD 改为 13(9 NULL-deadline + 4 第五层,fy1yk 明确不在其中,见 §4);§2.4 maker spine 提到的"14"已澄清区分(那是含 fy1yk 自己 spine 的另一个计数,与 §2.1 的 13 不再混淆)。
+
+**lint 规则独立验证**(Bettor 要求的模式级钉死之一,J2 写的 `R-STATUS-GUARD-BLACKLIST`):我用**隔离测试**(bad-only 文件 / good-only 文件分别测,避免同文件内白名单误抑制黑名单告警的组合测试假阴性)独立复现——纯黑名单(`NOT IN`)文件 → WARN 触发 ✅;纯白名单(`IN`)文件 → 不触发 ✅。规则真实工作,非摆设。
+
+**一处提醒(非阻塞)**:Bettor 同时要求"顺手加 ANTI-PATTERNS 一条"记录今晚三次撞同一模式(反馈工具 allow-list / trading.js type 排除表 / 本处置闸),J2 的折修只交付了 lint 规则,`ANTI-PATTERNS.md` 我 grep 未找到对应新条目——按"随手写不强求"口径不阻塞本 verdict,但建议不要漏(成本低,已经写了 lint 顺手补一条更完整)。
+
+**重审 verdict = GREEN,可进 dry-run**。设计逻辑自洽,两处 MUST-FIX 均已代码级验证(非仅读文本),lint 纵深防线独立确认工作。按桶B 同款纪律走"dry-run(13 行 SELECT 精确核对)→ Bettor 批 → 写"两人闸。
+
+— NWT 2026-07-12(首审 RED)+ 2026-07-12(重审 GREEN)
