@@ -118,6 +118,30 @@ function checkR_STATUS_GUARD_BLACKLIST(fp, content) {
   }
 }
 
+// ── R-EXPLORER-URL-BYPASS [ERROR, 硬阻塞]: explorer 死域名字面量禁散装 ──
+// (explorer 死链全库收敛设计 §3, docs/2026-07-12-explorer-url-dead-link-consolidation-design.md, NWT diff审
+// d7c28353 提醒: helper 契约改了但零调用点, 各消费点各自 inline null-safe 重写——不是这条规则堵复发, 收敛
+// 目标"防第 N+1 个新散装点"没物理达成, 本规则补上)。explorer-tn12.kaspa.org / explorer.kaspa.org 域名字面量
+// 出现在 kasia-console/src/lib/explorer-url.mjs 以外的任何 .js/.mjs/.eta 文件 = ERROR(该 helper 的 mainnet
+// 分支合法使用 explorer.kaspa.org, 别处一律不该硬编码——testnet 已知无公网 explorer, mainnet 该走 helper 单源)。
+const _EXPLORER_URL_HOME = path.join(ROOT, 'kasia-console/src/lib/explorer-url.mjs');
+function checkR_EXPLORER_URL_BYPASS(fp, content) {
+  if (!/\.(mjs|js|cjs|eta)$/.test(fp)) return;
+  if (path.resolve(fp) === _EXPLORER_URL_HOME) return;   // 唯一合法落点
+  if (/旁支重复目录|kanet-tn12[\\/]kanet-tn12/.test(fp)) return;   // 旧重复子目录已知问题, 另案处理不在本规则范围(设计 §4)
+  const lines = content.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    if (!/explorer-tn12\.kaspa\.org|explorer\.kaspa\.org/.test(lines[i])) continue;
+    if (/^\s*(\/\/|\*|#)/.test(lines[i]) || /^\s*<!--/.test(lines[i])) continue;   // 纯注释提及(如本次改动的记账注释)不算散装
+    violate('R-EXPLORER-URL-BYPASS',
+      `explorer 域名字面量硬编码在 explorer-url.mjs 以外的文件——单源契约形同虚设(建了没人被强制用, 死链
+全库收敛设计 §3 收敛目标)。改用 buildExplorerUrl/buildExplorerAddressUrl + formatTxReference(kasia-console/
+src/lib/explorer-url.mjs), 或(tg-bot/.eta 等不能 import 该 ESM helper 的场景)按同款 null-safe 降级模式手写,
+不内联域名字符串。`,
+      fp, i + 1);
+  }
+}
+
 // ── R-FEE-SPLIT-PKG-DRIFT [ERROR, 硬阻塞]: packages/fee-split/fee-split.mjs 必与源同步 ──
 // (B线落3, NWT G1 修法②, 2026-07-12): packages/fee-split/fee-split.mjs 是
 // kasia-console/src/lib/fee-split.mjs 的构建产物(packages/fee-split/scripts/sync.mjs 生成, 逐字节复制
@@ -1148,6 +1172,7 @@ for (const fp of targets) {
   checkR_PHANTOM_FIELD(fp, content);     // R-PHANTOM-FIELD [WARN] (2026-07-05, qzdh7nar): v0.6-only phase2_* 字段无守卫读取 — 防第4例(#48/#50/maker-P&L 同根)
   checkR_FEERULES_CANON_BYPASS(fp, content);  // R-FEERULES-CANON-BYPASS [WARN] (B线落1 2026-07-12): feeRules canonicalize/hash 单源封旁路(spec v1.2-2)
   checkR_STATUS_GUARD_BLACKLIST(fp, content);  // R-STATUS-GUARD-BLACKLIST [WARN] (处置设计红队 2026-07-12): protocol_status UPDATE 安全闸黑名单启发式→建议白名单
+  checkR_EXPLORER_URL_BYPASS(fp, content);     // R-EXPLORER-URL-BYPASS [ERROR] (死链收敛设计 §3 2026-07-12): explorer 域名字面量禁散装, 单源 explorer-url.mjs 外一律硬阻塞
 }
 checkR10();
 checkR_NULLIFIER_I64();
