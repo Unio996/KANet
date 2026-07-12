@@ -49,6 +49,20 @@ const faucetCooldown = new Map();
 // KANet-UI 2026-06-23 — /send 2 步确认的 pending 暂存 (ephemeral; 重启清空 = 安全, 不会误发).
 const pendingSends = new Map(); // tg_user → { to, amount, ts }
 
+// 用户反馈通道卡A N2 限流 (2026-07-12, tg-side-design.md §5): 单用户滑动窗口 5次/分钟, 内存 Map
+// (同 PM 会话状态管理模式, 不新建表). 超限 → 静态文案, 不调 LLM.
+const feedbackRateLimit = new Map(); // tg_user → number[] (最近请求时间戳 ms)
+const FEEDBACK_RATE_LIMIT_MAX = 5;
+const FEEDBACK_RATE_LIMIT_WINDOW_MS = 60_000;
+function feedbackRateLimited(tgUser) {
+  const now = Date.now();
+  const hits = (feedbackRateLimit.get(tgUser) || []).filter((ts) => now - ts < FEEDBACK_RATE_LIMIT_WINDOW_MS);
+  if (hits.length >= FEEDBACK_RATE_LIMIT_MAX) { feedbackRateLimit.set(tgUser, hits); return true; }
+  hits.push(now);
+  feedbackRateLimit.set(tgUser, hits);
+  return false;
+}
+
 // Lang helper: stored pref (set by /lang or auto-detected on first interaction) → fall back to auto-detect.
 function getLang(ctx) { return PM.getUserLang(String(ctx.from.id)); }
 // Auto-detect + persist on first use (non-blocking, uses debounce-persist).
@@ -415,6 +429,29 @@ async function hotHandler(ctx) {
 }
 bot.command('hot', hotHandler);
 
+// 用户反馈通道卡A (2026-07-12, tg-side-design.md §1): /support = 显式引导入口(展示说明+示例问法),
+// 不自己处理自由文本——用户后续直接打字走 message:text 兜底(§1 point 2, 同一接入点承接).
+bot.command('support', (ctx) => { initLang(ctx); return ctx.reply(t(getLang(ctx), 'support_intro')); });
+
+// 用户反馈通道卡A 核心分发: 身份锚定(H2, §2)+限流(N2, §5)+桥接 console 卡B → 展示回复.
+// 升级(escalated)时 console 已写好工单+events 行(§4 硬门), 这里只负责展示 Owner 已批的定稿文案
+// (§7)——不采信 LLM 自己对升级场景的即兴措辞, 用户看到的"已开工单"承诺必须是这句写死的话.
+async function feedbackAgentHandler(ctx, tgUser, lang, txt) {
+  if (feedbackRateLimited(tgUser)) {
+    return ctx.reply(t(lang, 'support_rate_limited'));
+  }
+  const linkedAddr = PM.getLinkedAddr(tgUser) || linked.get(tgUser)?.address || null;
+  const r = await api.feedbackReply(tgUser, linkedAddr, null, txt);
+  if (!r.ok || !r.json?.ok) {
+    return ctx.reply(t(lang, 'support_fail'));
+  }
+  const j = r.json;
+  if (j.escalated && j.ticketId) {
+    return ctx.reply(t(lang, 'support_escalated', { ticket_id: j.ticketId.slice(0, 8) }));
+  }
+  return ctx.reply(j.reply || t(lang, 'support_fail'));
+}
+
 // #18 nav buttons (2026-07-05, Owner /start 精简批): /start 首页 4 按钮里 3 个复用命令同款逻辑
 // (领水/我的下注/去押注), 只是入口从打字变成点按钮——按钮回调必须先 answerCallbackQuery(否则
 // Telegram 客户端一直转圈), 再走跟命令一样的 handler(单源, 不复制业务逻辑)。
@@ -449,7 +486,9 @@ bot.on('message:text', async (ctx) => {
   if (tl === '确认' || tl === 'yes' || tl === 'y' || /^[0-9]+$/.test(tl)) {
     return ctx.reply(t(lang, 'stale_session'));
   }
-  await ctx.reply(t(lang, 'generic_help'));
+  // 用户反馈通道卡A (2026-07-12, tg-side-design.md §1 point 2): generic_help 死路改接反馈 agent.
+  // 上面两道守卫(PM.inBetFlow / 确认-yes-数字 stale session)保持在前不动.
+  await feedbackAgentHandler(ctx, tgUser, lang, txt);
 });
 
 // S1 reactive notification poller — only polls addresses a user explicitly /link'd (opt-in).

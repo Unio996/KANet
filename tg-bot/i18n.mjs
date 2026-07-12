@@ -133,6 +133,12 @@ export const LANGS = {
     stale_session: '⌛ This looks like a reply to a previous bet flow, but the local session no longer exists (bot restarted or session expired).\nThat bet was not continued, no payment was monitored. Please /bet again.',
     generic_help: 'Use /help for commands · /bet to place bets · /swap to exchange · /link to link address',
 
+    // 用户反馈通道卡A (2026-07-12, Owner 文案批复照发)
+    support_intro: 'Got a question? Just type it, e.g. "why hasn\'t my bet settled yet".\nI can look up your bet history, market status, and open a ticket to follow up.\nFor fund-related issues or anything needing human judgment, it\'ll be handed to the team.',
+    support_escalated: 'This needs the team to handle it — a ticket has been opened (#{ticket_id}). The team will follow up, please be patient.',
+    support_rate_limited: 'Too many requests, please try again in a moment.',
+    support_fail: 'Sorry, something went wrong on our side. Please try again later.',
+
     // Misc market errors
     market_not_found: 'Market not found. /bet to choose another.',
     market_bad_spec: 'This market has incomplete settlement rules, betting is disabled (you can\'t know the outcome basis). /bet to select another.',
@@ -499,6 +505,12 @@ export const LANGS = {
     // Stale session
     stale_session: '⌛ 这句像是回前次押注流程的话, 但本地会话已不存在(bot 重启或会话过期)。\n之前那笔押注没续上, 也没启动付款监控。请重新 /bet 走一遍。',
     generic_help: '用 /help 看命令 · /bet 押注 · /swap 兑换 · /link 绑定地址',
+
+    // 用户反馈通道卡A (2026-07-12, Owner 文案批复照发, docs/2026-07-12-user-feedback-channel-tg-side-design.md §7)
+    support_intro: '有问题想问？直接打字说就行，比如"我的押注怎么还没结算"。\n我能帮你查押注记录、市场状态，开工单跟进。\n涉及资金变动或需要人工判断的情况，会转给团队处理。',
+    support_escalated: '这个问题需要团队处理，已经帮你开了工单（#{ticket_id}），团队会跟进，请耐心等待。',
+    support_rate_limited: '请求太频繁，请稍后再试。',
+    support_fail: '抱歉，暂时处理不了，请稍后再试。',
 
     // Misc market errors
     market_not_found: '市场未找到。/bet 重选。',

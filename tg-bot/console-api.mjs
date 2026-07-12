@@ -124,6 +124,15 @@ export function myPositions(linkedAddr) {
   return req('GET', `/api/pool/my-positions?linked_addr=${encodeURIComponent(linkedAddr)}`);
 }
 
+// 用户反馈通道卡A (2026-07-12, tg-side-design.md): bridge to console 卡B POST /api/feedback/reply.
+// bettorPk 若有(缓存值)一并传, 但 console 端(H2)会用 linkedAddr 独立重导出比对, 不信任这个值本身
+// ——传它只是给 console 一个快速一致性核对入口, mismatch 时 console fail-closed 拒答。
+export function feedbackReply(tgUserId, linkedAddr, bettorPk, rawText) {
+  return req('POST', '/api/feedback/reply', {
+    tg_user_id: tgUserId, linked_addr: linkedAddr || null, bettor_pk: bettorPk || null, raw_text: rawText,
+  });
+}
+
 // ── TG custodial wallet (Owner 钦定 2026-06-23, 零门槛玩): Console 持 key, bot 0-key 只调 ──
 // create 返助记词【仅一次】(display-once, bot 显给用户存后即弃, 不留); get 永不回助记词。
 export function tgWalletCreate(tgUserId) {
