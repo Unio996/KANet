@@ -48,19 +48,33 @@ export const FEEDBACK_TOOLS = [
 
 `execution_details.escalated=true` → 触发投递。**注b(Bettor 折入)**:每工单一次(status 从非-escalated 首次转 escalated 时投递一次,同一工单后续消息不重复推,即使再命中关键词)。
 
-## §4 开放问题(需 Bettor/NWT 裁定,非本设计自行拍板)
+## §4 升级投递机制(Bettor 已裁 #hfwel0,方案B + 两硬条件)
 
-**投递机制选哪个,取决于 §1 发现的防火墙约束**:
-1. **方案A(直接广播)**:走 `POST /api/chat/send` 到 `dev-coord-testnet`,需要一个 relay 身份满足 `OPUS_RELAY_NAMES` 或 `trust_level='owner'`——**这是权限授予动作**,不是我能单方决定的(同 D-010 身份纪律精神,新增能发协调频道的身份需要走审批,不能因为"要接反馈通道"就顺手给一个 agent 开协调频道权限)。
-2. **方案B(旁路,不占协调频道名额)**:落一条 `events`(`event_type='feedback_escalated'`)+ 复用 `chain_events` 或类似机制,由**已有权限的某个身份**(如 owner-bot 的既有 poller,`tg-bot/owner-bot.mjs` 已经在轮询 dev-coord 双向桥)改为**也轮询这条 events**,推送时用它自己已授权的身份代发。**不新增身份权限面**,零新造(只加一个轮询源)。
-3. **方案C**:新建一个只读展示位(coord-status 频道?D-010 刚建的那条单写签名频道,§0.1"物理只读工具面非prompt约束"精神类推——升级通知本质是只读广播,不需要"发言权",D-010 的签名摘要机制本就是为这类场景设计的)。
+**裁定:方案B**(events 行 + owner-bot 既有 poller 加一个轮询源,已授权身份代发)。方案A 否(给 feedback
+agent 开协调频道发言权 = 权限面扩张,且用户反馈流进协调频道语义污染);方案C 否(`coord-status` = D-010
+Bettor 单写签名摘要频道,语义不容混用)。
 
-**我倾向方案B**(零新增身份权限面,复用已有 poller,风险最小)但这是本卡 MUST-FIX 前必须裁定的一条,不动代码。
+落地形状:反馈工单升级时写一条 `events`(`event_type='feedback_escalated'`,payload 含工单 id/用户原始
+输入原文)。`tg-bot/owner-bot.mjs` 既有轮询循环(Direction B: dev-coord → Owner Telegram 那条)**加一个
+并行轮询源**(查这类 `events`,非改造既有 dev-coord 轮询逻辑),命中后用它已授权的身份代发到 `dev-coord-testnet`。
+
+**硬条件①(Bettor,今天身份事件直接教训)**:代发消息**必须硬前缀标注权威归属**——
+`[用户反馈工单#{id}·AI生成·非Owner/代发身份发言]` + 附用户原始输入原文(N1 要求)。owner-bot 的 relay
+在 dev-coord 有权威色彩,不标注 = 下一次"转达 Owner"混淆的温床(同今天 qzdh7nar 身份事件教训直接应用)。
+
+**硬条件②(Bettor)**:owner-bot 新轮询源 = 纯只读 `events` 查询 + 失败静默重试,物理不得影响其 Owner 桥
+主职(不能因为加了这条反馈轮询就把 Owner 通道搞挂——新轮询源独立 try/catch,异常不传播到既有轮询循环)。
 
 ## §5 N2 限流(console 侧,与卡A 的 tg-bot 侧滑动窗口互补,非重复)
 
 - **全局并发**:`/api/feedback/reply` 端点内存计数器,同时处理中的 `_callLlm` 反馈调用上限(建议 5,与 broker-llm-agent 现有 adapter 队列的经验值同量级)——超限直接 429,tg-bot 侧提示"请稍后重试",不排队等 LLM(避免用户体感"卡住")。
 - 卡A 的每用户滑动窗口(5次/分钟)是 tg-bot 入口闸,本闸是 console 端全局闸,两层互补不重复。
+
+## §5.5 文档修正(Bettor ③,查清并修正)
+
+`docs/DATABASE.md:384` 记 `execution_states（167 条）`,与本设计 §1 实查 `SELECT COUNT(*)=0` 对不上——
+**已现查确认 0 是当前真值**(非我查漏,167 是过去某次快照,DB 后来被重置/清库未同步更新文档)。已修正
+`DATABASE.md` 该行标注为 stale + 加"改表前必须现查不能信文档数字"提示,防将来同坑复发。
 
 ## §6 留痕、诚实边界
 
