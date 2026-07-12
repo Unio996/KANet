@@ -22,3 +22,24 @@ export function buildFeeRulesForCreateRequest({ brokerPk, introducerPkRaw }) {
   }
   return buildPredictionV1InterimRules({ brokerPk, introducerPk: provided ? introducerPkRaw : null });
 }
+
+// 🔴 B线深化件2 冲突守卫(Bettor 裁, uw8rd 事故坐实#hkpp9r.2·"第三方同款陷阱"): zk_native 缺省=true
+// (pool.js L1081-1091, Owner"ZK走到底")与 fee_rules 路径(仅非 zk_native 生效)天然互斥——caller 传了
+// introducer_pk(fee_rules 路径专属意图信号, 无其它消费者)却让 zk_native 解析为 true, 此前【静默吞掉
+// introducer_pk】建出 fee_rules=NULL 的盘(J2 广播 uw8rd 100KAS 真锁后才发现, DoD 全废)。
+//
+/**
+ * checkIntroducerZkNativeConflict — create-v07 建单前冲突检测(纯函数, 零 HTTP/chain, 可离线单测——
+ * Bettor 裁"守卫负例去 test-framework 离线跑, 不许再打 live 钱路端点")。
+ * @param {{introducerPkGiven:boolean, zkNative:boolean}} o
+ * @returns {{conflict:boolean, reason?:string}}
+ */
+export function checkIntroducerZkNativeConflict({ introducerPkGiven, zkNative }) {
+  if (introducerPkGiven && zkNative === true) {
+    return {
+      conflict: true,
+      reason: `冲突: introducer_pk 已传但 resolution_rule_spec.zk_native=true(fee_rules 路径需 zk_native:false, 否则 introducer_pk 会被静默丢弃建出 fee_rules=NULL 的盘)——显式传 zk_native:false 走 fee_rules 路径, 或去掉 introducer_pk 走 ZK-native 路径`,
+    };
+  }
+  return { conflict: false };
+}

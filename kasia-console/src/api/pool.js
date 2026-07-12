@@ -1125,11 +1125,24 @@ export async function registerPoolRoutes(fastify) {
     // byte-equal 护栏, 不进 packages/fee-split——本函数是 KANet 端点请求体字段名适配层非通用第三方原语)。
     // introducer_pk 非 relay 解析(测试/第三方角色不要求在本 console 注册 relay 身份——同 fee_rules
     // roles[].address 语义, raw x-only pk hex, 非 kaspa address)。
+    // 🔴 B线深化件2 冲突守卫(Bettor 裁, uw8rd 事故坐实#hkpp9r.2·"第三方同款陷阱"): zk_native 缺省=true
+    // (L1081-1091, Owner"ZK走到底")与 fee_rules 路径(仅非 zk_native 生效)天然互斥——caller 传了
+    // introducer_pk(fee_rules 路径专属意图信号, 无其它消费者)却让 zk_native 解析为 true, 此前【静默吞掉
+    // introducer_pk】建出 fee_rules=NULL 的盘(J2 广播 uw8rd 100KAS 真锁后才发现, DoD 全废)。改
+    // fail-loud 拒建——挡在下方 transferAndConfirm 真花钱之前, 不留"建出错的盘才发现"这条延迟雷
+    // (同 F2 hardening 同一纪律: 建单时炸, 不 settle 时才炸)。判据单源在
+    // checkIntroducerZkNativeConflict(lib/create-v07-fee-rules.mjs, 可离线单测——Bettor 裁"守卫负例去
+    // test-framework 离线跑, 不许再打 live 钱路端点")。
+    const introducerPkGiven = !(b.introducer_pk === undefined || b.introducer_pk === null || b.introducer_pk === '');
     let feeRulesJson = null;
     {
       let _rrs = {}; try { _rrs = JSON.parse(b.resolution_rule_spec || '{}') || {}; } catch {}
+      const { checkIntroducerZkNativeConflict, buildFeeRulesForCreateRequest } = await import('../lib/create-v07-fee-rules.mjs');
+      const conflictCheck = checkIntroducerZkNativeConflict({ introducerPkGiven, zkNative: _rrs.zk_native === true });
+      if (conflictCheck.conflict) {
+        return reply.code(400).send({ ok: false, error: conflictCheck.reason });
+      }
       if (_rrs.zk_native !== true && brokerPk) {
-        const { buildFeeRulesForCreateRequest } = await import('../lib/create-v07-fee-rules.mjs');
         try {
           feeRulesJson = JSON.stringify(buildFeeRulesForCreateRequest({ brokerPk, introducerPkRaw: b.introducer_pk }));
         } catch (e) {

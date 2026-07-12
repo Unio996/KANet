@@ -1,8 +1,11 @@
 // create-v07-fee-rules.test.mjs — B线深化件2 endpoint-wiring 回归(J2 2026-07-12, Bettor 裁"(a)修端点
 // 不降级+缺省路径byte-equal回归" #hkgnxl.2)。覆盖: 缺省 introducer_pk byte-equal 于此前单 brokerPk 调用 /
 // 合法 introducer_pk 正确产出双角色 / 坏格式 fail-loud(F2 建单时闸, 非 settle 时才炸)。
+//
+// ④ checkIntroducerZkNativeConflict 冲突守卫(uw8rd 事故坐实 #hkpp9r.2 追加, Bettor 裁"守卫负例去
+// test-framework 离线跑, 不许再打 live 钱路端点"——本节即该离线护栏, 覆盖 uw8rd 真实撞见的场景)。
 // Run: cd kasia-console && node src/lib/create-v07-fee-rules.test.mjs
-import { buildFeeRulesForCreateRequest } from './create-v07-fee-rules.mjs';
+import { buildFeeRulesForCreateRequest, checkIntroducerZkNativeConflict } from './create-v07-fee-rules.mjs';
 import { buildPredictionV1InterimRules } from './fee-split.mjs';
 
 let fails = 0;
@@ -38,7 +41,21 @@ console.log('[test] ③ 坏格式 introducer_pk → fail-loud(F2 建单时闸, �
   ok(throws(() => buildFeeRulesForCreateRequest({ brokerPk: BROKER, introducerPkRaw: 'aa'.repeat(33) }), /64-hex/), '长度超出 throw(66 char)');
 }
 
+console.log('[test] ④ checkIntroducerZkNativeConflict — uw8rd 事故场景离线回归(零真钱, live 端点不再打负例):');
+{
+  ok(checkIntroducerZkNativeConflict({ introducerPkGiven: true, zkNative: true }).conflict === true,
+    'introducer_pk 已传 + zk_native=true → conflict=true(uw8rd 真实撞见的组合, 此前静默吞掉 introducer_pk 建出 fee_rules=NULL 盘)');
+  ok(/zk_native:false/.test(checkIntroducerZkNativeConflict({ introducerPkGiven: true, zkNative: true }).reason),
+    'reason 消息含可执行修复建议(显式传 zk_native:false)');
+  ok(checkIntroducerZkNativeConflict({ introducerPkGiven: true, zkNative: false }).conflict === false,
+    'introducer_pk 已传 + zk_native=false(件2 正确姿势) → conflict=false, 放行 fee_rules 路径');
+  ok(checkIntroducerZkNativeConflict({ introducerPkGiven: false, zkNative: true }).conflict === false,
+    '无 introducer_pk + zk_native=true(纯 ZK-native 建单, 无冲突意图) → conflict=false, 不误伤');
+  ok(checkIntroducerZkNativeConflict({ introducerPkGiven: false, zkNative: false }).conflict === false,
+    '无 introducer_pk + zk_native=false(纯 legacy broker-only fee_rules 建单) → conflict=false, 不误伤');
+}
+
 console.log(fails === 0
-  ? '\n✅✅ ALL PASS — create-v07 introducer_pk 接通: 缺省byte-equal/合法双角色/坏格式fail-loud 全绿'
+  ? '\n✅✅ ALL PASS — create-v07 introducer_pk 接通: 缺省byte-equal/合法双角色/坏格式fail-loud/冲突守卫四态 全绿'
   : `\n❌ ${fails} assertions failed`);
 process.exit(fails === 0 ? 0 : 1);
