@@ -3,6 +3,7 @@
 # explorer 死链全库收敛设计
 
 **作者**: KANet-UI（2026-07-12，Bettor 派工 #hhxb4x.2，owner=UI/tg-bot 域，J2 辅 console 侧）
+**v1.1 更正（NWT 红队 31eade42 H1，GREEN-with-MUST-FIX 已折入）**：全库 grep `buildExplorerUrl`/`buildExplorerAddressUrl` 确认零现有调用方（风险全在本设计即将新建的调用点）。发现 `exchange-machine.js:1097`/`broker-v2/router.js:105,108`/`broker-state-authority.js:42,47`（5 处，3 文件）跟 `chains.js` 同款结构缺口——**从未 network-aware**，非三元类型，若照原文本"改成 import 调用替代内联"字面执行会产出 `"查看: https://explorer.kaspa.org/txs/null"` 类崩溃输出。已在 §2 拆成组 A/组 B 明确不同迁移形态，见下。
 **背景**: `explorer-tn12.kaspa.org` DNS 不存在（Owner 实测 ENOTFOUND），TN12 是 KANet 自建私有测试网，从未有人架设公网 explorer。`/mybets`/`/earnings` 死链已修（v1.2），NWT 主动扩查发现全库还有 **15 处代码命中**（1 个共享 helper 的 2 个函数 4 行 + 13 处独立消费点/硬编码），涉及 services/API/UI 模板/tg-bot 三层。本设计 = 单源根治 + lint 堵复发，不逐个补丁。
 
 ## §0 现状诊断（helper 本身也坏）
@@ -33,7 +34,10 @@ export function formatTxReference(txid, url) {
 
 ## §2 消费点迁移（按层分类，各层修法不同）
 
-**服务端 JS（`api/*.js`/`services/*.js`，7 处独立硬编码）**：改成 `import { buildExplorerUrl, formatTxReference } from '../lib/explorer-url.mjs'`，调用替代内联三元/箭头函数。`bettor.js:2047`/`pool.js:3516`/`exchange-machine.js:1097`/`broker-v2/router.js:105,108`/`broker-state-authority.js:42,47` 全部走这条。
+**服务端 JS（`api/*.js`/`services/*.js`，7 处独立硬编码，v1.1 按 NWT H1 拆两组）**：改成 `import { buildExplorerUrl, formatTxReference } from '../lib/explorer-url.mjs'`。**强制形态**：任何消费点必须用 `formatTxReference(txid, buildExplorerUrl(txid, networkId))` 包整行降级，**禁止**把 `buildExplorerUrl()` 的返回值直接拼进字符串模板（testnet 返回 `null` 时裸拼会产出 `"查看: null"` 或 `"查看: https://explorer.kaspa.org/txs/null"` 这类比死链更糟的输出）。
+
+- **组 A（原三元类型，已 network-aware 但域名写死）**：`bettor.js:2047`/`pool.js:3516`——原逻辑本身就在判断 mainnet/testnet，改法直接替换整个三元表达式为 `formatTxReference(...)`。
+- **组 B（NWT H1 实证：从未 network-aware，非三元，直接字符串模板拼死 mainnet 域名——跟 `chains.js` 同款结构缺口，不是"死链"而是"指错网络"）**：`exchange-machine.js:1097`/`broker-v2/router.js:105,108`/`broker-state-authority.js:42,47`（共 5 处，3 文件）。这组不是简单替换一个三元，是**从零加上 `networkId` 参数传递链路**（消息模板生成函数目前根本不知道当前网络是什么，需要从调用方传入或从 `process.env.KASPA_NETWORK`/`CONFIG.network` 读取），再套 `formatTxReference()` 整行降级。
 
 **`chains.js:31-32` 单独处理（结构性缺口，非同款硬编码）**：这两个箭头函数**从未有 testnet 分支**——不论跑在 mainnet 还是 testnet 都返回 `explorer.kaspa.org` 真实链接，语义错误但不是"死链"（链接可达但指向错误网络的浏览器，用户点开会查不到自己的 tx）。修法：给这个 config 对象加 `networkId` 感知，或干脆改成调用 `buildExplorerUrl`/`buildExplorerAddressUrl`（它们已经是 network-aware 的），消灭这个独立实现。
 
