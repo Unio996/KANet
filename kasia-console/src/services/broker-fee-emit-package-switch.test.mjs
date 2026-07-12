@@ -70,8 +70,11 @@ const PK_B = '22'.repeat(32);   // §2.1 独立断言(matched)
 const PK_C = '33'.repeat(32);   // §2.1 独立断言(mismatch → fallback)
 const PK_D = '44'.repeat(32);   // 坏 fee_rules JSON → 异常降级
 const PK_E = '55'.repeat(32);   // zk_native 判据边界: fee_rules 非空但 zk_native=true → 仍走 discovered
+const PK_F = '66'.repeat(32);   // threaded-claim fallback(fw9kk 实盘撞见): close_txid 无 broker output, 靠 settle_evidence.winner_details 找到独立 claim tx
+const PK_G = '77'.repeat(32);   // threaded-claim fallback 负例: winner_details 里真的没有 broker(非架构问题)
 // v83 trigger 强制 broker_* chain_events.txid = 64-hex(禁 placeholder) — 测试 txid 必真 hex 字符集。
 const TX_A = 'aa'.repeat(32), TX_B = 'bb'.repeat(32), TX_C = 'cc'.repeat(32), TX_D = 'dd'.repeat(32), TX_E = 'ee'.repeat(32);
+const TX_F_CLOSE = 'f0'.repeat(32), TX_F_CLAIM = 'f1'.repeat(32), TX_G_CLOSE = 'f2'.repeat(32);
 
 console.log('[test] ① §2.2 discover-then-trust 族(无 fee_rules) — 1dv70 同款真实历史金额回放:');
 {
@@ -170,7 +173,61 @@ console.log('[test] ⑥ recordSunsetTracking(Bettor 注2 MUST, 双路径日落�
   ok(s.consecutiveSuccess === 20 && s.sunsetReady === true, `连续20笔零fallback → sunsetReady=${s.sunsetReady}(日落触发器命中, 该提 follow-up 卡删 legacyDirectEmit)`);
 }
 
+console.log('[test] ⑦ threaded-claim fallback(fw9kk 实盘撞见, Owner 直令修复) — close_txid 无 broker output, 靠 settle_evidence.winner_details 找到独立 claim tx:');
+{
+  const rules = buildPredictionV1InterimRules({ brokerPk: PK_F });
+  const brokerAddr = deriveBrokerAddress(PK_F);
+  const CLAIM_AMOUNT = 160000000;   // 同 fw9kk 真实值(160,000,000 sompi)
+  const settleEvidence = {
+    settled_by: 'bshard-settle-daemon', close_txid: TX_F_CLOSE, complete: true,
+    winner_details: [
+      { pk: 'aa'.repeat(32), amount: '9820000000', txId: 'e1'.repeat(32) },   // 别的 winner leaf, 混进去验证不误配
+      // lint-allow-chain-amount-precision: sompi 整数(fixture 测试值非 KAS 小数, 非直发 wallet API 字段)
+      { pk: PK_F, amount: String(CLAIM_AMOUNT), txId: TX_F_CLAIM },            // broker 自己的 claim tx(独立于 close_txid)
+    ],
+  };
+  seedMarket('mkt-F', {
+    broker_pk: PK_F, settle_txid: TX_F_CLOSE, fee_rules: JSON.stringify(rules), maker_stake_amount: 500000000,
+    metadata: JSON.stringify({ settle_evidence: settleEvidence }),
+  });
+  const shardF = seedShard('mkt-F');
+  sqlite.prepare(`INSERT INTO pool_bettor_sides (market_id, bettor_pk, direction, stake_amount, side_p2sh, side_lock_tx) VALUES (?, ?, ?, ?, ?, ?)`)
+    .run(shardF, 'bettor-f1', 0, 10000000000, 'p2sh-dummy', 'sideF'.padEnd(64, '0'));
+  // close_txid(TX_F_CLOSE) 镜像真实 bshard 架构: closed-PS output + maker 找零, 【零 broker output】。
+  insertTx(TX_F_CLOSE, [
+    { address: 'addr:closed-ps-dummy', amount_sompi: 9843960000 },
+    { address: 'addr:maker-change-dummy', amount_sompi: 28000000 },
+  ]);
+  // broker 的独立 claim tx(threaded-claim, 与 close_txid 分开广播)。
+  insertTx(TX_F_CLAIM, [{ address: brokerAddr, amount_sompi: CLAIM_AMOUNT }]);
+  const logs = [];
+  const res = brokerFeeLandedEmitTick(sqlite, deriveBrokerAddress, (m) => logs.push(m));
+  ok(res.emitted === 1 && res.packageFallback === 0, `emitted=${res.emitted} fallback=${res.packageFallback}(threaded-claim fallback 找到真 output, 独立断言 matched, 零 package fallback)`);
+  ok(logs.some(l => l.includes('threaded-claim 架构')), '大声记录走了 threaded-claim fallback 分支(非静默)');
+  const ev = sqlite.prepare(`SELECT payload FROM chain_events WHERE event_type='broker_fee_landed' AND to_address=?`).get(brokerAddr);
+  const p = JSON.parse(ev.payload);
+  ok(p.fee_sompi === CLAIM_AMOUNT && p.settle_txid === TX_F_CLAIM && p.verification === 'independent',
+    `fee_sompi=${p.fee_sompi} settle_txid=${p.settle_txid.slice(0, 8)}(独立 claim tx, 非 close_txid) verification=${p.verification}`);
+}
+
+console.log('[test] ⑧ threaded-claim fallback 负例: winner_details 里没有 broker 条目(真的没收到钱, 非架构问题) → 仍走既有 no_broker_output 跳过路径, 不误报:');
+{
+  const rules = buildPredictionV1InterimRules({ brokerPk: PK_G });
+  const brokerAddr = deriveBrokerAddress(PK_G);
+  const settleEvidence = { settled_by: 'bshard-settle-daemon', close_txid: TX_G_CLOSE, complete: true, winner_details: [{ pk: 'bb'.repeat(32), amount: '9999999999', txId: 'e2'.repeat(32) }] };
+  seedMarket('mkt-G', {
+    broker_pk: PK_G, settle_txid: TX_G_CLOSE, fee_rules: JSON.stringify(rules), maker_stake_amount: 500000000,
+    metadata: JSON.stringify({ settle_evidence: settleEvidence }),
+  });
+  const shardG = seedShard('mkt-G');
+  sqlite.prepare(`INSERT INTO pool_bettor_sides (market_id, bettor_pk, direction, stake_amount, side_p2sh, side_lock_tx) VALUES (?, ?, ?, ?, ?, ?)`)
+    .run(shardG, 'bettor-g1', 0, 10000000000, 'p2sh-dummy', 'sideG'.padEnd(64, '0'));
+  insertTx(TX_G_CLOSE, [{ address: 'addr:closed-ps-dummy', amount_sompi: 9971960000 }, { address: 'addr:maker-change-dummy', amount_sompi: 28000000 }]);
+  const res = brokerFeeLandedEmitTick(sqlite, deriveBrokerAddress, () => {});
+  ok(res.noBrokerOutput === 1 && res.emitted === 0, `noBrokerOutput=${res.noBrokerOutput} emitted=${res.emitted}(winner_details 里真的没有 broker → 老实标记跳过, 不幻造通知)`);
+}
+
 console.log(fails === 0
-  ? '\n✅✅ ALL PASS — broker-fee-emit package live 切换: §2.1/§2.2 分族矩阵/byte-equal/mismatch降级/坏JSON降级/zk_native边界/日落追踪 全绿'
+  ? '\n✅✅ ALL PASS — broker-fee-emit package live 切换: §2.1/§2.2 分族矩阵/byte-equal/mismatch降级/坏JSON降级/zk_native边界/日落追踪/threaded-claim fallback+负例 全绿'
   : `\n❌ ${fails} assertions failed`);
 process.exit(fails === 0 ? 0 : 1);

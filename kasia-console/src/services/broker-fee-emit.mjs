@@ -156,7 +156,28 @@ export function brokerFeeLandedEmitTick(db, deriveBrokerAddress, log = () => {})
     }
 
     // 按【地址】匹配 broker output (fee 常是次级 output·非 to_address 列 — reference-verify-covenant-multiout-distribution)。
-    const idx = outs.findIndex(o => o && o.address === brokerAddress);
+    let idx = outs.findIndex(o => o && o.address === brokerAddress);
+    // 🔴 threaded-claim fallback(Owner 直令修 notify 层, fw9kk 实盘撞见 #hnppoc.2 后续): 上面的
+    //   outs 来自 m.settle_txid(= close_txid)——V1/legacy 老架构里 close tx 自带全部 payout output,
+    //   但 bshard "threaded claim" 架构下 close_txid 只做 covenant closed 0→1(零 payout output),
+    //   真正打款在【每个 payout leaf 各自独立的 claim tx】里(settleMarketLive 逐笔广播)。close tx
+    //   里找不到 broker output ≠ broker 没收到钱, 只是这次 outs 来源覆盖不到那笔 tx。降级前先查
+    //   metadata.settle_evidence.winner_details(settleMarketLive 写入的逐 leaf pk→{amount,txId}明细,
+    //   已链验 received===true 才计入)——命中则改用那笔真实 claim tx 的 output 作为 outs/landedTxid,
+    //   非瞎猜金额(仍是链读值, 只是从另一份已验证的链读结果里取, 同 NO-TX-NO-STATE 纪律)。
+    if (idx < 0 && m.settle_txid) {
+      let meta2; try { meta2 = JSON.parse(m.metadata || '{}'); } catch { meta2 = {}; }
+      const winnerDetails = meta2.settle_evidence?.winner_details;
+      const brokerClaim = Array.isArray(winnerDetails)
+        ? winnerDetails.find(w => w && String(w.pk).toLowerCase() === String(m.broker_pk).toLowerCase())
+        : null;
+      if (brokerClaim && brokerClaim.txId && Number.isFinite(Number(brokerClaim.amount)) && Number(brokerClaim.amount) > 0) {
+        outs = [{ address: brokerAddress, amount_sompi: Number(brokerClaim.amount) }];
+        landedTxid = brokerClaim.txId;
+        idx = 0;
+        log(`[broker-fee-emit] market=${m.id.slice(0, 12)} close_txid 无 broker output, 从 settle_evidence.winner_details 找到独立 claim tx ${String(brokerClaim.txId).slice(0, 12)}(threaded-claim 架构, 非 V1 单 tx)`);
+      }
+    }
     if (idx < 0) {
       // broker fee 没单独 output (=0 / below-floor / 无 broker) — 标记已 emit 防每 tick 重扫·不 emit 幻象。
       markEmitted(db, m.id, { skipped: 'no_broker_output' });
