@@ -34,11 +34,20 @@ export function matchLandedFeeOutputs(outputs, feeLeaves) {
   // outputs: [{address, amount_sompi}] (调用方已从链读到的真实 output 列表, 本函数不碰链不碰 DB)
   // feeLeaves: fee-split.mjs feeSplit() 产出的 feeLeaves(含 pk/amount/type)——调用方需自行 pk→address 派生
   //   (地址派生是链特定操作, 本函数只做"给定 address 候选集 + 给定 output 集 → 逐一匹配"的纯逻辑, 零链依赖)
-  // 返回: [{leaf, output, matched:true}] ∪ [{leaf, matched:false}](未落地的角色, 调用方决定重试或跳过)
+  // 🔴 Bettor 注3(MUST, 纯函数正确性承重, 单测必覆盖):
+  //   (i) amount 断言: output 金额 == leaf.amount 才算 matched; 地址对但金额不对 → 显式三态 'mismatch'
+  //       (非静默 matched, 同 thread-walk H2 断言家族——"找到地址"不等于"这就是那笔钱")。
+  //   (ii) 每个 output 至多配一个 leaf(防同地址多角色场景一个 output 被两个 leaf 认领); 同地址多个 leaf
+  //       (罕见但需支持)靠 amount + outputIndex 顺序消费区分, 不允许重复配对同一 output。
+  // 返回: [{leaf, output, state:'matched'}] ∪ [{leaf, output, state:'mismatch'}](地址对金额不对)
+  //     ∪ [{leaf, state:'unmatched'}](未落地的角色, 调用方决定重试或跳过)
 }
 export function emitLandedNotification(matched, { onLanded }) {
-  // matched: matchLandedFeeOutputs 的产出。onLanded(payload) 由调用方注入(DM/webhook/事件流——本函数不关心
-  //   投递方式, 只负责"每个真正落地的角色恰好触发一次"的去重语义(调用方传 idempotencyKey 由自己存)。
+  // matched: matchLandedFeeOutputs 的产出(只处理 state==='matched' 的条目)。onLanded(payload) 由调用方
+  //   注入(DM/webhook/事件流——本函数不关心投递方式)。
+  // 🔴 Bettor 注2(契约口径, 禁 overclaim): 本函数本身只能保证"给定调用方 seen 集的 at-most-once"——
+  //   真正的"恰好一次"依赖调用方持久化 idempotencyKey(同 broker-fee-emit.mjs 现状: metadata 标记落 DB)。
+  //   README/JSDoc 按实际契约写 at-most-once,不写 exactly-once(诚实口径铁律同样适用于 API 文档)。
   // payload 形状: {role, address, amountSompi, txid, outputIndex, landedAt} —— 通用, 不含 marketId 等 KANet 概念
   //   (KANet 特定字段由调用方在 onLanded 回调里自行拼装追加, 组件产出的是"分润角色到账"这一层通用事实)
 }
@@ -71,6 +80,11 @@ packages/fee-split/
 `prepublish`/手动跑,产物文件顶部加"自动生成,勿手改,源=kasia-console/src/lib/fee-split.mjs"警告注释)。
 **本设计选②**(第三方拿到的包必须自包含,不能依赖 kasia-console 目录结构存在)。
 
+**🔴 Bettor 注1(MUST,机制不约定)**:"sync 脚本+顶部警告注释"缺牙——注释挡不住手改。必须加 **drift 哨兵**:
+lint-kanet 新规则(或独立单测)byte-compare `packages/fee-split/fee-split.mjs` vs
+`kasia-console/src/lib/fee-split.mjs`,不一致 → fail(commit 卡点)。规矩靠自觉守不住,必须上机制——同
+D-008 反 vacuous 铁律同族("单源"必须是可验证的事实,不是约定)。
+
 ### 2.3 十分钟 demo(`examples/prediction-demo.mjs`)
 
 ```js
@@ -82,7 +96,7 @@ console.log(JSON.stringify(result, null, 2));
 ```
 配 README 三步走(`npm install`/`node examples/prediction-demo.mjs`/读输出),这是 spec §3.2"十分钟跑通"
 的字面验收标准——**验收方式 = 真找一个没碰过这个仓库的人计时跑一遍**(比自证靠谱,落码后找 Bettor/NWT
-任一位冷启动跑一次计时)。
+任一位冷启动跑一次计时)。**Bettor 注4:冷启动计时验收我(Bettor)认领**(read-only demo 跑,不越结构锁)。
 
 ### 2.4 README 内容大纲(spec §0/§4 已有素材,搬运+精简,非重写)
 
