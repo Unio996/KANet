@@ -72,9 +72,13 @@ const PK_D = '44'.repeat(32);   // 坏 fee_rules JSON → 异常降级
 const PK_E = '55'.repeat(32);   // zk_native 判据边界: fee_rules 非空但 zk_native=true → 仍走 discovered
 const PK_F = '66'.repeat(32);   // threaded-claim fallback(fw9kk 实盘撞见): close_txid 无 broker output, 靠 settle_evidence.winner_details 找到独立 claim tx
 const PK_G = '77'.repeat(32);   // threaded-claim fallback 负例: winner_details 里真的没有 broker(非架构问题)
+const PK_H = '88'.repeat(32);   // threaded-claim fallback 负例: claim tx 未 index → pendingIndex 重试
+const PK_I = '99'.repeat(32);   // threaded-claim fallback 负例: claim tx 已 index 但链上不吻合 metadata 声称值(不信任 metadata, CRITICAL 降级)
 // v83 trigger 强制 broker_* chain_events.txid = 64-hex(禁 placeholder) — 测试 txid 必真 hex 字符集。
 const TX_A = 'aa'.repeat(32), TX_B = 'bb'.repeat(32), TX_C = 'cc'.repeat(32), TX_D = 'dd'.repeat(32), TX_E = 'ee'.repeat(32);
 const TX_F_CLOSE = 'f0'.repeat(32), TX_F_CLAIM = 'f1'.repeat(32), TX_G_CLOSE = 'f2'.repeat(32);
+const TX_H_CLOSE = 'f3'.repeat(32), TX_H_CLAIM_UNINDEXED = 'f4'.repeat(32);
+const TX_I_CLOSE = 'f5'.repeat(32), TX_I_CLAIM = 'f6'.repeat(32);
 
 console.log('[test] ① §2.2 discover-then-trust 族(无 fee_rules) — 1dv70 同款真实历史金额回放:');
 {
@@ -227,7 +231,44 @@ console.log('[test] ⑧ threaded-claim fallback 负例: winner_details 里没有
   ok(res.noBrokerOutput === 1 && res.emitted === 0, `noBrokerOutput=${res.noBrokerOutput} emitted=${res.emitted}(winner_details 里真的没有 broker → 老实标记跳过, 不幻造通知)`);
 }
 
+console.log('[test] ⑨ threaded-claim fallback 负例: claim tx 未 index → pendingIndex 重试(非 emit 非幻造):');
+{
+  const rules = buildPredictionV1InterimRules({ brokerPk: PK_H });
+  const settleEvidence = { settled_by: 'bshard-settle-daemon', close_txid: TX_H_CLOSE, complete: true, winner_details: [{ pk: PK_H, amount: '160000000', txId: TX_H_CLAIM_UNINDEXED }] };
+  seedMarket('mkt-H', {
+    broker_pk: PK_H, settle_txid: TX_H_CLOSE, fee_rules: JSON.stringify(rules), maker_stake_amount: 500000000,
+    metadata: JSON.stringify({ settle_evidence: settleEvidence }),
+  });
+  const shardH = seedShard('mkt-H');
+  sqlite.prepare(`INSERT INTO pool_bettor_sides (market_id, bettor_pk, direction, stake_amount, side_p2sh, side_lock_tx) VALUES (?, ?, ?, ?, ?, ?)`)
+    .run(shardH, 'bettor-h1', 0, 10000000000, 'p2sh-dummy', 'sideH'.padEnd(64, '0'));
+  insertTx(TX_H_CLOSE, [{ address: 'addr:closed-ps-dummy', amount_sompi: 9971960000 }, { address: 'addr:maker-change-dummy', amount_sompi: 28000000 }]);
+  // TX_H_CLAIM_UNINDEXED 故意不 insertTx(模拟"claim 已广播但还没被 relay index" — 下 tick 该重试, 不该假阴性标记跳过)。
+  const res = brokerFeeLandedEmitTick(sqlite, deriveBrokerAddress, () => {});
+  ok(res.pendingIndex === 1 && res.emitted === 0 && res.noBrokerOutput === 0, `pendingIndex=${res.pendingIndex} emitted=${res.emitted} noBrokerOutput=${res.noBrokerOutput}(claim tx 未 index → 等下 tick, 不误标记跳过不误 emit)`);
+}
+
+console.log('[test] ⑩ threaded-claim fallback 负例: claim tx 已 index 但链上不吻合 metadata 声称值 → 不信任 metadata, CRITICAL 降级(链锚验证强于任何持久化字段):');
+{
+  const rules = buildPredictionV1InterimRules({ brokerPk: PK_I });
+  const settleEvidence = { settled_by: 'bshard-settle-daemon', close_txid: TX_I_CLOSE, complete: true, winner_details: [{ pk: PK_I, amount: '160000000', txId: TX_I_CLAIM }] };
+  seedMarket('mkt-I', {
+    broker_pk: PK_I, settle_txid: TX_I_CLOSE, fee_rules: JSON.stringify(rules), maker_stake_amount: 500000000,
+    metadata: JSON.stringify({ settle_evidence: settleEvidence }),
+  });
+  const shardI = seedShard('mkt-I');
+  sqlite.prepare(`INSERT INTO pool_bettor_sides (market_id, bettor_pk, direction, stake_amount, side_p2sh, side_lock_tx) VALUES (?, ?, ?, ?, ?, ?)`)
+    .run(shardI, 'bettor-i1', 0, 10000000000, 'p2sh-dummy', 'sideI'.padEnd(64, '0'));
+  insertTx(TX_I_CLOSE, [{ address: 'addr:closed-ps-dummy', amount_sompi: 9971960000 }, { address: 'addr:maker-change-dummy', amount_sompi: 28000000 }]);
+  // claim tx 确实 index 了, 但里面的 output 金额跟 metadata 声称的 160000000 不符(模拟 metadata 被污染/写错的场景)。
+  insertTx(TX_I_CLAIM, [{ address: deriveBrokerAddress(PK_I), amount_sompi: 999999 }]);
+  const logs = [];
+  const res = brokerFeeLandedEmitTick(sqlite, deriveBrokerAddress, (m) => logs.push(m));
+  ok(res.noBrokerOutput === 1 && res.emitted === 0, `noBrokerOutput=${res.noBrokerOutput} emitted=${res.emitted}(metadata 声称值与链上不符 → 不信任 metadata, 不 emit 幻象金额)`);
+  ok(logs.some(l => l.includes('CRITICAL') && l.includes('不信 metadata')), '大声记录 metadata 与链上不吻合(非静默降级)');
+}
+
 console.log(fails === 0
-  ? '\n✅✅ ALL PASS — broker-fee-emit package live 切换: §2.1/§2.2 分族矩阵/byte-equal/mismatch降级/坏JSON降级/zk_native边界/日落追踪/threaded-claim fallback+负例 全绿'
+  ? '\n✅✅ ALL PASS — broker-fee-emit package live 切换: §2.1/§2.2 分族矩阵/byte-equal/mismatch降级/坏JSON降级/zk_native边界/日落追踪/threaded-claim fallback+3类负例(无broker/未index/链上不吻合) 全绿'
   : `\n❌ ${fails} assertions failed`);
 process.exit(fails === 0 ? 0 : 1);

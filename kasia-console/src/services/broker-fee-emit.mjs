@@ -172,10 +172,26 @@ export function brokerFeeLandedEmitTick(db, deriveBrokerAddress, log = () => {})
         ? winnerDetails.find(w => w && String(w.pk).toLowerCase() === String(m.broker_pk).toLowerCase())
         : null;
       if (brokerClaim && brokerClaim.txId && Number.isFinite(Number(brokerClaim.amount)) && Number(brokerClaim.amount) > 0) {
-        outs = [{ address: brokerAddress, amount_sompi: Number(brokerClaim.amount) }];
-        landedTxid = brokerClaim.txId;
-        idx = 0;
-        log(`[broker-fee-emit] market=${m.id.slice(0, 12)} close_txid 无 broker output, 从 settle_evidence.winner_details 找到独立 claim tx ${String(brokerClaim.txId).slice(0, 12)}(threaded-claim 架构, 非 V1 单 tx)`);
+        // 🔴 加固(Bettor 批, NWT 原'received字段'建议被真实数据形状证伪 #hnppoc.2 后续——winner_details
+        //   条目形状={pk,amount,txId}, 没有 received 字段, received 只用于【构造前】filter 不进条目本身,
+        //   照字面查会让条件永假、fallback 永死): 不直接信 metadata 报的 amount, 对 claim txid 独立走
+        //   getIndexedTxOutputs 现读链上真实 output——跟 V1 直查 settle_txid 同款验证动作, 只是验证对象
+        //   换成这笔独立 claim tx。链锚验证严格强于任何 DB 字段, metadata 只提供"该查哪笔 tx"的路由信息。
+        const claimOuts = getIndexedTxOutputs(brokerClaim.txId, db);
+        if (!claimOuts) {
+          pendingIndex++;
+          log(`[broker-fee-emit] market=${m.id.slice(0, 12)} claim tx ${String(brokerClaim.txId).slice(0, 12)} 未 index, 下 tick 重试`);
+          continue;
+        }
+        const claimIdx = claimOuts.findIndex(o => o && o.address === brokerAddress);
+        if (claimIdx >= 0 && String(claimOuts[claimIdx].amount_sompi) === String(brokerClaim.amount)) {
+          outs = claimOuts;
+          landedTxid = brokerClaim.txId;
+          idx = claimIdx;
+          log(`[broker-fee-emit] market=${m.id.slice(0, 12)} close_txid 无 broker output, 从 claim tx ${String(brokerClaim.txId).slice(0, 12)} 链上独立核对到真实 output(threaded-claim 架构, 非 V1 单 tx)`);
+        } else {
+          log(`[broker-fee-emit] market=${m.id.slice(0, 12)} 🔴 CRITICAL claim tx ${String(brokerClaim.txId).slice(0, 12)} 链上核对不吻合 metadata 声称值(claimIdx=${claimIdx}, 声称amount=${brokerClaim.amount}) — 不信 metadata, 降级走既有 no_broker_output 路`);
+        }
       }
     }
     if (idx < 0) {
