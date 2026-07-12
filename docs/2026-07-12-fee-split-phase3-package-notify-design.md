@@ -80,10 +80,15 @@ packages/fee-split/
 `prepublish`/手动跑,产物文件顶部加"自动生成,勿手改,源=kasia-console/src/lib/fee-split.mjs"警告注释)。
 **本设计选②**(第三方拿到的包必须自包含,不能依赖 kasia-console 目录结构存在)。
 
-**🔴 Bettor 注1(MUST,机制不约定)**:"sync 脚本+顶部警告注释"缺牙——注释挡不住手改。必须加 **drift 哨兵**:
-lint-kanet 新规则(或独立单测)byte-compare `packages/fee-split/fee-split.mjs` vs
-`kasia-console/src/lib/fee-split.mjs`,不一致 → fail(commit 卡点)。规矩靠自觉守不住,必须上机制——同
-D-008 反 vacuous 铁律同族("单源"必须是可验证的事实,不是约定)。
+**🔴 Bettor 注1 + NWT G1(MUST,机制不约定)**:"sync 脚本+顶部警告注释"缺牙——注释挡不住手改,"手动跑"
+本身就是 drift 面(同规则55 手工配对家族;NWT 点出的风险更具体:落1 F1 修复过一次 `lib/fee-split.mjs`
+[`7dfbe9ea`],若 sync 非机制强制,`packages/` 快照完全可能停在 F1 修复前的旧版本被分发给第三方——比不做
+这个包更糟,带着"官方组件"信任标签的已知漏洞版本)。**落码时选一(不留手动)**:
+- lint-kanet.mjs 加规则:diff 涉及 `kasia-console/src/lib/fee-split.mjs` 但同 commit 未同步更新
+  `packages/fee-split/fee-split.mjs` → WARN(抄 R-FEERULES-CANON-BYPASS 模式,已有先例);
+- 或 sync 产物顶部嵌入源文件内容 hash,`node scripts/verify-fee-split-sync.mjs` 校验一致,纳入
+  pre-commit(既有 lint-kanet pre-commit 钩子模式)。
+落码时二选一定案,机制不给忘记的机会。
 
 ### 2.3 十分钟 demo(`examples/prediction-demo.mjs`)
 
@@ -106,6 +111,13 @@ console.log(JSON.stringify(result, null, 2));
 4. trustless 前提(spec §3"规则必须建单时链锚"——README 诚实注明:package 本身不做链锚,那是
    **消费方**(如 kasia-console 的 `computeMarketCommitV2`)的职责,组件只保证"给定同一份规则,任何地方
    算出来的分配 byte-identical")
+5. **🔴 landed 前提(NWT G2,MUST,防第三方误用)**:`matchLandedFeeOutputs(outputs, ...)` 的 `outputs`
+   参数**必须是调用方已确认终审的输出**(建议深度 ≥N 或走 confirmed UTXO set,禁 mempool-accepted 或
+   单次 RPC 查询直喂)——本函数不做终审判定,信任调用方喂入的数据(garbage-in-garbage-out,package 零链
+   依赖的必然边界)。**不写清楚会喂出假 landed 通知**(通知用户"收到钱了"但链上可能还没终审,reorg 可撤销)
+   ——这是 KANet 团队用真实事故换来的认知(kaspa_tx_log 命中≠canonical/landed 浅确认族教训),spec §3.2
+   目标受众"不懂链的第三方开发者"恰恰最容易踩这个坑,必须显式写在 README 这条 + `notify.mjs` JSDoc 同款
+   警示,不能靠"函数名叫 matchLanded 应该看得懂"含糊过去。
 
 ## 3. 为什么这么做(对抗自问)
 
