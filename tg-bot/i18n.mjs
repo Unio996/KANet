@@ -199,8 +199,6 @@ export const LANGS = {
     wallet_send_done_title: '✅ Transfer submitted on-chain:',
     wallet_send_done_amount: '· Amount: {kas} KAS → {to}',
     wallet_send_done_tx: '· TX: {txid}',
-    wallet_send_done_explorer: '· Explorer: https://explorer-tn12.kaspa.org/txs/{txid}',
-
     // /wallet inline error strings
     wallet_fail: 'Wallet operation failed: {error}',
     wallet_view_fallback: 'Your wallet: {addr}',
@@ -568,8 +566,6 @@ export const LANGS = {
     wallet_send_done_title: '✅ 转账已上链:',
     wallet_send_done_amount: '· 金额: {kas} KAS → {to}',
     wallet_send_done_tx: '· TX: {txid}',
-    wallet_send_done_explorer: '· 浏览器: https://explorer-tn12.kaspa.org/txs/{txid}',
-
     // /wallet inline error strings
     wallet_fail: '钱包操作失败: {error}',
     wallet_view_fallback: '你的钱包: {addr}',

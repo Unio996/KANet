@@ -98,9 +98,8 @@
       <div class="px-6 py-4 bg-warm-50 border-t border-warm-200 space-y-2 text-xs">
         <div class="flex items-center gap-2">
           <span class="text-ink-500 w-24">本金锁单 TX</span>
-          <a class="font-mono accent-gold hover:underline" target="_blank"
-             :href="'https://explorer-tn12.kaspa.org/txs/' + result.spine_lock_tx"
-             x-text="result.spine_lock_tx?.slice(0,16) + '...' + result.spine_lock_tx?.slice(-8)"></a>
+          <span class="font-mono text-ink-500"
+             x-text="result.spine_lock_tx?.slice(0,16) + '...' + result.spine_lock_tx?.slice(-8)"></span>
         </div>
         <!-- 高级 detail 折叠默认: market id 完整 + 本金锁地址 -->
         <button type="button" @click="showAdvancedShipDetail = !showAdvancedShipDetail"

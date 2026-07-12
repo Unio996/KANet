@@ -501,7 +501,6 @@ export function walletSendDone(txId, amountKas, to, lang = 'en') {
     t(lang, 'wallet_send_done_title'),
     t(lang, 'wallet_send_done_amount', { kas: amountKas, to }),
     t(lang, 'wallet_send_done_tx', { txid: txId }),
-    t(lang, 'wallet_send_done_explorer', { txid: txId }),
   ].join('\n');
 }
 

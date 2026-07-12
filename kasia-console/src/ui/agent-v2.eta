@@ -96,8 +96,8 @@
       <div>
         <div class="font-medium" x-text="faucet.error ? '领币失败' : '✓ 领币成功'"></div>
         <div class="text-xs mt-1" x-text="faucet.error || ('已发 ' + (faucet.result?.amount || '5 KAS') + ' 到你的 agent')"></div>
-        <a x-show="!faucet.error && faucet.result?.txid" :href="'https://explorer-tn12.kaspa.org/txs/' + faucet.result.txid" target="_blank"
-           class="text-[10px] font-mono underline mt-1 inline-block" x-text="faucet.result?.txid?.slice(0,16) + '...'"></a>
+        <span x-show="!faucet.error && faucet.result?.txid"
+           class="text-[10px] font-mono mt-1 inline-block" x-text="'TX: ' + faucet.result?.txid?.slice(0,16) + '...'"></span>
       </div>
       <button @click="faucet.result = null; faucet.error = ''" class="text-xs">✕</button>
     </div>

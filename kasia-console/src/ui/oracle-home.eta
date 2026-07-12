@@ -165,8 +165,7 @@
               <td class="py-2 px-3 text-ink-500 text-[11px]" x-text="committeeLabel(m)"></td>
               <td class="py-2 px-3 text-right tabular-nums text-ink-600" x-text="fmtKas((m.oracle_bond_amount || 0) / 1e8) + ' KAS'"></td>
               <td class="py-2 px-3">
-                <a x-show="m.settle_txid" :href="`https://explorer-tn12.kaspa.org/txs/${m.settle_txid}`" target="_blank"
-                   class="font-mono text-[10px] text-brand-500 hover:underline" x-text="(m.settle_txid || '').slice(0, 10) + '...'"></a>
+                <span x-show="m.settle_txid" class="font-mono text-[10px] text-ink-500" x-text="'TX: ' + (m.settle_txid || '').slice(0, 10) + '...'"></span>
                 <span x-show="!m.settle_txid" class="text-ink-300 text-[10px]">未结算</span>
               </td>
             </tr>
@@ -289,8 +288,7 @@
                   <!-- 成: 退出请求已广播 (record-level 真撤出; 押金取回 = 后续版本) -->
                   <div x-show="unlock.result" class="mt-2 text-[11px] bg-emerald-50 text-emerald-700 rounded px-2 py-1">
                     ✓ 退出请求已广播, 各节点同步后将不再抽你给市场投票.
-                    <a x-show="unlock.result?.txId" :href="'https://explorer-tn12.kaspa.org/txs/' + unlock.result?.txId"
-                       target="_blank" class="font-mono underline ml-1" x-text="unlock.result?.txId?.slice(0,16) + '...'"></a>
+                    <span x-show="unlock.result?.txId" class="font-mono ml-1" x-text="'TX: ' + unlock.result?.txId?.slice(0,16) + '...'"></span>
                     <div class="text-ink-400 mt-0.5">押金取回将在后续版本开放 (当前押金未链锁).</div>
                   </div>
                 </div>

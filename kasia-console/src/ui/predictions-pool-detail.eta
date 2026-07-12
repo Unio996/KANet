@@ -89,7 +89,8 @@
               <div class="text-ink-700 font-medium" x-text="eventLabel(ev.event_type, ev.payload)"></div>
               <div class="text-[10px] text-ink-400" x-text="formatEventTime(ev.observed_at)"></div>
             </div>
-            <a :href="explorerTxUrl(ev.txid)" target="_blank" class="text-brand-500 hover:text-brand-700 text-[11px] flex-shrink-0" :title="ev.txid">🔗 TX</a>
+            <a x-show="explorerTxUrl(ev.txid)" :href="explorerTxUrl(ev.txid)" target="_blank" class="text-brand-500 hover:text-brand-700 text-[11px] flex-shrink-0" :title="ev.txid">🔗 TX</a>
+            <span x-show="!explorerTxUrl(ev.txid) && ev.txid" class="font-mono text-[10px] text-ink-400 flex-shrink-0" :title="ev.txid" x-text="'TX: ' + (ev.txid || '').slice(0,10) + '…'"></span>
           </div>
         </template>
       </div>
@@ -221,8 +222,10 @@
           <div x-show="ext.registered" class="bg-emerald-50 rounded p-3 text-xs">
             <div class="font-medium text-emerald-700">✓ 押注已上链确认 — <span x-text="ext.prep?.exact_stake_kas"></span> KAS 押 <span x-text="ext.direction === 0 ? 'YES' : 'NO'"></span></div>
             <div class="mt-1 text-ink-500">锁仓 TX:</div>
-            <a x-show="ext.registered?.side_lock_tx" :href="explorerTxUrl(ext.registered.side_lock_tx)" target="_blank"
+            <a x-show="explorerTxUrl(ext.registered?.side_lock_tx)" :href="explorerTxUrl(ext.registered?.side_lock_tx)" target="_blank"
                class="font-mono text-[10px] text-brand-500 hover:underline break-all" x-text="ext.registered?.side_lock_tx"></a>
+            <span x-show="ext.registered?.side_lock_tx && !explorerTxUrl(ext.registered?.side_lock_tx)"
+               class="font-mono text-[10px] text-ink-500 break-all" x-text="ext.registered?.side_lock_tx"></span>
             <button @click="extReset()" class="mt-2 text-[11px] text-ink-500 underline">再押一笔</button>
           </div>
         </div>
@@ -274,8 +277,10 @@
         <div x-show="bet.txResult" class="bg-emerald-50 rounded p-3 text-xs">
           <div class="font-medium text-emerald-700">✓ 已锁 <span x-text="bet.stakeKas"></span> KAS 押 <span x-text="bet.direction === 0 ? 'YES' : 'NO'"></span></div>
           <div class="mt-1 text-ink-500">side_lock TX:</div>
-          <a x-show="bet.txResult?.side_lock_tx" :href="explorerTxUrl(bet.txResult.side_lock_tx)" target="_blank"
+          <a x-show="explorerTxUrl(bet.txResult?.side_lock_tx)" :href="explorerTxUrl(bet.txResult?.side_lock_tx)" target="_blank"
              class="font-mono text-[10px] text-brand-500 hover:underline break-all" x-text="bet.txResult?.side_lock_tx"></a>
+          <span x-show="bet.txResult?.side_lock_tx && !explorerTxUrl(bet.txResult?.side_lock_tx)"
+             class="font-mono text-[10px] text-ink-500 break-all" x-text="bet.txResult?.side_lock_tx"></span>
         </div>
 
         <!-- 失败 -->
@@ -356,10 +361,11 @@
       </div>
       <!-- payout TX explorer link -->
       <div x-show="market?.settle_txid" class="mt-3">
-        <a :href="explorerTxUrl(market?.settle_txid)" target="_blank"
+        <a x-show="explorerTxUrl(market?.settle_txid)" :href="explorerTxUrl(market?.settle_txid)" target="_blank"
            class="block text-center bg-brand-500 hover:bg-brand-600 text-white rounded-lg py-2 text-xs font-medium">
           🔗 结算 TX (Kaspa explorer)
         </a>
+        <div x-show="!explorerTxUrl(market?.settle_txid)" class="text-center text-xs text-ink-500 font-medium">结算 TX</div>
         <div class="text-[10px] text-ink-400 font-mono break-all mt-1 text-center" x-text="market?.settle_txid"></div>
       </div>
     </div>
@@ -473,11 +479,14 @@
       <!-- settle TX outputs hint -->
       <div x-show="audit?.settle_txid" class="border-t border-warm-200 pt-3 mt-3">
         <div class="text-[11px] text-ink-500 mb-1">④ 结算 TX · 一笔分给 (赢家 + 仲裁人 + 主持人)</div>
-        <a :href="audit.settle_explorer_url || explorerTxUrl(audit.settle_txid)" target="_blank"
+        <a x-show="audit.settle_explorer_url || explorerTxUrl(audit.settle_txid)" :href="audit.settle_explorer_url || explorerTxUrl(audit.settle_txid)" target="_blank"
            class="block bg-warm-50 hover:bg-warm-100 rounded px-3 py-2 text-xs text-ink-600">
           <div class="font-mono break-all">🔗 <span x-text="audit.settle_txid"></span></div>
           <div class="text-[10px] text-ink-400 mt-1">点开看 explorer 7 输出 (= broker 抽成 + N 个仲裁人报酬 + 赢家本金+池)</div>
         </a>
+        <div x-show="!(audit.settle_explorer_url || explorerTxUrl(audit.settle_txid))" class="block bg-warm-50 rounded px-3 py-2 text-xs text-ink-600">
+          <div class="font-mono break-all">TX: <span x-text="audit.settle_txid"></span></div>
+        </div>
       </div>
     </div>
 
@@ -536,7 +545,9 @@ function poolDetailPage(marketId) {
     tgBetLink: null,        // 去 TG 押注深链 = https://t.me/<bot>?start=<marketId>  (broker.bot_username → onboard/status)
     mapping: null,          // condition_id_mapping row (mirror_only / independent_source) OR null=未映射
     audit: null,            // /api/pool/market/:id/settle-audit (= 证据链 v0.7 全链路, KANet-UI #12 P0.1)
-    explorerBase: 'https://explorer-tn12.kaspa.org',   // fallback, audit.explorer_base overrides
+    // explorer-url 收敛 v1.1 (2026-07-12): TN12 无公网 explorer (Owner 实测 ENOTFOUND), 不再硬编码
+    // 死域名——null=诚实契约, audit.explorer_base(服务端 network-aware) 覆盖, mainnet 部署会拿到真值。
+    explorerBase: null,
     // KANet-UI 2026-06-07 P1-#5 (Bettor r325 关 1 PASS + 一致性): 全'仲裁人'贯穿 (与 P0-#4 hint/eventLabel 一致)
     stateMachine: [
       { key: 'pending_oracle_deposits', label: '等仲裁人接单' },
@@ -618,7 +629,9 @@ function poolDetailPage(marketId) {
     },
 
     explorerTxUrl(txid) {
-      return txid ? (this.explorerBase + '/txs/' + txid) : '#';
+      // explorer-url 收敛 v1.1 (2026-07-12): explorerBase 为 null (TN12 无公网 explorer) 时不拼死链,
+      // 模板侧改显 txTextFallback() 纯文本, 非静默消失/非拼出 "null" 字面量。
+      return (txid && this.explorerBase) ? (this.explorerBase + '/txs/' + txid) : null;
     },
 
     // KANet-UI 2026-06-07 P0-#4: chain_events 大白话 label (NWT r335 实测 event_type).
