@@ -19,6 +19,14 @@
 
 import { getIndexedTxOutputs } from '../lib/broker-fee-chain.mjs';
 import { sqlite } from '../db/client.js';
+// B线深化件1(2026-07-12, 设计 docs/2026-07-12-broker-fee-emit-package-live-switch-design.md v1.2,
+// Owner"broker自动分发独立功能深化"直令+双审GO): live 切换到 package(notify层)——补落3自己点名的 gap
+// (package 建好没 live 路径吃到)。deriveRoleFeeLeaves 用 kasia-console 自己的规范源(lib/fee-split.mjs,
+// 已是 pool-shard-settle.mjs 等既有消费者用的那份);matchLandedFeeOutputs/emitLandedNotification 只在
+// packages/fee-split/notify.mjs 存在(package 原生功能, 无 kasia-console 内部副本——单源两个家各司其职)。
+import { deriveRoleFeeLeaves } from '../lib/fee-split.mjs';
+import { matchLandedFeeOutputs, emitLandedNotification } from '../../../packages/fee-split/notify.mjs';
+import { getSidesByLogicalMarket } from '../lib/pool-bettor-sides-query.mjs';
 
 // J1tn 2026-07-08 (§2.1 broker-fee-reconciler-design 启用件): 本模块此前写好但零调用点(index.js 从没
 //   import 过) — Owner 直接指令"之前有这个模块没启用,查!"坐实。这里只做"接上一根已经焊好的线",
@@ -90,7 +98,7 @@ export function brokerFeeLandedEmitTick(db, deriveBrokerAddress, log = () => {})
   //     见 2026-07-10 频道排查+docs/2026-07-09-zk-autonomy-three-parts-design.md)。ZK 路 broker fee 是独立
   //     一笔 claim tx(feeLeaves 之一, 跟 winner payout 分开广播), 下方按 metadata.zk_escape_audit[] 逐笔核对。
   const candidates = db.prepare(`
-    SELECT id, broker_pk, settle_txid, spine_p2sh, resolution_rule_spec, metadata
+    SELECT id, broker_pk, settle_txid, spine_p2sh, resolution_rule_spec, metadata, fee_rules, maker_stake_amount
       FROM pool_markets
      WHERE broker_pk IS NOT NULL
        AND json_extract(COALESCE(metadata, '{}'), '$.broker_fee_landed_emitted_at') IS NULL
@@ -100,7 +108,7 @@ export function brokerFeeLandedEmitTick(db, deriveBrokerAddress, log = () => {})
        )
   `).all();
 
-  let emitted = 0, pendingIndex = 0, noBrokerOutput = 0;
+  let emitted = 0, pendingIndex = 0, noBrokerOutput = 0, packageFallback = 0;
   for (const m of candidates) {
     const network = String(m.spine_p2sh || '').startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
     let brokerAddress;
@@ -164,32 +172,108 @@ export function brokerFeeLandedEmitTick(db, deriveBrokerAddress, log = () => {})
     let marketTitle = m.id;
     try { const spec = JSON.parse(m.resolution_rule_spec || '{}'); marketTitle = spec.title || spec.question || m.id; } catch {}
 
-    const payload = JSON.stringify({
-      t: 'broker_fee_landed',
-      market_id: m.id,
-      broker_pk: String(m.broker_pk).toLowerCase(),
-      broker_address: brokerAddress,
-      fee_sompi: feeSompi,                 // 🔴 链验真金额 (kaspa_tx_log.outputs_json)·非 DB 估
-      settle_txid: landedTxid,             // V1: 共享 settle tx; ZK-native: broker 自己那笔 claim tx(见上方解析)
-      output_index: idx,
-      market_title: marketTitle,
-      landed_at: new Date().toISOString(),
-    });
-    // 🔴 txid = landedTxid (真 64-hex chain hash·满足 v83 trigger broker_* 禁 placeholder + 语义=fee 实际落地那笔 tx)。
-    //   UNIQUE(txid,event_type): 每盘 landedTxid 各异 → (landedTxid,'broker_fee_landed') 唯一·INSERT OR IGNORE 防竞态重 emit。
-    db.prepare(`
-      INSERT OR IGNORE INTO chain_events (id, txid, event_type, from_address, to_address, payload, observed_by, observed_at)
-      VALUES (lower(hex(randomblob(16))), ?, 'broker_fee_landed', ?, ?, ?, 'pool-settler', CURRENT_TIMESTAMP)
-    `).run(String(landedTxid), m.spine_p2sh || null, brokerAddress, payload);
-    markEmitted(db, m.id, { emitted_fee_sompi: feeSompi, settle_txid: landedTxid });
-    emitted++;
-    log(`[broker-fee-emit] 💰 market=${m.id.slice(0, 12)} broker fee ${(feeSompi / 1e8).toFixed(4)} KAS LANDED (tx ${String(landedTxid).slice(0, 12)} out#${idx}) → broker_fee_landed emit`);
+    // B线深化件1(package live 切换, 设计 v1.2 §2.1/§2.2 分族): onLanded 复用旧 payload 形状字节不变
+    //   (byte-equal 护栏, fee-single-source.test.mjs 守), 只加 verification 新字段(纯附加, Bettor 注1 MUST)。
+    const onLanded = (notif) => {
+      const feeSompiOut = Number(notif.amountSompi);
+      const payload = JSON.stringify({
+        t: 'broker_fee_landed',
+        market_id: m.id,
+        broker_pk: String(m.broker_pk).toLowerCase(),
+        broker_address: notif.address,
+        fee_sompi: feeSompiOut,             // 🔴 链验真金额 (kaspa_tx_log.outputs_json)·非 DB 估
+        settle_txid: notif.txid || landedTxid,
+        output_index: notif.outputIndex,
+        market_title: marketTitle,
+        landed_at: new Date().toISOString(),
+        verification: onLanded._verification,   // 'independent'(§2.1 fee_rules 真断言) | 'discovered'(§2.2 discover-then-trust, vacuous-pass 诚实标注)
+      });
+      // 🔴 txid = landedTxid (真 64-hex chain hash·满足 v83 trigger broker_* 禁 placeholder)。UNIQUE(txid,event_type) 防竞态重 emit。
+      db.prepare(`
+        INSERT OR IGNORE INTO chain_events (id, txid, event_type, from_address, to_address, payload, observed_by, observed_at)
+        VALUES (lower(hex(randomblob(16))), ?, 'broker_fee_landed', ?, ?, ?, 'pool-settler', CURRENT_TIMESTAMP)
+      `).run(String(notif.txid || landedTxid), m.spine_p2sh || null, notif.address, payload);
+      markEmitted(db, m.id, { emitted_fee_sompi: feeSompiOut, settle_txid: notif.txid || landedTxid, verification: onLanded._verification });
+      emitted++;
+      log(`[broker-fee-emit] 💰 market=${m.id.slice(0, 12)} broker fee ${(feeSompiOut / 1e8).toFixed(4)} KAS LANDED (tx ${String(notif.txid || landedTxid).slice(0, 12)} out#${notif.outputIndex}, verification=${onLanded._verification}) → broker_fee_landed emit`);
+    };
+
+    // 🔴 旧路径 fallback(Bettor §4 MUST, 失败降级): package 路径任何异常/不可信 match(mismatch/unmatched)
+    //   都不阻断 broker 到账通知——退回既有直写(byte-equal 于切换前), 只是走的是"备用网", 记一次 fallback。
+    const legacyDirectEmit = () => {
+      const payload = JSON.stringify({
+        t: 'broker_fee_landed', market_id: m.id, broker_pk: String(m.broker_pk).toLowerCase(),
+        broker_address: brokerAddress, fee_sompi: feeSompi, settle_txid: landedTxid, output_index: idx,
+        market_title: marketTitle, landed_at: new Date().toISOString(), verification: 'discovered',
+      });
+      db.prepare(`
+        INSERT OR IGNORE INTO chain_events (id, txid, event_type, from_address, to_address, payload, observed_by, observed_at)
+        VALUES (lower(hex(randomblob(16))), ?, 'broker_fee_landed', ?, ?, ?, 'pool-settler', CURRENT_TIMESTAMP)
+      `).run(String(landedTxid), m.spine_p2sh || null, brokerAddress, payload);
+      markEmitted(db, m.id, { emitted_fee_sompi: feeSompi, settle_txid: landedTxid, verification: 'discovered', fallback: true });
+      emitted++;
+      packageFallback++;
+      log(`[broker-fee-emit] 💰 market=${m.id.slice(0, 12)} broker fee ${(feeSompi / 1e8).toFixed(4)} KAS LANDED (tx ${String(landedTxid).slice(0, 12)} out#${idx}, FALLBACK 直写路径) → broker_fee_landed emit`);
+    };
+
+    let usedFallback = false;
+    try {
+      // 分族判据钉死(Bettor 注3 MUST + NWT 核实吻合): fee_rules 非空 且(resolution_rule_spec 非 zk_native) →
+      //   §2.1 独立断言族;否则(存量 V1 legacy / ZK 市场,绝大多数现存候选)→ §2.2 discover-then-trust 族。
+      let isZkNative = false;
+      try { isZkNative = JSON.parse(m.resolution_rule_spec || '{}')?.zk_native === true; } catch {}
+      const feeRules = (m.fee_rules && !isZkNative) ? JSON.parse(m.fee_rules) : null;
+
+      let feeLeaves, leafAddresses, verification;
+      if (feeRules) {
+        // §2.1: consolidatedPool 独立链读(同结算时口径, 镜像 pool-shard-settle.mjs L309 既有模式)——
+        //   maker_stake_amount + Σ pool_bettor_sides.stake_amount(已上链锁定的), 非透传/非从 settle output 反推。
+        //   getSidesByLogicalMarket (非裸 market_id 查, R-SHARD-BLIND 守): bshard 市场 bettor 挂在
+        //   shard_market_id 下·裸 WHERE market_id=? 在 bshard 场景查不到, 这里统一走 logical-market-aware 查询。
+        const sides = getSidesByLogicalMarket(m.id, db).filter(s => s.side_lock_tx);
+        const sidesSum = sides.reduce((s, r) => s + (Number(r.stake_amount) || 0), 0);
+        const poolSompi = BigInt(Number(m.maker_stake_amount) || 0) + BigInt(sidesSum);
+        const derived = deriveRoleFeeLeaves(feeRules, poolSompi.toString());
+        const brokerLeaf = derived.feeLeaves.find(l => l.type === 'broker');
+        if (!brokerLeaf) throw new Error(`fee_rules 无 broker leaf(bps=0/角色缺席) 但已发现链上 broker output — 结构不一致, 降级`);
+        feeLeaves = [brokerLeaf];
+        leafAddresses = [brokerAddress];   // brokerLeaf.pk 应 == m.broker_pk(同源派生), 复用已算好的 brokerAddress 不重复派生
+        verification = 'independent';
+      } else {
+        // §2.2: 把"发现值"当"期望值"喂给 package(结构性必 matched, 断言 vacuous — Bettor 注1 已诚实标注)。
+        // lint-allow-chain-amount-precision: feeSompi 是 sompi 整数(kaspa_tx_log 链读, 已 Number() 化非 KAS
+        //   小数), 本 amount 字段是 package feeLeaves 内部数据结构(非直发 wallet API 的 chain TX 广播字段)——
+        //   KI-30 真正守的是 KAS 小数 17-decimal 浮点误差, sompi 整数无此风险(Bettor r181 场景不适用)。
+        feeLeaves = [{ pk: String(m.broker_pk).toLowerCase(), amount: String(feeSompi), type: 'broker' }];
+        leafAddresses = [brokerAddress];
+        verification = 'discovered';
+      }
+
+      const outputsForMatch = outs.map(o => ({ address: o && o.address, amount: String((o && o.amount_sompi) || 0), txid: landedTxid }));
+      const matchResults = matchLandedFeeOutputs(outputsForMatch, feeLeaves, leafAddresses);
+      const brokerResult = matchResults[0];
+      if (brokerResult.state === 'matched') {
+        onLanded._verification = verification;
+        const n = emitLandedNotification([brokerResult], { onLanded });
+        if (n !== 1) throw new Error(`emitLandedNotification 预期投递1条实投${n}条`);
+      } else {
+        // mismatch/unmatched 只应在 §2.1(独立断言)族出现(§2.2 结构性必过) — 真实完整性告警, 大声记录后降级。
+        log(`[broker-fee-emit] 🔴 CRITICAL market=${m.id.slice(0, 12)} package 断言 ${brokerResult.state}(verification=${verification}) — 期望 leaf=${JSON.stringify(feeLeaves[0])} vs 链上发现 fee_sompi=${feeSompi} — 降级 fallback 直写(不阻断 broker 到账通知, 需人工核 fee_rules/bps 配置)`);
+        usedFallback = true;
+        legacyDirectEmit();
+      }
+    } catch (e) {
+      log(`[broker-fee-emit] ⚠ market=${m.id.slice(0, 12)} package 路径异常(${e.message}) → fallback 直写`);
+      usedFallback = true;
+      legacyDirectEmit();
+    }
+    recordSunsetTracking(db, { fellBack: usedFallback });
   }
 
   if (backfillSuppressed || emitted || noBrokerOutput) {
-    log(`[broker-fee-emit] tick: backfillSuppressed=${backfillSuppressed} scanned=${candidates.length} emitted=${emitted} pendingIndex=${pendingIndex} noBrokerOutput=${noBrokerOutput}`);
+    log(`[broker-fee-emit] tick: backfillSuppressed=${backfillSuppressed} scanned=${candidates.length} emitted=${emitted} pendingIndex=${pendingIndex} noBrokerOutput=${noBrokerOutput} packageFallback=${packageFallback}`);
   }
-  return { backfillSuppressed, emitted, pendingIndex, noBrokerOutput, scanned: candidates.length };
+  return { backfillSuppressed, emitted, pendingIndex, noBrokerOutput, packageFallback, scanned: candidates.length };
 }
 
 function markEmitted(db, marketId, extra) {
@@ -199,4 +283,34 @@ function markEmitted(db, marketId, extra) {
        SET metadata = json_set(COALESCE(metadata, '{}'), '$.broker_fee_landed_emitted_at', ?)
      WHERE id = ?
   `).run(stamp, marketId);
+}
+
+// 🔴 Bettor 注2(MUST, 双路径日落条件, 设计 v1.2 §4): fallback 安全网若无限期保留 = drift 温床(规则55族)。
+//   连续 20 笔 或 首次连胜起 7 天(取先到者)live emit 全走 package 路径、零次 fallback → sunsetReady=true,
+//   大声 log 提醒立 follow-up 卡删除 legacyDirectEmit()。任一次 fallback 触发即清零连胜(不允许"凑够20笔里混几次
+//   fallback"蒙混过关)。持久化用既有 config_entries k/v(monitor-service.js 同款 upsert 惯例, 非新表)。
+export function recordSunsetTracking(db, { fellBack }) {
+  const now = new Date().toISOString();
+  const existing = db.prepare(`SELECT id, value_plain_hint FROM config_entries WHERE key = ? AND category = ?`).get('package_path_streak', 'broker_fee_emit');
+  let state = { consecutiveSuccess: 0, fallbackCount: 0, firstSuccessAt: null, sunsetReady: false };
+  if (existing) { try { state = { ...state, ...JSON.parse(existing.value_plain_hint) }; } catch {} }
+  if (fellBack) {
+    state.consecutiveSuccess = 0;
+    state.firstSuccessAt = null;
+    state.fallbackCount = (state.fallbackCount || 0) + 1;
+    state.sunsetReady = false;
+  } else {
+    if (!state.firstSuccessAt) state.firstSuccessAt = now;
+    state.consecutiveSuccess = (state.consecutiveSuccess || 0) + 1;
+    const daysSinceFirst = (Date.now() - new Date(state.firstSuccessAt).getTime()) / 86400000;
+    state.sunsetReady = state.consecutiveSuccess >= 20 || daysSinceFirst >= 7;
+  }
+  state.updatedAt = now;
+  const val = JSON.stringify(state);
+  if (existing) db.prepare(`UPDATE config_entries SET value_plain_hint = ?, updated_at = ? WHERE id = ?`).run(val, now, existing.id);
+  else db.prepare(`INSERT INTO config_entries (id, key, category, value_plain_hint, is_sensitive, updated_at, created_at) VALUES (lower(hex(randomblob(16))), 'package_path_streak', 'broker_fee_emit', ?, 0, ?, ?)`).run(val, now, now);
+  if (state.sunsetReady) {
+    console.warn(`[broker-fee-emit] 🔔 日落触发器命中(连续${state.consecutiveSuccess}笔零fallback) — Bettor 注2 MUST: 该立 follow-up 卡删除 legacyDirectEmit() 直写分支, 停止双路径共存`);
+  }
+  return state;
 }
