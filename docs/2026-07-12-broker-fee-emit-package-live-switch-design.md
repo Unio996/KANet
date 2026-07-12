@@ -44,18 +44,25 @@ matched → emitLandedNotification(matched, {onLanded: 写 chain_events broker_f
 即使在单角色场景也提供纵深(万一未来同一笔结算 tx 里混进第二个 output 巧合撞了 broker 地址,这层保护
 生效),③**不引入新的失败模式**——discover-then-trust 场景下断言必过,新旧行为 byte-equal。
 
-**🔴 Bettor 注1(MUST,防 vacuous 口径)**:discover-then-trust 路径的 amount 断言"数学上必过"是
-**vacuous 断言**——比对的是同一个数(`shared-source-verification-is-vacuous` 同族),不是真验证。
-`payload`/log 必须带族标字段区分:`assert_mode: 'true_expectation'`(§2.1,独立期望值真比对)vs
-`'discover_trust'`(§2.2,自比对不算验证)。**报数口径永远禁止说"存量市场金额断言已上"**——防将来审计
-把 vacuous-pass 当真验证读。
+**🔴 Bettor 注1 + NWT H1(MUST,防 vacuous 口径,两位独立收敛同一诊断)**:discover-then-trust 路径的
+amount 断言"数学上必过"是 **vacuous 断言**——比对的是同一个数(`shared-source-verification-is-vacuous`
+同族),不是真验证。**"matched" 这个状态在两族间携带的信任强度不同**(§2.1 经过独立值真核对;§2.2
+结构性必过),下游若不区分,系统记录里两种不同强度的信任语义会长得一模一样。
+`emitLandedNotification` payload / `chain_events.payload` 必须带字段区分:`verification: 'independent'`
+(§2.1,fee_rules 路径,真断言)vs `'discovered'`(§2.2,discover-then-trust,诚实标注"金额来自发现值
+非独立重算")。纯附加字段,不影响 byte-equal 护栏(byte-equal 比对的是既有字段,新字段旧路径历史记录
+本就没有可比对象)。**报数口径永远禁止说"存量市场金额断言已上"**——防将来审计把 vacuous-pass 当真验证读。
 
-**🔴 Bettor 注3(转 NWT 红队核实):分族判据边界矩阵**——判据 `fee_rules IS NOT NULL` × `zk_native` 标志
-的组合:落2 接费范围 = "新建非-zk 市场"(`fee_rules` 写入条件本就带 `zk_native !== true` 检查,见
-`pool.js` create-v07)。**但**若未来 zk 市场也开始带 `fee_rules`(§4 落2 设计 §3 留的远期账,当下未落码),
-§2.1 的 `consolidatedPool` 独立链读口径与 ZK 池语义(含 seed、claim 分次结算)是否吻合需要重新核?
-判据可能该收紧为 `fee_rules IS NOT NULL AND zk_native != true`,而非单看 `fee_rules` 是否非空。
-NWT 红队核实此矩阵(现状是否已天然满足,还是需要显式加这个 AND 条件)。
+**🔴 Bettor 注3(转 NWT 红队核实)+ NWT 核实结论:分族判据边界矩阵**——判据 `fee_rules IS NOT NULL` ×
+`zk_native` 标志的组合。**NWT 独立核实(经验查活库 2 行 fee_rules 非空市场 0 行 zk_native=true;代码级
+证明 `pool.js` create-v07 的 zk_native 默认填充[1089-1090]无条件先于 fee_rules 构造[1121-1124]执行,
+无分支能跳过)**:现状**天然安全**(结构顺序保证,非巧合零命中)。**但仍显式加固**(防御性,非当前必要性,
+NWT 建议采纳):件1 的判据在另一个文件,隐性依赖 pool.js 创建逻辑顺序不变——若未来出现第二个 `fee_rules`
+写入路径(管理员脚本/新功能)未复刻这条顺序保证,不变量会静默破坏而件1 判据不自知。**分族判据钉死为**:
+```
+fee_rules IS NOT NULL AND (json_valid(resolution_rule_spec)=0 OR json_extract(resolution_rule_spec,'$.zk_native') IS NOT 1)
+```
+(镜像 `selectRipeMarkets` 既有的 `json_valid` 短路判定模式,同一份 v0.7 市场读取纪律,零新造)。
 
 ## 3. 回归护栏(Bettor 要求,MUST)
 
