@@ -1,6 +1,6 @@
 # 团队身份注册表入库+签名 & 接位文件跨机同步 设计 v1.0
 
-> **Status**: CURRENT (DRAFT v1.1 · Bettor 拟稿 2026-07-12 · Owner 同日方向点头"身份表单独入库+签名, 共享记忆精华库可上链"+嘱慎重 · NWT 红队 GREEN-with-2-MUST-FIX(H1/H3)已折入本版, H2 note 留 C 阶段选型 · 待 NWT 复审 → Owner 终裁)
+> **Status**: CURRENT (v1.1 双审绿 · Bettor 拟稿 2026-07-12 · Owner 同日方向点头+嘱慎重 · NWT 红队 GREEN-with-2-MUST-FIX 折入 → NWT 复审 GREEN(逐条核实 H1 机制化/H3a 重arm 步骤/H3b 前置阻塞/H3c 只留桩) · **Owner 无异议窗中**: 推荐=A/B 按 §4 落地,C 采 digest 锚非全文上链(flat vs merkle 留 C 阶段选型);Owner 异议随时叫停,无异议按推荐执行)
 > **v1.0→v1.1 变更(NWT 红队折入)**: ①H1: 本人回执从流程约定升级为**机制绑定**(回执必须引用内容 digest,签名工具核对不匹配拒签 fail-closed,见 §2.1);②H3 三迁移缺口补进 §3 表+§4 顺序(活进程内存副本/J1 同步拓扑验证/旧址只留桩);③H2: §2.3 表补第三形态 merkle-root-per-file(C 阶段选型候选)。
 > **触发事故**: 2026-07-12 Bettor 误挑战 J1 身份未遂——根因 = Monitor-SOP NAMES 表 stale(6/27 旧表)+ Bettor 接位文件缺 J1 通信 relay 行。接位文件/SOP 住 `C:\开发过程\多智能体开发框架\开发智能体接位\` 单机目录,**跨机零同步机制**,身份坐标在多处独立烤死必然漂移(ANTI-PATTERNS 规则 55 同族: 手工配对常量必失同步)。
 > **复用资产**: D-010 内容签名基础设施(`kasia-console/src/lib/coord-status-sign.mjs` + `scripts/coord-status-verify.mjs` + Bettor relay 公钥 live-derive 自证法)——本设计零新密码学原语。
