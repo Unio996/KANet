@@ -2,7 +2,7 @@
 
 > **Status**: CURRENT
 > **对象**: docs/2026-07-12-broker-fee-emit-package-live-switch-design.md(J2)
-> **verdict**: **GREEN-with-MUST-FIX——分族方案诚实且技术正确(discover-then-trust 断言必过是设计者主动坦白非隐瞒);H1 缺下游可辨识标记,'matched'状态在两族间语义强度不同却无区分,同规则56 vacuous 家族的轻量变体,必须补一个字段**
+> **verdict**: **首审 GREEN-with-MUST-FIX(H1)→ J2 v1.1 折入 Bettor 注1(assert_mode 族标)+注2(日落触发器)→ NWT 核实注3(fee_rules×zk_native 矩阵,见文末追加节)= 现状天然安全+建议显式加固,GREEN 落码 GO**
 
 ---
 
@@ -19,6 +19,16 @@
 **具体风险场景**:未来若有人(开发者/审计/甚至 Owner)查 `chain_events` 的 `broker_fee_landed`(或本设计新加的等价事件)记录,想知道"这笔钱的金额是不是真核对过",现有设计下**无法从记录本身回答这个问题**——两族记录形状完全一样。
 
 **修法(轻量,一个字段)**:`emitLandedNotification` 的 payload 或调用方组装的 `chain_events.payload` 里加一个字段,如 `verification: 'independent'`(fee_rules 路径,真断言)vs `verification: 'discovered'`(legacy 路径,discover-then-trust,诚实标注"金额来自发现值非独立重算")。**不改变任何现有行为/不影响 byte-equal 护栏**(byte-equal 测试比对的是 `fee_sompi`/`broker_address`/`output_index`,新增字段是纯附加,新旧路径的这几个既有字段值不受影响,新加字段本身在"新路径"里才存在,旧路径产出的历史记录本就没有可比较对象)。
+
+## 【v1.1 追加】注3(Bettor 转 NWT): fee_rules × zk_native 组合矩阵核实结果
+
+**结论:现状天然满足(经验+代码两路证实),但建议仍显式加 `AND zk_native != true`(防御性,非必要性)**。
+
+**①经验验证**:独立只读查询活库 `pool_markets`——`fee_rules IS NOT NULL` 共 2 行,逐行核对 `resolution_rule_spec.zk_native`,**0 行为 `true`**。当前数据零违反。
+
+**②代码级证明(顺序保证,非巧合)**:亲读 `pool.js` create-v07 完整流程——`zk_native` 默认填充(1089-1090 行:`if (_spec.zk_native !== false) _spec.zk_native = true; b.resolution_rule_spec = JSON.stringify(_spec);`)**无条件先执行**,写回 `b.resolution_rule_spec`;`fee_rules` 构造(1121-1124 行)**之后**重新 `JSON.parse(b.resolution_rule_spec)` 读取的是**已经默认填充过的值**。中间(1092-1120 行)全是提前 return 的校验闸,没有能跳过默认填充、直达 fee_rules 构造的分支路径。**∴ 当前唯一的 `fee_rules` 写入点,结构上物理不可能产出 `fee_rules≠null AND zk_native=true` 的组合**——不是巧合零命中,是代码顺序保证。
+
+**③但仍建议显式加 `AND zk_native != true`(防御性工程,非当前必要性)**:上面①②证明的是"这一个写入点(create-v07)安全",但件1 的判据是在**另一个文件**(broker-fee-emit 切换逻辑)读 `fee_rules` 列,**隐性依赖 pool.js 那条创建逻辑的顺序不变**——若未来出现第二个写 `fee_rules` 的路径(如管理员补录脚本/未来功能),且没人记得复刻这条顺序保证,不变量会静默破坏,而件1 的判据逻辑不会知道。加 `AND zk_native != true` 是本地显式声明依赖,不信任跨文件隐性不变量,零成本(判据本就要读 `resolution_rule_spec`,件1 §2.1 已经需要解析它算 `consolidatedPool`)——同今晚"白名单优于黑名单/显式优于隐式"反复验证的纪律,防将来 drift。
 
 ## 其余核点(过)
 
