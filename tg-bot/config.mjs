@@ -24,6 +24,8 @@ export const CONFIG = {
   // 该文件 L57/L62), 所以留空不会崩, 只是 bridge 不启用。真实值移到 gitignored 的 kanet.env。
   ownerChatId: process.env.OWNER_CHAT_ID || '',
   ownerBridgePollMs: parseInt(process.env.OWNER_BRIDGE_POLL_MS || '10000', 10), // dev-coord → Owner cadence
+  // 用户反馈通道卡A 续卡(2026-07-12): Direction C 独立轮询源 cadence, 与 Direction B 分开调不耦合两者.
+  feedbackEscalationPollMs: parseInt(process.env.FEEDBACK_ESCALATION_POLL_MS || '15000', 10),
 };
 
 // Resolve which broker the bot represents — prefer UI/DB config (Owner sets it in Settings,

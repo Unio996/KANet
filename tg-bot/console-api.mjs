@@ -194,3 +194,10 @@ export async function devCoordMessagesSince(sinceIso, limit = 50) {
   const fresh = sinceIso ? all.filter(m => m.created_at && m.created_at > sinceIso) : all;
   return { ok: r.ok, messages: fresh };
 }
+
+// 用户反馈通道卡A 续卡(2026-07-12, console-side-design §4 硬条件②): owner-bot 独立轮询源用, 纯只读.
+// 光标语义同 devCoordMessagesSince — sinceIso 严格早于 events.created_at 才算新, ASC 序.
+export async function feedbackEscalatedSince(sinceIso, limit = 50) {
+  const r = await req('GET', `/api/feedback/escalated-since/${encodeURIComponent(sinceIso || '1970-01-01')}?limit=${encodeURIComponent(limit)}`);
+  return { ok: r.ok, events: r.json?.events || [] };
+}

@@ -67,6 +67,30 @@ function escalateTicket(ticketId, { rawText }) {
 }
 
 export async function registerFeedbackRoutes(fastify) {
+  // GET /api/feedback/escalated-since/:ts — owner-bot 独立轮询源用(设计 §4 硬条件②: 纯只读 events 查询)。
+  // 光标语义同 devCoordMessagesSince: ts 是 ISO 时间戳, 返回严格晚于它的行, ASC 序(旧→新)供调用方顺序推送。
+  // 只读 events 表(非 chain_events), 不需要 address(feedback_escalated 是系统事件非地址维度)。
+  fastify.get('/api/feedback/escalated-since/:ts', async (request, reply) => {
+    const { ts } = request.params;
+    const limit = Math.min(parseInt(request.query?.limit, 10) || 50, 200);
+    // events.created_at 写入用 SQLite datetime('now') = 空格分隔无 T/Z 形式("YYYY-MM-DD HH:MM:SS");
+    // 调用方(owner-bot)cursor 用 JS new Date().toISOString() = 'T'/'Z' 形式——两种格式字符串直接
+    // > 比较是字典序非时间序('T'>' ' ascii, 同日任意时刻都会误判为"更早"), SQLite 无原生 datetime
+    // 类型全走 TEXT 比较, 必须用 datetime() 显式归一化两侧再比较 (同 memory
+    // reference-sqlite-iso-timestamp-string-compare-trap 教训, 这里是新代码首次撞同一个坑).
+    const rows = sqlite.prepare(`
+      SELECT id, summary, payload_json, created_at FROM events
+      WHERE event_type = 'feedback_escalated' AND datetime(created_at) > datetime(?)
+      ORDER BY created_at ASC LIMIT ?
+    `).all(ts || '1970-01-01', limit);
+    const events = rows.map((r) => {
+      let payload = {};
+      try { payload = JSON.parse(r.payload_json || '{}'); } catch {}
+      return { id: r.id, summary: r.summary, created_at: r.created_at, ticket_id: payload.ticket_id || null, raw_text: payload.raw_text || null };
+    });
+    return reply.send({ ok: true, events });
+  });
+
   fastify.post('/api/feedback/reply', async (request, reply) => {
     const { tg_user_id, linked_addr, bettor_pk, raw_text } = request.body || {};
     if (!raw_text?.trim()) return reply.code(400).send({ ok: false, error: 'raw_text required' });

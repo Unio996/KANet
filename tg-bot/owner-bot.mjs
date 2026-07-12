@@ -10,7 +10,7 @@
 //   B) dev-coord → Owner DM: poll new dev-coord messages, push compact "<sender>: <text>" to the Owner.
 import { Bot } from 'grammy';
 import { CONFIG, resolveOwnerVoiceRelayId } from './config.mjs';
-import { postOwnerMessageToDevCoord, devCoordMessagesSince } from './console-api.mjs';
+import { postOwnerMessageToDevCoord, devCoordMessagesSince, feedbackEscalatedSince } from './console-api.mjs';
 
 if (!CONFIG.ownerBotToken) {
   console.error('[owner-bot] OWNER_BOT_TOKEN not set — owner bot cannot start (Owner: @BotFather → /newbot → set OWNER_BOT_TOKEN).');
@@ -51,6 +51,25 @@ async function pollDevCoord() {
   }
 }
 
+// Direction C: 用户反馈通道卡A 续卡(2026-07-12, console-side-design §4 方案B 硬条件①②)——独立轮询源,
+// 只读 events(event_type='feedback_escalated'), 命中后用已授权的 owner-voice relay 身份代发到
+// dev-coord-testnet。硬条件①: 代发消息必须硬前缀标注权威归属, 非"转达 Owner"(同 qzdh7nar 身份事件教训
+// 直接应用)。硬条件②: 纯只读查询 + 失败静默重试, 独立 try/catch, 异常不得传播到 Direction A/B。
+let _feedbackCursor = new Date().toISOString();
+async function pollFeedbackEscalations() {
+  const r = await feedbackEscalatedSince(_feedbackCursor, 50);
+  if (!r.ok) return;
+  for (const ev of r.events) {
+    if (ev.created_at && ev.created_at > _feedbackCursor) _feedbackCursor = ev.created_at;   // advance first, 同 pollDevCoord 纪律(发送失败不重放)
+    const ownerRelayId = await resolveOwnerVoiceRelayId();
+    if (!ownerRelayId) continue;   // 未配置 owner-voice relay = 静默跳过(同 Direction A 降级)
+    const ticketShort = String(ev.ticket_id || ev.id || '').slice(0, 8);
+    const prefix = `[用户反馈工单#${ticketShort}·AI生成·非Owner/代发身份发言]`;
+    const body = `${prefix} ${ev.summary || ''}\n原始输入: ${ev.raw_text || '(无)'}`;
+    await postOwnerMessageToDevCoord(ownerRelayId, body);
+  }
+}
+
 // Runtime side-effects live in startOwnerBot() so importing this module (e.g. a test) registers the
 // handlers WITHOUT going live. _launch_owner_bot.mjs calls startOwnerBot(); tests import { bot }.
 export function startOwnerBot() {
@@ -58,8 +77,12 @@ export function startOwnerBot() {
     const t = setInterval(() => { pollDevCoord().catch(() => {}); }, CONFIG.ownerBridgePollMs);
     if (typeof t.unref === 'function') t.unref();
   }
+  // Direction C 独立于 Direction A/B 的 ownerChatId 门控——反馈升级转发只依赖 owner-voice relay 是否
+  // 配置好(resolveOwnerVoiceRelayId 内部检查), 不依赖 Owner 是否连了自己的 DM bridge.
+  const tf = setInterval(() => { pollFeedbackEscalations().catch(() => {}); }, CONFIG.feedbackEscalationPollMs);
+  if (typeof tf.unref === 'function') tf.unref();
   bot.start();
-  console.log('[owner-bot] up — Owner dev-coord bridge (chat=' + CONFIG.ownerChatId + ', Direction B poller ' + (CONFIG.ownerChatId ? 'on' : 'OFF — OWNER_CHAT_ID unset') + ')');
+  console.log('[owner-bot] up — Owner dev-coord bridge (chat=' + CONFIG.ownerChatId + ', Direction B poller ' + (CONFIG.ownerChatId ? 'on' : 'OFF — OWNER_CHAT_ID unset') + ', Direction C feedback-escalation poller on)');
 }
 
 export { bot };
