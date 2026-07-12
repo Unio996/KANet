@@ -1118,13 +1118,20 @@ export async function registerPoolRoutes(fastify) {
     // 生效边界=新建市场起(存量 fee_rules NULL 走既有路径字节不动)。build 内部跑 validateFeeRules =
     // NWT F2 闭合(坏 bps/坏地址建单时 fail-loud, 且在 spine 花钱之前, 不产生 settle 时才炸的延迟雷)。
     // zk_native 判定与 selectRipeMarkets 同口径: rule_spec 非法 JSON 视为"未标记"= V1 路径。
+    //
+    // B线深化件2(2026-07-12, Bettor 裁"(a)修端点不降级" #hkgnxl.2): 接通既有 buildPredictionV1InterimRules
+    // 的 introducerPk 参数(组件层早已支持, 端点此前只喂 brokerPk 一路——"第三方可用"在入口处断头)。
+    // 构造逻辑单源在 buildFeeRulesForCreateRequest(lib/create-v07-fee-rules.mjs, 可脱 HTTP/chain 独立单测
+    // byte-equal 护栏, 不进 packages/fee-split——本函数是 KANet 端点请求体字段名适配层非通用第三方原语)。
+    // introducer_pk 非 relay 解析(测试/第三方角色不要求在本 console 注册 relay 身份——同 fee_rules
+    // roles[].address 语义, raw x-only pk hex, 非 kaspa address)。
     let feeRulesJson = null;
     {
       let _rrs = {}; try { _rrs = JSON.parse(b.resolution_rule_spec || '{}') || {}; } catch {}
       if (_rrs.zk_native !== true && brokerPk) {
-        const { buildPredictionV1InterimRules } = await import('../lib/fee-split.mjs');
+        const { buildFeeRulesForCreateRequest } = await import('../lib/create-v07-fee-rules.mjs');
         try {
-          feeRulesJson = JSON.stringify(buildPredictionV1InterimRules({ brokerPk }));
+          feeRulesJson = JSON.stringify(buildFeeRulesForCreateRequest({ brokerPk, introducerPkRaw: b.introducer_pk }));
         } catch (e) {
           return reply.code(400).send({ ok: false, error: `fee_rules 构造失败(建单时 fail-loud, F2): ${e.message}` });
         }
