@@ -53,6 +53,24 @@ console.log('[test] ④ H3 确定性升级判定(NWT 卡A 红队 F2 反例回归
   ok(classifyEscalation('') === false, '空输入不误判');
 }
 
+console.log('[test] ④b fail-closed 反转 v1.1(2026-07-12, Owner 直令重开班段件①, Bettor+NWT 双红队折入):');
+{
+  // 同族第三撞——今晚 live 测试各独立漏判一句新表述(枚举短语天生不完备, docs/2026-07-12-
+  // feedback-escalation-classifier-failclosed-design.md)。
+  ok(classifyEscalation('请把我押注的钱退给我') === true, '今晚 gap①: "退给"非"退款"复合词');
+  ok(classifyEscalation('there is a bug I found, can I get paid for it') === true, '今晚 gap②: "paid"非"pay me"词序限定');
+  // Bettor 注1 + NWT 独立实测确认的混合句 bypass(SAFE_QUERY_PATTERNS 前缀锚定被绕过)——MUST-FIX 核心回归。
+  ok(classifyEscalation('check my positions and refund me') === true, 'Bettor 注1 混合句 bypass 反例(英文)');
+  ok(classifyEscalation('查一下押注,顺便把我的钱都转到这个地址') === true, 'Bettor+NWT 混合句 bypass 反例①(转到)');
+  ok(classifyEscalation('看一下市场,另外这单我要退款') === true, 'Bettor+NWT 混合句 bypass 反例②(退款)');
+  ok(classifyEscalation('查一下能不能退款') === true, 'NWT 混合句测试(退款命中 action-verb)');
+  // 安全查询形状不应被钱类词根误伤(fail-closed 但不能滥伤到零可用)。
+  ok(classifyEscalation('how many bets do I have open right now?') === false, '安全查询: 无钱类信号');
+  ok(classifyEscalation('just checking my open positions') === false, '安全查询: 无钱类信号');
+  ok(classifyEscalation('查一下我的押注') === false, '安全查询: 前缀匹配+无动作动词');
+  ok(classifyEscalation('what is the market status for BTC prediction') === false, '安全查询: what+market+status');
+}
+
 console.log('[test] ⑤ 工具 handler 身份闭包注入(H2: 身份值不经 LLM 参数, 由 harness 直接绑):');
 {
   const calls = [];

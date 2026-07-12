@@ -34,18 +34,46 @@ export const FEEDBACK_SYSTEM_PROMPT = `你是 KANet 用户反馈助手。只能�
 /**
  * H3(NWT MUST,框架 v1.1 §3):升级判定独立于对话 LLM 的确定性检查——基于用户原始输入的关键词/规则匹配,
  * 不读 LLM 自己的分类标记或复述。
- * 覆盖两类语言:①资金申诉("钱没到账"类,声称问题)②资金动作请求("帮我转一下"类,索要动作——NWT 卡A 红队
- * 用话术集 #1 原句实测抓出的盲区,F2 修法折入,本文件与卡A 同一份正则,不重复定义各自维护)。
+ *
+ * v1.1(2026-07-12): 模式级 MUST-FIX(设计 docs/2026-07-12-feedback-escalation-classifier-failclosed-design.md,
+ * Owner 直令重开班段件①, Bettor+NWT 双红队折入)——原复合短语精确匹配(ESCALATE_KEYWORDS)同族第三撞漏判
+ * (枚举"该升级的所有说法"天生不完备, 每晚都能测出新漏判句)。fail-closed 反转: 精确短语匹配→钱类词根宽网
+ * (MONEY_SIGNAL)+安全查询窄口白名单(SAFE_QUERY_PATTERNS), 且资金动作动词(MONEY_ACTION_VERB)优先级最高、
+ * 永不被安全网豁免(堵混合句 bypass: "check my positions and refund me" 前缀命中安全形状但资金动作藏在
+ * 后半, Bettor 注1+NWT 独立实测两处确认同一漏洞)。ESCALATE_KEYWORDS 保留导出(旧调用方兼容/文档参考),
+ * 不再是 classifyEscalation 的判定依据。
  */
 export const ESCALATE_KEYWORDS = /退款|没到账|钱不见|钱卡了|争议|投诉|骗|hack|漏洞|资金|转(一下|账|钱)|打钱|refund|money.*(missing|gone)|dispute|scam|transfer|pay\s*me/i;
 
+// 宽网: 钱类词根(非复合短语), 覆盖比 ESCALATE_KEYWORDS 更广的表述面(如"退"单字覆盖"退给我"/"退我"/
+// "退款"等各种"退"字开头的自然表述, 不需要逐个枚举复合词)。
+const MONEY_SIGNAL = /钱|退|赔|付|资金|骗|投诉|争议|hack|漏洞|refund|pay|paid|fund|transfer|money|scam|dispute/i;
+
+// 窄口: 已知安全查询形状(查押注/查市场/查状态), 前缀锚定(^)——只在 MONEY_ACTION_VERB 未命中时才检查,
+// 见 classifyEscalation 判定顺序注释。
+const SAFE_QUERY_PATTERNS = [
+  /^(查一?下?|看一?下?|check|show|list)\s*(我的)?\s*(押注|positions?|bets?|market|市场|状态|status|历史|record)/i,
+  /^(how\s+(many|much)|what('s|\s+is))\b.{0,30}\b(bets?|positions?|market|status)/i,
+  /^(just\s+checking|我?看看|我?查查)\b/i,
+];
+
+// 资金动作动词: "要求动钱"永不豁免(不管全文其它部分是不是安全查询形状)。判定顺序上必须先查这个,
+// 再查 SAFE_QUERY_PATTERNS——否则前缀锚定的安全模式会把混合句("查一下押注,顺便把钱转到这个地址")
+// 整句放行, 资金动作藏在后半溜走(Bettor 注1 + NWT 独立实测确认的具体 bypass, 非假设性担忧)。
+const MONEY_ACTION_VERB = /转(账|一下|钱|到)|退给|退我|退款|赔我|打钱|transfer|refund\s*me|pay\s*(me|out)|send\s*.{0,10}(kas|money|fund)/i;
+
 /**
- * classifyEscalation — H3 确定性判定(纯函数, 不读 LLM 输出)。
+ * classifyEscalation — H3 确定性判定(纯函数, 不读 LLM 输出)。fail-closed: 有钱类信号且非安全查询形状 =
+ * 默认升级(宁可误升不可漏升, NWT 已论证白名单漏列的失败模式风险远小于反向黑名单漏列)。
  * @param {string} rawUserText 用户原始输入(未经 LLM 处理)
  * @returns {boolean}
  */
 export function classifyEscalation(rawUserText) {
-  return ESCALATE_KEYWORDS.test(String(rawUserText || ''));
+  const text = String(rawUserText || '');
+  if (MONEY_ACTION_VERB.test(text)) return true;                    // 要求动钱 = 永不豁免, 最高优先级
+  if (!MONEY_SIGNAL.test(text)) return false;                        // 无钱类信号 = 安全, 不升级
+  if (SAFE_QUERY_PATTERNS.some((p) => p.test(text))) return false;   // 提及钱但匹配已知安全查询形状 = 放行
+  return true;                                                       // 有钱类信号且非安全查询形状 = fail-closed 升级
 }
 
 /**
