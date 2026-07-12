@@ -2889,4 +2889,34 @@ powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name='ka
 
 ---
 
+## 规则 58 · 安全闸/白名单用"排除已知坏值"（黑名单）天生不完备 —— 一晚同一模式撞三次，改用"只放行已知好值"（白名单）才是封闭式防护
+
+**触发时机**（2026-07-12，同一班内连续三次撞同一结构性弱点，NWT 红队每次都在 diff/设计审时抓出）：
+
+1. **反馈通道 FEEDBACK_TOOLS**：最初用正则黑名单守卫工具名（"不含 transfer/settle/refund 等资金字样"），NWT 指出正则挡不住 `helpUserMoney` 这类换皮命名，改成精确 allow-list（工具名 ∈ 显式三名单字面量）。
+2. **`trading.js` `/api/trade/pending-approvals`**：反馈工单混进 Owner 交易审批视图，修法本可以写"排除 `user_feedback` 这个 type"（黑名单），Bettor 裁定改用排除法但要求"对未来新交易 type 默认安全"——本质仍是黑名单思路的最小实例，埋了同一个坑的种子。
+3. **积压两族处置设计的 SQL 安全闸**：`UPDATE pool_markets SET protocol_status = 'pruned_expired_waived' WHERE ... AND protocol_status NOT IN ('completed', 'pruned_expired_waived', 'manual_recovery_refunded', 'settle_failed', 'cancelled')`——设计者凭记忆列了 5 个"不该碰的状态"。NWT 红队查活库 `pool_markets` 实际 distinct `protocol_status` 有 15 种值，黑名单漏了 `refunded`（907 行真终态）、`refunding`（51 行**进行中**转账）、`disputed`、`archived`、`settle_zombie_quarantine` 共 10 项——若目标 id 清单有任何误差命中这些状态之一，这条"安全闸"防不住它自己要防的事。
+
+### Wrong
+```sql
+-- 黑名单: 列出"不该碰的状态", 依赖设计者能想全所有坏值(活库状态集会持续增长, 记忆天生不完备)
+UPDATE pool_markets SET protocol_status = 'pruned_expired_waived'
+WHERE id IN (...) AND protocol_status NOT IN ('completed', 'cancelled', 'settle_failed')
+```
+
+### Right
+```sql
+-- 白名单: 只列出"目标本该处的状态"(设计 §1 已经明确写清楚这批市场应处于哪几个状态)
+UPDATE pool_markets SET protocol_status = 'pruned_expired_waived'
+WHERE id IN (...) AND protocol_status IN ('verifying', 'pending_bettors')
+```
+
+### Why
+- **黑名单的完备性依赖"穷举所有不该发生的情况"，这在真实系统里几乎不可能做到**——状态集合会随时间增长（新功能加新状态值），设计者写黑名单时凭的是"当下记得的几个"，不是查活库实测的全集。三次事故里，NWT 每次都是**亲查活库/亲跑正则**才发现遗漏，不是靠"审查代码逻辑显然对不对"就能看出来——遗漏本身是"不知道自己不知道"，人工 review 补不上。
+- **白名单的完备性依赖"穷举所有该发生的情况"，这通常是设计阶段就已经明确、集合很小的东西**（"这批市场理应处于 verifying 或 pending_bettors"——这个事实来自设计 §1 的判据，不是凭空列的）。集合外的任何值（不管是已知的还是未来新增的）天然被排除，不需要持续维护"又发现一个漏掉的坏值"。
+- **同一模式在一晚内复现三次**，说明这不是偶然疏忽，是默认思维定式（"我防的是坏情况，所以列坏情况"）——正确定式应该反过来："我允许的是好情况，所以列好情况"。写任何 guard/安全闸/权限白名单前，先问"这里该用 IN 还是 NOT IN"，默认优先 IN。
+- **落地纪律**：`scripts/lint-kanet.mjs` 的 `R-STATUS-GUARD-BLACKLIST` 规则（[WARN]，启发式非精确 AST）对 `UPDATE ...protocol_status` 附近出现 `NOT IN` 且无 `IN` 白名单的情况提示改写——这类"能写检测就写"的模式同 `R-FEE-SPLIT-PKG-DRIFT`（规矩靠自觉守不住，上机制）。
+
+---
+
 *本档案在 v2 spec 第八章元教训基础上独立。spec 聚焦"这次怎么做"，本档案聚焦"下次别再犯"。*
