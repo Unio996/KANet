@@ -59,8 +59,14 @@ let _feedbackCursor = new Date().toISOString();
 async function pollFeedbackEscalations() {
   const r = await feedbackEscalatedSince(_feedbackCursor, 50);
   if (!r.ok) return;
+  // NWT 红队抓到(2026-07-12 18:23, 现场重放5条重复代发实证): 同 memory
+  // reference-sqlite-iso-timestamp-string-compare-trap 教训, 这里再次出现——ev.created_at 是 SQLite
+  // datetime('now') 空格格式, _feedbackCursor 初始值是 toISOString() 'T'/'Z' 格式, `>` 字符串比较在
+  // 同一天内几乎永远为 false ⟹ cursor 卡死不推进 ⟹ 每 tick 拉同一批+重复代发。服务端 escalated-since
+  // 已用 datetime() 归一化查询、按 created_at ASC 返回, 故这里不需要再比较——直接无条件推进到本批
+  // 最后一条(数组已升序, 单调不减), 移除字符串比较本身而非试图"修对"它。
   for (const ev of r.events) {
-    if (ev.created_at && ev.created_at > _feedbackCursor) _feedbackCursor = ev.created_at;   // advance first, 同 pollDevCoord 纪律(发送失败不重放)
+    if (ev.created_at) _feedbackCursor = ev.created_at;   // advance first, 同 pollDevCoord 纪律(发送失败不重放)
     const ownerRelayId = await resolveOwnerVoiceRelayId();
     if (!ownerRelayId) continue;   // 未配置 owner-voice relay = 静默跳过(同 Direction A 降级)
     const ticketShort = String(ev.ticket_id || ev.id || '').slice(0, 8);
