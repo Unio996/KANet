@@ -16,7 +16,9 @@
 // PREREQUISITE (部署前): §0 unSafeJson patch (canonical build-preimage 返 un.serializeToSafeJSON·跑着的 relay 须载) +
 //   J1 consolidate auto-splice helper。
 
-import { getMarketBets } from '../lib/pool-bettor-sides-query.mjs';
+import { getMarketBets, getSidesByLogicalMarket } from '../lib/pool-bettor-sides-query.mjs';
+import { hasVerifiedContainer2Evidence } from '../api/admin-dedup.js';
+import { buildMakerRefundPreimage, handleRefunding } from './pool-market-settler.js';
 import { _shard9PhantomExcludeFor } from './bshard-close-voter.js';
 import { computePariMutuelPayout } from '../lib/pool-shard-settle.mjs';
 import { deriveRoleFeeLeaves } from '../lib/fee-split.mjs';
@@ -803,6 +805,100 @@ export async function cancelMarketLive(marketId, ctx) {
   const complete = claims.length === claimData.length && claims.every(c => c.received === true && !c.error);
   if (!complete) ctx.alert?.(marketId, `refund 未完整: attempted=${claims.length}/${claimData.length}, received=${claims.filter(c => c.received === true && !c.error).length} — needs_manual_refund${needsManualAttribution ? ' + needs_manual_attribution' : ''}`);
   return { ok: true, cancelTxid, claims, plan, complete, needsManualAttribution };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════════
+// bshard PoolSpine 容器① maker bond reclaim(J2, 2026-07-13, Bettor 派工#i2vns2 落码GO·
+// docs/2026-07-13-bshard-poolspine-maker-bond-reclaim-design.md)。
+//
+// 背景: refund_maker_unjoined entry(PoolSpine_v07.sil:381-398)对 bshard 完全零感知——缺口
+// 100%在驱动层。legacy dispatchRefund→handleRefunding 这条链路的唯一入口在 pool-market-settler.js
+// 主 tick 的 isBshard-skip 循环体内(harm-stopper 保护，防这条 legacy anonymous-pool 委员结算器
+// 误判 bshard 盘)，导致 handleRefunding 永远碰不到 bshard 市场（7pori 容器①拆雷事故根因）。
+// 本函数不新造链上能力，只是给已存在的 refund_maker_unjoined 补一条 bshard 专属驱动路径，单函数
+// 内完成 build→三闸判定→sign→broadcast（不搞"stash 完等下一 tick 捡"的两段式，那正是 7pori 撞见的
+// 结构缺口的同款形状，不重蹈）。
+
+/**
+ * reclaimBshardMakerBond — bshard 市场 PoolSpine 容器①(maker bond) 收口。
+ *
+ * 前置闸(全部 fail-closed，任一不满足直接拒绝不动钱，见 §3.3 设计):
+ *   ① isBshard: market_shards 有该 market 的行(否则该走 legacy dispatchRefund)。
+ *   ② 容器②已验证完成: hasVerifiedContainer2Evidence(market, sides) === true
+ *      (复用 admin-dedup.js 现成硬化判据，NWT 12 断言 8 负例，不重新发明"完成"的定义)。
+ *   ③ spine UTXO reorg-safe 深度确认: checkUtxoLanded(minDepth=REORG_SAFE_MIN_DEPTH)
+ *      (NWT 红队 MUST-FIX，禁零深度"这一刻 unspent"放行——浅确认可能是即将消失的 reorg phantom leaf；
+ *      复用 kasia-relay/src/lib/p2sh.mjs 已证资产 + 全库统一常量 pool-shard-register.mjs:58)。
+ *   ④ 未已收口: metadata.bshard_maker_bond_reclaimed_at 为空(幂等闸，防重复触发二次广播尝试)。
+ *
+ * ctx.dryRun=true: 四闸判定 + preimage 构建全部照跑，**在 handleRefunding(签名广播)之前停手**，
+ * 返回判定结果供人眼核对(镜像 cancelMarketLive 既有的 dryRun 惯例，§6 交付定义要求的"12 盘三闸判定
+ * 清单"就是靠这个模式跑出来的，不额外发明新机制)。
+ *
+ * @returns {ok, reason?, already?, txId?, amount?, dryRun?}
+ */
+export async function reclaimBshardMakerBond(marketId, ctx) {
+  const { db } = ctx;
+  const market = db.prepare('SELECT * FROM pool_markets WHERE id = ?').get(marketId);
+  if (!market) return { ok: false, reason: 'market 不存在' };
+
+  // 闸①: isBshard
+  const isBshard = !!db.prepare('SELECT 1 FROM market_shards WHERE logical_market_id = ? LIMIT 1').get(marketId);
+  if (!isBshard) return { ok: false, reason: '非 bshard 市场——用 legacy dispatchRefund/handleRefunding' };
+
+  let meta = {};
+  try { meta = JSON.parse(market.metadata || '{}'); } catch { return { ok: false, reason: 'metadata 坏 JSON, fail-closed' }; }
+  // 闸④: 幂等
+  if (meta.bshard_maker_bond_reclaimed_at) return { ok: false, reason: '已收口(幂等闸)', already: true };
+
+  // 闸②: 容器②完成证据(复用 NWT 硬化判据，不重新发明)
+  const sides = getSidesByLogicalMarket(marketId, db);
+  if (!hasVerifiedContainer2Evidence(market, sides)) {
+    return { ok: false, reason: '容器②完成证据未通过(hasVerifiedContainer2Evidence=false)——bettor 侧未确认终态前不放 maker bond' };
+  }
+
+  // 闸③: spine UTXO reorg-safe 深度确认(NWT MUST-FIX，NO TX NO STATE——不信 DB 的 protocol_status 字段本身)
+  const landedCheck = await ctx.relayPost(ctx.feeRelay.id, {
+    type: 'check_utxo_landed', address: market.spine_p2sh, txid: market.spine_lock_tx, minDepth: REORG_SAFE_MIN_DEPTH,
+  });
+  if (!landedCheck?.landed) {
+    return { ok: false, reason: `spine UTXO 未达 reorg-safe 深度确认(minDepth=${REORG_SAFE_MIN_DEPTH}, depth=${landedCheck?.depth})——闸③拒绝，不签名广播` };
+  }
+
+  // build(复用 legacy 共享 builder，非重写)
+  const preimage = await buildMakerRefundPreimage(market);
+  if (!preimage.ok) return { ok: false, reason: `preimage 构建失败: ${preimage.error}` };
+
+  if (ctx.dryRun) {
+    return { ok: true, dryRun: true, isBshard, makerAddress: preimage.makerAddress, amount: preimage.makerRefundAmount };
+  }
+
+  // 写回(同 legacy 形状字段命名，handleRefunding 直接认得，无需改动其逻辑)
+  const newMeta = {
+    ...meta, refund_tx_obj: preimage.tx_obj, refund_amount: preimage.makerRefundAmount,
+    refund_reason: 'bshard_maker_bond_reclaim', refund_dispatched_at: new Date().toISOString(),
+  };
+  db.prepare('UPDATE pool_markets SET metadata = ? WHERE id = ?').run(JSON.stringify(newMeta), marketId);
+
+  const marketRow = db.prepare('SELECT * FROM pool_markets WHERE id = ?').get(marketId);   // 重读拿到刚写的 meta
+  const submitResult = await handleRefunding(marketRow);
+  if (!submitResult?.ok) return { ok: false, reason: `handleRefunding submit 失败: ${submitResult?.reason}`, preimage };
+
+  // 幂等标记 + 审计(events 表先记 audit 意图，chain_events 只在真 txid 到手后才写——NWT 红队注1，
+  // chain_events 是链上事件唯一真相源，禁占位符污染双锚原则)
+  let finalMeta = {};
+  try { finalMeta = JSON.parse(db.prepare('SELECT metadata FROM pool_markets WHERE id = ?').get(marketId).metadata || '{}'); } catch {}
+  db.prepare('UPDATE pool_markets SET metadata = ? WHERE id = ?')
+    .run(JSON.stringify({ ...finalMeta, bshard_maker_bond_reclaimed_at: new Date().toISOString() }), marketId);
+  db.prepare(`INSERT INTO events (id, event_scope, event_type, source, level, summary, payload_json, created_at)
+              VALUES (lower(hex(randomblob(16))), 'settlement', 'bshard_maker_bond_reclaimed', 'reclaimBshardMakerBond', 'info', ?, ?, datetime('now'))`)
+    .run(`market=${marketId.slice(0,12)} amount=${preimage.makerRefundAmount} txid=${submitResult.txId}`,
+         JSON.stringify({ market_id: marketId, amount: preimage.makerRefundAmount, refund_txid: submitResult.txId }));
+  db.prepare(`INSERT INTO chain_events (id, txid, event_type, from_address, to_address, payload, observed_by, observed_at)
+              VALUES (lower(hex(randomblob(16))), ?, 'bshard_maker_bond_reclaimed', NULL, NULL, ?, 'reclaimBshardMakerBond', CURRENT_TIMESTAMP)`)
+    .run(submitResult.txId, JSON.stringify({ market_id: marketId, amount: preimage.makerRefundAmount }));
+
+  return { ok: true, amount: preimage.makerRefundAmount, txId: submitResult.txId };
 }
 
 export { COMMITTEE_DUMMY_SIG, QUORUM, ZERO32, splicePayoutContinuation, verifyClosedLanded, verifyClaimLanded };

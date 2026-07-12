@@ -2316,71 +2316,95 @@ export async function dispatchPhase2(market, decision) {
  * @param {object} market — pool_markets row
  * @param {object} decision — { action: 'refund', reason: string }
  */
+/**
+ * buildMakerRefundPreimage — 纯 preimage 构建(makerRow 查找 + fee 计算 + IPC 调用)，不碰 DB/status。
+ * 2026-07-13 从 dispatchRefund 内联逻辑抽出(docs/2026-07-13-bshard-poolspine-maker-bond-reclaim-design.md
+ * §3.2)——legacy dispatchRefund 和 bshard reclaimBshardMakerBond 两条路共用同一份构建逻辑，防止
+ * "bshard 专属重写一份"未来跟 legacy 那份 drift(同 D-009 手工配对常量必失同步族)。
+ * @returns {ok, tx_obj?, makerRefundAmount?, makerAddress?, error?}
+ */
+export async function buildMakerRefundPreimage(market) {
+  const makerStake = parseInt(market.maker_stake_amount, 10) || 0;
+  const oracleBond = parseInt(market.oracle_bond_amount, 10) || 0;
+
+  // Look up maker address (needed for both fee compute + preimage outputs)
+  const makerRow = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(market.maker_relay_id);
+  if (!makerRow?.address) {
+    if (typeof market.maker_relay_id === 'string' && market.maker_relay_id.startsWith('cross-node:')) {
+      logThrottled(`xnode-skip:${market.id}`, `[pool-settler] buildMakerRefundPreimage skip cross-node market ${market.id.slice(0,12)} (maker on remote host, refund must dispatch from producer node)`);
+      return { ok: false, error: 'cross-node maker (skip)' };
+    }
+    console.warn(`[pool-settler] buildMakerRefundPreimage market=${market.id.slice(0,12)} no maker address`);
+    return { ok: false, error: 'no maker address' };
+  }
+  const networkId = makerRow.address.startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
+
+  // Fee compute branches by protocol version:
+  //   v0.5: legacy fixed minerFee from market row (SS 焊死, can't change here).
+  //   v0.6: G2-B 二期 sediment — SS L281 require value==stake-ctor_minerFee, MUST use
+  //         baseMinerFeeR (= same as ctor). 47ff13d not floor (qlfpv 实测).
+  //   v0.7: G6 批3 段① — SS L372/373 fee 范围 [MIN_FEE=50_000, MAX_FEE=100M]. RED-LINE 2
+  //         (Bettor r297): fee MUST be mass-aware dynamic, 不 static 常数. Compute via
+  //         kaspa.calculateTransactionMass on a dummy signed-shape TX (= placeholder
+  //         scriptSig with same byte layout as real → mass identical to real signed TX).
+  const baseMinerFeeR = parseInt(market.miner_fee, 10) || 20_000;
+  let minerFee;
+  if (market.protocol_version === 'v0.7') {
+    try {
+      minerFee = await computeMassAwareV07RefundFee({
+        market, makerStake, networkId, makerAddress: makerRow.address,
+      });
+      console.log(`[pool-settler] buildMakerRefundPreimage v0.7 mass-aware fee market=${market.id.slice(0,12)} fee=${minerFee} (= mass × 110 sompi/mass + cap [50000, 1e8])`);
+    } catch (massErr) {
+      console.error(`[pool-settler] buildMakerRefundPreimage v0.7 mass compute fail market=${market.id.slice(0,12)}: ${massErr.message}`);
+      return { ok: false, error: `mass compute fail: ${massErr.message}` };
+    }
+  } else {
+    minerFee = baseMinerFeeR;
+  }
+
+  const isAnonymousPool = market.protocol_version === 'v0.6' || market.protocol_version === 'v0.7';
+  const makerRefundAmount = isAnonymousPool
+    ? (makerStake - Number(minerFee))
+    : (makerStake + oracleBond * 3 - Number(minerFee));  // v0.5: 3 bonds in spine
+  if (makerRefundAmount <= 0) {
+    console.warn(`[pool-settler] buildMakerRefundPreimage market=${market.id.slice(0,12)} makerRefundAmount=${makerRefundAmount} ≤ 0, skip`);
+    return { ok: false, error: `makerRefundAmount ${makerRefundAmount} <= 0` };
+  }
+
+  // Build refund TX preimage — reuse 'prediction_settle_build_preimage' IPC with single-p2sh + 1 output
+  const preimage = await sendCommandAsync(market.maker_relay_id, {
+    type: 'prediction_settle_build_preimage',
+    p2sh_address: market.spine_p2sh,
+    required_input_outpoints: [
+      { outpointTxid: market.spine_lock_tx, outpointIndex: 0 },
+    ],
+    outputs: [
+      { address: makerRow.address, amountSompi: makerRefundAmount.toString() },
+    ],
+  });
+  if (!preimage?.ok || !preimage.tx_obj) {
+    console.error(`[pool-settler] buildMakerRefundPreimage build_preimage fail market=${market.id.slice(0,12)}: ${preimage?.error}`);
+    return { ok: false, error: preimage?.error || 'no tx_obj' };
+  }
+
+  return { ok: true, tx_obj: preimage.tx_obj, makerRefundAmount, makerAddress: makerRow.address };
+}
+
 export async function dispatchRefund(market, decision) {
   try {
-    const makerStake = parseInt(market.maker_stake_amount, 10) || 0;
-    const oracleBond = parseInt(market.oracle_bond_amount, 10) || 0;
-
-    // Look up maker address (needed for both fee compute + preimage outputs)
-    const makerRow = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(market.maker_relay_id);
-    if (!makerRow?.address) {
-      if (typeof market.maker_relay_id === 'string' && market.maker_relay_id.startsWith('cross-node:')) {
-        logThrottled(`xnode-skip:${market.id}`, `[pool-settler] dispatchRefund skip cross-node market ${market.id.slice(0,12)} (maker on remote host, refund must dispatch from producer node)`);
-      } else {
-        console.warn(`[pool-settler] dispatchRefund market=${market.id.slice(0,12)} no maker address`);
-      }
-      return;
-    }
-    const networkId = makerRow.address.startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
-
-    // Fee compute branches by protocol version:
-    //   v0.5: legacy fixed minerFee from market row (SS 焊死, can't change here).
-    //   v0.6: G2-B 二期 sediment — SS L281 require value==stake-ctor_minerFee, MUST use
-    //         baseMinerFeeR (= same as ctor). 47ff13d not floor (qlfpv 实测).
-    //   v0.7: G6 批3 段① — SS L372/373 fee 范围 [MIN_FEE=50_000, MAX_FEE=100M]. RED-LINE 2
-    //         (Bettor r297): fee MUST be mass-aware dynamic, 不 static 常数. Compute via
-    //         kaspa.calculateTransactionMass on a dummy signed-shape TX (= placeholder
-    //         scriptSig with same byte layout as real → mass identical to real signed TX).
-    const baseMinerFeeR = parseInt(market.miner_fee, 10) || 20_000;
-    let minerFee;
-    if (market.protocol_version === 'v0.7') {
-      try {
-        minerFee = await computeMassAwareV07RefundFee({
-          market, makerStake, networkId, makerAddress: makerRow.address,
-        });
-        console.log(`[pool-settler] dispatchRefund v0.7 mass-aware fee market=${market.id.slice(0,12)} fee=${minerFee} (= mass × 110 sompi/mass + cap [50000, 1e8])`);
-      } catch (massErr) {
-        console.error(`[pool-settler] dispatchRefund v0.7 mass compute fail market=${market.id.slice(0,12)}: ${massErr.message}`);
-        return;
-      }
-    } else {
-      minerFee = baseMinerFeeR;
+    // 🔴 2026-07-13(docs/2026-07-13-bshard-poolspine-maker-bond-reclaim-design.md §3.1，Owner 7/12
+    // 17:05 裁定④防复发点): bshard 市场(market_shards 有行)没有 legacy refund 路——handleRefunding
+    // 的唯一调用点在同 tick 的 isBshard-skip 循环体内，dispatchRefund 建出的 refund_tx_obj 永远不会
+    // 被签名广播(7pori 容器①拆雷事故根因)。fail-loud 拒绝，不再静默建出一个死形状。
+    const isBshard = !!sqlite.prepare('SELECT 1 FROM market_shards WHERE logical_market_id = ? LIMIT 1').get(market.id);
+    if (isBshard) {
+      console.error(`[pool-settler] dispatchRefund REFUSED market=${market.id.slice(0,12)} — bshard market has no legacy refund path (market_shards rows exist), use reclaimBshardMakerBond instead`);
+      return { ok: false, reason: 'bshard market — legacy refund path structurally invalid' };
     }
 
-    const isAnonymousPool = market.protocol_version === 'v0.6' || market.protocol_version === 'v0.7';
-    const makerRefundAmount = isAnonymousPool
-      ? (makerStake - Number(minerFee))
-      : (makerStake + oracleBond * 3 - Number(minerFee));  // v0.5: 3 bonds in spine
-    if (makerRefundAmount <= 0) {
-      console.warn(`[pool-settler] dispatchRefund market=${market.id.slice(0,12)} makerRefundAmount=${makerRefundAmount} ≤ 0, skip`);
-      return;
-    }
-
-    // Build refund TX preimage — reuse 'prediction_settle_build_preimage' IPC with single-p2sh + 1 output
-    const preimage = await sendCommandAsync(market.maker_relay_id, {
-      type: 'prediction_settle_build_preimage',
-      p2sh_address: market.spine_p2sh,
-      required_input_outpoints: [
-        { outpointTxid: market.spine_lock_tx, outpointIndex: 0 },
-      ],
-      outputs: [
-        { address: makerRow.address, amountSompi: makerRefundAmount.toString() },
-      ],
-    });
-    if (!preimage?.ok || !preimage.tx_obj) {
-      console.error(`[pool-settler] dispatchRefund build_preimage fail market=${market.id.slice(0,12)}: ${preimage?.error}`);
-      return;
-    }
+    const preimage = await buildMakerRefundPreimage(market);
+    if (!preimage.ok) return { ok: false, reason: preimage.error };
 
     // 4. Stash refund metadata + transition to refunding (single-sig path skips collecting_sigs)
     let prevMeta = {};
@@ -2390,7 +2414,7 @@ export async function dispatchRefund(market, decision) {
       refund_tx_obj: preimage.tx_obj,
       refund_reason: decision.reason,
       refund_dispatched_at: new Date().toISOString(),
-      refund_amount: makerRefundAmount,
+      refund_amount: preimage.makerRefundAmount,
     };
     sqlite.prepare('UPDATE pool_markets SET metadata = ?, protocol_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
       .run(JSON.stringify(newMeta), 'refunding', market.id);
@@ -2398,9 +2422,11 @@ export async function dispatchRefund(market, decision) {
     // 5. Phase 2a-3 first ship: stash only. Phase 2b collecting_sigs handler will trigger maker sign + broadcast.
     //    For maker single-sig refund, simpler: maker_relay signs locally + broadcasts immediately (no DM needed).
     //    Future iteration: route through collecting_sigs handler for state machine consistency.
-    console.log(`[pool-settler] DISPATCHED Refund market=${market.id.slice(0,12)} reason=${decision.reason} maker_refund=${makerRefundAmount} → refunding`);
+    console.log(`[pool-settler] DISPATCHED Refund market=${market.id.slice(0,12)} reason=${decision.reason} maker_refund=${preimage.makerRefundAmount} → refunding`);
+    return { ok: true, makerRefundAmount: preimage.makerRefundAmount };
   } catch (e) {
     console.error(`[pool-settler] dispatchRefund fail market=${market.id?.slice(0,12)}: ${e.message}`);
+    return { ok: false, reason: e.message };
   }
 }
 
@@ -2490,40 +2516,40 @@ async function computeMassAwareV07RefundFee({ market, makerStake, networkId, mak
  * Cross-node ingested markets are skipped (= maker has no local key, refund must run on
  * producer node — same pattern as dispatchRefund). qlfpv-shape markets refund here.
  */
-async function handleRefunding(market) {
+export async function handleRefunding(market) {
   // G2-B 二期 (v0.6) + G6 批3 段① (v0.7) cover PoolSpine entry 2 refund_maker_unjoined. v0.5
   // markets use a different SS (3 oracle bonds in spine, fee 焊死) — separate handler not in
   // scope. v0.6/v0.7 differ only at SS bytecode level (= different redeem), the IPC path is
   // identical because scriptSig layout is same ([makerSig push] + OP_2 + [redeemScript push]).
   if (market.protocol_version !== 'v0.6' && market.protocol_version !== 'v0.7') {
     console.log(`[pool-settler:refunding] skip non-v0.6/v0.7 market ${market.id.slice(0,12)} (protocol_version=${market.protocol_version})`);
-    return;
+    return { ok: false, reason: `unsupported protocol_version ${market.protocol_version}` };
   }
   let meta = {};
   try { meta = JSON.parse(market.metadata || '{}'); } catch {}
   if (!meta.refund_tx_obj) {
     console.warn(`[pool-settler:refunding] market=${market.id.slice(0,12)} missing meta.refund_tx_obj, skip (= dispatchRefund did not stash)`);
-    return;
+    return { ok: false, reason: 'missing meta.refund_tx_obj' };
   }
   if (!meta.spine_redeem_script_hex) {
     console.warn(`[pool-settler:refunding] market=${market.id.slice(0,12)} missing meta.spine_redeem_script_hex (pre-v135 market), cannot assemble scriptSig`);
-    return;
+    return { ok: false, reason: 'missing meta.spine_redeem_script_hex' };
   }
   if (meta.refund_amount == null) {
     console.warn(`[pool-settler:refunding] market=${market.id.slice(0,12)} missing meta.refund_amount, skip`);
-    return;
+    return { ok: false, reason: 'missing meta.refund_amount' };
   }
 
   // Skip cross-node markets (maker_relay_id sentinel) — refund must run where maker key lives.
   if (typeof market.maker_relay_id === 'string' && market.maker_relay_id.startsWith('cross-node:')) {
     console.log(`[pool-settler:refunding] skip cross-node market ${market.id.slice(0,12)} (maker on remote host)`);
-    return;
+    return { ok: false, reason: 'cross-node maker' };
   }
 
   const makerRow = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(market.maker_relay_id);
   if (!makerRow?.address) {
     console.warn(`[pool-settler:refunding] market=${market.id.slice(0,12)} no maker address (maker_relay_id=${market.maker_relay_id?.slice(0,12)})`);
-    return;
+    return { ok: false, reason: 'no maker address' };
   }
 
   // PoolSpine_v06/v07/v0_7_1 SS L275/L376: tx.time >= (deadline + REFUND_GRACE_SEC) * 1000 (ms semantics).
@@ -2544,14 +2570,16 @@ async function handleRefunding(market) {
 
     if (!submitResult?.ok || !submitResult.txId) {
       console.error(`[pool-settler:refunding] submit fail market=${market.id.slice(0,12)}: ${submitResult?.error}`);
-      return;
+      return { ok: false, reason: submitResult?.error || 'submit fail (no txId)' };
     }
 
     sqlite.prepare('UPDATE pool_markets SET refund_txid = ?, protocol_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
       .run(submitResult.txId, 'refunded', market.id);
     console.log(`[pool-settler:refunding] REFUNDED market=${market.id.slice(0,12)} refund_txid=${submitResult.txId.slice(0,16)} to=${makerRow.address.slice(0,20)} amount=${meta.refund_amount}`);
+    return { ok: true, txId: submitResult.txId };
   } catch (e) {
     console.error(`[pool-settler:refunding] submit exception market=${market.id?.slice(0,12)}: ${e.message}`);
+    return { ok: false, reason: e.message };
   }
 }
 

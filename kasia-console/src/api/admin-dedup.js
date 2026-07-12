@@ -6,6 +6,8 @@ import { sqlite } from '../db/client.js';
 import { dispatchRefund } from '../services/pool-market-settler.js';
 import { verifyIngestRequest } from '../services/ingest-auth.js';
 import { getSidesByLogicalMarket } from '../lib/pool-bettor-sides-query.mjs';
+import { reclaimBshardMakerBond } from '../services/bshard-auto-settler.mjs';
+import { buildCtx } from '../services/bshard-settle-daemon.mjs';
 
 const HEX64 = /^[0-9a-fA-F]{64}$/;
 
@@ -76,5 +78,33 @@ export async function registerAdminDedupRoutes(fastify) {
       }
     }
     return reply.send({ ok: true, results });
+  });
+}
+
+// 2026-07-13 (docs/2026-07-13-bshard-poolspine-maker-bond-reclaim-design.md §3.4, Bettor 派工#i2vns2
+// 落码GO): bshard 市场容器①(PoolSpine maker bond) 收口——上面 /api/admin/dedup-refund 走 dispatchRefund
+// 是 legacy 专属(7pori 撞见的入口不辨材质病根，本条镜像修法：新端点单独收 bshard 材质，不再让一个
+// 端点兼两种机制)。dryRun:true(默认) 只跑四闸判定 + preimage 构建，不签名广播——§6.1 交付定义要求的
+// "12盘三闸判定清单"就靠这个模式跑，逐盘结果显式打印 makerAddress 供 Bettor+NWT 肉眼核对(同 7pori
+// 链验惯例，NWT verify-value-source 观察点)。真实执行仍需调用方显式传 dryRun:false + 走频道"明确批
+// 字样"纪律(钱路铁律不因为有 admin 端点降级)。
+export async function registerBshardBondReclaimRoutes(fastify) {
+  // POST /api/admin/reclaim-bshard-maker-bond { marketIds: [...], dryRun: true }
+  fastify.post('/api/admin/reclaim-bshard-maker-bond', { preHandler: async (request, reply) => { await verifyIngestRequest(request, reply); } }, async (request, reply) => {
+    const { marketIds, dryRun = true } = request.body || {};
+    if (!Array.isArray(marketIds) || !marketIds.length) {
+      return reply.code(400).send({ ok: false, error: 'marketIds must be a non-empty array' });
+    }
+    const ctx = { ...buildCtx(), dryRun };
+    const results = [];
+    for (const id of marketIds) {
+      try {
+        const r = await reclaimBshardMakerBond(id, ctx);
+        results.push({ id, ...r });
+      } catch (e) {
+        results.push({ id, ok: false, error: e.message });
+      }
+    }
+    return reply.send({ ok: true, dryRun, results });
   });
 }
