@@ -901,4 +901,47 @@ export async function reclaimBshardMakerBond(marketId, ctx) {
   return { ok: true, amount: preimage.makerRefundAmount, txId: submitResult.txId };
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════════
+// cohort B 附属拆雷(J2, 2026-07-13, Bettor 派工#i5cl3g·docs/2026-07-13-cohort-b-container2-
+// disposition-design.md)。清 legacy dispatchRefund 在 isBshard-skip 生效前误建的死形状字段
+// (跟 7pori 拆雷前一模一样，7pori 当时用一次性 scratch 脚本手清，这里做成可复用函数)。
+
+/**
+ * clearLegacyRefundDeadShape — 清 pool_markets.metadata 里 legacy dispatchRefund 留下的
+ * 四个死形状字段(refund_tx_obj/refund_reason/refund_dispatched_at/refund_amount)。这些字段
+ * 对 bshard 市场无害(handleRefunding 摸不到)，但是定时雷——若 isBshard-skip 逻辑将来被改动，
+ * 这些错形状 tx 可能被意外拾起签名广播。
+ *
+ * 前置闸(fail-closed):
+ *   ① isBshard: market_shards 有该 market 的行(NWT 红队 MUST-FIX，纵深防御——若被误用在非
+ *      bshard 市场上，会静默清空一笔合法 in-flight 的 legacy 退款，handleRefunding 下次 tick
+ *      直接 skip，钱卡死零报错。不能只信调用方传对了 marketId 列表)。
+ *   ② tripwire: 必须真的带着 refund_tx_obj 才生效(幂等，无该字段直接返回 already:true)。
+ *
+ * @returns {ok, reason?, already?, cleared?}
+ */
+export function clearLegacyRefundDeadShape(marketId, db) {
+  const market = db.prepare('SELECT metadata, protocol_status FROM pool_markets WHERE id = ?').get(marketId);
+  if (!market) return { ok: false, reason: 'market 不存在' };
+
+  const isBshard = !!db.prepare('SELECT 1 FROM market_shards WHERE logical_market_id = ? LIMIT 1').get(marketId);
+  if (!isBshard) return { ok: false, reason: '非 bshard 市场——refund_tx_obj 可能是 legacy 正常流程 in-flight 状态，拒绝清理(纵深防御)' };
+
+  let meta = {};
+  try { meta = JSON.parse(market.metadata || '{}'); } catch { return { ok: false, reason: 'metadata 坏 JSON' }; }
+  if (!meta.refund_tx_obj) return { ok: false, reason: '无 refund_tx_obj，无需清理(幂等)', already: true };
+
+  const before = {
+    refund_tx_obj: meta.refund_tx_obj, refund_reason: meta.refund_reason,
+    refund_dispatched_at: meta.refund_dispatched_at, refund_amount: meta.refund_amount,
+  };
+  const { refund_tx_obj, refund_reason, refund_dispatched_at, refund_amount, ...rest } = meta;
+  db.prepare('UPDATE pool_markets SET metadata = ? WHERE id = ?').run(JSON.stringify(rest), marketId);
+  db.prepare(`INSERT INTO events (id, event_scope, event_type, source, level, summary, payload_json, created_at)
+              VALUES (lower(hex(randomblob(16))), 'settlement', 'legacy_refund_deadshape_cleared', 'clearLegacyRefundDeadShape', 'warn', ?, ?, datetime('now'))`)
+    .run(`market=${marketId.slice(0,12)} 四字段清除`, JSON.stringify({ market_id: marketId, before }));
+
+  return { ok: true, cleared: before };
+}
+
 export { COMMITTEE_DUMMY_SIG, QUORUM, ZERO32, splicePayoutContinuation, verifyClosedLanded, verifyClaimLanded };
