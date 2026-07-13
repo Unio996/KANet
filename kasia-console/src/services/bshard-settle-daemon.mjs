@@ -298,6 +298,23 @@ function scheduleUmaRejudge(marketId, market) {
 //   同名 env GETBLOCKATDAA_MAX_WALK 两侧联动(Bettor 注4), regression case 双向钉值。
 const PREGATE_MAX_WALK = parseInt(process.env.GETBLOCKATDAA_MAX_WALK, 10) || 250000;
 const _pregateAudited = new Set();   // 进程内首次去重(重启后重发一条, 可接受——审计宁多勿漏)
+
+// 🔴 批量歼灭令(2026-07-13, Bettor #j869v7·29-aukqt 修完 70-ojizv 立刻现形, 同款病灶不再一个一个修):
+//   29-aukqt 的 walk_exhausted_confirmed marker 只认一种精确错误签名(getBlockAtDaa 特有)。70-ojizv 是
+//   另一种机制(consolidate landed() 确认轮询卡死, pool-shard-settle.mjs:426)——同"每 tick 重付一次
+//   沉没代价"的形状, 但错误文案完全不同。与其逐个错误类型开专属 regex(打地鼠), 泛化成: 任意市场若连续
+//   N 个 tick(REPEAT_OFFENDER_THRESHOLD, 默认 3)以**同一签名前缀**(reason 前 40 字符, 后半段的
+//   txid/金额等易变细节被截掉, 只保留失败*类型*)TRANSIENT 重试耗尽 → 判定"结构性卡死非真瞬态", 反应式
+//   标记 gate, 不再逐 tick 重付整轮 retry(3 次内部重试+backoff)的代价。只处理"停止空转"这一层——
+//   实际 UTXO/consolidate 为什么卡死是另一个问题, 见 events 审计 payload 里的 reason, 处置另案。
+//   不动钱、不改 protocol_status(shouldKeepStatus 原逻辑不动, 只加这层"要不要下次还试"的调度层)。
+const REPEAT_OFFENDER_THRESHOLD = parseInt(process.env.REPEAT_OFFENDER_THRESHOLD, 10) || 3;
+function _reasonSignature(reason) { return String(reason || '').slice(0, 40); }
+function repeatOffenderGate(m) {
+  let meta = {};
+  try { meta = JSON.parse(m.metadata || '{}'); } catch {}
+  return meta?.repeat_offender_confirmed === true;
+}
 function _coverageFloor() {
   try { return sqlite.prepare('SELECT MIN(start_daa) f FROM spc_daa_index_coverage').get()?.f ?? null; } catch { return null; }
 }
@@ -376,12 +393,15 @@ function selectRipeMarkets(currentDaa, pmt, limit) {
   `).all(FINALITY_BUFFER, currentDaa);
   const ripe = [];
   const _floor = _coverageFloor();   // 每 tick 查一次(Bettor 注1: 循环内每行纯算术零 DB 写)
-  let _gated = 0;
+  let _gated = 0, _gatedUnreachable = 0, _gatedRepeatOffender = 0;
   for (const m of rows) {
     if (_leases.has(m.id)) continue;
     // 🔴 pre-gate 主闸(合卡设计 §3, Bettor 注1 修层): push 进 ripe 前判——不占 MAX_PER_TICK slot,
     //    桶C 才真解饿死(v1.0 放 attempt 层被 Bettor 实读驳回: gate 盘无 lease 下一 tick 原样再入选)。
-    if (unreachablePreGate(m, currentDaa, _floor)) { _gated++; continue; }
+    if (unreachablePreGate(m, currentDaa, _floor)) { _gated++; _gatedUnreachable++; continue; }
+    // 🔴 批量歼灭令(repeat-offender 泛化闸, 见 REPEAT_OFFENDER_THRESHOLD 上方注释): 与 unreachablePreGate
+    //    并列独立闸门(不复用同一函数——判据完全不同: 这个不关心 DAA/floor/gap, 只认"同签名连续耗尽")。
+    if (repeatOffenderGate(m)) { _gated++; _gatedRepeatOffender++; continue; }
     // 🔴 consolidate lockTime gate (partial-shard ShardLeaf 件1: tx.time>=deadline*1000): MTP(pastMedianTime)
     //   滞后实时 ~2-3min·过早 settle → consolidate TX "input not finalized" rejected (live daemon A/u6ry7 实撞)。
     //   只在 MTP >= deadline*1000 才 settle (consolidate 才 final)。sealed-only 盘其实不需·但统一 gate 无害(稍延)。
@@ -399,7 +419,7 @@ function selectRipeMarkets(currentDaa, pmt, limit) {
       if (ripe.length >= limit) break;
     } catch (e) { log(`ripe-scan skip ${m.id.slice(-8)}: ${e.message}`); }
   }
-  if (_gated > 0) log(`[pre-gate] ${_gated} market(s) gated this tick (unreachable: deadline<coverage-floor ${_floor} OR 实测 walk-exhausted, && gap>${PREGATE_MAX_WALK}, 零walk零slot, 挂账待 L628 另案)`);
+  if (_gated > 0) log(`[pre-gate] ${_gated} market(s) gated this tick (unreachable=${_gatedUnreachable}[deadline<floor ${_floor} OR walk-exhausted, gap>${PREGATE_MAX_WALK}] + repeat-offender=${_gatedRepeatOffender}[连续${REPEAT_OFFENDER_THRESHOLD}次同签名TRANSIENT耗尽], 零walk/consolidate零slot, 挂账待人工另案)`);
   return ripe;
 }
 
@@ -516,6 +536,25 @@ async function settleOneMarket(marketId) {
   const classification = classifyFailure(lastResult._rawError || new Error(String(lastResult.reason || '')), marketRow, TRANSIENT_RE);
   if (String(lastResult.reason || '').match(TRANSIENT_RE)) {
     log(`${marketId.slice(-8)} 瞬态重试耗尽(${RETRY_MAX_ATTEMPTS}次): ${String(lastResult.reason || '').slice(0, 80)} — 分类=${classification.type}`);
+    // 批量歼灭令(见 REPEAT_OFFENDER_THRESHOLD 上方注释): 连续同签名 tick 级耗尽计数, 达阈值反应式 gate。
+    try {
+      const sig = _reasonSignature(lastResult.reason);
+      const row = sqlite.prepare('SELECT metadata FROM pool_markets WHERE id = ?').get(marketId);
+      let meta = {}; try { meta = JSON.parse(row?.metadata || '{}'); } catch {}
+      const streak = (meta.repeat_failure_sig === sig ? (meta.repeat_failure_streak || 0) : 0) + 1;
+      if (streak >= REPEAT_OFFENDER_THRESHOLD) {
+        sqlite.prepare(`UPDATE pool_markets SET metadata = json_set(json_set(COALESCE(metadata, '{}'), '$.repeat_failure_sig', ?), '$.repeat_offender_confirmed', json('true')) WHERE id = ?`).run(sig, marketId);
+        log(`🔴 [repeat-offender] ${marketId.slice(-8)} 连续 ${streak} 次同签名(${sig})TRANSIENT耗尽, 标记 repeat_offender_confirmed, 后续 tick gate(挂账待人工处置实际卡死原因)`);
+        try {
+          sqlite.prepare(`
+            INSERT INTO events (id, event_scope, event_type, source, level, summary, payload_json, created_at)
+            VALUES (?, 'system', 'repeat_offender_confirmed', 'bshard-settle-daemon', 'warn', ?, ?, datetime('now'))
+          `).run(randomUUID(), `market=${String(marketId).slice(-8)} 连续 ${streak} 次同签名TRANSIENT耗尽(${sig}), gate, 处置另案`, JSON.stringify({ marketId, streak, sig, fullReason: String(lastResult.reason || '').slice(0, 300) }));
+        } catch (evErr) { log(`repeat-offender events insert fail (non-fatal): ${evErr.message}`); }
+      } else {
+        sqlite.prepare(`UPDATE pool_markets SET metadata = json_set(json_set(COALESCE(metadata, '{}'), '$.repeat_failure_sig', ?), '$.repeat_failure_streak', ?) WHERE id = ?`).run(sig, streak, marketId);
+      }
+    } catch (e) { log(`repeat-offender streak write fail (non-fatal): ${e.message}`); }
   }
   return { ...lastResult, classification };
 }
@@ -841,4 +880,4 @@ export function startZkJudgeProposeAutonomousTickCron() {
 }
 export function stopZkJudgeProposeAutonomousTickCron() { if (_zkJudgeProposeTickTimer) { clearInterval(_zkJudgeProposeTickTimer); _zkJudgeProposeTickTimer = null; } }
 
-export { selectRipeMarkets, settleOneMarket, judgeWinDir, endBlockHash, buildCtx, consolidateAndBuildPsState, ensureReady, TRANSIENT_RE, _umaBackoffAllowsRetryNow, scheduleUmaRejudge, UMA_REJUDGE_BACKOFF_TABLE, UMA_GENUINE_TIMEOUT_HOURS, unreachablePreGate, PREGATE_MAX_WALK };
+export { selectRipeMarkets, settleOneMarket, judgeWinDir, endBlockHash, buildCtx, consolidateAndBuildPsState, ensureReady, TRANSIENT_RE, _umaBackoffAllowsRetryNow, scheduleUmaRejudge, UMA_REJUDGE_BACKOFF_TABLE, UMA_GENUINE_TIMEOUT_HOURS, unreachablePreGate, PREGATE_MAX_WALK, repeatOffenderGate, REPEAT_OFFENDER_THRESHOLD };

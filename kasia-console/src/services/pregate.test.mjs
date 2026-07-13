@@ -17,7 +17,7 @@ if (!process.env._PREGATE_TEST_BOOTSTRAPPED) {
 }
 
 const { sqlite } = await import('../db/client.js');
-const { selectRipeMarkets, unreachablePreGate, PREGATE_MAX_WALK } = await import('./bshard-settle-daemon.mjs');
+const { selectRipeMarkets, unreachablePreGate, PREGATE_MAX_WALK, repeatOffenderGate, REPEAT_OFFENDER_THRESHOLD } = await import('./bshard-settle-daemon.mjs');
 
 let fails = 0;
 const ok = (cond, label) => { if (cond) console.log(`  ✅ ${label}`); else { console.error(`  ❌ ${label}`); fails++; } };
@@ -118,6 +118,53 @@ console.log('[test] ② selectRipeMarkets 集成: gate 盘不占 slot, 可达盘
   selectRipeMarkets(CUR, Date.now() + 1e9, 20);   // 第二 tick
   const ev2 = sqlite.prepare(`SELECT COUNT(*) c FROM events WHERE event_type='unreachable_gated' AND payload_json LIKE '%m-gated-oldpruned%'`).get().c;
   ok(ev2 === 1, '第二 tick 不重发审计(进程内去重)');
+}
+
+console.log(`[test] ④ repeatOffenderGate 泛化闸(批量歼灭令, 2026-07-13, 阈值=${REPEAT_OFFENDER_THRESHOLD}):`);
+{
+  const m = (meta = '{}') => ({ id: `m-ro-${Math.random().toString(36).slice(2, 6)}`, metadata: meta });
+  ok(repeatOffenderGate(m()) === false, '空 metadata → 不 gate(基线)');
+  ok(repeatOffenderGate(m(JSON.stringify({ repeat_failure_streak: 2 }))) === false, '未达阈值(streak=2<3) → 不 gate');
+  ok(repeatOffenderGate(m(JSON.stringify({ repeat_offender_confirmed: true }))) === true, 'repeat_offender_confirmed=true → gate');
+  ok(repeatOffenderGate(m('not valid json{{{')) === false, '畸形 metadata JSON → fail-open 不 gate(同 unreachablePreGate 惯例)');
+
+  console.log('  ②(70-ojizv 形状)selectRipeMarkets 端到端: gate 盘不入 ripe, 首次发 repeat_offender_confirmed 审计:');
+  seedMarket('m-repeat-offender', { deadlineDaa: CUR - 5000, metadata: JSON.stringify({ repeat_offender_confirmed: true }) });
+  const ripe2 = selectRipeMarkets(CUR, Date.now() + 1e9, 20);
+  const ids2 = ripe2.map(r => r.market.id);
+  ok(!ids2.includes('m-repeat-offender'), `repeat-offender 盘不入 ripe: ${JSON.stringify(ids2)}`);
+
+  console.log('  ③ streak 累加 SQL 语句本身(复刻 settleOneMarket wrapper 同款 json_set 逻辑):');
+  seedMarket('m-streak-accum', { deadlineDaa: CUR - 5000 });
+  const bump = (sig) => {
+    const row = sqlite.prepare('SELECT metadata FROM pool_markets WHERE id = ?').get('m-streak-accum');
+    let meta = {}; try { meta = JSON.parse(row?.metadata || '{}'); } catch {}
+    const streak = (meta.repeat_failure_sig === sig ? (meta.repeat_failure_streak || 0) : 0) + 1;
+    if (streak >= REPEAT_OFFENDER_THRESHOLD) {
+      sqlite.prepare(`UPDATE pool_markets SET metadata = json_set(json_set(COALESCE(metadata, '{}'), '$.repeat_failure_sig', ?), '$.repeat_offender_confirmed', json('true')) WHERE id = ?`).run(sig, 'm-streak-accum');
+    } else {
+      sqlite.prepare(`UPDATE pool_markets SET metadata = json_set(json_set(COALESCE(metadata, '{}'), '$.repeat_failure_sig', ?), '$.repeat_failure_streak', ?) WHERE id = ?`).run(sig, streak, 'm-streak-accum');
+    }
+    return sqlite.prepare('SELECT metadata FROM pool_markets WHERE id = ?').get('m-streak-accum');
+  };
+  let r = bump('consolidate shard 0 no land');
+  ok(JSON.parse(r.metadata).repeat_failure_streak === 1, '第1次同签名失败 → streak=1');
+  r = bump('consolidate shard 0 no land');
+  ok(JSON.parse(r.metadata).repeat_failure_streak === 2, '第2次同签名失败 → streak=2(未达阈值3, 不confirm)');
+  r = bump('consolidate shard 0 no land');
+  ok(JSON.parse(r.metadata).repeat_offender_confirmed === true, `第3次同签名失败(达阈值${REPEAT_OFFENDER_THRESHOLD}) → repeat_offender_confirmed=true`);
+
+  seedMarket('m-streak-reset', { deadlineDaa: CUR - 5000 });
+  const bump2 = (id, sig) => {
+    const row = sqlite.prepare('SELECT metadata FROM pool_markets WHERE id = ?').get(id);
+    let meta = {}; try { meta = JSON.parse(row?.metadata || '{}'); } catch {}
+    const streak = (meta.repeat_failure_sig === sig ? (meta.repeat_failure_streak || 0) : 0) + 1;
+    sqlite.prepare(`UPDATE pool_markets SET metadata = json_set(json_set(COALESCE(metadata, '{}'), '$.repeat_failure_sig', ?), '$.repeat_failure_streak', ?) WHERE id = ?`).run(sig, streak, id);
+    return sqlite.prepare('SELECT metadata FROM pool_markets WHERE id = ?').get(id);
+  };
+  bump2('m-streak-reset', 'ECONNREFUSED at rpc');
+  r = bump2('m-streak-reset', 'UTXO not found for tx abc');   // 不同签名 → streak 重置回 1, 不延续
+  ok(JSON.parse(r.metadata).repeat_failure_streak === 1, '换了不同失败签名 → streak 重置为1(不跨签名累加噪音)');
 }
 
 console.log('[test] ③ 有 evidence 的 floor 下老盘照进 selection(桶A 形状——Fix-A resume 域, gate 不拦):');
