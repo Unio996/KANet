@@ -280,6 +280,7 @@ async function legacyRefundBuilderTick() {
 export async function poolSettlerTick() {
   if (running) { return { skipped: true }; }
   running = true;
+  const _tickDiagStart = Date.now();   // 诊断埋点(2026-07-13, Bettor #iynqdt·observe-only), 查完即删
   try {
     // J2-tn r391 #28: legacy-refund-builder before main tick. 解冻 ver=null/v0.5 卡单.
     // 独立 path 不碰 committee 路 (= Bettor ③ 关1 护栏达标).
@@ -1197,6 +1198,7 @@ export async function poolSettlerTick() {
 
     return { ok: true, processed: markets.length, consensus, refund, pending, doomed, errored, pathBReconciled, bshardSkipped, commingledRefund, brokerFeeEmit };
   } finally {
+    console.log(`[diag:tick-duration] poolSettlerTick ms=${Date.now() - _tickDiagStart}`);
     running = false;
   }
 }

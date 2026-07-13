@@ -566,6 +566,12 @@ startBshardCloseSubmitV2Cron();
 import { startPoolMarketSettlerCron } from './services/pool-market-settler.js';
 startPoolMarketSettlerCron();
 
+// 诊断埋点(2026-07-13, Bettor 派工#iynqdt·observe-only, 零DB写/只console.log): event loop 长阻塞
+// 调查(190s 缺口+settle-daemon tick 重叠+relay-health ~120 次误判 dead 级联)的决定性仪器——把
+// 饿死从"事后从日志缺口推断"换成"一等公民事件, 有时间戳有时长"。收集数据选刀后即可删。
+import { startEventLoopLagHeartbeat } from './lib/eventloop-lag-heartbeat.mjs';
+startEventLoopLagHeartbeat();
+
 // DoD C 收尾 (Bettor r393): 5min cron 自动领 unclaimed bettor refunds for cancelled markets.
 // J1 2026-06-20: env gate (BETTOR_REFUND_CLAIM_ENABLED=0 disable). claimAutoDispatcherTick 在 255-market backlog 上每 tick
 //   重同步 DB 查(better-sqlite3 native)打满 console CPU(node --prof 钉死, 见记忆 console-restart-storm)→ 100% peg 堵死

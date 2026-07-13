@@ -477,7 +477,14 @@ export async function settleMarketLive(marketId, ctx) {
         nextState['w' + word] = (BigInt(nextState['w' + word]) + (1n << BigInt(bit))).toString();
         const nextRedeem = splicePayoutContinuation(curRedeem, nextState);
         const nextAddr = ctx.p2shAddr(nextRedeem);
+        // 诊断埋点(2026-07-13, Bettor 派工#iynqdt·observe-only, 零分支/零DB写, 只 console.log): 这条
+        // LIKE 前导通配符查询对 kaspa_tx_log(794 万行, EXPLAIN QUERY PLAN 实测 SCAN 非 SEARCH) 是本轮
+        // event-loop 长阻塞调查的头号嫌疑——加计时 + 命中/未命中路径日志，把"事后从缺口推断"换成"有
+        // 时间戳直接看"。查完即可删，纯观测不改变任何行为。
+        const _likeQueryStart = Date.now();
         const histRow = ctx.db.prepare(`SELECT tx_id FROM kaspa_tx_log WHERE outputs_json LIKE ? ORDER BY block_time ASC LIMIT 1`).get(`%${nextAddr}%`);
+        const _likeQueryMs = Date.now() - _likeQueryStart;
+        console.log(`[diag:kaspa-tx-log-like] market=${marketId.slice(0,12)} step=${step} ms=${_likeQueryMs} hit=${!!histRow?.tx_id}`);
         let foundTxId = histRow?.tx_id;
         if (!foundTxId) {
           const nextEntries = (await ctx.getUtxos(nextAddr)).map(e => { const j = JSON.parse(JSON.stringify(e, (k, v) => typeof v === 'bigint' ? v.toString() : v)); return j.entry?.outpoint || j.outpoint; });

@@ -625,6 +625,7 @@ async function _settleOneMarketAttempt(marketId) {
 export async function settleDaemonTick() {
   if (_running) { log('prev tick still running·skip'); return; }
   _running = true;
+  const _tickDiagStart = Date.now();   // 诊断埋点(2026-07-13, Bettor #iynqdt·observe-only), 查完即删
   try {
     _k = await kaspa(); await buildPkMap();
     const currentDaa = await chainReader.getCurrentDaaScore();
@@ -684,7 +685,10 @@ export async function settleDaemonTick() {
       } finally { _leases.delete(market.id); }
     }
   } catch (e) { log(`tick error: ${e.message}`); }
-  finally { _running = false; }
+  finally {
+    log(`[diag:tick-duration] settleDaemonTick ms=${Date.now() - _tickDiagStart}`);
+    _running = false;
+  }
 }
 
 export function startSettleDaemonCron() {
