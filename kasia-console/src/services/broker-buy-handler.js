@@ -21,7 +21,11 @@ import {
   shouldDeterministicFire,
 } from './broker-state-authority.js';
 
-const BROKER_RELAY_ID = '0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0';
+// Bettor #j5romh r766 身份迁移补全, env 缺失 fail-loud 拒启(死值兜底=定时雷, 见 kanet.env)。
+const BROKER_RELAY_ID = process.env.BROKER_RELAY_ID;
+if (!BROKER_RELAY_ID) {
+  throw new Error('[broker-buy-handler] FATAL: BROKER_RELAY_ID env var not set (see kanet.env) — refusing to start with hardcoded dead relay id fallback');
+}
 // T-J2-2026-04-27 v1.1: 真扩 BUY_REGEX 同 BUY_OVERRIDE_REGEX (broker-sell-handler line 14) 模式
 // + SELL_REGEX 真扩 (63a953de3) 对称真扩同义词 — 真 deterministic fast path 跳 LLM 1-2s
 // 加 '想买/要买/购买/购/想换/搞/弄/来点/想要/我要/want/get/grab/take/need/cop/gimme/quiero'

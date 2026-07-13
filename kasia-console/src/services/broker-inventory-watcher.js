@@ -7,7 +7,11 @@ import { ethers } from 'ethers';
 import { sqlite } from '../db/client.js';
 import { swapUsdtToUsdc } from './broker-swap.js';
 
-const BROKER_RELAY_ID = '0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0';
+// Bettor #j5romh r766 身份迁移补全, env 缺失 fail-loud 拒启(死值兜底=定时雷, 见 kanet.env)。
+const BROKER_RELAY_ID = process.env.BROKER_RELAY_ID;
+if (!BROKER_RELAY_ID) {
+  throw new Error('[broker-inventory-watcher] FATAL: BROKER_RELAY_ID env var not set (see kanet.env) — refusing to start with hardcoded dead relay id fallback');
+}
 const BSC_RPC = 'https://bsc-dataseed1.binance.org';
 const USDC_BSC = '0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d';
 const ERC20_ABI = ['function balanceOf(address) view returns (uint256)'];

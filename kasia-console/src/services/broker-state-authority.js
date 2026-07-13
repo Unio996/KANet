@@ -24,27 +24,31 @@
 
 import { sqlite } from '../db/client.js';
 import { transition } from './broker-state-machine.js';  // SA-4 真 transition migrate (_sweepStaleAligning aligning→expired)
+import { buildExplorerUrl, formatTxReference } from '../lib/explorer-url.mjs';
 // T-J2-2026-05-11 Phase 2 A.4 (NWT #18 ABE audit): exchange-machine transition alias (区分 retail_dex_orders state machine 同名 transition)
 import { transition as exchangeTransition } from './exchange-machine.js';
 
 // T-J2-2026-05-07 r256 T1.5a: 主动 DM chain-truth grounding (Owner 钦定 broker user-facing 必 chain truth + TX evidence)
-const BROKER_RELAY_ID = '0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0';
+// Bettor #j5romh r766 身份迁移补全, env 缺失 fail-loud 拒启(死值兜底=定时雷, 见 kanet.env)。
+const BROKER_RELAY_ID = process.env.BROKER_RELAY_ID;
+if (!BROKER_RELAY_ID) {
+  throw new Error('[broker-state-authority] FATAL: BROKER_RELAY_ID env var not set (see kanet.env) — refusing to start with hardcoded dead relay id fallback');
+}
 
 // fire-and-forget DM 真 user with refund TX evidence + explorer URL. silent fail 真 NOT 阻 refund (T1.5b query path 真 ground 真 chain truth).
 async function _dmRefundUser(userKasiaAddr, refundAmount, realTxId, isBackfill) {
   try {
     if (!userKasiaAddr || !realTxId) return;
     const { enqueueVerified } = await import('./broker-action-queue.js');
+    const explorerUrl = buildExplorerUrl(realTxId, process.env.KASPA_NETWORK);
     const lines = isBackfill
       ? [
           `✓ 已退 ${refundAmount} KAS (链上早已退, 现补记 DB)`,
-          `TX: ${realTxId.slice(0, 16)}...`,
-          `查看: https://explorer.kaspa.org/txs/${realTxId}`,
+          `查看: ${formatTxReference(realTxId, explorerUrl)}`,
         ]
       : [
           `✓ 已退 ${refundAmount} KAS 到你 Kasia 钱包`,
-          `TX: ${realTxId.slice(0, 16)}...`,
-          `查看: https://explorer.kaspa.org/txs/${realTxId}`,
+          `查看: ${formatTxReference(realTxId, explorerUrl)}`,
         ];
     await enqueueVerified({
       kind: 'dm_completion',

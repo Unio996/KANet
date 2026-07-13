@@ -23,7 +23,12 @@ import { randomUUID } from 'crypto';
 // imports COMMAND_TYPES from relay's canonical source-of-truth.
 import { COMMAND_TYPES } from '../../../kasia-relay/src/lib/commands.mjs';
 
-const BROKER_RELAY_ID = '0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0';
+// Bettor #j5romh r766 身份迁移补全(9 兄弟文件漏跟 broker-llm-agent.js 的 env 化, 生产退款安全网静默死):
+// 死 relay id 字面量禁做 fallback(fixture 腐烂教训: 死值兜底=定时雷), env 缺失直接 fail-loud 拒启。
+const BROKER_RELAY_ID = process.env.BROKER_RELAY_ID;
+if (!BROKER_RELAY_ID) {
+  throw new Error('[broker-action-queue] FATAL: BROKER_RELAY_ID env var not set (see kanet.env) — refusing to start with hardcoded dead relay id fallback');
+}
 const TTL_DEFAULT_MS = 10 * 60 * 1000;
 const RETRY_MAX = 3;
 // R4 Bug 9 (J2 RCA 4e7be515): relay anti-spam fail-closed 5s 内同 message dedup 拒.

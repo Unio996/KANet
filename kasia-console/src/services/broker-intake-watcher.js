@@ -18,7 +18,11 @@ import { randomUUID } from 'node:crypto';
 
 const TICK_MS = 60_000;
 const REFUND_TICK_MS = 5 * 60_000;
-const BROKER_RELAY_ID = '0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0';  // Trader-B
+// Bettor #j5romh r766 身份迁移补全(此文件含 5min 退款 sweep tick, 死 id 自 relay 重建起静默失效): env 缺失 fail-loud 拒启。
+const BROKER_RELAY_ID = process.env.BROKER_RELAY_ID;
+if (!BROKER_RELAY_ID) {
+  throw new Error('[broker-intake-watcher] FATAL: BROKER_RELAY_ID env var not set (see kanet.env) — refusing to start with hardcoded dead relay id fallback');
+}
 const PUBLISH_EXPIRES_MIN = 120;
 const DEFAULT_FEE_KAS = '0.1';
 let _intakeInterval = null;

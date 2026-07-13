@@ -19,7 +19,11 @@ import { randomUUID } from 'crypto';
 import { setConvoStateLock, shouldDeterministicFire } from './broker-state-authority.js';
 import { transition } from './broker-state-machine.js';  // SA-4 真 transition migrate
 
-const BROKER_RELAY_ID = '0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0';
+// Bettor #j5romh r766 身份迁移补全, env 缺失 fail-loud 拒启(死值兜底=定时雷, 见 kanet.env)。
+const BROKER_RELAY_ID = process.env.BROKER_RELAY_ID;
+if (!BROKER_RELAY_ID) {
+  throw new Error('[broker-sell-handler] FATAL: BROKER_RELAY_ID env var not set (see kanet.env) — refusing to start with hardcoded dead relay id fallback');
+}
 // T-J2-2026-04-27 v1.1: 真扩 SELL_REGEX 同 BUY_OVERRIDE_REGEX 模式 (Owner 25:21 钦定真扩同义词)
 // 加 '想卖/要卖/出售/抛/想抛/想出/dump/cash out' — 真 deterministic fast path 跳 LLM 1-2s
 // R33 b iter6 (NWT c5bda126 fuzz negative trace): regex sign capture, 后续 reject negative.
