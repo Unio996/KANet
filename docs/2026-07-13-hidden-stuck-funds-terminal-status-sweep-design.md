@@ -1,4 +1,4 @@
-> **Status**: CURRENT (设计稿·待 NWT 快审，纯读零风险)
+> **Status**: CURRENT (设计稿 v1.1·NWT 快审 GREEN-with-1-note 已折入，纯读零风险)
 
 # 隐匿卡资金全库扫——第八层洋葱
 
@@ -10,7 +10,7 @@
 ## 范围
 
 `protocol_status IN ('completed','archived','pruned_expired_waived','cancelled',
-'settle_zombie_quarantine','refunded')` 的全部 `pool_markets`，实查行数：
+'settle_zombie_quarantine','refunded','settle_failed')` 的全部 `pool_markets`，实查行数：
 
 | 状态 | 行数 |
 |---|---|
@@ -20,7 +20,13 @@
 | cancelled | 59 |
 | settle_zombie_quarantine | 189 |
 | refunded | 992 |
-| **合计** | **1963** |
+| settle_failed(🔴 NWT 红队补，已折入) | 49 |
+| **合计** | **2012** |
+
+**🔴 NWT 快审 note(已折入)**：`settle_failed` 名字上正是"结算放弃了，可能还有钱躺着"的候选，不能默认
+排除不问，纳入扫描范围。其余非扫描状态(`refunding`/`verifying`/`pending_*`/`collecting_sigs`/
+`attested_v2`/`disputed`/`shard_internal`)是活跃态或非 logical-market 行，合理排除(非终态本身就不该
+被期望"资金已清空"，排除有据)。
 
 ## 方法(纯读，两级过滤，不打live console/relay 硬)
 
