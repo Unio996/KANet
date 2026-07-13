@@ -16,7 +16,7 @@ import fs from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { relayId as resolveRelayId, relayAddr as resolveRelayAddr } from './peers.mjs';
 
-const CONSOLE_URL = process.env.KANET_CONSOLE_URL || 'http://127.0.0.1:3100';
+const CONSOLE_URL = process.env.KANET_CONSOLE_URL || 'http://127.0.0.1:3200';
 const DB_PATH = process.env.KANET_DB_PATH
   || path.join(path.dirname(fileURLToPath(import.meta.url)), '../../data/console.db');
 // Owner 钦定 (2026-04-27 13:43): 'no log no pass' — 每个 case 跑测必须留完整 trace,
@@ -659,7 +659,7 @@ const actions = {
     // console process module-scoped _executeOverride 真 isolated. 真 HTTP endpoint inject same-process console.
     // J1 #86 vote A1' fail-closed: peer_addr param required, mock 仅 registered test peer fire,
     // production user real chain TX 真 fall-through _defaultExecute (Q2 production protection).
-    const PORT = process.env.PORT || 3100;
+    const PORT = process.env.PORT || 3200;
     if (!step.peer_addr) return { ok: false, error: 'peer_addr required (production protection: empty Set fail-closed = mock nothing, must register test peer addr)' };
     try {
       const res = await fetch(`http://127.0.0.1:${PORT}/api/test/inject-send-kas-mock`, {
@@ -675,7 +675,7 @@ const actions = {
   },
 
   async reset_send_kas_mock(step, ctx) {
-    const PORT = process.env.PORT || 3100;
+    const PORT = process.env.PORT || 3200;
     try {
       const res = await fetch(`http://127.0.0.1:${PORT}/api/test/reset-send-kas-mock`, { method: 'POST' });
       if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
@@ -692,7 +692,7 @@ const actions = {
    * 适合 6-turn LLM-driven case: T1-T6 各 inject 1 mock = 6 次 LLM 调用全 mock 控制.
    */
   async inject_llm_mock(step, ctx) {
-    const PORT = process.env.PORT || 3100;
+    const PORT = process.env.PORT || 3200;
     if (!step.mock || typeof step.mock !== 'object') {
       return { ok: false, error: 'mock object required, e.g. { content: "..." } or { tool_calls: [...] }' };
     }
@@ -710,7 +710,7 @@ const actions = {
   },
 
   async reset_llm_mock(step, ctx) {
-    const PORT = process.env.PORT || 3100;
+    const PORT = process.env.PORT || 3200;
     try {
       const res = await fetch(`http://127.0.0.1:${PORT}/api/test/reset-llm-mock`, { method: 'POST' });
       if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
@@ -741,7 +741,7 @@ const actions = {
   /**
    * T-J2-2026-05-11 Phase 2 B.2 (NWT #18 ABE audit): generic HTTP POST action.
    * 适合 race-condition test (2 concurrent fetch) + API endpoint exercise.
-   * step: { action: 'http_post', url: '/api/...' OR full URL, body?, timeout_ms? } — host 默 127.0.0.1:3100
+   * step: { action: 'http_post', url: '/api/...' OR full URL, body?, timeout_ms? } — host 默 127.0.0.1:3200
    * (backward compat: step.path 仍接受, 跟 step.url 等价)
    *
    * T-J2-2026-05-12 P0.2 #1/9 extension (NWT spec v0.2 §3): 返 reply 字段 (= JSON.stringify(body) sliced 800)
@@ -751,7 +751,7 @@ const actions = {
    */
   async http_post(step, ctx) {
     const t0 = Date.now();
-    const PORT = process.env.PORT || 3100;
+    const PORT = process.env.PORT || 3200;
     const target = step.url || step.path;  // T-J2-2026-05-12 兼容 url (新) + path (旧)
     if (!target) return { ok: false, error: 'url/path required', latency_ms: 0, reply: '' };
     const url = String(target).startsWith('http') ? target : `http://127.0.0.1:${PORT}${target}`;
@@ -784,7 +784,7 @@ const actions = {
   // Same return shape as http_post so all reply_* / http_status_equals assertions just work.
   async http_get(step, ctx) {
     const t0 = Date.now();
-    const PORT = process.env.PORT || 3100;
+    const PORT = process.env.PORT || 3200;
     const target = step.url || step.path;
     if (!target) return { ok: false, error: 'url/path required', latency_ms: 0, reply: '' };
     const url = String(target).startsWith('http') ? target : `http://127.0.0.1:${PORT}${target}`;
@@ -829,7 +829,7 @@ const actions = {
     if (!step.peer_addr) return { ok: false, error: 'llm_mock_dialogue requires peer_addr' };
     if (!step.broker_relay_id) return { ok: false, error: 'llm_mock_dialogue requires broker_relay_id' };
     const { runMockDialogue } = await import('./llm-mock-user.mjs');
-    const PORT = process.env.PORT || 3100;
+    const PORT = process.env.PORT || 3200;
     const stopContains = Array.isArray(step.stop_on_broker_contains) ? step.stop_on_broker_contains : [];
     try {
       const result = await runMockDialogue({
@@ -864,7 +864,7 @@ const actions = {
    * step: { action: 'trigger_refund_sweep', peer_addr }
    */
   async trigger_refund_sweep(step, ctx) {
-    const PORT = process.env.PORT || 3100;
+    const PORT = process.env.PORT || 3200;
     try {
       const res = await fetch(`http://127.0.0.1:${PORT}/api/test/trigger-refund-sweep`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
