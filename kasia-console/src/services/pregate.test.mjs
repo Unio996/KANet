@@ -187,6 +187,14 @@ console.log('[test] ⑤ _reasonSignature 精度修补(NWT 红队实测坐实的�
   // 29-aukqt 形状(plan throw 前缀, 非 consolidate) 同样验证正确区分:
   const walkExhausted = `plan throw: getBlockAtDaa fail: {"ok":false,"error":"getBlockAtDaa: backward walk exhausted MAX_WALK=250000 without crossing deadlineDaa=58695372 (deepest reached daa=58445372)"}`;
   ok(_reasonSignature(walkExhausted) !== _reasonSignature(diffKindUtxo), '不同 wrapper 前缀(plan throw vs consolidate) → 不同签名(基线区分力未受损)');
+
+  // NWT 红队第二刀(2026-07-13, 3ad150de 之后同日实测坐实, 范围更窄——多 shard 市场 shard 跳变场景):
+  // 曾经的 \b\d+\b 归一化会把 shard_index 也当噪音抹掉, shard 0 和 shard 1 各自独立的失败被误判成同一签名。
+  const shard0Fail = `consolidate shard 0 no land: {"ok":true,"error":"UTXO not found at kaspatest:pqjxxguyyufd8l2c7ugzgkws55f5mhsy7w0ts6k5vyuv2cffyml96x38t6rh0 for tx 5b74aee70dca6e9e6f221e67e9268d9006e55be0e7837300f15612a7dcb261cc"}`;
+  const shard1Fail = `consolidate shard 1 no land: {"ok":true,"error":"UTXO not found at kaspatest:pqjxxguyyufd8l2c7ugzgkws55f5mhsy7w0ts6k5vyuv2cffyml96x38t6rh0 for tx 5b74aee70dca6e9e6f221e67e9268d9006e55be0e7837300f15612a7dcb261cc"}`;
+  ok(_reasonSignature(shard0Fail) !== _reasonSignature(shard1Fail), 'NWT 第二刀坐实场景: shard 0 vs shard 1 的独立失败 → 不同签名(shard_index 是有意义差异位, 不该被当噪音抹掉)');
+  // 同一 shard 重复失败(70-ojizv 实况: 6 轮全是 shard 0)必须仍判定为同签名, 不能被这次修复误伤:
+  ok(_reasonSignature(shard0Fail) === _reasonSignature(shard0Fail), '同 shard 重复同根因失败 → 仍是同签名(70-ojizv 实际场景未受本次修复影响)');
 }
 
 console.log('[test] ⑥ clearRepeatOffenderMarker(精度补丁②, un-gate 复核路径):');

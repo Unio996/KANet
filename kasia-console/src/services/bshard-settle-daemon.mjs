@@ -314,15 +314,20 @@ const REPEAT_OFFENDER_THRESHOLD = parseInt(process.env.REPEAT_OFFENDER_THRESHOLD
 //   底层真实根因是什么(UTXO not found / ECONNREFUSED / 别的), 40 字符边界还没走到差异位就被切了, 会把
 //   同一市场上 3 次彼此独立、各自会自愈的不同瞬态问题误判成"同一个结构性卡死", 提前 permanent-gate 本
 //   不该被隔离的市场(非钱路/非状态风险, 但增加不必要的人工排查负担)。改法: 不再固定长度截断, 先归一化
-//   (剥掉 kaspa 地址/十六进制哈希/纯数字 token 这类"每次都不同但不代表根因不同"的易变部分), 再对
+//   (剥掉 kaspa 地址/十六进制哈希这类"每次都不同但不代表根因不同"的易变部分), 再对
 //   **归一化后的整串**(非截断片段)做 hash——不管差异位落在第 40 字符前还是第 400 字符后, 只要底层错误
 //   *类型*相同就产生相同签名, 类型不同就产生不同签名(不再有"公共前缀吞掉差异位"这个结构性缺口)。
+//   🔴 NWT 红队第二刀(同日实测坐实, 范围更窄——只影响多 shard 市场的 shard 跳变场景): 曾经加过
+//   `\b\d+\b` → '<num>' 想连纯数字 token(金额)一起剥掉, 但这会把 shard_index 也一起抹掉——shard 0
+//   和 shard 1 是**有意义的差异位**(不同 shard = 不同 UTXO/covenant, 不是随机噪音), 若多 shard 市场
+//   不同 tick 撞到不同 shard 各自独立的瞬态失败会被误判成同一签名延续 streak。地址/哈希已经被前两条
+//   规则单独剥干净, 没有再额外剥纯数字的必要——移除这条规则, 让 shard_index/amount 等小整数原样保留
+//   在签名里参与区分(对同一 market+shard 的重复失败, 这些数字本来就稳定不变, 不影响去重能力)。
 function _reasonSignature(reason) {
   const normalized = String(reason || '')
     .replace(/kaspatest:[a-z0-9]+/gi, '<addr>')      // kaspa bech32 地址(UTXO/consolidate 错误里常见)
     .replace(/0x[0-9a-fA-F]+/g, '<hex>')              // 0x 前缀十六进制(EVM 地址/值)
-    .replace(/\b[0-9a-fA-F]{16,}\b/g, '<hash>')       // 裸十六进制长串(txid/block hash, 无 0x 前缀)
-    .replace(/\b\d+\b/g, '<num>');                    // 纯数字 token(金额/index/DAA score 等易变值)
+    .replace(/\b[0-9a-fA-F]{16,}\b/g, '<hash>');      // 裸十六进制长串(txid/block hash, 无 0x 前缀)
   let hash = 0;
   for (let i = 0; i < normalized.length; i++) { hash = (hash * 31 + normalized.charCodeAt(i)) >>> 0; }
   return hash.toString(16);
