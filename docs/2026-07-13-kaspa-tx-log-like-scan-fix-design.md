@@ -1,4 +1,4 @@
-> **Status**: CURRENT (设计稿·并行撰写中，等埋点数据定优先级，非阻塞)
+> **Status**: CURRENT (设计稿 v1.1·Bettor 方向审 GREEN-with-2-notes 已折入，等埋点数据定优先级，非阻塞)
 
 # kaspa_tx_log LIKE 全扫描修复——两案并比
 
@@ -29,20 +29,32 @@
 
 - **写入侧改动**：`ingest.js` 的 `/ingest/kaspa-tx` handler 在写 `kaspa_tx_log` 的同一事务里，
   遍历 `outputs` 数组逐条 `INSERT`(输出数一般个位数，成本可忽略)。
-- **读侧改动**：`bshard-auto-settler.mjs:480` 改写为
-  `SELECT tx_id FROM kaspa_tx_log_outputs WHERE address = ? ORDER BY ... LIMIT 1`(走 `idx_ktlo_address`
-  的 `SEARCH`，非 `SCAN`)——需要 join 回 `kaspa_tx_log` 拿 `block_time` 排序，或在新表也存
-  `block_time` 冗余一列避免 join(存储换查询速度，行数不大，可接受)。
-- **历史数据缺口**：794 万行既有数据不会自动补进新表。两个子选项：
-  (a) 一次性 backfill 迁移(离线批处理，逐行 `JSON.parse(outputs_json)` 拆列写入新表)——**Bettor 已警示
-  的坑**：对 794 万行做任何形式的批量写操作本身可能造成长时间锁写，backfill **必须分批 + 限速 +
-  在低流量窗口跑**，禁一次性 `INSERT INTO ... SELECT`。
-  (b) 不 backfill，新表只覆盖"迁移时间点之后"的新 TX——旧市场的 thread-walk resume 对旧数据仍会
-  退回 LIKE 慢路径(或直接 miss，走 live UTXO 兜底)，**新市场立即受益，旧市场存量问题留观察**（thread-walk
-  只服务"需要 resume 的老市场"这个逐渐萎缩的存量，随时间推移可能自然消退）。
+- **读侧改动(🔴 Bettor 方向审注1，已锁定)**：新表结构改为
+  `kaspa_tx_log_outputs (tx_id TEXT, output_index INTEGER, address TEXT, block_time INTEGER,
+  PRIMARY KEY(tx_id, output_index))` + `CREATE INDEX idx_ktlo_address_time ON
+  kaspa_tx_log_outputs(address, block_time)`——**`block_time` 冗余存一份**，不 join 回 794 万行的
+  `kaspa_tx_log` 主表(join 本身可能是另一个隐性慢点，新表行数小，冗余存储成本可忽略)。
+  `bshard-auto-settler.mjs:480` 改写为
+  `SELECT tx_id FROM kaspa_tx_log_outputs WHERE address = ? ORDER BY block_time ASC LIMIT 1`
+  (走 `idx_ktlo_address_time` 的 `SEARCH`，非 `SCAN`，零 join)。
+- **历史数据 backfill(🔴 Bettor 方向审注2，已锁定为主选项，非留白子选择)**：thread-walk resume 的
+  主要使用者恰恰是**老市场存量**(中断后续接场景)，"只覆盖迁移点之后的新 TX"(forward-only)对现存
+  卡住盘几乎零改善——若埋点数据显示 resume 路径是热点元凶，backfill 大概率躲不掉，**这里提前把
+  ramp 方案写清楚，不留到选刀会现想**：
+  1. **分批**：按 `rowid` 区间分块(如每批 5 万行)，逐批 `SELECT tx_id, outputs_json, block_time
+     FROM kaspa_tx_log WHERE rowid BETWEEN ? AND ?`，逐行 `JSON.parse` 拆出 outputs 写入新表，
+     批间 `setTimeout` 让出 event loop(这条本身也要小心——批太大同样会造成单批内的长阻塞，5 万行
+     量级需要先在测试库实测单批耗时，超过约 200ms 就再切小)。
+  2. **限速**：整个 backfill 跑在**低流量窗口**(参考项目既有"分批 ramp 纪律"，先 1 批验证零副作用
+     → 再放量，不一次性 794 万行糊上去)。
+  3. **可中断可续跑**：记录 `backfill_progress` 的最后处理 `rowid`(可以是 `config_entries` 里一个
+     key，不新建表)，backfill 脚本可安全中断重启，不用从头来。
+  4. **验收**：backfill 完成后随机抽样(如 100 笔)人工核对 `kaspa_tx_log_outputs` 与 `kaspa_tx_log.
+     outputs_json` 内容一致，同 admin-dedup 系列一次性脚本的可审计惯例(events 表记一条 backfill
+     完成审计行，含处理总行数/耗时/抽样核对结果)。
 - **优点**：语义不变，风险最低，符合 Bettor "优先评估既有索引/候选集缓存" 的指导。
-- **缺点**：backfill(若做)是不小的一次性工程；新表 = schema 变更，需按 DATABASE.md 规范登记
-  + migrate.js 版本号 + 文档同步。
+- **缺点**：backfill 是不小的一次性工程(标准做法写清楚后风险可控)；新表 = schema 变更，需按
+  DATABASE.md 规范登记 + migrate.js 版本号 + 文档同步。
 
 ## 2. 候选 B：直连节点 RPC 替代本地索引查询
 
@@ -59,13 +71,13 @@
 `reference-kaspa-tx-log-indexer-completeness-gap`)。**结论：候选 B 在协议层不成立，排除**——不存在
 "绕开本地索引直连 RPC 更快更全"这条路，kaspad 没有对应能力可绕。
 
-## 3. 结论：候选 A 排除法胜出(非偏好，是候选 B 协议层不成立)
+## 3. 结论：候选 A(含 backfill)排除法+使用面分析双重锁定
 
 候选 B 已在 §2 排除。**候选 A(正规化输出索引表)是唯一在协议层可行的路径**，不是两案比较后选出的
-"更优"，是排除法只剩这一条。剩余的设计决策收窄到 §1 里的子选项：是否 backfill 历史 794 万行(以及
-backfill 怎么分批/限速安全跑)，还是接受"新市场受益、旧存量市场维持现状直到自然萎缩"。这个子选择
-留给选刀会：埋点数据若显示旧市场 thread-walk 仍是热点重灾区，backfill 优先级上调；若热点集中在新
-市场，backfill 可以先不做，省下这块工程量。
+"更优"，是排除法只剩这一条。§1 的 backfill 子选择(🔴 Bettor 方向审注2，已锁定)：thread-walk resume
+的主要使用者是**老市场存量**，forward-only(不 backfill)对现存卡住盘几乎零改善，所以 backfill 不是
+"留给选刀会的开放选项"，是**大概率躲不掉的主路径**，ramp 方案已在 §1 写清楚。选刀会真正要决定的是
+**要不要做/什么时候做**(取决于埋点数据显示 resume 路径的实际热度)，"怎么做"(方案本身)已经收敛。
 
 ## 4. 明确不做的事(范围边界)
 
