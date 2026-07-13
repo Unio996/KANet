@@ -40,16 +40,40 @@ export async function resolveBrokerRelayId() {
 }
 
 // Resolve the "Owner voice" relay for the owner-in-dev-channel bridge — the relay whose ADDRESS is
-// classified trust_level='owner' (Console /api/chat/owner-voice). Returns the relay id, or '' if no
-// address is classified 'owner' yet (bridge Direction A then no-ops — never errors). Re-resolved per
-// use so re-classifying in /identities takes effect with no bot restart (mirrors resolveBrokerRelayId).
-export async function resolveOwnerVoiceRelayId() {
+// classified trust_level='owner' (Console /api/chat/owner-voice). Re-resolved per use so re-classifying
+// in /identities takes effect with no bot restart (mirrors resolveBrokerRelayId).
+//
+// 2026-07-13 修(Bettor 派工#ixnqud.1, 卡1): 之前 fetch 超时/失败被 catch 吞掉统一返回 ''，跟"Console
+// 响应正常但确实没有 owner 分类地址"这个真实空结果无法区分——Owner 早上收到的"未分类 owner"文案实为
+// console 周期性事件循环卡顿(~30s settler tick 同步阻塞)造成的 5s fetch 超时，被误报成"去 Console
+// /identities 配置"，把瞬时性能问题包装成了看起来要用户去改配置的假故障。
+//
+// 现在区分三种返回：
+//   - 真实 relay id(字符串): 成功解析到 owner 分类地址。
+//   - ''（空字符串）: fetch 成功、Console 响应正常，但确实没有地址被分类 trust_level=owner——这才是
+//     该显示"去 /identities 配置"文案的场景。
+//   - null: fetch 超时/网络错误（重试一次后仍失败）——Console 暂时没响应，不是配置问题，调用方应显示
+//     "稍后重试"而非误导用户去改配置。
+//
+// 错峰重试: 第一次超时后不是立即重试(大概率还在同一个卡顿窗口里撞上), 隔 2s 再试一次——2s 足以跨过
+// 大多数瞬时卡顿, 又不会让 Owner 在 bot 里等太久才收到回复。
+async function _fetchOwnerVoiceOnce() {
   try {
     const res = await fetch(`${CONFIG.consoleUrl}/api/chat/owner-voice`, { signal: AbortSignal.timeout(5000) });
     const j = await res.json();
-    if (j && j.ownerVoice && j.ownerVoice.id) return j.ownerVoice.id;
-  } catch { /* Console unreachable — bridge skips this tick */ }
-  return '';
+    return { ok: true, id: (j && j.ownerVoice && j.ownerVoice.id) || '' };
+  } catch {
+    return { ok: false };
+  }
+}
+export async function resolveOwnerVoiceRelayId() {
+  let r = await _fetchOwnerVoiceOnce();
+  if (!r.ok) {
+    await new Promise((resolve) => setTimeout(resolve, 2000));   // 错峰: 隔 2s 再试, 不立即重试
+    r = await _fetchOwnerVoiceOnce();
+  }
+  if (r.ok) return r.id;   // '' (真空, 需配置) 或真实 id, 两者都是 "Console 响应了" 的结果
+  return null;             // 超时/网络错误重试后仍失败 —— Console 没响应, 非配置问题
 }
 
 // 根治(2026-07-08, Owner "找根治问题" 指令): bot 之前完全信任 TELEGRAM_BOT_USERNAME env var 自报的

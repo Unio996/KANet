@@ -27,7 +27,13 @@ bot.on('message:text', async (ctx) => {
   const txt = ctx.message?.text || '';
   if (txt.startsWith('/')) return;                         // commands handled by bot.command
   if (tgUser !== String(CONFIG.ownerChatId)) return;       // only the Owner's chat is bridged
+  // 2026-07-13 修(Bettor 派工#ixnqud.1): resolveOwnerVoiceRelayId 现在区分 null(Console 超时/无响应,
+  // 重试一次后仍失败——同 ~30s settler tick 阻塞事件循环撞上 5s fetch 超时)vs ''(Console 响应正常但
+  // 确实没有 owner 分类地址)。之前两者都误报成"去配置 /identities"，把瞬时性能问题包装成假故障。
   const ownerRelayId = await resolveOwnerVoiceRelayId();
+  if (ownerRelayId === null) {
+    return ctx.reply('⚠ Console 暂时没响应(可能在处理批量任务，重试一次仍未恢复)，稍后再发一次试试。');
+  }
   if (!ownerRelayId) {
     return ctx.reply('⚠ 还没有地址被分类为 trust_level=owner。在 Console /identities 把你的地址设为 owner 后，这里发的话才会以 owner 身份进 dev-coord。');
   }
@@ -68,7 +74,7 @@ async function pollFeedbackEscalations() {
   for (const ev of r.events) {
     if (ev.created_at) _feedbackCursor = ev.created_at;   // advance first, 同 pollDevCoord 纪律(发送失败不重放)
     const ownerRelayId = await resolveOwnerVoiceRelayId();
-    if (!ownerRelayId) continue;   // 未配置 owner-voice relay = 静默跳过(同 Direction A 降级)
+    if (!ownerRelayId) continue;   // null(Console超时)或''(未配置)= 静默跳过, 下次tick自然重试(后台轮询无需分辨两种失败, 同 Direction A 降级)
     const ticketShort = String(ev.ticket_id || ev.id || '').slice(0, 8);
     const prefix = `[用户反馈工单#${ticketShort}·AI生成·非Owner/代发身份发言]`;
     const body = `${prefix} ${ev.summary || ''}\n原始输入: ${ev.raw_text || '(无)'}`;
