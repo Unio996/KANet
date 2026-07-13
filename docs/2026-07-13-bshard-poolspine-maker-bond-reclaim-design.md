@@ -11,7 +11,7 @@
 
 | 需求 | 覆盖 |
 |---|---|
-| 7pori(100 KAS)+ 11 盘 bshard 族 maker bond 收口 | §3 一次性 admin 端点 |
+| 7pori(100 KAS)+ 10 盘同批 refunding bshard 市场(合计 11 盘)maker bond 收口 | §3 一次性 admin 端点 |
 | 防复发(admin-dedup 对 bshard 盘再次误选 legacy 机制) | §2.1 `dispatchRefund` 入口 isBshard fail-loud 拒绝 |
 | 未来新 bshard 盘同款卡死不再靠人工发现 | §4 daemon tick 自动扫描 |
 | 零新 SilverScript / 零新 covenant | §1 结论(复用既有 `refund_maker_unjoined` entry) |
@@ -24,7 +24,7 @@
 
 **结论**：不需要新 covenant/新 entry。缺口 100% 在**驱动层**(谁来调用这个已存在的链上能力)，不在链上脚本层。这跟 7/4 ABSTAIN 退款路那次"补漏·接通已有 covenant 能力·非新造机制"(`bshard-auto-settler.mjs:610-627` 注释)是同一个模式。
 
-**架构确认(grep `pool-shard-settle.mjs` 零命中 `spine_p2sh`/`maker_stake`)**：`consolidateAllShards`(bettor 侧折叠进 PayoutShard 的机制)完全不碰 PoolSpine——maker bond(容器①)与 bettor 池(容器②/PayoutShard)是两个独立 UTXO 世系，对**任何**结局(赢/输/退款)的 bshard 市场都成立，不只是退款态。本设计只解决"退款态"的 11+1 盘积压；win 态 bshard 市场的 maker bond 收口是同构的后续卡(§5 留白，不在本次范围)。
+**架构确认(grep `pool-shard-settle.mjs` 零命中 `spine_p2sh`/`maker_stake`)**：`consolidateAllShards`(bettor 侧折叠进 PayoutShard 的机制)完全不碰 PoolSpine——maker bond(容器①)与 bettor 池(容器②/PayoutShard)是两个独立 UTXO 世系，对**任何**结局(赢/输/退款)的 bshard 市场都成立，不只是退款态。本设计只解决"退款态"的 11 盘积压(7pori+10 盘同批 refunding)；win 态 bshard 市场的 maker bond 收口是同构的后续卡(§5 留白，不在本次范围)。
 
 ## 2. 复用清单(查了哪些既有资产·防重造)
 
@@ -172,7 +172,7 @@ export async function reclaimBshardMakerBond(marketId, ctx) {
 
 **🔴 Bettor 方向审注3(note，已折入)**: `refund_tx_obj` 已 stash 但 `handleRefunding` 广播失败的中间态——重读现有代码(`pool-market-settler.js:2545-2548`)确认 `handleRefunding` 的失败分支(`!submitResult?.ok`)只 `console.error` 后 `return`，**不写任何 DB**（成功分支才把 txid+status 一起原子写入同一条 `UPDATE`），所以不存在"半写 status"的中间态——`protocol_status` 停留在 `refunding`、`refund_tx_obj` 原样留着，下次重试会重新走一遍闸③(spine UTXO 活体校验)才敢再次尝试签名广播，双花风险由闸③挡（同 catch 分支，也是零 DB 写）。**请 NWT 红队核实这个读码结论**(即：现有 `handleRefunding` 失败路径是否真的处处零 DB 写，有没有我漏看的分支)。
 
-### 3.4 一次性 admin 端点(收口 7pori + 11 盘族·复用 `admin-dedup.js` 惯例)
+### 3.4 一次性 admin 端点(收口 7pori+10 盘同批 refunding=11 盘·复用 `admin-dedup.js` 惯例)
 
 `admin-dedup.js` 加一个新路由(不改现有 `/api/admin/dedup-refund`，避免那个端点继续含糊地兼两种机制——这正是 7pori 撞见的那类"入口不辨材质"隐患的镜像修法):
 
@@ -200,21 +200,21 @@ const BSHARD_BOND_RECLAIM_ENABLED = process.env.BSHARD_BOND_RECLAIM_ENABLED === 
 
 ## 5. 范围边界(明确排除，禁扩大)
 
-- **不覆盖 win 态 bshard 市场的 maker bond 收口**（§1 末段指出的同构后续问题）——本次只清"退款态"积压(7pori + 11 盘族)。
+- **不覆盖 win 态 bshard 市场的 maker bond 收口**（§1 末段指出的同构后续问题）——本次只清"退款态"积压(7pori+10 盘同批 refunding，合计 11 盘)。
 - **不覆盖 54 盘非 bshard refunding 积压**（另一根因，NWT 已确认"另因"，队列(b)单列）。
 - **不改动容器②(PayoutShard)任何逻辑** — `hasVerifiedContainer2Evidence`/`cancelMarketLive` 原样只读引用，零修改。
 
 ## 6. 测试计划
 
 - 离线单测(镜像 `admin-dedup.test.mjs` 风格): `reclaimBshardMakerBond` 对 8+ 类负例(非 bshard/容器②未完成/spine 已花费/已收口幂等/metadata 坏 JSON)fail-closed 断言。
-- **11+1 盘族 dry-run(不广播，只跑到三闸判定，打印每盘判定结果)。**
+- **11 盘(7pori+10 盘同批 refunding) dry-run(不广播，只跑到三闸判定，打印每盘判定结果)。**
 - 7pori 单盘实跑(NWT+Bettor 链验，同 7/12 容器①流程：dry-run→NWT 复核→Bettor 明确批字样→执行→链验→回读)。
 
 ### 6.1 交付定义(🔴 Bettor 方向审注2，MUST，已折入——防验收口径漂移)
 
-本原语**只收口容器①**（PoolSpine maker bond）。11 盘族里若有市场容器②(PayoutShard/bettor 侧)尚未终态，闸②(`hasVerifiedContainer2Evidence`)会**正确拒绝**——这是 fail-closed 设计意图的体现，不是 bug，也不是"没做完"。
+本原语**只收口容器①**（PoolSpine maker bond）。11 盘里若有市场容器②(PayoutShard/bettor 侧)尚未终态，闸②(`hasVerifiedContainer2Evidence`)会**正确拒绝**——这是 fail-closed 设计意图的体现，不是 bug，也不是"没做完"。
 
-**交付物 = 三闸判定清单**（11+1 盘逐盘：isBshard✓/容器②证据✓或✗/spine 活体✓或✗ → 通过 or 拒绝+原因），而非"11 盘全部清零"。**通过闸的盘执行收口；被闸②拒绝的盘转"容器②先行处置"另立卡**（不在本设计范围内趁手带做，容器②本身的处置是独立决策，需要单独设计→红队→批）。汇报时逐盘列出通过/拒绝及原因，不允许笼统报"收口完成"掩盖被拒盘的存在。
+**交付物 = 三闸判定清单**（11 盘逐盘：isBshard✓/容器②证据✓或✗/spine 活体✓或✗ → 通过 or 拒绝+原因），而非"11 盘全部清零"。**通过闸的盘执行收口；被闸②拒绝的盘转"容器②先行处置"另立卡**（不在本设计范围内趁手带做，容器②本身的处置是独立决策，需要单独设计→红队→批）。汇报时逐盘列出通过/拒绝及原因，不允许笼统报"收口完成"掩盖被拒盘的存在。
 
 ## 7. 待 NWT 红队的点(主动列，非等红队自己找)
 
