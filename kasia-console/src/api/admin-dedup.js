@@ -7,7 +7,7 @@ import { dispatchRefund } from '../services/pool-market-settler.js';
 import { verifyIngestRequest } from '../services/ingest-auth.js';
 import { getSidesByLogicalMarket } from '../lib/pool-bettor-sides-query.mjs';
 import { reclaimBshardMakerBond } from '../services/bshard-auto-settler.mjs';
-import { buildCtx } from '../services/bshard-settle-daemon.mjs';
+import { buildCtx, clearRepeatOffenderMarker } from '../services/bshard-settle-daemon.mjs';
 
 const HEX64 = /^[0-9a-fA-F]{64}$/;
 
@@ -106,5 +106,18 @@ export async function registerBshardBondReclaimRoutes(fastify) {
       }
     }
     return reply.send({ ok: true, dryRun, results });
+  });
+
+  // 🔴 精度补丁②(Bettor #j8p6gn, 2026-07-13): repeat-offender pre-gate 不能只进不出——人工 probe 确认
+  // 某盘已自愈(如卡住的 UTXO 后来自己落地)后, 显式清 marker(clearRepeatOffenderMarker 自带 tripwire
+  // guard: 非 gate 状态返回幂等 no-op, 不会误清)。纯调度层, 不动钱不改 protocol_status。
+  // POST /api/admin/clear-repeat-offender { marketIds: [...], reason: '...' }
+  fastify.post('/api/admin/clear-repeat-offender', { preHandler: async (request, reply) => { await verifyIngestRequest(request, reply); } }, async (request, reply) => {
+    const { marketIds, reason } = request.body || {};
+    if (!Array.isArray(marketIds) || !marketIds.length) {
+      return reply.code(400).send({ ok: false, error: 'marketIds must be a non-empty array' });
+    }
+    const results = marketIds.map((id) => ({ id, ...clearRepeatOffenderMarker(id, sqlite, reason) }));
+    return reply.send({ ok: true, results });
   });
 }

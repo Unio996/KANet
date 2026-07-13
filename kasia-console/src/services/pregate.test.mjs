@@ -17,7 +17,7 @@ if (!process.env._PREGATE_TEST_BOOTSTRAPPED) {
 }
 
 const { sqlite } = await import('../db/client.js');
-const { selectRipeMarkets, unreachablePreGate, PREGATE_MAX_WALK, repeatOffenderGate, REPEAT_OFFENDER_THRESHOLD } = await import('./bshard-settle-daemon.mjs');
+const { selectRipeMarkets, unreachablePreGate, PREGATE_MAX_WALK, repeatOffenderGate, REPEAT_OFFENDER_THRESHOLD, _reasonSignature, clearRepeatOffenderMarker } = await import('./bshard-settle-daemon.mjs');
 
 let fails = 0;
 const ok = (cond, label) => { if (cond) console.log(`  ✅ ${label}`); else { console.error(`  ❌ ${label}`); fails++; } };
@@ -165,6 +165,48 @@ console.log(`[test] ④ repeatOffenderGate 泛化闸(批量歼灭令, 2026-07-13
   bump2('m-streak-reset', 'ECONNREFUSED at rpc');
   r = bump2('m-streak-reset', 'UTXO not found for tx abc');   // 不同签名 → streak 重置回 1, 不延续
   ok(JSON.parse(r.metadata).repeat_failure_streak === 1, '换了不同失败签名 → streak 重置为1(不跨签名累加噪音)');
+}
+
+console.log('[test] ⑤ _reasonSignature 精度修补(NWT 红队实测坐实的缺口, 2026-07-13 #j8p6gn 直接验证):');
+{
+  // 真实生产形状(70-ojizv 日志原样, 只换了 UTXO 地址/txid 模拟"同根因不同实例"):
+  const sameKindA = `consolidate shard 0 no land: {"ok":true,"error":"UTXO not found at kaspatest:pqjxxguyyufd8l2c7ugzgkws55f5mhsy7w0ts6k5vyuv2cffyml96x38t6rh0 for tx 5b74aee70dca6e9e6f221e67e9268d9006e55be0e7837300f15612a7dcb261cc"}`;
+  const sameKindB = `consolidate shard 0 no land: {"ok":true,"error":"UTXO not found at kaspatest:zzzdifferentaddr000000000000000000000000000 for tx 9999999999999999999999999999999999999999999999999999999999999999"}`;
+  ok(_reasonSignature(sameKindA) === _reasonSignature(sameKindB), '同根因(UTXO not found)不同地址/txid实例 → 相同签名(核心去重能力保留)');
+
+  // NWT 红队实测场景: 同一 wrapper 前缀("consolidate shard 0 no land: {"ok":true,"), 底层根因完全不同
+  // ——旧 slice(0,40) 会把这两条都截成一样的前缀, 误判成"同一个结构性卡死"。修后必须能区分。
+  const diffKindNetwork = `consolidate shard 0 no land: {"ok":true,"error":"ECONNREFUSED connect to 127.0.0.1:17210"}`;
+  const diffKindUtxo = `consolidate shard 0 no land: {"ok":true,"error":"UTXO not found at kaspatest:pqjxxguyyufd8l2c7ugzgkws55f5mhsy7w0ts6k5vyuv2cffyml96x38t6rh0 for tx 5b74aee70dca6e9e6f221e67e9268d9006e55be0e7837300f15612a7dcb261cc"}`;
+  ok(_reasonSignature(diffKindNetwork) !== _reasonSignature(diffKindUtxo), 'NWT 坐实场景: 同 wrapper 前缀+不同根因(ECONNREFUSED vs UTXO not found) → 不同签名(旧版会误判成同一个, 这是本补丁要修的缺口)');
+
+  // 旧版 slice(0,40) 复现(证明缺口曾经真实存在, 非臆造):
+  const oldSlice40 = (s) => String(s || '').slice(0, 40);
+  ok(oldSlice40(diffKindNetwork) === oldSlice40(diffKindUtxo), '(对照组)旧 slice(0,40) 逻辑确实会把这两条不同根因错误压成同一签名——证实 NWT 发现的缺口真实存在');
+
+  // 29-aukqt 形状(plan throw 前缀, 非 consolidate) 同样验证正确区分:
+  const walkExhausted = `plan throw: getBlockAtDaa fail: {"ok":false,"error":"getBlockAtDaa: backward walk exhausted MAX_WALK=250000 without crossing deadlineDaa=58695372 (deepest reached daa=58445372)"}`;
+  ok(_reasonSignature(walkExhausted) !== _reasonSignature(diffKindUtxo), '不同 wrapper 前缀(plan throw vs consolidate) → 不同签名(基线区分力未受损)');
+}
+
+console.log('[test] ⑥ clearRepeatOffenderMarker(精度补丁②, un-gate 复核路径):');
+{
+  seedMarket('m-clear-target', { deadlineDaa: CUR - 5000, metadata: JSON.stringify({ repeat_offender_confirmed: true, repeat_failure_sig: 'abc123', repeat_failure_streak: 3 }) });
+  const notGated = clearRepeatOffenderMarker('m-not-gated-nonexistent', sqlite, 'test');
+  ok(notGated.ok === false && notGated.reason === 'market 不存在', '清不存在的市场 → 拒绝(明确原因, 非静默)');
+
+  seedMarket('m-never-gated', { deadlineDaa: CUR - 5000 });
+  const idempotent = clearRepeatOffenderMarker('m-never-gated', sqlite, 'test');
+  ok(idempotent.ok === false && idempotent.already === true, 'tripwire guard: 从未 gate 过的盘清理请求 → 幂等拒绝, 不误清');
+
+  const cleared = clearRepeatOffenderMarker('m-clear-target', sqlite, '人工probe确认UTXO已落地');
+  ok(cleared.ok === true && cleared.cleared.repeat_offender_confirmed === true, '真处于 gate 状态的盘 → 清除成功, 返回值带 before 快照');
+  const row = sqlite.prepare('SELECT metadata FROM pool_markets WHERE id = ?').get('m-clear-target');
+  const meta = JSON.parse(row.metadata);
+  ok(meta.repeat_offender_confirmed === undefined && meta.repeat_failure_sig === undefined && meta.repeat_failure_streak === undefined, '三个 repeat_* 字段全部清除(json_remove 三键)');
+  ok(!repeatOffenderGate({ id: 'm-clear-target', metadata: row.metadata }), '清除后 repeatOffenderGate 重新判定为不 gate(市场可重新被 selectRipeMarkets 选中重试)');
+  const ev = sqlite.prepare(`SELECT COUNT(*) c FROM events WHERE event_type='repeat_offender_cleared' AND payload_json LIKE '%m-clear-target%'`).get().c;
+  ok(ev === 1, '清除动作留一条 repeat_offender_cleared 审计事件(可追溯)');
 }
 
 console.log('[test] ③ 有 evidence 的 floor 下老盘照进 selection(桶A 形状——Fix-A resume 域, gate 不拦):');

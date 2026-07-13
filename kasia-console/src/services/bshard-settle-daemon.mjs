@@ -309,11 +309,46 @@ const _pregateAudited = new Set();   // 进程内首次去重(重启后重发一
 //   实际 UTXO/consolidate 为什么卡死是另一个问题, 见 events 审计 payload 里的 reason, 处置另案。
 //   不动钱、不改 protocol_status(shouldKeepStatus 原逻辑不动, 只加这层"要不要下次还试"的调度层)。
 const REPEAT_OFFENDER_THRESHOLD = parseInt(process.env.REPEAT_OFFENDER_THRESHOLD, 10) || 3;
-function _reasonSignature(reason) { return String(reason || '').slice(0, 40); }
+// 🔴 NWT 红队精度缺口 + Bettor 裁定收紧(2026-07-13, #j8p6gn, 2431fe98 装载后跟上不拖的精度补丁①):
+//   原 slice(0,40) 只抓到 wrapper 长公共前缀(如 "consolidate shard 0 no land: {"ok":true,")——不管
+//   底层真实根因是什么(UTXO not found / ECONNREFUSED / 别的), 40 字符边界还没走到差异位就被切了, 会把
+//   同一市场上 3 次彼此独立、各自会自愈的不同瞬态问题误判成"同一个结构性卡死", 提前 permanent-gate 本
+//   不该被隔离的市场(非钱路/非状态风险, 但增加不必要的人工排查负担)。改法: 不再固定长度截断, 先归一化
+//   (剥掉 kaspa 地址/十六进制哈希/纯数字 token 这类"每次都不同但不代表根因不同"的易变部分), 再对
+//   **归一化后的整串**(非截断片段)做 hash——不管差异位落在第 40 字符前还是第 400 字符后, 只要底层错误
+//   *类型*相同就产生相同签名, 类型不同就产生不同签名(不再有"公共前缀吞掉差异位"这个结构性缺口)。
+function _reasonSignature(reason) {
+  const normalized = String(reason || '')
+    .replace(/kaspatest:[a-z0-9]+/gi, '<addr>')      // kaspa bech32 地址(UTXO/consolidate 错误里常见)
+    .replace(/0x[0-9a-fA-F]+/g, '<hex>')              // 0x 前缀十六进制(EVM 地址/值)
+    .replace(/\b[0-9a-fA-F]{16,}\b/g, '<hash>')       // 裸十六进制长串(txid/block hash, 无 0x 前缀)
+    .replace(/\b\d+\b/g, '<num>');                    // 纯数字 token(金额/index/DAA score 等易变值)
+  let hash = 0;
+  for (let i = 0; i < normalized.length; i++) { hash = (hash * 31 + normalized.charCodeAt(i)) >>> 0; }
+  return hash.toString(16);
+}
 function repeatOffenderGate(m) {
   let meta = {};
   try { meta = JSON.parse(m.metadata || '{}'); } catch {}
   return meta?.repeat_offender_confirmed === true;
+}
+
+// 🔴 精度补丁②(Bettor #j8p6gn): "隔离闸不能只进不出"——人工 probe/处置复核发现某盘其实已自愈(比如
+//   consolidate 的 UTXO 后来自己落地了)后, 显式清 marker, 不留死锁。同 fw9kk/cohort-B
+//   clearLegacyRefundDeadShape 惯例: tripwire guard(必须真的带着要清的字段才生效, 防误清)+ 审计 events
+//   行(可追溯谁清的/为什么清)。纯调度层操作, 不动钱不改 protocol_status。
+export function clearRepeatOffenderMarker(marketId, db, clearReason) {
+  const market = db.prepare('SELECT metadata FROM pool_markets WHERE id = ?').get(marketId);
+  if (!market) return { ok: false, reason: 'market 不存在' };
+  let meta = {}; try { meta = JSON.parse(market.metadata || '{}'); } catch { return { ok: false, reason: 'metadata 坏 JSON' }; }
+  if (meta.repeat_offender_confirmed !== true) return { ok: false, reason: '未处于 gate 状态, 无需清理(幂等)', already: true };
+  const before = { repeat_offender_confirmed: meta.repeat_offender_confirmed, repeat_failure_sig: meta.repeat_failure_sig, repeat_failure_streak: meta.repeat_failure_streak };
+  db.prepare(`UPDATE pool_markets SET metadata = json_remove(metadata, '$.repeat_offender_confirmed', '$.repeat_failure_sig', '$.repeat_failure_streak') WHERE id = ?`).run(marketId);
+  db.prepare(`
+    INSERT INTO events (id, event_scope, event_type, source, level, summary, payload_json, created_at)
+    VALUES (?, 'system', 'repeat_offender_cleared', 'clearRepeatOffenderMarker', 'warn', ?, ?, datetime('now'))
+  `).run(randomUUID(), `market=${String(marketId).slice(-8)} repeat_offender marker 人工清除: ${clearReason || '(未附理由)'}`, JSON.stringify({ marketId, before, clearReason: clearReason || null }));
+  return { ok: true, cleared: before };
 }
 function _coverageFloor() {
   try { return sqlite.prepare('SELECT MIN(start_daa) f FROM spc_daa_index_coverage').get()?.f ?? null; } catch { return null; }
@@ -880,4 +915,4 @@ export function startZkJudgeProposeAutonomousTickCron() {
 }
 export function stopZkJudgeProposeAutonomousTickCron() { if (_zkJudgeProposeTickTimer) { clearInterval(_zkJudgeProposeTickTimer); _zkJudgeProposeTickTimer = null; } }
 
-export { selectRipeMarkets, settleOneMarket, judgeWinDir, endBlockHash, buildCtx, consolidateAndBuildPsState, ensureReady, TRANSIENT_RE, _umaBackoffAllowsRetryNow, scheduleUmaRejudge, UMA_REJUDGE_BACKOFF_TABLE, UMA_GENUINE_TIMEOUT_HOURS, unreachablePreGate, PREGATE_MAX_WALK, repeatOffenderGate, REPEAT_OFFENDER_THRESHOLD };
+export { selectRipeMarkets, settleOneMarket, judgeWinDir, endBlockHash, buildCtx, consolidateAndBuildPsState, ensureReady, TRANSIENT_RE, _umaBackoffAllowsRetryNow, scheduleUmaRejudge, UMA_REJUDGE_BACKOFF_TABLE, UMA_GENUINE_TIMEOUT_HOURS, unreachablePreGate, PREGATE_MAX_WALK, repeatOffenderGate, REPEAT_OFFENDER_THRESHOLD, _reasonSignature };
