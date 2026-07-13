@@ -79,7 +79,10 @@ bot.command('start', async (ctx) => {
   const payload = (ctx.match || '').trim();
   if (payload && /^[a-zA-Z0-9_-]{2,64}$/.test(payload)) {
     const reply = await PM.startBetFromMarket(tgUser, payload);
-    if (typeof reply === 'object' && reply.text) {
+    // Bettor #j1nlmx (2026-07-13, 实stack trace复现): typeof null === 'object' 是 JS 经典陷阱, 裸
+    // `typeof reply === 'object'` 骗不过 null——reply.text 会真崩(TypeError), 被 bot.catch 吞掉=用户
+    // 点击/操作零反应。加 `reply &&` 短路, null/undefined 都安全落到下面的 fallback.
+    if (reply && typeof reply === 'object' && reply.text) {
       return ctx.reply(reply.text, { reply_markup: reply.keyboard });
     }
     return ctx.reply(reply);
@@ -386,7 +389,8 @@ bot.callbackQuery(/^mybet:addmore:(.+)$/, async (ctx) => {
   await ctx.answerCallbackQuery();
   const marketId = ctx.match[1];
   const reply = await PM.startBetFromMarket(String(ctx.from.id), marketId);
-  if (typeof reply === 'object' && reply.text) {
+  // Bettor #j1nlmx: typeof null==='object' 陷阱, 加 reply && 短路 (同 line82/401/413 同款修法)。
+  if (reply && typeof reply === 'object' && reply.text) {
     await ctx.reply(reply.text, { reply_markup: reply.keyboard });
   } else {
     await ctx.reply(reply);
@@ -398,7 +402,8 @@ bot.callbackQuery(/^bet:market:(.+)$/, async (ctx) => {
   await ctx.answerCallbackQuery();
   initLang(ctx);
   const reply = await PM.startBetFromMarket(String(ctx.from.id), ctx.match[1]);
-  if (typeof reply === 'object' && reply.text) {
+  // Bettor #j1nlmx: typeof null==='object' 陷阱, 加 reply && 短路。
+  if (reply && typeof reply === 'object' && reply.text) {
     await ctx.reply(reply.text, { reply_markup: reply.keyboard });
   } else {
     await ctx.reply(reply);
@@ -408,12 +413,20 @@ bot.callbackQuery(/^bet:market:(.+)$/, async (ctx) => {
 // 详情页 YES/NO 押注按钮 callback — callback_data='bet:side:1'(YES)/'bet:side:2'(NO) → 复用 handleReply 进金额输入流程.
 bot.callbackQuery(/^bet:side:(1|2)$/, async (ctx) => {
   await ctx.answerCallbackQuery();
+  initLang(ctx);
+  const lang = getLang(ctx);
   const tgUser = String(ctx.from.id);
   const reply = await PM.handleReply(tgUser, ctx.match[1], PM.getLinkedAddr(tgUser));
-  if (typeof reply === 'object' && reply.text) {
+  // Bettor #j1nlmx(2026-07-13, 实stack trace复现: TypeError in middleware, typeof null==='object' 骗过
+  // 了旧 guard, reply.text 真崩, 被 bot.catch 吞掉=用户点 YES/NO 零反应): 加 reply && 短路防崩溃(止血)+
+  // reply 为 null/undefined 时(会话丢失, 如 bot 重启清了 in-mem session)显式告知, 不再默默什么都不做
+  // (崩溃 vs 静默失败对用户体感一样是"点了没用", 必须两条路都堵)。
+  if (reply && typeof reply === 'object' && reply.text) {
     await ctx.reply(reply.text, { reply_markup: reply.keyboard });
   } else if (reply) {
     await ctx.reply(reply);
+  } else {
+    await ctx.reply(t(lang, 'bet_session_expired'));
   }
 });
 bot.command('discover', (ctx) => { initLang(ctx); return ctx.reply(t(getLang(ctx), 'discover_text')); });
@@ -478,7 +491,9 @@ bot.on('message:text', async (ctx) => {
     if (reply) {
       // Bettor r116 + KANet-UI: prediction-menu confirm 阶段返 { text, parseMode } 支持 HTML.
       // T1 (2026-06-27): detail 阶段额外返 { keyboard } — 市场详情分享按钮.
-      if (typeof reply === 'object' && reply.text) {
+      // Bettor #j1nlmx: 这处已被外层 `if (reply)` 挡过 null, 本身安全; 加 reply && 只为跟其余 4 处
+      // 视觉一致(同一个文件出现 5 处同款写法, 4 处修了 1 处不修容易让后人以为漏了一处)。
+      if (reply && typeof reply === 'object' && reply.text) {
         await ctx.reply(reply.text, { parse_mode: reply.parseMode, reply_markup: reply.keyboard });
       } else {
         await ctx.reply(reply);

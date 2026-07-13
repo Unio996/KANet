@@ -134,6 +134,9 @@ export const LANGS = {
 
     // Stale session
     stale_session: '⌛ This looks like a reply to a previous bet flow, but the local session no longer exists (bot restarted or session expired).\nThat bet was not continued, no payment was monitored. Please /bet again.',
+    // 2026-07-13 (Bettor #j1nlmx, Owner 批复照发): YES/NO 按钮点击时会话已丢(bot 重启清了 in-mem
+    // session 等原因)——之前静默无反应(甚至 crash 被吞), 现在显式告知+给出下一步.
+    bet_session_expired: '⌛ Session expired, please /bet again to start over.',
     generic_help: 'Use /help for commands · /bet to place bets · /swap to exchange · /link to link address',
 
     // 用户反馈通道卡A (2026-07-12, Owner 文案批复照发)
@@ -510,6 +513,9 @@ export const LANGS = {
 
     // Stale session
     stale_session: '⌛ 这句像是回前次押注流程的话, 但本地会话已不存在(bot 重启或会话过期)。\n之前那笔押注没续上, 也没启动付款监控。请重新 /bet 走一遍。',
+    // 2026-07-13 (Bettor #j1nlmx, Owner 批复照发): YES/NO 按钮点击时会话已丢, 之前静默无反应(甚至崩溃
+    // 被吞), 现在显式告知+给下一步.
+    bet_session_expired: '⌛ 会话已过期，请重新 /bet 开始。',
     generic_help: '用 /help 看命令 · /bet 押注 · /swap 兑换 · /link 绑定地址',
 
     // 用户反馈通道卡A (2026-07-12, Owner 文案批复照发, docs/2026-07-12-user-feedback-channel-tg-side-design.md §7)
