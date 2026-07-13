@@ -10,7 +10,12 @@ const DB_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../d
 
 const RELAY_ADDR_BY_ALIAS = {
   // brokers
-  'trader-b': 'kaspa:qrxw764gez624hfkfvpmzfx8a4mg2vze5n6vsgu8fymewrkuphy65lxur9c5l',
+  // KANet-UI 2026-07-13: trader-b 原映射(0a8e9723.../qrxw764gez...)在当前 relay_nodes 表里完全不存在
+  // (peers.mjs 自 4/28 未更新, 期间 relay 被重建/迁移) — 44 个用 relayId('trader-b') 的 broker case
+  // 全部打到不存在的 relay id, /api/agent/reply 的 is_dex_broker/is_service 门禁查不到行直接 skip,
+  // 落地空回复(现场验证: 打旧 id → {reply:""}, 打真实 broker-1 id → 真实 LLM 回复), 造成 25 个 FAIL。
+  // 改指向当前唯一带 is_dex_broker=1/is_service=1 的 broker-1。
+  'trader-b': 'kaspatest:qq0khf22ca90thy7py06d4v8m4yudjrv0r4754jraktkgefr0z9rqn43s708z',
   'trader-a': 'kaspa:qpsys3gzy4lg8txkuskhfnc4tskzn5r344eyudgyrc43te7vlq3f5a2cr843s',
   // dev relays
   'martin': 'kaspa:qptg465n4jedfujewj3hfgkxtysq40v2jakxp2w6uuvrhf6sajf0kzewvmcmv',
@@ -20,7 +25,7 @@ const RELAY_ADDR_BY_ALIAS = {
 };
 
 const RELAY_ID_BY_ALIAS = {
-  'trader-b': '0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0',
+  'trader-b': '15593e10-fe63-4806-a7b5-cae062699de8', // broker-1 (真 is_dex_broker=1/is_service=1)
   'trader-a': 'df8cd0f9-27e7-45c6-bbea-2fa11a1ff1cd',
   'martin': '3765cc82-5e20-4e61-bb0a-697277287223',
   'nwt': '5b236c08-03d0-456c-953d-e10001610938',
