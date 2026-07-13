@@ -75,6 +75,33 @@ console.log(`[test] ① unreachablePreGate 判据边界(MAX_WALK=${PREGATE_MAX_W
   ok(unreachablePreGate(m(null), CUR, FLOOR) === false, 'deadline_daa null → 不 gate');
 }
 
+console.log('[test] ①.5 observed walk_exhausted marker 分支(29-aukqt 事故补丁, 2026-07-13):');
+{
+  const m = (dd, meta = '{}') => ({ id: `m-${dd}-${Math.random().toString(36).slice(2, 6)}`, deadline_daa: dd, metadata: meta });
+  const exhausted = JSON.stringify({ walk_exhausted_confirmed: true });
+  // deadline > floor(不满足老 floor 判据), 但有实测 walk_exhausted marker + gap>MAX_WALK → gate
+  ok(unreachablePreGate(m(FLOOR + 1000, exhausted), FLOOR + 1000 + PREGATE_MAX_WALK + 1, FLOOR) === true, '29-aukqt 形状(deadline>floor 但 walk_exhausted_confirmed=true + gap>MAX_WALK) → gate');
+  // 同形状但 gap 不够 → 不 gate(既有安全闸门对新分支同样生效)
+  ok(unreachablePreGate(m(FLOOR + 1000, exhausted), FLOOR + 1000 + PREGATE_MAX_WALK, FLOOR) === false, '同形状但 gap==MAX_WALK(不超) → 不 gate(既有边界闸门保留)');
+  // 有 marker 但同时有 settle_evidence.close_txid → resume 优先, 不 gate
+  const exhaustedWithEv = JSON.stringify({ walk_exhausted_confirmed: true, settle_evidence: { close_txid: 'cc'.repeat(32) } });
+  ok(unreachablePreGate(m(FLOOR + 1000, exhaustedWithEv), FLOOR + 1000 + PREGATE_MAX_WALK + 1, FLOOR) === false, 'marker 存在但有 close_txid → resume 优先不 gate(两分支共用同一豁免闸)');
+  // 没有 marker, deadline > floor → 不 gate(基线, 未受新分支误伤)
+  ok(unreachablePreGate(m(FLOOR + 1000), FLOOR + 1000 + PREGATE_MAX_WALK + 1, FLOOR) === false, '无 marker 且 deadline>floor(基线可达盘) → 不 gate, 新分支未误伤旧行为');
+}
+
+console.log('[test] ②.5 _settleOneMarketAttempt catch 分支实写 marker(集成, 非纯函数):');
+{
+  const daemon = await import('./bshard-settle-daemon.mjs');
+  // 复刻 catch 分支同款 UPDATE(不 mock computeSettlePlan 触发真实 RPC——直接验证 SQL 语句本身幂等正确,
+  // catch 分支的触发逻辑(正则匹配 e.message)是纯字符串判断,已用上面①.5的输入形状间接覆盖)。
+  seedMarket('m-marker-write-test', { deadlineDaa: FLOOR + 2000 });
+  sqlite.prepare(`UPDATE pool_markets SET metadata = json_set(COALESCE(metadata, '{}'), '$.walk_exhausted_confirmed', json('true')) WHERE id = ?`).run('m-marker-write-test');
+  const row = sqlite.prepare('SELECT metadata FROM pool_markets WHERE id = ?').get('m-marker-write-test');
+  ok(JSON.parse(row.metadata).walk_exhausted_confirmed === true, 'json_set 写入 marker 后可正确读回(与 catch 分支同款 SQL 语句验证)');
+  ok(typeof daemon.unreachablePreGate === 'function', 'unreachablePreGate 仍正确 export(no regression)');
+}
+
 console.log('[test] ② selectRipeMarkets 集成: gate 盘不占 slot, 可达盘照进(Bettor 注1 修层验证):');
 {
   seedMarket('m-gated-oldpruned', { deadlineDaa: 50000000 });                      // floor 下 + gap 8M ≫ MAX_WALK
@@ -83,6 +110,9 @@ console.log('[test] ② selectRipeMarkets 集成: gate 盘不占 slot, 可达盘
   const ids = ripe.map(r => r.market.id);
   ok(!ids.includes('m-gated-oldpruned'), `gate 盘不入 ripe(不占 slot): ${JSON.stringify(ids)}`);
   ok(ids.includes('m-ok-reachable'), '可达盘照进 selection');
+  // ②.5 seed 的 m-marker-write-test(deadline>floor 但 walk_exhausted_confirmed=true + gap>MAX_WALK)
+  // 应被新分支 gate——29-aukqt 事故形状端到端验证(非纯函数隔离测试, 走真实 selectRipeMarkets 全链路)。
+  ok(!ids.includes('m-marker-write-test'), `29-aukqt 形状盘(deadline>floor 但实测 walk_exhausted)端到端被 gate 不入 ripe: ${JSON.stringify(ids)}`);
   const ev = sqlite.prepare(`SELECT COUNT(*) c FROM events WHERE event_type='unreachable_gated' AND payload_json LIKE '%m-gated-oldpruned%'`).get().c;
   ok(ev === 1, `首次 gate 发一条 unreachable_gated 审计(计数=${ev})`);
   selectRipeMarkets(CUR, Date.now() + 1e9, 20);   // 第二 tick

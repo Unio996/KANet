@@ -301,20 +301,36 @@ const _pregateAudited = new Set();   // 进程内首次去重(重启后重发一
 function _coverageFloor() {
   try { return sqlite.prepare('SELECT MIN(start_daa) f FROM spc_daa_index_coverage').get()?.f ?? null; } catch { return null; }
 }
+// 🔴 29-aukqt 事故补丁(2026-07-13, Bettor 加急令 #j658rk·止痛最短路): floor 判据只覆盖"deadline
+//   早于 spc_daa_index 有史以来最早覆盖点"这一类结构性不可达。29-aukqt 是另一类: deadline_daa=
+//   58695372 > floor=56983539(比 floor 新), floor 判据不 gate, 但它实际落在 spc_daa_index_coverage
+//   最新区间尾部(58130000-58168048)**之后**的未覆盖空档(live 覆盖尚未追上当前 tip)——每 tick
+//   仍要重付一次 O(gap) backward walk 的沉没代价, 实测(12:05-12:22 五轮 tick 日志)每次耗尽
+//   MAX_WALK=250000 步仍不到 deadline, ~2min 空转期间整个事件循环阻塞(GC 假说排查现场撞见的
+//   真根因之一)。floor 分支是"预测式"(算出来的), 这里加一条"反应式"OR 分支: 一旦某个市场的
+//   plan 实测抛出 getBlockAtDaa MAX_WALK-exhausted(见 _settleOneMarketAttempt catch 分支写入
+//   metadata.walk_exhausted_confirmed 标记), 后续 tick 直接信这个实测结果, 不用等 floor 追上来才
+//   补判。floor 分支本身零改动(仍是主判据), 这里只加零风险扩面, gap>MAX_WALK + hasEvidence 两条
+//   既有安全闸门原样保留(两个分支共用, 缺一不 gate)。
 function unreachablePreGate(m, currentDaa, floor) {
-  if (floor == null || m.deadline_daa == null) return false;
-  if (!(Number(m.deadline_daa) < Number(floor))) return false;
+  if (m.deadline_daa == null) return false;
+  let meta = {};
+  try { meta = JSON.parse(m.metadata || '{}'); } catch {}
+  const belowFloor = floor != null && Number(m.deadline_daa) < Number(floor);
+  const observedExhausted = meta?.walk_exhausted_confirmed === true;
+  if (!belowFloor && !observedExhausted) return false;
   if (!((Number(currentDaa) - Number(m.deadline_daa)) > PREGATE_MAX_WALK)) return false;
-  let hasEvidence = false;
-  try { hasEvidence = !!JSON.parse(m.metadata || '{}')?.settle_evidence?.close_txid; } catch {}
-  if (hasEvidence) return false;   // resume 可用盘不 gate(Fix-A 域)
+  if (!!meta?.settle_evidence?.close_txid) return false;   // resume 可用盘不 gate(Fix-A 域)
   if (!_pregateAudited.has(m.id)) {
     _pregateAudited.add(m.id);
     try {
+      const reasonTxt = belowFloor
+        ? `deadline_daa=${m.deadline_daa} < coverage floor ${floor}`
+        : `实测确认 getBlockAtDaa MAX_WALK-exhausted(反应式, 非 floor 推断——deadline 落在 coverage 覆盖尾部之后的未追上空档)`;
       sqlite.prepare(`
         INSERT INTO events (id, event_scope, event_type, source, level, summary, payload_json, created_at)
         VALUES (?, 'system', 'unreachable_gated', 'bshard-settle-daemon', 'warn', ?, ?, datetime('now'))
-      `).run(randomUUID(), `market=${String(m.id).slice(-8)} pre-gate: deadline_daa=${m.deadline_daa} < coverage floor ${floor} 且 gap>${PREGATE_MAX_WALK} 物理不可达, 零walk skip(挂账, 终局走 L628 另案)`, JSON.stringify({ marketId: m.id, deadlineDaa: m.deadline_daa, coverageFloor: floor, gap: Number(currentDaa) - Number(m.deadline_daa) }));
+      `).run(randomUUID(), `market=${String(m.id).slice(-8)} pre-gate: ${reasonTxt} 且 gap>${PREGATE_MAX_WALK} 物理不可达, 零walk skip(挂账, 终局走 L628 另案)`, JSON.stringify({ marketId: m.id, deadlineDaa: m.deadline_daa, coverageFloor: floor, gap: Number(currentDaa) - Number(m.deadline_daa), gateReason: belowFloor ? 'below_floor' : 'observed_exhausted' }));
     } catch (e) { log(`pre-gate events insert fail (non-fatal): ${e.message}`); }
   }
   return true;
@@ -383,7 +399,7 @@ function selectRipeMarkets(currentDaa, pmt, limit) {
       if (ripe.length >= limit) break;
     } catch (e) { log(`ripe-scan skip ${m.id.slice(-8)}: ${e.message}`); }
   }
-  if (_gated > 0) log(`[pre-gate] ${_gated} market(s) gated this tick (unreachable: deadline<coverage-floor ${_floor} && gap>${PREGATE_MAX_WALK}, 零walk零slot, 挂账待 L628 另案)`);
+  if (_gated > 0) log(`[pre-gate] ${_gated} market(s) gated this tick (unreachable: deadline<coverage-floor ${_floor} OR 实测 walk-exhausted, && gap>${PREGATE_MAX_WALK}, 零walk零slot, 挂账待 L628 另案)`);
   return ripe;
 }
 
@@ -537,12 +553,19 @@ async function _settleOneMarketAttempt(marketId) {
       // currentDaa 近似 = spc_daa_index MAX(本地表零 RPC, 滞后 tip 分钟级 vs 250k 判据余量 = 无影响)。
       const _curApprox = sqlite.prepare('SELECT MAX(daa_score) m FROM spc_daa_index').get()?.m;
       if (_curApprox != null && unreachablePreGate(market, _curApprox, _coverageFloor())) {
-        return { ok: false, reason: `unreachable_gated (纵深 pre-gate: deadline<coverage-floor 且 gap>${PREGATE_MAX_WALK}, 零walk skip)` };
+        return { ok: false, reason: `unreachable_gated (纵深 pre-gate: deadline<coverage-floor OR 实测 walk-exhausted, 且 gap>${PREGATE_MAX_WALK}, 零walk skip)` };
       }
       plan = await computeSettlePlan(marketId, ctx);
     }
   } catch (e) {
     const rolling = /1024|rolling/i.test(e.message);
+    // 29-aukqt 事故补丁(见 unreachablePreGate 上方注释): 实测 getBlockAtDaa MAX_WALK 耗尽 → 记反应式
+    // backoff marker, 下一 tick 的 pre-gate 就能拦住, 不用每 60-180s 重付一次 ~2min 沉没代价的空转。
+    if (/backward walk exhausted MAX_WALK/i.test(e.message)) {
+      try {
+        sqlite.prepare(`UPDATE pool_markets SET metadata = json_set(COALESCE(metadata, '{}'), '$.walk_exhausted_confirmed', json('true')) WHERE id = ?`).run(marketId);
+      } catch (metaErr) { log(`walk_exhausted marker write fail (non-fatal): ${metaErr.message}`); }
+    }
     ctx.alert(marketId, `plan threw (${rolling ? '>1024 winner·待 rolling payout-shard task#18' : e.message}) — skip·不动钱`);
     return { ok: false, reason: rolling ? 'needs_rolling' : `plan throw: ${e.message}`, needsRolling: rolling };
   }
