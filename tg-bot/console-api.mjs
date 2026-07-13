@@ -21,6 +21,15 @@ async function req(method, path, body) {
   }
 }
 
+// 2026-07-13 (Bettor 派工#izjcun.1, 模式级裁定): status===0 是上面 catch 分支唯一标记(fetch 本身抛错——
+// 超时/网络错误), 跟任何真实 HTTP 响应(哪怕 4xx/5xx)不同。多处调用方之前把这种传输失败跟"真的没有"
+// 混为一谈(空数组/null 降级), 用户看到假空态而非"请重试"——docs/2026-07-13-tgbot-transport-failure-
+// false-empty-audit.md 全量清单。调用方在现有空值降级前加 `if (isTransportFailure(r)) return t(lang,
+// 'service_busy')`。
+export function isTransportFailure(r) {
+  return r.status === 0;
+}
+
 // S1 — poll chain_events for ONE linked address (notifications). Server filters by address.
 export function eventsSince(address, sinceMs, eventType) {
   const q = new URLSearchParams({ address });

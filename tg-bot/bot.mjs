@@ -282,7 +282,13 @@ bot.command('broker', async (ctx) => {
   const tgUser = String(ctx.from.id);
   const addr = PM.getLinkedAddr(tgUser) || linked.get(tgUser)?.address;
   let status = null;
-  if (addr) { const r = await api.brokerOnboardStatus(addr); if (r.ok) status = r.json; }
+  if (addr) {
+    const r = await api.brokerOnboardStatus(addr);
+    // Bettor #izjcun.1: 传输失败之前 status 保持 null, 落到 brokerRole() 最后一个 else 分支——对一个已
+    // approved 的 broker 显示"申请步骤"文案(暗示还没申请), 比"暂无数据"更误导。传输失败必须单独短路.
+    if (api.isTransportFailure(r)) return ctx.reply(t(lang, 'service_busy'));
+    if (r.ok) status = r.json;
+  }
   // T2 (2026-06-27): fetch earnings summary for approved brokers to show inline (non-broker = skip).
   let earnings = null;
   if (addr && status?.onboarded && status.status === 'approved') {

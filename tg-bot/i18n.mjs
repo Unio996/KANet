@@ -44,6 +44,9 @@ export const LANGS = {
     hot_footer: 'Tap button for market details · /bet all markets',
     hot_trust_card: '💰 Funds P2SH-locked on-chain · Rules publicly auditable · Auto-refund on expiry',
     hot_fail: 'Failed to load markets, try again later.',
+    // 2026-07-13 (Bettor 派工#izjcun.1, Owner 批复照发): 传输失败(超时/网络)统一文案——绝不冒充"业务上
+    // 确实为空"(docs/2026-07-13-tgbot-transport-failure-false-empty-audit.md)。
+    service_busy: 'Service busy, please retry in a moment.',
 
     // Deadline
     deadline_hours: '{h}h until close',
@@ -417,6 +420,9 @@ export const LANGS = {
     hot_footer: '点按钮进入市场详情押注 · /bet 全部市场',
     hot_trust_card: '💰 资金链上 P2SH 锁定 · 规则公开可审计 · 到期自动退',
     hot_fail: '热门市场加载失败, 稍后再试。',
+    // 2026-07-13 (Bettor 派工#izjcun.1, Owner 批复照发): 传输失败(超时/网络)统一文案——绝不冒充"业务上
+    // 确实为空"(docs/2026-07-13-tgbot-transport-failure-false-empty-audit.md)。
+    service_busy: '⏳ 系统繁忙，请稍后再试。',
 
     // Deadline
     deadline_hours: '{h}h 后截止',

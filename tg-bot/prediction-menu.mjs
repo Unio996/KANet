@@ -492,6 +492,7 @@ function _detailKeyboard(marketId, lang = 'en') {
 export async function startBetFromMarket(tgUser, marketId) {
   const lang = getUserLang(tgUser);
   const dr = await api.poolMarket(marketId);
+  if (api.isTransportFailure(dr)) return t(lang, 'service_busy');   // Bettor #izjcun.1: 传输失败≠真的没这个市场
   const market = (dr.json && (dr.json.market || (dr.json.id ? dr.json : null))) || null;
   if (!market) return t(lang, 'market_not_found');
   // 质量防御: 同 list filter (2026-06-06 Owner 实证 voo3z) — 缺规则不让进押注流程, 不糊弄用户.
@@ -619,6 +620,9 @@ async function _startBetImpl(tgUser, brokerRelayId) {
   // Fixes: /bet was using poolMarkets (no raw<50 guard) → users could select full markets → prep rejected.
   // availableMarkets already exposes protocol_version + resolution_rule_spec (pool.js update 2026-06-29).
   const r = await api.availableMarkets(100);
+  // Bettor #izjcun.1 (Owner 实撞): 传输失败(超时/网络)之前被静默降级成空数组, 跟 bet_no_markets 共用同一条
+  // 永久性语气文案——用户以为盘真的没了。传输失败必须先分流到 service_busy, 不进空盘判断.
+  if (api.isTransportFailure(r)) { sessions.delete(tgUser); return t(lang, 'service_busy'); }
   const allMarkets = (r.json && r.json.markets) || [];
   // Only v0.6/v0.7 — v0.5 needs legacy register-external path; deadline+specIsUsable already server-side.
   const markets = allMarkets.filter(m =>
@@ -699,6 +703,7 @@ async function _handleReplyImpl(tgUser, text, linkedAddr) {
     if (!term) return t(lang, 'bet_search_prompt');
     // 调 backend ?q= 全文 LIKE NOCASE + 客户端 specIsUsable filter (= Bettor 1要求一致性).
     const r = await api.poolMarkets({ status: 'pending_bettors', limit: 50 });
+    if (api.isTransportFailure(r)) return t(lang, 'service_busy');   // Bettor #izjcun.1: 传输失败≠搜索确实无结果
     const all = (r.json && r.json.markets) || [];
     const nowSec = Math.floor(Date.now() / 1000);
     const lowerTerm = term.toLowerCase();
