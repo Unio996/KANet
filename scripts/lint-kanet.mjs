@@ -164,6 +164,56 @@ function checkR_FEE_SPLIT_PKG_DRIFT() {
   }
 }
 
+// ── R-SELF-HTTP-FETCH [WARN]: console 进程禁 fetch 自己的 HTTP 端点 ──
+// (2026-07-14, docs/2026-07-14-legacy-refund-self-fetch-deadlock-fix-design.md 修法A 同族排查:
+// legacyRefundBuilderTick 靠 fetch('http://127.0.0.1:${PORT}/...') 自己调自己复用 HTTP handler 逻辑,
+// 事件循环被占时这个自我往返永远等不到自己处理, 造成自锁死循环——夜间 285 次冻结/94 次 >30s/最长 316s。
+// 全库 grep 发现 15+ 同族残留(bettor.js/exchange.js/pool.js/agent-health.js/broker-*.js/market-seeder.js
+// 等), 部分带 timeout 部分没有——这条规则堵"下周长出第 N+1 个"复发, 已知残留先 WARN(migration checklist),
+// 不马上升 ERROR(会挡住无关 commit)。同进程内复用逻辑正确做法 = 抽纯函数直调(同 buildBettorRefundClaim
+// 先例), 不经 HTTP loopback。
+const _SELF_FETCH_PORT_RE = /127\.0\.0\.1:\$\{?\s*(process\.env\.)?(PORT|CONSOLE_PORT)\b|127\.0\.0\.1:(3100|3200|3300)\b/;
+function checkR_SELF_HTTP_FETCH(fp, content) {
+  if (!/\.(mjs|js)$/.test(fp)) return;
+  if (/[\\/]scratch[\\/]|\.test\.mjs$/.test(fp)) return;
+  const lines = content.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (/^\s*(\/\/|\*)/.test(line)) continue;   // 纯注释提及(如本次改动的记账注释)不算
+    if (!/\bfetch\(/.test(line)) continue;
+    if (!_SELF_FETCH_PORT_RE.test(line)) continue;
+    warn('R-SELF-HTTP-FETCH',
+      `fetch() 目标疑似 console 自己的端口(127.0.0.1:PORT/3100/3200/3300)——进程内自己调自己的 HTTP
+端点, 事件循环被占时会自我死锁(见 2026-07-14 legacyRefundBuilderTick 事故, 夜间 285 次冻结)。若这是
+periodic tick/cron 里复用同进程 handler 逻辑, 改成抽纯函数直调(同 buildBettorRefundClaim 先例, HTTP
+路由与调用方共用同一份实现), 不经网络往返。若确实需要跨进程/外部调用, 忽略本警告。`,
+      fp, i + 1);
+  }
+}
+
+// ── R-FETCH-NO-TIMEOUT [WARN]: fetch() 调用建议带 AbortSignal.timeout ──
+// (同上 2026-07-14 设计 修法C 兜底): 任何无 timeout 的 fetch 都是潜在无限悬挂——legacyRefundBuilderTick
+// 那条 fetch 就是零 timeout 撞出的事故。启发式(WARN, 非精确 AST 解析): 检查 fetch( 所在行起 10 行窗口内
+// 有没有 AbortSignal.timeout 或 signal: —— 窗口法会有少量假阴性/假阳性(多行调用/邻近无关 timeout),
+// 可接受(migration checklist 性质, 不做commit 硬阻塞)。
+function checkR_FETCH_NO_TIMEOUT(fp, content) {
+  if (!/\.(mjs|js)$/.test(fp)) return;
+  if (/[\\/]scratch[\\/]|\.test\.mjs$/.test(fp)) return;
+  const lines = content.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (/^\s*(\/\/|\*)/.test(line)) continue;
+    if (!/\bfetch\(/.test(line)) continue;
+    const window = lines.slice(i, Math.min(lines.length, i + 10)).join('\n');
+    if (/AbortSignal\.timeout|signal:\s*\w/.test(window)) continue;
+    warn('R-FETCH-NO-TIMEOUT',
+      `fetch() 调用附近 10 行内未见 AbortSignal.timeout——无 timeout 的 fetch 是潜在无限悬挂(见 2026-07-14
+legacyRefundBuilderTick 自锁死循环事故根因之一)。补 { signal: AbortSignal.timeout(N) }(N 按调用语义选,
+通常 3000-15000ms)。`,
+      fp, i + 1);
+  }
+}
+
 // ── R-SCRATCH-CLUTTER [WARN]: 临时脚本铁律 (Owner 2026-06-27 钦定·防根目录堆爆) ──
 // 一次性诊断/测试脚本写 scratch/ (gitignored, 绝对路径), 不堆仓库根目录. gitignore (`_*`) 防入库不防
 // 物理堆在文件浏览器 → whole-repo warn (每次 commit 跑 lint 都提醒). 历史: 821 临时文件堆爆 (归档 815).
@@ -1173,6 +1223,8 @@ for (const fp of targets) {
   checkR_FEERULES_CANON_BYPASS(fp, content);  // R-FEERULES-CANON-BYPASS [WARN] (B线落1 2026-07-12): feeRules canonicalize/hash 单源封旁路(spec v1.2-2)
   checkR_STATUS_GUARD_BLACKLIST(fp, content);  // R-STATUS-GUARD-BLACKLIST [WARN] (处置设计红队 2026-07-12): protocol_status UPDATE 安全闸黑名单启发式→建议白名单
   checkR_EXPLORER_URL_BYPASS(fp, content);     // R-EXPLORER-URL-BYPASS [ERROR] (死链收敛设计 §3 2026-07-12): explorer 域名字面量禁散装, 单源 explorer-url.mjs 外一律硬阻塞
+  checkR_SELF_HTTP_FETCH(fp, content);         // R-SELF-HTTP-FETCH [WARN] (2026-07-14 legacy-refund 自锁死循环修复设计): console 禁 fetch 自己的端口
+  checkR_FETCH_NO_TIMEOUT(fp, content);        // R-FETCH-NO-TIMEOUT [WARN] (同上设计 修法C): fetch() 建议带 AbortSignal.timeout
 }
 checkR10();
 checkR_NULLIFIER_I64();
