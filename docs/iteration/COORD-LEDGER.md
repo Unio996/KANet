@@ -9,6 +9,7 @@
 ---
 
 ## 📅 7/9 日计划令(04:0x Z #czbkto·Bettor·GO)
+- **🔴 7/15 宿主机重启全停 41min+Bettor 接位恢复(20:44-21:29Z·Bettor 记账)**: Windows 宿主机 03:44:46 本地(20:44:46Z)重启——LastBootUpTime 与全子进程 exit 0x40010004 同刻吻合=OS 级事件非代码问题, 重启后零自启动, 全栈(kaspad/矿/llama/console/31relay)死透+频道死锁全员失声。**恢复序(21:14-21:29Z, Bettor 按前两次全停先例执行)**: ①kaspad 带 `--enable-unsynced-mining`(库完好, 35s 即 listen 17210)②裸 kaspa-miner(7/3 recovery 旧法)出块被节点拒 **"block is invalid"**——改走 canonical `tn12-mining-watchdog.ps1` bridge 内置 CPU 矿机(6/25 Owner 钦定路径)即 BLOCK ACCEPTED+confirmed BLUE ③`bash kanet-start.sh` 全栈。**验收**: console:3200/31 relay 单实例无翻倍/llama:8000 200/DAA ~8每秒推进/mempool 55→0 全消化/恢复通告 tx bd703530+7231971d 独立回读核实真在频道。**七源病复发实锤(恢复后即拍到)**: 21:25:34→21:28:42 单次事件循环阻塞 **188,396ms**(diag:eventloop-lag, heapUsed 163MB=非GC), 期间 relay-health deadCount=31 级联误判+API 全程 000, 与冷启动 catch-up+seeder 建盘冲刺(491→493/500)同窗——7/14 恒定签名族数据+1。**运维沉淀**: (a)7/3 outage-recovery runbook 的裸 miner 路径对 covenant 节点已失效, canonical=bridge watchdog(memory 已更新);(b)OS 重启后无任何自启动=整链单点, 立卡「开机自启动: 节点+挖矿watchdog+console supervisor」待 KANet-UI 域;(c)树上未提交改动(bettor-bisect env 门控/KANET_NODE_FLAGS/RH 计时探针, env 未设=行为中性)随启动装载, 频道已催认领。
 - **🔴🔴 7/14全日: 七源追凶未竟+系统全景图出炉+Owner裁定待决(00:0x-12:3x Z·Bettor 记账·当前状态)**:
   **■ 硬事实**: 修了**6轮**(第四源自fetch死锁/第五源6文件同族/Z20熔断闸+挂账+告警/阈值=1/两条lint/生产退款死id九文件), **但系统仍在冻结**(实测 26次>30s, 最长278秒)。**恒定4分钟签名六轮修复纹丝不动**(233→247→255→258→264→278s)。
   **■ 已修实证**: legacyRefundBuilderTick自fetch(tick 6.5分钟→2.8秒, b1d2cf99)/6文件同族self-fetch+过期端口3100(c8048e70+847b6413)/Z20熔断闸三件套(ff67936d+21c915f4, 实测每轮隔离10个+频道告警真喊)/阈值3→1(env, 因NWT指出重启清空进程内Map——**我的算术被现实打脸, 公开认账**)。
@@ -179,5 +180,7 @@ Owner 元问题:写进文档的铁律(CLAUDE.md 接位 SOP 第5条"设计前查�
 - `FAUCET_AMOUNT_KAS` 5→10k?(需 Owner + faucet relay 余额前提)
 - polymarket-UMA 实现切片派工时机 + owner 归属(生死线,优先级最高待 Owner 拍节奏)。
 - B/C broker 公开自助注册 auth 硬化(banked,production 前)。
+- 🔴 **NWT 接位(2026-07-15 04:1x)发现 console 无进程在跑**: 频道最后一条消息 7/14 20:43:34Z(J2 Z20 CPU-profile 归因汇报, 详见下条), 之后零新消息 = 与"无 node 进程"互相印证。树上有未 commit 的 Bettor bisect 探针(index.js BISECT_B_OFF/ZKPROVE_OFF + kanet-start.sh KANET_NODE_FLAGS + relay-health-monitor.js __t0 计时), 疑似排除法实验中间态。NWT 未单方面重启(域属 KANet-UI, 且不知实验意图, 盲重启有 7/13-7/14 两次全停先例风险)——等操作者或 KANet-UI 决定。
+- 🔄 **NWT 对 J2 Z20 `_scanExpiredBrokerOffers` CPU-profile 归因请求的回应**: J2 7/14 20:43Z 请求 NWT/Bettor 确认"逐 await 加计时探针"思路再动手。NWT 核实(EXPLAIN QUERY PLAN + 实测行数): SQL 本体索引全命中且候选集近空(broker_kas_refunded 全库 1 行/broker_fallback_claim 0 行), 函数体也无能吃 190s/次 CPU 的代码——**批准 J2 思路, 并加一条建议: 先测 setInterval 实际触发延迟(scheduled vs actual)看是不是本函数根本没开始执行就已经在排队, 比逐 await 更快能验证"profiler artifact(排队伪影)"假说**。详见 `docs/2026-07-15-NWT-redteam-z20-cpu-profiler-review.md`(频道发不出, 该文档是当前唯一交付)。
 
 ---
