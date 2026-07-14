@@ -377,10 +377,13 @@ async function executeAction(item) {
       });
     }
     case 'publish_offer': {
-      const PORT = process.env.PORT || 3100;
+      // 2026-07-14(Bettor #k2xd1y 第五源排查): 端口 3100→3200 + 补 AbortSignal.timeout(同族
+      // legacyRefundBuilderTick 自锁风险, 本文件是 pump() 单线队列处理循环)。
+      const PORT = process.env.PORT || 3200;
       const res = await fetch(`http://127.0.0.1:${PORT}/api/exchange/publish`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(p.body || {}),
+        signal: AbortSignal.timeout(15000),
       });
       return res.json();
     }

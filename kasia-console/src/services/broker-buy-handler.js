@@ -285,10 +285,14 @@ async function _brokerPublishKasOffer(qtyKas, payChain, give_asset = 'KAS', want
   const SPREAD_PCT = 1;
   const sellPrice = midPrice * (1 + SPREAD_PCT / 100);
   const wantAmount = (qtyKas * sellPrice).toFixed(4);
-  const PORT = process.env.CONSOLE_PORT || 3100;
+  // 2026-07-14(Bettor #k2xd1y 第五源排查): CONSOLE_PORT 从未在 kanet.env 配置过(实测), 之前恒定
+  // 退化到硬编码 3100(非"偶发 fallback", 是每次都命中的死代码路径)——改用真实配置的 process.env.PORT,
+  // 端口 3100→3200, 补 AbortSignal.timeout(同族 legacyRefundBuilderTick 自锁风险)。
+  const PORT = process.env.PORT || 3200;
   try {
     const res = await fetch(`http://127.0.0.1:${PORT}/api/exchange/publish`, {
       method: 'POST',
+      signal: AbortSignal.timeout(15000),
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         // T-J2-2026-04-27 Bug 6 真修: give_asset hardcode 'KAS' → 参数 (Bug 5 修了价 oracle, 但 publish body 还 hardcode KAS = generic 化半残)

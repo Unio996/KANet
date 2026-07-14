@@ -246,7 +246,9 @@ async function fireMarketSell(rule, currentValue) {
   }
   const sellPrice = Math.max(0.01, currentValue - 0.01);  // bid - $0.01 slippage cap
   try {
-    const res = await fetch('http://127.0.0.1:3100/api/predictions/order', {
+    // 2026-07-14(Bettor #k2xd1y 第五源排查): 补 AbortSignal.timeout(防同 legacyRefundBuilderTick
+    // 同族自锁) + 端口从过期 3100 改 process.env.PORT||3200(同批 5 处端口烤死修正之一)。
+    const res = await fetch(`http://127.0.0.1:${process.env.PORT || 3200}/api/predictions/order`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -259,6 +261,7 @@ async function fireMarketSell(rule, currentValue) {
         price: sellPrice,
         size: rule.current_size,
       }),
+      signal: AbortSignal.timeout(15000),
     });
     const data = await res.json();
     if (data.ok && data.success !== false) {

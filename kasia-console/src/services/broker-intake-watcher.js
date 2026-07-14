@@ -90,10 +90,13 @@ async function _fetchKasPrice() {
 
 async function _publishOffer(body) {
   if (_publishOverride) return _publishOverride(body);
-  const PORT = process.env.PORT || 3100;
+  // 2026-07-14(Bettor #k2xd1y 第五源排查): 端口从过期 3100 改 process.env.PORT||3200 + 补
+  // AbortSignal.timeout(防同 legacyRefundBuilderTick 同族自锁, 本文件 TICK_MS=60s 常驻循环调此函数)。
+  const PORT = process.env.PORT || 3200;
   const res = await fetch(`http://127.0.0.1:${PORT}/api/exchange/publish`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(15000),
   });
   return res.json();
 }
@@ -666,10 +669,13 @@ export async function _scanUntakenOffersFallback() {
         continue;
       }
       // Step 1: cancel_v1 broadcast on KANet (守 ch14 #44 chain TX anchor)
-      const PORT = process.env.PORT || 3100;
+      // 2026-07-14(Bettor #k2xd1y 第五源排查): 端口 3100→3200 + 补 AbortSignal.timeout(同上, 本文件
+      // REFUND_TICK_MS=5min 常驻循环调此路径)。
+      const PORT = process.env.PORT || 3200;
       const cancelRes = await fetch(`http://127.0.0.1:${PORT}/api/exchange/cancel`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ relayNodeId: BROKER_RELAY_ID, offer_id: r.id }),
+        signal: AbortSignal.timeout(15000),
       }).then(rr => rr.json()).catch(e => ({ ok: false, error: e.message }));
       if (!cancelRes.ok || !cancelRes.cancel_tx) {
         console.warn(`[broker-fallback] T2.5c cancel_v1 fail offer ${r.id.slice(0,8)}: ${cancelRes.error || 'no cancel_tx'}`);
@@ -832,10 +838,13 @@ export async function _scanUntakenBuyOffersFallback() {
         continue;
       }
       // Step 1: cancel_v1 broadcast (mirror T2.5c cancel chain TX anchor)
-      const PORT = process.env.PORT || 3100;
+      // 2026-07-14(Bettor #k2xd1y 第五源排查): 端口 3100→3200 + 补 AbortSignal.timeout(同上, 本文件
+      // REFUND_TICK_MS=5min 常驻循环调此路径)。
+      const PORT = process.env.PORT || 3200;
       const cancelRes = await fetch(`http://127.0.0.1:${PORT}/api/exchange/cancel`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ relayNodeId: BROKER_RELAY_ID, offer_id: r.id }),
+        signal: AbortSignal.timeout(15000),
       }).then(rr => rr.json()).catch(e => ({ ok: false, error: e.message }));
       if (!cancelRes.ok || !cancelRes.cancel_tx) {
         recordChainEvent({
