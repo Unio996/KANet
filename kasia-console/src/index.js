@@ -13,6 +13,21 @@ process.on('unhandledRejection', (reason) => {
   console.error('[kanet:unhandled-rejection]', reason?.stack || reason?.message || String(reason));
 });
 
+// 2026-07-14 J2/NWT 联合诊断(Owner直令#CPU-profile-P0): --cpu-prof CLI flag 依赖进程"自然退出"
+// (process.exit() 或正常 return)才 flush .cpuprofile 文件——外部 kill -TERM/-INT 在这台 Windows
+// 环境下(NWT 隔离进程实测坐实)不可靠触达/不触发 flush, 会导致跑完整个采样窗口却拿不到任何文件。
+// 解法: env 门控 self-timer, 到点进程自己调 process.exit(0)(= 正常退出路径, 触发原生 flush),
+// 不依赖外部信号。**observe-only, 默认不设 env 则完全零行为改变**。用完这轮诊断后删除。
+if (process.env.CPU_PROF_AUTO_EXIT_MS) {
+  const _exitMs = parseInt(process.env.CPU_PROF_AUTO_EXIT_MS, 10);
+  console.log(`[cpu-prof] self-exit timer armed: will process.exit(0) after ${_exitMs}ms to flush --cpu-prof output`);
+  // 不调用 .unref() — 必须让这个 timer 保持进程存活直到触发(默认行为已满足, 显式写出防未来误加 unref)。
+  setTimeout(() => {
+    console.log(`[cpu-prof] self-exit timer fired — exiting now to flush profile`);
+    process.exit(0);
+  }, _exitMs);
+}
+
 // DB setup
 import { runMigrations } from './db/migrate.js';
 import { sqlite as _sqlite } from './db/client.js';
@@ -474,8 +489,7 @@ await startAllAdapters();
 
 // Pre-warm all Agent Minds (identity + skills + memory loaded at startup)
 import { init as initMinds, startScheduler } from './services/mind-manager.js';
-await initMinds();
-startScheduler();
+if (process.env.DEMO_MINDS_OFF !== '1') { await initMinds(); startScheduler(); } else { console.log('[bettor-bisect] MINDS disabled'); }
 
 // Auto-start all relay processes (per-account)
 import { startAll as startAllRelays, stopAll as stopAllRelays } from './services/relay-manager.js';
@@ -586,19 +600,19 @@ else { console.log('[claimAuto] disabled via BETTOR_REFUND_CLAIM_ENABLED=0 (J1 C
 // env: AUTO_BET_TICK_MS (60s default), AUTO_BET_PER_TICK (2), MIN/MAX_STAKE_KAS (1/50),
 //      MIN_RESERVE_KAS (10), AUTO_BET_RELAYS (= AutoBetter-1/2/3 + tester-1/2/3 default).
 import { startAutoBetterCron } from './services/pool-auto-better.js';
-startAutoBetterCron();
+if (process.env.DEMO_AUTOBETTER_OFF !== '1') startAutoBetterCron(); else console.log('[bettor-bisect] AutoBetter disabled');
 
 // #42 (Bettor 2026-07-04 头号2, qzdh7nar 判断源 + KANet-UI 下注执行): house agent 公开判断+真押
 // 世界杯淘汰赛盘("击败 Agent" 玩法), 单一固定身份(HouseAgent relay), 每盘只押一次(去重), 方向来自
 // judgeWinDir 同源判断(非独立复刻)。env: HOUSE_AGENT_TICK_MS (5min default), HOUSE_AGENT_STAKE_KAS (20).
 import { startHouseAgentCron } from './services/pool-house-agent.js';
-startHouseAgentCron();
+if (process.env.DEMO_HOUSE_OFF !== '1') startHouseAgentCron(); else console.log('[bettor-bisect] HouseAgent disabled');
 
 // #42 加大方案·治本 (Bettor 2026-07-04 "别再充一次跑几单又干"): 自动巡检 AutoBetter/HouseAgent
 // relay 余额, 低于阈值从 mining 储备(#34 consolidate 出的 faucet reserve)自动补, 不用再手动 curl
 // transfer。env: BOT_AUTOFUND_SOURCE_RELAY_ID(必设才启动) / THRESHOLD_KAS(500) / AMOUNT_KAS(3000).
 import { startBotAutofundCron } from './services/pool-bot-autofund.js';
-startBotAutofundCron();
+if (process.env.DEMO_AUTOFUND_OFF !== '1') startBotAutofundCron(); else console.log('[bettor-bisect] BotAutofund disabled');
 
 // J1 #27d (Owner public-testnet hardening sprint 2026-06-14): boot catch-up for market_publishes
 // missed by in-mem chunk reassembly (LRU-evicted under sign_req re-broadcast flood, or lost across a
@@ -712,9 +726,7 @@ startRefreshWorker();
 
 // Start market seeder (auto seed orders on free market)
 import { startMarketSeeder, startSeederDepositWatcher, startSeederRefundWorker } from './services/market-seeder.js';
-startMarketSeeder();
-startSeederDepositWatcher();
-startSeederRefundWorker();
+if (process.env.DEMO_SEEDER_OFF !== '1') { startMarketSeeder(); startSeederDepositWatcher(); startSeederRefundWorker(); } else { console.log('[bettor-bisect] MarketSeeder disabled'); }
 
 // Pool-market seeder (S-A, Bettor r240) — auto-mirror real Polymarket top-volume markets →
 // pending_bettors. Opt-in via POOL_SEEDER_ENABLED=1 + POOL_SEEDER_MAKER_RELAY (off = no-op).
