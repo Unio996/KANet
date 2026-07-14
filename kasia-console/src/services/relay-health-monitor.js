@@ -34,6 +34,7 @@ function _recordRestart(relayNodeId) {
 }
 
 export async function relayHealthMonitorTick() {
+  const __t0 = Date.now(); // BETTOR_RH_TIMER
   if (running) return { skipped: true };
   running = true;
   // 2026-07-14 J2/Bettor 双轨定罪轨道1(Owner直令#kul7j3, 头号嫌疑relayHealthMonitorTick 31个relay
@@ -84,6 +85,7 @@ export async function relayHealthMonitorTick() {
     }
     if (restarted > 0 || restart_stormed > 0) {
       console.log(`[relay-health] tick eligible=${eligible.length} healthy=${healthy} restarted=${restarted} restart_stormed=${restart_stormed} errored=${errored}`);
+  console.log(`[relay-health][diag] TICK TOOK ${Date.now()-__t0}ms`);
     }
     console.log(`[diag:tick-duration] relayHealthMonitorTick ms=${Date.now() - _tickStart} eligible=${eligible.length} deadCount=${deadCount}`);
     return { ok: true, eligible: eligible.length, healthy, restarted, restart_stormed, errored };

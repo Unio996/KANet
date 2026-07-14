@@ -472,7 +472,7 @@ await startZkProveServer();
 // zk-prove-worker(缺件②, Bettor 2026-07-08 派工): 轮询 zk_prove_jobs 真跑 RISC0 proving + 铸 gate 注资。
 // ZK_PROVE_WORKER_ENABLED=1 才跑(默认 OFF, 真实 proving+真 KAS 注资, 同 SETTLE_DAEMON_ENABLED 模式)。
 import { startZkProveWorkerCron } from './services/zk-prove-worker.mjs';
-startZkProveWorkerCron();
+if (process.env.ZKPROVE_OFF !== '1') startZkProveWorkerCron(); else console.log('[bettor-bisect] ZkProveWorker disabled');
 
 // Tier 2.1 pair ingestor — scans broadcast_messages for pair_invite/pair_ack envelopes + writes agent_pairs.
 // 30s tick, idempotent re-scan, boot catch-up from id 0.
@@ -626,27 +626,27 @@ catchUpUningestedMarkets({ windowHours: 24, force: true }).catch((e) => console.
 // 配合 r424 Console supervisor: supervisor 救 Console 死, monitor 救 relay 死/没起来.
 // Restart storm 防护: 3/h cap per relay.
 import { startRelayHealthMonitorCron } from './services/relay-health-monitor.js';
-startRelayHealthMonitorCron();
+if (process.env.RH_OFF !== '1') startRelayHealthMonitorCron(); else console.log('[bettor-bisect] RelayHealth disabled');
 
 // Oracle-voter PRODUCING-health (KANet-UI, Q2 durability hard-req per NWT/Bettor r989/r997): relay-health
 // catches a DEAD relay, but Q2 was a SILENT 0-vote stall while the voter cron ran fine (process-alive).
 // 2min cron flags verifying markets a LOCAL committee oracle owes a vote on but hasn't cast (>10min) →
 // WARN log + events row (Brain/UI visible). Detect+surface only (a vote-routing/quorum bug isn't restart-healable).
 import { startOracleVoterHealthMonitorCron } from './services/oracle-voter-health-monitor.js';
-startOracleVoterHealthMonitorCron();
+if (process.env.ORACLE_OFF !== '1') startOracleVoterHealthMonitorCron(); else console.log('[bettor-bisect] startOracleVoterHealthMonitorCron disabled');
 
 // 质押池活化 (Bettor r449): 5min cron 刷 oracle_pool_chain_view 保新鲜.
 import { startOraclePoolScannerCron } from './services/oracle-pool-chain-scanner-cron.mjs';
-startOraclePoolScannerCron();
+if (process.env.ORACLE_OFF !== '1') startOraclePoolScannerCron(); else console.log('[bettor-bisect] startOraclePoolScannerCron disabled');
 
 // oracle 锁自动续期 (task#13 Bettor 2026-06-30·28h urgency): 1h cron, lock_until_daa 到期前 3M DAA 续 10M.
 import { startOraclePoolRenewalCron } from './services/oracle-pool-renewal-cron.mjs';
-startOraclePoolRenewalCron();
+if (process.env.ORACLE_OFF !== '1') startOraclePoolRenewalCron(); else console.log('[bettor-bisect] startOraclePoolRenewalCron disabled');
 
 // bshard 自治结算 daemon (Owner 2026-06-30 钦定 A·SETTLE_DAEMON_ENABLED=1 才跑, 默认 OFF).
 // canary: MAX_PER_TICK=1, TICK=60s → 验 → ramp。J1 covenant 是真安全网, DB lease = best-effort。
 import { startSettleDaemonCron, startZkCloseTickV2Cron, startClaimAutonomousTickCron, startZkHandoffAutonomousTickCron, startZkJudgeProposeAutonomousTickCron } from './services/bshard-settle-daemon.mjs';
-startSettleDaemonCron();
+if (process.env.SETTLE_DAEMON_OFF !== '1') startSettleDaemonCron(); else console.log('[bettor-bisect] SettleDaemon disabled');
 // (b)(c) 2026-07-09 J2: docs/2026-07-09-zk-autonomy-three-parts-design.md — 各自独立 kill switch(默认 OFF,
 // ZK_CLOSE_TICK_V2_ENABLED / ZK_CLAIM_TICK_ENABLED), 开关本身是配置变更(Bettor 注4: 走重启窗+ledger记账+双签)。
 startZkCloseTickV2Cron();
@@ -725,13 +725,19 @@ import { startRefreshWorker } from './services/connection-manager.js';
 startRefreshWorker();
 
 // Start market seeder (auto seed orders on free market)
+// 批0 MUST-FIX(NWT红队 d71ca8d0, 修法A): DEMO_SEEDER_OFF 只控 startMarketSeeder()(建新 demo 挂单)。
+// startSeederDepositWatcher/startSeederRefundWorker 永远跑——它们是真实用户 seeder 买单充值/退款
+// 状态机(唯一资金安全出口), 跟 demo 挂单创建无关, 关闭会让在途充值/过期退款孤儿卡死(Z20 同族坑)。
 import { startMarketSeeder, startSeederDepositWatcher, startSeederRefundWorker } from './services/market-seeder.js';
-if (process.env.DEMO_SEEDER_OFF !== '1') { startMarketSeeder(); startSeederDepositWatcher(); startSeederRefundWorker(); } else { console.log('[bettor-bisect] MarketSeeder disabled'); }
+if (process.env.DEMO_SEEDER_OFF !== '1') { startMarketSeeder(); } else { console.log('[bettor-bisect] MarketSeeder create-loop disabled'); }
+startSeederDepositWatcher();
+startSeederRefundWorker();
 
 // Pool-market seeder (S-A, Bettor r240) — auto-mirror real Polymarket top-volume markets →
 // pending_bettors. Opt-in via POOL_SEEDER_ENABLED=1 + POOL_SEEDER_MAKER_RELAY (off = no-op).
+// 批0(NWT红队 d71ca8d0): 原无顶层 kill-switch, 新加 DEMO_POOL_MARKET_SEEDER_OFF 与其余批0开关同款。
 import { startPoolMarketSeeder } from './services/pool-market-seeder.js';
-startPoolMarketSeeder();
+if (process.env.DEMO_POOL_MARKET_SEEDER_OFF !== '1') { startPoolMarketSeeder(); } else { console.log('[bettor-bisect] PoolMarketSeeder disabled'); }
 
 // R5 T-J2-16: retail-dex v1 deprecated, deleted. broker is_service Service 模式
 // 直走 broker-buy/sell-handler + broker-action-queue. retail_dex_orders 表保留
