@@ -2,6 +2,7 @@
 // Per service spec docs/poolspine-service-layer-spec-2026-05-21.md.
 
 import { sqlite } from '../db/client.js';
+import { buildExplorerUrl, buildExplorerAddressUrl, explorerBaseUrl } from '../lib/explorer-url.mjs';
 import { computeSpineP2SH, computeSideP2SH } from '../lib/pool-p2sh.mjs';
 import { buildSidesMerkleTree, getMerkleProof } from '../services/pool-merkle-builder.js';
 import { sendCommandAsync, transferAndConfirm, isRelayAlive } from '../services/relay-manager.js';
@@ -343,6 +344,143 @@ async function _broadcastBetRegistered(args) {
   } catch (e) {
     console.warn(`[pool/broadcast] bet_register fail ${args.market_id?.slice(0, 12)}/${args.bettor_pk?.slice(0, 8)}: ${e.message}`);
     return { ok: false, error: e.message };
+  }
+}
+
+// buildBettorRefundClaim — bettor 自取退款核心逻辑(2026-07-14, Bettor #k0i054 修法A 根治抽取)。
+//
+// 抽出原因: 原实现只活在 POST /api/pool/market/:id/bettor-refund-claim 这个 HTTP handler 里,
+// legacyRefundBuilderTick(pool-market-settler.js)靠 fetch('http://127.0.0.1:${PORT}/...') 自己
+// 调自己的 HTTP 端点来复用这份逻辑——console 单线程事件循环被占时,这个自我 HTTP 往返永远等不到
+// 自己处理,造成自锁死循环(见 docs/2026-07-14-legacy-refund-self-fetch-deadlock-fix-design.md,
+// 夜间实测 285 次事件循环冻结/94 次 >30s/最长 316s)。
+//
+// 抽成纯函数后,HTTP 路由与 tick 共用同一份逻辑(不复制两份——9 文件死 relay id 就是"不完整迁移"
+// 的前车之鉴),tick 侧直接 await 调用,进程内自调用天然不需要网络往返。
+//
+// 返回形状: { ok, httpStatus, ...payload } — httpStatus 供 HTTP 路由包装层映射状态码,
+// 纯内部调用方(tick)只需要看 ok。
+export async function buildBettorRefundClaim(marketId, { bettorPk: bettorPkRaw, sideId } = {}) {
+  const bettorPk = (typeof bettorPkRaw === 'string' ? bettorPkRaw.toLowerCase() : null);
+  if (!bettorPk && !sideId) {
+    return { ok: false, httpStatus: 400, error: 'bettor_pk or side_id required' };
+  }
+
+  const market = sqlite.prepare(`
+    SELECT id, deadline, spine_p2sh, protocol_version, protocol_status
+    FROM pool_markets WHERE id = ?
+  `).get(marketId);
+  if (!market) return { ok: false, httpStatus: 404, error: 'market not found' };
+
+  // 🚨 #33/#34 bshard-detect safety net(见原 HTTP handler 同款注释, 逐字保留——J1 红队 2026-06-25
+  // §11 裁决 + ANTI-PATTERNS 规则 50, DO NOT shard-aware-migrate this query）。
+  const isBshard = sqlite.prepare(
+    'SELECT 1 FROM market_shards WHERE logical_market_id = ? OR shard_market_id = ? LIMIT 1'
+  ).get(marketId, marketId);
+  if (isBshard) {
+    return {
+      ok: false, httpStatus: 409,
+      error: 'bshard market: bettor refunds use the fold refund path (PoolShard_fold refund_draw, lib/pool-refund-builder.mjs), not the standalone PoolSide refund endpoint — stake is in the aggregated shard pool, not a per-bettor side UTXO.',
+      refund_path: 'bshard_fold',
+    };
+  }
+
+  let side;
+  if (sideId) {
+    side = sqlite.prepare(`
+      SELECT id, bettor_pk, side_p2sh, side_lock_tx, side_redeem_script_hex, stake_amount, direction
+      FROM pool_bettor_sides WHERE id = ? AND market_id = ?
+    `).get(sideId, marketId);
+  } else {
+    side = sqlite.prepare(`
+      SELECT id, bettor_pk, side_p2sh, side_lock_tx, side_redeem_script_hex, stake_amount, direction
+      FROM pool_bettor_sides WHERE market_id = ? AND lower(bettor_pk) = ?
+    `).get(marketId, bettorPk);
+  }
+  if (!side) return { ok: false, httpStatus: 404, error: 'side row not found for bettor in market' };
+  if (!side.side_lock_tx) return { ok: false, httpStatus: 409, error: 'side stake not yet locked on chain' };
+  if (!side.side_redeem_script_hex) return { ok: false, httpStatus: 409, error: 'side row missing redeem_script_hex (= pre-v136 register, cannot self-claim)' };
+
+  // Resolve signing relay via deriveXOnlyPubkey(relay_nodes.address) match (Bettor r392 catch).
+  const candidates = sqlite.prepare('SELECT id, address FROM relay_nodes WHERE address IS NOT NULL').all();
+  let signingRelay = null;
+  for (const row of candidates) {
+    try {
+      const pk = await deriveXOnlyPubkey(row.address);
+      if (String(pk).toLowerCase() === String(side.bettor_pk).toLowerCase()) {
+        signingRelay = row;
+        break;
+      }
+    } catch {}
+  }
+  if (!signingRelay) {
+    return {
+      ok: false, httpStatus: 404,
+      error: `no local relay matches bettor_pk=${String(side.bettor_pk).slice(0,12)}.. via deriveXOnlyPubkey(address) — bettor relay not on this node`,
+    };
+  }
+
+  // Byte-size mass-aware fee + KIP-9 storage_mass (= helper refactor lib/kip9-mass.mjs).
+  const { computeSingleOutputFee } = await import('../lib/kip9-mass.mjs');
+  const redeemBytes = Buffer.from(side.side_redeem_script_hex, 'hex');
+  const sigScriptSize = 70 + redeemBytes.length;
+  const txByteEstimate = 45 + sigScriptSize + 50 + 80;
+  const computeMassEst = Math.ceil(txByteEstimate * 2.5);
+  const sideStakeInt = parseInt(side.stake_amount, 10) || 1_000_000_000;
+  const feeResult = computeSingleOutputFee(computeMassEst, sideStakeInt, 1000, 100_000_000);
+  const massEst = feeResult.totalMass;
+  const fee = feeResult.dynamicFee;
+
+  // v0.5 hardcodes output == stake - 1000 (1000 sompi in-script constant); actual TX fee paid by
+  // relay fee-input (separate relay-wallet UTXO, no-change). v06/v07 use dynamic KIP-9 fee.
+  const isLegacy = !market.protocol_version || market.protocol_version === 'v0.5';
+  const stakeSompi = BigInt(side.stake_amount);
+  const outAmount = isLegacy ? stakeSompi - 1000n : stakeSompi - BigInt(fee);
+  if (!isLegacy && outAmount <= 1000n) {
+    return { ok: false, httpStatus: 409, error: `output ${outAmount} <= dust 1000 (= fee ${fee} too high for stake ${stakeSompi})` };
+  }
+
+  // J1 5dd590cd0 grace fix: SS L260/270 require(tx.time >= (deadline + REFUND_GRACE_SEC) * 1000) ms.
+  const { REFUND_GRACE_SEC } = await import('../lib/pool-refund-grace.mjs');
+  const lockTime = isLegacy
+    ? BigInt(market.deadline) * 1000n
+    : (BigInt(market.deadline) + BigInt(REFUND_GRACE_SEC)) * 1000n;
+  const entryIndex = isLegacy ? 3 : 2;
+
+  try {
+    const submitResult = await sendCommandAsync(signingRelay.id, {
+      type: 'pool_side_refund_cancelled_tx',
+      side_p2sh_address: side.side_p2sh,
+      side_redeem_script_hex: side.side_redeem_script_hex,
+      required_input_outpoint: { outpointTxid: side.side_lock_tx, outpointIndex: 0 },
+      output: { address: signingRelay.address, amountSompi: outAmount.toString() },
+      lock_time: lockTime.toString(),
+      entry_index: entryIndex,
+      add_fee_input: isLegacy,
+    });
+    if (!submitResult?.ok || !submitResult.txId) {
+      return { ok: false, httpStatus: 500, error: `relay submit fail: ${submitResult?.error || 'no txId'}` };
+    }
+    // Bettor r400 catch: 必 UPDATE claim_txid 防 cron 重试。
+    sqlite.prepare('UPDATE pool_bettor_sides SET claim_txid = ?, refund_attempted_at = CURRENT_TIMESTAMP WHERE id = ?')
+      .run(submitResult.txId, side.id);
+    return {
+      ok: true, httpStatus: 200,
+      market_id: marketId,
+      bettor_pk: side.bettor_pk,
+      side_id: side.id,
+      signing_relay_id: signingRelay.id,
+      signing_relay_address: signingRelay.address,
+      refund_txid: submitResult.txId,
+      stake_sompi: stakeSompi.toString(),
+      fee_sompi: fee.toString(),
+      output_sompi: outAmount.toString(),
+      lock_time_ms: lockTime.toString(),
+      mass_estimate: massEst,
+    };
+  } catch (e) {
+    console.error(`[pool/bettor-refund-claim] fail market=${marketId.slice(0,12)} side=${side.id}: ${e.message}`);
+    return { ok: false, httpStatus: 500, error: `claim fail: ${e.message}` };
   }
 }
 
@@ -3534,11 +3672,11 @@ export async function registerPoolRoutes(fastify) {
     // Bettor sides (winner candidates).
     const sides = sqlite.prepare('SELECT bettor_pk, direction, stake_amount, side_p2sh, side_lock_tx, claim_txid FROM pool_bettor_sides WHERE market_id = ? ORDER BY merkle_index').all(marketId);
 
-    // Kaspa explorer base (testnet-12 default).
+    // Kaspa explorer base — 单源契约(explorer-url.mjs): testnet-12 无公网 explorer(explorer-tn12.kaspa.org
+    // DNS 不存在, Owner 实测 ENOTFOUND), 诚实返回 null 而非拼一个死链。
     const network = (market.spine_p2sh || '').startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
-    const explorerBase = network === 'testnet-12' ? 'https://explorer-tn12.kaspa.org' : 'https://explorer.kaspa.org';
-    const txUrl = (txid) => txid ? `${explorerBase}/txs/${txid}` : null;
-    const addrUrl = (addr) => addr ? `${explorerBase}/addresses/${addr}` : null;
+    const txUrl = (txid) => buildExplorerUrl(txid, network);
+    const addrUrl = (addr) => buildExplorerAddressUrl(addr, network);
 
     return reply.send({
       ok: true,
@@ -3605,7 +3743,7 @@ export async function registerPoolRoutes(fastify) {
       pool_merkle_root: market.pool_merkle_root,
       chain_events: eventsByType,
       network,
-      explorer_base: explorerBase,
+      explorer_base: explorerBaseUrl(network),
     });
   });
 
@@ -3922,147 +4060,15 @@ export async function registerPoolRoutes(fastify) {
   //   6. Return refund_txid or error.
   //
   // Body: { bettor_pk } OR { side_id }.
+  // 2026-07-14(Bettor #k0i054 修法A): 核心逻辑抽到模块级 buildBettorRefundClaim(见文件顶部),
+  // 这里只是薄包装(parse request → 调纯函数 → 按 httpStatus 映射 reply)。tick 侧(legacyRefundBuilderTick)
+  // 直接 import 调同一个函数,不再经过 HTTP 自调用。
   fastify.post('/api/pool/market/:id/bettor-refund-claim', async (request, reply) => {
     const marketId = request.params.id;
     const b = request.body || {};
-    const bettorPk = (typeof b.bettor_pk === 'string' ? b.bettor_pk.toLowerCase() : null);
-    const sideId = b.side_id;
-    if (!bettorPk && !sideId) {
-      return reply.code(400).send({ ok: false, error: 'bettor_pk or side_id required' });
-    }
-
-    const market = sqlite.prepare(`
-      SELECT id, deadline, spine_p2sh, protocol_version, protocol_status
-      FROM pool_markets WHERE id = ?
-    `).get(marketId);
-    if (!market) return reply.code(404).send({ ok: false, error: 'market not found' });
-
-    // 🚨 #33/#34 bshard-detect safety net (J1 红队 2026-06-25, §11 裁决 Bettor 认错+全员 co-verify,
-    // ANTI-PATTERNS 规则 50). bshard (register-v07) bettors have NO standalone refundable PoolSide:
-    // recordBettor (register-v07, ~L1157) writes side_p2sh = the SHARED shard pool P2SH, side_lock_tx =
-    // the leaf TX, side_redeem_script_hex = '' — the stake lives in the aggregated fold pool, refundable
-    // ONLY via the bshard path (PoolShard_fold refund_draw, lib/pool-refund-builder.mjs). THIS endpoint
-    // runs the standalone PoolSide refund (entry 2/3) = the wrong contract for bshard. The historic
-    // logical-404 / empty-redeem-409 were incidental fail-safes; this makes the rejection EXPLICIT so a
-    // future "make it shard-aware" migration can't strip the safety and route a bshard bettor's refund at
-    // the shared shard pool (= one bettor spending the aggregate). DO NOT shard-aware-migrate this query;
-    // detect-and-reject is the ruling. (queried by logical id → market_shards.logical_market_id; by a
-    // shard id → market_shards.shard_market_id; either match = bshard.)
-    const isBshard = sqlite.prepare(
-      'SELECT 1 FROM market_shards WHERE logical_market_id = ? OR shard_market_id = ? LIMIT 1'
-    ).get(marketId, marketId);
-    if (isBshard) {
-      return reply.code(409).send({
-        ok: false,
-        error: 'bshard market: bettor refunds use the fold refund path (PoolShard_fold refund_draw, lib/pool-refund-builder.mjs), not the standalone PoolSide refund endpoint — stake is in the aggregated shard pool, not a per-bettor side UTXO.',
-        refund_path: 'bshard_fold',
-      });
-    }
-
-    let side;
-    if (sideId) {
-      side = sqlite.prepare(`
-        SELECT id, bettor_pk, side_p2sh, side_lock_tx, side_redeem_script_hex, stake_amount, direction
-        FROM pool_bettor_sides WHERE id = ? AND market_id = ?
-      `).get(sideId, marketId);
-    } else {
-      side = sqlite.prepare(`
-        SELECT id, bettor_pk, side_p2sh, side_lock_tx, side_redeem_script_hex, stake_amount, direction
-        FROM pool_bettor_sides WHERE market_id = ? AND lower(bettor_pk) = ?
-      `).get(marketId, bettorPk);
-    }
-    if (!side) return reply.code(404).send({ ok: false, error: 'side row not found for bettor in market' });
-    if (!side.side_lock_tx) return reply.code(409).send({ ok: false, error: 'side stake not yet locked on chain' });
-    if (!side.side_redeem_script_hex) return reply.code(409).send({ ok: false, error: 'side row missing redeem_script_hex (= pre-v136 register, cannot self-claim)' });
-
-    // Resolve signing relay via deriveXOnlyPubkey(relay_nodes.address) match (Bettor r392 catch).
-    const candidates = sqlite.prepare('SELECT id, address FROM relay_nodes WHERE address IS NOT NULL').all();
-    let signingRelay = null;
-    for (const row of candidates) {
-      try {
-        const pk = await deriveXOnlyPubkey(row.address);
-        if (String(pk).toLowerCase() === String(side.bettor_pk).toLowerCase()) {
-          signingRelay = row;
-          break;
-        }
-      } catch {}
-    }
-    if (!signingRelay) {
-      return reply.code(404).send({
-        ok: false,
-        error: `no local relay matches bettor_pk=${String(side.bettor_pk).slice(0,12)}.. via deriveXOnlyPubkey(address) — bettor relay not on this node`,
-      });
-    }
-
-    // Byte-size mass-aware fee + KIP-9 storage_mass (= helper refactor lib/kip9-mass.mjs).
-    // J1tn r303 P0-#1 sweep (Bettor r341+r346/r366b 钦定 helper refactor): 公式抽 lib/kip9-mass.mjs
-    // computeSingleOutputFee, 5 site 不再各抄 STORAGE_MASS_C + 公式.
-    const { computeSingleOutputFee } = await import('../lib/kip9-mass.mjs');
-    const redeemBytes = Buffer.from(side.side_redeem_script_hex, 'hex');
-    const sigScriptSize = 70 + redeemBytes.length;
-    const txByteEstimate = 45 + sigScriptSize + 50 + 80;
-    const computeMassEst = Math.ceil(txByteEstimate * 2.5);
-    const sideStakeInt = parseInt(side.stake_amount, 10) || 1_000_000_000;
-    const feeResult = computeSingleOutputFee(computeMassEst, sideStakeInt, 1000, 100_000_000);
-    const massEst = feeResult.totalMass;
-    const fee = feeResult.dynamicFee;
-
-    // v0.5 hardcodes output == stake - 1000 (1000 sompi in-script constant); actual TX fee paid by
-    // relay fee-input (separate relay-wallet UTXO, no-change). v06/v07 use dynamic KIP-9 fee.
-    const isLegacy = !market.protocol_version || market.protocol_version === 'v0.5';
-    const stakeSompi = BigInt(side.stake_amount);
-    const outAmount = isLegacy ? stakeSompi - 1000n : stakeSompi - BigInt(fee);
-    if (!isLegacy && outAmount <= 1000n) {
-      return reply.code(409).send({ ok: false, error: `output ${outAmount} <= dust 1000 (= fee ${fee} too high for stake ${stakeSompi})` });
-    }
-
-    // J1 5dd590cd0 grace fix: SS L260/270 require(tx.time >= (deadline + REFUND_GRACE_SEC) * 1000) ms.
-    // J1tn r303 (Bettor 03:19 v3 approve): de-dup hardcode → import from lib/pool-refund-grace.mjs.
-    // J2-tn r391 (#28 Bettor ③ APPROVE v2 05:26): legacy v0.5 PoolSide locktime 无 grace (SS L121
-    // 严守 tx.time >= deadline*1000 ms), v06/v07 + REFUND_GRACE_SEC (L260/270 grace require).
-    // entry index: 3 for legacy (PoolSide.sil 4 entry refund=idx3), 2 for v06/v07 (PoolSide_v06/v07 3 entry refund=idx2).
-    const { REFUND_GRACE_SEC } = await import('../lib/pool-refund-grace.mjs');
-    const lockTime = isLegacy
-      ? BigInt(market.deadline) * 1000n
-      : (BigInt(market.deadline) + BigInt(REFUND_GRACE_SEC)) * 1000n;
-    const entryIndex = isLegacy ? 3 : 2;
-
-    try {
-      const submitResult = await sendCommandAsync(signingRelay.id, {
-        type: 'pool_side_refund_cancelled_tx',
-        side_p2sh_address: side.side_p2sh,
-        side_redeem_script_hex: side.side_redeem_script_hex,
-        required_input_outpoint: { outpointTxid: side.side_lock_tx, outpointIndex: 0 },
-        output: { address: signingRelay.address, amountSompi: outAmount.toString() },
-        lock_time: lockTime.toString(),
-        entry_index: entryIndex,
-        add_fee_input: isLegacy,
-      });
-      if (!submitResult?.ok || !submitResult.txId) {
-        return reply.code(500).send({ ok: false, error: `relay submit fail: ${submitResult?.error || 'no txId'}` });
-      }
-      // Bettor r400 catch: 必 UPDATE claim_txid 防 cron 重试 (= ccvr9 实证 endpoint 无 UPDATE
-      // 链上 claimed 但 DB 空 → cron 看作未领每 tick 重试).
-      sqlite.prepare('UPDATE pool_bettor_sides SET claim_txid = ?, refund_attempted_at = CURRENT_TIMESTAMP WHERE id = ?')
-        .run(submitResult.txId, side.id);
-      return reply.send({
-        ok: true,
-        market_id: marketId,
-        bettor_pk: side.bettor_pk,
-        side_id: side.id,
-        signing_relay_id: signingRelay.id,
-        signing_relay_address: signingRelay.address,
-        refund_txid: submitResult.txId,
-        stake_sompi: stakeSompi.toString(),
-        fee_sompi: fee.toString(),
-        output_sompi: outAmount.toString(),
-        lock_time_ms: lockTime.toString(),
-        mass_estimate: massEst,
-      });
-    } catch (e) {
-      console.error(`[pool/bettor-refund-claim] fail market=${marketId.slice(0,12)} side=${side.id}: ${e.message}`);
-      return reply.code(500).send({ ok: false, error: `claim fail: ${e.message}` });
-    }
+    const result = await buildBettorRefundClaim(marketId, { bettorPk: b.bettor_pk, sideId: b.side_id });
+    const { httpStatus, ...payload } = result;
+    return reply.code(httpStatus).send(payload);
   });
 
   // J2-tn r408 P0-A MVP Bettor r361 锁契约 — backend LLM prevet 评估端点.

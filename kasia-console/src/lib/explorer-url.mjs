@@ -31,6 +31,16 @@ export function buildExplorerAddressUrl(address, networkId) {
 }
 
 /**
+ * Base explorer URL for a network, or null if no public explorer exists (testnet).
+ * Single-source home for the mainnet domain literal (R-EXPLORER-URL-BYPASS lint target).
+ * @param {string} networkId
+ * @returns {string|null}
+ */
+export function explorerBaseUrl(networkId) {
+  return String(networkId || '').startsWith('testnet') ? null : 'https://explorer.kaspa.org';
+}
+
+/**
  * Display-layer helper: degrade to a plain-text txid credential when no explorer URL exists.
  * Consumers must route through this (never interpolate buildExplorerUrl()'s return value directly —
  * a bare template literal would stringify null into the literal word "null").

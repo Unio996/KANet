@@ -17,7 +17,39 @@
 
 import { sqlite } from '../db/client.js';
 import { sendCommandAsync } from './relay-manager.js';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+// 2026-07-14(Bettor #k0i054 修法A, docs/2026-07-14-legacy-refund-self-fetch-deadlock-fix-design.md):
+// legacyRefundBuilderTick 之前靠 fetch('http://127.0.0.1:${PORT}/...') 自己调自己的 HTTP 端点复用
+// 这份逻辑——事件循环被占时这个自我 HTTP 往返永远等不到自己处理, 造成自锁死循环(夜间实测 285 次
+// 事件循环冻结/94 次 >30s/最长 316s)。改为直接 import 同一份核心逻辑, 进程内调用零网络往返。
+import { buildBettorRefundClaim } from '../api/pool.js';
+
+// 修法B(纵深, 同上设计稿): 永久失败的 side(如 bettor relay 压根不在本节点)每 tick 重试是纯浪费。
+// 进程内 Map 熔断(照抄 bshard-settle-daemon.mjs 的 _pregateAudited 同款 in-process 模式, Bettor 裁定
+// 不为此加表/加列——重启后损失几轮 streak 只是多付几次快速失败的代价, 有界且小, 不值得 schema 变更)。
+const REFUND_CIRCUIT_THRESHOLD = parseInt(process.env.LEGACY_REFUND_CIRCUIT_THRESHOLD, 10) || 3;
+const _refundFailStreak = new Map();   // side_id -> { sig, streak }
+const _refundCircuitBroken = new Set();   // side_id 集合(达阈值后永久熔断, 直到进程重启)
+function sideRefundCircuitGate(sideId) { return _refundCircuitBroken.has(sideId); }
+function recordSideRefundFailure(sideId, reason) {
+  const sig = String(reason || '').slice(0, 60);
+  const prev = _refundFailStreak.get(sideId);
+  const streak = (prev?.sig === sig ? prev.streak : 0) + 1;
+  if (streak >= REFUND_CIRCUIT_THRESHOLD) {
+    _refundCircuitBroken.add(sideId);
+    console.warn(`[pool-settler:legacy-refund] 🔴 side_id=${sideId} 连续 ${streak} 次同签名失败(${sig}), 熔断(进程内, 重启重置), 后续 tick 跳过`);
+    // Bettor #k20yeu 终裁: 熔断触发写 events 审计行——上线后可查"实际有没有触发过"作为观察数据,
+    // 若观察到重启太频导致从未触发, 那时再补持久化(有真实数据支撑, 非猜测)。
+    try {
+      sqlite.prepare(`
+        INSERT INTO events (id, event_scope, event_type, source, level, summary, payload_json, created_at)
+        VALUES (?, 'system', 'legacy_refund_circuit_broken', 'pool-market-settler:legacyRefundBuilderTick', 'warn', ?, ?, datetime('now'))
+      `).run(randomUUID(), `side_id=${sideId} 连续 ${streak} 次同签名失败(${sig}), 进程内熔断(重启重置)`, JSON.stringify({ sideId, streak, sig }));
+    } catch (e) { console.warn(`[pool-settler:legacy-refund] circuit-break events insert fail (non-fatal): ${e.message}`); }
+  } else {
+    _refundFailStreak.set(sideId, { sig, streak });
+  }
+}
 // FINDING-2 (NWT) commingled-spine detection — SINGLE SOURCE (J1 pool-commingle-detect). 禁内联.
 import { isCommingledSpine } from '../lib/pool-commingle-detect.mjs';
 // broker 佣金到账 emit (Owner 主线·链验金额·post-index pass). 设计: docs/2026-06-28-broker-fee-landed-emit-pass-spec.md
@@ -209,7 +241,7 @@ async function legacyRefundBuilderTick() {
     // legacyRefundBuilderTick 自取 (= entry 2 OP_2 + (deadline+7200)*1000 ms via pool.js
     // bettor-refund-claim isLegacy 检 v0.7 path). maker stake 由 dispatchRefund 已 trigger 异步.
     const unfixablePlaceholders = unfixableIds.length ? unfixableIds.map(() => '?').join(',') : "''";
-    const sides = sqlite.prepare(`
+    const sidesRaw = sqlite.prepare(`
       SELECT pbs.id AS side_id, pbs.market_id, pbs.bettor_pk, pbs.side_p2sh, pbs.side_lock_tx,
              pbs.side_redeem_script_hex, pbs.stake_amount, pm.deadline, pm.protocol_version
       FROM pool_bettor_sides pbs
@@ -235,32 +267,30 @@ async function legacyRefundBuilderTick() {
         AND (pbs.refund_attempted_at IS NULL OR pbs.refund_attempted_at < datetime('now', '-1 hour'))
       ORDER BY pbs.stake_amount ASC
       LIMIT ?
-    `).all(...unfixableIds, nowSec, parseInt(process.env.LEGACY_REFUND_BATCH, 10) || 1);
+    `).all(...unfixableIds, nowSec, (parseInt(process.env.LEGACY_REFUND_BATCH, 10) || 1) * 4);
     // J2-tn r391 关2 硬门: 默认 batch=1 trial 模式. Bettor ④ 验过最小 1 笔 chain accept + bettor 实收
     // 后 env LEGACY_REFUND_BATCH=5 bump 进 batch. 不接受未验 ramp.
-    if (!sides.length) return { processed: 0 };
+    // 2026-07-14 修法B: LIMIT 放宽到 batch*4(多取候选), 熔断闸(见 sideRefundCircuitGate)先滤掉永久
+    // 失败的 side, 再 slice 回真正的 batch 大小——否则若这批候选恰好全被熔断, 会白白空转一个 tick。
+    const _gatedCount = sidesRaw.filter((s) => sideRefundCircuitGate(s.side_id)).length;
+    const sides = sidesRaw.filter((s) => !sideRefundCircuitGate(s.side_id)).slice(0, parseInt(process.env.LEGACY_REFUND_BATCH, 10) || 1);
+    if (_gatedCount > 0) console.log(`[pool-settler:legacy-refund] [circuit-breaker] ${_gatedCount} side(s) gated this tick (熔断, 跳过)`);
+    if (!sides.length) return { processed: 0, gated: _gatedCount };
     let triggered = 0, failed = 0;
     for (const side of sides) {
       try {
-        // 复用 endpoint via HTTP localhost (= same-process re-entry safe, endpoint has full
-        // signing-relay resolve + IPC + UPDATE claim_txid logic).
-        const port = process.env.PORT || '3200';
-        const url = `http://127.0.0.1:${port}/api/pool/market/${side.market_id}/bettor-refund-claim`;
-        const res = await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ side_id: side.side_id }),
-        });
-        const j = await res.json().catch(() => ({}));
-        if (res.ok && j.refund_txid) {
+        // 2026-07-14(修法A): 直接调进程内共用函数, 不再经过 HTTP loopback 自调用(见文件顶部 import 注释)。
+        const result = await buildBettorRefundClaim(side.market_id, { sideId: side.side_id });
+        if (result.ok && result.refund_txid) {
           triggered++;
-          console.log(`[pool-settler:legacy-refund] side_id=${side.side_id} market=${side.market_id.slice(0,16)} stake=${side.stake_amount} refund_txid=${j.refund_txid.slice(0,16)}`);
+          console.log(`[pool-settler:legacy-refund] side_id=${side.side_id} market=${side.market_id.slice(0,16)} stake=${side.stake_amount} refund_txid=${result.refund_txid.slice(0,16)}`);
         } else {
           failed++;
           // Surface bettor-key-cannot-sign errors per Bettor 05:24 确认点 (2) — not silent skip.
-          console.warn(`[pool-settler:legacy-refund] FAIL side_id=${side.side_id}: ${j.error || res.statusText}`);
+          console.warn(`[pool-settler:legacy-refund] FAIL side_id=${side.side_id}: ${result.error}`);
           // Mark refund_attempted_at to throttle retry (= 1h backoff applied via WHERE clause).
           sqlite.prepare('UPDATE pool_bettor_sides SET refund_attempted_at = CURRENT_TIMESTAMP WHERE id = ?').run(side.side_id);
+          recordSideRefundFailure(side.side_id, result.error);
         }
       } catch (e) {
         failed++;
@@ -268,6 +298,7 @@ async function legacyRefundBuilderTick() {
         try {
           sqlite.prepare('UPDATE pool_bettor_sides SET refund_attempted_at = CURRENT_TIMESTAMP WHERE id = ?').run(side.side_id);
         } catch {}
+        recordSideRefundFailure(side.side_id, e.message);
       }
     }
     return { processed: sides.length, triggered, failed };
