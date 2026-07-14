@@ -41,7 +41,7 @@ import { registerChainDataRoutes } from './api/chain-data.js';
 import { registerStockRoutes } from './api/stocks.js';
 import { registerBettorRoutes } from './api/bettor.js';
 import { registerPoolRoutes } from './api/pool.js';
-import { registerAdminDedupRoutes, registerBshardBondReclaimRoutes } from './api/admin-dedup.js'; // #27 dedup 存量清理 admin endpoint + 2026-07-13 bshard maker bond reclaim
+import { registerAdminDedupRoutes, registerBshardBondReclaimRoutes, registerZ20CircuitRoutes } from './api/admin-dedup.js'; // #27 dedup 存量清理 admin endpoint + 2026-07-13 bshard maker bond reclaim + 2026-07-14 Z20 熔断挂账清单
 import { registerCoordStatusRoutes } from './api/coord-status.js'; // D-010 落地① coord-status 内容签名
 import { registerFeedbackRoutes } from './api/feedback.js'; // 用户反馈通道卡B(2026-07-12, 框架v1.1+设计v1.2)
 import { registerKanetBrokerRoutes } from './api/kanet-broker.js';
@@ -194,6 +194,7 @@ await registerPoolRoutes(fastify);
 await registerFeedbackRoutes(fastify);
 await registerAdminDedupRoutes(fastify);
 await registerBshardBondReclaimRoutes(fastify);
+await registerZ20CircuitRoutes(fastify);
 await registerCoordStatusRoutes(fastify);
 await registerKanetBrokerRoutes(fastify);
 await registerTgWalletRoutes(fastify);

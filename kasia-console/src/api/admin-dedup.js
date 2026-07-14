@@ -8,6 +8,7 @@ import { verifyIngestRequest } from '../services/ingest-auth.js';
 import { getSidesByLogicalMarket } from '../lib/pool-bettor-sides-query.mjs';
 import { reclaimBshardMakerBond } from '../services/bshard-auto-settler.mjs';
 import { buildCtx, clearRepeatOffenderMarker } from '../services/bshard-settle-daemon.mjs';
+import { listZ20CircuitBroken, clearZ20Circuit } from '../services/broker-intake-watcher.js';
 
 const HEX64 = /^[0-9a-fA-F]{64}$/;
 
@@ -118,6 +119,28 @@ export async function registerBshardBondReclaimRoutes(fastify) {
       return reply.code(400).send({ ok: false, error: 'marketIds must be a non-empty array' });
     }
     const results = marketIds.map((id) => ({ id, ...clearRepeatOffenderMarker(id, sqlite, reason) }));
+    return reply.send({ ok: true, results });
+  });
+}
+
+// 2026-07-14 (Bettor 语义裁定 #k7xxxx, ff67936d Z20 熔断闸续): 挂账清单查询入口——"熔断=停调度重试
+// ≠ 放弃这笔钱"这条语义边界要成立, 必须有人能随时查到"哪些 offer 被熔断了、为什么、多少钱、归谁",
+// 否则熔断就从"止血"退化成"静默丢弃"(NWT 复审抓出的风险)。纯读 GET, 无需 body。
+export async function registerZ20CircuitRoutes(fastify) {
+  // GET /api/admin/z20-circuit-broken — 挂账清单: 谁被熔断/为什么/多少钱/归谁
+  fastify.get('/api/admin/z20-circuit-broken', { preHandler: async (request, reply) => { await verifyIngestRequest(request, reply); } }, async (request, reply) => {
+    const results = listZ20CircuitBroken();
+    return reply.send({ ok: true, count: results.length, results });
+  });
+
+  // POST /api/admin/clear-z20-circuit { offerIds: [...], reason: '...' }
+  // 人工确认卡死原因已处置后复位, 让下一轮 Z20 tick 重新尝试。纯调度层, 不动钱。
+  fastify.post('/api/admin/clear-z20-circuit', { preHandler: async (request, reply) => { await verifyIngestRequest(request, reply); } }, async (request, reply) => {
+    const { offerIds, reason } = request.body || {};
+    if (!Array.isArray(offerIds) || !offerIds.length) {
+      return reply.code(400).send({ ok: false, error: 'offerIds must be a non-empty array' });
+    }
+    const results = offerIds.map((id) => ({ id, ...clearZ20Circuit(id, reason) }));
     return reply.send({ ok: true, results });
   });
 }
