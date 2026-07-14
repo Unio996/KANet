@@ -27,6 +27,7 @@ const PUBLISH_EXPIRES_MIN = 120;
 const DEFAULT_FEE_KAS = '0.1';
 let _intakeInterval = null;
 let _refundInterval = null;
+let _refundLastFireAt = 0;  // T-J2-2026-07-15 diag(observe-only): setInterval scheduled-vs-actual lag probe
 let _sendCommandOverride = null;  // test injection
 
 // 🔴 Z20 熔断(2026-07-14, Bettor #k6qj5a 第五源续追查, 语义裁定 #k7xxxx 补): Z20 sweep(每
@@ -456,8 +457,19 @@ export async function _publishBrokerBuyOffer(peer, usdtAmount, eventId) {
   return markProcessed(eventId, `buy_published:${res.offer_id}`);
 }
 
+// T-J2-2026-07-15 diag(observe-only, NWT verdict 3b87317b GO): 逐 step 计时探针, 验证 CPU profile
+// 归因 _scanExpiredBrokerOffers 63.4% self-time 是否真同步阻塞(vs profiler artifact)。纯 console.log,
+// 不改任何分支/返回值。
 export async function _scanExpiredBrokerOffers() {
+  const _diagT0 = Date.now();
+  let _diagPrev = _diagT0;
+  const _diagStep = (label) => {
+    const now = Date.now();
+    console.log(`[diag:step-Z20] ${label} +${now - _diagPrev}ms (total ${now - _diagT0}ms)`);
+    _diagPrev = now;
+  };
   const trader = sqlite.prepare(`SELECT address FROM relay_nodes WHERE id = ?`).get(BROKER_RELAY_ID);
+  _diagStep('trader-lookup');
   if (!trader) return { handled: 0, scanned: 0, reason: 'no_broker_relay' };
   // Bug-Z20 fix (NWT 1a77fdd1 Owner 88 KAS 卡 broker 钱包): 真**真**proactive scan —
   // 真**真**真 broker offer 真**真**真 'open' + expires_at < now 真**真**真**真**真 'expired' 真**真**timed_out',
@@ -491,6 +503,7 @@ export async function _scanExpiredBrokerOffers() {
     ORDER BY broadcast_at DESC
     LIMIT 10
   `).all(trader.address);
+  _diagStep(`main-query rows=${rows.length}`);
   let handled = 0;
   if (rows.length > 0) console.log(`[broker-refund] Z20 scan: ${rows.length} expired/timeout offer(s) to refund`);
   // T-J2-2026-04-29 紧急 Track A: chain-truth dedup. 现 dedup SQL `txid IN kaspa_tx_log` 因占位符 txid='refund_xxx'
@@ -501,6 +514,7 @@ export async function _scanExpiredBrokerOffers() {
   // advanceToRefunded 内部 chain-truth dedup + Phase 1 CAS + Phase 2 sendKas (真 chain hash) + Phase 3 atomic 3-table sync.
   // chain_events INSERT 真 real txId (post-v83 lenient trigger PASS), 不再占位符 polluting.
   const { advanceToRefunded } = await import('./broker-state-authority.js');
+  _diagStep('dynamic-import');
   let _z20Gated = 0;
   const _newlyBroken = [];   // 2026-07-14 Bettor 裁定#k9iz8i: 本 tick 内新熔断的 offer, 收集后批量喊一条摘要(不 per-offer 刷屏)
   for (const r of rows) {
@@ -568,6 +582,7 @@ export async function _scanExpiredBrokerOffers() {
       if (recordZ20Failure(r.id, `exception: ${err.message}`)) _newlyBroken.push(r.id);
     }
   }
+  _diagStep(`for-loop rows=${rows.length} gated=${_z20Gated}`);
   if (_z20Gated > 0) console.log(`[broker-refund] Z20 [circuit-breaker] ${_z20Gated} offer(s) gated this tick(熔断, 跳过)`);
   // 2026-07-14 (Bettor 裁定#k9iz8i, 采纳 NWT "熔断必须喊疼"): 反脆弱柱②第一个实例——系统自己主动
   // 报告"这里有东西卡住了", 而不是指望有人去巡查 events 表。整批合并成一条摘要, 限速"同一 offer
@@ -583,6 +598,7 @@ export async function _scanExpiredBrokerOffers() {
     _send(BROKER_RELAY_ID, { type: COMMAND_TYPES.SEND_BROADCAST, channel: 'dev-coord-testnet', message: summary })
       .catch((e) => console.warn(`[broker-refund] Z20 熔断告警广播失败(non-fatal, 不影响本 tick): ${e.message}`));
   }
+  _diagStep('return');
   return { handled, scanned: rows.length, gated: _z20Gated };
 }
 
@@ -1058,6 +1074,16 @@ export function startIntakeWatcher() {
   }, TICK_MS);
   if (!_refundInterval) {
     _refundInterval = setInterval(async () => {
+      // T-J2-2026-07-15 diag(observe-only, NWT verdict 3b87317b GO): 测本 tick 实际触发时刻相对
+      // 上一次触发 + REFUND_TICK_MS 的漂移量。若漂移持续接近 0 但 CPU profile 仍显示大 self-time,
+      // 排除"排队被采样"假说,指向真同步阻塞;若漂移本身就巨大,说明问题在更上游(事件循环整体
+      // 拥堵),不是这个函数专属。
+      const _fireAt = Date.now();
+      if (_refundLastFireAt > 0) {
+        const gap = _fireAt - _refundLastFireAt;
+        console.log(`[diag:interval-lag] _refundInterval gap=${gap}ms expected=${REFUND_TICK_MS}ms drift=${gap - REFUND_TICK_MS}ms`);
+      }
+      _refundLastFireAt = _fireAt;
       try {
         const r = await _scanExpiredBrokerOffers();
         if (r && r.scanned > 0) console.log(`[broker-refund] tick handled=${r.handled||0}/${r.scanned||0}`);
