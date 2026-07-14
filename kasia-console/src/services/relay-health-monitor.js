@@ -36,6 +36,10 @@ function _recordRestart(relayNodeId) {
 export async function relayHealthMonitorTick() {
   if (running) return { skipped: true };
   running = true;
+  // 2026-07-14 J2/Bettor 双轨定罪轨道1(Owner直令#kul7j3, 头号嫌疑relayHealthMonitorTick 31个relay
+  // 串行await startRelay理论): observe-only 计时探针, 零行为改动, 照抄今天settle-daemon同款
+  // [diag:tick-duration]模式。装载后直接看数值定罪(单轮=264秒量级=铁证)。
+  const _tickStart = Date.now();
   try {
     // 2026-07-04 (查漏补缺·qzdh7nar/KANet-UI): 原 INNER JOIN adapter_nodes 把没绑 adapter 的 relay
     // 排除在健康监控外——但 startRelay()(relay-manager.js) 本身用 LEFT JOIN，压根不需要 adapter 才能跑。
@@ -47,10 +51,11 @@ export async function relayHealthMonitorTick() {
       WHERE r.address IS NOT NULL
         AND (r.mnemonic_encrypted IS NOT NULL OR r.privkey_encrypted IS NOT NULL)
     `).all();
-    let healthy = 0, restarted = 0, restart_stormed = 0, errored = 0;
+    let healthy = 0, restarted = 0, restart_stormed = 0, errored = 0, deadCount = 0;
     for (const r of eligible) {
       const aliveCheck = isRelayAlive(r.id);
       if (aliveCheck?.alive) { healthy++; continue; }
+      deadCount++;
 
       const recent = _restartCountInLastHour(r.id);
       if (recent >= MAX_RESTART_PER_HOUR) {
@@ -59,8 +64,10 @@ export async function relayHealthMonitorTick() {
         continue;
       }
       console.log(`[relay-health] ${r.name} dead (reason=${aliveCheck?.reason || 'unknown'}) — auto-restart attempt #${recent + 1}`);
+      const _srStart = Date.now();
       try {
         const result = await startRelay(r.id);
+        console.log(`[diag:relay-health-per-relay] ${r.name} startRelay ms=${Date.now() - _srStart}`);
         if (result?.ok) {
           _recordRestart(r.id);
           restarted++;
@@ -70,6 +77,7 @@ export async function relayHealthMonitorTick() {
           console.warn(`[relay-health] ${r.name} startRelay fail: ${result?.reason || 'unknown'}`);
         }
       } catch (e) {
+        console.log(`[diag:relay-health-per-relay] ${r.name} startRelay ms=${Date.now() - _srStart} (threw)`);
         errored++;
         console.warn(`[relay-health] ${r.name} startRelay exception: ${e.message}`);
       }
@@ -77,9 +85,11 @@ export async function relayHealthMonitorTick() {
     if (restarted > 0 || restart_stormed > 0) {
       console.log(`[relay-health] tick eligible=${eligible.length} healthy=${healthy} restarted=${restarted} restart_stormed=${restart_stormed} errored=${errored}`);
     }
+    console.log(`[diag:tick-duration] relayHealthMonitorTick ms=${Date.now() - _tickStart} eligible=${eligible.length} deadCount=${deadCount}`);
     return { ok: true, eligible: eligible.length, healthy, restarted, restart_stormed, errored };
   } catch (e) {
     console.error('[relay-health] tick fail:', e.message);
+    console.log(`[diag:tick-duration] relayHealthMonitorTick ms=${Date.now() - _tickStart} FAILED`);
     return { ok: false, error: e.message };
   } finally {
     running = false;
