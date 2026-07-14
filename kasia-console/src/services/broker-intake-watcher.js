@@ -28,6 +28,36 @@ const DEFAULT_FEE_KAS = '0.1';
 let _intakeInterval = null;
 let _refundInterval = null;
 let _sendCommandOverride = null;  // test injection
+
+// 🔴 Z20 熔断(2026-07-14, Bettor #k6qj5a 第五源续追查): Z20 sweep(每 REFUND_TICK_MS=5min)对同一批
+// offer 反复走 advanceToRefunded→enqueueVerified→单线 pump→sendCommandAsync(relay IPC, 默认 30s
+// timeout)——若这批 offer 结构性无法退(如无 retail_dex_orders 链接/relay 不在线), 每轮串行付出
+// 接近满额 IPC 超时代价, N 个卡住的 offer × 最多 30s = 观测到的 250-260s 长冻结签名(handled=0/10
+// 现场实证)。照抄今天 pool-market-settler.js 的同款 in-process 熔断模式(Bettor 裁定: 不为此加表/
+// 加列, tick 周期够快, streak 攒得起)。只处理"停止无效重试"这个调度层, 不动钱、不改 offer 状态——
+// 真正无法退款的业务原因(链接缺失/relay 不在线)留给人工处置(events 审计行可查, 可用同款
+// clear 逻辑手动复位)。
+const Z20_CIRCUIT_THRESHOLD = parseInt(process.env.Z20_REFUND_CIRCUIT_THRESHOLD, 10) || 3;
+const _z20FailStreak = new Map();   // offer_id -> { sig, streak }
+const _z20CircuitBroken = new Set();   // offer_id 集合(达阈值后永久熔断, 直到进程重启)
+export function z20CircuitGate(offerId) { return _z20CircuitBroken.has(offerId); }
+export function recordZ20Failure(offerId, reason) {
+  const sig = String(reason || '').slice(0, 60);
+  const prev = _z20FailStreak.get(offerId);
+  const streak = (prev?.sig === sig ? prev.streak : 0) + 1;
+  if (streak >= Z20_CIRCUIT_THRESHOLD) {
+    _z20CircuitBroken.add(offerId);
+    console.warn(`[broker-refund] Z20 🔴 offer=${offerId.slice(0,8)} 连续 ${streak} 次同签名失败(${sig}), 熔断(进程内, 重启重置), 后续 tick 跳过`);
+    try {
+      sqlite.prepare(`
+        INSERT INTO events (id, event_scope, event_type, source, level, summary, payload_json, created_at)
+        VALUES (?, 'system', 'z20_refund_circuit_broken', 'broker-intake-watcher:Z20', 'warn', ?, ?, datetime('now'))
+      `).run(randomUUID(), `offer=${offerId.slice(0,8)} 连续${streak}次同签名失败(${sig}), 进程内熔断(挂账待人工处置实际卡死原因)`, JSON.stringify({ offerId, streak, sig }));
+    } catch (e) { console.warn(`[broker-refund] Z20 circuit-break events insert fail (non-fatal): ${e.message}`); }
+  } else {
+    _z20FailStreak.set(offerId, { sig, streak });
+  }
+}
 let _publishOverride = null;      // test injection (POST /api/exchange/publish)
 
 export function _testInjectSendCommand(fn) { _sendCommandOverride = fn; }
@@ -420,12 +450,17 @@ export async function _scanExpiredBrokerOffers() {
   // advanceToRefunded 内部 chain-truth dedup + Phase 1 CAS + Phase 2 sendKas (真 chain hash) + Phase 3 atomic 3-table sync.
   // chain_events INSERT 真 real txId (post-v83 lenient trigger PASS), 不再占位符 polluting.
   const { advanceToRefunded } = await import('./broker-state-authority.js');
+  let _z20Gated = 0;
   for (const r of rows) {
+    // 🔴 Z20 熔断闸(见文件顶部 Z20_CIRCUIT_THRESHOLD 注释): push 进循环前判, 已熔断的 offer 零 IPC
+    // 代价直接跳过(不占这一轮的时间预算)。
+    if (z20CircuitGate(r.id)) { _z20Gated++; continue; }
     try {
       const meta = JSON.parse(r.metadata || '{}');
       const userKasia = meta.user_kasia_address;
       if (!userKasia) {
         console.warn(`[broker-refund] Z20 ${r.id.slice(0,8)} skip: no user_kasia_address in metadata`);
+        recordZ20Failure(r.id, 'no user_kasia_address in metadata');
         continue;
       }
       const refundAmount = parseFloat(meta.intent_qty || r.give_amount);
@@ -448,6 +483,7 @@ export async function _scanExpiredBrokerOffers() {
 
       if (!order?.id) {
         console.warn(`[broker-refund] Z20 ${r.id.slice(0,8)} skip — no retail_dex_orders link, advanceToRefunded 真 orderId 必`);
+        recordZ20Failure(r.id, 'no retail_dex_orders link');
         continue;
       }
 
@@ -470,12 +506,18 @@ export async function _scanExpiredBrokerOffers() {
         handled++;
       } else if (result.skipReason === 'race_lost') {
         console.warn(`[broker-refund] Z20 ${r.id.slice(0,8)} race lost (其他 caller 已 claim refunding lock), reconciler 真 backfill`);
+        recordZ20Failure(r.id, 'race_lost');
       } else {
         console.error(`[broker-refund] Z20 ${r.id.slice(0,8)} advanceToRefunded FAIL: ${result.error || result.skipReason}`);
+        recordZ20Failure(r.id, `advanceToRefunded FAIL: ${result.error || result.skipReason}`);
       }
-    } catch (err) { console.warn(`[broker-refund] Z20 ${r.id} err: ${err.message}`); }
+    } catch (err) {
+      console.warn(`[broker-refund] Z20 ${r.id} err: ${err.message}`);
+      recordZ20Failure(r.id, `exception: ${err.message}`);
+    }
   }
-  return { handled, scanned: rows.length };
+  if (_z20Gated > 0) console.log(`[broker-refund] Z20 [circuit-breaker] ${_z20Gated} offer(s) gated this tick(熔断, 跳过)`);
+  return { handled, scanned: rows.length, gated: _z20Gated };
 }
 
 // T-J2-10: 12h stale unsolicited_wait scanner — user 12h 无 ACK 自动退款
