@@ -49,6 +49,19 @@ function Archive-IfExists($path) {
 New-Item -ItemType Directory -Force -Path "D:\kanet-tn12\logs" | Out-Null
 Log "=== boot sequence start ==="
 
+# 守卫辅助函数(Bettor #lrgvk7.1, 折入自 KANet-UI 读码发现: kanet-start.sh 对 :3200 无端口占用检测,
+# 硬起会 EADDRINUSE 崩 + pidfile 被覆盖留 debris, 不是干净 no-op)。
+# 🔴 收窄说明(频道待 Bettor 确认, 暂按此版本实现): 没有挂在整个脚本开头整体 early-exit——今天第二起
+# 故障(kaspad 裸死)那种"console 还活着但 kaspad 死了"场景下, 整体早退会连①kaspad-watchdog这步也跳过,
+# 正好错过它最该管的场景。①②③⑤各自已有独立幂等检查(watchdog识别进程活着不重复拉/
+# console-supervisor.sh start 有 pidfile+kill -0 检查), 只有④kanet-start.sh 真的没有自保护, 守卫只挡这一步。
+function Test-ConsoleAlive {
+  try {
+    Invoke-WebRequest -Uri "http://127.0.0.1:3200/" -TimeoutSec 5 -UseBasicParsing -ErrorAction Stop | Out-Null
+    return $true
+  } catch { return $false }
+}
+
 # ① kaspad watchdog(detached, 常驻; 它自己会在第一个60s tick内发现kaspad缺失并拉起)
 Start-Watched "powershell.exe" @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "$KanetRoot\scripts\kaspad-watchdog.ps1") "kaspad-watchdog.ps1" | Out-Null
 
@@ -66,12 +79,18 @@ if ($ready) { Log "kaspad RPC ready after $($i*5)s" } else { Log "WARN: kaspad R
 Start-Watched "powershell.exe" @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "D:\kaspa-tn12-mining\tn12-mining-watchdog.ps1") "tn12-mining-watchdog.ps1" | Out-Null
 
 # ④ kanet-start.sh(全栈: console+relay+bridge stack; 显式Git-Bash绝对路径, 不走PATH裸 `bash`)
-$kanetStartOut = "D:\kanet-tn12\logs\boot-kanet-start-stdout.log"
-$kanetStartErr = "D:\kanet-tn12\logs\boot-kanet-start-stderr.log"
-Archive-IfExists $kanetStartOut
-Archive-IfExists $kanetStartErr
-$kanetStartExtra = @{ WorkingDirectory = $KanetRoot; RedirectStandardOutput = $kanetStartOut; RedirectStandardError = $kanetStartErr }
-Start-Watched $GitBash @("-lc", "cd '$KanetRoot' && ./kanet-start.sh") "kanet-start.sh" $kanetStartExtra | Out-Null
+# 守卫: kanet-start.sh 本身对 :3200 无端口占用检测, 硬起会 EADDRINUSE 崩+pidfile 被覆盖留 debris。
+# console 已活 = 跳过这一步(其余各步各自有独立幂等检查, 不受这个守卫影响)。
+if (Test-ConsoleAlive) {
+  Log "kanet-start.sh SKIPPED — :3200 already alive (kanet-start.sh has no port-guard of its own, avoid EADDRINUSE crash/debris)"
+} else {
+  $kanetStartOut = "D:\kanet-tn12\logs\boot-kanet-start-stdout.log"
+  $kanetStartErr = "D:\kanet-tn12\logs\boot-kanet-start-stderr.log"
+  Archive-IfExists $kanetStartOut
+  Archive-IfExists $kanetStartErr
+  $kanetStartExtra = @{ WorkingDirectory = $KanetRoot; RedirectStandardOutput = $kanetStartOut; RedirectStandardError = $kanetStartErr }
+  Start-Watched $GitBash @("-lc", "cd '$KanetRoot' && ./kanet-start.sh") "kanet-start.sh" $kanetStartExtra | Out-Null
+}
 
 # ⑤ console-supervisor(显式起, 不假设 kanet-start.sh 会顺带起它——7/15 实测该假设不成立)
 $supervisorOut = "D:\kanet-tn12\logs\boot-supervisor-start-stdout.log"
