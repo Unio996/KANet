@@ -489,7 +489,14 @@ export async function _scanExpiredBrokerOffers() {
       SELECT 1 FROM chain_events e
       WHERE e.event_type = 'broker_kas_refunded'
       AND e.payload LIKE '%"offer_id":"' || exchange_offers.id || '"%'
-      AND e.txid IN (SELECT tx_id FROM kaspa_tx_log)
+      -- T-J2-2026-07-15 P0 perf fix(Bettor #len5pi 派工,7/13-7/15 七源追凶实体·恒定186-190s
+      -- 冻结的凶手): 原写法 'e.txid IN (SELECT tx_id FROM kaspa_tx_log)' 让 SQLite 从
+      -- kaspa_tx_log(800万行)驱动外层循环, 对每行 probe chain_events, EXPLAIN 显示
+      -- 'USING INDEX sqlite_autoindex_kaspa_tx_log_1 FOR IN-OPERATOR'——语义等价的相关 EXISTS
+      -- 让 SQLite 反过来从 chain_events(event_type 索引命中近空)驱动, 对每行去 kaspa_tx_log
+      -- 做单点索引查找。live 实测 233,123ms → 1ms, 逐行结果 byte-identical(id 顺序全同,
+      -- kaspa_tx_log.tx_id 全库 0 NULL, IN/EXISTS 无 NULL 语义边界差异)。
+      AND EXISTS (SELECT 1 FROM kaspa_tx_log k WHERE k.tx_id = e.txid)
     )
     -- T-J2-2026-05-10 r223 T2.14 (NWT r289 Option A): 防 Z20 与 T2.5c CEX hedge race double-spend.
     -- T2.5c placeCexOrder ok 后立即 INSERT broker_fallback_claim → Z20 SQL skip claimed offer.
