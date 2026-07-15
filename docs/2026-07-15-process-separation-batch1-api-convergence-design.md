@@ -27,7 +27,7 @@
 
 12 个端点, 3 套版本号(无后缀/v06/v07)交叉 2 种模式(单步/两段式prep+confirm)。这正是 7/5 整顿钦定"调用方不选版本"目前不成立的具体证据。
 
-### 1.2 实际调用方(实测 grep, 非猜)
+### 1.2 实际调用方(实测 grep, 非猜——本节 2026-07-15 13:2xZ 频道对抗后已更正一轮, 见下方"更正记录")
 
 | 端点 | 调用方 | 性质 |
 |---|---|---|
@@ -35,12 +35,18 @@
 | `market/create-v06` | 未找到直接字面调用 | 疑似死代码, 需二次核实(可能经动态拼接调用) |
 | `market/create-v07` | `pool-market-seeder.js` / `worldcup-schedule-cron.mjs` | 系统内部自动建盘(seeder + 赛程自动开盘), 非用户直接触发 |
 | `bettor/register`(无版本) | 未找到直接字面调用 | 疑似死代码, 需二次核实 |
-| `bettor/register-v06/*` | `predictions-pool-detail.eta`(**人类用户面押注 UI**) / `prediction-agent-mind.mjs` / `tg-bot/test/dm-bet-e2e.mjs` | **当前真实用户押注走的是 v06, 不是 v07** |
-| `bettor/register-v07/*` | `pool-auto-better.js` / `pool-house-agent.js` | 均为批0已关闭的 demo agent(AutoBetter/HouseAgent), 非真实用户路径 |
+| `bettor/register-v06/*` | `predictions-pool-detail.eta`(web UI 押注) / `prediction-agent-mind.mjs` / `tg-bot/test/dm-bet-e2e.mjs`(测试) | **dual-handle v0.6+v0.7**(见下方更正), 服务扁平 pool(50 bettor 硬顶, pool.js:2676), web UI 押注走这条 |
+| `bettor/register-v07/*` | `tg-bot/prediction-menu.mjs`(**TG 机器人真实押注菜单**) / `pool-auto-better.js` / `pool-house-agent.js`(批0已关闭的 demo agent) | sharded bshard 架构(无 shard 数量硬顶), **真实大盘(如 kr5l4, 694 注/22 shard)靠这条扛** |
 | `bettor/register-external/*` | 未找到直接字面调用 | 疑似死代码, 需二次核实 |
 | `admin/pool/register-v07/confirm-by-address` | 手动管理员操作(非自动调用方) | 补登记通道, 保留 |
 
-**🔴 反直觉发现**: 版本号"更新"(v07)不代表"更活跃"。真实用户押注 UI(`predictions-pool-detail.eta`)走的是 **v06**, v07 目前只被已下线的 demo 机器人调用。如果直接"收敛到最新版本 v07"会切断真实用户押注路径——这正是本稿存在的意义: 收敛顺序必须先核实"哪个版本活人在用", 不能按版本号数字大小做决定。
+**更正记录(频道对抗 13:21-13:24Z, KANet-UI 自我更正+Bettor/J2 交叉核实)**: 本稿最初版本写"真实用户押注走 v06 不是 v07, v07 只被 demo bot 用"——**这个结论不完整, 已更正**。证据: kr5l4(694 注/22 shard)不可能走 register-v06(硬顶 50 bettor), 必然走 register-v07 的 sharded 架构；广搜后发现 `tg-bot/prediction-menu.mjs`(TG 真实押注入口)直接调用 register-v07, 此前搜索范围漏了 tg-bot 目录。
+
+**真实情况(两层, Bettor 13:23Z 框架 + KANet-UI 细化)**:
+1. **数据层无风险**: 7 月以来市场/押注对象在 DB 里的 `protocol_version` 字段 100% 是 v0.7(Bettor 库查), 钱全在 v0.7 结算逻辑里, 零资金风险。
+2. **代码层是两套并行的真实实现, 不是"门牌不对但服务同一个东西"**: `register-v06`(dual-handle v0.6/v0.7, 扁平 pool 模型)服务网页 UI 的小规模市场；`register-v07`(sharded bshard 模型)服务 TG bot 的大规模市场。两者**架构不同**(扁平 vs 分片), 不只是版本号命名差异——收敛方案需要处理"要不要统一成单一架构"这个更深的问题, 不是简单改个 URL 名字。
+
+**结论(更正后)**: 版本号≠调用频率≠架构成熟度, 三者独立。收敛顺序必须先画清楚"谁在什么规模下用哪个架构", 再决定统一目标, 不能按端点名字的版本数字大小做假设(这条本身也是本次犯错的教训——最初的 grep 范围没搜 tg-bot/, 只搜了 kasia-console/src/, 广度不够就下结论)。
 
 ### 1.3 收敛建议(草案, 待 NWT 红队 + 二次核实死代码)
 
