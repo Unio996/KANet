@@ -1,4 +1,4 @@
-> **Status**: DRAFT — 备稿,是否/如何对外提交由 Owner 定夺(本稿不构成已提交意见)
+> **Status**: DRAFT — NWT 红队 2026-07-16 GREEN(两条论证站得住,意见二已按补强建议更新)。备稿,是否/如何对外提交由 Owner 定夺(本稿不构成已提交意见)
 
 # KCC20 两个窄意见起草 — 供 Owner 终裁是否/如何提交
 
@@ -61,12 +61,14 @@ Borrowed Receive 触发后，这个 outpoint **消失并被替换成一个新 ou
 
 **我们自己刚撞过这个坑，作为具体证据**：KANet 内部一个类似性质的配对常量（ZK guest circuit 的 `imageId` 与其配对的 `gateTmplHash`，语义上等价于"编译产物的身份标识"与"从该产物派生的承诺值"这对关系）在一次 guest circuit 版本升级时，`imageId` 改了但配对的 `gateTmplHash` 没有同步重算，潜伏了一天多才在真正触发链上校验时炸出来（团队内部编号 D-009）。root cause 与本意见担心的场景结构相同：**一个理应从编译产物确定性派生的值，被当作独立维护的手工常量，两者脱钩不会立刻报错，只在真正触发校验路径时才现形**。KCC1（状态编码 ABI 标准）如果最终定稿，理论上能根治这类问题，但 KCC1 目前还不存在，KCC20 现在就在规定 descriptor，不该重复这个坑。
 
-**意见**：Descriptor 的 `prefix`/`suffix` 应要求（a）来自版本化的编译产物（不是可以手工填的自由字段），（b）发布前必须完成一次 round-trip 验证——即用该 descriptor 重建出的 P2SH 脚本哈希，必须与链上实际部署使用的 genesis P2SH 逐字节一致，这个验证步骤本身应该是规范里要求的最小合规证据之一（可以类比 Economic Kernel 里 "No successful transition, no live protocol claim" 这条精神——没有 round-trip 自证过的 descriptor，不该被 tooling 信任）。
+**（NWT 红队补强，2026-07-16 折入）**：D-009 真正暴露的时间点不是首次发布，而是**后续一次重编译/模板升级之后**——`imageId` 变了，配对值没跟着变。只在"发布前验证一次"堵不住这类漂移：round-trip 验证必须是**任何后续重编译/模板升级都要重新执行的强制步骤**，不是一次性的发布前检查，这一点应与 K-08（"安全关键常量应从源工件现场推导并进行跨源校验，禁止依赖人工同步记忆"）的持续性要求对齐。
+
+**意见**：Descriptor 的 `prefix`/`suffix` 应要求（a）来自版本化的编译产物（不是可以手工填的自由字段），（b）**首次发布及此后任何一次重编译/模板升级**都必须完成一次 round-trip 验证——即用该 descriptor 重建出的 P2SH 脚本哈希，必须与链上实际部署使用的 genesis P2SH 逐字节一致，这个验证步骤本身应该是规范里要求的最小合规证据之一（可以类比 Economic Kernel 里 "No successful transition, no live protocol claim" 这条精神——没有 round-trip 自证过的 descriptor，不该被 tooling 信任）。
 
 ---
 
 ## 待 NWT 红队 / Owner 定夺
 
-1. 两条意见的技术论证是否站得住，需要独立复核（我读的是当前 diff，PR 可能在红队期间继续更新，提交前建议重新对照最新版本）。
+1. ~~两条意见的技术论证是否站得住~~ — **NWT 2026-07-16 已核，GREEN**（意见一：与本队架构现有的 `current_leaf_outpoint`/`side_lock_tx` 等字段依赖 outpoint 稳定性的实例吻合，fail-closed 方向无漏洞；意见二：结构与 D-009 完全一致，证据扎实，补强建议已折入正文）。提交前仍建议重新对照 PR 最新版本（Draft 阶段可能已有变动）。
 2. 是否/以何种身份/何种措辞对外提交这两条意见，是 Owner 权限，本稿只是"技术论证已经站得住脚"层面的备稿，不代表已经对外发声。
 3. 意见一的具体 opt-in 机制命名（`kcc20_extensions` 追加子标记 vs covenant 自己模板里加分支）只是举例说明思路，不是最终提案格式，若要提交需要再打磨成 PR 评论惯用的措辞和格式。
