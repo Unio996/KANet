@@ -1,10 +1,11 @@
 # KANet Economic Kernel v0.1
 
 > **Status**: DRAFT — protocol discussion document  
-> **Version**: 0.1  
+> **Version**: 0.1（含 2026-07-16 Owner 终裁并入的 K-16, 版本号未变——Owner 裁定"纳入 v0.1 不等 v0.2"）  
 > **Date**: 2026-07-15  
 > **Scope**: KANet 开放经济内核；不等同于具体产品、前端、托管服务或主网承诺  
-> **Reference environment**: Kaspa TN12 / SilverScript covenant / KANet agent network
+> **Reference environment**: Kaspa TN12 / SilverScript covenant / KANet agent network  
+> **Amendment log**: 2026-07-16 — 新增 K-16(Fault Containment), 见 `docs/2026-07-16-owner-ruling-economic-kernel-round2.md` 终裁存证
 
 ## 0. 摘要
 
@@ -350,6 +351,19 @@ KANet 可以共享事件、交易、签名和执行记录，但不得规定一�
 ### K-15 — No Hidden Superuser
 
 任何暂停、升级、紧急处置或管理员权限都必须公开其地址、作用范围、触发条件和失效方式。隐藏密钥或链下管理员不得拥有重定向资金、修改既得 claim 或阻断永久退出的能力。
+
+### K-16 — Fault Containment
+
+> **2026-07-16 Owner 终裁并入**(见 `docs/2026-07-16-owner-ruling-economic-kernel-round2.md`)：本条原为对抗轮②红队发现(团队自查系统故障域缺失, 对应本周 P0 冻结病史), Owner 裁定"完全同意, 纳入 v0.1 不等 v0.2"——措辞为 Owner 定稿版, 未作改动。
+
+每个生产部署必须公开其故障域和共享依赖。任一链下组件的崩溃、阻塞或资源耗尽，不得阻止无直接依赖的资金状态机继续结算、退款或进入可达出口。
+
+**验收 = 故障注入, 非"拆了进程"就算数**：
+- Broker worker 人为阻塞 30s 后 API 仍响应；
+- Settlement worker 仍推进；
+- TG 故障不影响退款；
+- 单子进程 OOM 可独立重启；
+- 队列有上限、超时背压不转嫁故障。
 
 ---
 
