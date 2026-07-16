@@ -5416,5 +5416,48 @@ export function runMigrations() {
     }
   }
 
+  // v185 (2026-07-16, KANet-UI, Owner终裁件⑤步骤2·Bettor #nig8da 派工): 4个疑似死端点(market/create-v06/
+  // bettor/register无版本/register-external/prep+confirm)命中计数——无access_log表+fastify logger关闭+
+  // console.log重启即截断, 没有能查历史调用记录的基础设施(结构性推断不足以支撑删代码决策)。持久化命中计数
+  // (跨重启存活, 7天观察窗到期零命中才走删除, 删前仍NWT审+确认无隐藏调用方——不冒进, 记账)。
+  {
+    const tables = sqlite.pragma('table_list').map((t) => t.name);
+    if (!tables.includes('endpoint_hit_counters')) {
+      sqlite.exec(`
+        CREATE TABLE endpoint_hit_counters (
+          endpoint_name TEXT PRIMARY KEY,
+          hit_count INTEGER NOT NULL DEFAULT 0,
+          first_hit_at TEXT,
+          last_hit_at TEXT
+        )
+      `);
+      console.log('[migrate] v185: endpoint_hit_counters 建表(4个疑似死端点7天观察窗命中计数, 件⑤步骤2).');
+    }
+  }
+
+  // v186 (2026-07-16, KANet-UI, Owner"系统不需要人工/没有人工闸"原则钦定, 件⑥ break-glass 走向A,
+  // Bettor #njqd3u/#njwf26 派工执行): confirm-by-address 端点移除的永久审计记录(Bettor 要求"审计留档
+  // A决策砍除时间/最后状态")。写入 events 表(既有审计表, 不新建表), 幂等(先查是否已记过)。
+  {
+    const already = sqlite.prepare(`SELECT id FROM events WHERE event_type = 'admin_confirm_by_address_removed' LIMIT 1`).get();
+    if (!already) {
+      sqlite.prepare(`INSERT INTO events (event_scope, event_type, source, level, summary, payload_json, created_at)
+        VALUES (?,?,?,?,?,?,?)`).run(
+        'admin', 'admin_confirm_by_address_removed', 'migrate.js:v186', 'warn',
+        'confirm-by-address break-glass 通道永久移除(Owner"不要人工闸"原则+件⑥走向A). 移除前验死: events表对admin_confirm_by_address事件0命中/pending_actions表0行/KANetguy(7/8孤儿单, 唯一历史相关案例)钱包记录8天未更新(已走默认B自动路径). 自上线从未被实际调用. NWT+Bettor独立复核GREEN.',
+        JSON.stringify({
+          decision: 'remove_break_glass_channel',
+          owner_principle: 'system needs no manual gates',
+          verification: { events_hits: 0, pending_actions_rows: 0, kanetguy_wallet_last_update: '2026-07-08T14:23:01.666Z' },
+          verified_by: ['KANet-UI', 'NWT', 'Bettor'],
+          removed_endpoint: '/api/admin/pool/register-v07/confirm-by-address',
+          removed_from_commit_ref: 'pool.js confirm-by-address handler (2026-07-08 add, 2026-07-16 removal)',
+        }),
+        Math.floor(Date.now() / 1000),
+      );
+      console.log('[migrate] v186: confirm-by-address 移除决策永久审计记录写入 events 表(件⑥ break-glass 走向A).');
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }

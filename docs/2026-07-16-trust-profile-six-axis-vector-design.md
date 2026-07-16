@@ -1,8 +1,8 @@
-> **Status**: DRAFT — Owner 终裁派工②执行稿，待 NWT 审
+> **Status**: DRAFT — Owner 终裁派工②执行稿，NWT 红队 GREEN+1条强化已折入（J1 会话结束，KANet-UI 代收口）
 
 # Trust Profile 六轴信任向量 — Economic Kernel §7 改稿
 
-**作者**: J1tn · 2026-07-16 · Owner 终裁 `0f3a3506` 派工②（源自 J1 对抗轮②交付 `04a9368b` 的延伸）
+**作者**: J1tn(原稿) + KANet-UI(2026-07-16 代收口折入 NWT 强化，未改动 J1 原有分析结论) · Owner 终裁 `0f3a3506` 派工②（源自 J1 对抗轮②交付 `04a9368b` 的延伸）
 **依据**: Owner 原话——"签名证'谁说的'、ZK 证'怎么算的'、委员会证'多少人同意'、covenant 证'链强制了什么'，不得压扁为单一等级。"
 **目标**: 把 `docs/2026-07-15-KANet-Economic-Kernel-v0.1.md` §7 的单值 T0-T4 分级，改为六个独立坐标轴，每个 Agreement/市场必须逐轴声明，不得用一个笼统等级掩盖轴与轴之间的差异。
 
@@ -44,7 +44,7 @@
 | 取值 | 含义 | 现状例子 |
 |---|---|---|
 | `manual-judgment` | 人工/机构主观判断，不可重放 | UMA 的最终判定环节 |
-| `deterministic-local` | 确定性算法，每个验证者本地独立可重放，但不强制统一实现 | `enforceCloseAttest`（每个委员节点本地独立验证后才签名） |
+| `deterministic-local` | 确定性算法，每个验证者本地独立可重放，但不强制统一实现——**包含"委员各自独立读取同一外部数据源后投票"这种情况**（2026-07-16 NWT 红队②发现，kr5l4 活反例：`resolution_rule_spec.data_source_canonical` 直连 ESPN API，但判定机制走 4-of-5 committee 投票，不是纯算法计算——两种确定性来源不同，前者是"读同一份数据大家算法一致"，后者是"委员各自正确读取同一外部数据源"的信任假设，读者不应把本轴理解为只指纯算法计算） | `enforceCloseAttest`（每个委员节点本地独立验证后才签名）；kr5l4（committee 读 ESPN 数据源后投票） |
 | `zk-circuit` | 电路化确定性计算，产出可链上验证的密码学证明 | ZK guest circuit（zkNative markets，D-001 committed 方向） |
 
 ### 1.4 `enforcement` — 链强制了什么
@@ -87,9 +87,12 @@ covenant/脚本实际在链上校验的范围，不是"用了 covenant"就等于
 
 | 路径 | result_source | aggregation | computation | enforcement | availability | escape_authority |
 |---|---|---|---|---|---|---|
-| Committee-sig（committee/V1） | committee | threshold-signature | deterministic-local | structural-only | retryable | permissioned-manual |
+| Committee-sig（committee/V1，纯内部判定） | committee | threshold-signature | deterministic-local（纯算法） | structural-only | retryable | permissioned-manual |
+| Committee-reads-external（committee 读外部数据源投票，见下方 kr5l4 例） | committee | threshold-signature | deterministic-local（**委员各自独立读同一外部源，非纯算法**——见 §1.3 定稿说明） | structural-only | retryable | permissioned-manual |
 | ZK-native（zkNative markets, D-001） | chain-native（guest circuit 输入承诺后由证明约束） | none | zk-circuit | full-correctness（对 guestPayoutRoot） | retryable（zk-autonomy tick） | permissioned-manual（当前）/目标 permissionless |
 | UMA-mirrored | single-institution | none | manual-judgment | structural-only（committee 判定非约束性 parallel judgment，不构成 enforcement） | single-point（待核实是否有降级路径） | 待核实 |
+
+**2026-07-16 NWT 红队②发现（已折入）**：原三行示例遗漏了第四条真实并行路径——`kr5l4`（法西大盘）本身就是活反例：`resolution_rule_spec` 里 `data_source_canonical` 直连 ESPN API（非 UMA/Polymarket，`source_label='ESPN FIFA World Cup'`），但判定机制走的是 committee 4-of-5 投票，不是纯 UMA 单一机构判定，也不是纯内部确定性算法。这是"Committee-sig"和"UMA-mirrored"两行之间的第三种真实组合，原表未覆盖，现补为独立行。此行与 UMA-mirrored 的关键区别：committee 投票有 threshold-signature 聚合层，UMA 是单一机构无聚合；此行与纯 Committee-sig 的关键区别：computation 轴的确定性来源不同（读外部源 vs 纯算法），已在 §1.3 定稿说明区分。
 
 **待办（不在本稿范围内自行拍板）**：UMA 路径三格标"待核实"是诚实标注，不是留白——需要有代码访问权限的人（KANet-UI 或 J2）核实 `polymarket_uma_mirror` 失效时的降级行为、以及该路径下资金的 escape_authority 具体实现，本稿完成前先占位，避免我在不掌握实现细节的情况下猜测发布。
 

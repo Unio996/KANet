@@ -1,4 +1,4 @@
-# KANet TN12 开机启动序 — 响应 Bettor 加急卡 #lqp8vg(2026-07-15, 两起故障"进程死了没人拉"放大成全线故障)
+﻿# KANet TN12 开机启动序 — 响应 Bettor 加急卡 #lqp8vg(2026-07-15, 两起故障"进程死了没人拉"放大成全线故障)
 #
 # 顺序(Bettor #lqtxe6 GREEN-with-notes 折入): kaspad-watchdog(拉起kaspad) → 等RPC ready(超时5min)
 #   → tn12-mining-watchdog(现成不动) → kanet-start.sh(全栈, 显式Git-Bash绝对路径) → console-supervisor.sh(显式起, 不假设side-effect)

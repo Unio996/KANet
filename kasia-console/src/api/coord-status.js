@@ -7,6 +7,7 @@
 // OFF), 因为这条路径最终会触碰 relay 私钥签名操作, 按同等敏感度处理。
 import { sendCommandAsync } from '../services/relay-manager.js';
 import { computeContentHashHex, buildSignedMessage } from '../lib/coord-status-sign.mjs';
+import { checkAdminSecretTier } from '../lib/admin-secret-tier.mjs';
 
 export async function registerCoordStatusRoutes(fastify) {
   // POST /api/admin/coord-status/sign { content, relayId }
@@ -14,12 +15,9 @@ export async function registerCoordStatusRoutes(fastify) {
     if (process.env.ADMIN_COORD_STATUS_SIGN_ENABLED !== '1') {
       return reply.code(503).send({ ok: false, error: 'admin endpoint disabled (ADMIN_COORD_STATUS_SIGN_ENABLED != 1)' });
     }
-    const adminSecret = process.env.ADMIN_SECRET;
-    if (!adminSecret) return reply.code(503).send({ ok: false, error: 'admin endpoint disabled (ADMIN_SECRET env 未设)' });
-    const provided = request.headers['x-kanet-admin-secret'];
-    if (!provided || provided !== adminSecret) {
-      return reply.code(403).send({ ok: false, error: 'admin auth fail (X-KANet-Admin-Secret 缺失/不匹配)' });
-    }
+    // 件⑥ T-SIGN(触碰relay私钥签名, 独占一把钥匙——见admin-secret-tier.mjs)
+    const auth = checkAdminSecretTier(request, 'ADMIN_SECRET_STATUS_SIGN');
+    if (!auth.ok) return reply.code(auth.code).send({ ok: false, error: auth.error });
     const ipAllowlist = (process.env.ADMIN_IP_ALLOWLIST || '127.0.0.1,::1,::ffff:127.0.0.1').split(',').map(s => s.trim());
     if (!ipAllowlist.includes(request.ip)) {
       return reply.code(403).send({ ok: false, error: `admin auth fail (source IP ${request.ip} 不在 ADMIN_IP_ALLOWLIST)` });
