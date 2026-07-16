@@ -19,6 +19,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { MONEY_PATH_MANIFESTS } from '../kasia-console/src/lib/money-path-manifests.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -161,6 +162,94 @@ function checkR_FEE_SPLIT_PKG_DRIFT() {
       `packages/fee-split/fee-split.mjs 与源 kasia-console/src/lib/fee-split.mjs 不一致(drift)——第三方
 会拿到过期/错误的分润组件快照。重新同步: node packages/fee-split/scripts/sync.mjs, 然后 git add 两处一起提交。`,
       pkgFile, 0);
+  }
+}
+
+// ── R-MANIFEST-* [件④ money-path manifest 门禁, 2026-07-16, NWT 主笔, Owner 终裁件④]: 校验
+// kasia-console/src/lib/money-path-manifests.mjs 里的清单条目本身(不是扫源码找漏登记的路径——
+// 那是 R-MANIFEST-COVERAGE 的职责, 需要调用图静态分析, 工作量大, 排 v2 独立落, 诚实标注不在本批。
+// 本批 3 条规则只校验"已登记条目的数据完整性/一致性", 首批清单参见
+// docs/2026-07-16-money-path-manifest-schema-and-lint-gate-design.md)。
+//
+// R-MANIFEST-SCHEMA-COMPLETE [ERROR]: 每条 manifest 必须有 path_id/description/intake_transaction/
+// locked_states/normal_exit/timeout_exit/escape_exit/responsible_worker/kill_switch_effect/
+// fault_domain/admin_capabilities/required_tests 十二个顶层字段, 缺一不算合规条目(字段可以是
+// null/none/空数组, 但 KEY 本身不能缺——缺 key = 从没被人想过这一维度, 跟"想过了填 none"是两回事)。
+const _MANIFEST_REQUIRED_KEYS = [
+  'path_id', 'description', 'intake_transaction', 'locked_states', 'normal_exit',
+  'timeout_exit', 'escape_exit', 'responsible_worker', 'kill_switch_effect',
+  'fault_domain', 'admin_capabilities', 'required_tests',
+];
+function checkR_MANIFEST_SCHEMA_COMPLETE() {
+  const manifestFile = file('kasia-console/src/lib/money-path-manifests.mjs');
+  for (const entry of MONEY_PATH_MANIFESTS) {
+    const missing = _MANIFEST_REQUIRED_KEYS.filter((k) => !(k in entry));
+    if (missing.length > 0) {
+      violate('R-MANIFEST-SCHEMA-COMPLETE',
+        `manifest 条目 "${entry.path_id || '(无 path_id)'}" 缺字段: ${missing.join(', ')} — schema 定义的十二个顶层字段必须全部存在(值可以是 null/'none'/空数组, 但 key 不能缺, 缺 key 意味着这个维度从没被人想过)。`,
+        manifestFile, 0);
+    }
+  }
+}
+
+// R-MANIFEST-EXIT-REACHABLE [ERROR]: normal_exit/timeout_exit/escape_exit 三者至少一个 trigger
+// 非 'none' 且 mechanism 非空——三者全空 = 资金锁死无出口, K-10 直接违反(不是 WARN 级别的问题)。
+function checkR_MANIFEST_EXIT_REACHABLE() {
+  const manifestFile = file('kasia-console/src/lib/money-path-manifests.mjs');
+  for (const entry of MONEY_PATH_MANIFESTS) {
+    const exits = [entry.normal_exit, entry.timeout_exit, entry.escape_exit].filter(Boolean);
+    const hasReachable = exits.some((e) => e.trigger && e.trigger !== 'none' && e.mechanism);
+    if (!hasReachable) {
+      violate('R-MANIFEST-EXIT-REACHABLE',
+        `manifest 条目 "${entry.path_id}" 的 normal_exit/timeout_exit/escape_exit 三者全部是 none/空 mechanism — 这笔锁定资金没有任何声明的出口, K-10("Failure Has an Exit")直接违反。`,
+        manifestFile, 0);
+    }
+  }
+}
+
+// R-MANIFEST-TEST-COVERAGE [WARN]: required_tests 至少覆盖 normal_exit(以及任何已声明为非 none
+// 的 timeout_exit/escape_exit)——非阻塞, 首批清单里已知有"待补"占位, warn 而非 error 防止卡住
+// 尚在积累测试覆盖率过程中的正常条目。
+function checkR_MANIFEST_TEST_COVERAGE() {
+  const manifestFile = file('kasia-console/src/lib/money-path-manifests.mjs');
+  for (const entry of MONEY_PATH_MANIFESTS) {
+    const declaredExits = ['normal_exit', 'timeout_exit', 'escape_exit']
+      .filter((k) => entry[k]?.trigger && entry[k].trigger !== 'none' && entry[k].mechanism);
+    const covered = new Set((entry.required_tests || []).map((t) => t.covers));
+    const uncovered = declaredExits.filter((k) => !covered.has(k));
+    if (uncovered.length > 0) {
+      warn('R-MANIFEST-TEST-COVERAGE',
+        `manifest 条目 "${entry.path_id}" 的 required_tests 未覆盖: ${uncovered.join(', ')}(已声明生效的 exit 类型里, 这些在 required_tests[].covers 里零命中)。`,
+        manifestFile, 0);
+    }
+  }
+}
+
+// R-MANIFEST-ADMIN-TIER-MATCH [WARN]: admin_capabilities[].admin_secret_var 若非 null, 必须能在
+// ⑥ADMIN_SECRET拆分设计已定的密钥变量表里找到(不能声明一个不存在的密钥名), risk_tier 必须是已定义
+// 的五级枚举之一(或 'none')——两份独立维护的清单一致性检查, WARN(两份文档协同演进期间难免暂时脱节)。
+const _KNOWN_ADMIN_SECRET_VARS = new Set([
+  'ADMIN_SECRET_ZK_CLOSE_BROADCAST', 'ADMIN_SECRET_STATUS_SIGN',
+  'ADMIN_SECRET_ZK_STATE_PREP', 'ADMIN_SECRET_READONLY',
+]);
+const _KNOWN_RISK_TIERS = new Set([
+  'T-READONLY', 'T-STATE-PREP', 'T-SIGN', 'T-BROADCAST', 'T-BREAK-GLASS', 'none',
+]);
+function checkR_MANIFEST_ADMIN_TIER_MATCH() {
+  const manifestFile = file('kasia-console/src/lib/money-path-manifests.mjs');
+  for (const entry of MONEY_PATH_MANIFESTS) {
+    for (const cap of entry.admin_capabilities || []) {
+      if (cap.admin_secret_var && !_KNOWN_ADMIN_SECRET_VARS.has(cap.admin_secret_var)) {
+        warn('R-MANIFEST-ADMIN-TIER-MATCH',
+          `manifest 条目 "${entry.path_id}" 的 admin_capabilities 声明了未知密钥变量 "${cap.admin_secret_var}"(不在⑥ADMIN_SECRET拆分设计已定的四把钥匙里)——核对是不是笔误, 或⑥那份清单需要同步更新。`,
+          manifestFile, 0);
+      }
+      if (cap.risk_tier && !_KNOWN_RISK_TIERS.has(cap.risk_tier)) {
+        warn('R-MANIFEST-ADMIN-TIER-MATCH',
+          `manifest 条目 "${entry.path_id}" 的 admin_capabilities risk_tier="${cap.risk_tier}" 不在已定义的五级枚举里(T-READONLY/T-STATE-PREP/T-SIGN/T-BROADCAST/T-BREAK-GLASS/none)。`,
+          manifestFile, 0);
+      }
+    }
   }
 }
 
@@ -1232,6 +1321,10 @@ checkR_COMMAND_REGISTRATION();  // R-COMMAND-REGISTRATION (#25, KI-49 防重复)
 checkR_FEE_LEAVES_BYPASS();     // R-FEE-LEAVES-BYPASS [WARN] (P4/D-008, 2026-07-09): ZK 线禁直调 deriveFeeLeaves/FEE_CONFIG
 checkScratchClutter();
 checkR_FEE_SPLIT_PKG_DRIFT();     // R-FEE-SPLIT-PKG-DRIFT [ERROR] (B线落3 2026-07-12): packages/fee-split/fee-split.mjs 必与源同步(硬阻塞非WARN)
+checkR_MANIFEST_SCHEMA_COMPLETE();  // R-MANIFEST-SCHEMA-COMPLETE [ERROR] (件④ 2026-07-16): money-path manifest 十二字段齐全性
+checkR_MANIFEST_EXIT_REACHABLE();   // R-MANIFEST-EXIT-REACHABLE [ERROR] (件④ 2026-07-16): 三种exit全空=K-10直接违反
+checkR_MANIFEST_TEST_COVERAGE();    // R-MANIFEST-TEST-COVERAGE [WARN] (件④ 2026-07-16): required_tests 覆盖已声明exit
+checkR_MANIFEST_ADMIN_TIER_MATCH(); // R-MANIFEST-ADMIN-TIER-MATCH [WARN] (件④ 2026-07-16): admin_secret_var/risk_tier 对齐⑥拆分清单
 checkLedgerSize();               // R-LEDGER-SIZE [WARN] (D-010 2026-07-10): COORD-LEDGER.md >100KB 提醒切档
 checkDocPath();                          // R-DOC-PATH/R-DOC-DUPLICATE (③ doc-lint 2026-06-29): date-prefixed doc 必住 docs/ 根·同名多路径 → fail
 
