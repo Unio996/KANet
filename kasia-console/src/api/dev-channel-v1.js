@@ -5,6 +5,7 @@
 // human-facing routes kept (= 兼用 surface).
 
 import { sqlite } from '../db/client.js';
+import { checkAdminSecretTier } from '../lib/admin-secret-tier.mjs';
 
 const PROTOCOL_VERSION = 0;
 
@@ -366,14 +367,9 @@ export function registerDevChannelV1Routes(fastify) {
   // 2026-05-28 KANet-UI fill. Auth: env ADMIN_SECRET header gate (= 简化 admin, Tier 3 升级 multisig/pubkey).
   // Body: { visibility: 'public' | 'internal' }
   fastify.post('/api/admin/visibility/:txid', async (request, reply) => {
-    const adminSecret = process.env.ADMIN_SECRET;
-    if (!adminSecret) {
-      return reply.code(503).send({ v: PROTOCOL_VERSION, ok: false, error: 'admin endpoint disabled (= ADMIN_SECRET env 未设)' });
-    }
-    const provided = request.headers['x-kanet-admin-secret'];
-    if (!provided || provided !== adminSecret) {
-      return reply.code(403).send({ v: PROTOCOL_VERSION, ok: false, error: 'admin auth fail (= X-KANet-Admin-Secret header 缺失 OR 不匹配)' });
-    }
+    // 件⑥ T-READONLY(与zk-close-gate-debugger共用一把, 零链上副作用——见admin-secret-tier.mjs)
+    const auth = checkAdminSecretTier(request, 'ADMIN_SECRET_READONLY');
+    if (!auth.ok) return reply.code(auth.code).send({ v: PROTOCOL_VERSION, ok: false, error: auth.error });
     const { txid } = request.params;
     if (!/^[a-f0-9]{64}$/.test(txid)) {
       return reply.code(400).send({ v: PROTOCOL_VERSION, ok: false, error: 'invalid txid (= 64-char hex)' });

@@ -20,6 +20,7 @@ import { REORG_SAFE_MIN_DEPTH } from '../lib/pool-shard-register.mjs';  // #33 �
 import { ZK_GATE } from '../lib/zk-close-builder.mjs';
 import { ensureGateTmplHashFresh } from '../lib/gate-tmpl-hash.mjs';
 import { kaspaZk } from '../services/zk-prove-worker.mjs';
+import { checkAdminSecretTier } from '../lib/admin-secret-tier.mjs';
 
 // 件⑤步骤2 疑似死端点命中计数(2026-07-16, KANet-UI, Owner终裁+Bettor #nig8da 派工): observe-only,
 // 零业务逻辑影响, 持久化(跨重启存活)——4个疑似死端点各挂一次调用, 7天观察窗到期零命中才走删除决策,
@@ -1832,12 +1833,9 @@ export async function registerPoolRoutes(fastify) {
     if (process.env.ADMIN_PROPOSE_CLOSE_V2_ENABLED !== '1') {
       return reply.code(503).send({ ok: false, error: 'admin endpoint disabled (ADMIN_PROPOSE_CLOSE_V2_ENABLED != 1)' });
     }
-    const adminSecret = process.env.ADMIN_SECRET;
-    if (!adminSecret) return reply.code(503).send({ ok: false, error: 'admin endpoint disabled (ADMIN_SECRET env 未设)' });
-    const provided = request.headers['x-kanet-admin-secret'];
-    if (!provided || provided !== adminSecret) {
-      return reply.code(403).send({ ok: false, error: 'admin auth fail (X-KANet-Admin-Secret 缺失/不匹配)' });
-    }
+    // 件⑥ T-STATE-PREP(与zk-handoff-v2共用一把, 见admin-secret-tier.mjs)
+    const auth = checkAdminSecretTier(request, 'ADMIN_SECRET_ZK_STATE_PREP');
+    if (!auth.ok) return reply.code(auth.code).send({ ok: false, error: auth.error });
     const ipAllowlist = (process.env.ADMIN_IP_ALLOWLIST || '127.0.0.1,::1,::ffff:127.0.0.1').split(',').map(s => s.trim());
     if (!ipAllowlist.includes(request.ip)) {
       return reply.code(403).send({ ok: false, error: `admin auth fail (source IP ${request.ip} 不在 ADMIN_IP_ALLOWLIST)` });
@@ -1866,12 +1864,9 @@ export async function registerPoolRoutes(fastify) {
     if (process.env.ADMIN_ZK_HANDOFF_V2_ENABLED !== '1') {
       return reply.code(503).send({ ok: false, error: 'admin endpoint disabled (ADMIN_ZK_HANDOFF_V2_ENABLED != 1)' });
     }
-    const adminSecret = process.env.ADMIN_SECRET;
-    if (!adminSecret) return reply.code(503).send({ ok: false, error: 'admin endpoint disabled (ADMIN_SECRET env 未设)' });
-    const provided = request.headers['x-kanet-admin-secret'];
-    if (!provided || provided !== adminSecret) {
-      return reply.code(403).send({ ok: false, error: 'admin auth fail (X-KANet-Admin-Secret 缺失/不匹配)' });
-    }
+    // 件⑥ T-STATE-PREP(与propose-close-v2共用一把, 见admin-secret-tier.mjs)
+    const auth = checkAdminSecretTier(request, 'ADMIN_SECRET_ZK_STATE_PREP');
+    if (!auth.ok) return reply.code(auth.code).send({ ok: false, error: auth.error });
     const ipAllowlist = (process.env.ADMIN_IP_ALLOWLIST || '127.0.0.1,::1,::ffff:127.0.0.1').split(',').map(s => s.trim());
     if (!ipAllowlist.includes(request.ip)) {
       return reply.code(403).send({ ok: false, error: `admin auth fail (source IP ${request.ip} 不在 ADMIN_IP_ALLOWLIST)` });
@@ -1907,12 +1902,10 @@ export async function registerPoolRoutes(fastify) {
     if (process.env.ADMIN_ZK_CLOSE_V2_ENABLED !== '1') {
       return reply.code(503).send({ ok: false, error: 'admin endpoint disabled (ADMIN_ZK_CLOSE_V2_ENABLED != 1)' });
     }
-    const adminSecret = process.env.ADMIN_SECRET;
-    if (!adminSecret) return reply.code(503).send({ ok: false, error: 'admin endpoint disabled (ADMIN_SECRET env 未设)' });
-    const provided = request.headers['x-kanet-admin-secret'];
-    if (!provided || provided !== adminSecret) {
-      return reply.code(403).send({ ok: false, error: 'admin auth fail (X-KANet-Admin-Secret 缺失/不匹配)' });
-    }
+    // 件⑥ T-BROADCAST(最高风险层, 独占一把钥匙, 绝不与其它tier共用——见admin-secret-tier.mjs)。
+    // Owner"系统不需要人工"原则裁定: 不补第二方确认, 与移除break-glass同一原则。
+    const auth = checkAdminSecretTier(request, 'ADMIN_SECRET_ZK_CLOSE_BROADCAST');
+    if (!auth.ok) return reply.code(auth.code).send({ ok: false, error: auth.error });
     const ipAllowlist = (process.env.ADMIN_IP_ALLOWLIST || '127.0.0.1,::1,::ffff:127.0.0.1').split(',').map(s => s.trim());
     if (!ipAllowlist.includes(request.ip)) {
       return reply.code(403).send({ ok: false, error: `admin auth fail (source IP ${request.ip} 不在 ADMIN_IP_ALLOWLIST)` });
@@ -1996,12 +1989,9 @@ export async function registerPoolRoutes(fastify) {
     if (process.env.ADMIN_ZK_CLOSE_GATE_DEBUGGER_ENABLED !== '1') {
       return reply.code(503).send({ ok: false, error: 'admin endpoint disabled (ADMIN_ZK_CLOSE_GATE_DEBUGGER_ENABLED != 1)' });
     }
-    const adminSecret = process.env.ADMIN_SECRET;
-    if (!adminSecret) return reply.code(503).send({ ok: false, error: 'admin endpoint disabled (ADMIN_SECRET env 未设)' });
-    const provided = request.headers['x-kanet-admin-secret'];
-    if (!provided || provided !== adminSecret) {
-      return reply.code(403).send({ ok: false, error: 'admin auth fail (X-KANet-Admin-Secret 缺失/不匹配)' });
-    }
+    // 件⑥ T-READONLY(与visibility翻转共用一把, 零链上副作用——见admin-secret-tier.mjs)
+    const auth = checkAdminSecretTier(request, 'ADMIN_SECRET_READONLY');
+    if (!auth.ok) return reply.code(auth.code).send({ ok: false, error: auth.error });
     const ipAllowlist = (process.env.ADMIN_IP_ALLOWLIST || '127.0.0.1,::1,::ffff:127.0.0.1').split(',').map(s => s.trim());
     if (!ipAllowlist.includes(request.ip)) {
       return reply.code(403).send({ ok: false, error: `admin auth fail (source IP ${request.ip} 不在 ADMIN_IP_ALLOWLIST)` });
