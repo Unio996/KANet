@@ -8,6 +8,21 @@
 
 ---
 
+## 🔖 下一班 Bettor 接位·当前活状态快照(2026-07-17 17:1xZ·Bettor 会话交接·从这里接)
+
+> 本会话(7/15 凌晨接位→7/17)超长, 操作员将执行合并重启窗=整机重启会结束本会话。新会话从本快照+下方各段接力, 状态全外置零损耗。
+
+**接位第一件事(按序)**:
+1. **核实合并重启窗结果**(若操作员已按重启键): 新 PID/HEAD==目标 tip/四钥匙 log 生效/命中计数器表建/break-glass 端点 404/lint 规则在/**无人值守自愈证成(不登录 TG bot 响应)**——成=收卡报 Owner; 败=读 D:/kanet-tn12/logs/ boot-sequence+watchdog 存档日志归因。**若未重启**: 装载窗四 diff 仍待装(见下)。
+2. **装载窗(四 diff 全 GREEN 全在 origin, 当前 tip f560b9af)**: 命中计数器 14c58a23(v185)+break-glass 移除 120da762(v186)+件⑥ 四钥匙 8e19a913+件④ lint 首批 d35e707c。合并实重启终验一次装。
+3. **kr5l4 P0**(2 卡点, 钱安全零丢失已链验): (a)side_lock_daa=零退款方案选项 D 收敛待落码(735 收窄+聚合链锚, 暂缓待 shard21 定性一起落); (b)shard21 派生偏差=J2 后台调(ShardLeaf continuation step1+ 派生与链对不上, D-009 同族, 编译器域)。
+4. **j34vb(英阿)**: 到期 settling, 8/10 side_lock_daa NULL 轻症(剪裁墙之上 recapturable, J2 定位中: 1/8 补上/7 walk 余量不够/等交集结论)。
+5. **挂 Owner**: KCC20 两意见英文稿(docs/2026-07-16-kcc20...en-paste-ready.md)待 Owner 贴 PR#2。
+6. **七项终裁**: ①②③⑥ 闭环, ④lint 首批+⑤Batch1 步 1-2 落码待装; KILLSWITCH-SAFE 排 v2; K-13 自持通道排后; 4545 preps TTL 清理卫生卡; supervisor 死因收口.
+7. **开机自启动**: SYSTEM 任务 KANet-TN12-BootSequence 已注册(7/15 提权), 待实重启终验.
+
+**当前 live**: console:3200 健康, kaspad+bridge+watchdog×3 在岗, DAA 推进正常. 当前 tip f560b9af.
+
 ## 📅 7/9 日计划令(04:0x Z #czbkto·Bettor·GO)
 - **🔴 7/15 宿主机重启全停 41min+Bettor 接位恢复(20:44-21:29Z·Bettor 记账)**: Windows 宿主机 03:44:46 本地(20:44:46Z)重启——LastBootUpTime 与全子进程 exit 0x40010004 同刻吻合=OS 级事件非代码问题, 重启后零自启动, 全栈(kaspad/矿/llama/console/31relay)死透+频道死锁全员失声。**恢复序(21:14-21:29Z, Bettor 按前两次全停先例执行)**: ①kaspad 带 `--enable-unsynced-mining`(库完好, 35s 即 listen 17210)②裸 kaspa-miner(7/3 recovery 旧法)出块被节点拒 **"block is invalid"**——改走 canonical `tn12-mining-watchdog.ps1` bridge 内置 CPU 矿机(6/25 Owner 钦定路径)即 BLOCK ACCEPTED+confirmed BLUE ③`bash kanet-start.sh` 全栈。**验收**: console:3200/31 relay 单实例无翻倍/llama:8000 200/DAA ~8每秒推进/mempool 55→0 全消化/恢复通告 tx bd703530+7231971d 独立回读核实真在频道。**七源病复发实锤(恢复后即拍到)**: 21:25:34→21:28:42 单次事件循环阻塞 **188,396ms**(diag:eventloop-lag, heapUsed 163MB=非GC), 期间 relay-health deadCount=31 级联误判+API 全程 000, 与冷启动 catch-up+seeder 建盘冲刺(491→493/500)同窗——7/14 恒定签名族数据+1。**运维沉淀**: (a)7/3 outage-recovery runbook 的裸 miner 路径对 covenant 节点已失效, canonical=bridge watchdog(memory 已更新);(b)OS 重启后无任何自启动=整链单点, 立卡「开机自启动: 节点+挖矿watchdog+console supervisor」待 KANet-UI 域;(c)树上未提交改动(bettor-bisect env 门控/KANET_NODE_FLAGS/RH 计时探针, env 未设=行为中性)随启动装载, 频道已催认领。
 - **🪟 7/16-17 装载窗集齐+约 Owner 合并重启窗+j34vb 轻症(13:4x-17:0xZ·Bettor 记账·待 Owner 按键)**: ①**装载窗四 diff 集齐全 GREEN 全在 origin(tip d35e707c)**: 命中计数器 14c58a23(v185)+break-glass 移除 120da762(v186)+件⑥ 四钥匙拆分 8e19a913(crypto.randomBytes 真随机独立+shared helper admin-secret-tier.mjs)+件④ lint 首批 4 规则 d35e707c(正反测真抓到 z20 escape 缺口=活门禁, R-MANIFEST-KILLSWITCH-SAFE 需调用图排 v2 过渡人工审)。②**装载策略=合并实重启终验(一石三鸟)**: Owner 按整机重启键→不登录→SYSTEM 开机任务自动拉全栈(装 d35e707c+v185/v186 migration)→TG bot 探针验自愈。Bettor 前置逐项核: 四钥匙 kanet.env 在位/v185-186 migrate.js:5419+5438 幂等/四 diff 在 origin。**已报 Owner 约窗待按键**。③**教训**: KANet-UI 备份用 .backup() 对 live 库=WAL 争用(有 memory 但只应用到"用 WAL-safe API"层, 漏"live 时机"层)→下次 tree-kill 后备份。④**j34vb(英阿)守钟到点(精确 DAA 判据, 吸取 22h echo 教训)**: 新鲜 tip 61,432,775>deadline 61,421,827 过期 23min, shard0 status='settling'但 8/10 side_lock_daa NULL=kr5l4 同族**但轻症**(deadline 61.42M 在剪裁墙 59.49M 之上=recapturable 非物理清除)→派 J2 定位(recapture 补回自结 or 交集=0 等 735 fix)。**守钟又一次提前逮到而非等用户问**。
