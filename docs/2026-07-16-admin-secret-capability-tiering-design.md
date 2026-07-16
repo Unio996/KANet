@@ -52,23 +52,34 @@ ADMIN_SECRET_READONLY             # T-READONLY(visibility + debugger 共用—�
 
 **迁移期**: 若某把新密钥未设置, 对应端点保持现有"未设=503 disabled"的失败方向(fail-closed 对未配置=禁用, 不是自动 fallback 到旧 `ADMIN_SECRET`——旧变量迁移期允许保留只读兼容一段时间, 但新老不混用同一次请求校验, 避免"设了新的但旧的还生效"这种双活漏洞)。
 
-### 2.3 `confirm-by-address` Break-Glass 强化(Owner 原文四要求逐条对应)
+### 2.3 `confirm-by-address` Break-Glass 强化(Owner 原文四要求逐条对应, 2026-07-16 NWT 红队①后修订)
 
 | Owner 要求 | 现状 | 本稿设计动作 |
 |---|---|---|
 | 默认关 | 已有 `ADMIN_CONFIRM_BY_ADDRESS_ENABLED` 默认 OFF | 维持, 不变 |
 | 单独密钥 | 现与其它 6 个共用 `ADMIN_SECRET` | 换成 `ADMIN_SECRET_CONFIRM_BY_ADDRESS`(§2.2) |
 | 完整审计 | 已写 events 表(pool.js 注释确认) | 核实审计字段是否包含"谁触发+审批链依据"(txid/NWT 复核结论), 若缺补 |
-| 宜第二方确认 | **当前无**——代码注释写"由知道 ADMIN_SECRET 的人自律执行", 不是机制强制 | **本稿新增**: 端点要求 body 携带 `second_party_confirmation: { reviewer, note }` 必填字段, 缺失则 400 拒绝(不是"建议流程", 是代码硬门槛——呼应 Owner K-07 "禁止把 driver 默认升级为隐含裁判"精神) |
+| 宜第二方确认 | **当前无**——代码注释写"由知道 ADMIN_SECRET 的人自律执行", 不是机制强制 | 见下方(v1 设计已被 NWT 判定"牙没装上", 已重做) |
+
+**🔴 v1 设计缺陷(NWT 红队①发现, 已修订)**: 最初版本要求 body 携带 `second_party_confirmation: { reviewer, note }` 字段, 缺失 400 拒绝——但 `reviewer` 是自由文本, **发起人自己就能在同一次请求里填一个名字进去, 没有任何独立凭证证明这个"第二方"真的看过**。这是"有校验动作但校验的东西是自报的"经典 vacuous 模式(同族: 本项目今天已记录的 hash-commit 静默剥除未知字段/共享 env 常量致"独立"路径吻合两例)。
+
+**v2 设计(两步两凭证, maker-checker 模式)**:
+1. **发起**: `POST /api/admin/pool/register-v07/confirm-by-address`(用 `ADMIN_SECRET_CONFIRM_BY_ADDRESS`)——不立即执行, 写入 `pending_break_glass_actions` 表(状态 `pending_review`), 返回 `confirmation_id`。
+2. **批准**: `POST /api/admin/pool/confirm-by-address/:confirmation_id/approve`(**用另一把独立密钥** `ADMIN_SECRET_CONFIRM_BY_ADDRESS_REVIEWER`, 与发起密钥物理不同——第二方的身份证明就是"持有这把只有他知道的钥匙", 不是自报文本)——校验通过后才真正执行原逻辑(txid:output 精确匹配+写库)。
+3. 两把密钥必须分给两个不同的人持有(运营纪律, 代码强制不了"谁拿到密钥", 但**代码强制"必须两次不同凭证的请求"**这个结构本身, 比自由文本 reviewer 字段是真实的两人控制)。
+4. `pending_review` 状态超时(如 24h)未获批准则自动过期, 不遗留悬空的待执行动作。
+
+**待定(不阻塞落码, 但落码时需明确)**: T-BROADCAST(`zk-close-v2` 真广播分支)与 `confirm-by-address` 同标"最高风险", 但目前只有后者拿到第二方确认强化——NWT 指出这个不一致, 判定"是范围决策不是安全漏洞"(现状没有变差, 只是没有变得更好), 交 Owner 明确是否也给 `zk-close-v2` 补同款两步确认。
 
 ---
 
-## 三、待 NWT 审的问题(本稿不代拍板)
+## 三、NWT 红队①结论(2026-07-16, 已折入 §2.3)+ 剩余待 Owner/落码前定的问题
 
-1. §2.1 的分级方案本身——T-STATE-PREP 两个端点共用一把钥匙是否合理, 还是应该进一步拆分(比如 zk-handoff 比 propose-close 风险更高一线)?
-2. §2.2 迁移期新老变量并存的窗口多长合适, 是否需要 lint 规则(R-ADMIN-SECRET-LEGACY)防止迁移期结束后遗留旧变量继续生效?
-3. 第二方确认字段的"reviewer"是否需要绑定到已知身份表(如 relay_nodes 或团队成员白名单), 还是自由文本字段就够(Owner K-15 "隐藏 superuser" 精神下, 自由文本可能不够硬)?
-4. IP allowlist 现状是否也需要随本次拆分一起重新核实(本稿未逐条核实每个端点的 allowlist 配置是否齐全, 只核实了密钥本身)。
+1. ~~T-STATE-PREP 两端点共用一把钥匙是否合理~~ → **NWT 已核: 合理, 不拆**(同一操作者连续两步, 拆开无额外防线价值)。
+2. **迁移期**: NWT 建议给死线 + 新增 lint 规则 `R-ADMIN-SECRET-LEGACY`(死线后旧变量若仍生效, 拦截), 同今天新增的 `R-SELF-HTTP-FETCH` 同款思路(机制防呆而非只靠自觉)——**采纳, 落码时一并加**。
+3. **reviewer 身份绑定**: 见 §2.3 v2 设计(两把独立密钥, 不再是自由文本)。
+4. **IP allowlist 现状核实**: NWT 建议本次一起做, 不要分两次改同一批端点的权限面——**采纳**, 落码前逐端点核实 allowlist 配置是否齐全(本稿尚未做, 落码 diff 需覆盖)。
+5. T-BROADCAST 是否补同款两步确认——**Owner 定**, 不阻塞落码(见 §2.3 待定项)。
 
 ---
 
