@@ -169,6 +169,52 @@ required_tests:
     covers: normal_exit
 ```
 
+### 4.3 `tg-wallet-custodial-withdraw`(KANet-UI 供料, 2026-07-16——用户主动触发型 money-path, 与 4.1/4.2 两个 daemon-tick 型互补)
+
+```yaml
+path_id: tg-wallet-custodial-withdraw
+description: "TG 托管钱包用户提现——唯一让托管资金离开 KANet 控制的正常出口, 直接对应 K-13/§9 fund+claim custodial 架构性冲突(KANet-UI 已在频道发过的发现)"
+intake_transaction:
+  mechanism: "用户 TG 交互创建托管钱包(POST /api/tg-wallet/:tg_user_id/create), console 持 CONSOLE_ENCRYPTION_KEY 加密存 mnemonic_encrypted"
+  code_ref: "kasia-console/src/api/tg-wallet.js:52-75"
+locked_states:
+  - state: "tg_custodial_wallets 表存在该 tg_user_id 行, 且链上余额>0"
+    description: "资金被 console 托管, 私钥加密存本地 DB, 用户无独立签名能力(K-13 冲击点)"
+    table_or_covenant: tg_custodial_wallets
+normal_exit:
+  trigger: permissioned-manual
+  mechanism: "POST /api/tg-wallet/:tg_user_id/send——just-in-time 解密 mnemonic → 派生 privkey → IPC 给 relay(custodial_transfer) → 用完即弃"
+  code_ref: "kasia-console/src/api/tg-wallet.js:93-140"
+timeout_exit:
+  trigger: none
+  mechanism: null
+  # 🔴 无自动超时退出——资金停留多久完全取决于用户主动发起 /send, 没有任何"闲置N天自动怎样"的机制
+escape_exit:
+  trigger: none
+  mechanism: null
+  condition: "🔴 当前无独立于 normal_exit 的 escape path——如果 CUSTODIAL_RELAY_ID/FAUCET_RELAY_ID 未配(tg-wallet.js:101 判据), 唯一出口直接 503 不可用, 没有备用通道。这正是 K-13'真实价值场景不得强制托管'这条不变量的具体违反实例(不是理论风险, 是当前实现现状)。"
+responsible_worker:
+  process_or_cron: "无常驻 worker——这是用户主动触发的同步端点, 不是 daemon tick(与 4.1/4.2 两个已有案例不同类型, 补充 schema 覆盖'用户主动触发型' money-path)"
+  code_ref: "kasia-console/src/api/tg-wallet.js:93"
+kill_switch_effect:
+  env_var: "CUSTODIAL_RELAY_ID / FAUCET_RELAY_ID(二选一, 均未配=整条路径 503)"
+  when_off: blocks-all-including-exit
+  # 🔴 这两个 env var 不是为了"关闭"这条路径而设计的 kill-switch, 是必需配置项——但效果上跟 kill-switch 一样:
+  #   任一未设, 用户就再也拿不出自己的托管资金, 没有区分"我想临时关闭充值"和"我不小心漏配了"这两种意图。
+fault_domain:
+  shares_process_with: "console 主进程(与所有 pool.js/tg-bot 路径共享, 未隔离)"
+  k16_compliant: false   # 诚实自评: console 主进程若阻塞/崩溃, 提现路径连坐停摆, 无替代
+admin_capabilities:
+  - capability: "无 ADMIN_SECRET 门控——用的是 verifyIngestRequest(ingest secret 机制, 跟 admin tier 体系是两套不同的 auth, 不在⑥ADMIN_SECRET 拆分范围内)"
+    admin_secret_var: null
+    risk_tier: none
+required_tests:
+  - test_file: "待确认(需查 test-framework/cases/ 是否有 tg-wallet 提现覆盖用例)"
+    covers: normal_exit
+```
+
+**这条的价值**: ①补齐"用户主动触发型" money-path(区别于 4.1/4.2 两个 daemon-tick 型, 扩大 schema 覆盖面)②`escape_exit=none` 直接对应 K-13 冲突, 把频道已发的发现转成机器可读格式③`admin_capabilities` 交叉核对时显示这条根本不在 admin tier 体系里(用的是 ingest secret 不是 admin secret)——这个"两套不同 auth 机制并存"的事实, 也许值得 `R-MANIFEST-ADMIN-TIER-MATCH` 规则考虑要不要扩大覆盖范围, 不只对 `admin_secret_var`, 也覆盖 `verifyIngestRequest` 这类(不在本条目范围内自行拍板, 供 NWT 判断)。
+
 ## 五、诚实标注(不隐瞒, §四 首批清单目前不完整的地方)
 
 1. §4.1/4.2 只是**两个具体案例**用来验证 schema 设计本身+演示 lint 规则确实能拦住已知真实坑, 不是全系统 money-path 的完整清单——完整清单需要逐个 domain(broker/exchange/pool-settler/admin 端点/tg-bot 托管钱包等)扫过, 本稿不做这个体量的工作, 留给落码阶段按 domain 分批补。
