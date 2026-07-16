@@ -103,7 +103,7 @@ escape_exit:
   trigger: permissioned-manual
   mechanism: "POST /api/admin/clear-z20-circuit (熔断解除后人工复位)"
   condition: "Z20 circuit-breaker 熔断后(同一 offer 连续失败达阈值)"
-  code_ref: "kasia-console/src/api/pool.js (z20-circuit-broken 相关端点)"
+  code_ref: "kasia-console/src/api/admin-dedup.js:138 (2026-07-16 KANet-UI 核实更正, 原稿误写 pool.js)"
 responsible_worker:
   process_or_cron: "_refundInterval (broker-intake-watcher.js:1060, 5min tick)"
   code_ref: "kasia-console/src/services/broker-intake-watcher.js:1059-1074"
@@ -117,8 +117,11 @@ fault_domain:
   k16_compliant: true
 admin_capabilities:
   - capability: "清空 Z20 熔断闸"
-    admin_secret_var: null   # 目前无独立密钥门控, 只有 IP 层(需核实, 见 §五)
+    admin_secret_var: null   # 目前无独立密钥门控, 只有 ingest-secret(verifyIngestRequest), 非 admin tier 体系
     risk_tier: T-STATE-PREP
+    # 2026-07-16 KANet-UI 读码核实位置更正: escape_exit.code_ref 实际在 admin-dedup.js:131/138
+    # (GET /api/admin/z20-circuit-broken, POST /api/admin/clear-z20-circuit), 不在 pool.js——
+    # 逻辑描述本身准确, 纯文件位置引用误差, 落码时一并更正。
 required_tests:
   - test_file: "kasia-console/test-framework/cases/broker/ (待确认具体文件)"
     covers: normal_exit
@@ -214,6 +217,63 @@ required_tests:
 ```
 
 **这条的价值**: ①补齐"用户主动触发型" money-path(区别于 4.1/4.2 两个 daemon-tick 型, 扩大 schema 覆盖面)②`escape_exit=none` 直接对应 K-13 冲突, 把频道已发的发现转成机器可读格式③`admin_capabilities` 交叉核对时显示这条根本不在 admin tier 体系里(用的是 ingest secret 不是 admin secret)——这个"两套不同 auth 机制并存"的事实, 也许值得 `R-MANIFEST-ADMIN-TIER-MATCH` 规则考虑要不要扩大覆盖范围, 不只对 `admin_secret_var`, 也覆盖 `verifyIngestRequest` 这类(不在本条目范围内自行拍板, 供 NWT 判断)。
+
+### 4.4 `exchange-offer-kas-fund-lock`(KANet-UI 供料, 2026-07-16——用户主动触发型, exchange 撮合协议的 KAS 锁定/退出全链路, 与 4.1 z20 案例互补而非重复: z20 覆盖 seeder buy-side 充值退款, 本条覆盖 /api/exchange/publish 直接发起 KAS 挂单的锁定/释放)
+
+```yaml
+path_id: exchange-offer-kas-fund-lock
+description: "用户通过 /api/exchange/publish 直接发起 KAS 侧 exchange offer, 广播前先本地锁定 KAS 防超卖; 覆盖 open→matched→completed/cancelled/timed_out/disputed 全生命周期的锁定态与释放"
+intake_transaction:
+  mechanism: "give_asset='KAS' 时, 广播前调用 lockFunds(makerAddr, offerId, 'KAS', amount, currentBalance) 写入 fund_locks 表(status='locked'), 广播失败则 releaseFunds() 回滚"
+  code_ref: "kasia-console/src/api/exchange.js:285-297 (lockFunds), :329-334 (广播失败回滚)"
+locked_states:
+  - state: "fund_locks.status = 'locked' (asset='KAS', order_id=offer.id)"
+    description: "maker KAS 锁定, 防止同一钱包被多个挂单超额支用(非链上锁定, 是 console 本地记账层的并发保护)"
+    table_or_covenant: fund_locks
+normal_exit:
+  trigger: permissionless-anyone
+  mechanism: "taker accept→verifying→delivering→completed, transition() 在到达 completed(TERMINAL)时调用 spendFunds(offerId)"
+  code_ref: "kasia-console/src/services/exchange-machine.js:94-98 (transition 内 TERMINAL 分支)"
+timeout_exit:
+  trigger: timeout-automatic
+  mechanism: "expireStale() 处理 matched 态超时未 verifying 的挂单, 重新 open 并 releaseFunds(); timeoutVerifying()/checkMatchedTimeout() 处理其余超时分支, 均走 transition() 统一释放"
+  timeout_duration: "30min(matched→open reopen, 见 exchange-machine.js:730-737 附近逻辑)"
+  code_ref: "kasia-console/src/services/exchange-machine.js:581 (expireStale), :739 (releaseFunds); 调度者 kasia-console/src/index.js:239-243 (setInterval 30s, 无 kill-switch)"
+escape_exit:
+  trigger: permissioned-manual
+  mechanism: "POST /api/exchange/resolve, maker_wins→completed(spendFunds)/taker_wins→cancelled(releaseFunds), 均经统一 transition() 而非 resolve 端点自行操作 fund_locks"
+  condition: "争议(disputed 态)后人工/两方共识裁决, 无独立 admin_secret 门控(靠身份对等, 非 admin tier)"
+  code_ref: "kasia-console/src/api/exchange.js:757 (resolve endpoint), :842-848 (releaseFunds/spendFunds 调用点, 双路径均走 transition 统一逻辑)"
+responsible_worker:
+  process_or_cron: "index.js 顶层 setInterval(30s): expireStale+checkStaleDisputes+cleanupStaleOrphanAccepts+timeoutVerifying+checkMatchedTimeout"
+  code_ref: "kasia-console/src/index.js:239-243"
+kill_switch_effect:
+  env_var: null
+  when_off: no-kill-switch
+  # registerExchangeRoutes(index.js:205)和上述 setInterval 均无条件注册/运行, 没有 env 开关能关掉这条 money-path
+  # (对照 4.1 z20 案例的教训: 这里反而是"没有开关"本身更安全, 不存在"关 demo 连坐关退款出口"这类风险)
+fault_domain:
+  shares_process_with: "isolated (与 broker z20 路径共用 console 主进程但业务上互不相关; exchange-machine.js 的 transition() 是所有 exchange 状态出口的单一收口点, K-16 意义上退出逻辑本身故障域集中但一致, 非分散易漏)"
+  k16_compliant: true
+admin_capabilities:
+  - capability: "无独立 ADMIN_SECRET 门控——resolve 端点未见 checkAdminSecretTier 调用(需 NWT 复核确认无遗漏), 裁决靠 maker/taker 身份对等而非 admin 权限"
+    admin_secret_var: null
+    risk_tier: none
+required_tests:
+  - test_file: "kasia-console/test-framework/cases/exchange/ (待确认具体 fund_lock 生命周期覆盖用例)"
+    covers: normal_exit
+```
+
+**这条的价值**: ①与 4.1 z20 互补覆盖 exchange 协议的另一个 KAS 锁定入口(直接 publish, 非 seeder 中转)②验证发现 transition() 是一个**单一收口的退出机制**——所有终态(completed/cancelled/timed_out/disputed→resolve 后)都统一走同一段 fund lock 释放/花费逻辑(exchange-machine.js:90-103), 这是比 4.1/4.2 两个案例更干净的 K-10 范式, 值得作为"好例子"对照(此前 NWT 4.1/4.2 两个案例都是暴露问题, 本条补一个"设计对了"的正面参照)③`kill_switch_effect.env_var=null` 实测确认——这条 money-path 目前没有任何 env 开关能关闭, R-MANIFEST-KILLSWITCH-SAFE 规则对它天然不适用(没有开关就没有"关错"的风险面)。
+
+**读码时顺带发现并直接改正的既有条目位置错误**:
+§4.1 `z20-broker-kas-refund` 的 `escape_exit.code_ref` 原写"kasia-console/src/api/pool.js (z20-circuit-broken 相关端点)"——实读码确认这两个端点实际在 `kasia-console/src/api/admin-dedup.js:131`(GET /api/admin/z20-circuit-broken)+`:138`(POST /api/admin/clear-z20-circuit), 不在 pool.js。纯位置引用误差, 逻辑描述本身准确, 已在本次改动里直接更正(见上方 §4.1 `code_ref` 字段+ `admin_capabilities` 注释)。
+
+**其余候选(已定位 file:line, 未完整 schema 化, 留后续批次, 不虚报"已完成")**:
+- `bettor-refund-claim`(kasia-console/src/api/pool.js:3942, 用户主动触发 bshard 市场退款申领, 与 kr5l4 P0 同一资金域, 鉴于该 P0 仍在处理中, 暂不单独立 path_id 避免记录与在途事故冲突)
+- `oracle-pool-withdraw`/`timeout-unlock`(oracle-pool.js:303/455, 完整三态候选, 结构干净)
+- `hyperliquid-withdraw`/`aave-withdraw`(defi.js:530/68, 外部 DeFi 集成资金出口)
+- `escrow-create/lock/execute`(escrow.js:59/108/138, 三态 release/refund/arbitrate 通用基础设施)
 
 ## 五、诚实标注(不隐瞒, §四 首批清单目前不完整的地方)
 
