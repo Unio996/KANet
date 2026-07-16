@@ -131,3 +131,30 @@ export function ingestKaspaTx({ txId, blockHash, blockTime, fromAddress, toAddre
     network: RELAY_NETWORK,
   });
 }
+
+/**
+ * Record a finality-safe SPC (selected-parent-chain) block into the persistent
+ * daaScore→hash index (docs/2026-07-08-backward-walk-daa-index-design.md §2.2).
+ * Caller (rpc-listener.mjs) only invokes this for blocks past FINALITY_DEPTH,
+ * so reorg cannot invalidate the (daaScore, blockHash) binding once written.
+ */
+export function ingestSpcDaaBlock({ daaScore, blockHash, timestampMs }) {
+  post("/ingest/spc-daa-block", {
+    daaScore,
+    blockHash,
+    timestampMs,
+    network: RELAY_NETWORK,
+  });
+}
+
+/**
+ * Periodic tip heartbeat so Console can detect a stalled spc_daa_index writer
+ * (docs/2026-07-08-backward-walk-daa-index-design.md §2.2 note①/④) without
+ * Console ever touching kaspad RPC directly (Relay = sole on-chain egress).
+ */
+export function ingestSpcTipHeartbeat({ daaScore }) {
+  post("/ingest/spc-tip-heartbeat", {
+    daaScore,
+    network: RELAY_NETWORK,
+  });
+}

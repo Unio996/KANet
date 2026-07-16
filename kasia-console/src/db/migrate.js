@@ -5459,5 +5459,22 @@ export function runMigrations() {
     }
   }
 
+  // v187 (2026-07-16, J1tn, spc_daa_index 常驻写入器补落码 docs/2026-07-08-backward-walk-daa-index-design.md
+  // §2.2, Bettor 方向审 GREEN + NWT 攻击面终审 GREEN #o0056j/#o00hex): relay 侧 tip 心跳落地表(单行,
+  // console 完整性巡检拿它跟 spc_daa_index max(daa_score) 比对判定停更, 不给 console 开 RPC 口子)。
+  {
+    const tables = sqlite.pragma('table_list').map((t) => t.name);
+    if (!tables.includes('spc_tip_heartbeat')) {
+      sqlite.exec(`
+        CREATE TABLE spc_tip_heartbeat (
+          id INTEGER PRIMARY KEY CHECK (id = 1),
+          daa_score INTEGER NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+      `);
+      console.log('[migrate] v187: spc_tip_heartbeat 建表(单行, relay tip 心跳, spc_daa_index 完整性巡检用).');
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }

@@ -19,7 +19,7 @@ import { acceptHandshake, sendKaspa, sendMessage } from './chain.mjs';
 import { getAIReply } from './ai.mjs';
 import { routeMessage } from './router.mjs';
 import { loadSeen, saveSeen } from './state.mjs';
-import { ingestMessage, ingestReply, ingestTx, ingestHandshake, ingestKaspaTx } from './ingest.mjs';
+import { ingestMessage, ingestReply, ingestTx, ingestHandshake, ingestKaspaTx, ingestSpcDaaBlock, ingestSpcTipHeartbeat } from './ingest.mjs';
 
 const { RpcClient, Encoding } = kaspa;
 const Resolver = kaspa.Resolver || null;  // npm ^0.13.0 removed Resolver
@@ -125,6 +125,23 @@ const INDEXED_MAX = 20000;
 const RECENT_BLOCKS_MAX = 120000;  // J2 2026-06-23: 旧 50000 + comment '~14h @ 1bps' = config bug (testnet-12 ~10BPS → 50000≈83min); 120000≈3.3h. ring buffer 填充慢→今晚靠 backward-walk(MAX_WALK 120000); production verifiable-endBlock 硬化后续.
 const _recentBlocks = [];  // [{ hash, daaScore }] insertion order = block-added order
 const _recentBlockHashes = new Set();  // dedup
+
+// ── spc_daa_index 常驻写入器 (docs/2026-07-08-backward-walk-daa-index-design.md §2.2, J1tn 2026-07-16 补落码) ──
+// MUST-FIX(NWT 攻击面审): daaScore 是 spc_daa_index 主键，INSERT OR IGNORE 会把先到的非-canonical
+// (reorg 后失效) block_hash 永久锁死——写入门必须只放行 finality-safe 的块。FINALITY_DEPTH 复用
+// kasia-console/src/services/pool-market-settler-v06.mjs:43 DEFAULT_FINALITY_DEPTH（同一个 F-S1
+// anti-reorg 场景：不同时间点查询收敛到同一 hash），不新拍数字。
+const SPC_INDEX_FINALITY_DEPTH = 50;
+// NWT 提醒: 热路径(10BPS)不额外发 getBlockDagInfo RPC 查 tip——block-added 事件本身已带 daaScore,
+// 用本地已见最大值做近似 tip 即可, 零新增 RPC round-trip。
+let _maxSeenDaaScore = 0;
+const TIP_HEARTBEAT_MS = 60000;
+let _tipHeartbeatTimer = null;
+// FIFO of not-yet-finality-safe blocks awaiting SPC_INDEX_FINALITY_DEPTH confirmations.
+// Drained on every block-added tick (§ below) — a block only leaves once
+// (_maxSeenDaaScore - block.daaScore) >= SPC_INDEX_FINALITY_DEPTH, at which point its
+// (daaScore, blockHash) binding is GHOSTDAG-final and safe to INSERT OR IGNORE.
+const _pendingFinalityQueue = [];
 export function getRecentBlocksAtOrAbove(minDaa) {
   return _recentBlocks.filter(b => b.daaScore >= minDaa);
 }
@@ -287,6 +304,32 @@ function _trackBlockForChainReader(block) {
     const dropped = _recentBlocks.splice(0, _recentBlocks.length - RECENT_BLOCKS_MAX);
     for (const d of dropped) _recentBlockHashes.delete(d.hash);
   }
+
+  if (daa > _maxSeenDaaScore) _maxSeenDaaScore = daa;
+  if (isChainBlock) _pendingFinalityQueue.push({ hash, daaScore: daa, timestamp_ms });
+  for (const finalized of drainFinalitySafeBlocks(_pendingFinalityQueue, _maxSeenDaaScore, SPC_INDEX_FINALITY_DEPTH)) {
+    ingestSpcDaaBlock({ daaScore: finalized.daaScore, blockHash: finalized.hash, timestampMs: finalized.timestamp_ms });
+  }
+}
+
+// Pure function (exported for unit test — NWT MUST-FIX #o0056j regression coverage): pops every
+// entry off the FRONT of `queue` whose (maxSeenDaaScore - entry.daaScore) >= finalityDepth, i.e.
+// GHOSTDAG-final and reorg-safe to persist. Mutates `queue` in place (FIFO drain), returns the
+// popped entries in original order.
+export function drainFinalitySafeBlocks(queue, maxSeenDaaScore, finalityDepth) {
+  const finalized = [];
+  while (queue.length && (maxSeenDaaScore - queue[0].daaScore) >= finalityDepth) {
+    finalized.push(queue.shift());
+  }
+  return finalized;
+}
+
+function _startSpcTipHeartbeat() {
+  if (_tipHeartbeatTimer) return;
+  _tipHeartbeatTimer = setInterval(() => {
+    if (_maxSeenDaaScore > 0) ingestSpcTipHeartbeat({ daaScore: _maxSeenDaaScore });
+  }, TIP_HEARTBEAT_MS);
+  if (typeof _tipHeartbeatTimer.unref === 'function') _tipHeartbeatTimer.unref();
 }
 
 // ── Logging ─────────────────────────────────────────────────────────────────
@@ -694,6 +737,7 @@ async function _connect(wallet) {
   await refreshWatchedAddresses();
   _watchedRefreshTimer = setInterval(refreshWatchedAddresses, WATCHED_REFRESH_MS);
   log(`indexer: watching ${_watchedAddresses.size} addresses`);
+  _startSpcTipHeartbeat();
 
   let blockCount = 0;
   _rpc.addEventListener('block-added', async (event) => {

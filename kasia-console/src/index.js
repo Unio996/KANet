@@ -771,6 +771,11 @@ startStateReconciler();
 import { startBrokerFeeEmitCron } from './services/broker-fee-emit.mjs';
 startBrokerFeeEmitCron();
 
+// J1tn 2026-07-16 (docs/2026-07-08-backward-walk-daa-index-design.md §2.2 note①, Bettor 方向审
+// GREEN + NWT 攻击面终审 GREEN #o0056j): spc_daa_index 完整性巡检 — 9ez2u 同族根因防线。
+import { startSpcDaaIndexStaleCheck } from './services/spc-daa-index-monitor.mjs';
+startSpcDaaIndexStaleCheck();
+
 // Phase 4 (T-J2-09): broker-buy-completion-watcher — BUY 闭环, broker 代 accept 后 DM user KAS 到账
 import { startCompletionWatcher } from './services/broker-buy-completion-watcher.js';
 startCompletionWatcher();
