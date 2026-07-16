@@ -793,12 +793,13 @@ Silverscript P2SH 三方托管合约状态表（2026-06-27）。表从 v175 建�
 3. 改字段：SQLite 不支持直接改，需建新表→迁移→删旧表
 4. 新表：migrate.js 新版本，加 `IF NOT EXISTS` 保护
 
-**当前最新版本：v184（2026-07-12 pool_markets.fee_rules 列 + write-once trigger）**
+**当前最新版本：v187（2026-07-16 spc_tip_heartbeat 新表）**
 
-> 注：v125–v156 尚未在本表逐条回填（r281 scope 外）；新增 migration 接 v157 之后。v176-v183 未逐条回填（各自设计稿在 docs/ 有账），本行版本号以 migrate.js 实际为准。
+> 注：v125–v156 尚未在本表逐条回填（r281 scope 外）；新增 migration 接 v157 之后。v176-v183、v185-v186 未逐条回填（各自设计稿/COORD-LEDGER 有账），本行版本号以 migrate.js 实际为准。
 
 ## 版本历史（近期）
 
+- **v187 (2026-07-16 spc_daa_index 常驻写入器补落码)**: `spc_tip_heartbeat` 新表（单行，`id INTEGER PRIMARY KEY CHECK (id=1)` + `daa_score` + `updated_at`）。用途：relay 侧 tip 心跳落地，供 console 完整性巡检判定 `spc_daa_index` 写入器是否停更，不给 console 开 kaspad RPC 口子（Relay 唯一链上出口）。写入方：`kasia-console/src/api/ingest.js` `/ingest/spc-tip-heartbeat`（relay 每 60s `ingestSpcTipHeartbeat` 上报本地已见最大 daaScore）。读取方：`kasia-console/src/services/spc-daa-index-monitor.mjs`（5min tick 对比 `spc_tip_heartbeat.daa_score` vs `MAX(spc_daa_index.daa_score)`，落后超阈值写 `events` 表触发既有告警管道）。见 `docs/2026-07-08-backward-walk-daa-index-design.md` §2.2 note①。
 - **v184 (2026-07-12 B线落2 feeRules 上链锚定)**: `pool_markets.fee_rules` 新列（TEXT，分润规则全文 JSON，spec `docs/2026-06-22-modular-fee-split-component-spec.md` v1.3 + 设计 `docs/2026-07-12-fee-split-phase2-commit-anchor-design.md`）。**write-once**：`trg_pool_markets_fee_rules_write_once` trigger——已有值的行 UPDATE 改写/清空 = RAISE(ABORT)，NULL→值允许一次，等值 UPDATE 放行（settler 整行 UPDATE 不误伤）。写入方：`pool.js` create-v07（仅非 zk_native 且有 broker 的新市场，`buildPredictionV1InterimRules`）。读取方：`deriveMarketPredicateCommit`（三处 register 烤点）/ `computeSettlePlan`+`deriveResumePlanFromEvidence`（driver fee 叶）/ 委员侧**不读本列**（Bettor 注1：列不跨节点同步，enforce 只吃 attest 载荷携带的全文 + 链上 commit hash-bind）。陷阱：⚠ 老市场 NULL = 全走既有路径字节不动；⚠ 本列是 committed 承诺，丢失 = 该市场 fail-closed 不可 settle（标准 preset 盘可从 broker_pk + `prediction-v1-interim` 常量确定性重构，dry-run diff 报 Bettor 后写回）。
 - **v183 (2026-07-11 MAX_WALK 老盘根治)**: `spc_daa_index` + `spc_daa_index_coverage` 新表（SPC 块 DAA→hash 持久索引 + 覆盖区间防洞）。见 `docs/2026-07-08-backward-walk-daa-index-design.md`。
 - **v175 (2026-06-27 escrow_states 新表)**: `escrow_states` 新表（Silverscript P2SH 三方托管合约，15 列）。路由 escrow.js create/lock/execute 挂 verifyIngestRequest 鉴权。见「escrow_states」节。
