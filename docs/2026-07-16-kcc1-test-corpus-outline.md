@@ -37,13 +37,26 @@
 实测 `grep -l selector *.sil` 命中 5 个文件——**有 selector**：`FoldNode_sealonly.sil` / `PoolSpine_v08_agg.sil` / `PoolSpine_v08_chunk.sil` / `ProbeC_selfonly.sil` / `ShardLeaf_direct.sil`。
 **无 selector 对照组**：现行主干 `PoolSpine.sil`/`PoolSide.sil`/`PayoutShard.sil`/`CloseZkV2.sil` 均未命中——天然形成"有/无 selector"的正例对照，不需要另造。
 
-### §1.3 单/多入口(Owner 类别①)
+### §1.3 单/多入口(Owner 类别①)——已完成(grep `entrypoint function` 真实计数，非猜测)
 
-待查——需要读各 `.sil` 文件本体数入口点(function/branch 数)分类，今天只做到"文件清单"层，明天读码判定各文件入口数。
+| 文件 | entrypoint 数 | 函数名 |
+|---|---|---|
+| RootClaim | **1(单入口)** | claim_draw |
+| RefundClaim | **1(单入口)** | refund_payout |
+| FoldNode | **1(单入口)** | seal_to_root |
+| FoldNode_sealonly | **1(单入口)** | seal_to_root |
+| ShardLeaf / ShardLeaf_direct / PoolLeaf / PoolLeaf_nofold_probe | 2 | register_append + 一个终结函数 |
+| PoolRoot | 3 | close_commit, claim_draw, refund_draw |
+| CloseZkV2 / RootClose | 4 | 见文件 |
+| PoolSide | 4 | settled_via_spine, claim_winner, consumed_by_oracle_settlement, refund_market_cancelled |
+| PoolSpine / PayoutShard / PayoutShardV2 | **5(多入口上限)** | 见文件 |
 
-### §1.4 空 prefix(Owner 类别③)
+单/多入口正例已经齐了，直接用现成文件即可，不用构造。
 
-待查——需要结合 `pool-bshard-artifacts.mjs` 的 `computeSpineArtifact`/`computePoolSideArtifact` 实际调用点，找一个 prefix 为空字节串的真实/可构造案例（COORD-LEDGER 记录里"9999=free-tier 非硬墙"那条与 prefix/compute_budget 有关，需要交叉核对是否同一件事，不能想当然合并）。
+### §1.4 空 prefix(Owner 类别③)——判定条件已定位，具体命中文件待编译验证
+
+`pool-template-artifact.mjs:extractTemplateArtifact()` 第52行：`templatePrefixLen = prefix.length`，其中 `prefix = script.slice(0, sl.start)`（`sl` = silverc 编译产物的 `state_layout`）。**结构性结论：prefix 为空 ⟺ `state_layout.start === 0`**，即编译后脚本的 State 区域从第 0 字节开始、前面没有任何 opcode。哪个真实模板会触发这个条件需要实跑 silverc 编译才能确认（不属于纯读码能定的范围，明天用 `compileSil()` 对候选文件逐个跑一遍看 `state_layout.start`）——**候选优先级：单入口文件(RootClaim/RefundClaim/FoldNode)最可能命中**，因为样板代码最少。
+`COORD-LEDGER "9999=free-tier 非硬墙"` 那条查证过：与 `compute_budget` 覆盖有关，是完全不同的机制(gas/budget 阈值，非 prefix/suffix 字节结构)，**不是同一件事，不能合并**，本次核实排除。
 
 ### §1.5 covenant ID 所有权(Owner 类别⑤)
 
