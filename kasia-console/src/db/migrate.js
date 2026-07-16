@@ -5416,5 +5416,24 @@ export function runMigrations() {
     }
   }
 
+  // v185 (2026-07-16, KANet-UI, Owner终裁件⑤步骤2·Bettor #nig8da 派工): 4个疑似死端点(market/create-v06/
+  // bettor/register无版本/register-external/prep+confirm)命中计数——无access_log表+fastify logger关闭+
+  // console.log重启即截断, 没有能查历史调用记录的基础设施(结构性推断不足以支撑删代码决策)。持久化命中计数
+  // (跨重启存活, 7天观察窗到期零命中才走删除, 删前仍NWT审+确认无隐藏调用方——不冒进, 记账)。
+  {
+    const tables = sqlite.pragma('table_list').map((t) => t.name);
+    if (!tables.includes('endpoint_hit_counters')) {
+      sqlite.exec(`
+        CREATE TABLE endpoint_hit_counters (
+          endpoint_name TEXT PRIMARY KEY,
+          hit_count INTEGER NOT NULL DEFAULT 0,
+          first_hit_at TEXT,
+          last_hit_at TEXT
+        )
+      `);
+      console.log('[migrate] v185: endpoint_hit_counters 建表(4个疑似死端点7天观察窗命中计数, 件⑤步骤2).');
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
