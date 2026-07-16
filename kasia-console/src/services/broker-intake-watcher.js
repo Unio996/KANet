@@ -547,11 +547,23 @@ export async function _scanExpiredBrokerOffers() {
       }
 
       // Find linked retail_dex_orders.id
+      // 2026-07-16 J2 (Z20 10-offer 归因, Bettor #nzhtbj.4 方向GREEN): 加 'aligning','confirming' 进
+      // state 白名单——之前漏了这两态, 导致这类 order 永远查不到 link, 于是走 !order?.id 分支被误判
+      // "no retail_dex_orders link"(当失败算, 占 Z20 熔断预算+反复告警)。加回后 advanceToRefunded 会
+      // 真被调用, 其内部 Phase 1 CAS 已有的 J1 #73 Edge 1 逻辑(:434-438)会正确识别
+      // "aligning/confirming=broker 没收 user payment=NO refund needed"并走 result.noRefundNeeded
+      // 分支(:566-569, 已存在, log 一次+handled++, 不重试不告警)。零新逻辑, 只是让已有的正确处理
+      // 路径真被触达。
+      // MUST-FIX(NWT 红队, fuzzy 匹配分支 exchange_offer_id IS NULL 时的确定性吞单风险): 若同一用户
+      // 此刻同时有一条真待退款旧 order(如 awaiting_payment)和一条更晚创建的 confirming/aligning 空转
+      // order, 纯按 created_at DESC 会每次锁死选中后者→advanceToRefunded 直接 noRefundNeeded 短路→
+      // 前者永远排不上号, 静默吞单(非重试后自愈, 每 tick 结果确定性相同)。修法: ORDER BY 让"真待退款
+      // 态"优先于"confirming/aligning 态", 只有候选池里没有真待退款行时才落到 noRefundNeeded 快速路径。
       const order = sqlite.prepare(`
         SELECT id FROM retail_dex_orders
         WHERE user_kasia_address=?
-          AND (exchange_offer_id=? OR (exchange_offer_id IS NULL AND CAST(qty AS REAL) >= ? - 0.5 AND CAST(qty AS REAL) <= ? + 0.5 AND state IN ('awaiting_payment','paid','expired')))
-        ORDER BY created_at DESC LIMIT 1
+          AND (exchange_offer_id=? OR (exchange_offer_id IS NULL AND CAST(qty AS REAL) >= ? - 0.5 AND CAST(qty AS REAL) <= ? + 0.5 AND state IN ('awaiting_payment','paid','expired','aligning','confirming')))
+        ORDER BY (state IN ('awaiting_payment','paid','expired')) DESC, created_at DESC LIMIT 1
       `).get(userKasia, r.id, refundAmount, refundAmount);
 
       if (!order?.id) {
