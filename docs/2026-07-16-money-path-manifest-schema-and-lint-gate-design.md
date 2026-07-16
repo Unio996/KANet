@@ -241,9 +241,9 @@ timeout_exit:
   code_ref: "kasia-console/src/services/exchange-machine.js:581 (expireStale), :739 (releaseFunds); 调度者 kasia-console/src/index.js:239-243 (setInterval 30s, 无 kill-switch)"
 escape_exit:
   trigger: permissioned-manual
-  mechanism: "POST /api/exchange/resolve, maker_wins→completed(spendFunds)/taker_wins→cancelled(releaseFunds), 均经统一 transition() 而非 resolve 端点自行操作 fund_locks"
-  condition: "争议(disputed 态)后人工/两方共识裁决, 无独立 admin_secret 门控(靠身份对等, 非 admin tier)"
-  code_ref: "kasia-console/src/api/exchange.js:757 (resolve endpoint), :842-848 (releaseFunds/spendFunds 调用点, 双路径均走 transition 统一逻辑)"
+  mechanism: "POST /api/exchange/resolve, maker_wins→completed(spendFunds)/taker_wins→cancelled(releaseFunds)。🔴 2026-07-16 NWT 复核更正: 这条不走 transition()——exchange.js:823/827 注释自己写'disputed is terminal per TERMINAL set...transition() would refuse', resolve 端点改用直接 SQL UPDATE(:828-832)手动推进状态, 再手动调 spendFunds/releaseFunds(:842-849)复刻 transition() TERMINAL 分支的副作用, 但**遗漏了 is_fully_observed=1**(transition() 里该字段与 fund lock 释放是同一个 TERMINAL 分支绑定设置的, 见 exchange-machine.js:94-98, 手动复刻时漏了这一项)"
+  condition: "争议(disputed 态)后 maker/taker 身份对等裁决(concede-only 语义, 见下 admin_capabilities), 无独立 admin_secret 门控"
+  code_ref: "kasia-console/src/api/exchange.js:757 (resolve endpoint), :819-849 (direct SQL bypass + 手动 fund lock 副作用复刻)"
 responsible_worker:
   process_or_cron: "index.js 顶层 setInterval(30s): expireStale+checkStaleDisputes+cleanupStaleOrphanAccepts+timeoutVerifying+checkMatchedTimeout"
   code_ref: "kasia-console/src/index.js:239-243"
@@ -253,18 +253,20 @@ kill_switch_effect:
   # registerExchangeRoutes(index.js:205)和上述 setInterval 均无条件注册/运行, 没有 env 开关能关掉这条 money-path
   # (对照 4.1 z20 案例的教训: 这里反而是"没有开关"本身更安全, 不存在"关 demo 连坐关退款出口"这类风险)
 fault_domain:
-  shares_process_with: "isolated (与 broker z20 路径共用 console 主进程但业务上互不相关; exchange-machine.js 的 transition() 是所有 exchange 状态出口的单一收口点, K-16 意义上退出逻辑本身故障域集中但一致, 非分散易漏)"
+  shares_process_with: "isolated (与 broker z20 路径共用 console 主进程但业务上互不相关; normal_exit/timeout_exit 走 transition() 单一收口, 但 escape_exit/resolve 端点是独立的手动复刻路径, 见上方更正——本条目 K-16/K-10 评估以此为准, 非'全路径统一收口')"
   k16_compliant: true
 admin_capabilities:
-  - capability: "无独立 ADMIN_SECRET 门控——resolve 端点未见 checkAdminSecretTier 调用(需 NWT 复核确认无遗漏), 裁决靠 maker/taker 身份对等而非 admin 权限"
+  - capability: "身份对等门控(非 admin-secret 体系, 非'零门控')——resolve 端点强制 relay.address 必须等于 offer.maker 或 taker(exchange.js:778-784), concede-only 语义(只能自认输不能宣判对方输), 防误传"
     admin_secret_var: null
     risk_tier: none
 required_tests:
-  - test_file: "kasia-console/test-framework/cases/exchange/ (待确认具体 fund_lock 生命周期覆盖用例)"
+  - test_file: "kasia-console/test-framework/cases/exchange/ (待确认具体 fund_lock 生命周期覆盖用例, 建议补一条覆盖 disputed→resolve 后 is_fully_observed 是否置位的回归用例)"
     covers: normal_exit
 ```
 
-**这条的价值**: ①与 4.1 z20 互补覆盖 exchange 协议的另一个 KAS 锁定入口(直接 publish, 非 seeder 中转)②验证发现 transition() 是一个**单一收口的退出机制**——所有终态(completed/cancelled/timed_out/disputed→resolve 后)都统一走同一段 fund lock 释放/花费逻辑(exchange-machine.js:90-103), 这是比 4.1/4.2 两个案例更干净的 K-10 范式, 值得作为"好例子"对照(此前 NWT 4.1/4.2 两个案例都是暴露问题, 本条补一个"设计对了"的正面参照)③`kill_switch_effect.env_var=null` 实测确认——这条 money-path 目前没有任何 env 开关能关闭, R-MANIFEST-KILLSWITCH-SAFE 规则对它天然不适用(没有开关就没有"关错"的风险面)。
+**这条的价值(2026-07-16 NWT 复核后更正, 撤回"正面范例"框定)**: ①与 4.1 z20 互补覆盖 exchange 协议的另一个 KAS 锁定入口(直接 publish, 非 seeder 中转)②**原稿声称 transition() 是"单一收口退出机制"的正面范例, 已被 NWT 读码推翻**: normal_exit/timeout_exit 确实统一走 transition(), 但 escape_exit(resolve 端点)因 disputed 是 TERMINAL 集合成员、`transition()` 会拒绝, 改走直接 SQL UPDATE 手动复刻 fund lock 副作用, **遗漏了 `is_fully_observed=1`**——这其实是暴露了第三个真实缺口(与 4.1/4.2 同类: K-10"单一收口"设计意图在此路径未落实), 且与历史 S9 fund_lock 泄漏教训(trade-protocol-filter.js 旧代码同款 direct-SQL-bypass-transition 反模式)同族, 只是这次手动复刻没漏资金本身(只漏了一个审计字段, 非活跃 bug, 全库 grep 确认无查询依赖 `is_fully_observed` 做 WHERE 过滤)③`kill_switch_effect.env_var=null` 实测确认——这条 money-path 目前没有任何 env 开关能关闭, R-MANIFEST-KILLSWITCH-SAFE 规则对它天然不适用④admin_capabilities 原写"无门控"描述不准, 已更正为"身份对等门控(concede-only), 非 admin-secret 体系但非零门控"，防未来 R-MANIFEST-ADMIN-TIER-MATCH 规则误读。
+
+**后续小卡(不阻塞 manifest 本身落地, NWT 建议, 未落码——报备待 Bettor/NWT 排期)**: resolve 端点(exchange.js:819-849)改走 `transition()` 或至少补上 `is_fully_observed = 1`, 收敛 escape_exit 与 normal_exit/timeout_exit 到同一个收口点, 真正落实 K-10。
 
 **读码时顺带发现并直接改正的既有条目位置错误**:
 §4.1 `z20-broker-kas-refund` 的 `escape_exit.code_ref` 原写"kasia-console/src/api/pool.js (z20-circuit-broken 相关端点)"——实读码确认这两个端点实际在 `kasia-console/src/api/admin-dedup.js:131`(GET /api/admin/z20-circuit-broken)+`:138`(POST /api/admin/clear-z20-circuit), 不在 pool.js。纯位置引用误差, 逻辑描述本身准确, 已在本次改动里直接更正(见上方 §4.1 `code_ref` 字段+ `admin_capabilities` 注释)。
