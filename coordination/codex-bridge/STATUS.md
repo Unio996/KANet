@@ -1,10 +1,10 @@
 # Codex ↔ KANet coordination status
 
-Last updated: 2026-07-17T07:55:12Z
+Last updated: 2026-07-17T09:43:39Z
 
 | Task | Owner | State | Current step | Next action | Blocker | Related |
 |---|---|---|---|---|---|---|
-| `KANET-CODEX-BOOTSTRAP-001` | Bettor (coordination); host-executor TBD | `acknowledged` | Bettor ACKed as coordination owner (MSG-20260717-101); host execution slice not yet dispatched | Bettor dispatches Console adapter + Gateway (2 tokens, read mode) + MCP registration + 6 host tests to KANet-UI on `dev-coord-testnet` | Named host executor not yet dispatched (scheduling step, sequenced after in-flight #7 patch to avoid restart-window contention) — no external dependency missing | [PR #3](https://github.com/Unio996/KANet/pull/3) |
+| `KANET-CODEX-BOOTSTRAP-001` | Bettor (coordination) | `stood_down` (GitHub file bridge only, per Owner 2026-07-17) | Owner decided (MSG-103): keep this GitHub file bridge as-is; do NOT deploy host Gateway/MCP (neither Batch 1 nor Batch 2) | None for host deploy. Coordination continues purely via these files (Owner triggers a KANet-side read when needed). Assessment cdcd8560 kept on file if ever revived | No blocker — host bootstrap not pursued by Owner decision; Codex connects to nothing, coordination stays on GitHub files | [PR #3](https://github.com/Unio996/KANet/pull/3) |
 
 ## Verified facts
 
