@@ -220,6 +220,15 @@ Owner 元问题:写进文档的铁律(CLAUDE.md 接位 SOP 第5条"设计前查�
 
 ---
 
+## 🔴🔴 治本卡(Owner 2026-07-17 12:45 批"治表没治本"后正式立·不再拖)
+
+> **起因**: Owner"等结算结果+为什么反反复复+仅治表没深挖设计缺陷没治本"。三方(Bettor dig 证据+J2 机制+NWT 横向串联)深挖出**两层真根因**, 非孤立 bug。
+
+- 🔴 **治本卡①: bshard-settle-daemon 系统性补齐 v0.6 恢复层**(owner=J2 settler 域, reviewer=NWT): **证据**(Bettor grep dig): bshard-settle-daemon.mjs(923 行, 所有真实 v0.7 盘走它)是 v0.6 settler"复制分叉"独立路径, v0.6 每加恢复机制没同步——v0.6 有 dispatchRefund×70/handleRefunding×9/recapture/fallback×24/resurrect/reconcile; **bshard 里 recapture=0/dispatchRefund=0/handleRefunding=0/fallback=0/resurrect=0**(只 retry×7)。**逐条核对 v0.6 每个安全/纠错机制→bshard 有无对应→补齐**, 非踩一个补一个(side_lock_daa NULL=第三实例, 前两=dispatchRefund/handleRefunding)。配 [[reference-dispatchrefund-handlerefunding-v06-only-no-bshard-equivalent]]。
+- 🔴 **治本卡②: TOCTOU 族全系统识别**(owner=NWT 攻击审, reviewer=Bettor): NWT 横向串联今日四 bug(boot 派发不验证/pidfile 无差别杀/payload 零分隔/side_lock 剪裁懒补)=**同一设计缺陷类型**: 系统多处"假设数据从写入到消费之间一直有效, 却无机制验证"——中途被静默篡改(pidfile 删/payload 注入)或失效(剪裁/reorg/mempool)。**系统识别所有'假设数据有效未验证'点**, K-17(剪裁前捕获焊机器门禁)是第一个治本(已设计 GREEN+并宪法, 实现待落码)。
+- **诚实时间差(对 Owner)**: 治本根因(K-17)今天刚深挖+设计 GREEN+并宪法, 但实现没落码——今天时间耗在 H2/S1/supervisor 周边。demo(手动 recapture)=短期证明结算能跑, 非治本。
+- **demo 驱动中**: 现有 21 verifying 盘全 side_lock_daa NULL 积压族(剪裁点下)修不了→新建短 deadline 盘(tip+8000DAA≈15-20min 到期)+YES/NO 下注→J2 手动 recapture(finality 门)→到期→结算→赢家赔付。3mzoh(ddl 63.4M=2 天后)不能用, 已驱动建短 deadline 新盘。
+
 ## ESCALATIONS / 待 Owner 裁
 - ✅ **captureSideLockDaa 一次性捕获结构缺口——已根治(2026-07-12 销账 by Bettor)**: 675f5b88 补 indexer-miss 回走 fallback+approxDaaHint 锚点(a4343 大考实弹逼出并当场根治,tick 内自动补捕获=自愈),58128742/58128844 byte-exact 首考实证。原挂账见 archive。
 - 🔴 **daemon settle_failed UTXO timing retry（线14 首次遇·2026-06-30）**：mf0o4 首轮 settle_failed 因 TX 入 kaspa_tx_log ~4s 后 getUtxosByAddresses 仍返 0（UTXO set delay 或 block 孤块）。当前行为=立即标 settle_failed → 需 operator 手动 reset。**修法**：daemon settle_failed 路改为重试 N 次（如 3×10s poll）再标死·否则公测高频下会产生 operator 维护负担。域=KANet-UI·不急阻塞·建议首批 spot-check 后做。
