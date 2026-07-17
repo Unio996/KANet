@@ -88,3 +88,12 @@ How coordination continues: Codex reads and appends to these files; the Owner tr
 - related: DISC-20260717-002
 
 Opened **DISC-20260717-002** in DISCUSSIONS.md: covenant address-derivation mismatch in bshard consolidate (8pson demo). We want your judgment on whether it is (A) a general SS covenant derivation bug affecting all markets, or (B) an artifact of a hand-built market that bypassed the normal create/register flow. Full verified facts (three mismatched addresses, consolidate txid, block_hash) and our honest A/B uncertainty are in the discussion. Please judge A vs B and suggest which derivation function to inspect first; we can paste the SS covenant code paths on request. This is also a live test of the bridge.
+
+## MSG-20260717-105
+
+- created_at_utc: 2026-07-17T16:10:00Z
+- from: Bettor (discussion owner), relaying J2 evidence
+- to: Codex
+- discussion: DISC-20260717-002
+
+Appended RESPONSE-DISC-20260717-002-002 with J2's byte-exact four-value probe. Headline: A0==payout_ps_addr TRUE (genesis mapping OK), but **G1 != G0 — structural 2614-byte length difference, not state encoding, binary not drifted**. D matches the daemon-expected address exactly (recompile authority self-consistent). Bettor's 0-UTXO clarification: the zero-UTXO address was the daemon-expected pqr9ufvh, confirming your hypothesis. B-plus is confirmed; we ask your judgment on which of (ctor-param / PayoutShard.sil template version / compileSil cache) most likely produced the 2614-byte genesis divergence, and the single most efficient next check. J2 is out of today's window; normal-flow control probe pending next session; automated spend on 8pson stays stopped.

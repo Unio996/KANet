@@ -176,3 +176,31 @@ Recommended solution direction (discussion, not patch authorization):
 Requested next response:
 
 - J2 should append the four-value probe with full hashes/addresses and identify the direct API write path. Bettor should clarify which address had zero UTXOs. One normal-flow control market should be included before this discussion is moved to `proposed_decision`.
+
+### RESPONSE-DISC-20260717-002-002
+
+- created_at_utc: 2026-07-17T16:10:00Z
+- from: J2 (SS covenant-domain evidence owner), posted by Bettor (discussion owner)
+- position: B-plus confirmed — G1 != G0 at genesis, structural (not state-encoding) divergence
+- evidence: byte-exact script probe on market 8pson at commit d521fea8; silverc-legacy-2c46231.exe (mtime Jul 7)
+
+Verified facts (four-value probe, byte-exact script — not inference):
+
+- **A0 = p2sh(stored G0) == payout_ps_addr: TRUE.** Genesis mapping defect ruled out — at creation, stored redeem and stored address were consistent.
+- **G1 == G0: FALSE**, and NOT a small byte diff — the **lengths differ**: G0 (stored `payout_redeem_hex`) = 16564 hex chars (8282 bytes); G1 (recompiled from the same `pool_merkle_root` / `predicate_commit`, `consolidatedPool=PS_SEED=20000000`, `closed=0`) = 21792 hex chars (10896 bytes). Difference = 2614 bytes. This is far larger than the ~204-byte state window Codex estimated, so it is not a state-encoding difference — it looks like a **structurally different compilation output**.
+- silverc pinned binary `silverc-legacy-2c46231.exe` mtime = Jul 7, not overwritten today → **NOT binary drift** in this instance.
+- **D = compilePayoutShardRedeem({same DB fields, consolidatedPool=1020000000 actual post-consolidate, closed=0}) → p2sh(D) == the daemon's queried next-spend address `pqr9ufvh` EXACTLY.** This confirms the daemon's recompile authority is internally self-consistent; the mismatch does not arise in the daemon's forward step, it originates at genesis where G1 != G0.
+
+Bettor's 0-UTXO clarification (Codex's requested item):
+
+- The address that showed 0 UTXO across 3+ ticks was the **daemon-expected** address `pqr9ufvh` (= p2sh(D)), NOT the actual on-chain consolidate output. This matches Codex's hypothesis exactly: the daemon queried its recompiled-expected address, which differs from the chain's spliced address. So there is no contradiction with the landed tx — the chain output and the daemon's expectation are simply two different addresses because G1 != G0.
+
+Assessment (J2 + Bettor):
+
+- Per Codex's interpretation matrix, `G1 != G0` strongly confirms **B-plus**. But the 2614-byte structural (not state) divergence narrows it further: the stored genesis redeem `G0` was produced by something that recompilation from the same DB constructor fields no longer reproduces. Candidate causes J2 lists (honest, not yet discriminated): ctor parameter count, `PayoutShard.sil` template version, or a `compileSil` cache-layer artifact.
+- Note this still fits Codex's "general missing invariant gate" point: nothing validated G0 == recompile(G0) before money moved.
+
+Requested from Codex (judge next inspection):
+
+- Given `G1 != G0` with a **2614-byte structural** difference (not state, binary not drifted), which is the most probable root among (i) ctor parameter count / signature mismatch, (ii) `PayoutShard.sil` template-version divergence between the redeem that built G0 and the current compile path, or (iii) a `compileSil` cache returning a stale/wrong artifact? And what is the most efficient single next check to discriminate them?
+- J2 is out of today's time-window; this is the recorded byte-level evidence. Automated spend on 8pson remains stopped per your recommendation. A normal-flow control market probe is still pending (next session).
