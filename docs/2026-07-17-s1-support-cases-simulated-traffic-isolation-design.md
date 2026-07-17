@@ -23,16 +23,28 @@ payload 下游净化, `8446d4fb`+`b84f5ebd`, NWT 已 GREEN)打的是**同一条�
 - 新文件 `kasia-console/src/lib/test-harness-marker.mjs`, 仿 `admin-secret-tier.mjs` 同款
   fail-closed 风格但物理独立(不 import/复用 `checkAdminSecretTier`, 避免"改一个连坐另一个"):
   ```js
+  import { timingSafeEqual } from 'crypto';
+
   export function checkTestHarnessToken(request) {
-    const secret = process.env.TEST_HARNESS_TOKEN;
     const provided = request.headers['x-test-harness-token'];
     if (!provided) return { isSimulated: false };           // 没带 header = 正常生产请求, 不受影响
-    if (!secret || provided !== secret) {
-      return { ok: false, code: 403, error: 'test harness token 未配置或不匹配' };
-    }
-    return { isSimulated: true };
+    const secret = process.env.TEST_HARNESS_TOKEN;
+    if (!secret) return { ok: false, code: 403, error: 'test harness token 未配置' };
+    try {
+      const a = Buffer.from(provided), b = Buffer.from(secret);
+      if (a.length === b.length && timingSafeEqual(a, b)) return { isSimulated: true };
+    } catch { /* fall through to reject */ }
+    return { ok: false, code: 403, error: 'test harness token 不匹配' };
   }
   ```
+  **2026-07-17 NWT 红队 MUST-FIX 折入**: 比较逻辑改常量时间(`crypto.timingSafeEqual`), 不用
+  `provided !== secret` 直接比较——同 `54dd60d2`(NWT FINDING-1, `ingest-auth.js`
+  `isValidIngestSecret`)修过的同一类洞: 字符串直接比较存在时序侧信道, 攻击者可逐字节猜出正确
+  值。风险不是空对空: **猜中这把 token = 能让一条真实钱类升级工单的 `is_simulated` 被标记
+  `true`, 从而在 `owner-bot.mjs` 转发环节被跳过(§3 选 (a))**——是"抑制升级"类攻击, 跟 `#7`
+  (伪造内容混进升级)是同一条链路方向相反的姊妹攻击, 必须按同等严重度堵。写法逐字抄
+  `ingest-auth.js:14-15`(先比长度再 `timingSafeEqual`, 长度不等时直接 `false` 不进
+  `timingSafeEqual`, 避免抛异常)。
 - **Bettor 承重点①(fail-closed)**: 生产环境未配置 `TEST_HARNESS_TOKEN` 时, 任何带
   `X-Test-Harness-Token` header 的请求一律 403 拒绝(不静默忽略 header、不当成普通请求放行）
   ——"想标记为模拟流量但环境不支持" ≠ "那就当真实流量处理", 必须显式拒绝到调用方(S1 测试代码
@@ -100,18 +112,35 @@ payload 下游净化, `8446d4fb`+`b84f5ebd`, NWT 已 GREEN)打的是**同一条�
    `false`, 叠加钱类信号则 `true`——同今日 `_kanetui_classifier_failclosed_test.mjs` ⑥的组合
    断言)。
 4. `support_no_broadcast_leak_negative.test.mjs`(**新增, NWT 承重点直接对应的 regression**)——
-   跑一条会触发 `escalated:true` 的模拟工单, 断言 `dev-coord-testnet` 频道在此工单
-   `created_at` 之后**没有**新增任何包含该 `ticket_id` 前 8 位的消息(反向断言隔离机制真的
-   生效, 不是只测"我以为它不转发"）。
+   **2026-07-17 NWT 红队 MUST-FIX 折入(防自证 regression 假阳性)**: 原设计只断言"没有新增消息",
+   但没保证测试运行窗口真的覆盖了 `pollFeedbackEscalations` 的 tick(`FEEDBACK_ESCALATION_POLL_MS`,
+   默认 15000ms)——如果断言跑得比下一次 poll 还早, "没有消息"这个结果无论隔离逻辑对不对都会
+   成立(压根没到轮询点, 不是过滤生效了), 这是"证明不存在需要先证明有机会存在"的经典测试陷阱。
+   改为两步:
+   (a) **反例(隔离目标)**: 提交一条 `is_simulated:true` 的钱类升级工单, 记录提交时刻;
+       显式等待 ≥ 1 个完整 `FEEDBACK_ESCALATION_POLL_MS` 周期(用 `wait_for_db_row` 或等效的
+       轮询等待 action, 不用固定 `sleep`——等够时间但不多等), 之后断言 `dev-coord-testnet`
+       在提交时刻之后**没有**新增包含该 `ticket_id` 前 8 位的消息。
+   (b) **正对照(排除"轮询器根本没在跑"这种更荒谬的假阳性来源)**: 在同一个 case 里紧接着提交
+       一条**不带** `X-Test-Harness-Token`(即真实非模拟路径)的钱类升级工单, 用同样的等待窗口,
+       断言这条**确实**出现在 `dev-coord-testnet`(复用 `#7` 探针已验证过的围栏渲染断言即可)。
+       (a)(b) 必须在同一次 case 运行里各跑一次, 用同一个等待窗口——如果轮询器没在跑, (b) 会先
+       失败, 不会让 (a) 侥幸绿灯。
 5. `support_test_harness_token_failclosed.test.mjs`(**新增, Bettor 承重点①对应的 regression**)
    —— 直接调 `checkTestHarnessToken` 纯函数(不测完整 HTTP 栈也可以, 拆成纯函数就是为了单测
-   方便): 环境变量为空时任何 header 都返回 `ok:false code:403`; header 缺失时返回
-   `isSimulated:false`(视为普通请求, 不报错——只有"带了 token 但校验不过"才 403, "根本没带
-   token"是合法的生产请求路径)。
+   方便), 覆盖三条独立分支(**2026-07-17 NWT 非阻塞建议折入**: 原设计只写了两条, 漏了"env 已
+   配置但 token 值错误"这条独立于"env 未配置"的 403 成因, 同一个判定表达式里的两条不同代码
+   路径, 必须分开断言防止将来改坏比较逻辑时现有 case 测不出来):
+   - header 缺失 → `isSimulated:false`(视为普通请求, 不报错——"根本没带 token"是合法的生产
+     请求路径);
+   - `TEST_HARNESS_TOKEN` 环境变量未设置(空/undefined)、但 header 带了任意值 → `ok:false
+     code:403`;
+   - `TEST_HARNESS_TOKEN` 已设置、header 带了一个存在但**不匹配**的值 → `ok:false code:403`
+     (这条独立验证 `timingSafeEqual` 分支本身能正确判否, 不只是"env 没配"这条路径能拦)。
 
 ## §5 DoD
 
-- 5 条 case 全绿(含 2 条新增的隔离机制自证 regression)。
+- 5 条 case 全绿(含 case4 反例+正对照双断言、case5 三条独立分支断言)。
 - `docs/DATABASE.md` 补 `execution_states.action_details.is_simulated` 字段说明。
 - `kanet.env.example`(如有)或部署文档注明 `TEST_HARNESS_TOKEN` 只在测试环境配置, 生产不配置
   = 隔离机制天然对生产环境的意外触发 fail-closed。
