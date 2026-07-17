@@ -1,6 +1,6 @@
 # jepu1 陈签名重签修复设计 v0.1(含第三签名站点补丁)
 
-> **Status**: CURRENT(v1.1 — Bettor 方向审 GREEN #pf06l9, 顶格 gate"WC 盘路径分离"已 definitively 坐实(§1.5)+第四站点候选记录(§1.6); 待 NWT 红队 + Bettor/Owner 签发——money-path, 移动 188KAS)
+> **Status**: CURRENT(v1.2 — NWT 红队 GREEN-with-1-should-note(751eaa07), should-note 已采纳: 步2 改软失效(UPDATE event_type)弃硬 DELETE, 见 §2 步2; 剩余 gate: 步1 落码 diff 审 → §4-0 locality SQL → 手术单 Bettor 过目 → Owner 签发(188KAS))
 
 - 作者: J1tn(sighash 域, 6/28 c8188d98 co-diagnose 参与者)· 2026-07-18
 - 派工: Bettor #peri6h(判据数据坐实后授权设计)· 行号锚点 commit: `41ee726a`
@@ -34,11 +34,11 @@
 - `trade-protocol-filter.js` `handlePoolOracleTxSignReq`: 把 `toSettleSafeJsonTxHex` helper 从 `bettor-prediction-voter.js` 提到共享位置(或 export 复用, 反增殖单源), :571-575 改为转 safe_json + `safe_json:true`——与 c8188d98 两站点逐字节同款处理。
 - 影响面: 只有该 handler 的 sign 命令构造, relay/build 路 0 改(同 c8188d98 口径)。
 
-### 步2(数据手术·审计留档): 清 jepu1 陈签名行
+### 步2(数据手术·审计留档): 软失效 jepu1 陈签名行(v1.2 采纳 NWT should-note, 弃硬 DELETE)
 
-- **前提确认后(§4-0 全委员 local canonical)= 单节点手术**: canonical console.db 上, 精确 5 行(event_type='pool_oracle_tx_sig' AND market_id=jepu1, 按 id 列举)——先快照(SELECT * 存档进本设计稿附录/审计文件), 后 DELETE。同款先例: 7/17 test-fixture 清理(快照+精确id删+审计记录)。
-- 双重目的: ①解开收签侧 first-wins(无陈行可挡); ②解开 voter 侧幂等 skip(本地查无 own 签名 → 愿意重签)。
-- **若 §4-0 查出有跨节点委员**: 该节点同款手术(快照+精确删), 手术清单逐节点列出后才执行——不做"猜大概只有一台"。
+- **手术动作 = UPDATE 而非 DELETE**: 精确 5 行(按 id 列举)`UPDATE chain_events SET event_type='pool_oracle_tx_sig_superseded' WHERE id IN (...)`——收签器(pool-market-settler.js:2852)与 voter 幂等 skip(trade-protocol-filter.js:563)都按精确 `event_type='pool_oracle_tx_sig'` 过滤, 改名即**双解锁**, 效果与 DELETE 等价。
+- 软失效相对硬删的三优势(NWT 发现的两处 UI 消费者由此零洞): ①timeline(pool.js:3435)物理行仍在, 可追溯性无洞; ②可逆(改回原 type 即完全还原, 出错兜底); ③快照要求降级为"记录 5 个 id+原 type"即可(行本身没销毁)。签名进度计数器(pool.js:3181)在重签窗口内显示 0/5 属预期过渡态(NWT 判"不算 bug"), 执行时频道知会一句防误读。
+- **前提确认后(§4-0 全委员 local canonical)= 单节点手术**; 若查出跨节点委员, 该节点同款 UPDATE(手术清单逐节点列出后才执行——不做"猜大概只有一台")。
 
 ### 步3(执行·复用现有机制零新逻辑): one-shot 重发 sign_req
 
