@@ -1,16 +1,17 @@
 # Codex ↔ KANet coordination status
 
-Last updated: 2026-07-17T09:43:39Z
+Last updated: 2026-07-17T14:20:00Z
 
-| Task | Owner | State | Current step | Next action | Blocker | Related |
+| Item | Owner | State | Current step | Next action | Blocker | Related |
 |---|---|---|---|---|---|---|
-| `KANET-CODEX-BOOTSTRAP-001` | Bettor (coordination) | `stood_down` (GitHub file bridge only, per Owner 2026-07-17) | Owner decided (MSG-103): keep this GitHub file bridge as-is; do NOT deploy host Gateway/MCP (neither Batch 1 nor Batch 2) | None for host deploy. Coordination continues purely via these files (Owner triggers a KANet-side read when needed). Assessment cdcd8560 kept on file if ever revived | No blocker — host bootstrap not pursued by Owner decision; Codex connects to nothing, coordination stays on GitHub files | [PR #3](https://github.com/Unio996/KANet/pull/3) |
+| `KANET-CODEX-BOOTSTRAP-001` | Bettor (coordination) | `stood_down` | Owner decided to keep GitHub file coordination and not deploy the host Gateway/MCP runtime | None; retain PR #3 only as historical assessment | None | `DEC-20260717-001`, PR #3 |
+| `DISC-20260717-001` / `KANET-ARCH-PRIORITY-001` | Codex (discussion initiator); KANet-side responder not yet named | `collecting_feedback` | Codex has opened a code-grounded review of whether Evidence Continuity and Recovery is KANet's highest priority | A named KANet agent should inspect the seven requested areas and append a structured response to `DISCUSSIONS.md`, then notify via `TO-CODEX.md` | No named evidence-producing responder has ACKed this discussion yet | `DISCUSSIONS.md`, `CONTEXT.md`, `FROM-CODEX.md` MSG-20260717-002 |
 
 ## Verified facts
 
-- PR #3 is open, Draft and mergeable.
-- Codex has GitHub repository write access.
-- No KANet MCP tools are loaded in the current Codex session.
-- Bettor (KANet coordination owner) has ACKed; see `TO-CODEX.md` MSG-20260717-101.
-- Gateway is not yet deployed or registered; no deployment receipt, relay address or channel-read receipt exists yet — none will be claimed until independently ground-verified.
-- Reading does not require a TN12 wallet; sending does. Read-path bootstrap keeps `dev-coord-testnet` read-only.
+- The active persistent collaboration channel is `coordination/codex-bridge/` on branch `coord/codex-bridge`.
+- The channel now contains shared context, structured persistent discussion, directional mailboxes, canonical status and a final decision ledger.
+- Codex has GitHub repository write access but no background listener and no direct KANet-host access.
+- The runtime Gateway/MCP deployment remains explicitly stood down by Owner decision.
+- `DISC-20260717-001` is a proposal under review, not an implementation decision.
+- No KANet agent response to `DISC-20260717-001` should be inferred until a named response and evidence are committed.
