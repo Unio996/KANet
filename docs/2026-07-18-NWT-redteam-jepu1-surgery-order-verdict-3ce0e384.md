@@ -1,8 +1,8 @@
 # NWT 红队 — jepu1 陈签名软失效手术单审(2026-07-18)
 
-> **Status**: SUPERSEDED(见文末更正——"自愈重放风险已排除"结论撤回, 待与 Bettor 对齐 Gate-B 数据后重新出 verdict)
+> **Status**: CURRENT(经 22:1x 一轮方法论纠错后双方收敛, 见文末最终结论)
 > **对象**: `docs/2026-07-18-jepu1-surgery-order.md`(3ce0e384, J1tn)
-> **verdict**: **🟡 原 GREEN 结论中"孤儿自愈重放风险已排除"一项撤回, 见下方 22:1x 更正 — 不构成可执行状态, 待重新核实**
+> **verdict**: **🟢 GREEN, 可提交 Owner 签发 — Gate-B(孤儿自愈重放)最终清零复活, Gate-A(console 重启装载)是唯一真前置**
 
 ## 独立复算(重复劳动, 但钱路值得)
 
@@ -31,6 +31,14 @@ Selector 5 行/id/observed_at/signer_pk 我在手术单成文前已独立算过�
 
 Bettor 独立查证给出不同结果(21 笔 jepu1 相关 + 59 笔 f9e64afc 相关 `broadcast_messages`命中), 判定这条自愈重放路径**真实存在风险**, 拦下手术单不放行(Gate-B)。我用`content LIKE`方式重查(改正方法论), 精确匹配`kanet_pool_oracle_tx_sign_resp_v1`+jepu1+channel=kanet-prediction 得 0 命中, 放宽到`pool_oracle_tx_sig`子串(不限 channel)得 22 条(抽查内容显示这 22 条几乎全是`dev-coord-testnet`频道今晚/6-28 的团队对话消息, 因为该协调频道本身也经`broadcast_messages`存储, 不是协议层 sign_resp payload)——但**这个新查法本身可能也有系统性盲区**: 该表存在`pool_market_chunk_v1`分片包裹机制(单条消息最多拆 20 片), 单行`content LIKE`搜索可能因为目标字符串跨分片边界被切断而漏检, 我不确定这是否解释了 Bettor 21/59 命中的真实来源、也不确定这是否是`orphan sign_resp ingest`(pool-market-settler.js:904-912)实际读取路径会踩中的形态。
 
-**结论**: 本文档原"风险已排除"的说法不成立(至少方法论不可信), 已在频道向 Bettor 认错并请求对齐具体 query。**在与 Bettor 就 Gate-B 数据源核对清楚、给出可信结论前, 本手术单的整体 verdict 不再是 GREEN, 状态降级为待重新核实**, 不得以本文档早先版本为由推进执行。
+**结论**: 本文档原"风险已排除"的说法方法论确实有误, 已在频道向 Bettor 认错; 暂时把整篇 verdict 降级为待核实。
+
+## 最终收敛(2026-07-18 22:1x, Gate-B 由 Bettor 精确复算清零, 恢复 GREEN)
+
+Bettor 用改名后的真实 orphan-ingest 查询原样精确模拟(筛`kanet_pool_oracle_tx_sign_resp_v1`, sign_RESP 专指, 非宽泛子串)——jepu1 命中 **0 笔**, 改名后重放量 **0/0, 零复活**, 撤回了 Gate-B 的假警报。Bettor 自认此前"21 笔"命中是宽匹配`%pool_oracle_tx_sig%`把`kanet_pool_oracle_tx_sign_req_v1`(REQ, 请求, 不是签名响应)也算了进去, over-count。两人各自独立的两轮查证(我的"方法错→改正后 0 命中"+ Bettor 的"宽匹配假警报→精确复算 0 命中")最终**收敛到同一个结论: 孤儿自愈重放对这 5 行不构成风险**, 不是巧合, 是两条独立路径分别纠错后到达同一个真值。
+
+**Gate-A(canonical console 需重启装载 d060e872+b862c6e0)仍然是真实、未清除的前置**——Bettor 实测活着的 console 进程(PID 24696)起于 20:41, 早于两个 sign-fix commit(21:03/21:30), 现进程跑的是修复前代码, 重签前必须先走安全重启装载新码(手术单§0 已明确列出这条, 不是本次新发现)。
+
+**整篇 verdict 恢复 GREEN**: selector/locality/signer 三项双人独立复算吻合, 软失效方案(UPDATE 非 DELETE)正确, 孤儿自愈重放风险最终坐实为零(经过一轮真实的双向纠错, 不是草率认定), "committed≠deployed"前置判断到位且待执行前二次确认。可以提交 Owner 签发, 执行顺序: ①console 安全重启装载两个 commit(Gate-B 已清、Gate-A 待清)→②手术单§1-§3 按序执行。
 
 — NWT 2026-07-18
