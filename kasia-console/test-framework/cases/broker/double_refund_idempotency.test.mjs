@@ -13,6 +13,14 @@ import { freshTestPeer, relayAddr, relayId } from '../../lib/peers.mjs';
 import { randomUUID } from 'node:crypto';
 
 const peer = freshTestPeer('double-refund-' + Date.now());
+// J2 2026-07-17 (③ test-* 残留 8 行清理小卡, Bettor #omlqo0 派工): setup_simulate_paid_offer
+// 直接 INSERT 到生产 console.db(非隔离测试库), 但收尾只 cleanup_peer(仅删 messages)——
+// exchange_offers + retail_dex_orders 两行从没被删过。每跑一次这个 P0 regression 测试就永久
+// 泄漏 1 行 exchange_offers(id='test-'+8hex)到生产表, 被 Z20 sweep(broker-intake-watcher.js)
+// 当真 offer 扫到, 每 tick 重试直到熔断, 进程重启后熔断态清零又重新刷一轮告警。落码前实测确认
+// 8 个泄漏行的 offer_id 格式/fakeTxId 生成方式/give_amount=87.9/want_amount=0.034/market_key
+// 逐字节对上本文件这条 setup 步骤——非猜测。补 teardown, 不改 setup/assert 逻辑。
+const offerId = 'test-' + randomUUID().slice(0, 8);
 
 export default {
   id: 'double_refund_idempotency',
@@ -28,7 +36,7 @@ export default {
     {
       action: 'setup_simulate_paid_offer',
       peer_addr: peer,
-      offer_id: 'test-' + randomUUID().slice(0, 8),
+      offer_id: offerId,
       qty_kas: 88,
       give_amount: 87.9,  // post-fee
       // mark exchange_offers state='expired' + retail_dex_orders state='awaiting_payment' + refund_tx_hash NULL
@@ -93,5 +101,9 @@ export default {
 
     { action: 'reset_send_kas_mock' },
     { action: 'cleanup_peer', peer_addr: peer },
+    // teardown for setup_simulate_paid_offer's direct INSERTs (see top-of-file note) — by exact
+    // offerId only, never a LIKE pattern, so this can never touch a real user's row.
+    { action: 'exec_sql', sql: `DELETE FROM retail_dex_orders WHERE exchange_offer_id = ?`, params: [offerId] },
+    { action: 'exec_sql', sql: `DELETE FROM exchange_offers WHERE id = ?`, params: [offerId] },
   ],
 };
