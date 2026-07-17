@@ -60,6 +60,16 @@ const MAX_BETTORS_L4 = 50;                       // PoolSpine.sil L13 cap
 // 多叶子, NWT 澄清-2)。到顶后 register-v07/prep 拒绝新押注(NO TX NO STATE, 未付款前拒·非退款), 已存在的
 // 押注不受影响。#18 rolling 落地后此软顶可解除/抬高。
 const MARKET_MAX_LEAVES_G3 = 900;
+// 2026-07-18 KANet-UI(Bettor gate A派工): 世界杯坏盘临时展示层黑名单——V2 covenant家族(现成
+// cancelMarketLive硬编码V1-only, 退款fail-closed拦下)+标题跟真实赛程不符, 详细理由见下面
+// /api/pool/markets/available 里的注释。这是一份人工维护的临时列表, 不是长期机制——V2家族
+// coherence-gate治本落码后应该撤掉这条(或换成读covenant_family列自动判断, 见治本卡①)。
+// 注: kr5l4/j34vb(剪裁坏盘)当前status=verifying, 不在本端点WHERE protocol_status='pending_bettors'
+// 范围内, 天然不会展示, 不需要放进这份名单(查过数据库确认, 非假设)。
+const HIDDEN_BROKEN_MARKET_IDS = new Set([
+  'ext-pool-v07-1784236336840-3mzoh',  // "Will France advance?" V2/8282字节, cancel今晚做不了
+  'ext-pool-v07-1784315274654-ysgpv',  // "Will Spain advance?" 空盘0行, 同占用760517 conditionId
+]);
 // 5/28 Owner 钦定: 押注 softcap 拆除 (= 之前 4 KAS testnet 限制阻 UI form 真用户测试). 改 Infinity = 0 cap.
 // Per-market math guards (= storage mass / oracle fee floor) still enforce at L1 console + SS contract.
 // Env override 保留可 ops set finite cap if needed.
@@ -2908,6 +2918,13 @@ export async function registerPoolRoutes(fastify) {
         _conditionId: r.outcome_condition_id || null,
       };
     })
+      // 2026-07-18 KANet-UI(Bettor gate A派工, #pcbdgb/#pcfb4o系列): 世界杯坏盘临时隐藏——3mzoh/ysgpv
+      // 是V2 covenant家族(cancelMarketLive硬编码V1-only, fail-closed拦下退款, 今晚做不了干净处置)+
+      // 标题跟真实赛程不符("advance?"问的是晋级, 不是三四名/决赛这两场已排定的比赛), 会话搜到还会让
+      // 用户误押进结算不了的盘。这个端点同时喂首页推荐(limit=8)和/bet搜索(limit=100, console-api.mjs:88
+      // availableMarkets), 一处过滤两处生效。纯展示层查询排除, 不改market状态/不碰covenant/不碰钱。
+      // 治本(V2家族coherence-gate/V2版cancelMarketLive)落码后这条临时名单可以撤, 不是永久机制。
+      .filter((m) => !HIDDEN_BROKEN_MARKET_IDS.has(m.id))
       .filter((m) => !commingledSpines.has(m._spineP2sh))
       .filter((m) => isStructuredSpec(m.title))
       .filter((m) => m._leafCount < MARKET_MAX_LEAVES_G3 - 50)   // has available slots — leaf-count(shard-aware, 409 同源), 留 50 笔安全余量
