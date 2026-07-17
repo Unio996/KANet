@@ -19,7 +19,7 @@ import { computeSettlePlan, settleMarketLive, deriveResumePlanFromEvidence } fro
 import { consolidateAllShards } from '../lib/pool-shard-settle.mjs';
 import { _shard9PhantomExcludeFor } from './bshard-close-voter.js';
 import { compilePayoutShardRedeem } from '../lib/pool-shard-register.mjs';
-import { fetchEndBlockHashCanonical } from './pool-market-settler-v06.mjs';
+import { fetchEndBlockHashCanonical, recaptureSideLockDaaForMarket } from './pool-market-settler-v06.mjs';
 import { judgeLine } from '../lib/judgeline.mjs';
 import { extractStructuredFields } from '../lib/oracle-evidence-extractors.mjs';
 import { makeCtfReader } from '../lib/uma-ctf-reader.mjs';   // #20 UMA: polymarket 盘读链上 CTF 判定 (P1 binding-verified 30/30·Bettor)
@@ -613,6 +613,25 @@ async function _settleOneMarketAttempt(marketId) {
   // 包装器当作整体失败, 把刚写对的 protocol_status 覆盖成 settle_failed——DB 状态跟链上真相(已结算成功)
   // 完全对不上, 比"没结算"更危险(会让 operator 误以为要重新结算一个其实已经结完的盘)。
   const market = sqlite.prepare('SELECT * FROM pool_markets WHERE id = ?').get(marketId);
+
+  // bshard recapture 移植(2026-07-17,治本卡①第一条,docs/2026-07-17-bshard-recapture-side-lock-daa-
+  // port-design.md,Bettor方向审+NWT红队双GREEN b615caee): bshard 市场的 pool_bettor_sides 分散在各
+  // shard(market_shards.shard_market_id),不像 v0.6 单表单 market_id——每个 shard 各调一次。镜像
+  // pool-market-settler.js:770 的调用点+日志形状,复用同一份 recaptureSideLockDaaForMarket(零重复
+  // 实现,只是让已存在的机制在 bshard 这条路也被触发)。non-fatal: 失败/部分回填不阻塞本次结算尝试,
+  // 真正无法解出的 bet 仍走既有 fail-loud(NULL 留原样)。
+  try {
+    const shardIds = sqlite.prepare('SELECT shard_market_id FROM market_shards WHERE logical_market_id = ?').all(marketId).map(r => r.shard_market_id);
+    const targets = shardIds.length ? shardIds : [marketId];   // no-shard bshard edge case falls back to logical id itself
+    let totalRecaptured = 0, totalRemaining = 0;
+    for (const sid of targets) {
+      const rc = await recaptureSideLockDaaForMarket(sid);
+      totalRecaptured += rc.recaptured; totalRemaining += rc.remaining;
+    }
+    if (totalRecaptured > 0) log(`[bshard-recapture] market=${marketId.slice(-8)} filled ${totalRecaptured} mempool-NULL-daa bets from chain (remaining NULL ${totalRemaining})`);
+  } catch (rcErr) {
+    log(`[bshard-recapture] market=${marketId.slice(-8)} fail (non-fatal, settlement proceeds/fails on its own merits): ${rcErr.message}`);
+  }
 
   // 0. 🔴 pre-flight plan (J1 covenant gate): winners≤1024 + plan.ok 验在【动钱前】。
   //   >1024 → buildPayoutRoot 抛 → 这里 catch → skip·**不 consolidate 不动钱**(避免半结·钱留 ShardLeaf 安全)。

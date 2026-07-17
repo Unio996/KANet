@@ -1071,9 +1071,14 @@ const BETTOR_MIN_STAKE_POLICY_SOMPI = 100_000_000n;
  * ② fail-loud 不降级: kaspa_tx_log 查无该 tx 的 block_hash = 拒(null), 不静默回退瞎猜——side_lock_daa
  *    定的是 betsRoot canonical 序, attest 承重字段, 错值比拒绝更危险。
  *
- * @returns {Promise<{daa:number|null, reason:'ok'|'daa-unresolved'|'no-block-hash'|'rpc-fail: ...'}>}
+ * @returns {Promise<{daa:number|null, reason:'ok'|'daa-unresolved'|'no-block-hash'|'not-yet-finality-safe...'|'rpc-fail: ...'}>}
  *   NEVER guesses — null over a non-canonical value.
  */
+// 🔴 finality 门(2026-07-17,治本卡①第一条+K-17 发现 A 同一个洞,docs/2026-07-17-bshard-recapture-
+// side-lock-daa-port-design.md): 复用 pool-market-settler-v06.mjs:43 DEFAULT_FINALITY_DEPTH 同一个
+// F-S1 anti-reorg 场景(不同时间点查询收敛到同一 hash),不新拍数字——本文件不静态 import 那个模块
+// (它反过来动态 import 本文件,避免制造循环依赖的静态方向),本地声明同值。
+const CAPTURE_FINALITY_DEPTH = 50;
 export async function captureSideLockDaa({ side_p2sh, side_lock_tx, stake_amount, network, approxDaaHint }) {
   const row = sqlite.prepare('SELECT block_hash FROM kaspa_tx_log WHERE tx_id = ?').get(side_lock_tx);
   const { getWorkingRpc } = await import('./rpc-health.js');
@@ -1131,6 +1136,7 @@ export async function captureSideLockDaa({ side_p2sh, side_lock_tx, stake_amount
   }
 
   let blk;
+  let tipDaaScore = null;
   try {
     await Promise.race([rpc.connect({}), new Promise((_, rej) => setTimeout(() => rej(new Error('RPC connect timeout')), 4000))]);
     if (row?.block_hash) {
@@ -1142,6 +1148,11 @@ export async function captureSideLockDaa({ side_p2sh, side_lock_tx, stake_amount
       // block hash"——只是现在多了一条 fallback 路径没找到, 不是历史那种"根本没试第二条路")。
       if (!blk) { try { await rpc.disconnect(); } catch {} return { daa: null, reason: 'no-block-hash' }; }
     }
+    // 🔴 finality 门数据源(fetch while still connected — rpc.disconnect() fires in `finally`
+    // below, before daa is even computed): current tip, compared against the resolved block's
+    // daaScore after the connection closes.
+    const tipInfo = await rpc.getBlockDagInfo();
+    tipDaaScore = Number(BigInt(tipInfo.virtualDaaScore));
   } catch (e) {
     try { await rpc.disconnect(); } catch {}
     return { daa: null, reason: `rpc-fail: ${e.message}` };
@@ -1153,7 +1164,14 @@ export async function captureSideLockDaa({ side_p2sh, side_lock_tx, stake_amount
     const rawDaa = blk?.header?.daaScore;
     if (rawDaa !== undefined && rawDaa !== null) daa = Number(BigInt(rawDaa));  // daa ~55M fits Number safely
   } catch { daa = null; }
-  return { daa, reason: daa === null ? 'daa-unresolved' : 'ok' };
+  if (daa === null) return { daa: null, reason: 'daa-unresolved' };
+  // 🔴 finality 门(2026-07-17,治本卡①第一条+K-17 发现 A 同一个洞): 只有 accepting-block 已过
+  // CAPTURE_FINALITY_DEPTH(50)才写值——finality 前的值可能被 reorg 换成别的规范链, 写进去比留
+  // NULL 更危险(NULL 至少诚实"不知道", 错值带假自信直接过 C1 guard)。
+  if (tipDaaScore !== null && (tipDaaScore - daa) < CAPTURE_FINALITY_DEPTH) {
+    return { daa: null, reason: `not-yet-finality-safe (tip=${tipDaaScore}, block=${daa}, depth=${tipDaaScore - daa} < ${CAPTURE_FINALITY_DEPTH})` };
+  }
+  return { daa, reason: 'ok' };
 }
 
 async function handlePoolBetRegistered(msg) {

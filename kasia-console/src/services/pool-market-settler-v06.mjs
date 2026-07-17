@@ -40,7 +40,7 @@ const MIN_BROKER_FEE_SOMPI = 5_000_000; // 0.05 KAS (mirrors v0.5 MIN_BROKER_FEE
 // Bettor r48 F-S1 residual: chain tip blocks can be reorged. Require finality_depth
 // confirmation (= picked block at least N blocks deep from current tip) so that two
 // verifiers querying at different times converge to the same hash. testnet: 50 default.
-const DEFAULT_FINALITY_DEPTH = 50;
+export const DEFAULT_FINALITY_DEPTH = 50;
 
 /**
  * F-S1 canonical rule (Bettor r44 + r48 close gate ①):
