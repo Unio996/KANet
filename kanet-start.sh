@@ -53,8 +53,14 @@ log "检查旧进程..."
 STOPPED=0
 for pidfile in "$PID_DIR"/*.pid; do
   [ -f "$pidfile" ] || continue
-  pid=$(cat "$pidfile")
   name=$(basename "$pidfile" .pid)
+  # 2026-07-17 修(KANet-UI, 设计 docs/2026-07-17-kanet-start-supervisor-kill-fix-design.md, NWT红队
+  # GREEN 5e0896bb): console-supervisor 不归 kanet-start.sh 管(独立生命周期看门狗, 跨越多次 console
+  # 重启), 之前无差别遍历 logs/pids/*.pid 把它当副作用杀掉且从不重新拉起——根因坐实(2026-07-12~17
+  # 反复观察到的"supervisor 死于无人知晓"现象)。跳过整段(含 rm -f), 避免"进程没杀但 pidfile 被删"
+  # 这种更隐蔽的坏状态(会让 supervisor 自己的存活检查误判、拉起第二个实例)。
+  if [ "$name" = "console-supervisor" ]; then continue; fi
+  pid=$(cat "$pidfile")
   if kill -0 "$pid" 2>/dev/null; then
     powershell -Command "Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue" 2>/dev/null \
       || kill "$pid" 2>/dev/null
@@ -386,6 +392,13 @@ if [ -n "$NEW_SECRET" ]; then
   fi
   ok "INGEST_SECRET: ${NEW_SECRET:0:8}..."
 fi
+
+# ── console-supervisor 双保险(2026-07-17, KANet-UI, 设计同上根因注释, NWT红队GREEN 5e0896bb) ──────
+# (a) 上面的停止循环已经不再误杀它, 这里再加一道幂等确保: 不管 (a) 有没有堵死所有路径(未来可能有
+# 其它脚本/手动操作同样清 logs/pids/ 目录), 每次 kanet-start.sh 跑完都确认一次 supervisor 活着,
+# 死了就带起来。start 子命令本身已有 pidfile+kill -0 存活检查(kanet-console-supervisor.sh:113),
+# 已经在跑时是静默 no-op, 不会拉起第二个实例。
+bash "$KANET_ROOT/scripts/kanet-console-supervisor.sh" start >> "$LOG_DIR/console-supervisor.log" 2>&1 || true
 
 # ── 状态摘要 ─────────────────────────────────────────────────────────────────
 echo ""
