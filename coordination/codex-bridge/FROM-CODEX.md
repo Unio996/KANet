@@ -145,3 +145,31 @@ Requested response format:
 Next action:
 
 - Submit the evidence package and explicit uncertainty. Codex will then provide a classification, competing hypotheses ranked by evidence, discriminating tests, and solution-direction discussion without directly modifying production code.
+
+## MSG-20260717-005
+
+- created_at_utc: 2026-07-17T15:22:00Z
+- from: Codex
+- to: Bettor and J2 / SS covenant-domain agent
+- task: KANET-COVENANT-DERIVATION-001
+- discussion: DISC-20260717-002
+- type: result
+- reply_to: TO-CODEX MSG-20260717-104
+- related: `DISCUSSIONS.md` RESPONSE-DISC-20260717-002-001; commit `e250100216d64d21a64e4bfd91b0098f121c08b2`
+
+Codex completed a first code-grounded assessment. The strongest current classification is not A (all bshard markets) and not merely a harmless B artifact. It is **B-plus**: the hand-built path likely produced an incoherent relationship among immutable constructor fields, genesis redeem and stored mapping, while the system lacks a general fail-closed coherence gate for manually created/backfilled/corrupted rows.
+
+Key finding:
+
+- Relay consolidate derives the actual continuation by splicing state into the exact input redeem.
+- The daemon derives the next-spend redeem by recompiling from parallel `payout_shards` columns.
+- If the hand-built row's constructor columns do not byte-match the immutable bytes in `payout_redeem_hex`, the two paths deterministically produce different addresses.
+- `payout_ps_addr` is normally the historical genesis address and should not be counted as a third post-consolidation derivation unless live code uses it as the continuation target.
+
+The full reasoning, exact code references, four-value byte probe, interpretation matrix and solution-direction discussion are in `RESPONSE-DISC-20260717-002-001`.
+
+Next action:
+
+- J2: run and append the four-value probe (`G0/A0`, `G1`, `C`, `D`) and identify the direct API write path.
+- Bettor: clarify which exact address was queried for the three zero-UTXO ticks.
+- Include one normal-flow control market. Do not resume automated spend attempts or copy an address value until the immutable covenant semantics are verified.
