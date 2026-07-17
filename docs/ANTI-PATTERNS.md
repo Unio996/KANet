@@ -2978,3 +2978,16 @@ WHERE id IN (...) AND protocol_status IN ('verifying', 'pending_bettors')
 - 冻结期 CPU **接近 0** = 在等 I/O / 锁 / 外部服务 → 那时才轮到二分法和 handle dump。
 - **二分法是"不知道该测什么"时的下策。能直接测量的东西，不要靠排除法去推。** 两天 vs 30 分钟，就是这个区别的代价。
 
+## 规则 64 —— 修并行实现之一，必须枚举全部拷贝（copy-fork 漂移母题）
+
+**症状**（同一母题在本仓库四次独立发作，2026-07-18 J1tn 汇总坐实）：
+1. **v0.6→bshard 恢复层**：recapture/dispatchRefund/handleRefunding 只加进 v0.6 settler，bshard 复制分叉后一条没跟——j34vb/8pson 结算卡死（7/17 demo 撞出，d521fea8 补移植）。
+2. **CAPTURE_FINALITY_DEPTH 重复常量**：trade-protocol-filter 本地复制数值而非 import 单源（NWT diff 审抓出，"母题小型翻版"）。
+3. **V1/V2 编译分派**：cancelMarketLive/consolidateAndBuildPsState 硬编码 V1 compile，V2 家族出现后没人枚举既有调用点（8pson/kr5l4/j34vb 全撞）。
+4. **签名站点覆盖**：c8188d98 修 safe_json sighash 时改了 bettor-prediction-voter.js 两站点，**漏了 trade-protocol-filter.js:handlePoolOracleTxSignReq 第三站点**（jepu1 401 次拒签的半根因）；另有 bettor-prediction-settler.js:618 第四站点候选待定性。
+
+**铁律**：
+- 修一个"存在多份拷贝的实现"（同名机制/同 IPC 命令的多个 caller/同模板的多版本）时，**diff 里必须附全仓枚举证据**（`grep -rn <关键调用/常量> src/` 原文），逐个拷贝写明"已改 / 不需改+理由"。没枚举 = 审核退回。
+- 发现自己在复制一段逻辑/常量而不是 import 单源时，先停：能抽共享就抽（反增殖）；抽不了必须在两处都留互指注释（"改我必改 X:行号"）。
+- 机器 clamp（逐族落地，人工纪律只兜过渡期）：例如 sign 族 lint `R-SIGN-SETTLE-SAFE-JSON`——`sign_input_for_settle` 构造点必须带 `safe_json: true` 或在 allowlist 注明豁免理由（提案 2026-07-18，见 jepu1 修复稿 §1.6）。同思路已有先例：R-MANIFEST 系、K-18/PS-FAMILY 家族分派 lint 方向。
+
