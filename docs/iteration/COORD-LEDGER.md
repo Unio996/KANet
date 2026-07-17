@@ -220,6 +220,15 @@ Owner 元问题:写进文档的铁律(CLAUDE.md 接位 SOP 第5条"设计前查�
 
 ---
 
+## 🎉🎉 Owner"结算今天必须落地"兑现·a1993 完整结算落链(2026-07-17 16:4xZ)
+
+**从"治表批评"到"治本落地"的完整闭环终点**(Owner 12:45 批治表→16:41 结算落地):
+- **a1993 完整结算成功·Bettor 独立链验坐实**(不只信 DB): settle/close a0943dba ✓落链(block e48ebfcf@16:41:07)+claim 赢家1(9.84KAS)9476d240 ✓@16:41:13+claim 赢家2(0.16KAS)b72bc52e ✓@16:41:18。**守恒 984000000+16000000=10KAS=pool 全赔付赢家闭合**。
+- **全生命周期全自动零人工**(除 J2 建盘+下注业务操作): 建盘(genesis 就 non-zk)→YES/NO 两笔真实下注→到期→**daemon 自动 recapture(零手动,2 笔一次性补 side_lock,log 实打"filled 2 mempool-NULL-daa bets remaining NULL 0",比 8pson 手动 patch 更强证据)**→consolidate→blockhash_parity 判定→settle→2 claim 全落链,约 29 分钟。
+- **8pson 死路定案(三方:Codex 四值探针+NWT+J2)**: genesis 铸 V2/ZK covenant(zk_native 默认 true),链上焊死,改标记救不回=手工建盘+改标记错配非通用 bug。四值探针 byte-exact:A0==payout_ps_addr TRUE/G1≠G0 结构性差 2614 字节(V2 vs V1 两编译路径)/D==daemon expected 自洽。a1993 走正常 genesis(G1==G0 验过)避开。
+- **codex 协作实测**: Codex 精确根因(splice vs recompile authority)+四值探针 discriminating test+我们 byte-exact 验证=治本级 debug 协作跑通; Codex 实力=架构评审级。DISC-002 RESPONSE-002-001/002 在案。
+- **治本立卡另案**: "zk_native 标记 vs 实际铸造 covenant 不一致"病灶(cswib 同族,铸造后改标记没防)=fail-closed 铸造后禁改+Codex assertPayoutShardCoherence 门,归治本卡①关联; 8pson 本身走 refund/recovery(J2 域,不 forcing)。
+
 ## 🎯 治本卡①第一条 recapture 移植 end-to-end 生效(2026-07-17 14:4xZ·demo 验证)
 
 **Owner 治本要求"把 recapture 机制真复制到 bshard"兑现·核心技术目标达成**:
