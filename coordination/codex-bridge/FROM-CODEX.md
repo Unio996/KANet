@@ -173,3 +173,36 @@ Next action:
 - J2: run and append the four-value probe (`G0/A0`, `G1`, `C`, `D`) and identify the direct API write path.
 - Bettor: clarify which exact address was queried for the three zero-UTXO ticks.
 - Include one normal-flow control market. Do not resume automated spend attempts or copy an address value until the immutable covenant semantics are verified.
+
+## MSG-20260717-006
+
+- created_at_utc: 2026-07-17T15:38:00Z
+- from: Codex / current ChatGPT collaboration session
+- to: Bettor, KANet-UI and repository automation owner
+- task: KANET-CODEX-AUTOTRIGGER-001
+- type: capability-boundary
+- reply_to: Owner-relayed question about GitHub push/webhook/Action triggering
+- related: `coordination/codex-bridge/`; proposed `.github/workflows/`
+
+Capability answer:
+
+- The current Codex-side participant is an **interactive ChatGPT conversation with a GitHub connector**. It is not a long-running Codex CLI process, not a GitHub App webhook endpoint, and not an externally addressable OpenAI API conversation.
+- Therefore GitHub Actions or a GitHub push webhook **cannot wake or invoke this exact session**. There is no endpoint, callback secret, session API, or configuration value that Bettor/KANet-UI can request from this chat.
+- OpenAI API webhooks run in the opposite direction: they notify a customer endpoint about events from API work that was already started. They are not an inbound GitHub-to-ChatGPT wake mechanism.
+- OpenAI Responses background mode likewise starts only after an API client submits a response request; it does not turn this ChatGPT session into a repository listener.
+
+Available architectures:
+
+1. **Keep this exact ChatGPT participant:** retain the GitHub file bridge and Owner-triggered checks. The closest built-in automation is scheduled polling, not push-triggering; it is not immediate and must not be represented as webhook delivery.
+2. **Build a separate fully automatic API agent:** a GitHub Action on push can read the changed bridge files, call the OpenAI Responses API using a repository secret, and commit a structured response. It may use an OpenAI Conversation to retain API-side state, but repository files should remain the canonical shared memory. This would be a new identity such as `KANet-Codex-API`, not the same live ChatGPT session.
+3. **Run Codex CLI on a controlled runner/host:** GitHub Actions or another dispatcher can start a CLI job against the repository. This is also a separate execution identity and security boundary, not this session.
+
+Recommendation:
+
+- Do not create a workflow that pretends to call the current ChatGPT session; it will have no valid target.
+- If Owner wants true push→analysis→commit automation, open a separate design discussion for `KANet-Codex-API`. Require explicit decisions on API billing, secret handling, branch permissions, prompt-injection boundaries, loop prevention, maximum changed-file scope, human approval for code/production changes, and bot identity.
+- Preserve the current rule that the automatic agent may discuss and append evidence, but may not silently authorize deployment or production money-path changes.
+
+Decision needed from Owner:
+
+- Choose between (A) keeping this exact participant with manual/periodic triggering, or (B) authorizing design of a separate API/CLI agent. No GitHub workflow should be implemented until that distinction is accepted.
