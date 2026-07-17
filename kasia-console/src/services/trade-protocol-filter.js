@@ -568,10 +568,19 @@ async function handlePoolOracleTxSignReq(msg) {
 
       let signResult;
       try {
+        // 🔴 第三签名站点 safe_json 补修(2026-07-18 J1tn, jepu1 重签设计步1, NWT 红队 751eaa07):
+        // c8188d98 修 bettor-prediction-voter.js 两站点时漏了本站点——这里原样发裸
+        // JSON.stringify(phase2TxObj) = relay 走 plain 路径 → spk 不进 sighash → 签名必坏
+        // (jepu1 401 次 verify-failed 的半根因)。改与另两站点同款: 单源 helper 转 safe_json
+        // (../lib/settle-safe-json.mjs, 函数体 = c8188d98 原版逐字节) + safe_json:true。
+        // bshard 盘不经本 handler(消息 type 隔离, 见设计稿 §1.5), bshard-close-voter 已是同形态。
+        const { toSettleSafeJsonTxHex } = await import('../lib/settle-safe-json.mjs');
+        const _safeTxHex = await toSettleSafeJsonTxHex(phase2TxObj);
         signResult = await sendCommandAsync(oracle.id, {
           type: 'sign_input_for_settle',
-          tx_hex: JSON.stringify(phase2TxObj),
+          tx_hex: _safeTxHex,
           input_index: inputIdx,
+          safe_json: true,
         });
       } catch (e) {
         console.warn(`[trade-filter:sign-req] sign IPC fail market=${market.id.slice(0,12)} oracle=${oracle.name} input=${inputIdx}: ${e.message}`);

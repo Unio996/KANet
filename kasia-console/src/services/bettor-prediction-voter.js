@@ -27,6 +27,7 @@ import { sqlite } from '../db/client.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { sendCommandAsync } from './relay-manager.js';
 import { buildDeriveVotePrompt } from './derivevote-prompt.mjs';
+import { toSettleSafeJsonTxHex } from '../lib/settle-safe-json.mjs';
 
 // J2-tn r382 (Bettor 16:29 钦定): TICK_INTERVAL_MS env-configurable. Default 5min mainnet,
 // demo 期 .env 设 PREDICTION_VOTER_TICK_SEC=60 (= 1min) 提速 5x 流水. 与 settler 同 pattern.
@@ -39,32 +40,8 @@ let running = false;
 // J1/NWT 2026-06-28 (gap③ broker-DM settle 根因): relay sign_input_for_settle 默认路用
 // `new Transaction(JSON.parse(plain))` 重建 tx 给 createInputSignature → 新 kaspa-wasm 下 plain-object
 // scriptPublicKey 不被正确注入 sighash → checkSig false → settle "verification failed"(jepu1 8h 卡因)。
-// 修: voter 发 sign_req 前【无条件】把存的 plain phase2_tx_obj 转 safe_json(serializeToSafeJSON·spk 全保)
-// 发 {safe_json:true} → relay 走 deserializeFromSafeJSON 路(bshard 已 proven·relay.mjs L647)。
-// ⚠ bigint rehydration 必须和 relay.mjs L646-666 完全一致(否则 serialize 出的 safeJson 与 relay live 路不符)。
-// NWT 实测: new Transaction(plain).serializeToSafeJSON() round-trip lossless → 覆盖 jepu1 + 所有 stuck 老盘·零 re-dispatch。
-async function toSettleSafeJsonTxHex(txObj) {
-  const { Transaction } = await import('kaspa-wasm');
-  const parsed = JSON.parse(JSON.stringify(txObj)); // deep copy — 不污染 metadata 里的 plain phase2_tx_obj
-  parsed.lockTime = BigInt(parsed.lockTime || 0);
-  parsed.gas = BigInt(parsed.gas || 0);
-  if (Array.isArray(parsed.inputs)) {
-    parsed.inputs = parsed.inputs.map(i => ({
-      ...i,
-      sequence: BigInt(i.sequence || 0),
-      sigOpCount: Number(i.sigOpCount || 0),
-      utxo: i.utxo ? {
-        ...i.utxo,
-        amount: BigInt(i.utxo.amount || 0),
-        blockDaaScore: BigInt(i.utxo.blockDaaScore || 0),
-      } : undefined,
-    }));
-  }
-  if (Array.isArray(parsed.outputs)) {
-    parsed.outputs = parsed.outputs.map(o => ({ ...o, value: BigInt(o.value || 0) }));
-  }
-  return new Transaction(parsed).serializeToSafeJSON();
-}
+// 2026-07-18 J1tn: 本地 helper 提取到 ../lib/settle-safe-json.mjs 单源(规则64——第三站点
+// trade-protocol-filter.js:handlePoolOracleTxSignReq 漏修坐实后, 三站点共用一份, 函数体零改动)。
 
 // Bettor r472 (P0 incident 2026-06-10): per-(key) log throttle. Stuck offers in a permanent
 // condition (e.g. collecting_sigs with invalid/undefined phase2_winner) were re-warned every
