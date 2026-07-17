@@ -89,7 +89,11 @@ if (Test-ConsoleAlive) {
   Archive-IfExists $kanetStartOut
   Archive-IfExists $kanetStartErr
   $kanetStartExtra = @{ WorkingDirectory = $KanetRoot; RedirectStandardOutput = $kanetStartOut; RedirectStandardError = $kanetStartErr }
-  Start-Watched $GitBash @("-lc", "cd '$KanetRoot' && ./kanet-start.sh") "kanet-start.sh" $kanetStartExtra | Out-Null
+  # 2026-07-17 修复(Bettor#okhf66 GREEN, KANet-UI独立诊断+Bettor实验归因两路吻合): ArgumentList
+  # 传数组时 PS5.1 对含空格元素不加引号, bash 只收到 -lc 后第一个词 cd(无参成功)→ exit 0 零输出,
+  # 全脚本静默失效 9h(04:32 宿主机重启后无一步真正拉起 console/relay)。改单字符串内嵌引号让
+  # bash 收到完整 -c 命令(已用于当日手动恢复, 现补回脚本本体)。
+  Start-Watched $GitBash "-lc `"cd '$KanetRoot' && ./kanet-start.sh`"" "kanet-start.sh" $kanetStartExtra | Out-Null
 }
 
 # ⑤ console-supervisor(显式起, 不假设 kanet-start.sh 会顺带起它——7/15 实测该假设不成立)
@@ -98,6 +102,7 @@ $supervisorErr = "D:\kanet-tn12\logs\boot-supervisor-start-stderr.log"
 Archive-IfExists $supervisorOut
 Archive-IfExists $supervisorErr
 $supervisorExtra = @{ WorkingDirectory = $KanetRoot; RedirectStandardOutput = $supervisorOut; RedirectStandardError = $supervisorErr }
-Start-Watched $GitBash @("-lc", "cd '$KanetRoot' && bash scripts/kanet-console-supervisor.sh start") "console-supervisor.sh" $supervisorExtra | Out-Null
+# 同上根因同款修法(数组→单字符串内嵌引号), 见④步注释
+Start-Watched $GitBash "-lc `"cd '$KanetRoot' && bash scripts/kanet-console-supervisor.sh start`"" "console-supervisor.sh" $supervisorExtra | Out-Null
 
 Log "=== boot sequence dispatched all steps (this script now exits; watchdogs/supervisor/console keep running independently) ==="
