@@ -3210,8 +3210,8 @@ export async function registerPoolRoutes(fastify) {
     // (settle_evidence 写在 logical 市场, 拿不到), 导致所有 bshard 盘赢输永远显不出。
     // 通过 market_shards 解析 shard→logical(v0.6 无 shard 行, COALESCE 落回 s.market_id 原逻辑不变)。
     const positions = sqlite.prepare(`
-      SELECT s.market_id, s.direction, s.stake_amount, s.side_p2sh, s.side_lock_tx, s.claim_txid, s.merkle_index,
-             s.created_at AS locked_at,
+      SELECT s.id AS side_id, s.market_id, s.direction, s.stake_amount, s.side_p2sh, s.side_lock_tx, s.claim_txid, s.merkle_index,
+             s.created_at AS locked_at, m.id AS logical_market_id,
              m.resolution_rule_spec, m.outcome_side, m.protocol_status, m.deadline, m.category,
              m.maker_stake_amount, m.broker_fee_pct, m.oracle_bond_amount, m.miner_fee, m.settle_txid, m.refund_txid,
              m.metadata, m.protocol_version
@@ -3221,6 +3221,34 @@ export async function registerPoolRoutes(fastify) {
       WHERE s.bettor_pk = ?
       ORDER BY s.created_at DESC
     `).all(bettorPk);
+
+    // H2 fix (2026-07-17, docs/2026-07-17-h2-mybets-multiwin-split-design.md v1.1, NWT GREEN
+    // 12cce211): a bettor can hold multiple pool_bettor_sides rows in the SAME logical market
+    // (one per bshard shard they landed in) — settle_evidence.winner_details is keyed by pk only
+    // (one aggregate entry per bettor per logical market, see bshard-settle-daemon.mjs:681), so
+    // every row independently matching that one entry must split it by stake, not each claim the
+    // whole thing. BigInt throughout (NWT MUST-FIX): amount×stake for a 17613.9 KAS-scale market
+    // is ~1e22, far past Number.MAX_SAFE_INTEGER — floating point would silently corrupt the split.
+    function splitWinnerAmountByStake(totalAmount, groupRows, thisRowId) {
+      const total = BigInt(totalAmount);
+      const groupTotalStake = groupRows.reduce((s, r) => s + BigInt(r.stake_amount), 0n);
+      if (groupTotalStake <= 0n) return 0n;
+      const sorted = [...groupRows].sort((a, b) => a.id - b.id);
+      let floorSum = 0n;
+      const floors = new Map();
+      for (const r of sorted) {
+        const floor = (total * BigInt(r.stake_amount)) / groupTotalStake;
+        floors.set(r.id, floor);
+        floorSum += floor;
+      }
+      let remainder = total - floorSum;   // always >= 0 and < sorted.length
+      for (const r of sorted) {
+        if (remainder <= 0n) break;
+        floors.set(r.id, floors.get(r.id) + 1n);
+        remainder -= 1n;
+      }
+      return floors.get(thisRowId);
+    }
 
     // #27e (KANet-UI sprint): the settler pays an EXTERNAL bettor (bettor_relay_id NULL, = bot/DM-path)
     // to the P2PK address derived from x-only bettor_pk (pool-market-settler.js L1634) — which differs
@@ -3274,12 +3302,29 @@ export async function registerPoolRoutes(fastify) {
         const ev = meta.settle_evidence;
         if (p.protocol_version === 'v0.7' && ev && Array.isArray(ev.winner_details)) {
           const myWin = ev.winner_details.find(w => String(w.pk).toLowerCase() === String(bettorPk).toLowerCase());
-          if (myWin) {
-            outcomeWinner = myDirection;   // 这个 bettor 在 winner_details 里 = 赢了(方向就是自己下的那个方向)
+          // H2 fix (2026-07-17, NWT GREEN 12cce211): winner_details is keyed by pk only, aggregated
+          // per LOGICAL market (bshard-settle-daemon.mjs:681 writes win_direction alongside it in the
+          // same atomic evidence object, so a valid winner_details entry always carries a valid
+          // win_direction — precondition checked explicitly here, not assumed). A bettor who hedged
+          // (bet both YES and NO with the same pk) will match myWin on BOTH direction's rows; only the
+          // row whose OWN direction equals win_direction actually won — the other row must fall through
+          // to the win_direction branch below (which correctly marks it as lost), not claim a share here.
+          if (myWin && (ev.win_direction === 0 || ev.win_direction === 1) && myDirection === ev.win_direction) {
+            outcomeWinner = myDirection;
             didWin = true;
-            actualPayoutKas = Number(myWin.amount) / 1e8;
             actualPayoutChainVerified = true;   // winner_details 只收 received===true 的条目(daemon writeback 过滤过)
             bshardClaimTxid = myWin.txId || null;  // 权威源: settle_evidence.winner_details[].txId, 已链验 received===true (mybets v1.2 §0.1)
+            // this bettor may hold >1 row in this logical market (multi-shard) — split myWin.amount by
+            // stake across all of THIS bettor's rows in this (logical market, direction) group, not
+            // hand the whole aggregate to every row (H2 bug). BigInt throughout (NWT MUST-FIX).
+            const logicalId = p.logical_market_id || p.market_id;
+            const groupRows = sqlite.prepare(`
+              SELECT s.id, s.stake_amount FROM pool_bettor_sides s
+              LEFT JOIN market_shards ms ON ms.shard_market_id = s.market_id
+              WHERE s.bettor_pk = ? AND s.direction = ? AND COALESCE(ms.logical_market_id, s.market_id) = ?
+            `).all(bettorPk, myDirection, logicalId);
+            const myShare = splitWinnerAmountByStake(myWin.amount, groupRows, p.side_id);
+            actualPayoutKas = Number(myShare) / 1e8;
           } else if (ev.win_direction === 0 || ev.win_direction === 1) {
             // NWT 审(2026-07-04, 部署前抓到): 不在 winner_details 里≠真输了——若 myDirection===win_direction
             // 但没进 winner_details, 是"赢了但 claim 失败没到账"(#21 settled_partial_claims 那种), 不是"你输了"。

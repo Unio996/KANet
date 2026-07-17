@@ -346,9 +346,12 @@ export async function formatMyBets(linkedAddr, lang = 'en') {
       const cnt = a.count > 1 ? t(lang, 'mybets_dir_cnt', { n: a.count }) : '';
       lines.push(`• ${dir} ${a.stakeSum.toFixed(4)} KAS${cnt} · ${statusStr}`);
       // mybets v1.2 §1: 赔付凭证 txid 纯文本(非链接, TN12 无公网 explorer). 退款单笔对单笔无歧义直接显示;
-      // 赢单 H2 收窄——同市场同方向 >1 笔赢单时金额-交易不可消歧, 只在 count===1 时显示.
+      // 赢单 H2(2026-07-17 落码, NWT GREEN 12cce211): 后端 actual_payout_kas 现已按 stake 精确拆分
+      // (pool.js splitWinnerAmountByStake), a.actualPayoutSum 求和精确等于链上真实 amount, wonTxid
+      // 也确实是这笔真实 claim tx——不再有"哪笔钱对应哪个 tx"的歧义, count>1 时同样可以放心显示
+      // (原 count===1 门槛是 H2 修复前的临时收窄, 不再需要).
       if (onlyRefund && a.refundTxid) lines.push(t(lang, 'mybets_tx_line', { txid: a.refundTxid }));
-      else if (onlyWon && a.count === 1 && a.wonTxid) lines.push(t(lang, 'mybets_tx_line', { txid: a.wonTxid }));
+      else if (onlyWon && a.wonTxid) lines.push(t(lang, 'mybets_tx_line', { txid: a.wonTxid }));
       // 若赢可拿 = 直接加总每笔 payout_if_win_kas. 后端 endpoint 是 query-time 同池子快照统一算每笔
       // (Bettor r147 实证 + 我 r345 多想一层的 pari-mutuel 反向算同分母 = 数学等价).
       // → 简单加总即正确, 不需要 disclaimer "未来变" (现池就是 query 时的池).

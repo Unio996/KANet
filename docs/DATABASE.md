@@ -616,6 +616,26 @@ allocateForRegister 顺序填。
 分片 PoolSpine ctor（J1 shard variant）→ 每节点派生同分片集（by-root determinism）。double-count 由
 `pool_bettor_sides` 的 `UNIQUE(market_id, bettor_pk)` (v62) + 链上 PoolSide spent-once 双堵。
 
+### pool_markets（v62+，预测市场核心表）
+**一行 = 一个"市场"——注意 bshard(v0.7) 下这可能是逻辑市场，也可能是它的某个物理分片**
+
+**字段（节选，完整见 `migrate.js` v62 建表 + 后续 `ALTER TABLE`）**：id (PK，市场标识，形如 `ext-pool-v07-<ts>-<slug>` 或分片 id `<logical>-s<N>`), maker_relay_id, spine_p2sh/spine_lock_tx（PoolSpine covenant 锚点）, deadline/deadline_daa, protocol_version（v0.5/v0.6/v0.7）, protocol_status（pending_bettors → collecting_sigs → verifying → settling/refunding → completed/refunded/shard_internal 等，见各服务的状态机)，maker_stake_amount/broker_fee_pct/oracle_bond_amount/miner_fee, outcome_*（预言机源绑定), settle_txid/refund_txid, metadata（JSON，`settle_evidence`/`phase2_outputs`/`fee_rules` 等结算期写回都堆在这一列——见下方陷阱), sides_merkle_root/pool_merkle_root, fee_rules（v184, write-once trigger）。
+
+**写入方**：`pool.js` create-v07/v06（建市场）→ `pool-market-settler.js`/`bshard-settle-daemon.mjs`（结算写回 `protocol_status`+`metadata.settle_evidence`）→ voter/oracle 服务（委员投票中间态）。
+**读取方**：`/api/pool/my-positions`（用户仓位+赔付展示）/ `/api/pool/markets`（列表）/ settler/voter 每 tick 扫描 / prediction-menu.mjs（TG bot 展示）。
+
+**🔴 陷阱（H2 bug 根因，2026-07-17 补，docs/2026-07-17-h2-mybets-multiwin-split-design.md）**：bshard 市场的"逻辑市场"和"物理分片"**都是 `pool_markets` 里独立的一行**（分片 id 形如 `<logical>-s0`/`-s1`），通过 `market_shards.shard_market_id → logical_market_id` 关联。**结算证据(`metadata.settle_evidence.winner_details`) 只写在逻辑市场那一行，且按 `bettor_pk` 聚合(一个 pk 一条，amount = 该 pk 在整个逻辑市场的总赢得金额)**——不是按分片/按行。若同一 bettor 在同一逻辑市场的**不同分片**各下过注（`pool_bettor_sides.UNIQUE(market_id, bettor_pk)` 只挡同一分片内重复，挡不住跨分片），读侧必须按 stake 比例把这一份聚合 amount **拆給** 该 bettor 在这个逻辑市场+方向下的所有行，不能直接原样赋给每一行（否则金额被算重复次）——`pool.js` 的 `splitWinnerAmountByStake()`(H2 修复引入) 就是做这件事的，任何新读路径复用 `winner_details` 时必须走同样的拆分，不能重蹈。
+
+### pool_bettor_sides（v62+，逐笔下注记录）
+**一行 = 一笔独立下注（一个 bettor 在一个 market_id/分片、一个方向上的一次锁仓）**
+
+**字段**：id (PK AUTOINCREMENT，跨分片场景下唯一稳定排序键，H2 largest-remainder 拆分用它做确定性排序), market_id (REFERENCES pool_markets(id)——bshard 下是**分片** id，非逻辑市场 id), bettor_pk, bettor_relay_id, direction (0=YES/1=NO), stake_amount (sompi), side_p2sh/side_lock_tx（下注锁仓 P2SH+锁仓 tx）, merkle_index, claim_txid（v0.7 赢家自取 claim tx）, side_lock_daa（v187+，下注锁仓块的 DAA score，backward-walk 从链上派生，见 `docs/2026-07-08-backward-walk-daa-index-design.md`——**若此列长期 NULL 且已过物理剪裁点(pruningPoint daaScore)，本地/任何节点均无法再补，是永久性的，非"待补"**）, pay_amount_sompi, refund_attempted_at。
+
+**唯一约束**：`UNIQUE(market_id, bettor_pk)` — 只挡"同一 bettor 在同一 market_id(分片)重复下注"，**不挡跨分片**（同一 bettor 在同逻辑市场的不同分片各下一笔完全合法，也正是上面 H2 陷阱的成因）。
+
+**写入方**：`pool.js` register-v07/v06 confirm 端点（bettor 付款确认后 INSERT）。
+**读取方**：`/api/pool/my-positions`（逐行读+按 (market_id, bettor_pk) 或 (logical_market_id, direction) 分组聚合）/ settler（结算时按 market_id 汇总赔率池）/ voter（委员抽样）。
+
 ---
 
 ## 市场数据层
