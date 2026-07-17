@@ -31,7 +31,7 @@ function _computeChainContent(text) {
 // 之前漏在集合外 → 自治 Mind agent (AutoBetter/maker/tester/pred-*) 自动回复 + 编造 echo
 // 污染开发频道 (J1 #3 同步证实其 J1tn-*/pred-* 也在 echo)。开发频道只许 Claude Code 开发
 // agent (Bettor/J2/KANet-UI/NWT + J1 远端) 协作, 自治 Mind 一律回避。
-const COORD_CHANNELS = new Set(['dev-coord', 'dev-coord-testnet', 'kanet-arch', 'kanet-review', 'kanet-alert']);
+const COORD_CHANNELS = new Set(['dev-coord', 'dev-coord-testnet', 'codex-coord-testnet', 'kanet-arch', 'kanet-review', 'kanet-alert']);
 // Whitelist: Claude Code 开发 agent relay 实名 (本机 relay_nodes.name 带 -tn 后缀)。
 // Bettor r479: 补全实名 (旧版只有裸名 'Bettor'/'J2'/'NWT' 不匹配实际 'Bettor-tn'/'J2-tn'/...,
 // 不补会把开发 agent 自己 403-锁出协作频道)。裸名保留兼容其他机器 / Qwen→CC 迁移过渡。
@@ -39,6 +39,20 @@ const OPUS_RELAY_NAMES = new Set(['Martin', 'J2', 'J3', 'NWT', 'Opus', 'Qclaude'
   'Bettor-tn', 'J2-tn', 'KANet-UI-tn', 'NWT-tn',
   'J1', 'J1-tn', 'J1tn',
   'J1tn-Alice', 'J1tn-Bob', 'J1tn-Carol', 'J1tn-Dave']);  // Bettor r191 + r479 实名补全; KANet-UI r-j1fix: 300e10de 漏 J1 (我自补). J1 #41 实证他真 relay 名是 J1tn-Alice/Bob/Carol/Dave (committee oracle relay, 也是他频道 poster), exact match 不中裸 'J1tn' → 补 4 个委员实名 (J1 各形式仍留兼容)。
+
+// Restricted transport identity for the Codex MCP lane. This does not make the relay an
+// OPUS/Owner identity: it only opens the channels explicitly present in the MCP write policy.
+const MCP_COORD_RELAY_NAMES = new Set(
+  (process.env.KANET_MCP_RELAY_NAMES || 'KANet-MCP-Bot')
+    .split(',').map(name => name.trim()).filter(Boolean),
+);
+const MCP_COORD_WRITE_CHANNELS = new Set(
+  (process.env.KANET_MCP_WRITE_CHANNELS || 'codex-coord-testnet')
+    .split(',').map(name => name.trim()).filter(Boolean),
+);
+function isMcpCoordRelayAllowed(relayName, channelName) {
+  return MCP_COORD_RELAY_NAMES.has(relayName) && MCP_COORD_WRITE_CHANNELS.has(channelName);
+}
 
 // owner-in-dev-channel (2026-06-21, Owner 钦定): a relay whose ADDRESS is classified trust_level='owner'
 // (identities table) may post to COORD_CHANNELS even though its name is not in OPUS_RELAY_NAMES. Identity
@@ -95,6 +109,7 @@ const MIND_DISABLED_CHANNELS = new Set([
   'kanet-alert',
   'dev-coord',
   'dev-coord-testnet',
+  'codex-coord-testnet',
   'kanet-arch',
 ]);
 function isAutoReplyDisabledForChannel(channelName) {
@@ -222,7 +237,7 @@ export async function registerChatRoutes(fastify) {
     // 🔒 Coordination-channel firewall (shared constants COORD_CHANNELS +
     //    OPUS_RELAY_NAMES at top of file; same guard applied in triggerAutoReply).
     //    owner-in-dev-channel: an address classified trust_level='owner' is also permitted (isOwnerAddress).
-    if (COORD_CHANNELS.has(channel.trim()) && !OPUS_RELAY_NAMES.has(relay.name) && !isOwnerAddress(relay.address)) {
+    if (COORD_CHANNELS.has(channel.trim()) && !OPUS_RELAY_NAMES.has(relay.name) && !isOwnerAddress(relay.address) && !isMcpCoordRelayAllowed(relay.name, channel.trim())) {
       console.warn(`[chat] coord-channel BLOCKED: ${relay.name} → #${channel.trim()} — "${(message||'').slice(0,60)}"`);
       return reply.code(403).send({
         error: 'coordination_channel_restricted',
