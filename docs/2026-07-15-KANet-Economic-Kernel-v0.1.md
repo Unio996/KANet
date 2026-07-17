@@ -363,7 +363,22 @@ KANet 可以共享事件、交易、签名和执行记录，但不得规定一�
 - Settlement worker 仍推进；
 - TG 故障不影响退款；
 - 单子进程 OOM 可独立重启；
-- 队列有上限、超时背压不转嫁故障。
+- 队列有上限、超时背压不转嫁故障；
+- **链数据剪裁致关键值不可恢复**：活跃 money-path 的链派生关键值（如 `side_lock_daa`）持续 NULL 直到恢复数据越剪裁点 → 该值在 finality 后、剪裁前已被主动补齐，结算不依赖已被物理剪裁的链数据（见 K-17）。
+
+### K-17 — Pre-Prune Capture
+
+> **2026-07-17 并入**（设计 `docs/2026-07-17-preprune-capture-invariant-k16-gate-design.md`，Bettor 架构师帽→NWT 设计审 v1.1 复核 GREEN `369f6679`）：起因 j34vb 事故（8 条 `side_lock_daa` 越剪裁点物理不可逆，生存探针三重坐实）。根因=ingest 时 mempool 存 NULL + 结算时 lazy backward-walk 补，撞剪裁寿命。K-16 问"谁的故障感染谁"，K-17 是时间维度的 precondition："链数据的有限寿命"这个故障源不得让 money-path 关键输入不可恢复。
+
+任何 money-path 依赖的链派生值（accepting-block DAA、block_time、block_hash 等），若其恢复依赖会被链剪裁的数据，必须在一个**双边有效窗口**内完成本地持久化：**晚于** accepting-block 达到 finality depth（值已稳定、不会被 reorg 改写），**早于**对应数据进入剪裁窗口（数据仍可读）。不得以剪裁窗口外的 lazy 恢复作为唯一捕获路径；也不得在 finality 前抢捕获——未过 finality 的值可能被 reorg 改写，错误值比 NULL 更危险（NULL 诚实说"不知道"，错值带假自信进 money-path 判定）。
+
+**验收 = 故障注入**：
+- 活跃 money-path 关键链值持续 NULL 直到恢复数据越剪裁点 → 该值在 finality 后、剪裁前已被主动补齐，结算不依赖已剪裁数据；
+- 补齐 worker 停摆 N 小时后复活 → 积压队列在剩余窗口内清完（safety_margin 覆盖最坏宕机，非只单行时延）；
+- worker 遇 accepting-block 未过 finality depth 的行 → 本轮不捕获、下一 tick 再看（不抢写可能被 reorg 的值）；
+- 补齐 worker 心跳中断 → 独立监控告警（不靠 worker 自报活，复用 `spc_tip_heartbeat` 模式）。
+
+**机器门禁**（K-10 manifest 扩展）：money-path manifest 声明每个 chain-derived value 的 `{capture_point, prune_survival}`；`prune_survival` 三态 `guaranteed_before_prune | durable_index_backed | none`；lazy-recapture 且 `prune_survival=none` → lint block merge。
 
 ---
 

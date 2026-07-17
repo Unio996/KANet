@@ -74,3 +74,24 @@
 | 发现B 并发写 | 幂等 UPDATE...WHERE IS NULL 焊 note | §5 |
 
 **全部 MUST-FIX + 发现折入 v1.1, 回 NWT 复核。** 复核 GREEN 后拆实现卡(§7 表)。
+
+## 9. K-17 正式 invariant 文本 + K-16 矩阵行(草案·待 NWT 复核 GREEN 后逐字搬入 `docs/2026-07-15-KANet-Economic-Kernel-v0.1.md`)
+
+> 照 K-16 既有格式(invariant 陈述 + "验收=故障注入"bullet, 非新造结构)。Bettor 静默期自推进(11:2xZ), 不依赖复核先起草, 复核推翻则据 verdict 改。**在复核 GREEN 前不落入宪法正文**。
+
+### K-17 — Pre-Prune Capture
+
+任何 money-path 依赖的链派生值(accepting-block DAA、block_time、block_hash 等), 若其恢复依赖会被链剪裁的数据, 必须在一个**双边有效窗口**内完成本地持久化: **晚于** accepting-block 达到 finality depth(值已稳定、不会被 reorg 改写), **早于**对应数据进入剪裁窗口(数据仍可读)。不得以剪裁窗口外的 lazy 恢复作为唯一捕获路径; 也不得在 finality 前抢捕获——未过 finality 的值可能被 reorg 改写, 错误值比 NULL 更危险(NULL 诚实说"不知道", 错值带假自信进 money-path 判定)。
+
+**验收 = 故障注入**:
+- 活跃 money-path 关键链值持续 NULL 直到其恢复数据越过剪裁点 → 该值在 finality 后、剪裁前已被主动补齐, 结算不依赖已剪裁数据;
+- 补齐 worker 停摆 N 小时后复活 → 积压队列在剩余窗口内清完(safety_margin 覆盖最坏宕机, 非只单行时延);
+- worker 遇 accepting-block 未过 finality depth 的行 → 本轮不捕获、下一 tick 再看(不抢写可能被 reorg 的值);
+- 补齐 worker 心跳中断 → 独立监控告警(不靠 worker 自报活, 复用 spc_tip_heartbeat 模式)。
+
+### K-16 故障注入矩阵新增行(K-17 在 K-16 里的故障场景登记, 与 K-17 独立成条不冲突)
+
+在 K-16"验收=故障注入"清单**追加一条**:
+- **链数据剪裁致关键值不可恢复**: 活跃 money-path 的链派生关键值(如 side_lock_daa)持续 NULL 直到恢复数据越剪裁点 → 必须保持: 该值在 finality 后剪裁前已被主动补齐, 结算路径不依赖已被物理剪裁的链数据。
+
+> 编号依据(§3 已述): K-01/02/03/04/09 precondition 型全独立顶层编号有先例, K-17 独立成立; K-16 追加故障行是同一 invariant 在故障矩阵的登记(一条 invariant 既独立成条又在 K-16 矩阵有对应注入行, 非重复)。
