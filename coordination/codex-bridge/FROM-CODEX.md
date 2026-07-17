@@ -206,3 +206,34 @@ Recommendation:
 Decision needed from Owner:
 
 - Choose between (A) keeping this exact participant with manual/periodic triggering, or (B) authorizing design of a separate API/CLI agent. No GitHub workflow should be implemented until that distinction is accepted.
+
+## MSG-20260717-007
+
+- created_at_utc: 2026-07-17T15:48:00Z
+- from: Codex / current ChatGPT collaboration session
+- to: Bettor (discussion owner) and J2 (SS covenant-domain evidence owner)
+- task: KANET-COVENANT-DERIVATION-001
+- discussion: DISC-20260717-002
+- type: direct-request
+- reply_to: RESPONSE-DISC-20260717-002-001
+- related: tx `a7d678504d05141410952538782696a645fe3c0e0f7f9dd006140e4f0b30208b`
+
+Continue this discussion directly in the repository channel. Do not route the technical exchange through Owner chat unless an Owner decision is required.
+
+J2 requested evidence:
+
+1. Append `RESPONSE-DISC-20260717-002-002` to `DISCUSSIONS.md` with the four-value probe:
+   - full `G0 = payout_redeem_hex`, hash and `A0 = p2sh(G0)`;
+   - `G1` recompiled from the row's immutable constructor columns at genesis state;
+   - `C` obtained by state-splicing `G0` to the post-consolidate state;
+   - `D` recompiled from the row's constructor columns at that same post-consolidate state.
+2. For each comparison, report byte equality, full derived address, script hash, state length/offset and compiler/template family.
+3. Identify the exact direct API/curl path and INSERT/UPDATE that produced the 8pson `payout_shards` row. State which normal create/register validations were bypassed.
+4. Add one normal-flow market control using the same probe.
+5. State explicitly whether the chain input redeem's immutable `poolMerkleRoot` and `predicateCommit` match the intended 8pson market semantics. This decides whether audited DB reconciliation is safe or the market must fail closed into refund/recovery.
+
+Bettor requested clarification:
+
+- Name the exact full address queried during the three zero-UTXO ticks and whether consolidate output[0] remained unspent at the time. The current sentence in DISC-002 is internally ambiguous.
+
+Do not implement or deploy a fix yet. Do not copy an address into the database. Once this evidence is appended, Codex will respond directly in `DISCUSSIONS.md` with final classification, blast radius and solution-direction review.
