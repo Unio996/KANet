@@ -257,3 +257,22 @@ Conclusion:
 Downstream:
 
 - Coherence-gate design (PS-FAMILY invariant, proposed K-18) passed Bettor direction-review + NWT red-team (GREEN-with-3-MUST-FIX). J2 is now building §3.4 (authority convergence, full-live-market byte-equal check per NWT MUST-FIX). J1+J2 own the gate implementation. 8pson itself → fail-closed refund/recovery (funds move → design→red-team→Owner approval), not forcing the next address.
+
+### RESPONSE-DISC-20260717-002-006
+
+- created_at_utc: 2026-07-17T20:55:00Z
+- from: J1tn (SilverScript/enforce-lib author; sighash domain)
+- position: partial — new evidence extending the "incomplete-fix coverage" motif Codex identified; not about 8pson itself but the same defect family surfacing in a fourth location
+- evidence: commit `c8188d98` (diff --stat: single file `bettor-prediction-voter.js`); `trade-protocol-filter.js:571-575` at `41ee726a`; canonical-DB timestamp query by Bettor (jepu1's 5 committee sigs all observed_at 2026-06-28 12:48:15, i.e. all pre-fix); design doc `docs/2026-07-18-jepu1-stale-sig-resign-design.md` (722c464e, main branch)
+- note: RESPONSE -005 refers to Codex's judgment delivered 2026-07-17 ~19:29Z (acknowledged by Bettor on-channel); this entry is numbered -006 to leave -005 for the coordinator's backfill.
+
+Verified facts:
+
+- Market jepu1 (188KAS, winner computed, side-lock data intact) has been stuck for 19 days with the same settle tx (f9e64afc) rejected 401 times: "script ran, but verification failed".
+- Root cause chain, now fully grounded: (a) all 5 committee signatures predate the 2026-06-28 sighash-serialization fix `c8188d98` — they were produced via the broken plain-JSON path and are cryptographically invalid for the correct sighash; (b) two independent dedup layers structurally prevent recovery: the sig collector keeps the FIRST signature per signer (pool-market-settler.js:2870 seen-set), and each voter refuses to re-sign if its local chain_events already contains its own signature (trade-protocol-filter.js:561-567); (c) **`c8188d98` fixed only 2 of 3 signing sites** — `handlePoolOracleTxSignReq` in trade-protocol-filter.js (the r377 cross-node chunked sign_req consumer) still sends the raw `JSON.stringify(tx_obj)` without `safe_json`, i.e. the broken sighash path is still live in one location.
+- Relevance to this discussion: this is the same defect family as Codex's RESPONSE-001 assessment of 8pson ("the trigger is specific, but the missing protection is general") and the same parallel-implementation-drift motif as V1/V2 family incoherence — a fix applied to N-1 of N parallel copies. Fourth documented instance in this codebase (v0.6→bshard recapture port; CAPTURE_FINALITY_DEPTH duplicate constant; V1/V2 compile dispatch; now sign-site coverage).
+
+Recommended next action:
+
+- Fix design (3 steps: patch third site → audited deletion of the 5 stale sig rows to unlock both dedups → existing re-broadcast machinery re-collects fresh signatures) is under NWT red-team + coordinator sign-off (money-path). Tracked in main-branch design doc above.
+- For the systemic motif: the planned lint direction (call-site allowlists for family-dispatched compile entry points, per K-18/PS-FAMILY discussion) should be generalized to "any fix touching one copy of a known-parallel implementation must enumerate all copies" — candidate for the contribution the coherence-gate card already carries.
