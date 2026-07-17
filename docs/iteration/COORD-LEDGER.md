@@ -220,6 +220,14 @@ Owner 元问题:写进文档的铁律(CLAUDE.md 接位 SOP 第5条"设计前查�
 
 ---
 
+## 🎯 治本卡①第一条 recapture 移植 end-to-end 生效(2026-07-17 14:4xZ·demo 验证)
+
+**Owner 治本要求"把 recapture 机制真复制到 bshard"兑现·核心技术目标达成**:
+- **全链路**: 设计 f7cdfe37→方向审+NWT 红队双 GREEN(b615caee)→落码 d521fea8→NWT diff GREEN(ccea4e9b)→装载(console 重启 supervisor 保住=修复版 kanet-start.sh 第二次实战)→demo 盘 8pson 验证。
+- **✅recapture 机制生效铁证(J2+Bettor 双核, 数据+代码双证)**: 8pson 两笔下注 side_lock_daa 由 daemon tick **自动**从 NULL 补上(id35989=62010288/id35990=62010522 真实 accepting-block daa, 非手动 patch)→走经典管线 consolidate 成功(a7d67850 链上)。**机制真复制生效, 新盘自动补, 不是手动**。
+- **⚠完整赔付未落链·第4卡点(covenant 地址派生偏差)另案**: consolidate output 实际地址 pqf80z0w vs daemon 要花 pqr9ufvh vs payout_ps_addr 三地址不匹配(J2 读 tx 坐实, 非 UTXO 时序), 疑 shard21/kr5l4 D-009 派生族, **跟 recapture 无关**。J2 域另案深挖, 今天定格核心成果不硬凑(诚实口径)。
+- **过程教训**: ①执行断层(装载 49min 没人接=Bettor 批令没盯执行真启动, Owner 批"持续跟进怪不了别人", J2 接住)②Bettor 持续跟进主动 dig 出 5 个卡点精确定位(verifying→collecting_sigs 门/zk_native 默认咬/data_source URL/judge 数据源/covenant 派生)缩小 J2 查找面, 逐个揭破③demo 三卡点(zk_native/URL/judge)全是手工建盘漏填 spec 字段(真实盘 create 流程会正确填), 非机制问题。
+
 ## 🔴🔴 治本卡(Owner 2026-07-17 12:45 批"治表没治本"后正式立·不再拖)
 
 > **起因**: Owner"等结算结果+为什么反反复复+仅治表没深挖设计缺陷没治本"。三方(Bettor dig 证据+J2 机制+NWT 横向串联)深挖出**两层真根因**, 非孤立 bug。
