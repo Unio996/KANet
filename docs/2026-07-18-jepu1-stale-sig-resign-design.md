@@ -1,6 +1,6 @@
 # jepu1 陈签名重签修复设计 v0.1(含第三签名站点补丁)
 
-> **Status**: CURRENT(v0.1 设计稿, 待 NWT 红队 + Bettor/Owner 签发——money-path, 移动 188KAS)
+> **Status**: CURRENT(v1.1 — Bettor 方向审 GREEN #pf06l9, 顶格 gate"WC 盘路径分离"已 definitively 坐实(§1.5)+第四站点候选记录(§1.6); 待 NWT 红队 + Bettor/Owner 签发——money-path, 移动 188KAS)
 
 - 作者: J1tn(sighash 域, 6/28 c8188d98 co-diagnose 参与者)· 2026-07-18
 - 派工: Bettor #peri6h(判据数据坐实后授权设计)· 行号锚点 commit: `41ee726a`
@@ -15,6 +15,17 @@
 4. **🔴 第三签名站点漏修(本次新发现, 修复前置)**: c8188d98 只改了 `bettor-prediction-voter.js` 两站点(diff --stat 单文件铁证); **`trade-protocol-filter.js:handlePoolOracleTxSignReq`(:571-575, r377 跨节点 chunked sign_req 消费者)仍用裸 `tx_hex: JSON.stringify(phase2TxObj)` 无 `safe_json:true`** = 坏 sighash 原路径原样活着。不补这条, 重签可能签出新一批坏签名(取决于哪个 handler 接到 req)。这是 c8188d98"并行实现漏同步"母题第三发(同 v0.6→bshard recapture / CAPTURE_FINALITY_DEPTH 家族)。
 
 旁证: 5 笔同秒 12:48:15 = 单节点 localOracles 批量循环一次签完 → **jepu1 的 5 个委员 oracle 极可能全部 local 于 canonical :3200**(落码前用 pool_committee×relay_nodes 一条 SQL 确认, 见 §4-0)。
+
+### 1.5 WC 盘路径分离 = definitively 坐实(Bettor 顶格 gate, 三路证据)
+
+1. **分发键隔离**(J2 全仓 grep 独立坐实): `handlePoolOracleTxSignReq` 全仓仅 2 处调用, 均在 trade-protocol-filter.js 内部, 分发键 = 消息 `type='kanet_pool_oracle_tx_sign_req_v1'`(v0.6/v0.7 经典 oracle 委员协议专属)——bshard 签名走完全不同的消息 type 家族(bshard_close_request 系)。
+2. **bshard daemon 零引用**: `bshard-settle-daemon.mjs` grep `sign_req` 零命中。
+3. **bshard voter 本就 safe**: WC 盘(ajnid/85fit, bshard V1)签名走 `bshard-close-voter.js`:376(V1)/:497(V2), 两处调用 `sign_input_for_settle` **已带 `safe_json: true`**(bshard proven 路, 正是 c8188d98 修复对齐的目标形态)——otp6h 今天完整结算实证。
+→ 结论: 步1 改 `handlePoolOracleTxSignReq` 对 WC 盘**零暴露**(不同消息 type + 不同 voter 文件 + bshard 侧已是 safe_json), 不需要 WC 回归 case, gate 过。
+
+### 1.6 第四站点候选(记录, 不进本案 scope)
+
+`bettor-prediction-settler.js`:618-631(1v1 consensual exchange 结算, maker/taker 双签)同样裸 `JSON.stringify(preimage.tx_obj)` 无 safe_json——同 relay handler 同 plain 路径, 同族风险候选。**未定性**(该路径 tx_obj shape/近期是否有成功案例未查), 不塞进 jepu1 修复, 单独立卡定性(若坏 = c8188d98 母题第四实例实锤; 若其 tx_obj 构造恰好避开 spk 注入问题 = 记录排除依据)。
 
 ## 2. 修法(三步, 依赖序固定)
 
