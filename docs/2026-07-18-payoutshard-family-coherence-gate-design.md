@@ -1,6 +1,6 @@
-# PayoutShard 家族一致性门设计 v0.1(zk_native 铸后禁改 + assertPayoutShardCoherence)
+# PayoutShard 家族一致性门设计 v1.1(zk_native 铸后禁改 + assertPayoutShardCoherence)
 
-> **Status**: CURRENT(v0.1 设计稿, 待 NWT 红队)
+> **Status**: CURRENT(v1.1 — NWT 红队 GREEN-with-3-MUST-FIX 全折入, 见 2026-07-18-NWT-redteam-payoutshard-coherence-gate-design.md; 待 NWT 复核后落码)
 
 - 作者: J1tn(SS covenant/enforce 域)· 2026-07-18
 - 派工: Bettor #p6k49c(治本卡①关联件, J1+J2 SS 域)· 流程: 本稿 → NWT 红队 → GREEN 后落码
@@ -55,13 +55,17 @@ covenant 域第一性原理: P2SH 地址 = redeem 字节的纯函数; genesis tx
 - (c) **recompile byte-equality**: 按 declared 家族分派 `compilePayoutShardRedeem` / `compilePayoutShardV2Redeem`(V2 的 `closeZkTmplAnchor` **从 G0 自身固定 ctor 位解出回喂**, 自含, 不依赖当年 env)— 产物必须 byte-exact == stored `payout_redeem_hex`(genesis 态, `consolidatedPool=PS_SEED`);
 - (d) `p2sh(stored) == payout_ps_addr`。
 - FAIL → 不花费 + `events` 表喊疼(复用既有告警管道, 同 spc-daa-index-monitor 手法)+ 市场标记 blocked 待人工卡。
-- 调用点: ①`ensurePayoutShard`/`V2` 的 **existing-row 早返回分支**(pool-shard-register.mjs:111-112 / :248-249——Codex 点名的"返回既有行不验一致性"缺口); ②`consolidateAndBuildPsState` 使用 ps 行前(bshard-settle-daemon.mjs:675 调用处前置); ③close-transport 的 V2 路径入口。
-- 成本: (c) 是一次 silverc 子进程调用(百 ms 级), 只在 settle 生命周期点跑, 非热路径。
+- **调用点分级(NWT MUST-FIX③, 热路径成本)**——`ensurePayoutShard` 从 `registerBettorOnShard` **每笔下注**调一次(非每市场一次), 早返回分支是真实高频热路径, "非热路径"只对结算生命周期点成立(188s 冻结案同款"调用频率远超预期"病, NWT 读调用链坐实):
+  - 调用点①(`ensurePayoutShard`/`V2` existing-row 早返回分支, pool-shard-register.mjs:111-112 / :248-249, 每笔下注): **只跑便宜三步 (a)(b)(d)**——family 非 unknown + 结构探针 + 地址匹配, 全内存/DB 操作零子进程 spawn。语义 = "确认这行存在且看起来没坏", 不是钱路终闸。
+  - 调用点②(`consolidateAndBuildPsState` 使用 ps 行前, bshard-settle-daemon.mjs:675 前置)+ ③(close-transport V2 路径入口): **完整四步 (a)(b)(c)(d)**——真正动钱之前必过含 recompile 的全量校验, 低频(结算生命周期), 百 ms 级 silverc 子进程成本在此可承受。
+  - 安全性不因分级而降: 花费必经②/③的完整四步; ①省掉的只是对"早已铸好且未被触碰的行"的重复重编译。
+- **(c) 的 anchor 固定 offset 自校验论证(NWT 点①, 非阻塞但必须写进代码注释)**: 即使 V2 ctor 位偏移随未来 .sil 改动漂移导致解出脏 anchor, 紧接着的 recompile byte-equality 必然对不上 stored G0 → check FAIL——失败方向是 fail-closed 错误拒绝(可用性代价), 不是静默认可(安全代价)。这条论证落码时原文写进函数注释, 给后人可复核/可推翻的依据, 区别于 `reference-hardcoded-sil-offset-staleness` 那类"静默产出错值"的旧坑。
 
 ### 3.4 recompile 降级为校验(权威收敛, J2 daemon 域共建)
 
 - `consolidateAndBuildPsState:209` 的 `redeem0` 改为: **stored G0 + splice state**(与 relay/`consolidateAllShards` 同一权威——本来就有现成 splice 代码), 家族分派的 recompile 仅作为 §3.3(c) 校验存在, 不再是花费地址的独立来源。
 - 这是 Codex "prefer one runtime authority" 建议的落地; 属 daemon 行为改动, 设计定向在本稿, 落码归 J2 域(或 J2 审后 J1 落), NWT diff 审必过。
+- **硬性 DoD 前置(NWT MUST-FIX②, 不做不能切换)**: 权威切换前, 对现网**所有处于 verifying/settling 活跃态的 V1 盘**(全量, 非抽样)跑 splice 结果 vs recompile 结果的 byte-exact 对照, **逐行记录**, 全部一致才能真正切默认权威——"理论上 V1 行两者相等"是今天被反复打脸的表述族(`feedback-retry-consistency-proves-determinism-not-correctness`), 必须 live 全量证明, 不做样本推断。
 
 ## 4. 存量与 8pson
 
@@ -70,6 +74,7 @@ covenant 域第一性原理: P2SH 地址 = redeem 字节的纯函数; genesis tx
 
 ## 5. DoD
 
+0. **backfill dry-run 报告 = 硬性前置(NWT MUST-FIX①, 不做不能跑 migration)**: v188 migration 落码前, 先对生产库跑**只读**探针 dry-run, 产出完整报告——总行数 / v1_committee 数 / v2_zk 数 / unknown 数, 并列出 unknown 行对应市场当前 `protocol_status` 是否活跃在途; **人工过一遍报告确认没有活跃在途盘会被打成 unknown, 才能真正执行 migration**。理由: 若 backfill 把在途盘错判 unknown 再被 gate 拒花费 = 治本操作自己制造一批"盘静默卡住"新危机(今天上午同款)。
 1. regression cases(`kasia-console/` 既有测试风格): ①V2-genesis 行 + 标记翻转尝试 → API 400; ②incoherent 行(手工造 V2 redeem + v1 declared)→ assert FAIL + event 落表 + 零花费; ③正常 V1/V2 行全绿; ④backfill 探针对已知家族行判对(拿 a1993=V1 实行 + 8pson=V2 实行当 fixture)。
 2. lint 规则 `R-PS-FAMILY-DISPATCH`: `compilePayoutShardRedeem|compilePayoutShardV2Redeem` 的调用点必须在家族分派/coherence-gate 保护内(白名单机制同既有 R-MANIFEST 系)。
 3. DATABASE.md v188 条目 + ANTI-PATTERNS 追加一条"家族选择器不得可变"。
