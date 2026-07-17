@@ -776,6 +776,14 @@ startBrokerFeeEmitCron();
 import { startSpcDaaIndexStaleCheck } from './services/spc-daa-index-monitor.mjs';
 startSpcDaaIndexStaleCheck();
 
+// K-17 Pre-Prune Capture(2026-07-17, J2, docs/2026-07-17-preprune-capture-invariant-k16-gate-
+// design.md v1.1, NWT 红队 GREEN dd6496b0/369f6679)——j34vb 事故根治: side_lock_daa 独立于结算生命周期
+// 的主动补齐 worker + 独立存活心跳监控(两个定时器互不依赖, worker 挂了监控仍能巡检告警)。
+import { startPrepruneCaptureWorker } from './services/preprune-capture-worker.mjs';
+import { startPrepruneCaptureStaleCheck } from './services/preprune-capture-monitor.mjs';
+startPrepruneCaptureWorker();
+startPrepruneCaptureStaleCheck();
+
 // Phase 4 (T-J2-09): broker-buy-completion-watcher — BUY 闭环, broker 代 accept 后 DM user KAS 到账
 import { startCompletionWatcher } from './services/broker-buy-completion-watcher.js';
 startCompletionWatcher();

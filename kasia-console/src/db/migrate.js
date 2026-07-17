@@ -5476,5 +5476,24 @@ export function runMigrations() {
     }
   }
 
+  // v188 (2026-07-17, J2, K-17 Pre-Prune Capture worker, docs/2026-07-17-preprune-capture-invariant-
+  // k16-gate-design.md v1.1, NWT 红队 GREEN dd6496b0/369f6679): 剪裁前主动补齐 worker 独立存活心跳表,
+  // 镜像 v187 spc_tip_heartbeat 单行模式(worker 自身, 不是 relay tip——两条心跳各自独立, 互不替代)。
+  {
+    const tables = sqlite.pragma('table_list').map((t) => t.name);
+    if (!tables.includes('spc_prune_capture_heartbeat')) {
+      sqlite.exec(`
+        CREATE TABLE spc_prune_capture_heartbeat (
+          id INTEGER PRIMARY KEY CHECK (id = 1),
+          tick_count INTEGER NOT NULL DEFAULT 0,
+          last_scanned_null_rows INTEGER NOT NULL DEFAULT 0,
+          last_recaptured INTEGER NOT NULL DEFAULT 0,
+          updated_at TEXT NOT NULL
+        )
+      `);
+      console.log('[migrate] v188: spc_prune_capture_heartbeat 建表(K-17 剪裁前补齐 worker 独立存活心跳).');
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
