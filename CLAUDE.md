@@ -16,7 +16,26 @@
 - **慎重铁律（D-005）**：ZK 全隔离开发·live 节点原地不动·真上线 = 充分测试后 Owner 拍的独立迁移。
 - **权威记录**：`docs/DECISIONS.md` D-001 + KB `architecture/zk-track-c §9` + memory `reference-zk-committed-rolling-crossnode-deadend`。
 
+## 🔴 铁律 0.6：Economic Kernel 操作化门禁（Owner 2026-07-17 钦定）
+
+**任何涉及市场权威、Oracle / Verifier、结算输入、feeSplit、资金出口、ADMIN 权限、进程分离或 API 收敛的设计 / 代码，动手前必须读：**
+
+→ `docs/2026-07-17-economic-kernel-operationalization-directive.md`
+
+当前硬边界：
+
+- K-16 Fault Containment 进入 v0.1；
+- 单值 T0–T4 Trust Profile 废止为全局表达，改用多轴信任向量；
+- feeSplit 保持单一纯计算核，输入验证统一收敛到 VerifiedSettlementInputs；
+- 新 money-path 无 manifest / 可达出口 / 故障域 / 测试，不得合并；
+- Batch 1 的 C 信任边界、逐端点数据访问矩阵和故障验收未完成前，**禁止直接进行进程拆分与 API handler 收敛**；
+- 禁止用“文档正确”宣称生产系统已经合规。
+
 ## 你必须先读这些文档
+
+0. **Economic Kernel 操作化指令（涉及钱路 / 权威 / 进程必读）** → `docs/2026-07-17-economic-kernel-operationalization-directive.md`
+   - 定义 K-16、多轴 Trust Profile、VerifiedSettlementInputs、money-path manifest、ADMIN capabilities、Batch 1 HOLD 与 P0 顺序
+   - 本文是相关领域当前 Owner 裁决；与旧设计冲突时先报 Bettor，不得自行择旧路执行
 
 1. **开发者指南（唯一权威文档）** → `docs/DEVELOPER-GUIDE.md`
    - 必须先读完再动任何代码。全系统 15 章：架构、消息管道、Mind、交易、Health、UI、市场(8源)、致命陷阱、API速查表
