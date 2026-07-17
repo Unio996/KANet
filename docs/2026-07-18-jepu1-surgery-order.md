@@ -51,6 +51,7 @@ WHERE id IN (<§1 选出的 5 个完整 id 显式列举>);
 ## 4. 手术后验证链(逐步, 全可核)
 
 1. §1 SELECT 重跑 → 0 行(陈签名不再可见于收签器/voter 幂等);
+1b. **孤儿自愈零重放核对**(Gate-B 收敛的 belt-and-braces, NWT bd9b46a2): 改名后下个 tick 日志**不得出现** `per-tick sign_resp re-scan market=...jepu1: N orphan sig(s)`(pool-market-settler.js:914)——双方已证当前 broadcast_messages 无 jepu1 sign_resp(0 笔), 此项防"执行窗前 catch-up 又灌进新行"的时间差变量; 若出现重放 → 立即按 §5 回滚并回频道;
 2. 下个 settle tick 日志 → `waiting spine sigs: input0=0/5`;
 3. 既有 re-broadcast(pool-market-settler.js:2888)按 backoff 自动全员补发 sign_req(等待窗最长 ~12min; 超时未触发再议 one-shot 脚本, 设计稿步3 留了退路);
 4. 5 笔新 `pool_oracle_tx_sig`(observed_at=执行日)落库, voter_pubkey 集合 == 委员五 pk;
