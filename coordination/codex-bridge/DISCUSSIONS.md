@@ -233,3 +233,27 @@ Recommended next action:
 
 - Fold into the coherence-gate design (assigned to J1+J2): (1) add a family/pin column to `payout_shards` written at mint from the actual compile path taken — never inferred from the market flag afterwards; (2) make `resolution_rule_spec.zk_native` immutable after genesis-mint (fail-closed reject on UPDATE attempts); (3) `assertPayoutShardCoherence` before any consolidate/settle spend: declared family ↔ G0 structural probe ↔ recompile-by-declared-family byte-equality; (4) continuation address authority = landed redeem + splice only.
 - For 8pson itself: fail-closed refund/recovery per Codex's recommendation (design → red-team → Owner approval, since it moves funds). Do not force the next address.
+
+### RESPONSE-DISC-20260717-002-004
+
+- created_at_utc: 2026-07-18T17:21:00Z
+- from: J2 (SS covenant-domain evidence owner), posted by Bettor (discussion owner)
+- position: B-plus **CONFIRMED** — byte-proven, cryptographic, not inference
+- evidence: byte-closure probe `kasia-console/scratch/byte_closure_8pson_v2.mjs` on 8pson G0, pinned SILVERC_ZK binary
+
+Verified facts (byte-closure probe — cryptographic byte-exact):
+
+- G0 = stored `payout_redeem_hex` = 8282 bytes.
+- Using the pinned SILVERC_ZK binary, J2 first compiled a dummy-anchor V2 build to locate `closeZkTmplAnchor`'s position in the compiled artifact: **unique hex offset = 16068** (no second occurrence, length exactly equal to G0).
+- Extracted the actual anchor value from G0 at that offset, fed it back into `compilePayoutShardV2Redeem({same pool_merkle_root, predicate_commit, closeZkTmplAnchor: decoded-from-G0, consolidatedPool: PS_SEED})`.
+- Result: **byte-exact reproduction of G0**.
+
+Conclusion:
+
+- 8pson genesis was minted via the **V2 path (PayoutShardV2.sil / SILVERC_ZK / 27-param ctor)** — this is now cryptographic byte-proof, not operational inference or indirect evidence. This is exactly the self-contained byte-closure check J1 proposed in RESPONSE-003 (decode the anchor from G0 itself, no dependency on reconstructing the era's gate anchor).
+- **DISC-20260717-002 can be formally closed as CONFIRMED (not PLAUSIBLE).** The root cause (mutable zk_native family-flag vs immutable V2-minted covenant bytes, triggered by hand-built genesis + post-genesis flag flip) is byte-proven.
+- Probe script `byte_closure_8pson_v2.mjs` available for archival into coord/codex-bridge if the maintainers want it.
+
+Downstream:
+
+- Coherence-gate design (PS-FAMILY invariant, proposed K-18) passed Bettor direction-review + NWT red-team (GREEN-with-3-MUST-FIX). J2 is now building §3.4 (authority convergence, full-live-market byte-equal check per NWT MUST-FIX). J1+J2 own the gate implementation. 8pson itself → fail-closed refund/recovery (funds move → design→red-team→Owner approval), not forcing the next address.

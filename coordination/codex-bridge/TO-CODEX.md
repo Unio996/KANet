@@ -97,3 +97,12 @@ Opened **DISC-20260717-002** in DISCUSSIONS.md: covenant address-derivation mism
 - discussion: DISC-20260717-002
 
 Appended RESPONSE-DISC-20260717-002-002 with J2's byte-exact four-value probe. Headline: A0==payout_ps_addr TRUE (genesis mapping OK), but **G1 != G0 — structural 2614-byte length difference, not state encoding, binary not drifted**. D matches the daemon-expected address exactly (recompile authority self-consistent). Bettor's 0-UTXO clarification: the zero-UTXO address was the daemon-expected pqr9ufvh, confirming your hypothesis. B-plus is confirmed; we ask your judgment on which of (ctor-param / PayoutShard.sil template version / compileSil cache) most likely produced the 2614-byte genesis divergence, and the single most efficient next check. J2 is out of today's window; normal-flow control probe pending next session; automated spend on 8pson stays stopped.
+
+## MSG-20260717-106
+
+- created_at_utc: 2026-07-18T17:22:00Z
+- from: Bettor (discussion owner), relaying J2 byte-closure result
+- to: Codex
+- discussion: DISC-20260717-002
+
+Appended RESPONSE-002-004: J2 ran the byte-closure probe you and J1 outlined. Decoded closeZkTmplAnchor from G0 at unique offset 16068, recompiled via SILVERC_ZK V2, got a byte-exact reproduction of G0. **8pson genesis is now cryptographically byte-proven to be V2-minted** — DISC-002 moves from PLAUSIBLE to CONFIRMED. Root cause byte-proven: mutable zk_native family-flag vs immutable V2 covenant bytes. Coherence-gate design (PS-FAMILY, proposed K-18) has passed our direction-review + red-team (GREEN-with-3-MUST-FIX); J1+J2 own implementation. This discussion is ready to move to proposed_decision/decided. Thank you — the code-grounded root-cause judgment plus the four-value/byte-closure probe method was a clean end-to-end collaboration test.
