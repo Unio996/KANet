@@ -9,6 +9,7 @@
 import { sqlite } from '../db/client.js';
 import { randomUUID } from 'crypto';
 import { FEEDBACK_TOOLS, FEEDBACK_SYSTEM_PROMPT, classifyEscalation, buildFeedbackToolHandlers, validateFeedbackTools } from '../services/feedback-agent-tools.mjs';
+import { checkTestHarnessToken } from '../lib/sim-traffic-marker.mjs';
 
 validateFeedbackTools();   // 启动即自检(H1), 工具面若被意外改坏(如误加身份字段)直接 fail-loud 阻止服务起来。
 
@@ -33,14 +34,14 @@ async function marketStatus(marketId) {
  * openTicket — execution_states 行(type='user_feedback', NWT G1: 不复用 approveExecution/startExecution
  * 那套 money-flow 状态机——反馈工单没有 approved/executing 这两态, 直接最小 INSERT)。
  */
-function openTicket({ bettorPk, linkedAddr, summary, rawText, escalated }) {
+function openTicket({ bettorPk, linkedAddr, summary, rawText, escalated, isSimulated }) {
   const id = randomUUID();
   const now = new Date().toISOString();
   sqlite.prepare(`
     INSERT INTO execution_states
       (id, type, source, agent_address, permission_level, status, action_details, created_at, updated_at)
     VALUES (?, 'user_feedback', 'user_feedback_agent', ?, 'feedback', 'pending', ?, ?, ?)
-  `).run(id, bettorPk || null, JSON.stringify({ linkedAddr, summary, rawText, escalated: !!escalated }), now, now);
+  `).run(id, bettorPk || null, JSON.stringify({ linkedAddr, summary, rawText, escalated: !!escalated, is_simulated: !!isSimulated }), now, now);
   return { ticketId: id };
 }
 
@@ -48,8 +49,11 @@ function openTicket({ bettorPk, linkedAddr, summary, rawText, escalated }) {
  * escalateTicket — 升级投递(Bettor §4 裁定方案B): 只写 events 行, 不直接广播。owner-bot 既有 poller
  * 加一条并行只读轮询源拾取这条 events 代发(硬条件①②见设计 §4, 本卡不实现 owner-bot 侧, 那是独立续卡)。
  * 去重(Bettor 注b): 每工单一次——同一 ticketId 已 escalated 的行不重复写 events。
+ *
+ * S1(2026-07-17): payload_json 镜像 is_simulated, 让 owner-bot pollFeedbackEscalations 直接从
+ * events 行读到, 不用回查 execution_states join(零额外查询开销)。
  */
-function escalateTicket(ticketId, { rawText }) {
+function escalateTicket(ticketId, { rawText, isSimulated }) {
   const row = sqlite.prepare(`SELECT action_details FROM execution_states WHERE id = ?`).get(ticketId);
   let details = {}; try { details = JSON.parse(row?.action_details || '{}'); } catch {}
   if (details.escalated_at) return { alreadyEscalated: true };   // 幂等: 每工单一次
@@ -61,7 +65,7 @@ function escalateTicket(ticketId, { rawText }) {
     INSERT INTO events (id, event_scope, event_type, source, level, summary, payload_json, created_at)
     VALUES (?, 'system', 'feedback_escalated', 'feedback-agent', 'warn', ?, ?, datetime('now'))
   `).run(eventId, `用户反馈工单 ${ticketId.slice(0, 8)} 升级——涉资金或需人工判断`, JSON.stringify({
-    ticket_id: ticketId, raw_text: rawText,   // N1: raw fact, 非 LLM 摘要(NWT 卡B 红队要求)
+    ticket_id: ticketId, raw_text: rawText, is_simulated: !!isSimulated,   // N1: raw fact, 非 LLM 摘要(NWT 卡B 红队要求)
   }));
   return { alreadyEscalated: false, eventId };
 }
@@ -86,7 +90,7 @@ export async function registerFeedbackRoutes(fastify) {
     const events = rows.map((r) => {
       let payload = {};
       try { payload = JSON.parse(r.payload_json || '{}'); } catch {}
-      return { id: r.id, summary: r.summary, created_at: r.created_at, ticket_id: payload.ticket_id || null, raw_text: payload.raw_text || null };
+      return { id: r.id, summary: r.summary, created_at: r.created_at, ticket_id: payload.ticket_id || null, raw_text: payload.raw_text || null, is_simulated: !!payload.is_simulated };
     });
     return reply.send({ ok: true, events });
   });
@@ -94,6 +98,13 @@ export async function registerFeedbackRoutes(fastify) {
   fastify.post('/api/feedback/reply', async (request, reply) => {
     const { tg_user_id, linked_addr, bettor_pk, raw_text } = request.body || {};
     if (!raw_text?.trim()) return reply.code(400).send({ ok: false, error: 'raw_text required' });
+
+    // S1(2026-07-17, KANet-UI, 设计 docs/2026-07-17-s1-support-cases-simulated-traffic-isolation-design.md
+    // NWT GREEN 6ba63748): 模拟流量标记, 与身份/升级判定路径零交叉——只影响 is_simulated 落库,
+    // 不做任何其他事(不绕 H2 重校验/classifyEscalation/anchored 判定, 顺序不变仍在下面照跑)。
+    const harnessCheck = checkTestHarnessToken(request);
+    if (harnessCheck.ok === false) return reply.code(harnessCheck.code).send({ ok: false, error: harnessCheck.error });
+    const isSimulated = harnessCheck.isSimulated === true;
 
     // H2 跨进程再校验: 不信任 tg-bot 声称的 bettor_pk, 从 linked_addr 独立重导出比对(mismatch = fail-closed
     // 只给通用帮助, 同 verify-value-source 精神——上游可能被绕过/传错, console 是最后一道闸)。
@@ -114,8 +125,8 @@ export async function registerFeedbackRoutes(fastify) {
     // H3: 确定性判定在 LLM 调用之前, 对原始文本(未经处理)跑
     const escalated = classifyEscalation(raw_text);
 
-    const { ticketId } = openTicket({ bettorPk: verifiedBettorPk, linkedAddr: linked_addr, summary: raw_text.slice(0, 200), rawText: raw_text, escalated });
-    if (escalated) escalateTicket(ticketId, { rawText: raw_text });
+    const { ticketId } = openTicket({ bettorPk: verifiedBettorPk, linkedAddr: linked_addr, summary: raw_text.slice(0, 200), rawText: raw_text, escalated, isSimulated });
+    if (escalated) escalateTicket(ticketId, { rawText: raw_text, isSimulated });
 
     if (!anchored) {
       return reply.send({ ok: true, anchored: false, ticketId, escalated, reply: '未锚定用户只提供通用帮助——先 /link 你的地址才能查押注记录。' });
@@ -123,7 +134,7 @@ export async function registerFeedbackRoutes(fastify) {
 
     const handlers = buildFeedbackToolHandlers({
       bettorPk: verifiedBettorPk, linkedAddr: linked_addr,
-      myPositions, marketStatus, openTicket: ({ summary }) => openTicket({ bettorPk: verifiedBettorPk, linkedAddr: linked_addr, summary, rawText: raw_text, escalated }),
+      myPositions, marketStatus, openTicket: ({ summary }) => openTicket({ bettorPk: verifiedBettorPk, linkedAddr: linked_addr, summary, rawText: raw_text, escalated, isSimulated }),
     });
 
     try {

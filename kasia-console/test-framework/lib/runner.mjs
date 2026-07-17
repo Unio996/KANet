@@ -741,11 +741,15 @@ const actions = {
   /**
    * T-J2-2026-05-11 Phase 2 B.2 (NWT #18 ABE audit): generic HTTP POST action.
    * 适合 race-condition test (2 concurrent fetch) + API endpoint exercise.
-   * step: { action: 'http_post', url: '/api/...' OR full URL, body?, timeout_ms? } — host 默 127.0.0.1:3200
+   * step: { action: 'http_post', url: '/api/...' OR full URL, body?, headers?, timeout_ms? } — host 默 127.0.0.1:3200
    * (backward compat: step.path 仍接受, 跟 step.url 等价)
    *
    * T-J2-2026-05-12 P0.2 #1/9 extension (NWT spec v0.2 §3): 返 reply 字段 (= JSON.stringify(body) sliced 800)
    * 让 reply_contains / reply_does_not_contain assertion 兼容 + 加 latency_ms + error 字段.
+   *
+   * KANet-UI 2026-07-17 (S1): 加可选 step.headers, 与默认 Content-Type 合并(step.headers 优先级更高,
+   * 但不能覆盖 Content-Type 除非显式传——向后兼容, 现有零 headers 的调用方行为不变)。S1 用它带
+   * X-Test-Harness-Token。
    *
    * returns { ok, status, body, error?, latency_ms, reply }
    */
@@ -759,7 +763,7 @@ const actions = {
     try {
       const r = await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...(step.headers || {}) },
         body: JSON.stringify(step.body || {}),
         signal: AbortSignal.timeout(step.timeout_ms || 10_000),
       });

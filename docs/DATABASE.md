@@ -401,6 +401,14 @@
 **写入方**：action-executor.mjs、trading.js
 **读取方**：Episode 系统、审批 API
 
+**`type='user_feedback'` 场景（feedback.js openTicket, 2026-07-12 卡B）`action_details` JSON 形状**：
+`{ linkedAddr, summary, rawText, escalated, is_simulated, escalated_at? }`。`is_simulated`
+（2026-07-17, S1, 设计 `docs/2026-07-17-s1-support-cases-simulated-traffic-isolation-design.md`）
+= 该工单是否走 `TEST_HARNESS_TOKEN` 标记的模拟流量，只有独立测试凭证校验通过才能置 `true`（不来自
+任意 HTTP body 字段，物理隔离于文本约定）；`events.payload_json`（`event_type='feedback_escalated'`）
+镜像同一个值，供 `owner-bot.mjs pollFeedbackEscalations` 过滤——`is_simulated:true` 的升级完全不
+转发到 `dev-coord-testnet`（不进 Owner 真实身份广播链路，减攻击面优先于隔离频道方案）。
+
 ---
 
 ### pending_actions（3 条）

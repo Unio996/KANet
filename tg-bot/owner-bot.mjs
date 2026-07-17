@@ -81,6 +81,10 @@ async function pollFeedbackEscalations() {
   // 最后一条(数组已升序, 单调不减), 移除字符串比较本身而非试图"修对"它。
   for (const ev of r.events) {
     if (ev.created_at) _feedbackCursor = ev.created_at;   // advance first, 同 pollDevCoord 纪律(发送失败不重放)
+    // S1(2026-07-17, KANet-UI, 设计 docs/2026-07-17-s1-support-cases-simulated-traffic-isolation-design.md
+    // §3, Q2 选 (a) GREEN): 模拟流量升级完全不转发(非隔离频道)——S1 断言目标是 events 行本身符不符
+    // 预期, 不需要真广播才算通过; 减攻击面优先于给 adversarial 内容一个专门展示舞台。
+    if (ev.is_simulated) { console.log(`[owner-bot] Direction C: skip is_simulated ticket ${String(ev.ticket_id || ev.id || '').slice(0, 8)} (S1 隔离, 不转发)`); continue; }
     const ownerRelayId = await resolveOwnerVoiceRelayId();
     if (!ownerRelayId) continue;   // null(Console超时)或''(未配置)= 静默跳过, 下次tick自然重试(后台轮询无需分辨两种失败, 同 Direction A 降级)
     const ticketShort = String(ev.ticket_id || ev.id || '').slice(0, 8);

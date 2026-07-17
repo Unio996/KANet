@@ -20,7 +20,9 @@ payload 下游净化, `8446d4fb`+`b84f5ebd`, NWT 已 GREEN)打的是**同一条�
 这是测试流量标记, 绝不触及任何资金/权限操作)。
 
 - 新 env var: `TEST_HARNESS_TOKEN`(只在测试/开发环境 `kanet.env` 配置, 生产部署不设)。
-- 新文件 `kasia-console/src/lib/test-harness-marker.mjs`, 仿 `admin-secret-tier.mjs` 同款
+- 新文件 `kasia-console/src/lib/sim-traffic-marker.mjs`(落码时改名, 原计划名 `test-harness-marker.mjs`
+  撞 `.gitignore` 的 `test-*.mjs` 规则——那条规则是挡临时测试脚本的, 这个文件是生产代码只是名字
+  凑巧撞上前缀约定, 改名比每次 `git add` 都要 `-f` 强制更干净), 仿 `admin-secret-tier.mjs` 同款
   fail-closed 风格但物理独立(不 import/复用 `checkAdminSecretTier`, 避免"改一个连坐另一个"):
   ```js
   import { timingSafeEqual } from 'crypto';
