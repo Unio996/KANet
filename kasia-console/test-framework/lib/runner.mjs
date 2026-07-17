@@ -915,6 +915,128 @@ const actions = {
     }
     return { row: null, found: false, polled_for_ms: Date.now() - t0 };
   },
+
+  /**
+   * S2 journey (docs/2026-07-17-simulated-user-traffic-framework-v0.1.md §5) — settler-domain
+   * half. Takes the market a persona has just bet into via the real TG flow (ctx.vars.marketId,
+   * shard-or-logical id either way) and manufactures the H2 regression scenario (2 shards, same
+   * bettor_pk + direction, distinct stakes) by adding one synthetic second shard + bettor_sides
+   * row alongside the real one, then writes settle_evidence on the LOGICAL market mirroring
+   * bshard-settle-daemon.mjs:681's real output shape — so the journey's /mybets assertion
+   * exercises the actual read path, not a mock of it.
+   * step: { action: 'settle_journey_market_synthetic', marketId?, personaAddr?, additionalStakeSompi?, totalWinAmountSompi? }
+   *   marketId/personaAddr default to ctx.vars.marketId / ctx.vars.personaAddr.
+   * → { ok, logicalMarketId, secondShardId, txId, winner_details }
+   */
+  async settle_journey_market_synthetic(step, ctx) {
+    const marketId = step.marketId || ctx.vars.marketId;
+    const personaAddr = step.personaAddr || ctx.vars.personaAddr;
+    if (!marketId) return { ok: false, error: 'marketId required (step.marketId or ctx.vars.marketId)' };
+    if (!personaAddr) return { ok: false, error: 'personaAddr required (step.personaAddr or ctx.vars.personaAddr)' };
+    const db = new Database(DB_PATH);
+    try {
+      const kaspa = await import('kaspa-wasm');
+      const bettorPk = kaspa.XOnlyPublicKey.fromAddress(new kaspa.Address(personaAddr)).toString();
+
+      // resolve logical market id whether marketId is a shard id or already logical (mirrors
+      // pool.js:/api/pool/my-positions COALESCE(ms.logical_market_id, s.market_id) pattern)
+      const shardRow = db.prepare('SELECT logical_market_id FROM market_shards WHERE shard_market_id = ?').get(marketId);
+      const logicalMarketId = shardRow?.logical_market_id || marketId;
+
+      const realSide = db.prepare(
+        `SELECT s.market_id AS shard_id, s.direction, s.stake_amount FROM pool_bettor_sides s
+         LEFT JOIN market_shards ms ON ms.shard_market_id = s.market_id
+         WHERE s.bettor_pk = ? AND COALESCE(ms.logical_market_id, s.market_id) = ?`
+      ).get(bettorPk, logicalMarketId);
+      if (!realSide) { db.close(); return { ok: false, error: `no real pool_bettor_sides row for pk=${bettorPk.slice(0, 12)} market=${logicalMarketId}` }; }
+
+      const now = new Date().toISOString();
+      const secondShardId = `${logicalMarketId}-synth${randomUUID().slice(0, 6)}`;
+      const additionalStake = step.additionalStakeSompi != null ? Number(step.additionalStakeSompi) : Number(realSide.stake_amount);
+      // placeholder payout (not real pari-mutuel math — this manufactures H2's split scenario, doesn't validate settlement math)
+      const totalWinAmount = step.totalWinAmountSompi != null
+        ? Number(step.totalWinAmountSompi)
+        : (Number(realSide.stake_amount) + additionalStake) * 2;
+      const txId = (randomUUID().replace(/-/g, '') + randomUUID().replace(/-/g, '')).slice(0, 64);
+
+      const txn = db.transaction(() => {
+        db.prepare(
+          `INSERT INTO pool_markets (id, maker_relay_id, spine_p2sh, market_metadata_hash, deadline, protocol_version, protocol_status, created_at, updated_at)
+           SELECT ?, maker_relay_id, spine_p2sh, market_metadata_hash, deadline, protocol_version, 'shard_internal', ?, ? FROM pool_markets WHERE id = ?`
+        ).run(secondShardId, now, now, logicalMarketId);
+        db.prepare(
+          `INSERT INTO market_shards (logical_market_id, shard_index, shard_market_id, shard_p2sh, status, created_at)
+           VALUES (?, (SELECT COALESCE(MAX(shard_index), -1) + 1 FROM market_shards WHERE logical_market_id = ?), ?, ?, 'settled', ?)`
+        ).run(logicalMarketId, logicalMarketId, secondShardId, `synthetic-p2sh-${secondShardId.slice(-8)}`, now);
+        db.prepare(
+          `INSERT INTO pool_bettor_sides (market_id, bettor_pk, direction, stake_amount, side_p2sh, side_lock_tx, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`
+        ).run(secondShardId, bettorPk, realSide.direction, additionalStake, `synthetic-side-p2sh-${secondShardId.slice(-8)}`, txId, now);
+
+        const winner_details = [{ pk: bettorPk, amount: totalWinAmount, txId }];
+        const market = db.prepare('SELECT metadata FROM pool_markets WHERE id = ?').get(logicalMarketId);
+        let meta = {}; try { meta = JSON.parse(market?.metadata || '{}'); } catch {}
+        meta.settle_evidence = {
+          settled_by: 'test-framework:settle_journey_market_synthetic', close_txid: txId, winners: 1,
+          claim_txids: [txId], winner_details, win_direction: realSide.direction,
+          expected_winners: 1, attempted: 1, complete: true, chain_settled: false, settled_at: now,
+        };
+        db.prepare(`UPDATE pool_markets SET protocol_status = 'completed', metadata = ? WHERE id = ?`).run(JSON.stringify(meta), logicalMarketId);
+      });
+      txn();
+      db.close();
+      return { ok: true, logicalMarketId, secondShardId, txId, winner_details: [{ pk: bettorPk, amount: totalWinAmount, txId }] };
+    } catch (e) {
+      db.close();
+      return { ok: false, error: e.message };
+    }
+  },
+
+  /**
+   * S2 journey settler-domain assertion — reads /api/pool/my-positions for the persona and checks
+   * it against the injected settle_evidence. §4 honesty clause: when >1 winning row exists for the
+   * same market+direction (the H2 scenario this journey manufactures), the summed actual_payout_kas
+   * is EXPECTED to be wrong until H2 lands — this step reports the mismatch as `known_fail_h2` so
+   * the journey can assert on it explicitly instead of silently passing OR hard-failing.
+   * step: { action: 'settler_assert_mybets_consistency', marketId?, personaAddr? }
+   * → { ok, sumPayoutKas, expectedTotalKas, winRowCount, matches, known_fail_h2 }
+   */
+  async settler_assert_mybets_consistency(step, ctx) {
+    const marketId = step.marketId || ctx.vars.marketId;
+    const personaAddr = step.personaAddr || ctx.vars.personaAddr;
+    if (!marketId || !personaAddr) return { ok: false, error: 'marketId + personaAddr required' };
+    const db = new Database(DB_PATH, { readonly: true });
+    const shardRow = db.prepare('SELECT logical_market_id FROM market_shards WHERE shard_market_id = ?').get(marketId);
+    const logicalMarketId = shardRow?.logical_market_id || marketId;
+    const market = db.prepare('SELECT metadata FROM pool_markets WHERE id = ?').get(logicalMarketId);
+    // all shard ids under this logical market, to match /my-positions rows (its market_id = shard id, not logical)
+    const shardIds = new Set(
+      db.prepare('SELECT shard_market_id FROM market_shards WHERE logical_market_id = ?').all(logicalMarketId).map(r => r.shard_market_id)
+    );
+    shardIds.add(logicalMarketId);  // non-bshard / v0.6 markets: market_id IS the logical id
+    db.close();
+
+    let expectedTotalKas = null, bettorPk = null;
+    try {
+      const meta = JSON.parse(market?.metadata || '{}');
+      const kaspa = await import('kaspa-wasm');
+      bettorPk = kaspa.XOnlyPublicKey.fromAddress(new kaspa.Address(personaAddr)).toString();
+      const myWin = (meta.settle_evidence?.winner_details || []).find(w => String(w.pk).toLowerCase() === bettorPk.toLowerCase());
+      if (myWin) expectedTotalKas = Number(myWin.amount) / 1e8;
+    } catch { /* leave null → reported as missing evidence below, not a silent pass */ }
+
+    const res = await fetch(`${CONSOLE_URL}/api/pool/my-positions?linked_addr=${encodeURIComponent(personaAddr)}`, { signal: AbortSignal.timeout(10_000) });
+    const body = await res.json().catch(() => ({}));
+    const rows = (body.positions || []).filter(p => shardIds.has(p.market_id));
+    const sumPayoutKas = rows.reduce((s, p) => s + (Number(p.actual_payout_kas) || 0), 0);
+    const winRows = rows.filter(p => p.did_win === true);
+    const matches = expectedTotalKas != null && Math.abs(sumPayoutKas - expectedTotalKas) < 1e-8;
+
+    return {
+      ok: true, bettorPk, sumPayoutKas, expectedTotalKas, winRowCount: winRows.length, matches,
+      known_fail_h2: winRows.length > 1 && !matches,  // >1 winning row + mismatch = exactly the H2 bug, not a surprise
+    };
+  },
 };
 
 /**
