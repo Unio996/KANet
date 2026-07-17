@@ -693,9 +693,14 @@ async function processPoolRefundDisagreementTxSign(voter) {
         `).get(voter.address, `%"market_id":"${market.id}"%`, `%"input_index":${inputIdx}%`);
         if (existing) continue;
 
+        // 🔴 第五签名站点 safe_json 补修(2026-07-18 J1tn, settle-safe-json.test.mjs 枚举层首跑抓出):
+        // c8188d98 修本文件两站点时连同文件内的这处 refund-disagreement 站点也漏了——裸 JSON =
+        // 同款坏 sighash 路径, 任何 pool refund-disagreement 结算都会撞 verify-failed。同款单源修法。
+        const _safeRdTxHex = await toSettleSafeJsonTxHex(meta.refund_disagreement_tx_obj);
         const signResult = await sendCommandAsync(voter.id, {
           type: 'sign_input_for_settle',
-          tx_hex: JSON.stringify(meta.refund_disagreement_tx_obj),
+          tx_hex: _safeRdTxHex,
+          safe_json: true,
           input_index: inputIdx,
         });
         if (!signResult?.ok || !signResult.signature) {
