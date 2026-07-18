@@ -1,8 +1,8 @@
 # NWT 红队 — jepu1 陈签名软失效手术单审(2026-07-18)
 
-> **Status**: CURRENT(经 22:1x 一轮方法论纠错后双方收敛, 见文末最终结论)
+> **Status**: SUPERSEDED(手术单本身/前置审查结论仍站得住, 但 04:57 实际执行结果推翻了"过了条件5就能落地"的假设——见文末最终状态记录)
 > **对象**: `docs/2026-07-18-jepu1-surgery-order.md`(3ce0e384, J1tn)
-> **verdict**: **🟢 GREEN, 可提交 Owner 签发 — Gate-B(孤儿自愈重放)最终清零复活, Gate-A(console 重启装载)是唯一真前置**
+> **verdict**: **🟡 手术单前置审查部分(selector/locality/Gate-A/Gate-B)结论有效不撤回, 但实际执行未能让 jepu1 落链结算——node 拒签, 诊断转入 J1 深 sighash 域, 今晚不再推进**
 
 ## 独立复算(重复劳动, 但钱路值得)
 
@@ -40,5 +40,13 @@ Bettor 用改名后的真实 orphan-ingest 查询原样精确模拟(筛`kanet_po
 **Gate-A(canonical console 需重启装载 d060e872+b862c6e0)仍然是真实、未清除的前置**——Bettor 实测活着的 console 进程(PID 24696)起于 20:41, 早于两个 sign-fix commit(21:03/21:30), 现进程跑的是修复前代码, 重签前必须先走安全重启装载新码(手术单§0 已明确列出这条, 不是本次新发现)。
 
 **整篇 verdict 恢复 GREEN**: selector/locality/signer 三项双人独立复算吻合, 软失效方案(UPDATE 非 DELETE)正确, 孤儿自愈重放风险最终坐实为零(经过一轮真实的双向纠错, 不是草率认定), "committed≠deployed"前置判断到位且待执行前二次确认。可以提交 Owner 签发, 执行顺序: ①console 安全重启装载两个 commit(Gate-B 已清、Gate-A 待清)→②手术单§1-§3 按序执行。
+
+## 实际执行结果(2026-07-18 04:57, 前置审查有效但落地失败, 记录真实状态而非假装"审完=成功")
+
+Owner 授权后, ①console 重启装载 sign-fix ②手术§1-3 执行(5 行陈签名转 superseded, 断言全过)③自然 re-broadcast 触发 5 委员重签, 全部落到 chain_events④三方(J1/我/J2)独立跑`verify-settle-sigs.mjs`逐字节 sighash 一致、5 笔委员签名 schnorr-verify 全 PASS——**到这一步为止, 本文档前面的所有审查结论都站得住, 没有一步是错的**。
+
+但⑤清 backoff 冻结后, daemon 实际 submit → **node 拒绝, 错误与修复前完全一致**(`f9e64afc...script ran, but verification failed`)。排查排除了两个红鲱鱼(daemon 没用缓存老签名/新签名确实进了 submit 组装; txid 不变是 Kaspa 类 segwit 设计的预期行为, 不是"用了老签名"的证据, 这两条我都独立实测验证过), 但**没有排除"我们的验证器(verify-settle-sigs.mjs)与实际提交路径共享同一个可能有细微偏差的 sighash 派生逻辑, 二者自洽但都偏离 covenant 脚本 OP_CHECKSIG 运行时真正使用的 sighash"这条最危险的假设**——Bettor 精确点出这是条件5 本该防住但没完全防住的那种 vacuous-verification 风险。
+
+**最终状态**: jepu1 今晚**没有结算**, **188KAS 没有移动**(NO TX NO STATE CHANGE 原则成立, 节点拒绝=状态零改变), daemon 已重新进入 backoff, 不会无限重试烧钱路资源。诊断转入 J1 的深 sighash 域(covenant 脚本运行时 sighash vs 通用交易级 sighash 是否存在细微差异), 今晚不再推进, 不因为"已经审了好几轮"而在最后一步硬赶。这是"前置审查全部正确+最后一步真实卡住"的诚实记录, 不是本文档任何一处审查结论的推翻。
 
 — NWT 2026-07-18
