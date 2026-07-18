@@ -988,7 +988,26 @@ export async function unlockPoolSpineP2SH(args) {
     const allScriptSigs = [...spineScriptSigs, ...sideScriptSigs];
 
     let signedTx;
-    if (txObjPreimage) {
+    if (txObjPreimage && args.txObjPreimageSafeJson) {
+      // 🔴 submit侧safe_json补修(2026-07-18 J1tn, jepu1 413次VerifyError终诊·c8188d98孪生构造点):
+      // 下面plain分支的new Transaction(parsed)只补水BigInt, plain-object scriptPublicKey原样透传——
+      // 新kaspa-wasm下spk不被正确注入(c8188d98根因原文), 提交的wire tx outputs被碾→节点算的
+      // outputs_hash≠委员签名时的→runtime sighash≠离线验证值→5 checkSig全false→require①
+      // VerifyError, 且⑥⑦输出spk require同步死——重签无效413同错的真根。
+      // 修法: preimage以safe_json字符串到达(console侧toSettleSafeJsonTxHex转), 在safe-json的
+      // 平铺JSON结构里注入scriptSig(纯JSON编辑=注入必持久, 本机round-trip三项验证过:
+      // sig persisted/spk preserved/value preserved), 再走proven deserializeFromSafeJSON路
+      // (relay.mjs sign_input_for_settle safe_json分支同型)构造——spk/covenant/outpoint全保。
+      // 同族未修站点(规则64枚举, 各为独立live钱路分批审): unlockP2SHMultiSig:473/
+      // unlockP2SHConsensual:597/refund-disagreement路径——本批只修jepu1关键路径, 余立卡。
+      const safeObj = JSON.parse(txObjPreimage);
+      const txPart = safeObj.transaction || safeObj;
+      if (!Array.isArray(txPart.inputs) || txPart.inputs.length !== allScriptSigs.length) {
+        throw new Error(`safe_json preimage inputs ${txPart.inputs?.length} != scriptSigs ${allScriptSigs.length} — 拒绝错位注入`);
+      }
+      txPart.inputs.forEach((inp, i) => { inp.signatureScript = allScriptSigs[i]; });
+      signedTx = Transaction.deserializeFromSafeJSON(JSON.stringify(safeObj));
+    } else if (txObjPreimage) {
       const parsed = JSON.parse(JSON.stringify(txObjPreimage));
       parsed.lockTime = BigInt(parsed.lockTime || 0);
       parsed.gas = BigInt(parsed.gas || 0);

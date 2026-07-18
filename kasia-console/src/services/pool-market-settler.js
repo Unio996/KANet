@@ -3064,7 +3064,13 @@ async function handleCollectingSigs(market) {
       winner: meta.phase2_winner,
       sides_merkle_root: market.sides_merkle_root,
       unanimous: meta.phase2_unanimous,
-      tx_obj_preimage: meta.phase2_tx_obj,
+      // 🔴 submit侧safe_json补修(2026-07-18 J1tn, jepu1 413次VerifyError终诊): c8188d98修了签名侧的
+      // new Transaction(plain) spk碾坏, 但relay unlockPoolSpineP2SH(p2sh.mjs:991)的提交侧孪生构造点
+      // 漏了——committee签的是tx_obj的sighash, 但提交的wire tx经plain构造spk被碾→节点outputs_hash≠
+      // 签名时→checkSig全false→VerifyError。修法同款: console侧转safe_json, relay侧走proven
+      // deserializeFromSafeJSON路(relay.mjs sign_input_for_settle safe_json分支同型)。
+      tx_obj_preimage: await (await import('../lib/settle-safe-json.mjs')).toSettleSafeJsonTxHex(meta.phase2_tx_obj),
+      tx_obj_preimage_safe_json: true,
       ...v06Extras,
     });
 

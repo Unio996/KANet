@@ -821,6 +821,9 @@ if (process.send) {
             networkId: wallet.getNetworkId(),
             lockTime: BigInt(cmd.lock_time || 0),
             txObjPreimage: cmd.tx_obj_preimage || null,
+            // 2026-07-18 J1tn submit侧safe_json补修(c8188d98孪生, 见p2sh.mjs:991注释): true时
+            // tx_obj_preimage是safe_json字符串, p2sh走deserializeFromSafeJSON构造(spk全保)。
+            txObjPreimageSafeJson: cmd.tx_obj_preimage_safe_json === true,
             committee_data,
             settleEntrypoint: cmd.settle_entrypoint || 0,  // #31 ④a: 1 = v08 settle_aggregate (entry1); 0 = v05/06/07 / v08 chunk
           });
