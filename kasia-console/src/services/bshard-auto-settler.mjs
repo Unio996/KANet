@@ -23,7 +23,7 @@ import { _shard9PhantomExcludeFor } from './bshard-close-voter.js';
 import { computePariMutuelPayout } from '../lib/pool-shard-settle.mjs';
 import { deriveRoleFeeLeaves } from '../lib/fee-split.mjs';
 import { payoutRoot as buildPayoutRoot, payoutLeaf, merkleProof, climbProof } from '../lib/pool-payout-root.mjs';
-import { deriveCommitteeSeed, selectCommittee } from './pool-committee-sampler.mjs';
+import { deriveCommitteeSeed, deriveRefundCommitteeSeed, selectCommittee } from './pool-committee-sampler.mjs';
 import { compilePayoutShardRedeem, REORG_SAFE_MIN_DEPTH } from '../lib/pool-shard-register.mjs';
 import { buildPoolMerkleTree, getPoolMerkleProof } from './pool-merkle-v06.mjs';
 import { blake2b } from '@noble/hashes/blake2b';
@@ -659,13 +659,17 @@ export async function computeRefundPlan(marketId, ctx) {
   const refundLeaves = bets.map(b => ({ pk: b.pk, amount: String(b.stake) }));
   const refundRootHex = buildPayoutRoot(refundLeaves).toString('hex');
 
-  // committee VRF — 跟 computeSettlePlan 完全同款逻辑(确定性 seed, excludePks 含 bettor)。
+  // committee VRF — REFUND-PATH-ONLY: 用 deriveRefundCommitteeSeed(无 endBlockHash 依赖),
+  // 不跟 computeSettlePlan 共用 seed 派生(2026-07-18 kr5l4/aukqt 危机: endBlockHash 对预 K-17
+  // 老盘的 deadline_daa 可能物理裁剪不可达, cancel_attest covenant 本就不验 seed 只验 merkle
+  // membership, 见 deriveRefundCommitteeSeed 文档注释)。poolMembers 本就只按 poolMerkleRoot
+  // 查 oracle_pool_chain_view, 从不依赖 deadline_daa/endBlockHash, 这里的 deadline_daa 参数
+  // 只是历史签名多余传参(poolMembers 实现忽略第二参), 保留不改动调用形状。
   const poolMerkleRoot = market.pool_merkle_root;
-  const endBlockHash = await ctx.endBlockHash(Number(market.deadline_daa));
   const members = await ctx.poolMembers(poolMerkleRoot, Number(market.deadline_daa));
   const bettorPks = [...new Set(bets.map(b => b.pk.toLowerCase()))];
   const excludePks = [String(market.maker_pk).toLowerCase(), String(market.broker_pk).toLowerCase(), ...bettorPks];
-  const seed = deriveCommitteeSeed(marketId, endBlockHash, poolMerkleRoot);
+  const seed = deriveRefundCommitteeSeed(marketId, poolMerkleRoot);
   const sel = selectCommittee(members, seed, { excludePks });
   const asc = [...sel.selected].map(c => c.pk_hex).sort();
   const committeePkHash = Buffer.from(blake2b(Buffer.concat(asc.map(p => Buffer.from(p, 'hex'))), { dkLen: 32 })).toString('hex');
@@ -687,7 +691,7 @@ export async function computeRefundPlan(marketId, ctx) {
   return {
     ok: true, isBshard, betCount, refundRoot: refundRootHex, refunds: refundLeaves,
     poolSompi, committee: asc, committeeMeta, committeePkHash, expectedCancelledAddr,
-    _dbg: { seed: seed.toString('hex'), endBlockHash, poolMerkleRoot, memberCount: members.length, excludePks },
+    _dbg: { seed: seed.toString('hex'), seedKind: 'refund-marketId-poolMerkleRoot', poolMerkleRoot, memberCount: members.length, excludePks },
   };
 }
 

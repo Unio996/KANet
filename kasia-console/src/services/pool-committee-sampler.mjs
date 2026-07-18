@@ -53,6 +53,31 @@ export function deriveCommitteeSeed(marketId, endBlockHashHex, poolMerkleRootHex
 }
 
 /**
+ * REFUND-PATH-ONLY seed = blake2b(marketId || poolMerkleRoot) — no endBlockHash.
+ *
+ * 2026-07-18 J1/Bettor co-verify (kr5l4/aukqt semifinal refund crisis): endBlockHash
+ * requires a live block at deadline_daa, which for markets predating the K-17
+ * pre-prune-capture worker can be physically pruned by the node (backward walk
+ * exhausted, index covered:true entries proven stale via direct RPC — see channel
+ * history 2026-07-18 ~13:00-14:00). This is safe ONLY for refund because
+ * PayoutShardV2.sil's cancel_attest entry never validates the seed on-chain — it only
+ * checks (a) validSigs>=4 4-of-5 checkSig, (b) 5 distinct committee pks,
+ * (c) blake2b(pks)==committeePkHash, (d) merkle membership of each pk vs the
+ * ctor-baked poolMerkleRoot. The seed is purely an off-chain VRF input for "which 5
+ * members get asked to sign" — cross-node determinism (same seed → same 5 members)
+ * is the only requirement, and marketId+poolMerkleRoot are both already ctor-baked/
+ * publicly known, so this is deterministic across nodes without needing a
+ * deadline-anchored block hash. MUST NOT be used for settlement (that still needs
+ * endBlockHash to prevent maker-grinding the seed pre-deadline).
+ */
+export function deriveRefundCommitteeSeed(marketId, poolMerkleRootHex) {
+  if (!marketId || typeof marketId !== 'string') throw new Error('marketId required (string)');
+  const rootBuf = hexToBuf(poolMerkleRootHex);
+  if (rootBuf.length !== 32) throw new Error(`poolMerkleRoot must be 32 bytes hex, got ${rootBuf.length}`);
+  return b2b(cat(Buffer.from(marketId, 'utf8'), rootBuf));
+}
+
+/**
  * Stake-weighted linear sampling WITHOUT replacement.
  *
  * Input:
