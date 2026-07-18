@@ -42,11 +42,14 @@ cancelMarketLive:720 要 consolidated PS。kr5l4 卡 DB-lag → getUtxos 自愈�
 3. **aukqt endBlockHash**: deadline 58695372 墙下方+cannot find header → committee 选不了 → 即使 V1 cancelMarketLive 也卡 computeRefundPlan:664。aukqt 需独立评估(fallback/人工)。
 4. relay `bshard_cancel_attest` V2 家族支持(§3.2)。
 
-## 7. committee endBlockHash 三盘分野
+## 7. committee endBlockHash 三盘分野(J2 RPC 直核订正)
 
-- j34vb: 61421827 墙上方+index 回填✓ → 可选
-- kr5l4: 60722281 墙下但 covered:true 有 hash → 可选
-- aukqt: 58695372 墙下+cannot find header → ✗(见 §6.3)
+⚠ 早前"kr5l4 covered:true 有 hash 可选"是 **index 假阳性**——J2 直接 RPC 核 kr5l4 的 index hash(e5ec9d1a…)**同样 cannot find header**(index 记了但节点已裁,同 aukqt/j34vb-8bettor)。订正:
+- j34vb: deadline 61421827 墙上方 + index 回填(J2 RPC 核过 canonical block 真存在)→ **committee 真可选**(唯一)。
+- kr5l4: deadline 60722281 墙下 + index hash RPC 核=cannot find header → **committee endBlockHash 拿不到**(假阳性, 非可选)。
+- aukqt: 58695372 墙下 + cannot find header → 拿不到。
+
+**含义(退款也要 committee 签 cancel_attest → 需 endBlockHash 选 committee)**: kr5l4/aukqt 的 endBlockHash 墙下不可得 → deriveCommitteeSeed 算不了 → cancel_attest 的 committee 选不出 → **V2/V1 退款编排本身也卡在 committee 选择这步**。这是三盘退款的**共同新障碍**(不只 aukqt), 比 §6.3 原判更广。**退款前必须先解 endBlockHash 不可得下如何选 committee**: fallback seed(用别的确定性锚?)或人工指定 committee 或协议层豁免——**这是三盘退款的头号未决, 升到 §6 待确认之首**。仅 j34vb 的 endBlockHash 真可得(墙上方), 可能只有它能走标准 committee 退款路。
 
 ## 8. DoD
 
@@ -68,5 +71,3 @@ cancelMarketLive:720 要 consolidated PS。kr5l4 卡 DB-lag → getUtxos 自愈�
 4. §6.3 aukqt endBlockHash;
 5. refund_claim V2 state 4 尾随字段透传;
 6. J2 settler 域分工(复用现成骨架)。
-</parameter>
-</invoke>
