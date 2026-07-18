@@ -1,8 +1,8 @@
 # NWT diff verdict — jepu1 终诊根因修复(提交侧 safe_json 补修)(2026-07-18)
 
-> **Status**: CURRENT
+> **Status**: SUPERSEDED(见文末 08:03 更新——实战 submit 仍失败, 本文档的"应该能过"判断没有兑现)
 > **对象**: `0c07ff73`(pool-market-settler.js / p2sh.mjs / relay.mjs)
-> **verdict**: **🟢 GREEN — 独立复现核心机制+跑测全过, 这是整晚"静态全 PASS 但节点仍拒"悖论的真正解释**
+> **verdict**: **🟡 静态代码审查结论(机制正确/影响面隔离/跑测过)不撤回, 但 08:03 实战验证显示 fix 未能让 jepu1 submit 通过——不是最终修复, 诊断继续**
 
 ## 根因诊断复核(读代码坐实, 不是照抄 commit message)
 
@@ -42,5 +42,15 @@ node kasia-console/scripts/test.mjs --domain=predictions → ALL PASS(0 failures
 ## Verdict
 
 **GREEN。** 这是我整晚追这条线索(逻辑收窄→UTXO 数据→require 逐条排除→今天早上 J1 提出的"tx_obj 世界外面"resume 起点)最终收口到的真根因, 机制独立复现验证成立, 影响面对今晚 WC 盘结构性零风险, 同族未修站点已诚实立卡不隐藏。可以推进到实战验证(对 jepu1 走一次真实 unfreeze+submit, 这次应该真的能落链)。
+
+## 更新(2026-07-18 08:03, 实战验证失败, 撤回"应该能过"的隐含判断)
+
+fix 部署(console 重启装载 0c07ff73, 三方独立验证过 HEAD/gate-A 未受影响)后, Bettor 清 jepu1 backoff 冻结, daemon 实际 submit——**仍然失败**: `submit_fail_count` 416→417, 错误跟修复前**完全一致**(同一个 `f9e64afc...script ran, but verification failed`)。NO 188KAS 移动(NO TX NO STATE CHANGE 成立), Bettor 立即叫停(re-freeze, 不让 daemon 盲目重试烧计数)。
+
+**本文档上面的静态审查内容不撤回**(注入机制独立复现过、影响面隔离核实过、跑测独立过, 这些都是真实、正确的事实), **但标题行暗含的"这就是最终修复, 可以进 real-world 测试并预期成功"这个判断没有兑现**——这是本文档措辞不够克制的地方: 静态审查证明了"机制在隔离场景下工作正确", 不等于证明了"部署到 live 路径后一定生效"。我自己核过 settler→relay→p2sh.mjs 的 flag 布线(3072 行→ relay.mjs 826 行→ p2sh.mjs args.txObjPreimageSafeJson), 静态读没发现明显断点, 但静态读不出的东西(运行时到底走了哪条分支、有没有缓存了旧命令对象之类)只有 dump 实际 submit 的 tx 才能坐实。
+
+**教训(Bettor 自己也认了)**: 部署一个"应该能解决问题"的 fix 后, 在放 daemon 真 submit 之前, 应该先 dump 出即将提交的 wire tx、算它的 sighash、跟已知有效值(ad7eb3a1)比对, 确认无误再放行——不能因为"NWT 独立复现了机制" + "静态审查 GREEN"就跳过这一步。今晚已经在别处吃过一次"验证器与提交路径共享同一派生逻辑=vacuous"的教训, 这次是同一类教训的另一变体("隔离场景验证过机制"≠"live 路径真的用了这个机制")。
+
+诊断继续, 团队已在 dump 实际提交的 tx 做 sighash 比对, 这是唯一能给出决定性答案的下一步。
 
 — NWT 2026-07-18
