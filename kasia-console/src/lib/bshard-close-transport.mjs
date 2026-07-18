@@ -273,10 +273,22 @@ export async function buildProposeCloseRequestV2(marketId, judged) {
       const { REORG_SAFE_MIN_DEPTH } = await import('./pool-shard-register.mjs');
       const landedFn = async (txid, addr) => { for (let i = 0; i < 25; i++) { const j = await sendCommandAsync(settlerRelayId, { type: 'check_utxo_landed', address: addr, txid, minDepth: REORG_SAFE_MIN_DEPTH }, 20000); if (j.landed || j.found) return true; await new Promise(r => setTimeout(r, 2000)); } return false; };
       const transferFn = async (addr, sompi) => { const r = await transferAndConfirm(settlerRelayId, addr, (Number(sompi) / 1e8).toFixed(8), { minDepth: REORG_SAFE_MIN_DEPTH, maxWaitMs: 60000 }); return r.txId; };
+      // 🔴 DB-lag 自愈补齐(2026-07-18 J1tn, kr5l4 consolidate "UTXO not found @ genesis 地址" 根治·规则64):
+      //   ZK 结算路径此前【漏传 getUtxos】——经典路径 consolidateAndBuildPsState(bshard-settle-daemon.mjs:172)
+      //   传了 probeUtxos 启用 autoDetectConsolidateResume, 但这条 ZK propose 路径没传, 自愈不触发。后果:
+      //   consolidate 中途某片失败没把 payout_ps_outpoint 写回 DB 时(lv3rz/dyljb/kr5l4 同族), 重试从 DB 陈旧
+      //   genesis payout_redeem_hex(consolidated_pool=PS_SEED)派生错地址, 在错地址找不到 UTXO 撞 shard0 no land
+      //   ——钱其实在链上真实 post-splice 地址一分没丢, 只是地址算错(pool-shard-settle.mjs:331-336 注释)。补
+      //   getUtxos 后自愈从 genesis 逐片 splice 探链上真实 tip, 从正确位置续 consolidate。经 relay
+      //   get_address_utxos(Console 不碰链, 只读查询)。这是 recapture 移植 d521fea8 同族的 ZK 漏抄补齐。
       const consolidateRes = await consolidateAllShards({
         db: sqlite, rc, landed: landedFn, p2sh: p2shFn, logicalMarketId: marketId,
         payoutShard: { payout_redeem_hex: ps.payout_redeem_hex, payout_ps_outpoint: ps.payout_ps_outpoint, payout_cov_id: ps.payout_cov_id },
         relayAddr: relayAddrForConsolidate, transfer: transferFn, deadline: Number(market.deadline),
+        getUtxos: async (addr) => {
+          const r = await sendCommandAsync(settlerRelayId, { type: 'get_address_utxos', address: addr }, 15000);
+          return r?.utxos || [];
+        },
       });
       // 🔴 STOP修正(NWT红队抓到, 2026-07-08): 第一版这里错调了 compilePayoutShardRedeem(V1专属, silverc
       // 重新走ctor编译)——pxvml是V2市场, V1重编译出的redeem字节结构跟链上实际V2 P2SH对不上, 且V1编译器

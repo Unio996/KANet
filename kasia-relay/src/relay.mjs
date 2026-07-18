@@ -1161,6 +1161,19 @@ if (process.send) {
           return;
         }
 
+        case 'get_address_utxos': {
+          // 2026-07-18 J1tn (kr5l4 consolidate DB-lag 自愈): 返回地址活 UTXO 列表(outpoint+amount),
+          //   供 console 侧 buildProposeCloseRequestV2→autoDetectConsolidateResume 探测 consolidate 真实
+          //   tip(DB payout_ps_outpoint 陈旧时从链上真实位置续)。纯只读, 不签不广播不动钱。
+          const { getAddressUtxos } = await import('./lib/p2sh.mjs');
+          const wallet = getWallet();
+          const utxos = await getAddressUtxos(cmd.address, wallet.getNetworkId());
+          if (cmd.requestId && process.send) {
+            process.send({ requestId: cmd.requestId, result: { ok: true, utxos } });
+          }
+          return;
+        }
+
         case 'prediction_settle_build_preimage': {
           // Phase 4a Sub 8 step 4 (Bettor r242) — maker_relay builds unsigned TX for Phase 2 DM dispatch.
           // Returns tx_obj that voters use as input to sign_input_for_settle IPC.

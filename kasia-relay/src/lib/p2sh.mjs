@@ -1508,6 +1508,27 @@ export async function checkUtxoLanded(address, txid, networkId, minDepth = 0) {
   }
 }
 
+// getAddressUtxos — 地址活 UTXO 列表(outpoint+amount 归一), 供 console 侧 autoDetectConsolidateResume
+//   探测 consolidate 真实 tip 用(2026-07-18 J1tn, kr5l4 consolidate DB-lag 自愈补齐)。纯只读 RPC 查询,
+//   不签不广播不动钱。live UTXO 不受历史块剪裁影响(同 checkUtxoLanded addr-only 模式注释: 剪裁删历史
+//   区块记录不删活 UTXO 集)。归一 outpoint/amount(kaspa-wasm entry 字段多路 fallback, 同 checkUtxoLanded
+//   L1500 惯用法)——autoDetectConsolidateResume 只读 utxos[0].outpoint.{transactionId,index}, 不用再 norm。
+export async function getAddressUtxos(address, networkId) {
+  const rpc = await connectRpc(networkId);
+  try {
+    const { entries } = await rpc.getUtxosByAddresses([address]);
+    return (entries || []).map(e => {
+      const op = e.outpoint ?? e.entry?.outpoint ?? e.utxoEntry?.outpoint;
+      return {
+        outpoint: op ? { transactionId: op.transactionId, index: Number(op.index || 0) } : null,
+        amount: String(e.amount ?? e.utxoEntry?.amount ?? e.entry?.amount ?? 0),
+      };
+    }).filter(u => u.outpoint);
+  } finally {
+    try { await rpc.disconnect(); } catch {}
+  }
+}
+
 // ── 9. bshard M3 fold-carries-KAS relay handlers (J1, 2026-06-15) ──
 //
 // e2e-blocker 补齐: builders 产 command(action=bshard_register_bet/claim_winner/refund_cancelled), 本组 unlock 函数

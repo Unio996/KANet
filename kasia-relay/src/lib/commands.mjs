@@ -63,6 +63,7 @@ export const COMMAND_TYPES = Object.freeze({
   POOL_V07_COMPUTE_REFUND_MASS: 'pool_v07_compute_refund_mass',
   // B2 v0.5 Phase 3 bug 7 fix — confirm transfer UTXO landed in accepted set.
   CHECK_UTXO_LANDED: 'check_utxo_landed',
+  GET_ADDRESS_UTXOS: 'get_address_utxos',   // 2026-07-18 J1tn kr5l4 consolidate DB-lag 自愈: 地址活 UTXO 列表(只读查询)
   // ③ committee chainReader (Bettor r170 + J1 r204/649197d) — Console wraps as chainReader.
   // J1 r204 漏 register 白名单, validateCommandPayload reject silent → relay log "INVALID COMMAND" + settler "Relay not running". KI sediment 5/20 复刻 (relay.mjs L688 pattern), KANet-UI r365 补.
   CHAIN_GET_CURRENT_DAA_SCORE: 'chain_get_current_daa_score',
@@ -142,6 +143,7 @@ export const COMMAND_PAYLOAD_SCHEMA = Object.freeze({
   //   caller 省 txid = addr-only 存在性查询(per-ticket anti-swap 用法, 不比对特定 tx, 只问"这地址现在有没有
   //   UTXO"); 传 txid = 精确匹配(原行为, 命门①chain-bound 等场景不变)。
   [COMMAND_TYPES.CHECK_UTXO_LANDED]: ['address'],
+  [COMMAND_TYPES.GET_ADDRESS_UTXOS]: ['address'],
   // ③ committee chainReader — get current DAA score 不需 payload field; get blocks 需 min_daa_score.
   [COMMAND_TYPES.CHAIN_GET_CURRENT_DAA_SCORE]: [],
   [COMMAND_TYPES.CHAIN_GET_BLOCKS_FROM_DAA_SCORE]: ['min_daa_score'],
@@ -211,6 +213,7 @@ export const COMMAND_FIELD_TYPES = Object.freeze({
   [COMMAND_TYPES.POOL_SIDE_REFUND_CANCELLED_TX]: { side_p2sh_address: 'string', side_redeem_script_hex: 'string', required_input_outpoint: 'object', output: 'object' },
   [COMMAND_TYPES.POOL_V07_COMPUTE_REFUND_MASS]: { spine_p2sh: 'string', spine_lock_tx: 'string', spine_redeem_script_hex: 'string', maker_address: 'string', maker_stake: ['string','number'], deadline: ['string','number'] },
   [COMMAND_TYPES.CHECK_UTXO_LANDED]: { address: 'string', txid: 'string' },
+  [COMMAND_TYPES.GET_ADDRESS_UTXOS]: { address: 'string' },
   [COMMAND_TYPES.STAKE_UNLOCK_TX]: { p2sh_address: 'string', redeem_script_hex: 'string', to_address: 'string', lock_time: ['string', 'number'] },
   // bshard M3: 三块 object (witness 含 push 值 + ps_prefix/suffix; inputs 含 redeem/outpoint/current_state; outputs 含 state/amount).
   [COMMAND_TYPES.BSHARD_REGISTER_BET]: { witness: 'object', inputs: 'object', outputs: 'object' },
