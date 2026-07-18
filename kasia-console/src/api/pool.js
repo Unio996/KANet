@@ -3062,7 +3062,16 @@ export async function registerPoolRoutes(fastify) {
         no_implied_prob: total > 0 ? noPoolSompi / total : null,
       };
     });
-    return reply.send({ ok: true, total, count: markets.length, limit, offset, markets });
+    // 2026-07-18 KANet-UI(NWT default-safe纠偏, #qdp8zc): tg-bot /bet 搜索(prediction-menu.mjs
+    // search_input → console-api.mjs poolMarkets)走的正是这条端点, 之前没接 availableMarkets 那份
+    // HIDDEN_BROKEN_MARKET_IDS denylist——搜'france'/'spain'能搜到3mzoh/ysgpv(V2 covenant家族、
+    // cancelMarketLive V1-only拦退款, 今晚结算不了), 真用户可能误押。默认过滤(fail-safe: 忘传参数=
+    // 用户看不到坏盘, 而非相反); ops/诊断需要看全量传 ?include_hidden=1(J1/J2 平时按精确 id 直查坏盘,
+    // 不依赖这条列表端点, 默认过滤对现有 ops workflow 零成本)。同一份 Set(69行), 非新拷贝。
+    const filteredMarkets = String(q.include_hidden) === '1'
+      ? markets
+      : markets.filter((m) => !HIDDEN_BROKEN_MARKET_IDS.has(m.id));
+    return reply.send({ ok: true, total, count: filteredMarkets.length, limit, offset, markets: filteredMarkets });
   });
 
   // GET /api/pool/logical-markets — KANet-UI 分片对用户透明 (bshard B + self-claim C, Owner 2026-06-15 #1 directive).
