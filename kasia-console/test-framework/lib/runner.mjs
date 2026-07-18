@@ -921,6 +921,199 @@ const actions = {
   },
 
   /**
+   * S2 journey (docs/2026-07-17-simulated-user-traffic-framework-v0.1.md §5) — tg 入口半(KANet-UI
+   * 域)。走真实 tg-bot handler 管线(bot.handleUpdate, 同 dm-bet-e2e.mjs/l2-handler.test.mjs 那条
+   * 生产 handler 表面, 非替代品)从 /link 到 /bet 菜单到 confirm, 再从 persona 自己的 relay 自动
+   * 付款到 side_p2sh(身份必须是 persona 真实钱包, 不能走 /api/agent/reply 的 to_relay_id 语义——
+   * 那条绑定的是接收方 relay, 不是下注人自己, 会让下游 settler_assert_mybets_consistency 派生
+   * 出来的 bettor_pk 查不到真实 bet 行), 等锁上链落地, 再驱动 register-v06/confirm, 最后核实
+   * pool_bettor_sides 行真的归属这次付款(不是 side_p2sh 碰撞到别的历史行)。
+   *
+   * 逻辑逐字 port 自 tg-bot/test/dm-bet-e2e.mjs(独立脚本已验证过身份绑定正确, 这里改造成
+   * ctx.vars 驱动的 action 好接入 S2 journey case, 不是重新设计一套)。
+   *
+   * step: { action: 'tg_place_bet', marketId, side: 'YES'|'NO', stakeKas, personaRelayId?, tgUser? }
+   *   personaRelayId 默认 AutoBetter-1(ecb15318-cbb0-4335-aff7-a549f870b7f8, 同 dm-bet-e2e.mjs 默认值)。
+   * → { ok, marketId, personaAddr, sidePsh, direction, lockTx, merkleIndex, stakeSompi }
+   *   成功时写 ctx.vars.marketId / ctx.vars.personaAddr, 给后续 settler 域 action 读。
+   */
+  async tg_place_bet(step, ctx) {
+    const PORT = process.env.PORT || 3200;
+    const CONSOLE = `http://127.0.0.1:${PORT}`;
+    const marketId = step.marketId;
+    const side = String(step.side || 'YES').toUpperCase();
+    const stakeKas = Number(step.stakeKas || 1);
+    const personaRelayId = step.personaRelayId || 'ecb15318-cbb0-4335-aff7-a549f870b7f8';
+    const tgUser = String(step.tgUser || '990001');
+    if (!marketId) return { ok: false, error: 'marketId required' };
+    if (side !== 'YES' && side !== 'NO') return { ok: false, error: "side must be YES or NO" };
+
+    const db = new Database(DB_PATH, { timeout: 8000, readonly: true });
+    const fail = (msg) => { try { db.close(); } catch {} return { ok: false, error: msg }; };
+
+    // env: 同 dm-bet-e2e.mjs, 从 kanet.env 读真 token + ingest_secret(register-v06/confirm 需要认证)
+    const kanetEnvPath = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../../kanet.env');
+    if (!fs.existsSync(kanetEnvPath)) return fail('kanet.env not found at ' + kanetEnvPath);
+    const kanetEnv = fs.readFileSync(kanetEnvPath, 'utf8');
+    const kv = (k) => (kanetEnv.match(new RegExp(`^${k}=(.*)$`, 'm')) || [])[1]?.trim() || '';
+    if (!process.env.TELEGRAM_BOT_TOKEN) process.env.TELEGRAM_BOT_TOKEN = kv('TELEGRAM_BOT_TOKEN');
+    if (!process.env.TELEGRAM_BOT_USERNAME) process.env.TELEGRAM_BOT_USERNAME = kv('TELEGRAM_BOT_USERNAME') || 'KANET_Broker_bot';
+    if (!process.env.CONSOLE_ENCRYPTION_KEY) process.env.CONSOLE_ENCRYPTION_KEY = kv('CONSOLE_ENCRYPTION_KEY');
+    if (!process.env.BROKER_RELAY_ID) process.env.BROKER_RELAY_ID = '15593e10-fe63-4806-a7b5-cae062699de8';
+    process.env.CONSOLE_URL = CONSOLE;
+    if (!process.env.TELEGRAM_BOT_TOKEN) return fail('no TELEGRAM_BOT_TOKEN in kanet.env');
+
+    let decrypt;
+    try { ({ decrypt } = await import(pathToFileURL(path.join(path.dirname(fileURLToPath(import.meta.url)), '../../src/services/crypto.js')).href)); }
+    catch (e) { return fail('crypto.js import failed: ' + e.message); }
+    const _cfg = db.prepare('SELECT value_encrypted, is_sensitive FROM config_entries WHERE key=?').get('ingest_secret');
+    process.env.INGEST_SECRET = _cfg ? (_cfg.is_sensitive ? decrypt(_cfg.value_encrypted) : _cfg.value_encrypted) : '';
+    if (!process.env.INGEST_SECRET) return fail('ingest_secret did not decrypt (CONSOLE_ENCRYPTION_KEY?)');
+
+    const persona = db.prepare('SELECT id,name,address FROM relay_nodes WHERE id=?').get(personaRelayId);
+    if (!persona?.address) return fail(`persona relay ${personaRelayId} not found / no address`);
+    const LINKED_ADDR = persona.address;
+
+    const tgBotDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../../tg-bot');
+    const { bot } = await import(pathToFileURL(path.join(tgBotDir, 'bot.mjs')).href);
+    const PM = await import(pathToFileURL(path.join(tgBotDir, 'prediction-menu.mjs')).href);
+    const { specTitle } = PM;
+    // 现场实测发现: prediction-menu.mjs 的 userLangs 是跨进程持久化的(_state.json), maybeSetLang
+    // 只在"从没设过"时生效("先到先得")——tgUser 复用同一个测试用户号会撞到历史遗留的语言偏好,
+    // language_code 在 update() 里怎么传都不生效。直接用 setUserLang 强制覆盖, 不赌一个"从没用过"
+    // 的 tgUser 号。
+    PM.setUserLang(tgUser, 'zh');
+    bot.botInfo = { id: 1, is_bot: true, first_name: 'KANet Broker', username: process.env.TELEGRAM_BOT_USERNAME, can_join_groups: false, can_read_all_group_messages: false, supports_inline_queries: false };
+    const replies = [];
+    bot.api.config.use(async (_prev, method, payload) => {
+      if (method === 'sendMessage') { replies.push(typeof payload?.text === 'string' ? payload.text : ''); return { ok: true, result: { message_id: 1, date: 0, chat: payload.chat_id, text: payload.text } }; }
+      return { ok: true, result: {} };
+    });
+    let _u = 5000;
+    function update(text) {
+      // language_code:'zh' 而非 'en' (跟 dm-bet-e2e.mjs 抄的原值不同) —— 现场实测发现 dm-bet-e2e.mjs
+      // 那份 'en' 会让 detectLang('en')→英文 i18n, 但脚本自己的正则断言(如 /已绑定/)是按中文写的,
+      // 撞出 stage FAIL(link_ok 的 en 文案是 "✅ Linked ..." 不含"已绑定")——是既有脚本没跟上/
+      // 从没在当前语言映射下跑通过的漂移, 不是我引入的新问题。这里用 zh 让下面沿用的中文断言匹配上
+      // 现在真实的响应文案(detectLang: 'zh' 前缀→中文, 其余含'en'→英文, i18n.mjs:783-787)。
+      const message = { message_id: ++_u, date: 1718000000, chat: { id: Number(tgUser), type: 'private', first_name: 'Persona' }, from: { id: Number(tgUser), is_bot: false, first_name: 'Persona', language_code: 'zh' }, text };
+      if (text.startsWith('/')) { const c = text.split(/\s/)[0]; message.entities = [{ type: 'bot_command', offset: 0, length: c.length }]; }
+      return { update_id: ++_u, message };
+    }
+    async function feed(text) { replies.length = 0; await bot.handleUpdate(update(text)); return replies.join('\n'); }
+    async function relayCmd(cmd) {
+      const r = await fetch(`${CONSOLE}/api/relay/${personaRelayId}/send-command`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'x-ingest-secret': process.env.INGEST_SECRET }, body: JSON.stringify(cmd),
+      });
+      return r.json().catch(() => ({}));
+    }
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+    const linkR = await feed(`/link ${LINKED_ADDR}`);
+    if (!/已绑定/.test(linkR)) return fail(`/link did not bind: ${linkR.slice(0, 200)}`);
+
+    const tm = await fetch(`${CONSOLE}/api/pool/market/${encodeURIComponent(marketId)}`).then((r) => r.json()).catch(() => ({}));
+    const market = tm.market || (tm.id ? tm : null);
+    if (!market) return fail('target market not found via /api/pool/market');
+    const targetTitle = (specTitle(market.resolution_rule_spec) || '').trim();
+    if (!targetTitle) return fail('target market has no usable title');
+
+    const betMenu = await feed('/bet');
+    if (/现在没有可押注的市场/.test(betMenu)) return fail('/bet shows no markets (broker/usable filter)');
+    const searchNum = (betMenu.match(/^(\d+)\.\s+🔍/m) || [])[1];
+    if (!searchNum) return fail(`no 🔍 search option in /bet menu: ${betMenu.slice(0, 200)}`);
+    await feed(searchNum);
+    // 现场实测发现(2026-07-18 WC stress-test r1): 原逻辑挑选第一个 >=4 字符的词后再 strip 标点,
+    // 若挑中的词本身带标点(如 "stress-test" 带连字符), strip 后("stresstest")跟标题原文
+    // ("stress-test", 带连字符)不再是子串关系, /bet 搜索字面子串匹配会找不到——先只挑"本来就干净"
+    // (无需 strip 的纯字母数字)的词, 找不到再退回旧逻辑(挑第一个 >=4 字符词, 可能因为标点搜不到,
+    // 但至少不比原行为差)。
+    const words = targetTitle.split(/\s+/);
+    const cleanWord = words.find((w) => w.length >= 4 && /^[\p{L}\p{N}]+$/u.test(w));
+    const kw = cleanWord || (words.find((w) => w.length >= 4) || targetTitle.slice(0, 6)).replace(/[^\p{L}\p{N}]/gu, '');
+    const searchRes = await feed(kw);
+    // 现场实测发现: dm-bet-e2e.mjs 的 `· 出单人` 正则是过时格式——现在 prediction-menu.mjs:722 的
+    // 实际拼法是 "N. 标题  · makerLabel · 截止时间 · 押注数"(无"出单人"标签, makerLabel 直接是
+    // broker-1/maker-1 这类名字)。改成匹配"编号. 标题 · "到第一个分隔符为止, 不依赖具体标签文本。
+    let pickNum = null;
+    for (const line of searchRes.split('\n')) {
+      const mm = line.match(/^(\d+)\.\s+(.+?)\s+·\s+/);
+      if (mm) { const disp = mm[2].trim().replace(/…$/, ''); if (targetTitle.startsWith(disp) || disp === targetTitle) { pickNum = mm[1]; break; } }
+    }
+    if (!pickNum) return fail(`target not in search results for "${kw}":\n${searchRes.slice(0, 360)}`);
+    const detail = await feed(pickNum);
+    if (!/你押哪边/.test(detail)) return fail(`detail stage not reached: ${detail.slice(0, 200)}`);
+
+    await feed(side === 'YES' ? '1' : '2');
+    const amtReply = await feed(String(stakeKas));
+    if (!/(押注复核|地址)/.test(amtReply)) return fail(`amount stage failed: ${amtReply.slice(0, 200)}`);
+    const confirmReply = await feed('1');
+    if (!/已记录/.test(confirmReply)) return fail(`confirm failed: ${confirmReply.slice(0, 200)}`);
+
+    const pending = PM.listPendingPayments().find((p) => p.tgUser === tgUser);
+    if (!pending?.side_p2sh) return fail('no pendingPayment recorded for persona');
+    const { side_p2sh, exact_sompi, direction } = pending;
+    const exactKas = (Number(exact_sompi) / 1e8).toFixed(8);
+    // 现场实测发现(dm-bet-e2e.mjs 同款缺口): v0.7 市场走 register-v07(带 bet_id nonce, 见
+    // tg-bot/console-api.mjs:117-128 poolRegisterPrep/Confirm 的真实生产路由逻辑), 不是
+    // register-v06——v0.7 的 side_p2sh 派生带 betId 熵(防同 pk 同方向复押碰撞, pool.js:1550-1553
+    // _v07PayNonce), register-v06/confirm 的 _extStakeDeriveSide 不接 bet_id 参数, 永远算不出
+    // 带 nonce 的地址, confirm 会一直报"未检测到payment"(地址对不上, 不是没到账)。硬编码
+    // register-v06 是 dm-bet-e2e.mjs 从没在 v0.7 市场上真正跑通过的漂移, 这里按真实生产路由改。
+    const isV07 = String(market.protocol_version || '').startsWith('v0.7');
+    const confirmEp = isV07 ? 'register-v07' : 'register-v06';
+
+    const pay = await relayCmd({ type: 'transfer', target: side_p2sh, amount: exactKas });
+    const payTxid = pay?.txId || pay?.result?.txId;
+    if (!payTxid) return fail(`auto-pay transfer returned no txid: ${JSON.stringify(pay).slice(0, 240)}`);
+
+    async function landed(addr, txid) { const r = await relayCmd({ type: 'check_utxo_landed', address: addr, txid }); return r?.landed ?? r?.result?.landed; }
+    let paidLanded = false;
+    for (let i = 0; i < 30; i++) { await sleep(5000); if (await landed(side_p2sh, payTxid)) { paidLanded = true; break; } }
+    if (!paidLanded) return fail('PoolSide stake lock did not land within 150s');
+
+    let registered = false, lockTx = null, shardMarketId = marketId;
+    for (let i = 0; i < 12; i++) {
+      const cr = await fetch(`${CONSOLE}/api/pool/market/${encodeURIComponent(marketId)}/bettor/${confirmEp}/confirm`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'x-ingest-secret': process.env.INGEST_SECRET },
+        body: JSON.stringify({ linked_addr: LINKED_ADDR, direction, stake_kas: pending.stakeKas, ...(isV07 ? { bet_id: pending.betId } : {}) }),
+      }).then((r) => r.json()).catch((e) => ({ error: String(e) }));
+      if (cr.registered || cr.already_registered || cr.side_lock_tx || cr.merkle_index != null) {
+        registered = true; lockTx = cr.side_lock_tx || null;
+        // bshard: pool_bettor_sides.market_id 存的是分片 id 不是逻辑市场 id(现场实测发现, confirm
+        // 响应直接带 shardMarketId, 不用自己再反查 market_shards 表猜)。v0.6 无分片, 响应没有这个
+        // 字段时退回逻辑 marketId 本身(单一"分片"=自己)。
+        shardMarketId = cr.shardMarketId || marketId;
+        break;
+      }
+      if (cr.wrong_payment_detected) return fail('confirm reports wrong_payment_detected (amount mismatch)');
+      await sleep(5000);
+    }
+    if (!registered) return fail(`${confirmEp}/confirm never registered the side`);
+
+    // 现场实测发现(2026-07-18 WC round-1/round-2 压测): 原查询按 (market_id, side_p2sh) 找行——
+    // v0.7 bshard 市场的 pool_bettor_sides.side_p2sh 存的是**shard 聚合 covenant 地址**(同一 shard
+    // 下所有 bettor 共用), 不是每个 bettor 在 pending.side_p2sh 里那个独立收款地址(那是 register-v07
+    // 派生的、带 bet_id nonce 的一次性付款地址, 只在 pool_bet_preps.pay_addr 有记录, 从不写进
+    // pool_bettor_sides)。用 side_p2sh 当 WHERE 条件对 v0.7 分片市场永远查不到行(v0.6/未分片市场碰
+    // 巧不受影响, 因为那种场景两者本就相等)。改按 (market_id, side_lock_tx) 查——side_lock_tx 是这次
+    // 广播的确切 txid, INSERT 时原样落库, 唯一且不受聚合影响, 直接锁定"我的那一笔"。
+    const rows = db.prepare('SELECT side_lock_tx, direction, stake_amount, merkle_index FROM pool_bettor_sides WHERE market_id=? AND side_lock_tx=?').all(shardMarketId, payTxid);
+    if (rows.length === 0) return fail(`no pool_bettor_sides row for (market, side_lock_tx=${payTxid.slice(0, 16)})`);
+    const mine = rows[0];
+    if (!mine.side_lock_tx) return fail('attributed row has no side_lock_tx');
+    if (Math.abs(Number(mine.stake_amount) - Number(exact_sompi)) > 100000) return fail(`stake mismatch: row ${(mine.stake_amount / 1e8).toFixed(8)} vs paid ${exactKas} KAS (wrong row matched)`);
+
+    try { db.close(); } catch {}
+    ctx.vars.marketId = marketId;
+    ctx.vars.personaAddr = LINKED_ADDR;
+    return {
+      ok: true, marketId, personaAddr: LINKED_ADDR, sidePsh: side_p2sh, direction,
+      lockTx: mine.side_lock_tx, merkleIndex: mine.merkle_index, stakeSompi: mine.stake_amount,
+    };
+  },
+
+  /**
    * S2 journey (docs/2026-07-17-simulated-user-traffic-framework-v0.1.md §5) — settler-domain
    * half. Takes the market a persona has just bet into via the real TG flow (ctx.vars.marketId,
    * shard-or-logical id either way) and manufactures the H2 regression scenario (2 shards, same
@@ -1275,6 +1468,36 @@ const assertions = {
     return missing.length === 0
       ? { pass: true, expected: keys, actual: Object.keys(step_result.body) }
       : { pass: false, expected: keys, actual: Object.keys(step_result.body), msg: `missing keys: [${missing.join(',')}]` };
+  },
+
+  // KANet-UI 2026-07-17 — response_has_keys 的对等版本, 直接查 step_result 本身而非 .body。给
+  // 不走 http_post/http_get 的自定义 action(如 tg_place_bet/settle_journey_market_synthetic/
+  // settler_assert_mybets_consistency, 直接 return 结果对象而非 {ok,status,body} HTTP 包装)用,
+  // 通用而非 S2 专用——任何未来直接 return 富对象的自定义 action 都能复用这条断言。
+  result_has_keys(step_result, keys, ctx) {
+    if (!Array.isArray(keys)) return { pass: false, expected: keys, actual: step_result, msg: 'result_has_keys requires array' };
+    if (!step_result || typeof step_result !== 'object') {
+      return { pass: false, expected: keys, actual: typeof step_result, msg: `step_result is not an object (got ${typeof step_result})` };
+    }
+    const missing = keys.filter(k => !(k in step_result));
+    return missing.length === 0
+      ? { pass: true, expected: keys, actual: Object.keys(step_result) }
+      : { pass: false, expected: keys, actual: Object.keys(step_result), msg: `missing keys: [${missing.join(',')}]` };
+  },
+
+  // KANet-UI 2026-07-17 — result_field_equals: 同 row_field_equals 精神但直接查 step_result 顶层
+  // 字段(不是 step_result.row), 给上面同一批自定义 action 断言具体值(如 ok:true / known_fail_h2)。
+  result_field_equals(step_result, spec, ctx) {
+    if (!step_result || typeof step_result !== 'object') {
+      return { pass: false, expected: spec, actual: null, msg: 'step_result is not an object' };
+    }
+    for (const [k, expected] of Object.entries(spec || {})) {
+      const actual = step_result[k];
+      if (actual !== expected) {
+        return { pass: false, expected: { [k]: expected }, actual: { [k]: actual }, msg: `result_field_equals.${k}: got ${JSON.stringify(actual)}, want ${JSON.stringify(expected)}` };
+      }
+    }
+    return { pass: true, expected: spec, actual: step_result };
   },
 
   /**
@@ -1883,6 +2106,8 @@ function _writeTraceFile(result) {
 }
 
 // ── runner main ──────────────────────────────────────────────────
+
+export { actions };
 
 export async function runCase(testCase) {
   const result = {
