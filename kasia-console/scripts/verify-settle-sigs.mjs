@@ -15,6 +15,10 @@
 //   自测(本机, 合成 fixture):  cd kasia-console && node scripts/verify-settle-sigs.mjs --selftest
 //   实战(canonical, jepu1):    node scripts/verify-settle-sigs.mjs --market=<完整market_id> [--input=0]
 //     从 DB 读 meta.phase2_tx_obj + pool_committee pks + chain_events 新签名, oracle 门 → 逐签 verify。
+//   链上真值比对(2026-07-18 加, jepu1 413次同错判别探针): 加 --chain-check [--rpc=ws://127.0.0.1:17210]
+//     对每个 input 从节点 UTXO 集拉真实 entry, 逐字段比对 tx_obj 内嵌 utxo(amount/spk/存在性);
+//     若有差异 → 用【链上真值】替换后重算 sighash 并对 5 签重验——回答"节点实际算的 sighash 是哪个/
+//     委员签的到底对不对节点口径"。tx_obj 内嵌数据错 = 无论签名代码多对, 签的都是错 sighash。
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -158,6 +162,60 @@ if (args.selftest) {
     catch (e) { note = e.message; }
     report(`委员 ${pk.slice(0, 8)}… 签名 schnorr-verify`, verdict, note);
     if (verdict && !committee.includes(pk)) report(`委员 ${pk.slice(0, 8)}… ∈ committee 集合`, false, '签名有效但 pk 不在委员表!');
+  }
+
+  // ── --chain-check: tx_obj 内嵌 utxo vs 节点 UTXO 集真值(判别探针) ────────────────
+  if (args['chain-check']) {
+    const rpcUrl = typeof args.rpc === 'string' ? args.rpc : (process.env.KASPA_WRPC_URL || 'ws://127.0.0.1:17210');
+    console.log(`\n── chain-check via ${rpcUrl} ──`);
+    const rpc = new kaspa.RpcClient({ url: rpcUrl, encoding: kaspa.Encoding.Borsh, networkId: process.env.KASPA_NETWORK_ID || 'testnet-12' });
+    await rpc.connect({});
+    const txo = meta.phase2_tx_obj;
+    const addrs = [...new Set(txo.inputs.map(i => i.utxo?.address).filter(Boolean))];
+    const { entries } = await rpc.getUtxosByAddresses({ addresses: addrs });
+    const norm = (e) => e.entry || e; // wasm 版本差异兼容
+    const chainByOutpoint = new Map();
+    for (const e of entries || []) {
+      const n = norm(e);
+      const op = n.outpoint || e.outpoint;
+      chainByOutpoint.set(`${op.transactionId}:${op.index}`, n);
+    }
+    let anyDiff = false;
+    const chainTx = JSON.parse(JSON.stringify(txo)); // 深拷贝, 逐 input 换成链上真值
+    for (let i = 0; i < txo.inputs.length; i++) {
+      const inp = txo.inputs[i];
+      const key = `${inp.previousOutpoint.transactionId}:${inp.previousOutpoint.index}`;
+      const chain = chainByOutpoint.get(key);
+      if (!chain) { report(`input${i} outpoint 在节点 UTXO 集`, false, `${key} 不在 UTXO 集(已花/不存在/地址集没覆盖)`); anyDiff = true; continue; }
+      const embAmt = String(inp.utxo?.amount ?? '');
+      const chainAmt = String(chain.amount ?? '');
+      const embSpkN = normSpk(inp.utxo.scriptPublicKey);
+      const chainSpkRaw = chain.scriptPublicKey;
+      const chainSpkN = (chainSpkRaw && typeof chainSpkRaw === 'object')
+        ? { version: Number(chainSpkRaw.version || 0), script: Buffer.from(chainSpkRaw.script, 'hex') }
+        : normSpk(String(chainSpkRaw));
+      const amtOk = embAmt === chainAmt;
+      const spkOk = embSpkN.version === chainSpkN.version && embSpkN.script.equals(chainSpkN.script);
+      report(`input${i} amount 内嵌==链上`, amtOk, amtOk ? embAmt : `内嵌=${embAmt} 链上=${chainAmt}`);
+      report(`input${i} spk 内嵌==链上`, spkOk, spkOk ? '' : `内嵌=${embSpkN.version}:${embSpkN.script.toString('hex').slice(0, 24)}… 链上=${chainSpkN.version}:${chainSpkN.script.toString('hex').slice(0, 24)}…`);
+      if (!amtOk || !spkOk) {
+        anyDiff = true;
+        chainTx.inputs[i].utxo = { ...inp.utxo, amount: chainAmt, scriptPublicKey: { version: chainSpkN.version, script: chainSpkN.script.toString('hex') } };
+      }
+    }
+    if (anyDiff) {
+      console.log('\n🔴 内嵌 utxo ≠ 链上真值 → 用链上真值重算 sighash 并对签名重验(节点口径):');
+      const nodeHash = calcSchnorrSighash(chainTx, inputIndex);
+      console.log(`   node-truth sighash = ${nodeHash.toString('hex')} (vs tx_obj 派生 ${myHash.toString('hex').slice(0, 16)}…)`);
+      for (const s of sigs) {
+        const pk = String(s.voter_pubkey).toLowerCase();
+        let v = false; try { v = schnorr.verify(stripPushEncoding(s.signature), nodeHash, Buffer.from(pk, 'hex')); } catch {}
+        report(`[node-truth] 委员 ${pk.slice(0, 8)}… verify`, v, v ? '' : '(对节点口径无效 — 委员签的是 tx_obj 错数据)');
+      }
+    } else {
+      report('全部 input 内嵌 utxo == 链上真值(此层排除, 差异在别处)', true);
+    }
+    try { rpc.disconnect(); } catch {}
   }
   db.close();
 } else {
