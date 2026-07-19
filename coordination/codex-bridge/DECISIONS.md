@@ -87,3 +87,34 @@ Consequences:
 - 8pson stays stopped until its fail-closed refund is designed → red-teamed → Owner money-path approved.
 - Existing `payout_shards` rows must be family-classified from stored redeem bytes (never the mutable flag) going forward.
 - `DISC-20260717-002` moves to `decided` (authority recorded here).
+
+---
+
+## DEC-20260719-001 — Adopt Settlement Evidence Continuity & Recoverability as top pre-feature priority
+
+- decided_at_utc: 2026-07-19 (Owner instruction "剩两件收口: 授权!!! 干!!!" in dev-coord-testnet)
+- authority: Owner
+- status: active
+- related_discussion: DISC-20260717-001 (KANET-ARCH-PRIORITY-001), Bettor+Codex consensus (RESPONSE-001-001/002/003/004)
+- related_artifacts: `DISCUSSIONS.md` RESPONSE-001-001..003; `responses/RESPONSE-DISC-20260717-001-002.md`, `-004.md`; commits `ad7950cc`, `da0b139e`
+
+Decision:
+
+Adopt **"Settlement Evidence Continuity and Recoverability — lead with endBlock capture and restore proof"** as the highest-priority engineering work that precedes further feature expansion. Owner authorizes the two wrap-up items:
+
+1. **This priority is now a formal decision** (proposed_decision → decided), superseding no prior decision; it sets sequencing, not implementation approval.
+2. **Gate 0 (read-only evidence work) proceeds now** under ordinary technical delegation, owner = J2, target = before the WC-final settlement window (2026-07-19T19:00Z). Gate 0 must produce reproducible artifacts, not narrative:
+   - a pruning-margin report for every non-terminal market (deadline_daa, endBlock-capture status, NULL `side_lock_daa` exposure, current pruning-point daa, remaining margin);
+   - a disposable-copy `console.db` restore drill isolated from the live SQLite/WAL environment (no `backup()`/`VACUUM INTO` on the live file);
+   - explicit provenance for any aggregate affected-value/user-count figure (replacing the unmeasured ~54,275 KAS / 1,526-user estimate).
+
+Rationale:
+
+The active liveness failure (`getBlockAtDaa` MAX_WALK exhaustion, VERIFIED at `kasia-relay/src/rpc-listener.mjs:262/284`) is the highest-urgency manifestation of missing evidence continuity: the consensus-critical committee endBlock is not durably captured before the reconstruction window closes, unlike `side_lock_daa` which has a full pre-prune capture stack. This is already stranding money-path state (half-final refund markets). Leading with endBlock capture + a proven restore path closes the class.
+
+Consequences:
+
+- Gate 0 is read-only; it does NOT authorize any production-state change.
+- **Batch 1/2 (endBlock-capture code, pruning-point monitor, ZK `checkLanded` unification, backup/restore/replay infrastructure) remain gated: each requires design ownership + red-team review + explicit Owner money-path/production authority before implementation or deployment.** Owner's "干" authorizes items 1–2 only, per the scope Bettor stated on receipt.
+- Bettor records Gate 0 artifact paths/commits in the bridge as they land and reports measured figures to Owner.
+- `DISC-20260717-001` moves to `decided` (authority recorded here).
