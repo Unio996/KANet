@@ -9,6 +9,7 @@ import { randomUUID } from 'crypto';
 import { readFileSync, writeFileSync, existsSync, renameSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
+import { isDecidedWorldCupMarket } from './worldcup-teams.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const STATE_FILE = join(__dirname, '_state.json');
@@ -636,10 +637,13 @@ async function _startBetImpl(tgUser, brokerRelayId) {
   for (const m of markets) { const c = m.category || 'other'; (byCat[c] = byCat[c] || []).push(m); }
   const categories = Object.keys(byCat).sort();
   // KANet-UI 2026-06-06 Owner P0 + Bettor ③ APPROVE r543: 加 🏆 世界杯专题 + 🔍 搜索 虚菜单, 置顶突出.
+  // KANet-UI 2026-07-19 (#19+① 合并, Bettor/NWT 审GREEN): 排除已数学锁定 NO 的淘汰队夺冠/晋级盘
+  // (见 worldcup-teams.mjs), 否则专题里混着一堆"结果已定却还显示可押"的盘, 极度误导用户。
   const worldCupMarkets = markets.filter(m => {
     const s = String(m.resolution_rule_spec || '');
     const lower = s.toLowerCase();
-    return lower.includes('fifa') || lower.includes('world cup') || s.includes('世界杯');
+    const isWC = lower.includes('fifa') || lower.includes('world cup') || s.includes('世界杯');
+    return isWC && !isDecidedWorldCupMarket(m);
   });
   const menu = [];
   // entries[i] = { type: 'worldcup'|'search'|'category', markets?, cat? }

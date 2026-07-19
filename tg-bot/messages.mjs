@@ -1,6 +1,7 @@
 // TG bot user-facing text + flow builders. v1.3: builder voice, testnet/MIT, reactive-only.
 // Value/trust steps → the USER acts on-chain via Console/their relay. bot 0 持钥 / 0 execute (J1 S5).
 import { t } from './i18n.mjs';
+import { isDecidedWorldCupMarket } from './worldcup-teams.mjs';
 
 export const DISCLAIMER = 'testnet-only · MIT 开源 · 不运营主网 · 非投资建议';
 
@@ -31,7 +32,7 @@ export function startMessage(lang = 'en') {
 // §11 v2 (Owner 终裁 2026-06-27) 历史: 老用户极简, 无 /help 提示行. custody 双守行永在(NWT 承重, 不可删)。
 // Owner 2026-06-28: 老用户顶部嵌紧凑热榜(标题+池+人数+深链按钮) + /hot 兜底. trending 传 null→无块.
 // Owner 2026-06-28 UX重构: 加赛事聚合卡区 (sportsGroups != null → ⚽ 赛事区), 热榜/新盘双区.
-export function startMessageLinked(addr, custodial = null, trendingMarkets = null, botUsername = null, sportsGroups = null, lang = 'en') {
+export function startMessageLinked(addr, custodial = null, trendingMarkets = null, botUsername = null, sportsGroups = null, lang = 'en', wcFallbackCandidates = null) {
   const shortAddr = addr.length > 20 ? addr.slice(0, 17) + '…' : addr;
   const custLabel = custodial === true
     ? t(lang, 'start_linked_custodial_label')
@@ -62,7 +63,25 @@ export function startMessageLinked(addr, custodial = null, trendingMarkets = nul
   }
 
   // ⚽ 赛事聚合卡区 (新盘/冷启动, 信任卡, 无 bettor 门)
-  const sportsBlock = sportsGroups && sportsGroups.length > 0 ? sportsCardBlock(sportsGroups, botUsername, lang) : null;
+  let sportsBlock = sportsGroups && sportsGroups.length > 0 ? sportsCardBlock(sportsGroups, botUsername, lang) : null;
+  // KANet-UI 2026-07-19 (#19+① 合并设计, Bettor/NWT 审GREEN): card_groups 聚合结构性为空时
+  // (见 worldcup-teams.mjs 头注释——建市时批量漏打 card_group_id 标签), 挑世界杯盘兜底, 并排除
+  // 已数学锁定 NO 的淘汰队夺冠/晋级盘, 避免决赛等重要盘在首页彻底不可见。
+  // 候选池优先用 wcFallbackCandidates(bot.mjs 在 sports 为空时才额外拉的更宽可押市场集,
+  // 见 bot.mjs 注释)——不能只从 trendingMarkets 里挑, 那份按 pool+recency 排序且固定
+  // limit 5(Owner 2026-07-05 钦定不能动), 小池新盘(比如决赛这种刚开的盘)很容易挤不进前 5,
+  // 兜底就变成空转、看似修好实际没解决问题(2026-07-19 功能自测抓到, 修正后才接入)。
+  // wcFallbackCandidates 为 null(旧调用点/请求失败降级)时退回 trendingMarkets, 优雅降级。
+  const wcPool = wcFallbackCandidates || trendingMarkets;
+  if (!sportsBlock && wcPool && wcPool.length > 0) {
+    const wcCandidates = wcPool.filter((m) => {
+      const spec = String(m.resolution_rule_spec || m.title || '');
+      const lower = spec.toLowerCase();
+      const isWC = lower.includes('fifa') || lower.includes('world cup') || spec.includes('世界杯');
+      return isWC && !isDecidedWorldCupMarket(m);
+    }).slice(0, 5);
+    sportsBlock = _worldCupFallbackBlock(wcCandidates, botUsername, lang);
+  }
   if (sportsBlock) {
     // 在 commands 行前插赛事区
     const insertAt = lines.indexOf(cmdLine);
@@ -129,6 +148,28 @@ function _compactTrendingBlock(markets, botUsername, lang = 'en') {
     idx++;
   }
   lines.push(t(lang, 'trending_more'));
+  lines.push('');
+  return { lines, buttons };
+}
+
+// KANet-UI 2026-07-19 (#19+① 合并, Bettor/NWT 审GREEN): card_groups 为空时的兜底渲染——纯
+// flat market 列表(非 sportsCardBlock 期待的 grouped legs 结构), 复用已有的 sports_header/
+// sports_subheader 文案位, 不新造措辞、不承诺"聚合卡"体验。只读 markets, 无副作用, 不发新请求。
+function _worldCupFallbackBlock(markets, botUsername, lang = 'en') {
+  if (!markets || markets.length === 0) return null;
+  function parseTitle(raw) { try { const p = JSON.parse(raw); return p.event_title || p.title || raw; } catch { return raw; } }
+  function probSuffix(m) {
+    if (!(m.bettor_count > 0) || m.yes_implied_prob == null) return '';
+    const pct = Math.round(m.yes_implied_prob * 100);
+    return (pct >= 5 && pct <= 95) ? ` ${pct}%` : '';
+  }
+  const lines = ['', t(lang, 'sports_header'), t(lang, 'sports_subheader')];
+  const buttons = [];
+  for (const m of markets) {
+    const title = parseTitle(m.resolution_rule_spec || m.title || '');
+    const short = title.length > 30 ? title.slice(0, 28) + '…' : title;
+    buttons.push([{ text: `🎯 ${short}${probSuffix(m)}`, callback_data: 'bet:market:' + m.id }]);
+  }
   lines.push('');
   return { lines, buttons };
 }

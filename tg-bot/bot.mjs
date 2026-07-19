@@ -68,6 +68,28 @@ function getLang(ctx) { return PM.getUserLang(String(ctx.from.id)); }
 // Auto-detect + persist on first use (non-blocking, uses debounce-persist).
 function initLang(ctx) { PM.maybeSetLang(String(ctx.from.id), detectLang(ctx.from?.language_code)); }
 
+// Bettor 2026-06-29: 首页从"热榜(>=3真人)"换"可押市场(usable+有空位)": 用户要能押的盘不是最热的盘.
+// 查漏补缺(2026-07-05 晚, Owner 精确纠正"不加不减·只收真实膨胀点"): 热榜条数曾从设计值 5
+// 悄悄涨到 8(唯一该动的地方, 收回 5), 赛事卡组数原本就是 5, 不动(不是新猜的数字)。
+// KANet-UI 2026-07-19 (#19+① 合并, Bettor/NWT 审GREEN): /start 和 lang:toggle 两处原本各写一份
+// 一样的 fetch 逻辑(漂移风险), 抽成共享 helper。同时补上 wcFallbackCandidates: card_groups 为空
+// 时才多拉一次更宽的可押市场集(仅当 sports 为空才触发, 常态零额外请求), 专门喂给首页赛事区兜底
+// 过滤——不能复用 trending(那份 limit 5 按 pool+recency 排序, Owner 钦定不能动, 小池新盘挤不进
+// 前 5, 兜底会变空转, 2026-07-19 功能自测抓到)。
+async function _fetchHomeMarketData() {
+  let trending = null, sports = null, wcFallbackCandidates = null;
+  try {
+    const [av, cg] = await Promise.all([api.availableMarkets(5), api.cardGroups(5)]);
+    if (av.ok && av.json?.ok) trending = av.json.markets || [];
+    if (cg.ok && cg.json?.ok) sports = cg.json.card_groups || [];
+    if (!sports || sports.length === 0) {
+      const avWide = await api.availableMarkets(30);
+      if (avWide.ok && avWide.json?.ok) wcFallbackCandidates = avWide.json.markets || [];
+    }
+  } catch { /* Console 暂不可达 → 无区块 */ }
+  return { trending, sports, wcFallbackCandidates };
+}
+
 // KANet-UI 2026-06-22 (Owner 实测派修 ②): /start 查 /link 绑定 — 已绑显地址+下一步, 未绑走三步引导。
 // T1 (2026-06-27): 解析 ctx.match payload — t.me/<bot>?start=<market_id> 深链直跳市场详情。
 bot.command('start', async (ctx) => {
@@ -97,16 +119,8 @@ bot.command('start', async (ctx) => {
     const w = await api.tgWalletGet(tgUser);
     if (w.ok && w.json?.ok) custodial = !!(w.json.exists && w.json.address === addr);
   } catch { /* Console 暂不可达 → null → 中性 custody 警告 */ }
-  // Bettor 2026-06-29: 首页从"热榜(>=3真人)"换"可押市场(usable+有空位)": 用户要能押的盘不是最热的盘.
-  // 查漏补缺(2026-07-05 晚, Owner 精确纠正"不加不减·只收真实膨胀点"): 热榜条数曾从设计值 5
-  // 悄悄涨到 8(唯一该动的地方, 收回 5), 赛事卡组数原本就是 5, 不动(不是新猜的数字)。
-  let trending = null, sports = null;
-  try {
-    const [av, cg] = await Promise.all([api.availableMarkets(5), api.cardGroups(5)]);
-    if (av.ok && av.json?.ok) trending = av.json.markets || [];
-    if (cg.ok && cg.json?.ok) sports = cg.json.card_groups || [];
-  } catch { /* Console 暂不可达 → 无区块 */ }
-  const startMsg = M.startMessageLinked(addr, custodial, trending, CONFIG.botUsername, sports, lang);
+  const { trending, sports, wcFallbackCandidates } = await _fetchHomeMarketData();
+  const startMsg = M.startMessageLinked(addr, custodial, trending, CONFIG.botUsername, sports, lang, wcFallbackCandidates);
   return ctx.reply(startMsg.text, { reply_markup: startMsg.keyboard || undefined });
 });
 bot.command('help', (ctx) => { initLang(ctx); return ctx.reply(M.help(getLang(ctx))); });
@@ -137,13 +151,8 @@ bot.callbackQuery('lang:toggle', async (ctx) => {
         const w = await api.tgWalletGet(tgUser);
         if (w.ok && w.json?.ok) custodial = !!(w.json.exists && w.json.address === addr);
       } catch { /* ignore */ }
-      let trending = null, sports = null;
-      try {
-        const [av, cg] = await Promise.all([api.availableMarkets(5), api.cardGroups(5)]);
-        if (av.ok && av.json?.ok) trending = av.json.markets || [];
-        if (cg.ok && cg.json?.ok) sports = cg.json.card_groups || [];
-      } catch { /* ignore */ }
-      const msg = M.startMessageLinked(addr, custodial, trending, CONFIG.botUsername, sports, newLang);
+      const { trending, sports, wcFallbackCandidates } = await _fetchHomeMarketData();
+      const msg = M.startMessageLinked(addr, custodial, trending, CONFIG.botUsername, sports, newLang, wcFallbackCandidates);
       await ctx.editMessageText(msg.text, { reply_markup: msg.keyboard || undefined });
     } else {
       const msg = M.startMessage(newLang);
