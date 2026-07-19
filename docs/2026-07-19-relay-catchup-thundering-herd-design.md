@@ -39,7 +39,14 @@ console 当前管理 **~31 个** relay 进程（`[relay-health] tick eligible=31
 
 FaucetRelay-tn-2 这次的重启（`relay-health` 探测到 dead → auto-restart）只是**触发点**：它重启后立即调一次 `catchUpHistory()`（`rpc-listener.mjs:523`，启动时跑一次），这次调用恰好落在一个已经因相位对齐而聚集的批量触发窗口里，成为压垮骆驼的最后一根稻草，不是唯一原因。
 
-### 层③ — console 侧被打中的具体端点无索引（放大器，量化验证）
+### 层②b — 竞争/互补候选机制（KANet-UI 发现，未定论，需一并红队）
+`relay-manager.js:87` fork 配置是 `stdio: ['ignore','pipe','pipe','ipc']`（显式 pipe，非 inherit）——console 自身订阅每个 relay 子进程的 stdout/stderr `'data'` 事件，对每一行调用自己的 `console.log()`（`relay-manager.js:90/102/110`）。2130 行/分钟意味着 console **自己的进程**在那个窗口内执行了 2130 次同步 `console.log()`（写向持续增长的 console.log 文件）。这条**不需要**假设 relay 主动发 HTTP 请求给 console，纯粹是"多 relay 高频输出 → console 逐行同步写日志文件"的背压，可能比"relay 打 console API"（层②本节）更直接、或与其叠加共同致使阻塞。
+
+**两条机制的关系**：无论最终 console 端阻塞的具体机制是 layer② 的 API 调用负载、这里的 log-pipe 背压、还是两者叠加，**触发"为什么 2130 行集中在一分钟内"这件事本身，都要靠层②"多 relay 60s 定时器相位对齐"这个根因来解释**（单个 relay 按 150ms/条节奏跑一分钟上限约 400 行，2130 行需要多 relay 近乎同时触发）。这意味着**修复②（加 jitter 打散相位对齐）对两种候选机制都有效**——无论最终坐实是 (a) 还是 (b)，把触发窗口摊平都能直接压低瞬时峰值。修复①③仍各自独立成立（数据源浪费 / DB 索引缺失），但**本设计的核心根治点仍是修复②**，(a)/(b) 之争影响的是"是否还需要给 console 的日志管道加背压保护"这一条**追加**措施，不影响修复②的必要性。
+
+**待验证（KANet-UI 提议的具体测法）**：量测当前 console.log 文件大小下单次同步 write() 的实际耗时，或模拟高频 console.log 调用复现延迟量级，来判定 (a)/(b) 各自的贡献占比。本设计暂不下定论，留给红队/后续实测。
+
+### 层③ — console 侧被打中的具体端点无索引（放大器，量化验证；针对候选机制 (a)）
 `kasia-console/src/api/discovery.js:479-488`（`GET /api/discovery/message-index`）：
 ```sql
 SELECT ... FROM kanet_message_index WHERE 1=1 AND payload_type = ? AND processed_at IS NULL ORDER BY block_time ASC LIMIT 100
@@ -82,10 +89,15 @@ CREATE INDEX idx_kanet_msg_unprocessed ON kanet_message_index(payload_type, proc
 
 ---
 
-## 建议落地顺序
+## 建议落地顺序（2026-07-19 11:43Z 更新——优先级待 (a)/(b) 验证数据定案）
 
-1. **修复③（索引）+ 修复①（数据源）**：两条都是低风险、独立、纯粹消除浪费/优化查询，可以尽快上（不改变任何业务逻辑/时序假设）。
-2. **修复②（jitter）**：核心根治但改变时序行为，需要 NWT 完整红队（尤其确认没有隐藏的"同步触发"依赖）+ Bettor 审，若来得及在 19:00Z 决赛窗前上最好；来不及则维持现有两层缓解（决赛窗附近避免批量重启 relay + supervisor 秒级重启安全网）。
+**关键关联（Bettor 11:43Z 指出）**：那 2130 行/分钟的日志，本身**就是** `api.kaspa.org` 404 catch-up 产生的日志内容。这意味着修复①（停掉这条注定失败的外部调用）无论最终坐实 (a) 还是 (b) 是主导阻塞机制，**都会直接砍掉这 2130 行的日志源头**——若 (b)（console 端 log-pipe 背压）是主因，修复①就是**主要杠杆**而非"顺手清理"；若 (a)（relay 打 console 本地 API 风暴）是主因，修复①仍能消除其中一条子查询的调用量。**因此修复①的优先级上调，不再归为"次要"**。
+
+**验证先行**：KANet-UI 正在跑"11:29 那分钟 console.log 单次 write() 耗时 / 模拟当前文件大小下高频 console.log 延迟"测试，用来判定 (a)/(b) 各自贡献占比。本设计的落地顺序待该数据回来后可能微调，当前给出的是不依赖该数据也成立的稳健顺序：
+
+1. **修复①（数据源纠正）+ 修复③（索引）**：两条都是低风险、独立、直接消除浪费/优化查询/砍日志量，对 (a)/(b) 任一主导机制都有效，可以尽快上（不改变任何业务逻辑/时序假设）。**优先级上调至并列第一**。
+2. **修复②（jitter）**：核心根治触发面（打散多 relay 相位对齐），但改变时序行为，需要 NWT 完整红队（尤其确认没有隐藏的"同步触发"依赖）+ Bettor 审，若来得及在 19:00Z 决赛窗前上最好；来不及则维持现有两层缓解（决赛窗附近避免批量重启 relay + supervisor 秒级重启安全网）。
+3. **视 (a)/(b) 验证结果追加**：若 (b) 主导 → 追加 relay log-pipe 限流/降级/别逐行 re-log；若 (a) 也有实质贡献 → 追加 catch-up→console API 本身限流（不只靠索引优化）。
 
 ## 未覆盖 / 待确认
 
