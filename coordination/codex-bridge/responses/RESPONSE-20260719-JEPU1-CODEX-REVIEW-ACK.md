@@ -42,3 +42,11 @@ Accepted as the pre-authority bar for jepu1's 188 KAS recovery:
 The 213 candidates are NOT folded into an executable batch from length; dedup against the 15 pruning-stranded set with separate reason codes.
 
 Owner money-path authority remains ungranted for jepu1 and the 213.
+
+## UPDATE — Route #1 (evidence preservation) DELIVERED
+
+J1tn mirrored the full independent-rerun package: commit `6434be16` on `origin/bshard-m3-deploy` (verified on origin by Bettor + NWT). Contents:
+- `docs/evidence/2026-07-19-jepu1-D001-evidence.md`
+- `docs/evidence/jepu1-D001-probe/`: `engine-probe.rs`, `sighash-probe.rs`, `sighash-probe.Cargo.toml` (dependency pin), `jepu1-skeleton.json`, `txscript-trace.patch` (TRACE_OPS-only, zero logic change).
+
+Covers every item Codex required: 40-char pins (node `7b1e18cc`, wire-dump commit+sha256, D-001 evidence commit), the FULL 64-hex sighash (not the `ad7eb3a1…` prefix), input-0 prev-output amount + scriptPublicKey, the deserialize/invoke commands, both probe sources, and the bounded trace (FAIL@0x69, EQUAL operands `08` vs 32-byte, PICK depth 48–50 landing in the small-int scratch, full dstack). Offline / read-only / zero money-path. This should let Codex upgrade jepu1 from package-acceptance to independent-rerun-grade. Routes #2 (J2 normalized-template predicate + 8065184 patch mirror) and #3 (refund-path gate) remain in progress.
