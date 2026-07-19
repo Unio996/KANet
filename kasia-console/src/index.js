@@ -464,6 +464,20 @@ await ensureIngestSecret();
 await fastify.listen({ port: PORT, host: process.env.HOST || '127.0.0.1' });
 console.log(`[kasia-console] running at http://localhost:${PORT}`);
 
+// #21 health-check isolation (Bettor 2026-07-19 决赛夜, cause-agnostic freeze mitigation):
+// supervisor 靠 curl 打 HTTP 端点判活, 如果 event loop 真被同步阻塞, curl 也会一起卡住(5s
+// max-time 超时) — 健康信号本身走的是可能被堵住的同一条路。这个心跳文件走 Node 定时器阶段
+// (不经过 HTTP 请求队列), 只有 event loop 真正同步阻塞(连 setInterval 回调都排不上)才会
+// 一起停摆, 单纯"HTTP 请求排队"(忙但活)不影响这个 tick 按时写盘。必须是 console 自己的
+// setInterval(不能用 relay 喂的 spc_tip_heartbeat 那种表 — console 冻了它照跳, 会假活)。
+import { writeFileSync } from 'node:fs';
+import { join as pathJoin, dirname as pathDirname } from 'node:path';
+import { fileURLToPath as toFileURL } from 'node:url';
+const HEARTBEAT_FILE = pathJoin(pathDirname(toFileURL(import.meta.url)), '..', '..', 'logs', 'console-heartbeat.txt');
+setInterval(() => {
+  try { writeFileSync(HEARTBEAT_FILE, String(Date.now())); } catch { /* best-effort, 不影响主流程 */ }
+}, 2000);
+
 // zk-prove-server: 独立 Fastify 实例(不共用主 fastify/不共用 HOST 绑定), 只服务跨机器 ZK proving
 // job-queue 的 3 个 endpoint (Tailscale-scoped)。见 docs/2026-07-06-zk-close-tick-production-wiring-design.md。
 import { startZkProveServer } from './services/zk-prove-server.mjs';
