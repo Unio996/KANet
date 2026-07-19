@@ -22,10 +22,17 @@ Against Codex's 5-item acceptance list for Track 3:
 
 **Hypotheses tested and refuted by measurement (not reasoning):** wire-object serialization drift (excluded: bytes correct) → runtime/version drift (excluded: node sighash == derived) → stale signature (excluded: 5/5 committee sigs schnorr-valid over `ad7eb3a1`, verified against the witness pubkeys, perfect 5×5 diagonal) → committee-pk ordering (excluded: neither VRF-order hash `94d03887` nor sort-order hash `fee6469b` appears in the baked redeem script — no committee-hash check exists there) → covenant introspection VERIFY → **D-001 OP_PICK off-by-one** (terminal dstack).
 
-## Consequence and remediation (two separate tracks)
+## Consequence and remediation
 
-- **Track A — silverc source fix** (owner: J2, per 铁律0.5 roadmap): fix `pick_from_depth` OP_PICK off-by-one in `/d/silverscript` (looking at `settings.rs:42-61` `index + *stack_depth` call site and the 07-06 fix commit). Root fix for all future silverc-compiled covenants. jepu1 is the first live forensic instance.
-- **Track B — jepu1's 188 KAS remediation** (owner: J1tn): the settle branch is unsatisfiable and the baked script is immutable, so **re-signing/rebuilding the settle tx cannot recover it**. Preliminary recovery lead: in jepu1's same silverc epoch (06-28…07-06), 301–310 v0.7 markets reached `refunded` with on-chain refund_txid — the refund/cancel selector is very likely an independent branch not hit by this PICK site. **Discipline hold: jepu1's own refund/cancel path must be traced with the same harness to confirm it does not hit an equivalent PICK fault before committing.** Any recovery is a money-path action requiring a separate explicit Owner authorization.
+**CORRECTION (post-first-draft): the silverc source fix already exists and is deployed — it is NOT open work.** `/d/silverscript` commit `8065184` ("Fix OP_PICK off-by-one in compile_byte_sequence_cast_call", **2026-07-06**) removed the redundant stack op in the `byte[](val,size)` two-arg dynamic-cast branch. Independently verified by J2 and NWT. This bounds the whole problem:
+
+- **jepu1 was created at genesis 2026-06-28, BEFORE the 07-06 fix → it is a pre-fix historical victim.** Any covenant compiled after 07-06 is immune. This is exactly why the vast majority of settlements (ajnid / lv3rz / 28mln, etc.) work — they are outside the pre-fix window. Post-07-06 settlements succeeding is itself live proof the fix is deployed (not merely committed).
+- The remaining work is a **one-time historical-inventory cleanup**, not ongoing bleeding.
+
+Two open tracks:
+
+- **Track B — jepu1's 188 KAS remediation** (owner: J1tn): the settle branch is unsatisfiable and the baked script is immutable, so **re-signing/rebuilding the settle tx cannot recover it**. Recovery lead: in the same silverc epoch (06-28…07-06), 301–310 v0.7 markets reached `refunded` with on-chain refund_txid — the refund/cancel selector is a separate branch not hit by this PICK site. **Discipline hold: jepu1's own refund/cancel path must be traced with the same harness to confirm it does not hit an equivalent PICK fault before committing.** Money-path; separate explicit Owner authorization required.
+- **Track C — blast-radius inventory** (owner: J2): of the 218 same-era (06-28…07-06) `settle_zombie_quarantine`(169) + `settle_failed`(49) markets, **213 share jepu1's exact 2103-byte `spine_redeem_script_hex` length**. Script length is determined purely by the compilation template (baked addresses/amounts/committee values are equal-width PUSH32/PUSH8 slots), so identical length = same pre-fix buggy template = same broken settle codegen — high-confidence, near-deterministic settle failure (the mis-picked small-int scratch value essentially never equals the expected 32-byte hash). These ~213 are high-confidence D-001 settle-broken but recoverable via the same refund path. Batch recovery folds into the workstream-A refund-routing design (dedup against the original 15-market pruning-margin set). Money-path; Owner authorization required after the jepu1 pilot proves the refund recovery.
 
 ## Architectural note (for DECISIONS / Codex)
 
