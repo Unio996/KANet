@@ -1,0 +1,21 @@
+[package]
+name = "sighash-probe"
+version = "0.1.0"
+edition = "2021"
+
+# 独立 crate(空 workspace 表脱离 D:\silverscript 主 workspace)——不动主 workspace Cargo.lock。
+# 依赖 pin 到 rev 7b1e18cc(= operator live TN12 节点 kaspad v1.1.1-toc.1-7b1e18cc 的 commit,
+# 即 jepu1 429 次拒绝的执行方) —— 不是 branch=tn12 head(42b734f1)也不是 J1 本机节点(ab4c51a)。
+# 三 commit 分野 2026-07-19 频道已报, sighash.rs 在 7b1e18cc..ab4c51a 间无 diff, 但按 Bettor
+# 铁律仍以拒绝方 commit 为 by-construction 基准。
+[workspace]
+
+[patch."https://github.com/kaspanet/rusty-kaspa"]
+kaspa-txscript = { path = "../txscript-traced" }
+
+[dependencies]
+kaspa-consensus-core = { git = "https://github.com/kaspanet/rusty-kaspa", rev = "7b1e18cc6e7098d83927049781c91740b90e7754" }
+kaspa-hashes = { git = "https://github.com/kaspanet/rusty-kaspa", rev = "7b1e18cc6e7098d83927049781c91740b90e7754" }
+kaspa-txscript = { git = "https://github.com/kaspanet/rusty-kaspa", rev = "7b1e18cc6e7098d83927049781c91740b90e7754" }
+faster-hex = "0.9"
+serde_json = "1"

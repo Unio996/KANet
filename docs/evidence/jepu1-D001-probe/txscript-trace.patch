@@ -1,0 +1,53 @@
+--- /c/Users/Zenbook/.cargo/git/checkouts/rusty-kaspa-410e06d1fde91a92/7b1e18c/crypto/txscript/src/lib.rs	2026-07-19 20:15:32.546677200 +0700
++++ /d/silverscript/txscript-traced/src/lib.rs	2026-07-19 20:57:02.824598200 +0700
+@@ -575,7 +575,49 @@
+                 return Err(TxScriptError::SignatureScriptNotPushOnly);
+             }
+ 
+-            self.execute_opcode(opcode)?;
++            let __trace = std::env::var("TRACE_OPS").is_ok();
++            let __ov = opcode.value();
++            if __trace {
++                eprintln!("[op] value=0x{:02x} dstack_len={} astack_len={}", __ov, self.dstack.len(), self.astack.len());
++                // dump operands of EQUAL/NUMEQUAL right before they run (the compare that feeds VERIFY)
++                // OP_PICK(0x79): top of stack = the depth arg. Print it + neighbors to expose off-by-one.
++                if __ov == 0x79 && !self.dstack.is_empty() {
++                    let n = self.dstack.len();
++                    let arg = &self.dstack[n - 1];
++                    // decode small-int depth (LE minimal)
++                    let mut d: i64 = 0;
++                    for (i, byte) in arg.iter().enumerate() { d |= (*byte as i64) << (8 * i); }
++                    let at = |k: i64| -> String {
++                        if k < 0 { return "<oob->".into(); }
++                        let idx = (n as i64) - 2 - k; // below the arg is depth 0
++                        if idx < 0 || idx >= n as i64 { return "<oob>".into(); }
++                        faster_hex::hex_string(&self.dstack[idx as usize])
++                    };
++                    eprintln!("  [PICK depth={}] d-1={} d={} d+1={}", d, at(d-1), at(d), at(d+1));
++                }
++                if (__ov == 0x87 || __ov == 0x9c) && self.dstack.len() >= 2 {
++                    let n = self.dstack.len();
++                    let a = &self.dstack[n - 1];
++                    let b = &self.dstack[n - 2];
++                    eprintln!("  [cmp 0x{:02x}] top   = {}", __ov, faster_hex::hex_string(a));
++                    eprintln!("  [cmp 0x{:02x}] below = {}", __ov, faster_hex::hex_string(b));
++                    // On a MISMATCH, dump the full dstack (depth-indexed) so we can see where the
++                    // intended 32B value actually sits vs where PICK landed (OP_PICK off-by-one check).
++                    if a[..] != b[..] {
++                        eprintln!("  [MISMATCH full dstack, depth 0=top]:");
++                        for d in 0..n {
++                            eprintln!("    depth {:>2} = {}", d, faster_hex::hex_string(&self.dstack[n - 1 - d]));
++                        }
++                    }
++                }
++            }
++            let __r = self.execute_opcode(opcode);
++            if let Err(ref e) = __r {
++                if __trace {
++                    eprintln!("[FAIL] opcode value=0x{:02x} err={:?} dstack_len_before_pop={}", __ov, e, self.dstack.len());
++                }
++            }
++            __r?;
+ 
+             let combined_size = self.astack.len() + self.dstack.len();
+             if combined_size > MAX_STACK_SIZE {
