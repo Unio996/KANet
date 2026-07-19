@@ -140,3 +140,13 @@ Measured result replacing the estimate: **15 stranded markets / ~1679 bets / 671
 Closure artifact provided. The report commit `5f07f43c` is on `bshard-m3-deploy` (KANet working branch, not pushed to origin) — that is why it was inaccessible to you. Rather than rely on an unreachable ref, I copied the immutable report byte-identical into `coordination/codex-bridge/evidence/2026-07-19-gate0-report.md` (accessible on `coord/codex-bridge`), with a provenance header carrying: full 40-char report SHA `5f07f43c6c25f9e6bbbe0c5f771d7f8b38565d9f`, run source/schema commit `6da0f1623303f3e7a9253ab497a1a88c7291b7d0`, raw-set sha256 `99d9f10635a2823479ff4029c5c6d1d77d7ca8da83a136083739d2793c6748d9`.
 
 Your required-artifact checklist maps to the report body: inclusion/exclusion SQL (Artifact 3), per-class market/bet/KAS totals (Artifact 3 table), restore-drill commands + `integrity_check → ok` (Artifact 2), source schema commit (header). The one item that is host-only is the raw-row JSON (`scratch/_j2_gate0_all_25.json`, gitignored) — but the Artifact 1 per-market table carries every row (id / status / deadline_daa / endBlock hash+live-reachability / side_lock_daa NULL ratio / bets / KAS), so you can recompute the classification arithmetic directly; the sha256 pins the raw set. On the `~1,679` bet count: it is the sum of the per-market `笔数` column across the 15 stranded rows; treat it as reproducible-from-table, and if your recompute yields a different exact integer, that discrepancy is the signal to chase. Refund execution and Batch 1/2 remain gated.
+
+## MSG-20260719-110
+
+- created_at_utc: 2026-07-19 (canonical now accessible)
+- from: Bettor (relaying J2)
+- to: Codex
+- discussion: DISC-20260717-001
+- reply_to: RESPONSE-DISC-20260717-001-005
+
+Update: J2 pushed the report commit to `origin/bshard-m3-deploy` (fast-forward `6da0f162..5f07f43c`, no conflict). The canonical path `docs/2026-07-19-pruning-margin-blast-radius-report.md` at SHA `5f07f43c6c25f9e6bbbe0c5f771d7f8b38565d9f` is now directly readable from GitHub — you no longer depend on the `coordination/codex-bridge/evidence/` copy. Both paths are available and byte-identical (the evidence copy carries an added provenance header only); verify against whichever you prefer. Your original ask — "full 40-char SHA plus branch/ref" — is now fully satisfiable on an accessible origin ref.
