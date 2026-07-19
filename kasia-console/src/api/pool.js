@@ -70,6 +70,15 @@ const HIDDEN_BROKEN_MARKET_IDS = new Set([
   'ext-pool-v07-1784236336840-3mzoh',  // "Will France advance?" V2/8282字节, cancel今晚做不了
   'ext-pool-v07-1784315274654-ysgpv',  // "Will Spain advance?" 空盘0行, 同占用760517 conditionId
 ]);
+// 2026-07-19 KANet-UI(Bettor live-curl抓出的残留缺口, #15): 86e4d271只补了 /markets + /available 两个
+// 端点, 漏了 /trending + /card_groups——tg-bot /bet 走的 console-api.mjs 三条路径(trending/card_groups/
+// available)里有两条完全没兜底, 用户仍能从热门榜/赛事卡片摸到 3mzoh/ysgpv。单一共享 helper, 四个 list
+// 端点全调这个, 以后新增第五个 list 端点忘记补也只用改这一处。默认过滤(fail-safe), q.include_hidden==='1'
+// 才 opt-out(仅 ops 诊断用, 现有四个消费方——tg-bot 三条 + 我自己的诊断 curl——都不传这个参数)。
+function filterHiddenBrokenMarkets(markets, query) {
+  if (query && String(query.include_hidden) === '1') return markets;
+  return markets.filter((m) => !HIDDEN_BROKEN_MARKET_IDS.has(m.id));
+}
 // 5/28 Owner 钦定: 押注 softcap 拆除 (= 之前 4 KAS testnet 限制阻 UI form 真用户测试). 改 Infinity = 0 cap.
 // Per-market math guards (= storage mass / oracle fee floor) still enforce at L1 console + SS contract.
 // Env override 保留可 ops set finite cap if needed.
@@ -2838,6 +2847,9 @@ export async function registerPoolRoutes(fastify) {
         _leafCount: getSidesByLogicalMarket(r.id, sqlite).length,   // #14 fix: shard-aware leaf count, 同 availableMarkets
       };
     }).filter((m) => m._totalPool >= minPoolSompi)   // 防刷量: 池太小不上热榜
+      // 2026-07-19 KANet-UI(#15残留缺口, Bettor live-curl抓出): /trending之前完全没接HIDDEN_BROKEN_MARKET_IDS,
+      // 3mzoh能从热门榜摸到。纯展示端点同/available, 始终过滤(无需include_hidden opt-out)。
+      .filter((m) => !HIDDEN_BROKEN_MARKET_IDS.has(m.id))
       .filter((m) => !commingledSpines.has(m._spineP2sh))   // FINDING-2: 排除 commingled spine (J1 单源 helper)
       .filter((m) => isStructuredSpec(m.title))   // usability (Owner 2026-06-29 '首页一坨屎'): 只显配齐规则可押盘。
       //   m.title = raw resolution_rule_spec (L1990)。isStructuredSpec (lib/spec-validation.js·= bot specIsUsable
@@ -2994,7 +3006,10 @@ export async function registerPoolRoutes(fastify) {
              ${honestStakeSql('pool_markets.id', 1)} AS no_sompi
       FROM pool_markets
       WHERE pool_markets.protocol_status = 'pending_bettors'
-    `).all().filter(r => getSidesByLogicalMarket(r.id, sqlite).length < MARKET_MAX_LEAVES_G3 - 50);  // 同 availableMarkets·排满盘·防 /start card_groups 按钮误导
+    `).all().filter(r => getSidesByLogicalMarket(r.id, sqlite).length < MARKET_MAX_LEAVES_G3 - 50)  // 同 availableMarkets·排满盘·防 /start card_groups 按钮误导
+      // 2026-07-19 KANet-UI(#15残留缺口, Bettor live-curl抓出): /card_groups之前完全没接HIDDEN_BROKEN_MARKET_IDS,
+      // 3mzoh/ysgpv能从赛事聚合卡摸到。纯展示端点同/available/trending, 始终过滤。
+      .filter(r => !HIDDEN_BROKEN_MARKET_IDS.has(r.id));
     const out = aggregateCardGroups(rows, commingledSpines, { limit: q.limit });   // 聚合逻辑单源 (pool-card-groups.mjs)
     return reply.send({ ...out, filters: { status: 'pending_bettors', exclude_commingled: true, exclude_auto_bet: true, dedupe_leg_key: 'keep_most_active' } });
   });
@@ -3062,15 +3077,11 @@ export async function registerPoolRoutes(fastify) {
         no_implied_prob: total > 0 ? noPoolSompi / total : null,
       };
     });
-    // 2026-07-18 KANet-UI(NWT default-safe纠偏, #qdp8zc): tg-bot /bet 搜索(prediction-menu.mjs
-    // search_input → console-api.mjs poolMarkets)走的正是这条端点, 之前没接 availableMarkets 那份
-    // HIDDEN_BROKEN_MARKET_IDS denylist——搜'france'/'spain'能搜到3mzoh/ysgpv(V2 covenant家族、
-    // cancelMarketLive V1-only拦退款, 今晚结算不了), 真用户可能误押。默认过滤(fail-safe: 忘传参数=
-    // 用户看不到坏盘, 而非相反); ops/诊断需要看全量传 ?include_hidden=1(J1/J2 平时按精确 id 直查坏盘,
-    // 不依赖这条列表端点, 默认过滤对现有 ops workflow 零成本)。同一份 Set(69行), 非新拷贝。
-    const filteredMarkets = String(q.include_hidden) === '1'
-      ? markets
-      : markets.filter((m) => !HIDDEN_BROKEN_MARKET_IDS.has(m.id));
+    // 2026-07-18/19 KANet-UI(NWT default-safe纠偏 #qdp8zc, Bettor #15残留缺口坐实后改用共享 helper):
+    // tg-bot /bet 搜索(prediction-menu.mjs search_input → console-api.mjs poolMarkets)走的正是这条端点。
+    // 改调 filterHiddenBrokenMarkets(80行共享 helper)——四个 list 端点(/markets/available/trending/
+    // card_groups)全走同一份, 不再各自维护一份 filter 表达式。
+    const filteredMarkets = filterHiddenBrokenMarkets(markets, q);
     return reply.send({ ok: true, total, count: filteredMarkets.length, limit, offset, markets: filteredMarkets });
   });
 
