@@ -338,6 +338,40 @@ function repeatOffenderGate(m) {
   return meta?.repeat_offender_confirmed === true;
 }
 
+// 🔴 手动冻结闸(2026-07-19 22:54, Bettor #se81ld.1 派工): 跟 repeatOffenderGate 并列独立闸门——
+//   那个认"同签名 TRANSIENT 耗尽", 这个认"人工已知原因、暂不该重试"(如 85fit 的 enforce-mismatch
+//   孤儿对账未完成, 每 tick 重付 build+enforce 撞同一个已知 FAIL, 刷 ALERT 无价值)。跟 jepu1 那次
+//   ad-hoc 冻结同一诉求, 这次做成可复用的成对 gate+clear(镜像 repeatOffenderGate/
+//   clearRepeatOffenderMarker 惯例), 不动 protocol_status/不碰钱, 纯调度层。
+function manualHoldGate(m) {
+  let meta = {};
+  try { meta = JSON.parse(m.metadata || '{}'); } catch {}
+  return meta?.manual_hold_reason != null;
+}
+export function setManualHold(marketId, db, reason) {
+  const market = db.prepare('SELECT metadata FROM pool_markets WHERE id = ?').get(marketId);
+  if (!market) return { ok: false, reason: 'market 不存在' };
+  db.prepare(`UPDATE pool_markets SET metadata = json_set(metadata, '$.manual_hold_reason', ?, '$.manual_hold_at', datetime('now')) WHERE id = ?`).run(reason, marketId);
+  db.prepare(`
+    INSERT INTO events (id, event_scope, event_type, source, level, summary, payload_json, created_at)
+    VALUES (?, 'system', 'manual_hold_set', 'setManualHold', 'warn', ?, ?, datetime('now'))
+  `).run(randomUUID(), `market=${String(marketId).slice(-8)} 人工设置 manual_hold: ${reason}`, JSON.stringify({ marketId, reason }));
+  return { ok: true };
+}
+export function clearManualHold(marketId, db, clearReason) {
+  const market = db.prepare('SELECT metadata FROM pool_markets WHERE id = ?').get(marketId);
+  if (!market) return { ok: false, reason: 'market 不存在' };
+  let meta = {}; try { meta = JSON.parse(market.metadata || '{}'); } catch { return { ok: false, reason: 'metadata 坏 JSON' }; }
+  if (meta.manual_hold_reason == null) return { ok: false, reason: '未处于 hold 状态, 无需清理(幂等)', already: true };
+  const before = { manual_hold_reason: meta.manual_hold_reason, manual_hold_at: meta.manual_hold_at };
+  db.prepare(`UPDATE pool_markets SET metadata = json_remove(metadata, '$.manual_hold_reason', '$.manual_hold_at') WHERE id = ?`).run(marketId);
+  db.prepare(`
+    INSERT INTO events (id, event_scope, event_type, source, level, summary, payload_json, created_at)
+    VALUES (?, 'system', 'manual_hold_cleared', 'clearManualHold', 'warn', ?, ?, datetime('now'))
+  `).run(randomUUID(), `market=${String(marketId).slice(-8)} manual_hold 人工清除: ${clearReason || '(未附理由)'}`, JSON.stringify({ marketId, before, clearReason: clearReason || null }));
+  return { ok: true, cleared: before };
+}
+
 // 🔴 精度补丁②(Bettor #j8p6gn): "隔离闸不能只进不出"——人工 probe/处置复核发现某盘其实已自愈(比如
 //   consolidate 的 UTXO 后来自己落地了)后, 显式清 marker, 不留死锁。同 fw9kk/cohort-B
 //   clearLegacyRefundDeadShape 惯例: tripwire guard(必须真的带着要清的字段才生效, 防误清)+ 审计 events
@@ -442,6 +476,7 @@ function selectRipeMarkets(currentDaa, pmt, limit) {
     // 🔴 批量歼灭令(repeat-offender 泛化闸, 见 REPEAT_OFFENDER_THRESHOLD 上方注释): 与 unreachablePreGate
     //    并列独立闸门(不复用同一函数——判据完全不同: 这个不关心 DAA/floor/gap, 只认"同签名连续耗尽")。
     if (repeatOffenderGate(m)) { _gated++; _gatedRepeatOffender++; continue; }
+    if (manualHoldGate(m)) { _gated++; continue; }
     // 🔴 consolidate lockTime gate (partial-shard ShardLeaf 件1: tx.time>=deadline*1000): MTP(pastMedianTime)
     //   滞后实时 ~2-3min·过早 settle → consolidate TX "input not finalized" rejected (live daemon A/u6ry7 实撞)。
     //   只在 MTP >= deadline*1000 才 settle (consolidate 才 final)。sealed-only 盘其实不需·但统一 gate 无害(稍延)。
