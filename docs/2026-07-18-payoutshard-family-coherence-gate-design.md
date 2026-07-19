@@ -33,11 +33,13 @@ covenant 域第一性原理: P2SH 地址 = redeem 字节的纯函数; genesis tx
 
 ## 3. 设计三件套 + 一个权威收敛
 
-### 3.1 v188 schema: `payout_shards.covenant_family`
+### 3.1 v189 schema: `payout_shards.covenant_family`
+
+> ⚠ 迁移号订正(2026-07-19, Codex MUST-FIX via Bettor #rtqi5q): 本稿原写 v188, 但 K-17(16c2fda8)已用 v188 且 landed live(migrate.js 当前最大号=v188)——**K-18 实现改用 v189**(Bettor 已核 live 上 v189 空着), 落码前再核一次当时最新号顺延。
 
 - 新列 `covenant_family TEXT NOT NULL DEFAULT 'unknown'`, 取值 `'v1_committee' | 'v2_zk' | 'unknown'`。
 - **写入点 = 实际编译调用处**(不是市场标记): `ensurePayoutShard`(pool-shard-register.mjs:121 INSERT)写 `'v1_committee'`; `ensurePayoutShardV2`(:257 附近 INSERT)写 `'v2_zk'`。谁编译谁declare, 家族列与编译动作原子同写。
-- **存量 backfill**(migrate v188 内一次性): 对每行 `payout_redeem_hex` 跑结构探针(§3.3(b) 同一函数)判família; 探不出 → 留 `'unknown'`(诚实), gate 对 unknown 拒花费并出 event 喊疼, 不猜。
+- **存量 backfill**(migrate v189 内一次性): 对每行 `payout_redeem_hex` 跑结构探针(§3.3(b) 同一函数)判família; 探不出 → 留 `'unknown'`(诚实), gate 对 unknown 拒花费并出 event 喊疼, 不猜。
 - DATABASE.md 同步(CLAUDE.md 硬规矩)。
 
 ### 3.2 zk_native 铸后 immutable(fail-closed)
@@ -74,10 +76,10 @@ covenant 域第一性原理: P2SH 地址 = redeem 字节的纯函数; genesis tx
 
 ## 5. DoD
 
-0. **backfill dry-run 报告 = 硬性前置(NWT MUST-FIX①, 不做不能跑 migration)**: v188 migration 落码前, 先对生产库跑**只读**探针 dry-run, 产出完整报告——总行数 / v1_committee 数 / v2_zk 数 / unknown 数, 并列出 unknown 行对应市场当前 `protocol_status` 是否活跃在途; **人工过一遍报告确认没有活跃在途盘会被打成 unknown, 才能真正执行 migration**。理由: 若 backfill 把在途盘错判 unknown 再被 gate 拒花费 = 治本操作自己制造一批"盘静默卡住"新危机(今天上午同款)。
+0. **backfill dry-run 报告 = 硬性前置(NWT MUST-FIX①, 不做不能跑 migration)**: v189 migration 落码前, 先对生产库跑**只读**探针 dry-run, 产出完整报告——总行数 / v1_committee 数 / v2_zk 数 / unknown 数, 并列出 unknown 行对应市场当前 `protocol_status` 是否活跃在途; **人工过一遍报告确认没有活跃在途盘会被打成 unknown, 才能真正执行 migration**。理由: 若 backfill 把在途盘错判 unknown 再被 gate 拒花费 = 治本操作自己制造一批"盘静默卡住"新危机(今天上午同款)。
 1. regression cases(`kasia-console/` 既有测试风格): ①V2-genesis 行 + 标记翻转尝试 → API 400; ②incoherent 行(手工造 V2 redeem + v1 declared)→ assert FAIL + event 落表 + 零花费; ③正常 V1/V2 行全绿; ④backfill 探针对已知家族行判对(拿 a1993=V1 实行 + 8pson=V2 实行当 fixture)。
 2. lint 规则 `R-PS-FAMILY-DISPATCH`: `compilePayoutShardRedeem|compilePayoutShardV2Redeem` 的调用点必须在家族分派/coherence-gate 保护内(白名单机制同既有 R-MANIFEST 系)。
-3. DATABASE.md v188 条目 + ANTI-PATTERNS 追加一条"家族选择器不得可变"。
+3. DATABASE.md v189 条目 + ANTI-PATTERNS 追加一条"家族选择器不得可变"。
 4. 不做什么: 不改 relay splice 路径(已是正确权威); 不动 v0.6 settler; 不迁移存量 V2 盘的 ZK 结算路径(D-001 committed 主线自己的节奏); 不加 SQLite trigger(理由 §3.2)。
 
 ## 6. NWT 审读重点(自提, 架构师不自审)
