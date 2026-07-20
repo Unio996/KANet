@@ -395,7 +395,12 @@ export async function settleMarketLive(marketId, ctx) {
     closeTxid = submitRes.txId;
 
     // 6. NO TX NO STATE: verify close LANDED (closed PS @ 应锚地址·value==consolidatedPool)
-    const landed = await verifyClosedLanded(ctx, plan.expectedClosedAddr, closeTxid, ps.consolidatedPool);
+    // 🔴 2026-07-20 06:19 修复(NWT读码坐实, #su2ksh系列): 之前误传plan.expectedClosedAddr(computeSettlePlan
+    //   阶段用预测consolidatedPool算出的旧地址)——enforce闸(上面§2)早已改用realExpectedClosedAddr(真实链上
+    //   consolidatedPool算出), 但这里landed验证漏改, 两处地址不一致→enforce通过后landed检查去查错的(预测)
+    //   地址, 永远查不到→假阴性。85fit实例(a208cb39): close_attest实实landed, 但被误判'not landed'导致daemon
+    //   以为失败反复retry, 撞已花的input(59af4ef8:0), 造成state不同步。改用同一个realExpectedClosedAddr。
+    const landed = await verifyClosedLanded(ctx, realExpectedClosedAddr, closeTxid, ps.consolidatedPool);
     if (!landed) { ctx.alert?.(marketId, `close ${closeTxid} 未 verify LANDED (NO TX NO STATE)`); return { ok: false, reason: 'close not landed', closeTxid }; }
   }
 
