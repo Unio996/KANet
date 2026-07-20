@@ -349,10 +349,23 @@ export async function settleMarketLive(marketId, ctx) {
     // 靠这个字符串区分'UTXO not found'(瞬态·值得重试) vs 其它 build 失败(非瞬态·不重试)。
     if (buildRes?.error || !buildRes?.unSafeJson) { const detail = buildRes?.error || 'no unSafeJson'; ctx.alert?.(marketId, `build fail: ${detail}`); return { ok: false, reason: `build fail: ${detail}` }; }
 
-    // 2. 🔴 driver enforce 硬闸 (命门·NO submit if mismatch): build output 地址 == 应锚 (= re-derive payoutRoot 烤死)
-    if (buildRes.psContAddress !== plan.expectedClosedAddr) {
-      ctx.alert?.(marketId, `🔴 enforce FAIL: build psContAddress ${buildRes.psContAddress} != expected ${plan.expectedClosedAddr} — NO submit`);
-      return { ok: false, reason: 'enforce mismatch (driver-side 硬闸)' };
+    // 2. 🔴 driver enforce 硬闸 (命门·NO submit if mismatch): build output 地址 == 应锚
+    //    (2026-07-20, orphan-bet 修复·Bettor/NWT/Owner 三方 co-verify GREEN, channel #sstuf1 系列): plan.expectedClosedAddr
+    //    是 computeSettlePlan 阶段用 DB registered Σstake+seed **预测**算出的(那时还没 consolidate, 真实链上值不可得)。
+    //    若真实链上 ps.consolidatedPool(刚从上面 psState 拿到)因未登记押注(孤儿单)而大于预测值, 预测地址会跟
+    //    build 出的真实地址对不上——这不是 bug 是安全闸正确工作(防止把钱结错), 但会把合法结算也一起卡死
+    //    (85fit 实例: 预测 2021.2KAS vs 真实 5021.2KAS, 差额=4笔孤儿共3000KAS未登记)。改用刚拿到的真实
+    //    ps.consolidatedPool 现场重算 expected 地址, 不改 plan.payoutRoot/plan.winners(赢家分配金额完全不变,
+    //    computePariMutuelPayout 默认只按 registered bettors Σstake 分, 见 pool-shard-settle.mjs:43, 不受此改动
+    //    影响, 已由 NWT 独立核实全部 3 个调用点)。孤儿资金作为 covenant leftover 续存(不会被误分给 registered
+    //    赢家), 但 close 落链后**永久不可再花**(PayoutShard.sil 只有 payoutRoot-proof claim 一条路, 孤儿 leaf
+    //    从未入树——NWT 读源码坐实, 5 个 entrypoint 均不通)——此后果已向 Owner 明确披露并经确认接受。
+    const psRowForEnforce = ctx.db.prepare('SELECT pool_merkle_root, predicate_commit FROM payout_shards WHERE logical_market_id = ?').get(marketId);
+    const realClosedRedeem = compilePayoutShardRedeem({ poolMerkleRoot: psRowForEnforce.pool_merkle_root, predicateCommit: psRowForEnforce.predicate_commit, consolidatedPool: String(ps.consolidatedPool), closed: 1, payoutRoot: plan.payoutRoot });
+    const realExpectedClosedAddr = ctx.p2shAddr(realClosedRedeem);
+    if (buildRes.psContAddress !== realExpectedClosedAddr) {
+      ctx.alert?.(marketId, `🔴 enforce FAIL: build psContAddress ${buildRes.psContAddress} != expected(real-pool=${ps.consolidatedPool}) ${realExpectedClosedAddr} — NO submit`);
+      return { ok: false, reason: 'enforce mismatch (driver-side 硬闸, real-pool)' };
     }
     const unSafeJson = buildRes.unSafeJson;
 

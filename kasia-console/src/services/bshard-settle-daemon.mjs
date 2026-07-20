@@ -202,8 +202,28 @@ async function consolidateAndBuildPsState(marketId, ps, ctx) {
     // excludeSideLockTx(2026-07-11, Bettor #g3x7lm.2 抓漏同族点): 不接会预测出含phantom份额的假
     // consolidatedPool, 跟真实链上(已排除shard9/10)值不符。
     const { poolSompi } = getMarketBets(marketId, sqlite, _shard9PhantomExcludeFor(marketId));
-    consolidatedPool = (BigInt(poolSompi) + BigInt(PS_SEED_SOMPI)).toString();
-    log(`${marketId.slice(-8)} already consolidated → ${ps.payout_ps_outpoint} pool=${consolidatedPool}`);
+    const predictedPool = (BigInt(poolSompi) + BigInt(PS_SEED_SOMPI)).toString();
+    // 🔴 2026-07-20 orphan-bet 修复(Bettor/NWT/Owner 三方 co-verify GREEN, channel #sstuf1/#ssuv89): predictedPool
+    //   只按 DB registered stake 算——若链上真实池子因未登记押注(孤儿单: fold 上链成功但 pool_bettor_sides
+    //   INSERT 没跟上)而更大, 会跟真实值不符, 导致 driver enforce 硬闸(bshard-auto-settler.mjs 的
+    //   psContAddress 比对)把合法结算也一起挡住(85fit 实例: predicted 2021.2KAS vs 真实链上 5021.2KAS)。
+    //   改读 ps.payout_redeem_hex(这份 redeem 是当初这笔 consolidate TX 真实广播时用的字节, 已经 baked
+    //   了正确的真实 consolidatedPool)反推它的 P2SH 地址 → 查真实链上 UTXO 金额, 查到就是"读到的真相"非
+    //   "预测"; 查不到(边缘case: UTXO 已花/RPC 失败)fail-open 退回旧 predictedPool, 不新增阻塞面/不影响
+    //   任何当前正常工作的市场。
+    let consolidatedPoolReal = predictedPool;
+    try {
+      const realAddr = _p2shCache(ps.payout_redeem_hex);
+      const liveEntries = await getUtxos(realAddr);
+      const match = liveEntries.find((e) => { const n = norm(e); const op = n.entry?.outpoint || n.outpoint; return op?.transactionId === psOutpointTxid && Number(op?.index) === psIdx; });
+      if (match) {
+        const n = norm(match);
+        const realAmount = String(n.entry?.amount ?? n.amount ?? '');
+        if (realAmount && realAmount !== '0') consolidatedPoolReal = realAmount;
+      }
+    } catch (e) { log(`${marketId.slice(-8)} real-pool probe fail (non-fatal, fallback to predicted): ${e.message}`); }
+    consolidatedPool = consolidatedPoolReal;
+    log(`${marketId.slice(-8)} already consolidated → ${ps.payout_ps_outpoint} pool=${consolidatedPool}${consolidatedPool !== predictedPool ? ` (real≠predicted=${predictedPool}, using real)` : ''}`);
   }
 
   const redeem0 = compilePayoutShardRedeem({ poolMerkleRoot: ps.pool_merkle_root, predicateCommit: ps.predicate_commit, consolidatedPool, closed: 0 });
