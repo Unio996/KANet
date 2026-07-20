@@ -336,6 +336,10 @@ Owner 元问题:写进文档的铁律(CLAUDE.md 接位 SOP 第5条"设计前查�
 
 **J2 独立抽样进一步坐实(抽样非全量,供参考)**: ①refunded 组抽 4 条,`metadata.refund_tx_obj` 全部有完整值(含 inputs/outputs/lockTime 的真实 refund tx 对象)——**硬证据支持"已过 closed:0"假说**。③`attested_v2` 组 9 条全查,其中一个 id 正是 `pxvml`——`docs/DECISIONS.md` **D-009** 记录的 ZK guest imageId(`335cae6c`→`c9918501`)那个真实事故盘,**独立坐实这组确实是 ZK/V2 家族真实成员**,拿 V1 `compilePayoutShardRedeem` 比对确实是比错模板/家族。②`pruned_expired_waived` 组抽 4 条:`refund_tx_obj`/`close_txid`/`settle_txid` 全 null,**metadata 层面查不出证据**,需要**直接解码 `payout_redeem_hex` 末尾 `closed` 字段**判定所处阶段——这需要 J1 的 byte layout 知识,J2 明确止步不重复造轮子(域边界纪律正确执行)。
 
-**收敛结论(截至本次记账)**: **74 行(refunded 65 + attested_v2 9)已用硬证据确认是"比错 closed 模板/家族"的方法论假阳性,非真实权威漂移**;**剩 24 行(pruned_expired_waived 15 + verifying 9)仍是真开放项**,待 J1 byte-level 解码。DoD-0 硬前置在 24 行结论出来前依旧不满足,v0.3 recompile 校验维持非阻塞。**待续,下一 session 查频道最新——J1 是否已解码 pruned_expired_waived/verifying 剩余 24 行。**
+**收敛结论(截至本次记账)**: **74 行(refunded 65 + attested_v2 9)已用硬证据确认是"比错 closed 模板/家族"的方法论假阳性,非真实权威漂移**;**剩 24 行(pruned_expired_waived 15 + verifying 9)仍是真开放项**,待 J1 byte-level 解码。DoD-0 硬前置在 24 行结论出来前依旧不满足,v0.3 recompile 校验维持非阻塞。
+
+**后续两轮假说(均被数据证伪,记录过程本身——负结果同样有价值,防重复排查)**: J1 提出 D-001(pre-0706 silverc codegen bug)假说→**自行核代码后主动撤回**(V1 PayoutShard/ShardLeaf 编译永远走 pinned `SILVERC_LEGACY`,跟 D-001 OP_PICK 修复所在的 `SILVERC_ZK` 是完全独立二进制,时序假说不成立,认账"半成品扔出来浪费方向"）。J2 全量(非抽样)复核 created_at,坐实 24 行全部 post-0706,D-001 假说死透;同时提出 cohort B(`spc_daa_index` 老区间覆盖缺口)假说,KANet-UI 用真数据核(deadline_daa 范围/`protocol_status` 两个维度)**证伪**——不是同批市场。**最终归因结论(KANet-UI `0b09f6f1` finalize,J1 `dacafdb9` 出 v2 脚本收窄范围)**: `verifying` 9 条中 `8pson`(K-18 文档 §4 自己举的 incoherent V2/ZK 事故盘范例)已知,`kr5l4` 有名字但具体原因未查,**其余 7 条(7jy3s/s6zwj/tha3l/9ez2u/9jaty/j34vb/3mzoh)+ `pruned_expired_waived` 15 条 = 真正无已知假说解释的开放项**,需要懂 covenant 字节结构的人读 `payout_redeem_hex` 本身(K-18 §3.3(b) 结构探针),超出 DB 交叉核对范围,KANet-UI 明确不越域,交回 J1/NWT。**完整过程已存档 `docs/2026-07-21-k18-splice-vs-recompile-backfill-dryrun-report.md`,下次接位查该文档不用重查。**
+
+**总口径不变**: DoD-0 硬前置仍不满足,v0.3 recompile 校验维持非阻塞,P0(`6cff7305`→`25b3d0a0`→`2a231081`)全程落码未装载未申请 money-path。**待续,下一 session 查频道最新——J1/NWT 是否已对剩余 ~22 行做 byte-level 结构探针。**
 
 ---
