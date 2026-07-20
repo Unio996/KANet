@@ -169,5 +169,58 @@ console.log('[test] scenario C (K-18 §3.4, splice-authority not recompile): aut
   }
 }
 
+console.log('[test] scenario D (Codex finding③, dust-poisoning defenses): autoDetectConsolidateResume must NOT treat an amount-mismatched UTXO, or multiple UTXOs at one candidate address, as a valid match — both are attacker-reachable false-positive vectors since candidate addresses are publicly derivable from genesis + known shard pool_values (anyone can compute the same walk and send dust to a future step\'s address). Verified offline via stubbed getUtxos:');
+{
+  const kaspa = await import('kaspa-wasm');
+  const _p2sh = (hex) => {
+    const sb = kaspa.ScriptBuilder.fromScript(new Uint8Array(Buffer.from(hex, 'hex')));
+    return kaspa.addressFromScriptPublicKey(sb.createPayToScriptHashScript(), 'testnet-12').toString();
+  };
+
+  console.log('  [D1] amount mismatch: a UTXO exists at the exact candidate address but its amount does NOT equal the theoretical consolidatedPool for that step (dust/unrelated deposit) — must be skipped, not trusted:');
+  {
+    const marketId = `rdpooltest-d1-${randomUUID().slice(0, 6)}`;
+    const genesisBuf = Buffer.alloc(40, 0); genesisBuf.writeBigInt64LE(20000000n, 2);
+    const genesisRedeemHex = genesisBuf.toString('hex');
+    seedMarket(marketId, { poolMerkleRoot: 'a1'.repeat(32), predicateCommit: 'a2'.repeat(32), consolidatedPoolSeed: '20000000', psOutpoint: `${'55'.repeat(32)}:0` });
+    sqlite.prepare(`UPDATE payout_shards SET payout_redeem_hex = ? WHERE logical_market_id = ?`).run(genesisRedeemHex, marketId);
+    sqlite.prepare(`UPDATE market_shards SET current_leaf_state = ? WHERE logical_market_id = ? AND shard_index = 0`).run(JSON.stringify({ pool_value: 5000000 }), marketId);
+    const ps = sqlite.prepare('SELECT * FROM payout_shards WHERE logical_market_id = ?').get(marketId);
+    const splicedBuf = Buffer.from(genesisRedeemHex, 'hex'); splicedBuf.writeBigInt64LE(25000000n, 2);
+    const candidateAddr = _p2sh(splicedBuf.toString('hex'));
+    // dust UTXO sitting at the CORRECT candidate address but with the WRONG amount (1 sompi, not 25000000)
+    const dustUtxo = { outpoint: { transactionId: '66'.repeat(32), index: 0 }, amount: '1' };
+    const stubGetUtxos = async (addr) => (addr === candidateAddr ? [dustUtxo] : []);
+    const resumePoint = await autoDetectConsolidateResume({
+      db: sqlite, getUtxos: stubGetUtxos, p2sh: _p2sh, logicalMarketId: marketId,
+      payoutShard: { payout_redeem_hex: genesisRedeemHex, payout_ps_outpoint: ps.payout_ps_outpoint, payout_cov_id: ps.payout_cov_id },
+    });
+    ok(resumePoint === null, `dust at the right address with the wrong amount is rejected, function correctly falls through to null (fail-closed, same as "nothing found anywhere") — got: ${JSON.stringify(resumePoint)}`);
+  }
+
+  console.log('  [D2] multiple UTXOs at one candidate address (should never happen under normal covenant operation — 2+ concurrent UTXOs at a deterministically-derivable address is itself an anomaly) — must be skipped, not blindly resolved to utxos[0]:');
+  {
+    const marketId = `rdpooltest-d2-${randomUUID().slice(0, 6)}`;
+    const genesisBuf = Buffer.alloc(40, 0); genesisBuf.writeBigInt64LE(20000000n, 2);
+    const genesisRedeemHex = genesisBuf.toString('hex');
+    seedMarket(marketId, { poolMerkleRoot: 'b1'.repeat(32), predicateCommit: 'b2'.repeat(32), consolidatedPoolSeed: '20000000', psOutpoint: `${'77'.repeat(32)}:0` });
+    sqlite.prepare(`UPDATE payout_shards SET payout_redeem_hex = ? WHERE logical_market_id = ?`).run(genesisRedeemHex, marketId);
+    sqlite.prepare(`UPDATE market_shards SET current_leaf_state = ? WHERE logical_market_id = ? AND shard_index = 0`).run(JSON.stringify({ pool_value: 5000000 }), marketId);
+    const ps = sqlite.prepare('SELECT * FROM payout_shards WHERE logical_market_id = ?').get(marketId);
+    const splicedBuf = Buffer.from(genesisRedeemHex, 'hex'); splicedBuf.writeBigInt64LE(25000000n, 2);
+    const candidateAddr = _p2sh(splicedBuf.toString('hex'));
+    // two UTXOs at the same candidate address, one of which HAS the theoretically-correct amount —
+    // still must not be trusted, since which one is "real" can't be determined from presence alone.
+    const utxoReal = { outpoint: { transactionId: '88'.repeat(32), index: 0 }, amount: '25000000' };
+    const utxoDust = { outpoint: { transactionId: '99'.repeat(32), index: 0 }, amount: '1' };
+    const stubGetUtxos = async (addr) => (addr === candidateAddr ? [utxoReal, utxoDust] : []);
+    const resumePoint = await autoDetectConsolidateResume({
+      db: sqlite, getUtxos: stubGetUtxos, p2sh: _p2sh, logicalMarketId: marketId,
+      payoutShard: { payout_redeem_hex: genesisRedeemHex, payout_ps_outpoint: ps.payout_ps_outpoint, payout_cov_id: ps.payout_cov_id },
+    });
+    ok(resumePoint === null, `two UTXOs at the same candidate address is rejected wholesale (not "pick utxos[0] and hope"), falls through to null — got: ${JSON.stringify(resumePoint)}`);
+  }
+}
+
 console.log(fails === 0 ? `\n✅ all checks passed` : `\n❌ ${fails} check(s) failed`);
 process.exit(fails === 0 ? 0 : 1);

@@ -342,14 +342,28 @@ export function settlePayoutRoot(winners) {
  * @param {object} o { db, getUtxos(addr)→[{outpoint,amount}], p2sh, logicalMarketId, payoutShard }
  * @returns {null | { fromShardIdx, psTx, psIdx, pool }} null = 不需要 resume(from genesis 正常走或已探测不到任何进度)
  */
+// 🔴 2026-07-21 Codex finding③(coord/codex-bridge 2a10f5e8, MUST-FIX4 附带项): "autoDetectConsolidateResume
+//   只是候选生成器不是真值判定器——查到UTXO就信, 没查唯一性/金额匹配, 有dust-poisoning/多UTXO撞候选地址
+//   等假阳性面"。候选地址是从公开可推导的数据(genesis redeem + 逐 shard 已知 pool_value)现场编译出来的,
+//   任何观察者都能算出同一串候选地址——攻击者可以往未来的候选地址发送 dust, 让本函数误以为"consolidate
+//   已经走到这一步"。加固: ①候选地址上有 >1 笔 UTXO = 不该发生的异常(covenant 模型下每个 state 同一时刻
+//   只有一个当前 UTXO), 不猜哪个是真的, 当这一步没找到继续往后走, 不中断整个探测；②UTXO 金额必须
+//   byte-exact 等于这一步理论应有的 consolidatedPool, 金额不符 = dust/无关存款, 同样当没找到继续走。
+//   两条都只是"跳过这一步, 继续正常探测", 不改变函数既有的 null 返回契约(全走查无 = 原有 fail-closed 语义
+//   不变), 调用方不需要跟着改。深度/血缘校验(finding③原文还提到的)不在本次范围——那个需要给 getUtxos
+//   之外再传一个 landed()/深度检查回调, 是签名级改动, 影响面更大, 留给后续批次单独议(不在这次隐式夹带)。
+function _utxoAmountBig(u) { try { return BigInt(u?.amount ?? 0); } catch { return -1n; } }
+
 export async function autoDetectConsolidateResume({ db, getUtxos, p2sh, logicalMarketId, payoutShard }) {
   const allShards = db.prepare(`SELECT * FROM market_shards WHERE logical_market_id = ? AND status != 'manual_recovery_refunded' ORDER BY shard_index ASC`).all(logicalMarketId);
   let psRedeem = Buffer.from(payoutShard.payout_redeem_hex, 'hex');
   let consolidatedPool = psRedeem.readBigInt64LE(2);
   // genesis 本身有没有 UTXO(=从没 consolidate 过, 不需要 resume)先探一次, 省一轮不必要的 shard0 尝试.
+  // 同下方循环同款加固: 多 UTXO/金额不符不能直接当"genesis 完好未花"处理(会把明明该继续走 resume 的
+  // 场景误判成"不需要 resume"), 只有恰好一笔且金额等于 genesis consolidatedPool 才算数。
   const genesisAddr = p2sh(psRedeem.toString('hex'));
   const genesisUtxos = await getUtxos(genesisAddr);
-  if (genesisUtxos.length > 0) return null;   // genesis 完好未花, 从零开始正常走(不是这次要修的场景)
+  if (genesisUtxos.length === 1 && _utxoAmountBig(genesisUtxos[0]) === consolidatedPool) return null;   // genesis 完好未花, 从零开始正常走(不是这次要修的场景)
 
   let found = null;
   for (const shard of allShards) {
@@ -360,7 +374,9 @@ export async function autoDetectConsolidateResume({ db, getUtxos, p2sh, logicalM
     psRedeem = rbuf;
     const addr = p2sh(psRedeem.toString('hex'));
     const utxos = await getUtxos(addr);
-    if (utxos.length > 0) {
+    if (utxos.length !== 1) continue;      // 0 = 这一步还没到; >1 = 异常(dust-poisoning 等), 两种都不采信, 继续往后探
+    if (_utxoAmountBig(utxos[0]) !== consolidatedPool) continue;   // 金额跟理论值不符, 不是我们要找的那笔, 继续往后探
+    {
       const op = utxos[0].outpoint;
       // redeemHex(K-18 §3.4, 2026-07-21 J1 代笔 J2 域): 这里已经是 splice 出的真实字节(与
       // consolidateAllShards 同一权威), 不是从 consolidatedPool 数值重新 compilePayoutShardRedeem——

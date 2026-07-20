@@ -127,7 +127,13 @@ const redeem0 = compilePayoutShardRedeem({ poolMerkleRoot: ps.pool_merkle_root, 
 **未完成的 K-18 硬前置(不可跳过,本卡不满足就不能真正切换成 hard gate,当前只是 soft 校验+日志)**:
 - backfill dry-run 报告(K-18 §5 DoD-0, NWT MUST-FIX①):对生产库全部 `payout_shards` 行跑只读探针,产出总行数/家族分布/unknown 行是否对应在途盘的报告。
 - 现网全量 V1 活跃盘 splice-vs-recompile byte-exact 对照(K-18 §3.4 硬性前置, NWT MUST-FIX②):不能抽样推断("理论上相等"已被反复打脸,`feedback-retry-consistency-proves-determinism-not-correctness`)。
-- **两者都需要生产库访问 + pinned silverc 二进制,本机(J1tn,:3300 独立节点)都没有**(`payout_shards` 本地 0 行是老问题;`D:/silverscript/versioned-builds/` 本机不存在)——已在频道请 KANet-UI 协助在有权限的机器上跑。
+- **两者都需要生产库访问 + pinned silverc 二进制,本机(J1tn,:3300 独立节点)都没有**(`payout_shards` 本地 0 行是老问题;`D:/silverscript/versioned-builds/` 本机不存在)——脚本已交付 `kasia-console/scripts/_j1tn_k18_splice_vs_recompile_backfill_dryrun.mjs`,请 KANet-UI 在有权限的机器上跑。
+
+### finding③ 补(Codex/NWT diff 审追问, 2026-07-21 补齐, 不排到下一批)
+
+Codex 原文另指出 `autoDetectConsolidateResume` "只是候选生成器不是真值判定器——查到 UTXO 就信,没查唯一性/金额匹配,有 dust-poisoning/多 UTXO 撞候选地址等假阳性面"。核实成立并已加固(同一 commit,不单开批次):候选地址是从公开数据(genesis redeem + 已知 shard `pool_value`)现场编译的,任何观察者都能算出同一串未来候选地址——攻击者可以往某个未来候选地址发 dust,诱导本函数误判"已经 consolidate 到这一步"。修法:①候选地址上 UTXO 数 ≠1(0 笔=还没到/多笔=异常,covenant 模型下同一状态同一时刻只应有一个当前 UTXO)一律不采信,当作这一步没找到继续往后探;②UTXO 金额必须 byte-exact 等于这一步理论应有的 `consolidatedPool`,不符同样跳过。两条都不改变函数既有的 `null` 返回契约(全走查无=原有 fail-closed 语义不变),调用方不需要跟着改。回归测试补 scenario D(两个子场景:金额不符 dust / 多 UTXO 撞地址,均验证正确 fail-closed 而非误判为命中)。
+
+**finding③ 本次故意不覆盖的部分(诚实标注, 非隐藏)**:深度/血缘校验(Codex 原文提到但更大范围)——需要给 `getUtxos` 之外再传一个 `landed()`/确认深度检查回调,是函数签名级改动、影响面更大(`consolidateAllShards`/`bshard-close-transport.mjs` 等既有调用点都要跟着改调用方式),不在本次这批隐式夹带,留给后续单独议。
 
 **回归测试新增**(`bshard-consolidated-pool-rederive.test.mjs` scenario C):用 `autoDetectConsolidateResume` 接受的可注入 `getUtxos` stub(离线,无需真实链)直接验证新增的 `redeemHex` 返回字段——byte-exact 等于手工构造的 splice 结果、decode 出的 `consolidatedPool` 与预期值一致。这是真正的白盒单测(不是集成/mock 出的假象),覆盖了 K-18 §3.4 这次改动的核心断言:**消费方拿到的是 splice 字节,不是重新编译的字节**。
 
