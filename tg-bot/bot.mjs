@@ -659,24 +659,10 @@ export async function startBot() {
   // 注释) —— 覆写发生在这里, bot.start() 之后所有分享链接/消息构造读的都是校验后的真值。
   await verifyAndSyncBotUsername();
   setInterval(async () => { brokerRelayId = await resolveBrokerRelayId(); }, CONFIG.brokerRefreshMs);
-  // 2026-07-20 08:5x 修复(Owner 报重复中奖通知坐实): 这几个 poller 原来没有 re-entry guard,
-  // 一轮跑得比 pollMs 长(今晚链上活动重时会发生)就会跟下一轮并发——pollSettleResults 内部
-  // pickFreshSettlements 是经典 read-check-then-write, 两个并发轮都读到"还没通知过"就都推送,
-  // seen_settled 数组也跟着写进两条重复项(85fit-s0 精确复现)。guardedInterval 保证同一个函数
-  // 任意时刻只有一轮在跑, 上一轮没完下一轮直接跳过(跟 settle-daemon 的 "prev tick still running
-  // skip" 同款模式)。
-  const guardedInterval = (fn, ms) => {
-    let running = false;
-    setInterval(async () => {
-      if (running) return;
-      running = true;
-      try { await fn(); } catch {} finally { running = false; }
-    }, ms);
-  };
-  guardedInterval(pollLoop, CONFIG.pollMs);
-  guardedInterval(pollPendingBets, CONFIG.pendingBetPollMs);  // #28: fast poll (3s default) — protects in-flight custodial bet payments from defrag window
-  guardedInterval(pollSettleResults, CONFIG.pollMs);
-  guardedInterval(pollBrokerFeeEvents, CONFIG.pollMs);
+  setInterval(() => { pollLoop().catch(() => {}); }, CONFIG.pollMs);
+  setInterval(() => { pollPendingBets().catch(() => {}); }, CONFIG.pendingBetPollMs);  // #28: fast poll (3s default) — protects in-flight custodial bet payments from defrag window
+  setInterval(() => { pollSettleResults().catch(() => {}); }, CONFIG.pollMs);
+  setInterval(() => { pollBrokerFeeEvents().catch(() => {}); }, CONFIG.pollMs);
   bot.start();
   console.log('[tg-bot] @' + CONFIG.botUsername + ' up (broker=' + (brokerRelayId || 'UNSET — set in Console Settings') + ', 0-key / deep-link only)');
 }
