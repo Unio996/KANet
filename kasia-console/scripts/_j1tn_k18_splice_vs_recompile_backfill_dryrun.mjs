@@ -29,16 +29,26 @@ const { sqlite: db } = await import('../src/db/client.js');
 // compileSil), 本脚本直接 import 复用同一份权威实现, 不重新发明编译逻辑。
 const { compilePayoutShardRedeem } = await import('../src/lib/pool-shard-register.mjs');
 
-// K-18 §3.4 范围 = "verifying/settling 活跃态"——本库 protocol_status 是自由文本无 CHECK 约束(migrate.js
-// pool_markets v46 定义), 已知会出现的值(读码坐实, 非猜): pending_bettors/verifying/completed/
-// settled_partial_claims/needs_manual_attribution/settle_failed/zk_ready/zk_settled。终态(不应还有可花费
-// PS 状态需要担心 splice/recompile 分歧的)= completed/settle_failed(daemon 已放弃重试)。其余一律算"活跃"
-// 保守纳入(宁可多查不可漏查, 报告里会显示每个状态各多少行, 人工过一遍确认没漏)。
-const TERMINAL_STATUSES = new Set(['completed', 'settle_failed']);
+// v2(2026-07-21, 首次 dry-run 后 NWT/KANet-UI/J2 三方地面核实追加): 首版只排除 completed/settle_failed,
+// 结果 98 条 MISMATCH 里绝大多数是范围选错的假阳性, 不是真漂移——地面核实坐实的两类假阳性:
+//   ①已经不在 closed:0 阶段(refunded 65 条全部有真实 refund_txid 落链, 已经过 refund-close 甚至更后)。
+//   ②V2/ZK 家族被拿 V1 编译器错比(attested_v2 全部 + verifying 里混进的 8pson 这类——8pson 是 K-18 §4
+//     自己举的已知 incoherent 家族错配范例, protocol_status='verifying' 但实为 V2, 光看状态名筛不出来,
+//     这是本版新加 zk_native 过滤的直接动机)。
+// v2 收窄口径(两层过滤, 都是保守的"宁可漏查也不可能瞎报"方向——即: 排除标准必须有实证支持, 拿不准的
+// 状态一律留在比对范围内, 报告里能看见, 不能悄悄滤掉真正该查的行):
+//   TERMINAL: completed/settle_failed(原有)+ refunded/refunding/cancelled(已确认或强烈暗示已过 closed:0
+//     阶段, 不该拿 closed:0 模板比)。pruned_expired_waived 保留在范围内(git 全历史搜索零代码路径写过
+//     这个状态, 语义不明, 不能假设它已过 closed:0——留着比, 报告里仍能看见它, 交给人工归因)。
+//   FAMILY: resolution_rule_spec.zk_native === true 的行排除(V2/ZK 家族, 不该用 compilePayoutShardRedeem
+//     这个 V1 专属函数比)。诚实标注: 这个字段本身是可变标记(K-18 §2 原话"唯一家族选择器=可变标记"的
+//     那个问题字段), 不是 K-18 §3.1 要建的那个不可变 covenant_family 列(那个还没落地)——用它做过滤只是
+//     "目前能拿到的最好信号", 不是权威判定, 报告里仍会把这些行单独列出(不是直接丢弃不报)。
+const TERMINAL_STATUSES = new Set(['completed', 'settle_failed', 'refunded', 'refunding', 'cancelled']);
 
 const rows = db.prepare(`
   SELECT ps.logical_market_id, ps.payout_redeem_hex, ps.pool_merkle_root, ps.predicate_commit, ps.payout_ps_outpoint,
-         pm.protocol_status
+         pm.protocol_status, pm.resolution_rule_spec
     FROM payout_shards ps
     LEFT JOIN pool_markets pm ON pm.id = ps.logical_market_id
    ORDER BY ps.logical_market_id
@@ -51,6 +61,9 @@ const results = [];
 const statusCounts = {};
 let matchCount = 0, mismatchCount = 0, recompileFailCount = 0, missingMarketCount = 0;
 
+let familyExcludedCount = 0;
+const familyExcludedRows = [];
+
 for (const row of rows) {
   const status = row.protocol_status || '(pool_markets row missing — orphan payout_shards)';
   statusCounts[status] = (statusCounts[status] || 0) + 1;
@@ -58,6 +71,14 @@ for (const row of rows) {
 
   const isActive = !TERMINAL_STATUSES.has(row.protocol_status);
   if (!isActive) continue;   // 只报活跃态(K-18 §3.4 明确范围), 但上面的 statusCounts 已经统计了全表分布
+
+  let isZkNative = false;
+  try { isZkNative = JSON.parse(row.resolution_rule_spec || '{}')?.zk_native === true; } catch {}
+  if (isZkNative) {
+    familyExcludedCount++;
+    familyExcludedRows.push({ marketId: row.logical_market_id, status });
+    continue;   // V2/ZK 家族, 不该拿 V1 的 compilePayoutShardRedeem 比——单独列出不是悄悄丢弃, 见下方汇总
+  }
 
   let consolidatedPool;
   try {
@@ -89,17 +110,29 @@ for (const row of rows) {
   console.log(JSON.stringify(results[results.length - 1]));
 }
 
-console.log(`\n[k18-backfill-dryrun] === 聚合报告 ===`);
+console.log(`\n[k18-backfill-dryrun] === 聚合报告(v2, 收窄口径) ===`);
 console.log(`总 payout_shards 行数: ${rows.length}`);
-console.log(`protocol_status 分布: ${JSON.stringify(statusCounts, null, 2)}`);
+console.log(`protocol_status 分布(全表, 未过滤): ${JSON.stringify(statusCounts, null, 2)}`);
 console.log(`孤儿行(payout_shards 有但 pool_markets 查不到对应市场): ${missingMarketCount}`);
-console.log(`--- 活跃态(非 completed/settle_failed)范围内 splice-vs-recompile 结果 ---`);
+console.log(`TERMINAL 排除(completed/settle_failed/refunded/refunding/cancelled): 参见上方 protocol_status 分布自行相减`);
+console.log(`FAMILY 排除(resolution_rule_spec.zk_native===true, 疑似 V2/ZK 家族被拿 V1 编译器错比): ${familyExcludedCount} 行`);
+if (familyExcludedRows.length) {
+  console.log(`  family-excluded 明细(未丢弃, 只是不纳入本次 V1 recompile 比对——供人工确认这个判断本身对不对):`);
+  familyExcludedRows.forEach(r => console.log(`    ${JSON.stringify(r)}`));
+}
+console.log(`--- 收窄后仍纳入比对(疑似 V1 家族 + 疑似仍在 pre-close 阶段)的 splice-vs-recompile 结果 ---`);
 console.log(`MATCH(splice==recompile, byte-exact): ${matchCount}`);
 console.log(`MISMATCH(不一致, K-18 硬闸拦这类): ${mismatchCount}`);
 console.log(`DECODE_FAIL/RECOMPILE_FAIL(读不出/编不出, 需人工核): ${recompileFailCount}`);
 console.log(`\n结论判据(K-18 §3.4): MISMATCH+FAIL 都为 0 → 可以把当前 v0.3 的非阻塞 recompile 校验升级为
 硬拒绝闸(hard gate); 只要有一个非零, 必须先人工过一遍这份报告逐行确认原因(§3.4 原话"全部一致才能真正
-切换默认权威", 不接受抽样/大部分一致就切)。`);
+切换默认权威", 不接受抽样/大部分一致就切)。**v2 诚实边界**: TERMINAL/FAMILY 排除都是基于现有 schema 能
+拿到的最好信号(protocol_status 语义 + zk_native 可变标记), 不是 K-18 §3.1 要建的那个不可变
+covenant_family 列(还没落地)——排除掉的行不代表"确认无问题", 只代表"用这版脚本的方法论测不出有意义
+的信号, 该用别的方法核"。首版(TERMINAL 只排 completed/settle_failed)跑出的 98 条 MISMATCH, 经
+NWT/KANet-UI/J2 三方地面核实(refund_txid 实据/8pson 等已知家族错配样本/created_at 时间窗排除 D-001
+假说), 已收窄到一个小得多的真正待归因集合——这版脚本的排除逻辑是把那次人工核实的结论回写成可复现的
+自动化过滤, 不是凭空新猜的规则。`);
 
 if (mismatchCount > 0 || recompileFailCount > 0) {
   console.log(`\n⚠ 有 ${mismatchCount + recompileFailCount} 行不一致/失败, 完整逐行记录见上方 JSON 输出——`
