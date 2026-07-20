@@ -304,4 +304,14 @@ Owner 元问题:写进文档的铁律(CLAUDE.md 接位 SOP 第5条"设计前查�
 
 **当前状态(待续,下一 session 接手时查频道最新)**: Bettor 已频道插播叫停(@J1 @NWT @KANet-UI,commit hash 均已给出可查),要求 NWT 对照 Codex 六条重新过一遍 P0 diff(不只是原方案),J1 暂停 `6cff7305` 装载/Owner money-path 申请,KANet-UI 已自行暂停装载(独立发现"NWT 还没审代码 diff"先按住了,巧合先手)。**Bettor 未独立验证 Codex 每条(给了具体 file/line/commit 级证据,但地面复核仍需团队自己做),按纪律不代拟 verdict,只负责准确转达。**
 
+### ✅ 后续:MUST-FIX4 坐实 + K-18 §3.4 早有答案(重造近失事故,自捕获零浪费)+ 分工收敛
+
+- **J1 核实坐实(不辩解)**: `consolidateAndBuildPsState` 末尾确实调 `compilePayoutShardRedeem`(重编译,`bshard-settle-daemon.mjs:286-287`)产出 `redeem_hex`,下游 `bshard-auto-settler.mjs:340/547/750/756/820` 直接把它塞进花费 tx 的 `inputs.payoutshard.redeem_hex`——**是真花费权威,不是 validation-only**。Codex 对。J1 P0(`6cff7305`)没新引入这个模式(两个既有分支共用),但 Tier2 派生的新值会流进这个既有 recompile 调用,正是 Codex 指的交汇点。**NWT 撤回 `6cff7305` 的 GREEN,更新 verdict = RED,不可装载/不可申请 Owner money-path,需 redesign。**
+- **🔴🔴 重大发现(近失,零浪费,双方自捕获)**: NWT 查出这个问题**3 天前已经设计过且被自己 GREEN 过**——`docs/2026-07-18-payoutshard-family-coherence-gate-design.md`(K-18,Status **CURRENT**)§3.4 原文明确写"`consolidateAndBuildPsState:209` 的 `redeem0` 要改成 stored G0 + splice state,recompile 降级为 §3.3(c) 校验用,不再是花费地址来源"——**文档原文自己标注这是"Codex prefer-one-runtime-authority 建议的落地"(2026-07-18 那次)**,归 J2 域落码,但从未实现。**J1 独立推出的 splice 修法方向(Tier1 命中直接用 `ps.payout_redeem_hex`;Tier2 把 `autoDetectConsolidateResume` 内部已 splice 但被丢弃的 bytes 接出来)跟 K-18 §3.4 本质是同一个答案** —— 不需要另设计 v0.2,是把已批准方案接到 #28 这个具体调用点。
+  - **认账(双方,均撞自己写的铁律)**: NWT 承认审 #28 P0 时该先查 `consolidateAndBuildPsState` 有无既有设计资产、没查,撞 CLAUDE.md 接位 SOP 第 5 条(自己也在守的规矩);J1 认账一半——K-18 是自己 7/18 出的设计、7/19 memory 里明确记着"Owner 拍采用+ABC,J1/J2 解锁落地",写 P0 草稿时该核对、没核对,撞的是同一条。**记入"查资产硬门"重造事故记账(下方 §205 区块)**:本次是**近失(near-miss)**,J1 还没开始写 splice 替代逻辑就被 NWT 抓到既有资产,零重复劳动浪费——比此前 #27a/broker 身份两例更快被捕获(3 天窗口 vs 更久)。
+  - **K-18 §3.4 自带的 DoD 硬前置(NWT 7/18 自己提的 MUST-FIX①②)不能因为"只是接一个调用点"就跳过**:权威切换(recompile→splice 变成默认)前必须 ①backfill dry-run 报告(总行数/家族分布/unknown 行是否有在途盘)②现网**全量** V1 活跃盘 splice vs recompile byte-exact 对照(不是抽样推断)。
+  - **执行约束(J1 诚实说明,阻塞点)**: J1 本机(:3300 独立节点)两个前置都做不了——`payout_shards` 在其库里 0 行(bshard 状态不跨节点同步,老问题)+ pinned silverc `versioned-builds/` 本机不存在(K-18 §3.1 已提过)。J1 能做:①splice 替代 recompile 的代码改动本身(可以现在写,供 diff 审)②但**落地默认权威切换必须等 backfill dry-run 报告确认没有在途盘被误伤**,硬前置不能跳。**@KANet-UI 被请求**在有生产库+silverc 的机器跑一次只读 backfill dry-run(J1 出脚本)。
+- **分工收敛(Bettor 派工澄清,防撞车)**: K-18 §3.4 域归属本是 J2,但 J1 今晚已有 `consolidateAndBuildPsState` 全部上下文(Tier1/Tier2 具体代码结构)——由 J1/J2 自行商定谁接手这一个函数的具体改动(不铺 K-18 全案 family 列/coherence-gate 更大范围),定了向 Bettor 回报记账。money-path 签发口径不变:NWT GREEN + DoD 前置(backfill dry-run + 全量对照)完成后,一次性 Owner money-path 签发,不分批打扰。
+- **待续**: KANet-UI 是否接下 backfill dry-run 请求 / J1-J2 分工结论,下一 session 查频道最新(2026-07-21 21:0x 之后)。
+
 ---
