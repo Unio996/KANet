@@ -282,6 +282,26 @@ Owner 元问题:写进文档的铁律(CLAUDE.md 接位 SOP 第5条"设计前查�
 - **审查中触发并已闭环的事故**: 核实漂移点①时当场发现 `babdaed3`/`b5280c43` 被 Bettor 一次 `git reset --hard` 误删(详见上方 2026-07-20 团队事故记录),NWT 独立 `git merge-base --is-ancestor` 坐实,已找回复原,不影响本 verdict 结论。
 - **P1(evidence preserve-merge)不受本轮 MUST-FIX 阻塞**,J2 按原计划走 diff 审。
 
-**🟡 补充风险观察(操作员 2026-07-21 提出,非 NWT/Bettor 原发现,转达供 NWT 审 P1 时参考,不代拟 verdict)**: P1 的 preserve-merge 堵的是"字段被 replace 冲掉",但堵不住"陈旧值被 preserve 保留"——85fit 当晚的病灶如果字段本身还在但值是旧的,preserve-merge 救不了这种情况。P1 的安全性因此**依赖 P0/P2 的 re-derive-优先纪律先行**,顺序不能倒(全案 §5 路线图 P0→P1 的排序是对的,这条只是确认排序理由)。NWT 审 P1 时值得核一条:preserve-merge 落地后,有没有哪个消费者会因为"字段存在"就跳过 re-derive、误信一个陈旧但未被冲掉的值。
+**🟡 补充风险观察(操作员 2026-07-21 提出,非 NWT/Bettor 原发现,转达供 NWT 审 P1 时参考,不代拟 verdict)**: P1 的 preserve-merge 堵的是"字段被 replace 冲掉",但堵不住"陈旧值被 preserve 保留"——85fit 当晚的病灶如果字段本身还在但值是旧的,preserve-merge 救不了这种情况。P1 的安全性因此**依赖 P0/P2 的 re-derive-优先纪律先行**,顺序不能倒(全案 §5 路线图 P0→P1 的排序是对的,这条只是确认排序理由)。NWT 审 P1 时值得核一条:preserve-merge 落地后,有没有哪个消费者会因为"字段存在"就跳过 re-derive、误信一个陈旧但未被冲掉的值。**后续(同晚)**: P1(ea355c36+7c5dbe83)NWT 独立复测(better-sqlite3 实跑 json_patch vs JS spread 的 null 语义)后 GREEN,J2 已 push;J1 P0 落码(6cff7305,复用 NWT GREEN-with-notes 的方案)完成待装载——但见下条,P0 装载被叫停。
+
+---
+
+## 🔴🔴 Codex 对抗性审查 #28/P0 — verdict RED,P0 暂停装载/审批(2026-07-21,commit `2a10f5e8` on `coord/codex-bridge`)
+
+**背景**: Bettor 主动转达全案+NWT verdict 给 Codex(MSG-20260721-111,非索要代码级复核,只是同步进度+邀可选 judgment),操作员随后触发 Codex 实际读码做对抗性审查,回复落在 `coordination/codex-bridge/responses/RESPONSE-20260721-STATE-SYNC-P0-CODEX-ADVERSARIAL-REVIEW.md`。**此时 J1 已基于 NWT 的方案 GREEN 落码 P0(`6cff7305`,已 push),KANet-UI 正准备装载——Bettor 发现后紧急频道插播叫停**,未发生实际部署/激活。
+
+**Verdict**: 问题定性 GREEN,目标架构措辞 AMBER,**P0 实现就绪度 RED(not ready to land)**。核心矛盾:P0 draft 恢复出正确的 `consolidatedPool` 数值后,最后一步靠 `compilePayoutShardRedeem`(重编译)生成花费用 redeem 字节——**直接违反 `DEC-20260718-001`/K-18**(团队 8pson 事故后自己拍板的决议:"续约权威 = 落地 redeem + 确定性 splice;重编译只能当 validation,不能当 runtime authority")。Codex 原话:"Recovering the right pool but recompiling the wrong redeem is still an unsafe recovery"——**修 consolidated_pool 漂移的同时可能重造 8pson 同款地址分叉**。
+
+**六条 MUST-FIX 摘要(全文见上述 response 文件,NWT/J1 需读原文而非只信本摘要)**:
+1. "DB/evidence 全可从链重建"在 TN12 剪裁下不成立(Gate 0 已证伪),目标架构需三层信任(current chain state / durable evidence ledger / rebuildable cache),非两层。
+2. Tier1 读的是本地 `kaspa_tx_log`,是本地索引互证非独立链上观测,money-path 权威判定不能靠它,需绑定 node/RPC 直接 receipt + 现有 `check_utxo_landed` 同款深度/canonical 门。
+3. `autoDetectConsolidateResume` 是候选生成器非真值判定器——查到 UTXO 就信,无唯一性/金额匹配/血缘/深度校验,有 dust-poisoning、同地址多 UTXO 撞候选等假阳性面,需负测试。
+4. **(最严重,见上)** 重编译字节当花费权威违反 K-18。
+5. 自愈写回只更新 `payout_ps_outpoint` 一列,非原子/无 compare-and-set,并发 tick 可能覆盖。
+6. line423 消费点推给"24小时内第二个 PR"是排期非安全边界——P0 要么两个消费点一起审一起上,要么落码但不激活直到 line423 同款改完。附加:P1 的 preserve-merge 也不能因为"只写 JSON"就自动免检,需要字段所有权规则+版本/writer 序列+并发测试。
+
+**结论**: 方向值得继续,但当前 P0 draft 不该按现状放行实现/部署,建议出 v0.2 把 #28 跟 K-18/Evidence-Continuity(Gate 0 剪裁那条线)统一设计,不建平行"真相路径"。**本审查未授权任何生产部署/DB写/签名/广播/重启/money movement**。
+
+**当前状态(待续,下一 session 接手时查频道最新)**: Bettor 已频道插播叫停(@J1 @NWT @KANet-UI,commit hash 均已给出可查),要求 NWT 对照 Codex 六条重新过一遍 P0 diff(不只是原方案),J1 暂停 `6cff7305` 装载/Owner money-path 申请,KANet-UI 已自行暂停装载(独立发现"NWT 还没审代码 diff"先按住了,巧合先手)。**Bettor 未独立验证 Codex 每条(给了具体 file/line/commit 级证据,但地面复核仍需团队自己做),按纪律不代拟 verdict,只负责准确转达。**
 
 ---
