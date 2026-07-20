@@ -262,3 +262,15 @@ Owner 元问题:写进文档的铁律(CLAUDE.md 接位 SOP 第5条"设计前查�
 - 🔄 **NWT 对 J2 Z20 `_scanExpiredBrokerOffers` CPU-profile 归因请求的回应**: J2 7/14 20:43Z 请求 NWT/Bettor 确认"逐 await 加计时探针"思路再动手。NWT 核实(EXPLAIN QUERY PLAN + 实测行数): SQL 本体索引全命中且候选集近空(broker_kas_refunded 全库 1 行/broker_fallback_claim 0 行), 函数体也无能吃 190s/次 CPU 的代码——**批准 J2 思路, 并加一条建议: 先测 setInterval 实际触发延迟(scheduled vs actual)看是不是本函数根本没开始执行就已经在排队, 比逐 await 更快能验证"profiler artifact(排队伪影)"假说**。详见 `docs/2026-07-15-NWT-redteam-z20-cpu-profiler-review.md`(频道发不出, 该文档是当前唯一交付)。
 
 ---
+
+## 📐 #28 状态收敛全案交付 + 今日派工(2026-07-21 · Bettor 主编)
+
+**背景**: 2026-07-20 决赛夜 85fit 险情(consolidated_pool 被 evidence 整块覆盖清掉,resume 用预测值,最终 26/26 补救落链零损失)后,Owner 钦定 #28"架构-first→模块化"为下一主线。J1 签退前交了域分卡 `docs/2026-07-20-28-state-sync-convergence-design.md`(`05ff33ab`,只在 origin,本地未 fetch 过)。
+
+- **✅ #28 全案已交**: `docs/2026-07-21-28-state-sync-architecture-full-design.md`,吸收 J1 §1-§3 + 本卡新增第 6 个漂移点(`DATABASE.md:632` 对 `claim_txid` 描述与代码矛盾)+ 五个漂移点逐条 file:line 代码实证(非转述,Explore agent 实读当前代码坐实,细节见文档 §2.2)+ 目标架构三层图 + V1-vs-bshard 复杂度对比图("#28/#30/治本卡① 同根,不是三个孤立 bug")+ 迭代路线 P0-P2 + DoD + 今日派工。**commit `649950ff`,已 push origin/bshard-m3-deploy**(用 cherry-pick-onto-origin 手法避免把本地 parked 的 `5f17088c` 一并带上远端——push 前 origin 已领先本地一个 J1 commit,本地又领先一个未获批的 tg-bot commit,直接 push/merge 会误带后者,改用临时分支 cherry-pick 文档改动单独推送,local 分支之后 reset 回 origin + 重新 cherry-pick `5f17088c`(新 hash `974a24d5`)保持"仅本地领先一个待批 commit"的既有承诺不变)。
+- **系统画像(mermaid,4 图 + 团队图 + 派工卡)**: 私有 Artifact,操作员可看(fireworks-tech-graph 技能未装/未核实来源,本次改用 Claude Code 内置 mermaid/Artifact 渲染,效果等价,后续如需仍可另评估该第三方技能)。
+- **今日派工(频道已发,#tnvoio)**: **@NWT** 红队审全案(最优先,阻塞落码)——核漂移点准确性+一致性校验闸 fail-closed 语义+P0 回归测试场景够不够;**@J1** 真相源层+P0(consolidated_pool re-derive)方案草稿(不落码等红队)+ #30(可今天直接排,非钱路);**@J2** 缓存视图层+P1(evidence preserve-merge)方案草稿;**@KANet-UI** DATABASE.md:632 订正 + #25 等 Owner-ack 后部署。
+- **顺带修复**: `kasia-console/docs/evidence/2026-07-19-jepu1-blast-radius-inventory.md` 违反 R-DOC-PATH(J1 7/20 签退时点名,一直没人挪)→ `git mv` 到 `docs/` 根,随本次提交一并推送。
+- **待办**: NWT verdict 回来后,🔴 项(consolidated_pool re-derive、fresh-close 改真值)需 Bettor 精炼后单点上报 Owner money-path 签发,不发菜单、不分批打扰。
+
+---
