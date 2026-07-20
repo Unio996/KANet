@@ -340,6 +340,24 @@ Owner 元问题:写进文档的铁律(CLAUDE.md 接位 SOP 第5条"设计前查�
 
 **后续两轮假说(均被数据证伪,记录过程本身——负结果同样有价值,防重复排查)**: J1 提出 D-001(pre-0706 silverc codegen bug)假说→**自行核代码后主动撤回**(V1 PayoutShard/ShardLeaf 编译永远走 pinned `SILVERC_LEGACY`,跟 D-001 OP_PICK 修复所在的 `SILVERC_ZK` 是完全独立二进制,时序假说不成立,认账"半成品扔出来浪费方向"）。J2 全量(非抽样)复核 created_at,坐实 24 行全部 post-0706,D-001 假说死透;同时提出 cohort B(`spc_daa_index` 老区间覆盖缺口)假说,KANet-UI 用真数据核(deadline_daa 范围/`protocol_status` 两个维度)**证伪**——不是同批市场。**最终归因结论(KANet-UI `0b09f6f1` finalize,J1 `dacafdb9` 出 v2 脚本收窄范围)**: `verifying` 9 条中 `8pson`(K-18 文档 §4 自己举的 incoherent V2/ZK 事故盘范例)已知,`kr5l4` 有名字但具体原因未查,**其余 7 条(7jy3s/s6zwj/tha3l/9ez2u/9jaty/j34vb/3mzoh)+ `pruned_expired_waived` 15 条 = 真正无已知假说解释的开放项**,需要懂 covenant 字节结构的人读 `payout_redeem_hex` 本身(K-18 §3.3(b) 结构探针),超出 DB 交叉核对范围,KANet-UI 明确不越域,交回 J1/NWT。**完整过程已存档 `docs/2026-07-21-k18-splice-vs-recompile-backfill-dryrun-report.md`,下次接位查该文档不用重查。**
 
-**总口径不变**: DoD-0 硬前置仍不满足,v0.3 recompile 校验维持非阻塞,P0(`6cff7305`→`25b3d0a0`→`2a231081`)全程落码未装载未申请 money-path。**待续,下一 session 查频道最新——J1/NWT 是否已对剩余 ~22 行做 byte-level 结构探针。**
+**总口径不变**: DoD-0 硬前置仍不满足,v0.3 recompile 校验维持非阻塞,P0(`6cff7305`→`25b3d0a0`→`2a231081`)全程落码未装载未申请 money-path。
+
+### 🔎 J1 结构探针初步结果(KANet-UI 实测,`d97e2435`,可能解开剩余 8 行——不下结论,待 J1/NWT 判定)
+
+**方法**: J1 出结构探针(`scripts/_j1tn_k18_v1_structural_probe.mjs`,K-18 §3.3(b) 手法,length/marker/值域三重检查),对 7 条真开放 `verifying` 行(`7jy3s`/`s6zwj`/`tha3l`/`9ez2u`/`9jaty`/`j34vb`/`3mzoh`)+ `kr5l4` 共 8 目标 dump 结构,KANet-UI 生产库实跑(8/8 全命中),原始输出存 `scratch/2026-07-21-k18-v1-structural-probe-output.txt`(未入库,同机可读)。
+
+**KANet-UI 先纠自己一个口径混淆**:之前报告的"storedLen"是 `payout_redeem_hex` 十六进制字符数非字节数(N 字节 hex 字符串长度是 2N)——换算后完全对得上:此前"16564"组 ÷2=8282 字节,这次 8 目标全部 `byteLength=8282`,是同一批;"22196"组 ÷2=11098 字节,是另一批(已判定假阳性的 refunded 65+attested_v2 9,非本轮目标)。
+
+**结果(数据摆出,不下结论,域外交回 J1/NWT)**:
+- **8 目标 `byteLength` 全部 = 8282,baseline(completed 正常行)= 10896,系统性少 2614 字节**——**这正是今晚早前 D-009/8pson 事故复盘中 V1 vs V2 编译产物长度差的同一个数字("2614-byte G0/G1 结构性差异,cross-family recompilation 造成")**,强烈提示这 8 条可能跟 `attested_v2` 那 9 条同一族(拿错家族模板比对),而非真实漂移。
+- header marker 位置(`hex[0..2]`/`hex[10..12]`)跟 baseline 一致,state 区起点/`consolidatedPool` 字段 offset 未错位;`consolidatedPool` 解码值域合理(无乱码/负数/爆表)。
+- `pool_merkle_root`:`7jy3s`/`s6zwj`/`tha3l`/`9ez2u`/`9jaty` 五条共享同一前缀 `df3cd1c433fef5c5…`;`kr5l4`/`3mzoh` 两条共享另一前缀 `25f5caef900ab249…`(`predicate_commit` 各不相同,非重复行,疑似同批工具/脚本建的 sibling 盘)。
+- **KANet-UI 判读(明确标注"不下结论,数据摆给你")**:系统性等长短缺(非随机长度,不像单条数据损坏)+ 精确匹配已知的 2614 字节 V1/V2 差值,读起来更像"另一批家族错配假阳性",但**最终判定需 J1/NWT 用 covenant 结构领域知识确认**。KANet-UI 问是否继续挖(如 5 条共享 merkle_root 的市场是否同批手工/脚本建盘,查 created_at 间隔+`maker_relay_id` 一致性)——**待 J1 回复,未决**。
+
+**三方独立收敛(NWT + J2 + J1,各自不同路径认出同一个数字)**: NWT 直接查 `COORD-LEDGER` 7/17 段("8pson 死路定案"),原文"四值探针 byte-exact...G1≠G0 结构性差 **2614 字节**(V2 vs V1 两编译路径)"——跟这 8 条系统性短的字节数**完全同一个数字**。J2 独立从当天记忆里认出同一句原文(228 行)。**三人判断:大概率不是新漂移,是 8pson 那个已知病灶("`zk_native` 标记 vs 实际铸造 covenant 不一致",`COORD-LEDGER` 230 行"治本立卡另案")的更多样本,非独立新问题。**
+
+**验证尝试(J1 提议+KANet-UI 执行)**: 查 `metadata.zk_native`(顶层+`resolution_rule_spec.zk_native` 两路径)——**结果全部 null**,跟 `attested_v2` 那 9 条同款。**这条判据在此不可用(J1 预判正确)**:标记本身从铸造起就可能没打对,是 K-18 §2 自己诊断的病根("唯一家族选择器 = 可变标记,对 mint 后标记漂移零防护")——**metadata 检测走不通反而是 side-confirm K-18 §3.1 要建不可变 `covenant_family` 列的设计理由本身**,不是白查。真正判定权在 J1 域内结构探针(已跑,数字对上 2614)或更深 `.sil` 字节码判读/复用 8pson 当时的四值探针脚本。**J1 提出该把这批并入 K-18 §3.1(covenant_family 不可变列 + backfill)优先级考量,非今晚域内能定,已转达。**
+
+**待续,下一 session 查频道最新——四值探针复核是否已跑 + 这轮 backfill triage 是否能收尾成"98 条全部已知家族误判,零真实漂移"。**
 
 ---
