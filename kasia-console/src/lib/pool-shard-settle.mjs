@@ -362,7 +362,12 @@ export async function autoDetectConsolidateResume({ db, getUtxos, p2sh, logicalM
     const utxos = await getUtxos(addr);
     if (utxos.length > 0) {
       const op = utxos[0].outpoint;
-      found = { fromShardIdx: shard.shard_index + 1, psTx: op.transactionId, psIdx: Number(op.index || 0), pool: consolidatedPool.toString() };
+      // redeemHex(K-18 §3.4, 2026-07-21 J1 代笔 J2 域): 这里已经是 splice 出的真实字节(与
+      // consolidateAllShards 同一权威), 不是从 consolidatedPool 数值重新 compilePayoutShardRedeem——
+      // 之前只 return 了 pool 数值, 调用方(consolidateAndBuildPsState)再用这个数值去重编译, 是
+      // Codex/K-18 §3.4 指出的"recompile 当花费权威"违规根源之一。现在把这份已经算好的 splice 字节
+      // 一并交出, 调用方直接用, 不必再过一次 silverc。
+      found = { fromShardIdx: shard.shard_index + 1, psTx: op.transactionId, psIdx: Number(op.index || 0), pool: consolidatedPool.toString(), redeemHex: psRedeem.toString('hex') };
       break;
     }
   }
@@ -431,5 +436,9 @@ export async function consolidateAllShards({ db, rc, landed, p2sh, logicalMarket
     const rbuf = Buffer.from(psRedeem, 'hex'); rbuf.writeBigInt64LE(consolidatedPool, 2); psRedeem = rbuf.toString('hex');
     try { db.prepare(`UPDATE market_shards SET status = 'settling' WHERE shard_market_id = ?`).run(shard.shard_market_id); } catch { /* readonly driver DB → bookkeeping best-effort; on-chain settle is the truth */ }
   }
-  return { psOutpoint: `${psTx}:${psIdx}`, consolidatedPool: consolidatedPool.toString(), consolidatedShards: count };
+  // redeemHex(K-18 §3.4, 2026-07-21 J1 代笔 J2 域): psRedeem 在整个循环里都是 splice(writeBigInt64LE
+  // 直改 state 字段字节), 从未过 silverc recompile——这本来就是"对"的权威(§1 事故表格里的 splice 权威一栏)。
+  // 之前只 return consolidatedPool 数值, 调用方要用这个数值再单独重编译建 redeem, 那趟重编译才是
+  // Codex/K-18 指出的风险来源。改成直接把这份已经是权威字节的 psRedeem 交出去, 调用方不必再算一次。
+  return { psOutpoint: `${psTx}:${psIdx}`, consolidatedPool: consolidatedPool.toString(), consolidatedShards: count, redeemHex: psRedeem };
 }

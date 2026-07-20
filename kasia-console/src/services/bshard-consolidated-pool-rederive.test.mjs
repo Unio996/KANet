@@ -36,6 +36,7 @@ if (!process.env._RDPOOL_TEST_BOOTSTRAPPED) {
 
 const { sqlite } = await import('../db/client.js');
 const { consolidateAndBuildPsState, ensureReady } = await import('./bshard-settle-daemon.mjs');
+const { autoDetectConsolidateResume } = await import('../lib/pool-shard-settle.mjs');
 const { randomUUID } = await import('node:crypto');
 
 // NOTE: deliberately NOT using compilePayoutShardRedeem() here — it shells out to silverc, which is
@@ -118,6 +119,53 @@ console.log('[test] scenario B: kaspa_tx_log DOES have a row for the cached outp
   if (ev) {
     const payload = JSON.parse(ev.payload_json);
     ok(payload.redeemFresh === false, 'drift event correctly records redeemFresh=false despite kaspa_tx_log row existing (address mismatch caught, not presence-trusted)');
+  }
+}
+
+console.log('[test] scenario C (K-18 §3.4, splice-authority not recompile): autoDetectConsolidateResume must return the already-spliced redeemHex bytes it computed during its genesis-walk, not just the pool value — this is what closes Codex MUST-FIX4 (consumer no longer needs to recompile via silverc to get spend-authority bytes). Verified with a stubbed getUtxos (function accepts it as an injected param — no real chain needed for this specific unit):');
+{
+  const marketId = `rdpooltest-c-${randomUUID().slice(0, 6)}`;
+  const psRoot = 'ee'.repeat(32), predCommit = 'ff'.repeat(32);
+  // dedicated fixture, NOT fakeRedeemHex(): autoDetectConsolidateResume does readBigInt64LE(2)/
+  // writeBigInt64LE(2) on the real byte layout (offset 2, 8 bytes LE = consolidatedPool, matching
+  // compilePayoutShardRedeem's actual PUSH8 state encoding) — needs a buffer with a KNOWN value at
+  // that exact offset for this test's arithmetic to be self-consistent, unlike scenarios A/B which
+  // only need SOME bytes to hash into SOME P2SH address.
+  const genesisBuf = Buffer.alloc(40, 0); genesisBuf.writeBigInt64LE(20000000n, 2);
+  const genesisRedeemHex = genesisBuf.toString('hex');
+  seedMarket(marketId, { poolMerkleRoot: psRoot, predicateCommit: predCommit, consolidatedPoolSeed: '20000000', psOutpoint: `${'33'.repeat(32)}:0` });
+  sqlite.prepare(`UPDATE payout_shards SET payout_redeem_hex = ? WHERE logical_market_id = ?`).run(genesisRedeemHex, marketId);
+  // one shard with a known pool_value contribution
+  sqlite.prepare(`UPDATE market_shards SET current_leaf_state = ? WHERE logical_market_id = ? AND shard_index = 0`).run(JSON.stringify({ pool_value: 5000000 }), marketId);
+  const ps = sqlite.prepare('SELECT * FROM payout_shards WHERE logical_market_id = ?').get(marketId);
+
+  // stub getUtxos: genesis address has nothing (forces the walk forward); shard0's candidate address
+  // (genesis pool + 5000000) has a fake UTXO — deterministic, offline, no RPC.
+  const fakeUtxo = { outpoint: { transactionId: '44'.repeat(32), index: 0 }, amount: '25000000' };
+  const stubGetUtxos = async (addr) => (addr === expectedShard0Addr ? [fakeUtxo] : []);
+  // compute the expected shard0 candidate address the same way the function does internally (genesis
+  // bytes + splice consolidatedPool=25000000 at offset 2) so the stub can recognize it.
+  await ensureReady();
+  const kaspa = await import('kaspa-wasm');
+  const _p2sh = (hex) => {
+    const sb = kaspa.ScriptBuilder.fromScript(new Uint8Array(Buffer.from(hex, 'hex')));
+    return kaspa.addressFromScriptPublicKey(sb.createPayToScriptHashScript(), 'testnet-12').toString();
+  };
+  const splicedBuf = Buffer.from(genesisRedeemHex, 'hex'); splicedBuf.writeBigInt64LE(25000000n, 2);
+  const expectedShard0Addr = _p2sh(splicedBuf.toString('hex'));
+
+  const resumePoint = await autoDetectConsolidateResume({
+    db: sqlite, getUtxos: stubGetUtxos, p2sh: _p2sh, logicalMarketId: marketId,
+    payoutShard: { payout_redeem_hex: genesisRedeemHex, payout_ps_outpoint: ps.payout_ps_outpoint, payout_cov_id: ps.payout_cov_id },
+  });
+
+  ok(resumePoint != null, `autoDetectConsolidateResume finds the stubbed match (got: ${resumePoint ? 'found' : 'null — check stub wiring'})`);
+  if (resumePoint) {
+    ok(typeof resumePoint.redeemHex === 'string' && resumePoint.redeemHex.length > 0, 'resumePoint carries a redeemHex field (the new K-18 field, previously absent)');
+    ok(resumePoint.redeemHex === splicedBuf.toString('hex'), 'returned redeemHex is byte-exact the spliced bytes (genesis template + consolidatedPool spliced at offset 2), matches what a consumer would have gotten from splice — NOT a recompile');
+    const decoded = Buffer.from(resumePoint.redeemHex, 'hex').readBigInt64LE(2);
+    ok(decoded === 25000000n, `redeemHex correctly encodes consolidatedPool=25000000 at the state offset (decoded: ${decoded})`);
+    ok(resumePoint.pool === '25000000', `resumePoint.pool matches (${resumePoint.pool})`);
   }
 }
 

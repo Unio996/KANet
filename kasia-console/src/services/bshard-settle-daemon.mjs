@@ -165,7 +165,7 @@ async function consolidateAndBuildPsState(marketId, ps, ctx) {
   const needConsolidate = shards.some(s => s.status === 'sealed' || s.status === 'open');
   const market = sqlite.prepare('SELECT * FROM pool_markets WHERE id = ?').get(marketId);
 
-  let psOutpointTxid, psIdx, consolidatedPool;
+  let psOutpointTxid, psIdx, consolidatedPool, psRedeemHex;
   if (needConsolidate) {
     // #DB-lag自愈(2026-07-06, lv3rz/dyljb 手动马拉松式恢复后收编): getUtxos 探测每个 entry 归一成
     // {outpoint,amount} 供 autoDetectConsolidateResume 直接用(跟 landed() 的 norm 模式一致, 单源不重写).
@@ -195,7 +195,11 @@ async function consolidateAndBuildPsState(marketId, ps, ctx) {
     });
     [psOutpointTxid, psIdx] = res.psOutpoint.split(':'); psIdx = Number(psIdx);
     consolidatedPool = res.consolidatedPool;
-    try { sqlite.prepare('UPDATE payout_shards SET payout_ps_outpoint = ? WHERE logical_market_id = ?').run(res.psOutpoint, marketId); } catch {}
+    // K-18 §3.4(2026-07-21, J1 代笔 J2 域): redeem 权威 = consolidateAllShards 内部已经 splice 好的字节
+    // (res.redeemHex, 与 relay 广播时用的字节同源), 不再靠数值反推重编译。自愈写回同批覆盖两列(NWT
+    // finding⑤: 之前只写 payout_ps_outpoint 一列, payout_redeem_hex 留旧值会造成两列配对不一致)。
+    psRedeemHex = res.redeemHex;
+    try { sqlite.prepare('UPDATE payout_shards SET payout_ps_outpoint = ?, payout_redeem_hex = ? WHERE logical_market_id = ?').run(res.psOutpoint, psRedeemHex, marketId); } catch {}
     log(`${marketId.slice(-8)} consolidated ${res.consolidatedShards} shard(s) → ${res.psOutpoint} pool=${consolidatedPool}`);
   } else {
     [psOutpointTxid, psIdx] = String(ps.payout_ps_outpoint).split(':'); psIdx = Number(psIdx);
@@ -244,7 +248,9 @@ async function consolidateAndBuildPsState(marketId, ps, ctx) {
         if (match) {
           const n = norm(match);
           const realAmount = String(n.entry?.amount ?? n.amount ?? '');
-          if (realAmount && realAmount !== '0') consolidatedPoolReal = realAmount;
+          // K-18 §3.4: Tier1 已独立验证 ps.payout_redeem_hex 编译出的地址与链上实际观测地址一致(redeemFresh)
+          // 且这个 outpoint 确有活 UTXO——这份 DB 存的字节本身就是权威, 直接用, 不重编译。
+          if (realAmount && realAmount !== '0') { consolidatedPoolReal = realAmount; psRedeemHex = ps.payout_redeem_hex; }
         }
       } catch (e) { log(`${marketId.slice(-8)} Tier1 real-pool probe error (falling to Tier2): ${e.message}`); }
     }
@@ -260,8 +266,12 @@ async function consolidateAndBuildPsState(marketId, ps, ctx) {
       if (resumePoint) {
         psOutpointTxid = resumePoint.psTx; psIdx = resumePoint.psIdx;
         consolidatedPoolReal = resumePoint.pool;
-        try { sqlite.prepare('UPDATE payout_shards SET payout_ps_outpoint = ? WHERE logical_market_id = ?').run(`${psOutpointTxid}:${psIdx}`, marketId); } catch {}
-        log(`${marketId.slice(-8)} Tier2 重建命中: payout_ps_outpoint 自愈为 ${psOutpointTxid}:${psIdx} pool=${consolidatedPoolReal}(redeemFresh=${redeemFresh})`);
+        // K-18 §3.4: resumePoint.redeemHex 是 autoDetectConsolidateResume 内部 genesis-walk 时已经 splice
+        // 好的字节(与 relay/consolidateAllShards 同一权威), 不重编译。自愈写回同批覆盖两列(NWT finding⑤:
+        // 只写 payout_ps_outpoint 会让 payout_redeem_hex 继续留旧值, 两列配对不一致, 下次 Tier1 又会判"不新鲜")。
+        psRedeemHex = resumePoint.redeemHex;
+        try { sqlite.prepare('UPDATE payout_shards SET payout_ps_outpoint = ?, payout_redeem_hex = ? WHERE logical_market_id = ?').run(`${psOutpointTxid}:${psIdx}`, psRedeemHex, marketId); } catch {}
+        log(`${marketId.slice(-8)} Tier2 重建命中: payout_ps_outpoint/payout_redeem_hex 自愈为 ${psOutpointTxid}:${psIdx} pool=${consolidatedPoolReal}(redeemFresh=${redeemFresh})`);
       } else {
         // autoDetectConsolidateResume 返回 null 有两种原因(NWT 复核观察 b, 区分记录方便排查):
         // genesis 仍未花(与"已 consolidate"分支矛盾)或全 shard 候选地址均查无 live UTXO。
@@ -283,8 +293,32 @@ async function consolidateAndBuildPsState(marketId, ps, ctx) {
     log(`${marketId.slice(-8)} already consolidated → ${psOutpointTxid}:${psIdx} pool=${consolidatedPool}${consolidatedPool !== predictedPool ? ` (real≠predicted=${predictedPool}, using real)` : ''}`);
   }
 
-  const redeem0 = compilePayoutShardRedeem({ poolMerkleRoot: ps.pool_merkle_root, predicateCommit: ps.predicate_commit, consolidatedPool, closed: 0 });
-  return { outpointTxid: psOutpointTxid, index: psIdx, redeem_hex: redeem0, consolidatedPool, poolMerkleRoot: ps.pool_merkle_root, predicateCommit: ps.predicate_commit };
+  // 🔴 2026-07-21 K-18 §3.4(docs/2026-07-18-payoutshard-family-coherence-gate-design.md, NWT GREEN 7/18,
+  //   J1 代笔落地 J2 域·Codex 对抗审查 coord/codex-bridge 2a10f5e8 MUST-FIX4 抓出本函数原来最后这一步
+  //   一直用 compilePayoutShardRedeem 重编译的字节当花费权威, 违反团队 8pson 事故后拍板的权威收敛
+  //   决议——权威只能是"落地 redeem + 确定性 splice"(与 relay/consolidateAllShards 同源), 重编译只能
+  //   当校验用, 不能当 runtime authority(silverc 本地构建跟当年铸造那台机器字节漂移 = 8pson 同款分叉)。
+  //   两个分支现在都已经在各自的 Tier1/Tier2/consolidate 路径里把 psRedeemHex 设成"真权威"(splice 或
+  //   验证过新鲜的原始 DB 字节), 不再走这里的 compile。
+  //   recompile 降级为非阻塞校验(K-18 §3.3(c) 精神, 完整 assertPayoutShardCoherence 四步门 + family 列
+  //   属 K-18 全案更大范围, 本次窄范围落地不铺): 只 log 差异, 不 throw, 不影响返回值——K-18 DoD 硬前置
+  //   (backfill dry-run 报告 + 现网全量 V1 盘 splice vs recompile byte-exact 对照)完成前, 没有全量证据能
+  //   支撑"不一致就拒绝"这条硬闸, 贸然 throw 反而会把从未验证过的既有 V1 盘一起挡住(同 K-18 §5 DoD-0 warning)。
+  if (!psRedeemHex) throw new Error(`consolidateAndBuildPsState: psRedeemHex 未设置(market ${marketId}), 内部逻辑错误——每条路径都必须显式赋值 splice 权威字节, 不允许隐式回落 undefined`);
+  try {
+    const recompiled = compilePayoutShardRedeem({ poolMerkleRoot: ps.pool_merkle_root, predicateCommit: ps.predicate_commit, consolidatedPool, closed: 0 });
+    if (recompiled !== psRedeemHex) {
+      log(`${marketId.slice(-8)} 🟡 K-18 §3.3(c) 校验(非阻塞): recompile 字节 != splice 权威字节(silverc 版本漂移或数据不一致, 已用 splice 权威值, 未拒绝) recompiled=${recompiled.slice(0, 24)}… spliced=${psRedeemHex.slice(0, 24)}…`);
+      try {
+        sqlite.prepare(`INSERT INTO events (id, event_scope, event_type, source, level, summary, payload_json, created_at)
+          VALUES (?, 'system', 'ps_redeem_recompile_mismatch', 'consolidateAndBuildPsState', 'warn', ?, ?, datetime('now'))`)
+          .run(randomUUID(), `market=${marketId.slice(-8)} recompile != splice authority(非阻塞, K-18 backfill 前置证据积累)`,
+               JSON.stringify({ marketId, recompiledHex: recompiled, splicedHex: psRedeemHex }));
+      } catch {}
+    }
+  } catch (e) { log(`${marketId.slice(-8)} K-18 §3.3(c) recompile 校验跳过(非阻塞, silverc 不可用等): ${e.message}`); }
+
+  return { outpointTxid: psOutpointTxid, index: psIdx, redeem_hex: psRedeemHex, consolidatedPool, poolMerkleRoot: ps.pool_merkle_root, predicateCommit: ps.predicate_commit };
 }
 
 function buildCtx() {

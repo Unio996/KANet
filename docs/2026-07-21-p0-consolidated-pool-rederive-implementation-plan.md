@@ -1,8 +1,8 @@
-# P0 实现方案 — consolidated_pool re-derive-from-chain(J1 draft, 折入 NWT MUST-FIX②③)
+# P0 实现方案 — consolidated_pool re-derive-from-chain(J1 draft, 折入 NWT MUST-FIX②③ + K-18 §3.4)
 
-> **Status**: CURRENT(v0.2 · 2026-07-21 · J1 draft · NWT 复核 GREEN 可落码,2 条非阻塞观察已折入)
-> **依据**: `docs/2026-07-21-28-state-sync-architecture-full-design.md`(649950ff)§5 P0 派工 + `docs/2026-07-21-NWT-redteam-28-state-sync-full-design.md`(f1a16daa)MUST-FIX②③ + 附带项(第3回归场景)。
-> **审批**: NWT 逐项核实(签名/返回字段/回归场景链路)后 GREEN,2 条非阻塞观察(措辞/事件粒度)已折入 v0.2,详见 §2/§3 末尾标注。落码后 diff 需发 NWT(已约定)。
+> **Status**: CURRENT(v0.3 · 2026-07-21 · J1 · 首版实现 6cff7305 被 Codex 对抗审查(coord/codex-bridge `2a10f5e8`)+ NWT 复核撤回判 RED,MUST-FIX4 坐实——`consolidateAndBuildPsState` 最终仍用 `compilePayoutShardRedeem` 重编译产出 spending-authority `redeem_hex`,违反团队 8pson 事故后拍板的 K-18/DEC-20260718-001"续约权威=落地 redeem+splice,重编译只能校验"决议。v0.3 折入 K-18 §3.4(J1 代笔落地 J2 域,效率借调非域转移,记账见频道)——彻底改为 splice 权威,recompile 降级非阻塞校验。**K-18 自身 DoD 硬前置(backfill dry-run 报告 + 现网全量 V1 盘 splice-vs-recompile byte-exact 对照)仍未完成,不能跳,本机(J1tn)无生产库/pinned silverc 访问,该步骤待 KANet-UI/有权限机器执行。装载/money-path 仍全部 hold,等 NWT 对 v0.3 diff + K-18 backfill 报告双重放行。**)
+> **依据**: `docs/2026-07-21-28-state-sync-architecture-full-design.md`(649950ff)§5 P0 派工 + `docs/2026-07-21-NWT-redteam-28-state-sync-full-design.md`(f1a16daa)MUST-FIX②③ + 附带项(第3回归场景)+ `docs/2026-07-18-payoutshard-family-coherence-gate-design.md`(K-18 v1.1,NWT GREEN 7/18)§3.4 权威收敛 + coord/codex-bridge 对抗审查(`2a10f5e8`)MUST-FIX4。
+> **审批链**: NWT 首轮 GREEN(f51cb938)→ 装载前 KANet-UI 谨慎 hold(diff 未单独过 verdict)→ Codex 独立对抗审查判 RED → NWT 复核同意撤回 GREEN、抓出 K-18 §3.4 早有已批准解法未落码 → J1 认领执行部分责任(接位 SOP 第5条"设计前查资产"没做到,即便自己是 K-18 作者)→ 收敛为 v0.3(splice 权威落地窄范围,即本函数)→ **待 NWT 复核 v0.3 diff + K-18 backfill 前置完成后才能装载/money-path**。
 
 ---
 
@@ -107,6 +107,32 @@ if (!redeemFresh || !match) {
 
 ---
 
+## 3b. K-18 §3.4 落地:recompile→splice 权威收敛(2026-07-21,Codex MUST-FIX4 触发,v0.3 新增)
+
+**问题(Codex 对抗审查坐实, coord/codex-bridge 2a10f5e8)**: v0.2(6cff7305)的 Tier1/Tier2 虽然正确重新派生了 `consolidatedPool` **数值**,但函数最后仍统一走:
+```js
+const redeem0 = compilePayoutShardRedeem({ poolMerkleRoot: ps.pool_merkle_root, predicateCommit: ps.predicate_commit, consolidatedPool, closed: 0 });
+```
+这是**重编译**(过 silverc 子进程), 产出的 `redeem_hex` 经 `bshard-auto-settler.mjs:340/547/750/756/820` 直接进 `inputs.payoutshard.redeem_hex` 建实际花费交易——是真花费权威,不是校验用途。团队 8pson 事故(2026-07-17)后已拍板 K-18/DEC-20260718-001:**权威只能是"落地 redeem + 确定性 splice"**(与 relay/`consolidateAllShards` 同源,继承链上真实字节,永不跟链分歧),recompile 依赖本机 silverc 构建跟当年铸造那台机器字节一致——任何版本漂移都会产出错误字节、构造出错误地址(8pson 同款分叉)。K-18 §3.4(`docs/2026-07-18-payoutshard-family-coherence-gate-design.md`, NWT 7/18 GREEN)对这条已有精确设计,只是从未落码——本节即该设计落到 `consolidateAndBuildPsState` 这一个函数的最小范围实现(K-18 全案的 `covenant_family` 列 + `assertPayoutShardCoherence` 四步门等更大范围不在此次改动内,归 K-18 全案后续)。
+
+**修法(三处改动,均已落码 commit 待定,详见 diff)**:
+1. `autoDetectConsolidateResume`(`pool-shard-settle.mjs:345-372`)genesis-walk 过程本来就是逐步 `writeBigInt64LE` 的 byte-splice,不是 recompile——之前只 `return {pool}` 数值,现在把已经算好的 `psRedeem` bytes 一并 `return {..., redeemHex}` 交出去,消费方不必再重编译一次。
+2. `consolidateAllShards`(同文件 :381-441)内部循环同样全程 splice(:436 `rbuf.writeBigInt64LE`),之前只 `return {consolidatedPool}` 数值,现在同样多 `return {..., redeemHex: psRedeem}`。
+3. `consolidateAndBuildPsState`(`bshard-settle-daemon.mjs`)三条路径各自把 `psRedeemHex` 设为**权威字节**而非重编译结果:
+   - `needConsolidate=true` 分支:直接用 `res.redeemHex`(来自改动2);自愈写回同批覆盖 `payout_ps_outpoint` **和** `payout_redeem_hex` 两列(NWT finding⑤:此前只写一列,两列配对可能不一致)。
+   - Tier1 命中分支:`ps.payout_redeem_hex` 本身已经被独立验证过新鲜(链上观测地址与之匹配),直接原样使用,零编译零 splice(存量字节本来就对)。
+   - Tier2 命中分支:用 `resumePoint.redeemHex`(来自改动1);自愈写回同样覆盖两列。
+   - 函数末尾原本无条件的 `compilePayoutShardRedeem` 调用**降级为非阻塞校验**——recompile 出来跟 `psRedeemHex` 比对,不一致只 `log` + 写 `ps_redeem_recompile_mismatch` 事件(供未来 K-18 backfill 报告积累证据),**不 throw、不影响返回值**——K-18 §5 DoD-0 明确说这条硬闸的前提(backfill dry-run 报告确认没有在途盘会被误伤)没做之前不能变成拒绝闸,否则"治本操作自己制造一批盘静默卡住的新危机"(K-18 原文原话,同 8pson 教训同源)。
+
+**未完成的 K-18 硬前置(不可跳过,本卡不满足就不能真正切换成 hard gate,当前只是 soft 校验+日志)**:
+- backfill dry-run 报告(K-18 §5 DoD-0, NWT MUST-FIX①):对生产库全部 `payout_shards` 行跑只读探针,产出总行数/家族分布/unknown 行是否对应在途盘的报告。
+- 现网全量 V1 活跃盘 splice-vs-recompile byte-exact 对照(K-18 §3.4 硬性前置, NWT MUST-FIX②):不能抽样推断("理论上相等"已被反复打脸,`feedback-retry-consistency-proves-determinism-not-correctness`)。
+- **两者都需要生产库访问 + pinned silverc 二进制,本机(J1tn,:3300 独立节点)都没有**(`payout_shards` 本地 0 行是老问题;`D:/silverscript/versioned-builds/` 本机不存在)——已在频道请 KANet-UI 协助在有权限的机器上跑。
+
+**回归测试新增**(`bshard-consolidated-pool-rederive.test.mjs` scenario C):用 `autoDetectConsolidateResume` 接受的可注入 `getUtxos` stub(离线,无需真实链)直接验证新增的 `redeemHex` 返回字段——byte-exact 等于手工构造的 splice 结果、decode 出的 `consolidatedPool` 与预期值一致。这是真正的白盒单测(不是集成/mock 出的假象),覆盖了 K-18 §3.4 这次改动的核心断言:**消费方拿到的是 splice 字节,不是重新编译的字节**。
+
+---
+
 ## 4. 相邻但独立的问题:claim-thread 的 line 423 presence-trust 点
 
 `settleMarketLive`(`bshard-auto-settler.mjs:423`):
@@ -126,8 +152,9 @@ const consolidatedPool = priorEvidence?.consolidated_pool || (BigInt(plan.poolSo
 
 1. §2 Tier1/Tier2 落码 + §3 三个回归测试场景(孤儿盘 e2e / close 后-claim 中途重启 / **consolidate 中途重启,本卡新增**)全绿。
 2. 三源 co-verify:链上真值(独立 RPC 查询) vs Tier1/Tier2 re-derive 值 vs 一致性校验通过态——孤儿盘、正常盘、consolidate-中途重启盘各跑一遍。
-3. §4 的 claim-thread line 423 改动作为**第二个 PR**,不阻塞本卡落码,但需在本卡 merge 后 24h 内提出(不能无限期挂起)。
-4. money-path(🔴)签发:本卡改动改变结算构造值(`consolidatedPool` 的实际取值来源),按全案 §5 门禁,需 NWT 红队 GREEN + 本 DoD 1-2 完成后一次性 Owner money-path 签发(不分批打扰,同全案 §7 第6条口径)。
+3. §4 的 claim-thread line 423 改动作为**第二个 PR**,不阻塞本卡落码,但需在本卡 merge 后 24h 内提出(不能无限期挂起)——Codex 建议"line423 要么一起审一起上,要么 P0 落码但不激活直到同款改完",与本条排期口径的分歧待 NWT/Bettor 定夺,不由本方案单方面决定。
+4. **§3b(K-18 §3.4 splice 权威)DoD, v0.3 新增, 硬前置(不可跳)**: backfill dry-run 报告(K-18 §5 DoD-0)+ 现网全量 V1 活跃盘 splice-vs-recompile byte-exact 对照(K-18 §3.4 硬前置, NWT MUST-FIX②)均完成、报告经人工过一遍确认无在途盘被误伤,**才能**把 §3b 当前的"非阻塞校验+日志"升级为真正的 hard gate(拒绝不一致的 redeem)。本机(J1tn)不具备执行这两项前置的条件(无生产库/无 pinned silverc),需 KANet-UI 或有权限的机器执行。
+5. money-path(🔴)签发:本卡改动改变结算构造值 **及** 花费权威来源(`consolidatedPool` 数值 + `redeem_hex` 字节双重收敛),按全案 §5 门禁,需 NWT 红队对 v0.3 diff 出具新 verdict(首版 GREEN 已撤回)+ 本 DoD 1-2-4 完成后一次性 Owner money-path 签发(不分批打扰,同全案 §7 第6条口径)。**在此之前 6cff7305 及后续 commit 均只落码入库、不装载(console 不重启加载)、不申请 Owner 签发。**
 
 ---
 
