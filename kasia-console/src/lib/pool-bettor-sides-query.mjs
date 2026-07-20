@@ -47,11 +47,11 @@ export function getSidesByShard(shardMarketId, db, excludeSideLockTx = null) {
   if (excludeSideLockTx && excludeSideLockTx.length) {
     const placeholders = excludeSideLockTx.map(() => '?').join(',');
     return db.prepare(
-      `SELECT * FROM pool_bettor_sides WHERE market_id = ? AND side_lock_tx NOT IN (${placeholders})`
+      `SELECT * FROM pool_bettor_sides WHERE market_id = ? AND side_lock_tx NOT IN (${placeholders}) ORDER BY id ASC`
     ).all(shardMarketId, ...excludeSideLockTx);
   }
   return db.prepare(
-    'SELECT * FROM pool_bettor_sides WHERE market_id = ?'
+    'SELECT * FROM pool_bettor_sides WHERE market_id = ? ORDER BY id ASC'
   ).all(shardMarketId);
 }
 
