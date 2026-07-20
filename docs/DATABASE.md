@@ -629,7 +629,7 @@ allocateForRegister 顺序填。
 ### pool_bettor_sides（v62+，逐笔下注记录）
 **一行 = 一笔独立下注（一个 bettor 在一个 market_id/分片、一个方向上的一次锁仓）**
 
-**字段**：id (PK AUTOINCREMENT，跨分片场景下唯一稳定排序键，H2 largest-remainder 拆分用它做确定性排序), market_id (REFERENCES pool_markets(id)——bshard 下是**分片** id，非逻辑市场 id), bettor_pk, bettor_relay_id, direction (0=YES/1=NO), stake_amount (sompi), side_p2sh/side_lock_tx（下注锁仓 P2SH+锁仓 tx）, merkle_index, claim_txid（v0.7 赢家自取 claim tx）, side_lock_daa（v187+，下注锁仓块的 DAA score，backward-walk 从链上派生，见 `docs/2026-07-08-backward-walk-daa-index-design.md`——**若此列长期 NULL 且已过物理剪裁点(pruningPoint daaScore)，本地/任何节点均无法再补，是永久性的，非"待补"**）, pay_amount_sompi, refund_attempted_at。
+**字段**：id (PK AUTOINCREMENT，跨分片场景下唯一稳定排序键，H2 largest-remainder 拆分用它做确定性排序), market_id (REFERENCES pool_markets(id)——bshard 下是**分片** id，非逻辑市场 id), bettor_pk, bettor_relay_id, direction (0=YES/1=NO), stake_amount (sompi), side_p2sh/side_lock_tx（下注锁仓 P2SH+锁仓 tx）, merkle_index, claim_txid（**语义已废弃 for bshard 赢家**——唯二写入点 `bettor-refund-claim-auto.mjs:126`+`pool.js:501` 都只服务退款路，bshard 赢家 claim 循环 `bshard-auto-settler.mjs:407-460` 从未写这一列，故 bshard 赢家此列永远 NULL；赢家真实 claim 信息在 `pool_markets.metadata.settle_evidence.winner_details`，用户面已改读那里（`pool.js:3339-3353`），内部 `audit-prediction.js` 尚未跟进仍读本列会误报"未 claim"，见 `docs/2026-07-21-28-state-sync-architecture-full-design.md` 表2.2 #4/#6), side_lock_daa（v187+，下注锁仓块的 DAA score，backward-walk 从链上派生，见 `docs/2026-07-08-backward-walk-daa-index-design.md`——**若此列长期 NULL 且已过物理剪裁点(pruningPoint daaScore)，本地/任何节点均无法再补，是永久性的，非"待补"**）, pay_amount_sompi, refund_attempted_at。
 
 **唯一约束**：`UNIQUE(market_id, bettor_pk)` — 只挡"同一 bettor 在同一 market_id(分片)重复下注"，**不挡跨分片**（同一 bettor 在同逻辑市场的不同分片各下一笔完全合法，也正是上面 H2 陷阱的成因）。
 
