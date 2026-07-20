@@ -322,6 +322,14 @@ Owner 元问题:写进文档的铁律(CLAUDE.md 接位 SOP 第5条"设计前查�
 
 **部署门禁维持不变(跟 J1 昨晚原话一致,未因代码 GREEN 而放松)**: K-18 DoD-0(backfill dry-run + 全量 byte-exact 对照)+ line423 口径待定 + Owner money-path 三项均未过,commit 可留在 git 里但不能装载/不能申请签发。
 
-**开放问题(NWT 问 J1,待回)**: MUST-FIX③(`autoDetectConsolidateResume` 唯一性/金额/深度校验)这次 diff 没看到加,排在这批还是下一批?
+**开放问题(NWT 问 J1,待回,已解决见下)**: MUST-FIX③(`autoDetectConsolidateResume` 唯一性/金额/深度校验)这次 diff 没看到加,排在这批还是下一批?
+
+### ✅ MUST-FIX③ 补交(J1,commit `2a231081`)+ K-18 DoD-0 backfill dry-run 首次真实数据结果(KANet-UI,commit `107252f5`+`5dbc0358`)
+
+**J1 补交③(自曝漏交付,非故意拖批)**: 之前说"折进这次改动范围"结果只做了⑤忘了③。补上:`autoDetectConsolidateResume` 候选地址是从公开数据(genesis+已知 shard pool_value)现算的,任何人能算出同串未来候选地址,dust 打到预测地址会让函数误判"已 consolidate 到这一步"——加固两条:候选地址 UTXO 数必须恰好 1 笔(0/>1 都不采信)+ 金额必须 byte-exact 等于理论 `consolidatedPool`,不符则当没找到继续往后探(不改变原 `null` 返回契约)。回归测试 scenario D(dust/多 UTXO 撞地址两个子场景)离线验证,A/B/C 复跑仍绿。**深度/血缘校验(Codex 原文也提)本次故意不做**——需要给 `getUtxos` 之外传 `landed()` 式确认深度回调,是签名级改动会波及 `consolidateAllShards`/`bshard-close-transport.mjs` 既有调用点,影响面更大,单独留后续批次不夹带(诚实边界,非隐瞒)。
+
+**K-18 DoD-0 backfill dry-run 首次真实数据结果(J1 出脚本 `107252f5`,KANet-UI 生产库+silverc 只读跑)**: 总 721 行 `payout_shards`,活跃态(非 completed/settle_failed)526 行纳入对比 —— **MATCH 428 / MISMATCH 98 / DECODE_FAIL 0**。**判据:98 ≠ 0,§3.4 权威切换硬前置不满足,v0.3 的 recompile 校验维持非阻塞,不能升硬闸**(v0.3 现有安全姿态正确,未提前放松)。
+
+**98 条 MISMATCH 归因假说(KANet-UI + NWT 独立收敛到同一假说,均标注"未验证/不代拟结论")**: 全部是 `storedLen≠recompiledLen`(两种不同长度,22196×78 行 / 16564×20 行),非同长度字节漂移。按 status 分组:refunded 65 / pruned_expired_waived 15 / attested_v2 9 / verifying 9。**假说**:脚本统一拿 `closed:0` 模板重编译比对,但 refunded/pruned_expired_waived 状态名本身暗示 covenant 已走过 refund-close(`closed:2`,带 refundRoot)甚至更后阶段,`attested_v2` 状态名本身是 V2/ZK 家族(`covenant_family` 列 K-18§3.1 还没落地,脚本没法按家族过滤)——**很可能是"拿错模板/家族比对"的方法论假阳性,不是真实权威漂移**。**验证方法(NWT 提)**:挑几条 refunded/pruned_expired_waived 行,查 `settle_txid`/refund 相关字段是否已有落链记录,坐实的话能显著收窄 98 条里需要人工归因的范围;纯 `verifying` 状态的 9 条无此解释,仍需单独查。**待续,下一 session 查频道最新结论。**
 
 ---
