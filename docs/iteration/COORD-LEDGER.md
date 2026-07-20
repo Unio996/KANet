@@ -268,9 +268,20 @@ Owner 元问题:写进文档的铁律(CLAUDE.md 接位 SOP 第5条"设计前查�
 **背景**: 2026-07-20 决赛夜 85fit 险情(consolidated_pool 被 evidence 整块覆盖清掉,resume 用预测值,最终 26/26 补救落链零损失)后,Owner 钦定 #28"架构-first→模块化"为下一主线。J1 签退前交了域分卡 `docs/2026-07-20-28-state-sync-convergence-design.md`(`05ff33ab`,只在 origin,本地未 fetch 过)。
 
 - **✅ #28 全案已交**: `docs/2026-07-21-28-state-sync-architecture-full-design.md`,吸收 J1 §1-§3 + 本卡新增第 6 个漂移点(`DATABASE.md:632` 对 `claim_txid` 描述与代码矛盾)+ 五个漂移点逐条 file:line 代码实证(非转述,Explore agent 实读当前代码坐实,细节见文档 §2.2)+ 目标架构三层图 + V1-vs-bshard 复杂度对比图("#28/#30/治本卡① 同根,不是三个孤立 bug")+ 迭代路线 P0-P2 + DoD + 今日派工。**commit `649950ff`,已 push origin/bshard-m3-deploy**(用 cherry-pick-onto-origin 手法避免把本地 parked 的 `5f17088c` 一并带上远端——push 前 origin 已领先本地一个 J1 commit,本地又领先一个未获批的 tg-bot commit,直接 push/merge 会误带后者,改用临时分支 cherry-pick 文档改动单独推送,local 分支之后 reset 回 origin + 重新 cherry-pick `5f17088c`(新 hash `974a24d5`)保持"仅本地领先一个待批 commit"的既有承诺不变)。
-- **系统画像(mermaid,4 图 + 团队图 + 派工卡)**: 私有 Artifact,操作员可看(fireworks-tech-graph 技能未装/未核实来源,本次改用 Claude Code 内置 mermaid/Artifact 渲染,效果等价,后续如需仍可另评估该第三方技能)。
+- **系统画像(mermaid,4 图 + 团队图 + 派工卡)**: 私有 Artifact,操作员可看(fireworks-tech-graph 技能未装/未核实来源,本次改用 Claude Code 内置 mermaid/Artifact 渲染,效果等价,后续如需仍可另评估该第三方技能)。**🔴 引用纪律(操作员 2026-07-21 当场指出,D-004 框架延伸)**: **Artifact 是渲染快照,不是真相源——它本身就是本卡在批判的"可漂移缓存视图"的一个实例。** 权威永远是 repo 里的 `.md`(引用请引 commit hash,不引 artifact 链接,链接只当阅读入口)。方案经红队修订后(如下方 NWT MUST-FIX)Artifact 不会自动同步——已实测过一次:MUST-FIX② 落码进 `.md`(`e3258005`)后,Artifact 需手动重新发布才追上,期间两者确实短暂不一致,坐实了这条纪律不是空防。已加 provenance banner(注明快照 commit hash+"不会自动同步"警告)到 Artifact 页面本身,降低下一个读者误当权威源的概率,但**这不改变"永远以 repo 为准"的规则**。
 - **今日派工(频道已发,#tnvoio)**: **@NWT** 红队审全案(最优先,阻塞落码)——核漂移点准确性+一致性校验闸 fail-closed 语义+P0 回归测试场景够不够;**@J1** 真相源层+P0(consolidated_pool re-derive)方案草稿(不落码等红队)+ #30(可今天直接排,非钱路);**@J2** 缓存视图层+P1(evidence preserve-merge)方案草稿;**@KANet-UI** DATABASE.md:632 订正 + #25 等 Owner-ack 后部署。
 - **顺带修复**: `kasia-console/docs/evidence/2026-07-19-jepu1-blast-radius-inventory.md` 违反 R-DOC-PATH(J1 7/20 签退时点名,一直没人挪)→ `git mv` 到 `docs/` 根,随本次提交一并推送。
 - **待办**: NWT verdict 回来后,🔴 项(consolidated_pool re-derive、fresh-close 改真值)需 Bettor 精炼后单点上报 Owner money-path 签发,不发菜单、不分批打扰。
+
+## 🔴 NWT #28 红队 verdict — GREEN-with-2-MUST-FIX(2026-07-21,commit `f1a16daa`)
+
+**逐条 file:line 核了 §2 全部 5+1 漂移点 + §3 GATE 语义 + §6 P0 回归场景,方向/收敛原则 GREEN,但 P0 落码前两处必须先处理**:
+- **MUST-FIX②(已修复,`e3258005`)**: 漂移点③引用文件名错——`consolidateAndBuildPsState` 实际在 `bshard-settle-daemon.mjs:163-231`,不在 `bshard-auto-settler.mjs`(行号内容本身精确,只是文件名笔误)。
+- **MUST-FIX③(实质技术要求,P0 落码前必解,未修复)**: 目标架构 GATE 的 re-derive 查询地址来自可漂移 DB 列 `payout_redeem_hex`(只在 2 个机会性刷新点更新,无强制对账触发器),不是纯链上锚定——"去哪查"这个决策权还在 DB 手里,§1 收敛原则字面没做到。**修法**: P0 应改抄代码里已有的正确范式 `_inferWinDirectionFromChain`(`bshard-auto-settler.mjs:225-277`)——从 genesis 钉死不变的 `pool_merkle_root`/`predicate_commit` + 候选 `consolidatedPool` 现场编译地址,不信任存好的完整 redeem hex。@J1 P0 实现方案须把此项折入,NWT 复核实现方案(非仅本文档)后才放行落码。
+- **建议追加第 3 个 P0 回归场景(非阻塞)**: consolidate 中途重启(现有两个场景都假设重启在 close 之后)。
+- **审查中触发并已闭环的事故**: 核实漂移点①时当场发现 `babdaed3`/`b5280c43` 被 Bettor 一次 `git reset --hard` 误删(详见上方 2026-07-20 团队事故记录),NWT 独立 `git merge-base --is-ancestor` 坐实,已找回复原,不影响本 verdict 结论。
+- **P1(evidence preserve-merge)不受本轮 MUST-FIX 阻塞**,J2 按原计划走 diff 审。
+
+**🟡 补充风险观察(操作员 2026-07-21 提出,非 NWT/Bettor 原发现,转达供 NWT 审 P1 时参考,不代拟 verdict)**: P1 的 preserve-merge 堵的是"字段被 replace 冲掉",但堵不住"陈旧值被 preserve 保留"——85fit 当晚的病灶如果字段本身还在但值是旧的,preserve-merge 救不了这种情况。P1 的安全性因此**依赖 P0/P2 的 re-derive-优先纪律先行**,顺序不能倒(全案 §5 路线图 P0→P1 的排序是对的,这条只是确认排序理由)。NWT 审 P1 时值得核一条:preserve-merge 落地后,有没有哪个消费者会因为"字段存在"就跳过 re-derive、误信一个陈旧但未被冲掉的值。
 
 ---
