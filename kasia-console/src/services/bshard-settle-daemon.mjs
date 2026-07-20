@@ -16,7 +16,7 @@
 import { sqlite } from '../db/client.js';
 import { getMarketBets } from '../lib/pool-bettor-sides-query.mjs';
 import { computeSettlePlan, settleMarketLive, deriveResumePlanFromEvidence } from './bshard-auto-settler.mjs';
-import { consolidateAllShards } from '../lib/pool-shard-settle.mjs';
+import { consolidateAllShards, autoDetectConsolidateResume } from '../lib/pool-shard-settle.mjs';
 import { _shard9PhantomExcludeFor } from './bshard-close-voter.js';
 import { compilePayoutShardRedeem } from '../lib/pool-shard-register.mjs';
 import { fetchEndBlockHashCanonical, recaptureSideLockDaaForMarket } from './pool-market-settler-v06.mjs';
@@ -211,19 +211,76 @@ async function consolidateAndBuildPsState(marketId, ps, ctx) {
     //   了正确的真实 consolidatedPool)反推它的 P2SH 地址 → 查真实链上 UTXO 金额, 查到就是"读到的真相"非
     //   "预测"; 查不到(边缘case: UTXO 已花/RPC 失败)fail-open 退回旧 predictedPool, 不新增阻塞面/不影响
     //   任何当前正常工作的市场。
-    let consolidatedPoolReal = predictedPool;
-    try {
-      const realAddr = _p2shCache(ps.payout_redeem_hex);
-      const liveEntries = await getUtxos(realAddr);
-      const match = liveEntries.find((e) => { const n = norm(e); const op = n.entry?.outpoint || n.outpoint; return op?.transactionId === psOutpointTxid && Number(op?.index) === psIdx; });
-      if (match) {
-        const n = norm(match);
-        const realAmount = String(n.entry?.amount ?? n.amount ?? '');
-        if (realAmount && realAmount !== '0') consolidatedPoolReal = realAmount;
+    // 🔴 2026-07-21 P0(#28 MUST-FIX③, NWT GREEN f51cb938, docs/2026-07-21-p0-consolidated-pool-rederive-
+    //   implementation-plan.md): 上面这条 real-pool probe 的查询坐标(realAddr)来自 ps.payout_redeem_hex——
+    //   这一列只在两个机会性刷新点更新(漂移点⑤), 可能滞后于链上真实进度; 滞后时 realAddr 算错, match 必
+    //   然找不到, 旧代码把"找不到"和"这地址本来就没钱"混为一谈, 统一 fail-open 回 predictedPool——GATE 名义
+    //   链上优先, 实际查询坐标仍由可漂移 DB 列决定, 跟 §1 收敛原则字面矛盾。改法(方案 §2): Tier1 独立核
+    //   payout_redeem_hex 新鲜度(kaspa_tx_log 直接观测该 outpoint 链上实际地址, 不信 DB 反推的地址)——不
+    //   新鲜就跳过明知会失败的 probe; Tier2(仅 Tier1 未过/probe 未命中触发)复用已验证的
+    //   autoDetectConsolidateResume(genesis-anchored 候选编译+查链, pool-shard-settle.mjs:345-372, 此前只服务
+    //   consolidateAllShards 自己的 resume 入口)重建真值, 命中自愈写回 DB, 未命中 fail-closed throw+记
+    //   drift 事件——不再静默使用一个未经链上验证的预测值。
+    const realAddr = _p2shCache(ps.payout_redeem_hex);
+    // Tier1: 独立链读核实 payout_redeem_hex 是否新鲜(不信它反推的地址, 核它) —— 复用
+    // _inferWinDirectionFromChain(bshard-auto-settler.mjs:246-254)同款原语: kaspa_tx_log.outputs_json
+    // 直接读某 txid 的 output 地址, 跟 DB 反推的地址独立比对。
+    const txRow = sqlite.prepare('SELECT outputs_json FROM kaspa_tx_log WHERE tx_id = ?').get(psOutpointTxid);
+    let chainObservedAddr = null;
+    if (txRow?.outputs_json) {
+      try {
+        const outs = JSON.parse(txRow.outputs_json);
+        const o = outs[psIdx];
+        chainObservedAddr = o?.address || o?.verboseData?.scriptPublicKeyAddress || o?.scriptPublicKeyAddress || null;
+      } catch {}
+    }
+    const redeemFresh = !!(chainObservedAddr && chainObservedAddr === realAddr);
+
+    let consolidatedPoolReal = null;
+    if (redeemFresh) {
+      try {
+        const liveEntries = await getUtxos(realAddr);
+        const match = liveEntries.find((e) => { const n = norm(e); const op = n.entry?.outpoint || n.outpoint; return op?.transactionId === psOutpointTxid && Number(op?.index) === psIdx; });
+        if (match) {
+          const n = norm(match);
+          const realAmount = String(n.entry?.amount ?? n.amount ?? '');
+          if (realAmount && realAmount !== '0') consolidatedPoolReal = realAmount;
+        }
+      } catch (e) { log(`${marketId.slice(-8)} Tier1 real-pool probe error (falling to Tier2): ${e.message}`); }
+    }
+
+    if (consolidatedPoolReal == null) {
+      // Tier2: redeemFresh 判否, 或新鲜但 outpoint 已花(被后续 consolidate 步骤取代)——两种情况都说明
+      // ps.payout_redeem_hex/payout_ps_outpoint 不可信, 复用 autoDetectConsolidateResume 从 genesis 现场
+      // 重建, 不是猜。
+      const resumePoint = await autoDetectConsolidateResume({
+        db: sqlite, getUtxos, p2sh: _p2shCache, logicalMarketId: marketId,
+        payoutShard: { payout_redeem_hex: ps.payout_redeem_hex, payout_ps_outpoint: ps.payout_ps_outpoint, payout_cov_id: ps.payout_cov_id },
+      });
+      if (resumePoint) {
+        psOutpointTxid = resumePoint.psTx; psIdx = resumePoint.psIdx;
+        consolidatedPoolReal = resumePoint.pool;
+        try { sqlite.prepare('UPDATE payout_shards SET payout_ps_outpoint = ? WHERE logical_market_id = ?').run(`${psOutpointTxid}:${psIdx}`, marketId); } catch {}
+        log(`${marketId.slice(-8)} Tier2 重建命中: payout_ps_outpoint 自愈为 ${psOutpointTxid}:${psIdx} pool=${consolidatedPoolReal}(redeemFresh=${redeemFresh})`);
+      } else {
+        // autoDetectConsolidateResume 返回 null 有两种原因(NWT 复核观察 b, 区分记录方便排查):
+        // genesis 仍未花(与"已 consolidate"分支矛盾)或全 shard 候选地址均查无 live UTXO。
+        const genesisAddr = _p2shCache(ps.payout_redeem_hex);
+        let genesisUnspent = false;
+        try { genesisUnspent = (await getUtxos(genesisAddr)).length > 0; } catch {}
+        const driftReason = genesisUnspent ? 'genesis_still_unspent_contradicts_consolidated_status' : 'full_shard_walk_no_live_utxo';
+        ctx.alert?.(marketId, `consolidated_pool Tier2 重建未命中(${driftReason})— 拒绝本 tick 使用 predictedPool, 需人工核`);
+        try {
+          sqlite.prepare(`INSERT INTO events (id, event_scope, event_type, source, level, summary, payload_json, created_at)
+            VALUES (?, 'system', 'consolidated_pool_verify_drift', 'consolidateAndBuildPsState', 'warn', ?, ?, datetime('now'))`)
+            .run(randomUUID(), `market=${marketId.slice(-8)} payout_redeem_hex/payout_ps_outpoint 与链上不符且 Tier2 genesis-walk 未命中(${driftReason})`,
+                 JSON.stringify({ marketId, staleOutpoint: `${psOutpointTxid}:${psIdx}`, staleRedeemAddr: realAddr, redeemFresh, driftReason }));
+        } catch {}
+        throw new Error(`consolidated_pool 无法链上验证(market ${marketId}, reason=${driftReason}), fail-closed 拒绝本 tick`);
       }
-    } catch (e) { log(`${marketId.slice(-8)} real-pool probe fail (non-fatal, fallback to predicted): ${e.message}`); }
+    }
     consolidatedPool = consolidatedPoolReal;
-    log(`${marketId.slice(-8)} already consolidated → ${ps.payout_ps_outpoint} pool=${consolidatedPool}${consolidatedPool !== predictedPool ? ` (real≠predicted=${predictedPool}, using real)` : ''}`);
+    log(`${marketId.slice(-8)} already consolidated → ${psOutpointTxid}:${psIdx} pool=${consolidatedPool}${consolidatedPool !== predictedPool ? ` (real≠predicted=${predictedPool}, using real)` : ''}`);
   }
 
   const redeem0 = compilePayoutShardRedeem({ poolMerkleRoot: ps.pool_merkle_root, predicateCommit: ps.predicate_commit, consolidatedPool, closed: 0 });

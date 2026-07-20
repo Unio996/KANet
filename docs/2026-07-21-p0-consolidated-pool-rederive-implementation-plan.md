@@ -1,8 +1,8 @@
 # P0 实现方案 — consolidated_pool re-derive-from-chain(J1 draft, 折入 NWT MUST-FIX②③)
 
-> **Status**: CURRENT(v0.1 · 2026-07-21 · J1 draft,待 NWT 复核实现方案后放行落码)
+> **Status**: CURRENT(v0.2 · 2026-07-21 · J1 draft · NWT 复核 GREEN 可落码,2 条非阻塞观察已折入)
 > **依据**: `docs/2026-07-21-28-state-sync-architecture-full-design.md`(649950ff)§5 P0 派工 + `docs/2026-07-21-NWT-redteam-28-state-sync-full-design.md`(f1a16daa)MUST-FIX②③ + 附带项(第3回归场景)。
-> **本卡本身不改一行执行代码**(设计先行铁律)——落码前需 NWT 复核本实现方案。
+> **审批**: NWT 逐项核实(签名/返回字段/回归场景链路)后 GREEN,2 条非阻塞观察(措辞/事件粒度)已折入 v0.2,详见 §2/§3 末尾标注。落码后 diff 需发 NWT(已约定)。
 
 ---
 
@@ -29,7 +29,7 @@ if (match) consolidatedPoolReal = realAmount;              // 命中才用真值
 
 ---
 
-## 2. 修法:两层防御,复用已验证代码,不发明新机制
+## 2. 修法:复用已验证代码,不发明新机制(NWT 措辞订正: 非"两层独立防御",Tier1 是 Tier2 前的省 RPC 快速路径)
 
 ### Tier 1(每 tick 常规路径,低成本)——独立链读验证 `payout_redeem_hex` 新鲜度
 
@@ -52,6 +52,8 @@ const redeemFresh = chainObservedAddr && chainObservedAddr === realAddr;
 
 - **`chainObservedAddr === realAddr`**(新鲜)→ 走现有 `getUtxos(realAddr)` probe(:217-223 逻辑不变,只是现在建立在"已验证"而非"盲信"之上)。命中 = 用真值;这里如果 probe 未命中(该 outpoint 在链上已花)说明**这一步консолидate 已被后续步骤取代**,不是"没钱",落 Tier 2(下)。
 - **不新鲜**(地址不符,或 `kaspa_tx_log` 查不到——indexer 缺口,同 `_inferWinDirectionFromChain` 的 "F3 账" 语义)→ **不再进 `getUtxos(realAddr)` probe**(明知地址算错还去查它,浪费一次 RPC 且没有信息量),直接进 Tier 2。
+
+**NWT 复核观察(a,已采纳订正措辞)**: Tier1 不是跟 Tier2 并列的独立安全层——结构上无论 Tier1 判定新鲜与否,只要后续 `getUtxos(realAddr)` probe 的 `match` 失败(旧 outpoint 已被花掉的场景下必然失败),都会落到 Tier2 兜底。**Tier1 真正的作用是"省一次无信息量 RPC 的快速路径"**(不新鲜时跳过明知会失败的 probe,直接进 Tier2),真正的安全兜底是 Tier2 + `match` 判定的组合,不是 Tier1 本身。§2 标题已按此订正。
 
 ### Tier 2(仅 Tier 1 未通过时触发)——genesis-anchored 重建,复用 `autoDetectConsolidateResume`
 
@@ -97,10 +99,11 @@ if (!redeemFresh || !match) {
 - `market_shards.status` 是在 `consolidateAllShards` 内部**逐 shard 循环内**(pool-shard-settle.mjs:432)于每个 shard 的链上 consolidate tx `landed()` 之后立即 UPDATE 的,跟外层 :198 的 `payout_shards.payout_ps_outpoint` UPDATE 是两次独立写入,窗口之间不是原子的。
 - 若崩溃发生在**所有 shard 的 :432 都已提交**(即所有 shard 状态已翻出 sealed/open)但外层 :198 未提交 → 下次重启 `needConsolidate` 判定为 `false`(所有 shard 已翻状态)→ 直接进入本方案改造的"已 consolidate"分支 → `ps.payout_ps_outpoint` 是**consolidate 前的旧值**(:198 从未写入过,是更早一轮遗留或初始种子值)→ **Tier1 会正确抓到这个不新鲜**(旧 outpoint 早被后续 consolidate 步骤花掉,`chainObservedAddr` 要么查不到该 tx 是消费记录不匹配、要么地址对不上)→ 落 Tier2 → `autoDetectConsolidateResume` 从 genesis 一路走到底,找到真实最新 outpoint → 自愈写回。**本方案的 Tier1+Tier2 天然覆盖此场景,不需要为它单独加代码路径**,但需要一条回归测试显式验证这条链路(不能只靠代码读证明,見 NWT MUST-FIX 附带项原话"不要等下一个孤儿盘事故才补")。
 
-**测试设计**(放 `test-framework/cases/predictions/`,与 05ff33ab 提及的孤儿盘/重启穿越两个场景同批):
-1. 构造一个 bshard 市场,数据库层面模拟"所有 `market_shards.status` 已翻 'settling'"但 `payout_shards.payout_ps_outpoint` 仍是consolidate 前的旧值(直接 SQL UPDATE 模拟崩溃窗口,不需要真的杀进程)。
-2. 调用 `consolidateAndBuildPsState`,断言:①不使用旧 outpoint 的 UTXO 值;②Tier2 触发且命中真实最新 outpoint;③`payout_shards.payout_ps_outpoint` 被自愈更新为链上真实值;④返回的 `consolidatedPool` 与链上真实值一致(byte-exact,不是"看起来对"的字符串比较)。
-3. 负向分支:构造 Tier2 也查无(genesis 已花但所有 shard 候选地址均无 UTXO——模拟数据损坏级别的场景),断言函数 `throw` 而非返回一个猜测值,且 `consolidated_pool_verify_drift` 事件被写入。
+**落码状态(2026-07-21,已交付)**:`kasia-console/src/services/bshard-consolidated-pool-rederive.test.mjs`(与 §2 代码改动同批 commit)。实现口径,诚实标注覆盖边界(不夸大):
+
+- **已覆盖(真实,非 mock)**:两个场景都对着**真实本地 kaspad 节点**(:3300 或任一已连接的 RPC)跑 `getUtxos` 真查询——① `kaspa_tx_log` 完全没有该 outpoint 的记录(indexer 缺口/DB 写入窗口未提交,同本节场景);② `kaspa_tx_log` 有记录但地址跟 `payout_redeem_hex` 反推的不符(证明 Tier1 是真独立核验,不是"有记录就信")。两者对捏造的、从未真实收到过资金的测试地址而言,"查无 live UTXO"是**真链上事实**(不是 stub 出来的假阳性),据此验证:①不静默使用 predictedPool ②`throw` fail-closed ③`consolidated_pool_verify_drift` 事件正确写入 ④payload 含 `redeemFresh`/`driftReason` 两个诊断字段(NWT 观察 b 已折入)。
+- **诚实标出的覆盖缺口(不假装测了)**:Tier2 **命中**(genesis-walk 真的从链上找回正确 consolidatedPool 并自愈写回)这条正向路径,需要一段**真实、有资金流动**的 consolidate 序列(genesis UTXO→逐 shard consolidate→最终 outpoint 有真实余额)——这不是能安全 mock 出来的场景(money-path 语义, 见 memory `feedback-ship-features-with-live-fire-test`:"review 通过≠真跑过一次,money-path 改动 merge 前必须真钱走一遍具体分支")。**这条留作 Owner money-path 签发前的实弹验证项**(§4 DoD 第2条: 三源 co-verify 需要在一个真实/近真实的 bshard 市场上跑,不是本卡离线单测能替代的)。
+- 未按原计划放进 `test-framework/cases/predictions/`(persona/journey 高层测试框架),改放 `kasia-console/src/services/*.test.mjs`(与 `bshard-recapture-shard-loop.test.mjs`/`broker-fee-emit-package-switch.test.mjs` 同款自举模式——自建 temp DB + 真实模块调用,不经 test-framework 的 persona 层),因为本测试是函数级白盒回归(直接调 `consolidateAndBuildPsState` 断言内部分支行为),不是端到端业务场景,套用后者会话式框架反而不匹配这类测试的形状。跟现有代码库同类测试(`git log --oneline -- '*.test.mjs'` 下 `src/services/`)风格一致。
 
 ---
 
