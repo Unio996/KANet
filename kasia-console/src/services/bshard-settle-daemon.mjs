@@ -765,7 +765,11 @@ async function _settleOneMarketAttempt(marketId) {
       chain_settled: true, settled_at: new Date().toISOString(),
     };
     let meta = {}; try { meta = JSON.parse(market.metadata || '{}'); } catch {}
-    meta.settle_evidence = evidence;
+    // 🔴 #28 P1(2026-07-21, J2·J1 state序列化核确认无遗漏, 待 NWT diff 审): preserve-merge 非 replace——
+    //   上面 evidence 字面量枚举的 key 本 tick 永远 fresh 覆盖(spread 顺序保证), 但任何不在这个字面量里的
+    //   旧字段(历史手写/未来新增字段)不再被整键覆盖冲掉。堵住的是"每 tick 全新对象"这个通用坑本体
+    //   (85fit 当晚 consolidated_pool 丢失是这个坑的第一个受害字段, babdaed3 只加了字段本身, 没改这行)。
+    meta.settle_evidence = { ...(meta.settle_evidence || {}), ...evidence };
     sqlite.transaction(() => {
       sqlite.prepare("UPDATE pool_markets SET protocol_status = ?, settle_txid = ?, metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(newStatus, r.closeTxid, JSON.stringify(meta), marketId);
       if (r.complete) sqlite.prepare("UPDATE market_shards SET status = 'settled' WHERE logical_market_id = ?").run(marketId);
