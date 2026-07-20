@@ -412,7 +412,15 @@ export async function settleMarketLive(marketId, ctx) {
   // psRow(poolMerkleRoot/predicateCommit) + consolidatedPool 独立于 ps(fresh-close 分支专属变量)重算——
   // resume 分支没有 ps, 且这两条本身就是 market 级不变量(跟是不是第一次 close 无关), 统一取一次更简单可靠。
   const psRow = ctx.db.prepare('SELECT pool_merkle_root, predicate_commit FROM payout_shards WHERE logical_market_id = ?').get(marketId);
-  const consolidatedPool = (BigInt(plan.poolSompi) + BigInt(ctx.psSeedSompi ?? 20000000)).toString();
+  // 🔴 2026-07-20 06:28 修复(NWT读码坐实, #su2ksh系列第3处·跟 enforce§2/landed§6 同一 bug class):
+  //   跟上面两处一样, 这里也一直用 plan.poolSompi(DB registered Σstake)+seed 的公式预测 consolidatedPool,
+  //   不是 close 落链时真实 baked 的值——resume 分支(ps 在这里从不存在, 只有 fresh-close 分支才有 ps)
+  //   尤其危险: 没有任何活链路径可以兜底, 会直接拿错值去建第一笔 claim 的 continuation redeem, 跟真实
+  //   closed=1 状态(closeTxid:0 实际 baked 的 consolidatedPool)对不上, 复现同一类"UTXO not found"卡顿。
+  //   85fit 修法: resume 场景下优先信 settle_evidence.consolidated_pool(写入时来自 byte-exact 链上验证过
+  //   的真实值), 没有才退回公式(fresh-close 分支正常路径, 已由 daemon 侧 live-probe 修好, 这里理论上不会
+  //   再撞——留公式 fallback 只为不引入新阻塞面, 不是纵容这条 bug 继续存在)。
+  const consolidatedPool = priorEvidence?.consolidated_pool || (BigInt(plan.poolSompi) + BigInt(ctx.psSeedSompi ?? 20000000)).toString();
   let psOutTxid = closeTxid, psOutIdx = 0;
   let curPool = BigInt(consolidatedPool);
   let curState = { consolidated_pool: curPool.toString(), closed: 1, payoutRoot: plan.payoutRoot };
