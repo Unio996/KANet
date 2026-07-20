@@ -314,4 +314,14 @@ Owner 元问题:写进文档的铁律(CLAUDE.md 接位 SOP 第5条"设计前查�
 - **分工收敛(Bettor 派工澄清,防撞车)**: K-18 §3.4 域归属本是 J2,但 J1 今晚已有 `consolidateAndBuildPsState` 全部上下文(Tier1/Tier2 具体代码结构)——由 J1/J2 自行商定谁接手这一个函数的具体改动(不铺 K-18 全案 family 列/coherence-gate 更大范围),定了向 Bettor 回报记账。money-path 签发口径不变:NWT GREEN + DoD 前置(backfill dry-run + 全量对照)完成后,一次性 Owner money-path 签发,不分批打扰。
 - **待续**: KANet-UI 是否接下 backfill dry-run 请求 / J1-J2 分工结论,下一 session 查频道最新(2026-07-21 21:0x 之后)。
 
+### ✅ v0.3 落码(J1,commit `25b3d0a0`)+ NWT diff 审 GREEN(代码本身),部署门禁维持不变
+
+**J1 落码**: K-18 §3.4 接到 `consolidateAndBuildPsState`——`autoDetectConsolidateResume`/`consolidateAllShards` 内部本来就是 splice(`writeBigInt64LE`,不过 silverc),之前只 return 了 pool 数值、把已算好的 splice bytes 丢了;现在两函数都多 return `redeemHex`,三条路径(needConsolidate 分支/Tier1 命中/Tier2 命中)各自把 `psRedeemHex` 设为这份权威字节而非重编译。自愈写回同批覆盖 `payout_redeem_hex`+`payout_ps_outpoint` 两列(折入 NWT finding⑤)。原无条件 recompile 降级为非阻塞校验(try 包裹,不一致只 log+写 `ps_redeem_recompile_mismatch` 事件,不 throw——**K-18 DoD-0 硬前置没完成前不能升级成拒绝闸,避免治本操作自己制造新的静默卡住**)。回归测试新增 scenario C(离线 stub 注入,验证 `redeemHex` byte-exact 等于手工 splice 结果非 recompile 结果——测到 K-18 核心断言本身)。
+
+**NWT diff 审(先自曝一次操作失误——首次跑测试时本地分支未 fast-forward,测的是 v0.2 代码,scenario C 根本没跑到,已发现+重跑修正)**: 逐路径核对 `psRedeemHex` 三分支均显式赋值+函数末尾 `if(!psRedeemHex)throw` 防隐式 undefined 漏出,3 场景全绿。**结论:v0.3 代码本身 GREEN。**
+
+**部署门禁维持不变(跟 J1 昨晚原话一致,未因代码 GREEN 而放松)**: K-18 DoD-0(backfill dry-run + 全量 byte-exact 对照)+ line423 口径待定 + Owner money-path 三项均未过,commit 可留在 git 里但不能装载/不能申请签发。
+
+**开放问题(NWT 问 J1,待回)**: MUST-FIX③(`autoDetectConsolidateResume` 唯一性/金额/深度校验)这次 diff 没看到加,排在这批还是下一批?
+
 ---
