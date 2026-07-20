@@ -745,8 +745,15 @@ async function _settleOneMarketAttempt(marketId) {
   try {
     const allClaims = r.claims || [];
     const landedClaims = allClaims.filter(c => c.txId && c.received === true && !c.error);
+    // 🔴 2026-07-20 07:19 修复(J2 坐实, 85fit resume 卡死真根因): evidence 是每 tick 全新对象、整体替换
+    //   (非 merge)——之前没有 consolidated_pool 字段, 每次 writeback 都把上一次手动/正确写入的 consolidated_pool
+    //   静默冲掉。下一 tick resume 时 priorEvidence?.consolidated_pool 读到 undefined, 摔回公式 fallback
+    //   (registered stake 公式, 跟真实链上 baked 值可以差出孤儿部分), 续接 covenant 地址算错("UTXO not found")。
+    //   r.consolidatedPool 由 settleMarketLive 往外传(见 bshard-auto-settler.mjs 配套修复)——fresh-close tick
+    //   有真实 live-probe 过的值, resume tick 有 priorEvidence 传进去的值, 全程贯穿 carry-forward 不再丢。
     const evidence = {
       settled_by: 'bshard-settle-daemon', close_txid: r.closeTxid, payout_root: r.plan?.payoutRoot,
+      consolidated_pool: r.consolidatedPool ?? null,
       winners: landedClaims.length, claim_txids: landedClaims.map(c => c.txId),
       // #DM-UI-gap (NWT 2026-07-04 抓: my-positions 靠 v0.6 metadata.phase2_winner 判赢输, bshard 从没写过
       // 这字段·所有 bshard/世界杯盘结算后用户 /mybets 看不到"你赢了/输了"): 补 per-bettor 明细(pk→{amount,

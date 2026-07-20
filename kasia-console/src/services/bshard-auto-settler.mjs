@@ -570,7 +570,11 @@ export async function settleMarketLive(marketId, ctx) {
   // completed 不变量(task33 §4.1): 每个 claimData 条目都有 attempt 记录 + 全部 received===true + 全部无 error。
   const complete = claims.length === claimData.length && claims.every(c => c.received === true && !c.error);
   if (!complete) ctx.alert?.(marketId, `claim 未完整: attempted=${claims.length}/${claimData.length}, received=${claims.filter(c => c.received === true && !c.error).length} — settled_partial_claims${needsManualAttribution ? ' + needs_manual_attribution' : ''}`);
-  return { ok: true, closeTxid, claims, plan, complete, needsManualAttribution };
+  // 🔴 2026-07-20 07:19 修复(J2 坐实, 跟 ORDER BY 修复独立·真根因): consolidatedPool 之前只是本函数内部局部变量,
+  //   从没往外传——daemon 写回 settle_evidence 时没有这个值可存, 下一 tick 只能靠 priorEvidence?.consolidated_pool
+  //   的公式 fallback(202120000000, 跟真实 502120000000 差 3000 KAS orphan)重算续接地址, 必错。往外传后 daemon
+  //   侧才能持久化, 后续 resume 才有真值可读(见 bshard-settle-daemon.mjs 写回 evidence 处配套修复)。
+  return { ok: true, closeTxid, claims, plan, complete, needsManualAttribution, consolidatedPool };
 }
 
 // NO TX NO STATE: 查 closed PS @ 应锚地址·来自 close tx·value==consolidatedPool
