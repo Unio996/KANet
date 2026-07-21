@@ -120,4 +120,23 @@
 
 ---
 
+## 8. §3 classifier 拆分 — 改动范围说明(落码前先报审,NWT 已 GREEN §1,现在轮到 §3)
+
+**代码改动**(改动面小,但落码纪律同批1"改一个已 backfill 过真实生产数据的分类函数"一样敏感):
+- `classifyPayoutShardFamily(row)` 简化为**只依赖 `probeStructuralSignature`**:V1 结构签名符 → `'v1_committee'`;V2 符 → `'v2_zk'`;两者都不符 → `'unknown'`。不再要求 recompile byte-equal。
+- 副作用(好的):`classifyPayoutShardFamily` 从此不再需要 silverc,可以在任何机器上完整测试(不再需要 SKIP 分支)。
+- recompile byte-equal 逻辑不删除,继续留在 `assertPayoutShardCoherence` 步骤 (c)(§3.3 花费前 gate 专属),只是不再被 `classifyPayoutShardFamily` 重复调用一次。
+
+**生产数据后果(必须说清楚,不是"顺手改改")**:
+1. batch1 backfill(migrate v189)已在生产跑过(`K18_BACKFILL_CONFIRMED=1` 装载窗执行),78 行 `unknown`(63 refunded + 15 pruned_expired_waived)仍原样停在 DB 里——这次 classifier 改动**不会自动重跑**它们,除非再次触发 v189 的 backfill 循环(它的条件是 `WHERE covenant_family = 'unknown'`,重启时若 `K18_BACKFILL_CONFIRMED` 仍是 `1` 会再次捡到这 78 行,用新 classifier 重判)。
+2. 预期结果(不是猜测,是结构分析):63 行 refunded 的结构签名早就符合 V1(批1 backfill dry-run 报告已经证实"V1 结构签名符但 recompile 不等"),新 classifier 下会变成 `v1_committee`。15 行 pruned_expired_waived 结果未知(结构签名从没单独测过,只知道 recompile 也不等——需要真跑一遍才知道,不能假设)。
+3. **需要 Bettor/KANet-UI 确认**:`K18_BACKFILL_CONFIRMED` 这个环境变量装载窗后是否还留在 `kanet.env`(如果是一次性用完就该移除的开关,这次 classifier 落地后需要**显式重新设置**触发一次新的 backfill 循环,不能假设它还留着;如果留着,任何后续重启都会**静默**重跑这 78 行——这本身可能不是期望行为,需要团队确认这个开关的持久化语义)。
+4. 沿用 K-18 §5 DoD-0 纪律:即使这次重跑不需要子进程/silverc(纯 JS 结构签名判断,零成本),**仍然要产出一份新的 dry-run 式报告**(78 行 unknown 重判后的新分布)供人工过一遍再让它在生产真正生效,不能因为"这次改动看起来小/不需要 silverc 所以不用那么谨慎"就跳过复核这一步——**这正是本卡自己在 §7 记录的方法论:环境/成本低不等于风险低,数据层面的改动都要走同一套纪律**。
+
+**测试计划**:`classifyPayoutShardFamily` 现有单测(`bshard-payout-family-coherence.test.mjs`)里"两次都不过→unknown"那条断言需要保留(V1/V2 都不符的情形依然存在);新增断言覆盖"结构签名符但 recompile 会不等的历史数据模式"(用 63-refunded 类型的构造:结构签名符合但状态明显非 genesis-shape)现在应该判 `v1_committee` 而不是 `unknown`。
+
+**NWT 复核重点(自提)**:这条简化是否会让 classifier 对"结构签名凑巧符合但实际是损坏/伪造数据"的行更宽松(过去靠 recompile 兜底多一层防线,现在少了这层)——需要评估这个风险是否真实存在,还是理论上存在但结构签名本身(offset 518/1002 双点位匹配)已经足够窄,不容易被"凑巧"符合。
+
+---
+
 **关联**: `docs/2026-07-21-p2-batch1-truth-source-layer-k18-landing-design.md`(批1,已部署)、`docs/2026-07-18-payoutshard-family-coherence-gate-design.md`(K-18 v1.1)、`kasia-console/src/lib/bshard-payout-family-coherence.mjs`+`.test.mjs`(本卡要修改的对象)、`kasia-console/src/services/bshard-settle-daemon.mjs`(P0 non-blocking 先例出处)。
