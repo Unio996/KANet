@@ -78,10 +78,22 @@ export function probeStructuralSignature(row, declaredFamily) {
 }
 
 /**
- * Backfill-only 家族分类器(K-18 §3.1, migrate v189 一次性用, 允许 recompile 子进程成本——不给高频调用点用,
- * 见文件头分级说明)。declared 家族未知时, 实测判定它属于哪个家族。两次(V1/V2)都不过 → 'unknown', 不猜
- * (P2 §5 风险②已预期: 部分历史行(pruned_expired_waived/verifying A0 不符组)可能落进 unknown, 交 dry-run
- * 报告人工过, 不是本函数的 bug)。
+ * Backfill 家族分类器(K-18 §3.1, migrate v189 用)。declared 家族未知时, 实测判定它属于哪个家族。
+ *
+ * 🔴 P2 批2 §3(2026-07-21, Bettor 派工 + NWT GREEN #uiks39): 原实现要求"结构签名符 且 recompile byte-
+ * equal"才判定 v1_committee, 把"家族身份"(结构签名回答的问题: 这份 redeem 的字节布局像不像 V1)跟"创世
+ * 模板字节完全相等"(recompile byte-compare, 更严格的子集条件——只对"仍是 genesis-shape 未变化过"的行
+ * 成立)两个不同维度的问题捆在一起。batch1 backfill 报告实证:63 条 refunded 行结构签名早就符合 V1(家族
+ * 身份毫无疑问),只因为 refund-close 之后字节已偏离 genesis 模板(recompile 不等)被误判 unknown。
+ * 现在只依赖 `probeStructuralSignature`——结构身份判定不再要求"仍是 genesis 快照", 副作用: 不再需要
+ * silverc 子进程, backfill 本身变成纯 JS 零成本操作。recompile byte-equal 逻辑不删除, 继续留在
+ * `assertPayoutShardCoherence` 步骤 (c)(§3.3 花费前 gate 专属, 低频)——安全边界没有变化: 就算某行结构
+ * 签名"凑巧"符合被误标(NWT 复核结论: 概率可忽略, offset 518/1002 双 32B 字段 + marker + 长度四重指纹
+ * 够窄), 它去 consolidate/close 花费时仍会在步骤(c) 被 recompile 重新拦一次, 不会因为分类阶段少了这层
+ * 就在真正花钱时也漏检——这次拆分只是把"标签逻辑"和"花费门禁逻辑"的职责分开, 不是弱化任何一边。
+ *
+ * 两次(V1/V2)都不过 → 'unknown', 不猜(P2 §5 风险②已预期: 部分历史行(pruned_expired_waived/verifying
+ * A0 不符组)可能落进 unknown, 交 dry-run 报告人工过, 不是本函数的 bug)。
  * @returns {{ family: 'v1_committee'|'v2_zk'|'unknown', detail }}
  */
 export function classifyPayoutShardFamily(row) {
@@ -90,24 +102,11 @@ export function classifyPayoutShardFamily(row) {
 
   const v1Sig = probeStructuralSignature(row, 'v1_committee');
   if (v1Sig.ok) {
-    try {
-      const recompiled = compilePayoutShardRedeem({
-        poolMerkleRoot: row.pool_merkle_root, predicateCommit: row.predicate_commit,
-        consolidatedPool: v1Sig.decoded.consolidatedPool, closed: v1Sig.decoded.closed, payoutRoot: v1Sig.decoded.payoutRoot,
-      });
-      if (recompiled === row.payout_redeem_hex) {
-        return { family: 'v1_committee', detail: { consolidatedPool: v1Sig.decoded.consolidatedPool.toString(), closed: v1Sig.decoded.closed } };
-      }
-      return { family: 'unknown', detail: `V1 结构签名符但 recompile byte-compare 不等(closed=${v1Sig.decoded.closed}) — 可能 w0..w16 非零(nullifier 已用)或其它字段漂移, 不猜` };
-    } catch (e) {
-      return { family: 'unknown', detail: `V1 recompile 异常: ${e.message}` };
-    }
+    return { family: 'v1_committee', detail: { consolidatedPool: v1Sig.decoded.consolidatedPool.toString(), closed: v1Sig.decoded.closed } };
   }
 
   const v2Sig = probeStructuralSignature(row, 'v2_zk');
   if (v2Sig.ok) {
-    // V2 genesis-shape recompile byte-equal 属 §3.3(c) 低频花费前 gate 专属(只在 pre-attest 状态才有效,
-    // 见 P2 §1 边界说明), backfill 阶段只用结构签名判族, 不强制。
     return { family: 'v2_zk', detail: 'V2 结构签名(predicateCommit offset)符' };
   }
 

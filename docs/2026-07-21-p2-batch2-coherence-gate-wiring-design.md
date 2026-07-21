@@ -1,6 +1,6 @@
 # P2 第二批 — coherence gate 接线 + 高频零子进程性能实测 + classifier 家族/模板维度拆分(J1 主稿)
 
-> **Status**: v0.3 · 2026-07-21 · J1 → Bettor 方向审 GREEN-with-3-notes(#uhke6f.1/.2,全折入)→ NWT 定论(§6.1 不需要换,#uhke6f 全线 GREEN,可以落码)→ **§1(gate 接线)+ 观察者机制已落码,§3(classifier 拆分)+ §4(性能实测)待续**,见 §7。
+> **Status**: **全批(§1/§3/§4)DEPLOYED-READY**(v0.4 · 2026-07-21)。§1(gate 接线+观察者机制)+ 跨机器 fixture/FAIL-inconclusive 拆分修复 → NWT 最终 GREEN(a2a228ea+0505c11a)。§3(classifier 拆分)+ §4(零子进程性能实测)→ Bettor/NWT 双 GREEN(#uiks39)→ 已落码。**唯一未完成的操作步骤**(非代码,见 §8):78 行 unknown 的生产重判(KANet-UI dry-run → 人工过 → 显式重设 `K18_BACKFILL_CONFIRMED=1` 一次性触发)。
 > **依据**: Bettor 批2派工(#uh1h4i.2 后续,2026-07-21):"范围: gate 接线(调用点分级: 高频 `ensurePayoutShard`/`V2` 三步/低频 `consolidateAndBuildPsState` 四步)+ 高频零子进程性能实测 + classifier 家族/模板两维度拆分(你自己拍(a)时列的设计要点),照旧设计先行→NWT 红队→落码"。
 > **前置**: `docs/2026-07-21-p2-batch1-truth-source-layer-k18-landing-design.md`(批1,**DEPLOYED & CLOSED**)——`bshard-payout-family-coherence.mjs`(`probeStructuralSignature`/`classifyPayoutShardFamily`/`assertPayoutShardCoherence`/`assertZkNativeImmutable`)已落码上线,`payout_shards.covenant_family` 已 backfill(v1_committee=623/v2_zk=20/unknown=78),但**目前零调用点在读它/靠它做任何判定**——本批要把这套基础设施真正接上,是 K-18 全案"存在但没人用"→"真正生效"的关键一步。
 
@@ -136,6 +136,20 @@
 **测试计划**:`classifyPayoutShardFamily` 现有单测(`bshard-payout-family-coherence.test.mjs`)里"两次都不过→unknown"那条断言需要保留(V1/V2 都不符的情形依然存在);新增断言覆盖"结构签名符但 recompile 会不等的历史数据模式"(用 63-refunded 类型的构造:结构签名符合但状态明显非 genesis-shape)现在应该判 `v1_committee` 而不是 `unknown`。
 
 **NWT 复核重点(自提)**:这条简化是否会让 classifier 对"结构签名凑巧符合但实际是损坏/伪造数据"的行更宽松(过去靠 recompile 兜底多一层防线,现在少了这层)——需要评估这个风险是否真实存在,还是理论上存在但结构签名本身(offset 518/1002 双点位匹配)已经足够窄,不容易被"凑巧"符合。
+
+**结论(2026-07-21,全部三方 GREEN)**:Bettor 方向审 GREEN(#uiks39.1/.2,同时拍定 `K18_BACKFILL_CONFIRMED` 一次性窗口开关语义,KANet-UI 已在 kanet.env 里改回注释状态,批1那次 backfill 使命已尽)。NWT 复核 GREEN(#uiks39 后续):概率论证——`probeStructuralSignature` 的四重指纹(marker 位置 + 长度 + 两个独立 32B 字段 byte-exact 匹配)伪造/损坏数据凑巧同时满足的概率可忽略;即便某行真被误标,花费时(consolidate/close)仍会在 `assertPayoutShardCoherence` 步骤 (c) 被 recompile 重新拦一次,安全边界没有变化,只是"标签逻辑"与"花费门禁逻辑"职责正确分离(拆分本意)。**已落码**(commit 待定,本轮批量提交)。
+
+**§3 落码状态**:`classifyPayoutShardFamily` 简化完成,不再调用 `compilePayoutShardRedeem`,不再需要 silverc。测试更新:原来 SKIP-gated 的"V1 结构签名符但非真实编译产物"用例改为直接断言(不再 SKIP,预期 `v1_committee` 而非 `unknown`);新增"batch1 backfill 报告实证案例"回归(结构签名符但 `closed`/`consolidatedPool` 已偏离 genesis 快照,模拟 63 条 refunded 组特征,现在正确判 `v1_committee`)。全量回归 6 个测试文件本机绿 + lint 0 error。**78 行 unknown 的实际生产重判仍未执行**——按 §7 §8 商定流程(KANet-UI 出新 dry-run 报告 → 人工过 → 显式设 `K18_BACKFILL_CONFIRMED=1` 触发一次性重判 → 用完归位),不在本次代码提交范围内,是落码后的独立操作步骤。
+
+---
+
+## 9. §4 高频路径零子进程性能实测 — 落码状态(2026-07-21)
+
+新文件 `bshard-payout-coherence-perf.test.mjs`。两条独立信号(不是只信一条):
+1. **直接 spawn 计数拦截(承重断言)**:用 `createRequire` 拿到 `child_process` 的 CJS module.exports 对象,patch 它的 `execFileSync`——`node:child_process` 的 ESM 具名导出是对底层 CJS exports 对象的活绑定,patch 后 `pool-bshard-artifacts.mjs` 里 `import { execFileSync } from 'node:child_process'` 这条既有具名导入会透传到 patch 后的版本(先用一次直接调用验证拦截确实生效,不是"没报错=以为拦住了"这种弱证据)。`ensurePayoutShard`/`V2` 早返回分支跑 200 次,spawn 计数恒为 0——这是**直接证据**,不是推断。
+2. **耗时量级(次要, 交叉验证)**:200 次调用本机实测 6.03ms(0.03ms/次)。silverc 子进程按本库其它地方文档记录(pool-bshard-artifacts.mjs ETIMEDOUT 事故注释)是"几十到几百 ms"量级,200 次真 spawn 会是秒级——6ms 总耗时是这条弱信号(受机器负载影响,不作为唯一证据)对(1)的交叉印证。
+
+全量回归 6 个测试文件本机绿(新增 `bshard-payout-coherence-perf.test.mjs`)+ lint 0 error。
 
 ---
 

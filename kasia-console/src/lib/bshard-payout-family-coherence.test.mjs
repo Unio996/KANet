@@ -8,10 +8,12 @@
 // documented for the K-18 backfill dry-run scripts). Tests that exercise probeStructuralSignature/
 // assertPayoutShardCoherence's steps (a)(b)(d) (the zero-subprocess, high-frequency-tier path — arguably the
 // MORE load-bearing path to verify, since it runs on every bet) use hand-crafted deterministic byte fixtures
-// and need no silverc. Tests that would need real recompile (classifyPayoutShardFamily, tier='full' step (c)
-// for v1_committee) detect silverc absence and SKIP with an explicit reason rather than faking a pass — when
-// this file runs on a machine with silverc pinned (KANet-UI's, per DoD item 3 "装载后活代码复跑"), those
-// blocks execute for real instead of skipping.
+// and need no silverc. Only assertPayoutShardCoherence's tier='full' step (c) for v1_committee still needs
+// real recompile — it detects silverc absence and SKIPs with an explicit reason rather than faking a pass;
+// when this file runs on a machine with silverc pinned (KANet-UI's/J2's, per DoD item 3 "装载后活代码复跑"),
+// that block executes for real instead of skipping. classifyPayoutShardFamily no longer needs silverc at all
+// (P2 batch2 §3, 2026-07-21: family classification now relies solely on probeStructuralSignature — recompile
+// byte-equal moved to being assertPayoutShardCoherence step (c)'s exclusive concern, not duplicated here).
 //
 // Run: cd kasia-console && node src/lib/bshard-payout-family-coherence.test.mjs
 import { execSync, spawnSync } from 'child_process';
@@ -280,13 +282,17 @@ console.log(`[test] classifyPayoutShardFamily — V2 结构签名符 → 'v2_zk'
   const r = classifyPayoutShardFamily(row);
   ok(r.family === 'v2_zk', `V2 结构签名 → v2_zk (got ${sj(r)})`);
 }
-console.log(`[test] classifyPayoutShardFamily — V1 结构签名符但 hand-crafted fixture 不是真实编译产物, recompile byte-compare 应不等 → 'unknown'${HAVE_SILVERC ? '' : '(本机无 silverc, SKIP)'}:`);
-if (HAVE_SILVERC) {
+console.log(`[test] classifyPayoutShardFamily(P2 批2 §3 拆分后) — V1 结构签名符, 即便不是真实 silverc 编译产物(recompile 会不等)也判 'v1_committee' — 家族身份不再要求 recompile byte-equal, 零 silverc 依赖(不再 SKIP):`);
+{
   const row = { payout_redeem_hex: buildFakeV1RedeemHex(), pool_merkle_root: PMR, predicate_commit: PC };
   const r = classifyPayoutShardFamily(row);
-  ok(r.family === 'unknown', `hand-crafted 非真实产物 → recompile 不等 → unknown, 不误判 v1_committee (got ${sj(r)})`);
-} else {
-  skip('V1 recompile byte-compare(silverc 不在本机)');
+  ok(r.family === 'v1_committee', `结构签名符 → v1_committee, 不要求 recompile 佐证(拆分后设计) (got ${sj(r)})`);
+}
+console.log(`[test] classifyPayoutShardFamily — 回归守卫(batch1 backfill 报告实证案例): 结构签名符但状态已偏离 genesis 快照(模拟 63 条 refunded 组: closed/consolidatedPool 已变化, recompile 若跑一定不等)→ 拆分前会误判 unknown, 拆分后正确判 v1_committee:`);
+{
+  const row = { payout_redeem_hex: buildFakeV1RedeemHex({ consolidatedPool: 999999n, closed: 1 }), pool_merkle_root: PMR, predicate_commit: PC };
+  const r = classifyPayoutShardFamily(row);
+  ok(r.family === 'v1_committee', `非 genesis 状态(closed=1, consolidatedPool 已变)结构签名仍符 → v1_committee, 不再被 recompile 拖累成 unknown (got ${sj(r)})`);
 }
 
 // ── §3.1 写入点(ensurePayoutShard/V2 谁编译谁 declare covenant_family) ─────────────────────────
