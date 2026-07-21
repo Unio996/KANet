@@ -1,6 +1,6 @@
 # P2 第一批 — 真相源层模块化 + K-18 §3.1-§3.3 落地 + verifyClaimLanded 金额校验(J1 主稿,J2 协)
 
-> **Status**: CURRENT(v0.6 · 2026-07-21 · J1 draft,§3.5 折入 J2 发现+草案(#ue9cp6.1)→ Bettor 方向审 GREEN-with-3-notes(#uegipr)→ NWT 正式红队 GREEN-with-2-MUST-FIX → 三态设计(kaspa_tx_log 主 + getUtxos 兜底)经 Bettor/NWT/J2 交叉论证收敛定案(#uesq36,不再变动)· §3.1/§3.3/§3.4 已落码(单元测试本机绿,部分 recompile 分支因本机无 silverc 需 KANet-UI 机器复跑,见 §6)· §3.2 落码但发现原设计假设的调用点(`bettor.js:1459`)实为不同表(`exchange_offers`非`pool_markets`),已订正见 §6 · 待 NWT 对实际落码 diff 复核)
+> **Status**: CURRENT(v0.7 · 2026-07-21 · J1 draft,§3.5 折入 J2 发现+草案(#ue9cp6.1)→ Bettor 方向审 GREEN-with-3-notes(#uegipr)→ NWT 正式红队 GREEN-with-2-MUST-FIX → 三态设计(kaspa_tx_log 主 + getUtxos 兜底)经 Bettor/NWT/J2 交叉论证收敛定案(#uesq36,不再变动)· §3.1/§3.3/§3.4 已落码 · §3.2 落码但发现原设计假设的调用点(`bettor.js:1459`)实为不同表(`exchange_offers`非`pool_markets`),已订正见 §6 · **d829e8fe 首次提交 NWT diff 审抓到阻塞级 bug: `decodeV1State` marker 检查位置错(buf[0] 应为 buf[1]),20+ 单测全绿却没抓到(手搓 fixture 自证自洽同一错误假设)——已修复+补 2 条回归 case + 改造 hexdump 脚本直接跑真实函数验证(不再靠人眼数 offset),见 §6 "2026-07-21 追加"。待 KANet-UI 用真实生产行重跑验证 + NWT 复核这次修复本身**)
 > **依据**: `docs/2026-07-21-28-state-sync-architecture-full-design.md` §5 P2 派工("全状态推广 re-derive+校验纪律 + 真相源层模块化,§3 完整实现,J1 主+J2 协,分批走每批独立 NWT 审") + Bettor 今日派工(#udvo4q,并入 K-18 残项)+ Owner 直令(今日一鼓作气+充分测试,D-011 内部审核链走完即可装载)。
 > **前置**: K-18 §3.1-§3.4 全案(`docs/2026-07-18-payoutshard-family-coherence-gate-design.md` v1.1,**已 NWT GREEN-with-3-MUST-FIX 且 3 条全折入**)——§3.4(recompile 降级校验)已在昨晚 P0 v0.3(`25b3d0a0`)+ line423(`67490897`)落地。**本卡 = 落地 K-18 剩余 §3.1(covenant_family 列)+ §3.2(zk_native 铸后不可变)+ §3.3(assertPayoutShardCoherence 四步门)**,K-18 的架构设计本身不重新评审(已经 NWT 审过),本卡是**实现落地计划 + 用它解决两条昨晚遗留的开放线索**。
 
@@ -234,6 +234,10 @@ async function verifyClaimLanded(ctx, winnerAddr, claimTx, expectedAmount = null
 **§3.4(lint R-PS-FAMILY-DISPATCH)**:已加入 `scripts/lint-kanet.mjs`,全库扫 0 违规。**落码时发现原设计白名单范围过窄**:实际 grep 出 `compilePayoutShardRedeem` 在 `bshard-auto-settler.mjs`(6 处,close/claim/cancel/refund redeem 构建,合法既有调用点)+ `bshard-settle-daemon.mjs`(1 处,P0 已落地的 non-blocking recompile 校验)也在用,若不列入白名单会拦下这些已审过的生产核心代码——已订正扩大白名单,规则实际提供的价值收窄为"防止新增/意外调用点绕过既有审查纪律",不是"运行时强制经过 gate"(那需要 AST 调用图分析,超出本规则能力,已如实标注)。
 
 **下一步(明确未完成,不是本轮范围)**:①§3.3 gate 接入 `ensurePayoutShard`/`V2`+`consolidateAndBuildPsState`+close-transport V2 入口的实际调用点。②§3.3(a)(b)(d) 高频路径零子进程性能实测(DoD 项 7)。③生产库 backfill dry-run(KANet-UI)+ §0 两条遗留线索正式归因产出。④装载后活代码复跑(DoD 项 3)。⑤NWT 对本次 diff 红队审。
+
+**2026-07-21 追加(NWT diff 审阻塞级发现 + 修复)**:NWT 红队 d829e8fe 时抓到 `bshard-payout-family-coherence.mjs` 的 `decodeV1State()` 有 off-by-one:代码检查 `buf[0] !== 0x08`,但函数自己的注释写"`_PS_STATE_START=1` 起算"——真正的 PUSH8 marker 应该在 `buf[1]`,不是 `buf[0]`。证据来源:KANet-UI 早前跑 hex dump 脚本时(09:01,ozzeu 行)已经报过 byte[0] 实测不等于 0x08,后续 3 行干净样本交叉验证也没推翻这个观察,只是当时没人把这条实测跟本文件的守卫逻辑对上号。**根因(测试为什么没抓到)**:20+ 单元断言里手搓的 V1 fixture 自己也把 `buf[0]` 设成了 `0x08`——跟代码里的(错误)假设自证自洽,循环论证,从没有一条走真实 dump 出来的字节验证过。这正是本卡设计稿 §5 风险①"落码硬前置"想防的那类问题在自己身上又犯了一次(纯字节假设靠 hand-crafted fixture 单测,没有真实数据环节前置验证)。
+
+**处置**:①`decodeV1State` marker 检查改为 `buf[1]`(commit 待定,本轮同批次修复)。②测试 fixture 改造:`buildFakeV1RedeemHex` 的 `buf[0]` 显式设为跟 marker 值不同的 `0x6b`(KANet-UI 实测观察值),证明修复后确实不再依赖 offset 0 的值;新增 2 条回归 case——「buf[0]!=0x08 但 buf[1]==0x08 依然通过」+「buf[1] 损坏才真的 FAIL」,直接堵死同类循环论证复发。③`_j1tn_k18_v1_offset_hexdump.mjs` v2 改造:除了原有的人眼 hex 切片预览,新增直接调用 `probeStructuralSignature`/`classifyPayoutShardFamily` 对真实生产行跑一遍并打印结构化判定结果——不再要求人工数 offset 验证,脚本自己给结论。**待 KANet-UI 用已验证过的 4 个干净样本(pb73v/f08c4/vmhud + ozzeu 单独标注)重跑这版脚本,把 `probeStructuralSignature` 的真实输出贴回频道,NWT 复核这次修复本身是否真的解决了问题,而不是又一次自证自洽。**
 
 ---
 

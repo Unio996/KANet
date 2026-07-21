@@ -46,9 +46,17 @@ const PC = 'ab'.repeat(32);   // predicate_commit fixture
 const PMR = 'cd'.repeat(32);  // pool_merkle_root fixture
 const ROOT0 = '00'.repeat(32);
 
+// 🔴 事故修复(2026-07-21, NWT diff 审阻塞级抓漏坐实): 早前这里 buf[0]=0x08 是照抄
+// bshard-payout-family-coherence.mjs 原 decodeV1State() 的(错误)假设手搓的——marker 真实位置是
+// _PS_STATE_START=1(byte[1]), 不是 byte[0](KANet-UI 09:01 hex dump 对 ozzeu 行实测 byte[0] != 0x08 才
+// 坐实这个类型错误)。手搓 fixture 自己也把 buf[0] 设成 0x08 = 跟错误假设自证自洽, 这正是这个 bug 没被
+// 20+ 断言抓到的根因。现在 buf[0] 故意设成一个明确不是 0x08 的值(0x6b, KANet-UI 实测观察到的真实前导
+// byte——即使不是普适常量, 用真实观测值而非顺手挑的占位符, 且刻意跟 marker 值 0x08 不同, 用来验证
+// decodeV1State 真的不再依赖 buf[0] 的值), 真正的 marker 立在 buf[1]。
 function buildFakeV1RedeemHex({ consolidatedPool = 1000n, closed = 0, payoutRoot = ROOT0, predicateCommit = PC, poolMerkleRoot = PMR, totalLen = 1040 } = {}) {
   const buf = Buffer.alloc(totalLen, 0x11);   // 0x11 filler (not 0x00) — catches "byte just happens to be zero" false positives
-  buf[0] = 0x08;
+  buf[0] = 0x6b;   // 前导 byte(KANet-UI 实测观察值, 非 0x08——证明本函数不再错误依赖这个位置)
+  buf[1] = 0x08;   // 真正的 PUSH8 marker(_PS_STATE_START=1)
   buf.writeBigInt64LE(BigInt(consolidatedPool), 2);
   buf.writeBigInt64LE(BigInt(closed), 11);
   Buffer.from(payoutRoot, 'hex').copy(buf, 20);
@@ -58,7 +66,7 @@ function buildFakeV1RedeemHex({ consolidatedPool = 1000n, closed = 0, payoutRoot
 }
 function buildFakeV2RedeemHex({ predicateCommit = PC, totalLen = 700 } = {}) {
   const buf = Buffer.alloc(totalLen, 0x22);
-  buf[0] = 0x08;
+  buf[0] = 0x6b;   // 同上, V2 结构签名探针本来就不检查 buf[0], 这里只是保持跟 V1 fixture 一致的"非 0x08"前导字节
   Buffer.from(predicateCommit, 'hex').copy(buf, 642);
   return buf.toString('hex');
 }
@@ -96,6 +104,23 @@ console.log('[test] probeStructuralSignature — V1 正常行(结构签名 offse
   const r = probeStructuralSignature(row, 'v1_committee');
   ok(r.ok === true, `V1 结构签名通过 (got ${sj(r)})`);
   ok(r.decoded?.consolidatedPool === 42n && r.decoded?.closed === 1, `解码值正确 consolidatedPool=42n closed=1 (got ${JSON.stringify(r.decoded, (k,v)=>typeof v==='bigint'?v.toString():v)})`);
+}
+
+console.log('[test] probeStructuralSignature — 回归守卫(NWT diff 审阻塞级抓漏): marker 检查必须是 buf[1], 不是 buf[0] — fixture 的 buf[0]=0x6b(明确非 0x08)依然要能通过, 证明不再错误依赖 offset 0:');
+{
+  const row = { payout_redeem_hex: buildFakeV1RedeemHex(), pool_merkle_root: PMR, predicate_commit: PC };
+  const buf0 = Buffer.from(row.payout_redeem_hex, 'hex')[0];
+  ok(buf0 === 0x6b, `fixture buf[0]=0x6b(sanity: 确认这条 fixture 真的没把 buf[0] 设成 0x08, got 0x${buf0.toString(16)})`);
+  const r = probeStructuralSignature(row, 'v1_committee');
+  ok(r.ok === true, `buf[0]!=0x08 但 buf[1]===0x08 → 依然通过(marker 检查位置已修正) (got ${sj(r)})`);
+}
+console.log('[test] probeStructuralSignature — marker 真的缺失(buf[1] 也不是 0x08) → FAIL, 证明检查不是形同虚设:');
+{
+  const buf = Buffer.from(buildFakeV1RedeemHex(), 'hex');
+  buf[1] = 0xff;   // 破坏真正的 marker 位置
+  const row = { payout_redeem_hex: buf.toString('hex'), pool_merkle_root: PMR, predicate_commit: PC };
+  const r = probeStructuralSignature(row, 'v1_committee');
+  ok(r.ok === false && /解码失败/.test(r.reason), `buf[1] marker 损坏 → FAIL, 不是摆设 (got ${sj(r)})`);
 }
 
 console.log('[test] probeStructuralSignature — V1 行但 predicate_commit 列跟 offset 518 实际字节不符(混族/损坏数据模拟) → FAIL:');

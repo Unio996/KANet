@@ -28,10 +28,18 @@ function _hexAt(buf, off, len) {
 function _cleanHex(s) { return String(s || '').replace(/^0x/, '').toLowerCase(); }
 
 // V1 state 区解码(_PS_STATE_START=1 起算, 同 bshard-close-enforce.mjs `_readPsConsolidatedPool`/
-// `_splicePayoutCloseRedeem` 约定): byte[0]=PUSH8 marker(0x08) → consolidated_pool(i64LE)/closed(i64LE)/
-// payoutRoot(32B)。太短或 marker 不对 → null, 不猜。
+// `_splicePayoutCloseRedeem` 约定): byte[0] 是 state 区之前的前导 byte(不断言具体值——P2 §1 表原话
+// "(前导byte)", 从没说是 0x08; 实测 KANet-UI hex dump 显示这个位置另有其值, 不是本函数该检查的字段)。
+// 真正的 PUSH8 marker 在 byte[_PS_STATE_START]=byte[1](consolidated_pool 字段起点), 数据紧跟其后
+// (buf[2..10)=i64LE)。
+// 🔴 事故修复(2026-07-21, NWT diff 审 d829e8fe 阻塞级抓漏): 原代码检查 buf[0]!==0x08, 跟本函数自己的
+// 注释("_PS_STATE_START=1 起算")自相矛盾——marker 应该查 buf[1], 不是 buf[0]。这个 bug 会让每一行真实
+// V1 数据的这个守卫恒为 true(buf[0] 几乎不可能等于 0x08, 它是别的前导字节), decodeV1State 对生产数据
+// 永远返回 null, 整个 probeStructuralSignature('v1_committee') 分支形同虚设——测试没抓到是因为手搓
+// fixture 自己也把 buf[0] 设成 0x08(跟错误假设自证自洽, 从没有一条走真实 hex dump 字节验证过), 这正是
+// KANet-UI 09:01 hex dump(ozzeu 行 byte[0] 实测 != 0x08)才第一时间坐实的类型错误。
 function decodeV1State(buf) {
-  if (buf.length < 52 || buf[0] !== 0x08) return null;
+  if (buf.length < 52 || buf[1] !== 0x08) return null;
   try {
     return {
       consolidatedPool: buf.readBigInt64LE(2),
@@ -54,7 +62,7 @@ export function probeStructuralSignature(row, declaredFamily) {
 
   if (declaredFamily === 'v1_committee') {
     const v1State = decodeV1State(buf);
-    if (!v1State) return { ok: false, reason: `V1 state 区解码失败(byteLen=${buf.length}, marker=0x${buf[0]?.toString(16) ?? '??'})` };
+    if (!v1State) return { ok: false, reason: `V1 state 区解码失败(byteLen=${buf.length}, marker@1=0x${buf[1]?.toString(16) ?? '??'})` };
     const pcAt = _hexAt(buf, V1_PREDICATE_COMMIT_OFF, 32);
     const pmrAt = _hexAt(buf, V1_POOL_MERKLE_ROOT_OFF, 32);
     if (pcAt !== pc) return { ok: false, reason: `predicateCommit@${V1_PREDICATE_COMMIT_OFF} 跟 DB 列不符(got=${pcAt}, want=${pc})` };

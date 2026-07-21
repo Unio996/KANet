@@ -8,8 +8,16 @@
 // 用法: cd kasia-console && DB_PATH=<生产库路径> node scripts/_j1tn_k18_v1_offset_hexdump.mjs [marketId]
 //   不传 marketId = 自动挑一个 completed 状态的 V1 行(排除已知 attested_v2/pruned_expired_waived 等非
 //   V1 家族嫌疑行)。
+//
+// 🔴 v2(2026-07-21, NWT diff 审 d829e8fe 阻塞级发现, #ozzeu-marker-offbyone): probeStructuralSignature
+// 早前版本 decodeV1State() 的 PUSH8 marker 守卫错查了 buf[0](应该是 buf[1]=_PS_STATE_START), 20+ 单元
+// 断言全绿却没抓到——根因是手搓 fixture 自己也把 buf[0] 设成了 0x08, 跟错误假设自证自洽, 从没有一条走
+// 真实 hex dump 字节验证过。已在 bshard-payout-family-coherence.mjs 修正(buf[1] 而不是 buf[0]), 但 NWT
+// 要求这条修复必须真跑一遍真实生产数据的 probeStructuralSignature/classifyPayoutShardFamily 结果, 不能
+// 只信手搓单测——本版脚本新增这一段直接调用真实函数, 打印结构化判定结果, 不需要人眼再去数 hex 偏移。
 
 const { sqlite: db } = await import('../src/db/client.js');
+const { probeStructuralSignature, classifyPayoutShardFamily } = await import('../src/lib/bshard-payout-family-coherence.mjs');
 
 const argMarketId = process.argv[2] || null;
 const row = argMarketId
@@ -42,8 +50,8 @@ function slicePreview(label, off, len) {
   if (off + len > buf.length) { console.log(`  ${label}(offset ${off}, ${len}B): 越界(buf 长度 ${buf.length})`); return; }
   console.log(`  ${label}(offset ${off}, ${len}B): ${buf.slice(off, off + len).toString('hex')}`);
 }
-// _PS_STATE_START=1 起算(bshard-close-enforce.mjs 现成 helper 用的 offset, 已验证过 state 区本身正确):
-slicePreview('state 区起点 marker byte[0]', 0, 1);
+slicePreview('前导 byte[0](state 区之前, 不断言具体值——2026-07-21 v2 已订正: 早前误当作 marker=0x08, 实测另有其值)', 0, 1);
+slicePreview('真正的 PUSH8 marker byte[1](_PS_STATE_START=1)', 1, 1);
 slicePreview('consolidated_pool(PUSH8 marker + i64LE)', 1, 9);
 try { console.log(`    → 解码 consolidated_pool = ${buf.readBigInt64LE(2)} sompi`); } catch {}
 slicePreview('closed(PUSH8 marker + i64LE)', 10, 9);
@@ -72,5 +80,21 @@ if (predicateCommitHex) {
   const idx = fullHex.indexOf(predicateCommitHex);
   console.log(`  predicateCommit 在 hex 字符串里的位置: ${idx === -1 ? '未找到(可能有 push-opcode 包裹/编码差异, 需要人工再查)' : `hex 字符 offset ${idx} = byte offset ${idx / 2}`}`);
 }
+
+// ── v2 新增(NWT diff 审阻塞级发现, 真实数据直接跑函数, 不再靠人眼数 offset) ─────────────────────
+console.log(`\n[hexdump] ══════ probeStructuralSignature/classifyPayoutShardFamily 真实数据验证(NWT 要求, 2026-07-21 v2 补) ══════`);
+const probeV1 = probeStructuralSignature(row, 'v1_committee');
+console.log(`  probeStructuralSignature(row, 'v1_committee') = ${JSON.stringify(probeV1, (k, v) => typeof v === 'bigint' ? v.toString() : v)}`);
+if (!probeV1.ok) {
+  console.log(`  ⚠ 真实数据 probeStructuralSignature 返回 FAIL — 若这一行是已知正常 V1 行(非 ozzeu 类可疑样本),
+     说明修复后的 offset/marker 假设仍跟真实字节对不上, 需要 J1 进一步核实, 不能当 GREEN 上报。`);
+} else {
+  console.log(`  ✅ 真实数据 probeStructuralSignature 通过 — marker@1 检查 + predicateCommit@518/poolMerkleRoot@1002 结构签名全部跟这行真实字节吻合。`);
+}
+const classify = classifyPayoutShardFamily(row);
+console.log(`  classifyPayoutShardFamily(row) = ${JSON.stringify(classify, (k, v) => typeof v === 'bigint' ? v.toString() : v)}`);
+console.log(`  (classifyPayoutShardFamily 额外跑 recompile byte-equal, 需要本机有 silverc 才会真判定出 v1_committee——
+   若本机没有 D:/silverscript/versioned-builds/ 会在 try/catch 里落到 'unknown' 并记 recompile 异常原因, 那不代表
+   structural 层面有问题, 请看上面 probeStructuralSignature 的结果才是本次要验证的重点。)`);
 
 db.close();
