@@ -12,9 +12,15 @@
 //   'completed' + 假 settle_evidence(txid 是 randomUUID 拼的,从未广播上链)。诊断+精确修复见
 //   docs/2026-07-13-hidden-stuck-funds-terminal-status-sweep-design.md 追记段(2026-07-21)——3处
 //   DB 订正已由 KANet-UI 执行、NWT 复核 GREEN,真实 1 KAS 下注完好无损,该卡已核销。
-// v4(当前): marketId 换成 ext-pool-v07-1780704532865-7r617(已有 52 笔真实下注,payout_shards 早已
-//   存在且状态健康,非本次操作触发,pending_bettors,deadline 未来)——单笔下注即可直接命中
-//   ensurePayoutShard 的"已存在行"分支 = non-blocking coherence gate 真实吃到流量。
+// v4: marketId 换成 ext-pool-v07-1780704532865-7r617——FAIL(干净失败,无副作用): tg_place_bet 的
+//   搜索只查最近创建的 50 个 pending_bettors 市场(created_at DESC 分页),7r617 创建时间太早,不在
+//   这个窗口内,不是搜索算法 bug,是简单的分页排除(与 gate 改动无关)。核对了当前 top-50 里没有一个
+//   市场已有 payout_shards 行(genesis mint 显然要等更晚的生命周期阶段才触发)。
+// v5(当前,Bettor 拍板): 回到 gxrr4——它是全库 7 个"已有 payout_shards"的候选里唯一确认在 top-50
+//   搜索窗口内的(11:04 那次第一笔就是从这个窗口搜到它),已修复回 pending_bettors + 分片已存在(我们
+//   自己那笔 1 KAS 铸的,非污染)。这次只有一步(下方,合成结算步骤已彻底移除),第二笔命中
+//   ensurePayoutShard 的"已存在行"分支 = non-blocking coherence gate 真实吃到流量,顺带验证修复后的
+//   市场能正常回到生命周期(gxrr4 修复卡的活体验收)。
 //
 // 🔴 settle_journey_market_synthetic + settler_assert_mybets_consistency 两步本次运行**移除**
 // (原 H2 regression 场景,跟 DoD-8 的 gate 验证目标无关)——前者是刚闯出事故的合成结算 action,
@@ -33,9 +39,10 @@ export default {
   steps: [
     {
       action: 'tg_place_bet',
-      // DoD-8 本体: 目标市场 payout_shards 行已存在(52 笔既有真实下注,历史健康),ensurePayoutShard
-      // 走"已存在行"早返回分支,真正命中 non-blocking coherence gate。
-      marketId: 'ext-pool-v07-1780704532865-7r617',
+      // DoD-8 本体: gxrr4 的 payout_shards 行已存在(我们 11:04 那笔真实 1 KAS 铸的,非污染,已由
+      // gxrr4 修复卡确认干净),ensurePayoutShard 走"已存在行"早返回分支,真正命中 non-blocking
+      // coherence gate。
+      marketId: 'ext-pool-v07-1784059111477-gxrr4',
       side: 'YES',
       stakeKas: 1,
       expect: {
