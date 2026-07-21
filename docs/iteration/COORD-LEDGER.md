@@ -455,3 +455,11 @@ Owner 元问题:写进文档的铁律(CLAUDE.md 接位 SOP 第5条"设计前查�
 **最终裁定(NWT,全员认可)**: v0.4 三态——`kaspa_tx_log` 命中+金额符=通过 / 命中+不符=真 mismatch 硬拒**不 fallback**(防"两个源挑顺眼的")/ 查无 txid=inconclusive 兜底 `ctx.getUtxos` 现查。同时盖住 spent 竞态、indexer 永久漏块、TOCTOU 窗口三个失效面,无互相掩盖。NWT diff 复核重点:查无 txid/JSON.parse 失败/outputs 无该 index 三种非正常命中必须全归 inconclusive 分支。MUST-FIX①(§1 offset 表 hex dump 实测机制化进 DoD)不变;第 4 回归 case(spent-during-retry 自愈断言)+alert 良性竞态文案照加。
 
 **立卡(非阻塞)**: `verifyRedeemMatchesChainObservedOutput`(P0 已装载)同款 indexer-miss 兜底——独立小卡不混本批,J2 认领域内(settler L3),排 P2 后续批。
+
+## ✅ P2 第一批代码全 GREEN(2026-07-21 09:4xZ)——§3.5+§3.1-3.4 审核链闭,待 dry-run 报告→装载窗
+
+**交付链**: §3.5 金额校验(`1f9dda34`,三态 v0.5,J2 独立 15 断言+NWT diff GREEN,NWT 另读 daemon 代码补证 case7 自愈路径)→ MUST-FIX① offset 实测(`df24ede1` 脚本+KANet-UI 生产库 4 样本跨 3 月 byte-exact:predicateCommit@518/poolMerkleRoot@1002,**实测推翻设计稿"常量区在前"推断**;基线行 ozzeu 被 KANet-UI 对 ledger 核出是 7/13 已点名嫌疑行→换 3 干净行交叉验证;“四行 state 值全同”由 Bettor memory 钥匙+J1 脚本逻辑坐实=**列语义 G0 快照选择效应**非异常,NWT"ozzeu 假 completed 实锤"推断按此撤回;布局 vs 值边界 Bettor 供料防 MUST-FIX 膨胀,`7b4591b0` 定稿)→ 批主体(`d829e8fe`:covenant_family v189+zk_native 守卫+coherence gate 单源模块+lint R-PS-FAMILY-DISPATCH,570 行)→ **NWT 初审抓阻塞级 marker off-by-one**(buf[0] 应 buf[1],实测字节实锤;手搓 fixture 与错误假设自证自洽=Owner"fixture 必须复刻生产"直令的反面活案例)→修复 `ced75f31`(fixture 显式实测值+负向 case)→ **NWT 二发现 v189 backfill 无门禁**(计划外重启会搭车执行,Bettor 引今晨 07:35 计划外重启实例拍板升格 MUST)→ env gate `09f911da`(K18_BACKFILL_CONFIRMED,默认只 log 跳过)→ KANet-UI 实数据 4/4 {ok:true} → **NWT 最终 GREEN**。本批零生产行为改变(gate 未接线)。
+
+**§3.2 范围订正(J1 自报)**: 原设计引用 bettor.js:1459 实为 exchange_offers 表(指错表),zk_native 守卫真实写点已按全库 grep 收口;设计稿 §6 记录已知未接线缺口(gate 调用点接入=第二批)。
+
+**收尾编排(Bettor #ugultk 拍板)**: ①KANet-UI 只读 backfill dry-run 报告(含 pruned 15 行/A0 六条正式归因=DoD-5)→②J1 域判→③装载窗一次装(§3.5+本批,K18_BACKFILL_CONFIRMED=1 随窗,DoD-4 顺序满足),第二批=gate 接线+高频零子进程实测,今日续走。
