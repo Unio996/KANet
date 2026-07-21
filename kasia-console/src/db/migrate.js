@@ -5500,27 +5500,43 @@ export function runMigrations() {
   // landing-design.md §3.1): payout_shards 家族不可变列(v1_committee/v2_zk/unknown) + 一次性 backfill。
   // 幂等(DoD-2 孤儿盘/重启穿越): ADD COLUMN 用标准 table_info 存在性守卫; backfill UPDATE 只处理仍是
   // 'unknown' default 的行(重启重跑这段不会重复处理已分类过的行, 也不会覆盖新写入点已正确 declare 的行)。
+  // 🔴 事故修复(2026-07-21, NWT diff 审 ced75f31 后续独立发现): ADD COLUMN 本身安全(schema 变更, 新列
+  // default 'unknown' 无害), 但下面的 backfill UPDATE 原来是 runMigrations() 无条件跑的真实 migration,
+  // 不是 dry-run——只要这段代码部署了, 任何原因触发的 console 重启(不一定是为了装这一批)都会真的执行一次
+  // backfill, 完全没有等 K-18 §5 DoD-0"backfill dry-run 报告人工过一遍才能真正执行 migration"这道闸先
+  // 发生。跟本卡自己写的 DoD-0 铁律直接自相矛盾。影响量级非资金安全(误标 covenant_family 事后可 UPDATE
+  // 订正, coherence gate 目前也还没接入任何真实花费路径), 但机制成本低, 不留成"跟踪但不修"的技术债——
+  // 加显式 opt-in 环境变量, 不设不跑真实 backfill(列还是加, 只是新行/既有行都停留 'unknown' 直到人工过完
+  // dry-run 报告后显式打开这个开关, 跟 KANet-UI/J1 在生产库跑只读 dry-run 脚本、review 完再部署打开开关
+  // 的实际操作顺序对齐)。
   {
     const psCols = sqlite.pragma('table_info(payout_shards)').map(c => c.name);
     if (!psCols.includes('covenant_family')) {
       sqlite.exec(`ALTER TABLE payout_shards ADD COLUMN covenant_family TEXT NOT NULL DEFAULT 'unknown'`);
-      console.log('[migrate] v189: payout_shards.covenant_family 列已加(K-18 §3.1), 开始 backfill 既有行...');
+      console.log('[migrate] v189: payout_shards.covenant_family 列已加(K-18 §3.1).');
     }
-    const toBackfill = sqlite.prepare(`SELECT * FROM payout_shards WHERE covenant_family = 'unknown'`).all();
-    if (toBackfill.length > 0) {
-      const upd = sqlite.prepare(`UPDATE payout_shards SET covenant_family = ? WHERE logical_market_id = ?`);
-      const tx = sqlite.transaction((rows) => {
-        let v1 = 0, v2 = 0, unknown = 0;
-        for (const row of rows) {
-          const { family } = classifyPayoutShardFamily(row);
-          upd.run(family, row.logical_market_id);
-          if (family === 'v1_committee') v1++; else if (family === 'v2_zk') v2++; else unknown++;
-        }
-        return { v1, v2, unknown };
-      });
-      const { v1, v2, unknown } = tx(toBackfill);
-      console.log(`[migrate] v189: backfill 完成, 共 ${toBackfill.length} 行 — v1_committee=${v1} v2_zk=${v2} unknown=${unknown}`
-        + (unknown > 0 ? ` (${unknown} 行判不出家族, 停留 'unknown' — 需人工过一遍, 见 K-18 §5 风险②/DoD-5, 不阻断 migration)` : ''));
+    if (process.env.K18_BACKFILL_CONFIRMED !== '1') {
+      const pendingCount = sqlite.prepare(`SELECT COUNT(*) AS n FROM payout_shards WHERE covenant_family = 'unknown'`).get().n;
+      if (pendingCount > 0) {
+        console.log(`[migrate] v189: ${pendingCount} 行待 backfill, 但 K18_BACKFILL_CONFIRMED 未设为 '1' — 跳过真实 backfill(K-18 §5 DoD-0: 必须先跑只读 dry-run 报告人工过一遍, 确认无在途盘被误伤, 才能设这个环境变量真正执行)。这些行停留 'unknown', 不阻断其它 migration/不阻断启动。`);
+      }
+    } else {
+      const toBackfill = sqlite.prepare(`SELECT * FROM payout_shards WHERE covenant_family = 'unknown'`).all();
+      if (toBackfill.length > 0) {
+        const upd = sqlite.prepare(`UPDATE payout_shards SET covenant_family = ? WHERE logical_market_id = ?`);
+        const tx = sqlite.transaction((rows) => {
+          let v1 = 0, v2 = 0, unknown = 0;
+          for (const row of rows) {
+            const { family } = classifyPayoutShardFamily(row);
+            upd.run(family, row.logical_market_id);
+            if (family === 'v1_committee') v1++; else if (family === 'v2_zk') v2++; else unknown++;
+          }
+          return { v1, v2, unknown };
+        });
+        const { v1, v2, unknown } = tx(toBackfill);
+        console.log(`[migrate] v189: K18_BACKFILL_CONFIRMED=1, backfill 完成, 共 ${toBackfill.length} 行 — v1_committee=${v1} v2_zk=${v2} unknown=${unknown}`
+          + (unknown > 0 ? ` (${unknown} 行判不出家族, 停留 'unknown' — 需人工过一遍, 见 K-18 §5 风险②/DoD-5, 不阻断 migration)` : ''));
+      }
     }
   }
 
