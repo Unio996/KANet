@@ -167,10 +167,27 @@ async function consolidateAndBuildPsState(marketId, ps, ctx) {
   // consolidate/transfer。跟下面 Tier1/Tier2(verifyRedeemMatchesChainObservedOutput)增量不重叠:
   // Tier1/Tier2 验的是"payout_redeem_hex 反推地址是否跟链上实际观测一致"(chain-truth), 本 gate 的
   // (a)(b)(d) 三步验的是"covenant_family 是否已知 + 字节结构是否符合声明的家族 + payout_ps_addr 这个独立
-  // DB 列是否跟 redeem 自洽"(family/DB 自洽性, Tier1/Tier2 完全不检查这三项); (c) recompile 对 v1_committee
-  // 会跟下面已有的 non-blocking 校验(line ~305)有计算重叠, 但那条检查的是 consolidate 完成后【新解出的】
-  // psRedeemHex, 这里检查的是 consolidate 开始前的【原始】ps 行, 时序不同、目的不同(前者是"consolidate 出的
-  // 结果值得信"事后校验, 这里是"要不要开始这次 consolidate 操作"事前门禁), 不是重复劳动。
+  // DB 列是否跟 redeem 自洽"(family/DB 自洽性, Tier1/Tier2 完全不检查这三项)。
+  //
+  // 🔴 Bettor 裁定要求的死代码核查(2026-07-21, #ui92pg, J2 diff 复核时提出——"本 gate 挡在 Tier1/Tier2 之前
+  // 且是 blocking, 下面那条 P0 非阻塞 recompile 校验(line ~316, 事件类型 ps_redeem_recompile_mismatch)
+  // 还能不能被触发到"必须给出明确结论, 不能留死代码)。**结论: 不是死代码, 两者检查的是不同时刻的数据,
+  // 本 gate 看不到下面那条检查关心的东西**——逐分支验证:
+  //   ① needConsolidate=true 分支: 本 gate 在函数最开头用【consolidate 发生前】的原始 `ps` 行做检查;
+  //      随后 consolidateAllShards 产出一份全新的 psRedeemHex(把这次 tick 新折进来的 shard 状态 splice
+  //      进去)。line ~316 的检查用的是这份【consolidate 之后全新算出】的 psRedeemHex——这份数据本 gate
+  //      从没见过(它在本 gate 跑完之后才被计算出来), 两者检查的是不同快照, 后者不可能被前者提前拦下。
+  //   ② needConsolidate=false 分支、Tier2 命中: 同理, resumePoint.redeemHex 是 genesis-walk 现场重建出的
+  //      新值, 本 gate 检查的原始 `ps.payout_redeem_hex` 在 Tier1 已判定"不新鲜"时根本没被这条 Tier2 路径
+  //      使用——line ~316 检查的又是本 gate 从没见过的数据。
+  //   ③ needConsolidate=false 分支、Tier1 命中(用回原始未变的 `ps.payout_redeem_hex`): 这是唯一"两处检查
+  //      内容重叠"的子情形——但本 gate 用【解码出的 closed 值】recompile, line ~316 硬编码 closed:0；
+  //      结算前 consolidate 只在 closed:0 阶段发生, 语义上恒等, 该子情形下两者确实会给出一致结论, 是唯一
+  //      "重叠但不冲突"的情况, 不构成"整条检查路径不可达"。
+  // 综上: line ~316 的检查在 ①② 两个分支下是本 gate 无法替代的、检查全新数据的独立防线, 只有 ③ 这个
+  // 相对少见的子情形下会跟本 gate 的判定重叠(不是矛盾, 是同一结论算了两次)——继续保留, 不删除、不重排,
+  // 两条检查各自的存在理由已写清楚在各自的位置(本段 + line ~316 附近原有注释), 不留"测试改到过但语义没人
+  // 讲清楚"的僵尸路径。
   {
     const gateResult = assertPayoutShardCoherence(ps, { p2sh: _p2shCache, tier: 'full' });
     if (!gateResult.ok) {

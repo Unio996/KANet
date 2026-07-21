@@ -133,16 +133,24 @@ export function assertPayoutShardCoherence(psRow, { p2sh, tier = 'full' } = {}) 
     return { ok: false, failedStep: 'b', reason: `结构签名核对失败: ${sig.reason} (marketId=${marketId}, declared=${declared})` };
   }
   // (c) 低频专属, recompile byte-equality — 仅作校验, 不作花费权威来源(K-18 §3.4 定位)
-  // 🔴 事故预防(2026-07-21, P2 批2 接线时用 bshard-consolidated-pool-rederive.test.mjs 复跑抓到): 这里
-  // 必须区分"recompile 真的跑完、字节比对不等"(= 真 FAIL, 有意义的信号)跟"compileSil 子进程本身起不来"
-  // (silverc 二进制缺失/路径错/spawn 失败 = 环境问题, 不是这行数据有问题)——两者在原来的实现里被同一个
-  // "抛异常"混在一起, 会让本来该由 tier=cheap/high-freq 路径以外唯一使用 tier=full 的低频花费前 gate,
-  // 在任何缺 silverc 的节点上对【所有】v1_committee 市场无差别抛一个跟"这行数据到底 coherent 不 coherent"
-  // 完全无关的"spawn ENOENT"异常, 把"环境没配好"跟"这个市场真的有问题"混为一谈——同 §3.5 verifyClaimLanded
-  // 三态设计(kaspa_tx_log 查无 ≠ 确认不符)的同一条纪律: 环境层面"查不了" = inconclusive, 不能升级成
-  // "查了、真不符"的 FAIL 结论。inconclusive 时跳过(c), 只留(a)(b)(d)三步的判定结果, 不静默放行(不是把
-  // inconclusive 当 pass), 只是不让环境问题冒充数据问题挡住结算。
+  // 🔴 事故预防(2026-07-21, P2 批2 接线时用 bshard-consolidated-pool-rederive.test.mjs 复跑抓到 + NWT
+  // 进一步实读 compileSil/ctorBytes32 实现坐实): 必须区分三类, 不能只用一个 try/catch 笼统吞掉——
+  //   ①"recompile 真的跑完、字节比对不等" = 真 FAIL, 有意义的信号。
+  //   ②"compileSil 子进程本身起不来"(execFileSync ENOENT/超时等, pool-bshard-artifacts.mjs compileSil
+  //     自己的 catch 块产出"silverc compile ... fail: ..."消息) = 环境问题, 不是这行数据有问题。
+  //   ③"ctor 参数本身格式不对"(`ctorBytes32` 在 compileSil 被调用之前就同步抛"bytes32 must be 32B, got
+  //     N"——pool_merkle_root/predicate_commit 这两列 hex 格式本身有问题, 是数据问题, 不是环境问题, 不能
+  //     跟②同等对待为 inconclusive)。
+  // 原来①②③混在同一个 catch(e) 里全部 inconclusive, 会让"这两列 DB 数据本身损坏"这种真实该拦的信号被
+  // 悄悄放过——分离处理: hex 格式校验提到 compile 调用之前独立做(③直接判 FAIL, 不进 try), 只把"调用
+  // compileSil 本身"包进 try/catch(此时能进来的异常只剩②环境类, 才降级 inconclusive)。同 §3.5
+  // verifyClaimLanded 三态设计的同一条纪律: 环境层面"查不了" = inconclusive, 不能升级成"查了、真不符"的
+  // FAIL 结论; 但"数据格式本身就是坏的"不属于"查不了", 属于"查了、明确有问题", 该是 FAIL。
   if (tier === 'full' && declared === 'v1_committee') {
+    const _hex32 = (s) => /^([0-9a-fA-F]{64})$/.test(String(s || '').replace(/^0x/, ''));
+    if (!_hex32(psRow.pool_merkle_root) || !_hex32(psRow.predicate_commit)) {
+      return { ok: false, failedStep: 'c', reason: `pool_merkle_root/predicate_commit 列本身不是合法 32B hex(marketId=${marketId}) — 数据问题, 不是环境问题, fail-closed 拒绝` };
+    }
     try {
       const recompiled = compilePayoutShardRedeem({
         poolMerkleRoot: psRow.pool_merkle_root, predicateCommit: psRow.predicate_commit,
@@ -152,7 +160,7 @@ export function assertPayoutShardCoherence(psRow, { p2sh, tier = 'full' } = {}) 
         return { ok: false, failedStep: 'c', reason: `recompile byte-compare 不等(marketId=${marketId}, closed=${sig.decoded.closed}) — structural 校验失败(可能 w0..w16 非零/其它字段漂移), fail-closed 拒绝` };
       }
     } catch (e) {
-      console.warn(`[assertPayoutShardCoherence] 步骤(c) recompile 本身跑不了(环境问题, 非数据判定, marketId=${marketId}): ${e.message} — inconclusive, 跳过(c), 继续(d)`);
+      console.warn(`[assertPayoutShardCoherence] 步骤(c) compileSil 子进程本身跑不了(环境问题, 非数据判定, marketId=${marketId}): ${e.message} — inconclusive, 跳过(c), 继续(d)`);
     }
   }
   // v2_zk: compilePayoutShardV2Redeem 只能重编译 genesis-shape(pre-attest), attest 后状态不适用 — 见 P2 §1

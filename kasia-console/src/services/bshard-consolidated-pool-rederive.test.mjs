@@ -39,30 +39,40 @@ const { consolidateAndBuildPsState, ensureReady } = await import('./bshard-settl
 const { autoDetectConsolidateResume, verifyRedeemMatchesChainObservedOutput } = await import('../lib/pool-shard-settle.mjs');
 const { randomUUID } = await import('node:crypto');
 
-// NOTE: deliberately NOT using compilePayoutShardRedeem() here — it shells out to silverc, which is
-// pinned per-machine (D:/silverscript/versioned-builds/) and absent on nodes that only run/read chain
-// (this machine included, see memory reference-silverscript-pinned-build-not-on-every-node). This test
-// only exercises the Tier1/Tier2 chain-comparison logic in consolidateAndBuildPsState, which needs SOME
-// deterministic bytes to hash into a P2SH address (via _p2shCache/kaspa-wasm ScriptBuilder, pure crypto,
-// no opcode-validity requirement) — it does not need a semantically valid PayoutShard script.
-//
-// 🔴 2026-07-21 (P2 批2 §1, K-18 §3.3 coherence gate 接线): consolidateAndBuildPsState 现在开头就跑
-// assertPayoutShardCoherence(tier='full') blocking gate(见 bshard-settle-daemon.mjs 顶部新增段落)——
-// 之前这里用的 arbitrary short buffer(`fakeredeem-...`)完全不满足 probeStructuralSignature 的字节结构
-// 要求(会在到达本文件想测的 Tier1/Tier2 逻辑之前就被新 gate 拦在步骤(a)/(b)), 必须换成结构上真实符合
-// V1 offset 表(P2 §1: marker@1=0x08/consolidatedPool@2/closed@11/payoutRoot@20/predicateCommit@518/
-// poolMerkleRoot@1002)的手搓字节——同 bshard-payout-family-coherence.test.mjs 的 buildFakeV1RedeemHex
-// 同一手法, 不是重新发明。步骤(c) recompile 在本机(无 silverc)会被 assertPayoutShardCoherence 自身的
-// inconclusive 降级捕获(非 fatal), 不需要真实 silverc 编译产物。
+// 🔴 事故修复(2026-07-21, J2 diff 复核抓到, #批2§1 装载后跨机器不一致): 早前这里只有一条"手搓结构有效
+// 字节"路径, 隐含假设"本机没 silverc"这一种环境——在没 silverc 的机器(J1 本机)上, gate 步骤(c) 的
+// compileSil 会 ENOENT, 被 assertPayoutShardCoherence 自己的 inconclusive 捕获跳过, 测试全绿; 但在真的
+// 装了 silverc 的机器(J2 复核用的)上, compileSil 真的跑起来, 拿这份手搓 fixture(offset 字段位置对但
+// 填充 byte 是占位符, 不是真实编译产物)去 recompile byte-compare, 必然不等 → 步骤(c) 真 FAIL, 在到达
+// 本文件想测的 P0 Tier1/Tier2 逻辑之前就被拦下——同一个 commit 在两台机器上跑出不同结果, 根因是 fixture
+// 本身只对一种运行环境成立, 不是接线顺序错(gate 挡在 P0 逻辑之前本来就是设计意图)。
+// 处置: 有 silverc 就调真实 compilePayoutShardRedeem 拿真实编译产物(两边环境下步骤(c) 都能给出正确、
+// 一致的判定——有 silverc 的机器上真通过, 没有的机器上仍走 inconclusive 跳过), 没有才退回手搓字节
+// (同 P2 §1 offset 表结构, 跟 bshard-payout-family-coherence.test.mjs 的 buildFakeV1RedeemHex 同一手法)。
+const { compilePayoutShardRedeem } = await import('../lib/pool-shard-register.mjs');
+// NWT 方法论提醒(2026-07-21, 今晚第二次撞到"本地环境掩盖了真实代码路径没被测过"这类问题, 第一次是 marker
+// bug 的手搓 fixture 自证自洽): "全绿"这个信号本身在 silverc 环境不一致时有歧义——必须显式区分"真的编译
+// 验证过"和"环境跳过没验证", 不能让两者在输出上长得一模一样。用这个计数器追踪, 结尾摘要显式报告。
+let _realCompileCount = 0, _fallbackCompileCount = 0;
 function fakeRedeemHex(seed, { consolidatedPool = 20000000n, closed = 0, poolMerkleRoot, predicateCommit } = {}) {
-  const buf = Buffer.alloc(1040, 0x33);
-  buf[1] = 0x08;   // 真正的 PUSH8 marker(_PS_STATE_START=1)
-  buf.writeBigInt64LE(BigInt(consolidatedPool), 2);
-  buf.writeBigInt64LE(BigInt(closed), 11);
-  Buffer.from('00'.repeat(32), 'hex').copy(buf, 20);   // payoutRoot(占位, 本测试不断言这个字段)
-  Buffer.from(String(predicateCommit || '').replace(/^0x/, ''), 'hex').copy(buf, 518);
-  Buffer.from(String(poolMerkleRoot || '').replace(/^0x/, ''), 'hex').copy(buf, 1002);
-  return buf.toString('hex');
+  try {
+    const r = compilePayoutShardRedeem({ poolMerkleRoot, predicateCommit, consolidatedPool: Number(consolidatedPool), closed, payoutRoot: '00'.repeat(32) });
+    _realCompileCount++;
+    return r;
+  } catch {
+    _fallbackCompileCount++;
+    // silverc 不在本机(ENOENT 等) — 退回手搓字节, gate 步骤(c) 会走 inconclusive 降级(见
+    // bshard-payout-family-coherence.mjs assertPayoutShardCoherence 的 try/catch), 不影响这里想测的
+    // Tier1/Tier2 逻辑(那些逻辑在步骤(a)(b)(d) 通过之后才跑到)。
+    const buf = Buffer.alloc(1040, 0x33);
+    buf[1] = 0x08;   // 真正的 PUSH8 marker(_PS_STATE_START=1)
+    buf.writeBigInt64LE(BigInt(consolidatedPool), 2);
+    buf.writeBigInt64LE(BigInt(closed), 11);
+    Buffer.from('00'.repeat(32), 'hex').copy(buf, 20);   // payoutRoot(占位, 本测试不断言这个字段)
+    Buffer.from(String(predicateCommit || '').replace(/^0x/, ''), 'hex').copy(buf, 518);
+    Buffer.from(String(poolMerkleRoot || '').replace(/^0x/, ''), 'hex').copy(buf, 1002);
+    return buf.toString('hex');
+  }
 }
 
 let fails = 0;
@@ -311,5 +321,12 @@ console.log('[test] scenario E (#28 line423, Bettor #ubmne2.1): verifyRedeemMatc
   }
 }
 
+// NWT 方法论要求(见上方 fakeRedeemHex 注释): 显式报告 gate 步骤(c) 这次运行是真的编译验证过还是环境跳过
+// 过——"all checks passed"不能在两种情况下长得一样, 读这行输出的人必须能马上判断这次跑是不是真的走过了
+// silverc recompile byte-compare 这条路径。
+const compileStatusLine = _realCompileCount > 0
+  ? `K-18 §3.3 步骤(c) recompile: 本次运行 ${_realCompileCount} 次使用真实 silverc 编译产物(REAL, 非环境跳过)${_fallbackCompileCount > 0 ? ` + ${_fallbackCompileCount} 次退回手搓字节` : ''}`
+  : `⚠ K-18 §3.3 步骤(c) recompile: 本次运行全部 ${_fallbackCompileCount} 次都是手搓字节(silverc 不在本机, ENVIRONMENT-SKIPPED, 步骤(c) 从未真的执行验证——若要证明 gate 真的挡得住不一致数据, 需要在有 silverc 的机器上重跑此文件)`;
+console.log(`\n${compileStatusLine}`);
 console.log(fails === 0 ? `\n✅ all checks passed` : `\n❌ ${fails} check(s) failed`);
 process.exit(fails === 0 ? 0 : 1);

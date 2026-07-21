@@ -108,6 +108,14 @@
 
 **全量回归**:5 个测试文件(`bshard-payout-family-coherence`/`bshard-consolidated-pool-rederive`/`bshard-verify-claim-landed-amount`/`bshard-coherence-observability-monitor`/`bshard-close-transport-coherence-gate`)本机全绿;`bshard-auto-settler.test.mjs` 的既有 `getSidesByShard` schema-drift 失败确认跟今天改动无关(pre-existing,P0 阶段已记录)。lint-kanet 全库 0 error。
 
+**2026-07-21 追加(J2 diff 复核发现跨机器不一致,NWT/Bettor 三方跟进,commit 待定,本轮批量提交)**:
+
+1. **根因(J2 抓到)**:上面的"5 个测试文件本机全绿"只在 J1 本机(无 silverc)成立——`bshard-consolidated-pool-rederive.test.mjs` 的 `fakeRedeemHex` 用手搓占位字节,在无 silverc 的机器上 gate 步骤(c) 走 inconclusive 降级跳过,测试全绿;J2 在有 silverc 的机器上复核同一 commit,`compileSil` 真的跑起来,拿手搓字节(不是真实编译产物)去 recompile byte-compare 必然不等,步骤(c) 真 FAIL,在到达测试本来想验证的 P0 Tier1/Tier2 逻辑之前就被拦下——同一个 commit 两台机器不同结果。**不是接线顺序错**(gate 挡在 P0 逻辑之前正是设计意图),是 fixture 本身只对一种运行环境成立。
+2. **修复**:`fakeRedeemHex` 改为优先调用真实 `compilePayoutShardRedeem`(有 silverc 就用真实编译产物,两边环境下步骤(c) 都能给出正确、一致的判定),没有才退回手搓字节(原逻辑保留作 fallback)。
+3. **NWT 追加发现(更精确的问题)**:`assertPayoutShardCoherence` 步骤(c) 原来的 `catch(e)` 把三类不同性质的异常混在一起——①recompile 真跑完字节不等(真 FAIL)②`compileSil` 子进程本身起不来(execFileSync ENOENT 等,环境问题)③`ctorBytes32` 在调用 compileSil 之前就同步抛"bytes32 must be 32B"(`pool_merkle_root`/`predicate_commit` 列本身 hex 格式损坏,是数据问题不是环境问题)。原实现把②③一并降级成 inconclusive,会让"这两列 DB 数据本身损坏"这种真实该拦的信号被悄悄放过。**修复**:hex 格式校验提到 compile 调用之前独立做(③直接判 FAIL,不进 try/catch),只把"调用 compileSil 本身"包进 try/catch(此时能进来的异常只剩②环境类才降级 inconclusive)。
+4. **Bettor 死代码核查裁定要求**:`consolidateAndBuildPsState` 顶部新 gate(blocking)挡在 P0 既有非阻塞 recompile 校验(`ps_redeem_recompile_mismatch`,line ~316)之前,后者是否已经变成不可达死代码——**结论:不是**。逐分支验证已写入 `bshard-settle-daemon.mjs` 代码注释:①`needConsolidate=true` 分支 consolidate 后产出全新 `psRedeemHex`,新 gate 从没见过这份数据;②`needConsolidate=false`+Tier2 命中同理,genesis-walk 重建出的新值新 gate 也没见过;③唯一"两者内容重叠"的子情形是 `needConsolidate=false`+Tier1 命中(沿用原始未变的 `ps.payout_redeem_hex`)——这种情形下两者确实会给出一致结论,但不构成"整条检查路径不可达",继续保留两条检查。
+5. **NWT 方法论提醒(今晚第二次撞到同类问题,第一次是 marker bug 的手搓 fixture 自证自洽)**:"全绿"信号在环境不一致时有歧义,不能让"真的验证过"和"环境跳过没验证"长得一样。`bshard-consolidated-pool-rederive.test.mjs` 结尾摘要新增显式报告(真实编译次数 vs 手搓字节退回次数),silverc 不在本机时用 `⚠` 标注"步骤(c) 从未真的执行验证",不再是笼统一行"✅ all checks passed"。
+
 **待续(不在本次提交,§3/§4 后续另行提交)**:classifier 家族/模板拆分(§3)+ 高频路径零子进程性能实测(§4)。
 
 ---
