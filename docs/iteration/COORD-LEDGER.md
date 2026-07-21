@@ -394,3 +394,19 @@ Owner 元问题:写进文档的铁律(CLAUDE.md 接位 SOP 第5条"设计前查�
 **部署门禁仍不变(未因本轮 DoD-0 triage 完成而自动放松)**: P0(v0.3)保持 NWT GREEN + 非阻塞校验姿态,K-18 §3.4 权威切换仍需 line423 消费点配套修复 + Owner money-path 正式签发,**DoD-0 三小时内从"98 条未知"收敛到"98 条全部有归因、零真实漂移",是通过实证走完的,不是宣告出来的**——这轮 triage 本身是 #28/K-18 全案里最扎实的一段执行示范,可作为后续同类"数据卫生排查"的方法论参照(多假说提出+证伪+域边界纪律+算术自查)。
 
 ---
+
+## 🔴 D-011:钱路改动去 Owner 逐项点头化(2026-07-21 · Owner 频道直令)
+
+**Owner 当场纠正 Bettor**:"这不是你决定做就可以的吗?你看看自己职责?我这块只看目标!具体做什么都是你排版,你驱动团队做事。" 正式记入 `docs/DECISIONS.md` **D-011**(commit `313cd770`)——涉钱路/covenant/结算的改动,**不再要求 Owner 对每一项逐笔点头才能上线**,Owner 只定方向、看结果。**内部双审纪律不降**(NWT 独立红队/J1·J2 互审这套流程原样保留,是团队自己的安全网,不是"问 Owner"的替代品)。已在频道同步全员,NWT 明确回应"以后 verdict 不再写'等 Owner money-path'当门禁项,内部审核链走完就是终点,Bettor 拍板驱动"。
+
+## ✅ #28/K-18 全案三块全部落码收尾(P0 + DoD-0 + line423,J1 `67490897`)
+
+**line423(`settleMarketLive` 的 `priorEvidence` presence-trust 消费点)修复完成**:抽出共享函数 `verifyRedeemMatchesChainObservedOutput`(`pool-shard-settle.mjs`),跟 `consolidateAndBuildPsState` 的 Tier1 用同一个原语(顺手把 Tier1 也重构成调用共享函数,不再各写一份)。**改法**:evidence 候选优先(daemon 写回时已是链上验证过的真值)→ formula 兜底(仅 evidence 缺失时),但**不管走哪个候选,都必须过链上验证才能用,验不过 fail-closed 返回 `{ok:false}`**——不再有旧代码"没有任何活链路径兜底"的裸 formula 回退。
+
+**诚实标注未覆盖部分(J1 自曝,非阻塞待办)**:这个消费点的 `curRedeem` 仍是重编译产物(不像 §3b Tier1/Tier2 有 splice bytes 可直接借用,这个点没找到现成 splice 来源)——喂给重编译的数值现在是链上验证过的真值,但"重编译当权威"这个架构问题在这一点上还没根治。
+
+**验证**:回归测试新增 scenario E(匹配/不匹配/kaspa_tx_log 缺口三个 case,全离线确定性),lint 0 error,`node --check` 过,复跑 P1 回归测试+`bshard-auto-settler.test.mjs`(后者撞到一个**跟这次改动无关的既有 bug**——`deriveResumePlanFromEvidence` 测试 fixture 缺 id 列导致 `getSidesByShard` 崩,J1 用 `git stash` 复现同样失败坐实非自己引入)。
+
+**今晚 #28 全案状态**:P0 核心(consolidatedPool re-derive + K-18 splice 权威)+ K-18 DoD-0(98 条 MISMATCH 全部归因)+ line423(最后一块 presence-trust)**三块全部完成并落码**。**待续**:NWT diff 审 `67490897`,GREEN 后按 D-011,Bettor 直接判定装载/激活,不再单独等 Owner。
+
+---
