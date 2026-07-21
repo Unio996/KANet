@@ -10,21 +10,27 @@
 //
 // 2026-07-21(P2 批2 DoD-8, Bettor #ujjcz7.2 派工): marketId 换成一个干净的、跟今晚 K-18 调查
 // 无关的活跃 pending_bettors 市场(原 3mzoh 是今晚 verifying 组"-2614 字节 V2/ZK 家族误判"7条真
-// 开放盘之一,不适合再拿来下新注)——目的是让今天新接线的 coherence gate(ensurePayoutShard 高频
-// non-blocking 分支)吃一笔真实流量: 这个市场目前 payout_shards 还没有行(genesis mint 尚未触发,
-// 首次下注会走 ensurePayoutShard 全新创建路径,正好覆盖 gate 冷启动这条之前没有真实数据验证过的分支)。
+// 开放盘之一,不适合再拿来下新注)——ext-pool-v07-1784059111477-gxrr4,目前 payout_shards 零行。
+// 🔴 订正(J1 抓漏 #uj…,Bettor #uj0…裁定): non-blocking coherence gate 只挂在 ensurePayoutShard
+// 的"已存在行"早返回分支,首笔下注走的是 genesis-mint(创建新行)分支,完全不碰 gate——单笔下注验
+// 不到 DoD-8 要验的东西。改法(Bettor 裁定,比换市场更好,一次覆盖两条路径,成本仅 2×1 KAS):
+// 同一 persona 在同一市场连下两笔——第 1 笔走 genesis-mint(冷启动创建路径),第 2 笔(下方新增
+// step)payout_shards 行已存在,真正命中 non-blocking gate。两笔之间需等第 1 笔的 payout_shards
+// 行落定可见(KANet-UI 执行时人工确认)。
 //
 // 真花测试网 KAS(小额, stakeKas=1, 同 Bettor 裁定"币充足但不必要不浪费"), 真实链上等待(~2-5min),
 // skip_in_batch: true(不进批量自动跑, 手动触发)。
 export default {
   id: 'bshard_single_persona_bet_journey',
-  description: 'S2 首条旅程 — 真实TG下注(冷启动 genesis mint, K-18 coherence gate 首验)→settler H2回归场景→/mybets断言',
+  description: 'S2 首条旅程 — 同市场连下两笔真实TG下注(第1笔genesis-mint冷启动/第2笔命中K-18 coherence gate)→settler H2回归场景→/mybets断言',
   domain: 'predictions',
   tags: ['predictions', 'journey', 'real-chain', 's2'],
   skip_in_batch: true,
   steps: [
     {
       action: 'tg_place_bet',
+      // step [1/2]: genesis-mint 冷启动路径(payout_shards 此时零行, ensurePayoutShard 走创建分支,
+      // 不碰 gate——这一步只为准备第 2 步的前置条件, 不是 gate 验证本身)。
       marketId: 'ext-pool-v07-1784059111477-gxrr4',
       side: 'YES',
       stakeKas: 1,
@@ -32,6 +38,21 @@ export default {
         must: {
           // result_field_equals 先断 ok:true(action 内部任何一步 fail() 都会体现为 ok:false+error,
           // 不满足这条会直接给出失败原因, 不用猜); result_has_keys 再确认成功路径该有的字段都在。
+          result_field_equals: { ok: true },
+          result_has_keys: ['marketId', 'personaAddr', 'sidePsh', 'lockTx', 'merkleIndex'],
+        },
+      },
+    },
+    {
+      action: 'tg_place_bet',
+      // step [2/2](DoD-8 本体): 同 persona 同市场第二笔——此时 payout_shards 行已存在(上一步创建),
+      // ensurePayoutShard 走"已存在行"早返回分支,真正命中 non-blocking coherence gate。这才是
+      // DoD-8 要验的那条流量,不是第 1 步。
+      marketId: 'ext-pool-v07-1784059111477-gxrr4',
+      side: 'YES',
+      stakeKas: 1,
+      expect: {
+        must: {
           result_field_equals: { ok: true },
           result_has_keys: ['marketId', 'personaAddr', 'sidePsh', 'lockTx', 'merkleIndex'],
         },
