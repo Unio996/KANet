@@ -26,9 +26,29 @@ V1 PayoutShard state 区(`bshard-close-enforce.mjs:69-75` 注释 + `_splicePayou
 | `payoutRoot` | +19 | PUSH32 + 32B | 33 |
 | `w0..w16`(17 个 nullifier word) | +52 起 | 各 PUSH8 + i64LE | 17×9=153 |
 
-State 区总计 = 9+9+33+153 = **204 字节**(从 `_PS_STATE_START=1` 起,即整个 redeem 里 offset 1~205 是 state 区,offset 0 是 state_start 的某个前导字节)。State 区**之前**是 ctor 常量区(`poolMerkleRoot`/`predicateCommit` 各 32B+PUSH 前缀 ≈ 33B),这部分在 V1 里位于 state 区之前还是之后需要读 `PayoutShard.sil` 源码 ctor 顺序核实(`compilePayoutShardRedeem` 的 ctor 数组顺序是 `[poolMerkleRoot, predicateCommit, consolidatedPool, closed, payoutRoot, ...W17]`,推断常量区在 state 区前,但 push 后的实际字节序要以 silverc 编译产物为准,不能只信 ctor 参数顺序=字节顺序——本批结构探针会实测坐实,不预先断言)。
+State 区总计 = 9+9+33+153 = **204 字节**(从 `_PS_STATE_START=1` 起,即整个 redeem 里 offset 1~205 是 state 区,offset 0 是 state_start 的某个前导字节)。
+
+**【2026-07-21 09:0x 实测更新,MUST-FIX① 兑现——原推断已被推翻】**:上一版这里写"推断常量区在 state 区前(从 ctor 参数顺序猜的)"——**这个推断是错的**。KANet-UI 用 `_j1tn_k18_v1_offset_hexdump.mjs`(commit `df24ede1`)在生产库对一个已知 V1 行(`ext-pool-v07-1782186601857-ozzeu`)实测:`predicateCommit` 出现在 hex 里的 **byte offset 518**,`poolMerkleRoot` 出现在 **byte offset 1002**——**两者都在 offset 205(state 区结束点)之后**,即 **ctor 常量区在 state 区之后,不是之前**。这正是 §5.1 立 MUST-FIX① 这条硬闸的价值所在:凭 ctor 参数顺序推断的字节序假设是错的,实测才是唯一真相源(同 K-18 全案的核心母题)。
+
+**⚠ 这个基线样本本身有问题,offset 结论待交叉验证才能定稿**:`ozzeu` 被 NWT/KANet-UI 查实是 `COORD-LEDGER` 7/13"第八层洋葱"排查点过名的可疑市场(100KAS bond 自 6/23 未动 + 假 completed 状态嫌疑)——**hex dump 本身还坐实了一条新证据**:这行 `closed`(offset 10 解码)= `0`,但 `pool_markets.protocol_status = 'completed'`——**DB 说已完成结算,链上字节显示 covenant 从没真正 closed 过**,是 #28/K-18 全案从头到尾在追的"DB 记录 vs 链上真相不一致"这类矛盾的直接字节级实证,不是空口怀疑。**用一个自己状态都自相矛盾的行来定 offset 表本身不合适**(样本代表性存疑),已请 KANet-UI 换 2-3 个 COORD-LEDGER 查无异常记录的 completed 行(最好覆盖不同批次/时期)重跑交叉验证,多样本 offset 结果一致才正式写进下表定稿。**`ozzeu` 的探针结果本身是有价值的独立发现**(疑似 completed 状态造假的字节级证据),留给 §3.1 backfill dry-run 时单独标注,不能混进"正常 V1 行"的统计样本里。
+
+**【MUST-FIX① 定稿,2026-07-21 09:0x,4 样本交叉验证通过】**:KANet-UI 追加 3 个 `COORD-LEDGER` 查无异常记录的 completed 行(`pb73v` 6/30 04:01、`f08c4` 6/30 15:46、`vmhud` 7/18 13:19,跨 3 个多月不同批次)重跑,4 行(含 `ozzeu`)**byte-exact 完全一致**:`predicateCommit` 全部在 byte offset **518**,`poolMerkleRoot` 全部在 byte offset **1002**。offset 表定稿:
+
+| 字段 | 偏移 | 编码 | 字节数 |
+|---|---|---|---|
+| state 区起点 marker | 0 | (前导 byte) | 1 |
+| `consolidated_pool` | 1 | PUSH8 + i64LE | 9 |
+| `closed` | 10 | PUSH8 + i64LE | 9 |
+| `payoutRoot` | 19 | PUSH32 + 32B | 33 |
+| `w0..w16` | 52 起 | 各 PUSH8 + i64LE | 153 |
+| `predicateCommit` | **518** | (ctor 常量区,在 state 区之后) | — |
+| `poolMerkleRoot` | **1002** | (ctor 常量区,在 state 区之后) | — |
 
 **这个表是本批 §3.3(b) 结构探针 + 202 字节归因的直接工具**——不再是"猜可能是哪个字段",是"逐字段核对 offset 处的字节跟这个表对不对得上"。
+
+**副产品发现(4 样本共有,已排查清楚,不影响上表定稿)**:4 行 `consolidated_pool` 解码全部 = `20000000`(PS_SEED)、`closed` 全部 = `0`——横跨 3 个月的不同市场解出相同值,一度怀疑是新异常。查实(读 `_j1tn_k18_splice_vs_recompile_backfill_dryrun.mjs:85/94` 自己的判据逻辑坐实,非猜测)是**backfill dry-run 的 MATCH 判据本身的选择效应**:该判据从 `payout_redeem_hex` 自身解码 `consolidatedPool` 后拿这个刚解码出的值 + `closed:0` 去重编译、跟同一份 stored bytes 比对——这在结构上是"内部自洽性检查"(这行的 template 是不是合法 V1 编译产物),不是"这个数值反映市场当前真实结算态"的检查(后者需要独立链上观测,是 P0 Tier1/Tier2 管的范畴,针对**仍活跃/待花费**的市场;已完成市场的 `payout_redeem_hex` 结算后不再被任何花费路径读取,停留在 genesis 快照是预期行为非 bug)。NWT 独立核实过 `payout_redeem_hex` 确实有多个 UPDATE 点(非只写一次),但**布局(字段在哪个 offset)由 splice/编译方式决定,不随"哪个世代的值"变化**(splice 是定点改值不移动字段位置,recompile 用同一份 `.sil` 源码结构不变)——用任意时刻的 DB 快照做布局基线都成立,4 样本 byte-exact 一致已经是最直接的证明。**这不构成 `ozzeu` 假 completed 嫌疑的新证据也不削弱它**(该嫌疑仍立在原始的"100KAS bond 未动"证据上,是独立的两件事)。
+
+**边界说明(NWT/Bettor 已确认,写入设计供后续参考)**:`assertPayoutShardCoherence` 的 (c) 步骤(recompile byte-equality)验证的是**structural/family 正确性**(这行是不是一份合法的、声明家族自洽的编译产物),不是**value 时效性**(这个数值是不是市场当前真实状态)——两者是不同问题,K-18 §3.3 四步门的设计定位本来就是"花费前的安全闸"(只在 `consolidateAndBuildPsState` 使用前/close-transport V2 入口这类**还要花这笔钱**的场景跑),不是给已完成市场做历史真实性审计用的工具。已完成市场的 value 是否反映 genesis 还是最终态,不影响四步门的正确性保证,后续不要误用四步门去做它不承诺的"反映当前态"这类检查。
 
 ---
 
