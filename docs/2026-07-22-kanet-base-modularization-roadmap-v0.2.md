@@ -1,6 +1,7 @@
-# KANet 底座模块化路线图 v0.4（Codex 对抗审查整合稿 · 新增 M-1 安全边界阶段 · 待内部二轮对抗 + Codex 复审后再请 Owner 钉死）
+# KANet 底座模块化路线图 v0.4.1（内部二轮对抗 4/4 GREEN · 已送 Codex 复审 · 复审 GREEN 后请 Owner 钉死）
 
 > **Status**: CURRENT（2026-07-22 · Bettor 主编）
+> **v0.4.1 增量**：内部二轮 4/4 GREEN（KANet-UI/J1/J2/NWT）；Codex 四条代码断言全部 file:line 坐实；custodial_transfer 单列 M-1 最高优先级（校准定性：design debt 非当下可利用）；健康信号模板注记。
 > **版本链**：v0.1 首稿 → v0.2/v0.2.1 内部对抗第一轮整合（#v6ij51，D2 三轨）→ v0.3 Owner 磨合五条落实（`bdfd5c80`）→ **v0.4 = Codex 外部对抗审查（RESPONSE-20260722-MODULARIZATION-ROADMAP，verdict：战略 GREEN / 执行案 RED）11 条 MUST-FIX 全消化**：新增 M-1 安全边界发现阶段、能力/效果授权模型（A/B/C 降为描述性分类）、盲签退役方向、批规模门改"语义门+钱路 50 行硬上限"叠加制（NWT 终裁）、drain 台账算术更正（14+9=23）与三停政策、M2 进程分离失败语义验收、M5 最小权限验收。
 > **流程**：本稿 → 内部对抗第二轮 → 回 bridge 送 Codex 复审 → 双 GREEN → Owner 钉死 → 执行。钉死前不动任何执行代码（M-1 的取证/设计工作为只读+文档，Owner 已令即启，不属例外）。
 > **流程锚**（Owner 终裁 2026-07-21 18:20Z）：首稿 v0.1 → 对抗讨论（本轮完成，四方全回执）→ **本收敛稿交 Owner 磨合 → 钉死后 Bettor 安排分批执行。钉死前不动任何执行代码。**
@@ -75,7 +76,8 @@
   1. **全命令能力/效果清单**（machine-readable，覆盖全部 ~50 条**含 16 条"通用原语"**——Owner：D2 号称穷尽却排除 transfer/custodial_transfer/ecdsa_sign/sign_input_for_settle 于分类外，是在自己身上违反 M1"互斥且穷尽"；列定义见 D2 节）。已开工：J2 类 B 四层表已交，A/C 与通用原语扩展中。
   2. 威胁模型：被攻陷应用 / 被攻陷 Console worker / 重放的 IPC 或 HTTP 请求。
   3. public-vs-internal 命令资格划分。
-  4. **Codex 代码断言我方复核**（Owner：verify over echo 双向适用，两个智能体同意不构成证据）——已坐实：HTTP 零认证（J2 四层表）、dispatch 无身份校验（NWT 读 relay.mjs:331 起）；**待坐实**：custodial_transfer 收调用方 privkeyHex、prediction_settle_tx 完整可控参数面（J1/J2 四维 grep，file:line 落地后才入清单）。
+  4. **Codex 代码断言我方复核**（Owner：verify over echo 双向适用）——**四条全部坐实（v0.4.1，内部二轮期间完成）**：HTTP 零认证（J2 四层表）、dispatch 无身份校验（NWT，relay.mjs:331 起）、custodial_transfer 收调用方 privkeyHex（NWT，relay.mjs:478-490，IPC 字段直传 custodialSendKaspa，relay 不派生）、prediction_settle_tx 完整可控参数面（J1，relay.mjs:734-758，redeem/outpoints/outputs 收款地址金额/sigs/winner 全部 IPC 原样直传零校验，与 Codex MF3 可换维度逐字段吻合）。
+  4b. **custodial_transfer 单列 M-1 设计最高优先级项**（NWT 提、J1 附议、J2 补全链路、NWT 接受校准后的最终定性）：relay 层对 privkeyHex 来源零验证 = **实际存在的信任模型缺陷（design debt），但非当下可利用**——现存唯一触发路径（tg-wallet.js:92 send）有 ingest-secret 认证且私钥不出 console 进程边界；风险窗口在 M2/M4 多进程化后打开。性质与类 B 授权问题不同量级（密钥材料暴露面 vs 签名授权），在 M-1 caller identity 机制设计中排最优先，不与类 B 九条混排。
 - **设计类（只做到这两件为止）**：
   5. capability matrix（应用 × 钱包/市场/outpoint/分支/金额/收款地址 × 动作）。
   6. **caller 身份机制选型**：HTTP 能力网关 / per-app socket / 签名能力信封三案对比——**架构不在评审里定**（Owner hold），J2 出单机父子进程 IPC 拓扑下的最小改动对比，Owner 终选。payload 明文 app_id 不可接受（自我声明伪造零成本）。
@@ -103,6 +105,7 @@
 - M2a 归拢 `apps/exchange/`：**按表/功能组切 2-3 批**（NWT），纯移动+import 修正。
 - M2b 接口化：裸 DB/relay 直连改仓储层+底座 API；共享表走底座接口。**设计稿必含运行时拓扑自报端点**（health 报告单体/半独立模式，KANet-UI）。
 - M2c 独立进程化（视 M2b 后收益决定）：**runbook/supervisor/装载判据/健康检测/日志归档改造 = 一等验收项**（现 kanet-start/stop/supervisor 全按单 console 进程设计），不当"运维顺带的事"。
+- 健康信号模板（KANet-UI 二轮补，非阻塞）：rpc-health-degradation-alert 的"检测+events 表+播频道"三件套直接作为各独立 daemon 进程的健康信号模板复用，M-1/M2c 设计时照抄现有实现，不重新设计。
 - **进程分离失败语义验收（v0.4 采 Codex MF9——seeder deposit-watcher/refund-worker 是钱路，进程分离即使业务逻辑不变也改变 crash 窗口/顺序/重试/原子性；exchange 抽离不因"半冻结"就天然低风险）**，M2c 前必备：shadow/dual-read 对比 · checkpoint 事件重放 · 幂等与重复投递测试 · outbox/inbox 级持久交接 · "链上已生效但 DB 未确认"崩溃场景 · supervisor 重启与 stale-worker fencing · 限定钱包/金额范围的 canary 模式 · 回退不产生双活 worker。**"行为零变化"必须涵盖运维失败语义，不只 happy-path e2e。**
 - exchange-machine 零改动（D4 修正）；表迁移前置检查复用 drain 清单。
 - 验收：seeder deposit-watcher/refund-worker 真实用户路径零退化；OTC/exchange e2e 回归。
@@ -141,14 +144,14 @@
 |---|---|
 | 35（原估 34）命令分类表（J2 主核 + KANet-UI 复核） | ✅ 完成（A6+B9+C20=35；v0.4 起降级为描述性分类，授权模型另立） |
 | 类 B 现状调用权限摸底（NWT 四层判据） | ✅ 完成（J2 四层表：认证无/授权无独立层/传输部分/审计部分；NWT 复核） |
-| M-1 全命令能力/效果清单（~50 条含通用原语） | 进行中（J2 扩展 A/C+通用原语；Codex 两断言待 J1/J2 file:line 坐实） |
+| M-1 全命令能力/效果清单（~50 条含通用原语） | 进行中（J2 扩展 A/C+通用原语；Codex 四断言全部 file:line 坐实 ✅） |
+| 内部对抗第二轮 | ✅ 4/4 GREEN（KANet-UI/J1/J2/NWT，2026-07-22 22:1x，含两断言坐实与 custodial_transfer 校准增量） |
 | M-1 caller 身份机制三案对比（gateway/per-app socket/能力信封） | 待做（J2 出对比，Owner 终选） |
 | drain 义务台账（固定快照+逐行字段） | M3b 前置件，待做 |
 | bridge STATUS 更新（MF11 回执 + `blocked`→`red_verdict_pending_owner`） | 待做（Bettor 执行） |
 | D2-C 存量 20 条补审批次组 | 已挂账（2-4 批，M3 后启动，M5 前完成） |
 | typed-intent 签名全架构 | 独立卡（类 B 9 条分批，不卡 M0b） |
-| 内部对抗第二轮（v0.4 本稿） | 待做（四方） |
-| Codex 复审（v0.4 送 bridge） | 待做（内部二轮后） |
+| Codex 复审（v0.4.1 送 bridge） | 已发起（MSG-20260722-114） |
 | Owner 钉死 | 双 GREEN 后 |
 | 本收敛稿交 Owner 磨合 | 待交（Bettor 精炼单点上报） |
 | Owner 磨合点：①方案本体 ②节奏/火力配比（公测运营 vs 模块化 vs ZK 主线） | 待 Owner |
