@@ -415,4 +415,18 @@ Owner 元问题:写进文档的铁律(CLAUDE.md 接位 SOP 第5条"设计前查�
 
 **Bettor 拍板(D-011 首次实际应用,不再走 Owner 逐项签发)**: 同意装载。**执行仍派工 KANet-UI**(部署是其域,Bettor 结构锁只判定不代执行)——派工前先用 API 抽查一遍无市场卡在 verifying/settling/collecting_sigs 中途状态(显示 0,但要求 KANet-UI 用自己工具再核一遍更准,不单信 Bettor 一次查询),明确要求装载后跑 line423 回归场景在真实进程里过一遍再收尾,任何异常立刻喊停不硬撑。**这是 D-011 落地后第一次实际的钱路装载判定,记账留痕。**
 
+## 🎉 #28 全案装载完成 + 验证通过(KANet-UI,2026-07-21 07:37Z)——今晚战役收官
+
+**装载前巡检真实纠错(重要,记方法论)**: Bettor 报"0 条市场卡在结算中途"是 API 查询语法错误(逗号拼多状态值,API 不支持 OR 匹配,查出 0 是语法问题非数据真相)——KANet-UI 用自己工具独立核实,查出真实 92 条 `verifying` 状态市场,没有单方面信 Bettor 的数字就重启,而是报出分歧、要求口径对齐后才动手。**NWT 进一步纠正判据本身**:静态 `verifying` 计数不是安全判据(那是持久化 holding 态,不是"重启危险窗口"),真正关键是"重启这一刻 daemon 是否卡在某次 tick 执行中间"——这个不能靠状态计数看,得看 tick log 时间戳/心跳。**J2(settler 域)确认**:92 条本身不是新风险,resume-aware 设计(今晚 P0/P1 两项改动正在硬化的能力)本来就是为"重启中途穿过结算"这个场景准备的,不用等全部 92 条逐一查完。三方交叉核实收敛,零人单方面拍板。
+
+**装载中意外发现(LOUD 上报,顺带修复)**: 巡检时发现 console 侧 RpcClient 已处于已知劣化模式(`no RPC node available`,20000 行日志里 4913 条密集报错,kaspad 本体健康只是 console 内部连接状态坏了——匹配 memory 里记录过的既有模式)。判断:这本身就是"该立即重启"的理由,不是"再等等"的理由(系统当下就在降级,拖延对结算/下注反而更危险)。与计划中的装载重启合并执行,一次窗口处理两件事,全员(J1/J2/NWT/Bettor)无异议。
+
+**装载结果(KANet-UI 举证,非"看起来没事")**:
+- 新进程 PID `16188`(旧 `31112` 已终止),端口 3200 正常监听,API 200。停机窗口 **约 85 秒**(07:36:32 终止旧进程 → 07:37:57 新进程响应,supervisor 自动拉起,未人工干预)。
+- **①RPC 恢复**:重启后 ~5 分钟内零 RPC 错误,settle-daemon tick 干净跑完(07:39:04,1546ms)。
+- **②line423 回归**:`node --test` 在**部署后的活代码**上重跑(不是信任装载前跑过的结果,NWT 特别肯定这个习惯),5 个场景 A-E 全绿,含 K-18 splice-authority 断言(C)、dust-poisoning 防御(D1/D2)、line423 本体三态(E1 匹配/E2 不匹配/E3 索引缺口)。
+- **③92 条 verifying 市场**:重启后 300 行日志扫过零 uncaught/新 error;一条"transaction input #0 is not finalized"是今晚已定案的良性重试模式(mempool 时序,非 bug,下 tick 自愈),非新问题。pool-settler 最新 tick 显示 109 verifying markets / errored=0,daemon 健康。
+
+**今晚 #28 全案完整闭环**:设计(`e3258005`)→ NWT 红队(`f1a16daa`)→ Codex 对抗性审查拦截(`2a10f5e8`,MUST-FIX4 K-18 违反)→ K-18 §3.4 重新发现(近失零浪费)→ P0 v0.3 落码(`25b3d0a0`)→ K-18 DoD-0 backfill 98 条全归因(`5dbc0358`→`26e801dc`)→ line423(`67490897`)→ NWT 最终 diff 审 GREEN → D-011(Owner 授权去逐项点头)→ Bettor 拍板 → KANet-UI 装载 → 三项验证通过。**全员(Bettor/J1/J2/NWT/KANet-UI + 外部顾问 Codex)今晚收工。**
+
 ---
