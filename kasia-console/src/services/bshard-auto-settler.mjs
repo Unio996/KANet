@@ -569,9 +569,11 @@ export async function settleMarketLive(marketId, ctx) {
     });
     const claimTx = claimRes?.txId;
     if (!claimTx) { ctx.alert?.(marketId, `claim submit fail ${cd.pk.slice(0, 8)}: ${claimRes?.error}`); claims.push({ pk: cd.pk, amount: cd.amount, error: claimRes?.error || 'no txId' }); break; }
-    const received = await verifyClaimLanded(ctx, winnerAddr, claimTx);
+    const received = await verifyClaimLanded(ctx, winnerAddr, claimTx, cd.amount);
     if (!received) {
-      ctx.alert?.(marketId, `claim not landed ${cd.pk.slice(0, 8)} — STOP threading (NO-TX-NO-STATE)`);
+      // NWT MUST-FIX②(P2 §3.5): landed 判定本身对"UTXO 已被 winner 自行花掉"敏感, 这不必然是真实
+      // 失败(钱可能已到账、winner 只是验证窗口内自己转走了)——alert 文案区分, 防 on-call 误判连夜追。
+      ctx.alert?.(marketId, `claim not landed ${cd.pk.slice(0, 8)} — STOP threading (NO-TX-NO-STATE)(可能是 winner 在验证窗口内自行花费 payout 的良性竞态, 非必然实失败——先查该地址近期是否有自主转出记录再判断是否需要介入)`);
       claims.push({ pk: cd.pk, amount: cd.amount, txId: claimTx, received: false, error: 'not landed' }); break;
     }
     // thread continuation: pool-=payout · w[merkle_index/63] set bit(merkle_index%63)
@@ -636,17 +638,61 @@ async function verifyClosedLanded(ctx, expectedAddr, closeTxid, consolidatedPool
 
 // #15 helper: claim 后 winner P2PK 实收链验 (NO TX NO STATE·thread 下一笔前确认)。
 // #33 fix (2026-07-05): 同 verifyClosedLanded, 换深度确认(见上方注释), 不再是"当下存不存在"的浅确认。
-async function verifyClaimLanded(ctx, winnerAddr, claimTx) {
+// 🔴 2026-07-21 P2 §3.5(#28 全案 §6.5 DoD 遗留项, J2 发现+Bettor裁定折入本批, 设计
+//   docs/2026-07-21-p2-batch1-truth-source-layer-k18-landing-design.md §3.5 v0.5 定案):
+//   补金额校验——landed 只证"这笔 tx 落地了", 不证"金额对"(跟 verifyClosedLanded 早就有的金额校验
+//   不对称)。三态设计(v0.2→v0.3→v0.4 三轮红队论证收敛, 不是随手写的, 见设计稿完整过程):
+//   金额源 = kaspa_tx_log(主, 历史永久记录不受 winner 验证窗口内自行花掉 payout 的 TOCTOU 竞态影响)
+//   + ctx.getUtxos(兜底, 专治 indexer 永久漏记这一笔的场景——J2 引 7/8 committee attest 那晚的先例,
+//   "本地表 miss = inconclusive 非 confirmed-absent, 优先直连 RPC 兜底"这条规矩此前从未落码, 本次
+//   是第一次真正变成代码)。"确认 mismatch"(不 fallback)严格限定为"找到 winnerAddr 的输出条目但
+//   金额不同"——txRow 缺失/JSON.parse 失败/outs 里没这个地址三种情形一律走 inconclusive→fallback,
+//   不能被误判成 mismatch(NWT 红队复核重点点名的边界)。
+async function verifyClaimLanded(ctx, winnerAddr, claimTx, expectedAmount = null) {
   for (let attempt = 0; attempt < 20; attempt++) {
     try {
       const r = await ctx.relayPost(ctx.feeRelay.id, { type: 'check_utxo_landed', address: winnerAddr, txid: claimTx, minDepth: REORG_SAFE_MIN_DEPTH });
-      if (r?.landed) return true;
+      if (r?.landed) {
+        if (expectedAmount == null) return true;   // 向后兼容: 不传 = 老行为零改变
+        let outs = null;
+        const txRow = ctx.db.prepare('SELECT outputs_json FROM kaspa_tx_log WHERE tx_id = ?').get(claimTx);
+        if (txRow?.outputs_json) {
+          try { const parsed = JSON.parse(txRow.outputs_json); if (Array.isArray(parsed)) outs = parsed; } catch {}
+        }
+        const matchingOutput = outs?.find(o => o?.address === winnerAddr);
+        if (matchingOutput) {
+          if (String(matchingOutput.amount_sompi ?? matchingOutput.amount) === String(expectedAmount)) return true;
+          // 找到地址但金额确实不同 = 唯一的"确认 mismatch", 不 fallback(不允许"两个源挑一个顺眼的"),
+          // 落到下面继续下一 attempt(容许 expectedAmount 传参时序性 bug 被上游修正的窗口, 20 次预算
+          // 耗尽仍不符才真正 fail-closed)。
+        } else {
+          // txRow 缺失 / JSON.parse 失败 / outs 里没有这个地址 —— 三种情形统一 inconclusive, 直连
+          // RPC 现读当前 UTXO 集兜底一次。
+          const entries = await ctx.getUtxos(winnerAddr);
+          const ok = entries.some(e => {
+            const j = JSON.parse(JSON.stringify(e, (k, v) => typeof v === 'bigint' ? v.toString() : v));
+            const op = j.entry?.outpoint || j.outpoint;
+            const amt = j.entry?.amount ?? j.amount;
+            return op?.transactionId === claimTx && String(amt) === String(expectedAmount);
+          });
+          if (ok) return true;
+          // getUtxos 兜底也查不到(可能是 UTXO 已被 winner 自己花掉, 或者 indexer 还没追上+这个查询
+          // 窗口 UTXO 真的还没上链)→ 两条路径这次 attempt 都不能确认, 继续重试。
+        }
+      }
     } catch (e) {
       // 同 verifyClosedLanded 上方注释: 只加诊断日志, 不改变控制流/返回值。
       console.warn(`[verifyClaimLanded] attempt ${attempt + 1}/20 threw (非落地判定失败, 诊断用): ${e?.message || e}`);
     }
-    await _sleep(3000);
+    // ctx.claimRetryDelayMs 可选(测试专用, 让 spent-during-retry/耗尽重试这类需要真跑完 20 次循环的
+    // 回归测试不用等 60s 真实时间), 生产调用方不传就是原来的 3000ms, 零行为改变。
+    await _sleep(ctx.claimRetryDelayMs ?? 3000);
   }
+  // 🔴 NWT MUST-FIX②(实读 kasia-relay/src/lib/p2sh.mjs:1484-1509 坐实): checkUtxoLanded 本身是当前
+  //   UTXO 集语义, winner 若在这 20 次重试窗口内自行花掉 payout(完全合法操作, 钱已到账), 后续每次
+  //   attempt 会在 landed 这一步就返回 false, 20 次预算耗尽后走到这里返回 false, 触发调用方既有的
+  //   STOP threading——这不是"钱没到账", alert 文案需要能让 on-call 分清良性竞态 vs 真实失败,
+  //   见调用点 ctx.alert 文案改动(下方 :572/:845 附近)。
   return false;
 }
 
@@ -842,9 +888,10 @@ export async function cancelMarketLive(marketId, ctx) {
     });
     const claimTx = claimRes?.txId;
     if (!claimTx) { ctx.alert?.(marketId, `refund submit fail ${cd.pk.slice(0, 8)}: ${claimRes?.error}`); claims.push({ pk: cd.pk, amount: cd.amount, error: claimRes?.error || 'no txId' }); break; }
-    const received = await verifyClaimLanded(ctx, bettorAddr, claimTx);
+    const received = await verifyClaimLanded(ctx, bettorAddr, claimTx, cd.amount);
     if (!received) {
-      ctx.alert?.(marketId, `refund not landed ${cd.pk.slice(0, 8)} — STOP threading (NO-TX-NO-STATE)`);
+      // NWT MUST-FIX②(P2 §3.5), 同上 winner claim 分支同款理由。
+      ctx.alert?.(marketId, `refund not landed ${cd.pk.slice(0, 8)} — STOP threading (NO-TX-NO-STATE)(可能是 bettor 在验证窗口内自行花费退款的良性竞态, 非必然实失败——先查该地址近期是否有自主转出记录再判断是否需要介入)`);
       claims.push({ pk: cd.pk, amount: cd.amount, txId: claimTx, received: false, error: 'not landed' }); break;
     }
     const newState = { consolidated_pool: (curPool - BigInt(cd.amount)).toString(), closed: 2, payoutRoot: plan.refundRoot };
