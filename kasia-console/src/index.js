@@ -790,6 +790,13 @@ startBrokerFeeEmitCron();
 import { startSpcDaaIndexStaleCheck } from './services/spc-daa-index-monitor.mjs';
 startSpcDaaIndexStaleCheck();
 
+// J1tn 2026-07-21 (docs/2026-07-21-p2-batch2-coherence-gate-wiring-design.md §1, Bettor 方向审
+// #uhke6f note②"最实质" + NWT diff 审实证坐实 ps_redeem_recompile_mismatch 零消费者): K-18 §3.3
+// coherence gate 事件(新 ps_coherence_gate_fail + 补上 P0 遗留的 ps_redeem_recompile_mismatch)
+// 喊疼巡检 — 不留"写进 events 表就算有人看"的半吊子。
+import { startBshardCoherenceObservabilityMonitor } from './services/bshard-coherence-observability-monitor.mjs';
+startBshardCoherenceObservabilityMonitor();
+
 // K-17 Pre-Prune Capture(2026-07-17, J2, docs/2026-07-17-preprune-capture-invariant-k16-gate-
 // design.md v1.1, NWT 红队 GREEN dd6496b0/369f6679)——j34vb 事故根治: side_lock_daa 独立于结算生命周期
 // 的主动补齐 worker + 独立存活心跳监控(两个定时器互不依赖, worker 挂了监控仍能巡检告警)。

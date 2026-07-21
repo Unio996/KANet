@@ -23,9 +23,39 @@ import { compileSil, computePoolSideArtifact, ctorBytes32, ctorInt } from './poo
 import { extractTemplateArtifact } from './pool-template-artifact.mjs';
 import { buildRegisterWitness, buildRegisterCommand } from './pool-register-builder.mjs';
 import { allocateForRegister, registerShard, sealShard, onBettorRegistered } from './shard-allocator.mjs';
+import { assertPayoutShardCoherence } from './bshard-payout-family-coherence.mjs';
 import { blake2b } from '@noble/hashes/blake2b';
+import { randomUUID } from 'node:crypto';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+// K-18 §3.3 gate 接线(P2 批2, docs/2026-07-21-p2-batch2-coherence-gate-wiring-design.md §1, Bettor 方向审
+// #uhke6f GREEN-with-3-notes + NWT 红队 GREEN): ensurePayoutShard/V2 早返回分支是每笔下注必经的高频读路径,
+// 风险不对称论证(Bettor 定论,NWT 认可) —— 这里的 gate 不提供任何钱安全增量(下注本身不从 payout shard
+// 花钱,真正的花费/签名点 consolidate+close 走 tier='full' blocking),而假阳性代价是拦死整个市场下注
+// (liveness 重伤)。安全收益≈0、误伤代价高 → non-blocking(gate FAIL 写事件,不 throw,existing 缓存值照常
+// 返回,现状行为零改变)。升级到 blocking 的条件(non-blocking 满 7 天 + 期间零"未归因" `ps_coherence_gate_fail`
+// 事件)不在本次落码范围,是后续独立小卡,由 `bshard-coherence-observability-monitor.mjs` 的喊疼巡检提供
+// 判断升级用的真实数据。
+function _checkCoherenceNonBlocking(db, existing, p2sh) {
+  try {
+    const r = assertPayoutShardCoherence(existing, { p2sh, tier: 'cheap' });
+    if (!r.ok) {
+      _writeCoherenceGateFailEvent(db, existing.logical_market_id, r);
+    }
+  } catch (e) {
+    // p2sh 缺失等契约错误也不能让高频读路径崩(non-blocking 的字面意思), 只记录不拦。
+    console.warn(`[ensurePayoutShard] coherence gate 检查本身异常(non-blocking, 不影响返回): ${e.message}`);
+  }
+}
+function _writeCoherenceGateFailEvent(db, marketId, r) {
+  try {
+    db.prepare(`INSERT INTO events (id, event_scope, event_type, source, level, summary, payload_json, created_at)
+      VALUES (?, 'system', 'ps_coherence_gate_fail', 'ensurePayoutShard', 'warn', ?, ?, datetime('now'))`)
+      .run(randomUUID(), `market=${String(marketId).slice(-8)} coherence gate FAIL(non-blocking, tier=cheap, step=${r.failedStep}): ${r.reason}`,
+           JSON.stringify({ marketId, failedStep: r.failedStep, reason: r.reason }));
+  } catch (e) { console.warn(`[ensurePayoutShard] coherence-gate-fail 事件写入失败(non-fatal): ${e.message}`); }
+}
 
 const LIB = dirname(fileURLToPath(import.meta.url));
 // 🔴 事故修复(2026-07-07，Bettor/NWT 裁定，家族口径终案): compilePayoutShardRedeem(PayoutShard.sil V1)
@@ -109,7 +139,10 @@ export function compileShardLeafRedeem({ marketIdHash, psTmplHashHex, shardPoolI
  */
 export async function ensurePayoutShard({ db, rc, transfer, landed, p2sh, logicalMarketId, poolMerkleRoot, predicateCommit, relayAddr, silverc }) {
   const existing = db.prepare(`SELECT * FROM payout_shards WHERE logical_market_id = ?`).get(logicalMarketId);
-  if (existing) return { payoutCovId: existing.payout_cov_id, psAddr: existing.payout_ps_addr, psOutpoint: existing.payout_ps_outpoint, psRedeemGenesis: existing.payout_redeem_hex };
+  if (existing) {
+    _checkCoherenceNonBlocking(db, existing, p2sh);
+    return { payoutCovId: existing.payout_cov_id, psAddr: existing.payout_ps_addr, psOutpoint: existing.payout_ps_outpoint, psRedeemGenesis: existing.payout_redeem_hex };
+  }
 
   const redeem = compilePayoutShardRedeem({ poolMerkleRoot, predicateCommit, consolidatedPool: PS_SEED, closed: 0, payoutRoot: z32, silverc });
   const fundTx = await transfer(relayAddr, PS_SEED + 100_000_000);   // seed + headroom to gateway
@@ -249,7 +282,10 @@ export function compilePayoutShardV2Redeem({ poolMerkleRoot, predicateCommit, cl
  */
 export async function ensurePayoutShardV2({ db, rc, transfer, landed, p2sh, logicalMarketId, poolMerkleRoot, predicateCommit, closeZkTmplAnchor, relayAddr, silverc }) {
   const existing = db.prepare(`SELECT * FROM payout_shards WHERE logical_market_id = ?`).get(logicalMarketId);
-  if (existing) return { payoutCovId: existing.payout_cov_id, psAddr: existing.payout_ps_addr, psOutpoint: existing.payout_ps_outpoint, psRedeemGenesis: existing.payout_redeem_hex };
+  if (existing) {
+    _checkCoherenceNonBlocking(db, existing, p2sh);
+    return { payoutCovId: existing.payout_cov_id, psAddr: existing.payout_ps_addr, psOutpoint: existing.payout_ps_outpoint, psRedeemGenesis: existing.payout_redeem_hex };
+  }
 
   const redeem = compilePayoutShardV2Redeem({ poolMerkleRoot, predicateCommit, closeZkTmplAnchor, consolidatedPool: PS_SEED, silverc });
   const fundTx = await transfer(relayAddr, PS_SEED + 100_000_000);

@@ -1,6 +1,6 @@
 # P2 第二批 — coherence gate 接线 + 高频零子进程性能实测 + classifier 家族/模板维度拆分(J1 主稿)
 
-> **Status**: DRAFT(v0.1 · 2026-07-21 · J1,待 NWT 红队)
+> **Status**: v0.3 · 2026-07-21 · J1 → Bettor 方向审 GREEN-with-3-notes(#uhke6f.1/.2,全折入)→ NWT 定论(§6.1 不需要换,#uhke6f 全线 GREEN,可以落码)→ **§1(gate 接线)+ 观察者机制已落码,§3(classifier 拆分)+ §4(性能实测)待续**,见 §7。
 > **依据**: Bettor 批2派工(#uh1h4i.2 后续,2026-07-21):"范围: gate 接线(调用点分级: 高频 `ensurePayoutShard`/`V2` 三步/低频 `consolidateAndBuildPsState` 四步)+ 高频零子进程性能实测 + classifier 家族/模板两维度拆分(你自己拍(a)时列的设计要点),照旧设计先行→NWT 红队→落码"。
 > **前置**: `docs/2026-07-21-p2-batch1-truth-source-layer-k18-landing-design.md`(批1,**DEPLOYED & CLOSED**)——`bshard-payout-family-coherence.mjs`(`probeStructuralSignature`/`classifyPayoutShardFamily`/`assertPayoutShardCoherence`/`assertZkNativeImmutable`)已落码上线,`payout_shards.covenant_family` 已 backfill(v1_committee=623/v2_zk=20/unknown=78),但**目前零调用点在读它/靠它做任何判定**——本批要把这套基础设施真正接上,是 K-18 全案"存在但没人用"→"真正生效"的关键一步。
 
@@ -26,7 +26,16 @@
 | `consolidateAndBuildPsState` 使用前 | 低频(每个市场结算一次) | **blocking**(tier=full,四步全跑):gate FAIL → throw,不consolidate | 这是即将花费/构造 TX 的节点,已经是 P0 Tier1/Tier2 校验链条的一部分,批1设计文档原本就把这个点定位为"低频完整四步"——花费前硬拦符合"NO TX NO STATE CHANGE"铁律,且这个点本来就已经有 fail-closed 先例(P0 consolidatedPool 验证) |
 | close-transport V2 入口(`buildProposeCloseRequestV2`,`bshard-close-transport.mjs`,行号落码时重新 grep 核实) | 低频(每个 V2 市场 close 一次) | **blocking**(tier=full) | 同上,close 是构造即将签名/广播的请求,不是高频读路径 |
 
-**升级路径(non-blocking → blocking 的退出条件,需要 NWT/Bettor 定具体阈值,本卡先给框架)**:`ensurePayoutShard`/`V2` 的 non-blocking 模式运行 N 天(建议至少覆盖一次完整的日常下注量级,具体天数交 Bettor 拍)零 `ps_coherence_gate_fail` 事件(或全部事件都能归因到已知的 78 行 unknown 桶,而不是新出现的意外失配)→ 升级为 blocking。这条不在本卡落码范围内,是后续独立小卡。
+**升级路径(Bettor 方向审拍定,#uhke6f.1 note①,非本卡落码范围,后续独立小卡)**:non-blocking 模式运行**满 7 天** + 期间**零"未归因"** `ps_coherence_gate_fail` 事件(归因到已知桶——即 78 行 unknown 里那两类——的不算)→ 升级走独立小卡 + NWT 审。
+
+**Bettor 方向审定论(#uhke6f.1,GREEN-with-3-notes,2026-07-21)**:non-blocking-first 在下注路径上成立,且不只是"防未知 bug"这条(本卡草案自己标的)弱理由——是**风险不对称的强论证**:下注路径的 gate 不提供任何钱安全增量(下注本身不从 payout shard 花钱,真正的花费/签名点 consolidate+close 已经按本卡方案上了 blocking,fail-closed 牙齿已经装在对的地方),而它的假阳性代价是**拦死整个市场的下注(liveness 重伤)**。在"安全收益≈0、误伤代价高"的点上上 blocking,是负期望——**non-blocking-first 不是保守妥协,是这个调用点本身的正确终态候选**(升不升级看真实数据说话,不是"迟早要上 blocking"的过渡态)。
+
+**Bettor 三条 note(全折入本卡)**:
+1. 升级阈值(已并入上面"升级路径"段)。
+2. **【最实质,硬性 DoD 项】事件流必须钉观察者**——non-blocking 模式的信号如果没人读,就是"牙建好没人看"同一类坑(memory 有前科:trustless-teeth-built-not-armed)。要求:`ps_coherence_gate_fail` 必须接入既有 patrol/health 日常监控面,或最低限度**每日计数 check 有明确写清楚归属哪个 domain 负责看**——机制落地,不能靠"以后有人会记得看"这种自觉性假设。参照 `migrate.js v185`(`endpoint_hit_counters`,4 个疑似死端点 7 天观察窗命中计数)同款 observe-only-窗 + 落表计数先例,不重新发明模式。
+3. §2.2(Tier1/2 校验链跟四步门职责重叠的实际增量说清楚)+ §2.3(`buildProposeCloseRequestV2` 入口名重新 grep 核实)按 DoD-1 落码前必答,Bettor 无异议直接确认。
+
+**NWT 红队重点(Bettor 指定)**:§6.1 提到的替代方案("只对已知 78 行 unknown 不 blocking,其它一律 blocking"这种更精细的分行分级)是否值得换掉本卡的"全体 non-blocking-first"方案,由 NWT 裁。
 
 ---
 
@@ -75,6 +84,31 @@
 1. **non-blocking 先行的提案本身是否被认可**——这是本卡最核心的设计决策,不是细节,需要 NWT/Bettor 明确表态同意还是有更好的方案(比如"只对已知 78 行不 blocking,其它一律 blocking"这种更精细的分级,也是一个可能的替代方案,本卡先提最简单的"全体 non-blocking 先行"版本,不代表这是唯一选项)。
 2. classifier 拆分改动面看起来小,但"改一个已经落地、backfill 过一次真实生产数据的分类函数"本身就是敏感操作(今天刚犯过一次同文件的错),落码后必须有真实数据重新验证,不能只信单测。
 3. ~~§2 问题 1~~ 已核实排除(见 §2 更新),non-blocking-first 提案的必要性改立在"防未来未知 bug"这条更弱但仍然成立的理由上,NWT 复核时请一并评估这条理由单独是否足够支撑 non-blocking-first,还是核实完 78 行无风险后应该直接上 blocking(另一种合理立场,不是本卡唯一结论)。
+
+---
+
+## 7. 落码状态(2026-07-21,J1,§1 已完成,§3/§4 待续)
+
+**§2.2/§2.3 落码前必答(DoD-1,Bettor 无异议确认后补上正式答案)**:
+- §2.2(Tier1/Tier2 与四步门职责重叠说清增量):不重叠。Tier1/Tier2(`verifyRedeemMatchesChainObservedOutput`)验的是"`payout_redeem_hex` 反推地址是否跟链上实际观测一致"(chain-truth 核实);本 gate 的 (a)(b)(d) 三步验的是"`covenant_family` 是否已知 + 字节结构是否符合声明的家族 + `payout_ps_addr` 这个独立 DB 列是否跟 redeem 自洽"(family/DB 自洽性,Tier1/Tier2 完全不检查这三项)。(c) recompile 对 v1_committee 会跟 `consolidateAndBuildPsState` 内已有的 non-blocking 校验(`bshard-settle-daemon.mjs` 原 line ~300)有计算重叠,但那条检查的是 consolidate 完成后**新解出**的 `psRedeemHex`(事后校验"这次 consolidate 出的结果值得信"),本 gate 检查的是 consolidate 开始前的**原始** `ps` 行(事前门禁"要不要开始这次 consolidate 操作"),时序不同、目的不同,不是重复劳动——已写入 `bshard-settle-daemon.mjs` 代码注释。
+- §2.3(`buildProposeCloseRequestV2` 入口名重新 grep 核实):确认无误,`kasia-console/src/lib/bshard-close-transport.mjs:217`。
+
+**gate 接线**(commit 待定,本轮批量提交):
+- `ensurePayoutShard`/`ensurePayoutShardV2`(`pool-shard-register.mjs`)早返回分支:non-blocking,gate FAIL 写 `ps_coherence_gate_fail` 事件(含 marketId/failedStep/reason)+ `console.warn`,不 throw,`existing` 缓存值照常返回。新增 `_checkCoherenceNonBlocking` 辅助函数,连 `p2sh` 缺失这类契约错误自身抛异常都被 catch 住(non-blocking 意味着连 gate 自己出错也不能让高频读路径崩)。
+- `consolidateAndBuildPsState`(`bshard-settle-daemon.mjs`)开头:blocking(tier=full),gate FAIL 直接 throw,零 consolidate/transfer。
+- `buildProposeCloseRequestV2`(`bshard-close-transport.mjs`)开头:blocking(tier=full),同上,在任何 relay 命令/签名请求发起前拦下。SELECT 语句补齐了 `logical_market_id`/`payout_ps_addr`/`covenant_family` 三列(原查询没有,gate 需要)。
+
+**🔴 落码时发现并修复的设计缺口(不是本卡原计划,是接线时用回归测试撞出来的真实问题)**:`assertPayoutShardCoherence` 步骤 (c) 原实现把"recompile 真的跑完但字节不等"(= 真 FAIL)和"`compileSil` 子进程本身起不来"(silverc 二进制缺失/路径错 = 环境问题)混在同一个"抛异常"里——这意味着任何缺 silverc 的节点上,tier=full 对**所有** v1_committee 市场都会无差别抛一个跟"这行数据到底 coherent 不 coherent"完全无关的"spawn ENOENT"异常,把"环境没配好"跟"这个市场真的有问题"混为一谈。用 `bshard-consolidated-pool-rederive.test.mjs`(P0 既有回归测试)在本机(无 silverc)重跑时直接暴露——处置:比照 §3.5 `verifyClaimLanded` 三态设计的同一条纪律("kaspa_tx_log 查无 ≠ 确认不符"),环境层面"查不了"归类为 inconclusive,`console.warn` 记录后跳过 (c),只留 (a)(b)(d) 三步的判定结果,不静默放行(不是把 inconclusive 当 pass)。这个修复本身有生产意义,不只是让测试能跑:防止未来任何节点 silverc 路径配置漂移时,把结算功能整体锁死在一个跟真实数据无关的环境错误上。
+
+**测试**:
+- `bshard-payout-family-coherence.test.mjs` 新增 5 条断言块,覆盖 `ensurePayoutShard`/`V2` 早返回分支 non-blocking 行为(coherent 无事件/incoherent 有事件仍返回缓存值/p2sh 缺失不崩)。
+- 新文件 `bshard-close-transport-coherence-gate.test.mjs`:验证 `buildProposeCloseRequestV2` 在 incoherent 行上于任何 relay 调用前短路 throw(covenant_family=unknown → 步骤(a);结构签名不符 → 步骤(b))。正向路径(coherent → 真正走到构造 close 请求)需要活 relay + committee + 真实链态,留给测试网真金 E2E(DoD 项 8),不在本次离线测试范围内假造。
+- 新文件 `bshard-coherence-observability-monitor.mjs` + `.test.mjs`(Bettor note② 观察者要求):镜像 `spc-daa-index-monitor.mjs` 先例,1h tick 统计过去 24h `ps_redeem_recompile_mismatch`+`ps_coherence_gate_fail` 事件计数,分桶(已知 refunded/pruned_expired_waived vs 未归因),未归因非零才写汇总事件。已接入 `index.js` 启动流程。**这条顺带把 NWT 实测坐实的 P0 遗留观察盲区(`ps_redeem_recompile_mismatch` 全库零消费者)也一并补上,不留半吊子。**
+- `bshard-consolidated-pool-rederive.test.mjs`(P0 既有回归测试)fixture 修复:原来的 `fakeRedeemHex` 是任意短 buffer,不满足新 gate 的结构签名要求,会在到达测试想验证的 Tier1/Tier2 逻辑前就被新 gate 拦下(步骤(a)/(b))。改用同 `buildFakeV1RedeemHex` 手法的结构有效字节 + 真实 `covenant_family='v1_committee'` + 真实 kaspa-wasm 推导的 `payout_ps_addr`(不再是占位字符串),让 fixture 通过新 gate 后继续测试原本的 Tier1/Tier2 场景。
+
+**全量回归**:5 个测试文件(`bshard-payout-family-coherence`/`bshard-consolidated-pool-rederive`/`bshard-verify-claim-landed-amount`/`bshard-coherence-observability-monitor`/`bshard-close-transport-coherence-gate`)本机全绿;`bshard-auto-settler.test.mjs` 的既有 `getSidesByShard` schema-drift 失败确认跟今天改动无关(pre-existing,P0 阶段已记录)。lint-kanet 全库 0 error。
+
+**待续(不在本次提交,§3/§4 后续另行提交)**:classifier 家族/模板拆分(§3)+ 高频路径零子进程性能实测(§4)。
 
 ---
 

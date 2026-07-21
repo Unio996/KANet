@@ -133,13 +133,26 @@ export function assertPayoutShardCoherence(psRow, { p2sh, tier = 'full' } = {}) 
     return { ok: false, failedStep: 'b', reason: `结构签名核对失败: ${sig.reason} (marketId=${marketId}, declared=${declared})` };
   }
   // (c) 低频专属, recompile byte-equality — 仅作校验, 不作花费权威来源(K-18 §3.4 定位)
+  // 🔴 事故预防(2026-07-21, P2 批2 接线时用 bshard-consolidated-pool-rederive.test.mjs 复跑抓到): 这里
+  // 必须区分"recompile 真的跑完、字节比对不等"(= 真 FAIL, 有意义的信号)跟"compileSil 子进程本身起不来"
+  // (silverc 二进制缺失/路径错/spawn 失败 = 环境问题, 不是这行数据有问题)——两者在原来的实现里被同一个
+  // "抛异常"混在一起, 会让本来该由 tier=cheap/high-freq 路径以外唯一使用 tier=full 的低频花费前 gate,
+  // 在任何缺 silverc 的节点上对【所有】v1_committee 市场无差别抛一个跟"这行数据到底 coherent 不 coherent"
+  // 完全无关的"spawn ENOENT"异常, 把"环境没配好"跟"这个市场真的有问题"混为一谈——同 §3.5 verifyClaimLanded
+  // 三态设计(kaspa_tx_log 查无 ≠ 确认不符)的同一条纪律: 环境层面"查不了" = inconclusive, 不能升级成
+  // "查了、真不符"的 FAIL 结论。inconclusive 时跳过(c), 只留(a)(b)(d)三步的判定结果, 不静默放行(不是把
+  // inconclusive 当 pass), 只是不让环境问题冒充数据问题挡住结算。
   if (tier === 'full' && declared === 'v1_committee') {
-    const recompiled = compilePayoutShardRedeem({
-      poolMerkleRoot: psRow.pool_merkle_root, predicateCommit: psRow.predicate_commit,
-      consolidatedPool: sig.decoded.consolidatedPool, closed: sig.decoded.closed, payoutRoot: sig.decoded.payoutRoot,
-    });
-    if (recompiled !== psRow.payout_redeem_hex) {
-      return { ok: false, failedStep: 'c', reason: `recompile byte-compare 不等(marketId=${marketId}, closed=${sig.decoded.closed}) — structural 校验失败(可能 w0..w16 非零/其它字段漂移), fail-closed 拒绝` };
+    try {
+      const recompiled = compilePayoutShardRedeem({
+        poolMerkleRoot: psRow.pool_merkle_root, predicateCommit: psRow.predicate_commit,
+        consolidatedPool: sig.decoded.consolidatedPool, closed: sig.decoded.closed, payoutRoot: sig.decoded.payoutRoot,
+      });
+      if (recompiled !== psRow.payout_redeem_hex) {
+        return { ok: false, failedStep: 'c', reason: `recompile byte-compare 不等(marketId=${marketId}, closed=${sig.decoded.closed}) — structural 校验失败(可能 w0..w16 非零/其它字段漂移), fail-closed 拒绝` };
+      }
+    } catch (e) {
+      console.warn(`[assertPayoutShardCoherence] 步骤(c) recompile 本身跑不了(环境问题, 非数据判定, marketId=${marketId}): ${e.message} — inconclusive, 跳过(c), 继续(d)`);
     }
   }
   // v2_zk: compilePayoutShardV2Redeem 只能重编译 genesis-shape(pre-attest), attest 后状态不适用 — 见 P2 §1

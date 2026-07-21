@@ -44,15 +44,41 @@ const { randomUUID } = await import('node:crypto');
 // (this machine included, see memory reference-silverscript-pinned-build-not-on-every-node). This test
 // only exercises the Tier1/Tier2 chain-comparison logic in consolidateAndBuildPsState, which needs SOME
 // deterministic bytes to hash into a P2SH address (via _p2shCache/kaspa-wasm ScriptBuilder, pure crypto,
-// no opcode-validity requirement) — it does not need a semantically valid PayoutShard script. Using an
-// arbitrary deterministic buffer keeps this test runnable on any node regardless of silverc availability.
-function fakeRedeemHex(seed) { return Buffer.from(`fakeredeem-${seed}-${'00'.repeat(20)}`).toString('hex'); }
+// no opcode-validity requirement) — it does not need a semantically valid PayoutShard script.
+//
+// 🔴 2026-07-21 (P2 批2 §1, K-18 §3.3 coherence gate 接线): consolidateAndBuildPsState 现在开头就跑
+// assertPayoutShardCoherence(tier='full') blocking gate(见 bshard-settle-daemon.mjs 顶部新增段落)——
+// 之前这里用的 arbitrary short buffer(`fakeredeem-...`)完全不满足 probeStructuralSignature 的字节结构
+// 要求(会在到达本文件想测的 Tier1/Tier2 逻辑之前就被新 gate 拦在步骤(a)/(b)), 必须换成结构上真实符合
+// V1 offset 表(P2 §1: marker@1=0x08/consolidatedPool@2/closed@11/payoutRoot@20/predicateCommit@518/
+// poolMerkleRoot@1002)的手搓字节——同 bshard-payout-family-coherence.test.mjs 的 buildFakeV1RedeemHex
+// 同一手法, 不是重新发明。步骤(c) recompile 在本机(无 silverc)会被 assertPayoutShardCoherence 自身的
+// inconclusive 降级捕获(非 fatal), 不需要真实 silverc 编译产物。
+function fakeRedeemHex(seed, { consolidatedPool = 20000000n, closed = 0, poolMerkleRoot, predicateCommit } = {}) {
+  const buf = Buffer.alloc(1040, 0x33);
+  buf[1] = 0x08;   // 真正的 PUSH8 marker(_PS_STATE_START=1)
+  buf.writeBigInt64LE(BigInt(consolidatedPool), 2);
+  buf.writeBigInt64LE(BigInt(closed), 11);
+  Buffer.from('00'.repeat(32), 'hex').copy(buf, 20);   // payoutRoot(占位, 本测试不断言这个字段)
+  Buffer.from(String(predicateCommit || '').replace(/^0x/, ''), 'hex').copy(buf, 518);
+  Buffer.from(String(poolMerkleRoot || '').replace(/^0x/, ''), 'hex').copy(buf, 1002);
+  return buf.toString('hex');
+}
 
 let fails = 0;
 const ok = (cond, label) => { if (cond) console.log(`  ✅ ${label}`); else { console.error(`  ❌ ${label}`); fails++; } };
 
 sqlite.pragma('foreign_keys = OFF');
 await ensureReady();   // loads kaspa-wasm (needed by _p2shCache inside consolidateAndBuildPsState) — no RPC yet
+const _kaspaWasm = await import('kaspa-wasm');
+// 同 bshard-settle-daemon.mjs 内部 `_p2shCache` 一模一样的推导(NETWORK 默认 testnet-12, 同 env 惯例)——
+// 复刻而不是导出复用, 因为 `_p2shCache` 是那个文件的模块私有函数, 没有导出接口(同该文件既有惯例)。
+function realP2sh(redeemHex) {
+  return _kaspaWasm.addressFromScriptPublicKey(
+    _kaspaWasm.ScriptBuilder.fromScript(new Uint8Array(Buffer.from(redeemHex, 'hex'))).createPayToScriptHashScript(),
+    process.env.KASPA_NETWORK || 'testnet-12',
+  ).toString();
+}
 
 function seedMarket(marketId, { poolMerkleRoot, predicateCommit, consolidatedPoolSeed, psOutpoint }) {
   sqlite.prepare(`INSERT INTO pool_markets (id, maker_relay_id, spine_p2sh, market_metadata_hash, deadline, protocol_version, protocol_status, created_at, updated_at)
@@ -61,9 +87,10 @@ function seedMarket(marketId, { poolMerkleRoot, predicateCommit, consolidatedPoo
   const s0 = `${marketId}-s0`, s1 = `${marketId}-s1`;
   sqlite.prepare(`INSERT INTO market_shards (logical_market_id, shard_index, shard_market_id, shard_p2sh, status, created_at, current_leaf_state) VALUES (?, 0, ?, 'kaspatest:s0', 'settled', datetime('now'), ?)`).run(marketId, s0, JSON.stringify({ pool_value: 0 }));
   sqlite.prepare(`INSERT INTO market_shards (logical_market_id, shard_index, shard_market_id, shard_p2sh, status, created_at, current_leaf_state) VALUES (?, 1, ?, 'kaspatest:s1', 'settled', datetime('now'), ?)`).run(marketId, s1, JSON.stringify({ pool_value: 0 }));
-  const redeemHex = fakeRedeemHex(marketId);
-  sqlite.prepare(`INSERT INTO payout_shards (logical_market_id, payout_cov_id, payout_ps_addr, payout_ps_outpoint, payout_redeem_hex, pool_merkle_root, predicate_commit, created_at)
-    VALUES (?, 'covtest', 'kaspatest:psaddr', ?, ?, ?, ?, strftime('%s','now'))`).run(marketId, psOutpoint, redeemHex, poolMerkleRoot, predicateCommit);
+  const redeemHex = fakeRedeemHex(marketId, { consolidatedPool: BigInt(consolidatedPoolSeed), poolMerkleRoot, predicateCommit });
+  const psAddr = realP2sh(redeemHex);   // K-18 §3.3(d): payout_ps_addr 必须真的是 redeemHex 的 p2sh 推导值, 否则新 gate 会在(d)拦下(不是随手的占位字符串了)
+  sqlite.prepare(`INSERT INTO payout_shards (logical_market_id, payout_cov_id, payout_ps_addr, payout_ps_outpoint, payout_redeem_hex, pool_merkle_root, predicate_commit, created_at, covenant_family)
+    VALUES (?, 'covtest', ?, ?, ?, ?, ?, strftime('%s','now'), 'v1_committee')`).run(marketId, psAddr, psOutpoint, redeemHex, poolMerkleRoot, predicateCommit);
   return { redeemHex };
 }
 

@@ -230,8 +230,22 @@ export async function buildProposeCloseRequestV2(marketId, judged) {
 
   const market = sqlite.prepare('SELECT id, deadline, deadline_daa, maker_pk, broker_pk, broker_fee_pct, pool_merkle_root, resolution_rule_spec, market_metadata_hash FROM pool_markets WHERE id = ?').get(marketId);
   if (!market) throw new Error(`buildProposeCloseRequestV2: market ${marketId} not found`);
-  let ps = sqlite.prepare('SELECT payout_redeem_hex, payout_ps_outpoint, payout_cov_id, pool_merkle_root, predicate_commit FROM payout_shards WHERE logical_market_id = ?').get(marketId);
+  let ps = sqlite.prepare('SELECT logical_market_id, payout_redeem_hex, payout_ps_outpoint, payout_ps_addr, payout_cov_id, pool_merkle_root, predicate_commit, covenant_family FROM payout_shards WHERE logical_market_id = ?').get(marketId);
   if (!ps) throw new Error(`buildProposeCloseRequestV2: no payout_shards row for ${marketId}`);
+
+  // K-18 §3.3 coherence gate(P2 批2 §1, docs/2026-07-21-p2-batch2-coherence-gate-wiring-design.md): close-
+  // transport V2 入口, 低频花费前, blocking(tier=full)——NO TX NO STATE CHANGE, gate FAIL 直接 throw, 在
+  // 任何 consolidate/签名请求发起之前挡下。
+  {
+    const { assertPayoutShardCoherence } = await import('./bshard-payout-family-coherence.mjs');
+    const kaspaForGate = await import('kaspa-wasm');
+    const gateNetwork = process.env.KASPA_NETWORK === 'mainnet' ? 'mainnet' : 'testnet-12';
+    const gateP2sh = (redeemHex) => kaspaForGate.addressFromScriptPublicKey(kaspaForGate.ScriptBuilder.fromScript(new Uint8Array(Buffer.from(redeemHex, 'hex'))).createPayToScriptHashScript(), gateNetwork).toString();
+    const gateResult = assertPayoutShardCoherence(ps, { p2sh: gateP2sh, tier: 'full' });
+    if (!gateResult.ok) {
+      throw new Error(`buildProposeCloseRequestV2: K-18 §3.3 coherence gate FAIL(blocking, market=${marketId}, step=${gateResult.failedStep}): ${gateResult.reason} — 拒绝 close-transport V2, 零花费`);
+    }
+  }
 
   const loadBettorsFlat = () => {
     const shards = sqlite.prepare('SELECT shard_market_id FROM market_shards WHERE logical_market_id = ? ORDER BY shard_index ASC').all(marketId);

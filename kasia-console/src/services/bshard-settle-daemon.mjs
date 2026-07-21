@@ -17,6 +17,7 @@ import { sqlite } from '../db/client.js';
 import { getMarketBets } from '../lib/pool-bettor-sides-query.mjs';
 import { computeSettlePlan, settleMarketLive, deriveResumePlanFromEvidence } from './bshard-auto-settler.mjs';
 import { consolidateAllShards, autoDetectConsolidateResume, verifyRedeemMatchesChainObservedOutput } from '../lib/pool-shard-settle.mjs';
+import { assertPayoutShardCoherence } from '../lib/bshard-payout-family-coherence.mjs';   // K-18 §3.3 gate, P2 批2 §1(低频花费前, blocking)
 import { _shard9PhantomExcludeFor } from './bshard-close-voter.js';
 import { compilePayoutShardRedeem } from '../lib/pool-shard-register.mjs';
 import { fetchEndBlockHashCanonical, recaptureSideLockDaaForMarket } from './pool-market-settler-v06.mjs';
@@ -161,6 +162,22 @@ async function endBlockHash(daa) { return (await fetchEndBlockHashCanonical(chai
 // 的 closed=0 redeem 起点", 只是之后一个走 close_attest 一个走 cancel_attest)。抽出自 _settleOneMarketAttempt
 // 原 inline 逻辑(J2 2026-07-04 抽取, 逻辑一字不动, 见 git blame 迁移前版本)。
 async function consolidateAndBuildPsState(marketId, ps, ctx) {
+  // K-18 §3.3 coherence gate(P2 批2 §1, docs/2026-07-21-p2-batch2-coherence-gate-wiring-design.md):
+  // 低频花费前入口, blocking(tier=full)——NO TX NO STATE CHANGE 铁律适用, gate FAIL 直接 throw, 不做任何
+  // consolidate/transfer。跟下面 Tier1/Tier2(verifyRedeemMatchesChainObservedOutput)增量不重叠:
+  // Tier1/Tier2 验的是"payout_redeem_hex 反推地址是否跟链上实际观测一致"(chain-truth), 本 gate 的
+  // (a)(b)(d) 三步验的是"covenant_family 是否已知 + 字节结构是否符合声明的家族 + payout_ps_addr 这个独立
+  // DB 列是否跟 redeem 自洽"(family/DB 自洽性, Tier1/Tier2 完全不检查这三项); (c) recompile 对 v1_committee
+  // 会跟下面已有的 non-blocking 校验(line ~305)有计算重叠, 但那条检查的是 consolidate 完成后【新解出的】
+  // psRedeemHex, 这里检查的是 consolidate 开始前的【原始】ps 行, 时序不同、目的不同(前者是"consolidate 出的
+  // 结果值得信"事后校验, 这里是"要不要开始这次 consolidate 操作"事前门禁), 不是重复劳动。
+  {
+    const gateResult = assertPayoutShardCoherence(ps, { p2sh: _p2shCache, tier: 'full' });
+    if (!gateResult.ok) {
+      throw new Error(`consolidateAndBuildPsState: K-18 §3.3 coherence gate FAIL(blocking, market=${marketId}, step=${gateResult.failedStep}): ${gateResult.reason} — 拒绝 consolidate, 零花费`);
+    }
+  }
+
   const shards = sqlite.prepare('SELECT shard_index, status FROM market_shards WHERE logical_market_id = ?').all(marketId);
   const needConsolidate = shards.some(s => s.status === 'sealed' || s.status === 'open');
   const market = sqlite.prepare('SELECT * FROM pool_markets WHERE id = ?').get(marketId);

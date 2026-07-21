@@ -222,6 +222,51 @@ if (HAVE_SILVERC) {
   skip('V1 full-tier recompile(silverc 不在本机, 见文件头环境说明)');
 }
 
+// ── P2 批2 §1: ensurePayoutShard/V2 早返回分支 non-blocking gate 接线(零 silverc 依赖, tier=cheap
+// 从不调 recompile——这条覆盖的正是"每笔下注必经"的高频路径, 不受本机无 silverc 限制) ──────────
+console.log(`\n[test] ensurePayoutShard 早返回分支 — coherent 行 → 不写 ps_coherence_gate_fail 事件, 返回值不变(向后兼容):`);
+{
+  const row = seedRow({ covenant_family: 'v1_committee' });
+  const before = sqlite.prepare(`SELECT COUNT(*) AS n FROM events WHERE event_type='ps_coherence_gate_fail'`).get().n;
+  const r = await ensurePayoutShard({ db: sqlite, rc: async () => ({}), transfer: async () => 'x', landed: async () => true, p2sh: fakeP2sh, logicalMarketId: row.logical_market_id, poolMerkleRoot: PMR, predicateCommit: PC, relayAddr: 'kaspatest:relay' });
+  const after = sqlite.prepare(`SELECT COUNT(*) AS n FROM events WHERE event_type='ps_coherence_gate_fail'`).get().n;
+  ok(after === before, `coherent existing row → 早返回时零新增 ps_coherence_gate_fail 事件 (before=${before} after=${after})`);
+  ok(r.payoutCovId === row.payout_cov_id && r.psAddr === row.payout_ps_addr, `返回值仍是 existing 缓存值, 未被 gate 篡改 (got ${sj(r)})`);
+}
+console.log(`[test] ensurePayoutShard 早返回分支 — incoherent 行(p2sh 不符, 模拟误标/字节漂移)→ non-blocking: 写 ps_coherence_gate_fail 事件 但仍正常返回缓存值(不 throw, 不拦下注):`);
+{
+  const row = seedRow({ covenant_family: 'v1_committee', payout_ps_addr: 'kaspatest:stale-mismatched-address' });
+  const before = sqlite.prepare(`SELECT COUNT(*) AS n FROM events WHERE event_type='ps_coherence_gate_fail'`).get().n;
+  const r = await ensurePayoutShard({ db: sqlite, rc: async () => ({}), transfer: async () => 'x', landed: async () => true, p2sh: fakeP2sh, logicalMarketId: row.logical_market_id, poolMerkleRoot: PMR, predicateCommit: PC, relayAddr: 'kaspatest:relay' });
+  const after = sqlite.prepare(`SELECT COUNT(*) AS n FROM events WHERE event_type='ps_coherence_gate_fail'`).get().n;
+  ok(after === before + 1, `incoherent existing row → 早返回时写入 1 条 ps_coherence_gate_fail 事件 (before=${before} after=${after})`);
+  ok(r.psAddr === row.payout_ps_addr, `【关键】non-blocking: 即便 gate FAIL, 仍返回 existing 缓存值(不 throw, 不拦这个市场的下注) (got psAddr=${r.psAddr})`);
+  const evt = sqlite.prepare(`SELECT summary FROM events WHERE event_type='ps_coherence_gate_fail' ORDER BY created_at DESC LIMIT 1`).get();
+  ok(/failedStep|step=d/.test(evt.summary) || /步骤.*d|failedStep.*d/.test(evt.summary), `事件 summary 含可追溯的 failedStep 信息 (got: ${evt.summary})`);
+}
+console.log(`[test] ensurePayoutShardV2 早返回分支 — 同款 non-blocking 行为(coherent → 无事件, incoherent → 有事件+仍返回):`);
+{
+  const redeemHex = buildFakeV2RedeemHex();
+  const rowOk = seedRow({ covenant_family: 'v2_zk', payout_redeem_hex: redeemHex, payout_ps_addr: fakeP2sh(redeemHex) });
+  const beforeOk = sqlite.prepare(`SELECT COUNT(*) AS n FROM events WHERE event_type='ps_coherence_gate_fail'`).get().n;
+  await ensurePayoutShardV2({ db: sqlite, rc: async () => ({}), transfer: async () => 'x', landed: async () => true, p2sh: fakeP2sh, logicalMarketId: rowOk.logical_market_id, poolMerkleRoot: PMR, predicateCommit: PC, closeZkTmplAnchor: 'dd'.repeat(32), relayAddr: 'kaspatest:relay' });
+  const afterOk = sqlite.prepare(`SELECT COUNT(*) AS n FROM events WHERE event_type='ps_coherence_gate_fail'`).get().n;
+  ok(afterOk === beforeOk, `V2 coherent existing row → 零新增事件 (before=${beforeOk} after=${afterOk})`);
+
+  const rowBad = seedRow({ covenant_family: 'v2_zk', payout_redeem_hex: redeemHex, payout_ps_addr: 'kaspatest:another-stale-addr' });
+  const beforeBad = sqlite.prepare(`SELECT COUNT(*) AS n FROM events WHERE event_type='ps_coherence_gate_fail'`).get().n;
+  const rBad = await ensurePayoutShardV2({ db: sqlite, rc: async () => ({}), transfer: async () => 'x', landed: async () => true, p2sh: fakeP2sh, logicalMarketId: rowBad.logical_market_id, poolMerkleRoot: PMR, predicateCommit: PC, closeZkTmplAnchor: 'dd'.repeat(32), relayAddr: 'kaspatest:relay' });
+  const afterBad = sqlite.prepare(`SELECT COUNT(*) AS n FROM events WHERE event_type='ps_coherence_gate_fail'`).get().n;
+  ok(afterBad === beforeBad + 1, `V2 incoherent existing row → 1 条新事件 (before=${beforeBad} after=${afterBad})`);
+  ok(rBad.psAddr === rowBad.payout_ps_addr, `V2 non-blocking: 仍返回缓存值, 不 throw (got ${rBad.psAddr})`);
+}
+console.log(`[test] ensurePayoutShard 早返回分支 — p2sh 未传(参数缺失, 契约错误)→ non-blocking 自身也不能崩高频读路径, 早返回值照常拿到:`);
+{
+  const row = seedRow({ covenant_family: 'v1_committee' });
+  const r = await ensurePayoutShard({ db: sqlite, rc: async () => ({}), transfer: async () => 'x', landed: async () => true, p2sh: undefined, logicalMarketId: row.logical_market_id, poolMerkleRoot: PMR, predicateCommit: PC, relayAddr: 'kaspatest:relay' });
+  ok(r.psAddr === row.payout_ps_addr, `p2sh 缺失时(assertPayoutShardCoherence 内部 throw)_checkCoherenceNonBlocking 捕获异常, 早返回路径本身不受影响 (got ${sj(r)})`);
+}
+
 // ── classifyPayoutShardFamily (backfill-only, 允许 recompile 子进程成本) ──────────────────────
 console.log(`\n[test] classifyPayoutShardFamily — 结构签名都对不上的行 → 'unknown', 不猜(两次(V1/V2)都不过是设计内允许的结果, P2 §5 风险②已预期):`);
 {
