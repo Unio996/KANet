@@ -447,3 +447,11 @@ Owner 元问题:写进文档的铁律(CLAUDE.md 接位 SOP 第5条"设计前查�
 **P1(evidence preserve-merge)正式完成**: 落码 `ea355c36`+`7c5dbe83`(昨晚,NWT better-sqlite3 实跑复测 GREEN)→ 随 07:37Z 重启装载 → **今晨 J2 在装载后活代码上复跑 `evidence_preserve_merge_regression.test.mjs` PASS(1/1, 39ms)**,并核实 PID 16188 自装载后未重启、`67490897`→当前 HEAD 仅 docs 提交 settle 代码零漂移(非信任装载前旧结果)。#28 路线 P0/P1 两阶段均闭。
 
 **P2 第一批开工(今日主战场)**: J1 主(已认领)+J2 协——全状态推广 re-derive+真相源层模块化(#28 §3/§5),**K-18 残项三件打包并入第一批**(§3.1 covenant_family 不可变列+backfill / pruned 组 +202 字段判读 / A0 六条不符 §3.3(d)),J1 原话"分开做才是真正的碎片化"。流程: J1 设计稿→NWT 红队(已就位,默认试图打穿)→GREEN 落码;涉钱路按 D-011 内部审核链走完 Bettor 拍板。并行: #30(J1 卫生项)/#25 维持等 Owner-ack/DATABASE.md:632 经核实昨晚 `b070cf5f` 已订正无需重做(KANet-UI 查资产避免重造)。四员回执全齐。
+
+## 🔀 P2 第一批 §3.5 金额源三态裁定(2026-07-21 08:4xZ · 对抗收敛全程 ~10 分钟)
+
+**过程(交叉→打穿→收敛,记方法论)**: J1 设计稿 v0.2(`02d6813d`)→ Bettor 方向审 GREEN-with-3-notes(#uegipr,note① spent-UTXO 假阴性前科)→ J1 v0.3(`0e4a9a9c`)按 note① 切金额源到 `kaspa_tx_log.outputs_json` 与 NWT 对 v0.2 的 GREEN-with-2-MUST-FIX **在飞行中交叉**(NWT 裁的是"维持 getUtxos")→ Bettor 点名冲突要求单一裁定 → 过程中三笔自纠: J2 更正"line423 三态先例"引用(实为布尔塌缩,NWT 实读 `pool-shard-settle.mjs:352-363` 打穿)、J1 承认对既有函数能力描述过度延伸、Bettor 撤回一半"vacuous 推论"(漏了 landed 判定与金额读取间的 TOCTOU 窗口)。**"已知 txid 走直连 RPC/本地表 miss=inconclusive"确认为 7/8 口头共识从未落码,§3.5 是首次代码化。**
+
+**最终裁定(NWT,全员认可)**: v0.4 三态——`kaspa_tx_log` 命中+金额符=通过 / 命中+不符=真 mismatch 硬拒**不 fallback**(防"两个源挑顺眼的")/ 查无 txid=inconclusive 兜底 `ctx.getUtxos` 现查。同时盖住 spent 竞态、indexer 永久漏块、TOCTOU 窗口三个失效面,无互相掩盖。NWT diff 复核重点:查无 txid/JSON.parse 失败/outputs 无该 index 三种非正常命中必须全归 inconclusive 分支。MUST-FIX①(§1 offset 表 hex dump 实测机制化进 DoD)不变;第 4 回归 case(spent-during-retry 自愈断言)+alert 良性竞态文案照加。
+
+**立卡(非阻塞)**: `verifyRedeemMatchesChainObservedOutput`(P0 已装载)同款 indexer-miss 兜底——独立小卡不混本批,J2 认领域内(settler L3),排 P2 后续批。
