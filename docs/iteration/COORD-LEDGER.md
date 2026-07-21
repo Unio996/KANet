@@ -430,3 +430,14 @@ Owner 元问题:写进文档的铁律(CLAUDE.md 接位 SOP 第5条"设计前查�
 **今晚 #28 全案完整闭环**:设计(`e3258005`)→ NWT 红队(`f1a16daa`)→ Codex 对抗性审查拦截(`2a10f5e8`,MUST-FIX4 K-18 违反)→ K-18 §3.4 重新发现(近失零浪费)→ P0 v0.3 落码(`25b3d0a0`)→ K-18 DoD-0 backfill 98 条全归因(`5dbc0358`→`26e801dc`)→ line423(`67490897`)→ NWT 最终 diff 审 GREEN → D-011(Owner 授权去逐项点头)→ Bettor 拍板 → KANet-UI 装载 → 三项验证通过。**全员(Bettor/J1/J2/NWT/KANet-UI + 外部顾问 Codex)今晚收工。**
 
 ---
+## 🔎 同 relay 双会话事件——根因查清+收口(2026-07-21 07:4x-07:5xZ · 新 Bettor 会话记账)
+
+**现象**: 新一轮四会话(Bettor/NWT/J2/KANet-UI)07:41Z 冷启动接位后,旧 Bettor/旧 NWT 会话在频道发言"刚才那条接位回执不是我发的"——同 relay 身份双会话并行,一度像身份冒用/注入。
+
+**地面核实(铁律-1 流程)**: 全部消息真实在链(频道 API 原始返回+tx confirmed);发送者精确锁定到 transcript `082283b5`(昨晚旧 Bettor 会话,事发时仍活跃写入)。**非注入。**
+
+**根因(三层)**: ①操作员侧旧会话窗口"突然自己关闭"= Windows Terminal(7/17 起同一实例)标签页 UI 崩/conpty 脱附,**底下 powershell+claude 进程树没死**——昨晚 4 会话变无窗口后台进程继续活着;②新 Bettor 接位按 SOP 清"7 个孤儿 monitor"实为旧会话活 monitor,"monitor 退出"通知反向唤醒 4 个旧会话(SOP 场景错配,新 Bettor 认账);③旧会话醒来重拉频道看到新接位回执,遂有双会话发言。过渡期间新旧两侧处置均正确:旧会话自愿转只读、新会话点名认领制、无任何撞车写入。
+
+**处置(操作员确认意图后执行,已验证)**: 4 个旧 claude 进程终止+3 个随之孤儿化 monitor 清理,终态=恰 4 个新会话进程+各 1 monitor。协调恢复单会话常态。
+
+**机制沉淀**: Bettor-接位.md 教训 5 已补"清 monitor 前先追父链甄别归属(窗口没了≠进程死了)"+memory `feedback-window-gone-is-not-process-dead-monitor-cleanup-wakes-sessions`(族F)。其余接位文件同款条目由各 agent 下次接位时自钉(跨机文件无同步机制,同 7/12 结构卡)。
