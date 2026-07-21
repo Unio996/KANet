@@ -479,3 +479,13 @@ Owner 元问题:写进文档的铁律(CLAUDE.md 接位 SOP 第5条"设计前查�
 **DoD-8 真金 E2E(11:0x-11:28Z, 三次清洁失败换三个真发现后 PASS)**: 第二笔 1KAS 真注(lockTx `68092272…`)命中 existing-row 分支, non-blocking gate 首次吃真流量+观察者面按预期。过程挖出并全部闭环: ①**gxrr4 污染事故**——journey case 的 `settle_journey_market_synthetic` 步骤(runner.mjs:1161-1181)对真实生产市场无条件写 completed+假 evidence+幽灵 pool_markets 行(共 4 处残留), 两轮清点+指纹全库扫描(假 txid/synthfad5ff/假 spine 三指纹)后全清, 市场回归 pending_bettors 生命周期并成功承接第二笔=修复活体验收; 我们两笔真注(11:04/11:28 各 1KAS)均为合法在册。责任三方各认: Bettor(批工具未读全步骤)/J2(修复清单漏第 4 处)/NWT(清单审未上溯"action 共写几张表")。②**ozzeu 诞生机制活体复现**——"DB completed+假 evidence+链上未关"今日目睹产生全程, 调查方向已补进 J2 的 7/13 terminal-status sweep 卡。③FINDING-2 commingled 守卫被证实实战有效(拦下幽灵行造成的 spine 共享), 守卫无缺口(时序核清)。**立卡**: synthetic-settle 类 action 生产市场隔离 clamp(J2, NWT 审)/tg_place_bet 搜索排序挤出目标市场观察项/seeder 盘 deadline 远超实际赛事定性(J2 一句话待答)。
 
 **P2 全案今日总账(Owner"一鼓作气+充分测试"直令兑现)**: P1 关卡→批1(设计 v0.2-v0.5/装载/backfill 精确吻合)→批2(gate 接线/classifier 拆分/性能实测/装载)→DoD-8 真金双路径。全日红队+实测在装载前抓获真问题**七条**(marker off-by-one/backfill 无门禁/catch 吞数据错/跨机 fixture/spawn 拦截 vacuous/gate 单笔 vacuous 覆盖/synthetic 污染残留), 零带病上线。
+
+## ✅ Owner 三批复落地 + RpcClient 二次劣化响应(2026-07-21 15:2x-15:47Z)
+
+**Owner 15:26 批复**: ①#25 可以上 ②授权 push master ③KCC20 自理。
+
+**#25 tg-bot 去重修复上线**: revert-the-revert(`9b51f29d`,与原 974a24d5 byte-identical)→ NWT 补正式 diff 审 GREEN-with-1-note(hang 场景 wedge 风险→guardedInterval 超时预算小卡)→ 随 15:33 修复性重启 respawn 生效。**待办: 真实通知不重复的被动验证(今日内确认)。**
+
+**RpcClient 二次劣化(14:48-15:33, 44 分钟 tick 停摆)**: KANet-UI 巡检抓获(同 07:35 模式, 4 小时内二进=复发升级), 全员无异议 runbook 重启修复(~15:33), 四验全绿+44 分钟窗口零新增结算积压(4 条 6 月陈旧行无关)。**机制化响应四件全部当场闭环**: ①检测告警卡(`021d7827`, 复用 settle-failed-alert 三件套, 3 分钟窗≥5 次→边沿触发播频道, 自指风险/watchdog 自监控双核实, NWT GREEN)②kanet-start.sh 日志轮转(.prev 归档代替截断——本次停摆日志被截断丢失的教训直接机制化)③RPC 调用防护对称性加固(J2 `4b4eb24c`, getBlockDagInfo 补 12s withTimeout+自愈, NWT GREEN)④根因卡(hang 假设有代码证据但历史日志已失, 挂"待下次复发数据", 检测卡会自动留证)。①③随下次自然重启窗装载。
+
+**master 同步(Owner 授权)**: 陈旧本地指针 ca7e0a66 三方核实零独有内容后弃→merge deploy(`2d48f264..5daad1ad`, 零冲突, 527 文件)→对外仓库自 6/24 以来首次追平, 配合今晨对外链接三件套可用。
