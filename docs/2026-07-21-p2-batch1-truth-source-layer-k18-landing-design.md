@@ -1,0 +1,161 @@
+# P2 第一批 — 真相源层模块化 + K-18 §3.1-§3.3 落地 + verifyClaimLanded 金额校验(J1 主稿,J2 协)
+
+> **Status**: CURRENT(v0.2 · 2026-07-21 · J1 draft,§3.5 折入 J2 发现+草案(#ue9cp6.1 Bettor 裁定)· 待 NWT 红队,GREEN 后落码)
+> **依据**: `docs/2026-07-21-28-state-sync-architecture-full-design.md` §5 P2 派工("全状态推广 re-derive+校验纪律 + 真相源层模块化,§3 完整实现,J1 主+J2 协,分批走每批独立 NWT 审") + Bettor 今日派工(#udvo4q,并入 K-18 残项)+ Owner 直令(今日一鼓作气+充分测试,D-011 内部审核链走完即可装载)。
+> **前置**: K-18 §3.1-§3.4 全案(`docs/2026-07-18-payoutshard-family-coherence-gate-design.md` v1.1,**已 NWT GREEN-with-3-MUST-FIX 且 3 条全折入**)——§3.4(recompile 降级校验)已在昨晚 P0 v0.3(`25b3d0a0`)+ line423(`67490897`)落地。**本卡 = 落地 K-18 剩余 §3.1(covenant_family 列)+ §3.2(zk_native 铸后不可变)+ §3.3(assertPayoutShardCoherence 四步门)**,K-18 的架构设计本身不重新评审(已经 NWT 审过),本卡是**实现落地计划 + 用它解决两条昨晚遗留的开放线索**。
+
+---
+
+## 0. 本批要解决的两条遗留线索(不是新问题,是本批的验收数据)
+
+1. **`pruned_expired_waived`(15 行)组的 +202 字节签名**:昨晚 backfill dry-run 测出这组 `payout_redeem_hex` 比正常 V1 `closed:0` 模板系统性多 202 字节(J2 四值探针,15/15 精确一致),跟 8pson/verifying 组的 -2614 字节签名(V2/ZK 家族误判)不是同一类。J2 判断"疑似另一种 closed 状态或额外字段",但没有 `.sil` 字节布局知识精确定位,交给本批用 §3.3(b) 结构探针查清楚。
+2. **A0(stored redeem 的 p2sh)vs `payout_ps_addr` 6/8 不符**(verifying 组旁证发现):NWT 已判定"归入 K-18 §3.3(d) 本来就该管的范围,不用另开线"——`assertPayoutShardCoherence` 的 (d) 步骤(`p2sh(stored) == payout_ps_addr`)正是设计来抓这类问题的,本批实现这一步会自然给出这 6 条的正式判定。
+
+这两条不是本批"顺便查"的外快,是**本批 backfill 迁移步骤本身就必须产出的数据**(K-18 §3.1 backfill 探针本来就要对每行判 family + 结构合法性)——用真实迁移跑一遍生产数据,自动就把这两条悬案解决了,不需要额外发明诊断动作。
+
+---
+
+## 1. 字节布局参考(2026-07-21 从活代码抠出,非猜测,供本批设计使用)
+
+V1 PayoutShard state 区(`bshard-close-enforce.mjs:69-75` 注释 + `_splicePayoutCloseRedeem`/`_readPsConsolidatedPool` 实现逐字核对):
+
+| 字段 | offset(从 `_PS_STATE_START=1` 起算) | 编码 | 字节数 |
+|---|---|---|---|
+| `consolidated_pool` | +1 | PUSH8 + i64LE | 9 |
+| `closed` | +10 | PUSH8 + i64LE | 9 |
+| `payoutRoot` | +19 | PUSH32 + 32B | 33 |
+| `w0..w16`(17 个 nullifier word) | +52 起 | 各 PUSH8 + i64LE | 17×9=153 |
+
+State 区总计 = 9+9+33+153 = **204 字节**(从 `_PS_STATE_START=1` 起,即整个 redeem 里 offset 1~205 是 state 区,offset 0 是 state_start 的某个前导字节)。State 区**之前**是 ctor 常量区(`poolMerkleRoot`/`predicateCommit` 各 32B+PUSH 前缀 ≈ 33B),这部分在 V1 里位于 state 区之前还是之后需要读 `PayoutShard.sil` 源码 ctor 顺序核实(`compilePayoutShardRedeem` 的 ctor 数组顺序是 `[poolMerkleRoot, predicateCommit, consolidatedPool, closed, payoutRoot, ...W17]`,推断常量区在 state 区前,但 push 后的实际字节序要以 silverc 编译产物为准,不能只信 ctor 参数顺序=字节顺序——本批结构探针会实测坐实,不预先断言)。
+
+**这个表是本批 §3.3(b) 结构探针 + 202 字节归因的直接工具**——不再是"猜可能是哪个字段",是"逐字段核对 offset 处的字节跟这个表对不对得上"。
+
+---
+
+## 2. 范围(本批 IN / 后续批 OUT)
+
+**IN(本批)**:
+- K-18 §3.1: `payout_shards.covenant_family` 不可变列(schema + 写入点 + backfill)。
+- K-18 §3.2: `zk_native` 铸后不可变(fail-closed 拒绝已铸市场改标记)。
+- K-18 §3.3: `assertPayoutShardCoherence(psRow)` 四步一致性门(family 声明 + 结构探针 + recompile byte-equality + 地址匹配),调用点分级接入(高频省三步/低频全四步,K-18 原设计已定)。
+- 用 §3.1 backfill + §3.3(b) 结构探针,**产出 pruned_expired_waived(15 行)+ verifying 组 A0 不符(6 行)的正式归因**(数据+判定,不是猜测)。
+- lint 规则 `R-PS-FAMILY-DISPATCH`(K-18 §5 DoD-2 原定)。
+
+**OUT(明确排除,留后续批,不在本批隐式夹带)**:
+- P2 更广义的"全状态字段推广 re-derive"(K-18 只管 covenant family/redeem 一致性;`win_direction`/`payoutRoot` 已经有各自的 re-derive+验证模式在跑,`payout_shards` 之外的其它表字段的类似推广是后续批,本批先把 K-18 这个已经设计完、只差落地的模块做完,不铺更大摊子稀释审查质量)。
+- `covenant_family` 列建好后,把它接进**日常高频调用路径**(`registerBettorOnShard` 每笔下注)的完整性能测试/压测——本批只做正确性验收,性能验收(K-18 §3.3 调用点①每笔下注要求"零子进程 spawn"的实测确认)排验收清单但如果时间不够可以在装载后单独一批补,不阻塞本批正确性主线。
+- line423 的 `curRedeem` splice-not-recompile 彻底根治(P0 §4 已标注的独立待办,不在本批范围)。
+
+---
+
+## 3. 实现计划
+
+### 3.1 `payout_shards.covenant_family` 列(migrate v189)
+
+```sql
+ALTER TABLE payout_shards ADD COLUMN covenant_family TEXT NOT NULL DEFAULT 'unknown';
+```
+
+写入点(K-18 §3.1 原设计,谁编译谁 declare):
+- `ensurePayoutShard`(`pool-shard-register.mjs:121` INSERT)→ `'v1_committee'`。
+- `ensurePayoutShardV2`(`:257` 附近 INSERT)→ `'v2_zk'`。
+
+Backfill(migrate v189 内一次性,复用昨晚已交付的探针基础设施):
+- 对每个既有 `payout_shards` 行跑结构探针(§3.3(b) 同一函数)——**结构探针的判据不是"猜家族",是实测字节:先按 V1 state 布局(本卡 §1 表)解出 `consolidated_pool`/`closed`,recompile 出 V1 candidate,byte-compare;不过则按 V2 布局(`bshard-close-enforce.mjs` 现有 `_PSV2_*` offset 常量)解一遍,recompile 出 V2 candidate,再 byte-compare。两次都不过 → `'unknown'`,不猜。**
+- **backfill dry-run 报告硬前置(K-18 §5 DoD-0,Owner"充分测试"直令下不可省)**:migration 落码前先跑只读版本,产出总行数/family 分布/unknown 行是否对应在途盘的报告,人工过一遍确认无在途盘被误伤才能真正执行 migration——避免"backfill 本身制造一批盘静默卡住"(K-18 原文教训)。
+
+**§0 两条遗留线索在这一步自然产出答案**:backfill 探针跑到 `pruned_expired_waived`(15 行)和 verifying 组 A0 不符(6 行)时,会记录它们具体在哪个 offset 解码失败/字节不符,而不是像昨晚那样只知道"总长度差 202/不知道差在哪"——这是本批设计比昨晚临时诊断脚本更进一步的地方:昨晚是事后调查,这次是把同一套逻辑做成生产级、可重跑、结论可追溯的迁移工具。
+
+### 3.2 `zk_native` 铸后不可变
+
+判定点:该 logical market 的 `payout_shards` 行已存在(genesis 已 mint)后,任何写 `resolution_rule_spec` 的路径若改变 `zk_native` 值 → 拒绝(API 400 / 内部 throw),不静默纠正。覆盖点:`bettor.js:1459` + `pool.js` spec 写点(落码时全量 grep 收口,K-18 §3.2 已列出大致位置,实现时重新 grep 一遍不假设旧文档行号仍准——今晚已经吃过一次"文档行号漂移导致排查扑空"的亏,MUST-FIX②那次)。
+
+### 3.3 `assertPayoutShardCoherence(psRow)`
+
+新函数,单源供 console+daemon,K-18 §3.3 原设计四步:
+- (a) `covenant_family` ∈ {v1_committee, v2_zk},`'unknown'` 直接 FAIL。
+- (b) 结构探针(本卡 §1 表 + 对应 V2 offset 常量),探针结果必须 == declared 家族。
+- (c) recompile byte-equality(按声明家族分派 `compilePayoutShardRedeem`/`compilePayoutShardV2Redeem`)——**这一步现在有了明确的 K-18 §3.4 定位:仅作校验,不作为任何调用点的花费权威来源**(呼应昨晚 Codex MUST-FIX4 教训,本批从设计阶段就把这条焊死,不是落码后才发现)。
+- (d) `p2sh(stored) == payout_ps_addr`——**直接解决 verifying 组 6/8 不符的问题**,不用另外写诊断代码。
+
+调用点分级(K-18 原设计,NWT MUST-FIX③ 已折入):
+- 高频(`ensurePayoutShard`/`V2` 早返回分支,每笔下注):只跑 (a)(b)(d) 三步,零子进程。
+- 低频(`consolidateAndBuildPsState` 使用前、close-transport V2 入口):完整四步含 (c) recompile。
+
+### 3.4 lint `R-PS-FAMILY-DISPATCH`
+
+`compilePayoutShardRedeem|compilePayoutShardV2Redeem` 调用点必须在 coherence-gate 保护内(白名单机制同既有 `R-MANIFEST-*` 系,`scripts/lint-kanet.mjs` 已有可复用的实现模式)。
+
+### 3.5 `verifyClaimLanded` 金额校验(J2 发现,Bettor #ue9cp6.1 裁定折入本批;#28 全案 §6.5 DoD 明文项,P0 批漏了、本批还账)
+
+**问题(J2 坐实,`bshard-auto-settler.mjs:639-651`)**:`verifyClaimLanded` 只判 `r?.landed`,不比对金额——claim tx 落地但金额不对(比如 witness/redeem 某处编码错误导致实际打款额跟 `claimData` 里的期望值不一致)会被误判"实正到账",跟 `verifyClaimLanded` 的姊妹函数 `verifyClosedLanded`(同文件 :609-635)形成明显不对称——**后者早就在做金额校验**(:614-623:`landed` 通过后额外调 `ctx.getUtxos(expectedAddr)`,`.some()` 精确比对 `String(amt) === String(consolidatedPool)` 才算数,注释原话"depth 只保证这笔 TX 够深不会被 reorg 退,不代表金额对;两个校验都过才真正判定 landed")。
+
+**实现方案(比 J2 原草案更小的改动面——直接照抄 `verifyClosedLanded` 自己已经在用的模式,不改 relay 层)**:J2 草案提议扩展 relay `checkUtxoLanded` 加第 5 参 `expectedAmount`、把 amount 从 relay 侧带出来。读码发现**不需要动 relay**——`verifyClosedLanded` 从没让 relay 带出金额,是 console 侧 `landed` 通过后自己再单独调一次 `ctx.getUtxos(expectedAddr)` 查金额,`verifyClaimLanded` 完全可以照搬同一模式,零 relay 改动、零跨服务接口变更:
+
+```js
+async function verifyClaimLanded(ctx, winnerAddr, claimTx, expectedAmount = null) {
+  for (let attempt = 0; attempt < 20; attempt++) {
+    try {
+      const r = await ctx.relayPost(ctx.feeRelay.id, { type: 'check_utxo_landed', address: winnerAddr, txid: claimTx, minDepth: REORG_SAFE_MIN_DEPTH });
+      if (r?.landed) {
+        if (expectedAmount == null) return true;   // 向后兼容: 不传 = 老行为,零改变(NWT 复核点③)
+        const entries = await ctx.getUtxos(winnerAddr);
+        const ok = entries.some(e => {
+          const j = JSON.parse(JSON.stringify(e, (k, v) => typeof v === 'bigint' ? v.toString() : v));
+          const op = j.entry?.outpoint || j.outpoint;
+          const amt = j.entry?.amount ?? j.amount;
+          return op?.transactionId === claimTx && String(amt) === String(expectedAmount);   // 精确相等, 非容差(NWT 复核点②)
+        });
+        if (ok) return true;
+        // 落地但金额不对 = 不算数, 继续重试(可能是 reorg 后金额变了的瞬态, 也可能是真 bug——20 次重试预算跑完
+        // 后 fail-closed 返回 false, 由调用方走既有 STOP threading 分支, 不新增行为类别)
+      }
+    } catch (e) {
+      console.warn(`[verifyClaimLanded] attempt ${attempt + 1}/20 threw (非落地判定失败, 诊断用): ${e?.message || e}`);
+    }
+    await _sleep(3000);
+  }
+  return false;
+}
+```
+
+调用点(两处,`amount` 参数直接来自局部已有的 `cd.amount`,零新增数据流):
+- `bshard-auto-settler.mjs:572`:`verifyClaimLanded(ctx, winnerAddr, claimTx, cd.amount)`(winner claim)。
+- `bshard-auto-settler.mjs:845`:`verifyClaimLanded(ctx, bettorAddr, claimTx, cd.amount)`(refund claim)。
+
+**NWT 四点复核意见逐条对应**:
+1. fail-closed 默认对不对——`expectedAmount` 传了就必须真拦,不能只 log:上面实现里金额不符时**不 return true**,穿透到 20 次重试耗尽后返回 `false`,调用方现有的 `if (!received) { ...STOP threading... }` 分支原样生效,是真拦不是日志。
+2. 精确相等非容差:`String(amt) === String(expectedAmount)`,跟 `verifyClosedLanded` 同款字符串精确比较,不做任何 `>=`/容差,除非未来有对应的 dust 处理策略(本批没有,不引入)。
+3. 向后兼容——两处既有调用点(以及任何未来新调用点不传第 4 参)行为**逐字节不变**:`expectedAmount == null` 分支直接 `return true`(landed 检查本身逻辑完全没动,新代码只加在这一条判断之后),不是"默认传 0 走比对分支"这种会悄悄变严的写法。
+4. `amount` 字段本身缺失/undefined 时的行为——不特殊处理,交给现有的 `String(amt) === String(expectedAmount)` 精确比较自然处理:`String(undefined)` = `"undefined"`,不可能等于任何真实金额字符串,`.some()` 自然返回 `false`,不会被静默当 0 或跳过校验——不需要额外的空值分支,现有比较逻辑本身就是 fail-closed 的。
+
+**回归测试**(3 case,NWT 建议的第③case 已折入):①金额匹配 → true;②金额不符 → false(不是 landed=true 就直接过);③entries 里该笔 UTXO 的 amount 字段缺失/undefined → false(不当 0/不跳过)。风格复用 `bshard-consolidated-pool-rederive.test.mjs` 的 offline stub 模式(`ctx.getUtxos`/`ctx.relayPost` 用 stub,不需要真链)。
+
+---
+
+## 4. DoD(Owner"充分测试"直令,逐条钉死,缺一不收卡)
+
+1. **回归测试 fixture 复刻生产真实输入结构**(Owner 直令原话,不许简化字段)——参考今晚 `bshard-consolidated-pool-rederive.test.mjs` 的自举模式(真实 migration 跑出的 schema,不是手搓精简版),覆盖:
+   - V1 正常行 / V2 正常行 → coherence 通过。
+   - incoherent 行(手工造 V2 redeem + v1 declared)→ assert FAIL + event 落表 + 零花费。
+   - `unknown` 行 → gate 拒绝,不猜。
+   - `zk_native` 铸后尝试翻转 → API 400。
+2. **孤儿盘 / 重启穿越两类场景覆盖**(85fit 盲区,NWT 专项要求)——backfill migration 中途重启的幂等性(v189 是一次性 migration,需确认重跑不重复处理已 backfill 过的行)。
+3. **装载后活代码复跑**(不信任装载前结果,今晚 KANet-UI/J2 的习惯延续)。
+4. **backfill dry-run 报告人工过一遍**(K-18 DoD-0 铁律,confirm 无在途盘被误伤)才能真正执行 v189 migration。
+5. **pruned_expired_waived(15)+ A0 不符(6)两条遗留线索的正式归因结论**写入本卡或独立记录,不是"順手查了"没有下文。
+6. NWT 红队每步都出"测试覆盖是否够"专项判断(Owner 直令口径)。
+7. 测试网真金 E2E(Owner"测试 KAS 充足,不吝啬"直令):如果 coherence gate 接入高频路径(下注时),建议至少造一笔真实测试网下注验证零子进程 spawn 的性能路径+真实通过 gate,不能只看离线单测绿。
+8. **§3.5 `verifyClaimLanded` 金额校验**:3 case 回归测试(匹配/不符/字段缺失)全绿 + 两处既有调用点(:572/:845)改动后 `bshard-auto-settler.test.mjs`(即使今晚发现其 `deriveResumePlanFromEvidence` 分支因既有 schema drift 跑不通,不影响这次改动路径不同的部分——但如果落码时顺手能低成本把那个 fixture 的 `id` 列 schema drift 修一下,算是路过带修,不算范围蔓延)不因本改动引入新失败。
+
+---
+
+## 5. 风险 / 待 NWT 复核重点(自提,架构师不自审)
+
+1. 常量区(`poolMerkleRoot`/`predicateCommit`)在 state 区之前还是之后,§1 表格没有 100% 实测坐实(只是从 ctor 参数顺序推断)——落码前必须用一个已知 V1 行实测 hex dump 核对,不能凭推断写 offset。
+2. Backfill 探针的"两次 recompile 都不过→unknown"逻辑本身是否会误伤 pruned_expired_waived/verifying 这类历史行(如果它们的真实家族既不是标准 V1 也不是标准 V2 模板,是介于两者之间的过渡期产物)——需要在 dry-run 报告里显式统计"两次都不过"的行数并人工过一遍,不能假设只有两种可能。
+3. 高频调用点(每笔下注)的"零子进程 spawn"承诺——(a)(b)(d) 三步是否真的零 silverc 调用需要落码后实测确认,不是文档说了就算。
+
+---
+
+**关联**: `docs/2026-07-18-payoutshard-family-coherence-gate-design.md`(K-18 v1.1)、`docs/2026-07-21-28-state-sync-architecture-full-design.md`(#28 全案)、`docs/2026-07-21-p0-consolidated-pool-rederive-implementation-plan.md`(P0/line423,§3b K-18§3.4 已落地部分)、`docs/2026-07-21-k18-splice-vs-recompile-backfill-dryrun-report.md`(昨晚 98 条 MISMATCH 归因,pruned_expired_waived/A0 两条遗留线索来源)、`kasia-console/scripts/_j1tn_k18_splice_vs_recompile_backfill_dryrun.mjs`+`_j1tn_k18_v1_structural_probe.mjs`(本批复用的既有工具)。
