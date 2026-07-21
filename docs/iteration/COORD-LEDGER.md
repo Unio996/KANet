@@ -441,3 +441,9 @@ Owner 元问题:写进文档的铁律(CLAUDE.md 接位 SOP 第5条"设计前查�
 **处置(操作员确认意图后执行,已验证)**: 4 个旧 claude 进程终止+3 个随之孤儿化 monitor 清理,终态=恰 4 个新会话进程+各 1 monitor。协调恢复单会话常态。
 
 **机制沉淀**: Bettor-接位.md 教训 5 已补"清 monitor 前先追父链甄别归属(窗口没了≠进程死了)"+memory `feedback-window-gone-is-not-process-dead-monitor-cleanup-wakes-sessions`(族F)。其余接位文件同款条目由各 agent 下次接位时自钉(跨机文件无同步机制,同 7/12 结构卡)。
+
+## ✅ #28 P1 正式关卡(2026-07-21 08:2xZ)+ P2 第一批开工派工
+
+**P1(evidence preserve-merge)正式完成**: 落码 `ea355c36`+`7c5dbe83`(昨晚,NWT better-sqlite3 实跑复测 GREEN)→ 随 07:37Z 重启装载 → **今晨 J2 在装载后活代码上复跑 `evidence_preserve_merge_regression.test.mjs` PASS(1/1, 39ms)**,并核实 PID 16188 自装载后未重启、`67490897`→当前 HEAD 仅 docs 提交 settle 代码零漂移(非信任装载前旧结果)。#28 路线 P0/P1 两阶段均闭。
+
+**P2 第一批开工(今日主战场)**: J1 主(已认领)+J2 协——全状态推广 re-derive+真相源层模块化(#28 §3/§5),**K-18 残项三件打包并入第一批**(§3.1 covenant_family 不可变列+backfill / pruned 组 +202 字段判读 / A0 六条不符 §3.3(d)),J1 原话"分开做才是真正的碎片化"。流程: J1 设计稿→NWT 红队(已就位,默认试图打穿)→GREEN 落码;涉钱路按 D-011 内部审核链走完 Bettor 拍板。并行: #30(J1 卫生项)/#25 维持等 Owner-ack/DATABASE.md:632 经核实昨晚 `b070cf5f` 已订正无需重做(KANet-UI 查资产避免重造)。四员回执全齐。
