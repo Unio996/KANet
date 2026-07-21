@@ -20,7 +20,7 @@ import { getMarketBets, getSidesByLogicalMarket } from '../lib/pool-bettor-sides
 import { hasVerifiedContainer2Evidence } from '../api/admin-dedup.js';
 import { buildMakerRefundPreimage, handleRefunding } from './pool-market-settler.js';
 import { _shard9PhantomExcludeFor } from './bshard-close-voter.js';
-import { computePariMutuelPayout } from '../lib/pool-shard-settle.mjs';
+import { computePariMutuelPayout, verifyRedeemMatchesChainObservedOutput } from '../lib/pool-shard-settle.mjs';
 import { deriveRoleFeeLeaves } from '../lib/fee-split.mjs';
 import { payoutRoot as buildPayoutRoot, payoutLeaf, merkleProof, climbProof } from '../lib/pool-payout-root.mjs';
 import { deriveCommitteeSeed, selectCommittee } from './pool-committee-sampler.mjs';
@@ -420,12 +420,32 @@ export async function settleMarketLive(marketId, ctx) {
   //   85fit 修法: resume 场景下优先信 settle_evidence.consolidated_pool(写入时来自 byte-exact 链上验证过
   //   的真实值), 没有才退回公式(fresh-close 分支正常路径, 已由 daemon 侧 live-probe 修好, 这里理论上不会
   //   再撞——留公式 fallback 只为不引入新阻塞面, 不是纵容这条 bug 继续存在)。
-  const consolidatedPool = priorEvidence?.consolidated_pool || (BigInt(plan.poolSompi) + BigInt(ctx.psSeedSompi ?? 20000000)).toString();
+  // 🔴 2026-07-21 line423 修复(#28, Bettor 派工 #ubmne2.1, D-011 后内部审核链走完即可, 不再等 Owner 逐项批):
+  //   上面这条 presence-trust(priorEvidence?.consolidated_pool 存在就信, 不问新不新鲜)跟
+  //   consolidateAndBuildPsState MUST-FIX③修复前的病是同一类——评估候选值时不管来自 evidence 还是
+  //   formula, 都必须独立链上验证它是不是真的对应 closeTxid:0 实际观测到的输出, 不能盲信 presence 也
+  //   不能盲落回 formula。复用今晚 P0 抽出的共享 helper verifyRedeemMatchesChainObservedOutput
+  //   (pool-shard-settle.mjs), 跟 consolidateAndBuildPsState Tier1 同一个原语(kaspa_tx_log 独立观测,
+  //   不信候选自己反推的地址)。候选顺序: evidence 优先(daemon 写回时来自 byte-exact 链上验证过的真实值,
+  //   更可能对)→ formula 兜底(仅当 evidence 缺失)——两个候选都必须过链上验证才能用, 都验不过就 fail-closed
+  //   拒绝、不猜, 不再重蹈"没有任何活链路径兜底"的旧坑。
+  const evidencePool = priorEvidence?.consolidated_pool || null;
+  const formulaPool = (BigInt(plan.poolSompi) + BigInt(ctx.psSeedSompi ?? 20000000)).toString();
+  let consolidatedPool = null;
+  let curRedeem = null;   // 复用验证循环里已经编译过的候选字节, 不在下面重复调一次 compilePayoutShardRedeem
+  for (const candidate of [evidencePool, formulaPool].filter(Boolean)) {
+    const candidateRedeem = compilePayoutShardRedeem({ poolMerkleRoot: psRow.pool_merkle_root, predicateCommit: psRow.predicate_commit, consolidatedPool: candidate, closed: 1, payoutRoot: plan.payoutRoot });
+    const verified = ctx.db && ctx.p2shAddr && verifyRedeemMatchesChainObservedOutput({ db: ctx.db, p2sh: ctx.p2shAddr, candidateRedeemHex: candidateRedeem, outpointTxid: closeTxid, outpointIdx: 0 });
+    if (verified) { consolidatedPool = candidate; curRedeem = candidateRedeem; break; }
+  }
+  if (consolidatedPool == null) {
+    ctx.alert?.(marketId, `claim-thread consolidatedPool 无法链上验证(evidence=${evidencePool}, formula=${formulaPool}, closeTxid=${closeTxid}) — fail-closed 拒绝, 不猜`);
+    return { ok: false, reason: `consolidatedPool 无法链上验证(evidence=${evidencePool}, formula=${formulaPool})`, closeTxid };
+  }
   let psOutTxid = closeTxid, psOutIdx = 0;
   let curPool = BigInt(consolidatedPool);
   let curState = { consolidated_pool: curPool.toString(), closed: 1, payoutRoot: plan.payoutRoot };
   for (let i = 0; i < 17; i++) curState['w' + i] = 0;
-  let curRedeem = compilePayoutShardRedeem({ poolMerkleRoot: psRow.pool_merkle_root, predicateCommit: psRow.predicate_commit, consolidatedPool, closed: 1, payoutRoot: plan.payoutRoot });
   // #task33 (2026-07-03·NWT GREEN·docs/2026-07-03-bshard-claim-completeness-and-retry-design.md):
   //   丢单点①②(climb-fail/round-trip-fail, continue) = 数据/编码问题非时序问题, 独立标记 needsManualAttribution,
   //   不进 settled_partial_claims 重试队列(见 §4.2.1 🟡风险-1)。丢单点③④⑤(submit-fail/not-landed/splice-mismatch,

@@ -36,7 +36,7 @@ if (!process.env._RDPOOL_TEST_BOOTSTRAPPED) {
 
 const { sqlite } = await import('../db/client.js');
 const { consolidateAndBuildPsState, ensureReady } = await import('./bshard-settle-daemon.mjs');
-const { autoDetectConsolidateResume } = await import('../lib/pool-shard-settle.mjs');
+const { autoDetectConsolidateResume, verifyRedeemMatchesChainObservedOutput } = await import('../lib/pool-shard-settle.mjs');
 const { randomUUID } = await import('node:crypto');
 
 // NOTE: deliberately NOT using compilePayoutShardRedeem() here — it shells out to silverc, which is
@@ -219,6 +219,45 @@ console.log('[test] scenario D (Codex finding③, dust-poisoning defenses): auto
       payoutShard: { payout_redeem_hex: genesisRedeemHex, payout_ps_outpoint: ps.payout_ps_outpoint, payout_cov_id: ps.payout_cov_id },
     });
     ok(resumePoint === null, `two UTXOs at the same candidate address is rejected wholesale (not "pick utxos[0] and hope"), falls through to null — got: ${JSON.stringify(resumePoint)}`);
+  }
+}
+
+console.log('[test] scenario E (#28 line423, Bettor #ubmne2.1): verifyRedeemMatchesChainObservedOutput — the shared helper extracted from Tier1 and reused by settleMarketLive\'s claim-thread consolidatedPool verification. Directly tests the primitive both call sites now depend on: does a candidate redeem\'s p2sh address match what kaspa_tx_log actually observed at a given outpoint:');
+{
+  const kaspa = await import('kaspa-wasm');
+  const _p2sh = (hex) => {
+    const sb = kaspa.ScriptBuilder.fromScript(new Uint8Array(Buffer.from(hex, 'hex')));
+    return kaspa.addressFromScriptPublicKey(sb.createPayToScriptHashScript(), 'testnet-12').toString();
+  };
+  await ensureReady();
+
+  console.log('  [E1] match: kaspa_tx_log has a row for the outpoint whose observed output address equals the candidate redeem\'s p2sh address — verified true:');
+  {
+    const txid = 'aa'.repeat(32);
+    const candidateHex = Buffer.from('e1-candidate-bytes-0000000000000000').toString('hex');
+    const addr = _p2sh(candidateHex);
+    sqlite.prepare(`INSERT INTO kaspa_tx_log (tx_id, outputs_json, observed_at) VALUES (?, ?, datetime('now'))`)
+      .run(txid, JSON.stringify([{ address: addr, amount_sompi: '123' }]));
+    const result = verifyRedeemMatchesChainObservedOutput({ db: sqlite, p2sh: _p2sh, candidateRedeemHex: candidateHex, outpointTxid: txid, outpointIdx: 0 });
+    ok(result === true, `matching candidate verified true (got: ${result})`);
+  }
+
+  console.log('  [E2] mismatch: kaspa_tx_log has a row for the outpoint but the observed address is for a DIFFERENT script than the candidate — verified false, not presence-trusted:');
+  {
+    const txid = 'bb'.repeat(32);
+    const candidateHex = Buffer.from('e2-candidate-bytes-0000000000000000').toString('hex');
+    sqlite.prepare(`INSERT INTO kaspa_tx_log (tx_id, outputs_json, observed_at) VALUES (?, ?, datetime('now'))`)
+      .run(txid, JSON.stringify([{ address: 'kaspatest:some-unrelated-address-not-the-candidate', amount_sompi: '123' }]));
+    const result = verifyRedeemMatchesChainObservedOutput({ db: sqlite, p2sh: _p2sh, candidateRedeemHex: candidateHex, outpointTxid: txid, outpointIdx: 0 });
+    ok(result === false, `mismatched candidate verified false, not treated as fresh just because a row exists (got: ${result})`);
+  }
+
+  console.log('  [E3] indexer gap: no kaspa_tx_log row at all for the outpoint — verified false (fail-closed default, matches _inferWinDirectionFromChain\'s "F3 账" convention, never treated as an implicit pass):');
+  {
+    const txid = 'cc'.repeat(32);   // never inserted into kaspa_tx_log
+    const candidateHex = Buffer.from('e3-candidate-bytes-0000000000000000').toString('hex');
+    const result = verifyRedeemMatchesChainObservedOutput({ db: sqlite, p2sh: _p2sh, candidateRedeemHex: candidateHex, outpointTxid: txid, outpointIdx: 0 });
+    ok(result === false, `missing indexer row verified false, not an implicit pass (got: ${result})`);
   }
 }
 

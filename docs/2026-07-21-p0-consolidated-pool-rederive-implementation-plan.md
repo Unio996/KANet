@@ -139,18 +139,20 @@ Codex 原文另指出 `autoDetectConsolidateResume` "只是候选生成器不是
 
 ---
 
-## 4. 相邻但独立的问题:claim-thread 的 line 423 presence-trust 点
+## 4. claim-thread 的 line 423 presence-trust 点 — 已修复(2026-07-21,Bettor 派工 #ubmne2.1)
 
-`settleMarketLive`(`bshard-auto-settler.mjs:423`):
+`settleMarketLive`(`bshard-auto-settler.mjs:423`)原代码:
 ```js
 const consolidatedPool = priorEvidence?.consolidated_pool || (BigInt(plan.poolSompi) + BigInt(ctx.psSeedSompi ?? 20000000)).toString();
 ```
 
-这是**另一个函数、另一个调用点**,不在 `consolidateAndBuildPsState` 内,NWT MUST-FIX③ 原文没有点名它,但今晚 J2/NWT 频道讨论(20:40-20:41Z)已确认:这是一个"presence-trust"(只要 `priorEvidence.consolidated_pool` 存在就信,不管新鲜度)模式,风险类别与 MUST-FIX③ 相同,且**P1(evidence preserve-merge)明确不该管这条**(J2/NWT 一致结论,merge 只是持久化机制不是新鲜度校验)。
+这是"presence-trust"(只要 `priorEvidence.consolidated_pool` 存在就信,不管新鲜度)模式,风险类别与 MUST-FIX③ 相同。原计划排到"第二个 PR",D-011(钱路改动去 Owner 逐项点头化)落地后 Bettor 直接派工收尾,当批完成,不再另开 PR。
 
-**本方案的立场**:这个点**在概念上应该复用本方案的 Tier1/Tier2 校验**(`priorEvidence.consolidated_pool` 存在时,也应该核实它是否对应链上仍未花费/仍是最新的 consolidate 状态,而非直接信),但它是**独立的第二处改动**,不在本次 §2 的最小 diff 范围内(不同函数、不同数据流入口——`priorEvidence` 来自 `settle_evidence` JSON,不是 `payout_shards` 表)。
+**修法**:抽出共享函数 `verifyRedeemMatchesChainObservedOutput`(`pool-shard-settle.mjs`)——跟 §2 Tier1 完全同一个原语(`kaspa_tx_log` 独立观测某 outpoint 实际输出地址,不信候选自己反推的地址),`consolidateAndBuildPsState` 的 Tier1 也重构成调用这个共享函数(不再各写一份)。line423 处改为:候选顺序 evidence 优先(daemon 写回时来自 byte-exact 链上验证过的真实值)→ formula 兜底(仅当 evidence 缺失)——**两个候选都必须过链上验证(候选 closed:1 redeem 编译出的地址 == `closeTxid:0` 实际观测到的输出地址)才能采用,都验不过 fail-closed 拒绝返回 `{ok:false}`,不再有"没有任何活链路径兜底"的裸落回 formula**。复用循环里已经编译过的候选字节做 `curRedeem`,不重复调 silverc。
 
-**建议排期**:标记为 **P0 直接后续**(不并入 P2,因为 NWT/J2 已明确判定这条的安全性"本来就系于 P0"),但作为 §2 落码 + 过 NWT 复核之后的**第二个小 PR**,复用同一套 Tier1/Tier2 helper(届时可以把 §2 的验证逻辑抽成一个可复用函数,例如 `verifyConsolidatedPoolFresh(marketId, candidatePool, ctx)`,两个调用点共用)。不在本方案第一版 diff 里一次性铺开,理由:①范围收紧,NWT 复核负担小;②`consolidateAndBuildPsState` 是 85fit 当晚实际炸的那条路径,优先级更高;③claim-thread 这条目前没有已知实例真的因它出过事(85fit 那次的根因是 :423 之前的 `consolidateAndBuildPsState`,不是 :423 本身),风险是理论性的但已被点名,不能不排,只是不需要挤进第一批。
+**回归测试**(`bshard-consolidated-pool-rederive.test.mjs` scenario E):直接测试 `verifyRedeemMatchesChainObservedOutput` 三种情形——匹配(true)/不匹配(false,不因为有记录就信)/`kaspa_tx_log` 缺口(false,同 `_inferWinDirectionFromChain` 的"F3 账"惯例,不当默认通过)。这是共享 helper 本身的白盒单测,离线、确定性、不需要真链。
+
+**诚实标注未覆盖的部分**:`curRedeem` 构建仍然是 `compilePayoutShardRedeem` 重编译(K-18 §3.4 splice-not-recompile 原则在这个具体消费点没有落地)——跟 §3b 一样,理想状态应该是找到当初 close tx 广播时真实用过的字节(splice)而非重新编译,但本次没有定位到可复用的现成 splice 来源(不像 §3b 的 Tier1/Tier2 有 `ps.payout_redeem_hex`/`autoDetectConsolidateResume` 可以直接借用)。因为多了一层"候选必须先过链上验证才采用"的把关,即使 `curRedeem` 仍是重编译产物,它至少保证了**编译用的 `consolidatedPool` 数值是链上验证过的真值**,不是本卡在铸就"重编译当权威"这个问题的新实例(旧代码是"猜一个值、直接重编译当权威用"、新代码是"验证一个值、验证过了才重编译当权威用"——后者仍有重编译-as-authority 的架构问题,但至少喂给它的数值不再是猜的)。若要彻底根治这条,需要额外去定位 close 广播时的真实字节(独立工作量,记非阻塞待办)。
 
 ---
 

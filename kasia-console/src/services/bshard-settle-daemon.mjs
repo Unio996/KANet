@@ -16,7 +16,7 @@
 import { sqlite } from '../db/client.js';
 import { getMarketBets } from '../lib/pool-bettor-sides-query.mjs';
 import { computeSettlePlan, settleMarketLive, deriveResumePlanFromEvidence } from './bshard-auto-settler.mjs';
-import { consolidateAllShards, autoDetectConsolidateResume } from '../lib/pool-shard-settle.mjs';
+import { consolidateAllShards, autoDetectConsolidateResume, verifyRedeemMatchesChainObservedOutput } from '../lib/pool-shard-settle.mjs';
 import { _shard9PhantomExcludeFor } from './bshard-close-voter.js';
 import { compilePayoutShardRedeem } from '../lib/pool-shard-register.mjs';
 import { fetchEndBlockHashCanonical, recaptureSideLockDaaForMarket } from './pool-market-settler-v06.mjs';
@@ -226,19 +226,10 @@ async function consolidateAndBuildPsState(marketId, ps, ctx) {
     //   consolidateAllShards 自己的 resume 入口)重建真值, 命中自愈写回 DB, 未命中 fail-closed throw+记
     //   drift 事件——不再静默使用一个未经链上验证的预测值。
     const realAddr = _p2shCache(ps.payout_redeem_hex);
-    // Tier1: 独立链读核实 payout_redeem_hex 是否新鲜(不信它反推的地址, 核它) —— 复用
-    // _inferWinDirectionFromChain(bshard-auto-settler.mjs:246-254)同款原语: kaspa_tx_log.outputs_json
-    // 直接读某 txid 的 output 地址, 跟 DB 反推的地址独立比对。
-    const txRow = sqlite.prepare('SELECT outputs_json FROM kaspa_tx_log WHERE tx_id = ?').get(psOutpointTxid);
-    let chainObservedAddr = null;
-    if (txRow?.outputs_json) {
-      try {
-        const outs = JSON.parse(txRow.outputs_json);
-        const o = outs[psIdx];
-        chainObservedAddr = o?.address || o?.verboseData?.scriptPublicKeyAddress || o?.scriptPublicKeyAddress || null;
-      } catch {}
-    }
-    const redeemFresh = !!(chainObservedAddr && chainObservedAddr === realAddr);
+    // Tier1: 独立链读核实 payout_redeem_hex 是否新鲜(不信它反推的地址, 核它)。2026-07-21 抽成共享函数
+    // verifyRedeemMatchesChainObservedOutput(pool-shard-settle.mjs)——line423(settleMarketLive claim-thread
+    // consolidatedPool 校验)复用同一个原语, 不重复写第二份。
+    const redeemFresh = verifyRedeemMatchesChainObservedOutput({ db: sqlite, p2sh: _p2shCache, candidateRedeemHex: ps.payout_redeem_hex, outpointTxid: psOutpointTxid, outpointIdx: psIdx });
 
     let consolidatedPoolReal = null;
     if (redeemFresh) {

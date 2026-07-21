@@ -342,6 +342,26 @@ export function settlePayoutRoot(winners) {
  * @param {object} o { db, getUtxos(addr)→[{outpoint,amount}], p2sh, logicalMarketId, payoutShard }
  * @returns {null | { fromShardIdx, psTx, psIdx, pool }} null = 不需要 resume(from genesis 正常走或已探测不到任何进度)
  */
+// 🔴 2026-07-21(#28 line423, Bettor 派工 #ubmne2.1, J1 复用今晚 consolidateAndBuildPsState 的 Tier1 校验模式):
+//   verifyRedeemMatchesChainObservedOutput — 独立链读核实一个候选 redeem 是否真的对应链上某个 outpoint
+//   实际的输出脚本, 不信候选自己反推的地址。跟 _inferWinDirectionFromChain(bshard-auto-settler.mjs:
+//   246-254)、consolidateAndBuildPsState Tier1(bshard-settle-daemon.mjs)用的是同一个原语(kaspa_tx_log.
+//   outputs_json 直接读某 txid 某 output 的链上观测地址), 这次抽成共享函数供两处调用, 不重复写第三份。
+//   本身不碰链(kaspa_tx_log 是本地 indexer 缓存), 跟 _inferWinDirectionFromChain 同款"F3 账"边界——
+//   indexer 缺口时返回 false(不新鲜), 调用方按 fail-closed 处理, 不能当"验证通过"用。
+export function verifyRedeemMatchesChainObservedOutput({ db, p2sh, candidateRedeemHex, outpointTxid, outpointIdx }) {
+  let candidateAddr;
+  try { candidateAddr = p2sh(candidateRedeemHex); } catch { return false; }
+  const txRow = db.prepare('SELECT outputs_json FROM kaspa_tx_log WHERE tx_id = ?').get(outpointTxid);
+  if (!txRow?.outputs_json) return false;
+  try {
+    const outs = JSON.parse(txRow.outputs_json);
+    const o = outs[outpointIdx];
+    const chainObservedAddr = o?.address || o?.verboseData?.scriptPublicKeyAddress || o?.scriptPublicKeyAddress || null;
+    return !!(chainObservedAddr && chainObservedAddr === candidateAddr);
+  } catch { return false; }
+}
+
 // 🔴 2026-07-21 Codex finding③(coord/codex-bridge 2a10f5e8, MUST-FIX4 附带项): "autoDetectConsolidateResume
 //   只是候选生成器不是真值判定器——查到UTXO就信, 没查唯一性/金额匹配, 有dust-poisoning/多UTXO撞候选地址
 //   等假阳性面"。候选地址是从公开可推导的数据(genesis redeem + 逐 shard 已知 pool_value)现场编译出来的,
