@@ -471,3 +471,11 @@ Owner 元问题:写进文档的铁律(CLAUDE.md 接位 SOP 第5条"设计前查�
 **非阻塞立卡**: ①classifier 家族/模板两维度拆分(63 条 refunded 家族实无疑问,事后 UPDATE 修正)→并入批2 设计一次红队;②kanet.env KASPA_WS_PROXY_PORT=17310 vs kaspad 17210 既有配置漂移(仅浏览器桥接,KANet-UI 卡);③DoD-5(pruned 15+A0 六条正式归因)维持独立开放;④verifyRedeemMatchesChainObservedOutput indexer-miss 兜底(J2 认领)。KANet-UI 独立复核 tg-bot 约束已历史化(与 Bettor 晨查一致)。
 
 **批2 范围(开工)**: gate 接线(ensurePayoutShard/V2+consolidateAndBuildPsState 调用点分级)+高频零子进程性能实测+classifier 拆分——设计先行 J1→NWT 红队→落码。
+
+## 🏆 P2 批2 装载 + DoD-8 真金 E2E 完成——P2 全案今日收官(2026-07-21 10:5x-11:28Z)
+
+**批2 装载(10:53Z, KANet-UI)**: HEAD=`c887ed26`(批2 全部+J2 小卡),8 秒停机。五验: 78 行重判实跑 vs dry-run **精确吻合**(721=701 v1_committee+20 v2_zk+**unknown 0**,63 refunded+15 pruned 全部归位 v1_committee=DoD-5 家族归因收口,+202 字节=世代 state 漂移非家族错配)/7 测试文件活代码全绿/性能校准零 spawn 强证据(0.0165ms vs 0.3729ms 安全边际)/健康零错。批2 途中审改循环追加抓获: §4 spawn 拦截 vacuous(NWT 逼真链路 sanity check→CJS patch 不传导 ESM 具名导入坐实→J1 整案废弃重做校准法)/K18_BACKFILL_CONFIRMED 一次性语义拍定(用完归零, 每轮显式重臂)。
+
+**DoD-8 真金 E2E(11:0x-11:28Z, 三次清洁失败换三个真发现后 PASS)**: 第二笔 1KAS 真注(lockTx `68092272…`)命中 existing-row 分支, non-blocking gate 首次吃真流量+观察者面按预期。过程挖出并全部闭环: ①**gxrr4 污染事故**——journey case 的 `settle_journey_market_synthetic` 步骤(runner.mjs:1161-1181)对真实生产市场无条件写 completed+假 evidence+幽灵 pool_markets 行(共 4 处残留), 两轮清点+指纹全库扫描(假 txid/synthfad5ff/假 spine 三指纹)后全清, 市场回归 pending_bettors 生命周期并成功承接第二笔=修复活体验收; 我们两笔真注(11:04/11:28 各 1KAS)均为合法在册。责任三方各认: Bettor(批工具未读全步骤)/J2(修复清单漏第 4 处)/NWT(清单审未上溯"action 共写几张表")。②**ozzeu 诞生机制活体复现**——"DB completed+假 evidence+链上未关"今日目睹产生全程, 调查方向已补进 J2 的 7/13 terminal-status sweep 卡。③FINDING-2 commingled 守卫被证实实战有效(拦下幽灵行造成的 spine 共享), 守卫无缺口(时序核清)。**立卡**: synthetic-settle 类 action 生产市场隔离 clamp(J2, NWT 审)/tg_place_bet 搜索排序挤出目标市场观察项/seeder 盘 deadline 远超实际赛事定性(J2 一句话待答)。
+
+**P2 全案今日总账(Owner"一鼓作气+充分测试"直令兑现)**: P1 关卡→批1(设计 v0.2-v0.5/装载/backfill 精确吻合)→批2(gate 接线/classifier 拆分/性能实测/装载)→DoD-8 真金双路径。全日红队+实测在装载前抓获真问题**七条**(marker off-by-one/backfill 无门禁/catch 吞数据错/跨机 fixture/spawn 拦截 vacuous/gate 单笔 vacuous 覆盖/synthetic 污染残留), 零带病上线。
