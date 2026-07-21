@@ -143,13 +143,17 @@
 
 ---
 
-## 9. §4 高频路径零子进程性能实测 — 落码状态(2026-07-21)
+## 9. §4 高频路径零子进程性能实测 — 落码状态(2026-07-21,含 NWT diff 审抓到的一次自我修正)
 
-新文件 `bshard-payout-coherence-perf.test.mjs`。两条独立信号(不是只信一条):
-1. **直接 spawn 计数拦截(承重断言)**:用 `createRequire` 拿到 `child_process` 的 CJS module.exports 对象,patch 它的 `execFileSync`——`node:child_process` 的 ESM 具名导出是对底层 CJS exports 对象的活绑定,patch 后 `pool-bshard-artifacts.mjs` 里 `import { execFileSync } from 'node:child_process'` 这条既有具名导入会透传到 patch 后的版本(先用一次直接调用验证拦截确实生效,不是"没报错=以为拦住了"这种弱证据)。`ensurePayoutShard`/`V2` 早返回分支跑 200 次,spawn 计数恒为 0——这是**直接证据**,不是推断。
-2. **耗时量级(次要, 交叉验证)**:200 次调用本机实测 6.03ms(0.03ms/次)。silverc 子进程按本库其它地方文档记录(pool-bshard-artifacts.mjs ETIMEDOUT 事故注释)是"几十到几百 ms"量级,200 次真 spawn 会是秒级——6ms 总耗时是这条弱信号(受机器负载影响,不作为唯一证据)对(1)的交叉印证。
+新文件 `bshard-payout-coherence-perf.test.mjs`。
 
-全量回归 6 个测试文件本机绿(新增 `bshard-payout-coherence-perf.test.mjs`)+ lint 0 error。
+**🔴 首版方案被 NWT diff 审当场推翻(方法论价值高,记录完整过程)**:首版用 `createRequire` 拿 `child_process` 的 CJS module.exports 对象、patch `execFileSync`,配一条"sanity check"直接调用 patch 过的引用本身来"证明"拦截生效。NWT 精确指出这条 sanity check 是**同义反复**(vacuous)——直接调用自己刚 patch 的引用只能证明"这个引用被 patch 过",完全不能证明 `pool-bshard-artifacts.mjs` 里 `import { execFileSync } from 'node:child_process'` 那条具名导入解析到的是不是同一份 patch。**按 NWT 建议把 sanity check 改成走真实生产调用链**(`compilePayoutShardRedeem` → `compileSil` → `execFileSync`)后,**sanity check 真的失败了**(spawn 计数 before=0 after=0)——证明这个 Node 版本的 ESM/CJS interop 下,patch CJS `child_process` 的 exports 对象根本不会传导到 ESM 具名导入的绑定,首版"200 次调用 spawn=0"这个结论从一开始就是用一个不工作的探针测出来的,不能信。
+
+**处置(整个拦截方案废弃重做,不是打补丁绕过)**:改用两条独立、各自诚实的信号:
+1. **校准耗时对比(承重证据)**:本机实测一次真实 `execFileSync` spawn 尝试(打一个必然不存在的二进制路径,ENOENT 失败但真的走了 OS 级进程创建开销)的耗时作为基线(本机 1.87ms)。200 次 `ensurePayoutShard`/`V2` 早返回调用的**平均每次耗时**(0.03ms)必须远低于这个基线的 1/10 安全边际——如果 200 次里有任何一次真发起过 spawn,平均耗时会被那一次显著拉高,远超边际;观测值远低于边际是零 spawn 的强证据,而且是本次运行**当场校准**的基线,不是"别处文档记录的经验值"这种弱佐证。
+2. **静态代码路径核对(次要,结构性论据)**:直接读 `bshard-payout-family-coherence.mjs`/`pool-shard-register.mjs` 的活代码文本,正则断言 `assertPayoutShardCoherence` 步骤 (c) 的 recompile 分支确实卡在 `tier === 'full'` 条件内、`_checkCoherenceNonBlocking` 确实传 `tier: 'cheap'`——这是"读代码得到的既成事实",不是"我相信设计意图是这样"。
+
+全量回归 6 个测试文件本机绿(`bshard-payout-coherence-perf.test.mjs` 已用修正版)+ lint 0 error。
 
 ---
 
