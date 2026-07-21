@@ -24,6 +24,13 @@
 
 ## 🔴 当前有效的战略决策 (CURRENT)
 
+### D-011 钱路改动"审核关卡 ≠ Owner 逐项点头"——去 Owner-gate 化,内部双审纪律不降 (2026-07-21 · Owner 频道直令 · Bettor 记账)
+- **触发**: #28/K-18 §3.4 修复清单里 Bettor 列了一条"等老板正式点头"才能上线,Owner 当场纠正:"这不是你决定做就可以的吗?你看看自己职责?我这块只看目标!具体做什么都是你排版,你驱动团队做事。"
+- **决策**: 涉钱路/covenant/结算的改动,**不再要求 Owner 对每一项逐笔点头才能上线**。Owner 只定方向、看结果;"什么时候技术上具备上线条件"由 Bettor 协调团队自行判定并驱动执行。
+- **不变的部分(硬约束,未被这条放松)**: 内部双审纪律照走不降——NWT 独立红队/J1·J2 互审/design-first→红队→实现→验落链这套流程原样保留,这是团队自己的安全网,不是"问 Owner"的替代品,不能因为不用等 Owner 点头就跳过。
+- **一致性**: 与 D-001 附记(2026-07-09 Owner"不用等我拍!部署 ZK!中间技术我也不知道怎么拍"=部署节奏与技术细节全权下放团队、内部质量门照走不降)同一逻辑,本条是该原则在"钱路 money-path 签发"这个具体环节的再次确认+补进 CLAUDE.md 铁律 0 的执行口径(铁律 0 本身"用户面/钱路/重大功能需 Owner 批"没有被推翻,被明确的是"批"发生在方向/结果层面,不是逐项操作层面)。
+- **落地**: 各 agent 接位/派工文档中"等 Owner money-path 签发"类措辞,今后统一理解为"内部审核链走完即可驱动上线",不再单独回报等待 Owner 确认;Bettor 后续在 COORD-LEDGER/频道中同步此口径,避免团队按旧理解卡在等待。
+
 ### D-010 接位状态频道(coord-status)+ COORD-LEDGER 活跃窗口制 (2026-07-10 · Owner 7/9 方向点头 + 无异议窗终裁通过 · Bettor 拟/NWT 红队)
 - **决策**: 采纳 `docs/2026-07-10-d010-handoff-status-channel-proposal.md` **v1.1**——①链上频道 `coord-status`,Bettor 单写自足全量状态摘要(班次收束+重大变化时);**信任根=内容显式签名**(blake2b(content)+Bettor relay 私钥签+读端验签),sender_address 过滤仅减噪粗筛零信任功能;②锚(git HEAD/txid)只证新鲜度不证正文,禁"核锚过⇒信正文"推断链,正文一律地面复核(铁律-1 不动摇);③COORD-LEDGER 按月切档 `docs/iteration/archive/` + lint >100KB WARN,跨段引用禁行号。
 - **审计链**: v1.0 被 NWT 红队 🔴RED 打穿(`78161b7d`,finding①CRITICAL: bcast sender 归因=output[0] 攻击者自选,"密码学锚"vacuous)→v1.1 换签名门(`024c4e56`)→NWT 复审 GREEN(可行性核实: relay 既有 schnorr 原语复用)→升 Owner 无异议窗通过。
