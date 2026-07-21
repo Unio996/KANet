@@ -1,6 +1,6 @@
 # P2 第一批 — 真相源层模块化 + K-18 §3.1-§3.3 落地 + verifyClaimLanded 金额校验(J1 主稿,J2 协)
 
-> **Status**: CURRENT(v0.3 · 2026-07-21 · J1 draft,§3.5 折入 J2 发现+草案(#ue9cp6.1 Bettor 裁定,J2 已认可 J1 实现版本撤回自己草案)+ Bettor 方向审 GREEN-with-3-notes(#uegipr)全部折入(note①§3.5 金额源换 kaspa_tx_log/note②DoD-4 责任人钉死/note③§5.1 升级 MUST)· 待 NWT 红队,GREEN 后落码)
+> **Status**: CURRENT(v0.5 · 2026-07-21 · J1 draft,§3.5 折入 J2 发现+草案(#ue9cp6.1)→ Bettor 方向审 GREEN-with-3-notes(#uegipr)→ NWT 正式红队 GREEN-with-2-MUST-FIX → 三态设计(kaspa_tx_log 主 + getUtxos 兜底)经 Bettor/NWT/J2 交叉论证收敛定案(#uesq36,不再变动)· 待 NWT 对实际落码 diff 复核)
 > **依据**: `docs/2026-07-21-28-state-sync-architecture-full-design.md` §5 P2 派工("全状态推广 re-derive+校验纪律 + 真相源层模块化,§3 完整实现,J1 主+J2 协,分批走每批独立 NWT 审") + Bettor 今日派工(#udvo4q,并入 K-18 残项)+ Owner 直令(今日一鼓作气+充分测试,D-011 内部审核链走完即可装载)。
 > **前置**: K-18 §3.1-§3.4 全案(`docs/2026-07-18-payoutshard-family-coherence-gate-design.md` v1.1,**已 NWT GREEN-with-3-MUST-FIX 且 3 条全折入**)——§3.4(recompile 降级校验)已在昨晚 P0 v0.3(`25b3d0a0`)+ line423(`67490897`)落地。**本卡 = 落地 K-18 剩余 §3.1(covenant_family 列)+ §3.2(zk_native 铸后不可变)+ §3.3(assertPayoutShardCoherence 四步门)**,K-18 的架构设计本身不重新评审(已经 NWT 审过),本卡是**实现落地计划 + 用它解决两条昨晚遗留的开放线索**。
 
@@ -92,6 +92,8 @@ Backfill(migrate v189 内一次性,复用昨晚已交付的探针基础设施):
 
 **实现方案(比 J2 原草案更小的改动面——直接照抄 `verifyClosedLanded` 自己已经在用的模式,不改 relay 层)**:J2 草案提议扩展 relay `checkUtxoLanded` 加第 5 参 `expectedAmount`、把 amount 从 relay 侧带出来。读码发现**不需要动 relay**——`verifyClosedLanded` 从没让 relay 带出金额,是 console 侧 `landed` 通过后自己再单独调一次 `ctx.getUtxos(expectedAddr)` 查金额,`verifyClaimLanded` 完全可以照搬同一模式,零 relay 改动、零跨服务接口变更:
 
+**v0.4(Bettor 冲突收敛 #uemwsc + J2 历史先例补充,三态设计,不是 kaspa_tx_log/getUtxos 二选一)**:J2 指出 7/8 committee attest 那晚的先例——`kaspa_tx_log` 是 relay 自己 block-added 监听写入的本地索引,不是链的完整镜像,曾出现"已落链 tx 但监听漏事件、本地表查无"的真实案例,当时定的规矩是"本地表 miss = inconclusive,不是 confirmed-absent,优先走直连 RPC 兜底"。§3.5 照抄同款三态,不把"查无记录"并入"金额不符"这一支(两者原因不同、该有的后续动作也不同):
+
 ```js
 async function verifyClaimLanded(ctx, winnerAddr, claimTx, expectedAmount = null) {
   for (let attempt = 0; attempt < 20; attempt++) {
@@ -99,27 +101,44 @@ async function verifyClaimLanded(ctx, winnerAddr, claimTx, expectedAmount = null
       const r = await ctx.relayPost(ctx.feeRelay.id, { type: 'check_utxo_landed', address: winnerAddr, txid: claimTx, minDepth: REORG_SAFE_MIN_DEPTH });
       if (r?.landed) {
         if (expectedAmount == null) return true;   // 向后兼容: 不传 = 老行为,零改变(NWT 复核点③)
-        // v0.3(Bettor方向审note①折入, 2026-07-21): 金额源从"当前UTXO集"(ctx.getUtxos)改为
-        // kaspa_tx_log.outputs_json——同一份历史交易记录, 落链即永久, 不受"这笔claim UTXO是否已被
-        // 赢家花掉"影响。85fit教训(#22, 精确值匹配≠UTXO未花, claim UTXO已花导致verify假阴性)在这里
-        // 是真实暴露面: winner P2PK地址收到claim后可能立刻自己转走/整理UTXO, 若验证发生在那之后,
-        // 读当前UTXO集会查无此笔(不是金额不对, 是UTXO已经不在了), 误判"金额不符"烧完60s重试触发
-        // STOP threading——同款问题verifyClosedLanded的原始实现也有(§3.5正文已注明非本批新引入),
-        // 但本批既然要动这个函数, 直接用更稳的源头, 不把已知暴露面复制一份。跟 _inferWinDirectionFromChain
-        // (:245-247)/consolidateAndBuildPsState Tier1(verifyRedeemMatchesChainObservedOutput)同一个原语:
-        // 本地 indexer 缺口(F3 账)时 fail-closed 不当通过。
+        // 三态金额校验(v0.4): ①kaspa_tx_log 命中且金额符 → true(主路径, 历史永久记录, 不受"UTXO 后来
+        // 被花掉"影响, 解决 Bettor note① 的 85fit 教训)。②kaspa_tx_log 命中但金额不符 → 真· mismatch,
+        // 不重试当前 attempt 内的 fallback(不该让"查不到"和"查到了但错"混同处理)。③kaspa_tx_log 查无
+        // 该 txid(indexer miss)→ inconclusive(不是"金额不符"), 按 J2 7/8 先例直连 ctx.getUtxos(当前
+        // UTXO 集)兜底一次——这一步才是 v0.2 原稿的 ctx.getUtxos 逻辑, 不是被 v0.3 替换掉, 是降级为
+        // indexer-miss 时的兜底路径, 两条数据源分工明确、互相不遮蔽对方能解决的场景。
+        // 【关键边界(NWT 复核重点点名, 落码前钉死语义)】"命中但不符"(真 mismatch, 不 fallback)必须严格
+        // 限定为"找到了 winnerAddr 这个地址的输出条目, 但它的金额跟 expectedAmount 不一样"——以下三种情形
+        // 都【不算】"命中不符", 全部并入 inconclusive → fallback getUtxos, 不能被误判成 mismatch 直接拒:
+        //   (a) txRow 本身缺失(indexer 没这个 txid 的记录, J2 7/8 先例的原始场景)
+        //   (b) outputs_json JSON.parse 失败(数据本身损坏/格式异常, 不代表这笔钱没到账)
+        //   (c) outs 数组里根本没有 winnerAddr 这个地址的条目(可能是这份记录当初就没捕全该 tx 的所有
+        //       output, 不是"确认没给这个地址转钱"——真给没给, 后面 getUtxos 直接查这个地址现状更准)
+        let outs = null;
         const txRow = ctx.db.prepare('SELECT outputs_json FROM kaspa_tx_log WHERE tx_id = ?').get(claimTx);
-        let ok = false;
         if (txRow?.outputs_json) {
-          try {
-            const outs = JSON.parse(txRow.outputs_json);
-            ok = outs.some(o => o?.address === winnerAddr && String(o?.amount_sompi ?? o?.amount) === String(expectedAmount));
-          } catch {}
+          try { const parsed = JSON.parse(txRow.outputs_json); if (Array.isArray(parsed)) outs = parsed; } catch {}
         }
-        if (ok) return true;
-        // 落地但金额不对(或 indexer 还没追上这笔 claimTx, F3 账)= 不算数, 继续重试——indexer 滞后是
-        // 瞬态, 重试预算内大概率追上; 真金额错也不该被 UTXO 花没花这种无关因素掩盖成假阳性或假阴性。
-        // 20 次预算跑完后 fail-closed 返回 false, 走既有 STOP threading 分支, 不新增行为类别。
+        const matchingOutput = outs?.find(o => o?.address === winnerAddr);
+        if (matchingOutput) {
+          if (String(matchingOutput.amount_sompi ?? matchingOutput.amount) === String(expectedAmount)) return true;
+          // 真找到了这个地址的输出、金额确实不是期望值 = 唯一的"确认 mismatch"情形, 不 fallback(不允许
+          // "两个源挑一个顺眼的"), 落到下面继续下一 attempt(容许 expectedAmount 传参时序性 bug 被上游
+          // 修正的窗口, 20 次预算耗尽仍不符才真正 fail-closed)。
+        } else {
+          // 上面 (a)(b)(c) 三种情形统一走到这里: inconclusive, 直连 RPC 现读当前 UTXO 集兜底一次
+          // (J2 7/8 先例的规矩首次落码——本地表 miss ≠ confirmed-absent)。
+          const entries = await ctx.getUtxos(winnerAddr);
+          const ok = entries.some(e => {
+            const j = JSON.parse(JSON.stringify(e, (k, v) => typeof v === 'bigint' ? v.toString() : v));
+            const op = j.entry?.outpoint || j.outpoint;
+            const amt = j.entry?.amount ?? j.amount;
+            return op?.transactionId === claimTx && String(amt) === String(expectedAmount);
+          });
+          if (ok) return true;
+          // getUtxos 兜底也查不到(可能是 NWT MUST-FIX② 那个"UTXO 已被 winner 自己花掉"的场景, 或者
+          // indexer 还没追上+这个查询窗口 UTXO 真的还没上链)→ 两条路径这次 attempt 都不能确认, 继续重试。
+        }
       }
     } catch (e) {
       console.warn(`[verifyClaimLanded] attempt ${attempt + 1}/20 threw (非落地判定失败, 诊断用): ${e?.message || e}`);
@@ -134,15 +153,26 @@ async function verifyClaimLanded(ctx, winnerAddr, claimTx, expectedAmount = null
 - `bshard-auto-settler.mjs:572`:`verifyClaimLanded(ctx, winnerAddr, claimTx, cd.amount)`(winner claim)。
 - `bshard-auto-settler.mjs:845`:`verifyClaimLanded(ctx, bettorAddr, claimTx, cd.amount)`(refund claim)。
 
-**Bettor 方向审 note① 已折入(v0.3)**:原 v0.2 稿用 `ctx.getUtxos`(当前 UTXO 集)校验金额,Bettor 抓出 85fit 同款教训(claim UTXO 若在验证前被赢家自己花掉,当前 UTXO 集查无此笔,误判"金额不符"而非"这笔已经花过了"),问红队是接受这个暴露面(pre-existing,`verifyClosedLanded`/旧 `verifyClaimLanded` 的 landed 检查本身也有同款问题)还是换金额源。**改法已直接采用后者**:金额源换成 `kaspa_tx_log.outputs_json`(历史永久记录,不受后续花费影响,跟 `_inferWinDirectionFromChain`/§2 Tier1 同一原语),不是"改动面更大"——这个原语在本文件里已有三处先例(:246/:497/:531),复用现成模式,不是新发明。**`ctx.getUtxos` 参数不再需要**,调用侧签名不变(`ctx` 本来就带 `ctx.db`)。
+**定案(v0.4,NWT 最终裁定,#uesq36 收敛,不再变动)**:原 v0.2 稿只用 `ctx.getUtxos`(当前 UTXO 集)校验金额。Bettor 方向审 note① 抓出 85fit 同款教训(claim UTXO 若在验证前被赢家自己花掉,当前 UTXO 集查无此笔,误判"金额不符"),一度论证"landed 先行短路下这个窗口收益趋近空集"(建议退回纯 v0.2),但随即自己发现漏算 TOCTOU 窗口(landed=true 那一瞬到金额读取之间,UTXO 仍可能被花,`getUtxos` 会漏读而 `kaspa_tx_log.outputs_json` 因为是历史永久记录仍可读)并撤回。**结论:金额源是 `kaspa_tx_log` 主 + `ctx.getUtxos` 兜底的三态设计(v0.4),两个数据源都保留、分工不同,不是二选一替换**——`kaspa_tx_log` 解 spent-race(§2 Tier1 同一原语,本文件已有三处先例 :246/:497/:531),`ctx.getUtxos` 解 indexer 永久漏块(J2 引的 7/8 committee attest 先例,首次落码这条规矩)。`ctx.getUtxos` 参数依然需要,调用侧签名不变(`ctx` 本来就带 `ctx.db`+`getUtxos`)。
 
 **NWT 四点复核意见逐条对应**(v0.3 用 kaspa_tx_log 源重新过一遍,结论不变):
 1. fail-closed 默认对不对——`expectedAmount` 传了就必须真拦,不能只 log:金额不符(或 indexer 缺口)时**不 return true**,穿透到 20 次重试耗尽后返回 `false`,调用方现有的 `if (!received) { ...STOP threading... }` 分支原样生效,是真拦不是日志。
 2. 精确相等非容差:`String(o.amount_sompi ?? o.amount) === String(expectedAmount)`,不做任何 `>=`/容差。
 3. 向后兼容——`expectedAmount == null` 分支直接 `return true`,新代码(含 kaspa_tx_log 查询)完全不会被执行,两处既有调用点行为逐字节不变。
-4. `outputs_json` 里对应输出缺失/字段异常——`.some()` 精确比较自然返回 `false`,`txRow` 本身缺失(indexer 缺口)也走同一条 fail-closed 路径,不特殊处理、不当 0、不跳过。
+4. `outputs_json` 里对应输出缺失/字段异常——`.some()` 精确比较自然返回 `false`(视为该记录不支持这次比对,跟"记录整体缺失"走向同一条重试路径,但**不等于**"确认金额不符"——见下方 v0.4 三态订正)。
 
-**回归测试**(3 case,NWT 建议的第③case 已折入):①金额匹配 → true;②金额不符 → false(不是 landed=true 就直接过);③entries 里该笔 UTXO 的 amount 字段缺失/undefined → false(不当 0/不跳过)。风格复用 `bshard-consolidated-pool-rederive.test.mjs` 的 offline stub 模式(`ctx.getUtxos`/`ctx.relayPost` 用 stub,不需要真链)。
+**v0.4 订正(NWT 实读坐实,收回"跟 verifyRedeemMatchesChainObservedOutput 同一原语"这个类比)**:上面 4 点是针对 v0.3(纯 `kaspa_tx_log`,无 RPC 兜底)写的,NWT 红队 + J2 独立核实发现 `verifyRedeemMatchesChainObservedOutput`(P0 Tier1 用,已装载在线上)**本身也只是布尔 collapse,indexer 缺口跟真 mismatch 都归到同一个 `false`,没有直连 RPC 兜底**——J1 之前把它当"已有先例"类比是过度延伸,团队核实后确认"indexer 查无 = inconclusive,应该直连 RPC 兜底"这条规矩(J2 引 7/8 committee attest 那晚的教训)**此前从没有一个现成实现可抄,§3.5 v0.4 是这条规矩第一次真正落码**,不是复用。v0.4 三态明确区分,且"确认 mismatch"的边界收窄到最严格的定义(NWT 复核重点,见上方代码注释):**只有"找到 winnerAddr 的输出条目、金额确实不同"才算真 mismatch**,以下都算 inconclusive → fallback:txRow 缺失 / JSON.parse 失败或非数组 / outs 里没有 winnerAddr 这条。**回归测试扩到 7 case**:①`kaspa_tx_log` 命中+金额符→true;②命中(找到地址)+金额不符→false 且不 fallback(用 spy 断言 `ctx.getUtxos` 没被调用,验证真是"不 fallback"而不是"fallback 了但也没用");③`kaspa_tx_log` 整行缺失(txRow=null)+`getUtxos` 命中→true;④`outputs_json` JSON.parse 失败(存一个非法 JSON 字符串)+`getUtxos` 命中→true(不当 mismatch);⑤`outs` 数组是合法 JSON 但没有 winnerAddr 这条+`getUtxos` 命中→true(不当 mismatch);⑥两个源都查不到/都不符→false(重试预算耗尽后);⑦**spent-during-retry 自愈场景**(NWT MUST-FIX②,见下)。风格复用 `bshard-consolidated-pool-rederive.test.mjs` 的 offline stub 模式(`ctx.relayPost`/`ctx.getUtxos`/`ctx.db` 均用 stub,不需要真链)。
+
+---
+
+**NWT 正式红队 MUST-FIX②(2026-07-21,#uegipr 后续,实读 `kasia-relay/src/lib/p2sh.mjs:1484-1509` 坐实,比 Bettor 方向审 note① 更进一层)**:
+
+`checkUtxoLanded`(relay 侧,`verifyClaimLanded`/`verifyClosedLanded` 共同依赖的底层 landed 判定)本身就是**当前 UTXO 集**语义,不是历史记录——`getUtxosByAddresses` 查当下活 UTXO,`entry = entries.find(e => outpoint.transactionId === txid)`(:1494),若该笔 claim tx 的输出**在这次检查前已被 winner 自己花掉**,`entries` 里根本没有这个 outpoint 了,`entry` 为 `undefined`,直接 `{landed: false}`(:1495)——**不是"landed 但金额查不到",是"landed 本身就判 false"**。这意味着 §3.5 把金额源换成 `kaspa_tx_log`(本卡上方 note①改法)解决的只是"금액比对"这一层,**没有解决更上游的 `r?.landed` 判定本身同样对"UTXO 已花"敏感**——winner 若在 60s 重试窗内自己花掉 payout(完全合法的正常操作,钱已经到账,爱怎么用怎么用),后续每次 `attempt` 都会在 `checkUtxoLanded` 这一步就返回 `landed:false`,20 次重试预算耗尽后触发 `STOP threading`,卡住这批结算里排在这个 winner 之后的其余 winner。
+
+**范围裁定(NWT,Bettor 方向审 note① 给的两个选项里选①)**:这不是 §3.5 新引入的风险——`checkUtxoLanded` 这个 landed 语义是 relay 共享基础设施,`verifyClosedLanded` 用同一个函数、同样暴露(只是 shard 地址不像 winner 外部钱包那样会被"用户主动花掉",发生概率低很多但机制上一样脆弱)。**本批不改 `checkUtxoLanded` 的 landed 判定本身**(那是更大改动面——relay 侧共享函数,改了要过全部现有调用点的回归,不是"顺手一起改"能装下的范围,会稀释本批审查质量),接受这个已知暴露面作为 pre-existing 特征,不在本批解决,但必须做到"卡住不是死状态、能自愈":
+
+- **DoD 第 4 回归 case**:构造"claim tx 已 landed 但在下一次 attempt 前该 UTXO 被花掉"的场景(stub `ctx.relayPost` 让第一次返回 `landed:true`、第二次开始返回 `landed:false` 模拟这个时序),断言:①`verifyClaimLanded` 最终对这一笔返回 `false`(诚实反映"验证不了",不是假装成功)②`STOP threading` 触发后这个市场进入既有的 `settled_partial_claims` 重试队列(不是死状态,下一 tick daemon 会重新走 resume 路径续接,不需要人工介入才能恢复)③不产生任何"钱没到账"的误报——alert 文案需要能让 on-call 分清"这是良性花费竞态"还是"真的没收到钱"。
+- **Alert 文案改动**(`bshard-auto-settler.mjs` 现有 `ctx.alert?.(marketId, 'claim not landed ... — STOP threading (NO-TX-NO-STATE)')`):追加一句区分提示,例如 `+ '(可能是 winner 在验证窗口内自行花费 payout 的良性竞态, 非必然实失败——先查该地址近期是否有自主转出记录再判断是否需要介入)'`,防止 on-call 把良性竞态当成真事故连夜追查。
 
 ---
 
