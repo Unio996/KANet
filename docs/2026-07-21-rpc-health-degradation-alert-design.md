@@ -1,5 +1,7 @@
 # RPC 健康劣化检测告警(KANet-UI,2026-07-21,半页设计)
 
+> **Status**: **DEPLOYED**(NWT 方向审 GREEN,落码完成待下次自然重启窗装载)。
+
 ## 背景
 今天 RpcClient 状态劣化复发两次(07:35Z / 14:48Z,间隔仅约7小时,第二次冻结 settle-daemon tick 44 分钟才被人肉巡检发现)。Bettor 派工(#utf9ze.1):先落地检测告警(owner=KANet-UI),自动重启暂不做(告警先行,防误杀)。根因排查另立卡(owner=J2,非紧急)。
 

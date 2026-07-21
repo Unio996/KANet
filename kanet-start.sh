@@ -257,6 +257,9 @@ echo ""
 echo -e "${C_BOLD}[1/1] kasia-console${C_RESET}  port $CONSOLE_PORT"
 
 CONSOLE_LOG="$LOG_DIR/console.log"
+# 归档上一窗口日志再截断(2026-07-21, Bettor #utf9ze 派工: 别靠"下次记得先备份", 机制化——
+# 事故复盘常撞到"重启前该留一份副本却忘了"这类坑, 只留最近 1 份, 不无限堆积)。
+[ -f "$CONSOLE_LOG" ] && mv "$CONSOLE_LOG" "$CONSOLE_LOG.prev" 2>/dev/null
 > "$CONSOLE_LOG"
 
 KANET_ROOT=$KANET_ROOT \

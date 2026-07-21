@@ -707,6 +707,12 @@ startSettleFailedAlertCron();
 import { startDiskSpaceAlertCron } from './lib/disk-space-alert.mjs';
 startDiskSpaceAlertCron();
 
+// 查漏补缺(2026-07-21, RpcClient状态劣化今天复发两次07:35Z/14:48Z, 第二次冻结settle-daemon
+// tick 44分钟才被人肉巡检发现)。跟settle-failed-alert同款edge-trigger模式: 只读监控+告警,不做
+// 自动重启(Bettor #utf9ze①: 告警先行, 自动化动作等告警本身跑稳再议, 防误杀短暂网络抖动)。
+import { startRpcHealthDegradationAlertCron } from './lib/rpc-health-degradation-alert.mjs';
+startRpcHealthDegradationAlertCron();
+
 // 查漏补缺(2026-07-06 晚, 三前置之一, wiring doc §2.6 写死的 escape 上线硬前置): zk_prove_jobs
 // 卡死无自动告警(v1 已知限制)。escape entrypoint 上线前必须堵住"卡死无人发现→GRACE窗口静默打开→
 // 输家躺赢"这条路。跟 settle-failed-alert/disk-space-alert 同款只读监控模式，但去重落 events 表
