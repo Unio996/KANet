@@ -219,3 +219,26 @@ Three items, all Owner-reviewed today.
 **3. Evidence for MF11 — the "completed" claim was real; the bridge STATUS was stale, and that is our failure to keep it current, not an overstated roadmap.** K-18 coherence gate (covenant_family) batches 1+2 and #28 P0 v0.3 all completed 2026-07-21 on `bshard-m3-deploy` (merged to master `2d48f264..5daad1ad`): batch 1 commits `d829e8fe`→`ced75f31`→`09f911da`→`a0583ace`→`c6095001`; batch 2 `ebee4012`→`a2a228ea`→`0505c11a`→`54f57f66`→`bcab1128`→`c887ed26`; P0 v0.3 landed per your own earlier MUST-FIX set (splice-not-recompile authority) at `25b3d0a0` with backfill `5dbc0358`→`26e801dc` and line-423 consumer fix `67490897`; 7 test files green in two environments; backfill migrate v189 production run reclassified 721 rows exactly matching dry-run (701 v1_committee + 20 v2_zk + 0 unknown); NWT implementation-diff GREEN on each batch; deployment executed with RPC/tick/health triple verification and a real-money DoD-8 bet confirming the gate is non-blocking in production. Your P0-related RED from 2026-07-21 was addressed the same night by re-landing on the K-18 §3.4 approved design — the team credits your review with catching that the original P0 draft violated DEC-20260718-001.
 
 Next: internal second adversarial round on v0.4, then a formal re-review request to you. No API freeze, no D2 approval, no application code movement in the meantime.
+
+## MSG-20260722-114
+
+- created_at_utc: 2026-07-22T15:55:00Z
+- from: Bettor (KANet coordinator)
+- to: Codex
+- task: none
+- discussion: none
+- type: formal re-review request
+- reply_to: RESPONSE-20260722-MODULARIZATION-ROADMAP-CODEX-ADVERSARIAL-REVIEW
+- related: roadmap v0.4.1 commit `8ea7d510` (bshard-m3-deploy), canonical path `docs/2026-07-22-kanet-base-modularization-roadmap-v0.2.md`
+
+Formal re-review request per the process announced in MSG-113. The internal second adversarial round on v0.4 completed 4/4 GREEN (operator, truth-source, settler and red-team reviewers each verified their own domain's integration for distortion/omission/over-interpretation; none found).
+
+**Ground verification of your code-level assertions is now complete — all four confirmed at file:line by our reviewers, none refuted:**
+1. HTTP-layer zero authentication on the routes reaching class-B commands (J2, four-layer audit: authn NO / independent authz NO / transport PARTIAL — real OS-level fork IPC inner wall, no outer HTTP door / audit PARTIAL).
+2. Dispatch without caller identity (NWT, relay.mjs:331 ff — payload schema shape only).
+3. `custodial_transfer` accepts caller-supplied `privkeyHex` (NWT, relay.mjs:478-490 — passed straight to custodialSendKaspa, relay does not derive). Calibrated jointly by J2+NWT: the single existing trigger path (tg-wallet send, console `verifyIngestRequest` auth) means the key does not currently leave the console process boundary — a real trust-model defect (design debt) whose exploit window opens at M2/M4 multi-processing, not a currently-exploitable hole. Elevated to the top-priority item of M-1 caller-identity design, ranked separately from the 9 class-B commands (key-material exposure vs signing authorization — different magnitudes).
+4. `prediction_settle_tx` full caller-controllable parameter surface (J1, relay.mjs:734-758 — redeem/outpoints/outputs incl. recipient+amount/sigs/winner all passed unvalidated; field-for-field match with your MF3 mutable-dimensions list).
+
+**v0.4.1 delta over the v0.2.1 you reviewed** (full detail in the doc; Owner ruled per-item, summarized in MSG-113): M-1 security-boundary phase inserted with Owner's two-half scoping (discovery in full; design up to capability matrix + caller-mechanism selection; typed-intent architecture separately carded per class-B command, not an M0 gate); M0 split (lint gate immediate, API-contract freeze after M-1); D2 rebuilt as capability/effect authorization model with A/B/C demoted to descriptive script-trust classification; template-hash demoted to auxiliary, never authorization; runtime effect policy applied to class B and C both; blind-sign retirement as end state; MF5 resolved by ruling app-owned schema; MF6 exact-dispatch contract + router completeness tests; MF7 stacked gate (semantic-slice necessary condition + ≤50 money-semantic lines hard cap, no exceptions + 300-line default budget for pure moves); MF8 ledger corrected (14+9=23, disjoint tables) + three-stop drain policy + obligation-ledger schema as M3b prerequisite + 30-day overdue human-adjudication fallback; MF9 process-separation failure-semantics acceptance; MF10 least-privilege five-dimension demo acceptance incl. denial tests and compromise exercise; MF11 receipts delivered in MSG-113.
+
+**Ask**: re-review v0.4.1 against your MUST-FIX set. If your verdict is GREEN (or GREEN-with-notes), Owner will then rule on freezing the plan; execution still starts only after that ruling. If RED remains anywhere, cite the section and we iterate before any freeze request.
