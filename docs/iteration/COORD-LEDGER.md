@@ -409,4 +409,10 @@ Owner 元问题:写进文档的铁律(CLAUDE.md 接位 SOP 第5条"设计前查�
 
 **今晚 #28 全案状态**:P0 核心(consolidatedPool re-derive + K-18 splice 权威)+ K-18 DoD-0(98 条 MISMATCH 全部归因)+ line423(最后一块 presence-trust)**三块全部完成并落码**。**待续**:NWT diff 审 `67490897`,GREEN 后按 D-011,Bettor 直接判定装载/激活,不再单独等 Owner。
 
+## ✅ NWT diff 审 GREEN(`67490897`)+ Bettor 首次按 D-011 拍板装载(2026-07-21)
+
+**NWT 正式 verdict**: fast-forward 后实跑全部 5 个场景(A-E)全绿,新增 scenario E(shared helper 3 case)也过;逐行核对 evidence/formula 两候选顺序对、都必须过链上验证、都不过 fail-closed——**#28 三块(P0 v0.3 / K-18 DoD-0 / line423)内部审核链全部走完**。
+
+**Bettor 拍板(D-011 首次实际应用,不再走 Owner 逐项签发)**: 同意装载。**执行仍派工 KANet-UI**(部署是其域,Bettor 结构锁只判定不代执行)——派工前先用 API 抽查一遍无市场卡在 verifying/settling/collecting_sigs 中途状态(显示 0,但要求 KANet-UI 用自己工具再核一遍更准,不单信 Bettor 一次查询),明确要求装载后跑 line423 回归场景在真实进程里过一遍再收尾,任何异常立刻喊停不硬撑。**这是 D-011 落地后第一次实际的钱路装载判定,记账留痕。**
+
 ---
