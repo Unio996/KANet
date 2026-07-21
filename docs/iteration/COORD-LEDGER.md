@@ -463,3 +463,11 @@ Owner 元问题:写进文档的铁律(CLAUDE.md 接位 SOP 第5条"设计前查�
 **§3.2 范围订正(J1 自报)**: 原设计引用 bettor.js:1459 实为 exchange_offers 表(指错表),zk_native 守卫真实写点已按全库 grep 收口;设计稿 §6 记录已知未接线缺口(gate 调用点接入=第二批)。
 
 **收尾编排(Bettor #ugultk 拍板)**: ①KANet-UI 只读 backfill dry-run 报告(含 pruned 15 行/A0 六条正式归因=DoD-5)→②J1 域判→③装载窗一次装(§3.5+本批,K18_BACKFILL_CONFIRMED=1 随窗,DoD-4 顺序满足),第二批=gate 接线+高频零子进程实测,今日续走。
+
+## ✅ P2 第一批装载完成+四验全绿(2026-07-21 09:56Z·KANet-UI 执行)——批2 开工
+
+**装载**: §3.5+批1(至 `a6d7f876` 线+KANet-UI 脚本 `05575a08`),窗前 checklist 三项全过(树干净/K18_BACKFILL_CONFIRMED=1 显式授权/tick 间隙),停机 34 秒(PID 16188→169701)。**四验**: ①v189 backfill 实跑 vs dry-run 预测**精确吻合**(721/623/20/78 一个数字不差)②§3.5 15 断言活代码复跑全绿③coherence 模块测试活代码全绿④RPC 零错/零 uncaught/tick 正常。**DoD-4 判据口径记档**: "unknown 中在途/活跃盘=0"为实质判据(非字面 unknown=0),三方收敛(Bettor 拍口径/J1 域判含 pruned 状态零读写路径核实/NWT selectRipeMarkets 代码证据),KANet-UI 逐行断言 78=63refunded+15pruned 零活跃。J1 拍 (a) 接受现标签(引今晨 marker 教训拒仓促加塞改 classifier,判断质量高)。
+
+**非阻塞立卡**: ①classifier 家族/模板两维度拆分(63 条 refunded 家族实无疑问,事后 UPDATE 修正)→并入批2 设计一次红队;②kanet.env KASPA_WS_PROXY_PORT=17310 vs kaspad 17210 既有配置漂移(仅浏览器桥接,KANet-UI 卡);③DoD-5(pruned 15+A0 六条正式归因)维持独立开放;④verifyRedeemMatchesChainObservedOutput indexer-miss 兜底(J2 认领)。KANet-UI 独立复核 tg-bot 约束已历史化(与 Bettor 晨查一致)。
+
+**批2 范围(开工)**: gate 接线(ensurePayoutShard/V2+consolidateAndBuildPsState 调用点分级)+高频零子进程性能实测+classifier 拆分——设计先行 J1→NWT 红队→落码。
