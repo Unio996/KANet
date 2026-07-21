@@ -358,6 +358,21 @@ Owner 元问题:写进文档的铁律(CLAUDE.md 接位 SOP 第5条"设计前查�
 
 **验证尝试(J1 提议+KANet-UI 执行)**: 查 `metadata.zk_native`(顶层+`resolution_rule_spec.zk_native` 两路径)——**结果全部 null**,跟 `attested_v2` 那 9 条同款。**这条判据在此不可用(J1 预判正确)**:标记本身从铸造起就可能没打对,是 K-18 §2 自己诊断的病根("唯一家族选择器 = 可变标记,对 mint 后标记漂移零防护")——**metadata 检测走不通反而是 side-confirm K-18 §3.1 要建不可变 `covenant_family` 列的设计理由本身**,不是白查。真正判定权在 J1 域内结构探针(已跑,数字对上 2614)或更深 `.sil` 字节码判读/复用 8pson 当时的四值探针脚本。**J1 提出该把这批并入 K-18 §3.1(covenant_family 不可变列 + backfill)优先级考量,非今晚域内能定,已转达。**
 
-**待续,下一 session 查频道最新——四值探针复核是否已跑 + 这轮 backfill triage 是否能收尾成"98 条全部已知家族误判,零真实漂移"。**
+### ✅ 四值探针复核完成(J2 执行,`_j2_4value_probe_8verifying.mjs`)+ J1 正式域判定(`14e940af`)——83/98 有硬证据归因,15 条(pruned_expired_waived)仍真开放
+
+**J2 直接跑了 8pson 当年判定用的同款四值探针工具**(照抄 `codex_probe_8pson.mjs` 判据,泛化到 verifying 组 8 目标,只读零链上调用):**结果 8/8 全部同一签名**——`stored G0=8282 字节`,V1 genesis 重编译 `G1=10896 字节`,`G0-G1=-2614 字节`(逐一精确相等,非近似),`G1==G0` 全部 `false`,跟 8pson 当年判据逐位吻合。**J1 独立结构探针(`14e940af`,结构信号匹配,byteLength+zk_native 两个独立信号)与 J2 的四值探针(更严格的 opcode 级方法)结果一致收敛。**
+
+**J1 正式域判定(明确纠正频道里"98 条全部满足"的过度概括,以此条为准)**:
+- **65 行 refunded**:假阳性(硬证据:`refund_tx_obj`/`refund_txid` 真实落链值,已过 `closed:0` 阶段)。
+- **9 行 attested_v2**:假阳性(硬证据:其中一条 id 正是 `docs/DECISIONS.md` D-009 记录的 ZK guest imageId 事故盘 `pxvml`)。
+- **8 行 verifying(7jy3s/s6zwj/tha3l/9ez2u/9jaty/j34vb/3mzoh/kr5l4)**:高置信度假阳性(8pson 同族家族误判,J2 四值探针 byte-exact 确认)。
+- **合计 83/98 有归因,判定为方法论假阳性,非真实 splice/recompile 权威漂移。**
+- **🔴 剩余 15 行(`pruned_expired_waived`)——J1 明确标注"仍未跑同款探针,待续但不影响上面 98-15=83 条的判定"**,只有 created_at 时序证据(排除 D-001,非坚实归因)。**这是唯一真正未闭合的开放项,不可与"98 条全部满足"混同。**
+
+**次要发现(J2 提,非阻塞,归入 K-18 全案而非新开线)**:8 个 verifying 目标里 `A0`(stored redeem 的 p2sh)vs 记录的 `payout_ps_addr`——仅 2 个(`7jy3s`/`kr5l4`)相符,6 个不符。NWT 建议归进 K-18 §3.3(d)(p2sh(stored)==payout_ps_addr 本是四步门里一步)一起治,J1 认领"明天(非今晚)看"。
+
+**部署门禁(明确不变,J1 原话)**: P0 核心(v0.3)全程保持 NWT GREEN + 非阻塞校验姿态,**不受这轮调查任何结论影响,钱路侧安全边界没变**。K-18 §3.4 权威切换(recompile 从非阻塞升级为硬拒绝闸)仍需完整 DoD-0(含 `pruned_expired_waived` 15 行)+ line423 口径 + Owner money-path 三项全过,**本轮只是 DoD-0 的绝大部分(83/98)有了扎实归因,不是"DoD-0 已满足"的正式宣告**。今晚到此,`pruned_expired_waived` 探针 + `kr5l4` 关联 + A0 次要发现全部留作非阻塞待办。
+
+**过程教训(自曝,记账)**: 06:17 Owner 问"怎么没看你动起来"——34 分钟全频道(不只 Bettor)静默,原因是团队判断剩余项非紧急后停手但没主动汇报进展,Bettor 未及时主动跟进(协调者该做的"持续跟进"没做到)。重新拉起后 1 分钟内 J2/J1 均给出实质进展,证明团队本身健康,是协调层的可见性/主动性缺口,非系统或团队卡住。已认账,后续静默超时应主动检查而非被动等 Owner 发现。
 
 ---
