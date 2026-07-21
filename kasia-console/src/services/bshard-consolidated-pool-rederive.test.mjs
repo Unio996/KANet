@@ -238,26 +238,49 @@ console.log('[test] scenario E (#28 line423, Bettor #ubmne2.1): verifyRedeemMatc
     const addr = _p2sh(candidateHex);
     sqlite.prepare(`INSERT INTO kaspa_tx_log (tx_id, outputs_json, observed_at) VALUES (?, ?, datetime('now'))`)
       .run(txid, JSON.stringify([{ address: addr, amount_sompi: '123' }]));
-    const result = verifyRedeemMatchesChainObservedOutput({ db: sqlite, p2sh: _p2sh, candidateRedeemHex: candidateHex, outpointTxid: txid, outpointIdx: 0 });
+    const result = await verifyRedeemMatchesChainObservedOutput({ db: sqlite, p2sh: _p2sh, candidateRedeemHex: candidateHex, outpointTxid: txid, outpointIdx: 0 });
     ok(result === true, `matching candidate verified true (got: ${result})`);
   }
 
-  console.log('  [E2] mismatch: kaspa_tx_log has a row for the outpoint but the observed address is for a DIFFERENT script than the candidate — verified false, not presence-trusted:');
+  console.log('  [E2] mismatch: kaspa_tx_log has a row for the outpoint but the observed address is for a DIFFERENT script than the candidate — verified false, not presence-trusted, and does NOT fall back to getUtxos (confirmed mismatch is not "pick whichever source is convenient"):');
   {
     const txid = 'bb'.repeat(32);
     const candidateHex = Buffer.from('e2-candidate-bytes-0000000000000000').toString('hex');
     sqlite.prepare(`INSERT INTO kaspa_tx_log (tx_id, outputs_json, observed_at) VALUES (?, ?, datetime('now'))`)
       .run(txid, JSON.stringify([{ address: 'kaspatest:some-unrelated-address-not-the-candidate', amount_sompi: '123' }]));
-    const result = verifyRedeemMatchesChainObservedOutput({ db: sqlite, p2sh: _p2sh, candidateRedeemHex: candidateHex, outpointTxid: txid, outpointIdx: 0 });
+    let fallbackCalls = 0;
+    const spyGetUtxos = async () => { fallbackCalls++; return []; };
+    const result = await verifyRedeemMatchesChainObservedOutput({ db: sqlite, p2sh: _p2sh, candidateRedeemHex: candidateHex, outpointTxid: txid, outpointIdx: 0, getUtxos: spyGetUtxos });
     ok(result === false, `mismatched candidate verified false, not treated as fresh just because a row exists (got: ${result})`);
+    ok(fallbackCalls === 0, `confirmed mismatch must NOT call getUtxos fallback (got ${fallbackCalls} calls)`);
   }
 
-  console.log('  [E3] indexer gap: no kaspa_tx_log row at all for the outpoint — verified false (fail-closed default, matches _inferWinDirectionFromChain\'s "F3 账" convention, never treated as an implicit pass):');
+  console.log('  [E3] indexer gap, no getUtxos passed: no kaspa_tx_log row at all for the outpoint — verified false (fail-closed default, matches _inferWinDirectionFromChain\'s "F3 账" convention, never treated as an implicit pass). Backward-compat baseline: identical outcome to before this function had a getUtxos param:');
   {
     const txid = 'cc'.repeat(32);   // never inserted into kaspa_tx_log
     const candidateHex = Buffer.from('e3-candidate-bytes-0000000000000000').toString('hex');
-    const result = verifyRedeemMatchesChainObservedOutput({ db: sqlite, p2sh: _p2sh, candidateRedeemHex: candidateHex, outpointTxid: txid, outpointIdx: 0 });
+    const result = await verifyRedeemMatchesChainObservedOutput({ db: sqlite, p2sh: _p2sh, candidateRedeemHex: candidateHex, outpointTxid: txid, outpointIdx: 0 });
     ok(result === false, `missing indexer row verified false, not an implicit pass (got: ${result})`);
+  }
+
+  console.log('  [E4] indexer gap, getUtxos fallback rescues it: no kaspa_tx_log row (indexer never recorded this txid — permanent miss, not lag), but the candidate address\'s current live UTXO set has exactly this outpoint — verified true, inconclusive is not the same as confirmed-false:');
+  {
+    const txid = 'dd'.repeat(32);   // never inserted into kaspa_tx_log
+    const candidateHex = Buffer.from('e4-candidate-bytes-0000000000000000').toString('hex');
+    const candidateAddr = _p2sh(candidateHex);
+    const stubGetUtxos = async (addr) => (addr === candidateAddr
+      ? [{ entry: { outpoint: { transactionId: txid, index: 0 }, amount: '123' } }] : []);
+    const result = await verifyRedeemMatchesChainObservedOutput({ db: sqlite, p2sh: _p2sh, candidateRedeemHex: candidateHex, outpointTxid: txid, outpointIdx: 0, getUtxos: stubGetUtxos });
+    ok(result === true, `indexer-gap case rescued by getUtxos fallback finding the exact outpoint (got: ${result})`);
+  }
+
+  console.log('  [E5] indexer gap, getUtxos fallback also finds nothing: neither source has this outpoint — verified false, same as before (not worse, not better — fallback only rescues, never makes it stricter):');
+  {
+    const txid = 'ee'.repeat(32);   // never inserted into kaspa_tx_log
+    const candidateHex = Buffer.from('e5-candidate-bytes-0000000000000000').toString('hex');
+    const stubGetUtxos = async () => [];   // candidate address has no live UTXOs at all
+    const result = await verifyRedeemMatchesChainObservedOutput({ db: sqlite, p2sh: _p2sh, candidateRedeemHex: candidateHex, outpointTxid: txid, outpointIdx: 0, getUtxos: stubGetUtxos });
+    ok(result === false, `both sources inconclusive → false, not a hang/crash (got: ${result})`);
   }
 }
 

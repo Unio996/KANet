@@ -349,17 +349,41 @@ export function settlePayoutRoot(winners) {
 //   outputs_json 直接读某 txid 某 output 的链上观测地址), 这次抽成共享函数供两处调用, 不重复写第三份。
 //   本身不碰链(kaspa_tx_log 是本地 indexer 缓存), 跟 _inferWinDirectionFromChain 同款"F3 账"边界——
 //   indexer 缺口时返回 false(不新鲜), 调用方按 fail-closed 处理, 不能当"验证通过"用。
-export function verifyRedeemMatchesChainObservedOutput({ db, p2sh, candidateRedeemHex, outpointTxid, outpointIdx }) {
+// 🔴 2026-07-21(J2, 独立小卡, Bettor #uhc592.1 授权与批2并行·NWT #uh9wn5.1 GREEN): 可选 getUtxos 兜底(照抄
+//   §3.5 verifyClaimLanded 的三态纪律,同一函数不重复发明第二套语义)——kaspa_tx_log 查无该 txid/JSON
+//   解析失败/outputs 里没有这个 index 三种情形统一是 indexer inconclusive(不是"确认不符"), 传了
+//   getUtxos 时用它现查 candidateAddr 当前 UTXO 集兜底一次: 命中该 outpoint 才算 true, 查无仍 false
+//   (不比之前更松, 只是多一次挽救渠道)。**"记录里有地址但不相符" 是唯一的"确认 mismatch", 不 fallback**
+//   (不允许两个源挑一个顺眼的, 同 §3.5 纪律)。不传 getUtxos = 行为完全不变(向后兼容)。
+//   ⚠ 函数从同步改成 async(必须, 不是随手加): fallback 分支天然要 await getUtxos, 如果只在"传了
+//   getUtxos"时才返回 Promise、其余分支仍同步返回 boolean, 会制造"同一个函数按参数决定同步/异步返回
+//   类型"的陷阱——调用方若沿用旧的"当同步布尔值用"的写法(不 await), 会把 Promise 对象当真值判断,
+//   永远 truthy, 把 fail-closed 的安全默认悄悄翻成 fail-open。改成统一 async + 两个既有调用点补 await,
+//   一次性堵死这条(比"看起来兼容其实是新 bug"的兼容更可靠)。
+export async function verifyRedeemMatchesChainObservedOutput({ db, p2sh, candidateRedeemHex, outpointTxid, outpointIdx, getUtxos }) {
   let candidateAddr;
   try { candidateAddr = p2sh(candidateRedeemHex); } catch { return false; }
+  const fallback = async () => {
+    if (!getUtxos) return false;
+    try {
+      const entries = await getUtxos(candidateAddr);
+      return (entries || []).some(e => {
+        const j = JSON.parse(JSON.stringify(e, (k, v) => typeof v === 'bigint' ? v.toString() : v));
+        const op = j.entry?.outpoint || j.outpoint;
+        return op?.transactionId === outpointTxid && Number(op?.index) === Number(outpointIdx);
+      });
+    } catch { return false; }
+  };
   const txRow = db.prepare('SELECT outputs_json FROM kaspa_tx_log WHERE tx_id = ?').get(outpointTxid);
-  if (!txRow?.outputs_json) return false;
+  if (!txRow?.outputs_json) return fallback();   // indexer 缺口: inconclusive, 不是确认不符
   try {
     const outs = JSON.parse(txRow.outputs_json);
     const o = outs[outpointIdx];
     const chainObservedAddr = o?.address || o?.verboseData?.scriptPublicKeyAddress || o?.scriptPublicKeyAddress || null;
-    return !!(chainObservedAddr && chainObservedAddr === candidateAddr);
-  } catch { return false; }
+    if (!chainObservedAddr) return fallback();   // 记录里没这个地址字段: 同样 inconclusive
+    if (chainObservedAddr === candidateAddr) return true;
+    return false;   // 记录里有地址且不符 = 确认 mismatch, 不 fallback(防挑顺眼源)
+  } catch { return fallback(); }   // JSON.parse 失败: inconclusive
 }
 
 // 🔴 2026-07-21 Codex finding③(coord/codex-bridge 2a10f5e8, MUST-FIX4 附带项): "autoDetectConsolidateResume

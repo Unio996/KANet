@@ -435,7 +435,7 @@ export async function settleMarketLive(marketId, ctx) {
   let curRedeem = null;   // 复用验证循环里已经编译过的候选字节, 不在下面重复调一次 compilePayoutShardRedeem
   for (const candidate of [evidencePool, formulaPool].filter(Boolean)) {
     const candidateRedeem = compilePayoutShardRedeem({ poolMerkleRoot: psRow.pool_merkle_root, predicateCommit: psRow.predicate_commit, consolidatedPool: candidate, closed: 1, payoutRoot: plan.payoutRoot });
-    const verified = ctx.db && ctx.p2shAddr && verifyRedeemMatchesChainObservedOutput({ db: ctx.db, p2sh: ctx.p2shAddr, candidateRedeemHex: candidateRedeem, outpointTxid: closeTxid, outpointIdx: 0 });
+    const verified = ctx.db && ctx.p2shAddr && await verifyRedeemMatchesChainObservedOutput({ db: ctx.db, p2sh: ctx.p2shAddr, candidateRedeemHex: candidateRedeem, outpointTxid: closeTxid, outpointIdx: 0, getUtxos: ctx.getUtxos });
     if (verified) { consolidatedPool = candidate; curRedeem = candidateRedeem; break; }
   }
   if (consolidatedPool == null) {

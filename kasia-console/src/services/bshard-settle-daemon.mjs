@@ -229,7 +229,7 @@ async function consolidateAndBuildPsState(marketId, ps, ctx) {
     // Tier1: 独立链读核实 payout_redeem_hex 是否新鲜(不信它反推的地址, 核它)。2026-07-21 抽成共享函数
     // verifyRedeemMatchesChainObservedOutput(pool-shard-settle.mjs)——line423(settleMarketLive claim-thread
     // consolidatedPool 校验)复用同一个原语, 不重复写第二份。
-    const redeemFresh = verifyRedeemMatchesChainObservedOutput({ db: sqlite, p2sh: _p2shCache, candidateRedeemHex: ps.payout_redeem_hex, outpointTxid: psOutpointTxid, outpointIdx: psIdx });
+    const redeemFresh = await verifyRedeemMatchesChainObservedOutput({ db: sqlite, p2sh: _p2shCache, candidateRedeemHex: ps.payout_redeem_hex, outpointTxid: psOutpointTxid, outpointIdx: psIdx, getUtxos });
 
     let consolidatedPoolReal = null;
     if (redeemFresh) {
