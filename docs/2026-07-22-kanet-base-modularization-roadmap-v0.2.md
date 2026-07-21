@@ -1,6 +1,6 @@
-# KANet 底座模块化路线图 v0.2（收敛稿 · 对抗讨论第一轮裁决整合 · 待 Owner 磨合）
+# KANet 底座模块化路线图 v0.2.1（收敛稿 · 对抗讨论第一轮裁决整合 + D2 三轨定稿 · 待 Owner 磨合）
 
-> **Status**: CURRENT（2026-07-22 · Bettor 主编 · 整合 KANet-UI/NWT/J1/J2 四方对抗意见，频道裁决 #v6ij51 在案）
+> **Status**: CURRENT（2026-07-22 · Bettor 主编 · 整合 KANet-UI/NWT/J1/J2 四方对抗意见，频道裁决 #v6ij51 在案；v0.2.1 增量：D2 按 34 命令分类表实证结果由双轨升三轨，四方全数确认）
 > **流程锚**（Owner 终裁 2026-07-21 18:20Z）：首稿 v0.1 → 对抗讨论（本轮完成，四方全回执）→ **本收敛稿交 Owner 磨合 → 钉死后 Bettor 安排分批执行。钉死前不动任何执行代码。**
 > **v0.1→v0.2 变更**：D2 拆双轨（J1）；D4 按 J2 读码修正（exchange-machine 零预测逻辑）+ V1 drain 退役方案（J2）；M0 加运维脚本例外 + 豁免燃尽三钉（KANet-UI/NWT）；M1 按 handler 拆三批 + 互斥穷尽两硬门（NWT）；全路线图单批规模硬上限（NWT 实测校准）；M3 排序钉死 M3a+M3b→M3c（J1）；运维/runbook 改造升为一等工作项 + 拓扑自报端点（KANet-UI）。
 > **本卡性质**：设计文档，不改一行执行代码。
@@ -20,11 +20,15 @@
 ### D1 数据库：不物理拆库，先拆访问路径（无人反对，维持）
 应用专属表留 console.db，应用代码一律经仓储层/HTTP API 访问，禁止裸 `sqlite` 句柄。物理拆库留待独立进程化稳定后单独议。
 
-### D2 Relay 命令表：双轨制（J1 裁定采纳）
-34 个应用专用命令**先分类再处理**，两轨性质不同不许混：
-- **组合型**（仅用 16 个通用原语拼顺序/参数校验）：走轻量应用注册机制，链上能力边界已被原语框死，app 团队自审组合逻辑安全。
-- **原语扩展型**（新脚本构造/新签名模式，如 PayoutShard/ShardLeaf covenant construction）：**不叫注册**，直接进 relay 核心命令表，走 relay 代码库全强度审查（NWT/团队）。"唯一链上出口能干什么"的决定权不下放。
-- **前置任务（进行中）**：34 命令分类表——J2 主核 + KANet-UI 复核，五列（命令名/轨别/依据），纯读码分析。分类比例决定 D2 实施复杂度，分类表出来前 D2 不进设计稿阶段。
+### D2 Relay 命令表：三轨制（v0.2.1 定稿 · J2 分类表实证 + J1/NWT/KANet-UI 全数确认）
+分类表已完成（J2 主核读 COMMAND_PAYLOAD_SCHEMA/FIELD_TYPES + KANet-UI 实读 relay.mjs 抽查坐实 + J1/NWT verdict）：**类 A 6 + 类 B 9 + 类 C 20 = 35 条**（原估 ~34，取整差异）。分轨依据是 **relay 对 covenant 脚本的信任模型**，非组合 vs 扩展：
+
+- **类 A 纯计算/只读（6）**：GET_PER_BET_ADDRESS / POOL_V07_COMPUTE_REFUND_MASS / CHAIN_GET_* ×3 / GET_ADDRESS_UTXOS。零签名能力，风险天然有界 → **轻量应用注册通道**。
+- **类 B 盲签（9，风险排三类之首——J1 裁定，NWT 认可）**：PREDICTION_SETTLE_TX 等 9 条，调用方传 `redeem_script_hex`，relay 零结构/opcode 校验原样签字（KANet-UI 实证 `relay.mjs:786-816`）。本质 = "唯一链上出口"的独立校验能力被清空，**谁能拿到这个 IPC 接口 = 谁就有等效签名权**；与 covenant_family 治的"不独立验证、只信调用方声明"是同一反模式。两条硬约束（J1 钉，非软建议）：
+  ① **caller 白名单必须运行时强制**（relay 侧校验 caller identity），不是审查时君子协定；现状这 9 条的调用权限控制是既有缺口，D2 设计稿**硬前置**摸清并趁重构窗口补上（NWT）。
+  ② 长期观察项独立立卡（不阻塞本轮）：relay 对高频类 B 脚本做最小结构校验——校验脚本 hash 落在已注册模板集合（covenant_family structural-signature 思路），非重新实现 covenant 逻辑。
+  D2 设计稿中类 B 是最重的一块，禁被"只有 9 条"的数量印象带轻。
+- **类 C relay 内建 covenant 编译（20）**：BSHARD_* / CLOSEZK_* 全家，payload 为结构化 {witness,inputs,outputs}，relay 内部编译脚本字节。每加一条 = relay 签名能力集合实际变大 → **应用命令注册机制 + relay 代码库全强度审查**（NWT/团队，不下放 app 自审）。
 
 ### D3 协议消息分发收归底座原语（维持，DoD 见 M1 两硬门）
 
@@ -95,7 +99,8 @@
 
 | 项 | 状态 |
 |---|---|
-| 34 命令分类表（J2 主核 + KANet-UI 复核） | 进行中，v0.2 已派工，D2 设计前置 |
+| 34 命令分类表（J2 主核 + KANet-UI 复核） | ✅ 完成（A6+B9+C20=35，四方确认，已入 D2 三轨定稿） |
+| 类 B 现状调用权限控制摸底 + caller 白名单方案 | D2 设计稿硬前置（钉死后 M0-M1 期间可并行做设计） |
 | 本收敛稿交 Owner 磨合 | 待交（Bettor 精炼单点上报） |
 | Owner 磨合点：①方案本体 ②节奏/火力配比（公测运营 vs 模块化 vs ZK 主线） | 待 Owner |
 | 钉死后：M0 设计稿开工（首批派工） | 等钉死 |
