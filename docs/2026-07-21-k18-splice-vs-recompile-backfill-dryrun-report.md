@@ -68,6 +68,22 @@ MISMATCH+FAIL 非零(98) → **不满足"全部一致"，K-18 §3.4 权威切换
  WHERE logical_market_id IN (<marketId 列表>))
 ```
 
+## J1 域正式判定(2026-07-21,K-18 §3.3(b) 结构探针结果,`_j1tn_k18_v1_structural_probe.mjs` commit d97e2435,KANet-UI 执行)
+
+**verifying 组 8 目标(7jy3s/s6zwj/tha3l/9ez2u/9jaty/j34vb/3mzoh/kr5l4)判定:高置信度=8pson 同族家族误判,非新 splice/recompile 漂移。**
+
+**证据链**:
+1. `byteLength` 8 个目标全部 = **8282**(hex 字符数 16564÷2,此前 KANet-UI 报告口径误把 hex 字符数当字节数,已自查纠正),对照 baseline(任一 `completed` 状态已知正常 V1 行)= **10896**,差值 = **2614 字节,8 个目标全部一致**(不是随机分散的损坏特征——数据损坏预期长度各不相同,系统性一致差值指向"同一份不同模板")。
+2. 该数值**不是巧合**:COORD-LEDGER 228 行(8pson 死路定案,Codex 四值探针+NWT+J2 三方核实)白纸黑字记录 "G1≠G0 结构性差 2614 字节(V2 vs V1 两编译路径)"——跟今晚测出的差值**位数级精确匹配**,同一个数字出现在两次独立时间点的独立测量中。
+3. state 头部字段(`0x08` PUSH8 marker 位置、`consolidatedPool` 解码 offset)8 个目标全部结构正确、数值域合理(20000000~5650020000000 sompi,无乱码/负数/溢出)——排除"数据物理损坏"假说,支持"完整但来自不同编译模板"。
+4. `resolution_rule_spec.zk_native` 全部 null(KANet-UI 现查坐实)——跟 K-18 §2 自己诊断的病根吻合:"唯一家族选择器=可变标记...对 mint 之后的标记漂移零防护"。这批市场很可能跟 8pson 同款,genesis 铸造时是 V2/ZK 家族,但记录家族的标记(`zk_native`)从一开始就没有可靠写入/后续漂移,导致任何依赖这个字段的家族判断(包括本次 backfill 脚本的过滤逻辑)都测不准。
+
+**置信度诚实标注**: 这是**结构信号高度吻合**的判定,不是逐 opcode 字节比对出的 100% 确证(那需要 Codex 当时对 8pson 做的完整四值探针同款深度,本次只做了长度+关键 offset 抽查,没有对 8pson 本尊和这 8 个目标做逐字节 diff 互证)。但独立信号数量(byteLength 精确匹配已知值+state 头结构正确+zk_native 全 null 同 8pson 病灶)已经足够排除"新的 splice/recompile 权威 bug"这个 K-18 §3.4 真正关心的问题——**跟 P0/K-18 §3.4 权威切换的相关性判定为:不相关,是另一个已知问题(家族标记不可靠)的更多样本,不是 v0.3 引入或发现的新漂移**。
+
+**待续(不阻塞上面的判定,分开记账)**:
+- `kr5l4` 单独关联(COORD-LEDGER committee-seed 退款修法那条线)未查,不影响上面的家族误判判定(byteLength/zk_native 两个信号 kr5l4 都命中同款特征),但完整归因留待需要时再查。
+- `pruned_expired_waived`(15 行)组**尚未跑同款结构探针**——本次探针目标只覆盖了 verifying 组 8 条,pruned_expired_waived 是否也是同一个 2614 字节签名待验证(如果是,可以把假阳性范围扩到 74+15=89/98;如果不是,那是另一个独立、真正需要查的信号)。建议下一步: 用 `_j1tn_k18_v1_structural_probe.mjs` 传 pruned_expired_waived 那 15 个 marketId 跑一遍,看 byteLength 是不是同样落在 8282(同 8pson 族)还是别的数字(全新信号)。
+
 ## 部署门禁状态(不变)
 
 K-18 §3.4 权威切换(recompile 从非阻塞校验升级为硬拒绝闸)仍然 **不满足**。P0(6cff7305→v0.3 25b3d0a0)的整体装载仍受 NWT RED verdict + Codex MUST-FIX(6条，部分已折入 v0.3)+ Owner money-path 三重门禁，本报告只解决其中一项前置(backfill dry-run)，且解决结果是"数据摆出来了，但 98 条不一致需要人工归因，不能直接宣布'满足全部一致'"。
