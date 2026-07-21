@@ -118,8 +118,11 @@ export async function ensurePayoutShard({ db, rc, transfer, landed, p2sh, logica
   if (!payoutCovId || payoutCovId === z32) throw new Error('PayoutShard genesis-mint cov_id 0 — covenant provenance fail');
   if (!await landed(psTx, psAddr)) throw new Error('PayoutShard genesis no land');
 
-  db.prepare(`INSERT INTO payout_shards (logical_market_id, payout_cov_id, payout_ps_addr, payout_ps_outpoint, payout_redeem_hex, pool_merkle_root, predicate_commit, created_at)
-    VALUES (?,?,?,?,?,?,?,?)`).run(logicalMarketId, payoutCovId, psAddr, `${psTx}:0`, redeem, poolMerkleRoot, predicateCommit, Math.floor(Date.now() / 1000));
+  // K-18 §3.1(covenant_family 列, migrate v189): 谁编译谁 declare — 这里走 compilePayoutShardRedeem(V1),
+  // 声明 'v1_committee'。不可变(§3.2 assertZkNativeImmutable 只护 genesis 之后; genesis 这一刻本身就是
+  // 唯一定家族的时刻, 不需要额外守卫)。
+  db.prepare(`INSERT INTO payout_shards (logical_market_id, payout_cov_id, payout_ps_addr, payout_ps_outpoint, payout_redeem_hex, pool_merkle_root, predicate_commit, created_at, covenant_family)
+    VALUES (?,?,?,?,?,?,?,?,?)`).run(logicalMarketId, payoutCovId, psAddr, `${psTx}:0`, redeem, poolMerkleRoot, predicateCommit, Math.floor(Date.now() / 1000), 'v1_committee');
   return { payoutCovId, psAddr, psOutpoint: `${psTx}:0`, psRedeemGenesis: redeem };
 }
 
@@ -255,11 +258,10 @@ export async function ensurePayoutShardV2({ db, rc, transfer, landed, p2sh, logi
   if (!payoutCovId || payoutCovId === z32) throw new Error('PayoutShardV2 genesis-mint cov_id 0 — covenant provenance fail');
   if (!await landed(psTx, psAddr)) throw new Error('PayoutShardV2 genesis no land');
 
-  // ⚠ payout_shards 表(migrate v172)目前无 V1/V2 区分列——今天范围只加这两个函数，不加 schema。
-  // 下游若需要区分本行是 V1 还是 V2 shaped redeem，靠调用方自己的市场类型记录(如 pool_markets.protocol_status
-  // ='zk_ready')判断，不靠 introspect 这张表。若后续需要，独立小工单加列，非本次范围。
-  db.prepare(`INSERT INTO payout_shards (logical_market_id, payout_cov_id, payout_ps_addr, payout_ps_outpoint, payout_redeem_hex, pool_merkle_root, predicate_commit, created_at)
-    VALUES (?,?,?,?,?,?,?,?)`).run(logicalMarketId, payoutCovId, psAddr, `${psTx}:0`, redeem, poolMerkleRoot, predicateCommit, Math.floor(Date.now() / 1000));
+  // K-18 §3.1(covenant_family 列, migrate v189, 落地取代了下面这条 2026-07-07 遗留注释描述的"无区分列"
+  // 状态): 谁编译谁 declare — 这里走 compilePayoutShardV2Redeem(V2/ZK), 声明 'v2_zk'。
+  db.prepare(`INSERT INTO payout_shards (logical_market_id, payout_cov_id, payout_ps_addr, payout_ps_outpoint, payout_redeem_hex, pool_merkle_root, predicate_commit, created_at, covenant_family)
+    VALUES (?,?,?,?,?,?,?,?,?)`).run(logicalMarketId, payoutCovId, psAddr, `${psTx}:0`, redeem, poolMerkleRoot, predicateCommit, Math.floor(Date.now() / 1000), 'v2_zk');
   return { payoutCovId, psAddr, psOutpoint: `${psTx}:0`, psRedeemGenesis: redeem };
 }
 

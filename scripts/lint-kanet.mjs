@@ -143,6 +143,46 @@ src/lib/explorer-url.mjs), 或(tg-bot/.eta 等不能 import 该 ESM helper 的�
   }
 }
 
+// ── R-PS-FAMILY-DISPATCH [ERROR, 硬阻塞]: compilePayoutShardRedeem/V2Redeem 调用点必在已知白名单内 ──
+// (K-18 §3.4 lint 原设计, docs/2026-07-21-p2-batch1-truth-source-layer-k18-landing-design.md §3.4)。
+// 🔴 落码时核实修正(2026-07-21, J1 grep 全库实测坐实, 不是猜): 原稿以为只有 pool-shard-register.mjs(定义
+// 处)+coherence gate 单源两处该出现, 实际 grep 出 bshard-auto-settler.mjs(6 处, close/claim/cancel/refund
+// redeem 构建——这些是构建"即将真实广播的花费 TX"所需的合法必经路径, 不是绕过 gate 的散装误用)+
+// bshard-settle-daemon.mjs(1 处, P0 已落地的 non-blocking recompile 校验, verify-value-source 已审)也是
+// 合法既有调用点——若不列入白名单, 这条规则会把 6+1 处已经过 NWT/Codex 红队审过的生产核心代码全部拦下,
+// 是本规则最初设计粒度过细(误以为"物理调用点位置"能作为"是否经过 coherence gate 保护"的判据, 实际两者
+// 无必然对应, coherence gate 保护是运行时/调用序列层面的事, 不是文件位置能表达的)。收窄本规则实际能提供
+// 的价值: 不是"运行时强制经过 gate"(那需要 AST 级调用图分析, 不是本规则能力范围, 诚实标注非本规则职责),
+// 而是"防止第 N+1 个新增/意外调用点悄悄冒出来绕过既有审查纪律"——白名单 = 已知+已审过的合法调用点全集,
+// 任何新文件/新位置调这两个函数 = 触发人工审查(是否也该走 coherence gate / splice-not-recompile 纪律)。
+const _PS_FAMILY_DISPATCH_WHITELIST = [
+  path.join(ROOT, 'kasia-console/src/lib/pool-shard-register.mjs'),          // 定义处
+  path.join(ROOT, 'kasia-console/src/lib/bshard-payout-family-coherence.mjs'), // coherence gate 单源(K-18 §3.1-3.3)
+  path.join(ROOT, 'kasia-console/src/db/migrate.js'),                        // v189 backfill(一次性, 允许子进程成本)
+  path.join(ROOT, 'kasia-console/src/services/bshard-auto-settler.mjs'),     // close/claim/cancel/refund redeem 构建(既有, 已审)
+  path.join(ROOT, 'kasia-console/src/services/bshard-settle-daemon.mjs'),    // P0 non-blocking recompile 校验(已审, verify-value-source)
+];
+function checkR_PS_FAMILY_DISPATCH(fp, content) {
+  if (!/\.(mjs|js|cjs)$/.test(fp)) return;
+  if (/\.test\.mjs$/.test(fp)) return;   // 测试文件允许直接验证编译产物
+  const resolved = path.resolve(fp);
+  if (_PS_FAMILY_DISPATCH_WHITELIST.some(w => resolved === w)) return;
+  if (/[\\/]scripts[\\/]_\w*k18\w*\.mjs$/.test(fp.replace(/\\/g, '/'))) return;   // K-18 一次性 backfill/诊断脚本同一权限级别
+  const lines = content.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    if (/^\s*(\/\/|\*)/.test(lines[i])) continue;   // 纯注释提及不算
+    if (!/\bcompilePayoutShard(V2)?Redeem\s*\(/.test(lines[i])) continue;
+    violate('R-PS-FAMILY-DISPATCH',
+      `compilePayoutShardRedeem/V2Redeem 调用点出现在白名单(pool-shard-register.mjs 定义处 / bshard-payout-
+family-coherence.mjs coherence gate 单源 / migrate.js backfill / K-18 诊断脚本 / *.test.mjs)之外的文件——
+这两个函数的编译产物只能作 validation-only 校验用, 不能绕过 assertPayoutShardCoherence 直接当花费权威字节
+使用(K-18 §3.4, 呼应 Codex MUST-FIX4 教训)。改走 assertPayoutShardCoherence(psRow, {p2sh, tier}) 或 splice
+(pool-shard-settle.mjs autoDetectConsolidateResume/consolidateAllShards 已返回 spliced redeemHex, 不需要
+自己 recompile)。`,
+      fp, i + 1);
+  }
+}
+
 // ── R-FEE-SPLIT-PKG-DRIFT [ERROR, 硬阻塞]: packages/fee-split/fee-split.mjs 必与源同步 ──
 // (B线落3, NWT G1 修法②, 2026-07-12): packages/fee-split/fee-split.mjs 是
 // kasia-console/src/lib/fee-split.mjs 的构建产物(packages/fee-split/scripts/sync.mjs 生成, 逐字节复制
@@ -1314,6 +1354,7 @@ for (const fp of targets) {
   checkR_EXPLORER_URL_BYPASS(fp, content);     // R-EXPLORER-URL-BYPASS [ERROR] (死链收敛设计 §3 2026-07-12): explorer 域名字面量禁散装, 单源 explorer-url.mjs 外一律硬阻塞
   checkR_SELF_HTTP_FETCH(fp, content);         // R-SELF-HTTP-FETCH [WARN] (2026-07-14 legacy-refund 自锁死循环修复设计): console 禁 fetch 自己的端口
   checkR_FETCH_NO_TIMEOUT(fp, content);        // R-FETCH-NO-TIMEOUT [WARN] (同上设计 修法C): fetch() 建议带 AbortSignal.timeout
+  checkR_PS_FAMILY_DISPATCH(fp, content);      // R-PS-FAMILY-DISPATCH [ERROR] (K-18 §3.4 2026-07-21): compilePayoutShardRedeem/V2Redeem 调用点白名单, 防绕过 coherence gate
 }
 checkR10();
 checkR_NULLIFIER_I64();

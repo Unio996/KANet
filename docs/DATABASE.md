@@ -636,6 +636,15 @@ allocateForRegister 顺序填。
 **写入方**：`pool.js` register-v07/v06 confirm 端点（bettor 付款确认后 INSERT）。
 **读取方**：`/api/pool/my-positions`（逐行读+按 (market_id, bettor_pk) 或 (logical_market_id, direction) 分组聚合）/ settler（结算时按 market_id 汇总赔率池）/ voter（委员抽样）。
 
+### payout_shards（v172+，每逻辑市场一个 PayoutShard covenant）
+**一行 = 一个逻辑市场唯一的 consolidation sink covenant（每片 ShardLeaf consolidate 目的地，genesis-mint 一次）**
+
+**字段**：logical_market_id (PK), payout_cov_id, payout_ps_addr (P2SH 地址), payout_ps_outpoint (`txid:idx`), payout_redeem_hex (当前 redeem，随 consolidate/close 推进而 splice 更新), pool_merkle_root, predicate_commit, created_at, **covenant_family**（v189, 2026-07-21, K-18 §3.1——`v1_committee`(committee-sig)/`v2_zk`(ZK-native)/`unknown`(backfill 判不出，需人工归因)，不可变列，genesis-mint 时由写入点声明——`ensurePayoutShard`→`v1_committee`/`ensurePayoutShardV2`→`v2_zk`；`src/lib/bshard-payout-family-coherence.mjs` 提供 `assertPayoutShardCoherence` 四步一致性花费前 gate + `assertZkNativeImmutable` 铸后不可变守卫）。
+
+**写入方**：`src/lib/pool-shard-register.mjs`（`ensurePayoutShard`/`ensurePayoutShardV2`，genesis-mint 时 INSERT）→ consolidate/close 流程 UPDATE `payout_redeem_hex`（splice-not-recompile 为权威，见 `docs/2026-07-21-p0-consolidated-pool-rederive-implementation-plan.md`）。
+**读取方**：`bshard-settle-daemon.mjs`/`bshard-auto-settler.mjs`（consolidate/claim 编排）、K-18 backfill/coherence gate。
+**陷阱**：`payout_redeem_hex` 的字段布局（state 区 offset 0/1/10/19/52 + ctor 常量区 predicateCommit@518/poolMerkleRoot@1002(V1)、predicateCommit@642(V2)）已实测定稿（`docs/2026-07-21-p2-batch1-truth-source-layer-k18-landing-design.md` §1），不是从 ctor 参数顺序推断——改动前必读该文档，不能凭 `.sil` ctor 声明顺序猜字节位置。
+
 ---
 
 ## 市场数据层

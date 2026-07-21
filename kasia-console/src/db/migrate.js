@@ -5,6 +5,7 @@ import { randomUUID } from 'crypto';
 import { readFileSync, existsSync } from 'node:fs';
 import { encrypt } from '../services/crypto.js';
 import { categorizeMarket } from '../lib/market-category.js';
+import { classifyPayoutShardFamily } from '../lib/bshard-payout-family-coherence.mjs';
 
 export function runMigrations() {
   sqlite.exec(`
@@ -5492,6 +5493,34 @@ export function runMigrations() {
         )
       `);
       console.log('[migrate] v188: spc_prune_capture_heartbeat 建表(K-17 剪裁前补齐 worker 独立存活心跳).');
+    }
+  }
+
+  // v189 (2026-07-21, J1, K-18 §3.1 covenant_family 列, docs/2026-07-21-p2-batch1-truth-source-layer-k18-
+  // landing-design.md §3.1): payout_shards 家族不可变列(v1_committee/v2_zk/unknown) + 一次性 backfill。
+  // 幂等(DoD-2 孤儿盘/重启穿越): ADD COLUMN 用标准 table_info 存在性守卫; backfill UPDATE 只处理仍是
+  // 'unknown' default 的行(重启重跑这段不会重复处理已分类过的行, 也不会覆盖新写入点已正确 declare 的行)。
+  {
+    const psCols = sqlite.pragma('table_info(payout_shards)').map(c => c.name);
+    if (!psCols.includes('covenant_family')) {
+      sqlite.exec(`ALTER TABLE payout_shards ADD COLUMN covenant_family TEXT NOT NULL DEFAULT 'unknown'`);
+      console.log('[migrate] v189: payout_shards.covenant_family 列已加(K-18 §3.1), 开始 backfill 既有行...');
+    }
+    const toBackfill = sqlite.prepare(`SELECT * FROM payout_shards WHERE covenant_family = 'unknown'`).all();
+    if (toBackfill.length > 0) {
+      const upd = sqlite.prepare(`UPDATE payout_shards SET covenant_family = ? WHERE logical_market_id = ?`);
+      const tx = sqlite.transaction((rows) => {
+        let v1 = 0, v2 = 0, unknown = 0;
+        for (const row of rows) {
+          const { family } = classifyPayoutShardFamily(row);
+          upd.run(family, row.logical_market_id);
+          if (family === 'v1_committee') v1++; else if (family === 'v2_zk') v2++; else unknown++;
+        }
+        return { v1, v2, unknown };
+      });
+      const { v1, v2, unknown } = tx(toBackfill);
+      console.log(`[migrate] v189: backfill 完成, 共 ${toBackfill.length} 行 — v1_committee=${v1} v2_zk=${v2} unknown=${unknown}`
+        + (unknown > 0 ? ` (${unknown} 行判不出家族, 停留 'unknown' — 需人工过一遍, 见 K-18 §5 风险②/DoD-5, 不阻断 migration)` : ''));
     }
   }
 

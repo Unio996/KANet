@@ -1,6 +1,6 @@
 # P2 第一批 — 真相源层模块化 + K-18 §3.1-§3.3 落地 + verifyClaimLanded 金额校验(J1 主稿,J2 协)
 
-> **Status**: CURRENT(v0.5 · 2026-07-21 · J1 draft,§3.5 折入 J2 发现+草案(#ue9cp6.1)→ Bettor 方向审 GREEN-with-3-notes(#uegipr)→ NWT 正式红队 GREEN-with-2-MUST-FIX → 三态设计(kaspa_tx_log 主 + getUtxos 兜底)经 Bettor/NWT/J2 交叉论证收敛定案(#uesq36,不再变动)· 待 NWT 对实际落码 diff 复核)
+> **Status**: CURRENT(v0.6 · 2026-07-21 · J1 draft,§3.5 折入 J2 发现+草案(#ue9cp6.1)→ Bettor 方向审 GREEN-with-3-notes(#uegipr)→ NWT 正式红队 GREEN-with-2-MUST-FIX → 三态设计(kaspa_tx_log 主 + getUtxos 兜底)经 Bettor/NWT/J2 交叉论证收敛定案(#uesq36,不再变动)· §3.1/§3.3/§3.4 已落码(单元测试本机绿,部分 recompile 分支因本机无 silverc 需 KANet-UI 机器复跑,见 §6)· §3.2 落码但发现原设计假设的调用点(`bettor.js:1459`)实为不同表(`exchange_offers`非`pool_markets`),已订正见 §6 · 待 NWT 对实际落码 diff 复核)
 > **依据**: `docs/2026-07-21-28-state-sync-architecture-full-design.md` §5 P2 派工("全状态推广 re-derive+校验纪律 + 真相源层模块化,§3 完整实现,J1 主+J2 协,分批走每批独立 NWT 审") + Bettor 今日派工(#udvo4q,并入 K-18 残项)+ Owner 直令(今日一鼓作气+充分测试,D-011 内部审核链走完即可装载)。
 > **前置**: K-18 §3.1-§3.4 全案(`docs/2026-07-18-payoutshard-family-coherence-gate-design.md` v1.1,**已 NWT GREEN-with-3-MUST-FIX 且 3 条全折入**)——§3.4(recompile 降级校验)已在昨晚 P0 v0.3(`25b3d0a0`)+ line423(`67490897`)落地。**本卡 = 落地 K-18 剩余 §3.1(covenant_family 列)+ §3.2(zk_native 铸后不可变)+ §3.3(assertPayoutShardCoherence 四步门)**,K-18 的架构设计本身不重新评审(已经 NWT 审过),本卡是**实现落地计划 + 用它解决两条昨晚遗留的开放线索**。
 
@@ -221,4 +221,20 @@ async function verifyClaimLanded(ctx, winnerAddr, claimTx, expectedAmount = null
 
 ---
 
-**关联**: `docs/2026-07-18-payoutshard-family-coherence-gate-design.md`(K-18 v1.1)、`docs/2026-07-21-28-state-sync-architecture-full-design.md`(#28 全案)、`docs/2026-07-21-p0-consolidated-pool-rederive-implementation-plan.md`(P0/line423,§3b K-18§3.4 已落地部分)、`docs/2026-07-21-k18-splice-vs-recompile-backfill-dryrun-report.md`(昨晚 98 条 MISMATCH 归因,pruned_expired_waived/A0 两条遗留线索来源)、`kasia-console/scripts/_j1tn_k18_splice_vs_recompile_backfill_dryrun.mjs`+`_j1tn_k18_v1_structural_probe.mjs`(本批复用的既有工具)。
+## 6. 落码状态(2026-07-21,J1)
+
+**新文件**:`kasia-console/src/lib/bshard-payout-family-coherence.mjs`(单源,K-18 §3.1-3.3)——`probeStructuralSignature`(零子进程结构签名,高频/低频调用点共用)、`classifyPayoutShardFamily`(backfill-only,允许 recompile 子进程成本)、`assertPayoutShardCoherence`(四步一致性门,tier=cheap/full)、`assertZkNativeImmutable`(§3.2 铸后不可变守卫)。回归测试 `bshard-payout-family-coherence.test.mjs`(20+ 断言,本机绿,silverc 依赖分支优雅 SKIP,见文件头环境说明)。
+
+**§3.1(covenant_family 列)**:migrate.js v189 落码(schema + 一次性 backfill,复用 `classifyPayoutShardFamily`,幂等——只处理仍是 `'unknown'` default 的行)。已在本机跑全量 migration chain 验证 v189 干净执行(零 payout_shards 行场景)。写入点 `ensurePayoutShard`→`'v1_committee'`/`ensurePayoutShardV2`→`'v2_zk'` 已改(`pool-shard-register.mjs`)。**生产库 backfill dry-run 仍需 KANet-UI 机器执行**(DoD-0 铁律,§0 两条遗留线索的正式归因待那次真实跑出——本机零 payout_shards 行测不出真实分布)。
+
+**§3.2(zk_native 铸后不可变)**:`assertZkNativeImmutable(db, logicalMarketId, newZkNative)` 已实现+测试(fail-closed,含 unknown-family 边界)。**🔴 落码时核实修正(原设计假设有误)**:全库 grep `resolution_rule_spec` 写点,原稿点名的 `bettor.js:1459` 实际是 `exchange_offers` 表的 UPDATE(独立的 SS-based P2P 预测托管系统,跟 `pool_markets`/bshard 分片市场无关),不是本卡该管的范围。**进一步 grep 确认:当前代码库里,`pool_markets.resolution_rule_spec` 只有创建时的 3 处 INSERT(`pool.js:754/959/1372`),零 UPDATE 路径**——也就是说现网目前没有任何代码会在 payout_shards 已铸后去改一个市场的 zk_native。`assertZkNativeImmutable` 因此**暂无实际调用点可接入**(不是没做,是没有该防的对象)。处置:函数已就绪+测试覆盖,作为纯防御性基础设施随本批一起落地(未来若有人加"编辑市场规则"这类端点,必须先调这个函数);不算本卡 DoD"API 400"那条的字面兑现(现网没有这个 API),已如实记录不强行凑一个假调用点。
+
+**§3.3(assertPayoutShardCoherence)**:四步实现,(a)(b)(d) 零子进程(高频 tier=cheap 用),(c) recompile byte-equality 只在 tier=full 且 declared=v1_committee 时跑(v2_zk 的 attest 后状态不适用,见 §1 边界说明,不阻塞)。**尚未接入实际调用点**(`ensurePayoutShard`/`V2` 早返回分支 + `consolidateAndBuildPsState` 使用前/close-transport V2 入口)——本轮先把 gate 本身做对+测试覆盖,调用点接入 + 高频路径"零子进程"性能实测(DoD 项 7)是下一步,不在本次提交内(批量装载前必须补上,否则 §3.3 只是"存在但没人用"的死代码,不满足 K-18 落地的真正意图)。
+
+**§3.4(lint R-PS-FAMILY-DISPATCH)**:已加入 `scripts/lint-kanet.mjs`,全库扫 0 违规。**落码时发现原设计白名单范围过窄**:实际 grep 出 `compilePayoutShardRedeem` 在 `bshard-auto-settler.mjs`(6 处,close/claim/cancel/refund redeem 构建,合法既有调用点)+ `bshard-settle-daemon.mjs`(1 处,P0 已落地的 non-blocking recompile 校验)也在用,若不列入白名单会拦下这些已审过的生产核心代码——已订正扩大白名单,规则实际提供的价值收窄为"防止新增/意外调用点绕过既有审查纪律",不是"运行时强制经过 gate"(那需要 AST 调用图分析,超出本规则能力,已如实标注)。
+
+**下一步(明确未完成,不是本轮范围)**:①§3.3 gate 接入 `ensurePayoutShard`/`V2`+`consolidateAndBuildPsState`+close-transport V2 入口的实际调用点。②§3.3(a)(b)(d) 高频路径零子进程性能实测(DoD 项 7)。③生产库 backfill dry-run(KANet-UI)+ §0 两条遗留线索正式归因产出。④装载后活代码复跑(DoD 项 3)。⑤NWT 对本次 diff 红队审。
+
+---
+
+**关联**: `docs/2026-07-18-payoutshard-family-coherence-gate-design.md`(K-18 v1.1)、`docs/2026-07-21-28-state-sync-architecture-full-design.md`(#28 全案)、`docs/2026-07-21-p0-consolidated-pool-rederive-implementation-plan.md`(P0/line423,§3b K-18§3.4 已落地部分)、`docs/2026-07-21-k18-splice-vs-recompile-backfill-dryrun-report.md`(昨晚 98 条 MISMATCH 归因,pruned_expired_waived/A0 两条遗留线索来源)、`kasia-console/scripts/_j1tn_k18_splice_vs_recompile_backfill_dryrun.mjs`+`_j1tn_k18_v1_structural_probe.mjs`(本批复用的既有工具)、`kasia-console/src/lib/bshard-payout-family-coherence.mjs`+`.test.mjs`(本批新落码)。
