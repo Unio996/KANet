@@ -932,8 +932,19 @@ export async function settleDaemonTick() {
   try {
     _k = await kaspa(); await buildPkMap();
     const currentDaa = await chainReader.getCurrentDaaScore();
+    // 🔴 2026-07-21(Bettor #uwq7t2 派工, J2 根因卡·防护对称性): 与 getUtxos(:79) 同款 withTimeout+
+    // disconnect 自愈——原来这一行直接 await _rpc.getBlockDagInfo() 没有超时, 若底层连接进入"僵尸"
+    // 状态(WS 未触发 close/error, 但请求也永不回应), await 会挂住整个 async 函数, 永远到不了下面的
+    // try/catch/finally, _running(:930, 早于 try 设 true)就会永久卡 true——之后每次 cron interval
+    // 都会在 :929 打 skip 日志、tick 却再也跑不动, 只有重启进程能清(_running 是内存变量, 非持久化)。
+    // 未 100% 坐实这就是今天两次 RpcClient 劣化(07:35/14:48)的根因(停摆窗口日志已被重启覆盖, 无法
+    // 回溯确认), 但这个不对称本身就是缺陷: 同一个 _rpc 对象, 一条调用路径(getUtxos)有超时+自愈,
+    // 另一条(这里)没有——不管是不是这次的病根, 都该补齐。
     await rpcEnsure();
-    const pmt = Number((await _rpc.getBlockDagInfo()).pastMedianTime);   // MTP·consolidate lockTime(deadline*1000) final gate
+    let dagInfo;
+    try { dagInfo = await withTimeout(_rpc.getBlockDagInfo(), 12000, 'getBlockDagInfo'); }
+    catch (e) { try { await _rpc?.disconnect().catch(() => {}); } catch {} _rpc = null; throw e; }
+    const pmt = Number(dagInfo.pastMedianTime);   // MTP·consolidate lockTime(deadline*1000) final gate
 
     // 2026-07-06 J2: ZK settle tick — 独立于下面的 committee-sig ripe 处理, 必须放在
     // "if (ripe.length === 0) return" 早退**之前**(否则 committee-sig 市场为 0 时这条新路径永远
