@@ -15,9 +15,8 @@ import { spawn } from 'node:child_process';
 
 const KANET_ROOT     = process.env.KANET_ROOT     || 'C:/kanet';
 const LLAMA_EXE      = process.env.LLAMA_EXE      || `${KANET_ROOT}/tools/llama-server/llama-server.exe`;
-const LLAMA_MODEL    = process.env.LLAMA_MODEL    || `${KANET_ROOT}/models/Qwen_Qwen3.6-35B-A3B-Q4_K_M.gguf`;
-const LITELLM_EXE    = process.env.LITELLM_EXE    || 'C:/Users/ADMIN/AppData/Local/Programs/Python/Python310/Scripts/litellm.exe';
-const LITELLM_CONFIG = process.env.LITELLM_CONFIG || `${KANET_ROOT}/tools/litellm-config.yaml`;
+const LLAMA_MODEL    = process.env.LLAMA_MODEL    || `${KANET_ROOT}/models/Qwythos-9B-Claude-Mythos-5-1M-Q6_K.gguf`;
+const PROXY_SCRIPT   = process.env.PROXY_SCRIPT   || `${KANET_ROOT}/tools/anthropic-proxy.mjs`;
 const CONSOLE_URL    = process.env.CONSOLE_URL    || 'http://127.0.0.1:3100';
 const NWT_RELAY_ID   = process.env.NWT_RELAY_ID   || '5b236c08-03d0-456c-953d-e10001610938';
 
@@ -26,7 +25,7 @@ const PROBE_TIMEOUT_MS  = 3_000;
 const RETRY_CAP         = 3;
 const RETRY_WINDOW_MS   = 600_000;  // 10 min
 
-const _retryHistory = { llama: [], litellm: [] };
+const _retryHistory = { llama: [], proxy: [] };
 
 async function probe(url) {
   try {
@@ -47,19 +46,22 @@ function spawnLlama() {
   const proc = spawn(LLAMA_EXE, [
     '--model', LLAMA_MODEL,
     '--host', '0.0.0.0', '--port', '8000',
-    '--n-gpu-layers', '99', '--ctx-size', '262144', '--threads', '8', '--flash-attn', 'on',
+    '--n-gpu-layers', '99', '--ctx-size', '1048576',
+    '--cache-type-k', 'q8_0', '--cache-type-v', 'q8_0',
+    '--threads', '8', '--flash-attn', 'on',
   ], { detached: true, stdio: 'ignore', cwd: `${KANET_ROOT}/tools/llama-server` });
   proc.unref();
   console.log(`[watchdog] llama-server spawned PID ${proc.pid}`);
   return proc.pid;
 }
 
-function spawnLitellm() {
-  const proc = spawn(LITELLM_EXE, ['--config', LITELLM_CONFIG, '--port', '4000', '--host', '0.0.0.0'], {
+function spawnProxy() {
+  const proc = spawn('node', [PROXY_SCRIPT], {
     detached: true, stdio: 'ignore',
+    env: { ...process.env, PROXY_AUTH_TOKEN: 'sk-local-qwythos', PROXY_PORT: '4000', LLAMA_PORT: '8000' },
   });
   proc.unref();
-  console.log(`[watchdog] litellm spawned PID ${proc.pid}`);
+  console.log(`[watchdog] anthropic-proxy spawned PID ${proc.pid}`);
   return proc.pid;
 }
 
@@ -87,10 +89,10 @@ async function handleDown(service, spawnFn) {
 }
 
 async function watchdogTick() {
-  const llamaOk = await probe('http://127.0.0.1:8000/health');
-  const litellmOk = await probe('http://127.0.0.1:4000/health/liveliness');
+  const llamaOk  = await probe('http://127.0.0.1:8000/health');
+  const proxyOk  = await probe('http://127.0.0.1:4000/health');
   if (!llamaOk) await handleDown('llama', spawnLlama);
-  if (!litellmOk) await handleDown('litellm', spawnLitellm);
+  if (!proxyOk) await handleDown('proxy', spawnProxy);
 }
 
 console.log(`[watchdog] starting, probe ${PROBE_INTERVAL_MS / 1000}s interval, retry cap ${RETRY_CAP}/${RETRY_WINDOW_MS / 60000}min`);

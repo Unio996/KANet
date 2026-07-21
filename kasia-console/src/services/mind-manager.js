@@ -793,6 +793,15 @@ export function startScheduler() {
     // Proactive loop
     console.log(`[mind-manager] ${r.name}: proactive every ${r.proactive_interval_minutes || 60}min, reflect every ${r.evolution_interval_hours || 24}h`);
 
+    // 🔴 第三源根治(2026-07-13, Bettor #jadgup — 13:51 105s假死现场证据: 10+ agent[MIND:layered]同时
+    //   喷出, adapter并发重DB读撞死): staggerMs 原意是"25s间隔错峰", 但此前只在下方 837/872 那两个
+    //   one-time"首次触发"setTimeout里接了, **常驻循环**(这个 setInterval)一直只用纯随机抖动(30-60s
+    //   window)——DB实测全部31个relay的 proactive_interval_minutes 清一色60min, 随机抖动在31个样本
+    //   挤进一个30s窗口时按生日悖论大概率出现聚簇, 而且因为间隔完全相同, 一旦聚簇形成就**永久锁死**
+    //   (每小时准点原样重演, 不会因为下一轮随机重新打散——因为这里根本不是"每轮"随机, 是"启动时一次性"
+    //   随机, 之后固定周期重复)。改法: 补上 staggerMs(照抄下方 837/872 已经在用的 base+staggerMs+
+    //   小随机抖动写法), 让31个agent确定性错峰25s一个——因为周期相同, 错峰关系此后永久保持, 不再有
+    //   聚簇风险(不是"减少概率", 是结构性消除)。
     setTimeout(() => {
       setInterval(async () => {
         if (!_proactiveEnabled) return;
@@ -813,7 +822,7 @@ export function startScheduler() {
           _proactiveRunning.delete(name);
         }
       }, proactiveMs);
-    }, 30_000 + Math.random() * 30_000);
+    }, 30_000 + staggerMs + Math.random() * 10_000);
 
     // First proactive on startup (after 2min settle time)
     setTimeout(async () => {
@@ -837,6 +846,8 @@ export function startScheduler() {
     }, 120_000 + staggerMs + Math.random() * 10_000);
 
     // Reflection loop
+    // 🔴 同款第三源根治(见上方 proactive loop 注释): DB 实测全部 31 个 relay 的 evolution_interval_hours
+    //   清一色 24h, 这里此前也只有纯随机抖动(60-120s window)没接 staggerMs, 同样会永久聚簇。补上。
     setTimeout(() => {
       setInterval(async () => {
         if (!_reflectionEnabled) return;
@@ -850,7 +861,7 @@ export function startScheduler() {
           console.log(`[mind-manager] ${r.name} reflection error: ${err.message}`);
         }
       }, reflectMs);
-    }, 60_000 + Math.random() * 60_000);
+    }, 60_000 + staggerMs + Math.random() * 10_000);
 
     // Immediate reflection if overdue (agent never reflected or interval elapsed)
     // Spread startup reflection to avoid concurrent API calls from agents sharing an adapter

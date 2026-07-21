@@ -2619,4 +2619,375 @@ qlfpv 实测 5 层 brick:
 
 ---
 
+---
+
+## 规则 50 · pool_bettor_sides 裸按 logical market_id 查 = bshard bettor 全漏 — lint R-SHARD-BLIND [WARN] 自动扫
+
+**触发时机** (线8 STEP2, 2026-06-24 Bettor 钦定): 任何查 `pool_bettor_sides` 的时候，特别是:
+- 显示押注人数 / 总 stake (display bug: 显示 0)
+- settler 判断是否有人押注 (误判 0-bet → 退 maker 本金)
+- bettor-refund-claim 找 side 记录 (refund 404)
+- 任何 `WHERE market_id = logical_market_id` 的 SQL
+
+### Wrong
+```javascript
+// 按 logical market_id 直接查
+const sides = db.prepare(
+  'SELECT * FROM pool_bettor_sides WHERE market_id = ?'
+).all(logicalMarketId);
+// 结果: v06 bettor 有, bshard register-v07 bettor 全漏
+// 根因: bshard 按 shard_market_id 存, 不是 logical_market_id
+```
+
+### Right
+```javascript
+import { getSidesByLogicalMarket, getSidesByShard } from '../lib/pool-bettor-sides-query.mjs';
+
+// 跨-shard 聚合 (display / settler / refund 场景)
+const sides = getSidesByLogicalMarket(logicalMarketId, db);
+
+// 单片操作 (已知 shardMarketId, e.g. shard-allocator)
+const shardSides = getSidesByShard(shardMarketId, db);
+```
+
+SQL 原理: `OR market_id IN (SELECT shard_market_id FROM market_shards WHERE logical_market_id = ?)` 把所有分片 bettor 聚合进来。v06 和 bshard 市场互斥（一个市场只走一条路），OR 无重复。
+
+### ⚠ EXCEPTION — bettor-refund-claim 端点 (#33/#34) **不准** shard-aware 迁移 (J1 红队 2026-06-25, §11 裁决 Bettor 认错 + KANet-UI/J2 co-verify)
+
+`POST /api/pool/market/:id/bettor-refund-claim` (`pool.js`) 是上面列表里**唯一不能按"改用 getSidesByLogicalMarket"修的命中点**。原因:
+- bshard register-v07 bettor 在 `pool_bettor_sides` 里**没有独立可退的 side**: `recordBettor` (register-v07, ~L1157) 写 `side_p2sh` = **整片共享的 shard 池 P2SH**, `side_lock_tx` = leaf TX, `side_redeem_script_hex` = `''`(空)。stake 在 fold 聚合池里, 只能走 bshard 退款路 (`PoolShard_fold refund_draw` / `lib/pool-refund-builder.mjs`)。
+- 该端点跑的是 **standalone PoolSide refund** (entry 2/3, `type=pool_side_refund_cancelled_tx`) = 对 bshard **错误的合约**。
+- 把它 shard-aware 化 = 让 query **找到**那行 → 把一个 bshard bettor 的退款指向**共享 shard 聚合池 P2SH** = 一个 bettor 花整池资金 (money-path 灾难)。历史 logical-404 / 空-redeem-409 是**安全网**, 不是 bug。
+
+**正确修 = 显式 bshard detect → 明确拒绝** (不是 shard-aware query):
+```javascript
+const isBshard = sqlite.prepare(
+  'SELECT 1 FROM market_shards WHERE logical_market_id = ? OR shard_market_id = ? LIMIT 1'
+).get(marketId, marketId);
+if (isBshard) return reply.code(409).send({ ok:false, error:'bshard market: 走 fold 退款路...', refund_path:'bshard_fold' });
+```
+守: `test-framework/cases/predictions/pool/bettor_refund_bshard_guard.test.mjs` + `scripts/j1-refund-bshard-guard-test.mjs` (双 fixture: bshard→拒 / v0.5→放行)。**别把这条端点的 logical 查"顺手"迁成 cross-shard。**
+
+**逃生舱**: 确认是单-片已知 shardMarketId 操作 → 调 `getSidesByShard(shardId, db)` + 同行加注释 `// lint-allow-shard-blind: 单片操作, shardMarketId 已从 market_shards 取得`。
+
+### Why
+- bshard register-v07 (`kasia-console/src/api/pool.js` 中 register 路径) 写入时 key = `shard_market_id`（如 `ext-pool-...u7hq4-shard-0`），不是 logical `ext-pool-...u7hq4`。
+- 裸 `WHERE market_id = logical_id` 查不到任何 bshard bettor → 41 处定时炸弹全库散落。
+- settler 是最危险的命中点: `pool_bettor_sides` 空 → 误判 0-bet → `handleRefunding` 退 maker 本金 → 链上已 settle 的市场 DB 翻 `refunded`（x4kpq 事故，2026-06-22）。
+
+**前科**: x4kpq close 4123de55 链上真 settle（winner 实领 19.44 KAS），但 DB=`refunded`，因 settler 查到 0 sides → 误判无人押注。同病的 settler A-fix (aff42980) 是 harm-stopper（bshard 跳过），不是根治。"改了又坏"根因 = 不完整迁移，N 处散落定时炸弹逐一浮现（Owner 2026-06-24 元问题）。
+
+**Lint 守**: `lint-kanet.mjs` 规则 `R-SHARD-BLIND` (warn-mode): 扫 `pool_bettor_sides.*WHERE.*market_id =` 在非 shard-allocator、非 pool-bettor-sides-query 文件 → ⚠ WARN（不 block commit，当迁移 checklist）。迁完 42 处后改 hard fail。shard-allocator.mjs 排除（传入的已是 shardMarketId，正确）。
+
+---
+
+## 规则 51 · 重构抽取 helper 函数后残留变量引用 → catch-all 把"代码 bug"误判成"业务失败"，覆写已成功的状态
+
+**触发时机**（#48, 2026-07-04, NWT 独立复核 + J2 修）: 重构时把函数体一部分抽成新的 helper 函数（如 `consolidateAndBuildPsState`），原函数体**后半段**仍引用被抽走的局部变量。
+
+### Wrong
+```javascript
+async function _settleOneMarketAttempt(marketId) {
+  // consolidateAndBuildPsState() 抽取时把 market 变量声明搬进了它的局部作用域
+  const { psState } = await consolidateAndBuildPsState(marketId, ...);
+  // ... settleMarketLive 成功、writeback 成功 ...
+  let meta = {}; try { meta = JSON.parse(market.metadata || '{}'); } catch {}   // ← market 已不在作用域
+  // ...
+  recordShadowJudgment(sqlite, { market, authorityWinDir: plan.winDir, ... }); // ← 同样引用不到
+}
+```
+结果：`ReferenceError: market is not defined` 抛在 **writeback 成功之后**（`protocol_status='completed'` 已经真的写进 DB、evidence 已经真的记完整、钱已经真的到账）。外层 G5-5a 瞬态重试包装器 `catch(e) { lastResult = { ok:false, reason: e.message } }` 把这个纯语法级异常当成"这次结算失败"，重试耗尽后把 **刚写对的 `completed` 覆盖回 `settle_failed`**——DB 状态与链上真相完全对不上，operator 会误判"这盘还没结算"去手动重新结算一个其实已经结完的盘。
+
+### Right
+1. **重构抽取时**：把被抽走变量在原函数体内**所有**引用点一起搬迁/改参数传入，不能只改前半段编译能跑通就当作测过了（JS 只在实际执行到那一行时才抛 `ReferenceError`，happy-path 测试如果没走到 shadow-ledger 那类"锦上添花"分支，看着是绿的）。
+2. **更根本的设计修**：daemon 的重试/错误处理不能把**所有**异常一视同仁当"业务失败"处理。写库前必须完成的动作（judge/consolidate/close/claim）失败 = 真业务失败，可以重试/标记；**写库成功之后**发生的异常（如可观测性/影子台账这类 non-critical 收尾代码）应该 `try/catch` **局部吞掉+记警告日志**，绝不能让它冒泡到外层，把已经正确落库的终态状态覆盖成失败态。
+
+### Why
+- 危险级比"真结算失败"更高：真失败时 DB 状态和链上状态一致（都没成），operator 能看懂要做什么；这种"假失败"是 DB 撒谎，掩盖了一个真实成功的结算，且**没有报错以外任何信号**能告诉 operator 钱其实已经到账了。
+- 本次是 fresh e2e 测试盘（8v0w1）暴露的——如果只用旧盘（如 5984o，恰好在重启前用旧 daemon 结算）验证，**这类"重启后新逻辑" bug 天生测不出**（旧盘走的是旧代码路径），配 `feedback-coverify-checklist-multidimensional`：co-verify 必须用 **fresh 场景**触发新代码路径，不能只验证旧数据能读对。
+- **不建议靠 lint-kanet.mjs 正则堵这一类**：变量作用域分析需要真正的 AST（JS 的函数提升/闭包/块作用域规则复杂），正则匹配"变量是否在作用域内声明"的误报/漏报都会很严重，本身不是 lint-kanet.mjs 定位的"KANet-specific 模式"。真正对症的工具是 **ESLint `no-undef` 规则**（本项目目前未接入 ESLint）——如果之后要引入，`no-undef` 会在 lint 阶段直接抓出这类问题，比运行时才炸出来更早。当前阶段没有 ESLint，只能靠 ①重构后跑一遍相关业务路径（不能只信语法检查/编译通过）②上面"写库后异常不覆盖终态"的设计纪律做纵深防御。
+
+---
+
+## 规则 52 · 精准问题被办成整页重写 → 丢失既有功能（"精准继承"没有机制只有口头期望）
+
+**触发时机**（2026-07-05，Owner 报告 /start 首页"下方链接膨胀"，收到的却是整页推倒重写）：Owner 反馈的是一个精确、范围很小的问题（热榜条数从设计值 5 悄悄涨到 8，没有上限约束），落地时却被执行成 13→4 按钮的整页重写——丢了 🔥 热榜区、⚽ 赛事聚合卡区、commands 提示行，外加语言切换按钮位置全变。
+
+### Wrong
+```
+任务：收敛首页"下方链接膨胀"
+执行：Write 覆盖 startMessageLinked() 整个函数体，从训练先验重新生成一版"看起来对"的精简首页
+```
+对 LLM 而言，整页重写比精准修改更省力：精准修改要求"读懂整个文件 → 定位真正的行 → 理解周边依赖 → 最小改动"；整页重写只要求"理解需求 → 生成一个看起来对的版本"。后者是低阻力路径，而原有的 5 个热门链接、语言切换这些细节不在模型训练先验里，自然被丢。
+
+### Right
+四层机制，缺一不可（口头"精准继承"不构成机制）：
+1. **禁止修复类任务对既有文件整体 Write 覆盖** — 只许 Edit/str_replace 式最小补丁。动手前声明"预计触碰 N 个文件、≤M 行"，`git diff --stat` 超预算就停下报告，不继续。
+2. **特征清单(feature manifest)防静默丢失** — 改 UI/展示类文件前，从**现有代码**枚举该页面全部可见特征（按钮/链接/文案标识符），写进计划；改完逐项核验（grep/curl 实测）仍然存在。清单少一项 = 回归 = 未通过，"看起来修好了"不是 DoD，"清单全勾"才是。
+3. **定位与修改拆两步** — Step A 报告"定位到 `file:line`，预计 diff 如下"→ 等 ack → Step B 才许动手。定位错了在 Step A 就拦住，不是等整页被推倒重写完才发现。
+4. **git 纪律：审 diff 原文，不审文字描述** — reviewer 看 `git diff` 本身，agent 的文字描述会说"精准修复了间距"，diff 才会暴露它实际重写了几百行。**有历史好版本必须先 `git show <commit>:<path>` 找回原样对照着改，不能凭对"应该长什么样"的印象重建**——这条最关键：如果动手前先把原始内容原样摆出来对照，根本不会发生"丢内容"。
+
+**L4 范围细化**（Bettor 2026-07-06 裁定）：第 1 条的"禁止整体 Write 覆盖"只对**修复类(fix)任务**生效；已批准的**重构类(refactor)任务**需要走 DECISIONS.md 决策编号显式解锁，否则真正需要的大范围重构会被这条规则卡死，逼出新的绕开路径。
+
+### Why
+- 今天审核流程（Bettor+NWT 双人过目 diff）在这次事故里**依然放行**了这个改动——因为审核标准检查的是"这次改动实现得对不对"（custody 警告在不在/i18n key 全不全/回调逻辑对不对），完全没有检查"这次改动的范围本身对不对"。按当时的审核清单再走一遍，这次改动照样会通过——说明这是**审核维度本身的缺口**，不是这次审核疏忽了。
+- 同一天内，实现者(J2)和审核者(NWT)独立犯了同一个次生错误：J2 提出"热榜从 5 条降到 2-3 条"、NWT 一度认可这个数字——两人都没有先查"5"这个原设计值的来源（注释里写明白的），而是各自凭感觉又猜了一个新数字。**这跟本条主错误是同一个模式**（不查原样，凭印象/直觉给答案），说明"精准继承"这个要求必须下沉到每一个具体数字/字段，不能只停留在"文件级别"。
+- 参见规则 51（结算 daemon 重构抽取变量丢失作用域）——两条规则的根因都是"改动范围比声称的更大，且没有机制在事中拦截，只能靠事后 co-verify 撞见"。
+
+---
+
+## 规则 53 · 递减资金池 covenant 的最后一笔 claim 精确清零 → 撞 Kaspa dust 策略拒绝，生产合约(PayoutShard.sil)潜伏同款缺口从未被真实触发
+
+**触发时机**（2026-07-06，NWT 隔离链上测试中抓出）：新写的 `escape_claim`(`consolidated_pool` 逐笔递减 + `validateOutputState` 无条件产生 continuation output)第一次跑单 bettor 全额 claim，广播报 `"transaction output #0: payment of 0 is dust"`。J2 最初判断"生产环境多 bettor 分批 claim 不会撞到这个边界"——**这个推理站不住，NWT 当场纠正**：不管一个市场有多少个 bettor，只要全部人最终都 claim 完，池子总和精确等于所有已注册 stake 之和（这本来就是它的烤法）——**排在队尾的最后一个 claimant，`consolidated_pool - stake` 必然精确等于 0**，导致 continuation 的 0 值 output 撞 dust 下限。**这不是"单 bettor 测试才会撞"的边缘场景，是每个市场都会撞到的同一个结构性缺口，不因 bettor 数量而改变**。
+
+Owner 事后凭印象要求"先查现有解法，这个应该修过很多次"——**三方(Bettor+NWT+J2)独立查代码库+memory，确认这个精确场景从未有过既有修法**。更严重的发现：生产环境 `PayoutShard.sil` 的 `claim`/`refund_claim`(今晚 955 个赢家实际走的路)是**完全相同的无条件模式**，同样没有"最后一笔"特殊分支——只是 955 人里从没人恰好撞上 `payout == consolidated_pool` 这个精确边界（费用/舍入让每次都留了残余），**不是问题已解决，是从未被真实触发**。
+
+### Wrong
+```
+entrypoint function claim/refund_claim/escape_claim(...) {
+    ...授权检查...
+    require(tx.outputs[selfOutIdx].value == consolidated_pool - payout);
+    validateOutputState(selfOutIdx, { consolidated_pool: consolidated_pool - payout, ... });  // 无条件产生 continuation
+}
+```
+任何"逐笔递减到 0 就该结束"的资金池 covenant，只要不显式处理 `剩余 == 0` 这个边界，最后一个 claimant 必然构造出 0 值 output，被 Kaspa 标准 dust 策略拒绝——这不是随机概率事件，是这类递减模式的数学必然。
+
+### Right
+```
+entrypoint function escape_claim(...) {
+    ...merkle proof / nullifier / recipient-bind / value check 全部无条件先执行，零豁免...
+    if (consolidated_pool == stake) {
+        // 最后一笔：覆约生命周期在这笔 tx 结束，不留 continuation，不调用 validateOutputState
+    } else {
+        // 原有分支：产生 continuation output，逐笔递减
+        validateOutputState(selfOutIdx, { consolidated_pool: consolidated_pool - stake, ... });
+        require(tx.outputs[selfOutIdx].value == consolidated_pool - stake);
+    }
+}
+```
+关键约束（写审核 checklist）：①分支判断必须放在全部授权检查(merkle/nullifier/recipient-bind)**之后**，不能因为走了某个分支就跳过任何检查；②`consolidated_pool == stake` 这个判据不可被伪造——stake 经 merkle proof 绑定到真实注册的这个 claimant，数学上此条件成立当且仅当此人确实是最后一个未领取者(否则 remaining 必然严格大于自己的 stake)；③"最后一笔"分支的资金流出只能有一个 output(退款本身)，不能留任何其它 output 给攻击者可乘之机。
+
+### Why
+- **递减资金池 + 逐笔 claim 的 covenant 设计模式，本身自带这个边界，不是某一次实现疏忽**——凡是见到 `consolidated_pool - X` 这类递减 state 字段配 `validateOutputState` 无条件续约，就该反射性问一句"最后一笔怎么办"，不用等真被撞到才发现。
+- **潜伏 bug 比显性 bug 更危险**：`PayoutShard.sil` 是已部署、正在服务真实市场的活字节码，955 个赢家安全走完是因为"运气"（费用/舍入让最后一笔总有残余），不是因为设计正确——下一个市场未必这么走运。这类"设计缺陷因数值巧合从未触发"的情况，跟"代码有 bug 但从没被测试覆盖到"是同一类风险，都需要主动排查，不能等生产事故倒逼。
+- **Owner 凭印象说"应该修过"这类提醒必须先查证再行动**（不是照单全收也不是直接反驳）——这次查证的产出不只是"确认没有既有修法"，还意外挖出了生产合约里的同款潜伏缺口，是**认真查证本身带来的额外收益**，不是走过场。
+
+---
+
+## 规则 54 · SQLite `json_extract` 对畸形 JSON 抛异常非返回 NULL —— 生产数据不保证干净，处理 JSON 字段前必须 `json_valid` guard
+
+**触发时机**（2026-07-06，J2 给 `selectRipeMarkets()` 加 zk_native 市场排除条件时抓出，NWT 独立复现确认）：想加一条 `AND json_extract(resolution_rule_spec, '$.zk_native') IS NOT 1` 排除 ZK-native 市场，动手前先用只读连接对生产 DB(`kasia-console/data/console.db`)做验证，发现两件事：①这个 SQLite build 的 `json_extract` 遇到畸形 JSON 直接抛 `SqliteError: malformed JSON`，**不是该行温和返回 NULL**；②生产库里现在就真实存在 5 个市场的 `resolution_rule_spec` 是畸形 JSON(`ext-pool-1779936049539-8ay8j` 等)。若不加 guard 直接上线，`selectRipeMarkets()` 一旦扫描到这些行会让整条 `SELECT` 抛异常——**结算 daemon 的 tick 彻底停摆，把所有真实市场的自动结算全部打崩**，比"没排除 zk_native 市场"这个原始目标问题严重得多。
+
+### Wrong
+```sql
+SELECT * FROM pool_markets
+WHERE ...
+  AND json_extract(resolution_rule_spec, '$.zk_native') IS NOT 1   -- 假设畸形 JSON 返回 NULL，实际抛异常
+```
+
+### Right
+```sql
+SELECT * FROM pool_markets
+WHERE ...
+  AND (json_valid(resolution_rule_spec) = 0 OR json_extract(resolution_rule_spec, '$.zk_native') IS NOT 1)
+  -- json_valid() 短路在前：畸形 JSON 视为"未标记"(不排除，走原逻辑，行为不变)，
+  -- 只有合法 JSON 且字段确实为 true 才排除。零风险改变现有行为。
+```
+
+### Why
+- **"生产数据永远是干净 JSON"是一个未经验证的假设，不是事实**——这条数据库运行了几个月，各种历史遗留/半成品/手工改动都可能在某个字段留下不合法 JSON，SQL 层面处理任何 TEXT 存 JSON 的字段之前，先假设它可能是脏的，用 `json_valid()` 挡一道，而不是等生产事故倒逼。
+- **这类 guard 的成本几乎为零**（一次 `json_valid()` 调用），但省下的是"一次新增的 WHERE 条件让整条 daemon 停摆"这种级别的事故——性价比上没有不加的理由。
+- **验证方式**：改动前对生产 DB 开只读连接(`new Database(path, {readonly:true})`)跑一次目标查询的简化版，亲眼看它在真实数据上不抛错，而不是假设"这种情况不会发生"。这条本身也是 `feedback-read-actual-code-not-assumed-canonical` 同一纪律在 SQL 层面的应用。
+
+---
+
+## 规则 55 · 手工配对常量必失同步 —— 改一个源值时,跟它配对烤死的派生常量不会自动跟着变,禁手工维护"配对值",改用 live-derive+round-trip 自证
+
+**触发时机**（2026-07-08，market5(pxvml) 门② zk_close pre-broadcast dry-run 抓到，Bettor 独立重算+链上已注资 gate 地址逐字节吻合双证坐实）：commit `9b9804b5`（2026-07-07）裁定把 ZK guest 的 `imageId` 从旧版本（`335cae6c...`）切到新版本（`c9918501...`），改动只更新了 `imageId` 这一个字段——但 `gateTmplHash`（`blake2b(prefix‖suffix)`，跟 `imageId` 是"同一个编译产物的两个不同哈希视角"，必须成对更新）**没有跟着重算**，仍停留在配对旧 `imageId` 时钉死的值（`b9d56ce4...`）。这个半更新的值随后被 pxvml 市场 genesis-mint 烤进链上 covenant——`zk_close` 入口的 `require(blake2b(prefix‖suffix)==gateTmplHash)` 从此**物理上永远无法通过**（不是重试/修复能解的运行时 bug，是这个市场从出生那一刻起就带着的永久性缺陷）。同族先例：`reference-hardcoded-sil-offset-staleness-live-derive-required`（硬编码 `.sil` 字节 offset 过期）——两者共同的结构性特征是**"从某个会变化的编译产物/源头派生出的常量，被当作独立的手工维护值烤进代码/链上"，源头一变，配对值必然脱钩，而且脱钩本身不会报错，只会在下游校验时才炸**。
+
+### Wrong
+```js
+// 改 guest 版本时只改了这一半
+const ZK_GATE = {
+  imageId: 'c9918501...',        // 已更新
+  gateTmplHash: 'b9d56ce4...',   // 忘了同步重算 —— 仍是配对旧 imageId 的值
+};
+```
+
+### Right
+```js
+// 启动时(或首次使用时, gate 在功能开关内防炸非 ZK 节点) round-trip 自证：
+// 从当前 imageId 现场推导 gateTmplHash，跟硬编码值比对，不一致就 fail-loud，不是让 stale 值悄悄流通。
+// 详见 docs/2026-07-08-gate-tmplhash-live-derive-design.md（J1 落码方案，NWT 红队 GREEN）。
+if (process.env.ZK_PROVE_WORKER_ENABLED === '1') {
+  const derived = computeGateTmplHashFromImageId(ZK_GATE.imageId);
+  if (derived !== ZK_GATE.gateTmplHash) throw new Error(`gateTmplHash 跟当前 imageId 不匹配: derived=${derived} != hardcoded=${ZK_GATE.gateTmplHash}`);
+}
+```
+
+### Why
+- **"改一个值时记得也改另一个"是靠人记性，人记性会忘**——尤其是配对关系不在同一行代码/同一次 diff 里可见时（这次两个常量确实在同一个对象里，仍然漏改，说明"就在旁边"都防不住，何况分散在不同文件的配对值）。
+- **过渡期风险**：修正一次配对值（本次改成 `4ec7ca3d...`）只是打了一次补丁，不是根治——下次任何人再改 `imageId`，同一颗雷会原样重埋。**硬约束：live-derive+round-trip 落码验证通过之前，冻结一切 imageId/guest circuit 变更**（这条本身应作为显式 gate 记进协调记录，不能靠"大家知道"）。
+- 这条不是新的错误类别，是**"手工同步的配对常量"这个反模式**的又一次现身（跟规则里其它"半更新/不完整迁移"案例同根）：只要允许"从某个源头派生的值，被当独立字段手工维护"，就必然有人在某次改动时漏改其中一个，而且这类 bug 在写下那一刻不会报错，只会在下游校验时才现形，排查成本远高于当场写对。
+
+## 规则 56 · "两条独立路径算出同一个值"不足以证明正确 —— 若两条路径共享同一个上游常量/配置来源，必须先画信源图，同源=按一源计（vacuous verification）
+
+**触发时机**（2026-07-08，market5 门①/门② 事故复盘，Bettor 主动认账 + NWT 独立复核也漏掉同一处）：门①（zk_handoff 广播前）阶段，Bettor 的"盲算算出的 closeZkAddress 跟 production dry-run 返回的地址 byte-exact 吻合"被当作独立验证的强证据，写进"无异议可以真广播"的结论——但 builder 代码跟 Bettor 的盲算脚本**读的是同一个 `ZK_GATE_TMPL_HASH` 环境变量**（当时已经是规则 55 描述的那个过期配对值），两边"独立算出同一个地址"只是"两边用了同一个错误常量，算出同一个错误结果"的必然结果，不是独立验证证明了正确性。**NWT 当时的复核也没抓到这一点**——红队复核走了和被审方相同的信源拓扑，复核就退化成了 echo，不是真正的第二路验证。
+
+### Wrong
+```
+路径A(builder):        读 env ZK_GATE_TMPL_HASH → 算出地址X
+路径B(盲算脚本):        读 env ZK_GATE_TMPL_HASH → 算出地址X
+结论: "两条独立路径吻合，可信" —— 错，两条路径的输入常量同源，这不是独立验证
+```
+
+### Right
+```
+盲算/独立验证开始前，先画一张信源图：
+- 路径A的每一个输入常量/配置，来自哪个 env var / config 文件 / builder 缓存？
+- 路径B同样列一遍。
+- 凡两条"独立"路径最终汇到同一上游（同 env、同 builder、同 config 文件），按同一个信源计——
+  这种情况下的"吻合"只能证明"常量被一致地传播/使用了"，不能证明"常量本身正确"。
+- 真正的独立验证要求至少一条路径从更底层的事实重新推导（比如从链上原始数据/密码学基础事实），
+  不能是"读取同一个缓存值再算一遍"。
+```
+
+### Why
+- 跟规则 55 是同一个事故里揪出的两个层面：规则 55 是"常量本身会过期"，本规则是"验证方法论没能抓住常量过期"——**审查任何"独立盲算/独立第二路验证"类证据时，除了确认计算逻辑/代码路径不同源，必须额外确认关键常量的输入来源是不是也真的独立**。
+- 这条不只对 gateTmplHash/closeZkTmplAnchor 这类"跟编译产物绑定"的常量有用，任何"多方独立验证"设计（预言机多签、委员盲算比对、跨节点 co-verify）都适用同一条纪律：验证设计者必须先问"这几条路径的输入常量物理上是不是来自不同源"，再决定这个验证能不能真正抓住"常量本身错了"这类 bug（vs 只能抓住"计算逻辑写错了"这类 bug）。
+
+---
+
+## 规则 57 · Git Bash 传 Windows 反斜杠路径给原生 exe 会被吞 —— 一律用正斜杠 + 启动后验证进程实际收到的 argv
+
+**触发时机**（2026-07-10，J1tn 重新拉起本机独立 TN12 kaspad 节点，用户追问"是否严格执行了接位文件的同步经验教训"才揪出）：用 Bash 工具（Git Bash，当次会话 PowerShell 工具本身不可用）执行 `nohup .../kaspad.exe --appdir=D:\\kaspa-tn12-data ... & disown`。预期反斜杠转义后进程收到单个 `\`，但实际进程收到的 `--appdir` 是 `D:kaspa-tn12-data`——反斜杠整个消失，变成一个 **drive-relative 路径**（不带前导分隔符）。启动前 `cd` 到了 `/d/kaspa-tn12-data`（对应 `D:\kaspa-tn12-data`），这个 drive-relative 路径被解析成"D: 盘当前目录下的子目录"，实际新建/写入了嵌套的 `D:\kaspa-tn12-data\kaspa-tn12-data\`，而不是原来存有 9GB 已同步链数据的 `D:\kaspa-tn12-data\`。后果：节点没有走"本地重验证"（复用已有数据），而是从零开始网络下载 header（下载了 20 多万个 header），浪费约 30 分钟才被发现。**更严重的一层**：诊断过程中已经用 `Get-CimInstance Win32_Process ... | select CommandLine` 亲眼看到实际参数就是 `--appdir=D:kaspa-tn12-data`（缺失反斜杠），但当时被当成"日志显示问题"一带而过，没有停下来推敲会不会导致路径解析错误——这是比转义本身更严重的失职：验证时已经看到了异常信号，却没把它当信号处理。
+
+### Wrong
+```bash
+cd /d/kaspa-tn12-data
+nohup /d/rusty-kaspa/target/release/kaspad.exe --appdir=D:\\kaspa-tn12-data ... &
+# 进程实际收到 --appdir=D:kaspa-tn12-data(反斜杠消失, drive-relative 路径)
+# cwd 恰好也在这个目录 → 解析成嵌套子目录, 不是绝对路径, 复用已有数据失败, 从零同步
+```
+
+### Right
+```bash
+# Windows 路径传给原生 exe, 一律用正斜杠——Windows API 原生支持, 不会被 Git Bash 转义吞掉:
+nohup /d/rusty-kaspa/target/release/kaspad.exe --appdir=D:/kaspa-tn12-data ... &
+
+# 启动后必须验证进程实际收到的参数, 不能只信自己转义对了:
+powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name='kaspad.exe'\" | Select CommandLine"
+# 并核对启动日志自己回显的路径行(如 kaspad 的 "Application directory: ...")跟预期是否一致,
+# 以及日志里有没有"current sink is/current pruning point is/syncing ahead"这类"复用已有数据"的信号
+# (若看到的是从 0 开始"Downloaded N headers", 说明没有复用到已有数据, 路径大概率不对)。
+```
+
+### Why
+- Git Bash 对含反斜杠的 Windows 风格路径参数传给原生（非 MSYS）exe 时，转义/翻译行为不可靠——本次实测反斜杠被整个吃掉，而不是保留单个 `\`（哪怕命令本身写的是 `\\` 双转义）。这不是"记得转义"能保证对的，根治办法是压根不用反斜杠。
+- **任何验证输出里出现"看起来有点不对"的路径/字符串，都是信号，不是噪音**——本次事故里，路径缺失反斜杠这个证据在诊断的第一次输出里就已经出现，但被当成日志格式问题放过了。跟规则 46（下强结论前必验对对象）同一母题：验证的意义在于真的去看，不是走个流程。
+- 这条不止对 kaspad 适用——任何 agent 用 Bash 工具在 Windows 上拉起原生 exe、传 Windows 风格路径参数，都可能踩同一个坑；PowerShell 工具不可用时（本次遇到的情况）尤其容易被忽略，因为少了 PowerShell 原生处理路径的直觉。
+
+---
+
+## 规则 58 · 安全闸/白名单用"排除已知坏值"（黑名单）天生不完备 —— 一晚同一模式撞三次，改用"只放行已知好值"（白名单）才是封闭式防护
+
+**触发时机**（2026-07-12，同一班内连续三次撞同一结构性弱点，NWT 红队每次都在 diff/设计审时抓出）：
+
+1. **反馈通道 FEEDBACK_TOOLS**：最初用正则黑名单守卫工具名（"不含 transfer/settle/refund 等资金字样"），NWT 指出正则挡不住 `helpUserMoney` 这类换皮命名，改成精确 allow-list（工具名 ∈ 显式三名单字面量）。
+2. **`trading.js` `/api/trade/pending-approvals`**：反馈工单混进 Owner 交易审批视图，修法本可以写"排除 `user_feedback` 这个 type"（黑名单），Bettor 裁定改用排除法但要求"对未来新交易 type 默认安全"——本质仍是黑名单思路的最小实例，埋了同一个坑的种子。
+3. **积压两族处置设计的 SQL 安全闸**：`UPDATE pool_markets SET protocol_status = 'pruned_expired_waived' WHERE ... AND protocol_status NOT IN ('completed', 'pruned_expired_waived', 'manual_recovery_refunded', 'settle_failed', 'cancelled')`——设计者凭记忆列了 5 个"不该碰的状态"。NWT 红队查活库 `pool_markets` 实际 distinct `protocol_status` 有 15 种值，黑名单漏了 `refunded`（907 行真终态）、`refunding`（51 行**进行中**转账）、`disputed`、`archived`、`settle_zombie_quarantine` 共 10 项——若目标 id 清单有任何误差命中这些状态之一，这条"安全闸"防不住它自己要防的事。
+
+### Wrong
+```sql
+-- 黑名单: 列出"不该碰的状态", 依赖设计者能想全所有坏值(活库状态集会持续增长, 记忆天生不完备)
+UPDATE pool_markets SET protocol_status = 'pruned_expired_waived'
+WHERE id IN (...) AND protocol_status NOT IN ('completed', 'cancelled', 'settle_failed')
+```
+
+### Right
+```sql
+-- 白名单: 只列出"目标本该处的状态"(设计 §1 已经明确写清楚这批市场应处于哪几个状态)
+UPDATE pool_markets SET protocol_status = 'pruned_expired_waived'
+WHERE id IN (...) AND protocol_status IN ('verifying', 'pending_bettors')
+```
+
+### Why
+- **黑名单的完备性依赖"穷举所有不该发生的情况"，这在真实系统里几乎不可能做到**——状态集合会随时间增长（新功能加新状态值），设计者写黑名单时凭的是"当下记得的几个"，不是查活库实测的全集。三次事故里，NWT 每次都是**亲查活库/亲跑正则**才发现遗漏，不是靠"审查代码逻辑显然对不对"就能看出来——遗漏本身是"不知道自己不知道"，人工 review 补不上。
+- **白名单的完备性依赖"穷举所有该发生的情况"，这通常是设计阶段就已经明确、集合很小的东西**（"这批市场理应处于 verifying 或 pending_bettors"——这个事实来自设计 §1 的判据，不是凭空列的）。集合外的任何值（不管是已知的还是未来新增的）天然被排除，不需要持续维护"又发现一个漏掉的坏值"。
+- **同一模式在一晚内复现三次**，说明这不是偶然疏忽，是默认思维定式（"我防的是坏情况，所以列坏情况"）——正确定式应该反过来："我允许的是好情况，所以列好情况"。写任何 guard/安全闸/权限白名单前，先问"这里该用 IN 还是 NOT IN"，默认优先 IN。
+- **落地纪律**：`scripts/lint-kanet.mjs` 的 `R-STATUS-GUARD-BLACKLIST` 规则（[WARN]，启发式非精确 AST）对 `UPDATE ...protocol_status` 附近出现 `NOT IN` 且无 `IN` 白名单的情况提示改写——这类"能写检测就写"的模式同 `R-FEE-SPLIT-PKG-DRIFT`（规矩靠自觉守不住，上机制）。
+
+---
+
 *本档案在 v2 spec 第八章元教训基础上独立。spec 聚焦"这次怎么做"，本档案聚焦"下次别再犯"。*
+
+---
+
+## 规则 59 —— 探测外部服务，必须用它真实的协议/客户端，不能手搓一个"看起来像"的请求
+
+**症状（2026-07-14 追凶日 · Bettor 犯）**：怀疑 kaspad 挂了，用 `new WebSocket()` + `JSON.stringify({method:'getServerInfo'})` 去打 `--rpclisten-borsh=0.0.0.0:17210`。结果：**WS 连上 28ms，但 25 秒无任何响应** → 判定"节点 accept TCP 但不回 RPC = 挂了" → **kill 了一个完全健康的生产节点**（它随后被迫重新追块）。
+
+**真相**：`--rpclisten-borsh` 是 **borsh 二进制编码**端点。发 JSON 文本进去它无法解析、直接丢弃 —— **沉默是"协议不匹配"的正常表现，不是"服务挂了"**。用项目自己在用的 kaspa-wasm `RpcClient({ encoding: Encoding.Borsh })` 复测：**getServerInfo 40 毫秒返回，节点完全健康**。
+
+**铁律**：
+- 探测任何外部服务（RPC / gRPC / borsh / protobuf / 任何二进制协议），**必须用生产代码正在用的那个客户端**去探。项目里已经有能连它的代码 —— 用那份，别手搓。
+- **"没有响应"是最弱的证据。** 它同时兼容至少四种解释：服务挂了 / 协议不匹配 / 认证失败 / 网络丢包。**只有当你用正确协议探过，"无响应"才等于"挂了"。**
+- 拿"无响应"当证据去做**破坏性动作**（kill 进程 / 回滚 / 改配置）之前，**必须第二路独立证实**。
+
+**同族**：`feedback-read-actual-code-not-assumed-canonical` / `feedback-verify-actual-code-path-before-applying-finding`。同一个病：**用"我以为它长这样"代替"它实际长这样"**。
+
+---
+
+## 规则 60 —— 观察窗口必须长于故障周期，否则"干净"是假的
+
+**症状**：二分法排查间歇性冻结，每轮观察 8 分钟，报"本轮无冻结 → 排除这一批"。**连续四轮结论全部作废** —— 该故障有 **20-30 分钟静默期**，8 分钟窗口天然看不到它。队友在我宣布"干净"的那个窗口里，翻出了一次 **272 秒**的冻结。
+
+**铁律**：
+- 做排除性实验前，**先测出故障的周期/间隔**，观察窗口取 **≥2 倍周期**。
+- **阴性结论比阳性结论危险得多**：抓到一次冻结是硬证据；"没抓到"什么都不证明，除非窗口足够长。
+- 报"本轮干净"时，**必须同时报出窗口长度和已知故障周期**，让人能判断这个"干净"值不值钱。
+
+---
+
+## 规则 61 —— `if (process.env.X)` 对字符串 "0" 为真
+
+**症状**：给 `CPU_PROF_AUTO_EXIT_MS` 设 `0` 想"关掉自动退出"，但 `"0"` 是**非空字符串 = truthy** → `setTimeout(..., 0)` 立即触发 → **console 每次启动即自杀**，反复排查以为是别的原因。
+
+**铁律**：env 开关**只有"删掉"才等于关掉**。要么显式比较（`=== '1'`），要么 `delete process.env.X`。**别指望 `=0` 能关掉任何东西。**
+
+---
+
+## 规则 62 —— `--cpu-prof` / `NODE_OPTIONS` 会被 fork 的子进程继承（含持私钥的 relay）
+
+**症状**：往 `NODE_OPTIONS` 里塞 `--prof` → Node 硬拒（`--prof is not allowed in NODE_OPTIONS`）→ console 启动即死 → **全系统停 17 分钟**。更严重的是：`NODE_OPTIONS` 会被 console fork 的**全部 31 个 relay 子进程继承** —— 而 **relay 持有私钥**。当时若塞的是 `--inspect`，等于给 31 个持私钥进程各开一个调试端口（内存读取 + RCE）。
+
+**铁律**：
+- 诊断 flag 用**命令行**传（`node --cpu-prof src/index.js`），**不要**用 `NODE_OPTIONS`。
+- 动任何进程级 flag 前先问：**这个进程 fork 谁？它们继承什么？其中有没有持密钥的？**
+- `--inspect` 在**任何持私钥进程上一律禁止**。`--cpu-prof` 安全（只写本地文件，不开端口）。
+- Windows 上 `--cpu-prof` **需要 graceful exit 才落盘**（force kill 不写）—— 用自杀定时器，不要 `taskkill /F`。
+
+---
+
+## 规则 63 —— 冻结期 CPU 满载 = 纯计算，直接上 profiler，不要做二分法
+
+**症状**：为了找一个"事件循环冻结 270 秒"的凶手，做了**两天**的 env 开关二分法（关 cron、杀 relay、逐批排除）。最后关光 24 个 cron + 杀光 30 个 relay + console 单进程独跑，**仍然冻 270 秒** —— 二分法把整个业务层排除干净了，却始终没能指出凶手是谁。
+
+**铁律**：
+- **先看 CPU。** 冻结期 CPU **满载** = 有 JS 在**纯烧 CPU**（不是等 I/O）→ **CPU profiler 直接把函数名报出来**，一次就够。
+- 冻结期 CPU **接近 0** = 在等 I/O / 锁 / 外部服务 → 那时才轮到二分法和 handle dump。
+- **二分法是"不知道该测什么"时的下策。能直接测量的东西，不要靠排除法去推。** 两天 vs 30 分钟，就是这个区别的代价。
+
+## 规则 64 —— 修并行实现之一，必须枚举全部拷贝（copy-fork 漂移母题）
+
+**症状**（同一母题在本仓库四次独立发作，2026-07-18 J1tn 汇总坐实）：
+1. **v0.6→bshard 恢复层**：recapture/dispatchRefund/handleRefunding 只加进 v0.6 settler，bshard 复制分叉后一条没跟——j34vb/8pson 结算卡死（7/17 demo 撞出，d521fea8 补移植）。
+2. **CAPTURE_FINALITY_DEPTH 重复常量**：trade-protocol-filter 本地复制数值而非 import 单源（NWT diff 审抓出，"母题小型翻版"）。
+3. **V1/V2 编译分派**：cancelMarketLive/consolidateAndBuildPsState 硬编码 V1 compile，V2 家族出现后没人枚举既有调用点（8pson/kr5l4/j34vb 全撞）。
+4. **签名站点覆盖**：c8188d98 修 safe_json sighash 时改了 bettor-prediction-voter.js 两站点，**漏了 trade-protocol-filter.js:handlePoolOracleTxSignReq 第三站点**（jepu1 401 次拒签的半根因）；另有 bettor-prediction-settler.js:618 第四站点候选待定性。
+
+**铁律**：
+- 修一个"存在多份拷贝的实现"（同名机制/同 IPC 命令的多个 caller/同模板的多版本）时，**diff 里必须附全仓枚举证据**（`grep -rn <关键调用/常量> src/` 原文），逐个拷贝写明"已改 / 不需改+理由"。没枚举 = 审核退回。
+- 发现自己在复制一段逻辑/常量而不是 import 单源时，先停：能抽共享就抽（反增殖）；抽不了必须在两处都留互指注释（"改我必改 X:行号"）。
+- 机器 clamp（逐族落地，人工纪律只兜过渡期）：例如 sign 族 lint `R-SIGN-SETTLE-SAFE-JSON`——`sign_input_for_settle` 构造点必须带 `safe_json: true` 或在 allowlist 注明豁免理由（提案 2026-07-18，见 jepu1 修复稿 §1.6）。同思路已有先例：R-MANIFEST 系、K-18/PS-FAMILY 家族分派 lint 方向。
+

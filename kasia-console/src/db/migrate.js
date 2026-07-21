@@ -5,6 +5,7 @@ import { randomUUID } from 'crypto';
 import { readFileSync, existsSync } from 'node:fs';
 import { encrypt } from '../services/crypto.js';
 import { categorizeMarket } from '../lib/market-category.js';
+import { classifyPayoutShardFamily } from '../lib/bshard-payout-family-coherence.mjs';
 
 export function runMigrations() {
   sqlite.exec(`
@@ -5162,6 +5163,381 @@ export function runMigrations() {
       )
     `);
     console.log('[migrate] v174: tg_custodial_wallets table (电报 DM 托管钱包, 助记词 aes-256-gcm 加密 fail-loud, display-once 无明文回取, Owner 钦定).');
+  }
+
+  // v175: escrow_states — Silverscript P2SH 合约状态表 (路由 escrow.js 早存在但表从未建立).
+  {
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS escrow_states (
+        id                  TEXT PRIMARY KEY,
+        offer_id            TEXT,
+        initiator_relay_id  TEXT NOT NULL,
+        buyer_address       TEXT NOT NULL,
+        seller_address      TEXT NOT NULL,
+        arbiter_address     TEXT NOT NULL,
+        p2sh_address        TEXT NOT NULL,
+        redeem_script_hex   TEXT NOT NULL,
+        amount_sompi        TEXT NOT NULL,
+        deadline            INTEGER,
+        status              TEXT NOT NULL DEFAULT 'created',
+        lock_txid           TEXT,
+        unlock_txid         TEXT,
+        created_at          TEXT NOT NULL,
+        updated_at          TEXT NOT NULL
+      )
+    `);
+    console.log('[migrate] v175: escrow_states table (Silverscript P2SH escrow — buyer/seller/arbiter 三方合约, lock/execute via relay IPC).');
+  }
+
+  // v176 (J1, Owner 钦定 2026-06-30 "自我进化"·槽位 #26): oracle_shadow_ledger — 影子判定台账.
+  //   目的: 每个盘结算时记一行 = {权威判定(UMA/judgeLine), 我们自己 oracle 的独立判定, 是否一致, 领域}.
+  //   纯记录·**永不碰结算**(Bettor 守门铁律1): settle 照常只走权威; 台账在旁边攒"我们 vs 权威"命中率历史.
+  //   our_oracle_* 为 NULL = 该领域尚无独立数据源(=路线图: 该给哪个领域先配源, NWT 排域序滚动建).
+  //   写入方: src/lib/oracle-shadow-ledger.mjs recordShadowJudgment (settle daemon judgeWinDir 捕获点 defensive 调用).
+  //   读取方: shadowAccuracyReport (按领域命中率报表 → Owner 定先攻哪个领域升授权).
+  {
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS oracle_shadow_ledger (
+        id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+        market_id           TEXT NOT NULL UNIQUE,
+        domain              TEXT,                  -- pool_markets.category: sports|crypto|politics|economy|other
+        market_source       TEXT,                  -- pool_markets.outcome_market_source: polymarket|espn|kanet_v07...
+        authority_source    TEXT NOT NULL,         -- 'uma_ctf' | 'espn_judgeline' (谁结的钱)
+        authority_verdict   TEXT NOT NULL,         -- 'YES' | 'NO'
+        authority_windir    INTEGER NOT NULL,      -- 0=YES | 1=NO (与 judgeWinDir 同口径)
+        our_oracle_source   TEXT,                  -- 领域判 id (e.g. 'espn_judgeline'/'onchain_price'); NULL=无独立源
+        our_oracle_verdict  TEXT,                  -- 'YES'|'NO'|'ABSTAIN'; NULL=未独立判(无源)
+        our_oracle_windir   INTEGER,               -- 0|1; NULL
+        agree               INTEGER,               -- 1=一致 0=分歧; NULL=无我方判定可对比
+        divergence_reason   TEXT,                  -- 分歧时记原因(领域判 vs 权威 差异)
+        settle_txid         TEXT,
+        deadline            INTEGER,
+        recorded_at         TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+    try { sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_shadow_ledger_domain ON oracle_shadow_ledger(domain, agree)`); } catch {}
+    console.log('[migrate] v176: oracle_shadow_ledger table (影子判定台账 — 我们 oracle vs 权威 命中率历史, 纯记录不碰结算, Owner 自我进化 #26).');
+  }
+
+  // v177 (J2, task#32, 2026-07-03 Owner 500 卡死根因修): pool_bettor_sides += pay_amount_sompi.
+  //   问题: register-v07/confirm 的"已注册"幂等判定原靠 hasMatchingUtxo(payAddr 当前是否还有匹配 UTXO)
+  //   ——但注册成功后立刻 fire-and-forget sweep_per_bet 把该 UTXO 扫走, 任何 sweep 之后的重复 poll 会
+  //   看到 hasMatchingUtxo=false, 即使 DB 早已真实注册, 也照样返回 pending:true(Owner 那笔 Cabo Verde
+  //   500KAS = pool_bettor_sides.id=11913 实证)。且旧 mine 查询只按 pk+direction+market 取最新一条,
+  //   同方向多笔押注场景可能认错笔。
+  //   修法: 记录 payAmountSompi(=stake+bet_id 派生 nonce, 每笔押注唯一且确定性可重算) → confirm 幂等判定
+  //   只信 DB、精确匹配这一笔 payAmountSompi, 不再依赖 UTXO 是否还在原地。
+  {
+    const cols = sqlite.prepare("PRAGMA table_info(pool_bettor_sides)").all();
+    if (!cols.some(c => c.name === 'pay_amount_sompi')) {
+      try {
+        sqlite.exec(`ALTER TABLE pool_bettor_sides ADD COLUMN pay_amount_sompi INTEGER`);
+        console.log('[migrate] v177: pool_bettor_sides += pay_amount_sompi INTEGER (task#32 confirm-idempotency fix, NULL for pre-existing rows = falls back to old latest-match behavior).');
+      } catch (e) {
+        console.warn(`[migrate] v177 pay_amount_sompi fail: ${e.message}`);
+      }
+    }
+  }
+
+  // v178 (KANet-UI, G4 世界杯上线门, 2026-07-04 Bettor 钦定轻量指纹): faucet_grants += fingerprint_hash.
+  //   目标"防随手换IP多领"非"防专业女巫"(测试网币零价值,不值得防死磕攻击者)。主防线仍是 per-IP(24h≤3)+
+  //   全局日帽; 这是第二把钥匙同样 24h≤3, 用 hash(user-agent+accept-language+timezone offset+屏幕分辨率)
+  //   当稳定字段拼 key, 不装重型设备指纹库。NULL = 旧行(迁移前授予, 无指纹数据, 不回填, 不影响新行判定)。
+  {
+    const cols = sqlite.prepare("PRAGMA table_info(faucet_grants)").all();
+    if (!cols.some(c => c.name === 'fingerprint_hash')) {
+      try {
+        sqlite.exec(`ALTER TABLE faucet_grants ADD COLUMN fingerprint_hash TEXT`);
+        sqlite.exec(`CREATE INDEX IF NOT EXISTS idx_faucet_grants_fingerprint ON faucet_grants(fingerprint_hash, granted_at)`);
+        console.log('[migrate] v178: faucet_grants += fingerprint_hash TEXT + index (G4 lightweight fingerprint throttle, secondary key alongside per-IP).');
+      } catch (e) {
+        console.warn(`[migrate] v178 fingerprint_hash fail: ${e.message}`);
+      }
+    }
+  }
+
+  // v179 (J2, #35 世界杯造盘管线, 2026-07-04 Owner 钦定头号): worldcup_schedule 表.
+  //   目的: G1 设计 §3 赛程 config + 自动开盘 —— ESPN 自己为未来轮次(QF/SF/3rd/Final)预先发布了
+  //   带真实 event id + kickoff 的"占位符"赛事(队伍名形如 'RD16 W1'/'QFW2'/'SF L1', 上一轮结果出来后
+  //   ESPN 自己把占位符换成真队名, 同一个 event id 不变)——不需要我们自己搭桥接/追踪谁晋级, cron 只需
+  //   定期重新 fetch 同一个 espn_event_id, 检测队伍名是否已从占位符变成真实队伍缩写(真队伍缩写从不含
+  //   数字, 占位符都含数字, 用这个当判定谓词), 一旦双边都解析出真队伍 → 走 create-v07(#41/R16 验过的
+  //   安全管线)建盘, 记 market_id 回这行, 防重复建。
+  {
+    const exists = sqlite.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='worldcup_schedule'").get();
+    if (!exists) {
+      sqlite.exec(`
+        CREATE TABLE worldcup_schedule (
+          id                INTEGER PRIMARY KEY AUTOINCREMENT,
+          espn_event_id     TEXT NOT NULL UNIQUE,
+          stage             TEXT NOT NULL,              -- 'r16'|'qf'|'sf'|'third_place'|'final'
+          kickoff_utc       INTEGER NOT NULL,            -- unix seconds
+          market_id         TEXT,                        -- 建盘后回填, NULL = 未建
+          status            TEXT NOT NULL DEFAULT 'pending_teams',  -- pending_teams|created|skipped
+          skip_reason       TEXT,
+          created_at        TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at        TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+      `);
+      sqlite.exec(`CREATE INDEX idx_worldcup_schedule_status ON worldcup_schedule(status)`);
+      console.log('[migrate] v179: worldcup_schedule table (#35 世界杯赛程 config, ESPN 占位符解析驱动自动开盘).');
+    }
+  }
+
+  // v180 (J2, ZK settle 生产装配 job-queue, 2026-07-06, 见 docs/2026-07-06-zk-close-tick-production-wiring-design.md):
+  //   zk_prove_jobs 表 —— 跨机器 proving 任务队列(settler 在 J2 host 侧 enqueue, J1 机器的 RISC0/Docker
+  //   环境轮询+完成)。partial unique index 是持久化幂等锁(NWT 要求: 不能只在内存里, daemon 重启会丢锁)。
+  //   v1 已知限制(NWT 审过接受): job 若长期卡在 in_progress(J1 机器崩溃/网络断), 需手动
+  //   UPDATE zk_prove_jobs SET status='failed' WHERE id=X 解锁重新入队; 自动超时恢复留待下个迭代。
+  {
+    const exists = sqlite.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='zk_prove_jobs'").get();
+    if (!exists) {
+      sqlite.exec(`
+        CREATE TABLE zk_prove_jobs (
+          id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+          market_id           TEXT NOT NULL,
+          status              TEXT NOT NULL DEFAULT 'pending',  -- pending|in_progress|done|failed
+          ordered_bets_json   TEXT NOT NULL,
+          bets_root_hex       TEXT,
+          attested_winner     INTEGER,
+          receipt_hex         TEXT,
+          journal_digest_hex  TEXT,
+          error               TEXT,
+          created_at          TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at          TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+      `);
+      sqlite.exec(`
+        CREATE UNIQUE INDEX idx_zk_prove_jobs_market_active
+          ON zk_prove_jobs(market_id)
+          WHERE status IN ('pending', 'in_progress')
+      `);
+      console.log('[migrate] v180: zk_prove_jobs table (跨机器ZK proving job-queue, partial unique index做持久化幂等锁).');
+    }
+  }
+
+  // v181 (2026-07-08, J2, 缺件②prove worker): zk_prove_jobs 补 fee_leaves_json/pool_total_sompi 两列——
+  //   v180 建表时只覆盖了 winner payout 侧(ordered_bets_json/bets_root_hex/attested_winner), 没有 fee_leaves
+  //   字段, 但今天的设计文档 §4 硬门⑤(禁 bps-fallback, 生产路径必须显式提供完整 fee_leaves)要求 GuestInput
+  //   必须带这两项, enqueue 侧(缺件①, J1 域)写入这两列, prove worker(本文件调用方)读取喂给 RISC0 guest。
+  {
+    const cols = sqlite.pragma('table_info(zk_prove_jobs)').map((c) => c.name);
+    if (!cols.includes('fee_leaves_json')) {
+      sqlite.exec(`ALTER TABLE zk_prove_jobs ADD COLUMN fee_leaves_json TEXT NOT NULL DEFAULT '[]'`);
+    }
+    if (!cols.includes('pool_total_sompi')) {
+      sqlite.exec(`ALTER TABLE zk_prove_jobs ADD COLUMN pool_total_sompi TEXT`);
+    }
+    console.log('[migrate] v181: zk_prove_jobs 补 fee_leaves_json/pool_total_sompi(§4硬门⑤禁bps-fallback, guest需要完整fee_leaves).');
+  }
+
+  // v182 (2026-07-08, J2, #19 根治: betId 服务端持久化, 见设计稿 docs/2026-07-08-betid-persistence-and-
+  // pending-lifecycle-design.md, NWT 审 GREEN 0297e50e): tg-bot 的 betId(randomUUID, 派生 per-bet 地址的
+  // 关键参数)此前只活在 bot 进程内存 pendingPayments 里——console/tg-bot 任一重启, 已付款用户的 betId
+  // 永久丢失, per-bet 地址无法重建, 变成不可恢复孤儿单(2026-07-08 Martin 事故实例)。prep 时把
+  // (marketId,bettorPk,direction,betId,payAddr,金额) 持久化进这张表, 重启后可反查恢复。
+  //   UNIQUE 建在 bet_id 本身(不是三元组)——同一 bettor 同方向允许多笔独立在途加注(betId 存在的意义
+  //   就是解这个碰撞), 三元组唯一会在"二次加注、第一笔还没确认"场景把第一笔覆盖冲掉, 重新造孤儿
+  //   (NWT 红队初版设计时抓到这条, 已按此修正)。
+  {
+    const tables = sqlite.pragma("table_list").map((t) => t.name);
+    if (!tables.includes('pool_bet_preps')) {
+      sqlite.exec(`
+        CREATE TABLE pool_bet_preps (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          logical_market_id TEXT NOT NULL,
+          bettor_pk TEXT NOT NULL,
+          direction INTEGER NOT NULL,
+          bet_id TEXT NOT NULL,
+          pay_addr TEXT NOT NULL,
+          exact_stake_sompi INTEGER NOT NULL,
+          stake_kas REAL NOT NULL,
+          confirmed_at INTEGER,
+          created_at INTEGER NOT NULL
+        )
+      `);
+      sqlite.exec(`CREATE UNIQUE INDEX idx_pool_bet_preps_betid ON pool_bet_preps(bet_id)`);
+      sqlite.exec(`CREATE INDEX idx_pool_bet_preps_triple ON pool_bet_preps(logical_market_id, bettor_pk, direction, confirmed_at)`);
+      console.log('[migrate] v182: pool_bet_preps 建表(#19 根治, betId 服务端持久化防孤儿单).');
+    }
+  }
+
+  // v183 (2026-07-11, J2, MAX_WALK 老盘卡死根治: 见设计稿 docs/2026-07-08-backward-walk-daa-index-design.md,
+  // J1 设计+NWT 红队 GREEN+Bettor GO #g4mz41.2, 28mln 卡在 getBlockAtDaa backward walk gap=637115 > MAX_WALK
+  // 250000 触发): 持久化 SPC(selected-parent-chain)块 DAA→hash 索引, backfill 一次性摊销覆盖老市场的
+  // deadline_daa, getBlockAtDaa 查表优先(O(log n)), 查不到才退化现有 forward-ring/backward-walk(逐字节不动)。
+  // §2.5 索引空洞防线: spc_daa_index_coverage 只信"确认连续覆盖"区间内的查表结果, 落洞老实退化, 无半信态。
+  {
+    const tables = sqlite.pragma('table_list').map((t) => t.name);
+    if (!tables.includes('spc_daa_index')) {
+      sqlite.exec(`
+        CREATE TABLE spc_daa_index (
+          daa_score INTEGER PRIMARY KEY,
+          block_hash TEXT NOT NULL,
+          timestamp_ms INTEGER NOT NULL
+        )
+      `);
+      console.log('[migrate] v183a: spc_daa_index 建表(SPC块DAA→hash索引, MAX_WALK老盘根治).');
+    }
+    if (!tables.includes('spc_daa_index_coverage')) {
+      sqlite.exec(`
+        CREATE TABLE spc_daa_index_coverage (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          start_daa INTEGER NOT NULL,
+          end_daa INTEGER NOT NULL
+        )
+      `);
+      console.log('[migrate] v183b: spc_daa_index_coverage 建表(索引空洞防线, §2.5).');
+    }
+  }
+
+  // v184 (2026-07-12, J2, B线落2: feeRules 上链锚定, 见设计稿 docs/2026-07-12-fee-split-phase2-commit-anchor-
+  // design.md v1.2, Bettor 注1-4+NWT P1-P3 折入, 双审 GREEN): pool_markets.fee_rules 新列——市场建单时的分润
+  // 规则全文 JSON(canonical 化前原始结构含 schema_v), 委员 settle 时对全文 canonicalizeFeeRules+hash == 链上
+  // commit 才继续。write-once: 独立列(不进 settler read-modify-write 的 metadata 域, xzztw 教训)+ BEFORE
+  // UPDATE trigger(Bettor 注2: 从"约定不 UPDATE"L1 升为结构性不可能 L4——已有值的行禁止改写, NULL→值 允许
+  // 一次)。老市场 fee_rules IS NULL → 全部走既有路径字节不动(生效边界=新建非-zk 市场起, 不追溯)。
+  {
+    const cols = sqlite.pragma('table_info(pool_markets)').map((c) => c.name);
+    if (!cols.includes('fee_rules')) {
+      sqlite.exec(`ALTER TABLE pool_markets ADD COLUMN fee_rules TEXT`);
+      console.log('[migrate] v184a: pool_markets.fee_rules 列(B线落2 分润规则全文, write-once).');
+    }
+    const trg = sqlite.prepare(`SELECT name FROM sqlite_master WHERE type='trigger' AND name='trg_pool_markets_fee_rules_write_once'`).get();
+    if (!trg) {
+      sqlite.exec(`
+        CREATE TRIGGER trg_pool_markets_fee_rules_write_once
+        BEFORE UPDATE OF fee_rules ON pool_markets
+        WHEN OLD.fee_rules IS NOT NULL AND (NEW.fee_rules IS NULL OR NEW.fee_rules != OLD.fee_rules)
+        BEGIN
+          SELECT RAISE(ABORT, 'fee_rules is write-once (B线落2 Bettor 注2): committed 分润规则禁止改写/清空');
+        END
+      `);
+      console.log('[migrate] v184b: fee_rules write-once trigger(Bettor 注2, L4 结构性不可变).');
+    }
+  }
+
+  // v185 (2026-07-16, KANet-UI, Owner终裁件⑤步骤2·Bettor #nig8da 派工): 4个疑似死端点(market/create-v06/
+  // bettor/register无版本/register-external/prep+confirm)命中计数——无access_log表+fastify logger关闭+
+  // console.log重启即截断, 没有能查历史调用记录的基础设施(结构性推断不足以支撑删代码决策)。持久化命中计数
+  // (跨重启存活, 7天观察窗到期零命中才走删除, 删前仍NWT审+确认无隐藏调用方——不冒进, 记账)。
+  {
+    const tables = sqlite.pragma('table_list').map((t) => t.name);
+    if (!tables.includes('endpoint_hit_counters')) {
+      sqlite.exec(`
+        CREATE TABLE endpoint_hit_counters (
+          endpoint_name TEXT PRIMARY KEY,
+          hit_count INTEGER NOT NULL DEFAULT 0,
+          first_hit_at TEXT,
+          last_hit_at TEXT
+        )
+      `);
+      console.log('[migrate] v185: endpoint_hit_counters 建表(4个疑似死端点7天观察窗命中计数, 件⑤步骤2).');
+    }
+  }
+
+  // v186 (2026-07-16, KANet-UI, Owner"系统不需要人工/没有人工闸"原则钦定, 件⑥ break-glass 走向A,
+  // Bettor #njqd3u/#njwf26 派工执行): confirm-by-address 端点移除的永久审计记录(Bettor 要求"审计留档
+  // A决策砍除时间/最后状态")。写入 events 表(既有审计表, 不新建表), 幂等(先查是否已记过)。
+  {
+    const already = sqlite.prepare(`SELECT id FROM events WHERE event_type = 'admin_confirm_by_address_removed' LIMIT 1`).get();
+    if (!already) {
+      sqlite.prepare(`INSERT INTO events (event_scope, event_type, source, level, summary, payload_json, created_at)
+        VALUES (?,?,?,?,?,?,?)`).run(
+        'admin', 'admin_confirm_by_address_removed', 'migrate.js:v186', 'warn',
+        'confirm-by-address break-glass 通道永久移除(Owner"不要人工闸"原则+件⑥走向A). 移除前验死: events表对admin_confirm_by_address事件0命中/pending_actions表0行/KANetguy(7/8孤儿单, 唯一历史相关案例)钱包记录8天未更新(已走默认B自动路径). 自上线从未被实际调用. NWT+Bettor独立复核GREEN.',
+        JSON.stringify({
+          decision: 'remove_break_glass_channel',
+          owner_principle: 'system needs no manual gates',
+          verification: { events_hits: 0, pending_actions_rows: 0, kanetguy_wallet_last_update: '2026-07-08T14:23:01.666Z' },
+          verified_by: ['KANet-UI', 'NWT', 'Bettor'],
+          removed_endpoint: '/api/admin/pool/register-v07/confirm-by-address',
+          removed_from_commit_ref: 'pool.js confirm-by-address handler (2026-07-08 add, 2026-07-16 removal)',
+        }),
+        Math.floor(Date.now() / 1000),
+      );
+      console.log('[migrate] v186: confirm-by-address 移除决策永久审计记录写入 events 表(件⑥ break-glass 走向A).');
+    }
+  }
+
+  // v187 (2026-07-16, J1tn, spc_daa_index 常驻写入器补落码 docs/2026-07-08-backward-walk-daa-index-design.md
+  // §2.2, Bettor 方向审 GREEN + NWT 攻击面终审 GREEN #o0056j/#o00hex): relay 侧 tip 心跳落地表(单行,
+  // console 完整性巡检拿它跟 spc_daa_index max(daa_score) 比对判定停更, 不给 console 开 RPC 口子)。
+  {
+    const tables = sqlite.pragma('table_list').map((t) => t.name);
+    if (!tables.includes('spc_tip_heartbeat')) {
+      sqlite.exec(`
+        CREATE TABLE spc_tip_heartbeat (
+          id INTEGER PRIMARY KEY CHECK (id = 1),
+          daa_score INTEGER NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+      `);
+      console.log('[migrate] v187: spc_tip_heartbeat 建表(单行, relay tip 心跳, spc_daa_index 完整性巡检用).');
+    }
+  }
+
+  // v188 (2026-07-17, J2, K-17 Pre-Prune Capture worker, docs/2026-07-17-preprune-capture-invariant-
+  // k16-gate-design.md v1.1, NWT 红队 GREEN dd6496b0/369f6679): 剪裁前主动补齐 worker 独立存活心跳表,
+  // 镜像 v187 spc_tip_heartbeat 单行模式(worker 自身, 不是 relay tip——两条心跳各自独立, 互不替代)。
+  {
+    const tables = sqlite.pragma('table_list').map((t) => t.name);
+    if (!tables.includes('spc_prune_capture_heartbeat')) {
+      sqlite.exec(`
+        CREATE TABLE spc_prune_capture_heartbeat (
+          id INTEGER PRIMARY KEY CHECK (id = 1),
+          tick_count INTEGER NOT NULL DEFAULT 0,
+          last_scanned_null_rows INTEGER NOT NULL DEFAULT 0,
+          last_recaptured INTEGER NOT NULL DEFAULT 0,
+          updated_at TEXT NOT NULL
+        )
+      `);
+      console.log('[migrate] v188: spc_prune_capture_heartbeat 建表(K-17 剪裁前补齐 worker 独立存活心跳).');
+    }
+  }
+
+  // v189 (2026-07-21, J1, K-18 §3.1 covenant_family 列, docs/2026-07-21-p2-batch1-truth-source-layer-k18-
+  // landing-design.md §3.1): payout_shards 家族不可变列(v1_committee/v2_zk/unknown) + 一次性 backfill。
+  // 幂等(DoD-2 孤儿盘/重启穿越): ADD COLUMN 用标准 table_info 存在性守卫; backfill UPDATE 只处理仍是
+  // 'unknown' default 的行(重启重跑这段不会重复处理已分类过的行, 也不会覆盖新写入点已正确 declare 的行)。
+  // 🔴 事故修复(2026-07-21, NWT diff 审 ced75f31 后续独立发现): ADD COLUMN 本身安全(schema 变更, 新列
+  // default 'unknown' 无害), 但下面的 backfill UPDATE 原来是 runMigrations() 无条件跑的真实 migration,
+  // 不是 dry-run——只要这段代码部署了, 任何原因触发的 console 重启(不一定是为了装这一批)都会真的执行一次
+  // backfill, 完全没有等 K-18 §5 DoD-0"backfill dry-run 报告人工过一遍才能真正执行 migration"这道闸先
+  // 发生。跟本卡自己写的 DoD-0 铁律直接自相矛盾。影响量级非资金安全(误标 covenant_family 事后可 UPDATE
+  // 订正, coherence gate 目前也还没接入任何真实花费路径), 但机制成本低, 不留成"跟踪但不修"的技术债——
+  // 加显式 opt-in 环境变量, 不设不跑真实 backfill(列还是加, 只是新行/既有行都停留 'unknown' 直到人工过完
+  // dry-run 报告后显式打开这个开关, 跟 KANet-UI/J1 在生产库跑只读 dry-run 脚本、review 完再部署打开开关
+  // 的实际操作顺序对齐)。
+  {
+    const psCols = sqlite.pragma('table_info(payout_shards)').map(c => c.name);
+    if (!psCols.includes('covenant_family')) {
+      sqlite.exec(`ALTER TABLE payout_shards ADD COLUMN covenant_family TEXT NOT NULL DEFAULT 'unknown'`);
+      console.log('[migrate] v189: payout_shards.covenant_family 列已加(K-18 §3.1).');
+    }
+    if (process.env.K18_BACKFILL_CONFIRMED !== '1') {
+      const pendingCount = sqlite.prepare(`SELECT COUNT(*) AS n FROM payout_shards WHERE covenant_family = 'unknown'`).get().n;
+      if (pendingCount > 0) {
+        console.log(`[migrate] v189: ${pendingCount} 行待 backfill, 但 K18_BACKFILL_CONFIRMED 未设为 '1' — 跳过真实 backfill(K-18 §5 DoD-0: 必须先跑只读 dry-run 报告人工过一遍, 确认无在途盘被误伤, 才能设这个环境变量真正执行)。这些行停留 'unknown', 不阻断其它 migration/不阻断启动。`);
+      }
+    } else {
+      const toBackfill = sqlite.prepare(`SELECT * FROM payout_shards WHERE covenant_family = 'unknown'`).all();
+      if (toBackfill.length > 0) {
+        const upd = sqlite.prepare(`UPDATE payout_shards SET covenant_family = ? WHERE logical_market_id = ?`);
+        const tx = sqlite.transaction((rows) => {
+          let v1 = 0, v2 = 0, unknown = 0;
+          for (const row of rows) {
+            const { family } = classifyPayoutShardFamily(row);
+            upd.run(family, row.logical_market_id);
+            if (family === 'v1_committee') v1++; else if (family === 'v2_zk') v2++; else unknown++;
+          }
+          return { v1, v2, unknown };
+        });
+        const { v1, v2, unknown } = tx(toBackfill);
+        console.log(`[migrate] v189: K18_BACKFILL_CONFIRMED=1, backfill 完成, 共 ${toBackfill.length} 行 — v1_committee=${v1} v2_zk=${v2} unknown=${unknown}`
+          + (unknown > 0 ? ` (${unknown} 行判不出家族, 停留 'unknown' — 需人工过一遍, 见 K-18 §5 风险②/DoD-5, 不阻断 migration)` : ''));
+      }
+    }
   }
 
   console.log('[migrate] DB migrations complete.');

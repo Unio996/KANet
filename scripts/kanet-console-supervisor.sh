@@ -47,8 +47,35 @@ log() {
   echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] $*" >> "$LOG"
 }
 
+# #21 health-check isolation (Bettor 2026-07-19 决赛夜, cause-agnostic freeze mitigation):
+# 纯 curl 判活的问题——如果 console event loop 真被同步阻塞, curl 也会跟着卡到 max-time 超时,
+# 健康信号本身走的是可能被堵住的同一条 HTTP 路径。加一条心跳文件 OR 逻辑: console 自己的
+# setInterval(2s tick, 见 src/index.js)在事件循环转得动的情况下会按时写这个文件——只有真正
+# 同步阻塞(连 setInterval 回调都排不上)才会让心跳也停摆。"HTTP 请求排队"(忙但活)不影响
+# 这个 tick, curl 超时但心跳新鲜 = 判活不重启, 避免误杀。心跳也过期(>10s)才真正判死。
+#
+# NWT 红队 2026-07-19 抓到的已知 trade-off: curl 失败原因没区分——真进程崩溃(端口没监听)
+# 时, 若心跳文件恰好是崩溃前几秒写的, heartbeat_fresh() 会误判"活着", 最多引入约 10s 的
+# 判死延迟。Bettor 提议按 curl exit code 区分(7=connection refused 立即判死 / 28=timeout
+# 才查心跳)——**实测这条在本机 Windows/Git-Bash 环境不成立**: 关闭的端口在这台机器上不会
+# 立即返回 connection refused, curl 会一直等到 --max-time 超时才退出, exit code 恒为 28,
+# 真进程崩溃场景在这里也只会看到 28, 跟"忙但活"的 28 无法用 exit code 区分(3 次重复测试
+# 都验证了这一点, 不是偶发)。exit-code 精炼在此平台是空转、不生效, 退回 NWT 原先审过的
+# 心跳 OR 简单方案(已知 trade-off 已评估影响有限、可接受, 不为了修一个平台上打不开的锁
+# 加复杂度)。
+HEARTBEAT_FILE="$KANET_ROOT/logs/console-heartbeat.txt"
+heartbeat_fresh() {
+  [[ -f "$HEARTBEAT_FILE" ]] || return 1
+  local hb_age
+  hb_age=$(( $(date +%s) - $(stat -c %Y "$HEARTBEAT_FILE" 2>/dev/null || stat -f %m "$HEARTBEAT_FILE" 2>/dev/null || echo 0) ))
+  (( hb_age >= 0 && hb_age <= 10 ))
+}
+
 console_alive() {
-  curl -sf --max-time 5 "http://127.0.0.1:${CONSOLE_PORT}/" > /dev/null 2>&1
+  if curl -sf --max-time 5 "http://127.0.0.1:${CONSOLE_PORT}/" > /dev/null 2>&1; then
+    return 0
+  fi
+  heartbeat_fresh
 }
 
 count_recent_restarts() {

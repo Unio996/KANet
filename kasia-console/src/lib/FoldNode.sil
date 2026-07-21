@@ -71,7 +71,7 @@ contract FoldNode(
         require(tx.outputs[0].value == new_states[0].pool_value);
         // 折满全片 → 验 commit_v2 完整性
         if (count_sum == shard_count) {
-            byte[] commit_pre0 = byte[](yes_sum, 16) + byte[](no_sum, 16);
+            byte[] commit_pre0 = byte[](yes_sum, 8) + byte[](no_sum, 8);
             byte[] commit_pre1 = commit_pre0 + byte[](market_id);
             byte[] commit_pre2 = commit_pre1 + byte[](shard_count, 4);
             require(blake2b(commit_pre2) == commit_v2);

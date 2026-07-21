@@ -23,7 +23,11 @@ import { sqlite } from '../db/client.js';
 import { randomUUID } from 'crypto';
 import { isOfferAlreadyRefunded } from './broker-refund-dedup.js';
 
-const BROKER_RELAY_ID = '0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0';
+// Bettor #j5romh r766 身份迁移补全, env 缺失 fail-loud 拒启(死值兜底=定时雷, 见 kanet.env)。
+const BROKER_RELAY_ID = process.env.BROKER_RELAY_ID;
+if (!BROKER_RELAY_ID) {
+  throw new Error('[broker-cancel-refund] FATAL: BROKER_RELAY_ID env var not set (see kanet.env) — refusing to start with hardcoded dead relay id fallback');
+}
 const FEE_KAS = 0.1;
 
 // Cancel intent detection — 用户**真**真 user-facing cancel-and-refund 表达.
@@ -152,7 +156,9 @@ export async function handleCancelAndRefund(peerAddr) {
   // 替原 inline sendKas + markOrderRefunded (双重退款 root cause) → call advanceToRefunded.
   // advanceToRefunded 内部 Phase 1 CAS lock + Phase 2 sendKas + Phase 3 atomic 3-table sync + chain-truth dedup.
   const { advanceToRefunded } = await import('./broker-state-authority.js');
-  const PORT = process.env.PORT || 3100;
+  // 2026-07-14(Bettor #k2xd1y 第五源排查): 端口 3100→3200 + 补 AbortSignal.timeout(同族
+  // legacyRefundBuilderTick 自锁风险)。
+  const PORT = process.env.PORT || 3200;
   const ackParts = [];
 
   for (const offer of refundable) {
@@ -162,6 +168,7 @@ export async function handleCancelAndRefund(peerAddr) {
       await fetch(`http://127.0.0.1:${PORT}/api/exchange/cancel`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ relayNodeId: BROKER_RELAY_ID, offer_id: offer.id }),
+        signal: AbortSignal.timeout(15000),
       });
     } catch (e) {
       console.warn(`[cancel-refund] cancel API err for ${offer.id.slice(0,8)}: ${e.message}`);

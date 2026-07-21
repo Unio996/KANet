@@ -19,7 +19,7 @@ import { acceptHandshake, sendKaspa, sendMessage } from './chain.mjs';
 import { getAIReply } from './ai.mjs';
 import { routeMessage } from './router.mjs';
 import { loadSeen, saveSeen } from './state.mjs';
-import { ingestMessage, ingestReply, ingestTx, ingestHandshake, ingestKaspaTx } from './ingest.mjs';
+import { ingestMessage, ingestReply, ingestTx, ingestHandshake, ingestKaspaTx, ingestSpcDaaBlock, ingestSpcTipHeartbeat } from './ingest.mjs';
 
 const { RpcClient, Encoding } = kaspa;
 const Resolver = kaspa.Resolver || null;  // npm ^0.13.0 removed Resolver
@@ -125,6 +125,23 @@ const INDEXED_MAX = 20000;
 const RECENT_BLOCKS_MAX = 120000;  // J2 2026-06-23: 旧 50000 + comment '~14h @ 1bps' = config bug (testnet-12 ~10BPS → 50000≈83min); 120000≈3.3h. ring buffer 填充慢→今晚靠 backward-walk(MAX_WALK 120000); production verifiable-endBlock 硬化后续.
 const _recentBlocks = [];  // [{ hash, daaScore }] insertion order = block-added order
 const _recentBlockHashes = new Set();  // dedup
+
+// ── spc_daa_index 常驻写入器 (docs/2026-07-08-backward-walk-daa-index-design.md §2.2, J1tn 2026-07-16 补落码) ──
+// MUST-FIX(NWT 攻击面审): daaScore 是 spc_daa_index 主键，INSERT OR IGNORE 会把先到的非-canonical
+// (reorg 后失效) block_hash 永久锁死——写入门必须只放行 finality-safe 的块。FINALITY_DEPTH 复用
+// kasia-console/src/services/pool-market-settler-v06.mjs:43 DEFAULT_FINALITY_DEPTH（同一个 F-S1
+// anti-reorg 场景：不同时间点查询收敛到同一 hash），不新拍数字。
+const SPC_INDEX_FINALITY_DEPTH = 50;
+// NWT 提醒: 热路径(10BPS)不额外发 getBlockDagInfo RPC 查 tip——block-added 事件本身已带 daaScore,
+// 用本地已见最大值做近似 tip 即可, 零新增 RPC round-trip。
+let _maxSeenDaaScore = 0;
+const TIP_HEARTBEAT_MS = 60000;
+let _tipHeartbeatTimer = null;
+// FIFO of not-yet-finality-safe blocks awaiting SPC_INDEX_FINALITY_DEPTH confirmations.
+// Drained on every block-added tick (§ below) — a block only leaves once
+// (_maxSeenDaaScore - block.daaScore) >= SPC_INDEX_FINALITY_DEPTH, at which point its
+// (daaScore, blockHash) binding is GHOSTDAG-final and safe to INSERT OR IGNORE.
+const _pendingFinalityQueue = [];
 export function getRecentBlocksAtOrAbove(minDaa) {
   return _recentBlocks.filter(b => b.daaScore >= minDaa);
 }
@@ -158,6 +175,25 @@ export async function getBlockAtDaa(deadlineDaa) {
   // :3300) + J2 r667 (:3200 backward == J1 forward 4/4 cross-node). endBlock feeds committee_pk_hash
   // (cross-node consensus), so equivalence is mandatory before switching. 69-93x faster at the
   // danger zone. Backward walk retained as fallback for deadlines older than the ring window (rare).
+  // v183 index-lookup layer (backward-walk-daa-index-design.md, J1设计/NWT红队GREEN/Bettor GO):
+  // 插在现有 forward ring buffer 之前, 老盘(deadline 落后 tip 超 MAX_WALK 的 backlog)一次 O(1) 查表命中。
+  // 只信 console 侧"确认连续覆盖"区间内的查表结果(§2.5 空洞防线), 未覆盖/relay 不可达/任何失败 →
+  // 原样落到下面现有的 forward-ring/backward-walk 逻辑, 零改动。
+  if (CONSOLE_URL) {
+    try {
+      const res = await fetch(`${CONSOLE_URL}/api/chain/spc-daa-index?daa=${deadlineDaa}`, {
+        signal: AbortSignal.timeout(3000),
+      });
+      if (res.ok) {
+        const idx = await res.json();
+        if (idx?.covered && idx.hash) {
+          return { hash: idx.hash, daaScore: idx.daaScore, timestamp_ms: idx.timestamp_ms, isChainBlock: true };
+        }
+      }
+    } catch (e) {
+      log(`getBlockAtDaa index-lookup failed (${e.message}); falling back to forward-ring/backward-walk`);
+    }
+  }
   let anchor = null; // ring block with highest daa strictly below deadlineDaa
   for (const b of _recentBlocks) {
     if (b.daaScore < deadlineDaa && (!anchor || b.daaScore > anchor.daaScore)) anchor = b;
@@ -199,8 +235,16 @@ export async function getBlockAtDaa(deadlineDaa) {
   // from an SPC block — info.sink is the canonical start.
   const startHash = info?.sink;
   if (!startHash) throw new Error(`cannot resolve SPC tip from getBlockDagInfo (sink missing; got: ${JSON.stringify(Object.keys(info || {}))})`);
-  const MAX_WALK = 120000;   // J2 2026-06-23 ozzeu close LAND: 50000 @ ~10BPS testnet-12 ≈ 83min walk 窗; 长拖延 close(>83min,
-  //   如调试)→ backward SPC walk 够不着 deadline_daa → enforce committee re-derive fail (getBlockAtDaa)。120000≈3.3h。
+  // env override(2026-07-12 合卡设计 Bettor 注4): 与 driver 侧 bshard-settle-daemon.mjs PREGATE_MAX_WALK
+  //   同名 env 联动——改一处 env 两侧同步, 降手工配对常量失同步面(规则55)。默认值两侧必同 250000,
+  //   且 driver 侧宁大勿小(NWT F2 非对称: driver<rpc = 可达盘被 gate = liveness 误伤)。
+  const MAX_WALK = parseInt(process.env.GETBLOCKATDAA_MAX_WALK, 10) || 250000;   // J2 2026-07-05 世界杯首场 7rztt 卡死案例: 120000(≈3.3h@10BPS)被 settle-daemon
+  //   队列积压(130+老盘排在前面)挡住, 4.3h 后才轮到轮到7rztt, 窗口已过, backward-walk 从 tip 够不着 deadline
+  //   → 永久卡死(排队优先级救不了它, 只能扩大窗口)。250000≈6.9h@10BPS, 给队列积压留更大容错余量。
+  //   (根本收敛: bshard-settle-daemon.mjs selectRipeMarkets 需要优先级排序防止新盘被老盘挡住, 249000 只是
+  //   扩大安全窗, 双管齐下。)
+  //   J2 2026-06-23 ozzeu close LAND: 50000 @ ~10BPS testnet-12 ≈ 83min walk 窗; 长拖延 close(>83min,
+  //   如调试)→ backward SPC walk 够不着 deadline_daa → enforce committee re-derive fail (getBlockAtDaa)。
   //   (decouple follow-up: production close 分钟级不撞; MAX_WALK 注释旧假设 1BPS=14h 实 ~10BPS=83min 是 config bug, verifiable-endBlock 硬化是后续。)
   let cursor = startHash;
   let lastEligible = null; // last block where daa >= deadlineDaa during walk
@@ -260,6 +304,32 @@ function _trackBlockForChainReader(block) {
     const dropped = _recentBlocks.splice(0, _recentBlocks.length - RECENT_BLOCKS_MAX);
     for (const d of dropped) _recentBlockHashes.delete(d.hash);
   }
+
+  if (daa > _maxSeenDaaScore) _maxSeenDaaScore = daa;
+  if (isChainBlock) _pendingFinalityQueue.push({ hash, daaScore: daa, timestamp_ms });
+  for (const finalized of drainFinalitySafeBlocks(_pendingFinalityQueue, _maxSeenDaaScore, SPC_INDEX_FINALITY_DEPTH)) {
+    ingestSpcDaaBlock({ daaScore: finalized.daaScore, blockHash: finalized.hash, timestampMs: finalized.timestamp_ms });
+  }
+}
+
+// Pure function (exported for unit test — NWT MUST-FIX #o0056j regression coverage): pops every
+// entry off the FRONT of `queue` whose (maxSeenDaaScore - entry.daaScore) >= finalityDepth, i.e.
+// GHOSTDAG-final and reorg-safe to persist. Mutates `queue` in place (FIFO drain), returns the
+// popped entries in original order.
+export function drainFinalitySafeBlocks(queue, maxSeenDaaScore, finalityDepth) {
+  const finalized = [];
+  while (queue.length && (maxSeenDaaScore - queue[0].daaScore) >= finalityDepth) {
+    finalized.push(queue.shift());
+  }
+  return finalized;
+}
+
+function _startSpcTipHeartbeat() {
+  if (_tipHeartbeatTimer) return;
+  _tipHeartbeatTimer = setInterval(() => {
+    if (_maxSeenDaaScore > 0) ingestSpcTipHeartbeat({ daaScore: _maxSeenDaaScore });
+  }, TIP_HEARTBEAT_MS);
+  if (typeof _tipHeartbeatTimer.unref === 'function') _tipHeartbeatTimer.unref();
 }
 
 // ── Logging ─────────────────────────────────────────────────────────────────
@@ -589,6 +659,8 @@ async function catchUpHistory() {
       }
       for (const record of pendingComms) {
         try {
+          // 请求间隔 150ms，避免 public API 限流
+          await new Promise(r => setTimeout(r, 150));
           // 从链上按 txid 取完整 TX（链是真相源）
           const txRes = await fetch(
             `https://api.kaspa.org/transactions/${record.txid}`,
@@ -596,6 +668,8 @@ async function catchUpHistory() {
           );
           if (!txRes.ok) {
             log(`catch-up comm: API ${txRes.status} for ${record.txid.slice(0, 16)}, skipping`);
+            // 429 限流：中止本轮，等下次 catch-up 再试
+            if (txRes.status === 429) break;
             continue;
           }
           const txData = await txRes.json();
@@ -663,6 +737,7 @@ async function _connect(wallet) {
   await refreshWatchedAddresses();
   _watchedRefreshTimer = setInterval(refreshWatchedAddresses, WATCHED_REFRESH_MS);
   log(`indexer: watching ${_watchedAddresses.size} addresses`);
+  _startSpcTipHeartbeat();
 
   let blockCount = 0;
   _rpc.addEventListener('block-added', async (event) => {

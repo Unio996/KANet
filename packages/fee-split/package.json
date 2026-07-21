@@ -1,0 +1,17 @@
+{
+  "name": "@kanet/fee-split",
+  "version": "0.1.0",
+  "description": "Trustless, deterministic value-split component — pluggable role-based fee splitting for prediction markets, e-commerce, freelance, and any multi-party value coordination.",
+  "type": "module",
+  "main": "index.mjs",
+  "scripts": {
+    "sync": "node scripts/sync.mjs",
+    "test": "node notify.test.mjs",
+    "demo:prediction": "node examples/prediction-demo.mjs",
+    "demo:ecommerce": "node examples/ecommerce-demo.mjs"
+  },
+  "dependencies": {
+    "@noble/hashes": "^1.3.2"
+  },
+  "license": "UNLICENSED"
+}

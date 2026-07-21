@@ -448,6 +448,43 @@ export async function registerChainDataRoutes(fastify) {
     }
   });
 
+  // GET /api/chain/spc-daa-index — SPC 块 DAA→hash 索引查表 (v183, backward-walk-daa-index-design.md)
+  // relay 端 getBlockAtDaa 新增最快层查此表, 命中且落在已确认连续覆盖区间内才信, 否则退化现有 forward-ring/backward-walk。
+  fastify.get('/api/chain/spc-daa-index', async (request, reply) => {
+    try {
+      const deadlineDaa = parseInt(request.query.daa, 10);
+      if (!Number.isFinite(deadlineDaa) || deadlineDaa <= 0) {
+        return reply.code(400).send({ error: 'daa (positive int) required' });
+      }
+
+      // §2.5 空洞防线: 只信"确认连续覆盖"区间, 落洞老实回 covered:false
+      const coverage = sqlite.prepare(
+        'SELECT start_daa, end_daa FROM spc_daa_index_coverage WHERE start_daa <= ? AND end_daa >= ? LIMIT 1'
+      ).get(deadlineDaa, deadlineDaa);
+      if (!coverage) {
+        return reply.send({ covered: false });
+      }
+
+      // 语义同 getBlockAtDaa: 最低 daaScore >= deadline 的 SPC 块 = canonical endBlock
+      const row = sqlite.prepare(
+        'SELECT daa_score, block_hash, timestamp_ms FROM spc_daa_index WHERE daa_score >= ? ORDER BY daa_score ASC LIMIT 1'
+      ).get(deadlineDaa);
+      // 命中行必须仍在同一覆盖区间内(该区间外无连续性保证), 否则老实回未覆盖
+      if (!row || row.daa_score > coverage.end_daa) {
+        return reply.send({ covered: false });
+      }
+
+      return reply.send({
+        covered: true,
+        hash: row.block_hash,
+        daaScore: row.daa_score,
+        timestamp_ms: row.timestamp_ms,
+      });
+    } catch (err) {
+      return reply.code(500).send({ error: err.message });
+    }
+  });
+
   // GET /api/chain/tx/:txHash — 本地 TX 查看（通过系统 RPC 节点）
   fastify.get('/api/chain/tx/:txHash', async (request, reply) => {
     const { txHash } = request.params;

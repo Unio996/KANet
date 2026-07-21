@@ -15,6 +15,7 @@ import { payoutRoot as buildPayoutRoot, merkleProof } from './pool-payout-root.m
 import { spliceLeafState } from './pool-shard-register.mjs';
 import { blake2b } from '@noble/hashes/blake2b';
 import { deriveCommitteeSeed, selectCommittee } from '../services/pool-committee-sampler.mjs';
+import { deriveRoleFeeLeaves, FEE_RULES_SCHEMA_V, computeFeeRulesCommit } from './fee-split.mjs';
 
 // 价值分成 fee 协议常量 (单源 = 真相源; UI 收口 + deriveFeeLeaves + create-v07 都读此, 防硬编漂移). bps = basis points (1% = 100).
 //   押注侧: winners 9700bps (97%) / fee 300bps (3%) = broker 160 + oracle 100 + introducer 20 + node 20.
@@ -66,6 +67,11 @@ export function computePariMutuelPayout({ bettors, winningDirection, poolTotalSo
  * 价值分成 fee-leaf 单源派生 (J1 co-verify 边界①单源②整数③provenance). claim builder + enforceCommitteeSign re-derive 两处
  * 【必调此一个函数】否则 bind 永假. 所有 fee-recipient pk 必【链锚派生】(broker/introducer = market create-committed,
  * oracle+node = pool_merkle_root 派生委员集) — caller 绑 provenance, 本 fn 纯算 (BigInt floor, fee-dust→committee[0] 确定性).
+ *
+ * 🔴 旁路封死(P4·D-008, 2026-07-09)：**本函数是 V1(PayoutShard/committee-settle)专属**——ZK 线(V2/
+ * PayoutShardV2/CloseZkV2)禁止直调本函数，一律走 `deriveSettlementFeeLeaves`（pool 基数=consolidatedPool
+ * 含seed、费率=市场级 broker_fee_pct，非本函数的 FEE_CONFIG 协议常量口径）。V1 语义不受 P4 影响，本函数
+ * 及其 `FEE_CONFIG` 一字不动。
  * @param {object} o {
  *   poolSompi, feeConfig:{ brokerBps, oracleBps, introBps, nodeBps }, brokerPk(hex32), introducerPk(hex32|null),
  *   committeePks(hex32[] 签 close 的链上派生委员, oracle+node reward 均分)
@@ -90,6 +96,53 @@ export function deriveFeeLeaves({ poolSompi, feeConfig, brokerPk, introducerPk =
   }
   const feeSompi = leaves.reduce((s, l) => s + l.amount, 0n);
   return { feeLeaves: leaves.map(l => ({ pk: l.pk, amount: l.amount.toString(), type: l.type })), feeSompi: feeSompi.toString() };
+}
+
+/**
+ * deriveSettlementFeeLeaves — ZK 线单源 fee-leaf 派生函数(P4·D-008 BLOCKING 收敛卡, J2 2026-07-09)。
+ * 设计文档 docs/2026-07-09-fee-single-source-leaf-derivation-design.md(Bettor 方向审 GREEN-with-notes +
+ * NWT 红队)。取代 propose/enqueue/enforceCloseAttestV2 三个调用点各自手搓的 `deriveFeeLeaves({poolSompi:
+ * Σ注(漏seed), feeConfig: FEE_CONFIG})` 旧口径(7/8 门②同一市场三处三说法的病根)。
+ *
+ * 🔴 反 vacuous 铁律（每个 caller 必读，不是可选建议）：本函数只单源"派生算法"，**不单源"值源"**——
+ * `consolidatedPoolSompi` 形参必须由每个 caller 各自独立链读，禁止任何一侧把自己算好的值转发/透传给另一侧
+ * "图省事保持一致"。当前三个合法读取路径（互不共享代码，互不透传数值）：
+ *   - propose 侧（bshard-close-transport.mjs）：zk_handoff 之前，continuation 还不存在——读
+ *     `payout_shards.payout_redeem_hex` 当前活 UTXO 现读的 consolidated_pool（= realConsolidatedPool，
+ *     既有 verify-value-source 现读逻辑，含 seed）。
+ *   - enqueue 侧（zk-prove-enqueue.mjs）：zk_handoff 已完成——`readPayoutShardV2AttestedState` 对
+ *     `zk_continuation.redeemHex` 现读的 consolidatedPool。
+ *   - 委员 voter 侧（bshard-close-enforce.mjs enforceCloseAttestV2）：对被签 tx 的 PS input redeem
+ *     （`psRedeemHex`，链锚、非 caller 喂）现读的 `_readPsConsolidatedPool`——委员本来就是独立验证人，
+ *     这一读天然构成第三条独立值链（Bettor #dcndfw 裁定：比 propose 转发强）。
+ * 若两个 caller 传入同一个已经算好的数字（哪怕形参名相同），§3 三侧 byte-exact 验收会全绿，但只证明了
+ * "传递链路没打错字"，证明不了"每一侧真的独立读对了源头"——同 7/8 门①"同 env 同源三处一致=vacuous"同一个坑
+ * （规则56）。
+ *
+ * @param {{brokerPk:string, brokerFeePctBps:number}} market  create-committed 市场级字段（D-007 口径）。
+ *   brokerFeePctBps = market.broker_fee_pct 列原值（已是 bps 单位，非百分比），无 broker_pk/pct<=0 → 无 broker leaf。
+ * @param {string|number|bigint} consolidatedPoolSompi  caller 独立链读的 pool 实额（含 seed），函数内断言 >0。
+ * @returns {{feeLeaves:[{pk,amount,type}], feeSompi:string}}
+ */
+export function deriveSettlementFeeLeaves(market, consolidatedPoolSompi) {
+  const pool = BigInt(consolidatedPoolSompi);
+  if (pool <= 0n) throw new Error(`deriveSettlementFeeLeaves: consolidatedPoolSompi=${consolidatedPoolSompi} 必须 >0(caller 链读值可疑, 拒绝派生)`);
+  // B线落1(2026-07-12, spec v1.1-A): 内部实现替换为 fee-split 组件——本函数收窄为"V2 市场字段 → feeRules 映射"
+  //   的薄壳, 分配数学单源在组件里。产出 byte-equal 既有实现(fee-single-source.test.mjs ①-⑥ 守), 四侧接线
+  //   与 lint R-FEE-LEAVES-BYPASS 门自动继承。
+  // committeeShare: 'pending-D-008-owner-policy' — FEE_CONFIG 120bps(oracle+node)委员分成暂不并入。
+  //   D-008(docs/DECISIONS.md)明确挂起待 Owner 确认份额表；确认后在【feeRules 映射内】加 derive:'committee'
+  //   角色, 不接受调用方自行追加委员 leaf(旁路封死同一铁律: 单源是唯一权威, 不是"调用方可以自己补几条"的模板)。
+  const bps = Number(market?.brokerFeePctBps || 0);
+  const hasBroker = bps > 0 && !!market?.brokerPk;
+  const feeRules = {
+    schema_v: FEE_RULES_SCHEMA_V,
+    preset: 'prediction-v2-market',   // 市场级 broker_fee_pct 口径(D-008), 非 FEE_PRESETS.prediction 协议常量口径
+    roles: hasBroker
+      ? [{ name: 'provider', bps: 10000 - bps }, { name: 'broker', address: String(market.brokerPk).toLowerCase(), bps }]
+      : [{ name: 'provider', bps: 10000 }],
+  };
+  return deriveRoleFeeLeaves(feeRules, pool);
 }
 
 /**
@@ -162,6 +215,55 @@ export function computePredicateCommit(predicate) {
   return Buffer.from(blake2b(Buffer.from(canonicalPredicate(predicate)), { dkLen: 32 })).toString('hex');
 }
 
+/**
+ * computeMarketCommitV2 — B线落2(设计 docs/2026-07-12-fee-split-phase2-commit-anchor-design.md v1.2,
+ * Bettor 注1-4 + NWT P1-P3 折入): fee_rules 市场的 commit 槽公式。两级 hash——fee_rules_commit(组件单源
+ * computeFeeRulesCommit, 32B)折进 preimage, 保持 offset-518 槽机制零变(.sil 不变零 re-deploy)。
+ *
+ * 🔴 P1(NWT 红队): fee_rules 市场【一律】烤本公式——predicate-null(如 blockhash_parity)市场不再走裸
+ * market_metadata_hash(那条第三分支对 feeRules 零绑定 = settler 可喂任意假规则重定向 fee 零 BUST),
+ * preimage 折入原 identity 锚 {fee_rules_commit, market_metadata_hash}。
+ * 🔴 类型 pin(NWT 注4c): fee_rules_commit / market_metadata_hash 均以 lowercase hex string 进 preimage,
+ * 禁 Buffer(canonicalPredicate(Buffer) 会序列化成 {"data":[…],"type":"Buffer"} 形状 = 两侧一 string 一
+ * Buffer commit 永假)。preimage key 名钉死: `fee_rules_commit` / `predicate` / `market_metadata_hash`。
+ * 双向 BUST(论证表, 设计 §2.2): 篡改规则→fee_rules_commit 不符; 隐瞒规则(委员按无 feeRules 走 legacy
+ * 分支)→legacy commit ≠ 链上 v2; predicate-null 两方向同理。
+ *
+ * @param {object} feeRules 全文规则(内部 computeFeeRulesCommit 会跑 validateFeeRules 双验)
+ * @param {{predicate?:object|null, marketMetadataHash?:string|null}} anchors predicate 优先; null 时必须给 marketMetadataHash
+ */
+export function computeMarketCommitV2(feeRules, { predicate = null, marketMetadataHash = null } = {}) {
+  const feeRulesCommit = computeFeeRulesCommit(feeRules);   // lowercase hex string(组件产出即 hex string)
+  let obj;
+  if (predicate != null) {
+    obj = { fee_rules_commit: feeRulesCommit, predicate };
+  } else {
+    if (!marketMetadataHash) throw new Error('computeMarketCommitV2: predicate-null 市场必须提供 marketMetadataHash(P1 identity 锚, 缺失拒烤)');
+    obj = { fee_rules_commit: feeRulesCommit, market_metadata_hash: String(marketMetadataHash).toLowerCase() };
+  }
+  return Buffer.from(blake2b(Buffer.from(canonicalPredicate(obj)), { dkLen: 32 })).toString('hex');
+}
+
+/**
+ * deriveMarketPredicateCommit — 市场行 → commit 槽值的唯一派生函数(B线落2)。取代 pool.js 三处烤点各自
+ * 手搓的同型四行(1333/1585/1755——"两套并行实现"家族病, 同 _resolveZkNativeCtorExtras 收敛先例)。
+ * 分支(与 enforce 侧 _enforceCloseAttestCore 命门① 判别严格镜像):
+ *   fee_rules 非空 → computeMarketCommitV2(一律, 含 predicate-null, P1)
+ *   fee_rules NULL + predicate → 既有 computeMarketCommit(predicate, fee_recipients)【字节不动】
+ *   fee_rules NULL + predicate-null → 既有裸 market_metadata_hash【字节不动】
+ * @param {object} market pool_markets 行(需 resolution_rule_spec/fee_rules/broker_pk/introducer_pk/market_metadata_hash)
+ */
+export function deriveMarketPredicateCommit(market) {
+  let predicate = null;
+  try { predicate = JSON.parse(market.resolution_rule_spec || '{}')?.resolution_predicate || null; } catch {}
+  if (market.fee_rules) {
+    const feeRules = JSON.parse(market.fee_rules);   // 坏 JSON = fail-loud throw(committed 规则不可解析绝不静默降级)
+    return computeMarketCommitV2(feeRules, { predicate, marketMetadataHash: market.market_metadata_hash });
+  }
+  if (!predicate) return market.market_metadata_hash;
+  return computeMarketCommit(predicate, { brokerPk: market.broker_pk || null, introducerPk: market.introducer_pk || null });
+}
+
 // PayoutShard.sil (canonical 873e799e) ctor-baked predicate_commit 在 redeem 的 byte offset (J2 probe: 两 predicate_commit
 //   compile diff → first occurrence @518). ⚠ .sil 变则 offset 变 — provenance-pinned 873e799e 下稳定. NWT 命门① 审.
 const _PREDICATE_COMMIT_REDEEM_OFFSET = 518;
@@ -226,12 +328,127 @@ export function settlePayoutRoot(winners) {
 }
 
 /**
+ * #DB-lag自愈 (2026-07-06, lv3rz/dyljb 公测首两场结算实战暴露: consolidate 每一步落链后只在【全部
+ * shard 循环成功完成】才把最终 payout_ps_outpoint 写回 payout_shards 表——如果中途任何一步失败
+ * (常见: 某个 shard 自身撞了不相关的 tip-lag/phantom), 已经【真实链上完成】的前面几步全部白白
+ * 不被记录, 下次重试还是从 DB 记的 genesis/旧值开始, 立刻在 shard0 撞"UTXO not found"(因为那个
+ * outpoint早被这次没记上账的中途进度花掉了)。J2 今晚手动做的诊断(逐步splice consolidated_pool
+ * 重算每一跳地址查UTXO)证明为可靠、纯计算(不需要区块扫描)、可自动化——这里收编成通用探测函数。
+ *
+ * 探测方法: 从 DB 记录的 genesis payout_redeem_hex 出发, 按 shard_index 升序逐个尝试 splice 新的
+ * consolidated_pool 算出对应地址查 UTXO, 找到第一个"有 UTXO"的即为当前真实 tip。找不到(genesis 本身
+ * 就有 UTXO)说明还没开始consolidate过, 走原逻辑(resume=null 从零开始)。
+ *
+ * @param {object} o { db, getUtxos(addr)→[{outpoint,amount}], p2sh, logicalMarketId, payoutShard }
+ * @returns {null | { fromShardIdx, psTx, psIdx, pool }} null = 不需要 resume(from genesis 正常走或已探测不到任何进度)
+ */
+// 🔴 2026-07-21(#28 line423, Bettor 派工 #ubmne2.1, J1 复用今晚 consolidateAndBuildPsState 的 Tier1 校验模式):
+//   verifyRedeemMatchesChainObservedOutput — 独立链读核实一个候选 redeem 是否真的对应链上某个 outpoint
+//   实际的输出脚本, 不信候选自己反推的地址。跟 _inferWinDirectionFromChain(bshard-auto-settler.mjs:
+//   246-254)、consolidateAndBuildPsState Tier1(bshard-settle-daemon.mjs)用的是同一个原语(kaspa_tx_log.
+//   outputs_json 直接读某 txid 某 output 的链上观测地址), 这次抽成共享函数供两处调用, 不重复写第三份。
+//   本身不碰链(kaspa_tx_log 是本地 indexer 缓存), 跟 _inferWinDirectionFromChain 同款"F3 账"边界——
+//   indexer 缺口时返回 false(不新鲜), 调用方按 fail-closed 处理, 不能当"验证通过"用。
+// 🔴 2026-07-21(J2, 独立小卡, Bettor #uhc592.1 授权与批2并行·NWT #uh9wn5.1 GREEN): 可选 getUtxos 兜底(照抄
+//   §3.5 verifyClaimLanded 的三态纪律,同一函数不重复发明第二套语义)——kaspa_tx_log 查无该 txid/JSON
+//   解析失败/outputs 里没有这个 index 三种情形统一是 indexer inconclusive(不是"确认不符"), 传了
+//   getUtxos 时用它现查 candidateAddr 当前 UTXO 集兜底一次: 命中该 outpoint 才算 true, 查无仍 false
+//   (不比之前更松, 只是多一次挽救渠道)。**"记录里有地址但不相符" 是唯一的"确认 mismatch", 不 fallback**
+//   (不允许两个源挑一个顺眼的, 同 §3.5 纪律)。不传 getUtxos = 行为完全不变(向后兼容)。
+//   ⚠ 函数从同步改成 async(必须, 不是随手加): fallback 分支天然要 await getUtxos, 如果只在"传了
+//   getUtxos"时才返回 Promise、其余分支仍同步返回 boolean, 会制造"同一个函数按参数决定同步/异步返回
+//   类型"的陷阱——调用方若沿用旧的"当同步布尔值用"的写法(不 await), 会把 Promise 对象当真值判断,
+//   永远 truthy, 把 fail-closed 的安全默认悄悄翻成 fail-open。改成统一 async + 两个既有调用点补 await,
+//   一次性堵死这条(比"看起来兼容其实是新 bug"的兼容更可靠)。
+export async function verifyRedeemMatchesChainObservedOutput({ db, p2sh, candidateRedeemHex, outpointTxid, outpointIdx, getUtxos }) {
+  let candidateAddr;
+  try { candidateAddr = p2sh(candidateRedeemHex); } catch { return false; }
+  const fallback = async () => {
+    if (!getUtxos) return false;
+    try {
+      const entries = await getUtxos(candidateAddr);
+      return (entries || []).some(e => {
+        const j = JSON.parse(JSON.stringify(e, (k, v) => typeof v === 'bigint' ? v.toString() : v));
+        const op = j.entry?.outpoint || j.outpoint;
+        return op?.transactionId === outpointTxid && Number(op?.index) === Number(outpointIdx);
+      });
+    } catch { return false; }
+  };
+  const txRow = db.prepare('SELECT outputs_json FROM kaspa_tx_log WHERE tx_id = ?').get(outpointTxid);
+  if (!txRow?.outputs_json) return fallback();   // indexer 缺口: inconclusive, 不是确认不符
+  try {
+    const outs = JSON.parse(txRow.outputs_json);
+    const o = outs[outpointIdx];
+    const chainObservedAddr = o?.address || o?.verboseData?.scriptPublicKeyAddress || o?.scriptPublicKeyAddress || null;
+    if (!chainObservedAddr) return fallback();   // 记录里没这个地址字段: 同样 inconclusive
+    if (chainObservedAddr === candidateAddr) return true;
+    return false;   // 记录里有地址且不符 = 确认 mismatch, 不 fallback(防挑顺眼源)
+  } catch { return fallback(); }   // JSON.parse 失败: inconclusive
+}
+
+// 🔴 2026-07-21 Codex finding③(coord/codex-bridge 2a10f5e8, MUST-FIX4 附带项): "autoDetectConsolidateResume
+//   只是候选生成器不是真值判定器——查到UTXO就信, 没查唯一性/金额匹配, 有dust-poisoning/多UTXO撞候选地址
+//   等假阳性面"。候选地址是从公开可推导的数据(genesis redeem + 逐 shard 已知 pool_value)现场编译出来的,
+//   任何观察者都能算出同一串候选地址——攻击者可以往未来的候选地址发送 dust, 让本函数误以为"consolidate
+//   已经走到这一步"。加固: ①候选地址上有 >1 笔 UTXO = 不该发生的异常(covenant 模型下每个 state 同一时刻
+//   只有一个当前 UTXO), 不猜哪个是真的, 当这一步没找到继续往后走, 不中断整个探测；②UTXO 金额必须
+//   byte-exact 等于这一步理论应有的 consolidatedPool, 金额不符 = dust/无关存款, 同样当没找到继续走。
+//   两条都只是"跳过这一步, 继续正常探测", 不改变函数既有的 null 返回契约(全走查无 = 原有 fail-closed 语义
+//   不变), 调用方不需要跟着改。深度/血缘校验(finding③原文还提到的)不在本次范围——那个需要给 getUtxos
+//   之外再传一个 landed()/深度检查回调, 是签名级改动, 影响面更大, 留给后续批次单独议(不在这次隐式夹带)。
+function _utxoAmountBig(u) { try { return BigInt(u?.amount ?? 0); } catch { return -1n; } }
+
+export async function autoDetectConsolidateResume({ db, getUtxos, p2sh, logicalMarketId, payoutShard }) {
+  const allShards = db.prepare(`SELECT * FROM market_shards WHERE logical_market_id = ? AND status != 'manual_recovery_refunded' ORDER BY shard_index ASC`).all(logicalMarketId);
+  let psRedeem = Buffer.from(payoutShard.payout_redeem_hex, 'hex');
+  let consolidatedPool = psRedeem.readBigInt64LE(2);
+  // genesis 本身有没有 UTXO(=从没 consolidate 过, 不需要 resume)先探一次, 省一轮不必要的 shard0 尝试.
+  // 同下方循环同款加固: 多 UTXO/金额不符不能直接当"genesis 完好未花"处理(会把明明该继续走 resume 的
+  // 场景误判成"不需要 resume"), 只有恰好一笔且金额等于 genesis consolidatedPool 才算数。
+  const genesisAddr = p2sh(psRedeem.toString('hex'));
+  const genesisUtxos = await getUtxos(genesisAddr);
+  if (genesisUtxos.length === 1 && _utxoAmountBig(genesisUtxos[0]) === consolidatedPool) return null;   // genesis 完好未花, 从零开始正常走(不是这次要修的场景)
+
+  let found = null;
+  for (const shard of allShards) {
+    let st = {}; try { st = JSON.parse(shard.current_leaf_state || '{}'); } catch { break; }   // 数据缺失 fail-closed, 别猜
+    consolidatedPool += BigInt(st.pool_value || 0);
+    const rbuf = Buffer.from(psRedeem);
+    rbuf.writeBigInt64LE(consolidatedPool, 2);
+    psRedeem = rbuf;
+    const addr = p2sh(psRedeem.toString('hex'));
+    const utxos = await getUtxos(addr);
+    if (utxos.length !== 1) continue;      // 0 = 这一步还没到; >1 = 异常(dust-poisoning 等), 两种都不采信, 继续往后探
+    if (_utxoAmountBig(utxos[0]) !== consolidatedPool) continue;   // 金额跟理论值不符, 不是我们要找的那笔, 继续往后探
+    {
+      const op = utxos[0].outpoint;
+      // redeemHex(K-18 §3.4, 2026-07-21 J1 代笔 J2 域): 这里已经是 splice 出的真实字节(与
+      // consolidateAllShards 同一权威), 不是从 consolidatedPool 数值重新 compilePayoutShardRedeem——
+      // 之前只 return 了 pool 数值, 调用方(consolidateAndBuildPsState)再用这个数值去重编译, 是
+      // Codex/K-18 §3.4 指出的"recompile 当花费权威"违规根源之一。现在把这份已经算好的 splice 字节
+      // 一并交出, 调用方直接用, 不必再过一次 silverc。
+      found = { fromShardIdx: shard.shard_index + 1, psTx: op.transactionId, psIdx: Number(op.index || 0), pool: consolidatedPool.toString(), redeemHex: psRedeem.toString('hex') };
+      break;
+    }
+  }
+  // 探测完所有 shard 都没找到活着的 UTXO = 探测失败(比 genesis 更深的问题, 比如真 phantom 或数据缺失),
+  // fail-closed 返回 null 让调用方走原逻辑照常报错, 不能编造一个假 resume 点。
+  return found;
+}
+
+/**
  * Consolidate all shards of a logical market into its PayoutShard, then return the final PS outpoint + consolidated_pool.
  * Iterative: each shard's CURRENT ShardLeaf (spliced from shard_redeem_hex + current_leaf_state) → bshard_consolidate.
- * @param {object} o { db, rc, landed, p2sh, logicalMarketId, payoutShard:{payout_redeem_hex, payout_ps_outpoint, payout_cov_id}, relayAddr, transfer }
+ * @param {object} o { db, rc, landed, p2sh, logicalMarketId, payoutShard:{payout_redeem_hex, payout_ps_outpoint, payout_cov_id}, relayAddr, transfer,
+ *   getUtxos(addr)→[{outpoint,amount}] (optional — enables DB-lag 自愈自动 resume, 见 autoDetectConsolidateResume) }
  * @returns {{ psOutpoint, consolidatedPool, consolidatedShards }}
  */
-export async function consolidateAllShards({ db, rc, landed, p2sh, logicalMarketId, payoutShard, relayAddr, transfer, deadline, resume = null }) {
+export async function consolidateAllShards({ db, rc, landed, p2sh, logicalMarketId, payoutShard, relayAddr, transfer, deadline, resume = null, getUtxos = null }) {
+  // DB-lag 自愈: 没传显式 resume 且调用方给了 getUtxos, 先探测一次"DB 记的 payout_ps_outpoint 是不是
+  // 已经过期(链上真实进度比它超前)"——探到了自动用探测结果当 resume, 不用每次卡住都手动介入。
+  if (!resume && getUtxos) {
+    resume = await autoDetectConsolidateResume({ db, getUtxos, p2sh, logicalMarketId, payoutShard });
+  }
   // 件1(J1 deadline-gate, J2 ms-unit fix b98e0112): partial 片(count<seal_count)consolidate 触发 ShardLeaf
   //   `require(tx.time >= deadline * 1000)` → consolidate tx 必须 set lockTime = deadline*1000(ms, ≥ Kaspa
   //   LOCK_TIME_THRESHOLD 5e11 → ms-epoch 模式, tx.time=lockTime literal=ms 比对). 否则默认 lockTime=0 →
@@ -239,7 +456,12 @@ export async function consolidateAllShards({ db, rc, landed, p2sh, logicalMarket
   //   sealed 片跳闸(满片随时 LAND), lock_time 无害. 单位三处一致: register 烤秒 / 合约 *1000 / 此处 *1000ms.
   if (!Number.isFinite(Number(deadline)) || Number(deadline) <= 0) throw new Error(`consolidateAllShards: deadline (Unix s, partial-sweep gate) required, got ${deadline}`);
   const consolidateLockTimeMs = Math.floor(Number(deadline)) * 1000;
-  const allShards = db.prepare(`SELECT * FROM market_shards WHERE logical_market_id = ? ORDER BY shard_index ASC`).all(logicalMarketId);
+  // manual_recovery_refunded(2026-07-06, lv3rz shard6 phantom-leaf 事故·Bettor 拍板①经济完整性):
+  //   shard 自身 leaf 因为更早的 tip-lag 事故变 phantom(链上真花过, 但溯源代价太高), 团队走手动 runbook
+  //   直接从 gateway 原路退款给对应 bettor(见 dev-coord-testnet #7/6凌晨), 这个 shard 不再参与
+  //   consolidate(它的 stake 已经不在池子里, 退给 bettor 了不是赢家池的一部分)。exclude 掉, 否则
+  //   会重新尝试 consolidate 它已经 phantom 的 leaf outpoint 撞同一个 UTXO-not-found 卡住整条链。
+  const allShards = db.prepare(`SELECT * FROM market_shards WHERE logical_market_id = ? AND status != 'manual_recovery_refunded' ORDER BY shard_index ASC`).all(logicalMarketId);
   // resume(部分 consolidate 后续跑): 跳 shard_index < resume.fromShardIdx, PS 从 resume.psTx/pool 起(已 consolidate 片的 leaf 已花).
   const shards = resume ? allShards.filter(s => s.shard_index >= resume.fromShardIdx) : allShards;
   let psTx = resume ? resume.psTx : String(payoutShard.payout_ps_outpoint).split(':')[0];
@@ -274,5 +496,9 @@ export async function consolidateAllShards({ db, rc, landed, p2sh, logicalMarket
     const rbuf = Buffer.from(psRedeem, 'hex'); rbuf.writeBigInt64LE(consolidatedPool, 2); psRedeem = rbuf.toString('hex');
     try { db.prepare(`UPDATE market_shards SET status = 'settling' WHERE shard_market_id = ?`).run(shard.shard_market_id); } catch { /* readonly driver DB → bookkeeping best-effort; on-chain settle is the truth */ }
   }
-  return { psOutpoint: `${psTx}:${psIdx}`, consolidatedPool: consolidatedPool.toString(), consolidatedShards: count };
+  // redeemHex(K-18 §3.4, 2026-07-21 J1 代笔 J2 域): psRedeem 在整个循环里都是 splice(writeBigInt64LE
+  // 直改 state 字段字节), 从未过 silverc recompile——这本来就是"对"的权威(§1 事故表格里的 splice 权威一栏)。
+  // 之前只 return consolidatedPool 数值, 调用方要用这个数值再单独重编译建 redeem, 那趟重编译才是
+  // Codex/K-18 指出的风险来源。改成直接把这份已经是权威字节的 psRedeem 交出去, 调用方不必再算一次。
+  return { psOutpoint: `${psTx}:${psIdx}`, consolidatedPool: consolidatedPool.toString(), consolidatedShards: count, redeemHex: psRedeem };
 }

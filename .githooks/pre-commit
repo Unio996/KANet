@@ -1,0 +1,27 @@
+#!/bin/sh
+# KANet pre-commit hook — 真装版 (2026-06-29 真落地·非 CLAUDE.md 假声明)
+#
+# 激活 (新 clone 一次性 setup):
+#   git config core.hooksPath .githooks
+#
+# 内容:
+#   ① lint-kanet (block on fail): 只扫 staged 文件 (~1-2s)
+#   ② check-tree-fresh (warn-not-block): 落后 canonical 超阈值 LOUD warn
+
+# ① lint-kanet: staged .js/.mjs/.cjs/.sil 文件
+STAGED=$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null | grep -E '\.(js|mjs|cjs|sil)$')
+if [ -n "$STAGED" ]; then
+  node scripts/lint-kanet.mjs $STAGED
+  STATUS=$?
+  if [ $STATUS -ne 0 ]; then
+    echo ""
+    echo "[pre-commit] ✗ lint-kanet 失败·commit 拦截. 修完再 commit."
+    echo "  手动重跑: node scripts/lint-kanet.mjs $STAGED"
+    exit 1
+  fi
+fi
+
+# ② check-tree-fresh: warn-not-block (|| true 确保 warn 不挡 commit)
+node scripts/check-tree-fresh.mjs || true
+
+exit 0

@@ -21,6 +21,13 @@ CONSOLE_PORT=${CONSOLE_PORT:-3400}  # KANet-UI ops r38: env override default for
 
 mkdir -p "$LOG_DIR" "$PID_DIR"
 
+# 自重定向 launcher 输出 (2026-07-04 事故 #52: 调用方手动把 stdout 重定向到 C 盘 Temp 的各种一次性
+# 文件名, 反复重启一天攒了 43 个 2-3GB 文件把 C 盘写满 0 字节, 阻断全队。脚本自己接管顶层输出——
+# 不管调用方有没有重定向/往哪重定向, 都固定写进项目自己的 LOG_DIR (不在 C 盘); 每次启动截断
+# (> 非 >>) 只留最新一次, 不无限增长 (旧运行的错误已经靠今天新建的 events 表告警/频道通知捕获,
+# 不需要在这个 launcher log 里累积长期历史)。
+exec > >(tee "$LOG_DIR/kanet-start-launcher.log") 2>&1
+
 # ── 颜色 ────────────────────────────────────────────────────────────────────
 C_RESET='\033[0m'; C_BOLD='\033[1m'; C_DIM='\033[2m'
 C_GREEN='\033[32m'; C_YELLOW='\033[33m'; C_CYAN='\033[36m'
@@ -46,8 +53,14 @@ log "检查旧进程..."
 STOPPED=0
 for pidfile in "$PID_DIR"/*.pid; do
   [ -f "$pidfile" ] || continue
-  pid=$(cat "$pidfile")
   name=$(basename "$pidfile" .pid)
+  # 2026-07-17 修(KANet-UI, 设计 docs/2026-07-17-kanet-start-supervisor-kill-fix-design.md, NWT红队
+  # GREEN 5e0896bb): console-supervisor 不归 kanet-start.sh 管(独立生命周期看门狗, 跨越多次 console
+  # 重启), 之前无差别遍历 logs/pids/*.pid 把它当副作用杀掉且从不重新拉起——根因坐实(2026-07-12~17
+  # 反复观察到的"supervisor 死于无人知晓"现象)。跳过整段(含 rm -f), 避免"进程没杀但 pidfile 被删"
+  # 这种更隐蔽的坏状态(会让 supervisor 自己的存活检查误判、拉起第二个实例)。
+  if [ "$name" = "console-supervisor" ]; then continue; fi
+  pid=$(cat "$pidfile")
   if kill -0 "$pid" 2>/dev/null; then
     powershell -Command "Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue" 2>/dev/null \
       || kill "$pid" 2>/dev/null
@@ -191,10 +204,17 @@ if [ -f "$WS_PROXY_SCRIPT" ]; then
 fi
 
 # ── llama-server (本地推理引擎) ──────────────────────────────────────────────
-LLAMA_SERVER="$KANET_ROOT/tools/llama-server/llama-server.exe"
-LLAMA_MODEL="${LLAMA_MODEL_PATH:-$KANET_ROOT/models/Qwen_Qwen3.6-35B-A3B-Q4_K_M.gguf}"
+# LLAMA_SERVER_PATH: host-specific override (= 同 LLAMA_MODEL_PATH 既有先例, kanet.env 里配)。
+# 2026-07-07 事故: 这台机器 llama-server.exe 实装在 C:/KANet/tools/llama-server/, 跟默认
+# $KANET_ROOT/tools/... 不一致, 重启后 [ -f ] 判假静默跳过整个启动块, 无任何 WARN, 只有肉眼盯 UI 才发现。
+LLAMA_SERVER="${LLAMA_SERVER_PATH:-$KANET_ROOT/tools/llama-server/llama-server.exe}"
+LLAMA_MODEL="${LLAMA_MODEL_PATH:-$KANET_ROOT/models/Qwythos-9B-Claude-Mythos-5-1M-Q4_K_M.gguf}"
 LLAMA_PORT=8000
 LLAMA_LOG="$LOG_DIR/llama-server.log"
+
+if [ ! -f "$LLAMA_SERVER" ] || [ ! -f "$LLAMA_MODEL" ]; then
+  warn "llama-server 跳过: exe=$LLAMA_SERVER $([ -f "$LLAMA_SERVER" ] && echo 存在 || echo 缺失), model=$LLAMA_MODEL $([ -f "$LLAMA_MODEL" ] && echo 存在 || echo 缺失) — 本机若确实有 GPU 推理机, 检查 kanet.env 的 LLAMA_SERVER_PATH/LLAMA_MODEL_PATH"
+fi
 
 if [ -f "$LLAMA_SERVER" ] && [ -f "$LLAMA_MODEL" ]; then
   echo ""
@@ -202,13 +222,16 @@ if [ -f "$LLAMA_SERVER" ] && [ -f "$LLAMA_MODEL" ]; then
   if netstat -an 2>/dev/null | grep -q ":${LLAMA_PORT}.*LISTEN"; then
     ok "llama-server 已在运行 (port $LLAMA_PORT)"
   else
-    info "启动 llama-server (Qwen3-30B, RTX 5090)..."
+    info "启动 llama-server (Qwythos-9B, RTX 5090)..."
     > "$LLAMA_LOG"
-    (cd "$KANET_ROOT/tools/llama-server" && ./llama-server.exe \
+    # cd 目标必须跟 LLAMA_SERVER 本身一起走 override (2026-07-07 回归: 之前这行硬编码默认路径,
+    # LLAMA_SERVER_PATH 覆盖后 exe 路径对了但 cd 还是走旧默认值, 目录不存在直接炸)。
+    (cd "$(dirname "$LLAMA_SERVER")" && "./$(basename "$LLAMA_SERVER")" \
       --model "$LLAMA_MODEL" \
       --host 0.0.0.0 --port $LLAMA_PORT \
-      --n-gpu-layers 99 --ctx-size 262144 --threads 8 \
-      --flash-attn on \
+      --n-gpu-layers 99 --ctx-size 1048576 \
+      --cache-type-k q8_0 --cache-type-v q8_0 \
+      --threads 8 --flash-attn on \
       >> "$LLAMA_LOG" 2>&1) &
     LLAMA_PID=$!
     echo "$LLAMA_PID" > "$PID_DIR/llama-server.pid"
@@ -234,6 +257,9 @@ echo ""
 echo -e "${C_BOLD}[1/1] kasia-console${C_RESET}  port $CONSOLE_PORT"
 
 CONSOLE_LOG="$LOG_DIR/console.log"
+# 归档上一窗口日志再截断(2026-07-21, Bettor #utf9ze 派工: 别靠"下次记得先备份", 机制化——
+# 事故复盘常撞到"重启前该留一份副本却忘了"这类坑, 只留最近 1 份, 不无限堆积)。
+[ -f "$CONSOLE_LOG" ] && mv "$CONSOLE_LOG" "$CONSOLE_LOG.prev" 2>/dev/null
 > "$CONSOLE_LOG"
 
 KANET_ROOT=$KANET_ROOT \
@@ -247,7 +273,7 @@ PREDICTION_AGENT_ENABLED="$PREDICTION_AGENT_ENABLED" \
 KANET_TESTNET_NO_LIMITS="$KANET_TESTNET_NO_LIMITS" \
 POOL_DEADLINE_MIN_OVERRIDE="$POOL_DEADLINE_MIN_OVERRIDE" \
 POOL_DEADLINE_MAX_DAY="$POOL_DEADLINE_MAX_DAY" \
-  node "$CONSOLE_DIR/src/index.js" >> "$CONSOLE_LOG" 2>&1 &
+  node ${KANET_NODE_FLAGS:-} "$CONSOLE_DIR/src/index.js" >> "$CONSOLE_LOG" 2>&1 &
 CONSOLE_PID=$!
 echo "$CONSOLE_PID" > "$PID_DIR/console.pid"
 
@@ -332,6 +358,19 @@ elif [ -f "$KANET_ROOT/scripts/channel-bridge.mjs" ]; then
   ok "channel-bridge 就绪  (PID $CH_BRIDGE_PID, 7 channels)"
 fi
 
+# owner-bot — Owner 专属 dev-coord 远程指挥 bot (跟押注用的 broker bot 分离, 独立 token)。
+# 2026-07-07 事故: _launch_owner_bot.mjs 头部注释早就说"kanet-start.sh 能无条件拉起它", 但从未真接线,
+# 今天几次重启都没人补起来导致 Owner 的 dev-coord bot 用不了。脚本自身 no-op-safe (OWNER_BOT_TOKEN 未
+# 设时打日志退出, 不崩), 幂等检查跟 channel-bridge 同款。
+if proc_running "_launch_owner_bot\.mjs"; then
+  ok "owner-bot 已在运行"
+elif [ -f "$CONSOLE_DIR/_launch_owner_bot.mjs" ]; then
+  (cd "$CONSOLE_DIR" && node _launch_owner_bot.mjs > "$LOG_DIR/owner-bot.log" 2>&1) &
+  OWNER_BOT_PID=$!
+  echo "$OWNER_BOT_PID" > "$PID_DIR/owner-bot.pid"
+  ok "owner-bot 就绪  (PID $OWNER_BOT_PID, no-op 若 OWNER_BOT_TOKEN 未配置)"
+fi
+
 # test-cron — 定时跑 test-framework, 失败 broadcast dev-coord (Owner 钦定 4 台阶 #4)
 # 默认 6h 周期, 启动时立即跑一次. 配置通过 env: KANET_TEST_CRON_INTERVAL_MS / KANET_TEST_CRON_NO_BOOT_RUN=1
 if proc_running "test-cron\.mjs"; then
@@ -356,6 +395,13 @@ if [ -n "$NEW_SECRET" ]; then
   fi
   ok "INGEST_SECRET: ${NEW_SECRET:0:8}..."
 fi
+
+# ── console-supervisor 双保险(2026-07-17, KANet-UI, 设计同上根因注释, NWT红队GREEN 5e0896bb) ──────
+# (a) 上面的停止循环已经不再误杀它, 这里再加一道幂等确保: 不管 (a) 有没有堵死所有路径(未来可能有
+# 其它脚本/手动操作同样清 logs/pids/ 目录), 每次 kanet-start.sh 跑完都确认一次 supervisor 活着,
+# 死了就带起来。start 子命令本身已有 pidfile+kill -0 存活检查(kanet-console-supervisor.sh:113),
+# 已经在跑时是静默 no-op, 不会拉起第二个实例。
+bash "$KANET_ROOT/scripts/kanet-console-supervisor.sh" start >> "$LOG_DIR/console-supervisor.log" 2>&1 || true
 
 # ── 状态摘要 ─────────────────────────────────────────────────────────────────
 echo ""

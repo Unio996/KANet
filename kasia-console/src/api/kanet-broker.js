@@ -16,6 +16,7 @@ import { sqlite } from '../db/client.js';
 import { randomUUID } from 'crypto';
 import { encrypt } from '../services/crypto.js';
 import { reconcileBrokerBots, brokerBotsStatus, stopBrokerBot } from '../services/broker-bot-manager.js';
+import { computeMarketBrokerFee } from '../lib/broker-fee-chain.mjs';
 
 // 地址格式校验 (testnet-12 = kaspatest: / mainnet = kaspa:). 宽松长度界, 防垃圾提交.
 const KAS_ADDR_RE = /^kaspa(test)?:[a-z0-9]{50,80}$/;
@@ -87,9 +88,18 @@ export async function registerKanetBrokerRoutes(fastify) {
     const { relay_id } = request.params;
     if (!relay_id) return reply.code(400).send({ ok: false, error: 'relay_id required' });
 
+    // 查漏补缺(2026-07-04, Owner 撞见 DM vs UI 收益显示"完全不一样"·系统性 consolidate·非打补丁):
+    // fee 计算改调单一权威 computeMarketBrokerFee(lib/broker-fee-chain.mjs) — 跟 DM 端
+    // (/earnings-by-address) 共用同一份逻辑, 不再各自维护一份"怎么算 broker fee"(Owner 点破的
+    // "一个功能几个并行相似程序"活案例根治)。
+    const relayRow = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(relay_id);
+    const brokerAddress = relayRow?.address || null;
+
+    // shard-blind display fix (Bettor 2026-07-04, Owner 抓 via earnings-by-address 同源 bug): 排除
+    // shard_internal 内部克隆, 只显逻辑/用户面盘 (母盘的 per-shard 副本不该单独列一行)。
     const poolRows = sqlite.prepare(`
       SELECT id, broker_fee_pct, maker_stake_amount, protocol_status, settle_txid, refund_txid, updated_at, metadata
-      FROM pool_markets WHERE broker_relay_id = ?
+      FROM pool_markets WHERE broker_relay_id = ? AND protocol_status != 'shard_internal'
     `).all(relay_id);
 
     // Same retail-broker scope as above: system-wide broker config, return all if configured.
@@ -110,23 +120,11 @@ export async function registerKanetBrokerRoutes(fastify) {
     const byMarket = [];
 
     for (const r of poolRows) {
-      const isRealized = !!r.settle_txid;
-      // J2-tn (Bettor r617 ②): settled 市场用【实际落链 broker fee】= settler 记的 phase2_broker_fee_sompi
-      // (losingPool×fee_pct, L1364-1366), 非 maker_stake×fee_pct 估算 (gz5g7 估 2.0 KAS vs 实落 6.73 KAS)。
-      // 无记录 (pending 未 settle / 旧 settle 无 phase2_broker_fee_sompi) 回退估算 (兼容 + pending 显示)。
-      let actualFeeSompi = null;
-      if (isRealized && r.metadata) {
-        try { const _m = JSON.parse(r.metadata); if (_m.phase2_broker_fee_sompi != null) actualFeeSompi = BigInt(_m.phase2_broker_fee_sompi); } catch {}
-      }
-      const feeSompi = actualFeeSompi != null
-        ? actualFeeSompi
-        : (BigInt(r.maker_stake_amount || 0) * BigInt(r.broker_fee_pct || 0)) / 10000n;
-      const isRefunded = !!r.refund_txid;
-      const status = isRealized ? 'settled' : (isRefunded ? 'refunded' : r.protocol_status);
-      if (isRealized) {
+      const { status, feeSompi, chainVerified, estimated } = computeMarketBrokerFee(r, brokerAddress);
+      if (status === 'settled') {
         realizedPoolSompi += feeSompi;
         realizedPoolN += 1;
-      } else if (isRefunded) {
+      } else if (status === 'refunded') {
         refundedPoolSompi += feeSompi;
         refundedPoolN += 1;
       } else {
@@ -138,7 +136,9 @@ export async function registerKanetBrokerRoutes(fastify) {
         id: r.id,
         fee_kas: (Number(feeSompi) / 1e8).toFixed(8),
         status,
-        settled_at: isRealized ? r.updated_at : null,
+        settled_at: status === 'settled' ? r.updated_at : null,
+        chain_verified: chainVerified,
+        estimated,
       });
     }
 
@@ -216,44 +216,41 @@ export async function registerKanetBrokerRoutes(fastify) {
     try { const kaspa = await import('kaspa-wasm'); brokerPk = kaspa.XOnlyPublicKey.fromAddress(new kaspa.Address(String(address))).toString().toLowerCase(); }
     catch (e) { return reply.code(400).send({ ok: false, error: `address→pubkey derive fail: ${e.message}` }); }
 
+    // shard-blind display fix (Bettor 2026-07-04, Owner 抓): shard_internal 是内部克隆(母盘的 per-shard 副本,
+    // maker_stake=0), 不该跟母盘一起列进用户面"经手市场"——排除它, 只显逻辑/用户面盘。收益数字本身不受影响
+    // (fee 只落在真实结算, 克隆盘从不会单独结算/退款)。
     const poolRows = sqlite.prepare(`
       SELECT id, broker_fee_pct, maker_stake_amount, protocol_status, settle_txid, refund_txid, updated_at, metadata
-      FROM pool_markets WHERE LOWER(broker_pk) = ?
+      FROM pool_markets WHERE LOWER(broker_pk) = ? AND protocol_status != 'shard_internal'
     `).all(brokerPk);
 
+    // 查漏补缺(2026-07-04, Owner 撞见 DM vs UI"完全不一样"·consolidate 非打补丁): 改调单一权威
+    // computeMarketBrokerFee(lib/broker-fee-chain.mjs) — 之前这条路径靠 metadata.settle_evidence.
+    // fee_payouts, 这个字段从没被任何代码写过(幽灵字段, 全库 grep 零命中), bshard 盘(几乎全部新盘)
+    // 因此永远算不出 realized fee。跟 /earnings/:relay_id 共用同一份链验逻辑, 不再各自维护一份。
+    const brokerAddr = String(address);
     let realizedKas = 0, pendingKas = 0, refundedKas = 0, realizedN = 0, pendingN = 0, refundedN = 0;
     const byMarket = [];
     for (const r of poolRows) {
-      let meta = null; try { meta = r.metadata ? JSON.parse(r.metadata) : null; } catch {}
-      // KANet-UI 15:45 gap fix: v0.7 bshard 市场走 close_attest → settle_txid=NULL, fee 在 metadata.settle_evidence
-      //   (chain_settled + fee_payouts[role=broker].amount_kas, 链上实分发)。chain-truth 胜过 stale DB status/refund_txid
-      //   (cron 翻 refunding 前链上已 settle, 见 x4kpq status=refunded 但 chain_settled=true)。relay-keyed v06 路不变。
-      const se = meta?.settle_evidence;
-      const bshardSettled = se && se.chain_settled === true;
-      let feeKas, settleTxid = r.settle_txid || null;
-      if (bshardSettled) {
-        const bfees = (se.fee_payouts || []).filter((p) => p && p.role === 'broker');
-        feeKas = bfees.reduce((s, p) => s + (parseFloat(p.amount_kas) || 0), 0);
-        settleTxid = se.close_txid || (bfees[0] && bfees[0].txid) || null;
+      const { status, feeSompi, chainVerified, estimated } = computeMarketBrokerFee(r, brokerAddr);
+      const feeKas = Number(feeSompi) / 1e8;
+      if (status === 'settled') {
+        realizedKas += feeKas; realizedN += 1;
+        byMarket.push({ id: r.id, fee_kas: feeKas.toFixed(8), status: 'settled', chain_verified: true, settle_txid: r.settle_txid, settled_at: r.updated_at });
+      } else if (status === 'refunded') {
+        refundedN += 1;
+        byMarket.push({ id: r.id, fee_kas: '0.00000000', status: 'refunded', chain_verified: false });
       } else {
-        let actualFeeSompi = null;   // legacy v06: 实落 phase2_broker_fee_sompi / 回退 maker_stake×pct 估算
-        if (r.settle_txid && meta?.phase2_broker_fee_sompi != null) { try { actualFeeSompi = BigInt(meta.phase2_broker_fee_sompi); } catch {} }
-        const feeSompi = actualFeeSompi != null ? actualFeeSompi : (BigInt(r.maker_stake_amount || 0) * BigInt(r.broker_fee_pct || 0)) / 10000n;
-        feeKas = Number(feeSompi) / 1e8;
+        pendingKas += feeKas; pendingN += 1;
+        byMarket.push({ id: r.id, fee_kas: feeKas.toFixed(8), status: 'pending', chain_verified: false, estimated });
       }
-      const isRealized = !!r.settle_txid || bshardSettled;
-      const isRefunded = !isRealized && !!r.refund_txid;   // chain-truth: bshardSettled 胜过 refund_txid (stale)
-      const status = isRealized ? 'settled' : (isRefunded ? 'refunded' : r.protocol_status);
-      if (isRealized) { realizedKas += feeKas; realizedN += 1; }
-      else if (isRefunded) { refundedKas += feeKas; refundedN += 1; }
-      else { pendingKas += feeKas; pendingN += 1; }
-      byMarket.push({ id: r.id, fee_kas: feeKas.toFixed(8), status, settle_txid: isRealized ? settleTxid : null, settled_at: isRealized ? r.updated_at : null });
     }
     return reply.send({
-      ok: true, address: String(address), broker_pk: brokerPk,
-      realized: { pool_kas: realizedKas.toFixed(8), n_markets: realizedN },
+      ok: true, address: brokerAddr, broker_pk: brokerPk,
+      realized: { pool_kas: realizedKas.toFixed(8), n_markets: realizedN, source: 'chain-verified: fee tx in kaspa_tx_log + outputs_json parsed (multi-output aware)' },
       pending: { pool_kas: pendingKas.toFixed(8), n_markets: pendingN },
       refunded: { pool_kas: refundedKas.toFixed(8), n_markets: refundedN },
+      cross_node_note: '本节点链口径: 仅含本节点 pool_markets + kaspa_tx_log 可见 fee。他节点产出市场 fee 未含 (V2 per-recipient fee-index 才全跨节点)。',
       by_market: byMarket,
     });
   });
@@ -273,25 +270,54 @@ export async function registerKanetBrokerRoutes(fastify) {
     if (!bot_token || String(bot_token).trim().length < 20) {
       return reply.code(400).send({ ok: false, error: 'bot_token (Telegram @BotFather token) required' });
     }
+    // 根治(2026-07-08, Owner "找根治问题" 指令, #12): bot_username 之前是 broker 自报字段, 从没验过跟
+    // bot_token 是不是真的对应同一个 bot——broker 填错/填别人的 username, 下游(市场详情页/分享链接)会
+    // 指向一个完全不同的 bot, 只有真的点开才会暴露。用 Telegram 自己的 getMe API(唯一权威源, 传
+    // bot_token 换它自己认的 username)校验, 同时顺手验了 token 本身是不是真的有效(之前只查字符串长度
+    // ≥20, 连是不是真 token 都没验)。getMe 失败(token 无效/网络问题)直接拒绝 onboarding, 不静默放行。
+    let verifiedUsername;
+    try {
+      const meRes = await fetch(`https://api.telegram.org/bot${String(bot_token).trim()}/getMe`, { signal: AbortSignal.timeout(8000) });
+      const meJson = await meRes.json();
+      verifiedUsername = meJson?.result?.username;
+      if (!meJson?.ok || !verifiedUsername) {
+        return reply.code(400).send({ ok: false, error: `bot_token 校验失败(getMe 返回: ${meJson?.description || 'invalid token'}) — 请确认这是从 @BotFather 拿到的真实 token` });
+      }
+    } catch (e) {
+      return reply.code(502).send({ ok: false, error: `bot_token 校验失败(无法连接 Telegram API: ${e.message}) — 请稍后重试` });
+    }
+    if (bot_username && String(bot_username).replace(/^@/, '') !== verifiedUsername) {
+      console.warn(`[kanet-broker/onboard] broker=${broker_address} 提交的 bot_username=@${bot_username} 跟 getMe 真值 @${verifiedUsername} 不符 — 已用真值覆盖, 不信自报`);
+    }
     const now = new Date().toISOString();
     const tokenEnc = encrypt(String(bot_token).trim());
     const net = broker_address.startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
 
     // upsert by address (地址制 UNIQUE)。重复提交 = 更新 token/username, status 保持 (approved 不回退到 pending)。
+    // bot_username 存 verifiedUsername(getMe 真值), 不存 broker 自报的 bot_username 参数(防止 §上方 mismatch)。
     const existing = sqlite.prepare('SELECT id, status FROM broker_onboarding WHERE broker_address = ?').get(broker_address);
     if (existing) {
-      sqlite.prepare('UPDATE broker_onboarding SET bot_token_encrypted = ?, bot_username = COALESCE(?, bot_username), updated_at = ? WHERE broker_address = ?')
-        .run(tokenEnc, bot_username || null, now, broker_address);
+      sqlite.prepare('UPDATE broker_onboarding SET bot_token_encrypted = ?, bot_username = ?, updated_at = ? WHERE broker_address = ?')
+        .run(tokenEnc, verifiedUsername, now, broker_address);
     } else {
       sqlite.prepare(`INSERT INTO broker_onboarding (id, broker_address, bot_token_encrypted, bot_username, status, created_at, updated_at)
-        VALUES (?,?,?,?,?,?,?)`).run(randomUUID(), broker_address, tokenEnc, bot_username || null, 'pending', now, now);
+        VALUES (?,?,?,?,?,?,?)`).run(randomUUID(), broker_address, tokenEnc, verifiedUsername, 'pending', now, now);
     }
 
-    // 确保该地址在 identities 有行 → Owner 才能在 /identities UI 给它设 trust (审批门)。已存在则不动。
-    sqlite.prepare(`INSERT OR IGNORE INTO identities (id, network, address, display_name, identity_type, created_at, updated_at)
-      VALUES (?,?,?,?,?,?,?)`).run(randomUUID(), net, broker_address, bot_username || 'broker applicant', 'remote', now, now);
+    // Permissionless broker onboarding (Owner 2026-07-04 钦定: 测试网无许可自由进出, 移除人工审批门,
+    // Bettor 拍板 #5zftp1 — 只放行 broker 申请这一条路径, 不动 identities.trust_level 在别处的语义/含义):
+    // 提交即视为 recommended (= reconcileBrokerBots() 单源判定 trust_level IN ('owner','recommended') 直接放行)。
+    // 不降级既有更高信任(owner 不动)·不解封 blocked 地址(Owner 显式拉黑的另有原因, 申请 broker 不该悄悄解封)。
+    const existingIdn = sqlite.prepare('SELECT trust_level FROM identities WHERE address = ?').get(broker_address);
+    if (!existingIdn) {
+      sqlite.prepare(`INSERT INTO identities (id, network, address, display_name, identity_type, trust_level, created_at, updated_at)
+        VALUES (?,?,?,?,?,?,?,?)`).run(randomUUID(), net, broker_address, verifiedUsername, 'remote', 'recommended', now, now);
+    } else if (existingIdn.trust_level === 'normal') {
+      sqlite.prepare('UPDATE identities SET trust_level = ?, updated_at = ? WHERE address = ?').run('recommended', now, broker_address);
+    }
+    // existingIdn.trust_level in ('owner','recommended') → 已放行不动; 'blocked' → 不解封.
 
-    return reply.send({ ok: true, broker_address, status: 'pending', note: '已提交。等待 Owner 审批 (在 /identities 给该地址设 trust=recommended/owner 即 approved)。' });
+    return reply.send({ ok: true, broker_address, bot_username: verifiedUsername, status: 'approved', note: '已提交, 即时激活 (testnet 无许可进出, 无需人工审批)。bot_username 已经 getMe 校验为真值。' });
   });
 
   // GET /api/kanet-broker/onboard/status?address=… — 查单个地址 onboarding 状态 (token 永不回)。

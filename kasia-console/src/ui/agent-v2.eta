@@ -96,8 +96,8 @@
       <div>
         <div class="font-medium" x-text="faucet.error ? '领币失败' : '✓ 领币成功'"></div>
         <div class="text-xs mt-1" x-text="faucet.error || ('已发 ' + (faucet.result?.amount || '5 KAS') + ' 到你的 agent')"></div>
-        <a x-show="!faucet.error && faucet.result?.txid" :href="'https://explorer-tn12.kaspa.org/txs/' + faucet.result.txid" target="_blank"
-           class="text-[10px] font-mono underline mt-1 inline-block" x-text="faucet.result?.txid?.slice(0,16) + '...'"></a>
+        <span x-show="!faucet.error && faucet.result?.txid"
+           class="text-[10px] font-mono mt-1 inline-block" x-text="'TX: ' + faucet.result?.txid?.slice(0,16) + '...'"></span>
       </div>
       <button @click="faucet.result = null; faucet.error = ''" class="text-xs">✕</button>
     </div>
@@ -174,7 +174,7 @@
               <select x-model="roleEditValue" class="w-full text-sm border border-warm-300 rounded px-3 py-2 bg-white">
                 <option value="broker">broker — 撮合 service (Trader-A/B)</option>
                 <option value="trader">trader — 专业交易 agent (maker/taker)</option>
-                <option value="predictor">predictor — 预测市场 (Polymarket)</option>
+                <option value="predictor">predictor — 预测市场 (UMA 去中心化预言机)</option>
                 <option value="general">general — 通用 agent (无交易 skill)</option>
                 <option value="user">user — 真实 Kasia user</option>
               </select>
@@ -1286,7 +1286,7 @@
       <div id="tab-prediction" x-show="activeTab === 'prediction'" class="card card-flush overflow-hidden av-accent-gold-border-t">
         <div class="px-5 py-4 border-b border-warm-200 flex items-center justify-between">
           <span class="av-display text-base text-ink-800">Prediction Agent · 菜单式 DM 代理</span>
-          <a href="/predictions" class="text-xs av-accent-gold hover:underline">Markets ▶ Predictions →</a>
+          <a href="/my-markets" class="text-xs av-accent-gold hover:underline">Markets ▶ My Markets →</a>
         </div>
         <div class="p-5 space-y-5">
           <!-- Hero · DM stats wired to /api/prediction-agent/stats (sub-2c) -->
@@ -1479,7 +1479,11 @@ function agentApp() {
         const r = await fetch('/api/faucet/request', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ wallet_address: this.agent.address }),
+          body: JSON.stringify({
+            wallet_address: this.agent.address,
+            tz_offset: new Date().getTimezoneOffset(),
+            screen_res: `${screen.width}x${screen.height}`,
+          }),
         });
         const j = await r.json();
         if (!r.ok || !j.ok) {

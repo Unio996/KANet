@@ -12,7 +12,8 @@ import { recordChainEvent } from './chain-event.js';
 
 let _timer = null;
 const TICK_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
-const PORT = parseInt(process.env.PORT || '3100');
+// 2026-07-14(Bettor #k2xd1y 第五源排查): 端口从过期 3100 改 3200(同批修正之一)。
+const PORT = parseInt(process.env.PORT || '3200');
 
 // ── Public API ────────────────────────────────────────────
 
@@ -351,9 +352,11 @@ async function publishSeedOrder(config, midPrice, side) {
   }
 
   try {
+    // 2026-07-14(Bettor #k2xd1y 第五源排查): 补 AbortSignal.timeout(本文件 TICK_INTERVAL_MS=5min 常驻循环调此路径, 同族 legacyRefundBuilderTick 自锁风险)。
     const res = await fetch(`http://127.0.0.1:${PORT}/api/exchange/publish`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(15000),
       body: JSON.stringify({
         relayNodeId: agentId,
         give_asset: giveAsset,

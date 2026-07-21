@@ -65,6 +65,72 @@ export async function registerIngestRoutes(fastify) {
     }
   });
 
+  // ── POST /ingest/spc-daa-block — Relay reports a finality-safe SPC block ──
+  // (docs/2026-07-08-backward-walk-daa-index-design.md §2.2, J1tn 2026-07-16 补落码)
+  //
+  // Relay only calls this once a block is SPC_INDEX_FINALITY_DEPTH deep (see rpc-listener.mjs) —
+  // by the time Console sees it, the (daaScore, blockHash) binding is GHOSTDAG-final and cannot be
+  // reorg'd out, so INSERT OR IGNORE is safe (NWT attack-surface review #o0056j MUST-FIX closed by
+  // the finality gate living on the write side, not here).
+  //
+  // §2.5 覆盖区间维护: 判定新块是否与当前最新区间"相邻"——阈值(SPC_INDEX_ADJACENCY_PLACEHOLDER)是
+  // 占位值(NWT note: 宁紧勿松, 明天用 backfill 实数据的相邻 daa_score 差值分布校准, 不是最终值)。
+  //
+  // Body: { daaScore, blockHash, timestampMs, network }
+  const SPC_INDEX_ADJACENCY_PLACEHOLDER = 10; // TODO(J1tn, 明天): 用 spc_daa_index 实数据分布校准
+  fastify.post('/ingest/spc-daa-block', async (request, reply) => {
+    const { daaScore, blockHash, timestampMs } = request.body || {};
+    if (!Number.isFinite(daaScore) || !blockHash) {
+      return reply.code(400).send({ error: 'daaScore (number), blockHash required' });
+    }
+    try {
+      const { sqlite } = await import('../db/client.js');
+      sqlite.prepare(`
+        INSERT OR IGNORE INTO spc_daa_index (daa_score, block_hash, timestamp_ms)
+        VALUES (?, ?, ?)
+      `).run(daaScore, blockHash, timestampMs || 0);
+
+      const latest = sqlite.prepare(`
+        SELECT id, start_daa, end_daa FROM spc_daa_index_coverage ORDER BY end_daa DESC LIMIT 1
+      `).get();
+      if (latest && (daaScore - latest.end_daa) >= 0 && (daaScore - latest.end_daa) <= SPC_INDEX_ADJACENCY_PLACEHOLDER) {
+        sqlite.prepare(`UPDATE spc_daa_index_coverage SET end_daa = ? WHERE id = ?`).run(daaScore, latest.id);
+      } else if (!latest || daaScore > latest.end_daa) {
+        // 不相邻(relay 重启/console backoff 造成的洞)或首条区间——开新区间，旧区间原样保留(诚实标注洞)。
+        sqlite.prepare(`
+          INSERT INTO spc_daa_index_coverage (start_daa, end_daa) VALUES (?, ?)
+        `).run(daaScore, daaScore);
+      }
+      // daaScore <= latest.end_daa（乱序到达）: 已在某区间内或早于当前覆盖起点, INSERT OR IGNORE 已处理数据本身, 覆盖区间不用动。
+
+      return reply.code(201).send({ ok: true });
+    } catch (err) {
+      return reply.code(500).send({ error: err.message });
+    }
+  });
+
+  // ── POST /ingest/spc-tip-heartbeat — Relay reports its locally-observed tip daaScore ──
+  // Console 完整性巡检据此判断 spc_daa_index 写入器是否停更(§2.2 note①, 9ez2u 同族根因防线)，
+  // 不直连 kaspad RPC(Relay 唯一链上出口, docs/KANet-Positioning.md)。
+  //
+  // Body: { daaScore, network }
+  fastify.post('/ingest/spc-tip-heartbeat', async (request, reply) => {
+    const { daaScore } = request.body || {};
+    if (!Number.isFinite(daaScore)) {
+      return reply.code(400).send({ error: 'daaScore (number) required' });
+    }
+    try {
+      const { sqlite } = await import('../db/client.js');
+      sqlite.prepare(`
+        INSERT INTO spc_tip_heartbeat (id, daa_score, updated_at) VALUES (1, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET daa_score = excluded.daa_score, updated_at = excluded.updated_at
+      `).run(daaScore, new Date().toISOString());
+      return reply.code(201).send({ ok: true });
+    } catch (err) {
+      return reply.code(500).send({ error: err.message });
+    }
+  });
+
   // ── GET /api/indexer/watched-addresses — Relay polls this to know what to index ──
   // (Note: this route is under /api, not /ingest, because it's a read not a write)
   //

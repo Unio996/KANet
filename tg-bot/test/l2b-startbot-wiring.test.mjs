@@ -47,8 +47,11 @@ let botStartCalled = 0;
 const realBotStart = bot.start;
 bot.start = async () => { botStartCalled++; };
 
+// startBot() 现在是 async(2026-07-08 根治: 内部先 await verifyAndSyncBotUsername() 才走 bot.start()/
+// setInterval), 必须 await 完整个 promise, 否则 setInterval/bot.start 的桩替换窗口(下面 restore 那两行)
+// 会在真正调用发生前就提前收回, 造成未桩替换的 setInterval/bot.start 泄漏到测试窗口外真的触发。
 let threw = null;
-try { startBot(); } catch (e) { threw = e; }
+try { await startBot(); } catch (e) { threw = e; }
 
 // restore globals immediately
 globalThis.setInterval = realSetInterval;
@@ -59,10 +62,13 @@ check('L2b startBot() runs without throwing', threw === null, threw && threw.mes
 // THE critical one: dropping bot.start() = bot registers handlers but never polls = silently dead.
 check('L2b startBot() calls bot.start() (poller launched — guards "registered but not polling = dead bot")',
   botStartCalled === 1, `bot.start called ${botStartCalled}x`);
-// the 4 background pollers (broker-refresh + pollLoop + pollPendingBets + pollSettleResults). Exact count
-// is intentional: dropping/adding one should be a conscious change that updates this guard.
-check('L2b startBot() registers its 4 background pollers (setInterval x4)',
-  intervalCount === 4, `got ${intervalCount} setInterval(s)`);
+// the 5 background pollers (broker-refresh + pollLoop + pollPendingBets + pollSettleResults +
+// pollBrokerFeeEvents). Exact count is intentional: dropping/adding one should be a conscious
+// change that updates this guard. (2026-07-08 KANet-UI real-token run: pollBrokerFeeEvents 早前
+// 加进 bot.mjs 时没人同步这条断言, 之前一直是过期的"4"——J1tn getMe 校验改动本身不碰 setInterval
+// 调用, 不是回归源, 是这次真机跑通才第一次暴露的既有 staleness, 顺手改对。)
+check('L2b startBot() registers its 5 background pollers (setInterval x5)',
+  intervalCount === 5, `got ${intervalCount} setInterval(s)`);
 
 console.log(`\nL2b: ${pass}/${pass + fail} PASS`);
 

@@ -37,6 +37,15 @@ const SKILLS_DIR = `${KANET_ROOT}/agent-mind/src/skills`;
 const CONSOLE_PORT = process.env.PORT || '3100';
 
 export async function registerRelayRoutes(fastify) {
+  // T3 (2026-06-27): /integrations — TG bot management (moved from /relays, pure UI).
+  fastify.get('/integrations', async (request, reply) => {
+    const lang = parseLang(request.headers.cookie);
+    const t = getT(lang);
+    const dir = isRtl(lang) ? 'rtl' : 'ltr';
+    const langs = LANG_NAMES;
+    return reply.view('integrations', { title: '集成', t, lang, dir, langs });
+  });
+
   fastify.get('/relays', async (request, reply) => {
     const lang = parseLang(request.headers.cookie);
     const t = getT(lang);
@@ -341,10 +350,12 @@ export async function registerRelayRoutes(fastify) {
           rpc.connect({}),
           new Promise((_, rej) => setTimeout(() => rej(new Error('RPC connect timeout')), 3000)),
         ]);
-        const { entries } = await rpc.getUtxosByAddresses([new Address(relay.address)]);
+        // plural (not singular getBalanceByAddress — throws "invalid type: floating point,
+        // expected a string" on this vendored kaspa-wasm build) + direct node-side sum, not
+        // per-UTXO fetch — stays fast on massive-UTXO addresses (mining/faucet, millions of coinbase UTXOs).
+        const { entries } = await rpc.getBalancesByAddresses([new Address(relay.address)]);
         await rpc.disconnect();
-        const sompi = (entries || []).reduce((sum, e) => sum + e.amount, 0n);
-        const kas = Number(sompi) / 1e8;
+        const kas = Number(entries?.[0]?.balance || 0n) / 1e8;
         return reply.send({ balance: Math.round(kas * 1000) / 1000 });
       } catch {}
     }
@@ -389,6 +400,16 @@ export async function registerRelayRoutes(fastify) {
     }
   });
 
+  // T4 (2026-06-27) — relay lookup by Kaspa address. Used by TG bot /earnings node-income path.
+  // Returns relay_id + name so caller can proceed to /api/relay/:id/pubkey → /api/node/income/:pk.
+  fastify.get('/api/relay/find', async (request, reply) => {
+    const { address } = request.query;
+    if (!address) return reply.code(400).send({ ok: false, error: 'address required' });
+    const row = sqlite.prepare('SELECT id, name, address FROM relay_nodes WHERE address = ? LIMIT 1').get(address);
+    if (!row) return reply.code(404).send({ ok: false, error: 'relay_not_found' });
+    return reply.send({ ok: true, relay_id: row.id, relay_name: row.name, address: row.address });
+  });
+
   // T-J2-2026-05-12 #4 — system-wide RPC overview (聚合全 relay state, header indicator + dashboard 用).
   fastify.get('/api/system/rpc-overview', async (_request, reply) => {
     const relays = listRelayNodes();
@@ -428,7 +449,13 @@ export async function registerRelayRoutes(fastify) {
         return false;
       }
       function isSettled(m) {
-        if (m.settle_txid || m.protocol_status === 'completed') return true;
+        // #task33 (2026-07-03): settled_partial_claims/needs_manual_attribution 也会写 settle_txid
+        // (close TX 真上链, 只是不是每个 winner 都到账) — 不能再用裸 settle_txid 判"已结算",
+        // 否则 canary settle% 又把 completed 不变量修好前那批"部分领取误标 completed"的病, 换个
+        // 位置在这个 display metric 上重演。completed 是唯一权威。
+        if (m.protocol_status === 'completed') return true;
+        if (m.protocol_status === 'settled_partial_claims' || m.protocol_status === 'needs_manual_attribution') return false;
+        if (m.settle_txid) return true;   // 非 bshard 路径的旧字段兜底(v0.7 但不经此 daemon 结算的场景)
         try { const meta = JSON.parse(m.metadata || '{}'); if (meta.settle_evidence?.chain_settled) return true; } catch {}
         return false;
       }
@@ -447,7 +474,16 @@ export async function registerRelayRoutes(fastify) {
   fastify.post('/api/relay/:id/split-utxos', async (request, reply) => {
     try {
       const { splitUtxos } = await import('../services/utxo-splitter.js');
-      const result = await splitUtxos(request.params.id);
+      // #G4 (2026-07-04, faucet UTXO topology fix): default targetCount=8 (TARGET_UTXO_COUNT, tuned for
+      // broker high-frequency small-msg use-case, 2026-04-25) doesn't fit "many UTXOs each >= faucet grant
+      // amount" — a relay with 1 giant UTXO + 8 dust already reads as "9 >= 8, sufficient" and no-ops.
+      // Allow caller to override for cases needing more/larger chunks (e.g. faucet relay pre-burst prep).
+      const targetCount = Number.isFinite(Number(request.body?.targetCount)) ? Number(request.body.targetCount) : undefined;
+      // force=true → REBALANCE (consolidate + re-split to N fresh equal UTXOs) even when current count
+      // already >= targetCount — needed to fix an over-fragmented set (many too-small chunks), not just
+      // grow an under-fragmented one.
+      const force = request.body?.force === true;
+      const result = await splitUtxos(request.params.id, targetCount, { force });
       return reply.send(result);
     } catch (err) {
       return reply.code(500).send({ error: err.message });
@@ -604,10 +640,9 @@ export async function registerRelayRoutes(fastify) {
           rpc.connect({}),
           new Promise((_, rej) => setTimeout(() => rej(new Error('RPC connect timeout')), 3000)),
         ]);
-        const { entries } = await rpc.getUtxosByAddresses([new Address(relay.address)]);
+        const { entries } = await rpc.getBalancesByAddresses([new Address(relay.address)]);
         await rpc.disconnect();
-        const sompi = (entries || []).reduce((sum, e) => sum + e.amount, 0n);
-        return Math.round(Number(sompi) / 1e8 * 1000) / 1000;
+        return Math.round(Number(entries?.[0]?.balance || 0n) / 1e8 * 1000) / 1000;
       } catch {}
     }
     try {
@@ -1691,7 +1726,10 @@ export async function registerRelayRoutes(fastify) {
   fastify.post('/api/relay/:id/send-command', async (request, reply) => {
     const body = request.body || {};
     if (!body.type) return reply.code(400).send({ error: 'type is required' });
-    const timeoutMs = body.type === 'chain_get_block_at_daa' ? 120000 : 30000;
+    // 2026-07-07(J2·Bettor批): 120000→400000. MAX_WALK=250000@~1000块/s≈250s上限, 400s留余量——3o6cs(zk_native
+    // 首证市场)的walk深度随chain tip推进每天变深(target_daa固定不变), 之前120s在target较近时够用, 现在walk距离
+    // 已超ring buffer窗口必须慢速fallback, 120s不够。运维参数改动, 非逻辑变更。
+    const timeoutMs = body.type === 'chain_get_block_at_daa' ? 400000 : 30000;
     try {
       const result = await sendCommandAsync(request.params.id, body, timeoutMs);
       return reply.send({ ok: true, ...result });

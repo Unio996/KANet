@@ -1,0 +1,1135 @@
+// bshard-settle-daemon — 自治结算 daemon (Owner 2026-06-30 钦定 A: 补 daemon → 无人值守公测)。
+//
+// 编排已证的 settleMarketLive (五源验·gp8hy 18 / 2ysnl 26 winner 多片 e2e) 成自治 tick:
+//   扫到期 ripe 盘 → consolidate (多片折单 PS) → settleMarketLive (close+threaded claim) → writeback status。
+//
+// 铁律 (carry 全程):
+//   - NO TX NO STATE: 全复用 settleMarketLive 内硬闸 (driver-enforce + verifyClosedLanded poll + claim received-gate)。
+//   - 资金安全网 = 链上 covenant (nullifier require(bit==0)·close driver-enforce 锚)·非 DB lease (J1 钦定)。
+//     ∴ lease = best-effort 防浪费 TX/竞态·非安全网。重入/双进程链上也只成一笔。
+//   - canary: SETTLE_DAEMON_MAX_PER_TICK (默认 1) 小批·失败挂 settle_failed flag 跳过 (operator review)·不死循环重试。
+//   - 默认 OFF (SETTLE_DAEMON_ENABLED=1 才跑)·deploy 不自动开·canary review 后启。
+//   - ≤1024 winner (settleMarketLive payoutRoot depth-10)·>1024 抛错 fail-safe (rolling payout-shard task#18 根除)。
+//
+// 部署: index.js startSettleDaemonCron() (env-gated)。canary: 设 ENABLED=1 MAX=1 → 验 → ramp。
+
+import { sqlite } from '../db/client.js';
+import { getMarketBets } from '../lib/pool-bettor-sides-query.mjs';
+import { computeSettlePlan, settleMarketLive, deriveResumePlanFromEvidence } from './bshard-auto-settler.mjs';
+import { consolidateAllShards, autoDetectConsolidateResume, verifyRedeemMatchesChainObservedOutput } from '../lib/pool-shard-settle.mjs';
+import { assertPayoutShardCoherence } from '../lib/bshard-payout-family-coherence.mjs';   // K-18 §3.3 gate, P2 批2 §1(低频花费前, blocking)
+import { _shard9PhantomExcludeFor } from './bshard-close-voter.js';
+import { compilePayoutShardRedeem } from '../lib/pool-shard-register.mjs';
+import { fetchEndBlockHashCanonical, recaptureSideLockDaaForMarket } from './pool-market-settler-v06.mjs';
+import { judgeLine } from '../lib/judgeline.mjs';
+import { extractStructuredFields } from '../lib/oracle-evidence-extractors.mjs';
+import { makeCtfReader } from '../lib/uma-ctf-reader.mjs';   // #20 UMA: polymarket 盘读链上 CTF 判定 (P1 binding-verified 30/30·Bettor)
+import { recordShadowJudgment, registerDomainJudge } from '../lib/oracle-shadow-ledger.mjs';   // #26 自我进化: 影子台账(我们 oracle vs 权威·纯记录·永不碰结算·Owner 2026-06-30)
+import { espnSportsJudge } from '../lib/nwt-espn-sports-judge.mjs';   // NWT域判v1: polymarket体育盘ESPN独立判
+import { classifyFailure, shouldKeepStatus } from '../lib/bshard-failure-classifier.mjs';   // #49 模块①
+import { zkCloseTick } from '../lib/zk-close-builder.mjs';   // 2026-07-06 J2: ZK settle 生产装配, 见 docs/2026-07-06-zk-close-tick-production-wiring-design.md
+import { dispatchUnlockZkClose as _dispatchUnlockZkCloseImpl } from '../lib/zk-close-dispatch.mjs';   // 缺件③(J1tn 2026-07-08)
+import { zkCloseTickV2, claimAutonomousTick, zkHandoffAutonomousTick, zkJudgeProposeAutonomousTick } from '../lib/zk-autonomy-ticks.mjs';   // (b)(c) 2026-07-09 J2: 见 docs/2026-07-09-zk-autonomy-three-parts-design.md, 独立于上面旧 zkCloseTick 骨架, 各自 kill switch; 第五件(zkHandoffAutonomousTick) 2026-07-11 见 docs/2026-07-11-zk-autonomy-fifth-piece-handoff-broadcast-design.md; 第六件(zkJudgeProposeAutonomousTick) 2026-07-11 见 docs/2026-07-11-zk-autonomy-sixth-piece-judge-propose-design.md
+import { buildZkHandoffRequestV2, buildProposeCloseRequestV2 } from '../lib/bshard-close-transport.mjs';   // 第五/六件 ctx 注入(dispatchUnlockZkClose 同惯例, 本 daemon 不重新实现门①/propose 逻辑)
+import { randomUUID } from 'crypto';
+import { createRequire } from 'node:module';
+const _require = createRequire(import.meta.url);
+// 同 zk-prove-worker.mjs 完全一致的 isolated zk-sdk WASM 路径(D-005 隔离铁律: ZK 工具链绝不碰 live kaspa-wasm,
+// 独立 clone 出的 zk-sdk 构建)——gate witness 重建需要跟铸 gate 时同一份 ZkScriptBuilder API。
+const ZKSDK_WASM_PATH = process.env.ZKSDK_WASM_PATH || 'D:/rusty-kaspa-zksdk-isolated/wasm/nodejs/kaspa/kaspa.js';
+let _kaspaZkMod = null;
+function kaspaZk() { if (!_kaspaZkMod) _kaspaZkMod = _require(ZKSDK_WASM_PATH); return _kaspaZkMod; }
+// 跟 zk-prove-worker.mjs buildAndFundGate 用的同一个 relay 身份(铸+注资 gate 的那个 relay, 花它自己铸的
+// gate UTXO 天然该用同一身份广播——不用 SETTLE_DAEMON_FEE_RELAY_ID, 那是 committee-sig 老路径的身份)。
+const ZK_SETTLER_RELAY_ID = process.env.BSHARD_SETTLER_RELAY_ID || null;
+registerDomainJudge(espnSportsJudge);
+
+const CONSOLE = process.env.SETTLE_DAEMON_CONSOLE_BASE || 'http://127.0.0.1:3200';
+const RPC_URL = process.env.SETTLE_DAEMON_RPC_URL || 'ws://127.0.0.1:17210';
+const NETWORK = process.env.KASPA_NETWORK || 'testnet-12';
+const FEE_RELAY_ID = process.env.SETTLE_DAEMON_FEE_RELAY_ID || '8f104e2d-646d-47cd-81f6-97a16b4f6c01';   // J2test
+const PS_SEED_SOMPI = 20000000;
+const FINALITY_BUFFER = 60;   // deadline_daa + buffer 才 ripe (endBlockHash finality depth 50·留余量)
+const TICK_MS = parseInt(process.env.SETTLE_DAEMON_TICK_MS, 10) || 60000;
+const MAX_PER_TICK = parseInt(process.env.SETTLE_DAEMON_MAX_PER_TICK, 10) || 1;   // canary 默认 1
+const ENABLED = process.env.SETTLE_DAEMON_ENABLED === '1';
+// 2026-07-06 J2: ZK settle 生产装配 kill switch — 默认 OFF, 出意外行为可立刻关(照搬 SETTLE_DAEMON_ENABLED 模式)。
+const ZK_CLOSE_TICK_ENABLED = process.env.ZK_CLOSE_TICK_ENABLED === '1';
+// #20 UMA judge: polymarket 盘 winDir 读链上 Polymarket CTF (payoutNumerators/payoutDenominator by conditionId).
+// multi-RPC cross-check (RPC-trust·≥2 源同值才认)·finality (payoutDenominator>0 才 resolved·否则 ABSTAIN fail-closed)。
+const UMA_POLYGON_RPCS = (process.env.UMA_POLYGON_RPCS || 'https://polygon-bor-rpc.publicnode.com,https://polygon.drpc.org,https://1rpc.io/matic').split(',').map((s) => s.trim()).filter(Boolean);
+let _ctfReader = null;
+function ctfReader() { if (!_ctfReader) _ctfReader = makeCtfReader({ rpcs: UMA_POLYGON_RPCS }); return _ctfReader; }
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const log = (...a) => console.log('[settle-daemon]', new Date().toISOString().slice(11, 19), ...a);
+
+const _leases = new Set();   // in-memory best-effort lease (J1: covenant 是真安全网)
+let _timer = null;
+let _running = false;
+
+// ── ctx (复用已证 driver·HTTP relayPost :3200 + own RpcClient) ──
+let _kaspa = null, _rpc = null;
+async function kaspa() { if (!_kaspa) _kaspa = await import('kaspa-wasm'); return _kaspa; }
+async function rpcConnect() { const k = await kaspa(); const r = new k.RpcClient({ url: RPC_URL, encoding: k.Encoding.Borsh, networkId: NETWORK }); await r.connect({}); _rpc = r; return r; }
+async function rpcEnsure() { if (!_rpc) await rpcConnect(); return _rpc; }
+const withTimeout = (p, ms, tag) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error(`${tag} timeout ${ms}ms`)), ms))]);
+async function getUtxos(addr) {
+  const k = await kaspa();
+  for (let i = 0; i < 3; i++) {
+    try { await rpcEnsure(); const { entries } = await withTimeout(_rpc.getUtxosByAddresses([new k.Address(addr)]), 12000, 'getUtxos'); return entries || []; }
+    catch { try { await _rpc?.disconnect().catch(() => {}); } catch {} _rpc = null; }
+  }
+  throw new Error('getUtxos failed 3x');
+}
+const norm = (e) => JSON.parse(JSON.stringify(e, (kk, v) => typeof v === 'bigint' ? v.toString() : v));
+async function relayPost(relayId, cmd) {
+  const r = await fetch(`${CONSOLE}/api/relay/${relayId}/send-command`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cmd), signal: AbortSignal.timeout(180000) });
+  return r.json();
+}
+async function apiTransfer(toAddr, kas) {
+  const amt = Number(kas).toFixed(8);   // KI-30: Kaspa wallet 8-decimal max·防 JS 浮点 17-dec reject
+  const r = await fetch(`${CONSOLE}/api/relay/${FEE_RELAY_ID}/transfer`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ to: toAddr, amount: amt }), signal: AbortSignal.timeout(180000) });
+  return r.json();
+}
+async function p2shAddr(redeemHex) { const k = await kaspa(); return k.addressFromScriptPublicKey(k.ScriptBuilder.fromScript(new Uint8Array(Buffer.from(redeemHex, 'hex'))).createPayToScriptHashScript(), NETWORK).toString(); }
+async function p2pkAddr(pkHex) { const k = await kaspa(); return new k.PublicKey(pkHex).toAddress(k.NetworkType.Testnet).toString(); }
+async function p2pkSpk(addr) { const k = await kaspa(); const s = k.payToAddressScript(new k.Address(addr)); return (s.script ?? s).toString(); }
+function feeRelayAddr() { return sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(FEE_RELAY_ID)?.address; }
+async function mintFeeUtxo() {
+  const addr = feeRelayAddr();
+  const tr = await apiTransfer(addr, 0.3);
+  const txId = tr.txId || tr.tx_id; if (!txId) throw new Error(`mintFeeUtxo fail: ${JSON.stringify(tr).slice(0, 120)}`);
+  for (let i = 0; i < 30; i++) { const es = await getUtxos(addr); if (es.some(e => (norm(e).entry?.outpoint || norm(e).outpoint)?.transactionId === txId)) break; await sleep(2000); }
+  return { address: addr, outpointTxid: txId, index: 0 };
+}
+let _pkMap = null;
+async function buildPkMap() {
+  _pkMap = {};
+  const oracles = sqlite.prepare("SELECT id FROM relay_nodes WHERE is_oracle = 1").all();
+  for (const o of oracles) { try { const r = await relayPost(o.id, { type: 'get_pubkey' }); const pk = (r.x_only_pubkey || r.xOnlyPubkey || r.pubkey || '').toLowerCase(); if (/^[0-9a-f]{64}$/.test(pk)) _pkMap[pk] = o.id; } catch {} }
+  return _pkMap;
+}
+async function judgeWinDir(market) {
+  // #20 UMA path: polymarket 盘判定走链上 Polymarket CTF (非 HTTP data source·非 gamma price·bonded on-chain truth)。
+  //   conditionId = outcome_condition_id (66-char 0x bytes32·三源 verify-value-source·329/329 pending polymarket 实证)。
+  //   readResolution multi-RPC cross-check + finality(payoutDenominator>0)·未 resolved/异常/不一致 → ABSTAIN → throw skip。
+  if (market.outcome_market_source === 'polymarket') {
+    const conditionId = market.outcome_condition_id;
+    const res = await ctfReader().readResolution(conditionId);
+    if (res.final !== 'YES' && res.final !== 'NO') throw new Error(`UMA judge ABSTAIN: ${res.final} (conditionId ${String(conditionId).slice(0, 12)})`);
+    return res.final === 'YES' ? 0 : 1;   // YES→winDir0 / NO→winDir1 (value-mapping 与 ESPN 一致)
+  }
+  // 🔴 fix (2026-07-12, 第六件 zkJudgeProposeAutonomousTick 首考撞出的真 bug, #gr021n.2): 原判据
+  // 检查 market.outcome_market_source === 'blockhash_parity'——但真实数据(DB 实读)显示这些市场的
+  // outcome_market_source 大多是 'kanet_v07'(KANet 自有盘的通用分类值，跟"怎么判定"是两个不同维度)，
+  // 真正标记"这个市场走 blockhash_parity 判定"的字段是 resolution_rule_spec.judge_type。这个分支
+  // 2026-07-07 加入后从未被 zk_native 市场真实行使过——V1 selectRipeMarkets 显式排除 zk_native
+  // (§正确隔离设计, 不受影响)，历史上每次 blockhash_parity 判定(5R-2/tyr91/bvh2c/b0uoi)都是人工
+  // 脚本直接算 endBlockHash+奇偶，从未真正调用过这个函数的这个分支——今晚第六件是它第一次被真实
+  // 执行路径调用，立刻暴露检查错了字段。改用 resolution_rule_spec.judge_type 判定(DB 实读确认所有
+  // 36 个 blockhash_parity 市场该字段值一致为 'blockhash_parity'，不受 outcome_market_source 历史
+  // 不一致值影响)——双向隔离不受影响(polymarket 分支/ESPN 回退分支逻辑一字不动)。
+  const spec = JSON.parse(market.resolution_rule_spec);
+  if (spec.judge_type === 'blockhash_parity') {
+    const targetDaa = Number(spec.target_daa);
+    if (!Number.isFinite(targetDaa) || targetDaa <= 0) throw new Error(`blockhash_parity: invalid target_daa in resolution_rule_spec`);
+    const cur = await chainReader.getCurrentDaaScore();
+    if (cur < targetDaa) throw new Error(`blockhash_parity judge ABSTAIN: target DAA ${targetDaa} 未到(当前 ${cur})`);
+    const { hash } = await chainReader.getBlockAtDaa(targetDaa);
+    const lastByte = parseInt(String(hash).slice(-2), 16);
+    if (!Number.isFinite(lastByte)) throw new Error(`blockhash_parity: cannot parse last byte of hash ${String(hash).slice(0, 12)}`);
+    return lastByte % 2 === 0 ? 0 : 1;   // 偶→YES(winDir0) / 奇→NO(winDir1)，跟 ESPN/polymarket 同一 value-mapping
+  }
+  // ESPN/HTTP path (原路·不变): resolution_rule_spec.data_source_canonical = HTTP URL → extract + judgeLine。
+  const raw = await (await fetch(spec.data_source_canonical, { signal: AbortSignal.timeout(30000) })).text();
+  const ev = extractStructuredFields(spec.data_source_canonical, raw);
+  const v = judgeLine(spec.resolution_predicate, ev.fields);
+  if (v !== 'YES' && v !== 'NO') throw new Error(`judge ABSTAIN: ${v}`);
+  return v === 'YES' ? 0 : 1;
+}
+function poolMembers(root) {
+  const snap = sqlite.prepare('SELECT leaves_json FROM oracle_pool_chain_view WHERE merkle_root = ? ORDER BY snapshot_daa DESC LIMIT 1').get(root);
+  if (!snap) throw new Error(`no snapshot for root ${root.slice(0, 12)}`);
+  return JSON.parse(snap.leaves_json).map(l => ({ pk_hex: String(l.pk_x).toLowerCase(), stake_sompi: String(l.stake_sompi) }));
+}
+const chainReader = {
+  async getCurrentDaaScore() { const r = await relayPost(FEE_RELAY_ID, { type: 'chain_get_current_daa_score' }); return Number(r.daa_score); },
+  async getBlockAtDaa(minDaa) { const r = await relayPost(FEE_RELAY_ID, { type: 'chain_get_block_at_daa', min_daa_score: minDaa }); if (!r?.hash) throw new Error(`getBlockAtDaa fail: ${JSON.stringify(r).slice(0, 120)}`); return { hash: String(r.hash), daaScore: Number(r.daaScore) }; },
+};
+async function endBlockHash(daa) { return (await fetchEndBlockHashCanonical(chainReader, daa)).hash; }
+
+// consolidate(如需要) + psState 构造 — settle 路径和 ABSTAIN 退款路径共用(两者都需要"折片进 PayoutShard 之后
+// 的 closed=0 redeem 起点", 只是之后一个走 close_attest 一个走 cancel_attest)。抽出自 _settleOneMarketAttempt
+// 原 inline 逻辑(J2 2026-07-04 抽取, 逻辑一字不动, 见 git blame 迁移前版本)。
+async function consolidateAndBuildPsState(marketId, ps, ctx) {
+  // K-18 §3.3 coherence gate(P2 批2 §1, docs/2026-07-21-p2-batch2-coherence-gate-wiring-design.md):
+  // 低频花费前入口, blocking(tier=full)——NO TX NO STATE CHANGE 铁律适用, gate FAIL 直接 throw, 不做任何
+  // consolidate/transfer。跟下面 Tier1/Tier2(verifyRedeemMatchesChainObservedOutput)增量不重叠:
+  // Tier1/Tier2 验的是"payout_redeem_hex 反推地址是否跟链上实际观测一致"(chain-truth), 本 gate 的
+  // (a)(b)(d) 三步验的是"covenant_family 是否已知 + 字节结构是否符合声明的家族 + payout_ps_addr 这个独立
+  // DB 列是否跟 redeem 自洽"(family/DB 自洽性, Tier1/Tier2 完全不检查这三项)。
+  //
+  // 🔴 Bettor 裁定要求的死代码核查(2026-07-21, #ui92pg, J2 diff 复核时提出——"本 gate 挡在 Tier1/Tier2 之前
+  // 且是 blocking, 下面那条 P0 非阻塞 recompile 校验(line ~316, 事件类型 ps_redeem_recompile_mismatch)
+  // 还能不能被触发到"必须给出明确结论, 不能留死代码)。**结论: 不是死代码, 两者检查的是不同时刻的数据,
+  // 本 gate 看不到下面那条检查关心的东西**——逐分支验证:
+  //   ① needConsolidate=true 分支: 本 gate 在函数最开头用【consolidate 发生前】的原始 `ps` 行做检查;
+  //      随后 consolidateAllShards 产出一份全新的 psRedeemHex(把这次 tick 新折进来的 shard 状态 splice
+  //      进去)。line ~316 的检查用的是这份【consolidate 之后全新算出】的 psRedeemHex——这份数据本 gate
+  //      从没见过(它在本 gate 跑完之后才被计算出来), 两者检查的是不同快照, 后者不可能被前者提前拦下。
+  //   ② needConsolidate=false 分支、Tier2 命中: 同理, resumePoint.redeemHex 是 genesis-walk 现场重建出的
+  //      新值, 本 gate 检查的原始 `ps.payout_redeem_hex` 在 Tier1 已判定"不新鲜"时根本没被这条 Tier2 路径
+  //      使用——line ~316 检查的又是本 gate 从没见过的数据。
+  //   ③ needConsolidate=false 分支、Tier1 命中(用回原始未变的 `ps.payout_redeem_hex`): 这是唯一"两处检查
+  //      内容重叠"的子情形——但本 gate 用【解码出的 closed 值】recompile, line ~316 硬编码 closed:0；
+  //      结算前 consolidate 只在 closed:0 阶段发生, 语义上恒等, 该子情形下两者确实会给出一致结论, 是唯一
+  //      "重叠但不冲突"的情况, 不构成"整条检查路径不可达"。
+  // 综上: line ~316 的检查在 ①② 两个分支下是本 gate 无法替代的、检查全新数据的独立防线, 只有 ③ 这个
+  // 相对少见的子情形下会跟本 gate 的判定重叠(不是矛盾, 是同一结论算了两次)——继续保留, 不删除、不重排,
+  // 两条检查各自的存在理由已写清楚在各自的位置(本段 + line ~316 附近原有注释), 不留"测试改到过但语义没人
+  // 讲清楚"的僵尸路径。
+  {
+    const gateResult = assertPayoutShardCoherence(ps, { p2sh: _p2shCache, tier: 'full' });
+    if (!gateResult.ok) {
+      throw new Error(`consolidateAndBuildPsState: K-18 §3.3 coherence gate FAIL(blocking, market=${marketId}, step=${gateResult.failedStep}): ${gateResult.reason} — 拒绝 consolidate, 零花费`);
+    }
+  }
+
+  const shards = sqlite.prepare('SELECT shard_index, status FROM market_shards WHERE logical_market_id = ?').all(marketId);
+  const needConsolidate = shards.some(s => s.status === 'sealed' || s.status === 'open');
+  const market = sqlite.prepare('SELECT * FROM pool_markets WHERE id = ?').get(marketId);
+
+  let psOutpointTxid, psIdx, consolidatedPool, psRedeemHex;
+  if (needConsolidate) {
+    // #DB-lag自愈(2026-07-06, lv3rz/dyljb 手动马拉松式恢复后收编): getUtxos 探测每个 entry 归一成
+    // {outpoint,amount} 供 autoDetectConsolidateResume 直接用(跟 landed() 的 norm 模式一致, 单源不重写).
+    const probeUtxos = async (addr) => (await getUtxos(addr)).map(e => { const n = norm(e); return { outpoint: n.entry?.outpoint || n.outpoint, amount: n.entry?.amount || n.amount }; });
+    const res = await consolidateAllShards({
+      db: sqlite, rc: (cmd) => relayPost(FEE_RELAY_ID, cmd),
+      // 🔴 修复(2026-07-10, Bettor GO·NWT+J1 低风险评估: 复用6/30已验证的D=20深度门到这条consolidate
+      // 专属 landed 检查——之前是纯存在性检查(getUtxos查到就算数, 零确认深度), 对 reorg/race 没有防护。
+      // 改走跟其余 landed-gated 路径(见(a)/zk-autonomy-ticks.mjs)同款 relay `check_utxo_landed` 命令,
+      // minDepth=20——不是发明新机制, 是把已证有效的深度门搬进这条之前漏掉的路径。参数注意(J1 提醒):
+      // 本函数签名是 landed(txid, addr)(consolidateAllShards 既有调用约定, 不改), relay 命令字段是
+      // {address, txid, minDepth} ——显式映射, 不能位置直传。
+      landed: async (txid, addr) => {
+        for (let i = 0; i < 30; i++) {
+          const j = await relayPost(FEE_RELAY_ID, { type: 'check_utxo_landed', address: addr, txid, minDepth: 20 }).catch(() => ({}));
+          if (j.landed || j.found) return true;
+          await sleep(3000);
+        }
+        return false;
+      },
+      p2sh: _p2shCache, logicalMarketId: marketId,
+      payoutShard: { payout_redeem_hex: ps.payout_redeem_hex, payout_ps_outpoint: ps.payout_ps_outpoint, payout_cov_id: ps.payout_cov_id },
+      relayAddr: feeRelayAddr(),
+      transfer: async (addr, sompi) => { const t = await apiTransfer(addr, (sompi / 1e8).toFixed(8)); const tx = t.txId || t.tx_id; if (!tx) throw new Error('fee transfer fail'); await sleep(3000); return tx; },
+      deadline: Number(market.deadline),
+      getUtxos: probeUtxos,
+    });
+    [psOutpointTxid, psIdx] = res.psOutpoint.split(':'); psIdx = Number(psIdx);
+    consolidatedPool = res.consolidatedPool;
+    // K-18 §3.4(2026-07-21, J1 代笔 J2 域): redeem 权威 = consolidateAllShards 内部已经 splice 好的字节
+    // (res.redeemHex, 与 relay 广播时用的字节同源), 不再靠数值反推重编译。自愈写回同批覆盖两列(NWT
+    // finding⑤: 之前只写 payout_ps_outpoint 一列, payout_redeem_hex 留旧值会造成两列配对不一致)。
+    psRedeemHex = res.redeemHex;
+    try { sqlite.prepare('UPDATE payout_shards SET payout_ps_outpoint = ?, payout_redeem_hex = ? WHERE logical_market_id = ?').run(res.psOutpoint, psRedeemHex, marketId); } catch {}
+    log(`${marketId.slice(-8)} consolidated ${res.consolidatedShards} shard(s) → ${res.psOutpoint} pool=${consolidatedPool}`);
+  } else {
+    [psOutpointTxid, psIdx] = String(ps.payout_ps_outpoint).split(':'); psIdx = Number(psIdx);
+    // excludeSideLockTx(2026-07-11, Bettor #g3x7lm.2 抓漏同族点): 不接会预测出含phantom份额的假
+    // consolidatedPool, 跟真实链上(已排除shard9/10)值不符。
+    const { poolSompi } = getMarketBets(marketId, sqlite, _shard9PhantomExcludeFor(marketId));
+    const predictedPool = (BigInt(poolSompi) + BigInt(PS_SEED_SOMPI)).toString();
+    // 🔴 2026-07-20 orphan-bet 修复(Bettor/NWT/Owner 三方 co-verify GREEN, channel #sstuf1/#ssuv89): predictedPool
+    //   只按 DB registered stake 算——若链上真实池子因未登记押注(孤儿单: fold 上链成功但 pool_bettor_sides
+    //   INSERT 没跟上)而更大, 会跟真实值不符, 导致 driver enforce 硬闸(bshard-auto-settler.mjs 的
+    //   psContAddress 比对)把合法结算也一起挡住(85fit 实例: predicted 2021.2KAS vs 真实链上 5021.2KAS)。
+    //   改读 ps.payout_redeem_hex(这份 redeem 是当初这笔 consolidate TX 真实广播时用的字节, 已经 baked
+    //   了正确的真实 consolidatedPool)反推它的 P2SH 地址 → 查真实链上 UTXO 金额, 查到就是"读到的真相"非
+    //   "预测"; 查不到(边缘case: UTXO 已花/RPC 失败)fail-open 退回旧 predictedPool, 不新增阻塞面/不影响
+    //   任何当前正常工作的市场。
+    // 🔴 2026-07-21 P0(#28 MUST-FIX③, NWT GREEN f51cb938, docs/2026-07-21-p0-consolidated-pool-rederive-
+    //   implementation-plan.md): 上面这条 real-pool probe 的查询坐标(realAddr)来自 ps.payout_redeem_hex——
+    //   这一列只在两个机会性刷新点更新(漂移点⑤), 可能滞后于链上真实进度; 滞后时 realAddr 算错, match 必
+    //   然找不到, 旧代码把"找不到"和"这地址本来就没钱"混为一谈, 统一 fail-open 回 predictedPool——GATE 名义
+    //   链上优先, 实际查询坐标仍由可漂移 DB 列决定, 跟 §1 收敛原则字面矛盾。改法(方案 §2): Tier1 独立核
+    //   payout_redeem_hex 新鲜度(kaspa_tx_log 直接观测该 outpoint 链上实际地址, 不信 DB 反推的地址)——不
+    //   新鲜就跳过明知会失败的 probe; Tier2(仅 Tier1 未过/probe 未命中触发)复用已验证的
+    //   autoDetectConsolidateResume(genesis-anchored 候选编译+查链, pool-shard-settle.mjs:345-372, 此前只服务
+    //   consolidateAllShards 自己的 resume 入口)重建真值, 命中自愈写回 DB, 未命中 fail-closed throw+记
+    //   drift 事件——不再静默使用一个未经链上验证的预测值。
+    const realAddr = _p2shCache(ps.payout_redeem_hex);
+    // Tier1: 独立链读核实 payout_redeem_hex 是否新鲜(不信它反推的地址, 核它)。2026-07-21 抽成共享函数
+    // verifyRedeemMatchesChainObservedOutput(pool-shard-settle.mjs)——line423(settleMarketLive claim-thread
+    // consolidatedPool 校验)复用同一个原语, 不重复写第二份。
+    const redeemFresh = await verifyRedeemMatchesChainObservedOutput({ db: sqlite, p2sh: _p2shCache, candidateRedeemHex: ps.payout_redeem_hex, outpointTxid: psOutpointTxid, outpointIdx: psIdx, getUtxos });
+
+    let consolidatedPoolReal = null;
+    if (redeemFresh) {
+      try {
+        const liveEntries = await getUtxos(realAddr);
+        const match = liveEntries.find((e) => { const n = norm(e); const op = n.entry?.outpoint || n.outpoint; return op?.transactionId === psOutpointTxid && Number(op?.index) === psIdx; });
+        if (match) {
+          const n = norm(match);
+          const realAmount = String(n.entry?.amount ?? n.amount ?? '');
+          // K-18 §3.4: Tier1 已独立验证 ps.payout_redeem_hex 编译出的地址与链上实际观测地址一致(redeemFresh)
+          // 且这个 outpoint 确有活 UTXO——这份 DB 存的字节本身就是权威, 直接用, 不重编译。
+          if (realAmount && realAmount !== '0') { consolidatedPoolReal = realAmount; psRedeemHex = ps.payout_redeem_hex; }
+        }
+      } catch (e) { log(`${marketId.slice(-8)} Tier1 real-pool probe error (falling to Tier2): ${e.message}`); }
+    }
+
+    if (consolidatedPoolReal == null) {
+      // Tier2: redeemFresh 判否, 或新鲜但 outpoint 已花(被后续 consolidate 步骤取代)——两种情况都说明
+      // ps.payout_redeem_hex/payout_ps_outpoint 不可信, 复用 autoDetectConsolidateResume 从 genesis 现场
+      // 重建, 不是猜。
+      const resumePoint = await autoDetectConsolidateResume({
+        db: sqlite, getUtxos, p2sh: _p2shCache, logicalMarketId: marketId,
+        payoutShard: { payout_redeem_hex: ps.payout_redeem_hex, payout_ps_outpoint: ps.payout_ps_outpoint, payout_cov_id: ps.payout_cov_id },
+      });
+      if (resumePoint) {
+        psOutpointTxid = resumePoint.psTx; psIdx = resumePoint.psIdx;
+        consolidatedPoolReal = resumePoint.pool;
+        // K-18 §3.4: resumePoint.redeemHex 是 autoDetectConsolidateResume 内部 genesis-walk 时已经 splice
+        // 好的字节(与 relay/consolidateAllShards 同一权威), 不重编译。自愈写回同批覆盖两列(NWT finding⑤:
+        // 只写 payout_ps_outpoint 会让 payout_redeem_hex 继续留旧值, 两列配对不一致, 下次 Tier1 又会判"不新鲜")。
+        psRedeemHex = resumePoint.redeemHex;
+        try { sqlite.prepare('UPDATE payout_shards SET payout_ps_outpoint = ?, payout_redeem_hex = ? WHERE logical_market_id = ?').run(`${psOutpointTxid}:${psIdx}`, psRedeemHex, marketId); } catch {}
+        log(`${marketId.slice(-8)} Tier2 重建命中: payout_ps_outpoint/payout_redeem_hex 自愈为 ${psOutpointTxid}:${psIdx} pool=${consolidatedPoolReal}(redeemFresh=${redeemFresh})`);
+      } else {
+        // autoDetectConsolidateResume 返回 null 有两种原因(NWT 复核观察 b, 区分记录方便排查):
+        // genesis 仍未花(与"已 consolidate"分支矛盾)或全 shard 候选地址均查无 live UTXO。
+        const genesisAddr = _p2shCache(ps.payout_redeem_hex);
+        let genesisUnspent = false;
+        try { genesisUnspent = (await getUtxos(genesisAddr)).length > 0; } catch {}
+        const driftReason = genesisUnspent ? 'genesis_still_unspent_contradicts_consolidated_status' : 'full_shard_walk_no_live_utxo';
+        ctx.alert?.(marketId, `consolidated_pool Tier2 重建未命中(${driftReason})— 拒绝本 tick 使用 predictedPool, 需人工核`);
+        try {
+          sqlite.prepare(`INSERT INTO events (id, event_scope, event_type, source, level, summary, payload_json, created_at)
+            VALUES (?, 'system', 'consolidated_pool_verify_drift', 'consolidateAndBuildPsState', 'warn', ?, ?, datetime('now'))`)
+            .run(randomUUID(), `market=${marketId.slice(-8)} payout_redeem_hex/payout_ps_outpoint 与链上不符且 Tier2 genesis-walk 未命中(${driftReason})`,
+                 JSON.stringify({ marketId, staleOutpoint: `${psOutpointTxid}:${psIdx}`, staleRedeemAddr: realAddr, redeemFresh, driftReason }));
+        } catch {}
+        throw new Error(`consolidated_pool 无法链上验证(market ${marketId}, reason=${driftReason}), fail-closed 拒绝本 tick`);
+      }
+    }
+    consolidatedPool = consolidatedPoolReal;
+    log(`${marketId.slice(-8)} already consolidated → ${psOutpointTxid}:${psIdx} pool=${consolidatedPool}${consolidatedPool !== predictedPool ? ` (real≠predicted=${predictedPool}, using real)` : ''}`);
+  }
+
+  // 🔴 2026-07-21 K-18 §3.4(docs/2026-07-18-payoutshard-family-coherence-gate-design.md, NWT GREEN 7/18,
+  //   J1 代笔落地 J2 域·Codex 对抗审查 coord/codex-bridge 2a10f5e8 MUST-FIX4 抓出本函数原来最后这一步
+  //   一直用 compilePayoutShardRedeem 重编译的字节当花费权威, 违反团队 8pson 事故后拍板的权威收敛
+  //   决议——权威只能是"落地 redeem + 确定性 splice"(与 relay/consolidateAllShards 同源), 重编译只能
+  //   当校验用, 不能当 runtime authority(silverc 本地构建跟当年铸造那台机器字节漂移 = 8pson 同款分叉)。
+  //   两个分支现在都已经在各自的 Tier1/Tier2/consolidate 路径里把 psRedeemHex 设成"真权威"(splice 或
+  //   验证过新鲜的原始 DB 字节), 不再走这里的 compile。
+  //   recompile 降级为非阻塞校验(K-18 §3.3(c) 精神, 完整 assertPayoutShardCoherence 四步门 + family 列
+  //   属 K-18 全案更大范围, 本次窄范围落地不铺): 只 log 差异, 不 throw, 不影响返回值——K-18 DoD 硬前置
+  //   (backfill dry-run 报告 + 现网全量 V1 盘 splice vs recompile byte-exact 对照)完成前, 没有全量证据能
+  //   支撑"不一致就拒绝"这条硬闸, 贸然 throw 反而会把从未验证过的既有 V1 盘一起挡住(同 K-18 §5 DoD-0 warning)。
+  if (!psRedeemHex) throw new Error(`consolidateAndBuildPsState: psRedeemHex 未设置(market ${marketId}), 内部逻辑错误——每条路径都必须显式赋值 splice 权威字节, 不允许隐式回落 undefined`);
+  try {
+    const recompiled = compilePayoutShardRedeem({ poolMerkleRoot: ps.pool_merkle_root, predicateCommit: ps.predicate_commit, consolidatedPool, closed: 0 });
+    if (recompiled !== psRedeemHex) {
+      log(`${marketId.slice(-8)} 🟡 K-18 §3.3(c) 校验(非阻塞): recompile 字节 != splice 权威字节(silverc 版本漂移或数据不一致, 已用 splice 权威值, 未拒绝) recompiled=${recompiled.slice(0, 24)}… spliced=${psRedeemHex.slice(0, 24)}…`);
+      try {
+        sqlite.prepare(`INSERT INTO events (id, event_scope, event_type, source, level, summary, payload_json, created_at)
+          VALUES (?, 'system', 'ps_redeem_recompile_mismatch', 'consolidateAndBuildPsState', 'warn', ?, ?, datetime('now'))`)
+          .run(randomUUID(), `market=${marketId.slice(-8)} recompile != splice authority(非阻塞, K-18 backfill 前置证据积累)`,
+               JSON.stringify({ marketId, recompiledHex: recompiled, splicedHex: psRedeemHex }));
+      } catch {}
+    }
+  } catch (e) { log(`${marketId.slice(-8)} K-18 §3.3(c) recompile 校验跳过(非阻塞, silverc 不可用等): ${e.message}`); }
+
+  return { outpointTxid: psOutpointTxid, index: psIdx, redeem_hex: psRedeemHex, consolidatedPool, poolMerkleRoot: ps.pool_merkle_root, predicateCommit: ps.predicate_commit };
+}
+
+function buildCtx() {
+  return {
+    db: sqlite, psSeedSompi: PS_SEED_SOMPI,
+    judgeWinDir, endBlockHash, poolMembers,
+    p2shAddr: (r) => _p2shCache(r), p2pkAddr: (p) => _p2pkAddrSync(p), p2pkSpk: (a) => _p2pkSpkSync(a),
+    getUtxos: async (addr) => (await getUtxos(addr)).map(norm),
+    relayPost,
+    feeRelay: { id: FEE_RELAY_ID, address: feeRelayAddr() },
+    feeUtxo: mintFeeUtxo,
+    pkToRelay: (pk) => _pkMap?.[pk.toLowerCase()] || null,
+    alert: (mid, reason) => log(`🔴 ALERT [${String(mid).slice(-8)}]: ${reason}`),
+  };
+}
+// kaspa-wasm p2sh/p2pk are sync after module load; pre-warm in tick. computeSettlePlan/settleMarketLive call them sync.
+let _k = null;
+function _p2shCache(redeemHex) { return _k.addressFromScriptPublicKey(_k.ScriptBuilder.fromScript(new Uint8Array(Buffer.from(redeemHex, 'hex'))).createPayToScriptHashScript(), NETWORK).toString(); }
+function _p2pkAddrSync(pkHex) { return new _k.PublicKey(pkHex).toAddress(_k.NetworkType.Testnet).toString(); }
+function _p2pkSpkSync(addr) { const s = _k.payToAddressScript(new _k.Address(addr)); return (s.script ?? s).toString(); }
+
+// #49 模块② (2026-07-04, docs/2026-07-04-daemon-error-handling-modular-design.md v2 §3.2):
+// UMA re-judge 退避表——数字来自真实查证的 UMA/Polymarket 协议参数(2h 常规 dispute window,
+// 最长 96h DVM 投票升级), 不是拍脑袋。Owner 钦定方向"充分嫁接 UMA"(耐心等它 finalize, 不是
+// 绕过它用别的数据源抢跑)。
+const UMA_REJUDGE_BACKOFF_TABLE = [
+  { maxAgeHours: 2, intervalMinutes: 15 },   // 常规无 dispute 路径, 2h 内应该 finalize
+  { maxAgeHours: 6, intervalMinutes: 30 },   // 可能刚好卡在 propose 边缘或短暂 dispute
+  { maxAgeHours: 96, intervalMinutes: 120 }, // DVM 投票升级场景, 最长约 4 天
+];
+const UMA_GENUINE_TIMEOUT_HOURS = 96; // 超过这个还 ABSTAIN = 真正长期无解, 转 settle_failed 走 #47
+
+// 该市场是不是 UMA-pending(metadata.uma_pending_since 已设, 上次尝试距今是否已经过了退避表
+// 对应档位的间隔)。true = 这次 tick 可以重新尝试判定; false = 还没到该重试的时候, 跳过(省 RPC)。
+// 非 UMA-pending 的市场(没有这个 metadata 字段)一律放行(不受此函数影响, 保持原有 ripe 行为)。
+function _umaBackoffAllowsRetryNow(marketRow) {
+  let meta = {}; try { meta = JSON.parse(marketRow.metadata || '{}'); } catch {}
+  const pendingSince = meta.uma_pending_since;
+  if (!pendingSince) return true; // 不是 UMA-pending 市场, 不受退避表限制
+  const nowMs = Date.now();
+  const ageHours = (nowMs - new Date(pendingSince).getTime()) / 3_600_000;
+  const lastAttemptMs = meta.uma_last_attempt_at ? new Date(meta.uma_last_attempt_at).getTime() : new Date(pendingSince).getTime();
+  const sinceLastAttemptMinutes = (nowMs - lastAttemptMs) / 60_000;
+  const tier = UMA_REJUDGE_BACKOFF_TABLE.find((t) => ageHours <= t.maxAgeHours) || UMA_REJUDGE_BACKOFF_TABLE[UMA_REJUDGE_BACKOFF_TABLE.length - 1];
+  return sinceLastAttemptMinutes >= tier.intervalMinutes;
+}
+
+// scheduleUmaRejudge — BUSINESS_PENDING(UMA ABSTAIN)分类命中时调用。首次调用写
+// metadata.uma_pending_since(标记进入 UMA-pending 状态); 每次调用更新 uma_last_attempt_at
+// (供 _umaBackoffAllowsRetryNow 计算退避间隔) + 重试计数。超过 genuine-timeout 门槛则返回
+// timeout_exceeded, 调用方(settleDaemonTick)据此转 settle_failed(#47 人工评估退款路的入口)。
+function scheduleUmaRejudge(marketId, market) {
+  let meta = {}; try { meta = JSON.parse(market.metadata || '{}'); } catch {}
+  const nowIso = new Date().toISOString();
+  const isFirst = !meta.uma_pending_since;
+  if (isFirst) meta.uma_pending_since = nowIso;
+  meta.uma_last_attempt_at = nowIso;
+  meta.uma_retry_count = (meta.uma_retry_count || 0) + 1;
+  const ageHours = (Date.now() - new Date(meta.uma_pending_since).getTime()) / 3_600_000;
+  const timedOut = ageHours > UMA_GENUINE_TIMEOUT_HOURS;
+  try {
+    if (timedOut) {
+      // 真超时: metadata + protocol_status 一次写, 别只更新 metadata 漏了状态转换(#48 那种
+      // "新逻辑写了一半没接通"的坑, 这里两个字段一起原子写, 不留中间态)。
+      sqlite.prepare("UPDATE pool_markets SET metadata = ?, protocol_status = 'settle_failed' WHERE id = ?").run(JSON.stringify(meta), marketId);
+    } else {
+      sqlite.prepare('UPDATE pool_markets SET metadata = ? WHERE id = ?').run(JSON.stringify(meta), marketId);
+    }
+  } catch (e) { log(`${marketId.slice(-8)} scheduleUmaRejudge writeback warn: ${e.message}`); }
+  if (timedOut) {
+    log(`${marketId.slice(-8)} UMA-pending 超过 genuine-timeout(${UMA_GENUINE_TIMEOUT_HOURS}h, 实际 ${ageHours.toFixed(1)}h) — 转 settle_failed, 走 #47 人工评估退款`);
+    return { ok: false, action: 'timeout_exceeded', keepStatus: false };
+  }
+  log(`${marketId.slice(-8)} UMA-pending${isFirst ? '(首次)' : ''}, 第 ${meta.uma_retry_count} 次尝试, 年龄 ${ageHours.toFixed(2)}h — 保留 verifying, 等下次退避窗口`);
+  return { ok: false, action: 'scheduled', keepStatus: true };
+}
+
+// ripe = v0.7 + deadline_daa+buffer passed + 未结算 + 非 settle_failed + betCount>0 + 非 commingled。
+// ── 不可达 pre-gate(合卡设计 docs/2026-07-12-bucketA-windir-backfill-and-unreachable-pregate-design.md §3,
+//    Bettor 三硬边界+注1 修层+NWT F2, 2026-07-12)──
+// 双条件同时成立才 gate(可达的一律照走): ①deadline_daa < coverage floor(spc_daa_index_coverage 最早覆盖起点)
+// ②gap = currentDaa - deadline_daa > MAX_WALK(严格 >: rpc-listener.mjs:240-262 语义是 walk MAX_WALK 步,
+//   exhaust 时 daa==deadline 属正确 crossing 返回成功——等值不 gate, 与 rpc 边界严格一致, F2 off-by-one)。
+// 有 settle_evidence.close_txid 的盘不 gate(照进 selection 走 resume 快路, 零 walk)。
+// skip = 纯跳过零状态变化(挂账), 首次 gate 发 events 审计 + tick 计数 log(禁静默消失, silent-truncation 族)。
+// 🔴 MAX_WALK 配对常量(ANTI-PATTERNS 规则55 + NWT F2 非对称): 必须 ≥ kasia-relay/src/rpc-listener.mjs:221
+//   的 MAX_WALK——**宁大勿小**: 偏大=少 gate 仍撞重锤(次优但安全); 偏小=实际可达盘被跳=liveness 误伤。
+//   同名 env GETBLOCKATDAA_MAX_WALK 两侧联动(Bettor 注4), regression case 双向钉值。
+const PREGATE_MAX_WALK = parseInt(process.env.GETBLOCKATDAA_MAX_WALK, 10) || 250000;
+const _pregateAudited = new Set();   // 进程内首次去重(重启后重发一条, 可接受——审计宁多勿漏)
+
+// 🔴 批量歼灭令(2026-07-13, Bettor #j869v7·29-aukqt 修完 70-ojizv 立刻现形, 同款病灶不再一个一个修):
+//   29-aukqt 的 walk_exhausted_confirmed marker 只认一种精确错误签名(getBlockAtDaa 特有)。70-ojizv 是
+//   另一种机制(consolidate landed() 确认轮询卡死, pool-shard-settle.mjs:426)——同"每 tick 重付一次
+//   沉没代价"的形状, 但错误文案完全不同。与其逐个错误类型开专属 regex(打地鼠), 泛化成: 任意市场若连续
+//   N 个 tick(REPEAT_OFFENDER_THRESHOLD, 默认 3)以**同一签名前缀**(reason 前 40 字符, 后半段的
+//   txid/金额等易变细节被截掉, 只保留失败*类型*)TRANSIENT 重试耗尽 → 判定"结构性卡死非真瞬态", 反应式
+//   标记 gate, 不再逐 tick 重付整轮 retry(3 次内部重试+backoff)的代价。只处理"停止空转"这一层——
+//   实际 UTXO/consolidate 为什么卡死是另一个问题, 见 events 审计 payload 里的 reason, 处置另案。
+//   不动钱、不改 protocol_status(shouldKeepStatus 原逻辑不动, 只加这层"要不要下次还试"的调度层)。
+const REPEAT_OFFENDER_THRESHOLD = parseInt(process.env.REPEAT_OFFENDER_THRESHOLD, 10) || 3;
+// 🔴 NWT 红队精度缺口 + Bettor 裁定收紧(2026-07-13, #j8p6gn, 2431fe98 装载后跟上不拖的精度补丁①):
+//   原 slice(0,40) 只抓到 wrapper 长公共前缀(如 "consolidate shard 0 no land: {"ok":true,")——不管
+//   底层真实根因是什么(UTXO not found / ECONNREFUSED / 别的), 40 字符边界还没走到差异位就被切了, 会把
+//   同一市场上 3 次彼此独立、各自会自愈的不同瞬态问题误判成"同一个结构性卡死", 提前 permanent-gate 本
+//   不该被隔离的市场(非钱路/非状态风险, 但增加不必要的人工排查负担)。改法: 不再固定长度截断, 先归一化
+//   (剥掉 kaspa 地址/十六进制哈希这类"每次都不同但不代表根因不同"的易变部分), 再对
+//   **归一化后的整串**(非截断片段)做 hash——不管差异位落在第 40 字符前还是第 400 字符后, 只要底层错误
+//   *类型*相同就产生相同签名, 类型不同就产生不同签名(不再有"公共前缀吞掉差异位"这个结构性缺口)。
+//   🔴 NWT 红队第二刀(同日实测坐实, 范围更窄——只影响多 shard 市场的 shard 跳变场景): 曾经加过
+//   `\b\d+\b` → '<num>' 想连纯数字 token(金额)一起剥掉, 但这会把 shard_index 也一起抹掉——shard 0
+//   和 shard 1 是**有意义的差异位**(不同 shard = 不同 UTXO/covenant, 不是随机噪音), 若多 shard 市场
+//   不同 tick 撞到不同 shard 各自独立的瞬态失败会被误判成同一签名延续 streak。地址/哈希已经被前两条
+//   规则单独剥干净, 没有再额外剥纯数字的必要——移除这条规则, 让 shard_index/amount 等小整数原样保留
+//   在签名里参与区分(对同一 market+shard 的重复失败, 这些数字本来就稳定不变, 不影响去重能力)。
+function _reasonSignature(reason) {
+  const normalized = String(reason || '')
+    .replace(/kaspatest:[a-z0-9]+/gi, '<addr>')      // kaspa bech32 地址(UTXO/consolidate 错误里常见)
+    .replace(/0x[0-9a-fA-F]+/g, '<hex>')              // 0x 前缀十六进制(EVM 地址/值)
+    .replace(/\b[0-9a-fA-F]{16,}\b/g, '<hash>');      // 裸十六进制长串(txid/block hash, 无 0x 前缀)
+  let hash = 0;
+  for (let i = 0; i < normalized.length; i++) { hash = (hash * 31 + normalized.charCodeAt(i)) >>> 0; }
+  return hash.toString(16);
+}
+function repeatOffenderGate(m) {
+  let meta = {};
+  try { meta = JSON.parse(m.metadata || '{}'); } catch {}
+  return meta?.repeat_offender_confirmed === true;
+}
+
+// 🔴 手动冻结闸(2026-07-19 22:54, Bettor #se81ld.1 派工): 跟 repeatOffenderGate 并列独立闸门——
+//   那个认"同签名 TRANSIENT 耗尽", 这个认"人工已知原因、暂不该重试"(如 85fit 的 enforce-mismatch
+//   孤儿对账未完成, 每 tick 重付 build+enforce 撞同一个已知 FAIL, 刷 ALERT 无价值)。跟 jepu1 那次
+//   ad-hoc 冻结同一诉求, 这次做成可复用的成对 gate+clear(镜像 repeatOffenderGate/
+//   clearRepeatOffenderMarker 惯例), 不动 protocol_status/不碰钱, 纯调度层。
+function manualHoldGate(m) {
+  let meta = {};
+  try { meta = JSON.parse(m.metadata || '{}'); } catch {}
+  return meta?.manual_hold_reason != null;
+}
+export function setManualHold(marketId, db, reason) {
+  const market = db.prepare('SELECT metadata FROM pool_markets WHERE id = ?').get(marketId);
+  if (!market) return { ok: false, reason: 'market 不存在' };
+  db.prepare(`UPDATE pool_markets SET metadata = json_set(metadata, '$.manual_hold_reason', ?, '$.manual_hold_at', datetime('now')) WHERE id = ?`).run(reason, marketId);
+  db.prepare(`
+    INSERT INTO events (id, event_scope, event_type, source, level, summary, payload_json, created_at)
+    VALUES (?, 'system', 'manual_hold_set', 'setManualHold', 'warn', ?, ?, datetime('now'))
+  `).run(randomUUID(), `market=${String(marketId).slice(-8)} 人工设置 manual_hold: ${reason}`, JSON.stringify({ marketId, reason }));
+  return { ok: true };
+}
+export function clearManualHold(marketId, db, clearReason) {
+  const market = db.prepare('SELECT metadata FROM pool_markets WHERE id = ?').get(marketId);
+  if (!market) return { ok: false, reason: 'market 不存在' };
+  let meta = {}; try { meta = JSON.parse(market.metadata || '{}'); } catch { return { ok: false, reason: 'metadata 坏 JSON' }; }
+  if (meta.manual_hold_reason == null) return { ok: false, reason: '未处于 hold 状态, 无需清理(幂等)', already: true };
+  const before = { manual_hold_reason: meta.manual_hold_reason, manual_hold_at: meta.manual_hold_at };
+  db.prepare(`UPDATE pool_markets SET metadata = json_remove(metadata, '$.manual_hold_reason', '$.manual_hold_at') WHERE id = ?`).run(marketId);
+  db.prepare(`
+    INSERT INTO events (id, event_scope, event_type, source, level, summary, payload_json, created_at)
+    VALUES (?, 'system', 'manual_hold_cleared', 'clearManualHold', 'warn', ?, ?, datetime('now'))
+  `).run(randomUUID(), `market=${String(marketId).slice(-8)} manual_hold 人工清除: ${clearReason || '(未附理由)'}`, JSON.stringify({ marketId, before, clearReason: clearReason || null }));
+  return { ok: true, cleared: before };
+}
+
+// 🔴 精度补丁②(Bettor #j8p6gn): "隔离闸不能只进不出"——人工 probe/处置复核发现某盘其实已自愈(比如
+//   consolidate 的 UTXO 后来自己落地了)后, 显式清 marker, 不留死锁。同 fw9kk/cohort-B
+//   clearLegacyRefundDeadShape 惯例: tripwire guard(必须真的带着要清的字段才生效, 防误清)+ 审计 events
+//   行(可追溯谁清的/为什么清)。纯调度层操作, 不动钱不改 protocol_status。
+export function clearRepeatOffenderMarker(marketId, db, clearReason) {
+  const market = db.prepare('SELECT metadata FROM pool_markets WHERE id = ?').get(marketId);
+  if (!market) return { ok: false, reason: 'market 不存在' };
+  let meta = {}; try { meta = JSON.parse(market.metadata || '{}'); } catch { return { ok: false, reason: 'metadata 坏 JSON' }; }
+  if (meta.repeat_offender_confirmed !== true) return { ok: false, reason: '未处于 gate 状态, 无需清理(幂等)', already: true };
+  const before = { repeat_offender_confirmed: meta.repeat_offender_confirmed, repeat_failure_sig: meta.repeat_failure_sig, repeat_failure_streak: meta.repeat_failure_streak };
+  db.prepare(`UPDATE pool_markets SET metadata = json_remove(metadata, '$.repeat_offender_confirmed', '$.repeat_failure_sig', '$.repeat_failure_streak') WHERE id = ?`).run(marketId);
+  db.prepare(`
+    INSERT INTO events (id, event_scope, event_type, source, level, summary, payload_json, created_at)
+    VALUES (?, 'system', 'repeat_offender_cleared', 'clearRepeatOffenderMarker', 'warn', ?, ?, datetime('now'))
+  `).run(randomUUID(), `market=${String(marketId).slice(-8)} repeat_offender marker 人工清除: ${clearReason || '(未附理由)'}`, JSON.stringify({ marketId, before, clearReason: clearReason || null }));
+  return { ok: true, cleared: before };
+}
+function _coverageFloor() {
+  try { return sqlite.prepare('SELECT MIN(start_daa) f FROM spc_daa_index_coverage').get()?.f ?? null; } catch { return null; }
+}
+// 🔴 29-aukqt 事故补丁(2026-07-13, Bettor 加急令 #j658rk·止痛最短路): floor 判据只覆盖"deadline
+//   早于 spc_daa_index 有史以来最早覆盖点"这一类结构性不可达。29-aukqt 是另一类: deadline_daa=
+//   58695372 > floor=56983539(比 floor 新), floor 判据不 gate, 但它实际落在 spc_daa_index_coverage
+//   最新区间尾部(58130000-58168048)**之后**的未覆盖空档(live 覆盖尚未追上当前 tip)——每 tick
+//   仍要重付一次 O(gap) backward walk 的沉没代价, 实测(12:05-12:22 五轮 tick 日志)每次耗尽
+//   MAX_WALK=250000 步仍不到 deadline, ~2min 空转期间整个事件循环阻塞(GC 假说排查现场撞见的
+//   真根因之一)。floor 分支是"预测式"(算出来的), 这里加一条"反应式"OR 分支: 一旦某个市场的
+//   plan 实测抛出 getBlockAtDaa MAX_WALK-exhausted(见 _settleOneMarketAttempt catch 分支写入
+//   metadata.walk_exhausted_confirmed 标记), 后续 tick 直接信这个实测结果, 不用等 floor 追上来才
+//   补判。floor 分支本身零改动(仍是主判据), 这里只加零风险扩面, gap>MAX_WALK + hasEvidence 两条
+//   既有安全闸门原样保留(两个分支共用, 缺一不 gate)。
+function unreachablePreGate(m, currentDaa, floor) {
+  if (m.deadline_daa == null) return false;
+  let meta = {};
+  try { meta = JSON.parse(m.metadata || '{}'); } catch {}
+  const belowFloor = floor != null && Number(m.deadline_daa) < Number(floor);
+  const observedExhausted = meta?.walk_exhausted_confirmed === true;
+  if (!belowFloor && !observedExhausted) return false;
+  if (!((Number(currentDaa) - Number(m.deadline_daa)) > PREGATE_MAX_WALK)) return false;
+  if (!!meta?.settle_evidence?.close_txid) return false;   // resume 可用盘不 gate(Fix-A 域)
+  if (!_pregateAudited.has(m.id)) {
+    _pregateAudited.add(m.id);
+    try {
+      const reasonTxt = belowFloor
+        ? `deadline_daa=${m.deadline_daa} < coverage floor ${floor}`
+        : `实测确认 getBlockAtDaa MAX_WALK-exhausted(反应式, 非 floor 推断——deadline 落在 coverage 覆盖尾部之后的未追上空档)`;
+      sqlite.prepare(`
+        INSERT INTO events (id, event_scope, event_type, source, level, summary, payload_json, created_at)
+        VALUES (?, 'system', 'unreachable_gated', 'bshard-settle-daemon', 'warn', ?, ?, datetime('now'))
+      `).run(randomUUID(), `market=${String(m.id).slice(-8)} pre-gate: ${reasonTxt} 且 gap>${PREGATE_MAX_WALK} 物理不可达, 零walk skip(挂账, 终局走 L628 另案)`, JSON.stringify({ marketId: m.id, deadlineDaa: m.deadline_daa, coverageFloor: floor, gap: Number(currentDaa) - Number(m.deadline_daa), gateReason: belowFloor ? 'below_floor' : 'observed_exhausted' }));
+    } catch (e) { log(`pre-gate events insert fail (non-fatal): ${e.message}`); }
+  }
+  return true;
+}
+
+function selectRipeMarkets(currentDaa, pmt, limit) {
+  // 只结 active-未结 (pending_bettors/verifying)·排终态 (cancelled/completed/refunded/refunding/settle_failed)。
+  // 优先级排序 (J2 2026-07-05, 世界杯首场 7rztt 被 130+ polymarket 镜像盘积压堵住的案例·Bettor 拍):
+  // outcome_market_source='kanet_v07'(KANet 自有盘, 如世界杯) 排最前, 同优先级内再按 deadline_daa ASC。
+  // 之前纯 deadline ASC 排序会让"最老的积压盘"永远排最前——如果那些老盘本身卡在慢速 MAX_WALK 路径
+  // (每个 27-30s) 或长期 UMA-pending, 新的自有盘(如世界杯)会被无限期挤到后面, 即使 MAX_PER_TICK
+  // 调大也救不了(它们仍排在慢盘后面, 而 tick 内是串行处理)。KANet 自有盘数量少(个位数到几十)、
+  // 用户可见、demo/展示价值高, 理应优先; polymarket 镜像盘数量大(百+)、UMA-pending 本身有自己的
+  // 退避机制保护(不会被无限重试消耗每个 tick 的处理量), 排后面不影响其正确性只影响相对速度。
+  // #33-③ (2026-07-06, lv3rz/k3cnf/dyljb 手动救场后收编·Bettor/NWT co-review): settled_partial_claims
+  // (close_attest 已成功, settle_txid 已非空, 但 claim 循环中途因 landed()假阴性/mempool竞争/僵尸盘等
+  // 原因未跑完)之前完全不在这条 WHERE 里(原来的 settle_txid IS NULL 天然把它排除了)——导致这类盘一旦
+  // 卡住就永远躺在 settled_partial_claims, 需要人工重新调 settleOneMarket() 才会继续(今晚 lv3rz/k3cnf
+  // 都是这样手动接力结完的, 现存 25 个盘卡在这个状态)。settleOneMarket() 内部本来就支持从这个状态正确
+  // resume(见 settleMarketLive() 的 priorWinnerDetails 回放, 复用已有 close_txid 不会重跑 consolidate/
+  // close_attest)——缺的只是让它被 selectRipeMarkets 选中。加一个 OR 分支, 不动原逻辑(未结盘走原路径)。
+  // 🔴 反向结构隔离(2026-07-06 Bettor 推演抓出，开盘前必堵): resolution_rule_spec.zk_native===true
+  // 的市场只该被 ZK 管线(scanReadyZkMarkets/zkCloseTick)处理——老 committee-sig settle 路径不认识
+  // zk_native 字段，若不排除会照常把它捡进来，用 V1 attest 工具(22参 close_attest witness)去打
+  // 一个实际是 PayoutShardV2(26参 close_attest)的 covenant，fail-closed 会反复失败重试(污染
+  // events/浪费 tick，还可能撞 #33 类僵尸状态)。
+  // ⚠ J2 实测(scratch 隔离 DB，非假设): 这条数据库里 resolution_rule_spec 不保证永远是合法 JSON——
+  // 直接用 json_extract(...) IS NOT 1 在遇到畸形 JSON 的行时会让 sqlite 整条 SELECT 抛异常(不是
+  // 该行返回 NULL 那么温和)，会让 selectRipeMarkets() 整体报错、结算 tick 彻底停摆——比不排除
+  // zk_native 市场这个原洞严重得多。改用 json_valid() 先短路判断，非法 JSON 视为"未标记"(不排除，
+  // 走原逻辑，行为不变)，只有合法 JSON 且 zk_native 字段确实是 true 时才排除。
+  const rows = sqlite.prepare(`
+    SELECT * FROM pool_markets
+    WHERE protocol_version = 'v0.7'
+      AND deadline_daa IS NOT NULL
+      AND deadline_daa + ? <= ?
+      AND (
+        (settle_txid IS NULL AND protocol_status IN ('pending_bettors', 'verifying'))
+        OR protocol_status = 'settled_partial_claims'
+      )
+      AND (json_valid(resolution_rule_spec) = 0 OR json_extract(resolution_rule_spec, '$.zk_native') IS NOT 1)
+    ORDER BY (CASE WHEN outcome_market_source = 'kanet_v07' THEN 0 ELSE 1 END) ASC, deadline_daa ASC
+  `).all(FINALITY_BUFFER, currentDaa);
+  const ripe = [];
+  const _floor = _coverageFloor();   // 每 tick 查一次(Bettor 注1: 循环内每行纯算术零 DB 写)
+  let _gated = 0, _gatedUnreachable = 0, _gatedRepeatOffender = 0;
+  for (const m of rows) {
+    if (_leases.has(m.id)) continue;
+    // 🔴 pre-gate 主闸(合卡设计 §3, Bettor 注1 修层): push 进 ripe 前判——不占 MAX_PER_TICK slot,
+    //    桶C 才真解饿死(v1.0 放 attempt 层被 Bettor 实读驳回: gate 盘无 lease 下一 tick 原样再入选)。
+    if (unreachablePreGate(m, currentDaa, _floor)) { _gated++; _gatedUnreachable++; continue; }
+    // 🔴 批量歼灭令(repeat-offender 泛化闸, 见 REPEAT_OFFENDER_THRESHOLD 上方注释): 与 unreachablePreGate
+    //    并列独立闸门(不复用同一函数——判据完全不同: 这个不关心 DAA/floor/gap, 只认"同签名连续耗尽")。
+    if (repeatOffenderGate(m)) { _gated++; _gatedRepeatOffender++; continue; }
+    if (manualHoldGate(m)) { _gated++; continue; }
+    // 🔴 consolidate lockTime gate (partial-shard ShardLeaf 件1: tx.time>=deadline*1000): MTP(pastMedianTime)
+    //   滞后实时 ~2-3min·过早 settle → consolidate TX "input not finalized" rejected (live daemon A/u6ry7 实撞)。
+    //   只在 MTP >= deadline*1000 才 settle (consolidate 才 final)。sealed-only 盘其实不需·但统一 gate 无害(稍延)。
+    if (Number(m.deadline) * 1000 > pmt) continue;
+    try {
+      const { betCount, multiShard, isBshard } = getMarketBets(m.id, sqlite);
+      if (!isBshard || betCount === 0) continue;
+      const logicalBets = sqlite.prepare('SELECT COUNT(*) c FROM pool_bettor_sides WHERE market_id = ?').get(m.id).c;
+      if (logicalBets > 0) continue;   // commingled → skip (cleanliness 闸·settleMarketLive 也会拦)
+      // #49 模块② (2026-07-04): UMA-pending 市场(metadata.uma_pending_since 已设)按退避表判断
+      // 该不该这次 tick 就重新尝试——不改这里的话, daemon 会对每个 UMA-pending 盘每 60 秒 tick 都
+      // 重新尝试判定, 意图"0-2h 每 15 分钟"变成"每 60 秒", 浪费 UMA RPC 调用(NWT review 指出)。
+      if (!_umaBackoffAllowsRetryNow(m)) continue;
+      ripe.push({ market: m, betCount, multiShard });
+      if (ripe.length >= limit) break;
+    } catch (e) { log(`ripe-scan skip ${m.id.slice(-8)}: ${e.message}`); }
+  }
+  if (_gated > 0) log(`[pre-gate] ${_gated} market(s) gated this tick (unreachable=${_gatedUnreachable}[deadline<floor ${_floor} OR walk-exhausted, gap>${PREGATE_MAX_WALK}] + repeat-offender=${_gatedRepeatOffender}[连续${REPEAT_OFFENDER_THRESHOLD}次同签名TRANSIENT耗尽], 零walk/consolidate零slot, 挂账待人工另案)`);
+  return ripe;
+}
+
+// 2026-07-06 J2: ZK-eligible 市场选择 — 全新专属 protocol_status='zk_ready' 值, 跟上面
+// selectRipeMarkets() 的选择条件(pending_bettors/verifying/settled_partial_claims)字符串层面
+// 互斥, 结构性隔离(非逻辑判断)。见 docs/2026-07-06-zk-close-tick-production-wiring-design.md §1。
+// 市场要进这条路径必须被显式标记 zk_ready(不自动推断/不继承其他状态) — 标记动作是独立的、
+// 后续才做的运维/判定步骤, 不在本次范围内。
+async function scanReadyZkMarkets() {
+  return sqlite.prepare("SELECT * FROM pool_markets WHERE protocol_status = 'zk_ready'").all();
+}
+
+// 2026-07-06 J2: zkCloseTick ctx — B1/B2/C1 命门 hook(见 zk-close-builder.mjs 顶部注释)。
+// ⚠ 范围(2026-07-06 J2, NWT/Bettor 二次确认 GREEN, 见频道 15:47-15:49 讨论): 今晚发现 phase1
+// (oracle_attest_verdict 委员 attest 机制) 在代码库里完全不存在(只有设计注释) —— fetchCloseZkContinuation
+// 因此不可能有"真实 phase1 产出"可 fetch, 只能读 market.metadata.zk_continuation 这个**手动模拟**字段
+// (跟今晚一路的手法一致: 手动构造 covenant/gate, 不是走真实committee attest流程)。同样, CloseZk covenant
+// (_j2_closezk_repro3.sil) 只有 zk_close 一个 entrypoint, 没有退款路径 —— escapeRefund 需要新设计一个
+// ZK 版退款 entrypoint(独立于现有 committee-sig 的 cancel_attest, 两个 covenant 不同 entrypoint 集合),
+// 今晚仍是 stub。dispatchUnlockZkClose 是 J1 域的 relay handler(未落码, 真实碰钱 broadcast, 留给下个
+// clean session)。checkLanded/reconcile 是纯读写(查 UTXO / 写 DB), 今晚真实实现。
+const _zkCloseCtx = {
+  scanReadyZkMarkets,
+  // 手动模拟(非真实 phase1): 读 market.metadata.zk_continuation(测试时手动写入该字段模拟"phase1 已产出"),
+  // 格式 { outpoint: {txid, index}, redeemHex, valueSompi }。真实市场没这个字段 → 返回 null(zkClosePhase2
+  // 会 skip, 不会往下走)。
+  fetchCloseZkContinuation: async (market) => {
+    let meta = {}; try { meta = JSON.parse(market.metadata || '{}'); } catch {}
+    return meta.zk_continuation || null;
+  },
+  // 缺件③落地(J1tn 2026-07-08): 真实实现搬进 zk-close-dispatch.mjs(独立可单测, mock ctx 覆盖全部
+  // fail-closed 分支), 这里只做 ctx 绑定(getMarket/getDoneJob 用真实 sqlite, kaspaZk 用同 zk-prove-worker.mjs
+  // 一致的 isolated zk-sdk WASM, relayCall 走本文件既有 relayPost 惯例)。
+  dispatchUnlockZkClose: async (args) => {
+    if (!ZK_SETTLER_RELAY_ID) return { ok: false, error: 'BSHARD_SETTLER_RELAY_ID unset — 无法广播 zk_close' };
+    return _dispatchUnlockZkCloseImpl(args, {
+      getMarket: (marketId) => sqlite.prepare('SELECT metadata FROM pool_markets WHERE id = ?').get(marketId),
+      getDoneJob: (marketId) => sqlite.prepare("SELECT receipt_hex FROM zk_prove_jobs WHERE market_id = ? AND status = 'done' ORDER BY id DESC LIMIT 1").get(marketId),
+      kaspaZk,
+      relayCall: (cmd) => relayPost(ZK_SETTLER_RELAY_ID, cmd),
+    });
+  },
+  // 真实实现: 查目标 UTXO 是否存在(landed = 有对应 UTXO, 复用今晚反复验证过的 rpc.getUtxosByAddresses 模式)。
+  checkLanded: async (txid) => {
+    try {
+      await rpcEnsure();
+      const k = await kaspa();
+      // txid 本身不是地址, 无法直接按地址查 —— 用 kaspa_tx_log(今晚一路验证落链的标准做法, 见
+      // reference-chain-verify-via-relay-check-utxo-landed) 判定这笔 tx 是否已被节点索引确认。
+      const row = sqlite.prepare('SELECT tx_id FROM kaspa_tx_log WHERE tx_id = ?').get(txid);
+      return !!row;
+    } catch (e) { log(`checkLanded(${String(txid).slice(0,12)}) error: ${e.message}`); return false; }
+  },
+  escapeRefund: async () => { throw new Error('TODO: escapeRefund 未实现(ZK covenant 退款 entrypoint 未设计, 下一步独立工作)'); },
+  // 真实实现: LAND 后才调(zkClosePhase2 保证), 写 closed=2 状态语义 + settle_evidence, 复用现有
+  // writeback 惯例(见上面 settleOneMarket 里同款模式), 用独立的 protocol_status 值(zk_settled)
+  // 保持跟 committee-sig 路径的 completed/settled_partial_claims 语义区分, 不冲突。
+  reconcile: async (market, { txid, winner, betsRoot }) => {
+    let meta = {}; try { meta = JSON.parse(market.metadata || '{}'); } catch {}
+    meta.zk_settle_evidence = { settled_by: 'zkCloseTick', close_txid: txid, attested_winner: winner, bets_root: betsRoot, chain_settled: true, settled_at: new Date().toISOString() };
+    sqlite.prepare("UPDATE pool_markets SET protocol_status = 'zk_settled', settle_txid = ?, metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(txid, JSON.stringify(meta), market.id);
+  },
+};
+
+function _writeZkCloseTickErrorEvent(message) {
+  try {
+    sqlite.prepare(`
+      INSERT INTO events (id, event_scope, event_type, source, level, summary, payload_json, created_at)
+      VALUES (?, 'system', 'zk_close_tick_error', 'bshard-settle-daemon', 'warn', ?, ?, datetime('now'))
+    `).run(randomUUID(), `zkCloseTick error (不影响 committee-sig 结算路径): ${message}`, JSON.stringify({ message }));
+  } catch (e) { log(`events insert fail for zkCloseTick error (non-fatal): ${e.message}`); }
+}
+
+// #G5-5a (2026-07-04, task#33 §2.2 找到的原始证据基础): 瞬态 RPC/consolidate 查询有界重试。
+//   #33 全量重放 ALERT 日志分类过这类失败: "plan threw (fetch failed)"(3例) + "build fail: UTXO
+//   not found"(5例, 3例仍卡 settle_failed) —— 都是 RPC/网络层瞬时问题, 不是业务/安全判定, 重试大概率
+//   自愈(节点还没索引到刚广播的 UTXO / 一次性网络抖动)。白名单严格: 只匹配这几类瞬态错误签名, 不匹配
+//   ABSTAIN(oracle 判定拿不到, 重试无意义, 走 re-judge 通道 G7)/climb-fail/round-trip-fail(数据问题非
+//   时序问题)/needs_rolling(架构上限)/enforce mismatch(安全判定, 绝不重试掩盖)。
+const TRANSIENT_RE = /UTXO not found|fetch failed|ECONNREFUSED|RPC connect timeout|not synced|no working Kaspa RPC|ETIMEDOUT|network.*(timeout|error)|no land\b|not landed/i;
+// ⚠ 已知权衡(非阻塞,记录不隐藏): "not landed" 类重试有极小窗口——若第1次的 close_attest 实际已上链
+// 只是 verifyClosedLanded 假阴性(见 #33 NWT 发现的 verifyClaimLanded 32s 窗口同类问题), 重试会再发一笔
+// close_attest。covenant 自身 require(closed==0) 是真安全网(第2笔在链上被拒·非双花/双付), 只是浪费一笔
+// fee + alert 噪音。可接受: fail-safe 优于 fail-open, 且此重试跟 §4.2 resume 引擎(读链上 tip 而非盲重试)
+// 是互补关系, 不是替代——真正的幂等重试属于 resume 引擎范畴(排 #21-5b, 见 task33 设计文档)。
+const RETRY_MAX_ATTEMPTS = 3;
+const RETRY_BASE_DELAY_MS = 2000;
+const _sleepRetry = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function settleOneMarket(marketId) {
+  // #49 模块① (2026-07-04, docs/2026-07-04-daemon-error-handling-modular-design.md v2):
+  // 分类需要 market 行(BUSINESS_PENDING 判定要看 outcome_market_source)——读一次, 便宜(单行 PK 查询),
+  // 供本函数末尾分类使用。注意: 这是"读取失败原因用的辅助信息", 不是结算逻辑本身, 读不到也不阻断。
+  const marketRow = sqlite.prepare('SELECT outcome_market_source FROM pool_markets WHERE id = ?').get(marketId);
+  let lastResult = null;
+  for (let attempt = 1; attempt <= RETRY_MAX_ATTEMPTS; attempt++) {
+    // consolidateAllShards 内部可能直接 throw(非 {ok:false} 返回形态)——统一收口成同形状, 否则瞬态异常
+    // (如 landed() polling 超时/transfer RPC 失败)会绕过下面的白名单分类直接冒泡崩掉整个 tick。
+    try { lastResult = await _settleOneMarketAttempt(marketId); }
+    catch (e) { lastResult = { ok: false, reason: e.message || String(e), _rawError: e }; }
+    if (lastResult.ok) return lastResult;
+    const reason = String(lastResult.reason || '');
+    if (!TRANSIENT_RE.test(reason)) break;   // non-transient (business/security/code-bug) → fail fast, classify below, no more retry
+    if (attempt === RETRY_MAX_ATTEMPTS) break;
+    const delay = RETRY_BASE_DELAY_MS * attempt;   // 2s, 4s (linear backoff, bounded — this is a settle daemon tick, not a hot loop)
+    log(`${marketId.slice(-8)} 瞬态失败(${attempt}/${RETRY_MAX_ATTEMPTS}): ${reason.slice(0, 80)} — 退避 ${delay}ms 重试`);
+    await _sleepRetry(delay);
+  }
+  // #49 模块①: 分类最终失败原因, 附在返回值里供 settleDaemonTick 决定要不要覆盖 protocol_status。
+  //   注意: lastResult.reason 是字符串(经过 `plan throw: ${e.message}` 这类包装), classifyFailure
+  //   的 instanceof 检查用 lastResult._rawError(若有, 未被包装过的原始异常对象); 若 _settleOneMarketAttempt
+  //   走的是正常 return {ok:false, reason} 路径(非 throw), 没有原始异常对象, classifyFailure 退化成
+  //   只靠字符串正则判断(仍然安全, 只是 instanceof 那层结构化判定用不上)。
+  const classification = classifyFailure(lastResult._rawError || new Error(String(lastResult.reason || '')), marketRow, TRANSIENT_RE);
+  if (String(lastResult.reason || '').match(TRANSIENT_RE)) {
+    log(`${marketId.slice(-8)} 瞬态重试耗尽(${RETRY_MAX_ATTEMPTS}次): ${String(lastResult.reason || '').slice(0, 80)} — 分类=${classification.type}`);
+    // 批量歼灭令(见 REPEAT_OFFENDER_THRESHOLD 上方注释): 连续同签名 tick 级耗尽计数, 达阈值反应式 gate。
+    try {
+      const sig = _reasonSignature(lastResult.reason);
+      const row = sqlite.prepare('SELECT metadata FROM pool_markets WHERE id = ?').get(marketId);
+      let meta = {}; try { meta = JSON.parse(row?.metadata || '{}'); } catch {}
+      const streak = (meta.repeat_failure_sig === sig ? (meta.repeat_failure_streak || 0) : 0) + 1;
+      if (streak >= REPEAT_OFFENDER_THRESHOLD) {
+        sqlite.prepare(`UPDATE pool_markets SET metadata = json_set(json_set(COALESCE(metadata, '{}'), '$.repeat_failure_sig', ?), '$.repeat_offender_confirmed', json('true')) WHERE id = ?`).run(sig, marketId);
+        log(`🔴 [repeat-offender] ${marketId.slice(-8)} 连续 ${streak} 次同签名(${sig})TRANSIENT耗尽, 标记 repeat_offender_confirmed, 后续 tick gate(挂账待人工处置实际卡死原因)`);
+        try {
+          sqlite.prepare(`
+            INSERT INTO events (id, event_scope, event_type, source, level, summary, payload_json, created_at)
+            VALUES (?, 'system', 'repeat_offender_confirmed', 'bshard-settle-daemon', 'warn', ?, ?, datetime('now'))
+          `).run(randomUUID(), `market=${String(marketId).slice(-8)} 连续 ${streak} 次同签名TRANSIENT耗尽(${sig}), gate, 处置另案`, JSON.stringify({ marketId, streak, sig, fullReason: String(lastResult.reason || '').slice(0, 300) }));
+        } catch (evErr) { log(`repeat-offender events insert fail (non-fatal): ${evErr.message}`); }
+      } else {
+        sqlite.prepare(`UPDATE pool_markets SET metadata = json_set(json_set(COALESCE(metadata, '{}'), '$.repeat_failure_sig', ?), '$.repeat_failure_streak', ?) WHERE id = ?`).run(sig, streak, marketId);
+      }
+    } catch (e) { log(`repeat-offender streak write fail (non-fatal): ${e.message}`); }
+  }
+  return { ...lastResult, classification };
+}
+
+// per-market: consolidate (if needed) → settle → writeback。failure → settle_failed flag。
+async function _settleOneMarketAttempt(marketId) {
+  _k = await kaspa();   // ensure kaspa-wasm loaded before sync p2sh/p2pk helpers (direct-call + tick safety)
+  if (!_pkMap) await buildPkMap();   // ensure committee pk→relay map (direct-call safety; tick also builds it)
+  const ctx = buildCtx();
+  const ps = sqlite.prepare('SELECT * FROM payout_shards WHERE logical_market_id = ?').get(marketId);
+  if (!ps) { ctx.alert(marketId, 'no payout_shards row'); return { ok: false, reason: 'no PS' }; }
+  // #48 regression fix (J2 2026-07-04 co-verify 抓到, 真实撞过一次): consolidateAndBuildPsState 抽取时
+  // 把 market 变量的声明也一起搬进了那个 helper 的局部作用域——但下方 writeback(market.metadata)和
+  // shadow ledger(收窄 { market, ... })两处仍在【本函数】里用 market, 抽取后变成 ReferenceError。危险处:
+  // 这个错发生在 settleMarketLive 成功 + writeback 成功【之后】(shadow ledger 那行), 被外层 G5-5a 重试
+  // 包装器当作整体失败, 把刚写对的 protocol_status 覆盖成 settle_failed——DB 状态跟链上真相(已结算成功)
+  // 完全对不上, 比"没结算"更危险(会让 operator 误以为要重新结算一个其实已经结完的盘)。
+  const market = sqlite.prepare('SELECT * FROM pool_markets WHERE id = ?').get(marketId);
+
+  // bshard recapture 移植(2026-07-17,治本卡①第一条,docs/2026-07-17-bshard-recapture-side-lock-daa-
+  // port-design.md,Bettor方向审+NWT红队双GREEN b615caee): bshard 市场的 pool_bettor_sides 分散在各
+  // shard(market_shards.shard_market_id),不像 v0.6 单表单 market_id——每个 shard 各调一次。镜像
+  // pool-market-settler.js:770 的调用点+日志形状,复用同一份 recaptureSideLockDaaForMarket(零重复
+  // 实现,只是让已存在的机制在 bshard 这条路也被触发)。non-fatal: 失败/部分回填不阻塞本次结算尝试,
+  // 真正无法解出的 bet 仍走既有 fail-loud(NULL 留原样)。
+  try {
+    const shardIds = sqlite.prepare('SELECT shard_market_id FROM market_shards WHERE logical_market_id = ?').all(marketId).map(r => r.shard_market_id);
+    const targets = shardIds.length ? shardIds : [marketId];   // no-shard bshard edge case falls back to logical id itself
+    let totalRecaptured = 0, totalRemaining = 0;
+    for (const sid of targets) {
+      const rc = await recaptureSideLockDaaForMarket(sid);
+      totalRecaptured += rc.recaptured; totalRemaining += rc.remaining;
+    }
+    if (totalRecaptured > 0) log(`[bshard-recapture] market=${marketId.slice(-8)} filled ${totalRecaptured} mempool-NULL-daa bets from chain (remaining NULL ${totalRemaining})`);
+  } catch (rcErr) {
+    log(`[bshard-recapture] market=${marketId.slice(-8)} fail (non-fatal, settlement proceeds/fails on its own merits): ${rcErr.message}`);
+  }
+
+  // 0. 🔴 pre-flight plan (J1 covenant gate): winners≤1024 + plan.ok 验在【动钱前】。
+  //   >1024 → buildPayoutRoot 抛 → 这里 catch → skip·**不 consolidate 不动钱**(避免半结·钱留 ShardLeaf 安全)。
+  // resume-fix (2026-07-11, docs/2026-07-11-backlog-markets-resume-fix-and-cleanup-design.md §1):
+  // 已 attest 过的市场(metadata.settle_evidence.close_txid 存在)优先用 deriveResumePlanFromEvidence
+  // (零 judgeWinDir/committee VRF/getBlockAtDaa)——这个 pre-flight 只是为了 winners≤1024 gate, 不需要
+  // computeSettlePlan 完整重新 judge+选委员那一套(settleMarketLive 自己下游也会走同一份 resume-aware
+  // 逻辑)。fail-closed: derive 不 ok 就回退 computeSettlePlan, 原样撞 MAX_WALK 是可见失败, 不是"将就用"。
+  let plan;
+  try {
+    let priorMeta = {}; try { priorMeta = JSON.parse(market.metadata || '{}'); } catch {}
+    plan = priorMeta.settle_evidence?.close_txid ? deriveResumePlanFromEvidence(marketId, ctx) : { ok: false };
+    if (!plan.ok) {
+      // 诊断可见性(合卡 Fix-A, Bettor #gukbiu 副发现(a)): derive 拒绝原因落 log 不再静默。
+      if (priorMeta.settle_evidence?.close_txid) log(`[resume-skip] ${marketId.slice(-8)}: ${plan.reason} → 回退 computeSettlePlan`);
+      // pre-gate 纵深(合卡设计 §3, 主闸在 selectRipeMarkets——此处防其它入口绕过 selection 直调本函数)。
+      // currentDaa 近似 = spc_daa_index MAX(本地表零 RPC, 滞后 tip 分钟级 vs 250k 判据余量 = 无影响)。
+      const _curApprox = sqlite.prepare('SELECT MAX(daa_score) m FROM spc_daa_index').get()?.m;
+      if (_curApprox != null && unreachablePreGate(market, _curApprox, _coverageFloor())) {
+        return { ok: false, reason: `unreachable_gated (纵深 pre-gate: deadline<coverage-floor OR 实测 walk-exhausted, 且 gap>${PREGATE_MAX_WALK}, 零walk skip)` };
+      }
+      plan = await computeSettlePlan(marketId, ctx);
+    }
+  } catch (e) {
+    const rolling = /1024|rolling/i.test(e.message);
+    // 29-aukqt 事故补丁(见 unreachablePreGate 上方注释): 实测 getBlockAtDaa MAX_WALK 耗尽 → 记反应式
+    // backoff marker, 下一 tick 的 pre-gate 就能拦住, 不用每 60-180s 重付一次 ~2min 沉没代价的空转。
+    if (/backward walk exhausted MAX_WALK/i.test(e.message)) {
+      try {
+        sqlite.prepare(`UPDATE pool_markets SET metadata = json_set(COALESCE(metadata, '{}'), '$.walk_exhausted_confirmed', json('true')) WHERE id = ?`).run(marketId);
+      } catch (metaErr) { log(`walk_exhausted marker write fail (non-fatal): ${metaErr.message}`); }
+    }
+    ctx.alert(marketId, `plan threw (${rolling ? '>1024 winner·待 rolling payout-shard task#18' : e.message}) — skip·不动钱`);
+    return { ok: false, reason: rolling ? 'needs_rolling' : `plan throw: ${e.message}`, needsRolling: rolling };
+  }
+  if (!plan.ok) { ctx.alert(marketId, `plan not ok: ${plan.reason} — skip·不动钱`); return { ok: false, reason: plan.reason }; }
+  if (plan.winners && plan.winners.length > 1024) { ctx.alert(marketId, `${plan.winners.length} winners >1024 — skip·待 rolling`); return { ok: false, reason: 'needs_rolling', needsRolling: true }; }
+
+  // 1-2. consolidate(如需要) + psState 构造 — 抽成可复用 helper (J2 2026-07-04, ABSTAIN 退款路复用同一步骤,
+  //   见 cancelMarketLive caller: consolidate 判断/psState 形状跟结算路径完全一致, 只是之后走 cancel_attest 非 close_attest)。
+  const psState = await consolidateAndBuildPsState(marketId, ps, ctx);
+
+  // 3. settle (close + threaded claim·已证)
+  const ctx2 = { ...ctx, psState: () => psState };
+  const r = await settleMarketLive(marketId, ctx2);
+  if (!r.ok || !r.closeTxid) { ctx.alert(marketId, `settle fail: ${r.reason || 'no closeTxid'}`); return { ok: false, reason: r.reason, closeTxid: r.closeTxid }; }
+
+  // 4. writeback (task#17·status + settle_txid + settle_evidence)
+  //    #task33 (2026-07-03·NWT GREEN): completed 不变量 = 每个 winner 都有链上确认(received===true 且无 error)的
+  //    claim TX。r.complete 由 settleMarketLive 精确计算(claims.length===plan.winners.length 且全部 received && !error)。
+  //    不完整 → settled_partial_claims(可重入重试队列, 见 §4.2)；其中若含 climb-fail/round-trip-fail(数据/编码问题
+  //    非时序问题) → needs_manual_attribution(独立终态, 不进自动重试, 见 §4.2.1 🟡风险-1)。
+  //    evidence.winners/claim_txids 只认真到账(txId && received===true && !error)——旧字段把失败-但-带-txId 的条目
+  //    也计入是本 bug 产物, 不再重蹈(Bettor co-verify 指正)。
+  const newStatus = r.complete ? 'completed' : (r.needsManualAttribution ? 'needs_manual_attribution' : 'settled_partial_claims');
+  try {
+    const allClaims = r.claims || [];
+    const landedClaims = allClaims.filter(c => c.txId && c.received === true && !c.error);
+    // 🔴 2026-07-20 07:19 修复(J2 坐实, 85fit resume 卡死真根因): evidence 是每 tick 全新对象、整体替换
+    //   (非 merge)——之前没有 consolidated_pool 字段, 每次 writeback 都把上一次手动/正确写入的 consolidated_pool
+    //   静默冲掉。下一 tick resume 时 priorEvidence?.consolidated_pool 读到 undefined, 摔回公式 fallback
+    //   (registered stake 公式, 跟真实链上 baked 值可以差出孤儿部分), 续接 covenant 地址算错("UTXO not found")。
+    //   r.consolidatedPool 由 settleMarketLive 往外传(见 bshard-auto-settler.mjs 配套修复)——fresh-close tick
+    //   有真实 live-probe 过的值, resume tick 有 priorEvidence 传进去的值, 全程贯穿 carry-forward 不再丢。
+    const evidence = {
+      settled_by: 'bshard-settle-daemon', close_txid: r.closeTxid, payout_root: r.plan?.payoutRoot,
+      consolidated_pool: r.consolidatedPool ?? null,
+      winners: landedClaims.length, claim_txids: landedClaims.map(c => c.txId),
+      // #DM-UI-gap (NWT 2026-07-04 抓: my-positions 靠 v0.6 metadata.phase2_winner 判赢输, bshard 从没写过
+      // 这字段·所有 bshard/世界杯盘结算后用户 /mybets 看不到"你赢了/输了"): 补 per-bettor 明细(pk→{amount,
+      // txId}), 供 my-positions 直接按 bettorPk 匹配判赢(landedClaims 已链验 received===true, 不用再反查
+      // kaspa_tx_log)。winDir 一并存(哪个方向赢了, 没赢的 bettor 靠这个判"你输了"非"待结算")。
+      winner_details: landedClaims.map(c => ({ pk: c.pk, amount: c.amount, txId: c.txId })),
+      win_direction: r.plan?.winDir ?? null,
+      expected_winners: r.plan?.winners?.length ?? null, attempted: allClaims.length, complete: !!r.complete,
+      chain_settled: true, settled_at: new Date().toISOString(),
+    };
+    let meta = {}; try { meta = JSON.parse(market.metadata || '{}'); } catch {}
+    // 🔴 #28 P1(2026-07-21, J2·J1 state序列化核确认无遗漏, 待 NWT diff 审): preserve-merge 非 replace——
+    //   上面 evidence 字面量枚举的 key 本 tick 永远 fresh 覆盖(spread 顺序保证), 但任何不在这个字面量里的
+    //   旧字段(历史手写/未来新增字段)不再被整键覆盖冲掉。堵住的是"每 tick 全新对象"这个通用坑本体
+    //   (85fit 当晚 consolidated_pool 丢失是这个坑的第一个受害字段, babdaed3 只加了字段本身, 没改这行)。
+    meta.settle_evidence = { ...(meta.settle_evidence || {}), ...evidence };
+    sqlite.transaction(() => {
+      sqlite.prepare("UPDATE pool_markets SET protocol_status = ?, settle_txid = ?, metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(newStatus, r.closeTxid, JSON.stringify(meta), marketId);
+      if (r.complete) sqlite.prepare("UPDATE market_shards SET status = 'settled' WHERE logical_market_id = ?").run(marketId);
+    })();
+  } catch (e) {
+    // #daemon-audit-② (NWT 2026-07-04 红队审计抓到): 原来这里只 log warning 就吞掉, 函数照样往下走到
+    // 最后 return{ok:true}——如果 writeback 这个 DB UPDATE 本身失败(比如 DB 锁), daemon 会**误报成功**,
+    // 但 DB 里 protocol_status 其实还停在 verifying(既不是 completed 也不是 settle_failed, 没人会去查
+    // 的诡异中间态)。链上钱是安全的(settleMarketLive 已经成功), 但这个"看起来没事但其实卡住"的假信号
+    // 比明确的 settle_failed 更危险(后者至少有 KANet-UI 的告警 monitor 能发现)。改成: 返回失败, 让外层
+    // G5-5a 重试(retry 时 settleMarketLive 会因为链上已 closed 而快速/安全地再失败一次, 最终落地 settle_
+    // failed——可见、可告警, 好过静默卡死)。
+    log(`${marketId.slice(-8)} 🔴 writeback FAIL: ${e.message} (on-chain settle 已成功但 DB 没写进去, close=${r.closeTxid.slice(0, 12)} — 不再静默吞, 走失败路径让外层能看见/重试)`);
+    return { ok: false, reason: `writeback fail: ${e.message}`, closeTxid: r.closeTxid };
+  }
+  log(`${r.complete ? '✅' : '🟠'} ${marketId.slice(-8)} ${newStatus} close=${r.closeTxid.slice(0, 12)} winners=${(r.claims || []).filter(c => c.txId && c.received === true && !c.error).length}/${r.plan?.winners?.length ?? '?'}`);
+
+  // 📒 影子台账 (#26 自我进化·J1·Owner 2026-06-30): 记"我们 oracle 独立判定 vs 权威判定(plan.winDir·已结钱)"。
+  //   🔴 BETTOR 守门铁律1: **纯记录·永不碰结算**——settle 已完成(上方 writeback)·本块吞所有错·绝不阻断 return。
+  //   plan.winDir = computeSettlePlan 实际用于结算的权威判定(polymarket→UMA / ESPN→judgeLine)·复用不重判。
+  //   our_oracle 当前多为 NULL(领域判 registry 空=路线图)·NWT 滚动 registerDomainJudge 后真对比 materialize。
+  //   🟡 J2 forward-looking 守门: **fire-and-forget·不在 settle 路 await**——即便 NWT 域判做慢/挂的网络调用,
+  //   也零拖延结算(record 内部 per-judge timeout 8s 兜底)。把"shadow 永不碰结算"延伸到"永不拖时延"。
+  // #daemon-audit-① (NWT 2026-07-04 红队审计抓到): 原来这行裸调用完全靠 recordShadowJudgment 内部"永不
+  // throw"的注释承诺(belt-and-suspenders 是信任假设, 不是结构性保证)——万一以后有人改内部逻辑不小心引入
+  // 同步 throw(比如访问了 market 或其它变量的属性但那个变量是 undefined, 正是 #48 撞过的那种坑), 这行本身
+  // 没有独立 try/catch 兜底, 会重演#48"结算成功之后的收尾代码抛错·被外层当整体失败"那一幕。这里加一层不
+  // 依赖被调函数承诺的独立防护。
+  try {
+    if (plan.winDir === 0 || plan.winDir === 1) {
+      recordShadowJudgment(sqlite, { market, authorityWinDir: plan.winDir, settleTxid: r.closeTxid })
+        .then((s) => { if (s.recorded) log(`📒 shadow ${marketId.slice(-8)}: ${s.agree == null ? '∅无独立源(路线图)' : s.agree ? '✓我方一致' : '✗我方分歧'}${s.reason ? ' · ' + s.reason : ''}`); })
+        .catch((e) => log(`📒 shadow ${marketId.slice(-8)} skip (不影响结算): ${String(e?.message || e).slice(0, 80)}`));   // 内部已永不throw·belt-and-suspenders
+    }
+  } catch (e) { log(`📒 shadow ${marketId.slice(-8)} sync throw caught (不影响结算, 独立防护生效): ${String(e?.message || e).slice(0, 80)}`); }
+
+  return { ok: true, closeTxid: r.closeTxid, claims: r.claims };
+}
+
+export async function settleDaemonTick() {
+  if (_running) { log('prev tick still running·skip'); return; }
+  _running = true;
+  const _tickDiagStart = Date.now();   // 诊断埋点(2026-07-13, Bettor #iynqdt·observe-only), 查完即删
+  try {
+    _k = await kaspa(); await buildPkMap();
+    const currentDaa = await chainReader.getCurrentDaaScore();
+    // 🔴 2026-07-21(Bettor #uwq7t2 派工, J2 根因卡·防护对称性): 与 getUtxos(:79) 同款 withTimeout+
+    // disconnect 自愈——原来这一行直接 await _rpc.getBlockDagInfo() 没有超时, 若底层连接进入"僵尸"
+    // 状态(WS 未触发 close/error, 但请求也永不回应), await 会挂住整个 async 函数, 永远到不了下面的
+    // try/catch/finally, _running(:930, 早于 try 设 true)就会永久卡 true——之后每次 cron interval
+    // 都会在 :929 打 skip 日志、tick 却再也跑不动, 只有重启进程能清(_running 是内存变量, 非持久化)。
+    // 未 100% 坐实这就是今天两次 RpcClient 劣化(07:35/14:48)的根因(停摆窗口日志已被重启覆盖, 无法
+    // 回溯确认), 但这个不对称本身就是缺陷: 同一个 _rpc 对象, 一条调用路径(getUtxos)有超时+自愈,
+    // 另一条(这里)没有——不管是不是这次的病根, 都该补齐。
+    await rpcEnsure();
+    let dagInfo;
+    try { dagInfo = await withTimeout(_rpc.getBlockDagInfo(), 12000, 'getBlockDagInfo'); }
+    catch (e) { try { await _rpc?.disconnect().catch(() => {}); } catch {} _rpc = null; throw e; }
+    const pmt = Number(dagInfo.pastMedianTime);   // MTP·consolidate lockTime(deadline*1000) final gate
+
+    // 2026-07-06 J2: ZK settle tick — 独立于下面的 committee-sig ripe 处理, 必须放在
+    // "if (ripe.length === 0) return" 早退**之前**(否则 committee-sig 市场为 0 时这条新路径永远
+    // 跑不到, 见 docs/2026-07-06-zk-close-tick-production-wiring-design.md §4.1 隔离性验证)。
+    // 独立 try-catch: ZK 路径出错既不静默吞掉(写 events 表, Bettor 要求①)也不影响下面
+    // committee-sig 的 ripe 处理循环。kill switch(ZK_CLOSE_TICK_ENABLED, Bettor 要求②)默认 OFF。
+    if (ZK_CLOSE_TICK_ENABLED) {
+      try { await zkCloseTick(_zkCloseCtx); }
+      catch (e) { log(`zkCloseTick error(不影响 committee-sig 路径): ${e.message}`); _writeZkCloseTickErrorEvent(e.message); }
+    }
+
+    const ripe = selectRipeMarkets(currentDaa, pmt, MAX_PER_TICK);
+    if (ripe.length === 0) return;
+    log(`tick: ${ripe.length} ripe market(s) (MAX_PER_TICK=${MAX_PER_TICK})`);
+    for (const { market, betCount, multiShard } of ripe) {
+      if (_leases.has(market.id)) continue;
+      _leases.add(market.id);
+      try {
+        log(`settling ${market.id.slice(-8)} betCount=${betCount} shards=${multiShard || 1}`);
+        const r = await settleOneMarket(market.id);
+        if (!r.ok) {
+          // #49 模块① (2026-07-04, NWT 抓到的关键接线缺口·实现清单第一个验证点): 原来这里
+          // 无条件写 settle_failed, 完全不看 classifyFailure 算出的分类——分类器写了但没接通,
+          // 等于没做(#25/KI-49 同源模式)。现在: CODE_BUG/UNCLASSIFIED/TRANSIENT(重试已耗尽)
+          // 都 shouldKeepStatus===true, 跳过 UPDATE(不武断覆盖状态), 只走告警; 只有真正确认的
+          // 失败(needsRolling 或分类结果不要求保留状态)才改 protocol_status。
+          // #49 模块②: BUSINESS_PENDING(UMA ABSTAIN)不查 shouldKeepStatus(它总是走独立的
+          // scheduleUmaRejudge 判断——退避未到/genuine-timeout 未到 = 保留, 真超时 = 转 settle_failed)。
+          if (!r.needsRolling && r.classification?.type === 'BUSINESS_PENDING') {
+            scheduleUmaRejudge(market.id, market); // 内部已 log + 决定是否 timeout, writeback metadata
+            continue; // 跳过下面的 settle_failed 通用写入路径, 已由 scheduleUmaRejudge 处理完
+          }
+          const flag = r.needsRolling ? 'needs_rolling' : 'settle_failed';   // needs_rolling=>1024·待 task#18·非错
+          const keep = !r.needsRolling && r.classification && shouldKeepStatus(r.classification);
+          if (keep) {
+            log(`🟡 ${market.id.slice(-8)} 失败但保留状态(分类=${r.classification.type}, 不误标 settle_failed): ${r.reason}`);
+          } else {
+            try { sqlite.prepare('UPDATE pool_markets SET protocol_status = ? WHERE id = ?').run(flag, market.id); } catch {}
+            log(`🔴 ${market.id.slice(-8)} → ${flag} (operator review): ${r.reason}`);
+          }
+        }
+      } catch (e) {
+        // 同款分类(这里的 e 是 settleOneMarket 本身抛出的意外异常, 不是 _settleOneMarketAttempt 内部
+        // 已经收口过的 {ok:false} 形态——理论上少见, 但同样不该无条件武断标 settle_failed)。
+        const classification = classifyFailure(e, market, TRANSIENT_RE);
+        if (shouldKeepStatus(classification)) {
+          log(`🟡 ${market.id.slice(-8)} settle threw 但保留状态(分类=${classification.type}): ${e.message}`);
+        } else {
+          log(`🔴 ${market.id.slice(-8)} settle threw: ${e.message}`);
+          try { sqlite.prepare("UPDATE pool_markets SET protocol_status = 'settle_failed' WHERE id = ?").run(market.id); } catch {}
+        }
+      } finally { _leases.delete(market.id); }
+    }
+  } catch (e) { log(`tick error: ${e.message}`); }
+  finally {
+    log(`[diag:tick-duration] settleDaemonTick ms=${Date.now() - _tickDiagStart}`);
+    _running = false;
+  }
+}
+
+export function startSettleDaemonCron() {
+  if (!ENABLED) { log('disabled (SETTLE_DAEMON_ENABLED!=1)·not starting'); return; }
+  if (_timer) return;
+  log(`starting·tick=${TICK_MS}ms·MAX_PER_TICK=${MAX_PER_TICK}·feeRelay=${FEE_RELAY_ID.slice(0, 8)}`);
+  _timer = setInterval(() => { settleDaemonTick().catch(e => log(`tick uncaught: ${e.message}`)); }, TICK_MS);
+  settleDaemonTick().catch(e => log(`startup tick: ${e.message}`));   // immediate first tick
+}
+export function stopSettleDaemonCron() { if (_timer) { clearInterval(_timer); _timer = null; } }
+async function ensureReady() { _k = await kaspa(); if (!_pkMap) await buildPkMap(); }
+
+// ── (b)(c) 2026-07-09 J2: zkCloseTickV2 / claimAutonomousTick cron 装配 ──
+// docs/2026-07-09-zk-autonomy-three-parts-design.md — 各自独立 kill switch(默认 OFF, Bettor 注4: 开关=配置
+// 变更, 走重启窗+ledger记账+Bettor/NWT双签, 不是普通代码合并)、独立 timer(跟 T2b 卡2 bshardCloseSubmitV2Tick
+// 同款风格, 不塞进 settleDaemonTick——两条新 tick 跟 committee-sig ripe 处理/旧 zkCloseTick 骨架完全独立)。
+const ZK_CLOSE_TICK_V2_ENABLED = process.env.ZK_CLOSE_TICK_V2_ENABLED === '1';
+const ZK_CLAIM_TICK_ENABLED = process.env.ZK_CLAIM_TICK_ENABLED === '1';
+const ZK_CLOSE_TICK_V2_MS = parseInt(process.env.ZK_CLOSE_TICK_V2_MS, 10) || 30000;
+const ZK_CLAIM_TICK_MS = parseInt(process.env.ZK_CLAIM_TICK_MS, 10) || 30000;
+
+async function _checkLandedViaRelay(address, txid, minDepth = 20) {
+  if (!address || !txid) return false;
+  for (let i = 0; i < 30; i++) {
+    try {
+      const j = await relayPost(ZK_SETTLER_RELAY_ID, { type: 'check_utxo_landed', address, txid, minDepth });
+      if (j.landed || j.found) return true;
+    } catch { /* transient, retry */ }
+    await sleep(3000);
+  }
+  return false;
+}
+
+function _zkCloseTickV2Ctx() {
+  return {
+    dispatchUnlockZkClose: async (args) => {
+      if (!ZK_SETTLER_RELAY_ID) return { ok: false, error: 'BSHARD_SETTLER_RELAY_ID unset — 无法广播 zk_close' };
+      return _dispatchUnlockZkCloseImpl(args, {
+        getMarket: (marketId) => sqlite.prepare('SELECT metadata FROM pool_markets WHERE id = ?').get(marketId),
+        getDoneJob: (marketId) => sqlite.prepare("SELECT receipt_hex FROM zk_prove_jobs WHERE market_id = ? AND status = 'done' ORDER BY id DESC LIMIT 1").get(marketId),
+        kaspaZk,
+        relayCall: (cmd) => relayPost(ZK_SETTLER_RELAY_ID, cmd),
+      });
+    },
+    checkLanded: _checkLandedViaRelay,
+  };
+}
+
+function _claimAutonomousCtx() {
+  return {
+    relayCall: (cmd) => relayPost(ZK_SETTLER_RELAY_ID, cmd),
+    checkLanded: _checkLandedViaRelay,
+    mintFeeUtxo,
+    p2shAddr,
+    p2pkAddr,
+  };
+}
+
+let _zkCloseV2Timer = null;
+export function startZkCloseTickV2Cron() {
+  if (!ZK_CLOSE_TICK_V2_ENABLED) { log('zkCloseTickV2 disabled (ZK_CLOSE_TICK_V2_ENABLED!=1)·not starting'); return; }
+  if (_zkCloseV2Timer) return;
+  if (!ZK_SETTLER_RELAY_ID) { log('zkCloseTickV2 NOT starting — BSHARD_SETTLER_RELAY_ID unset'); return; }
+  log(`zkCloseTickV2 starting·tick=${ZK_CLOSE_TICK_V2_MS}ms`);
+  _zkCloseV2Timer = setInterval(() => { zkCloseTickV2(_zkCloseTickV2Ctx()).catch(e => log(`zkCloseTickV2 uncaught: ${e.message}`)); }, ZK_CLOSE_TICK_V2_MS);
+}
+export function stopZkCloseTickV2Cron() { if (_zkCloseV2Timer) { clearInterval(_zkCloseV2Timer); _zkCloseV2Timer = null; } }
+
+let _claimTickTimer = null;
+export function startClaimAutonomousTickCron() {
+  if (!ZK_CLAIM_TICK_ENABLED) { log('claimAutonomousTick disabled (ZK_CLAIM_TICK_ENABLED!=1)·not starting'); return; }
+  if (_claimTickTimer) return;
+  if (!ZK_SETTLER_RELAY_ID) { log('claimAutonomousTick NOT starting — BSHARD_SETTLER_RELAY_ID unset'); return; }
+  log(`claimAutonomousTick starting·tick=${ZK_CLAIM_TICK_MS}ms`);
+  _claimTickTimer = setInterval(() => { claimAutonomousTick(_claimAutonomousCtx()).catch(e => log(`claimAutonomousTick uncaught: ${e.message}`)); }, ZK_CLAIM_TICK_MS);
+}
+export function stopClaimAutonomousTickCron() { if (_claimTickTimer) { clearInterval(_claimTickTimer); _claimTickTimer = null; } }
+
+// ── 第五件(zkHandoffAutonomousTick) 2026-07-11 J2: docs/2026-07-11-zk-autonomy-fifth-piece-
+// handoff-broadcast-design.md(Bettor+NWT 双 GREEN #gljs86.2)。同 (b)(c) 风格: 独立 tick + 独立
+// kill switch(默认 OFF, 开关=配置变更, 走重启窗+ledger记账+Bettor/NWT双签)、独立 timer。
+const ZK_HANDOFF_TICK_ENABLED = process.env.ZK_HANDOFF_TICK_ENABLED === '1';
+const ZK_HANDOFF_TICK_MS = parseInt(process.env.ZK_HANDOFF_TICK_MS, 10) || 30000;
+
+function _zkHandoffTickCtx() {
+  return {
+    settlerRelayId: ZK_SETTLER_RELAY_ID,
+    buildZkHandoffRequestV2: ({ marketId, settlerRelayId }) => buildZkHandoffRequestV2(marketId, { settlerRelayId, dryRun: false }),
+    checkLanded: _checkLandedViaRelay,
+  };
+}
+
+let _zkHandoffTickTimer = null;
+export function startZkHandoffAutonomousTickCron() {
+  if (!ZK_HANDOFF_TICK_ENABLED) { log('zkHandoffAutonomousTick disabled (ZK_HANDOFF_TICK_ENABLED!=1)·not starting'); return; }
+  if (_zkHandoffTickTimer) return;
+  if (!ZK_SETTLER_RELAY_ID) { log('zkHandoffAutonomousTick NOT starting — BSHARD_SETTLER_RELAY_ID unset'); return; }
+  log(`zkHandoffAutonomousTick starting·tick=${ZK_HANDOFF_TICK_MS}ms`);
+  _zkHandoffTickTimer = setInterval(() => { zkHandoffAutonomousTick(_zkHandoffTickCtx()).catch(e => log(`zkHandoffAutonomousTick uncaught: ${e.message}`)); }, ZK_HANDOFF_TICK_MS);
+}
+export function stopZkHandoffAutonomousTickCron() { if (_zkHandoffTickTimer) { clearInterval(_zkHandoffTickTimer); _zkHandoffTickTimer = null; } }
+
+// ── 第六件(zkJudgeProposeAutonomousTick) 2026-07-11 J2: docs/2026-07-11-zk-autonomy-sixth-piece-
+// judge-propose-design.md(Bettor+NWT 双 GREEN #gotdnc.2)。b0uoi 验收局炸出的真缺口: judge+propose
+// 从未被任何一件自治化覆盖过——同 (b)(c)(e) 风格: 独立 tick + 独立 kill switch + 独立 timer。
+const ZK_JUDGE_PROPOSE_TICK_ENABLED = process.env.ZK_JUDGE_PROPOSE_TICK_ENABLED === '1';
+const ZK_JUDGE_PROPOSE_TICK_MS = parseInt(process.env.ZK_JUDGE_PROPOSE_TICK_MS, 10) || 30000;
+
+function _zkJudgeProposeTickCtx() {
+  return {
+    settlerRelayId: ZK_SETTLER_RELAY_ID,
+    judgeWinDir,
+    endBlockHash,
+    getCurrentDaaScore: () => chainReader.getCurrentDaaScore(),
+    buildProposeCloseRequestV2: ({ marketId, winningDirection, endBlockHash: ebh, settlerRelayId: relayId }) =>
+      buildProposeCloseRequestV2(marketId, { winningDirection, endBlockHash: ebh, settlerRelayId: relayId }),
+  };
+}
+
+let _zkJudgeProposeTickTimer = null;
+export function startZkJudgeProposeAutonomousTickCron() {
+  if (!ZK_JUDGE_PROPOSE_TICK_ENABLED) { log('zkJudgeProposeAutonomousTick disabled (ZK_JUDGE_PROPOSE_TICK_ENABLED!=1)·not starting'); return; }
+  if (_zkJudgeProposeTickTimer) return;
+  if (!ZK_SETTLER_RELAY_ID) { log('zkJudgeProposeAutonomousTick NOT starting — BSHARD_SETTLER_RELAY_ID unset'); return; }
+  log(`zkJudgeProposeAutonomousTick starting·tick=${ZK_JUDGE_PROPOSE_TICK_MS}ms`);
+  _zkJudgeProposeTickTimer = setInterval(() => { zkJudgeProposeAutonomousTick(_zkJudgeProposeTickCtx()).catch(e => log(`zkJudgeProposeAutonomousTick uncaught: ${e.message}`)); }, ZK_JUDGE_PROPOSE_TICK_MS);
+}
+export function stopZkJudgeProposeAutonomousTickCron() { if (_zkJudgeProposeTickTimer) { clearInterval(_zkJudgeProposeTickTimer); _zkJudgeProposeTickTimer = null; } }
+
+export { selectRipeMarkets, settleOneMarket, judgeWinDir, endBlockHash, buildCtx, consolidateAndBuildPsState, ensureReady, TRANSIENT_RE, _umaBackoffAllowsRetryNow, scheduleUmaRejudge, UMA_REJUDGE_BACKOFF_TABLE, UMA_GENUINE_TIMEOUT_HOURS, unreachablePreGate, PREGATE_MAX_WALK, repeatOffenderGate, REPEAT_OFFENDER_THRESHOLD, _reasonSignature };

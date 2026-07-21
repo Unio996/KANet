@@ -620,6 +620,49 @@ if (process.send) {
           return;
         }
 
+        case 'get_per_bet_address': {
+          // #28 (B) piece② wire (J1 2026-07-01·Owner money-path 根治): 派生【per-bet 独立 P2SH 收款址】
+          //   替共享 relay P2PK → 付款根隔离·免并发花费(defrag/transfer 等碰不到·Martin paid-no-bet 根治)。
+          //   复用 per-bet-p2sh.mjs(派生 4 源验·spendability 3 源链证) + 本 relay x-only pubkey(gw key·sweep_per_bet 时签)。
+          //   confirm 检测此址有付款即 register(gateway 已垫)·sweep_per_bet 异步报销(J2 已链证可花)。
+          const kaspa = await import('kaspa-wasm');
+          const { derivePerBet } = await import('./lib/per-bet-p2sh.mjs');
+          const wallet = getWallet();
+          const addr = wallet.getAddress();
+          const xOnlyHex = kaspa.XOnlyPublicKey.fromAddress(new kaspa.Address(addr)).toString();
+          const networkId = String(addr).startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
+          const { marketId, bettorPk, direction, payAmountSompi, betId } = cmd;
+          if (!marketId || !bettorPk || direction == null || !payAmountSompi || !betId) {
+            throw new Error('get_per_bet_address: marketId/bettorPk/direction/payAmountSompi/betId 必传 (per-bet 唯一性)');
+          }
+          const d = derivePerBet(kaspa, { marketId, bettorPk, direction, payAmountSompi, betId, gwXOnlyHex: xOnlyHex, networkId });
+          if (cmd.requestId && process.send) {
+            process.send({ requestId: cmd.requestId, result: { ok: true, address: d.address, redeem_hex: d.redeemHex, nonce_hex: d.nonceHex, gw_x_only_pubkey: xOnlyHex } });
+          }
+          return;
+        }
+
+        case 'sweep_per_bet': {
+          // #28 (B) wire-2/3 (J1 2026-07-01): sweep per-bet P2SH 付款【扫回 gateway 自己】= 异步报销
+          //   (gateway 已用余额垫 stake 进 leaf·Bettor 读 recordBettorOnShard L148; sweep 补偿。sweep 失败不 strand
+          //   bet·未 sweep 由 reconciliation daemon(J2 piece④)重试防失血)。
+          //   🔑 复用 unlockP2SH_SingleEntry(proven no-selector P2SH spend·OracleStake timeout_unlock 同款·= J2
+          //   spendability harness 链证那套逐行: 单 in/out·无 fee-input·无 selector·createInputSignature SighashType.All·
+          //   scriptSig=sig+redeem-push)。零创新=零新签名险。per-bet redeem 单 CHECKSIG → single-entry no-selector 正解。
+          const { unlockP2SH_SingleEntry } = await import('./lib/p2sh.mjs');
+          const wallet = getWallet();
+          const gwAddr = wallet.getAddress();   // 扫回 gateway 自己 P2PK = 报销
+          if (!cmd.per_bet_address || !cmd.redeem_hex) {
+            throw new Error('sweep_per_bet: per_bet_address + redeem_hex 必传');
+          }
+          const redeem = new Uint8Array(Buffer.from(cmd.redeem_hex, 'hex'));
+          const r = await unlockP2SH_SingleEntry(wallet, cmd.per_bet_address, redeem, gwAddr, 0n);
+          if (cmd.requestId && process.send) {
+            process.send({ requestId: cmd.requestId, result: { ok: true, sweep_txid: r.txId, amount: String(r.amount), to: gwAddr } });
+          }
+          return;
+        }
+
         case 'sign_input_for_settle': {
           // Phase 4a Sub 8 (Bettor r238 Path A two-phase sign) — oracle signs a specific TX input.
           //
@@ -778,6 +821,9 @@ if (process.send) {
             networkId: wallet.getNetworkId(),
             lockTime: BigInt(cmd.lock_time || 0),
             txObjPreimage: cmd.tx_obj_preimage || null,
+            // 2026-07-18 J1tn submit侧safe_json补修(c8188d98孪生, 见p2sh.mjs:991注释): true时
+            // tx_obj_preimage是safe_json字符串, p2sh走deserializeFromSafeJSON构造(spk全保)。
+            txObjPreimageSafeJson: cmd.tx_obj_preimage_safe_json === true,
             committee_data,
             settleEntrypoint: cmd.settle_entrypoint || 0,  // #31 ④a: 1 = v08 settle_aggregate (entry1); 0 = v05/06/07 / v08 chunk
           });
@@ -806,6 +852,7 @@ if (process.send) {
             txObjPreimage: cmd.tx_obj_preimage || null,
             // J2-tn r391 (#28 Bettor ③ APPROVE v2): entry_index 透传 — 2 for v06/v07, 3 for legacy v0.5.
             entryIndex: Number.isInteger(cmd.entry_index) ? cmd.entry_index : 2,
+            addFeeInput: !!cmd.add_fee_input,
           });
           if (cmd.requestId && process.send) {
             process.send({ requestId: cmd.requestId, result: { ok: true, txId: r.txId } });
@@ -894,11 +941,49 @@ if (process.send) {
           if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, ...r } });
           return;
         }
+        case 'bshard_consolidate_v2': {
+          // W2 (J2 2026-07-07): PayoutShardV2/ZK-native absorb — 镜像 bshard_consolidate 一字不动的调用形状,
+          // ShardLeaf.sil 侧零改动, 只有 PS 侧 state 序列化换成 V2(288B, 多 4 字段透传)。
+          const { unlockBshardConsolidateV2 } = await import('./lib/p2sh.mjs');
+          const wallet = getWallet();
+          const r = await unlockBshardConsolidateV2({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) });
+          if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, ...r } });
+          return;
+        }
         case 'bshard_close_attest': {
           // 委员 4-of-5 (pubkey-distinct, b0e35141) 背书 payoutRoot, closed 0→1 write-once + cov_id 续.
           const { unlockBshardCloseAttest } = await import('./lib/p2sh.mjs');
           const wallet = getWallet();
           const r = await unlockBshardCloseAttest({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) });
+          if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, ...r } });
+          return;
+        }
+        case 'bshard_close_attest_v2': {
+          // W2 (J2 2026-07-07): PayoutShardV2/ZK-native close_attest — 委员 4-of-5 背书 payoutRoot + attestedWinner/
+          // betsRoot/refundRoot/attestedAtMs, closed 0→1 write-once + cov_id 续. 镜像 bshard_close_attest 一字不动的调用形状。
+          const { unlockBshardCloseAttestV2 } = await import('./lib/p2sh.mjs');
+          const wallet = getWallet();
+          const r = await unlockBshardCloseAttestV2({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) });
+          if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, ...r } });
+          return;
+        }
+        case 'bshard_zk_handoff': {
+          // W4a (J1 2026-07-07): PayoutShardV2 zk_handoff — 一次性把 consolidated_pool 交给新铸 CloseZkRepro4
+          // genesis output, 无 continuation(生命周期终点)。NWT 逻辑级 GREEN(478de1b0→b34ce1ba, 侧分支 j1-w4a-draft)。
+          // dryRun(J1tn 2026-07-08 市场5彩排门① Bettor #bk7kbx 六条件批文): cmd.dryRun 显式 true 才透传,
+          // 缺省/falsy 走原 live 广播路径分毫不变(cmd.dryRun 是 console 侧新加的可选字段, 老 caller 不传=无感知)。
+          const { unlockBshardZkHandoff } = await import('./lib/p2sh.mjs');
+          const wallet = getWallet();
+          const r = await unlockBshardZkHandoff({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0), dryRun: cmd.dryRun === true });
+          if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, ...r } });
+          return;
+        }
+        case 'bshard_zk_close': {
+          // W4a (J2 2026-07-07, 应急代写 J1 domain, NWT 双倍审): CloseZkRepro4 zk_close — closed 1→2 + payoutRoot
+          // 写入 continuation state, 2-input(CloseZkRepro4 + 真实 groth16 proof gate)。
+          const { unlockBshardZkClose } = await import('./lib/p2sh.mjs');
+          const wallet = getWallet();
+          const r = await unlockBshardZkClose({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) });
           if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, ...r } });
           return;
         }
@@ -923,6 +1008,33 @@ if (process.send) {
           const { unlockBshardRefundClaim } = await import('./lib/p2sh.mjs');
           const wallet = getWallet();
           const r = await unlockBshardRefundClaim({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) });
+          if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, ...r } });
+          return;
+        }
+        case 'closezk_v2_claim': {
+          // 缺件1 (J2 2026-07-08, NWT GREEN-with-conditions + Bettor 终GO): CloseZkV2 claim — payoutRootField
+          // merkle climb + 17-word nullifier + P2PK payout + splice 续约(state-in-address, 213B 状态区), closed==2 前置.
+          const { unlockCloseZkV2Claim } = await import('./lib/p2sh.mjs');
+          const wallet = getWallet();
+          const r = await unlockCloseZkV2Claim({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) });
+          if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, ...r } });
+          return;
+        }
+        case 'closezk_v2_escape_trigger': {
+          // P2 pxvml escape 退款 (J2 2026-07-09, Bettor GREEN-with-notes + NWT GREEN-with-conditions):
+          // escape_trigger OP_1 — closed 1→3 write-once flag-flip, 守恒不动钱, tx.time 阈值链上机械裁决.
+          const { unlockCloseZkV2EscapeTrigger } = await import('./lib/p2sh.mjs');
+          const wallet = getWallet();
+          const r = await unlockCloseZkV2EscapeTrigger({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) });
+          if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, ...r } });
+          return;
+        }
+        case 'closezk_v2_escape_claim': {
+          // P2 pxvml escape 退款 (同上): escape_claim OP_2 — refundRootBaked merkle climb + 17-word nullifier
+          // + P2PK(bettorPk) 原额退款(地址 handler 自推, 不信 caller 标量) + splice 续约, closed==3 前置.
+          const { unlockCloseZkV2EscapeClaim } = await import('./lib/p2sh.mjs');
+          const wallet = getWallet();
+          const r = await unlockCloseZkV2EscapeClaim({ wallet, cmd, networkId: wallet.getNetworkId(), lockTime: BigInt(cmd.lock_time || 0) });
           if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: true, ...r } });
           return;
         }
@@ -1041,9 +1153,23 @@ if (process.send) {
           // A mempool-accepted TX can lose a double-spend race (is_accepted=false) → no UTXO.
           const { checkUtxoLanded } = await import('./lib/p2sh.mjs');
           const wallet = getWallet();
-          const r = await checkUtxoLanded(cmd.address, cmd.txid, wallet.getNetworkId());
+          // ★ minDepth (J1 phantom-leaf 根治): caller (register land-gate) 传 ≥20 → reorg-safe 深度门; 未传=0 legacy first-seen
+          const r = await checkUtxoLanded(cmd.address, cmd.txid, wallet.getNetworkId(), cmd.minDepth);
           if (cmd.requestId && process.send) {
-            process.send({ requestId: cmd.requestId, result: { ok: true, landed: r.landed } });
+            process.send({ requestId: cmd.requestId, result: { ok: true, landed: r.landed, depth: r.depth } });
+          }
+          return;
+        }
+
+        case 'get_address_utxos': {
+          // 2026-07-18 J1tn (kr5l4 consolidate DB-lag 自愈): 返回地址活 UTXO 列表(outpoint+amount),
+          //   供 console 侧 buildProposeCloseRequestV2→autoDetectConsolidateResume 探测 consolidate 真实
+          //   tip(DB payout_ps_outpoint 陈旧时从链上真实位置续)。纯只读, 不签不广播不动钱。
+          const { getAddressUtxos } = await import('./lib/p2sh.mjs');
+          const wallet = getWallet();
+          const utxos = await getAddressUtxos(cmd.address, wallet.getNetworkId());
+          if (cmd.requestId && process.send) {
+            process.send({ requestId: cmd.requestId, result: { ok: true, utxos } });
           }
           return;
         }

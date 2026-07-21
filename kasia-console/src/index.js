@@ -13,6 +13,21 @@ process.on('unhandledRejection', (reason) => {
   console.error('[kanet:unhandled-rejection]', reason?.stack || reason?.message || String(reason));
 });
 
+// 2026-07-14 J2/NWT 联合诊断(Owner直令#CPU-profile-P0): --cpu-prof CLI flag 依赖进程"自然退出"
+// (process.exit() 或正常 return)才 flush .cpuprofile 文件——外部 kill -TERM/-INT 在这台 Windows
+// 环境下(NWT 隔离进程实测坐实)不可靠触达/不触发 flush, 会导致跑完整个采样窗口却拿不到任何文件。
+// 解法: env 门控 self-timer, 到点进程自己调 process.exit(0)(= 正常退出路径, 触发原生 flush),
+// 不依赖外部信号。**observe-only, 默认不设 env 则完全零行为改变**。用完这轮诊断后删除。
+if (process.env.CPU_PROF_AUTO_EXIT_MS) {
+  const _exitMs = parseInt(process.env.CPU_PROF_AUTO_EXIT_MS, 10);
+  console.log(`[cpu-prof] self-exit timer armed: will process.exit(0) after ${_exitMs}ms to flush --cpu-prof output`);
+  // 不调用 .unref() — 必须让这个 timer 保持进程存活直到触发(默认行为已满足, 显式写出防未来误加 unref)。
+  setTimeout(() => {
+    console.log(`[cpu-prof] self-exit timer fired — exiting now to flush profile`);
+    process.exit(0);
+  }, _exitMs);
+}
+
 // DB setup
 import { runMigrations } from './db/migrate.js';
 import { sqlite as _sqlite } from './db/client.js';
@@ -41,6 +56,9 @@ import { registerChainDataRoutes } from './api/chain-data.js';
 import { registerStockRoutes } from './api/stocks.js';
 import { registerBettorRoutes } from './api/bettor.js';
 import { registerPoolRoutes } from './api/pool.js';
+import { registerAdminDedupRoutes, registerBshardBondReclaimRoutes, registerZ20CircuitRoutes } from './api/admin-dedup.js'; // #27 dedup 存量清理 admin endpoint + 2026-07-13 bshard maker bond reclaim + 2026-07-14 Z20 熔断挂账清单
+import { registerCoordStatusRoutes } from './api/coord-status.js'; // D-010 落地① coord-status 内容签名
+import { registerFeedbackRoutes } from './api/feedback.js'; // 用户反馈通道卡B(2026-07-12, 框架v1.1+设计v1.2)
 import { registerKanetBrokerRoutes } from './api/kanet-broker.js';
 import { registerTgWalletRoutes } from './api/tg-wallet.js'; // TG custodial wallet (Owner 钦定, Bettor 审)
 import { registerKanetMakerRoutes } from './api/kanet-maker.js';
@@ -56,6 +74,7 @@ import { registerPortfolioRoutes } from './api/portfolio.js';
 import { registerBackupRoutes } from './api/backup.js';
 import { registerBudgetRoutes } from './api/budget.js';
 import { registerAdminRoutes } from './api/admin.js';
+import { registerEscrowRoutes } from './api/escrow.js';
 import { parseLang, getT, isRtl, LANG_NAMES } from './i18n/index.js';
 import { autoStartIfEnabled } from './services/scanner.js';
 import { startAllAdapters, stopAllAdapters } from './services/adapter-launcher.js';
@@ -187,6 +206,11 @@ await registerExchangeRoutes(fastify);
 await registerAuditPredictionRoutes(fastify);
 await registerBettorRoutes(fastify);
 await registerPoolRoutes(fastify);
+await registerFeedbackRoutes(fastify);
+await registerAdminDedupRoutes(fastify);
+await registerBshardBondReclaimRoutes(fastify);
+await registerZ20CircuitRoutes(fastify);
+await registerCoordStatusRoutes(fastify);
 await registerKanetBrokerRoutes(fastify);
 await registerTgWalletRoutes(fastify);
 await registerKanetMakerRoutes(fastify);
@@ -197,6 +221,7 @@ await registerPortfolioRoutes(fastify);
 await registerBackupRoutes(fastify);
 await registerBudgetRoutes(fastify);
 await registerAdminRoutes(fastify);
+await registerEscrowRoutes(fastify);
 
 // NWT-V3 / Qclaude monitor 系统 — route 必须在 fastify.listen 之前注册
 import { registerMonitorRoutes } from './api/monitor-dashboard.js';
@@ -439,6 +464,30 @@ await ensureIngestSecret();
 await fastify.listen({ port: PORT, host: process.env.HOST || '127.0.0.1' });
 console.log(`[kasia-console] running at http://localhost:${PORT}`);
 
+// #21 health-check isolation (Bettor 2026-07-19 决赛夜, cause-agnostic freeze mitigation):
+// supervisor 靠 curl 打 HTTP 端点判活, 如果 event loop 真被同步阻塞, curl 也会一起卡住(5s
+// max-time 超时) — 健康信号本身走的是可能被堵住的同一条路。这个心跳文件走 Node 定时器阶段
+// (不经过 HTTP 请求队列), 只有 event loop 真正同步阻塞(连 setInterval 回调都排不上)才会
+// 一起停摆, 单纯"HTTP 请求排队"(忙但活)不影响这个 tick 按时写盘。必须是 console 自己的
+// setInterval(不能用 relay 喂的 spc_tip_heartbeat 那种表 — console 冻了它照跳, 会假活)。
+import { writeFileSync } from 'node:fs';
+import { join as pathJoin, dirname as pathDirname } from 'node:path';
+import { fileURLToPath as toFileURL } from 'node:url';
+const HEARTBEAT_FILE = pathJoin(pathDirname(toFileURL(import.meta.url)), '..', '..', 'logs', 'console-heartbeat.txt');
+setInterval(() => {
+  try { writeFileSync(HEARTBEAT_FILE, String(Date.now())); } catch { /* best-effort, 不影响主流程 */ }
+}, 2000);
+
+// zk-prove-server: 独立 Fastify 实例(不共用主 fastify/不共用 HOST 绑定), 只服务跨机器 ZK proving
+// job-queue 的 3 个 endpoint (Tailscale-scoped)。见 docs/2026-07-06-zk-close-tick-production-wiring-design.md。
+import { startZkProveServer } from './services/zk-prove-server.mjs';
+await startZkProveServer();
+
+// zk-prove-worker(缺件②, Bettor 2026-07-08 派工): 轮询 zk_prove_jobs 真跑 RISC0 proving + 铸 gate 注资。
+// ZK_PROVE_WORKER_ENABLED=1 才跑(默认 OFF, 真实 proving+真 KAS 注资, 同 SETTLE_DAEMON_ENABLED 模式)。
+import { startZkProveWorkerCron } from './services/zk-prove-worker.mjs';
+if (process.env.ZKPROVE_OFF !== '1') startZkProveWorkerCron(); else console.log('[bettor-bisect] ZkProveWorker disabled');
+
 // Tier 2.1 pair ingestor — scans broadcast_messages for pair_invite/pair_ack envelopes + writes agent_pairs.
 // 30s tick, idempotent re-scan, boot catch-up from id 0.
 import { startPeriodicIngest } from './services/pair-ingestor.mjs';
@@ -454,8 +503,7 @@ await startAllAdapters();
 
 // Pre-warm all Agent Minds (identity + skills + memory loaded at startup)
 import { init as initMinds, startScheduler } from './services/mind-manager.js';
-await initMinds();
-startScheduler();
+if (process.env.DEMO_MINDS_OFF !== '1') { await initMinds(); startScheduler(); } else { console.log('[bettor-bisect] MINDS disabled'); }
 
 // Auto-start all relay processes (per-account)
 import { startAll as startAllRelays, stopAll as stopAllRelays } from './services/relay-manager.js';
@@ -535,13 +583,23 @@ startPredictionVoterCron();
 // is_oracle=1 relays + v0.7 markets in 'collecting_sigs' with metadata.bshard_close_request → each committee
 // node INDEPENDENTLY runs enforceCloseAttest (命门①③④ + frozen_evidence 同源 + fix① 链锚 re-derive + C1/C3/D1)
 // before its relay signs (replaces relay blind-sign). E1 ctx hooks wired (J2 2026-06-22).
-import { startBshardCloseVoterCron } from './services/bshard-close-voter.js';
+import { startBshardCloseVoterCron, startBshardCloseVoterV2Cron, startBshardCloseSubmitV2Cron } from './services/bshard-close-voter.js';
 startBshardCloseVoterCron();
+// V2 (close_attest_v2 自治 collecting_sigs→signed) — 卡2 交付时漏了启动接线, 函数/测试都在但零调用点
+// (NWT 2026-07-08 22:00 grep 坐实, Bettor 派工两行修). 各自 kill switch 默认 OFF, 见函数体注释.
+startBshardCloseVoterV2Cron();
+startBshardCloseSubmitV2Cron();
 
 // B2 v0.5 Sub 2d Phase 1 — pool_markets settler (aggregate 3 oracle votes + consensus check).
 // Phase 2 (TX construction + sig orchestration + broadcast) deferred.
 import { startPoolMarketSettlerCron } from './services/pool-market-settler.js';
 startPoolMarketSettlerCron();
+
+// 诊断埋点(2026-07-13, Bettor 派工#iynqdt·observe-only, 零DB写/只console.log): event loop 长阻塞
+// 调查(190s 缺口+settle-daemon tick 重叠+relay-health ~120 次误判 dead 级联)的决定性仪器——把
+// 饿死从"事后从日志缺口推断"换成"一等公民事件, 有时间戳有时长"。收集数据选刀后即可删。
+import { startEventLoopLagHeartbeat } from './lib/eventloop-lag-heartbeat.mjs';
+startEventLoopLagHeartbeat();
 
 // DoD C 收尾 (Bettor r393): 5min cron 自动领 unclaimed bettor refunds for cancelled markets.
 // J1 2026-06-20: env gate (BETTOR_REFUND_CLAIM_ENABLED=0 disable). claimAutoDispatcherTick 在 255-market backlog 上每 tick
@@ -556,7 +614,19 @@ else { console.log('[claimAuto] disabled via BETTOR_REFUND_CLAIM_ENABLED=0 (J1 C
 // env: AUTO_BET_TICK_MS (60s default), AUTO_BET_PER_TICK (2), MIN/MAX_STAKE_KAS (1/50),
 //      MIN_RESERVE_KAS (10), AUTO_BET_RELAYS (= AutoBetter-1/2/3 + tester-1/2/3 default).
 import { startAutoBetterCron } from './services/pool-auto-better.js';
-startAutoBetterCron();
+if (process.env.DEMO_AUTOBETTER_OFF !== '1') startAutoBetterCron(); else console.log('[bettor-bisect] AutoBetter disabled');
+
+// #42 (Bettor 2026-07-04 头号2, qzdh7nar 判断源 + KANet-UI 下注执行): house agent 公开判断+真押
+// 世界杯淘汰赛盘("击败 Agent" 玩法), 单一固定身份(HouseAgent relay), 每盘只押一次(去重), 方向来自
+// judgeWinDir 同源判断(非独立复刻)。env: HOUSE_AGENT_TICK_MS (5min default), HOUSE_AGENT_STAKE_KAS (20).
+import { startHouseAgentCron } from './services/pool-house-agent.js';
+if (process.env.DEMO_HOUSE_OFF !== '1') startHouseAgentCron(); else console.log('[bettor-bisect] HouseAgent disabled');
+
+// #42 加大方案·治本 (Bettor 2026-07-04 "别再充一次跑几单又干"): 自动巡检 AutoBetter/HouseAgent
+// relay 余额, 低于阈值从 mining 储备(#34 consolidate 出的 faucet reserve)自动补, 不用再手动 curl
+// transfer。env: BOT_AUTOFUND_SOURCE_RELAY_ID(必设才启动) / THRESHOLD_KAS(500) / AMOUNT_KAS(3000).
+import { startBotAutofundCron } from './services/pool-bot-autofund.js';
+if (process.env.DEMO_AUTOFUND_OFF !== '1') startBotAutofundCron(); else console.log('[bettor-bisect] BotAutofund disabled');
 
 // J1 #27d (Owner public-testnet hardening sprint 2026-06-14): boot catch-up for market_publishes
 // missed by in-mem chunk reassembly (LRU-evicted under sign_req re-broadcast flood, or lost across a
@@ -570,18 +640,37 @@ catchUpUningestedMarkets({ windowHours: 24, force: true }).catch((e) => console.
 // 配合 r424 Console supervisor: supervisor 救 Console 死, monitor 救 relay 死/没起来.
 // Restart storm 防护: 3/h cap per relay.
 import { startRelayHealthMonitorCron } from './services/relay-health-monitor.js';
-startRelayHealthMonitorCron();
+if (process.env.RH_OFF !== '1') startRelayHealthMonitorCron(); else console.log('[bettor-bisect] RelayHealth disabled');
 
 // Oracle-voter PRODUCING-health (KANet-UI, Q2 durability hard-req per NWT/Bettor r989/r997): relay-health
 // catches a DEAD relay, but Q2 was a SILENT 0-vote stall while the voter cron ran fine (process-alive).
 // 2min cron flags verifying markets a LOCAL committee oracle owes a vote on but hasn't cast (>10min) →
 // WARN log + events row (Brain/UI visible). Detect+surface only (a vote-routing/quorum bug isn't restart-healable).
 import { startOracleVoterHealthMonitorCron } from './services/oracle-voter-health-monitor.js';
-startOracleVoterHealthMonitorCron();
+if (process.env.ORACLE_OFF !== '1') startOracleVoterHealthMonitorCron(); else console.log('[bettor-bisect] startOracleVoterHealthMonitorCron disabled');
 
 // 质押池活化 (Bettor r449): 5min cron 刷 oracle_pool_chain_view 保新鲜.
 import { startOraclePoolScannerCron } from './services/oracle-pool-chain-scanner-cron.mjs';
-startOraclePoolScannerCron();
+if (process.env.ORACLE_OFF !== '1') startOraclePoolScannerCron(); else console.log('[bettor-bisect] startOraclePoolScannerCron disabled');
+
+// oracle 锁自动续期 (task#13 Bettor 2026-06-30·28h urgency): 1h cron, lock_until_daa 到期前 3M DAA 续 10M.
+import { startOraclePoolRenewalCron } from './services/oracle-pool-renewal-cron.mjs';
+if (process.env.ORACLE_OFF !== '1') startOraclePoolRenewalCron(); else console.log('[bettor-bisect] startOraclePoolRenewalCron disabled');
+
+// bshard 自治结算 daemon (Owner 2026-06-30 钦定 A·SETTLE_DAEMON_ENABLED=1 才跑, 默认 OFF).
+// canary: MAX_PER_TICK=1, TICK=60s → 验 → ramp。J1 covenant 是真安全网, DB lease = best-effort。
+import { startSettleDaemonCron, startZkCloseTickV2Cron, startClaimAutonomousTickCron, startZkHandoffAutonomousTickCron, startZkJudgeProposeAutonomousTickCron } from './services/bshard-settle-daemon.mjs';
+if (process.env.SETTLE_DAEMON_OFF !== '1') startSettleDaemonCron(); else console.log('[bettor-bisect] SettleDaemon disabled');
+// (b)(c) 2026-07-09 J2: docs/2026-07-09-zk-autonomy-three-parts-design.md — 各自独立 kill switch(默认 OFF,
+// ZK_CLOSE_TICK_V2_ENABLED / ZK_CLAIM_TICK_ENABLED), 开关本身是配置变更(Bettor 注4: 走重启窗+ledger记账+双签)。
+startZkCloseTickV2Cron();
+startClaimAutonomousTickCron();
+// 第五件 2026-07-11 J2: docs/2026-07-11-zk-autonomy-fifth-piece-handoff-broadcast-design.md — 同款独立
+// kill switch(默认 OFF, ZK_HANDOFF_TICK_ENABLED), 自治链最后一格(attest landed 后自动广播门①)。
+startZkHandoffAutonomousTickCron();
+// 第六件 2026-07-11 J2: docs/2026-07-11-zk-autonomy-sixth-piece-judge-propose-design.md — 同款独立
+// kill switch(默认 OFF, ZK_JUDGE_PROPOSE_TICK_ENABLED), 真正最后一格(deadline 到了自动 judge+propose)。
+startZkJudgeProposeAutonomousTickCron();
 
 // design-v2 (B) broadcaster N-medium-UTXO maintainer (KANet-UI, 880 settle-throughput; Bettor r489b APPROVE).
 // Proactive cron keeps settle broadcasters (local oracle signers + hot seeder maker) topped at N confirmed
@@ -592,11 +681,57 @@ startOraclePoolScannerCron();
 import { startBroadcasterUtxoMaintainerCron } from './lib/broadcaster-utxo.mjs';
 startBroadcasterUtxoMaintainerCron();
 
+// #34 Direction C (2026-07-04, qzdh7nar design + Bettor/NWT co-verify): mining payout moved off the
+// old 294.7万-UTXO address (protocol-level unreadable, GetUtxosByAddresses has no pagination — see
+// mining-utxo-consolidate.mjs header) to a fresh address. This cron keeps the NEW address's UTXO
+// count bounded so it never regrows into the same wall. No-op until MINING_RELAY_ID is set in kanet.env.
+import { startMiningConsolidateCron } from './lib/mining-utxo-consolidate.mjs';
+startMiningConsolidateCron();
+
+// 查漏补缺 (NWT 2026-07-04 挖到的 gap, Bettor 裁定 launch 前必补): 公开 FaucetRelay-tn 之前完全没有
+// 持续健康监控, 今早 G4 炸过一次(UTXO 碎片化), 退化了会对真实公开用户静默失败。纯只读监控+告警,
+// 不做任何自动 consolidate/split(避免跟正在进行的用户 faucet transfer 撞车)。
+import { startFaucetHealthCron } from './lib/faucet-utxo-health.mjs';
+startFaucetHealthCron();
+
+// 查漏补缺 (Owner 2026-07-04 追问"以后新盘会不会也卡死"·团队诚实答"机制设计本身脆, 靠人工
+// review 救但今天证明这个人工环节从没真正发生过"): 不改 daemon 核心逻辑(跨tick自动重试是另一条
+// 待 Owner 批的根治线), 只做"一进 settle_failed 立刻告警"这一步, operator 第一时间知道不用等
+// 事后翻查/公开用户投诉/Owner 自己撞见。
+import { startSettleFailedAlertCron } from './lib/settle-failed-alert.mjs';
+startSettleFailedAlertCron();
+
+// 查漏补缺(2026-07-04晚, J2撞见C盘0字节可用·curl全炸): disk full会静默拖垮全系统,之前没有任何
+// 监控(全靠J2手动碰见)。跟faucet-health/settle-failed-alert同款模式: 只读监控+告警,不做任何自动
+// 清理(删文件风险高,交operator判断哪些安全删)。
+import { startDiskSpaceAlertCron } from './lib/disk-space-alert.mjs';
+startDiskSpaceAlertCron();
+
+// 查漏补缺(2026-07-21, RpcClient状态劣化今天复发两次07:35Z/14:48Z, 第二次冻结settle-daemon
+// tick 44分钟才被人肉巡检发现)。跟settle-failed-alert同款edge-trigger模式: 只读监控+告警,不做
+// 自动重启(Bettor #utf9ze①: 告警先行, 自动化动作等告警本身跑稳再议, 防误杀短暂网络抖动)。
+import { startRpcHealthDegradationAlertCron } from './lib/rpc-health-degradation-alert.mjs';
+startRpcHealthDegradationAlertCron();
+
+// 查漏补缺(2026-07-06 晚, 三前置之一, wiring doc §2.6 写死的 escape 上线硬前置): zk_prove_jobs
+// 卡死无自动告警(v1 已知限制)。escape entrypoint 上线前必须堵住"卡死无人发现→GRACE窗口静默打开→
+// 输家躺赢"这条路。跟 settle-failed-alert/disk-space-alert 同款只读监控模式，但去重落 events 表
+// (非内存态)，防重启吞掉已卡死的 job(Bettor+NWT 审出的范围继承坑，settle-failed-alert 的 baseline
+// 哲学在这里不成立)。
+import { startZkProveJobStuckAlertCron } from './lib/zk-prove-job-stuck-alert.mjs';
+startZkProveJobStuckAlertCron();
+
 // Phase B Variant Expander 3-tier (Owner 5/16 钦定 "B" + Bettor r141 spec) — 30 min cron.
 // per scanner rec → auto-find related markets → 3 档 variant (激进/适中/保守) INSERT.
 // Phase 1 skeleton + UI surface, Phase 2 will integrate depth-500 /book API real-time.
 import { startVariantExpanderCron as startBettorVariantExpander } from './services/bettor-variant-expander.js';
 startBettorVariantExpander();
+
+// #35 世界杯赛程自动开盘 (J2, 2026-07-04, Owner 钦定头号任务·G1 §3).
+// ESPN 自己为 QF/SF/3rd/Final 预先发布占位符赛事(真 event id + kickoff), cron 定期检测占位符是否已
+// 解析成真队伍(真队伍缩写从不含数字), 解析后按 G1 措辞模板+ #41/R16 验过的安全 create-v07 管线自动建盘。
+import { startWorldcupScheduleCron } from './services/worldcup-schedule-cron.mjs';
+startWorldcupScheduleCron();
 
 // Pre-split UTXOs via Relay IPC (after relays are running)
 import { autoSplitAll } from './services/utxo-splitter.js';
@@ -610,15 +745,19 @@ import { startRefreshWorker } from './services/connection-manager.js';
 startRefreshWorker();
 
 // Start market seeder (auto seed orders on free market)
+// 批0 MUST-FIX(NWT红队 d71ca8d0, 修法A): DEMO_SEEDER_OFF 只控 startMarketSeeder()(建新 demo 挂单)。
+// startSeederDepositWatcher/startSeederRefundWorker 永远跑——它们是真实用户 seeder 买单充值/退款
+// 状态机(唯一资金安全出口), 跟 demo 挂单创建无关, 关闭会让在途充值/过期退款孤儿卡死(Z20 同族坑)。
 import { startMarketSeeder, startSeederDepositWatcher, startSeederRefundWorker } from './services/market-seeder.js';
-startMarketSeeder();
+if (process.env.DEMO_SEEDER_OFF !== '1') { startMarketSeeder(); } else { console.log('[bettor-bisect] MarketSeeder create-loop disabled'); }
 startSeederDepositWatcher();
 startSeederRefundWorker();
 
 // Pool-market seeder (S-A, Bettor r240) — auto-mirror real Polymarket top-volume markets →
 // pending_bettors. Opt-in via POOL_SEEDER_ENABLED=1 + POOL_SEEDER_MAKER_RELAY (off = no-op).
+// 批0(NWT红队 d71ca8d0): 原无顶层 kill-switch, 新加 DEMO_POOL_MARKET_SEEDER_OFF 与其余批0开关同款。
 import { startPoolMarketSeeder } from './services/pool-market-seeder.js';
-startPoolMarketSeeder();
+if (process.env.DEMO_POOL_MARKET_SEEDER_OFF !== '1') { startPoolMarketSeeder(); } else { console.log('[bettor-bisect] PoolMarketSeeder disabled'); }
 
 // R5 T-J2-16: retail-dex v1 deprecated, deleted. broker is_service Service 模式
 // 直走 broker-buy/sell-handler + broker-action-queue. retail_dex_orders 表保留
@@ -645,6 +784,32 @@ startReconcileCron();
 // NWT territory file (broker-state-reconciler.js), J1 territory startup wire (index.js).
 import { startStateReconciler } from './services/broker-state-reconciler.js';
 startStateReconciler();
+
+// J1tn 2026-07-08 (docs/2026-07-08-broker-fee-reconciler-design.md §2.1): 启用早就写好但零调用点的
+//   broker-fee-emit.mjs(Owner 直接指令查出的死代码)——纯只读链+chain_event 写入,不碰 money-path 决策,
+//   跟上面 broker-state-reconciler 同档 5min cron。
+import { startBrokerFeeEmitCron } from './services/broker-fee-emit.mjs';
+startBrokerFeeEmitCron();
+
+// J1tn 2026-07-16 (docs/2026-07-08-backward-walk-daa-index-design.md §2.2 note①, Bettor 方向审
+// GREEN + NWT 攻击面终审 GREEN #o0056j): spc_daa_index 完整性巡检 — 9ez2u 同族根因防线。
+import { startSpcDaaIndexStaleCheck } from './services/spc-daa-index-monitor.mjs';
+startSpcDaaIndexStaleCheck();
+
+// J1tn 2026-07-21 (docs/2026-07-21-p2-batch2-coherence-gate-wiring-design.md §1, Bettor 方向审
+// #uhke6f note②"最实质" + NWT diff 审实证坐实 ps_redeem_recompile_mismatch 零消费者): K-18 §3.3
+// coherence gate 事件(新 ps_coherence_gate_fail + 补上 P0 遗留的 ps_redeem_recompile_mismatch)
+// 喊疼巡检 — 不留"写进 events 表就算有人看"的半吊子。
+import { startBshardCoherenceObservabilityMonitor } from './services/bshard-coherence-observability-monitor.mjs';
+startBshardCoherenceObservabilityMonitor();
+
+// K-17 Pre-Prune Capture(2026-07-17, J2, docs/2026-07-17-preprune-capture-invariant-k16-gate-
+// design.md v1.1, NWT 红队 GREEN dd6496b0/369f6679)——j34vb 事故根治: side_lock_daa 独立于结算生命周期
+// 的主动补齐 worker + 独立存活心跳监控(两个定时器互不依赖, worker 挂了监控仍能巡检告警)。
+import { startPrepruneCaptureWorker } from './services/preprune-capture-worker.mjs';
+import { startPrepruneCaptureStaleCheck } from './services/preprune-capture-monitor.mjs';
+startPrepruneCaptureWorker();
+startPrepruneCaptureStaleCheck();
 
 // Phase 4 (T-J2-09): broker-buy-completion-watcher — BUY 闭环, broker 代 accept 后 DM user KAS 到账
 import { startCompletionWatcher } from './services/broker-buy-completion-watcher.js';

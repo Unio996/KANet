@@ -76,7 +76,7 @@ export async function splitUtxosRelay(targetCount = 3, opts = {}) {
     }
 
     const maxN = maxSafeOutputs(totalBalance);
-    const splitCount = Math.min(targetCount, maxN);
+    let splitCount = Math.min(targetCount, maxN);
     if (splitCount <= 1) {
       return { ok: false, reason: 'balance_too_low_for_split', maxSafe: maxN };
     }
@@ -86,29 +86,57 @@ export async function splitUtxosRelay(targetCount = 3, opts = {}) {
     // → 3-split TX mass ~4500 → required fee ~450000 sompi. Hardcoded 5000n way under floor → "not standard" reject.
     // Fix: feeReserve floor = max(500k, N × 200k) covers structural overhead + per-output mass.
     // priorityFee floor 500_000n same pattern as transaction.mjs iter 4 (= bce1916).
+    // KIP-9 floor: each explicit output ≥ 0.5 KAS to stay above KIP-9 storage-mass minimum.
+    // Note: consolidateUtxosRelay's CHANGE_FLOOR=5 KAS is for the change output (different purpose/size).
+    // tiny perOutput (< 0.5 KAS) blows storage mass → "Storage mass exceeds maximum" at broadcast.
+    // Reduce splitCount until perOutput is viable.
+    const MIN_OUTPUT_SOMPI = 50_000_000n; // 0.5 KAS
+    while (splitCount > 1) {
+      const fr = BigInt(Math.max(500_000, splitCount * 200_000));
+      const candidate = (totalBalance - fr) / BigInt(splitCount);
+      if (candidate >= MIN_OUTPUT_SOMPI) break;
+      splitCount--;
+    }
+    if (splitCount <= 1) return { ok: false, reason: 'balance_too_low_for_kip9_split' };
     const feeReserve = BigInt(Math.max(500_000, splitCount * 200_000));
     const perOutput = (totalBalance - feeReserve) / BigInt(splitCount);
-    const outputs = [];
-    for (let i = 0; i < splitCount - 1; i++) {
-      outputs.push(new PaymentOutput(new Address(address), perOutput));
+    // try/catch retry: Generator 从碎片 UTXO 集挑最少输入时找零可能极小 → KIP-9 "Storage mass exceeds
+    // maximum" 在 submit 才抛。perOutput 预检不能覆盖找零大小，需在 broadcast 失败后减 splitCount 重试。
+    let lastTxId = '', fee = '0';
+    while (splitCount > 1) {
+      const fr = BigInt(Math.max(500_000, splitCount * 200_000));
+      const po = (totalBalance - fr) / BigInt(splitCount);
+      if (po < MIN_OUTPUT_SOMPI) { splitCount--; continue; }
+
+      const outputs = [];
+      for (let i = 0; i < splitCount - 1; i++) {
+        outputs.push(new PaymentOutput(new Address(address), po));
+      }
+      const generator = new Generator({
+        entries, outputs, priorityFee: 500_000n,
+        changeAddress: new Address(address), networkId,
+      });
+
+      try {
+        let pending = null;
+        lastTxId = '';
+        while ((pending = await generator.next())) {
+          await pending.sign([wallet.getPrivateKey()]);
+          lastTxId = await pending.submit(rpc);
+        }
+        fee = sompiToKaspaString(generator.summary().fees).toString();
+        break; // success
+      } catch (e) {
+        const errMsg = String(e?.message ?? e ?? '');
+        if (errMsg.toLowerCase().includes('storage mass')) {
+          splitCount--;
+          continue; // retry with fewer outputs — kaspa-wasm可能抛string非Error
+        }
+        throw e; // other error — propagate
+      }
     }
 
-    const generator = new Generator({
-      entries,
-      outputs,
-      priorityFee: 500_000n,
-      changeAddress: new Address(address),
-      networkId,
-    });
-
-    let pending, lastTxId = '';
-    while ((pending = await generator.next())) {
-      await pending.sign([wallet.getPrivateKey()]);
-      lastTxId = await pending.submit(rpc);
-    }
-
-    if (!lastTxId) return { ok: false, reason: 'no_tx_produced' };
-    const fee = sompiToKaspaString(generator.summary().fees).toString();
+    if (!lastTxId) return { ok: false, reason: splitCount <= 1 ? 'balance_too_low_for_kip9_split' : 'no_tx_produced' };
 
     // Mark every consumed UTXO pending so the next chunk's sendKaspa (after we release the lock) won't
     // reselect one this rebalance just spent before RPC reflects it (mirrors transaction.mjs L214).
@@ -155,9 +183,44 @@ export async function consolidateUtxosRelay(opts = {}) {
   return withSendLock(async () => {
     const { entries: rawEntries } = await rpc.getUtxosByAddresses([new Address(address)]);
     if (!rawEntries || rawEntries.length === 0) return { ok: false, reason: 'no_utxos' };
-    const entries = filterPendingUtxos(rawEntries);
+    const entries0 = filterPendingUtxos(rawEntries);
+    // 🔴 #28 (J1 2026-06-30·Owner money-path): defrag 跳过【young UTXO】= 保护还没被 confirm 注册的 bettor 付款。
+    //   根因(Martin w7lcx 实证·三源对死): 一键托管 bettor 付款到 relay 址 → confirm 等 D=20 才认领 → 这窗口内
+    //   defrag(每 40 注触发 _maybeDefrag) consolidate 把那笔 exact-amount UTXO 合并进 best → confirm 按 exact 找不到
+    //   → bet 永注册不上("付了没单")。修: consolidate 只归集 depth≥DEFRAG_MIN_DEPTH 的【老】funding 碎片·跳过 young
+    //   (含 in-flight bet 付款·confirm 取走前保护)。fund-safe-by-construction: 【不合并某 UTXO 永不丢钱】(只留着不动)·
+    //   失败模式仅 defrag 少合并一轮(880-wall 容一轮 skip·young 下轮变老再合并)=benign。复用 checkUtxoLanded 的
+    //   depth 算法(p2sh.mjs L1475·同 D=20 锚·4 级 blockDaaScore fallback)。
+    //   🔴 阈值必 ≥【保护窗】= confirm 轮询间隔 + splice 处理(NWT/Bettor BLOCKING 算账·原 30 太低): bot
+    //   pollPendingBets=CONFIG.pollMs(config.mjs·默认 30000ms=30s)·TN12 ~10 BPS → 30s=300 块·付款最坏到
+    //   depth ~300 才被下轮 confirm 认领。∴ 默认 = D=20 + 300(30s 窗) + 80 margin = 400(覆盖 30s 轮询·env 可配)。
+    //   ⚠ 与 pollMs 耦合: 若 KANet-UI 给 pending-bet 加快轮询(2-5s·治本+真人 UX)→ 窗口降到 ~30-50 块·DEFRAG_MIN_DEPTH
+    //   可降到 ~60(env 设)。高默认 fund-safe(只是 defrag 少合并 <40s 的 young·健康 relay 大块多·无碍)。
+    const DEFRAG_MIN_DEPTH = Number(process.env.DEFRAG_MIN_DEPTH) || 400;
+    // #34 (KANet-UI/NWT/Bettor 2026-07-04, qzdh7nar 实证): consolidate 试图花未成熟 coinbase 被 RPC 拒
+    // ('ImmatureCoinbaseSpend')。根因: rusty-kaspa consensus 层 coinbase_maturity = BPS×100s，testnet-12
+    // 跟 mainnet 同用 10 BPS → 1000 DAA-score 深度(consensus/core/src/config/{bps.rs,constants.rs}，
+    // enforced at transaction_validator/tx_validation_in_utxo_context.rs)。DEFRAG_MIN_DEPTH=400 是给
+    // #28 保护 in-flight bettor 付款设的，从没考虑过 coinbase 成熟度，400 < 1000 完全不够。coinbase 类
+    // UTXO 单独用更严格阈值(留安全余量)，非 coinbase(bettor 付款等)维持原 400 不退化 #28 保护。
+    const COINBASE_MIN_DEPTH = Number(process.env.COINBASE_MIN_DEPTH) || 1050; // 1000 协议要求 + 50 余量
+    let entries;
+    try {
+      const dag = await rpc.getBlockDagInfo();
+      const vdaa = Number(dag.virtualDaaScore);
+      entries = entries0.filter((e) => {
+        const bds = e.blockDaaScore ?? e.utxoEntry?.blockDaaScore ?? e.entry?.blockDaaScore ?? e.entry?.utxoEntry?.blockDaaScore;
+        if (bds == null) return false;                          // 无 blockDaaScore → 不合并(age 未知·安全不碰)
+        const isCoinbase = e.isCoinbase ?? e.utxoEntry?.isCoinbase ?? e.entry?.isCoinbase ?? e.entry?.utxoEntry?.isCoinbase ?? false;
+        const minDepth = isCoinbase ? COINBASE_MIN_DEPTH : DEFRAG_MIN_DEPTH;
+        return (vdaa - Number(bds)) >= minDepth;                // coinbase 用更严格阈值; 非 coinbase(bet 付款等) 维持原 400
+      });
+    } catch (e) {
+      // getBlockDagInfo 失败 → 跳过本轮 consolidate(不冒险合并 young 付款·下轮重试)。
+      return { ok: true, consolidated: false, reason: `daa_unavailable_skip (${String(e?.message || e).slice(0, 60)})`, utxosBefore: entries0.length };
+    }
     if (entries.length < minFragments) {
-      return { ok: true, consolidated: false, reason: 'not_fragmented', utxosBefore: entries.length };
+      return { ok: true, consolidated: false, reason: 'not_fragmented', utxosBefore: entries.length, youngSkipped: entries0.length - entries.length };
     }
     // §5b disjoint regression guard: every input MUST be from this relay's own P2PK address (the
     // query already scopes to it; assert so a future refactor that widens the input set is caught).

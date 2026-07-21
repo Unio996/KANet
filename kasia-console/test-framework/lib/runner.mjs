@@ -16,7 +16,7 @@ import fs from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { relayId as resolveRelayId, relayAddr as resolveRelayAddr } from './peers.mjs';
 
-const CONSOLE_URL = process.env.KANET_CONSOLE_URL || 'http://127.0.0.1:3100';
+const CONSOLE_URL = process.env.KANET_CONSOLE_URL || 'http://127.0.0.1:3200';
 const DB_PATH = process.env.KANET_DB_PATH
   || path.join(path.dirname(fileURLToPath(import.meta.url)), '../../data/console.db');
 // Owner 钦定 (2026-04-27 13:43): 'no log no pass' — 每个 case 跑测必须留完整 trace,
@@ -659,7 +659,7 @@ const actions = {
     // console process module-scoped _executeOverride 真 isolated. 真 HTTP endpoint inject same-process console.
     // J1 #86 vote A1' fail-closed: peer_addr param required, mock 仅 registered test peer fire,
     // production user real chain TX 真 fall-through _defaultExecute (Q2 production protection).
-    const PORT = process.env.PORT || 3100;
+    const PORT = process.env.PORT || 3200;
     if (!step.peer_addr) return { ok: false, error: 'peer_addr required (production protection: empty Set fail-closed = mock nothing, must register test peer addr)' };
     try {
       const res = await fetch(`http://127.0.0.1:${PORT}/api/test/inject-send-kas-mock`, {
@@ -675,7 +675,7 @@ const actions = {
   },
 
   async reset_send_kas_mock(step, ctx) {
-    const PORT = process.env.PORT || 3100;
+    const PORT = process.env.PORT || 3200;
     try {
       const res = await fetch(`http://127.0.0.1:${PORT}/api/test/reset-send-kas-mock`, { method: 'POST' });
       if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
@@ -692,7 +692,7 @@ const actions = {
    * 适合 6-turn LLM-driven case: T1-T6 各 inject 1 mock = 6 次 LLM 调用全 mock 控制.
    */
   async inject_llm_mock(step, ctx) {
-    const PORT = process.env.PORT || 3100;
+    const PORT = process.env.PORT || 3200;
     if (!step.mock || typeof step.mock !== 'object') {
       return { ok: false, error: 'mock object required, e.g. { content: "..." } or { tool_calls: [...] }' };
     }
@@ -710,7 +710,7 @@ const actions = {
   },
 
   async reset_llm_mock(step, ctx) {
-    const PORT = process.env.PORT || 3100;
+    const PORT = process.env.PORT || 3200;
     try {
       const res = await fetch(`http://127.0.0.1:${PORT}/api/test/reset-llm-mock`, { method: 'POST' });
       if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
@@ -741,17 +741,21 @@ const actions = {
   /**
    * T-J2-2026-05-11 Phase 2 B.2 (NWT #18 ABE audit): generic HTTP POST action.
    * 适合 race-condition test (2 concurrent fetch) + API endpoint exercise.
-   * step: { action: 'http_post', url: '/api/...' OR full URL, body?, timeout_ms? } — host 默 127.0.0.1:3100
+   * step: { action: 'http_post', url: '/api/...' OR full URL, body?, headers?, timeout_ms? } — host 默 127.0.0.1:3200
    * (backward compat: step.path 仍接受, 跟 step.url 等价)
    *
    * T-J2-2026-05-12 P0.2 #1/9 extension (NWT spec v0.2 §3): 返 reply 字段 (= JSON.stringify(body) sliced 800)
    * 让 reply_contains / reply_does_not_contain assertion 兼容 + 加 latency_ms + error 字段.
    *
+   * KANet-UI 2026-07-17 (S1): 加可选 step.headers, 与默认 Content-Type 合并(step.headers 优先级更高,
+   * 但不能覆盖 Content-Type 除非显式传——向后兼容, 现有零 headers 的调用方行为不变)。S1 用它带
+   * X-Test-Harness-Token。
+   *
    * returns { ok, status, body, error?, latency_ms, reply }
    */
   async http_post(step, ctx) {
     const t0 = Date.now();
-    const PORT = process.env.PORT || 3100;
+    const PORT = process.env.PORT || 3200;
     const target = step.url || step.path;  // T-J2-2026-05-12 兼容 url (新) + path (旧)
     if (!target) return { ok: false, error: 'url/path required', latency_ms: 0, reply: '' };
     const url = String(target).startsWith('http') ? target : `http://127.0.0.1:${PORT}${target}`;
@@ -759,7 +763,7 @@ const actions = {
     try {
       const r = await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...(step.headers || {}) },
         body: JSON.stringify(step.body || {}),
         signal: AbortSignal.timeout(step.timeout_ms || 10_000),
       });
@@ -784,7 +788,7 @@ const actions = {
   // Same return shape as http_post so all reply_* / http_status_equals assertions just work.
   async http_get(step, ctx) {
     const t0 = Date.now();
-    const PORT = process.env.PORT || 3100;
+    const PORT = process.env.PORT || 3200;
     const target = step.url || step.path;
     if (!target) return { ok: false, error: 'url/path required', latency_ms: 0, reply: '' };
     const url = String(target).startsWith('http') ? target : `http://127.0.0.1:${PORT}${target}`;
@@ -829,7 +833,7 @@ const actions = {
     if (!step.peer_addr) return { ok: false, error: 'llm_mock_dialogue requires peer_addr' };
     if (!step.broker_relay_id) return { ok: false, error: 'llm_mock_dialogue requires broker_relay_id' };
     const { runMockDialogue } = await import('./llm-mock-user.mjs');
-    const PORT = process.env.PORT || 3100;
+    const PORT = process.env.PORT || 3200;
     const stopContains = Array.isArray(step.stop_on_broker_contains) ? step.stop_on_broker_contains : [];
     try {
       const result = await runMockDialogue({
@@ -864,7 +868,7 @@ const actions = {
    * step: { action: 'trigger_refund_sweep', peer_addr }
    */
   async trigger_refund_sweep(step, ctx) {
-    const PORT = process.env.PORT || 3100;
+    const PORT = process.env.PORT || 3200;
     try {
       const res = await fetch(`http://127.0.0.1:${PORT}/api/test/trigger-refund-sweep`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -914,6 +918,321 @@ const actions = {
       await new Promise(r => setTimeout(r, poll));
     }
     return { row: null, found: false, polled_for_ms: Date.now() - t0 };
+  },
+
+  /**
+   * S2 journey (docs/2026-07-17-simulated-user-traffic-framework-v0.1.md §5) — tg 入口半(KANet-UI
+   * 域)。走真实 tg-bot handler 管线(bot.handleUpdate, 同 dm-bet-e2e.mjs/l2-handler.test.mjs 那条
+   * 生产 handler 表面, 非替代品)从 /link 到 /bet 菜单到 confirm, 再从 persona 自己的 relay 自动
+   * 付款到 side_p2sh(身份必须是 persona 真实钱包, 不能走 /api/agent/reply 的 to_relay_id 语义——
+   * 那条绑定的是接收方 relay, 不是下注人自己, 会让下游 settler_assert_mybets_consistency 派生
+   * 出来的 bettor_pk 查不到真实 bet 行), 等锁上链落地, 再驱动 register-v06/confirm, 最后核实
+   * pool_bettor_sides 行真的归属这次付款(不是 side_p2sh 碰撞到别的历史行)。
+   *
+   * 逻辑逐字 port 自 tg-bot/test/dm-bet-e2e.mjs(独立脚本已验证过身份绑定正确, 这里改造成
+   * ctx.vars 驱动的 action 好接入 S2 journey case, 不是重新设计一套)。
+   *
+   * step: { action: 'tg_place_bet', marketId, side: 'YES'|'NO', stakeKas, personaRelayId?, tgUser? }
+   *   personaRelayId 默认 AutoBetter-1(ecb15318-cbb0-4335-aff7-a549f870b7f8, 同 dm-bet-e2e.mjs 默认值)。
+   * → { ok, marketId, personaAddr, sidePsh, direction, lockTx, merkleIndex, stakeSompi }
+   *   成功时写 ctx.vars.marketId / ctx.vars.personaAddr, 给后续 settler 域 action 读。
+   */
+  async tg_place_bet(step, ctx) {
+    const PORT = process.env.PORT || 3200;
+    const CONSOLE = `http://127.0.0.1:${PORT}`;
+    const marketId = step.marketId;
+    const side = String(step.side || 'YES').toUpperCase();
+    const stakeKas = Number(step.stakeKas || 1);
+    const personaRelayId = step.personaRelayId || 'ecb15318-cbb0-4335-aff7-a549f870b7f8';
+    const tgUser = String(step.tgUser || '990001');
+    if (!marketId) return { ok: false, error: 'marketId required' };
+    if (side !== 'YES' && side !== 'NO') return { ok: false, error: "side must be YES or NO" };
+
+    const db = new Database(DB_PATH, { timeout: 8000, readonly: true });
+    const fail = (msg) => { try { db.close(); } catch {} return { ok: false, error: msg }; };
+
+    // env: 同 dm-bet-e2e.mjs, 从 kanet.env 读真 token + ingest_secret(register-v06/confirm 需要认证)
+    const kanetEnvPath = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../../kanet.env');
+    if (!fs.existsSync(kanetEnvPath)) return fail('kanet.env not found at ' + kanetEnvPath);
+    const kanetEnv = fs.readFileSync(kanetEnvPath, 'utf8');
+    const kv = (k) => (kanetEnv.match(new RegExp(`^${k}=(.*)$`, 'm')) || [])[1]?.trim() || '';
+    if (!process.env.TELEGRAM_BOT_TOKEN) process.env.TELEGRAM_BOT_TOKEN = kv('TELEGRAM_BOT_TOKEN');
+    if (!process.env.TELEGRAM_BOT_USERNAME) process.env.TELEGRAM_BOT_USERNAME = kv('TELEGRAM_BOT_USERNAME') || 'KANET_Broker_bot';
+    if (!process.env.CONSOLE_ENCRYPTION_KEY) process.env.CONSOLE_ENCRYPTION_KEY = kv('CONSOLE_ENCRYPTION_KEY');
+    if (!process.env.BROKER_RELAY_ID) process.env.BROKER_RELAY_ID = '15593e10-fe63-4806-a7b5-cae062699de8';
+    process.env.CONSOLE_URL = CONSOLE;
+    if (!process.env.TELEGRAM_BOT_TOKEN) return fail('no TELEGRAM_BOT_TOKEN in kanet.env');
+
+    let decrypt;
+    try { ({ decrypt } = await import(pathToFileURL(path.join(path.dirname(fileURLToPath(import.meta.url)), '../../src/services/crypto.js')).href)); }
+    catch (e) { return fail('crypto.js import failed: ' + e.message); }
+    const _cfg = db.prepare('SELECT value_encrypted, is_sensitive FROM config_entries WHERE key=?').get('ingest_secret');
+    process.env.INGEST_SECRET = _cfg ? (_cfg.is_sensitive ? decrypt(_cfg.value_encrypted) : _cfg.value_encrypted) : '';
+    if (!process.env.INGEST_SECRET) return fail('ingest_secret did not decrypt (CONSOLE_ENCRYPTION_KEY?)');
+
+    const persona = db.prepare('SELECT id,name,address FROM relay_nodes WHERE id=?').get(personaRelayId);
+    if (!persona?.address) return fail(`persona relay ${personaRelayId} not found / no address`);
+    const LINKED_ADDR = persona.address;
+
+    const tgBotDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../../tg-bot');
+    const { bot } = await import(pathToFileURL(path.join(tgBotDir, 'bot.mjs')).href);
+    const PM = await import(pathToFileURL(path.join(tgBotDir, 'prediction-menu.mjs')).href);
+    const { specTitle } = PM;
+    // 现场实测发现: prediction-menu.mjs 的 userLangs 是跨进程持久化的(_state.json), maybeSetLang
+    // 只在"从没设过"时生效("先到先得")——tgUser 复用同一个测试用户号会撞到历史遗留的语言偏好,
+    // language_code 在 update() 里怎么传都不生效。直接用 setUserLang 强制覆盖, 不赌一个"从没用过"
+    // 的 tgUser 号。
+    PM.setUserLang(tgUser, 'zh');
+    bot.botInfo = { id: 1, is_bot: true, first_name: 'KANet Broker', username: process.env.TELEGRAM_BOT_USERNAME, can_join_groups: false, can_read_all_group_messages: false, supports_inline_queries: false };
+    const replies = [];
+    bot.api.config.use(async (_prev, method, payload) => {
+      if (method === 'sendMessage') { replies.push(typeof payload?.text === 'string' ? payload.text : ''); return { ok: true, result: { message_id: 1, date: 0, chat: payload.chat_id, text: payload.text } }; }
+      return { ok: true, result: {} };
+    });
+    let _u = 5000;
+    function update(text) {
+      // language_code:'zh' 而非 'en' (跟 dm-bet-e2e.mjs 抄的原值不同) —— 现场实测发现 dm-bet-e2e.mjs
+      // 那份 'en' 会让 detectLang('en')→英文 i18n, 但脚本自己的正则断言(如 /已绑定/)是按中文写的,
+      // 撞出 stage FAIL(link_ok 的 en 文案是 "✅ Linked ..." 不含"已绑定")——是既有脚本没跟上/
+      // 从没在当前语言映射下跑通过的漂移, 不是我引入的新问题。这里用 zh 让下面沿用的中文断言匹配上
+      // 现在真实的响应文案(detectLang: 'zh' 前缀→中文, 其余含'en'→英文, i18n.mjs:783-787)。
+      const message = { message_id: ++_u, date: 1718000000, chat: { id: Number(tgUser), type: 'private', first_name: 'Persona' }, from: { id: Number(tgUser), is_bot: false, first_name: 'Persona', language_code: 'zh' }, text };
+      if (text.startsWith('/')) { const c = text.split(/\s/)[0]; message.entities = [{ type: 'bot_command', offset: 0, length: c.length }]; }
+      return { update_id: ++_u, message };
+    }
+    async function feed(text) { replies.length = 0; await bot.handleUpdate(update(text)); return replies.join('\n'); }
+    async function relayCmd(cmd) {
+      const r = await fetch(`${CONSOLE}/api/relay/${personaRelayId}/send-command`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'x-ingest-secret': process.env.INGEST_SECRET }, body: JSON.stringify(cmd),
+      });
+      return r.json().catch(() => ({}));
+    }
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+    const linkR = await feed(`/link ${LINKED_ADDR}`);
+    if (!/已绑定/.test(linkR)) return fail(`/link did not bind: ${linkR.slice(0, 200)}`);
+
+    const tm = await fetch(`${CONSOLE}/api/pool/market/${encodeURIComponent(marketId)}`).then((r) => r.json()).catch(() => ({}));
+    const market = tm.market || (tm.id ? tm : null);
+    if (!market) return fail('target market not found via /api/pool/market');
+    const targetTitle = (specTitle(market.resolution_rule_spec) || '').trim();
+    if (!targetTitle) return fail('target market has no usable title');
+
+    const betMenu = await feed('/bet');
+    if (/现在没有可押注的市场/.test(betMenu)) return fail('/bet shows no markets (broker/usable filter)');
+    const searchNum = (betMenu.match(/^(\d+)\.\s+🔍/m) || [])[1];
+    if (!searchNum) return fail(`no 🔍 search option in /bet menu: ${betMenu.slice(0, 200)}`);
+    await feed(searchNum);
+    // 现场实测发现(2026-07-18 WC stress-test r1): 原逻辑挑选第一个 >=4 字符的词后再 strip 标点,
+    // 若挑中的词本身带标点(如 "stress-test" 带连字符), strip 后("stresstest")跟标题原文
+    // ("stress-test", 带连字符)不再是子串关系, /bet 搜索字面子串匹配会找不到——先只挑"本来就干净"
+    // (无需 strip 的纯字母数字)的词, 找不到再退回旧逻辑(挑第一个 >=4 字符词, 可能因为标点搜不到,
+    // 但至少不比原行为差)。
+    const words = targetTitle.split(/\s+/);
+    const cleanWord = words.find((w) => w.length >= 4 && /^[\p{L}\p{N}]+$/u.test(w));
+    const kw = cleanWord || (words.find((w) => w.length >= 4) || targetTitle.slice(0, 6)).replace(/[^\p{L}\p{N}]/gu, '');
+    const searchRes = await feed(kw);
+    // 现场实测发现: dm-bet-e2e.mjs 的 `· 出单人` 正则是过时格式——现在 prediction-menu.mjs:722 的
+    // 实际拼法是 "N. 标题  · makerLabel · 截止时间 · 押注数"(无"出单人"标签, makerLabel 直接是
+    // broker-1/maker-1 这类名字)。改成匹配"编号. 标题 · "到第一个分隔符为止, 不依赖具体标签文本。
+    let pickNum = null;
+    for (const line of searchRes.split('\n')) {
+      const mm = line.match(/^(\d+)\.\s+(.+?)\s+·\s+/);
+      if (mm) { const disp = mm[2].trim().replace(/…$/, ''); if (targetTitle.startsWith(disp) || disp === targetTitle) { pickNum = mm[1]; break; } }
+    }
+    if (!pickNum) return fail(`target not in search results for "${kw}":\n${searchRes.slice(0, 360)}`);
+    const detail = await feed(pickNum);
+    if (!/你押哪边/.test(detail)) return fail(`detail stage not reached: ${detail.slice(0, 200)}`);
+
+    await feed(side === 'YES' ? '1' : '2');
+    const amtReply = await feed(String(stakeKas));
+    if (!/(押注复核|地址)/.test(amtReply)) return fail(`amount stage failed: ${amtReply.slice(0, 200)}`);
+    const confirmReply = await feed('1');
+    if (!/已记录/.test(confirmReply)) return fail(`confirm failed: ${confirmReply.slice(0, 200)}`);
+
+    const pending = PM.listPendingPayments().find((p) => p.tgUser === tgUser);
+    if (!pending?.side_p2sh) return fail('no pendingPayment recorded for persona');
+    const { side_p2sh, exact_sompi, direction } = pending;
+    const exactKas = (Number(exact_sompi) / 1e8).toFixed(8);
+    // 现场实测发现(dm-bet-e2e.mjs 同款缺口): v0.7 市场走 register-v07(带 bet_id nonce, 见
+    // tg-bot/console-api.mjs:117-128 poolRegisterPrep/Confirm 的真实生产路由逻辑), 不是
+    // register-v06——v0.7 的 side_p2sh 派生带 betId 熵(防同 pk 同方向复押碰撞, pool.js:1550-1553
+    // _v07PayNonce), register-v06/confirm 的 _extStakeDeriveSide 不接 bet_id 参数, 永远算不出
+    // 带 nonce 的地址, confirm 会一直报"未检测到payment"(地址对不上, 不是没到账)。硬编码
+    // register-v06 是 dm-bet-e2e.mjs 从没在 v0.7 市场上真正跑通过的漂移, 这里按真实生产路由改。
+    const isV07 = String(market.protocol_version || '').startsWith('v0.7');
+    const confirmEp = isV07 ? 'register-v07' : 'register-v06';
+
+    const pay = await relayCmd({ type: 'transfer', target: side_p2sh, amount: exactKas });
+    const payTxid = pay?.txId || pay?.result?.txId;
+    if (!payTxid) return fail(`auto-pay transfer returned no txid: ${JSON.stringify(pay).slice(0, 240)}`);
+
+    async function landed(addr, txid) { const r = await relayCmd({ type: 'check_utxo_landed', address: addr, txid }); return r?.landed ?? r?.result?.landed; }
+    let paidLanded = false;
+    for (let i = 0; i < 30; i++) { await sleep(5000); if (await landed(side_p2sh, payTxid)) { paidLanded = true; break; } }
+    if (!paidLanded) return fail('PoolSide stake lock did not land within 150s');
+
+    let registered = false, lockTx = null, shardMarketId = marketId;
+    for (let i = 0; i < 12; i++) {
+      const cr = await fetch(`${CONSOLE}/api/pool/market/${encodeURIComponent(marketId)}/bettor/${confirmEp}/confirm`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'x-ingest-secret': process.env.INGEST_SECRET },
+        body: JSON.stringify({ linked_addr: LINKED_ADDR, direction, stake_kas: pending.stakeKas, ...(isV07 ? { bet_id: pending.betId } : {}) }),
+      }).then((r) => r.json()).catch((e) => ({ error: String(e) }));
+      if (cr.registered || cr.already_registered || cr.side_lock_tx || cr.merkle_index != null) {
+        registered = true; lockTx = cr.side_lock_tx || null;
+        // bshard: pool_bettor_sides.market_id 存的是分片 id 不是逻辑市场 id(现场实测发现, confirm
+        // 响应直接带 shardMarketId, 不用自己再反查 market_shards 表猜)。v0.6 无分片, 响应没有这个
+        // 字段时退回逻辑 marketId 本身(单一"分片"=自己)。
+        shardMarketId = cr.shardMarketId || marketId;
+        break;
+      }
+      if (cr.wrong_payment_detected) return fail('confirm reports wrong_payment_detected (amount mismatch)');
+      await sleep(5000);
+    }
+    if (!registered) return fail(`${confirmEp}/confirm never registered the side`);
+
+    // 现场实测发现(2026-07-18 WC round-1/round-2 压测): 原查询按 (market_id, side_p2sh) 找行——
+    // v0.7 bshard 市场的 pool_bettor_sides.side_p2sh 存的是**shard 聚合 covenant 地址**(同一 shard
+    // 下所有 bettor 共用), 不是每个 bettor 在 pending.side_p2sh 里那个独立收款地址(那是 register-v07
+    // 派生的、带 bet_id nonce 的一次性付款地址, 只在 pool_bet_preps.pay_addr 有记录, 从不写进
+    // pool_bettor_sides)。用 side_p2sh 当 WHERE 条件对 v0.7 分片市场永远查不到行(v0.6/未分片市场碰
+    // 巧不受影响, 因为那种场景两者本就相等)。改按 (market_id, side_lock_tx) 查——side_lock_tx 是这次
+    // 广播的确切 txid, INSERT 时原样落库, 唯一且不受聚合影响, 直接锁定"我的那一笔"。
+    const rows = db.prepare('SELECT side_lock_tx, direction, stake_amount, merkle_index FROM pool_bettor_sides WHERE market_id=? AND side_lock_tx=?').all(shardMarketId, payTxid);
+    if (rows.length === 0) return fail(`no pool_bettor_sides row for (market, side_lock_tx=${payTxid.slice(0, 16)})`);
+    const mine = rows[0];
+    if (!mine.side_lock_tx) return fail('attributed row has no side_lock_tx');
+    if (Math.abs(Number(mine.stake_amount) - Number(exact_sompi)) > 100000) return fail(`stake mismatch: row ${(mine.stake_amount / 1e8).toFixed(8)} vs paid ${exactKas} KAS (wrong row matched)`);
+
+    try { db.close(); } catch {}
+    ctx.vars.marketId = marketId;
+    ctx.vars.personaAddr = LINKED_ADDR;
+    return {
+      ok: true, marketId, personaAddr: LINKED_ADDR, sidePsh: side_p2sh, direction,
+      lockTx: mine.side_lock_tx, merkleIndex: mine.merkle_index, stakeSompi: mine.stake_amount,
+    };
+  },
+
+  /**
+   * S2 journey (docs/2026-07-17-simulated-user-traffic-framework-v0.1.md §5) — settler-domain
+   * half. Takes the market a persona has just bet into via the real TG flow (ctx.vars.marketId,
+   * shard-or-logical id either way) and manufactures the H2 regression scenario (2 shards, same
+   * bettor_pk + direction, distinct stakes) by adding one synthetic second shard + bettor_sides
+   * row alongside the real one, then writes settle_evidence on the LOGICAL market mirroring
+   * bshard-settle-daemon.mjs:681's real output shape — so the journey's /mybets assertion
+   * exercises the actual read path, not a mock of it.
+   * step: { action: 'settle_journey_market_synthetic', marketId?, personaAddr?, additionalStakeSompi?, totalWinAmountSompi? }
+   *   marketId/personaAddr default to ctx.vars.marketId / ctx.vars.personaAddr.
+   * → { ok, logicalMarketId, secondShardId, txId, winner_details }
+   */
+  async settle_journey_market_synthetic(step, ctx) {
+    const marketId = step.marketId || ctx.vars.marketId;
+    const personaAddr = step.personaAddr || ctx.vars.personaAddr;
+    if (!marketId) return { ok: false, error: 'marketId required (step.marketId or ctx.vars.marketId)' };
+    if (!personaAddr) return { ok: false, error: 'personaAddr required (step.personaAddr or ctx.vars.personaAddr)' };
+    const db = new Database(DB_PATH);
+    try {
+      const kaspa = await import('kaspa-wasm');
+      const bettorPk = kaspa.XOnlyPublicKey.fromAddress(new kaspa.Address(personaAddr)).toString();
+
+      // resolve logical market id whether marketId is a shard id or already logical (mirrors
+      // pool.js:/api/pool/my-positions COALESCE(ms.logical_market_id, s.market_id) pattern)
+      const shardRow = db.prepare('SELECT logical_market_id FROM market_shards WHERE shard_market_id = ?').get(marketId);
+      const logicalMarketId = shardRow?.logical_market_id || marketId;
+
+      const realSide = db.prepare(
+        `SELECT s.market_id AS shard_id, s.direction, s.stake_amount FROM pool_bettor_sides s
+         LEFT JOIN market_shards ms ON ms.shard_market_id = s.market_id
+         WHERE s.bettor_pk = ? AND COALESCE(ms.logical_market_id, s.market_id) = ?`
+      ).get(bettorPk, logicalMarketId);
+      if (!realSide) { db.close(); return { ok: false, error: `no real pool_bettor_sides row for pk=${bettorPk.slice(0, 12)} market=${logicalMarketId}` }; }
+
+      const now = new Date().toISOString();
+      const secondShardId = `${logicalMarketId}-synth${randomUUID().slice(0, 6)}`;
+      const additionalStake = step.additionalStakeSompi != null ? Number(step.additionalStakeSompi) : Number(realSide.stake_amount);
+      // placeholder payout (not real pari-mutuel math — this manufactures H2's split scenario, doesn't validate settlement math)
+      const totalWinAmount = step.totalWinAmountSompi != null
+        ? Number(step.totalWinAmountSompi)
+        : (Number(realSide.stake_amount) + additionalStake) * 2;
+      const txId = (randomUUID().replace(/-/g, '') + randomUUID().replace(/-/g, '')).slice(0, 64);
+
+      const txn = db.transaction(() => {
+        db.prepare(
+          `INSERT INTO pool_markets (id, maker_relay_id, spine_p2sh, market_metadata_hash, deadline, protocol_version, protocol_status, created_at, updated_at)
+           SELECT ?, maker_relay_id, spine_p2sh, market_metadata_hash, deadline, protocol_version, 'shard_internal', ?, ? FROM pool_markets WHERE id = ?`
+        ).run(secondShardId, now, now, logicalMarketId);
+        db.prepare(
+          `INSERT INTO market_shards (logical_market_id, shard_index, shard_market_id, shard_p2sh, status, created_at)
+           VALUES (?, (SELECT COALESCE(MAX(shard_index), -1) + 1 FROM market_shards WHERE logical_market_id = ?), ?, ?, 'settled', ?)`
+        ).run(logicalMarketId, logicalMarketId, secondShardId, `synthetic-p2sh-${secondShardId.slice(-8)}`, now);
+        db.prepare(
+          `INSERT INTO pool_bettor_sides (market_id, bettor_pk, direction, stake_amount, side_p2sh, side_lock_tx, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`
+        ).run(secondShardId, bettorPk, realSide.direction, additionalStake, `synthetic-side-p2sh-${secondShardId.slice(-8)}`, txId, now);
+
+        const winner_details = [{ pk: bettorPk, amount: totalWinAmount, txId }];
+        const market = db.prepare('SELECT metadata FROM pool_markets WHERE id = ?').get(logicalMarketId);
+        let meta = {}; try { meta = JSON.parse(market?.metadata || '{}'); } catch {}
+        meta.settle_evidence = {
+          settled_by: 'test-framework:settle_journey_market_synthetic', close_txid: txId, winners: 1,
+          claim_txids: [txId], winner_details, win_direction: realSide.direction,
+          expected_winners: 1, attempted: 1, complete: true, chain_settled: false, settled_at: now,
+        };
+        db.prepare(`UPDATE pool_markets SET protocol_status = 'completed', metadata = ? WHERE id = ?`).run(JSON.stringify(meta), logicalMarketId);
+      });
+      txn();
+      db.close();
+      return { ok: true, logicalMarketId, secondShardId, txId, winner_details: [{ pk: bettorPk, amount: totalWinAmount, txId }] };
+    } catch (e) {
+      db.close();
+      return { ok: false, error: e.message };
+    }
+  },
+
+  /**
+   * S2 journey settler-domain assertion — reads /api/pool/my-positions for the persona and checks
+   * it against the injected settle_evidence. §4 honesty clause: when >1 winning row exists for the
+   * same market+direction (the H2 scenario this journey manufactures), the summed actual_payout_kas
+   * is EXPECTED to be wrong until H2 lands — this step reports the mismatch as `known_fail_h2` so
+   * the journey can assert on it explicitly instead of silently passing OR hard-failing.
+   * step: { action: 'settler_assert_mybets_consistency', marketId?, personaAddr? }
+   * → { ok, sumPayoutKas, expectedTotalKas, winRowCount, matches, known_fail_h2 }
+   */
+  async settler_assert_mybets_consistency(step, ctx) {
+    const marketId = step.marketId || ctx.vars.marketId;
+    const personaAddr = step.personaAddr || ctx.vars.personaAddr;
+    if (!marketId || !personaAddr) return { ok: false, error: 'marketId + personaAddr required' };
+    const db = new Database(DB_PATH, { readonly: true });
+    const shardRow = db.prepare('SELECT logical_market_id FROM market_shards WHERE shard_market_id = ?').get(marketId);
+    const logicalMarketId = shardRow?.logical_market_id || marketId;
+    const market = db.prepare('SELECT metadata FROM pool_markets WHERE id = ?').get(logicalMarketId);
+    // all shard ids under this logical market, to match /my-positions rows (its market_id = shard id, not logical)
+    const shardIds = new Set(
+      db.prepare('SELECT shard_market_id FROM market_shards WHERE logical_market_id = ?').all(logicalMarketId).map(r => r.shard_market_id)
+    );
+    shardIds.add(logicalMarketId);  // non-bshard / v0.6 markets: market_id IS the logical id
+    db.close();
+
+    let expectedTotalKas = null, bettorPk = null;
+    try {
+      const meta = JSON.parse(market?.metadata || '{}');
+      const kaspa = await import('kaspa-wasm');
+      bettorPk = kaspa.XOnlyPublicKey.fromAddress(new kaspa.Address(personaAddr)).toString();
+      const myWin = (meta.settle_evidence?.winner_details || []).find(w => String(w.pk).toLowerCase() === bettorPk.toLowerCase());
+      if (myWin) expectedTotalKas = Number(myWin.amount) / 1e8;
+    } catch { /* leave null → reported as missing evidence below, not a silent pass */ }
+
+    const res = await fetch(`${CONSOLE_URL}/api/pool/my-positions?linked_addr=${encodeURIComponent(personaAddr)}`, { signal: AbortSignal.timeout(10_000) });
+    const body = await res.json().catch(() => ({}));
+    const rows = (body.positions || []).filter(p => shardIds.has(p.market_id));
+    const sumPayoutKas = rows.reduce((s, p) => s + (Number(p.actual_payout_kas) || 0), 0);
+    const winRows = rows.filter(p => p.did_win === true);
+    const matches = expectedTotalKas != null && Math.abs(sumPayoutKas - expectedTotalKas) < 1e-8;
+
+    return {
+      ok: true, bettorPk, sumPayoutKas, expectedTotalKas, winRowCount: winRows.length, matches,
+      known_fail_h2: winRows.length > 1 && !matches,  // >1 winning row + mismatch = exactly the H2 bug, not a surprise
+    };
   },
 };
 
@@ -1149,6 +1468,36 @@ const assertions = {
     return missing.length === 0
       ? { pass: true, expected: keys, actual: Object.keys(step_result.body) }
       : { pass: false, expected: keys, actual: Object.keys(step_result.body), msg: `missing keys: [${missing.join(',')}]` };
+  },
+
+  // KANet-UI 2026-07-17 — response_has_keys 的对等版本, 直接查 step_result 本身而非 .body。给
+  // 不走 http_post/http_get 的自定义 action(如 tg_place_bet/settle_journey_market_synthetic/
+  // settler_assert_mybets_consistency, 直接 return 结果对象而非 {ok,status,body} HTTP 包装)用,
+  // 通用而非 S2 专用——任何未来直接 return 富对象的自定义 action 都能复用这条断言。
+  result_has_keys(step_result, keys, ctx) {
+    if (!Array.isArray(keys)) return { pass: false, expected: keys, actual: step_result, msg: 'result_has_keys requires array' };
+    if (!step_result || typeof step_result !== 'object') {
+      return { pass: false, expected: keys, actual: typeof step_result, msg: `step_result is not an object (got ${typeof step_result})` };
+    }
+    const missing = keys.filter(k => !(k in step_result));
+    return missing.length === 0
+      ? { pass: true, expected: keys, actual: Object.keys(step_result) }
+      : { pass: false, expected: keys, actual: Object.keys(step_result), msg: `missing keys: [${missing.join(',')}]` };
+  },
+
+  // KANet-UI 2026-07-17 — result_field_equals: 同 row_field_equals 精神但直接查 step_result 顶层
+  // 字段(不是 step_result.row), 给上面同一批自定义 action 断言具体值(如 ok:true / known_fail_h2)。
+  result_field_equals(step_result, spec, ctx) {
+    if (!step_result || typeof step_result !== 'object') {
+      return { pass: false, expected: spec, actual: null, msg: 'step_result is not an object' };
+    }
+    for (const [k, expected] of Object.entries(spec || {})) {
+      const actual = step_result[k];
+      if (actual !== expected) {
+        return { pass: false, expected: { [k]: expected }, actual: { [k]: actual }, msg: `result_field_equals.${k}: got ${JSON.stringify(actual)}, want ${JSON.stringify(expected)}` };
+      }
+    }
+    return { pass: true, expected: spec, actual: step_result };
   },
 
   /**
@@ -1757,6 +2106,8 @@ function _writeTraceFile(result) {
 }
 
 // ── runner main ──────────────────────────────────────────────────
+
+export { actions };
 
 export async function runCase(testCase) {
   const result = {

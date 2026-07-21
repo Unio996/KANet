@@ -161,7 +161,7 @@ const payloadHex = Buffer.from(text, 'utf8').toString('hex');</pre>
               <span class="ob-gold mx-1">→</span>
               <span x-text="o.want_amount"></span> <span class="text-ink-400" x-text="o.want_asset"></span>
             </span>
-            <a :href="explorerUrl(o.broadcast_tx_id)" target="_blank" class="ob-code text-brand-500 hover:underline" x-text="(o.broadcast_tx_id||'').slice(0,8)"></a>
+            <span class="ob-code text-ink-500" x-text="(o.broadcast_tx_id||'').slice(0,8)"></span>
           </div>
         </div>
       </template>
@@ -203,7 +203,8 @@ function onboardApp() {
     },
 
     shortAddr(a) { if (!a) return '?'; return a.slice(0, 14) + '…' + a.slice(-6); },
-    explorerUrl(tx) { return tx ? ('https://explorer-tn12.kaspa.org/txs/' + tx) : '#'; },
+    // explorer-url 收敛 v1.1 (2026-07-12): TN12 无公网 explorer, 诚实返回 null, 消费点降级纯文本.
+    explorerUrl(tx) { return null; },
 
     copy(el) {
       const t = el?.innerText || el?.textContent || '';
@@ -216,11 +217,15 @@ function onboardApp() {
       try {
         const r = await fetch(this.apiBase + '/api/faucet/request', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ wallet_address: this.faucetAddr.trim() }),
+          body: JSON.stringify({
+            wallet_address: this.faucetAddr.trim(),
+            tz_offset: new Date().getTimezoneOffset(),
+            screen_res: `${screen.width}x${screen.height}`,
+          }),
         });
         const j = await r.json().catch(() => ({}));
         if (r.ok && j.txid) {
-          this.faucetMsg = `<span class="text-emerald-600">✓ Sent ${j.amount}. tx <a class="ob-code text-brand-500 underline" target="_blank" href="${this.explorerUrl(j.txid)}">${j.txid.slice(0,12)}…</a> — confirms in ~10s.</span>`;
+          this.faucetMsg = `<span class="text-emerald-600">✓ Sent ${j.amount}. TX: <span class="ob-code">${j.txid.slice(0,12)}…</span> — confirms in ~10s.</span>`;
         } else {
           this.faucetMsg = `<span class="text-red-500">${(j.error || ('failed (HTTP ' + r.status + ')'))}</span>`;
         }

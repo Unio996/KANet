@@ -1,0 +1,62 @@
+Status: DRAFT — J1(shard域)起稿, 待J2(settler域)补settlement-pipeline影响, 待NWT红队, Bettor终验。禁止在设计通过前直接手改DB。
+
+# shard9恢复设计(28mln, ext-pool-v07-1783455512843-28mln-s9)
+
+## 背景(A线已定案,证据见频道#fbutv6/#fbvgwf及本会话记录)
+- shard9链上真实前沿 = step21: covenant leaf现址`kaspatest:pq6j9t6nyrpl50zzq98kwm2xdzrhezzekfad035st5jg0u63a0angpaawqx4u`,
+  UTXO `67ebc76a1ab623b6b2256aa06c257b022cc1544fcf883820cd89123f9831d51c:0` = 64824000000 sompi(J1/Bettor两节点独立RPC复核一致)。
+- bet22-32(11笔,共40737000000 sompi=407.37KAS)的register_append曾短暂landed(txid 821c8cb3...,J2/NWT/KANet-UI/J1四方独立验证过block_hash+地址+金额)但**被reorg踢出选定链**——不是phantom丢失,是从没真正成为canonical状态。J1 block-scan(24.8万块)+NWT本机日志(105次一致"not found")互证:这笔spend不存在于当前canonical链。
+- 11笔bettor的side_lock付款已按正常sweep_per_bet流程被gateway扫回,本金现在gateway托管(非丢失非被盗)。
+- DB当前记录(market_shards.current_leaf_state/current_leaf_outpoint)错误地停在step32,需纠正回step21真实前沿。
+
+## 方案A: DB纠正 + 11笔按refund处理(J1推荐)
+1. 纠正`market_shards`(shard9行): `current_leaf_outpoint`='67ebc76a1ab623b6b2256aa06c257b022cc1544fcf883820cd89123f9831d51c:0', `current_leaf_state`=step21状态`{"local_yes":46102000000,"local_no":18722000000,"count":21,"pool_value":64824000000}`(取自J1 rewind脚本docs/iteration/shard9-leaf-rewind-result.json的step21输出,非手写)。
+2. **(NWT红队MUST-FIX后修正)** `bettor_count`/`projected_settle_mass`**不经过onBettorRegistered**(该函数内部调shardStakes()无refund过滤,会把32笔全算进去,数字错)。直接手动UPDATE为对应第21笔为止的真值:`bettor_count=21`,`projected_settle_mass=9647`(用kip9-mass.mjs的真实estimateStorageMass()对前21笔bet_sequence的stake_amount逐笔算的,非估算——脚本可复现)。这4个字段(current_leaf_outpoint/current_leaf_state/bettor_count/projected_settle_mass)是这次纠正唯一要动的列,一次UPDATE写死,不调用任何现有注册路径函数。
+3. bet22-32这11笔`pool_bettor_sides`行标记为refunded(不删除,留审计痕迹+关联gateway托管的本金),走既有lv3rz(2026-06-30)phantom-leaf退款runbook(gateway原路退stake给11个bettor_pk对应地址)。**注**: 因为步骤2已经不再依赖shardStakes()的实时聚合,这里标不标refunded不影响current_leaf_state/bettor_count的正确性,但仍要标,防止未来任何代码路径(如canary-stats的hadBets)重新用shardStakes()误算出32笔。
+4. shard9之后按正常consolidate流程(帶D=20新修复b3a6e420)推进,纳入28mln整体结算。
+
+## 是否可以"纠正后重新advance"这11笔(而非refund)? ——论证,非默认
+**covenant层面**: 查过PoolLeaf.sil的register_append入口(shard-leaf合约,line58-89)——只check `count<seal_count`/`side∈{0,1}`/`stake>=min_bet`,**没有deadline限制**。deadline常量只bake给seal_to_root(consolidate闸),不挡register_append。纯合约角度,技术上任何时候都能对这个leaf重新append,不因"过了几天"被合约拒绝。
+
+**应用层面(这才是真正卡点)**: 正常`/register-v07/confirm`流程(pool.js:1371,`_v07PrepConfirmPrelude`共享)硬性要求`market.protocol_status==='pending_bettors'`——28mln现在已进入结算流程,`protocol_status`大概率已不是`pending_bettors`(需J2核实实际值),这条路**会被直接拒绝**。唯一能绕开这个检查的是`/api/admin/pool/register-v07/confirm-by-address`(pool.js:1627起)——查过整个handler,它**没有检查protocol_status**,理论上能用来对一个已经离开`pending_bettors`状态的市场重新写入bet。
+
+**J1结论**: 技术上可行(covenant不拦, admin escape hatch不拦), 但这是把"专为救单笔孤儿单设计的逃生路"用在"重新对一个已进入结算流程的市场批量补11笔历史交易"这个从未设计过、从未测过的场景——11笔重新append会改变shard9的bettor_count/pool_value, 而28mln整体结算(consolidate/deadline sweep)可能已经基于"shard9=已知状态"做了假设(需J2核实28mln settle-daemon是否已对其他shard做了假设shard9状态的操作)。**推荐refund而非重新advance**:退款路径成熟(有lv3rz先例)、不touch正在结算中的市场状态机、11个bettor本金原样退回没有经济损失,风险面小得多。重新advance在纯技术上"论证成立"但操作风险不対称地高,不建议。
+
+## J2补充(settler域: settlement-pipeline影响核实)
+
+**28mln当前状态(直查DB, 2026-07-11)**: `protocol_status='verifying'`, `settle_txid=null`——印证J1判断: 确实已离开`pending_bettors`, `/register-v07/confirm`正常路径会拒。**无`pool_committee`缓存行**(committee尚未抽样)——这点关键: 意味着纠正shard9发生在committee抽样**之前**, 时序上是对的(若已抽样缓存, 纠正后的pool构成会跟已锁定的committee快照脱节, 需要额外失效逻辑; 现在不存在这个问题)。**shard0-8='settling'(已折入PayoutShard)/shard9='sealed'(卡点)/shard10='open'(count=1, 1500000000 sompi=15KAS, 天然partial trailing shard, 尚未sealed)**——consolidate流程还没跑到shard9之后的任何一步, 没有下游状态"已经假设shard9=32笔"过, 纠正不会打翻已完成的工作。
+
+**🔴 方案A步骤3的一个缺口(必须堵, 否则守恒会假绿又真崩)**: "标记为refunded"这个动作本身**不会**把这11笔从结算计算里排除——查了`getMarketBets`(pool-bettor-sides-query.mjs:93, 全库settler/daemon读bet-count/pool/payout的**唯一合法入口**, lint-kanet堵裸读): 它对bshard市场的排除粒度是**整片shard**(`WHERE status != 'manual_recovery_refunded'`, 见L104-105), 片内的`getSidesByShard`(L38-42)是**裸`SELECT * WHERE market_id=?`, 没有任何按行过滤的手段**(pool_bettor_sides本身也没有一个"排除出池"的列)。也就是说: 只要这11行还在`pool_bettor_sides`里且shard9不是整片被排除, `getMarketBets`会原样把32个bettor都读回来算payout_root——跟纠正后covenant实际只backing 21个bettor(648.24KAS)对不上, 会在settle/consolidate某一步撞守恒不符(比J1提的"重新advance风险"更隐蔽, 因为它不会立刻报错, 而是让payout_root算出一个链上验不过的假值, 委员会拒签或更糟——委员如果没做这层交叉验证会签出一个凭空多了11人份额的错误分配)。
+
+**🔴 更正(J2自查撤回)**: 上面"按`merkle_index<count`过滤"这条建议是错的——直查shard9全32行实际数据, `merkle_index`字段值**全部是常量9**, 不是按片内注册顺序分配的0-31。查了`recordBettor`实际INSERT语句(pool.js:1574-1575)确认这一列写入的其实是`shardIndex`(=9, 分片序号), 不是片内下注序号——列名带"merkle"但语义与这次需求无关, 是我没先查值就假设了字段语义。撤回, 不采用。
+
+**改用方案(精确版, 已核实可行性)**: 原计划"完全不碰`getSidesByShard`/`getMarketBets`"经核实**做不到**——`getMarketBets`的`bets`映射(pool-bettor-sides-query.mjs:121)只保留`{pk, stake, direction}`, **丢弃了`id`列**, 调用方拿到结果后已经无法按row id过滤。改为最小侵入方案:
+  1. 给`getSidesByShard(shardMarketId, db, excludeSideLockTx=null)`加一个**可选**参数: 传了就在SQL加`AND side_lock_tx NOT IN (...)`, 不传(现有全部调用点)行为完全不变——这是新增可选参数默认关闭, 不是复用/改写现有字段语义, 跟merkle_index那次的错误性质不同。
+  2. `getMarketBets`同样加可选`excludeSideLockTx`透传给内部的`getSidesByShard`调用。
+  3. 28mln的settle/consolidate driver调用`getMarketBets`时, 对shard9传入这11笔的`side_lock_tx`(11个64-hex txid, 见下方判别值)。其余任何市场/任何shard的调用不传此参数, 行为零变化。
+  这11行仍标记refunded(记录退款时间, 供审计/防重复退款), 但**结算侧排除靠显式excludeSideLockTx, 不靠这个标记**——避免"结算正确性依赖有没有人记得去读某个标记"这个隐患。
+
+**🔴 Bettor②问的答案(判别式值源: id还是side_lock_tx)**: 原方案按`pool_bettor_sides.id`(SQLite本地auto-increment)排除有一个真实风险——committee的`enforceCloseAttest`(经`loadBettorsCrossShard`, bshard-close-voter.js)是**每个投票节点各自独立跑**的再验证(J1明确在独立机器上, 不共享文件树/未证实共享同一份sqlite实例), 若任一委员节点是对自己本地DB独立ingest这批下注(而非共享同一物理db文件), 同一笔bet在不同节点DB里的`id`(本地行号)完全可能不同——用`id`排除在那种节点上会精确排掉错误的行(或排不掉任何行), driver端(id排除, 21注)跟该委员节点(id排错, 仍读到32注或错误子集)算出不同payoutRoot, BUST。**采纳Bettor倾向的方案(b)**: 判别式换成`side_lock_tx`(bettor付款txid)——这是链上唯一值, 与运行该DB的是哪台机器/以何种顺序ingest无关, 天然跨节点确定, 且`close-voter.js:75`本来就在SELECT这一列(零额外查询成本)。不需要先证明"是否所有voter共享同一DB"(即Bettor选项(a))才能下结论——(b)本身几乎不增加复杂度且直接消除这整类风险, 没有必要为了省这一个字段名改成本去论证一个不确定的多机拓扑假设。
+  这11笔的判别值(side_lock_tx, 已核实, 来自pool_bettor_sides真实数据): `810469a1622cd75eba9387f7759044494572aea50022ce3351e9c18750400d4f`(id33444) / `e042a738a74abb4ee4063c9fa401e77ac4829717c431f9d20a13cb877080f7ef`(33446) / `49dc8534aafe6950a2463ba835fb59ac70948da7a1bc2ef3f3e50fbb16f9de40`(33449) / `6339712e542ce0f6a5081165fc69284f99871f0927995e028395e1d92d572b2d`(33450) / `20ea7c2bdf624e362453436ab47786bac745b5b83e966321e0d83cdab4e390b2`(33452) / `8f665e09d6c65fc1da03c67949197215ede3389fc3949177072e45839c207254`(33458) / `35a50964f9b63b14b5b7899f2e627629d59a614328f9baf3971a74cefc419445`(33459) / `9df3b71382c05a166ef17d94d16a4bf53e77a8cc2c012ee4be9ebadd1cea22ae`(33460) / `65ea06ba35e8f173a1c708415de76b3231aa89c604fd0a436bfce9216623e70e`(33467) / `fd6be6ff732b05a5db39403f7f037f619a663bc3f7e778eabe2e1f9a572ee55e`(33468) / `7272f21ce46669caf476d9ee4604d8f3d09d9e8ec6e937a7a57b1f632beb1884`(33471)。
+
+**🔴 Bettor①问的答案(枚举V1结算数学全部读shard9 bettor行的消费点)**——派Explore子agent查完, 比原设想多两个独立raw-SQL消费点, 不是只有`getMarketBets`一处:
+  1. `getSidesByShard`/`getMarketBets`(pool-bettor-sides-query.mjs) — feeds `bshard-auto-settler.mjs`的`computeSettlePlan`(payoutRoot)/`computeRefundPlan`(refund root)/`bshard-settle-daemon.mjs`的consolidate预测PS地址+`selectRipeMarkets`门槛。**需要排除**。
+  2. `loadBettorsCrossShard`(bshard-close-voter.js:67-82, 独立raw SQL, 不经过①) — 喂给`bshard-close-enforce.mjs`两处: `_enforceCloseAttestCore`→`enforceCloseAttest`(委员签名重算payout, **需要排除**)以及`reDeriveCommittee`(委员抽样时排除`side_lock_daa<=deadline`的bettor, 用途不同但同样读了这11笔——**这11笔虽是phantom但side_lock_daa字段仍是它们付款时链上真实值**, 需要核实排除后是否影响委员抽样池, 已确认这4个bettor_pk全是内部bot非委员候选, 无影响, 但机制上仍需排除以防将来复用到有委员资格的场景)。
+  3. `verifyBettorsCompleteFromChain`里的fallback raw query(bshard-close-enforce.mjs:837, 逐片查`WHERE market_id=?`, 只在跨节点签名请求没带`sh.bettors`快照时才触发) — 喂per-ticket反掉包链锚检查(对每个bettor派生ticket地址查UTXO-landed)。**需要排除**, 否则会对11个从未真实mint的ticket地址查UTXO, 大概率查到空进而fail-loud拒签(比多算份额更容易发现, 但仍需堵)。
+  **结论**: 三个独立raw-SQL消费点都要同步加排除, 不是一处。三处分别加**同一模式**(可选`excludeSideLockTx`参数, 传side_lock_tx集合, 不传=现有行为零变化), 不做"消费点合一"式重构(今晚已经因为一次'临时通用化'(merkle_index)吃过亏, 三处各自最小加一行AND过滤, 分开验证, 比合并成一个新共享函数风险小)。三处都要改成按`side_lock_tx`(见上方Bettor②答复)而非`id`过滤, 保证跨节点(不同voter各自的DB实例)确定性一致。
+
+**验收(按Bettor③硬门, 落地前必过, 不是可选优化)**:
+  (i) 对真实28mln数据跑一遍上面三处: 传excludeSideLockTx后`getMarketBets`的`betCount`精确=21/`poolSompi`精确=64824000000; `loadBettorsCrossShard`返回数组精确剩21个元素; `verifyBettorsCompleteFromChain`路径同理(离线可复现测试, 不必等真触发跨节点缺快照场景)。三处**不传**excludeSideLockTx的既有调用点(shard0-8/10及其他任何市场)结果必须逐字节不变(before/after diff=空)。
+  (ii) test-framework补regression case, 覆盖三处各自"传excludeSideLockTx时精确排除"+"不传时零副作用"两组断言(共6个)。
+  (iii) 三处代码改动+28mln driver调用点(哪里传这11个具体side_lock_tx, 逐点写清)完整走"设计→NWT审→Bettor验"再落地, 不因为是"加可选参数"简化流程。这11个txid(见上方Bettor②答复列出的判别值)硬编码进一次性纠正调用点, 注释钉死"仅28mln-s9本次事故处置, 不通用", 防误复用(Bettor④要求)。
+
+**refund runbook适配**: lv3rz(2026-06-30)先例是整片shard排除+退款, 28mln这次是"片内部分排除"——机制不同但退款本身(gateway原路退stake给bettor_pk对应linked_addr)是同一个原语, 复用没有结构性障碍, 只是触发范围从"整片"变成上面11个具体side_lock_tx对应的bettor_pk列表(从`pool_bettor_sides`原样读, 不受结算侧side_lock_tx排除影响, 退款走的是另一条读路径)。
+
+## Bettor方向审notes(已核,折入)
+- **身份新地面(Bettor独立核实)**: 11笔的4个bettor_pk全部是内部bot relay——HouseAgent(5笔×50KAS)/UnderdogBot(4笔×15KAS)/AutoBetter-1(48.81KAS)/AutoBetter-2(48.56KAS),custodial地址零命中真实用户。**零真实用户受影响**,退款面全内部,不需要用户面文案/Owner批沟通稿。
+- **(a) payout基数值源核实**: 28mln整体payout计算必须以纠正后shard9(21注/648.24KAS)为准——J2需在其补充节明确payout实际读的pool基数来自链上`consolidatedPool`(自然只含真实21注)还是任何DB侧`projected_settle_mass`/`pool_value`等缓存值(后者若还是32笔口径必须先排除, 不能直接用)。这条待J2最终确认后NWT才能给收尾GREEN。
+- **(b) 退款执行纪律**: 走lv3rz runbook, 但退款txid必须链上验证+写回`pool_bettor_sides`的退款记录字段(非空手认领); 广播前Bettor会predict-then-verify预钉这11行/4个bettor_pk/Σ=40737000000 sompi逐分对上, 不接受近似值。
+- **执行序(不跳步)**: J2补完两问(已完成,见J2补充节)→NWT终GREEN(收尾(a)后)→Bettor终验→才动手执行,退款环节同样遵守"设计先行"纪律,不因为是退款就简化流程。
+
+## 落地纪律
+纯设计,不动DB/不广播交易。NWT红队后交Bettor终验,批准后按方案执行,执行本身也要走"设计→NWT审→Bettor验"同一节奏,不因为是"退款"就跳过。

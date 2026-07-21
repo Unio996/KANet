@@ -3,7 +3,7 @@
 // 模拟 L903 修后行为(喂 spec.title 非 hash)→ demonstrate 修后 discrimination 回升。可 re-run 验 production 修复。
 // 守 Bettor r580/r582: 不报聚合虚高, 分 truth 报(YES-truth 准/NO-truth recall/abstain 校准)。
 const LLM = process.env.QWEN_LLM_URL || 'http://127.0.0.1:8000';
-const MODEL = 'Qwen_Qwen3.6-35B-A3B-Q4_K_M.gguf';
+const MODEL = 'Qwythos-9B-Claude-Mythos-5-1M-Q4_K_M.gguf';
 const ESPN = 'https://site.api.espn.com/x';
 
 // production prompt 但 market_question 用真问题(=修后); 对照组用 hash(=修前) 量 bug

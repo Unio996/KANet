@@ -1,0 +1,401 @@
+// PayoutShardV2.sil — ZK-native 结算的 committee-attest + fund-consolidation 层(J2, 2026-07-07)。
+//   设计文档: docs/2026-07-07-zk-genesis-mint-pipeline-design.md(v2.1, NWT+Bettor 设计层面 GREEN)。
+//
+//   ★ REGRESSION-safe(同 CloseZkRepro3→4 纪律): 相对 PayoutShard.sil 的改动逐条列清单，方便 NWT diff 审：
+//     ① ctor 新增 5 字段: closeZkTmplAnchor(§锚定用) + init_attestedWinner/init_attestedAtMs/
+//        init_betsRootBaked/init_refundRootBaked(ZK 结算需要的委员背书值，genesis 起始占位)。
+//     ② absorb 逻辑【一字不动】——committee 验证/守恒 weld 全部原样；仅 validateOutputState 补齐新增 4 个
+//        state 字段的透传(attestedWinner/attestedAtMs/betsRootBaked/refundRootBaked 不变)。
+//     ③ close_attest 委员 ①②③(threshold/pubkey-distinctness/depth-8 merkle membership)逻辑【一字不动】；
+//        新增 4 个 witness 参数(new_attestedWinner/new_betsRoot/new_refundRoot/new_attestedAtMs)，
+//        一并进 committee sighash 覆盖，写入 state。
+//     ④ cancel_attest 逻辑【一字不动】；validateOutputState 补齐新增 4 字段透传(不变，cancel 路径跟 ZK 无关)。
+//     ⑤ 🔴 claim entrypoint 整个物理删除(不是 flag 门)——Bettor 拍板：若赢家在 zk_handoff 广播前走这条路
+//        领走一份，CloseZkRepro4 的 guest proof 仍按全量原始 bets 算 payoutRoot，会导致后续赢家分不到钱
+//        (分配数学错配，不是资金安全但是正确性 bug)。ZK-native 市场的赢家支付路径 = CloseZkRepro4 独占。
+//     ⑥ refund_claim 逻辑【一字不动】——保留：closed==2(cancel 路径)专用，跟 zk_handoff(closed==1)互斥
+//        (closed 是 write-once 0→1 XOR 0→2)，不影响。validateOutputState 补齐新增 4 字段透传(不变)。
+//     ⑦ 新增 zk_handoff entrypoint：committee attest(closed==1)后，一次性把全部 consolidated_pool
+//        交接给新铸的 CloseZkRepro4 genesis output。无 continuation(同 escape_claim 的 last-claimant
+//        分支手法，UTXO 花过即不存在，零 double-invoke 风险)。
+//
+//   🔑 covenant 身份 / cov_id provenance 机制：跟 PayoutShard.sil 完全一致(见该文件顶部注释)，
+//     ShardLeaf.sil 零改动(J2 源码级 verify: consolidate_to_payout 只认 cov_id 身份，不认 bytecode 类型)。
+//
+//   ⚠ zk_handoff 的字节级 splice 机制(NWT 待审重点)：CloseZkRepro4 genesis redeem 的 ctor 值嵌入，
+//     经 silverc 实测(J2 2026-07-07)证实【至少部分 int 字段用 minimal-push 变长编码，非固定宽度】
+//     (attestedAtSeconds 从 0 改到 999，编译产物总长度 +2 字节)——这意味着 off-chain genesis-mint 工具
+//     构造 CloseZkRepro4 的 ctor 参数时，必须对所有会被 zk_handoff 见证/拼接的字段使用【强制固定宽度编码】
+//     (同 pool-payout-root.mjs 的 serializeI64 fixed-8-byte 模式，不能依赖 silverc 默认的 minimal-push
+//     ctor 参数嵌入)，否则 witness 供的 prefix/suffix 分段点会因为字段宽度不定而对不上。这条留给 NWT
+//     byte-level 审核 + 实际 diff 时用 canonical-pipeline 工具核对，不在本文件里假装已经解决。
+
+pragma silverscript ^0.1.0;
+
+contract PayoutShardV2(
+    byte[32] poolMerkleRoot,
+    byte[32] predicate_commit,
+    byte[32] closeZkTmplAnchor,        // 新增: CloseZkRepro4 编译模板(prefix+suffix)的 blake2b 锚 hash
+    // —— genesis State ——
+    int      init_consolidated_pool,
+    int      init_closed,
+    byte[32] init_payoutRoot,
+    int init_w0, int init_w1, int init_w2, int init_w3, int init_w4, int init_w5, int init_w6, int init_w7, int init_w8,
+    int init_w9, int init_w10, int init_w11, int init_w12, int init_w13, int init_w14, int init_w15, int init_w16,
+    // —— 新增 ZK 结算 state(genesis 起始占位: -1/0/ZERO32/ZERO32，close_attest 时委员写真值) ——
+    int      init_attestedWinner,
+    int      init_attestedAtMs,
+    byte[32] init_betsRootBaked,
+    byte[32] init_refundRootBaked
+) {
+    int consolidated_pool = init_consolidated_pool;
+    int closed            = init_closed;
+    byte[32] payoutRoot   = init_payoutRoot;
+    int w0 = init_w0; int w1 = init_w1; int w2 = init_w2; int w3 = init_w3; int w4 = init_w4; int w5 = init_w5;
+    int w6 = init_w6; int w7 = init_w7; int w8 = init_w8; int w9 = init_w9; int w10 = init_w10; int w11 = init_w11;
+    int w12 = init_w12; int w13 = init_w13; int w14 = init_w14; int w15 = init_w15; int w16 = init_w16;
+    int attestedWinner        = init_attestedWinner;
+    int attestedAtMs          = init_attestedAtMs;
+    byte[32] betsRootBaked    = init_betsRootBaked;
+    byte[32] refundRootBaked = init_refundRootBaked;
+
+    // —— entry 0: absorb —— [REGRESSION: 逻辑一字不动，仅补新增 4 字段透传] ——
+    entrypoint function absorb(int selfOutIdx, int shardInIdx) {
+        require(closed == 0);
+        int shard_value = tx.inputs[shardInIdx].value;
+        validateOutputState(selfOutIdx, {
+            consolidated_pool:  consolidated_pool + shard_value,
+            closed:             0,
+            payoutRoot:         payoutRoot,
+            w0: w0, w1: w1, w2: w2, w3: w3, w4: w4, w5: w5, w6: w6, w7: w7, w8: w8, w9: w9, w10: w10, w11: w11, w12: w12, w13: w13, w14: w14, w15: w15, w16: w16,
+            attestedWinner:    attestedWinner,
+            attestedAtMs:      attestedAtMs,
+            betsRootBaked:     betsRootBaked,
+            refundRootBaked:   refundRootBaked
+        });
+        require(tx.outputs[selfOutIdx].value == consolidated_pool + shard_value);
+    }
+
+    // —— entry 1: close_attest —— [REGRESSION: 委员①②③逻辑一字不动；新增4 witness参数+state透传] ——
+    entrypoint function close_attest(
+        int      selfOutIdx,
+        byte[32] new_payoutRoot,
+        int      new_attestedWinner,      // 新增
+        byte[32] new_betsRoot,            // 新增
+        byte[32] new_refundRoot,          // 新增
+        int      new_attestedAtMs,        // 新增, witness供(self-read tx.time 经实测证实不可行，见文件头注释)
+        sig      c0Sig, sig c1Sig, sig c2Sig, sig c3Sig, sig c4Sig,
+        byte[32] committeePkHash,
+        byte[32] c0Pk, byte[32] c1Pk, byte[32] c2Pk, byte[32] c3Pk, byte[32] c4Pk,
+        int      c0Idx, int c1Idx, int c2Idx, int c3Idx, int c4Idx,
+        byte[32] c0s0, byte[32] c0s1, byte[32] c0s2, byte[32] c0s3, byte[32] c0s4, byte[32] c0s5, byte[32] c0s6, byte[32] c0s7,
+        byte[32] c1s0, byte[32] c1s1, byte[32] c1s2, byte[32] c1s3, byte[32] c1s4, byte[32] c1s5, byte[32] c1s6, byte[32] c1s7,
+        byte[32] c2s0, byte[32] c2s1, byte[32] c2s2, byte[32] c2s3, byte[32] c2s4, byte[32] c2s5, byte[32] c2s6, byte[32] c2s7,
+        byte[32] c3s0, byte[32] c3s1, byte[32] c3s2, byte[32] c3s3, byte[32] c3s4, byte[32] c3s5, byte[32] c3s6, byte[32] c3s7,
+        byte[32] c4s0, byte[32] c4s1, byte[32] c4s2, byte[32] c4s3, byte[32] c4s4, byte[32] c4s5, byte[32] c4s6, byte[32] c4s7
+    ) {
+        require(closed == 0);
+        require(blake2b(byte[](predicate_commit)) != predicate_commit);
+        int validSigs = 0;
+        if (checkSig(c0Sig, pubkey(c0Pk))) { validSigs = validSigs + 1; }
+        if (checkSig(c1Sig, pubkey(c1Pk))) { validSigs = validSigs + 1; }
+        if (checkSig(c2Sig, pubkey(c2Pk))) { validSigs = validSigs + 1; }
+        if (checkSig(c3Sig, pubkey(c3Pk))) { validSigs = validSigs + 1; }
+        if (checkSig(c4Sig, pubkey(c4Pk))) { validSigs = validSigs + 1; }
+        require(validSigs >= 4);
+        require(c0Pk != c1Pk); require(c0Pk != c2Pk); require(c0Pk != c3Pk); require(c0Pk != c4Pk);
+        require(c1Pk != c2Pk); require(c1Pk != c3Pk); require(c1Pk != c4Pk);
+        require(c2Pk != c3Pk); require(c2Pk != c4Pk);
+        require(c3Pk != c4Pk);
+        byte[] cConcat0 = c0Pk + c1Pk;
+        byte[] cConcat1 = cConcat0 + c2Pk;
+        byte[] cConcat2 = cConcat1 + c3Pk;
+        byte[] cConcat3 = cConcat2 + c4Pk;
+        require(blake2b(cConcat3) == committeePkHash);
+        require(c0Idx >= 0); require(c0Idx < 256);
+        byte[32] c0Cur = blake2b(byte[](c0Pk));
+        int c0b0 = c0Idx % 2;       if (c0b0 == 0) { c0Cur = blake2b(byte[](c0Cur) + byte[](c0s0)); } else { c0Cur = blake2b(byte[](c0s0) + byte[](c0Cur)); }
+        int c0b1 = (c0Idx / 2) % 2;  if (c0b1 == 0) { c0Cur = blake2b(byte[](c0Cur) + byte[](c0s1)); } else { c0Cur = blake2b(byte[](c0s1) + byte[](c0Cur)); }
+        int c0b2 = (c0Idx / 4) % 2;  if (c0b2 == 0) { c0Cur = blake2b(byte[](c0Cur) + byte[](c0s2)); } else { c0Cur = blake2b(byte[](c0s2) + byte[](c0Cur)); }
+        int c0b3 = (c0Idx / 8) % 2;  if (c0b3 == 0) { c0Cur = blake2b(byte[](c0Cur) + byte[](c0s3)); } else { c0Cur = blake2b(byte[](c0s3) + byte[](c0Cur)); }
+        int c0b4 = (c0Idx / 16) % 2; if (c0b4 == 0) { c0Cur = blake2b(byte[](c0Cur) + byte[](c0s4)); } else { c0Cur = blake2b(byte[](c0s4) + byte[](c0Cur)); }
+        int c0b5 = (c0Idx / 32) % 2; if (c0b5 == 0) { c0Cur = blake2b(byte[](c0Cur) + byte[](c0s5)); } else { c0Cur = blake2b(byte[](c0s5) + byte[](c0Cur)); }
+        int c0b6 = (c0Idx / 64) % 2; if (c0b6 == 0) { c0Cur = blake2b(byte[](c0Cur) + byte[](c0s6)); } else { c0Cur = blake2b(byte[](c0s6) + byte[](c0Cur)); }
+        int c0b7 = (c0Idx / 128) % 2;if (c0b7 == 0) { c0Cur = blake2b(byte[](c0Cur) + byte[](c0s7)); } else { c0Cur = blake2b(byte[](c0s7) + byte[](c0Cur)); }
+        require(c0Cur == poolMerkleRoot);
+        require(c1Idx >= 0); require(c1Idx < 256);
+        byte[32] c1Cur = blake2b(byte[](c1Pk));
+        int c1b0 = c1Idx % 2;       if (c1b0 == 0) { c1Cur = blake2b(byte[](c1Cur) + byte[](c1s0)); } else { c1Cur = blake2b(byte[](c1s0) + byte[](c1Cur)); }
+        int c1b1 = (c1Idx / 2) % 2;  if (c1b1 == 0) { c1Cur = blake2b(byte[](c1Cur) + byte[](c1s1)); } else { c1Cur = blake2b(byte[](c1s1) + byte[](c1Cur)); }
+        int c1b2 = (c1Idx / 4) % 2;  if (c1b2 == 0) { c1Cur = blake2b(byte[](c1Cur) + byte[](c1s2)); } else { c1Cur = blake2b(byte[](c1s2) + byte[](c1Cur)); }
+        int c1b3 = (c1Idx / 8) % 2;  if (c1b3 == 0) { c1Cur = blake2b(byte[](c1Cur) + byte[](c1s3)); } else { c1Cur = blake2b(byte[](c1s3) + byte[](c1Cur)); }
+        int c1b4 = (c1Idx / 16) % 2; if (c1b4 == 0) { c1Cur = blake2b(byte[](c1Cur) + byte[](c1s4)); } else { c1Cur = blake2b(byte[](c1s4) + byte[](c1Cur)); }
+        int c1b5 = (c1Idx / 32) % 2; if (c1b5 == 0) { c1Cur = blake2b(byte[](c1Cur) + byte[](c1s5)); } else { c1Cur = blake2b(byte[](c1s5) + byte[](c1Cur)); }
+        int c1b6 = (c1Idx / 64) % 2; if (c1b6 == 0) { c1Cur = blake2b(byte[](c1Cur) + byte[](c1s6)); } else { c1Cur = blake2b(byte[](c1s6) + byte[](c1Cur)); }
+        int c1b7 = (c1Idx / 128) % 2;if (c1b7 == 0) { c1Cur = blake2b(byte[](c1Cur) + byte[](c1s7)); } else { c1Cur = blake2b(byte[](c1s7) + byte[](c1Cur)); }
+        require(c1Cur == poolMerkleRoot);
+        require(c2Idx >= 0); require(c2Idx < 256);
+        byte[32] c2Cur = blake2b(byte[](c2Pk));
+        int c2b0 = c2Idx % 2;       if (c2b0 == 0) { c2Cur = blake2b(byte[](c2Cur) + byte[](c2s0)); } else { c2Cur = blake2b(byte[](c2s0) + byte[](c2Cur)); }
+        int c2b1 = (c2Idx / 2) % 2;  if (c2b1 == 0) { c2Cur = blake2b(byte[](c2Cur) + byte[](c2s1)); } else { c2Cur = blake2b(byte[](c2s1) + byte[](c2Cur)); }
+        int c2b2 = (c2Idx / 4) % 2;  if (c2b2 == 0) { c2Cur = blake2b(byte[](c2Cur) + byte[](c2s2)); } else { c2Cur = blake2b(byte[](c2s2) + byte[](c2Cur)); }
+        int c2b3 = (c2Idx / 8) % 2;  if (c2b3 == 0) { c2Cur = blake2b(byte[](c2Cur) + byte[](c2s3)); } else { c2Cur = blake2b(byte[](c2s3) + byte[](c2Cur)); }
+        int c2b4 = (c2Idx / 16) % 2; if (c2b4 == 0) { c2Cur = blake2b(byte[](c2Cur) + byte[](c2s4)); } else { c2Cur = blake2b(byte[](c2s4) + byte[](c2Cur)); }
+        int c2b5 = (c2Idx / 32) % 2; if (c2b5 == 0) { c2Cur = blake2b(byte[](c2Cur) + byte[](c2s5)); } else { c2Cur = blake2b(byte[](c2s5) + byte[](c2Cur)); }
+        int c2b6 = (c2Idx / 64) % 2; if (c2b6 == 0) { c2Cur = blake2b(byte[](c2Cur) + byte[](c2s6)); } else { c2Cur = blake2b(byte[](c2s6) + byte[](c2Cur)); }
+        int c2b7 = (c2Idx / 128) % 2;if (c2b7 == 0) { c2Cur = blake2b(byte[](c2Cur) + byte[](c2s7)); } else { c2Cur = blake2b(byte[](c2s7) + byte[](c2Cur)); }
+        require(c2Cur == poolMerkleRoot);
+        require(c3Idx >= 0); require(c3Idx < 256);
+        byte[32] c3Cur = blake2b(byte[](c3Pk));
+        int c3b0 = c3Idx % 2;       if (c3b0 == 0) { c3Cur = blake2b(byte[](c3Cur) + byte[](c3s0)); } else { c3Cur = blake2b(byte[](c3s0) + byte[](c3Cur)); }
+        int c3b1 = (c3Idx / 2) % 2;  if (c3b1 == 0) { c3Cur = blake2b(byte[](c3Cur) + byte[](c3s1)); } else { c3Cur = blake2b(byte[](c3s1) + byte[](c3Cur)); }
+        int c3b2 = (c3Idx / 4) % 2;  if (c3b2 == 0) { c3Cur = blake2b(byte[](c3Cur) + byte[](c3s2)); } else { c3Cur = blake2b(byte[](c3s2) + byte[](c3Cur)); }
+        int c3b3 = (c3Idx / 8) % 2;  if (c3b3 == 0) { c3Cur = blake2b(byte[](c3Cur) + byte[](c3s3)); } else { c3Cur = blake2b(byte[](c3s3) + byte[](c3Cur)); }
+        int c3b4 = (c3Idx / 16) % 2; if (c3b4 == 0) { c3Cur = blake2b(byte[](c3Cur) + byte[](c3s4)); } else { c3Cur = blake2b(byte[](c3s4) + byte[](c3Cur)); }
+        int c3b5 = (c3Idx / 32) % 2; if (c3b5 == 0) { c3Cur = blake2b(byte[](c3Cur) + byte[](c3s5)); } else { c3Cur = blake2b(byte[](c3s5) + byte[](c3Cur)); }
+        int c3b6 = (c3Idx / 64) % 2; if (c3b6 == 0) { c3Cur = blake2b(byte[](c3Cur) + byte[](c3s6)); } else { c3Cur = blake2b(byte[](c3s6) + byte[](c3Cur)); }
+        int c3b7 = (c3Idx / 128) % 2;if (c3b7 == 0) { c3Cur = blake2b(byte[](c3Cur) + byte[](c3s7)); } else { c3Cur = blake2b(byte[](c3s7) + byte[](c3Cur)); }
+        require(c3Cur == poolMerkleRoot);
+        require(c4Idx >= 0); require(c4Idx < 256);
+        byte[32] c4Cur = blake2b(byte[](c4Pk));
+        int c4b0 = c4Idx % 2;       if (c4b0 == 0) { c4Cur = blake2b(byte[](c4Cur) + byte[](c4s0)); } else { c4Cur = blake2b(byte[](c4s0) + byte[](c4Cur)); }
+        int c4b1 = (c4Idx / 2) % 2;  if (c4b1 == 0) { c4Cur = blake2b(byte[](c4Cur) + byte[](c4s1)); } else { c4Cur = blake2b(byte[](c4s1) + byte[](c4Cur)); }
+        int c4b2 = (c4Idx / 4) % 2;  if (c4b2 == 0) { c4Cur = blake2b(byte[](c4Cur) + byte[](c4s2)); } else { c4Cur = blake2b(byte[](c4s2) + byte[](c4Cur)); }
+        int c4b3 = (c4Idx / 8) % 2;  if (c4b3 == 0) { c4Cur = blake2b(byte[](c4Cur) + byte[](c4s3)); } else { c4Cur = blake2b(byte[](c4s3) + byte[](c4Cur)); }
+        int c4b4 = (c4Idx / 16) % 2; if (c4b4 == 0) { c4Cur = blake2b(byte[](c4Cur) + byte[](c4s4)); } else { c4Cur = blake2b(byte[](c4s4) + byte[](c4Cur)); }
+        int c4b5 = (c4Idx / 32) % 2; if (c4b5 == 0) { c4Cur = blake2b(byte[](c4Cur) + byte[](c4s5)); } else { c4Cur = blake2b(byte[](c4s5) + byte[](c4Cur)); }
+        int c4b6 = (c4Idx / 64) % 2; if (c4b6 == 0) { c4Cur = blake2b(byte[](c4Cur) + byte[](c4s6)); } else { c4Cur = blake2b(byte[](c4s6) + byte[](c4Cur)); }
+        int c4b7 = (c4Idx / 128) % 2;if (c4b7 == 0) { c4Cur = blake2b(byte[](c4Cur) + byte[](c4s7)); } else { c4Cur = blake2b(byte[](c4s7) + byte[](c4Cur)); }
+        require(c4Cur == poolMerkleRoot);
+        validateOutputState(selfOutIdx, {
+            consolidated_pool:  consolidated_pool,
+            closed:             1,
+            payoutRoot:         new_payoutRoot,
+            w0: w0, w1: w1, w2: w2, w3: w3, w4: w4, w5: w5, w6: w6, w7: w7, w8: w8, w9: w9, w10: w10, w11: w11, w12: w12, w13: w13, w14: w14, w15: w15, w16: w16,
+            attestedWinner:    new_attestedWinner,
+            attestedAtMs:      new_attestedAtMs,
+            betsRootBaked:     new_betsRoot,
+            refundRootBaked:   new_refundRoot
+        });
+        require(tx.outputs[selfOutIdx].value == consolidated_pool);
+    }
+
+    // 🔴 entry "claim" 已删除(Bettor 拍板，非 flag 门) —— 见文件头注释⑤。ZK-native 市场的赢家支付路径 =
+    //    CloseZkRepro4 独占，PayoutShardV2 上没有第二条领钱路径。
+
+    // —— entry 2(原3): cancel_attest —— [REGRESSION: 委员逻辑一字不动；补新增4字段透传, 跟 ZK 无关不变] ——
+    entrypoint function cancel_attest(
+        int      selfOutIdx,
+        byte[32] new_refundRoot,
+        sig      c0Sig, sig c1Sig, sig c2Sig, sig c3Sig, sig c4Sig,
+        byte[32] committeePkHash,
+        byte[32] c0Pk, byte[32] c1Pk, byte[32] c2Pk, byte[32] c3Pk, byte[32] c4Pk,
+        int      c0Idx, int c1Idx, int c2Idx, int c3Idx, int c4Idx,
+        byte[32] c0s0, byte[32] c0s1, byte[32] c0s2, byte[32] c0s3, byte[32] c0s4, byte[32] c0s5, byte[32] c0s6, byte[32] c0s7,
+        byte[32] c1s0, byte[32] c1s1, byte[32] c1s2, byte[32] c1s3, byte[32] c1s4, byte[32] c1s5, byte[32] c1s6, byte[32] c1s7,
+        byte[32] c2s0, byte[32] c2s1, byte[32] c2s2, byte[32] c2s3, byte[32] c2s4, byte[32] c2s5, byte[32] c2s6, byte[32] c2s7,
+        byte[32] c3s0, byte[32] c3s1, byte[32] c3s2, byte[32] c3s3, byte[32] c3s4, byte[32] c3s5, byte[32] c3s6, byte[32] c3s7,
+        byte[32] c4s0, byte[32] c4s1, byte[32] c4s2, byte[32] c4s3, byte[32] c4s4, byte[32] c4s5, byte[32] c4s6, byte[32] c4s7
+    ) {
+        require(closed == 0);
+        require(blake2b(byte[](predicate_commit)) != predicate_commit);
+        int validSigs = 0;
+        if (checkSig(c0Sig, pubkey(c0Pk))) { validSigs = validSigs + 1; }
+        if (checkSig(c1Sig, pubkey(c1Pk))) { validSigs = validSigs + 1; }
+        if (checkSig(c2Sig, pubkey(c2Pk))) { validSigs = validSigs + 1; }
+        if (checkSig(c3Sig, pubkey(c3Pk))) { validSigs = validSigs + 1; }
+        if (checkSig(c4Sig, pubkey(c4Pk))) { validSigs = validSigs + 1; }
+        require(validSigs >= 4);
+        require(c0Pk != c1Pk); require(c0Pk != c2Pk); require(c0Pk != c3Pk); require(c0Pk != c4Pk);
+        require(c1Pk != c2Pk); require(c1Pk != c3Pk); require(c1Pk != c4Pk);
+        require(c2Pk != c3Pk); require(c2Pk != c4Pk);
+        require(c3Pk != c4Pk);
+        byte[] dConcat0 = c0Pk + c1Pk;
+        byte[] dConcat1 = dConcat0 + c2Pk;
+        byte[] dConcat2 = dConcat1 + c3Pk;
+        byte[] dConcat3 = dConcat2 + c4Pk;
+        require(blake2b(dConcat3) == committeePkHash);
+        require(c0Idx >= 0); require(c0Idx < 256);
+        byte[32] d0Cur = blake2b(byte[](c0Pk));
+        int d0b0 = c0Idx % 2;       if (d0b0 == 0) { d0Cur = blake2b(byte[](d0Cur) + byte[](c0s0)); } else { d0Cur = blake2b(byte[](c0s0) + byte[](d0Cur)); }
+        int d0b1 = (c0Idx / 2) % 2;  if (d0b1 == 0) { d0Cur = blake2b(byte[](d0Cur) + byte[](c0s1)); } else { d0Cur = blake2b(byte[](c0s1) + byte[](d0Cur)); }
+        int d0b2 = (c0Idx / 4) % 2;  if (d0b2 == 0) { d0Cur = blake2b(byte[](d0Cur) + byte[](c0s2)); } else { d0Cur = blake2b(byte[](c0s2) + byte[](d0Cur)); }
+        int d0b3 = (c0Idx / 8) % 2;  if (d0b3 == 0) { d0Cur = blake2b(byte[](d0Cur) + byte[](c0s3)); } else { d0Cur = blake2b(byte[](c0s3) + byte[](d0Cur)); }
+        int d0b4 = (c0Idx / 16) % 2; if (d0b4 == 0) { d0Cur = blake2b(byte[](d0Cur) + byte[](c0s4)); } else { d0Cur = blake2b(byte[](c0s4) + byte[](d0Cur)); }
+        int d0b5 = (c0Idx / 32) % 2; if (d0b5 == 0) { d0Cur = blake2b(byte[](d0Cur) + byte[](c0s5)); } else { d0Cur = blake2b(byte[](c0s5) + byte[](d0Cur)); }
+        int d0b6 = (c0Idx / 64) % 2; if (d0b6 == 0) { d0Cur = blake2b(byte[](d0Cur) + byte[](c0s6)); } else { d0Cur = blake2b(byte[](c0s6) + byte[](d0Cur)); }
+        int d0b7 = (c0Idx / 128) % 2;if (d0b7 == 0) { d0Cur = blake2b(byte[](d0Cur) + byte[](c0s7)); } else { d0Cur = blake2b(byte[](c0s7) + byte[](d0Cur)); }
+        require(d0Cur == poolMerkleRoot);
+        require(c1Idx >= 0); require(c1Idx < 256);
+        byte[32] d1Cur = blake2b(byte[](c1Pk));
+        int d1b0 = c1Idx % 2;       if (d1b0 == 0) { d1Cur = blake2b(byte[](d1Cur) + byte[](c1s0)); } else { d1Cur = blake2b(byte[](c1s0) + byte[](d1Cur)); }
+        int d1b1 = (c1Idx / 2) % 2;  if (d1b1 == 0) { d1Cur = blake2b(byte[](d1Cur) + byte[](c1s1)); } else { d1Cur = blake2b(byte[](c1s1) + byte[](d1Cur)); }
+        int d1b2 = (c1Idx / 4) % 2;  if (d1b2 == 0) { d1Cur = blake2b(byte[](d1Cur) + byte[](c1s2)); } else { d1Cur = blake2b(byte[](c1s2) + byte[](d1Cur)); }
+        int d1b3 = (c1Idx / 8) % 2;  if (d1b3 == 0) { d1Cur = blake2b(byte[](d1Cur) + byte[](c1s3)); } else { d1Cur = blake2b(byte[](c1s3) + byte[](d1Cur)); }
+        int d1b4 = (c1Idx / 16) % 2; if (d1b4 == 0) { d1Cur = blake2b(byte[](d1Cur) + byte[](c1s4)); } else { d1Cur = blake2b(byte[](c1s4) + byte[](d1Cur)); }
+        int d1b5 = (c1Idx / 32) % 2; if (d1b5 == 0) { d1Cur = blake2b(byte[](d1Cur) + byte[](c1s5)); } else { d1Cur = blake2b(byte[](c1s5) + byte[](d1Cur)); }
+        int d1b6 = (c1Idx / 64) % 2; if (d1b6 == 0) { d1Cur = blake2b(byte[](d1Cur) + byte[](c1s6)); } else { d1Cur = blake2b(byte[](c1s6) + byte[](d1Cur)); }
+        int d1b7 = (c1Idx / 128) % 2;if (d1b7 == 0) { d1Cur = blake2b(byte[](d1Cur) + byte[](c1s7)); } else { d1Cur = blake2b(byte[](c1s7) + byte[](d1Cur)); }
+        require(d1Cur == poolMerkleRoot);
+        require(c2Idx >= 0); require(c2Idx < 256);
+        byte[32] d2Cur = blake2b(byte[](c2Pk));
+        int d2b0 = c2Idx % 2;       if (d2b0 == 0) { d2Cur = blake2b(byte[](d2Cur) + byte[](c2s0)); } else { d2Cur = blake2b(byte[](c2s0) + byte[](d2Cur)); }
+        int d2b1 = (c2Idx / 2) % 2;  if (d2b1 == 0) { d2Cur = blake2b(byte[](d2Cur) + byte[](c2s1)); } else { d2Cur = blake2b(byte[](c2s1) + byte[](d2Cur)); }
+        int d2b2 = (c2Idx / 4) % 2;  if (d2b2 == 0) { d2Cur = blake2b(byte[](d2Cur) + byte[](c2s2)); } else { d2Cur = blake2b(byte[](c2s2) + byte[](d2Cur)); }
+        int d2b3 = (c2Idx / 8) % 2;  if (d2b3 == 0) { d2Cur = blake2b(byte[](d2Cur) + byte[](c2s3)); } else { d2Cur = blake2b(byte[](c2s3) + byte[](d2Cur)); }
+        int d2b4 = (c2Idx / 16) % 2; if (d2b4 == 0) { d2Cur = blake2b(byte[](d2Cur) + byte[](c2s4)); } else { d2Cur = blake2b(byte[](c2s4) + byte[](d2Cur)); }
+        int d2b5 = (c2Idx / 32) % 2; if (d2b5 == 0) { d2Cur = blake2b(byte[](d2Cur) + byte[](c2s5)); } else { d2Cur = blake2b(byte[](c2s5) + byte[](d2Cur)); }
+        int d2b6 = (c2Idx / 64) % 2; if (d2b6 == 0) { d2Cur = blake2b(byte[](d2Cur) + byte[](c2s6)); } else { d2Cur = blake2b(byte[](c2s6) + byte[](d2Cur)); }
+        int d2b7 = (c2Idx / 128) % 2;if (d2b7 == 0) { d2Cur = blake2b(byte[](d2Cur) + byte[](c2s7)); } else { d2Cur = blake2b(byte[](c2s7) + byte[](d2Cur)); }
+        require(d2Cur == poolMerkleRoot);
+        require(c3Idx >= 0); require(c3Idx < 256);
+        byte[32] d3Cur = blake2b(byte[](c3Pk));
+        int d3b0 = c3Idx % 2;       if (d3b0 == 0) { d3Cur = blake2b(byte[](d3Cur) + byte[](c3s0)); } else { d3Cur = blake2b(byte[](c3s0) + byte[](d3Cur)); }
+        int d3b1 = (c3Idx / 2) % 2;  if (d3b1 == 0) { d3Cur = blake2b(byte[](d3Cur) + byte[](c3s1)); } else { d3Cur = blake2b(byte[](c3s1) + byte[](d3Cur)); }
+        int d3b2 = (c3Idx / 4) % 2;  if (d3b2 == 0) { d3Cur = blake2b(byte[](d3Cur) + byte[](c3s2)); } else { d3Cur = blake2b(byte[](c3s2) + byte[](d3Cur)); }
+        int d3b3 = (c3Idx / 8) % 2;  if (d3b3 == 0) { d3Cur = blake2b(byte[](d3Cur) + byte[](c3s3)); } else { d3Cur = blake2b(byte[](c3s3) + byte[](d3Cur)); }
+        int d3b4 = (c3Idx / 16) % 2; if (d3b4 == 0) { d3Cur = blake2b(byte[](d3Cur) + byte[](c3s4)); } else { d3Cur = blake2b(byte[](c3s4) + byte[](d3Cur)); }
+        int d3b5 = (c3Idx / 32) % 2; if (d3b5 == 0) { d3Cur = blake2b(byte[](d3Cur) + byte[](c3s5)); } else { d3Cur = blake2b(byte[](c3s5) + byte[](d3Cur)); }
+        int d3b6 = (c3Idx / 64) % 2; if (d3b6 == 0) { d3Cur = blake2b(byte[](d3Cur) + byte[](c3s6)); } else { d3Cur = blake2b(byte[](c3s6) + byte[](d3Cur)); }
+        int d3b7 = (c3Idx / 128) % 2;if (d3b7 == 0) { d3Cur = blake2b(byte[](d3Cur) + byte[](c3s7)); } else { d3Cur = blake2b(byte[](c3s7) + byte[](d3Cur)); }
+        require(d3Cur == poolMerkleRoot);
+        require(c4Idx >= 0); require(c4Idx < 256);
+        byte[32] d4Cur = blake2b(byte[](c4Pk));
+        int d4b0 = c4Idx % 2;       if (d4b0 == 0) { d4Cur = blake2b(byte[](d4Cur) + byte[](c4s0)); } else { d4Cur = blake2b(byte[](c4s0) + byte[](d4Cur)); }
+        int d4b1 = (c4Idx / 2) % 2;  if (d4b1 == 0) { d4Cur = blake2b(byte[](d4Cur) + byte[](c4s1)); } else { d4Cur = blake2b(byte[](c4s1) + byte[](d4Cur)); }
+        int d4b2 = (c4Idx / 4) % 2;  if (d4b2 == 0) { d4Cur = blake2b(byte[](d4Cur) + byte[](c4s2)); } else { d4Cur = blake2b(byte[](c4s2) + byte[](d4Cur)); }
+        int d4b3 = (c4Idx / 8) % 2;  if (d4b3 == 0) { d4Cur = blake2b(byte[](d4Cur) + byte[](c4s3)); } else { d4Cur = blake2b(byte[](c4s3) + byte[](d4Cur)); }
+        int d4b4 = (c4Idx / 16) % 2; if (d4b4 == 0) { d4Cur = blake2b(byte[](d4Cur) + byte[](c4s4)); } else { d4Cur = blake2b(byte[](c4s4) + byte[](d4Cur)); }
+        int d4b5 = (c4Idx / 32) % 2; if (d4b5 == 0) { d4Cur = blake2b(byte[](d4Cur) + byte[](c4s5)); } else { d4Cur = blake2b(byte[](c4s5) + byte[](d4Cur)); }
+        int d4b6 = (c4Idx / 64) % 2; if (d4b6 == 0) { d4Cur = blake2b(byte[](d4Cur) + byte[](c4s6)); } else { d4Cur = blake2b(byte[](c4s6) + byte[](d4Cur)); }
+        int d4b7 = (c4Idx / 128) % 2;if (d4b7 == 0) { d4Cur = blake2b(byte[](d4Cur) + byte[](c4s7)); } else { d4Cur = blake2b(byte[](c4s7) + byte[](d4Cur)); }
+        require(d4Cur == poolMerkleRoot);
+        validateOutputState(selfOutIdx, {
+            consolidated_pool:  consolidated_pool,
+            closed:             2,
+            payoutRoot:         new_refundRoot,
+            w0: w0, w1: w1, w2: w2, w3: w3, w4: w4, w5: w5, w6: w6, w7: w7, w8: w8, w9: w9, w10: w10, w11: w11, w12: w12, w13: w13, w14: w14, w15: w15, w16: w16,
+            attestedWinner:    attestedWinner,
+            attestedAtMs:      attestedAtMs,
+            betsRootBaked:     betsRootBaked,
+            refundRootBaked:   refundRootBaked
+        });
+        require(tx.outputs[selfOutIdx].value == consolidated_pool);
+    }
+
+    // —— entry 3(原4): refund_claim —— [REGRESSION: 逻辑一字不动; 补新增4字段透传, closed==2 跟 zk_handoff 互斥] ——
+    entrypoint function refund_claim(
+        int selfOutIdx, int refundOutIdx,
+        byte[32] bettorPk, int refund, int merkle_index,
+        byte[32] s0, byte[32] s1, byte[32] s2, byte[32] s3, byte[32] s4, byte[32] s5, byte[32] s6, byte[32] s7, byte[32] s8, byte[32] s9
+    ) {
+        require(closed == 2);
+        require(merkle_index >= 0); require(merkle_index < 1024);
+        require(refund >= 1); require(refund <= consolidated_pool);
+        byte[32] cur = blake2b(byte[](bettorPk) + byte[](refund, 8));
+        int div = 1;
+        int b0 = (merkle_index / div) % 2; if (b0 == 0) { cur = blake2b(byte[](cur) + byte[](s0)); } else { cur = blake2b(byte[](s0) + byte[](cur)); } div = div * 2;
+        int b1 = (merkle_index / div) % 2; if (b1 == 0) { cur = blake2b(byte[](cur) + byte[](s1)); } else { cur = blake2b(byte[](s1) + byte[](cur)); } div = div * 2;
+        int b2 = (merkle_index / div) % 2; if (b2 == 0) { cur = blake2b(byte[](cur) + byte[](s2)); } else { cur = blake2b(byte[](s2) + byte[](cur)); } div = div * 2;
+        int b3 = (merkle_index / div) % 2; if (b3 == 0) { cur = blake2b(byte[](cur) + byte[](s3)); } else { cur = blake2b(byte[](s3) + byte[](cur)); } div = div * 2;
+        int b4 = (merkle_index / div) % 2; if (b4 == 0) { cur = blake2b(byte[](cur) + byte[](s4)); } else { cur = blake2b(byte[](s4) + byte[](cur)); } div = div * 2;
+        int b5 = (merkle_index / div) % 2; if (b5 == 0) { cur = blake2b(byte[](cur) + byte[](s5)); } else { cur = blake2b(byte[](s5) + byte[](cur)); } div = div * 2;
+        int b6 = (merkle_index / div) % 2; if (b6 == 0) { cur = blake2b(byte[](cur) + byte[](s6)); } else { cur = blake2b(byte[](s6) + byte[](cur)); } div = div * 2;
+        int b7 = (merkle_index / div) % 2; if (b7 == 0) { cur = blake2b(byte[](cur) + byte[](s7)); } else { cur = blake2b(byte[](s7) + byte[](cur)); } div = div * 2;
+        int b8 = (merkle_index / div) % 2; if (b8 == 0) { cur = blake2b(byte[](cur) + byte[](s8)); } else { cur = blake2b(byte[](s8) + byte[](cur)); } div = div * 2;
+        int b9 = (merkle_index / div) % 2; if (b9 == 0) { cur = blake2b(byte[](cur) + byte[](s9)); } else { cur = blake2b(byte[](s9) + byte[](cur)); } div = div * 2;
+        require(cur == payoutRoot);
+        int word_idx = merkle_index / 63;
+        int bit_in   = merkle_index % 63;
+        int mask = 1;
+        for (b, 0, bit_in, 63) { mask = mask * 2; }
+        int nw0 = w0; int nw1 = w1; int nw2 = w2; int nw3 = w3; int nw4 = w4; int nw5 = w5; int nw6 = w6; int nw7 = w7; int nw8 = w8;
+        int nw9 = w9; int nw10 = w10; int nw11 = w11; int nw12 = w12; int nw13 = w13; int nw14 = w14; int nw15 = w15; int nw16 = w16;
+        if (word_idx == 0)       { require((w0 / mask) % 2 == 0); nw0 = w0 + mask; }
+        else if (word_idx == 1)  { require((w1 / mask) % 2 == 0); nw1 = w1 + mask; }
+        else if (word_idx == 2)  { require((w2 / mask) % 2 == 0); nw2 = w2 + mask; }
+        else if (word_idx == 3)  { require((w3 / mask) % 2 == 0); nw3 = w3 + mask; }
+        else if (word_idx == 4)  { require((w4 / mask) % 2 == 0); nw4 = w4 + mask; }
+        else if (word_idx == 5)  { require((w5 / mask) % 2 == 0); nw5 = w5 + mask; }
+        else if (word_idx == 6)  { require((w6 / mask) % 2 == 0); nw6 = w6 + mask; }
+        else if (word_idx == 7)  { require((w7 / mask) % 2 == 0); nw7 = w7 + mask; }
+        else if (word_idx == 8)  { require((w8 / mask) % 2 == 0); nw8 = w8 + mask; }
+        else if (word_idx == 9)  { require((w9 / mask) % 2 == 0); nw9 = w9 + mask; }
+        else if (word_idx == 10) { require((w10 / mask) % 2 == 0); nw10 = w10 + mask; }
+        else if (word_idx == 11) { require((w11 / mask) % 2 == 0); nw11 = w11 + mask; }
+        else if (word_idx == 12) { require((w12 / mask) % 2 == 0); nw12 = w12 + mask; }
+        else if (word_idx == 13) { require((w13 / mask) % 2 == 0); nw13 = w13 + mask; }
+        else if (word_idx == 14) { require((w14 / mask) % 2 == 0); nw14 = w14 + mask; }
+        else if (word_idx == 15) { require((w15 / mask) % 2 == 0); nw15 = w15 + mask; }
+        else                     { require((w16 / mask) % 2 == 0); nw16 = w16 + mask; }
+        byte[34] refundLock = new ScriptPubKeyP2PK(pubkey(bettorPk));
+        require(tx.outputs[refundOutIdx].scriptPubKey == byte[](refundLock));
+        require(tx.outputs[refundOutIdx].value == refund);
+        validateOutputState(selfOutIdx, {
+            consolidated_pool:  consolidated_pool - refund,
+            closed:             2,
+            payoutRoot:         payoutRoot,
+            w0: nw0, w1: nw1, w2: nw2, w3: nw3, w4: nw4, w5: nw5, w6: nw6, w7: nw7, w8: nw8, w9: nw9, w10: nw10, w11: nw11, w12: nw12, w13: nw13, w14: nw14, w15: nw15, w16: nw16,
+            attestedWinner:    attestedWinner,
+            attestedAtMs:      attestedAtMs,
+            betsRootBaked:     betsRootBaked,
+            refundRootBaked:   refundRootBaked
+        });
+        require(tx.outputs[selfOutIdx].value == consolidated_pool - refund);
+    }
+
+    // —— entry 4: zk_handoff(新增) —— committee attest 完成(closed==1)后，一次性把全部 consolidated_pool
+    //    交接给新铸的 CloseZkRepro4 genesis output。无 continuation(生命周期终点，同 escape_claim last-claimant)。
+    //
+    // 🔴 byte-exact 重构(2026-07-07，J2 用 fixed silverc 实测 CloseZkRepro4 编译产物验证，非猜测)：
+    //   genesis redeem = byte[1](107)                                             // 固定(script[0:1]，跟 state 值无关)
+    //                  + STATE_BYTES(attestedWinner/closed=1/payoutRootField=ZERO32/consolidated_pool/17×w=0)  // 213B，canonical fixed-width splice(同 pool-shard-state-serialize.mjs 模式)
+    //                  + templateA(59B: script[214:273]，含 gateTmplHash 32B，对所有 ZK-native 市场固定不变)
+    //                  + betsRootBaked(32B，本合约 state)
+    //                  + templateB(336B: script[305:641])
+    //                  + [0x06 + attestedAtMs 6B LE](7B，本合约 state；仅在 2^40≤attestedAtMs<2^47 时宽度稳定
+    //                    —— 见下方 bounds guard，Bettor+NWT 联合实测确认 2026 年起 10 年内 ms 时间戳全部落在此域)
+    //                  + templateC(748B: script[648:1396])
+    //                  + refundRootBaked(32B，本合约 state)
+    //                  + templateD(2903B: script[1428:end])
+    //   templateA+B+C+D 四段拼接后的 blake2b = closeZkTmplAnchor(ctor 烤值)。J2 已在 JS 侧对真实编译产物做过
+    //   逐字节自测(scratch 环境，非本文件)：reconstructed.equals(realCompiledScript) === true。NWT 复核用
+    //   同样手法(canonical-pipeline 工具，非手打猜)重新验证一遍，不能只信这段注释。
+    entrypoint function zk_handoff(
+        int      selfOutIdx,
+        byte[]   templateA,
+        byte[]   templateB,
+        byte[]   templateC,
+        byte[]   templateD
+    ) {
+        require(closed == 1);
+        // ⚠ bounds guard(NWT+Bettor 联合提案，实测确认稳定域): attestedAtMs 必须落在 [2^40, 2^47) 才能保证
+        // 6-byte minimal-push 宽度稳定(J2 实测: now/+1y/+2y/+10y 全部同宽同位置)。越界拒绝，不静默产生错误宽度。
+        require(attestedAtMs >= 1099511627776);
+        require(attestedAtMs < 140737488355328);
+        // 🔒 锚定检查: witness 供的 4 段固定模板必须匹配 ctor 烤死的模板锚——防止 caller 自由构造任意
+        // "CloseZk 模板"(带后门 redeem)通过下面的重构检查卷走全池(同 w0in CRITICAL bug 同一 class)。
+        require(blake2b(templateA + templateB + templateC + templateD) == closeZkTmplAnchor);
+        // STATE_BYTES: attestedWinner(9B)+closed=1(9B)+payoutRootField=ZERO32(33B)+consolidated_pool(9B)+17×w=0(9B each)。
+        byte[1] push8 = byte[1](8);
+        byte[1] push32 = byte[1](32);
+        // 🔴 修复(debugger实测抓出): byte[32](0)不合法——NUM2BIN target size对int-to-bytes cast上限8字节,
+        // 不能直接把int 0扩到32字节。改用4×8字节零拼接达到32字节(同8字节上限内合法)。
+        byte[] zero32 = byte[](0, 8) + byte[](0, 8) + byte[](0, 8) + byte[](0, 8);
+        byte[] zeroWord = push8 + byte[](0, 8);
+        byte[] stateBytes = push8 + byte[](attestedWinner, 8)
+            + push8 + byte[](1, 8)
+            + push32 + zero32
+            + push8 + byte[](consolidated_pool, 8)
+            + zeroWord + zeroWord + zeroWord + zeroWord + zeroWord + zeroWord + zeroWord + zeroWord + zeroWord
+            + zeroWord + zeroWord + zeroWord + zeroWord + zeroWord + zeroWord + zeroWord + zeroWord;
+        byte[1] genesisMarker = byte[1](107);
+        byte[1] atMsMarker = byte[1](6);
+        byte[] atMsBytes = atMsMarker + byte[](attestedAtMs, 6);
+        byte[32] expectedCloseZkRedeemHash = blake2b(genesisMarker + stateBytes
+            + templateA + betsRootBaked + templateB + atMsBytes + templateC + refundRootBaked + templateD);
+        require(tx.outputs[selfOutIdx].scriptPubKey == new ScriptPubKeyP2SH(expectedCloseZkRedeemHash));
+        require(tx.outputs[selfOutIdx].value == consolidated_pool);
+        // 无 validateOutputState —— 本 entry 是 PayoutShardV2 生命周期终点(UTXO 花过即不存在)。
+    }
+}

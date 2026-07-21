@@ -129,7 +129,7 @@
             <div class="flex items-center justify-between text-xs py-1 border-b border-warm-100">
               <span class="font-mono text-ink-500" x-text="m.id.slice(0, 22) + '…'"></span>
               <span class="flex items-center gap-3">
-                <span class="text-ink-400" x-text="m.status"></span>
+                <span class="text-ink-400" x-text="statusLabel(m.status)"></span>
                 <span class="tabular-nums" :class="m.pnl_kas == null ? 'text-ink-300' : (parseFloat(m.pnl_kas) < 0 ? 'text-red-600' : 'text-emerald-700')"
                       x-text="m.pnl_kas == null ? ('押 ' + fmtKas(m.stake_kas)) : fmtSignedKas(m.pnl_kas)"></span>
               </span>
@@ -161,6 +161,37 @@ function makerHome() {
       const x = parseFloat(n);
       if (!Number.isFinite(x)) return '0';
       return (x >= 0 ? '+' : '') + x.toFixed(4);
+    },
+    // 查漏补缺(2026-07-04): 之前裸显 protocol_status 原始枚举给 maker——broker-home.eta/my-markets.eta
+    // 早有同一套翻译, 这里没有。
+    // 查漏补缺(2026-07-05 更正): 上面那条注释写错了——kanet-maker.js /pnl 的 by_market[].status
+    // 不是 protocol_status 原值, 是该 endpoint 自己定义的一套状态词汇(settled/refunded/active/
+    // settled_pending_payout/economic_layer_pending), 跟下面这个"③历史(我的市场)"块用的
+    // markets.pool_markets[].protocol_status 是两套不同的东西, 共用一个函数只是巧合命中了几个
+    // 同名 key(completed/refunded)。这里补全 PNL 专属状态的翻译, 别再裸显英文枚举。
+    statusLabel(s) {
+      const m = {
+        pending_oracle_deposits: '等仲裁人接单',
+        pending_oracle_sampling: '抽仲裁人中',
+        pending_oracle_sample: '抽仲裁人中',
+        pending_bettors: '押注中',
+        verifying: '等仲裁人投票',
+        collecting_sigs: '收仲裁人签名',
+        completed: '已结算',
+        cancelled: '已取消',
+        refunded: '已退款',
+        settle_failed: '结算重试中',
+        needs_manual_attribution: '结算核对中',
+        settled_partial_claims: '已结算·部分待领',
+        shard_internal: '押注中',
+        // /api/kanet-maker/pnl 专属(非 protocol_status)
+        settled: '已结算',
+        active: '押注中',
+        settled_pending_payout: '已结算·待回填',
+        // 查漏补缺(2026-07-05, #51 同族): bshard 盘经济层(maker 回收机制)还没实现, 诚实标不谎称"待回填"
+        economic_layer_pending: '已结算·经济层未上线(暂无法结算 maker 收益)',
+      };
+      return m[s] || s || '?';
     },
 
     async init() {

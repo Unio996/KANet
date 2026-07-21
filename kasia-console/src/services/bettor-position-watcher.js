@@ -157,7 +157,8 @@ rule_id: ${rule.id}`;
 
 async function broadcastAlert(relayNodeId, message) {
   try {
-    const PORT = process.env.PORT || 3100;
+    // 2026-07-14(Bettor #k2xd1y 复审抓出的我的漏改: 只查了timeout有没有, 忘了同批查端口——补上)。
+    const PORT = process.env.PORT || 3200;
     const res = await fetch(`http://127.0.0.1:${PORT}/api/chat/send`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

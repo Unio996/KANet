@@ -161,14 +161,14 @@ async function placeGateio({ baseUrl, apiKey, apiSecret, kasPair, side, price, q
       ? {
           currency_pair: kasPair,
           side: 'sell',
-          amount: String(qty),
+          amount: Number(qty).toFixed(8),
           type: 'market',
           time_in_force: 'ioc',
         }
       : {
           currency_pair: kasPair,
           side: side.toLowerCase(),
-          amount: String(qty),
+          amount: Number(qty).toFixed(8),
           price: String(price),
           type: 'limit',
         }
@@ -442,7 +442,7 @@ async function placeHtx({ baseUrl, apiKey, apiSecret, kasPair, side, price, qty 
   const htxSide = side === 'BUY' ? 'buy-limit' : 'sell-limit';
   const body = JSON.stringify({
     'account-id': accountId, symbol: kasPair, type: htxSide,
-    amount: String(qty), price: String(price),
+    amount: Number(qty).toFixed(8), price: String(price),
   });
 
   const res = await fetch(`${baseUrl}${path}?${orderParams.toString()}`, {

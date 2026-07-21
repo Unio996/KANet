@@ -166,9 +166,12 @@ export async function stopRelay(relayNodeId) {
  * relays (e.g. Owner-qrymjvc-tn) down — operator hit it manually 2026-05-30 ~10:00.
  */
 export async function startAll() {
+  // 2026-07-04 (查漏补缺·qzdh7nar/KANet-UI): 原 INNER JOIN adapter_nodes 排除没绑 adapter 的 relay——
+  // 但 startRelay() 本身(上方)用 LEFT JOIN，adapter 只是可选的 http_port 来源，不是启动必要条件。
+  // 条件比实际需求严 = 无 adapter 的 relay 在 Console 重启后永远不会自动拉起(#34 挖矿 relay 撞过)。
+  // 改成跟 startRelay() 资格条件一致，不要求 adapter。
   const accounts = sqlite.prepare(
     `SELECT r.id FROM relay_nodes r
-     JOIN adapter_nodes a ON a.id = r.adapter_node_id
      WHERE r.address IS NOT NULL
        AND (r.mnemonic_encrypted IS NOT NULL OR r.privkey_encrypted IS NOT NULL)`
   ).all();
@@ -324,12 +327,20 @@ export async function getRelayRpcState(relayNodeId) {
  * @param {object} [opts]
  * @param {number} [opts.pollIntervalMs=3000]
  * @param {number} [opts.maxWaitMs=30000]
+ * @param {number} [opts.minDepth] - 事故硬化(2026-07-08, yxllc spine 100KAS 追踪战役): 不传时走
+ *   check_utxo_landed 的默认(浅/mempool-accepted 级)确认——block 层面是 blue 不代表这笔 tx 本身赢了
+ *   acceptance(同一源 UTXO 若被 gateway 自己另一笔并发 tx 竞争, 可能在 acceptance 层输掉, 但两笔都可能
+ *   先后进过 mempool/被广播, 浅确认看不出来)。调用方在"这笔钱后续要落库当作权威真相"的场景(如 create-v07
+ *   的 spine_lock_tx, DB INSERT 之前)必须显式传 minDepth(如 REORG_SAFE_MIN_DEPTH=20, 见
+ *   pool-shard-register.mjs), 用更深的确认换更低的"落库了但链上其实没作数"风险。不传 = 原有行为不变
+ *   (向后兼容, 不强改所有既有调用点的语义)。
  * @returns {Promise<{ ok: true, txId: string, landed: true }>} on confirmed landing
  * @throws if transfer fails OR the UTXO never lands within maxWaitMs
  */
 export async function transferAndConfirm(relayNodeId, target, amount, opts = {}) {
   const pollIntervalMs = opts.pollIntervalMs || 3000;
   const maxWaitMs = opts.maxWaitMs || 30000;
+  const minDepth = opts.minDepth;   // undefined = 原有浅确认行为, 不传不变
 
   const result = await sendCommandAsync(relayNodeId, { type: 'transfer', target, amount });
   if (!result) throw new Error('relay not running');
@@ -337,18 +348,20 @@ export async function transferAndConfirm(relayNodeId, target, amount, opts = {})
   const txId = result.txId;
   if (!txId) throw new Error('transfer returned no txId');
 
-  // Poll until the UTXO from this txId appears at the target (= accepted UTXO set).
+  // Poll until the UTXO from this txId appears at the target (= accepted UTXO set, at minDepth if given).
   const deadline = Date.now() + maxWaitMs;
   while (Date.now() < deadline) {
     await new Promise(r => setTimeout(r, pollIntervalMs));
     let check;
     try {
-      check = await sendCommandAsync(relayNodeId, { type: 'check_utxo_landed', address: target, txid: txId }, 10000);
+      const cmd = { type: 'check_utxo_landed', address: target, txid: txId };
+      if (minDepth != null) cmd.minDepth = minDepth;
+      check = await sendCommandAsync(relayNodeId, cmd, 10000);
     } catch (e) {
       continue;  // transient RPC error — keep polling until deadline
     }
     if (check?.landed) return { ok: true, txId, landed: true };
   }
-  throw new Error(`transfer ${txId} mempool-accepted but UTXO did not land at ${target} within ${maxWaitMs}ms (= likely lost a double-spend race, is_accepted=false)`);
+  throw new Error(`transfer ${txId} mempool-accepted but UTXO did not land at ${target} within ${maxWaitMs}ms${minDepth != null ? ` at minDepth=${minDepth}` : ''} (= likely lost a double-spend race, is_accepted=false)`);
 }
 

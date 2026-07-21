@@ -16,7 +16,11 @@
 import { sqlite } from '../db/client.js';
 
 const TICK_MS = 30 * 1000;
-const BROKER_RELAY_ID = '0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0';
+// Bettor #j5romh r766 身份迁移补全, env 缺失 fail-loud 拒启(死值兜底=定时雷, 见 kanet.env)。
+const BROKER_RELAY_ID = process.env.BROKER_RELAY_ID;
+if (!BROKER_RELAY_ID) {
+  throw new Error('[broker-bsc-intake-watcher] FATAL: BROKER_RELAY_ID env var not set (see kanet.env) — refusing to start with hardcoded dead relay id fallback');
+}
 const SCAN_SPAN_BLOCKS = 1500;  // ~75min BSC (3s blocks)
 const AMOUNT_TOLERANCE_PCT = 0.01;  // ±1% match
 

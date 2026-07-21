@@ -27,6 +27,7 @@ import { sqlite } from '../db/client.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { sendCommandAsync } from './relay-manager.js';
 import { buildDeriveVotePrompt } from './derivevote-prompt.mjs';
+import { toSettleSafeJsonTxHex } from '../lib/settle-safe-json.mjs';
 
 // J2-tn r382 (Bettor 16:29 钦定): TICK_INTERVAL_MS env-configurable. Default 5min mainnet,
 // demo 期 .env 设 PREDICTION_VOTER_TICK_SEC=60 (= 1min) 提速 5x 流水. 与 settler 同 pattern.
@@ -35,6 +36,12 @@ const STARTUP_GRACE_MS = 45 * 1000;        // 45s grace (= settler 30s + 15s 错
 
 let timer = null;
 let running = false;
+
+// J1/NWT 2026-06-28 (gap③ broker-DM settle 根因): relay sign_input_for_settle 默认路用
+// `new Transaction(JSON.parse(plain))` 重建 tx 给 createInputSignature → 新 kaspa-wasm 下 plain-object
+// scriptPublicKey 不被正确注入 sighash → checkSig false → settle "verification failed"(jepu1 8h 卡因)。
+// 2026-07-18 J1tn: 本地 helper 提取到 ../lib/settle-safe-json.mjs 单源(规则64——第三站点
+// trade-protocol-filter.js:handlePoolOracleTxSignReq 漏修坐实后, 三站点共用一份, 函数体零改动)。
 
 // Bettor r472 (P0 incident 2026-06-10): per-(key) log throttle. Stuck offers in a permanent
 // condition (e.g. collecting_sigs with invalid/undefined phase2_winner) were re-warned every
@@ -300,6 +307,11 @@ async function processPoolMarket(voter) {
   // 之前 L283/L291 用 voter.id (UUID) 匹配 → 永不命中 → voted=0 settle 永卡. 改 voter.address
   // 匹 oracle_relay_ids 数组 (= addresses). voter.id 保留给 IPC (get_pubkey/sendCommandAsync/
   // ecdsa_sign). 同 r337 e1468f0 设计未传到所有 reader, 这是 r337 漏迁的 reader.
+  // 🔴 反向结构隔离(2026-07-06 NWT 自动进程横扫抓出，开盘前必堵): bshard(v0.7·含 ZK-native)市场
+  // 用 close_attest 4-of-5 委员多签一笔 tx 背书，不是这里的"每个委员各自广播一笔 pool_oracle_vote"
+  // 机制——这个 voter 若捡到 bshard 市场并广播投票，对该市场是废票(下游 settler/bshard-settle-daemon
+  // 从不读它)，纯浪费真实链上手续费 + 污染 chain_events/oracle_history。用跟 selectRipeMarkets/
+  // pool-market-settler 同款 market_shards 存在性排除，不是新发明的判据。
   const markets = sqlite.prepare(`
     SELECT id, maker_relay_id, outcome_market_source, outcome_token_id, outcome_condition_id, outcome_side,
            resolution_rule_spec, protocol_status, deadline, oracle_relay_ids
@@ -307,6 +319,7 @@ async function processPoolMarket(voter) {
     WHERE oracle_relay_ids LIKE ?
       AND protocol_status = 'verifying'
       AND deadline <= ?
+      AND id NOT IN (SELECT logical_market_id FROM market_shards)
   `).all(`%"${voter.address}"%`, Math.floor(Date.now() / 1000));
   if (!markets.length) return { voted, skipped, errored };
 
@@ -508,11 +521,16 @@ async function processPoolMarket(voter) {
 async function processPoolTxSign(voter) {
   let signed = 0, skipped = 0, errored = 0;
   // J2-tn r357: 同 processPoolMarket — r337 后 oracle_relay_ids 存 addresses, 匹 voter.address.
+  // 防御性 guard(2026-07-06 NWT 横扫③，Bettor 拍板"即使当前靠上游间接安全也要补"): bshard 市场
+  // 目前没有代码会把它写成 collecting_sigs+phase2_tx_obj 组合(间接安全，非本函数结构自证)，但若
+  // 以后有别的代码改变了这个上游前提，这里会立刻暴露成跟 processPoolMarket 同款的废票/污染问题。
+  // 补齐同款 market_shards 排除，不依赖"现在没人触发"这个隐含假设。
   const markets = sqlite.prepare(`
     SELECT id, oracle_relay_ids, metadata
     FROM pool_markets
     WHERE protocol_status = 'collecting_sigs'
       AND oracle_relay_ids LIKE ?
+      AND id NOT IN (SELECT logical_market_id FROM market_shards)
   `).all(`%"${voter.address}"%`);
   if (!markets.length) return { signed, skipped, errored };
 
@@ -575,9 +593,12 @@ async function processPoolTxSign(voter) {
         `).get(voter.address, `%"market_id":"${market.id}"%`, `%"input_index":${inputIdx}%`);
         if (existing) { continue; }
 
+        // J1/NWT 2026-06-28 fix: 转 safe_json 再发 (spk 全保·见 toSettleSafeJsonTxHex 注释)
+        const _safeTxHex = await toSettleSafeJsonTxHex(meta.phase2_tx_obj);
         const signResult = await sendCommandAsync(voter.id, {
           type: 'sign_input_for_settle',
-          tx_hex: JSON.stringify(meta.phase2_tx_obj),
+          tx_hex: _safeTxHex,
+          safe_json: true,
           input_index: inputIdx,
         });
         if (!signResult?.ok || !signResult.signature) {
@@ -628,11 +649,14 @@ async function processPoolTxSign(voter) {
 async function processPoolRefundDisagreementTxSign(voter) {
   let signed = 0, skipped = 0, errored = 0;
   // J2-tn r357: 同 processPoolMarket / processPoolTxSign — r337 后 oracle_relay_ids 存 addresses.
+  // 防御性 guard(2026-07-06 NWT 横扫③，同 processPoolTxSign 那份理由): bshard 市场目前不会被
+  // 写成这个函数依赖的 collecting_sigs 组合(间接安全)，补齐 market_shards 排除防未来上游前提变化。
   const markets = sqlite.prepare(`
     SELECT id, oracle_relay_ids, metadata
     FROM pool_markets
     WHERE protocol_status = 'collecting_sigs'
       AND oracle_relay_ids LIKE ?
+      AND id NOT IN (SELECT logical_market_id FROM market_shards)
   `).all(`%"${voter.address}"%`);
   if (!markets.length) return { signed, skipped, errored };
 
@@ -669,9 +693,14 @@ async function processPoolRefundDisagreementTxSign(voter) {
         `).get(voter.address, `%"market_id":"${market.id}"%`, `%"input_index":${inputIdx}%`);
         if (existing) continue;
 
+        // 🔴 第五签名站点 safe_json 补修(2026-07-18 J1tn, settle-safe-json.test.mjs 枚举层首跑抓出):
+        // c8188d98 修本文件两站点时连同文件内的这处 refund-disagreement 站点也漏了——裸 JSON =
+        // 同款坏 sighash 路径, 任何 pool refund-disagreement 结算都会撞 verify-failed。同款单源修法。
+        const _safeRdTxHex = await toSettleSafeJsonTxHex(meta.refund_disagreement_tx_obj);
         const signResult = await sendCommandAsync(voter.id, {
           type: 'sign_input_for_settle',
-          tx_hex: JSON.stringify(meta.refund_disagreement_tx_obj),
+          tx_hex: _safeRdTxHex,
+          safe_json: true,
           input_index: inputIdx,
         });
         if (!signResult?.ok || !signResult.signature) {
@@ -1106,9 +1135,12 @@ async function handleTxSignReq(voter, offer) {
   for (let inputIdx = 0; inputIdx < 2; inputIdx++) {
     if (signedInputs.has(inputIdx)) continue;  // already signed this input
     try {
+      // J1/NWT 2026-06-28 fix: 转 safe_json 再发 (spk 全保·见 toSettleSafeJsonTxHex 注释)
+      const _safeTxHex = await toSettleSafeJsonTxHex(meta.phase2_tx_obj);
       const signResult = await sendCommandAsync(voter.id, {
         type: 'sign_input_for_settle',
-        tx_hex: JSON.stringify(meta.phase2_tx_obj),  // relay JSON.parse 还原 tx_obj
+        tx_hex: _safeTxHex,
+        safe_json: true,
         input_index: inputIdx,
       });
       if (!signResult?.ok || !signResult.signature) {

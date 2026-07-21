@@ -43,51 +43,59 @@ expectThrow('reject zero deadline', () => describeEndBlockRule(0), 'positive int
 expectThrow('reject negative deadline', () => describeEndBlockRule(-1), 'positive integer');
 
 // 2. fetchEndBlockHashCanonical with stub reader
+// 2026-07-16 J2 (settler 域坏测试卡, Bettor #o0ddcf.1 派工): 契约已升级为 SPC-only fail-closed
+// (pool-market-settler-v06.mjs:104-106, 'J2-tn r332' 注释——无 ring buffer fallback, 单点
+// chainReader.getBlockAtDaa(minDaa) 直查, 不再是 chainReader.getBlocksFromDaaScore 返回数组
+// 让本函数自己 scan 找第一个 crossing 的块)。本文件 mock 一直停在旧契约, 从没跟着升级过
+// (git diff 确认: J1 spc_daa_index 落码零接触本文件, 是更早的 signature 改动漏改测试)。
+// 逐 case 重写为新契约 mock; "reject below-threshold-only response" 测的是旧 scan 逻辑,
+// 新契约下该场景不存在(threshold-crossing 由 chainReader 自己的 SPC walk 负责, 不再是本函数
+// 的职责), 整条删除而非改写。
 {
   // current at 100_100, picked at 100_000 → depth 100 ≥ 50 default → OK
   const reader = {
-    async getBlocksFromDaaScore(minDaa) {
-      return [
-        { hash: 'aa'.repeat(32), daaScore: minDaa - 1 },
-        { hash: 'bb'.repeat(32), daaScore: minDaa },
-        { hash: 'cc'.repeat(32), daaScore: minDaa + 1 },
-      ];
-    },
+    async getBlockAtDaa(minDaa) { return { hash: 'bb'.repeat(32), daaScore: minDaa }; },
     async getCurrentDaaScore() { return 100_100; },
   };
   const r = await fetchEndBlockHashCanonical(reader, 100_000);
-  assert('fetch picks first crossing daaScore', r.hash === 'bb'.repeat(32));
+  assert('fetch picks block at deadline daaScore', r.hash === 'bb'.repeat(32));
   assert('block_daa matches', r.block_daa === 100_000);
   assert('finality_depth_actual = 100', r.finality_depth_actual === 100);
 }
 
-await expectAsyncThrow('reject empty chain response', async () => {
+await expectAsyncThrow('reject no block found at deadline (SPC walk未达)', async () => {
   await fetchEndBlockHashCanonical({
-    async getBlocksFromDaaScore() { return []; },
+    async getBlockAtDaa() { return null; },
     async getCurrentDaaScore() { return 100_100; },
   }, 100_000);
-}, 'no blocks');
+}, 'no block at daaScore');
 
-await expectAsyncThrow('reject invalid reader (no getBlocks)', async () => {
+await expectAsyncThrow('reject invalid reader (no getCurrentDaaScore)', async () => {
   await fetchEndBlockHashCanonical({}, 100_000);
 }, 'chainReader');
 
 await expectAsyncThrow('reject reader missing getCurrentDaaScore (F-S1 finality)', async () => {
   await fetchEndBlockHashCanonical({
-    async getBlocksFromDaaScore(minDaa) { return [{ hash: 'aa'.repeat(32), daaScore: minDaa }]; },
+    async getBlockAtDaa(minDaa) { return { hash: 'aa'.repeat(32), daaScore: minDaa }; },
   }, 100_000);
 }, 'getCurrentDaaScore');
 
-await expectAsyncThrow('reject below-threshold-only response', async () => {
+await expectAsyncThrow('reject invalid reader (no getBlockAtDaa)', async () => {
   await fetchEndBlockHashCanonical({
-    async getBlocksFromDaaScore(minDaa) { return [{ hash: 'aa'.repeat(32), daaScore: minDaa - 5 }]; },
     async getCurrentDaaScore() { return 100_100; },
   }, 100_000);
-}, 'none crossed');
+}, 'getBlockAtDaa');
+
+await expectAsyncThrow('reject chain rewinded (currentDaa < picked block daaScore)', async () => {
+  await fetchEndBlockHashCanonical({
+    async getBlockAtDaa(minDaa) { return { hash: 'bb'.repeat(32), daaScore: minDaa }; },
+    async getCurrentDaaScore() { return 99_999; }, // < picked block daaScore 100_000
+  }, 100_000);
+}, 'rewinded');
 
 await expectAsyncThrow('reject wrong hash length', async () => {
   await fetchEndBlockHashCanonical({
-    async getBlocksFromDaaScore(minDaa) { return [{ hash: 'aabb', daaScore: minDaa }]; },
+    async getBlockAtDaa(minDaa) { return { hash: 'aabb', daaScore: minDaa }; },
     async getCurrentDaaScore() { return 100_100; },
   }, 100_000);
 }, '64-char hex');
@@ -95,7 +103,7 @@ await expectAsyncThrow('reject wrong hash length', async () => {
 // F-S1 finality depth tests (Bettor r48 close gate ① residual fix)
 await expectAsyncThrow('reject pre-finality block (depth < 50 default)', async () => {
   await fetchEndBlockHashCanonical({
-    async getBlocksFromDaaScore(minDaa) { return [{ hash: 'bb'.repeat(32), daaScore: minDaa }]; },
+    async getBlockAtDaa(minDaa) { return { hash: 'bb'.repeat(32), daaScore: minDaa }; },
     async getCurrentDaaScore() { return 100_010; }, // depth = 10, < 50 default
   }, 100_000);
 }, 'finality');
@@ -103,7 +111,7 @@ await expectAsyncThrow('reject pre-finality block (depth < 50 default)', async (
 {
   // custom finalityDepth=20 allows depth-30 block
   const r = await fetchEndBlockHashCanonical({
-    async getBlocksFromDaaScore(minDaa) { return [{ hash: 'bb'.repeat(32), daaScore: minDaa }]; },
+    async getBlockAtDaa(minDaa) { return { hash: 'bb'.repeat(32), daaScore: minDaa }; },
     async getCurrentDaaScore() { return 100_030; },
   }, 100_000, 20);
   assert('custom finalityDepth=20 + depth 30 passes', r.hash === 'bb'.repeat(32));
@@ -111,7 +119,7 @@ await expectAsyncThrow('reject pre-finality block (depth < 50 default)', async (
 
 await expectAsyncThrow('reject negative finalityDepth', async () => {
   await fetchEndBlockHashCanonical({
-    async getBlocksFromDaaScore(minDaa) { return [{ hash: 'bb'.repeat(32), daaScore: minDaa }]; },
+    async getBlockAtDaa(minDaa) { return { hash: 'bb'.repeat(32), daaScore: minDaa }; },
     async getCurrentDaaScore() { return 100_100; },
   }, 100_000, -1);
 }, 'non-negative');

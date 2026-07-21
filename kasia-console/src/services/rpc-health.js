@@ -10,6 +10,8 @@
  */
 import { getConfig } from '../data/settings/configs.js';
 import net from 'net';
+import { sqlite } from '../db/client.js';
+import { randomUUID } from 'node:crypto';
 
 // 5/26 根治: env single source, 0 hardcode. C 盘/D 盘同 code 跑两环境, 0 drift.
 // fail-fast 暴 surface 错配, 不再 silent fallback mainnet 默认.
@@ -183,6 +185,17 @@ export async function getWorkingRpc() {
   // 全部失败
   console.warn('[rpc-health] no RPC node available');
   _cache = { url: null, isLocal: false, ts: 0 }; // 不缓存失败
+  // 2026-07-21(Bettor #utf9ze①, KANet-UI): 单纯留痕原始失败信号, 不在这里做计数/告警判断
+  // (阈值/去重/播频道逻辑在 rpc-health-observability-monitor.mjs 里, 同 K-18 gate 写事件 vs
+  // coherence-observability-monitor 判断分层的既有约定, 这里出错也不能影响调用方拿到的返回值)。
+  try {
+    sqlite.prepare(`
+      INSERT INTO events (id, event_scope, event_type, source, level, summary, payload_json, created_at)
+      VALUES (?, 'system', 'rpc_health_check_failed', 'rpc-health', 'warn', 'getWorkingRpc() 全部候选(local/configured/discover)均不可用', '{}', datetime('now'))
+    `).run(randomUUID());
+  } catch (e) {
+    console.warn(`[rpc-health] event write failed (non-fatal): ${e.message}`);
+  }
   return { url: null, isLocal: false };
 }
 

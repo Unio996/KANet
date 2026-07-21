@@ -1,0 +1,23 @@
+{
+  "purpose": "J1 407KAS溯源请求的side_p2sh字段(17:52 J1标记tmp-28mln-shard9-state.json缺此列)——KANet-UI直查pool_bettor_sides补齐",
+  "queried_at_utc": "2026-07-11 (session resumed, channel last real msg 2026-07-10T17:53:39Z)",
+  "note_critical": "11笔side_p2sh全部相同(非per-bet独立地址)== shard9 step0/genesis地址(J1 shard9-leaf-rewind-result.json step0一致)。该地址KANet-UI直连RPC查=0 UTXO(与Bettor/团队17:50判断'per-bet锁定地址已花空'吻合)。",
+  "shared_side_p2sh": "kaspatest:prjah4wsk3rnnn8w2k6x4gdtuw850d2h3dpj67u5hapnutapjxu6qd4a77xpa",
+  "shared_side_p2sh_current_utxo_count_rpc_verified": 0,
+  "bets": [
+    { "id": 33444, "bettor_pk": "4173a91cef12f00530d47408b37823ac483999024f2f1184fca8f334a8525373", "direction": 0, "stake_amount_sompi": 5000000000, "side_lock_tx": "810469a1622cd75eba9387f7759044494572aea50022ce3351e9c18750400d4f" },
+    { "id": 33446, "bettor_pk": "81101a71428619cba1e9e9b93f67268047974364ed319deaecc88337686e7e34", "direction": 1, "stake_amount_sompi": 1500000000, "side_lock_tx": "e042a738a74abb4ee4063c9fa401e77ac4829717c431f9d20a13cb877080f7ef" },
+    { "id": 33449, "bettor_pk": "f5bb64c6e7afad8c042fe6c571f983b8eaea9dd4a58b1705d1b0587c2c026f08", "direction": 0, "stake_amount_sompi": 4881000000, "side_lock_tx": "49dc8534aafe6950a2463ba835fb59ac70948da7a1bc2ef3f3e50fbb16f9de40" },
+    { "id": 33450, "bettor_pk": "4173a91cef12f00530d47408b37823ac483999024f2f1184fca8f334a8525373", "direction": 0, "stake_amount_sompi": 5000000000, "side_lock_tx": "6339712e542ce0f6a5081165fc69284f99871f0927995e028395e1d92d572b2d" },
+    { "id": 33452, "bettor_pk": "81101a71428619cba1e9e9b93f67268047974364ed319deaecc88337686e7e34", "direction": 1, "stake_amount_sompi": 1500000000, "side_lock_tx": "20ea7c2bdf624e362453436ab47786bac745b5b83e966321e0d83cdab4e390b2" },
+    { "id": 33458, "bettor_pk": "4173a91cef12f00530d47408b37823ac483999024f2f1184fca8f334a8525373", "direction": 0, "stake_amount_sompi": 5000000000, "side_lock_tx": "8f665e09d6c65fc1da03c67949197215ede3389fc3949177072e45839c207254" },
+    { "id": 33459, "bettor_pk": "81101a71428619cba1e9e9b93f67268047974364ed319deaecc88337686e7e34", "direction": 1, "stake_amount_sompi": 1500000000, "side_lock_tx": "35a50964f9b63b14b5b7899f2e627629d59a614328f9baf3971a74cefc419445" },
+    { "id": 33460, "bettor_pk": "606be169d935e9460bc9a1665210e7d2fadd43823574aac1f1dd9e38ff3248cf", "direction": 0, "stake_amount_sompi": 4856000000, "side_lock_tx": "9df3b71382c05a166ef17d94d16a4bf53e77a8cc2c012ee4be9ebadd1cea22ae" },
+    { "id": 33467, "bettor_pk": "4173a91cef12f00530d47408b37823ac483999024f2f1184fca8f334a8525373", "direction": 0, "stake_amount_sompi": 5000000000, "side_lock_tx": "65ea06ba35e8f173a1c708415de76b3231aa89c604fd0a436bfce9216623e70e" },
+    { "id": 33468, "bettor_pk": "81101a71428619cba1e9e9b93f67268047974364ed319deaecc88337686e7e34", "direction": 1, "stake_amount_sompi": 1500000000, "side_lock_tx": "fd6be6ff732b05a5db39403f7f037f619a663bc3f7e778eabe2e1f9a572ee55e" },
+    { "id": 33471, "bettor_pk": "4173a91cef12f00530d47408b37823ac483999024f2f1184fca8f334a8525373", "direction": 0, "stake_amount_sompi": 5000000000, "side_lock_tx": "7272f21ce46669caf476d9ee4604d8f3d09d9e8ec6e937a7a57b1f632beb1884" }
+  ],
+  "sum_stake_amount_sompi": 40737000000,
+  "sum_stake_amount_kas": 407.37,
+  "use_note": "用完删,同既有跨机传输惯例"
+}

@@ -164,7 +164,7 @@ async function _doPublish(peer, draft, relayNodeId, prevReply) {
   const body = isBuy
     ? {
         relayNodeId,
-        give_asset: 'KAS', give_amount: String(qty), give_chain: 'kaspa',
+        give_asset: 'KAS', give_amount: Number(qty).toFixed(8), give_chain: 'kaspa',
         want_asset: 'USDT', want_amount: wantAmount,
         want_chain: chainKey,
         verification: 'cross_chain_tx',
@@ -179,7 +179,7 @@ async function _doPublish(peer, draft, relayNodeId, prevReply) {
       }
     : {
         relayNodeId,
-        give_asset: 'KAS', give_amount: String(qty), give_chain: 'kaspa',
+        give_asset: 'KAS', give_amount: Number(qty).toFixed(8), give_chain: 'kaspa',
         want_asset: 'USDT', want_amount: wantAmount,
         want_chain: chainKey,
         verification: 'cross_chain_tx',

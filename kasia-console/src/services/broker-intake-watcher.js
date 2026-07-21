@@ -18,12 +18,98 @@ import { randomUUID } from 'node:crypto';
 
 const TICK_MS = 60_000;
 const REFUND_TICK_MS = 5 * 60_000;
-const BROKER_RELAY_ID = '0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0';  // Trader-B
+// Bettor #j5romh r766 身份迁移补全(此文件含 5min 退款 sweep tick, 死 id 自 relay 重建起静默失效): env 缺失 fail-loud 拒启。
+const BROKER_RELAY_ID = process.env.BROKER_RELAY_ID;
+if (!BROKER_RELAY_ID) {
+  throw new Error('[broker-intake-watcher] FATAL: BROKER_RELAY_ID env var not set (see kanet.env) — refusing to start with hardcoded dead relay id fallback');
+}
 const PUBLISH_EXPIRES_MIN = 120;
 const DEFAULT_FEE_KAS = '0.1';
 let _intakeInterval = null;
 let _refundInterval = null;
+let _refundLastFireAt = 0;  // T-J2-2026-07-15 diag(observe-only): setInterval scheduled-vs-actual lag probe
 let _sendCommandOverride = null;  // test injection
+
+// 🔴 Z20 熔断(2026-07-14, Bettor #k6qj5a 第五源续追查, 语义裁定 #k7xxxx 补): Z20 sweep(每
+// REFUND_TICK_MS=5min)对同一批 offer 反复走 advanceToRefunded→enqueueVerified→单线 pump→
+// sendCommandAsync(relay IPC, 默认 30s timeout)——若这批 offer 结构性无法退(如无 retail_dex_orders
+// 链接/relay 不在线), 每轮串行付出接近满额 IPC 超时代价, N 个卡住的 offer × 最多 30s = 观测到的
+// 250-260s 长冻结签名(handled=0/10 现场实证)。照抄今天 pool-market-settler.js 的同款 in-process
+// 熔断模式(Bettor 裁定: 不为此加表/加列, tick 周期够快, streak 攒得起)。
+//
+// 🔴 语义边界(Bettor 裁定钉死, 不容混淆): 熔断 = 调度层"别再每 5 分钟空转重试" ≠ 资金层"永久放弃
+// 这笔钱"。熔断只停止本 tick 对该 offer 的调度重试, **绝不改 exchange_offers.protocol_status,
+// 绝不动用户资金, 绝不影响用户的退款权利**——钱还在原地不动, 只是不再让它每 5 分钟把整个 Console
+// 事件循环冻 4 分钟。真正无法退款的业务原因(链接缺失/relay 不在线)必须走人工处置: 用
+// listZ20CircuitBroken() 查"谁被熔断/为什么/多少钱/归谁", 处置后用 clearZ20Circuit() 复位(镜像
+// bshard-settle-daemon.mjs 的 clearRepeatOffenderMarker 先例)。events 审计行仅供追溯, 不等于会被
+// 主动巡查——listing 端点才是真正的挂账清单入口(admin-dedup.js 挂 GET /api/admin/z20-circuit-broken)。
+// 2026-07-14 续二(Bettor 裁定#k9iz8i, 采纳 NWT "熔断必须喊疼"): 光"可查"不够, 没人主动巡查=静默丢弃,
+// 反而比之前"徒劳重试"更差。补: 每 tick 新熔断的 offer 整批合并成一条摘要, fire-and-forget 广播到
+// dev-coord-testnet(见循环尾部, 不 await, 避免在已卡死边缘的 tick 里再叠一次 IPC 30s 代价)。
+const Z20_CIRCUIT_THRESHOLD = parseInt(process.env.Z20_REFUND_CIRCUIT_THRESHOLD, 10) || 3;
+const _z20FailStreak = new Map();   // offer_id -> { sig, streak }
+const _z20CircuitBroken = new Map();   // offer_id -> { sig, streak, brokenAt }(达阈值后熔断, 直到进程重启或人工 clearZ20Circuit)
+export function z20CircuitGate(offerId) { return _z20CircuitBroken.has(offerId); }
+export function recordZ20Failure(offerId, reason) {
+  const sig = String(reason || '').slice(0, 60);
+  const prev = _z20FailStreak.get(offerId);
+  const streak = (prev?.sig === sig ? prev.streak : 0) + 1;
+  if (streak >= Z20_CIRCUIT_THRESHOLD) {
+    const brokenAt = new Date().toISOString();
+    _z20CircuitBroken.set(offerId, { sig, streak, brokenAt });
+    _z20FailStreak.delete(offerId);
+    console.warn(`[broker-refund] Z20 🔴 offer=${offerId.slice(0,8)} 连续 ${streak} 次同签名失败(${sig}), 熔断(仅停调度重试, 不动资金, 进程内可人工clearZ20Circuit复位), 后续 tick 跳过`);
+    try {
+      sqlite.prepare(`
+        INSERT INTO events (id, event_scope, event_type, source, level, summary, payload_json, created_at)
+        VALUES (?, 'system', 'z20_refund_circuit_broken', 'broker-intake-watcher:Z20', 'warn', ?, ?, datetime('now'))
+      `).run(randomUUID(), `offer=${offerId.slice(0,8)} 连续${streak}次同签名失败(${sig}), 进程内熔断(仅停调度重试不动资金, 挂账待人工处置实际卡死原因)`, JSON.stringify({ offerId, streak, sig }));
+    } catch (e) { console.warn(`[broker-refund] Z20 circuit-break events insert fail (non-fatal): ${e.message}`); }
+    return true;   // 刚跳变为熔断(本次调用是这次 streak 的第 N=threshold 次) — 调用方用这个信号做"整批合并成一条摘要"告警(NWT+Bettor 裁定, 不要 per-offer 刷屏)
+  } else {
+    _z20FailStreak.set(offerId, { sig, streak });
+    return false;
+  }
+}
+
+// listZ20CircuitBroken() — Bettor 裁定 #k7xxxx 要求①的挂账清单查询入口: 谁被熔断/为什么/多少钱/归谁。
+// 纯读, 不动任何状态。enrich exchange_offers 补金额+用户地址(offer 已被 delete/清表则金额字段留 null,
+// 不因此报错——熔断记录本身仍要能看到, 不能因为周边数据缺失就吞掉审计线索)。
+export function listZ20CircuitBroken() {
+  const out = [];
+  for (const [offerId, info] of _z20CircuitBroken.entries()) {
+    let giveAmount = null, wantAmount = null, userAddress = null, protocolStatus = null;
+    try {
+      const row = sqlite.prepare(`SELECT give_amount, want_amount, metadata, protocol_status FROM exchange_offers WHERE id = ?`).get(offerId);
+      if (row) {
+        giveAmount = row.give_amount;
+        wantAmount = row.want_amount;
+        protocolStatus = row.protocol_status;
+        try { userAddress = JSON.parse(row.metadata || '{}')?.user_kasia_address ?? null; } catch {}
+      }
+    } catch (e) { console.warn(`[broker-refund] Z20 listZ20CircuitBroken enrich fail for ${offerId.slice(0,8)} (non-fatal): ${e.message}`); }
+    out.push({ offerId, sig: info.sig, streak: info.streak, brokenAt: info.brokenAt, giveAmount, wantAmount, userAddress, protocolStatus });
+  }
+  return out;
+}
+
+// clearZ20Circuit(offerId, reason) — 人工确认某 offer 的卡死原因已处置(如补上 retail_dex_orders 链接/
+// relay 恢复在线)后, 手动复位熔断状态, 让下一轮 Z20 tick 重新尝试。镜像 bshard-settle-daemon.mjs 的
+// clearRepeatOffenderMarker(同款 tripwire: 非熔断状态返回幂等 no-op, 不误清)。纯调度层, 不动钱。
+export function clearZ20Circuit(offerId, reason) {
+  if (!_z20CircuitBroken.has(offerId)) return { ok: false, reason: '未处于熔断状态, 无需清理(幂等)', already: true };
+  const before = _z20CircuitBroken.get(offerId);
+  _z20CircuitBroken.delete(offerId);
+  _z20FailStreak.delete(offerId);
+  try {
+    sqlite.prepare(`
+      INSERT INTO events (id, event_scope, event_type, source, level, summary, payload_json, created_at)
+      VALUES (?, 'system', 'z20_refund_circuit_cleared', 'clearZ20Circuit', 'warn', ?, ?, datetime('now'))
+    `).run(randomUUID(), `offer=${offerId.slice(0,8)} 熔断人工清除: ${reason || '(未附理由)'}`, JSON.stringify({ offerId, before, reason: reason || null }));
+  } catch (e) { console.warn(`[broker-refund] Z20 clearZ20Circuit events insert fail (non-fatal): ${e.message}`); }
+  return { ok: true, cleared: before };
+}
 let _publishOverride = null;      // test injection (POST /api/exchange/publish)
 
 export function _testInjectSendCommand(fn) { _sendCommandOverride = fn; }
@@ -86,10 +172,13 @@ async function _fetchKasPrice() {
 
 async function _publishOffer(body) {
   if (_publishOverride) return _publishOverride(body);
-  const PORT = process.env.PORT || 3100;
+  // 2026-07-14(Bettor #k2xd1y 第五源排查): 端口从过期 3100 改 process.env.PORT||3200 + 补
+  // AbortSignal.timeout(防同 legacyRefundBuilderTick 同族自锁, 本文件 TICK_MS=60s 常驻循环调此函数)。
+  const PORT = process.env.PORT || 3200;
   const res = await fetch(`http://127.0.0.1:${PORT}/api/exchange/publish`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(15000),
   });
   return res.json();
 }
@@ -250,7 +339,7 @@ async function _publishBrokerSellOffer(peer, amount, eventId) {
   try {
     res = await _publishOffer({
       relayNodeId: BROKER_RELAY_ID,
-      give_asset: 'KAS', give_amount: String(netKas),
+      give_asset: 'KAS', give_amount: Number(netKas).toFixed(8),
       want_asset: 'USDT', want_amount: wantUsdt,
       verification: 'cross_chain_tx',
       verification_meta: {
@@ -337,7 +426,7 @@ export async function _publishBrokerBuyOffer(peer, usdtAmount, eventId) {
   try {
     res = await _publishOffer({
       relayNodeId: BROKER_RELAY_ID,
-      give_asset: 'USDT', give_amount: String(netUsdt),
+      give_asset: 'USDT', give_amount: Number(netUsdt).toFixed(8),
       give_chain: 'bnb',
       want_asset: 'KAS', want_amount: wantKas,
       verification: 'kaspa_tx',  // BUY: KAS deliver verification 真 Kaspa chain TX
@@ -368,8 +457,19 @@ export async function _publishBrokerBuyOffer(peer, usdtAmount, eventId) {
   return markProcessed(eventId, `buy_published:${res.offer_id}`);
 }
 
+// T-J2-2026-07-15 diag(observe-only, NWT verdict 3b87317b GO): 逐 step 计时探针, 验证 CPU profile
+// 归因 _scanExpiredBrokerOffers 63.4% self-time 是否真同步阻塞(vs profiler artifact)。纯 console.log,
+// 不改任何分支/返回值。
 export async function _scanExpiredBrokerOffers() {
+  const _diagT0 = Date.now();
+  let _diagPrev = _diagT0;
+  const _diagStep = (label) => {
+    const now = Date.now();
+    console.log(`[diag:step-Z20] ${label} +${now - _diagPrev}ms (total ${now - _diagT0}ms)`);
+    _diagPrev = now;
+  };
   const trader = sqlite.prepare(`SELECT address FROM relay_nodes WHERE id = ?`).get(BROKER_RELAY_ID);
+  _diagStep('trader-lookup');
   if (!trader) return { handled: 0, scanned: 0, reason: 'no_broker_relay' };
   // Bug-Z20 fix (NWT 1a77fdd1 Owner 88 KAS 卡 broker 钱包): 真**真**proactive scan —
   // 真**真**真 broker offer 真**真**真 'open' + expires_at < now 真**真**真**真**真 'expired' 真**真**timed_out',
@@ -389,7 +489,14 @@ export async function _scanExpiredBrokerOffers() {
       SELECT 1 FROM chain_events e
       WHERE e.event_type = 'broker_kas_refunded'
       AND e.payload LIKE '%"offer_id":"' || exchange_offers.id || '"%'
-      AND e.txid IN (SELECT tx_id FROM kaspa_tx_log)
+      -- T-J2-2026-07-15 P0 perf fix(Bettor #len5pi 派工,7/13-7/15 七源追凶实体·恒定186-190s
+      -- 冻结的凶手): 原写法 'e.txid IN (SELECT tx_id FROM kaspa_tx_log)' 让 SQLite 从
+      -- kaspa_tx_log(800万行)驱动外层循环, 对每行 probe chain_events, EXPLAIN 显示
+      -- 'USING INDEX sqlite_autoindex_kaspa_tx_log_1 FOR IN-OPERATOR'——语义等价的相关 EXISTS
+      -- 让 SQLite 反过来从 chain_events(event_type 索引命中近空)驱动, 对每行去 kaspa_tx_log
+      -- 做单点索引查找。live 实测 233,123ms → 1ms, 逐行结果 byte-identical(id 顺序全同,
+      -- kaspa_tx_log.tx_id 全库 0 NULL, IN/EXISTS 无 NULL 语义边界差异)。
+      AND EXISTS (SELECT 1 FROM kaspa_tx_log k WHERE k.tx_id = e.txid)
     )
     -- T-J2-2026-05-10 r223 T2.14 (NWT r289 Option A): 防 Z20 与 T2.5c CEX hedge race double-spend.
     -- T2.5c placeCexOrder ok 后立即 INSERT broker_fallback_claim → Z20 SQL skip claimed offer.
@@ -403,6 +510,7 @@ export async function _scanExpiredBrokerOffers() {
     ORDER BY broadcast_at DESC
     LIMIT 10
   `).all(trader.address);
+  _diagStep(`main-query rows=${rows.length}`);
   let handled = 0;
   if (rows.length > 0) console.log(`[broker-refund] Z20 scan: ${rows.length} expired/timeout offer(s) to refund`);
   // T-J2-2026-04-29 紧急 Track A: chain-truth dedup. 现 dedup SQL `txid IN kaspa_tx_log` 因占位符 txid='refund_xxx'
@@ -413,12 +521,19 @@ export async function _scanExpiredBrokerOffers() {
   // advanceToRefunded 内部 chain-truth dedup + Phase 1 CAS + Phase 2 sendKas (真 chain hash) + Phase 3 atomic 3-table sync.
   // chain_events INSERT 真 real txId (post-v83 lenient trigger PASS), 不再占位符 polluting.
   const { advanceToRefunded } = await import('./broker-state-authority.js');
+  _diagStep('dynamic-import');
+  let _z20Gated = 0;
+  const _newlyBroken = [];   // 2026-07-14 Bettor 裁定#k9iz8i: 本 tick 内新熔断的 offer, 收集后批量喊一条摘要(不 per-offer 刷屏)
   for (const r of rows) {
+    // 🔴 Z20 熔断闸(见文件顶部 Z20_CIRCUIT_THRESHOLD 注释): push 进循环前判, 已熔断的 offer 零 IPC
+    // 代价直接跳过(不占这一轮的时间预算)。
+    if (z20CircuitGate(r.id)) { _z20Gated++; continue; }
     try {
       const meta = JSON.parse(r.metadata || '{}');
       const userKasia = meta.user_kasia_address;
       if (!userKasia) {
         console.warn(`[broker-refund] Z20 ${r.id.slice(0,8)} skip: no user_kasia_address in metadata`);
+        if (recordZ20Failure(r.id, 'no user_kasia_address in metadata')) _newlyBroken.push(r.id);
         continue;
       }
       const refundAmount = parseFloat(meta.intent_qty || r.give_amount);
@@ -432,15 +547,28 @@ export async function _scanExpiredBrokerOffers() {
       }
 
       // Find linked retail_dex_orders.id
+      // 2026-07-16 J2 (Z20 10-offer 归因, Bettor #nzhtbj.4 方向GREEN): 加 'aligning','confirming' 进
+      // state 白名单——之前漏了这两态, 导致这类 order 永远查不到 link, 于是走 !order?.id 分支被误判
+      // "no retail_dex_orders link"(当失败算, 占 Z20 熔断预算+反复告警)。加回后 advanceToRefunded 会
+      // 真被调用, 其内部 Phase 1 CAS 已有的 J1 #73 Edge 1 逻辑(:434-438)会正确识别
+      // "aligning/confirming=broker 没收 user payment=NO refund needed"并走 result.noRefundNeeded
+      // 分支(:566-569, 已存在, log 一次+handled++, 不重试不告警)。零新逻辑, 只是让已有的正确处理
+      // 路径真被触达。
+      // MUST-FIX(NWT 红队, fuzzy 匹配分支 exchange_offer_id IS NULL 时的确定性吞单风险): 若同一用户
+      // 此刻同时有一条真待退款旧 order(如 awaiting_payment)和一条更晚创建的 confirming/aligning 空转
+      // order, 纯按 created_at DESC 会每次锁死选中后者→advanceToRefunded 直接 noRefundNeeded 短路→
+      // 前者永远排不上号, 静默吞单(非重试后自愈, 每 tick 结果确定性相同)。修法: ORDER BY 让"真待退款
+      // 态"优先于"confirming/aligning 态", 只有候选池里没有真待退款行时才落到 noRefundNeeded 快速路径。
       const order = sqlite.prepare(`
         SELECT id FROM retail_dex_orders
         WHERE user_kasia_address=?
-          AND (exchange_offer_id=? OR (exchange_offer_id IS NULL AND CAST(qty AS REAL) >= ? - 0.5 AND CAST(qty AS REAL) <= ? + 0.5 AND state IN ('awaiting_payment','paid','expired')))
-        ORDER BY created_at DESC LIMIT 1
+          AND (exchange_offer_id=? OR (exchange_offer_id IS NULL AND CAST(qty AS REAL) >= ? - 0.5 AND CAST(qty AS REAL) <= ? + 0.5 AND state IN ('awaiting_payment','paid','expired','aligning','confirming')))
+        ORDER BY (state IN ('awaiting_payment','paid','expired')) DESC, created_at DESC LIMIT 1
       `).get(userKasia, r.id, refundAmount, refundAmount);
 
       if (!order?.id) {
         console.warn(`[broker-refund] Z20 ${r.id.slice(0,8)} skip — no retail_dex_orders link, advanceToRefunded 真 orderId 必`);
+        if (recordZ20Failure(r.id, 'no retail_dex_orders link')) _newlyBroken.push(r.id);
         continue;
       }
 
@@ -463,12 +591,34 @@ export async function _scanExpiredBrokerOffers() {
         handled++;
       } else if (result.skipReason === 'race_lost') {
         console.warn(`[broker-refund] Z20 ${r.id.slice(0,8)} race lost (其他 caller 已 claim refunding lock), reconciler 真 backfill`);
+        if (recordZ20Failure(r.id, 'race_lost')) _newlyBroken.push(r.id);
       } else {
         console.error(`[broker-refund] Z20 ${r.id.slice(0,8)} advanceToRefunded FAIL: ${result.error || result.skipReason}`);
+        if (recordZ20Failure(r.id, `advanceToRefunded FAIL: ${result.error || result.skipReason}`)) _newlyBroken.push(r.id);
       }
-    } catch (err) { console.warn(`[broker-refund] Z20 ${r.id} err: ${err.message}`); }
+    } catch (err) {
+      console.warn(`[broker-refund] Z20 ${r.id} err: ${err.message}`);
+      if (recordZ20Failure(r.id, `exception: ${err.message}`)) _newlyBroken.push(r.id);
+    }
   }
-  return { handled, scanned: rows.length };
+  _diagStep(`for-loop rows=${rows.length} gated=${_z20Gated}`);
+  if (_z20Gated > 0) console.log(`[broker-refund] Z20 [circuit-breaker] ${_z20Gated} offer(s) gated this tick(熔断, 跳过)`);
+  // 2026-07-14 (Bettor 裁定#k9iz8i, 采纳 NWT "熔断必须喊疼"): 反脆弱柱②第一个实例——系统自己主动
+  // 报告"这里有东西卡住了", 而不是指望有人去巡查 events 表。整批合并成一条摘要, 限速"同一 offer
+  // 只报一次"(天然满足: recordZ20Failure 只在 streak 首次跨阈值那次返回 true, 之后该 offer 被
+  // z20CircuitGate 挡在循环入口, 不会再触发)。Fire-and-forget(不 await, 只 .catch 吞错) ——
+  // sendCommandAsync 是本 tick 卡死的同一 IPC 通道(默认 30s timeout), 若同步 await 反而在已经
+  // 崩溃边缘的 tick 里再叠一次最多 30s 代价, 违背这条修复本身的目的。镜像
+  // broker-bot-manager.js:notifyBotDisabled 的既有 fire-and-forget 系统告警先例。
+  if (_newlyBroken.length > 0) {
+    const summary = `🔴 [Z20 熔断告警] 本轮新熔断 ${_newlyBroken.length} 个 offer(仅停调度重试, 不动资金, 钱原地不动): `
+      + _newlyBroken.map((id) => id.slice(0, 8)).join(', ')
+      + ` — 查详情: GET /api/admin/z20-circuit-broken , 处置后 POST /api/admin/clear-z20-circuit 复位。`;
+    _send(BROKER_RELAY_ID, { type: COMMAND_TYPES.SEND_BROADCAST, channel: 'dev-coord-testnet', message: summary })
+      .catch((e) => console.warn(`[broker-refund] Z20 熔断告警广播失败(non-fatal, 不影响本 tick): ${e.message}`));
+  }
+  _diagStep('return');
+  return { handled, scanned: rows.length, gated: _z20Gated };
 }
 
 // T-J2-10: 12h stale unsolicited_wait scanner — user 12h 无 ACK 自动退款
@@ -662,10 +812,13 @@ export async function _scanUntakenOffersFallback() {
         continue;
       }
       // Step 1: cancel_v1 broadcast on KANet (守 ch14 #44 chain TX anchor)
-      const PORT = process.env.PORT || 3100;
+      // 2026-07-14(Bettor #k2xd1y 第五源排查): 端口 3100→3200 + 补 AbortSignal.timeout(同上, 本文件
+      // REFUND_TICK_MS=5min 常驻循环调此路径)。
+      const PORT = process.env.PORT || 3200;
       const cancelRes = await fetch(`http://127.0.0.1:${PORT}/api/exchange/cancel`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ relayNodeId: BROKER_RELAY_ID, offer_id: r.id }),
+        signal: AbortSignal.timeout(15000),
       }).then(rr => rr.json()).catch(e => ({ ok: false, error: e.message }));
       if (!cancelRes.ok || !cancelRes.cancel_tx) {
         console.warn(`[broker-fallback] T2.5c cancel_v1 fail offer ${r.id.slice(0,8)}: ${cancelRes.error || 'no cancel_tx'}`);
@@ -828,10 +981,13 @@ export async function _scanUntakenBuyOffersFallback() {
         continue;
       }
       // Step 1: cancel_v1 broadcast (mirror T2.5c cancel chain TX anchor)
-      const PORT = process.env.PORT || 3100;
+      // 2026-07-14(Bettor #k2xd1y 第五源排查): 端口 3100→3200 + 补 AbortSignal.timeout(同上, 本文件
+      // REFUND_TICK_MS=5min 常驻循环调此路径)。
+      const PORT = process.env.PORT || 3200;
       const cancelRes = await fetch(`http://127.0.0.1:${PORT}/api/exchange/cancel`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ relayNodeId: BROKER_RELAY_ID, offer_id: r.id }),
+        signal: AbortSignal.timeout(15000),
       }).then(rr => rr.json()).catch(e => ({ ok: false, error: e.message }));
       if (!cancelRes.ok || !cancelRes.cancel_tx) {
         recordChainEvent({
@@ -937,6 +1093,16 @@ export function startIntakeWatcher() {
   }, TICK_MS);
   if (!_refundInterval) {
     _refundInterval = setInterval(async () => {
+      // T-J2-2026-07-15 diag(observe-only, NWT verdict 3b87317b GO): 测本 tick 实际触发时刻相对
+      // 上一次触发 + REFUND_TICK_MS 的漂移量。若漂移持续接近 0 但 CPU profile 仍显示大 self-time,
+      // 排除"排队被采样"假说,指向真同步阻塞;若漂移本身就巨大,说明问题在更上游(事件循环整体
+      // 拥堵),不是这个函数专属。
+      const _fireAt = Date.now();
+      if (_refundLastFireAt > 0) {
+        const gap = _fireAt - _refundLastFireAt;
+        console.log(`[diag:interval-lag] _refundInterval gap=${gap}ms expected=${REFUND_TICK_MS}ms drift=${gap - REFUND_TICK_MS}ms`);
+      }
+      _refundLastFireAt = _fireAt;
       try {
         const r = await _scanExpiredBrokerOffers();
         if (r && r.scanned > 0) console.log(`[broker-refund] tick handled=${r.handled||0}/${r.scanned||0}`);

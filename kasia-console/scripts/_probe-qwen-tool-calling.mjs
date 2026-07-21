@@ -2,7 +2,7 @@
 // 6 变体同一条 SELL 消息 + 同样 stale BUY history, 看哪个变量决定 Qwen 调 tool
 
 const QWEN_URL = 'http://localhost:8000/v1/chat/completions';
-const MODEL = 'Qwen3.6-35B-A3B';
+const MODEL = 'Qwythos-9B-Claude-Mythos-5-1M-Q4_K_M.gguf';
 
 // === 输入: Eric Bug-Z6 真 case (字段全齐, 应该立刻调 preview_order) ===
 const USER_MSG = '卖 5 KAS, BSC, 0x94053e04feE8d863cFa29DF10938a7A2E2b71D74';

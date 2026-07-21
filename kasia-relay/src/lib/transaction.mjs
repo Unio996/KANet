@@ -50,8 +50,14 @@ let _sendLock = Promise.resolve();
 // 充分 buffer + cover restart race.
 const _pendingSpentUtxos = new Map(); // key = "txid:index" → expiry timestamp
 const _PENDING_UTXO_TTL_MS = 60_000;  // J1-D-4 extended from 30000
+// #G4-launchblocker (2026-07-04, KANet-UI 根因坐实 + Bettor/NWT co-verify + J2 runtime 实测确认):
+//   旧 path entry.entry?.transactionId / entry.transactionId 两条都读不到值(kaspa-wasm 实际结构
+//   多一层 outpoint 嵌套) → key 恒 ':0' → L55 安全阀直接吞掉 → 这个防重复花费的 shadow-tracking
+//   从部署以来就是死代码, 从没生效过。runtime console.log 实测(scratch probe, J2test relay 真
+//   entry)证实: entry.entry.outpoint.transactionId 和 entry.outpoint.transactionId 两条路径都
+//   真实可读(同值, wasm 对象在两层都暴露了 outpoint) — 防御式两条都试, 防未来 wasm 版本再漂移。
 export function markUtxoSpent(entry) {
-  const key = `${entry.entry?.transactionId || entry.transactionId || ''}:${entry.entry?.index ?? entry.index ?? 0}`;
+  const key = `${entry.entry?.outpoint?.transactionId || entry.outpoint?.transactionId || ''}:${entry.entry?.outpoint?.index ?? entry.outpoint?.index ?? 0}`;
   if (key === ':0') return; // safety: no valid outpoint
   _pendingSpentUtxos.set(key, Date.now() + _PENDING_UTXO_TTL_MS);
 }
@@ -70,7 +76,7 @@ export function filterPendingUtxos(entries) {
   for (const [k, exp] of _pendingSpentUtxos) { if (exp < now) _pendingSpentUtxos.delete(k); }
   if (_pendingSpentUtxos.size === 0) return entries;
   return entries.filter(e => {
-    const key = `${e.entry?.transactionId || e.transactionId || ''}:${e.entry?.index ?? e.index ?? 0}`;
+    const key = `${e.entry?.outpoint?.transactionId || e.outpoint?.transactionId || ''}:${e.entry?.outpoint?.index ?? e.outpoint?.index ?? 0}`;
     return !_pendingSpentUtxos.has(key);
   });
 }

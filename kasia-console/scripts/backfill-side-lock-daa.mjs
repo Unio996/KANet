@@ -24,7 +24,11 @@ const DRY_RUN = process.argv.includes('--dry-run');
 
 // Non-terminal markets only — terminal (completed/cancelled/refunded/refunding/disputed) never re-sample, skip.
 // pending_bettors will reach `verifying` (sample) later, so their NULL-daa bets need backfill now too.
-const NON_TERMINAL = ['pending_bettors', 'verifying', 'collecting_sigs', 'pending_oracle_deposits'];
+// 🔴 修复(2026-07-09, J2·Bettor #e1td59.2 GO): bshard v0.7 分片的 pool_bettor_sides.market_id 指向
+// shard_market_id, 其 pool_markets 行状态恒为 'shard_internal'——原列表没有这个值, JOIN 结构性排除了
+// 100% 的 bshard 分片下注, 此脚本对 bshard 市场从未真正生效过(28mln 314/314 全 null 实证坐实)。
+// 只加这一个状态值, 不改取值逻辑(仍是 captureSideLockDaa 链上现读, 单源不变)。
+const NON_TERMINAL = ['pending_bettors', 'verifying', 'collecting_sigs', 'pending_oracle_deposits', 'shard_internal'];
 
 const rows = sqlite.prepare(`
   SELECT s.id AS side_id, s.market_id, s.side_p2sh, s.side_lock_tx, s.stake_amount,

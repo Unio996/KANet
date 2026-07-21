@@ -22,6 +22,14 @@ import { extract } from './parser.js';
 import * as state from './state.js';
 import * as llm from './llm.js';
 import * as orderBook from './order-book.js';
+import { buildExplorerUrl, formatTxReference } from '../../lib/explorer-url.mjs';
+
+// Bettor #j5romh r766 身份迁移补全(此文件此前直接内联死 relay id 字面量, 未被 9 文件 grep 覆盖到,
+// J2 追加发现): env 缺失 fail-loud 拒启(死值兜底=定时雷, 见 kanet.env)。
+const BROKER_RELAY_ID = process.env.BROKER_RELAY_ID;
+if (!BROKER_RELAY_ID) {
+  throw new Error('[broker-v2/router] FATAL: BROKER_RELAY_ID env var not set (see kanet.env) — refusing to start with hardcoded dead relay id fallback');
+}
 
 // parser fields → retail_dex_orders col name 映射.
 // Note: 'asset' field 解 但不 setField — phase 1 hardcode KAS (retail_dex_orders 无 asset col).
@@ -102,10 +110,10 @@ export async function handleMessage(peer, msg) {
     if (!recent) return '你没有订单记录. 想下新单告诉我.';
     const sideZh = recent.side === 'sell_kas' ? '卖' : '买';
     if (recent.state === 'refunded' && recent.refund_tx_hash) {
-      return `✓ ${recent.ct_local} ${sideZh} ${recent.qty} KAS 已退\nTX: ${recent.refund_tx_hash.slice(0, 16)}...\n查看: https://explorer.kaspa.org/txs/${recent.refund_tx_hash}`;
+      return `✓ ${recent.ct_local} ${sideZh} ${recent.qty} KAS 已退\n查看: ${formatTxReference(recent.refund_tx_hash, buildExplorerUrl(recent.refund_tx_hash, process.env.KASPA_NETWORK))}`;
     }
     if (recent.state === 'completed' && recent.deliver_tx_hash) {
-      return `✓ ${recent.ct_local} ${sideZh} ${recent.qty} KAS 已成交\nTX: ${recent.deliver_tx_hash.slice(0, 16)}...\n查看: https://explorer.kaspa.org/txs/${recent.deliver_tx_hash}`;
+      return `✓ ${recent.ct_local} ${sideZh} ${recent.qty} KAS 已成交\n查看: ${formatTxReference(recent.deliver_tx_hash, buildExplorerUrl(recent.deliver_tx_hash, process.env.KASPA_NETWORK))}`;
     }
     if (recent.state === 'expired') {
       return `⏳ ${recent.ct_local} ${sideZh} ${recent.qty} KAS 真 TTL 过期, 等 broker 5min cron 自动退款 (chain-truth dedup 严守).`;
@@ -169,7 +177,7 @@ export async function handleMessage(peer, msg) {
     if (!evmChain) return `${wChain} chain 暂不支持 broker direct transfer (Phase 2 β candidate). 现 BSC/ETH/TRX 真 supported.`;
     const brokerWallet = sqlite.prepare(
       `SELECT privkey_encrypted, address FROM agent_wallets WHERE relay_node_id = ? AND chain = ? AND privkey_encrypted IS NOT NULL LIMIT 1`
-    ).get('0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0', evmChain);
+    ).get(BROKER_RELAY_ID, evmChain);
     if (!brokerWallet?.privkey_encrypted) return `broker ${wChain} 钱包未配置, 联系 Owner. 你的余额仍在.`;
     const { transferUsdt } = await import('../evm-transfer.js');
     const wRes = await transferUsdt(evmChain, brokerWallet.privkey_encrypted, payRow.pay_address, wAmount);
@@ -365,7 +373,7 @@ export async function handleMessage(peer, msg) {
       try {
         const selfDeal = sqlite.prepare(
           `SELECT 1 FROM agent_wallets WHERE relay_node_id = ? AND lower(address) = lower(?) LIMIT 1`
-        ).get('0a8e9723-f00b-4b10-8c79-1dbd4fe3cfb0', draft.pay_address);
+        ).get(BROKER_RELAY_ID, draft.pay_address);
         if (selfDeal) {
           console.warn(`[broker-v2 R4] self-deal pre-publish blocked: peer=${peer.slice(-12)} pay_address=${draft.pay_address.slice(0,12)}... ∈ broker wallets`);
           return `挂单失败: 你给的地址 ${draft.pay_address.slice(0,10)}...${draft.pay_address.slice(-6)} 是 broker 自己的钱包(不是你的). BUY 流程是 you 付 USDT 到 broker 自挂 maker addr → broker 给 KAS 到 you Kasia. 请回**你自己的** EVM 钱包地址 (你能 send USDT from 这地址) — 不是 broker 或别人的. 想重新下单回 "取消" 后再发.`;

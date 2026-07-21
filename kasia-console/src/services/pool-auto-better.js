@@ -8,7 +8,7 @@
 //   2. For each bettor relay (= AUTO_BET_RELAYS env list):
 //      a. Pick random subset N=AUTO_BET_PER_TICK markets (default 2)
 //      b. For each: random direction (50/50 YES/NO) + random stake (= [MIN_STAKE_KAS, MAX_STAKE_KAS])
-//      c. Call register-v06/prep → relay transfer → register-v06/confirm
+//      c. Call register-v07/prep (+bet_id nonce) → relay transfer exact → register-v07/confirm (shard-aware)
 //   3. Idempotent: relay × market uniqueness 自然由 side_p2sh UNIQUE 守 (= 同 direction 同 bettor 同 market 同 stake = 同 P2SH).
 //
 // Guardrails:
@@ -17,8 +17,16 @@
 //   - deadline < 120s skip 防 race
 //   - per-cycle / per-relay 上限 PER_TICK 防资金过快烧
 
+import { randomBytes } from 'node:crypto';
 import { sqlite } from '../db/client.js';
 import { isRelayAlive, sendCommandAsync } from './relay-manager.js';
+import { getSidesByLogicalMarket } from '../lib/pool-bettor-sides-query.mjs';
+
+// #42 加大方案 cap 安全 (Bettor 2026-07-04): 8+ bot 高频押·世界杯盘会很快填满 900 叶子上限
+// (G3 register-v07/prep 的硬顶, pool.js MARKET_MAX_LEAVES_G3)。满的盘该自动被 bot 跳过换下一个,
+// 不是撞 PREP_FAIL 空转。跟 create-v07 cap-check 同一个 shard-aware helper(非裸查 market_id,
+// 防 shard-blind 漏计——bshard 押注按 shard_market_id 存, 裸查 logical id 会漏, 见 ANTI-PATTERNS).
+const AUTO_BET_MAX_LEAVES = 900;
 
 // J2-tn r428 (Bettor r466 Owner 钦定火力全开): tick 60s→20s, PER_TICK 2→50 (= 押所有开放市场).
 // 8 单并发 0-bet 饿死 surface → 调猛 3x 频率 + 每 tick 全市场扫.
@@ -44,9 +52,28 @@ const MAX_STAKE_KAS = Number(process.env.AUTO_BET_MAX_STAKE_KAS) || 50;
 const MIN_RESERVE_KAS = Number(process.env.AUTO_BET_MIN_RESERVE_KAS) || 10;
 const RELAYS = parseRelays(process.env.AUTO_BET_RELAYS);
 const CONSOLE_BASE = process.env.AUTO_BET_CONSOLE_BASE || 'http://127.0.0.1:3200';
+// NEAR_DEADLINE_SEC: only bet on markets expiring within this window. Default 6h (prod focus); testnet
+// can set AUTO_BET_NEAR_DEADLINE_H env to cover longer-horizon markets.
+const NEAR_DEADLINE_SEC = (Number(process.env.AUTO_BET_NEAR_DEADLINE_H) || 6) * 3600;
 
 let timer = null;
 let running = false;
+
+// J2 2026-06-28 (Bettor 派·稳定性): self-call fetch + AbortController timeout. 无 timeout 时·event-loop 饱和期
+//   self-call(打同一 console)挂死 → await 永挂 → running 卡 true → auto-bet 静默停 + 挂的连接占用放大饱和
+//   (Bettor 裁: auto-bet=amplifier 非 root)。timeout fail-fast → throw AbortError → _placeBet catch 接住 →
+//   释放 running → 下 tick 重试。robustness: auto-bet 扛过 transient 饱和不卡死。
+async function fetchWithTimeout(url, opts, ms) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), ms);
+  try {
+    return await fetch(url, { ...(opts || {}), signal: ctrl.signal });
+  } finally {
+    clearTimeout(t);
+  }
+}
+const FETCH_TIMEOUT_FAST_MS = Number(process.env.AUTO_BET_FETCH_TIMEOUT_FAST_MS) || 10_000;   // prep / balance (轻查询)
+const FETCH_TIMEOUT_TX_MS = Number(process.env.AUTO_BET_FETCH_TIMEOUT_TX_MS) || 30_000;       // transfer / confirm (链上 TX)
 
 function _pickRandomSubset(arr, n) {
   const shuffled = [...arr].sort(() => Math.random() - 0.5);
@@ -62,51 +89,61 @@ function _randomDirection() {
   return Math.random() < 0.5 ? 0 : 1;  // 0=YES, 1=NO
 }
 
+// J2-tn 2026-06-30 (Owner "删老代码" + Bettor commingle 根治): auto-bet 改走 register-v07/prep+confirm
+//   (shard-aware 路·第一注 open_new 建 shard·满 32 自动滚片)。**删 v06 logical 押注路** = commingling 物理
+//   不可能(v07 永远落 shard·pool_bettor_sides.market_id = shard_market_id·非 logical)。
+//   v07 与 v06 的关键差异: ① 必带 bet_id(nonce 熵源·解同 relay 同向复押碰撞)② confirm 返 `registered`(非 `ok`·
+//   ok:true 仍可能 registered:false/pending/ambiguous)③ prep 返 exact_stake_kas 已含 nonce(8 位精度·KAS↔sompi 精确往返)。
+//   验收(Bettor): 1 注 → market_shards 出记录 + pool_bettor_sides.market_id = shard_market_id(-s0)。
 async function _placeBet(bot, market) {
   const direction = _randomDirection();
   const stakeKas = _randomStakeKas();
   const dirLabel = direction === 0 ? 'YES' : 'NO';
   const tag = market.id.slice(-12);
+  const betId = randomBytes(8).toString('hex');   // 每笔唯一 nonce 熵源 (复押去碰撞)
 
   try {
-    // Step 1: prep — compute side_p2sh + exact stake
-    const prepR = await fetch(`${CONSOLE_BASE}/api/pool/market/${market.id}/bettor/register-v06/prep`, {
+    // Step 1: prep (v07) — compute side_p2sh + exact stake (含 nonce)
+    const prepR = await fetchWithTimeout(`${CONSOLE_BASE}/api/pool/market/${market.id}/bettor/register-v07/prep`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ linked_addr: bot.address, direction, stake_kas: parseFloat(stakeKas) }),
-    });
+      body: JSON.stringify({ linked_addr: bot.address, direction, stake_kas: parseFloat(stakeKas), bet_id: betId }),
+    }, FETCH_TIMEOUT_FAST_MS);
     const prep = await prepR.json();
     if (!prep.ok) {
       if (String(prep.error || '').toLowerCase().includes('already')) return { tag, bot: bot.name, status: 'DUP' };
       return { tag, bot: bot.name, status: 'PREP_FAIL', error: String(prep.error || '').slice(0, 80) };
     }
 
-    // Step 2: transfer — relay sends exact_stake_kas to side_p2sh
-    const payR = await fetch(`${CONSOLE_BASE}/api/relay/${bot.id}/transfer`, {
+    // Step 2: transfer — relay sends exact_stake_kas (含 nonce·8 位精度) to side_p2sh
+    const payR = await fetchWithTimeout(`${CONSOLE_BASE}/api/relay/${bot.id}/transfer`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ to: prep.side_p2sh, amount: prep.exact_stake_kas }),
-    });
+    }, FETCH_TIMEOUT_TX_MS);
     const pay = await payR.json();
     if (!pay.ok || !pay.txId) return { tag, bot: bot.name, status: 'PAY_FAIL', error: String(pay.error || '').slice(0, 80) };
 
-    // Step 3: confirm — register side row + broadcast pool_bet_registered_v1
+    // Step 3: confirm (v07) — detect payment → registerBettorOnShard splice (落 shard·非 logical)
     // Try confirm a few times because UTXO needs to land in indexer/mempool.
+    // v07: 检 `registered`(非 `ok`); ambiguous=同额多 UTXO 碰撞→停(bet_id 唯一时不该发生)。
     let confirmed = null;
     for (let attempt = 0; attempt < 6; attempt++) {
       await new Promise(r => setTimeout(r, 3000 + attempt * 2000));
-      const confirmR = await fetch(`${CONSOLE_BASE}/api/pool/market/${market.id}/bettor/register-v06/confirm`, {
+      const confirmR = await fetchWithTimeout(`${CONSOLE_BASE}/api/pool/market/${market.id}/bettor/register-v07/confirm`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ linked_addr: bot.address, direction, stake_kas: parseFloat(stakeKas) }),
-      });
+        body: JSON.stringify({ linked_addr: bot.address, direction, stake_kas: parseFloat(stakeKas), bet_id: betId }),
+      }, FETCH_TIMEOUT_TX_MS);
       const confirm = await confirmR.json();
-      if (confirm.ok) { confirmed = confirm; break; }
+      if (confirm.registered) { confirmed = confirm; break; }
+      if (confirm.ambiguous) return { tag, bot: bot.name, status: 'AMBIGUOUS', pay_tx: pay.txId.slice(0, 16) };
     }
     if (!confirmed) {
       return { tag, bot: bot.name, status: 'PAID_NOT_CONFIRMED', pay_tx: pay.txId.slice(0, 16), stake: prep.exact_stake_kas, dir: dirLabel };
     }
-    return { tag, bot: bot.name, status: 'CONFIRMED', side_tx: pay.txId.slice(0, 16), stake: prep.exact_stake_kas, dir: dirLabel };
+    const shardId = confirmed.shard_market_id || confirmed.shardMarketId || '?';
+    return { tag, bot: bot.name, status: 'CONFIRMED', side_tx: pay.txId.slice(0, 16), stake: prep.exact_stake_kas, dir: dirLabel, shard: shardId };
   } catch (e) {
     return { tag, bot: bot.name, status: 'EXCEPTION', error: String(e.message || '').slice(0, 80) };
   }
@@ -114,19 +151,49 @@ async function _placeBet(bot, market) {
 
 // J2-tn r433 (Bettor r471 真解): 聚焦 near-deadline 单, 不均摊 97+ 远期单 → 押注稀释.
 // 排序 deadline ASC (= 最早过期优先) + LIMIT 20 (= 仅最临近 20 个市场).
-// 远期单 (deadline > now + 6h) 不优先, 留给 ramp 拆分.
+// NEAR_DEADLINE_SEC 通过 AUTO_BET_NEAR_DEADLINE_H env 可调(默认 6h; testnet 常设更大覆盖远期盘).
+// FINDING-2 ③ 止血 (KANet-UI 2026-06-28): 排 commingled-spine v0.7 盘 (spine_p2sh 被 >1 市场共享).
+// 根治=J1 assertNotCommingled 入口闸 (register-v06/register-v07/register); 此处防 auto-bet 持续灌.
+// NULL spine (v0.6 盘) 不受影响 (IS NULL 分支 pass).
+// #42 (Bettor 2026-07-04, KANet-UI 二次根因 + Bettor union 方案): 世界杯盘(卡片洞见/公开 demo 活跃度命脉)
+// deadline 40-68h·排在 top-20-by-deadline 之外, 永远抽不到. 不改 r433 的防稀释设计(top-20 仍是主池)——
+// 加一路 UNION: card_group_id LIKE 'fifa-2026%' 的市场无条件补进候选池(不受 deadline 排名限制, 但仍走
+// 同一套 pending_bettors/v0.7/deadline-window/非-commingled 安全过滤), 世界杯盘永远在池里能被随机抽到.
 async function _fetchEligibleMarkets() {
-  const NEAR_DEADLINE_SEC = 6 * 3600;  // 仅押 < 6h 之内 deadline 的市场
-  return sqlite.prepare(`
-    SELECT id, protocol_version, deadline
-    FROM pool_markets
-    WHERE protocol_status = 'pending_bettors'
-      AND (protocol_version = 'v0.6' OR protocol_version = 'v0.7')
-      AND deadline > unixepoch() + 120
-      AND deadline < unixepoch() + ?
-    ORDER BY deadline ASC
-    LIMIT 20
-  `).all(NEAR_DEADLINE_SEC);
+  const rows = sqlite.prepare(`
+    SELECT id, protocol_version, deadline FROM (
+      SELECT id, protocol_version, deadline
+      FROM pool_markets
+      WHERE protocol_status = 'pending_bettors'
+        AND protocol_version = 'v0.7'
+        AND deadline > unixepoch() + 120
+        AND deadline < unixepoch() + ?
+        AND (spine_p2sh IS NULL OR spine_p2sh NOT IN (
+          SELECT spine_p2sh FROM pool_markets
+          WHERE protocol_version = 'v0.7' AND spine_p2sh IS NOT NULL
+          GROUP BY spine_p2sh HAVING COUNT(*) > 1
+        ))
+      ORDER BY deadline ASC
+      LIMIT 20
+    )
+    UNION
+    SELECT id, protocol_version, deadline FROM (
+      SELECT id, protocol_version, deadline
+      FROM pool_markets
+      WHERE protocol_status = 'pending_bettors'
+        AND protocol_version = 'v0.7'
+        AND deadline > unixepoch() + 120
+        AND deadline < unixepoch() + ?
+        AND resolution_rule_spec LIKE '%"card_group_id":"fifa-2026%'
+        AND (spine_p2sh IS NULL OR spine_p2sh NOT IN (
+          SELECT spine_p2sh FROM pool_markets
+          WHERE protocol_version = 'v0.7' AND spine_p2sh IS NOT NULL
+          GROUP BY spine_p2sh HAVING COUNT(*) > 1
+        ))
+    )
+  `).all(NEAR_DEADLINE_SEC, NEAR_DEADLINE_SEC);
+  // cap 安全: 跳过已达 900 叶子上限的盘(shard-aware 跨 shard 计数, 非裸 market_id 查).
+  return rows.filter((r) => getSidesByLogicalMarket(r.id, sqlite).length < AUTO_BET_MAX_LEAVES);
 }
 
 function _fetchRelayBots() {
@@ -145,7 +212,7 @@ function _fetchRelayBots() {
 // 真 guardrail: 每 relay 每 tick 查一次 balance, < MIN_RESERVE_KAS 则跳过整 relay 本 tick.
 async function _getBalanceKas(relayId) {
   try {
-    const r = await fetch(`${CONSOLE_BASE}/api/relay/${relayId}/balance`);
+    const r = await fetchWithTimeout(`${CONSOLE_BASE}/api/relay/${relayId}/balance`, {}, FETCH_TIMEOUT_FAST_MS);
     const j = await r.json();
     if (!j?.ok) return null;
     // /api/relay/:id/balance 返 { ok, total_sompi, ... } 通常. 兼容 multiple shapes.

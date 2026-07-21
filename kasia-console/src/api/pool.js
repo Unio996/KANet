@@ -2,14 +2,41 @@
 // Per service spec docs/poolspine-service-layer-spec-2026-05-21.md.
 
 import { sqlite } from '../db/client.js';
+import { buildExplorerUrl, buildExplorerAddressUrl, explorerBaseUrl } from '../lib/explorer-url.mjs';
 import { computeSpineP2SH, computeSideP2SH } from '../lib/pool-p2sh.mjs';
 import { buildSidesMerkleTree, getMerkleProof } from '../services/pool-merkle-builder.js';
 import { sendCommandAsync, transferAndConfirm, isRelayAlive } from '../services/relay-manager.js';
 import { getWorkingRpc } from '../services/rpc-health.js';
 import { estimateStorageMass } from '../services/pool-market-settler.js';
 import { categorizeMarket } from '../lib/market-category.js';
-import { isStructuredSpec } from '../lib/spec-validation.js';
+import { isStructuredSpec, assertSpecPredicateValid } from '../lib/spec-validation.js';
+// FINDING-2 (NWT) ③ entry-gate — SINGLE SOURCE commingled-spine guard. assertNotCommingled is called at the
+// top of EVERY bettor stake-lock handler (6 entries); lint-kanet R-COMMINGLE-GUARD flags any that forgot. 禁内联.
+import { assertNotCommingled } from '../lib/pool-commingle-detect.mjs';
+import { getSidesByLogicalMarket } from '../lib/pool-bettor-sides-query.mjs';
 import { createHash, randomUUID } from 'node:crypto';
+import { verifyIngestRequest } from '../services/ingest-auth.js';  // P1 fix (NWT): broker-fee-dm PII 端点 auth
+import { REORG_SAFE_MIN_DEPTH } from '../lib/pool-shard-register.mjs';  // #33 整顿(NWT review): 单一具名常量取代多处硬编码 20
+import { ZK_GATE } from '../lib/zk-close-builder.mjs';
+import { ensureGateTmplHashFresh } from '../lib/gate-tmpl-hash.mjs';
+import { kaspaZk } from '../services/zk-prove-worker.mjs';
+import { checkAdminSecretTier } from '../lib/admin-secret-tier.mjs';
+
+// 件⑤步骤2 疑似死端点命中计数(2026-07-16, KANet-UI, Owner终裁+Bettor #nig8da 派工): observe-only,
+// 零业务逻辑影响, 持久化(跨重启存活)——4个疑似死端点各挂一次调用, 7天观察窗到期零命中才走删除决策,
+// 删前仍NWT审+确认无隐藏调用方(不靠结构推断直接删钱路相关端点)。
+function _recordEndpointHit(endpointName) {
+  try {
+    const now = new Date().toISOString();
+    sqlite.prepare(`
+      INSERT INTO endpoint_hit_counters (endpoint_name, hit_count, first_hit_at, last_hit_at)
+      VALUES (?, 1, ?, ?)
+      ON CONFLICT(endpoint_name) DO UPDATE SET hit_count = hit_count + 1, last_hit_at = excluded.last_hit_at
+    `).run(endpointName, now, now);
+  } catch (e) {
+    console.error(`[endpoint-hit-counter] ${endpointName}: ${e.message}`);
+  }
+}
 
 // L4 (area-11): create-time invariants. Hardcoded mirrors of the settler constants;
 // kept inline rather than imported because they're stable v0.5 protocol values
@@ -27,6 +54,31 @@ const BETTOR_MIN_STAKE_PHYS_FLOOR = 100_000;     // 0.001 KAS — KIP-9 storage 
 const BETTOR_MIN_STAKE_POLICY = 100_000_000;     // 1 KAS — anti-bot product floor (Bettor r158/Owner P0).
 const BETTOR_MIN_STAKE_L4 = BETTOR_MIN_STAKE_POLICY;  // Back-compat alias for existing callers — points to current active floor.
 const MAX_BETTORS_L4 = 50;                       // PoolSpine.sil L13 cap
+// G3 (Owner 世界杯上线门, 2026-07-04, Bettor+NWT 钦定): bshard 无限押注(SHARD_SEAL_COUNT=32 无限开新片)
+// 没有市场级上限, 但 PayoutShard 结算侧硬顶 1024 leaf/片(pool-payout-root.mjs CAP, 需 #18 rolling-payout-shard
+// 才能 >1024, 该功能公测前未建)。900 = 留 12% 安全边界的软顶(按 distinct bet/叶子数计, 非人数——一人多笔=
+// 多叶子, NWT 澄清-2)。到顶后 register-v07/prep 拒绝新押注(NO TX NO STATE, 未付款前拒·非退款), 已存在的
+// 押注不受影响。#18 rolling 落地后此软顶可解除/抬高。
+const MARKET_MAX_LEAVES_G3 = 900;
+// 2026-07-18 KANet-UI(Bettor gate A派工): 世界杯坏盘临时展示层黑名单——V2 covenant家族(现成
+// cancelMarketLive硬编码V1-only, 退款fail-closed拦下)+标题跟真实赛程不符, 详细理由见下面
+// /api/pool/markets/available 里的注释。这是一份人工维护的临时列表, 不是长期机制——V2家族
+// coherence-gate治本落码后应该撤掉这条(或换成读covenant_family列自动判断, 见治本卡①)。
+// 注: kr5l4/j34vb(剪裁坏盘)当前status=verifying, 不在本端点WHERE protocol_status='pending_bettors'
+// 范围内, 天然不会展示, 不需要放进这份名单(查过数据库确认, 非假设)。
+const HIDDEN_BROKEN_MARKET_IDS = new Set([
+  'ext-pool-v07-1784236336840-3mzoh',  // "Will France advance?" V2/8282字节, cancel今晚做不了
+  'ext-pool-v07-1784315274654-ysgpv',  // "Will Spain advance?" 空盘0行, 同占用760517 conditionId
+]);
+// 2026-07-19 KANet-UI(Bettor live-curl抓出的残留缺口, #15): 86e4d271只补了 /markets + /available 两个
+// 端点, 漏了 /trending + /card_groups——tg-bot /bet 走的 console-api.mjs 三条路径(trending/card_groups/
+// available)里有两条完全没兜底, 用户仍能从热门榜/赛事卡片摸到 3mzoh/ysgpv。单一共享 helper, 四个 list
+// 端点全调这个, 以后新增第五个 list 端点忘记补也只用改这一处。默认过滤(fail-safe), q.include_hidden==='1'
+// 才 opt-out(仅 ops 诊断用, 现有四个消费方——tg-bot 三条 + 我自己的诊断 curl——都不传这个参数)。
+function filterHiddenBrokenMarkets(markets, query) {
+  if (query && String(query.include_hidden) === '1') return markets;
+  return markets.filter((m) => !HIDDEN_BROKEN_MARKET_IDS.has(m.id));
+}
 // 5/28 Owner 钦定: 押注 softcap 拆除 (= 之前 4 KAS testnet 限制阻 UI form 真用户测试). 改 Infinity = 0 cap.
 // Per-market math guards (= storage mass / oracle fee floor) still enforce at L1 console + SS contract.
 // Env override 保留可 ops set finite cap if needed.
@@ -95,6 +147,36 @@ function deriveXOnlyPubkey(address) {
   return import('kaspa-wasm').then(kaspa => {
     return kaspa.XOnlyPublicKey.fromAddress(new kaspa.Address(address)).toString();
   });
+}
+
+// ZK-native 结算(2026-07-07，Owner"ZK走到底"钦定首证市场)。Bettor 拍板(#9ufcxq)：zk_native 必须是
+// resolution_rule_spec 里一个独立、显式的顶层布尔字段——不能从 outcome_market_source(judge类型，怎么判输赢)
+// 推断 covenant 版本(钱走 PayoutShard 还是 PayoutShardV2)，这两者是正交的两件事，今天恰好一对一是巧合
+// (首证市场用区块哈希奇偶判定+同时是唯一的ZK-native盘)，未来 ESPN/UMA 判定的市场也可能想走 ZK-native，
+// 届时不该因为 judge 类型不是 blockhash_parity 就被这条推断挡住。
+// 🔴 单一真值(2026-07-08, Bettor #bo75z6): 曾经两处调用点(monolithic /register-v07 + /register-v07/confirm)
+// 各自独立读取这段逻辑, 后者漏抄导致 cswib 首证撞见的 zk_native=true 市场静默铸成 V1 PayoutShard 事故——
+// 抽成这一个共享函数, 两处调用同一份, 不再各自维护各自的副本(今晚已两次撞"两套并行实现同族病"教训)。
+function _resolveZkNativeCtorExtras(market, silverc, computeCloseZkTmplAnchor) {
+  let zkNative = false, closeZkTmplAnchor = null;
+  try { zkNative = JSON.parse(market.resolution_rule_spec || '{}')?.zk_native === true; } catch {}
+  if (zkNative) {
+    // 🔴 STOP修正(2026-07-09, 规则55同族雷·docs/2026-07-08-gate-tmplhash-live-derive-design.md §4 落地清单
+    // 第5条): 不接受硬编码 fallback('511b0ead...'是 repro4 时代旧值、'_j2_closezk_repro4.sil' 是 Repro4
+    // 永久禁铸令的残留路径, 两者都会悄悄过期)——缺 env 直接 throw, 跟 pool.js:1863-1866/
+    // bshard-close-transport.mjs:453-461 已落地的同款纪律对齐, 不留"看起来能跑但值可能不对"的窗口。
+    if (!process.env.ZK_GATE_TMPL_HASH) throw new Error('_resolveZkNativeCtorExtras: ZK_GATE_TMPL_HASH env 必需(不接受硬编码 fallback, 该值随 guest image 变化易过期)');
+    if (!process.env.ZK_CLOSEZK_SIL_PATH) throw new Error('_resolveZkNativeCtorExtras: ZK_CLOSEZK_SIL_PATH env 必需(不接受硬编码 fallback, 路径随归位进度变化)');
+    // 根修(2026-07-09, NWT finding①(b)HIGH): 这是 zkNative 市场 genesis-mint 的 ctor 组装点——之前的
+    // guard 只在 prove/close(genesis 下游)才检查, 这里(genesis 本身)从来没人验过 env 跟 ZK_GATE 是否
+    // 配对新鲜。force=true: 走进这个 if 分支已经确定 zkNative=true(真在铸 ZK-native genesis), 非 ZK 节点
+    // 根本不会进这里, flag 在这没有可用性风险; 没装 WASM 的节点 fail-loud 拒铸, 好过烤一个没法验证的值。
+    ensureGateTmplHashFresh(ZK_GATE, kaspaZk, { force: true });
+    const gateTmplHash = process.env.ZK_GATE_TMPL_HASH;
+    const closeZkSilPath = process.env.ZK_CLOSEZK_SIL_PATH;
+    closeZkTmplAnchor = computeCloseZkTmplAnchor(closeZkSilPath, gateTmplHash, silverc).anchorHex;
+  }
+  return { zkNative, closeZkTmplAnchor };
 }
 
 // KANet-UI 2026-06-11 (Bettor r606/r607 + J1 #143 chokepoint + NWT r66): broker/gateway 收款址必 P2PK.
@@ -301,6 +383,143 @@ async function _broadcastBetRegistered(args) {
   }
 }
 
+// buildBettorRefundClaim — bettor 自取退款核心逻辑(2026-07-14, Bettor #k0i054 修法A 根治抽取)。
+//
+// 抽出原因: 原实现只活在 POST /api/pool/market/:id/bettor-refund-claim 这个 HTTP handler 里,
+// legacyRefundBuilderTick(pool-market-settler.js)靠 fetch('http://127.0.0.1:${PORT}/...') 自己
+// 调自己的 HTTP 端点来复用这份逻辑——console 单线程事件循环被占时,这个自我 HTTP 往返永远等不到
+// 自己处理,造成自锁死循环(见 docs/2026-07-14-legacy-refund-self-fetch-deadlock-fix-design.md,
+// 夜间实测 285 次事件循环冻结/94 次 >30s/最长 316s)。
+//
+// 抽成纯函数后,HTTP 路由与 tick 共用同一份逻辑(不复制两份——9 文件死 relay id 就是"不完整迁移"
+// 的前车之鉴),tick 侧直接 await 调用,进程内自调用天然不需要网络往返。
+//
+// 返回形状: { ok, httpStatus, ...payload } — httpStatus 供 HTTP 路由包装层映射状态码,
+// 纯内部调用方(tick)只需要看 ok。
+export async function buildBettorRefundClaim(marketId, { bettorPk: bettorPkRaw, sideId } = {}) {
+  const bettorPk = (typeof bettorPkRaw === 'string' ? bettorPkRaw.toLowerCase() : null);
+  if (!bettorPk && !sideId) {
+    return { ok: false, httpStatus: 400, error: 'bettor_pk or side_id required' };
+  }
+
+  const market = sqlite.prepare(`
+    SELECT id, deadline, spine_p2sh, protocol_version, protocol_status
+    FROM pool_markets WHERE id = ?
+  `).get(marketId);
+  if (!market) return { ok: false, httpStatus: 404, error: 'market not found' };
+
+  // 🚨 #33/#34 bshard-detect safety net(见原 HTTP handler 同款注释, 逐字保留——J1 红队 2026-06-25
+  // §11 裁决 + ANTI-PATTERNS 规则 50, DO NOT shard-aware-migrate this query）。
+  const isBshard = sqlite.prepare(
+    'SELECT 1 FROM market_shards WHERE logical_market_id = ? OR shard_market_id = ? LIMIT 1'
+  ).get(marketId, marketId);
+  if (isBshard) {
+    return {
+      ok: false, httpStatus: 409,
+      error: 'bshard market: bettor refunds use the fold refund path (PoolShard_fold refund_draw, lib/pool-refund-builder.mjs), not the standalone PoolSide refund endpoint — stake is in the aggregated shard pool, not a per-bettor side UTXO.',
+      refund_path: 'bshard_fold',
+    };
+  }
+
+  let side;
+  if (sideId) {
+    side = sqlite.prepare(`
+      SELECT id, bettor_pk, side_p2sh, side_lock_tx, side_redeem_script_hex, stake_amount, direction
+      FROM pool_bettor_sides WHERE id = ? AND market_id = ?
+    `).get(sideId, marketId);
+  } else {
+    side = sqlite.prepare(`
+      SELECT id, bettor_pk, side_p2sh, side_lock_tx, side_redeem_script_hex, stake_amount, direction
+      FROM pool_bettor_sides WHERE market_id = ? AND lower(bettor_pk) = ?
+    `).get(marketId, bettorPk);
+  }
+  if (!side) return { ok: false, httpStatus: 404, error: 'side row not found for bettor in market' };
+  if (!side.side_lock_tx) return { ok: false, httpStatus: 409, error: 'side stake not yet locked on chain' };
+  if (!side.side_redeem_script_hex) return { ok: false, httpStatus: 409, error: 'side row missing redeem_script_hex (= pre-v136 register, cannot self-claim)' };
+
+  // Resolve signing relay via deriveXOnlyPubkey(relay_nodes.address) match (Bettor r392 catch).
+  const candidates = sqlite.prepare('SELECT id, address FROM relay_nodes WHERE address IS NOT NULL').all();
+  let signingRelay = null;
+  for (const row of candidates) {
+    try {
+      const pk = await deriveXOnlyPubkey(row.address);
+      if (String(pk).toLowerCase() === String(side.bettor_pk).toLowerCase()) {
+        signingRelay = row;
+        break;
+      }
+    } catch {}
+  }
+  if (!signingRelay) {
+    return {
+      ok: false, httpStatus: 404,
+      error: `no local relay matches bettor_pk=${String(side.bettor_pk).slice(0,12)}.. via deriveXOnlyPubkey(address) — bettor relay not on this node`,
+    };
+  }
+
+  // Byte-size mass-aware fee + KIP-9 storage_mass (= helper refactor lib/kip9-mass.mjs).
+  const { computeSingleOutputFee } = await import('../lib/kip9-mass.mjs');
+  const redeemBytes = Buffer.from(side.side_redeem_script_hex, 'hex');
+  const sigScriptSize = 70 + redeemBytes.length;
+  const txByteEstimate = 45 + sigScriptSize + 50 + 80;
+  const computeMassEst = Math.ceil(txByteEstimate * 2.5);
+  const sideStakeInt = parseInt(side.stake_amount, 10) || 1_000_000_000;
+  const feeResult = computeSingleOutputFee(computeMassEst, sideStakeInt, 1000, 100_000_000);
+  const massEst = feeResult.totalMass;
+  const fee = feeResult.dynamicFee;
+
+  // v0.5 hardcodes output == stake - 1000 (1000 sompi in-script constant); actual TX fee paid by
+  // relay fee-input (separate relay-wallet UTXO, no-change). v06/v07 use dynamic KIP-9 fee.
+  const isLegacy = !market.protocol_version || market.protocol_version === 'v0.5';
+  const stakeSompi = BigInt(side.stake_amount);
+  const outAmount = isLegacy ? stakeSompi - 1000n : stakeSompi - BigInt(fee);
+  if (!isLegacy && outAmount <= 1000n) {
+    return { ok: false, httpStatus: 409, error: `output ${outAmount} <= dust 1000 (= fee ${fee} too high for stake ${stakeSompi})` };
+  }
+
+  // J1 5dd590cd0 grace fix: SS L260/270 require(tx.time >= (deadline + REFUND_GRACE_SEC) * 1000) ms.
+  const { REFUND_GRACE_SEC } = await import('../lib/pool-refund-grace.mjs');
+  const lockTime = isLegacy
+    ? BigInt(market.deadline) * 1000n
+    : (BigInt(market.deadline) + BigInt(REFUND_GRACE_SEC)) * 1000n;
+  const entryIndex = isLegacy ? 3 : 2;
+
+  try {
+    const submitResult = await sendCommandAsync(signingRelay.id, {
+      type: 'pool_side_refund_cancelled_tx',
+      side_p2sh_address: side.side_p2sh,
+      side_redeem_script_hex: side.side_redeem_script_hex,
+      required_input_outpoint: { outpointTxid: side.side_lock_tx, outpointIndex: 0 },
+      output: { address: signingRelay.address, amountSompi: outAmount.toString() },
+      lock_time: lockTime.toString(),
+      entry_index: entryIndex,
+      add_fee_input: isLegacy,
+    });
+    if (!submitResult?.ok || !submitResult.txId) {
+      return { ok: false, httpStatus: 500, error: `relay submit fail: ${submitResult?.error || 'no txId'}` };
+    }
+    // Bettor r400 catch: 必 UPDATE claim_txid 防 cron 重试。
+    sqlite.prepare('UPDATE pool_bettor_sides SET claim_txid = ?, refund_attempted_at = CURRENT_TIMESTAMP WHERE id = ?')
+      .run(submitResult.txId, side.id);
+    return {
+      ok: true, httpStatus: 200,
+      market_id: marketId,
+      bettor_pk: side.bettor_pk,
+      side_id: side.id,
+      signing_relay_id: signingRelay.id,
+      signing_relay_address: signingRelay.address,
+      refund_txid: submitResult.txId,
+      stake_sompi: stakeSompi.toString(),
+      fee_sompi: fee.toString(),
+      output_sompi: outAmount.toString(),
+      lock_time_ms: lockTime.toString(),
+      mass_estimate: massEst,
+    };
+  } catch (e) {
+    console.error(`[pool/bettor-refund-claim] fail market=${marketId.slice(0,12)} side=${side.id}: ${e.message}`);
+    return { ok: false, httpStatus: 500, error: `claim fail: ${e.message}` };
+  }
+}
+
 export async function registerPoolRoutes(fastify) {
   // POST /api/pool/market/create — maker creates market + locks stake
   // Bettor r449 4 决策 — backend defaults for omitted V2-wireframe fields:
@@ -435,6 +654,8 @@ export async function registerPoolRoutes(fastify) {
     // KANet-UI 2026-06-06 (Bettor ③ APPROVE r546): 创建端 spec 结构化强制 (= 配 bot 入口 filter 双层堵).
     try { _maybeDeriveSpecFromSourceKind(b); } catch (e) { return reply.code(400).send({ ok: false, error: `source_kind derive fail: ${e.message}` }); }
     if (!isStructuredSpec(b.resolution_rule_spec)) return reply.code(400).send({ ok: false, error: 'resolution_rule_spec must be JSON with non-empty title + resolution_criteria + data_source_canonical (= 可填可信源下拉 source_kind 自动 derive, 或自填 canonical URL)' });
+    // SEAM fix (NWT FINDING-1): 建市 chokepoint — spec 带 resolution_predicate 必过 validateResolutionPredicate (shape+护栏6 半线单源)。整数线/畸形 → 400, 不依赖 caller 走 buildSportsCard。
+    { const _pv = assertSpecPredicateValid(b.resolution_rule_spec); if (!_pv.valid) return reply.code(400).send({ ok: false, error: `resolution_predicate 非法 (建市拒, 防 un-settleable): ${_pv.reason}` }); }
     // 5/28 Owner 钦定: testnet 0 limits. Skip dynamic min spendable + softcap when KANET_TESTNET_NO_LIMITS=1.
     if (process.env.KANET_TESTNET_NO_LIMITS !== '1') {
       if (makerStakeKas > MAKER_STAKE_MAX_KAS) return reply.code(400).send({ ok: false, error: `maker_stake_kas must be <= ${MAKER_STAKE_MAX_KAS} KAS (v0.5 testnet per-market softcap, Bettor r444 + Owner钦定 SS-baked)` });
@@ -509,7 +730,13 @@ export async function registerPoolRoutes(fastify) {
     // surfaces the real transfer error (= not a generic "failed after 3 attempts").
     let spineTxId = null;
     try {
-      const r = await transferAndConfirm(b.maker_relay_id, spineResult.p2shAddr, makerStakeStr);
+      // 事故硬化(2026-07-08, yxllc spine 100KAS 追踪战役): 落库(下面 INSERT INTO pool_markets)前的
+      // landed 确认必须是深确认(minDepth=REORG_SAFE_MIN_DEPTH), 不能停在浅/mempool-accepted 级——
+      // block 是 blue 不代表这笔 tx 本身赢了 acceptance(同一源 UTXO 可能被 gateway 自己另一笔并发 tx
+      // 竞争抢先, 浅确认看不出来, 一旦落库就把从未真正确权的 spine_lock_tx 当权威记录, DB 有记录但链上
+      // 没钱)。maxWaitMs 相应放宽到 60s, 给 20 个确认累积的时间(即使按今晚测到的最低速率也够)。这个坑
+      // 三处 create 端点(v0.6 legacy ×2 + v0.7 一处)字面同一段代码, 一次性堵完(不留同形状副本)。
+      const r = await transferAndConfirm(b.maker_relay_id, spineResult.p2shAddr, makerStakeStr, { minDepth: REORG_SAFE_MIN_DEPTH, maxWaitMs: 60000 });
       spineTxId = r.txId;
     } catch (err) {
       return reply.code(503).send({ ok: false, error: `maker stake lock failed: ${err.message} (spine_p2sh=${spineResult.p2shAddr})` });
@@ -575,6 +802,7 @@ export async function registerPoolRoutes(fastify) {
   //   - Status goes directly to 'pending_bettors' (no on-market oracle-deposit phase — committee bonds
   //     live at the pool-layer contract, not per-market).
   fastify.post('/api/pool/market/create-v06', async (request, reply) => {
+    _recordEndpointHit('market/create-v06');  // 件⑤步骤2 疑似死端点观察窗
     // 503 guard removed: path A LOCKED + shipped (Bettor r19, 5/30). Contracts now use 5
     // individual committee sigs (4-of-5 threshold) + committee ∈ poolMerkleRoot binding.
     const b = request.body || {};
@@ -665,6 +893,8 @@ export async function registerPoolRoutes(fastify) {
     // KANet-UI 2026-06-06 (Bettor ③ APPROVE r546): 创建端 spec 结构化强制 (= 配 bot 入口 filter 双层堵).
     try { _maybeDeriveSpecFromSourceKind(b); } catch (e) { return reply.code(400).send({ ok: false, error: `source_kind derive fail: ${e.message}` }); }
     if (!isStructuredSpec(b.resolution_rule_spec)) return reply.code(400).send({ ok: false, error: 'resolution_rule_spec must be JSON with non-empty title + resolution_criteria + data_source_canonical (= 可填可信源下拉 source_kind 自动 derive, 或自填 canonical URL)' });
+    // SEAM fix (NWT FINDING-1): 建市 chokepoint — spec 带 resolution_predicate 必过 validateResolutionPredicate (shape+护栏6 半线单源)。整数线/畸形 → 400, 不依赖 caller 走 buildSportsCard。
+    { const _pv = assertSpecPredicateValid(b.resolution_rule_spec); if (!_pv.valid) return reply.code(400).send({ ok: false, error: `resolution_predicate 非法 (建市拒, 防 un-settleable): ${_pv.reason}` }); }
     if (process.env.KANET_TESTNET_NO_LIMITS !== '1') {
       if (makerStakeKas > MAKER_STAKE_MAX_KAS) return reply.code(400).send({ ok: false, error: `maker_stake_kas must be <= ${MAKER_STAKE_MAX_KAS} KAS` });
     }
@@ -705,7 +935,13 @@ export async function registerPoolRoutes(fastify) {
     // Maker stake lock — NO TX NO STATE CHANGE.
     let spineTxId = null;
     try {
-      const r = await transferAndConfirm(b.maker_relay_id, spineResult.p2shAddr, makerStakeStr);
+      // 事故硬化(2026-07-08, yxllc spine 100KAS 追踪战役): 落库(下面 INSERT INTO pool_markets)前的
+      // landed 确认必须是深确认(minDepth=REORG_SAFE_MIN_DEPTH), 不能停在浅/mempool-accepted 级——
+      // block 是 blue 不代表这笔 tx 本身赢了 acceptance(同一源 UTXO 可能被 gateway 自己另一笔并发 tx
+      // 竞争抢先, 浅确认看不出来, 一旦落库就把从未真正确权的 spine_lock_tx 当权威记录, DB 有记录但链上
+      // 没钱)。maxWaitMs 相应放宽到 60s, 给 20 个确认累积的时间(即使按今晚测到的最低速率也够)。这个坑
+      // 三处 create 端点(v0.6 legacy ×2 + v0.7 一处)字面同一段代码, 一次性堵完(不留同形状副本)。
+      const r = await transferAndConfirm(b.maker_relay_id, spineResult.p2shAddr, makerStakeStr, { minDepth: REORG_SAFE_MIN_DEPTH, maxWaitMs: 60000 });
       spineTxId = r.txId;
     } catch (err) {
       return reply.code(503).send({ ok: false, error: `maker stake lock failed: ${err.message} (spine_p2sh=${spineResult.p2shAddr})` });
@@ -791,6 +1027,29 @@ export async function registerPoolRoutes(fastify) {
     const required = ['maker_relay_id', 'outcome_side', 'outcome_end_date', 'resolution_rule_spec', 'maker_stake_kas'];
     for (const k of required) {
       if (b[k] === undefined || b[k] === null || b[k] === '') return reply.code(400).send({ ok: false, error: `missing ${k}` });
+    }
+    // 🔴 #27 层A (Owner 钦定 2026-06-30 "大胆修·测试网无妨"): pre-broadcast conditionId 去重闸 — 止重复盘。
+    //   根因(六层查实): 重复盘今天密集成簇产生(0xf161×5/32秒)·seeder 早有 dedup(L92)但 check-then-act RACE
+    //   (DB查在前·create-v07 异步锁链落库在后·burst-builder/多实例发得比落库快→同 conditionId 重复 create)。
+    //   create-v07 是【所有建市 chokepoint】(seeder/burst/手动全走此)→ 在此【锁 stake 前】查重 = path-independent 根治
+    //   (非只改 seeder JS)。active 同 conditionId 已存 → 409 拒·一分钱不花(spine lock TX 在下方·此处在其前)。
+    if (b.outcome_condition_id) {
+      try {
+        const _condStr = String(b.outcome_condition_id);
+        // #15 查漏补缺(2026-07-05, o70vh/2ua7d真实重复盘案例): 白名单IN('pending_bettors','verifying')
+        // 只覆盖v0.7两个状态, 漏了v0.6专属'pending_oracle_deposits'等非终态——反转成黑名单排除真终态
+        // (cancelled/archived/refunded=市场从没真正跑起来或已清理干净), 其余一律算 active 挡重复
+        // (含completed/settled_partial_claims: 真实赛事结果已产生过一次, 不该允许同conditionId再建新盘)。
+        const _dup = sqlite.prepare(
+          "SELECT id FROM pool_markets WHERE outcome_condition_id = ? AND protocol_status NOT IN ('cancelled','archived','refunded') LIMIT 1"
+        ).get(_condStr);
+        if (_dup) {
+          return reply.code(409).send({
+            ok: false, duplicate: true, existing_market_id: _dup.id,
+            error: `duplicate market: conditionId ${_condStr.slice(0, 14)}.. 已有 active 盘 ${String(_dup.id).slice(0, 12)} (#27 dedup·不重复建·不烧 stake)`,
+          });
+        }
+      } catch (e) { console.warn(`[create-v07] #27 dedup-gate query fail (放行不挡建市): ${e.message}`); }
     }
     // J2-tn r411 DoD-E Bettor r383 关1 PASS — 源头堵 oracle pool < 5 卡死单 gap.
     // 现状: 委员从建市时 pool_snapshots 定格. snapshot eligible < COMMITTEE_SIZE (5) →
@@ -940,6 +1199,25 @@ export async function registerPoolRoutes(fastify) {
       return reply.code(400).send({ ok: false, error: `outcome_end_date must be <= now + ${maxDeadlineDay} days` });
     }
     const deadline = Math.floor(outcomeEndMs / 1000);
+
+    // #35/G1 pre-flight gate (J2, 2026-07-04, Bettor 决策·opt-in 非全局强制): 只在 caller 显式传
+    // b.preflight_check 时才跑三项核对(镜像源逻辑等价/deadline充足/judge时机)——create-v07 是全体
+    // v0.7 建市 chokepoint(polymarket 镜像盘/ESPN spread-total 盘等都走这条路), 这些市场类型没有
+    // "镜像源逻辑等价"这个概念, 强制跑会误伤。只有世界杯 advance/win 盘(本 cron)主动传入这个字段
+    // 才受 gate 约束, 其它建市路径零影响(向后兼容)。
+    if (b.preflight_check) {
+      try {
+        const { runPreflightGate } = await import('../lib/pool-preflight-gate.mjs');
+        const gateResult = runPreflightGate(b.preflight_check);
+        if (!gateResult.pass) {
+          const failed = Object.entries(gateResult.checks).filter(([, c]) => !c.pass).map(([k, c]) => `${k}: ${c.reasons.join('; ')}`);
+          return reply.code(409).send({ ok: false, error: `preflight gate failed: ${failed.join(' | ')}`, preflight: gateResult });
+        }
+        b._preflightGateResult = gateResult; // 建市成功后落 metadata (下方 writeback 处读取)
+      } catch (e) {
+        return reply.code(500).send({ ok: false, error: `preflight gate check threw: ${e.message}` });
+      }
+    }
     // v0.7 SS refund_maker_unjoined L370-373 uses fee 范围 [MIN_FEE=50_000, MAX_FEE=100M]. ctor
     // minerFee 仍 in ctor for backward compat / settle entry but refund 不读. 5M floor 仍 safe
     // (= L284-285 ctor validate 0<minerFee<1e8, 5M 通过) + 不打架 (R241 verify, Bettor ack).
@@ -975,7 +1253,20 @@ export async function registerPoolRoutes(fastify) {
     if (makerStakeKas < POOL_MAKER_STAKE_MIN_KAS) return reply.code(400).send({ ok: false, error: `maker_stake_kas must be >= ${POOL_MAKER_STAKE_MIN_KAS} KAS (Owner 钦定 demo 实质押 skin-in-game, 单一源 L33)` });
     // KANet-UI 2026-06-06 (Bettor ③ APPROVE r546): 创建端 spec 结构化强制 (= 配 bot 入口 filter 双层堵).
     try { _maybeDeriveSpecFromSourceKind(b); } catch (e) { return reply.code(400).send({ ok: false, error: `source_kind derive fail: ${e.message}` }); }
+    // 🔴 Owner "ZK走到底"钦定(2026-07-10, Bettor #f9ckoz DoD·D-001 committed架构): create-v07 新盘默认
+    // zk_native=true——此前 caller 不显式传该字段时静默落回旧 V1(PayoutShard committee-sig)路径,
+    // 残留自 CloseZkV2 定名前的旧默认值, 没跟上"ZK是committed目标"的决策。只在 caller 显式传 false
+    // 时保留 V1(渐进迁移/明确退回 legacy 的逃生口), 缺省/未提及一律默认 ZK。genesis-mint 时
+    // _resolveZkNativeCtorExtras 对 zkNative=true 分支本就 fail-loud(缺 ZK_GATE_TMPL_HASH/
+    // ZK_CLOSEZK_SIL_PATH env 直接 throw, 不静默降级)——这条路径已被 uqmp8/3o0a6 等实盘验证过。
+    try {
+      const _spec = JSON.parse(b.resolution_rule_spec || '{}') || {};
+      if (_spec.zk_native !== false) _spec.zk_native = true;
+      b.resolution_rule_spec = JSON.stringify(_spec);
+    } catch (e) { return reply.code(400).send({ ok: false, error: `resolution_rule_spec zk_native default-fill fail: ${e.message}` }); }
     if (!isStructuredSpec(b.resolution_rule_spec)) return reply.code(400).send({ ok: false, error: 'resolution_rule_spec must be JSON with non-empty title + resolution_criteria + data_source_canonical (= 可填可信源下拉 source_kind 自动 derive, 或自填 canonical URL)' });
+    // SEAM fix (NWT FINDING-1): 建市 chokepoint — spec 带 resolution_predicate 必过 validateResolutionPredicate (shape+护栏6 半线单源)。整数线/畸形 → 400, 不依赖 caller 走 buildSportsCard。
+    { const _pv = assertSpecPredicateValid(b.resolution_rule_spec); if (!_pv.valid) return reply.code(400).send({ ok: false, error: `resolution_predicate 非法 (建市拒, 防 un-settleable): ${_pv.reason}` }); }
     if (process.env.KANET_TESTNET_NO_LIMITS !== '1') {
       if (makerStakeKas > MAKER_STAKE_MAX_KAS) return reply.code(400).send({ ok: false, error: `maker_stake_kas must be <= ${MAKER_STAKE_MAX_KAS} KAS` });
     }
@@ -996,6 +1287,44 @@ export async function registerPoolRoutes(fastify) {
       rule: b.resolution_rule_spec,
     });
     const marketMetadataHash = createHash('sha256').update(metaInput).digest('hex');
+
+    // B线落2(2026-07-12, 设计 docs/2026-07-12-fee-split-phase2-commit-anchor-design.md v1.2): 非 zk_native
+    // 市场建单即 commit 分润规则(prediction-v1-interim: broker 160bps/委员叶 bps=0 挂 D-008 政策卡)。
+    // 生效边界=新建市场起(存量 fee_rules NULL 走既有路径字节不动)。build 内部跑 validateFeeRules =
+    // NWT F2 闭合(坏 bps/坏地址建单时 fail-loud, 且在 spine 花钱之前, 不产生 settle 时才炸的延迟雷)。
+    // zk_native 判定与 selectRipeMarkets 同口径: rule_spec 非法 JSON 视为"未标记"= V1 路径。
+    //
+    // B线深化件2(2026-07-12, Bettor 裁"(a)修端点不降级" #hkgnxl.2): 接通既有 buildPredictionV1InterimRules
+    // 的 introducerPk 参数(组件层早已支持, 端点此前只喂 brokerPk 一路——"第三方可用"在入口处断头)。
+    // 构造逻辑单源在 buildFeeRulesForCreateRequest(lib/create-v07-fee-rules.mjs, 可脱 HTTP/chain 独立单测
+    // byte-equal 护栏, 不进 packages/fee-split——本函数是 KANet 端点请求体字段名适配层非通用第三方原语)。
+    // introducer_pk 非 relay 解析(测试/第三方角色不要求在本 console 注册 relay 身份——同 fee_rules
+    // roles[].address 语义, raw x-only pk hex, 非 kaspa address)。
+    // 🔴 B线深化件2 冲突守卫(Bettor 裁, uw8rd 事故坐实#hkpp9r.2·"第三方同款陷阱"): zk_native 缺省=true
+    // (L1081-1091, Owner"ZK走到底")与 fee_rules 路径(仅非 zk_native 生效)天然互斥——caller 传了
+    // introducer_pk(fee_rules 路径专属意图信号, 无其它消费者)却让 zk_native 解析为 true, 此前【静默吞掉
+    // introducer_pk】建出 fee_rules=NULL 的盘(J2 广播 uw8rd 100KAS 真锁后才发现, DoD 全废)。改
+    // fail-loud 拒建——挡在下方 transferAndConfirm 真花钱之前, 不留"建出错的盘才发现"这条延迟雷
+    // (同 F2 hardening 同一纪律: 建单时炸, 不 settle 时才炸)。判据单源在
+    // checkIntroducerZkNativeConflict(lib/create-v07-fee-rules.mjs, 可离线单测——Bettor 裁"守卫负例去
+    // test-framework 离线跑, 不许再打 live 钱路端点")。
+    const introducerPkGiven = !(b.introducer_pk === undefined || b.introducer_pk === null || b.introducer_pk === '');
+    let feeRulesJson = null;
+    {
+      let _rrs = {}; try { _rrs = JSON.parse(b.resolution_rule_spec || '{}') || {}; } catch {}
+      const { checkIntroducerZkNativeConflict, buildFeeRulesForCreateRequest } = await import('../lib/create-v07-fee-rules.mjs');
+      const conflictCheck = checkIntroducerZkNativeConflict({ introducerPkGiven, zkNative: _rrs.zk_native === true });
+      if (conflictCheck.conflict) {
+        return reply.code(400).send({ ok: false, error: conflictCheck.reason });
+      }
+      if (_rrs.zk_native !== true && brokerPk) {
+        try {
+          feeRulesJson = JSON.stringify(buildFeeRulesForCreateRequest({ brokerPk, introducerPkRaw: b.introducer_pk }));
+        } catch (e) {
+          return reply.code(400).send({ ok: false, error: `fee_rules 构造失败(建单时 fail-loud, F2): ${e.message}` });
+        }
+      }
+    }
 
     // Generate marketId FIRST so we can derive market_id hash for SS ctor.
     const marketId = 'ext-pool-v07-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7);
@@ -1019,7 +1348,13 @@ export async function registerPoolRoutes(fastify) {
 
     let spineTxId = null;
     try {
-      const r = await transferAndConfirm(b.maker_relay_id, spineResult.p2shAddr, makerStakeStr);
+      // 事故硬化(2026-07-08, yxllc spine 100KAS 追踪战役): 落库(下面 INSERT INTO pool_markets)前的
+      // landed 确认必须是深确认(minDepth=REORG_SAFE_MIN_DEPTH), 不能停在浅/mempool-accepted 级——
+      // block 是 blue 不代表这笔 tx 本身赢了 acceptance(同一源 UTXO 可能被 gateway 自己另一笔并发 tx
+      // 竞争抢先, 浅确认看不出来, 一旦落库就把从未真正确权的 spine_lock_tx 当权威记录, DB 有记录但链上
+      // 没钱)。maxWaitMs 相应放宽到 60s, 给 20 个确认累积的时间(即使按今晚测到的最低速率也够)。这个坑
+      // 三处 create 端点(v0.6 legacy ×2 + v0.7 一处)字面同一段代码, 一次性堵完(不留同形状副本)。
+      const r = await transferAndConfirm(b.maker_relay_id, spineResult.p2shAddr, makerStakeStr, { minDepth: REORG_SAFE_MIN_DEPTH, maxWaitMs: 60000 });
       spineTxId = r.txId;
     } catch (err) {
       return reply.code(503).send({ ok: false, error: `maker stake lock failed: ${err.message} (spine_p2sh=${spineResult.p2shAddr})` });
@@ -1032,6 +1367,7 @@ export async function registerPoolRoutes(fastify) {
         v07_shard_id: shard_id,
         v07_shard_count: shard_count,
         v07_market_id_hash: market_id_hash,
+        ...(b._preflightGateResult ? { preflight: b._preflightGateResult } : {}),
       });
       sqlite.prepare(`INSERT INTO pool_markets (
         id, maker_relay_id, maker_pk, spine_p2sh, spine_lock_tx, market_metadata_hash,
@@ -1039,14 +1375,14 @@ export async function registerPoolRoutes(fastify) {
         deadline, miner_fee, broker_fee_pct, oracle_bond_amount, maker_stake_amount,
         outcome_market_source, outcome_condition_id, outcome_token_id, outcome_side, resolution_rule_spec,
         protocol_status, sides_merkle_root, oracle_relay_ids, broker_relay_id, metadata, category,
-        protocol_version, pool_merkle_root, deadline_daa
-      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+        protocol_version, pool_merkle_root, deadline_daa, fee_rules
+      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
         marketId, b.maker_relay_id, maker_relay_pk, spineResult.p2shAddr, spineTxId, marketMetadataHash,
         null, null, null, brokerPk,
         deadline, minerFee, brokerFeePct, oracleBondAmount, makerStakeAmount,
         b.outcome_market_source, b.outcome_condition_id, b.outcome_token_id, b.outcome_side, b.resolution_rule_spec,
         'pending_bettors', '', '[]', b.broker_relay_id, initialMetadata, b.category,
-        'v0.7', poolMerkleRoot, b._deadline_daa || null,
+        'v0.7', poolMerkleRoot, b._deadline_daa || null, feeRulesJson,
       );
     } catch (e) {
       console.error(`[pool/create-v07] DB insert fail: ${e.message}`);
@@ -1102,6 +1438,20 @@ export async function registerPoolRoutes(fastify) {
     if (market.protocol_status !== 'pending_bettors') return reply.code(409).send({ ok: false, error: `market status=${market.protocol_status}, registration closed` });
     if (!market.pool_merkle_root) return reply.code(409).send({ ok: false, error: 'v0.7 market missing pool_merkle_root (committee)' });
 
+    // FINDING-2 (NWT) ③ 入口闸 — 单源守卫 (commit1 此处内联, 现迁 shared assertNotCommingled = call-site 单源).
+    //   commingled spine_p2sh 被 >1 v0.7 市场共享 → 跨市场替换风险. entry-block ≠ status-cancel (J1 decoupling):
+    //   只拒新押注, 不碰 status/资金; 已有押注走 deadline 自动退款 (outpoint-precise) → 不 orphan 退款路.
+    if (assertNotCommingled(market, reply, sqlite)) return;
+
+    // G3 (世界杯上线门): 同 register-v07/prep 的市场级总 leaf 上限(结算侧 PayoutShard 1024 硬顶, #18 rolling 未建).
+    const existingLeafCountG3 = getSidesByLogicalMarket(logicalMarketId, sqlite).length;
+    if (existingLeafCountG3 >= MARKET_MAX_LEAVES_G3) {
+      return reply.code(409).send({
+        ok: false, error: 'market_full',
+        message: `This market has reached its bet capacity (${existingLeafCountG3}/${MARKET_MAX_LEAVES_G3}) and cannot accept new bets. Please choose another market.`,
+      });
+    }
+
     const direction = parseInt(b.direction, 10);
     if (direction !== 0 && direction !== 1) return reply.code(400).send({ ok: false, error: 'direction must be 0 (YES) or 1 (NO)' });
     const stakeSompi = Math.round(parseFloat(b.stake_kas) * 1e8);
@@ -1144,8 +1494,11 @@ export async function registerPoolRoutes(fastify) {
     const kaspa = await import('kaspa-wasm');
     const p2sh = (redeemHex) => kaspa.addressFromScriptPublicKey(kaspa.ScriptBuilder.fromScript(new Uint8Array(Buffer.from(redeemHex, 'hex'))).createPayToScriptHashScript(), network).toString();
     const rc = (cmd) => sendCommandAsync(gatewayRelayId, cmd, 90000);
-    const transfer = async (addr, sompi) => { const r = await transferAndConfirm(gatewayRelayId, addr, (Number(sompi) / 1e8).toFixed(8)); return r.txId; };
-    const landed = async (txid, addr, n = 25) => { for (let i = 0; i < n; i++) { const j = await sendCommandAsync(gatewayRelayId, { type: 'check_utxo_landed', address: addr, txid }, 20000); if (j.landed || j.found) return true; await new Promise(r => setTimeout(r, 2000)); } return false; };
+    // 事故硬化(2026-07-08, yxllc追踪): 这笔transfer的产物(fundTx)被喂进genesis-mint(ensurePayoutShardV2)
+    // 当funding input, 最终落payout_shards表——同create-v07 spine那条纪律, 也升级深确认。
+    const transfer = async (addr, sompi) => { const r = await transferAndConfirm(gatewayRelayId, addr, (Number(sompi) / 1e8).toFixed(8), { minDepth: REORG_SAFE_MIN_DEPTH, maxWaitMs: 60000 }); return r.txId; };
+    // minDepth: 20 (J1 phantom-leaf 根治) — reorg-safe DAA-深度门: 浅确认 UTXO(被 reorg 退)不算 landed → register land-gate 不记 phantom leaf。poll 到 depth≥20 才 true; 超时返 false → caller throw(NO-TX-NO-STATE 不推进 leaf)。
+    const landed = async (txid, addr, n = 25) => { for (let i = 0; i < n; i++) { const j = await sendCommandAsync(gatewayRelayId, { type: 'check_utxo_landed', address: addr, txid, minDepth: REORG_SAFE_MIN_DEPTH }, 20000); if (j.landed || j.found) return true; await new Promise(r => setTimeout(r, 2000)); } return false; };
 
     // shard→pool_markets row: each physical shard is a minimal pool_markets clone (FK shard_market_id REFERENCES pool_markets(id);
     //   foreign_keys=ON). UI aggregates shards under the logical market via market_shards.logical_market_id. ⚠ DESIGN-FLAG for team:
@@ -1173,20 +1526,18 @@ export async function registerPoolRoutes(fastify) {
     const shardP2sh_of = (smid) => (sqlite.prepare('SELECT shard_p2sh FROM market_shards WHERE shard_market_id = ?').get(smid)?.shard_p2sh) || '';
 
     try {
-      const { registerBettorOnShard } = await import('../lib/pool-shard-register.mjs');
-      const silverc = process.env.SILVERC_PATH || 'D:/silverscript/target/release/silverc.exe';
-      // 命门① genesis coherence (NWT/Bettor load-bearing): PayoutShard 烤 predicate_commit = blake2b(canonicalPredicate(predicate))
-      //   (单源 computePredicateCommit, 与 enforce 同函数) — 非 market_metadata_hash (= sha256({全市场元}) ≠ blake2b(canonical(predicate))
-      //   → 委员 enforce hash-bind 永假 → close 永 BUST). predicate-less 市场(无结构化判)fallback metadata_hash(无命门③ enforce).
-      const { computePredicateCommit, computeMarketCommit } = await import('../lib/pool-shard-settle.mjs');
-      let _predicate = null;
-      try { _predicate = JSON.parse(market.resolution_rule_spec || '{}')?.resolution_predicate || null; } catch {}
-      // 命门④ v1 fee provenance (NWT 底线): fee 市场烤 computeMarketCommit({predicate, fee_recipients:{broker_pk, introducer_pk}})
-      //   进 PS offset-518 commit slot (折进 predicate_commit 同一 32B, .sil 不变零 re-deploy). 委员 enforce 从被花 PS 读 + 同函数
-      //   验 → settler 改 broker/introducer 地址 → 不符 → BUST. broker_pk/introducer_pk = market row create-baked (链同步).
-      //   predicate-less 市场 fallback market_metadata_hash (无 fee provenance, 无 enforce). 单源 (genesis+enforce 同 computeMarketCommit).
-      const _feeRecipients = { brokerPk: market.broker_pk || null, introducerPk: market.introducer_pk || null };
-      const predicateCommit = _predicate ? computeMarketCommit(_predicate, _feeRecipients) : market.market_metadata_hash;
+      const { registerBettorOnShard, computeCloseZkTmplAnchor } = await import('../lib/pool-shard-register.mjs');
+      // 事故硬化(2026-07-08 backlog 调查, Bettor④指令): 这两处曾各自独立声明危险默认(target/release/
+      // silverc.exe，会随任意 cargo build 原地漂移，07-07 事故的确切病灶), 改跟 pool-bshard-artifacts.mjs
+      // 已修的那行同一模式——固定 versioned-builds 下按族 pin 的已知良性文件, 不再吃 target/release 默认。
+      const silverc = process.env.SILVERC_LEGACY_PATH || 'D:/silverscript/versioned-builds/silverc-legacy-2c46231.exe';
+      const { zkNative: _zkNative, closeZkTmplAnchor: _closeZkTmplAnchor } = _resolveZkNativeCtorExtras(market, silverc, computeCloseZkTmplAnchor);
+      // 命门①④ genesis coherence: commit 槽派生收敛为单源 deriveMarketPredicateCommit(B线落2, 2026-07-12,
+      //   取代此处与 confirm/admin-confirm 两处的同型四行拷贝——"两套并行实现"家族病, 同 _resolveZkNativeCtorExtras
+      //   收敛先例)。分支: fee_rules 非空→computeMarketCommitV2(P1: 含 predicate-null 折 identity 锚);
+      //   NULL→既有 computeMarketCommit/metadata_hash 分支字节不动。与 enforce 命门① 判别严格镜像。
+      const { deriveMarketPredicateCommit } = await import('../lib/pool-shard-settle.mjs');
+      const predicateCommit = deriveMarketPredicateCommit(market);
       // 件1(J1 deadline-gate, NWT option-a): partial-shard sweep gate = market.deadline (Unix s, = outcome_end floor,
       //   市场创建时 ctor-baked 非 spender → verify-value-source). ShardLeaf bakes it; partial 片仅 tx.time>=deadline 可归集
       //   (满片随时). 缺则 registerBettorOnShard fail-closed throw. predicate-less / 旧 .sil(无 deadline 参)则被忽略=无害.
@@ -1198,6 +1549,7 @@ export async function registerPoolRoutes(fastify) {
         poolMerkleRoot: market.pool_merkle_root, predicateCommit,
         bettorPk, direction, stakeSompi, relayAddr, silverc, sealCount: 32, deadline: market.deadline,
         createShardMarketRow, recordBettor,
+        zkNative: _zkNative, closeZkTmplAnchor: _closeZkTmplAnchor,   // 非 zkNative 市场: false/null，等价于不传，行为不变
       });
       return reply.send({ ok: true, logical_market_id: logicalMarketId, bettor_pk: bettorPk, ...result });
     } catch (e) {
@@ -1206,7 +1558,505 @@ export async function registerPoolRoutes(fastify) {
     }
   });
 
+  // ── B (无限滚动分片押注) 0-custody 两步流: register-v07/prep + register-v07/confirm (J2 2026-06-30, Owner 钦定 fresh 实现) ──
+  //   缺口: register-v07 (单体 L1103) 是 gateway-custody 一步 (无 /prep /confirm); bot 0-custody 用户自付流用不了 → 回退 v06 (单片 50-cap).
+  //   本两步流 = 把现成 registerBettorOnShard (allocate-at-confirm·满 SHARD_SEAL_COUNT=32 自动开新片·无限) 包装成 0-custody-风格两步 (编排非造新机制).
+  //   §3 命门 (J1 covenant·代码实证): relay handler unlockBshardRegister(p2sh.mjs:2024) 用 wallet.getPrivateKey() 签 funding input
+  //     → funding 地址只能是 gateway relay 自己钱包地址 → 口径 = relay-assisted (relay 持 funds + 签); 纯 0-custody (bettor 自签) = follow-up.
+  //   付款 attribution (shared relayAddr 防误吞): pay_amount = 注金 + per-(market,bettor,direction) deterministic nonce
+  //     (sha256(market|pk|dir) % 9000 + 1000 sompi, <0.0001 KAS) → confirm 按 exact pay_amount 匹配 UTXO; 注金本身 = 注的整额 (nonce 不进池/不进 DB stake).
+  //   经济守恒: bettor 付 pay_amount 到 relayAddr → gateway 余额 +pay_amount → registerBettorOnShard 从 gateway 余额垫 stake 进 leaf → gateway 净平 (+nonce 吸收 fee).
+  //   betId = 可选 caller idempotency key (bot 每笔押注生成 UUID, 传 prep+confirm 两步) → 额外熵: 解同 bettor 同向【复押】碰撞
+  //   (Bettor flag: hash(market+pk+dir) 对复押同 nonce → 同额 → 歧义). 无 betId 退化为 deterministic per (market,pk,dir).
+  //   残余碰撞 (不同 betId hash 撞同 tag) → confirm 的 >1-match 拒绝/挂起 (J1 no-strand #1) 兜住, 非 strand.
+  function _v07PayNonce(logicalMarketId, bettorPk, direction, betId) {
+    const h = createHash('sha256').update(`${logicalMarketId}|${bettorPk}|${direction}|${betId || ''}`).digest();
+    return 1000 + (h.readUInt32BE(0) % 89000);   // 1000..89999 sompi (<0.0009 KAS) attribution tag (relay 吸收, 不进池/DB stake)
+  }
+  // shared prelude for prep+confirm: validate + market gates + bettor_pk + area-1 exclusivity + gateway pay address.
+  async function _v07PrepConfirmPrelude(logicalMarketId, b, reply) {
+    const v = _extStakeValidate(b);
+    if (v.error) { reply.code(v.code).send({ ok: false, error: v.error }); return null; }
+    // 🔴 #28-followup (2026-07-01, Owner "第二次押注失败"): bot mybets/add-more reuses the POSITION's market_id, which is
+    //   the SHARD id (pool_bettor_sides.market_id = shard_market_id, status=shard_internal) → prep/confirm would reject
+    //   "market status=shard_internal, registration closed". Resolve a shard id → its logical parent so a re-bet routes to
+    //   the open rolling shard exactly like a first bet. No-op for a real logical id (not in market_shards.shard_market_id).
+    const _shardParent = sqlite.prepare('SELECT logical_market_id FROM market_shards WHERE shard_market_id = ?').get(logicalMarketId);
+    if (_shardParent && _shardParent.logical_market_id) logicalMarketId = _shardParent.logical_market_id;
+    const market = sqlite.prepare('SELECT * FROM pool_markets WHERE id = ?').get(logicalMarketId);
+    if (!market) { reply.code(404).send({ ok: false, error: 'market not found' }); return null; }
+    if (market.protocol_version !== 'v0.7') { reply.code(409).send({ ok: false, error: `register-v07 requires protocol_version v0.7, got ${market.protocol_version}` }); return null; }
+    if (market.protocol_status !== 'pending_bettors') { reply.code(409).send({ ok: false, error: `market status=${market.protocol_status}, registration closed` }); return null; }
+    if (!market.pool_merkle_root) { reply.code(409).send({ ok: false, error: 'v0.7 market missing pool_merkle_root (committee)' }); return null; }
+    // 件1 (J1 deadline-gate): ShardLeaf bakes deadline as the partial-shard sweep gate. fail-closed if missing.
+    if (!Number.isFinite(Number(market.deadline)) || Number(market.deadline) <= 0) { reply.code(409).send({ ok: false, error: 'v0.7 market missing deadline (partial-shard sweep gate, 件1)' }); return null; }
+    // NOTE: FINDING-2 ③ commingled guard is enforced INLINE in each register* handler (R-COMMINGLE-GUARD convention —
+    //   the guard must be visible in the handler body, not hidden in a helper; see prep/confirm below).
+    let bettorPk;
+    try { bettorPk = await deriveXOnlyPubkey(b.linked_addr); }
+    catch (e) { reply.code(400).send({ ok: false, error: `linked_addr → pubkey failed: ${e.message}` }); return null; }
+    // area-1 exclusivity: oracle/maker cannot bet (mirror _extStakeDeriveSide guards).
+    if ([market.oracle1_pk, market.oracle2_pk, market.oracle3_pk].includes(bettorPk)) { reply.code(403).send({ ok: false, error: 'linked address is an oracle of this market — oracle/bettor exclusivity (area-1)' }); return null; }
+    const makerRow = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(market.maker_relay_id);
+    if (makerRow?.address && (await deriveXOnlyPubkey(makerRow.address)) === bettorPk) { reply.code(403).send({ ok: false, error: 'linked address is the market maker — maker bets implicitly via outcome_side (area-1)' }); return null; }
+    // gateway relay = market host (maker_relay_id); its P2PK wallet address = relay-signable funding/payment address (§3 relay-assisted).
+    const gatewayRelayId = market.maker_relay_id;
+    if (!isRelayAlive(gatewayRelayId)) { reply.code(503).send({ ok: false, error: 'gateway (maker) relay not alive' }); return null; }
+    const gw = await sendCommandAsync(gatewayRelayId, { type: 'get_pubkey' });
+    const relayAddr = gw.address;
+    if (!relayAddr) { reply.code(503).send({ ok: false, error: 'gateway relay get_pubkey returned no address' }); return null; }
+    const network = relayAddr.startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
+    const nonce = _v07PayNonce(logicalMarketId, bettorPk, v.direction, b.bet_id);
+    const payAmountSompi = v.stakeAmount + nonce;
+    // 🔴 #28 (B) wire-3/3 (J1 2026-07-01·Owner money-path 根治): payAddr = 【per-bet 独立 P2SH】(替共享 gw relayAddr)。
+    //   付款根隔离 → relay 通用选币(defrag/transfer 等 17 路)物理碰不到 → 免并发花费(Martin paid-no-bet 根治)。
+    //   ⚠ 确定性 by construction (Bettor wire-3/3 命门 option a): prep 与 confirm 【共用本 _v07PrepConfirmPrelude】·
+    //   同参数(marketId|bettorPk|direction|payAmountSompi|betId·单源)→ get_per_bet_address 派生【同址】(perBetNonce 确定性)。
+    //   per-bet 址唯一 → 该址只有这一笔付款·confirm exact-amount-match 在唯一址仍 work(零 commingle/零并发竞态)。
+    //   perBetRedeem 带回供 confirm 后 sweep_per_bet 报销 gateway(gateway 已垫·sweep 异步·失败不 strand bet·daemon 重试)。
+    const perBet = await sendCommandAsync(gatewayRelayId, {
+      type: 'get_per_bet_address',
+      marketId: logicalMarketId, bettorPk, direction: v.direction, payAmountSompi: String(payAmountSompi), betId: b.bet_id,
+    });
+    if (!perBet?.address || !perBet?.redeem_hex) { reply.code(503).send({ ok: false, error: `gateway relay get_per_bet_address failed (per-bet P2SH 派生): ${JSON.stringify(perBet).slice(0, 120)}` }); return null; }
+    const payAddr = perBet.address;
+    // #19 根治(2026-07-08, Martin孤儿单事故, 设计稿 docs/2026-07-08-betid-persistence-and-pending-
+    // lifecycle-design.md, NWT审GREEN 0297e50e): 服务端持久化betId+payAddr, 不再让它只活在bot进程内存
+    // pendingPayments里——console/bot任一重启, 这笔在途付款仍可按(marketId,bettorPk,direction)反查恢复。
+    // UNIQUE建在bet_id本身(不是三元组), 允许同用户同方向多笔独立在途加注并存, 不覆盖冲掉彼此。
+    try {
+      sqlite.prepare(`
+        INSERT INTO pool_bet_preps (logical_market_id, bettor_pk, direction, bet_id, pay_addr, exact_stake_sompi, stake_kas, created_at)
+        VALUES (?,?,?,?,?,?,?,?)
+        ON CONFLICT(bet_id) DO UPDATE SET
+          pay_addr=excluded.pay_addr, exact_stake_sompi=excluded.exact_stake_sompi,
+          stake_kas=excluded.stake_kas, created_at=excluded.created_at
+      `).run(logicalMarketId, bettorPk, v.direction, String(b.bet_id || ''), payAddr, payAmountSompi, v.stakeAmount / 1e8, Math.floor(Date.now() / 1000));
+    } catch (e) { console.warn(`[pool.js#19] pool_bet_preps持久化失败(不阻断prep/confirm主流程): ${e.message}`); }
+    return { v, market, bettorPk, gatewayRelayId, payAddr, perBetRedeem: perBet.redeem_hex, relayAddr, network, payAmountSompi, logicalMarketId };
+  }
+
+  // POST /api/pool/market/:id/bettor/register-v07/prep — B step 1: compute pay address + exact pay amount (NO TX, no state change).
+  fastify.post('/api/pool/market/:id/bettor/register-v07/prep', async (request, reply) => {
+    let logicalMarketId = request.params.id;
+    const p = await _v07PrepConfirmPrelude(logicalMarketId, request.body || {}, reply);
+    if (!p) return;   // prelude already sent the error reply
+    logicalMarketId = p.logicalMarketId;   // #28-followup: prelude resolved a shard id → its logical parent (re-bet routing)
+    const { v, market, bettorPk, payAddr, network, payAmountSompi } = p;
+    // FINDING-2 ③ commingled guard (单源·inline per R-COMMINGLE-GUARD convention).
+    if (assertNotCommingled(market, reply, sqlite)) return;
+    // G3 (世界杯上线门): SHARD_SEAL_COUNT=32 仍是无限开新片(片级无 cap), 但整个 logical market 的
+    // 总 leaf 数(跨全部 shard)顶 MARKET_MAX_LEAVES_G3 — 结算侧 PayoutShard 硬顶 1024, #18 rolling
+    // 未建前必须挡在这里(未付款前拒, NO TX NO STATE, 不是退款)。
+    const existingLeafCount = getSidesByLogicalMarket(logicalMarketId, sqlite).length;
+    if (existingLeafCount >= MARKET_MAX_LEAVES_G3) {
+      return reply.code(409).send({
+        ok: false, error: 'market_full',
+        message: `This market has reached its bet capacity (${existingLeafCount}/${MARKET_MAX_LEAVES_G3}) and cannot accept new bets. Please choose another market.`,
+      });
+    }
+    return reply.send({
+      ok: true,
+      protocol_version: 'v0.7',
+      market_id: logicalMarketId,
+      direction: v.direction,
+      bettor_pk: bettorPk,
+      side_p2sh: payAddr,                                  // bot 复用 v06 渲染字段 ("付到 side_p2sh"); 这里 = relay P2PK 收款地址
+      pay_to_address: payAddr,
+      bet_stake_sompi: v.stakeAmount,                      // 实际下注额 (进池/进 DB)
+      bet_stake_kas: (v.stakeAmount / 1e8).toFixed(8),
+      exact_stake_sompi: payAmountSompi,                   // 实付额 = 注金 + 唯一 nonce (attribution); bot/用户付这个
+      exact_stake_kas: (payAmountSompi / 1e8).toFixed(8),
+      pool_merkle_root: market.pool_merkle_root,
+      network,
+      deadline: market.deadline,
+      custody: 'relay-assisted',
+      warning: 'Pay EXACTLY exact_stake_kas to side_p2sh. relay-assisted custody: the gateway relay holds & signs the funding input — this is NOT non-custodial; for real funds use your own /link wallet. Your bet routes to the open rolling shard (auto-opens a new shard past 32 bets per shard — no per-market cap). The small amount above bet_stake_kas is a per-bettor payment tag absorbed by the gateway.',
+    });
+  });
+
+  // POST /api/pool/market/:id/bettor/register-v07/confirm — B step 2: detect payment → registerBettorOnShard splice (NO TX NO STATE).
+  fastify.post('/api/pool/market/:id/bettor/register-v07/confirm', async (request, reply) => {
+    let logicalMarketId = request.params.id;
+    const p = await _v07PrepConfirmPrelude(logicalMarketId, request.body || {}, reply);
+    if (!p) return;
+    logicalMarketId = p.logicalMarketId;   // #28-followup: prelude resolved a shard id → its logical parent (re-bet routing)
+    const { v, market, bettorPk, gatewayRelayId, payAddr, perBetRedeem, network, payAmountSompi } = p;
+    // FINDING-2 ③ commingled guard (单源·inline per R-COMMINGLE-GUARD convention).
+    if (assertNotCommingled(market, reply, sqlite)) return;
+
+    // ── detect payment: query relayAddr UTXOs, find one == payAmountSompi (exact, bettor-unique) not yet consumed ──
+    let utxos;
+    try {
+      const { url: rpcUrl } = await getWorkingRpc();
+      if (!rpcUrl) return reply.code(503).send({ ok: false, error: 'no working Kaspa RPC node — retry shortly' });
+      const { RpcClient, Encoding, Address } = await import('kaspa-wasm');
+      const rpc = new RpcClient({ url: rpcUrl, encoding: Encoding.Borsh, networkId: network });
+      await Promise.race([rpc.connect({}), new Promise((_, rej) => setTimeout(() => rej(new Error('RPC connect timeout')), 4000))]);
+      try { ({ entries: utxos } = await rpc.getUtxosByAddresses([new Address(payAddr)])); }
+      finally { await rpc.disconnect().catch(() => {}); }
+    } catch (e) {
+      return reply.code(503).send({ ok: false, error: `RPC UTXO query failed (${e.message}) — retry shortly` });
+    }
+    utxos = utxos || [];
+    // consumed = payment txids already registered across this logical market's shards (idempotent dedup).
+    const consumed = new Set(
+      sqlite.prepare(`SELECT pbs.side_lock_tx t FROM pool_bettor_sides pbs JOIN market_shards ms ON pbs.market_id = ms.shard_market_id WHERE ms.logical_market_id = ?`)
+        .all(logicalMarketId).map(r => r.t)
+    );
+    const amtOf = (u) => { try { return BigInt(u.amount); } catch { return null; } };
+    const txidOf = (u) => { const op = u.outpoint || u.entry?.outpoint; return op && (op.transactionId || op.transaction_id); };
+    // 🔴 no-strand #1 (J1): 一额一 UTXO 唯一才注册. 多个 unconsumed UTXO 撞同 exact 额 (碰撞/重复付) → 绝不盲取一个 attribute
+    //    (误吞=strand) → 拒绝/挂起, 款留 relayAddr (relay 控·可退·非黑洞), 让付款方改额重押.
+    const matches = utxos.filter(u => amtOf(u) === BigInt(payAmountSompi) && txidOf(u) && !consumed.has(txidOf(u)));
+    if (matches.length > 1) {
+      return reply.send({ ok: true, registered: false, ambiguous: true, side_p2sh: payAddr, pay_to_address: payAddr,
+        matching_unconsumed: matches.length, exact_stake_sompi: payAmountSompi, exact_stake_kas: (payAmountSompi / 1e8).toFixed(8),
+        note: `${matches.length} unconsumed payments of exactly ${(payAmountSompi / 1e8).toFixed(8)} KAS detected at side_p2sh — refusing to auto-attribute (no-strand). Pass a distinct bet_id (idempotency key) per bet and pay its unique amount; funds at side_p2sh are relay-held and recoverable.` });
+    }
+    const candidate = matches[0];
+    if (!candidate) {
+      // #task32 fix (2026-07-03, Owner 500KAS 卡死根因): 已注册判定改成只信 DB, 不再依赖 hasMatchingUtxo
+      // (payAddr 当前是否还有匹配 UTXO) — 注册成功后 L1448 附近的 sweep_per_bet 会把该 UTXO 扫走, 任何
+      // sweep 之后的重复 poll 都会看到"UTXO 不在了"从而误判 pending(即使这笔早已真实注册, 实证见
+      // pool_bettor_sides.id=11913)。精确匹配 pay_amount_sompi(=这一笔押注的确定性唯一 exact 付款额,
+      // 每次 confirm 用同一个 bet_id 重算必得同值) — 不再用"pk+direction+market 取最新一条"这种可能
+      // 认错笔的模糊匹配。
+      const mine = sqlite.prepare(`SELECT pbs.market_id shard_market_id, pbs.side_lock_tx, pbs.merkle_index, pbs.stake_amount
+          FROM pool_bettor_sides pbs JOIN market_shards ms ON pbs.market_id = ms.shard_market_id
+          WHERE ms.logical_market_id = ? AND pbs.bettor_pk = ? AND pbs.direction = ? AND pbs.pay_amount_sompi = ?
+          ORDER BY pbs.id DESC LIMIT 1`)
+        .get(logicalMarketId, bettorPk, v.direction, payAmountSompi);
+      if (mine) {
+        return reply.send({ ok: true, registered: true, already_registered: true, shard_market_id: mine.shard_market_id, side_lock_tx: mine.side_lock_tx, merkle_index: mine.merkle_index, stake_sompi: mine.stake_amount });
+      }
+      // legacy fallback: rows registered before v177(pay_amount_sompi 列)落地, 该列为 NULL — 退回旧的
+      // "pk+direction+market 取最新一条"模糊匹配(仍是纯 DB 判定, 不依赖 UTXO), 缩小窗口只咬 pre-fix 数据。
+      const legacyMine = sqlite.prepare(`SELECT pbs.market_id shard_market_id, pbs.side_lock_tx, pbs.merkle_index, pbs.stake_amount
+          FROM pool_bettor_sides pbs JOIN market_shards ms ON pbs.market_id = ms.shard_market_id
+          WHERE ms.logical_market_id = ? AND pbs.bettor_pk = ? AND pbs.direction = ? AND pbs.pay_amount_sompi IS NULL
+          ORDER BY pbs.id DESC LIMIT 1`)
+        .get(logicalMarketId, bettorPk, v.direction);
+      if (legacyMine) {
+        return reply.send({ ok: true, registered: true, already_registered: true, shard_market_id: legacyMine.shard_market_id, side_lock_tx: legacyMine.side_lock_tx, merkle_index: legacyMine.merkle_index, stake_sompi: legacyMine.stake_amount });
+      }
+      return reply.send({ ok: true, registered: false, pending: true, side_p2sh: payAddr, pay_to_address: payAddr, exact_stake_sompi: payAmountSompi, exact_stake_kas: (payAmountSompi / 1e8).toFixed(8), note: `no payment of exactly ${(payAmountSompi / 1e8).toFixed(8)} KAS detected at side_p2sh yet — pay the exact amount and retry confirm.` });
+    }
+    const paymentTxid = txidOf(candidate);
+    if (!paymentTxid) return reply.code(500).send({ ok: false, error: 'payment UTXO outpoint.transactionId missing' });
+
+    // ── registerBettorOnShard wiring (relay-assisted; gateway funds stake into the leaf from its own balance, which the
+    //    bettor's payment to payAddr=relayAddr has just replenished → economics conserved). NO TX NO STATE: splice must land. ──
+    try {
+      const kaspa = await import('kaspa-wasm');
+      const p2sh = (redeemHex) => kaspa.addressFromScriptPublicKey(kaspa.ScriptBuilder.fromScript(new Uint8Array(Buffer.from(redeemHex, 'hex'))).createPayToScriptHashScript(), network).toString();
+      const rc = (cmd) => sendCommandAsync(gatewayRelayId, cmd, 90000);
+      // 事故硬化(2026-07-08, yxllc追踪): 这笔transfer的产物(fundTx)被喂进genesis-mint(ensurePayoutShardV2)
+      // 当funding input, 最终落payout_shards表——同create-v07 spine那条纪律, 也升级深确认。
+      const transfer = async (addr, sompi) => { const r = await transferAndConfirm(gatewayRelayId, addr, (Number(sompi) / 1e8).toFixed(8), { minDepth: REORG_SAFE_MIN_DEPTH, maxWaitMs: 60000 }); return r.txId; };
+      // minDepth: 20 (J1 phantom-leaf 根治) — reorg-safe DAA-深度门: 浅确认 UTXO(被 reorg 退)不算 landed → register land-gate 不记 phantom leaf。poll 到 depth≥20 才 true; 超时返 false → caller throw(NO-TX-NO-STATE 不推进 leaf)。
+    const landed = async (txid, addr, n = 25) => { for (let i = 0; i < n; i++) { const j = await sendCommandAsync(gatewayRelayId, { type: 'check_utxo_landed', address: addr, txid, minDepth: REORG_SAFE_MIN_DEPTH }, 20000); if (j.landed || j.found) return true; await new Promise(r => setTimeout(r, 2000)); } return false; };
+      // 🔴 #28 (B) REGRESSION FIX (J1 2026-07-01): register_append funding 必用【gateway 主址】不是 payAddr。
+      //   payAddr 现已改为 per-bet 独立 P2SH(只有 bettor 这一笔付款·无 gateway 运营余额)。registerBettorOnShard
+      //   从 relayAddr 选币垫 stake 进 leaf → 若用 per-bet 址(余额=单笔付款)→ 选不出 funding/签名错"failed to verify
+      //   signature script"(部署后全盘注册+结算挂的真因)。gateway 主址 = p.relayAddr(prelude 返回的 gw.address)。
+      const relayAddr = p.relayAddr;
+
+      // shard→pool_markets clone row (FK shard_market_id REFERENCES pool_markets(id)) — identical to monolithic register-v07.
+      const pmCols = sqlite.prepare('PRAGMA table_info(pool_markets)').all().map(c => c.name);
+      const shardP2sh_of = (smid) => (sqlite.prepare('SELECT shard_p2sh FROM market_shards WHERE shard_market_id = ?').get(smid)?.shard_p2sh) || '';
+      const createShardMarketRow = async (shardIndex, shardP2sh) => {
+        const shardMarketId = `${logicalMarketId}-s${shardIndex}`;
+        const clone = { ...market, id: shardMarketId, spine_p2sh: shardP2sh, protocol_status: 'shard_internal', maker_stake_amount: 0 };
+        try { sqlite.prepare(`INSERT OR IGNORE INTO pool_markets (${pmCols.join(',')}) VALUES (${pmCols.map(() => '?').join(',')})`).run(...pmCols.map(c => clone[c])); }
+        catch (e) { console.warn(`[register-v07/confirm] shard pool_markets clone warn: ${e.message}`); }
+        return shardMarketId;
+      };
+      // recordBettor: side_lock_tx = bettor's PAYMENT txid (= idempotent dedup key + audit anchor; mirrors v06 semantics),
+      //   stake_amount = the bet stake (round, nonce excluded), side_p2sh = the shard's p2sh (shard-aware read parity).
+      //   pay_amount_sompi = this bet's exact deterministic paid amount(v177, task#32) — the confirm-idempotency
+      //   re-poll lookup above matches on this, not on whether the payment UTXO is still sitting at payAddr.
+      const recordBettor = async ({ shardMarketId, shardIndex, bettorPk: pk, direction: dir, stakeSompi: st }) => {
+        try {
+          sqlite.prepare(`INSERT OR IGNORE INTO pool_bettor_sides (market_id, bettor_pk, bettor_relay_id, direction, stake_amount, side_p2sh, side_lock_tx, merkle_index, side_redeem_script_hex, pay_amount_sompi)
+            VALUES (?,?,?,?,?,?,?,?,?,?)`).run(shardMarketId, pk, null, dir, st, shardP2sh_of(shardMarketId), paymentTxid, shardIndex, '', payAmountSompi);
+        } catch (e) { console.warn(`[register-v07/confirm] recordBettor warn: ${e.message}`); }
+      };
+
+      // 命门①③④ genesis coherence: 单源 deriveMarketPredicateCommit(B线落2 收敛, 见 register-v07 处注释)。
+      const { deriveMarketPredicateCommit } = await import('../lib/pool-shard-settle.mjs');
+      const predicateCommit = deriveMarketPredicateCommit(market);
+
+      const { registerBettorOnShard, computeCloseZkTmplAnchor } = await import('../lib/pool-shard-register.mjs');
+      // 事故硬化(2026-07-08 backlog 调查, Bettor④指令): 这两处曾各自独立声明危险默认(target/release/
+      // silverc.exe，会随任意 cargo build 原地漂移，07-07 事故的确切病灶), 改跟 pool-bshard-artifacts.mjs
+      // 已修的那行同一模式——固定 versioned-builds 下按族 pin 的已知良性文件, 不再吃 target/release 默认。
+      const silverc = process.env.SILVERC_LEGACY_PATH || 'D:/silverscript/versioned-builds/silverc-legacy-2c46231.exe';
+      // 🔴 事故修复(2026-07-08, cswib 首证撞见): 本 endpoint(prep+confirm 两步流, #28)此前完全没有读
+      // resolution_rule_spec.zk_native——registerBettorOnShard 的 zkNative 参数缺省 false, 导致任何标记
+      // zk_native=true 的市场经这条路径首注 genesis-mint 时静默铸成 V1 PayoutShard(committee-sig), 不是
+      // PayoutShardV2——市场从 genesis 起物理上没有 zk_handoff/zk_close/claim 三个 entry, ZK 彩排/结算走不通。
+      // 老的单体 /register-v07 endpoint 一直有这段逻辑, 只是没人发现两条路径分叉了。Bettor 裁定(#bo75z6):
+      // 不抄一段重复代码(今晚已两次撞"两套并行实现"同族病), 抽共享函数 _resolveZkNativeCtorExtras, 两处调用同一份。
+      const { zkNative: _zkNative, closeZkTmplAnchor: _closeZkTmplAnchor } = _resolveZkNativeCtorExtras(market, silverc, computeCloseZkTmplAnchor);
+      const result = await registerBettorOnShard({
+        db: sqlite, rc, transfer, landed, p2sh, logicalMarketId,
+        poolMerkleRoot: market.pool_merkle_root, predicateCommit,
+        bettorPk, direction: v.direction, stakeSompi: v.stakeAmount, relayAddr, silverc, sealCount: 32, deadline: market.deadline,
+        createShardMarketRow, recordBettor,
+        zkNative: _zkNative, closeZkTmplAnchor: _closeZkTmplAnchor,   // 非 zkNative 市场: false/null，等价于不传，行为不变
+      });
+      // 🔴 #28 (B) wire-3/3 报销: bet 已注册 → sweep per-bet P2SH 付款回 gateway(补偿 gateway 垫的 stake)。
+      //   **fire-and-forget·best-effort**: 不 await(不阻 success 返回)·sweep 失败【绝不 strand bet】(bet 已注册·gateway
+      //   已垫·链上真相已成)·未 sweep 由 reconciliation daemon(J2 piece④)扫描重试防 gateway 失血。perBetRedeem 来自
+      //   prelude(prep/confirm 同源派生·byte-identical)。per-bet 唯一址 → sweep 只扫这一笔付款·不碰别的。
+      if (perBetRedeem) {
+        sendCommandAsync(gatewayRelayId, { type: 'sweep_per_bet', per_bet_address: payAddr, redeem_hex: perBetRedeem }, 90000)
+          .then((sr) => { if (!sr?.ok) console.warn(`[confirm] sweep_per_bet ${logicalMarketId} not-ok: ${JSON.stringify(sr).slice(0, 100)} (bet 已注册·daemon 重试报销)`); })
+          .catch((e) => console.warn(`[confirm] sweep_per_bet ${logicalMarketId} fail: ${e.message} (bet 已注册·daemon 重试报销)`));
+      }
+      // #19: 注册成功 = 这笔已有归宿, 回写confirmed_at(区分'仍在途待恢复'vs'已完成', 恢复工具按confirmed_at IS NULL筛)。
+      try { sqlite.prepare(`UPDATE pool_bet_preps SET confirmed_at = ? WHERE bet_id = ?`).run(Math.floor(Date.now() / 1000), String((request.body || {}).bet_id || '')); } catch {}
+      return reply.send({
+        ok: true, registered: true, protocol_version: 'v0.7', logical_market_id: logicalMarketId,
+        bettor_pk: bettorPk, direction: v.direction,
+        side_lock_tx: paymentTxid, stake_sompi: v.stakeAmount, stake_kas: (v.stakeAmount / 1e8).toFixed(8),
+        custody: 'relay-assisted', ...result,
+      });
+    } catch (e) {
+      console.error(`[pool/register-v07/confirm] ${logicalMarketId} fail: ${e.message}`);
+      return reply.code(500).send({ ok: false, error: `register-v07/confirm failed: ${e.message}` });
+    }
+  });
+
+  // 🔴 REMOVED 2026-07-16(Owner"系统不需要人工/没有人工闸"原则钦定, 件⑥ break-glass 走向A,
+  // Bettor #njqd3u/#njwf26 派工执行, NWT+Bettor 双人独立验死 GREEN): 原
+  // POST /api/admin/pool/register-v07/confirm-by-address 端点(2026-07-08 Martin 孤儿单事故建, betId
+  // 不可恢复时的人工登记逃生路)在此彻底移除, 不留 dead code。
+  // 验死结论(三路证据, KANet-UI 首查+NWT 独立复核+Bettor 独立复核, 三方收敛): events 表对
+  // event_type='admin_confirm_by_address' 精确 0 命中/pending_actions 表整表 0 行/唯一历史相关案例
+  // (7/8 KANetguy 孤儿单)的托管钱包记录 created_at==updated_at 8 天未变, 早已走"24h 逾期默认 B"自动
+  // 路径收尾, 非本端点救的——**此端点自上线从未被实际调用执行过一次**, 零在途依赖, 移除零风险。
+  // 详见 docs/2026-07-16-owner-ruling-economic-kernel-round2.md 件⑥ + docs/2026-07-16-admin-secret-
+  // capability-tiering-design.md(⑥ ADMIN_SECRET 拆分设计, T-BREAK-GLASS 分级章节同步移除)。
+  // 审计留档见 migrate.js v186(admin_confirm_by_address_removal_audit, 永久保留移除决策记录)。
+  // 根治方向(替代 break-glass 的预防性设计, Owner 原话): 孤儿单靠 betId 持久化等根治预防, 不靠人工救——
+  // #19 betId 服务端持久化(pool_bet_preps 表, v182)已经是这个方向的既有落地。
+
   // GET /api/pool/config — static defaults for UI pre-submit preview (D4 wallet浮窗 estimate fee)
+  // POST /api/admin/pool/propose-close-v2 — buildProposeCloseRequestV2 的活进程调用入口(2026-07-08,
+  // market5/pxvml 首次实战 propose)。只是执行位置的 wiring(standalone 脚本连不到 relay-manager.js 的
+  // 活 relay 注册表), 不是新业务逻辑——buildProposeCloseRequestV2 本身已设计+落码(缺件② thin-shell),
+  // 复用 adminConfirmByAddress 同款 secret+IP allowlist 认证(条件②⑤同款), 窄路由默认 OFF。
+  fastify.post('/api/admin/pool/propose-close-v2', async (request, reply) => {
+    if (process.env.ADMIN_PROPOSE_CLOSE_V2_ENABLED !== '1') {
+      return reply.code(503).send({ ok: false, error: 'admin endpoint disabled (ADMIN_PROPOSE_CLOSE_V2_ENABLED != 1)' });
+    }
+    // 件⑥ T-STATE-PREP(与zk-handoff-v2共用一把, 见admin-secret-tier.mjs)
+    const auth = checkAdminSecretTier(request, 'ADMIN_SECRET_ZK_STATE_PREP');
+    if (!auth.ok) return reply.code(auth.code).send({ ok: false, error: auth.error });
+    const ipAllowlist = (process.env.ADMIN_IP_ALLOWLIST || '127.0.0.1,::1,::ffff:127.0.0.1').split(',').map(s => s.trim());
+    if (!ipAllowlist.includes(request.ip)) {
+      return reply.code(403).send({ ok: false, error: `admin auth fail (source IP ${request.ip} 不在 ADMIN_IP_ALLOWLIST)` });
+    }
+    const { market_id, winning_direction, end_block_hash, settler_relay_id } = request.body || {};
+    if (!market_id || (winning_direction !== 0 && winning_direction !== 1) || !end_block_hash || !settler_relay_id) {
+      return reply.code(400).send({ ok: false, error: 'market_id, winning_direction(0|1), end_block_hash, settler_relay_id 全部必需' });
+    }
+    try {
+      const { buildProposeCloseRequestV2 } = await import('../lib/bshard-close-transport.mjs');
+      const result = await buildProposeCloseRequestV2(market_id, {
+        winningDirection: winning_direction, endBlockHash: end_block_hash, settlerRelayId: settler_relay_id,
+      });
+      return reply.send({ ok: true, ...result });
+    } catch (e) {
+      console.error(`[admin/propose-close-v2] ${market_id} fail: ${e.message}`);
+      return reply.code(500).send({ ok: false, error: `propose-close-v2 failed: ${e.message}` });
+    }
+  });
+
+  // POST /api/admin/pool/zk-handoff-v2 — 门①(J1tn, 2026-07-08 市场5彩排): buildZkHandoffRequestV2 的
+  // 活进程调用入口。同 propose-close-v2 同款理由(standalone 脚本连不到活 relay 注册表)+同款认证
+  // (secret+IP allowlist)+窄路由默认 OFF。dryRun 默认 true(彩排门①纪律: 先 dry-run 核对再真广播,
+  // caller 必须显式传 dry_run:false 才会真花钱广播——防止默认值意外真广播)。
+  fastify.post('/api/admin/pool/zk-handoff-v2', async (request, reply) => {
+    if (process.env.ADMIN_ZK_HANDOFF_V2_ENABLED !== '1') {
+      return reply.code(503).send({ ok: false, error: 'admin endpoint disabled (ADMIN_ZK_HANDOFF_V2_ENABLED != 1)' });
+    }
+    // 件⑥ T-STATE-PREP(与propose-close-v2共用一把, 见admin-secret-tier.mjs)
+    const auth = checkAdminSecretTier(request, 'ADMIN_SECRET_ZK_STATE_PREP');
+    if (!auth.ok) return reply.code(auth.code).send({ ok: false, error: auth.error });
+    const ipAllowlist = (process.env.ADMIN_IP_ALLOWLIST || '127.0.0.1,::1,::ffff:127.0.0.1').split(',').map(s => s.trim());
+    if (!ipAllowlist.includes(request.ip)) {
+      return reply.code(403).send({ ok: false, error: `admin auth fail (source IP ${request.ip} 不在 ADMIN_IP_ALLOWLIST)` });
+    }
+    const { market_id, settler_relay_id, dry_run } = request.body || {};
+    if (!market_id || !settler_relay_id) {
+      return reply.code(400).send({ ok: false, error: 'market_id, settler_relay_id 全部必需' });
+    }
+    try {
+      const { buildZkHandoffRequestV2 } = await import('../lib/bshard-close-transport.mjs');
+      const result = await buildZkHandoffRequestV2(market_id, {
+        settlerRelayId: settler_relay_id, dryRun: dry_run !== false,
+      });
+      return reply.send({ ok: true, marketId: market_id, ...result });
+    } catch (e) {
+      console.error(`[admin/zk-handoff-v2] ${market_id} fail: ${e.message}`);
+      return reply.code(500).send({ ok: false, error: `zk-handoff-v2 failed: ${e.message}` });
+    }
+  });
+
+  // POST /api/admin/pool/zk-close-v2 — 门②真广播(J2, 2026-07-09 市场5R-2彩排): dispatchUnlockZkClose 的
+  // 活进程调用入口。同 propose-close-v2/zk-handoff-v2 一字不差理由(standalone 脚本连不到活 relay 注册表,
+  // 纯执行位置 wiring, 零新业务逻辑)+同款认证(secret+IP allowlist)+窄路由默认 OFF。ZK_CLOSE_TICK_ENABLED
+  // 自治 daemon 分支仍留 OFF(确认令制)——本端点是 money-entry 广播前贴预期值→盲算比对→GO 纪律下的手动
+  // 触发口, 不是自治 tick。ctx 复用 dispatchUnlockZkClose 既定契约(zk-close-dispatch.mjs:65-70): kaspaZk
+  // 单一加载器(zk-prove-worker.mjs, #cb42af 纪律)+ relayCall 走 sendCommandAsync(活 relay 注册表)。
+  // dry_run(Bettor 批文约束①要求, 镜像 zk-handoff-v2 契约): dispatchUnlockZkClose 本身/kasia-relay
+  // unlockBshardZkClose 都没有原生 dryRun 分支(跟 unlockBshardZkHandoff 不同, 不碰更高风险的 covenant
+  // 广播代码新增分支)——dry_run!==false(含未传, 安全默认同 zk-handoff-v2)时改走已审查过的
+  // gateZkClose 彩排模拟路径(rehearsal-pre-broadcast-gate.mjs, 跟 zk-close-gate-debugger 端点同函数,
+  // 零广播); 只有显式传 dry_run:false 才真调 dispatchUnlockZkClose 广播。
+  fastify.post('/api/admin/pool/zk-close-v2', async (request, reply) => {
+    if (process.env.ADMIN_ZK_CLOSE_V2_ENABLED !== '1') {
+      return reply.code(503).send({ ok: false, error: 'admin endpoint disabled (ADMIN_ZK_CLOSE_V2_ENABLED != 1)' });
+    }
+    // 件⑥ T-BROADCAST(最高风险层, 独占一把钥匙, 绝不与其它tier共用——见admin-secret-tier.mjs)。
+    // Owner"系统不需要人工"原则裁定: 不补第二方确认, 与移除break-glass同一原则。
+    const auth = checkAdminSecretTier(request, 'ADMIN_SECRET_ZK_CLOSE_BROADCAST');
+    if (!auth.ok) return reply.code(auth.code).send({ ok: false, error: auth.error });
+    const ipAllowlist = (process.env.ADMIN_IP_ALLOWLIST || '127.0.0.1,::1,::ffff:127.0.0.1').split(',').map(s => s.trim());
+    if (!ipAllowlist.includes(request.ip)) {
+      return reply.code(403).send({ ok: false, error: `admin auth fail (source IP ${request.ip} 不在 ADMIN_IP_ALLOWLIST)` });
+    }
+    const { market_id, settler_relay_id, dry_run, gate_utxo_value_sompi } = request.body || {};
+    if (!market_id || !settler_relay_id) {
+      return reply.code(400).send({ ok: false, error: 'market_id, settler_relay_id 全部必需' });
+    }
+    try {
+      const market = sqlite.prepare('SELECT metadata FROM pool_markets WHERE id = ?').get(market_id);
+      if (!market) return reply.code(404).send({ ok: false, error: `market ${market_id} not found` });
+      const meta = JSON.parse(market.metadata || '{}');
+      const zkCont = meta.zk_continuation;
+      if (!zkCont) return reply.code(409).send({ ok: false, error: 'zk_continuation missing (zk_handoff 未完成)' });
+      const { kaspaZk } = await import('../services/zk-prove-worker.mjs');
+      if (dry_run !== false) {
+        if (gate_utxo_value_sompi == null) return reply.code(400).send({ ok: false, error: 'dry_run 模式需 gate_utxo_value_sompi(同 zk-close-gate-debugger)' });
+        // beforeState 来源与 zk-close-gate-debugger 端点(pool.js:1938-1942)一字不差: payout_shards 是
+        // attest 落链后没被 handoff 动过的单一真值来源, 门①用它铸出了当前这个 CloseZkV2 genesis。
+        const { gateZkClose } = await import('../lib/rehearsal-pre-broadcast-gate.mjs');
+        const { readPayoutShardV2AttestedState } = await import('../lib/bshard-close-enforce.mjs');
+        const ps = sqlite.prepare('SELECT payout_redeem_hex FROM payout_shards WHERE logical_market_id = ?').get(market_id);
+        if (!ps) return reply.code(404).send({ ok: false, error: `no payout_shards row for ${market_id}` });
+        const state = readPayoutShardV2AttestedState(ps.payout_redeem_hex);
+        if (!process.env.ZK_GATE_TMPL_HASH) return reply.code(503).send({ ok: false, error: 'ZK_GATE_TMPL_HASH env 未设(不接受硬编码 fallback)' });
+        const ZERO32 = '00'.repeat(32);
+        const beforeState = {
+          gateTmplHash: process.env.ZK_GATE_TMPL_HASH, betsRootBaked: state.betsRootHex, refundRootBaked: state.refundRootHex,
+          attestedAtMs: state.attestedAtMs, attestedWinner: state.attestedWinner, closed: 1,
+          payoutRootHex: ZERO32, consolidatedPool: state.consolidatedPool,
+        };
+        const ctx = { getMarket: (mid) => sqlite.prepare('SELECT metadata FROM pool_markets WHERE id = ?').get(mid), getDoneJob: (mid) => sqlite.prepare(`SELECT receipt_hex FROM zk_prove_jobs WHERE market_id = ? AND status = 'done' ORDER BY id DESC LIMIT 1`).get(mid), kaspaZk: () => kaspaZk() };
+        const result = gateZkClose(market_id, ctx, beforeState, { gateUtxoValueSompi: gate_utxo_value_sompi });
+        return reply.send({ ok: true, marketId: market_id, broadcasted: false, ...result });
+      }
+      const { dispatchUnlockZkClose } = await import('../lib/zk-close-dispatch.mjs');
+      const ctx = {
+        getMarket: (mid) => sqlite.prepare('SELECT metadata FROM pool_markets WHERE id = ?').get(mid),
+        getDoneJob: (mid) => sqlite.prepare(`SELECT receipt_hex FROM zk_prove_jobs WHERE market_id = ? AND status = 'done' ORDER BY id DESC LIMIT 1`).get(mid),
+        kaspaZk: () => kaspaZk(),
+        relayCall: (cmd) => sendCommandAsync(settler_relay_id, cmd, 90000),
+      };
+      const result = await dispatchUnlockZkClose({ marketId: market_id, continuationOutpoint: zkCont.outpoint, attestedWinner: zkCont.attestedWinner }, ctx);
+      if (!result.ok) return reply.code(500).send({ ok: false, error: result.error });
+      // 🔴 landed-gated 持久化(2026-07-09, J2·docs/2026-07-09-zk-autonomy-three-parts-design.md (a)): 这条
+      // 端点今天上午上线时(41b34dca)完全没写持久化, 靠我手动跑 advanceZkContinuationAfterSpend 补——正式场
+      // 市场5 门②当天真撞过这个 gap。改成: check_utxo_landed(minDepth=20)确认 landed(该 relay 命令内部按地址
+      // 过滤 UTXO, 找到即隐含 spk 原像绑定, 不需要额外再验), 过了才调 advanceZkContinuationAfterSpend。
+      let landedOk = false;
+      for (let i = 0; i < 30; i++) {
+        const j = await sendCommandAsync(settler_relay_id, { type: 'check_utxo_landed', address: result.closeZkContinuationAddress, txid: result.txid, minDepth: 20 }, 20000).catch(() => ({}));
+        if (j.landed || j.found) { landedOk = true; break; }
+        await new Promise(r => setTimeout(r, 3000));
+      }
+      if (!landedOk) {
+        console.error(`[admin/zk-close-v2] ${market_id} 广播 OK(txId=${result.txid}) 但 landed 确认超时 — 零持久化, 需人工核实链上实况`);
+        return reply.send({ ok: true, marketId: market_id, broadcasted: true, txId: result.txid, persisted: false, persistError: 'landed 确认超时' });
+      }
+      try {
+        const { advanceZkContinuationAfterSpend } = await import('../lib/closezk-v2-mint.mjs');
+        advanceZkContinuationAfterSpend(market_id, {
+          outpointTxid: result.txid, outpointIndex: 0, redeemHex: result.closeZkContinuationRedeemHex,
+          valueSompi: zkCont.valueSompi, spentEntry: 'zk_close', spentTxid: result.txid,
+        });
+      } catch (e) {
+        console.error(`[admin/zk-close-v2] ${market_id} landed 但持久化 FAILED(资金已安全, 链上是真相源): ${e.message}`);
+        return reply.send({ ok: true, marketId: market_id, broadcasted: true, txId: result.txid, persisted: false, persistError: e.message });
+      }
+      return reply.send({ ok: true, marketId: market_id, broadcasted: true, txId: result.txid, persisted: true });
+    } catch (e) {
+      console.error(`[admin/zk-close-v2] ${market_id} fail: ${e.message}`);
+      return reply.code(500).send({ ok: false, error: `zk-close-v2 failed: ${e.message}` });
+    }
+  });
+
+  // POST /api/admin/pool/zk-close-gate-debugger — 门②(J1tn, 2026-07-08 市场5彩排 T1.5): 用生产共享函数
+  // rebuildZkCloseGateWitness(zk-close-dispatch.mjs, 跟真广播 dispatchUnlockZkClose 完全同一条 witness
+  // 构造代码路, §1.2 反vacuous 铁律)重建 gate witness, 拼 cli-debugger test-case 跑 --run-all, 只读不广播。
+  // 同 propose-close-v2/zk-handoff-v2 款 secret+IP allowlist + 窄路由默认 OFF。
+  fastify.post('/api/admin/pool/zk-close-gate-debugger', async (request, reply) => {
+    if (process.env.ADMIN_ZK_CLOSE_GATE_DEBUGGER_ENABLED !== '1') {
+      return reply.code(503).send({ ok: false, error: 'admin endpoint disabled (ADMIN_ZK_CLOSE_GATE_DEBUGGER_ENABLED != 1)' });
+    }
+    // 件⑥ T-READONLY(与visibility翻转共用一把, 零链上副作用——见admin-secret-tier.mjs)
+    const auth = checkAdminSecretTier(request, 'ADMIN_SECRET_READONLY');
+    if (!auth.ok) return reply.code(auth.code).send({ ok: false, error: auth.error });
+    const ipAllowlist = (process.env.ADMIN_IP_ALLOWLIST || '127.0.0.1,::1,::ffff:127.0.0.1').split(',').map(s => s.trim());
+    if (!ipAllowlist.includes(request.ip)) {
+      return reply.code(403).send({ ok: false, error: `admin auth fail (source IP ${request.ip} 不在 ADMIN_IP_ALLOWLIST)` });
+    }
+    const { market_id, gate_utxo_value_sompi } = request.body || {};
+    if (!market_id || gate_utxo_value_sompi == null) {
+      return reply.code(400).send({ ok: false, error: 'market_id, gate_utxo_value_sompi 全部必需' });
+    }
+    try {
+      const { gateZkClose } = await import('../lib/rehearsal-pre-broadcast-gate.mjs');
+      const { readPayoutShardV2AttestedState } = await import('../lib/bshard-close-enforce.mjs');
+      // 🔴 STOP修正(2026-07-08, KANet-UI实战撞出, Bettor #cb42af 顺手要求收拢单一加载器): ZkScriptBuilder
+      //   不在常规 kaspa-wasm 包里, 是独立的 ZK-SDK isolated build——不在这里第二次声明 ZKSDK_WASM_PATH
+      //   路径常量/require 调用, 直接复用 zk-prove-worker.mjs 已导出的 kaspaZk()(唯一加载器, 同一份缓存)。
+      const { kaspaZk } = await import('../services/zk-prove-worker.mjs');
+      const kaspa = kaspaZk();
+      const ZERO32 = '00'.repeat(32);
+
+      // beforeState: 跟门①(zk_handoff)读的同一份来源(payout_shards, 自 attest 落链后没被 handoff 动过,
+      // 门①用它铸出了当前这个 CloseZkV2 genesis)——不新起一套 closed==1 状态解析器, 复用单一真值来源。
+      const ps = sqlite.prepare('SELECT payout_redeem_hex FROM payout_shards WHERE logical_market_id = ?').get(market_id);
+      if (!ps) return reply.code(404).send({ ok: false, error: `no payout_shards row for ${market_id}` });
+      const state = readPayoutShardV2AttestedState(ps.payout_redeem_hex);
+      // 🔴 STOP修正(2026-07-08, Bettor #cb42af 抓到同族雷): 不接受硬编码 fallback(会悄悄过期, 511b0ead
+      // 是 repro4 时代旧值) —— 缺 env 直接 throw, 不留"看起来能跑但值可能不对"的窗口。
+      if (!process.env.ZK_GATE_TMPL_HASH) return reply.code(503).send({ ok: false, error: 'ZK_GATE_TMPL_HASH env 未设(不接受硬编码 fallback)' });
+      const gateTmplHash = process.env.ZK_GATE_TMPL_HASH;
+      const beforeState = {
+        gateTmplHash, betsRootBaked: state.betsRootHex, refundRootBaked: state.refundRootHex,
+        attestedAtMs: state.attestedAtMs, attestedWinner: state.attestedWinner, closed: 1,
+        payoutRootHex: ZERO32, consolidatedPool: state.consolidatedPool,
+      };
+
+      const ctx = {
+        getMarket: (mid) => sqlite.prepare('SELECT metadata FROM pool_markets WHERE id = ?').get(mid),
+        getDoneJob: (mid) => sqlite.prepare(`SELECT receipt_hex FROM zk_prove_jobs WHERE market_id = ? AND status = 'done' ORDER BY id DESC LIMIT 1`).get(mid),
+        kaspaZk: () => kaspa,
+      };
+      const result = gateZkClose(market_id, ctx, beforeState, { gateUtxoValueSompi: gate_utxo_value_sompi });
+      return reply.send({ ok: true, ...result });
+    } catch (e) {
+      console.error(`[admin/zk-close-gate-debugger] ${market_id} fail: ${e.message}`);
+      return reply.code(500).send({ ok: false, error: `zk-close-gate-debugger failed: ${e.message}` });
+    }
+  });
+
   fastify.get('/api/pool/config', async (request, reply) => {
     return reply.send({
       ok: true,
@@ -1293,6 +2143,7 @@ export async function registerPoolRoutes(fastify) {
 
   // POST /api/pool/market/:id/bettor/register — bettor locks stake to own side P2SH
   fastify.post('/api/pool/market/:id/bettor/register', async (request, reply) => {
+    _recordEndpointHit('bettor/register');  // 件⑤步骤2 疑似死端点观察窗
     const marketId = request.params.id;
     const b = request.body || {};
     if (!b.bettor_relay_id || b.direction === undefined || !b.stake_kas) {
@@ -1304,6 +2155,9 @@ export async function registerPoolRoutes(fastify) {
     if (market.protocol_status !== 'pending_bettors') {
       return reply.code(409).send({ ok: false, error: `market status=${market.protocol_status}, bettor registration closed` });
     }
+
+    // FINDING-2 ③ commingled-spine guard (单源 assertNotCommingled, 见 register-v07). dual-handle v0.6/v0.7.
+    if (assertNotCommingled(market, reply, sqlite)) return;
 
     // Area-1 invariant: oracle ∩ bettor = ∅ (PoolSpine.sil L9-16, pp.txt 1.4). An oracle
     // betting on its own adjudication is a direct manipulation vector. Reject before
@@ -1491,6 +2345,7 @@ export async function registerPoolRoutes(fastify) {
 
   // POST /api/pool/market/:id/bettor/register-external/prep — step 1: compute the side P2SH + canonical exact stake.
   fastify.post('/api/pool/market/:id/bettor/register-external/prep', async (request, reply) => {
+    _recordEndpointHit('bettor/register-external/prep');  // 件⑤步骤2 疑似死端点观察窗
     const marketId = request.params.id;
     const b = request.body || {};
     const v = _extStakeValidate(b);
@@ -1500,6 +2355,8 @@ export async function registerPoolRoutes(fastify) {
     if (market.protocol_status !== 'pending_bettors') {
       return reply.code(409).send({ ok: false, error: `market status=${market.protocol_status}, bettor registration closed` });
     }
+    // FINDING-2 ③ commingled guard (单源). register-external 不强制 protocol_version → 防御性 wire (v0.5 no-op).
+    if (assertNotCommingled(market, reply, sqlite)) return;
     const bettorCount = sqlite.prepare('SELECT COUNT(*) c FROM pool_bettor_sides WHERE market_id = ?').get(marketId).c;
     if (bettorCount >= 50) return reply.code(409).send({ ok: false, error: 'market full — 50 bettors max per market (PoolSpine.sil L13)' });
     let d;
@@ -1534,6 +2391,7 @@ export async function registerPoolRoutes(fastify) {
   // dest==side_p2sh + amount==exact_sompi + idempotent UNIQUE tx. (sender NOT checked — deterministic
   // address binds, J2 r86 ③.) Parity w/ relay bettor/register (insert pool_bettor_sides + Merkle).
   fastify.post('/api/pool/market/:id/bettor/register-external/confirm', async (request, reply) => {
+    _recordEndpointHit('bettor/register-external/confirm');  // 件⑤步骤2 疑似死端点观察窗
     const marketId = request.params.id;
     const b = request.body || {};
     const v = _extStakeValidate(b);
@@ -1543,6 +2401,8 @@ export async function registerPoolRoutes(fastify) {
     if (market.protocol_status !== 'pending_bettors') {
       return reply.code(409).send({ ok: false, error: `market status=${market.protocol_status}, bettor registration closed` });
     }
+    // FINDING-2 ③ commingled guard (单源). register-external 不强制 protocol_version → 防御性 wire (v0.5 no-op).
+    if (assertNotCommingled(market, reply, sqlite)) return;
     let d;
     try { d = await _extStakeDeriveSide(market, b.linked_addr, v.direction, v.stakeAmount); }
     catch (e) { return reply.code(e.code || 500).send({ ok: false, error: e.message }); }
@@ -1705,6 +2565,8 @@ export async function registerPoolRoutes(fastify) {
     if (market.protocol_status !== 'pending_bettors') {
       return reply.code(409).send({ ok: false, error: `market status=${market.protocol_status}, bettor registration closed` });
     }
+    // FINDING-2 ③ commingled guard (单源). dual-handle v0.6/v0.7 — auto-bet + TG /bet 走这条 (commit1 漏的主路径).
+    if (assertNotCommingled(market, reply, sqlite)) return;
     const bettorCount = sqlite.prepare('SELECT COUNT(*) c FROM pool_bettor_sides WHERE market_id = ?').get(marketId).c;
     if (bettorCount >= 50) return reply.code(409).send({ ok: false, error: 'market full — 50 bettors max per market' });
     let d;
@@ -1740,6 +2602,8 @@ export async function registerPoolRoutes(fastify) {
     if (market.protocol_status !== 'pending_bettors') {
       return reply.code(409).send({ ok: false, error: `market status=${market.protocol_status}, bettor registration closed` });
     }
+    // FINDING-2 ③ commingled guard (单源). dual-handle v0.6/v0.7 — 真锁仓 confirm (INSERT pool_bettor_sides 下方).
+    if (assertNotCommingled(market, reply, sqlite)) return;
     let d;
     try { d = await _extStakeDeriveSide(market, b.linked_addr, v.direction, v.stakeAmount); }
     catch (e) { return reply.code(e.code || 500).send({ ok: false, error: e.message }); }
@@ -1875,6 +2739,281 @@ export async function registerPoolRoutes(fastify) {
   // status/category 模式. 复用 specIsUsable 一致性 (= Bettor 1要求): 搜索/专题结果也得是结构化有规则,
   // 不把 21 个烂单推给用户. specIsUsable 在 bot 客户端 filter (= 现有 startBet L322 同模式),
   // backend 仅 SQL filter 不再 specIsUsable, 由调用方 (bot) 负责一致性. 单一源是 specIsUsable JS helper.
+  // GET /api/pool/broker-fee-dm?since=<ms> — Phase 1 broker DM 事件 feed (KANet-UI 2026-06-28).
+  // 返 broker_fee_landed 事件 ∩ tg_custodial_wallets (broker 收款地址 = 托管/link 地址的 broker).
+  // bot poller 每隔 pollMs 调; since=0 → 取最近 60s 兜底; 结果按 observed_at ASC 让 bot 按序 DM.
+  // P1 fix (NWT): verifyIngestRequest 守 PII (tg_user_id↔地址映射); 同 chain-data.js L124 模式.
+  fastify.get('/api/pool/broker-fee-dm', async (request, reply) => {
+    await verifyIngestRequest(request, reply);
+    if (reply.sent) return;
+    const sinceMs = parseInt(request.query?.since, 10) || (Date.now() - 60_000);
+    const rows = sqlite.prepare(`
+      SELECT ce.id, ce.to_address AS broker_address, ce.payload, ce.observed_at,
+             w.tg_user_id
+        FROM chain_events ce
+        INNER JOIN tg_custodial_wallets w ON w.kaspa_address = ce.to_address
+       WHERE ce.event_type = 'broker_fee_landed'
+         AND ce.observed_at > datetime(?, 'unixepoch', 'subsec')
+       ORDER BY ce.observed_at ASC
+       LIMIT 50
+    `).all(sinceMs / 1000);
+    const events = rows.map(r => {
+      let p = {};
+      try { p = JSON.parse(r.payload || '{}'); } catch {}
+      return {
+        id: r.id,
+        tg_user_id: r.tg_user_id,
+        broker_address: r.broker_address,
+        fee_sompi: p.fee_sompi || 0,
+        market_id: p.market_id || null,
+        market_title: p.market_title || p.market_id || null,
+        settle_txid: p.settle_txid || null,
+        observed_at: r.observed_at,
+      };
+    });
+    return reply.send({ ok: true, count: events.length, events });
+  });
+
+  // GET /api/pool/markets/trending?limit=5 — T5 (Q4, J2 2026-06-27): 热门市场, activity+commitment 加权
+  // (非裸 volume → 防 seeder 刷量). 排序分 = bettor_count(承诺/活跃, 重权) + total_pool_kas(总承诺值);
+  // 裸 volume 易刷(seeder 自挂大池), bettor_count(不同押注人数) 才是真活跃. 过滤: status=pending_bettors(开放押注)
+  // + deadline>now+1h(快截止的不上热榜) + created>1h ago(排极新, 防刚建的刷榜) + total_pool≥阈值(挡空/微市场)
+  // + 排除 commingled spine(FINDING-2 单源 isCommingledSpine, J1 2026-06-28).
+  // + 排除 AutoBetter relay 押注(NWT option A, KANet-UI 2026-06-28): bettor_count + 赔率只计真人押注.
+  //   AutoBetter 识别: relay_nodes.name LIKE 'AutoBetter-%'. 只读端点, 不碰 settle.
+  // ── 诚实显示计数 SQL · 单源 (Bettor 2026-06-29 审定·收敛单源·禁三处各写一套·= 不完整迁移的根治) ──
+  //   两件套 (Bettor scope): ① AUTO_BET_EXCL 排 AutoBetter 假押注 ② shard-aware union (logical key + 各 shard key)。
+  //   commingledSpine 排除【不在此】= trending 首页"选哪些盘上榜"的 filter·非单盘计数口径。
+  //   消费方: trending / card_groups / markets-list / market-detail → 一个口径 (修 Owner '51人假数据' 抱怨)。
+  //   honestCountSql/StakeSql 返回纯 SQL 表达式 (call-site 自加 AS <alias>)。mExpr = logical market id 的 SQL 表达式:
+  //     'pool_markets.id' (相关子查询·list/trending/card_groups) 或 '?' (单盘 detail·该 expr 出现 2 次 → 须绑 2 次)。
+  const AUTO_BET_EXCL = `AND (s.bettor_relay_id IS NULL OR s.bettor_relay_id NOT IN (SELECT id FROM relay_nodes WHERE name LIKE 'AutoBetter-%'))`;
+  function honestCountSql(mExpr) {
+    return `((SELECT COUNT(*) FROM pool_bettor_sides s WHERE s.market_id = ${mExpr} ${AUTO_BET_EXCL})`
+      + ` + (SELECT COUNT(*) FROM pool_bettor_sides s WHERE s.market_id IN (SELECT shard_market_id FROM market_shards WHERE logical_market_id = ${mExpr}) ${AUTO_BET_EXCL}))`;
+  }
+  function honestStakeSql(mExpr, dir) {
+    return `((SELECT COALESCE(SUM(stake_amount),0) FROM pool_bettor_sides s WHERE s.market_id = ${mExpr} AND s.direction = ${dir} ${AUTO_BET_EXCL})`
+      + ` + (SELECT COALESCE(SUM(stake_amount),0) FROM pool_bettor_sides s WHERE s.market_id IN (SELECT shard_market_id FROM market_shards WHERE logical_market_id = ${mExpr}) AND s.direction = ${dir} ${AUTO_BET_EXCL}))`;
+  }
+
+  fastify.get('/api/pool/markets/trending', async (request, reply) => {
+    const q = request.query || {};
+    const limit = Math.min(Math.max(parseInt(q.limit, 10) || 5, 1), 20);
+    const minPoolSompi = parseInt(q.min_pool_sompi, 10) || 500_000_000;   // 默认 5 KAS 最小池, 防刷量空市场
+    const BETTOR_WEIGHT = 10;   // 每个不同押注人 ≈ 10 KAS 等权 — 让"多人小注"胜过"单人刷大池"(防 volume gaming)
+    const now = Math.floor(Date.now() / 1000);
+    // created_at stored as local datetime (no TZ suffix). Use local format for comparison, not UTC ISO.
+    const _cd = new Date((now - 3600) * 1000);
+    const _p = n => String(n).padStart(2, '0');
+    const createdCutoffIso = `${_cd.getFullYear()}-${_p(_cd.getMonth()+1)}-${_p(_cd.getDate())} ${_p(_cd.getHours())}:${_p(_cd.getMinutes())}:${_p(_cd.getSeconds())}`;   // 创建 >1h ago (local format)
+    const { commingledSpineSet } = await import('../lib/pool-commingle-detect.mjs');
+    const commingledSpines = commingledSpineSet(sqlite);
+    // bettor_count/yes_sompi/no_sompi → honestCountSql/StakeSql 单源 (排 AutoBetter + shard-aware union)。
+    const rows = sqlite.prepare(`
+      SELECT pool_markets.id, pool_markets.resolution_rule_spec, pool_markets.category,
+             pool_markets.outcome_side, pool_markets.deadline, pool_markets.maker_stake_amount,
+             pool_markets.spine_p2sh,
+             ${honestCountSql('pool_markets.id')} AS bettor_count,
+             ${honestStakeSql('pool_markets.id', 0)} AS yes_sompi,
+             ${honestStakeSql('pool_markets.id', 1)} AS no_sompi
+      FROM pool_markets
+      WHERE pool_markets.protocol_status = 'pending_bettors'
+        AND pool_markets.protocol_status != 'shard_internal'
+        AND pool_markets.deadline > ?
+        AND pool_markets.created_at < ?
+    `).all(now + 3600, createdCutoffIso);
+    const scored = rows.map((r) => {
+      const makerSompi = r.maker_stake_amount || 0;
+      const makerOnYes = r.outcome_side === 'YES';
+      const yesPool = Number(r.yes_sompi) + (makerOnYes ? makerSompi : 0);
+      const noPool = Number(r.no_sompi) + (!makerOnYes ? makerSompi : 0);
+      const totalPool = yesPool + noPool;
+      const totalPoolKas = totalPool / 1e8;
+      const trendingScore = r.bettor_count * BETTOR_WEIGHT + totalPoolKas;
+      let card_group_id = null, leg_key = null;
+      try {
+        const spec = JSON.parse(r.resolution_rule_spec || '');
+        if (spec && typeof spec === 'object') { card_group_id = spec.card_group_id || null; leg_key = spec.leg_key || null; }
+      } catch {}
+      return {
+        id: r.id, title: r.resolution_rule_spec, category: r.category, deadline: r.deadline,
+        bettor_count: r.bettor_count, total_pool_kas: totalPoolKas,
+        yes_implied_prob: totalPool > 0 ? yesPool / totalPool : null,
+        trending_score: Math.round(trendingScore * 100) / 100,
+        card_group_id, leg_key,
+        _totalPool: totalPool,
+        _spineP2sh: r.spine_p2sh,
+        _leafCount: getSidesByLogicalMarket(r.id, sqlite).length,   // #14 fix: shard-aware leaf count, 同 availableMarkets
+      };
+    }).filter((m) => m._totalPool >= minPoolSompi)   // 防刷量: 池太小不上热榜
+      // 2026-07-19 KANet-UI(#15残留缺口, Bettor live-curl抓出): /trending之前完全没接HIDDEN_BROKEN_MARKET_IDS,
+      // 3mzoh能从热门榜摸到。纯展示端点同/available, 始终过滤(无需include_hidden opt-out)。
+      .filter((m) => !HIDDEN_BROKEN_MARKET_IDS.has(m.id))
+      .filter((m) => !commingledSpines.has(m._spineP2sh))   // FINDING-2: 排除 commingled spine (J1 单源 helper)
+      .filter((m) => isStructuredSpec(m.title))   // usability (Owner 2026-06-29 '首页一坨屎'): 只显配齐规则可押盘。
+      //   m.title = raw resolution_rule_spec (L1990)。isStructuredSpec (lib/spec-validation.js·= bot specIsUsable
+      //   三端单一源·Bettor r243) = JSON 含非空 title+resolution_criteria+data_source_canonical。镜像盘缺 title/criteria
+      //   → false → 源头从热门藏掉。非裸 json_extract (非 JSON spec 会 throw malformed JSON 崩整 query + title 有 fallback 误过滤)。
+      .filter((m) => m.bettor_count >= 3)   // Owner 2026-06-28: 0/少真人盘不上首页(bettor_count已排 AutoBetter)
+      .filter((m) => m._leafCount < MARKET_MAX_LEAVES_G3 - 50)   // 排链上满盘(shard-aware, 409 同源)——之前用 raw COUNT(*) WHERE market_id=id 对 bshard 永远查不到东西
+      .sort((a, b) => b.trending_score - a.trending_score)
+      .slice(0, limit)
+      .map(({ _totalPool, _spineP2sh, _rawBettorCount, ...m }) => m);
+    return reply.send({ ok: true, count: scored.length, score_formula: `bettor_count*${BETTOR_WEIGHT} + total_pool_kas (activity+commitment 加权, 非裸 volume)`, filters: { status: 'pending_bettors', deadline_gt: '+1h', created_lt: '-1h', min_pool_kas: minPoolSompi / 1e8, exclude_commingled: true, exclude_auto_bet: true, min_bettors: 3 }, trending: scored });
+  });
+
+  // 查漏补缺(2026-07-05 晚, Owner 实测撞见"首页全巴西"): 从 title/resolution_rule_spec 提取球队名
+  // 一类的专有名词, 当"事件主体"标识, 供跨数据源(ESPN 原生盘/Polymarket 镜像盘)选品多样化用。
+  // 简单启发式: 抓 event_title(更规整, "TeamA vs TeamB" 格式)优先, 没有则退 title 本身; 抓大写开头
+  // 连续字母的词, 排除掉常见非球队名的英文常用词(问句/连接词)。
+  function _extractSubjectTokens(rawSpec) {
+    let spec;
+    try { spec = JSON.parse(rawSpec); } catch { return []; }
+    const text = spec.event_title || spec.title || '';
+    const stop = new Set(['Will', 'The', 'Team', 'To', 'Win', 'Advance', 'More', 'Markets', 'On', 'End', 'In', 'A', 'Draw', 'Reach']);
+    return [...new Set((text.match(/[A-Z][a-zA-Z]+/g) || []).filter((w) => !stop.has(w)))];
+  }
+
+  // GET /api/pool/markets/available?limit=8 — 可押市场 (Bettor 2026-06-29): usable+raw<50+非commingled+deadline>+10min,
+  // 按 total_pool_kas+recency 排, 无活跃人数门 (区别 trending 的 >=3 真人门)。只读展示端点·不碰钱。
+  // raw<50 用 raw COUNT(*) 非 honestCount (J1/Bettor no-strand line: AutoBetter 的 bet 是真 covenant leaf).
+  // 消费方: bot /start 首页 (替换 trending 作为"能押的盘"入口)。
+  fastify.get('/api/pool/markets/available', async (request, reply) => {
+    const q = request.query || {};
+    const limit = Math.min(Math.max(parseInt(q.limit, 10) || 8, 1), 100);
+    // ?tag=champions (世界杯玩法UI, Bettor 2026-07-04): 冠军长线盘(polymarket "Will X win the 2026
+    // FIFA World Cup?" futures, 118 行历史导入含重复快照)。不需要 G1 cron(静态盘, 已存在)。复用本
+    // endpoint 的既有过滤(usable spec/非commingled/有空位/conditionId去重), 只加一层标题过滤缩到冠军盘。
+    const championsFilter = q.tag === 'champions';
+    const now = Math.floor(Date.now() / 1000);
+    const _cd = new Date((now - 3600) * 1000);
+    const _p = n => String(n).padStart(2, '0');
+    const createdCutoffIso = `${_cd.getFullYear()}-${_p(_cd.getMonth()+1)}-${_p(_cd.getDate())} ${_p(_cd.getHours())}:${_p(_cd.getMinutes())}:${_p(_cd.getSeconds())}`;
+    const { commingledSpineSet } = await import('../lib/pool-commingle-detect.mjs');
+    const commingledSpines = commingledSpineSet(sqlite);
+    const rows = sqlite.prepare(`
+      SELECT pool_markets.id, pool_markets.resolution_rule_spec, pool_markets.category,
+             pool_markets.outcome_side, pool_markets.deadline, pool_markets.maker_stake_amount,
+             pool_markets.protocol_version,
+             pool_markets.spine_p2sh, pool_markets.created_at AS market_created_at,
+             pool_markets.outcome_condition_id,
+             ${honestCountSql('pool_markets.id')} AS bettor_count,
+             ${honestStakeSql('pool_markets.id', 0)} AS yes_sompi,
+             ${honestStakeSql('pool_markets.id', 1)} AS no_sompi
+      FROM pool_markets
+      WHERE pool_markets.protocol_status = 'pending_bettors'
+        AND pool_markets.protocol_status != 'shard_internal'
+        AND pool_markets.deadline > ?
+        AND pool_markets.created_at < ?
+    `).all(now + 600, createdCutoffIso);   // deadline > +10min (用户还来得及押)
+    const sorted = rows.map((r) => {
+      const makerSompi = r.maker_stake_amount || 0;
+      const makerOnYes = r.outcome_side === 'YES';
+      const yesPool = Number(r.yes_sompi) + (makerOnYes ? makerSompi : 0);
+      const noPool = Number(r.no_sompi) + (!makerOnYes ? makerSompi : 0);
+      const totalPool = yesPool + noPool;
+      // #14 fix (2026-07-05, Owner 实测撞见: dyljb 900 笔满盘仍被推荐, NWT/J2 查实根因):
+      //   之前用 `SELECT COUNT(*) FROM pool_bettor_sides WHERE market_id = pool_markets.id` 算 raw_bettor_count——
+      //   对 v0.7 bshard 市场这是永远查不到东西的 shard-blind 查询(下注实际存在各个 shard 的 market_id 下,
+      //   不是 logical parent 的 id), 导致 900 笔满盘的市场也被算成 raw_bettor_count=0, filter<50 恒过。
+      //   换成 getSidesByLogicalMarket(跨 shard 聚合的单源 helper, 跟 register-v07/prep 那个真正拒绝
+      //   下注的 409 逻辑同源)算真实 leaf 数, 跟 MARKET_MAX_LEAVES_G3 留安全余量比较。
+      const leafCount = getSidesByLogicalMarket(r.id, sqlite).length;
+      return {
+        id: r.id, title: r.resolution_rule_spec, resolution_rule_spec: r.resolution_rule_spec,
+        protocol_version: r.protocol_version, category: r.category, deadline: r.deadline,
+        bettor_count: r.bettor_count, total_pool_kas: totalPool / 1e8,
+        yes_implied_prob: totalPool > 0 ? yesPool / totalPool : null,
+        _totalPool: totalPool, _spineP2sh: r.spine_p2sh,
+        _leafCount: leafCount, _createdAt: r.market_created_at,
+        _conditionId: r.outcome_condition_id || null,
+      };
+    })
+      // 2026-07-18 KANet-UI(Bettor gate A派工, #pcbdgb/#pcfb4o系列): 世界杯坏盘临时隐藏——3mzoh/ysgpv
+      // 是V2 covenant家族(cancelMarketLive硬编码V1-only, fail-closed拦下退款, 今晚做不了干净处置)+
+      // 标题跟真实赛程不符("advance?"问的是晋级, 不是三四名/决赛这两场已排定的比赛), 会话搜到还会让
+      // 用户误押进结算不了的盘。这个端点同时喂首页推荐(limit=8)和/bet搜索(limit=100, console-api.mjs:88
+      // availableMarkets), 一处过滤两处生效。纯展示层查询排除, 不改market状态/不碰covenant/不碰钱。
+      // 治本(V2家族coherence-gate/V2版cancelMarketLive)落码后这条临时名单可以撤, 不是永久机制。
+      .filter((m) => !HIDDEN_BROKEN_MARKET_IDS.has(m.id))
+      .filter((m) => !commingledSpines.has(m._spineP2sh))
+      .filter((m) => isStructuredSpec(m.title))
+      .filter((m) => m._leafCount < MARKET_MAX_LEAVES_G3 - 50)   // has available slots — leaf-count(shard-aware, 409 同源), 留 50 笔安全余量
+      .filter((m) => {
+        if (!championsFilter) return true;
+        try { return /win the 2026 fifa world cup/i.test(JSON.parse(m.title || '{}').title || ''); } catch { return false; }
+      })
+      // conditionId 去重 — 同一真实问题只保留流动性最高那条(Bettor #27·Owner "重复盘·母子盘 display-dedup")
+      .reduce((acc, m) => {
+        const cid = m._conditionId;
+        if (!cid) { acc.push(m); return acc; }
+        const i = acc.findIndex((x) => x._conditionId === cid);
+        if (i < 0) { acc.push(m); return acc; }
+        if (m._totalPool > acc[i]._totalPool || (m._totalPool === acc[i]._totalPool && m._createdAt < acc[i]._createdAt)) {
+          acc[i] = m;
+        }
+        return acc;
+      }, [])
+      .sort((a, b) => (b._totalPool - a._totalPool) || (b._createdAt > a._createdAt ? 1 : -1));
+    // 查漏补缺(2026-07-05 晚, Owner 实测撞见: 首页热榜 5 条 4 条巴西, 且 ESPN 原生盘("Will Brazil
+    // advance?")跟 Polymarket 镜像盘("Brazil vs. Norway: Team to Advance")是同一场真实比赛却当成
+    // 两条不同内容推荐)。上面那段 conditionId 去重只挡得住"同一 conditionId"的重复, 挡不住"同一真实
+    // 事件、跨数据源、不同 conditionId"这种情况。加一层贪心多样性选择: 提取标题里的专有名词(球队名等)
+    // 当"事件主体"标识, 优先选主体不重叠的市场, 主体不够多样才回填剩下热度最高的(不砍数量, 只调顺序)。
+    const _selected = [];
+    const _usedSubjects = new Set();
+    const _backup = [];
+    for (const m of sorted) {
+      const tokens = _extractSubjectTokens(m.title);
+      const overlaps = tokens.length > 0 && tokens.some((t) => _usedSubjects.has(t));
+      if (!overlaps) {
+        _selected.push(m);
+        tokens.forEach((t) => _usedSubjects.add(t));
+      } else {
+        _backup.push(m);
+      }
+      if (_selected.length >= limit) break;
+    }
+    while (_selected.length < limit && _backup.length > 0) _selected.push(_backup.shift());
+    const available = _selected
+      .map(({ _totalPool, _spineP2sh, _leafCount, _createdAt, _conditionId, ...m }) => ({ ...m, condition_id: _conditionId }));
+    return reply.send({ ok: true, count: available.length, markets: available });
+  });
+
+  // GET /api/pool/markets/card_groups?limit=8 — 赛事聚合卡 (Owner 钦定 UX 首页·J2 后端·2026-06-28).
+  // 把 pending_bettors 的散盘按 spec.card_group_id 聚成【赛事卡】(一场赛 → winner/spread/total 多 leg 嵌一卡),
+  // 喂 KANet-UI 首页 (前端只渲染, 不再 N round-trip / 不在前端 group)。card_group 由 sports-card-builder.mjs
+  // 建市时折入 spec (card_group_id=espn-<league>-<event_id> + leg_key)。本端点是【读/聚合侧】, 不碰链不碰 settle。
+  // 复用 trending 的 per-leg 池/人数算法 (correlated subquery + shard 汇总 + AutoBetter 排除 + commingled 排除),
+  // 一致性单源同 trending。dedupe: 同 card_group 内同 leg_key 多盘 → 留活跃度最高那条 (重复建市数据洁癖)。
+  // 每 leg 带 trust 字段 (data_source_canonical / resolution_criteria / spine_p2sh) 供 UI 信任卡。只读·additive。
+  fastify.get('/api/pool/markets/card_groups', async (request, reply) => {
+    const q = request.query || {};
+    const { commingledSpineSet } = await import('../lib/pool-commingle-detect.mjs');
+    const { aggregateCardGroups } = await import('../lib/pool-card-groups.mjs');
+    const commingledSpines = commingledSpineSet(sqlite);
+    // per-leg 池/人数: honestCountSql/StakeSql 单源 (排 AutoBetter + shard-aware union·一致性同 trending)。
+    // #14 fix (2026-07-05, 同 availableMarkets 同源 shard-blind 坑): raw COUNT(*) WHERE market_id=pool_markets.id
+    //   对 v0.7 bshard 永远查不到东西(下注存在各 shard 的 id 下), 换成 getSidesByLogicalMarket 跨 shard
+    //   聚合真实 leaf 数, 跟 409 拒绝逻辑同源, 留安全余量。
+    const rows = sqlite.prepare(`
+      SELECT pool_markets.id, pool_markets.resolution_rule_spec, pool_markets.category,
+             pool_markets.outcome_side, pool_markets.deadline, pool_markets.maker_stake_amount,
+             pool_markets.spine_p2sh,
+             ${honestCountSql('pool_markets.id')} AS bettor_count,
+             ${honestStakeSql('pool_markets.id', 0)} AS yes_sompi,
+             ${honestStakeSql('pool_markets.id', 1)} AS no_sompi
+      FROM pool_markets
+      WHERE pool_markets.protocol_status = 'pending_bettors'
+    `).all().filter(r => getSidesByLogicalMarket(r.id, sqlite).length < MARKET_MAX_LEAVES_G3 - 50)  // 同 availableMarkets·排满盘·防 /start card_groups 按钮误导
+      // 2026-07-19 KANet-UI(#15残留缺口, Bettor live-curl抓出): /card_groups之前完全没接HIDDEN_BROKEN_MARKET_IDS,
+      // 3mzoh/ysgpv能从赛事聚合卡摸到。纯展示端点同/available/trending, 始终过滤。
+      .filter(r => !HIDDEN_BROKEN_MARKET_IDS.has(r.id));
+    const out = aggregateCardGroups(rows, commingledSpines, { limit: q.limit });   // 聚合逻辑单源 (pool-card-groups.mjs)
+    return reply.send({ ...out, filters: { status: 'pending_bettors', exclude_commingled: true, exclude_auto_bet: true, dedupe_leg_key: 'keep_most_active' } });
+  });
+
   fastify.get('/api/pool/markets', async (request, reply) => {
     const q = request.query || {};
     const where = [];
@@ -1909,9 +3048,9 @@ export async function registerPoolRoutes(fastify) {
              pool_markets.outcome_market_source, pool_markets.outcome_condition_id, pool_markets.created_at,
              pool_markets.maker_relay_id, pool_markets.broker_relay_id, pool_markets.oracle_relay_ids,  /* KANet-UI r308 maker 名显 + J2-tn r741 broker filter/markets-tool */
              rn_maker.name AS maker_name,                       /* LEFT JOIN: 跨节点 maker 不在本表 → NULL, 前端兜底 */
-             (SELECT COUNT(*) FROM pool_bettor_sides s WHERE s.market_id = pool_markets.id) AS bettor_count,
-             (SELECT COALESCE(SUM(stake_amount),0) FROM pool_bettor_sides s WHERE s.market_id = pool_markets.id AND s.direction = 0) AS yes_bettor_stake_sompi,
-             (SELECT COALESCE(SUM(stake_amount),0) FROM pool_bettor_sides s WHERE s.market_id = pool_markets.id AND s.direction = 1) AS no_bettor_stake_sompi
+             ${honestCountSql('pool_markets.id')} AS bettor_count,
+             ${honestStakeSql('pool_markets.id', 0)} AS yes_bettor_stake_sompi,
+             ${honestStakeSql('pool_markets.id', 1)} AS no_bettor_stake_sompi
       FROM pool_markets
       LEFT JOIN relay_nodes rn_maker ON rn_maker.id = pool_markets.maker_relay_id
       ${whereSql}
@@ -1938,7 +3077,12 @@ export async function registerPoolRoutes(fastify) {
         no_implied_prob: total > 0 ? noPoolSompi / total : null,
       };
     });
-    return reply.send({ ok: true, total, count: markets.length, limit, offset, markets });
+    // 2026-07-18/19 KANet-UI(NWT default-safe纠偏 #qdp8zc, Bettor #15残留缺口坐实后改用共享 helper):
+    // tg-bot /bet 搜索(prediction-menu.mjs search_input → console-api.mjs poolMarkets)走的正是这条端点。
+    // 改调 filterHiddenBrokenMarkets(80行共享 helper)——四个 list 端点(/markets/available/trending/
+    // card_groups)全走同一份, 不再各自维护一份 filter 表达式。
+    const filteredMarkets = filterHiddenBrokenMarkets(markets, q);
+    return reply.send({ ok: true, total, count: filteredMarkets.length, limit, offset, markets: filteredMarkets });
   });
 
   // GET /api/pool/logical-markets — KANet-UI 分片对用户透明 (bshard B + self-claim C, Owner 2026-06-15 #1 directive).
@@ -1972,16 +3116,17 @@ export async function registerPoolRoutes(fastify) {
                 WHERE s.market_id IN (SELECT shard_market_id FROM market_shards WHERE logical_market_id = lm.logical_market_id AND status != 'refunded')) AS bettor_count
       FROM (
         SELECT ms.logical_market_id,
-               COUNT(DISTINCT ms.shard_market_id)      AS shard_count,
-               COALESCE(SUM(pm.maker_stake_amount), 0) AS maker_stake_sompi,
-               MAX(pm.outcome_side)                    AS outcome_side,
-               MAX(pm.resolution_rule_spec)            AS resolution_rule_spec,
-               MAX(pm.deadline)                        AS deadline,
-               MAX(pm.category)                        AS category,
-               MAX(pm.protocol_version)                AS protocol_version,
-               MIN(pm.created_at)                      AS created_at
+               COUNT(DISTINCT ms.shard_market_id)           AS shard_count,
+               COALESCE(MAX(pm_parent.maker_stake_amount), 0) AS maker_stake_sompi,
+               MAX(pm.outcome_side)                         AS outcome_side,
+               MAX(pm.resolution_rule_spec)                 AS resolution_rule_spec,
+               MAX(pm.deadline)                             AS deadline,
+               MAX(pm.category)                             AS category,
+               MAX(pm.protocol_version)                     AS protocol_version,
+               MIN(pm.created_at)                           AS created_at
         FROM market_shards ms
         LEFT JOIN pool_markets pm ON pm.id = ms.shard_market_id
+        LEFT JOIN pool_markets pm_parent ON pm_parent.id = ms.logical_market_id
         ${whereSql}
         GROUP BY ms.logical_market_id
       ) lm
@@ -2030,9 +3175,19 @@ export async function registerPoolRoutes(fastify) {
   });
 
   fastify.get('/api/pool/market/:id', async (request, reply) => {
-    const marketId = request.params.id;
-    const market = sqlite.prepare('SELECT * FROM pool_markets WHERE id = ?').get(marketId);
+    let marketId = request.params.id;
+    let market = sqlite.prepare('SELECT * FROM pool_markets WHERE id = ?').get(marketId);
     if (!market) return reply.code(404).send({ ok: false, error: 'market not found' });
+    // Auto-redirect shard clones → logical parent: shard_internal rows are not user-facing.
+    // /mybets addmore button passes pool_bettor_sides.market_id = shard market ID (shard-blind bug);
+    // transparently resolve to the logical parent so all callers get the correct market context.
+    if (market.protocol_status === 'shard_internal') {
+      const sr = sqlite.prepare('SELECT logical_market_id FROM market_shards WHERE shard_market_id = ?').get(marketId);
+      if (sr?.logical_market_id) {
+        const logicalMarket = sqlite.prepare('SELECT * FROM pool_markets WHERE id = ?').get(sr.logical_market_id);
+        if (logicalMarket) { market = logicalMarket; marketId = sr.logical_market_id; }
+      }
+    }
     // KANet-UI 2026-06-07 r308 maker 名显: LEFT JOIN relay_nodes 取 maker_name (跨节点 NULL, 前端兜底)
     const _makerRow = market.maker_relay_id
       ? sqlite.prepare('SELECT name FROM relay_nodes WHERE id = ?').get(market.maker_relay_id)
@@ -2040,19 +3195,17 @@ export async function registerPoolRoutes(fastify) {
     market.maker_name = _makerRow?.name || null;
     let metaParsed = {};
     try { metaParsed = JSON.parse(market.metadata || '{}'); } catch {}
-    const bettorCount = sqlite.prepare('SELECT COUNT(*) c FROM pool_bettor_sides WHERE market_id = ?').get(marketId).c;
+    // 详情计数 honestCountSql 单源: shard-aware (修 v07 logical-only 漏 shard 押注 bug) + 排 AutoBetter (= 与 list/trending 一口径)。
+    const bettorCount = sqlite.prepare(`SELECT ${honestCountSql('?')} AS c`).get(marketId, marketId).c;
+    const rawBettorCount = sqlite.prepare('SELECT COUNT(*) c FROM pool_bettor_sides WHERE market_id = ?').get(marketId).c;
     const sigsCollected = sqlite.prepare(`
       SELECT COUNT(*) c FROM chain_events
       WHERE event_type IN ('pool_oracle_tx_sig', 'pool_oracle_refund_disagreement_tx_sig')
         AND payload LIKE ?
     `).get(`%"market_id":"${marketId}"%`).c;
-    // Bettor r70 A: pool distribution on detail too (same model as list).
-    const yesBettorSompi = sqlite.prepare(
-      'SELECT COALESCE(SUM(stake_amount),0) AS s FROM pool_bettor_sides WHERE market_id = ? AND direction = 0'
-    ).get(marketId).s;
-    const noBettorSompi = sqlite.prepare(
-      'SELECT COALESCE(SUM(stake_amount),0) AS s FROM pool_bettor_sides WHERE market_id = ? AND direction = 1'
-    ).get(marketId).s;
+    // Bettor r70 A: pool distribution on detail too (same model as list). honestStakeSql 单源 (shard-aware + 排 AutoBetter)。
+    const yesBettorSompi = sqlite.prepare(`SELECT ${honestStakeSql('?', 0)} AS s`).get(marketId, marketId).s;
+    const noBettorSompi = sqlite.prepare(`SELECT ${honestStakeSql('?', 1)} AS s`).get(marketId, marketId).s;
     const makerSompi = market.maker_stake_amount || 0;
     const makerOnYes = market.outcome_side === 'YES';
     const yesPoolSompi = Number(yesBettorSompi) + (makerOnYes ? makerSompi : 0);
@@ -2073,6 +3226,7 @@ export async function registerPoolRoutes(fastify) {
       },
       protocol_status: market.protocol_status,
       bettor_count: bettorCount,
+      raw_bettor_count: rawBettorCount,
       sigs_collected: sigsCollected,
     });
   });
@@ -2088,17 +3242,50 @@ export async function registerPoolRoutes(fastify) {
     let bettorPk;
     try { bettorPk = await deriveXOnlyPubkey(linkedAddr); }
     catch (e) { return reply.code(400).send({ ok: false, error: `linked_addr derive pubkey fail: ${e.message}` }); }
+    // #48 shard-blind fix (NWT/J2 2026-07-04): bshard bettor 行 s.market_id 是 SHARD 的 market_id
+    // (非 logical parent) — 裸 JOIN pool_markets m ON m.id=s.market_id 会拿到 shard_internal 状态的行
+    // (settle_evidence 写在 logical 市场, 拿不到), 导致所有 bshard 盘赢输永远显不出。
+    // 通过 market_shards 解析 shard→logical(v0.6 无 shard 行, COALESCE 落回 s.market_id 原逻辑不变)。
     const positions = sqlite.prepare(`
-      SELECT s.market_id, s.direction, s.stake_amount, s.side_p2sh, s.side_lock_tx, s.claim_txid, s.merkle_index,
-             s.created_at AS locked_at,
+      SELECT s.id AS side_id, s.market_id, s.direction, s.stake_amount, s.side_p2sh, s.side_lock_tx, s.claim_txid, s.merkle_index,
+             s.created_at AS locked_at, m.id AS logical_market_id,
              m.resolution_rule_spec, m.outcome_side, m.protocol_status, m.deadline, m.category,
              m.maker_stake_amount, m.broker_fee_pct, m.oracle_bond_amount, m.miner_fee, m.settle_txid, m.refund_txid,
-             m.metadata
+             m.metadata, m.protocol_version
       FROM pool_bettor_sides s
-      LEFT JOIN pool_markets m ON m.id = s.market_id
+      LEFT JOIN market_shards ms ON ms.shard_market_id = s.market_id
+      LEFT JOIN pool_markets m ON m.id = COALESCE(ms.logical_market_id, s.market_id)
       WHERE s.bettor_pk = ?
       ORDER BY s.created_at DESC
     `).all(bettorPk);
+
+    // H2 fix (2026-07-17, docs/2026-07-17-h2-mybets-multiwin-split-design.md v1.1, NWT GREEN
+    // 12cce211): a bettor can hold multiple pool_bettor_sides rows in the SAME logical market
+    // (one per bshard shard they landed in) — settle_evidence.winner_details is keyed by pk only
+    // (one aggregate entry per bettor per logical market, see bshard-settle-daemon.mjs:681), so
+    // every row independently matching that one entry must split it by stake, not each claim the
+    // whole thing. BigInt throughout (NWT MUST-FIX): amount×stake for a 17613.9 KAS-scale market
+    // is ~1e22, far past Number.MAX_SAFE_INTEGER — floating point would silently corrupt the split.
+    function splitWinnerAmountByStake(totalAmount, groupRows, thisRowId) {
+      const total = BigInt(totalAmount);
+      const groupTotalStake = groupRows.reduce((s, r) => s + BigInt(r.stake_amount), 0n);
+      if (groupTotalStake <= 0n) return 0n;
+      const sorted = [...groupRows].sort((a, b) => a.id - b.id);
+      let floorSum = 0n;
+      const floors = new Map();
+      for (const r of sorted) {
+        const floor = (total * BigInt(r.stake_amount)) / groupTotalStake;
+        floors.set(r.id, floor);
+        floorSum += floor;
+      }
+      let remainder = total - floorSum;   // always >= 0 and < sorted.length
+      for (const r of sorted) {
+        if (remainder <= 0n) break;
+        floors.set(r.id, floors.get(r.id) + 1n);
+        remainder -= 1n;
+      }
+      return floors.get(thisRowId);
+    }
 
     // #27e (KANet-UI sprint): the settler pays an EXTERNAL bettor (bettor_relay_id NULL, = bot/DM-path)
     // to the P2PK address derived from x-only bettor_pk (pool-market-settler.js L1634) — which differs
@@ -2142,10 +3329,52 @@ export async function registerPoolRoutes(fastify) {
       // can show '你赢了' / '你输了' instead of generic '已结算'.
       let outcomeWinner = null;
       let didWin = null;
-      let actualPayoutKas = null;
+      let actualPayoutKas = null, actualPayoutChainVerified = false;
+      let bshardClaimTxid = null;
       try {
         const meta = JSON.parse(p.metadata || '{}');
-        if (meta.phase2_winner === 0 || meta.phase2_winner === 1) {
+        // #48 (NWT/J2 2026-07-04): bshard(v0.7) 盘从没写 phase2_winner(v0.6 专属字段) — 结算后所有
+        // bshard/世界杯盘 /mybets 永远显不出输赢。改读 settle_evidence.winner_details(daemon writeback
+        // 时存的 per-bettor 明细, 已链验 received===true, 比反查 kaspa_tx_log 更直接)。
+        const ev = meta.settle_evidence;
+        if (p.protocol_version === 'v0.7' && ev && Array.isArray(ev.winner_details)) {
+          const myWin = ev.winner_details.find(w => String(w.pk).toLowerCase() === String(bettorPk).toLowerCase());
+          // H2 fix (2026-07-17, NWT GREEN 12cce211): winner_details is keyed by pk only, aggregated
+          // per LOGICAL market (bshard-settle-daemon.mjs:681 writes win_direction alongside it in the
+          // same atomic evidence object, so a valid winner_details entry always carries a valid
+          // win_direction — precondition checked explicitly here, not assumed). A bettor who hedged
+          // (bet both YES and NO with the same pk) will match myWin on BOTH direction's rows; only the
+          // row whose OWN direction equals win_direction actually won — the other row must fall through
+          // to the win_direction branch below (which correctly marks it as lost), not claim a share here.
+          if (myWin && (ev.win_direction === 0 || ev.win_direction === 1) && myDirection === ev.win_direction) {
+            outcomeWinner = myDirection;
+            didWin = true;
+            actualPayoutChainVerified = true;   // winner_details 只收 received===true 的条目(daemon writeback 过滤过)
+            bshardClaimTxid = myWin.txId || null;  // 权威源: settle_evidence.winner_details[].txId, 已链验 received===true (mybets v1.2 §0.1)
+            // this bettor may hold >1 row in this logical market (multi-shard) — split myWin.amount by
+            // stake across all of THIS bettor's rows in this (logical market, direction) group, not
+            // hand the whole aggregate to every row (H2 bug). BigInt throughout (NWT MUST-FIX).
+            const logicalId = p.logical_market_id || p.market_id;
+            const groupRows = sqlite.prepare(`
+              SELECT s.id, s.stake_amount FROM pool_bettor_sides s
+              LEFT JOIN market_shards ms ON ms.shard_market_id = s.market_id
+              WHERE s.bettor_pk = ? AND s.direction = ? AND COALESCE(ms.logical_market_id, s.market_id) = ?
+            `).all(bettorPk, myDirection, logicalId);
+            const myShare = splitWinnerAmountByStake(myWin.amount, groupRows, p.side_id);
+            actualPayoutKas = Number(myShare) / 1e8;
+          } else if (ev.win_direction === 0 || ev.win_direction === 1) {
+            // NWT 审(2026-07-04, 部署前抓到): 不在 winner_details 里≠真输了——若 myDirection===win_direction
+            // 但没进 winner_details, 是"赢了但 claim 失败没到账"(#21 settled_partial_claims 那种), 不是"你输了"。
+            // 必须先比对方向, 真不同方向才是真输; 同方向缺席 = 赢了待发放(不误判成假阴性, 比模糊 pending 更危险)。
+            outcomeWinner = ev.win_direction;
+            if (myDirection === ev.win_direction) {
+              didWin = true; actualPayoutKas = null; actualPayoutChainVerified = false;   // 赢了·claim 未到账·金额未知不瞎猜
+            } else {
+              didWin = false;
+            }
+          }
+          // ev 存在但 win_direction 缺失(老结构/尚在写入中) → outcomeWinner/didWin 留 null(继续显示"待结算", 不误判)。
+        } else if (meta.phase2_winner === 0 || meta.phase2_winner === 1) {
           outcomeWinner = meta.phase2_winner;
           didWin = (myDirection === outcomeWinner);
           if (didWin) {
@@ -2156,9 +3385,26 @@ export async function registerPoolRoutes(fastify) {
             // over-states (demo lwrcl: 148.1 projected vs 141.427 on-chain). data-three-role: settler
             // records actual, display reads. Robust to #28 (oracle_bond tuning): reads the real output,
             // no local formula to drift. Fallback to the projection only for legacy settles w/o outputs.
-            const myOnChainSompi = Array.isArray(meta.phase2_outputs)
-              ? meta.phase2_outputs.filter(o => _payoutAddrSet.has(o.address)).reduce((s, o) => s + (Number(o.amountSompi) || 0), 0)
-              : 0;
+            // T6 (Q3, J2 2026-06-27): read ACTUAL payout from CHAIN (kaspa_tx_log.outputs_json of the
+            // claim/settle TX) not DB meta.phase2_outputs — 链验铁律 (这程 DB status 骗 4 次). bshard winner
+            // claims via claim_txid (merkle claim); v0.6 winner paid in settle_txid output. multi-output aware
+            // (复用 broker earnings earnings-by-address L233 同源链验法). DB phase2_outputs = fallback 仅当 tx 未索引.
+            let myOnChainSompi = 0;
+            const _payoutTxid = p.claim_txid || p.settle_txid;
+            if (_payoutTxid) {
+              const _ptx = sqlite.prepare('SELECT outputs_json FROM kaspa_tx_log WHERE tx_id = ?').get(_payoutTxid);
+              if (_ptx && _ptx.outputs_json) {
+                try {
+                  myOnChainSompi = JSON.parse(_ptx.outputs_json)
+                    .filter(o => _payoutAddrSet.has(o.script_public_key_address || o.address))
+                    .reduce((s, o) => s + (Number(o.amount ?? o.amount_sompi ?? o.value) || 0), 0);
+                  if (myOnChainSompi > 0) actualPayoutChainVerified = true;
+                } catch {}
+              }
+            }
+            if (myOnChainSompi <= 0 && Array.isArray(meta.phase2_outputs)) {   // fallback: DB-recorded settle outputs (tx not yet indexed)
+              myOnChainSompi = meta.phase2_outputs.filter(o => _payoutAddrSet.has(o.address)).reduce((s, o) => s + (Number(o.amountSompi) || 0), 0);
+            }
             if (myOnChainSompi > 0) {
               // A bettor may hold multiple winning sides on one market → multiple outputs to one address.
               // Split this side's share by stake so the per-direction sum (formatMyBets) == on-chain total.
@@ -2194,11 +3440,13 @@ export async function registerPoolRoutes(fastify) {
         claim_txid: p.claim_txid,
         settle_txid: p.settle_txid,
         refund_txid: p.refund_txid,
+        bshard_claim_txid: bshardClaimTxid,  // mybets v1.2 §0.1: v0.7 赢家 claim 权威源 (H1, claim_txid 列只写退款专属)
         // F-N1: settled outcome surface (NULL if not settled or oracle still voting).
         outcome_winner: outcomeWinner,
         outcome_side: outcomeWinner === 0 ? 'YES' : (outcomeWinner === 1 ? 'NO' : null),
         did_win: didWin,
         actual_payout_kas: actualPayoutKas,
+        actual_payout_chain_verified: actualPayoutChainVerified,  // T6: true = 链上 claim/settle tx 核证; false = DB fallback/projection
       });
     }
     return reply.send({ ok: true, linked_addr: linkedAddr, bettor_pk: bettorPk, count: out.length, positions: out });
@@ -2382,11 +3630,11 @@ export async function registerPoolRoutes(fastify) {
     // Bettor sides (winner candidates).
     const sides = sqlite.prepare('SELECT bettor_pk, direction, stake_amount, side_p2sh, side_lock_tx, claim_txid FROM pool_bettor_sides WHERE market_id = ? ORDER BY merkle_index').all(marketId);
 
-    // Kaspa explorer base (testnet-12 default).
+    // Kaspa explorer base — 单源契约(explorer-url.mjs): testnet-12 无公网 explorer(explorer-tn12.kaspa.org
+    // DNS 不存在, Owner 实测 ENOTFOUND), 诚实返回 null 而非拼一个死链。
     const network = (market.spine_p2sh || '').startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
-    const explorerBase = network === 'testnet-12' ? 'https://explorer-tn12.kaspa.org' : 'https://explorer.kaspa.org';
-    const txUrl = (txid) => txid ? `${explorerBase}/txs/${txid}` : null;
-    const addrUrl = (addr) => addr ? `${explorerBase}/addresses/${addr}` : null;
+    const txUrl = (txid) => buildExplorerUrl(txid, network);
+    const addrUrl = (addr) => buildExplorerAddressUrl(addr, network);
 
     return reply.send({
       ok: true,
@@ -2453,7 +3701,7 @@ export async function registerPoolRoutes(fastify) {
       pool_merkle_root: market.pool_merkle_root,
       chain_events: eventsByType,
       network,
-      explorer_base: explorerBase,
+      explorer_base: explorerBaseUrl(network),
     });
   });
 
@@ -2562,6 +3810,74 @@ export async function registerPoolRoutes(fastify) {
       total_settled_markets: perMarket.length,
       total_income_sompi: totalIncomeSompi,
       total_income_kas: totalIncomeSompi / 1e8,
+      pending_tx_index_count: pendingTxCount,
+      per_market: perMarket,
+    });
+  });
+
+  // GET /api/node/income/:pk — per-node (signing committee member) income, SPLIT from the combined
+  // committee fee. T6 (Q3, J2 2026-06-27): node 收益现跟 oracle 捆绑 — committee 那笔 fee = oracleBps+nodeBps
+  // 合并 (pool-shard-settle.mjs L84 commBps), node→5 签名委员均分 (FEE_CONFIG). node 份额 = committee_payout
+  // × nodeBps/(oracleBps+nodeBps). 链验铁律 (不信 DB, 这程 DB 骗 4 次): 真值从 kaspa_tx_log.outputs_json parse
+  // (v0.6 = settle_txid output[position+1]; v0.7 bshard = settle_evidence.fee_payouts[committee].txid),
+  // 复用 oracle income (L2521) + broker earnings (earnings-by-address) 同源链验法。
+  fastify.get('/api/node/income/:pk', async (request, reply) => {
+    if (!_v06TablesExist()) return reply.code(503).send({ ok: false, error: 'v159 schema not yet migrated' });
+    const nodePk = String(request.params.pk).toLowerCase();
+    if (!/^[0-9a-f]{64}$/.test(nodePk)) return reply.code(400).send({ ok: false, error: 'pk must be 64-hex (32 bytes)' });
+    const { FEE_CONFIG } = await import('../lib/pool-shard-settle.mjs');
+    const commBps = (FEE_CONFIG.oracleBps || 0) + (FEE_CONFIG.nodeBps || 0);
+    const nodeFrac = commBps > 0 ? (FEE_CONFIG.nodeBps || 0) / commBps : 0;  // = 20/120 with default config
+    // derive node address (for v0.7 fee_payout to_address match)
+    let nodeAddrs = [];
+    try { const kw = await import('kaspa-wasm'); const xo = new kw.XOnlyPublicKey(nodePk); nodeAddrs = [xo.toAddress('testnet-12').toString(), xo.toAddress('mainnet').toString()]; } catch {}
+    const txLog = sqlite.prepare('SELECT outputs_json FROM kaspa_tx_log WHERE tx_id = ?');
+
+    let totalNodeSompi = 0, pendingTxCount = 0;
+    const perMarket = [];
+    // (1) v0.6 committee-position path (mirrors oracle income): committee output = combined fee → node split.
+    const v06 = sqlite.prepare(`
+      SELECT pc.market_id, pc.committee_pks, pm.settle_txid, pm.protocol_status
+      FROM pool_committee pc JOIN pool_markets pm ON pm.id = pc.market_id
+      WHERE pm.protocol_version = 'v0.6' AND pm.settle_txid IS NOT NULL
+    `).all();
+    for (const r of v06) {
+      let pks = []; try { pks = JSON.parse(r.committee_pks); } catch {}
+      const position = pks.map((p) => String(p).toLowerCase()).indexOf(nodePk);
+      if (position < 0) continue;
+      const txRow = txLog.get(r.settle_txid);
+      if (!txRow || !txRow.outputs_json) { pendingTxCount += 1; perMarket.push({ market_id: r.market_id, version: 'v0.6', position, settle_txid: r.settle_txid, node_income_sompi: null, status: 'tx_pending_index' }); continue; }
+      let outputs = []; try { outputs = JSON.parse(txRow.outputs_json); } catch {}
+      const myOut = outputs[position + 1];   // [0]=broker, [1..5]=committee
+      const commSompi = myOut ? (parseInt(myOut.value ?? myOut.amount ?? myOut.amount_sompi, 10) || 0) : 0;
+      const nodeSompi = Math.floor(commSompi * nodeFrac);
+      totalNodeSompi += nodeSompi;
+      perMarket.push({ market_id: r.market_id, version: 'v0.6', position, settle_txid: r.settle_txid, committee_payout_sompi: commSompi, node_income_sompi: nodeSompi, chain_verified: true, status: r.protocol_status });
+    }
+    // (2) v0.7 bshard path: settle_evidence.fee_payouts[committee] matched to node address, chain-verified by fee txid.
+    if (nodeAddrs.length) {
+      const v07 = sqlite.prepare("SELECT id, metadata FROM pool_markets WHERE protocol_version = 'v0.7' AND metadata LIKE '%fee_payouts%'").all();
+      for (const m of v07) {
+        let meta = {}; try { meta = JSON.parse(m.metadata || '{}'); } catch {}
+        const cfees = (meta.settle_evidence?.fee_payouts || []).filter((p) => p && p.role === 'committee' && nodeAddrs.includes(p.to_address));
+        for (const f of cfees) {
+          const lg = f.txid ? txLog.get(f.txid) : null;   // 链验 fee txid landed + 取真额
+          let commSompi = 0;
+          if (lg && lg.outputs_json) { try { const o = JSON.parse(lg.outputs_json); commSompi = o.filter((x) => nodeAddrs.includes(x.script_public_key_address || x.address)).reduce((s, x) => s + Number(x.amount ?? x.amount_sompi ?? x.value ?? 0), 0); } catch {} }
+          if (commSompi <= 0) { pendingTxCount += 1; perMarket.push({ market_id: m.id, version: 'v0.7', fee_txid: f.txid, node_income_sompi: null, status: 'fee_tx_pending_index' }); continue; }
+          const nodeSompi = Math.floor(commSompi * nodeFrac);
+          totalNodeSompi += nodeSompi;
+          perMarket.push({ market_id: m.id, version: 'v0.7', fee_txid: f.txid, committee_payout_sompi: commSompi, node_income_sompi: nodeSompi, chain_verified: true, status: 'completed' });
+        }
+      }
+    }
+    return reply.send({
+      ok: true, node_pk: nodePk,
+      node_fraction_of_committee_fee: nodeFrac,
+      fee_config: { oracleBps: FEE_CONFIG.oracleBps, nodeBps: FEE_CONFIG.nodeBps },
+      total_settled_markets: perMarket.length,
+      total_node_income_sompi: totalNodeSompi,
+      total_node_income_kas: totalNodeSompi / 1e8,
       pending_tx_index_count: pendingTxCount,
       per_market: perMarket,
     });
@@ -2702,122 +4018,15 @@ export async function registerPoolRoutes(fastify) {
   //   6. Return refund_txid or error.
   //
   // Body: { bettor_pk } OR { side_id }.
+  // 2026-07-14(Bettor #k0i054 修法A): 核心逻辑抽到模块级 buildBettorRefundClaim(见文件顶部),
+  // 这里只是薄包装(parse request → 调纯函数 → 按 httpStatus 映射 reply)。tick 侧(legacyRefundBuilderTick)
+  // 直接 import 调同一个函数,不再经过 HTTP 自调用。
   fastify.post('/api/pool/market/:id/bettor-refund-claim', async (request, reply) => {
     const marketId = request.params.id;
     const b = request.body || {};
-    const bettorPk = (typeof b.bettor_pk === 'string' ? b.bettor_pk.toLowerCase() : null);
-    const sideId = b.side_id;
-    if (!bettorPk && !sideId) {
-      return reply.code(400).send({ ok: false, error: 'bettor_pk or side_id required' });
-    }
-
-    const market = sqlite.prepare(`
-      SELECT id, deadline, spine_p2sh, protocol_version, protocol_status
-      FROM pool_markets WHERE id = ?
-    `).get(marketId);
-    if (!market) return reply.code(404).send({ ok: false, error: 'market not found' });
-
-    let side;
-    if (sideId) {
-      side = sqlite.prepare(`
-        SELECT id, bettor_pk, side_p2sh, side_lock_tx, side_redeem_script_hex, stake_amount, direction
-        FROM pool_bettor_sides WHERE id = ? AND market_id = ?
-      `).get(sideId, marketId);
-    } else {
-      side = sqlite.prepare(`
-        SELECT id, bettor_pk, side_p2sh, side_lock_tx, side_redeem_script_hex, stake_amount, direction
-        FROM pool_bettor_sides WHERE market_id = ? AND lower(bettor_pk) = ?
-      `).get(marketId, bettorPk);
-    }
-    if (!side) return reply.code(404).send({ ok: false, error: 'side row not found for bettor in market' });
-    if (!side.side_lock_tx) return reply.code(409).send({ ok: false, error: 'side stake not yet locked on chain' });
-    if (!side.side_redeem_script_hex) return reply.code(409).send({ ok: false, error: 'side row missing redeem_script_hex (= pre-v136 register, cannot self-claim)' });
-
-    // Resolve signing relay via deriveXOnlyPubkey(relay_nodes.address) match (Bettor r392 catch).
-    const candidates = sqlite.prepare('SELECT id, address FROM relay_nodes WHERE address IS NOT NULL').all();
-    let signingRelay = null;
-    for (const row of candidates) {
-      try {
-        const pk = await deriveXOnlyPubkey(row.address);
-        if (String(pk).toLowerCase() === String(side.bettor_pk).toLowerCase()) {
-          signingRelay = row;
-          break;
-        }
-      } catch {}
-    }
-    if (!signingRelay) {
-      return reply.code(404).send({
-        ok: false,
-        error: `no local relay matches bettor_pk=${String(side.bettor_pk).slice(0,12)}.. via deriveXOnlyPubkey(address) — bettor relay not on this node`,
-      });
-    }
-
-    // Byte-size mass-aware fee + KIP-9 storage_mass (= helper refactor lib/kip9-mass.mjs).
-    // J1tn r303 P0-#1 sweep (Bettor r341+r346/r366b 钦定 helper refactor): 公式抽 lib/kip9-mass.mjs
-    // computeSingleOutputFee, 5 site 不再各抄 STORAGE_MASS_C + 公式.
-    const { computeSingleOutputFee } = await import('../lib/kip9-mass.mjs');
-    const redeemBytes = Buffer.from(side.side_redeem_script_hex, 'hex');
-    const sigScriptSize = 70 + redeemBytes.length;
-    const txByteEstimate = 45 + sigScriptSize + 50 + 80;
-    const computeMassEst = Math.ceil(txByteEstimate * 2.5);
-    const sideStakeInt = parseInt(side.stake_amount, 10) || 1_000_000_000;
-    const feeResult = computeSingleOutputFee(computeMassEst, sideStakeInt, 1000, 100_000_000);
-    const massEst = feeResult.totalMass;
-    const fee = feeResult.dynamicFee;
-
-    const stakeSompi = BigInt(side.stake_amount);
-    const outAmount = stakeSompi - BigInt(fee);
-    if (outAmount <= 1000n) {
-      return reply.code(409).send({ ok: false, error: `output ${outAmount} <= dust 1000 (= fee ${fee} too high for stake ${stakeSompi})` });
-    }
-
-    // J1 5dd590cd0 grace fix: SS L260/270 require(tx.time >= (deadline + REFUND_GRACE_SEC) * 1000) ms.
-    // J1tn r303 (Bettor 03:19 v3 approve): de-dup hardcode → import from lib/pool-refund-grace.mjs.
-    // J2-tn r391 (#28 Bettor ③ APPROVE v2 05:26): legacy v0.5 PoolSide locktime 无 grace (SS L121
-    // 严守 tx.time >= deadline*1000 ms), v06/v07 + REFUND_GRACE_SEC (L260/270 grace require).
-    // entry index: 3 for legacy (PoolSide.sil 4 entry refund=idx3), 2 for v06/v07 (PoolSide_v06/v07 3 entry refund=idx2).
-    const isLegacy = !market.protocol_version || market.protocol_version === 'v0.5';
-    const { REFUND_GRACE_SEC } = await import('../lib/pool-refund-grace.mjs');
-    const lockTime = isLegacy
-      ? BigInt(market.deadline) * 1000n
-      : (BigInt(market.deadline) + BigInt(REFUND_GRACE_SEC)) * 1000n;
-    const entryIndex = isLegacy ? 3 : 2;
-
-    try {
-      const submitResult = await sendCommandAsync(signingRelay.id, {
-        type: 'pool_side_refund_cancelled_tx',
-        side_p2sh_address: side.side_p2sh,
-        side_redeem_script_hex: side.side_redeem_script_hex,
-        required_input_outpoint: { outpointTxid: side.side_lock_tx, outpointIndex: 0 },
-        output: { address: signingRelay.address, amountSompi: outAmount.toString() },
-        lock_time: lockTime.toString(),
-        entry_index: entryIndex,
-      });
-      if (!submitResult?.ok || !submitResult.txId) {
-        return reply.code(500).send({ ok: false, error: `relay submit fail: ${submitResult?.error || 'no txId'}` });
-      }
-      // Bettor r400 catch: 必 UPDATE claim_txid 防 cron 重试 (= ccvr9 实证 endpoint 无 UPDATE
-      // 链上 claimed 但 DB 空 → cron 看作未领每 tick 重试).
-      sqlite.prepare('UPDATE pool_bettor_sides SET claim_txid = ?, refund_attempted_at = CURRENT_TIMESTAMP WHERE id = ?')
-        .run(submitResult.txId, side.id);
-      return reply.send({
-        ok: true,
-        market_id: marketId,
-        bettor_pk: side.bettor_pk,
-        side_id: side.id,
-        signing_relay_id: signingRelay.id,
-        signing_relay_address: signingRelay.address,
-        refund_txid: submitResult.txId,
-        stake_sompi: stakeSompi.toString(),
-        fee_sompi: fee.toString(),
-        output_sompi: outAmount.toString(),
-        lock_time_ms: lockTime.toString(),
-        mass_estimate: massEst,
-      });
-    } catch (e) {
-      console.error(`[pool/bettor-refund-claim] fail market=${marketId.slice(0,12)} side=${side.id}: ${e.message}`);
-      return reply.code(500).send({ ok: false, error: `claim fail: ${e.message}` });
-    }
+    const result = await buildBettorRefundClaim(marketId, { bettorPk: b.bettor_pk, sideId: b.side_id });
+    const { httpStatus, ...payload } = result;
+    return reply.code(httpStatus).send(payload);
   });
 
   // J2-tn r408 P0-A MVP Bettor r361 锁契约 — backend LLM prevet 评估端点.

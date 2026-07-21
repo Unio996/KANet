@@ -111,7 +111,7 @@ contract PoolShard_fold(
         // ★ output-bind weld 2: parent value == parent.pool_value (parent cov-output 在 outputs[0] builder 约定, e2e 验)
         require(tx.outputs[0].value == new_states[0].pool_value);
         if (count_sum == shard_count) {
-            byte[] commit_pre0 = byte[](yes_sum, 16) + byte[](no_sum, 16);
+            byte[] commit_pre0 = byte[](yes_sum, 8) + byte[](no_sum, 8);
             byte[] commit_pre1 = commit_pre0 + byte[](market_id);
             byte[] commit_pre2 = commit_pre1 + byte[](shard_count, 4);
             require(blake2b(commit_pre2) == commit_v2);

@@ -32,6 +32,8 @@ export const COMMAND_TYPES = Object.freeze({
   ECDSA_SIGN: 'ecdsa_sign',
   GET_PUBKEY: 'get_pubkey',
   SIGN_INPUT_FOR_SETTLE: 'sign_input_for_settle',
+  GET_PER_BET_ADDRESS: 'get_per_bet_address',   // #28 (B) wire: 派生 per-bet 独立 P2SH 收款址 (relay.mjs handler·三层 KI-49)
+  SWEEP_PER_BET: 'sweep_per_bet',                // #28 (B) wire: sweep per-bet P2SH 扫回 gateway 报销 (relay.mjs handler·三层 KI-49)
   PREDICTION_SETTLE_BUILD_PREIMAGE: 'prediction_settle_build_preimage',
   // Oracle v0.3 sub 5c (J2 r21 ship 730b910) — 1V1 escrow settle_consensual maker+taker mutual sig preimage build.
   // KI sediment per feedback_ipc_double_enforce_register_both_layers 5/20: relay.mjs L688 case 漏 commands.mjs register
@@ -61,6 +63,7 @@ export const COMMAND_TYPES = Object.freeze({
   POOL_V07_COMPUTE_REFUND_MASS: 'pool_v07_compute_refund_mass',
   // B2 v0.5 Phase 3 bug 7 fix — confirm transfer UTXO landed in accepted set.
   CHECK_UTXO_LANDED: 'check_utxo_landed',
+  GET_ADDRESS_UTXOS: 'get_address_utxos',   // 2026-07-18 J1tn kr5l4 consolidate DB-lag 自愈: 地址活 UTXO 列表(只读查询)
   // ③ committee chainReader (Bettor r170 + J1 r204/649197d) — Console wraps as chainReader.
   // J1 r204 漏 register 白名单, validateCommandPayload reject silent → relay log "INVALID COMMAND" + settler "Relay not running". KI sediment 5/20 复刻 (relay.mjs L688 pattern), KANet-UI r365 补.
   CHAIN_GET_CURRENT_DAA_SCORE: 'chain_get_current_daa_score',
@@ -86,6 +89,18 @@ export const COMMAND_TYPES = Object.freeze({
   BSHARD_PAYOUT_CLAIM: 'bshard_payout_claim',                 // PayoutShard claim OP_2, store-payout merkle+nullifier+recipient
   BSHARD_CANCEL_ATTEST: 'bshard_cancel_attest',               // PayoutShard cancel_attest OP_3, 委员 pubkey-distinct 背书 refundRoot, closed 0→2 (market-cancel)
   BSHARD_REFUND_CLAIM: 'bshard_refund_claim',                 // PayoutShard refund_claim OP_4, store-refund merkle+nullifier+recipient (closed==2)
+  // ── W2 (2026-07-07): PayoutShardV2 / ZK-native close_attest (4 新字段, 委员 pubkey-distinct 背书 + zk_handoff 前置) ──
+  BSHARD_CLOSE_ATTEST_V2: 'bshard_close_attest_v2',           // PayoutShardV2 close_attest OP_1, 同 BSHARD_CLOSE_ATTEST + attestedWinner/betsRoot/refundRoot/attestedAtMs
+  BSHARD_CONSOLIDATE_V2: 'bshard_consolidate_v2',             // PayoutShardV2 absorb OP_0 + SL consolidate_to_payout OP_1, 同 BSHARD_CONSOLIDATE + V2 state(288B)
+  // ── W4a (2026-07-07, J1): PayoutShardV2 zk_handoff — 一次性把 consolidated_pool 交给新铸 CloseZkRepro4 genesis ──
+  BSHARD_ZK_HANDOFF: 'bshard_zk_handoff',                     // PayoutShardV2 zk_handoff OP_4, 无 continuation(生命周期终点)
+  // ── W4a (2026-07-07, J2 应急代写 J1 domain, NWT 双倍审, Bettor/Owner 批): CloseZkRepro4 zk_close ──
+  BSHARD_ZK_CLOSE: 'bshard_zk_close',                          // CloseZkRepro4 zk_close OP_0, closed 1→2 + payoutRoot 写入
+  // ── 缺件1 (2026-07-08, J2, NWT GREEN-with-conditions + Bettor 终GO): CloseZkV2 claim ──
+  CLOSEZK_V2_CLAIM: 'closezk_v2_claim',                        // CloseZkV2 claim OP_3(待T0.3实测确认), closed==2 前置, payoutRootField merkle+17-word nullifier+P2PK payout
+  // ── P2 pxvml escape 退款 (2026-07-09, J2, Bettor GREEN-with-notes + NWT GREEN-with-conditions): CloseZkV2 escape 双 entry ──
+  CLOSEZK_V2_ESCAPE_TRIGGER: 'closezk_v2_escape_trigger',      // CloseZkV2 escape_trigger OP_1, closed 1→3 write-once 不动钱, tx.time>=attestedAtMs+GRACE(链上裁决)
+  CLOSEZK_V2_ESCAPE_CLAIM: 'closezk_v2_escape_claim',          // CloseZkV2 escape_claim OP_2, closed==3 前置, refundRootBaked merkle+17-word nullifier+P2PK(bettorPk) 原额退款
 });
 
 export const COMMAND_TYPE_SET = new Set(Object.values(COMMAND_TYPES));
@@ -110,6 +125,8 @@ export const COMMAND_PAYLOAD_SCHEMA = Object.freeze({
   [COMMAND_TYPES.ECDSA_SIGN]: ['message'],
   [COMMAND_TYPES.GET_PUBKEY]: [],
   [COMMAND_TYPES.SIGN_INPUT_FOR_SETTLE]: ['tx_hex', 'input_index'],
+  [COMMAND_TYPES.GET_PER_BET_ADDRESS]: ['marketId', 'bettorPk', 'direction', 'payAmountSompi', 'betId'],  // #28 (B) per-bet 唯一性必传
+  [COMMAND_TYPES.SWEEP_PER_BET]: ['per_bet_address', 'redeem_hex'],  // #28 (B) sweep 必传
   [COMMAND_TYPES.PREDICTION_SETTLE_BUILD_PREIMAGE]: ['p2sh_address', 'required_input_outpoints', 'outputs'],
   // Oracle v0.3 sub 5c — 1V1 escrow settle_consensual maker+taker mutual sig preimage build.
   // KI sediment 5/20: COMMAND_PAYLOAD_SCHEMA missing entry → validateCommandPayload throws "required is not iterable".
@@ -122,7 +139,11 @@ export const COMMAND_PAYLOAD_SCHEMA = Object.freeze({
   [COMMAND_TYPES.POOL_REFUND_MAKER_UNJOINED_TX]: ['spine_p2sh_address', 'spine_redeem_script_hex', 'required_input_outpoint', 'output'],
   [COMMAND_TYPES.POOL_SIDE_REFUND_CANCELLED_TX]: ['side_p2sh_address', 'side_redeem_script_hex', 'required_input_outpoint', 'output'],
   [COMMAND_TYPES.POOL_V07_COMPUTE_REFUND_MASS]: ['spine_p2sh', 'spine_lock_tx', 'spine_redeem_script_hex', 'maker_address', 'maker_stake', 'deadline'],
-  [COMMAND_TYPES.CHECK_UTXO_LANDED]: ['address', 'txid'],
+  // txid 可选(2026-07-11, level2-B live-check升级, docs/2026-07-11-c1-folded-shard-anchor-design.md):
+  //   caller 省 txid = addr-only 存在性查询(per-ticket anti-swap 用法, 不比对特定 tx, 只问"这地址现在有没有
+  //   UTXO"); 传 txid = 精确匹配(原行为, 命门①chain-bound 等场景不变)。
+  [COMMAND_TYPES.CHECK_UTXO_LANDED]: ['address'],
+  [COMMAND_TYPES.GET_ADDRESS_UTXOS]: ['address'],
   // ③ committee chainReader — get current DAA score 不需 payload field; get blocks 需 min_daa_score.
   [COMMAND_TYPES.CHAIN_GET_CURRENT_DAA_SCORE]: [],
   [COMMAND_TYPES.CHAIN_GET_BLOCKS_FROM_DAA_SCORE]: ['min_daa_score'],
@@ -144,6 +165,13 @@ export const COMMAND_PAYLOAD_SCHEMA = Object.freeze({
   [COMMAND_TYPES.BSHARD_PAYOUT_CLAIM]: ['witness', 'inputs', 'outputs'],
   [COMMAND_TYPES.BSHARD_CANCEL_ATTEST]: ['witness', 'inputs', 'outputs'],
   [COMMAND_TYPES.BSHARD_REFUND_CLAIM]: ['witness', 'inputs', 'outputs'],
+  [COMMAND_TYPES.BSHARD_CLOSE_ATTEST_V2]: ['witness', 'inputs', 'outputs'],
+  [COMMAND_TYPES.BSHARD_CONSOLIDATE_V2]: ['inputs', 'outputs'],
+  [COMMAND_TYPES.BSHARD_ZK_HANDOFF]: ['witness', 'inputs', 'outputs'],
+  [COMMAND_TYPES.BSHARD_ZK_CLOSE]: ['witness', 'inputs'],
+  [COMMAND_TYPES.CLOSEZK_V2_CLAIM]: ['witness', 'inputs', 'outputs'],
+  [COMMAND_TYPES.CLOSEZK_V2_ESCAPE_TRIGGER]: ['witness', 'inputs'],
+  [COMMAND_TYPES.CLOSEZK_V2_ESCAPE_CLAIM]: ['witness', 'inputs'],
 });
 
 // R38 (Z23 sediment): typeof spec per field. Bug-Z23 真根因 — broker enqueue amount: number,
@@ -169,6 +197,8 @@ export const COMMAND_FIELD_TYPES = Object.freeze({
   [COMMAND_TYPES.ECDSA_SIGN]: { message: 'string' },
   [COMMAND_TYPES.GET_PUBKEY]: {},
   [COMMAND_TYPES.SIGN_INPUT_FOR_SETTLE]: { tx_hex: 'string', input_index: 'number' },
+  [COMMAND_TYPES.GET_PER_BET_ADDRESS]: { marketId: 'string', bettorPk: 'string', direction: 'number', payAmountSompi: 'string', betId: 'string' },  // #28 (B)
+  [COMMAND_TYPES.SWEEP_PER_BET]: { per_bet_address: 'string', redeem_hex: 'string' },  // #28 (B)
   // p2sh_address allows array for pool multi-p2sh (= spine + N side) per B2 v0.5 Sub 2d Phase 2a-1.
   // sig_op_counts optional per-input array (Phase 3 bug 5 — preimage/final sighash consistency).
   [COMMAND_TYPES.PREDICTION_SETTLE_BUILD_PREIMAGE]: { p2sh_address: ['string', 'array'], required_input_outpoints: 'array', outputs: 'array', sig_op_counts: 'array' },
@@ -183,6 +213,7 @@ export const COMMAND_FIELD_TYPES = Object.freeze({
   [COMMAND_TYPES.POOL_SIDE_REFUND_CANCELLED_TX]: { side_p2sh_address: 'string', side_redeem_script_hex: 'string', required_input_outpoint: 'object', output: 'object' },
   [COMMAND_TYPES.POOL_V07_COMPUTE_REFUND_MASS]: { spine_p2sh: 'string', spine_lock_tx: 'string', spine_redeem_script_hex: 'string', maker_address: 'string', maker_stake: ['string','number'], deadline: ['string','number'] },
   [COMMAND_TYPES.CHECK_UTXO_LANDED]: { address: 'string', txid: 'string' },
+  [COMMAND_TYPES.GET_ADDRESS_UTXOS]: { address: 'string' },
   [COMMAND_TYPES.STAKE_UNLOCK_TX]: { p2sh_address: 'string', redeem_script_hex: 'string', to_address: 'string', lock_time: ['string', 'number'] },
   // bshard M3: 三块 object (witness 含 push 值 + ps_prefix/suffix; inputs 含 redeem/outpoint/current_state; outputs 含 state/amount).
   [COMMAND_TYPES.BSHARD_REGISTER_BET]: { witness: 'object', inputs: 'object', outputs: 'object' },
@@ -199,6 +230,13 @@ export const COMMAND_FIELD_TYPES = Object.freeze({
   [COMMAND_TYPES.BSHARD_PAYOUT_CLAIM]: { witness: 'object', inputs: 'object', outputs: 'object' },
   [COMMAND_TYPES.BSHARD_CANCEL_ATTEST]: { witness: 'object', inputs: 'object', outputs: 'object' },
   [COMMAND_TYPES.BSHARD_REFUND_CLAIM]: { witness: 'object', inputs: 'object', outputs: 'object' },
+  [COMMAND_TYPES.BSHARD_CLOSE_ATTEST_V2]: { witness: 'object', inputs: 'object', outputs: 'object' },
+  [COMMAND_TYPES.BSHARD_CONSOLIDATE_V2]: { inputs: 'object', outputs: 'object' },
+  [COMMAND_TYPES.BSHARD_ZK_HANDOFF]: { witness: 'object', inputs: 'object', outputs: 'object' },
+  [COMMAND_TYPES.BSHARD_ZK_CLOSE]: { witness: 'object', inputs: 'object' },
+  [COMMAND_TYPES.CLOSEZK_V2_CLAIM]: { witness: 'object', inputs: 'object', outputs: 'object' },
+  [COMMAND_TYPES.CLOSEZK_V2_ESCAPE_TRIGGER]: { witness: 'object', inputs: 'object' },
+  [COMMAND_TYPES.CLOSEZK_V2_ESCAPE_CLAIM]: { witness: 'object', inputs: 'object' },
 });
 
 export function validateCommandPayload(cmd) {

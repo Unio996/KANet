@@ -21,6 +21,15 @@ async function req(method, path, body) {
   }
 }
 
+// 2026-07-13 (Bettor 派工#izjcun.1, 模式级裁定): status===0 是上面 catch 分支唯一标记(fetch 本身抛错——
+// 超时/网络错误), 跟任何真实 HTTP 响应(哪怕 4xx/5xx)不同。多处调用方之前把这种传输失败跟"真的没有"
+// 混为一谈(空数组/null 降级), 用户看到假空态而非"请重试"——docs/2026-07-13-tgbot-transport-failure-
+// false-empty-audit.md 全量清单。调用方在现有空值降级前加 `if (isTransportFailure(r)) return t(lang,
+// 'service_busy')`。
+export function isTransportFailure(r) {
+  return r.status === 0;
+}
+
 // S1 — poll chain_events for ONE linked address (notifications). Server filters by address.
 export function eventsSince(address, sinceMs, eventType) {
   const q = new URLSearchParams({ address });
@@ -68,6 +77,32 @@ export function poolMarkets({ status, category, limit = 50, offset = 0, broker_r
 export function poolMarket(id) {
   return req('GET', `/api/pool/market/${encodeURIComponent(id)}`);
 }
+// T5 trending (Owner 热需求 2026-06-27): activity+commitment 加权 top-N 活跃市场.
+// 返 [{id,title,total_pool_kas,bettor_count,...}], 已过滤 open+deadline>1h+pool≥阈值.
+export function trendingMarkets(limit = 5) {
+  return req('GET', `/api/pool/markets/trending?limit=${limit}`);
+}
+// 可押市场 (Bettor 2026-06-29): usable+有空位(<50 raw)+deadline>+10min, 无活跃人数门.
+// 区别 trendingMarkets(>=3真人活跃门). 用于 /start 首页展示"能押的盘".
+// 返 { ok, count, markets:[{id,title,bettor_count,total_pool_kas,...}] }
+export function availableMarkets(limit = 8) {
+  return req('GET', `/api/pool/markets/available?limit=${limit}`);
+}
+// 世界杯冠军长线盘 (Bettor 2026-07-04, 世界杯玩法UI): "Will X win the 2026 FIFA World Cup?" futures,
+// 复用 availableMarkets 同一 endpoint 的 ?tag=champions 过滤(usable+非commingled+conditionId去重).
+// 数据壳: J2 还没建新的干净盘时返回 count=0, /champions 命令走 record_empty 式空态文案, 不报错.
+export function championMarkets(limit = 20) {
+  return req('GET', `/api/pool/markets/available?tag=champions&limit=${limit}`);
+}
+// 赛事聚合卡 (Owner 2026-06-28 首页视觉重构): 散盘按 card_group_id 聚成赛事卡.
+// 返 { ok, card_groups:[{ card_group_id, event_title, home_team, away_team, legs:[...] }] }
+export function cardGroups(limit = 8) {
+  return req('GET', `/api/pool/markets/card_groups?limit=${limit}`);
+}
+// broker fee DM 事件 feed (Phase 1: 托管/link 地址 broker). 返 { events:[{ tg_user_id, fee_sompi, market_title, ... }] }
+export function brokerFeeDmEvents(sinceMs) {
+  return req('GET', `/api/pool/broker-fee-dm?since=${Math.floor(sinceMs)}`);
+}
 
 // S-C stage4-5 — POOL external bettor registration (design LOCKED Bettor r263; J1 building backend).
 // 0-custody (J1 S5): bot NEVER moves funds — prep computes the deterministic side-P2SH so the bot can
@@ -76,22 +111,35 @@ export function poolMarket(id) {
 // confirm = bot reports it's awaiting payment; backend runs the 3 validations (dest==side_p2sh +
 //   amount==exact_sompi + UNIQUE tx) against on-chain state → inserts pool_bettor_sides when detected.
 // Path mirrors the existing /api/pool/market/:id/bettor/register convention; exact -external path pending J1 ship.
-// DoD #1.3 (Bettor r316): switched from register-external (v0.5 only) to register-v06 endpoint, which
-// now dual-handles v0.6 + v0.7 markets (PoolSide ctor identical, helper switches by version internally).
+// DoD #1.3 (Bettor r316): switched from register-external (v0.5 only) to register-v06 endpoint.
+// v0.7 markets route to register-v07 which uses amount-nonce attribution (betId → nonce entropy).
 // v0.5 markets are no longer offered via /bet (filter in prediction-menu.mjs excludes them).
-export function poolRegisterPrep(marketId, { linkedAddr, direction, stakeKas }) {
-  return req('POST', `/api/pool/market/${encodeURIComponent(marketId)}/bettor/register-v06/prep`,
-    { linked_addr: linkedAddr, direction, stake_kas: stakeKas });
+export function poolRegisterPrep(marketId, { linkedAddr, direction, stakeKas, protocolVersion, betId }) {
+  const v07 = String(protocolVersion || '').startsWith('v0.7');
+  const ep = v07 ? 'register-v07' : 'register-v06';
+  return req('POST', `/api/pool/market/${encodeURIComponent(marketId)}/bettor/${ep}/prep`,
+    { linked_addr: linkedAddr, direction, stake_kas: stakeKas, ...(v07 ? { bet_id: betId } : {}) });
 }
-export function poolRegisterConfirm(marketId, { linkedAddr, direction, stakeKas }) {
-  return req('POST', `/api/pool/market/${encodeURIComponent(marketId)}/bettor/register-v06/confirm`,
-    { linked_addr: linkedAddr, direction, stake_kas: stakeKas });
+export function poolRegisterConfirm(marketId, { linkedAddr, direction, stakeKas, protocolVersion, betId }) {
+  const v07 = String(protocolVersion || '').startsWith('v0.7');
+  const ep = v07 ? 'register-v07' : 'register-v06';
+  return req('POST', `/api/pool/market/${encodeURIComponent(marketId)}/bettor/${ep}/confirm`,
+    { linked_addr: linkedAddr, direction, stake_kas: stakeKas, ...(v07 ? { bet_id: betId } : {}) });
 }
 
 // Bettor r70 B (Owner P0): /mybets data source. Returns positions[] with
 // payout-if-win + pool distribution + on-chain TX status (settle/refund).
 export function myPositions(linkedAddr) {
   return req('GET', `/api/pool/my-positions?linked_addr=${encodeURIComponent(linkedAddr)}`);
+}
+
+// 用户反馈通道卡A (2026-07-12, tg-side-design.md): bridge to console 卡B POST /api/feedback/reply.
+// bettorPk 若有(缓存值)一并传, 但 console 端(H2)会用 linkedAddr 独立重导出比对, 不信任这个值本身
+// ——传它只是给 console 一个快速一致性核对入口, mismatch 时 console fail-closed 拒答。
+export function feedbackReply(tgUserId, linkedAddr, bettorPk, rawText) {
+  return req('POST', '/api/feedback/reply', {
+    tg_user_id: tgUserId, linked_addr: linkedAddr || null, bettor_pk: bettorPk || null, raw_text: rawText,
+  });
 }
 
 // ── TG custodial wallet (Owner 钦定 2026-06-23, 零门槛玩): Console 持 key, bot 0-key 只调 ──
@@ -109,7 +157,8 @@ export function tgWalletSend(tgUserId, to, amountKas) {
 }
 
 // ── broker onboarding (Owner 钦定 2026-06-22): user 在 bot 里申请当 broker (地址制) ──
-// 申请落 pending; Owner 经 /identities 批 trust→approved 才激活 (auth 门已落 = 公开自助安全)。
+// 提交即激活 (Owner 2026-07-04 钦定移除人工审批门, 测试网无许可自由进出; trust_level 自动设
+// recommended, 不降级已有 owner/不解封 blocked, 见 kanet-broker.js onboard endpoint)。
 // 状态查 (token 永不回); 申请提交 (用户的 /link 地址 + 他的 @BotFather token)。
 export function brokerOnboardStatus(address) {
   return req('GET', `/api/kanet-broker/onboard/status?address=${encodeURIComponent(address)}`);
@@ -122,6 +171,20 @@ export function brokerOnboardApply({ address, token, username }) {
 // status,settle_txid,shards}], totals:{realized,pending}}。fee=价值分成(1.6%×池), 非旧 maker_stake×pct。
 export function brokerEarningsByAddress(address) {
   return req('GET', `/api/kanet-broker/earnings-by-address/${encodeURIComponent(address)}`);
+}
+
+// T4 (2026-06-27) — node (委员) 收益查询链路 (read-only).
+// Step 1: find relay by kaspa address → relay_id.
+// Step 2: get oracle x-only-pubkey from relay → pk (64-char hex).
+// Step 3: get node income from pool endpoint → total + per_market.
+export function relayFind(address) {
+  return req('GET', `/api/relay/find?address=${encodeURIComponent(address)}`);
+}
+export function relayPubkey(relayId) {
+  return req('GET', `/api/relay/${encodeURIComponent(relayId)}/pubkey`);
+}
+export function nodeIncomeByPk(pk) {
+  return req('GET', `/api/node/income/${encodeURIComponent(pk)}`);
 }
 
 // ── owner-in-dev-channel bridge (Step3) — pure messaging, 0-custody (no key / no value) ──
@@ -139,4 +202,11 @@ export async function devCoordMessagesSince(sinceIso, limit = 50) {
   const all = r.json?.messages || [];
   const fresh = sinceIso ? all.filter(m => m.created_at && m.created_at > sinceIso) : all;
   return { ok: r.ok, messages: fresh };
+}
+
+// 用户反馈通道卡A 续卡(2026-07-12, console-side-design §4 硬条件②): owner-bot 独立轮询源用, 纯只读.
+// 光标语义同 devCoordMessagesSince — sinceIso 严格早于 events.created_at 才算新, ASC 序.
+export async function feedbackEscalatedSince(sinceIso, limit = 50) {
+  const r = await req('GET', `/api/feedback/escalated-since/${encodeURIComponent(sinceIso || '1970-01-01')}?limit=${encodeURIComponent(limit)}`);
+  return { ok: r.ok, events: r.json?.events || [] };
 }

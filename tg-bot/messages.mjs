@@ -1,166 +1,445 @@
 // TG bot user-facing text + flow builders. v1.3: builder voice, testnet/MIT, reactive-only.
 // Value/trust steps → the USER acts on-chain via Console/their relay. bot 0 持钥 / 0 execute (J1 S5).
-import { CONFIG } from './config.mjs';
+import { t } from './i18n.mjs';
+import { isDecidedWorldCupMarket } from './worldcup-teams.mjs';
 
 export const DISCLAIMER = 'testnet-only · MIT 开源 · 不运营主网 · 非投资建议';
 
-export function startMessage() {
-  // gate D onboarding tour (Bettor Q3: low-friction guided sequence). 无账户无许可 + 每步给下一命令.
-  // KANet-UI 2026-06-23 (Owner 真机发现 + Bettor 派修): /start 必列钱包命令 (原漏); custody 口径不可一刀切——
-  //   托管钱包 (/wallet) 节点持 key, 非托管 (/link) key 用户掌控 (Bettor 承重警告, 不可写"bot 不持 key"假称).
-  //   faucet 数量绝不硬编 (由 server env FAUCET_AMOUNT_KAS 定, Owner 可调), 故 /start 不写具体数, 领取时由 API 回真值。
+export function startMessage(lang = 'en') {
+  // §11 v2 (Owner 终裁 2026-06-27): 22行→6行精简. 详情移 /help. 首次用户+1行 /help 提示.
+  // custody 警告保留 1 行(NWT 承重 bar: 不可删/弱化). faucet 数量不硬编.
+  // Owner 2026-06-28: 首次用户加 /hot 指针(老用户嵌 5 热榜, 首次用户给指针兜底).
+  const text = [
+    t(lang, 'start_title'),
+    '',
+    t(lang, 'start_commands'),
+    t(lang, 'start_commands_extra'),
+    '',
+    t(lang, 'start_hot'),
+    '',
+    t(lang, 'start_custody_warn'),
+    t(lang, 'start_help'),
+  ].join('\n');
+  const langBtnKey = lang === 'en' ? 'start_lang_btn_zh' : 'start_lang_btn_en';
+  return { text, keyboard: { inline_keyboard: [[{ text: t(lang, langBtnKey), callback_data: 'lang:toggle' }]] } };
+}
+
+// 查漏补缺(2026-07-05 晚, Owner 重大纠正+精确重申): #18 那次把"下方链接膨胀"的精准问题, 办成了
+// 整页推倒重写——丢了🔥热榜区+⚽赛事卡区+commands行, 违反"继承优化不替换重写"铁律。Owner 明确
+// 要求"精确恢复原版, 不加不减": 本函数逐行对照 90ca865e 之前的原版恢复, 不保留 #18 新增的 3 个
+// 快捷按钮(那是额外添加, 不在"恢复"范围内)。唯一该动的地方是 Owner 指出的真实膨胀点——热榜条数
+// 曾经悄悄从设计值 5 涨到 8, 这个由 bot.mjs 调用处的 availableMarkets(5) 参数收敛, 本函数不变。
+// §11 v2 (Owner 终裁 2026-06-27) 历史: 老用户极简, 无 /help 提示行. custody 双守行永在(NWT 承重, 不可删)。
+// Owner 2026-06-28: 老用户顶部嵌紧凑热榜(标题+池+人数+深链按钮) + /hot 兜底. trending 传 null→无块.
+// Owner 2026-06-28 UX重构: 加赛事聚合卡区 (sportsGroups != null → ⚽ 赛事区), 热榜/新盘双区.
+export function startMessageLinked(addr, custodial = null, trendingMarkets = null, botUsername = null, sportsGroups = null, lang = 'en', wcFallbackCandidates = null) {
+  const shortAddr = addr.length > 20 ? addr.slice(0, 17) + '…' : addr;
+  const custLabel = custodial === true
+    ? t(lang, 'start_linked_custodial_label')
+    : custodial === false
+      ? t(lang, 'start_linked_non_custodial_label')
+      : t(lang, 'start_linked_mixed_label');
+  const custWarn = custodial === false
+    ? t(lang, 'start_linked_non_custodial_warn')
+    : t(lang, 'start_linked_custody_warn');
+  const cmdLine = t(lang, 'start_linked_commands');
+  const lines = [
+    t(lang, 'start_linked_title'),
+    `📍 ${shortAddr}  ${custLabel}`,
+    '',
+    cmdLine,
+    '',
+    custWarn,
+  ];
+  const buttons = [];
+
+  // 🔥 热榜区 (bettors>=3 真实热度)
+  if (trendingMarkets && trendingMarkets.length > 0) {
+    const block = _compactTrendingBlock(trendingMarkets, botUsername, lang);
+    lines.splice(2, 0, ...block.lines);  // insert after header, before commands
+    buttons.push(...block.buttons);
+  } else if (trendingMarkets !== null) {
+    lines.splice(2, 0, '', t(lang, 'start_trending_empty'), '');
+  }
+
+  // ⚽ 赛事聚合卡区 (新盘/冷启动, 信任卡, 无 bettor 门)
+  let sportsBlock = sportsGroups && sportsGroups.length > 0 ? sportsCardBlock(sportsGroups, botUsername, lang) : null;
+  // KANet-UI 2026-07-19 (#19+① 合并设计, Bettor/NWT 审GREEN): card_groups 聚合结构性为空时
+  // (见 worldcup-teams.mjs 头注释——建市时批量漏打 card_group_id 标签), 挑世界杯盘兜底, 并排除
+  // 已数学锁定 NO 的淘汰队夺冠/晋级盘, 避免决赛等重要盘在首页彻底不可见。
+  // 候选池优先用 wcFallbackCandidates(bot.mjs 在 sports 为空时才额外拉的更宽可押市场集,
+  // 见 bot.mjs 注释)——不能只从 trendingMarkets 里挑, 那份按 pool+recency 排序且固定
+  // limit 5(Owner 2026-07-05 钦定不能动), 小池新盘(比如决赛这种刚开的盘)很容易挤不进前 5,
+  // 兜底就变成空转、看似修好实际没解决问题(2026-07-19 功能自测抓到, 修正后才接入)。
+  // wcFallbackCandidates 为 null(旧调用点/请求失败降级)时退回 trendingMarkets, 优雅降级。
+  const wcPool = wcFallbackCandidates || trendingMarkets;
+  if (!sportsBlock && wcPool && wcPool.length > 0) {
+    const wcCandidates = wcPool.filter((m) => {
+      const spec = String(m.resolution_rule_spec || m.title || '');
+      const lower = spec.toLowerCase();
+      const isWC = lower.includes('fifa') || lower.includes('world cup') || spec.includes('世界杯');
+      return isWC && !isDecidedWorldCupMarket(m);
+    }).slice(0, 5);
+    sportsBlock = _worldCupFallbackBlock(wcCandidates, botUsername, lang);
+  }
+  if (sportsBlock) {
+    // 在 commands 行前插赛事区
+    const insertAt = lines.indexOf(cmdLine);
+    const at = insertAt >= 0 ? insertAt : lines.length - 2;
+    lines.splice(at, 0, ...sportsBlock.lines);
+    buttons.push(...sportsBlock.buttons);
+  }
+
+  const langBtnKey = lang === 'en' ? 'start_lang_btn_zh' : 'start_lang_btn_en';
+  buttons.push([{ text: t(lang, langBtnKey), callback_data: 'lang:toggle' }]);
+  return { text: lines.join('\n'), keyboard: { inline_keyboard: buttons } };
+}
+
+// Compact 5-market block for /start embed: title+pool+bettors per market, deeplink buttons.
+function _compactTrendingBlock(markets, botUsername, lang = 'en') {
+  const BOT = botUsername || 'KANET_Broker_bot';
+  function parseTitle(raw) { try { const p = JSON.parse(raw); return p.title || raw; } catch { return raw; } }
+  // §11 v3: extract per-leg human label from JSON title ("Match — Brazil to win" → "Brazil to win")
+  function legButtonLabel(raw, legKey) {
+    try {
+      const p = JSON.parse(raw);
+      if (p.title) { const parts = p.title.split(' — '); if (parts.length > 1) return parts.slice(1).join(' — '); }
+    } catch {}
+    if (!legKey) return '';
+    if (legKey.startsWith('winner_')) return legKey.slice(7) + (lang === 'zh' ? ' 赢' : ' Win');
+    if (legKey.startsWith('spread_')) return legKey.split('_').slice(1).join(' ');
+    if (legKey.startsWith('total_o_')) return (lang === 'zh' ? '大球 O' : 'Over O') + legKey.slice(8);
+    if (legKey.startsWith('total_u_')) return (lang === 'zh' ? '小球 U' : 'Under U') + legKey.slice(8);
+    return legKey;
+  }
+  // Show implied probability % only when ≥1 real bettor and probability is 5–95% (avoids misleading extremes)
+  function probSuffix(m) {
+    if (!(m.bettor_count > 0) || m.yes_implied_prob == null) return '';
+    const pct = Math.round(m.yes_implied_prob * 100);
+    return (pct >= 5 && pct <= 95) ? ` ${pct}%` : '';
+  }
+  const lines = ['', t(lang, 'trending_header')];
+  const buttons = [];
+  // Deduplicate card_groups: show once per group
+  const seen = new Set();
+  let idx = 1;
+  for (const m of markets) {
+    if (m.card_group_id) {
+      if (seen.has(m.card_group_id)) {
+        // Add this leg's button (sibling leg)
+        const label = legButtonLabel(m.title || '', m.leg_key);
+        buttons.push([{ text: `🎯 ${label}${probSuffix(m)}`, callback_data: 'bet:market:' + m.id }]);
+        continue;
+      }
+      seen.add(m.card_group_id);
+      // Count siblings in this group
+      const groupSize = markets.filter(x => x.card_group_id === m.card_group_id).length;
+      const totalKas = markets.filter(x => x.card_group_id === m.card_group_id)
+        .reduce((s, x) => s + (x.total_pool_kas || 0), 0);
+      const firstTitle = parseTitle(m.title || '');
+      const matchName = firstTitle.includes(' — ') ? firstTitle.split(' — ')[0].trim() : firstTitle.slice(0, 35);
+      const label = legButtonLabel(m.title || '', m.leg_key);
+      buttons.push([{ text: `🎯 ${label}${probSuffix(m)}`, callback_data: 'bet:market:' + m.id }]);
+    } else {
+      const title = parseTitle(m.title || '');
+      const short = title.length > 22 ? title.slice(0, 20) + '…' : title;
+      buttons.push([{ text: `🎯 ${short}${probSuffix(m)}`, callback_data: 'bet:market:' + m.id }]);
+    }
+    idx++;
+  }
+  lines.push(t(lang, 'trending_more'));
+  lines.push('');
+  return { lines, buttons };
+}
+
+// KANet-UI 2026-07-19 (#19+① 合并, Bettor/NWT 审GREEN): card_groups 为空时的兜底渲染——纯
+// flat market 列表(非 sportsCardBlock 期待的 grouped legs 结构), 复用已有的 sports_header/
+// sports_subheader 文案位, 不新造措辞、不承诺"聚合卡"体验。只读 markets, 无副作用, 不发新请求。
+function _worldCupFallbackBlock(markets, botUsername, lang = 'en') {
+  if (!markets || markets.length === 0) return null;
+  function parseTitle(raw) { try { const p = JSON.parse(raw); return p.event_title || p.title || raw; } catch { return raw; } }
+  function probSuffix(m) {
+    if (!(m.bettor_count > 0) || m.yes_implied_prob == null) return '';
+    const pct = Math.round(m.yes_implied_prob * 100);
+    return (pct >= 5 && pct <= 95) ? ` ${pct}%` : '';
+  }
+  const lines = ['', t(lang, 'sports_header'), t(lang, 'sports_subheader')];
+  const buttons = [];
+  for (const m of markets) {
+    const title = parseTitle(m.resolution_rule_spec || m.title || '');
+    const short = title.length > 30 ? title.slice(0, 28) + '…' : title;
+    buttons.push([{ text: `🎯 ${short}${probSuffix(m)}`, callback_data: 'bet:market:' + m.id }]);
+  }
+  lines.push('');
+  return { lines, buttons };
+}
+
+// KANet-UI 2026-06-28 (Owner 钦定 broker 收益 DM): 单笔 fee 到账 DM 文案.
+// ev = { fee_sompi, market_title, market_id, settle_txid } (broker_fee_landed payload).
+export function brokerFeeDmText(ev, lang = 'en') {
+  const feeKas = ((ev.fee_sompi || 0) / 1e8).toFixed(4);
+  const title = String(ev.market_title || ev.market_id || '').slice(0, 40);
   return [
-    '👋 KANet — 用 Kaspa 信任链把 AI agent 接到任何市场。无账户、无许可。',
+    t(lang, 'fee_dm_title'),
+    t(lang, 'fee_dm_body', { title }),
+    t(lang, 'fee_dm_amount', { kas: feeKas }),
+    t(lang, 'fee_dm_link'),
     '',
-    '👉 三步上手:',
-    '',
-    '① 先有个钱包 — 二选一:',
-    '   🅰 /wallet — 节点替你生成，零门槛（⚠ 托管·节点持 key，仅试玩）',
-    '   🅱 /link <你的 kaspatest 地址> — 绑你自己的钱包（非托管·key 只你掌控）',
-    '② /faucet — 领测试 KAS（约 10 秒到账）',
-    '③ /bet — 押注预测市场（链上锁定，多评判结算），再 /mybets 看赢/输/退款',
-    '',
-    '更多:',
-    '· /balance · /receive · /send <地址> <金额> — 钱包收发',
-    '· /swap — 兑换 KAS ↔ USDT（经 broker，链上结算）',
-    '· /discover — 浏览开放挂单 / 预测市场',
-    '· /broker — 想做撮合者（broker）赚佣金？怎么参与 + 价值分成',
-    '· /help — 全部命令',
-    '',
-    '⚠ /wallet 托管钱包由【节点持 key】，仅供测试网试玩；',
-    '   真钱请务必换用你【自己生成、助记词从未发给任何人/服务】的非托管钱包（/link 绑定）。',
-    '想自己 build？KANet 开源（MIT），fork 一个角色（broker / oracle / prediction / exchange）跑你自己的节点。',
-    DISCLAIMER,
+    t(lang, 'fee_dm_testnet_note'),
   ].join('\n');
 }
 
-// KANet-UI 2026-06-22 (Owner 实测派修): /start 对【已 /link 的用户】不重复三步引导, 改显其绑定地址 +
-// 直接给下一步 (Owner 钦定 'personalize-on-link, 显地址 + 最多一个改绑'). 未绑用户仍走 startMessage()。
-// KANet-UI 2026-06-23 (Bettor 派修·承重 custody 口径): custody 参数 = true(托管/wallet) / false(非托管/link) /
-//   null(查不到 → 不假称任一方, 显两类并存警告)。绝不一刀切写"bot 不持 key"(对托管钱包是假的, 误导用户拿真钱)。
-export function startMessageLinked(addr, custodial = null) {
-  const lines = [
-    '👋 KANet — 你已就绪。',
-    '',
-    `📍 你的地址: ${addr}`,
-  ];
-  if (custodial === true) lines.push('   (测试网托管钱包·节点持 key — 仅供试玩)');
-  else if (custodial === false) lines.push('   (你自己的非托管地址·key 只你掌控)');
-  lines.push(
-    '',
-    '👉 下一步:',
-    '· /bet — 押注预测市场（链上锁定，多评判结算），/mybets 看赢/输/退款',
-    '· /faucet — 领测试 KAS',
-    '· /swap — 兑换 KAS ↔ USDT（经 broker，链上结算）',
-    '· /broker — 想做撮合者赚佣金？申请当 broker + 价值分成',
-    '· /discover · /help',
-    '',
-    '👛 钱包（所有命令任何时候都可用）:',
-    '· /wallet — 查看你的钱包地址 + 余额',
-    '· /balance 查余额 · /receive 收款 · /send <地址> <金额> 转账',
-    '· /link <kaspatest地址> — 改绑成你【自己掌控】的非托管地址（换钱包 / 退出托管用）',
-  );
-  if (custodial === true) {
-    lines.push('');
-    lines.push('⚠ 你用的是测试网【托管钱包】：私钥由节点持有，方便零门槛试玩。');
-    lines.push('   • 助记词只在生成时显示一次——丢了也【不影响用钱】(节点持 key 仍能 /send /bet)，只是无法导出到别的钱包。');
-    lines.push('   • 想完全自主掌控：用任意 Kaspa 钱包生成你自己的地址 → /link 绑定 → /send 把币转过去（不需旧助记词）。');
-    lines.push('   • 真钱请务必换用你【自己生成、助记词从未外泄】的非托管钱包。');
-  } else if (custodial === false) {
-    lines.push('');
-    lines.push('⚠ 这个地址由你自己链上掌控，bot 不持它的 key——每笔付款都你从自己钱包链上发起。');
-    lines.push('   (想零门槛试玩也可 /wallet 生成测试网托管钱包，但托管钱包节点持 key，仅供试玩。)');
-  } else {
-    lines.push('');
-    lines.push('⚠ 若你用 /wallet 托管钱包：私钥由节点持有，仅供测试网试玩；');
-    lines.push('   若你 /link 自己地址：key 只你掌控。真钱请务必用你自己助记词从未外泄的非托管钱包。');
+// KANet-UI 2026-06-28 (Owner 钦定首页赛事聚合卡): 赛事卡区文本+按钮.
+// groups = card_groups endpoint 返 [{card_group_id, event_title, home_team, away_team, legs:[{id,leg_key,kind,label,total_pool_kas,bettor_count,yes_implied_prob}]}]
+export function sportsCardBlock(groups, botUsername, lang = 'en') {
+  if (!groups || groups.length === 0) return null;
+  const BOT = botUsername || 'KANET_Broker_bot';
+  const lines = ['', t(lang, 'sports_header'), t(lang, 'sports_subheader')];
+  const buttons = [];
+  for (const g of groups) {
+    const teamLine = (g.home_team && g.away_team)
+      ? `${g.home_team} vs ${g.away_team}`
+      : (g.event_title || g.card_group_id || '').slice(0, 30);
+    const totalPool = (g.total_pool_kas || 0).toFixed(0);
+    const totalBettors = g.total_bettor_count || 0;
+    lines.push(`🏟 ${teamLine} · 💰${totalPool}KAS${totalBettors > 0 ? ` · 👥${totalBettors}${t(lang, 'people_unit')}` : ` · ${t(lang, 'sports_new')}` }`);
+    const rowBtns = [];
+    for (const leg of (g.legs || []).slice(0, 3)) {
+      const label = _legLabel(leg, lang);
+      const prob = _legProb(leg);
+      rowBtns.push({ text: `${label}${prob}`, callback_data: 'bet:market:' + leg.id });
+    }
+    if (rowBtns.length) buttons.push(rowBtns);
   }
-  lines.push(DISCLAIMER);
-  return lines.join('\n');
+  lines.push('');
+  return { lines, buttons };
+}
+
+function _legLabel(leg, lang = 'en') {
+  const lk = String(leg.leg_key || '');
+  if (lk.startsWith('winner_')) {
+    const team = lk.slice(7);
+    if (lang === 'zh') {
+      return team === 'home' ? '主队赢' : team === 'away' ? '客队赢' : team === 'draw' ? '平局' : team + ' 赢';
+    }
+    return team === 'home' ? 'Home Win' : team === 'away' ? 'Away Win' : team === 'draw' ? 'Draw' : team + ' Win';
+  }
+  if (lk.startsWith('total_o_')) return (lang === 'zh' ? '大球 O' : 'Over O') + lk.slice(8);
+  if (lk.startsWith('total_u_')) return (lang === 'zh' ? '小球 U' : 'Under U') + lk.slice(8);
+  if (lk.startsWith('spread_')) return lang === 'zh' ? '让球' : 'Spread';
+  return (leg.label || lk).slice(0, 10);
+}
+function _legProb(leg) {
+  if (!(leg.bettor_count > 0) || leg.yes_implied_prob == null) return '';
+  const pct = Math.round(leg.yes_implied_prob * 100);
+  return (pct >= 5 && pct <= 95) ? ` ${pct}%` : '';
 }
 
 // KANet-UI 2026-06-22 (Owner 钦定 broker 收益统计 DM 显): 格式化 address-keyed 收益。
 // data = /api/kanet-broker/earnings-by-address 返 {address,realized,pending,refunded,by_market}。
-// 链上证: 每已结算单挂 settle_txid explorer 链接。fee=价值分成(后端已用 phase2 实落值)。
-export function brokerEarnings(data) {
-  const explorer = (CONFIG.network === 'mainnet') ? 'https://explorer.kaspa.org' : 'https://explorer-tn12.kaspa.org';
+// 链上证: 每已结算单挂 settle_txid 纯文本凭证。fee=价值分成(后端已用 phase2 实落值)。
+// mybets v1.2 §3 (2026-07-12): explorer-tn12.kaspa.org DNS 不存在(Owner 实测 ENOTFOUND), TN12 无公网
+// explorer, 此前一直是死链——降级为 txid 纯文本(可复制留存的原始凭证, 非"点开即验").
+// T4 (2026-06-27): nodeIncome = /api/node/income/:pk 返回值 (可选). 非 node 用户传 null 静默略过.
+export function brokerEarnings(data, nodeIncome = null, lang = 'en') {
   const r = data.realized || {}, p = data.pending || {}, rf = data.refunded || {};
   const by = data.by_market || [];
   if (!by.length) {
     return [
-      '💰 你的 broker 收益',
+      t(lang, 'earnings_title'),
       `📍 ${data.address || ''}`,
       '',
-      '还没有经手任何市场。当有市场用你的地址当 broker + 结算后, 1.6% 佣金会落你地址, 这里就能看到。',
-      '想接市场? /broker 申请 / 看状态。',
+      t(lang, 'earnings_no_markets'),
+      t(lang, 'earnings_no_markets_apply'),
+      '',
+      t(lang, 'earnings_testnet_note'),
     ].join('\n');
   }
   const lines = [
-    '💰 你的 broker 收益',
+    t(lang, 'earnings_title'),
     `📍 ${data.address || ''}`,
     '',
-    `✅ 已实现: ${r.pool_kas || '0'} KAS (${r.n_markets || 0} 单已结算)`,
-    `⏳ 待结算: ${p.pool_kas || '0'} KAS (${p.n_markets || 0} 单进行中)`,
+    t(lang, 'earnings_realized', { kas: r.pool_kas || '0', n: r.n_markets || 0 }),
+    t(lang, 'earnings_pending', { kas: p.pool_kas || '0', n: p.n_markets || 0 }),
   ];
-  if ((rf.n_markets || 0) > 0) lines.push(`↩ 已退款: ${rf.pool_kas || '0'} KAS (${rf.n_markets} 单 — 市场退款, 未赚到)`);
-  lines.push('', '经手市场 (最近):');
+  if ((rf.n_markets || 0) > 0) lines.push(t(lang, 'earnings_refunded', { kas: rf.pool_kas || '0', n: rf.n_markets }));
+  lines.push('', t(lang, 'earnings_recent'));
   const icon = (s) => s === 'settled' ? '✅' : (s === 'refunded' ? '↩' : '⏳');
   for (const m of by.slice(0, 10)) {
     const id = String(m.id || '').slice(-12);
     let line = `${icon(m.status)} …${id}  ${m.fee_kas} KAS`;
-    if (m.settle_txid) line += `  ${explorer}/txs/${m.settle_txid}`;
+    if (m.settle_txid) line += `  TX: ${m.settle_txid}`;
     lines.push(line);
   }
-  if (by.length > 10) lines.push(`… 余 ${by.length - 10} 单 (在 web broker-home 看全部)`);
-  lines.push('', `共经手 ${by.length} 个市场 · 每笔分润落你地址, 链上可验。`);
+  if (by.length > 10) lines.push(t(lang, 'earnings_more', { n: by.length - 10 }));
+  lines.push('', t(lang, 'earnings_total', { n: by.length }));
+  // T4: 附加 node 委员收益 (若该地址是本机 relay)
+  if (nodeIncome && nodeIncome.total_settled_markets > 0) {
+    lines.push('', t(lang, 'earnings_node_title'));
+    lines.push(t(lang, 'earnings_node_total', { kas: nodeIncome.total_node_income_kas?.toFixed(8) || '0', n: nodeIncome.total_settled_markets }));
+    if ((nodeIncome.pending_tx_index_count || 0) > 0)
+      lines.push(t(lang, 'earnings_node_pending', { n: nodeIncome.pending_tx_index_count }));
+    lines.push(t(lang, 'earnings_node_note'));
+  }
+  lines.push('', t(lang, 'earnings_testnet_note'));
   return lines.join('\n');
+}
+
+// /hot 热门市场 (Owner 热需求 2026-06-27): T5 trending top-N 格式化.
+// markets = trending[]. 返 {text, keyboard} — keyboard = CopyText 深链按钮.
+// 支持 card_group_id 分组: 同一 card_group_id 的盘组成一块显示(非散盘).
+export function hotMarkets(markets, botUsername, lang = 'en') {
+  if (!markets || !markets.length) {
+    return { text: t(lang, 'hot_empty'), keyboard: null };
+  }
+  function parseTitle(raw) {
+    try { const p = JSON.parse(raw); return p.title || raw; } catch { return raw; }
+  }
+  function fmtDl(deadline) {
+    if (!deadline) return '';
+    const h = Math.round((Number(deadline) * 1000 - Date.now()) / 3600000);
+    return h > 0 ? t(lang, 'deadline_hours', { h }) : t(lang, 'deadline_expired');
+  }
+  // §11 v3: extract per-leg label from JSON title, fallback to legKey parsing
+  function legLabel(raw, legKey) {
+    try {
+      const p = JSON.parse(raw);
+      if (p.title) { const parts = p.title.split(' — '); if (parts.length > 1) return parts.slice(1).join(' — '); }
+    } catch {}
+    if (!legKey) return '';
+    if (legKey.startsWith('winner_')) return legKey.slice(7) + (lang === 'zh' ? ' 赢' : ' Win');
+    if (legKey.startsWith('spread_')) return legKey.split('_').slice(1).join(' ');
+    if (legKey.startsWith('total_o_')) return (lang === 'zh' ? '大球 O' : 'Over O') + legKey.slice(8);
+    if (legKey.startsWith('total_u_')) return (lang === 'zh' ? '小球 U' : 'Under U') + legKey.slice(8);
+    return legKey;
+  }
+  // Show implied probability % only when ≥1 real bettor and probability is 5–95%
+  function probSuffix(m) {
+    if (!(m.bettor_count > 0) || m.yes_implied_prob == null) return '';
+    const pct = Math.round(m.yes_implied_prob * 100);
+    return (pct >= 5 && pct <= 95) ? ` ${pct}%` : '';
+  }
+  const CAT = { sports: '🏆', politics: '🗳', other: '🌐', test: '🧪' };
+  const BOT = botUsername || 'KANET_Broker_bot';
+  // Separate card-group markets from singles (insertion-order preserved)
+  const groupsMap = new Map();
+  const singles = [];
+  for (const m of markets) {
+    if (m.card_group_id) {
+      if (!groupsMap.has(m.card_group_id)) groupsMap.set(m.card_group_id, []);
+      groupsMap.get(m.card_group_id).push(m);
+    } else {
+      singles.push(m);
+    }
+  }
+  const lines = [t(lang, 'hot_title', { n: markets.length }), ''];
+  const buttons = [];
+  let idx = 1;
+  // Card groups
+  for (const [, gMarkets] of groupsMap) {
+    const firstTitle = parseTitle(gMarkets[0].title || '');
+    const matchHeader = firstTitle.includes(' — ') ? firstTitle.split(' — ')[0].trim() : firstTitle;
+    const totalKas = gMarkets.reduce((s, m) => s + (m.total_pool_kas || 0), 0);
+    const maxBettors = Math.max(...gMarkets.map(m => m.bettor_count || 0));
+    const dl = fmtDl(gMarkets[0].deadline);
+    lines.push(`${idx}. ⚽ ${matchHeader} · ${gMarkets.length} ${t(lang, 'markets_unit')}`);
+    lines.push(`   💰${totalKas.toFixed(0)} KAS · 👥${maxBettors}${t(lang, 'people_unit')}${dl ? ' · ' + dl : ''}`);
+    // §11 信任卡 (J1 定版 2026-06-28): 全真原语·不超卖·禁写「自动结算/无法作弊/去信任」(Track B 未完成)
+    lines.push(`   ${t(lang, 'hot_trust_card')}`);
+    for (const m of gMarkets) {
+      const label = legLabel(m.title || '', m.leg_key);
+      buttons.push([{ text: `🎯 ${label}${probSuffix(m)}`, callback_data: 'bet:market:' + m.id }]);
+    }
+    lines.push('');
+    idx++;
+  }
+  // Singles
+  for (const m of singles) {
+    const title = parseTitle(m.title);
+    const short = title.length > 40 ? title.slice(0, 38) + '…' : title;
+    const cat = CAT[m.category] || '🌐';
+    const prob = probSuffix(m);
+    lines.push(`${idx}. ${cat} ${short}`);
+    lines.push(`   💰${(m.total_pool_kas || 0).toFixed(0)} KAS · 👥${m.bettor_count || 0}${t(lang, 'people_unit')}${prob ? ' · YES' + prob : ''}`);
+    buttons.push([{ text: `🎯 押 #${idx} ${short.slice(0, 20)}${prob}`, callback_data: 'bet:market:' + m.id }]);
+    lines.push('');
+    idx++;
+  }
+  lines.push(t(lang, 'hot_footer'));
+  return { text: lines.join('\n'), keyboard: { inline_keyboard: buttons } };
+}
+
+// 世界杯冠军长线盘 (Bettor 2026-07-04, 世界杯玩法UI·数据无关壳): "Will X win the 2026 FIFA World
+// Cup?" futures 列表。壳先搭好(J2 走 create-v07 安全管线建新盘前, count=0 走空态文案不报错), 新盘
+// 建好后本函数直接就能渲染(靠 console-api.mjs championMarkets() 的 ?tag=champions 过滤, 该过滤已
+// 排除 commingled 历史脏数据·见 pool.js d395897d)。
+export function championMarkets(markets, lang = 'en') {
+  if (!markets || !markets.length) {
+    return { text: t(lang, 'champions_empty'), keyboard: null };
+  }
+  function extractTeam(raw) {
+    try {
+      const p = JSON.parse(raw);
+      const m = /^will (.+?) win the 2026 fifa world cup\??$/i.exec((p.title || '').trim());
+      return m ? m[1] : (p.title || raw);
+    } catch { return raw; }
+  }
+  const sorted = [...markets].sort((a, b) => (b.total_pool_kas || 0) - (a.total_pool_kas || 0));
+  const lines = [t(lang, 'champions_title', { n: sorted.length }), ''];
+  const buttons = [];
+  sorted.forEach((m, i) => {
+    const team = extractTeam(m.title || '');
+    const pct = m.yes_implied_prob != null ? ` · ${Math.round(m.yes_implied_prob * 100)}%` : '';
+    lines.push(`${i + 1}. 🏆 ${team}  💰${(m.total_pool_kas || 0).toFixed(0)} KAS${pct}`);
+    buttons.push([{ text: `🏆 ${team}${pct}`, callback_data: 'bet:market:' + m.id }]);
+  });
+  lines.push('', t(lang, 'champions_footer'));
+  return { text: lines.join('\n'), keyboard: { inline_keyboard: buttons } };
 }
 
 // 兑换 flow — show broker X's KAS receiving address; the USER pays on-chain from their own wallet.
 // bot 0 execute: 只显地址 + 引导 + deep-link。broker-intake-watcher 在链上检测到付款后继续。
-export function swapFlow(broker) {
+export function swapFlow(broker, lang = 'en', network = 'testnet-12') {
   const name = broker?.name || 'broker';
-  const addr = broker?.address || '(broker 未配置 — Owner 在 Console 设置页选)';
+  // Testnet gate: hide send-KAS steps entirely to prevent accidental fund loss.
+  // Feature is implemented and tested; exchange only runs on mainnet.
+  if (network !== 'mainnet') {
+    return [t(lang, 'swap_title', { name }), '', t(lang, 'swap_testnet_note')].join('\n');
+  }
+  const addr = broker?.address || t(lang, 'swap_broker_not_configured');
   return [
-    `💱 兑换 KAS ↔ USDT — 经 broker ${name}`,
+    t(lang, 'swap_title', { name }),
     '',
-    '1) 从你自己的钱包,把要兑换的 KAS 链上转到 broker 收款地址:',
+    t(lang, 'swap_step1'),
     `   ${addr}`,
-    '2) broker 会问你 USDT 收哪条链 + 地址(回复 "用 bnb 0x..." 之类),然后链上回款。',
+    t(lang, 'swap_step2'),
     '',
-    '⚠ 钱全程你自己链上掌控:你从自己地址发起付款,bot 不经手、碰不到你的钱。',
+    t(lang, 'swap_warn'),
   ].join('\n');
 }
 
-// 押注 flow — deep-link 到预测市场;用户自己链上锁仓 + 签名,bot 0 execute。
-export function betFlow(broker) {
-  const name = broker?.name || 'broker';
-  return [
-    `🎲 押注预测市场 — 经 broker ${name}`,
-    '',
-    '在 Console 选市场押注:你自己链上锁定,5 个 oracle 投票结算,全程链上可审计。',
-    'broker 只撮合/引导,收协议内置的 broker 佣金(落 broker 链上地址)。',
-    '',
-    '⚠ 你自己链上锁定 + 签名,bot 不碰你的钱。',
-    '直接 /bet 开始押注 (全 Telegram 菜单交互, 不跳网页)。',
-  ].join('\n');
-}
-
-export function notifyLine(ev) {
+export function notifyLine(ev, lang = 'en') {
   const tx = (ev.txid || '').slice(0, 12);
-  const t = ev.event_type || 'event';
+  const evType = ev.event_type || 'event';
   // KANet-UI 线B P1 (Bettor v2 ③): settle/refund 事件友好化 — 用户押注有结果时给可读+可执行通知,
   // 指向 /mybets 看赢/输/退 + 金额(原 generic '🔔 event tx' 用户看不懂)。金额/赢输详情在 /mybets。
-  if (/settle|payout|winner|distribut/i.test(t)) {
-    return `🎉 你押注的预测市场结算了! 押中的话 KAS 已到你 /link 地址。\ntx ${tx}… — 回 /mybets 看你赢了多少。`;
+  if (/settle|payout|winner|distribut/i.test(evType)) {
+    return t(lang, 'notify_settle', { tx });
   }
-  if (/refund/i.test(t)) {
-    return `↩ 你押注的市场退款了 (裁决源不可得 / 仲裁人弃权, 押金退回你地址)。\ntx ${tx}… — /mybets 看详情。`;
+  if (/refund/i.test(evType)) {
+    return t(lang, 'notify_refund', { tx });
   }
-  if (t === 'tx') {
-    return `💰 你的地址有链上入账 (可能是押注结算赢款或退款)。\ntx ${tx}… — /mybets 看你的押注结果。`;
+  if (evType === 'broker_fee_landed') {
+    let meta = {};
+    try { meta = typeof ev.payload === 'string' ? JSON.parse(ev.payload) : (ev.payload || {}); } catch {}
+    const kas = meta.fee_sompi ? (meta.fee_sompi / 1e8).toFixed(4) : '?';
+    const title = meta.market_title || meta.market_id || '';
+    return t(lang, 'notify_broker_fee', { kas, title, tx });
   }
-  return `🔔 链上动态: ${t} · tx ${tx}… · ${ev.observed_at || ''}`;
+  if (evType === 'tx') {
+    return t(lang, 'notify_tx', { tx });
+  }
+  return t(lang, 'notify_generic', { type: evType, tx, time: ev.observed_at || '' });
 }
 
 // 成为撮合者 (broker / gateway) — Owner UI gap (2026-06-22): 公开面缺 user 级 'become broker' 入口.
@@ -171,109 +450,124 @@ export function notifyLine(ev) {
 // KANet-UI 2026-06-22 (Owner 实测派修 + onboarding 闭环已落): /broker 从 INFO-ONLY 升级为真接通自助
 // 申请流 (地址制 onboarding 已落 + Owner trust 审批门 = auth 硬化已满足, 公开自助安全)。opts:
 //   { addr: 用户 /link 地址 (无则提示先 /link), status: onboard/status 返回 (onboarded/status/trust_level) }
-export function brokerRole(opts = {}) {
-  const { addr, status } = opts;
+export function brokerRole(opts = {}, lang = 'en') {
+  const { addr, status, earnings } = opts;
   const lines = [
-    '🤝 成为撮合者 (broker)',
+    t(lang, 'broker_role_title'),
     '',
-    'broker = 把预测市场 / 兑换撮合给用户, 按协议内置佣金收费(落你自己的链上地址):',
-    '· 价值分成(协议常量): 赢家 97% / oracle 1% / broker 1.6% / introducer 0.2% / node 0.2%',
-    '· broker 不碰用户资金 —— 用户全程自己链上锁仓+付款, 你只撮合+收佣 (佣金进你地址)',
+    t(lang, 'broker_role_desc1'),
+    t(lang, 'broker_role_fees'),
+    t(lang, 'broker_role_no_custody'),
     '',
   ];
   if (!addr) {
-    lines.push('👉 申请当 broker (3 步):');
-    lines.push('① 先 /link <你的 kaspatest 地址> — 这地址就是你的 broker 收款地址(佣金落这)');
-    lines.push('② 去 @BotFather /newbot 拿一个你自己的 bot token');
-    lines.push('③ /broker_apply <你的 bot token> — 提交申请');
+    lines.push(t(lang, 'broker_role_apply_steps'));
+    lines.push(t(lang, 'broker_role_step1_noaddr'));
+    lines.push(t(lang, 'broker_role_step2'));
+    lines.push(t(lang, 'broker_role_step3'));
   } else if (status?.onboarded && status.status === 'approved') {
-    lines.push(`✅ 你已是 approved broker (地址 ${addr})`);
-    lines.push('你的 bot 已(或即将由 KANet 托管)拉起, 对外呈现全部市场, 带量成交的佣金落你地址。');
-    lines.push('· /earnings — 看你的 broker 收益 (经手单/已实现/待结算, 链上可验)');
-    lines.push('· 改 bot token: /broker_apply <新 token>');
+    lines.push(t(lang, 'broker_role_approved', { addr }));
+    lines.push(t(lang, 'broker_role_approved_bot'));
+    // T2 (2026-06-27): inline earnings summary for approved brokers.
+    if (earnings) {
+      const r = earnings.realized || {}, p = earnings.pending || {};
+      lines.push(t(lang, 'broker_role_earnings', { realized: r.pool_kas || '0', n_realized: r.n_markets || 0, pending: p.pool_kas || '0', n_pending: p.n_markets || 0 }));
+      lines.push(t(lang, 'broker_role_earnings_link'));
+    } else {
+      lines.push(t(lang, 'broker_role_earnings_no_data'));
+    }
+    lines.push(t(lang, 'broker_role_change_token'));
   } else if (status?.onboarded) {
-    lines.push(`⏳ 你的 broker 申请已提交 (地址 ${addr}), 待 Owner 审批。`);
-    lines.push('审批通过后你的 bot 会被 KANet 自动托管拉起。换 token: /broker_apply <新 token>');
+    lines.push(t(lang, 'broker_role_pending', { addr }));
+    lines.push(t(lang, 'broker_role_pending_note'));
   } else {
-    lines.push(`👉 申请当 broker (你已绑地址 ${addr}):`);
-    lines.push('① 去 @BotFather /newbot 拿一个你自己的 bot token');
-    lines.push('② /broker_apply <你的 bot token> — 提交申请 (待 Owner 审批后激活)');
+    lines.push(t(lang, 'broker_role_apply_has_addr', { addr }));
+    lines.push(t(lang, 'broker_role_apply_step1_hasaddr'));
+    lines.push(t(lang, 'broker_role_apply_step2_hasaddr'));
   }
   lines.push('');
-  lines.push('⚠ 申请提交后需 Owner 审批才激活(防佣金滥用/女巫)。你的 bot token 加密存储、绝不外显。');
-  lines.push(DISCLAIMER);
+  lines.push(t(lang, 'broker_role_warn'));
+  lines.push(t(lang, 'help_disclaimer'));
   return lines.join('\n');
 }
 
 // KANet-UI 2026-06-23 (Owner 钦定 托管钱包): 生成时的醒目警告 + 助记词 display-once (Bettor 钦定文案模板,
 // 含③助记词过 Telegram 泄漏 + ④托管=TG账号安全 + 真钱用自己钱包口径; 不能埋)。
-export function walletGenerated(address, mnemonic) {
+export function walletGenerated(address, mnemonic, lang = 'en') {
   return [
-    '✅ 已为你生成测试网钱包:',
-    `📍 地址: ${address}`,
+    t(lang, 'wallet_gen_title'),
+    t(lang, 'wallet_gen_addr', { addr: address }),
     '',
-    '🔑 助记词 (12 词, 现在就备份, 只显示这一次):',
+    t(lang, 'wallet_gen_mnemonic_label'),
     `\`${mnemonic}\``,
     '',
-    '⚠️ 测试网托管钱包 (仅试玩), 务必看清:',
-    '· 助记词显示在这条 Telegram 消息里, Telegram 服务器看得到 → 切勿用于真钱',
-    '· 私钥由节点托管 (服务器持有), 方便直接玩; 但服务器或你的 Telegram 账号被盗 = 此钱包币会失',
-    '· 仅测试币, 零真实价值',
-    '· 真用 Kaspa 请用你【自己生成、助记词从未发给任何人/服务】的钱包',
-    '· 现在就备份助记词, 它只显示这一次, 系统不会再给你看',
+    t(lang, 'wallet_gen_warn_title'),
+    t(lang, 'wallet_gen_warn1'),
+    t(lang, 'wallet_gen_warn2'),
+    t(lang, 'wallet_gen_warn3'),
+    t(lang, 'wallet_gen_warn4'),
+    t(lang, 'wallet_gen_warn5'),
     '',
-    '下一步: /faucet 领测试 KAS → /bet 下注。/wallet 看地址余额。',
+    t(lang, 'wallet_gen_next'),
   ].join('\n');
 }
-// 钱包视图 (地址+余额, 永不含助记词) + 测试网页脚。
-export function walletView(data) {
-  const bal = (data.balance_kas == null) ? '查询中/RPC 暂不可用' : (data.balance_kas + ' KAS');
+// 钱包视图 (地址+余额, 永不含助记词). NWT双守: 存款面必带 custody 警告行.
+export function walletView(data, lang = 'en') {
+  const bal = (data.balance_kas == null)
+    ? t(lang, 'wallet_view_bal_unavail')
+    : (data.balance_kas + ' KAS');
   return [
-    '👛 你的测试网托管钱包:',
-    `📍 地址: ${data.address}`,
-    `💰 余额: ${bal}`,
+    t(lang, 'wallet_view_title'),
+    t(lang, 'wallet_view_addr', { addr: data.address }),
+    t(lang, 'wallet_view_bal', { bal }),
     '',
-    '/receive 收款(给别人转你用此地址) · /faucet 领测试币 · /bet 下注',
-    '⚠ 测试网托管钱包 · 真钱请用你自己助记词从未外泄的钱包。',
+    t(lang, 'wallet_view_actions'),
+    t(lang, 'wallet_view_warn'),
   ].join('\n');
 }
 
 // 转账 2 步确认 (Bettor: /send 必 confirm)。第一步显金额+目标+常驻托管警告, 待 /confirm。
-export function walletSendConfirm(to, amountKas) {
+export function walletSendConfirm(to, amountKas, lang = 'en') {
   return [
-    '请确认转账:',
-    `· 金额: ${amountKas} KAS`,
-    `· 收款: ${to}`,
+    t(lang, 'wallet_send_confirm_title'),
+    t(lang, 'wallet_send_confirm_amount', { kas: amountKas }),
+    t(lang, 'wallet_send_confirm_to', { to }),
     '',
-    '回 /confirm 执行, /cancel 取消。',
-    '⚠ 测试网托管钱包 · 真钱请用你自己助记词从未外泄的钱包。',
+    t(lang, 'wallet_send_confirm_prompt'),
+    t(lang, 'wallet_send_confirm_warn'),
   ].join('\n');
 }
-export function walletSendDone(txId, amountKas, to) {
+export function walletSendDone(txId, amountKas, to, lang = 'en') {
   return [
-    '✅ 转账已上链:',
-    `· 金额: ${amountKas} KAS → ${to}`,
-    `· TX: ${txId}`,
-    `· 浏览器: https://explorer-tn12.kaspa.org/txs/${txId}`,
+    t(lang, 'wallet_send_done_title'),
+    t(lang, 'wallet_send_done_amount', { kas: amountKas, to }),
+    t(lang, 'wallet_send_done_tx', { txid: txId }),
   ].join('\n');
 }
 
-export function help() {
+export function help(lang = 'en') {
   return [
-    '命令:',
-    '/start — 介绍 + 三步上手',
-    '/wallet — 生成/查看你的测试网托管钱包 (零门槛玩)',
-    '/balance — 查钱包余额  /receive — 显收款地址',
-    '/send <地址> <金额> — 从钱包转 KAS (2 步确认)',
-    '/link <kaspatest地址> — 绑定你的地址',
-    '/faucet — 领测试 KAS（先 /wallet 或 /link）',
-    '/swap — 兑换 KAS ↔ USDT(经 broker,链上)',
-    '/bet — 押注预测市场',
-    '/mybets — 看自己的押注 + 状态',
-    '/discover — 浏览开放挂单 / 市场',
-    '/broker — 想做撮合者(broker)? 角色 + 佣金 + 申请',
-    '/earnings — broker 收益 (经手单/已实现/待结算, 链上可验)',
+    t(lang, 'help_title'),
+    t(lang, 'help_start'),
+    t(lang, 'help_wallet'),
+    t(lang, 'help_send'),
+    t(lang, 'help_link'),
+    t(lang, 'help_faucet'),
+    t(lang, 'help_swap'),
+    t(lang, 'help_bet'),
+    t(lang, 'help_mybets'),
+    t(lang, 'help_record'),
+    t(lang, 'help_champions'),
+    t(lang, 'help_discover'),
+    t(lang, 'help_broker'),
+    t(lang, 'help_earnings'),
+    t(lang, 'help_lang'),
     '',
-    DISCLAIMER,
+    t(lang, 'help_custody_note'),
+    t(lang, 'help_custody_1'),
+    t(lang, 'help_custody_2'),
+    t(lang, 'help_custody_3'),
+    '',
+    t(lang, 'help_disclaimer'),
   ].join('\n');
 }

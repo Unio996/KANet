@@ -568,10 +568,19 @@ async function handlePoolOracleTxSignReq(msg) {
 
       let signResult;
       try {
+        // 🔴 第三签名站点 safe_json 补修(2026-07-18 J1tn, jepu1 重签设计步1, NWT 红队 751eaa07):
+        // c8188d98 修 bettor-prediction-voter.js 两站点时漏了本站点——这里原样发裸
+        // JSON.stringify(phase2TxObj) = relay 走 plain 路径 → spk 不进 sighash → 签名必坏
+        // (jepu1 401 次 verify-failed 的半根因)。改与另两站点同款: 单源 helper 转 safe_json
+        // (../lib/settle-safe-json.mjs, 函数体 = c8188d98 原版逐字节) + safe_json:true。
+        // bshard 盘不经本 handler(消息 type 隔离, 见设计稿 §1.5), bshard-close-voter 已是同形态。
+        const { toSettleSafeJsonTxHex } = await import('../lib/settle-safe-json.mjs');
+        const _safeTxHex = await toSettleSafeJsonTxHex(phase2TxObj);
         signResult = await sendCommandAsync(oracle.id, {
           type: 'sign_input_for_settle',
-          tx_hex: JSON.stringify(phase2TxObj),
+          tx_hex: _safeTxHex,
           input_index: inputIdx,
+          safe_json: true,
         });
       } catch (e) {
         console.warn(`[trade-filter:sign-req] sign IPC fail market=${market.id.slice(0,12)} oracle=${oracle.name} input=${inputIdx}: ${e.message}`);
@@ -1057,47 +1066,121 @@ const BETTOR_MIN_STAKE_POLICY_SOMPI = 100_000_000n;
  * the daa a fresh ingest would have written — zero cross-node divergence in the committee bettor-exclude set.
  *
  * Chain truth: getUtxosByAddresses(side_p2sh) returns the UNSPENT UTXO for an OPEN position; we match it by
- * stake_amount + side_lock_tx (a spent/missing UTXO = already settled or never paid → not capturable here).
- * The daaScore is the CANONICAL accepting-block daa (chain consensus fact, identical on every node).
- * kaspa-wasm UtxoEntryReference shape varies (cross-chain-verify.mjs L545 same defensive pattern).
+ * stake_amount + side_lock_tx.
  *
- * @returns {Promise<{daa:number|null, reason:'ok'|'daa-unresolved'|'no-unspent-utxo'|'no-rpc'|string}>}
- *   reason 'rpc-fail: ...' is transient (replay later); 'no-unspent-utxo' = settled/unpaid; 'daa-unresolved'
- *   = UTXO found but shape unknown (daa null, fail-loud at sample). NEVER guesses — null over a non-canonical value.
+ * 🔴 method switch (Bettor 2026-07-08 22:04, #b75exc, 四条件批): 原实现靠查 side_p2sh 上"未花费 UTXO"反推
+ * DAA, 但一笔 bet 一落地就可能被 register-v07 自己吸收进 shard 聚合 leaf(pool_value 更新), UTXO 不再"未花费"
+ * → 假阴性(uqmp8 两笔真实 bet 实测撞到, 不是边角场景)。改用 kaspa_tx_log.block_hash(indexer 落链时写入的
+ * 真实 accepting block) → RPC getBlock(hash).header.daaScore(链真相, rpc-listener.mjs:223-226 同款调用)——
+ * 对"未花费"和"已被吸收"两态通用, 单一路径不分叉(3o6cs 当时手动 UPDATE 3 行绕过的正是这同一个洞, 这次把
+ * 一次性绕路升级成生产修复)。
+ *
+ * ① 链锚纯度: DAA 只能来自 getBlock(block_hash).header.daaScore, block_hash 只能来自 kaspa_tx_log —
+ *    禁任何 DB 猜测值/时间换算值。
+ * ② fail-loud 不降级: kaspa_tx_log 查无该 tx 的 block_hash = 拒(null), 不静默回退瞎猜——side_lock_daa
+ *    定的是 betsRoot canonical 序, attest 承重字段, 错值比拒绝更危险。
+ *
+ * @returns {Promise<{daa:number|null, reason:'ok'|'daa-unresolved'|'no-block-hash'|'not-yet-finality-safe...'|'rpc-fail: ...'}>}
+ *   NEVER guesses — null over a non-canonical value.
  */
-export async function captureSideLockDaa({ side_p2sh, side_lock_tx, stake_amount, network }) {
+// 🔴 finality 门(2026-07-17,治本卡①第一条+K-17 发现 A 同一个洞,docs/2026-07-17-bshard-recapture-
+// side-lock-daa-port-design.md): 复用 pool-market-settler-v06.mjs:43 DEFAULT_FINALITY_DEPTH 同一个
+// F-S1 anti-reorg 场景(不同时间点查询收敛到同一 hash),不新拍数字——本文件不静态 import 那个模块
+// (它反过来动态 import 本文件,避免制造循环依赖的静态方向),本地声明同值。
+const CAPTURE_FINALITY_DEPTH = 50;
+export async function captureSideLockDaa({ side_p2sh, side_lock_tx, stake_amount, network, approxDaaHint }) {
+  const row = sqlite.prepare('SELECT block_hash FROM kaspa_tx_log WHERE tx_id = ?').get(side_lock_tx);
   const { getWorkingRpc } = await import('./rpc-health.js');
   const { url: rpcUrl } = await getWorkingRpc();
   if (!rpcUrl) return { daa: null, reason: 'no-rpc' };
-  const { RpcClient, Encoding, Address } = await import('kaspa-wasm');
+  const { RpcClient, Encoding } = await import('kaspa-wasm');
   const rpc = new RpcClient({ url: rpcUrl, encoding: Encoding.Borsh, networkId: network });
-  let utxos;
+
+  // 🔴 fix (2026-07-12, 第六件大考 a4343 撞出, #gry4yj.2·ESCALATIONS 已挂账缺口): kaspa_tx_log 是本地
+  // indexer, 有已知完整性缺口(reference-kaspa-tx-log-indexer-completeness-gap——同族问题今晚已在
+  // checkUtxoLanded level2-B/claim1 两处撞过)——原实现命中缺口就直接 {daa:null, reason:'no-block-hash'}
+  // 永久放弃, 无重试无退化, 是 a4343 propose 被卡住的根因。**不走"查 side_p2sh 未花费 UTXO 反推"那条
+  // 路**(2026-07-08 method switch 注释里明确记录的历史假阴性: bet 落地后可能被 register-v07 吸收进
+  // shard 聚合 leaf, UTXO 不再"未花费"——对已吸收的合法 bet 会误判查无此 tx)。改用今晚已验证的方法论:
+  // indexer 未命中时, 从一个尽量近的锚点沿 selectedParentHash 有界回走(读 block 内容, 非 UTXO 集合
+  // 状态, 不受"是否已花费"影响), 逐块核对 verboseData.transactionId 匹配 side_lock_tx。
+  //
+  // 锚点选择(复用今晚 v183 backward-walk-daa-index 基建, 同一个 DB, 不新起一套):
+  //   若调用方给了 approxDaaHint(例如市场 deadline_daa——bet 必然发生在 deadline 之前, 是天然的
+  //   "≥ 真实 daa"上界), 先查 spc_daa_index_coverage 有没有覆盖到这个区间, 有就直接从索引查表拿到
+  //   一个非常靠近的锚块 hash 开始走(几十到几百步内必中, 不看 tip 到 deadline 之间隔了多久)。
+  //   没有 hint 或索引没覆盖 → 退化到从当前 tip 走(同 §原方案), 但那样对"registration 到 recapture
+  //   之间隔了很久"的市场(今晚验证局连环修复正撞上这个)会力不从心——诚实反映在 MAX_STEPS 里, 不假装
+  //   兜得住所有情况。
+  // 实测校准(2026-07-12, a4343 现场验证): 从 v183 索引锚点(≈deadline_daa)回走到真实 bet 落链块
+  // 实测 5839 步(≈11600 DAA, ~2 DAA/步实测速率)——bet 通常在 deadline 前"一段时间"下注, 具体多久
+  // 取决于市场生命周期长度。10000 步留出安全余量(约两倍实测距离), 覆盖典型验证盘/短生命周期市场;
+  // 极端长生命周期市场若 bet 下得早、deadline 拖得晚, 仍可能落在此界外(fail-loud, 不是无界搜索)。
+  const MAX_STEPS = 10000;
+  async function _resolveStartCursor() {
+    if (approxDaaHint != null && Number.isFinite(Number(approxDaaHint))) {
+      try {
+        const cov = sqlite.prepare('SELECT block_hash FROM spc_daa_index WHERE daa_score >= ? ORDER BY daa_score ASC LIMIT 1').get(Number(approxDaaHint));
+        const covRange = sqlite.prepare('SELECT 1 FROM spc_daa_index_coverage WHERE start_daa <= ? AND end_daa >= ? LIMIT 1').get(Number(approxDaaHint), Number(approxDaaHint));
+        if (cov?.block_hash && covRange) return cov.block_hash;
+      } catch { /* spc_daa_index tables may not exist pre-v183 DBs — fall through to tip */ }
+    }
+    const info = await rpc.getBlockDagInfo();
+    return info?.sink || null;
+  }
+  async function _scanBackwardForTx() {
+    let cursor = await _resolveStartCursor();
+    if (!cursor) return null;
+    for (let i = 0; i < MAX_STEPS; i++) {
+      const blkResp = await rpc.getBlock({ hash: cursor, includeTransactions: true });
+      const blk = blkResp?.block || blkResp;
+      const txs = blk?.transactions || [];
+      const hit = txs.find(t => (t?.verboseData?.transactionId || t?.id) === side_lock_tx);
+      if (hit) return blk;
+      const sp = blk?.verboseData?.selectedParentHash;
+      if (!sp || sp === '0'.repeat(64)) return null;
+      cursor = sp;
+    }
+    return null;
+  }
+
+  let blk;
+  let tipDaaScore = null;
   try {
     await Promise.race([rpc.connect({}), new Promise((_, rej) => setTimeout(() => rej(new Error('RPC connect timeout')), 4000))]);
-    ({ entries: utxos } = await rpc.getUtxosByAddresses([new Address(side_p2sh)]));
+    if (row?.block_hash) {
+      const blkResp = await rpc.getBlock({ hash: row.block_hash, includeTransactions: false });
+      blk = blkResp?.block || blkResp;
+    } else {
+      blk = await _scanBackwardForTx();
+      // reason 字符串保持 'no-block-hash'(向后兼容既有调用方/测试的精确匹配, 语义仍是"无法解出
+      // block hash"——只是现在多了一条 fallback 路径没找到, 不是历史那种"根本没试第二条路")。
+      if (!blk) { try { await rpc.disconnect(); } catch {} return { daa: null, reason: 'no-block-hash' }; }
+    }
+    // 🔴 finality 门数据源(fetch while still connected — rpc.disconnect() fires in `finally`
+    // below, before daa is even computed): current tip, compared against the resolved block's
+    // daaScore after the connection closes.
+    const tipInfo = await rpc.getBlockDagInfo();
+    tipDaaScore = Number(BigInt(tipInfo.virtualDaaScore));
   } catch (e) {
     try { await rpc.disconnect(); } catch {}
     return { daa: null, reason: `rpc-fail: ${e.message}` };
   } finally {
     try { await rpc.disconnect(); } catch {}
   }
-  utxos = utxos || [];
-  const wantSompi = BigInt(stake_amount);
-  const exactUtxo = utxos.find(u => {
-    try {
-      if (BigInt(u.amount) !== wantSompi) return false;
-      const op = u.outpoint || u.entry?.outpoint;
-      const txid = op && (op.transactionId || op.transaction_id);
-      return txid === side_lock_tx;
-    } catch { return false; }
-  });
-  if (!exactUtxo) return { daa: null, reason: 'no-unspent-utxo' };
   let daa = null;
   try {
-    const rawDaa = exactUtxo.blockDaaScore ?? exactUtxo.utxoEntry?.blockDaaScore ?? exactUtxo.entry?.blockDaaScore ?? exactUtxo.entry?.utxoEntry?.blockDaaScore;
-    if (rawDaa !== undefined && rawDaa !== null) daa = Number(BigInt(rawDaa));  // daa ~38M fits Number safely
+    const rawDaa = blk?.header?.daaScore;
+    if (rawDaa !== undefined && rawDaa !== null) daa = Number(BigInt(rawDaa));  // daa ~55M fits Number safely
   } catch { daa = null; }
-  return { daa, reason: daa === null ? 'daa-unresolved' : 'ok' };
+  if (daa === null) return { daa: null, reason: 'daa-unresolved' };
+  // 🔴 finality 门(2026-07-17,治本卡①第一条+K-17 发现 A 同一个洞): 只有 accepting-block 已过
+  // CAPTURE_FINALITY_DEPTH(50)才写值——finality 前的值可能被 reorg 换成别的规范链, 写进去比留
+  // NULL 更危险(NULL 至少诚实"不知道", 错值带假自信直接过 C1 guard)。
+  if (tipDaaScore !== null && (tipDaaScore - daa) < CAPTURE_FINALITY_DEPTH) {
+    return { daa: null, reason: `not-yet-finality-safe (tip=${tipDaaScore}, block=${daa}, depth=${tipDaaScore - daa} < ${CAPTURE_FINALITY_DEPTH})` };
+  }
+  return { daa, reason: 'ok' };
 }
 
 async function handlePoolBetRegistered(msg) {

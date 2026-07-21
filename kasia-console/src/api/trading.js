@@ -1961,9 +1961,16 @@ export async function registerTradingRoutes(fastify) {
     const { getPendingExecutions } = await import('../services/execution-state.js');
     if (!agent_address) {
       // Return all pending
+      // 🔴 修复(2026-07-12, NWT 红队 G1, 用户反馈通道设计审出): 非交易 type(如 user_feedback)不该出现在
+      //   Owner 的"待批交易"审批视图——裸查询漏 type 过滤会让反馈工单跟真实交易审批行混在一起, Owner 若
+      //   误点批准会把反馈工单强推进 money-flow 状态机(approved/executing, 反馈工单不该有这两态)。
+      //   排除表 = 已知非交易类 type 的白名单反面(新增非交易 type 需同步加入, 同 R-FEE-LEAVES-BYPASS 类
+      //   手工配对家族——本卡先堵住已知的一个, 若未来再加别的非交易 type 复发同坑再补规则)。
+      const NON_TRADE_TYPES = ['user_feedback'];
+      const placeholders = NON_TRADE_TYPES.map(() => '?').join(',');
       const rows = sqlite.prepare(
-        "SELECT * FROM execution_states WHERE status = 'pending' ORDER BY created_at DESC"
-      ).all();
+        `SELECT * FROM execution_states WHERE status = 'pending' AND type NOT IN (${placeholders}) ORDER BY created_at DESC`
+      ).all(...NON_TRADE_TYPES);
       return reply.send(rows.map(_parseExecutionRow));
     }
     return reply.send(getPendingExecutions(agent_address).map(_parseExecutionRow));

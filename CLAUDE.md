@@ -1,5 +1,21 @@
 # KANet — Claude Code 接力指南
 
+## 🔴 铁律 0：开发框架（Owner 2026-07-06 钦定·违反即退回）
+
+**任何 agent，未经「报备 → 审核 → 批准 → 测试」，无权改动任何代码。先报计划，后动手，绝不先斩后奏。** 全流程见 → `docs/DEV-FRAMEWORK.md`（必读）。
+- 用户面（tg-bot/*.mjs、*.eta、messages.mjs、i18n.mjs、任何用户看得到的文案版面）+ 钱路/covenant/结算 + 重大功能 = **必须 Owner 批**才能动。
+- Bettor = 强制审核闸；绕过审核/写完才报备 = 改动 revert。根因：规矩是"约定"靠自觉守不住，必须上机制（lint 卡点 + Bettor 守）。
+
+## 🔴 铁律 0.5：ZK 是 committed 结算架构·rolling/covenant 跨节点是死路（Owner 2026-07-06 钦定·根治反复回退浪费资源）
+
+**ZK（协议原生 `OpZkPrecompile` 链上验证 Groth16/RISC0·TN12 已 live）= committed 目标结算架构。rolling/covenant 联机跨节点 = 没前途、极脆弱的死路**（实践已验证：bshard `market_shards` 不跨节点同步、去中心委员无法独立跨节点重建验；ZK proof 每节点独立验、不需跨节点同步 = 解此死结）。**不准再往 rolling/covenant 跨节点方向投任何资源。**
+
+- **执行路径**：自修 `silverc` 的 `pick_from_depth` OP_PICK off-by-one codegen bug（选项 A·有源码 `/d/silverscript`）→ 生成调 ZK opcode 的 covenant → ZK 结算。J2 主攻。
+- **rolling 处置**：只维持 live 公测过渡（真人钱在里面·不停）·**零追加投入**。
+- **🚫 禁止把这个决策当"待定"重新讨论/调研/回退** —— Owner 已多次数落"之前共识过、你们一再耽搁回退、浪费无数资源"。**决策已定 = 执行·不再讨论**（违反 = 又一次炒陈饭·D-002 复发计数）。
+- **慎重铁律（D-005）**：ZK 全隔离开发·live 节点原地不动·真上线 = 充分测试后 Owner 拍的独立迁移。
+- **权威记录**：`docs/DECISIONS.md` D-001 + KB `architecture/zk-track-c §9` + memory `reference-zk-committed-rolling-crossnode-deadend`。
+
 ## 你必须先读这些文档
 
 1. **开发者指南（唯一权威文档）** → `docs/DEVELOPER-GUIDE.md`
@@ -54,11 +70,18 @@
 4. **memory 相关 feedback**: `grep -ri <topic> ~/.claude/projects/*/memory/feedback_*.md`
 5. **设计前查资产（铁律,违=重造/绕路,第3次同病的根治）**: 任何**领域设计 / SS / 链上机制**动手前——(a) 必读 `D:\KANet-Knowledge-Base` 该领域目录 + 既有设计文档(防重造已设计系统);(b) 写 SS/链上前**必查 silverscript 官方 `docs/DECL.md`+`TUTORIAL.md` 确认可用原语**(introspection `tx.outputs[i].value/scriptPubKey` / covenant `OpInputCovenantId` / `byte[](int,int)` int-to-byte / `blake2b` / `for` 循环——TN12 全有,见记忆 `reference-silverscript-real-capabilities`)。**撞到"这原语好像没有/做不了"的假设,必先去文档/源码验证再决定绕不绕——禁止凭印象判定限制然后搭链下 fallback**(漏 KB / 漏既有 §2.A 滚动分片设计 / 漏 silverscript 工具 = 同一个病)。
 
-**写完 commit 前必跑**: `node scripts/lint-kanet.mjs <changed-files>` — 失败一条 commit 都不让 (git pre-commit hook 强制).
+**写完 commit 前必跑**: `node scripts/lint-kanet.mjs <changed-files>` — 失败一条 commit 都不让。
+
+**pre-commit hook 真实配置 (2026-06-29 真装·非虚声明)**:
+- Hook 在 `.githooks/pre-commit` (已入库)。**新 clone 必跑一次**: `git config core.hooksPath .githooks`
+- 内容: ① `lint-kanet` staged 文件 (block on fail) ② `check-tree-fresh` (warn-not-block·落后 canonical 超 20 commits LOUD warn)
+- doc-lint 规则内置于 lint-kanet: date-prefix 设计文档必住 `docs/` 根目录·同名多路径 → block
 
 **改 broker / agent 业务代码后必跑**: `cd kasia-console && node scripts/test.mjs --domain=<相关 domain>` — framework 一键回归。修 bug 必同步加 regression case 进 `kasia-console/test-framework/cases/<domain>/` 守住，永不退化。详见 `docs/TEST-FRAMEWORK.md`.
 
 跳步 SOP = 重复犯错的根因 (Owner 2026-04-26 元问题). NWT 接位漏 ANTI-PATTERNS.md → 漏 QWEN Rule 11 → broker LLM 60-120s timeout 全崩, 是负面教材.
+
+**临时脚本铁律 (Owner 2026-06-27 钦定·防根目录堆爆)**: 一次性诊断/测试/发送脚本 **写 `scratch/`**(gitignored, 用绝对路径如 `D:/kanet-tn12/kasia-console/data/console.db`), **绝不写根目录**。根目录只放 launcher (`_launch_*.mjs`) / 各 agent canonical send (`_<agent>_send.cjs`) / 常驻工具。历史教训: 各 agent 把 scratch 堆根目录 → 821 个临时文件堆爆 (2026-06-27 归档 815 个到 `scratch/_archive_root_20260627/`)。`.gitignore` 已 ignore `_*` + `scratch/`, 但 gitignore 防入库不防物理堆 → 必靠本约定写对目录。
 
 ## 核心原则（违反即退回）
 
@@ -72,6 +95,7 @@
 - **每笔链上交易必须入库** — 地址 + TX 双锚点
 - **花钱代码验证所有路径** — 失败也要处理
 - **调查异常必须走六层** — 场景→数据→协议→逻辑→流向→存储，不跳步。修复前先完成前三层。详见 `docs/kanet-investigation-methodology.md`
+- **绝不给 Owner 发菜单/选项，全走开发频道先问 Bettor**（Owner 2026-07-04 钦定·全智能体铁律）— Owner **不在终端**，任何 agent 都**禁止**用「A/B 请选择」这类菜单式询问戳 Owner。有事发 `dev-coord-testnet` 开发频道，**先问 Bettor**（协调者）；能自判/自决的自己拍或 Bettor 拍，需要 Owner 拍板的由 Bettor 精炼后单点上报。Owner 只收结果、只做少数关键决策，不当交互终端。接位/回归的 agent 尤其注意：卡在命令模式也**只走频道**，绝不私戳 Owner 菜单。
 
 ## 数据库修改规范
 
@@ -190,6 +214,6 @@ bash kanet-stop.sh
 ## 关键配置
 
 - Adapter 端口从 3010 起
-- Console 端口 3100
+- Console 端口 3200（kanet.env `PORT=3200`；旧文档写 3100 是过期默认值，2026-07-11 KANet-UI 勘误）
 - CONSOLE_ENCRYPTION_KEY 必须持久化（丢失 = 所有加密数据不可恢复）
 - kanet.env 持久化配置

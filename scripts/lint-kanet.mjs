@@ -19,17 +19,23 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { MONEY_PATH_MANIFESTS } from '../kasia-console/src/lib/money-path-manifests.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 
 const violations = [];
+const warnings = [];  // warn-mode: report without blocking commit
 const file = (rel) => path.join(ROOT, rel);
 const exists = (p) => { try { return fs.statSync(p).isFile(); } catch { return false; } };
 const read = (p) => fs.readFileSync(p, 'utf8');
 
 function violate(rule, msg, file, line) {
   violations.push({ rule, msg, file, line });
+}
+
+function warn(rule, msg, file, line) {
+  warnings.push({ rule, msg, file, line });
 }
 
 function* walk(dir, ext = ['.js', '.mjs']) {
@@ -74,6 +80,289 @@ function checkR_NULLIFIER_I64() {
         violate('R_NULLIFIER_I64', `单-i64 nullifier bitmap (line ${i64Bitmap + 1}) 但 merkle depth/N 允许 >63 winner → i64 只 63-slot 装不下 → winner#64+ 双领抽干. 必 byte[] 多-slot 或分桶 ≤63/shard (配 feedback-recreatable-utxo-nullifier)`, fp, i64Bitmap + 1);
       }
     }
+  }
+}
+
+// ── R-LEDGER-SIZE [WARN]: COORD-LEDGER 活跃窗口制 (D-010 2026-07-10, Bettor 拟稿+NWT GREEN) ──
+// docs/iteration/COORD-LEDGER.md 单文件无界膨胀过 (7/9 实测 301KB, 接位一次读不进要分段翻).
+// >100KB 提醒切档到 docs/iteration/archive/COORD-LEDGER-YYYY-MM.md, warn-not-block (不阻 commit,
+// 切档是有意识动作非自动触发). 见 docs/2026-07-10-d010-handoff-status-channel-proposal.md §2.3。
+function checkLedgerSize() {
+  const ledgerFile = file('docs/iteration/COORD-LEDGER.md');
+  if (!exists(ledgerFile)) return;
+  const sizeBytes = fs.statSync(ledgerFile).size;
+  const THRESHOLD = 100 * 1024;
+  if (sizeBytes > THRESHOLD) {
+    warn('R-LEDGER-SIZE',
+      `COORD-LEDGER.md 现 ${(sizeBytes / 1024).toFixed(0)}KB > ${THRESHOLD / 1024}KB 阈值 — 建议按月切档到 docs/iteration/archive/COORD-LEDGER-YYYY-MM.md (活跃文件只留当月内容+归档索引). 见 D-010 §2.3.`,
+      ledgerFile, 0);
+  }
+}
+
+// ── R-STATUS-GUARD-BLACKLIST [WARN]: UPDATE ...protocol_status 的安全闸用黑名单(NOT IN)启发式提醒换白名单 ──
+// (处置设计红队 2026-07-12, NWT H1 + Bettor 钉死"今晚第三次撞同一模式"后要求补的启发式规则): 黑名单
+// (NOT IN (...))枚举"不该碰的状态"天生不完备(活库状态集持续增长, 设计者凭记忆写的黑名单会漏, NWT 处置
+// 设计红队现场撞到——5 项黑名单漏了 refunded/refunding/disputed 等 10 项活库真实状态)。同一行/相邻窗口
+// 内出现 IN(...) 白名单则不告警(已用推荐写法)。启发式非精确 AST, 只在同段 SQL 文本内粗判, 误报可接受
+// (WARN 不阻塞, "随手写不强求"精神——Bettor #hgmhxf.2)。
+function checkR_STATUS_GUARD_BLACKLIST(fp, content) {
+  if (!/\.(mjs|js|cjs)$/.test(fp)) return;
+  const lines = content.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    if (!/UPDATE\s+\w+\s+SET[^;]*protocol_status/i.test(lines[i])) continue;
+    const windowText = lines.slice(i, Math.min(lines.length, i + 6)).join('\n');
+    if (!/protocol_status\s*NOT\s+IN\s*\(/i.test(windowText)) continue;
+    if (/protocol_status\s+IN\s*\(/i.test(windowText.replace(/NOT\s+IN/i, ''))) continue;   // 同段也有白名单写法, 不告警
+    warn('R-STATUS-GUARD-BLACKLIST [WARN]',
+      `UPDATE ...protocol_status 的安全闸用黑名单(NOT IN)——枚举"不该碰的状态"天生不完备(活库状态集会持续增长/漏项), 改白名单(AND protocol_status IN (目标市场理应处的状态)), 同 R-FEE-SPLIT-PKG-DRIFT/反馈工具 allow-list 同一封闭式防护原则(处置设计 NWT 红队 H1, 2026-07-12)。`,
+      fp, i + 1);
+  }
+}
+
+// ── R-EXPLORER-URL-BYPASS [ERROR, 硬阻塞]: explorer 死域名字面量禁散装 ──
+// (explorer 死链全库收敛设计 §3, docs/2026-07-12-explorer-url-dead-link-consolidation-design.md, NWT diff审
+// d7c28353 提醒: helper 契约改了但零调用点, 各消费点各自 inline null-safe 重写——不是这条规则堵复发, 收敛
+// 目标"防第 N+1 个新散装点"没物理达成, 本规则补上)。explorer-tn12.kaspa.org / explorer.kaspa.org 域名字面量
+// 出现在 kasia-console/src/lib/explorer-url.mjs 以外的任何 .js/.mjs/.eta 文件 = ERROR(该 helper 的 mainnet
+// 分支合法使用 explorer.kaspa.org, 别处一律不该硬编码——testnet 已知无公网 explorer, mainnet 该走 helper 单源)。
+const _EXPLORER_URL_HOME = path.join(ROOT, 'kasia-console/src/lib/explorer-url.mjs');
+function checkR_EXPLORER_URL_BYPASS(fp, content) {
+  if (!/\.(mjs|js|cjs|eta)$/.test(fp)) return;
+  if (path.resolve(fp) === _EXPLORER_URL_HOME) return;   // 唯一合法落点
+  if (/旁支重复目录|kanet-tn12[\\/]kanet-tn12/.test(fp)) return;   // 旧重复子目录已知问题, 另案处理不在本规则范围(设计 §4)
+  const lines = content.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    if (!/explorer-tn12\.kaspa\.org|explorer\.kaspa\.org/.test(lines[i])) continue;
+    if (/^\s*(\/\/|\*|#)/.test(lines[i]) || /^\s*<!--/.test(lines[i])) continue;   // 纯注释提及(如本次改动的记账注释)不算散装
+    violate('R-EXPLORER-URL-BYPASS',
+      `explorer 域名字面量硬编码在 explorer-url.mjs 以外的文件——单源契约形同虚设(建了没人被强制用, 死链
+全库收敛设计 §3 收敛目标)。改用 buildExplorerUrl/buildExplorerAddressUrl + formatTxReference(kasia-console/
+src/lib/explorer-url.mjs), 或(tg-bot/.eta 等不能 import 该 ESM helper 的场景)按同款 null-safe 降级模式手写,
+不内联域名字符串。`,
+      fp, i + 1);
+  }
+}
+
+// ── R-PS-FAMILY-DISPATCH [ERROR, 硬阻塞]: compilePayoutShardRedeem/V2Redeem 调用点必在已知白名单内 ──
+// (K-18 §3.4 lint 原设计, docs/2026-07-21-p2-batch1-truth-source-layer-k18-landing-design.md §3.4)。
+// 🔴 落码时核实修正(2026-07-21, J1 grep 全库实测坐实, 不是猜): 原稿以为只有 pool-shard-register.mjs(定义
+// 处)+coherence gate 单源两处该出现, 实际 grep 出 bshard-auto-settler.mjs(6 处, close/claim/cancel/refund
+// redeem 构建——这些是构建"即将真实广播的花费 TX"所需的合法必经路径, 不是绕过 gate 的散装误用)+
+// bshard-settle-daemon.mjs(1 处, P0 已落地的 non-blocking recompile 校验, verify-value-source 已审)也是
+// 合法既有调用点——若不列入白名单, 这条规则会把 6+1 处已经过 NWT/Codex 红队审过的生产核心代码全部拦下,
+// 是本规则最初设计粒度过细(误以为"物理调用点位置"能作为"是否经过 coherence gate 保护"的判据, 实际两者
+// 无必然对应, coherence gate 保护是运行时/调用序列层面的事, 不是文件位置能表达的)。收窄本规则实际能提供
+// 的价值: 不是"运行时强制经过 gate"(那需要 AST 级调用图分析, 不是本规则能力范围, 诚实标注非本规则职责),
+// 而是"防止第 N+1 个新增/意外调用点悄悄冒出来绕过既有审查纪律"——白名单 = 已知+已审过的合法调用点全集,
+// 任何新文件/新位置调这两个函数 = 触发人工审查(是否也该走 coherence gate / splice-not-recompile 纪律)。
+const _PS_FAMILY_DISPATCH_WHITELIST = [
+  path.join(ROOT, 'kasia-console/src/lib/pool-shard-register.mjs'),          // 定义处
+  path.join(ROOT, 'kasia-console/src/lib/bshard-payout-family-coherence.mjs'), // coherence gate 单源(K-18 §3.1-3.3)
+  path.join(ROOT, 'kasia-console/src/db/migrate.js'),                        // v189 backfill(一次性, 允许子进程成本)
+  path.join(ROOT, 'kasia-console/src/services/bshard-auto-settler.mjs'),     // close/claim/cancel/refund redeem 构建(既有, 已审)
+  path.join(ROOT, 'kasia-console/src/services/bshard-settle-daemon.mjs'),    // P0 non-blocking recompile 校验(已审, verify-value-source)
+];
+function checkR_PS_FAMILY_DISPATCH(fp, content) {
+  if (!/\.(mjs|js|cjs)$/.test(fp)) return;
+  if (/\.test\.mjs$/.test(fp)) return;   // 测试文件允许直接验证编译产物
+  const resolved = path.resolve(fp);
+  if (_PS_FAMILY_DISPATCH_WHITELIST.some(w => resolved === w)) return;
+  if (/[\\/]scripts[\\/]_\w*k18\w*\.mjs$/.test(fp.replace(/\\/g, '/'))) return;   // K-18 一次性 backfill/诊断脚本同一权限级别
+  const lines = content.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    if (/^\s*(\/\/|\*)/.test(lines[i])) continue;   // 纯注释提及不算
+    if (!/\bcompilePayoutShard(V2)?Redeem\s*\(/.test(lines[i])) continue;
+    violate('R-PS-FAMILY-DISPATCH',
+      `compilePayoutShardRedeem/V2Redeem 调用点出现在白名单(pool-shard-register.mjs 定义处 / bshard-payout-
+family-coherence.mjs coherence gate 单源 / migrate.js backfill / K-18 诊断脚本 / *.test.mjs)之外的文件——
+这两个函数的编译产物只能作 validation-only 校验用, 不能绕过 assertPayoutShardCoherence 直接当花费权威字节
+使用(K-18 §3.4, 呼应 Codex MUST-FIX4 教训)。改走 assertPayoutShardCoherence(psRow, {p2sh, tier}) 或 splice
+(pool-shard-settle.mjs autoDetectConsolidateResume/consolidateAllShards 已返回 spliced redeemHex, 不需要
+自己 recompile)。`,
+      fp, i + 1);
+  }
+}
+
+// ── R-FEE-SPLIT-PKG-DRIFT [ERROR, 硬阻塞]: packages/fee-split/fee-split.mjs 必与源同步 ──
+// (B线落3, NWT G1 修法②, 2026-07-12): packages/fee-split/fee-split.mjs 是
+// kasia-console/src/lib/fee-split.mjs 的构建产物(packages/fee-split/scripts/sync.mjs 生成, 逐字节复制
+// +生成头), 单源策略靠这条规则机制化(手改/漏同步 = commit 卡点, 非 WARN——落1 F1 就在源文件修过一次,
+// 若产物 drift, 第三方会拿到已知有漏洞的旧快照, 比不做这个包更糟)。
+function checkR_FEE_SPLIT_PKG_DRIFT() {
+  const srcFile = file('kasia-console/src/lib/fee-split.mjs');
+  const pkgFile = file('packages/fee-split/fee-split.mjs');
+  if (!exists(srcFile) || !exists(pkgFile)) return;   // 包未建/源已删, 不在本规则职责内
+  const src = read(srcFile);
+  const pkg = read(pkgFile);
+  // 生成头 = sync.mjs 写的固定两行 + 空行, 剥掉后剩余内容必须逐字节 == 源文件。
+  const HEADER_RE = /^\/\/ ⚠ 自动生成 — 勿手改[^\n]*\n\/\/ 手改会被 lint-kanet[^\n]*\n\n/;
+  const stripped = pkg.replace(HEADER_RE, '');
+  if (stripped !== src) {
+    violate('R-FEE-SPLIT-PKG-DRIFT',
+      `packages/fee-split/fee-split.mjs 与源 kasia-console/src/lib/fee-split.mjs 不一致(drift)——第三方
+会拿到过期/错误的分润组件快照。重新同步: node packages/fee-split/scripts/sync.mjs, 然后 git add 两处一起提交。`,
+      pkgFile, 0);
+  }
+}
+
+// ── R-MANIFEST-* [件④ money-path manifest 门禁, 2026-07-16, NWT 主笔, Owner 终裁件④]: 校验
+// kasia-console/src/lib/money-path-manifests.mjs 里的清单条目本身(不是扫源码找漏登记的路径——
+// 那是 R-MANIFEST-COVERAGE 的职责, 需要调用图静态分析, 工作量大, 排 v2 独立落, 诚实标注不在本批。
+// 本批 3 条规则只校验"已登记条目的数据完整性/一致性", 首批清单参见
+// docs/2026-07-16-money-path-manifest-schema-and-lint-gate-design.md)。
+//
+// R-MANIFEST-SCHEMA-COMPLETE [ERROR]: 每条 manifest 必须有 path_id/description/intake_transaction/
+// locked_states/normal_exit/timeout_exit/escape_exit/responsible_worker/kill_switch_effect/
+// fault_domain/admin_capabilities/required_tests 十二个顶层字段, 缺一不算合规条目(字段可以是
+// null/none/空数组, 但 KEY 本身不能缺——缺 key = 从没被人想过这一维度, 跟"想过了填 none"是两回事)。
+const _MANIFEST_REQUIRED_KEYS = [
+  'path_id', 'description', 'intake_transaction', 'locked_states', 'normal_exit',
+  'timeout_exit', 'escape_exit', 'responsible_worker', 'kill_switch_effect',
+  'fault_domain', 'admin_capabilities', 'required_tests',
+];
+function checkR_MANIFEST_SCHEMA_COMPLETE() {
+  const manifestFile = file('kasia-console/src/lib/money-path-manifests.mjs');
+  for (const entry of MONEY_PATH_MANIFESTS) {
+    const missing = _MANIFEST_REQUIRED_KEYS.filter((k) => !(k in entry));
+    if (missing.length > 0) {
+      violate('R-MANIFEST-SCHEMA-COMPLETE',
+        `manifest 条目 "${entry.path_id || '(无 path_id)'}" 缺字段: ${missing.join(', ')} — schema 定义的十二个顶层字段必须全部存在(值可以是 null/'none'/空数组, 但 key 不能缺, 缺 key 意味着这个维度从没被人想过)。`,
+        manifestFile, 0);
+    }
+  }
+}
+
+// R-MANIFEST-EXIT-REACHABLE [ERROR]: normal_exit/timeout_exit/escape_exit 三者至少一个 trigger
+// 非 'none' 且 mechanism 非空——三者全空 = 资金锁死无出口, K-10 直接违反(不是 WARN 级别的问题)。
+function checkR_MANIFEST_EXIT_REACHABLE() {
+  const manifestFile = file('kasia-console/src/lib/money-path-manifests.mjs');
+  for (const entry of MONEY_PATH_MANIFESTS) {
+    const exits = [entry.normal_exit, entry.timeout_exit, entry.escape_exit].filter(Boolean);
+    const hasReachable = exits.some((e) => e.trigger && e.trigger !== 'none' && e.mechanism);
+    if (!hasReachable) {
+      violate('R-MANIFEST-EXIT-REACHABLE',
+        `manifest 条目 "${entry.path_id}" 的 normal_exit/timeout_exit/escape_exit 三者全部是 none/空 mechanism — 这笔锁定资金没有任何声明的出口, K-10("Failure Has an Exit")直接违反。`,
+        manifestFile, 0);
+    }
+  }
+}
+
+// R-MANIFEST-TEST-COVERAGE [WARN]: required_tests 至少覆盖 normal_exit(以及任何已声明为非 none
+// 的 timeout_exit/escape_exit)——非阻塞, 首批清单里已知有"待补"占位, warn 而非 error 防止卡住
+// 尚在积累测试覆盖率过程中的正常条目。
+function checkR_MANIFEST_TEST_COVERAGE() {
+  const manifestFile = file('kasia-console/src/lib/money-path-manifests.mjs');
+  for (const entry of MONEY_PATH_MANIFESTS) {
+    const declaredExits = ['normal_exit', 'timeout_exit', 'escape_exit']
+      .filter((k) => entry[k]?.trigger && entry[k].trigger !== 'none' && entry[k].mechanism);
+    const covered = new Set((entry.required_tests || []).map((t) => t.covers));
+    const uncovered = declaredExits.filter((k) => !covered.has(k));
+    if (uncovered.length > 0) {
+      warn('R-MANIFEST-TEST-COVERAGE',
+        `manifest 条目 "${entry.path_id}" 的 required_tests 未覆盖: ${uncovered.join(', ')}(已声明生效的 exit 类型里, 这些在 required_tests[].covers 里零命中)。`,
+        manifestFile, 0);
+    }
+  }
+}
+
+// R-MANIFEST-ADMIN-TIER-MATCH [WARN]: admin_capabilities[].admin_secret_var 若非 null, 必须能在
+// ⑥ADMIN_SECRET拆分设计已定的密钥变量表里找到(不能声明一个不存在的密钥名), risk_tier 必须是已定义
+// 的五级枚举之一(或 'none')——两份独立维护的清单一致性检查, WARN(两份文档协同演进期间难免暂时脱节)。
+const _KNOWN_ADMIN_SECRET_VARS = new Set([
+  'ADMIN_SECRET_ZK_CLOSE_BROADCAST', 'ADMIN_SECRET_STATUS_SIGN',
+  'ADMIN_SECRET_ZK_STATE_PREP', 'ADMIN_SECRET_READONLY',
+]);
+const _KNOWN_RISK_TIERS = new Set([
+  'T-READONLY', 'T-STATE-PREP', 'T-SIGN', 'T-BROADCAST', 'T-BREAK-GLASS', 'none',
+]);
+function checkR_MANIFEST_ADMIN_TIER_MATCH() {
+  const manifestFile = file('kasia-console/src/lib/money-path-manifests.mjs');
+  for (const entry of MONEY_PATH_MANIFESTS) {
+    for (const cap of entry.admin_capabilities || []) {
+      if (cap.admin_secret_var && !_KNOWN_ADMIN_SECRET_VARS.has(cap.admin_secret_var)) {
+        warn('R-MANIFEST-ADMIN-TIER-MATCH',
+          `manifest 条目 "${entry.path_id}" 的 admin_capabilities 声明了未知密钥变量 "${cap.admin_secret_var}"(不在⑥ADMIN_SECRET拆分设计已定的四把钥匙里)——核对是不是笔误, 或⑥那份清单需要同步更新。`,
+          manifestFile, 0);
+      }
+      if (cap.risk_tier && !_KNOWN_RISK_TIERS.has(cap.risk_tier)) {
+        warn('R-MANIFEST-ADMIN-TIER-MATCH',
+          `manifest 条目 "${entry.path_id}" 的 admin_capabilities risk_tier="${cap.risk_tier}" 不在已定义的五级枚举里(T-READONLY/T-STATE-PREP/T-SIGN/T-BROADCAST/T-BREAK-GLASS/none)。`,
+          manifestFile, 0);
+      }
+    }
+  }
+}
+
+// ── R-SELF-HTTP-FETCH [WARN]: console 进程禁 fetch 自己的 HTTP 端点 ──
+// (2026-07-14, docs/2026-07-14-legacy-refund-self-fetch-deadlock-fix-design.md 修法A 同族排查:
+// legacyRefundBuilderTick 靠 fetch('http://127.0.0.1:${PORT}/...') 自己调自己复用 HTTP handler 逻辑,
+// 事件循环被占时这个自我往返永远等不到自己处理, 造成自锁死循环——夜间 285 次冻结/94 次 >30s/最长 316s。
+// 全库 grep 发现 15+ 同族残留(bettor.js/exchange.js/pool.js/agent-health.js/broker-*.js/market-seeder.js
+// 等), 部分带 timeout 部分没有——这条规则堵"下周长出第 N+1 个"复发, 已知残留先 WARN(migration checklist),
+// 不马上升 ERROR(会挡住无关 commit)。同进程内复用逻辑正确做法 = 抽纯函数直调(同 buildBettorRefundClaim
+// 先例), 不经 HTTP loopback。
+const _SELF_FETCH_PORT_RE = /127\.0\.0\.1:\$\{?\s*(process\.env\.)?(PORT|CONSOLE_PORT)\b|127\.0\.0\.1:(3100|3200|3300)\b/;
+function checkR_SELF_HTTP_FETCH(fp, content) {
+  if (!/\.(mjs|js)$/.test(fp)) return;
+  if (/[\\/]scratch[\\/]|\.test\.mjs$/.test(fp)) return;
+  const lines = content.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (/^\s*(\/\/|\*)/.test(line)) continue;   // 纯注释提及(如本次改动的记账注释)不算
+    if (!/\bfetch\(/.test(line)) continue;
+    if (!_SELF_FETCH_PORT_RE.test(line)) continue;
+    warn('R-SELF-HTTP-FETCH',
+      `fetch() 目标疑似 console 自己的端口(127.0.0.1:PORT/3100/3200/3300)——进程内自己调自己的 HTTP
+端点, 事件循环被占时会自我死锁(见 2026-07-14 legacyRefundBuilderTick 事故, 夜间 285 次冻结)。若这是
+periodic tick/cron 里复用同进程 handler 逻辑, 改成抽纯函数直调(同 buildBettorRefundClaim 先例, HTTP
+路由与调用方共用同一份实现), 不经网络往返。若确实需要跨进程/外部调用, 忽略本警告。`,
+      fp, i + 1);
+  }
+}
+
+// ── R-FETCH-NO-TIMEOUT [WARN]: fetch() 调用建议带 AbortSignal.timeout ──
+// (同上 2026-07-14 设计 修法C 兜底): 任何无 timeout 的 fetch 都是潜在无限悬挂——legacyRefundBuilderTick
+// 那条 fetch 就是零 timeout 撞出的事故。启发式(WARN, 非精确 AST 解析): 检查 fetch( 所在行起 10 行窗口内
+// 有没有 AbortSignal.timeout 或 signal: —— 窗口法会有少量假阴性/假阳性(多行调用/邻近无关 timeout),
+// 可接受(migration checklist 性质, 不做commit 硬阻塞)。
+function checkR_FETCH_NO_TIMEOUT(fp, content) {
+  if (!/\.(mjs|js)$/.test(fp)) return;
+  if (/[\\/]scratch[\\/]|\.test\.mjs$/.test(fp)) return;
+  const lines = content.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (/^\s*(\/\/|\*)/.test(line)) continue;
+    if (!/\bfetch\(/.test(line)) continue;
+    const window = lines.slice(i, Math.min(lines.length, i + 10)).join('\n');
+    if (/AbortSignal\.timeout|signal:\s*\w/.test(window)) continue;
+    warn('R-FETCH-NO-TIMEOUT',
+      `fetch() 调用附近 10 行内未见 AbortSignal.timeout——无 timeout 的 fetch 是潜在无限悬挂(见 2026-07-14
+legacyRefundBuilderTick 自锁死循环事故根因之一)。补 { signal: AbortSignal.timeout(N) }(N 按调用语义选,
+通常 3000-15000ms)。`,
+      fp, i + 1);
+  }
+}
+
+// ── R-SCRATCH-CLUTTER [WARN]: 临时脚本铁律 (Owner 2026-06-27 钦定·防根目录堆爆) ──
+// 一次性诊断/测试脚本写 scratch/ (gitignored, 绝对路径), 不堆仓库根目录. gitignore (`_*`) 防入库不防
+// 物理堆在文件浏览器 → whole-repo warn (每次 commit 跑 lint 都提醒). 历史: 821 临时文件堆爆 (归档 815).
+// keep-list = launcher / 各 agent canonical send (`_<agent>_send.cjs`) / 代码引用的常驻工具. 详见 CLAUDE.md.
+function checkScratchClutter() {
+  const KEEP = new Set([
+    '_bettor_send.cjs', '_bettor_verify.cjs', '_nwt_send.cjs', '_j1_send.cjs',
+    '_j2_send.cjs', '_kanetui_send.cjs', '_j2_ready.cjs',
+    '_launch_tg_bot.mjs', '_launch_broker_bot.mjs', '_launch_owner_bot.mjs',
+    '_autobet_config_parse.mjs', '_bettor_ticket_byteeq.mjs', '_fee_single_source.mjs',
+    '_j2tn_backfill_snapshot_v2.mjs', '_nwt_tn_autobet_loop.mjs',
+  ]);
+  let clutter;
+  try {
+    clutter = fs.readdirSync(ROOT).filter(f => /^_.*\.(cjs|mjs)$/.test(f) && !KEEP.has(f));
+  } catch { return; }
+  if (clutter.length > 0) {
+    warn('R-SCRATCH-CLUTTER',
+      `${clutter.length} 个临时脚本堆在仓库根目录 — 一次性脚本应写 scratch/ (gitignored, 绝对路径). 新增常驻工具→加进本 lint keep-list. 见 CLAUDE.md 临时脚本铁律. 例: ${clutter.slice(0, 5).join(', ')}`,
+      file(clutter[0]), 0);
   }
 }
 
@@ -135,6 +424,10 @@ function checkR10() {
 // ── R11: 中文 deterministic 完成动作 regex 必含 (?:了)? 后缀 ──
 // 检测: const X_REGEX = /^(...|完成|付了|转完|done|...)\s*[!！。.…]*\s*$/  无 (?:了)?
 function checkR11(filepath, content) {
+  // R11 只查真实 source 里的 const X_REGEX 声明. .md 文档(如 ANTI-PATTERNS.md 自己规则11的
+  // "### Wrong" 教学代码块)会把示例性缺后缀 regex 字面量误判成真实违规, 导致自身规则文档永远
+  // 过不了自己的 lint (2026-07-11 KANet-UI 发现, 见 memory). 文档示例不是要被 lint 的源码.
+  if (filepath.endsWith('.md')) return;
   const lines = content.split('\n');
   // 看变量名含 PAID/FINISH/DONE 的 regex literal
   const re = /const\s+(\w*(?:PAID|FINISH|DONE|COMPLETE)\w*_REGEX)\s*=\s*(\/[^\n]+\/[gimsu]*)/gi;
@@ -672,6 +965,365 @@ function checkR40_minerFee_floor(filepath, content) {
   }
 }
 
+// ── R_SHARD_BLIND (线8 STEP2, Bettor 2026-06-24 APPROVED): pool_bettor_sides 裸按 logical market_id 查 ──
+// 根因: bshard register-v07 bettor 按 shard_market_id 存, 不在 logical_market_id 下.
+//       WHERE market_id = logicalId → 0 结果 → settler 误判 0 押注退 maker / display 0 / refund 404.
+// 修法: 用 getSidesByLogicalMarket(logicalId, db) (跨-shard 聚合)
+//       或  getSidesByShard(shardId, db)      (单片, 已知 shard-level 操作)
+//       from: kasia-console/src/lib/pool-bettor-sides-query.mjs
+// 注意: shard-allocator.mjs 传入的 shardMarketId 是 CORRECT, 不改.
+// Escape hatch: 同行或前3行加 // lint-allow-shard-blind: <reason>
+// warn-mode (扫现存 41 命中当 checklist 迁移), 迁完改 error.
+function checkR_SHARD_BLIND(filepath, content) {
+  if (/\.(md|txt)$/.test(filepath)) return;  // docs/comments not code
+  if (/[/\\]test-framework[/\\]/.test(filepath)) return;
+  if (/[/\\]scripts[/\\]/.test(filepath)) return;
+  if (/shard-allocator\.mjs$/.test(filepath)) return;
+  if (/pool-bettor-sides-query\.mjs$/.test(filepath)) return;
+
+  const lines = content.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (/^\s*(?:\/\/|\*|\/\*)/.test(line)) continue;
+    if (!/pool_bettor_sides/i.test(line)) continue;
+    // Match: pool_bettor_sides WHERE market_id = (bare logical query)
+    if (!/pool_bettor_sides\b.*WHERE\b.*\bmarket_id\s*=/.test(line)) continue;
+    // escape hatch: lint-allow-shard-blind in this line or prev 3 lines
+    const windowStart = Math.max(0, i - 3);
+    const windowText = lines.slice(windowStart, i + 1).join('\n');
+    if (/lint-allow-shard-blind/.test(windowText)) continue;
+    warn(
+      'R-SHARD-BLIND [WARN]',
+      '[线8 STEP2] pool_bettor_sides 裸按 market_id 查 — bshard bettor 按 shard_market_id 存, ' +
+      'logical 查不到 → settler 误退 / 显示 0 / refund 404. ' +
+      '改用 getSidesByLogicalMarket(logicalId, db) 或 getSidesByShard(shardId, db) ' +
+      'from lib/pool-bettor-sides-query.mjs. ' +
+      '如确需裸查(已知单片操作), 加 // lint-allow-shard-blind: <reason>.',
+      filepath,
+      i + 1
+    );
+  }
+}
+
+// ── R-COMMAND-REGISTRATION (#25, NWT 2026-07-04): relay.mjs command case 必在 commands.mjs 三层注册 ──
+// 根因(KI-49, 复刻 5+ 次实录·commands.mjs 头部自己列了教训): 有人加 relay.mjs 一个新 case 'x' handler,
+// 但忘了在 commands.mjs 里同步注册 COMMAND_TYPES/COMMAND_PAYLOAD_SCHEMA/COMMAND_FIELD_TYPES 三层 —
+// validateCommandPayload 在 switch 前查 COMMAND_TYPE_SET 找不到 → 静默 reject "unknown/invalid command
+// type" → 调用方(settler/daemon/broker)看到的是"Relay not running"或"INVALID COMMAND"这类误导性错误,
+// 真因是白名单没登记。今天(2026-07-04) #28 B(get_per_bet_address+sweep_per_bet)和历史上 sign_input_
+// for_settle / pool_side_refund_cancelled_tx / pool_refund_maker_unjoined_tx 等至少 5 次复刻同一个坑。
+// 这条 lint 做静态一次性核对: relay.mjs 里所有 case 字符串字面量, 必须都在 commands.mjs 的
+// COMMAND_TYPES 值集合里(第一层); COMMAND_TYPES 每个 key 必须在 COMMAND_PAYLOAD_SCHEMA 和
+// COMMAND_FIELD_TYPES 里都有对应条目(第二三层, 防只补了枚举没补 schema/field-types 这种半截注册)。
+function checkR_COMMAND_REGISTRATION() {
+  const relayFile = file('kasia-relay/src/relay.mjs');
+  const commandsFile = file('kasia-relay/src/lib/commands.mjs');
+  if (!exists(relayFile) || !exists(commandsFile)) return;
+  const relayContent = read(relayFile);
+  const commandsContent = read(commandsFile);
+
+  // relay.mjs case 字符串字面量(只认 case 'literal': 形态, 不含 case CONST: 这种间接引用 — 现状全库
+  // relay.mjs 命令 case 都是裸字符串字面量, 见 commands.mjs 头部注释 "2. Add case in relay.mjs switch").
+  const relayLines = relayContent.split('\n');
+  const relayCases = [];
+  for (let i = 0; i < relayLines.length; i++) {
+    const m = relayLines[i].match(/^\s*case\s+['"]([a-z][a-z0-9_]*)['"]\s*:/);
+    if (m) relayCases.push({ type: m[1], line: i + 1 });
+  }
+
+  // commands.mjs 三层: COMMAND_TYPES { KEY: 'value', ... } / COMMAND_PAYLOAD_SCHEMA { [COMMAND_TYPES.KEY]: [...] }
+  // / COMMAND_FIELD_TYPES { [COMMAND_TYPES.KEY]: {...} }。抓 block 用 Object.freeze({ ... }); 边界(找不到就空).
+  function extractBlock(varName) {
+    const re = new RegExp(`export const ${varName}\\s*=\\s*Object\\.freeze\\(\\{`);
+    const m = re.exec(commandsContent);
+    if (!m) return '';
+    // 从匹配点数括号找配对的 }); (block 内不会有更深层嵌套的 { 使这个简单计数失配 — 三个 export 都是扁平对象)
+    let depth = 1, i = m.index + m[0].length;
+    const start = i;
+    while (i < commandsContent.length && depth > 0) {
+      if (commandsContent[i] === '{') depth++;
+      else if (commandsContent[i] === '}') depth--;
+      i++;
+    }
+    return commandsContent.slice(start, i - 1);
+  }
+  const typesBlock = extractBlock('COMMAND_TYPES');
+  const schemaBlock = extractBlock('COMMAND_PAYLOAD_SCHEMA');
+  const fieldTypesBlock = extractBlock('COMMAND_FIELD_TYPES');
+
+  // COMMAND_TYPES: KEY: 'value' 对 (跳注释行)
+  const typeEntries = [...typesBlock.matchAll(/^\s*([A-Z][A-Z0-9_]*)\s*:\s*['"]([a-z][a-z0-9_]*)['"]/gm)];
+  const typeKeyToValue = new Map(typeEntries.map((m) => [m[1], m[2]]));
+  const typeValueSet = new Set(typeEntries.map((m) => m[2]));
+
+  // ① relay.mjs 每个 case 必须在 COMMAND_TYPES 值集合里 — 这是历史上真正咬人的那一层.
+  for (const { type, line } of relayCases) {
+    if (!typeValueSet.has(type)) {
+      violate(
+        'R-COMMAND-REGISTRATION (#25, KI-49 第 N 次复刻)',
+        `relay.mjs case '${type}' 没在 commands.mjs COMMAND_TYPES 注册 — validateCommandPayload 会静默 reject "unknown command type", 调用方只会看到"Relay not running"/"INVALID COMMAND"这类误导性错误(真因是白名单没登记)。加 COMMAND_TYPES.${type.toUpperCase()}: '${type}' + 同步 COMMAND_PAYLOAD_SCHEMA/COMMAND_FIELD_TYPES(三层缺一不可)。`,
+        relayFile, line
+      );
+    }
+  }
+
+  // ②③ COMMAND_TYPES 每个 key 必须在 SCHEMA / FIELD_TYPES 里有 [COMMAND_TYPES.KEY]: 条目 — 防"加了枚举
+  // 没加后两层"这种半截注册(validateCommandPayload 对 SCHEMA 里没有的 type 会 skip 必填字段校验,
+  // 不是硬拒绝, 但意味着这个命令的必填参数完全不受检查, 静默数据缺陷比硬拒绝更隐蔽).
+  for (const [key] of typeKeyToValue) {
+    const ref = `[COMMAND_TYPES.${key}]`;
+    if (!schemaBlock.includes(ref)) {
+      warn(
+        'R-COMMAND-REGISTRATION [WARN]',
+        `commands.mjs COMMAND_TYPES.${key} 没在 COMMAND_PAYLOAD_SCHEMA 里注册对应 [COMMAND_TYPES.${key}] 条目 — 这个命令类型的必填字段完全不受 validateCommandPayload 校验(半截注册, 比硬拒绝更隐蔽)。`,
+        commandsFile, 0
+      );
+    }
+    if (!fieldTypesBlock.includes(ref)) {
+      warn(
+        'R-COMMAND-REGISTRATION [WARN]',
+        `commands.mjs COMMAND_TYPES.${key} 没在 COMMAND_FIELD_TYPES 里注册对应 [COMMAND_TYPES.${key}] 条目 — 这个命令类型的字段类型完全不受校验(半截注册)。`,
+        commandsFile, 0
+      );
+    }
+  }
+}
+
+// ── R-FEE-LEAVES-BYPASS [WARN] (P4/D-008, 2026-07-09, J2): ZK 线文件禁直调 deriveFeeLeaves/FEE_CONFIG ──
+// 根因(7/8 门②实弹分叉): propose/enqueue/委员 voter 三处各自手搓 fee 派生, 同一市场三处三说法(pool 基数漏
+// seed/费率用协议常量非市场级 broker_fee_pct)。P4 收敛为单源 deriveSettlementFeeLeaves(pool-shard-settle.mjs),
+// deriveFeeLeaves/FEE_CONFIG 收窄为 V1(PayoutShard/committee-settle)专属——ZK 线文件(bshard-close-transport.mjs
+// /zk-prove-enqueue.mjs/zk-prove-worker.mjs)若出现 deriveFeeLeaves(/FEE_CONFIG 直调 = 复发同一坑, WARN 标记。
+// ⚠ 不含 bshard-close-enforce.mjs: 该文件 V1(enforceCloseAttest)/V2(enforceCloseAttestV2)共存, V1 分支
+// 合法保留 deriveFeeLeaves/FEE_CONFIG(P4 只抽出了 V2 分支), 文件级静态扫无法可靠区分函数边界, 不纳入本规则
+// (人工 review 覆盖, 见设计文档 §2 四侧接线)。
+const _FEE_LEAVES_BYPASS_FILES = [
+  'kasia-console/src/lib/bshard-close-transport.mjs',
+  'kasia-console/src/lib/zk-prove-enqueue.mjs',
+  'kasia-console/src/services/zk-prove-worker.mjs',
+];
+function checkR_FEE_LEAVES_BYPASS() {
+  for (const rel of _FEE_LEAVES_BYPASS_FILES) {
+    const fp = file(rel);
+    if (!exists(fp)) continue;
+    const content = read(fp);
+    const lines = content.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (/\bderiveFeeLeaves\s*\(/.test(line) || /\bFEE_CONFIG\b/.test(line)) {
+        warn(
+          'R-FEE-LEAVES-BYPASS [WARN]',
+          `ZK 线文件直用 deriveFeeLeaves()/FEE_CONFIG(V1 协议常量口径)——P4/D-008 单源收敛后 ZK 线一律走 deriveSettlementFeeLeaves(pool-shard-settle.mjs, 市场级 broker_fee_pct+consolidatedPool 含seed), 否则复发 7/8 门②"同一市场三处三说法"同族坑。`,
+          fp, i + 1
+        );
+      }
+    }
+  }
+}
+
+// ── R-FEERULES-CANON-BYPASS [WARN] (B线落1, 2026-07-12, J2): feeRules canonicalize/hash 单源封旁路 ──
+// 根因(spec 2026-06-22-modular-fee-split-component-spec.md v1.2-2): create-time commit 与 settle-time
+// re-derive 若各自实现"同一"canonical 规范 = driver/committee 漏配家族的根(7/11 一夜炸五处同形状)。
+// canonicalizeFeeRules()/computeFeeRulesCommit() 唯一家 = kasia-console/src/lib/fee-split.mjs。
+// 其它文件出现 ①canonicalizeFeeRules 重定义 或 ②对 feeRules 直接 blake2b = 旁路, WARN 标记。
+const _FEERULES_CANON_HOME = 'kasia-console/src/lib/fee-split.mjs';
+// packages/fee-split/fee-split.mjs(B线落3)是 _FEERULES_CANON_HOME 的 sync 构建产物(R-FEE-SPLIT-PKG-DRIFT
+// 守内容一致), 不是独立实现——同源排除, 否则每次 sync 都会在这条 WARN 上噪音。
+const _FEERULES_CANON_HOME_SYNCED_COPIES = new Set(['packages/fee-split/fee-split.mjs']);
+function checkR_FEERULES_CANON_BYPASS(fp, content) {
+  const rel = path.relative(ROOT, fp).replace(/\\/g, '/');
+  if (rel === _FEERULES_CANON_HOME || _FEERULES_CANON_HOME_SYNCED_COPIES.has(rel)) return;
+  if (!/\.(mjs|js|cjs)$/.test(fp)) return;
+  const lines = content.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (/(?:function\s+canonicalizeFeeRules|(?:const|let|var)\s+canonicalizeFeeRules\s*=)/.test(line)) {
+      warn('R-FEERULES-CANON-BYPASS [WARN]',
+        `canonicalizeFeeRules 重定义——feeRules canonical 序列化唯一家=${_FEERULES_CANON_HOME}(spec v1.2-2 单一共享函数), 两处各自实现同一规范=commit 永假/永真同族坑, import 组件的那份。`,
+        fp, i + 1);
+    }
+    if (/blake2b\s*\([^)]*fee_?[Rr]ules/.test(line)) {
+      warn('R-FEERULES-CANON-BYPASS [WARN]',
+        `对 feeRules 直接 blake2b——hash-commit 必走 computeFeeRulesCommit(${_FEERULES_CANON_HOME})单源, 自 hash = canonical 规范旁路。`,
+        fp, i + 1);
+    }
+  }
+}
+
+// R-PHANTOM-FIELD (2026-07-05, qzdh7nar/J1, following #48/#50/maker-P&L 三例同根): metadata fields written
+// ONLY by the legacy v0.6 settler (pool-market-settler.js) are read unconditionally elsewhere as if they're
+// always populated — but bshard(v0.7)/create-v07 markets never write them (deriveFeeLeaves/phase2_* writeback
+// live only in the old settler), so an unguarded read silently gets `undefined` for every v0.7 market and either
+// crashes or (worse) produces a wrong display (win shown as loss, fee shown as 0, P&L shown as "pending" forever).
+// Three real incidents hit this exact pattern in 48h (phase2_winner #48, phase2_broker_fee_sompi #50,
+// phase2_maker_payout_sompi maker-P&L) — this rule stops a 4th field from repeating it. Heuristic, not full AST:
+// any `phase2_<word>` property read outside the writer file must have a same-line null/undefined/equality guard
+// (`!= null`, `!== undefined`, `=== 0`, `=== 1`, optional chaining `?.`) — mirroring the exact pattern the three
+// fixes converged on. WARN not error: some phase2_ references are plain comments/docs, not live reads.
+// pool-market-settler.js = the actual v0.6→v0.7 migration risk this rule targets (pool_markets.metadata).
+// bettor-prediction-{settler,voter}.js reuse the same "phase2_*" name for an unrelated, self-contained
+// exchange_offers writer/reader pair (own dispatchPhase2 write at bettor-prediction-settler.js:338) — same
+// field NAMES, different table/feature, not a v0.6/v0.7 split. Excluded to keep signal on the real risk.
+const PHANTOM_FIELD_WRITER_FILE = 'services/pool-market-settler.js';
+const PHANTOM_FIELD_EXCLUDE_FILES = ['services/bettor-prediction-settler.js', 'services/bettor-prediction-voter.js'];
+// property-access only (`.phase2_x` / `['phase2_x']`) — excludes bare mentions inside strings/comments/log messages
+// (e.g. migrate.js console.log("... phase2_tx_obj ...") is prose, not a live read).
+const PHANTOM_FIELD_ACCESS_RE = /[.\[]['"]?(phase2_[a-z0-9_]+)\b/g;
+const PHANTOM_FIELD_GUARD_RE = /!=\s*null|!==\s*null|!=\s*undefined|!==\s*undefined|===\s*0|===\s*1|\?\.|Array\.isArray|![\w.]*phase2_/;
+function checkR_PHANTOM_FIELD(filepath, content) {
+  const relPath = filepath.replace(/\\/g, '/');
+  if (relPath.endsWith(PHANTOM_FIELD_WRITER_FILE)) return;  // the legitimate writer — no read-guard needed
+  if (PHANTOM_FIELD_EXCLUDE_FILES.some((f) => relPath.endsWith(f))) return;  // unrelated self-contained phase2_ writer/reader pair
+  const lines = content.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+    if (trimmed.startsWith('//') || trimmed.startsWith('*')) continue;  // comment/doc line, not a live read
+    const matches = [...line.matchAll(PHANTOM_FIELD_ACCESS_RE)];
+    if (matches.length === 0) continue;
+    // guard may be on this line or either of the two preceding lines (enclosing `if (x.phase2_y != null) {` block) —
+    // matches the codebase's actual fixed pattern (#48 pool.js:2739-2740: guard on the `if`, use on the next line).
+    const window = [lines[i - 2], lines[i - 1], line].filter(Boolean).join('\n');
+    if (PHANTOM_FIELD_GUARD_RE.test(window)) continue;
+    warn(
+      'R-PHANTOM-FIELD [WARN]',
+      `'${matches[0][1]}' 是 v0.6 老settler(pool-market-settler.js)专属字段, bshard(v0.7)/create-v07 盘从没写过(#48/#50/maker-P&L 三例同根)——这行读它但附近(本行+前两行)看不到 null/undefined/等值/Array.isArray/可选链守卫, 对 v0.7 盘会静默读到 undefined。确认这个读取点是不是也要区分 v0.6/v0.7(仿 #48/#50 fix 的守卫写法), 或者本身就在 v0.6-only 代码路径里(此时可忽略此告警)。`,
+      filepath, i + 1
+    );
+  }
+}
+
+// R-COMMINGLE-GUARD (FINDING-2 ③, J1 2026-06-28): every bettor stake-lock handler in pool.js must call the
+// single-source assertNotCommingled guard. commit1 inlined the check in register-v07 ONLY and missed the other
+// 5 register handlers (register / register-v06{prep,confirm} / register-external{prep,confirm}) → auto-bet + TG
+// /bet (register-v06 dual-handle) let commingled bets through. (1) flags any /bettor/register* handler missing
+// the guard so a NEW register handler can't silently reopen the hole; (2) warns on inline commingled-detection
+// SQL outside the canonical helper (= the same single-source-drift the guard-call-site rule prevents).
+function checkR_COMMINGLE_GUARD(filepath, content) {
+  // (1) guard-call-site: pool.js /bettor/register* handlers MUST call assertNotCommingled (hard fail).
+  // A handler's body ends at the NEXT route handler (any verb) — not the next register handler — so an
+  // unguarded handler can't false-pass on a guard call that lives in a non-register handler between them.
+  if (/api[\\/]pool\.js$/.test(filepath)) {
+    // Enumerate every fastify route handler with its route string, then check each whose body either (a) is a
+    // /bettor/register* route OR (b) writes a stake lock (INSERT ... INTO pool_bettor_sides). Keying on the
+    // INSERT signature — not just the route name (KANet-UI future-proof catch) — means a NEW stake-lock handler
+    // under any path can't silently reopen the hole; the register* condition keeps prep-handler defense coverage.
+    const handlerRe = /fastify\.(?:post|put|get|delete|patch)\(\s*['"`]([^'"`]*)['"`]/g;
+    const handlers = [];
+    let h;
+    while ((h = handlerRe.exec(content)) !== null) {
+      handlers.push({ idx: h.index, route: h[1], line: content.slice(0, h.index).split('\n').length });
+    }
+    for (let i = 0; i < handlers.length; i++) {
+      const body = content.slice(handlers[i].idx, i + 1 < handlers.length ? handlers[i + 1].idx : content.length);
+      const isRegister = /\/bettor\/register/.test(handlers[i].route);
+      const locksStake = /INSERT(?:\s+OR\s+\w+)?\s+INTO\s+pool_bettor_sides\b/i.test(body);
+      if ((isRegister || locksStake) && !/assertNotCommingled\s*\(/.test(body)) {
+        violate(
+          'R-COMMINGLE-GUARD',
+          '[FINDING-2 ③] bettor stake-lock handler 缺 assertNotCommingled 单源守卫 — commingled-spine 盘可漏押 (commit1 只守 register-v07, 漏 register-v06 dual-handle = auto-bet/TG 主路径; 触发=register* 路由 OR INSERT pool_bettor_sides). market 加载后加一行 `if (assertNotCommingled(market, reply, sqlite)) return;` (lib/pool-commingle-detect.mjs).',
+          filepath, handlers[i].line
+        );
+      }
+    }
+  }
+  // (2) single-source: inline commingled-detection SQL outside the canonical helper = drift risk (warn).
+  // Skip the helper itself (canonical home) AND this lint script (whose regex/message literally contains the
+  // scanned pattern → would self-flag).
+  if (!/pool-commingle-detect\.mjs$/.test(filepath) && !/lint-kanet\.mjs$/.test(filepath)) {
+    const lines = content.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+      if (/^\s*(?:\/\/|\*)/.test(lines[i])) continue;
+      const window = lines.slice(i, i + 3).join(' ');
+      if (/GROUP\s+BY\s+spine_p2sh\b[\s\S]{0,80}HAVING\s+COUNT\(\*\)\s*>\s*1/i.test(window)) {
+        warn(
+          'R-COMMINGLE-SINGLE-SOURCE',
+          '[FINDING-2 单源] 内联 commingled-spine 检测 SQL (GROUP BY spine_p2sh HAVING COUNT(*)>1) — 应 import commingledSpineSet/isCommingledSpine (lib/pool-commingle-detect.mjs) 防与单源判据漂移.',
+          filepath, i + 1
+        );
+      }
+    }
+  }
+}
+
+// ── R-DOC-PATH / R-DOC-DUPLICATE (③ doc-lint, Bettor 2026-06-29):
+//   设计文档(date-prefix *.md)必住 docs/ 根目录·同名多路径 → fail.
+//   根因: 今晚 KANet-UI UX doc 误提 kasia-console/docs/ → grep 扫 docs/ 看不到 → 假阴性.
+//   同族: J1 stale-local 假阴性(代码同名但版本不同). 此 lint 堵"同名 doc 多路径"变体.
+//   Escape hatch: 不支持 (文档无理由散落多路径; 必归 docs/).
+function checkDocPath() {
+  const DOCS_ROOT = path.join(ROOT, 'docs');
+  const datePrefix = /^\d{4}-\d{2}-\d{2}-/;
+  // 不走嵌套副本目录 / 无关目录 (kanet-tn12 = 嵌套同名目录, 非本 repo 范围)
+  const mdSkip = new Set(['node_modules', '.git', 'logs', 'dist', 'build', 'out', '.cache',
+    'scratch', 'tmp', '_archive_root_20260627', 'kasia-console-archive', 'kanet-tn12']);
+
+  const mdFiles = [];
+  function walkMd(dir, depth) {
+    if (depth > 7) return;
+    let entries;
+    try { entries = fs.readdirSync(dir); } catch { return; }
+    for (const name of entries) {
+      if (mdSkip.has(name) || name.startsWith('.')) continue;
+      const full = path.join(dir, name);
+      let st;
+      try { st = fs.statSync(full); } catch { continue; }
+      if (st.isDirectory()) walkMd(full, depth + 1);
+      else if (st.isFile() && name.endsWith('.md')) mdFiles.push(full);
+    }
+  }
+  walkMd(ROOT, 0);
+
+  // Rule 1: date-prefixed design doc NOT under docs/ hierarchy → block
+  // 允许 docs/ 任何子目录 (archived/plans/spec 等); 不允 kasia-console/docs/、根目录 等。
+  const docsHierarchy = DOCS_ROOT + path.sep;
+  for (const fp of mdFiles) {
+    const name = path.basename(fp);
+    if (!datePrefix.test(name)) continue;
+    if (fp.startsWith(docsHierarchy) || path.dirname(fp) === DOCS_ROOT) continue;
+    violate('R-DOC-PATH',
+      `设计文档 "${name}" 不在 docs/ 层次下 (当前: ${path.relative(ROOT, fp)}). ` +
+      `必 git mv → docs/${name}. Owner 单路径原则·防 grep 假阴性 (今晚教训).`,
+      fp, 0);
+  }
+
+  // Rule 2: same-basename date-prefix .md in multiple paths → block
+  // 只查 date-prefix 设计文档 (排除 README.md / broker-test-guide.md 等通用名).
+  const byBasename = {};
+  for (const fp of mdFiles) {
+    const name = path.basename(fp);
+    if (!datePrefix.test(name)) continue;  // skip non-design-doc
+    (byBasename[name] ||= []).push(fp);
+  }
+  for (const [name, fps] of Object.entries(byBasename)) {
+    if (fps.length <= 1) continue;
+    violate('R-DOC-DUPLICATE',
+      `设计文档 "${name}" 散落 ${fps.length} 个路径: ` +
+      `${fps.map(f => path.relative(ROOT, f)).join(' + ')} → grep 假阴性. ` +
+      `保留 docs/ 一份·删其余.`,
+      fps[0], 0);
+  }
+
+  // Rule 3 (R-DOC-STATUS, WARN, 2026-07-07 卡3 KANet-UI+Bettor+NWT): date-prefix 设计文档缺 Status 头
+  // → 亮灯不 block(现存 123/129 篇无头, hard-block 会瘫掉几乎所有 docs/ commit)。
+  // 目的同 D-004 知识分层:接位者一眼看清这篇是 CURRENT/SUPERSEDED/ARCHIVED,不用翻 ledger 猜。
+  // 只查 docs/ 根(不含子目录,archived/等子目录本身已经是状态声明,不强制加头)。
+  const statusRe = /^\s*>\s*\*\*Status\*\*\s*:\s*(CURRENT|SUPERSEDED|ARCHIVED)/mi;
+  for (const fp of mdFiles) {
+    const name = path.basename(fp);
+    if (!datePrefix.test(name)) continue;
+    if (path.dirname(fp) !== DOCS_ROOT) continue;  // 只查 docs/ 根, 子目录已分类不重复要求
+    let head;
+    try { head = fs.readFileSync(fp, 'utf8').slice(0, 2000); } catch { continue; }
+    if (!statusRe.test(head)) {
+      warn('R-DOC-STATUS',
+        `设计文档 "${name}" 缺 Status 头(> **Status**: CURRENT|SUPERSEDED|ARCHIVED,标题下方几行内). ` +
+        `接位者翻 docs/ 时无法一眼判断这篇还作不作数. 加一行, 见任意近期文档示例.`,
+        fp, 0);
+    }
+  }
+}
+
 // ── 跑 ──
 for (const fp of targets) {
   let content;
@@ -687,6 +1339,7 @@ for (const fp of targets) {
   checkR_NWT_FRAMEWORK(fp, content);
   checkR_NWT_STATE_MACHINE(fp, content);  // SA-3: retail_dex_orders.state 直 UPDATE → hard fail
   checkBrokerStutter(fp, content);
+  checkR_COMMINGLE_GUARD(fp, content);  // FINDING-2 ③: stake-lock handler 必调单源 assertNotCommingled (防漏 handler)
   checkCommandEnum(fp, content);
   checkABE_A6_protocol_status_owner(fp, content);  // ABE-A.6: protocol_status owner invariant
   checkKI30_chain_amount_precision(fp, content);  // KI-30 (Bettor r181 5/19): chain TX amount 必 toFixed(8)
@@ -694,20 +1347,55 @@ for (const fp of targets) {
   checkKI32_oracle_channel_mutex(fp, content);  // KI-32 (Oracle v0.3 R7 J2 #9 + J1 #4): oracle-registry NOT 进 COORD_CHANNELS + ORACLE_REGISTRY_CHANNELS 跟 COORD mutex
   checkKI33_trust_score_placeholder(fp, content);  // KI-33 (Oracle v0.3 §9 5/26): broker-llm-agent.js SYSTEM_PROMPT 必含 {{trust_score}}
   checkR40_minerFee_floor(fp, content);  // R40 (G6 批2 红线 7, qlfpv brick sediment 5/31): pool.js create-v06 minerFee 默认下限
+  checkR_SHARD_BLIND(fp, content);       // R-SHARD-BLIND [WARN] (线8 STEP2 2026-06-24): pool_bettor_sides 裸 logical market_id 查
+  checkR_PHANTOM_FIELD(fp, content);     // R-PHANTOM-FIELD [WARN] (2026-07-05, qzdh7nar): v0.6-only phase2_* 字段无守卫读取 — 防第4例(#48/#50/maker-P&L 同根)
+  checkR_FEERULES_CANON_BYPASS(fp, content);  // R-FEERULES-CANON-BYPASS [WARN] (B线落1 2026-07-12): feeRules canonicalize/hash 单源封旁路(spec v1.2-2)
+  checkR_STATUS_GUARD_BLACKLIST(fp, content);  // R-STATUS-GUARD-BLACKLIST [WARN] (处置设计红队 2026-07-12): protocol_status UPDATE 安全闸黑名单启发式→建议白名单
+  checkR_EXPLORER_URL_BYPASS(fp, content);     // R-EXPLORER-URL-BYPASS [ERROR] (死链收敛设计 §3 2026-07-12): explorer 域名字面量禁散装, 单源 explorer-url.mjs 外一律硬阻塞
+  checkR_SELF_HTTP_FETCH(fp, content);         // R-SELF-HTTP-FETCH [WARN] (2026-07-14 legacy-refund 自锁死循环修复设计): console 禁 fetch 自己的端口
+  checkR_FETCH_NO_TIMEOUT(fp, content);        // R-FETCH-NO-TIMEOUT [WARN] (同上设计 修法C): fetch() 建议带 AbortSignal.timeout
+  checkR_PS_FAMILY_DISPATCH(fp, content);      // R-PS-FAMILY-DISPATCH [ERROR] (K-18 §3.4 2026-07-21): compilePayoutShardRedeem/V2Redeem 调用点白名单, 防绕过 coherence gate
 }
 checkR10();
 checkR_NULLIFIER_I64();
+checkR_COMMAND_REGISTRATION();  // R-COMMAND-REGISTRATION (#25, KI-49 防重复): relay.mjs case 必在 commands.mjs 三层注册
+checkR_FEE_LEAVES_BYPASS();     // R-FEE-LEAVES-BYPASS [WARN] (P4/D-008, 2026-07-09): ZK 线禁直调 deriveFeeLeaves/FEE_CONFIG
+checkScratchClutter();
+checkR_FEE_SPLIT_PKG_DRIFT();     // R-FEE-SPLIT-PKG-DRIFT [ERROR] (B线落3 2026-07-12): packages/fee-split/fee-split.mjs 必与源同步(硬阻塞非WARN)
+checkR_MANIFEST_SCHEMA_COMPLETE();  // R-MANIFEST-SCHEMA-COMPLETE [ERROR] (件④ 2026-07-16): money-path manifest 十二字段齐全性
+checkR_MANIFEST_EXIT_REACHABLE();   // R-MANIFEST-EXIT-REACHABLE [ERROR] (件④ 2026-07-16): 三种exit全空=K-10直接违反
+checkR_MANIFEST_TEST_COVERAGE();    // R-MANIFEST-TEST-COVERAGE [WARN] (件④ 2026-07-16): required_tests 覆盖已声明exit
+checkR_MANIFEST_ADMIN_TIER_MATCH(); // R-MANIFEST-ADMIN-TIER-MATCH [WARN] (件④ 2026-07-16): admin_secret_var/risk_tier 对齐⑥拆分清单
+checkLedgerSize();               // R-LEDGER-SIZE [WARN] (D-010 2026-07-10): COORD-LEDGER.md >100KB 提醒切档
+checkDocPath();                          // R-DOC-PATH/R-DOC-DUPLICATE (③ doc-lint 2026-06-29): date-prefixed doc 必住 docs/ 根·同名多路径 → fail
 
 // ── 报告 ──
+// warnings first (non-blocking — WARN rules are migration checklists, not hard blockers)
+if (warnings.length > 0) {
+  const byWarnRule = {};
+  for (const w of warnings) (byWarnRule[w.rule] ||= []).push(w);
+  console.log(`\n[lint-kanet] ⚠  ${warnings.length} warning(s) across ${Object.keys(byWarnRule).length} warn-rule(s) (non-blocking — fix as migration checklist):\n`);
+  for (const [rule, ws] of Object.entries(byWarnRule)) {
+    console.log(`  ${rule}: ${ws.length} hit(s)`);
+    for (const w of ws.slice(0, 5)) {
+      console.log(`    ${path.relative(ROOT, w.file)}:${w.line}`);
+      console.log(`      ${w.msg.slice(0, 200)}`);
+    }
+    if (ws.length > 5) console.log(`    ... ${ws.length - 5} more`);
+  }
+  console.log(`\n  Warnings do NOT block commit. Migrate to suppress. See docs/ANTI-PATTERNS.md.`);
+}
+
 if (violations.length === 0) {
-  console.log(`[lint-kanet] ✓ ${targets.length} files clean`);
+  if (warnings.length === 0) console.log(`[lint-kanet] ✓ ${targets.length} files clean`);
+  else console.log(`[lint-kanet] ✓ ${targets.length} files — 0 errors (${warnings.length} warning(s) above)`);
   process.exit(0);
 }
 
 const byRule = {};
 for (const v of violations) (byRule[v.rule] ||= []).push(v);
 
-console.log(`\n[lint-kanet] ✗ ${violations.length} violations across ${Object.keys(byRule).length} rules:\n`);
+console.log(`\n[lint-kanet] ✗ ${violations.length} violation(s) across ${Object.keys(byRule).length} rule(s):\n`);
 for (const [rule, vs] of Object.entries(byRule)) {
   console.log(`  ${rule}: ${vs.length} hit(s)`);
   for (const v of vs.slice(0, 5)) {

@@ -319,17 +319,24 @@ contract PoolSpine_v07(
         require(shard_count >= 1);
         require(shard_id < shard_count);
 
-        // ⑨ commit anchor (Bettor G6 cross-shard binding):
-        //    Ideally: require(blake2b(int->bytes(globalYesTotal_sompi) || int->bytes(globalNoTotal_sompi)
-        //    || market_id || int->bytes(shard_count)) == global_commit_id).
-        //    silverc int-to-byte primitive may not exist (= unverified, this is first v0.7 ship).
-        //    Fallback (active until int-to-byte confirmed): committee sigs (5 above) cover scriptSig
-        //    args via sighash — global_commit_id, globalYes, globalNo are implicitly attested by sigs.
-        //    Single-shard attacker forging globals breaks committee sigs (= they'd have to forge sigs).
-        //    Cross-shard consistency relies on off-chain settler using SAME global_commit_id across all
-        //    shards (= Bettor G6 architectural agreement; J2 settler enforces).
-        //    NOTE: still pass commit_v2 as arg so it's covered by sighash + auditable on chain.
-        require(global_commit_id != poolMerkleRoot);  // sanity: commit ≠ accidental zero or pool root
+        // ⑨ commit anchor — ACTIVE (J1 2026-06-28, NWT FINDING-2 systemic v0.7 spine-isolation fix).
+        //    PRIOR BUG (deferred): market_id (+ marketMetadataHash) 在 ctor 声明但函数体从不引用 →
+        //    silverc 不烤【未引用的 ctor 参数】进 redeem → 仅 market_id/metadata 不同的市场塌成【同一 spine
+        //    P2SH】(资金共址 commingle) + close_attest 不验 UTXO 属哪个市场 → 跨市场替换(市场 A 的 attest
+        //    可花市场 B 的同址 UTXO, 链上脚本不拦). 当年 defer 理由 "int-to-byte primitive may not exist"
+        //    已过时: byte[](int,N) 真存在且全库在用(FoldNode/PoolShard_fold/PayoutShard).
+        //    FIX: 实现 G6 绑定 → market_id 被【函数体实际引用】→ 烤进 redeem → 每市场 distinct P2SH +
+        //    spend 强验 global_commit_id 含【本市场 market_id】(跨市场替换在脚本层 BUST).
+        //    🔒 CANONICAL global_commit_id 单源 layout (= FoldNode commit_v2, pool-fold.mjs L8-12; 链下
+        //       settler 必 byte-EXACT 镜像此一处):
+        //         blake2b( byte[](globalYes,8) ‖ byte[](globalNo,8) ‖ byte[](market_id)[32B raw ctor]
+        //                  ‖ byte[](shard_count,4) ) , dkLen=32. Preimage 8+8+32+4=52B.
+        //       ENDIAN: byte[](int,N) = rusty-kaspa serialize_i64 = LE sign-magnitude (J2 source-verified).
+        //       NOTE: N=8 not 16: Kaspa NUM2BIN target ≤8 (int64 limit). 8B covers max sompi <2^63 ≈9.2e18.
+        byte[] gcPre0 = byte[](globalYesTotal_sompi, 8) + byte[](globalNoTotal_sompi, 8);
+        byte[] gcPre1 = gcPre0 + byte[](market_id);
+        byte[] gcPre2 = gcPre1 + byte[](shard_count, 4);
+        require(blake2b(gcPre2) == global_commit_id);
     }
 
     // entry 1 — dispute_reveal: triggered when a settle outcome is disputed. Each committee

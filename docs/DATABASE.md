@@ -381,7 +381,7 @@
 
 ---
 
-### execution_states（167 条）
+### execution_states（2026-07-12 实查 0 条，文档曾记"167 条"已 stale——历史某次 DB 重置/清库后未同步更新此行，数字快照类注记不代表当前状态，改表前必须现查不能信文档数字）
 **交易执行状态：每笔操作的审计链**
 
 | 字段 | 类型 | 说明 |
@@ -400,6 +400,14 @@
 
 **写入方**：action-executor.mjs、trading.js
 **读取方**：Episode 系统、审批 API
+
+**`type='user_feedback'` 场景（feedback.js openTicket, 2026-07-12 卡B）`action_details` JSON 形状**：
+`{ linkedAddr, summary, rawText, escalated, is_simulated, escalated_at? }`。`is_simulated`
+（2026-07-17, S1, 设计 `docs/2026-07-17-s1-support-cases-simulated-traffic-isolation-design.md`）
+= 该工单是否走 `TEST_HARNESS_TOKEN` 标记的模拟流量，只有独立测试凭证校验通过才能置 `true`（不来自
+任意 HTTP body 字段，物理隔离于文本约定）；`events.payload_json`（`event_type='feedback_escalated'`）
+镜像同一个值，供 `owner-bot.mjs pollFeedbackEscalations` 过滤——`is_simulated:true` 的升级完全不
+转发到 `dev-coord-testnet`（不进 Owner 真实身份广播链路，减攻击面优先于隔离频道方案）。
 
 ---
 
@@ -608,6 +616,35 @@ allocateForRegister 顺序填。
 分片 PoolSpine ctor（J1 shard variant）→ 每节点派生同分片集（by-root determinism）。double-count 由
 `pool_bettor_sides` 的 `UNIQUE(market_id, bettor_pk)` (v62) + 链上 PoolSide spent-once 双堵。
 
+### pool_markets（v62+，预测市场核心表）
+**一行 = 一个"市场"——注意 bshard(v0.7) 下这可能是逻辑市场，也可能是它的某个物理分片**
+
+**字段（节选，完整见 `migrate.js` v62 建表 + 后续 `ALTER TABLE`）**：id (PK，市场标识，形如 `ext-pool-v07-<ts>-<slug>` 或分片 id `<logical>-s<N>`), maker_relay_id, spine_p2sh/spine_lock_tx（PoolSpine covenant 锚点）, deadline/deadline_daa, protocol_version（v0.5/v0.6/v0.7）, protocol_status（pending_bettors → collecting_sigs → verifying → settling/refunding → completed/refunded/shard_internal 等，见各服务的状态机)，maker_stake_amount/broker_fee_pct/oracle_bond_amount/miner_fee, outcome_*（预言机源绑定), settle_txid/refund_txid, metadata（JSON，`settle_evidence`/`phase2_outputs`/`fee_rules` 等结算期写回都堆在这一列——见下方陷阱), sides_merkle_root/pool_merkle_root, fee_rules（v184, write-once trigger）。
+
+**写入方**：`pool.js` create-v07/v06（建市场）→ `pool-market-settler.js`/`bshard-settle-daemon.mjs`（结算写回 `protocol_status`+`metadata.settle_evidence`）→ voter/oracle 服务（委员投票中间态）。
+**读取方**：`/api/pool/my-positions`（用户仓位+赔付展示）/ `/api/pool/markets`（列表）/ settler/voter 每 tick 扫描 / prediction-menu.mjs（TG bot 展示）。
+
+**🔴 陷阱（H2 bug 根因，2026-07-17 补，docs/2026-07-17-h2-mybets-multiwin-split-design.md）**：bshard 市场的"逻辑市场"和"物理分片"**都是 `pool_markets` 里独立的一行**（分片 id 形如 `<logical>-s0`/`-s1`），通过 `market_shards.shard_market_id → logical_market_id` 关联。**结算证据(`metadata.settle_evidence.winner_details`) 只写在逻辑市场那一行，且按 `bettor_pk` 聚合(一个 pk 一条，amount = 该 pk 在整个逻辑市场的总赢得金额)**——不是按分片/按行。若同一 bettor 在同一逻辑市场的**不同分片**各下过注（`pool_bettor_sides.UNIQUE(market_id, bettor_pk)` 只挡同一分片内重复，挡不住跨分片），读侧必须按 stake 比例把这一份聚合 amount **拆給** 该 bettor 在这个逻辑市场+方向下的所有行，不能直接原样赋给每一行（否则金额被算重复次）——`pool.js` 的 `splitWinnerAmountByStake()`(H2 修复引入) 就是做这件事的，任何新读路径复用 `winner_details` 时必须走同样的拆分，不能重蹈。
+
+### pool_bettor_sides（v62+，逐笔下注记录）
+**一行 = 一笔独立下注（一个 bettor 在一个 market_id/分片、一个方向上的一次锁仓）**
+
+**字段**：id (PK AUTOINCREMENT，跨分片场景下唯一稳定排序键，H2 largest-remainder 拆分用它做确定性排序), market_id (REFERENCES pool_markets(id)——bshard 下是**分片** id，非逻辑市场 id), bettor_pk, bettor_relay_id, direction (0=YES/1=NO), stake_amount (sompi), side_p2sh/side_lock_tx（下注锁仓 P2SH+锁仓 tx）, merkle_index, claim_txid（**语义已废弃 for bshard 赢家**——唯二写入点 `bettor-refund-claim-auto.mjs:126`+`pool.js:501` 都只服务退款路，bshard 赢家 claim 循环 `bshard-auto-settler.mjs:407-460` 从未写这一列，故 bshard 赢家此列永远 NULL；赢家真实 claim 信息在 `pool_markets.metadata.settle_evidence.winner_details`，用户面已改读那里（`pool.js:3339-3353`），内部 `audit-prediction.js` 尚未跟进仍读本列会误报"未 claim"，见 `docs/2026-07-21-28-state-sync-architecture-full-design.md` 表2.2 #4/#6), side_lock_daa（v187+，下注锁仓块的 DAA score，backward-walk 从链上派生，见 `docs/2026-07-08-backward-walk-daa-index-design.md`——**若此列长期 NULL 且已过物理剪裁点(pruningPoint daaScore)，本地/任何节点均无法再补，是永久性的，非"待补"**）, pay_amount_sompi, refund_attempted_at。
+
+**唯一约束**：`UNIQUE(market_id, bettor_pk)` — 只挡"同一 bettor 在同一 market_id(分片)重复下注"，**不挡跨分片**（同一 bettor 在同逻辑市场的不同分片各下一笔完全合法，也正是上面 H2 陷阱的成因）。
+
+**写入方**：`pool.js` register-v07/v06 confirm 端点（bettor 付款确认后 INSERT）。
+**读取方**：`/api/pool/my-positions`（逐行读+按 (market_id, bettor_pk) 或 (logical_market_id, direction) 分组聚合）/ settler（结算时按 market_id 汇总赔率池）/ voter（委员抽样）。
+
+### payout_shards（v172+，每逻辑市场一个 PayoutShard covenant）
+**一行 = 一个逻辑市场唯一的 consolidation sink covenant（每片 ShardLeaf consolidate 目的地，genesis-mint 一次）**
+
+**字段**：logical_market_id (PK), payout_cov_id, payout_ps_addr (P2SH 地址), payout_ps_outpoint (`txid:idx`), payout_redeem_hex (当前 redeem，随 consolidate/close 推进而 splice 更新), pool_merkle_root, predicate_commit, created_at, **covenant_family**（v189, 2026-07-21, K-18 §3.1——`v1_committee`(committee-sig)/`v2_zk`(ZK-native)/`unknown`(backfill 判不出，需人工归因)，不可变列，genesis-mint 时由写入点声明——`ensurePayoutShard`→`v1_committee`/`ensurePayoutShardV2`→`v2_zk`；`src/lib/bshard-payout-family-coherence.mjs` 提供 `assertPayoutShardCoherence` 四步一致性花费前 gate + `assertZkNativeImmutable` 铸后不可变守卫）。
+
+**写入方**：`src/lib/pool-shard-register.mjs`（`ensurePayoutShard`/`ensurePayoutShardV2`，genesis-mint 时 INSERT）→ consolidate/close 流程 UPDATE `payout_redeem_hex`（splice-not-recompile 为权威，见 `docs/2026-07-21-p0-consolidated-pool-rederive-implementation-plan.md`）。
+**读取方**：`bshard-settle-daemon.mjs`/`bshard-auto-settler.mjs`（consolidate/claim 编排）、K-18 backfill/coherence gate。
+**陷阱**：`payout_redeem_hex` 的字段布局（state 区 offset 0/1/10/19/52 + ctor 常量区 predicateCommit@518/poolMerkleRoot@1002(V1)、predicateCommit@642(V2)）已实测定稿（`docs/2026-07-21-p2-batch1-truth-source-layer-k18-landing-design.md` §1），不是从 ctor 参数顺序推断——改动前必读该文档，不能凭 `.sil` ctor 声明顺序猜字节位置。
+
 ---
 
 ## 市场数据层
@@ -771,6 +808,12 @@ CEX 交易日志。v51 新增 `exchange` 列记录交易所归属（旧记录为
 ### broker_onboarding（v173, 0 条）
 玩家→轻路 broker 自助 onboarding（Owner 钦定 2026-06-22, 骨架）。**铁律=地址制**：`broker_address`（UNIQUE）是 broker 身份，**非 relay_id**（玩家当玩家时绑的地址转 broker 不变）。字段：`broker_address` / `bot_token_encrypted`（Telegram bot token，crypto.encrypt aes-256-gcm 加密落库，**任何 GET 都不回**）/ `bot_username` / `status`(pending/approved) / `note` / `created_at` / `updated_at`。审批门复用 `identities.trust_level`（Owner 批 trust=recommended/owner → 派生 approved）。写入方 `POST /api/kanet-broker/onboard`；读取方 `GET /api/kanet-broker/onboard/status|list` + `broker-home.eta` onboarding 卡。多-bot tg-manager（托管各 broker token 同步呈现市场）=下一步。
 
+### escrow_states（v175, 0 条）
+Silverscript P2SH 三方托管合约状态表（2026-06-27）。表从 v175 建立；对应路由 `src/api/escrow.js` 早于表存在（v51 注释），build 后长期死路由直到此次复活。**⚠ 建表同时活化了资金操作路由，create/lock/execute 三端点挂 `verifyIngestRequest` 鉴权**。字段：`id`（UUID PK）/ `offer_id`（外键关联 exchange_offers，可 NULL）/ `initiator_relay_id`（发起方 relay_id）/ `buyer_address` / `seller_address` / `arbiter_address`（三方 Kaspa 地址）/ `p2sh_address`（合约地址，relay IPC create_escrow 返回）/ `redeem_script_hex`（赎回脚本，relay 编译结果）/ `amount_sompi`（TEXT，锁定金额 sompi）/ `deadline`（INTEGER，CLTV DAA score，NULL=无超时）/ `status`（TEXT: created/locked/released/refunded/disputed）/ `lock_txid`（锁币 TX）/ `unlock_txid`（解锁 TX）/ `created_at` / `updated_at`。写入方 `POST /api/escrow/create|lock|execute`（均需 ingest-secret）；读取方 `GET /api/escrow/list`（只读，无鉴权）。Relay IPC 依赖：`create_escrow` / `lock_escrow` / `execute_escrow`（白名单需确认）。
+
+### zk_prove_jobs（v180 建表 + v181 补列, 0 条历史/新表）
+跨机器 ZK proving 任务队列（2026-07-07，T2b ZK-native 结算生产线缺件②）。`market_id` 上的 partial unique index（`WHERE status IN ('pending','in_progress')`）是持久化幂等锁（防同一市场并发入队两个 job）。字段：`id`（PK）/ `market_id` / `status`（TEXT: pending/in_progress/done/failed）/ `ordered_bets_json`（TEXT，winner 侧 bets 数组）/ `bets_root_hex` / `attested_winner`（INTEGER）/ `fee_leaves_json`（TEXT，v181 补，默认 `'[]'`，§4 硬门⑤禁 bps-fallback 要求 guest 必须拿到完整 fee_leaves，非空数组）/ `pool_total_sompi`（TEXT，v181 补，可 NULL）/ `receipt_hex`（TEXT，RISC0 Groth16 receipt borsh-hex）/ `journal_digest_hex`（TEXT）/ `error`（TEXT，失败原因）/ `created_at` / `updated_at`。写入方：enqueue 侧（缺件①，J1 域，close_attest_v2 落链后自动 insert，走幂等锁）+ `zk-prove-server.mjs POST /zk-prove/enqueue`（手动/跨机器 HTTP 备用路径，bearer-token 门）。读取/推进方：`zk-prove-worker.mjs`（本机同 host 直读 DB, 原子 claim pending→in_progress→done/failed）+ `zk-prove-server.mjs GET /zk-prove/poll`（跨机器备用路径）。**⚠ v1 已知限制（NWT 审过接受）**：job 若长期卡在 `in_progress`（worker 进程崩溃/网络断）需手动 `UPDATE zk_prove_jobs SET status='failed' WHERE id=X` 解锁重新入队，自动超时恢复留待下个迭代。job 完成/失败会同步回写 `pool_markets.metadata.zk_continuation.proving`（T2b(i) schema，见 `closezk-v2-mint.mjs` `updateProvingReady`/`updateProvingFailed`）——job 表是内部队列记账，`zk_continuation.proving` 才是下游（`dispatchUnlockZkClose`）读取的权威状态。
+
 ---
 
 ## 索引规范
@@ -787,12 +830,17 @@ CEX 交易日志。v51 新增 `exchange` 列记录交易所归属（旧记录为
 3. 改字段：SQLite 不支持直接改，需建新表→迁移→删旧表
 4. 新表：migrate.js 新版本，加 `IF NOT EXISTS` 保护
 
-**当前最新版本：v157（r281 私钥型 relay — relay_nodes 加 privkey_encrypted + privkey_hint）**
+**当前最新版本：v187（2026-07-16 spc_tip_heartbeat 新表）**
 
-> 注：v125–v156 尚未在本表逐条回填（r281 scope 外）；新增 migration 接 v157 之后。
+> 注：v125–v156 尚未在本表逐条回填（r281 scope 外）；新增 migration 接 v157 之后。v176-v183、v185-v186 未逐条回填（各自设计稿/COORD-LEDGER 有账），本行版本号以 migrate.js 实际为准。
 
 ## 版本历史（近期）
 
+- **v187 (2026-07-16 spc_daa_index 常驻写入器补落码)**: `spc_tip_heartbeat` 新表（单行，`id INTEGER PRIMARY KEY CHECK (id=1)` + `daa_score` + `updated_at`）。用途：relay 侧 tip 心跳落地，供 console 完整性巡检判定 `spc_daa_index` 写入器是否停更，不给 console 开 kaspad RPC 口子（Relay 唯一链上出口）。写入方：`kasia-console/src/api/ingest.js` `/ingest/spc-tip-heartbeat`（relay 每 60s `ingestSpcTipHeartbeat` 上报本地已见最大 daaScore）。读取方：`kasia-console/src/services/spc-daa-index-monitor.mjs`（5min tick 对比 `spc_tip_heartbeat.daa_score` vs `MAX(spc_daa_index.daa_score)`，落后超阈值写 `events` 表触发既有告警管道）。见 `docs/2026-07-08-backward-walk-daa-index-design.md` §2.2 note①。
+- **v184 (2026-07-12 B线落2 feeRules 上链锚定)**: `pool_markets.fee_rules` 新列（TEXT，分润规则全文 JSON，spec `docs/2026-06-22-modular-fee-split-component-spec.md` v1.3 + 设计 `docs/2026-07-12-fee-split-phase2-commit-anchor-design.md`）。**write-once**：`trg_pool_markets_fee_rules_write_once` trigger——已有值的行 UPDATE 改写/清空 = RAISE(ABORT)，NULL→值允许一次，等值 UPDATE 放行（settler 整行 UPDATE 不误伤）。写入方：`pool.js` create-v07（仅非 zk_native 且有 broker 的新市场，`buildPredictionV1InterimRules`）。读取方：`deriveMarketPredicateCommit`（三处 register 烤点）/ `computeSettlePlan`+`deriveResumePlanFromEvidence`（driver fee 叶）/ 委员侧**不读本列**（Bettor 注1：列不跨节点同步，enforce 只吃 attest 载荷携带的全文 + 链上 commit hash-bind）。陷阱：⚠ 老市场 NULL = 全走既有路径字节不动；⚠ 本列是 committed 承诺，丢失 = 该市场 fail-closed 不可 settle（标准 preset 盘可从 broker_pk + `prediction-v1-interim` 常量确定性重构，dry-run diff 报 Bettor 后写回）。
+- **v183 (2026-07-11 MAX_WALK 老盘根治)**: `spc_daa_index` + `spc_daa_index_coverage` 新表（SPC 块 DAA→hash 持久索引 + 覆盖区间防洞）。见 `docs/2026-07-08-backward-walk-daa-index-design.md`。
+- **v175 (2026-06-27 escrow_states 新表)**: `escrow_states` 新表（Silverscript P2SH 三方托管合约，15 列）。路由 escrow.js create/lock/execute 挂 verifyIngestRequest 鉴权。见「escrow_states」节。
+- **v174 (2026-06-27 tg custodial wallet)**: `tg_custodial_wallets` 新表（TG 托管钱包，私钥加密存储）。见 tg-wallet 相关节。
 - **v173 (2026-06-22 玩家→轻路 broker onboarding 骨架)**: `broker_onboarding` 新表（地址制自助申请，bot_token 加密落库，审批门复用 identities.trust）。Owner 钦定，KANet-UI task#4 骨架（存+审批）。见上「broker_onboarding」节 + `src/api/kanet-broker.js` onboard 端点 + `broker-home.eta`。
 - **v172 (2026-06-21 bshard 生产 register wiring (b))**: `market_shards` 新加 `current_leaf_outpoint` (txid:idx 当前 ShardLeaf 续约 UTXO) + `current_leaf_state` (JSON count/local_yes/local_no/pool_value)。(A) 自包含模型 ShardLeaf covenant 每 register 续约地址变（count 烤进 state），buildRegisterCommand 下一笔 register 要当前续约 UTXO + state 重算 redeem（spliceLeafState byte-equal，不存全 redeem_hex）。每笔 register landed 后 `onBettorRegistered` 原子更新。见 `docs/2026-06-21-bshard-production-register-wiring-design.md` (b) + `src/lib/shard-allocator.mjs`。
 - **v171 (2026-06-15 bshard 无限押注)**: `market_shards` 新表（滚动分片注册表：logical_market_id ↔ shard_market_id 映射 + UNIQUE(logical,index) 注册竞态锁 + 封片状态）。Owner #1 directive 分片+自取。见「预测市场分片层」节 + `src/lib/shard-allocator.mjs`。

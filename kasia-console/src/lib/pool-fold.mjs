@@ -5,9 +5,10 @@
 //   (2) buildFoldTree()  — by-root deterministic k-ary fold plan (件3 fold调度; structure from on-chain shard roots).
 //
 // ── commit_v2 byte layout (EXACT, from PoolShard_fold.sil fold()) ──
-//   commit_pre = byte[](yes_sum,16) ‖ byte[](no_sum,16) ‖ byte[](market_id) ‖ byte[](shard_count,4)
+//   commit_pre = byte[](yes_sum,8) ‖ byte[](no_sum,8) ‖ byte[](market_id) ‖ byte[](shard_count,4)
 //   commit_v2  = blake2b(commit_pre)[dkLen 32]
-//   = 16 + 16 + 32 + 4 = 68-byte preimage.
+//   = 8 + 8 + 32 + 4 = 52-byte preimage.
+//   NOTE: N=8 not 16 — Kaspa NUM2BIN target ≤8 (int64); 8B covers max sompi <2^63.
 //
 // ENDIANNESS: byte[](int,size) = rusty-kaspa serialize_i64 = LE sign-magnitude (J2 source-verified in
 //   pool-payout-root.mjs, byte-match 7/7 @size8). We REUSE that exact serializeI64 (same algorithm, sizes
@@ -32,13 +33,13 @@ export const FOLD_FANIN = 4; // route-split: PoolLeaf max_fan_in=4 (4-ary fold; 
  * @returns {Buffer} 32-byte commit_v2
  */
 export function foldRootCommit(globalYesSompi, globalNoSompi, marketIdHex32, shardCount) {
-  const yes = serializeI64(BigInt(globalYesSompi), 16);
-  const no  = serializeI64(BigInt(globalNoSompi), 16);
+  const yes = serializeI64(BigInt(globalYesSompi), 8);
+  const no  = serializeI64(BigInt(globalNoSompi), 8);
   const mid = Buffer.from(marketIdHex32, 'hex');
   if (mid.length !== 32) throw new Error(`market_id must be 32B (64 hex), got ${mid.length}B`);
   const cnt = serializeI64(BigInt(shardCount), 4);
   const preimage = Buffer.concat([yes, no, mid, cnt]);
-  if (preimage.length !== 68) throw new Error(`fold commit preimage must be 68B, got ${preimage.length}`);
+  if (preimage.length !== 52) throw new Error(`fold commit preimage must be 52B, got ${preimage.length}`);
   return Buffer.from(blake2b(preimage, { dkLen: 32 }));
 }
 

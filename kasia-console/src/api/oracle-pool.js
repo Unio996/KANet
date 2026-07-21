@@ -528,4 +528,95 @@ export async function registerOraclePoolRoutes(fastify) {
       return reply.code(503).send({ ok: false, error: `IPC stake_unlock fail: ${ipcErr.message}` });
     }
   });
+
+  // #42 house agent (2026-07-04, Owner head-priority-2 — 人机对抗玩法): read-only judgment endpoint.
+  // qzdh7nar 域 = 出判断源; KANet-UI 域 = 拿这个结果去真下注(register-v07 prep→transfer→confirm)。
+  //
+  // 实测纠偏(2026-07-04): 原计划复用 #26 的 espnSportsJudge——但今天新造的 kanet_v07 世界杯盘(J2 create-v07
+  // 管线)outcome_market_source='kanet_v07' 非 'polymarket'，且措辞是 G1 定的"advance"非"win"，espnSportsJudge
+  // 的 appliesTo/WIN_RE 两处都对不上(实测 applies:false)。这些原生盘 resolution_rule_spec 本身已经是干净结构化
+  // 数据(data_source_canonical=ESPN URL 直给 + resolution_predicate={metric,op,operand} 直给)，不需要 espnSportsJudge
+  // 那套给嘈杂 polymarket 文本做的标题解析/球队名匹配。改直接复用 bshard-settle-daemon.mjs 的 judgeWinDir()——
+  // 那就是【结算实际用的同一份判定逻辑】，house agent 的"预测"跟真结算永远同源，不会出现两边判不一样的尴尬分裂。
+  // Pre-match prediction (2026-07-04, Bettor/KANet-UI co-verify #42): judgeWinDir only knows the
+  // ACTUAL result (post-match) — a house agent needs a pre-match GUESS so it can actually be wrong
+  // and be "beaten". Primary signal = the same ESPN summary URL's sportsbook odds (pickcenter),
+  // available before kickoff — deliberately a DIFFERENT field/moment than judgeWinDir's post-match
+  // read, so prediction and settlement never collapse into the same self-confirming source.
+  // NOT parseEspnSummary (oracle-evidence-extractors.mjs) — that helper hard-gates on
+  // status.type.completed===true (by design, for post-match judging), so it always returns null
+  // pre-kickoff. Minimal standalone parse here instead of weakening that gate for an unrelated need.
+  // FIFA World Ranking fallback (KANet-UI 2026-07-04, per Bettor 分工: qzdh7nar 赔率主 + 我 fallback).
+  // 来源: FIFA/Coca-Cola Men's World Ranking 2026-06-11 官方更新(下次更新 2026-07-20, 本届赛事期间不变) -
+  // https://inside.fifa.com/fifa-world-ranking/men + ESPN Top-50 复核(非猜, WebSearch 实查两源对齐)。
+  // 只收 2026 世界杯16强 + 2个待定席位候选队(共19队), 非全量200+队排名表 — 够用即可, 别过度工程.
+  // 排名数字越小=越强(FIFA 惯例); 用于 pickcenter 缺失/pick'em 时的 tiebreaker, 非首选信号(odds 优先).
+  const FIFA_RANKING_JUN2026 = {
+    ARG: 1, ESP: 2, FRA: 3, ENG: 4, POR: 5, BRA: 6, MAR: 7, BEL: 9, COL: 13,
+    MEX: 14, USA: 17, SUI: 19, AUS: 27, EGY: 29, CAN: 30, NOR: 31, PAR: 41, CPV: 67, GHA: 73,
+  };
+  function predictByFifaRanking(homeAbbr, awayAbbr, operand) {
+    const homeRank = FIFA_RANKING_JUN2026[String(homeAbbr).toUpperCase()];
+    const awayRank = FIFA_RANKING_JUN2026[String(awayAbbr).toUpperCase()];
+    if (homeRank == null || awayRank == null) return { verdict: 'ABSTAIN', reason: 'fifa_ranking_unknown_team' };
+    if (homeRank === awayRank) return { verdict: 'ABSTAIN', reason: 'fifa_ranking_tie' };
+    const favoredAbbr = homeRank < awayRank ? homeAbbr : awayAbbr; // 排名数字小 = 更强
+    const predictedYes = String(favoredAbbr).toUpperCase() === String(operand).toUpperCase();
+    return { verdict: predictedYes ? 'PREDICTED_YES' : 'PREDICTED_NO', favored: favoredAbbr, provider: 'fifa-ranking-2026-06-11-fallback' };
+  }
+
+  async function predictPreMatch(dataSourceUrl, operand) {
+    let data;
+    try {
+      const raw = await (await fetch(dataSourceUrl, { signal: AbortSignal.timeout(15000) })).text();
+      data = JSON.parse(raw);
+    } catch (e) {
+      return { verdict: 'ABSTAIN', reason: `fetch/parse fail: ${String(e?.message || e).slice(0, 120)}` };
+    }
+    const comp = data?.header?.competitions?.[0];
+    const competitors = comp?.competitors || [];
+    const home = competitors.find(c => c.homeAway === 'home');
+    const away = competitors.find(c => c.homeAway === 'away');
+    if (!home || !away) return { verdict: 'ABSTAIN', reason: 'no_competitors' };
+    const pick = data?.pickcenter?.[0] || data?.odds?.[0];
+    if (!pick) return predictByFifaRanking(home.team?.abbreviation, away.team?.abbreviation, operand);
+    const homeFav = pick.homeTeamOdds?.favorite === true;
+    const awayFav = pick.awayTeamOdds?.favorite === true;
+    if (homeFav === awayFav) return predictByFifaRanking(home.team?.abbreviation, away.team?.abbreviation, operand); // pick'em / missing flags
+    const favoredAbbr = homeFav ? home.team?.abbreviation : away.team?.abbreviation;
+    if (!favoredAbbr) return predictByFifaRanking(home.team?.abbreviation, away.team?.abbreviation, operand);
+    const predictedYes = String(favoredAbbr).toUpperCase() === String(operand).toUpperCase();
+    return { verdict: predictedYes ? 'PREDICTED_YES' : 'PREDICTED_NO', favored: favoredAbbr, provider: pick.provider?.name || null };
+  }
+
+  fastify.get('/api/oracle-pool/house-judgment/:marketId', async (request, reply) => {
+    const { marketId } = request.params;
+    const market = sqlite.prepare(
+      `SELECT id, category, outcome_market_source, outcome_condition_id, resolution_rule_spec FROM pool_markets WHERE id = ?`
+    ).get(marketId);
+    if (!market) return reply.code(404).send({ ok: false, error: 'market_not_found' });
+
+    let spec = {};
+    try { spec = JSON.parse(market.resolution_rule_spec || '{}'); } catch {}
+
+    const { judgeWinDir } = await import('../services/bshard-settle-daemon.mjs');
+    try {
+      const winDir = await judgeWinDir(market);   // 0 = YES, 1 = NO (同 settle daemon 的 value-mapping)
+      return reply.send({
+        ok: true,
+        applies: true,
+        market_id: marketId,
+        verdict: winDir === 0 ? 'YES' : 'NO',       // 赛后真结果(结算同源) — 用于算 Agent 战绩，不是下注触发信号
+        source: 'bshard-settle-daemon.judgeWinDir',
+        title: spec.title || null,
+      });
+    } catch (e) {
+      // judgeWinDir ABSTAIN(比赛没打完等)→ 落到赛前预测(下注真正用的信号)。
+      if (spec.data_source_canonical && spec.resolution_predicate?.operand) {
+        const pred = await predictPreMatch(spec.data_source_canonical, spec.resolution_predicate.operand);
+        return reply.send({ ok: true, applies: true, market_id: marketId, verdict: pred.verdict, source: 'espn-pickcenter-odds', title: spec.title || null, ...pred });
+      }
+      return reply.send({ ok: true, applies: true, market_id: marketId, verdict: 'ABSTAIN', source: 'bshard-settle-daemon.judgeWinDir', reason: String(e?.message || e).slice(0, 160) });
+    }
+  });
 }

@@ -1,0 +1,372 @@
+{
+  "shard": "shard9",
+  "purpose": "J1tn为Bettor独立RPC核实准备:逐步重放leaf_state,定位DB状态推进跟链上第一次脱节的步骤",
+  "verified_against_db_final_state": true,
+  "known_current_leaf_outpoint": "821c8cb3c04789d93abcd76b00367b11207b03863c605938c2602b3faf851851:0",
+  "steps": [
+    {
+      "step": 0,
+      "after_bet_id": null,
+      "state": {
+        "local_yes": 0,
+        "local_no": 0,
+        "count": 0,
+        "pool_value": 0
+      },
+      "address": "kaspatest:prjah4wsk3rnnn8w2k6x4gdtuw850d2h3dpj67u5hapnutapjxu6qd4a77xpa"
+    },
+    {
+      "step": 1,
+      "after_bet_id": 33353,
+      "state": {
+        "local_yes": 0,
+        "local_no": 1500000000,
+        "count": 1,
+        "pool_value": 1500000000
+      },
+      "address": "kaspatest:pph0ulc3vs85y94afpzd4mfmtgxjg3s7t2ukdq4nzgse9t4rvc062zxj28hzh"
+    },
+    {
+      "step": 2,
+      "after_bet_id": 33361,
+      "state": {
+        "local_yes": 5000000000,
+        "local_no": 1500000000,
+        "count": 2,
+        "pool_value": 6500000000
+      },
+      "address": "kaspatest:pz92vaj7wfzmlpajysw57srl0822zml0j377htltupu8f2m63xupzxgqmexjt"
+    },
+    {
+      "step": 3,
+      "after_bet_id": 33362,
+      "state": {
+        "local_yes": 5000000000,
+        "local_no": 3000000000,
+        "count": 3,
+        "pool_value": 8000000000
+      },
+      "address": "kaspatest:pqjgke49lgyt6xllkhm7rt5vx9scd86kpgelw4c23ewl7e7pkrx5v228erred"
+    },
+    {
+      "step": 4,
+      "after_bet_id": 33368,
+      "state": {
+        "local_yes": 10000000000,
+        "local_no": 3000000000,
+        "count": 4,
+        "pool_value": 13000000000
+      },
+      "address": "kaspatest:pqu0k832eml09yscs3yrghkfjk0uklurpc0av5njetn9waekd9rqczvx5v2g6"
+    },
+    {
+      "step": 5,
+      "after_bet_id": 33369,
+      "state": {
+        "local_yes": 10000000000,
+        "local_no": 4500000000,
+        "count": 5,
+        "pool_value": 14500000000
+      },
+      "address": "kaspatest:pqzh2h2n7h8hzyyperc6p3t6kpeyp4rtg33reygvnyyjus7dg7ml2y9ka9w5m"
+    },
+    {
+      "step": 6,
+      "after_bet_id": 33376,
+      "state": {
+        "local_yes": 15000000000,
+        "local_no": 4500000000,
+        "count": 6,
+        "pool_value": 19500000000
+      },
+      "address": "kaspatest:pz8me72ks2mm2jzlkyjeuc3fr2q0aj06cem7esxlpeq5ye23w7mgs6l5w0m26"
+    },
+    {
+      "step": 7,
+      "after_bet_id": 33378,
+      "state": {
+        "local_yes": 15000000000,
+        "local_no": 6000000000,
+        "count": 7,
+        "pool_value": 21000000000
+      },
+      "address": "kaspatest:prr8m4qq4jlgq5u7fd3p7kqnvp8m58dldtayg4q6dha9jwxe90xkws8t62ns2"
+    },
+    {
+      "step": 8,
+      "after_bet_id": 33388,
+      "state": {
+        "local_yes": 20000000000,
+        "local_no": 6000000000,
+        "count": 8,
+        "pool_value": 26000000000
+      },
+      "address": "kaspatest:ppxzyuf6hvjqch7c0hv6sx74k6ek79mdduqge4ct5t0gejdzuxsjsc75d70l3"
+    },
+    {
+      "step": 9,
+      "after_bet_id": 33390,
+      "state": {
+        "local_yes": 20000000000,
+        "local_no": 7500000000,
+        "count": 9,
+        "pool_value": 27500000000
+      },
+      "address": "kaspatest:pp7tl0gkgqk8te46rl978edtgedxvvgaze43ajsesrjf6eyxc33ey73fuzkrz"
+    },
+    {
+      "step": 10,
+      "after_bet_id": 33395,
+      "state": {
+        "local_yes": 21102000000,
+        "local_no": 7500000000,
+        "count": 10,
+        "pool_value": 28602000000
+      },
+      "address": "kaspatest:pzdd3ygqen8mkhwu8ah9vhl697x9sgs098mkggkreguwtyw4ej6w5sa6hmawj"
+    },
+    {
+      "step": 11,
+      "after_bet_id": 33398,
+      "state": {
+        "local_yes": 26102000000,
+        "local_no": 7500000000,
+        "count": 11,
+        "pool_value": 33602000000
+      },
+      "address": "kaspatest:pzl636gjx4k2838wzrd5evw28nsu90w8urpq3csjzp42h6g8zsrs6lxtv686w"
+    },
+    {
+      "step": 12,
+      "after_bet_id": 33400,
+      "state": {
+        "local_yes": 26102000000,
+        "local_no": 9000000000,
+        "count": 12,
+        "pool_value": 35102000000
+      },
+      "address": "kaspatest:ppsn7vjvxeufjkkjkp9gf9j0755xcmtfcnygctuye2dq6sssytdusrxxv2t8x"
+    },
+    {
+      "step": 13,
+      "after_bet_id": 33406,
+      "state": {
+        "local_yes": 31102000000,
+        "local_no": 9000000000,
+        "count": 13,
+        "pool_value": 40102000000
+      },
+      "address": "kaspatest:prmmp0jk2jtrc3ff0utdypu0knvalh2vyds0fedy8nqlksjcd8apkn39glx8k"
+    },
+    {
+      "step": 14,
+      "after_bet_id": 33407,
+      "state": {
+        "local_yes": 31102000000,
+        "local_no": 10500000000,
+        "count": 14,
+        "pool_value": 41602000000
+      },
+      "address": "kaspatest:pzv555z3flxgz9ajhl6s3w887ezrur7h589ryy6x38auu9wulr83y2sm0wmq9"
+    },
+    {
+      "step": 15,
+      "after_bet_id": 33418,
+      "state": {
+        "local_yes": 36102000000,
+        "local_no": 10500000000,
+        "count": 15,
+        "pool_value": 46602000000
+      },
+      "address": "kaspatest:pzdjqqfu5m6prqcm7x39f9qh6ncyudsq78tz4kx3ym3m2u04dmnkkk3thecda"
+    },
+    {
+      "step": 16,
+      "after_bet_id": 33419,
+      "state": {
+        "local_yes": 36102000000,
+        "local_no": 12000000000,
+        "count": 16,
+        "pool_value": 48102000000
+      },
+      "address": "kaspatest:pr0mtdge7dap8kjpzszn2xmtd5hrrnpqcq4akl2xplkv2lm86gla75refd70s"
+    },
+    {
+      "step": 17,
+      "after_bet_id": 33432,
+      "state": {
+        "local_yes": 41102000000,
+        "local_no": 12000000000,
+        "count": 17,
+        "pool_value": 53102000000
+      },
+      "address": "kaspatest:ppvsmy9gush8ry8psmqmx2rvqc7smneympvtdmndykvlnkjn8dpwgfnvchawf"
+    },
+    {
+      "step": 18,
+      "after_bet_id": 33434,
+      "state": {
+        "local_yes": 41102000000,
+        "local_no": 13500000000,
+        "count": 18,
+        "pool_value": 54602000000
+      },
+      "address": "kaspatest:pzzs029gw4deu2eqkmsgq8pynn3t3ajajevqu5ehcczq2sl3lc9hky53fsj3v"
+    },
+    {
+      "step": 19,
+      "after_bet_id": 33436,
+      "state": {
+        "local_yes": 46102000000,
+        "local_no": 13500000000,
+        "count": 19,
+        "pool_value": 59602000000
+      },
+      "address": "kaspatest:prqdugfsw98vd64f0n7yme90ctgkmxhu8u79dsf8kxnglt56tyedyuca2t969"
+    },
+    {
+      "step": 20,
+      "after_bet_id": 33438,
+      "state": {
+        "local_yes": 46102000000,
+        "local_no": 15000000000,
+        "count": 20,
+        "pool_value": 61102000000
+      },
+      "address": "kaspatest:ppx7xlt4sqf5apgznghjgckr3z27fx76yr3w7jwz08fempakrep6vyvmn8svs"
+    },
+    {
+      "step": 21,
+      "after_bet_id": 33440,
+      "state": {
+        "local_yes": 46102000000,
+        "local_no": 18722000000,
+        "count": 21,
+        "pool_value": 64824000000
+      },
+      "address": "kaspatest:pq6j9t6nyrpl50zzq98kwm2xdzrhezzekfad035st5jg0u63a0angpaawqx4u"
+    },
+    {
+      "step": 22,
+      "after_bet_id": 33444,
+      "state": {
+        "local_yes": 51102000000,
+        "local_no": 18722000000,
+        "count": 22,
+        "pool_value": 69824000000
+      },
+      "address": "kaspatest:prucymqvprn84dnjvy6x5snhg2mn3nvnwvdm0yxslptxhcaru2qazny9p963g"
+    },
+    {
+      "step": 23,
+      "after_bet_id": 33446,
+      "state": {
+        "local_yes": 51102000000,
+        "local_no": 20222000000,
+        "count": 23,
+        "pool_value": 71324000000
+      },
+      "address": "kaspatest:pzkkqaxt9kangrj0nz8ts5gma6wx9ayzc5np2hnfx0jgh5vfhe7qs76vzqhd6"
+    },
+    {
+      "step": 24,
+      "after_bet_id": 33449,
+      "state": {
+        "local_yes": 55983000000,
+        "local_no": 20222000000,
+        "count": 24,
+        "pool_value": 76205000000
+      },
+      "address": "kaspatest:pzznnvt0fq6a7clgclc6f4ggkwetjesthg6ck06rg5qwgsakqagzzmhq52ky6"
+    },
+    {
+      "step": 25,
+      "after_bet_id": 33450,
+      "state": {
+        "local_yes": 60983000000,
+        "local_no": 20222000000,
+        "count": 25,
+        "pool_value": 81205000000
+      },
+      "address": "kaspatest:pqd03turxcktsyzdafhkc6yn34rsj8veuswzdwjz9ummjyhtk0df5u496tf44"
+    },
+    {
+      "step": 26,
+      "after_bet_id": 33452,
+      "state": {
+        "local_yes": 60983000000,
+        "local_no": 21722000000,
+        "count": 26,
+        "pool_value": 82705000000
+      },
+      "address": "kaspatest:pzkyw2njl3nwqt8scuk237352lck3slfvp4yjs5tu6gn4t8dflyfsw9s9rczz"
+    },
+    {
+      "step": 27,
+      "after_bet_id": 33458,
+      "state": {
+        "local_yes": 65983000000,
+        "local_no": 21722000000,
+        "count": 27,
+        "pool_value": 87705000000
+      },
+      "address": "kaspatest:prpu463zy5vqnu3mtd7z2apj9qweurzm0n2xsvvnscnfgtzxddamjusxuh562"
+    },
+    {
+      "step": 28,
+      "after_bet_id": 33459,
+      "state": {
+        "local_yes": 65983000000,
+        "local_no": 23222000000,
+        "count": 28,
+        "pool_value": 89205000000
+      },
+      "address": "kaspatest:premrhxdzve5203d85uhv8ur9zy34avh48vpgy3a0x3fnxgywptvzlzpryy7h"
+    },
+    {
+      "step": 29,
+      "after_bet_id": 33460,
+      "state": {
+        "local_yes": 70839000000,
+        "local_no": 23222000000,
+        "count": 29,
+        "pool_value": 94061000000
+      },
+      "address": "kaspatest:ppkjww8gt5zx63jsmj7xwc5hfrd72ley35h8y6lp4z53w9nkxq5kguwgey6sc"
+    },
+    {
+      "step": 30,
+      "after_bet_id": 33467,
+      "state": {
+        "local_yes": 75839000000,
+        "local_no": 23222000000,
+        "count": 30,
+        "pool_value": 99061000000
+      },
+      "address": "kaspatest:pptdeat6mqnmw0x4a3kydekh8vt9w392tm4uuljdr9zjp8asg8xtc8rw2hmtx"
+    },
+    {
+      "step": 31,
+      "after_bet_id": 33468,
+      "state": {
+        "local_yes": 75839000000,
+        "local_no": 24722000000,
+        "count": 31,
+        "pool_value": 100561000000
+      },
+      "address": "kaspatest:prx86ynymxqmp2dsmphqff2tnhq2yp5vc0m22zyvv7cmjkwsh6pacvnpst0uq"
+    },
+    {
+      "step": 32,
+      "after_bet_id": 33471,
+      "state": {
+        "local_yes": 80839000000,
+        "local_no": 24722000000,
+        "count": 32,
+        "pool_value": 105561000000
+      },
+      "address": "kaspatest:pzv6ttghlfzd6ealvkrudpf85fze6gam2md46ve8zhv4g4autax6ykl5ngvcm"
+    }
+  ],
+  "generated_at_note": "每条step.address都可独立用getUtxosByAddresses核实是否有UTXO/金额是否≈该step.state.pool_value"
+}

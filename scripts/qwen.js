@@ -85,7 +85,7 @@ async function main() {
   // 唯一有效 kill switch 是 API body 的 chat_template_kwargs.enable_thinking=false
   // (规则#11，实测 8s → 1s)。DEVELOPER-GUIDE Rule 11.
   const body = JSON.stringify({
-    model: 'Qwen3.6-35B-A3B',
+    model: 'Qwythos-9B-Claude-Mythos-5-1M-Q4_K_M.gguf',
     messages,
     max_tokens: maxTokens,
     temperature,

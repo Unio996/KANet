@@ -699,8 +699,8 @@ export class ActionExecutor {
         const { consoleUrl } = this.config;
         const relayNodeId = this.config.relayNodeId;
         const body = side === 'sell'
-          ? { relayNodeId, give_asset: 'KAS', give_amount: String(amount), give_chain: 'kaspa', want_asset: 'USDT', want_amount: String((amount * price).toFixed(6)), verification: 'manual' }
-          : { relayNodeId, give_asset: 'USDT', give_amount: String((amount * price).toFixed(6)), want_asset: 'KAS', want_amount: String(amount), want_chain: 'kaspa', verification: 'manual' };
+          ? { relayNodeId, give_asset: 'KAS', give_amount: Number(amount).toFixed(8), give_chain: 'kaspa', want_asset: 'USDT', want_amount: String((amount * price).toFixed(6)), verification: 'manual' }
+          : { relayNodeId, give_asset: 'USDT', give_amount: String((amount * price).toFixed(6)), want_asset: 'KAS', want_amount: Number(amount).toFixed(8), want_chain: 'kaspa', verification: 'manual' };
         const result = await fetchJson(`${consoleUrl}/api/exchange/publish`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -753,7 +753,7 @@ export class ActionExecutor {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           relayNodeId,
-          give_asset: 'KAS', give_amount: String(amount), give_chain: 'kaspa',
+          give_asset: 'KAS', give_amount: Number(amount).toFixed(8), give_chain: 'kaspa',
           want_asset: 'USDT', want_amount: String((amount * sellPrice).toFixed(6)), want_chain: null,
           verification: 'manual',
         }),
@@ -773,7 +773,7 @@ export class ActionExecutor {
         body: JSON.stringify({
           relayNodeId,
           give_asset: 'USDT', give_amount: String((amount * buyPrice).toFixed(6)), give_chain: null,
-          want_asset: 'KAS', want_amount: String(amount), want_chain: 'kaspa',
+          want_asset: 'KAS', want_amount: Number(amount).toFixed(8), want_chain: 'kaspa',
           verification: 'manual',
         }),
       });
@@ -891,8 +891,8 @@ export class ActionExecutor {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           relayNodeId,
-          give_asset: 'KAS', give_amount: String(execQty),
-          want_asset: 'USDT', want_amount: String(wantUsdt),
+          give_asset: 'KAS', give_amount: Number(execQty).toFixed(8),
+          want_asset: 'USDT', want_amount: Number(wantUsdt).toFixed(8),
           verification: 'manual',
           expires_minutes: 30,
           verification_meta: JSON.stringify({
@@ -963,8 +963,8 @@ export class ActionExecutor {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               relayNodeId,
-              give_asset: 'KAS', give_amount: String(execQty),
-              want_asset: 'USDT', want_amount: String(netUsdt),
+              give_asset: 'KAS', give_amount: Number(execQty).toFixed(8),
+              want_asset: 'USDT', want_amount: Number(netUsdt).toFixed(8),
               verification: 'manual', expires_minutes: 1,
               metadata: JSON.stringify({
                 type: 'follow_through', sell_exchange: exchange,
