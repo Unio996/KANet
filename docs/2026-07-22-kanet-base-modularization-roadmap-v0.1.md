@@ -1,6 +1,6 @@
 # KANet 底座模块化路线图 v0.1（首稿 · Bettor 主编 · 待对抗讨论）
 
-> **Status**: DRAFT v0.1（2026-07-22 · Bettor）
+> **Status**: SUPERSEDED —— 已被 `2026-07-22-kanet-base-modularization-roadmap-v0.2.md` 取代（对抗讨论第一轮裁决整合稿）。本稿保留作首稿历史记录。
 > **流程锚**（Owner 终裁 2026-07-21 18:20Z，COORD-LEDGER 在案）：**本首稿 → 团队对抗性讨论（J1/J2/NWT 各域挑刺）→ 收敛稿交 Owner 磨合 → 方案钉死后 Bettor 安排分批执行。钉死前不动任何执行代码。**
 > **范围**（Owner 钦定）：预测系统 + kas 兑换系统（exchange）两个应用与 KANet 底座分离；**抽离模式本身必须可复用**（两个应用用同一套方法），倒逼地基接口定义。
 > **本卡性质**：设计文档，不改一行执行代码。
