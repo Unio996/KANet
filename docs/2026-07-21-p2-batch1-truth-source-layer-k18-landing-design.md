@@ -1,6 +1,6 @@
 # P2 第一批 — 真相源层模块化 + K-18 §3.1-§3.3 落地 + verifyClaimLanded 金额校验(J1 主稿,J2 协)
 
-> **Status**: CURRENT(v0.2 · 2026-07-21 · J1 draft,§3.5 折入 J2 发现+草案(#ue9cp6.1 Bettor 裁定)· 待 NWT 红队,GREEN 后落码)
+> **Status**: CURRENT(v0.3 · 2026-07-21 · J1 draft,§3.5 折入 J2 发现+草案(#ue9cp6.1 Bettor 裁定,J2 已认可 J1 实现版本撤回自己草案)+ Bettor 方向审 GREEN-with-3-notes(#uegipr)全部折入(note①§3.5 金额源换 kaspa_tx_log/note②DoD-4 责任人钉死/note③§5.1 升级 MUST)· 待 NWT 红队,GREEN 后落码)
 > **依据**: `docs/2026-07-21-28-state-sync-architecture-full-design.md` §5 P2 派工("全状态推广 re-derive+校验纪律 + 真相源层模块化,§3 完整实现,J1 主+J2 协,分批走每批独立 NWT 审") + Bettor 今日派工(#udvo4q,并入 K-18 残项)+ Owner 直令(今日一鼓作气+充分测试,D-011 内部审核链走完即可装载)。
 > **前置**: K-18 §3.1-§3.4 全案(`docs/2026-07-18-payoutshard-family-coherence-gate-design.md` v1.1,**已 NWT GREEN-with-3-MUST-FIX 且 3 条全折入**)——§3.4(recompile 降级校验)已在昨晚 P0 v0.3(`25b3d0a0`)+ line423(`67490897`)落地。**本卡 = 落地 K-18 剩余 §3.1(covenant_family 列)+ §3.2(zk_native 铸后不可变)+ §3.3(assertPayoutShardCoherence 四步门)**,K-18 的架构设计本身不重新评审(已经 NWT 审过),本卡是**实现落地计划 + 用它解决两条昨晚遗留的开放线索**。
 
@@ -99,16 +99,27 @@ async function verifyClaimLanded(ctx, winnerAddr, claimTx, expectedAmount = null
       const r = await ctx.relayPost(ctx.feeRelay.id, { type: 'check_utxo_landed', address: winnerAddr, txid: claimTx, minDepth: REORG_SAFE_MIN_DEPTH });
       if (r?.landed) {
         if (expectedAmount == null) return true;   // 向后兼容: 不传 = 老行为,零改变(NWT 复核点③)
-        const entries = await ctx.getUtxos(winnerAddr);
-        const ok = entries.some(e => {
-          const j = JSON.parse(JSON.stringify(e, (k, v) => typeof v === 'bigint' ? v.toString() : v));
-          const op = j.entry?.outpoint || j.outpoint;
-          const amt = j.entry?.amount ?? j.amount;
-          return op?.transactionId === claimTx && String(amt) === String(expectedAmount);   // 精确相等, 非容差(NWT 复核点②)
-        });
+        // v0.3(Bettor方向审note①折入, 2026-07-21): 金额源从"当前UTXO集"(ctx.getUtxos)改为
+        // kaspa_tx_log.outputs_json——同一份历史交易记录, 落链即永久, 不受"这笔claim UTXO是否已被
+        // 赢家花掉"影响。85fit教训(#22, 精确值匹配≠UTXO未花, claim UTXO已花导致verify假阴性)在这里
+        // 是真实暴露面: winner P2PK地址收到claim后可能立刻自己转走/整理UTXO, 若验证发生在那之后,
+        // 读当前UTXO集会查无此笔(不是金额不对, 是UTXO已经不在了), 误判"金额不符"烧完60s重试触发
+        // STOP threading——同款问题verifyClosedLanded的原始实现也有(§3.5正文已注明非本批新引入),
+        // 但本批既然要动这个函数, 直接用更稳的源头, 不把已知暴露面复制一份。跟 _inferWinDirectionFromChain
+        // (:245-247)/consolidateAndBuildPsState Tier1(verifyRedeemMatchesChainObservedOutput)同一个原语:
+        // 本地 indexer 缺口(F3 账)时 fail-closed 不当通过。
+        const txRow = ctx.db.prepare('SELECT outputs_json FROM kaspa_tx_log WHERE tx_id = ?').get(claimTx);
+        let ok = false;
+        if (txRow?.outputs_json) {
+          try {
+            const outs = JSON.parse(txRow.outputs_json);
+            ok = outs.some(o => o?.address === winnerAddr && String(o?.amount_sompi ?? o?.amount) === String(expectedAmount));
+          } catch {}
+        }
         if (ok) return true;
-        // 落地但金额不对 = 不算数, 继续重试(可能是 reorg 后金额变了的瞬态, 也可能是真 bug——20 次重试预算跑完
-        // 后 fail-closed 返回 false, 由调用方走既有 STOP threading 分支, 不新增行为类别)
+        // 落地但金额不对(或 indexer 还没追上这笔 claimTx, F3 账)= 不算数, 继续重试——indexer 滞后是
+        // 瞬态, 重试预算内大概率追上; 真金额错也不该被 UTXO 花没花这种无关因素掩盖成假阳性或假阴性。
+        // 20 次预算跑完后 fail-closed 返回 false, 走既有 STOP threading 分支, 不新增行为类别。
       }
     } catch (e) {
       console.warn(`[verifyClaimLanded] attempt ${attempt + 1}/20 threw (非落地判定失败, 诊断用): ${e?.message || e}`);
@@ -123,11 +134,13 @@ async function verifyClaimLanded(ctx, winnerAddr, claimTx, expectedAmount = null
 - `bshard-auto-settler.mjs:572`:`verifyClaimLanded(ctx, winnerAddr, claimTx, cd.amount)`(winner claim)。
 - `bshard-auto-settler.mjs:845`:`verifyClaimLanded(ctx, bettorAddr, claimTx, cd.amount)`(refund claim)。
 
-**NWT 四点复核意见逐条对应**:
-1. fail-closed 默认对不对——`expectedAmount` 传了就必须真拦,不能只 log:上面实现里金额不符时**不 return true**,穿透到 20 次重试耗尽后返回 `false`,调用方现有的 `if (!received) { ...STOP threading... }` 分支原样生效,是真拦不是日志。
-2. 精确相等非容差:`String(amt) === String(expectedAmount)`,跟 `verifyClosedLanded` 同款字符串精确比较,不做任何 `>=`/容差,除非未来有对应的 dust 处理策略(本批没有,不引入)。
-3. 向后兼容——两处既有调用点(以及任何未来新调用点不传第 4 参)行为**逐字节不变**:`expectedAmount == null` 分支直接 `return true`(landed 检查本身逻辑完全没动,新代码只加在这一条判断之后),不是"默认传 0 走比对分支"这种会悄悄变严的写法。
-4. `amount` 字段本身缺失/undefined 时的行为——不特殊处理,交给现有的 `String(amt) === String(expectedAmount)` 精确比较自然处理:`String(undefined)` = `"undefined"`,不可能等于任何真实金额字符串,`.some()` 自然返回 `false`,不会被静默当 0 或跳过校验——不需要额外的空值分支,现有比较逻辑本身就是 fail-closed 的。
+**Bettor 方向审 note① 已折入(v0.3)**:原 v0.2 稿用 `ctx.getUtxos`(当前 UTXO 集)校验金额,Bettor 抓出 85fit 同款教训(claim UTXO 若在验证前被赢家自己花掉,当前 UTXO 集查无此笔,误判"金额不符"而非"这笔已经花过了"),问红队是接受这个暴露面(pre-existing,`verifyClosedLanded`/旧 `verifyClaimLanded` 的 landed 检查本身也有同款问题)还是换金额源。**改法已直接采用后者**:金额源换成 `kaspa_tx_log.outputs_json`(历史永久记录,不受后续花费影响,跟 `_inferWinDirectionFromChain`/§2 Tier1 同一原语),不是"改动面更大"——这个原语在本文件里已有三处先例(:246/:497/:531),复用现成模式,不是新发明。**`ctx.getUtxos` 参数不再需要**,调用侧签名不变(`ctx` 本来就带 `ctx.db`)。
+
+**NWT 四点复核意见逐条对应**(v0.3 用 kaspa_tx_log 源重新过一遍,结论不变):
+1. fail-closed 默认对不对——`expectedAmount` 传了就必须真拦,不能只 log:金额不符(或 indexer 缺口)时**不 return true**,穿透到 20 次重试耗尽后返回 `false`,调用方现有的 `if (!received) { ...STOP threading... }` 分支原样生效,是真拦不是日志。
+2. 精确相等非容差:`String(o.amount_sompi ?? o.amount) === String(expectedAmount)`,不做任何 `>=`/容差。
+3. 向后兼容——`expectedAmount == null` 分支直接 `return true`,新代码(含 kaspa_tx_log 查询)完全不会被执行,两处既有调用点行为逐字节不变。
+4. `outputs_json` 里对应输出缺失/字段异常——`.some()` 精确比较自然返回 `false`,`txRow` 本身缺失(indexer 缺口)也走同一条 fail-closed 路径,不特殊处理、不当 0、不跳过。
 
 **回归测试**(3 case,NWT 建议的第③case 已折入):①金额匹配 → true;②金额不符 → false(不是 landed=true 就直接过);③entries 里该笔 UTXO 的 amount 字段缺失/undefined → false(不当 0/不跳过)。风格复用 `bshard-consolidated-pool-rederive.test.mjs` 的 offline stub 模式(`ctx.getUtxos`/`ctx.relayPost` 用 stub,不需要真链)。
 
@@ -142,7 +155,7 @@ async function verifyClaimLanded(ctx, winnerAddr, claimTx, expectedAmount = null
    - `zk_native` 铸后尝试翻转 → API 400。
 2. **孤儿盘 / 重启穿越两类场景覆盖**(85fit 盲区,NWT 专项要求)——backfill migration 中途重启的幂等性(v189 是一次性 migration,需确认重跑不重复处理已 backfill 过的行)。
 3. **装载后活代码复跑**(不信任装载前结果,今晚 KANet-UI/J2 的习惯延续)。
-4. **backfill dry-run 报告人工过一遍**(K-18 DoD-0 铁律,confirm 无在途盘被误伤)才能真正执行 v189 migration。
+4. **backfill dry-run 报告人工过一遍**(K-18 DoD-0 铁律,confirm 无在途盘被误伤)才能真正执行 v189 migration。**责任人钉死(Bettor note②,不留无主语)**:沿 K-18 DoD-0 昨晚先例——KANet-UI 在生产库机器执行只读 dry-run(有权限跑),J1(本卡作者)对报告出域内判定(family 分布是否合理/unknown 行是否对应在途盘),两人角色不互换、不能只由一方单独拍板过这一关。
 5. **pruned_expired_waived(15)+ A0 不符(6)两条遗留线索的正式归因结论**写入本卡或独立记录,不是"順手查了"没有下文。
 6. NWT 红队每步都出"测试覆盖是否够"专项判断(Owner 直令口径)。
 7. 测试网真金 E2E(Owner"测试 KAS 充足,不吝啬"直令):如果 coherence gate 接入高频路径(下注时),建议至少造一笔真实测试网下注验证零子进程 spawn 的性能路径+真实通过 gate,不能只看离线单测绿。
@@ -152,7 +165,7 @@ async function verifyClaimLanded(ctx, winnerAddr, claimTx, expectedAmount = null
 
 ## 5. 风险 / 待 NWT 复核重点(自提,架构师不自审)
 
-1. 常量区(`poolMerkleRoot`/`predicateCommit`)在 state 区之前还是之后,§1 表格没有 100% 实测坐实(只是从 ctor 参数顺序推断)——落码前必须用一个已知 V1 行实测 hex dump 核对,不能凭推断写 offset。
+1. **【MUST,Bettor note③ 升级确认】常量区(`poolMerkleRoot`/`predicateCommit`)在 state 区之前还是之后,§1 表格没有 100% 实测坐实(只是从 ctor 参数顺序推断)**——**落码硬前置(不是"待复核的风险",是阻塞落码的 MUST 项)**:必须先用一个已知 V1 行(`protocol_status='completed'` 任取一行即可,今晚测试里已经在用这个筛选惯例)实测 hex dump,逐字段核对 §1 表格 offset 跟实际字节位置完全吻合,才能把 §1 这张表写进探针/backfill 代码——**先 dump 后写 offset,不是先写 offset 后验证**,顺序不能反(今晚 MUST-FIX②"文件名笔误导致排查扑空"的同类教训:文档/代码里任何"可能是猜的"结构性断言,落码前必须有一次真实数据的正向验证,不能等出了岔子才回头查)。
 2. Backfill 探针的"两次 recompile 都不过→unknown"逻辑本身是否会误伤 pruned_expired_waived/verifying 这类历史行(如果它们的真实家族既不是标准 V1 也不是标准 V2 模板,是介于两者之间的过渡期产物)——需要在 dry-run 报告里显式统计"两次都不过"的行数并人工过一遍,不能假设只有两种可能。
 3. 高频调用点(每笔下注)的"零子进程 spawn"承诺——(a)(b)(d) 三步是否真的零 silverc 调用需要落码后实测确认,不是文档说了就算。
 
