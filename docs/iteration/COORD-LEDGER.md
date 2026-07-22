@@ -528,3 +528,5 @@ Owner 元问题:写进文档的铁律(CLAUDE.md 接位 SOP 第5条"设计前查�
 处置: 均排白天工作恢复时具体重指派, 非紧急不半夜抢人; 当前关键路径(Owner 钉死)零依赖 J1。
 
 **Owner 钉死+授权开工(06:15)→执行第一波派工**: Owner"我同意你开工, 分配并督促大家干活"=路线图 v0.4.2 正式冻结进入执行。纪律: 每批仍走 design→NWT→code→diff→装载(开工≠跳审), money-path 含 containment 仍单独签发。**执行第一波**(J1tn 离线, covenant/settler 域并 J2): @J2=M-1.1 全命令能力/效果清单(~50 命令 14 列, 并入已坐实证据+补 covenant/bshard 20+条)+M-1.6 caller 三案对比+78 行 classifier 重判审接手; @NWT=M-1.2 威胁模型三场景可测清单+containment 目标 B 主审; @KANet-UI=M0a lint 设计稿(repo-wide differential/content-anchored/manifest, 先设计→NWT 审→码)。本波 DoD=清单+威胁模型+lint 设计三件齐→进 M-1 内部审。节奏: 凌晨不冲刺, 白天各自认领, Bettor 盯进度督促。
+
+**J1tn 白天归位+4 项去重(13:45)**: J1 新会话接位, 全栈拉起+RPC 同步。4 项交接去重(避免和 J2 凌晨兜底认领撞车): ①M-1.1 能力清单=J2 主笔+J1 covenant/payout_shards 域视角复核(两坐实证据已入档不重坐) ②78 行 classifier 审=**改派回 J1**(原域 K-18, J2 解绑专注 M-1.1+caller) ③containment 目标 B=NWT 主审不占 J1 ④M3a 剩余字段清单=J1 域 prep(纯读码可逆, 但 M3a 正式推广排 M-1/M0c 之后, 现列清单=占位非启动落码)。执行第一波 DoD 不变(M-1 清单+威胁模型+M0a lint 设计三件齐→进 M-1 内部审)。
