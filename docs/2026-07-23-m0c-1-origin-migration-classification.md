@@ -12,8 +12,8 @@
 
 | 位置 | 内容 | 定性 |
 |---|---|---|
-| `api/relay.js:1734` | `POST /api/relay/:id/send-command` — **裸 sendCommandAsync 透传端点**：`request.body` 整体直发，任意命令类型（含全部钱路命令），文件挂 verifyIngestRequest | §2.1"不暴露裸透传端点"的**存量反例**、(b) 类最高危条目。迁移批单列处置：初判标 `legacy-app-unprotected` + 优先挂 M2/M4 收敛卡（能力网关化或收窄命令白名单），**绝不标 internal** |
-| `api/relay.js:504` | `POST /api/relay/:id/transfer` 提币端点（UI 面板用，`type:'transfer'`） | (b)/(本地面板) 归属待 route 级鉴权核——挂没挂 secret、外部 app 是否实际调用，J1 核 |
+| `api/relay.js:1726/:1734` | `POST /api/relay/:id/send-command` — **零鉴权裸透传端点**（NWT 实读更正 + J2 route 级复核：本稿初版写"挂共享 secret"错——那是文件级 grep 误判，relay.js 全文件仅 `/api/relay/import-privkey`:119 挂 verifyIngestRequest preHandler，此 route **零门**）：`request.body` 整体直发任意命令类型（含全部钱路命令），任意本机进程可发（不限持 secret 的场景A app） | §2.1"不暴露裸透传端点"存量**最严重**反例，比 (b) 类更糟（零门 vs 持 secret）。**绝不标 internal**（标了=整个 gate 被单端点旁路）；也无法简单标 app+envelope（转发任意 body 无有效 envelope=端点废掉）。**单列第四类处置：收敛**（operator-only 门控/命令白名单收窄/能力网关化，修法等 NWT 完整建议随迁移批定）。紧迫度按 NWT 校准：当前 localhost-only 双证非公网火警，但属"Console 一旦暴露即全 money-path 沦陷"单点 |
+| `api/relay.js:494/:504` | `POST /api/relay/:id/transfer` 提币端点（`type:'transfer'`） | **route 级核实=同样零鉴权**（无 preHandler）——归零鉴权钱路端点族（同 :1726 处置方向），非 (b)（无 secret 概念）非本地面板观察卡级（它是任意 relay 提币，面宽于面板） |
 
 ## 2. (b) 类候选 — api/ 挂共享 secret（文件级），外部可达性待 J1 逐 route 核
 
