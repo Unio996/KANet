@@ -589,3 +589,13 @@ Owner 元问题:写进文档的铁律(CLAUDE.md 接位 SOP 第5条"设计前查�
 - **M0a**(KANet-UI, `c5992005`+NWT verdict `8c7870bb`): GREEN-with-1-MUST-FIX, 落码前修不阻塞 DoD。
 
 **M-1 内部审收口唯一剩余关键路径 = J1 covenant 域逐命令核(闭 M-1.1 复核 + M-1.2 C-3, 一次交付)。** 三份 NWT verdict 全是 GREEN-with-1-MUST-FIX(方向全对, 各一条落码前修), 设计层无返工。J1 核完 covenant 域即可汇总 M-1 内部审整体 verdict → 进 M0c/M-1 实现批设计。
+
+## ✅ M0a v0.2 + M-1.6 v0.2 双消化到位(2026-07-22 14:07Z, 地面核实均在 origin 链上)
+
+**M0a v0.2(`c140fcc9`, KANet-UI)**: 消化 NWT MUST-FIX+三裁定。MUST-FIX 修法采纳 NWT 首选并收紧——**废弃全仓标量 count 多重集, 改 path 键逐 occurrence 精确镜像(exact equality)**: baseline=`{path,form,count_in_file}` 现实精确镜像(非额度上限), 任何方向偏差=ERROR; git rename 对(`git diff --cached -M`)=身份延续但同 commit 必须 `gen --refresh-paths` 刷新 baseline 路径(owner/burn_down 元数据随行), 否则 ERROR。**同时闭合两漏报面**: 删真+加假(git 不把语义无关两 blob 配 rename)+headroom 银行(精确镜像无额度可存, 次选"减必落账"并入)。三裁定落稿(self-serve 只读测试道/动态 require 已知残留入档/shadow-module 首批带非互替)。负向测试扩 12 条(含 Bettor 点的对偶 case#5"删旧+加新净 count 不变→必 ERROR")。
+
+**🔺 路线图④口径偏离(标记, 供实现批 diff 审 + 上报 Owner 顺带告知)**: 路线图 v0.4.2 §M0a 需求④字面="内容指纹锚定非路径锚定"; NWT MUST-FIX 用实测(单 form 116 处塌缩)证明**纯内容锚定在本仓现实下不可靠**(删真+加假与纯移动 count 同形)。④的**实质需求**=两条(移动不清零豁免身份 + 移动零误报), v0.2 用 git rename 检测满足这两条实质、path 重新参与身份。**性质判定(Bettor)**: 这是"钉死的是实质意图、字面实现手段被实现阶段红队证伪后按背书修正", 非违背 Owner 意图; NWT verdict 明文背书("path 身份在 form 塌缩现实下承重不能降级"); KANet-UI 已在 v0.2 §1 显式记录口径。处置=内部收敛(实质需求满足+红队背书), 实现批 diff 审时 Bettor/Owner 复核, 上报 M-1.6 选型时顺带一句告知 Owner 知情(不需单独拍)。
+
+**M-1.6 v0.2(`0ea4b3d7`, J2)**: 消化 NWT MUST-FIX。C 案收敛为**单一非空配置两条硬约束**(验证 locus=relay 进程内命令执行前 fail-closed + 签名权=各 app 自持凭证 Console 不持全量签发密钥), 不留"或"承重; §4 补分场景防线归属+A+C vs B 真实 trade-off(A+C 靠 relay 验证+app 凭证纪律 vs B 靠传输层物理隔离)+containment 卡并轨约束(app 自持+relay 验证版本非换名共享 secret, 两卡对照审)。**待 NWT 复核是否照两条收敛到位 → 过则选型输入成熟 → Bettor 精炼上报 Owner 终选。**
+
+**M-1 内部审依赖链现状**: ①M-1.6 v0.2→NWT 复核→成熟→上报 Owner(A+C vs B 终选, 顺带 M0a④口径知会) ②M0a v0.2→实现批 diff 审复核口径 ③**J1 covenant 域核(唯一收口关键路径未动)**→闭 M-1.1 复核+M-1.2 C-3→M-1 整体 verdict。三份 NWT verdict 全 GREEN-with-1-MUST-FIX 且两份已消化 v0.2, 设计层零返工。
