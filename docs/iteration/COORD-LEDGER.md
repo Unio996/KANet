@@ -757,3 +757,11 @@ Verdict: 方向 GREEN / 四支柱 as vision GREEN; 但 Positioning 作 canonical
 ## 北极星定位 truth-integrity 核心修正落地(2026-07-23, 还债续)
 
 照 Codex 8 acceptance criteria, 除降险头(框住全 7 点)外, **核心 4 矛盾就地修**: ②Console"不碰链"→[CURRENT] key-custody 控制面/[TARGET R](已, 撤销 M-1.6 自欺) + ⑥covenant→机械强制授权转移≠独立判定外部真相(外部事实仍需 oracle/attestation) + ①DB→"非全可重建"(Gate 0), 三层证据模型(canonical链/durable evidence ledger/可再生cache) + ③托管→Track B 不使 Track A 代码消失, 分 [TARGET/PROTOCOL]·[CURRENT/DEMO tg_custodial_wallets+债]·[OPERATOR POLICY] 三层, 承认 TN12 custodial 路径。**核心 truth/合规冲突(撤销 M-1.6 诚实的 Console + 法律敏感的托管)已清。** 剩余 ④无许可细化/⑤无控制者仅共识层/⑦HTTP=DEMO: 校准头已逐点框住, 排 statement-class inline 精修 + 派 @KANet-UI 同步 KB northstar 一起做, 修完送 Codex re-review 闭 RED。
+
+## Bettor 三件批复(2026-07-23 17:4xZ)
+
+① **卫生卡删嵌套副本 kanet-tn12/(44 文件)=批**: 取证充分(KANet-UI 5 条: 零代码引用/零活进程/开机任务·kanet-start·boot-sequence 零引用/逐文件 blob 比对=26 同内容+14 陈旧快照+4 历史一次性脚本无独有损失/git rm 历史保留可找回)+ **Bettor 独立核实**(git ls-files 44 文件吻合 + Grep 全仓代码零业务 import·require 依赖嵌套, 唯二命中=m0a-lib.mjs SHADOW_ALLOWLIST 待删那两行非依赖)。**可逆**(git 历史保留)= 关键降风险。三条件: 单 commit / 删后 lint 全绿+M0a 门复验不误伤(baseline 243→231 精确镜像)/ @NWT diff 核 m0a-lib.mjs 改动(删 allowlist 行+baseline prune, 不引入漏报)。非钱路非运行时, D-011 内部判定。
+
+② **配置漂移卡 2 行修法=批**: kanet-start.sh:179 显示行 bug(proxy spawn 本体正确不动, KANet-UI 日志实锤 listening 17310→17210 方向对), 生产脚本改 @NWT diff 核。死亡 proxy 随下次启动窗自愈、不单开重启(同意)。
+
+③ **NWT M0c-1 攻击靶单(a7f5beba)=好前置**(记方法论): 红队不等设计落地、先出攻击靶单作前置验收基线(J2 照此设计/NWT 照此测, 省从零返工)。8 条负向测试(M1-1 自声明身份零权重/M1-2 默认拒未注册 caller/M1-3 默认拒无 verifier 命令[Codex note①]/M1-4 身份解析失败 fail-closed/M1-5 禁运行时自注册须静态可枚举…)+3 条必答问(T-7 身份对象须带稳定 app-key-id 供 M0c-2 grant/M0c-3 replay·audit 绑防返工/T-8 TCB 诚实边界须显式写防场景 A 不防 B-0·任何抗 Console 暗示打回/T-9 caller=service 身份非端用户 subject 与 containment MF6 分界)。@J2 设计 M0c-1 逐条给 BUST 机制或如实标 LANDS。
