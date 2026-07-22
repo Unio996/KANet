@@ -30,8 +30,7 @@ export const FAMILIES = {
 // 白名单 = 规范模块本体; 嵌套陈旧副本 kanet-tn12/ 随独立卫生卡消亡后从白名单删除。
 export const SHADOW_BASENAMES = /^relay-manager\.(js|mjs|cjs)$/;
 export const SHADOW_ALLOWLIST = new Set([
-  'kasia-console/src/services/relay-manager.js',
-  'kanet-tn12/kasia-console/src/services/relay-manager.js', // 陈旧副本, burn_down=hygiene-card
+  'kasia-console/src/services/relay-manager.js', // 唯一规范模块(嵌套陈旧副本已随卫生卡删除, 白名单收窄)
 ]);
 
 export const BASELINE_PATH = 'scripts/m0a-bare-import-baseline.json';
@@ -271,7 +270,8 @@ export function shadowModuleCheck(root) {
   const violations = [];
   let out = '';
   try { out = git(root, ['ls-files']); } catch { return violations; }
-  const staged = (() => { try { return git(root, ['diff', '--cached', '--name-only']); } catch { return ''; } })();
+  // --diff-filter=d 排除删除: 被删文件的路径也会出现在 name-only 里, 不滤会把"正在删除的旧 shadow"误报成"新建 shadow"(卫生卡删陈旧副本时实撞)
+  const staged = (() => { try { return git(root, ['diff', '--cached', '--name-only', '--diff-filter=d']); } catch { return ''; } })();
   const all = new Set([...out.split('\n'), ...staged.split('\n')].filter(Boolean));
   for (const fp of all) {
     if (SHADOW_BASENAMES.test(path.posix.basename(fp)) && !SHADOW_ALLOWLIST.has(fp)) {

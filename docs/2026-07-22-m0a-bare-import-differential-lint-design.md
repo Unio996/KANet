@@ -1,6 +1,6 @@
 # M0a repo-wide differential lint 卡点 · 设计稿 v0.2
 
-> **Status**: CURRENT（v0.2，NWT MUST-FIX+三裁定已收敛，待实现批）
+> **Status**: CURRENT（v0.2 已实现落地并转正——实现批 `417e29b0`+空白变体修复 `bfa2fa9e`，NWT diff 审 GREEN+复核 GREEN，Bettor 四路验证转正 7/22；门已在 pre-commit 生效）
 
 - **作者**: KANet-UI（执行第一波派工 #voxgak，2026-07-22）
 - **审链**: v0.1（`c5992005`）→ NWT 红队 GREEN-with-1-MUST-FIX+三裁定（`docs/2026-07-22-NWT-redteam-m0a-lint-design.md`，`8c7870bb`）→ 本 v0.2 收敛。实现批 diff NWT 再审。
