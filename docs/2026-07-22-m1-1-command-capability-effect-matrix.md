@@ -55,23 +55,25 @@
 
 ## 2. 16 条"通用原语"（Owner 点名不可自外于分类之外，逐条列出）
 
-| 命令 | 效果类 | 所用密钥与钱包 | 备注 |
-|---|---|---|---|
-| `HANDSHAKE` | read | relay 自己身份 | 无价值转移 |
-| `SEND_MESSAGE` | build·submit | relay 自己签名密钥 | 消息广播，无 KAS 转移 |
-| `SEND_BROADCAST` | build·submit | 同上 | 频道广播 |
-| `PUBLISH_CARD` | build·submit | 同上 | 名片发布 |
-| `TRANSFER` | sign·submit·transfer | **relay 自己钱包** | 从 relay 自己地址转出，非托管 |
-| `CUSTODIAL_TRANSFER` | sign·submit·transfer·**wallet-admin** | **调用方传入的外部 privkeyHex**(relay.mjs:478-490，MF2/NWT 已坐实) | 见 §D2 类 B 段落完整分析，唯一"relay 签别人钥匙"的命令 |
-| `SPLIT_UTXO` | build·submit | relay 自己钱包 | UTXO 管理 |
-| `CONSOLIDATE_UTXO` | build·submit | relay 自己钱包 | 同上 |
-| `GET_RPC_STATE` | read | n/a | 只读 |
-| `ECDSA_SIGN` | sign | relay 自己私钥 | **签任意调用方传入的 message**，无内容校验——跟 custodial_transfer 同族风险(签名对象由调用方完全决定) |
-| `GET_PUBKEY` | read | n/a | 只读 |
-| `SIGN_INPUT_FOR_SETTLE` | sign | relay 自己私钥 | **签调用方传入的 tx_hex 任意 input**——跟盲签 9 条同一模式(relay 不理解这笔交易语义) |
-| `CHECK_UTXO_LANDED` | read | n/a | 只读查询 |
-| `GET_ADDRESS_UTXOS` | read | n/a | 只读查询 |
-| `CHAIN_GET_CURRENT_DAA_SCORE`/`CHAIN_GET_BLOCKS_FROM_DAA_SCORE`/`CHAIN_GET_BLOCK_AT_DAA` | read | n/a | 只读链查询(3 条合并一行) |
+**v0.2（Bettor 方向审 n1 折入）**：`TRANSFER`/`ECDSA_SIGN`/`SIGN_INPUT_FOR_SETTLE` 三条高风险行原稿只填了 4/14 列——正是我自己在 §3 指出的"贴通用原语标签被无意识降级审查"那个病在本卡内复现了一半，这次补全跟类 C 同款 14 列全量待遇，不因为"通用+早就有"就简化处理：
+
+| 命令 | 效果类 | 所用密钥与钱包 | 允许资产与网络 | 允许市场-家族-分支 | 输入 outpoint 范围 | 收款与输出约束 | 金额-费率上限 | 幂等键 | 所需证据与终局性 | 调用方能力 | 审计回执 | 吊销机制 | 是否可进公开应用契约 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| `HANDSHAKE` | read | relay 自己身份 | n/a | n/a | n/a | 无价值转移 | n/a | 无 | n/a | 无 | 无 | 无 | 是(纯身份，无价值面) |
+| `SEND_MESSAGE` | build·submit | relay 自己签名密钥 | n/a(消息非链上资产) | n/a | n/a | 消息广播，无 KAS 转移 | n/a | 无 | n/a | 无 | 无 | 无 | 是 |
+| `SEND_BROADCAST` | build·submit | 同上 | n/a | n/a | n/a | 频道广播 | n/a | 无 | n/a | 无 | 无 | 无 | 是 |
+| `PUBLISH_CARD` | build·submit | 同上 | n/a | n/a | n/a | 名片发布 | n/a | 无 | n/a | 无 | 无 | 无 | 是 |
+| `TRANSFER` | sign·submit·**transfer** | **relay 自己钱包** | KAS，`wallet.getNetworkId()` | n/a(非 covenant，普通 P2PK 转账) | relay 自己 UTXO 集(自动选币) | **收款地址+金额完全由调用方 `target`/`amount` 决定，relay 零校验合理性**(是否白名单收款人/是否超预算) | **现状无独立上限**——跟 custodial_transfer 同族风险，只是花的是 relay 自己的钱不是别人的 | 无显式(重复调用=重复转账) | n/a | **无**(跟盲签 9 条同一现状) | **无**(链上 tx 本身可查，但无独立"谁在何时申请了这笔转账"的调用请求记录) | 无 | **否**——需先有金额/收款人 scope 才能公开(M0c 范围) |
+| `CUSTODIAL_TRANSFER` | sign·submit·transfer·**wallet-admin** | **调用方传入的外部 privkeyHex**(relay.mjs:478-490，MF2/NWT 已坐实) | KAS | n/a | 该私钥对应地址的 UTXO 集 | 同 TRANSFER，且私钥本身经 IPC 传递(见 §D2 类 B 完整分析) | 现状无独立上限 | 无显式 | n/a | 无 | 无独立审计(私钥用后即弃，无留痕) | 无 | 否(唯一"relay 签别人钥匙"的命令，M-1 caller identity 最高优先级) |
+| `SPLIT_UTXO` | build·submit | relay 自己钱包 | KAS | n/a | relay 自己 UTXO | UTXO 管理，产出仍归 relay 自己 | targetCount 参数决定份数，无金额上限 | 无显式 | n/a | 无 | 无 | 无 | 是(不涉及第三方资产) |
+| `CONSOLIDATE_UTXO` | build·submit | relay 自己钱包 | KAS | n/a | relay 自己 UTXO | 同上 | n/a | 无显式 | n/a | 无 | 无 | 无 | 是 |
+| `GET_RPC_STATE` | read | n/a | n/a | n/a | n/a | 只读 | n/a | n/a | n/a | 无 | n/a | n/a | 是 |
+| `ECDSA_SIGN` | sign | relay 自己私钥 | n/a(非链上 tx，任意消息签名) | n/a | n/a | **签任意调用方传入的 `message`，relay 对内容零校验** | n/a(签名操作本身无金额概念) | 无显式 | n/a | **无**——跟 custodial_transfer 同族风险(签名对象由调用方完全决定，relay 不知道自己在签什么语义的东西) | 无独立审计(签名结果返回给调用方，relay 侧无独立记录"谁申请签了什么") | 无 | **否**(需先有消息内容/用途白名单才能公开) |
+| `GET_PUBKEY` | read | n/a | n/a | n/a | n/a | 只读 | n/a | n/a | n/a | 无 | n/a | n/a | 是 |
+| `SIGN_INPUT_FOR_SETTLE` | sign | relay 自己私钥 | KAS(签的是 kaspa tx 的某个 input) | n/a(不绑定任何特定 market/covenant family) | **调用方指定 `input_index`，relay 不校验这个 index 对应的 UTXO 语义**(是不是真的这笔结算该花的那个 input) | **签调用方传入的 `tx_hex` 任意 input**——relay 不理解这笔交易的收款人/金额/用途 | 无独立上限(受 tx_hex 本身金额约束，但 relay 不核实这个金额是否合理) | 无显式 | n/a | **无**——跟盲签 9 条同一模式(relay 不理解这笔交易语义，纯粹执行签名动作) | 无独立审计 | 无 | **否**(需 typed-intent 包装才能公开，M0c/typed-intent 范围) |
+| `CHECK_UTXO_LANDED` | read | n/a | n/a | n/a | n/a | 只读查询 | n/a | n/a | n/a | 无 | n/a | n/a | 是 |
+| `GET_ADDRESS_UTXOS` | read | n/a | n/a | n/a | n/a | 只读查询 | n/a | n/a | n/a | 无 | n/a | n/a | 是 |
+| `CHAIN_GET_CURRENT_DAA_SCORE`/`CHAIN_GET_BLOCKS_FROM_DAA_SCORE`/`CHAIN_GET_BLOCK_AT_DAA` | read | n/a | n/a | n/a | n/a | 只读链查询(3 条合并一行) | n/a | n/a | n/a | 无 | n/a | n/a | 是 |
 
 **Owner 那句话验证成立**：`ECDSA_SIGN`(签任意消息)+`SIGN_INPUT_FOR_SETTLE`(签任意 tx input)两条通用原语，风险模式跟类 B 盲签 9 条几乎一样(relay 对签名内容零校验，纯粹执行调用方给的字节)——之前分类只覆盖 A6+B9+C20=35 条，这两条+`TRANSFER`/`CUSTODIAL_TRANSFER` 混在"16 条通用原语"标签下被无意识降级审查，是原分类穷尽性的真实漏洞，M-1.1 完整清单已经堵上。
 
