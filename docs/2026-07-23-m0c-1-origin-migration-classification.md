@@ -23,12 +23,16 @@
 
 **收敛方案（三方收敛，最终形态迁移批 NWT 主导 diff 核定）**：
 - **(a) 生产 daemon → 直接 import `sendCommandAsync` + `origin='internal'`**（消 R-SELF-HTTP-FETCH 反模式 = legacy-refund 死循环那族教训 + 内部命令带对 origin）。**`bshard-settle-daemon.mjs:86` 在 J2 域，J2 落码批 wire**（money-path，走 diff 审+Owner 签发）；`prediction-agent-mind.mjs:385` 归属确认后 wire。
-- **(b) daemon 迁走后端点不消失**（operator scratch 仍用）→ **零鉴权改 verifyIngestRequest（起步·三方定稿）**：**不砍钱路白名单**（KANet-UI 认账收回"白名单砍钱路"——operator 手动 covenant/结算 sign_input_for_settle/bshard_close_attest 就是经此端点发 money-path=刚需，砍了断人工结算，同 NWT 自纠"只读白名单"一个性质）。**诚实残留（进禁用词表）**：verifyIngestRequest = 那把 11 组件共用共享 secret（M-1 containment 母面），起步堵场景 A 但**非实 operator 隔离**；operator-scoped 身份 = 理想态，排后（R 卡族）。
+- **(b) daemon 迁走后端点不消失**（operator scratch 仍用）→ 加鉴权。**🔴 NWT precondition 修正（推翻"verifyIngestRequest 起步够用"）**：verifyIngestRequest = 11 组件共用共享 ingest secret，**tg-bot 这类场景A app（托管钱包）就持这个 secret**——加 verifyIngestRequest 只把端点从"零鉴权（任意本机进程）"收窄到"持共享 secret 者（含 tg-bot=场景A）"，**场景A app 仍够得到、仍能经它发任意 money-path 命令**。故 verifyIngestRequest **不满足 gate-arming precondition**（"gate 开前堵死场景A旁路"）。
+  - **含义（关系 gate 能否 armed）**：要让端点实堵场景A旁路，money-path 那部分 auth 必须**排除场景A** = operator-scoped 身份（非共享 secret）或 A 方案 operator 专道。**operator-scoped 不能排到 R 卡**——若此端点是 gate-arming 硬前置，money-path 面的 operator-scoped auth 必须 **gate 开之前到位**（与 provision"零应用可达"同构：授权到达面一致收窄）。清单前文"operator-scoped 理想态排 R 卡族"**据此更正**。
+  - 三方两次自纠已收敛的部分仍立：不砍钱路白名单（operator 手动 covenant/结算 sign_input_for_settle/bshard_close_attest 是刚需，NWT+KANet-UI 各自收回"只读/砍钱路"）——即"保留 money-path 能力"与"money-path auth 排除场景A"两条同时成立，正是 A 方案（钱路离开共享 secret 端点、走 operator 专道）解的。
 - **🔴 ② operator scratch 21 脚本的钱路处置（NWT 点名摊开·钱路运维决策·非纯技术选型）**：这 21 脚本发的正是 money-path covenant 命令（sign_input_for_settle/bshard_close_attest/zk_* 等），是**事故时人工结算兜底手段**。两方案：
-  - **A：端点彻底非钱路 + operator 钱路另开专道**——端点白名单只留非钱路（覆盖 daemon+UI）+ operator 手动结算迁到 operator-auth 专用 money-path 路径（operator-scoped 身份门，乙路 operator=TCB 放行 money-path）。最干净（宽 HTTP 端点永不转发钱路），代价=新建 operator 专道 + 21 脚本改指向。（NWT 倾向 A）
-  - **B：端点加 operator-auth 保留全命令面**——改动最小，但留一个 operator 可发钱路的 passthrough。
-  - **红线（不管选哪个）**：不许静默砍 operator 手动结算能力（事故兜底，砍了必须有替代）。
-  - **决策归属**：operator 手动结算路径存废 = **钱路运维决策，升 Bettor/Owner 知情拍**（NWT 明确非纯技术选型，J2 不自拍），本卡忠实记 tension + A/B，选定后回写。
+  - **A（团队推荐·NWT+Bettor+KANet-UI 收敛倾向）：端点彻底非钱路 + operator 钱路另开专道**——端点白名单只留非钱路（覆盖 daemon+UI）+ operator 手动结算迁 operator-scoped 身份专用 money-path 路径（非共享 secret，乙路 operator=TCB 放行）。钱路面**彻底移出共享 secret 端点** = 与 provision"零应用可达"、与整个 M0c-1"钱路面排除场景A"同构。**代价被 KANet-UI 证实很低**：21 脚本中 20 个是一次性历史盘处置脚本（qi37q/bh01w/3o6cs 按市场 ID 命名，已用完），持久 operator money-path 需求很小 = 专道是小组件、非"迁 21 个"。
+  - **B：端点加 auth 保留全命令面**——看似最小当天可闭，**但"省事"是假的**：用共享 ingest secret 那把 auth **不满足 gate 前置**（场景A app 持 secret 仍能经端点发 money-path）；B 要有效就得把 operator-scoped 从 R 卡拉到 gate 前——那还不如直接 A。
+  - **🔴 NWT 收口判据（给 Bettor/Owner 拍）**：这不是"A 干净 vs B 省事"，是"**A 满足 gate 前置 vs B 用共享 secret 不满足前置**"——gate 场景A保护要实成立，money-path 面必须离开场景A够得到的任何 auth（含共享 secret）。落码收敛 NWT diff 核"money-path 路径实排除场景A（共享 secret 不算）"。
+  - **红线**：不许静默砍 operator 手动结算能力（sign_input_for_settle/bshard_close_attest 事故兜底，砍了必须有替代）。
+  - **✅ Bettor 拍板 = A 方案（2026-07-23，NWT②/KANet-UI 终态一致）**：relay.js:1726 钱路命令彻底离开共享 secret 端点——(a) 内部 daemon 直 import（origin=internal）；(b) operator 手动结算走 **operator-scoped 专道**（排除场景A，与 provision"零应用可达"同构，**gate 前到位、不排 R 卡**——Bettor 同步自纠先前"operator-scoped 排 R 卡"错，NWT 点破 gate-arming 硬前置不能排后）；(c) 端点自身白名单收窄到非钱路通信类+加 auth。
+  - **工作量影响（补进 `c0d05f28` Owner 知情）**：operator-scoped 专道 = **新钱路组件**，走设计→红队→Owner 签发，因是 gate-arming 硬前置**必须 gate armed 前到位** = M0c-1 落码前工作量加一项。Owner 若对 operator 手动结算路径有偏好请示一句。
 - **时序统一 note-A**：relay.js:1726 收敛（daemon 并入 (a) 类迁移 + 端点 (b) 加鉴权 + ② A/B 定后 operator 路径处置）= gate arming 硬前置。涉 money-path 面按 D-011 内部审链，NWT 落码 diff 核。
 - **时序（NWT 红队判定，2026-07-23）**：①**不做独立紧急热修**（双证不 live 远程暴露，走乙 localhost=TCB 内无活跃远程利用路径）；②**绝不能拖到 gate 装载后**（零鉴权任意命令透传原样留着=gate 装了也被这单端点整体旁路发任意命令绕 authorizeCommand）→ **gate-arming 硬前置 checklist 项**（"未收敛裸透传存在=gate 不 armed"，KANet-UI 已钉），"迁移批优先"= gate 开之前、非迁移批内部随意排序。
 - **收敛后决定性残留核（NWT 必答，迁移批）**：daemon 迁走后**还有没有外部/UI 调这个 HTTP 端点**？有 → 加 auth（不能只靠迁 daemon）；无 → operator-only 化/删。NWT 落码 diff 核收敛改动（daemon 迁移 + 端点 auth/白名单/删三选一按残留定）。
