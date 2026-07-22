@@ -159,11 +159,15 @@ KANet 的协议层天然包容万物。任何有价值的东西都能在这个�
 
 ### 4. 链上裁决结算（covenant）
 
-"凭效果"能成立，前提是"效果"能被机器判定、不靠人拍板。这是 covenant（链上合约）的角色 —— 一台**在链上做真实裁决的机器**：效果对了自动付、不对不付，规则写死在链上、谁也改不了、机器执行。KANet 的"信任"不来自委员会多数、不是去中心化装饰，而是来自**链上可验证的执行本身**。
+"凭效果"能成立，前提是"效果"能被机器判定、不靠人拍板。这是 covenant（链上合约）的角色。
+
+> **[CURRENT] 校准（Codex 矛盾⑥）**：covenant **机械强制**脚本与已提交状态里编码的规则和状态转移 —— 保证"已授权/已提交的结果被一致使用"。这 **≠ 独立判定外部世界的真相**。当前预测路径仍需外部谓词证据、判定者/oracle 输出、委员签名、弃权与证据连续性。准确说法：**可编码或可提交的效果，covenant 机械执行授权转移与支付；外部事实仍需独立可问责的 oracle/attestation 输入、确定性推导、弃权与 durable 证据。** covenant 是"授权结果的强制执行机器"，不是"外部真相的独立判官"——后者仍需可问责的输入源。
 
 ### Track 归属（合规锚，不可省）
 
-以上是**协议层的愿景（Track B）**：KANet 提供的是让"无许可、凭效果结算的协作"成为可能的协议原语 —— testnet-only、MIT 开源、任何第三方可自行 fork 部署。**KANet 团队不运营任何付佣市场、不撮合、不托管、不收费**（与"KANet 不做什么"及 Track A 7 铁律一致）。是协议使这一切成为可能，不是 KANet 在经营一门生意。任何对外表述必须守住这条边界。
+以上是**协议层的愿景（Track B）**：KANet 提供的是让"无许可、凭效果结算的协作"成为可能的协议原语 —— testnet-only、MIT 开源、任何第三方可自行 fork 部署。**KANet 团队不运营任何付佣市场、不撮合、不收费**（与"KANet 不做什么"及 Track A 7 铁律一致）。是协议使这一切成为可能，不是 KANet 在经营一门生意。任何对外表述必须守住这条边界。
+
+> **[CURRENT] 校准（Codex 矛盾③ · Track B 标签不使 Track A 代码消失）**：托管一项须分三层，不能笼统写"不托管"——**[TARGET/PROTOCOL]** KANet base 不要求托管、第三方可自 host/fork；**[CURRENT/DEMO]** 当前 TN12 有 operator 控制的 opt-in 托管便利路径（`tg_custodial_wallets` 存加密助记词 → Console just-in-time 解密 → `custodial_transfer`），带**已知 subject-binding + key-custody 债**（containment 卡实现就绪度 Codex 判 RED）；**[OPERATOR POLICY]** 某 operator 是否"运营"市场是单独的事实/法律陈述，不能仅凭 MIT 授权推断。"不托管"是协议目标，**不是当前 TN12 实现的事实**。
 
 ---
 
@@ -192,7 +196,7 @@ Agent Mind（通用大脑）
 ## 核心设计原则
 
 1. **Agent 为中心** — Agent 是链上自主主体，人类是伙伴不是用户
-2. **链是真相源** — 链上记录不可篡改，DB 只是索引，数据可从链上完全重建
+2. **链是真相源（[CURRENT] 校准 · Codex 矛盾①）** — 链上是**当前 canonical 共识状态**（UTXO/current）的权威。但"数据可从链上**完全**重建"**不成立**：Gate 0 已证 pruning 边界下 tx body / accepting-block 证据可能物理丢失（`side_lock_daa`、bet 级 accepting-block 等 preimage 事后不总能恢复）。正确三层模型 → ① 当前 canonical 链状态；② **durable evidence ledger**（tx 字节 / prevouts / accepting-block·DAA / script·redeem / family / 金额 / state·preimage 哈希 / 回执 —— pruning 会毁的都要独立留存）；③ 可从 ①② 再生的 cache/index。"DB 只是索引"仅对能从保留证据推导的字段成立，非普适架构规则
 3. **靠做事变强** — 链上行为即成长，不靠喂知识，经验不可伪造
 4. **大脑可换灵魂不变** — Mind 五核不变，AI Provider 随时切换
 5. **只建地基不造房子** — 只提供通信、身份、结算原语，不规定上层行为
