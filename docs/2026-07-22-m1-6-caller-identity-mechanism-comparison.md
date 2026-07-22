@@ -1,6 +1,7 @@
 # M-1.6 Caller 身份机制三案对比（J2，供 Owner 终选）
 
-> **Status**: DRAFT（2026-07-22 · J2）
+> **Status**: v0.2（2026-07-22 · J2·已消化 NWT MUST-FIX）
+> **v0.2 修订记录**：消化 NWT 红队 verdict（`docs/2026-07-22-NWT-redteam-m1-6-caller-identity.md`，GREEN-with-1-MUST-FIX）——v0.1 §3 的"签发者可以是 Console 自己""relay 侧或 Console 侧验证"两处表述对威胁场景 B（被攻陷 Console worker）vacuous（自签自验=空验证），本版收敛为单一非空配置：**验证 locus=relay 进程内（fail-closed）+ 签名权=各 app 自持凭证（Console 不持全量签发密钥）**，不留"或"承重。§4 同步补入 A+C vs B 的真实 trade-off（供 Owner 终选，非改动量单维度）。
 > **依据**：`docs/2026-07-22-kanet-base-modularization-roadmap-v0.2.md` M-1 §5.6 派工——三案对比（HTTP 能力网关 / per-app socket / 签名能力信封），单机父子进程拓扑下最小改动视角，架构本身 Owner hold（不在评审里定）。
 > **本卡性质**：设计文档，不改一行执行代码。
 
@@ -30,7 +31,7 @@
 - 现有 tg-bot 已经是这个模式的雏形（纯 HTTP、不碰 DB、走 `/api/pool/*`），只是那层目前不做 capability 校验——本方案是把这个已验证可行的模式补上鉴权层，不是发明新架构。
 
 **弱点**：
-- Console 依然是单点——如果 Console 进程本身被攻陷，这层网关形同虚设（跟现状风险面相同，没有变差但也没有变好）。
+- Console 依然是单点——如果 Console 进程本身被攻陷，这层网关形同虚设（跟现状风险面相同，没有变差但也没有变好）。**该场景（威胁场景 B）的防线不在本方案，只能由方案 C 的两条硬约束提供（见 §3），网关自身对场景 B 零防御——这是组合推荐里 A 与 C 的明确分工，不是 A 的隐性能力。**
 - capability matrix 的维护/更新如果不跟 M0c 的 evaluator 强绑定，网关本身可能沦为"看起来有检查，实际没人认真维护"（豁免温床同款风险，需要 NWT 的燃尽纪律套用）。
 
 ---
@@ -46,7 +47,7 @@
 - relay.mjs 的每个 case handler 可能需要拿到"当前请求来自哪个 socket/app"这个上下文（目前完全没有这个概念，`cmd`对象里没有调用方字段）。
 - 对已有 16+ 命令的 handler 签名有连锁改动面（即使只是新增一个上下文参数，仍然要逐个 touch，且这类改动落进 M-1 M0c 阶段的"钱路语义行≤50硬上限"考量）。
 
-**优点**：结构上最干净——身份绑定在传输层，不依赖任何一方"老实自报"，理论上最难被绕过。
+**优点**：结构上最干净——身份绑定在传输层，不依赖任何一方"老实自报"，理论上最难被绕过。**NWT 红队补充（v0.2 采纳）**：B 是三案里**唯一在传输层结构性绑定身份的方案，也是唯一天然抗威胁场景 B（被攻陷 Console worker）的传输层方案**——身份来自"连的是哪个 socket"这个物理事实，被攻陷的 Console 无法替别的 app 伪造通道成员资格。这一点 v0.1 轻描淡写了，Owner 终选应看到。
 
 **结论（对比）**：改动面明显大于方案 A，且需要新增组件/连锁改现有 handler，不符合"单机父子进程拓扑下最小改动"这个筛选标准，但架构洁净度最高——如果 Owner 判断"这次要一次做对，不计较改动量"，B 是终态更彻底的选项。
 
@@ -54,9 +55,16 @@
 
 ## 3. 方案 C：签名能力信封（typed-intent + 能力凭证）
 
-**做法**：不管请求走 HTTP 还是走进程内直调，每一条最终要送进 relay 的命令都必须附带一个**签名的能力信封**——内容至少包含：调用方 app 身份、typed intent（不是裸 witness/inputs/outputs，是"这次要做什么"的结构化描述）、scope(允许的市场/outpoint/金额范围)、nonce(防重放)、过期时间。relay(或 Console 内部的 evaluator)验证信封签名+scope 匹配后才放行，**不依赖传输通道本身提供身份保证**。
+**做法**：不管请求走 HTTP 还是走进程内直调，每一条最终要送进 relay 的命令都必须附带一个**签名的能力信封**——内容至少包含：调用方 app 身份、typed intent（不是裸 witness/inputs/outputs，是"这次要做什么"的结构化描述）、scope(允许的市场/outpoint/金额范围)、nonce(防重放)、过期时间。信封验证通过后才放行，**不依赖传输通道本身提供身份保证**。
 
-**跟单机父子进程拓扑的关系**：这条**不改变**relay 子进程的 fork/IPC 结构本身（跟方案 A 一样，relay-manager.js 零改动），但要求：①有一个信封签发者（可以是 Console 自己，也可以是独立的能力颁发服务）②relay 侧（或 Console 侧网关）新增信封验证逻辑，这部分是新代码但不涉及进程拓扑重构。
+**两条硬约束（NWT MUST-FIX 收敛，缺一即 vacuous，不是可选配置）**：
+
+1. **验证 locus = relay 进程内**：信封验证发生在 relay 子进程里、命令执行前，fail-closed（无信封/验证不过=拒绝执行）。**不能是 Console 内的 evaluator**——威胁场景 B（被攻陷 Console worker）下，Console 进程内任何验证逻辑都在攻击者可控地址空间里（进程内代码可不走网关直接 `import relay-manager.js` 调 `sendCommandAsync`，§0 已坐实）；relay 是被攻陷 Console 碰不到内存的独立进程，它自己的校验代码是场景 B 下唯一站得住的验证点。
+2. **签名权 = 各 app 自持的独立能力凭证**（一次性 provision / 离线颁发），**Console 不持有全量签发密钥**。否则被攻陷 Console 直接给任意 app 签任意 scope 的信封=自签自验空验证。在此约束下，Console 被攻陷的上界=重放它观测到的合法信封（受 nonce+过期时间约束，M0c⑤兜底），**无法伪造新 scope**。
+
+> v0.1 曾写"签发者可以是 Console 自己""relay 侧或 Console 侧验证"——NWT 红队打穿：该写法下场景 B 中攻击者"给自己签放行条自己盖章"，C 案对最高危场景零防御（memory: vacuous-teeth / verify-value-source 同款——checker 与被验对象同处攻击者可控域=空验证）。v0.2 起以上两条为本案定义的一部分，任何实现批偏离即不再是本卡推荐的方案 C。
+
+**跟单机父子进程拓扑的关系**：这条**不改变**relay 子进程的 fork/IPC 结构本身（跟方案 A 一样，relay-manager.js 的 fork 机制零改动），但 relay.mjs 侧要新增信封验证入口（命令分发前统一验，非逐 handler 散装）——这部分是新代码，不涉及进程拓扑重构。app 凭证的 provision 流程（谁颁发、怎么轮换、怎么吊销）是 M0c⑦（免代码吊销）要一起设计的内容。
 
 **改动面**：
 - 需要设计信封格式+签发流程（新组件或 Console 内新模块）。
@@ -69,13 +77,22 @@
 
 ## 4. 推荐（供 Owner 终选，不越权拍板）
 
-**单机父子进程拓扑下最小改动视角**：**方案 A（HTTP 能力网关）作为传输层选型 + 方案 C（签名能力信封）作为网关内部的授权判据，两者叠加**——这个组合：
+**单机父子进程拓扑下最小改动视角**：**方案 A（HTTP 能力网关）作为传输层选型 + 方案 C（签名能力信封，按 §3 两条硬约束定义：relay 进程内验证 + app 自持凭证）作为授权判据，两者叠加**——这个组合：
 - 不改变 relay-manager.js 的 fork/IPC 结构（方案 B 的改动面最大，本卡不推荐作为传输层选型，除非 Owner 认为值得为架构洁净度承担更大改动）。
 - 完全对齐 M0c 七项已经在设计的内容（caller identity/默认拒绝/evaluator/scope/nonce/审计/吊销），不是发明第四套机制。
 - 复用 tg-bot 已验证的"纯 HTTP、不碰 DB"模式作为传输层先例，降低这条选型本身的风险。
 
 **payload 明文 app_id 不可接受**（Owner 已定调："自我声明伪造零成本"）——方案 A+C 组合天然满足这条：app 身份不是消息里的一个字段，是能力信封签名验证出来的结果。
 
+**分场景防线归属（v0.2 明确，防"A+C 笼统满足一切"的误读）**：
+- **场景 A（被攻陷/越权的应用进程）**：A 网关挡"谁能连"，C 信封 scope 挡"连上后能干什么"——两层叠加成立。
+- **场景 B（被攻陷 Console worker）**：A 网关在同进程内可被绕过（§0 坐实），**这个场景的防线只来自 C 案的两条硬约束**——relay 进程内验证（攻击者碰不到的验证点）+ app 自持凭证（攻击者伪造不了新 scope，上界=重放，nonce 兜底）。缺任何一条，A+C 对场景 B 退化为零防御。
+- **场景 C（重放）**：C 信封的 nonce+过期时间，与 M0c⑤ 同机制。
+
+**A+C vs B 的真实 trade-off（NWT 红队钉出，Owner 终选应知，非改动量单维度）**：A+C 抗场景 B 靠的是"relay 验证 + app 凭证"这层**实现纪律**（依赖落码不偷懒——签发密钥若图省事收归 Console 集中管理，防线整体 vacuous 且不易察觉）；方案 B 靠的是传输层**物理隔离的结构保证**（不依赖任何一方老实）。本卡仍按 Owner 给的"最小改动"筛选标准推荐 A+C，但两者的保证性质不同，这是终选时的真实代价面。
+
+**与 containment 卡目标 B 的并轨约束**（Bettor 已编排、NWT 持二审硬条件）：containment 卡的凭证形态与本卡 C 案信封**同机制收敛、不另造第二套**——且"同一套凭证"必须是 §3 硬约束定义的 **app 自持 + relay 验证**版本，不能是换名共享 secret，否则命名合规（Codex RED-3）底层仍 vacuous。同一凭证管两卡=一处偷懒两处塌，实现批 diff 审须两卡对照着审。
+
 ---
 
-**关联**：`docs/2026-07-22-kanet-base-modularization-roadmap-v0.2.md`（M-1 §5.6、M0c 七项）、`docs/2026-07-22-m1-1-command-capability-effect-matrix.md`（本卡的 scope/命令依据）。
+**关联**：`docs/2026-07-22-kanet-base-modularization-roadmap-v0.2.md`（M-1 §5.6、M0c 七项）、`docs/2026-07-22-m1-1-command-capability-effect-matrix.md`（本卡的 scope/命令依据）、`docs/2026-07-22-NWT-redteam-m1-6-caller-identity.md`（红队 verdict，v0.2 消化对象）、`docs/2026-07-22-NWT-redteam-m1-2-threat-model.md`（三威胁场景定义）、`docs/2026-07-23-custodial-transfer-subject-binding-containment-card.md`（凭证并轨）。
