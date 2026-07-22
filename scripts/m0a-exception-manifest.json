@@ -1,0 +1,4 @@
+{
+ "_doc": "M0a 冻结后新增裸 import 的唯一合法通道(设计 v0.2 §5)。七字段全必填: id/family/form/path/capability/justification/review_ref。capability ∈ {db-readonly, test-fixture}; relay-manager 族不开口。test-fixture 三静态限制全过可用 review_ref='self-serve:readonly-test'; db-readonly 必须人审锚(频道 txid / ledger)。",
+ "entries": []
+}

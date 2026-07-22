@@ -20,6 +20,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { MONEY_PATH_MANIFESTS } from '../kasia-console/src/lib/money-path-manifests.mjs';
+import { runAllM0aChecks } from './m0a-lib.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -62,6 +63,19 @@ console.log(`[lint-kanet] scanning ${targets.length} files...`);
 // 根因: i64 bitmap 只 63 可用 bit; merkle depth 允许 >63 leaf 时, winner#64+ 的 slot 装不下 → nullifier 失效 → 双领抽干.
 // 出现 2 次 (④ refund-merkle + B2 PayoutShard, J1 复犯) → baked-lint 根治. 解: byte[] 多-slot OR 分桶 ≤63/shard.
 // 配 ANTI-PATTERNS / 记忆 feedback-recreatable-utxo-nullifier-defeatable.
+// ── R-M0A-* [ERROR×5] (M0a repo-wide differential 门, 2026-07-22, 设计 docs/2026-07-22-m0a-bare-import-differential-lint-design.md v0.2 NWT GREEN):
+// 裸 better-sqlite3 / relay-manager import 与 baseline+manifest 精确镜像比对(path 键+git rename 身份延续)。
+// 判定逻辑全在 scripts/m0a-lib.mjs(生成器/测试/lint 单源)。检查执行本身失败 = fail-closed 报 ERROR。
+function checkM0A() {
+  let results;
+  try { results = runAllM0aChecks(ROOT); }
+  catch (e) {
+    violate('R-M0A-BARE-IMPORT-DIFF', `M0a 检查执行失败(fail-closed, 门不许静默失效): ${e.message}`, file('scripts/m0a-lib.mjs'), 0);
+    return;
+  }
+  for (const v of results) violate(v.rule, v.msg, path.isAbsolute(v.file) ? v.file : file(v.file), 0);
+}
+
 function checkR_NULLIFIER_I64() {
   const silDirs = [path.join(ROOT, 'kasia-console/src/lib'), path.join(ROOT, '_j2_probe_branch')];
   for (const dir of silDirs) {
@@ -1368,6 +1382,7 @@ checkR_MANIFEST_TEST_COVERAGE();    // R-MANIFEST-TEST-COVERAGE [WARN] (件④ 2
 checkR_MANIFEST_ADMIN_TIER_MATCH(); // R-MANIFEST-ADMIN-TIER-MATCH [WARN] (件④ 2026-07-16): admin_secret_var/risk_tier 对齐⑥拆分清单
 checkLedgerSize();               // R-LEDGER-SIZE [WARN] (D-010 2026-07-10): COORD-LEDGER.md >100KB 提醒切档
 checkDocPath();                          // R-DOC-PATH/R-DOC-DUPLICATE (③ doc-lint 2026-06-29): date-prefixed doc 必住 docs/ 根·同名多路径 → fail
+checkM0A();                              // R-M0A-* [ERROR×5] (M0a 差分门 2026-07-22 设计v0.2 NWT GREEN): 裸 sqlite/relay-manager import 精确镜像 baseline+manifest, 新增即败
 
 // ── 报告 ──
 // warnings first (non-blocking — WARN rules are migration checklists, not hard blockers)

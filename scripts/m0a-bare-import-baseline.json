@@ -1,0 +1,1949 @@
+{
+ "generated_at_head": "21c8c116",
+ "entries": [
+  {
+   "path": "kanet-tn12/kasia-console/scripts/test-pool-bettor-cap.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "stale-copy",
+   "burn_down": "hygiene-card"
+  },
+  {
+   "path": "kanet-tn12/kasia-console/scripts/test-pool-bettor-duplicate-params.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "stale-copy",
+   "burn_down": "hygiene-card"
+  },
+  {
+   "path": "kanet-tn12/kasia-console/scripts/test-pool-doomed-skip.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "stale-copy",
+   "burn_down": "hygiene-card"
+  },
+  {
+   "path": "kanet-tn12/kasia-console/scripts/test-pool-f1-dispute-cut.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "stale-copy",
+   "burn_down": "hygiene-card"
+  },
+  {
+   "path": "kanet-tn12/kasia-console/scripts/test-pool-maker-bettor-exclusion.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "stale-copy",
+   "burn_down": "hygiene-card"
+  },
+  {
+   "path": "kanet-tn12/kasia-console/scripts/test-pool-oracle-bettor-exclusion.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "stale-copy",
+   "burn_down": "hygiene-card"
+  },
+  {
+   "path": "kanet-tn12/kasia-console/scripts/test-pool-stake-input-validation.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "stale-copy",
+   "burn_down": "hygiene-card"
+  },
+  {
+   "path": "kanet-tn12/kasia-console/scripts/test-pool-v142-refund-attempted-at.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "stale-copy",
+   "burn_down": "hygiene-card"
+  },
+  {
+   "path": "kanet-tn12/kasia-console/src/api/pool.js",
+   "family": "relay-manager",
+   "form": "import { sendCommandAsync, transferAndConfirm } from relay-manager.js",
+   "count": 1,
+   "owner": "stale-copy",
+   "burn_down": "hygiene-card"
+  },
+  {
+   "path": "kanet-tn12/kasia-console/src/index.js",
+   "family": "relay-manager",
+   "form": "import { startAll as startAllRelays, stopAll as stopAllRelays } from relay-manager.js",
+   "count": 1,
+   "owner": "stale-copy",
+   "burn_down": "hygiene-card"
+  },
+  {
+   "path": "kanet-tn12/kasia-console/src/services/bettor-prediction-voter.js",
+   "family": "relay-manager",
+   "form": "import { sendCommandAsync } from relay-manager.js",
+   "count": 1,
+   "owner": "stale-copy",
+   "burn_down": "hygiene-card"
+  },
+  {
+   "path": "kanet-tn12/kasia-console/src/services/pool-market-settler.js",
+   "family": "relay-manager",
+   "form": "import { sendCommandAsync } from relay-manager.js",
+   "count": 1,
+   "owner": "stale-copy",
+   "burn_down": "hygiene-card"
+  },
+  {
+   "path": "kas-market-maker/src/db.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "exchange-app",
+   "burn_down": "M2"
+  },
+  {
+   "path": "kasia-console/scripts/_apply-trader-a-slim.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_backfill_oracle_stake_enroll.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_backfill-market-description.mjs",
+   "family": "sqlite",
+   "form": "import D from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_bettor-corpus-build.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_bettor-pattern-matcher.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_cleanup-5c.mjs",
+   "family": "sqlite",
+   "form": "const Database2 = (await import(better-sqlite3)).default",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_cleanup-5c.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_eval-history.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_j2_fee_payout.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_j2_reset_qlfpv_refund.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_j2-agent-as-real-user-e2e.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_j2-broker-bsc-check.mjs",
+   "family": "sqlite",
+   "form": "import Db from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_j2-broker-state-probe.mjs",
+   "family": "sqlite",
+   "form": "import Db from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_j2-bsc-cols.mjs",
+   "family": "sqlite",
+   "form": "import Db from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_j2-cleanup-stuck.mjs",
+   "family": "sqlite",
+   "form": "import Db from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_j2-dig-broker-offers.mjs",
+   "family": "sqlite",
+   "form": "import Db from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_j2-eval-usdc-multiturn.mjs",
+   "family": "sqlite",
+   "form": "import Db from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_j2-evaluate-user-buy-kas-flow.mjs",
+   "family": "sqlite",
+   "form": "import Db from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_j2-monitor-poll.mjs",
+   "family": "sqlite",
+   "form": "import Db from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_j2-probe-89fd092d.mjs",
+   "family": "sqlite",
+   "form": "import Db from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_j2-probe-llm-usdc-post-phase-e.mjs",
+   "family": "sqlite",
+   "form": "import Db from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_j2-real-swap-1usdt.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_j2-realtest-wire-36087428.mjs",
+   "family": "sqlite",
+   "form": "import Db from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_j2-rescue-sophie-usdc-stuck.mjs",
+   "family": "sqlite",
+   "form": "import Db from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_j2-schema-check.mjs",
+   "family": "sqlite",
+   "form": "import Db from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_j2-schema-check2.mjs",
+   "family": "sqlite",
+   "form": "import Db from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_j2-swap-fresh-fund-usdc.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_j2-test-broker-sell-flow.mjs",
+   "family": "sqlite",
+   "form": "import Db from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_j2-test-finalize-usdc.mjs",
+   "family": "sqlite",
+   "form": "import Db from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_j2-trader-wallet-status.mjs",
+   "family": "sqlite",
+   "form": "import Db from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_j2-trigger-usdc-e2e-fresh.mjs",
+   "family": "sqlite",
+   "form": "import Db from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_j2-wallet-chains.mjs",
+   "family": "sqlite",
+   "form": "import Db from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_j2tn_backfill_snapshot_v2.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_j2tn_backfill_snapshot.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_kanetui_backfill_market_spec_sanitize.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_nwt_watch_devcoord.mjs",
+   "family": "sqlite",
+   "form": "import Db from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_phase2-zeta1-disable-matcher.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_phase2-zeta2-trader-a-service.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_probe-b-preview-seedhistory.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_probe-bug-z6-live.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_probe-bugz8-direct.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_probe-bugz8-fix.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_probe-j1-case.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_probe-llm-usdc-recognition.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_probe-min-qty.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_probe-r19ext-verify.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_probe-tool-call-trim-v2.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_probe-usdc-bug7.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_probe-wire-verify.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_q-14b-result.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_q-broker-chain-13-18-38.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_q-broker-env.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_q-broker-inbound-since-restart.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_q-broker-test-status.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_q-expired-locks.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_q-fake-msgs.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_q-fund-locks.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_q-msg-schema.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_q-rescue-1-5387-state.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_q-rescue-state.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_q-schema.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_q-stuck-buy.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_q-tables.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_q-trader-skills.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_real-onchain-test-A-J2.mjs",
+   "family": "sqlite",
+   "form": "const Db = (await import(better-sqlite3)).default",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_real-test-multiturn.mjs",
+   "family": "sqlite",
+   "form": "const Db = (await import(better-sqlite3)).default",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_rescue-eric-1usdc.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_rescue-owner-1-5387.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_rescue-owner-1-88.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_rescue-owner-1-9738.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_rescue-sophie-89fd092d.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_smoke-r5-queue-hold.mjs",
+   "family": "relay-manager",
+   "form": "import { waitForRelay } from relay-manager.js",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_smoke-self-accept-fix.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_test-14b.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_verify-11.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_verify-bug-w-with-history.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_verify-bug-z5-fix.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/_verify-bug-z6-fix.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/backfill-maker-payout.cjs",
+   "family": "sqlite",
+   "form": "const D = require(better-sqlite3)",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/backfill-oracle-reward.cjs",
+   "family": "sqlite",
+   "form": "const D = require(better-sqlite3)",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/backfill-resolution-criteria-2026-07-05.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/debug-wallet.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/decode-settle-scriptsig.mjs",
+   "family": "sqlite",
+   "form": "const Database = require(better-sqlite3)",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/dump-launch.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/e2e-asset-pair.mjs",
+   "family": "sqlite",
+   "form": "import Db from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/e2e-broker-dynamic.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/e2e-case2-paid-variants.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/e2e-case3-repeat.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/e2e-case4-mind-change.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/e2e-v2-no-hash.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/gateE-shadow-accuracy.mjs",
+   "family": "sqlite",
+   "form": "const Database = require(better-sqlite3)",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/j1-refund-bshard-guard-test.mjs",
+   "family": "sqlite",
+   "form": "const Database = require(better-sqlite3)",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/j2-broker-fee-emit-test.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/migrate-skill-categories.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/regression-runner.mjs",
+   "family": "sqlite",
+   "form": "const Database = (await import(better-sqlite3)).default",
+   "count": 2,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/regression-runner.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/reset-trader-skills.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/round5-multi-user-buy.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/smoke-broker-buy-completion.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/smoke-broker-buy.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/smoke-broker-full-ux.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/smoke-broker-intake.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/smoke-broker-stale-unsolicited.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/smoke-t5b-behavioral.mjs",
+   "family": "sqlite",
+   "form": "const betterSqlite3 = (await import(better-sqlite3)).default",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/smoke-t5b-quick.mjs",
+   "family": "sqlite",
+   "form": "const betterSqlite3 = (await import(better-sqlite3)).default",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/test-pool-bettor-cap.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/test-pool-bettor-duplicate-params.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/test-pool-doomed-skip.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/test-pool-f1-dispute-cut.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/test-pool-maker-bettor-exclusion.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/test-pool-oracle-bettor-exclusion.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/test-pool-stake-input-validation.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/test-pool-v142-refund-attempted-at.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/verify-settle-sigs.mjs",
+   "family": "sqlite",
+   "form": "const Database = require(better-sqlite3)",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/scripts/zk-prove-job-recover.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/src/api/admin.js",
+   "family": "relay-manager",
+   "form": "import { sendCommandAsync } from relay-manager.js",
+   "count": 1,
+   "owner": "console-core",
+   "burn_down": "M1"
+  },
+  {
+   "path": "kasia-console/src/api/bettor.js",
+   "family": "relay-manager",
+   "form": "const { sendCommandAsync } = await import(relay-manager.js)",
+   "count": 5,
+   "owner": "console-core",
+   "burn_down": "M1"
+  },
+  {
+   "path": "kasia-console/src/api/bettor.js",
+   "family": "relay-manager",
+   "form": "const { sendCommandAsync: sca } = await import(relay-manager.js)",
+   "count": 1,
+   "owner": "console-core",
+   "burn_down": "M1"
+  },
+  {
+   "path": "kasia-console/src/api/bettor.js",
+   "family": "relay-manager",
+   "form": "import { isRelayAlive } from relay-manager.js",
+   "count": 1,
+   "owner": "console-core",
+   "burn_down": "M1"
+  },
+  {
+   "path": "kasia-console/src/api/chat.js",
+   "family": "relay-manager",
+   "form": "const { sendCommandAsync } = await import(relay-manager.js)",
+   "count": 1,
+   "owner": "console-core",
+   "burn_down": "M1"
+  },
+  {
+   "path": "kasia-console/src/api/chat.js",
+   "family": "relay-manager",
+   "form": "import { sendCommandAsync } from relay-manager.js",
+   "count": 1,
+   "owner": "console-core",
+   "burn_down": "M1"
+  },
+  {
+   "path": "kasia-console/src/api/conversations.js",
+   "family": "relay-manager",
+   "form": "import { getStatus as getRelayStatus } from relay-manager.js",
+   "count": 1,
+   "owner": "console-core",
+   "burn_down": "M1"
+  },
+  {
+   "path": "kasia-console/src/api/coord-status.js",
+   "family": "relay-manager",
+   "form": "import { sendCommandAsync } from relay-manager.js",
+   "count": 1,
+   "owner": "console-core",
+   "burn_down": "M1"
+  },
+  {
+   "path": "kasia-console/src/api/discovery.js",
+   "family": "relay-manager",
+   "form": "const { sendCommandAsync } = await import(relay-manager.js)",
+   "count": 1,
+   "owner": "console-core",
+   "burn_down": "M1"
+  },
+  {
+   "path": "kasia-console/src/api/escrow.js",
+   "family": "relay-manager",
+   "form": "import { sendCommandAsync } from relay-manager.js",
+   "count": 1,
+   "owner": "console-core",
+   "burn_down": "M1"
+  },
+  {
+   "path": "kasia-console/src/api/exchange.js",
+   "family": "relay-manager",
+   "form": "const { sendCommandAsync } = await import(relay-manager.js)",
+   "count": 5,
+   "owner": "console-core",
+   "burn_down": "M1"
+  },
+  {
+   "path": "kasia-console/src/api/exchange.js",
+   "family": "relay-manager",
+   "form": "const { sendCommandAsync: sendCancelCmd } = await import(relay-manager.js)",
+   "count": 1,
+   "owner": "console-core",
+   "burn_down": "M1"
+  },
+  {
+   "path": "kasia-console/src/api/ingest-spc-daa.test.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "test",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/src/api/oracle-pool.js",
+   "family": "relay-manager",
+   "form": "const { sendCommandAsync } = await import(relay-manager.js)",
+   "count": 1,
+   "owner": "console-core",
+   "burn_down": "M1"
+  },
+  {
+   "path": "kasia-console/src/api/oracle-pool.js",
+   "family": "relay-manager",
+   "form": "import { sendCommandAsync } from relay-manager.js",
+   "count": 1,
+   "owner": "console-core",
+   "burn_down": "M1"
+  },
+  {
+   "path": "kasia-console/src/api/pool.js",
+   "family": "relay-manager",
+   "form": "const { getStatus, isRelayAlive } = await import(relay-manager.js)",
+   "count": 1,
+   "owner": "console-core",
+   "burn_down": "M1"
+  },
+  {
+   "path": "kasia-console/src/api/pool.js",
+   "family": "relay-manager",
+   "form": "import { sendCommandAsync, transferAndConfirm, isRelayAlive } from relay-manager.js",
+   "count": 1,
+   "owner": "console-core",
+   "burn_down": "M1"
+  },
+  {
+   "path": "kasia-console/src/api/relay.js",
+   "family": "relay-manager",
+   "form": "import { sendCommand, sendCommandAsync, getRelayRpcState } from relay-manager.js",
+   "count": 1,
+   "owner": "console-core",
+   "burn_down": "M1"
+  },
+  {
+   "path": "kasia-console/src/api/relay.js",
+   "family": "relay-manager",
+   "form": "import { startRelay, stopRelay } from relay-manager.js",
+   "count": 1,
+   "owner": "console-core",
+   "burn_down": "M1"
+  },
+  {
+   "path": "kasia-console/src/api/tg-wallet.js",
+   "family": "relay-manager",
+   "form": "const { sendCommandAsync } = await import(relay-manager.js)",
+   "count": 1,
+   "owner": "console-core",
+   "burn_down": "M1"
+  },
+  {
+   "path": "kasia-console/src/api/trading.js",
+   "family": "relay-manager",
+   "form": "const { sendCommandAsync } = await import(relay-manager.js)",
+   "count": 2,
+   "owner": "console-core",
+   "burn_down": "M1"
+  },
+  {
+   "path": "kasia-console/src/api/trading.js",
+   "family": "relay-manager",
+   "form": "const { sendCommandAsync: sendCmd } = await import(relay-manager.js)",
+   "count": 2,
+   "owner": "console-core",
+   "burn_down": "M1"
+  },
+  {
+   "path": "kasia-console/src/db/client.js",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "base-repository-layer",
+   "burn_down": "M5-底座保留"
+  },
+  {
+   "path": "kasia-console/src/index.js",
+   "family": "relay-manager",
+   "form": "import { startAll as startAllRelays, stopAll as stopAllRelays } from relay-manager.js",
+   "count": 1,
+   "owner": "console-core",
+   "burn_down": "M1"
+  },
+  {
+   "path": "kasia-console/src/lib/broadcaster-utxo.mjs",
+   "family": "relay-manager",
+   "form": "import { sendCommandAsync } from relay-manager.js",
+   "count": 1,
+   "owner": "console-core",
+   "burn_down": "M1"
+  },
+  {
+   "path": "kasia-console/src/lib/bshard-close-transport.mjs",
+   "family": "relay-manager",
+   "form": "const { sendCommandAsync } = await import(relay-manager.js)",
+   "count": 2,
+   "owner": "console-core",
+   "burn_down": "M1"
+  },
+  {
+   "path": "kasia-console/src/lib/bshard-close-transport.mjs",
+   "family": "relay-manager",
+   "form": "const { transferAndConfirm } = await import(relay-manager.js)",
+   "count": 2,
+   "owner": "console-core",
+   "burn_down": "M1"
+  },
+  {
+   "path": "kasia-console/src/lib/fee-split-phase2.test.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "test",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/src/lib/mining-utxo-consolidate.mjs",
+   "family": "relay-manager",
+   "form": "import { sendCommandAsync } from relay-manager.js",
+   "count": 1,
+   "owner": "console-core",
+   "burn_down": "M1"
+  },
+  {
+   "path": "kasia-console/src/lib/pool-broadcast.mjs",
+   "family": "relay-manager",
+   "form": "import { sendCommandAsync } from relay-manager.js",
+   "count": 1,
+   "owner": "console-core",
+   "burn_down": "M1"
+  },
+  {
+   "path": "kasia-console/src/lib/zk-prove-enqueue.test.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "test",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/src/services/agent-health.js",
+   "family": "relay-manager",
+   "form": "import { getStatus as getRelayStatus } from relay-manager.js",
+   "count": 1,
+   "owner": "console-core",
+   "burn_down": "M1"
+  },
+  {
+   "path": "kasia-console/src/services/bettor-prediction-settler.js",
+   "family": "relay-manager",
+   "form": "const { sendCommandAsync } = await import(relay-manager.js)",
+   "count": 3,
+   "owner": "console-core",
+   "burn_down": "M1"
+  },
+  {
+   "path": "kasia-console/src/services/bettor-prediction-settler.js",
+   "family": "relay-manager",
+   "form": "const { sendCommandAsync: sca2 } = await import(relay-manager.js)",
+   "count": 1,
+   "owner": "console-core",
+   "burn_down": "M1"
+  },
+  {
+   "path": "kasia-console/src/services/bettor-prediction-settler.js",
+   "family": "relay-manager",
+   "form": "import { sendCommandAsync } from relay-manager.js",
+   "count": 1,
+   "owner": "console-core",
+   "burn_down": "M1"
+  },
+  {
+   "path": "kasia-console/src/services/bettor-prediction-voter.js",
+   "family": "relay-manager",
+   "form": "import { sendCommandAsync } from relay-manager.js",
+   "count": 1,
+   "owner": "console-core",
+   "burn_down": "M1"
+  },
+  {
+   "path": "kasia-console/src/services/bettor-refund-claim-auto.mjs",
+   "family": "relay-manager",
+   "form": "import { isRelayAlive } from relay-manager.js",
+   "count": 1,
+   "owner": "console-core",
+   "burn_down": "M1"
+  },
+  {
+   "path": "kasia-console/src/services/bettor-refund-claim-auto.mjs",
+   "family": "relay-manager",
+   "form": "import { sendCommandAsync } from relay-manager.js",
+   "count": 1,
+   "owner": "console-core",
+   "burn_down": "M1"
+  },
+  {
+   "path": "kasia-console/src/services/broker-action-queue.js",
+   "family": "relay-manager",
+   "form": "const { sendCommandAsync } = await import(relay-manager.js)",
+   "count": 1,
+   "owner": "console-core",
+   "burn_down": "M1"
+  },
+  {
+   "path": "kasia-console/src/services/broker-action-queue.js",
+   "family": "relay-manager",
+   "form": "const { waitForRelay } = await import(relay-manager.js)",
+   "count": 1,
+   "owner": "console-core",
+   "burn_down": "M1"
+  },
+  {
+   "path": "kasia-console/src/services/broker-bot-manager.js",
+   "family": "relay-manager",
+   "form": "import { sendCommandAsync } from relay-manager.js",
+   "count": 1,
+   "owner": "console-core",
+   "burn_down": "M1"
+  },
+  {
+   "path": "kasia-console/src/services/broker-buy-completion-watcher.js",
+   "family": "relay-manager",
+   "form": "const { sendCommandAsync } = await import(relay-manager.js)",
+   "count": 1,
+   "owner": "console-core",
+   "burn_down": "M1"
+  },
+  {
+   "path": "kasia-console/src/services/broker-buy-handler.js",
+   "family": "relay-manager",
+   "form": "const { sendCommandAsync } = await import(relay-manager.js)",
+   "count": 1,
+   "owner": "console-core",
+   "burn_down": "M1"
+  },
+  {
+   "path": "kasia-console/src/services/broker-intake-watcher.js",
+   "family": "relay-manager",
+   "form": "const { sendCommandAsync } = await import(relay-manager.js)",
+   "count": 1,
+   "owner": "console-core",
+   "burn_down": "M1"
+  },
+  {
+   "path": "kasia-console/src/services/bshard-auto-settler.test.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "test",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/src/services/bshard-close-voter.js",
+   "family": "relay-manager",
+   "form": "import { sendCommandAsync } from relay-manager.js",
+   "count": 1,
+   "owner": "console-core",
+   "burn_down": "M1"
+  },
+  {
+   "path": "kasia-console/src/services/bshard-verify-claim-landed-amount.test.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "test",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/src/services/exchange-machine.js",
+   "family": "relay-manager",
+   "form": "const { sendCommandAsync } = await import(relay-manager.js)",
+   "count": 3,
+   "owner": "console-core",
+   "burn_down": "M1"
+  },
+  {
+   "path": "kasia-console/src/services/exchange-machine.js",
+   "family": "relay-manager",
+   "form": "const { sendCommandAsync: sendCmd } = await import(relay-manager.js)",
+   "count": 1,
+   "owner": "console-core",
+   "burn_down": "M1"
+  },
+  {
+   "path": "kasia-console/src/services/market-seeder.js",
+   "family": "relay-manager",
+   "form": "const m = await import(relay-manager.js)",
+   "count": 1,
+   "owner": "console-core",
+   "burn_down": "M1"
+  },
+  {
+   "path": "kasia-console/src/services/mind-manager.js",
+   "family": "relay-manager",
+   "form": "const { sendCommandAsync: sendCmd } = await import(relay-manager.js)",
+   "count": 1,
+   "owner": "console-core",
+   "burn_down": "M1"
+  },
+  {
+   "path": "kasia-console/src/services/oracle-pool-renewal-cron.mjs",
+   "family": "relay-manager",
+   "form": "import { sendCommandAsync } from relay-manager.js",
+   "count": 1,
+   "owner": "console-core",
+   "burn_down": "M1"
+  },
+  {
+   "path": "kasia-console/src/services/pool-auto-better.js",
+   "family": "relay-manager",
+   "form": "import { isRelayAlive, sendCommandAsync } from relay-manager.js",
+   "count": 1,
+   "owner": "console-core",
+   "burn_down": "M1"
+  },
+  {
+   "path": "kasia-console/src/services/pool-house-agent.js",
+   "family": "relay-manager",
+   "form": "import { isRelayAlive } from relay-manager.js",
+   "count": 1,
+   "owner": "console-core",
+   "burn_down": "M1"
+  },
+  {
+   "path": "kasia-console/src/services/pool-market-settler.js",
+   "family": "relay-manager",
+   "form": "const { getStatus, isRelayAlive } = await import(relay-manager.js)",
+   "count": 2,
+   "owner": "console-core",
+   "burn_down": "M1"
+  },
+  {
+   "path": "kasia-console/src/services/pool-market-settler.js",
+   "family": "relay-manager",
+   "form": "const { getStatus, isRelayAlive, sendCommandAsync } = await import(relay-manager.js)",
+   "count": 1,
+   "owner": "console-core",
+   "burn_down": "M1"
+  },
+  {
+   "path": "kasia-console/src/services/pool-market-settler.js",
+   "family": "relay-manager",
+   "form": "const { sendCommandAsync } = await import(relay-manager.js)",
+   "count": 1,
+   "owner": "console-core",
+   "burn_down": "M1"
+  },
+  {
+   "path": "kasia-console/src/services/pool-market-settler.js",
+   "family": "relay-manager",
+   "form": "import { sendCommandAsync } from relay-manager.js",
+   "count": 1,
+   "owner": "console-core",
+   "burn_down": "M1"
+  },
+  {
+   "path": "kasia-console/src/services/prediction-params-cache.js",
+   "family": "relay-manager",
+   "form": "import { sendCommandAsync } from relay-manager.js",
+   "count": 1,
+   "owner": "console-core",
+   "burn_down": "M1"
+  },
+  {
+   "path": "kasia-console/src/services/relay-chain-reader.mjs",
+   "family": "relay-manager",
+   "form": "import { sendCommandAsync } from relay-manager.js",
+   "count": 1,
+   "owner": "console-core",
+   "burn_down": "M1"
+  },
+  {
+   "path": "kasia-console/src/services/relay-health-monitor.js",
+   "family": "relay-manager",
+   "form": "import { getStatus, isRelayAlive, startRelay } from relay-manager.js",
+   "count": 1,
+   "owner": "console-core",
+   "burn_down": "M1"
+  },
+  {
+   "path": "kasia-console/src/services/retail-dex-pusher.js",
+   "family": "relay-manager",
+   "form": "const m = await import(relay-manager.js)",
+   "count": 1,
+   "owner": "console-core",
+   "burn_down": "M1"
+  },
+  {
+   "path": "kasia-console/src/services/settler-router.js",
+   "family": "relay-manager",
+   "form": "const { sendCommandAsync } = await import(relay-manager.js)",
+   "count": 1,
+   "owner": "console-core",
+   "burn_down": "M1"
+  },
+  {
+   "path": "kasia-console/src/services/system-repair.js",
+   "family": "relay-manager",
+   "form": "const { startRelay } = await import(relay-manager.js)",
+   "count": 1,
+   "owner": "console-core",
+   "burn_down": "M1"
+  },
+  {
+   "path": "kasia-console/src/services/system-repair.js",
+   "family": "relay-manager",
+   "form": "import { getStatus as getRelayStatus } from relay-manager.js",
+   "count": 1,
+   "owner": "console-core",
+   "burn_down": "M1"
+  },
+  {
+   "path": "kasia-console/src/services/trade-protocol-filter.js",
+   "family": "relay-manager",
+   "form": "const { sendCommandAsync } = await import(relay-manager.js)",
+   "count": 2,
+   "owner": "console-core",
+   "burn_down": "M1"
+  },
+  {
+   "path": "kasia-console/src/services/utxo-splitter.js",
+   "family": "relay-manager",
+   "form": "import { sendCommandAsync } from relay-manager.js",
+   "count": 1,
+   "owner": "console-core",
+   "burn_down": "M1"
+  },
+  {
+   "path": "kasia-console/src/services/windir-infer.test.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "test",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/src/services/zk-prove-worker.mjs",
+   "family": "relay-manager",
+   "form": "import { sendCommandAsync } from relay-manager.js",
+   "count": 1,
+   "owner": "console-core",
+   "burn_down": "M1"
+  },
+  {
+   "path": "kasia-console/test-framework/cases/agent-tunnel/_smoke_pair_handshake_e2e.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "test",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/test-framework/cases/agent-tunnel/_smoke_peer_chat_signed.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "test",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/test-framework/cases/oracle/dispute_trigger.test.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "test",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/test-framework/cases/oracle/sampler_determinism.test.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "test",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/test-framework/cases/oracle/schema_v143_lock.test.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "test",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/test-framework/cases/oracle/settle_broker_addr_determinism.test.mjs",
+   "family": "sqlite",
+   "form": "try { Database = (await import(better-sqlite3)).default; } catch (e) { return { ok: false, error: `better-sqlite3 import fail: ${e.message}` }; }",
+   "count": 1,
+   "owner": "test",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/test-framework/cases/oracle/spof_recovery.test.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "test",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/test-framework/cases/system/relay-restart.test.mjs",
+   "family": "relay-manager",
+   "form": "import { stopRelay, startRelay } from relay-manager.js",
+   "count": 1,
+   "owner": "test",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/test-framework/lib/chain-oracle.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "test",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/test-framework/lib/peers.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "test",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/test-framework/lib/runner.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "test",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/test-framework/standalone/test_mypositions_onchain_payout.mjs",
+   "family": "sqlite",
+   "form": "const Database = require(better-sqlite3)",
+   "count": 1,
+   "owner": "test",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/test/broker-buy-handler.test.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "test",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/test/e2e-pipeline.test.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "test",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/test/introduce.test.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "test",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/test/multi-oracle-vote-settle.test.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "test",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/test/order-machine.test.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "test",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/test/projection.test.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "test",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "kasia-console/test/state-machine.test.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "test",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "scripts/_j1tn-fire-settle-workaround.mjs",
+   "family": "sqlite",
+   "form": "const Database = require(better-sqlite3)",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "scripts/_j1tn-spof-path-a-measure.mjs",
+   "family": "sqlite",
+   "form": "const Database = require(better-sqlite3)",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "scripts/_j2_backfill_pool_snapshots.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "scripts/_phasec_real_p2p_driver.mjs",
+   "family": "sqlite",
+   "form": "const Database = require(better-sqlite3)",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "scripts/_tmp-relay-spawn-via-mgr.mjs",
+   "family": "relay-manager",
+   "form": "const { startRelay, getStatus } = await import(relay-manager.js)",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "scripts/alpha-check.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "scripts/audit-track-a-keywords.mjs",
+   "family": "sqlite",
+   "form": "const Database = require(better-sqlite3)",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "scripts/cleanup-expired-pending.mjs",
+   "family": "sqlite",
+   "form": "const Database = require(better-sqlite3)",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "scripts/e2e-sophie-broker.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "scripts/nwt-test-broker.mjs",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "scripts/smoke-2.1.mjs",
+   "family": "sqlite",
+   "form": "const Database = require(better-sqlite3)",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "scripts/smoke-2.2.mjs",
+   "family": "sqlite",
+   "form": "const Database = require(better-sqlite3)",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "scripts/smoke-2.3.mjs",
+   "family": "sqlite",
+   "form": "const Database = require(better-sqlite3)",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "scripts/smoke-2.5.mjs",
+   "family": "sqlite",
+   "form": "const Database = require(better-sqlite3)",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "scripts/smoke-handshake-fix.mjs",
+   "family": "sqlite",
+   "form": "const Database = require(better-sqlite3)",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "scripts/smoke-outbound-advance.mjs",
+   "family": "sqlite",
+   "form": "const Database = require(better-sqlite3)",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "scripts/smoke-retail-dex-memory.mjs",
+   "family": "sqlite",
+   "form": "const Database = require(better-sqlite3)",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "scripts/smoke-t5b-behavioral.mjs",
+   "family": "sqlite",
+   "form": "const Database = (await import(better-sqlite3)).default",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "scripts/test-handshake.js",
+   "family": "sqlite",
+   "form": "const Database = require(better-sqlite3)",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "scripts/test-message-pipeline.js",
+   "family": "sqlite",
+   "form": "const Database = require(better-sqlite3)",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "scripts/test-system-bugs.js",
+   "family": "sqlite",
+   "form": "const Database = require(better-sqlite3)",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "scripts/tmp-smoke-t3-opus.mjs",
+   "family": "sqlite",
+   "form": "const Database = require(better-sqlite3)",
+   "count": 1,
+   "owner": "operator-ops",
+   "burn_down": "M5-manifest化"
+  },
+  {
+   "path": "tg-bot/test/dm-bet-e2e.mjs",
+   "family": "sqlite",
+   "form": "const Database = require(better-sqlite3)",
+   "count": 1,
+   "owner": "prediction-app",
+   "burn_down": "M4"
+  },
+  {
+   "path": "tg-bot/test/l2-handler.test.mjs",
+   "family": "sqlite",
+   "form": "const Database = require(better-sqlite3)",
+   "count": 1,
+   "owner": "prediction-app",
+   "burn_down": "M4"
+  },
+  {
+   "path": "tg-bot/test/l2c-autopay-pending-tracking.test.mjs",
+   "family": "sqlite",
+   "form": "const Database = require(better-sqlite3)",
+   "count": 1,
+   "owner": "prediction-app",
+   "burn_down": "M4"
+  },
+  {
+   "path": "tg-bot/test/l2d-autopay-fullchain-e2e.test.mjs",
+   "family": "sqlite",
+   "form": "const Database = require(better-sqlite3)",
+   "count": 1,
+   "owner": "prediction-app",
+   "burn_down": "M4"
+  },
+  {
+   "path": "tg-bot/test/l3-cross-surface.test.mjs",
+   "family": "sqlite",
+   "form": "const Database = require(better-sqlite3)",
+   "count": 1,
+   "owner": "prediction-app",
+   "burn_down": "M4"
+  }
+ ]
+}
