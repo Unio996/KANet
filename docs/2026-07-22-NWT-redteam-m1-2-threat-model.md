@@ -57,17 +57,23 @@
 
 ### 场景 B：被攻陷 Console worker
 
-**威胁定义**：console 进程内任一模块/依赖/worker 被攻陷（供应链、注入、越权模块）。攻击者获得的能力 = **console 进程内代码执行**。这是最高危面——因为 T-1：进程成员资格 == relay 全权。
+**威胁定义**：console 进程内任一模块/依赖/worker 被攻陷（供应链、注入、越权模块）。攻击者获得的能力 = **console 进程内代码执行**。这是最高危面。
+
+> **🔴 B-0 是本场景的决定性事实（Codex 外审 `06d759df` 补，NWT/J2 独立核码坐实，v0.1→v0.2 修订）**：**Console 就是 relay 的 TCB（可信计算基）——relay 不是独立信任锚**。`relay-manager.js:60-61` 在 Console 进程内调 `getRelayPrivkey(relayNodeId)`→`relay-nodes.js:44-53` `decrypt(privkey_encrypted)` 返**明文私钥**（Console 持 `CONSOLE_ENCRYPTION_KEY`，可随时解出**任意** relay 的明文私钥）→`:83-84` 塞 `env.KASPA_PRIVKEY`→`:87` `fork('src/relay.mjs')`。**故被攻陷 Console 根本不需要经 IPC 发命令、不需要伪造能力信封、不需要绕过 relay 端验证——它直接持签名密钥可签任意字节，且能 kill/重启/替换 relay 二进制与代码路径。** 这推翻了本卡 v0.1 场景 B 与 M-1.6 v0.1 MUST-FIX 共同的隐含前提"relay 进程内验证 = 被攻陷 Console 碰不到的独立进程"。**B-1~B-5 是"有了 IPC 全权能干什么"，B-0 是"连 IPC 都不需要，密钥本就在手"——B-0 使 B-1~B-5 几近 moot。**
 
 | ID | 攻击链 | 必须成立的不变量（MUST） | 判据/测试形态 | 当前状态 |
 |---|---|---|---|---|
-| B-1 | 进程内代码经 `relay-manager` map 拿任意 relayId 句柄，`child.send({type:'custodial_transfer', privkeyHex, target, amount})` | relay 分发前必须校验 caller 身份，非"能 send 就执行" | 从非授权模块上下文发 custodial_transfer → 断言 relay 拒绝（需 caller 身份门） | 🔴 **LANDS**（`relay.mjs:331/358` 零 caller 校验；J2 坐实 map 全开） |
+| **B-0** | **Console 进程内代码调 `getRelayPrivkey()` 解出任意 relay 明文私钥直接签任意 tx / 或替换 relay 代码 / kill-重启带恶意码** | relay 私钥与生命周期须在 Console **够不到**的隔离信任域（Console 不持解密密钥、不能替换签名者代码）——即方案 R（key-custody/lifecycle 隔离） | 从 Console 进程内上下文调 `getRelayPrivkey` → 断言拿不到明文（密钥不在 Console 地址空间） | 🔴🔴 **LANDS（最高危）**（`relay-manager.js:60-61`+`relay-nodes.js:44-53` 四方坐实；**app 自持凭证+relay 端验证对本条无效**——密钥托管在 Console，验证再严也绕不过"持钥人自己签"） |
+| B-1 | 进程内代码经 `relay-manager` map 拿任意 relayId 句柄，`child.send({type:'custodial_transfer', privkeyHex, target, amount})` | relay 分发前必须校验 caller 身份，非"能 send 就执行" | 从非授权模块上下文发 custodial_transfer → 断言 relay 拒绝（需 caller 身份门） | 🔴 **LANDS**（`relay.mjs:331/358` 零 caller 校验；J2 坐实 map 全开）——注：B-0 成立时本条是冗余路径 |
 | B-2 | 发 `ECDSA_SIGN{message:任意}` / `SIGN_INPUT_FOR_SETTLE{tx_hex:任意}` 让 relay 私钥盲签攻击者构造的字节 | relay 不得对语义未校验的字节签名；签名对象须绑定已授权意图 | 构造任意 message → 断言 relay 拒签或要求 typed-intent | 🔴 **LANDS**（M-1.1 §2 坐实两条通用原语 = 盲签同族，relay 零内容校验） |
 | B-3 | 发 covenant 20 条（BSHARD_*/CLOSEZK_V2_*）伪造 witness/inputs/outputs 推进结算/退款 | covenant 命令须有 caller scope + typed-intent + 经济效果 verifier | 逐命令用越权上下文提交 → 断言默认拒绝（internal 不可外调） | 🔴 **LANDS**（M-1.1 §1 坐实 20 条"调用方能力/审计/吊销"全无） |
 | B-4 | 攻陷后无痕：无绑定身份的请求审计，事后无法归因是哪个 worker 发起 | 每条 relay 命令须写**绑定已认证 caller 身份**的独立审计回执（非仅链上 tx） | 制造一次越权命令 → 断言审计日志含 caller 身份可归因 | 🔴 **LANDS**（现状仅链上 tx + 无 caller 维度日志） |
 | B-5 | 攻陷持续：无免代码吊销路径，无法在不改码重启下切断被攻陷 worker 的命令权 | 须存在运行时吊销/禁用某 caller 命令权的路径 | 触发吊销 → 断言该 caller 后续命令被拒，且无需改码部署 | 🔴 **LANDS**（M0c⑦未建） |
 
-**B 场景是 M0c 存在的核心理由**：Codex MF1"选完机制没人装 = 设计到运行时缺环"——M-1.6 选出 caller 身份机制后，**必须先于 M1 与任何多进程应用触达 relay 装上 M0c①②③**，否则 B-1~B-3 在整个模块化过程中一直 LANDS。**红队硬门：M0c 未装armed 前，任何"应用已抽离可独立触达 relay"的批次 = RED**（等于在没有权限边界的目录边界上做"化妆式模块化"）。
+**B 场景两档，别混**：
+- **B-1~B-5（有 IPC 全权能干什么）= M0c 治**：Codex MF1"选完机制没人装 = 设计到运行时缺环"——M-1.6 选出 caller 身份机制后，必须先于 M1 与任何多进程应用触达 relay 装上 M0c①②③，否则 B-1~B-5 一直 LANDS。**红队硬门：M0c 未 armed 前任何"应用已抽离可独立触达 relay"批次 = RED**（目录边界≠权限边界=化妆式模块化）。
+- **B-0（密钥本就在 Console 手里）= M0c 治不了，只有方案 R 治**：M0c 的 caller 身份/scope/审计/吊销全是"约束谁能让 relay 干活"，但 B-0 的攻击者**不需要 relay 干活**——它自己有钥匙。**唯一结构性解 = 方案 R：把 relay 私钥与生命周期隔离到 Console 够不到的信任域**（独立签名服务/密钥不入 Console 地址空间/Console 不能替换签名者码）。**这是本卡 v0.1→v0.2 修订的核心：抗场景 B ≠ 装好 M0c，抗场景 B = 装好 M0c（治 B-1~B-5）+ 做方案 R（治 B-0）。**
+- **甲/乙分叉（钱路安全边界决策，Owner 拍，非红队定）**：(甲) 做 R = 一次抗 Console 攻陷，稳但重；(乙) 诚实声明"测试网阶段 Console = TCB / 可信"，A+C 作**防场景 A（应用被攻陷/共享 secret 误用）第一步**先上、**明示不抗场景 B**、R 作后续渐进。**红队对 (乙) 的硬牙 = 诚实性即安全控制**：若走 (乙)，M-1.6/M-1.2 与任何对外表述**禁止声称 A+C 抗被攻陷 Console**；必须写清"Console 持全量 relay 私钥 = TCB，A+C 不防 B-0"。含糊其辞地暗示抗 Console = 化妆式，红队打回。
 
 ### 场景 C：重放的 IPC 或 HTTP 请求
 
@@ -107,7 +113,9 @@ M0c 每一项的验收 = 对应场景的负向测试全部 fail-closed。这张�
 | ⑥绑定已认证身份的审计回执 | B-4 | 越权命令后审计可归因 caller | 🔴 未建 |
 | ⑦免代码部署的吊销/禁用路径 | B-5 | 运行时吊销 caller 命令权生效 | 🔴 未建 |
 
-**红队总判据（M-1 验收门 §3.86"NWT 红队过"的可测化）**：上表 21 格负向测试全部 fail-closed = M0c GREEN；任一格 LANDS = 对应 M0c 子批 RED。M-1 阶段本卡只负责**把测试写出来 + 证明现状全 LANDS**（已完成；C-3 经 J1 逐命令核细化为"12/20 covenant 层挡二次生效 + 请求层去重 0/20 全 LANDS"，⑤这格仍整体未建）；实际拦截由 M0c-1/2/3 逐批实现后重跑本表验证。
+**红队总判据（M-1 验收门 §3.86"NWT 红队过"的可测化）**：上表负向测试全部 fail-closed = M0c GREEN；任一格 LANDS = 对应 M0c 子批 RED。M-1 阶段本卡只负责**把测试写出来 + 证明现状全 LANDS**（已完成；C-3 经 J1 逐命令核细化为"12/20 covenant 层挡二次生效 + 请求层去重 0/20 全 LANDS"，⑤这格仍整体未建）；实际拦截由 M0c-1/2/3 逐批实现后重跑本表验证。
+
+> **⚠ 本矩阵治不了 B-0（v0.2 补）**：M0c 七项全是"约束谁能让 relay 干活"，B-0 的攻击者持钥自签、不经 relay 授权路径——**M0c 全绿也拦不住 B-0**。抗 B-0 的验收项不在本表，在方案 R（key-custody/lifecycle 隔离）：负向测试 = "Console 进程内调 `getRelayPrivkey` 拿不到明文私钥"。**故"M0c GREEN = 抗场景 B"是错的；抗场景 B = M0c GREEN（B-1~B-5）+ R 完成（B-0）**。走 (乙) 则 B-0 是 Owner 知情接受的 TCB 残留，不是被拦的。
 
 ---
 
@@ -116,6 +124,8 @@ M0c 每一项的验收 = 对应场景的负向测试全部 fail-closed。这张�
 - **不可自审自过**：Bettor 已协调级交叉核 T-1/T-2/T-3 file:line 全属实（2026-07-22 14:01）；**C-3 由 J1 covenant 域逐 20 命令核完（`e59b00ba`）**，本卡 C-3 已按其 12/20 细化收敛（见上）。
 - **A-1 = containment 卡目标 B 的威胁模型依据**：本卡 A 场景 = `docs/2026-07-23-custodial-transfer-subject-binding-containment-card.md` 的攻击面母表。containment 卡落码仍走 NWT 二审 + Owner money-path 签发（流程锚显式例外，D-011 不放松）。
 - **✅ C-3 已闭（J1 `e59b00ba`）**：20 命令逐 `.sil` 核——nullifier 4 + write-once 8 = 12/20 挡二次生效，6 UTXO-only + 2 N/A；请求层去重 0/20 全 LANDS = M0c⑤。J1 另订正 M-1.1 待办②③（BSHARD_CLAIM_WINNER/CLOSE_COMMIT"无独立 finality 检查"是原稿误判——检查在 covenant 层强制非 relay JS 层，属架构正确非缺口）；①register_bet 金额无上限=真缺口（TRANSFER 反模式家族，M-1.1 金额上限列的 gap，非 caller/重放面）。
+- **🔴 B-0 认账（Codex 外审 `06d759df` 抓出，v0.1→v0.2 修订）**：本卡 v0.1 场景 B 枚举 B-1~B-5（IPC 全权面）但**漏了 B-0（key-custody/lifecycle takeover）**——最根本的场景 B 事实。连带我的 **M-1.6 v0.1 MUST-FIX（relay 端验证 + app 自持凭证）necessary-but-insufficient**：它治了"自签自验"子问题，却仍建立在"relay 进程是被攻陷 Console 碰不到的独立锚"这个被拓扑推翻的前提上。B-0 经 Codex/Bettor/J2/NWT 四方独立核码坐实（`relay-manager.js:60-61`+`relay-nodes.js:44-53`）。红队席该在原稿就问"relay 私钥从哪来、谁能解密"——没问到，是本卡的真实盲点，认账。
+- **甲/乙待 Owner 拍**：M-1.6 v0.3 按拍定方向修订（甲=A+C+R 排后续；乙=A+C+诚实 TCB 声明+R 渐进）；两方向文档框架不同不预写。走乙则本卡场景 B 判据保留但标注"B-0 = Owner 知情接受的测试网 TCB 残留"。
 - **交付**：本文档 + COORD-LEDGER 回写。频道 relay UTXO 充足则同步频道摘要。
 
 **关联**：`docs/2026-07-22-kanet-base-modularization-roadmap-v0.2.md`（M-1 §3.2、M0c §3）、`docs/2026-07-22-m1-1-command-capability-effect-matrix.md`、`docs/2026-07-22-m1-6-caller-identity-mechanism-comparison.md`、`docs/2026-07-23-custodial-transfer-subject-binding-containment-card.md`。
