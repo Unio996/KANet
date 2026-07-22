@@ -1,6 +1,7 @@
-# M-1.1 全命令能力/效果清单 v0.1（J2 主笔，J1 域视角复核 covenant 部分待补）
+# M-1.1 全命令能力/效果清单 v0.3（J2 主笔，J1 域视角复核已并入）
 
-> **Status**: DRAFT（2026-07-22 · J2）
+> **Status**: v0.3（2026-07-22 · J2）
+> **v0.3 修订记录**：并入 J1 covenant 域复核（`docs/2026-07-22-j1-covenant-domain-review-m1-1-m1-2.md`，J2 已独立交叉核 file:line——ShardLeaf.sil:61/PoolRoot.sil:54-65,92-114/p2sh.mjs:2667-2718,42-74 逐处实读吻合）：待办①坐实为真缺口（`BSHARD_REGISTER_BET` 无金额上限=TRANSFER 反模式第 6 例）；待办②③为 v0.1 误判、本版订正（claim_winner/close_commit 的终局/深度门在 covenant 层俱在，v0.1 只读 JS 包装层未进 .sil 就下"无检查"结论）。**方法论教训入档：判断"有没有检查"必须看强制执行层（covenant），不能只看请求发起层（relay JS）——JS 层没查 ≠ 系统没查。**
 > **依据**：`docs/2026-07-22-kanet-base-modularization-roadmap-v0.2.md` §D2 + M-1 §3（14 列定义原文）+ Owner 令："D2 号称穷尽却排除 16 条通用原语于分类外，是在自己身上违反 M1 互斥且穷尽"——本清单覆盖全部 ~50 条命令，不分类外。
 > **列定义**（原文）：命令 / 效果类（read·derive·build·sign·submit·transfer·wallet-admin·state-mutate）/ 所用密钥与钱包 / 允许资产与网络 / 允许市场-家族-分支 / 输入 outpoint 范围 / 收款与输出约束 / 金额-费率上限 / 幂等键 / 所需证据与终局性 / 调用方能力 / 审计回执 / 吊销机制 / 是否可进公开应用契约。
 > **本卡性质**：M-1 只读取证 + 文档，不改一行执行代码。诚实标注：多数行的"调用方能力/审计回执/吊销机制"三列现状全部是"无"（这正是 M0c 要建的东西，不是本清单漏填）。
@@ -26,11 +27,11 @@
 
 | 命令 | 家族/分支(covenant family·opcode) | 输入 outpoint 范围 | 收款与输出约束 | 金额-费率上限 | 幂等键 | 所需证据与终局性 |
 |---|---|---|---|---|---|---|
-| `BSHARD_REGISTER_BET` | ShardLeaf `register_append` OP_0 | leaf P2SH(无签名)+funding P2PK | relay 自算续约地址(per-state continuation)，无外部收款人 | witness 传入 stake 金额，handler 内部无独立上限校验(待确认，见下方待办①) | 无显式幂等键——console 侧 `bet_id`/`betId` 是上游概念，本条命令自己不带 | 无(下注登记本身即首次状态) |
-| `BSHARD_CLAIM_WINNER` | PoolRoot `claim_draw` OP_1 | root P2SH(无签名)+ticket(bettorSig)+fee | winner 收款，收款人由 ticket 签名隐含绑定 | 无独立上限（受 covenant state 内 pool 值约束） | 无显式 | 需 ticket(bettorSig)真实签名，无独立 finality 检查(待确认②) |
+| `BSHARD_REGISTER_BET` | ShardLeaf `register_append` OP_0 | leaf P2SH(无签名)+funding P2PK | relay 自算续约地址(per-state continuation)，无外部收款人 | **❌ 无上限（J1 核实+J2 交叉核坐实）**：covenant 仅 `require(stake>=min_bet)` 下限(ShardLeaf.sil:61)，JS 层 `unlockBshardRegister`(p2sh.mjs:2667-2718)与 `_assertTxInvariants`(:42-74)均无业务上限——TRANSFER 反模式第 6 例；资金来源限 relay 自身钱包(funding 全用 wallet.getPrivateKey() 签, :2703)，风险=掏空 relay 钱包非转移第三方资产；已并入 M-1.2 B-3 例证 | 无显式幂等键——console 侧 `bet_id`/`betId` 是上游概念，本条命令自己不带 | 无(下注登记本身即首次状态) |
+| `BSHARD_CLAIM_WINNER` | PoolRoot `claim_draw` OP_1 | root P2SH(无签名)+ticket(bettorSig)+fee | winner 收款，收款人由 ticket 签名隐含绑定 | 无独立上限（受 covenant state 内 pool 值约束） | 无显式 | 需 ticket(bettorSig)真实签名 + **终局检查在 covenant 层强制（v0.3 订正 v0.1 误判）**：`closed==1` write-once 门(PoolRoot.sil:92)+`payout<=pool_value`(:98)+赢向绑定(:103)+merkle-proof 金额绑定到委员 attest 的 payoutRoot(:105-114)；relay JS 层不重复校验=架构正确分工非缺口 |
 | `BSHARD_REFUND_CANCELLED` | PoolRoot `refund_draw` OP_2 | pool P2SH(无签名)+ticket(bettorSig) | 原路退本金给 bettor | 无独立上限 | 无显式 | closed flip 0→2，本条即终态转移 |
 | `BSHARD_FOLD` | `__leader_fold`OP_1/`__delegate_fold`OP_2 | k children→1 parent | 输出=parent covenant 地址(relay自算) | n/a(结构折叠非价值转移) | 无显式 | 无独立终局检查 |
-| `BSHARD_CLOSE_COMMIT` | PoolRoot `close_commit` OP_0，委员 4-of-5 | root P2SH+fee | closed 0→1 + outcome 写入 | n/a | 无显式 | 委员签名数量校验(4-of-5)，无独立深度/finality 门(待确认③) |
+| `BSHARD_CLOSE_COMMIT` | PoolRoot `close_commit` OP_0，委员 4-of-5 | root P2SH+fee | closed 0→1 + outcome 写入 | n/a | 无显式 | **三门均在 covenant 层强制（v0.3 订正 v0.1 误判）**：`closed==0` write-once(PoolRoot.sil:54)+`count==shard_count` 深度防御门(:55, 源码注释原话)+`tx.time>=deadline*1000` 时间门(:56)+4-of-5 签名门(:59-65)；无缺口, relay JS 层(p2sh.mjs:2850-2898)只做签名收集=正确分工 |
 | `BSHARD_SEAL_TO_ROOT` | PoolLeaf `seal_to_root` OP_3 | leaf P2SH(无签名)+funding | 全池 KAS→PoolRoot | n/a | 无显式 | 无独立终局检查 |
 | `BSHARD_CONVERT_TO_FOLDNODE` | ShardLeaf `convert_to_foldnode` OP_1 | sealed leaf P2SH(无签名)+funding P2PK | leaf→FoldNode(relay自算续约地址) | n/a | 无显式 | 无独立终局检查 |
 | `BSHARD_GENESIS_MINT_PAYOUT` | 市场创建铸空 PayoutShard(`populateGenesisCovenants`) | 无既有 outpoint(创世) | 返回 `payoutCovId` 供后续 ctor bake | n/a | 无显式(cov_id 本身是唯一性来源) | 创世操作，无前置终局 |
@@ -47,8 +48,7 @@
 | `CLOSEZK_V2_ESCAPE_TRIGGER` | CloseZkV2 `escape_trigger` OP_1, closed 1→3 | write-once flag-flip，**不动钱**(守恒) | 无价值转移 | n/a | write-once | `tx.time`阈值链上机械裁决(OP_CHECKLOCKTIMEVERIFY 类逻辑) |
 | `CLOSEZK_V2_ESCAPE_CLAIM` | CloseZkV2 `escape_claim` OP_2, closed==3 前置 | refundRootBaked merkle climb+17-word nullifier+P2PK(bettorPk) | 原额退款，**地址由 handler 自推不信 caller 标量**(NWT 复核过的正确范式) | 受 refundRootBaked 分配值约束 | nullifier | merkle+nullifier+closed==3 检查 |
 
-**待办（诚实标注，不是本卡最终稿）**：
-- ①②③标记的三处需要读 `kasia-relay/src/lib/p2sh.mjs` 对应 `unlockBshard*` 函数体本身（本卡目前只读了 relay.mjs 的 case 分支注释，未逐一进 p2sh.mjs 核实每个 unlock 函数内部是否有独立金额/深度校验）——**J1 域视角复核时请重点看这三处**，你比我更熟这些函数的历史演进。
+**待办①②③——已闭（v0.3）**：J1 域复核（`docs/2026-07-22-j1-covenant-domain-review-m1-1-m1-2.md` §1）进 p2sh.mjs 函数体+对应 .sil 源码核实完毕，J2 独立交叉核 file:line 吻合。结论已回填 §1 表内对应三行：①真缺口（无上限，TRANSFER 反模式第 6 例）；②③v0.1 误判已订正（covenant 层俱在）。
 - `BSHARD_ZK_CLOSE` 的 groth16 proof gate 是本清单唯一"真密码学证明"而非"签名数量计数"的命令，M0c 的 evaluator 设计时这条应该单独对待（proof 验证失败 vs 签名不足，是两种不同的 fail-closed 语义）。
 
 ---
@@ -83,6 +83,6 @@
 
 - 本卡覆盖：类 A6(指针) + 类 B9(指针) + 类 C20(本卡新增完整) + 通用原语 16(本卡新增) = 全部 ~50 条命令，无排除项。
 - **交叉发现**：16 条通用原语里 `ECDSA_SIGN`/`SIGN_INPUT_FOR_SETTLE`/`CUSTODIAL_TRANSFER` 三条实际风险模式应该并入"盲签/信任模型缺陷"那一类讨论，不该因为贴着"通用原语"标签就被认为风险更低。
-- **待办**：①②③三处 p2sh.mjs 深挖（J1 域视角复核认领）；M-1.2 威胁模型（NWT）出来后，本卡"调用方能力/审计回执/吊销机制"三列（现状全部"无"）要跟 M0c 七项设计对照，确认没有遗漏命令。
+- ~~**待办**：①②③三处 p2sh.mjs 深挖~~ **已闭（v0.3, J1 复核+J2 交叉核, 见 §1 回填）**。剩余待办：M-1.2 威胁模型（NWT, `0ec41001` 已交）与本卡"调用方能力/审计回执/吊销机制"三列（现状全部"无"）跟 M0c 七项设计对照，确认没有遗漏命令——排 M0c 设计批。
 
-**关联**：`docs/2026-07-22-kanet-base-modularization-roadmap-v0.2.md`（M-1 §3、D2 节）、频道 dev-coord-testnet 2026-07-22 06:17 派工记录。
+**关联**：`docs/2026-07-22-kanet-base-modularization-roadmap-v0.2.md`（M-1 §3、D2 节）、`docs/2026-07-22-j1-covenant-domain-review-m1-1-m1-2.md`（v0.3 订正依据）、`docs/2026-07-22-NWT-redteam-m1-2-threat-model.md`（B-3 例证并入目标）、频道 dev-coord-testnet 2026-07-22 06:17 派工记录。
