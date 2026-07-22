@@ -526,3 +526,5 @@ Owner 元问题:写进文档的铁律(CLAUDE.md 接位 SOP 第5条"设计前查�
 3. containment 卡目标 B 设计若涉 K-18/payout_shards subject 绑定, 需 J1 视角→NWT 主审, J2 补 covenant 视角。
 4. M3a re-derive 纪律推广剩余字段清单(只做完 covenant_family 一个)→J1 域主责, 待重指派。
 处置: 均排白天工作恢复时具体重指派, 非紧急不半夜抢人; 当前关键路径(Owner 钉死)零依赖 J1。
+
+**Owner 钉死+授权开工(06:15)→执行第一波派工**: Owner"我同意你开工, 分配并督促大家干活"=路线图 v0.4.2 正式冻结进入执行。纪律: 每批仍走 design→NWT→code→diff→装载(开工≠跳审), money-path 含 containment 仍单独签发。**执行第一波**(J1tn 离线, covenant/settler 域并 J2): @J2=M-1.1 全命令能力/效果清单(~50 命令 14 列, 并入已坐实证据+补 covenant/bshard 20+条)+M-1.6 caller 三案对比+78 行 classifier 重判审接手; @NWT=M-1.2 威胁模型三场景可测清单+containment 目标 B 主审; @KANet-UI=M0a lint 设计稿(repo-wide differential/content-anchored/manifest, 先设计→NWT 审→码)。本波 DoD=清单+威胁模型+lint 设计三件齐→进 M-1 内部审。节奏: 凌晨不冲刺, 白天各自认领, Bettor 盯进度督促。
