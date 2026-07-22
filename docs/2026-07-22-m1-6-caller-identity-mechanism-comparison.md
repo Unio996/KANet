@@ -1,6 +1,7 @@
 # M-1.6 Caller 身份机制选型 v0.3（J2 机制 + NWT 红队，Owner 乙路定案后决策稿）
 
-> **Status**: v0.3 DRAFT（2026-07-22 · J2 出稿 → 待 NWT 红队审 → 待 Codex 再审 → 再请 Owner 冻结）
+> **Status**: v0.3.1 DRAFT（2026-07-22 · J2 出稿 → NWT 红队审 GREEN 无 MUST-FIX `d52b815d` → 待 Codex 再审 → 再请 Owner 冻结）
+> **v0.3.1 微调**：折入 NWT 两条非阻塞完整性 note（不改任何结论）——note-1：§8.6 gateway-bypass 的场景-A-BUST 补"(M0c armed 后)"前置标注（与其余测试"设计期 LANDS"对称）；note-2：§1.1 补 per-relay 子进程=其单把 key 的更窄 TCB 面（信任边界枚举完备到子进程层）。
 > **本卡性质**：设计/决策文档，不改一行执行代码。不授权任何落码、密钥迁移、relay 重启、签名、广播、结算、资金移动。
 > **方向定案**：Owner 2026-07-22 16:0xZ 拍板**走乙路**（记账 `d8c45faa`）——A+C 授权模型作第一步先上，**明确接受测试网阶段 Console = TCB（可信计算基）残留**；甲方案（R = relay 密钥/生命周期隔离）记为后续安全升级卡，慢工出细活、与模块化并行渐进、不阻塞主线，但须在应用抽离触达 relay 之前收口。
 > **v0.3 相对 v0.2 的根本变化**：v0.2 曾判"A+C 两条硬约束后抗场景 B"，被 Codex 外审 B-0 推翻（`06d759df`，J2/NWT 各自独立核代码坐实认账）——Console 进程本就持全量 relay 明文私钥，被攻陷 Console 无需过 relay 验证即可直接签任意交易。故 v0.3 不再声称 A+C 抗场景 B，改为**诚实分场景**：A+C 防场景 A（越权/被攻陷应用）+场景 C（重放），场景 B/B-0 只有方案 R 能治，走乙期间显式声明为已知残留。
@@ -21,6 +22,8 @@
 - **持有 `CONSOLE_ENCRYPTION_KEY` 的任何主体**（该密钥 = 解密 `relay_nodes.privkey_encrypted`/`mnemonic_encrypted` 的唯一钥匙；`kanet.env` 持久化，见 CLAUDE.md 关键配置）。
 - **Console 运行所在的 OS 安全主体**（relay 子进程 `fork` 时继承同一 OS principal，`relay-manager.js:87`；能读 Console 内存/env/DB 文件的 OS 用户等价于在 TCB 内）。
 - **Console 可写的 relay 代码目录 `RELAY_DIR` 与 DB 文件**（Console 能改 relay 码/改配置/改密文=能重定义 relay 行为）。
+
+> **per-relay 子进程的更窄 TCB 面（NWT note-2，完整性补全）**：以上是"被攻陷=relay **全量**私钥失守"的支配威胁。另有一个更窄的边界：**每个 relay 子进程对它自己那一把 key 也在 TCB 内**（key 在其 env，`relay-manager.js:83-84`）——单个 relay 子进程被攻陷 = 仅该 relay 单把 key，爆炸半径远小于 Console 全量。不改变乙决策（Console 全量失守是支配威胁），但信任边界枚举须完备到此层。
 
 ### 1.2 TCB 被攻陷的具体后果（B-0，LANDS，可测）
 
@@ -144,7 +147,7 @@ containment 卡**不能**复用 app 持有的 service 凭证并称之为真正�
 3. **scope inflation**：合法 app key 签一个 scope 超出其 grant 的信封 → 需 MF3 relay-authoritative grant 校验才 BUST（这条不依赖 R，是 A+C 完整版就该拦的场景 A 攻击，必须 BUST）。
 4. **cross-user substitution**：被攻陷/恶意多用户 tg-bot 用合法 service 凭证替换 `tg_user_id` 提他人款 → 需 MF6 独立用户证明才 BUST；无则 LANDS + 靠 §7 爆炸半径限制兜底。
 5. **plaintext-key extraction（B-0 直证）**：Console 域内代码调 `getRelayPrivkey()` 直接签交易 → 走乙 LANDS（就是 TCB 定义本身），R 收口后 BUST。这条是 §1.4 验收基线的头号断言。
-6. **gateway bypass（场景 B vs A 分界）**：Console 进程内代码不走 A 网关直接 import relay-manager 调 sendCommandAsync → 走乙 LANDS（场景 B）；但从**独立应用进程**发起同样绕过尝试 → 应被 A 网关 + C 信封拦（场景 A，必须 BUST）。这条区分 A+C 对两场景的不同效力。
+6. **gateway bypass（场景 B vs A 分界）**：Console 进程内代码不走 A 网关直接 import relay-manager 调 sendCommandAsync → 走乙 LANDS（场景 B）；但从**独立应用进程**发起同样绕过尝试 → **（M0c armed 后）**应被 A 网关 + C 信封拦（场景 A，必须 BUST）。这条区分 A+C 对两场景的不同效力。**注（NWT note-1）**：此场景-A-BUST 是 **post-M0c 验收断言**，非当前态——当前乙-first 阶段 A+C 仅设计未落码，且红队硬门规定"M0c GREEN+R 收口前应用不得抽离为独立进程"，故独立应用进程这个前提当前尚不存在；标注与其余测试的"设计期 LANDS"对称，避免读成"现在就 BUST"。
 
 ---
 
