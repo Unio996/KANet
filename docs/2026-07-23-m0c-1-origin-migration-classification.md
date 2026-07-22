@@ -19,11 +19,18 @@
 
 | 文件 | 调用数 | tg-facing | 初判 |
 |---|---|---|---|
-| `api/pool.js` | 19（含 :288 ecdsa_sign **J1 已坐实 (b)**、:1617/:1814 sweep 钱路、:487 submit） | ✅ | (b) 坐实族 |
-| `api/tg-wallet.js` | 1（:125 custodial 族） | ✅ | (b) 坐实族（NWT 点名 tg-wallet 类同暴露模型） |
-| `api/chat.js` | 3（send_broadcast/faucet） | ✅ | (b) 候选 |
-| `api/relay.js` | 2（见 §1 特殊高亮） | — | (b) 最高危 |
-| `api/admin.js` / `api/discovery.js` / `api/escrow.js` / `api/oracle-pool.js` / `api/trading.js` | 1/1/3/6/2 | — | 挂 secret 但非 tg 线，**外部 app 实际可达性 J1 核**（可能部分是 UI-only route→归本地面板族；admin.js 名字像 operator 面，NWT 同判） |
+**J1 逐 route 可达性核完成（2026-07-23，六文件收工）——判定逐条落定：**
+
+| 文件 | 调用数 | J1 判定 |
+|---|---|---|
+| `api/pool.js` | 19（:288 ecdsa_sign 坐实、:1617/:1814 sweep、:487 submit） | **(b) 坐实族**（tg-facing + verifyIngestRequest 守） |
+| `api/tg-wallet.js` | 1（:125 custodial） | **(b) 坐实族**（NWT 点名同暴露模型） |
+| `api/chat.js` | 3（send_broadcast/faucet） | (b) 候选（tg-facing，逐 route 门待迁移批确认） |
+| `api/admin.js` | 1（:27 handshake） | **(b) 低风险**：唯一调用是 handshake（**非钱路**），在 verifyIngestRequest 守的路由（:18-27），门对 |
+| `api/discovery.js` | 1（:388 handshake） | **(b)**：scoped 全局 hook（:185-189，只对 `/api/discovery` 非 scanner/list/activity 非 GET 生效）覆盖 :388 调用，门生效；scanner/list/activity 注释"UI local only"但**不发 sendCommandAsync**（标注 hook 范围，不影响判定） |
+| `api/escrow.js` | 3（:59/:108/:138 create/lock/execute） | **(b) 干净**：三处全在显式挂 verifyIngestRequest 的 AUTH-gated 路由内 |
+| `api/oracle-pool.js` | 6 | 🔶 **性质特殊，单独立卡（不进本次三分类）**：`/withdraw`(:303)/`/enroll`/`/timeout-unlock` HTTP 层零 verifyIngestRequest，但安全边界设计在**下游签名验证层**（`_broadcastOracleStakeWithdraw` 验签名者 pk==staker_pk_x，protocol-level auth 替代 HTTP-level）——**J1 未 verify 该层校验代码是否严实**（真校验=安全；没校验=真洞）。是"HTTP 无门+协议层门没查清"问题，非"origin 标错"，性质不同，深查卡另立 |
+| `api/trading.js` | 2+（:2326/:2470/:2488/:2574） | 🔴 **J1 新发现·真实不一致**：verifyIngestRequest 只在 :2153（mm-orders 创建）+:2690 两处内联，但 `/api/trade/mm-orders/:id/action`（:2221 起，含四处 sendCommandAsync 含 handshake）**本身无 verifyIngestRequest**——同组端点"创建有门/对订单 action 没门"，进 (b) 类高危清单（连同 relay.js:1726，非本地面板可缓那类） |
 
 **双人 grep 口径差（如实标注，迁移批清点为准）**：NWT 独立穷尽核 = 同 9 文件 **~53 处**；本稿文件级过滤后 = 38 处。差异来自过滤规则（import/注释行、跨行调用形态、helper 内共用 call）——**9 文件集合双方一致（穷尽性对上），处数以迁移批逐 call-site 清点为准**，两人数字先各自保留不硬拍。
 **NWT scope note（三核 #4，进本清单约束）**：①(b) 候选覆盖必须全 9 文件，不停在 pool.js/tg-wallet 两例；②"挂 verifyIngestRequest"是 (b) 的**必要非充分**条件——每处逐 call-site 判"是否实由外部 app 请求触发"（route+daemon 共用 helper 非纯请求触发，随 §4 调用链透传规则处理）。
@@ -33,6 +40,7 @@
 | 文件 | 调用数 | 备注 |
 |---|---|---|
 | `api/bettor.js` | 6（:1415/:1600 transfer escrow） | J1 已定性：零鉴权本地面板（交易推荐 domain，撞名纯巧合）；KANet-UI 已查证部署=仅绑 127.0.0.1 无反代对外，非 live 洞。观察卡（纵深防御）非紧迫 |
+| `api/relay.js:494` `/:id/transfer` | 1 | **J1 route 级判定=本地面板族**（并入观察卡，非 (b)）：零 preHandler，紧邻 :514 `/relays/:id/mnemonic`（注释"local UI only"揭示 mnemonic）=同路由簇强上下文信号；单一固定语义 transfer+零鉴权，风险比 :1726（任意命令）低一档，并入零鉴权本地面板观察卡，不单独收敛卡 |
 | `api/exchange.js` | 5 | 同暴露模型候选（exchange UI 后端），观察卡随 bettor.js 一起 |
 | `api/coord-status.js` | 1（:29 ecdsa_sign） | D-010 签名端点，自有门控（ADMIN_SECRET+IP allowlist+默认 OFF），单列核 |
 
@@ -44,9 +52,15 @@
 - **lib/ 4 文件**：broadcaster-utxo / bshard-close-transport(6) / mining-utxo-consolidate / pool-broadcast——被 daemon/settler 调用，初判 (a)。
 - **注意两点**：① `relay-manager.js:345`（transferFromRelay 工具函数）等**被谁调用决定性质**——工具函数不自标 origin，origin 由最外层调用方传入（设计稿 §4.0 落码细则待补这句：origin 参数沿调用链透传，不在工具层硬编码）；② services 中若有函数**同时被 HTTP route 调用**（如 pool.js:1968 relayCall 传给 zk worker），迁移批逐条查调用链定 origin 传递路径。
 
-## 5. 待办
+## 5. 独立立卡（本次分类之外，J1 核衍生，不塞 origin 三分类）
 
-- [ ] NWT：§2 第三类候选名单穷尽性核对（有无漏掉挂 verifyIngestRequest 的 app-facing 路由）。
-- [ ] J1：§2 表"外部 app 实际可达性"逐 route 核（admin/discovery/escrow/oracle-pool/trading 五文件 + relay.js:504）。
-- [ ] J2：设计稿 §4.0 补"origin 沿调用链透传，工具函数不硬编码"落码细则（随下版或落码批）。
-- [ ] 观察卡另立：零鉴权本地面板族 + trustProxy 盘点（非紧迫，Bettor 排期）。
+- **oracle-pool.js 协议层认证深查卡**：`/withdraw` 等 HTTP 层无门、安全边界在下游签名验证层（`_broadcastOracleStakeWithdraw` 验签名者 pk==staker_pk_x）——须 verify 该层校验代码是否严实。真校验=安全 / 没校验=真洞（喂别人 staker_pk_x + 自己 signing_relay_id 广播他人 withdraw，下游签名大概率对不上但深度未查）。**性质=协议层 auth 完整性核，非 origin 分类**。
+- **零鉴权本地面板观察卡**（纵深防御，Bettor 排期，非紧迫）：bettor.js(6) + exchange.js(5) + relay.js:494 transfer + trustProxy 反代暴露形态盘点（index.js:122）。双证当前 localhost-only 不 live 暴露。
+- **trading.js mm-orders/:id/action 鉴权不一致**：进 (b) 高危清单（§2 表已录），迁移批处理。
+
+## 6. 待办
+
+- [ ] NWT：§2 (b) 候选穷尽性二核（J1 核后名单：pool/tg-wallet/chat/admin/discovery/escrow/trading 挂门族 + relay.js:1726/trading action 零门高危 + oracle-pool 单立卡 + relay.js:494 移观察卡）。
+- [x] J1：逐 route 可达性核完成（六文件收工，判定已录 §2/§3/§5）。
+- [ ] J2：设计稿 §4.0 已补 origin 透传 + 两层守护 + 机械盲区（v0.3.1/v0.3.2），落码批清点精确处数。
+- [ ] relay.js:1726 收敛卡：KANet-UI 运维域记（gate arming 前置，取证中——注意 head 截断致"零生产依赖"假象，KANet-UI 已自纠，消费方含 services/ 生产调用）。
