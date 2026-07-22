@@ -806,3 +806,15 @@ Owner 直令: 盯 M0c-1 出稿→接着审→驱动大家落码→**每个小阶
 - **J1 域复核=GREEN-with-1-MUST-FIX**: authorizeCommand locus 独立读码验证正确(唯一合理钱路闸位); 域侧 MUST-FIX=authorizeCommand 对 Console 内部合法自动命令(settle-daemon 等)会不会误伤, relay/settler 域边界须理清。
 
 **编排**: @J2 own 改稿(600a005c 修订版)消化两 MUST-FIX+全 notes → NWT 复审 MUST-FIX 闭合 + J1 域二过 → Owner money-path 签发 → 落码 → **实战测试(harness `f7865428` 逐条真发验 BUST/放行, Owner DoD)** → 装载。三路审都确认 TCB 诚实边界(不假装抗 Console)守住。红队抓真缺口无放水。
+
+## ✅ M0c-1 origin 修法对抗讨论+装载编排全收敛(2026-07-23 19:4xZ)
+
+NWT 红队 J2 origin 修法③④=判据够硬 GREEN(逐条验: 场景 A app 无路径拿 origin='internal'——app→网关 HTTP→网关 hardcode 'app'覆写 app 输入→child.send)。团队自组织(NWT/J1/J2/KANet-UI)收敛:
+
+- **origin 三分 fail-closed**(NWT 护栏, 纠 J1 最早 opt-in trust): 内部 daemon 正向 internal 标记 / app 命令带 envelope / **两者都无→fail-closed 拒(非 pass-through)**。J1 认账"无 envelope=既有行为不变"是 absence-implies-trusted、反 M1-2 fail-closed(方法论)。
+- **🔴 NWT note-A 装载排序硬前置(钉进 M0c-1 装载 DoD)**: gate armed 前, 全部 20+ 存量 internal 调用点(settler/voter daemon/pool-market-settler 12 处等)**必须已迁移标注 origin='internal'+零行为变更验证**; 否则未迁移 internal→无 origin→fail-closed 拒=**现网结算当场断**。"全 internal call site 已标注"=gate armed 显式前置, 不能 gate 先上迁移后补。
+- **NWT note-B post-R revisit(进 R 卡/§1)**: origin='internal'→跳 envelope 是**乙-scoped**(relay 信乙路 Console=TCB); R 收口后 Console 在 relay 信任域外, origin 变可伪造声明, R 卡须 revisit origin auth。
+- **NWT 授权到达面网**: provision(谁写 grant)/ origin(谁能不带 envelope 过 gate)/ post-R(隔离后 internal 怎么 auth)= 同一张网。
+- **KANet-UI origin lint 三段式时序**(复用 m0a-lib 四件套, 走 warn-first 规则65): ①warn 落码(迁移驱动器: 20+存量逐个标注+零行为变更验证)→②全迁完+NWT diff GREEN→升 ERROR(关门: 新调用点必须显式 origin)→③ERROR 门在位+迁移收口报告=gate armed 装载窗显式前置 checklist。
+
+**M0c-1 装载 DoD 增补(两项 gate armed 前置)**: ①实战测试(harness `f7865428` 逐条真发验 BUST/放行)②**internal 迁移全收口(note-A)**。J2 v0.2 合全部(J1 四点+origin 三分+NWT MUST-FIX provision 场景 A 不可达+note-A/B+3note+Bettor 3notes)→NWT 复核+J1 二过→Owner 签发→落码→迁移收口→实战测试→装载。**团队自组织对抗+编排文化教科书: 设计/红队/lint/装载时序全在频道走完收敛。**
