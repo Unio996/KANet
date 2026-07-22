@@ -665,3 +665,17 @@ Owner 元问题:写进文档的铁律(CLAUDE.md 接位 SOP 第5条"设计前查�
 **Codex 回复非实时**（经 operator 触发读 bridge, 落 `responses/RESPONSE-*.md`）。等回复期间: Owner 可独立拍选型（不 gate 于 Codex）; 若 Codex 先回, 其 verdict 并入 Owner 拍板输入。
 
 **编号说明**: 用真实 UTC 日期 2026-07-22（前人 MSG-115 标 created_at 2026-07-23T04:00Z=未来日期, 我不跟错, NNN=116 递增即可）。
+
+## 🔴 Codex M-1.6 RED verdict(06d759df)+ Bettor 核实 + Owner STATUS 已记 + 方向升级(2026-07-22 14:5xZ)
+
+**Codex 对 caller 选型对抗审 = RED(trust-boundary revision required)**。决定性漏掉的攻击(**Bettor 独立核实代码属实**): M-1.6/NWT 假设"被攻陷 Console 无法伪造动钱操作(app 持凭证+relay 独立进程验证)"——但 `relay-manager.js:17,40` 在 **Console 进程内**调 `getRelayPrivkey()` 拿**明文私钥**塞 env 再 fork relay; `relay-nodes.js getRelayPrivkey()` 解密返回明文。**Console 本就持 relay 私钥+控制其生命周期(kill/restart/换码)**。故 Console 攻陷者直接拿钥匙签, 不需伪造信封, A+C relay 验证形同虚设。NWT 两约束 MUST-FIX **必要不充分**。Codex 真正最小目标=**A+C+R**(R=relay 密钥托管+验证器+生命周期隔离, Console 不可读私钥)+ 6 条 MUST-FIX(grant/durable-replay/audit/user-subject)。
+
+**🔺 更正(诚实, 转述不超原发现者+钱路独立核铁律)**: Bettor 之前上报 Owner"A+C 满足 MUST-FIX 同样抗场景 B"(`97c3411a`)**错了**——那是 NWT 判断, Codex 从拓扑推翻。Console 持私钥这个 **B-0(key-custody/lifecycle takeover)被 M-1.2/NWT 整个漏了**(Codex 补)。
+
+**Owner(Unio996)已在 bridge STATUS.md(`fe59620b`, 21:56)正式记录**: 新条目 `KANET-M0C-CALLER-IDENTITY-001`=`red_verdict_trust_boundary_revision_required`; 路线图仍 `owner_frozen_m1_execution_started` 但 **M-1.6 须在 M0c 前修订**。Owner 侧已在 loop。
+
+**方向升级(不再 A+C vs B, 是 first vs 渐进)**: Codex MUST-FIX 1 给岔路——**(甲)** 补 R(relay 密钥隔离)一次做到抗 Console 攻陷; 或 **(乙)** 诚实声明 Console 属可信计算基(TCB), A+C **不声称**抗 Console 攻陷、作"防应用/内部误用"第一步, R+其余 MUST-FIX 渐进补。**Codex 明确接受(乙)**(原文"describe M0c as least-privilege protection against apps and internal misuse, not protection against Console compromise"), 前提=诚实标残留不自欺。
+
+**用户战略(终端, email=Owner)**: A+C 作好头/第一步、模块化+清晰分层主线优先、安全渐进=倾向**(乙)**。**Bettor 推荐(乙)**: 测试网北极星(非主网真金)+ Console 绑 127.0.0.1 未网暴 + 场景 B 需 Console 内任意代码执行(深度攻陷)+ 主线=模块化。但(乙)=**明确接受"模块化过程中 relay 密钥托管边界暂不隔离、依赖 Console 可信"的残留风险**, 属钱路安全边界决策, 须 Owner 正式知情拍(不默认, respect-hard-process)。
+
+**待 Owner 频道正式拍(甲 vs 乙)**: 拍(乙)→M-1.6 v0.3=A+C+诚实 TCB 声明+R 排后续升级项+M0c 验收口径从"抗 Console 攻陷"改"防应用/内部误用+诚实标 Console 在 TCB"。拍(甲)→R 先做再进 M0c。M-1.6 v0.3 产出派工 J2(机制)+NWT(红队)+ B-0 纳入 M-1.2。
