@@ -827,3 +827,13 @@ NWT 红队 J2 origin 修法③④=判据够硬 GREEN(逐条验: 场景 A app 无
 - **编排 v0.3**: @J2 迁移**禁 blanket-internal 逐点分类**——(a)真 internal(daemon/voter/transport/lib 非请求触发)→internal; (b)legacy HTTP 路由(api/*.js 挂 verifyIngestRequest)→**不许标 internal**(迁能力网关+envelope 或显式标'未授权 legacy 待迁移'不豁免)+ §4.0'场景 A 不可达'claim 收窄到只对真 internal。@J1 域二过帮分类(熟 api 路由哪些 tg-bot/外部 app 打)→ NWT 复核 → 两维度过 → Owner 签发。**M0c-1 未到 Owner 签发, 先诚实修 blanket-internal。**
 
 **方法论**: 红队复审卡在 Owner 签发前抓化妆式诚实缺口=不放水典范(守"代码位置≠请求来源可信"诚实红线, 与 Codex north-star truth-integrity/lint 先斩后接同族——宁可多改一版, 不带化妆式缺口进 Owner 签发)。
+
+## ✅ M0c-1 v0.3 设计层三核即将闭合 + bettor.js 双查证不暴露(2026-07-23 19:5xZ)
+
+- **v0.3(`b02fd31a`)NWT 三核=blanket-internal MUST-FIX 机制闭合 GREEN**: 三类分类(a 真 internal 非请求触发/b legacy-app-unprotected 挂共享 secret 服务外部请求/c 网关 app)+ "场景 A 不可达"claim 收窄到(a)+ §1 诚实边界同步(b 类=绕网关第二入口/场景 A 可达)+ 禁用词表扩展(b 禁称受 M0c-1 保护)+ 防回归 test12(api handler 标 internal→打回)。**NWT scope-sizing 强 note 进§9**: (b)面 grep 全部'挂 verifyIngestRequest+调 sendCommandAsync'=**9 文件~53 处**(admin/chat/discovery/escrow... 非只 pool.js+tg-wallet), §9 分类清单须覆盖全 9 文件、逐 call-site 判外部可达性(verifyIngestRequest 必要非充分: admin 可能 operator 面/route+daemon 共用 helper 非纯请求触发)=**落码前实交付, NWT 再核放行迁移批**。
+
+- **bettor.js:1415 零鉴权 transfer=双查证不 live 暴露**: Bettor 仓库配置(index.js:464 HOST 默认 127.0.0.1/kanet.env 无 HOST/index.js:122 trustProxy scoped 非 unscoped)+ KANet-UI netstat 运行时实测(console:3200 仅 127.0.0.1 LISTENING PID 35444/反代无对外监听)。TCB 内本地面板, **立独立观察卡**(KANet-UI 运维域, 触发升级=HOST 改 0.0.0.0 或前置暴露反代)。NWT 举证 bettor.js 归类错(J1 纠正=零 verifyIngestRequest/零 tg-bot 的本地仓位面板、名字撞频道 Bettor 纯巧合, NWT 认账); 精确第三类判据=挂 verifyIngestRequest 共享 secret + 服务外部 app 请求。
+
+- **编排**: J1 v0.3 三过 → 两维度过 → 送 Owner money-path 签发(**设计层**)。§9 全仓分类清单=J2 起草+J1 核外部可达性+NWT 核穷尽性=落码前随迁移批。
+
+**方法论**: 红队三核不放水(穷尽核发现(b)面 9 文件 53 处远大于举例=scope-sizing 防 under-scope)+ 双查证部署形态(仓库配置+netstat 运行时)+ NWT 认账举证归类错 = 对抗审查文化持续。M0c-1 设计经 v0.1→三路审→对抗→v0.2→复审→v0.3→三核, 每版红队抓真东西无放水。
