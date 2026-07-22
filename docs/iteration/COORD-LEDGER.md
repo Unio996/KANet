@@ -771,3 +771,10 @@ Verdict: 方向 GREEN / 四支柱 as vision GREEN; 但 Positioning 作 canonical
 报批→核实批→执行→NWT diff 核 GREEN 全闭。KANet-UI 执行 `a17e6f21`(删嵌套副本 44 文件/-13732 行 + baseline 243→231 首次 M0a --prune 实用 + SHADOW_ALLOWLIST 收窄)→ Bettor 核实(44 文件吻合/Grep 零业务依赖/git 可逆)+ 协调级判断 fix 安全 → **NWT diff 核 GREEN 三项独立验证**: ①baseline prune 外科精度(删的 12 条 path 全 kanet-tn12/ 嵌套, "非嵌套"过滤返空=零误删活条目, -96 行=12×8 与 243→231 吻合)②M0a 门镜像复验(NWT 自跑非信转述)③两处 m0a-lib 改动读核: SHADOW_ALLOWLIST 收窄=v0.2 预留消亡点正确 + `--diff-filter=d` 修 shadow bug **不引入漏报**(新建 shadow 是 git A 态不受排除 D 影响 + git ls-files 索引双覆盖, 与 Bettor 协调级判断一致)。
 
 **M0a bug fix 补审 GREEN, "不自审自过"守住**: 又一次"落码即生效在审前"(m0a-lib 核心 staged 逻辑改动 push 即生效), 但漏报-only(实为减误报: 门原把删除态误报新建)且 NWT 独立核过转正。M0a 燃尽 --prune 流程首次实战验证(设计→实用闭环)。**方法论沉淀(KANet-UI 自曝)**: 配置漂移卡原"17310 vs 17210"实为 netstat head -5 截断把 17310 LISTENING 行挤没的观察盲区(非真漂移), 待 KANet-UI 定性撤卡 or 修显示行。
+
+## 📐 机制补丁拍板: lint 存量逻辑改动 verdict-before-push(2026-07-23, clamp 第 5 次)
+
+KANet-UI 认账"--diff-filter=d fix=审前生效同族第 5 次"(执行 momentum 把"过 lint 必需的顺手修"当免审搭车)+ 主动提机制补丁, **Bettor 拍板采纳**(模式层 clamp 非自觉)。两个口全关: ①**新规则 warn-first**(默认 warn→NWT diff GREEN 后升 ERROR, 已定 2026-07-22)②**存量 lint 逻辑改动 verdict-before-push**(新增): 改 m0a-lib/lint-kanet 等 lint 工具核心逻辑(判定/扫描集/staged 来源)= commit·push 前先拿 NWT diff verdict, 因 lint 一 push 即对全团队 pre-commit 生效=deploy 门, 适用 diff-verdict-before-deploy 铁律; 哪怕一行+方向对也审后 push。门误报挡合法操作的正规流程: 频道报备→NWT 快审 fix→审过 push, 不 --no-verify 跳门、不先斩。落地: KANet-UI 起草 ANTI-PATTERNS(Bettor 过)+ photo 接位文件双保险。KANet-UI 自抓第 5 次+提补丁=认账文化实践(配 feedback clamp-repeat-offender-at-pattern-level)。
+
+## 配置漂移卡定性: 修法保留(真 bug)+ 观察盲区(方法论)
+两件独立: ①观察盲区(错报 proxy 死活)=netstat head-5 截断把 17310 LISTENING 行挤没, 已更正、记方法论(观察工具输出截断致假象)②kanet-start.sh:179/:181 时序 bug **独立成立、修法保留**: 探测跑在 proxy spawn 之前, 首次开机 17310 无人监听→必假报 UNREACHABLE(launcher.log 实锤)。已批(批复②)走 NWT diff 核。
