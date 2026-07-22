@@ -196,6 +196,22 @@ const hasRule = (vs, rule, substr) => vs.some((v) => v.rule === rule && (!substr
   git(r, ['add', '-A']);
   ok('#12 计算opts → fail-closed ERROR', hasRule(manifestChecks(r), 'R-M0A-OPS-NOT-READONLY', '计算'));
 }
+// 14. 空白变体绕过(NWT 实现批 diff 审 MUST-FIX 7d079ed5): 双空格/括号后空格/tab 必须照抓
+{
+  const TAB = String.fromCharCode(9);
+  const variants = [
+    ['#14a from双空格', 'import Database from  ' + Q + SQLITE + Q + ';'],
+    ['#14b require括号后空格', 'const Database = require( ' + Q + SQLITE + Q + ');'],
+    ['#14c from后tab', 'import Database from' + TAB + Q + SQLITE + Q + ';'],
+    ['#14d relay动态import括号后空格', 'const m = await import( ' + Q + '../lib/' + RELAY + Q + ');'],
+  ];
+  for (const [name, line] of variants) {
+    const r = freshRepo(BASE_FILES());
+    writeFile(r, 'app/ws-variant.mjs', line + '\n');
+    git(r, ['add', 'app/ws-variant.mjs']);
+    ok(`${name} → ERROR`, hasRule(diffAgainstBaseline(r), 'R-M0A-BARE-IMPORT-DIFF', 'app/ws-variant.mjs'));
+  }
+}
 // 13. 真仓全量计时 < 3s
 {
   const t0 = Date.now();

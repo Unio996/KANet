@@ -9,14 +9,19 @@ import path from 'path';
 // 用 fromCharCode 而非字面转义, 防不可见字节混入源码(实现批踩过的坑)。
 export const SEP = String.fromCharCode(0);
 
+// 关键字与引号间空白 = 弹性匹配(NWT 实现批 diff 审 MUST-FIX 7d079ed5: 硬编码单形态可被
+// "from  '..'"双空格 / "require( '..'"括号后空格 / tab 绕过)。用 POSIX [[:space:]] 类, 不用 \s
+// (git grep -E 是 POSIX ERE, \s 非各平台保证)。
+const WS_STAR = '[[:space:]]*', WS_PLUS = '[[:space:]]+';
+const IMPORT_PREFIX = `(require\\(${WS_STAR}|from${WS_PLUS}|import\\(${WS_STAR})`;
 export const FAMILIES = {
   sqlite: {
     // require('better-sqlite3') / from 'better-sqlite3' / import('better-sqlite3')
-    grep: `(require\\(|from |import\\()['"]better-sqlite3`,
+    grep: `${IMPORT_PREFIX}['"]better-sqlite3`,
     specifier: /^better-sqlite3$/,
   },
   'relay-manager': {
-    grep: `(require\\(|from |import\\()['"][^'"]*relay-manager(\\.m?js)?['"]`,
+    grep: `${IMPORT_PREFIX}['"][^'"]*relay-manager(\\.m?js)?['"]`,
     specifier: /(^|\/)relay-manager(\.m?js)?$/,
   },
 };
@@ -254,7 +259,7 @@ export function checkReadonlyConstraint(entry, content) {
         msg: `${entry.path}:${i + 1} new Database(...) 无法静态核出 readonly:true(字面缺失或 opts 为计算值) — fail-closed 拒(计算 opts 不豁免, NWT 注记)。manifest 条目 "${entry.id}"。` });
     }
   }
-  if (entry.family === 'sqlite' && /(require\(|from |import\()['"][^'"]*relay-manager/.test(content)) {
+  if (entry.family === 'sqlite' && /(require\(\s*|from\s+|import\(\s*)['"][^'"]*relay-manager/.test(content)) {
     violations.push({ rule: 'R-M0A-OPS-NOT-READONLY', file: entry.path,
       msg: `${entry.path} manifest 只读例外文件内出现 relay-manager import — 只读诊断没有碰 relay 的理由, 拒。` });
   }
