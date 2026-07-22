@@ -23,8 +23,12 @@
 - subject 绑定的凭证形态（per-service 凭证？per-tg-user token？）——与 M-1 caller identity 机制选型同源，但 containment 需要一个**不等 M0c 全量落地**的最小版本先堵住。取最小可行绑定，M0c 落地时并入统一机制。
 - 11 个共用 secret 的其他端点是否各有类似 subject 缺口 = M-1 威胁模型清单顺带全扫（本卡先堵 custodial_transfer 这条真金路径）。
 
-## 4. 流程
+## 4. 流程与当前状态
 
-设计（本卡）→ NWT 审 → Owner 流程锚显式例外 + money-path 签发（托管钱包动作）→ 落码 → NWT diff 审 → 装载。**在 Owner 签发例外前，本卡不落任何执行代码。**
+设计（本卡）→ **NWT 卡审 ✅ GREEN-with-1-condition** → 凭证形态设计 → **NWT 二审凭证形态** → Owner 流程锚显式例外 + money-path 签发 → 落码 → NWT diff 审 → 装载。**在 Owner 签发例外前，本卡不落任何执行代码。**
+
+- **NWT 卡审条件（2026-07-23，必守）**：具体凭证形态（per-service 凭证 / per-tg-user token / 其它）出来后**必须单独再过 NWT**，重点确认它自己不会引入"另一个共享 secret 换个名字"的新瓶装旧酒。
+- **等级（Owner 2026-07-23"按你建议办"）**：按常规报备处理，**非火警**——生产 console 绑 127.0.0.1 未网暴，活跃面为内部横向（需持共享 secret 的 11 组件之一被攻陷）。凭证形态设计排白天做，与 M-1 caller identity 机制选型协同（取最小可行、可并入 M0c 统一机制的版本，避免重复造轮子 / 避免 NWT 警告的换名共享 secret）。
+- **待**：凭证形态设计（拟派 J2/KANet-UI，白天）→ NWT 二审 → Owner money-path 签发 → 落码。
 
 **关联**：`docs/2026-07-22-kanet-base-modularization-roadmap-v0.2.md`（M-1 §4b/4c）、Codex RESPONSE-...-V041-REREVIEW MF2、频道坐实记录（NWT/J2/J1 2026-07-23 03:53）。
