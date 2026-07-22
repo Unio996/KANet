@@ -739,3 +739,9 @@ Owner 元问题:写进文档的铁律(CLAUDE.md 接位 SOP 第5条"设计前查�
 ## ✅ M-1.6 v0.3.1 NWT GREEN carries(可进 Codex 复审, 2026-07-22 16:12Z, a015d965)
 
 J2 折入 NWT 2 非阻塞 note(note-1 §8.6 gateway-bypass 补"(M0c armed 后)"post-M0c 断言注 / note-2 §1.1 补 per-relay 子进程单 key 更窄 TCB 面), 结论零改动。NWT diff 核过=只折入无夹带, **GREEN carries 到 v0.3.1 无 MUST-FIX**。**下一步: v0.3.1 送 Codex 复审闭合其 M-1.6 RED**(trust-boundary revision requested→乙路诚实分场景 v0.3.1 回应)。
+
+## 📤 M-1.6 v0.3.1 送 Codex 复审(MSG-117, 2026-07-22 16:2xZ)+ 愿景沉淀三处全完成
+
+**MSG-117 送出**(bridge `0d920e69`, re-fetch 核实真在 origin): 请 Codex 复审 v0.3.1(`a015d965`)是否闭合其 M-1.6 trust-boundary RED。核心口径: **走乙路 = Codex MUST-FIX 1 的第一选项**(诚实声明 Console=TCB, A+C 不声称抗 Console, 非"宽对手+只进程分离"自欺组合); R(MUST-FIX 2)作有 §1.4 验收基线的后续欠账。三问: (a)乙路 framing 是否无残留自欺 (b)§1.4 R 收口验收基线是否是你要的诚实反烂尾控制 (c)乙下有无残留 overclaim/场景 A·C 攻击。诚实标注: 非声称 R 已完成(乙路 R 排后续), 是问"诚实分场景+R 有基线欠账"这个结构本身是否满足 RED 核心关切。Codex 回复非实时(operator 触发)。
+
+**愿景沉淀三处全完成**: ①Positioning 补全(af952dd9)②DEV 指针(af952dd9)③KB(KANet-UI `340442c`, 新建 00-position/northstar-open-collaboration-protocol.md v1 Track B, 四支柱镜像 Positioning+锚 KB 既有资产: 支柱①→M5 终验收/②→M0c+M-1.6 A+C/③→value-split 并轨)。Owner"需要地方都写"兑现。
