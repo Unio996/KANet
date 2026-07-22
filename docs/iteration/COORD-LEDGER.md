@@ -851,3 +851,15 @@ NWT 红队 J2 origin 修法③④=判据够硬 GREEN(逐条验: 场景 A app 无
 **钱路安全债知情 Owner(非火警)**: bettor.js:1415 零鉴权本地面板(观察卡)+ relay.js:1726 零鉴权裸透传(收敛卡)+ relay.js:504 零鉴权 transfer(J1 判本地面板, 紧邻 :514 mnemonic "local UI only")。**双证 Console 绑 127.0.0.1 不 live 远程暴露**, M0c-1 迁移批优先收敛零鉴权端点。
 
 **等 Owner 签发** → 落码 → 迁移收口 → 实战测试 → 装载, 每步验落链。M0c-1 从 J2 会话死(设计稿已 push 未报致误判改派)到设计层闭合上报签发, 全天对抗审查每版抓真缺口零放水。
+
+## ✅ relay.js:1726 收敛决策=A 方案定案(Bettor 拍 + 红队综合一致, 2026-07-23 20:1xZ)
+
+**决策(Bettor 拍板 `f6aad9ed`, NWT 红队综合+KANet-UI 事实输入一致)**: relay.js:1726 零鉴权裸透传收敛=**A 方案(钱路面彻底离开端点)**: (a)内部 daemon(bshard-settle/prediction-agent-mind)直 import sendCommandAsync(origin=internal)消 self-fetch 反模式; (b)operator 手动结算走 **operator-scoped 专道**(排除场景 A, 与 provision"零应用可达"同构, **gate 前到位不排 R 卡**); (c)端点白名单收窄非钱路通信类+加 auth。
+
+**判据(NWT 摆齐, 决定 gate 能不能 armed)**: 不是"A 干净 vs B 省事", 是"**A 满足 gate 前置 vs B 用共享 secret 不满足**"——verifyIngestRequest 是 11 组件共享 secret, tg-bot(场景 A 托管钱包)也持, 加了端点仍是"持共享 secret 含场景 A 可发任意 money-path"=gate 场景 A 保护书面洞。B 想有效得把 operator-scoped 从 R 卡拉 gate 前=不如直接 A。落码 NWT diff 核"money-path 路径实排除场景 A(共享 secret 不算)"。
+
+**Bettor 纠错(留痕)**: 我先架构倾向 A 但说"operator-scoped 排 R 卡族"——NWT 点破错: relay.js:1726 是 gate-arming 硬前置, operator-scoped 不能排 R 卡(排了 gate 不算真 armed, 与"gate 开前必须堵"自相矛盾)。认账。**两处团队自纠**: KANet-UI("白名单砍钱路"漏 operator 手动结算刚需 + "operator-scoped 排 R 卡当 settled")两错认账; NWT("白名单收窄只读"猜测)认账。全程窄查全集/认账文化。
+
+**红线守死**: 不砍 operator 手动结算能力(事故兜底, 配 memory owner-settle-not-refund), 迁 operator-scoped 专道保留。KANet-UI 实测 21 脚本 20 个一次性历史脚本(按市场 ID 命名已用完)=专道是小组件非迁 21 个。
+
+**落码**: A 定稿归 KANet-UI; operator 专道=新钱路组件走设计→NWT 主审→随 M0c-1 Owner 签发范围(gate-arming 硬前置须 gate armed 前到位)。Owner 知情已补进 M0c-1 签发上报(c0d05f28)。M0c-1 设计层已闭合待 Owner 签发。
