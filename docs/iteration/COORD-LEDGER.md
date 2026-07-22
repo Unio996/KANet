@@ -818,3 +818,12 @@ NWT 红队 J2 origin 修法③④=判据够硬 GREEN(逐条验: 场景 A app 无
 - **KANet-UI origin lint 三段式时序**(复用 m0a-lib 四件套, 走 warn-first 规则65): ①warn 落码(迁移驱动器: 20+存量逐个标注+零行为变更验证)→②全迁完+NWT diff GREEN→升 ERROR(关门: 新调用点必须显式 origin)→③ERROR 门在位+迁移收口报告=gate armed 装载窗显式前置 checklist。
 
 **M0c-1 装载 DoD 增补(两项 gate armed 前置)**: ①实战测试(harness `f7865428` 逐条真发验 BUST/放行)②**internal 迁移全收口(note-A)**。J2 v0.2 合全部(J1 四点+origin 三分+NWT MUST-FIX provision 场景 A 不可达+note-A/B+3note+Bettor 3notes)→NWT 复核+J1 二过→Owner 签发→落码→迁移收口→实战测试→装载。**团队自组织对抗+编排文化教科书: 设计/红队/lint/装载时序全在频道走完收敛。**
+
+## 🔴 M0c-1 v0.2 复审: 两 MUST-FIX 闭合 + NWT 新抓 blanket-internal MUST-FIX(卡 Owner 签发前)(2026-07-23 19:5xZ)
+
+- **J1 域二过=GREEN-with-1-minor-note**: §4.0 origin 三分 fail-closed 解干净它那条 Console 内部命令边界(比原提议更硬——正向标记非缺省推断, legacy 20+ 调用点误伤根治)。
+- **NWT 复审**: provision §4.3 MUST-FIX+3note+note-A/B+诚实 scoping+TOCTOU+T-9 **全闭合**(§4.3 零 HTTP/IPC 写入+不新增 provision_grant+静态枚举比原修法更严; §5.1 AuthResult 不设 userId 防透传漂亮)。**但复审 §4.0 迁移新抓一条 MUST-FIX(卡 Owner 签发前)**: blanket 标 20+ 调用点 origin='internal' **错**——`api/*.js` HTTP handler(bettor.js:1415/1600 transfer / pool.js:288 ecdsa)代码在 Console 内(TCB)**但服务外部请求**(场景 A app 持共享 secret)。**根因(NWT 抓得深)**: origin 该反映**请求来源**(app)非**代码位置**(internal)——'code 在 Console 内=internal'≠'请求来源可信', 同 §5.1 推理错。'唯一入口=A 网关'在乙-first 窗口假(legacy /api/pool 是绕网关第二入口)。blanket-internal 把一大片场景 A 面标'不可达'=**化妆式**, 违 M0c-1 走乙立身价值(防场景 A)。
+
+- **编排 v0.3**: @J2 迁移**禁 blanket-internal 逐点分类**——(a)真 internal(daemon/voter/transport/lib 非请求触发)→internal; (b)legacy HTTP 路由(api/*.js 挂 verifyIngestRequest)→**不许标 internal**(迁能力网关+envelope 或显式标'未授权 legacy 待迁移'不豁免)+ §4.0'场景 A 不可达'claim 收窄到只对真 internal。@J1 域二过帮分类(熟 api 路由哪些 tg-bot/外部 app 打)→ NWT 复核 → 两维度过 → Owner 签发。**M0c-1 未到 Owner 签发, 先诚实修 blanket-internal。**
+
+**方法论**: 红队复审卡在 Owner 签发前抓化妆式诚实缺口=不放水典范(守"代码位置≠请求来源可信"诚实红线, 与 Codex north-star truth-integrity/lint 先斩后接同族——宁可多改一版, 不带化妆式缺口进 Owner 签发)。
