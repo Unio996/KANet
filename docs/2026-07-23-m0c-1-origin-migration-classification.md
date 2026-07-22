@@ -12,7 +12,26 @@
 
 | 位置 | 内容 | 定性 |
 |---|---|---|
-| `api/relay.js:1726/:1734` | `POST /api/relay/:id/send-command` — **零鉴权裸透传端点**（NWT 实读更正 + J2 route 级复核：本稿初版写"挂共享 secret"错——那是文件级 grep 误判，relay.js 全文件仅 `/api/relay/import-privkey`:119 挂 verifyIngestRequest preHandler，此 route **零门**）：`request.body` 整体直发任意命令类型（含全部钱路命令），任意本机进程可发（不限持 secret 的场景A app） | §2.1"不暴露裸透传端点"存量**最严重**反例，比 (b) 类更糟（零门 vs 持 secret）。**绝不标 internal**（标了=整个 gate 被单端点旁路）；也无法简单标 app+envelope（转发任意 body 无有效 envelope=端点废掉）。**单列第四类处置：收敛**（operator-only 门控/命令白名单收窄/能力网关化，修法等 NWT 完整建议随迁移批定）。紧迫度按 NWT 校准：当前 localhost-only 双证非公网火警，但属"Console 一旦暴露即全 money-path 沦陷"单点 |
+| `api/relay.js:1726/:1734` | `POST /api/relay/:id/send-command` — **零鉴权裸透传端点**（NWT 实读更正 + J2 route 级复核：本稿初版写"挂共享 secret"错——那是文件级 grep 误判，relay.js 全文件仅 `/api/relay/import-privkey`:119 挂 verifyIngestRequest preHandler，此 route **零门**）：`request.body` 整体直发任意命令类型（含全部钱路命令），任意本机进程可发（不限持 secret 的场景A app） | §2.1"不暴露裸透传端点"存量**最严重**反例，比 (b) 类更糟（零门 vs 持 secret）。**绝不标 internal**（标了=整个 gate 被单端点旁路）；也无法简单标 app+envelope（转发任意 body 无有效 envelope=端点废掉）。**收敛路径见下方**。紧迫度按 NWT 校准：当前 localhost-only 双证非公网火警，但属"Console 一旦暴露即全 money-path 沦陷"单点 |
+
+**relay.js:1726 收敛路径（KANet-UI 分桶取证 + NWT 红队 + J2[设计 owner]，2026-07-23）**：
+
+消费方全景（KANet-UI 分桶查、无截断——含一笔 head 截断致"零生产依赖"假象的自纠，同 ws-proxy/limit=8 族第 N 次；NWT 独立 background grep 坐实同结论、并更正自己"白名单收窄到只读"的未查猜测）：
+- **① 生产内部 daemon 走 self-HTTP-fetch**：`bshard-settle-daemon.mjs:86` relayPost（结算，**J2 域** settler）+ `prediction-agent-mind.mjs:385`（下注付款 transfer→side P2SH）——发钱路命令。
+- **② operator scratch 脚本**（十几~21 个：nwt-reverify/qi37q_*/run_bh01w/_j2_3o6cs_* 等），**发 money-path 命令**（sign_input_for_settle 等，人工 covenant/结算实需）+ 部分非钱路（handshake 等）。
+- **∴ 既不能纯删**（生产 daemon + operator 都在用）**也不能白名单砍到只读**（会断人工结算，NWT 更正）。
+
+**收敛方案（三方收敛，最终形态迁移批 NWT 主导 diff 核定）**：
+- **(a) 生产 daemon → 直接 import `sendCommandAsync` + `origin='internal'`**（消 R-SELF-HTTP-FETCH 反模式 = legacy-refund 死循环那族教训 + 内部命令带对 origin）。**`bshard-settle-daemon.mjs:86` 在 J2 域，J2 落码批 wire**（money-path，走 diff 审+Owner 签发）；`prediction-agent-mind.mjs:385` 归属确认后 wire。
+- **(b) daemon 迁走后端点不消失**（operator scratch 仍用）→ **零鉴权改 verifyIngestRequest（起步·三方定稿）**：**不砍钱路白名单**（KANet-UI 认账收回"白名单砍钱路"——operator 手动 covenant/结算 sign_input_for_settle/bshard_close_attest 就是经此端点发 money-path=刚需，砍了断人工结算，同 NWT 自纠"只读白名单"一个性质）。**诚实残留（进禁用词表）**：verifyIngestRequest = 那把 11 组件共用共享 secret（M-1 containment 母面），起步堵场景 A 但**非实 operator 隔离**；operator-scoped 身份 = 理想态，排后（R 卡族）。
+- **🔴 ② operator scratch 21 脚本的钱路处置（NWT 点名摊开·钱路运维决策·非纯技术选型）**：这 21 脚本发的正是 money-path covenant 命令（sign_input_for_settle/bshard_close_attest/zk_* 等），是**事故时人工结算兜底手段**。两方案：
+  - **A：端点彻底非钱路 + operator 钱路另开专道**——端点白名单只留非钱路（覆盖 daemon+UI）+ operator 手动结算迁到 operator-auth 专用 money-path 路径（operator-scoped 身份门，乙路 operator=TCB 放行 money-path）。最干净（宽 HTTP 端点永不转发钱路），代价=新建 operator 专道 + 21 脚本改指向。（NWT 倾向 A）
+  - **B：端点加 operator-auth 保留全命令面**——改动最小，但留一个 operator 可发钱路的 passthrough。
+  - **红线（不管选哪个）**：不许静默砍 operator 手动结算能力（事故兜底，砍了必须有替代）。
+  - **决策归属**：operator 手动结算路径存废 = **钱路运维决策，升 Bettor/Owner 知情拍**（NWT 明确非纯技术选型，J2 不自拍），本卡忠实记 tension + A/B，选定后回写。
+- **时序统一 note-A**：relay.js:1726 收敛（daemon 并入 (a) 类迁移 + 端点 (b) 加鉴权 + ② A/B 定后 operator 路径处置）= gate arming 硬前置。涉 money-path 面按 D-011 内部审链，NWT 落码 diff 核。
+- **时序（NWT 红队判定，2026-07-23）**：①**不做独立紧急热修**（双证不 live 远程暴露，走乙 localhost=TCB 内无活跃远程利用路径）；②**绝不能拖到 gate 装载后**（零鉴权任意命令透传原样留着=gate 装了也被这单端点整体旁路发任意命令绕 authorizeCommand）→ **gate-arming 硬前置 checklist 项**（"未收敛裸透传存在=gate 不 armed"，KANet-UI 已钉），"迁移批优先"= gate 开之前、非迁移批内部随意排序。
+- **收敛后决定性残留核（NWT 必答，迁移批）**：daemon 迁走后**还有没有外部/UI 调这个 HTTP 端点**？有 → 加 auth（不能只靠迁 daemon）；无 → operator-only 化/删。NWT 落码 diff 核收敛改动（daemon 迁移 + 端点 auth/白名单/删三选一按残留定）。
 | `api/relay.js:494/:504` | `POST /api/relay/:id/transfer` 提币端点（`type:'transfer'`） | **route 级核实=同样零鉴权**（无 preHandler）——归零鉴权钱路端点族（同 :1726 处置方向），非 (b)（无 secret 概念）非本地面板观察卡级（它是任意 relay 提币，面宽于面板） |
 
 ## 2. (b) 类候选 — api/ 挂共享 secret（文件级），外部可达性待 J1 逐 route 核
