@@ -599,3 +599,13 @@ Owner 元问题:写进文档的铁律(CLAUDE.md 接位 SOP 第5条"设计前查�
 **M-1.6 v0.2(`0ea4b3d7`, J2)**: 消化 NWT MUST-FIX。C 案收敛为**单一非空配置两条硬约束**(验证 locus=relay 进程内命令执行前 fail-closed + 签名权=各 app 自持凭证 Console 不持全量签发密钥), 不留"或"承重; §4 补分场景防线归属+A+C vs B 真实 trade-off(A+C 靠 relay 验证+app 凭证纪律 vs B 靠传输层物理隔离)+containment 卡并轨约束(app 自持+relay 验证版本非换名共享 secret, 两卡对照审)。**待 NWT 复核是否照两条收敛到位 → 过则选型输入成熟 → Bettor 精炼上报 Owner 终选。**
 
 **M-1 内部审依赖链现状**: ①M-1.6 v0.2→NWT 复核→成熟→上报 Owner(A+C vs B 终选, 顺带 M0a④口径知会) ②M0a v0.2→实现批 diff 审复核口径 ③**J1 covenant 域核(唯一收口关键路径未动)**→闭 M-1.1 复核+M-1.2 C-3→M-1 整体 verdict。三份 NWT verdict 全 GREEN-with-1-MUST-FIX 且两份已消化 v0.2, 设计层零返工。
+
+## ✅ NWT 复核两份 v0.2 全 GREEN → M-1.6 选型输入成熟(2026-07-22 14:09Z)
+
+**M0a v0.2 `c140fcc9` = GREEN, MUST-FIX 关闭**(NWT 逐条核): ①path 键精确镜像根治"删实加假"(加的文件 path 不在 baseline=新增即败, 与全局 count 无关) ②燃尽必须同 commit `--prune` 落账=baseline 永远精确镜像无 headroom 可积(跨 commit 银行堵死) ③git rename 身份延续免误报且核了 rename 不能私带新 occurrence(count_in_file 对不上=exact-mirror 抓) ④**NWT 追加**: R-M0A-BASELINE-EDIT-GUARD 堵了 tool-abuse 面(伪造 path 改写无对应 rename 对/全 regen 加新条目=硬拒)=闭了 NWT 本要追问的面。负向测试 #5/#6/#8 全在。**实现批 note(不阻塞设计)**: `new Database(opts)` 当 opts 非字面量/计算值时 readonly 静态核必须 fail-closed(证不了 readonly=拒非跳过), 测试 #9 只覆字面 case 建议补计算 opts case。**路线图④字面偏离**: NWT 技术方向背书(path 身份 form 塌缩现实下承重=正是 MUST-FIX 论点), 字面措辞偏离留 Owner 实现批 diff 审拍。
+
+**M-1.6 v0.2 `0ea4b3d7` = GREEN, 两条硬约束照收敛到位**: ①验证 locus=relay 进程内命令执行前 fail-closed 明确排除 Console evaluator ②签名权=app 自持凭证 Console 不持全量签发密钥(Console 攻陷上界=重放受 nonce 兜底无法伪造新 scope)。写成"缺一即 vacuous 非可选配置"+保留 v0.1 攻击记录作教训+"任何实现批偏离即不再是本卡方案 C"。**选型输入成熟。**
+
+**上报 Owner 时机决策(Bettor)**: M-1.6 选型(A+C vs B)是 Owner 明确 hold 的架构决策, 现已成熟可上报。**采一次性上报**——等 J1 covenant 域核完 M-1 整体收口后, 一次单点上报 Owner(M-1.6 选型终选 + M0a④口径知会 + M-1 整体 verdict), 符合"Owner 只做少数关键决策/单点上报"减打扰; **软触发例外**: 若 J1 covenant 域核要拖到明天, 则 M-1.6 选型先单独上报不让 Owner 决策被 J1 进度 gated。
+
+**M-1 收口唯一剩余 = J1 covenant 域逐命令核**(闭 M-1.1 的 p2sh.mjs unlockBshard* 独立校验复核 + M-1.2 C-3 nullifier/write-once 覆盖矩阵)。四件(M-1.1/M-1.2/M-1.6/M0a)红队+消化全过, 设计层零返工。containment 卡目标 B 凭证(与 M-1.6 C 案并轨)NWT 持二审等 v2 稿。
