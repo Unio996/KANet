@@ -109,7 +109,11 @@ v0.2 曾写"存量 20+ 逐一标 internal"——**NWT 复审打回（overclaim�
 
 - **诚实标注（禁用词表扩展）**：`legacy-app-unprotected` 调用点**不许称"场景 A 不可达"**——它们是绕过能力网关的第二入口、场景 A 可达的 envelope-bypass 面，是显式接受并挂里程碑的场景 A 残留（与今天裸跑等价，M0c-1 对它们不新增保护也不假装保护）。**§4.0"场景 A 不可达"claim 收窄到 (a) 实 internal**（外部应用无法触发非请求驱动的 daemon 路径）。
 - **防"临时"变永久**：(b) 类清单 = 显式枚举入迁移 baseline，每条挂 M2/M4 迁移卡；lint 禁新增 `legacy-app-unprotected` 标注（只减不增，同 M0a shrink-only 编辑守卫）。
-- lint 差分门同 v0.2：规则"`sendCommandAsync` 调用必须显式 origin"+ baseline 枚举存量 + 新增即败（KANet-UI 接，复用 m0a-lib 四件套；warn-first → NWT diff GREEN 升 ERROR）。迁移批独立 diff 审，**分类判定（a/b 归属）逐条列入 diff 审材料**（NWT 点名 J1 熟 api 路由外部可达性，分类表请 J1 核）。
+- **origin 落码守护两层拆法（v0.3 补·KANet-UI 提案 + J2 拍）**——纯语法 lint 判不了透传语义（工具函数如 `relay-manager.js` transferAndConfirm 的 origin 由外层调用方决定，本就不该硬编码），故拆两层互补：
+  1. **runtime assert（机械保证）**：`sendCommandAsync` 本体（`relay-manager.js:277` 唯一收口点）收不到显式 origin → **fail-closed 抛拒**（console 侧 fail-fast 第一重）；relay 侧 gate 三分判 origin 缺失=拒（权威闸第二重）。两重同为 fail-closed，console 侧早失败利于定位。**assert 与 relay gate 同窗 armed**——都以迁移收口为前置（note-A 三段式），否则 console 侧先断。
+  2. **lint 差分登记（分类不漏）**：新增直发调用点未在分类清单 baseline 内 = warn → NWT diff GREEN 后升 ERROR（M0a 模式）——保证新调用点必被人工分类；**origin 值的对错靠 runtime 门 + 迁移批 diff 审，不靠 lint 静态判**。
+  - **origin 沿调用链透传**：工具函数/共用 helper 不硬编码 origin，签名收 origin 参数由最外层调用方传入（daemon 入口传 `internal`、HTTP handler 按 (b)/(c) 判定传）。
+- 迁移批独立 diff 审，**分类判定（a/b 归属）逐条列入 diff 审材料**（NWT 点名 J1 熟 api 路由外部可达性，分类表请 J1 核）。
 
 **装载排序硬前置（NWT note-A·armed 显式前置条件）**：gate armed 前，全部存量 internal 调用点**必须已迁移标注 + 验证零行为变更**——否则未迁移调用 → 无 origin → fail-closed 拒 = 现网结算断。装载时序三段式（KANet-UI 装载编排）：① lint warn 落码（warn 清单 = 迁移驱动器）→ ② 全迁完 + NWT diff GREEN → 升 ERROR（关门：新调用点必须显式 origin）→ ③ ERROR 门在位 + 迁移收口报告 = gate armed 装载窗的显式前置 checklist 项。**不允许 gate 先上、迁移后补。**
 
