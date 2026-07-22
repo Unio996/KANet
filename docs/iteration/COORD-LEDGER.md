@@ -556,3 +556,19 @@ Owner 元问题:写进文档的铁律(CLAUDE.md 接位 SOP 第5条"设计前查�
 **J2 交叉发现定性并入**: ECDSA_SIGN/SIGN_INPUT_FOR_SETTLE=盲签反模式第 4/5 实例(前三 pool_settle/prediction_settle/custodial_transfer), 须与盲签 9 条同规格进 typed-intent 毕业, M0b 前保持 internal(B-2 已纳入可测清单)。
 
 **待**: ①不自审自过——须 Bettor/J2 交叉核 file:line(尤其 C-3 逐 covenant nullifier 覆盖度, 我标"部分"待 J1/J2 covenant 域逐条核哪些有链上防重放/哪些裸奔); ②A 场景=containment 卡目标 B 攻击面母表, 卡落码仍走 NWT 二审+Owner money-path 签发(流程锚显式例外不放松)。第一波 DoD 三件已到两件(M-1.1 已交待 J1 复核/M-1.2 本卡), 余 M0a lint 设计稿(KANet-UI 在写)齐进 M-1 内部审。
+
+## ✅ 执行第一波 DoD 三件全齐 → 进 M-1 内部审(2026-07-22 14:0xZ · Bettor 编排)
+
+**四件到位地面核实**(全 git cat-file=commit 且 origin 尖端): M-1.1 能力清单 `1451eafa`+n1 补全 `bd3c2810`(TRANSFER/ECDSA_SIGN/SIGN_INPUT_FOR_SETTLE 三高风险行补全 14 列) / M-1.2 威胁模型 `0ec41001`(三场景 21 格 M0c 对照矩阵,红队默认 LANDS) / M-1.6 caller 三案对比 `5270f6c0`+NWT verdict `d7a46faf` / M0a lint 设计稿 `c5992005`。**第一波 DoD(M-1.1+M-1.2+M0a)齐,进 M-1 内部审。**
+
+**Bettor 协调级 file:line 交叉核 M-1.2 已过**(NWT"不自审自过"要求的一路交叉核): 抽查 T-1(relay.mjs:331 process.on message→337 validateCommandPayload 只校验形状零 caller 校验)/T-2(ingest-auth.js:19-44 verifyIngestRequest 单一全局 secret 无 scope/nonce)/T-3(tg-wallet.js:19-22 知险未治注释实在, tg_user_id 取自 URL 攻击者可控)三锚点全部属实, 传输拓扑地基扎实。**C-3 逐 covenant nullifier 覆盖矩阵深核留 J1 covenant 域**(标"部分"待逐条)。
+
+**NWT M-1.6 verdict=GREEN-with-1-MUST-FIX(高质量)**: A+C 组合方向对但如当前写法对场景 B(被攻陷 Console worker)vacuous——信封签发权+验证都在 Console=攻陷后自签自验空验证(memory vacuous-teeth/verify-value-source 同款)。MUST-FIX: 验证 locus=relay 进程内(命令执行前 fail-closed)+签名权=app 自持凭证(Console 被攻陷最多重放不伪造)。与 containment 卡目标 B 凭证并轨=同一 MUST-FIX 同时管两处(收敛价值也是收敛风险: 一处偷懒两处塌)。红队另留真 trade-off 供 Owner: A+C 抗场景 B 靠"relay 验证+app 凭证"纪律(依赖实现不偷懒), 方案 B(per-app socket)靠传输层物理隔离(结构保证)——不翻案排除 B 但 Owner 终选应知非改动量单维度。
+
+**M-1 内部审编排(交叉审, 各认领)**:
+1. **@J1 covenant 域逐命令核(一次闭两卡)**: (a)M-1.1 待办①②③ p2sh.mjs `unlockBshard*` 函数体独立金额/深度校验核实;(b)M-1.2 C-3 逐 covenant 命令 nullifier/write-once 覆盖矩阵(哪些重放被链上拦/哪些裸奔)。你原域最熟。
+2. **@NWT 审 M0a 设计稿**: 裁 §9 三个开放问题(测试夹具摩擦度/注释剥离深度/shadow-module 补丁规则), form-fingerprint+multiset count 身份模型红队打(尤其 §9.3 "删真的+加假的" count 平衡残留面)。
+3. **@J2 消化 M-1.6 MUST-FIX**: 把 §3/§4 vacuous 表述收敛为单一非空配置(验证在 relay+app 自持凭证), 不留"或"承重。消化后 M-1.6 选型输入成熟。
+4. **Bettor**: M-1.6 MUST-FIX 消化 + NWT 审过后, 精炼 A+C(with relay 验证+app 凭证) vs B trade-off 单点上报 Owner 终选; containment 卡目标 B 凭证与 M-1.6 C 案并轨(NWT 二审硬条件)。
+
+**节奏**: 泰国时间近 21:00, 团队熬夜一天, 内部审是设计/审文档工作非钱路, 各自认领不强制即刻冲刺; 齐了汇总 M-1 内部审 verdict。
