@@ -1,6 +1,7 @@
 # operator-scoped 结算专道设计稿 — relay.js:1726 收敛 A 方案的 money-path 出口
 
-> **Status**: DRAFT（2026-07-23 · J2 出稿 → 待 Bettor 方向审 → 待 NWT 红队 → 待 Owner **专道 money-path 签发**才落码）
+> **Status**: v0.2 修订版（2026-07-23 · J2 出稿 → Bettor 方向审 GREEN → NWT 红队 GREEN-with-2-note（`ed4856e5`，头号判据满足）→ J2 连 note 修订 v0.2 → 待 Owner **专道 money-path 签发**才落码 → 落码后 NWT diff 审+实战 harness 两道过才够 gate-arming 前置）
+> **v0.2 修订**：note-1（§2.2 白名单分两档：covenant-specific 保留 / generic transfer 标最高危+更高 gate / ecdsa_sign 倾向剔除）+ note-2（§7 intra-command scope 残留诚实标+post-R R 卡）+ origin 四值化定案（§2.3，NWT 差异化 policy 硬理由）。
 > **本卡性质**：设计文档，不改一行执行代码；不授权任何落码/凭证 provision/relay 重启/签名/广播/结算/资金移动。
 > **是什么**：M0c-1 relay.js:1726 收敛 **A 方案**（Bettor 拍板）里的 (b) 分量——operator 手动结算的 money-path 命令彻底离开共享 secret 端点后，落地的**operator-scoped 专用 money-path 路径**。**gate-arming 硬前置**：M0c-1 gate armed 前此专道必须到位（否则钱路面无合法出口或仍走场景A可达的宽端点）。
 > **依据**：M0c-1 v0.3.2（`43c77044`，§4.0/§4.3）+ 分类清单 relay.js:1726 收敛 A 拍板（`c698edea`，§1）+ M-1.6 v0.3.1 乙路 TCB 声明 + Owner M0c-1 设计层签发（20:12Z，Bettor 地面核 tx df8abb9a + J2 relay_nodes 核 Owner-qrymjvc-tn 91e2efb1）。
@@ -31,9 +32,17 @@ operator scratch 脚本（事故兜底 + 一次性盘处置）**实需**经某�
 
 新增 `POST /api/operator/settle-command`（命名待定，operator 语义非 relay 透传语义）——**专用 money-path 出口**，仅 operator 可达。
 
-### 2.2 命令白名单（显式枚举·operator money-path 命令集）
+### 2.2 命令白名单（v0.2 分两档·NWT note-1 收窄 WHAT 不只 WHO）
 
-依 operator scratch 实测命令集（grep 坐实）显式枚举：`sign_input_for_settle` / `bshard_close_attest` / `bshard_payout_claim` / `sweep_per_bet` / `transfer` / `ecdsa_sign` / `consolidate_utxo` / `get_per_bet_address` 等 covenant/结算命令。**白名单外拒**（fail-closed，与 M0c-1 §3.2 默认拒绝同构）；新增命令默认不在白名单=拒。**非钱路通信类不走本专道**（走收窄后的 relay.js:1726 端点，职责分离）。
+NWT note-1：白名单含 generic 最强原语 = 收窄了 WHO（operator only）没收窄 WHAT（还能转任意款/签任意字节）= 半 defeat 收敛。故白名单**逐条 justify against 实际 operator 手动结算需求**，分两档：
+
+**档一·covenant-specific（结算语义明确·同档放行）**：`sign_input_for_settle` / `bshard_close_attest` / `bshard_payout_claim` / `sweep_per_bet` / `consolidate_utxo` / `get_per_bet_address`（+ 只读 `check_utxo_landed` / `get_pubkey` / `chain_get_*`）——结算/covenant 语义受限，保留合理。
+
+**档二·generic 最强原语（最高危·单独论证/更高 gate·非与 covenant 同档）**：
+- `transfer`（转任意金额到任意地址）：operator 事故恢复移资（孤儿/卡住资金手动转出）确有兜底需求 → **保留但标最高危**，加**更高 gate**（二人复核 or 额外确认因子 or 更严子 tier），不与 covenant 命令同档裸放行。
+- `ecdsa_sign`（签任意字节）：结算签名应走专用 `sign_input_for_settle`，generic ecdsa_sign 签任意字节 = 结算非刚需 + 最危险 → **J2 判定倾向剔除**（落码前核 operator 实际流程：若纯历史 scratch 顺手用、非结算刚需则剔除；若发现某 operator 流程确需则同 transfer 标最高危+更高 gate，不默认放行）。
+
+**白名单外拒**（fail-closed，与 M0c-1 §3.2 同构）；新增命令默认不在白名单=拒。档二两条的高 gate 靠 origin='operator' 差异化 policy 实现（§2.3）。**非钱路通信类不走本专道**（走收窄后的 relay.js:1726 端点，职责分离）。**最终集落码前定+NWT diff 核**（NWT 明列"白名单最终集 + generic 处置"为落码 diff 审项）。
 
 ### 2.3 auth = 现成 operator 门（复用不重造·资产调研坐实）
 
@@ -42,7 +51,7 @@ operator scratch 脚本（事故兜底 + 一次性盘处置）**实需**经某�
 - **专用 tier**：`ADMIN_SECRET_OPERATOR_SETTLE`（新 env，operator 专有秘钥，**非共享 ingest secret**）。
 - **IP allowlist**：`ADMIN_IP_ALLOWLIST` 默认 `127.0.0.1,::1`（localhost-only，同 coord-status）。
 - **env 开关默认 off**：`ADMIN_OPERATOR_SETTLE_ENABLED != '1'` → 503（默认关，operator 手动结算时才开，镜像 zk-close-v2 默认 OFF）。
-- **relay 侧 origin**：专道翻译成 sendCommandAsync 时标 `origin='operator'`（origin 四值：internal/app/operator/缺失拒——operator 是**第四类 origin**，gate 侧按 operator-scoped 放行 money-path；与 internal 区分=可审计谁发的手动结算）。
+- **relay 侧 origin = `operator` 第四类（四值化定案·NWT+Bettor+J2 一致）**：origin 四值 internal/app/operator/缺失拒。四值化两条理由：① J2 审计价值（区分 operator 手动结算 vs daemon 自动，事故复盘不混淆）；② **NWT 更硬理由**：distinct `origin='operator'` 让 gate 能对 operator 施**差异化 policy**——note-1 要给 operator 的 generic transfer/ecdsa_sign 上更高 gate（§2.2 档二），就靠这个 origin 区分实现（operator 白名单/gate 策略 ≠ internal）。复用 internal 会把 operator 命令混进 daemon 命令 = gate 无法对 operator 单独施策 = 丢了 note-1 需要的那层能力。故**四值化，不复用 internal**。M0c-1 gate 本体（批3）origin 三分→四分同步，operator 分支只放行白名单内命令 + 档二走高 gate，缺失/非法仍 fail-closed。
 
 ### 2.4 排除场景A论证（🔴 NWT 头号验收判据·gate-arming precondition 满足）
 
@@ -98,7 +107,8 @@ M0c-1 gate armed 的 checklist 前置项（KANet-UI 装载编排）新增一条�
 
 - operator 专道的 auth（ADMIN_SECRET_OPERATOR_SETTLE）**宿主在 Console 域内** = 乙路 TCB。对**场景A（应用/共享 secret 持有者）有效**（排除了它们）；对**场景B（被攻陷 Console 读 env 拿 ADMIN_SECRET）无效**——Console 攻陷者能读任何 env 秘钥，本专道不防 B-0（与 M0c-1 §1 一致）。
 - **禁用词表**：不得称本专道"防被攻陷 Console"。允许口径="operator 专道 = money-path 排除场景A（应用/共享 secret 够不到）+ operator 显式门；Console=TCB，不防 B-0，抗场景B需 R"。
-- **R 收口**：R 后 ADMIN_SECRET 托管移出 Console 域 / operator 身份走可验证凭证时，本专道 auth 升级（记 R 卡族）。
+- **🔴 intra-command scope 残留（NWT note-2·诚实标）**：本专道白名单判的是**命令类型**（能不能发 sign_input_for_settle），**不判命令内容**（sign 哪个 input / transfer 多少到谁）——故对白名单内命令**无金额/收款人/outpoint 限制**，operator（或持 ADMIN_SECRET 者）可**无界移资**。乙路 operator=TCB 使其可接受（operator 受信），但**不假装有 intra-command scope**：专道只提供命令类型白名单，scope 限制（金额/收款人/outpoint 上限）是 M0c-2/后续，本卡不提供。
+- **R 收口**：R 后 ADMIN_SECRET 托管移出 Console 域 / operator 身份走可验证凭证时，本专道 auth 升级 + **operator money-path 获 intra-command scope 限制**（note-2 的 post-R，金额/收款人上限）（记 R 卡族，同 §7 R 升级 + note-B origin post-R revisit）。
 
 ---
 
