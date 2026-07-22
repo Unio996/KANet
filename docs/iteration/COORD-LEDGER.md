@@ -837,3 +837,17 @@ NWT 红队 J2 origin 修法③④=判据够硬 GREEN(逐条验: 场景 A app 无
 - **编排**: J1 v0.3 三过 → 两维度过 → 送 Owner money-path 签发(**设计层**)。§9 全仓分类清单=J2 起草+J1 核外部可达性+NWT 核穷尽性=落码前随迁移批。
 
 **方法论**: 红队三核不放水(穷尽核发现(b)面 9 文件 53 处远大于举例=scope-sizing 防 under-scope)+ 双查证部署形态(仓库配置+netstat 运行时)+ NWT 认账举证归类错 = 对抗审查文化持续。M0c-1 设计经 v0.1→三路审→对抗→v0.2→复审→v0.3→三核, 每版红队抓真东西无放水。
+
+## 🏁 M0c-1 v0.3 设计层三方过 → 上报 Owner money-path 签发(2026-07-23 20:0xZ)
+
+**三方内部审全 GREEN + 外部 Codex GREEN → 上报 Owner 签发**:
+- Bettor 方向审 GREEN(notes 闭合)+ NWT 红队**三核** GREEN(v0.1→对抗→v0.2→复审→v0.3, blanket-internal MUST-FIX 闭合)+ J1 域二过 GREEN(v0.2 carry 到 v0.3: authorizeCommand locus/B-0/TCB 诚实/四点补丁 M1-4·5·6·T-9 原样未动)。外部 Codex M-1.6 GREEN-with-notes(乙路 A+C)。
+- **已上报 Owner money-path 签发**(`c0d05f28`): M0c-1=caller 身份+默认拒绝(C 信封 relay 侧 fail-closed + A 网关 + 默认拒绝 + grant 防伪造 provision 只 operator 离线 + origin 三分)。守 TCB 诚实边界不假装抗 Console。
+
+**落码前四项实交付(gate armed 前置, 不 gate 签发)**: ①§9 全仓 sendCommandAsync 分类清单(37 文件~130 处 / 9 文件(b)候选 53 处逐 call-site 判外部可达: J2 起草+J1 核+NWT 穷尽二核)②relay.js:1726 零鉴权裸透传收敛(NWT 实读更正=**零鉴权非挂 secret**, 最严重存量反例, gate arming 前必收敛否则整 gate 旁路)③20+ internal 调用点迁移标注(装载排序硬前置)④实战测试(harness 逐条真发验 BUST)。
+
+**落码细则收敛(v0.3.2 `43c77044`)**: origin lint=**完整性门非正确性门**(抓没标/新口未登记, 抓不到"标错值"=blanket-internal 病靠 diff 审人工审); 三层职责(runtime=有没有 origin / lint=新口登记 / diff 审=值对不对); 未收敛裸透传端点存在=gate 不 armed 进装载前置 checklist。
+
+**钱路安全债知情 Owner(非火警)**: bettor.js:1415 零鉴权本地面板(观察卡)+ relay.js:1726 零鉴权裸透传(收敛卡)+ relay.js:504 零鉴权 transfer(J1 判本地面板, 紧邻 :514 mnemonic "local UI only")。**双证 Console 绑 127.0.0.1 不 live 远程暴露**, M0c-1 迁移批优先收敛零鉴权端点。
+
+**等 Owner 签发** → 落码 → 迁移收口 → 实战测试 → 装载, 每步验落链。M0c-1 从 J2 会话死(设计稿已 push 未报致误判改派)到设计层闭合上报签发, 全天对抗审查每版抓真缺口零放水。
