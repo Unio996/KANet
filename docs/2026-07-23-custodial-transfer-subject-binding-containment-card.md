@@ -1,6 +1,6 @@
 # Containment 卡：custodial_transfer subject 绑定（活跃横向越权面）
 
-> **Status**: DRAFT（2026-07-23 · Bettor 起草 · 待 NWT 审 + Owner money-path/流程锚例外签发）
+> **Status**: DRAFT v2 pending（2026-07-23 · Bettor · NWT 卡审 GREEN-with-1-condition + Codex 独立审 RED-3 → 凭证形态设计据 §3 三条重出，再过 NWT 二审，再 Owner money-path/流程锚例外签发）
 > **性质**：**活跃风险 containment**，非模块化路线图批次。Owner 已批"活漏洞修补作为钉死前流程锚的显式例外单独请示，不夹带路线图静默开工"。**本卡是设计描述，不含执行代码；落码另经报备→NWT 审→Owner 签发。**
 > **触发**：Codex 复审 MF2 + 三方独立坐实（NWT/J2/J1，2026-07-23 03:53）+ tg-wallet.js:19-22 知险未治历史注释。
 
@@ -18,10 +18,22 @@
 2. **负向测试**（回归，永久守）：合法服务凭证 + 他人 `tg_user_id` → 必须被拒（403/401），不得放行。
 3. **范围**：本卡只修 subject 绑定这一横向越权面。**裸私钥过 IPC = 单独 key-custody design debt**（长期走 scoped signer/intent 接口，不在本 containment 内）。
 
-## 3. 待定（设计阶段确认，不在本卡拍死）
+## 3. Codex 独立审 RED-3（2026-07-23，凭证形态设计的必守输入）
 
-- subject 绑定的凭证形态（per-service 凭证？per-tg-user token？）——与 M-1 caller identity 机制选型同源，但 containment 需要一个**不等 M0c 全量落地**的最小版本先堵住。取最小可行绑定，M0c 落地时并入统一机制。
-- 11 个共用 secret 的其他端点是否各有类似 subject 缺口 = M-1 威胁模型清单顺带全扫（本卡先堵 custodial_transfer 这条真金路径）。
+Codex 对本卡首稿：漏洞诊断 GREEN + "作为独立 containment 项"GREEN，但**作为可实现的安全设计 = RED，三条 MUST-FIX**。核心洞见（精确验证 NWT 的"换名共享 secret"担忧）：**"subject binding"混淆了两个不同安全目标，per-service 凭证证明不了用户级授权**——
+
+- **MF-c1 分清跨服务隔离 vs 用户 subject 授权（必须命名安全目标，不许做 A 声称 B）**：
+  - **目标 A（仅跨服务隔离）**：只有专用 tg-wallet caller 能碰这个端点，消除"11 个不相关服务共享钱包端点权限"。有价值，但**残留风险必须显式声明并接受**：被攻陷的 tg-bot（本身多用户）仍可对任意 tg_user_id 行动。
+  - **目标 B（真用户 subject 授权）**：每笔提款带**服务端可验证、绑定具体 tg_user_id** 的授权，由独立于"可能被攻陷的多用户 caller"的权威产生/校验。调用方自控的 app_id/header/body 字段不足。
+  - 真正防"被攻陷的多用户 tg-bot"需要目标 B 的独立用户绑定信号；per-service 凭证单独给不了。
+- **MF-c2 授权证明绑定完整提款意图**：证明至少覆盖 caller/audience、HTTP method+route、tg_user_id 与解析出的 fromAddress、收款地址、金额+网络、nonce/request-id+过期、幂等身份。授权后改收款人/金额/用户/route 必须使请求失效；重放拒绝或返回原不可变回执不二次执行。bearer 凭证只说"我是 tg-bot"然后信未签名 body = 没堵钱路授权口。
+- **MF-c3 fail-closed 迁移+吊销+负向测试**：旧共享 x-ingest-secret 单独对该端点不再充分、无无限期双接受回退；专用凭证有属主/轮换/吊销；负向测试覆盖（合法凭证+他人 id / 错服务 audience / 重放 nonce / 授权后改收款人或金额 / 过期-吊销-缺失-畸形证明 / 仅旧共享 secret 无新证明 / 拒绝时零助记词解密+零 relay 命令+零 tx）；审计回执绑定认证 caller+授权用户 subject+意图 digest+决策+txid/error，不记密钥材料。
+
+## 4. 待定（凭证形态设计，白天出，据 §3 三条 + NWT 二审）
+
+- **先定安全目标 A 还是 B**（Codex 要求命名，不许含糊）——建议直接做 B（真用户绑定），因 A 的残留风险=攻陷 tg-bot 即可越权全体托管用户，对真金托管钱包不可接受；但若 B 的最小可行版本工程量过大，可分两步（A 先落堵跨服务面 + 显式声明残留 + B 排期），由设计稿权衡后 Owner 定。
+- 与 M-1 caller identity 机制选型同源，取能并入 M0c 统一机制的形态，避免造第二套。
+- 11 个共用 secret 端点是否各有类似 subject 缺口 = M-1 威胁模型清单顺带全扫。
 
 ## 4. 流程与当前状态
 

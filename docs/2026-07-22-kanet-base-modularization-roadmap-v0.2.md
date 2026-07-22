@@ -1,12 +1,9 @@
-# KANet 底座模块化路线图 v0.4.2（Codex 复审三条 MUST-FIX + Owner 裁决整合 · 待 Codex 终审）
+# KANet 底座模块化路线图 v0.4.2（Codex 终审 GREEN-with-notes · 待 Owner 钉死）
 
-> **Status**: CURRENT（2026-07-22/23 · Bettor 主编）
-> **v0.4.1 增量**：内部二轮 4/4 GREEN（KANet-UI/J1/J2/NWT）；Codex 四条代码断言全部 file:line 坐实；健康信号模板注记。
-> **v0.4.2 增量（Codex 复审 RED 收窄三条 + Owner 逐条裁决，2026-07-23 03:50 频道在案）**：①插入 **M0c 能力强制基座批**（设计→运行时缺环补齐，Owner 自认两半拆法留下的真空）+ 默认拒绝准入规则入 M0b 验收；②custodial_transfer 重定性（按自身威胁模型=当下即活的横向越权面）+ containment 卡（Owner 批流程锚显式例外）+ key-custody debt 单列；③M0a 升 repo-wide differential/manifest 卡点（content-anchored）；④M5 类 B 完成判据改逐命令效果校验；⑤禁用词表文档纪律；⑥50 行帽与原子改动冲突规则。Owner 三确认：M0c 排期冲击可接受 / containment 开流程锚例外 / lint 工具代码算执行代码。
-> **版本链**：v0.1 首稿 → v0.2/v0.2.1 内部对抗第一轮整合（#v6ij51，D2 三轨）→ v0.3 Owner 磨合五条落实（`bdfd5c80`）→ **v0.4 = Codex 外部对抗审查（RESPONSE-20260722-MODULARIZATION-ROADMAP，verdict：战略 GREEN / 执行案 RED）11 条 MUST-FIX 全消化**：新增 M-1 安全边界发现阶段、能力/效果授权模型（A/B/C 降为描述性分类）、盲签退役方向、批规模门改"语义门+钱路 50 行硬上限"叠加制（NWT 终裁）、drain 台账算术更正（14+9=23）与三停政策、M2 进程分离失败语义验收、M5 最小权限验收。
-> **流程**：本稿 → 内部对抗第二轮 → 回 bridge 送 Codex 复审 → 双 GREEN → Owner 钉死 → 执行。钉死前不动任何执行代码（M-1 的取证/设计工作为只读+文档，Owner 已令即启，不属例外）。
-> **流程锚**（Owner 终裁 2026-07-21 18:20Z）：首稿 v0.1 → 对抗讨论（本轮完成，四方全回执）→ **本收敛稿交 Owner 磨合 → 钉死后 Bettor 安排分批执行。钉死前不动任何执行代码。**
-> **v0.1→v0.2 变更**：D2 拆双轨（J1）；D4 按 J2 读码修正（exchange-machine 零预测逻辑）+ V1 drain 退役方案（J2）；M0 加运维脚本例外 + 豁免燃尽三钉（KANet-UI/NWT）；M1 按 handler 拆三批 + 互斥穷尽两硬门（NWT）；全路线图单批规模硬上限（NWT 实测校准）；M3 排序钉死 M3a+M3b→M3c（J1）；运维/runbook 改造升为一等工作项 + 拓扑自报端点（KANet-UI）。
+> **Status**: CURRENT · **可供 Owner 钉死考虑**（2026-07-23 · Bettor 主编）
+> **单一流程状态（钉死前清 stale，Codex 终审 note 5）**：内部对抗两轮全过（一轮 #v6ij51 / 二轮 4/4 GREEN）+ Codex 外审两轮全过（v0.4 RED 11 条全消化 → v0.4.1 复审 RED 收窄 3 条 → **v0.4.2 终审 GREEN-with-notes，三条 MUST-FIX 全 CLOSED**）。**下一步 = Owner 钉死**；钉死前不动任何执行代码（M-1 取证/设计为只读+文档，Owner 已令即启，不属例外）。
+> **完整版本链与逐版增量**：见文末附录 A（避免头部堆积 stale 行）。核心结论：路线图已从"目录模块化"推进到"能力受限模块化"（capability-bounded），Codex 判技术上足够连贯可钉。
+> **Codex 终审 5 条 notes（均为实现阶段门，非钉死阻塞）**：①M0c 批量/语义切片可暂 TBD 但须 M-1 后、实现授权前定；②containment 卡仍 DRAFT，须红队+D-011+实现审+负向测试+装载证据；③M0c 实现且拒绝/重放/scope/审计/吊销测试过之前，任何抽离应用不得获 relay 访问；④类 B 只经逐命令 typed-intent/效果校验或退役毕业，白名单/模板匹配不足；⑤钉死文档保持单一流程状态（本次已清）。
 > **本卡性质**：设计文档，不改一行执行代码。
 
 ---
@@ -154,18 +151,26 @@
 | 内部对抗第二轮 | ✅ 4/4 GREEN（KANet-UI/J1/J2/NWT，2026-07-22 22:1x，含两断言坐实与 custodial_transfer 校准增量） |
 | M-1 caller 身份机制三案对比（gateway/per-app socket/能力信封） | 待做（J2 出对比，Owner 终选） |
 | drain 义务台账（固定快照+逐行字段） | M3b 前置件，待做 |
-| bridge STATUS 更新（MF11 回执 + `blocked`→`red_verdict_pending_owner`） | 待做（Bettor 执行） |
 | D2-C 存量 20 条补审批次组 | 已挂账（2-4 批，M3 后启动，M5 前完成） |
 | typed-intent 签名全架构 | 独立卡（类 B 9 条分批，不卡 M0b） |
-| Codex 复审（v0.4.1） | ✅ RED 收窄三条（V041-REREVIEW），其余全关闭 |
-| Codex 三条新断言坐实（ingest-auth 单一共享 secret / tg-wallet subject 可替换 / secret 多组件共用） | ✅ 三方独立坐实（NWT+J2+J1，2026-07-23 03:53，file:line 入档；含 tg-wallet.js:19-22 知险未治历史注释） |
-| containment 卡（subject 绑定+负向测试，Owner 批流程锚例外） | **可立卡（断言已坐实）**——Bettor 起卡描述，NWT 审+D-011，走 Owner 批的流程锚显式例外 |
-| Codex 终审（v0.4.2 送 bridge） | 待发（断言坐实入档后） |
-| Owner 钉死 | 双 GREEN 后 |
-| 本收敛稿交 Owner 磨合 | 待交（Bettor 精炼单点上报） |
-| Owner 磨合点：①方案本体 ②节奏/火力配比（公测运营 vs 模块化 vs ZK 主线） | 待 Owner |
-| 钉死后：M0 设计稿开工（首批派工） | 等钉死 |
+| **Codex 终审（v0.4.2）** | ✅ **GREEN-with-notes，三条 MUST-FIX 全 CLOSED**（V042-FINAL-REVIEW，MSG-115） |
+| containment 卡（custodial subject 绑定） | NWT GREEN-with-1-condition + **Codex 独立审 RED-3**（凭证形态须区分跨服务隔离 vs 用户 subject 授权、绑定完整提款意图、fail-closed 迁移）——不阻塞路线图，喂白天凭证设计 |
+| **Owner 钉死** | **可钉（两轮外审+两轮内审全过，Codex GREEN-with-notes）** |
+| 钉死后首批 | M-1（即启）+ M0a lint 实现 |
+| M-1 caller 身份机制三案对比 / drain 台账 / 共享 secret 收窄立卡 | 排白天，非钉死阻塞 |
 
 ---
 
-**关联**：v0.1 首稿（`2026-07-22-kanet-base-modularization-roadmap-v0.1.md`，已 SUPERSEDED，含完整资产盘点数据）、频道对抗讨论记录（#v6c77r 首稿发布 / KANet-UI 三条 / NWT #①②③ / J1 两靶一议 / J2 三题 / #v6ij51 裁决）、`docs/2026-07-21-28-state-sync-architecture-full-design.md`、`docs/KANet-Positioning.md`。
+**关联**：v0.1 首稿（`2026-07-22-kanet-base-modularization-roadmap-v0.1.md`，已 SUPERSEDED，含完整资产盘点数据）、containment 卡（`docs/2026-07-23-custodial-transfer-subject-binding-containment-card.md`）、`docs/2026-07-21-28-state-sync-architecture-full-design.md`、`docs/KANet-Positioning.md`、bridge responses（V042-FINAL-REVIEW / V041-REREVIEW / MODULARIZATION-ROADMAP 三份 Codex verdict）。
+
+---
+
+## 附录 A：版本链与逐版增量（从头部移出，钉死文档保持单一流程状态）
+
+- **v0.1** 首稿（`fa7ec84c`）：四路资产盘点 + 三范式选型 + M0-M5 分批 + 对抗问题清单。
+- **v0.2/v0.2.1**（`ea0b1c5d`/`9c680e17`）内部对抗第一轮（#v6ij51）：D2 三轨；D4 exchange-machine 零预测逻辑修正 + V1 drain；M0 运维例外 + 豁免燃尽三钉；M1 按 handler 拆三批 + 互斥穷尽两硬门；单批规模上限；M3a+M3b→M3c 钉序；runbook 一等工作项 + 拓扑自报端点。
+- **v0.3**（`bdfd5c80`）Owner 磨合五条：stale 文本清 / 三钉(b) 主语 Bettor 周检 / drain 30 天超期人工裁定兜底 / D2-C 存量挂账 / 类 B 摸底即启。
+- **v0.4**（`6e8f6ee9`）Codex 外审 RED 11 条全消化：M-1 安全边界阶段；能力/效果授权模型（A/B/C 降描述性）；盲签退役方向；批规模叠加门（语义门 + 钱路 50 行硬上限）；drain 算术更正 14+9=23 + 三停；M2 失败语义验收；M5 最小权限五维；MF11 回执链。
+- **v0.4.1**（`8ea7d510`）内部对抗第二轮 4/4 GREEN：Codex 四代码断言全 file:line 坐实；custodial_transfer 校准 + 健康模板注记。
+- **v0.4.2**（`72f7a400`）Codex 复审 RED 收窄三条全消化 + Owner 逐条裁决：M0c 能力强制基座批（预拆三子批 + 默认拒绝准入入 M0b 验收）；custodial_transfer 重定性（活跃横向面，三方坐实）；M0a repo-wide differential/content-anchored；M5 逐命令效果校验；禁用词表纪律；50 行帽冲突规则。
+- **v0.4.2 终审**（本状态）：Codex GREEN-with-notes，三条 MUST-FIX 全 CLOSED，可供 Owner 钉死。
