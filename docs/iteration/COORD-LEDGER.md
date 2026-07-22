@@ -653,3 +653,15 @@ Owner 元问题:写进文档的铁律(CLAUDE.md 接位 SOP 第5条"设计前查�
 ## 📐 M0c 能力基座启动准备骨架（Bettor 架构师起草, 选型待拍期设计准备）
 
 `docs/2026-07-22-m0c-capability-base-batch-prep.md`（DRAFT, 待选型待红队）: 填路线图 line 92 明确标注的"M0c 逐批 diff 预算待补"空——两依赖（J2 caller 三案对比+M-1 清单）今日已双满足。**三子批切分+选型相关性**: M0c-1（①caller 身份+②默认拒绝）=🔴选型相关（等 Owner 拍 A+C vs B）/ M0c-2（③evaluator+④scope）+M0c-3（⑤防重放+⑥审计+⑦吊销）=🟢选型无关（**可先启动设计**, Owner 拍后只 M0c-1 需按选型收敛=压缩关键路径）。预算框架给维度、具体行数标"待 J2 域填"（Bettor read-only 不拍未核数, 遵 Owner"给不出诚实预算写待补"令）。与 M-1.2 §4 七项验收矩阵交接（不重造）。**非半夜抢**（团队熬夜, M0c-2/3 设计排白天派 J2→NWT 红队）。
+
+## 📤 caller 身份选型送 Codex 外审（MSG-116, 2026-07-22 14:44Z · Owner/用户直令"给 Codex 报"）
+
+**动作**: 经 GitHub bridge（coord/codex-bridge, `f71757b3`）发 **MSG-20260722-116 = review-invite**——把 caller 身份选型（M-1.6 A+C vs B）送 Codex 独立外审 + M-1 四件收口状态同步。已 re-fetch 核实真在 origin bridge 分支（不信 push 回执）。worktree 临时分支用完即删（保留别人常驻 `D:/kanet-cbx-wt` 未动）。
+
+**判断纠偏（用户直令促成，记方法论）**: Bettor 上一轮建议"M-1 收口后收摊等 Owner 拍选型, 团队推不动关键路径"——**漏了"送 Codex 外审"这个不依赖 Owner、能推进、且能帮 Owner 更好拍板的动作**。用户指出刚重启 session 适合继续干复杂任务, 判断更准: caller 选型是承重整个模块化安全边界的架构决策, 之前只 NWT 内审, 送 Codex（审查级外部顾问, 审过路线图 v0.2→v0.4.2 多轮）补强, Owner 拍板时多一个独立视角。协调者"关键路径卡在 Owner"不等于"无事可做"——外审是有价值的并行推进。
+
+**MSG-116 三问（review-invite, 要 Codex verdict）**: (a)A+C（含 NWT 两条 MUST-FIX）是否对得起你"目录边界无权限边界=化妆式模块化"原则、还是 discipline-vs-structure 差距该选 B; (b)A+C 靠纪律（vs B 靠结构）是否留残留场景 B 风险; (c)NWT 两约束 MUST-FIX 是否足够让 A+C 对被攻陷 Console 非 vacuous、有没有我们+NWT 漏的攻击。另 FYI M0a 先斩后接教训+定规矩。引 canonical commit（M-1.1 `66cc5686`/M-1.2 `cfd75d85`/M-1.6 `0ea4b3d7`+`d7a46faf`/M0a `bfa2fa9e`+`7d079ed5`）让 Codex 读码。
+
+**Codex 回复非实时**（经 operator 触发读 bridge, 落 `responses/RESPONSE-*.md`）。等回复期间: Owner 可独立拍选型（不 gate 于 Codex）; 若 Codex 先回, 其 verdict 并入 Owner 拍板输入。
+
+**编号说明**: 用真实 UTC 日期 2026-07-22（前人 MSG-115 标 created_at 2026-07-23T04:00Z=未来日期, 我不跟错, NNN=116 递增即可）。
