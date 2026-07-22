@@ -679,3 +679,15 @@ Owner 元问题:写进文档的铁律(CLAUDE.md 接位 SOP 第5条"设计前查�
 **用户战略(终端, email=Owner)**: A+C 作好头/第一步、模块化+清晰分层主线优先、安全渐进=倾向**(乙)**。**Bettor 推荐(乙)**: 测试网北极星(非主网真金)+ Console 绑 127.0.0.1 未网暴 + 场景 B 需 Console 内任意代码执行(深度攻陷)+ 主线=模块化。但(乙)=**明确接受"模块化过程中 relay 密钥托管边界暂不隔离、依赖 Console 可信"的残留风险**, 属钱路安全边界决策, 须 Owner 正式知情拍(不默认, respect-hard-process)。
 
 **待 Owner 频道正式拍(甲 vs 乙)**: 拍(乙)→M-1.6 v0.3=A+C+诚实 TCB 声明+R 排后续升级项+M0c 验收口径从"抗 Console 攻陷"改"防应用/内部误用+诚实标 Console 在 TCB"。拍(甲)→R 先做再进 M0c。M-1.6 v0.3 产出派工 J2(机制)+NWT(红队)+ B-0 纳入 M-1.2。
+
+## 🔒 B-0 四方独立核码坐实 + NWT 回填 M-1.2 v0.2 + 乙路红队硬牙锁定(2026-07-22 15:2xZ)
+
+**四方(Codex/Bettor/J2/NWT)独立核代码一致坐实 B-0**: `relay-manager.js:60-61` Console 进程内调 `getRelayPrivkey` → `relay-nodes.js:44-53` decrypt 返明文私钥(Console 持 `CONSOLE_ENCRYPTION_KEY` 可解任意 relay 明文)→ `:83-84` 塞 `env.KASPA_PRIVKEY` → `:87` fork。非转述, 四人各自读码同一结论。
+
+**NWT 认账精确(不含糊)**: ①M-1.2 v0.1 场景 B 枚举 B-1~B-5(IPC 全权能干什么)但**漏了 B-0(密钥本就在 Console 手里)=最根本那条**; ②M-1.6 v0.1 MUST-FIX necessary-but-insufficient——治了"自签自验"子问题, 但建立在"relay 进程是被攻陷 Console 碰不到的独立锚"这个**被拓扑推翻的前提**上。红队席本该原稿追问"relay 私钥从哪来/谁能解密", 没追到, 认。外审对抗价值实证。
+
+**NWT 回填 M-1.2 v0.2(`f3fde977`)**: B-0 作场景 B 决定性事实置顶+标最高危 LANDS; **分两档=B-1~B-5 归 M0c 治 / B-0 只有方案 R(key-custody+lifecycle 隔离到 Console 够不到的信任域)治**; §4 矩阵补"M0c 全绿也拦不住 B-0"; 结论改写**"抗场景 B = M0c GREEN + R 完成"**(非只 M0c)。
+
+**🔒 乙路红队硬牙(锁定, Owner 拍乙则必纳入 M-1.6 v0.3)**: **诚实性即安全控制**——走乙可以, 但 M-1.6/M-1.2/任何对外表述**禁止声称 A+C 抗被攻陷 Console**, 必须显式写清"Console 持全量 relay 私钥=TCB, A+C 只防场景 A 不防 B-0"。含糊暗示抗 Console=化妆式, 红队打回。**与 Codex MUST-FIX 1 完全一致**(诚实缩威胁模型 or 补 R, 不许"宽对手定义+只靠进程分离"自欺组合)。
+
+**全收敛, 等 Owner 拍甲/乙**: 四方坐实 B-0 / M-1.2 v0.2 回填 / 乙路守门条件锁定 / M-1.6 v0.3 不预写(甲乙框架不同, J2+NWT 待方向后出)。拍(乙)→v0.3 必带诚实 TCB 声明(NWT 硬牙)+ R 排后续升级项。拍(甲)→R 先做。**这是纯等 Owner 决策的点, 团队侧已就绪。**
