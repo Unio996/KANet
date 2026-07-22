@@ -778,3 +778,6 @@ KANet-UI 认账"--diff-filter=d fix=审前生效同族第 5 次"(执行 momentum
 
 ## 配置漂移卡定性: 修法保留(真 bug)+ 观察盲区(方法论)
 两件独立: ①观察盲区(错报 proxy 死活)=netstat head-5 截断把 17310 LISTENING 行挤没, 已更正、记方法论(观察工具输出截断致假象)②kanet-start.sh:179/:181 时序 bug **独立成立、修法保留**: 探测跑在 proxy spawn 之前, 首次开机 17310 无人监听→必假报 UNREACHABLE(launcher.log 实锤)。已批(批复②)走 NWT diff 核。
+
+## ✅ 卫生+配置+机制这一波全闭(2026-07-23 17:53Z)
+① shadow `--diff-filter=d` fix NWT 实测两场景不漏(新建 A 态 / git mv 重命名双命中 ls-files+非D名单)=GREEN 转正, 与 Bettor+KANet-UI 判断一致。② kanet-start.sh:179 NWT 定性=实 bug 卡保留(探针:184 跑在 spawn:195 前、测 proxy 端口非 kaspad), 独立于'proxy 死活'观察盲区(已更正)。③ **规则65 落地(`436a319e`)+ Bettor 过目认可**——根因洞察精华: 判"算不算 deploy"的正确测试 = "push 后有没有任何人的工作流/运行时行为在 verdict 前被改变"(**非"我有没有重启进程"**), 把 diff-verdict-before-deploy 从狭义"重启"升级成"改变别人工作流", 一举收窄同族五连逐次逃逸口; 钉 ANTI-PATTERNS(git 跨机同步)=主保险选对位置。两个已发生 fix(shadow/kanet-start:179)NWT 补审 GREEN 技术对; 规则65 防未来。KANet-UI 认账+抓根因+落规则一条龙。**回主线: M0c-1 设计 J2 进行中, 出稿 Bettor 接审。**
