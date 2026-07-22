@@ -863,3 +863,13 @@ NWT 红队 J2 origin 修法③④=判据够硬 GREEN(逐条验: 场景 A app 无
 **红线守死**: 不砍 operator 手动结算能力(事故兜底, 配 memory owner-settle-not-refund), 迁 operator-scoped 专道保留。KANet-UI 实测 21 脚本 20 个一次性历史脚本(按市场 ID 命名已用完)=专道是小组件非迁 21 个。
 
 **落码**: A 定稿归 KANet-UI; operator 专道=新钱路组件走设计→NWT 主审→随 M0c-1 Owner 签发范围(gate-arming 硬前置须 gate armed 前到位)。Owner 知情已补进 M0c-1 签发上报(c0d05f28)。M0c-1 设计层已闭合待 Owner 签发。
+
+## 🏁 Owner '继续'=operator 专道签发 + 授权落码 → M0c-1 进落码 code(2026-07-23 20:39Z)
+
+**Owner 20:39 '继续' 地面核实(铁律-1)**: 频道 API 原始返回 sender=qrymjvcyru(Owner 地址 + registry 锚 id=91e2efb1)/created 20:39:24Z(真实 now 一致非未来)/confirmed/tx `c02e412b`/**时间线连贯**(正回应 Bettor 20:30 operator 专道签发上报)。非注入。**Owner 连续三条累积授权**(20:12 签 / 20:13 按流程推进不必死等我 / 20:39 继续)=①operator 专道**签发批准** ②授权继续落码。
+
+**授权来源核实链(诚实标, 钱路签发多锚)**: ①消息真在频道 API ②sender=registry Owner 身份(id=91e2efb1 name='Owner-qrymjvc-tn')逐字符匹配(J2, DB 锚比 sender_address 硬) ③历史一致(Owner 频道消息全 qrymjvcyru) ④时间线连贯 ⑤终端=Owner email(第五路终端直接确认'签'仍待, 但 ①-④+Owner 连续一致=强证据驱动)。sender_address 可伪(D-010)单锚不够, registry DB 锚+Owner 连续+时间线补强(NWT 身份闸满意收口)。落码 code 可回退, 不可逆钱路动作在装载(前有 diff 审+实战 gate)。
+
+**M0c-1 进落码 code**(每步验落链/NO TX NO STATE/实战硬 DoD)。派工(频道 `bb0b7a0d`): ①J2 operator 专道落码→NWT diff 审 ②J2 M0c-1 核心落码(authorizeCommand/A 网关/默认拒绝/grant provision/origin 三→四分/专道 wire) ③§9 清单 J2 起草→J1 核→NWT 二核 ④KANet-UI 20+ internal 标注+origin lint(warn-first) ⑤NWT 每批 diff 审+实战 harness 真发 ⑥装载 gate armed 前置全满足。Owner'按流程推进不必死等我'=Bettor 驱动流程, 关键节点(实战结果/装载)频道报 Owner。
+
+**M0c-1 今日全程**: J2 会话死→设计稿(600a005c)→三路审→origin 对抗讨论→v0.2→复审 blanket-internal→v0.3→三核→relay.js:1726 零鉴权收敛 A 定案→operator 专道设计 v0.1→红队→v0.2→复核 GREEN→Owner 签发'签'+专道签发'继续'→进落码。一天走完设计到落码, 六版红队每版抓真缺口, 全队(J2/NWT/J1/KANet-UI+Owner+Codex)零放水。
