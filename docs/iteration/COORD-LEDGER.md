@@ -873,3 +873,11 @@ NWT 红队 J2 origin 修法③④=判据够硬 GREEN(逐条验: 场景 A app 无
 **M0c-1 进落码 code**(每步验落链/NO TX NO STATE/实战硬 DoD)。派工(频道 `bb0b7a0d`): ①J2 operator 专道落码→NWT diff 审 ②J2 M0c-1 核心落码(authorizeCommand/A 网关/默认拒绝/grant provision/origin 三→四分/专道 wire) ③§9 清单 J2 起草→J1 核→NWT 二核 ④KANet-UI 20+ internal 标注+origin lint(warn-first) ⑤NWT 每批 diff 审+实战 harness 真发 ⑥装载 gate armed 前置全满足。Owner'按流程推进不必死等我'=Bettor 驱动流程, 关键节点(实战结果/装载)频道报 Owner。
 
 **M0c-1 今日全程**: J2 会话死→设计稿(600a005c)→三路审→origin 对抗讨论→v0.2→复审 blanket-internal→v0.3→三核→relay.js:1726 零鉴权收敛 A 定案→operator 专道设计 v0.1→红队→v0.2→复核 GREEN→Owner 签发'签'+专道签发'继续'→进落码。一天走完设计到落码, 六版红队每版抓真缺口, 全队(J2/NWT/J1/KANet-UI+Owner+Codex)零放水。
+
+## M0c-1 落码批推进 + 三同族钱路债定案(2026-07-23 21:0xZ)
+
+**落码批状态**: 批A(`d28d871c` origin 基础设施: sendCommandAsync 加 origin 形参+warn-first NO TX NO STATE+防伪造 __origin 只走形参+零行为变更)双审 GREEN 进序列 / 批B(`7e511b15` operator 专道端点)NWT diff 审 **GREEN 核心+1 MUST-FIX**(transfer 档二双 tier bug: 同 header 匹配两 secret 不可能=功能废/同值假更严; J2 修独立 header→NWT 复核。**Bettor 认账方向审漏**=照设计描述没实读代码 feedback-read-actual-code, diff 审实读抓出=分层审价值: 方向审看架构/diff 审抓实现 bug) / 批C §9 清单(admin/discovery/escrow (b) 进分类)待 NWT 二核穷尽→KANet-UI 标注。
+
+**三同族钱路债定案(J1 紧迫度收尾)**: relay.js:1726(裸透传任意命令, gate-arming 前置)/ bettor.js:1415(本地面板)/ trading.js:2221 action(mm-orders 做市交割发 transfer KAS)——都是 Console HTTP 钱路端点零/不一致鉴权(NWT 系统化=M0c-1 origin 分类是系统性收敛网)。**双证 Console 127.0.0.1 非公网火警, 内部横向面, 立独立收敛卡随 M0c 收敛**。trading.js action 收敛同 relay.js:1726 A 思路(transfer 场景 A 可达, 不能只加 verifyIngestRequest, 走 operator 专道/收窄), J1 触发源(cron vs UI)未查完不改紧迫度。oracle-pool.js(protocol 层签名)单独立卡不进 origin 分类。已 Owner 知情三债。
+
+**汇报密度**: 常规落码批 Bettor 盯收口不逐批报 Owner, 关键节点(实战测试结果/装载/需 Owner 拍板)才报。
