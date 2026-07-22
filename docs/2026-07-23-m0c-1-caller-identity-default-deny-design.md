@@ -113,7 +113,9 @@ v0.2 曾写"存量 20+ 逐一标 internal"——**NWT 复审打回（overclaim�
   1. **runtime assert（机械保证）**：`sendCommandAsync` 本体（`relay-manager.js:277` 唯一收口点）收不到显式 origin → **fail-closed 抛拒**（console 侧 fail-fast 第一重）；relay 侧 gate 三分判 origin 缺失=拒（权威闸第二重）。两重同为 fail-closed，console 侧早失败利于定位。**assert 与 relay gate 同窗 armed**——都以迁移收口为前置（note-A 三段式），否则 console 侧先断。
   2. **lint 差分登记（分类不漏）**：新增直发调用点未在分类清单 baseline 内 = warn → NWT diff GREEN 后升 ERROR（M0a 模式）——保证新调用点必被人工分类；**origin 值的对错靠 runtime 门 + 迁移批 diff 审，不靠 lint 静态判**。
   - **origin 沿调用链透传**：工具函数/共用 helper 不硬编码 origin，签名收 origin 参数由最外层调用方传入（daemon 入口传 `internal`、HTTP handler 按 (b)/(c) 判定传）。
+  - 🔴 **两层守护的机械盲区（NWT 红队点破·load-bearing）**：这套 runtime assert + lint 差分登记**只抓"没标 origin / 新口未登记"，抓不到"标错 origin 值"**——一个 legacy-app-facing 调用点被误标 `origin='internal'`（正是 blanket-internal 那个病本身），lint 绿（有 origin 值、已登记）+ runtime 放行（`internal` 是合法值）= **无任何机械闸拦住误标**。故 **(a)/(b) 分类判定的正确性由"迁移批 diff 审 + J1 逐 route 可达性核 + NWT 穷尽核"这条人工链 load-bearing 保证，不是机械保证**——诚实标注：这是乙路 TCB 内的人工审查依赖，实现批与迁移批必须显式声明"分类正确性靠审查非靠门"，禁止表述成"lint/runtime 保证了 origin 不被误标"。R 收口后请求来源变可验证凭证时此盲区才机械关闭。
 - 迁移批独立 diff 审，**分类判定（a/b 归属）逐条列入 diff 审材料**（NWT 点名 J1 熟 api 路由外部可达性，分类表请 J1 核）。
+- **"哪一类都装不进"的端点先收敛（§1 特殊高亮 / relay.js:1726 零鉴权裸透传）**：既不能标 internal（整 gate 被单端点旁路）又无法标 app+envelope（转发任意 body 无有效 envelope=端点废掉）的调用点，必须在 gate arming **前**先收敛（收窄命令白名单 / operator-only 门控 / 能力网关化 / 删）才能纳入 origin 体系——这是 note-A"gate arming 前置收敛"的具体所指。
 
 **装载排序硬前置（NWT note-A·armed 显式前置条件）**：gate armed 前，全部存量 internal 调用点**必须已迁移标注 + 验证零行为变更**——否则未迁移调用 → 无 origin → fail-closed 拒 = 现网结算断。装载时序三段式（KANet-UI 装载编排）：① lint warn 落码（warn 清单 = 迁移驱动器）→ ② 全迁完 + NWT diff GREEN → 升 ERROR（关门：新调用点必须显式 origin）→ ③ ERROR 门在位 + 迁移收口报告 = gate armed 装载窗的显式前置 checklist 项。**不允许 gate 先上、迁移后补。**
 
