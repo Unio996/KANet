@@ -723,3 +723,19 @@ Owner 元问题:写进文档的铁律(CLAUDE.md 接位 SOP 第5条"设计前查�
 **NWT verdict = GREEN(无 MUST-FIX)+ 2 非阻塞 note**, 8 路试图打穿全失败(挣的 GREEN 非顺水): ①grant-inflation 乙路下不矛盾(§8.3 scope-inflation 正确 scoped 场景 A)②全稿 overclaim 扫描: A/C 职责全显式 scoped 场景 A/C+明写对 B 零防御, §1.3 禁用词表全稿自洽, **无一处暗示抗 Console** ③B 裂缝(authority-outside-Console)处理到位。**特赞 §1.4 可测验收基线**(NWT 原话): "R 收口=§1.1 TCB 成员逐条移出+§1.2 五后果 LANDS→BUST 的可测清单——走乙不烂尾的关键, 残留被钉成有验收清单的欠账而非模糊'以后会做'"。2 非阻塞 note(Codex 再审顺带收, 不拦 GREEN): note-1 §8.6 gateway-bypass 场景 A-BUST 缺"M0c armed 后"前置标注(post-M0c 断言)+note-2 见 `d52b815d`。
 
 **caller 身份选型乙路内部审闭**(J2 出稿→NWT 红队 GREEN)。下一步: v0.3 送 Codex 复审闭合其 M-1.6 RED(顺带收 2 note)。这是今晚"Codex 发现 B-0→四方核实→Owner 拍乙→J2 诚实修订稿 v0.3→NWT GREEN"完整闭环。
+
+## 📐 北极星愿景沉淀进定位/开发文档(Owner 令"需要地方都写", 2026-07-22 16:1xZ)
+
+**Owner 令**: 把"Kaspa 上的操作系统 + 无许可接活 + 凭效果付佣 + 链上裁决结算"愿景沉淀进定位/开发/KB, 让团队与接位者一眼对齐北极星, 不用每轮重拼。
+
+**查资产(设计前查, 不重造)**: `docs/KANet-Positioning.md` 已完整覆盖"操作系统/无许可接活/无控制者市场", 缺"凭效果付佣**机制** + covenant **裁决**"两块; KB 有 Owner 2026-06-22 钦定 `00-position/value-split-social-coordination-infra`("分润不是分钱是协调机制…KANet=社会资源协调信任基础设施")=凭效果付佣的**思想根**。→ 补全非重写。
+
+**已落**: ① **Positioning 补全**(追加"北极星: Kaspa 上的开放协作协议"章, 四支柱=操作系统/无许可接活/凭效果付佣[fee-split 链上实证+Owner 6-22 协调机制]/covenant 链上裁决 + **Track 合规锚**; 追加式不动现有内容)② **DEVELOPER-GUIDE 指针**(开头加"北极星"段, 写码前对齐方向, 指向 Positioning 权威章)。
+
+**待**: ③ **KB 同步派 @KANet-UI**(doc/KB 域+熟 Track 框架): 把北极星同步进 KB `00-position`(标 **Track B**, 与 `value-split-social-coordination-infra` 并轨), Positioning 章为内容源。
+
+**诚实/合规校准(不可省)**: 愿景全程 framing 成**协议能力(Track B: 协议使之可能, testnet/MIT)**非 KANet 运营——"KANet 团队不运营付佣市场/不撮合/不托管/不收费", 呼应 Positioning"不做什么"+Track A 7 铁律, 守法律边界(KB 强调的 framing 模糊=法律风险)。
+
+## ✅ M-1.6 v0.3.1 NWT GREEN carries(可进 Codex 复审, 2026-07-22 16:12Z, a015d965)
+
+J2 折入 NWT 2 非阻塞 note(note-1 §8.6 gateway-bypass 补"(M0c armed 后)"post-M0c 断言注 / note-2 §1.1 补 per-relay 子进程单 key 更窄 TCB 面), 结论零改动。NWT diff 核过=只折入无夹带, **GREEN carries 到 v0.3.1 无 MUST-FIX**。**下一步: v0.3.1 送 Codex 复审闭合其 M-1.6 RED**(trust-boundary revision requested→乙路诚实分场景 v0.3.1 回应)。
