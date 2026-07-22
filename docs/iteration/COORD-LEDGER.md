@@ -765,3 +765,9 @@ Verdict: 方向 GREEN / 四支柱 as vision GREEN; 但 Positioning 作 canonical
 ② **配置漂移卡 2 行修法=批**: kanet-start.sh:179 显示行 bug(proxy spawn 本体正确不动, KANet-UI 日志实锤 listening 17310→17210 方向对), 生产脚本改 @NWT diff 核。死亡 proxy 随下次启动窗自愈、不单开重启(同意)。
 
 ③ **NWT M0c-1 攻击靶单(a7f5beba)=好前置**(记方法论): 红队不等设计落地、先出攻击靶单作前置验收基线(J2 照此设计/NWT 照此测, 省从零返工)。8 条负向测试(M1-1 自声明身份零权重/M1-2 默认拒未注册 caller/M1-3 默认拒无 verifier 命令[Codex note①]/M1-4 身份解析失败 fail-closed/M1-5 禁运行时自注册须静态可枚举…)+3 条必答问(T-7 身份对象须带稳定 app-key-id 供 M0c-2 grant/M0c-3 replay·audit 绑防返工/T-8 TCB 诚实边界须显式写防场景 A 不防 B-0·任何抗 Console 暗示打回/T-9 caller=service 身份非端用户 subject 与 containment MF6 分界)。@J2 设计 M0c-1 逐条给 BUST 机制或如实标 LANDS。
+
+## ✅ 卫生卡完全闭合(NWT diff 核 GREEN, 2026-07-23 17:49Z)
+
+报批→核实批→执行→NWT diff 核 GREEN 全闭。KANet-UI 执行 `a17e6f21`(删嵌套副本 44 文件/-13732 行 + baseline 243→231 首次 M0a --prune 实用 + SHADOW_ALLOWLIST 收窄)→ Bettor 核实(44 文件吻合/Grep 零业务依赖/git 可逆)+ 协调级判断 fix 安全 → **NWT diff 核 GREEN 三项独立验证**: ①baseline prune 外科精度(删的 12 条 path 全 kanet-tn12/ 嵌套, "非嵌套"过滤返空=零误删活条目, -96 行=12×8 与 243→231 吻合)②M0a 门镜像复验(NWT 自跑非信转述)③两处 m0a-lib 改动读核: SHADOW_ALLOWLIST 收窄=v0.2 预留消亡点正确 + `--diff-filter=d` 修 shadow bug **不引入漏报**(新建 shadow 是 git A 态不受排除 D 影响 + git ls-files 索引双覆盖, 与 Bettor 协调级判断一致)。
+
+**M0a bug fix 补审 GREEN, "不自审自过"守住**: 又一次"落码即生效在审前"(m0a-lib 核心 staged 逻辑改动 push 即生效), 但漏报-only(实为减误报: 门原把删除态误报新建)且 NWT 独立核过转正。M0a 燃尽 --prune 流程首次实战验证(设计→实用闭环)。**方法论沉淀(KANet-UI 自曝)**: 配置漂移卡原"17310 vs 17210"实为 netstat head -5 截断把 17310 LISTENING 行挤没的观察盲区(非真漂移), 待 KANet-UI 定性撤卡 or 修显示行。
