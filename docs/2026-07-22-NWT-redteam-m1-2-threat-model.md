@@ -77,10 +77,10 @@
 |---|---|---|---|---|
 | C-1 | 捕获一次合法 `tg-wallet/{id}/send`，重放 N 次 → 多次扣款 | 每请求须带 nonce/request-id，服务端去重，重放第二次即拒 | 同一请求发 2 次 → 断言第二次 409/拒绝，链上仅 1 tx | 🔴 **LANDS**（HTTP 无 nonce，`tg-wallet.js` 无 idempotency） |
 | C-2 | 捕获合法 IPC custodial_transfer / 盲签命令，重投 | IPC 命令须带 nonce + relay 侧幂等去重 | 重投同 requestId/同 payload → 断言 relay 去重不重复执行 | 🔴 **LANDS**（`requestId` 仅响应关联，无去重存储） |
-| C-3 | 重放 covenant 命令触发同一 nullifier/state 二次转移 | 链上 nullifier/write-once 是最后防线，但**应用层不应依赖它兜底**——须有请求级去重 | 重放 BSHARD_PAYOUT_CLAIM → 断言请求层先拒（不靠 nullifier 链上兜） | 🟡 **部分**（部分 covenant 有 nullifier/write-once 链上防重放 = M-1.1 坐实；但**无请求层去重**，攻击者可用重放消耗费用/探测 + 非 nullifier 保护命令裸奔）→ 需逐命令核 nullifier 覆盖 |
+| C-3 | 重放 covenant 命令触发同一 nullifier/state 二次转移 | 链上 nullifier/write-once 是最后防线，但**应用层不应依赖它兜底**——须有请求级去重 | 重放 BSHARD_PAYOUT_CLAIM → 断言请求层先拒（不靠 nullifier 链上兜） | 🟡 **两件事分开判（J1 covenant 域逐 20 命令核，`e59b00ba`）**：**二次生效**被 covenant 层挡住 = **12/20 BUST**（nullifier 4：PAYOUT_CLAIM/REFUND_CLAIM/CLOSEZK_V2_CLAIM/ESCAPE_CLAIM，`PayoutShard.sil:171-226` 等；write-once 8：CLOSE_COMMIT/CONSOLIDATE(absorb)/CLOSE_ATTEST/CANCEL_ATTEST/+V2×2/ZK_CLOSE/ESCAPE_TRIGGER）；6 条 UTXO-only + 2 N/A 靠共识层双花挡二次生效。**请求层去重（M0c⑤ 意义的 nonce/幂等）= 0/20 全 LANDS**——无一条命令有应用级去重，重放消耗 relay 处理+mempool 拒绝噪音/探测状态对 20 条全成立 |
 | C-4 | 重放跨时间窗（旧请求延迟重投）攻击 daa/lockfile 阈值命令 | 请求须带时效（timestamp + 过期窗），过期即拒 | 延迟重投过期请求 → 断言拒绝 | 🔴 **LANDS**（无 timestamp/过期校验） |
 
-**C 场景关键点（红队立场）**：C-3 是唯一有链上兜底的，但**"链上 nullifier 存在"≠"重放被拦"**——它只拦"重复领同一叶子的钱"，拦不住重放消耗对手费用、探测状态、或攻击**无 nullifier 保护**的命令（如 ECDSA_SIGN 重放让 relay 反复签同一字节可能被用于别处）。请求级去重（M0c⑤）是必需，链上防重放是纵深不是替代。
+**C 场景关键点（红队立场，J1 逐命令核实后收敛）**：C-3 必须**把"二次生效"和"请求层去重"两个后果分开判**——不能笼统标"部分"。**二次生效**：12/20 covenant 命令有 nullifier(4)/write-once(8) 链上硬挡，6 条 UTXO-only 靠共识层双花挡、2 条终点/创世无重放概念——即"重放能不能造成第二次价值转移"这个后果对 covenant 域基本 BUST（`e59b00ba` 逐 `.sil` file:line 坐实）。**但"链上挡住二次生效"≠"重放被拦"**：请求层去重（M0c⑤ 的 nonce/幂等）**0/20 全 LANDS**——攻击者重放仍能消耗 relay 处理开销+mempool 拒绝噪音、探测状态，且 nullifier 只保护"领同一份额"这个后果，保护不了**无 nullifier 语义**的命令（如 ECDSA_SIGN 重放让 relay 反复签同一字节可能被用于别处）。**请求级去重是必需，链上防重放是纵深不是替代**——这条对 20 条命令一致成立，不因命令而异（= M0c⑤ 要建的东西）。
 
 ---
 
@@ -103,19 +103,19 @@ M0c 每一项的验收 = 对应场景的负向测试全部 fail-closed。这张�
 | ②默认拒绝的命令暴露 | A-3, B-2, B-3 | 无 verifier 命令 / internal 命令被 app 调 → 拒 | 🔴 未建 |
 | ③对照 capability matrix 的策略 evaluator | A-2, B-1~B-3 | 越 scope 命令 → 拒 | 🔴 未建 |
 | ④逐 caller 命令+钱包/市场/outpoint scope | A-1, A-2, B-3 | 替换 subject / 越钱包越市场 → 拒 | 🔴 未建（A-1=containment 卡） |
-| ⑤nonce/request-id 防重放 + 幂等回执 | C-1~C-4 | 重放任意命令 → 第二次拒 | 🔴 未建 |
+| ⑤nonce/request-id 防重放 + 幂等回执 | C-1~C-4 | 重放任意命令 → 第二次拒 | 🔴 未建（请求层去重 0/20 covenant + HTTP/IPC 全 LANDS；covenant 层 12/20 挡二次生效是纵深非替代，J1 `e59b00ba`） |
 | ⑥绑定已认证身份的审计回执 | B-4 | 越权命令后审计可归因 caller | 🔴 未建 |
 | ⑦免代码部署的吊销/禁用路径 | B-5 | 运行时吊销 caller 命令权生效 | 🔴 未建 |
 
-**红队总判据（M-1 验收门 §3.86"NWT 红队过"的可测化）**：上表 21 格负向测试全部 fail-closed = M0c GREEN；任一格 LANDS = 对应 M0c 子批 RED。M-1 阶段本卡只负责**把测试写出来 + 证明现状全 LANDS**（已完成，除 C-3 部分）；实际拦截由 M0c-1/2/3 逐批实现后重跑本表验证。
+**红队总判据（M-1 验收门 §3.86"NWT 红队过"的可测化）**：上表 21 格负向测试全部 fail-closed = M0c GREEN；任一格 LANDS = 对应 M0c 子批 RED。M-1 阶段本卡只负责**把测试写出来 + 证明现状全 LANDS**（已完成；C-3 经 J1 逐命令核细化为"12/20 covenant 层挡二次生效 + 请求层去重 0/20 全 LANDS"，⑤这格仍整体未建）；实际拦截由 M0c-1/2/3 逐批实现后重跑本表验证。
 
 ---
 
 ## 5. 待交叉审 + 挂账
 
-- **不可自审自过**：本卡出稿后须 Bettor/J2 至少一路交叉核 file:line（尤其 C-3 逐命令 nullifier 覆盖度——我标"部分"，需 J2 covenant 域逐条核实哪些命令有链上防重放、哪些裸奔）。
+- **不可自审自过**：Bettor 已协调级交叉核 T-1/T-2/T-3 file:line 全属实（2026-07-22 14:01）；**C-3 由 J1 covenant 域逐 20 命令核完（`e59b00ba`）**，本卡 C-3 已按其 12/20 细化收敛（见上）。
 - **A-1 = containment 卡目标 B 的威胁模型依据**：本卡 A 场景 = `docs/2026-07-23-custodial-transfer-subject-binding-containment-card.md` 的攻击面母表。containment 卡落码仍走 NWT 二审 + Owner money-path 签发（流程锚显式例外，D-011 不放松）。
-- **C-3 待补**：逐 covenant 命令核 nullifier/write-once 覆盖矩阵（哪些命令重放被链上拦、哪些裸奔），需 J1/J2 covenant 域视角。
+- **✅ C-3 已闭（J1 `e59b00ba`）**：20 命令逐 `.sil` 核——nullifier 4 + write-once 8 = 12/20 挡二次生效，6 UTXO-only + 2 N/A；请求层去重 0/20 全 LANDS = M0c⑤。J1 另订正 M-1.1 待办②③（BSHARD_CLAIM_WINNER/CLOSE_COMMIT"无独立 finality 检查"是原稿误判——检查在 covenant 层强制非 relay JS 层，属架构正确非缺口）；①register_bet 金额无上限=真缺口（TRANSFER 反模式家族，M-1.1 金额上限列的 gap，非 caller/重放面）。
 - **交付**：本文档 + COORD-LEDGER 回写。频道 relay UTXO 充足则同步频道摘要。
 
 **关联**：`docs/2026-07-22-kanet-base-modularization-roadmap-v0.2.md`（M-1 §3.2、M0c §3）、`docs/2026-07-22-m1-1-command-capability-effect-matrix.md`、`docs/2026-07-22-m1-6-caller-identity-mechanism-comparison.md`、`docs/2026-07-23-custodial-transfer-subject-binding-containment-card.md`。
