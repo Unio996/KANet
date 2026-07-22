@@ -572,3 +572,20 @@ Owner 元问题:写进文档的铁律(CLAUDE.md 接位 SOP 第5条"设计前查�
 4. **Bettor**: M-1.6 MUST-FIX 消化 + NWT 审过后, 精炼 A+C(with relay 验证+app 凭证) vs B trade-off 单点上报 Owner 终选; containment 卡目标 B 凭证与 M-1.6 C 案并轨(NWT 二审硬条件)。
 
 **节奏**: 泰国时间近 21:00, 团队熬夜一天, 内部审是设计/审文档工作非钱路, 各自认领不强制即刻冲刺; 齐了汇总 M-1 内部审 verdict。
+
+## ✅ M0a 设计稿 NWT verdict=GREEN-with-1-MUST-FIX(2026-07-22 14:03Z, 8c7870bb)
+
+**MUST-FIX(高质量, 正中 Bettor 点名的 §9.3 残留面并彻底展开机理)**: 标量 multiset count 有 delete-and-add 平衡漏报。form 归 basename 后高度塌缩(实测 better-sqlite3 单 form 116 处/26 处/21 处), 漏报链: commit1 合法燃尽删一处(count 116→115, baseline 仍 116 因无人 --regen)=冻结 baseline 银行 1 格 headroom → commit2 新文件(任意路径含本不该碰 DB 的 src/api/)加裸 import(count 115→116)判定 116>116? 否, 等于, PASS=新增裸 import 零报警。根因: 标量 count 无法区分"移动 A→B"(靠 count 不变免误报)和"删 A 加无关 B"(本攻击), form 塌缩后两者 count 维度同形; §3.3 把 path 降级为 informational 正是漏报来源, path 身份在 form 塌缩现实下承重不能降级。R-M0A-SHADOW-MODULE 堵不住(那条管 basename 冒充, 本攻击复用真实 better-sqlite3 包 form 新文件叫啥都行)。**修法(NWT 给方向 KANet-UI 选实现)**: 首选 git rename 检测(`git diff --cached -M`)做判据核心(rename pair=身份延续免误报+相对前缀改写被相似度匹配吸收/纯 Add 引入 baseline 外 occurrence=ERROR, git 不把语义无关两 blob 配 rename); 次选 count 减少改"必须同 commit --regen 落账"(残留: 同 commit 内 delete+add 仍蒙混, 不如首选干净)。负向测试补"删旧+加新文件净 count 不变→必 ERROR"对偶条。
+
+**§9 三裁定**: ①测试摩擦=接受但开自助只读测试道(test-fixture 静态限制 readonly:true 替代人审 review_ref, 非只读连接照旧人审); ②注释剥离=行首启发够用, 动态/拼接 require(`require(variable)`/字符串拼接/computed import)是正则+AST 都难的固有盲区=已知残留写进设计稿"不承诺覆盖"节别上 AST; ③R-M0A-SHADOW-MODULE 首批带上(+15 行堵 basename 冒充)但不替代 MUST-FIX, 两者不同攻击面别顶替交差。
+
+**不阻塞第一波 DoD**: NWT 明示 M0a 是 design 步, MUST-FIX 在**落码前**修(实现批 design→code→diff 审链带上), 非现在返工设计稿。KANet-UI v0.2 收敛 MUST-FIX+三裁定后, 实现批 NWT 再审 diff。
+
+## 📍 M-1 内部审当前状态(2026-07-22 14:0xZ)
+
+- **M-1.1**(J2, `1451eafa`+`bd3c2810`): 待 @J1 covenant 域复核 ①②③ p2sh.mjs unlockBshard* 独立金额/深度校验。
+- **M-1.2**(NWT, `0ec41001`): Bettor 协调级 file:line 交叉核过(T-1/T-2/T-3); C-3 逐 covenant nullifier/write-once 覆盖矩阵待 @J1 covenant 域核。
+- **M-1.6**(J2, `5270f6c0`+NWT verdict `d7a46faf`): GREEN-with-1-MUST-FIX, J2 认账待休整后消化 v0.2(验证 locus=relay+app 自持凭证)。
+- **M0a**(KANet-UI, `c5992005`+NWT verdict `8c7870bb`): GREEN-with-1-MUST-FIX, 落码前修不阻塞 DoD。
+
+**M-1 内部审收口唯一剩余关键路径 = J1 covenant 域逐命令核(闭 M-1.1 复核 + M-1.2 C-3, 一次交付)。** 三份 NWT verdict 全是 GREEN-with-1-MUST-FIX(方向全对, 各一条落码前修), 设计层无返工。J1 核完 covenant 域即可汇总 M-1 内部审整体 verdict → 进 M0c/M-1 实现批设计。
