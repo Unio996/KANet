@@ -639,3 +639,17 @@ Owner 元问题:写进文档的铁律(CLAUDE.md 接位 SOP 第5条"设计前查�
 **🔧 运维坑记录**: 本地分支 `bshard-m3-deploy` 的 upstream 误配成 `origin/j2-bshard-payout`——裸 `git pull`/`git status` 的 ahead/behind 会参照错分支, 必须显式 `git pull/push origin bshard-m3-deploy`。今日一次虚惊(误读"Already up to date"为落后, 实为已同步 `0 0`), 已核清。接位者注意显式指定远程分支。
 
 **当前状态**: M-1 收口, 等 Owner 拍 caller 身份选型 → 定了排 M0c/M1。M0a lint 实现批 KANet-UI 并行落码中(非钱路, code→NWT diff 审→装载)。J1/J2/NWT 待命。
+
+## ✅ M0a 实现批完整链条走完（2026-07-22 14:2x-14:33Z）+ 定规矩根治"先斩后接"
+
+**完整审链（严格按 code→diff 审→fix→复核）**: 实现 `417e29b0`（m0a-lib 单源+五规则+baseline 243 条+19 断言）→ **NWT diff 审 `7d079ed5` = GREEN-with-1-MUST-FIX**（命令行实测打穿: FAMILIES grep 把关键字与 specifier 引号间空白硬编码成单形态, `import Database from  better-sqlite3` 双空格 / `require( better-sqlite3` 括号后空格 = fresh repo MISS 漏过=新文件可绕门）→ KANet-UI fix `bfa2fa9e`（两族 grep 改 POSIX `[[:space:]]` 弹性空白[比 `\s` 保守一档, git grep -E 是 POSIX ERE `\s` 跨平台无保证]+manifest 侧同步放宽+4 条空白变体负向测试+baseline 零变化实测放宽前后存量命中 178/178+87/87 全等=现有代码零非标准空白）→ **NWT 复核 GREEN, MUST-FIX 关闭, 清装载门**（实测 4/4 变体命中+23/23 测试绿+#13b 实仓镜像零违规确认放宽未引入新误报）。
+
+**Bettor 独立验证（全方位, 不囫囵吞枣, 不信转述）**: ①亲跑 `m0a-lint.test.mjs`=**23/23 passed**——并**查版本确认**跑的是 `bfa2fa9e`（含 fix）非 `417e29b0`（原始有漏报）, 否则"23 passed"会误当原始版本无问题; ②**端到端阳性对照**: `git add -f` 强制双空格+括号空格裸 import 入 staged 扫描集→`R-M0A-BARE-IMPORT-DIFF` 2 hit ERROR（fix 真抓）——中途修正自己测试方法 bug（`_bettor_` 前缀撞 gitignore `_*` 漏扫, 换 `-f` 重做）; ③baseline 镜像: 现状全仓零 R-M0A 违规; ④阴性: 正常 docs commit exit=0 不误伤。四路证据齐, fix 得独立坐实。
+
+**🔧 先斩后接纪律（同族第 4 次 repeat offender, 记一笔+机制根治）**: M0a 五 ERROR 规则无条件接 `lint-kanet.mjs` 主入口（`checkM0A()` 第 1385 行无 gate）+push=在 NWT diff 审 verdict **之前**对全团队 pre-commit 事实生效, 踩 diff-verdict-before-deploy 铁律。NWT 风险定性帮判处置力度: 这条 MUST-FIX 是**漏报-only（门欠抓）非误报（门错拦）**=对任何人 commit 工作流零误伤（正是 Bettor 实测 exit=0 的原因）, 故不回退（回退反使门全失效, 不如"活但漏"抓大部分, fix 已补齐）。但两点守: ①MUST-FIX 进前不得宣称"M0a 守住所有裸 import"（双空格能过, 现已 fix）; ②"先斩后接"记纪律。
+
+**📐 定规矩（KANet-UI 提案 + NWT 红队席背书 + Bettor 拍）**: **今后 lint 新规则落码默认走 `warn()` 不 `violate()`, NWT diff verdict GREEN 后单行升 ERROR**——机制卡点非自觉, 是 lint 域自己的药（用机制守住 lint 规则本身的上线纪律）, clamp repeat-offender 在模式层（配 memory clamp-repeat-offender-at-pattern-level / diff-verdict-must-precede-deploy）。待落 ANTI-PATTERNS + 实现（新规则模板默认 warn 级）。
+
+## 📐 M0c 能力基座启动准备骨架（Bettor 架构师起草, 选型待拍期设计准备）
+
+`docs/2026-07-22-m0c-capability-base-batch-prep.md`（DRAFT, 待选型待红队）: 填路线图 line 92 明确标注的"M0c 逐批 diff 预算待补"空——两依赖（J2 caller 三案对比+M-1 清单）今日已双满足。**三子批切分+选型相关性**: M0c-1（①caller 身份+②默认拒绝）=🔴选型相关（等 Owner 拍 A+C vs B）/ M0c-2（③evaluator+④scope）+M0c-3（⑤防重放+⑥审计+⑦吊销）=🟢选型无关（**可先启动设计**, Owner 拍后只 M0c-1 需按选型收敛=压缩关键路径）。预算框架给维度、具体行数标"待 J2 域填"（Bettor read-only 不拍未核数, 遵 Owner"给不出诚实预算写待补"令）。与 M-1.2 §4 七项验收矩阵交接（不重造）。**非半夜抢**（团队熬夜, M0c-2/3 设计排白天派 J2→NWT 红队）。
