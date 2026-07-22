@@ -795,3 +795,14 @@ Owner 直令: 盯 M0c-1 出稿→接着审→驱动大家落码→**每个小阶
 **🔑 Owner 授权(记, 以后接位/运维用)**: **agent 会话死可启动新 claude code 会话顶替, 不必干等原 agent 恢复**——Bettor 遇 agent 会话死亡时可主动 spawn 新会话接手, 保关键路径不卡。本次 Owner 亲自重启 J2 + Bettor 派 J1 顶 M0c-1(双轨: 原会话恢复 + 任务不等)。
 
 **方法论(记)**: agent 会话"死"的识别锚——目标 agent 沉默(未出稿+未回追问)但频道其他 agent 活跃(证频道/网络通)= 大概率该会话死/卡而非在专注写; 追两次无回即可判、报 Owner 确认, 不无限干等(呼应 feedback-actively-chase + Owner"以后可 spawn 新会话")。
+
+## ✅ M0c-1 设计稿三路审全过 + 信息差事件收口(2026-07-23 19:3xZ)
+
+**信息差事件收口**: 前任 J2 会话死前已 push M0c-1 设计稿 `600a005c`(完整 165 行)但**死前没在频道报出稿**→Bettor 误判"没出稿"改派 J1→J2 重启接位发现并报告→Bettor 地面核实属实。**归属定案**: J2 own(原 owner+写稿, 重启活了)+ J1 域复核(它被改派后独立读码收敛到同一架构=强交叉验证, 非重复劳动)。**方法论(记 memory)**: 会话死改派前必 grep git 有无设计稿 commit, 不能只凭频道没报判没出稿(会话可能死在"commit 了但没频道报"之间)。
+
+**三路审全回, 共识=设计扎实方向对、两条真缺口必补**:
+- **Bettor 方向审=GREEN-with-notes**(读全文: TCB 诚实置顶/A 网关非透传/默认拒绝 fail-closed/C 信封 locus=relay.mjs:337后:358前 authorizeCommand+grant 防 inflation/§5 解耦接缝/Codex 5 notes 逐条§7)。notes: 覆盖对齐/禁内存 nonce 占位/预算边界。
+- **NWT 红队=GREEN-with-1-MUST-FIX(`8c1d424b`)+3note**。MUST-FIX(真信任根缺口, Bettor 协调核实): grant/app-key registry 的 provision 路径没指定场景 A 不可达——应用若能自注册 grant 则自签发大 grant→intent⊆grant 永远成立→MF3 整个被绕(§4.2 只讨论场景 B 漏场景 A)。修法: provision 只 operator 离线带外+M1-5 测试。3note: M1-6 TOCTOU 绑定/M1-3→M0b 交叉引用/M1-2·M1-4 补测试。
+- **J1 域复核=GREEN-with-1-MUST-FIX**: authorizeCommand locus 独立读码验证正确(唯一合理钱路闸位); 域侧 MUST-FIX=authorizeCommand 对 Console 内部合法自动命令(settle-daemon 等)会不会误伤, relay/settler 域边界须理清。
+
+**编排**: @J2 own 改稿(600a005c 修订版)消化两 MUST-FIX+全 notes → NWT 复审 MUST-FIX 闭合 + J1 域二过 → Owner money-path 签发 → 落码 → **实战测试(harness `f7865428` 逐条真发验 BUST/放行, Owner DoD)** → 装载。三路审都确认 TCB 诚实边界(不假装抗 Console)守住。红队抓真缺口无放水。
