@@ -625,3 +625,17 @@ Owner 元问题:写进文档的铁律(CLAUDE.md 接位 SOP 第5条"设计前查�
 **后续回填(文档订正, 非新设计)**: @J2 回 M-1.1 订正 ②③ 两行"待确认"标记为准确描述 + ① "金额-费率上限"列改"❌无上限(同 TRANSFER 反模式)"并入 B-3; @NWT 回填 M-1.2 §2 C-3+§4 矩阵采纳"12/20 covenant 挡二次生效 + 0/20 请求层去重"细化。
 
 **上报 Owner 时机到(等 J1 收口一次性上报已满足)**: 下一步 Bettor 精炼单点上报 Owner——M-1 阶段收口 + M-1.6 caller 身份选型终选建议(A+C vs B) + M0a④ 字面口径知会 + ① register_bet 缺口定性(B-3 已知反模式新实例)。
+
+## 🏁 M-1 阶段完全收口 + 上报 Owner 待拍选型(2026-07-22 14:1xZ)
+
+**M-1.1 回填完成(v0.3 `ffbd7ea2`→v0.3.1 `66cc5686`)**: J2 独立交叉核 J1 复核(双人各自实读 .sil 源码非信转述: ShardLeaf.sil:61 只有 min_bet 下限零上限 / PoolRoot.sil:54-65 三门 + :92/98/103/114 终局+merkle 俱在), J2 认账 ②③ 是 v0.1 只读 JS 包装层的误判、"J1 进 .sil 这步做得对"; register_bet 缺口经 NWT 终裁归 M-1.1 金额上限列 gap(TRANSFER 反模式第 6 例, 资金源限 relay 自身钱包)、**不进 M-1.2 B-3**(B-3 是 covenant 命令授权面, register_bet 是金额上限面, 两面不同)。
+
+**M-1 四件全部内部审核链闭**: M-1.1 v0.3.1(J2 主笔+J1 covenant 域复核+J2/Bettor 双交叉核) / M-1.2(NWT 红队+Bettor file:line 交叉核+J1 C-3 覆盖矩阵 12/20 细化) / M-1.6 v0.2(J2+NWT GREEN-with-1-MUST-FIX+消化+复核 GREEN) / M0a v0.2(KANet-UI+NWT GREEN-with-1-MUST-FIX+消化+复核 GREEN+实现批开工)。设计层零返工, 全程红队+双人交叉核在装载前抓获: J2 v0.1 的 ②③ covenant 层误判 / M0a count 平衡漏报 / M-1.6 A+C vacuous——**取证/设计阶段的错在文档层被抓, 未流入代码**。
+
+**已上报 Owner(`97c3411a` 三块)**: M-1 收口 + caller 身份选型 A+C(relay 验证+app 自持凭证)推荐 vs B(per-app socket)真实 trade-off + 两项知会(M0a④字面口径/register_bet 缺口)。**待 Owner 拍选型**(A+C vs B)。
+
+**定性校准(`a0c74955`, 转述不超原发现者铁律实践)**: 上报知会②初稿把 register_bet 说成"和 custodial_transfer 同族"拔高了严重性——发后自查, custodial_transfer 是 subject 绑定缺失/能碰第三方托管的最敏感面, register_bet 只能掏空 relay 自己钱包(资金源限自身), 两者不同档。已单发 Owner 校准: register_bet 归 TRANSFER 同族(花自己钱无上限)非 custodial_transfer, 非新高危盗币面, M0c 统一堵。
+
+**🔧 运维坑记录**: 本地分支 `bshard-m3-deploy` 的 upstream 误配成 `origin/j2-bshard-payout`——裸 `git pull`/`git status` 的 ahead/behind 会参照错分支, 必须显式 `git pull/push origin bshard-m3-deploy`。今日一次虚惊(误读"Already up to date"为落后, 实为已同步 `0 0`), 已核清。接位者注意显式指定远程分支。
+
+**当前状态**: M-1 收口, 等 Owner 拍 caller 身份选型 → 定了排 M0c/M1。M0a lint 实现批 KANet-UI 并行落码中(非钱路, code→NWT diff 审→装载)。J1/J2/NWT 待命。
