@@ -691,3 +691,19 @@ Owner 元问题:写进文档的铁律(CLAUDE.md 接位 SOP 第5条"设计前查�
 **🔒 乙路红队硬牙(锁定, Owner 拍乙则必纳入 M-1.6 v0.3)**: **诚实性即安全控制**——走乙可以, 但 M-1.6/M-1.2/任何对外表述**禁止声称 A+C 抗被攻陷 Console**, 必须显式写清"Console 持全量 relay 私钥=TCB, A+C 只防场景 A 不防 B-0"。含糊暗示抗 Console=化妆式, 红队打回。**与 Codex MUST-FIX 1 完全一致**(诚实缩威胁模型 or 补 R, 不许"宽对手定义+只靠进程分离"自欺组合)。
 
 **全收敛, 等 Owner 拍甲/乙**: 四方坐实 B-0 / M-1.2 v0.2 回填 / 乙路守门条件锁定 / M-1.6 v0.3 不预写(甲乙框架不同, J2+NWT 待方向后出)。拍(乙)→v0.3 必带诚实 TCB 声明(NWT 硬牙)+ R 排后续升级项。拍(甲)→R 先做。**这是纯等 Owner 决策的点, 团队侧已就绪。**
+
+## ✅ Owner 拍板:走乙路 + 甲方案(R)立后续安全升级卡(2026-07-22 15:2xZ · Owner 终端直令)
+
+**Owner 决策(终端拍板, email=Owner, 几分钟前刚亲自在 git STATUS 记 RED)**: "先干乙, 甲方案记下来, 空了慢工出细活, 一步一步做。" Bettor 代为落正式记录(状态外置纪律: 终端拍板→ledger+频道公告可核实)。
+
+**决策性质(知情同意有据)**: Owner **明确接受测试网阶段 Console=TCB 残留风险**——A+C 授权模型只防场景 A(应用被攻陷/共享 secret 误用/应用间越权/内部误用), **不防场景 B(被攻陷 Console/B-0)**。这是方向决策**非落码**: M-1.6 v0.3 是设计文档; 实际 A+C 实现(M0c)后续走 design→红队→落码时 Owner money-path 签发; 红队硬门(M0c 装好+五类测试过前任何抽离应用不得触达 relay)仍守; B-0 残留风险窗口在"未来模块化推进到应用抽离时 relay 密钥仍在 Console", 非今日立即暴露, 有 R 卡兜底。
+
+**乙路执行·派工**: @J2(机制)+@NWT(红队)出 **M-1.6 v0.3** = A+C 授权模型(HTTP 能力网关 + 签名能力信封, relay 端验证 + app 自持凭证)+ **红队硬牙: 诚实 TCB 声明**(显式写"Console 持全量 relay 私钥=TCB, A+C 不防被攻陷 Console/B-0", 禁任何暗示抗 Console, 含糊=化妆式红队打回)+ 引用下方 R 卡作后续。白天活, 不强制即刻冲刺。
+
+**🔒 甲方案 = R 卡立后续安全升级项(Owner"记下来, 慢工出细活"直令, 多处锚定不丢)**:
+> **卡 R(relay trust-boundary / key-custody isolation)**: relay 私钥托管 + 验证器代码/配置 + 生命周期, 隔离到 Console **够不到**的信任域。方向(Codex MUST-FIX 2): 独立 supervisor 起 relay(非 Console fork)/ 独立 OS 服务身份或容器边界 / relay-only keystore 不入 Console 地址空间 / Console 不能写 relay 码·信任注册表·密钥 / pinned-signed relay 二进制配置 / 生命周期权限与普通 Console 模块分离。
+> **性质**: 抗场景 B(B-0)的**唯一结构性解**(M-1.2 v0.2 定"抗场景 B = M0c GREEN + R 完成")。
+> **节奏**: 与模块化**并行渐进**, 慢工出细活, 不阻塞当前主线; 与模块化推进到"应用抽离触达 relay"之前收口(否则残留窗口敞开)。
+> **含 Codex 其余 MUST-FIX 归属**: MF3(relay-authoritative grant)/MF4(durable replay state)/MF5(independent audit)/MF6(user-subject 授权)——J2 出 v0.3 时分归属(部分属 A+C 完整版=M0c 逐子批, 部分属 R)。
+
+**主线**: 模块化 + 清晰分层继续。方向已定=乙, M-1.6 v0.3 派工 J2+NWT, R 卡后续渐进。
