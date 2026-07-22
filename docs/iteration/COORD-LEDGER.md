@@ -609,3 +609,19 @@ Owner 元问题:写进文档的铁律(CLAUDE.md 接位 SOP 第5条"设计前查�
 **上报 Owner 时机决策(Bettor)**: M-1.6 选型(A+C vs B)是 Owner 明确 hold 的架构决策, 现已成熟可上报。**采一次性上报**——等 J1 covenant 域核完 M-1 整体收口后, 一次单点上报 Owner(M-1.6 选型终选 + M0a④口径知会 + M-1 整体 verdict), 符合"Owner 只做少数关键决策/单点上报"减打扰; **软触发例外**: 若 J1 covenant 域核要拖到明天, 则 M-1.6 选型先单独上报不让 Owner 决策被 J1 进度 gated。
 
 **M-1 收口唯一剩余 = J1 covenant 域逐命令核**(闭 M-1.1 的 p2sh.mjs unlockBshard* 独立校验复核 + M-1.2 C-3 nullifier/write-once 覆盖矩阵)。四件(M-1.1/M-1.2/M-1.6/M0a)红队+消化全过, 设计层零返工。containment 卡目标 B 凭证(与 M-1.6 C 案并轨)NWT 持二审等 v2 稿。
+
+## 🏁 M-1 内部审收口 — J1 covenant 域复核 + Bettor 交叉核(2026-07-22 14:1xZ, e59b00ba)
+
+**J1 covenant 域复核交付 `e59b00ba`(进 .sil 源码, 非只读 relay.mjs/p2sh.mjs case 注释)**, Bettor 独立地面交叉核 .sil 关键 require 全部验证成立(J1 "不可自审自过"一路交叉核已过):
+
+- **① `BSHARD_REGISTER_BET` 金额无上限 = 真缺口(确认)**: `ShardLeaf.sil` register_append 唯一金额约束=`require(stake >= min_bet)`(下限), **无上限**; output-bind weld `require(tx.outputs[leafOutIdx].value == pool_value + stake)` 只保证钱真入池不约束大小(Bettor 亲核 .sil:12/30)。**资金来源关键(定风险等级)**: funding 用 `wallet.getPrivateKey()` 签=花 relay 自己钱包的钱(非 custodial 外部私钥), caller 只能指定花多少不能花第三方资产。**定性=TRANSFER 反模式第 6 实例**(前 5: pool_settle/prediction_settle/custodial_transfer/ECDSA_SIGN/SIGN_INPUT_FOR_SETTLE), 任何摸到 relay IPC 分发点的调用方(T-1 零 caller 校验=场景 B)能命令 relay 把自己钱包钱以任意大小注进"下注"掏空 relay 钱包→并入 M-1.2 B-3 LANDS 具体例证。
+- **②③ = J2 原稿误判订正(Bettor 亲核 .sil 确认订正成立)**: ② `BSHARD_CLAIM_WINNER` 链上有终局检查(`PoolRoot.sil:92 require(closed==1)` + :98 payout<=pool_value + :114 merkle 绑定金额), J2 原稿"无独立 finality 检查"不准确; ③ `BSHARD_CLOSE_COMMIT` 三门齐(:54 write-once + :55 `count==shard_count` 深度防御门[源码注释原话] + :56 时间门 + :65 4-of-5 签名门), J2 原稿"无独立深度门"不准确。**方法论教训**: 判"有没有检查"必看强制执行层(covenant/.sil)非发起请求层(relay JS)——JS 层没查 ≠ 系统没查。
+- **C-3 nullifier 覆盖矩阵(逐 20 条, 细化 NWT 的"部分")**: 🟢🟢nullifier 4(PAYOUT_CLAIM/REFUND_CLAIM/CLOSEZK_V2_CLAIM/ESCAPE_CLAIM)/🟢write-once 8/🟡UTXO-only 6/⚪N-A·终点 2。**关键分层判定**: "二次生效"后果=12/20(nullifier+write-once)被 covenant 层挡=BUST; "请求层无去重可消耗资源/探测"后果=**20/20 全 LANDS**(无一条有 M0c⑤ nonce/idempotency)。链上防重放≠请求层去重, 两件事分开判。
+
+**① 缺口定性(冷静, 不渲染成新火警)**: register_bet 无上限是 **M-1 摸底本就要暴露的已知反模式新实例**, 与 custodial_transfer/TRANSFER/盲签同族同风险模型(relay 无 caller 校验), 非公网新漏洞(生产 console 绑 127.0.0.1 未网暴, 活跃面=场景 B 内部横向需进程/secret 被攻陷)。统一由 M0c①②③ 建成后堵, 非单独紧急修。
+
+**M-1 内部审四件全收口**: M-1.1(J2+J1 复核)/M-1.2(NWT+Bettor file:line+J1 C-3 细化)/M-1.6(J2+NWT GREEN, v0.2 消化+复核 GREEN)/M0a(KANet-UI+NWT GREEN, v0.2 消化+复核 GREEN, 实现批已开工)。三份红队 verdict 全 GREEN-with-1-MUST-FIX 且两份已消化闭卡, J1 复核补全+订正 J2 两处误判, 设计层零返工。
+
+**后续回填(文档订正, 非新设计)**: @J2 回 M-1.1 订正 ②③ 两行"待确认"标记为准确描述 + ① "金额-费率上限"列改"❌无上限(同 TRANSFER 反模式)"并入 B-3; @NWT 回填 M-1.2 §2 C-3+§4 矩阵采纳"12/20 covenant 挡二次生效 + 0/20 请求层去重"细化。
+
+**上报 Owner 时机到(等 J1 收口一次性上报已满足)**: 下一步 Bettor 精炼单点上报 Owner——M-1 阶段收口 + M-1.6 caller 身份选型终选建议(A+C vs B) + M0a④ 字面口径知会 + ① register_bet 缺口定性(B-3 已知反模式新实例)。
