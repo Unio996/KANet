@@ -80,7 +80,7 @@
   2. 威胁模型：被攻陷应用 / 被攻陷 Console worker / 重放的 IPC 或 HTTP 请求。
   3. public-vs-internal 命令资格划分。
   4. **Codex 代码断言我方复核**（Owner：verify over echo 双向适用）——**四条全部坐实（v0.4.1，内部二轮期间完成）**：HTTP 零认证（J2 四层表）、dispatch 无身份校验（NWT，relay.mjs:331 起）、custodial_transfer 收调用方 privkeyHex（NWT，relay.mjs:478-490，IPC 字段直传 custodialSendKaspa，relay 不派生）、prediction_settle_tx 完整可控参数面（J1，relay.mjs:734-758，redeem/outpoints/outputs 收款地址金额/sigs/winner 全部 IPC 原样直传零校验，与 Codex MF3 可换维度逐字段吻合）。
-  4b. **custodial_transfer 单列 M-1 设计最高优先级项 + v0.4.2 重定性（Codex MF2，Owner"逻辑接受"）**：v0.4.1 的"非当下可利用"定性**过乐观**——按本路线图自己的 M-1 威胁模型（共享 secret 泄露 / worker 被攻破）量：`verifyIngestRequest` 只验单一共享 `x-ingest-secret`，无服务身份、无用户 subject、无钱包/动作 scope；tg-wallet send 接受 URL 中的 `tg_user_id` 取该行加密助记词派生私钥转账 = **任何持共享 secret 的受信主体被攻陷/误用即可替换 subject 横向越权别人的托管钱包，当下即活**。"bot 会传 ctx.from.id"是调用方君子协定，与 relay 盲签"只信调用方声明"同一反模式第三实例。准确表述：*对无 secret 的外部匿名调用方不可直接利用；对任何持共享服务 secret 的主体被攻陷或误用当下即可利用，因不存在终端用户 subject 与钱包 scope 绑定*。（三条支撑断言 Codex 单方读码，**取证状态：J1/J2 四维 grep 坐实中，坐实前不作为已入档事实**——verify over echo 双向适用。）
+  4b. **custodial_transfer 单列 M-1 设计最高优先级项 + v0.4.2 重定性（Codex MF2，Owner"逻辑接受"）**：v0.4.1 的"非当下可利用"定性**过乐观**——按本路线图自己的 M-1 威胁模型（共享 secret 泄露 / worker 被攻破）量：`verifyIngestRequest` 只验单一共享 `x-ingest-secret`，无服务身份、无用户 subject、无钱包/动作 scope；tg-wallet send 接受 URL 中的 `tg_user_id` 取该行加密助记词派生私钥转账 = **任何持共享 secret 的受信主体被攻陷/误用即可替换 subject 横向越权别人的托管钱包，当下即活**。"bot 会传 ctx.from.id"是调用方君子协定，与 relay 盲签"只信调用方声明"同一反模式第三实例。准确表述：*对无 secret 的外部匿名调用方不可直接利用；对任何持共享服务 secret 的主体被攻陷或误用当下即可利用，因不存在终端用户 subject 与钱包 scope 绑定*。**三条支撑断言已全部坐实入档（2026-07-23 03:53，NWT 与 J2 独立双核，file:line 在案）**：(a) `ingest-auth.js:8-44` 仅 timingSafeEqual 比对唯一共享 secret，零身份/scope 概念；(b) `tg-wallet.js:93-94` tg_user_id 取自 URL 可替换，且 **2026-06-23 的代码注释（:19-22）早已自述此风险**（"tg_user_id 取自 URL=攻击者可控，'只载该 tg_user 钱包'不是鉴权"——知险未治的活体案例）；(c) `verifyIngestRequest` 被**至少 11 个不相关文件**共用（admin/chat/链数据/托管钱包全域一把钥匙），"tg-bot 独占"否证。NWT 撤回其"design debt 非活跃风险"结论，改按**活跃风险**处理。**公允定性（NWT+J1）：非失职**——2026-06-23 的共享 secret 缓解针对的是"网络暴露(HOST=0.0.0.0)"这个旧威胁且对它有效；本轮是威胁模型升级（secret 被多进程共享+其中一环被攻陷）暴露旧防线未覆盖的新面，正是 M-1 威胁模型存在的意义处
   4c. **containment 卡（即刻，Owner 已批流程锚显式例外）**：断言坐实后单独立卡——已认证 caller/service 绑定允许的 Telegram 用户/钱包 subject、拒绝任意 subject 替换、负向测试（合法服务凭证尝试他人钱包必须被拒）。落码前仍走 NWT 审 + D-011，不夹带在路线图批次里。**裸私钥材料过 IPC 单列 key-custody design debt**：长期边界 = scoped signer/intent 接口，不是更广地分发 privkeyHex。
 - **设计类（只做到这两件为止）**：
   5. capability matrix（应用 × 钱包/市场/outpoint/分支/金额/收款地址 × 动作）。
@@ -158,8 +158,8 @@
 | D2-C 存量 20 条补审批次组 | 已挂账（2-4 批，M3 后启动，M5 前完成） |
 | typed-intent 签名全架构 | 独立卡（类 B 9 条分批，不卡 M0b） |
 | Codex 复审（v0.4.1） | ✅ RED 收窄三条（V041-REREVIEW），其余全关闭 |
-| Codex 三条新断言坐实（ingest-auth 单一共享 secret / tg-wallet subject 可替换 / secret 多组件共用） | J1/J2 四维 grep 进行中，坐实前不入档 |
-| containment 卡（subject 绑定+负向测试，Owner 批流程锚例外） | 断言坐实后立卡，NWT 审+D-011 |
+| Codex 三条新断言坐实（ingest-auth 单一共享 secret / tg-wallet subject 可替换 / secret 多组件共用） | ✅ 三方独立坐实（NWT+J2+J1，2026-07-23 03:53，file:line 入档；含 tg-wallet.js:19-22 知险未治历史注释） |
+| containment 卡（subject 绑定+负向测试，Owner 批流程锚例外） | **可立卡（断言已坐实）**——Bettor 起卡描述，NWT 审+D-011，走 Owner 批的流程锚显式例外 |
 | Codex 终审（v0.4.2 送 bridge） | 待发（断言坐实入档后） |
 | Owner 钉死 | 双 GREEN 后 |
 | 本收敛稿交 Owner 磨合 | 待交（Bettor 精炼单点上报） |
