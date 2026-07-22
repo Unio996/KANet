@@ -530,3 +530,15 @@ Owner 元问题:写进文档的铁律(CLAUDE.md 接位 SOP 第5条"设计前查�
 **Owner 钉死+授权开工(06:15)→执行第一波派工**: Owner"我同意你开工, 分配并督促大家干活"=路线图 v0.4.2 正式冻结进入执行。纪律: 每批仍走 design→NWT→code→diff→装载(开工≠跳审), money-path 含 containment 仍单独签发。**执行第一波**(J1tn 离线, covenant/settler 域并 J2): @J2=M-1.1 全命令能力/效果清单(~50 命令 14 列, 并入已坐实证据+补 covenant/bshard 20+条)+M-1.6 caller 三案对比+78 行 classifier 重判审接手; @NWT=M-1.2 威胁模型三场景可测清单+containment 目标 B 主审; @KANet-UI=M0a lint 设计稿(repo-wide differential/content-anchored/manifest, 先设计→NWT 审→码)。本波 DoD=清单+威胁模型+lint 设计三件齐→进 M-1 内部审。节奏: 凌晨不冲刺, 白天各自认领, Bettor 盯进度督促。
 
 **J1tn 白天归位+4 项去重(13:45)**: J1 新会话接位, 全栈拉起+RPC 同步。4 项交接去重(避免和 J2 凌晨兜底认领撞车): ①M-1.1 能力清单=J2 主笔+J1 covenant/payout_shards 域视角复核(两坐实证据已入档不重坐) ②78 行 classifier 审=**改派回 J1**(原域 K-18, J2 解绑专注 M-1.1+caller) ③containment 目标 B=NWT 主审不占 J1 ④M3a 剩余字段清单=J1 域 prep(纯读码可逆, 但 M3a 正式推广排 M-1/M0c 之后, 现列清单=占位非启动落码)。执行第一波 DoD 不变(M-1 清单+威胁模型+M0a lint 设计三件齐→进 M-1 内部审)。
+
+## 🔁 Bettor 新会话接位 + 执行第一波首批交付核实与方向审(2026-07-22 13:5xZ)
+
+**接位**: 全员同波新会话(Bettor/NWT/KANet-UI 13:51-13:52 先后报到, J1 13:45 已归位)。Bettor 接位链走完: coord-status#7 验签 exit=0(7/13 摘要, 已被 ledger 取代仅证工具链活)/ledger/频道/git 地面核/Monitor 布防/回执 tx 37a5708d 独立 re-pull 核实。
+
+**J2 双交付地面核实**: M-1.1 能力清单 `1451eafa` + M-1.6 caller 三案对比 `5270f6c0`, 均 git cat-file=commit 且在 origin/bshard-m3-deploy 尖端, 属实。J2 交叉发现(ECDSA_SIGN/SIGN_INPUT_FOR_SETTLE 风险模式=类 B 盲签族而非通用原语)是对原 D2 分类穷尽性漏洞的实质补堵, 与 Owner"16 条通用原语不可自外于分类"直令闭环。
+
+**Bettor 方向审**(协调级, 非替 NWT 红队): ①M-1.1=GREEN-with-3-notes: n1)§2 表内 TRANSFER/ECDSA_SIGN/SIGN_INPUT_FOR_SETTLE 三条高风险行仅 4/14 列, v0.2 须补全与类 B 同待遇(防"标签降级审查"在本卡内复现); n2)①②③ p2sh.mjs 深挖=J1 域复核重点(J2 自标, 已对齐); n3)引用路线图文件名 v0.2.md 在位更新至 v0.4.2 内容, 核实无误。②M-1.6=GREEN-with-1-note: A(HTTP 能力网关)+C(签名能力信封)组合推荐与 M0c 七项同机制、满足 Owner"自我声明伪造零成本"定调; note=containment 目标 B 凭证形态必须与 C 案信封同机制收敛不另造第二套凭证(正是 NWT"防换名共享 secret"二审条件), NWT 二审一并把关。
+
+**审序编排**: M-1.1(待 J1 域复核)+M-1.2(NWT 在写)+M0a 设计稿(KANet-UI 在写)三件齐进 M-1 内部审, 第一波 DoD 口径不变; M-1.6 为 Owner hold 的选型输入不卡 DoD, NWT 完成 M-1.2 后审, 审过 Bettor 精炼单点上报 Owner 终选。
+
+**文档卫生**: 路线图头部按 Codex note5 单一流程状态纪律清 stale——"待 Owner 钉死"→FROZEN-EXECUTING(Owner 06:15Z 已钉死授权开工, 钉死记账=`30e9d0f3`)。本段初稿 commit 指针一度写错, Bettor 当场按 git log 核正——铁律-1"不信自己转述"的日常实践。

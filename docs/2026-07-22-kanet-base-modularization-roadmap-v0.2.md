@@ -1,7 +1,7 @@
-# KANet 底座模块化路线图 v0.4.2（Codex 终审 GREEN-with-notes · 待 Owner 钉死）
+# KANet 底座模块化路线图 v0.4.2（FROZEN · Owner 已钉死开工 2026-07-22 06:15Z）
 
-> **Status**: CURRENT · **可供 Owner 钉死考虑**（2026-07-23 · Bettor 主编）
-> **单一流程状态（钉死前清 stale，Codex 终审 note 5）**：内部对抗两轮全过（一轮 #v6ij51 / 二轮 4/4 GREEN）+ Codex 外审两轮全过（v0.4 RED 11 条全消化 → v0.4.1 复审 RED 收窄 3 条 → **v0.4.2 终审 GREEN-with-notes，三条 MUST-FIX 全 CLOSED**）。**下一步 = Owner 钉死**；钉死前不动任何执行代码（M-1 取证/设计为只读+文档，Owner 已令即启，不属例外）。
+> **Status**: FROZEN-EXECUTING · Owner 2026-07-22 06:15Z 频道直令"我同意你开工，分配并督促大家干活"= 正式钉死+授权执行（ledger `30e9d0f3`）· Bettor 主编
+> **单一流程状态（Codex 终审 note 5 纪律）**：内部对抗两轮全过（一轮 #v6ij51 / 二轮 4/4 GREEN）+ Codex 外审两轮全过（v0.4 RED 11 条全消化 → v0.4.1 复审 RED 收窄 3 条 → **v0.4.2 终审 GREEN-with-notes，三条 MUST-FIX 全 CLOSED**）→ **Owner 已钉死，当前=执行第一波（M-1 取证/设计 + M0a lint 设计）**。执行纪律：每批仍走 design→NWT 红队→code→diff 审→装载；money-path（含 containment）仍单独 Owner 签发。
 > **完整版本链与逐版增量**：见文末附录 A（避免头部堆积 stale 行）。核心结论：路线图已从"目录模块化"推进到"能力受限模块化"（capability-bounded），Codex 判技术上足够连贯可钉。
 > **Codex 终审 5 条 notes（均为实现阶段门，非钉死阻塞）**：①M0c 批量/语义切片可暂 TBD 但须 M-1 后、实现授权前定；②containment 卡仍 DRAFT，须红队+D-011+实现审+负向测试+装载证据；③M0c 实现且拒绝/重放/scope/审计/吊销测试过之前，任何抽离应用不得获 relay 访问；④类 B 只经逐命令 typed-intent/效果校验或退役毕业，白名单/模板匹配不足；⑤钉死文档保持单一流程状态（本次已清）。
 > **本卡性质**：设计文档，不改一行执行代码。
