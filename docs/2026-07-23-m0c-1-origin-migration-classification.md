@@ -1,0 +1,52 @@
+# M0c-1 origin 迁移分类清单（初稿）— sendCommandAsync 全仓调用点三类判定
+
+> **Status**: DRAFT（2026-07-23 · J2 起草[文件级粗扫] → 待 NWT 穷尽性核对 + J1 外部可达性核 → 迁移批落码时逐条精判随 diff 审）
+> **判据来源**：M0c-1 设计稿 v0.3 §4.0 三类分类表（`b02fd31a`）——(a) 实 internal=非请求触发 → `origin='internal'`；(b) 挂共享 ingest secret 服务外部 app 请求 → `origin='legacy-app-unprotected'`（禁静默标 internal）；(c) 经能力网关 → `'app'`。
+> **本稿性质与局限（诚实标注）**：文件级 grep 粗扫（`verifyIngestRequest` 出现在文件 ≠ 每个 route 都挂；触发上下文按目录/代码形态粗判）。**route 级逐条精判在迁移批做**，本稿供 NWT 穷尽性核对（"第三类是否穷尽"）与 J1 可达性核，不作最终判定。
+
+## 0. 总量
+
+文件级 grep：**37 文件、约 130 个调用点**（含少量注释/定义行，精确数迁移批清点）。api/ 12 文件 50 处 / services/ 20 文件 ~70 处 / lib/ 4 文件 ~10 处 / db/migrate.js。
+
+## 1. 🔴 特殊高亮（迁移批最先处理）
+
+| 位置 | 内容 | 定性 |
+|---|---|---|
+| `api/relay.js:1734` | `POST /api/relay/:id/send-command` — **裸 sendCommandAsync 透传端点**：`request.body` 整体直发，任意命令类型（含全部钱路命令），文件挂 verifyIngestRequest | §2.1"不暴露裸透传端点"的**存量反例**、(b) 类最高危条目。迁移批单列处置：初判标 `legacy-app-unprotected` + 优先挂 M2/M4 收敛卡（能力网关化或收窄命令白名单），**绝不标 internal** |
+| `api/relay.js:504` | `POST /api/relay/:id/transfer` 提币端点（UI 面板用，`type:'transfer'`） | (b)/(本地面板) 归属待 route 级鉴权核——挂没挂 secret、外部 app 是否实际调用，J1 核 |
+
+## 2. (b) 类候选 — api/ 挂共享 secret（文件级），外部可达性待 J1 逐 route 核
+
+| 文件 | 调用数 | tg-facing | 初判 |
+|---|---|---|---|
+| `api/pool.js` | 19（含 :288 ecdsa_sign **J1 已坐实 (b)**、:1617/:1814 sweep 钱路、:487 submit） | ✅ | (b) 坐实族 |
+| `api/tg-wallet.js` | 1（:125 custodial 族） | ✅ | (b) 坐实族（NWT 点名 tg-wallet 类同暴露模型） |
+| `api/chat.js` | 3（send_broadcast/faucet） | ✅ | (b) 候选 |
+| `api/relay.js` | 2（见 §1 特殊高亮） | — | (b) 最高危 |
+| `api/admin.js` / `api/discovery.js` / `api/escrow.js` / `api/oracle-pool.js` / `api/trading.js` | 1/1/3/6/2 | — | 挂 secret 但非 tg 线，**外部 app 实际可达性 J1 核**（可能部分是 UI-only route→归本地面板族；admin.js 名字像 operator 面，NWT 同判） |
+
+**双人 grep 口径差（如实标注，迁移批清点为准）**：NWT 独立穷尽核 = 同 9 文件 **~53 处**；本稿文件级过滤后 = 38 处。差异来自过滤规则（import/注释行、跨行调用形态、helper 内共用 call）——**9 文件集合双方一致（穷尽性对上），处数以迁移批逐 call-site 清点为准**，两人数字先各自保留不硬拍。
+**NWT scope note（三核 #4，进本清单约束）**：①(b) 候选覆盖必须全 9 文件，不停在 pool.js/tg-wallet 两例；②"挂 verifyIngestRequest"是 (b) 的**必要非充分**条件——每处逐 call-site 判"是否实由外部 app 请求触发"（route+daemon 共用 helper 非纯请求触发，随 §4 调用链透传规则处理）。
+
+## 3. 本地面板/自有门控族（文件级零 ingest-secret 的 HTTP 路由）— 独立观察卡，不塞本分类
+
+| 文件 | 调用数 | 备注 |
+|---|---|---|
+| `api/bettor.js` | 6（:1415/:1600 transfer escrow） | J1 已定性：零鉴权本地面板（交易推荐 domain，撞名纯巧合）；KANet-UI 已查证部署=仅绑 127.0.0.1 无反代对外，非 live 洞。观察卡（纵深防御）非紧迫 |
+| `api/exchange.js` | 5 | 同暴露模型候选（exchange UI 后端），观察卡随 bettor.js 一起 |
+| `api/coord-status.js` | 1（:29 ecdsa_sign） | D-010 签名端点，自有门控（ADMIN_SECRET+IP allowlist+默认 OFF），单列核 |
+
+**观察卡范围**（J1 标 + NWT 加急被 KANet-UI 查证降级 + trustProxy 旁证）：零鉴权本地面板端点纵深防御 + `index.js:122` trustProxy 反代暴露形态盘点。独立卡，不阻塞 M0c-1。
+
+## 4. (a) 实 internal 候选 — 非请求触发（daemon tick/watcher/cron/worker/传输层）
+
+- **services/ 20 文件 ~70 处**：pool-market-settler(9) / bettor-prediction-settler(9) / bettor-prediction-voter(12) / bshard-close-voter(9) / trade-protocol-filter(6) / broker 族(9) / exchange-machine(3) / market-seeder(1) / oracle-pool-renewal-cron(3) / prediction-params-cache(3) / relay-chain-reader(3) / retail-dex-pusher(1) / settler-router(2) / utxo-splitter(1) / zk-prove-worker(2) / bettor-refund-claim-auto(1) 等——初判全 (a)。
+- **lib/ 4 文件**：broadcaster-utxo / bshard-close-transport(6) / mining-utxo-consolidate / pool-broadcast——被 daemon/settler 调用，初判 (a)。
+- **注意两点**：① `relay-manager.js:345`（transferFromRelay 工具函数）等**被谁调用决定性质**——工具函数不自标 origin，origin 由最外层调用方传入（设计稿 §4.0 落码细则待补这句：origin 参数沿调用链透传，不在工具层硬编码）；② services 中若有函数**同时被 HTTP route 调用**（如 pool.js:1968 relayCall 传给 zk worker），迁移批逐条查调用链定 origin 传递路径。
+
+## 5. 待办
+
+- [ ] NWT：§2 第三类候选名单穷尽性核对（有无漏掉挂 verifyIngestRequest 的 app-facing 路由）。
+- [ ] J1：§2 表"外部 app 实际可达性"逐 route 核（admin/discovery/escrow/oracle-pool/trading 五文件 + relay.js:504）。
+- [ ] J2：设计稿 §4.0 补"origin 沿调用链透传，工具函数不硬编码"落码细则（随下版或落码批）。
+- [ ] 观察卡另立：零鉴权本地面板族 + trustProxy 盘点（非紧迫，Bettor 排期）。
