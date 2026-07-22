@@ -119,4 +119,16 @@ M0c-1 gate armed 的 checklist 前置项（KANet-UI 装载编排）新增一条�
 - **改表**：本专道不新增表（auth 走 env + 现成 checkAdminSecretTier，命令走现有 relay IPC）。
 - **origin 四值化**：M0c-1 gate 本体（批3）需把 origin 从三分（internal/app/缺失）扩到四分（+operator），本卡与 M0c-1 §4.0 落码时同步（origin='operator' 的 gate 分支 = operator-scoped money-path 放行）。
 
-**关联**：`docs/2026-07-23-m0c-1-caller-identity-default-deny-design.md`（M0c-1 母卡 §4.0/§4.3）、`docs/2026-07-23-m0c-1-origin-migration-classification.md`（relay.js:1726 收敛 A §1）、`src/lib/admin-secret-tier.mjs`（复用 auth）。
+## 9. 落码 diff 审 checklist（NWT verdict·落码照走·两道过才够 gate-arming 前置）
+
+NWT 复核 GREEN 全闭（设计层过），列清落码 diff 审 5 项（verdict 过 ≠ 落码放行）：
+
+1. **头号判据扩到所有 tier**：`ADMIN_SECRET_OPERATOR_SETTLE` 与 ingest 不同源/不复用/不派生（原判据）；**且档二 transfer 若走"更严子 tier"，那个 tier 也必须 operator-exclusive、非 ingest**（别高 gate 用了个场景A够得到的 tier = 白高）。
+2. **档二 transfer 更高 gate 必须落成具体机制且实更严**：设计留"二人复核 / 额外确认 / 更严子 tier"三选一（设计层可），**落码必须 pin 一个具体的 + NWT 核它实比档一强 + fail-closed**（非名义更高实际同档）。
+3. **ecdsa_sign 最终处置**：落码前核 operator 实际流程——剔除=最好；确需保留=同 transfer 档二高 gate，**不许悄悄留在档一**（NWT diff 核白名单最终集时盯）。
+4. **origin='operator' 四值分支（批3 gate 本体）**：operator 分支只放行白名单内 + 档二走高 gate，缺失/非法 fail-closed。
+5. **实战 harness §6 六条实发**（场景A 打专道拒/白名单外拒/env off 503/非 localhost 拒/端点 money-path 白名单拒/合法 operator 真放行）。
+
+**两道闸**：落码后 NWT diff 审（上 5 项）+ 实战 harness 主跑，两道过才算专道闭、才够 M0c-1 gate-arming 前置。
+
+**关联**：`docs/2026-07-23-m0c-1-caller-identity-default-deny-design.md`（M0c-1 母卡 §4.0/§4.3）、`docs/2026-07-23-m0c-1-origin-migration-classification.md`（relay.js:1726 收敛 A §1）、`docs/2026-07-23-NWT-redteam-operator-settle-lane.md`（红队 verdict）、`src/lib/admin-secret-tier.mjs`（复用 auth）。
