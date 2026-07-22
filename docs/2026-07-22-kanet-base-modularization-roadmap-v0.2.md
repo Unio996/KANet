@@ -1,7 +1,8 @@
-# KANet 底座模块化路线图 v0.4.1（内部二轮对抗 4/4 GREEN · 已送 Codex 复审 · 复审 GREEN 后请 Owner 钉死）
+# KANet 底座模块化路线图 v0.4.2（Codex 复审三条 MUST-FIX + Owner 裁决整合 · 待 Codex 终审）
 
-> **Status**: CURRENT（2026-07-22 · Bettor 主编）
-> **v0.4.1 增量**：内部二轮 4/4 GREEN（KANet-UI/J1/J2/NWT）；Codex 四条代码断言全部 file:line 坐实；custodial_transfer 单列 M-1 最高优先级（校准定性：design debt 非当下可利用）；健康信号模板注记。
+> **Status**: CURRENT（2026-07-22/23 · Bettor 主编）
+> **v0.4.1 增量**：内部二轮 4/4 GREEN（KANet-UI/J1/J2/NWT）；Codex 四条代码断言全部 file:line 坐实；健康信号模板注记。
+> **v0.4.2 增量（Codex 复审 RED 收窄三条 + Owner 逐条裁决，2026-07-23 03:50 频道在案）**：①插入 **M0c 能力强制基座批**（设计→运行时缺环补齐，Owner 自认两半拆法留下的真空）+ 默认拒绝准入规则入 M0b 验收；②custodial_transfer 重定性（按自身威胁模型=当下即活的横向越权面）+ containment 卡（Owner 批流程锚显式例外）+ key-custody debt 单列；③M0a 升 repo-wide differential/manifest 卡点（content-anchored）；④M5 类 B 完成判据改逐命令效果校验；⑤禁用词表文档纪律；⑥50 行帽与原子改动冲突规则。Owner 三确认：M0c 排期冲击可接受 / containment 开流程锚例外 / lint 工具代码算执行代码。
 > **版本链**：v0.1 首稿 → v0.2/v0.2.1 内部对抗第一轮整合（#v6ij51，D2 三轨）→ v0.3 Owner 磨合五条落实（`bdfd5c80`）→ **v0.4 = Codex 外部对抗审查（RESPONSE-20260722-MODULARIZATION-ROADMAP，verdict：战略 GREEN / 执行案 RED）11 条 MUST-FIX 全消化**：新增 M-1 安全边界发现阶段、能力/效果授权模型（A/B/C 降为描述性分类）、盲签退役方向、批规模门改"语义门+钱路 50 行硬上限"叠加制（NWT 终裁）、drain 台账算术更正（14+9=23）与三停政策、M2 进程分离失败语义验收、M5 最小权限验收。
 > **流程**：本稿 → 内部对抗第二轮 → 回 bridge 送 Codex 复审 → 双 GREEN → Owner 钉死 → 执行。钉死前不动任何执行代码（M-1 的取证/设计工作为只读+文档，Owner 已令即启，不属例外）。
 > **流程锚**（Owner 终裁 2026-07-21 18:20Z）：首稿 v0.1 → 对抗讨论（本轮完成，四方全回执）→ **本收敛稿交 Owner 磨合 → 钉死后 Bettor 安排分批执行。钉死前不动任何执行代码。**
@@ -63,12 +64,14 @@
 - **①语义切片门（必要条件，通不过则不管多小都不算一批）**：单一命名不变量/改动目标 · 依赖与钱路爆炸半径有界 · 每个中间 commit 可部署或显式 dark/disabled · 完整测试在同一验收单元 · 独立回退 · 不临时放宽任何权限。人为拆批不得制造不安全中间态。
 - **②钱路语义行硬上限（NWT 终裁，无书面例外）**：触及**签名/授权/花费构造逻辑**的改动行单独计数，**单批 ≤50 行**，超出强制拆批。（依据：今晚最致命的坑 marker off-by-one 是几十行里的一个字符；而 468 行 11 文件的纯接线批照样审出实 bug——出事维度是钱路语义密度，不是总行数。）
 - **③纯结构搬移预算（Codex 模式）**：纯移动/import 重写适用 ≤300 行默认预算 + 书面例外（例外须记录理由入批次卡）。
+- **②与①冲突时（原子改动拆不进 50 行）**（v0.4.2 补 Codex note）：改动必须**重设计到更小的权限函数后面**，或退回单独 Owner 计划；**禁止操纵行数归类**来满足上限。
 - **排期换算：每批 = 半天到一天实打红队时间**；大改动耦合风险非线性，禁按行数线性外推。
 - 每批完整审链：设计 → NWT 红队 → 落码 → diff 审 → 装载验证；涉钱路走 D-011。
+- **禁用词表纪律（v0.4.2 · Owner 令，stale-label 三连击的 L2→L3 根治）**：被 supersede 的术语入禁用词表（当前：规范性"双轨"、"34 命令"、"白名单强制=类 B 完成"、"~~不可利用~~类 custodial 旧定性），收敛稿终审跑一遍词表 grep，命中即改。词表随每次 supersede 追加。
 
 ---
 
-## 3. 分批路线（v0.4 排序：**M-1（即启）→ M0a（与 M-1 并行）→ M0b（M-1 后）→ M1 → M2 → M3 → M4 → M5**）
+## 3. 分批路线（v0.4.2 排序：**M-1（即启）→ M0a（与 M-1 并行）→ M0b（M-1 后）→ M0c（能力强制基座，先于 M1 与任何多进程应用触达 relay）→ M1 → M2 → M3 → M4 → M5**）
 
 ### M-1 安全边界发现（v0.4 新增 · Codex 核心要求 + Owner 两半拆法约束范围）
 > Owner 裁定：M-1 插入接受，**整体串行反对**——防"安全完美主义反噬止血时效"（否则即"止血但永不缝合"的镜像失败）。M-1 全部为只读取证+文档设计，不动执行代码，Owner 已令即启。
@@ -77,16 +80,19 @@
   2. 威胁模型：被攻陷应用 / 被攻陷 Console worker / 重放的 IPC 或 HTTP 请求。
   3. public-vs-internal 命令资格划分。
   4. **Codex 代码断言我方复核**（Owner：verify over echo 双向适用）——**四条全部坐实（v0.4.1，内部二轮期间完成）**：HTTP 零认证（J2 四层表）、dispatch 无身份校验（NWT，relay.mjs:331 起）、custodial_transfer 收调用方 privkeyHex（NWT，relay.mjs:478-490，IPC 字段直传 custodialSendKaspa，relay 不派生）、prediction_settle_tx 完整可控参数面（J1，relay.mjs:734-758，redeem/outpoints/outputs 收款地址金额/sigs/winner 全部 IPC 原样直传零校验，与 Codex MF3 可换维度逐字段吻合）。
-  4b. **custodial_transfer 单列 M-1 设计最高优先级项**（NWT 提、J1 附议、J2 补全链路、NWT 接受校准后的最终定性）：relay 层对 privkeyHex 来源零验证 = **实际存在的信任模型缺陷（design debt），但非当下可利用**——现存唯一触发路径（tg-wallet.js:92 send）有 ingest-secret 认证且私钥不出 console 进程边界；风险窗口在 M2/M4 多进程化后打开。性质与类 B 授权问题不同量级（密钥材料暴露面 vs 签名授权），在 M-1 caller identity 机制设计中排最优先，不与类 B 九条混排。
+  4b. **custodial_transfer 单列 M-1 设计最高优先级项 + v0.4.2 重定性（Codex MF2，Owner"逻辑接受"）**：v0.4.1 的"非当下可利用"定性**过乐观**——按本路线图自己的 M-1 威胁模型（共享 secret 泄露 / worker 被攻破）量：`verifyIngestRequest` 只验单一共享 `x-ingest-secret`，无服务身份、无用户 subject、无钱包/动作 scope；tg-wallet send 接受 URL 中的 `tg_user_id` 取该行加密助记词派生私钥转账 = **任何持共享 secret 的受信主体被攻陷/误用即可替换 subject 横向越权别人的托管钱包，当下即活**。"bot 会传 ctx.from.id"是调用方君子协定，与 relay 盲签"只信调用方声明"同一反模式第三实例。准确表述：*对无 secret 的外部匿名调用方不可直接利用；对任何持共享服务 secret 的主体被攻陷或误用当下即可利用，因不存在终端用户 subject 与钱包 scope 绑定*。（三条支撑断言 Codex 单方读码，**取证状态：J1/J2 四维 grep 坐实中，坐实前不作为已入档事实**——verify over echo 双向适用。）
+  4c. **containment 卡（即刻，Owner 已批流程锚显式例外）**：断言坐实后单独立卡——已认证 caller/service 绑定允许的 Telegram 用户/钱包 subject、拒绝任意 subject 替换、负向测试（合法服务凭证尝试他人钱包必须被拒）。落码前仍走 NWT 审 + D-011，不夹带在路线图批次里。**裸私钥材料过 IPC 单列 key-custody design debt**：长期边界 = scoped signer/intent 接口，不是更广地分发 privkeyHex。
 - **设计类（只做到这两件为止）**：
   5. capability matrix（应用 × 钱包/市场/outpoint/分支/金额/收款地址 × 动作）。
   6. **caller 身份机制选型**：HTTP 能力网关 / per-app socket / 签名能力信封三案对比——**架构不在评审里定**（Owner hold），J2 出单机父子进程 IPC 拓扑下的最小改动对比，Owner 终选。payload 明文 app_id 不可接受（自我声明伪造零成本）。
 - **明确不属 M-1**（独立立卡，不作 M0b 解锁条件）：typed-intent 签名全架构（按类 B 9 条分批实施）、capability 授权吊销机制全量实现。
 - 验收：清单 + matrix + 威胁模型 + 选型对比四件齐，NWT 红队过。
 
-### M0 边界冻结（止血批 · Owner 拆两半）
-- **M0a lint 卡点（立即可做，与 M-1 并行——负向约束"新代码禁裸连"不依赖 M-1 结论，冻错风险为零）**：新增代码禁止应用目录裸连 sqlite/relay-manager。
-- **M0b《底座 API 契约 v1》冻结（移到 M-1 之后——冻错契约比不冻更糟；契约必须建立在 capability matrix 上，防把超权命令冻成"公开原语"）**。
+### M0 边界冻结（止血批 · Owner 拆两半 · v0.4.2 按 Codex MF3 升级 M0a）
+- **M0a repo-wide differential lint 卡点（Codex MF3，Owner 无保留全采）**——路径规则在 M2/M4 前对 `src/services/`、`src/api/`、index.js 等存量主体零覆盖 = 形同虚设，改为全仓差分门：①枚举当前全部裸 `sqlite`/`relay-manager` import 为**不可变 baseline**；②任何新增 import 文件或新增 import occurrence 一律拒绝，除非在显式、经审的 owner/role allowlist；③每条 baseline 例外挂应用属主 + 燃尽里程碑；④**改名/移动保持例外身份不清零**——baseline 按 import occurrence 内容指纹锚定，**非文件路径锚定**（Owner 执行注记：否则 M2a 纯移动批大规模误报烧红队带宽，lint 设计稿必须写清）；⑤ops 只读脚本例外走显式 manifest + 静态限制，不靠目录命名。**注（Owner 确认）：lint 工具代码本身算执行代码，实现等钉死后 M0a 首批落。**
+- **M0b《底座 API 契约 v1》冻结（M-1 之后）**：契约建立在 capability matrix 上。**验收必含默认拒绝准入规则（Codex MF1，Owner 评"全篇最好的一句"直采）：任何缺少已完成经济效果 verifier 的命令保持 internal——不进公开契约、不可被已抽离应用调用；typed-intent 逐命令毕业后才准入**（默认拒绝 + 逐命令毕业，与 shadow-accuracy threshold-graduate 同模式；把"typed-intent 全量完成"从阻塞条件变为准入条件，允许分批同时封死裸奔口子）。
+- **M0c 能力强制基座批（v0.4.2 新增 · Codex MF1：选完机制没人装 = 设计到运行时的缺环；必须先于 M1 与任何多进程应用触达 relay）**——七项：①传输边界上非自声明的 caller 身份 ②默认拒绝的命令暴露 ③对照 capability matrix 的策略 evaluator ④逐 caller 的命令与钱包/市场/outpoint scope ⑤nonce/request-id 防重放 + 幂等回执 ⑥审计回执绑定已认证身份 ⑦免代码部署的吊销/禁用路径。
+  **预拆子批（Owner 令：不许把隐形排期从类 C 挪到 M0c）**：M0c-1 caller 身份 + 默认拒绝（①②，机制按 M-1 选型）→ M0c-2 策略 evaluator + scope（③④）→ M0c-3 防重放 + 审计 + 吊销（⑤⑥⑦）。粗估 3-5 个红队批；**逐批 diff 预算待 J2 caller 三案对比 + M-1 清单完成后补**（Owner 令：给不出诚实预算就写待补拿 GREEN-with-notes，不拍数换全绿）。
 - **例外**（KANet-UI）：`scripts/` 等 ops-only 路径的 operator 只读诊断工具不算应用代码，例外靠路径约定+清单，不靠个案豁免。
 - **豁免燃尽三钉**（NWT，不满足则 M0 不算完）：
   (a) 每条豁免挂具体批次名下燃尽：M2 完成→exchange 相关豁免归零；M4 完成→prediction 相关归零；M5 完成→豁免表物理删除。禁"以后会减少"式无主语承诺。
@@ -123,7 +129,7 @@
 - D2 注册机制管**增量**；存量 20 条类 C 命令的全强度补审是独立工作量——按 §2 上限换算约 **2-4 个红队批次**，显式挂账为独立批次组，排期 M3 完成后启动、M5 终验收前完成（M5 验收依赖 relay 命令表干净）。不写进路线图 = 隐形排期，故单列。
 
 ### M5 底座收尾与定位验收
-- index.js 回归纯底座启动器；relay 命令表三轨落地（D2，A 轨注册机制 + B 轨白名单强制 + C 轨核心表）；D2-C 存量补审批次组完成；豁免表物理删除（M0 钉 a）。
+- index.js 回归纯底座启动器；relay 命令表按能力/效果授权模型落地（D2）——**类 B 完成判据（v0.4.2 更正，Codex MF1 + Owner"stale-label 第三次"）：逐命令 typed-intent/效果校验毕业或退役，caller 白名单只是前置不是完成**；D2-C 存量补审批次组完成；豁免表物理删除（M0 钉 a）。
 - 终验收：最小 demo 应用仅靠《底座 API 契约 v1》完成"身份+通信+一笔结算"，不改一行 KANet 代码（D1 已裁 schema 归属移交应用，使此句可达），fee-split 式冷启动计时公开验收。
 - **最小权限五维（v0.4 采 Codex MF10 + Owner"与 BUST/LAND 探针文化同构"）**：demo 拿超权 transfer 接入 = 用牺牲安全边界换扩展性，不算过。验收必含：声明式最小权限能力清单 / 无任意消息-交易签名 / 限定测试钱包或有界 fund lock + 金额-频率-收款人限制 / 可吊销 + 完整审计回执 / **拒绝越权测试 + 应用被攻陷演练**（证明攻陷一个 app 影响不了其他 app/市场/钱包）。
 
@@ -135,7 +141,7 @@
 - NWT 审查带宽为全程瓶颈：批规模硬上限（§2）就是为它定的；宁多批勿大批。
 - 回退：结构批 git revert 即回；接口批 feature-flag 观察期 + 拓扑自报端点消除"现在是哪个模式"的人记负担。
 - 豁免温床风险：M0 三钉机制对冲；两周零净减自动升级。
-- 与公测运营/ZK 主线火力配比：**批次总量量化**——Owner 磨合粗算 M0(1)+M1(3)+M2(4-5)+M3a(3-5)+M3b(1-2)+M3c(1)+M4(2-3)+M5(1) ≈ 13-18 批；加 D2-C 存量补审（2-4 批）+ **v0.4 新增 M-1（摸底+matrix+选型，估 2-3 批红队量）+ typed-intent 独立卡（类 B 9 条分批，估 3-5 批，长线）** 后总量约 **20-30 批**，与 ZK 主线和公测运营共享同一 NWT 瓶颈。默认配比（Owner 已认可）：ZK(J2) 与 M3a(J1) 并行不抢占；M0a/M-1 走非钱路带宽即启。裁决依据是这个总量，不是里程碑个数的印象。
+- 与公测运营/ZK 主线火力配比：**批次总量量化**——Owner 磨合粗算 M0(1)+M1(3)+M2(4-5)+M3a(3-5)+M3b(1-2)+M3c(1)+M4(2-3)+M5(1) ≈ 13-18 批；加 D2-C 存量补审（2-4 批）+ **v0.4 新增 M-1（摸底+matrix+选型，估 2-3 批红队量）+ typed-intent 独立卡（类 B 9 条分批，估 3-5 批，长线）** + **M0c（3-5 批，逐批预算待补）** 后总量约 **23-35 批**，与 ZK 主线和公测运营共享同一 NWT 瓶颈。默认配比（Owner 已认可）：ZK(J2) 与 M3a(J1) 并行不抢占；M0a/M-1 走非钱路带宽即启。裁决依据是这个总量，不是里程碑个数的印象。
 - **Codex 复审流程旗（Owner 定）**：评审权 ≠ 状态裁定权——bridge STATUS 由 Codex 写的 `blocked` 改为 `red_verdict_pending_owner`；后续评审同理，verdict 归评审方、状态裁定归 Owner。
 
 ## 5. 待办与交 Owner 事项
@@ -151,7 +157,10 @@
 | bridge STATUS 更新（MF11 回执 + `blocked`→`red_verdict_pending_owner`） | 待做（Bettor 执行） |
 | D2-C 存量 20 条补审批次组 | 已挂账（2-4 批，M3 后启动，M5 前完成） |
 | typed-intent 签名全架构 | 独立卡（类 B 9 条分批，不卡 M0b） |
-| Codex 复审（v0.4.1 送 bridge） | 已发起（MSG-20260722-114） |
+| Codex 复审（v0.4.1） | ✅ RED 收窄三条（V041-REREVIEW），其余全关闭 |
+| Codex 三条新断言坐实（ingest-auth 单一共享 secret / tg-wallet subject 可替换 / secret 多组件共用） | J1/J2 四维 grep 进行中，坐实前不入档 |
+| containment 卡（subject 绑定+负向测试，Owner 批流程锚例外） | 断言坐实后立卡，NWT 审+D-011 |
+| Codex 终审（v0.4.2 送 bridge） | 待发（断言坐实入档后） |
 | Owner 钉死 | 双 GREEN 后 |
 | 本收敛稿交 Owner 磨合 | 待交（Bettor 精炼单点上报） |
 | Owner 磨合点：①方案本体 ②节奏/火力配比（公测运营 vs 模块化 vs ZK 主线） | 待 Owner |
