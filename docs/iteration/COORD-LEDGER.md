@@ -717,3 +717,9 @@ Owner 元问题:写进文档的铁律(CLAUDE.md 接位 SOP 第5条"设计前查�
 **🔩 NWT 红队钉②(诚实 TCB 声明要可测, 进 v0.3)**: 不能只是免责句, 要写清: TCB 边界(谁在 TCB 内=Console 进程 + 持 `CONSOLE_ENCRYPTION_KEY` 者)/ TCB 攻陷后果(B-0 全 relay 私钥失守)/ 走乙期间**禁称能力清单**(禁称抗 Console)→ 给 R 收口时"TCB 缩小了什么"的**验收基线**。
 
 **状态**: 方向定案(乙)+ 团队认领 + NWT 两条钉焊死 + J2 出 v0.3 中。主线=模块化继续; R 卡=硬约束前置门(与 M0c 并列, 应用抽离前收口)。
+
+## ✅ M-1.6 v0.3 NWT 红队 GREEN(caller 选型乙路内部审闭, 2026-07-22 16:11Z, d52b815d)
+
+**NWT verdict = GREEN(无 MUST-FIX)+ 2 非阻塞 note**, 8 路试图打穿全失败(挣的 GREEN 非顺水): ①grant-inflation 乙路下不矛盾(§8.3 scope-inflation 正确 scoped 场景 A)②全稿 overclaim 扫描: A/C 职责全显式 scoped 场景 A/C+明写对 B 零防御, §1.3 禁用词表全稿自洽, **无一处暗示抗 Console** ③B 裂缝(authority-outside-Console)处理到位。**特赞 §1.4 可测验收基线**(NWT 原话): "R 收口=§1.1 TCB 成员逐条移出+§1.2 五后果 LANDS→BUST 的可测清单——走乙不烂尾的关键, 残留被钉成有验收清单的欠账而非模糊'以后会做'"。2 非阻塞 note(Codex 再审顺带收, 不拦 GREEN): note-1 §8.6 gateway-bypass 场景 A-BUST 缺"M0c armed 后"前置标注(post-M0c 断言)+note-2 见 `d52b815d`。
+
+**caller 身份选型乙路内部审闭**(J2 出稿→NWT 红队 GREEN)。下一步: v0.3 送 Codex 复审闭合其 M-1.6 RED(顺带收 2 note)。这是今晚"Codex 发现 B-0→四方核实→Owner 拍乙→J2 诚实修订稿 v0.3→NWT GREEN"完整闭环。
