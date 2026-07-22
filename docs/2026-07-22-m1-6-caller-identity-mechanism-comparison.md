@@ -1,6 +1,7 @@
 # M-1.6 Caller 身份机制三案对比（J2，供 Owner 终选）
 
-> **Status**: v0.2（2026-07-22 · J2·已消化 NWT MUST-FIX）
+> **Status**: v0.2 — ⛔ 场景 B 结论被 Codex 外审 RED 推翻，等 Owner 拍甲/乙后出 v0.3（2026-07-22 · J2）
+> **🔴 v0.2 已知错误（Codex B-0，J2 已独立核代码坐实并认账 2026-07-22 15:1xZ）**：本卡（及 NWT verdict）"A+C 两条硬约束后同样抗场景 B（被攻陷 Console worker）"的结论**不成立**。根因：Console 进程本就持有 relay 明文私钥——`relay-manager.js:16,60-61` 在 Console 进程内调 `getRelayPrivkey()`，经 `relay-nodes.js:44-53` 用 `CONSOLE_ENCRYPTION_KEY` 解密 DB 密文得明文私钥，`:83-84` 塞入 env、`:87` fork relay。被攻陷 Console 可直接解密私钥自签任意交易、或 kill/换码重 fork relay，**绕过 relay 进程内验证**——"relay 是被攻陷 Console 碰不到的独立验证点"这个 §3 前提在当前密钥托管边界下为假。**方法论教训**：§0 已写"私钥经 env 注入子进程"这个地基事实，但 §3 硬约束分析没把它的含义带进结论=记录了地基却没用地基检验结论。**修正口径**：A+C 两条硬约束防住场景 A（越权应用）+场景 C（重放），对场景 B 只在**(甲) relay 密钥/生命周期从 Console 隔离出去**之后才成立；不做(甲)则=**(乙) 接受测试网阶段 Console 可信残留**。Owner 拍甲/乙 gating v0.3 修订方向（两方向文档框架不同，不预写）。以下 v0.2 正文保留原样作对照，读者以本状态头为准。
 > **v0.2 修订记录**：消化 NWT 红队 verdict（`docs/2026-07-22-NWT-redteam-m1-6-caller-identity.md`，GREEN-with-1-MUST-FIX）——v0.1 §3 的"签发者可以是 Console 自己""relay 侧或 Console 侧验证"两处表述对威胁场景 B（被攻陷 Console worker）vacuous（自签自验=空验证），本版收敛为单一非空配置：**验证 locus=relay 进程内（fail-closed）+ 签名权=各 app 自持凭证（Console 不持全量签发密钥）**，不留"或"承重。§4 同步补入 A+C vs B 的真实 trade-off（供 Owner 终选，非改动量单维度）。
 > **依据**：`docs/2026-07-22-kanet-base-modularization-roadmap-v0.2.md` M-1 §5.6 派工——三案对比（HTTP 能力网关 / per-app socket / 签名能力信封），单机父子进程拓扑下最小改动视角，架构本身 Owner hold（不在评审里定）。
 > **本卡性质**：设计文档，不改一行执行代码。
