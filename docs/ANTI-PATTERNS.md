@@ -2991,3 +2991,19 @@ WHERE id IN (...) AND protocol_status IN ('verifying', 'pending_bettors')
 - 发现自己在复制一段逻辑/常量而不是 import 单源时，先停：能抽共享就抽（反增殖）；抽不了必须在两处都留互指注释（"改我必改 X:行号"）。
 - 机器 clamp（逐族落地，人工纪律只兜过渡期）：例如 sign 族 lint `R-SIGN-SETTLE-SAFE-JSON`——`sign_input_for_settle` 构造点必须带 `safe_json: true` 或在 allowlist 注明豁免理由（提案 2026-07-18，见 jepu1 修复稿 §1.6）。同思路已有先例：R-MANIFEST 系、K-18/PS-FAMILY 家族分派 lint 方向。
 
+## 规则 65 —— lint 工具改动 push 即对全团队生效 = deploy：新规则走 warn-first，存量判定逻辑走 verdict-before-push（Bettor 2026-07-23 拍板 · diff-verdict 同族第 5 次后的模式层 clamp）
+
+**症状**（同族五连，全是 KANet-UI，"deploy"的定义被逐次收窄逃过纪律）：
+1-3. 7/13 起三次：落码后未等 NWT diff verdict 就装载重启（经典 deploy 形态，已记 memory `feedback-diff-verdict-must-precede-deploy-not-follow`）。
+4. 7/22 M0a 实现批：五条 ERROR 规则**无条件接进 lint-kanet 主入口后 push**——没有重启、没有装载窗，但 pre-commit hook 直接读仓内脚本 → **push 的那一刻规则就对全团队每一次 commit 生效**，NWT diff 审在生效之后才到（幸运：那次缺陷是漏报-only 零误伤）。
+5. 7/23 卫生卡执行中：M0a 门自身误报挡路（shadow 检查没滤删除态），顺手修一行 `--diff-filter=d` 折进已批的卫生卡 commit push——"过 lint 必需的顺手修"被当成免审搭车，又一次审前生效。
+
+**根因**：判"这算不算 deploy"用了错误测试（"我有没有重启进程"）。正确测试：**这个 push 落地后，有没有任何人的工作流或运行时行为在 verdict 之前被我的代码改变？有 = deploy**。lint 工具（`scripts/lint-kanet.mjs`、`scripts/m0a-lib.mjs` 等被 pre-commit hook 消费的一切）天然满足：push = 部署到全团队的 commit 关口，误报即拦全员。
+
+**两道门（Bettor 拍板，缺一不可）**：
+- **新 lint 规则**：默认 `warn()` 落码（非阻塞），NWT diff verdict GREEN 后**单行升 `violate()`/ERROR**（2026-07-22 拍板）。
+- **存量 lint 判定逻辑改动**（改 `m0a-lib.mjs`/`lint-kanet.mjs` 既有判定路径，含"一行小修"）：**verdict-before-push**——commit 本地可以，push 前必须频道声明"含 lint 核心逻辑改动" @NWT 取 verdict。与 ship 三件套同构：**push 就是这类文件的 deploy 门**。
+- **门误报挡合法操作时的正规流程**（第 5 次撞到的场景）：频道报备 → NWT 快速审 fix → 审过再 push。**禁 `--no-verify` 跳门、禁先斩后奏**——门误报不是绕门授权，是走快审通道的触发条件。
+
+**为什么条目在这**：接位文件在 C 盘不入 git 跨机不同步（7/12 结构卡教训），ANTI-PATTERNS 在 git 内全员自动同步——规矩钉在这里是主保险，接位文件拷贝是双保险。
+
