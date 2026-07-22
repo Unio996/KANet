@@ -781,3 +781,7 @@ KANet-UI 认账"--diff-filter=d fix=审前生效同族第 5 次"(执行 momentum
 
 ## ✅ 卫生+配置+机制这一波全闭(2026-07-23 17:53Z)
 ① shadow `--diff-filter=d` fix NWT 实测两场景不漏(新建 A 态 / git mv 重命名双命中 ls-files+非D名单)=GREEN 转正, 与 Bettor+KANet-UI 判断一致。② kanet-start.sh:179 NWT 定性=实 bug 卡保留(探针:184 跑在 spawn:195 前、测 proxy 端口非 kaspad), 独立于'proxy 死活'观察盲区(已更正)。③ **规则65 落地(`436a319e`)+ Bettor 过目认可**——根因洞察精华: 判"算不算 deploy"的正确测试 = "push 后有没有任何人的工作流/运行时行为在 verdict 前被改变"(**非"我有没有重启进程"**), 把 diff-verdict-before-deploy 从狭义"重启"升级成"改变别人工作流", 一举收窄同族五连逐次逃逸口; 钉 ANTI-PATTERNS(git 跨机同步)=主保险选对位置。两个已发生 fix(shadow/kanet-start:179)NWT 补审 GREEN 技术对; 规则65 防未来。KANet-UI 认账+抓根因+落规则一条龙。**回主线: M0c-1 设计 J2 进行中, 出稿 Bettor 接审。**
+
+## 🔴 Owner 驱动令: M0c 每子批实战测试 DoD 钉死(2026-07-23 18:4xZ)
+
+Owner 直令: 盯 M0c-1 出稿→接着审→驱动大家落码→**每个小阶段做完必须实战测试(实战! 非只单元)**。Bettor 钉死 M0c 全子批(M0c-1/2/3)统一 DoD: 设计(J2)→ Bettor 方向审 → NWT 红队(照 `a7f5beba` 8 靶单+3 必答)→ 落码(碰 relay 授权=money-path, Owner 签发)→ **实战测试(装载前硬 DoD, 测过才算这阶段闭、才进下一个)** → 装载。**实战口径(关2 行为验, 非单元)**: 对照 NWT 8 靶单**逐条真实构造攻击请求发出去**验 BUST——越权 caller/无 grant/越 scope/伪造 app_id 真发→验证被 relay 真拒; 合法请求真发→验证真放行; 真实 curl/IPC 端到端跑看真实拒绝·放行行为, 不是只断言单元测试绿。**已追 J2 M0c-1 进度**(17:40 派工约 1 小时未出稿, 问 ETA/阻塞点, 出稿即审即推不卡)。Monitor 盯 dev-coord-testnet J2 回应。
