@@ -274,9 +274,23 @@ export async function waitForRelay(relayNodeId, timeoutMs = 60000) {
   throw new Error(`waitForRelay: ${relayNodeId.slice(0, 8)} not ready after ${timeoutMs / 1000}s`);
 }
 
-export function sendCommandAsync(relayNodeId, command, timeoutMs = 30000) {
+// M0c-1 批A (origin 体系基础设施) — warn-first 去重: 每个未标 origin 的命令类型只 warn 一次, 避免高频 daemon tick 刷屏.
+const _originWarnedTypes = new Set();
+
+// M0c-1: origin ∈ {'internal','app','operator'} 由调用方显式传, 供 relay 侧 authorizeCommand gate (批E) 判别命令来源.
+// 本批 (批A) relay 侧尚未读 __origin = 零行为变更 no-op; warn-first: 迁移期存量调用点未标 origin → 记 warn 不拒
+// (立即 fail-closed 会断现网结算, 违反 NO TX NO STATE). 迁移收口 + gate armed 前置齐后, relay 侧才对缺失 origin fail-closed.
+export function sendCommandAsync(relayNodeId, command, timeoutMs = 30000, origin) {
   const state = _relays[relayNodeId];
   if (!state?.child?.send) return Promise.reject(new Error('Relay not running'));
+
+  if (origin === undefined) {
+    const t = command?.type || '?';
+    if (!_originWarnedTypes.has(t)) {
+      _originWarnedTypes.add(t);
+      console.warn(`[M0c-1 origin] sendCommandAsync(type=${t}) 未标 origin — 迁移批需补 origin 参数 (warn-first, 暂不拒)`);
+    }
+  }
 
   const requestId = `req-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   return new Promise((resolve, reject) => {
@@ -293,7 +307,11 @@ export function sendCommandAsync(relayNodeId, command, timeoutMs = 30000) {
       }
     }
     state.child.on('message', handler);
-    state.child.send({ ...command, requestId });
+    // __origin 由 origin 形参权威设置, 显式覆写/剥除 command 里可能夹带的同名字段 (防调用方经 command 伪造来源).
+    const payload = { ...command, requestId };
+    if (origin !== undefined) payload.__origin = origin;
+    else delete payload.__origin;
+    state.child.send(payload);
   });
 }
 
