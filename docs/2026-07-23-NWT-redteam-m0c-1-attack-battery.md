@@ -34,9 +34,26 @@ M0c-1 在走乙路下**只防场景 A（应用/共享 secret/应用间越权/内
 - **T-8 TCB 诚实边界**：设计稿必须显式写"M0c-1 caller 身份在走乙期防场景 A，不防被攻陷 Console/B-0；身份注册表/凭证签发权在乙期位于 Console TCB 内"（Codex note②/M-1.6 §4.1）。缺此声明或出现任何"抗 Console"暗示 = 红队打回。
 - **T-9 与 containment MF6 的接口**：M0c-1 的 caller 身份是"service 身份"（如 tg-bot），**不是端用户 subject**。设计稿须标明 caller 身份层不解决"用户 X 授权本次提款"（那是 containment 卡目标 B / MF6），避免把 service 身份误当用户授权。
 
+## 实战测试 harness（关 2 行为验 · Owner DoD 2026-07-23 · 每子批做完实战测一个）
+
+Owner 直令：每小阶段做完**必须实战测试**（真实构造攻击请求端到端发，看 relay 真拒/真放，非只断言单元绿）。以下把 8 靶单预铺成可执行攻击请求形态——**端点路径/信封 schema 待 M0c-1 落码后绑定，攻击"形状"现在就定死**，落码即能逐条真发。判定 = 真实 relay 拒绝响应（4xx/reject）或链上零 tx（攻击）/ 真实放行 + 预期效果（合法对照）。
+
+| 靶 | 实战攻击请求构造（真发） | 合法对照（真发） | 通过判据（真实行为，非单元断言） |
+|---|---|---|---|
+| M1-1 | 合法凭证 + payload 里塞 `app_id=<高权app>` 真发 | 同凭证不塞伪 app_id | 攻击：relay 按真实凭证判、伪 app_id 零效果；对照放行。二者行为一致=payload 自称无权重 |
+| M1-2 | 无凭证 / 过期凭证 / 未注册 app 真发命令 | 已注册合法 app 发 | 攻击 → relay 真拒（reject/4xx，链上零 tx）；对照 → 放行 |
+| M1-3 | 已抽离应用（或模拟其身份）真调无 verifier 命令 | 调有 verifier 的命令 | 攻击 → 拒（internal 不可外调）；对照 → 放行 |
+| M1-4 | 喂畸形/触发解析异常的凭证真发 | 正常凭证 | 攻击 → 拒（解析失败 fail-closed，绝不 fall-through 默认身份）；对照 → 放行 |
+| M1-5 | 运行时真尝试往 caller 注册表写自己 | 离线经审注册项 | 攻击 → 写入不生效/被拒；对照（离线审过的）→ 生效 |
+| M1-6 | 校验通过后、执行前真掉包 payload（构造 TOCTOU 窗）| 不掉包 | 攻击 → 执行被校验的那份 or 整体拒；对照 → 正常执行 |
+| M1-7 | ①Console 进程内真调 sendCommandAsync 绕网关 ②独立应用进程真发绕过尝试 | 独立应用走正规网关 | ①走乙 LANDS（如实记，TCB 残留，不算 fail）②M0c armed 后必真拒；对照 → 放行 |
+| M1-8 | 认证 app 真调其能力集外命令（M0c-2 scope 未接时） | 调能力集内命令 | 攻击 → 默认拒（身份认出≠命令放行）；对照 → 放行 |
+
+**harness 交付形态**：M0c-1 落码后写成 `scratch/` 下可复跑脚本（真 curl 打网关端点 / 真 IPC 发 relay），每条打印"攻击真发→relay 真实响应→BUST/LANDS 判定"。合法对照与攻击同脚本跑，证明门"拦攻击且不误伤合法"（同 vacuous-teeth 双向判别：happy-path LAND + attack BUST）。**测过才算 M0c-1 阶段闭、才进 M0c-2**（Owner DoD）。
+
 ## 红队复核判据
 
-J2 M0c-1 设计稿交付后，我逐条核：M1-1~M1-8 每条设计是否给出 BUST 机制（场景 A）或如实标 LANDS（场景 B）+ T-7~T-9 三问是否显式答。**任一场景 A 攻击设计里 LANDS 或 T-8 诚实声明缺失 = RED**。落码后再走实际 diff 审（M0c 碰 relay 授权=money-path，Owner 签发）。
+J2 M0c-1 设计稿交付后，我逐条核：M1-1~M1-8 每条设计是否给出 BUST 机制（场景 A）或如实标 LANDS（场景 B）+ T-7~T-9 三问是否显式答。**任一场景 A 攻击设计里 LANDS 或 T-8 诚实声明缺失 = RED**。落码后：①实际 diff 审（M0c 碰 relay 授权=money-path，Owner 签发）②按上表跑实战 harness，真发攻击验真拒/真放（Owner DoD，非只单元绿）——两道过才算 M0c-1 闭。
 
 ---
 
