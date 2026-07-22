@@ -542,3 +542,17 @@ Owner 元问题:写进文档的铁律(CLAUDE.md 接位 SOP 第5条"设计前查�
 **审序编排**: M-1.1(待 J1 域复核)+M-1.2(NWT 在写)+M0a 设计稿(KANet-UI 在写)三件齐进 M-1 内部审, 第一波 DoD 口径不变; M-1.6 为 Owner hold 的选型输入不卡 DoD, NWT 完成 M-1.2 后审, 审过 Bettor 精炼单点上报 Owner 终选。
 
 **文档卫生**: 路线图头部按 Codex note5 单一流程状态纪律清 stale——"待 Owner 钉死"→FROZEN-EXECUTING(Owner 06:15Z 已钉死授权开工, 钉死记账=`30e9d0f3`)。本段初稿 commit 指针一度写错, Bettor 当场按 git log 核正——铁律-1"不信自己转述"的日常实践。
+
+## 🔴 NWT M-1.2 威胁模型交付(2026-07-22 14:0xZ, commit `0ec41001`)
+
+**交付**: `docs/2026-07-22-NWT-redteam-m1-2-threat-model.md`(push+核对无误)。三场景可测清单, 每条威胁=可执行负向测试(攻击链+不变量 MUST+判据形态+pass=BUST/fail=LANDS 二值), 非原则空谈; 红队默认立场=每条先假设当前 LANDS 只有代码证拦得住才标 BUST。
+
+**传输拓扑三事实钉死(三场景共同地面)**: T-1 relay IPC=Node fork 通道(`relay.mjs:331` `process.on('message')`), 分发前唯一门=`validateCommandPayload` 只校验 type+字段 typeof 形状**零 caller 身份**, 通过即 `switch` 执行全 ~50 命令——**进程成员资格==relay 全权**(J2 M-1.6 独立坐实 relay-manager map 全开, 两路吻合); T-2 console HTTP=单一共享 `ingest_secret`(`ingest-auth.js:19-44`)被 16+ 路由复用, custodial `tg_user_id` 取自 URL 零绑定(`tg-wallet.js:92`, :19-22 知险注释); T-3 全链路零重放防护(`requestId` 仅响应关联无去重, HTTP 无 nonce)。
+
+**三场景 21 格 M0c 七项对照矩阵**: 场景 A 被攻陷应用(A-1 替换 subject 抽他人钱包=containment 卡目标 B 威胁依据/A-2 单 secret 无 scope 16+路由全开/A-3 无 verifier 命令可被 app 调/A-4 payload 自声明 app_id); 场景 B 被攻陷 Console worker(B-1 进程内发 custodial_transfer/B-2 ECDSA_SIGN+SIGN_INPUT_FOR_SETTLE 盲签任意字节/B-3 covenant 20 条伪 witness/B-4 无 caller-bound 审计/B-5 无免代码吊销)=M0c 核心理由; 场景 C 重放(C-1 HTTP send 重放多扣/C-2 IPC 命令重投/C-3 nullifier 部分兜底非替代/C-4 跨时间窗)。**现状除 C-3 部分外全 21 格 LANDS**。
+
+**红队硬门**: M0c 未装 armed 前, 任何"应用已抽离可独立触达 relay"批次=RED(目录边界≠权限边界=化妆式模块化, 呼应 Codex MF1)。
+
+**J2 交叉发现定性并入**: ECDSA_SIGN/SIGN_INPUT_FOR_SETTLE=盲签反模式第 4/5 实例(前三 pool_settle/prediction_settle/custodial_transfer), 须与盲签 9 条同规格进 typed-intent 毕业, M0b 前保持 internal(B-2 已纳入可测清单)。
+
+**待**: ①不自审自过——须 Bettor/J2 交叉核 file:line(尤其 C-3 逐 covenant nullifier 覆盖度, 我标"部分"待 J1/J2 covenant 域逐条核哪些有链上防重放/哪些裸奔); ②A 场景=containment 卡目标 B 攻击面母表, 卡落码仍走 NWT 二审+Owner money-path 签发(流程锚显式例外不放松)。第一波 DoD 三件已到两件(M-1.1 已交待 J1 复核/M-1.2 本卡), 余 M0a lint 设计稿(KANet-UI 在写)齐进 M-1 内部审。
