@@ -785,3 +785,13 @@ KANet-UI 认账"--diff-filter=d fix=审前生效同族第 5 次"(执行 momentum
 ## 🔴 Owner 驱动令: M0c 每子批实战测试 DoD 钉死(2026-07-23 18:4xZ)
 
 Owner 直令: 盯 M0c-1 出稿→接着审→驱动大家落码→**每个小阶段做完必须实战测试(实战! 非只单元)**。Bettor 钉死 M0c 全子批(M0c-1/2/3)统一 DoD: 设计(J2)→ Bettor 方向审 → NWT 红队(照 `a7f5beba` 8 靶单+3 必答)→ 落码(碰 relay 授权=money-path, Owner 签发)→ **实战测试(装载前硬 DoD, 测过才算这阶段闭、才进下一个)** → 装载。**实战口径(关2 行为验, 非单元)**: 对照 NWT 8 靶单**逐条真实构造攻击请求发出去**验 BUST——越权 caller/无 grant/越 scope/伪造 app_id 真发→验证被 relay 真拒; 合法请求真发→验证真放行; 真实 curl/IPC 端到端跑看真实拒绝·放行行为, 不是只断言单元测试绿。**已追 J2 M0c-1 进度**(17:40 派工约 1 小时未出稿, 问 ETA/阻塞点, 出稿即审即推不卡)。Monitor 盯 dev-coord-testnet J2 回应。
+
+## 🔴 J2 会话死亡 → M0c-1 改派 J1(2026-07-23 19:2xZ · Owner 令)
+
+**J2 会话意外死亡**(原因不明): ~18:47-19:2x J2 沉默约 1 小时+、未出 M0c-1 设计稿、未回 Bettor 两次进度追问; 其间 NWT 活跃(铺 harness f7865428)= 频道通→Bettor 判 J2 会话状态问题(非频道/网络), Owner 确认 J2 死并去重启。
+
+**M0c-1 设计关键路径改派 @J1**(Owner 直令): 依据=J1 covenant 域复核底子(进 .sil 源码逐条核)+relay/covenant 熟。给 J1 完整接手指引(#wh531q): M-1.6 v0.3.1 决策稿 / NWT a7f5beba 8 靶单+3 必答 / NWT f7865428 实战 harness / M0c 骨架 / Codex 5 notes / 流程+Owner 实战测试 DoD。待 J1 回执接手。
+
+**🔑 Owner 授权(记, 以后接位/运维用)**: **agent 会话死可启动新 claude code 会话顶替, 不必干等原 agent 恢复**——Bettor 遇 agent 会话死亡时可主动 spawn 新会话接手, 保关键路径不卡。本次 Owner 亲自重启 J2 + Bettor 派 J1 顶 M0c-1(双轨: 原会话恢复 + 任务不等)。
+
+**方法论(记)**: agent 会话"死"的识别锚——目标 agent 沉默(未出稿+未回追问)但频道其他 agent 活跃(证频道/网络通)= 大概率该会话死/卡而非在专注写; 追两次无回即可判、报 Owner 确认, 不无限干等(呼应 feedback-actively-chase + Owner"以后可 spawn 新会话")。
