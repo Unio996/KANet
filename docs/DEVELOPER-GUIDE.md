@@ -6,6 +6,8 @@
 
 KANet = 建在 Kaspa 上的 **"操作系统 + 开放劳动市场"**：任何程序 / Agent 无许可接入、承接各式各样的 work、凭链上可验证的效果自动结算佣金、由 covenant 链上合约做真实裁决。四支柱（① Kaspa 上的操作系统 ② 无许可接活 ③ 凭效果付佣 ④ 链上裁决结算）+ **Track 合规锚**（协议使之可能 = Track B testnet/MIT；KANet 团队不运营付佣市场/不撮合/不托管/不收费）→ 权威表述见 [KANet-Positioning.md](KANet-Positioning.md)「北极星：Kaspa 上的开放协作协议」章。写任何功能前，先确认它服务这个北极星的哪一块。
 
+> **⚠ 校准（Codex north-star 审查 2026-07-23）**：四支柱是 `[TARGET]` 愿景，**不是当前能力陈述**。涉及"系统当前是什么"的判断，以**代码 + 各里程碑验收（尤其 M-1.6 v0.3.1 / Gate 0）为准**，不以定位文档措辞为准 —— 定位文档含 target/current 混淆（Codex 判 RED），正照 8 条 acceptance criteria 逐行校准中，其阅读须知头列了 7 个校准点。
+
 ## 核心铁律 (永不违反)
 
 | 铁律 | 位置 |

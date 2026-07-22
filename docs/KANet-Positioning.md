@@ -1,5 +1,18 @@
 # KANet — 定位与愿景
 
+> **⚠ 阅读须知 · 陈述分层（2026-07-23 Codex truth-integrity 审查后加）**：本文件混合 target 愿景与 current 实现。**涉及"当前能力"的技术判断以代码 + 各里程碑验收为准，不以本文措辞为准。** 陈述类别：`[PROTOCOL]` 协议层稳定属性 / `[CURRENT]` 仓库已验证的当前实现 / `[TARGET]` 里程碑门控的目标态 / `[DEMO]` host/testnet 示范非公开保证 / `[OPERATOR POLICY]` 组织·法律边界非协议定理。
+>
+> **已知 target/current 校准点（Codex RED，逐行修订进行中，照 8 条 acceptance criteria）**：
+> ① DB **非**全部可从链重建 —— Gate 0：pruning 下 tx body / accepting-block 证据可能物理丢失，需 durable evidence ledger（非"DB 只是索引"普适规则）。
+> ② `[CURRENT]` Console 是 relay **密钥托管 + 生命周期控制面**（B-0，见 M-1.6 v0.3.1）；角色表"Console 不碰链"是 `[TARGET R]`，非当前事实。
+> ③ 协议非托管是 `[TARGET]`；当前 TN12 有 `[DEMO]` opt-in 托管钱包路径（`tg_custodial_wallets`，含已知 subject-binding 债）。Track B label 不使 Track A 代码消失。
+> ④ 无许可 = **协议参与**开放，**≠** 无约束调用某实例的钱路（后者需 scoped 能力授权 / M0c）。
+> ⑤ 无控制者仅限**共识层**；当前应用栈仍有 operator / authority / admin / 委员 / 人工裁决。
+> ⑥ covenant **机械强制已授权转移**，**≠** 独立判定外部真相（外部事实仍需 oracle / attestation / 证据连续性）。
+> ⑦ 零改 HTTP 接入是 `[DEMO]` 已示范形状；安全通用默认 gated on M0c + R + M5 收口。
+>
+> 四支柱"北极星"章 = `[TARGET]` 愿景（Codex GREEN as vision）。权威依据：Codex north-star 审查 + Gate 0 + M-1.6 v0.3.1 + custodial containment 状态。
+
 ## 一句话
 
 **KANet 不是一个产品，是一个让任何人、任何系统、任何行业都能接入去中心化世界的协议基础设施。**
@@ -206,6 +219,8 @@ Relay   — 执行所有链上操作，是唯一的链上出口
 Adapter — 连接 AI 大脑，不持有状态
 Scout   — 观察链上活动，只读不写
 ```
+
+> **[CURRENT] 校准（Codex M-1.6 B-0，撤销自欺）**：上表"Console 不碰链"是 `[TARGET R]` 目标态，**非当前事实**。当前 Console 在进程内解密并持有 relay 明文私钥（`relay-manager.js` → `relay-nodes.js`）、控制 relay 生命周期（起 / 停 / 换码），是 relay **密钥托管 + 生命周期控制面**（= M-1.6 v0.3.1 声明的 gradual-phase TCB）。"Console 不碰链"要等方案 R（密钥 / 生命周期隔离到 Console 够不到的域）收口才成立。
 
 ### 数据持久化
 

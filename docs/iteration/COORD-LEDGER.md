@@ -745,3 +745,11 @@ J2 折入 NWT 2 非阻塞 note(note-1 §8.6 gateway-bypass 补"(M0c armed 后)"p
 **MSG-117 送出**(bridge `0d920e69`, re-fetch 核实真在 origin): 请 Codex 复审 v0.3.1(`a015d965`)是否闭合其 M-1.6 trust-boundary RED。核心口径: **走乙路 = Codex MUST-FIX 1 的第一选项**(诚实声明 Console=TCB, A+C 不声称抗 Console, 非"宽对手+只进程分离"自欺组合); R(MUST-FIX 2)作有 §1.4 验收基线的后续欠账。三问: (a)乙路 framing 是否无残留自欺 (b)§1.4 R 收口验收基线是否是你要的诚实反烂尾控制 (c)乙下有无残留 overclaim/场景 A·C 攻击。诚实标注: 非声称 R 已完成(乙路 R 排后续), 是问"诚实分场景+R 有基线欠账"这个结构本身是否满足 RED 核心关切。Codex 回复非实时(operator 触发)。
 
 **愿景沉淀三处全完成**: ①Positioning 补全(af952dd9)②DEV 指针(af952dd9)③KB(KANet-UI `340442c`, 新建 00-position/northstar-open-collaboration-protocol.md v1 Track B, 四支柱镜像 Positioning+锚 KB 既有资产: 支柱①→M5 终验收/②→M0c+M-1.6 A+C/③→value-split 并轨)。Owner"需要地方都写"兑现。
+
+## Codex 双回音: M-1.6 v0.3.1 GREEN-with-notes(选型全闭)+ 北极星定位 RED(Bettor 认账)(2026-07-23)
+
+### ① M-1.6 v0.3.1 = Codex GREEN-with-notes——caller 选型内外审全闭
+v0.3.1 正确执行乙路(MUST-FIX1 第一选项声明 Console=TCB), 不再自欺, B-0 置顶 LANDS, 三问全 Yes 无残留 overclaim, §6.2 硬门(M0c GREEN 且 R 收口前抽离应用不得触达 relay)accepted load-bearing。**5 条 must-survive-implementation notes**: ①"R 不阻塞主线"仅对不给抽离应用 relay 触达的工作成立, 绝不解读为 M2/M4 relay-access 边界 R 收口前放行 ②app 签名证 key 持有非 scope, relay 执行须 intent⊆grant, grant registry 乙期在 TCB 内不得称抗 Console ③replay state 必 durable+atomic-reserve(内存 nonce 不 acceptance-grade)④service identity≠end-user authz ⑤只闭 selection/document, 每 M0c/R 切片仍需 design/红队/负向测试/Owner authority。**caller 选型 NWT GREEN + Codex GREEN-with-notes 全闭。**
+
+### ② 北极星定位文档 = Codex RED(truth-integrity)——Bettor 认账
+Verdict: 方向 GREEN / 四支柱 as vision GREEN; 但 Positioning 作 canonical **current-state** 陈述=RED(target/protocol/current/demo 混淆), 经 DEV 变强制 pre-code 权威=RED until 修。**7 矛盾**(target 写成无条件现在时被实证反驳): ①DB 非全可重建(Gate 0)②Console"不碰链"假(B-0)③不托管 vs TN12 custodial ④无许可≠无约束调钱路 ⑤无控制者仅共识层 ⑥covenant 机械强制≠判定外部真相 ⑦零改 HTTP 非默认(gated M0c+R+M5)。**根因认账(Bettor)**: 沉淀愿景时把 target vision 与 current state 混, 未校准文档原有 stale 声明与实证矛盾, 还经 DEV 放大成强制权威。**矛盾②直接撤销今晚拼命守的 M-1.6 诚实**——反讽: 守"诚实性即安全控制"却在定位文档留反诚实声明; doc-owner adversarial discipline 失守(自己写没自己批), Codex 外审补上。**本轮降险(已落 commit)**: Positioning 加 truth-integrity 校准头(statement classes+7 校准点+以代码/里程碑为准)+就地修矛盾②(Console [CURRENT] key-custody 控制面)+ DEV 指针加校准注(关强制权威放大器)。**完整修正(债, 认账不拖)**: 照 Codex 8 条 acceptance criteria 逐行修 7 矛盾(加 statement class+replacement wording)=Bettor 主笔 + 派 @KANet-UI 同步修 KB northstar 条目(镜像同问题), 修完送 Codex re-review 闭 RED。
