@@ -519,3 +519,10 @@ Owner 元问题:写进文档的铁律(CLAUDE.md 接位 SOP 第5条"设计前查�
 **Codex 终审 GREEN-with-notes 三条全 CLOSED→路线图可钉死+containment 卡 Codex 独立审 RED-3(04:35)**: Codex 对 v0.4.2 终审=GREEN-with-notes(MF1/MF2/MF3 全 CLOSED), 判语"从目录模块化推进到能力受限模块化, 技术上足够连贯可供 Owner 钉死", 5 条 notes 全是实现阶段门非钉死阻塞(note5 钉死文档保持单一流程状态→当场清 stale 头部+版本链移附录 A)。**containment 卡 Codex 单独审=RED-3**(不阻塞路线图): 精确验证 NWT 换名共享 secret 担忧——"subject binding"混淆目标 A(跨服务隔离)vs B(真用户 subject 授权), tg-bot 多用户被攻陷拿专用凭证仍可选任意 tg_user_id; 三 MUST-FIX(命名目标不许 A 声称 B/绑定完整提款意图/fail-closed 迁移+七类负向测试)已纳入卡 DRAFT v2 pending。**路线图两轮外审+两轮内审全过, commit `4786dda7`, 现可供 Owner 钉死**; 钉死后首批 M-1+M0a。containment 凭证设计(建议直接做目标 B)排白天→NWT 二审→Owner money-path 签发才落码。
 
 **两条线记账边界(J1 钉·06:11)**: ①**P2(批1+批2+DoD-8)=已 Closed**(设计→红队→装载→生产 backfill→实金验证→NWT 最终 GREEN, 已跟 Owner 确认), 独立结项。②**模块化路线图**(v0.4.2 Codex 终审 GREEN-with-notes→等 Owner 钉死)=P2 收尾后 Owner 当天追加钦定的独立新方向, 非 P2 一部分。路线图 M3a 引用 covenant_family/P2 仅作"已完成首例+回执链"举证(Codex MF11 证据需要), 标了独立回执链未混入进度。两条线分开记账, 防接位混记。
+
+**J1tn 端点关闭交接(06:14·Bettor 记账待重指派)**: J1 断线, 4 项域内工作交接, **均不阻塞 Owner 钉死**(路线图 freeze-ready, 以下全是钉死后实现阶段或 P2 遗留, 排白天重指派):
+1. M-1 能力/效果清单 covenant/payout_shards 相关命令的 J1 域视角补全(custodial_transfer/prediction_settle_tx file:line 证据已入档, 剩结构性补全)→拟 J2 接(settler/covenant 域重叠)。
+2. §3.5 批1批2遗留 78 行(63 refunded+15 pruned_expired_waived)classifier 重判——流程=新 dry-run→审→显式 K18_BACKFILL_CONFIRMED 一次性重判, 缺"审"这一步接手人。**非紧急**(全 terminal 态 waived/refunded)→拟 J2 或 K-18 域接手人。
+3. containment 卡目标 B 设计若涉 K-18/payout_shards subject 绑定, 需 J1 视角→NWT 主审, J2 补 covenant 视角。
+4. M3a re-derive 纪律推广剩余字段清单(只做完 covenant_family 一个)→J1 域主责, 待重指派。
+处置: 均排白天工作恢复时具体重指派, 非紧急不半夜抢人; 当前关键路径(Owner 钉死)零依赖 J1。
