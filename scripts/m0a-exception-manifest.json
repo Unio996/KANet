@@ -1,4 +1,15 @@
 {
- "_doc": "M0a 冻结后新增裸 import 的唯一合法通道(设计 v0.2 §5)。七字段全必填: id/family/form/path/capability/justification/review_ref。capability ∈ {db-readonly, test-fixture}; relay-manager 族不开口。test-fixture 三静态限制全过可用 review_ref='self-serve:readonly-test'; db-readonly 必须人审锚(频道 txid / ledger)。",
- "entries": []
+ "_doc": "M0a 冻结后新增裸 import 的唯一合法通道(设计 v0.2 §5 + considered amendment 6c612df5+5d013865)。七字段全必填: id/family/form/path/capability/justification/review_ref。capability ∈ {db-readonly, test-fixture, m0c-controlled-relay-endpoint}。test-fixture 三静态限制全过可用 review_ref='self-serve:readonly-test'; db-readonly 必须人审锚(频道 txid / ledger)。relay-manager 族只经窄 capability m0c-controlled-relay-endpoint 放行受控 funnel(白名单 CONTROLLED_FUNNEL_ALLOWLIST shrink-only + content_digest[该文件批准时内容 sha256 hex]TOCTOU 防御 + NWT diff 审 load-bearing, NWT 4 约束); 其余 relay-manager import 一律硬拒走仓储层/API。",
+ "entries": [
+  {
+   "id": "MRC-operator-settle",
+   "family": "relay-manager",
+   "form": "import { sendCommandAsync } from relay-manager.js",
+   "path": "kasia-console/src/api/operator-settle.js",
+   "capability": "m0c-controlled-relay-endpoint",
+   "justification": "M0c-1 批B operator 结算专道 = relay.js:1726 零鉴权裸透传端点收敛 A 方案的 money-path 出口(受控 funnel, 非裸透传): POST /api/operator/settle-command 三层 auth(env 开关 ADMIN_OPERATOR_SETTLE_ENABLED 默认 off + checkAdminSecretTier(ADMIN_SECRET_OPERATOR_SETTLE 独立 operator 密钥, 非共享 ingest secret) + IP allowlist) + 命令白名单两档 fail-closed(covenant-specific 同档/transfer 额外 ADMIN_SECRET_OPERATOR_TRANSFER 独立 header tier/ecdsa_sign 剔除) + origin=operator。设计稿 docs/2026-07-23-m0c-1-operator-settle-lane-design.md v0.2 (Bettor 方向审 GREEN+NWT 红队 GREEN-with-2-note 复核闭)。",
+   "review_ref": "ae192f76",
+   "content_digest": "d9219253954578932fc68fda56cd91f4ad30e77cd3c9d1700aed2334847bc073"
+  }
+ ]
 }

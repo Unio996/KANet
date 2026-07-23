@@ -52,10 +52,12 @@ export function registerOperatorSettleRoutes(fastify) {
     const cmdType = command.type;
     // 命令白名单两档 (fail-closed: 白名单外拒)
     if (LANE2_HIGH_GATE.has(cmdType)) {
-      // 档二 transfer: 额外 ADMIN_SECRET_OPERATOR_TRANSFER tier — 实更严 (两把 secret), 未设/不匹配 fail-closed 拒.
-      const transferAuth = checkAdminSecretTier(request, 'ADMIN_SECRET_OPERATOR_TRANSFER');
+      // 档二 transfer: 额外 ADMIN_SECRET_OPERATOR_TRANSFER tier 走**独立 header** (M0c-1 批B MUST-FIX·NWT):
+      // 实更严=两把不同 secret 各带各自 header (x-kanet-admin-secret=OPERATOR_SETTLE + x-kanet-admin-secret-transfer=OPERATOR_TRANSFER);
+      // 同 header 双 tier 会退化成"两 secret 需相同=假更严"或"永不匹配=transfer 废=违红线". 未设/不匹配 fail-closed 拒.
+      const transferAuth = checkAdminSecretTier(request, 'ADMIN_SECRET_OPERATOR_TRANSFER', 'x-kanet-admin-secret-transfer');
       if (!transferAuth.ok) {
-        return reply.code(transferAuth.code).send({ ok: false, error: `operator settle lane 档二 transfer 需额外 tier: ${transferAuth.error}` });
+        return reply.code(transferAuth.code).send({ ok: false, error: `operator settle lane 档二 transfer 需额外 tier (独立 header): ${transferAuth.error}` });
       }
     } else if (!LANE1_COVENANT.has(cmdType)) {
       // 白名单外 (含剔除的 ecdsa_sign) → fail-closed 拒

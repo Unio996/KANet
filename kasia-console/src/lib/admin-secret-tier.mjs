@@ -23,14 +23,17 @@
  * @param {string} envVarName - 本次调用方所属 tier 的 env var 名(如 'ADMIN_SECRET_ZK_STATE_PREP')
  * @returns {{ok: true} | {ok: false, code: number, error: string}}
  */
-export function checkAdminSecretTier(request, envVarName) {
+// headerName (2026-07-23, M0c-1 批B MUST-FIX): 默认 'x-kanet-admin-secret' (向后兼容, 现有端点不变).
+// 多 tier 端点若要求"实两把不同 secret"(如 operator-settle transfer 档二), 第二 tier 必须走独立 header
+// (否则一个请求只有一个 x-kanet-admin-secret 值, 双 tier 读同一 header = 两 secret 需相同 = 假更严, 或永不匹配 = 功能废).
+export function checkAdminSecretTier(request, envVarName, headerName = 'x-kanet-admin-secret') {
   const secret = process.env[envVarName];
   if (!secret) {
     return { ok: false, code: 503, error: `admin endpoint disabled (${envVarName} env 未设)` };
   }
-  const provided = request.headers['x-kanet-admin-secret'];
+  const provided = request.headers[headerName];
   if (!provided || provided !== secret) {
-    return { ok: false, code: 403, error: `admin auth fail (X-KANet-Admin-Secret 缺失/不匹配, tier=${envVarName})` };
+    return { ok: false, code: 403, error: `admin auth fail (${headerName} 缺失/不匹配, tier=${envVarName})` };
   }
   return { ok: true };
 }
