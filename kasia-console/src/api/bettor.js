@@ -2042,9 +2042,9 @@ export async function registerBettorRoutes(fastify) {
       ORDER BY created_at DESC LIMIT 100
     `).all(...includeStates);
 
-    // Enrich with oracle vote summary + explorer URL prefix
+    // Enrich with oracle vote summary + explorer URL(单源 explorer-url.mjs; testnet 返 null——explorer-tn12 域名不存在, 死链收敛设计 §3)
     const network = process.env.KASPA_NETWORK || 'testnet-12';
-    const explorerBase = network === 'mainnet' ? 'https://explorer.kaspa.org' : 'https://explorer-tn12.kaspa.org';
+    const { buildExplorerUrl, buildExplorerAddressUrl } = await import('../lib/explorer-url.mjs');
     const enriched = rows.map(o => {
       let voteSummary = null;
       if (o.escrow_p2sh) {
@@ -2079,11 +2079,11 @@ export async function registerBettorRoutes(fastify) {
         ...o,
         is_phase_4a: !!o.escrow_p2sh,
         explorer: {
-          escrow: o.escrow_p2sh ? `${explorerBase}/addresses/${o.escrow_p2sh}` : null,
-          settle: o.settle_txid ? `${explorerBase}/txs/${o.settle_txid}` : null,
-          refund: o.refund_txid ? `${explorerBase}/txs/${o.refund_txid}` : null,
-          maker_escrow_lock: o.escrow_p2sh ? `${explorerBase}/txs/${o.broadcast_tx_id || ''}` : null,
-          taker_escrow_lock: o.taker_escrow_lock_tx ? `${explorerBase}/txs/${o.taker_escrow_lock_tx}` : null,
+          escrow: o.escrow_p2sh ? buildExplorerAddressUrl(o.escrow_p2sh, network) : null,
+          settle: o.settle_txid ? buildExplorerUrl(o.settle_txid, network) : null,
+          refund: o.refund_txid ? buildExplorerUrl(o.refund_txid, network) : null,
+          maker_escrow_lock: o.escrow_p2sh ? buildExplorerUrl(o.broadcast_tx_id, network) : null,
+          taker_escrow_lock: o.taker_escrow_lock_tx ? buildExplorerUrl(o.taker_escrow_lock_tx, network) : null,
         },
         oracle_vote_summary: voteSummary,
       };
