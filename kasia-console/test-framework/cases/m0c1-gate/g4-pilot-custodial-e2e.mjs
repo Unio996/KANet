@@ -130,16 +130,27 @@ async function main() {
     return env;
   }
 
+  // NWT note (20:16, non-blocker·打包前要 Bettor 钦定): evidence JSON 原只记 HTTP 层 detail(LAND①/
+  // BUST①/③ 三条撞车成同一句通用 503, 具体拒绝原因只在 relay stdout 没进持久化 artifact——Codex/
+  // Owner 光看 evidence 文件分不清每条 BUST 是不是被"对的"闸拦下的, 必须重新跑才能知道)。修法:
+  // 每次 post 后立即读 relayManager.getStatus() 抓 lastLog(relay 侧 deny 是同步 log 后才 IPC 回执,
+  // 时序上 HTTP 响应落地时该行大概率已刷新到 stdout), 存进 evidence 条目——非 100% 时序保证(极端
+  // 情况 log flush 可能慢于 IPC 回执), 诚实标为"尽力捕获, 非强一致性保证"。
+  function relayLastLog() {
+    const st = relayManager.getStatus().find((r) => r.relayNodeId === RELAY_ID);
+    return st?.lastLog || '(no relay log captured)';
+  }
+
   async function post(envelope) {
     const res = await fastify.inject({ method: 'POST', url: '/api/capability/wallet/transfer', payload: { envelope } });
     let body; try { body = JSON.parse(res.body); } catch { body = { raw: res.body }; }
-    return { status: res.statusCode, body };
+    return { status: res.statusCode, body, relayLastLog: relayLastLog() };
   }
 
   // ══ LAND: 最小正向用例(runbook §4 激活验证判据引用这一条) ══
   {
     const intent = { fromAddress: pilotAddress, target: DUMMY_TARGET, amount: '1', network: NETWORK };
-    const { status, body } = await post(buildSignedEnvelope({ intent }));
+    const { status, body, relayLastLog } = await post(buildSignedEnvelope({ intent }));
     // 🔴 断言收紧(不只"非 400/401/403"): 必须明确排除"relay 根本没起来"这类基础设施失败(500 +
     // 'Relay not running'/'timeout'类 sendCommandAsync 拒绝), 否则会跟"到达 relay 执行层, 因隔离
     // 死 RPC 端口连不上链才失败"(503, 预期证据)混为一谈——这正是本 harness 第一版踩过的假阳性坑
@@ -150,7 +161,7 @@ async function main() {
     const reachedExecutionLayer = (status === 200 && body?.ok && body?.txId) ||
       (status === 503 && /RPC down|relay 侧拒绝/.test(body?.error || ''));
     check('LAND① 最小正向: 到达 relay 执行层(非基础设施失败/非网关拒绝)', reachedExecutionLayer && !infraFailure,
-      `status=${status} body=${JSON.stringify(body)}`);
+      `status=${status} body=${JSON.stringify(body)} | relayLog=${relayLastLog}`);
   }
 
   // ══ BUST 1: 非白名单源地址(source_scope 不含) ══
@@ -160,25 +171,28 @@ async function main() {
     sqlite.prepare(`INSERT INTO tg_custodial_wallets (tg_user_id, kaspa_address, mnemonic_encrypted, network, created_at, updated_at)
       VALUES (?,?,?,?,?,?)`).run('g4-other-tg-user', otherAddress, encrypt(otherMnemonic), NETWORK, nowIso, nowIso);
     const intent = { fromAddress: otherAddress, target: DUMMY_TARGET, amount: '1', network: NETWORK };
-    const { status, body } = await post(buildSignedEnvelope({ intent }));
+    const { status, body, relayLastLog } = await post(buildSignedEnvelope({ intent }));
     // 网关早拒验不查 source_scope(§2.1: 那是 relay 权威层职责, 网关只做 cheap 早拒+DoS 护栏)——
     // 网关会放过这条(签名/amount/payee 都合法), 期待在 relay 侧被 source_scope 维度拒。
     // 🔴 诚实边界(同 LAND① 教训): capability.js 把"relay 主动 deny"和"relay RPC 连不上"都映射成
-    // 同一个通用 503"转账未上链", 本 harness 从 HTTP 层面无法区分"source_scope 精确拦下"vs"任意
-    // 原因失败"——具体拒绝原因的字符串级验证已在 scratch/j1-custodial-binder-smoketest.mjs 用例
-    // ⑧ 里做过(直调 verifyAppEnvelope 断言 reason 命中 source_scope)。本处只验证"基础设施没坏"
-    // (relay 确实活着响应了, 不是没启动/超时)+"没有意外放行"这两件事, 不重复断言具体原因。
+    // 同一个通用 503"转账未上链", HTTP body 本身分不清"source_scope 精确拦下"vs"任意原因失败"——
+    // 但 relayLastLog(NWT note 采纳, 20:16) 捕获了 relay 侧真实 log 行, evidence log 里能独立核实
+    // 具体命中 source_scope(不用重跑)。断言仍只判"没被意外放行+基础设施正常"(双重: HTTP 层弱判据
+    // 兜底 + evidence log 强证据人工可核), detail 里带 relayLog 供 Codex/Owner 独立核对具体原因。
     const infraFailure = status === 500 && /Relay not running|timeout/i.test(body?.error || '');
     const notWronglyAllowed = !(status === 200 && body?.ok && body?.txId);
     check('BUST① 非白名单源地址未被意外放行(且 relay 基础设施正常响应)', notWronglyAllowed && !infraFailure,
-      `status=${status} body=${JSON.stringify(body)}`);
+      `status=${status} body=${JSON.stringify(body)} | relayLog=${relayLastLog}`);
   }
 
   // ══ BUST 2: 超额度(amount 超 grant.max_amount_sompi=2 KAS) ══
   {
     const intent = { fromAddress: pilotAddress, target: DUMMY_TARGET, amount: '999', network: NETWORK };
-    const { status, body } = await post(buildSignedEnvelope({ intent }));
-    check('BUST② 超额度被网关早拒(403)', status === 403, `status=${status} body=${JSON.stringify(body)}`);
+    const { status, body, relayLastLog } = await post(buildSignedEnvelope({ intent }));
+    // amount cap 是网关早拒验(§earlyRejectCheck)自己判的, HTTP status=403 本身就是精确证据(不依赖
+    // relay 侧, relayLastLog 这条不适用——网关层直接拒, 请求根本没到 relay), 仍记 relayLastLog
+    // 便于跟其它三条 evidence 条目格式一致(值应显示上一条请求残留的 log, 非本条产生)。
+    check('BUST② 超额度被网关早拒(403)', status === 403, `status=${status} body=${JSON.stringify(body)} | relayLog(网关层拒·未到relay)=${relayLastLog}`);
   }
 
   // ══ BUST 3: 信封已过期(TTL 超窗) ══
@@ -186,13 +200,14 @@ async function main() {
     const intent = { fromAddress: pilotAddress, target: DUMMY_TARGET, amount: '1', network: NETWORK };
     const now = Date.now();
     const env = buildSignedEnvelope({ intent, overrides: { issued_at: now - 20 * 60 * 1000, expires_at: now - 15 * 60 * 1000 } });
-    const { status, body } = await post(env);
+    const { status, body, relayLastLog } = await post(env);
     // 网关早拒验目前不查 TTL(§2.3 记录的诚实缺口, pilot 阶段待补)——relay 侧 verifyAppEnvelope
-    // 会拒(过期)。同 BUST①诚实边界: 只验证"没被意外放行"+"relay 基础设施正常"。
+    // 会拒(过期)。同 BUST①诚实边界: 断言只判"没被意外放行+基础设施正常", relayLastLog 记进
+    // detail 供独立核实具体命中"envelope 已过期"(NWT note 采纳)。
     const infraFailure = status === 500 && /Relay not running|timeout/i.test(body?.error || '');
     const notWronglyAllowed = !(status === 200 && body?.ok && body?.txId);
     check('BUST③ 过期信封未被意外放行(relay 侧兜底, 网关早拒验暂未查 TTL·诚实标已知缺口)', notWronglyAllowed && !infraFailure,
-      `status=${status} body=${JSON.stringify(body)}`);
+      `status=${status} body=${JSON.stringify(body)} | relayLog=${relayLastLog}`);
   }
 
   // ══ BUST 4: 掉包(签名意图 amount=1, 实际请求体 target 字段被篡改成别的地址, 签名对不上) ══
@@ -202,9 +217,11 @@ async function main() {
     // 偷签名不改签名字段, 只改 intent.target(掉包) —— intent_digest 会对不上, 网关早拒验目前不查
     // digest 自洽(那是 relay 侧 verifyAppEnvelope 的 step)——网关会转发, relay 侧拒。
     const tampered = { ...env, intent: { ...env.intent, target: 'kaspatest:qzevileviltargetaddressxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx' } };
-    const { status, body } = await post(tampered);
+    const { status, body, relayLastLog } = await post(tampered);
+    // 精确证据(不依赖 relayLastLog): 网关早拒验的签名检查直接判(body.error 里带具体文案"信封签名
+    // 验证失败"), 请求根本没到 relay(掉包让签名对不上, 网关早拒验第一层就拦), status 本身是精确判据。
     const bust = status !== 200 || !body.ok;
-    check('BUST④ intent 掉包(digest 自洽被破坏)被拦', bust, `status=${status} body=${JSON.stringify(body)}`);
+    check('BUST④ intent 掉包(digest 自洽被破坏)被拦', bust, `status=${status} body=${JSON.stringify(body)} | relayLog(网关层拒·未到relay)=${relayLastLog}`);
   }
 
   await relayManager.stopRelay(RELAY_ID);
