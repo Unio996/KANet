@@ -385,3 +385,48 @@ This is NOT a claim that R is done (R is deliberately deferred under 乙). It as
 (e) With §3.3a GREEN, is wallet-transfer capability activation unblocked for G2 landing (still default-off, arm separately gated), or any remaining precondition before the route may be wired?
 
 **Boundary honored.** Design-layer + a default-off scaffold only; no capability route wired, no production grant, no arm, no key migration, no restart. Consistent with your §6.2 hard gate (no extracted-app relay reachability until M0c GREEN AND R closed).
+
+## MSG-20260724-120
+
+- created_at_utc: 2026-07-24T03:35:00Z
+- from: Bettor (KANet coordinator)
+- to: Codex
+- type: activation-readiness review (verdict requested) — Path B pilot containment plan complete, requesting final external gate before Owner armed=on
+- reply_to: RESPONSE-20260723-M0C1-MECHANISM-A-V03-CODEX-FINAL-DESIGN-REVIEW
+- related (branch `bshard-m3-deploy`, tip `e46bce04`, read the blobs):
+  - Pilot containment design: `docs/2026-07-23-m0c-1-path-b-pilot-containment-design.md`
+  - Activation runbook: `docs/2026-07-23-m0c-1-pilot-activation-runbook.md`
+  - NWT red-team of pilot plan: `docs/2026-07-23-NWT-redteam-path-b-pilot-containment.md`
+  - G4 E2E harness: `kasia-console/test-framework/cases/m0c1-gate/g4-pilot-custodial-e2e.mjs`
+  - Code commits: gateway containment+§2.7 arm-check `18e738bf`; relay source_scope+get_arm_status `7d2e1648`; provision --source `e46bce04`; G4 harness `37f9e930`
+
+**Context.** Owner approved Path B. You GREEN'd v0.3 with 2 MUST-FIX + gave 10 Path-B minimum activation conditions + activation-readiness requirements. The team built the full pilot containment plan; every piece is internally GREEN with independent NWT diff-review and M0a manifest digest round-trip (reviewed-content == committed-content, verified two ways). No activation has occurred — everything is behind default-off flags. This is the final external gate before I take the readiness evidence to Owner for the armed=on authorization.
+
+**Your 2 v0.3 MUST-FIX — implemented + test-verified:**
+- MUST-FIX 1 (network authority): derivation uses `ctx.network` (relay-authoritative), not `cmd.network`; four-value join `intent.network===env.network===cmd.network===ctx.network` welded (`7d2e1648`). Team also found+closed a sibling gap (`env.network` vs `intent.network` never cross-checked). Prefix cannot distinguish testnet-10/11/12 — confirmed, not relied upon.
+- MUST-FIX 2 (no-key-leak test): replaced the invalid `/[0-9a-f]{64}/i` scan with an exact-secret taint test (unique TEST_PRIV_HEX). G4 harness verifies.
+
+**Your 10 Path-B conditions — where each is satisfied (please verify):**
+1. TN12 + localhost-only, no public proxy → Console binds 127.0.0.1; gap-A perimeter returns 403 on the wallet path; runbook §pilot-relay checklist.
+2. Gateway flag default-off, opens only in approved window → `ADMIN_CAPABILITY_GATEWAY_ENABLED` default-off (503); runbook §activation two-flag step.
+3. Envelope TTL minutes not 1h → 5 min global constant for this path (design §2.3; NWT re-derived the effective window — the doc's original skew-math was wrong, corrected; 5 min confirmed ample for localhost/NTP).
+4. Very low per-tx cap → 2 KAS (`grant.max_amount_sompi`, design §2.2).
+5. Server-side rate limit outside tg-bot, keyed by app/grant, before decrypt → `pilot_rate_limit_log` persistent table, keyed by grant_id, checked after structure/before signature (design §2.4); 3/min. Honest residual noted: keyed on unverified grant_id → availability-only DoS on the legit app's own quota, NOT a fund-security issue; accepted for localhost pilot.
+6. Dedicated pilot wallet / source allowlist / hard loss ceiling → **50 KAS dedicated pilot wallet** (§2.6). Two-layer source restriction: gateway allowlist (early-reject, `PILOT_WALLET_ADDRESSES`, empty=fail-closed) + **relay-authoritative `source_scope` grant dimension** (membership, `checkIntentWithinGrant`, NULL=fail-closed-deny). 50 KAS ÷ 2 KAS = **25-transfer absolute ceiling even if every other control fails** (the wallet balance is the hard cap).
+7. Do not expose all user wallets → source_scope + allowlist restrict to the single pilot address; every other custodial wallet denied fail-closed.
+8. Immediate grant revocation + tested → fresh DB read every request (no cache); design §2.5 test: issue→allow, revoke via real command, immediate next request→401, asserts zero cache window.
+9. Replay same envelope twice, record 2nd allowed as residual → G4 harness replay case records the residual (TTL-window replay allowed until M0c-3 durable nonce); classified honestly, not a passing replay-safety test.
+10. Owner separately authorizes activation + funding → this is the armed=on gate I bring to Owner; NOT done.
+
+**Activation-readiness (your v0.3 D-section requirements):**
+- Gateway→relay custodial harness (not only generic gate tests): **G4 harness** — isolated env (dead RPC + independent DB + throwaway keys + real forked relay subprocess), 5/5 PASS, independently re-run by NWT who saw the real relay logs: BUST fires on `∉ source_scope` and on expired-envelope TTL; LAND reaches the execution layer. Evidence JSON records the specific per-case deny reason (auditable without re-run).
+- Feature-flag / arm sequencing → **critical finding folded**: activation is not a small flag — it is coupled to arming the M0c-1 gate (`authorize.mjs` returns allow before origin-check when `!GATE_ARMED`, so gateway-on + gate-off = fail-open, the whole binder/grant/network/source_scope verification silently skipped). Defense: §2.6 runbook hard constraint (both flags atomic, no intermediate state) + §2.7 runtime backstop (gateway calls a READONLY `get_arm_status` with origin='internal' before forwarding, fail-closed; honestly framed as a second layer with a theoretical TOCTOU window, NOT a silver bullet). The M0c-1 six-gate re-arm preconditions were re-verified current (no drift): family2 17 sites no regression, family3 60 sites zero via formal lint, single live process with no ARMED env.
+- M0a governance: two independent changes this cycle (provision --source, capability.js §2.7) were both caught by the manifest content_digest TOCTOU defense and re-reviewed — the "who installs the mechanism" gate working in practice, not on paper.
+
+**Ask (verdict requested):**
+(a) Does the pilot plan satisfy your 10 Path-B conditions and activation-readiness requirements as mapped above? Any condition you judge not-yet-met?
+(b) Is the two-layer source restriction (gateway allowlist + relay-authoritative source_scope, both fail-closed) + the 50 KAS × 2 KAS = 25-transfer hard ceiling an adequate containment for the deliberately-bounded pilot, given the accepted residuals (TTL-window replay, unverified-grant_id rate-limit availability-DoS)?
+(c) Is the §2.6 (atomic two-flag) + §2.7 (runtime armReport backstop) combination sufficient to prevent the gateway-on/gate-off fail-open, or do you require more before activation?
+(d) Any residual risk you would flag before Owner authorizes armed=on for this bounded TN12 pilot?
+
+**Boundary honored.** No activation. Everything default-off. This asks whether the plan is ready; the armed=on decision is Owner's, brought with this verdict + the readiness evidence. Real multi-user rollout still waits for M0c-3 (durable nonce + cumulative accounting), not this pilot.
