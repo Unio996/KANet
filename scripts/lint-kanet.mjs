@@ -1440,7 +1440,8 @@ for (const fp of targets) {
   checkR_SELF_HTTP_FETCH(fp, content);         // R-SELF-HTTP-FETCH [WARN] (2026-07-14 legacy-refund 自锁死循环修复设计): console 禁 fetch 自己的端口
   checkR_FETCH_NO_TIMEOUT(fp, content);        // R-FETCH-NO-TIMEOUT [WARN] (同上设计 修法C): fetch() 建议带 AbortSignal.timeout
   checkR_PS_FAMILY_DISPATCH(fp, content);      // R-PS-FAMILY-DISPATCH [ERROR] (K-18 §3.4 2026-07-21): compilePayoutShardRedeem/V2Redeem 调用点白名单, 防绕过 coherence gate
-  checkR_SCA_ALIAS_ORIGIN(fp, content);        // R-SCA-ALIAS-ORIGIN [WARN] (M0c-1 批C 2026-07-23): sendCommandAsync 别名 call 缺 origin/裸值传参检测, 防 armed 后漏标断路
+  checkR_SCA_ALIAS_ORIGIN(fp, content);        // R-SCA-ALIAS-ORIGIN [ERROR] (M0c-1 批C 2026-07-23): sendCommandAsync 别名 call 缺 origin/裸值传参检测, 防 armed 后漏标断路
+  checkR_SENDCMD_ORIGIN_REQUIRED(fp, content); // R-SENDCMD-ORIGIN-REQUIRED [WARN→ERROR] (第三断路族根治 2026-07-23): 直调缺 origin 检测, 57 处补标驱动器
 }
 checkR10();
 checkR_NULLIFIER_I64();
@@ -1522,6 +1523,49 @@ function checkR_LEGACY_ORIGIN_SHRINK() {
       violate('R-LEGACY-ORIGIN-SHRINK', `${fp} legacy-unmigrated 计数 ${actual} > baseline ${allowed} — 禁新增 legacy 标(它是迁移债非通行证): 新路由/新调用必须直接 origin=app(信封)/operator(专道)/internal(纯 daemon)。`, file(fp), 0);
     } else if (actual < allowed) {
       warn('R-LEGACY-ORIGIN-SHRINK', `${fp} legacy 实际 ${actual} < baseline ${allowed} — 迁移有进展, 把 ${LEGACY_BASELINE_PATH} 对应计数收紧到 ${actual}(与迁移代码同 commit, 债账实时)。`, file(fp), 0);
+    }
+  }
+}
+
+// ── R-SENDCMD-ORIGIN-REQUIRED [WARN→ERROR] (2026-07-23 开闸事故第三断路族根治·NWT 提议 Bettor 采纳) ──
+// 每个 sendCommandAsync 直调必须带 origin 第4实参(五值之一)。事故实锤: 批A/C 手工标注漏 ~57 处缺失
+// origin 的直调(多 daemon tick 路径), armed 下 latent 断结算——手工追永漏, 静态 lint 强制=机制根治。
+// warn-first(规则65 门①): 57 处补标完+NWT diff GREEN 后升 ERROR。别名 call 由 R-SCA-ALIAS-ORIGIN 管,
+// 本规则管直调 sendCommandAsync(——两规则合起来覆盖直调+别名全集。
+// 检测: call-arg-span 括号配对(同 R-SCA 方法), span 内无五值 origin 字面量 → warn。
+// 已知限界(与 R-SCA 同源诚实标): span 内 payload 裸五值词字面量可假阴(现存零命中); 变量传 origin
+// (如 wrapper 形参透传)不在字面量检测内=wrapper 内部标注处已被检测, 透传处误报→排除含 origin 标识符的 span。
+function checkR_SENDCMD_ORIGIN_REQUIRED(filepath, content) {
+  if (!/kasia-console[\\/]src[\\/].*\.(?:js|mjs)$/.test(filepath)) return;
+  if (/relay-manager\.js$|\.test\.[cm]?js$/.test(filepath)) return; // 定义方+测试豁免
+  const lines = content.split('\n');
+  const ORIGIN5_RE = /['"](?:internal|app|operator|legacy-unmigrated)['"]|\borigin\b/; // 字面量五值 or origin 标识符透传
+  const callRe = /(?:^|[^.\w$])sendCommandAsync\s*\(/;
+  const extractSpan = (startLine, startCol) => {
+    let depth = 0, span = '', inStr = null;
+    for (let li = startLine; li < Math.min(startLine + 40, lines.length); li++) {
+      const s = lines[li];
+      for (let ci = (li === startLine ? startCol : 0); ci < s.length; ci++) {
+        const ch = s[ci], prev = ci > 0 ? s[ci - 1] : '';
+        if (inStr) { span += ch; if (ch === inStr && prev !== '\\') inStr = null; continue; }
+        if (ch === '"' || ch === "'" || ch === '`') { inStr = ch; span += ch; continue; }
+        if (ch === '(') { depth++; if (depth === 1) continue; }
+        if (ch === ')') { depth--; if (depth === 0) return span; }
+        if (depth >= 1) span += ch;
+      }
+      span += '\n';
+    }
+    return null;
+  };
+  for (let i = 0; i < lines.length; i++) {
+    const code = lines[i].replace(/\/\/.*$/, '');
+    if (/^\s*(?:\*|\/\*|import\b|export\s+\{)/.test(lines[i])) continue;
+    const cm = callRe.exec(code);
+    if (!cm) continue;
+    const openCol = code.indexOf('(', cm.index + cm[0].length - 1);
+    const span = extractSpan(i, openCol >= 0 ? openCol : 0);
+    if (span == null || !ORIGIN5_RE.test(span)) {
+      warn('R-SENDCMD-ORIGIN-REQUIRED', `sendCommandAsync 直调${span == null ? '实参 40 行内未闭合(可疑)' : '缺 origin 第4实参'}(五值之一: internal/app/operator/legacy-unmigrated)— 缺失=armed 下 fail-closed 拒·daemon tick 路径 latent 断结算(2026-07-23 第三断路族 57 处实锤)。补标或经 wrapper 透传。`, filepath, i + 1);
     }
   }
 }
