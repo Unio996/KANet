@@ -1,6 +1,7 @@
 # M0c-1 app provision 组件设计稿 — grant registry + 信封验证 + provision（J2 主设计）
 
-> **Status**: DRAFT（2026-07-23 · J2 出稿 → 待 Bettor 方向审 → 待 NWT 红队 → 待 Owner money-path 签发才落码）
+> **Status**: v0.2 修订版（2026-07-23 · J2 出稿 → NWT 红队 GREEN-with-1-MUST-FIX+1-note（`f9d7fc32`）→ J2 连修订 v0.2 → 待 Bettor 方向审 → 待 Owner money-path 签发才落码）
+> **v0.2 修订**：MUST-FIX（§3 step3 签名范围：验签绑**全 canonical envelope 去 signature**、非只 intent，M-1.6 §5"任一字段变化必须使签名失效"——防 nonce 换重放/跨 relay·network·grant 重放/expiry 延期复用；step4 strict-reject 全信封；§6 补测试）+ note（§2 registry 每命令 fresh 读/写失效缓存，焊吊销即时可见非被 relay 缓存打败）。
 > **本卡性质**：设计文档，不改一行执行代码；不授权任何落码/凭证 provision/relay 重启/签名/广播/结算/资金移动。
 > **是什么**：批3 M0c-1 gate 本体（`547f1c07`）的 app 路径 grant/envelope 验证是 **stub**（`GRANT_ENVELOPE_IMPLEMENTED=false`，armed=on 被 arm 前提焊死拦）。本组件**填实** stub——app 凭证 + grant registry + 信封验证 + provision，实现后置 `GRANT_ENVELOPE_IMPLEMENTED=true`，解 armed=on 前提之一。
 > **依据**：M0c-1 母卡 §4.1（信封验证 step2-7）/§4.2（relay-authoritative grant）/§4.3（provision operator 离线，v0.2 NWT MUST-FIX + J1 补丁 M1-5）+ §5（AuthResult 接口）+ 批3 authorize.mjs（`authorizeAppCommand` stub 填实点）。
@@ -41,7 +42,7 @@
 | revocation | 吊销标识（M0c-3 ⑦查此） |
 
 - **宿主（乙期）**：DB 表（过 DATABASE.md migrate v190+），Console TCB 内，**只读评估**（gate 读）+ **operator 离线写**（§4）。
-- **relay 侧读取**：relay gate（authorizeAppCommand）查 registry 取 app 公钥（验签）+ grant scope（intent⊆grant）。relay 进程启动加载 or 按需查（落码定，考虑 registry 一致性 + 性能）。
+- **relay 侧读取（🔴 v0.2 note·registry 读一致性·焊吊销即时可见）**：relay gate（authorizeAppCommand）查 registry 取 app 公钥（验签）+ grant scope（intent⊆grant）。**每命令 fresh 读 or 写失效缓存**——**不启动缓存**：若启动加载缓存，operator 吊销（M0c-3 ⑦即时）在 relay 重启前不生效 = 缓存的被吊销 grant 仍放行 = 吊销即时性被 relay 缓存打败。焊"吊销即时可见"（吊销写入后下条命令即拒），落码 diff 审核 registry/吊销读的 freshness。
 
 ---
 
@@ -51,8 +52,8 @@
 
 1. **无害只读白名单豁免**（§3.1，批3 已有 READONLY_ALLOWLIST）——命中放行。
 2. **解 `cmd.envelope`**（缺 → 拒 fail-closed）。
-3. **验签名**：`app_key_id` → 查 grant registry 取 app 公钥 → `kaspa.verifyMessage(canonical(envelope.intent), envelope.signature, appPubkey)`（复用 kaspa-wasm 验签，不新造）；签名不过 → 拒。
-4. **canonical 反序列化**信封字段（M-1.6 §5 字段表；domain-separation；防 unknown 字段碰撞[reference-feerules-hash-commit-unknown-field-collision] → strict-reject 未知字段）。
+3. **验签名（🔴 v0.2 MUST-FIX·签名范围立身之本）**：`app_key_id` → 查 grant registry 取 app 公钥 → `kaspa.verifyMessage(canonical(**全 envelope 去 signature 字段**), envelope.signature, appPubkey)`（复用 kaspa-wasm 验签，不新造）；签名不过 → 拒。**验签绑 M-1.6 §5 全字段**（protocol/domain/version + app_key_id + grant-id + relay + network + intent digest + scope + nonce + issued-at + expiry）——**不只签 intent**（M-1.6 §5"任一字段变化必须使签名失效"）。只签 intent 的窄化 = nonce 没签→换 nonce 重发绕 M0c-3 防重放(vacuous) / relay·network 没签→跨 relay·network 重放 / expiry 没签→延期复用 / grant-id 没签→跨 grant 套签名 —— 全 envelope 绑签焊死这些面。
+4. **canonical 反序列化**信封字段（M-1.6 §5 字段表；domain-separation；防 unknown 字段碰撞[reference-feerules-hash-commit-unknown-field-collision] → **strict-reject 未知字段·对全信封**，非只 intent）。
 5. **intent ⊆ grant 校验**（§4.2 — MF3 核心，逐维度：命令∈allowed_commands / relay·wallet∈scope / market·outpoint∈scope / 收款人∈payee+额度≤上限 / 有效期内）。**verify-value-source（M0c-2 §3.5 同纪律）**：抽的每个 scope 值来自 §4.1 冻结的 canonical intent、relay 执行消费的同一字段，禁旁支/re-parse。
 6. **[M0c-3] nonce/replay durable 校验**（本组件留 M0c-3 接口，M0c-3 实现——禁内存 nonce 占位）。
 7. **全过 → 返回 AuthResult**（§5：authenticated+callerId+grantId+intentDigest）→ decision=allow；任一步失败 → fail-closed 拒 + 不推进状态。
@@ -86,10 +87,12 @@
 3. **grant inflation**（app 签超 grant scope 的 intent）→ intent⊄grant → 拒。
 4. **未知 key-id**（无 grant）→ 拒。
 5. **过期/吊销 grant** → 拒。
-6. **未知字段碰撞**（信封夹带未知字段）→ strict-reject 拒。
+6. **未知字段碰撞**（信封夹带未知字段，**全信封 strict-reject**）→ 拒。
 7. **provision 场景A不可达**（app 用凭证试 provision 新 grant 经网关/HTTP/IPC）→ 必拒（§4）。
 8. **verify-value-source**（信封 intent 与执行字段不一致/掉包）→ scope 抽取==执行字段核。
-9. **合法 app**（有效 grant+签名+intent⊆grant）→ 真放行、真执行。
+9. **合法 app**（有效 grant+全 envelope 签名+intent⊆grant）→ 真放行、真执行。
+10. **🔴 签名范围（v0.2 MUST-FIX）**：拿合法签名后**改 nonce/relay/network/expiry/grant-id 任一** → 签名失效验拒（防换 nonce 重放/跨 relay·network·grant 重放/延期复用）。
+11. **🔴 吊销即时（v0.2 note）**：operator 吊销某 grant 后，该 grant 下条命令**立即拒**（relay 无启动缓存 staleness 窗，registry/吊销 fresh 读）。
 
 ---
 
