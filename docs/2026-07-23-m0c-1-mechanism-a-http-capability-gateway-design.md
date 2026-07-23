@@ -1,6 +1,7 @@
 # M0c-1 机制A — HTTP 能力网关设计 v0.1（外部 app 带信封受保护接入 / tg-bot 头号消费者）
 
-> **Status**: CURRENT（v0.1 设计草案·待 Bettor 方向审 + NWT 5 角度红队 + Codex 外部对抗审）
+> **Status**: CURRENT（v0.2·NWT 红队 GREEN-with-1-MUST-FIX+2-note[`36a9d901`] fold 完·待 Codex 外部对抗审回齐 → Owner money-path 签发）
+> **v0.1→v0.2 变更**（NWT 独立重跑 5 角度红队，MUST-FIX 是 J2 §5 自答未触及的第 6 角度，非验证既有）：①§3.2/§6 批 G2 MUST-FIX fold（网关签名验证由「可选」改「强制」+ 批 G2 落码 feature-flag 默认 off 与 relay armed 状态解耦，防新钱路面 fail-open 空窗，比照 `operator-settle.js:36-37` 先例）②§4.3 N1 诚实标 fold（`payee_scope` 对「提现到任意地址」形同虚设，实防线 = 保守额度上限 + tg-bot 诚实，非「限定收款人」；Bettor 裁：边界可接受作模块化第一样板，但必须诚实标 + 保守额度）③留 §9 v0.3 槽接 Codex findings。
 
 > **作者**: J2（settler/voter/pipeline·clean 会话接位）· 2026-07-23
 > **主线依据**: Owner 方向锚（系统干净分层·各功能块可模块化接入 kanet + broker 重点）→ Bettor 自判技术主线机制A 做（`#xl6fla`）。
@@ -57,10 +58,11 @@
 3. **翻译成具体 `sendCommandAsync` 调用**，**强制 `origin='app'`**，把信封**原样**随命令带到 relay（供 relay 侧权威 C 验证）。
 4. **不做**细粒度 covenant/outputs 派生 scope 判定（M0c-2）；不做 grant 签发（provision 只走 operator 离线脚本，§4.2 焊死）。
 
-### 3.2 双验模型（答 NWT 角度 2：网关验 or relay 验 or 双验 = **双验**）
-- **网关早拒验**（Console 侧）: envelope 结构 strict-reject + 签名验证 + intent_type ∈ 本路由允许命令。**目的 = 早拒 + DoS 护栏**，非权威闸。
+### 3.2 双验模型（答 NWT 角度 2：网关验 or relay 验 or 双验 = **双验，且网关验证是强制的**）
+- **网关早拒验**（Console 侧）: envelope 结构 strict-reject + **签名验证（🔴 v0.2 fold：MUST，非可选）** + intent_type ∈ 本路由允许命令。**目的 = 早拒 + DoS 护栏**——但不是「因为 relay 会兜底所以网关可以省」；两层各自独立完整验证，互不依赖对方为前提（见 §6 G2 MUST-FIX 的推理错误：曾把「网关可选」建立在「relay 会兜底」上，而 relay armed=off 时兜底本身是 inert 的，两个「各自不完整」互相 backstop 会在 armed=off 窗口内合成为 fail-open，NWT `36a9d901` MUST-FIX）。
 - **relay 权威验**（`authorizeCommand` → `authorizeAppCommand` → `verifyAppEnvelope`）: 读 grant registry 做 `intent⊆grant` + `intent==cmd` + 有效期/吊销 + 时间窗。**这是 load-bearing 最后闸**（母卡 §2.3：relay 侧 C 验证是命令执行前 fail-closed 闸；网关对场景 B 零防御，relay 侧验证 backstop 网关授权 bug + post-R 隔离预备）。
 - **🔴 信封端到端不可变**: 网关**绝不重序列化/改动信封**——原样对象经 `sendCommandAsync` → IPC `child.send` → relay，relay 对同一 envelope 重跑 `canonicalJson` 重验签（`envelopeSigningMessage`）。网关篡改任一字段 = relay 重验签失败 = fail-closed 拒（自我 backstop）。
+- **两层验证独立成立的含义**: 网关签名验证失败 = 网关直接 403，请求不到 relay IPC（早拒价值）；即使网关验证被绕过/有 bug，relay 侧仍独立重验签+ scope（backstop 价值）；**armed=off 期间**（relay gate inert）网关验证仍是唯一实际生效的闸——这是 §6 G2 feature-flag 设计的直接推论。
 
 ### 3.3 路由形态（母卡 §2：按业务能力命名·非裸 `sendCommandAsync` 透传）
 **业务能力命名路由**，每路由绑死一个（或小集）`intent_type`，拒绝不匹配——这是「非裸透传」的机械实现（对比 relay.js:1726 转发任意 body 的反例）。新增文件 `kasia-console/src/api/capability.js`：
@@ -75,7 +77,7 @@ POST /api/capability/bet/prep          → 确定性计算（NO STATE·可豁免
 每路由 handler 统一走一个 `handleCapabilityCommand(request, { allowedIntentType })`：
 1. 取 `body.envelope`（缺 = 400）。
 2. `intent_type !== allowedIntentType` → 403（本路由不接受该命令）。
-3. 网关早拒验（§3.2 网关验）：结构 strict + 签名。**复用 relay 侧 `app-envelope.mjs` 导出的 `canonicalJson`/`envelopeSigningMessage`/结构校验**——抽成共享 lib（`kasia-console` 与 `kasia-relay` 都能 import 的纯函数模块）避免两份漂移（同 grant-schema 单一真相源思路）。签名验证网关侧可选（relay 权威重验），但早拒 UX 好。
+3. 网关早拒验（§3.2 网关验）：结构 strict + 签名。**复用 relay 侧 `app-envelope.mjs` 导出的 `canonicalJson`/`envelopeSigningMessage`/结构校验**——抽成共享 lib（`kasia-console` 与 `kasia-relay` 都能 import 的纯函数模块）避免两份漂移（同 grant-schema 单一真相源思路）。**签名验证 MUST，非可选**（见 §3.2：不能把安全性全押给 relay 权威重验，armed=off 期间那扇门本来就 off）。
 4. **强制 origin**: 构造 `cmd = { type: intent_type, ...env.intent 业务字段, envelope: env }`，调 `sendCommandAsync(relayId, cmd, undefined, 'app')`。入站任何 `origin` 声明被丢弃（网关只会传 `'app'`，母卡 §4.0：网关强制覆写任何入站 origin 为 `'app'`）。
 5. relay 侧 `authorizeCommand` 见 `origin='app'` → 权威验（§3.2 relay 验）。deny → 网关返 403 + reason；allow → 命令执行，返 txId。
 
@@ -91,7 +93,7 @@ operator 用 `scripts/m0c1-grant-provision.mjs gen-key` 生成 tg-bot app 密钥
 - `app_key_id='tg-bot'`, `app_pubkey=<tg-bot 公钥>`
 - `allowed_commands=['custodial_transfer', <faucet>, <bet-confirm>]`（**只钱路命令进 grant**；readonly 走白名单豁免不进 grant）
 - `relay_scope=[CUSTODIAL_RELAY_ID]`, `network='testnet-12'`
-- `payee_scope`=（见 §4.3 难点）, `max_amount_sompi`/`max_cumulative_sompi`=单笔/累计上限, `valid_until`=有效期
+- `payee_scope`=（🔴 v0.2 N1: 对 custodial_transfer「提现到任意地址」形同虚设，见 §4.3）, `max_amount_sompi`/`max_cumulative_sompi`=**实防线核心**（单笔/累计上限，务必保守）, `valid_until`=有效期
 - 未授权维度列留 NULL = 触及即拒（缺维度默认最严）。
 
 ### 4.2 tg-bot 侧改造（`console-api.mjs`）
@@ -100,11 +102,17 @@ operator 用 `scripts/m0c1-grant-provision.mjs gen-key` 生成 tg-bot app 密钥
 - **信封构造 SDK**: 抽 `tg-bot/envelope-sign.mjs`（或共享 lib），封装 nonce 生成 + issued_at/expires_at + intent_digest + `kaspa.signMessage`。
 - 只读端点**可保留现状或也迁**（无副作用，优先级低）——先迁钱路面（最大风险）。
 
-### 4.3 🔴 遗留难点（红队/设计必答）: /send 的端到端用户绑定
+### 4.3 🔴 遗留难点（NWT 红队 N1·Bettor 已裁）: /send 的端到端用户绑定 + payee_scope 实防线诚实标
+
 grant 收窄了「tg-bot 能发什么命令 + 额度」，但**未解**「一人只能转自己钱包」——`custodial_transfer` 的 `tg_user_id`（决定解密哪个托管钱包）仍是 tg-bot 传入的业务数据，对 gate 不透明（`app-envelope.mjs` callerId=service 身份，母卡 §5.1：命令 payload 里端用户标识对 gate 是不透明业务数据，不读不信不转述为身份）。
 - **候选 A**: 把 `tg_user_id` 纳入 intent 字段 + payee_scope 绑定？不行——payee 是收款地址维度，tg_user 是钱包属主，语义不同。
-- **候选 B**: 托管钱包属主绑定移到 **Console 侧业务鉴权**（不是 M0c-1 gate 职责）——即 `/api/capability/wallet/transfer` handler 或 tg-wallet 逻辑层保留「tg_user_id = Telegram 认证的调用者」不变式（现 tg-wallet.js:91-92 已有此设计意图，但依赖 tg-bot 诚实传 ctx.from.id）。gate 保证「tg-bot 这个 service 只能发限额 transfer」，属主绑定归 Console 业务层。
-- **本 v0.1 倾向 B + 显式诚实标注**: M0c-1 gate 解决「共享 secret → 窄 service grant」（场景 A service 越权），**不解决**「tg-bot 内部 tg_user 冒名」（那是 Telegram 侧认证 + Console 业务层职责，另立卡）。红队请裁此边界是否可接受。
+- **候选 B**（采纳）: 托管钱包属主绑定移到 **Console 侧业务鉴权**（不是 M0c-1 gate 职责）——即 `/api/capability/wallet/transfer` handler 或 tg-wallet 逻辑层保留「tg_user_id = Telegram 认证的调用者」不变式（现 tg-wallet.js:91-92 已有此设计意图，但依赖 tg-bot 诚实传 ctx.from.id）。gate 保证「tg-bot 这个 service 只能发限额 transfer」，属主绑定归 Console 业务层。
+
+**🔴 N1（NWT 红队 `36a9d901`·v0.2 fold）—— payee_scope 对「提现到任意地址」形同虚设**: `custodial_transfer` 的收款地址是用户自由指定的目标地址（提现场景），不是固定收款人集合；`payee_scope` schema 语义 = membership 集合（NULL=拒非不限，§ SCALAR_DIMENSIONS `kind:'membership'`），**没有通配符/"任意合法 Kaspa 地址"语义**。若要 tg-bot 能支持"提现到任意用户指定地址"这个真实功能，`payee_scope` 要么留空（触及即拒 = 功能直接废掉）要么塞进一个不断膨胀的白名单（不是真限制）——**两种都不是"限定收款人"的有效实现**。
+
+**推论（诚实标，Codex `v0.3.1` note#4 已 pre-rule：multi-user tg-bot credential 本身不能 authorize 特定用户提现）**: candidate B 的实际防线**退化为仅额度上限**——不是 grant 收窄了「该转给谁」，只是收窄了「最多转多少」+「tg-bot 诚实传 ctx.from.id」两条，**均非密码学约束**。
+
+**Bettor 裁定（`#xluo50`，方向裁·非技术正确性裁）**: 边界可接受，作为模块化第一样板落地，**但必须**：①`max_amount_sompi`/`max_cumulative_sompi` 保守设值（不是形式上有个数字，是真正把单次/单日 blast-radius 压到可承受）②本节诚实标是 canonical 措辞，任何后续文档/汇报引用 payee_scope 时禁止暗示"限定了收款人"③这是**已知 M0c-1 粗粒度 scope 局限**（母卡 §3.5 note：细粒度 covenant/outputs 派生 scope 归 M0c-2），不是本卡实现 bug，不因此卡落码。
 
 ### 4.4 共享 secret 废除（答 NWT 角度：迁完共享 secret 必实废非并存）
 - tg-bot 钱路面迁完 → tg-bot 不再需要 `INGEST_SECRET` 调钱路。
@@ -134,7 +142,9 @@ grant 收窄了「tg-bot 能发什么命令 + 额度」，但**未解**「一人
 ## 6. 分批落码计划（每批 NWT diff 审·verdict-before-push·armed 前置）
 
 - **批 G1**: 共享 envelope lib（`canonicalJson`/`envelopeSigningMessage`/结构 strict 校验抽成 console+relay 共享纯函数模块，防两份漂移）+ 单测。
-- **批 G2**: `capability.js` 网关路由 + `handleCapabilityCommand`（wallet/transfer 先行·钱路最大风险面）+ `sendCommandAsync(...,'app')` 唯一铸造点 lint 规则。armed=off 下网关路由存在但 relay gate inert（=现状不 live）。
+- **批 G2**: `capability.js` 网关路由 + `handleCapabilityCommand`（wallet/transfer 先行·钱路最大风险面）+ `sendCommandAsync(...,'app')` 唯一铸造点 lint 规则。
+  - **🔴 v0.2 MUST-FIX fold（NWT `36a9d901`，比照 `operator-settle.js:36-37` 先例）**: ~~armed=off 下网关路由存在但 relay gate inert（=现状不 live）~~ 这句断言**没有论证为什么安全**——链条：网关早拒验读 registry 取 app_pubkey 做签名验证，但 v0.1 写「网关侧签名验证可选（relay 权威重验）」；而 relay armed=off 时 `authorizeCommand` 对**任何** origin 都直接 `{decision:'allow'}`（inert，§ authorize.mjs:66-72，不管 envelope 是否有效）。**若网关验证被跳过/可选 + relay armed=off = 新钱路面（`/api/capability/*` 公开路由）存在但两层验证都不生效 = fail-open 空窗**（两个「各自不完整」互相 backstop 的推理不成立，与今夜开闸事故同款模式）。
+  - **修法**: ①`capability.js` 路由落码时**默认 feature-flag off**（`ADMIN_CAPABILITY_GATEWAY_ENABLED != '1'` → 整体 503），**与 relay armed 状态完全解耦**（不能靠"relay 还没 arm 所以网关裸着也没事"这种依赖对方的论证）②§3.2 网关侧签名验证**写死为强制**（非可选）——网关自己必须能独立挡住无效信封，不能把安全性全押给 relay armed（那扇门本来就 off）。③批 G4 实战 harness 通过后，批 G5 armed 前置满足时才把 `ADMIN_CAPABILITY_GATEWAY_ENABLED` 置 1（与 relay armed=on 同批开，非提前裸露）。
 - **批 G3**: tg-bot 信封签名 SDK + `console-api.mjs` 钱路端点切网关（tg-bot 侧改造）。
 - **批 G4**: operator 签发 tg-bot grant（离线）+ 实战 harness（persona 平替真人：tg-bot 带信封走网关→relay→上链，端到端）。
 - **批 G5（arm）**: 三前提焊死满足后 armed=on（gate 生效），tg-bot 走 app 面授权。共享 secret 钱路面废除（§4.4 阶段①）。
@@ -145,8 +155,8 @@ grant 收窄了「tg-bot 能发什么命令 + 额度」，但**未解**「一人
 
 ## 7. 诚实边界 / 待答问题（迎审清单）
 
-1. **§2.4 proxy 公网可达性** — 威胁模型 load-bearing，需实核 reverse proxy 配置（红队）。
-2. **§4.3 tg_user 属主绑定** — gate 管 service 越权，不管 tg_user 冒名；边界是否可接受，或需另立 Console 业务层鉴权卡（红队/Bettor 裁）。
+1. ~~**§2.4 proxy 公网可达性**~~ — **已坐实定案**（NWT netstat + KANet-UI operator 域实测，§2.4）: localhost-only + gap-A 未跑（即便跑，钱路面 403）= 内部横向非公网 drain。
+2. ~~**§4.3 tg_user 属主绑定 / payee_scope 实防线**~~ — **已裁**（NWT N1 `36a9d901` + Bettor `#xluo50`，§4.3）: gate 管 service 越权，不管 tg_user 冒名；payee_scope 对提现场景形同虚设，实防线=保守额度上限+tg-bot 诚实，非密码学约束。诚实标已 fold，Bettor 裁边界可接受作第一样板。
 3. **durable nonce 重放** — 本卡不实现（M0c-3 接口），expiry 窗口内原样重放不拦（TTL≤1h 收紧）。诚实残留。
 4. **faucet 是否走 relay 命令** — faucet 现走 `/api/faucet/request` → FaucetRelay，是否纳入 capability 网关 or 保持独立反刷（faucet 是 fully-public money-path，靠反刷非 auth，母卡 §9 faucet 改判）——待定，倾向 faucet 独立不进 grant。
 5. **只读面迁不迁** — 无副作用，优先级低，先迁钱路。
@@ -158,3 +168,10 @@ grant 收窄了「tg-bot 能发什么命令 + 额度」，但**未解**「一人
 - 负向: 无信封拒 / 伪签拒 / 未知 grant 拒 / 过期拒 / intent_type 不匹配路由拒 / 注入 origin=internal 被覆写拒 / 超额度拒 / 收款人 ∉ payee_scope 拒 / 网关篡改信封后 relay 重验失败拒 / app 试 provision 拒。
 - 正向: 合法信封 + 合法 grant → allow → 上链 txId。
 - 实战 harness（G4）: tg-bot persona 真发带信封 transfer 走网关端到端上链（母卡实战 DoD·Owner 每子批实战钉死）。
+- 🔴 v0.2 新增负向（G2 MUST-FIX 对应）: `ADMIN_CAPABILITY_GATEWAY_ENABLED` 未设/=0 → 路由 503（与 relay armed 状态无关，即使 relay armed=on 网关 flag off 仍 503）；网关侧签名验证单独关闭测试（不存在这个开关——验证代码路径本身无可绕过分支）。
+
+---
+
+## 9. v0.3 槽位 — Codex 外部对抗审 findings（占位，待回齐）
+
+> Codex 外部对抗审已推送（GitHub bridge `coord/codex-bridge` MSG-20260723-118，canonical 设计稿版本见该 MSG 附带 commit）。回齐后本节 fold findings，同 §「v0.1→v0.2 变更」模式记录 diff，不覆盖已 fold 的 v0.2 内容。已知 Codex 早期反馈（`v0.3.1` note#4，通过 Bettor 转述，已在 §4.3 引用）: multi-user tg-bot credential 本身不能 authorize 特定用户提现——与 NWT N1 同一发现，双路独立收敛（交叉验证价值）。
