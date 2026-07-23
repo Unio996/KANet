@@ -8,6 +8,7 @@ import { fileURLToPath } from 'url';
 import {
   snapshotEntries, runAllM0aChecks, diffAgainstBaseline, baselineEditGuard,
   manifestChecks, shadowModuleCheck, BASELINE_PATH, MANIFEST_PATH,
+  normalizeForm, sha256Hex, CONTROLLED_RELAY_CAP, CONTROLLED_FUNNEL_ALLOWLIST,
 } from './m0a-lib.mjs';
 
 const REAL_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -60,6 +61,7 @@ const BASE_FILES = () => ({
   'app/b.mjs': relayDynamic + '\nexport const y = 2;\n',
 });
 const hasRule = (vs, rule, substr) => vs.some((v) => v.rule === rule && (!substr || v.msg.includes(substr)));
+const findRule = (vs, rule, substr) => vs.find((v) => v.rule === rule && (!substr || v.msg.includes(substr)));
 
 // 1. 新文件加裸 import(逐字节抄现有行) → ERROR
 {
@@ -211,6 +213,55 @@ const hasRule = (vs, rule, substr) => vs.some((v) => v.rule === rule && (!substr
     git(r, ['add', 'app/ws-variant.mjs']);
     ok(`${name} → ERROR`, hasRule(diffAgainstBaseline(r), 'R-M0A-BARE-IMPORT-DIFF', 'app/ws-variant.mjs'));
   }
+}
+// ── considered amendment: 窄 capability m0c-controlled-relay-endpoint(NWT 4 约束) ──
+// 受控 funnel relay import 经窄 capability 合法放行; 非白名单/digest 失配/其他 capability 仍拒。
+// 夹具用运行时拼接的 relay-manager import(防自指污染), manifest form 用 normalizeForm 保与枚举 form 对齐。
+const FUNNEL_PATH = [...CONTROLLED_FUNNEL_ALLOWLIST][0]; // kasia-console/src/api/operator-settle.js
+const relayStatic = 'import { sendCommandAsync } from ' + Q + '../services/' + RELAY + Q + ';';
+const relayForm = normalizeForm(relayStatic, 'relay-manager');
+const funnelBody = relayStatic + '\nexport const settle = 1;\n';
+const mkRelayEntry = (over = {}) => ({
+  id: 'MRC-1', family: 'relay-manager', form: relayForm, path: FUNNEL_PATH,
+  capability: CONTROLLED_RELAY_CAP, justification: 'M0c-1 operator settle 受控 funnel',
+  review_ref: 'NWT-diff:pending', content_digest: sha256Hex(funnelBody), ...over,
+});
+// 15. 合法条目: 白名单文件 + capability 对 + digest 匹配 → 零报(放行)
+{
+  const r = freshRepo(BASE_FILES());
+  writeFile(r, FUNNEL_PATH, funnelBody);
+  writeFile(r, MANIFEST_PATH, JSON.stringify({ entries: [mkRelayEntry()] }, null, 1));
+  git(r, ['add', '-A']);
+  const vs = runAllM0aChecks(r);
+  ok('#15 受控funnel(白名单+cap+digest匹配) → 零报', vs.length === 0, JSON.stringify(vs.map((v) => v.msg.slice(0, 90))));
+}
+// 16. 非白名单文件用此 capability → 拒(warn-first)
+{
+  const r = freshRepo(BASE_FILES());
+  const badPath = 'kasia-console/src/api/capability-gateway.js'; // 未来项, 现不在白名单
+  writeFile(r, badPath, funnelBody);
+  writeFile(r, MANIFEST_PATH, JSON.stringify({ entries: [mkRelayEntry({ path: badPath, content_digest: sha256Hex(funnelBody) })] }, null, 1));
+  git(r, ['add', '-A']);
+  const v = findRule(runAllM0aChecks(r), 'R-M0A-MANIFEST-SCHEMA', '白名单');
+  ok('#16 非白名单文件用此cap → 拒(warn-first)', !!v && v.severity === 'warn', JSON.stringify(v || null));
+}
+// 17. digest 不匹配(文件批准后被改过) → 拒(warn-first)
+{
+  const r = freshRepo(BASE_FILES());
+  writeFile(r, FUNNEL_PATH, funnelBody + '\n// 批准后被改过的一行\n'); // 内容变, digest 不再匹配
+  writeFile(r, MANIFEST_PATH, JSON.stringify({ entries: [mkRelayEntry()] }, null, 1)); // digest 仍是旧值
+  git(r, ['add', '-A']);
+  const v = findRule(runAllM0aChecks(r), 'R-M0A-MANIFEST-SCHEMA', 'digest 失配');
+  ok('#17 digest失配(文件改过) → 拒(warn-first)', !!v && v.severity === 'warn', JSON.stringify(v || null));
+}
+// 18. relay-manager 用其他 capability(db-readonly) → 仍拒(既有硬拒 block, 非 warn)
+{
+  const r = freshRepo(BASE_FILES());
+  writeFile(r, FUNNEL_PATH, funnelBody);
+  writeFile(r, MANIFEST_PATH, JSON.stringify({ entries: [mkRelayEntry({ capability: 'db-readonly' })] }, null, 1));
+  git(r, ['add', '-A']);
+  const v = findRule(runAllM0aChecks(r), 'R-M0A-MANIFEST-SCHEMA', '只能经窄 capability');
+  ok('#18 relay-manager用db-readonly → 仍拒(block非warn)', !!v && v.severity !== 'warn', JSON.stringify(v || null));
 }
 // 13. 真仓全量计时 < 3s
 {

@@ -2,6 +2,7 @@
 // 设计: docs/2026-07-22-m0a-bare-import-differential-lint-design.md v0.2 (NWT GREEN 8c7870bb)
 // 模型: path 键逐 occurrence 精确镜像 + git rename(-M) 身份延续。baseline 是现实的镜像不是额度。
 import { execFileSync } from 'child_process';
+import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 
@@ -35,6 +36,26 @@ export const SHADOW_ALLOWLIST = new Set([
 
 export const BASELINE_PATH = 'scripts/m0a-bare-import-baseline.json';
 export const MANIFEST_PATH = 'scripts/m0a-exception-manifest.json';
+
+// ── considered amendment(2026-07-23, NWT 4 约束): 窄 capability m0c-controlled-relay-endpoint ──
+// M0c-1 收窄后, 所有 relay 访问该走的正规 funnel(operator-settle 专道 / 未来能力网关)理应 import
+// relay-manager; 但 §5 对 relay-manager 族原文是"不开任何通道"完全硬拒。红队定这是一次 considered
+// amendment: 加一个窄 capability, 只对白名单内的受控 funnel 文件放行, 受 4 约束焊死:
+//   ① "受控非裸连"(端点必过 authorizeCommand+命令白名单+不裸透传)= NWT diff 审判的语义, lint 不校;
+//      lint 只校 manifest schema(capability 合法/字段全/digest 匹配/白名单命中)。
+//   ② lint 只是完整性门, NWT diff 审是唯一 load-bearing 闸。
+//   ③ 白名单有界、shrink-only(只准收窄, 扩张走 NWT 审 + Owner 知情)。
+//   ④ TOCTOU 防御: 条目 content_digest 锚定该文件"批准时"内容 sha256, 每次核现内容, 失配=批准后被
+//      改过没重审=拒(见 manifestChecks)。
+export const CONTROLLED_RELAY_CAP = 'm0c-controlled-relay-endpoint';
+// 受控 funnel 白名单(硬编码、有界、shrink-only, 约束③)。扩张(如未来 capability-gateway.js 能力网关)
+// 要走 NWT 审 + Owner 知情, 不预先塞占位。
+export const CONTROLLED_FUNNEL_ALLOWLIST = new Set([
+  'kasia-console/src/api/operator-settle.js', // M0c-1 批B operator 结算专道(relay.js:1726 money-path 出口收敛)
+  // 未来项(留注释, 不预塞): capability-gateway.js 能力网关等 —— 扩张要走 NWT 审 + Owner 知情。
+]);
+
+export const sha256Hex = (s) => crypto.createHash('sha256').update(Buffer.from(s, 'utf8')).digest('hex');
 
 const git = (root, args) =>
   execFileSync('git', args, { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
@@ -90,6 +111,12 @@ export function readJsonStaged(root, rel) {
 }
 export function readJsonHead(root, rel) {
   try { return JSON.parse(git(root, ['show', 'HEAD:' + rel])); } catch { return null; }
+}
+// 读文件内容: 优先 git show :path(与被检 occurrence 同一 index 时间面, 防 working-tree 干净 staged
+// 藏私货), 回退 fs.readFileSync(首批尚未 add 时)。都无 = null。与 readJsonStaged 同款时间面。
+export function readStagedContent(root, rel) {
+  try { return git(root, ['show', ':' + rel]); } catch { /* not in index */ }
+  try { return fs.readFileSync(path.join(root, rel), 'utf8'); } catch { return null; }
 }
 
 // ── staged rename map(git -M 身份延续) ──
@@ -192,7 +219,10 @@ export function baselineEditGuard(root) {
 
 // ── R-M0A-MANIFEST-SCHEMA + R-M0A-OPS-NOT-READONLY(设计 §5) ──
 const MANIFEST_FIELDS = ['id', 'family', 'form', 'path', 'capability', 'justification', 'review_ref'];
-const CAPABILITIES = new Set(['db-readonly', 'test-fixture']);
+// 七字段(MANIFEST_FIELDS)全必填对所有 capability 生效; content_digest 是"仅此 capability 附加必填"
+// (m0c-controlled-relay-endpoint), 单独校验(见 manifestChecks relay-manager 分支), 不并入 MANIFEST_FIELDS
+// —— 否则 db-readonly / test-fixture 存量条目会因缺新字段被全判挂(向后兼容, NWT 第4约束的兼容边界)。
+const CAPABILITIES = new Set(['db-readonly', 'test-fixture', CONTROLLED_RELAY_CAP]);
 
 export function manifestChecks(root) {
   const violations = [];
@@ -211,12 +241,49 @@ export function manifestChecks(root) {
     }
     if (!CAPABILITIES.has(e.capability)) {
       violations.push({ rule: 'R-M0A-MANIFEST-SCHEMA', file: MANIFEST_PATH,
-        msg: `manifest 条目 "${e.id}" capability "${e.capability}" 不在 {db-readonly, test-fixture} — relay-manager 族不开任何 ops/test 口(设计 §5)。` });
+        msg: `manifest 条目 "${e.id}" capability "${e.capability}" 不在 {db-readonly, test-fixture, ${CONTROLLED_RELAY_CAP}}(设计 §5 + considered amendment)。` });
       continue;
     }
     if (e.family === 'relay-manager') {
-      violations.push({ rule: 'R-M0A-MANIFEST-SCHEMA', file: MANIFEST_PATH,
-        msg: `manifest 条目 "${e.id}" family=relay-manager — 该族不开 manifest 通道, 新增一律正规审批走仓储层/API(设计 §5)。` });
+      // considered amendment(NWT 4 约束): relay-manager 族只经窄 capability m0c-controlled-relay-endpoint
+      // 放行受控 funnel。其他 capability = 保持既有硬拒(既有 block, 非新增)。
+      if (e.capability !== CONTROLLED_RELAY_CAP) {
+        violations.push({ rule: 'R-M0A-MANIFEST-SCHEMA', file: MANIFEST_PATH,
+          msg: `manifest 条目 "${e.id}" family=relay-manager 只能经窄 capability ${CONTROLLED_RELAY_CAP}(受控 funnel), 不开 db-readonly/test-fixture 口 —— 其余 relay-manager import 一律正规审批走仓储层/API(设计 §5 + considered amendment)。` });
+        continue;
+      }
+      // ↓↓↓ 以下是本 amendment 新增的 m0c-controlled-relay-endpoint 校验 → warn-first(规则65) ↓↓↓
+      // 新增校验(非白名单拒 / digest 失配拒 / digest 缺失拒)先 warn 不 block, 由 NWT diff 审(唯一
+      // load-bearing 闸, 约束②)过后升 block。既有 relay-manager 硬拒(上面 capability!==cap 分支)不受影响。
+      // 约束③ 白名单有界、shrink-only: 非白名单文件用此 capability = 拒。
+      if (!CONTROLLED_FUNNEL_ALLOWLIST.has(e.path)) {
+        violations.push({ rule: 'R-M0A-MANIFEST-SCHEMA', severity: 'warn', file: MANIFEST_PATH,
+          // TODO(规则65): NWT diff 审过后升 block(去掉 severity:'warn')
+          msg: `manifest 条目 "${e.id}" capability=${CONTROLLED_RELAY_CAP} 但 path ${e.path} 不在受控 funnel 白名单 — 只有 {${[...CONTROLLED_FUNNEL_ALLOWLIST].join(', ')}} 可用此 capability(白名单 shrink-only, 扩张走 NWT 审 + Owner 知情)。[warn-first 待升 block]` });
+        continue;
+      }
+      // 约束④ TOCTOU 防御: content_digest 仅此 capability 必填, 核现文件内容 sha256 == 批准时 digest。
+      if (!('content_digest' in e) || e.content_digest === '' || e.content_digest == null) {
+        violations.push({ rule: 'R-M0A-MANIFEST-SCHEMA', severity: 'warn', file: MANIFEST_PATH,
+          // TODO(规则65): NWT diff 审过后升 block
+          msg: `manifest 条目 "${e.id}" capability=${CONTROLLED_RELAY_CAP} 缺 content_digest — 受控 funnel 条目必填(该文件批准时内容的 sha256 hex, TOCTOU 防御, NWT 第4约束)。[warn-first 待升 block]` });
+        continue;
+      }
+      const funnelContent = readStagedContent(root, e.path);
+      if (funnelContent == null) {
+        violations.push({ rule: 'R-M0A-MANIFEST-SCHEMA', severity: 'warn', file: MANIFEST_PATH,
+          // TODO(规则65): NWT diff 审过后升 block
+          msg: `manifest 条目 "${e.id}" 指向的受控文件 ${e.path} 不存在于 index — path 锚定 fail-closed: 文件移动必须同步改 manifest。[warn-first 待升 block]` });
+        continue;
+      }
+      const actualDigest = sha256Hex(funnelContent);
+      if (actualDigest !== e.content_digest) {
+        violations.push({ rule: 'R-M0A-MANIFEST-SCHEMA', severity: 'warn', file: MANIFEST_PATH,
+          // TODO(规则65): NWT diff 审过后升 block
+          msg: `受控文件 ${e.path} 内容变更(digest 失配: 现 ${actualDigest.slice(0, 12)}… ≠ manifest ${String(e.content_digest).slice(0, 12)}…)需重新 NWT 审并更新 content_digest。[warn-first 待升 block]` });
+        continue;
+      }
+      // 全过: 合法受控 funnel relay import(白名单命中 + digest 匹配)。放行, 不落 sqlite 只读检查。
       continue;
     }
     // 静态限制核验(读 index 内容)
