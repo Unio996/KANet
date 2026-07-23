@@ -762,6 +762,46 @@ function checkCommandEnum(filepath, content) {
   }
 }
 
+// R-SCA-ALIAS-ORIGIN [WARN] (M0c-1 批C 2026-07-23, NWT 完整清单复核 24da7ea9 硬前置):
+// sendCommandAsync 别名(解构重命名 { sendCommandAsync: X } / import rename as X / 裸值赋值·传参)
+// 会让按名字 string-grep 的 origin 迁移扫描漏掉别名 call site(实撞: 8 处别名迁移清单初版全漏,
+// bettor sca/exchange sendCancelCmd/trading·exchange-machine·mind-manager sendCmd/settler sca2)。
+// gate armed=on 后未标 origin 的调用 fail-closed 拒 → 漏标别名 call = 现网该路径当场断。
+// 检测: ①别名定义处向后扫该别名的 call, call 窗口(6行)内无 origin 实参('internal'/'app'/'operator')
+// → warn ②sendCommandAsync 裸值传参(callback 形态, 静态不可追踪)→ warn。
+// warn-first(规则65): NWT diff GREEN 后升 ERROR。别名的别名(二级)不追, 由一级 warn 逼平。
+function checkR_SCA_ALIAS_ORIGIN(filepath, content) {
+  if (!/kasia-console[\\/]src[\\/].*\.(?:js|mjs)$/.test(filepath)) return;
+  if (/relay-manager\.js$/.test(filepath)) return; // 定义方自身豁免
+  const lines = content.split('\n');
+  const ORIGIN_RE = /['"](?:internal|app|operator)['"]/;
+  const aliases = []; // { name, defLine }
+  for (let i = 0; i < lines.length; i++) {
+    const code = lines[i].replace(/\/\/.*$/, '');
+    if (/^\s*(?:\*|\/\*)/.test(lines[i])) continue;
+    let m;
+    if ((m = code.match(/sendCommandAsync\s*:\s*([A-Za-z_$][\w$]*)/))) aliases.push({ name: m[1], defLine: i + 1 });
+    else if ((m = code.match(/sendCommandAsync\s+as\s+([A-Za-z_$][\w$]*)/))) aliases.push({ name: m[1], defLine: i + 1 });
+    else if ((m = code.match(/(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*sendCommandAsync\s*[;,)\]]?\s*$/))) aliases.push({ name: m[1], defLine: i + 1 });
+    // 裸值传参(callback): foo(sendCommandAsync) / foo(x, sendCommandAsync, y) — 静态不可追踪
+    if (/[(,]\s*sendCommandAsync\s*[,)]/.test(code) && !/await\s+import|require\s*\(/.test(code)) {
+      warn('R-SCA-ALIAS-ORIGIN', `sendCommandAsync 以裸值传参(callback 形态)— origin 迁移扫描静态不可追踪, gate armed 后此路径若未标 origin 会 fail-closed 断。改传显式 wrapper((id,cmd,t)=>sendCommandAsync(id,cmd,t,'<origin>'))或直接调用。`, filepath, i + 1);
+    }
+  }
+  for (const { name, defLine } of aliases) {
+    const callRe = new RegExp(`(?:^|[^.\\w$])${name.replace(/\$/g, '\\$')}\\s*\\(`);
+    for (let i = defLine; i < lines.length; i++) {
+      const code = lines[i].replace(/\/\/.*$/, '');
+      if (/^\s*(?:\*|\/\*)/.test(lines[i])) continue;
+      if (!callRe.test(code)) continue;
+      const windowText = lines.slice(i, Math.min(i + 6, lines.length)).join('\n');
+      if (!ORIGIN_RE.test(windowText)) {
+        warn('R-SCA-ALIAS-ORIGIN', `sendCommandAsync 别名 '${name}'(定义 :${defLine})调用未见 origin 实参('internal'/'app'/'operator', 6 行窗口内)— 别名 call 必须与直接调用同样标 origin 第4实参(M0c-1 批C armed 硬前置), 否则 gate armed=on 后 fail-closed 拒·现网该路径断。`, filepath, i + 1);
+      }
+    }
+  }
+}
+
 // R-NWT-2026-04-28 Bug-Z22 (Owner production 真撞): "真**真**真" stutter pattern leaked from
 // dev-coord agent broadcast style INTO broker user-facing strings. Real users see broker DM
 // replies containing "真**真**真**真 cancel" (Owner screenshot 04:33). Catastrophic UX —
@@ -1369,6 +1409,7 @@ for (const fp of targets) {
   checkR_SELF_HTTP_FETCH(fp, content);         // R-SELF-HTTP-FETCH [WARN] (2026-07-14 legacy-refund 自锁死循环修复设计): console 禁 fetch 自己的端口
   checkR_FETCH_NO_TIMEOUT(fp, content);        // R-FETCH-NO-TIMEOUT [WARN] (同上设计 修法C): fetch() 建议带 AbortSignal.timeout
   checkR_PS_FAMILY_DISPATCH(fp, content);      // R-PS-FAMILY-DISPATCH [ERROR] (K-18 §3.4 2026-07-21): compilePayoutShardRedeem/V2Redeem 调用点白名单, 防绕过 coherence gate
+  checkR_SCA_ALIAS_ORIGIN(fp, content);        // R-SCA-ALIAS-ORIGIN [WARN] (M0c-1 批C 2026-07-23): sendCommandAsync 别名 call 缺 origin/裸值传参检测, 防 armed 后漏标断路
 }
 checkR10();
 checkR_NULLIFIER_I64();
