@@ -235,7 +235,7 @@ const mkRelayEntry = (over = {}) => ({
   const vs = runAllM0aChecks(r);
   ok('#15 受控funnel(白名单+cap+digest匹配) → 零报', vs.length === 0, JSON.stringify(vs.map((v) => v.msg.slice(0, 90))));
 }
-// 16. 非白名单文件用此 capability → 拒(warn-first)
+// 16. 非白名单文件用此 capability → 拒(fail-closed block, NWT diff 审后升 block)
 {
   const r = freshRepo(BASE_FILES());
   const badPath = 'kasia-console/src/api/capability-gateway.js'; // 未来项, 现不在白名单
@@ -243,16 +243,16 @@ const mkRelayEntry = (over = {}) => ({
   writeFile(r, MANIFEST_PATH, JSON.stringify({ entries: [mkRelayEntry({ path: badPath, content_digest: sha256Hex(funnelBody) })] }, null, 1));
   git(r, ['add', '-A']);
   const v = findRule(runAllM0aChecks(r), 'R-M0A-MANIFEST-SCHEMA', '白名单');
-  ok('#16 非白名单文件用此cap → 拒(warn-first)', !!v && v.severity === 'warn', JSON.stringify(v || null));
+  ok('#16 非白名单文件用此cap → 拒(block非warn)', !!v && v.severity !== 'warn', JSON.stringify(v || null));
 }
-// 17. digest 不匹配(文件批准后被改过) → 拒(warn-first)
+// 17. digest 不匹配(文件批准后被改过) → 拒(fail-closed block)
 {
   const r = freshRepo(BASE_FILES());
   writeFile(r, FUNNEL_PATH, funnelBody + '\n// 批准后被改过的一行\n'); // 内容变, digest 不再匹配
   writeFile(r, MANIFEST_PATH, JSON.stringify({ entries: [mkRelayEntry()] }, null, 1)); // digest 仍是旧值
   git(r, ['add', '-A']);
   const v = findRule(runAllM0aChecks(r), 'R-M0A-MANIFEST-SCHEMA', 'digest 失配');
-  ok('#17 digest失配(文件改过) → 拒(warn-first)', !!v && v.severity === 'warn', JSON.stringify(v || null));
+  ok('#17 digest失配(文件改过) → 拒(block非warn)', !!v && v.severity !== 'warn', JSON.stringify(v || null));
 }
 // 18. relay-manager 用其他 capability(db-readonly) → 仍拒(既有硬拒 block, 非 warn)
 {
