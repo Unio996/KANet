@@ -501,8 +501,8 @@ export async function registerRelayRoutes(fastify) {
     if (!amountKas || amountKas <= 0) return reply.code(400).send({ error: 'Amount must be > 0' });
 
     try {
-      // TODO(批3): 收敛类,待 M0c-1 gate/迁移收敛后定 app/operator origin
-      const result = await sendCommandAsync(request.params.id, { type: 'transfer', target: to.trim(), amount: amountKas.toFixed(8) });
+      // origin=legacy-unmigrated: 收敛类迁移债(C 分阶段 arm 8282dd61), 迁 app 信封/operator 专道后撤此标
+      const result = await sendCommandAsync(request.params.id, { type: 'transfer', target: to.trim(), amount: amountKas.toFixed(8) }, undefined, 'legacy-unmigrated');
       if (!result) return reply.code(503).send({ error: 'Relay not running' });
       if (result.error) return reply.code(400).send({ error: result.error });
       return reply.send({ ok: true, txId: result.txId, fee: result.fee });
@@ -1732,8 +1732,8 @@ export async function registerRelayRoutes(fastify) {
     // 已超ring buffer窗口必须慢速fallback, 120s不够。运维参数改动, 非逻辑变更。
     const timeoutMs = body.type === 'chain_get_block_at_daa' ? 400000 : 30000;
     try {
-      // TODO(批3): 收敛类,待 M0c-1 gate/迁移收敛后定 app/operator origin
-      const result = await sendCommandAsync(request.params.id, body, timeoutMs);
+      // origin=legacy-unmigrated: 收敛类迁移债(C 分阶段 arm 8282dd61), 迁 app 信封/operator 专道后撤此标
+      const result = await sendCommandAsync(request.params.id, body, timeoutMs, 'legacy-unmigrated');
       return reply.send({ ok: true, ...result });
     } catch (err) {
       return reply.code(503).send({ ok: false, error: err.message || 'Relay command failed' });

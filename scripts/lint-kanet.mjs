@@ -789,8 +789,9 @@ function checkR_SCA_ALIAS_ORIGIN(filepath, content) {
     if ((m = code.match(/sendCommandAsync\s*:\s*([A-Za-z_$][\w$]*)/))) aliases.push({ name: m[1], defLine: i + 1 });
     else if ((m = code.match(/sendCommandAsync\s+as\s+([A-Za-z_$][\w$]*)/))) aliases.push({ name: m[1], defLine: i + 1 });
     else if ((m = code.match(/(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*sendCommandAsync\s*[;,)\]]?\s*$/))) aliases.push({ name: m[1], defLine: i + 1 });
-    // 裸值传参(callback): foo(sendCommandAsync) / foo(x, sendCommandAsync, y) — 静态不可追踪
-    if (/[(,]\s*sendCommandAsync\s*[,)]/.test(code) && !/await\s+import|require\s*\(/.test(code)) {
+    // 裸值传参(callback): foo(sendCommandAsync) / foo(x, sendCommandAsync, y) — 静态不可追踪。
+    // 排除: 动态 import/require 解构 + 静态 import/export 具名列表(relay.js:8 实撞误报: import { a, sendCommandAsync, b } from ...)
+    if (/[(,]\s*sendCommandAsync\s*[,)]/.test(code) && !/await\s+import|require\s*\(/.test(code) && !/^\s*(?:import|export)\b/.test(code)) {
       violate('R-SCA-ALIAS-ORIGIN', `sendCommandAsync 以裸值传参(callback 形态)— origin 迁移扫描静态不可追踪, gate armed 后此路径若未标 origin 会 fail-closed 断。改传显式 wrapper((id,cmd,t)=>sendCommandAsync(id,cmd,t,'<origin>'))或直接调用。`, filepath, i + 1);
     }
   }
@@ -1455,6 +1456,64 @@ checkLedgerSize();               // R-LEDGER-SIZE [WARN] (D-010 2026-07-10): COO
 checkDocPath();                          // R-DOC-PATH/R-DOC-DUPLICATE (③ doc-lint 2026-06-29): date-prefixed doc 必住 docs/ 根·同名多路径 → fail
 checkM0A();                              // R-M0A-* [ERROR×5] (M0a 差分门 2026-07-22 设计v0.2 NWT GREEN): 裸 sqlite/relay-manager import 精确镜像 baseline+manifest, 新增即败
 checkHooksPathArmed();                   // R-HOOKSPATH-ARMED [WARN·LOUD] (2026-07-23 门虚设事故): core.hooksPath 未设=pre-commit 门静默全关, 自卫检测
+checkR_LEGACY_ORIGIN_SHRINK();           // R-LEGACY-ORIGIN-SHRINK [ERROR] (C 分阶段 arm 8282dd61 §3): legacy 迁移债 shrink-only ratchet, 新增即拒+baseline 抬额即拒
+
+// ── R-LEGACY-ORIGIN-SHRINK [ERROR] (C 分阶段 arm 8282dd61 §3, 2026-07-23): migration debt ledger ──
+// origin='legacy-unmigrated' = 收敛类零鉴权路由的显式过渡标(armed 下暂放行), 是迁移债记账 marker
+// 非安全控制, 目标 shrink 到零。本规则 = shrink-only ratchet 三道:
+//   ① 任一文件实际 legacy 计数 > baseline → ERROR(新增 legacy 禁止, 新路由必须直接 app/operator/internal)。
+//   ② baseline 文件自身被调升(对比 HEAD 版) → ERROR(防经 baseline 抬额度绕门 = 硬 ratchet,
+//      补设计稿"无硬 ratchet 则纪律依赖"残留)。
+//   ③ 实际计数 < baseline → warn 提醒收紧 baseline(迁移完成后同 commit 减计数, 债账实时)。
+// 计数只认代码里带引号的 'legacy-unmigrated'(注释剥除), 与 gate 分支消费的字面量同源。
+function checkR_LEGACY_ORIGIN_SHRINK() {
+  const LEGACY_BASELINE_PATH = 'scripts/legacy-origin-baseline.json'; // 声明在函数内(调用点在定义前, 防模块级 const TDZ)
+  const LEGACY_RE = /['"]legacy-unmigrated['"]/g;
+  const counts = new Map(); // repoRelPath(posix) -> count
+  const srcRoot = path.join(ROOT, 'kasia-console', 'src');
+  if (!fs.existsSync(srcRoot)) return;
+  for (const abs of walk(srcRoot)) {
+    let content = '';
+    try { content = read(abs); } catch { continue; }
+    let n = 0;
+    for (const line of content.split('\n')) {
+      const code = line.replace(/\/\/.*$/, '');
+      if (/^\s*(?:\*|\/\*)/.test(line)) continue;
+      n += (code.match(LEGACY_RE) || []).length;
+    }
+    if (n > 0) counts.set(path.relative(ROOT, abs).split(path.sep).join('/'), n);
+  }
+  let baseline = null;
+  try { baseline = JSON.parse(read(file(LEGACY_BASELINE_PATH)).replace(/^﻿/, '')); } catch { baseline = null; }
+  if (!baseline || typeof baseline.files !== 'object') {
+    if (counts.size > 0) {
+      violate('R-LEGACY-ORIGIN-SHRINK', `legacy-unmigrated 标存在(${[...counts.keys()].join(', ')})但 baseline ${LEGACY_BASELINE_PATH} 缺失/损坏 — 债账 fail-closed, 恢复 baseline 文件。`, file(LEGACY_BASELINE_PATH), 0);
+    }
+    return;
+  }
+  // ② 硬 ratchet: baseline 自身只准降不准升(对比 HEAD 版)
+  try {
+    const headRaw = execFileSync('git', ['show', 'HEAD:' + LEGACY_BASELINE_PATH], { cwd: ROOT, encoding: 'utf8' });
+    const head = JSON.parse(headRaw.replace(/^﻿/, ''));
+    if (head && typeof head.files === 'object') {
+      for (const [fp, n] of Object.entries(baseline.files)) {
+        const hn = head.files[fp] ?? 0;
+        if (n > hn) violate('R-LEGACY-ORIGIN-SHRINK', `baseline ${fp} 计数被调升(HEAD ${hn} → ${n})— baseline 只准 shrink, 抬额度=绕 migration debt 门(硬 ratchet)。新增 legacy 走不通, 新路由直接 app/operator/internal。`, file(LEGACY_BASELINE_PATH), 0);
+      }
+    }
+  } catch { /* baseline 尚未入 HEAD(首 commit)= 跳过 ratchet 对比 */ }
+  // ① 实际 > baseline = 新增禁止; ③ 实际 < baseline = 提醒收紧
+  const allFiles = new Set([...counts.keys(), ...Object.keys(baseline.files)]);
+  for (const fp of allFiles) {
+    const actual = counts.get(fp) || 0;
+    const allowed = baseline.files[fp] ?? 0;
+    if (actual > allowed) {
+      violate('R-LEGACY-ORIGIN-SHRINK', `${fp} legacy-unmigrated 计数 ${actual} > baseline ${allowed} — 禁新增 legacy 标(它是迁移债非通行证): 新路由/新调用必须直接 origin=app(信封)/operator(专道)/internal(纯 daemon)。`, file(fp), 0);
+    } else if (actual < allowed) {
+      warn('R-LEGACY-ORIGIN-SHRINK', `${fp} legacy 实际 ${actual} < baseline ${allowed} — 迁移有进展, 把 ${LEGACY_BASELINE_PATH} 对应计数收紧到 ${actual}(与迁移代码同 commit, 债账实时)。`, file(fp), 0);
+    }
+  }
+}
 
 // ── R-HOOKSPATH-ARMED [WARN·LOUD] (2026-07-23 KANet-UI 抓·Bettor 采纳机制补丁): 门自卫 ──
 // 实锤: 本 clone core.hooksPath 从未配置 → pre-commit lint 门全程虚设, 全体 agent commit 裸跑,

@@ -1,0 +1,9 @@
+{
+ "_doc": "R-LEGACY-ORIGIN-SHRINK baseline(C 分阶段 arm 8282dd61 §3 migration debt ledger)。origin='legacy-unmigrated' call 点存量计数, 只减不增: 每迁移一条收敛类路由(→app 信封/operator 专道)撤 legacy 标后, 手动把对应计数减小并与代码同 commit(lint 会在实际计数<baseline 时提醒收紧)。新增 legacy 标=lint ERROR(新路由必须直接 app/operator/internal)。baseline 本文件自身受硬 ratchet 守护: 任何计数/总数调升=lint ERROR(防经 baseline 抬额度绕门)。2026-07-23 初始=批C B桶收敛类 22 处穷尽集(NWT 完整清单 per-route §9)。",
+ "files": {
+  "kasia-console/src/api/pool.js": 18,
+  "kasia-console/src/api/relay.js": 2,
+  "kasia-console/src/api/trading.js": 2
+ },
+ "total": 22
+}
