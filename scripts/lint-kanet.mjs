@@ -1566,7 +1566,7 @@ function checkR_SENDCMD_ORIGIN_REQUIRED(filepath, content) {
     const r = extractCallArgSpanShared(lines, i, openCol >= 0 ? openCol : 0);
     const span = r ? r.span : null;
     if (span == null || !ORIGIN5_RE.test(span)) {
-      warn('R-SENDCMD-ORIGIN-REQUIRED', `sendCommandAsync 直调${span == null ? '实参 40 行内未闭合(可疑)' : '缺 origin 第4实参'}(五值之一: internal/app/operator/legacy-unmigrated)— 缺失=armed 下 fail-closed 拒·daemon tick 路径 latent 断结算(2026-07-23 第三断路族 57 处实锤)。补标或经 wrapper 透传。`, filepath, i + 1);
+      violate('R-SENDCMD-ORIGIN-REQUIRED', `sendCommandAsync 直调${span == null ? '实参 40 行内未闭合(可疑)' : '缺 origin 第4实参'}(五值之一: internal/app/operator/legacy-unmigrated)— 缺失=armed 下 fail-closed 拒·daemon tick 路径 latent 断结算(2026-07-23 第三断路族 57 处实锤)。补标或经 wrapper 透传。`, filepath, i + 1);
     }
   }
 }
