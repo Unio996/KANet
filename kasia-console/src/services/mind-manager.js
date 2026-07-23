@@ -1077,7 +1077,7 @@ export function startScheduler() {
               reason: `payment_timeout_${tOrder.timeout_minutes}min`,
               at_status: 'accepted',
             });
-            const bcastResult = await sendCmd(tOrder.relay_node_id, { type: 'send_broadcast', channel: tOrder.id, message: timeoutMsg });
+            const bcastResult = await sendCmd(tOrder.relay_node_id, { type: 'send_broadcast', channel: tOrder.id, message: timeoutMsg }, undefined, 'internal');
             if (bcastResult?.ok) {
               console.log(`[timeout] Broadcast kanet_timeout_v1 for ${tOrder.id.slice(0, 8)}`);
               // Filter's handleTimeout will revert to published + tryNextAccept

@@ -612,7 +612,7 @@ async function _emitTimeoutAndTransition(id, reason) {
     let timeoutTxId = null;
     for (let ta = 1; ta <= 3; ta++) {
       try {
-        const tr = await sendCommandAsync(relay.id, { type: 'send_broadcast', channel: 'kanet-exchange', message: msg });
+        const tr = await sendCommandAsync(relay.id, { type: 'send_broadcast', channel: 'kanet-exchange', message: msg }, undefined, 'internal');
         timeoutTxId = tr?.txId;
         if (timeoutTxId) break;
       } catch (te) {
@@ -708,7 +708,7 @@ export async function checkMatchedTimeout() {
       let timeoutTxId = null;
       for (let ta = 1; ta <= 3; ta++) {
         try {
-          const tr = await sendCommandAsync(relay.id, { type: 'send_broadcast', channel: 'kanet-exchange', message: timeoutMsg });
+          const tr = await sendCommandAsync(relay.id, { type: 'send_broadcast', channel: 'kanet-exchange', message: timeoutMsg }, undefined, 'internal');
           timeoutTxId = tr?.txId;
           if (timeoutTxId) break;
         } catch (te) {
@@ -971,11 +971,12 @@ async function _verifyAndComplete(offer_id, payment_tx, payment_chain, attempt =
               if (give_asset === 'KAS') {
                 // KAS 走现 relay transfer (backward compat 不动)
                 const { sendCommandAsync } = await import('./relay-manager.js');
+                // NWT 完整清单复核(24da7ea9): daemon auto-deliver 钱路 transfer → origin=internal
                 const sendResult = await sendCommandAsync(deliveryAgent.id, {
                   type: 'transfer',
                   target: deliveryTarget,
                   amount: String(deliveringOffer.give_amount),
-                });
+                }, undefined, 'internal');
                 deliveryTxId = sendResult?.txId;
               } else {
                 // T-NWT-2026-04-27 Bug-Z2 fix: 非 KAS 走 J1 settler-router sendAsset generic
@@ -1017,7 +1018,7 @@ async function _verifyAndComplete(offer_id, payment_tx, payment_chain, attempt =
             let deliveredBcastTxId = null;
             for (let ba = 1; ba <= 5; ba++) {
               try {
-                const br = await sendCmd(deliveryAgent.id, { type: 'send_broadcast', channel: 'kanet-exchange', message: deliveredMsg });
+                const br = await sendCmd(deliveryAgent.id, { type: 'send_broadcast', channel: 'kanet-exchange', message: deliveredMsg }, undefined, 'internal');
                 deliveredBcastTxId = br?.txId;
                 if (deliveredBcastTxId) break;
               } catch (be) {

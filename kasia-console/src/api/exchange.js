@@ -310,7 +310,7 @@ export async function registerExchangeRoutes(fastify) {
           type: 'send_broadcast',
           channel,
           message: JSON.stringify(protocolMsg),
-        });
+        }, undefined, 'app');
         broadcastTx = result?.txId || null;
         if (broadcastTx) break;
         // T-J2-2026-04-28 Phase D P0 Layer 1 v2 (NWT f8e7221a catch): sendCommandAsync 'already spent' 走 result.error
@@ -498,7 +498,7 @@ export async function registerExchangeRoutes(fastify) {
             receive_address: offerForBcast?.taker_payment_address || null,
             payment_asset: payment_asset || null,
           }),
-        });
+        }, undefined, 'app');
         acceptTx = res?.txId || null;
         if (acceptTx) break;
       } catch (err) {
@@ -600,7 +600,7 @@ export async function registerExchangeRoutes(fastify) {
         const res = await sendCancelCmd(relayNodeId, {
           type: 'send_broadcast', channel,
           message: JSON.stringify({ t: 'kanet_exchange_cancel_v1', offer_id }),
-        });
+        }, undefined, 'app');
         cancelTx = res?.txId || null;
         if (cancelTx) break;
       } catch (err) {
@@ -657,7 +657,7 @@ export async function registerExchangeRoutes(fastify) {
         type: 'send_broadcast',
         channel,
         message: JSON.stringify({ t: 'kanet_confirm_v1', offer_id, role, confirmer_address: addr }),
-      });
+      }, undefined, 'app');
     } catch (err) {
       console.log(`[exchange] Confirm broadcast pending: ${err.message}`);
     }
@@ -721,7 +721,7 @@ export async function registerExchangeRoutes(fastify) {
             reason: reason || 'no_reason_given',
             raised_at: new Date().toISOString(),
           }),
-        });
+        }, undefined, 'app');
         disputeTx = res?.txId || null;
         if (disputeTx) break;
       } catch (err) {
@@ -804,7 +804,7 @@ export async function registerExchangeRoutes(fastify) {
             resolver: relay.address,
             reason: reason || null,
           }),
-        });
+        }, undefined, 'app');
         resolveTx = res?.txId || null;
         if (resolveTx) break;
       } catch (err) {

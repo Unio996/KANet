@@ -443,11 +443,11 @@ async function dispatchPhase2OrCheckSigs(offer, winnerStr, db) {
         const takerDm = buildCompletedDm(offer.id, offer, winnerOutcome, submitResult.txId, winnerAmt, !makerWon);
         const { sendCommandAsync: sca2 } = await import('./relay-manager.js');
         if (offer.maker_kaspa_addr && offer.maker_relay_id) {
-          sca2(offer.maker_relay_id, { type: 'send_message', target: offer.maker_kaspa_addr, message: makerDm })
+          sca2(offer.maker_relay_id, { type: 'send_message', target: offer.maker_kaspa_addr, message: makerDm }, undefined, 'internal')
             .catch(e => console.warn(`[settler] DM push maker fail: ${e.message}`));
         }
         if (offer.taker && offer.maker_relay_id) {
-          sca2(offer.maker_relay_id, { type: 'send_message', target: offer.taker, message: takerDm })
+          sca2(offer.maker_relay_id, { type: 'send_message', target: offer.taker, message: takerDm }, undefined, 'internal')
             .catch(e => console.warn(`[settler] DM push taker fail: ${e.message}`));
         }
         console.log(`[settler] DM push fired maker+taker offer=${offer.id.slice(0,12)}`);
