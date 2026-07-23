@@ -1,6 +1,6 @@
 # M0c-1 app provision 实战 harness 方案 — persona 端到端 armed=on 隔离实发（J2 主设计）
 
-> **Status**: DRAFT v0.1（2026-07-23 · J2 出稿 → 待 Bettor 方向审 + NWT 核 → 才实施）
+> **Status**: v0.2（2026-07-23 · J2 出稿 → 双核 GREEN → v0.1 harness 22/22 PASS 实施 → armed=on 首开事故[漏 app 面+缺失 origin daemon 两族] → v0.2 补 §7 门⑤生产 origin 全集动态验 + §8 arm 诚实边界 · 待 NWT 重核 138 GREEN 后落门⑤）
 > **依据**: Owner 令"记得测试·迭代框架平替真人循环发现问题"（Bettor 编排 #x773rd）+ NWT GREEN 4 note（arm 前提①收口条件 = 代码 GREEN + 实战 harness + N2/N3 live 验）+ `docs/TEST-FRAMEWORK.md` 三原则。
 > **性质**: 测试方案文档。不授权装载/arm/真钱移动；harness 全程隔离非 live。
 
@@ -65,4 +65,28 @@ test-framework/
 
 ① harness 代码（§4 六件）② evidence log（逐命令: 发什么/gate 决策/reason 原文/回执形态）③ 五条 PASS/FAIL 榜 + persona 流回放 ④ 框架迭代清单（跑中发现的 test-framework 不足当场补, 记录进 README）⑤ PASS 后 flip 单行 commit（sha256 对齐 harness run log）。
 
-**关联**: `docs/2026-07-23-m0c-1-app-provision-design.md`（§6 负向测试）、批3 `kasia-relay/src/lib/authorize.mjs`、`docs/TEST-FRAMEWORK.md`、NWT verdict（app provision GREEN 4 note）。
+## 7. 🔴 门⑤：生产 origin 全集动态验（arm 事故 09:00 后补·re-arm 硬前置）
+
+> **起因（2026-07-23 09:00 armed=on 首开事故）**：v0.1 harness（§1-6）测的是 gate **设计正确性**（app 带 envelope→allow / 无 envelope→deny），22/22 PASS——但**没镜像生产实际 origin 标注的 armed 行为**（fixture-must-mirror-production 教训）。armed=on 后暴露两族断路：②app 标注面 17 处无 envelope→fail-closed 断；③~57 处缺失 origin 的 daemon（settle/oracle/close tick）→armed 拒→latent 冻结结算。v0.1 全绿给了假信心。本节补 harness 覆盖生产标注现实。
+
+**与 lint R-SENDCMD-ORIGIN-REQUIRED 分工（双闸·缺一漏）**：
+- **lint = 完整性门（静态）**：每 sendCommandAsync/别名调用必须带 origin（缺失=block）→ 抓第三族"缺失 origin"。
+- **harness 门⑤ = 正确性门（动态）**：origin **值对不对** + armed **行为对不对** → 抓"标了但标错致断"（daemon 该 internal 误标 app→armed 需 envelope→断；lint 绿因为有 origin，看不出类型对错）。这正是 blast-radius 病根（app 面 17 处 = 标 app 实 Console 通信）。
+
+**方法（输入=family3 补全后 NWT 138 map 的生产 origin 全集）**：
+1. 从生产 138 直调点补全标注派生 `{origin 类别 → 代表命令类型}` 矩阵（internal daemon: settle/oracle/close tick 代表 / operator: 专道命令 / legacy-unmigrated: 收敛类 / app: 机制A 就绪后才有真 envelope）。
+2. armed=on 隔离环境（§2 同 driver·fork 真 relay）逐类实发，断言 armed 行为对：
+   - `internal`（daemon tick）→ **allow 不冻结**（第三族防复现核心：settle/oracle/close armed 后照常）
+   - `operator` → allow（专道受信）
+   - `legacy-unmigrated` → allow（暂放行+LOUD）
+   - `缺失 origin` → 若出现即 deny（暴露 family3 补标残漏=硬 fail·应为 0）
+3. **收口断言**：armed=on 下现网所有实际命令流类别不断（internal/operator/legacy 全 allow）+ 零缺失 origin（否则第三族残留）。特别验 daemon tick 类不 fail-closed（latent 冻结的动态证）。
+
+**re-arm 前置**：门⑤ + lint（门③）+ family2/3 全修（NWT 重核 138 GREEN）+ 防复燃（arm 窗 supervisor 无 ARMED env）= 五/六门全 GREEN 才 re-arm（arm 时机机制A-first·Owner 定）。**落码前提**：NWT 重核全 138 GREEN（origin 全集确定=门⑤矩阵输入）。
+
+## 8. arm 语义诚实边界（事故后补·上报 Owner 带）
+
+- armed=on 保护面 = **已迁移 app 面**（origin=app 带 envelope，经机制A 网关）。**机制A（HTTP 能力网关）未落码前无实 app 面**（生产全是 Console 内部 internal/operator/legacy）→ **arm 现在 low-value**（只立 fail-closed 默认 + C 过渡框架，不破 live 但无实 app 面可保护）。arm 真价值在机制A 就绪后（实外部 app 发信封）。
+- 三断路族全图（blast-radius 逐 origin 值枚举，非只推演缺失面）：①收敛类缺失 origin→C legacy（已解）②app 标注无 envelope→重标 legacy（family2 解）③缺失 origin daemon→补标 internal/legacy（family3 解）。根治=静态 lint 完整性 + harness 动态正确性双闸。
+
+**关联**: `docs/2026-07-23-m0c-1-app-provision-design.md`（§6 负向测试）、批3 `kasia-relay/src/lib/authorize.mjs`、`docs/TEST-FRAMEWORK.md`、NWT verdict（app provision GREEN 4 note）、`docs/2026-07-23-NWT-phased-arm-legacy-unmigrated-design.md`（C 分阶段）、NWT 138 补全 map（`9c5f32db`）、arm 事故根因（频道 09:00-09:2xZ）。
