@@ -98,13 +98,13 @@ export async function buildAndFundGate(imageIdHex, journalDigestHex, receiptHex,
   const gateAddr = kaspa.addressFromScriptPublicKey(spk, 'testnet-12').toString();
 
   const kasAmount = GATE_FUND_SOMPI / 1e8;
-  const tr = await sendCommandAsync(relayId, { type: 'transfer', target: gateAddr, amount: Number(kasAmount.toFixed(8)) }, 90_000);
+  const tr = await sendCommandAsync(relayId, { type: 'transfer', target: gateAddr, amount: Number(kasAmount.toFixed(8)) }, 90_000, 'internal');
   const outpointTxid = tr?.txId || tr?.txid;
   if (!outpointTxid) throw new Error(`buildAndFundGate: transfer no txId: ${JSON.stringify(tr).slice(0, 200)}`);
 
   let landedOk = false;
   for (let i = 0; i < 15 && !landedOk; i++) {
-    try { const chk = await sendCommandAsync(relayId, { type: 'check_utxo_landed', address: gateAddr, txid: outpointTxid }, 15_000); landedOk = !!(chk?.landed || chk?.found); } catch { /* transient, retry */ }
+    try { const chk = await sendCommandAsync(relayId, { type: 'check_utxo_landed', address: gateAddr, txid: outpointTxid }, 15_000, 'internal'); landedOk = !!(chk?.landed || chk?.found); } catch { /* transient, retry */ }
     if (!landedOk) await new Promise((res) => setTimeout(res, 2_000));
   }
   if (!landedOk) throw new Error(`buildAndFundGate: gate funding tx ${outpointTxid} broadcast OK but not landed within wait window`);

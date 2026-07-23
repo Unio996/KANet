@@ -545,7 +545,7 @@ async function handlePoolOracleTxSignReq(msg) {
     // Get oracle's pubkey via IPC, check membership.
     let voterPubkey;
     try {
-      const pkRes = await sendCommandAsync(oracle.id, { type: 'get_pubkey' });
+      const pkRes = await sendCommandAsync(oracle.id, { type: 'get_pubkey' }, undefined, 'internal');
       if (!pkRes?.x_only_pubkey) continue;
       voterPubkey = String(pkRes.x_only_pubkey).toLowerCase();
     } catch { continue; }
@@ -581,7 +581,7 @@ async function handlePoolOracleTxSignReq(msg) {
           tx_hex: _safeTxHex,
           input_index: inputIdx,
           safe_json: true,
-        });
+        }, undefined, 'internal');
       } catch (e) {
         console.warn(`[trade-filter:sign-req] sign IPC fail market=${market.id.slice(0,12)} oracle=${oracle.name} input=${inputIdx}: ${e.message}`);
         continue;
@@ -604,7 +604,7 @@ async function handlePoolOracleTxSignReq(msg) {
           type: 'send_broadcast',
           channel: 'kanet-prediction',
           message: JSON.stringify(respPayload),
-        });
+        }, undefined, 'internal');
         if (!bcastRes?.txId) {
           console.warn(`[trade-filter:sign-req] broadcast no txId market=${market.id.slice(0,12)} oracle=${oracle.name} input=${inputIdx}`);
           continue;
@@ -2678,7 +2678,7 @@ async function _autoPayExchange(offer, takerRelayNodeId) {
         type: 'send_broadcast',
         channel: 'kanet-exchange',
         message: paidMsg,
-      });
+      }, undefined, 'internal');
       if (bcastResult?.error) {
         // sendCommandAsync resolves with {error} instead of rejecting
         console.error(`[exchange-autopay] Paid broadcast attempt ${attempt}/${MAX_BCAST_RETRIES}: ${bcastResult.error}`);
@@ -2816,7 +2816,7 @@ async function _autoSettleAsset(offer, takerRelayNodeId) {
           type: 'send_broadcast',
           channel: 'kanet-exchange',
           message: paidMsg,
-        });
+        }, undefined, 'internal');
         if (pr?.txId) { paidBroadcastOk = true; break; }
       } catch (err) {
         console.error(`[exchange-autosend] paid broadcast attempt ${pa}/5: ${err.message}`);

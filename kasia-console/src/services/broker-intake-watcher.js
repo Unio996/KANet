@@ -135,7 +135,7 @@ async function _send(relayId, cmd) {
     return { ok: true, queued: true };
   }
   const { sendCommandAsync } = await import('./relay-manager.js');
-  return sendCommandAsync(relayId, cmd);
+  return sendCommandAsync(relayId, cmd, undefined, 'internal');
 }
 
 function _getUserPayAddress(peer) {

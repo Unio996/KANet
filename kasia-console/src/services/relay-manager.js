@@ -326,7 +326,8 @@ export function sendCommandAsync(relayNodeId, command, timeoutMs = 30000, origin
  */
 export async function getRelayRpcState(relayNodeId) {
   try {
-    const result = await sendCommandAsync(relayNodeId, { type: 'get_rpc_state' }, 5000);
+    // origin=legacy-unmigrated: 唯二调用方 api/relay.js:382/:418 UI 健康探针=请求触发(9c5f32db ⚠复核项④实核: 非 daemon), 过渡标
+    const result = await sendCommandAsync(relayNodeId, { type: 'get_rpc_state' }, 5000, 'legacy-unmigrated');
     return result;  // 期望 {ok:true, state:{connected, reconnecting, attempt, currentUrl, lastConnectedAt, lastError}}
   } catch (err) {
     return { ok: false, error: err?.message || String(err) };
@@ -362,8 +363,11 @@ export async function transferAndConfirm(relayNodeId, target, amount, opts = {})
   const pollIntervalMs = opts.pollIntervalMs || 3000;
   const maxWaitMs = opts.maxWaitMs || 30000;
   const minDepth = opts.minDepth;   // undefined = 原有浅确认行为, 不传不变
+  // opts.origin 透传(9c5f32db ⚠复核项①实核: 共享钱路 helper 混合调用方——pool.js 请求触发路由+transport daemon,
+  // 硬编码 internal=blanket-internal 病(请求触发面冒充 TCB), 由调用方声明; 不传=undefined→armed 下 fail-closed 逼声明。
+  const origin = opts.origin;
 
-  const result = await sendCommandAsync(relayNodeId, { type: 'transfer', target, amount });
+  const result = await sendCommandAsync(relayNodeId, { type: 'transfer', target, amount }, undefined, origin);
   if (!result) throw new Error('relay not running');
   if (result.error) throw new Error(`transfer failed: ${result.error}`);
   const txId = result.txId;
@@ -377,7 +381,7 @@ export async function transferAndConfirm(relayNodeId, target, amount, opts = {})
     try {
       const cmd = { type: 'check_utxo_landed', address: target, txid: txId };
       if (minDepth != null) cmd.minDepth = minDepth;
-      check = await sendCommandAsync(relayNodeId, cmd, 10000);
+      check = await sendCommandAsync(relayNodeId, cmd, 10000, origin);
     } catch (e) {
       continue;  // transient RPC error — keep polling until deadline
     }

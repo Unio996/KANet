@@ -149,7 +149,7 @@ export async function verifyParamsDualSig({ ctor_params, params_hash, maker_sig,
  * Sign params_hash via relay's ecdsa_sign IPC (= secp256k1 over message).
  */
 async function signParamsHash(relayId, paramsHash) {
-  const res = await sendCommandAsync(relayId, { type: 'ecdsa_sign', message: paramsHash });
+  const res = await sendCommandAsync(relayId, { type: 'ecdsa_sign', message: paramsHash }, undefined, 'internal');
   if (!res?.ok || !res.signature) {
     throw new Error(`ecdsa_sign fail relay=${relayId?.slice(0, 12)}: ${res?.error || 'no signature'}`);
   }
@@ -223,7 +223,7 @@ export async function emitPredictionParamsCache({ offer, meta, makerRelayId, tak
       type: 'send_broadcast',
       channel: PARAMS_CHANNEL,
       message: payloadJson,
-    });
+    }, undefined, 'internal');
     broadcastTxId = r?.txId || null;
   } catch (e) {
     console.error(`[params-cache] Path A broadcast FAIL offer=${offer.id?.slice(0, 12)}: ${e.message}`);
@@ -249,7 +249,7 @@ export async function emitPredictionParamsCache({ offer, meta, makerRelayId, tak
   // DM sends — best-effort, full ctor_params payload for cache portability
   const fullPayloadJson = JSON.stringify(fullPayload);
   await Promise.allSettled([...recipientAddrs].map(addr =>
-    sendCommandAsync(makerRelayId, { type: 'send_message', target: addr, message: fullPayloadJson })
+    sendCommandAsync(makerRelayId, { type: 'send_message', target: addr, message: fullPayloadJson }, undefined, 'internal')
       .then(() => { dmCount++; })
       .catch(e => console.warn(`[params-cache] Path B DM to ${addr?.slice(0, 20)} fail: ${e.message}`))
   ));

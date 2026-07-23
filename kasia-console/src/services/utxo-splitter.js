@@ -20,7 +20,7 @@ export async function splitUtxos(relayNodeId, targetCount = TARGET_UTXO_COUNT, o
     // without it, utxosBefore >= targetCount short-circuits as "sufficient" even when existing UTXOs are
     // individually too small for the caller's real need (faucet re-split: 84 dust-ish → fewer/larger, not
     // "already have enough count").
-    const result = await sendCommandAsync(relayNodeId, { type: 'split_utxo', targetCount, force: opts.force === true }, 20_000);
+    const result = await sendCommandAsync(relayNodeId, { type: 'split_utxo', targetCount, force: opts.force === true }, 20_000, 'internal');
     return result || { ok: false, reason: 'no_response' };
   } catch (err) {
     return { ok: false, reason: err.message };

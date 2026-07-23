@@ -26,7 +26,7 @@ export async function registerCoordStatusRoutes(fastify) {
     if (!content || !relayId) return reply.code(400).send({ ok: false, error: 'content, relayId 全部必需' });
     try {
       const hashHex = computeContentHashHex(content);
-      const signResult = await sendCommandAsync(relayId, { type: 'ecdsa_sign', message: hashHex });
+      const signResult = await sendCommandAsync(relayId, { type: 'ecdsa_sign', message: hashHex }, undefined, 'legacy-unmigrated');
       if (!signResult?.signature) return reply.code(502).send({ ok: false, error: 'relay ecdsa_sign returned empty signature' });
       const signedMessage = buildSignedMessage(content, signResult.signature);
       return reply.send({ ok: true, hashHex, signature: signResult.signature, signedMessage });

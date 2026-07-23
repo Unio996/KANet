@@ -118,7 +118,7 @@ export function _getPendingAccept(peer) { return _pendingAccepts.get(peer); }
 async function _send(relayId, cmd) {
   if (_sendOverride) return _sendOverride(relayId, cmd);
   const { sendCommandAsync } = await import('./relay-manager.js');
-  return sendCommandAsync(relayId, cmd);
+  return sendCommandAsync(relayId, cmd, undefined, 'internal');
 }
 
 // T-J2-2026-04-29 Phase 0 (NWT 79ba4015 88 KAS sacred regression dig):

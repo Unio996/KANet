@@ -99,7 +99,7 @@ export async function refundWorkerTick() {
       const cancelRes = await sendCommandAsync(pub.seeder_relay_id, {
         type: 'send_broadcast',
         payload: { t: 'kanet_exchange_cancel_v1', offer_id: pub.seeder_publish_offer_id, reason: 'timeout' },
-      });
+      }, undefined, 'internal');
       if (cancelRes.error) throw new Error(`cancel_broadcast_failed: ${cancelRes.error}`);
 
       const order = sqlite.prepare(`

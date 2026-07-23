@@ -323,10 +323,10 @@ async function executeAction(item) {
         );
         if (stale) {
           const note = '上一条订单画像内容过时 (你已变更 qty/addr/chain). 我按你最新 input 重新报价中, 上条 skip.';
-          return sendCommandAsync(BROKER_RELAY_ID, { type: COMMAND_TYPES.SEND_MESSAGE, target: item.peer, message: note });
+          return sendCommandAsync(BROKER_RELAY_ID, { type: COMMAND_TYPES.SEND_MESSAGE, target: item.peer, message: note }, undefined, 'internal');
         }
       }
-      return sendCommandAsync(BROKER_RELAY_ID, { type: COMMAND_TYPES.SEND_MESSAGE, target: item.peer, message: p.message });
+      return sendCommandAsync(BROKER_RELAY_ID, { type: COMMAND_TYPES.SEND_MESSAGE, target: item.peer, message: p.message }, undefined, 'internal');
     }
     case 'accept_v1':
     case 'paid_v1': {
@@ -337,7 +337,7 @@ async function executeAction(item) {
       // (offer 留 'open', taker=null) → bsc-watcher 检测 USDT 但 paid event 拒 → KAS 永不
       // deliver. 5 笔 manual rescue 同根因. 修法: pump 真发后调 onBroadcastWritten 通知, 跟
       // /api/chat/send 路径对齐. 不动协议, 不新文件, broker 真融入 exchange 完整完成.
-      const result = await sendCommandAsync(BROKER_RELAY_ID, { type: COMMAND_TYPES.SEND_BROADCAST, channel: p.channel || 'kanet-exchange', message: p.message });
+      const result = await sendCommandAsync(BROKER_RELAY_ID, { type: COMMAND_TYPES.SEND_BROADCAST, channel: p.channel || 'kanet-exchange', message: p.message }, undefined, 'internal');
       // sendCommandAsync resolves msg.result (relay-manager.js:260) = relay 返回的 { txId, fee },
       // 没有 ok 字段. 用 txId 判 success (跟 broker-queue 别处 line 175 same convention).
       if (result?.txId) {
@@ -374,7 +374,7 @@ async function executeAction(item) {
         target: transferTarget,
         amount: transferAmount,
         note: p.note,
-      });
+      }, undefined, 'internal');
     }
     case 'publish_offer': {
       // 2026-07-14(Bettor #k2xd1y 第五源排查): 端口 3100→3200 + 补 AbortSignal.timeout(同族

@@ -264,7 +264,7 @@ export async function buildProposeCloseRequestV2(marketId, judged) {
   for (const sid of (shardIds.length ? shardIds : [marketId])) await recaptureSideLockDaaForMarket(sid);
 
   const rc = async (cmd, t = 90000) => {
-    const r = await sendCommandAsync(settlerRelayId, cmd, t);
+    const r = await sendCommandAsync(settlerRelayId, cmd, t, 'internal');
     if (r?.ok === false) { const e = new Error(cmd.type); e.relayErr = r.error; throw e; }
     return r;
   };
@@ -285,8 +285,8 @@ export async function buildProposeCloseRequestV2(marketId, judged) {
       const p2shFn = (redeemHex) => kaspaForP2sh.addressFromScriptPublicKey(kaspaForP2sh.ScriptBuilder.fromScript(new Uint8Array(Buffer.from(redeemHex, 'hex'))).createPayToScriptHashScript(), relayAddrForConsolidate.startsWith('kaspatest:') ? 'testnet-12' : 'mainnet').toString();
       const { transferAndConfirm } = await import('../services/relay-manager.js');
       const { REORG_SAFE_MIN_DEPTH } = await import('./pool-shard-register.mjs');
-      const landedFn = async (txid, addr) => { for (let i = 0; i < 25; i++) { const j = await sendCommandAsync(settlerRelayId, { type: 'check_utxo_landed', address: addr, txid, minDepth: REORG_SAFE_MIN_DEPTH }, 20000); if (j.landed || j.found) return true; await new Promise(r => setTimeout(r, 2000)); } return false; };
-      const transferFn = async (addr, sompi) => { const r = await transferAndConfirm(settlerRelayId, addr, (Number(sompi) / 1e8).toFixed(8), { minDepth: REORG_SAFE_MIN_DEPTH, maxWaitMs: 60000 }); return r.txId; };
+      const landedFn = async (txid, addr) => { for (let i = 0; i < 25; i++) { const j = await sendCommandAsync(settlerRelayId, { type: 'check_utxo_landed', address: addr, txid, minDepth: REORG_SAFE_MIN_DEPTH }, 20000, 'internal'); if (j.landed || j.found) return true; await new Promise(r => setTimeout(r, 2000)); } return false; };
+      const transferFn = async (addr, sompi) => { const r = await transferAndConfirm(settlerRelayId, addr, (Number(sompi) / 1e8).toFixed(8), { minDepth: REORG_SAFE_MIN_DEPTH, maxWaitMs: 60000, origin: 'internal' }); return r.txId; };
       // 🔴 DB-lag 自愈补齐(2026-07-18 J1tn, kr5l4 consolidate "UTXO not found @ genesis 地址" 根治·规则64):
       //   ZK 结算路径此前【漏传 getUtxos】——经典路径 consolidateAndBuildPsState(bshard-settle-daemon.mjs:172)
       //   传了 probeUtxos 启用 autoDetectConsolidateResume, 但这条 ZK propose 路径没传, 自愈不触发。后果:
@@ -300,7 +300,7 @@ export async function buildProposeCloseRequestV2(marketId, judged) {
         payoutShard: { payout_redeem_hex: ps.payout_redeem_hex, payout_ps_outpoint: ps.payout_ps_outpoint, payout_cov_id: ps.payout_cov_id },
         relayAddr: relayAddrForConsolidate, transfer: transferFn, deadline: Number(market.deadline),
         getUtxos: async (addr) => {
-          const r = await sendCommandAsync(settlerRelayId, { type: 'get_address_utxos', address: addr }, 15000);
+          const r = await sendCommandAsync(settlerRelayId, { type: 'get_address_utxos', address: addr }, 15000, 'internal');
           return r?.utxos || [];
         },
       });
@@ -511,7 +511,7 @@ export async function buildZkHandoffRequestV2(marketId, args) {
   const closeZkSilPath = process.env.ZK_CLOSEZK_SIL_PATH;
   const { templateA, templateB, templateC, templateD } = computeCloseZkTmplAnchor(closeZkSilPath, gateTmplHash);
 
-  const rc = (cmd, t = 90000) => sendCommandAsync(settlerRelayId, cmd, t);
+  const rc = (cmd, t = 90000) => sendCommandAsync(settlerRelayId, cmd, t, 'internal');
   const relayAddr = (await rc({ type: 'get_pubkey' })).address;
 
   // fee input 必须精确 == consolidated_pool(unlockBshardZkHandoff 硬性要求, PS output 本身无余付空间) —
@@ -519,7 +519,7 @@ export async function buildZkHandoffRequestV2(marketId, args) {
   const { transferAndConfirm } = await import('../services/relay-manager.js');
   const { REORG_SAFE_MIN_DEPTH } = await import('./pool-shard-register.mjs');
   const feeSompi = state.consolidatedPool;
-  const feeTx = await transferAndConfirm(settlerRelayId, relayAddr, (Number(feeSompi) / 1e8).toFixed(8), { minDepth: REORG_SAFE_MIN_DEPTH, maxWaitMs: 90000 });
+  const feeTx = await transferAndConfirm(settlerRelayId, relayAddr, (Number(feeSompi) / 1e8).toFixed(8), { minDepth: REORG_SAFE_MIN_DEPTH, maxWaitMs: 90000, origin: 'internal' });
 
   const [psTx, psIdxStr] = String(ps.payout_ps_outpoint).split(':');
   const cmd = {

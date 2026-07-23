@@ -1113,7 +1113,7 @@ export async function registerBettorRoutes(fastify) {
             type: 'transfer',
             target: escrowAddr,
             amount: stakeKas.toFixed(8),  // KI-30: Kaspa sompi max 8 decimal precision, JS float 17-digit → reject
-          });
+          }, undefined, 'legacy-unmigrated');
           escrowTxId = result?.txId || null;
           if (escrowTxId) break;
           if (attempt < ESCROW_MAX_ATTEMPTS) await new Promise(r => setTimeout(r, attempt * 5000));
@@ -1168,7 +1168,7 @@ export async function registerBettorRoutes(fastify) {
             type: 'send_broadcast',
             channel: 'kanet-exchange',
             message: JSON.stringify(protocolMsg),
-          });
+          }, undefined, 'legacy-unmigrated');
           broadcastTx = result?.txId || null;
           if (broadcastTx) {
             broadcastEmittedAt = new Date().toISOString();
@@ -1412,7 +1412,7 @@ export async function registerBettorRoutes(fastify) {
     let escrowTxId = null;
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
-        const r = await sendCommandAsync(b.maker_relay_id, { type: 'transfer', target: escrow.p2shAddr, amount: stakeKasStr });
+        const r = await sendCommandAsync(b.maker_relay_id, { type: 'transfer', target: escrow.p2shAddr, amount: stakeKasStr }, undefined, 'legacy-unmigrated');
         escrowTxId = r?.txId || null;
         if (escrowTxId) break;
         if (attempt < 3) await new Promise(r => setTimeout(r, attempt * 5000));
@@ -1597,7 +1597,7 @@ export async function registerBettorRoutes(fastify) {
     let takerEscrowTxId = null;
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
-        const r = await sendCommandAsync(b.taker_relay_id, { type: 'transfer', target: offer.escrow_p2sh, amount: stakeKasStr });
+        const r = await sendCommandAsync(b.taker_relay_id, { type: 'transfer', target: offer.escrow_p2sh, amount: stakeKasStr }, undefined, 'legacy-unmigrated');
         takerEscrowTxId = r?.txId || null;
         if (takerEscrowTxId) break;
         if (attempt < 3) await new Promise(r => setTimeout(r, attempt * 5000));
@@ -1897,7 +1897,7 @@ export async function registerBettorRoutes(fastify) {
           redeem_script_hex: redeemScriptHex,
           maker_address: offer.maker_kaspa_addr,
           lock_time: deadlineSeconds * 1000,  // J1tn r303 (Bettor 03:19 v3): *1000 → ms; PredictionEscrowUnanimous5 SS L146/167 require(tx.time >= deadline*1000), NO grace. 漏 *1000 致 kaspad DAA 模式 reject.
-        });
+        }, undefined, 'legacy-unmigrated');
       } else {
         // refund_both — caller pre-resolves both outpoints (= maker_lock_tx[0] + taker_lock_tx[0]).
         // amounts: each refund = stake - half(minerFee). For Phase 4a v0 simplification (1:1 stake), equal split.
@@ -1916,7 +1916,7 @@ export async function registerBettorRoutes(fastify) {
             { address: offer.taker, amountSompi: String((takerStakeSompi - halfFee).toString()) },
           ],
           lock_time: deadlineSeconds * 1000,  // J1tn r303 (Bettor 03:19 v3): *1000 → ms; PredictionEscrowUnanimous5 SS L146/167 require(tx.time >= deadline*1000), NO grace. 漏 *1000 致 kaspad DAA 模式 reject.
-        });
+        }, undefined, 'legacy-unmigrated');
       }
     } catch (err) {
       console.error(`[prediction-refund] relay IPC fail offer=${offerId.slice(0,12)}: ${err.message}`);

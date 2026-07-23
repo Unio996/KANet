@@ -53,7 +53,7 @@ async function notifyBotDisabled(brokerAddress, why) {
     const msg = `[broker-bot-mgr] ⚠ BROKER BOT DISABLED broker=…${brokerAddress.slice(-12)} (${why}). `
       + `Bot 已自禁, 无法服务该 broker 用户, 直到 Console 重启或 re-onboard 新 token。`
       + ` GET /api/kanet-broker/bots-status 查详情。`;
-    await sendCommandAsync(relay.id, { type: 'send_broadcast', channel: 'dev-coord-testnet', message: msg });
+    await sendCommandAsync(relay.id, { type: 'send_broadcast', channel: 'dev-coord-testnet', message: msg }, undefined, 'internal');
   } catch (e) {
     console.warn('[broker-bot-mgr] notify failed:', e.message);
   }

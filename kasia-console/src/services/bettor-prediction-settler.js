@@ -177,7 +177,7 @@ export async function settlePredictionOutcomes() {
               type: 'transfer',
               target: winnerAddr,
               amount: stakeKas.toFixed(8),  // KI-30: Kaspa sompi max 8 decimal precision
-            });
+            }, undefined, 'internal');
             payoutTxId = result?.txId || null;
             if (payoutTxId) break;
             if (attempt < PAYOUT_MAX_ATTEMPTS) await new Promise(r => setTimeout(r, attempt * 5000));
@@ -328,7 +328,7 @@ async function dispatchPhase2OrCheckSigs(offer, winnerStr, db) {
           { outpointTxid: offer.taker_escrow_lock_tx, outpointIndex: 0 },
         ],
         outputs,
-      });
+      }, undefined, 'internal');
       if (!preimage?.ok || !preimage.tx_obj) {
         console.error(`[settler] Phase 2 build_preimage fail offer=${offer.id.slice(0,12)}: ${preimage?.error}`);
         return { handled: true, completed: false };
@@ -352,7 +352,7 @@ async function dispatchPhase2OrCheckSigs(offer, winnerStr, db) {
         redeem_script_hash: createHash('sha256').update(meta.redeem_script_hex || '', 'hex').digest('hex'),
       });
       Promise.allSettled(oracleAddrs.map(o =>
-        sendCommandAsync(offer.maker_relay_id, { type: 'send_message', target: o.address, message: reqPayload })
+        sendCommandAsync(offer.maker_relay_id, { type: 'send_message', target: o.address, message: reqPayload }, undefined, 'internal')
       )).catch(() => {});
 
       // Transition to collecting_sigs
@@ -422,7 +422,7 @@ async function dispatchPhase2OrCheckSigs(offer, winnerStr, db) {
         sigs_by_input: sigsByInput,
         winner: meta.phase2_winner,
         tx_obj_preimage: meta.phase2_tx_obj,  // Sub 8.2 Bug 14: voter's exact tx_obj for byte-identical sighash
-      });
+      }, undefined, 'internal');
       if (!submitResult?.ok || !submitResult.txId) {
         console.error(`[settler] Phase 4a Sub 8 settle submit fail offer=${offer.id.slice(0,12)}: ${submitResult?.error}`);
         return { handled: true, completed: false };
@@ -565,7 +565,7 @@ export async function dispatchPhase2Consensual(offer, winner, db = sqlite) {
       ],
       outputs,
       winner,  // 0 or 1, signed by both parties per settle_consensual entry param
-    });
+    }, undefined, 'internal');
     if (!preimage?.ok || !preimage.tx_obj) {
       console.error(`[settler:consensual] build_preimage fail offer=${offer.id.slice(0,12)}: ${preimage?.error}`);
       return { handled: true, completed: false, step: 'build_preimage', error: preimage?.error || 'no error in response' };
@@ -619,7 +619,7 @@ export async function dispatchPhase2Consensual(offer, winner, db = sqlite) {
           type: 'sign_input_for_settle',
           tx_hex: JSON.stringify(preimage.tx_obj),  // schema requires tx_hex, handler L538 parses back
           input_index: inputIdx,
-        });
+        }, undefined, 'internal');
         if (!makerSigRes?.ok || !makerSigRes.signature) {
           console.error(`[settler:consensual] maker sign input ${inputIdx} fail offer=${offer.id.slice(0,12)}: ${makerSigRes?.error}`);
           return { handled: true, completed: false, step: `maker_sign_${inputIdx}`, error: makerSigRes?.error || 'no error in response' };
@@ -629,7 +629,7 @@ export async function dispatchPhase2Consensual(offer, winner, db = sqlite) {
           type: 'sign_input_for_settle',
           tx_hex: JSON.stringify(preimage.tx_obj),
           input_index: inputIdx,
-        });
+        }, undefined, 'internal');
         if (!takerSigRes?.ok || !takerSigRes.signature) {
           console.error(`[settler:consensual] taker sign input ${inputIdx} fail offer=${offer.id.slice(0,12)}: ${takerSigRes?.error}`);
           return { handled: true, completed: false, step: `taker_sign_${inputIdx}`, error: takerSigRes?.error || 'no error in response' };
@@ -654,7 +654,7 @@ export async function dispatchPhase2Consensual(offer, winner, db = sqlite) {
         sigs_by_input: sigsByInput,
         winner,
         tx_obj_preimage: preimage.tx_obj,
-      });
+      }, undefined, 'internal');
       if (!submitRes?.ok || !submitRes.txId) {
         console.error(`[settler:consensual] settle TX submit fail offer=${offer.id.slice(0,12)}: ${submitRes?.error}`);
         return { handled: true, completed: false, step: 'submit', error: submitRes?.error || 'no error in response' };
@@ -807,7 +807,7 @@ export async function collectMultiOracleVotes(offer, db = sqlite) {
         // dispatch via maker_relay (= async, non-blocking). 不 sendCommandAsync 阻塞 settler tick.
         // Use Promise.allSettled — 失 oracle DM 不影响 settler 继续.
         Promise.allSettled(oracles.map(o =>
-          sendCommandAsync(offer.maker_relay_id, { type: 'send_message', target: o.address, message: revotePayload })
+          sendCommandAsync(offer.maker_relay_id, { type: 'send_message', target: o.address, message: revotePayload }, undefined, 'internal')
         )).then(results => {
           const okCount = results.filter(r => r.status === 'fulfilled').length;
           console.log(`[settler] revote DM dispatched offer=${offer.id.slice(0,12)} round=${currentRound + 1}: ${okCount}/${oracles.length} sent`);

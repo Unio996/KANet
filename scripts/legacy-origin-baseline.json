@@ -1,19 +1,28 @@
 {
  "_doc": "R-LEGACY-ORIGIN-SHRINK baseline(C 分阶段 arm 8282dd61 §3 migration debt ledger)。origin='legacy-unmigrated' call 点存量计数, 只减不增: 每迁移一条路由(→app 信封/operator 专道)撤 legacy 标后, 手动把对应计数减小并与代码同 commit。新增 legacy 标=lint ERROR。baseline 自身受硬 ratchet 守护: 计数/总数调升=lint ERROR, 唯一例外=expansion_authorizations 含 to_total==新总数的授权条目(每条须 NWT verdict 锚·diff 审 load-bearing·lint 只校完整性)。2026-07-23 初始=批C B桶收敛类 22 处; 同日事故修法扩张 22→39(17 处误标 app 的 Console 内部通信重分类为 legacy, 非新债, NWT 频道授权)。",
  "files": {
-  "kasia-console/src/api/pool.js": 18,
+  "kasia-console/src/api/pool.js": 26,
   "kasia-console/src/api/relay.js": 2,
   "kasia-console/src/api/trading.js": 4,
   "kasia-console/src/api/chat.js": 2,
   "kasia-console/src/api/admin.js": 1,
   "kasia-console/src/api/discovery.js": 1,
-  "kasia-console/src/api/bettor.js": 1,
+  "kasia-console/src/api/bettor.js": 7,
   "kasia-console/src/api/escrow.js": 3,
   "kasia-console/src/api/exchange.js": 6,
-  "kasia-console/src/api/tg-wallet.js": 1
+  "kasia-console/src/api/tg-wallet.js": 1,
+  "kasia-console/src/api/oracle-pool.js": 6,
+  "kasia-console/src/api/coord-status.js": 1,
+  "kasia-console/src/services/relay-manager.js": 1
  },
- "total": 39,
+ "total": 61,
  "expansion_authorizations": [
+  {
+   "to_total": 61,
+   "date": "2026-07-23",
+   "ref": "NWT 9c5f32db 完整枚举 map(family3 第三族·请求触发面→legacy: oracle-pool 6+bettor 6+coord-status 1)+⚠复核项实核偏差(getRelayRpcState 唯二调用方 api/relay UI 探针=请求触发→legacy 非 map 的 internal·待 NWT 重核裁; transferAndConfirm 混合调用方→opts.origin 透传, pool.js 8 调用方声明 legacy=+8)+Bettor 编排 09:22Z。39→61 重分类/补标非新债",
+   "sites": "oracle-pool:32/56/73/85/130/506 bettor:1112/1167/1415/1600/1893/1905 coord-status:29 relay-manager:329(getRelayRpcState) pool.js transferAndConfirm×8 opts.origin"
+  },
   {
    "to_total": 39,
    "date": "2026-07-23",

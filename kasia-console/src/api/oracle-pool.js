@@ -29,7 +29,7 @@ import { sendBroadcastChunked } from '../lib/pool-broadcast.mjs';
 // get_pubkey 返与 staker_pk_x 同值, 否则 endpoint reject.
 async function _broadcastOracleStakeEnroll({ stakerPkX, lockUntilDaa, p2shAddr, signingRelayId }) {
   // 1. Verify signing relay's pubkey matches staker_pk_x (= owner sig 不能被代签).
-  const pkRes = await sendCommandAsync(signingRelayId, { type: 'get_pubkey' });
+  const pkRes = await sendCommandAsync(signingRelayId, { type: 'get_pubkey' }, undefined, 'legacy-unmigrated');
   const signerPk = String(pkRes?.x_only_pubkey || '').toLowerCase();
   if (!signerPk || signerPk.length !== 64) throw new Error(`signing relay get_pubkey invalid: ${signerPk}`);
   if (signerPk !== stakerPkX.toLowerCase()) {
@@ -53,7 +53,7 @@ async function _broadcastOracleStakeEnroll({ stakerPkX, lockUntilDaa, p2shAddr, 
     enrolled_at: new Date().toISOString(),
   };
   const messageToSign = JSON.stringify(unsignedPayload);
-  const signResult = await sendCommandAsync(signingRelayId, { type: 'ecdsa_sign', message: messageToSign });
+  const signResult = await sendCommandAsync(signingRelayId, { type: 'ecdsa_sign', message: messageToSign }, undefined, 'legacy-unmigrated');
   const signature = signResult?.signature;
   if (!signature) throw new Error('ecdsa_sign returned empty');
 
@@ -70,7 +70,7 @@ async function _broadcastOracleStakeEnroll({ stakerPkX, lockUntilDaa, p2shAddr, 
 // EVERY node (incl this one) ingests it (trade-protocol-filter handleOracleStakeWithdraw) → sets active=0 in
 // lockstep = the CROSS-NODE-CONVERGENT pool removal (NOT a node-local UPDATE = #22 active-flag divergence).
 async function _broadcastOracleStakeWithdraw({ stakerPkX, signingRelayId }) {
-  const pkRes = await sendCommandAsync(signingRelayId, { type: 'get_pubkey' });
+  const pkRes = await sendCommandAsync(signingRelayId, { type: 'get_pubkey' }, undefined, 'legacy-unmigrated');
   const signerPk = String(pkRes?.x_only_pubkey || '').toLowerCase();
   if (!signerPk || signerPk.length !== 64) throw new Error(`signing relay get_pubkey invalid: ${signerPk}`);
   if (signerPk !== stakerPkX.toLowerCase()) {
@@ -82,7 +82,7 @@ async function _broadcastOracleStakeWithdraw({ stakerPkX, signingRelayId }) {
     withdrawn_at: new Date().toISOString(),
   };
   const messageToSign = JSON.stringify(unsignedPayload);
-  const signResult = await sendCommandAsync(signingRelayId, { type: 'ecdsa_sign', message: messageToSign });
+  const signResult = await sendCommandAsync(signingRelayId, { type: 'ecdsa_sign', message: messageToSign }, undefined, 'legacy-unmigrated');
   const signature = signResult?.signature;
   if (!signature) throw new Error('ecdsa_sign returned empty');
   const payloadStr = JSON.stringify({ ...unsignedPayload, signature });
@@ -127,7 +127,7 @@ export async function registerOraclePoolRoutes(fastify) {
     const failures = [];
     for (const c of candidates) {
       try {
-        const r = await sendCommandAsync(c.id, { type: 'get_pubkey' });
+        const r = await sendCommandAsync(c.id, { type: 'get_pubkey' }, undefined, 'legacy-unmigrated');
         const pk = r?.x_only_pubkey;
         if (!pk || pk.length !== 64) {
           failures.push({ relay_id: c.id, name: c.name, reason: `get_pubkey returned invalid pk: ${pk}` });
@@ -509,7 +509,7 @@ export async function registerOraclePoolRoutes(fastify) {
         redeem_script_hex: enroll.redeem_script_hex,
         to_address: enroll.relay_address,
         lock_time: lockTime.toString(),
-      });
+      }, undefined, 'legacy-unmigrated');
       if (!submitResult?.ok || !submitResult.txId) {
         return reply.code(503).send({ ok: false, error: `relay stake_unlock submit fail: ${submitResult?.error || 'no txId'}` });
       }

@@ -30,7 +30,7 @@ export async function sendBroadcastChunked(relayId, channel, payloadStr, timeout
   // 减 settle TX 尺寸 = broadcast-880 根治) 另治; 此处先让大广播不被 30s 硬截。
   const tmo = timeoutMs || parseInt(process.env.BROADCAST_CHUNK_TIMEOUT_MS, 10) || 90_000;
   if (payloadStr.length <= SAFE_CHUNK_BUDGET) {
-    return await sendCommandAsync(relayId, { type: 'send_broadcast', channel, message: payloadStr }, tmo);
+    return await sendCommandAsync(relayId, { type: 'send_broadcast', channel, message: payloadStr }, tmo, 'internal');
   }
   const hash = createHash('sha256').update(payloadStr).digest('hex');
   const total = Math.ceil(payloadStr.length / CHUNK_DATA_BUDGET);
@@ -41,7 +41,7 @@ export async function sendBroadcastChunked(relayId, channel, payloadStr, timeout
     let r, attempt = 0;
     for (;;) {
       try {
-        r = await sendCommandAsync(relayId, { type: 'send_broadcast', channel, message: chunkPayload }, tmo);
+        r = await sendCommandAsync(relayId, { type: 'send_broadcast', channel, message: chunkPayload }, tmo, 'internal');
       } catch (e) {
         r = { error: e?.message || String(e) };
       }

@@ -618,7 +618,7 @@ export async function poolSettlerTick() {
                       type: 'send_broadcast',
                       channel: 'kanet-prediction',
                       message: JSON.stringify(payload),
-                    });
+                    }, undefined, 'internal');
                     if (bcastResult?.ok && bcastResult.txId) {
                       meta0.refund_request_broadcasted_at = new Date().toISOString();
                       meta0.refund_request_txid = bcastResult.txId;
@@ -2182,7 +2182,7 @@ export async function dispatchPhase2(market, decision) {
       required_input_outpoints: requiredInputOutpoints,
       outputs,
       sig_op_counts: sigOpCounts,
-    });
+    }, undefined, 'internal');
     if (!preimage?.ok || !preimage.tx_obj) {
       console.error(`[pool-settler] dispatchPhase2 build_preimage fail market=${market.id.slice(0,12)}: ${preimage?.error}`);
       return;
@@ -2415,7 +2415,7 @@ export async function buildMakerRefundPreimage(market) {
     outputs: [
       { address: makerRow.address, amountSompi: makerRefundAmount.toString() },
     ],
-  });
+  }, undefined, 'internal');
   if (!preimage?.ok || !preimage.tx_obj) {
     console.error(`[pool-settler] buildMakerRefundPreimage build_preimage fail market=${market.id.slice(0,12)}: ${preimage?.error}`);
     return { ok: false, error: preimage?.error || 'no tx_obj' };
@@ -2599,7 +2599,7 @@ export async function handleRefunding(market) {
       output: { address: makerRow.address, amountSompi: String(meta.refund_amount) },
       lock_time: lockTime.toString(),
       tx_obj_preimage: meta.refund_tx_obj,
-    });
+    }, undefined, 'internal');
 
     if (!submitResult?.ok || !submitResult.txId) {
       console.error(`[pool-settler:refunding] submit fail market=${market.id.slice(0,12)}: ${submitResult?.error}`);
@@ -2753,7 +2753,7 @@ export async function dispatchRefundDisagreement(market, decision) {
       required_input_outpoints: requiredInputOutpoints,
       outputs,
       lock_time: refundLockTimeMs,
-    });
+    }, undefined, 'internal');
     if (!preimage?.ok || !preimage.tx_obj) {
       console.error(`[pool-settler] dispatchRefundDisagreement build_preimage fail market=${market.id.slice(0,12)}: ${preimage?.error}`);
       return;
@@ -2784,7 +2784,7 @@ export async function dispatchRefundDisagreement(market, decision) {
       input_count: requiredInputOutpoints.length,
     });
     Promise.allSettled(signingOracles.map(i =>
-      sendCommandAsync(market.maker_relay_id, { type: 'send_message', target: oracleRows[i].address, message: reqPayload })
+      sendCommandAsync(market.maker_relay_id, { type: 'send_message', target: oracleRows[i].address, message: reqPayload }, undefined, 'internal')
     )).catch(() => {});
 
     console.log(`[pool-settler] DISPATCHED RefundDisagreement market=${market.id.slice(0,12)} silentOracleIndex=${silentOracleIndex} signingPair=${signingPair} outputs=${outputs.length} signers=${signingOracles.join(',')} → collecting_sigs`);
@@ -3072,7 +3072,7 @@ async function handleCollectingSigs(market) {
       tx_obj_preimage: await (await import('../lib/settle-safe-json.mjs')).toSettleSafeJsonTxHex(meta.phase2_tx_obj),
       tx_obj_preimage_safe_json: true,
       ...v06Extras,
-    });
+    }, undefined, 'internal');
 
     if (!submitResult?.ok || !submitResult.txId) {
       // J2-tn r388 #24 (Bettor 02:25 follow-up): collecting_sigs submit-fail backoff. settle
@@ -3148,7 +3148,7 @@ async function handleCollectingSigs(market) {
           type: 'send_broadcast',
           channel: 'kanet-prediction',
           message: JSON.stringify(payload),
-        });
+        }, undefined, 'internal');
         if (bcastResult?.ok && bcastResult.txId) {
           console.log(`[pool-settler:collecting] cross-node settled broadcast market=${market.id.slice(0,12)} bcast_txid=${bcastResult.txId.slice(0,16)}`);
         } else {
@@ -3278,7 +3278,7 @@ async function handleCollectingSigsRefundDisagreement(market, meta) {
       // txObjPreimage.lockTime (already deadline+300) but this keeps the IPC self-describing
       // in case future paths build the TX from scratch without preimage.
       lock_time: meta.refund_disagreement_lock_time || 0,
-    });
+    }, undefined, 'internal');
 
     if (!submitResult?.ok || !submitResult.txId) {
       console.error(`[pool-settler:collecting-refund-dis] submit fail market=${market.id.slice(0,12)}: ${submitResult?.error}`);
