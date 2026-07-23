@@ -27,9 +27,9 @@
    "form": "import Database from better-sqlite3",
    "path": "kasia-console/scripts/m0c1-grant-provision.mjs",
    "capability": "m0c1-provision-writer",
-   "justification": "M0c-1 app provision operator 离线签发脚本(6e608b7e)= 全仓唯一 grant registry 写入方(M1-5 静态可枚举, NWT app provision GREEN 判据③实核: 零 HTTP/fetch/listen/IPC/sendCommand + privkey 只打印不落盘 + 直写 m0c1_app_grants 表 = 场景A结构不可达的实现方式)。裸 better-sqlite3 import 是其直写 DB 本意, 触 R-M0A-BARE-IMPORT-DIFF 是规则没 writer 档非 provision 错(NWT 快裁定性)。writer 档=grant 铸造权威最敏感: content_digest 锚 6e608b7e 版, 任何改动失配即重审。",
-   "review_ref": "bbff75aa",
-   "content_digest": "839b23bd077fc311474379f654d66386150cdf89cccf841501911ae6016701ca"
+   "justification": "M0c-1 app provision operator 离线签发脚本(6e608b7e)= 全仓唯一 grant registry 写入方(M1-5 静态可枚举, NWT app provision GREEN 判据③实核: 零 HTTP/fetch/listen/IPC/sendCommand + privkey 只打印不落盘 + 直写 m0c1_app_grants 表 = 场景A结构不可达的实现方式)。裸 better-sqlite3 import 是其直写 DB 本意, 触 R-M0A-BARE-IMPORT-DIFF 是规则没 writer 档非 provision 错(NWT 快裁定性)。writer 档=grant 铸造权威最敏感: content_digest 锚 6e608b7e 版, 任何改动失配即重审。【2026-07-23 更新】J1 加 --source CLI 参数(Path B pilot 围栏 §2.1, source_scope 字段签发支持)——三处纯字段透传(usage 注释+row 对象+INSERT 语句), 跟既有 --payee/--market/--branch 完全同构, 零新逻辑分支/零 relay-manager import/零网络面, 不触及 provision-writer 静态负面检查任何一条。NWT diff 审 GREEN(跨节点用临时 docs 文件 60065f5e 传递, 场景 A 结构不可达属性不变)。content_digest 锚更新为本次改动后版本。",
+   "review_ref": "60065f5e",
+   "content_digest": "81170bde392fb01eb7ae7b757b795ee1502561ff06c046fe546b1c2ccbc931c5"
   }
  ]
 }

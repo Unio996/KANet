@@ -12,8 +12,9 @@
 //   node kasia-console/scripts/m0c1-grant-provision.mjs gen-key
 //   node kasia-console/scripts/m0c1-grant-provision.mjs issue \
 //     --app-key-id <id> --app-pubkey <xonly-hex> --commands <a,b,c> --relay <relay_node_id[,..]> \
-//     --network <testnet-12> [--payee <addr1,addr2>] [--max-amount-kas <N>] [--market <m1,m2>] \
-//     [--branch <b1,b2>] [--valid-days <30>] [--intent-version <1>] [--db <path>]
+//     --network <testnet-12> [--payee <addr1,addr2>] [--source <addr1,addr2>] [--max-amount-kas <N>] \
+//     [--market <m1,m2>] [--branch <b1,b2>] [--valid-days <30>] [--intent-version <1>] [--db <path>]
+//     (--source = Path B pilot 围栏 §2.1: custodial_transfer 限定 fromAddress 出账源钱包集合)
 //   node kasia-console/scripts/m0c1-grant-provision.mjs revoke --grant-id <G> [--db <path>]
 //   node kasia-console/scripts/m0c1-grant-provision.mjs list [--db <path>]
 //
@@ -97,6 +98,7 @@ async function main() {
       outpoint_scope: null, // 复杂结构维度精判归 M0c-2, 本脚本乙期不放开
       branch_scope: args.branch ? JSON.stringify(csv(args.branch)) : null,
       payee_scope: args.payee ? JSON.stringify(csv(args.payee)) : null,
+      source_scope: args.source ? JSON.stringify(csv(args.source)) : null, // Path B pilot 围栏 §2.1: 限定 fromAddress 出账源钱包集合
       max_amount_sompi: args['max-amount-kas'] ? kasToSompiInt(args['max-amount-kas']) : null,
       max_cumulative_sompi: null, // 累计上限 enforcement 归 M0c-3 审计派生
       max_fee_sompi: null,
@@ -108,12 +110,12 @@ async function main() {
     db.prepare(`
       INSERT INTO ${M0C1_GRANT_TABLE} (
         grant_id, app_key_id, app_pubkey, allowed_commands, typed_intent_version,
-        relay_scope, network, market_scope, outpoint_scope, branch_scope, payee_scope,
+        relay_scope, network, market_scope, outpoint_scope, branch_scope, payee_scope, source_scope,
         max_amount_sompi, max_cumulative_sompi, max_fee_sompi,
         valid_from, valid_until, grant_version, created_at
       ) VALUES (
         @grant_id, @app_key_id, @app_pubkey, @allowed_commands, @typed_intent_version,
-        @relay_scope, @network, @market_scope, @outpoint_scope, @branch_scope, @payee_scope,
+        @relay_scope, @network, @market_scope, @outpoint_scope, @branch_scope, @payee_scope, @source_scope,
         @max_amount_sompi, @max_cumulative_sompi, @max_fee_sompi,
         @valid_from, @valid_until, @grant_version, @created_at
       )
