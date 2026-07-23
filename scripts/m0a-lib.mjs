@@ -55,6 +55,20 @@ export const CONTROLLED_FUNNEL_ALLOWLIST = new Set([
   // 未来项(留注释, 不预塞): capability-gateway.js 能力网关等 —— 扩张要走 NWT 审 + Owner 知情。
 ]);
 
+// ── considered amendment #2(2026-07-23, Bettor 快裁·blocker): 窄 capability m0c1-provision-writer ──
+// M0c-1 app provision 的 operator 离线脚本(grant-provision.mjs)直写 grant DB 是 NWT GREEN 判据③本意
+// (零 HTTP/IPC/relay 写入面=场景A结构不可达的实现方式), 但 M0a 三 capability 无一适配 writer。
+// 同 m0c-controlled-relay-endpoint 先例四约束 + writer 特有静态负面检查(NWT §③ grep 判据机制化):
+//   ① 白名单有界 shrink-only(仅 grant-provision.mjs, 扩张走 NWT 审 + Owner 知情)。
+//   ② content_digest TOCTOU 锚(批准时内容 sha256, 失配=改过没重审=拒)。
+//   ③ writer 不走 checkReadonlyConstraint(直写是其存在意义), 换 provision 专属静态负面检查:
+//      文件内禁 relay-manager import / 禁 http·fetch·listen·sendCommand 面(离线纯 DB 写)。
+//   ④ lint 是完整性门, NWT diff 审仍是唯一 load-bearing 闸(受控语义人审)。
+export const PROVISION_WRITER_CAP = 'm0c1-provision-writer';
+export const PROVISION_WRITER_ALLOWLIST = new Set([
+  'kasia-console/scripts/m0c1-grant-provision.mjs', // M0c-1 app provision operator 离线签发脚本(唯一 registry 写入方)
+]);
+
 export const sha256Hex = (s) => crypto.createHash('sha256').update(Buffer.from(s, 'utf8')).digest('hex');
 
 const git = (root, args) =>
@@ -222,7 +236,7 @@ const MANIFEST_FIELDS = ['id', 'family', 'form', 'path', 'capability', 'justific
 // 七字段(MANIFEST_FIELDS)全必填对所有 capability 生效; content_digest 是"仅此 capability 附加必填"
 // (m0c-controlled-relay-endpoint), 单独校验(见 manifestChecks relay-manager 分支), 不并入 MANIFEST_FIELDS
 // —— 否则 db-readonly / test-fixture 存量条目会因缺新字段被全判挂(向后兼容, NWT 第4约束的兼容边界)。
-const CAPABILITIES = new Set(['db-readonly', 'test-fixture', CONTROLLED_RELAY_CAP]);
+const CAPABILITIES = new Set(['db-readonly', 'test-fixture', CONTROLLED_RELAY_CAP, PROVISION_WRITER_CAP]);
 
 export function manifestChecks(root) {
   const violations = [];
@@ -282,6 +296,50 @@ export function manifestChecks(root) {
         continue;
       }
       // 全过: 合法受控 funnel relay import(白名单命中 + digest 匹配)。放行, 不落 sqlite 只读检查。
+      continue;
+    }
+    if (e.capability === PROVISION_WRITER_CAP) {
+      // ↓↓↓ considered amendment #2: m0c1-provision-writer 安全控制校验(先例四约束 + writer 静态负面检查)↓↓↓
+      if (e.family !== 'sqlite') {
+        violations.push({ rule: 'R-M0A-MANIFEST-SCHEMA', file: MANIFEST_PATH,
+          msg: `manifest 条目 "${e.id}" capability=${PROVISION_WRITER_CAP} 只适配 family=sqlite(provision 直写 grant DB 的裸 sqlite import), 不开其他族口。` });
+        continue;
+      }
+      if (!PROVISION_WRITER_ALLOWLIST.has(e.path)) {
+        violations.push({ rule: 'R-M0A-MANIFEST-SCHEMA', file: MANIFEST_PATH,
+          msg: `manifest 条目 "${e.id}" capability=${PROVISION_WRITER_CAP} 但 path ${e.path} 不在 provision writer 白名单 — 只有 {${[...PROVISION_WRITER_ALLOWLIST].join(', ')}} 可用此 capability(白名单 shrink-only, 扩张走 NWT 审 + Owner 知情)。` });
+        continue;
+      }
+      if (!('content_digest' in e) || e.content_digest === '' || e.content_digest == null) {
+        violations.push({ rule: 'R-M0A-MANIFEST-SCHEMA', file: MANIFEST_PATH,
+          msg: `manifest 条目 "${e.id}" capability=${PROVISION_WRITER_CAP} 缺 content_digest — writer 条目必填(批准时内容 sha256 hex, TOCTOU 防御, 同先例第4约束)。` });
+        continue;
+      }
+      const writerContent = readStagedContent(root, e.path);
+      if (writerContent == null) {
+        violations.push({ rule: 'R-M0A-MANIFEST-SCHEMA', file: MANIFEST_PATH,
+          msg: `manifest 条目 "${e.id}" 指向的 writer 文件 ${e.path} 不存在于 index — path 锚定 fail-closed: 文件移动必须同步改 manifest。` });
+        continue;
+      }
+      const writerDigest = sha256Hex(writerContent);
+      if (writerDigest !== e.content_digest) {
+        violations.push({ rule: 'R-M0A-MANIFEST-SCHEMA', file: MANIFEST_PATH,
+          msg: `writer 文件 ${e.path} 内容变更(digest 失配: 现 ${writerDigest.slice(0, 12)}… ≠ manifest ${String(e.content_digest).slice(0, 12)}…)需重新 NWT 审并更新 content_digest。` });
+        continue;
+      }
+      // writer 静态负面检查(NWT app provision verdict §③ grep 判据机制化, 每次核现内容非只批准时):
+      // 离线纯 DB 写 = 零 relay 面 + 零网络面。任一出现 = provision 离线性质被破坏 = 拒(需重审)。
+      if (/(require\(\s*|from\s+|import\(\s*)['"][^'"]*relay-manager/.test(writerContent)) {
+        violations.push({ rule: 'R-M0A-OPS-NOT-READONLY', file: e.path,
+          msg: `${e.path} provision writer 文件内出现 relay-manager import — operator 离线签发脚本没有碰 relay 的理由(场景A结构不可达前提), 拒。` });
+        continue;
+      }
+      if (/\b(fetch\s*\(|https?\.|\.listen\s*\(|sendCommandAsync|createServer)/.test(writerContent)) {
+        violations.push({ rule: 'R-M0A-OPS-NOT-READONLY', file: e.path,
+          msg: `${e.path} provision writer 文件内出现网络/relay 面(fetch/http/listen/sendCommandAsync/createServer)— 离线纯 DB 写性质被破坏(NWT §③ 判据), 拒需重审。` });
+        continue;
+      }
+      // 全过: 合法 provision writer(白名单 + digest + 静态负面全净)。放行, 不落只读检查(writer 本意)。
       continue;
     }
     // 静态限制核验(读 index 内容)

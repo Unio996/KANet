@@ -9,6 +9,7 @@ import {
   snapshotEntries, runAllM0aChecks, diffAgainstBaseline, baselineEditGuard,
   manifestChecks, shadowModuleCheck, BASELINE_PATH, MANIFEST_PATH,
   normalizeForm, sha256Hex, CONTROLLED_RELAY_CAP, CONTROLLED_FUNNEL_ALLOWLIST,
+  PROVISION_WRITER_CAP, PROVISION_WRITER_ALLOWLIST,
 } from './m0a-lib.mjs';
 
 const REAL_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -262,6 +263,64 @@ const mkRelayEntry = (over = {}) => ({
   git(r, ['add', '-A']);
   const v = findRule(runAllM0aChecks(r), 'R-M0A-MANIFEST-SCHEMA', '只能经窄 capability');
   ok('#18 relay-manager用db-readonly → 仍拒(block非warn)', !!v && v.severity !== 'warn', JSON.stringify(v || null));
+}
+// ── considered amendment #2: 窄 capability m0c1-provision-writer(NWT 快裁 GREEN 5 约束) ──
+// operator 离线 provision 脚本裸 sqlite 写 grant registry 经窄 capability 合法放行;
+// 非白名单/digest 失配/网络面出现/错 family 仍拒(block)。
+const PROV_PATH = [...PROVISION_WRITER_ALLOWLIST][0]; // kasia-console/scripts/m0c1-grant-provision.mjs
+const provForm = normalizeForm(sqliteImport, 'sqlite');
+const provBody = sqliteImport + '\n' + 'const db = new Database(process.argv[2]);\nexport const issue = 1;\n';
+const mkProvEntry = (over = {}) => ({
+  id: 'MPW-1', family: 'sqlite', form: provForm, path: PROV_PATH,
+  capability: PROVISION_WRITER_CAP, justification: 'M0c-1 provision operator 离线写 grant registry',
+  review_ref: 'NWT-verdict:fixture', content_digest: sha256Hex(provBody), ...over,
+});
+// 19. 合法 writer 条目: 白名单文件 + digest 匹配 + 静态负面全净 → 零报(放行, 不落 readonly 检查)
+{
+  const r = freshRepo(BASE_FILES());
+  writeFile(r, PROV_PATH, provBody);
+  writeFile(r, MANIFEST_PATH, JSON.stringify({ entries: [mkProvEntry()] }, null, 1));
+  git(r, ['add', '-A']);
+  const vs = runAllM0aChecks(r);
+  ok('#19 provision writer(白名单+digest+负面净) → 零报', vs.length === 0, JSON.stringify(vs.map((v) => v.msg.slice(0, 90))));
+}
+// 20. 非白名单文件用 writer capability → 拒(block)
+{
+  const r = freshRepo(BASE_FILES());
+  const badPath = 'kasia-console/scripts/other-writer.mjs';
+  writeFile(r, badPath, provBody);
+  writeFile(r, MANIFEST_PATH, JSON.stringify({ entries: [mkProvEntry({ path: badPath })] }, null, 1));
+  git(r, ['add', '-A']);
+  const v = findRule(runAllM0aChecks(r), 'R-M0A-MANIFEST-SCHEMA', 'provision writer 白名单');
+  ok('#20 非白名单writer → 拒(block)', !!v && v.severity !== 'warn', JSON.stringify(v || null));
+}
+// 21. writer digest 失配(批准后被改过) → 拒(block, NWT: 防批准后改成写别处/铸假 grant)
+{
+  const r = freshRepo(BASE_FILES());
+  writeFile(r, PROV_PATH, provBody + '\n// 批准后被改过\n');
+  writeFile(r, MANIFEST_PATH, JSON.stringify({ entries: [mkProvEntry()] }, null, 1)); // digest 旧值
+  git(r, ['add', '-A']);
+  const v = findRule(runAllM0aChecks(r), 'R-M0A-MANIFEST-SCHEMA', 'digest 失配');
+  ok('#21 writer digest失配 → 拒(block)', !!v && v.severity !== 'warn', JSON.stringify(v || null));
+}
+// 22. writer 文件内出现网络面(fetch) → 拒(离线纯 DB 写性质破坏, NWT §③ 判据机制化)
+{
+  const r = freshRepo(BASE_FILES());
+  const dirtyBody = provBody + 'await fetch(' + Q + 'http://x' + Q + ');\n';
+  writeFile(r, PROV_PATH, dirtyBody);
+  writeFile(r, MANIFEST_PATH, JSON.stringify({ entries: [mkProvEntry({ content_digest: sha256Hex(dirtyBody) })] }, null, 1));
+  git(r, ['add', '-A']);
+  const v = findRule(runAllM0aChecks(r), 'R-M0A-OPS-NOT-READONLY', '网络/relay 面');
+  ok('#22 writer含fetch网络面 → 拒(digest对也拒)', !!v && v.severity !== 'warn', JSON.stringify(v || null));
+}
+// 23. writer capability 用在非 sqlite 族 → 拒(capability 族窄化)
+{
+  const r = freshRepo(BASE_FILES());
+  writeFile(r, PROV_PATH, provBody);
+  writeFile(r, MANIFEST_PATH, JSON.stringify({ entries: [mkProvEntry({ family: 'relay-manager', form: 'import { sendCommandAsync } from relay-manager.js' })] }, null, 1));
+  git(r, ['add', '-A']);
+  const v = findRule(runAllM0aChecks(r), 'R-M0A-MANIFEST-SCHEMA', '只能经窄 capability');
+  ok('#23 writer cap错族(relay-manager) → 拒', !!v && v.severity !== 'warn', JSON.stringify(v || null));
 }
 // 13. 真仓全量计时 < 3s
 {
