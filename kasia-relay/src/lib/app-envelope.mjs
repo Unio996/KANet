@@ -22,35 +22,27 @@
 //   本模块是 M0c-1 粗粒度 intent⊆grant: 命令白名单 + relay/network + 标量维度 + 有效期/吊销。
 
 import * as kaspa from 'kaspa-wasm';
-import { createHash } from 'node:crypto';
 import { getGrantFresh } from './grant-registry.mjs';
+// G1 (2026-07-23·verdict-before-push 规则65 门②): canonical 序列化 + 结构规格纯函数抽到
+// shared/lib/app-envelope-canonical.mjs（kasia-console 网关早拒验 + kasia-relay 权威验证共用，
+// 防两份漂移）。零行为变化重构——canonicalJson/envelopeSigningMessage/intentDigestOf 输出字节
+// 与重构前逐位一致（byte-identical 交叉验证见 scratch/ 自测脚本，Bettor `#`钉死 DoD）。
+import {
+  ENVELOPE_PROTOCOL,
+  ENVELOPE_DOMAIN,
+  ENVELOPE_VERSION,
+  ENVELOPE_FIELDS,
+  canonicalJson,
+  envelopeSigningMessage,
+  intentDigestOf,
+  validateEnvelopeStructure,
+} from '../../../shared/lib/app-envelope-canonical.mjs';
 
-export const ENVELOPE_PROTOCOL = 'kanet-m0c1-app-envelope';
-export const ENVELOPE_DOMAIN = 'kanet.m0c1.app-command.v1'; // domain separation (M-1.6 §5)
-export const ENVELOPE_VERSION = 1;
+export { ENVELOPE_PROTOCOL, ENVELOPE_DOMAIN, ENVELOPE_VERSION, canonicalJson, envelopeSigningMessage, intentDigestOf };
 
 // envelope 生命周期上限: 收紧 M0c-3 前的重放窗诚实残留 (nonce durable 校验落地前唯一时间闸)。
 const MAX_ENVELOPE_TTL_MS = 60 * 60 * 1000; // 1h
 const ISSUED_AT_SKEW_MS = 2 * 60 * 1000;    // 容忍 app/relay 时钟偏差
-
-// strict 字段规格 (§3 step4): 恰好这些键、恰好这些类型。多一键/少一键/类型错 = 拒。
-const ENVELOPE_FIELDS = Object.freeze({
-  protocol: 'string',
-  domain: 'string',
-  version: 'number',
-  app_key_id: 'string',
-  grant_id: 'string',
-  relay_id: 'string',
-  network: 'string',
-  intent_type: 'string',
-  intent_version: 'number',
-  intent: 'object',
-  intent_digest: 'string',
-  nonce: 'string',
-  issued_at: 'number',
-  expires_at: 'number',
-  signature: 'string',
-});
 
 // cmd 上的基础设施字段 (非业务语义, 不参与 intent==cmd 绑定):
 //   type/action = 命令路由 (intent_type 单独绑), envelope = 信封本体,
@@ -67,43 +59,6 @@ const SCALAR_DIMENSIONS = Object.freeze([
   { dim: 'market', fields: ['marketId'], grantCol: 'market_scope', kind: 'membership' },
   { dim: 'branch', fields: ['branch', 'winner'], grantCol: 'branch_scope', kind: 'membership' },
 ]);
-
-/**
- * canonical 确定性序列化: 对象键递归字典序; 只允许 JSON-safe 标量; 在场字段全部序列化
- * (绝不静默剥除未知键 — 两份语义不同的载荷不可能产出同一 canonical 字节)。
- * 非法类型 (undefined/NaN/Infinity/BigInt/function) → throw (调用方 fail-closed deny)。
- */
-export function canonicalJson(v) {
-  if (v === null) return 'null';
-  const t = typeof v;
-  if (t === 'string') return JSON.stringify(v);
-  if (t === 'boolean') return v ? 'true' : 'false';
-  if (t === 'number') {
-    if (!Number.isFinite(v)) throw new Error('canonical: 非有限 number');
-    return JSON.stringify(v);
-  }
-  if (Array.isArray(v)) return '[' + v.map(canonicalJson).join(',') + ']';
-  if (t === 'object') {
-    const keys = Object.keys(v).sort();
-    const parts = [];
-    for (const k of keys) {
-      if (v[k] === undefined) throw new Error(`canonical: 键 ${k} 值为 undefined`);
-      parts.push(JSON.stringify(k) + ':' + canonicalJson(v[k]));
-    }
-    return '{' + parts.join(',') + '}';
-  }
-  throw new Error(`canonical: 不可序列化类型 ${t}`);
-}
-
-export function intentDigestOf(intent) {
-  return 'sha256:' + createHash('sha256').update(canonicalJson(intent), 'utf8').digest('hex');
-}
-
-/** 签名消息 = canonical(全 envelope 去 signature) — 签发端(provision/app SDK)与验证端共用同一定义。 */
-export function envelopeSigningMessage(envelope) {
-  const { signature, ...unsigned } = envelope;
-  return canonicalJson(unsigned);
-}
 
 function deepEq(a, b) {
   if (a === b) return true;
@@ -208,22 +163,12 @@ const denyResult = (reason) => ({
  */
 export function verifyAppEnvelope(cmd, ctx = {}) {
   try {
-    // step2 解信封
+    // step2 解信封 + step4 strict-reject 全信封（结构先行: 字段集恰好匹配 + 类型恰好匹配）——
+    // G1 单一真相源：调共享库 validateEnvelopeStructure（Bettor DoD: 别只搬一半, kasia-console
+    // 网关早拒验用同一份，不许本地再维护一份逻辑重复的循环）。
     const env = cmd?.envelope;
-    if (!env || typeof env !== 'object' || Array.isArray(env)) return denyResult('envelope 缺失/非对象 (§3 step2)');
-
-    // step4 strict-reject 全信封 (结构先行: 字段集恰好匹配 + 类型恰好匹配)
-    for (const k of Object.keys(env)) {
-      if (!(k in ENVELOPE_FIELDS)) return denyResult(`envelope 未知字段 ${k} (strict-reject, §3 step4)`);
-    }
-    for (const [k, t] of Object.entries(ENVELOPE_FIELDS)) {
-      if (!(k in env)) return denyResult(`envelope 缺字段 ${k} (strict-reject)`);
-      if (t === 'object') {
-        if (typeof env[k] !== 'object' || env[k] === null || Array.isArray(env[k])) return denyResult(`envelope.${k} 非对象`);
-      } else if (typeof env[k] !== t) {
-        return denyResult(`envelope.${k} 类型错 (需 ${t})`);
-      }
-    }
+    const structErr = validateEnvelopeStructure(env);
+    if (structErr) return denyResult(structErr);
     if (env.protocol !== ENVELOPE_PROTOCOL) return denyResult('envelope.protocol 不匹配');
     if (env.domain !== ENVELOPE_DOMAIN) return denyResult('envelope.domain 不匹配 (domain separation)');
     if (env.version !== ENVELOPE_VERSION) return denyResult('envelope.version 不匹配');

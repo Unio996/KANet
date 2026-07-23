@@ -59,6 +59,7 @@ import { registerPoolRoutes } from './api/pool.js';
 import { registerAdminDedupRoutes, registerBshardBondReclaimRoutes, registerZ20CircuitRoutes } from './api/admin-dedup.js'; // #27 dedup 存量清理 admin endpoint + 2026-07-13 bshard maker bond reclaim + 2026-07-14 Z20 熔断挂账清单
 import { registerCoordStatusRoutes } from './api/coord-status.js'; // D-010 落地① coord-status 内容签名
 import { registerOperatorSettleRoutes } from './api/operator-settle.js'; // M0c-1 批B operator 结算专道 (relay.js:1726 收敛 A money-path 出口)
+import { registerCapabilityRoutes } from './api/capability.js'; // M0c-1 机制A HTTP 能力网关 (G1 脚手架)
 import { registerFeedbackRoutes } from './api/feedback.js'; // 用户反馈通道卡B(2026-07-12, 框架v1.1+设计v1.2)
 import { registerKanetBrokerRoutes } from './api/kanet-broker.js';
 import { registerTgWalletRoutes } from './api/tg-wallet.js'; // TG custodial wallet (Owner 钦定, Bettor 审)
@@ -213,6 +214,7 @@ await registerBshardBondReclaimRoutes(fastify);
 await registerZ20CircuitRoutes(fastify);
 await registerCoordStatusRoutes(fastify);
 await registerOperatorSettleRoutes(fastify); // M0c-1 批B operator 结算专道 (env 默认 off, gate-arming 前置)
+await registerCapabilityRoutes(fastify); // M0c-1 机制A HTTP 能力网关 (G1 脚手架, env 默认 off, 业务逻辑未接·§3.3a 待定稿落码)
 await registerKanetBrokerRoutes(fastify);
 await registerTgWalletRoutes(fastify);
 await registerKanetMakerRoutes(fastify);
