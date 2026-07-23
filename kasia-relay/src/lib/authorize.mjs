@@ -64,6 +64,11 @@ export function authorizeCommand(cmd) {
   if (origin === 'operator') {
     // operator-settle 端点已做白名单两档 + ADMIN_SECRET tier auth + IP allowlist (受信来源, 批B); gate 认 origin=operator 放行。
     // (operator 白名单在 operator-settle 端点做, gate 不重复; 端点是 operator 命令的唯一合法来源。)
+    // 🔴 单来源假设 (J1 covenant/relay 域核·GREEN 建议·防未来打破): origin=operator 的信任前提 = 全仓**唯一**
+    //   sendCommandAsync(...,'operator') 调用点在 operator-settle.js:72 (J1 grep 验证过, 非假设)。此信任同 origin=internal
+    //   同款性质 (信标签非重新验证, 靠 Console=TCB + 唯一来源撑住)。**若未来新增第二个 origin=operator 调用点,
+    //   必须同步: 新来源须同 operator-settle 做白名单+auth+IP allowlist, 或改 relay 侧对 operator 重新验证 ——
+    //   否则单来源假设被静默打破 = 新来源绕过 operator-settle 端点的白名单/auth 直接放行 money-path。**
     return { decision: 'allow', reason: 'origin=operator (operator-settle 端点白名单+auth 受信)' };
   }
   if (origin === 'app') {
