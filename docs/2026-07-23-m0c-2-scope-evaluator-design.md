@@ -1,6 +1,7 @@
 # M0c-2 设计稿 — 策略 evaluator + 逐 caller scope 精判（J2 主设计）
 
-> **Status**: DRAFT（2026-07-23 · J2 出稿 → 待 Bettor 方向审 → 待 NWT 红队 → 待 Owner money-path 签发才落码）
+> **Status**: v0.2 修订版（2026-07-23 · J2 出稿 → NWT 红队 GREEN-with-1-MUST-FIX+2-note（`f0036e0a`）→ J2 连 MUST-FIX+note 修订 v0.2 → 待 Bettor 方向审 → 待 Owner money-path 签发才落码）
+> **v0.2 修订**：MUST-FIX（§0/§3.5 verify-value-source：scope 维度值必来自 M0c-1 §4.1 冻结的、relay 执行消费的同一字段）+ note-1（§2.1 covenant outpoint/market 抽取需 covenant 审同严度派生）+ note-2（§2.2 amount/recipient 精判 gated on 该命令 typed-intent 化，交叉引用 M0b）。
 > **本卡性质**：设计文档，不改一行执行代码；不授权任何落码/凭证 provision/relay 重启/签名/广播/结算/资金移动。
 > **覆盖 M0c 七项之**：③对照 capability matrix 的策略 evaluator ④逐 caller 命令+钱包/市场/outpoint scope 精判（①②=M0c-1 已设计/落码中；⑤⑥⑦=M0c-3 另稿）。
 > **选型无关（M0c 骨架 §1）**：evaluator 消费 M0c-1 产出的 `AuthResult`（callerId+grantId）+ M-1.1 capability matrix，**不关心身份怎么验出来的** → 可在 M0c-1 落码期并行设计。
@@ -12,7 +13,9 @@
 
 M0c-1 `authorizeCommand(cmd) → AuthResult` 产出（母卡 §5）：`authenticated`（身份验过）+ `decision`（M0c-1 层=身份验证+默认拒绝+**粗粒度** intent⊆grant）+ `callerId`（app key-id）+ `grantId`（命中的权威 grant）+ `intentDigest` + `reason`。
 
-**M0c-2 的位置**：在 M0c-1 的 `decision` 基础上**叠加逐 caller 细粒度 scope 精判**——M0c-1 保证"有 grant 对照且 intent 粗粒度 ⊆ grant"，M0c-2 保证"intent 逐维度精确 ⊆ 该 caller 该 grant 的具体 scope"。消费 `callerId`+`grantId`（拿 grant scope）+ 反序列化后的 intent（命令+参数），**不消费身份验证过程**（选型无关接缝）。
+**M0c-2 的位置**：在 M0c-1 的 `decision` 基础上**叠加逐 caller 细粒度 scope 精判**——M0c-1 保证"有 grant 对照且 intent 粗粒度 ⊆ grant"，M0c-2 保证"intent 逐维度精确 ⊆ 该 caller 该 grant 的具体 scope"。消费 `callerId`+`grantId`（拿 grant scope）+ **M0c-1 §4.1 冻结的 frozen canonical intent**（见 §3.5，**不是**任意"反序列化后的 intent"），**不消费身份验证过程**（选型无关接缝）。
+
+**🔴 verify-value-source 前提（NWT MUST-FIX·置顶）**：evaluateScope 抽 scope 维度值（amount/recipient/outpoint 等）**必须来自 M0c-1 §4.1 冻结的、`:358` switch 实际执行消费的同一份 canonical intent**——否则 scope 判定 vacuous（evaluator 读 cmd.amount=100 放行、relay 执行用 cmd.outputs[i].value=10000）。详见 §3.5，这是 scope evaluator 立身之本。
 
 **为什么分两层**（M0c-1 粗 / M0c-2 细）：M0c-1 是"gate 存在且 fail-closed + 有权威 grant"（防 grant-inflation 的前提在）；M0c-2 是"这个 grant 的 scope 边界逐维度焊死"（防已认证 caller 越自己 scope）。对应 NWT 靶单 **M1-8（身份≠授权）**：M0c-1 层已做 intent⊆grant 早拦（比预期早），M0c-2 做完整逐维度 scope。
 
@@ -42,6 +45,14 @@ grant 的 scope 维度（M0c-1 §4.2 grant 绑定 + M-1.6 §5 canonical，M0c-2 
 
 **宿主（乙期）**：scope 策略 = grant registry 的一部分（M0c-1 §4.3 provision operator 离线写入，M0c-2 只读评估不写）。schema 落 DB 须过 DATABASE.md（migrate 接 v190+，当前 v189）或配置——落码定，本卡定维度不定存储形态。
 
+### 2.1 covenant outpoint/market scope 抽取非平凡（NWT note-1·我域 covenant 审同严度）
+
+对 covenant 结算命令（sign_input_for_settle 等），"这条命令触达哪个 market/outpoint"**编码在 covenant 结构里**（witness/inputs/outputs），不是简单标量字段。evaluator 从 covenant 命令**正确派生**它花的 outpoint/market，需要**跟 covenant 审同等严度**（知道这条 unlock 实际花哪个 outpoint）——这是 §3.5 verify-value-source 的 covenant 版：**covenant scope 抽取的 outpoint == covenant 实际花费的 outpoint**。落码须验（J2 域 settler/covenant 熟，我 wire 这段抽取 + NWT covenant 审同严度核）。硬编码 offset 抽取会静默过期（记忆 hardcoded-sil-offset），须 live-derive + round-trip 自证。
+
+### 2.2 amount/recipient 精判 gated on typed-intent（NWT note-2·交叉引用 M0b）
+
+细粒度 intent scope（amount/recipient 从结构化 intent 抽）**要求命令有 typed-intent**。M-1.1/M0b 坐实多数命令还没 typed-intent（裸 witness/inputs/outputs）——**未 typed 化的命令 M0c-2 只能做粗 scope**（命令类型 + relay/wallet），做不了 amount/recipient 精判。**交叉引用 M0b**：M0c-2 的 amount/recipient/outpoint 精判 **gated on 该命令 typed-intent 化**；而按 M0b 准入门"无 verifier 命令保持 internal"（M0c-1 §2.1），未 typed 化命令本就不该走 app 路径 → 一致。落码时逐命令标注"已 typed 化=可精判 / 未 typed=粗 scope + 走 M0b internal"。
+
 ---
 
 ## 3. evaluator 判定逻辑（逐维度 intent ⊆ grant scope·fail-closed）
@@ -58,6 +69,15 @@ grant 的 scope 维度（M0c-1 §4.2 grant 绑定 + M-1.6 §5 canonical，M0c-2 
 4. **fail-closed 不变量**：evaluator 任何解析异常/维度缺失/grant 读失败 → 拒（同 M0c-1 §3.2 解析异常 fail-closed）。scope 表未配置某维度 → **默认最严**（无 allowed_commands = 拒所有，非放行所有）。
 
 **与 M0c-1 decision 合成**：最终 `decision = M0c-1.decision AND evaluateScope(...)`——M0c-1 先过（身份+粗 grant），M0c-2 scope 再过，任一 deny 则 deny。M0c-2 **不放宽** M0c-1 的拒（只可能更严），保证叠加单调。
+
+### 3.5 🔴 verify-value-source 焊死（NWT MUST-FIX·scope evaluator 立身之本）
+
+evaluator 的全部价值在"**验的值 == 执行的值**"。焊死为设计不变量（落码 diff 审逐维度核）：
+
+1. **同源字段**：evaluateScope 抽的每个 scope 维度值（amount / recipient / outpoint / market / family / branch）**必须来自 M0c-1 §4.1 冻结的 canonical intent 的、relay `:358` switch 执行时消费的同一字段路径**。禁止 evaluator 读"命令旁支字段"（如命令同时带 cmd.amount 和 cmd.outputs[i].value，evaluator 看小的 relay 执行大的 = vacuous scope）。
+2. **intentDigest 覆盖 scope 字段**：`intentDigest`（M0c-1 §5 / §4.1 覆盖全部影响执行字段）**必须覆盖全部 scope 维度字段**——改任一 scope 值（amount/recipient/outpoint…）使 digest 失效，防 evaluator 验完、relay 执行前掉包（TOCTOU-on-value）。这与 M0c-1 §4.1 TOCTOU 不变量（frozen canonical cmd，switch 只消费冻结那份）同一条纪律，M0c-2 evaluator 也只读那份冻结对象。
+3. **禁 re-parse / 旁支取值**：evaluator 不 re-parse 原始 cmd、不从 M0c-1 冻结对象之外的任何来源取 scope 值。
+4. **J2 域 C3 纪律对口**：这就是"签的 tx byte-identical == enforce 验的 txSafeJson"在 scope 层的复刻——验 scope 的字段 == 执行花的字段。
 
 ---
 
