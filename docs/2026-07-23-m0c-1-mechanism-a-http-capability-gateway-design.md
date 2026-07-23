@@ -232,16 +232,30 @@ grant 收窄了「tg-bot 能发什么命令 + 额度」，但**未解**「一人
 
 **🔴 归属**：本节只列**需求骨架**（哪些面必须覆盖），**不代写核查结论/不代写具体 assertion**——no-key-leak 数据流核查 + 具体测试用例内容独家归 J1（`#xsktcp` Bettor 派工，他坐实过 privkey 经手全路径，J2 不具备同等把握代写结论）。
 
-**J1 已给出的骨架（`17:35:57` 消息·五点，J2 转录不改写）**：
-1. envelope/intent canonical 字节 grep 不到 64-hex 私钥模式。
-2. 所有 deny reason 字符串扫描确认不插值 `cmd.privkeyHex`。
-3. `log()` 调用链路 grep 确认 custodial 分支新代码零处传 `privkeyHex` 进 log。
-4. 回执 result 对象不含该字段。
-5. 派生地址不匹配的伪造负向 case 必须 deny（对应 §3.3a 第 4 点核验）。
+**J1 可执行测试规格（`17:54:20` 消息展开自 `17:35:57` 五点骨架，J2 转录不改写，标出处）**：
+
+1. **canonical 字节扫描**：`envelopeSigningMessage(env)` 产出字符串 + `JSON.stringify(env)` 整体，都 regex `/[0-9a-f]{64}/i` 扫零命中；结构上另断言 `'privkeyHex' in env.intent === false` 且 `'privkeyHex' in env === false`（双保险，不只信 regex）。fixture 用 harness 既有 app-envelope-sdk 真构造一份 `custodial_transfer` 信封去跑。
+
+2. **deny reason 扫描**：
+   - 静态部分：grep 新增 custodial 专属 `denyResult(...)` 调用点的 reason 字符串字面量，确认没有 `${...privkeyHex...}` 插值。
+   - 动态部分：把 custodial_transfer 全部 deny 分支都触发一遍（伪签/过期/`fromAddress` 不匹配/派生失败 garbage privkeyHex），每条实际拿到的 reason 字符串跑 64-hex 正则扫描断言零命中（garbage privkeyHex 若被误 echo 会正好命中这个 pattern，测试能抓住）。
+
+3. **`log()` 链路**：
+   - 静态部分：grep 批 G2 新增代码（`capability.js` + gateway dispatch + `app-envelope.mjs` custodial 分支）所有 `log`/`console.*` 调用，逐个检查参数不含 `privkeyHex`——**特别注意间接泄露**：`JSON.stringify(cmd)` 或 `JSON.stringify(env)` 整体传进 `log()` 也算泄露，不能只查字面量 identifier 名。
+   - 动态部分：harness 跑一轮完整 custodial allow+deny flow，log 输出全部重定向到 buffer，64-hex 正则扫描断言零命中。
+
+4. **回执 result 对象**：custodial_transfer 的两条回执路径（gate-deny 走 `authorizeCommand` 通用 deny reply + switch 内 `relay.mjs:499` 成功/失败 reply）都结构断言 `!('privkeyHex' in result)`，外加 `JSON.stringify(result)` 做 regex 扫描防嵌套泄露。
+
+5. **派生不匹配负向 case 矩阵（三条，不是一条）**：
+   a) 签名意图 `fromAddress`=A 但 `cmd.privkeyHex` 实际派生到地址 B（≠A）→ 必须 deny，reason 可以带地址（非密文，便于排障）但不能带任何私钥材料。
+   b) `cmd.privkeyHex` 格式非法（非 64-hex/构造抛异常）→ `KaspaWallet.fromPrivateKey` 会 throw，必须被 catch 转成 deny，不能变成 relay 进程未捕获异常（那是可用性风险，不是简单的 deny）。
+   c) privkeyHex 合法但网络对不上（如 mainnet key 喂进 testnet 流程）→ 地址前缀天然不同串比较自然失配，deny——这条顺便实测验证了 §3.3a 第 5 点"network 一致性隐式覆盖"这个理论声明，不能只停留在推理层面。
 
 **J2 认为需要额外覆盖但未展开（供 J1 判断是否纳入，非坚持）**：审计/事件表（`chain_events`/`events`，M0c-3 audit 落地后）序列化路径是否会意外带上 `privkeyHex`——现在还没有 M0c-3 audit 具体实现，先记一笔，等那批设计落地时对照本条复查。
 
-**重放测试（补 §7-3 诚实分类）**: 同一签好的合法信封在 TTL 窗口内重放两次 → **当前设计下第二次也会 allow**（不是 bug，是已知诚实残留）——测试目的是**证明**这个残留存在（不是证明它被拦），供 §7-7 Path A/B 决策引用为具体证据，不能只在文档里写"诚实残留"却没有一个测试实际跑出这个行为让决策者看到。
+**防重放测试（J1 `17:54:20` 展开，补 §7-3 诚实分类）**：不是测"拦住了"而是测"证明这个洞存在"——构造一份完整合法签名信封（真签名+真 grant+TTL 内），发一次 → allow；原样字节不改再发第二次 → **当前设计预期依然 allow**（intent 绑定过/签名过，nonce 没有 durable 去重，M0c-3 前无机制拦这个）。测试的断言方向是"第二次确实被 allow"（不是 expect deny），这份 evidence 直接喂给 Owner 做 Path A/B 决策依据，不能只有文档里一句"诚实残留"却没有实测证据支撑。
+
+**归属声明（J1 `17:54:20`）**：这五点+防重放 spec 够详细可以直接进 G4 测试代码了；等 G2/G4 实际落码时 J1 按这份填 assertion。
 
 ---
 
