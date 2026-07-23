@@ -385,7 +385,7 @@ export async function registerDiscoveryRoutes(fastify) {
       const receiver = localAddrs.find(r => r.address === addressB);
       if (receiver) {
         const { sendCommandAsync } = await import('../services/relay-manager.js');
-        sendCommandAsync(receiver.id, { type: 'handshake', target: addressA }, 15000, 'app').catch(err => {
+        sendCommandAsync(receiver.id, { type: 'handshake', target: addressA }, 15000, 'legacy-unmigrated').catch(err => {
           console.log(`[discovery] Relay handshake IPC failed for ${addressB.slice(-12)}: ${err?.message || err}`);
         });
       }

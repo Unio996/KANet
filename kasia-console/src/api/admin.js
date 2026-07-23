@@ -24,7 +24,7 @@ export async function registerAdminRoutes(fastify) {
         return reply.code(400).send({ error: 'relayNodeId and remoteAddress required' });
       }
       try {
-        const result = await sendCommandAsync(relayNodeId, { type: 'handshake', target: remoteAddress }, 15000, 'app');
+        const result = await sendCommandAsync(relayNodeId, { type: 'handshake', target: remoteAddress }, 15000, 'legacy-unmigrated');
         return reply.send({ ok: true, txId: result?.txId || null, fee: result?.fee || null });
       } catch (err) {
         return reply.code(503).send({ error: `relay send-command failed: ${err.message}` });

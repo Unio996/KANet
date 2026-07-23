@@ -2500,8 +2500,8 @@ export async function registerTradingRoutes(fastify) {
           });
           // Delay 5s: wait for send_kas UTXO to settle before broadcasting
           setTimeout(() => {
-            // sendCmd=sendCommandAsync 别名; NWT 完整清单复核(24da7ea9)定类: 请求触发通信 → origin=app
-            sendCmd(order.relay_node_id, { type: 'send_broadcast', channel: _delCh, message: deliveredPayload }, undefined, 'app').then(r => {
+            // sendCmd=sendCommandAsync 别名; 2026-07-23 开闸事故订正: Console 内部通信无信封, app 标 armed 即断 → legacy-unmigrated 过渡(信封网关就绪后真迁 app)
+            sendCmd(order.relay_node_id, { type: 'send_broadcast', channel: _delCh, message: deliveredPayload }, undefined, 'legacy-unmigrated').then(r => {
               console.log(`[trade] Broadcast kanet_delivered_v1 to channel ${_delCh.slice(0, 8)} TX=${r?.txId?.slice(0, 16) || '?'}`);
             }).catch(err => {
               console.error(`[trade] Failed to broadcast kanet_delivered_v1: ${err?.message || err}`);
@@ -2585,8 +2585,8 @@ export async function registerTradingRoutes(fastify) {
             t: 'kanet_paid_v1', v: 1, id: _paidCh,
             chain, tx: tx.hash, amt: usdtAmount, to: sellerAddr,
           });
-          // sendCmd=sendCommandAsync 别名; NWT 完整清单复核(24da7ea9)定类: 请求触发通信 → origin=app
-          sendCmd(order.relay_node_id, { type: 'send_broadcast', channel: _paidCh, message: paidPayload }, undefined, 'app').then(r => {
+          // sendCmd=sendCommandAsync 别名; 2026-07-23 开闸事故订正: Console 内部通信无信封, app 标 armed 即断 → legacy-unmigrated 过渡(信封网关就绪后真迁 app)
+          sendCmd(order.relay_node_id, { type: 'send_broadcast', channel: _paidCh, message: paidPayload }, undefined, 'legacy-unmigrated').then(r => {
               console.log(`[trade] Broadcast kanet_paid_v1 to channel ${_paidCh.slice(0, 8)} TX=${r?.txId?.slice(0, 16) || '?'}`);
             }).catch(err => {
               console.error(`[trade] Failed to broadcast kanet_paid_v1: ${err?.message || err}`);

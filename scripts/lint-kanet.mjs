@@ -780,7 +780,7 @@ function checkR_SCA_ALIAS_ORIGIN(filepath, content) {
   if (!/kasia-console[\\/]src[\\/].*\.(?:js|mjs)$/.test(filepath)) return;
   if (/relay-manager\.js$/.test(filepath)) return; // 定义方自身豁免
   const lines = content.split('\n');
-  const ORIGIN_RE = /['"](?:internal|app|operator)['"]/;
+  const ORIGIN_RE = /['"](?:internal|app|operator|legacy-unmigrated)['"]/; // 五值(C 分阶段 arm 8282dd61: legacy-unmigrated=显式过渡标, 别名 call 带它=已标注非缺失)
   const aliases = []; // { name, defLine }
   for (let i = 0; i < lines.length; i++) {
     const code = lines[i].replace(/\/\/.*$/, '');
@@ -827,7 +827,7 @@ function checkR_SCA_ALIAS_ORIGIN(filepath, content) {
       const openCol = code.indexOf('(', cm.index + cm[0].length - 1);
       const span = extractCallArgSpan(i, openCol >= 0 ? openCol : 0);
       if (span == null || !ORIGIN_RE.test(span)) {
-        violate('R-SCA-ALIAS-ORIGIN', `sendCommandAsync 别名 '${name}'(定义 :${defLine})调用${span == null ? '实参 40 行内未闭合(可疑)' : '实参 span 内未见 origin'}('internal'/'app'/'operator')— 别名 call 必须与直接调用同样标 origin 第4实参(M0c-1 批C armed 硬前置), 否则 gate armed=on 后 fail-closed 拒·现网该路径断。`, filepath, i + 1);
+        violate('R-SCA-ALIAS-ORIGIN', `sendCommandAsync 别名 '${name}'(定义 :${defLine})调用${span == null ? '实参 40 行内未闭合(可疑)' : '实参 span 内未见 origin'}('internal'/'app'/'operator'/'legacy-unmigrated')— 别名 call 必须与直接调用同样标 origin 第4实参(M0c-1 批C armed 硬前置), 否则 gate armed=on 后 fail-closed 拒·现网该路径断。`, filepath, i + 1);
       }
     }
   }
@@ -1491,14 +1491,25 @@ function checkR_LEGACY_ORIGIN_SHRINK() {
     }
     return;
   }
-  // ② 硬 ratchet: baseline 自身只准降不准升(对比 HEAD 版)
+  // ② 硬 ratchet: baseline 自身只准降不准升(对比 HEAD 版)。唯一例外=授权扩张通道(2026-07-23 开闸
+  // 事故修法引入): expansion_authorizations 含 to_total==现总数的条目→放行+LOUD warn(重分类订正类
+  // 合法扩张, 如 17 处误标 app→legacy)。授权条目真实性 lint 不能验(完整性门), 靠 NWT diff 审 load-bearing
+  // ——同 M0a manifest review_ref 模式; 无授权条目的调升照拒。
   try {
     const headRaw = execFileSync('git', ['show', 'HEAD:' + LEGACY_BASELINE_PATH], { cwd: ROOT, encoding: 'utf8' });
     const head = JSON.parse(headRaw.replace(/^﻿/, ''));
     if (head && typeof head.files === 'object') {
-      for (const [fp, n] of Object.entries(baseline.files)) {
-        const hn = head.files[fp] ?? 0;
-        if (n > hn) violate('R-LEGACY-ORIGIN-SHRINK', `baseline ${fp} 计数被调升(HEAD ${hn} → ${n})— baseline 只准 shrink, 抬额度=绕 migration debt 门(硬 ratchet)。新增 legacy 走不通, 新路由直接 app/operator/internal。`, file(LEGACY_BASELINE_PATH), 0);
+      const raised = Object.entries(baseline.files).filter(([fp, n]) => n > (head.files[fp] ?? 0));
+      if (raised.length > 0) {
+        const auths = Array.isArray(baseline.expansion_authorizations) ? baseline.expansion_authorizations : [];
+        const authOk = auths.some((a) => a && a.to_total === baseline.total && a.ref);
+        if (authOk) {
+          warn('R-LEGACY-ORIGIN-SHRINK', `🔴 baseline 授权扩张生效(→total ${baseline.total}, ${raised.length} 文件计数升)— expansion_authorizations 条目匹配。此扩张须经 NWT diff 审 load-bearing 核授权真实性(lint 只校完整性)。涉及: ${raised.map(([fp]) => fp).join(', ')}`, file(LEGACY_BASELINE_PATH), 0);
+        } else {
+          for (const [fp, n] of raised) {
+            violate('R-LEGACY-ORIGIN-SHRINK', `baseline ${fp} 计数被调升(HEAD ${head.files[fp] ?? 0} → ${n})且无匹配授权条目(expansion_authorizations 需 to_total==${baseline.total}+ref)— baseline 只准 shrink, 抬额度=绕 migration debt 门(硬 ratchet)。`, file(LEGACY_BASELINE_PATH), 0);
+          }
+        }
       }
     }
   } catch { /* baseline 尚未入 HEAD(首 commit)= 跳过 ratchet 对比 */ }

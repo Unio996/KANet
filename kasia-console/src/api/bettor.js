@@ -1663,7 +1663,7 @@ export async function registerBettorRoutes(fastify) {
           const dmText = buildMatchedDm(offerId, offerFull, offerFull.taker);
           const { sendCommandAsync: sca } = await import('../services/relay-manager.js');
           // DM to maker. Fire-and-forget.
-          sca(offerFull.maker_relay_id, { type: 'send_message', target: offerFull.maker_kaspa_addr, message: dmText }, undefined, 'app')
+          sca(offerFull.maker_relay_id, { type: 'send_message', target: offerFull.maker_kaspa_addr, message: dmText }, undefined, 'legacy-unmigrated')
             .catch(e => console.warn(`[taker-stake] DM push to maker fail: ${e.message}`));
           console.log(`[taker-stake] DM push fired to maker offer=${offerId.slice(0,12)}`);
         }

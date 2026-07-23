@@ -247,7 +247,7 @@ export async function registerChatRoutes(fastify) {
     }
 
     try {
-      const result = await sendCommandAsync(relayId, { type: 'send_broadcast', channel: channel.trim(), message: message.trim() }, undefined, 'app');
+      const result = await sendCommandAsync(relayId, { type: 'send_broadcast', channel: channel.trim(), message: message.trim() }, undefined, 'legacy-unmigrated');
       if (!result?.ok) throw new Error(result?.error || 'Broadcast failed');
       result.address = relay.address;
 
@@ -781,7 +781,7 @@ async function triggerAutoReply(responder, channelName, senderAddress, content, 
 
   while (attempts < MAX_ATTEMPTS) {
     try {
-      result = await sendCommandAsync(responder.relay_id, { type: 'send_broadcast', channel: channelName, message: broadcastText }, undefined, 'app');
+      result = await sendCommandAsync(responder.relay_id, { type: 'send_broadcast', channel: channelName, message: broadcastText }, undefined, 'legacy-unmigrated');
       if (!result?.ok) throw new Error(result?.error || 'Broadcast failed');
       result.address = responder.address;
       break; // success
