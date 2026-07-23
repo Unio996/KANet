@@ -52,7 +52,7 @@ export const CONTROLLED_RELAY_CAP = 'm0c-controlled-relay-endpoint';
 // 要走 NWT 审 + Owner 知情, 不预先塞占位。
 export const CONTROLLED_FUNNEL_ALLOWLIST = new Set([
   'kasia-console/src/api/operator-settle.js', // M0c-1 批B operator 结算专道(relay.js:1726 money-path 出口收敛)
-  // 未来项(留注释, 不预塞): capability-gateway.js 能力网关等 —— 扩张要走 NWT 审 + Owner 知情。
+  'kasia-console/src/api/capability.js', // 机制A HTTP 能力网关 custodial_transfer 受控 funnel(NWT G2 整体 diff GREEN·review_ref 3a58f2b4·MRC-capability-gateway-wallet-transfer)
 ]);
 
 // ── considered amendment #2(2026-07-23, Bettor 快裁·blocker): 窄 capability m0c1-provision-writer ──

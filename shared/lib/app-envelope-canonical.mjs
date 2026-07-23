@@ -68,6 +68,25 @@ export function intentDigestOf(intent) {
   return 'sha256:' + createHash('sha256').update(canonicalJson(intent), 'utf8').digest('hex');
 }
 
+// G2 (2026-07-23·同 G1 单一真相源纪律): grant scope 判定用到的两个纯函数，gateway 早拒验
+// 的 amount cap 检查 + relay 权威 checkIntentWithinGrant 共用同一份，防两份漂移。
+
+/** KAS 十进制字符串 → sompi BigInt (transfer.amount 经 validateCommandPayload coerce 后为 KAS 字符串)。 */
+export function kasToSompiBig(s) {
+  const m = /^([0-9]+)(?:\.([0-9]{1,8}))?$/.exec(String(s).trim());
+  if (!m) throw new Error(`amount 非法 KAS 十进制: ${String(s).slice(0, 32)}`);
+  return BigInt(m[1]) * 100000000n + BigInt((m[2] || '').padEnd(8, '0'));
+}
+
+/** grant 表里 JSON 字符串数组列（如 allowed_commands/relay_scope/payee_scope）解析，非法 → throw。 */
+export function parseJsonStringArray(raw, name) {
+  const arr = JSON.parse(raw);
+  if (!Array.isArray(arr) || arr.some((x) => typeof x !== 'string')) {
+    throw new Error(`grant.${name} 非字符串数组`);
+  }
+  return arr;
+}
+
 /** 签名消息 = canonical(全 envelope 去 signature) — 签发端(provision/app SDK)与验证端共用同一定义。 */
 export function envelopeSigningMessage(envelope) {
   const { signature, ...unsigned } = envelope;

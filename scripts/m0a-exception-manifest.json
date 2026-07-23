@@ -12,6 +12,16 @@
    "content_digest": "d9219253954578932fc68fda56cd91f4ad30e77cd3c9d1700aed2334847bc073"
   },
   {
+   "id": "MRC-capability-gateway-wallet-transfer",
+   "family": "relay-manager",
+   "form": "import { sendCommandAsync } from relay-manager.js",
+   "path": "kasia-console/src/api/capability.js",
+   "capability": "m0c-controlled-relay-endpoint",
+   "justification": "机制A HTTP能力网关custodial_transfer受控funnel(非裸透传): origin='app'网关强制覆写(app请求体任何origin声明被丢弃)+intent_type路由锁死(每路由绑死一个intent_type拒不匹配)+签名验证MUST+grant吊销/有效期/amount cap早拒验(cheap-to-expensive, 无效签名/超额不触发privkey解密)+default-off feature-flag(ADMIN_CAPABILITY_GATEWAY_ENABLED未设恒503, 与relay armed状态解耦)+privkeyHex网关自己查库派生非body输入(verify-value-source)。设计稿docs/2026-07-23-m0c-1-mechanism-a-http-capability-gateway-design.md §3.3(路由形态非裸透传, 对比relay.js:1726反例)+§3.3a(custodial绑定器, NWT+J1+Codex三方GREEN)。NWT整体G2 diff逐点核实: cheap-to-expensive顺序对/签名MUST实调用/privkeyHex网关自造非body读入/cmd字段匹配intent/origin='app'唯一铸造点(全仓恰1处:161)/no-key-leak回执干净。",
+   "review_ref": "3a58f2b4",
+   "content_digest": "19c020682d08648847c8598e2c9d8b827aee5e1127e5930e8b48e4a030a024cd"
+  },
+  {
    "id": "MPW-grant-provision",
    "family": "sqlite",
    "form": "import Database from better-sqlite3",

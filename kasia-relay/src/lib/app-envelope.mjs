@@ -39,6 +39,8 @@ import {
   envelopeSigningMessage,
   intentDigestOf,
   validateEnvelopeStructure,
+  kasToSompiBig,
+  parseJsonStringArray,
 } from '../../../shared/lib/app-envelope-canonical.mjs';
 
 export { ENVELOPE_PROTOCOL, ENVELOPE_DOMAIN, ENVELOPE_VERSION, canonicalJson, envelopeSigningMessage, intentDigestOf };
@@ -98,21 +100,6 @@ function deepFreeze(o) {
     for (const k of Object.keys(o)) deepFreeze(o[k]);
   }
   return o;
-}
-
-/** KAS 十进制字符串 → sompi BigInt (transfer.amount 经 validateCommandPayload coerce 后为 KAS 字符串)。 */
-function kasToSompiBig(s) {
-  const m = /^([0-9]+)(?:\.([0-9]{1,8}))?$/.exec(String(s).trim());
-  if (!m) throw new Error(`amount 非法 KAS 十进制: ${String(s).slice(0, 32)}`);
-  return BigInt(m[1]) * 100000000n + BigInt((m[2] || '').padEnd(8, '0'));
-}
-
-function parseJsonStringArray(raw, name) {
-  const arr = JSON.parse(raw);
-  if (!Array.isArray(arr) || arr.some((x) => typeof x !== 'string')) {
-    throw new Error(`grant.${name} 非字符串数组`);
-  }
-  return arr;
 }
 
 /**
