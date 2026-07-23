@@ -763,6 +763,41 @@ function checkCommandEnum(filepath, content) {
   }
 }
 
+// ── 共享 helper(R-SCA / R-SENDCMD 引擎·2026-07-23 NWT 重核 3 假阳修)──
+// 行内字符串字面量内容→空格(保引号与长度): call 检测正则不再命中字符串/SQL 里"提及"的
+// sendCommandAsync(实撞: broker-action-queue:250 Error 文案 / pool-auto-better:172 SQL)。
+// 多行模板串跨行部分不在本行剥除范围=残留限界(诚实标, runtime harness 兜底)。
+function stripLineStrings(line) {
+  let out = '', inStr = null;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i], prev = i > 0 ? line[i - 1] : '';
+    if (inStr) { out += (ch === inStr && prev !== '\\') ? (inStr = null, ch) : ' '; continue; }
+    if (ch === '"' || ch === "'" || ch === '`') { inStr = ch; out += ch; continue; }
+    out += ch;
+  }
+  return out;
+}
+// call-arg-span 提取(括号配对+字符串状态机+行注释跳过): 修 call 内注释撇号骗 string-state
+// 断 span 的假阳(实撞: bettor-prediction-settler:410 注释 "voter's" 撇号)。块注释 /* */ 罕见于
+// call 实参内=残留限界。40 行未闭合上限返 null。
+function extractCallArgSpanShared(lines, startLine, startCol) {
+  let depth = 0, span = '', inStr = null;
+  for (let li = startLine; li < Math.min(startLine + 40, lines.length); li++) {
+    const s = lines[li];
+    for (let ci = (li === startLine ? startCol : 0); ci < s.length; ci++) {
+      const ch = s[ci], prev = ci > 0 ? s[ci - 1] : '';
+      if (inStr) { span += ch; if (ch === inStr && prev !== '\\') inStr = null; continue; }
+      if (ch === '/' && s[ci + 1] === '/') break; // 行注释起=本行余下跳过(撇号坑修)
+      if (ch === '"' || ch === "'" || ch === '`') { inStr = ch; span += ch; continue; }
+      if (ch === '(') { depth++; if (depth === 1) continue; }
+      if (ch === ')') { depth--; if (depth === 0) return { span, closeLi: li, closeCi: ci }; }
+      if (depth >= 1) span += ch;
+    }
+    span += '\n';
+  }
+  return null;
+}
+
 // R-SCA-ALIAS-ORIGIN [WARN] (M0c-1 批C 2026-07-23, NWT 完整清单复核 24da7ea9 硬前置):
 // sendCommandAsync 别名(解构重命名 { sendCommandAsync: X } / import rename as X / 裸值赋值·传参)
 // 会让按名字 string-grep 的 origin 迁移扫描漏掉别名 call site(实撞: 8 处别名迁移清单初版全漏,
@@ -783,7 +818,7 @@ function checkR_SCA_ALIAS_ORIGIN(filepath, content) {
   const ORIGIN_RE = /['"](?:internal|app|operator|legacy-unmigrated)['"]/; // 五值(C 分阶段 arm 8282dd61: legacy-unmigrated=显式过渡标, 别名 call 带它=已标注非缺失)
   const aliases = []; // { name, defLine }
   for (let i = 0; i < lines.length; i++) {
-    const code = lines[i].replace(/\/\/.*$/, '');
+    const code = stripLineStrings(lines[i].replace(/\/\/.*$/, '')); // 字符串剥除: SQL/文案提及不当定义(NWT 重核假阳修)
     if (/^\s*(?:\*|\/\*)/.test(lines[i])) continue;
     let m;
     if ((m = code.match(/sendCommandAsync\s*:\s*([A-Za-z_$][\w$]*)/))) aliases.push({ name: m[1], defLine: i + 1 });
@@ -795,37 +830,17 @@ function checkR_SCA_ALIAS_ORIGIN(filepath, content) {
       violate('R-SCA-ALIAS-ORIGIN', `sendCommandAsync 以裸值传参(callback 形态)— origin 迁移扫描静态不可追踪, gate armed 后此路径若未标 origin 会 fail-closed 断。改传显式 wrapper((id,cmd,t)=>sendCommandAsync(id,cmd,t,'<origin>'))或直接调用。`, filepath, i + 1);
     }
   }
-  // call-arg-span 提取: 从 call 开括号起括号配对深度扫描到闭合(简易字符串状态机跳过引号内容,
-  // 上限 40 行防未闭合失控), 返回实参 span 文本; 未闭合返 null(按可疑处理仍 warn, fail-closed 倾向)。
-  const extractCallArgSpan = (startLine, startCol) => {
-    let depth = 0, span = '', inStr = null;
-    for (let li = startLine; li < Math.min(startLine + 40, lines.length); li++) {
-      const s = lines[li];
-      for (let ci = (li === startLine ? startCol : 0); ci < s.length; ci++) {
-        const ch = s[ci], prev = ci > 0 ? s[ci - 1] : '';
-        if (inStr) {
-          span += ch;
-          if (ch === inStr && prev !== '\\') inStr = null;
-          continue;
-        }
-        if (ch === '"' || ch === "'" || ch === '`') { inStr = ch; span += ch; continue; }
-        if (ch === '(') { depth++; if (depth === 1) continue; }
-        if (ch === ')') { depth--; if (depth === 0) return span; }
-        if (depth >= 1) span += ch;
-      }
-      span += '\n';
-    }
-    return null; // 40 行内未闭合
-  };
+  // call-arg-span 提取: 共享引擎 extractCallArgSpanShared(括号配对+字符串状态机+行注释跳过, NWT 重核假阳修)。
   for (const { name, defLine } of aliases) {
     const callRe = new RegExp(`(?:^|[^.\\w$])${name.replace(/\$/g, '\\$')}\\s*\\(`);
     for (let i = defLine; i < lines.length; i++) {
-      const code = lines[i].replace(/\/\/.*$/, '');
+      const code = stripLineStrings(lines[i].replace(/\/\/.*$/, '')); // 字符串剥除防提及误匹配
       if (/^\s*(?:\*|\/\*)/.test(lines[i])) continue;
       const cm = callRe.exec(code);
       if (!cm) continue;
       const openCol = code.indexOf('(', cm.index + cm[0].length - 1);
-      const span = extractCallArgSpan(i, openCol >= 0 ? openCol : 0);
+      const r = extractCallArgSpanShared(lines, i, openCol >= 0 ? openCol : 0);
+      const span = r ? r.span : null;
       if (span == null || !ORIGIN_RE.test(span)) {
         violate('R-SCA-ALIAS-ORIGIN', `sendCommandAsync 别名 '${name}'(定义 :${defLine})调用${span == null ? '实参 40 行内未闭合(可疑)' : '实参 span 内未见 origin'}('internal'/'app'/'operator'/'legacy-unmigrated')— 别名 call 必须与直接调用同样标 origin 第4实参(M0c-1 批C armed 硬前置), 否则 gate armed=on 后 fail-closed 拒·现网该路径断。`, filepath, i + 1);
       }
@@ -1541,29 +1556,15 @@ function checkR_SENDCMD_ORIGIN_REQUIRED(filepath, content) {
   const lines = content.split('\n');
   const ORIGIN5_RE = /['"](?:internal|app|operator|legacy-unmigrated)['"]|\borigin\b/; // 字面量五值 or origin 标识符透传
   const callRe = /(?:^|[^.\w$])sendCommandAsync\s*\(/;
-  const extractSpan = (startLine, startCol) => {
-    let depth = 0, span = '', inStr = null;
-    for (let li = startLine; li < Math.min(startLine + 40, lines.length); li++) {
-      const s = lines[li];
-      for (let ci = (li === startLine ? startCol : 0); ci < s.length; ci++) {
-        const ch = s[ci], prev = ci > 0 ? s[ci - 1] : '';
-        if (inStr) { span += ch; if (ch === inStr && prev !== '\\') inStr = null; continue; }
-        if (ch === '"' || ch === "'" || ch === '`') { inStr = ch; span += ch; continue; }
-        if (ch === '(') { depth++; if (depth === 1) continue; }
-        if (ch === ')') { depth--; if (depth === 0) return span; }
-        if (depth >= 1) span += ch;
-      }
-      span += '\n';
-    }
-    return null;
-  };
+  // span 提取: 共享引擎(括号配对+字符串状态机+行注释跳过, NWT 重核 3 假阳修)
   for (let i = 0; i < lines.length; i++) {
-    const code = lines[i].replace(/\/\/.*$/, '');
+    const code = stripLineStrings(lines[i].replace(/\/\/.*$/, '')); // 字符串剥除: SQL/文案提及不当调用(broker:250/pool-auto-better:172 实撞)
     if (/^\s*(?:\*|\/\*|import\b|export\s+\{)/.test(lines[i])) continue;
     const cm = callRe.exec(code);
     if (!cm) continue;
     const openCol = code.indexOf('(', cm.index + cm[0].length - 1);
-    const span = extractSpan(i, openCol >= 0 ? openCol : 0);
+    const r = extractCallArgSpanShared(lines, i, openCol >= 0 ? openCol : 0);
+    const span = r ? r.span : null;
     if (span == null || !ORIGIN5_RE.test(span)) {
       warn('R-SENDCMD-ORIGIN-REQUIRED', `sendCommandAsync 直调${span == null ? '实参 40 行内未闭合(可疑)' : '缺 origin 第4实参'}(五值之一: internal/app/operator/legacy-unmigrated)— 缺失=armed 下 fail-closed 拒·daemon tick 路径 latent 断结算(2026-07-23 第三断路族 57 处实锤)。补标或经 wrapper 透传。`, filepath, i + 1);
     }
