@@ -1,0 +1,225 @@
+{
+  "ran_at_note": "timestamp omitted (harness-safe)",
+  "flip": {
+    "orig_sha256": "b20bf2afd61d7a6bd19287fd2fbee9a05d5ea8a6d9165a83570815195735f9fc",
+    "flipped_sha256": "dd35b2a51168a3514697f976bc14e16100b7db585e11303fba48b05cce2f0048",
+    "restored_sha256": "b20bf2afd61d7a6bd19287fd2fbee9a05d5ea8a6d9165a83570815195735f9fc",
+    "clean": true
+  },
+  "summary": {
+    "pass": 22,
+    "fail": 0
+  },
+  "evidence": [
+    {
+      "persona": "(bootstrap)",
+      "label": "armed relay 起(模块未 throw=flag=true arm 前提满足)",
+      "ok": true,
+      "flippedSha": "dd35b2a51168a3514697f976bc14e16100b7db585e11303fba48b05cce2f0048"
+    },
+    {
+      "persona": "app_legit",
+      "label": "readonly get_pubkey(白名单豁免信封)",
+      "sent": "type=get_pubkey origin=app env✗ {}",
+      "expect": "allow",
+      "gateDecision": "allow(进 switch)",
+      "reason_or_error": "ok",
+      "ok": true
+    },
+    {
+      "persona": "app_legit",
+      "label": "合法 transfer(scope 内额度+收款人)",
+      "sent": "type=transfer origin=app env✓ {\"target\":\"kaspatest:qqallowedpayee0000\",\"amount\":\"1.0\"}",
+      "expect": "allow",
+      "gateDecision": "allow(进 switch)",
+      "reason_or_error": "Shared RpcClient not ready after 30000ms",
+      "ok": true
+    },
+    {
+      "persona": "app_legit",
+      "label": "再一笔合法 transfer(重复业务·非重放·新 nonce)",
+      "sent": "type=transfer origin=app env✓ {\"target\":\"kaspatest:qqallowedpayee0000\",\"amount\":\"2.0\"}",
+      "expect": "allow",
+      "gateDecision": "allow(进 switch)",
+      "reason_or_error": "Shared RpcClient not ready after 30000ms",
+      "ok": true
+    },
+    {
+      "persona": "app_greedy",
+      "label": "超额度 transfer(>单笔上限)",
+      "sent": "type=transfer origin=app env✓ {\"target\":\"kaspatest:qqallowedpayee0000\",\"amount\":\"99.0\"}",
+      "expect": "deny",
+      "gateDecision": "deny",
+      "reason_or_error": "M0c-1 gate deny: amount 99.0 KAS 超 grant 单笔上限 300000000 sompi",
+      "ok": true
+    },
+    {
+      "persona": "app_greedy",
+      "label": "scope 外收款人",
+      "sent": "type=transfer origin=app env✓ {\"target\":\"kaspatest:qqevilpayee00000\",\"amount\":\"1.0\"}",
+      "expect": "deny",
+      "gateDecision": "deny",
+      "reason_or_error": "M0c-1 gate deny: intent.target=kaspatest:qqevilpayee00000 ∉ grant.payee_scope",
+      "ok": true
+    },
+    {
+      "persona": "app_greedy",
+      "label": "未授权命令(sign_input_for_settle ∉ allowed_commands)",
+      "sent": "type=sign_input_for_settle origin=app env✓ {\"tx_hex\":\"aa\",\"input_index\":0}",
+      "expect": "deny",
+      "gateDecision": "deny",
+      "reason_or_error": "M0c-1 gate deny: 命令 sign_input_for_settle ∉ grant.allowed_commands (grant inflation 拒, §6-3)",
+      "ok": true
+    },
+    {
+      "persona": "app_greedy",
+      "label": "未授权维度(带 marketId·grant.market_scope=NULL)",
+      "sent": "type=transfer origin=app env✓ {\"target\":\"kaspatest:qqallowedpayee0000\",\"amount\":\"1.0\",\"marketId\":\"m1\"}",
+      "expect": "deny",
+      "gateDecision": "deny",
+      "reason_or_error": "M0c-1 gate deny: intent 含 market 维度字段 marketId 但 grant.market_scope 未授权 (缺维度默认最严拒)",
+      "ok": true
+    },
+    {
+      "persona": "app_forger",
+      "label": "错私钥重签",
+      "sent": "type=transfer origin=app env✓ {\"target\":\"kaspatest:qqallowedpayee0000\",\"amount\":\"1.0\"}",
+      "expect": "deny",
+      "gateDecision": "deny",
+      "reason_or_error": "M0c-1 gate deny: 信封签名验证失败 (全 canonical envelope 去 signature, §3 step3)",
+      "ok": true
+    },
+    {
+      "persona": "app_forger",
+      "label": "偷签名改 nonce(旧签名失效)",
+      "sent": "type=transfer origin=app env✓ {\"target\":\"kaspatest:qqallowedpayee0000\",\"amount\":\"1.0\"}",
+      "expect": "deny",
+      "gateDecision": "deny",
+      "reason_or_error": "M0c-1 gate deny: 信封签名验证失败 (全 canonical envelope 去 signature, §3 step3)",
+      "ok": true
+    },
+    {
+      "persona": "app_forger",
+      "label": "偷签名改 relay_id(旧签名失效)",
+      "sent": "type=transfer origin=app env✓ {\"target\":\"kaspatest:qqallowedpayee0000\",\"amount\":\"1.0\"}",
+      "expect": "deny",
+      "gateDecision": "deny",
+      "reason_or_error": "M0c-1 gate deny: envelope.relay_id 不匹配本 relay",
+      "ok": true
+    },
+    {
+      "persona": "app_forger",
+      "label": "偷签名改 network(旧签名失效)",
+      "sent": "type=transfer origin=app env✓ {\"target\":\"kaspatest:qqallowedpayee0000\",\"amount\":\"1.0\"}",
+      "expect": "deny",
+      "gateDecision": "deny",
+      "reason_or_error": "M0c-1 gate deny: envelope.network 不匹配本 relay network",
+      "ok": true
+    },
+    {
+      "persona": "app_forger",
+      "label": "偷签名改 expires_at(旧签名失效)",
+      "sent": "type=transfer origin=app env✓ {\"target\":\"kaspatest:qqallowedpayee0000\",\"amount\":\"1.0\"}",
+      "expect": "deny",
+      "gateDecision": "deny",
+      "reason_or_error": "M0c-1 gate deny: 信封签名验证失败 (全 canonical envelope 去 signature, §3 step3)",
+      "ok": true
+    },
+    {
+      "persona": "app_forger",
+      "label": "偷签名改 grant_id(旧签名失效)",
+      "sent": "type=transfer origin=app env✓ {\"target\":\"kaspatest:qqallowedpayee0000\",\"amount\":\"1.0\"}",
+      "expect": "deny",
+      "gateDecision": "deny",
+      "reason_or_error": "M0c-1 gate deny: grant 不存在 (未知 grant_id, §6-4)",
+      "ok": true
+    },
+    {
+      "persona": "app_toctou",
+      "label": "envelope 签 1.0 / cmd 执行改 99.0",
+      "sent": "type=transfer origin=app env✓ {\"target\":\"kaspatest:qqallowedpayee0000\",\"amount\":\"99.0\"}",
+      "expect": "deny",
+      "gateDecision": "deny",
+      "reason_or_error": "M0c-1 gate deny: intent.amount != cmd.amount (verify-value-source: 验的值必须==执行消费的值)",
+      "ok": true
+    },
+    {
+      "persona": "app_toctou",
+      "label": "cmd 多带执行字段(字段集不匹配)",
+      "sent": "type=transfer origin=app env✓ {\"target\":\"kaspatest:qqallowedpayee0000\",\"amount\":\"1.0\",\"sneak_field\":\"x\"}",
+      "expect": "deny",
+      "gateDecision": "deny",
+      "reason_or_error": "M0c-1 gate deny: intent 字段集 [amount,target] != cmd 业务字段集 [amount,sneak_field,target] (§3 step5 掉包拒)",
+      "ok": true
+    },
+    {
+      "persona": "app_revoked",
+      "label": "吊销前合法 transfer",
+      "sent": "type=transfer origin=app env✓ {\"target\":\"kaspatest:qqallowedpayee0000\",\"amount\":\"1.0\"}",
+      "expect": "allow",
+      "gateDecision": "allow(进 switch)",
+      "reason_or_error": "Shared RpcClient not ready after 30000ms",
+      "ok": true
+    },
+    {
+      "persona": "app_revoked",
+      "label": "__REVOKE__",
+      "action": "operator revoke grant",
+      "ok": true
+    },
+    {
+      "persona": "app_revoked",
+      "label": "吊销后同 grant transfer(即时拒)",
+      "sent": "type=transfer origin=app env✓ {\"target\":\"kaspatest:qqallowedpayee0000\",\"amount\":\"1.0\"}",
+      "expect": "deny",
+      "gateDecision": "deny",
+      "reason_or_error": "M0c-1 gate deny: grant 已吊销 (fresh 读即时可见, §6-5/11)",
+      "ok": true
+    },
+    {
+      "persona": "origin_spectrum",
+      "label": "internal 放行(乙路 TCB)",
+      "sent": "type=transfer origin=internal env✗ {\"target\":\"kaspatest:qqx\",\"amount\":\"1\"}",
+      "expect": "allow",
+      "gateDecision": "allow(进 switch)",
+      "reason_or_error": "Shared RpcClient not ready after 30000ms",
+      "ok": true
+    },
+    {
+      "persona": "origin_spectrum",
+      "label": "operator 放行(端点白名单受信)",
+      "sent": "type=transfer origin=operator env✗ {\"target\":\"kaspatest:qqx\",\"amount\":\"1\"}",
+      "expect": "allow",
+      "gateDecision": "allow(进 switch)",
+      "reason_or_error": "Shared RpcClient not ready after 30000ms",
+      "ok": true
+    },
+    {
+      "persona": "origin_spectrum",
+      "label": "legacy-unmigrated 放行(C 分阶段·显式 tag·收敛类过渡)",
+      "sent": "type=transfer origin=legacy-unmigrated env✗ {\"target\":\"kaspatest:qqx\",\"amount\":\"1\"}",
+      "expect": "allow",
+      "gateDecision": "allow(进 switch)",
+      "reason_or_error": "Shared RpcClient not ready after 30000ms",
+      "ok": true
+    },
+    {
+      "persona": "origin_spectrum",
+      "label": "缺失 origin 拒(fail-closed·非\"缺失放行\")",
+      "sent": "type=transfer origin=(缺失) env✗ {\"target\":\"kaspatest:qqx\",\"amount\":\"1\"}",
+      "expect": "deny",
+      "gateDecision": "deny",
+      "reason_or_error": "M0c-1 gate deny: origin 缺失/非法 (undefined) — fail-closed 拒",
+      "ok": true
+    },
+    {
+      "persona": "origin_spectrum",
+      "label": "非法 origin 拒",
+      "sent": "type=transfer origin=spoofed env✗ {\"target\":\"kaspatest:qqx\",\"amount\":\"1\"}",
+      "expect": "deny",
+      "gateDecision": "deny",
+      "reason_or_error": "M0c-1 gate deny: origin 缺失/非法 (spoofed) — fail-closed 拒",
+      "ok": true
+    }
+  ]
+}
