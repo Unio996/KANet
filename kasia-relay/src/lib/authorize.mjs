@@ -21,7 +21,7 @@ export const READONLY_ALLOWLIST = new Set([
 // grant/envelope 验证实现开关。app provision 组件批已落完整验证链 (app-envelope.mjs, 本文件下方
 // authorizeAppCommand 已接), 但本 flag 置 true 仅在该批 NWT diff 审 + 实战 harness 过后单独 commit
 // (arm 前提之一, 非落码即置; 置 true ≠ arm, armed 仍由 ADMIN_M0C1_GATE_ARMED + 批F Owner 拍)。
-const GRANT_ENVELOPE_IMPLEMENTED = false;
+const GRANT_ENVELOPE_IMPLEMENTED = true;
 
 const GATE_ARMED = process.env.ADMIN_M0C1_GATE_ARMED === '1';
 
