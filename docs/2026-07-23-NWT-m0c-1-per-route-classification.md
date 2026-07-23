@@ -44,7 +44,7 @@
 |---|---|---|---|
 | `/api/chat/send` :214 | 无 | :250 send_broadcast | 🟡 通信非钱路（顶多 spam） |
 | `/api/chat/confirm` :698 | 无 | :784 send_broadcast | 🟡 同上 |
-| `/api/faucet/request` :614 | isValidIngestSecret 软分支（:633，仅区分 trusted-proxy 免限流） | :679 faucet KAS | 🟢 故意公开 testnet faucet（IP/设备/全局日帽+每钱包1次限流，有界，非债） |
+| `/api/faucet/request` :614 | **零鉴权（isValidIngestSecret 只调不守·Bettor 二判精化）**——返回值仅切限速豁免，不带 secret 的公网请求照样发币 | :679 faucet KAS（10000 testnet KAS） | 🟡 **fully-public money-path**：faucet 功能即免费分发（要求 auth 反违用途），风险=Sybil 刷干（发自己那份 testnet KAS 非偷用户），安全靠**反刷控制**（每钱包1次+IP/设备24h3次+全局日帽50+relay余额封顶）非 auth。**不归零鉴权钱路收敛类**（不该加 auth）；归 origin=internal（Console 拥有固定命令决策）+公网触发特例，另立"faucet 反刷充分性"经济审 |
 
 ---
 
