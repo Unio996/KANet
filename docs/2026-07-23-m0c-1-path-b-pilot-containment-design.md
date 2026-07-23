@@ -25,7 +25,7 @@ Path B = "先用最窄的围栏在真实环境跑一遍，暴露面小到可承�
 
 **🔴 两层纵深防御定型（`#xx6ofb` J1+Bettor 讨论收敛，非本节独占设计）**：
 - **gateway 层（本节，我owns）= 早拒 + DoS 护栏，非权威**。跟 §3.2（机制A 母卡）"网关验非权威、relay 验才是 load-bearing 闸"同一纪律——即使 gateway 白名单有 bug 放过了不该放的地址，relay 侧独立再挡一次，不能只信这一层。
-- **relay 层（J1 owns，独立设计稿）= 权威**。两个候选方案 J1/Bettor 讨论中：①硬编码 `PILOT_WALLET_ADDRESS`（env 配置，J1 倾向：pilot 短命+不想为临时用途扩 grant schema，复杂度留给 M0c-2）②`source_address_scope` 新 grant 列，`checkIntentWithinGrant` 权威 enforce（Bettor 倾向：数据驱动非硬编码+天然接吊销即时生效+跟现有 grant-scoped 架构一致）。**Bettor 明确要求"选哪个+理由写进设计稿"**——这个抉择归 relay 侧设计稿定案，本节只记录两个选项存在+各自 tradeoff，不代 J1 拍板。
+- **relay 层（J1 owns，独立设计稿）= 权威，已定案**：`source_address_scope` 新 grant 列 + `checkIntentWithinGrant`/`SCALAR_DIMENSIONS` 权威 enforce（`19:45:39` J1 采纳 Bettor 建议，撤回硬编码 `PILOT_WALLET_ADDRESS` 提案——理由：数据驱动非硬编码、天然接吊销即时生效、复用既有 `payee_scope` 同款 membership kind 机制非新建，复杂度比硬编码方案预想的低）。relay 侧具体落码归 J1 配对设计稿。
 
 **gateway 侧设计（不受权威层选择影响，两种情况下 gateway 这层都一样存在）**：`earlyRejectCheck` 里、`amount cap` 检查之后（同样 cheap，无需解密）加一步：
 ```js
@@ -59,7 +59,7 @@ if (!PILOT_WALLET_ALLOWLIST.has(env.intent.fromAddress)) {
 **🔴 数值提案（J1 `19:44:07`）**：TTL = **5 分钟**（Bettor 区间 5-10min 下限，主动选择收窄——nonce durable 去重要 M0c-3 才有，TTL 目前是唯一防重放窗的闸；现网 zero 真实流量，5 分钟对 tg-bot 签发→发送→relay 处理这个真实链路时延依然绰绰有余）。
    - **谁定义这个表的权威副本**：建议放共享库（`shared/lib/app-envelope-canonical.mjs`），gateway 和 relay 各自 import，同 G1 单一真相源纪律，防两份漂移（同 amount cap 用 `kasToSompiBig` 那次的模式）。
 
-**为什么分钟级不是本设计本身定死具体数字**：5 分钟只是本文档举例，实际数字应在 NWT/Codex 红队时定案（要考虑：太短会不会导致合法请求因网络延迟/时钟偏差频繁被拒——`ISSUED_AT_SKEW_MS = 2 * 60 * 1000`（2 分钟时钟容忍）已经占了 TTL 预算的一部分，5 分钟 TTL - 2 分钟 skew 容忍 = 实际有效签名窗口可能只有 3 分钟左右，这个数字需要红队核实是否够用不误伤，不够就调）。
+**TTL 有效窗口够不够用（NWT `19:51` 重新推导，修正 J2 v0.1 初稿的错误数学）**：J2 v0.1 初稿曾写"5min TTL − 2min `ISSUED_AT_SKEW_MS` 容忍 = 实际有效窗口约 3min"——**这个减法在数学上不成立**：`ISSUED_AT_SKEW_MS` 只容忍 app 时钟比 relay **快**多少（挡"未来"issued_at），完全不影响 app 时钟比 relay **慢**的方向（慢的情况下 issued_at 天然不触发"未来"检查），跟 TTL 消耗预算无关。**真正决定有效窗口的是**：`TTL − max(0, app 时钟实际比 relay 慢的量) − 端到端真实延迟（网络+处理）`，这两个因子都跟 `SKEW_MS` 无关。**结论（NWT 判断）**：5 分钟 TTL 在 pilot 环境下技术上够用——pilot 阶段 tg-bot 与 relay 大概率同机/同内网（localhost-only，§2.4 母卡定案），时钟应 NTP 同步（偏差毫秒级）+ 端到端延迟应毫秒到秒级，远小于 5 分钟预算，不太可能误伤合法请求。**5 分钟 TTL 在低延迟同网环境下留有充分余量，主要消耗是端到端处理延迟非时钟偏差**（措辞按 NWT 建议修正）。
 
 ### 2.4 进程外限流（解密前拦·keyed by app-grant）
 
@@ -109,7 +109,9 @@ CREATE INDEX idx_pilot_rate_limit_grant_time ON pilot_rate_limit_log(grant_id, r
 2. **需要机制校验，不能只靠 runbook 人工纪律**（人会漏，今晚已有先例）——见 §2.7。
 3. NWT/Codex 审围栏时把"两 flag 耦合 + re-arm 六门前置 current 状态"列为必核项（Bettor 已下达）。
 
-### 2.7 `armReport()` 跨进程运行时互查（J1 `19:45:39` 提案，抛给团队判断，非拍板）
+### 2.7 `armReport()` 跨进程运行时互查（J1 `19:45:39` 提案 → **Bettor `19:50` 决定做，非可选**）
+
+**🔴 定性（Bettor `19:50`+`19:51` recalibrate，诚实框定）**：这是纵深防御**第二层**（缩窗 + 还 `armReport()` 未接线的旧债），**不是 100% 银弹**——NWT 指出（§4 第 8 点）它有理论 TOCTOU 窗口（gateway 查完 `armed===true` 到实际转发之间，relay 状态理论上可能变化）。Bettor 认账：最初说"结构上让 footgun 不可能"是 over-claim，已收回——**主防线仍是 §2.6 两 flag 同批次开 + re-arm 六门前置**，§2.7 是运行时兜底，缩小暴露窗口，不是把 §2.6 的运维纪律要求降级或替代掉。
 
 **背景**：§2.6 的机制化校验诉求——`ADMIN_CAPABILITY_GATEWAY_ENABLED` 在 Console/gateway 进程 env，`ADMIN_M0C1_GATE_ARMED` 在 relay 进程 env，**两个不同进程**，relay 自己在模块加载时看不到 gateway 那个 flag 的值，没法照搬 `authorize.mjs` 现有的"armed=on 但 grant/envelope stub → throw"那种同进程内自检模式。
 
@@ -120,10 +122,7 @@ CREATE INDEX idx_pilot_rate_limit_grant_time ON pilot_rate_limit_log(grant_id, r
 - gateway 侧 `earlyRejectCheck`（或独立的 dispatch 前置步骤）在**真正转发**（`sendCommandAsync` 携带 `origin='app'` 那一步）之前，先发一次 `get_arm_status` 查询，确认 `armed === true` 才继续；`armed !== true` → 拒绝转发（明确错误："relay 未 armed，网关侧转发已暂停"），而不是把命令发出去然后信任 relay 会正确处理。
 - **这不是取代 §2.6 的运维纪律**（两 flag 仍必须同批次开，是激活流程本身的硬约束），**是运行时的第二重确认**——同一天已经反复出现的纵深防御纪律（relay 不信 gateway 早拒验/gateway 也不该盲目信 relay 已经 armed），两边互相不单方面假设对方状态正确。
 
-**待团队判断（不代拍板）**：
-1. 这个机制值得做吗，还是运维纪律（§2.6 强制项①②）+ NWT/Codex 复核已经够（Bettor 已明确要求把这条列必核项）？
-2. 如果做，`get_arm_status` 该在 G2 已有代码基础上快速加（小改动，READONLY_ALLOWLIST 加一条 + 一个 handler），还是留到下一批？
-3. 归属：relay 侧 handler = J1 域；gateway 侧调用逻辑 = 我域（若采纳，我可以接）。
+**已决定（Bettor `19:50`）**：做。`get_arm_status`（relay 侧 handler = J1 域；gateway 侧调用逻辑 = 我域）。落码时机（G2 基础上快速加 vs 留下一批）待与 J1 对齐排期，围栏设计文档层面到此已完整（不是"是否做"的开放问题，是"何时落码"的排期问题，归实现批次决定）。
 
 ---
 
@@ -138,17 +137,20 @@ J1 指出 G4 harness 的 BUST/LAND 用例边界依赖围栏具体数值（cap �
 ## 4. 诚实边界 / 待答问题（迎审清单）
 
 1. **限流表清理机制** — 未定具体实现，留落码批次决定（§2.4）。
-2. **PER_TYPE_MAX_TTL_MS 归属位置** — 建议共享库，待与 J1 对齐 relay 侧落点是否有更合适的位置。
-3. **具体数字（amount cap/TTL 分钟数/限流阈值 N）** — 本设计不定死，留红队+Bettor/Owner 拍板。
-4. **限流复用现成基础设施 vs 新建** — 待核实仓库里是否已有类似"per-key 窗口计数"模式可复用（避免重造轮子），本设计目前假设新建一张窄表。
-5. **relay 侧是否也需要独立的 pilot 白名单核验（纵深防御第三层）** — J1 relay 侧设计范围，本文档不代答，等 J1 §3.3a 式配对产出。
+2. ~~PER_TYPE_MAX_TTL_MS 归属位置~~ — **已改**（NWT `19:50` 抓的文档内部矛盾修正）：J1 relay 侧方案是**全局常量** `MAX_ENVELOPE_TTL_MS` 直接改分钟级（§2.3 已定案），非本文档 v0.1 初稿设想的 per-type 表——落码/测试统一用 `MAX_ENVELOPE_TTL_MS`，不建 per-type 索引结构。
+3. ~~TTL 有效签名窗口是否够用~~ — **已答，NWT `19:51` 判断 = 够用**（结论认同，J2 v0.1 初稿的"5min−2min=3min"数学推导错误已修正，见 §2.3）：真正决定因素是 `TTL − 时钟慢的量 − 端到端延迟`，与 `ISSUED_AT_SKEW_MS` 无关；pilot localhost-only 低延迟同网环境下 5 分钟留有充分余量。
+4. ~~具体数字（amount cap/TTL 分钟数/限流阈值 N）~~ — **已 ratify**（Bettor `19:50` `#xxefka`）：50 KAS 钱包硬止损 / 2 KAS 单笔 / 3 笔每分钟限流 / 5 分钟 TTL（TTL 附带上表第 3 点必核 caveat，未最终锁死）。
+5. **限流复用现成基础设施 vs 新建** — 待核实仓库里是否已有类似"per-key 窗口计数"模式可复用（避免重造轮子），本设计目前假设新建一张窄表。
+6. ~~relay 侧是否也需要独立的 pilot 白名单核验~~ — **已答**：需要，且是**权威层**（§2.1，grant-scoped `source_address_scope`，J1 `19:45` 定案）。
+7. 🟡 **限流键用未验证 grant_id 声明值的可用性风险（NWT `19:50` note，non-blocker）**：签名验证之前先做限流检查（§2.4），意味着"知道 grant_id 但没有正确签名私钥"的第三方可以发大量"grant_id 对但签名错"的请求，把**合法 app 自己的**限流配额耗尽，造成合法 app 暂时被拒——**这是可用性问题，非资金安全问题**（真正钱路防线 amount cap+钱包顶+签名验证依然完整，攻击者耗尽配额不能因此转出一分钱）。localhost-only 环境（§2.4 母卡 blast-radius 定案）门槛较高（先要本地访问能力）+ pilot 流量极低，威胁面小。**根治方向（供后续批次参考，非本轮必须）**：签名前的 DoS 护栏改用独立于 grant_id 的键（如源 IP 或粗粒度全局限流），真正的 grant_id 配额限流放到签名验证之后。本轮记录为已知限制，不阻塞 pilot。
+8. **§2.7 armReport 互查是否有 TOCTOU 窗口** — NWT 已指出（`19:50`）：有理论 TOCTOU 窗口（gateway 查完 armed=true 到实际转发之间，relay 状态理论上可能变化）——边缘 case，不会让情况变差（不查这个机制的话，风险只多不少），非 100% 万无一失，**主防线仍是 §2.6 两 flag 同批次开 + 启动自检，§2.7 是运行时兜底第二重，不是唯一防线**。
 
 ---
 
 ## 5. 测试计划骨架
 
 - 白名单：非 pilot 地址请求 → 403（区别于"amount 超上限"/"签名失败"的独立 error 消息，便于诊断）。
-- TTL：超过 `PER_TYPE_MAX_TTL_MS[custodial_transfer]` 的合法签名信封 → 早拒（gateway 侧，不到 relay）。
+- TTL：超过收紧后 `MAX_ENVELOPE_TTL_MS`（全局常量，5 分钟）的合法签名信封 → 早拒（gateway 侧，不到 relay）。
 - 限流：同一 grant_id 短窗口内超过阈值 → 403，且被拒请求不计入下次窗口判断（防自我放大）。
 - 吊销实测：§2.5 四步流程，断言吊销后**下一条**请求即被拒，无窗口。
 - 组合负向：白名单外 + 超额 + 过期信封（多重违规叠加）→ 确认第一个命中的检查先触发拒绝（顺序符合 cheap-to-expensive，测试断言具体是哪层拒的，非只断言"被拒"）。
