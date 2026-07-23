@@ -767,8 +767,9 @@ function checkCommandEnum(filepath, content) {
 // 会让按名字 string-grep 的 origin 迁移扫描漏掉别名 call site(实撞: 8 处别名迁移清单初版全漏,
 // bettor sca/exchange sendCancelCmd/trading·exchange-machine·mind-manager sendCmd/settler sca2)。
 // gate armed=on 后未标 origin 的调用 fail-closed 拒 → 漏标别名 call = 现网该路径当场断。
-// 检测: ①别名定义处向后扫该别名的 call, call 窗口(6行)内无 origin 实参('internal'/'app'/'operator')
-// → warn ②sendCommandAsync 裸值传参(callback 形态, 静态不可追踪)→ warn。
+// 检测: ①别名定义处向后扫该别名的 call, call 实参 span(括号配对深度扫描, 非行窗口)内无 origin
+// 实参('internal'/'app'/'operator')→ warn ②sendCommandAsync 裸值传参(callback 形态, 静态不可追踪)→ warn。
+// call-arg-span(NWT ff28fe68 NOTE-B): 相邻 call 的 origin 字面量不再满足本 call(消 window-bleed 假阴)。
 // warn-first(规则65): NWT diff GREEN 后升 ERROR。别名的别名(二级)不追, 由一级 warn 逼平。
 function checkR_SCA_ALIAS_ORIGIN(filepath, content) {
   if (!/kasia-console[\\/]src[\\/].*\.(?:js|mjs)$/.test(filepath)) return;
@@ -788,15 +789,39 @@ function checkR_SCA_ALIAS_ORIGIN(filepath, content) {
       warn('R-SCA-ALIAS-ORIGIN', `sendCommandAsync 以裸值传参(callback 形态)— origin 迁移扫描静态不可追踪, gate armed 后此路径若未标 origin 会 fail-closed 断。改传显式 wrapper((id,cmd,t)=>sendCommandAsync(id,cmd,t,'<origin>'))或直接调用。`, filepath, i + 1);
     }
   }
+  // call-arg-span 提取: 从 call 开括号起括号配对深度扫描到闭合(简易字符串状态机跳过引号内容,
+  // 上限 40 行防未闭合失控), 返回实参 span 文本; 未闭合返 null(按可疑处理仍 warn, fail-closed 倾向)。
+  const extractCallArgSpan = (startLine, startCol) => {
+    let depth = 0, span = '', inStr = null;
+    for (let li = startLine; li < Math.min(startLine + 40, lines.length); li++) {
+      const s = lines[li];
+      for (let ci = (li === startLine ? startCol : 0); ci < s.length; ci++) {
+        const ch = s[ci], prev = ci > 0 ? s[ci - 1] : '';
+        if (inStr) {
+          span += ch;
+          if (ch === inStr && prev !== '\\') inStr = null;
+          continue;
+        }
+        if (ch === '"' || ch === "'" || ch === '`') { inStr = ch; span += ch; continue; }
+        if (ch === '(') { depth++; if (depth === 1) continue; }
+        if (ch === ')') { depth--; if (depth === 0) return span; }
+        if (depth >= 1) span += ch;
+      }
+      span += '\n';
+    }
+    return null; // 40 行内未闭合
+  };
   for (const { name, defLine } of aliases) {
     const callRe = new RegExp(`(?:^|[^.\\w$])${name.replace(/\$/g, '\\$')}\\s*\\(`);
     for (let i = defLine; i < lines.length; i++) {
       const code = lines[i].replace(/\/\/.*$/, '');
       if (/^\s*(?:\*|\/\*)/.test(lines[i])) continue;
-      if (!callRe.test(code)) continue;
-      const windowText = lines.slice(i, Math.min(i + 6, lines.length)).join('\n');
-      if (!ORIGIN_RE.test(windowText)) {
-        warn('R-SCA-ALIAS-ORIGIN', `sendCommandAsync 别名 '${name}'(定义 :${defLine})调用未见 origin 实参('internal'/'app'/'operator', 6 行窗口内)— 别名 call 必须与直接调用同样标 origin 第4实参(M0c-1 批C armed 硬前置), 否则 gate armed=on 后 fail-closed 拒·现网该路径断。`, filepath, i + 1);
+      const cm = callRe.exec(code);
+      if (!cm) continue;
+      const openCol = code.indexOf('(', cm.index + cm[0].length - 1);
+      const span = extractCallArgSpan(i, openCol >= 0 ? openCol : 0);
+      if (span == null || !ORIGIN_RE.test(span)) {
+        warn('R-SCA-ALIAS-ORIGIN', `sendCommandAsync 别名 '${name}'(定义 :${defLine})调用${span == null ? '实参 40 行内未闭合(可疑)' : '实参 span 内未见 origin'}('internal'/'app'/'operator')— 别名 call 必须与直接调用同样标 origin 第4实参(M0c-1 批C armed 硬前置), 否则 gate armed=on 后 fail-closed 拒·现网该路径断。`, filepath, i + 1);
       }
     }
   }
