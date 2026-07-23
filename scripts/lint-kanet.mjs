@@ -18,6 +18,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { MONEY_PATH_MANIFESTS } from '../kasia-console/src/lib/money-path-manifests.mjs';
 import { runAllM0aChecks } from './m0a-lib.mjs';
@@ -1453,6 +1454,22 @@ checkR_MANIFEST_ADMIN_TIER_MATCH(); // R-MANIFEST-ADMIN-TIER-MATCH [WARN] (件�
 checkLedgerSize();               // R-LEDGER-SIZE [WARN] (D-010 2026-07-10): COORD-LEDGER.md >100KB 提醒切档
 checkDocPath();                          // R-DOC-PATH/R-DOC-DUPLICATE (③ doc-lint 2026-06-29): date-prefixed doc 必住 docs/ 根·同名多路径 → fail
 checkM0A();                              // R-M0A-* [ERROR×5] (M0a 差分门 2026-07-22 设计v0.2 NWT GREEN): 裸 sqlite/relay-manager import 精确镜像 baseline+manifest, 新增即败
+checkHooksPathArmed();                   // R-HOOKSPATH-ARMED [WARN·LOUD] (2026-07-23 门虚设事故): core.hooksPath 未设=pre-commit 门静默全关, 自卫检测
+
+// ── R-HOOKSPATH-ARMED [WARN·LOUD] (2026-07-23 KANet-UI 抓·Bettor 采纳机制补丁): 门自卫 ──
+// 实锤: 本 clone core.hooksPath 从未配置 → pre-commit lint 门全程虚设, 全体 agent commit 裸跑,
+// 多个 ERROR 级违规(explorer 硬编码/M0a bare-import)静默过关。hook 激活是 per-clone 一次性动作,
+// "hook 文件在仓库里"≠"本 clone 门开着"。本自检让每次手动跑 lint 都 LOUD 提示门的真实状态,
+// 防再次静默关门(约定靠自觉守不住→上机制, CLAUDE.md 铁律 0 同族)。
+function checkHooksPathArmed() {
+  let hp = '';
+  try {
+    hp = execFileSync('git', ['config', 'core.hooksPath'], { cwd: ROOT, encoding: 'utf8' }).trim();
+  } catch { hp = ''; } // 未配置时 git config 退出码 1
+  if (hp !== '.githooks') {
+    warn('R-HOOKSPATH-ARMED', `🔴🔴 core.hooksPath 未指向 .githooks(现值: "${hp || '(未设置)'}")= 本 clone 的 pre-commit lint 门是关的, commit 在裸跑! 立即执行: git config core.hooksPath .githooks(per-clone 一次性, 2026-07-23 门虚设事故复发防)。`, path.join(ROOT, '.git/config'), 0);
+  }
+}
 
 // ── 报告 ──
 // warnings first (non-blocking — WARN rules are migration checklists, not hard blockers)
