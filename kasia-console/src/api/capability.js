@@ -96,6 +96,29 @@ async function earlyRejectCheck(env, intentType) {
 }
 
 /**
+ * Path B 围栏 §2.7（docs/2026-07-23-m0c-1-path-b-pilot-containment-design.md）：gateway 转发
+ * custodial_transfer 命令前，主动查一次 relay 的 armed 状态——纵深防御第二层，防"两个 flag
+ * 分批开"（gateway=on 但 relay armed=off）导致 relay 侧全部密码学核验（checkCustodialTransferBinding/
+ * network 绑定/source_scope）被 `authorizeCommand` 无条件放行静默跳过（`authorize.mjs:66`
+ * `if (!GATE_ARMED) return {decision:'allow'}`，在判断 origin 之前）。
+ * 🔴 这次查询本身 origin='internal'（NWT `20:05` relay 侧 diff 审 note）：运维/系统诊断查询非外部
+ * app 业务意图，不占用 origin='app' 唯一铸造点；`get_arm_status` 在 READONLY_ALLOWLIST 里不需要信封。
+ * 🔶 诚实边界：有理论 TOCTOU 窗口（本次查询到实际转发之间 armed 状态理论上可能翻转）——不是 100%
+ * 银弹，主防线仍是 §2.6"两 flag 必须同批次开"运维硬约束+re-arm 六门前置，本查询是运行时兜底第二层。
+ */
+async function checkRelayArmed(relayId) {
+  try {
+    const result = await sendCommandAsync(relayId, { type: 'get_arm_status' }, 5000, 'internal');
+    if (!result?.ok) return { ok: false, error: 'relay armed 状态查询失败（result.ok=false）' };
+    if (result.armed !== true) return { ok: false, error: 'relay 未 armed（ADMIN_M0C1_GATE_ARMED != 1），网关侧转发已暂停' };
+    return { ok: true };
+  } catch (e) {
+    // fail-closed: 查不到状态（relay 未起/超时/IPC 异常）一律当作"不能确认已 armed"，不放行转发。
+    return { ok: false, error: 'relay armed 状态查询异常（fail-closed 拒转发）: ' + (e?.message || 'unknown') };
+  }
+}
+
+/**
  * custodial_transfer 专属执行绑定器（gateway 侧一半，§3.3a 第 5 点·J1 relay 侧一半独立落码配对）：
  * 只接受 intent.fromAddress（已过签名验证的字段，非直接不可信输入）作为唯一输入，查
  * tg_custodial_wallets（UNIQUE(kaspa_address)）取 mnemonic_encrypted，CONSOLE_ENCRYPTION_KEY
@@ -133,17 +156,24 @@ export async function registerCapabilityRoutes(fastify) {
       if (!check.ok) return reply.code(check.code).send({ ok: false, error: check.error });
 
       // 🔴 到此为止，全部 cheap 检查已过（结构/协议/intent_type/grant 存在吊销有效期/签名/amount cap）。
-      // 只有这些都通过才触发下面的 privkey 派生（expensive：DB 查询 + AES 解密）。
+      // 只有这些都通过、且 relay armed 状态确认 OK（§2.7，见下）才触发 privkey 派生（expensive：
+      // DB 查询 + AES 解密）。
       if (intentType === 'custodial_transfer') {
         const fromAddress = check.env.intent?.fromAddress;
         if (typeof fromAddress !== 'string' || !fromAddress) {
           return reply.code(400).send({ ok: false, error: 'intent.fromAddress 缺失/非法' });
         }
-        const derived = deriveCustodialExecFields(fromAddress);
-        if (!derived.ok) return reply.code(401).send({ ok: false, error: derived.error });
-
         const relayId = CUSTODIAL_RELAY_ID();
         if (!relayId) return reply.code(503).send({ ok: false, error: '转账暂不可用（CUSTODIAL_RELAY_ID/FAUCET_RELAY_ID 未配）' });
+
+        // 🔴 Path B 围栏 §2.7：真正转发前先查一次 relay armed 状态（纵深防御第二层，见函数注释）。
+        // 放在 derive（AES 解密）之前——armed 查询本身也是 cheap-to-expensive 顺序的延伸：relay 未
+        // armed 时不该白白解密一次钱包私钥只为了发一个注定会被静默放行、零验证执行的命令。
+        const armCheck = await checkRelayArmed(relayId);
+        if (!armCheck.ok) return reply.code(503).send({ ok: false, error: armCheck.error });
+
+        const derived = deriveCustodialExecFields(fromAddress);
+        if (!derived.ok) return reply.code(401).send({ ok: false, error: derived.error });
 
         // cmd 组装：意图字段（已签名验证过）+ 派生执行字段（网关自己查出来的，非 body 输入）+ envelope
         // 原样带上供 relay 权威重验（§3.2 信封端到端不可变，网关不改动 env 任何字段）。强制 origin='app'
