@@ -127,9 +127,21 @@ POST /api/capability/bet/prep          → 确定性计算（NO STATE·可豁免
    ```
    不等 / 派生失败 → deny，不进 switch。**这是本设计的安全核心**：即使 Console/gateway 被攻陷、换了一把不属于该用户的 `privkeyHex`（同时还留着匹配 `target`/`amount`/`network` 骗过字段绑定检查），relay 独立算出这把 key 对应的地址，跟签名意图里的 `fromAddress` 对不上照样拒——**这不是"信 Console 派生正确"的 TCB 信任，是 relay 自己用密码学重新证明了一遍**，比纯粹排除字段+信任派生更强。这一步答上了 J2 初稿留的"⚠ 待红队钉死的问题"（该问题因此**不再需要红队裁**，J1 方案已经解决，非绕过）。
 
+   🔴 **v0.4 MUST-FIX（Codex `RESPONSE-...V03-FINAL`·证伪 J1 v0.3 "地址前缀隐式覆盖 network" 断言·NWT 独立复核坐实认同）**：上面这一步用 `cmd.network` 做派生参数**是错的**，J1 认账：
+   - **问题①（Codex 抓出）**：`wallet.mjs:9-11` `getNetworkType()` 把 `testnet-10`/`testnet-11`/`testnet-12` **全部映射到同一个 `NetworkType.Testnet`**——三者产出的地址**前缀完全相同**（都是 `kaspatest:`），字符串层面区分不出具体哪个 testnet。J1 v0.3 "network 不一致会导致地址前缀不同、天然失配" 这个论证**只对 mainnet vs testnet 这种粗粒度成立，对同族 testnet 变体（10/11/12）不成立**——这是理论声明没有对照实际枚举映射逐值核实的失误（同 NWT 本轮认账的"未验证 enforce 就引用为防线"同一类错误：具体技术断言必须读实现代码逐值验证，不能靠"看起来应该这样"的合理推断）。
+   - **问题②（J1 认账当轮追加发现，Codex 未点名但同根）**：`env.network`（信封顶层字段，已被 `app-envelope.mjs:178` `env.network !== ctx.network → deny` 强制绑定到 relay 自己的权威网络）和 `env.intent.network`（v0.3 新增的 intent 字段，只经泛化的 `checkIntentBindsCmd` 与 `cmd.network` 逐值比较）是**两个不同位置的字段，从未被相互校验过**——理论上 `intent.network` 和 `cmd.network` 可以被同时填成同一个错误值（例如都填 `testnet-11`），使 `intent.network===cmd.network` 这条通用绑定检查通过，但这个值跟经过 `ctx.network` 核验的 `env.network`（如 `testnet-12`）完全对不上，链路是空的。
+   - **修法（派生参数改用 relay 权威值 + 补齐四值 join）**：
+     ```
+     KaspaWallet.fromPrivateKey(cmd.privkeyHex, ctx.network).getAddress() === intent.fromAddress
+     ```
+     派生**用 `ctx.network`（relay 自身从 `process.env.NETWORK`/`KASPA_NETWORK` 取得的权威值），不用 `cmd.network`**（cmd/intent 里的 network 字段理论上可被上游 Console/gateway 环节影响，不该被信任为派生这一步的输入）。另外 `custodial_transfer` 命令级特判新增一条显式绑定：**`intent.network === env.network`**（补上此前空缺的这条链路）。四值链路补齐后：`intent.network === env.network`（新增）+ `env.network === ctx.network`（既有 `:178`）+ `intent.network === cmd.network`（既有通用绑定）= 全部经 relay 权威值传递闭合，不再依赖"地址前缀天然区分"这种在同族 testnet 变体下不成立的弱推断。
+     负向测试补一条：mainnet 私钥派生（`ctx.network` 固定 testnet 场景下）→ deny；`intent.network`/`env.network` 故意错配同一"看似一致"的错误值（如都填非当前 relay 的 testnet 变体）→ deny（验证新补的 `intent.network===env.network` 这条真的生效，不是摆设）。
+
 5. **privkeyHex 从哪来（just-in-time 派生，位置不变，未被本次改动触碰）**：网关侧（不是 relay 侧）在验证通过前的 dispatch 准备阶段，按 `intent.fromAddress`（`UNIQUE` 索引，`WHERE kaspa_address = ?` 直接命中）查 `tg_custodial_wallets` 取 `mnemonic_encrypted`，`CONSOLE_ENCRYPTION_KEY` just-in-time 解密派生 `privkeyHex`，塞进 cmd 送 relay——**这条路径完全复用今天 `tg-wallet.js:115-122` 已有的 decrypt+derive 逻辑，不新增数据访问面，只是触发它的"谁能发起"从共享 secret 换成 grant+信封**。relay 端不持有 `CONSOLE_ENCRYPTION_KEY`、不碰 `tg_custodial_wallets` 表——它只做第 4 点那步密码学核验（`fromPrivateKey`→`getAddress`，这是 relay 已有的 `wallet.mjs`/`KaspaWallet` 能力，不需要新数据访问权限）。**J1 方案巧妙之处**：不需要给 relay 新增敏感数据访问路径（这是 J2 初稿"待红队钉死"选项 A 的顾虑）就拿到了密码学核验（比初稿选项 B"纯信任"更强）——两个顾虑一次解决。
 
 6. **TOCTOU 检查（M1-6 立身之本，必须回答）**: 母卡的核心不变量是"验的对象==执行的对象"，`deepFreeze(cmd)` 冻结的必须是 switch 实际消费的那个对象。**J1 方案下这个问题比 J2 初稿设计简单**：privkeyHex 的派生（第 5 点）发生在网关侧、cmd 送到 relay **之前**——relay 收到的 cmd 从一开始就是完整的（含 `privkeyHex`），`authorizeCommand`→`verifyAppEnvelope`→（新增第 4 点核验）→`deepFreeze(cmd)` 是对同一个、一次性构造好的对象做的，**没有"验证通过后再注入字段"这个中间态**，不存在 J2 初稿担心的"派生时机是否在 freeze 前"的问题。剩下唯一需要诚实标的：**gateway 侧 privkeyHex 派生本身仍是乙路 TCB 行为**（Console 持 `CONSOLE_ENCRYPTION_KEY`，这个派生正确性 relay 不参与也不需要参与——它用第 4 点的独立密码学核验代替了"信任 Console 派生对不对"，**这才是本方案相对纯 TCB 信任的实质提升**）。仍然诚实标：这条防线对**场景 B**（被攻陷 Console 能读 `CONSOLE_ENCRYPTION_KEY` 本身、能给任意钱包做合法派生）无效——但这不是本方案的缺陷，是母卡 §1 一贯边界（Console=TCB，R 收口才解），第 4 点密码学核验挡的是"Console 派生错了 key/被换了 key 但没被攻陷到能读加密钥匙"这类**中间态错误/局部攻陷**，比纯粹排除字段+零核验的方案覆盖面更宽。
+
+   **v0.4 追加确认（答 Codex binder 验收条件"派生+network join 在 deepFreeze 前"）**：第 4 点 v0.4 修复后新增的 `intent.network===env.network` join + `ctx.network` 派生核验，跟原第 4 点是**同一步**（在 `checkIntentBindsCmd` 通过之后、`deepFreeze(cmd)` 之前执行），不是事后补丁挂在 freeze 后面——上面这段 TOCTOU 分析对 v0.4 版本同样成立，不需要重新论证时序。
 
 ### 3.4 relayId 解析
 网关按业务映射目标 relay（custodial_transfer → `CUSTODIAL_RELAY_ID`，同现 tg-wallet.js:28）。relayId **不从 app 请求体取**（防 app 指定任意 relay）；网关按能力 + grant.relay_scope 约束（relay 侧 `checkIntentWithinGrant` 再验 `relay_id ∈ grant.relay_scope`，双重）。
@@ -234,7 +246,15 @@ grant 收窄了「tg-bot 能发什么命令 + 额度」，但**未解**「一人
 
 **J1 可执行测试规格（`17:54:20` 消息展开自 `17:35:57` 五点骨架，J2 转录不改写，标出处）**：
 
-1. **canonical 字节扫描**：`envelopeSigningMessage(env)` 产出字符串 + `JSON.stringify(env)` 整体，都 regex `/[0-9a-f]{64}/i` 扫零命中；结构上另断言 `'privkeyHex' in env.intent === false` 且 `'privkeyHex' in env === false`（双保险，不只信 regex）。fixture 用 harness 既有 app-envelope-sdk 真构造一份 `custodial_transfer` 信封去跑。
+1. ~~**canonical 字节扫描（v0.3 原方案，已废）**：`envelopeSigningMessage(env)` 产出字符串 + `JSON.stringify(env)` 整体，都 regex `/[0-9a-f]{64}/i` 扫零命中~~
+
+   🔴 **v0.4 MUST-FIX（Codex `RESPONSE-...V03-FINAL`·证伪 J1 v0.3 §8a-1 正则方案·J1 认账）**：`/[0-9a-f]{64}/i` 这个检测方法本身有硬伤——**合法信封天然包含 64-hex 字符串**：`intent_digest` 字段本身就是 `'sha256:' + createHash('sha256')...digest('hex')`（`app-envelope.mjs` `intentDigestOf` 函数，SHA256 输出恰好 64 hex 字符），签名字段、nonce 也可能是同形状。这个正则要么对**每一份合法信封都误报命中**（测试永远"失败"，没法用），要么得反向排除已知安全字段（脆弱设计——漏排除一个新字段就漏检真正的泄露）。用"64-hex 这个形状"本身无法区分"这是安全的 digest"和"这是泄露的私钥"，两者形状完全一样。
+
+   **修法（exact-secret taint 测试，替代形状匹配）**：不测"有没有任何 64-hex 形状的东西"，改测"**这个具体的私钥值有没有出现**"：
+   - fixture 生成一个专属、唯一、可识别的 `TEST_PRIV_HEX` 常量（跟测试用的其他 64-hex 字段——digest/签名/nonce——保证不会字节碰撞，测试初始化时可断言这个专属值与信封里其他 64-hex 字段均不同，防测试自身巧合通过）。
+   - 断言①**结构缺失**：`!('privkeyHex' in env)` 且 `!('privkeyHex' in env.intent)`。
+   - 断言②**精确子串扫描**：这个具体的 `TEST_PRIV_HEX` 字符串本身（不是"任意 64-hex 形状"）不作为子串出现在 `envelopeSigningMessage(env)` / `JSON.stringify(env)` / log buffer / 所有 deny reason 字符串里的任何一处。
+   - 这样测的是"这一个特定密钥值有没有泄露"，不会被合法的 digest/签名/nonce 字段误伤，也不依赖维护一份"已知安全字段"排除名单。
 
 2. **deny reason 扫描**：
    - 静态部分：grep 新增 custodial 专属 `denyResult(...)` 调用点的 reason 字符串字面量，确认没有 `${...privkeyHex...}` 插值。
