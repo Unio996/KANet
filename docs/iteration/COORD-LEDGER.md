@@ -902,3 +902,15 @@ NWT 红队 J2 origin 修法③④=判据够硬 GREEN(逐条验: 场景 A app 无
 **§9 穷尽核收尾**(9 文件逐 route 核完·NWT 7eede78f 权威清单): 零鉴权钱路收敛类=pool.js 18/20+trading action+relay 1726·494(必收敛非诚实残留); chat.js 🟡(broadcast 非钱路 spam); **faucet 🟡改判**(Bettor spawn 独立交叉核抓出 isValidIngestSecret 只调不守诱饵→NWT 认修: fully-public money-path 靠反刷非 auth, 单列'faucet 反刷充分性'小核·独立 M0c-1·不进零鉴权钱路类因不该加 auth); oracle-pool 协议层 auth 严实(NWT 深查 withdraw griefing 两层[endpoint 验+消费端 kaspa.verifyMessage]挡死=非洞·降级)。交叉核价值实锤: 独立第二路把 NWT'有界非债'糊的定性核清。
 
 **KANet-UI 会话死处置**(地面核实近30条零发言+三催无回+他人秒回=会话死锚命中): Bettor 按 Owner 授权 spawn 隔离 worktree 会话顶 M0a 落码初稿(m0a-lib.mjs:217-220 relay-manager 族硬拒→条件放行 amendment: 仅 CONTROLLED_FUNNEL_ALLOWLIST[初始 operator-settle.js]+capability=m0c-controlled-relay-endpoint+content_digest 匹配[TOCTOU 第4约束], warn-first), commit 不装载→NWT diff 审(load-bearing)→KANet-UI 会话回交接 owner。隔离防撞+频道知会。
+
+## ✅ M0c-1 落码链批B+M0a amendment+批3 gate 本体全收口(2026-07-23 04:xx-06:3xZ·凌晨多线并进·Owner 令"梳理+并行+没动的 spawn 接位")
+
+**M0a amendment(capability)定稿+合入**: 6c612df5 初稿(NWT diff 审 GREEN·4 约束全对·verdict doc ae192f76)→5d013865 去 warn-first→fail-closed block(NWT 复核 GREEN·severity 彻底消失)→Bettor spawn 隔离会话落, 打破 KANet-UI 会话死锁 J2 cherry-pick 合入主 branch(a0ec3a65+621f905f)。
+
+**批B(operator 专道·52646f43)三审收口**: operator-settle.js MUST-FIX 独立 header(transfer 档二 x-kanet-admin-secret-transfer·admin-secret-tier headerName 参数向后兼容·自测9/9)+m0a-exception-manifest MRC-operator-settle 条目(capability=m0c-controlled-relay-endpoint·**content_digest=d9219253..847bc073 四方独立算[J2/NWT/Bettor/接位会话]逐字符匹配**·review_ref=ae192f76)清 #13b 既存红转绿。NWT diff 核 GREEN 三点(digest round-trip/受控非裸连/transfer 两 secret 读两 env)。装载 note: OPERATOR_TRANSFER env 值必 != OPERATOR_SETTLE。J2 防返工顺序坑抓得准(digest 锚最终 MUST-FIX 版非 spawn 旧版·原子 commit)。
+
+**批3 M0c-1 gate 本体(547f1c07·J2 落码)三审全 GREEN 收口=M0c-1 核心授权闸**: Bettor 初筛+J1 covenant/relay 域视角+NWT load-bearing diff 审(母卡+靶单 a7f5beba 逐条实读)。新模块 kasia-relay/src/lib/authorize.mjs(authorizeCommand)+relay.mjs validateCommandPayload 后·switch 前插(deny 不进 switch=NO TX NO STATE)。①armed 开关默认 off(inert 放行+warn=现状零新暴露面不 live) ②origin 四值 fail-closed(internal 乙 TCB/operator 端点白名单/app grant·envelope/缺失·非法拒) ③默认拒绝二分类(READONLY_ALLOWLIST 9 只读豁免/其余需信封默认拒) ④grant·envelope stub。**两红队硬条件机械焊死**: arm 前提焊死(armed=on+stub→模块加载 throw·想 arm stub 都 arm 不了)+armReport() 可观测(防批F arm 后 env 静默解除 fail-open)。2 乙-可接受 minor 归 post-R revisit。armed=off 不装载。
+
+**KANet-UI 会话死→Bettor spawn 接位(a89d8944)**: M0a owner review GREEN 签字(owner 事后把关闭环)+批C 盘点五桶(A 43 明确标/B 22 零鉴权钱路面 TODO 归批3/**🔴C-2 42 处 services 被 route 动态 import=不能 blanket internal·route-reachable 误标 internal→armed 后放行=洞·blanket-internal 病正面→J1 逐 call-site 核·大量钱路面>pool18 升级报 Owner**/C-1 helper 9 origin 透传归批3/C-3 观察卡 18 不动)。
+
+**并行线**: app provision 组件批(grant/envelope 实·J2→NWT)/批C A 桶(接位)+C-2(J1)/批F arm(三前提焊死 NWT 盯)/实战 harness(真 relay armed=on 排批F 装载窗)。oracle-pool 非洞完整闭+faucet 反刷小核 从收敛类剥离。J1 追活待命未误 spawn。会话死识别锚+Owner 授权 spawn 接位(KANet-UI 死锁打破)全程实践。
