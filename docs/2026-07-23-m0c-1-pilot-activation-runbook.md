@@ -37,6 +37,7 @@
 
 **核心纪律：不允许中间态**（只开一个 flag 的时间窗 = §1 描述的漏洞窗口暴露期）。
 
+0. **重启前查在途请求**（NWT note2：与今日 armed=on 重启前查在途 betting/settle 同款纪律，NO-TX-NO-STATE 相关——console 若在等 `custodial_transfer` 的 `sendCommandAsync` 回执时被杀，会有"不确定是否已执行"的悬空状态）：确认无正在处理中的 custodial_transfer 请求（pilot 阶段流量本就极低，直接看 relay 日志近几分钟无 `CUSTODIAL_TRANSFER` in-flight 行即可，无需查表）。
 1. 停 console（正规 stop，非强杀，防 WAL 未 flush；查 stale pidfile，见今日复现 3 次的坑）
 2. `kanet.env` 同一次编辑里加两行：
    ```
@@ -49,6 +50,7 @@
    - [ ] relay 群起零 crash-loop（`GATE_ARMED && !GRANT_ENVELOPE_IMPLEMENTED` 会 throw，能起来=前提满足）
    - [ ] `armReport()` 读到 `armed: true`（当前无接线的健康探针 endpoint——见 §5 已知缺口，先用日志法：relay 日志出现 `[M0c-1 gate LEGACY]` warn tell 证明 armed=on 实生效）
    - [ ] `capability.js` 的 `GATEWAY_ENABLED()` 读到 true（curl 一个已知 501-scaffold 路由，确认从 503→非 503）
+   - [ ] **端到端冒烟（NWT note1，不可省；Bettor 定型：单一真相源非另建第二套）**：上面四点只验证"两个 flag 各自读到 true"，不证明组合后请求能实走通完整链路（若 env 变量拼写错/指错 relay id，四点独立检查仍可能全绿但请求实际打不通）。**"激活成功"判据 = 跑一次 ②G4 E2E harness 的最小正向 LAND 用例**（gateway→relay→上链的 custodial_transfer 最小 smoke，J1 harness 域交付，本 runbook 不重建、直接调用）——四点独立验证 + G4 smoke 跑绿，两者都要；env 拼错这类"flag 读到 true 但链路实际断"的情形会被 G4 smoke 直接抓出失败。
 5. **收敛类 legacy-unmigrated 面照常不断**：跑几笔现网 pool/relay/trading 操作，确认无 fail-closed 断（今晨事故的直接回归检查）
 
 ## 5. 已知缺口（诚实标，非 blocker，跟踪）
