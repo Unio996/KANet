@@ -889,3 +889,16 @@ NWT 红队 J2 origin 修法③④=判据够硬 GREEN(逐条验: 场景 A app 无
 **已上报 Owner(`7272ea71` 重大发现单点报)**: 诚实定性=存量债(非 M0c-1 引入)+ 紧迫度内部横向面(Console 127.0.0.1 localhost-only 双证·非公网火警·需本机执行代码)+ 面最大(整个业务面 vs 三同族单端点)+ M0c-1 收敛覆盖(授权闸装好业务 route 走 app 面授权 origin=app+凭证+grant)。不单独紧急热修, 列 M0c-1 最高优先收敛面, J1/J2 判 app 面 origin。**教训**: 红队坚持"逐 route 核而非按文件数"最大收获——按文件级 auth 计数把 pool.js 整个标成"有门", 逐 route 才见裸奔。§9 (b) 文件级标签整个不可信, 穷尽必逐 route。chat.js 待 J1 同法核。
 
 **M0a 窄 capability considered-amendment 拍板(Bettor `cee1f457`/`7cdd6c76`, NWT 论证补强+4 约束)**: M0c-1 受控端点(operator 专道/A 能力网关)撞 M0a R-M0A-BARE-IMPORT-DIFF(新文件 import sendCommandAsync 硬 block)。**决策=M0a 加窄 capability m0c-controlled-relay-endpoint**(后者·非塞 relay.js 老文件绕门=那开坏先例=M0a content-anchored 防的 gaming), 只给已知 funnel 文件(operator-settle/A 网关/少数), 每条 review_ref=该端点 design→红队→Owner 签发链。**改 NWT 审过的 M0a=considered amendment 非 ad-hoc 绕门**。**NWT 4 约束焊死例外**: ①"受控非裸连"客观定义(必过 authorizeCommand gate 带 origin+命令白名单 fail-closed+绝不转发任意 command/body, 裸透传=反例) ②(b) NWT diff 审=唯一 load-bearing 闸(lint 只校 manifest schema) ③例外集合有界+shrink-only(M5 后永久受控 funnel 管非敞口, 每新增走 NWT 审+money-path-adjacent 建议 Owner 知情) ④🔴 TOCTOU-on-manifest(受控文件批准后编辑不再重 gate=有人加裸透传 route 挂 controlled 标签混过, M0a 差分只抓 import 变化抓不到文件内变裸连→KANet-UI lint 加"受控文件改动重触发审"·内容指纹变→重审)。@KANet-UI(M0a owner)落窄 capability→NWT 审例外落地→J2 重构批B(专道独立文件+窄 capability manifest+MUST-FIX 独立 header)→NWT 复核。批E A 网关同走此窄 capability 一并定省返工。J2 已回执全收。
+
+## ✅ M0c 三子批设计层全红队收口 + KANet-UI 会话死 Bettor spawn 顶 M0a 落码(2026-07-23 04:0x-04:17Z·凌晨自驱)
+
+**Owner 03:55 催'继续推'→团队凌晨自驱把 M0c 设计层全铺红队收口**(KANet-UI 会话死堵 M0c-1 批B 落码期间, NWT/J2 并行推非阻塞设计线):
+- **M0c-1** 母卡 GREEN-with-1-MUST-FIX(provision 已闭)+ operator 专道 GREEN-with-2-note(v0.2 闭)。
+- **M0c-2** scope evaluator(f0036e0a red-team): GREEN-with-1-MUST-FIX(verify-value-source·立身之本: evaluateScope 抽的 scope 维度值[amount/recipient/outpoint/market/family/branch]必来自 M0c-1 §4.1 冻结的 :358 switch 执行消费同一字段路径, 禁旁支/re-parse, intentDigest 覆盖全 scope 维度防验完执行前掉包)→J2 v0.2(9ccfa6e7)闭合 GREEN。
+- **M0c-3** replay/audit/revoke(71ce7ced red-team): GREEN-with-2-MUST-FIX(①reserve 崩溃恢复对账·NO-TX-NO-STATE 深化: dual-write[DB reserve+链上广播]非原子, reserved-未终结按 intentDigest 查链上→committed 返 txid/超时 failed 放重试, 对账原子不引双执行, 测试覆盖两崩溃窗 ②replay 去重键=强制 client nonce 非 intentDigest 单键, 防两笔合法同参 transfer 撞误杀 legit-repeat)→J2 v0.2(0b78d33a)闭合 GREEN。
+
+**M0c 全设计层收口**(每子批各自待 Owner money-path 签发, 排 M0c-1 落码后各自签)。**NWT 落码 diff 审队列**: M0a 窄 capability 初稿(Bettor spawn·NWT 唯一 load-bearing 闸)→批B 重构(专道独立文件+MUST-FIX 独立 header)→批C 逐 route 标注(照 NWT 7eede78f 权威清单)→批3 M0c-1 gate 本体→M0c-2/M0c-3 落码(各照设计稿焊)。
+
+**§9 穷尽核收尾**(9 文件逐 route 核完·NWT 7eede78f 权威清单): 零鉴权钱路收敛类=pool.js 18/20+trading action+relay 1726·494(必收敛非诚实残留); chat.js 🟡(broadcast 非钱路 spam); **faucet 🟡改判**(Bettor spawn 独立交叉核抓出 isValidIngestSecret 只调不守诱饵→NWT 认修: fully-public money-path 靠反刷非 auth, 单列'faucet 反刷充分性'小核·独立 M0c-1·不进零鉴权钱路类因不该加 auth); oracle-pool 协议层 auth 严实(NWT 深查 withdraw griefing 两层[endpoint 验+消费端 kaspa.verifyMessage]挡死=非洞·降级)。交叉核价值实锤: 独立第二路把 NWT'有界非债'糊的定性核清。
+
+**KANet-UI 会话死处置**(地面核实近30条零发言+三催无回+他人秒回=会话死锚命中): Bettor 按 Owner 授权 spawn 隔离 worktree 会话顶 M0a 落码初稿(m0a-lib.mjs:217-220 relay-manager 族硬拒→条件放行 amendment: 仅 CONTROLLED_FUNNEL_ALLOWLIST[初始 operator-settle.js]+capability=m0c-controlled-relay-endpoint+content_digest 匹配[TOCTOU 第4约束], warn-first), commit 不装载→NWT diff 审(load-bearing)→KANet-UI 会话回交接 owner。隔离防撞+频道知会。
