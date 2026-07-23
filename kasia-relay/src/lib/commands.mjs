@@ -117,7 +117,7 @@ export const COMMAND_PAYLOAD_SCHEMA = Object.freeze({
   [COMMAND_TYPES.PUBLISH_CARD]: [],
   [COMMAND_TYPES.SEND_BROADCAST]: ['channel', 'message'],
   [COMMAND_TYPES.TRANSFER]: ['target', 'amount'],
-  [COMMAND_TYPES.CUSTODIAL_TRANSFER]: ['privkeyHex', 'target', 'amount'],  // KANet-UI: TG 托管转账 (Path C)
+  [COMMAND_TYPES.CUSTODIAL_TRANSFER]: ['privkeyHex', 'target', 'amount', 'fromAddress'],  // KANet-UI: TG 托管转账 (Path C); fromAddress 转必填 (M0c-1 机制A §3.3a v0.3 J1 domain-authority·此前隐性可选只在 ledger 记账兜底, 现作为签名意图锚点必须真实存在)
   [COMMAND_TYPES.SPLIT_UTXO]: [],
   [COMMAND_TYPES.CONSOLIDATE_UTXO]: [],  // #24: no required field (minFragments optional)
   [COMMAND_TYPES.GET_RPC_STATE]: [],  // T-J2-2026-05-12 #2 — read-only, 无 required field
@@ -187,8 +187,9 @@ export const COMMAND_FIELD_TYPES = Object.freeze({
   [COMMAND_TYPES.SEND_MESSAGE]: { target: 'string', message: 'string' },
   [COMMAND_TYPES.SEND_BROADCAST]: { channel: 'string', message: 'string' },
   [COMMAND_TYPES.TRANSFER]: { target: 'string', amount: ['string', 'number'] },
-  // KANet-UI: TG 托管转账 — privkeyHex/target string, amount string|number, network/fromAddress optional string。
-  [COMMAND_TYPES.CUSTODIAL_TRANSFER]: { privkeyHex: 'string', target: 'string', amount: ['string', 'number'] },
+  // KANet-UI: TG 托管转账 — privkeyHex/target/fromAddress string, amount string|number, network optional string。
+  // fromAddress 转必填 (M0c-1 §3.3a v0.3): 唯一现网调用方 tg-wallet.js:130 已传该字段, 转必填零现网影响。
+  [COMMAND_TYPES.CUSTODIAL_TRANSFER]: { privkeyHex: 'string', target: 'string', amount: ['string', 'number'], fromAddress: 'string' },
   [COMMAND_TYPES.PUBLISH_CARD]: { params: 'object' },
   [COMMAND_TYPES.SPLIT_UTXO]: { targetCount: 'number' },
   [COMMAND_TYPES.CONSOLIDATE_UTXO]: { minFragments: 'number' },  // #24: optional

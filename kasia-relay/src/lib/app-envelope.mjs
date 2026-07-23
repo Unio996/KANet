@@ -23,6 +23,9 @@
 
 import * as kaspa from 'kaspa-wasm';
 import { getGrantFresh } from './grant-registry.mjs';
+// M0c-1 §3.3a v0.4 (custodial_transfer 专属绑定器): relay 独立密码学核验派生地址 (KaspaWallet
+// 已有能力, 不需要新数据访问权限——relay 不持有 CONSOLE_ENCRYPTION_KEY, 不碰 tg_custodial_wallets 表)。
+import { KaspaWallet } from './wallet.mjs';
 // G1 (2026-07-23·verdict-before-push 规则65 门②): canonical 序列化 + 结构规格纯函数抽到
 // shared/lib/app-envelope-canonical.mjs（kasia-console 网关早拒验 + kasia-relay 权威验证共用，
 // 防两份漂移）。零行为变化重构——canonicalJson/envelopeSigningMessage/intentDigestOf 输出字节
@@ -48,6 +51,15 @@ const ISSUED_AT_SKEW_MS = 2 * 60 * 1000;    // 容忍 app/relay 时钟偏差
 //   type/action = 命令路由 (intent_type 单独绑), envelope = 信封本体,
 //   __origin = sendCommandAsync 权威设置 (批A), requestId = IPC 回执关联。
 const CMD_INFRA_FIELDS = new Set(['type', 'action', 'envelope', '__origin', 'requestId']);
+
+// M0c-1 §3.3a (custodial_transfer 专属绑定器) 落码硬性要求 (NWT 红队 implementation-note 钉死·
+// v0.3/v0.4 设计文档 §3.3a 第3点): privkeyHex 这类"执行专属、app 绝不可声明"的字段, 排除必须按
+// cmd.type 命令类型门控, 绝不能实现成全局字段名黑名单——否则给 verify-value-source 完整性开逃
+// 生舱后门 (任何命令类型只要塞个叫 privkeyHex 的字段就能跳过对应绑定检查)。目前唯一条目 =
+// custodial_transfer; 未来若有第二个"执行专属字段"命令, 逐条加, 不共享排除逻辑。
+const PER_TYPE_EXCLUDE_FIELDS = Object.freeze({
+  custodial_transfer: Object.freeze(new Set(['privkeyHex'])),
+});
 
 // M0c-1 粗粒度标量维度抽取表 (§3 step5): 字段名 == relay switch 执行消费的同一字段
 // (commands.mjs COMMAND_PAYLOAD_SCHEMA: transfer={target,amount}, stake_unlock_tx.to_address,
@@ -103,15 +115,50 @@ function parseJsonStringArray(raw, name) {
   return arr;
 }
 
-/** intent 字段集+值 === cmd 业务字段集+值 (verify-value-source: 验的值==执行消费的值)。 */
-function checkIntentBindsCmd(intent, cmd) {
+/**
+ * intent 字段集+值 === cmd 业务字段集+值 (verify-value-source: 验的值==执行消费的值)。
+ * @param {string} cmdType 命令类型, 决定 PER_TYPE_EXCLUDE_FIELDS 命令级排除表 (§3.3a 硬性要求：
+ *   per-type 门控, 非全局黑名单——同一 cmdType 参数保证排除逻辑不会泄漏到其他命令类型)。
+ */
+function checkIntentBindsCmd(intent, cmd, cmdType) {
+  const extraExclude = PER_TYPE_EXCLUDE_FIELDS[cmdType]; // undefined 为绝大多数命令类型 (正常路径)
   const intentKeys = Object.keys(intent).sort();
-  const cmdKeys = Object.keys(cmd).filter((k) => !CMD_INFRA_FIELDS.has(k)).sort();
+  const cmdKeys = Object.keys(cmd)
+    .filter((k) => !CMD_INFRA_FIELDS.has(k) && !(extraExclude && extraExclude.has(k)))
+    .sort();
   if (intentKeys.length !== cmdKeys.length || intentKeys.some((k, i) => k !== cmdKeys[i])) {
     return `intent 字段集 [${intentKeys}] != cmd 业务字段集 [${cmdKeys}] (§3 step5 掉包拒)`;
   }
   for (const k of intentKeys) {
     if (!deepEq(intent[k], cmd[k])) return `intent.${k} != cmd.${k} (verify-value-source: 验的值必须==执行消费的值)`;
+  }
+  return null;
+}
+
+/**
+ * custodial_transfer 专属绑定器 (§3.3a v0.4): relay 独立密码学核验 cmd.privkeyHex 确实派生出
+ * 签名意图里的 fromAddress ——不是信任 Console/gateway 派生对了, 是 relay 自己重新证明一遍
+ * (堵 Codex 洞: "证不了选了哪把 key")。派生用 ctx.network (relay 权威值, 从 process.env
+ * NETWORK/KASPA_NETWORK 取得), 不用 cmd.network (v0.4 MUST-FIX: cmd/intent 里的 network 字段
+ * 理论上可被上游 Console/gateway 影响, 不该被信任为派生输入; wallet.mjs testnet-10/11/12
+ * 全映射同一 NetworkType.Testnet, 地址前缀不足以区分, 不能靠"前缀天然不同"这种弱推断)。
+ * 另补 intent.network===env.network 绑定 (env.network 已被 178 行绑定到 ctx.network, 此前
+ * intent 内的 network 字段从未跟 env.network 互相校验过, 是 v0.4 追加发现的同根空缺链路)。
+ * 返回 null=过, 字符串=deny 原因 (原因绝不带 privkeyHex 本身, 只带非敏感地址/字段名——no-key-leak)。
+ */
+function checkCustodialTransferBinding(env, cmd, ctx) {
+  if (env.intent.network !== env.network) {
+    return `intent.network(${env.intent.network}) != envelope.network(${env.network}) (§3.3a v0.4 network join 拒)`;
+  }
+  let derivedAddress;
+  try {
+    derivedAddress = KaspaWallet.fromPrivateKey(cmd.privkeyHex, ctx.network).getAddress();
+  } catch {
+    // 不 echo cmd.privkeyHex (no-key-leak); 格式非法/构造异常统一转 deny, 不留未捕获异常。
+    return 'custodial privkeyHex 派生失败 (格式非法, §3.3a step4 fail-closed)';
+  }
+  if (derivedAddress !== env.intent.fromAddress) {
+    return 'custodial 派生地址 != intent.fromAddress (§3.3a step4 密码学核验拒, key/源址不匹配)';
   }
   return null;
 }
@@ -213,8 +260,16 @@ export function verifyAppEnvelope(cmd, ctx = {}) {
     if (nowSec < grant.valid_from || nowSec > grant.valid_until) return denyResult('grant 不在有效期 (§6-5)');
 
     // step5a intent == cmd 绑定 (verify-value-source / M1-6 验的对象==执行的对象)
-    const bindErr = checkIntentBindsCmd(env.intent, cmd);
+    const bindErr = checkIntentBindsCmd(env.intent, cmd, cmd.type);
     if (bindErr) return denyResult(bindErr);
+
+    // step5a-custodial (§3.3a v0.4·G2 落码): custodial_transfer 专属密码学核验 (privkeyHex↔
+    // fromAddress 独立派生比对 + network 四值 join), 命令类型门控 (cmd.type==='custodial_transfer')
+    // 非全局——发生在 checkIntentBindsCmd 通过之后、deepFreeze(cmd) 之前 (同一步, 非事后补丁)。
+    if (cmd.type === 'custodial_transfer') {
+      const custErr = checkCustodialTransferBinding(env, cmd, ctx);
+      if (custErr) return denyResult(custErr);
+    }
 
     // step5b intent ⊆ grant (MF3 粗粒度)
     const scopeErr = checkIntentWithinGrant(env, grant);
