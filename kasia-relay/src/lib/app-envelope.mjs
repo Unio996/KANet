@@ -72,6 +72,13 @@ const SCALAR_DIMENSIONS = Object.freeze([
   { dim: 'amount', fields: ['amount'], grantCol: 'max_amount_sompi', kind: 'amount' },
   { dim: 'market', fields: ['marketId'], grantCol: 'market_scope', kind: 'membership' },
   { dim: 'branch', fields: ['branch', 'winner'], grantCol: 'branch_scope', kind: 'membership' },
+  // Path B pilot 围栏 §2.1 (docs/2026-07-23-m0c-1-path-b-pilot-containment-design.md·J1 relay 侧定案):
+  // custodial_transfer intent 含 fromAddress 时才触发 (循环里 `if (!(f in env.intent)) continue`
+  // 天然只对声明了这个字段的命令类型生效, 现网唯一是 custodial_transfer)——限定"从哪个托管钱包出账"
+  // 只能是 grant 授权的地址集合, NULL=未授权→intent 含 fromAddress 即拒 (缺维度默认最严同族纪律)。
+  // 这是 checkCustodialTransferBinding 密码学核验(哪把 key 对应这个地址)之外的独立第二层: 前者证
+  // "cmd.privkeyHex 确实是这个 fromAddress 的钥匙", 本条证"这个 fromAddress 本身是被授权动用的"。
+  { dim: 'source', fields: ['fromAddress'], grantCol: 'source_scope', kind: 'membership' },
 ]);
 
 function deepEq(a, b) {

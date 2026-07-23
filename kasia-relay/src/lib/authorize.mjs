@@ -16,6 +16,10 @@ export const READONLY_ALLOWLIST = new Set([
   'get_rpc_state', 'get_pubkey', 'check_utxo_landed', 'get_address_utxos',
   'chain_get_current_daa_score', 'chain_get_blocks_from_daa_score', 'chain_get_block_at_daa',
   'get_per_bet_address', 'pool_v07_compute_refund_mass',
+  // Path B pilot 围栏 §2.7 (docs/2026-07-23-m0c-1-path-b-pilot-containment-design.md·Bettor 定为
+  // 必做非可选): gateway 转发 custodial_transfer 前查一次 relay armed 状态的诊断命令, 零业务副作用,
+  // 无论 armed 状态如何都可答 (同 get_rpc_state 等既有只读诊断命令同类, 不因未 armed 而拒自己)。
+  'get_arm_status',
 ]);
 
 // grant/envelope 验证实现开关。app provision 组件批已落完整验证链 (app-envelope.mjs, 本文件下方

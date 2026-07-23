@@ -328,7 +328,8 @@ if (process.send) {
   // (cover Z23 broker 传 number 给 amount 触 BigInt crash). 双层防御 + kasToSompi boundary coerce.
   const { COMMAND_TYPES, validateCommandPayload } = await import('./lib/commands.mjs');
   // M0c-1 批3: 命令执行前授权闸(armed 开关默认 off=inert 放行+warn=现状; armed=on 时 origin 四值 fail-closed)。
-  const { authorizeCommand } = await import('./lib/authorize.mjs');
+  // armReport: Path B 围栏 §2.7 get_arm_status 诊断命令用 (gateway 转发前查 armed 状态)。
+  const { authorizeCommand, armReport } = await import('./lib/authorize.mjs');
 
   process.on('message', async (cmd) => {
     try {
@@ -539,6 +540,18 @@ if (process.send) {
           const snapshot = getRpcState();
           if (cmd.requestId && process.send) {
             process.send({ requestId: cmd.requestId, result: { ok: true, state: snapshot } });
+          }
+          return;  // skip generic completion reply
+        }
+
+        case 'get_arm_status': {
+          // Path B pilot 围栏 §2.7 (docs/2026-07-23-m0c-1-path-b-pilot-containment-design.md):
+          // gateway 转发 custodial_transfer 前查一次的诊断命令, 零业务副作用, 无论 armed 状态如何
+          // 都可答 (READONLY_ALLOWLIST 已含, 同 get_rpc_state 同类)。理论 TOCTOU 窗口诚实标(armed
+          // 在本次查询与 gateway 后续转发之间翻转的边缘 case)——本命令是纵深防御第二层, 不取代
+          // §2.6 的"两 flag 必须同批次开"运维硬约束, 主防线仍是那条。
+          if (cmd.requestId && process.send) {
+            process.send({ requestId: cmd.requestId, result: { ok: true, ...armReport() } });
           }
           return;  // skip generic completion reply
         }

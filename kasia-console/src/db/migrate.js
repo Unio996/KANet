@@ -5557,5 +5557,18 @@ export function runMigrations() {
     }
   }
 
+  // v191 (2026-07-23, J1, M0c-1 Path B pilot 围栏 §2.1): m0c1_app_grants 加 source_scope 列。
+  // 设计: docs/2026-07-23-m0c-1-path-b-pilot-containment-design.md §2.1 — custodial_transfer 专属
+  // 维度, 限定 intent.fromAddress 只能是 grant 授权的地址集合 (membership, NULL=该维度未授权→
+  // intent 含 fromAddress 即拒)。DDL 单一真相源已含此列 (m0c1-grant-registry-schema.js), 本迁移
+  // 只补齐 v190 时已建表的既有库 (新库走 M0C1_GRANT_DDL 直接含新列, 幂等: ALTER 前查 table_info)。
+  {
+    const grantCols = sqlite.pragma(`table_info(${M0C1_GRANT_TABLE})`).map(c => c.name);
+    if (!grantCols.includes('source_scope')) {
+      sqlite.exec(`ALTER TABLE ${M0C1_GRANT_TABLE} ADD COLUMN source_scope TEXT`);
+      console.log('[migrate] v191: m0c1_app_grants.source_scope 列已加 (Path B pilot 围栏, fromAddress membership scope).');
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }

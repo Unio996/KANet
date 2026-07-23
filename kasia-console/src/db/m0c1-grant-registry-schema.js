@@ -1,6 +1,10 @@
 // M0c-1 app provision — grant registry schema 单一真相源
 // 设计: docs/2026-07-23-m0c-1-app-provision-design.md §2 (grant 绑定字段) + 母卡 §4.2 (relay-authoritative 防 grant inflation)
 // migrate.js v190 与 operator provision 脚本 (scripts/m0c1-grant-provision.mjs) 共用本 DDL, 防两处漂移。
+// source_scope (v191·Path B pilot 围栏 §2.1 J1 relay 侧定案, docs/2026-07-23-m0c-1-path-b-pilot-containment-design.md):
+//   custodial_transfer 专属维度 (app-envelope.mjs SCALAR_DIMENSIONS 'source' 条目)——限定 intent.fromAddress
+//   只能是这个集合里的地址 (membership, NULL=该维度未授权→intent 含 fromAddress 即拒, 缺维度默认最严同族纪律)。
+//   Bettor 采纳 grant-scoped 方案 (数据驱动+吊销即时生效), 撤回硬编码 PILOT_WALLET_ADDRESS 常量提案。
 //
 // 🔴 写入方静态可枚举 (母卡 §4.3 / M1-5): 仅 operator 离线脚本 scripts/m0c1-grant-provision.mjs 一处
 //    (migrate v190 只建表不写行)。任何 HTTP handler / IPC handler / daemon tick 出现本表写入
@@ -27,6 +31,7 @@ export const M0C1_GRANT_DDL = `
     outpoint_scope TEXT,
     branch_scope TEXT,
     payee_scope TEXT,
+    source_scope TEXT,
     max_amount_sompi INTEGER,
     max_cumulative_sompi INTEGER,
     max_fee_sompi INTEGER,
