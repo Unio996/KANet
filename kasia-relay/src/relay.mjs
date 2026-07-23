@@ -327,6 +327,8 @@ if (process.send) {
   // 之前 isValidCommandType 只 check type 名 (cover Z21); validateCommandPayload 加 typeof check
   // (cover Z23 broker 传 number 给 amount 触 BigInt crash). 双层防御 + kasToSompi boundary coerce.
   const { COMMAND_TYPES, validateCommandPayload } = await import('./lib/commands.mjs');
+  // M0c-1 批3: 命令执行前授权闸(armed 开关默认 off=inert 放行+warn=现状; armed=on 时 origin 四值 fail-closed)。
+  const { authorizeCommand } = await import('./lib/authorize.mjs');
 
   process.on('message', async (cmd) => {
     try {
@@ -354,6 +356,16 @@ if (process.send) {
           process.send({ requestId: cmd.requestId, result: { error: reason, rejected: true } });
         }
         return;  // skip switch + generic completion handler
+      }
+      // M0c-1 批3: authorizeCommand gate (validateCommandPayload 后、switch 前, §4.1 locus)。
+      // armed=off: inert 放行(=现状); armed=on: origin 四值 fail-closed(internal/operator 放行/app 走验证链/缺失·非法拒)。
+      const authz = authorizeCommand(cmd);
+      if (authz.decision === 'deny') {
+        log(`M0c-1 GATE DENY → ${authz.reason} (type=${cmd.type}, origin=${cmd.__origin})`);
+        if (cmd.requestId && process.send) {
+          process.send({ requestId: cmd.requestId, result: { ok: false, error: `M0c-1 gate deny: ${authz.reason}`, denied: true } });
+        }
+        return;  // NO TX NO STATE: 拒不进 switch, 不推进任何状态。
       }
       switch (cmd.type) {
         case 'handshake':
