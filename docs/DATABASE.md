@@ -2,8 +2,8 @@
 
 > 版本：2026-04-23
 > 数据库：kasia-console/data/console.db（SQLite）
-> 总表数：37 张（v68 新增 retail_dex_orders）
-> migrate.js 当前版本：v69
+> 总表数：37 张（v68 新增 retail_dex_orders）——⚠ 此行 stale，v69 后新表未回填总数，以 sqlite_master 实数为准
+> migrate.js 当前版本：v190（2026-07-23 m0c1_app_grants；此前头部长期 stale 写 v69，以 migrate.js 实际为准）
 > 维护原则：改表前必查本文档，确认影响范围
 
 ---
@@ -814,6 +814,9 @@ Silverscript P2SH 三方托管合约状态表（2026-06-27）。表从 v175 建�
 ### zk_prove_jobs（v180 建表 + v181 补列, 0 条历史/新表）
 跨机器 ZK proving 任务队列（2026-07-07，T2b ZK-native 结算生产线缺件②）。`market_id` 上的 partial unique index（`WHERE status IN ('pending','in_progress')`）是持久化幂等锁（防同一市场并发入队两个 job）。字段：`id`（PK）/ `market_id` / `status`（TEXT: pending/in_progress/done/failed）/ `ordered_bets_json`（TEXT，winner 侧 bets 数组）/ `bets_root_hex` / `attested_winner`（INTEGER）/ `fee_leaves_json`（TEXT，v181 补，默认 `'[]'`，§4 硬门⑤禁 bps-fallback 要求 guest 必须拿到完整 fee_leaves，非空数组）/ `pool_total_sompi`（TEXT，v181 补，可 NULL）/ `receipt_hex`（TEXT，RISC0 Groth16 receipt borsh-hex）/ `journal_digest_hex`（TEXT）/ `error`（TEXT，失败原因）/ `created_at` / `updated_at`。写入方：enqueue 侧（缺件①，J1 域，close_attest_v2 落链后自动 insert，走幂等锁）+ `zk-prove-server.mjs POST /zk-prove/enqueue`（手动/跨机器 HTTP 备用路径，bearer-token 门）。读取/推进方：`zk-prove-worker.mjs`（本机同 host 直读 DB, 原子 claim pending→in_progress→done/failed）+ `zk-prove-server.mjs GET /zk-prove/poll`（跨机器备用路径）。**⚠ v1 已知限制（NWT 审过接受）**：job 若长期卡在 `in_progress`（worker 进程崩溃/网络断）需手动 `UPDATE zk_prove_jobs SET status='failed' WHERE id=X` 解锁重新入队，自动超时恢复留待下个迭代。job 完成/失败会同步回写 `pool_markets.metadata.zk_continuation.proving`（T2b(i) schema，见 `closezk-v2-mint.mjs` `updateProvingReady`/`updateProvingFailed`）——job 表是内部队列记账，`zk_continuation.proving` 才是下游（`dispatchUnlockZkClose`）读取的权威状态。
 
+### m0c1_app_grants（v190, 0 条）
+M0c-1 app provision grant registry（2026-07-23, 设计 `docs/2026-07-23-m0c-1-app-provision-design.md` §2，母卡 §4.2 relay-authoritative 防 grant inflation）。DDL 单一真相源：`src/db/m0c1-grant-registry-schema.js`（migrate v190 与 provision 脚本共用）。字段：`grant_id`（UUID PK）/ `app_key_id` / `app_pubkey`（x-only 32B hex，信封验签公钥）/ `allowed_commands`（JSON array 命令类型集）/ `typed_intent_version` / `relay_scope`（JSON array relay_node_id）/ `network` / `market_scope` / `outpoint_scope` / `branch_scope` / `payee_scope`（各 JSON array，**NULL=该维度未授权=intent 触及即拒（缺维度默认最严），不是"不限制"**）/ `max_amount_sompi`（单笔上限）/ `max_cumulative_sompi`（累计上限，enforcement 归 M0c-3 审计派生，本版只存）/ `max_fee_sompi` / `valid_from` / `valid_until`（**INTEGER unix 秒**，避 ISO 字符串字典序比较坑）/ `grant_version` / `revoked` / `revoked_at` / `created_at` / `provisioned_by`。**🔴 写入方静态可枚举（M1-5）：仅 operator 离线脚本 `scripts/m0c1-grant-provision.mjs` 一处（gen-key/issue/revoke/list），零 HTTP 写/零 IPC 写；任何请求处理代码出现本表写入 = diff 审打回**。读取方：`kasia-relay/src/lib/grant-registry.mjs`（node:sqlite **readOnly** 直开，路径经 relay-manager fork env `M0C1_GRANT_DB_PATH`，每命令 fresh 读零缓存 = 吊销即时可见）。乙路 TCB 诚实边界：表在 Console 信任域内，对场景 A 有效、不抗场景 B（禁称"抗 Console"）。
+
 ---
 
 ## 索引规范
@@ -830,12 +833,13 @@ Silverscript P2SH 三方托管合约状态表（2026-06-27）。表从 v175 建�
 3. 改字段：SQLite 不支持直接改，需建新表→迁移→删旧表
 4. 新表：migrate.js 新版本，加 `IF NOT EXISTS` 保护
 
-**当前最新版本：v187（2026-07-16 spc_tip_heartbeat 新表）**
+**当前最新版本：v190（2026-07-23 m0c1_app_grants 新表）**
 
 > 注：v125–v156 尚未在本表逐条回填（r281 scope 外）；新增 migration 接 v157 之后。v176-v183、v185-v186 未逐条回填（各自设计稿/COORD-LEDGER 有账），本行版本号以 migrate.js 实际为准。
 
 ## 版本历史（近期）
 
+- **v190 (2026-07-23 M0c-1 app provision grant registry)**: `m0c1_app_grants` 新表（见上「m0c1_app_grants」节）。migrate 只建表零数据写入；写入仅 operator 离线脚本（M1-5）；relay 侧 readonly fresh 读（吊销即时可见）。v188-v189（spc_prune_capture_heartbeat / payout_shards.covenant_family）未逐条回填，见 migrate.js 注释与 COORD-LEDGER。
 - **v187 (2026-07-16 spc_daa_index 常驻写入器补落码)**: `spc_tip_heartbeat` 新表（单行，`id INTEGER PRIMARY KEY CHECK (id=1)` + `daa_score` + `updated_at`）。用途：relay 侧 tip 心跳落地，供 console 完整性巡检判定 `spc_daa_index` 写入器是否停更，不给 console 开 kaspad RPC 口子（Relay 唯一链上出口）。写入方：`kasia-console/src/api/ingest.js` `/ingest/spc-tip-heartbeat`（relay 每 60s `ingestSpcTipHeartbeat` 上报本地已见最大 daaScore）。读取方：`kasia-console/src/services/spc-daa-index-monitor.mjs`（5min tick 对比 `spc_tip_heartbeat.daa_score` vs `MAX(spc_daa_index.daa_score)`，落后超阈值写 `events` 表触发既有告警管道）。见 `docs/2026-07-08-backward-walk-daa-index-design.md` §2.2 note①。
 - **v184 (2026-07-12 B线落2 feeRules 上链锚定)**: `pool_markets.fee_rules` 新列（TEXT，分润规则全文 JSON，spec `docs/2026-06-22-modular-fee-split-component-spec.md` v1.3 + 设计 `docs/2026-07-12-fee-split-phase2-commit-anchor-design.md`）。**write-once**：`trg_pool_markets_fee_rules_write_once` trigger——已有值的行 UPDATE 改写/清空 = RAISE(ABORT)，NULL→值允许一次，等值 UPDATE 放行（settler 整行 UPDATE 不误伤）。写入方：`pool.js` create-v07（仅非 zk_native 且有 broker 的新市场，`buildPredictionV1InterimRules`）。读取方：`deriveMarketPredicateCommit`（三处 register 烤点）/ `computeSettlePlan`+`deriveResumePlanFromEvidence`（driver fee 叶）/ 委员侧**不读本列**（Bettor 注1：列不跨节点同步，enforce 只吃 attest 载荷携带的全文 + 链上 commit hash-bind）。陷阱：⚠ 老市场 NULL = 全走既有路径字节不动；⚠ 本列是 committed 承诺，丢失 = 该市场 fail-closed 不可 settle（标准 preset 盘可从 broker_pk + `prediction-v1-interim` 常量确定性重构，dry-run diff 报 Bettor 后写回）。
 - **v183 (2026-07-11 MAX_WALK 老盘根治)**: `spc_daa_index` + `spc_daa_index_coverage` 新表（SPC 块 DAA→hash 持久索引 + 覆盖区间防洞）。见 `docs/2026-07-08-backward-walk-daa-index-design.md`。

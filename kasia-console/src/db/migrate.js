@@ -6,6 +6,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { encrypt } from '../services/crypto.js';
 import { categorizeMarket } from '../lib/market-category.js';
 import { classifyPayoutShardFamily } from '../lib/bshard-payout-family-coherence.mjs';
+import { M0C1_GRANT_TABLE, M0C1_GRANT_DDL } from './m0c1-grant-registry-schema.js';
 
 export function runMigrations() {
   sqlite.exec(`
@@ -5537,6 +5538,22 @@ export function runMigrations() {
         console.log(`[migrate] v189: K18_BACKFILL_CONFIRMED=1, backfill 完成, 共 ${toBackfill.length} 行 — v1_committee=${v1} v2_zk=${v2} unknown=${unknown}`
           + (unknown > 0 ? ` (${unknown} 行判不出家族, 停留 'unknown' — 需人工过一遍, 见 K-18 §5 风险②/DoD-5, 不阻断 migration)` : ''));
       }
+    }
+  }
+
+  // v190 (2026-07-23, J2, M0c-1 app provision·grant registry): m0c1_app_grants 建表。
+  // 设计: docs/2026-07-23-m0c-1-app-provision-design.md §2 (relay-authoritative grant, 防 grant inflation)。
+  // DDL 单一真相源在 src/db/m0c1-grant-registry-schema.js (migrate + operator provision 脚本共用防漂移)。
+  // 🔴 写入方静态可枚举 (母卡 §4.3 / M1-5): 仅 operator 离线脚本 scripts/m0c1-grant-provision.mjs;
+  //    本表出现在任何 HTTP/IPC/daemon 写路径 = diff 审打回。migrate 只建表, 零数据写入。
+  // 读取方: kasia-relay/src/lib/grant-registry.mjs (readonly fresh 读, 焊吊销即时可见·v0.2 note)。
+  {
+    const hasGrantTable = sqlite.prepare(
+      "SELECT count(*) AS cnt FROM sqlite_master WHERE type='table' AND name=?"
+    ).get(M0C1_GRANT_TABLE).cnt > 0;
+    if (!hasGrantTable) {
+      sqlite.exec(M0C1_GRANT_DDL);
+      console.log('[migrate] v190: m0c1_app_grants grant registry 建表 (M0c-1 app provision §2, 写入仅 operator 离线脚本).');
     }
   }
 

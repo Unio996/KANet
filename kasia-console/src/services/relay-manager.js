@@ -78,6 +78,9 @@ export async function startRelay(relayNodeId) {
     RELAY_MODE: relayMode,
     POLL_MS: String(account.poll_ms || 2000),
     IS_SERVICE: account.is_service ? '1' : '0',  // R5 T-J2-16: Service 模式 relay (broker) 跳 anti-spam dedup
+    // M0c-1 app provision: grant registry 只读路径 (relay 侧 authorizeAppCommand fresh 读,
+    // grant-registry.mjs readOnly 直开)。console 侧解析成绝对路径 — relay cwd=RELAY_DIR, 相对路径会解错。
+    M0C1_GRANT_DB_PATH: resolve(process.env.DB_PATH || './data/console.db'),
   };
   // r281: pass exactly one of KASPA_PRIVKEY / KASPA_MNEMONIC (privkey wins). wallet.mjs reads them.
   if (privkey) env.KASPA_PRIVKEY = privkey;
