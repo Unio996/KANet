@@ -110,6 +110,16 @@ POST /api/capability/bet/prep          → 确定性计算（NO STATE·可豁免
    → 排除 CMD_INFRA_FIELDS ∪ {privkeyHex（本命令专属排除）} 后逐值比较，
      intent.{fromAddress,target,amount,network} === cmd.{同名字段}，严格相等。
    ```
+   🔴 **落码硬性要求（NWT 红队 `17:46` 实现细节note，方向审 GREEN-with-1-implementation-note 的那一条·diff 审重点核）**：上面这个排除**必须门控在 `cmd.type === 'custodial_transfer'`**，**绝不能实现成全局字段名黑名单**（即绝不能写成"任何 cmd 只要出现叫 `privkeyHex` 的字段就跳过绑定检查"这种跟命令类型无关的静态排除）。伪代码钉死：
+   ```js
+   // 对，命令类型门控：
+   if (cmd.type === 'custodial_transfer') excludeFields.add('privkeyHex');
+   // 错，全局字段名黑名单（NWT 抓的坑，绝不能这样实现）：
+   // const GLOBAL_EXCLUDE = new Set(['privkeyHex']);  // ← 对所有命令类型生效，禁止
+   ```
+   **为什么这条是硬性要求**：若做成全局黑名单，等于给整个 `checkIntentBindsCmd` 开了一个通用逃生舱——任何命令（不只 custodial_transfer）只要往 `cmd` 里塞一个叫 `privkeyHex` 的字段，就能让那个字段自动跳过 intent==cmd 绑定检查而不需要在 intent 里声明，等于给 verify-value-source 完整性开了后门（跟这个命令是不是真的需要 privkeyHex 无关，纯粹因为字段名对上了）。**diff 审时 NWT 会专门核这条实现是否按命令类型门控。**
+
+   （J1 domain-authority 独立核实：`relay.mjs` 全文 grep `privkeyHex`，唯一消费点 = `:495 custodial_transfer`，无其他命令类型碰它——命令级排除表精确覆盖这一个 type 范围判断成立。）
 
 4. **🔴 派生绑定的独立密码学证明（J1 方案核心改进，堵住 Codex 洞）**：relay 收到 cmd 后，**在** `checkIntentBindsCmd` 通过之后、执行 `custodialSendKaspa` 之前，加一步独立验证：
    ```
@@ -251,4 +261,10 @@ grant 收窄了「tg-bot 能发什么命令 + 额度」，但**未解**「一人
 
 **外审独立价值实锤（团队集体认账，`17:31` NWT）**: Codex 抓出两处 NWT/Bettor/J2 三方都漏审的真洞——这不是走过场的"红队 rubber stamp"，是外部视角带来的实质发现。NWT 自认两处漏审（①命令级 verify-value-source 没具体套进 custodial_transfer 验证 privkey 翻译 ②verdict note-1 背书了未验证 enforce 的字段），已记忆 `feedback-verify-control-implemented-before-citing-as-defense`。
 
-**下一步**: §7-8 待 NWT/Codex 对 §3.3a 具体机制新一轮 confirm → §7-7 Path A/B 待 Bettor/Owner 对齐 → G1（不受阻）可并行落码。
+**§7-8 新一轮 confirm 已回（`17:46`，NWT + J1 双 GREEN，§3.3a 落地）**：
+- **NWT 红队核**（`17:46`）：**设计层面 GREEN**——核心密码学核验（步骤 4）机制正确，"是 relay 自己重新证明一遍，不是信任 Console 派生对了"，实答上 Codex 洞；TOCTOU 分析（步骤 6）成立，privkeyHex 在 gate 检查前就已在完整 cmd 里，无"验证后再注入"中间态。**1 implementation-note（已 fold 进 §3.3a 第 3 点，diff 审重点）**：`checkIntentBindsCmd` 排除 privkeyHex 必须按 `cmd.type==='custodial_transfer'` 命令类型门控，绝不能实现成全局字段名黑名单（否则给 verify-value-source 完整性开逃生舱后门）。**1 note（非 blocker，低优先级）**：网关早拒验（签名检查）可能在 grant/scope 校验之前触发一次 privkeyHex 解密查询——有效签名但超额度的请求仍会先解密才被拒，轻量 DoS 放大点，不阻塞落码。**verdict = GREEN-with-1-implementation-note+1-note**。
+- **J1 domain-authority 审**（`17:46`）：**GREEN**——独立核实文档引用的每处代码坐标（非只读 prose 背书）：`migrate.js:5157` UNIQUE 约束/`tg-wallet.js:79` 只读端点不回 mnemonic/`tg-wallet.js:104,115-122` decrypt+derive 流程/`relay.mjs` 全文 grep `privkeyHex` 唯一消费点 `:495`，行号全部精确对上。**额外证据**（非文档假设，J1 补核实）：`tg-wallet.js:130` 现有 `/send` 端点已经在传 `fromAddress: w.kaspa_address` 进 cmd（legacy-unmigrated 路由），印证"`fromAddress` 目前隐性可选"这句是实读代码结论非臆测。**network 一致性隐式覆盖**（J1 观察）：Kaspa 地址文本自带 network 前缀（`kaspa:` vs `kaspatest:`），network 不一致会导致派生地址字符串直接不等，不需要额外单独校验 network 字段。no-key-leak 五点骨架维持不变，§4.1/§4.3 诚实修正认可。
+
+**Codex 待跑最后一轮**（本文档已回应两个 BLOCKER，需要 Codex 对 §3.3a 具体机制 + §4.1/§4.3 修正做外部复核，等回执才算完整闭环——NWT/J1 内部双 GREEN 不能替代外审）。
+
+**下一步**: Codex 对 §3.3a + 诚实修正复核（外部对抗审最后一轮）→ §7-7 Path A/B 待 Bettor/Owner 对齐 → J1 落码（relay 侧特判+密码学核验）+ J2/或分配的 gateway 侧（§3.3a 第 1/5 点）落码 → NWT diff 审（重点核命令类型门控是否落对）→ 实战 harness → G1（不受阻，可能已并行推进）。
