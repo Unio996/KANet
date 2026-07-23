@@ -1,6 +1,7 @@
 # M0c-3 设计稿 — 防重放 + 审计回执 + 免代码吊销（J2 主设计）
 
-> **Status**: DRAFT（2026-07-23 · J2 出稿 → 待 Bettor 方向审 → 待 NWT 红队 → 待 Owner money-path 签发才落码）
+> **Status**: v0.2 修订版（2026-07-23 · J2 出稿 → NWT 红队 GREEN-with-2-MUST-FIX+1-note（`71ce7ced`）→ J2 连修订 v0.2 → 待 Bettor 方向审 → 待 Owner money-path 签发才落码）
+> **v0.2 修订**：MUST-FIX-1（§2 reserve 状态机加崩溃恢复对账路径：dual-write 非原子，reserved-未终结记录按 intentDigest 查链上落地对账，防资金永久卡/状态悬空）+ MUST-FIX-2（§2 去重键改**强制 client nonce**、intentDigest 只做值绑定防篡改：原"可选 nonce+intentDigest 当键"会误拒合法同参数第二笔）+ note（§4 吊销读一致性：直读 DB 或写失效缓存，防 staleness 窗）。
 > **本卡性质**：设计文档，不改一行执行代码；不授权任何落码/凭证 provision/relay 重启/签名/广播/结算/资金移动。
 > **覆盖 M0c 七项之**：⑤nonce/request-id 防重放 + 幂等回执 ⑥审计回执绑定已认证身份 ⑦免代码吊销/禁用路径（①②=M0c-1；③④=M0c-2）。
 > **选型无关（M0c 骨架 §1）**：nonce/审计/吊销机制不依赖身份验证形态 → 可在 M0c-1 落码期并行设计。
@@ -27,11 +28,15 @@
 
 **问题（M-1.2 C-3）**：`relay.mjs` 的 `requestId` 只做响应关联（哪个 reply 对哪个 request），**无去重**——同一已签名信封/命令重发会重复执行（重放攻击：截获合法 app 的结算命令重发 → 重复结算/转账）。20/20 命令请求层去重全缺。
 
-**机制（Codex note③ 焊死）**：
-- **durable 存储**：replay 记录落 **DB**（非内存——Codex 明确内存 nonce 非 acceptance-grade，进程重启/多 worker 会丢/不一致）。键 = `intentDigest`（M0c-1 §5，覆盖全部影响执行字段）+ app key-id + 可选 nonce/request-id。
-- **atomic-reserve（副作用前）**：命令执行**副作用发生前**，原子地 reserve 这个 key（DB UNIQUE 约束 / `INSERT ... ON CONFLICT` 原子占位）——reserve 成功=首次，继续执行；reserve 冲突=重放，**拒 + 返回首次的缓存回执**（幂等：同 request 重发得同结果，不重执行）。
+**机制（Codex note③ 焊死 + v0.2 两 MUST-FIX）**：
+- **durable 存储**：replay 记录落 **DB**（非内存——Codex 明确内存 nonce 非 acceptance-grade，进程重启/多 worker 会丢/不一致）。
+- **🔴 去重键 = 强制 client nonce/request-id（v0.2 MUST-FIX-2·"可选"反了）**：去重键 = **client 提供的强制 nonce/request-id（每逻辑请求唯一）**，**不是** intentDigest。原稿"intentDigest 当键 + nonce 可选"是错的——若只按 intentDigest（命令+参数摘要）去重，**两笔合法但同参数命令会撞**（operator/app 先 transfer 100 给 X，之后合法第二笔 transfer 100 给 X → 同 digest → 第二笔被当重放误拒）。正解（幂等键标准设计）：**nonce 强制且是去重键**（同 nonce=同一逻辑请求幂等 / 不同 nonce=不同请求即使参数相同=合法第二笔）；**`intentDigest` 的作用 = 绑定 nonce↔intent**（同一 nonce 重发但参数不同=攻击篡改，拒），**不当去重键本身**。可重复的钱路命令（transfer）尤其必须强制 nonce。
+- **atomic-reserve（副作用前）**：命令执行**副作用发生前**，原子地 reserve 这个 nonce 键（DB UNIQUE 约束 / `INSERT ... ON CONFLICT` 原子占位）——reserve 成功=首次，继续执行；reserve 冲突=同 nonce 重放（校 intentDigest 一致：不一致=nonce 复用攻击拒），**返回首次缓存回执**（幂等：同 nonce 重发得同结果，不重执行）。
 - **幂等回执**：reserve 记录存首次执行结果摘要（txid / decision），重放命中返缓存回执（幂等语义，非"拒绝报错"——防合法重试[网络抖动 app 重发]被误当攻击断掉）。
-- **NO TX NO STATE 交互**：reserve 在广播前占位，但广播失败（未上链）时 reserve 记录须可回滚/标失败（否则重试被幂等挡住=资金卡）——reserve 状态机：reserved(占位)→committed(上链确认)→或 failed(可重试)。**这条是 J2 域 C3 纪律的延伸**（签的==执行的==reserve 的 intentDigest 一致）。
+- **🔴 reserve 状态机 + 崩溃恢复对账（v0.2 MUST-FIX-1·dual-write 非原子·NO-TX-NO-STATE 硬点）**：状态机 reserved(副作用前占位)→committed(上链确认，存 txid)→或 failed(可重试)。但 **DB reserve + 链上广播本质不原子**——reserve 与 outcome-marking 之间崩溃必须有恢复路径，否则：
+  - 崩在 reserve 后、广播前 → 记录卡 reserved 无结果，重试撞 reserved 幂等返但无缓存结果 = **命令永久卡死资金卡**。
+  - 崩在广播成功后、标 committed 前 → tx 已上链但记录卡 reserved 悬空，app 拿不到 txid。
+  - **修法（对账恢复路径）**：对 reserved-但未终结记录，按 **intentDigest 查链上该 tx 落没落**（covenant/txid 可查，走 relay `check_utxo_landed` 等）→ 落了标 committed（返 txid）/ 超时未落标 failed（放重试）。**对账本身也要原子**（不能引入双执行——对账查链+标状态用同一原子事务/条件更新）。这是 durable-reserve 用于钱路的必备件（缺了=卡资金 or 双执行）。**J2 域 C3 纪律延伸**（签的==执行的==reserve 的 intentDigest 一致，且对账查的是同一 intentDigest 的链上落地）。
 
 ---
 
@@ -52,6 +57,7 @@
 - **免代码**：吊销是**数据写入**（operator 写吊销表，走 §5 operator 通道），非改代码/重启——满足"运行时吊销某被攻陷/越权 caller"（M0c 七项⑦）。
 - **写入面（继承 M0c-1 §4.3 provision）**：吊销表写入走 **operator 离线/operator 专道**（同 grant provision 通道，零应用可达）——应用不能自吊销他人或撤自己吊销。
 - **与 grant 有效期互补**：有效期是被动过期，吊销是主动即时撤销（事故响应：发现某 app key 泄露 → 立即吊销，不等有效期）。
+- **🔴 吊销读一致性（v0.2 note）**："immediate 生效"要求 gate step1 吊销查**直读 DB 或写时失效缓存**——若吊销查走缓存，吊销写入后有 staleness 窗（被吊销 caller 短暂仍放行=事故响应期间还能动钱）。设计写死无缓存/写失效，落码核。
 
 ---
 
@@ -69,9 +75,12 @@ M0c-3 **不改** M0c-1/M0c-2 判定逻辑，只在其钩子点插 replay/审计/
 
 ## 6. 负向测试（armed 判据·关2 行为验）
 
-1. **重放同信封**：截获合法 app 已签命令重发 → 第二次 reserve 冲突 → 拒 + 返首次缓存回执（不重复执行/不重复结算）。
-2. **幂等重试**：合法 app 网络抖动重发同 request-id → 返首次结果（不报错断掉，不重执行）。
+1. **重放同信封**：截获合法 app 已签命令（同 nonce）重发 → 第二次 reserve 冲突（nonce 撞）→ 拒 + 返首次缓存回执（不重复执行/不重复结算）。
+2. **幂等重试**：合法 app 网络抖动重发同 nonce → 返首次结果（不报错断掉，不重执行）。
 3. **广播失败重试**：命令广播未上链（NO TX NO STATE）→ reserve 标 failed → 允许重试（不被幂等误挡=资金不卡）。
+3b. **🔴 合法同参数第二笔（v0.2 MUST-FIX-2）**：transfer 100 给 X 之后再 transfer 100 给 X（**不同 nonce**，合法第二笔）→ 放行（不被当重放误拒）——去重键是 nonce 非 intentDigest，同参数不同 nonce=不同逻辑请求。
+3c. **🔴 nonce 复用攻击（v0.2 MUST-FIX-2）**：同 nonce 重发但改 intent 参数（篡改）→ intentDigest 不一致 → 拒（nonce 绑定 intent 防复用）。
+3d. **🔴 崩溃恢复对账（v0.2 MUST-FIX-1）**：崩在 reserve 后广播前 → reserved 无结果记录 → 对账查链上无 tx → 标 failed 放重试（不永久卡）；崩在广播成功后标 committed 前 → 对账查链上有 tx → 标 committed 返 txid（不悬空、不双执行）。
 4. **内存 nonce 拒收**：验证 replay 存储是 durable（进程重启后重放仍被挡）——非内存（Codex note③）。
 5. **审计完整**：每条命令（allow/deny）都有审计记录，含 callerId+grantId+intentDigest+decision，不记 secret。
 6. **吊销即时生效**：吊销某 caller → 该 caller 下条命令立即 deny（不需重启）。
