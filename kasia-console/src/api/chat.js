@@ -247,7 +247,7 @@ export async function registerChatRoutes(fastify) {
     }
 
     try {
-      const result = await sendCommandAsync(relayId, { type: 'send_broadcast', channel: channel.trim(), message: message.trim() });
+      const result = await sendCommandAsync(relayId, { type: 'send_broadcast', channel: channel.trim(), message: message.trim() }, undefined, 'app');
       if (!result?.ok) throw new Error(result?.error || 'Broadcast failed');
       result.address = relay.address;
 
@@ -680,7 +680,7 @@ export async function registerChatRoutes(fastify) {
         type: 'transfer',
         target: wallet_address,
         amount: FAUCET_AMOUNT_KAS.toFixed(8),  // KI-30: sompi 8 decimal max
-      });
+      }, undefined, 'internal');
       const txid = result?.txId || null;
       if (!txid) {
         return reply.code(503).send({ error: 'faucet transfer 未上链 (= relay 返回无 txId, 可能余额不足 OR relay down)' });
@@ -781,7 +781,7 @@ async function triggerAutoReply(responder, channelName, senderAddress, content, 
 
   while (attempts < MAX_ATTEMPTS) {
     try {
-      result = await sendCommandAsync(responder.relay_id, { type: 'send_broadcast', channel: channelName, message: broadcastText });
+      result = await sendCommandAsync(responder.relay_id, { type: 'send_broadcast', channel: channelName, message: broadcastText }, undefined, 'app');
       if (!result?.ok) throw new Error(result?.error || 'Broadcast failed');
       result.address = responder.address;
       break; // success

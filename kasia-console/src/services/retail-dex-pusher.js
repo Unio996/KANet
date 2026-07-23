@@ -91,7 +91,7 @@ async function _sendDm({ userAddr, msg, brokerRelayId, context }) {
       type: 'send_message',
       target: userAddr,
       message: msg,
-    });
+    }, undefined, 'internal');
     console.log(`[pusher] ${context} → ${userAddr.slice(-12)} (tx ${result.txId?.slice(0, 10) || 'err'})`);
     return result;
   } catch (err) {

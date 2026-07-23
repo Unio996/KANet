@@ -194,12 +194,12 @@ export function buildEnforceCtx(voter, voterPk, market) {
       if (txid) {
         // 命门①chain-bound 等场景: 精确 txid 匹配, 行为完全不变(relay 抛错照样往外抛, errored≠refused
         // 的既有分流不受影响, 不因这次修复悄悄改变 retriable-vs-permanent 的既定语义)。
-        const r = await sendCommandAsync(voter.id, { type: 'check_utxo_landed', address: addr, txid }, 15000);
+        const r = await sendCommandAsync(voter.id, { type: 'check_utxo_landed', address: addr, txid }, 15000, 'internal');
         return !!(r?.landed || r?.found);
       }
       // level2-B per-ticket anti-swap 用法(无具体已知 txid, 只问"这地址上有没有UTXO")——live为主。
       try {
-        const r = await sendCommandAsync(voter.id, { type: 'check_utxo_landed', address: addr }, 15000);
+        const r = await sendCommandAsync(voter.id, { type: 'check_utxo_landed', address: addr }, 15000, 'internal');
         if (r && typeof r.landed === 'boolean') return r.landed;
       } catch { /* relay 不可用/超时 → 退化到 kaspa_tx_log, 不 fail-loud 拦委员 */ }
       const row = sqlite.prepare(`SELECT 1 FROM kaspa_tx_log WHERE outputs_json LIKE ? LIMIT 1`).get(`%"${addr}"%`);
@@ -317,7 +317,7 @@ async function processCloseRequest(voter, market, req, enforceCloseAttest) {
     // 1. 本节点是该 close 的委员? get_pubkey (真 pk, 不信 req.committee_pks) — req.committee_pks 只当便宜预筛, enforce 内
     //    fix① 链锚 re-derive 委员才是真判定 (D3 闭, NWT 坐实)。
     let voterPk;
-    try { voterPk = String((await sendCommandAsync(voter.id, { type: 'get_pubkey' }))?.x_only_pubkey || '').toLowerCase(); } catch { return { errored: true }; }
+    try { voterPk = String((await sendCommandAsync(voter.id, { type: 'get_pubkey' }, undefined, 'internal'))?.x_only_pubkey || '').toLowerCase(); } catch { return { errored: true }; }
     if (!voterPk || voterPk.length !== 64) return { skipped: true };
     const committeePks = (req.committee_pks || []).map(p => String(p).toLowerCase());
     if (committeePks.length && !committeePks.includes(voterPk)) return { skipped: true };   // 预筛: settler 都没把我列为委员 → not-my-business
@@ -373,7 +373,7 @@ async function processCloseRequest(voter, market, req, enforceCloseAttest) {
     // 5. PASS → 本节点 relay 签。真 enforceCloseAttest 不顺手签 (它纯验); placeholder 路径才带 _signature。
     let signature = verdict._signature;
     if (!signature) {
-      const sj = await sendCommandAsync(voter.id, { type: 'sign_input_for_settle', tx_hex: txToSign, input_index: req.input_index ?? 0, safe_json: true });
+      const sj = await sendCommandAsync(voter.id, { type: 'sign_input_for_settle', tx_hex: txToSign, input_index: req.input_index ?? 0, safe_json: true }, undefined, 'internal');
       if (!sj?.signature) return { errored: true, reason: `sign_input_for_settle no sig: ${JSON.stringify(sj).slice(0, 80)}` };
       signature = sj.signature;
     }
@@ -436,7 +436,7 @@ export async function bshardCloseVoterV2Tick() {
 async function processCloseRequestV2(voter, market, req, enforceCloseAttestV2) {
   try {
     let voterPk;
-    try { voterPk = String((await sendCommandAsync(voter.id, { type: 'get_pubkey' }))?.x_only_pubkey || '').toLowerCase(); } catch { return { errored: true }; }
+    try { voterPk = String((await sendCommandAsync(voter.id, { type: 'get_pubkey' }, undefined, 'internal'))?.x_only_pubkey || '').toLowerCase(); } catch { return { errored: true }; }
     if (!voterPk || voterPk.length !== 64) return { skipped: true };
     const committeePks = (req.committee_pks || []).map(p => String(p).toLowerCase());
     if (committeePks.length && !committeePks.includes(voterPk)) return { skipped: true };
@@ -494,7 +494,7 @@ async function processCloseRequestV2(voter, market, req, enforceCloseAttestV2) {
 
     let signature = verdict._signature;
     if (!signature) {
-      const sj = await sendCommandAsync(voter.id, { type: 'sign_input_for_settle', tx_hex: txToSign, input_index: req.input_index ?? 0, safe_json: true });
+      const sj = await sendCommandAsync(voter.id, { type: 'sign_input_for_settle', tx_hex: txToSign, input_index: req.input_index ?? 0, safe_json: true }, undefined, 'internal');
       if (!sj?.signature) return { errored: true, reason: `sign_input_for_settle no sig(V2): ${JSON.stringify(sj).slice(0, 80)}` };
       signature = sj.signature;
     }
@@ -624,7 +624,7 @@ export async function submitCloseAttestV2(marketId, req, sigs, opts = {}) {
         committee: committeeWitness, committee_pk_hash: committeePkHash,
       },
       outputs: { change_address: opts.changeAddress },
-    }, 90_000);
+    }, 90_000, 'internal');
   } catch (e) { return { ok: false, reason: `relay broadcast fail: ${e.message}` }; }
   const txId = sj?.txId || sj?.txid;
   if (!txId) return { ok: false, reason: `no txId in relay response: ${JSON.stringify(sj).slice(0, 200)}` };
@@ -706,7 +706,7 @@ function _tryEnqueueZkProve(market, req) {
 async function _pollLanded(address, txid, attempts = 15, intervalMs = 2_000) {
   for (let i = 0; i < attempts; i++) {
     try {
-      const chk = await sendCommandAsync(SETTLER_RELAY_ID, { type: 'check_utxo_landed', address, txid }, 15_000);
+      const chk = await sendCommandAsync(SETTLER_RELAY_ID, { type: 'check_utxo_landed', address, txid }, 15_000, 'internal');
       if (chk?.landed || chk?.found) return true;
     } catch { /* transient, retry */ }
     if (i < attempts - 1) await new Promise((res) => setTimeout(res, intervalMs));
@@ -750,7 +750,7 @@ export async function bshardCloseSubmitV2Tick() {
       if (!ready) { notReady++; continue; }
       if (!SETTLER_RELAY_ID) { errored++; console.error('[bshard-close-submit-v2] BSHARD_SETTLER_RELAY_ID unset — 无法 submit'); continue; }
       let changeAddress;
-      try { changeAddress = (await sendCommandAsync(SETTLER_RELAY_ID, { type: 'get_pubkey' }))?.address; } catch (e) { errored++; console.error(`[bshard-close-submit-v2] get_pubkey fail: ${e.message}`); continue; }
+      try { changeAddress = (await sendCommandAsync(SETTLER_RELAY_ID, { type: 'get_pubkey' }, undefined, 'internal'))?.address; } catch (e) { errored++; console.error(`[bshard-close-submit-v2] get_pubkey fail: ${e.message}`); continue; }
       if (!changeAddress) { errored++; continue; }
       const r = await submitCloseAttestV2(market.id, req, sigs, { relayId: SETTLER_RELAY_ID, changeAddress });
       if (!r.ok) { failed++; console.warn(`[bshard-close-submit-v2] market=${market.id.slice(-8)} submit fail: ${r.reason}`); continue; }

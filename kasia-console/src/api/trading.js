@@ -2325,6 +2325,7 @@ export async function registerTradingRoutes(fastify) {
             // 未握手 — 发起握手（异步，不阻塞交易）
             const { sendCommandAsync } = await import('../services/relay-manager.js');
             console.log(`[trade] Handshake needed: ${myAddr.slice(-12)} → ${peerAddr.slice(-12)} (status: ${rel?.status || 'none'})`);
+            // TODO(批3): 收敛类,待 M0c-1 gate/迁移收敛后定 app/operator origin
             sendCommandAsync(freshOrder.relay_node_id, { type: 'handshake', target: peerAddr }, 15000)
               .then(res => {
                 if (res?.txId) console.log(`[trade] Handshake sent: TX ${res.txId.slice(0, 16)}`);
@@ -2468,6 +2469,7 @@ export async function registerTradingRoutes(fastify) {
 
       try {
         const { sendCommandAsync } = await import('../services/relay-manager.js');
+        // TODO(批3): 收敛类,待 M0c-1 gate/迁移收敛后定 app/operator origin
         const result = await sendCommandAsync(order.relay_node_id, {
           type: 'transfer', target: targetAddr, amount: String(order.kas_amount),
         }, 30000);

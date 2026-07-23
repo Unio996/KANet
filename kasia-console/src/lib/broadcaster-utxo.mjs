@@ -56,7 +56,7 @@ function _broadcasterRelays() {
 export async function ensureBroadcasterUtxos(relayId, targetN = TARGET_UTXOS, timeoutMs = 60_000) {
   if (!relayId || !Number.isFinite(targetN) || targetN < 2) return { ok: false, reason: 'noop' };
   try {
-    const r = await sendCommandAsync(relayId, { type: 'split_utxo', targetCount: targetN, force: true }, timeoutMs);
+    const r = await sendCommandAsync(relayId, { type: 'split_utxo', targetCount: targetN, force: true }, timeoutMs, 'internal');
     if (r?.split) {
       console.log(`[broadcaster-utxo] ${relayId.slice(0, 8)} rebalanced ${r.utxosBefore}→${r.utxosAfter} (target ${targetN}) tx=${(r.txId || '').slice(0, 12)}`);
     }

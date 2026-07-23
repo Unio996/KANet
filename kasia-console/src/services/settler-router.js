@@ -44,7 +44,7 @@ export async function sendAsset({ asset, chain, to, qty, relayId }) {
     // Native KAS via Kasia relay
     const { sendCommandAsync } = await import('./relay-manager.js');
     // Z21 fix: relay only supports 'transfer' (cmd.amount), not 'send_kas' (cmd.amount_kas).
-    const r = await sendCommandAsync(relayId, { type: COMMAND_TYPES.TRANSFER, target: to, amount: qty });
+    const r = await sendCommandAsync(relayId, { type: COMMAND_TYPES.TRANSFER, target: to, amount: qty }, undefined, 'internal');
     return r?.txId
       ? { ok: true, txHash: r.txId }
       : { ok: false, error: r?.error || 'transfer failed (no txId)' };

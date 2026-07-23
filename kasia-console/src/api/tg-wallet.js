@@ -129,7 +129,7 @@ export async function registerTgWalletRoutes(fastify) {
         amount: amountKas.toFixed(8),
         fromAddress: w.kaspa_address,
         network: w.network || NETWORK,
-      });
+      }, undefined, 'app');
       const txId = result?.txId || null;
       if (!txId) return reply.code(503).send({ ok: false, error: '转账未上链 (relay 无 txId, 可能 RPC down)' });
       return reply.send({ ok: true, txId, amount_kas: amountKas, to, from: w.kaspa_address });

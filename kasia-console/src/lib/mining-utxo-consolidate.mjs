@@ -84,7 +84,7 @@ export async function miningConsolidateTick() {
   if (!relayId) return { skipped: true, reason: 'no_mining_relay_id_configured' };
   running = true;
   try {
-    const r = await sendCommandAsync(relayId, { type: 'consolidate_utxo', minFragments: MIN_FRAGMENTS }, 60_000);
+    const r = await sendCommandAsync(relayId, { type: 'consolidate_utxo', minFragments: MIN_FRAGMENTS }, 60_000, 'internal');
     if (r?.utxosBefore != null) _alertIfOverThreshold(relayId, r.utxosBefore);
     if (r?.consolidated) {
       console.log(`[mining-consolidate] ${relayId.slice(0, 8)} consolidated ${r.utxosBefore}→1 (${r.rounds} round) tx=${(r.txId || '').slice(0, 12)}`);

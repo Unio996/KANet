@@ -501,6 +501,7 @@ export async function registerRelayRoutes(fastify) {
     if (!amountKas || amountKas <= 0) return reply.code(400).send({ error: 'Amount must be > 0' });
 
     try {
+      // TODO(批3): 收敛类,待 M0c-1 gate/迁移收敛后定 app/operator origin
       const result = await sendCommandAsync(request.params.id, { type: 'transfer', target: to.trim(), amount: amountKas.toFixed(8) });
       if (!result) return reply.code(503).send({ error: 'Relay not running' });
       if (result.error) return reply.code(400).send({ error: result.error });
@@ -1731,6 +1732,7 @@ export async function registerRelayRoutes(fastify) {
     // 已超ring buffer窗口必须慢速fallback, 120s不够。运维参数改动, 非逻辑变更。
     const timeoutMs = body.type === 'chain_get_block_at_daa' ? 400000 : 30000;
     try {
+      // TODO(批3): 收敛类,待 M0c-1 gate/迁移收敛后定 app/operator origin
       const result = await sendCommandAsync(request.params.id, body, timeoutMs);
       return reply.send({ ok: true, ...result });
     } catch (err) {

@@ -63,7 +63,7 @@ async function _renewEnrollment({ rpcUrl, networkId, stakerPkX, relayId, relayAd
   const stakeKas = amountSompi ? (Number(amountSompi) / 1e8) : DEFAULT_STAKE_KAS;
   const txRes = await sendCommandAsync(relayId, {
     type: 'transfer', target: newP2shAddr, amount: stakeKas.toFixed(8),
-  });
+  }, undefined, 'internal');
   if (!txRes) throw new Error('relay not running — no response to transfer command');
   if (txRes.error) throw new Error(`transfer rejected: ${txRes.error}`);
   const transferTxId = txRes.txId;
@@ -87,7 +87,7 @@ async function _renewEnrollment({ rpcUrl, networkId, stakerPkX, relayId, relayAd
   // 5. Broadcast enrollment envelope — best-effort; transfer+DB already valid without it.
   let broadcastTxId = null;
   try {
-    const pkRes = await sendCommandAsync(relayId, { type: 'get_pubkey' });
+    const pkRes = await sendCommandAsync(relayId, { type: 'get_pubkey' }, undefined, 'internal');
     const signerPk = String(pkRes?.x_only_pubkey || '').toLowerCase();
     if (!signerPk || signerPk.length !== 64) throw new Error(`get_pubkey invalid: ${signerPk?.slice(0, 12)}`);
     if (signerPk !== stakerPkX.toLowerCase()) {
@@ -101,7 +101,7 @@ async function _renewEnrollment({ rpcUrl, networkId, stakerPkX, relayId, relayAd
       relay_address: relayAddress,
       enrolled_at: new Date().toISOString(),
     };
-    const signResult = await sendCommandAsync(relayId, { type: 'ecdsa_sign', message: JSON.stringify(unsignedPayload) });
+    const signResult = await sendCommandAsync(relayId, { type: 'ecdsa_sign', message: JSON.stringify(unsignedPayload) }, undefined, 'internal');
     const signature = signResult?.signature;
     if (!signature) throw new Error('ecdsa_sign returned empty');
     const bcastResult = await sendBroadcastChunked(relayId, 'kanet-prediction', JSON.stringify({ ...unsignedPayload, signature }));

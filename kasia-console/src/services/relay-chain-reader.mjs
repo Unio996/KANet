@@ -17,7 +17,7 @@ export function createRelayChainReader(relayId) {
   if (!relayId) throw new Error('createRelayChainReader: relayId required');
   return {
     async getCurrentDaaScore() {
-      const r = await sendCommandAsync(relayId, { type: 'chain_get_current_daa_score' });
+      const r = await sendCommandAsync(relayId, { type: 'chain_get_current_daa_score' }, undefined, 'internal');
       if (!r?.ok) throw new Error(`chain_get_current_daa_score (relay ${relayId.slice(0,8)}) failed: ${r?.error || 'no response'}`);
       const n = Number(r.daa_score);
       if (!Number.isFinite(n) || n < 0) throw new Error(`chain_get_current_daa_score returned invalid daa_score: ${r.daa_score}`);
@@ -28,7 +28,7 @@ export function createRelayChainReader(relayId) {
       const r = await sendCommandAsync(relayId, {
         type: 'chain_get_blocks_from_daa_score',
         min_daa_score: minDaa,
-      });
+      }, undefined, 'internal');
       if (!r?.ok) throw new Error(`chain_get_blocks_from_daa_score (relay ${relayId.slice(0,8)}) failed: ${r?.error || 'no response'}`);
       const blocks = Array.isArray(r.blocks) ? r.blocks : [];
       // Normalize daaScore to number (IPC may serialize bigint)
@@ -44,7 +44,7 @@ export function createRelayChainReader(relayId) {
       const r = await sendCommandAsync(relayId, {
         type: 'chain_get_block_at_daa',
         min_daa_score: minDaa,
-      }, 120000);
+      }, 120000, 'internal');
       if (!r?.ok) throw new Error(`chain_get_block_at_daa (relay ${relayId.slice(0,8)}) failed: ${r?.error || 'no response'}`);
       if (!r.hash || typeof r.hash !== 'string' || r.hash.length !== 64) {
         throw new Error(`chain_get_block_at_daa returned invalid hash: ${r.hash}`);

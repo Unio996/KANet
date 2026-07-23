@@ -28,7 +28,7 @@ async function _send(relayId, cmd) {
     }
   }
   const { sendCommandAsync } = await import('./relay-manager.js');
-  return sendCommandAsync(relayId, cmd);
+  return sendCommandAsync(relayId, cmd, undefined, 'internal');
 }
 
 // T-NWT-2026-04-30 R1.1 (RCA J2 r39 same-pattern site, J2 r40 audit confirm):

@@ -218,7 +218,7 @@ async function processVoter(voter) {
       // 5a. Get voter x-only pubkey via relay IPC (= relay holds privkey, derive in-process)
       let voterXOnlyPubkey;
       try {
-        const pkResult = await sendCommandAsync(voter.id, { type: 'get_pubkey' });
+        const pkResult = await sendCommandAsync(voter.id, { type: 'get_pubkey' }, undefined, 'internal');
         voterXOnlyPubkey = pkResult?.x_only_pubkey;
         if (!voterXOnlyPubkey || voterXOnlyPubkey.length !== 64) {
           throw new Error(`get_pubkey returned invalid: ${voterXOnlyPubkey}`);
@@ -245,7 +245,7 @@ async function processVoter(voter) {
       const messageToSign = JSON.stringify(unsignedPayload);  // canonical signature input
       let signature;
       try {
-        const signResult = await sendCommandAsync(voter.id, { type: 'ecdsa_sign', message: messageToSign });
+        const signResult = await sendCommandAsync(voter.id, { type: 'ecdsa_sign', message: messageToSign }, undefined, 'internal');
         signature = signResult?.signature;
         if (!signature) throw new Error('ecdsa_sign returned empty signature');
       } catch (signErr) {
@@ -262,7 +262,7 @@ async function processVoter(voter) {
           type: 'send_message',
           target: offer.maker_kaspa_addr,
           message: JSON.stringify(votePayload),
-        });
+        }, undefined, 'internal');
         voted++;
       } catch (sendErr) {
         console.error(`[prediction-voter] DM fail voter=${voter.name} offer=${offer.id.slice(0,8)}: ${sendErr.message}`);
@@ -395,7 +395,7 @@ async function processPoolMarket(voter) {
       // Get voter x-only pubkey via relay IPC
       let voterXOnlyPubkey;
       try {
-        const pkResult = await sendCommandAsync(voter.id, { type: 'get_pubkey' });
+        const pkResult = await sendCommandAsync(voter.id, { type: 'get_pubkey' }, undefined, 'internal');
         voterXOnlyPubkey = pkResult?.x_only_pubkey;
         if (!voterXOnlyPubkey || voterXOnlyPubkey.length !== 64) {
           throw new Error(`get_pubkey returned invalid: ${voterXOnlyPubkey}`);
@@ -425,7 +425,7 @@ async function processPoolMarket(voter) {
       const messageToSign = JSON.stringify(unsignedPayload);
       let signature;
       try {
-        const signResult = await sendCommandAsync(voter.id, { type: 'ecdsa_sign', message: messageToSign });
+        const signResult = await sendCommandAsync(voter.id, { type: 'ecdsa_sign', message: messageToSign }, undefined, 'internal');
         signature = signResult?.signature;
         if (!signature) throw new Error('ecdsa_sign returned empty signature');
       } catch (signErr) {
@@ -457,7 +457,7 @@ async function processPoolMarket(voter) {
           type: 'send_broadcast',
           channel: 'kanet-prediction',
           message: JSON.stringify(votePayload),
-        });
+        }, undefined, 'internal');
         voteTxid = bcastResult?.txId;
         if (!voteTxid) throw new Error(`broadcast returned no txId: ${JSON.stringify(bcastResult).slice(0, 200)}`);
       } catch (bcastErr) {
@@ -474,7 +474,7 @@ async function processPoolMarket(voter) {
           type: 'send_message',
           target: makerRow.address,
           message: JSON.stringify(votePayload),
-        });
+        }, undefined, 'internal');
       } catch (sendErr) {
         console.warn(`[prediction-voter:pool] DM fast-path fail voter=${voter.name} market=${market.id.slice(0,12)}: ${sendErr.message} (broadcast succeeded, settler will catch via Scout ingest)`);
       }
@@ -574,7 +574,7 @@ async function processPoolTxSign(voter) {
       // J2-tn r362: Get voter pubkey once per market (= used in each sign_resp envelope).
       let voterPk = null;
       try {
-        const pkRes = await sendCommandAsync(voter.id, { type: 'get_pubkey' });
+        const pkRes = await sendCommandAsync(voter.id, { type: 'get_pubkey' }, undefined, 'internal');
         voterPk = String(pkRes?.x_only_pubkey || '').toLowerCase();
       } catch {}
       if (!voterPk || voterPk.length !== 64) {
@@ -600,7 +600,7 @@ async function processPoolTxSign(voter) {
           tx_hex: _safeTxHex,
           safe_json: true,
           input_index: inputIdx,
-        });
+        }, undefined, 'internal');
         if (!signResult?.ok || !signResult.signature) {
           console.error(`[prediction-voter:pool-txsign] sign fail voter=${voter.name} market=${market.id.slice(0,12)} input=${inputIdx}: ${signResult?.error || 'no sig'}`);
           errored++;
@@ -702,7 +702,7 @@ async function processPoolRefundDisagreementTxSign(voter) {
           tx_hex: _safeRdTxHex,
           safe_json: true,
           input_index: inputIdx,
-        });
+        }, undefined, 'internal');
         if (!signResult?.ok || !signResult.signature) {
           console.error(`[prediction-voter:pool-refund-dis] sign fail voter=${voter.name} market=${market.id.slice(0,12)} input=${inputIdx}: ${signResult?.error || 'no sig'}`);
           errored++;
@@ -1142,7 +1142,7 @@ async function handleTxSignReq(voter, offer) {
         tx_hex: _safeTxHex,
         safe_json: true,
         input_index: inputIdx,
-      });
+      }, undefined, 'internal');
       if (!signResult?.ok || !signResult.signature) {
         console.error(`[prediction-voter] sign_input_for_settle fail voter=${voter.name} offer=${offer.id.slice(0,8)} input=${inputIdx}: ${signResult?.error || 'no sig'}`);
         return { signed: false, skipped: false };
@@ -1171,7 +1171,7 @@ async function handleTxSignReq(voter, offer) {
           type: 'send_message',
           target: offer.maker_kaspa_addr,
           message: respPayload,
-        });
+        }, undefined, 'internal');
       }
       console.log(`[prediction-voter] TX-SIG ${voter.name}: offer=${offer.id.slice(0,8)} input=${inputIdx} winner=${winner}`);
     } catch (e) {

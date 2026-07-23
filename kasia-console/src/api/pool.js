@@ -214,6 +214,7 @@ async function _sendBroadcastChunked(relayId, channel, payloadStr, timeoutMs) {
   // payload (未来/边界) 不被 30s 截 + 与 lib/J1 一致。env BROADCAST_CHUNK_TIMEOUT_MS 同一变量。
   const tmo = timeoutMs || parseInt(process.env.BROADCAST_CHUNK_TIMEOUT_MS, 10) || 90_000;
   if (payloadStr.length <= SAFE_CHUNK_BUDGET) {
+    // TODO(批3): 收敛类,待 M0c-1 gate/迁移收敛后定 app/operator origin
     return await sendCommandAsync(relayId, { type: 'send_broadcast', channel, message: payloadStr }, tmo);
   }
   const hash = createHash('sha256').update(payloadStr).digest('hex');
@@ -222,6 +223,7 @@ async function _sendBroadcastChunked(relayId, channel, payloadStr, timeoutMs) {
   for (let ord = 0; ord < total; ord++) {
     const data = payloadStr.slice(ord * CHUNK_DATA_BUDGET, (ord + 1) * CHUNK_DATA_BUDGET);
     const chunkPayload = JSON.stringify({ t: 'pool_market_chunk_v1', hash, ord, total, data });
+    // TODO(批3): 收敛类,待 M0c-1 gate/迁移收敛后定 app/operator origin
     const r = await sendCommandAsync(relayId, { type: 'send_broadcast', channel, message: chunkPayload }, tmo);
     if (!r?.txId) throw new Error(`chunk ${ord+1}/${total} broadcast no txId: ${JSON.stringify(r).slice(0,200)}`);
     txIds.push(r.txId);
@@ -238,6 +240,7 @@ async function _sendBroadcastChunked(relayId, channel, payloadStr, timeoutMs) {
 // (relay 实际 pk, 非 deriveXOnlyPubkey(address) round-trip = 非 P2PK edge fork)。列==sentinel 逐字节同
 // = 全节点单一 derivation。helper 保 3 create path + broadcast 同口径 (NWT "一个变量/口径")。
 async function _getMakerRelayPk(makerRelayId) {
+  // TODO(批3): 收敛类,待 M0c-1 gate/迁移收敛后定 app/operator origin
   const pkResult = await sendCommandAsync(makerRelayId, { type: 'get_pubkey' });
   const pk = pkResult?.x_only_pubkey;
   if (!pk || pk.length !== 64) throw new Error(`maker get_pubkey invalid: ${pk}`);
@@ -285,6 +288,7 @@ async function _broadcastMarketPublished(marketRow, makerRelayId) {
       published_at: new Date().toISOString(),
     };
     const messageToSign = JSON.stringify(unsignedPayload);
+    // TODO(批3): 收敛类,待 M0c-1 gate/迁移收敛后定 app/operator origin
     const signResult = await sendCommandAsync(makerRelayId, { type: 'ecdsa_sign', message: messageToSign });
     const signature = signResult?.signature;
     if (!signature) throw new Error('ecdsa_sign returned empty');
@@ -484,6 +488,7 @@ export async function buildBettorRefundClaim(marketId, { bettorPk: bettorPkRaw, 
   const entryIndex = isLegacy ? 3 : 2;
 
   try {
+    // TODO(批3): 收敛类,待 M0c-1 gate/迁移收敛后定 app/operator origin
     const submitResult = await sendCommandAsync(signingRelay.id, {
       type: 'pool_side_refund_cancelled_tx',
       side_p2sh_address: side.side_p2sh,
@@ -1479,6 +1484,7 @@ export async function registerPoolRoutes(fastify) {
     // gateway relay = market host (maker_relay_id); funds genesis/register, custodies bettor stake (testnet ramp).
     const gatewayRelayId = market.maker_relay_id;
     if (!isRelayAlive(gatewayRelayId)) return reply.code(503).send({ ok: false, error: 'gateway (maker) relay not alive' });
+    // TODO(批3): 收敛类,待 M0c-1 gate/迁移收敛后定 app/operator origin
     const gw = await sendCommandAsync(gatewayRelayId, { type: 'get_pubkey' });
     const relayAddr = gw.address;
     if (!relayAddr) return reply.code(503).send({ ok: false, error: 'gateway relay get_pubkey returned no address' });
@@ -1493,11 +1499,13 @@ export async function registerPoolRoutes(fastify) {
     // relay helpers for the orchestrator (all on the gateway relay).
     const kaspa = await import('kaspa-wasm');
     const p2sh = (redeemHex) => kaspa.addressFromScriptPublicKey(kaspa.ScriptBuilder.fromScript(new Uint8Array(Buffer.from(redeemHex, 'hex'))).createPayToScriptHashScript(), network).toString();
+    // TODO(批3): 收敛类,待 M0c-1 gate/迁移收敛后定 app/operator origin
     const rc = (cmd) => sendCommandAsync(gatewayRelayId, cmd, 90000);
     // 事故硬化(2026-07-08, yxllc追踪): 这笔transfer的产物(fundTx)被喂进genesis-mint(ensurePayoutShardV2)
     // 当funding input, 最终落payout_shards表——同create-v07 spine那条纪律, 也升级深确认。
     const transfer = async (addr, sompi) => { const r = await transferAndConfirm(gatewayRelayId, addr, (Number(sompi) / 1e8).toFixed(8), { minDepth: REORG_SAFE_MIN_DEPTH, maxWaitMs: 60000 }); return r.txId; };
     // minDepth: 20 (J1 phantom-leaf 根治) — reorg-safe DAA-深度门: 浅确认 UTXO(被 reorg 退)不算 landed → register land-gate 不记 phantom leaf。poll 到 depth≥20 才 true; 超时返 false → caller throw(NO-TX-NO-STATE 不推进 leaf)。
+    // TODO(批3): 收敛类,待 M0c-1 gate/迁移收敛后定 app/operator origin
     const landed = async (txid, addr, n = 25) => { for (let i = 0; i < n; i++) { const j = await sendCommandAsync(gatewayRelayId, { type: 'check_utxo_landed', address: addr, txid, minDepth: REORG_SAFE_MIN_DEPTH }, 20000); if (j.landed || j.found) return true; await new Promise(r => setTimeout(r, 2000)); } return false; };
 
     // shard→pool_markets row: each physical shard is a minimal pool_markets clone (FK shard_market_id REFERENCES pool_markets(id);
@@ -1602,6 +1610,7 @@ export async function registerPoolRoutes(fastify) {
     // gateway relay = market host (maker_relay_id); its P2PK wallet address = relay-signable funding/payment address (§3 relay-assisted).
     const gatewayRelayId = market.maker_relay_id;
     if (!isRelayAlive(gatewayRelayId)) { reply.code(503).send({ ok: false, error: 'gateway (maker) relay not alive' }); return null; }
+    // TODO(批3): 收敛类,待 M0c-1 gate/迁移收敛后定 app/operator origin
     const gw = await sendCommandAsync(gatewayRelayId, { type: 'get_pubkey' });
     const relayAddr = gw.address;
     if (!relayAddr) { reply.code(503).send({ ok: false, error: 'gateway relay get_pubkey returned no address' }); return null; }
@@ -1614,6 +1623,7 @@ export async function registerPoolRoutes(fastify) {
     //   同参数(marketId|bettorPk|direction|payAmountSompi|betId·单源)→ get_per_bet_address 派生【同址】(perBetNonce 确定性)。
     //   per-bet 址唯一 → 该址只有这一笔付款·confirm exact-amount-match 在唯一址仍 work(零 commingle/零并发竞态)。
     //   perBetRedeem 带回供 confirm 后 sweep_per_bet 报销 gateway(gateway 已垫·sweep 异步·失败不 strand bet·daemon 重试)。
+    // TODO(批3): 收敛类,待 M0c-1 gate/迁移收敛后定 app/operator origin
     const perBet = await sendCommandAsync(gatewayRelayId, {
       type: 'get_per_bet_address',
       marketId: logicalMarketId, bettorPk, direction: v.direction, payAmountSompi: String(payAmountSompi), betId: b.bet_id,
@@ -1750,11 +1760,13 @@ export async function registerPoolRoutes(fastify) {
     try {
       const kaspa = await import('kaspa-wasm');
       const p2sh = (redeemHex) => kaspa.addressFromScriptPublicKey(kaspa.ScriptBuilder.fromScript(new Uint8Array(Buffer.from(redeemHex, 'hex'))).createPayToScriptHashScript(), network).toString();
+      // TODO(批3): 收敛类,待 M0c-1 gate/迁移收敛后定 app/operator origin
       const rc = (cmd) => sendCommandAsync(gatewayRelayId, cmd, 90000);
       // 事故硬化(2026-07-08, yxllc追踪): 这笔transfer的产物(fundTx)被喂进genesis-mint(ensurePayoutShardV2)
       // 当funding input, 最终落payout_shards表——同create-v07 spine那条纪律, 也升级深确认。
       const transfer = async (addr, sompi) => { const r = await transferAndConfirm(gatewayRelayId, addr, (Number(sompi) / 1e8).toFixed(8), { minDepth: REORG_SAFE_MIN_DEPTH, maxWaitMs: 60000 }); return r.txId; };
       // minDepth: 20 (J1 phantom-leaf 根治) — reorg-safe DAA-深度门: 浅确认 UTXO(被 reorg 退)不算 landed → register land-gate 不记 phantom leaf。poll 到 depth≥20 才 true; 超时返 false → caller throw(NO-TX-NO-STATE 不推进 leaf)。
+    // TODO(批3): 收敛类,待 M0c-1 gate/迁移收敛后定 app/operator origin
     const landed = async (txid, addr, n = 25) => { for (let i = 0; i < n; i++) { const j = await sendCommandAsync(gatewayRelayId, { type: 'check_utxo_landed', address: addr, txid, minDepth: REORG_SAFE_MIN_DEPTH }, 20000); if (j.landed || j.found) return true; await new Promise(r => setTimeout(r, 2000)); } return false; };
       // 🔴 #28 (B) REGRESSION FIX (J1 2026-07-01): register_append funding 必用【gateway 主址】不是 payAddr。
       //   payAddr 现已改为 per-bet 独立 P2SH(只有 bettor 这一笔付款·无 gateway 运营余额)。registerBettorOnShard
@@ -1811,6 +1823,7 @@ export async function registerPoolRoutes(fastify) {
       //   已垫·链上真相已成)·未 sweep 由 reconciliation daemon(J2 piece④)扫描重试防 gateway 失血。perBetRedeem 来自
       //   prelude(prep/confirm 同源派生·byte-identical)。per-bet 唯一址 → sweep 只扫这一笔付款·不碰别的。
       if (perBetRedeem) {
+        // TODO(批3): 收敛类,待 M0c-1 gate/迁移收敛后定 app/operator origin
         sendCommandAsync(gatewayRelayId, { type: 'sweep_per_bet', per_bet_address: payAddr, redeem_hex: perBetRedeem }, 90000)
           .then((sr) => { if (!sr?.ok) console.warn(`[confirm] sweep_per_bet ${logicalMarketId} not-ok: ${JSON.stringify(sr).slice(0, 100)} (bet 已注册·daemon 重试报销)`); })
           .catch((e) => console.warn(`[confirm] sweep_per_bet ${logicalMarketId} fail: ${e.message} (bet 已注册·daemon 重试报销)`));
@@ -1965,6 +1978,7 @@ export async function registerPoolRoutes(fastify) {
         getMarket: (mid) => sqlite.prepare('SELECT metadata FROM pool_markets WHERE id = ?').get(mid),
         getDoneJob: (mid) => sqlite.prepare(`SELECT receipt_hex FROM zk_prove_jobs WHERE market_id = ? AND status = 'done' ORDER BY id DESC LIMIT 1`).get(mid),
         kaspaZk: () => kaspaZk(),
+        // TODO(批3): 收敛类,待 M0c-1 gate/迁移收敛后定 app/operator origin
         relayCall: (cmd) => sendCommandAsync(settler_relay_id, cmd, 90000),
       };
       const result = await dispatchUnlockZkClose({ marketId: market_id, continuationOutpoint: zkCont.outpoint, attestedWinner: zkCont.attestedWinner }, ctx);
@@ -1975,6 +1989,7 @@ export async function registerPoolRoutes(fastify) {
       // 过滤 UTXO, 找到即隐含 spk 原像绑定, 不需要额外再验), 过了才调 advanceZkContinuationAfterSpend。
       let landedOk = false;
       for (let i = 0; i < 30; i++) {
+        // TODO(批3): 收敛类,待 M0c-1 gate/迁移收敛后定 app/operator origin
         const j = await sendCommandAsync(settler_relay_id, { type: 'check_utxo_landed', address: result.closeZkContinuationAddress, txid: result.txid, minDepth: 20 }, 20000).catch(() => ({}));
         if (j.landed || j.found) { landedOk = true; break; }
         await new Promise(r => setTimeout(r, 3000));
@@ -3946,6 +3961,7 @@ export async function registerPoolRoutes(fastify) {
     // get oracle x-only pubkey via relay IPC
     let oraclePubkey;
     try {
+      // TODO(批3): 收敛类,待 M0c-1 gate/迁移收敛后定 app/operator origin
       const pkResult = await sendCommandAsync(b.oracle_relay_id, { type: 'get_pubkey' });
       oraclePubkey = pkResult?.x_only_pubkey;
       if (!oraclePubkey || oraclePubkey.length !== 64) throw new Error(`get_pubkey invalid: ${oraclePubkey}`);
@@ -3965,6 +3981,7 @@ export async function registerPoolRoutes(fastify) {
     };
     let signature;
     try {
+      // TODO(批3): 收敛类,待 M0c-1 gate/迁移收敛后定 app/operator origin
       const signResult = await sendCommandAsync(b.oracle_relay_id, { type: 'ecdsa_sign', message: JSON.stringify(unsignedPayload) });
       signature = signResult?.signature;
       if (!signature) throw new Error('ecdsa_sign returned empty');
@@ -3976,6 +3993,7 @@ export async function registerPoolRoutes(fastify) {
     const makerRow = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(market.maker_relay_id);
     if (makerRow?.address) {
       try {
+        // TODO(批3): 收敛类,待 M0c-1 gate/迁移收敛后定 app/operator origin
         await sendCommandAsync(b.oracle_relay_id, { type: 'send_message', target: makerRow.address, message: JSON.stringify(votePayload) });
       } catch { /* DM best-effort — chain_event is the source of truth for settler */ }
     }

@@ -108,7 +108,7 @@ export async function claimAutoDispatcherTick() {
           required_input_outpoint: { outpointTxid: side.side_lock_tx, outpointIndex: 0 },
           output: { address: signingRelay.address, amountSompi: outAmount.toString() },
           lock_time: lockTime.toString(),
-        });
+        }, undefined, 'internal');
         if (!submitResult?.ok || !submitResult.txId) {
           // Bettor r400 catch: 'No UTXOs at side P2SH' = 已花 (= 已领 但 DB claim_txid 没 set).
           // 自愈 mark side as claimed via sentinel (= prevent forever retry).

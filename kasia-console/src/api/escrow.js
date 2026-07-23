@@ -74,7 +74,7 @@ export async function registerEscrowRoutes(fastify) {
         type: 'create_escrow',
         buyerPk32, sellerPk32, arbiterPk32,
         deadline: deadline || 0,
-      });
+      }, undefined, 'app');
 
       if (result.error) return reply.code(500).send({ error: result.error });
 
@@ -120,7 +120,7 @@ export async function registerEscrowRoutes(fastify) {
         type: 'lock_escrow',
         p2shAddress: escrow.p2sh_address,
         amountKas,
-      });
+      }, undefined, 'app');
 
       if (result.error) return reply.code(500).send({ error: result.error });
 
@@ -177,7 +177,7 @@ export async function registerEscrowRoutes(fastify) {
         branch,
         toAddress,
         lockTime,
-      });
+      }, undefined, 'app');
 
       if (result.error) return reply.code(500).send({ error: result.error });
 
