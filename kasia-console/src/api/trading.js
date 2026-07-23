@@ -2500,6 +2500,7 @@ export async function registerTradingRoutes(fastify) {
           });
           // Delay 5s: wait for send_kas UTXO to settle before broadcasting
           setTimeout(() => {
+            // TODO(批3): 收敛类,待 M0c-1 gate/迁移收敛后定 app/operator origin(sendCmd=sendCommandAsync 别名)
             sendCmd(order.relay_node_id, { type: 'send_broadcast', channel: _delCh, message: deliveredPayload }).then(r => {
               console.log(`[trade] Broadcast kanet_delivered_v1 to channel ${_delCh.slice(0, 8)} TX=${r?.txId?.slice(0, 16) || '?'}`);
             }).catch(err => {
@@ -2584,6 +2585,7 @@ export async function registerTradingRoutes(fastify) {
             t: 'kanet_paid_v1', v: 1, id: _paidCh,
             chain, tx: tx.hash, amt: usdtAmount, to: sellerAddr,
           });
+          // TODO(批3): 收敛类,待 M0c-1 gate/迁移收敛后定 app/operator origin(sendCmd=sendCommandAsync 别名)
           sendCmd(order.relay_node_id, { type: 'send_broadcast', channel: _paidCh, message: paidPayload }).then(r => {
               console.log(`[trade] Broadcast kanet_paid_v1 to channel ${_paidCh.slice(0, 8)} TX=${r?.txId?.slice(0, 16) || '?'}`);
             }).catch(err => {
