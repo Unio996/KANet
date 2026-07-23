@@ -770,7 +770,11 @@ function checkCommandEnum(filepath, content) {
 // 检测: ①别名定义处向后扫该别名的 call, call 实参 span(括号配对深度扫描, 非行窗口)内无 origin
 // 实参('internal'/'app'/'operator')→ warn ②sendCommandAsync 裸值传参(callback 形态, 静态不可追踪)→ warn。
 // call-arg-span(NWT ff28fe68 NOTE-B): 相邻 call 的 origin 字面量不再满足本 call(消 window-bleed 假阴)。
-// warn-first(规则65): NWT diff GREEN 后升 ERROR。别名的别名(二级)不追, 由一级 warn 逼平。
+// ERROR 级(2026-07-23 升级): warn-first 落码(7aa2d117)→call-arg-span 收窗(dc73ae06)→NWT 两轮 diff
+// GREEN 后升 ERROR(规则65 门①完整走完)。8 存量别名 call 已全标注 origin=零现存阻挡。
+// 残留限界(NWT dc73ae06 verdict 诚实标·非 blocker): 本 call payload 内裸 'app'/'internal'/'operator'
+// 字符串字面量可满足 ORIGIN_RE(限本 call args 内, 远窄于旧 window-bleed; 现存 8 别名结构化 payload 零命中)。
+// 别名的别名(二级)不追, 由一级 ERROR 逼平。
 function checkR_SCA_ALIAS_ORIGIN(filepath, content) {
   if (!/kasia-console[\\/]src[\\/].*\.(?:js|mjs)$/.test(filepath)) return;
   if (/relay-manager\.js$/.test(filepath)) return; // 定义方自身豁免
@@ -786,7 +790,7 @@ function checkR_SCA_ALIAS_ORIGIN(filepath, content) {
     else if ((m = code.match(/(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*sendCommandAsync\s*[;,)\]]?\s*$/))) aliases.push({ name: m[1], defLine: i + 1 });
     // 裸值传参(callback): foo(sendCommandAsync) / foo(x, sendCommandAsync, y) — 静态不可追踪
     if (/[(,]\s*sendCommandAsync\s*[,)]/.test(code) && !/await\s+import|require\s*\(/.test(code)) {
-      warn('R-SCA-ALIAS-ORIGIN', `sendCommandAsync 以裸值传参(callback 形态)— origin 迁移扫描静态不可追踪, gate armed 后此路径若未标 origin 会 fail-closed 断。改传显式 wrapper((id,cmd,t)=>sendCommandAsync(id,cmd,t,'<origin>'))或直接调用。`, filepath, i + 1);
+      violate('R-SCA-ALIAS-ORIGIN', `sendCommandAsync 以裸值传参(callback 形态)— origin 迁移扫描静态不可追踪, gate armed 后此路径若未标 origin 会 fail-closed 断。改传显式 wrapper((id,cmd,t)=>sendCommandAsync(id,cmd,t,'<origin>'))或直接调用。`, filepath, i + 1);
     }
   }
   // call-arg-span 提取: 从 call 开括号起括号配对深度扫描到闭合(简易字符串状态机跳过引号内容,
@@ -821,7 +825,7 @@ function checkR_SCA_ALIAS_ORIGIN(filepath, content) {
       const openCol = code.indexOf('(', cm.index + cm[0].length - 1);
       const span = extractCallArgSpan(i, openCol >= 0 ? openCol : 0);
       if (span == null || !ORIGIN_RE.test(span)) {
-        warn('R-SCA-ALIAS-ORIGIN', `sendCommandAsync 别名 '${name}'(定义 :${defLine})调用${span == null ? '实参 40 行内未闭合(可疑)' : '实参 span 内未见 origin'}('internal'/'app'/'operator')— 别名 call 必须与直接调用同样标 origin 第4实参(M0c-1 批C armed 硬前置), 否则 gate armed=on 后 fail-closed 拒·现网该路径断。`, filepath, i + 1);
+        violate('R-SCA-ALIAS-ORIGIN', `sendCommandAsync 别名 '${name}'(定义 :${defLine})调用${span == null ? '实参 40 行内未闭合(可疑)' : '实参 span 内未见 origin'}('internal'/'app'/'operator')— 别名 call 必须与直接调用同样标 origin 第4实参(M0c-1 批C armed 硬前置), 否则 gate armed=on 后 fail-closed 拒·现网该路径断。`, filepath, i + 1);
       }
     }
   }
