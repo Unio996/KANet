@@ -120,6 +120,7 @@ CREATE INDEX idx_pilot_rate_limit_grant_time ON pilot_rate_limit_log(grant_id, r
 **gateway 侧实现草图（J2·本节新增，回应 J1 提案的具体落地方式，非最终设计）**：
 - relay 侧新增只读诊断命令（如 `get_arm_status`，零业务副作用，纳入 `READONLY_ALLOWLIST`——同 `get_rpc_state` 等既有只读诊断命令同类，无论 armed 状态如何都可答）——handler 调用 `armReport()`，通过 IPC `requestId` 回执把 `{armed, grantEnvelopeImplemented, ...}` 传回。
 - gateway 侧 `earlyRejectCheck`（或独立的 dispatch 前置步骤）在**真正转发**（`sendCommandAsync` 携带 `origin='app'` 那一步）之前，先发一次 `get_arm_status` 查询，确认 `armed === true` 才继续；`armed !== true` → 拒绝转发（明确错误："relay 未 armed，网关侧转发已暂停"），而不是把命令发出去然后信任 relay 会正确处理。
+  - 🔴 **`get_arm_status` 这次查询本身的 `origin`（NWT `20:05` relay 侧 diff 审 note，落码前先钉死）**：用 `'internal'`，**不用** `'app'`——这是网关自己的运维/系统级诊断查询，不是外部 app 业务意图，不该占用 §5 焊死的"`origin='app'` 唯一铸造点"规则（我们规定过全仓恰好一处 `sendCommandAsync(...,'app')` 调用点 = `capability.js` 真正转发 custodial_transfer 的那一行，参见母卡 §5 角度①独立 grep 验证）；也不需要信封（`get_arm_status` 在 `READONLY_ALLOWLIST` 里，`armed=on` 时豁免完整信封验证）。
 - **这不是取代 §2.6 的运维纪律**（两 flag 仍必须同批次开，是激活流程本身的硬约束），**是运行时的第二重确认**——同一天已经反复出现的纵深防御纪律（relay 不信 gateway 早拒验/gateway 也不该盲目信 relay 已经 armed），两边互相不单方面假设对方状态正确。
 
 **已决定（Bettor `19:50`）**：做。`get_arm_status`（relay 侧 handler = J1 域；gateway 侧调用逻辑 = 我域）。落码时机（G2 基础上快速加 vs 留下一批）待与 J1 对齐排期，围栏设计文档层面到此已完整（不是"是否做"的开放问题，是"何时落码"的排期问题，归实现批次决定）。
