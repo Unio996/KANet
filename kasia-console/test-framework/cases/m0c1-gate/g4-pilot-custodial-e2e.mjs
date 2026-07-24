@@ -4,6 +4,17 @@
 // 派工: Bettor 工作流① J1 域最后一块。runbook §4 激活验证的"e2e 最小 smoke"直接引用本文件的最小
 // 正向 LAND 用例（单一真相源，不建第二套 smoke——KANet-UI `bde13e51` 已锚定这个依赖方向）。
 //
+// 🔴 v0.2(2026-07-24·Codex RED-not-ready 修正): v0.1 只有 5 用例(LAND①+BUST①②③④), 缺 replay/
+// 吊销/taint/pilot专属TTL/限流覆盖(Bettor MSG-120 把设计稿声称的控制当已测试打包, Codex 抓出这是
+// evidence-integrity 问题)。本版补齐 4 类缺口 + 把弱判据("没被 400/401/403 拒")升级为精确 reason
+// 断言(读 relayLastLog 或 HTTP body 具体文案, 而非只判"没意外通过")。
+//
+// 🔴 v0.2 架构变化(每个需要触达 relay 的用例用独立 grant+wallet, 不共享): J2 落码的真实限流(每
+// grant_id 每 60s ≤3 笔)生效后, v0.1 多个用例共享同一个 grantId 连续发请求, 会在同一 60s 窗口内
+// 自己把自己的请求配额耗尽——后面的用例被限流拦下而非被"想测的那个原因"拦下(v0.2 首跑时发现的
+// 真实测试设计缺陷, 非产品 bug, 记录见下方 freshGrantWallet 注释)。修法: 每个需要精确验证"是哪个
+// 具体原因拒绝"的用例都用 freshGrantWallet() 拿一份全新的 grant+wallet, 各自独立的限流配额。
+//
 // 隔离架构（非 live 论证，同门⑤ harness 纪律）：
 // ① 独立临时 DB（process.env.DB_PATH 指向 scratch，非 console.db；db/client.js 在 MODULE LOAD 时
 //    一次性绑定路径，本文件在任何 import 触发 db/client.js 加载前先设好 env，保证绑定到隔离库）。
@@ -18,6 +29,7 @@
 
 import { existsSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import { randomUUID, randomBytes } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -56,6 +68,18 @@ function check(label, ok, detail) {
   evidence.push({ label, ok, detail: detail ? String(detail).slice(0, 500) : undefined });
 }
 
+function reachedExecLayer(r) {
+  const infra = r.status === 500 && /Relay not running|timeout/i.test(r.body?.error || '');
+  const reached = (r.status === 200 && r.body?.ok && r.body?.txId) || (r.status === 503 && /RPC down|relay 侧拒绝/.test(r.body?.error || ''));
+  return reached && !infra;
+}
+function notWronglyLanded(r) {
+  return !(r.status === 200 && r.body?.ok && r.body?.txId);
+}
+function isInfraFailure(r) {
+  return r.status === 500 && /Relay not running|timeout/i.test(r.body?.error || '');
+}
+
 async function main() {
   // ── ① migrate: 建全部依赖表(relay_nodes/identities/m0c1_app_grants/tg_custodial_wallets 等) ──
   const migrateMod = await import(pathToFileURL(path.join(ROOT, 'kasia-console/src/db/migrate.js')).href);
@@ -65,6 +89,7 @@ async function main() {
   const { encrypt } = await import(pathToFileURL(path.join(ROOT, 'kasia-console/src/services/crypto.js')).href);
   const walletMod = await import(pathToFileURL(path.join(ROOT, 'kasia-relay/src/lib/wallet.mjs')).href);
   const { KaspaWallet } = walletMod;
+  const { generateMnemonic, addressFromMnemonic, privKeyHexFromMnemonic } = await import(pathToFileURL(path.join(ROOT, 'kasia-console/src/services/wallet.js')).href);
 
   // ── ② relay_nodes: pilot relay 自身身份(privkey-backed, r281 模式) ──
   const relayPriv = randomBytes(32).toString('hex');
@@ -73,31 +98,48 @@ async function main() {
   sqlite.prepare(`INSERT INTO relay_nodes (id, name, address, network, privkey_encrypted, poll_ms, is_service, created_at, updated_at)
     VALUES (?,?,?,?,?,?,?,?,?)`).run(RELAY_ID, 'g4-pilot-relay', relayAddress, NETWORK, encrypt(relayPriv), 999999, 0, nowIso, nowIso);
 
-  // ── ③ tg_custodial_wallets: pilot 专用托管钱包(真加密助记词, 走真 decrypt+derive 路径) ──
-  const { generateMnemonic, addressFromMnemonic } = await import(pathToFileURL(path.join(ROOT, 'kasia-console/src/services/wallet.js')).href);
-  const pilotMnemonic = generateMnemonic();
-  const pilotAddress = addressFromMnemonic(pilotMnemonic, NETWORK);
-  sqlite.prepare(`INSERT INTO tg_custodial_wallets (tg_user_id, kaspa_address, mnemonic_encrypted, network, created_at, updated_at)
-    VALUES (?,?,?,?,?,?)`).run('g4-pilot-tg-user', pilotAddress, encrypt(pilotMnemonic), NETWORK, nowIso, nowIso);
-
-  // ── ④ app 签名密钥 + pilot grant(source_scope 只含 pilotAddress·围栏核心) ──
   const kaspa = await import(pathToFileURL(path.resolve(ROOT, 'kasia-relay/node_modules/kaspa-wasm/kaspa.js')).href);
   const appPriv = new kaspa.PrivateKey(randomBytes(32).toString('hex'));
   const appPub = appPriv.toPublicKey().toXOnlyPublicKey().toString();
-  const nowSec = Math.floor(Date.now() / 1000);
-  const grantId = randomUUID();
-  sqlite.prepare(`INSERT INTO m0c1_app_grants (
-      grant_id, app_key_id, app_pubkey, allowed_commands, typed_intent_version, relay_scope, network,
-      payee_scope, source_scope, max_amount_sompi, valid_from, valid_until, grant_version, created_at
-    ) VALUES (@grant_id,@app_key_id,@app_pubkey,@allowed_commands,@typed_intent_version,@relay_scope,@network,
-      @payee_scope,@source_scope,@max_amount_sompi,@valid_from,@valid_until,@grant_version,@created_at)`).run({
-    grant_id: grantId, app_key_id: 'g4-pilot-app', app_pubkey: appPub,
-    allowed_commands: JSON.stringify(['custodial_transfer']), typed_intent_version: 1,
-    relay_scope: JSON.stringify([RELAY_ID]), network: NETWORK,
-    payee_scope: JSON.stringify([DUMMY_TARGET]), source_scope: JSON.stringify([pilotAddress]),
-    max_amount_sompi: 200000000, // 2 KAS (J1 数值提案·待 Bettor 最终 ratify, 此处用作 harness 默认)
-    valid_from: nowSec, valid_until: nowSec + 7 * 86400, grant_version: 1, created_at: nowSec,
-  });
+
+  // 🔴 v0.2 隔离修法: 每个需要"到达 relay 精确验证具体拒绝原因"的用例都拿一份全新 wallet+grant,
+  // 避免共享同一 grant_id 时限流配额(每 grant 每 60s ≤3 笔)被前面的用例耗尽, 导致后面用例被限流
+  // 拒绝而非被想测的那个原因拒绝(v0.2 首跑时发现的真实测试设计缺陷, 见文件头注释)。
+  const allowedAddresses = [];
+  function refreshWhitelistEnv() {
+    process.env.PILOT_WALLET_ADDRESSES = allowedAddresses.join(',');
+  }
+  function freshWallet(tgUserIdSuffix) {
+    const mnemonic = generateMnemonic();
+    const address = addressFromMnemonic(mnemonic, NETWORK);
+    sqlite.prepare(`INSERT INTO tg_custodial_wallets (tg_user_id, kaspa_address, mnemonic_encrypted, network, created_at, updated_at)
+      VALUES (?,?,?,?,?,?)`).run(`g4-${tgUserIdSuffix}`, address, encrypt(mnemonic), NETWORK, nowIso, nowIso);
+    allowedAddresses.push(address); // 网关白名单准入(§2.1) — 累加, 不替换(此前 wallet 依然合法)
+    refreshWhitelistEnv();
+    return { mnemonic, address, privHex: privKeyHexFromMnemonic(mnemonic) };
+  }
+  function freshGrant({ walletAddress, maxAmountSompi = 200000000, allowedCommands = ['custodial_transfer'] }) {
+    const nowSec = Math.floor(Date.now() / 1000);
+    const grantId = randomUUID();
+    sqlite.prepare(`INSERT INTO m0c1_app_grants (
+        grant_id, app_key_id, app_pubkey, allowed_commands, typed_intent_version, relay_scope, network,
+        payee_scope, source_scope, max_amount_sompi, valid_from, valid_until, grant_version, created_at
+      ) VALUES (@grant_id,@app_key_id,@app_pubkey,@allowed_commands,@typed_intent_version,@relay_scope,@network,
+        @payee_scope,@source_scope,@max_amount_sompi,@valid_from,@valid_until,@grant_version,@created_at)`).run({
+      grant_id: grantId, app_key_id: 'g4-pilot-app', app_pubkey: appPub,
+      allowed_commands: JSON.stringify(allowedCommands), typed_intent_version: 1,
+      relay_scope: JSON.stringify([RELAY_ID]), network: NETWORK,
+      payee_scope: JSON.stringify([DUMMY_TARGET]), source_scope: JSON.stringify([walletAddress]),
+      max_amount_sompi: maxAmountSompi, valid_from: nowSec, valid_until: nowSec + 7 * 86400, grant_version: 1, created_at: nowSec,
+    });
+    return grantId;
+  }
+  /** 一份全新、独立限流配额的 wallet+grant 对(默认 grant 只授权这个新 wallet 的地址)。 */
+  function freshGrantWallet(label) {
+    const w = freshWallet(label);
+    const grantId = freshGrant({ walletAddress: w.address });
+    return { ...w, grantId };
+  }
 
   // ── ⑤ 真 fork relay(startRelay, 同 relay-manager 生产路径) ──
   const relayManager = await import(pathToFileURL(path.join(ROOT, 'kasia-console/src/services/relay-manager.js')).href);
@@ -115,13 +157,13 @@ async function main() {
   const envSDK = await import(pathToFileURL(path.join(ROOT, 'kasia-relay/src/lib/app-envelope.mjs')).href);
   const { envelopeSigningMessage, intentDigestOf, ENVELOPE_PROTOCOL, ENVELOPE_DOMAIN, ENVELOPE_VERSION } = envSDK;
 
-  function buildSignedEnvelope({ intent, signPriv = appPriv, overrides = {} }) {
+  function buildSignedEnvelope({ intent, grantId, signPriv = appPriv, overrides = {} }) {
     const now = Date.now();
     const env = {
       protocol: ENVELOPE_PROTOCOL, domain: ENVELOPE_DOMAIN, version: ENVELOPE_VERSION,
       app_key_id: 'g4-pilot-app', grant_id: grantId, relay_id: RELAY_ID, network: NETWORK,
       intent_type: 'custodial_transfer', intent_version: 1, intent, intent_digest: intentDigestOf(intent),
-      nonce: 'nonce-' + Math.random().toString(36).slice(2), issued_at: now, expires_at: now + 5 * 60 * 1000,
+      nonce: 'nonce-' + Math.random().toString(36).slice(2), issued_at: now, expires_at: now + 4 * 60 * 1000,
       signature: '00', ...overrides,
     };
     if (!overrides.signature) {
@@ -130,12 +172,11 @@ async function main() {
     return env;
   }
 
-  // NWT note (20:16, non-blocker·打包前要 Bettor 钦定): evidence JSON 原只记 HTTP 层 detail(LAND①/
-  // BUST①/③ 三条撞车成同一句通用 503, 具体拒绝原因只在 relay stdout 没进持久化 artifact——Codex/
-  // Owner 光看 evidence 文件分不清每条 BUST 是不是被"对的"闸拦下的, 必须重新跑才能知道)。修法:
-  // 每次 post 后立即读 relayManager.getStatus() 抓 lastLog(relay 侧 deny 是同步 log 后才 IPC 回执,
-  // 时序上 HTTP 响应落地时该行大概率已刷新到 stdout), 存进 evidence 条目——非 100% 时序保证(极端
-  // 情况 log flush 可能慢于 IPC 回执), 诚实标为"尽力捕获, 非强一致性保证"。
+  // NWT note (20:16, non-blocker·打包前要 Bettor 钦定): evidence JSON 原只记 HTTP 层 detail, 具体
+  // 拒绝原因只在 relay stdout 没进持久化 artifact——Codex/Owner 光看 evidence 文件分不清每条 BUST
+  // 是不是被"对的"闸拦下的, 必须重新跑才能知道。修法: 每次 post 后立即读 relayManager.getStatus()
+  // 抓 lastLog(relay 侧 deny 是同步 log 后才 IPC 回执, 时序上 HTTP 响应落地时该行大概率已刷新到
+  // stdout), 存进 evidence 条目——非 100% 时序保证, 是"尽力捕获, 非强一致性保证"。
   function relayLastLog() {
     const st = relayManager.getStatus().find((r) => r.relayNodeId === RELAY_ID);
     return st?.lastLog || '(no relay log captured)';
@@ -147,81 +188,153 @@ async function main() {
     return { status: res.statusCode, body, relayLastLog: relayLastLog() };
   }
 
-  // ══ LAND: 最小正向用例(runbook §4 激活验证判据引用这一条) ══
+  // ══ LAND①: 最小正向用例(runbook §4 激活验证判据引用这一条) ══
   {
-    const intent = { fromAddress: pilotAddress, target: DUMMY_TARGET, amount: '1', network: NETWORK };
-    const { status, body, relayLastLog } = await post(buildSignedEnvelope({ intent }));
-    // 🔴 断言收紧(不只"非 400/401/403"): 必须明确排除"relay 根本没起来"这类基础设施失败(500 +
-    // 'Relay not running'/'timeout'类 sendCommandAsync 拒绝), 否则会跟"到达 relay 执行层, 因隔离
-    // 死 RPC 端口连不上链才失败"(503, 预期证据)混为一谈——这正是本 harness 第一版踩过的假阳性坑
-    // (见上方 KANET_ROOT 注释): 当时 relay 没启动, LAND① 因为凑巧不是 400/401/403 而"通过", 实际
-    // 什么都没验证到。改为白名单式判定: 只有 txId 落地(真上链, 隔离环境理论不该发生但留口子)或
-    // 503+'RPC down'/'relay 侧拒绝' 这个已知执行层失败签名才算 PASS。
-    const infraFailure = status === 500 && /Relay not running|timeout/i.test(body?.error || '');
-    const reachedExecutionLayer = (status === 200 && body?.ok && body?.txId) ||
-      (status === 503 && /RPC down|relay 侧拒绝/.test(body?.error || ''));
-    check('LAND① 最小正向: 到达 relay 执行层(非基础设施失败/非网关拒绝)', reachedExecutionLayer && !infraFailure,
-      `status=${status} body=${JSON.stringify(body)} | relayLog=${relayLastLog}`);
+    const w = freshGrantWallet('land1');
+    const intent = { fromAddress: w.address, target: DUMMY_TARGET, amount: '1', network: NETWORK };
+    const r = await post(buildSignedEnvelope({ intent, grantId: w.grantId }));
+    check('LAND① 最小正向: 到达 relay 执行层(非基础设施失败/非网关拒绝)', reachedExecLayer(r),
+      `status=${r.status} body=${JSON.stringify(r.body)} | relayLog=${r.relayLastLog}`);
+    check('LAND①-精确 relay 侧确实处理了 custodial_transfer(非陈旧/无关日志残留)',
+      /custodial_transfer|GATE DENY/.test(r.relayLastLog), `relayLog=${r.relayLastLog}`);
   }
 
-  // ══ BUST 1: 非白名单源地址(source_scope 不含) ══
+  // ══ BUST①: 非白名单源地址(grant.source_scope 不含·relay 权威层职责) ══
   {
-    const otherMnemonic = generateMnemonic();
-    const otherAddress = addressFromMnemonic(otherMnemonic, NETWORK);
-    sqlite.prepare(`INSERT INTO tg_custodial_wallets (tg_user_id, kaspa_address, mnemonic_encrypted, network, created_at, updated_at)
-      VALUES (?,?,?,?,?,?)`).run('g4-other-tg-user', otherAddress, encrypt(otherMnemonic), NETWORK, nowIso, nowIso);
-    const intent = { fromAddress: otherAddress, target: DUMMY_TARGET, amount: '1', network: NETWORK };
-    const { status, body, relayLastLog } = await post(buildSignedEnvelope({ intent }));
-    // 网关早拒验不查 source_scope(§2.1: 那是 relay 权威层职责, 网关只做 cheap 早拒+DoS 护栏)——
-    // 网关会放过这条(签名/amount/payee 都合法), 期待在 relay 侧被 source_scope 维度拒。
-    // 🔴 诚实边界(同 LAND① 教训): capability.js 把"relay 主动 deny"和"relay RPC 连不上"都映射成
-    // 同一个通用 503"转账未上链", HTTP body 本身分不清"source_scope 精确拦下"vs"任意原因失败"——
-    // 但 relayLastLog(NWT note 采纳, 20:16) 捕获了 relay 侧真实 log 行, evidence log 里能独立核实
-    // 具体命中 source_scope(不用重跑)。断言仍只判"没被意外放行+基础设施正常"(双重: HTTP 层弱判据
-    // 兜底 + evidence log 强证据人工可核), detail 里带 relayLog 供 Codex/Owner 独立核对具体原因。
-    const infraFailure = status === 500 && /Relay not running|timeout/i.test(body?.error || '');
-    const notWronglyAllowed = !(status === 200 && body?.ok && body?.txId);
-    check('BUST① 非白名单源地址未被意外放行(且 relay 基础设施正常响应)', notWronglyAllowed && !infraFailure,
-      `status=${status} body=${JSON.stringify(body)} | relayLog=${relayLastLog}`);
+    const scoped = freshGrantWallet('bust1-scoped');   // grant 只授权这个地址
+    const unauthorized = freshWallet('bust1-unauth');  // 网关白名单里(能到 relay), 但不在这个 grant 的 source_scope
+    const intent = { fromAddress: unauthorized.address, target: DUMMY_TARGET, amount: '1', network: NETWORK };
+    const r = await post(buildSignedEnvelope({ intent, grantId: scoped.grantId }));
+    check('BUST① 非白名单源地址(grant 层)未被意外放行(且 relay 基础设施正常响应)',
+      notWronglyLanded(r) && !isInfraFailure(r), `status=${r.status} body=${JSON.stringify(r.body)} | relayLog=${r.relayLastLog}`);
+    check('BUST①-精确 relay 日志精确命中 source_scope(非泛泛拒绝)', /source_scope/.test(r.relayLastLog), `relayLog=${r.relayLastLog}`);
   }
 
-  // ══ BUST 2: 超额度(amount 超 grant.max_amount_sompi=2 KAS) ══
+  // ══ BUST②: 超额度(amount 超 grant.max_amount_sompi=2 KAS·网关早拒验) ══
   {
-    const intent = { fromAddress: pilotAddress, target: DUMMY_TARGET, amount: '999', network: NETWORK };
-    const { status, body, relayLastLog } = await post(buildSignedEnvelope({ intent }));
-    // amount cap 是网关早拒验(§earlyRejectCheck)自己判的, HTTP status=403 本身就是精确证据(不依赖
-    // relay 侧, relayLastLog 这条不适用——网关层直接拒, 请求根本没到 relay), 仍记 relayLastLog
-    // 便于跟其它三条 evidence 条目格式一致(值应显示上一条请求残留的 log, 非本条产生)。
-    check('BUST② 超额度被网关早拒(403)', status === 403, `status=${status} body=${JSON.stringify(body)} | relayLog(网关层拒·未到relay)=${relayLastLog}`);
+    const w = freshGrantWallet('bust2');
+    const intent = { fromAddress: w.address, target: DUMMY_TARGET, amount: '999', network: NETWORK };
+    const r = await post(buildSignedEnvelope({ intent, grantId: w.grantId }));
+    check('BUST② 超额度被网关早拒(403)', r.status === 403, `status=${r.status} body=${JSON.stringify(r.body)}`);
   }
 
-  // ══ BUST 3: 信封已过期(TTL 超窗) ══
+  // ══ BUST③: 信封已过期(TTL 超窗, 已在过去·relay 侧兜底) ══
   {
-    const intent = { fromAddress: pilotAddress, target: DUMMY_TARGET, amount: '1', network: NETWORK };
+    const w = freshGrantWallet('bust3');
+    const intent = { fromAddress: w.address, target: DUMMY_TARGET, amount: '1', network: NETWORK };
     const now = Date.now();
-    const env = buildSignedEnvelope({ intent, overrides: { issued_at: now - 20 * 60 * 1000, expires_at: now - 15 * 60 * 1000 } });
-    const { status, body, relayLastLog } = await post(env);
-    // 网关早拒验目前不查 TTL(§2.3 记录的诚实缺口, pilot 阶段待补)——relay 侧 verifyAppEnvelope
-    // 会拒(过期)。同 BUST①诚实边界: 断言只判"没被意外放行+基础设施正常", relayLastLog 记进
-    // detail 供独立核实具体命中"envelope 已过期"(NWT note 采纳)。
-    const infraFailure = status === 500 && /Relay not running|timeout/i.test(body?.error || '');
-    const notWronglyAllowed = !(status === 200 && body?.ok && body?.txId);
-    check('BUST③ 过期信封未被意外放行(relay 侧兜底, 网关早拒验暂未查 TTL·诚实标已知缺口)', notWronglyAllowed && !infraFailure,
-      `status=${status} body=${JSON.stringify(body)} | relayLog=${relayLastLog}`);
+    const env = buildSignedEnvelope({ intent, grantId: w.grantId, overrides: { issued_at: now - 20 * 60 * 1000, expires_at: now - 15 * 60 * 1000 } });
+    const r = await post(env);
+    check('BUST③ 过期信封未被意外放行(relay 侧兜底, 网关早拒验暂未查 TTL·诚实标已知缺口)',
+      notWronglyLanded(r) && !isInfraFailure(r), `status=${r.status} body=${JSON.stringify(r.body)} | relayLog=${r.relayLastLog}`);
+    check('BUST③-精确 relay 日志精确命中"已过期"(非泛泛拒绝)', /已过期/.test(r.relayLastLog), `relayLog=${r.relayLastLog}`);
   }
 
-  // ══ BUST 4: 掉包(签名意图 amount=1, 实际请求体 target 字段被篡改成别的地址, 签名对不上) ══
+  // ══ BUST④: 掉包(intent.target 篡改, digest 自洽被破坏·网关早拒验签名检查直接判) ══
   {
-    const intent = { fromAddress: pilotAddress, target: DUMMY_TARGET, amount: '1', network: NETWORK };
-    const env = buildSignedEnvelope({ intent });
-    // 偷签名不改签名字段, 只改 intent.target(掉包) —— intent_digest 会对不上, 网关早拒验目前不查
-    // digest 自洽(那是 relay 侧 verifyAppEnvelope 的 step)——网关会转发, relay 侧拒。
+    const w = freshGrantWallet('bust4');
+    const intent = { fromAddress: w.address, target: DUMMY_TARGET, amount: '1', network: NETWORK };
+    const env = buildSignedEnvelope({ intent, grantId: w.grantId });
     const tampered = { ...env, intent: { ...env.intent, target: 'kaspatest:qzevileviltargetaddressxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx' } };
-    const { status, body, relayLastLog } = await post(tampered);
-    // 精确证据(不依赖 relayLastLog): 网关早拒验的签名检查直接判(body.error 里带具体文案"信封签名
-    // 验证失败"), 请求根本没到 relay(掉包让签名对不上, 网关早拒验第一层就拦), status 本身是精确判据。
-    const bust = status !== 200 || !body.ok;
-    check('BUST④ intent 掉包(digest 自洽被破坏)被拦', bust, `status=${status} body=${JSON.stringify(body)} | relayLog(网关层拒·未到relay)=${relayLastLog}`);
+    const r = await post(tampered);
+    check('BUST④ intent 掉包(digest 自洽被破坏)被拦', r.status !== 200 || !r.body.ok,
+      `status=${r.status} body=${JSON.stringify(r.body)}`);
+    check('BUST④-精确 网关精确回"信封签名验证失败"(非泛泛拒绝)', /信封签名验证失败/.test(r.body?.error || ''), `body=${JSON.stringify(r.body)}`);
+  }
+
+  // ══ BUST⑤(Codex RED-not-ready 修正④): custodial 专属 pilot TTL(5min)——10min 跨度在旧全局 1h
+  // 上限内合法, 但超 pilot 专属 5min 上限, 区别于 BUST③ 的"已过期"路径(本用例未过期, 只是跨度太长) ══
+  {
+    const w = freshGrantWallet('bust5');
+    const intent = { fromAddress: w.address, target: DUMMY_TARGET, amount: '1', network: NETWORK };
+    const now = Date.now();
+    const env = buildSignedEnvelope({ intent, grantId: w.grantId, overrides: { issued_at: now, expires_at: now + 10 * 60 * 1000 } });
+    const r = await post(env);
+    check('BUST⑤ 未过期但超 pilot 专属 5min TTL 上限未被意外放行',
+      notWronglyLanded(r) && !isInfraFailure(r), `status=${r.status} body=${JSON.stringify(r.body)} | relayLog=${r.relayLastLog}`);
+    check('BUST⑤-精确 relay 日志精确命中"pilot 专属上限"(区别于 BUST③ 的"已过期")', /pilot 专属上限/.test(r.relayLastLog), `relayLog=${r.relayLastLog}`);
+  }
+
+  // ══ BUST⑥(Codex RED-not-ready 修正④, Bettor 明确点名"限流超3笔→BUST"): 同一 grant_id 60s 内
+  // 第 4 笔请求被网关限流拒绝(J2 checkRateLimit 落码, 每 grant_id 每 60s ≤3 笔) ══
+  {
+    const w = freshGrantWallet('bust6-ratelimit');
+    const intent = { fromAddress: w.address, target: DUMMY_TARGET, amount: '1', network: NETWORK };
+    const results = [];
+    for (let i = 0; i < 4; i++) {
+      results.push(await post(buildSignedEnvelope({ intent, grantId: w.grantId })));
+    }
+    const first3AllPassedRateLimit = results.slice(0, 3).every((r) => r.status !== 429);
+    check('BUST⑥-① 前 3 笔请求(60s 窗口内)未被限流拦(限流阈值刚好 3 笔/60s, 不误伤合法配额内请求)',
+      first3AllPassedRateLimit, results.slice(0, 3).map((r) => r.status).join(','));
+    const fourth = results[3];
+    check('BUST⑥-② 第 4 笔请求(超过 3 笔/60s)被限流拒绝(429)', fourth.status === 429,
+      `status=${fourth.status} body=${JSON.stringify(fourth.body)}`);
+    check('BUST⑥-精确 网关精确回限流文案(非泛泛拒绝)', /限流/.test(fourth.body?.error || ''), `body=${JSON.stringify(fourth.body)}`);
+  }
+
+  // ══ REPLAY(Codex RED-not-ready 修正④): 同一份合法签名信封重放两次——记录已知残留风险(nonce
+  // durable 去重归 M0c-3, 本 pilot 不实现, TTL 收窄到 5min 是唯一时间闸)。断言方向反着来: 不是
+  // "证明拦住了", 是"证明这个洞确实存在"——第二次重放当前设计预期依然到达执行层, 这份 evidence
+  // 是给 Owner 做风险接受决策的具体证据, 不能只在文档里写"诚实残留"没有实测证据。独立 grant(全新
+  // 60s/3笔配额), 只发 2 笔, 不会撞上 BUST⑥ 的限流边界。 ══
+  {
+    const w = freshGrantWallet('replay');
+    const intent = { fromAddress: w.address, target: DUMMY_TARGET, amount: '1', network: NETWORK };
+    const env = buildSignedEnvelope({ intent, grantId: w.grantId }); // 同一份合法信封, 复用两次(nonce 相同)
+    const first = await post(env);
+    const second = await post(env); // 原样字节不改, 第二次重放
+    check('REPLAY-① 第一次合法信封到达执行层', reachedExecLayer(first), `status=${first.status} body=${JSON.stringify(first.body)}`);
+    check('REPLAY-② 已知残留: 原样重放第二次当前设计下依然到达执行层(证明洞存在, 非证明被拦——nonce durable 归 M0c-3)',
+      reachedExecLayer(second), `status=${second.status} body=${JSON.stringify(second.body)} | relayLog=${second.relayLastLog}`);
+  }
+
+  // ══ REVOCATION(Codex RED-not-ready 修正④): grant 随时吊销实测——用真实 provision.mjs revoke
+  // 子命令(非手工 UPDATE DB, 贴近真实 operator 操作路径), 断言吊销后下一条同 grant_id 请求立即被拒,
+  // 无缓存窗口(fresh-read-every-time 设计的直接验证) ══
+  {
+    const w = freshGrantWallet('revoke');
+    const intent = { fromAddress: w.address, target: DUMMY_TARGET, amount: '1', network: NETWORK };
+    const before = await post(buildSignedEnvelope({ intent, grantId: w.grantId }));
+    check('REVOCATION-① 吊销前请求到达执行层(证明吊销后的拒绝不是因为 grant 本来就无效)',
+      reachedExecLayer(before), `status=${before.status} body=${JSON.stringify(before.body)}`);
+
+    // 真实 operator 吊销路径(provision.mjs revoke, 非手工 UPDATE), 贴近真实操作。
+    const revokeOut = execFileSync('node', [
+      path.join(ROOT, 'kasia-console/scripts/m0c1-grant-provision.mjs'), 'revoke',
+      '--grant-id', w.grantId, '--db', DB,
+    ], { encoding: 'utf8' });
+
+    // 立即(不等待/不重启任何进程)用同一个 grant_id 再发一次——必须被拒, 且精确命中"已吊销"。
+    const after = await post(buildSignedEnvelope({ intent, grantId: w.grantId, overrides: { nonce: 'nonce-after-revoke-' + Math.random().toString(36).slice(2) } }));
+    check('REVOCATION-② 吊销后立即用同一 grant_id 再发被拒(fresh-read 无缓存窗口)', notWronglyLanded(after),
+      `status=${after.status} body=${JSON.stringify(after.body)}`);
+    // 🔴 首跑发现自己的测试假设错误(记账): 原以为吊销拒绝发生在 relay 侧(该查 relayLastLog), 实际
+    // grant.revoked 检查在网关 earlyRejectCheck 里(cheap-to-expensive 第一批, grant fresh 读那一步
+    // 就查了 revoked 字段), 请求根本没到 relay——relayLastLog 会是上一条请求残留的陈旧值, 不是本次
+    // 产生的。精确证据应该看 HTTP body(网关自己回的 error 文案), 不是 relayLastLog。
+    check('REVOCATION-②-精确 网关早拒验精确回"grant 已吊销"(非泛泛拒绝, 401 状态码+body.error 双确认)',
+      after.status === 401 && /grant 已吊销/.test(after.body?.error || ''),
+      `revokeOut=${revokeOut.trim()} | status=${after.status} body=${JSON.stringify(after.body)}`);
+  }
+
+  // ══ TAINT(Codex RED-not-ready 修正④): exact-secret taint 测试(§8a 原方法论, 首次真落码到可
+  // 执行测试)——不测"有没有任何 64-hex 形状的东西"(会被合法 intent_digest/签名/nonce 误伤), 测
+  // "这个具体的、真实会被 deriveCustodialExecFields 派生出来的私钥值, 有没有出现在任何一处对外
+  // 可见的输出里"(HTTP 回执 body + relay stdout 日志, 这两处是外部可观察面; envelope/intent 本身
+  // 结构上不含 privkeyHex 字段, 在 relay 侧单测 scratch/j1-custodial-binder-smoketest.mjs 已验证
+  // 过, 本处补的是 E2E 层面外部可观察输出的扫描, 不重复那部分) ══
+  {
+    const w = freshGrantWallet('taint');
+    const intent = { fromAddress: w.address, target: DUMMY_TARGET, amount: '1', network: NETWORK };
+    const r = await post(buildSignedEnvelope({ intent, grantId: w.grantId }));
+    const bodyStr = JSON.stringify(r.body);
+    const leakInBody = bodyStr.includes(w.privHex);
+    const leakInRelayLog = r.relayLastLog.includes(w.privHex);
+    check('TAINT-① HTTP 回执不含真实私钥值(exact-secret 扫描, 非形状匹配)', !leakInBody,
+      leakInBody ? 'LEAK DETECTED IN BODY' : `body 干净(status=${r.status})`);
+    check('TAINT-② relay 侧日志不含真实私钥值(exact-secret 扫描, 非形状匹配)', !leakInRelayLog,
+      leakInRelayLog ? 'LEAK DETECTED IN RELAY LOG' : `relayLog 干净`);
   }
 
   await relayManager.stopRelay(RELAY_ID);
@@ -229,10 +342,11 @@ async function main() {
   const logPath = path.join(LOG_DIR, 'm0c1-g4-pilot-custodial-e2e-latest.json');
   writeFileSync(logPath, JSON.stringify({
     matrix_source: 'docs/2026-07-23-m0c-1-path-b-pilot-containment-design.md §3 + relay-side §5',
+    codex_remediation: 'RESPONSE-...PATHB-ACTIVATION(b93134e8) RED-not-ready 修正④: replay/吊销/taint/pilot专属TTL/限流 + 精确reason断言',
     summary: { pass, fail }, evidence,
   }, null, 2));
   console.log(`\nevidence log: ${logPath}`);
-  console.log(`\n== G4 pilot custodial e2e harness: PASS ${pass} / FAIL ${fail} ==`);
+  console.log(`\n== G4 pilot custodial e2e harness v0.2: PASS ${pass} / FAIL ${fail} ==`);
   process.exit(fail === 0 ? 0 : 1);
 }
 
