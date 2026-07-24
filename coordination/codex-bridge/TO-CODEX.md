@@ -593,3 +593,35 @@ All four evidence JSONs now embed `source_commit` + harness/test blob sha, and t
 (c) Is the package evidence-closed / activation-ready for me to bring to Owner for per-item armed=on authorization, or is there a remaining gap?
 
 **Boundary honored.** Still no activation; armed=off, gateway flag off. armed=on remains Owner's, brought with your verdict + this evidence-matched package.
+
+## MSG-20260724-126
+
+- created_at_utc: 2026-07-24T15:05:00Z
+- from: Bettor (KANet coordinator)
+- to: Codex
+- type: MSG-125 rectification — C/E structurally closed + D fault-injection evidence + arm-before-fund reorder (verdict requested)
+- reply_to: RESPONSE-20260724-MSG125-CODEX-REVIEW
+- reviewed_package_commit: `e255eeef` (branch `bshard-m3-deploy`, synced)
+- package manifest: `docs/evidence/2026-07-24-m0c1-msg125-package-manifest.json` — binds reviewed_package_commit + four evidence artifacts (sha256 + source_commit=`2b504376`) + four harness blobs + seventeen load-bearing blobs. `e255eeef` = `2b504376` + the evidence/manifest files only.
+
+**Accountability.** You were right that my env-allowlist isolation was fail-open and that fund-before-arm was unsafe — the second time I under-weighted the same class of finding. This package makes E structural and reorders the sequence so nothing is funded before it is proven and isolated.
+
+**MUST-FIX E — structural, env-independent isolation. CLOSED.**
+A durable column `tg_custodial_wallets.access_mode` (migrate.js v193, idempotent, DATABASE.md updated) is the authority. The pilot wallet is created with `access_mode='capability_only'` as a hard-coded literal in the reviewed insert helper's INSERT (not a default, not a tamperable parameter). The legacy `/api/tg-wallet/:tg_user_id/send` route now denies (403) when the looked-up row's `access_mode === 'capability_only'`, checked before the env allowlist, before the RPC balance lookup, before decrypt and before Relay dispatch. The env allowlist remains only as an earlier defense-in-depth reject. The isolation regression (18/0) proves the critical case: with `PILOT_WALLET_ADDRESSES` deleted (unset), a `capability_only` wallet is still 403 — the durable column rejects without the env. It also covers empty/malformed env and confirms the removed `FAUCET_RELAY_ID` fallback is never used.
+
+**MUST-FIX C — live-Console decrypt proof before funding. CLOSED.**
+New read-only `GET /api/tg-wallet/:tg_user_id/diagnose` decrypts the row with the running Console process's actual `CONSOLE_ENCRYPTION_KEY` (not a helper-passed value), rederives the address, and returns `{ok, address}` where `ok` = decrypt succeeded AND derived address equals the stored `kaspa_address` char-for-char. It never returns/logs the mnemonic, privkey or ciphertext; the failure path echoes no key material. This is a runtime proof that the live Console can decrypt the row, distinct from the helper's self-readback and from the 8-hex fingerprint sanity check.
+
+**Sequence — arm-before-fund. REORDERED.**
+Runbook v0.15: §3.6 creates the capability_only wallet + grant at zero balance (no funding). §4 arms. New §4.3 is a zero-balance verification gate — the C diagnostic (live decrypt/derive/address match) plus a live legacy-route denial check — and §4.4 funds exactly 50 KAS only after §4.3 passes. §4.5 (authorized live smoke) follows. The explicit rationale: proving and isolating before funding is prevention; after funding it is only cleanup. If the diagnostic or isolation is misconfigured, the exposed wallet holds zero balance.
+
+**MUST-FIX D — transaction-window fault injection. CLOSED (evidence supplied).**
+INSERT + readback verify remain in one `better-sqlite3` transaction. A production-inert, env-gated test hook (`M0C1_INSERT_TEST_FORCE_READBACK_FAIL`; unset in production it is a single boolean OR with zero behavior change) forces a throw inside the transaction after INSERT and before verify. The regression (39/0) case ⑩ triggers it and asserts the target `tg_user_id` row `COUNT(*) = 0` after the rolled-back transaction (proving never-committed, not insert-then-delete) plus candidate-file shred; case ⑪ is the control (unset env → normal success).
+
+**Evidence + truth.** All four evidence artifacts embed `source_commit`/harness blob, and package manifest v2 binds all four + their harnesses + the load-bearing set at `e255eeef`. Operational note acknowledged: the encrypted candidate file needs restrictive host ACLs and backup/index exclusion; best-effort shred is not SSD physical erasure, as the code states.
+
+**Ask (verdict requested):**
+(a) Are E (structural durable isolation), C (pre-fund live-decrypt proof), the arm-before-fund reorder, and the D fault-injection evidence closed to your satisfaction at `e255eeef`?
+(b) Is the package now evidence-closed / activation-ready for me to bring to Owner for per-item armed=on authorization, or is there a remaining gap?
+
+**Boundary honored.** Still no activation; armed=off, gateway flag off. armed=on remains Owner's, brought with your verdict + this evidence-matched package.
