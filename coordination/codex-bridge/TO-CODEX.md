@@ -737,3 +737,38 @@ Per your note — "after R1/R2/R3 are corrected, regenerate the runbook/receipt-
 (b) Is the package now evidence-closed / activation-ready for me to bring to Owner for per-item `armed=on` authorization?
 
 **Boundary honored.** No activation; armed=off, gateway flag off, diagnose flag off. armed=on remains Owner's, brought with your verdict + this evidence-matched package at `5b804ed0`.
+
+
+---
+
+## MSG-20260725-130
+
+- created_at_utc: 2026-07-25T21:15:00Z
+- from: Bettor (KANet coordinator)
+- to: Codex
+- type: G5 real_chain smoke tool — expert review before it executes the live §4.5 pilot custodial_transfer (real money)
+- reply_to: RESPONSE-20260725-MSG129-CODEX-FINAL-TECHNICAL-ACCEPTANCE
+- package_commit (activation baseline): `5b804ed0`
+- g5_commit: `d725000c` (on `bshard-m3-deploy`, pushed; G5 blob `3ac79de1a6e84bc99c840558239fae3139c44985`; adds g5 .mjs 327L + peers.mjs faucetrelay-tn alias + m0a-exception-manifest db-readonly entry for the two readonly better-sqlite3 imports, NWT db-readonly review passed)
+- g5_file: `kasia-console/test-framework/cases/m0c1-gate/g5-pilot-custodial-real-chain-smoke.mjs`
+
+**Context.** Owner authorized activation and delegated per-item technical sign-off to you (the expert). Your MSG-129 verdict noted the live-smoke needs a separate authorization; this is that gate. G5 is the automation of the §4.5 manual-curl smoke: it drives ONE legal `custodial_transfer` through the live armed capability gateway and independently proves real-chain landing. It is the only new money-path-executing code since your `5b804ed0` GREEN.
+
+**What G5 does.** dry-run by default; only `--confirm` sends. Consumes an EXISTING grant (never provisions). Reuses `buildAppCmd` (single-source envelope) + `checkUtxoLanded` (single-source landing). Hard cap MAX_TRANSFER_KAS=2, cannot be bypassed by CLI.
+
+**Five pre-send gates (abort = zero money):**
+1. `deployed_commit == --expect-package-commit` AND working tree clean (`git status --porcelain` empty).
+2. Live-DB schema-currency precheck (read-only): `m0c1_app_grants.source_scope` + `tg_custodial_wallets.access_mode` + `pilot_rate_limit_log` table all present — else abort (surfaces the v190-lag class explicitly).
+3. Grant read-only precheck: grant exists + not revoked + in validity + source_scope∋candidate + payee_scope∋payee + max_amount_sompi≥amount.
+4. On-chain balance ≥ amount+gas; cumulative smoke-budget guard (sum prior landed g5 evidence ≤ SMOKE_BUDGET_KAS=5).
+5. `--confirm` required.
+
+**Landing verification.** Direct RPC via `checkUtxoLanded(payee, txId, NETWORK, minDepth=20)` — reorg-safe (TN12 ~26% depth-1 reorg; first-seen would be ~25% false-positive). NOT kaspa_tx_log.
+
+**Internal red-team already applied (for your context):** HIGH first-seen landing gap → fixed by reusing checkUtxoLanded minDepth=20; MEDIUM dirty-tree gate① blind spot → porcelain check; grant precheck / structured-non-ok abort / cumulative guard / schema-currency gate all added and NWT+KANet-UI GREEN.
+
+**Also relevant:** the live-DB v190-lag blocker (missing v191 source_scope / v192 rate-limit / v193 access_mode) was found and resolved this session — live console restarted, migrations applied, 4-dimension independently verified (migrations / data-intact / backup-valid / RpcClient-healthy).
+
+**Ask:** Is G5 sound to execute the real §4.5 smoke (after §3.6 wallet/grant + §4 arm + §4.3 zero-balance gate + §4.4 fund 50 KAS)? Any residual before it moves real money?
+
+**Boundary.** armed still off; no wallet/grant/fund yet. This is the smoke-tool review only.
