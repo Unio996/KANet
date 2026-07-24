@@ -48,25 +48,42 @@ function getGrantFreshGateway(grantId) {
 const RATE_LIMIT_WINDOW_MS = 60 * 1000; // 1 分钟
 const RATE_LIMIT_MAX = 3; // 每 grant_id 每分钟 3 笔（J1 `19:44:07` 提案，Bettor ratify）
 const RATE_LIMIT_CLEANUP_MULTIPLE = 10; // 清理超过 10 倍窗口的旧行，自清理不另起 cron
+const GRANT_ID_MAX_LEN = 128; // Codex MUST-FIX 4：input 长度 cap，挡超长 grant_id 撑大限流表行
+
+// count+insert 原子化（Codex MUST-FIX 4）：better-sqlite3 `.transaction()` 包成单个 SQLite
+// 事务（BEGIN/COMMIT），杜绝"两个并发请求都读到 count<3 都插入导致超限"这类竞态——不依赖
+// "Node.js 单线程+本函数内无 await 所以天然序列化"这种隐式假设（脆弱：未来若改成 async 就会破）。
+const _rateLimitTxn = sqlite.transaction((grantId, now, windowStart) => {
+  const { cnt } = sqlite.prepare('SELECT COUNT(*) AS cnt FROM pilot_rate_limit_log WHERE grant_id = ? AND requested_at >= ?').get(grantId, windowStart);
+  if (cnt >= RATE_LIMIT_MAX) return { limited: true };
+  sqlite.prepare('INSERT INTO pilot_rate_limit_log (grant_id, requested_at) VALUES (?, ?)').run(grantId, now);
+  return { limited: false };
+});
 
 /**
  * Path B 围栏 §2.4：进程外（DB 持久化，非内存计数器）限流，keyed by app-grant（Bettor 原话）——
- * 用 env.grant_id 这个**未验证的声明值**（签名验证之前，见 §2.4 母卡诚实标注：NWT note 已定性
- * 这是可用性风险非资金安全风险，第三方可耗合法 app 配额但转不出钱，Bettor accept for pilot）。
+ * 🔴 Codex MUST-FIX 4（v0.2 修正，恢复第二轮）：调用方必须先验证 grant 存在（见 earlyRejectCheck
+ * 调用点），本函数不再对任意未验证字符串直接写库——原设计"未验证声明值"是指"签名验证之前"，
+ * 不是"grant 存在性验证之前"；grant 存在性检查本身极便宜（一次索引命中的 SELECT），先做这层
+ * 不违反 cheap-to-expensive 精神，且堵死了伪造任意 grant_id 字符串无限撑大表的攻击面。
+ * 长度 cap 挡超长 payload；count+insert 用 SQLite 事务原子化。
  * 返回 { ok:true } 或 { ok:false, error }。fail-closed：DB 异常算拒绝，不放行。
  */
 function checkRateLimit(grantId) {
+  const g = String(grantId);
+  if (g.length > GRANT_ID_MAX_LEN) {
+    return { ok: false, error: `grant_id 超长（>${GRANT_ID_MAX_LEN} 字符，拒绝写入限流表）` };
+  }
   const now = Date.now();
   try {
     // 自清理：每次检查顺带删除超过 10 倍窗口的旧行，不需要独立 cron/daemon。
     sqlite.prepare('DELETE FROM pilot_rate_limit_log WHERE requested_at < ?').run(now - RATE_LIMIT_WINDOW_MS * RATE_LIMIT_CLEANUP_MULTIPLE);
     const windowStart = now - RATE_LIMIT_WINDOW_MS;
-    const { cnt } = sqlite.prepare('SELECT COUNT(*) AS cnt FROM pilot_rate_limit_log WHERE grant_id = ? AND requested_at >= ?').get(String(grantId), windowStart);
-    if (cnt >= RATE_LIMIT_MAX) {
+    const { limited } = _rateLimitTxn(g, now, windowStart);
+    if (limited) {
       // 🔴 超限不记录本次尝试（防止被拒请求本身继续膨胀计数、放大拒绝面，§2.4 母卡已标注）。
       return { ok: false, error: `grant 限流：每 ${RATE_LIMIT_WINDOW_MS / 1000}s 至多 ${RATE_LIMIT_MAX} 笔请求` };
     }
-    sqlite.prepare('INSERT INTO pilot_rate_limit_log (grant_id, requested_at) VALUES (?, ?)').run(String(grantId), now);
     return { ok: true };
   } catch (e) {
     return { ok: false, error: '限流检查异常（fail-closed 拒）: ' + (e?.message || 'unknown') };
@@ -74,9 +91,15 @@ function checkRateLimit(grantId) {
 }
 
 /**
- * 网关早拒验：结构 + protocol/domain/version + intent_type + 限流（§2.4）+ 签名（MUST，§3.2）+
- * grant 存在/未吊销/有效期 + amount cap（cheap-to-expensive：这几步全部零解密成本，任一步失败都在
- * 触发 privkey 派生前拒绝——Bettor `#xw1umo` 钦定顺序，防止无效签名/超额请求白白触发一次 AES 解密）。
+ * 网关早拒验：结构 + protocol/domain/version + intent_type + grant 存在 + 限流（§2.4）+ 签名
+ * （MUST，§3.2）+ 未吊销/有效期 + amount cap（cheap-to-expensive：这几步全部零解密成本，任一步
+ * 失败都在触发 privkey 派生前拒绝——Bettor `#xw1umo` 钦定顺序，防止无效签名/超额请求白白触发一次
+ * AES 解密）。
+ * 🔴 Codex MUST-FIX 4（v0.2 修正）：限流检查挪到 grant 存在性验证**之后**——原顺序（限流在 grant
+ * 查询前）意味着任意伪造的 grant_id 字符串都会先被限流表 INSERT 一行，之后才在 grant 查询这步被拒，
+ * 等于给"用海量随机 grant_id 撑爆 pilot_rate_limit_log 表"开了口子。grant 存在性检查本身极便宜
+ * （一次索引命中的 SELECT），移到限流之前不违反 cheap-to-expensive 精神——仍早于签名验证（更贵：
+ * 需要 kaspa-wasm 验签运算）+ amount cap（更贵：BigInt 运算）。
  * 返回 { ok:true, grant, env } 或 { ok:false, code, error }（code 供 handler 映射 HTTP 状态）。
  */
 async function earlyRejectCheck(env, intentType) {
@@ -89,16 +112,18 @@ async function earlyRejectCheck(env, intentType) {
     return { ok: false, code: 403, error: `本路由不接受命令 ${env.intent_type}（须 ${intentType}）` };
   }
 
-  // 限流（§2.4，cheap-to-expensive 第一项：结构确认过 grant_id 是字符串之后、签名验证之前）——
-  // keyed by 声明的 grant_id，读的是 ENVELOPE_FIELDS 结构已保证存在的字段，无需等 grant 查证。
-  const rl = checkRateLimit(env.grant_id);
-  if (!rl.ok) return { ok: false, code: 429, error: rl.error };
-
-  // grant fresh 读（cheap，一次 DB 查询，供签名验证取 app_pubkey + 后续 amount cap 复用同一行）
+  // grant fresh 读（cheap，一次 DB 查询，供签名验证取 app_pubkey + 后续 amount cap 复用同一行）——
+  // 🔴 现在排在限流之前（Codex MUST-FIX 4）：先确认这是个真实存在的 grant，再往限流表写记录。
   const gr = getGrantFreshGateway(env.grant_id);
   if (!gr.ok) return { ok: false, code: 503, error: `grant registry 读失败: ${gr.error}` };
   if (!gr.grant) return { ok: false, code: 401, error: 'grant 不存在' };
   const grant = gr.grant;
+
+  // 限流（§2.4，keyed by 已确认存在的 grant_id，签名验证之前——仍是 cheap-to-expensive 顺序里
+  // 比签名验证/amount cap 更早的一项，只是现在排在 grant 存在性确认之后）。
+  const rl = checkRateLimit(env.grant_id);
+  if (!rl.ok) return { ok: false, code: 429, error: rl.error };
+
   if (grant.app_key_id !== env.app_key_id) return { ok: false, code: 401, error: 'grant.app_key_id != envelope.app_key_id' };
   if (grant.revoked) return { ok: false, code: 401, error: 'grant 已吊销' };
   const nowSec = Math.floor(Date.now() / 1000);
