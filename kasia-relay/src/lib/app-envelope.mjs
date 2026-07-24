@@ -128,10 +128,10 @@ function checkIntentBindsCmd(intent, cmd, cmdType) {
     .filter((k) => !CMD_INFRA_FIELDS.has(k) && !(extraExclude && extraExclude.has(k)))
     .sort();
   if (intentKeys.length !== cmdKeys.length || intentKeys.some((k, i) => k !== cmdKeys[i])) {
-    return `intent 字段集 [${intentKeys}] != cmd 业务字段集 [${cmdKeys}] (§3 step5 掉包拒)`;
+    return { reason: `intent 字段集 [${intentKeys}] != cmd 业务字段集 [${cmdKeys}] (§3 step5 掉包拒)`, code: 'INTENT_CMD_FIELD_MISMATCH' };
   }
   for (const k of intentKeys) {
-    if (!deepEq(intent[k], cmd[k])) return `intent.${k} != cmd.${k} (verify-value-source: 验的值必须==执行消费的值)`;
+    if (!deepEq(intent[k], cmd[k])) return { reason: `intent.${k} != cmd.${k} (verify-value-source: 验的值必须==执行消费的值)`, code: 'INTENT_CMD_VALUE_MISMATCH' };
   }
   return null;
 }
@@ -149,23 +149,23 @@ function checkIntentBindsCmd(intent, cmd, cmdType) {
  */
 function checkCustodialTransferBinding(env, cmd, ctx) {
   if (env.intent.network !== env.network) {
-    return `intent.network(${env.intent.network}) != envelope.network(${env.network}) (§3.3a v0.4 network join 拒)`;
+    return { reason: `intent.network(${env.intent.network}) != envelope.network(${env.network}) (§3.3a v0.4 network join 拒)`, code: 'CUSTODIAL_NETWORK_JOIN_MISMATCH' };
   }
   // Path B pilot 围栏专属 TTL 收紧 (Codex RED-not-ready 修正)：custodial_transfer 独享分钟级上限,
   // 比全局 MAX_ENVELOPE_TTL_MS(1h, 已在 :249 那道全局检查里先过一轮) 更严——双重收紧, 后加的这道
   // 更紧不代表前面那道可删(全局兜底其他未来 origin='app' 命令类型)。
   if (env.expires_at - env.issued_at > CUSTODIAL_PILOT_MAX_TTL_MS) {
-    return `custodial_transfer envelope TTL 超 pilot 专属上限 (${CUSTODIAL_PILOT_MAX_TTL_MS / 60000}min, §2.3 围栏收紧)`;
+    return { reason: `custodial_transfer envelope TTL 超 pilot 专属上限 (${CUSTODIAL_PILOT_MAX_TTL_MS / 60000}min, §2.3 围栏收紧)`, code: 'CUSTODIAL_PILOT_TTL_EXCEEDED' };
   }
   let derivedAddress;
   try {
     derivedAddress = KaspaWallet.fromPrivateKey(cmd.privkeyHex, ctx.network).getAddress();
   } catch {
     // 不 echo cmd.privkeyHex (no-key-leak); 格式非法/构造异常统一转 deny, 不留未捕获异常。
-    return 'custodial privkeyHex 派生失败 (格式非法, §3.3a step4 fail-closed)';
+    return { reason: 'custodial privkeyHex 派生失败 (格式非法, §3.3a step4 fail-closed)', code: 'CUSTODIAL_KEY_DERIVATION_FAILED' };
   }
   if (derivedAddress !== env.intent.fromAddress) {
-    return 'custodial 派生地址 != intent.fromAddress (§3.3a step4 密码学核验拒, key/源址不匹配)';
+    return { reason: 'custodial 派生地址 != intent.fromAddress (§3.3a step4 密码学核验拒, key/源址不匹配)', code: 'CUSTODIAL_ADDRESS_MISMATCH' };
   }
   return null;
 }
@@ -174,36 +174,39 @@ function checkCustodialTransferBinding(env, cmd, ctx) {
 function checkIntentWithinGrant(env, grant) {
   const allowed = parseJsonStringArray(grant.allowed_commands, 'allowed_commands');
   if (!allowed.includes(env.intent_type)) {
-    return `命令 ${env.intent_type} ∉ grant.allowed_commands (grant inflation 拒, §6-3)`;
+    return { reason: `命令 ${env.intent_type} ∉ grant.allowed_commands (grant inflation 拒, §6-3)`, code: 'COMMAND_NOT_IN_GRANT' };
   }
   if (env.intent_version !== grant.typed_intent_version) {
-    return `intent_version ${env.intent_version} != grant.typed_intent_version ${grant.typed_intent_version}`;
+    return { reason: `intent_version ${env.intent_version} != grant.typed_intent_version ${grant.typed_intent_version}`, code: 'INTENT_VERSION_MISMATCH' };
   }
   const relayScope = parseJsonStringArray(grant.relay_scope, 'relay_scope');
-  if (!relayScope.includes(env.relay_id)) return `relay_id ∉ grant.relay_scope`;
-  if (env.network !== grant.network) return `network != grant.network`;
+  if (!relayScope.includes(env.relay_id)) return { reason: 'relay_id ∉ grant.relay_scope', code: 'RELAY_NOT_IN_SCOPE' };
+  if (env.network !== grant.network) return { reason: 'network != grant.network', code: 'GRANT_NETWORK_MISMATCH' };
 
   for (const { dim, fields, grantCol, kind } of SCALAR_DIMENSIONS) {
     for (const f of fields) {
       if (!(f in env.intent)) continue;
       const raw = grant[grantCol];
       if (raw === null || raw === undefined) {
-        return `intent 含 ${dim} 维度字段 ${f} 但 grant.${grantCol} 未授权 (缺维度默认最严拒)`;
+        return { reason: `intent 含 ${dim} 维度字段 ${f} 但 grant.${grantCol} 未授权 (缺维度默认最严拒)`, code: `SCOPE_DIMENSION_NOT_AUTHORIZED_${dim.toUpperCase()}` };
       }
       if (kind === 'amount') {
         const sompi = kasToSompiBig(env.intent[f]);
-        if (sompi > BigInt(raw)) return `amount ${env.intent[f]} KAS 超 grant 单笔上限 ${raw} sompi`;
+        if (sompi > BigInt(raw)) return { reason: `amount ${env.intent[f]} KAS 超 grant 单笔上限 ${raw} sompi`, code: 'AMOUNT_EXCEEDS_GRANT_LIMIT' };
       } else {
         const scopeSet = parseJsonStringArray(raw, grantCol);
-        if (!scopeSet.includes(String(env.intent[f]))) return `intent.${f}=${String(env.intent[f]).slice(0, 48)} ∉ grant.${grantCol}`;
+        if (!scopeSet.includes(String(env.intent[f]))) return { reason: `intent.${f}=${String(env.intent[f]).slice(0, 48)} ∉ grant.${grantCol}`, code: `VALUE_NOT_IN_SCOPE_${dim.toUpperCase()}` };
       }
     }
   }
   return null;
 }
 
-const denyResult = (reason) => ({
-  decision: 'deny', reason,
+// MF3 结构化 decision (Codex 第二轮 RED 修正④): 加 phase + reason_code, gate 层拒绝一律
+// phase='authorization'(不泄密, 只带非敏感原因分类), 让调用方(capability.js/G4 harness)靠
+// 结构化字段判定"到达执行层没有", 不用靠 regex 猜 relay 日志文本(Codex 抓的 G4 弱判据坑同根)。
+const denyResult = (reason, code = 'DENIED') => ({
+  decision: 'deny', reason, reason_code: code, phase: 'authorization',
   authenticated: false, callerId: null, grantId: null, intentDigest: null,
 });
 
@@ -222,26 +225,26 @@ export function verifyAppEnvelope(cmd, ctx = {}) {
     // 网关早拒验用同一份，不许本地再维护一份逻辑重复的循环）。
     const env = cmd?.envelope;
     const structErr = validateEnvelopeStructure(env);
-    if (structErr) return denyResult(structErr);
-    if (env.protocol !== ENVELOPE_PROTOCOL) return denyResult('envelope.protocol 不匹配');
-    if (env.domain !== ENVELOPE_DOMAIN) return denyResult('envelope.domain 不匹配 (domain separation)');
-    if (env.version !== ENVELOPE_VERSION) return denyResult('envelope.version 不匹配');
+    if (structErr) return denyResult(structErr, 'ENVELOPE_STRUCTURE_INVALID');
+    if (env.protocol !== ENVELOPE_PROTOCOL) return denyResult('envelope.protocol 不匹配', 'ENVELOPE_PROTOCOL_MISMATCH');
+    if (env.domain !== ENVELOPE_DOMAIN) return denyResult('envelope.domain 不匹配 (domain separation)', 'ENVELOPE_DOMAIN_MISMATCH');
+    if (env.version !== ENVELOPE_VERSION) return denyResult('envelope.version 不匹配', 'ENVELOPE_VERSION_MISMATCH');
 
     // relay/network 绑定本 relay (跨 relay/network 重放在签名范围内 + 这里双重拒)
-    if (!ctx.relayId || env.relay_id !== ctx.relayId) return denyResult('envelope.relay_id 不匹配本 relay');
-    if (!ctx.network || env.network !== ctx.network) return denyResult('envelope.network 不匹配本 relay network');
-    if (env.intent_type !== cmd.type) return denyResult('envelope.intent_type != cmd.type');
+    if (!ctx.relayId || env.relay_id !== ctx.relayId) return denyResult('envelope.relay_id 不匹配本 relay', 'RELAY_ID_MISMATCH');
+    if (!ctx.network || env.network !== ctx.network) return denyResult('envelope.network 不匹配本 relay network', 'NETWORK_MISMATCH');
+    if (env.intent_type !== cmd.type) return denyResult('envelope.intent_type != cmd.type', 'INTENT_TYPE_MISMATCH');
 
     // intent digest 自洽 (声明 == 重算; digest 供 M0c-3 nonce 绑定 + 审计)
     const digest = intentDigestOf(env.intent);
-    if (digest !== env.intent_digest) return denyResult('intent_digest != sha256(canonical(intent))');
+    if (digest !== env.intent_digest) return denyResult('intent_digest != sha256(canonical(intent))', 'INTENT_DIGEST_MISMATCH');
 
     // grant fresh 读 (§2·零缓存, 吊销即时可见; 读失败 fail-closed)
     const gr = getGrantFresh(env.grant_id);
-    if (!gr.ok) return denyResult(`grant registry 读失败 fail-closed: ${gr.error}`);
-    if (!gr.grant) return denyResult('grant 不存在 (未知 grant_id, §6-4)');
+    if (!gr.ok) return denyResult(`grant registry 读失败 fail-closed: ${gr.error}`, 'GRANT_REGISTRY_READ_FAILED');
+    if (!gr.grant) return denyResult('grant 不存在 (未知 grant_id, §6-4)', 'GRANT_NOT_FOUND');
     const grant = gr.grant;
-    if (grant.app_key_id !== env.app_key_id) return denyResult('grant.app_key_id != envelope.app_key_id');
+    if (grant.app_key_id !== env.app_key_id) return denyResult('grant.app_key_id != envelope.app_key_id', 'APP_KEY_ID_MISMATCH');
 
     // step3 验签 (v0.2 MUST-FIX 签名范围): 消息 = canonical(全 envelope 去 signature), 公钥来自权威 grant 行
     let sigOk = false;
@@ -252,35 +255,35 @@ export function verifyAppEnvelope(cmd, ctx = {}) {
         publicKey: grant.app_pubkey,
       });
     } catch { sigOk = false; }
-    if (!sigOk) return denyResult('信封签名验证失败 (全 canonical envelope 去 signature, §3 step3)');
+    if (!sigOk) return denyResult('信封签名验证失败 (全 canonical envelope 去 signature, §3 step3)', 'SIGNATURE_INVALID');
 
     // 时间窗 (envelope) — nonce durable 校验归 M0c-3, 这里收紧窗口
     const now = Number.isFinite(ctx.nowMs) ? ctx.nowMs : Date.now();
-    if (!Number.isInteger(env.issued_at) || !Number.isInteger(env.expires_at)) return denyResult('issued_at/expires_at 非整数 ms');
-    if (env.issued_at > now + ISSUED_AT_SKEW_MS) return denyResult('envelope.issued_at 在未来');
-    if (now > env.expires_at) return denyResult('envelope 已过期 (§6-5)');
-    if (env.expires_at - env.issued_at > MAX_ENVELOPE_TTL_MS) return denyResult('envelope TTL 超上限 (M0c-3 前重放窗收紧)');
+    if (!Number.isInteger(env.issued_at) || !Number.isInteger(env.expires_at)) return denyResult('issued_at/expires_at 非整数 ms', 'ENVELOPE_TIMESTAMPS_INVALID');
+    if (env.issued_at > now + ISSUED_AT_SKEW_MS) return denyResult('envelope.issued_at 在未来', 'ENVELOPE_ISSUED_IN_FUTURE');
+    if (now > env.expires_at) return denyResult('envelope 已过期 (§6-5)', 'ENVELOPE_EXPIRED');
+    if (env.expires_at - env.issued_at > MAX_ENVELOPE_TTL_MS) return denyResult('envelope TTL 超上限 (M0c-3 前重放窗收紧)', 'ENVELOPE_TTL_EXCEEDS_GLOBAL_MAX');
 
     // grant 有效期 + 吊销 (unix 秒; fresh 读保证吊销即时, §6-11)
-    if (grant.revoked) return denyResult('grant 已吊销 (fresh 读即时可见, §6-5/11)');
+    if (grant.revoked) return denyResult('grant 已吊销 (fresh 读即时可见, §6-5/11)', 'GRANT_REVOKED');
     const nowSec = Math.floor(now / 1000);
-    if (nowSec < grant.valid_from || nowSec > grant.valid_until) return denyResult('grant 不在有效期 (§6-5)');
+    if (nowSec < grant.valid_from || nowSec > grant.valid_until) return denyResult('grant 不在有效期 (§6-5)', 'GRANT_NOT_IN_VALID_PERIOD');
 
     // step5a intent == cmd 绑定 (verify-value-source / M1-6 验的对象==执行的对象)
     const bindErr = checkIntentBindsCmd(env.intent, cmd, cmd.type);
-    if (bindErr) return denyResult(bindErr);
+    if (bindErr) return denyResult(bindErr.reason, bindErr.code);
 
     // step5a-custodial (§3.3a v0.4·G2 落码): custodial_transfer 专属密码学核验 (privkeyHex↔
     // fromAddress 独立派生比对 + network 四值 join), 命令类型门控 (cmd.type==='custodial_transfer')
     // 非全局——发生在 checkIntentBindsCmd 通过之后、deepFreeze(cmd) 之前 (同一步, 非事后补丁)。
     if (cmd.type === 'custodial_transfer') {
       const custErr = checkCustodialTransferBinding(env, cmd, ctx);
-      if (custErr) return denyResult(custErr);
+      if (custErr) return denyResult(custErr.reason, custErr.code);
     }
 
     // step5b intent ⊆ grant (MF3 粗粒度)
     const scopeErr = checkIntentWithinGrant(env, grant);
-    if (scopeErr) return denyResult(scopeErr);
+    if (scopeErr) return denyResult(scopeErr.reason, scopeErr.code);
 
     // step6 [M0c-3 接口] nonce durable replay 校验 — 留接口不占位 (设计 §3 step6: 禁内存 nonce)。
     // nonce 已在签名范围内 (换 nonce = 签名失效); M0c-3 落地后在此接 durable+atomic reserve。
@@ -291,6 +294,10 @@ export function verifyAppEnvelope(cmd, ctx = {}) {
     return {
       decision: 'allow',
       reason: 'app envelope 全链验证通过 (§3 step2-7)',
+      // MF3: allow 也带 phase——gate 层放行后进 switch, 后续任何失败(比如 custodialSendKaspa
+      // 因隔离环境连不上 RPC)都属于 execution phase, 由 relay.mjs 外层 catch 单独打标 phase='execution'
+      // (本函数只负责 authorization phase 的结果, 不越权定义 execution 阶段发生了什么)。
+      phase: 'authorization', reason_code: 'ALLOWED',
       authenticated: true,
       callerId: env.app_key_id,
       grantId: env.grant_id,
@@ -298,6 +305,6 @@ export function verifyAppEnvelope(cmd, ctx = {}) {
     };
   } catch (e) {
     // M1-4: 任何解析/评估异常 → fail-closed deny, 不推进状态。
-    return denyResult(`envelope 验证异常 fail-closed (M1-4): ${e?.message || String(e)}`);
+    return denyResult(`envelope 验证异常 fail-closed (M1-4): ${e?.message || String(e)}`, 'ENVELOPE_VERIFICATION_EXCEPTION');
   }
 }

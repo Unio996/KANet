@@ -72,14 +72,15 @@ export function authorizeCommand(cmd) {
       _originWarnedTypes.add(type);
       console.warn(`[M0c-1 gate armed=off] cmd type=${type} 未标 origin — 批C 迁移驱动(inert 放行, armed=off=现状)`);
     }
-    return { decision: 'allow', reason: 'gate armed=off (inert, =现状)' };
+    return { decision: 'allow', reason: 'gate armed=off (inert, =现状)', reason_code: 'GATE_INERT_ARMED_OFF', phase: 'authorization' };
   }
 
   // ↓↓↓ armed=on (arm 前提焊死已保证 grant/envelope 非 stub + 批C 收口 + provision 实) ↓↓↓
-  // origin 四值判别 (§4.0)。
+  // origin 四值判别 (§4.0)。MF3(Codex 第二轮 RED 修正): 全部结果加 phase='authorization'+reason_code
+  // (稳定枚举, 供 capability.js/G4 harness 结构化判定, 不用 regex 猜 relay 日志文本)。
   if (origin === 'internal') {
     // 乙路 TCB: Console daemon/内部代码静态设置, 放行 (场景 B 可伪=乙已接受 TCB 残留, R 收口才 BUST)。
-    return { decision: 'allow', reason: 'origin=internal (乙路 TCB 放行)' };
+    return { decision: 'allow', reason: 'origin=internal (乙路 TCB 放行)', reason_code: 'ALLOWED_INTERNAL', phase: 'authorization' };
   }
   if (origin === 'operator') {
     // operator-settle 端点已做白名单两档 + ADMIN_SECRET tier auth + IP allowlist (受信来源, 批B); gate 认 origin=operator 放行。
@@ -89,7 +90,7 @@ export function authorizeCommand(cmd) {
     //   同款性质 (信标签非重新验证, 靠 Console=TCB + 唯一来源撑住)。**若未来新增第二个 origin=operator 调用点,
     //   必须同步: 新来源须同 operator-settle 做白名单+auth+IP allowlist, 或改 relay 侧对 operator 重新验证 ——
     //   否则单来源假设被静默打破 = 新来源绕过 operator-settle 端点的白名单/auth 直接放行 money-path。**
-    return { decision: 'allow', reason: 'origin=operator (operator-settle 端点白名单+auth 受信)' };
+    return { decision: 'allow', reason: 'origin=operator (operator-settle 端点白名单+auth 受信)', reason_code: 'ALLOWED_OPERATOR', phase: 'authorization' };
   }
   if (origin === 'app') {
     return authorizeAppCommand(cmd); // 完整 grant/envelope 验证 (armed 时非 stub, arm 前提焊死保证)。
@@ -102,11 +103,11 @@ export function authorizeCommand(cmd) {
     _legacyPassCount++;
     _lastLegacyPassAt = Date.now();
     console.warn(`[M0c-1 gate LEGACY] origin=legacy-unmigrated 暂放行 (收敛类迁移债·type=${type}, 累计 ${_legacyPassCount}) — 非安全控制·目标 shrink 到零`);
-    return { decision: 'allow', reason: 'origin=legacy-unmigrated (收敛类过渡暂放行·迁移债 marker 非安全控制)' };
+    return { decision: 'allow', reason: 'origin=legacy-unmigrated (收敛类过渡暂放行·迁移债 marker 非安全控制)', reason_code: 'ALLOWED_LEGACY_UNMIGRATED', phase: 'authorization' };
   }
   // origin 缺失/非法: fail-closed 拒 (§4.0 — 防悄悄全开, 与 §3.2 新命令默认需授权同构)。
   // 🔴 新未迁移路由/被剥 origin 攻击/未声明命令都落这里 = 拒 (与 legacy 显式 tag 的关键区别: 缺失不放行)。
-  return { decision: 'deny', reason: `origin 缺失/非法 (${String(origin)}) — fail-closed 拒` };
+  return { decision: 'deny', reason: `origin 缺失/非法 (${String(origin)}) — fail-closed 拒`, reason_code: 'ORIGIN_MISSING_OR_INVALID', phase: 'authorization' };
 }
 
 // app 路径完整验证 (§4.1 step1-7)。app provision 组件批填实: 完整链在 app-envelope.mjs
@@ -115,12 +116,12 @@ export function authorizeCommand(cmd) {
 function authorizeAppCommand(cmd) {
   // 无害只读白名单豁免信封 (§3.1)。
   if (READONLY_ALLOWLIST.has(cmd?.type)) {
-    return { decision: 'allow', reason: 'readonly 白名单豁免信封 (§3.1)' };
+    return { decision: 'allow', reason: 'readonly 白名单豁免信封 (§3.1)', reason_code: 'ALLOWED_READONLY', phase: 'authorization' };
   }
   // 需信封类 (§3.1 默认): grant/envelope 验证 (§4.1 step2-7: 解信封→验签名→canonical→intent⊆grant→nonce[M0c-3])。
   if (!GRANT_ENVELOPE_IMPLEMENTED) {
     // 防御性 fail-closed (理论不可达: armed=on+flag=false 已被模块加载 throw 拦; 此处双保险)。
-    return { decision: 'deny', reason: 'app grant/envelope 验证未启用 (flag 待 diff 审+实战后置 true) — fail-closed' };
+    return { decision: 'deny', reason: 'app grant/envelope 验证未启用 (flag 待 diff 审+实战后置 true) — fail-closed', reason_code: 'GRANT_ENVELOPE_STUB', phase: 'authorization' };
   }
   // 完整验证链 (app provision 组件批): AuthResult = 母卡 §5 接口 (decision/reason 向后兼容批3 调用方)。
   return verifyAppEnvelope(cmd, {

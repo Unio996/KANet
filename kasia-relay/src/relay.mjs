@@ -364,7 +364,17 @@ if (process.send) {
       if (authz.decision === 'deny') {
         log(`M0c-1 GATE DENY → ${authz.reason} (type=${cmd.type}, origin=${cmd.__origin})`);
         if (cmd.requestId && process.send) {
-          process.send({ requestId: cmd.requestId, result: { ok: false, error: `M0c-1 gate deny: ${authz.reason}`, denied: true } });
+          // MF3(Codex 第二轮 RED 修正④): IPC 回执带结构化 phase/reason_code(从 authz 透传), 供
+          // capability.js/G4 harness 精确判定"gate 层拒绝"vs"过了 gate、执行层出错"——不用再靠
+          // regex 猜 relay 日志文本(Codex 抓的 G4 弱判据坑同根: LAND 用例误把 GATE DENY 也当"到达
+          // 执行层"的证据, phase='authorization' 让这类误判在结构层面不可能发生)。
+          process.send({
+            requestId: cmd.requestId,
+            result: {
+              ok: false, error: `M0c-1 gate deny: ${authz.reason}`, denied: true,
+              phase: authz.phase || 'authorization', reason_code: authz.reason_code || 'DENIED',
+            },
+          });
         }
         return;  // NO TX NO STATE: 拒不进 switch, 不推进任何状态。
       }
@@ -497,7 +507,10 @@ if (process.send) {
           sent = { txId: r?.txId, fee: r?.fee };
           // ledger 入库用托管地址锚 (= cmd.fromAddress, 非 relay 自己地址), 不含 privkey。
           ingestTx({ traceId: sent?.txId, txid: sent?.txId, direction: 'outbound', amount: cmd.amount, fee: sent?.fee, localAddress: cmd.fromAddress || localAddress });
-          if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: !!sent?.txId, txId: sent?.txId, fee: sent?.fee } });
+          // MF3(Codex 第二轮 RED 修正④): phase='execution'——custodial_transfer 短路自己的成功回执
+          // 不经下方通用 generic handler, 单独补上同款结构化字段(否则这条路径漏掉 phase, 跟其他命令
+          // 类型不一致, capability.js/G4 harness 判定逻辑会对这一种命令失效)。
+          if (cmd.requestId && process.send) process.send({ requestId: cmd.requestId, result: { ok: !!sent?.txId, txId: sent?.txId, fee: sent?.fee, phase: 'execution' } });
           log(`CUSTODIAL_TRANSFER ${cmd.amount} → ${cmd.target?.slice(-12)} TX: ${sent?.txId || '?'} fee: ${sent?.fee || '?'}`);
           return; // 短路 generic handler (已 reply requestId)
         }
@@ -1302,13 +1315,20 @@ if (process.send) {
         }
       }
       // 如果有 requestId，回传执行结果给 Console
+      // MF3(Codex 第二轮 RED 修正④): phase='execution' 标记——此处已过 gate(authorization phase
+      // 已通过), 这条回执代表业务执行层的真实结果(成功/失败都算 execution phase, 区别于上方
+      // gate-deny 分支的 phase='authorization')。
       if (cmd.requestId && process.send) {
-        process.send({ requestId: cmd.requestId, result: { txId: sent?.txId, fee: sent?.fee, ok: !!sent?.txId } });
+        process.send({ requestId: cmd.requestId, result: { txId: sent?.txId, fee: sent?.fee, ok: !!sent?.txId, phase: 'execution' } });
       }
     } catch (err) {
       log(`command ${cmd.type} failed: ${err?.message || err?.toString?.() || JSON.stringify(err)}`);
       if (cmd.requestId && process.send) {
-        process.send({ requestId: cmd.requestId, result: { error: err?.message || String(err) } });
+        // 同上: 执行层异常(RPC down/无效地址/... )打 phase='execution', 跟 gate-deny 的
+        // phase='authorization' 结构性区分开——capability.js/G4 harness 靠这个字段判定"到达执行层"
+        // 不用再猜 503 通用错误消息里到底是哪一种失败。denied 字段刻意不设(undefined!==true 天然
+        // 满足调用方 result.denied!==true 的判定, 语义上"执行层失败"本来就不是"被 gate 拒绝")。
+        process.send({ requestId: cmd.requestId, result: { error: err?.message || String(err), phase: 'execution' } });
       }
     }
   });
