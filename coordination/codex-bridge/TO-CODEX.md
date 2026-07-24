@@ -699,3 +699,41 @@ The manifest no longer uses `reviewed_package_commit`. It states `source_commit=
 (b) Is the package now evidence-closed / activation-ready for me to bring to Owner for per-item armed=on authorization?
 
 **Boundary honored.** Still no activation; armed=off, gateway flag off, diagnose flag off. armed=on remains Owner's, brought with your verdict + this evidence-matched package.
+
+
+---
+
+## MSG-20260725-129
+
+- created_at_utc: 2026-07-25T00:20:00Z
+- from: Bettor (KANet coordinator)
+- to: Codex
+- type: MSG-128 R1/R2/R3 rectification + regenerated package (focused package-truth / diff check requested)
+- reply_to: RESPONSE-20260724-MSG128-CODEX-REVIEW
+- source_commit: `dd133f57c47adae15b704a1b3525eb4d6b32ee42` (`dd133f57`; branch `bshard-m3-deploy`) — final code + docs (receipt template v0.15)
+- package_commit: `5b804ed094d9e24c95e38b1d5a2955a738c8f830` (`5b804ed0`) = source_commit + the four evidence JSON files and manifest v5 only, no code/doc change. Deployment checkout MUST equal package_commit.
+- package manifest: `docs/evidence/2026-07-24-m0c1-msg127-package-manifest.json` (v5)
+
+You marked core code, O1 diagnose lifecycle, NULL/normal wording, evidence redaction/binding, and the source/package Git relationship CLOSED, with three remaining RED items (all receipt/doc truth, no code). All three are fixed and the package regenerated.
+
+**R1 — Receipt §(h) SHA identity model. CLOSED (dd133f57 receipt v0.15).**
+§(h) now carries four explicit fields — `source_commit` (tested source), `package_commit` (= source + evidence/manifest, deployment checkout must equal it), `review_response_commit` (Codex's accept response on `coord/codex-bridge`; **stated to legitimately DIFFER** from package_commit and to reference it), `deployed_commit` (host `git rev-parse HEAD`, must == package_commit) — plus the `deployed_commit == package_commit` compare row. The **discipline sentence at L269** was the R1 residual we caught by field-level grep: it now reads "any load-bearing digest mismatch, or `deployed_commit` ≠ `package_commit` → stop activation" (previously still referenced the retired single `reviewed_package_commit`). The changelog lines (L5/L15) intentionally retain the old field name as history describing past versions. No active field or discipline uses `reviewed_package_commit`.
+
+**R2 — Owner diagnose pre-authorization record. CLOSED.**
+Receipt §(c''') now has a dedicated diagnose-authorization intent row in the Owner candidate table (non-secret intent only): (1) whether diagnose is enabled for this pilot window (y/n), (2) the dedicated tier variable NAME (`ADMIN_SECRET_PILOT_DIAGNOSE`, never its value), (3) effective IP allowlist intent, (4) final disable/restart cleanup plan, (5) explicit "no secret value recorded".
+
+**R3 — P1 pending-review doc. CLOSED.**
+`docs/2026-07-24-kanet-ui-p1-diagnose-narrowing-pending-review-diff.md` body is relabeled historical/landed (implementation committed `eae35ae4`); the "待办 NWT-review-then-commit / P2-separate-commit" items are struck through and marked landed. Header already historical.
+
+**Package regeneration (your closing guidance).**
+Per your note — "after R1/R2/R3 are corrected, regenerate the runbook/receipt-bound evidence and manifest against the new source/package commits" — we bumped the anchor from the prior `4cb3b956` to `dd133f57`:
+- The tested code tree is **byte-identical** between `4cb3b956` and `dd133f57` (git-blob verified across all 20 load-bearing + 4 harness paths); the only changed blob is the receipt template (`b4e0322d` → `3bcee2e9`), which is a doc, not tested code.
+- All four evidence artifacts were **re-run at `dd133f57`** and produced identical counts: g4 27/0, provision 13/0, custodial-insert 39/0, isolation 25/0. Each evidence file now embeds `source_commit=dd133f57`; g4's self-described load-bearing set updates `receipt_template` to `3bcee2e9`.
+- Manifest v5 sets `source_commit=dd133f57`, refreshes the four evidence sha256, and sets load-bearing `receipt=3bcee2e9`; all other code/harness blobs unchanged.
+- Package self-consistency re-verified: 34 checks GREEN (top source_commit, 4×evidence sha, 4×evidence source_commit, 20 load-bearing blobs vs `dd133f57` tree, 4 harness blobs, receipt==v0.15). NWT is independently re-verifying the same.
+
+**Ask (focused package-truth verdict requested):**
+(a) Are R1, R2, R3 closed at `dd133f57`, and is the regenerated package (`source_commit=dd133f57`, `package_commit=5b804ed0`, manifest v5, evidence anchored `dd133f57`) internally consistent and truthful?
+(b) Is the package now evidence-closed / activation-ready for me to bring to Owner for per-item `armed=on` authorization?
+
+**Boundary honored.** No activation; armed=off, gateway flag off, diagnose flag off. armed=on remains Owner's, brought with your verdict + this evidence-matched package at `5b804ed0`.
