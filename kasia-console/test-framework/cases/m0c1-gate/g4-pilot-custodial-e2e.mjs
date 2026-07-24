@@ -426,22 +426,41 @@ async function main() {
 
   await relayManager.stopRelay(RELAY_ID);
 
-  // Codex note(非 activation blocker, J1 认领→J1 不在改派 J2): evidence 文件嵌两个自描述字段，让
-  // 证据脱离 git 历史也能自证"是哪个 tip、哪版 harness 跑的"——sanitized evidence 发布进
+  // Codex note(非 activation blocker, J1 认领→J1 不在改派 J2): evidence 文件嵌自描述字段，让
+  // 证据脱离 git 历史也能自证"是哪个 tip、哪版代码跑的"——sanitized evidence 发布进
   // docs/evidence/ 时经常被单独 fetch/引用，读者手头未必有本地 git checkout 去反查。
   //   - source_commit: 跑这次 harness 时 working tree 的 HEAD（git rev-parse HEAD）。
-  //   - harness_blob_sha: 本文件自身内容的 git blob sha（git hash-object，非任意 sha256——跟本轮
-  //     全程用的 blob-sha 核对方式统一，供读者用 `git cat-file blob <sha>` 直接核对文件内容一致）。
-  // 两者都是 best-effort：跑在非 git 环境(理论不会发生，但防御性处理)时不让 evidence 生成本身失败。
+  //   - harness_blob_sha: 本文件自身内容的 git blob sha。
+  //   - load_bearing_blobs: Codex MF1(v0.10 re-review) 升级要求——不止 harness 自身，全部
+  //     load-bearing 代码文件（网关+relay 权威闸+grant provision）+ 两份治理文档（runbook/收据
+  //     模板）各自的 blob_sha 都嵌进来，读者拿这份 evidence 就能逐一 `git cat-file blob <sha>`
+  //     核对"证据对应的到底是哪个版本的每一份 load-bearing 文件"，不用另外去翻 manifest。
+  // 全部 best-effort（git hash-object 用 git 自己的 blob 计算方式，非任意 sha256；跑在非 git
+  // 环境时不让 evidence 生成本身失败——理论不会发生，防御性处理）。
+  const LOAD_BEARING_FILES = {
+    capability: 'kasia-console/src/api/capability.js',
+    authorize: 'kasia-relay/src/lib/authorize.mjs',
+    app_envelope: 'kasia-relay/src/lib/app-envelope.mjs',
+    relay: 'kasia-relay/src/relay.mjs',
+    grant_provision: 'kasia-console/scripts/m0c1-grant-provision.mjs',
+    runbook: 'docs/2026-07-23-m0c-1-pilot-activation-runbook.md',
+    receipt_template: 'docs/2026-07-24-m0c-1-pilot-activation-receipt-template.md',
+  };
   let sourceCommit = null, harnessBlobSha = null;
   try { sourceCommit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim(); } catch { /* best-effort */ }
   try { harnessBlobSha = execFileSync('git', ['hash-object', fileURLToPath(import.meta.url)], { cwd: ROOT, encoding: 'utf8' }).trim(); } catch { /* best-effort */ }
+  const loadBearingBlobs = {};
+  for (const [key, relPath] of Object.entries(LOAD_BEARING_FILES)) {
+    try { loadBearingBlobs[key] = { path: relPath, blob_sha: execFileSync('git', ['hash-object', relPath], { cwd: ROOT, encoding: 'utf8' }).trim() }; }
+    catch { loadBearingBlobs[key] = { path: relPath, blob_sha: null }; }
+  }
 
   const logPath = path.join(LOG_DIR, 'm0c1-g4-pilot-custodial-e2e-latest.json');
   writeFileSync(logPath, JSON.stringify({
     matrix_source: 'docs/2026-07-23-m0c-1-path-b-pilot-containment-design.md §3 + relay-side §5',
     codex_remediation: 'RESPONSE-...PATHB-ACTIVATION(b93134e8) RED-not-ready 修正④: replay/吊销/taint/pilot专属TTL/限流 + 精确reason断言',
     mf3_remediation: 'MF3(relay 571441ea + gateway 82df7b4f): 结构化 body.reason_code 判据取代 relayLastLog 正则 + META-CHECK(真实auth拒response喂入LAND判据验证真FAIL) + BUST⑦(relay_id mismatch)',
+    load_bearing_blobs: loadBearingBlobs,
     source_commit: sourceCommit,
     harness_blob_sha: harnessBlobSha,
     summary: { pass, fail }, evidence,
