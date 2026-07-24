@@ -15,6 +15,8 @@ import { encrypt, decrypt } from '../services/crypto.js';
 import { generateMnemonic, addressFromMnemonic, privKeyHexFromMnemonic } from '../services/wallet.js';
 import { getWorkingRpc } from '../services/rpc-health.js';
 import { verifyIngestRequest } from '../services/ingest-auth.js';
+import { checkAdminSecretTier } from '../lib/admin-secret-tier.mjs';
+import { isLegacySendAllowed, isDiagnoseAllowed } from '../lib/pilot-wallet-policy.js';
 
 // KANet-UI 2026-06-23 (Bettor BLOCKING 修): 三端点全加 x-ingest-secret 鉴权 preHandler。
 //   tg_user_id 取自 URL = 攻击者可控, "只载该 tg_user 钱包" 不是鉴权; 若 HOST=0.0.0.0 则任何人可
@@ -87,19 +89,44 @@ export async function registerTgWalletRoutes(fastify) {
     return reply.send({ ok: true, exists: true, address: w.kaspa_address, network: w.network, balance_kas: balance, created_at: w.created_at });
   });
 
-  // GET /api/tg-wallet/:tg_user_id/diagnose — M0c-1 Path B pilot Codex MSG-125 MUST-FIX C:
-  //   no-broadcast live-Console decrypt proof, 充值前跑 (runbook §3.6 重排后的验证步骤之一)。
-  //   证明"live Console 用真实运行时 process.env.CONSOLE_ENCRYPTION_KEY + 真实 DB 连接" 能解密这行 —
-  //   非 helper 自己 encrypt 自己 decrypt 那种内部一致性、也非人工核对 8-hex 指纹那种 sanity check。
-  //   ok:true 语义 = decrypt 成功 **且** derive 出的地址 == 行里存的 kaspa_address 逐字符相同
-  //   (证加密 mnemonic 内部一致 + live Console 确实能解出预期的那把钥匙, 非只是"decrypt 没抛异常")。
-  //   绝不返回/log mnemonic、privkey、加密 blob 本身——只返 { ok, address }。
-  fastify.get('/api/tg-wallet/:tg_user_id/diagnose', AUTH, async (request, reply) => {
+  // GET /api/tg-wallet/:tg_user_id/diagnose — M0c-1 Path B pilot Codex MSG-125 MUST-FIX C
+  //   (MSG-126 P1 收窄授权): no-broadcast live-Console decrypt proof, 充值前跑
+  //   (runbook §4.3 验证闸)。证明"live Console 用真实运行时 process.env.CONSOLE_ENCRYPTION_KEY
+  //   + 真实 DB 连接" 能解密这行 — 非 helper 自己 encrypt 自己 decrypt 那种内部一致性、也非
+  //   人工核对 8-hex 指纹那种 sanity check。ok:true 语义 = decrypt 成功 **且** derive 出的地址
+  //   == 行里存的 kaspa_address 逐字符相同。绝不返回/log mnemonic、privkey、加密 blob 本身——
+  //   只返 { ok, address }。
+  //
+  // 🔴 MSG-126 P1（Codex 收窄要求，此端点能对任意 tg_user_id 触发解密，原只挂 shared ingest
+  //   secret = 把共享凭据扩成"全托管钱包表的 decrypt-and-derive 触发器"，不必要的新暴露面）：
+  //   不再用共享 AUTH（shared ingest secret），改三层（同 coord-status.js/operator-settle.js
+  //   既有 admin 端点模式，不新造 auth 机制）：
+  //   ① ADMIN_DIAGNOSE_ENABLED !== '1' → 503（默认 off）
+  //   ② checkAdminSecretTier(ADMIN_SECRET_PILOT_DIAGNOSE)（独立 operator 级凭据，非 shared
+  //      ingest secret，也非其他端点复用的 tier）
+  //   ③ ADMIN_IP_ALLOWLIST（loopback 默认）
+  //   ④ **解密前**先查 access_mode，`isDiagnoseAllowed()` 判定非 capability_only（normal/
+  //      unknown/null）直接拒，不碰 decrypt——诊断端点只该对 pilot 专属钱包生效
+  fastify.get('/api/tg-wallet/:tg_user_id/diagnose', async (request, reply) => {
+    if (process.env.ADMIN_DIAGNOSE_ENABLED !== '1') {
+      return reply.code(503).send({ ok: false, error: 'admin endpoint disabled (ADMIN_DIAGNOSE_ENABLED != 1)' });
+    }
+    const auth = checkAdminSecretTier(request, 'ADMIN_SECRET_PILOT_DIAGNOSE');
+    if (!auth.ok) return reply.code(auth.code).send({ ok: false, error: auth.error });
+    const ipAllowlist = (process.env.ADMIN_IP_ALLOWLIST || '127.0.0.1,::1,::ffff:127.0.0.1').split(',').map((s) => s.trim());
+    if (!ipAllowlist.includes(request.ip)) {
+      return reply.code(403).send({ ok: false, error: `admin auth fail (source IP ${request.ip} 不在 ADMIN_IP_ALLOWLIST)` });
+    }
+
     const tgUser = String(request.params.tg_user_id || '').trim();
     if (!tgUser) return reply.code(400).send({ ok: false, error: 'tg_user_id required' });
 
-    const w = sqlite.prepare('SELECT kaspa_address, mnemonic_encrypted, network FROM tg_custodial_wallets WHERE tg_user_id = ?').get(tgUser);
+    const w = sqlite.prepare('SELECT kaspa_address, mnemonic_encrypted, network, access_mode FROM tg_custodial_wallets WHERE tg_user_id = ?').get(tgUser);
     if (!w) return reply.code(404).send({ ok: false, error: '钱包不存在' });
+
+    if (!isDiagnoseAllowed(w.access_mode)) {
+      return reply.code(403).send({ ok: false, error: `诊断端点只对 pilot 专属钱包(access_mode=capability_only)生效 (当前 access_mode=${w.access_mode})` });
+    }
 
     let derivedAddress;
     try {
@@ -134,17 +161,22 @@ export async function registerTgWalletRoutes(fastify) {
     const w = sqlite.prepare('SELECT kaspa_address, mnemonic_encrypted, network, access_mode FROM tg_custodial_wallets WHERE tg_user_id = ?').get(tgUser);
     if (!w) return reply.code(404).send({ ok: false, error: '你还没有钱包' });
 
-    // M0c-1 Path B pilot 隔离 (Codex MSG-124 MUST-FIX E, MSG-125 结构性收紧): 这条 legacy 路径
-    // 只挂 AUTH (shared ingest secret)，完全绕过 grant/source-scope/armed 闸/capability 网关 —
-    // pilot 钱包一旦充值，持 ingest secret + pilot tg_user_id 者即可经这条路径把钱转走。
+    // M0c-1 Path B pilot 隔离 (Codex MSG-124 MUST-FIX E, MSG-125 结构性收紧, MSG-126 P1 共用
+    // policy helper): 这条 legacy 路径只挂 AUTH (shared ingest secret)，完全绕过
+    // grant/source-scope/armed 闸/capability 网关 — pilot 钱包一旦充值，持 ingest secret +
+    // pilot tg_user_id 者即可经这条路径把钱转走。
     // 🔴 MSG-125 修正：MSG-124 版本只靠 process.env.PILOT_WALLET_ADDRESSES env allowlist，
     // Codex 判这会 fail-open（env 缺失/畸形/重启未加载时隔离静默失效）。权威判据改成 durable
     // 的 `access_mode` 列（`tg_custodial_wallets` migrate.js v193，J2 落码）——pilot 钱包建行时
     // (`m0c1-pilot-custodial-insert.mjs`) 就把这一行显式设成 `'capability_only'`，从诞生那一刻
     // 起是权威标记，不依赖任何后续步骤/任何 env 变量存在。env allowlist 保留作 defense-in-depth
     // 早拒层（两层都查，任一命中即拒，不是"降级到只查一层"）。
-    if (w.access_mode === 'capability_only') {
-      return reply.code(403).send({ ok: false, error: 'M0c-1 pilot 隔离钱包 (access_mode=capability_only): 本 legacy 路径已 fail-closed 禁用，请走 capability 网关 custodial_transfer 路径' });
+    // 🔴 MSG-126 P1 收窄：判据改成 `isLegacySendAllowed()`（`pilot-wallet-policy.js` 唯一定义，
+    // 跟 `/diagnose` 共用同一条规则）——从"排除 capability_only"改成"只放行 normal"的白名单
+    // 式思路（unknown/null 这类既有 v193 迁移前不该出现、但万一出现的边缘值也默认拒绝，不是
+    // 只堵已知的那一种）。
+    if (!isLegacySendAllowed(w.access_mode)) {
+      return reply.code(403).send({ ok: false, error: `M0c-1 pilot 隔离钱包 (access_mode=${w.access_mode}): 本 legacy 路径已 fail-closed 禁用，请走 capability 网关 custodial_transfer 路径` });
     }
     const pilotIsolationSet = new Set((process.env.PILOT_WALLET_ADDRESSES || '').split(',').map((s) => s.trim()).filter(Boolean));
     if (pilotIsolationSet.has(w.kaspa_address)) {
