@@ -1,6 +1,7 @@
 # M0c-1 Path B Pilot 激活部署 runbook（KANet-UI·工作流④）
 
-> **Status**: CURRENT（v0.14·Codex MSG-124 五条 MUST-FIX(A/B/C/D/E)+真相校正全部落码, 三人红队+NWT独立复核 GREEN, 待 Bettor 最终整包整合(HEAD 重跑全测+新 blob manifest) + Codex evidence-closure verdict + Owner 最后拍）
+> **Status**: CURRENT（v0.15·Codex MSG-125 二审：C/E 未结构性闭+D证据不全，本版补 C(diagnose端点)/E(durable列，待J2 schema)/序列重排(arm-before-fund)，待 J2 E-schema+D-fault-injection 落码+三人红队+Bettor整包整合+Codex 三审+Owner 最后拍）
+> **v0.15 更新（2026-07-24，Codex MSG-125 二审"C/E未结构性闭"，`docs/2026-07-24-m0c1-pilot-codex-msg125-rectification.md`）**：MSG-124 五条修完后 Codex 又挖深一层：① **E 未结构性闭**（Bettor 认账第二次判轻）——env allowlist 会 fail-open（env 缺失/畸形/重启未加载时 legacy `/send` 静默重开），改用 `tg_custodial_wallets` 新增 `access_mode` durable 列（`'capability_only'`）做权威判据，env 降级 defense-in-depth（J2 认领 schema，见 `docs/2026-07-24-kanet-ui-e-tg-wallet-pilot-isolation-pending-review-diff.md` 后续更新）② **C 未闭**——helper 自读自过只证内部一致、8-hex 指纹是人工 sanity，唯一权威此前是充值后的 §4.5，Codex 要求充值前就证：新增 `GET /:tg_user_id/diagnose` no-broadcast 诊断（live 进程实际 key decrypt+derive 地址比对，KANet-UI 落码，见 `docs/2026-07-24-kanet-ui-c-diagnose-pending-review-diff.md`）③ **序列重排（arm-before-fund）**——§3.6 不再充值（只建零余额钱包+grant），新增 §4.3（零余额验证闸：C 诊断+E 隔离攻击验证）+ §4.4（验证闸全过才充值），§4.5 live 冒烟顺延到充值之后不变位置。④ D 项还差 fault-injection 测试（J2 认领：INSERT 后、readback 前受控注入异常，证明零残留行）。
 > **v0.13 更新**: PILOT_WALLET_ADDRESSES durability 纪律(NWT 追问坐实)——这个 env 是 E 项隔离检查唯一判据源, pilot 结束/§(f)吊销+确认余额清零前绝不能 unset, 语义跟 §4 两 flag(删=更安全)相反(删=更危险的 fail-open), §6 回退路径明确切开不属于本次回退动作。
 > **v0.14 更新（2026-07-24，Codex MSG-124 终审 5 条 MUST-FIX 全部收口，`docs/2026-07-24-m0c1-pilot-codex-msg124-rectification.md`）**：Codex 终判"G4 绑定 CLOSED/provision GREEN/M0a capability GREEN，但 A/B/C/D/E 五条 MUST-FIX 未闭+一条 over-claim（Bettor 认账: "三份 evidence 都自描述"实只 G4/"stdin 不回显"实假）"。本版一次性全改：**E**（KANet-UI 主，`fea2f4b7` 已 ship）legacy `tg-wallet.js` `/send` 对 pilot 钱包 fail-closed 隔离+去 FAUCET fallback，Bettor 全仓枚举 spend 路径确认无第三条绕过路径。**A+B**（J2，合并方案）根治"stdin 不回显"over-claim——不试图隐藏交互式终端输入，彻底不给这个选项，改用 `m0c1-pilot-candidate-generate.mjs` 同一 tick 加密落盘+`--candidate-file` 取代 stdin。**C**（J2 helper 半+KANet-UI runbook 半）`--db` 硬 required 去默认值+`currentKeyFingerprint()` 双处打印早期 sanity check+§4.5 live 冒烟升级为唯一权威最终证明。**D**（J2）`INSERT`+`readback` 包进同一 `db.transaction()`，事务内 throw 自动 ROLLBACK 取代手写 DELETE 自愈，真并发测试证明"从未提交"非"插入又清理"。真相校正（J2）两 regression evidence 补 source_commit/blob 自描述字段。33/33（helper+candidate 测试）+ 8/8（E regression）+ 13/13（provision regression）全绿，三人红队+NWT 独立复核 GREEN（review_ref=`a99c387b`/`42c96e8e`）。
 > **v0.12 更新（2026-07-24，reviewed helper `5964af91` ship 后，runbook 步骤 4-6 从"待定设计"改成引用实际实现）**：§3.6 MF2 步骤 4-6 原先是"helper 具体实现留 KANet-UI+J2 联合定"的占位描述，helper（`kasia-console/scripts/m0c1-pilot-custodial-insert.mjs`）落码 ship（三人红队 GREEN + NWT loop-closer 复核 GREEN，review_ref=`bed78d93`，含 NWT 红队抓出的两个真实缺口修复：`--network` 白名单堵 typo-fallback-mainnet footgun + 非法 mnemonic 错误路径 no-leak 测试）后，本版把步骤 4-6 改写为具体命令+行为描述，非泛泛"经一个 reviewed helper"这类占位措辞。
@@ -74,10 +75,10 @@
 - [ ] **Owner 的 go 必须是对"这次激活整包具体候选参数"的知情同意，不是一句空白的"可以了"**（Bettor 定型的范围）：给 Owner 看的东西必须包含——部署 commit SHA（§(h)）、pilot relay **候选**参数（network=testnet-12+name，§2，relay 尚未创建）、专用 custodial 钱包**候选**地址（§3，尚未充值）、拟充值金额（须 = 50 KAS 硬顶，§3）、grant **候选**字段（source_scope/payee_scope/max_amount_sompi/valid_until，§3，尚未写入 registry）、`CUSTODIAL_RELAY_ID` 拟绑定对象（= §2 那个候选 name 指向的 relay，实际 id 值要等 §3.6 创建后才存在，尚未写入 `kanet.env`）、即将写入的两 flag 目标值（§(d)）、§4.5 smoke 测试参数（金额/收款地址）、回滚路径（§6）——**逐项过一遍具体值**，不是抽象地问"能不能 arm"
 - [ ] **在执行 §3.6 或 §4 任何一步之前**，Owner 已就上面这包候选参数给出显式 go（非默许、非"之前讨论过就算数"——每次真实激活都是一次新的不可逆窗口打开，需要当次的显式确认，理由见频道纪律 `feedback-decision-making-discipline-consolidated`：重大决策需 Owner 终裁）
 - [ ] Owner go 的方式、时间戳、**Owner 当时看到的具体候选参数快照**（或指向收据其余字段的引用）记入收据（`docs/2026-07-24-m0c-1-pilot-activation-receipt-template.md` §(c'''），位置在 §(d) flag 回读之前
-- [ ] operator 未拿到这条明确记录之前，**不得**开始 §3.6（充值/grant 签发）或 §4 步骤 1——两者都已进入不允许中断的原子序列，不能"先斩后奏再补授权"
+- [ ] operator 未拿到这条明确记录之前，**不得**开始 §3.6（🔴 v0.15 更正：§3.6 现在只建零余额钱包+grant，不含充值——充值挪到 §4.4）或 §4 步骤 1——都已进入不允许中断的原子序列，不能"先斩后奏再补授权"
 - [ ] §4.5（live 冒烟）仍保留独立的第二道 Owner 授权检查点（对"发这笔真实转账"本身的知情同意）——两道检查点不是同一件事、不能互相替代：本节 gate 的是"要不要按这套候选参数动钱+开闸"（覆盖 §3.6 执行 + §4 flag 开启两个后续动作），§4.5 gate 的是"要不要现在发这笔真实测试转账"
 
-## 3.6. Owner go 后执行：创建 relay + 真充值 + grant 正式签发（🔴 v0.8 更新，原 §2 创建步骤 + §3 后半段移到这里）
+## 3.6. Owner go 后执行：创建 relay + 建 capability_only 钱包（零余额）+ grant 正式签发（🔴 v0.15 重排，Codex MSG-125 req 4 + finding 5"arm-before-fund"：充值挪到 §4.4，本节结束时钱包仍是零余额）
 
 **前置条件：§3.5 Owner go 已拿到并记入收据，否则不得开始下面任何一步。** 若实际要创建/写入的值与 Owner 看到的候选值不同（哪怕只是笔误改动），必须回到 §3.5 重新过 Owner，不得自行调整后继续。
 
@@ -101,17 +102,17 @@
 - [ ] **[MF2 步骤 6] 显式唯一 pilot `tg_user_id` 非空**：用一个**显式、唯一**的 pilot `tg_user_id`（专用 pilot 标识符，非复用任何既有真实用户的 id）——helper 对空值/占位符字面量（`blank`/`mark pilot`/`pilot`/`test`/`placeholder`/`todo`/`tbd`，大小写不敏感）**精确拒绝**
 - [ ] `tg_custodial_wallets` 表其余字段（`network`/`created_at`/`updated_at`）由 helper 按建行流程正常填
 - [ ] regression 证据：`test-framework/cases/m0c1-gate/pilot-custodial-insert-regression.mjs`（真实调用两个 CLI，`spawnSync`/`execFileSync`，非 mock），33/33 PASS——含 D 项**真并发**测试（`Promise.all` 非顺序 await，两进程抢同一 `tg_user_id`，恰好 1 个成功+DB 恰好 1 行，证明输家的 INSERT 从未提交非"插入又清理"）+ shred 三档时机逐场景验证 + key 指纹不一致场景验证
-- [ ] 用上一步建好的地址充值 **恰好 50 KAS**（不多充——多充=硬止损形同虚设）
-- [ ] 充值后用 relay 只读命令 `get_address_utxos`（`relay.mjs:1189`，接受任意地址参数）查该地址链上余额，确认 = 50 KAS（**不是** `GET /api/relay/:id/balance`，那个查的是 relay 自身身份钱包）
-- [ ] 跑 provision 脚本正式签发 grant（`kasia-console/scripts/m0c1-grant-provision.mjs`，用 §3 起草、Owner 已批的候选字段值，非临时改动的新值；**必须显式传 `--payee`**——`m0c1-grant-provision.mjs:100` 默认 NULL，不传 = `payee_scope` 空 = 该维 NULL，J2 负责校验落码，本条是 runbook 侧的执行提醒）
-- [ ] 候选地址写入 `PILOT_WALLET_ADDRESSES` env——🔴 v0.13 新增（NWT 核 E 项时追问的 durability 缺口，Bettor refinement 2 原话）：**这个 env 是 Codex MSG-124 MUST-FIX E（tg-wallet.js legacy `/send` 隔离）的唯一判据来源**——若这个 env 后续被意外 unset（重启漏带/误改 `kanet.env`），`tg_custodial_wallets` 表里那一行、里面的 50 KAS 都还在，但隔离检查会静默失效，legacy `/send` 重新对 pilot 钱包开放。**这个 env 一旦写入，在 pilot 结束/§(f) 吊销+清空钱包之前绝不能 unset**（不是"跟 armed flag 一样可以回退删掉"的东西——armed flag 删了是 fail-closed 更安全，这个 env 删了是 fail-open 更危险，两者语义相反，回退纪律不能套用同一套）。收据 §(d)/§(c'') 每次现场回读时一并确认这个 env 仍在（非只查两 flag）
+- [ ] 🔴 v0.15 新增（Codex MSG-125 MUST-FIX E 要害，durable 结构隔离，J2 认领 schema）：insert 时该行 `access_mode` 列必须写成 `'capability_only'`（`tg_custodial_wallets` 新增列，migrate.js 新版本号，`DATABASE.md` 同步更新——J2 负责，本条是 runbook 侧核对提醒）——这是 legacy `tg-wallet.js` `/send` 隔离的**权威判据**（§4.3 E 检查用的就是这一列，非仅 env allowlist；env allowlist 降级为 defense-in-depth 早拒层，durable 列才是"env 没了也拒"的结构性保证）
+- [ ] 🔴 v0.15 重排：**本节到此为止钱包保持零余额，不充值**——充值挪到 §4.4（arm + 验证闸全过之后），理由见本节标题的 v0.15 更新说明
+- [ ] 跑 provision 脚本正式签发 grant（`kasia-console/scripts/m0c1-grant-provision.mjs`，用 §3 起草、Owner 已批的候选字段值，非临时改动的新值；**必须显式传 `--payee`**——`m0c1-grant-provision.mjs:100` 默认 NULL，不传 = `payee_scope` 空 = 该维 NULL，J2 负责校验落码，本条是 runbook 侧的执行提醒）——grant 签发本身不涉及资金转移，零余额钱包也可以先签好授权范围
+- [ ] 候选地址写入 `PILOT_WALLET_ADDRESSES` env（defense-in-depth 早拒层，非唯一权威——权威是上面的 `access_mode` 列）——🔴 v0.13（NWT 核 E 项时追问的 durability 缺口，Bettor refinement 2 原话，v0.15 后语义收窄为"补充层"但纪律不变）：这个 env 若后续被意外 unset，`access_mode='capability_only'` 那一列仍会挡住 legacy `/send`（v0.15 durable 化后的保证），但 env 早拒层失效意味着少了一层"更早、更省事"的防线，**仍然在 pilot 结束/§(f) 吊销+清空钱包之前不应该 unset**，只是不再是唯一防线
 - [ ] **`CUSTODIAL_RELAY_ID` 写入 `kanet.env`**（🔴 Bettor+NWT 整序列反向扫抓出的缺口：v0.6 之前全文档只有"读取/核对 `CUSTODIAL_RELAY_ID` 值"这类验证性引用（收据 §(c'')⑤⑨），从没有一步是真正执行"把 `CUSTODIAL_RELAY_ID=xxx` 写进 `kanet.env`"这个动作——对比 §4 两 flag 那步有显式编辑指令，这里之前是空的）：写入值 = 上面刚创建的 pilot relay 的实际 id（此刻才存在），**不得留空指望 `FAUCET_RELAY_ID` 兜底**（C 项已去掉该 fallback，留空直接 503）
 - [ ] 🔴 v0.8 修正（Codex 三轮反馈坐实的技术错误）：**此刻 console 进程还没重启（重启在 §4），编辑 `kanet.env` 文件不会让已在跑的进程的 `process.env` 变化**——写入后能核对的只是 `kanet.env` **文件内容**本身（`grep CUSTODIAL_RELAY_ID kanet.env` 确认写对了、跟上面创建的 pilot relay id 逐字符一致），不是 `process.env`。真正的 `process.env.CUSTODIAL_RELAY_ID` 运行时回读要等 §4 步骤 4 重启完成之后才技术上成立（§4 步骤 4 需同步补一条这项检查，见该节更新）
-- [ ] 收据模板 §(c') 四值一致证明在充值+grant 签发后做一次
+- [ ] 收据模板 §(c') 四值一致证明本节先做一次（此刻钱包已建、地址已定，虽然还没充值——地址本身不会因充值与否而改变，四值一致性此刻就能核；余额=0 这件事本身也是一个待核实的事实，见 §(c) 回读）
 
 ## 4. 两 flag 原子开启顺序
 
-**核心纪律：不允许中间态**（只开一个 flag 的时间窗 = §1 描述的漏洞窗口暴露期）。**前置条件：§3.5 Owner go 已拿到并记入收据 + §3.6 真充值/真 grant 签发已完成，否则不得开始下面任何一步。**
+**核心纪律：不允许中间态**（只开一个 flag 的时间窗 = §1 描述的漏洞窗口暴露期）。**前置条件：§3.5 Owner go 已拿到并记入收据 + §3.6 建号/grant 签发已完成（🔴 v0.15：钱包此刻仍是零余额，不再要求"真充值已完成"——充值挪到 §4.4，在本节 arm 之后），否则不得开始下面任何一步。**
 
 0. **重启前查在途请求**（NWT note2：与今日 armed=on 重启前查在途 betting/settle 同款纪律，NO-TX-NO-STATE 相关——console 若在等 `custodial_transfer` 的 `sendCommandAsync` 回执时被杀，会有"不确定是否已执行"的悬空状态）：确认无正在处理中的 custodial_transfer 请求（pilot 阶段流量本就极低，直接看 relay 日志近几分钟无 `CUSTODIAL_TRANSFER` in-flight 行即可，无需查表）。
 1. 停 console（正规 stop，非强杀，防 WAL 未 flush；查 stale pidfile，见今日复现 3 次的坑）
@@ -130,12 +131,26 @@
    - [ ] **端到端冒烟（NWT note1，不可省；Bettor 定型：单一真相源非另建第二套）**：上面四点只验证"两个 flag 各自读到 true"，不证明组合后请求能实走通完整链路（若 env 变量拼写错/指错 relay id，四点独立检查仍可能全绿但请求实际打不通）。**"激活成功"判据 = 跑一次 G4 E2E harness 全量用例**（`kasia-console/test-framework/cases/m0c1-gate/g4-pilot-custodial-e2e.mjs`，J1 harness 域交付，本 runbook 不重建、直接调用；v0.4=27 用例（v0.3 起改用结构化 `phase` 判据取代日志正则+META-CHECK+relay_id mismatch，D 项落码后新增 BUST⑧ 畸形 cmd 场景），含 LAND/BUST①-⑧/REPLAY/REVOCATION/TAINT，2026-07-24 claim-to-code 三道核 GREEN，sanitized evidence 见 `docs/evidence/2026-07-24-m0c1-g4-pilot-custodial-e2e-v0.4-evidence.json`）——四点独立验证 + G4 全量跑绿，两者都要。**🔴 v0.4 诚实边界（Codex MSG-121 MUST-FIX 2）：G4 是隔离环境单元测试（独立 relay 子进程+独立 DB+throwaway 密钥），验证的是授权逻辑本身对不对，不侦测真实部署环境的配置错误（env 变量拼写错/指错真实 relay id 这类问题 G4 抓不到——v0.3 曾暗示"env 拼错会被 G4 抓出"是过度声称，已删）。真实部署配置正确性靠本 runbook 逐项 checklist + §4.5 真 live 冒烟兜底。**
 5. **收敛类 legacy-unmigrated 面照常不断**：跑几笔现网 pool/relay/trading 操作，确认无 fail-closed 断（今晨事故的直接回归检查）
 
-## 4.5. Owner 授权后真 live 冒烟（🔴 v0.4 新增，Codex MSG-121 MUST-FIX 2 要求，G4 隔离测试之外的独立验证层）
+## 4.3. 零余额验证闸（🔴 v0.15 新增，Codex MSG-125 req 4 + finding 5"arm-before-fund"）
+
+**核心纪律：钱包此刻仍是 §3.6 建号时的零余额状态。以下两项验证必须在这个零余额窗口内全过，才允许进 §4.4 充值。** 这样即便验证过程本身出岔子（诊断端点 bug、隔离检查漏配），暴露的钱包里也没有真钱可偷——这是本次重排的核心动机（Codex：C 项的"充值前证明"和 E 项的"结构性隔离"只有排在充值之前才真正起到"先证/先隔离"的作用，排在充值之后就只是"亡羊补牢"）。
+
+- [ ] **C 诊断**：`GET /api/tg-wallet/<pilot tg_user_id>/diagnose`（挂同款 `x-ingest-secret` 鉴权）——`ok:true` 且返回的 `address` 与 §3.5 Owner 批准的候选地址逐字符一致，才算过。**这是唯一权威的"live Console 能真解密这行"证明**（`§3.6` helper 自己的 readback 验证只是内部一致性，key 指纹人工核对只是早期 sanity check，均不能替代这一步）。若不一致或诊断本身报错——**停止激活**，不进 §4.4，回查是不是 canonical DB 路径/`CONSOLE_ENCRYPTION_KEY` 跟 helper 写入时用的不是同一个
+- [ ] **E 隔离验证**：构造一次真实请求，持合法 `x-ingest-secret` + pilot `tg_user_id` 直接打 `POST /api/tg-wallet/<pilot tg_user_id>/send`（金额随意，反正没钱可转，这本身就是攻击场景复现）——**必须收到 403**（`tg-wallet.js` 的 `access_mode==='capability_only'` durable 列检查生效）。这是激活当次的**真实攻击验证**，不是引用 regression 测试报告了事——regression 证的是"这段代码逻辑对"，这一步证的是"这次激活里，这一行确实被正确标记+这条隔离确实在生效"
+- [ ] 两项都过，记入收据（新增字段：诊断结果+隔离验证结果+时间戳）——**任一没过，禁止进 §4.4**
+
+## 4.4. 充值（🔴 v0.15 新增，原 §3.6 的充值步骤移到这里，此刻已过 §4.3 验证闸）
+
+- [ ] 用 §3.6 建好的地址充值 **恰好 50 KAS**（不多充——多充=硬止损形同虚设）
+- [ ] 充值后用 relay 只读命令 `get_address_utxos`（`relay.mjs:1189`，接受任意地址参数）查该地址链上余额，确认 = 50 KAS（**不是** `GET /api/relay/:id/balance`，那个查的是 relay 自身身份钱包）
+- [ ] 收据模板 §(c') 四值一致证明在充值后再做一次（§3.6 已做过一次地址层面的核对，本次补上余额=50 KAS 这个新增事实）
+
+## 4.5. Owner 授权后真 live 冒烟（🔴 v0.4 新增，Codex MSG-121 MUST-FIX 2 要求，G4 隔离测试之外的独立验证层；🔴 v0.15：本节现在排在 §4.4 充值之后，序列不变，只是前面多了 §4.3 验证闸）
 
 G4（§4 步骤 4）证明的是"授权逻辑写对了"，不证明"真实部署环境配对了"。两者是不同的验证层，缺一不可：
 
 - [ ] Owner 显式授权后（🔴 v0.5 更正：真正不可逆的窗口打开点是 §3.5 的 arm 授权，本节是**第二道独立**的 Owner 授权检查点——针对"现在发这笔真实测试转账"本身，不是 arm 闸本身；v0.4 曾把这句话误写成"不可逆动作前的最后一步"，暗示只有这一道检查点，已更正，见 §3.5）
-- [ ] 用真实 console（非 G4 的隔离 relay 子进程）+ 真实 grant（provision 脚本正式签发的那份，非 harness 临时生成）+ 真实 custodial 钱包（§3 充值的那个）跑一笔真实、最小额的 custodial_transfer
+- [ ] 用真实 console（非 G4 的隔离 relay 子进程）+ 真实 grant（provision 脚本正式签发的那份，非 harness 临时生成）+ 真实 custodial 钱包（§4.4 充值的那个）跑一笔真实、最小额的 custodial_transfer
 - [ ] 记录真实 txId 进本次激活的收据（`docs/2026-07-24-m0c-1-pilot-activation-receipt-template.md`，新增字段：live 冒烟 txId + 时间戳）
 - [ ] 确认链上落地（`checkUtxoLanded` 或等价方式），非仅看 API 返回 `ok:true`
 - [ ] 🔴 v0.14 新增（Codex MSG-124 MUST-FIX C 权威证明层，KANet-UI+J2 联合定）：**这笔真实转账的成功，本身就是"live Console 确实用同一个 DB、同一把 `CONSOLE_ENCRYPTION_KEY` 解密了 §3.6 helper 写的那一行"的权威证明**——`capability.js` 的 `deriveCustodialExecFields` 内部必须真的 `decrypt(mnemonic_encrypted)` 拿到 mnemonic 才能派生出 privkey 发起转账；若 §3.6 helper 当时写的是错误的 DB 文件、或用的 key 跟 live Console 实际用的不是同一把，这笔转账会在这一步失败（解密失败/派生出的地址跟预期不符），不会伪装成功。**这条证明不是 helper 自己关起门来做的（§3.6 步骤 4 的 in-process readback 只证明 helper 内部一致性），是 live Console 进程本身在真实业务路径上给出的证明**——§3.6 的 key 指纹人工核对是激活当刻的早期低成本 sanity check，本节这笔真转账才是唯一权威、最终的"live 已验证"依据
