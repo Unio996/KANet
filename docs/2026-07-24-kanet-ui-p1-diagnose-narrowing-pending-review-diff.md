@@ -1,6 +1,6 @@
 # KANet-UI · Codex MSG-126 P1（收窄 /diagnose 授权 + 共享 policy helper）pending-review diff
 
-> **性质**: 历史 pending-review 工件（**🔴 v0.1 更正，Codex MSG-127 O3 抓出的 stale 真相**：本文档原写"代码在共享工作树未 committed"，那是三方核实（我+NWT review_ref=53117aed+J2）通过前的状态——代码已正式 commit（`eae35ae4`，含 `tg-wallet.js`/新文件 `pilot-wallet-policy.js`/regression 测试），本文档降级为 P1 设计记录，不再是活跃 pending-review。当前实际代码状态以 `eae35ae4` + `git log -- kasia-console/src/api/tg-wallet.js` 为准）。
+> **性质**: 历史 pending-review 工件（**🔴 v0.1 更正，Codex MSG-127 O3 抓出的 stale 真相**：本文档原写"代码在共享工作树未 committed"，那是三方核实（我+NWT review_ref=53117aed+J2）通过前的状态——代码已正式 commit（`eae35ae4`，含 `tg-wallet.js`/新文件 `pilot-wallet-policy.js`/regression 测试），本文档降级为 P1 设计记录，不再是活跃 pending-review。当前实际代码状态以 `eae35ae4` + `git log -- kasia-console/src/api/tg-wallet.js` 为准）。**🔴 v0.2 更正（Codex MSG-128 R3：v0.1 只改了 header，正文"测试...working tree diff"+"待办：commit 实代码"两处仍是 stale 措辞，本版一并校正）**。
 > **依据**: `docs/2026-07-24-m0c1-pilot-codex-msg126-rectification.md` §P1（Bettor 批：复用 `operator-settle.js`/`coord-status.js` 既有 admin 端点模式，不新造 auth 机制）。
 > **用户面钱路 + 密钥经手**: 不自批，走完整 pending-review 周期。
 
@@ -29,7 +29,7 @@ Codex 判：`GET /:tg_user_id/diagnose`（Codex MSG-125 MUST-FIX C 引入）挂 
 
 `migrate.js` v193 `ALTER TABLE ... ADD COLUMN access_mode TEXT DEFAULT 'normal'` 对既有行和后续经 `/create` 端点新建的行都会读到 `'normal'`（SQLite 对常量 DEFAULT 的既有行回填是标准行为，`/create` 的 INSERT 语句本就不显式传这一列，靠列 DEFAULT）——`isLegacySendAllowed` 从"排除 capability_only"收紧到"只放行 normal"不会误伤既有/新建的普通用户钱包（regression ⑩ 验证）。
 
-## 测试（`tg-wallet-pilot-isolation-regression.mjs`，重写 ④⑤ + 新增 ⑥-⑫，working tree diff）
+## 测试（`tg-wallet-pilot-isolation-regression.mjs`，重写 ④⑤ + 新增 ⑥-⑫，🔴 v0.2 更正：已随本文档改动一起 commit，非 working tree diff——见文档头部 v0.1 stale 真相校正）
 
 真 Fastify inject，23/23 PASS（原 8 + C 诊断原 6 改写为 9 + 新增 4）：
 - ④ operator 授权 + capability_only → 成功
@@ -45,10 +45,10 @@ Codex 判：`GET /:tg_user_id/diagnose`（Codex MSG-125 MUST-FIX C 引入）挂 
 
 `node scripts/lint-kanet.mjs kasia-console/src/api/tg-wallet.js kasia-console/src/lib/pilot-wallet-policy.js kasia-console/test-framework/cases/m0c1-gate/tg-wallet-pilot-isolation-regression.mjs` — 0 errors。新文件 `pilot-wallet-policy.js` 纯逻辑判断函数（不 import better-sqlite3/relay-manager），未触发 M0a 门。
 
-## 待办
+## 待办（🔴 v0.2 更正，Codex MSG-128 R3：这两条都已完成，非仍待办）
 
-- NWT 红队通过后 commit 实代码
-- P2（receipt/runbook 真相对齐）单独提交
+- ~~NWT 红队通过后 commit 实代码~~ → 已完成，`eae35ae4`（三方核 review_ref=53117aed 通过后正式 commit）
+- ~~P2（receipt/runbook 真相对齐）单独提交~~ → 已完成，见 `docs/2026-07-24-m0c1-pilot-codex-msg126-rectification.md` §P2 及后续 O1/R1/R2/R3 各轮修正提交
 
 ---
 

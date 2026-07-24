@@ -1,7 +1,8 @@
 # M0c-1 Path B Pilot 激活收据（KANet-UI 工作流⑦·空白模板）
 
-> **Status**: CURRENT（v0.13·空白模板·配套 `docs/2026-07-23-m0c-1-pilot-activation-runbook.md`）
+> **Status**: CURRENT（v0.14·空白模板·配套 `docs/2026-07-23-m0c-1-pilot-activation-runbook.md`）
 > **v0.13 更新（2026-07-24，Codex MSG-127 O1）**：§(c'''') 新增 diagnose 三 env 的 file-vs-runtime 配置态回读表 + 重启后重验规则字段；§(f) 新增 diagnose env 收尾清理时间字段。
+> **v0.14 更新（2026-07-25，Codex MSG-128 R1+R2）**：**R1** §(h) 从单一 `reviewed_package_commit` 字段改成 `source_commit`/`package_commit`/`review_response_commit`/`deployed_commit` 四个语义不同的字段——此前声称"`review_response_commit` 通常应相等"是错的，Codex 审查回复 commit 活在 `coord/codex-bridge` 分支，跟部署用的 `package_commit` 本就不是同一条分支上的东西，不该假设相等；真正要求相等的是 `deployed_commit == package_commit`。**R2** §(c''') 候选表补 diagnose 端点授权候选意图行（是否启用/tier 变量名/IP allowlist 意图/disable 计划，不记 secret 值）。
 > **v0.12 更新（2026-07-24，Codex MSG-126 P2）**：相位表扩为 7 相（新增 §4.3 pre-fund 验证闸 / §4.4 post-fund）；新增 §(c'''') 记录 C 诊断 + E 隔离攻击验证结果；§(h) load-bearing 清单补 `tg-wallet.js`/`client.js`/`pilot-wallet-policy.js`/`admin-secret-tier.mjs`。
 > **依据**: 2026-07-24 05:xx NWT 声称清单 grep 扫描发现 MSG-120 多处"声称已实现"实际代码不存在（TTL/限流/白名单/G4 用例），Bettor 认账根因="claim==code" completeness 交叉核缺失。本模板的存在意义：**激活当刻**从运行系统实际读到的值，不是从任何设计文档/频道消息转引的值。
 > **v0.2 更新**: 四条控制已全部补齐落码（J1 `944f2a72` TTL / J2 `cf680280` 限流+白名单 / J1 `2fbdb290` G4 harness v0.2 21/21），均经 claim-to-code 三道核（自核+Bettor grep+NWT 独立扫描）GREEN。下方 (b)(e) 已补代码坐标（供激活时对照查询用，坐标本身已核实存在，具体运行时值仍需激活当刻现查填空）。
@@ -134,6 +135,7 @@
 | 拟充值金额（须=50 KAS 硬顶，尚未真充） | §3 | |
 | grant **候选**字段（source_scope/payee_scope/max_amount_sompi/valid_until，尚未 provision——payee_scope 强制非空，见 §(b)） | §3 | |
 | `CUSTODIAL_RELAY_ID` 拟绑定意图（= 上面那个候选 relay name 指向的对象，实际 id 值要等 §3.6 创建后才存在，此刻无法给出具体值） | §3/§(c'') | |
+| 🔴 v0.14 新增（Codex MSG-128 R2）diagnose 端点授权候选意图：①本次 pilot 窗口是否启用 §4.3 C 诊断（y/n）②专属 tier 变量名（`ADMIN_SECRET_PILOT_DIAGNOSE`，**只记变量名，不记值**）③生效 `ADMIN_IP_ALLOWLIST` 意图（默认 loopback 还是要扩）④最终 disable/收尾重启计划（对应 runbook §6） | §3 | |
 | 即将写入的两 flag 目标值 | §3.6→§4（尚未执行） | |
 | §(g) smoke 测试参数（金额/收款地址） | §(g)（届时才执行） | |
 | 回滚路径 | runbook §6 | |
@@ -226,21 +228,22 @@ G4（docs/evidence 那份）是隔离环境单元测试，不证明真实部署�
 
 > MSG-122 三道核（自核+Bettor grep+NWT 独立扫描）证明的是"审过的那个 commit 里代码写对了"，**不证明**"真实跑在生产 console/relay 进程里的代码 == 那个被审过的 commit"。两者中间隔着一次部署动作（拉代码/重启），必须显式核对，不能默认"刚部署过所以肯定是最新"——这条本身就是本次事故（claim-to-code）在运行时维度的延伸，不核就是同一个坑在新层面复发。
 
-🔴 **v0.9 重构（Codex 三轮 A2(a)：静态硬编码某个历史 commit 示例值本身就是问题——每次激活可能对应不同审查轮次，模板不该内嵌任何具体 SHA）**。改用运行时填充字段，比对基准 = **当次 Owner 决策所依据的、Codex+NWT 实际审过的那个包**，不是任何写死的旧值：
+🔴 **v0.14 重构（Codex MSG-128 R1：字段名+关系声称都错——沿用旧的单一 `reviewed_package_commit` 字段，且写"`review_response_commit` 通常应相等"是假的，Codex 的审查回复 commit 活在 `coord/codex-bridge` 分支上，跟部署用的 package commit 本就不是同一个东西，"应相等"这个预期从一开始就搭错了对象）**。改用四个语义不同、不得混用的字段（沿用 Bettor `docs/2026-07-24-m0c1-msg128-package-manifest.json` 那次 regen 定的命名）：
 
 | 字段 | 说明 | 实际值 |
 |---|---|---|
-| `reviewed_package_commit` | Codex **最终一轮**（当次授权决策所依据的那一轮，非任意中间反馈）GREEN 放行时点名的 commit——现查频道记录，**不得抄本文档历史版本出现过的任何示例值**（如曾出现过的 `26a23292`，那是旧一轮的值，早已过期） | |
-| `review_response_commit` | Codex 该轮回复消息本身引用/锚定的 commit（若与上一行不同需说明原因，通常应一致） | |
-| `runbook_blob_sha` | 本 runbook 文档（`docs/2026-07-23-m0c-1-pilot-activation-runbook.md`）在 `reviewed_package_commit` 那个 tip 的 git blob sha（`git rev-parse HEAD:docs/2026-07-23-m0c-1-pilot-activation-runbook.md`） | |
+| `source_commit` | 本次激活改动的**源头** commit（改动落地那一刻的 `bshard-m3-deploy` tip，非 Codex 审的包，非 bridge 分支）——现查 `git log` | |
+| `package_commit` | Bettor 把 `source_commit` 之上再加 evidence/manifest 打成的**不可变审查包**那个 commit（送 Codex 审的就是这个）——现查频道记录/`docs/evidence/*package-manifest*.json` | |
+| `review_response_commit` | Codex 回复消息本身引用/锚定的 commit——**活在 `coord/codex-bridge` 分支**，跟 `package_commit` **本就不是同一条分支上的 commit**，**不要求相等**，也不该假设相等；这里记的是"Codex 这轮回复对应哪个 bridge 分支 commit"，纯粹是审计链路可追溯性，不是拿来跟 `package_commit` 做比对的 | |
+| `deployed_commit` | **实际跑 console/relay 的机器/目录**执行 `git rev-parse HEAD` 现查（非本地开发树；若共享同一台机器需先确认是同一份 working tree，非另一个 clone）——**须 == `package_commit`**（这才是 claim-to-deployed 的真正比对对象，不是 `review_response_commit`） | |
+| `deployed_commit == package_commit` ？（逐字符比对，唯一有意义的相等性检查） | | |
+| `runbook_blob_sha` | 本 runbook 文档在 `package_commit` 那个 tip 的 git blob sha（`git rev-parse HEAD:docs/2026-07-23-m0c-1-pilot-activation-runbook.md`） | |
 | `receipt_template_blob_sha` | 本收据模板自身在同一 tip 的 blob sha | |
 | `g4_evidence_blob_sha` | 当次引用的 G4 evidence 文件（`docs/evidence/...`）blob sha + sha256（两者都记，前者证明"是这个 tip 里的那份文件"，后者证明"内容没被后续悄悄改过"） | |
-| 部署进程实际运行的 commit SHA | **在实际跑 console/relay 的机器/目录**执行 `git rev-parse HEAD`（非本地开发树；若共享同一台机器需先确认是同一份 working tree，非另一个 clone） | |
-| 部署 commit == `reviewed_package_commit` ？（逐字符比对） | | |
 
 **load-bearing 文件 digest 交叉核对**（防"部署了但某个文件没跟上"/"部署后又被手动改过且没人知道"；🔴 v0.9 修正 B2：旧版只列 5 个文件，漏了 grant 写手+文档自身+manifest）：
 
-| 文件 | sha256（部署环境实际文件，激活时现算） | sha256（`reviewed_package_commit` 里的版本，同一时刻现算比对） | 一致？ |
+| 文件 | sha256（部署环境实际文件，激活时现算） | sha256（`package_commit` 里的版本，同一时刻现算比对） | 一致？ |
 |---|---|---|---|
 | `kasia-relay/src/lib/authorize.mjs` | | | |
 | `kasia-relay/src/lib/app-envelope.mjs` | | | |
