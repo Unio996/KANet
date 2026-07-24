@@ -266,7 +266,7 @@ G4（docs/evidence 那份）是隔离环境单元测试，不证明真实部署�
 | `migrate.js` 代码里定义的最新版本号 | |
 | 两者一致？（若部署库版本落后于代码——DB schema 缺字段但代码假设字段存在，是另一类静默故障，需先跑 migrate 补齐） | |
 
-**纪律**：任一 load-bearing 文件 digest 不匹配、或部署 commit SHA ≠ `reviewed_package_commit` → **停止激活**，先查清楚差异来源（漏部署 / 部署后被改 / tip 记错），差异本身若涉及安全参数改动需重走 claim-to-code 三道核（对实际部署的那份代码，非旧审过的那份），不得凭"应该没差多少"跳过。
+**纪律**：任一 load-bearing 文件 digest 不匹配、或 `deployed_commit` ≠ `package_commit`（🔴 v0.14 更正：不是 `≠ reviewed_package_commit`，那个字段名已废弃，且真正要求相等的从来不是 `review_response_commit`）→ **停止激活**，先查清楚差异来源（漏部署 / 部署后被改 / tip 记错），差异本身若涉及安全参数改动需重走 claim-to-code 三道核（对实际部署的那份代码，非旧审过的那份），不得凭"应该没差多少"跳过。
 
 ---
 
