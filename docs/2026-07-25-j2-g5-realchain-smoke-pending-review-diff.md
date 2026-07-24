@@ -39,3 +39,17 @@ G4(`g4-pilot-custodial-e2e.mjs`)27/27 已把 custodial_transfer 门控**机制**
 3. **grant 一次性 vs 可重跑**: 脚本每次成功执行 = 消费一次 grant 的限流/累计额度(如果 grant 配了 max_cumulative_sompi)——多次手工重跑这个脚本做冒烟验证会不会把 pilot 唯一那份 grant 的额度提前用完? 建议 runbook 里为这个脚本预留专门一小笔额度, 不跟真实用户流量共享同一个 grant。
 
 @NWT @KANet-UI 请审(重点: envelope 构造字段跟 capability.js 期望的形状逐字核, gate 条件是否有遗漏, peers.mjs 两行地址/id 没认错)。@Bettor 上面 3 个未决点等你判。
+
+## v2 修订(2026-07-25, 对抗审+3 个未决点全落码)
+
+KANet-UI 红队抓到 2 条(1 HIGH + 1 MEDIUM), Bettor 判 3 个未决点, 全部改完:
+
+- **HIGH(KANet-UI 抓+NWT 独立核实)**: 落链验证原来等价 `checkUtxoLanded` 的 `minDepth=0` first-seen 模式(自己手写 `entries.some(txId matched)`, 压根没调用 `checkUtxoLanded` 本尊)——TN12 reorg ~26% 恒常, first-seen 历史上造成过 phantom-leaf 真实事故(hcxu3/clycz)。修: **直接 `import` `p2sh.mjs` 的 `checkUtxoLanded()` 本尊**, `minDepth=20`(relay.mjs "register land-gate" 既有阈值), 复用它已经踩坑修好的 4 级字段 fallback, 不在 G5 自己代码里另写一份。
+- **MEDIUM(KANet-UI 抓)**: gate① 只比 `git rev-parse HEAD`, 没查 working tree 是否干净——脏树(哪怕改的是 capability.js 本身)也能让①通过。加 `git status --porcelain` 非空即 abort。
+- **Bettor①**: 加 gate②grant 只读预检(`m0c1_app_grants` SELECT, 零写)——存在+未吊销+在有效期+source_scope 含 candidate+payee_scope 含 payee+max_amount_sompi 够, dry-run 阶段就 fail-fast。
+- **Bettor②**: gate⑤(原 POST 判定)去掉 `/ADMIN_CAPABILITY_GATEWAY_ENABLED/.test(error)` 文本正则(capability.js 的 disabled/relay 未 armed/relay id 未配三种 503 目前都没有稳定 reason_code, NWT 核实确认), 改成任何非 200/非 ok 统一 abort, 原始 body 全量打印。
+- **Bettor③**: 加 gate④ 累计冒烟预算护栏(`SMOKE_BUDGET_KAS=5`), sum 过往 `g5-real-chain-smoke-*.json` evidence log 里 `landed` 的金额, 不新开专用 grant。
+
+顺带发现并修的一致性问题: `withRpc` 原来读 `G5_KASPA_RPC_URL` 自定义变量, 但 `checkUtxoLanded` 内部 `connectRpc()` 直接读 `KASPA_RPC_URL`——两处不同变量名会漂移(同 pilot-wallet-policy.js 那次"两路各自解析"教训), 统一成都读 `KASPA_RPC_URL`。
+
+gate 从 4 个增到 5 个(①HEAD+clean ②grant 预检 ③余额 ④累计预算 ⑤--confirm), 文件头/CLI 用法/console 输出全部同步改了编号。lint 0 errors。working tree 仍未 commit, 等复审。
