@@ -135,10 +135,18 @@ async function main() {
   }
 
   const logPath = path.join(LOG_DIR, 'm0c1-provision-payee-regression-latest.json');
+  // Codex MSG-124 真相校正: 之前声称"三份 evidence 都自描述"实只 G4 v0.6 嵌了 source_commit/
+  // blob 字段, 这两份 regression 只有 source/target/method/summary/assertions——本次补齐,
+  // 逻辑照抄 G4 harness 已验证过的那段(execFileSync git rev-parse/hash-object, best-effort)。
+  const gitRevParse = () => { try { return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim(); } catch { return null; } };
+  const gitHashObject = (p) => { try { return execFileSync('git', ['hash-object', p], { cwd: ROOT, encoding: 'utf8' }).trim(); } catch { return null; } };
   writeFileSync(logPath, JSON.stringify({
     source: 'docs/2026-07-24-m0c1-pilot-comprehensive-defect-sweep.md A3 + Codex v0.10 re-review 项②(regression evidence artifact)',
     target: 'kasia-console/scripts/m0c1-grant-provision.mjs issue 子命令 --payee 强制规则(commit cbec6837)',
     method: '真实调用 CLI(execFileSync, 非 mock/非直调内部函数) + DB 旁路核对 payee_scope 真值',
+    source_commit: gitRevParse(),
+    test_blob_sha: gitHashObject(path.relative(ROOT, fileURLToPath(import.meta.url)).split(path.sep).join('/')),
+    target_blob_sha: gitHashObject('kasia-console/scripts/m0c1-grant-provision.mjs'),
     summary: { pass, fail }, evidence,
   }, null, 2));
   console.log(`\nevidence log: ${logPath}`);

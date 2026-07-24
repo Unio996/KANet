@@ -2,6 +2,7 @@ import Fastify from 'fastify';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { randomBytes } from 'crypto';
+import { currentKeyFingerprint } from './services/crypto.js';
 
 // J2-tn r429 (Bettor r467 P0 Console crash 根治): defensive top-level handlers.
 // 防 Console 反复 crash 真因 — uncaught exception / unhandledRejection 自 child relay /
@@ -89,6 +90,11 @@ if (!process.env.CONSOLE_ENCRYPTION_KEY || process.env.CONSOLE_ENCRYPTION_KEY.le
   console.error('Generate with: node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"');
   process.exit(1);
 }
+// Codex MSG-124 整改 C 项(密钥链一致性 sanity check)：启动时打印这次用的 CONSOLE_ENCRYPTION_KEY
+// 指纹（sha256 前 8 hex，非 key 本身，不可逆推）——供 M0c-1 pilot reviewed helper insert 后
+// operator 人工核对"helper 用的 key 指纹" == "live Console 用的 key 指纹"，早期低成本 sanity
+// check（真正权威证明是 §4.5 live 转账，这条只是提早发现"错 key"这类配置漂移，非替代权威证明）。
+console.log(`[console] CONSOLE_ENCRYPTION_KEY fingerprint: ${currentKeyFingerprint()}`);
 
 // Run migrations
 runMigrations();
