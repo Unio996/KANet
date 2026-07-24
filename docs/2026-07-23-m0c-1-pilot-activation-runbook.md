@@ -98,7 +98,7 @@
 - [ ] 用上一步建好的地址充值 **恰好 50 KAS**（不多充——多充=硬止损形同虚设）
 - [ ] 充值后用 relay 只读命令 `get_address_utxos`（`relay.mjs:1189`，接受任意地址参数）查该地址链上余额，确认 = 50 KAS（**不是** `GET /api/relay/:id/balance`，那个查的是 relay 自身身份钱包）
 - [ ] 跑 provision 脚本正式签发 grant（`kasia-console/scripts/m0c1-grant-provision.mjs`，用 §3 起草、Owner 已批的候选字段值，非临时改动的新值；**必须显式传 `--payee`**——`m0c1-grant-provision.mjs:100` 默认 NULL，不传 = `payee_scope` 空 = 该维 NULL，J2 负责校验落码，本条是 runbook 侧的执行提醒）
-- [ ] 候选地址写入 `PILOT_WALLET_ADDRESSES` env
+- [ ] 候选地址写入 `PILOT_WALLET_ADDRESSES` env——🔴 v0.13 新增（NWT 核 E 项时追问的 durability 缺口，Bettor refinement 2 原话）：**这个 env 是 Codex MSG-124 MUST-FIX E（tg-wallet.js legacy `/send` 隔离）的唯一判据来源**——若这个 env 后续被意外 unset（重启漏带/误改 `kanet.env`），`tg_custodial_wallets` 表里那一行、里面的 50 KAS 都还在，但隔离检查会静默失效，legacy `/send` 重新对 pilot 钱包开放。**这个 env 一旦写入，在 pilot 结束/§(f) 吊销+清空钱包之前绝不能 unset**（不是"跟 armed flag 一样可以回退删掉"的东西——armed flag 删了是 fail-closed 更安全，这个 env 删了是 fail-open 更危险，两者语义相反，回退纪律不能套用同一套）。收据 §(d)/§(c'') 每次现场回读时一并确认这个 env 仍在（非只查两 flag）
 - [ ] **`CUSTODIAL_RELAY_ID` 写入 `kanet.env`**（🔴 Bettor+NWT 整序列反向扫抓出的缺口：v0.6 之前全文档只有"读取/核对 `CUSTODIAL_RELAY_ID` 值"这类验证性引用（收据 §(c'')⑤⑨），从没有一步是真正执行"把 `CUSTODIAL_RELAY_ID=xxx` 写进 `kanet.env`"这个动作——对比 §4 两 flag 那步有显式编辑指令，这里之前是空的）：写入值 = 上面刚创建的 pilot relay 的实际 id（此刻才存在），**不得留空指望 `FAUCET_RELAY_ID` 兜底**（C 项已去掉该 fallback，留空直接 503）
 - [ ] 🔴 v0.8 修正（Codex 三轮反馈坐实的技术错误）：**此刻 console 进程还没重启（重启在 §4），编辑 `kanet.env` 文件不会让已在跑的进程的 `process.env` 变化**——写入后能核对的只是 `kanet.env` **文件内容**本身（`grep CUSTODIAL_RELAY_ID kanet.env` 确认写对了、跟上面创建的 pilot relay id 逐字符一致），不是 `process.env`。真正的 `process.env.CUSTODIAL_RELAY_ID` 运行时回读要等 §4 步骤 4 重启完成之后才技术上成立（§4 步骤 4 需同步补一条这项检查，见该节更新）
 - [ ] 收据模板 §(c') 四值一致证明在充值+grant 签发后做一次
@@ -140,7 +140,9 @@ G4（§4 步骤 4）证明的是"授权逻辑写对了"，不证明"真实部署
 
 ## 6. 回退路径
 
-同今晨验证过的路径：删 `kanet.env` 两行（或注释掉）→ 重启 → armed=off 全 inert，网关 503。**必须两行一起删/两行一起留**，不留中间态。
+同今晨验证过的路径：删 `kanet.env` 两行（`ADMIN_CAPABILITY_GATEWAY_ENABLED`/`ADMIN_M0C1_GATE_ARMED`）（或注释掉）→ 重启 → armed=off 全 inert，网关 503。**必须两行一起删/两行一起留**，不留中间态。
+
+🔴 v0.13 新增（防跟上面两行混为一谈）：**`PILOT_WALLET_ADDRESSES` 不属于这次回退动作**——它是 Codex MSG-124 MUST-FIX E（tg-wallet.js legacy `/send` 隔离，§3.6）的判据来源，语义跟上面两个 flag 相反（那两个删=更安全的 fail-closed，这个删=更危险的 fail-open）。只要 `tg_custodial_wallets` 表里 pilot 那一行还有余额，这个 env **必须留着**，即便 armed 闸已经回退关闭。只有在 §(f) 走完吊销+确认钱包余额清零之后，才允许考虑一并清理这个 env。
 
 ---
 
