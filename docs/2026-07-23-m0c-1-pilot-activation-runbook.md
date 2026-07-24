@@ -4,6 +4,7 @@
 > **依据**: `docs/2026-07-23-m0c-1-path-b-pilot-containment-design.md`（围栏设计，本 runbook 是它的部署时序落地）+ 频道 19:44-19:46（两 flag 耦合 footgun）+ 19:33 relay-utxo-topology 老坑。
 > **性质**: 部署编排 runbook，非设计文档——只讲"按什么顺序、每步怎么验"。
 > **v0.3 更新（2026-07-24，claim-to-code 事故后自我校准）**: v0.1/v0.2 原写"安全参数以围栏设计 doc 为准"——这正是 Codex RED 抓出的转引链风险（本 runbook 当时也没有独立验证被引用的数字是否真落码，2026-07-24 05:06 自曝）。现改为逐项标代码坐标，本文档自己对每个数字负一次独立验证责任：50 KAS 钱包顶（围栏设计 §2.2，运维配置值非代码常量）/ 2 KAS 单笔（`kasia-relay/src/lib/app-envelope.mjs:79` grant `max_amount_sompi` 字段 + `kasia-console/src/api/capability.js:126` 早拒检查）/ 3 笔每分钟限流（`capability.js:48-49` `RATE_LIMIT_WINDOW_MS`+`RATE_LIMIT_MAX`，J2 `cf680280` 落码，claim-to-code 三道核 GREEN）/ 5min custodial TTL（`app-envelope.mjs:57` `CUSTODIAL_PILOT_MAX_TTL_MS`，J1 `944f2a72` 落码）/ gateway pilot-wallet 白名单（`capability.js:206` `PILOT_WALLET_ADDRESSES`，J2 `cf680280` 落码，空=fail-closed）/ grant-scoped 白名单（`app-envelope.mjs:79` `source_scope` 字段）。均已通过 claim-to-code 三道核（自核+Bettor grep+NWT 独立扫描）确认真实存在。
+> **v0.4 更新（2026-07-24 06:17，Codex MSG-121 再审 MUST-FIX 1/2 + 三处校正）**: **§3 资金 checklist 全程指错钱包**——`custodial_transfer` 实际出钱的是 `tg_custodial_wallets` 表选出的托管钱包，不是 relay 自身钱包（`relay_nodes.address`），详见 `docs/2026-07-24-m0c-1-pilot-activation-receipt-template.md` §(a)(c)(c')。本版同步修正：①§3 资金 checklist 改查 custodial 地址、删 relay split-utxos 引用 ②§4 步骤 4 的 `armReport()`/501-scaffold 措辞更新为已接线现状 ③新增 §4.5 Owner 授权后真 live 冒烟（G4 是隔离环境单元测试，不侦测真实部署配置错误，这条是 MSG-121 指出的独立验证层，之前 runbook 暗示"G4 能抓 live 配错"是假声称，已删）。
 
 ---
 
@@ -28,11 +29,15 @@
 - [ ] 创建后立即查 DB 复核：`SELECT network FROM relay_nodes WHERE id=?` == `testnet-12`
 - [ ] 现存 31 个 relay 已审计（2026-07-23）：100% `testnet-12`，此 pilot relay 是新增第 32 个，独立核验
 
-## 3. 资金 checklist（对齐围栏设计硬止损）
+## 3. 资金 checklist（🔴 v0.4 全部改查 custodial-source 地址，对齐围栏设计硬止损）
 
-- [ ] pilot 专用钱包充值 **恰好 50 KAS**（围栏设计 §2.2 硬止损顶，不多充——多充=硬止损形同虚设）
-- [ ] 确认这是**独立**钱包，非复用任何现有 relay 的托管钱包（源地址白名单 grant-scoped 只认这一个地址）
-- [ ] relay UTXO 拓扑健康：跑一次 `POST /api/relay/:id/split-utxos {force:true}` 确保新钱包起步不碎片化（今日 NWT-tn/J2-tn/KANet-UI-tn/Bettor-tn 均已示范，同款操作零外部地址参数、低风险）
+**先读**：`docs/2026-07-24-m0c-1-pilot-activation-receipt-template.md` §(a)(c)(c')——`custodial_transfer` 实际出钱的是 `tg_custodial_wallets` 表按 `fromAddress` 选出的托管钱包（`capability.js:163-164`），**不是** pilot relay 自身的钱包（`relay_nodes.address`）。§(c') 的四值一致证明必须在充值前后各做一次。
+
+- [ ] 在 `tg_custodial_wallets` 表新建/指定**一个专用**托管钱包记录（非复用任何既有用户的托管钱包）
+- [ ] 该钱包地址充值 **恰好 50 KAS**（围栏设计 §2.2 硬止损顶，不多充——多充=硬止损形同虚设）
+- [ ] 充值后用 relay 只读命令 `get_address_utxos`（`relay.mjs:1189`，接受任意地址参数）查该地址链上余额，确认 = 50 KAS（**不是** `GET /api/relay/:id/balance`，那个查的是 relay 自身身份钱包）
+- [ ] 该地址写入 `PILOT_WALLET_ADDRESSES` env + `grant.source_scope`，做收据模板 §(c') 四值一致核对
+- [ ] **relay 自身钱包**（executor-relay，收据 §(a) 上半）保持独立日常余额管理，不需要为 pilot 专门操作——`split-utxos`/UTXO 拓扑是 relay 自己的运维事，跟 custodial-source 地址的资金安全无关，**不再作为本 checklist 一项**（v0.3 曾误列，v0.4 删除；custodial 地址若未来需要 UTXO 整理，属于另一个操作面，未评估，不在本次 pilot 范围内）
 
 ## 4. 两 flag 原子开启顺序
 
@@ -49,15 +54,24 @@
 4. **重启后立即验证**（四钥匙同款纪律）：
    - [ ] console 新 PID + 唯一实例（无并发残留）
    - [ ] relay 群起零 crash-loop（`GATE_ARMED && !GRANT_ENVELOPE_IMPLEMENTED` 会 throw，能起来=前提满足）
-   - [ ] `armReport()` 读到 `armed: true`（当前无接线的健康探针 endpoint——见 §5 已知缺口，先用日志法：relay 日志出现 `[M0c-1 gate LEGACY]` warn tell 证明 armed=on 实生效）
-   - [ ] `capability.js` 的 `GATEWAY_ENABLED()` 读到 true（curl 一个已知 501-scaffold 路由，确认从 503→非 503）
-   - [ ] **端到端冒烟（NWT note1，不可省；Bettor 定型：单一真相源非另建第二套）**：上面四点只验证"两个 flag 各自读到 true"，不证明组合后请求能实走通完整链路（若 env 变量拼写错/指错 relay id，四点独立检查仍可能全绿但请求实际打不通）。**"激活成功"判据 = 跑一次 G4 E2E harness 全量用例**（`kasia-console/test-framework/cases/m0c1-gate/g4-pilot-custodial-e2e.mjs`，J1 harness 域交付，本 runbook 不重建、直接调用；v0.2=21 用例，含 LAND/BUST①-⑥/REPLAY/REVOCATION/TAINT，2026-07-24 claim-to-code 三道核 GREEN，sanitized evidence 见 `docs/evidence/2026-07-24-m0c1-g4-pilot-custodial-e2e-v0.2-evidence.json`）——四点独立验证 + G4 全量跑绿，两者都要；env 拼错这类"flag 读到 true 但链路实际断"的情形会被 G4 直接抓出失败。
+   - [ ] armed 状态确认为 true（`kasia-relay/src/lib/authorize.mjs` `armReport()` 本身仍无 IPC/health endpoint 接线——见 §5；但网关侧已接线一个只读通道：`capability.js:163` `checkRelayArmed()` 调 `get_arm_status`（`origin='internal'`），2026-07-24 J2 `18e738bf` 落码，NWT round-trip 核过。用这条或日志法 `[M0c-1 gate LEGACY]` warn tell 均可，v0.3 曾错写"当前无接线的健康探针"，已更正）
+   - [ ] `capability.js` 的 `GATEWAY_ENABLED()` 读到 true（curl `custodial_transfer` 路由确认从 503→非 503——该路由 2026-07-24 前是 501-scaffold-only，`18e738bf`/`cf680280` 落码后已实际 wire 业务逻辑，v0.3 的"501-scaffold"描述已过期，此处更正为探真实路由）
+   - [ ] **端到端冒烟（NWT note1，不可省；Bettor 定型：单一真相源非另建第二套）**：上面四点只验证"两个 flag 各自读到 true"，不证明组合后请求能实走通完整链路（若 env 变量拼写错/指错 relay id，四点独立检查仍可能全绿但请求实际打不通）。**"激活成功"判据 = 跑一次 G4 E2E harness 全量用例**（`kasia-console/test-framework/cases/m0c1-gate/g4-pilot-custodial-e2e.mjs`，J1 harness 域交付，本 runbook 不重建、直接调用；v0.2=21 用例，含 LAND/BUST①-⑥/REPLAY/REVOCATION/TAINT，2026-07-24 claim-to-code 三道核 GREEN，sanitized evidence 见 `docs/evidence/2026-07-24-m0c1-g4-pilot-custodial-e2e-v0.2-evidence.json`）——四点独立验证 + G4 全量跑绿，两者都要。**🔴 v0.4 诚实边界（Codex MSG-121 MUST-FIX 2）：G4 是隔离环境单元测试（独立 relay 子进程+独立 DB+throwaway 密钥），验证的是授权逻辑本身对不对，不侦测真实部署环境的配置错误（env 变量拼写错/指错真实 relay id 这类问题 G4 抓不到——v0.3 曾暗示"env 拼错会被 G4 抓出"是过度声称，已删）。真实部署配置正确性靠本 runbook 逐项 checklist + §4.5 真 live 冒烟兜底。**
 5. **收敛类 legacy-unmigrated 面照常不断**：跑几笔现网 pool/relay/trading 操作，确认无 fail-closed 断（今晨事故的直接回归检查）
+
+## 4.5. Owner 授权后真 live 冒烟（🔴 v0.4 新增，Codex MSG-121 MUST-FIX 2 要求，G4 隔离测试之外的独立验证层）
+
+G4（§4 步骤 4）证明的是"授权逻辑写对了"，不证明"真实部署环境配对了"。两者是不同的验证层，缺一不可：
+
+- [ ] Owner 显式授权后（本步骤本身是不可逆动作前的最后一步，需要 Owner 知情同意，非 operator 自行决定）
+- [ ] 用真实 console（非 G4 的隔离 relay 子进程）+ 真实 grant（provision 脚本正式签发的那份，非 harness 临时生成）+ 真实 custodial 钱包（§3 充值的那个）跑一笔真实、最小额的 custodial_transfer
+- [ ] 记录真实 txId 进本次激活的收据（`docs/2026-07-24-m0c-1-pilot-activation-receipt-template.md`，新增字段：live 冒烟 txId + 时间戳）
+- [ ] 确认链上落地（`checkUtxoLanded` 或等价方式），非仅看 API 返回 `ok:true`
 
 ## 5. 已知缺口（诚实标，非 blocker，跟踪）
 
-- `armReport()` 目前无 IPC 命令/health endpoint 接线（NWT 09:22 抓出的观察性 follow-up）——本 runbook §4 验证步骤暂用日志法替代，接线是后续硬化项，归我 operator/健康探针域，非本次 pilot 激活阻塞项。
-- §2.7 gateway→relay armed 状态互查（TOCTOU 窗口）：J2/relay 侧实现后本 runbook §4 增补对应验证步骤。
+- `armReport()`（`authorize.mjs` 里那个函数本身）目前仍无独立 IPC 命令/health endpoint 接线（NWT 09:22 抓出的观察性 follow-up，v0.4 更正：§4 现有 `get_arm_status` 走的是 §2.7 网关互查通道，跟这条不是同一件事——健康探针专用接线仍未做）——接线是后续硬化项，归我 operator/健康探针域，非本次 pilot 激活阻塞项。
+- §2.7 gateway→relay armed 状态互查已实现（`18e738bf`），**但有理论 TOCTOU 窗口**（check 与 forward 是两次独立 IPC，不是原子操作）——诚实标，主防线仍是 §1 两 flag 原子开启顺序。
 
 ## 6. 回退路径
 
