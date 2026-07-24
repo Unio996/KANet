@@ -1,6 +1,7 @@
 # M0c-1 Path B Pilot 激活部署 runbook（KANet-UI·工作流④）
 
-> **Status**: CURRENT（v0.11·v0.10 已 Codex 三轮 re-review 判 docs GREEN，剩 evidence-closure 层：MF1 已闭[J2]，MF2 本版补齐[KANet-UI]，待 Bettor+NWT 深核 + Codex evidence-closure verdict + Owner 最后拍）
+> **Status**: CURRENT（v0.12·docs 已 Codex GREEN，MF1[J2]/MF2 reviewed helper[J2 落码+KANet-UI 文档同步]均已三人红队 GREEN+ship，待 Bettor 最终 HEAD 重跑 evidence + Codex evidence-closure verdict + Owner 最后拍）
+> **v0.12 更新（2026-07-24，reviewed helper `5964af91` ship 后，runbook 步骤 4-6 从"待定设计"改成引用实际实现）**：§3.6 MF2 步骤 4-6 原先是"helper 具体实现留 KANet-UI+J2 联合定"的占位描述，helper（`kasia-console/scripts/m0c1-pilot-custodial-insert.mjs`）落码 ship（三人红队 GREEN + NWT loop-closer 复核 GREEN，review_ref=`bed78d93`，含 NWT 红队抓出的两个真实缺口修复：`--network` 白名单堵 typo-fallback-mainnet footgun + 非法 mnemonic 错误路径 no-leak 测试）后，本版把步骤 4-6 改写为具体命令+行为描述，非泛泛"经一个 reviewed helper"这类占位措辞。
 > **v0.11 更新（2026-07-24，Codex v0.10 re-review "Remaining MUST-FIX 2"）**：明文候选 mnemonic 跨 §3（Owner go 前，offline 生成）→ §3.6（Owner go 后，真建行）两个相位，此前只说"留 scratch 不进消息"，没定义完整生命周期。补齐 6 步（Codex 原文逐字，见 `scratch/mf2-mnemonic-handoff-spec.txt`）：①隔离进程生成，mnemonic 不进 stdout/不做 shell 参数 ②仅存加密瞬态容器/受控 in-memory session，绝不明文文件/剪贴板/chat/log ③no-go/abort/mismatch → 立即销毁候选密钥，只记 public 地址/hash ④go 后经 reviewed helper 做 encrypt+insert，随即 in-process 解密 derive 地址跟候选比对，不 log secret ⑤零化瞬态明文 ⑥`tg_user_id` 必须显式唯一非空（更正 v0.10 曾写"留空/标记 pilot 专用"的错误措辞）。Codex 明确"不要求 HSM，是有界操作程序"——纯 runbook 章节扩写，非新钱路代码。步骤 4 的 reviewed helper 具体实现（新写小函数 vs 复用现有代码路径）留 KANet-UI+J2 联合定，本版只定操作程序本身。
 > **依据**: `docs/2026-07-23-m0c-1-path-b-pilot-containment-design.md`（围栏设计，本 runbook 是它的部署时序落地）+ 频道 19:44-19:46（两 flag 耦合 footgun）+ 19:33 relay-utxo-topology 老坑。
 > **性质**: 部署编排 runbook，非设计文档——只讲"按什么顺序、每步怎么验"。
@@ -81,10 +82,19 @@
 
 **🔴 v0.11 新增（Codex "Remaining MUST-FIX 2" 步骤 4-6，接续 §3 步骤 1-3，明文候选密钥生命周期在这里收尾）：**
 
-- [ ] **[MF2 步骤 4] go → encrypt+insert 经 reviewed helper，随即 in-process 验证**：Owner 批准（§3.5 go）后，**经一个 reviewed helper**（受审的插入路径，**不是 operator 手搓 SQL/命令**——复用 `tg-wallet.js:62-68` 的 `encrypt()`+`INSERT` 逻辑封装一个小 helper，或等价的 reviewed 代码路径；这个 helper 本身要不要新写、写在哪个文件，KANet-UI+J2 联合定，关键约束是 encrypt 路径必须走已审代码，不能是本次现改的裸 SQL）做 encrypt + insert。**插入后立即 in-process 解密、derive 出地址、跟 Owner 批准时看到的候选地址逐字符比对**——确认写进生产 DB 的加密 mnemonic 确实 derive 出那个被批准的地址，非另一对张冠李戴的 key material。**整个过程不得 log 这个 secret**（明文 mnemonic 不得出现在任何日志行，哪怕是 debug 级）
-- [ ] **[MF2 步骤 5] 零化瞬态明文**：insert+验证完成后，**best-effort 零化/删除**所有瞬态明文副本（§3 scratch 里的、in-memory 的那份候选 mnemonic）——只记录"完成"状态，**不记录 mnemonic 本身**
-- [ ] **[MF2 步骤 6] 显式唯一 pilot `tg_user_id` 非空**：🔴 v0.11 更正（上一版本此处写"留空/标记 pilot 专用"是错的，Codex 明确要求非空）：用一个**显式、唯一**的 pilot `tg_user_id`（专用 pilot 标识符，非复用任何既有真实用户的 id）——**不得留空、不得写占位字符串**。既有 `tg-wallet` 路径把 `tg_user_id` 当稳定 lookup key，空值会被拒
-- [ ] `tg_custodial_wallets` 表其余字段（`network`/`created_at`/`updated_at`）按建行流程正常填
+**🔴 v0.12 更新（reviewed helper 已落码 ship，`5964af91`，M0a `m0c1-pilot-custodial-writer` capability + 三人红队 GREEN + NWT loop-closer 复核 GREEN，review_ref=`bed78d93`）：** 下面步骤 4-6 从"待定设计"改为引用**实际 ship 的 helper**，非占位描述：
+
+- [ ] **[MF2 步骤 4] go → 用 `kasia-console/scripts/m0c1-pilot-custodial-insert.mjs` 做 encrypt+insert，随即 in-process 验证**：Owner 批准（§3.5 go）后跑：
+  ```
+  node kasia-console/scripts/m0c1-pilot-custodial-insert.mjs insert \
+    --tg-user-id <pilot 专用唯一标识> --approved-address <Owner 批准的候选地址> \
+    --network testnet-12 [--db <path，默认生产 console.db>]
+  ```
+  mnemonic 从脚本随后弹出的 stdin prompt 交互式喂入（**绝不用** `echo "mnemonic" | node ...` 这类喂法——echo 本身会把 mnemonic 写进 shell history + `ps` 进程表，等于把步骤 1 想堵的暴露面从 helper 挪到了喂法上，没堵住；必须交互式输入或受控管道）。该 helper 复用 `tg-wallet.js:58-73` 同一批 reviewed 函数（`crypto.js` `encrypt()`/`decrypt()` + `wallet.js` `addressFromMnemonic()`），非本次现改的裸 SQL；`--network` 走白名单校验（仅 `testnet-12`，拒绝任何 typo/未识别值，不进 `wallet.js` `getNetworkType()` 的 mainnet-default 分支——同 `relay.js:75` 那类 footgun 的反面教材）。**插入前先派生候选地址跟 `--approved-address` 比对**（不匹配立即 abort 不碰 DB，比"insert 后才发现"更早止损）；**插入后用同一个 better-sqlite3 连接**（非另开 readonly 连接，防 WAL 可见性延迟导致误判）**立即 in-process 解密、derive 出地址、再次跟批准候选地址逐字符比对**——两层验证目标不同（前者挡"候选值本身对不对"，后者挡"写进 DB 的加密副本解密回来还对不对"），双保险非冗余。任一层比对失败 → helper 自动 DELETE 刚插入那行（自愈，不留错误数据）+ CRITICAL 非零退出。**整个过程不 log mnemonic 本身**（console 输出只含 `tg_user_id`/地址/PASS-FAIL 状态）
+- [ ] **[MF2 步骤 5] 零化瞬态明文**：insert+验证完成后，helper 内部把持有 mnemonic 的局部变量重新赋值为空字符串丢弃引用。**诚实标注（非过度承诺）**：mnemonic 复用 `crypto.js`/`wallet.js` 现有函数的 `string` 签名（未改这两个已审函数去接 `Buffer`——那是范围外重构），JS `string` 不可变+由 GC 回收，**无法做到真正的内存覆写零化**（语言限制，非 helper 实现缺陷）；best-effort = 丢引用尽早失去可达性 + 不缓存/不重试重用，**不写"已零化"这种过度承诺的措辞**
+- [ ] **[MF2 步骤 6] 显式唯一 pilot `tg_user_id` 非空**：🔴 v0.11 更正（上一版本此处写"留空/标记 pilot 专用"是错的，Codex 明确要求非空）：用一个**显式、唯一**的 pilot `tg_user_id`（专用 pilot 标识符，非复用任何既有真实用户的 id）——helper 对空值/占位符字面量（`blank`/`mark pilot`/`pilot`/`test`/`placeholder`/`todo`/`tbd`，大小写不敏感）**精确拒绝**。既有 `tg-wallet` 路径把 `tg_user_id` 当稳定 lookup key，空值会被拒
+- [ ] `tg_custodial_wallets` 表其余字段（`network`/`created_at`/`updated_at`）由 helper 按建行流程正常填
+- [ ] regression 证据：`test-framework/cases/m0c1-gate/pilot-custodial-insert-regression.mjs`（真实 CLI 调用，非 mock），17/17 PASS（候选匹配/不匹配/占位符/重复/network 白名单拒绝/非法 mnemonic 拒绝+无泄露/TAINT 全路径扫描）
 - [ ] 用上一步建好的地址充值 **恰好 50 KAS**（不多充——多充=硬止损形同虚设）
 - [ ] 充值后用 relay 只读命令 `get_address_utxos`（`relay.mjs:1189`，接受任意地址参数）查该地址链上余额，确认 = 50 KAS（**不是** `GET /api/relay/:id/balance`，那个查的是 relay 自身身份钱包）
 - [ ] 跑 provision 脚本正式签发 grant（`kasia-console/scripts/m0c1-grant-provision.mjs`，用 §3 起草、Owner 已批的候选字段值，非临时改动的新值；**必须显式传 `--payee`**——`m0c1-grant-provision.mjs:100` 默认 NULL，不传 = `payee_scope` 空 = 该维 NULL，J2 负责校验落码，本条是 runbook 侧的执行提醒）
