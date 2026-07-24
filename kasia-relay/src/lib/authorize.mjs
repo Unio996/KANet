@@ -121,7 +121,10 @@ function authorizeAppCommand(cmd) {
   // 需信封类 (§3.1 默认): grant/envelope 验证 (§4.1 step2-7: 解信封→验签名→canonical→intent⊆grant→nonce[M0c-3])。
   if (!GRANT_ENVELOPE_IMPLEMENTED) {
     // 防御性 fail-closed (理论不可达: armed=on+flag=false 已被模块加载 throw 拦; 此处双保险)。
-    return { decision: 'deny', reason: 'app grant/envelope 验证未启用 (flag 待 diff 审+实战后置 true) — fail-closed', reason_code: 'GRANT_ENVELOPE_STUB', phase: 'authorization' };
+    // phase='infra_error'(非'authorization'): 这不是"此请求违反授权规则", 是 relay 自身验证链未启用的
+    // 基础设施故障 — Bettor 06:35 三phase收口: 分类单一源放在 relay 侧 reason_code 定义处(此处),
+    // gateway 纯按 phase 映射 503, 不维护自己一份 infra reason_code Set (防漂移复发 NWT 抓的洞)。
+    return { decision: 'deny', reason: 'app grant/envelope 验证未启用 (flag 待 diff 审+实战后置 true) — fail-closed', reason_code: 'GRANT_ENVELOPE_STUB', phase: 'infra_error' };
   }
   // 完整验证链 (app provision 组件批): AuthResult = 母卡 §5 接口 (decision/reason 向后兼容批3 调用方)。
   return verifyAppEnvelope(cmd, {

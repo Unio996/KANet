@@ -202,11 +202,22 @@ function checkIntentWithinGrant(env, grant) {
   return null;
 }
 
-// MF3 结构化 decision (Codex 第二轮 RED 修正④): 加 phase + reason_code, gate 层拒绝一律
-// phase='authorization'(不泄密, 只带非敏感原因分类), 让调用方(capability.js/G4 harness)靠
-// 结构化字段判定"到达执行层没有", 不用靠 regex 猜 relay 日志文本(Codex 抓的 G4 弱判据坑同根)。
-const denyResult = (reason, code = 'DENIED') => ({
-  decision: 'deny', reason, reason_code: code, phase: 'authorization',
+// MF3 结构化 decision (Codex 第二轮 RED 修正④): 加 phase + reason_code, 让调用方(capability.js/
+// G4 harness)靠结构化字段判定"到达执行层没有", 不用靠 regex 猜 relay 日志文本(Codex 抓的 G4 弱
+// 判据坑同根)。
+//
+// 三档 phase(Bettor 06:35 定案·分类下沉到 relay 源头, 非 gateway 侧维护 reason_code 例外表——
+// relay 自己最清楚一条 deny 是"我这边读/验证本身失败"还是"我判定这个请求不该被授权", gateway
+// 只需纯按 phase 三分支映射 HTTP 状态, 新增任何 reason_code 都不用碰 gateway, 零维护漂移)：
+//   - 'authorization': relay 权威判定"此请求违反了授权规则"(签名/scope/结构/吊销/过期/绑定等
+//     绝大多数 deny) —— gateway 映射 403(永久性拒绝语义, 客户端不该重试同一请求)。
+//   - 'infra_error': relay 自己的基础设施/验证过程故障(grant registry DB 读失败/信封验证异常/
+//     功能 flag 未启用的防御性拒绝), 不是"这个请求违反规则", 是"relay 这次没能完成判定" ——
+//     gateway 映射 503(临时性语义, 客户端该退避重试)。目前仅 3 条 reason_code 落这档(见下方
+//     GRANT_REGISTRY_READ_FAILED/ENVELOPE_VERIFICATION_EXCEPTION/GRANT_ENVELOPE_STUB)。
+//   - 'execution': gate 已放行, 进 switch 后的业务执行结果(relay.mjs 另外两处打标, 不在本文件)。
+const denyResult = (reason, code = 'DENIED', phase = 'authorization') => ({
+  decision: 'deny', reason, reason_code: code, phase,
   authenticated: false, callerId: null, grantId: null, intentDigest: null,
 });
 
@@ -241,7 +252,7 @@ export function verifyAppEnvelope(cmd, ctx = {}) {
 
     // grant fresh 读 (§2·零缓存, 吊销即时可见; 读失败 fail-closed)
     const gr = getGrantFresh(env.grant_id);
-    if (!gr.ok) return denyResult(`grant registry 读失败 fail-closed: ${gr.error}`, 'GRANT_REGISTRY_READ_FAILED');
+    if (!gr.ok) return denyResult(`grant registry 读失败 fail-closed: ${gr.error}`, 'GRANT_REGISTRY_READ_FAILED', 'infra_error');
     if (!gr.grant) return denyResult('grant 不存在 (未知 grant_id, §6-4)', 'GRANT_NOT_FOUND');
     const grant = gr.grant;
     if (grant.app_key_id !== env.app_key_id) return denyResult('grant.app_key_id != envelope.app_key_id', 'APP_KEY_ID_MISMATCH');
@@ -305,6 +316,6 @@ export function verifyAppEnvelope(cmd, ctx = {}) {
     };
   } catch (e) {
     // M1-4: 任何解析/评估异常 → fail-closed deny, 不推进状态。
-    return denyResult(`envelope 验证异常 fail-closed (M1-4): ${e?.message || String(e)}`, 'ENVELOPE_VERIFICATION_EXCEPTION');
+    return denyResult(`envelope 验证异常 fail-closed (M1-4): ${e?.message || String(e)}`, 'ENVELOPE_VERIFICATION_EXCEPTION', 'infra_error');
   }
 }
