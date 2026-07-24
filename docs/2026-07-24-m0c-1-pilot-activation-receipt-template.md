@@ -7,6 +7,7 @@
 > **v0.4 更新（2026-07-24 07:xx，Codex MSG-122 四 MUST-FIX 全 CLOSED+源码包 GREEN，armed=on 前 pre-activation B 项）**: 四 MUST-FIX 全部收口后，Codex 放行呈 Owner 做 Path B go/no-go 决策，但指出 claim-to-code（审过代码写对了）不等于 claim-to-deployed（真实跑的进程 == 审过的那份代码）——中间隔着一次部署动作没人核过。新增 §(h) 部署代码钉死回读：部署 commit SHA 核对 + 5 个 load-bearing 文件（authorize.mjs/app-envelope.mjs/relay.mjs/capability.js/migrate.js）sha256 交叉核 + migration 版本回读，任一不匹配即停激活重查。
 > **v0.5 更新（2026-07-24 07:4x，Codex MSG-122 pre-activation C 项·收据半）**: `capability.js:30` `CUSTODIAL_RELAY_ID` 定义为 `process.env.CUSTODIAL_RELAY_ID || process.env.FAUCET_RELAY_ID || null`——忘设前者会静默落到身份完全不同的 faucet relay（同款 `relay.js:75` `network||'mainnet'` 隐式 fallback 老坑的变体）。C 项拆两半：gateway 侧去 fallback 显式必设（J2 负责）+ 收据侧现场核对（本次）。新增 §(c'') relay 身份+network+target 等式：⑤env 实际值==⑥pilot relay id、⑦network==testnet-12、⑧intent.target==⑨grant.payee_scope 且是真实预期收款方。
 > **v0.6 更新（2026-07-24 08:xx，Codex MSG-122 pre-activation A 项：Owner-gate 时序）**: Bettor+NWT 独立核对确认——真正不可逆的窗口打开点是两 flag 原子开启（§(d)）本身，不是 §(g) 那笔 live 冒烟测试；旧版把"Owner 显式授权"只挂在 §(g) 前，等于决策权倒置给 operator。新增 §(c''') arm 授权回读，作为独立于 §(g) 的第二道 gate，且要求 Owner 的 go 是对**整包具体参数**（部署 commit/custodial 钱包/50 KAS/grant 字段/两 flag 目标值/smoke 参数/回滚路径）的知情同意，不是空白的"可以了"。对应 runbook v0.5 §3.5。
+> **v0.7 更新（2026-07-24 09:xx，Codex 二轮 MUST-FIX：§(c''') 改记候选值，非回读值）**: 对应 runbook v0.6 §3→§3.5→§3.6 三段重排——§(c''') Owner 逐项过目表现改为记录**候选值**（尚未充值的钱包地址/尚未 provision 的 grant 字段/CUSTODIAL_RELAY_ID 拟设值），并显式要求核对 Owner go 时间戳早于 §(a)(c)(c'')(d) 任何"实际发生"值出现之前——填表时若那些字段已有值，说明执行顺序倒了。
 > **性质**: 部署产物（filled-in receipt），非设计文档。每次真实激活（含未来 pilot 结束/重开）都产生一份新收据，不是写一次的模板本身。
 
 ---
@@ -85,27 +86,29 @@
 | ⑨ `grant.payee_scope` | grant registry 查询 | |
 | ⑧==⑨ ？（intent 里实际要付的地址 == grant 授权范围内，且是真实预期收款方，非笔误/测试残留地址） | 逐字符比对 + 人工确认这是真实预期收款方 | |
 
-### (c''') arm 授权回读（🔴 v0.5 新增，Codex MSG-122 pre-activation A 项，runbook §3.5 硬前置——必须先于下方 §(d) 存在，因为它是"要不要开闸"本身的 Owner go，不是闸开了之后的事）
+### (c''') arm 授权回读（🔴 v0.6 更新，Codex MSG-122 pre-activation A 项 + 二轮 MUST-FIX，runbook §3.5 硬前置——必须先于下方 §(a)(c)(d) 的**实际值**填写完成，因为它是"要不要动钱/要不要开闸"本身的 Owner go，不是钱已经动了之后的事）
 
-Owner 的 go 必须是对**这次激活整包具体参数**的知情同意，不是一句空白的"可以了"——填写本节前，下面这些字段必须已经有真实值（可引用本收据其余小节），Owner 是看着这些具体数字点头的：
+**🔴 v0.6 修正（Codex 二轮 MUST-FIX，Bettor 自认内部验证也漏掉这层顺序）**：Owner 审批时看到的是**候选值**（runbook §3 起草、尚未充值/尚未写入 registry），**不是**下面 §(a)(c)(d)(c'') 那些"实际发生后"的回读值——那些字段要到 runbook §3.6（Owner go 之后）才会有真实内容。填本节时若 §(a)(c)(d)(c'') 已经有值，说明执行顺序倒了，回去查是不是先斩后奏。
 
-| Owner 逐项过目的参数 | 引用位置 | 当时看到的实际值 |
+| Owner 逐项过目的候选参数 | 对应 runbook 章节（候选值来源，非回读） | Owner 当时看到的候选值 |
 |---|---|---|
-| 部署 commit SHA | §(h) | |
-| 专用 custodial 钱包地址 | §(a)/§3 | |
-| 充值金额（须=50 KAS 硬顶） | §(c) | |
-| grant 字段（source_scope/payee_scope/max_amount_sompi/valid_until） | §(b) | |
-| 即将写入的两 flag 目标值 | §(d) | |
-| §(g) smoke 测试参数（金额/收款地址） | §(g) | |
+| 部署 commit SHA | §(h)（这项本身就是已部署状态，非候选，正常回读） | |
+| 专用 custodial 钱包**候选**地址（尚未充值） | §3 | |
+| 拟充值金额（须=50 KAS 硬顶，尚未真充） | §3 | |
+| grant **候选**字段（source_scope/payee_scope/max_amount_sompi/valid_until，尚未 provision） | §3 | |
+| `CUSTODIAL_RELAY_ID` 拟设值 + 对应 pilot relay id（尚未在 §(d) 生效） | §(c'') | |
+| 即将写入的两 flag 目标值 | §3.6→§4（尚未执行） | |
+| §(g) smoke 测试参数（金额/收款地址） | §(g)（届时才执行） | |
 | 回滚路径 | runbook §6 | |
 
 | 授权字段 | 实际值 |
 |---|---|
 | Owner go 的方式（频道消息/其他，附原文引用或链接） | |
 | Owner go 的时间戳 | |
-| 该 go 是否在下方 §(d) 两 flag 生效之前拿到（逐时间戳核对，不得倒序） | |
+| 该 go 是否在下方 §(a)(c)(c'')(d) 出现任何"实际充值/实际写库/实际生效"值**之前**拿到（逐时间戳核对，不得倒序——这正是 Codex 二轮抓的洞：v0.5 之前 §(a)/§(c) 的实际值早于本节 Owner go 就已产生） | |
+| 若执行中候选值与实际写入值有出入（哪怕只是笔误） | 记录差异，说明是否回头重新过 Owner（runbook §3.6 纪律：不得自行调整后继续） | |
 
-> 与 §(g) 的 live 冒烟授权是**两道独立**记录，不可用一条顶替另一条：本节记录"是否同意开闸"，§(g) 记录"是否同意发这笔真实测试转账"。
+> 与 §(g) 的 live 冒烟授权是**两道独立**记录，不可用一条顶替另一条：本节记录"是否同意按这套候选参数动钱+开闸"，§(g) 记录"是否同意发这笔真实测试转账"。
 
 ### (d) 两 flag 状态同时回读（runbook §1 依赖，缺一不可）
 

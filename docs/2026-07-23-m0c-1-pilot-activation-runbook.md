@@ -6,6 +6,7 @@
 > **v0.3 更新（2026-07-24，claim-to-code 事故后自我校准）**: v0.1/v0.2 原写"安全参数以围栏设计 doc 为准"——这正是 Codex RED 抓出的转引链风险（本 runbook 当时也没有独立验证被引用的数字是否真落码，2026-07-24 05:06 自曝）。现改为逐项标代码坐标，本文档自己对每个数字负一次独立验证责任：50 KAS 钱包顶（围栏设计 §2.2，运维配置值非代码常量）/ 2 KAS 单笔（`kasia-relay/src/lib/app-envelope.mjs:79` grant `max_amount_sompi` 字段 + `kasia-console/src/api/capability.js:126` 早拒检查）/ 3 笔每分钟限流（`capability.js:48-49` `RATE_LIMIT_WINDOW_MS`+`RATE_LIMIT_MAX`，J2 `cf680280` 落码，claim-to-code 三道核 GREEN）/ 5min custodial TTL（`app-envelope.mjs:57` `CUSTODIAL_PILOT_MAX_TTL_MS`，J1 `944f2a72` 落码）/ gateway pilot-wallet 白名单（`capability.js:206` `PILOT_WALLET_ADDRESSES`，J2 `cf680280` 落码，空=fail-closed）/ grant-scoped 白名单（`app-envelope.mjs:79` `source_scope` 字段）。均已通过 claim-to-code 三道核（自核+Bettor grep+NWT 独立扫描）确认真实存在。
 > **v0.4 更新（2026-07-24 06:17，Codex MSG-121 再审 MUST-FIX 1/2 + 三处校正）**: **§3 资金 checklist 全程指错钱包**——`custodial_transfer` 实际出钱的是 `tg_custodial_wallets` 表选出的托管钱包，不是 relay 自身钱包（`relay_nodes.address`），详见 `docs/2026-07-24-m0c-1-pilot-activation-receipt-template.md` §(a)(c)(c')。本版同步修正：①§3 资金 checklist 改查 custodial 地址、删 relay split-utxos 引用 ②§4 步骤 4 的 `armReport()`/501-scaffold 措辞更新为已接线现状 ③新增 §4.5 Owner 授权后真 live 冒烟（G4 是隔离环境单元测试，不侦测真实部署配置错误，这条是 MSG-121 指出的独立验证层，之前 runbook 暗示"G4 能抓 live 配错"是假声称，已删）。
 > **v0.5 更新（2026-07-24 08:xx，Codex MSG-122 pre-activation A 项：Owner-gate 时序）**: Bettor+NWT 独立核对确认的洞——v0.4 之前"Owner 显式授权"只挂在 §4.5（live 冒烟测试）前面，但真正让闸对全部真实流量生效、pilot custodial 地址暴露在真实攻击面下的动作是 §4（两 flag 原子开启）本身，不是 §4.5 那笔测试转账。旧文档把 Owner 知情同意安排在"闸已经开着"之后，等于决策权倒置给 operator。新增 **§3.5 Owner 显式 go/no-go**，作为 §4 的硬前置条件（未拿到 Owner go 不得开始 §4 步骤 1），与 §4.5 的授权检查点是两道独立的、不能互相替代的 gate（§3.5 gate "要不要开闸"，§4.5 gate "要不要发这笔测试转账"）；§4.5 原"不可逆动作前的最后一步"措辞已更正。
+> **v0.6 更新（2026-07-24 09:xx，Codex 二轮 MUST-FIX：§3 排在 §3.5 前面=先动钱再问 Owner，Bettor 自认内部验证也漏掉这层）**: v0.5 的 §3.5 硬前置只挡住了 §4（flag 开启），但原 §3（资金 checklist：真充 50 KAS + 真写 grant.source_scope 进 registry）仍排在 §3.5 之前执行——Owner 表态时钱已经进了钱包、grant 已经进了 registry，是又一层"先斩后奏"，被 Codex 二轮外审抓出。v0.6 拆三段：**§3**（候选值准备，只起草钱包候选地址+grant 候选字段，不动钱不写库）→ **§3.5**（Owner 看候选值给 go，范围从"§4 前置"扩为"§3.6+§4 前置"）→ **§3.6**（Owner go 后才真充值+真 provision grant，原 §3 后半段搬到这里）。收据模板 §(c''') 同步改为记录"Owner 看到的是候选值"而非回读值。
 
 ---
 
@@ -30,29 +31,43 @@
 - [ ] 创建后立即查 DB 复核：`SELECT network FROM relay_nodes WHERE id=?` == `testnet-12`
 - [ ] 现存 31 个 relay 已审计（2026-07-23）：100% `testnet-12`，此 pilot relay 是新增第 32 个，独立核验
 
-## 3. 资金 checklist（🔴 v0.4 全部改查 custodial-source 地址，对齐围栏设计硬止损）
+## 3. custodial 钱包 + grant 候选值准备（🔴 v0.6 重排，Codex 二轮 MUST-FIX：不动钱/不写 grant 库，先出候选值给 Owner 审）
 
-**先读**：`docs/2026-07-24-m0c-1-pilot-activation-receipt-template.md` §(a)(c)(c')——`custodial_transfer` 实际出钱的是 `tg_custodial_wallets` 表按 `fromAddress` 选出的托管钱包（`capability.js:163-164`），**不是** pilot relay 自身的钱包（`relay_nodes.address`）。§(c') 的四值一致证明必须在充值前后各做一次。
+**Codex 二轮外审抓出的洞（Bettor 自认这层也是团队内部验证漏掉的）**：v0.5 之前，本节（原"资金 checklist"）在 §3.5（Owner go/no-go）**之前**执行，等于 operator 先把 50 KAS 真充进钱包、先把 grant 真写进 registry，才轮到 Owner 表态——充值=动钱，写 grant=铸造授权，两者都不是"准备动作"，而是本身就该等 Owner 批的实际操作。旧顺序 = 先斩后奏。v0.6 拆成两段：本节只出**候选值**（不动钱、不写 registry），§3.5 Owner 看着候选值批，批完才进 §3.6 真执行。
 
-- [ ] 在 `tg_custodial_wallets` 表新建/指定**一个专用**托管钱包记录（非复用任何既有用户的托管钱包）
-- [ ] 该钱包地址充值 **恰好 50 KAS**（围栏设计 §2.2 硬止损顶，不多充——多充=硬止损形同虚设）
+**先读**：`docs/2026-07-24-m0c-1-pilot-activation-receipt-template.md` §(a)(c)(c')——`custodial_transfer` 实际出钱的是 `tg_custodial_wallets` 表按 `fromAddress` 选出的托管钱包（`capability.js:163-164`），**不是** pilot relay 自身的钱包（`relay_nodes.address`）。
+
+- [ ] 生成/指定**一个专用**托管钱包候选地址（非复用任何既有用户的托管钱包）。若技术上必须建 `tg_custodial_wallets` 行才能拿到地址，允许建行，但**该行本次不充值**——地址存在不等于资金存在，风险面在充值那一刻发生，不在生成地址那一刻
+- [ ] 起草 grant 候选字段值（`source_scope`=上面候选地址 / `payee_scope` / `max_amount_sompi`=2 KAS / `valid_until`），**本节不跑 provision 脚本、不写入 `m0c1_app_grants` 表**——provision 是"铸造授权"本身，即便此刻 gate 还没 arm、不会被 enforce，仍属于该等 Owner 批的动作，非"准备"
+- [ ] 候选钱包地址 + 候选 grant 字段值整理进收据 §(c''') 的"Owner 逐项过目参数"表，供 §3.5 引用
+- [ ] 充值目标金额记为 **恰好 50 KAS**（围栏设计 §2.2 硬止损顶，候选值阶段只是写下这个数字，不是真充）
+- [ ] **relay 自身钱包**（executor-relay，收据 §(a) 上半）保持独立日常余额管理，不需要为 pilot 专门操作，不在本节范围内（v0.3 曾误列，v0.4 删除）
+
+## 3.5. Owner 显式 go/no-go（🔴 v0.6 更新，Codex MSG-122 pre-activation A 项 + 二轮 MUST-FIX：arm 闸本身、以及 §3 的候选钱包/grant 都要 Owner 先批，不是只等最后那笔冒烟）
+
+**Bettor + NWT 独立核对确认的洞（v0.5）**：v0.4 之前，"Owner 显式授权"这句话只出现在 §4.5（live 冒烟测试）前面。但 §4（两 flag 原子开启）本身才是让 armed 闸对**全部真实流量**生效的那个动作——闸一开，pilot custodial 地址就暴露在真实攻击面下，**即便 operator 还没手动发 §4.5 那笔测试转账**。这才是真正不可逆（或至少高成本回退）的窗口打开点，不是 §4.5 那一笔测试转账。旧文档把 Owner 知情同意安排在"闸已经开着"之后，而不是"要不要开闸"之前，等于把决策权倒置给了 operator。
+
+**v0.6 追加（Codex 二轮）**：本节的 go 现在也是 §3→§3.6（真充值+真写 grant）的前置闸，不只是 §4（flag 开启）的前置闸——Owner 看到的是**候选值**（还没充的钱包地址、还没插库的 grant 字段），批完才允许 §3.6 真的动钱/写库。
+
+- [ ] **Owner 的 go 必须是对"这次激活整包具体候选参数"的知情同意，不是一句空白的"可以了"**（Bettor 定型的范围）：给 Owner 看的东西必须包含——部署 commit SHA（§(h)）、专用 custodial 钱包**候选**地址（§3，尚未充值）、拟充值金额（须 = 50 KAS 硬顶，§3）、grant **候选**字段（source_scope/payee_scope/max_amount_sompi/valid_until，§3，尚未写入 registry）、即将写入的两 flag 目标值（§(d)）、§4.5 smoke 测试参数（金额/收款地址）、回滚路径（§6）——**逐项过一遍具体值**，不是抽象地问"能不能 arm"
+- [ ] **在执行 §3.6 或 §4 任何一步之前**，Owner 已就上面这包候选参数给出显式 go（非默许、非"之前讨论过就算数"——每次真实激活都是一次新的不可逆窗口打开，需要当次的显式确认，理由见频道纪律 `feedback-decision-making-discipline-consolidated`：重大决策需 Owner 终裁）
+- [ ] Owner go 的方式、时间戳、**Owner 当时看到的具体候选参数快照**（或指向收据其余字段的引用）记入收据（`docs/2026-07-24-m0c-1-pilot-activation-receipt-template.md` §(c'''），位置在 §(d) flag 回读之前
+- [ ] operator 未拿到这条明确记录之前，**不得**开始 §3.6（充值/grant 签发）或 §4 步骤 1——两者都已进入不允许中断的原子序列，不能"先斩后奏再补授权"
+- [ ] §4.5（live 冒烟）仍保留独立的第二道 Owner 授权检查点（对"发这笔真实转账"本身的知情同意）——两道检查点不是同一件事、不能互相替代：本节 gate 的是"要不要按这套候选参数动钱+开闸"（覆盖 §3.6 执行 + §4 flag 开启两个后续动作），§4.5 gate 的是"要不要现在发这笔真实测试转账"
+
+## 3.6. Owner go 后执行：真充值 + grant 正式签发（🔴 v0.6 新增，原 §3 后半段移到这里）
+
+**前置条件：§3.5 Owner go 已拿到并记入收据，否则不得开始下面任何一步。** 若实际要写入的值与 Owner 看到的候选值不同（哪怕只是笔误改动），必须回到 §3.5 重新过 Owner，不得自行调整后继续。
+
+- [ ] 用 §3 候选地址充值 **恰好 50 KAS**（不多充——多充=硬止损形同虚设）
 - [ ] 充值后用 relay 只读命令 `get_address_utxos`（`relay.mjs:1189`，接受任意地址参数）查该地址链上余额，确认 = 50 KAS（**不是** `GET /api/relay/:id/balance`，那个查的是 relay 自身身份钱包）
-- [ ] 该地址写入 `PILOT_WALLET_ADDRESSES` env + `grant.source_scope`，做收据模板 §(c') 四值一致核对
-- [ ] **relay 自身钱包**（executor-relay，收据 §(a) 上半）保持独立日常余额管理，不需要为 pilot 专门操作——`split-utxos`/UTXO 拓扑是 relay 自己的运维事，跟 custodial-source 地址的资金安全无关，**不再作为本 checklist 一项**（v0.3 曾误列，v0.4 删除；custodial 地址若未来需要 UTXO 整理，属于另一个操作面，未评估，不在本次 pilot 范围内）
-
-## 3.5. Owner 显式 go/no-go（🔴 v0.5 新增，Codex MSG-122 pre-activation A 项：arm 闸本身要 Owner 知情同意，不是只等最后那笔冒烟）
-
-**Bettor + NWT 独立核对确认的洞**：v0.4 之前，"Owner 显式授权"这句话只出现在 §4.5（live 冒烟测试）前面。但 §4（两 flag 原子开启）本身才是让 armed 闸对**全部真实流量**生效的那个动作——闸一开，pilot custodial 地址就暴露在真实攻击面下，**即便 operator 还没手动发 §4.5 那笔测试转账**。这才是真正不可逆（或至少高成本回退）的窗口打开点，不是 §4.5 那一笔测试转账。旧文档把 Owner 知情同意安排在"闸已经开着"之后，而不是"要不要开闸"之前，等于把决策权倒置给了 operator。
-
-- [ ] **Owner 的 go 必须是对"这次激活整包具体参数"的知情同意，不是一句空白的"可以了"**（Bettor 定型的范围）：给 Owner 看的东西必须包含——部署 commit SHA（§(h)）、专用 custodial 钱包地址（§3/§(a)）、充值金额（须 = 50 KAS 硬顶，§3）、grant 具体字段（source_scope/payee_scope/max_amount_sompi/valid_until，§(b)）、即将写入的两 flag 目标值（§(d)）、§4.5 smoke 测试参数（金额/收款地址）、回滚路径（§6）——**逐项过一遍具体值**，不是抽象地问"能不能 arm"
-- [ ] **在执行 §4 任何一步之前**（尤其是 §4 步骤 2 编辑 `kanet.env` 之前），Owner 已就上面这包具体参数给出显式 go（非默许、非"之前讨论过就算数"——每次真实激活都是一次新的不可逆窗口打开，需要当次的显式确认，理由见频道纪律 `feedback-decision-making-discipline-consolidated`：重大决策需 Owner 终裁）
-- [ ] Owner go 的方式、时间戳、**Owner 当时看到的具体参数快照**（或指向收据其余字段的引用）记入收据（`docs/2026-07-24-m0c-1-pilot-activation-receipt-template.md` §(c'''），位置在 §4 flag 回读之前
-- [ ] operator 未拿到这条明确记录之前，**不得**开始 §4 步骤 1（停 console）——§4 一旦启动就已进入不允许中断的原子序列，不能"先斩后奏再补授权"
-- [ ] §4.5（live 冒烟）仍保留独立的第二道 Owner 授权检查点（对"发这笔真实转账"本身的知情同意）——两道检查点不是同一件事、不能互相替代：本节 gate 的是"要不要让闸对真实流量生效"，§4.5 gate 的是"要不要现在发这笔真实测试转账"
+- [ ] 跑 provision 脚本正式签发 grant（`kasia-console/scripts/m0c1-grant-provision.mjs`，用 §3 起草、Owner 已批的候选字段值，非临时改动的新值）
+- [ ] 候选地址写入 `PILOT_WALLET_ADDRESSES` env
+- [ ] 收据模板 §(c') 四值一致证明在充值+grant 签发后做一次
 
 ## 4. 两 flag 原子开启顺序
 
-**核心纪律：不允许中间态**（只开一个 flag 的时间窗 = §1 描述的漏洞窗口暴露期）。**前置条件：§3.5 Owner go 已拿到并记入收据，否则不得开始下面任何一步。**
+**核心纪律：不允许中间态**（只开一个 flag 的时间窗 = §1 描述的漏洞窗口暴露期）。**前置条件：§3.5 Owner go 已拿到并记入收据 + §3.6 真充值/真 grant 签发已完成，否则不得开始下面任何一步。**
 
 0. **重启前查在途请求**（NWT note2：与今日 armed=on 重启前查在途 betting/settle 同款纪律，NO-TX-NO-STATE 相关——console 若在等 `custodial_transfer` 的 `sendCommandAsync` 回执时被杀，会有"不确定是否已执行"的悬空状态）：确认无正在处理中的 custodial_transfer 请求（pilot 阶段流量本就极低，直接看 relay 日志近几分钟无 `CUSTODIAL_TRANSFER` in-flight 行即可，无需查表）。
 1. 停 console（正规 stop，非强杀，防 WAL 未 flush；查 stale pidfile，见今日复现 3 次的坑）
