@@ -455,6 +455,24 @@ async function main() {
     catch { loadBearingBlobs[key] = { path: relPath, blob_sha: null }; }
   }
 
+  // Codex MF1 补项(v0.10 re-review 追加): evidence 除了 blob 指纹集, 还要显式记"跑这次 harness
+  // 用的确切调用参数+隔离边界"——读者不能只看到"跑了什么代码", 还要能确认"是在什么条件下跑的"
+  // (跟设计文档 §隔离架构 声称的隔离属性对得上, 非凭空信 harness 顶部注释)。这些隔离属性 harness
+  // 本来就是这么跑的(见文件头 ①②③④ 注释), 这里只是把它们从"代码里隐含"显式搬进 evidence JSON。
+  const runParams = {
+    invocation: `node ${path.relative(ROOT, fileURLToPath(import.meta.url)).split(path.sep).join('/')}`,
+    cwd: ROOT,
+    network: NETWORK,
+    harness_path: path.relative(ROOT, fileURLToPath(import.meta.url)).split(path.sep).join('/'),
+    isolation: {
+      db: 'independent scratch DB (process.env.DB_PATH, 非 console.db)',
+      relay: 'real forked relay subprocess (relay-manager.js startRelay, 同生产路径代码, 非 mock)',
+      rpc: 'dead port ws://127.0.0.1:1 (零真链接触)',
+      keys: 'throwaway 一次性生成 relay/custody 密钥 (每次跑随机生成, 非复用任何真实密钥)',
+      console_encryption_key: 'throwaway (randomBytes(32).toString(hex), 非复用 live console 的密钥)',
+    },
+  };
+
   const logPath = path.join(LOG_DIR, 'm0c1-g4-pilot-custodial-e2e-latest.json');
   writeFileSync(logPath, JSON.stringify({
     matrix_source: 'docs/2026-07-23-m0c-1-path-b-pilot-containment-design.md §3 + relay-side §5',
@@ -463,6 +481,7 @@ async function main() {
     load_bearing_blobs: loadBearingBlobs,
     source_commit: sourceCommit,
     harness_blob_sha: harnessBlobSha,
+    run_params: runParams,
     summary: { pass, fail }, evidence,
   }, null, 2));
   console.log(`\nevidence log: ${logPath}`);
