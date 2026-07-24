@@ -53,3 +53,13 @@ KANet-UI 红队抓到 2 条(1 HIGH + 1 MEDIUM), Bettor 判 3 个未决点, 全�
 顺带发现并修的一致性问题: `withRpc` 原来读 `G5_KASPA_RPC_URL` 自定义变量, 但 `checkUtxoLanded` 内部 `connectRpc()` 直接读 `KASPA_RPC_URL`——两处不同变量名会漂移(同 pilot-wallet-policy.js 那次"两路各自解析"教训), 统一成都读 `KASPA_RPC_URL`。
 
 gate 从 4 个增到 5 个(①HEAD+clean ②grant 预检 ③余额 ④累计预算 ⑤--confirm), 文件头/CLI 用法/console 输出全部同步改了编号。lint 0 errors。working tree 仍未 commit, 等复审。
+
+## v3 修订(2026-07-25, Finding3 排查衍生出的真阻塞项: live DB schema currency)
+
+排查 Finding3(source_scope 疑似不存在)过程中三方独立实测撞见更大的问题: **live console.db 停在 v190, migrate.js 里已定义的 v191(source_scope)/v192(pilot_rate_limit_log 表)/v193(access_mode)全没跑过**——这不是设计缺陷, 是"live DB 部署态落后于代码"这类 gap 的第二个实例(第一个是本轮更早发现的 access_mode/v193 单独滞后, 这次三方交叉验证发现范围更大: 从 v190 之后连续缺口)。
+
+Bettor 判: 这是主 console 级别的阻塞项(serving 全系统 betting/settlement, 重启 blast radius 覆盖全系统, 需要 Owner 知情+走完整重启纪律), 优先级高于 G5 代码细节, 已上报 Owner 请示重启窗口。
+
+**G5 侧配套**: 新增 gate②(live DB schema currency 预检, 原 gate②③④⑤ 依次后移为③④⑤⑥) —— 只读查三个信号(`m0c1_app_grants` 有无 `source_scope` 列 / `tg_custodial_wallets` 有无 `access_mode` 列 / `pilot_rate_limit_log` 表是否存在), 缺一直接 abort 并给出清晰诊断(不靠"网关会 fail-closed 恒拒"这种间接安全网让 operator 自己猜)。这也是 Owner"真链/live 测试胜过隔离测试"方向的一次直接印证: G4(隔离环境, 每次新建 DB 永远最新 schema)结构上看不到 live DB 的迁移滞后, 只有 G5 这种打真实 live DB 的路径才会撞见。
+
+gate 编号最终: ①HEAD+clean ②live DB schema currency ③grant 预检 ④余额 ⑤累计预算 ⑥--confirm。lint 0 errors。working tree 仍未 commit, 等复审; 真跑 G5(--confirm)在 live DB 完成迁移前必然卡在 gate②, 这是预期行为不是 bug。
