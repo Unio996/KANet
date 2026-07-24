@@ -22,12 +22,17 @@ const RELAY_ADDR_BY_ALIAS = {
   'nwt': 'kaspa:qzd2ktu49f4cqwy7f4s2kmd5m4j0l27gfghjenurypaum99qxz2w7ktl95grm',
   'j2': 'kaspa:qr7km875u5hhl42eaz4sjgmlcdnzjan9fnplcct3q7gq4ujdtpqqqe78fjev3',
   'kanet': 'kaspa:qpf2f39dp869lfm3f32z0ujsrafamznjxxknlk792ftc9jhk2cs7y7err0tz9',
+  // J2 2026-07-25 (M0c-1 real_chain case, Bettor 拍): FaucetRelay-tn(非 -tn-2 那个历史上枚举
+  // UTXO 崩过的巨额地址, relay_nodes 表核对过是不同两行) — team 自持 treasury relay, testnet-12,
+  // 用作 real_chain smoke 的 payee, 不再让 case 文件硬编码长地址/不再问 Owner 现挑地址。
+  'faucetrelay-tn': 'kaspatest:qr7cqq2eq5xyzq63yljgsfspmfce8nltrp9vhq5y0tjayzvhswtcvjc4pvxcx',
 };
 
 const RELAY_ID_BY_ALIAS = {
   'trader-b': '15593e10-fe63-4806-a7b5-cae062699de8', // broker-1 (真 is_dex_broker=1/is_service=1)
   'trader-a': 'df8cd0f9-27e7-45c6-bbea-2fa11a1ff1cd',
   'martin': '3765cc82-5e20-4e61-bb0a-697277287223',
+  'faucetrelay-tn': '7c4cb102-8476-40f9-bd85-c528bffaf8aa',
   'nwt': '5b236c08-03d0-456c-953d-e10001610938',
 };
 

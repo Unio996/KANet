@@ -60,6 +60,17 @@
    "justification": "PCW-pilot-custodial-insert 的 regression 证据 artifact（密钥经手场景，虽三静态限制全过但走真人审非自助道——NWT 明确要求这类场景全程走完整 pending-review）。真实调用 helper CLI（spawnSync + stdin 管道喂 mnemonic，非 mock）覆盖①候选匹配②候选不匹配③占位符④重复+TAINT exact-secret 扫描。文件在 test-framework/ 路径（静态限制①满足）+全部 new Database() 字面 readonly:true（静态限制②满足）+不 import relay-manager（静态限制③满足）。【2026-07-24 更新, Codex MSG-124 终审整改 A+B+C+D 全面重写】适配新 candidate-file 流程（取代 stdin），全部 9 条用例改造 + 新增真并发原子性测试（Promise.all 两进程抢同一 tg_user_id）。33/33 PASS。既有回归/G4/provision-payee-regression 零回归。加 source_commit/blob 自描述字段（真相校正）。NWT 独立核实 GREEN（review_ref=a99c387b）：digest 一致 + 真并发测试独立重跑确认。【2026-07-24 更新, Codex MSG-125 E+D 项】新增 access_mode 断言(①) + D 项 fault-injection 测试(⑩⑪, 含 production-inert 对照组)。39/39 PASS。NWT 独立核实 GREEN（review_ref=17ea537b）。",
    "review_ref": "17ea537b",
    "content_digest": "d8b9147f3c2b76bc5d92f77162ac0ac06663b255a98fb603b2df0c387ee70b50"
+  },
+  {
+   "id": "G5-realchain-smoke-dbreadonly",
+   "family": "sqlite",
+   "form": "const { default: Database } = await import(better-sqlite3)",
+   "count": 2,
+   "path": "kasia-console/test-framework/cases/m0c1-gate/g5-pilot-custodial-real-chain-smoke.mjs",
+   "capability": "db-readonly",
+   "justification": "M0c-1 Path B pilot real_chain smoke（G5, J2 2026-07-25）补 G4 死端口隔离测试没证的 delta：一笔合法请求打到活的 Console 进程, 经真实 armed 的 capability 网关, 真广播到 testnet-12, 独立可验证落地。文件里两处裸 better-sqlite3 import 均为只读预检门, 触发 R-M0A-BARE-IMPORT-DIFF, 走 db-readonly capability（非 test-fixture 自助道——NWT 明确'db-readonly 不适用自助 review_ref, ops 诊断工具走人审锚'）。①schemaCurrencyCheck()：gate②, 查 live DB 是否已应用 migrate.js v191（m0c1_app_grants.source_scope 列）/v192（pilot_rate_limit_log 表）/v193（tg_custodial_wallets.access_mode 列）——只调 db.pragma('table_info(...)') + SELECT COUNT(*)，表名字面量硬编码非拼接。②grantPreCheck()：gate③, 只读 SELECT * FROM m0c1_app_grants WHERE grant_id=?（参数化, 非字符串拼接）, 验 grant 存在+未吊销+在有效期+source_scope 含 candidate 地址+payee_scope 含 payee 地址+max_amount_sompi 够, POST 前 fail-fast, 不用等真请求才 403。两处 new Database(dbPath,{readonly:true}) 字面量, try/finally db.close()。真钱预算硬 cap 2 KAS/单笔 + 5 KAS 累计护栏（sum 过往 evidence log）, 只写不跑（需 --confirm 才真发送）。落地验证复用 kasia-relay/src/lib/p2sh.mjs 的 checkUtxoLanded() 本尊（minDepth=20, reorg-safe）, 不读 kaspa_tx_log（本地 indexer 会漏块+命中≠仍 canonical）。KANet-UI 红队抓 2 处（HIGH：落链验证原等价 minDepth=0 first-seen, 改直接复用 checkUtxoLanded 本尊；MEDIUM：gate① 缺 working tree clean 检查, 已补 git status --porcelain）+Bettor 判 3 处（grant 只读预检/去 disabled 文本正则改统一非 200 非 ok abort/累计冒烟预算护栏）全部落码。排查过程三方独立实测撞见 live DB 落后 v190（migration 缺口）真阻塞, 已由主 console 干净重启解决（备份三件套+验证+RpcClient 健康, NWT+KANet-UI 独立核）, 新增 gate②（schema currency 预检）防这类 gap 再次静默复发。peers.mjs 新增 faucetrelay-tn alias（四方独立交叉核对 == relay_nodes 表 id=7c4cb102 那行, 非 UTXO 枚举曾崩过的 -tn-2）。lint 0 errors。NWT 逐行核实 GREEN：两处 new Database 均 readonly:true, schemaCurrencyCheck 表名字面量非拼接, grantPreCheck 单条 SELECT 参数化零注入面, 均 try/finally db.close(), 零写、family=sqlite、单文件 live console.db, 符合 db-readonly 既有约束模型。",
+   "review_ref": "3ac79de1",
+   "content_digest": "11501c4ac47199105c5fbfbcf62975e392e0f4cf1bf0a00048a09fa54c6f5083"
   }
  ]
 }
