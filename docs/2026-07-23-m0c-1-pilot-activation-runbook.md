@@ -2,7 +2,8 @@
 
 > **Status**: CURRENT（v0.1 起草·待 NWT 红队 + Codex 激活就位复核 + Owner 最后拍，路由随围栏设计一并送审）
 > **依据**: `docs/2026-07-23-m0c-1-path-b-pilot-containment-design.md`（围栏设计，本 runbook 是它的部署时序落地）+ 频道 19:44-19:46（两 flag 耦合 footgun）+ 19:33 relay-utxo-topology 老坑。
-> **性质**: 部署编排 runbook，非设计文档——只讲"按什么顺序、每步怎么验"，安全参数（50 KAS 顶/2 KAS cap/3 笔每分钟/5min TTL/grant-scoped 白名单）以围栏设计 doc 为准，本文不重复定义。
+> **性质**: 部署编排 runbook，非设计文档——只讲"按什么顺序、每步怎么验"。
+> **v0.3 更新（2026-07-24，claim-to-code 事故后自我校准）**: v0.1/v0.2 原写"安全参数以围栏设计 doc 为准"——这正是 Codex RED 抓出的转引链风险（本 runbook 当时也没有独立验证被引用的数字是否真落码，2026-07-24 05:06 自曝）。现改为逐项标代码坐标，本文档自己对每个数字负一次独立验证责任：50 KAS 钱包顶（围栏设计 §2.2，运维配置值非代码常量）/ 2 KAS 单笔（`kasia-relay/src/lib/app-envelope.mjs:79` grant `max_amount_sompi` 字段 + `kasia-console/src/api/capability.js:126` 早拒检查）/ 3 笔每分钟限流（`capability.js:48-49` `RATE_LIMIT_WINDOW_MS`+`RATE_LIMIT_MAX`，J2 `cf680280` 落码，claim-to-code 三道核 GREEN）/ 5min custodial TTL（`app-envelope.mjs:57` `CUSTODIAL_PILOT_MAX_TTL_MS`，J1 `944f2a72` 落码）/ gateway pilot-wallet 白名单（`capability.js:206` `PILOT_WALLET_ADDRESSES`，J2 `cf680280` 落码，空=fail-closed）/ grant-scoped 白名单（`app-envelope.mjs:79` `source_scope` 字段）。均已通过 claim-to-code 三道核（自核+Bettor grep+NWT 独立扫描）确认真实存在。
 
 ---
 
@@ -50,7 +51,7 @@
    - [ ] relay 群起零 crash-loop（`GATE_ARMED && !GRANT_ENVELOPE_IMPLEMENTED` 会 throw，能起来=前提满足）
    - [ ] `armReport()` 读到 `armed: true`（当前无接线的健康探针 endpoint——见 §5 已知缺口，先用日志法：relay 日志出现 `[M0c-1 gate LEGACY]` warn tell 证明 armed=on 实生效）
    - [ ] `capability.js` 的 `GATEWAY_ENABLED()` 读到 true（curl 一个已知 501-scaffold 路由，确认从 503→非 503）
-   - [ ] **端到端冒烟（NWT note1，不可省；Bettor 定型：单一真相源非另建第二套）**：上面四点只验证"两个 flag 各自读到 true"，不证明组合后请求能实走通完整链路（若 env 变量拼写错/指错 relay id，四点独立检查仍可能全绿但请求实际打不通）。**"激活成功"判据 = 跑一次 ②G4 E2E harness 的最小正向 LAND 用例**（gateway→relay→上链的 custodial_transfer 最小 smoke，J1 harness 域交付，本 runbook 不重建、直接调用）——四点独立验证 + G4 smoke 跑绿，两者都要；env 拼错这类"flag 读到 true 但链路实际断"的情形会被 G4 smoke 直接抓出失败。
+   - [ ] **端到端冒烟（NWT note1，不可省；Bettor 定型：单一真相源非另建第二套）**：上面四点只验证"两个 flag 各自读到 true"，不证明组合后请求能实走通完整链路（若 env 变量拼写错/指错 relay id，四点独立检查仍可能全绿但请求实际打不通）。**"激活成功"判据 = 跑一次 G4 E2E harness 全量用例**（`kasia-console/test-framework/cases/m0c1-gate/g4-pilot-custodial-e2e.mjs`，J1 harness 域交付，本 runbook 不重建、直接调用；v0.2=21 用例，含 LAND/BUST①-⑥/REPLAY/REVOCATION/TAINT，2026-07-24 claim-to-code 三道核 GREEN，sanitized evidence 见 `docs/evidence/2026-07-24-m0c1-g4-pilot-custodial-e2e-v0.2-evidence.json`）——四点独立验证 + G4 全量跑绿，两者都要；env 拼错这类"flag 读到 true 但链路实际断"的情形会被 G4 直接抓出失败。
 5. **收敛类 legacy-unmigrated 面照常不断**：跑几笔现网 pool/relay/trading 操作，确认无 fail-closed 断（今晨事故的直接回归检查）
 
 ## 5. 已知缺口（诚实标，非 blocker，跟踪）
