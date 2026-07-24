@@ -87,6 +87,33 @@ export async function registerTgWalletRoutes(fastify) {
     return reply.send({ ok: true, exists: true, address: w.kaspa_address, network: w.network, balance_kas: balance, created_at: w.created_at });
   });
 
+  // GET /api/tg-wallet/:tg_user_id/diagnose — M0c-1 Path B pilot Codex MSG-125 MUST-FIX C:
+  //   no-broadcast live-Console decrypt proof, 充值前跑 (runbook §3.6 重排后的验证步骤之一)。
+  //   证明"live Console 用真实运行时 process.env.CONSOLE_ENCRYPTION_KEY + 真实 DB 连接" 能解密这行 —
+  //   非 helper 自己 encrypt 自己 decrypt 那种内部一致性、也非人工核对 8-hex 指纹那种 sanity check。
+  //   ok:true 语义 = decrypt 成功 **且** derive 出的地址 == 行里存的 kaspa_address 逐字符相同
+  //   (证加密 mnemonic 内部一致 + live Console 确实能解出预期的那把钥匙, 非只是"decrypt 没抛异常")。
+  //   绝不返回/log mnemonic、privkey、加密 blob 本身——只返 { ok, address }。
+  fastify.get('/api/tg-wallet/:tg_user_id/diagnose', AUTH, async (request, reply) => {
+    const tgUser = String(request.params.tg_user_id || '').trim();
+    if (!tgUser) return reply.code(400).send({ ok: false, error: 'tg_user_id required' });
+
+    const w = sqlite.prepare('SELECT kaspa_address, mnemonic_encrypted, network FROM tg_custodial_wallets WHERE tg_user_id = ?').get(tgUser);
+    if (!w) return reply.code(404).send({ ok: false, error: '钱包不存在' });
+
+    let derivedAddress;
+    try {
+      const mnemonic = decrypt(w.mnemonic_encrypted); // 用 live 进程实际的 CONSOLE_ENCRYPTION_KEY, 非 helper 传入的
+      derivedAddress = addressFromMnemonic(mnemonic, w.network || NETWORK);
+    } catch (e) {
+      // 不 echo 任何密钥材料; 只报诊断失败这个事实。
+      return reply.code(500).send({ ok: false, error: 'live decrypt 诊断失败 (检查 CONSOLE_ENCRYPTION_KEY 是否与写入这行时用的是同一把)' });
+    }
+    const match = derivedAddress === w.kaspa_address;
+    return reply.send({ ok: match, address: match ? derivedAddress : undefined,
+      error: match ? undefined : 'live decrypt 成功但 derive 出的地址与行内记录的 kaspa_address 不一致' });
+  });
+
   // POST /api/tg-wallet/:tg_user_id/send { to, amount_kas } — custodial transfer via Path C
   //   (Bettor 拍·Owner 钦定). Console (持 CONSOLE_ENCRYPTION_KEY = 托管人) decrypts mnemonic just-in-time,
   //   derives privkey, hands it to the relay over localhost IPC (custodial_transfer); the relay is the
@@ -104,18 +131,24 @@ export async function registerTgWalletRoutes(fastify) {
     const relayId = CUSTODIAL_RELAY_ID();
     if (!relayId) return reply.code(503).send({ ok: false, error: '转账暂不可用 (CUSTODIAL_RELAY_ID 未配)' });
 
-    const w = sqlite.prepare('SELECT kaspa_address, mnemonic_encrypted, network FROM tg_custodial_wallets WHERE tg_user_id = ?').get(tgUser);
+    const w = sqlite.prepare('SELECT kaspa_address, mnemonic_encrypted, network, access_mode FROM tg_custodial_wallets WHERE tg_user_id = ?').get(tgUser);
     if (!w) return reply.code(404).send({ ok: false, error: '你还没有钱包' });
 
-    // M0c-1 Path B pilot 隔离 (Codex MSG-124 MUST-FIX E): 这条 legacy 路径只挂 AUTH (shared
-    // ingest secret)，完全绕过 grant/source-scope/armed 闸/capability 网关 — pilot 钱包一旦充值，
-    // 持 ingest secret + pilot tg_user_id 者即可在 arm 前就经这条路径把钱转走，
-    // "fund-before-arm 安全" 的前提在这条路径上是假的。判据用查出的钱包地址 (fund-holder 本体，
-    // 比 tg_user_id 更根本 — 防"另一个 tg_user_id 映射到同一 pilot 地址"这类边缘情形)，
-    // 复用 capability.js:237 已用的 PILOT_WALLET_ADDRESSES 单一真相源，不新造第二个判据来源。
+    // M0c-1 Path B pilot 隔离 (Codex MSG-124 MUST-FIX E, MSG-125 结构性收紧): 这条 legacy 路径
+    // 只挂 AUTH (shared ingest secret)，完全绕过 grant/source-scope/armed 闸/capability 网关 —
+    // pilot 钱包一旦充值，持 ingest secret + pilot tg_user_id 者即可经这条路径把钱转走。
+    // 🔴 MSG-125 修正：MSG-124 版本只靠 process.env.PILOT_WALLET_ADDRESSES env allowlist，
+    // Codex 判这会 fail-open（env 缺失/畸形/重启未加载时隔离静默失效）。权威判据改成 durable
+    // 的 `access_mode` 列（`tg_custodial_wallets` migrate.js v193，J2 落码）——pilot 钱包建行时
+    // (`m0c1-pilot-custodial-insert.mjs`) 就把这一行显式设成 `'capability_only'`，从诞生那一刻
+    // 起是权威标记，不依赖任何后续步骤/任何 env 变量存在。env allowlist 保留作 defense-in-depth
+    // 早拒层（两层都查，任一命中即拒，不是"降级到只查一层"）。
+    if (w.access_mode === 'capability_only') {
+      return reply.code(403).send({ ok: false, error: 'M0c-1 pilot 隔离钱包 (access_mode=capability_only): 本 legacy 路径已 fail-closed 禁用，请走 capability 网关 custodial_transfer 路径' });
+    }
     const pilotIsolationSet = new Set((process.env.PILOT_WALLET_ADDRESSES || '').split(',').map((s) => s.trim()).filter(Boolean));
     if (pilotIsolationSet.has(w.kaspa_address)) {
-      return reply.code(403).send({ ok: false, error: 'M0c-1 pilot 隔离钱包: 本 legacy 路径已 fail-closed 禁用，请走 capability 网关 custodial_transfer 路径' });
+      return reply.code(403).send({ ok: false, error: 'M0c-1 pilot 隔离钱包 (env allowlist): 本 legacy 路径已 fail-closed 禁用，请走 capability 网关 custodial_transfer 路径' });
     }
 
     if (to === w.kaspa_address) return reply.code(400).send({ ok: false, error: '不能转给自己 (收款地址=你的钱包地址)' });

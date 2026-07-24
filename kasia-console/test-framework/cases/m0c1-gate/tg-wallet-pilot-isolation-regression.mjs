@@ -53,6 +53,12 @@ async function main() {
   const migrateMod = await import(pathToFileURL(path.join(ROOT, 'kasia-console/src/db/migrate.js')).href);
   await migrateMod.runMigrations();
 
+  // 走 db/client.js 的受控 sqlite 单例(非裸 better-sqlite3 import), 同 tg-wallet.js 自己用的
+  // 那个连接——用于模拟"pilot 建号流程把 access_mode 设成 capability_only"这一步(真实流程走
+  // m0c1-pilot-custodial-insert.mjs helper, 这里直接 UPDATE 是为了单独测 /send 路由的 durable
+  // 列检查逻辑本身, 不重新跑一遍 insert helper 全流程)。
+  const { sqlite: dbClient } = await import(pathToFileURL(path.join(ROOT, 'kasia-console/src/db/client.js')).href);
+
   const configsMod = await import(pathToFileURL(path.join(ROOT, 'kasia-console/src/data/settings/configs.js')).href);
   await configsMod.setConfig('ingest_secret', INGEST_SECRET, { category: 'security', isSensitive: true });
 
@@ -76,6 +82,15 @@ async function main() {
       method: 'POST', url: `/api/tg-wallet/${tgUserId}/send`,
       headers: { 'x-ingest-secret': INGEST_SECRET },
       payload: { to, amount_kas: amountKas },
+    });
+    let body; try { body = JSON.parse(res.body); } catch { body = { raw: res.body }; }
+    return { status: res.statusCode, body };
+  }
+
+  async function diagnose(tgUserId) {
+    const res = await fastify.inject({
+      method: 'GET', url: `/api/tg-wallet/${tgUserId}/diagnose`,
+      headers: { 'x-ingest-secret': INGEST_SECRET },
     });
     let body; try { body = JSON.parse(res.body); } catch { body = { raw: res.body }; }
     return { status: res.statusCode, body };
@@ -140,6 +155,72 @@ async function main() {
       /CUSTODIAL_RELAY_ID 未配/.test(r.body?.error || '') && !/FAUCET_RELAY_ID/.test(r.body?.error || ''),
       r.body?.error);
     delete process.env.FAUCET_RELAY_ID;
+  }
+
+  // ── ④⑤ GET /diagnose(Codex MSG-125 MUST-FIX C: no-broadcast live-Console decrypt 证明) ──
+  {
+    const tgUserId = 'diagnose-match-' + Date.now();
+    const created = await createWallet(tgUserId);
+    check('④建钱包(测 diagnose 正常路径)', created.ok && created.created, JSON.stringify(created));
+
+    const r = await diagnose(tgUserId);
+    check('④live decrypt 成功且 derive 地址与行内 kaspa_address 逐字符一致 → ok:true',
+      r.status === 200 && r.body?.ok === true && r.body?.address === created.address,
+      `status=${r.status} body=${JSON.stringify(r.body)}`);
+    check('④诊断回执不含 mnemonic/加密 blob(只 address, TAINT 纪律)',
+      !JSON.stringify(r.body).includes('mnemonic') && !JSON.stringify(r.body).includes('encrypted'),
+      JSON.stringify(r.body));
+  }
+  {
+    // 模拟"live Console 的 key 跟写这行时用的不是同一把"——建钱包后原地轮换
+    // CONSOLE_ENCRYPTION_KEY(crypto.js getKey() 每次调用现读 process.env, 非缓存, 可以这样测)，
+    // 诊断这时应该 decrypt 直接抛异常(auth tag 校验失败) → ok:false, 且不泄露任何密钥材料。
+    const tgUserId = 'diagnose-wrongkey-' + Date.now();
+    const created = await createWallet(tgUserId);
+    check('⑤建钱包(测 diagnose key 不一致路径)', created.ok && created.created, JSON.stringify(created));
+
+    const originalKey = process.env.CONSOLE_ENCRYPTION_KEY;
+    process.env.CONSOLE_ENCRYPTION_KEY = randomBytes(32).toString('hex'); // 另一把不同的 key
+    const r = await diagnose(tgUserId);
+    process.env.CONSOLE_ENCRYPTION_KEY = originalKey; // 复原, 不影响后续用例
+
+    check('⑤key 不一致 → decrypt 失败(auth tag 校验拦) → ok:false, 非静默放行',
+      r.status === 500 && r.body?.ok === false, `status=${r.status} body=${JSON.stringify(r.body)}`);
+    check('⑤key 不一致错误回执不含密钥材料(TAINT 纪律, exact-secret 扫描)',
+      !JSON.stringify(r.body).includes(originalKey) && !JSON.stringify(r.body).includes(process.env.CONSOLE_ENCRYPTION_KEY),
+      JSON.stringify(r.body));
+  }
+
+  // ── ⑥⑦ Codex MSG-125 MUST-FIX E 结构性收紧: access_mode durable 列在 env 完全缺失/畸形
+  // 时仍能独立拒绝(env allowlist 降级为 defense-in-depth, 非唯一权威) ──
+  {
+    const tgUserId = 'durable-noenv-' + Date.now();
+    const created = await createWallet(tgUserId);
+    check('⑥建钱包(测 durable 列独立生效)', created.ok && created.created, JSON.stringify(created));
+    // 模拟真实 pilot 建号流程会做的事: 把这一行标成 capability_only(真实流程走
+    // m0c1-pilot-custodial-insert.mjs helper 的 INSERT 语句, 这里直接 UPDATE 复现同样的行状态)。
+    dbClient.prepare("UPDATE tg_custodial_wallets SET access_mode = 'capability_only' WHERE tg_user_id = ?").run(tgUserId);
+
+    delete process.env.PILOT_WALLET_ADDRESSES; // env 完全不设(不是空字符串, 是 undefined)
+    process.env.CUSTODIAL_RELAY_ID = 'dummy-relay-not-real';
+    const r6 = await send(tgUserId, DUMMY_TARGET, 1);
+    check('⑥PILOT_WALLET_ADDRESSES 完全未设时, access_mode durable 列仍独立挡住 → 403(结构性, 非靠 env)',
+      r6.status === 403 && /access_mode=capability_only/.test(r6.body?.error || ''),
+      `status=${r6.status} body=${JSON.stringify(r6.body)}`);
+  }
+  {
+    const tgUserId = 'durable-malformedenv-' + Date.now();
+    const created = await createWallet(tgUserId);
+    check('⑦建钱包(测 durable 列在畸形 env 下仍生效)', created.ok && created.created, JSON.stringify(created));
+    dbClient.prepare("UPDATE tg_custodial_wallets SET access_mode = 'capability_only' WHERE tg_user_id = ?").run(tgUserId);
+
+    process.env.PILOT_WALLET_ADDRESSES = '   ,, ,'; // 畸形值(全逗号/空白, split+filter 后是空 Set)
+    process.env.CUSTODIAL_RELAY_ID = 'dummy-relay-not-real';
+    const r7 = await send(tgUserId, DUMMY_TARGET, 1);
+    check('⑦PILOT_WALLET_ADDRESSES 畸形值(空 Set)时, access_mode durable 列仍独立挡住 → 403',
+      r7.status === 403 && /access_mode=capability_only/.test(r7.body?.error || ''),
+      `status=${r7.status} body=${JSON.stringify(r7.body)}`);
+    delete process.env.PILOT_WALLET_ADDRESSES;
   }
 
   const logPath = path.join(LOG_DIR, 'tg-wallet-pilot-isolation-regression-latest.json');
