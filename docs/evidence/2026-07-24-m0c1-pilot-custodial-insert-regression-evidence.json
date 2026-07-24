@@ -1,0 +1,96 @@
+{
+  "source": "scratch/j2-reviewed-helper-design.txt(Bettor+NWT+KANet-UI 三人红队 GREEN) + docs/2026-07-23-m0c-1-pilot-activation-runbook.md §3.6",
+  "target": "kasia-console/scripts/m0c1-pilot-custodial-insert.mjs (MF2 步骤4 reviewed helper)",
+  "method": "真实调用 CLI(spawnSync + stdin 管道喂 mnemonic, 非 mock) + DB 旁路核对",
+  "summary": {
+    "pass": 17,
+    "fail": 0
+  },
+  "evidence": [
+    {
+      "label": "①候选地址匹配 → CLI exit code=0",
+      "ok": true,
+      "detail": "code=0 stderr="
+    },
+    {
+      "label": "①stdout 报告 readback 验证 PASS",
+      "ok": true,
+      "detail": "插入成功: tg_user_id=j2-regr-match-1784895219305 address=kaspatest:qqd6e65yefepe9wk0m9vuxdufxd80sphy67gwwd0vdaumzdt4tc9ssxd5s7gn network=testnet-12\nreadback 验证: PASS（解密后重新派生地址与批准值逐字符一致）\n"
+    },
+    {
+      "label": "①DB 行存在且 address 精确匹配",
+      "ok": true,
+      "detail": "kaspatest:qqd6e65yefepe9wk0m9vuxdufxd80sphy67gwwd0vdaumzdt4tc9ssxd5s7gn"
+    },
+    {
+      "label": "①独立解密+重新派生地址与批准值一致(不信 helper 自己的 readback 断言)",
+      "ok": true,
+      "detail": "kaspatest:qqd6e65yefepe9wk0m9vuxdufxd80sphy67gwwd0vdaumzdt4tc9ssxd5s7gn"
+    },
+    {
+      "label": "②候选地址不匹配 → CLI 非零 exit code(abort)",
+      "ok": true,
+      "detail": "code=1 stderr=候选 mnemonic 派生地址(kaspatest:qqd6e65yefepe9wk0m9vuxdufxd80sphy67gwwd0vdaumzdt4tc9ssxd5s7gn) != --approved-address(kaspatest:qwrongaddr00000000000000000000000000000000000000000000000)，abort，不碰 DB\n"
+    },
+    {
+      "label": "②stderr 精确提示地址不匹配(非泛泛报错)",
+      "ok": true,
+      "detail": "候选 mnemonic 派生地址(kaspatest:qqd6e65yefepe9wk0m9vuxdufxd80sphy67gwwd0vdaumzdt4tc9ssxd5s7gn) != --approved-address(kaspatest:qwrongaddr00000000000000000000000000000000000000000000000)，abort，不碰 DB\n"
+    },
+    {
+      "label": "②DB 里确实没有这条 wallet(abort 时不写库)",
+      "ok": true,
+      "detail": "(无行, 符合预期)"
+    },
+    {
+      "label": "③tg_user_id=占位符\"blank\" → CLI 非零 exit code(拒绝)",
+      "ok": true,
+      "detail": "code=1 stderr=--tg-user-id 非法：不得为空或占位符字面量（拒绝清单: blank/mark pilot/pilot/test/placeholder/todo/tbd/）——须为专用唯一 pilot 标识\n"
+    },
+    {
+      "label": "③stderr 精确提示占位符非法(非泛泛报错)",
+      "ok": true,
+      "detail": "--tg-user-id 非法：不得为空或占位符字面量（拒绝清单: blank/mark pilot/pilot/test/placeholder/todo/tbd/）——须为专用唯一 pilot 标识\n"
+    },
+    {
+      "label": "④首次插入(为重复测试铺垫) → exit code=0",
+      "ok": true,
+      "detail": "code=0 stderr="
+    },
+    {
+      "label": "④同 tg_user_id 重复插入 → CLI 非零 exit code(拒绝)",
+      "ok": true,
+      "detail": "code=1 stderr=--tg-user-id=j2-regr-dup-1784895219568 已存在于 tg_custodial_wallets，本工具只做首次插入（吊销/更新走其他流程，非本工具范围）\n"
+    },
+    {
+      "label": "④stderr 精确提示已存在(友好报错先于 PK 约束报错)",
+      "ok": true,
+      "detail": "--tg-user-id=j2-regr-dup-1784895219568 已存在于 tg_custodial_wallets，本工具只做首次插入（吊销/更新走其他流程，非本工具范围）\n"
+    },
+    {
+      "label": "⑤--network 打错(\"testnet12\"漏横杠) → CLI 非零 exit code(白名单拒绝)",
+      "ok": true,
+      "detail": "code=1 stderr=--network=testnet12 不在允许集合 {testnet-12}（拒绝, 防止 wallet.js getNetworkType() 对未识别值默认落 mainnet 的 footgun）\n"
+    },
+    {
+      "label": "⑤stderr 精确提示不在允许集合(非泛泛报错, 证明真是白名单挡的非其他原因)",
+      "ok": true,
+      "detail": "--network=testnet12 不在允许集合 {testnet-12}（拒绝, 防止 wallet.js getNetworkType() 对未识别值默认落 mainnet 的 footgun）\n"
+    },
+    {
+      "label": "⑥非法 mnemonic → CLI 非零 exit code(派生失败 abort)",
+      "ok": true,
+      "detail": "code=1 stderr=mnemonic 派生地址失败（格式非法？）: Bip39 error\n"
+    },
+    {
+      "label": "⑥非法 mnemonic 错误路径 stdout/stderr 不含原始输入片段(含逐词扫描, 非只整串匹配)",
+      "ok": true,
+      "detail": "干净"
+    },
+    {
+      "label": "TAINT stdout/stderr 不含明文 mnemonic(exact-secret 扫描, 非形状匹配)",
+      "ok": true,
+      "detail": "干净"
+    }
+  ]
+}
