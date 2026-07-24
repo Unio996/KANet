@@ -4,6 +4,7 @@
 > **依据**: 2026-07-24 05:xx NWT 声称清单 grep 扫描发现 MSG-120 多处"声称已实现"实际代码不存在（TTL/限流/白名单/G4 用例），Bettor 认账根因="claim==code" completeness 交叉核缺失。本模板的存在意义：**激活当刻**从运行系统实际读到的值，不是从任何设计文档/频道消息转引的值。
 > **v0.2 更新**: 四条控制已全部补齐落码（J1 `944f2a72` TTL / J2 `cf680280` 限流+白名单 / J1 `2fbdb290` G4 harness v0.2 21/21），均经 claim-to-code 三道核（自核+Bettor grep+NWT 独立扫描）GREEN。下方 (b)(e) 已补代码坐标（供激活时对照查询用，坐标本身已核实存在，具体运行时值仍需激活当刻现查填空）。
 > **v0.3 更新（2026-07-24 06:17，Codex MSG-121 再审 MUST-FIX 1 修正）**: **v0.1/v0.2 全程查错钱包**——`custodial_transfer` 实际出钱的是 `tg_custodial_wallets` 表按 `fromAddress` 选出的托管钱包（`kasia-console/src/api/capability.js:163-164` `deriveCustodialExecFields`），**不是** relay 自身的运营钱包（`relay_nodes.address`，`GET /api/relay/:id/balance` 查的是这个，只用于 relay 付 gas/日常 IPC）。两者是完全不同的身份/余额。NWT 独立读码坐实"极其严重"。本版 §(a)(c) 已改为区分两个身份、余额回读改查 custodial 地址真实链上 UTXO。
+> **v0.4 更新（2026-07-24 07:xx，Codex MSG-122 四 MUST-FIX 全 CLOSED+源码包 GREEN，armed=on 前 pre-activation B 项）**: 四 MUST-FIX 全部收口后，Codex 放行呈 Owner 做 Path B go/no-go 决策，但指出 claim-to-code（审过代码写对了）不等于 claim-to-deployed（真实跑的进程 == 审过的那份代码）——中间隔着一次部署动作没人核过。新增 §(h) 部署代码钉死回读：部署 commit SHA 核对 + 5 个 load-bearing 文件（authorize.mjs/app-envelope.mjs/relay.mjs/capability.js/migrate.js）sha256 交叉核 + migration 版本回读，任一不匹配即停激活重查。
 > **性质**: 部署产物（filled-in receipt），非设计文档。每次真实激活（含未来 pilot 结束/重开）都产生一份新收据，不是写一次的模板本身。
 
 ---
@@ -93,6 +94,34 @@
 | revoke 命令执行时间 | | |
 | `grant.revoked` 回读 | 吊销后立即查 grant registry | |
 | 吊销后下一条请求是否即时拒 | 实发一条验证（G4 harness 或手工） | |
+
+### (h) 部署代码钉死回读（🔴 v0.4 新增，Codex MSG-122 pre-activation B 项：claim-to-code 延伸到 claim-to-deployed）
+
+> MSG-122 三道核（自核+Bettor grep+NWT 独立扫描）证明的是"审过的那个 commit 里代码写对了"，**不证明**"真实跑在生产 console/relay 进程里的代码 == 那个被审过的 commit"。两者中间隔着一次部署动作（拉代码/重启），必须显式核对，不能默认"刚部署过所以肯定是最新"——这条本身就是本次事故（claim-to-code）在运行时维度的延伸，不核就是同一个坑在新层面复发。
+
+| 字段 | 查询方式 | 实际值 |
+|---|---|---|
+| 部署进程实际运行的 commit SHA | **在实际跑 console/relay 的机器/目录**执行 `git rev-parse HEAD`（非本地开发树；若共享同一台机器需先确认是同一份 working tree，非另一个 clone） | |
+| Codex MSG-122 终审时的 commit tip | 频道记录（本次 = `26a23292`，Bettor 发 MSG-122 `918137ea` 时的 current tip） | |
+| 两者是否一致（逐字符比对） | | |
+
+**load-bearing 文件 digest 交叉核对**（防"部署了但某个文件没跟上"/"部署后又被手动改过且没人知道"）：
+
+| 文件 | sha256（部署环境实际文件，激活时现算） | sha256（对应 commit tip 里的版本，同一时刻现算比对） | 一致？ |
+|---|---|---|---|
+| `kasia-relay/src/lib/authorize.mjs` | | | |
+| `kasia-relay/src/lib/app-envelope.mjs` | | | |
+| `kasia-relay/src/relay.mjs` | | | |
+| `kasia-console/src/api/capability.js` | | | |
+| `kasia-console/src/db/migrate.js` | | | |
+
+| migration 版本回读 | 实际值 |
+|---|---|
+| 部署库（运行中的 DB）已执行到的最新 migration 版本号（查 DB 内 migration 记录表，非猜测） | |
+| `migrate.js` 代码里定义的最新版本号 | |
+| 两者一致？（若部署库版本落后于代码——DB schema 缺字段但代码假设字段存在，是另一类静默故障，需先跑 migrate 补齐） | |
+
+**纪律**：任一 load-bearing 文件 digest 不匹配、或部署 commit SHA ≠ MSG-122 终审 tip → **停止激活**，先查清楚差异来源（漏部署 / 部署后被改 / tip 记错），差异本身若涉及安全参数改动需重走 claim-to-code 三道核（对实际部署的那份代码，非旧审过的那份），不得凭"应该没差多少"跳过。
 
 ### (g) Owner 授权后真 live 冒烟（🔴 v0.2 新增，runbook §4.5，Codex MSG-121 MUST-FIX 2 要求）
 
