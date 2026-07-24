@@ -1,0 +1,153 @@
+{
+  "matrix_source": "docs/2026-07-23-m0c-1-path-b-pilot-containment-design.md §3 + relay-side §5",
+  "codex_remediation": "RESPONSE-...PATHB-ACTIVATION(b93134e8) RED-not-ready 修正④: replay/吊销/taint/pilot专属TTL/限流 + 精确reason断言",
+  "mf3_remediation": "MF3(relay 571441ea + gateway 82df7b4f): 结构化 body.reason_code 判据取代 relayLastLog 正则 + META-CHECK(真实auth拒response喂入LAND判据验证真FAIL) + BUST⑦(relay_id mismatch)",
+  "source_commit": "4819d2c7393c5cbe137f42907beb0f90b28328a6",
+  "harness_blob_sha": "ca634b3b50e0edf9a6aa3d9b2583b349dba0864b",
+  "summary": {
+    "pass": 27,
+    "fail": 0
+  },
+  "evidence": [
+    {
+      "label": "(bootstrap) startRelay",
+      "ok": true,
+      "detail": "{\"ok\":true,\"pid\":37556,\"name\":\"g4-pilot-relay\"}"
+    },
+    {
+      "label": "LAND① 最小正向: 到达 relay 执行层(非基础设施失败/非网关拒绝)",
+      "ok": true,
+      "detail": "status=503 body={\"ok\":false,\"error\":\"转账未上链（relay 无 txId，可能 RPC down 或执行失败）\",\"phase\":\"execution\"} | relayLog=7/24/2026, 17:31:37 command custodial_transfer failed: invalid kaspa address (to)"
+    },
+    {
+      "label": "LAND①-精确 body 无 reason_code(证明真到达 relay 执行层, 非 relay denyResult 拒绝分支)",
+      "ok": true,
+      "detail": "status=503 body={\"ok\":false,\"error\":\"转账未上链（relay 无 txId，可能 RPC down 或执行失败）\",\"phase\":\"execution\"}"
+    },
+    {
+      "label": "BUST① 非白名单源地址(grant 层)未被意外放行(且 relay 基础设施正常响应)",
+      "ok": true,
+      "detail": "status=403 body={\"ok\":false,\"error\":\"relay 拒绝: VALUE_NOT_IN_SCOPE_SOURCE\",\"reason_code\":\"VALUE_NOT_IN_SCOPE_SOURCE\"} | relayLog=7/24/2026, 17:31:37 M0c-1 GATE DENY → intent.fromAddress=kaspatest:qpgkc5wmv7zwfrdyps06l2zwdx72xe7mxlm27e ∉ grant.source_scope (type=custodial_transfer, origin=app)"
+    },
+    {
+      "label": "BUST①-精确 relay 日志精确命中 source_scope(非泛泛拒绝)",
+      "ok": true,
+      "detail": "relayLog=7/24/2026, 17:31:37 M0c-1 GATE DENY → intent.fromAddress=kaspatest:qpgkc5wmv7zwfrdyps06l2zwdx72xe7mxlm27e ∉ grant.source_scope (type=custodial_transfer, origin=app)"
+    },
+    {
+      "label": "BUST①-结构化 relay 权威闸真实拒绝(403·phase=authorization)+reason_code精确命中VALUE_NOT_IN_SCOPE_SOURCE",
+      "ok": true,
+      "detail": "status=403 body={\"ok\":false,\"error\":\"relay 拒绝: VALUE_NOT_IN_SCOPE_SOURCE\",\"reason_code\":\"VALUE_NOT_IN_SCOPE_SOURCE\"}"
+    },
+    {
+      "label": "META: LAND①判据在真实 auth 拒(source_scope不匹配)响应上正确判定为FAIL(非误判GATE DENY为LAND通过)",
+      "ok": true,
+      "detail": "用 BUST① 真实拒绝 response 喂入 LAND 判据: status=403 若误判landed=false isDenied=true phase=authorization"
+    },
+    {
+      "label": "BUST⑦ relay_id 不匹配被 relay 权威闸拒(403·phase=authorization)+reason_code精确命中RELAY_ID_MISMATCH",
+      "ok": true,
+      "detail": "status=403 body={\"ok\":false,\"error\":\"relay 拒绝: RELAY_ID_MISMATCH\",\"reason_code\":\"RELAY_ID_MISMATCH\"}"
+    },
+    {
+      "label": "BUST⑧ 省略 intent.amount 骗过网关早拒验、到达 relay 后被 validateCommandPayload 真实拒绝(非 200 落地)",
+      "ok": true,
+      "detail": "status=503 body={\"ok\":false,\"error\":\"转账未上链（relay 无 txId，可能 RPC down 或执行失败）\",\"phase\":null} | relayLog=7/24/2026, 17:31:37 INVALID COMMAND: custodial_transfer missing required field: amount (valid types: handshake, send_message, publish_card, send_broadcast, transfer, custodial_transfer, split_utxo, consolidate_utxo, get_rpc_state, get_arm_status, ecdsa_sign, get_pubkey, sign_input_for_settle, get_per_bet_address, sweep_per_bet, prediction_settle_build_preimage, prediction_settle_consensual_build_"
+    },
+    {
+      "label": "BUST⑧-D项核心攻击靶: reachedExecLayer 正确判定 FAIL(未到执行层, 非误判\"到达执行层\")——旧版正则 /RPC down|relay 侧拒绝/ 会命中 gateway 固定通用文案里的\"RPC down\"四字, 把这条从没到 authorizeCommand 的响应误判成到达执行层",
+      "ok": true,
+      "detail": "status=503 body={\"ok\":false,\"error\":\"转账未上链（relay 无 txId，可能 RPC down 或执行失败）\",\"phase\":null} reachedExecLayer(旧regex会给true, 新版应给false)=false"
+    },
+    {
+      "label": "BUST⑧-结构化 body.phase 不是 execution(relay 从没跑到 authorizeCommand 后的 switch 执行分支)",
+      "ok": true,
+      "detail": "status=503 body={\"ok\":false,\"error\":\"转账未上链（relay 无 txId，可能 RPC down 或执行失败）\",\"phase\":null}"
+    },
+    {
+      "label": "BUST② 超额度被网关早拒(403)",
+      "ok": true,
+      "detail": "status=403 body={\"ok\":false,\"error\":\"amount 超 grant 单笔上限（超额请求，未触发解密）\"}"
+    },
+    {
+      "label": "BUST③ 过期信封未被意外放行(relay 侧兜底, 网关早拒验暂未查 TTL·诚实标已知缺口)",
+      "ok": true,
+      "detail": "status=403 body={\"ok\":false,\"error\":\"relay 拒绝: ENVELOPE_EXPIRED\",\"reason_code\":\"ENVELOPE_EXPIRED\"} | relayLog=7/24/2026, 17:31:37 M0c-1 GATE DENY → envelope 已过期 (§6-5) (type=custodial_transfer, origin=app)"
+    },
+    {
+      "label": "BUST③-精确 relay 日志精确命中\"已过期\"(非泛泛拒绝)",
+      "ok": true,
+      "detail": "relayLog=7/24/2026, 17:31:37 M0c-1 GATE DENY → envelope 已过期 (§6-5) (type=custodial_transfer, origin=app)"
+    },
+    {
+      "label": "BUST④ intent 掉包(digest 自洽被破坏)被拦",
+      "ok": true,
+      "detail": "status=401 body={\"ok\":false,\"error\":\"信封签名验证失败（网关早拒验）\"}"
+    },
+    {
+      "label": "BUST④-精确 网关精确回\"信封签名验证失败\"(非泛泛拒绝)",
+      "ok": true,
+      "detail": "body={\"ok\":false,\"error\":\"信封签名验证失败（网关早拒验）\"}"
+    },
+    {
+      "label": "BUST⑤ 未过期但超 pilot 专属 5min TTL 上限未被意外放行",
+      "ok": true,
+      "detail": "status=403 body={\"ok\":false,\"error\":\"relay 拒绝: CUSTODIAL_PILOT_TTL_EXCEEDED\",\"reason_code\":\"CUSTODIAL_PILOT_TTL_EXCEEDED\"} | relayLog=7/24/2026, 17:31:37 M0c-1 GATE DENY → custodial_transfer envelope TTL 超 pilot 专属上限 (5min, §2.3 围栏收紧) (type=custodial_transfer, origin=app)"
+    },
+    {
+      "label": "BUST⑤-精确 relay 日志精确命中\"pilot 专属上限\"(区别于 BUST③ 的\"已过期\")",
+      "ok": true,
+      "detail": "relayLog=7/24/2026, 17:31:37 M0c-1 GATE DENY → custodial_transfer envelope TTL 超 pilot 专属上限 (5min, §2.3 围栏收紧) (type=custodial_transfer, origin=app)"
+    },
+    {
+      "label": "BUST⑥-① 前 3 笔请求(60s 窗口内)未被限流拦(限流阈值刚好 3 笔/60s, 不误伤合法配额内请求)",
+      "ok": true,
+      "detail": "503,503,503"
+    },
+    {
+      "label": "BUST⑥-② 第 4 笔请求(超过 3 笔/60s)被限流拒绝(429)",
+      "ok": true,
+      "detail": "status=429 body={\"ok\":false,\"error\":\"grant 限流：每 60s 至多 3 笔请求\"}"
+    },
+    {
+      "label": "BUST⑥-精确 网关精确回限流文案(非泛泛拒绝)",
+      "ok": true,
+      "detail": "body={\"ok\":false,\"error\":\"grant 限流：每 60s 至多 3 笔请求\"}"
+    },
+    {
+      "label": "REPLAY-① 第一次合法信封到达执行层",
+      "ok": true,
+      "detail": "status=503 body={\"ok\":false,\"error\":\"转账未上链（relay 无 txId，可能 RPC down 或执行失败）\",\"phase\":\"execution\"}"
+    },
+    {
+      "label": "REPLAY-② 已知残留: 原样重放第二次当前设计下依然到达执行层(证明洞存在, 非证明被拦——nonce durable 归 M0c-3)",
+      "ok": true,
+      "detail": "status=503 body={\"ok\":false,\"error\":\"转账未上链（relay 无 txId，可能 RPC down 或执行失败）\",\"phase\":\"execution\"} | relayLog=7/24/2026, 17:31:37 command custodial_transfer failed: invalid kaspa address (to)"
+    },
+    {
+      "label": "REVOCATION-① 吊销前请求到达执行层(证明吊销后的拒绝不是因为 grant 本来就无效)",
+      "ok": true,
+      "detail": "status=503 body={\"ok\":false,\"error\":\"转账未上链（relay 无 txId，可能 RPC down 或执行失败）\",\"phase\":\"execution\"}"
+    },
+    {
+      "label": "REVOCATION-② 吊销后立即用同一 grant_id 再发被拒(fresh-read 无缓存窗口)",
+      "ok": true,
+      "detail": "status=401 body={\"ok\":false,\"error\":\"grant 已吊销\"}"
+    },
+    {
+      "label": "REVOCATION-②-精确 网关早拒验精确回\"grant 已吊销\"(非泛泛拒绝, 401 状态码+body.error 双确认)",
+      "ok": true,
+      "detail": "revokeOut=grant 已吊销: a3b3e456-d8b3-4e9d-9659-469de62ff3fe (relay fresh 读 → 下条命令即拒, §6-11) | status=401 body={\"ok\":false,\"error\":\"grant 已吊销\"}"
+    },
+    {
+      "label": "TAINT-① HTTP 回执不含真实私钥值(exact-secret 扫描, 非形状匹配)",
+      "ok": true,
+      "detail": "body 干净(status=503)"
+    },
+    {
+      "label": "TAINT-② relay 侧日志不含真实私钥值(exact-secret 扫描, 非形状匹配)",
+      "ok": true,
+      "detail": "relayLog 干净"
+    }
+  ]
+}
