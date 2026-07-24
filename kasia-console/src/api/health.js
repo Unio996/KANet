@@ -1,5 +1,36 @@
 import { getConfig } from '../data/settings/configs.js';
 import { computeAllHealth } from '../services/agent-health.js';
+import { dbPath } from '../db/client.js';
+import { execFileSync } from 'node:child_process';
+import { statSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, resolve } from 'node:path';
+
+// M0c-1 G5 real_chain smoke P0-2（Codex RESPONSE-20260725-MSG131）: runtime identity self-report.
+// 这个进程自己在启动这一刻算一次 git_commit + db 的 {dev,ino}（不是每次请求现查——目的是证"这个
+// 进程实际在跑哪份代码/连的是哪份 db 文件", 进程启动后 working tree 再被后续 commit 改动不该污染
+// 这个读数, 缓存值才是真正对应 runtime 行为的锚点）。零鉴权只读零副作用, 但只在 loopback 场景暴露
+// 有意义（调用方自己决定是否只信 loopback 请求的响应）。
+// KANet-UI 2026-07-25 抓 bug: 这个文件在 kasia-console/src/api/health.js(距 repo root 3 层),
+// 不是 G5 那个 4 层深路径——照抄 G5 的 '../../../..' 会跳到 repo 外(D:\ 本身), 导致 git rev-parse
+// 静默失败(catch{} best-effort)返回 null, 是个会静默产出错误身份数据的真 bug, 不是 cosmetic。
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../..'); // D:/kanet-tn12
+// 模块加载时(进程启动早期, import 这个文件那一刻)立即算一次, 非等第一次请求才算——
+// 精确对应"这个进程从哪个 commit / 哪个 db 文件启动"这个事实, 全进程生命周期不变。
+function computeRuntimeIdentity() {
+  let gitCommit = null;
+  try { gitCommit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim(); } catch { /* best-effort */ }
+  let dbStat = null;
+  try { const s = statSync(dbPath); dbStat = { dev: s.dev, ino: s.ino }; } catch { /* best-effort */ }
+  return {
+    git_commit: gitCommit,
+    db_path: dbPath,
+    db_stat: dbStat, // {dev, ino} — 比纯路径字符串强一档(NTFS ino 也有效), 已知局限见下方端点注释
+    pid: process.pid,
+    started_at: new Date().toISOString(),
+  };
+}
+const RUNTIME_IDENTITY = computeRuntimeIdentity();
 
 export async function registerHealthRoutes(fastify) {
   fastify.get('/health', async (request, reply) => {
@@ -50,5 +81,14 @@ export async function registerHealthRoutes(fastify) {
       litellm,
       overall,
     });
+  });
+
+  // M0c-1 G5 real_chain smoke P0-2: 进程自证身份(供 external harness 独立证明"打的是真在
+  // serving 那个进程"用, 见文件头 computeRuntimeIdentity 注释)。零鉴权只读——只在调用方自己
+  // 强制 loopback-only 时才有身份证明意义(本端点不做 host 校验, 那是调用方的责任)。
+  // 已知局限(如实标注, 非隐藏): db_stat.{dev,ino} 是文件系统内唯一标识(比路径字符串强一档),
+  // 但仍不覆盖 package.json/node_modules 依赖变更、不跨机器/跨挂载点比对。
+  fastify.get('/api/system/runtime-identity', async (request, reply) => {
+    return reply.send(RUNTIME_IDENTITY);
   });
 }
