@@ -2,7 +2,7 @@
   "source": "docs/2026-07-24-m0c1-pilot-codex-msg124-rectification.md §E",
   "target": "kasia-console/src/api/tg-wallet.js POST /:tg_user_id/send",
   "method": "真实 Fastify inject 调 tg-wallet.js 注册路由(非 mock/非直调内部函数) + 真 runMigrations schema",
-  "source_commit": "41e331bf0ceed7a4d960e27414b4ad22e8fe5b0a",
+  "source_commit": "4cb3b956394dccba03e7118fce924a8abb7423ce",
   "test_blob_sha": "5eb13f828959227d81e1ef3ebf225637e4c4dff3",
   "target_blob_sha": "585e6e81d058090cb14472293acc5ae04667ff05",
   "summary": {
@@ -13,7 +13,7 @@
     {
       "label": "①建 pilot 候选钱包",
       "ok": true,
-      "detail": "{\"ok\":true,\"created\":true,\"address\":\"kaspatest:qpa4nlwlhgpdaw4vh4mjag6nhmxjguve9y775xlak985nwp68xy6kta0squp3\",\"mnemonic\":\"[REDACTED-MNEMONIC-SHAPE]\",\"network\":\"testnet-12\"}"
+      "detail": "{\"ok\":true,\"created\":true,\"address\":\"kaspatest:qp7x04tlyuyzgvprlcgulfy87m0g5re0x0tqrfgvgg0qlqjtu7af73jscedcm\",\"mnemonic\":\"[REDACTED-MNEMONIC-SHAPE]\",\"network\":\"testnet-12\"}"
     },
     {
       "label": "①真攻击场景: 持 ingest secret+pilot tg_user_id 直接打 /send 被 403 拒",
@@ -28,7 +28,7 @@
     {
       "label": "②建非 pilot 钱包",
       "ok": true,
-      "detail": "{\"ok\":true,\"created\":true,\"address\":\"kaspatest:qphanevy307mu3xmnjhrzm6klqslre5au5zy8xmlwhhy5wz8rkrc6yf500gzj\",\"mnemonic\":\"[REDACTED-MNEMONIC-SHAPE]\",\"network\":\"testnet-12\"}"
+      "detail": "{\"ok\":true,\"created\":true,\"address\":\"kaspatest:qqsncy8sp0pp2z9a8rewfjneu4dtnthk7yytvyu2tcg8judg8lt0z03pth63j\",\"mnemonic\":\"[REDACTED-MNEMONIC-SHAPE]\",\"network\":\"testnet-12\"}"
     },
     {
       "label": "②非 pilot 地址不被隔离检查拦(不是 403 pilot 隔离文案——后续因隔离 relay/RPC 不可用会以别的方式失败, 那是预期的, 只要不是这条隔离拒绝)",
@@ -38,7 +38,7 @@
     {
       "label": "③建钱包(测 relay id fallback)",
       "ok": true,
-      "detail": "{\"ok\":true,\"created\":true,\"address\":\"kaspatest:qp46nngayvcsyhc0ewa6lzfnrdlhhu5yt7cv2h7g5590vugn6ps7x7fl7sw8p\",\"mnemonic\":\"[REDACTED-MNEMONIC-SHAPE]\",\"network\":\"testnet-12\"}"
+      "detail": "{\"ok\":true,\"created\":true,\"address\":\"kaspatest:qztxm35805zgzyndr3sknuvtrz78rs72zasz7yderrsaj47ak9tvcfcjh893a\",\"mnemonic\":\"[REDACTED-MNEMONIC-SHAPE]\",\"network\":\"testnet-12\"}"
     },
     {
       "label": "③CUSTODIAL_RELAY_ID 未设(即便 FAUCET_RELAY_ID 有值)→ 503 fail-closed, 非静默 fallback",
@@ -53,17 +53,17 @@
     {
       "label": "④建钱包(测 diagnose 正常路径)",
       "ok": true,
-      "detail": "{\"ok\":true,\"created\":true,\"address\":\"kaspatest:qre3w3zf8ezms4asgzja0rswva8asq2evsksew6xe7cfel4uh8uyu0fdzhf7n\",\"mnemonic\":\"[REDACTED-MNEMONIC-SHAPE]\",\"network\":\"testnet-12\"}"
+      "detail": "{\"ok\":true,\"created\":true,\"address\":\"kaspatest:qqrj0u47ktl9vfpmja2rwnfxwd64gsht2zg6yvvwyamxlyzwjvwu6kg73t89u\",\"mnemonic\":\"[REDACTED-MNEMONIC-SHAPE]\",\"network\":\"testnet-12\"}"
     },
     {
       "label": "④operator 授权+capability_only → live decrypt 成功且 derive 地址与行内 kaspa_address 逐字符一致 → ok:true",
       "ok": true,
-      "detail": "status=200 body={\"ok\":true,\"address\":\"kaspatest:qre3w3zf8ezms4asgzja0rswva8asq2evsksew6xe7cfel4uh8uyu0fdzhf7n\"}"
+      "detail": "status=200 body={\"ok\":true,\"address\":\"kaspatest:qqrj0u47ktl9vfpmja2rwnfxwd64gsht2zg6yvvwyamxlyzwjvwu6kg73t89u\"}"
     },
     {
       "label": "④诊断回执不含 mnemonic/加密 blob(只 address, TAINT 纪律)",
       "ok": true,
-      "detail": "{\"ok\":true,\"address\":\"kaspatest:qre3w3zf8ezms4asgzja0rswva8asq2evsksew6xe7cfel4uh8uyu0fdzhf7n\"}"
+      "detail": "{\"ok\":true,\"address\":\"kaspatest:qqrj0u47ktl9vfpmja2rwnfxwd64gsht2zg6yvvwyamxlyzwjvwu6kg73t89u\"}"
     },
     {
       "label": "⑤只带 shared ingest secret(无 x-kanet-admin-secret operator tier) → 403 拒, 非静默放行",
@@ -93,7 +93,7 @@
     {
       "label": "⑧建钱包(测 diagnose key 不一致路径)",
       "ok": true,
-      "detail": "{\"ok\":true,\"created\":true,\"address\":\"kaspatest:qrqc5qu925vkgltymq08s7nt7g3nazduanes2gycdc84x89mx4luw7rqadfwp\",\"mnemonic\":\"[REDACTED-MNEMONIC-SHAPE]\",\"network\":\"testnet-12\"}"
+      "detail": "{\"ok\":true,\"created\":true,\"address\":\"kaspatest:qq7vx82awnc7af2jhzl8cl94kjny0wkq373myhvzcwvldnmq3ghqcud5rr5k8\",\"mnemonic\":\"[REDACTED-MNEMONIC-SHAPE]\",\"network\":\"testnet-12\"}"
     },
     {
       "label": "⑧key 不一致(operator 授权对·access_mode 对) → decrypt 失败(auth tag 校验拦) → ok:false, 非静默放行",
@@ -118,7 +118,7 @@
     {
       "label": "⑪建钱包(测 durable 列独立生效)",
       "ok": true,
-      "detail": "{\"ok\":true,\"created\":true,\"address\":\"kaspatest:qzcatmwvdvy6509dcnd2r7y5gxy4zs6zhnvc3tlnwsex8vzk39fhym2kem96f\",\"mnemonic\":\"[REDACTED-MNEMONIC-SHAPE]\",\"network\":\"testnet-12\"}"
+      "detail": "{\"ok\":true,\"created\":true,\"address\":\"kaspatest:qruy0axl20gpq59dkxjejwzj4hpvsye3pdumd24wmszj2cy0nlkky2lq4c3vs\",\"mnemonic\":\"[REDACTED-MNEMONIC-SHAPE]\",\"network\":\"testnet-12\"}"
     },
     {
       "label": "⑪PILOT_WALLET_ADDRESSES 完全未设时, access_mode durable 列仍独立挡住 → 403(结构性, 非靠 env)",
@@ -128,7 +128,7 @@
     {
       "label": "⑫建钱包(测 durable 列在畸形 env 下仍生效)",
       "ok": true,
-      "detail": "{\"ok\":true,\"created\":true,\"address\":\"kaspatest:qzngtsq5eusjchqjd5n2dg230lnh5zcfkc36mn74t7wp0zh2s77skey6es959\",\"mnemonic\":\"[REDACTED-MNEMONIC-SHAPE]\",\"network\":\"testnet-12\"}"
+      "detail": "{\"ok\":true,\"created\":true,\"address\":\"kaspatest:qqfw2nn7fwhjxtdw5c44lsmr04wrnn7z224djqkyrtway0z2a3esg4x7mfjck\",\"mnemonic\":\"[REDACTED-MNEMONIC-SHAPE]\",\"network\":\"testnet-12\"}"
     },
     {
       "label": "⑫PILOT_WALLET_ADDRESSES 畸形值(空 Set)时, access_mode durable 列仍独立挡住 → 403",

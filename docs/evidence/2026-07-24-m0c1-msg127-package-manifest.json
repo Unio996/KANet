@@ -1,0 +1,69 @@
+{
+  "_doc": "M0c-1 Path B pilot — Codex MSG-127整改(O1 diagnose env生命周期+O2命名+O3 stale doc+NULL测+redact) package manifest v4。O2命名校正: source_commit=测试跑的源码commit; package_commit=加入本manifest+4 evidence的那个commit(=source_commit+evidence/manifest文件); 部署checkout须==package_commit(一份不可变包)。",
+  "source_commit": "4cb3b956394dccba03e7118fce924a8abb7423ce",
+  "package_commit_definition": "package_commit = the git commit that adds this manifest file plus the four evidence JSON files (= source_commit + evidence/manifest only, no code/doc change). Deployment checkout MUST equal package_commit. Its exact hash is stated in the accompanying bridge message after this file is committed.",
+  "evidence_parent_relation": "package_commit is source_commit (4cb3b956394d) plus the evidence/manifest files only",
+  "msg127_fix_commits": {
+    "O1_diagnose_env_lifecycle": "4cb3b956",
+    "O3_pending_doc_historical": "810da258",
+    "NULL_test_and_redact": "cda8f6db"
+  },
+  "evidence": [
+    {
+      "file": "docs/evidence/2026-07-24-m0c1-g4-pilot-custodial-e2e-v0.10-evidence.json",
+      "sha256": "b7bb0803eab0e110cd21432027e7dbae03f5719d55107134c81787ade796546a",
+      "source_commit": "4cb3b956394dccba03e7118fce924a8abb7423ce",
+      "pass": 27,
+      "fail": 0
+    },
+    {
+      "file": "docs/evidence/2026-07-24-m0c1-provision-payee-regression-v5-evidence.json",
+      "sha256": "002b5c864db884fd420efe11081596c943cb6396fa33efd40f6917312d0ab443",
+      "source_commit": "4cb3b956394dccba03e7118fce924a8abb7423ce",
+      "pass": 13,
+      "fail": 0
+    },
+    {
+      "file": "docs/evidence/2026-07-24-m0c1-pilot-custodial-insert-regression-v5-evidence.json",
+      "sha256": "f2b2acb33acb8a8af28ac1ac169eb0f6428719413ebc926d54236a2fb60224fd",
+      "source_commit": "4cb3b956394dccba03e7118fce924a8abb7423ce",
+      "pass": 39,
+      "fail": 0
+    },
+    {
+      "file": "docs/evidence/2026-07-24-m0c1-tg-wallet-pilot-isolation-regression-v4-evidence.json",
+      "sha256": "b34e34a449e15d6d6e2cc460540054362399f0db3b91f3890c86d967552dcaa7",
+      "source_commit": "4cb3b956394dccba03e7118fce924a8abb7423ce",
+      "pass": 25,
+      "fail": 0
+    }
+  ],
+  "harness_blobs": {
+    "g4": "032de2a6ae3098497b9872c63c2db21f735594c2",
+    "provision_regression": "4e13dc06b73e7ad5c38c8560407c080b6168fdc5",
+    "custodial_insert_regression": "b347fa06a98aaf6dc6cd8f97f6790a39fd8d09b4",
+    "tg_wallet_isolation_regression": "5eb13f828959227d81e1ef3ebf225637e4c4dff3"
+  },
+  "load_bearing_blobs": {
+    "capability": "f3dc92a60215617544f65828174dc01e968378eb",
+    "tg_wallet": "585e6e81d058090cb14472293acc5ae04667ff05",
+    "pilot_wallet_policy": "338f0a835fa0c3ecdd29992a21ec70dea97e3868",
+    "admin_secret_tier": "6467bf1d92c2d2a000c15d1c2df0b1b9c52234de",
+    "db_client": "ce3ff393f312ea3af1c59a2388fde0f5d1f23a06",
+    "migrate": "20b71c0d74dfc6c10c2ea53ee1af10dfa848b64b",
+    "app_envelope": "a35a8c97f4f5edf8fd7fcd0796e70ded03a98d63",
+    "authorize": "40f6f2485890813abc2b0bc324b24c0358475aac",
+    "relay": "aa6fb71f023eba59fd751c451ad00641781fb3ba",
+    "grant_provision": "cf17d8fb8cfe423299f031c11ca845e285e8ed9b",
+    "pilot_custodial_insert": "4be043e26b343b7d94604d55a0b6a8ffe2c12d7e",
+    "pilot_candidate_generate": "d0fd02d12eeeb0a6ab9f6a39884c6f478bee877c",
+    "crypto": "c79f82bf555d6b688cdda04b8f5c9700623c0152",
+    "index": "c3b18246ffff4dbb96ba0a02204353c9fad59f1b",
+    "wallet": "e1c75187556a048c68f4a6a65318bd2408a4bf13",
+    "m0a_lib": "e1bfad6e2e8f0f144bbf514faee1a8530861fb75",
+    "m0a_manifest": "97749dea26ae38e50ef653a4c383a9c03f1fe9db",
+    "runbook": "71bbc2568d0b9b2037ddfb454c8ef9c2261f0606",
+    "receipt": "b4e0322dc4c466ed1592da4992b26f30d4be87b9",
+    "database_md": "129234601c27cec00f9c2d357b9b36f3465d8b5a"
+  }
+}
