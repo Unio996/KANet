@@ -5584,5 +5584,21 @@ export function runMigrations() {
     console.log('[migrate] v192: pilot_rate_limit_log 建表 (M0c-1 Path B pilot 围栏 §2.4, gateway 限流 keyed by grant_id).');
   }
 
+  // v193 (2026-07-24, J2, Codex MSG-125 E 项·durable 结构隔离): tg_custodial_wallets 加
+  // access_mode 列。设计: docs/2026-07-24-m0c1-pilot-codex-msg125-rectification.md E —
+  // 原来 legacy /send 靠 process.env.PILOT_WALLET_ADDRESSES 这个 env allowlist 做隔离,
+  // env 缺失/畸形/重启未加载时 set 会是空, legacy 路径静默重新对 pilot 钱包开放（fail-open）。
+  // 这条列是权威、durable 的隔离判据——pilot 钱包建行时显式设 access_mode='capability_only'
+  // （见 m0c1-pilot-custodial-insert.mjs），legacy /send 查出行后按这一列 fail-closed 拒绝
+  // （env allowlist 降级为纵深防御的早拒层，非唯一权威）。默认 'normal'（既有 tg-wallet.js
+  // /create 走的自助注册钱包，不受这条列影响，行为不变）。
+  {
+    const walletCols = sqlite.pragma(`table_info(tg_custodial_wallets)`).map(c => c.name);
+    if (!walletCols.includes('access_mode')) {
+      sqlite.exec(`ALTER TABLE tg_custodial_wallets ADD COLUMN access_mode TEXT DEFAULT 'normal'`);
+      console.log("[migrate] v193: tg_custodial_wallets.access_mode 列已加 (Codex MSG-125 E 项, pilot 钱包 durable 隔离标记, 默认 'normal').");
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }

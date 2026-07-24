@@ -74,6 +74,8 @@ async function main() {
     const db = new Database(DB, { readonly: true });
     const row = db.prepare('SELECT * FROM tg_custodial_wallets WHERE tg_user_id = ?').get(tgUserId);
     check('①DB 行存在且 address 精确匹配', row && row.kaspa_address === g.address, row ? row.kaspa_address : '(无行)');
+    check('①(Codex MSG-125 E 项)DB 行 access_mode 精确 = capability_only(durable 隔离标记, 非留 default)',
+      row && row.access_mode === 'capability_only', row ? row.access_mode : '(无行)');
     if (row) {
       const decrypted = decrypt(row.mnemonic_encrypted);
       const { addressFromMnemonic } = await import(pathToFileURL(path.join(ROOT, 'kasia-console/src/services/wallet.js')).href);
@@ -233,6 +235,45 @@ async function main() {
       || illegalMnemonic.split(' ').some((w) => r.stdout.includes(w) || r.stderr.includes(w));
     check('⑨非法 mnemonic 错误路径 stdout/stderr 不含原始输入片段(逐词扫描)', !leaked9, leaked9 ? `LEAK: stdout=${r.stdout} stderr=${r.stderr}` : '干净');
     check('⑨候选文件被 shred(候选本身内容坏了, genuine mismatch)', !existsSync(g.candidateFile), '');
+  }
+
+  // ── ⑩ D 项(Codex MSG-125)：test-only fault-injection 证明事务真原子——"INSERT 后、readback
+  // 验证前故意抛异常"这条路径在正常操作下无法自然构造(pre-check③跟事务内 check 用同一份数据,
+  // 结构上不会出现"pre-check 过了、事务内又失败"的自然场景), 必须显式注入才能验证。用
+  // M0C1_INSERT_TEST_FORCE_READBACK_FAIL=1 触发 helper 内建的 test-only 钩子(production-inert
+  // ——不设这个 env 时零行为改变), 断言事务回滚后目标 tg_user_id 行数=0(非"插入又删除", 是
+  // "从未提交"——用 sqlite_master 层面的行计数证明, 非只看 exit code)。同时验证候选文件按
+  // NWT 规则②被 shred(注入的失败走 READBACK_MISMATCH 分支, 判定为 genuine mismatch)。 ──
+  {
+    const g = generateCandidate('regr-fault-inject');
+    const tgUserId = 'j2-regr-faultinject-' + Date.now();
+    let r;
+    try {
+      const stdout = execFileSync('node', [INSERT, 'insert', '--candidate-file', g.candidateFile, '--tg-user-id', tgUserId,
+        '--approved-address', g.address, '--network', NETWORK, '--db', DB],
+        { encoding: 'utf8', env: { ...process.env, M0C1_INSERT_TEST_FORCE_READBACK_FAIL: '1' } });
+      r = { code: 0, stdout, stderr: '' };
+    } catch (e) {
+      r = { code: e.status ?? 1, stdout: e.stdout?.toString() || '', stderr: e.stderr?.toString() || e.message };
+    }
+    check('⑩注入的事务内失败 → CLI 非零 exit code', r.code !== 0, `code=${r.code} stderr=${r.stderr}`);
+    check('⑩stderr 精确提示 TEST_INJECTED_FAILURE(证明真走了注入分支, 非其他原因失败)',
+      /TEST_INJECTED_FAILURE/.test(r.stderr), r.stderr);
+    const db2 = new Database(DB, { readonly: true });
+    const cnt = db2.prepare('SELECT COUNT(*) AS cnt FROM tg_custodial_wallets WHERE tg_user_id = ?').get(tgUserId).cnt;
+    check('⑩注入失败后目标 tg_user_id 行数=0(事务真回滚, 非"插入又删除")', cnt === 0, `实际=${cnt}`);
+    db2.close();
+    check('⑩候选文件被 shred(注入失败走 READBACK_MISMATCH 分支, 判定 genuine mismatch)', !existsSync(g.candidateFile), '');
+  }
+
+  // ── ⑪ D 项对照组：不设注入 env 时, 同一份候选正常插入成功(证明注入钩子 production-inert,
+  // 不设 env 时零行为改变, 不是"平时也会随机失败"的坏钩子) ──
+  {
+    const g = generateCandidate('regr-fault-inject-control');
+    const tgUserId = 'j2-regr-faultinject-control-' + Date.now();
+    const r = runCli(INSERT, ['insert', '--candidate-file', g.candidateFile, '--tg-user-id', tgUserId,
+      '--approved-address', g.address, '--network', NETWORK, '--db', DB]); // 不设 M0C1_INSERT_TEST_FORCE_READBACK_FAIL
+    check('⑪不设注入 env 时同一套流程正常成功(production-inert 对照组)', r.code === 0, `code=${r.code} stderr=${r.stderr}`);
   }
 
   const gitRevParse = () => { try { return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim(); } catch { return null; } };

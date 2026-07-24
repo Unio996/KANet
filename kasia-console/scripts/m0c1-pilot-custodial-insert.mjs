@@ -195,16 +195,28 @@ async function main() {
   // 取代原来"INSERT→SELECT→条件 DELETE"三条独立语句之间的 crash 残留窗口。
   const now = new Date().toISOString();
   const insertAndVerify = db.transaction(() => {
-    db.prepare(`INSERT INTO tg_custodial_wallets (tg_user_id, kaspa_address, mnemonic_encrypted, network, created_at, updated_at)
-      VALUES (?,?,?,?,?,?)`).run(tgUserId, approvedAddress, mnemonicEnc, network, now, now);
+    // Codex MSG-125 E 项：pilot 钱包建行时显式设 access_mode='capability_only'（durable 隔离
+    // 判据，非留 default 'normal'）——legacy tg-wallet.js /send 查出行后按这一列 fail-closed
+    // 拒绝，不依赖 process.env.PILOT_WALLET_ADDRESSES 这个 env allowlist（env 缺失/畸形/重启
+    // 未加载时 fail-open 的老坑，见 migrate.js v193 注释）。
+    db.prepare(`INSERT INTO tg_custodial_wallets (tg_user_id, kaspa_address, mnemonic_encrypted, network, access_mode, created_at, updated_at)
+      VALUES (?,?,?,?,'capability_only',?,?)`).run(tgUserId, approvedAddress, mnemonicEnc, network, now, now);
     // 同一个 db handle 读回（refinement, KANet-UI+Bettor）：not 另开连接, 避免 WAL 可见性
     // 延迟让"刚写的行还没 checkpoint"被误判成"读不到"。
     const row = db.prepare('SELECT mnemonic_encrypted FROM tg_custodial_wallets WHERE tg_user_id = ?').get(tgUserId);
     const decrypted = decrypt(row.mnemonic_encrypted);
     const readbackAddress = addressFromMnemonic(decrypted, network);
-    if (readbackAddress !== approvedAddress) {
+    // Codex MSG-125 D 项(fault-injection 测试挂钩)：test-only 注入点, 只在显式设置的测试专用
+    // env 变量下触发——production-inert（env 未设时零行为改变, 不加任何 production 分支开销:
+    // 下面这行本身就是一次布尔求值 + 短路, 没有 env 时走的还是原来那条 readbackAddress 比较）。
+    // 用途：证明"INSERT 后、readback 验证前故意抛异常"这条无法自然构造的路径（pre-check③跟
+    // 事务内这个 check 用同一份数据, 结构上不会出现"pre-check 过了事务内又失败"的自然场景）
+    // 真的会让整个事务原子回滚, 零残留行——而非只是"理论上应该会"。绝不在生产环境设这个 env。
+    const forceInjectedFailure = process.env.M0C1_INSERT_TEST_FORCE_READBACK_FAIL === '1';
+    if (readbackAddress !== approvedAddress || forceInjectedFailure) {
       // 这个 throw 会让整个事务(INSERT+SELECT)自动回滚——不会有半插入状态残留。
-      throw new Error(`READBACK_MISMATCH: readback 派生地址(${readbackAddress}) != approvedAddress(${approvedAddress})`);
+      const reason = forceInjectedFailure ? 'TEST_INJECTED_FAILURE(M0C1_INSERT_TEST_FORCE_READBACK_FAIL=1)' : `readback 派生地址(${readbackAddress}) != approvedAddress(${approvedAddress})`;
+      throw new Error(`READBACK_MISMATCH: ${reason}`);
     }
   });
 
