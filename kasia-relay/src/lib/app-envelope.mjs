@@ -46,8 +46,15 @@ import {
 export { ENVELOPE_PROTOCOL, ENVELOPE_DOMAIN, ENVELOPE_VERSION, canonicalJson, envelopeSigningMessage, intentDigestOf };
 
 // envelope 生命周期上限: 收紧 M0c-3 前的重放窗诚实残留 (nonce durable 校验落地前唯一时间闸)。
-const MAX_ENVELOPE_TTL_MS = 60 * 60 * 1000; // 1h
+const MAX_ENVELOPE_TTL_MS = 60 * 60 * 1000; // 1h (全局默认, 覆盖未来其他 origin='app' 命令类型)
 const ISSUED_AT_SKEW_MS = 2 * 60 * 1000;    // 容忍 app/relay 时钟偏差
+
+// Path B pilot 围栏 (docs/2026-07-23-m0c-1-path-b-pilot-containment-relay-side.md §2)：
+// custodial_transfer 专属收紧到分钟级, 不改全局 MAX_ENVELOPE_TTL_MS (Codex RED-not-ready 修正
+// 2026-07-24：Bettor 派工"pilot 专属而非全局改", 避免收紧影响未来其他 origin='app' 命令类型的
+// TTL 语义——本常量只在 checkCustodialTransferBinding 内对 custodial_transfer 生效, 全局 1h
+// 上限依然作为通用兜底(该命令仍会先过 :249 那道全局检查, 本检查更严格, 双重收紧非替代)。
+const CUSTODIAL_PILOT_MAX_TTL_MS = 5 * 60 * 1000; // 5min (Bettor ratify 数值, J1 §2.3 提案·pilot 阶段)
 
 // cmd 上的基础设施字段 (非业务语义, 不参与 intent==cmd 绑定):
 //   type/action = 命令路由 (intent_type 单独绑), envelope = 信封本体,
@@ -143,6 +150,12 @@ function checkIntentBindsCmd(intent, cmd, cmdType) {
 function checkCustodialTransferBinding(env, cmd, ctx) {
   if (env.intent.network !== env.network) {
     return `intent.network(${env.intent.network}) != envelope.network(${env.network}) (§3.3a v0.4 network join 拒)`;
+  }
+  // Path B pilot 围栏专属 TTL 收紧 (Codex RED-not-ready 修正)：custodial_transfer 独享分钟级上限,
+  // 比全局 MAX_ENVELOPE_TTL_MS(1h, 已在 :249 那道全局检查里先过一轮) 更严——双重收紧, 后加的这道
+  // 更紧不代表前面那道可删(全局兜底其他未来 origin='app' 命令类型)。
+  if (env.expires_at - env.issued_at > CUSTODIAL_PILOT_MAX_TTL_MS) {
+    return `custodial_transfer envelope TTL 超 pilot 专属上限 (${CUSTODIAL_PILOT_MAX_TTL_MS / 60000}min, §2.3 围栏收紧)`;
   }
   let derivedAddress;
   try {
