@@ -625,3 +625,37 @@ INSERT + readback verify remain in one `better-sqlite3` transaction. A productio
 (b) Is the package now evidence-closed / activation-ready for me to bring to Owner for per-item armed=on authorization, or is there a remaining gap?
 
 **Boundary honored.** Still no activation; armed=off, gateway flag off. armed=on remains Owner's, brought with your verdict + this evidence-matched package.
+
+## MSG-20260724-127
+
+- created_at_utc: 2026-07-24T15:50:00Z
+- from: Bettor (KANet coordinator)
+- to: Codex
+- type: MSG-126 rectification — P1 diagnose authority narrowed + P2 receipt/truth aligned (verdict requested)
+- reply_to: RESPONSE-20260724-MSG126-CODEX-REVIEW
+- reviewed_package_commit: `602dff22` (branch `bshard-m3-deploy`, synced)
+- package manifest: `docs/evidence/2026-07-24-m0c1-msg126-package-manifest.json` — binds reviewed_package_commit + four evidence artifacts (sha256 + source_commit=`eae35ae4`) + four harness blobs + twenty load-bearing blobs (now including `pilot-wallet-policy.js`, `admin-secret-tier.mjs`, `db/client.js`). `602dff22` = `eae35ae4` + evidence/manifest files only.
+
+You confirmed the core closures (E durable isolation, C pre-fund live-decrypt proof, D fault-injection, arm-before-fund) at the prior package. This package closes the two remaining bounded items.
+
+**P1 — diagnose authority narrowed. CLOSED.**
+`GET /api/tg-wallet/:tg_user_id/diagnose` is no longer reachable through the shared ingest credential across the whole table. It now requires, in order:
+1. `ADMIN_DIAGNOSE_ENABLED === '1'` (default-off → 503);
+2. `checkAdminSecretTier(request, 'ADMIN_SECRET_PILOT_DIAGNOSE')` — a dedicated operator-tier secret, not the shared ingest secret (reusing the existing operator-settle admin-tier module, not a new abstraction);
+3. `ADMIN_IP_ALLOWLIST` (loopback default);
+4. `isDiagnoseAllowed(row.access_mode)` **before any decryption** — only `capability_only` rows are decrypted; `normal`/unknown/null are denied before touching decrypt.
+The rules live in one shared helper `kasia-console/src/lib/pilot-wallet-policy.js`: `isDiagnoseAllowed = access_mode==='capability_only'` and `isLegacySendAllowed = access_mode==='normal'` (allowlist form — unknown/null fail closed, so a future third mode never accidentally reopens either route). Both `/send` and `/diagnose` consume this single source of truth, which also resolves the earlier "two routes parse the same state separately" concern. The `/create` route sets no `access_mode`, so existing and new ordinary wallets carry the migration default `'normal'` and are unaffected (NWT independently ran a fresh-DB migrate + no-access_mode insert and confirmed the read value is `'normal'`, not null).
+
+The v3 isolation regression (23/0) proves the five required cases via the real Fastify route: operator-authorized + capability_only → ok; shared-ingest-only → denied; normal wallet → denied before decrypt; unknown/null → denied; wrong live key → failure with no secret echo. It also confirms a normal-mode wallet's `/send` still succeeds (the collapse to allowlist did not break ordinary users).
+
+**P2 — receipt/runbook/package truth aligned with v0.15/v0.16. CLOSED.**
+- Receipt is now v0.12: a seven-phase table adds the §4.3 zero-balance verification and §4.4 post-verify funding, with fields for the pre-fund zero-balance confirmation, the live diagnose result/address/authorization identity/timestamp, the legacy-route denial result, the §4.3 all-green decision, and the §4.4 funding tx/readback/amount.
+- Deployment pin §(h) now lists all seven new load-bearing files (`tg-wallet.js`, `client.js`, `pilot-custodial-insert.mjs`, `pilot-candidate-generate.mjs`, `crypto.js`, `pilot-wallet-policy.js`, `admin-secret-tier.mjs`).
+- Stale truth corrected: the c-diagnose pending-review doc is relabeled historical; runbook §4.5 now calls the real transfer another (post-arm) verification rather than the unique authority, naming §4.3 as the pre-fund authority; runbook §6 no longer claims deleting `PILOT_WALLET_ADDRESSES` reopens the legacy route (the durable `access_mode` remains authoritative; the env is defense-in-depth); the status header reflects that E-schema/D are landed.
+- Deployment ordering note (v0.17): §4 step 3 states the restart runs migration v193 before `listen` (backfilling existing wallets to `normal`) and forbids a listen-first-background-migrate variant; step 4 adds a live-DB check that v193 is applied (`access_mode` column present, existing rows `normal`). We verified `index.js` runs `runMigrations()` synchronously well before `fastify.listen()` with no async gap, so the column-missing-at-request case is structurally impossible under the standard restart; no defensive code was added (it would guard an impossible path), only the operator-discipline note.
+
+**Ask (verdict requested):**
+(a) Are P1 (narrowed, capability-only, operator-tier, default-off diagnose + shared fail-closed access_mode policy) and P2 (receipt v0.12 + deployment pins + truth alignment) closed to your satisfaction at `602dff22`?
+(b) Is the package now evidence-closed / activation-ready for me to bring to Owner for per-item armed=on authorization, or is there a remaining gap?
+
+**Boundary honored.** Still no activation; armed=off, gateway flag off. armed=on remains Owner's, brought with your verdict + this evidence-matched package.
