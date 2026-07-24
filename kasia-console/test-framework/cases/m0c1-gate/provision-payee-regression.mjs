@@ -72,17 +72,45 @@ async function main() {
     }
   }
 
-  // ── ② custodial_transfer 传 --payee → CLI 正常签发, payee_scope 真值正确写入 ──
+  // ── ② custodial_transfer 传 --payee → CLI 正常签发, DB 精确行核对(Codex closure 证据要求:
+  // "approved singleton --payee, singleton --source, explicit 2-KAS max and TN12 relay", 且
+  // "no extra scope elements"——不能停在".includes()"这种弱判据, 数组多塞几个元素也会通过。
+  // 复刻 Path B pilot 首签的实际批准参数集(singleton payee + singleton source + 2 KAS 上限 +
+  // testnet-12 + 单一 relay), 逐维度做恰好相等断言, 并显式核对未涉及的维度(market/branch/
+  // outpoint)确实是 NULL——证明"只授了该授的, 无多余维度"，非只查一个字段。 ──
   {
-    const appKeyId = 'regr-haspayee-' + Date.now();
+    const appKeyId = 'regr-preciserow-' + Date.now();
     const payeeAddr = 'kaspatest:qregr0000000000000000000000000000000000000000000000000000';
+    const sourceAddr = 'kaspatest:qregrsrc00000000000000000000000000000000000000000000000';
+    const relayId = 'tn12-pilot-relay-0001';
     const r = runProvision(['issue', '--app-key-id', appKeyId, '--app-pubkey', xonlyHex(),
-      '--commands', 'custodial_transfer', '--relay', 'r1', '--network', 'testnet-12', '--payee', payeeAddr]);
-    check('②custodial_transfer 传 --payee → CLI exit code=0(正常签发)', r.code === 0, `code=${r.code} stderr=${r.stderr}`);
+      '--commands', 'custodial_transfer', '--relay', relayId, '--network', 'testnet-12',
+      '--payee', payeeAddr, '--source', sourceAddr, '--max-amount-kas', '2']);
+    check('②custodial_transfer 传完整批准参数集 → CLI exit code=0(正常签发)', r.code === 0, `code=${r.code} stderr=${r.stderr}`);
     const db = new Database(DB, { readonly: true });
-    const row = db.prepare('SELECT payee_scope FROM m0c1_app_grants WHERE app_key_id = ?').get(appKeyId);
-    check('②DB 里 payee_scope 真值 = JSON 数组含批准地址(非 NULL/非其他值)', row && JSON.parse(row.payee_scope).includes(payeeAddr),
-      row ? row.payee_scope : '(无行)');
+    const row = db.prepare('SELECT * FROM m0c1_app_grants WHERE app_key_id = ?').get(appKeyId);
+    if (!row) {
+      check('②DB 里存在这条 grant', false, '(无行)');
+    } else {
+      const payeeScope = JSON.parse(row.payee_scope);
+      const sourceScope = JSON.parse(row.source_scope);
+      const relayScope = JSON.parse(row.relay_scope);
+      check('②payee_scope 恰好是 singleton [payeeAddr](非只含·非多余元素)',
+        Array.isArray(payeeScope) && payeeScope.length === 1 && payeeScope[0] === payeeAddr,
+        JSON.stringify(payeeScope));
+      check('②source_scope 恰好是 singleton [sourceAddr]',
+        Array.isArray(sourceScope) && sourceScope.length === 1 && sourceScope[0] === sourceAddr,
+        JSON.stringify(sourceScope));
+      check('②relay_scope 恰好是 singleton [relayId](TN12 pilot relay)',
+        Array.isArray(relayScope) && relayScope.length === 1 && relayScope[0] === relayId,
+        JSON.stringify(relayScope));
+      check('②max_amount_sompi 精确 = 2 KAS(200000000 sompi, 非近似/非其他值)',
+        String(row.max_amount_sompi) === '200000000', String(row.max_amount_sompi));
+      check('②network 精确 = testnet-12', row.network === 'testnet-12', row.network);
+      check('②无多余授权维度: market_scope/branch_scope/outpoint_scope 均为 NULL(只授了该授的)',
+        row.market_scope === null && row.branch_scope === null && row.outpoint_scope === null,
+        `market=${row.market_scope} branch=${row.branch_scope} outpoint=${row.outpoint_scope}`);
+    }
     db.close();
   }
 
