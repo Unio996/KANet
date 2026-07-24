@@ -277,7 +277,17 @@ export async function registerCapabilityRoutes(fastify) {
             return reply.code(403).send({ ok: false, error: 'relay 拒绝: ' + (result.reason_code || 'DENIED'), reason_code: result.reason_code || 'DENIED' });
           }
           const txId = result?.txId || null;
-          if (!txId) return reply.code(503).send({ ok: false, error: '转账未上链（relay 无 txId，可能 RPC down 或执行失败）' });
+          if (!txId) {
+            // Codex pre-activation D 项修正：relay 对真实 execution phase 失败（RPC down/广播异常，
+            // relay.mjs:1331）本来就会带 phase:'execution'——旧代码回一条固定通用文案，把这个字段
+            // 整个吞掉不透传，导致 G4 harness 只能靠 regex 猜错误文案（弱判据：固定文案里恰好含
+            // "RPC down" 四字，会把 validateCommandPayload 失败/IPC 超时这类根本没到执行层的响应也
+            // 误判成"到达执行层"）。现在把 relay 实际发的 phase 透传出去（没发就是 null——
+            // validateCommandPayload 失败 relay.mjs:344 目前不带任何 phase 字段，IPC 超时同样拿不到
+            // 任何 result），调用方（G4/审计）可以直接查 body.phase==='execution' 做精确判定，不用
+            // 猜文案。
+            return reply.code(503).send({ ok: false, error: '转账未上链（relay 无 txId，可能 RPC down 或执行失败）', phase: result?.phase || null });
+          }
           // 🔴 no-key-leak: 回执只回 txId/amount/target/fromAddress（公开信息），绝不回 privkeyHex。
           return reply.send({ ok: true, txId, amount: cmd.amount, target: cmd.target, fromAddress: cmd.fromAddress });
         } catch (e) {

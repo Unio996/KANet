@@ -76,9 +76,16 @@ function check(label, ok, detail) {
   evidence.push({ label, ok, detail: detail ? String(detail).slice(0, 500) : undefined });
 }
 
+// Codex pre-activation D 项修正(2026-07-24)：旧版 reachedExecLayer 用 regex(/RPC down|relay 侧
+// 拒绝/) 猜 body.error 文案判定"到达执行层"——这是弱判据本身: gateway 对任何未分类的无 txId 失败
+// (含 validateCommandPayload 从没到执行层就被拒的情况)都回同一条固定通用文案"转账未上链（relay
+// 无 txId，可能 RPC down 或执行失败）", 这条文案恰好含"RPC down"四字, 会被正则误判成"到达执行层
+// 的真实 RPC 失败"。修法: capability.js fallback 分支现在把 relay 实际发的 phase 透传进 body(relay
+// 侧 execution 分支本就带 phase:'execution', relay.mjs:1322/1331; validateCommandPayload 失败/
+// IPC 超时都拿不到这个字段) —— 直接查 body.phase==='execution' 做精确判定, 不用再猜文案。
 function reachedExecLayer(r) {
   const infra = r.status === 500 && /Relay not running|timeout/i.test(r.body?.error || '');
-  const reached = (r.status === 200 && r.body?.ok && r.body?.txId) || (r.status === 503 && /RPC down|relay 侧拒绝/.test(r.body?.error || ''));
+  const reached = (r.status === 200 && r.body?.ok && r.body?.txId) || (r.status === 503 && r.body?.phase === 'execution');
   return reached && !infra;
 }
 function notWronglyLanded(r) {
@@ -90,10 +97,10 @@ function isInfraFailure(r) {
 
 // MF3 结构化字段判定(v0.3, Codex/Bettor 强制升级, 替换 v0.2 的 relayLog 正则猜测)。
 // capability.js(82df7b4f) 按 relay 结构化 decision 的 phase 三档映射 HTTP 状态(J1 571441ea relay 侧
-// + J2 82df7b4f gateway 侧)。body 本身不直接回传 phase 字段(内部只用来选状态码, 不外泄), 但
-// body.reason_code 的"是否存在"本身就是精确判据: 只有 relay denyResult 的两个拒绝分支(403
-// authorization / 503 infra_error, capability.js:268-282) 才带 reason_code; 成功(200)、执行层无
-// txId 失败(503 无 reason_code)、gateway 早拒验(401/403/503 无 reason_code) 都不带。
+// + J2 82df7b4f gateway 侧)。deny 分支(403 authorization / 503 infra_error) 本身不直接回传 phase
+// 字段(内部只用来选状态码, 不外泄), 但 body.reason_code 的"是否存在"本身就是精确判据: 只有 relay
+// denyResult 的两个拒绝分支才带 reason_code; 成功(200)、gateway 早拒验(401/403/503 无 reason_code)
+// 都不带。execution phase 失败(503 无 txId 无 reason_code) 现在改查 body.phase(见上方修正)。
 function isRelayDeniedResponse(r) {
   return typeof r.body?.reason_code === 'string';
 }
@@ -265,6 +272,29 @@ async function main() {
     check('BUST⑦ relay_id 不匹配被 relay 权威闸拒(403·phase=authorization)+reason_code精确命中RELAY_ID_MISMATCH',
       r.status === 403 && r.body?.reason_code === 'RELAY_ID_MISMATCH',
       `status=${r.status} body=${JSON.stringify(r.body)}`);
+  }
+
+  // ══ BUST⑧(Codex pre-activation D 项·2026-07-24: relay validateCommandPayload 真实失败, 从没到
+  // authorizeCommand/执行层就被拒·relay.mjs:340-347)。gateway 的信封结构校验只查 intent 顶层是
+  // "object"(shared/lib/app-envelope-canonical.mjs ENVELOPE_FIELDS: intent:'object'), 不校验
+  // intent 内部各字段的类型——省略 intent.amount 能骗过网关早拒验(amount cap 检查也只在
+  // 'amount' in intent 时才跑, 省略等于跳过), 一路到 relay 才被 COMMAND_PAYLOAD_SCHEMA 的
+  // typeof 检查拦下(commands.mjs:197 要求 amount 是 string|number)。这是"造一个畸形 cmd 喂穿
+  // gateway 触 validateCommandPayload 失败"的真实端到端场景(非 relay 层直调模拟), 用来验证
+  // reachedExecLayer 的 D 项修法是否真堵住了弱判据洞: 旧版正则(/RPC down|relay 侧拒绝/)会把
+  // gateway 这条固定通用 503 文案误判成"到达执行层"(文案里恰好含"RPC down"四字), 新版查
+  // body.phase==='execution' 应该正确判定 FAIL(relay 根本没跑到 phase='execution' 那步)。 ══
+  {
+    const w = freshGrantWallet('bust8-payload-invalid');
+    const intent = { fromAddress: w.address, target: DUMMY_TARGET, network: NETWORK }; // 故意省略 amount
+    const r = await post(buildSignedEnvelope({ intent, grantId: w.grantId }));
+    check('BUST⑧ 省略 intent.amount 骗过网关早拒验、到达 relay 后被 validateCommandPayload 真实拒绝(非 200 落地)',
+      notWronglyLanded(r), `status=${r.status} body=${JSON.stringify(r.body)} | relayLog=${r.relayLastLog}`);
+    check('BUST⑧-D项核心攻击靶: reachedExecLayer 正确判定 FAIL(未到执行层, 非误判"到达执行层")——' +
+      '旧版正则 /RPC down|relay 侧拒绝/ 会命中 gateway 固定通用文案里的"RPC down"四字, 把这条从没到 authorizeCommand 的响应误判成到达执行层',
+      !reachedExecLayer(r), `status=${r.status} body=${JSON.stringify(r.body)} reachedExecLayer(旧regex会给true, 新版应给false)=${reachedExecLayer(r)}`);
+    check('BUST⑧-结构化 body.phase 不是 execution(relay 从没跑到 authorizeCommand 后的 switch 执行分支)',
+      r.body?.phase !== 'execution', `status=${r.status} body=${JSON.stringify(r.body)}`);
   }
 
   // ══ BUST②: 超额度(amount 超 grant.max_amount_sompi=2 KAS·网关早拒验) ══
