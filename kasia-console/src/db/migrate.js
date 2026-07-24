@@ -5570,5 +5570,19 @@ export function runMigrations() {
     }
   }
 
+  // v192 (2026-07-24, J2, M0c-1 Path B pilot 围栏 §2.4·恢复派工 claim==code 纪律②): pilot_rate_limit_log
+  // 建表 — gateway 转发 custodial_transfer 前限流(keyed by app-grant 声明值, 签名验证之前, cheap-to-expensive)。
+  // 设计: docs/2026-07-23-m0c-1-path-b-pilot-containment-design.md §2.4。
+  {
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS pilot_rate_limit_log (
+        grant_id TEXT NOT NULL,
+        requested_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_pilot_rate_limit_grant_time ON pilot_rate_limit_log(grant_id, requested_at);
+    `);
+    console.log('[migrate] v192: pilot_rate_limit_log 建表 (M0c-1 Path B pilot 围栏 §2.4, gateway 限流 keyed by grant_id).');
+  }
+
   console.log('[migrate] DB migrations complete.');
 }

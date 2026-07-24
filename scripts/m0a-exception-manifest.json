@@ -17,9 +17,9 @@
    "form": "import { sendCommandAsync } from relay-manager.js",
    "path": "kasia-console/src/api/capability.js",
    "capability": "m0c-controlled-relay-endpoint",
-   "justification": "机制A HTTP能力网关custodial_transfer受控funnel(非裸透传): origin='app'网关强制覆写(app请求体任何origin声明被丢弃)+intent_type路由锁死(每路由绑死一个intent_type拒不匹配)+签名验证MUST+grant吊销/有效期/amount cap早拒验(cheap-to-expensive, 无效签名/超额不触发privkey解密)+default-off feature-flag(ADMIN_CAPABILITY_GATEWAY_ENABLED未设恒503, 与relay armed状态解耦)+privkeyHex网关自己查库派生非body输入(verify-value-source)+Path B围栏§2.7 checkRelayArmed(转发前查relay armed状态, origin='internal'非'app', fail-closed三路径全拒, cheap-to-expensive延伸置于AES解密前)。设计稿docs/2026-07-23-m0c-1-mechanism-a-http-capability-gateway-design.md §3.3/§3.3a + docs/2026-07-23-m0c-1-path-b-pilot-containment-design.md §2.7。NWT整体G2 diff+§2.7 diff逐点核实: cheap-to-expensive顺序对/签名MUST实调用/privkeyHex网关自造非body读入/cmd字段匹配intent/origin='app'唯一铸造点(全仓恰1处)/no-key-leak回执干净/get_arm_status origin='internal'落对/fail-closed覆盖完整/digest独立核实一致。",
-   "review_ref": "32012272",
-   "content_digest": "2d12ee4a63416b23cfe19eb3e43cb9b7616e915619462bceb0bf1c3af889b8d8"
+   "justification": "机制A HTTP能力网关custodial_transfer受控funnel(非裸透传): origin='app'网关强制覆写(app请求体任何origin声明被丢弃)+intent_type路由锁死(每路由绑死一个intent_type拒不匹配)+签名验证MUST+grant吊销/有效期/amount cap早拒验(cheap-to-expensive, 无效签名/超额不触发privkey解密)+default-off feature-flag(ADMIN_CAPABILITY_GATEWAY_ENABLED未设恒503, 与relay armed状态解耦)+privkeyHex网关自己查库派生非body输入(verify-value-source)+Path B围栏§2.7 checkRelayArmed(转发前查relay armed状态, origin='internal'非'app', fail-closed三路径全拒, cheap-to-expensive延伸置于AES解密前)+Path B围栏§2.4限流(pilot_rate_limit_log, keyed by grant_id, 3笔/60秒, 超限不计数防自我放大, 自清理)+§2.1 gateway早拒白名单(PILOT_WALLET_ADDRESSES, 空Set=default-deny, non-authoritative早拒层独立于relay侧source_scope权威层)。【2026-07-24 更新, claim==code恢复批次】Codex MSG-120外审抓到围栏设计声称的②限流③白名单此前只停在设计文档从未落码(over-claim事故), Bettor全员claim-to-code复查后重新派工, 本次补齐真代码+隔离测试7/7 PASS+既有回归26/2零新增+lint 0 errors。设计稿docs/2026-07-23-m0c-1-mechanism-a-http-capability-gateway-design.md §3.3/§3.3a + docs/2026-07-23-m0c-1-path-b-pilot-containment-design.md §2.1/§2.4/§2.7。NWT claim-to-code扫描核实②③: 限流表实存在+checkRateLimit实被调用+逻辑正确(fail-closed/超限不记录/自清理/位置对)+白名单PILOT_WALLET_ADDRESSES实存在+空Set实default-deny。",
+   "review_ref": "73e9bdc7",
+   "content_digest": "ec2ad6ef8ef418eb4befc3f36d7b097f0afbfbd692d8764f9f8095e185dc0adc"
   },
   {
    "id": "MPW-grant-provision",
