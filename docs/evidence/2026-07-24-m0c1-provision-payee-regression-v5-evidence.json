@@ -2,7 +2,7 @@
   "source": "docs/2026-07-24-m0c1-pilot-comprehensive-defect-sweep.md A3 + Codex v0.10 re-review 项②(regression evidence artifact)",
   "target": "kasia-console/scripts/m0c1-grant-provision.mjs issue 子命令 --payee 强制规则(commit cbec6837)",
   "method": "真实调用 CLI(execFileSync, 非 mock/非直调内部函数) + DB 旁路核对 payee_scope 真值",
-  "source_commit": "4cb3b956394dccba03e7118fce924a8abb7423ce",
+  "source_commit": "dd133f57c47adae15b704a1b3525eb4d6b32ee42",
   "test_blob_sha": "4e13dc06b73e7ad5c38c8560407c080b6168fdc5",
   "target_blob_sha": "cf17d8fb8cfe423299f031c11ca845e285e8ed9b",
   "summary": {

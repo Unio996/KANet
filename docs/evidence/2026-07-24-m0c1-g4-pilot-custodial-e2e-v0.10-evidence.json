@@ -29,10 +29,10 @@
     },
     "receipt_template": {
       "path": "docs/2026-07-24-m0c-1-pilot-activation-receipt-template.md",
-      "blob_sha": "b4e0322dc4c466ed1592da4992b26f30d4be87b9"
+      "blob_sha": "3bcee2e92cd5c3d1a0a1f8a5258144f26a651d0a"
     }
   },
-  "source_commit": "4cb3b956394dccba03e7118fce924a8abb7423ce",
+  "source_commit": "dd133f57c47adae15b704a1b3525eb4d6b32ee42",
   "harness_blob_sha": "032de2a6ae3098497b9872c63c2db21f735594c2",
   "run_params": {
     "invocation": "node kasia-console/test-framework/cases/m0c1-gate/g4-pilot-custodial-e2e.mjs",

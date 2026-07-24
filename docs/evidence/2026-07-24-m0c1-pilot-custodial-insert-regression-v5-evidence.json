@@ -2,7 +2,7 @@
   "source": "scratch/j2-msg124-rectification-design.txt(A+B+C+D 整改) + scratch/j2-reviewed-helper-design.txt(基础9步)",
   "target": "kasia-console/scripts/m0c1-pilot-candidate-generate.mjs + m0c1-pilot-custodial-insert.mjs",
   "method": "真实调用两个 CLI(execFileSync, 非 mock) + Promise.all 真并发(非 mock)",
-  "source_commit": "4cb3b956394dccba03e7118fce924a8abb7423ce",
+  "source_commit": "dd133f57c47adae15b704a1b3525eb4d6b32ee42",
   "test_blob_sha": "b347fa06a98aaf6dc6cd8f97f6790a39fd8d09b4",
   "generate_blob_sha": "d0fd02d12eeeb0a6ab9f6a39884c6f478bee877c",
   "insert_blob_sha": "4be043e26b343b7d94604d55a0b6a8ffe2c12d7e",

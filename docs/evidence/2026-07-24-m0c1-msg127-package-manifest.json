@@ -1,39 +1,39 @@
 {
-  "_doc": "M0c-1 Path B pilot — Codex MSG-127整改(O1 diagnose env生命周期+O2命名+O3 stale doc+NULL测+redact) package manifest v4。O2命名校正: source_commit=测试跑的源码commit; package_commit=加入本manifest+4 evidence的那个commit(=source_commit+evidence/manifest文件); 部署checkout须==package_commit(一份不可变包)。",
-  "source_commit": "4cb3b956394dccba03e7118fce924a8abb7423ce",
+  "_doc": "M0c-1 Path B pilot — package manifest v5 (Codex MSG-128 R1/R2/R3 receipt/doc真相对齐后重生成). source_commit从4cb3b956 bump到dd133f57: 4cb3b956↔dd133f57之间tested CODE字节相同(git blob核: capability/runbook等全同), 唯一变动是receipt模板v0.14→v0.15(R1 §(h)四字段身份模型+L269纪律句改deployed_commit≠package_commit / R2 §(c''') diagnose授权意图行 / R3 P1 doc标historical), 属docs非tested code, 故4份evidence在dd133f57重跑结果字节一致合法锚dd133f57. O2命名: source_commit=测试跑的源码commit(含最终docs); package_commit=加入本manifest+4 evidence的那个commit(=source_commit+evidence/manifest文件, 无code/doc改动); 部署checkout须==package_commit(一份不可变包). load-bearing expected blob从package_commit读.",
+  "source_commit": "dd133f57c47adae15b704a1b3525eb4d6b32ee42",
   "package_commit_definition": "package_commit = the git commit that adds this manifest file plus the four evidence JSON files (= source_commit + evidence/manifest only, no code/doc change). Deployment checkout MUST equal package_commit. Its exact hash is stated in the accompanying bridge message after this file is committed.",
-  "evidence_parent_relation": "package_commit is source_commit (4cb3b956394d) plus the evidence/manifest files only",
-  "msg127_fix_commits": {
-    "O1_diagnose_env_lifecycle": "4cb3b956",
-    "O3_pending_doc_historical": "810da258",
-    "NULL_test_and_redact": "cda8f6db"
+  "evidence_parent_relation": "package_commit is source_commit (dd133f57c47a) plus the evidence/manifest files only",
+  "code_identical_to_prior_source": "The tested code tree is byte-identical between the prior source_commit 4cb3b956394d and dd133f57c47a; only the receipt template (b4e0322d -> 3bcee2e9) and the P1 pending-review doc changed (both docs, not tested code). All four evidence artifacts were re-run at dd133f57 and produced identical pass/fail counts.",
+  "receipt_r1_r2_r3_commits": {
+    "R1_R2_R3_v0.14_receipt_doc": "327edc8a",
+    "R1_L269_residual_v0.15": "dd133f57"
   },
   "evidence": [
     {
       "file": "docs/evidence/2026-07-24-m0c1-g4-pilot-custodial-e2e-v0.10-evidence.json",
-      "sha256": "b7bb0803eab0e110cd21432027e7dbae03f5719d55107134c81787ade796546a",
-      "source_commit": "4cb3b956394dccba03e7118fce924a8abb7423ce",
+      "sha256": "cbb8570568005c1f779e53c58c58a1bf6037eff2cbe3a78f242873009b0540f4",
+      "source_commit": "dd133f57c47adae15b704a1b3525eb4d6b32ee42",
       "pass": 27,
       "fail": 0
     },
     {
       "file": "docs/evidence/2026-07-24-m0c1-provision-payee-regression-v5-evidence.json",
-      "sha256": "002b5c864db884fd420efe11081596c943cb6396fa33efd40f6917312d0ab443",
-      "source_commit": "4cb3b956394dccba03e7118fce924a8abb7423ce",
+      "sha256": "951d49d618a51be95a573eb9851f98b8fe80882eede758c263815bf8294f11a9",
+      "source_commit": "dd133f57c47adae15b704a1b3525eb4d6b32ee42",
       "pass": 13,
       "fail": 0
     },
     {
       "file": "docs/evidence/2026-07-24-m0c1-pilot-custodial-insert-regression-v5-evidence.json",
-      "sha256": "f2b2acb33acb8a8af28ac1ac169eb0f6428719413ebc926d54236a2fb60224fd",
-      "source_commit": "4cb3b956394dccba03e7118fce924a8abb7423ce",
+      "sha256": "1cb656a07df1536b74fb104501725aa185a12de262f9d0023f0e3eea22d5ec1a",
+      "source_commit": "dd133f57c47adae15b704a1b3525eb4d6b32ee42",
       "pass": 39,
       "fail": 0
     },
     {
       "file": "docs/evidence/2026-07-24-m0c1-tg-wallet-pilot-isolation-regression-v4-evidence.json",
-      "sha256": "b34e34a449e15d6d6e2cc460540054362399f0db3b91f3890c86d967552dcaa7",
-      "source_commit": "4cb3b956394dccba03e7118fce924a8abb7423ce",
+      "sha256": "cc56e6e2e9de0e612befe517e10e70cbcfc07a618a1140fe27429b4ce50179e1",
+      "source_commit": "dd133f57c47adae15b704a1b3525eb4d6b32ee42",
       "pass": 25,
       "fail": 0
     }
@@ -63,7 +63,7 @@
     "m0a_lib": "e1bfad6e2e8f0f144bbf514faee1a8530861fb75",
     "m0a_manifest": "97749dea26ae38e50ef653a4c383a9c03f1fe9db",
     "runbook": "71bbc2568d0b9b2037ddfb454c8ef9c2261f0606",
-    "receipt": "b4e0322dc4c466ed1592da4992b26f30d4be87b9",
+    "receipt": "3bcee2e92cd5c3d1a0a1f8a5258144f26a651d0a",
     "database_md": "129234601c27cec00f9c2d357b9b36f3465d8b5a"
   }
 }

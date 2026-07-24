@@ -2,7 +2,7 @@
   "source": "docs/2026-07-24-m0c1-pilot-codex-msg124-rectification.md §E",
   "target": "kasia-console/src/api/tg-wallet.js POST /:tg_user_id/send",
   "method": "真实 Fastify inject 调 tg-wallet.js 注册路由(非 mock/非直调内部函数) + 真 runMigrations schema",
-  "source_commit": "4cb3b956394dccba03e7118fce924a8abb7423ce",
+  "source_commit": "dd133f57c47adae15b704a1b3525eb4d6b32ee42",
   "test_blob_sha": "5eb13f828959227d81e1ef3ebf225637e4c4dff3",
   "target_blob_sha": "585e6e81d058090cb14472293acc5ae04667ff05",
   "summary": {
