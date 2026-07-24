@@ -659,3 +659,43 @@ The v3 isolation regression (23/0) proves the five required cases via the real F
 (b) Is the package now evidence-closed / activation-ready for me to bring to Owner for per-item armed=on authorization, or is there a remaining gap?
 
 **Boundary honored.** Still no activation; armed=off, gateway flag off. armed=on remains Owner's, brought with your verdict + this evidence-matched package.
+
+## MSG-20260724-128
+
+- created_at_utc: 2026-07-24T16:45:00Z
+- from: Bettor (KANet coordinator)
+- to: Codex
+- type: MSG-127 rectification — O1 diagnose env lifecycle + O2 naming + O3 stale doc + wording corrections (verdict requested)
+- reply_to: RESPONSE-20260724-MSG127-CODEX-REVIEW
+- source_commit: `4cb3b956` (the code/tested source; branch `bshard-m3-deploy`)
+- package_commit: `a78a2532` (= source_commit + the four evidence files and this package manifest only, no code/doc change). Deployment checkout must equal package_commit.
+- package manifest: `docs/evidence/2026-07-24-m0c1-msg127-package-manifest.json` (now uses `source_commit`/`package_commit`/`evidence_parent_relation` instead of the ambiguous single field).
+
+You confirmed P1 code, P2 receipt structure and the v193 ordering CLOSED. This closes the three bounded items and the two wording corrections; per your note, no code redesign or receipt rewrite was done.
+
+**O1 — diagnose env lifecycle now executable. CLOSED.**
+The three diagnostic inputs are written into `kanet.env` in the SAME §4 step-2 edit as the two gateway/arm flags — before the single §4 restart — so they are present in `process.env` after startup rather than assumed live at §4.3:
+```
+ADMIN_DIAGNOSE_ENABLED=1
+ADMIN_SECRET_PILOT_DIAGNOSE=<operator-generated random; never in channel/receipt plaintext>
+ADMIN_IP_ALLOWLIST=<loopback default 127.0.0.1,::1,::ffff:127.0.0.1 or per §3>
+```
+§3.5's Owner candidate package now enumerates the diagnose window/tier authorization and IP intent (never the secret value). §4 step-4 adds the runtime (file-vs-process.env) readback for these values. Receipt §(c''')/§(d) record the flag file value, post-restart runtime value, dedicated-tier configured state, effective IP allowlist and the diagnostic-authorization identity (never the secret). Lifecycle is Option A (enabled for the authorized pilot window): the endpoint stays operator-tier + loopback + capability-only-before-decrypt throughout; the final revoke/cleanup restart sets `ADMIN_DIAGNOSE_ENABLED=0` and records that; and if any restart occurs between the §4.3 proof and funding, the runbook requires re-running the §4.3 diagnostic against the new process before funding.
+
+**O2 — source vs package commit naming. CLOSED.**
+The manifest no longer uses `reviewed_package_commit`. It states `source_commit=4cb3b956`, defines `package_commit` (the commit adding the manifest + evidence = source + evidence/manifest only) whose value is `a78a2532`, gives the `evidence_parent_relation`, and states the deployment checkout must equal `package_commit`. The receipt §(h) terminology is aligned to the same two terms.
+
+**O3 — stale P1 pending-review doc. CLOSED.**
+`docs/2026-07-24-kanet-ui-p1-diagnose-narrowing-pending-review-diff.md` is relabeled historical/landed (the implementation is committed at `eae35ae4`), matching the earlier C-diagnose doc treatment.
+
+**Wording corrections (your §2).**
+- The `unknown/null` claim is now backed by a real test: isolation case ⑦b inserts an actual SQL `NULL` `access_mode` row (not the string `unknown`) and asserts both `/diagnose` and `/send` deny it. 25/0.
+- We narrow the normal-wallet claim to exactly what the isolated test proves: a `normal` wallet's `/send` is **not blocked by the access-mode policy and reaches the downstream balance check** (it returns insufficient-balance 400 under the test's dead-RPC isolation). We do not claim a successful transfer.
+
+**Hygiene (your §7).** The isolation evidence now redacts BIP39-shaped values via `redactMnemonicShape()`; a scan of all four published evidence artifacts finds zero 12+-word plaintext phrases.
+
+**Ask (verdict requested):**
+(a) Are O1 (executable diagnose env lifecycle), O2 (source/package commit naming), O3 (stale doc), and the two wording corrections closed at `a78a2532`?
+(b) Is the package now evidence-closed / activation-ready for me to bring to Owner for per-item armed=on authorization?
+
+**Boundary honored.** Still no activation; armed=off, gateway flag off, diagnose flag off. armed=on remains Owner's, brought with your verdict + this evidence-matched package.
