@@ -1,6 +1,7 @@
 # M0c-1 Path B Pilot 激活收据（KANet-UI 工作流⑦·空白模板）
 
-> **Status**: CURRENT（v0.12·空白模板·配套 `docs/2026-07-23-m0c-1-pilot-activation-runbook.md`）
+> **Status**: CURRENT（v0.13·空白模板·配套 `docs/2026-07-23-m0c-1-pilot-activation-runbook.md`）
+> **v0.13 更新（2026-07-24，Codex MSG-127 O1）**：§(c'''') 新增 diagnose 三 env 的 file-vs-runtime 配置态回读表 + 重启后重验规则字段；§(f) 新增 diagnose env 收尾清理时间字段。
 > **v0.12 更新（2026-07-24，Codex MSG-126 P2）**：相位表扩为 7 相（新增 §4.3 pre-fund 验证闸 / §4.4 post-fund）；新增 §(c'''') 记录 C 诊断 + E 隔离攻击验证结果；§(h) load-bearing 清单补 `tg-wallet.js`/`client.js`/`pilot-wallet-policy.js`/`admin-secret-tier.mjs`。
 > **依据**: 2026-07-24 05:xx NWT 声称清单 grep 扫描发现 MSG-120 多处"声称已实现"实际代码不存在（TTL/限流/白名单/G4 用例），Bettor 认账根因="claim==code" completeness 交叉核缺失。本模板的存在意义：**激活当刻**从运行系统实际读到的值，不是从任何设计文档/频道消息转引的值。
 > **v0.2 更新**: 四条控制已全部补齐落码（J1 `944f2a72` TTL / J2 `cf680280` 限流+白名单 / J1 `2fbdb290` G4 harness v0.2 21/21），均经 claim-to-code 三道核（自核+Bettor grep+NWT 独立扫描）GREEN。下方 (b)(e) 已补代码坐标（供激活时对照查询用，坐标本身已核实存在，具体运行时值仍需激活当刻现查填空）。
@@ -148,6 +149,14 @@
 
 ### (c'''') 零余额验证闸回读（🔴 v0.12 新增，Codex MSG-126 序列重排，runbook §4.3——必须在 §(c) 余额=50 KAS 出现之前填，此刻钱包应仍是零余额）
 
+**🔴 v0.13 新增（Codex MSG-127 O1）diagnose 三个 env 配置态回读**（file-vs-runtime 两层，同 §(d) 那次教训——写文件≠进程读到；此刻应已在 §4 步骤 2/4 落地+确认过，本节只是引用）：
+
+| env | §4 步骤 2 文件值 | §4 步骤 4 运行时是否生效 |
+|---|---|---|
+| `ADMIN_DIAGNOSE_ENABLED` | | |
+| `ADMIN_SECRET_PILOT_DIAGNOSE`（**只记"已配置"，不记值本身**） | 已配置 / 未配置 | |
+| `ADMIN_IP_ALLOWLIST` | | |
+
 **C 诊断**（`GET /api/tg-wallet/<pilot tg_user_id>/diagnose`，MSG-126 P1 收窄后三层授权：`ADMIN_DIAGNOSE_ENABLED=1` + `x-kanet-admin-secret`(独立 operator 凭据) + IP allowlist）：
 
 | 字段 | 实际值 |
@@ -157,6 +166,7 @@
 | 诊断返回的 `ok` | |
 | 诊断返回的 `address` | |
 | 该地址是否与 §3.5 Owner 批准的候选地址逐字符一致 | |
+| 🔴 若 §4.3 之后、§4.5/pilot 收尾之前又发生过重启：本条诊断是否已按 runbook §4.3 规则重新跑过一次（不得复用旧进程那次的记录） | |
 
 **E 隔离攻击验证**（真实构造一次请求，持合法 `x-ingest-secret` + pilot `tg_user_id` 直打 `POST /:tg_user_id/send`）：
 
@@ -198,6 +208,7 @@
 | revoke 命令执行时间 | | |
 | `grant.revoked` 回读 | 吊销后立即查 grant registry | |
 | 吊销后下一条请求是否即时拒 | 实发一条验证（G4 harness 或手工） | |
+| 🔴 v0.13 新增（Codex MSG-127 O1）diagnose env 收尾清理时间 | runbook §6 那次收尾重启：`ADMIN_DIAGNOSE_ENABLED` 删/置 0 的时间 + 重启后 `curl /diagnose` 确认 503 | |
 
 ### (g) Owner 授权后真 live 冒烟（🔴 v0.2 新增，runbook §4.5，Codex MSG-121 MUST-FIX 2 要求）
 

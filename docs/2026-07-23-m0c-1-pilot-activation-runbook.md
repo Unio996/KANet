@@ -1,6 +1,7 @@
 # M0c-1 Path B Pilot 激活部署 runbook（KANet-UI·工作流④）
 
-> **Status**: CURRENT（v0.17·P1+P2 均已落码/文档对齐，J2 部署时序检查另抓一条真实隐患（v193 migrate 必须先于新 `access_mode` 依赖代码 serving，否则全体 `/send` 断非仅 pilot）已补进 §4，NWT 独立核实标准部署顺序（migrate 同步先于 listen）本身安全，待三人红队+Bettor整包整合+Codex 终审+Owner 最后拍）
+> **Status**: CURRENT（v0.18·Codex MSG-127 判 P1 代码/P2 材料/v193 时序全 CLOSED，剩 O1(本版，diagnose env 生命周期可执行化)+O2(Bettor manifest 命名，待 regen)+O3(已标历史)+措辞校正+hygiene，Codex 明说"P1 代码不用重设计·P2 结构不用再大改·最后窄包"，待三人红队+Bettor整包最终整合+Codex 终审+Owner 最后拍）
+> **v0.18 更新（2026-07-24，Codex MSG-127 O1，diagnose env 生命周期可执行化）**：Codex 判此前的 diagnose 三 env 操作序列不完整——§3.5 候选包没提诊断端点授权、§4 步骤 2 只写两 gateway/arm flag（不含 diagnose 三 env，意味着重启后这三个 env 对新进程不生效，等 §4.3 才现开会撞"编辑 env 在 console 已跑时不改 process.env"那个老坑）、receipt 没记 flag 文件/运行时值。本版补齐：① §3 候选值起草阶段记诊断端点授权意图（不含 secret 值）② §3.5 Owner 候选包纳入这项 ③ **§4 步骤 2 把三个 diagnose env 跟两 flag 同批写进 `kanet.env`**（核心修法）④ §4 步骤 4 补运行时验证 ⑤ §4.3 措辞从"激活前显式开"改为"已在 §4 生效，直接调用" ⑥ 新增"若诊断和收尾之间又发生重启，必须重新跑一次诊断"规则 ⑦ §6 新增可执行的"用完关"收尾步骤（收尾重启删/置 0 三个 env + 验证 503）。
 > **v0.17 更新（2026-07-24，J2 部署时序检查·Bettor 定型）**：live console.db 尚未跑 v193（`access_mode` 列不存在），J2 检查发现若代码先于 migrate serving 会导致 `/send` SELECT 报 "no such column"，影响全体用户非仅 pilot。§4 步骤 3 新增显式说明（这次重启同时承担 migrate v193 + 加载新代码，migrate 必须先于 listen，不得用"先 listen 后台 migrate"的启动变体）；步骤 4 新增验证项（确认 v193 已应用：`access_mode` 列存在+既有行回填 `'normal'`）。NWT 独立核实 `index.js` 现有启动顺序（`runMigrations()` 同步早于 `fastify.listen()`）本身就是安全的标准顺序，这条是"确认别用非标准变体"的显式提醒，非代码缺陷。
 > **v0.16 更新（2026-07-24，Codex MSG-126 最后一轮：P1 诊断收窄 + P2 文档真相对齐，`docs/2026-07-24-m0c1-pilot-codex-msg126-rectification.md`）**：核心安全（E/C/D/序列重排）全 CLOSED。P1（J2+KANet-UI，已落码 pending-review 见 `docs/2026-07-24-kanet-ui-p1-diagnose-narrowing-pending-review-diff.md`）：`/diagnose` 去 shared ingest secret 改三层 admin 授权（`ADMIN_DIAGNOSE_ENABLED` 默认 off + 独立 operator 凭据 + IP allowlist）+ 解密前先查 `access_mode`；新增共享 `pilot-wallet-policy.js`（`/send`+`/diagnose` 两路由共用一条规则）。P2（本版）：§4.3 诊断步骤更新鉴权方式描述；§4.5"唯一权威、最终证明"措辞收窄为"充值后又一道独立验证"（跟 §4.3 不矛盾）；§6 更正"删 env 重开 legacy"的过期声称（v0.15 durable 列上线后不再成立，env 只是 defense-in-depth）；status 更新反映 E-schema/D-fault 已落码（非 pending）。
 > **v0.15 更新（2026-07-24，Codex MSG-125 二审"C/E未结构性闭"，`docs/2026-07-24-m0c1-pilot-codex-msg125-rectification.md`）**：MSG-124 五条修完后 Codex 又挖深一层：① **E 未结构性闭**（Bettor 认账第二次判轻）——env allowlist 会 fail-open（env 缺失/畸形/重启未加载时 legacy `/send` 静默重开），改用 `tg_custodial_wallets` 新增 `access_mode` durable 列（`'capability_only'`）做权威判据，env 降级 defense-in-depth（J2 认领 schema，见 `docs/2026-07-24-kanet-ui-e-tg-wallet-pilot-isolation-pending-review-diff.md` 后续更新）② **C 未闭**——helper 自读自过只证内部一致、8-hex 指纹是人工 sanity，唯一权威此前是充值后的 §4.5，Codex 要求充值前就证：新增 `GET /:tg_user_id/diagnose` no-broadcast 诊断（live 进程实际 key decrypt+derive 地址比对，KANet-UI 落码，见 `docs/2026-07-24-kanet-ui-c-diagnose-pending-review-diff.md`）③ **序列重排（arm-before-fund）**——§3.6 不再充值（只建零余额钱包+grant），新增 §4.3（零余额验证闸：C 诊断+E 隔离攻击验证）+ §4.4（验证闸全过才充值），§4.5 live 冒烟顺延到充值之后不变位置。④ D 项还差 fault-injection 测试（J2 认领：INSERT 后、readback 前受控注入异常，证明零残留行）。
@@ -64,7 +65,9 @@
 
 - [ ] 起草 grant 候选字段值（`source_scope`=上面候选地址 / `payee_scope` / `max_amount_sompi`=2 KAS / `valid_until`），**本节不跑 provision 脚本、不写入 `m0c1_app_grants` 表**——provision 是"铸造授权"本身，即便此刻 gate 还没 arm、不会被 enforce，仍属于该等 Owner 批的动作，非"准备"
 - [ ] 记下 `CUSTODIAL_RELAY_ID` **拟设值**（🔴 v0.11 措辞更正：不是"§2 创建的 pilot relay id"——§2 此刻只有候选 name，relay 还没创建，没有 id 可引用；应写作"绑定到 §3.6 从这个候选 name 创建出来的那个 relay"）——目前还没写进 `kanet.env`，只是确定"届时要设成这个"（`capability.js:30`，C 项已去掉的 `FAUCET_RELAY_ID` 隐式 fallback 意味着这个值必须显式设对，写错/漏写=网关早拒或误路由到别的 relay 身份，Owner 该看这个值）
-- [ ] 候选钱包地址 + 候选 grant 字段值 + `CUSTODIAL_RELAY_ID` 拟设值整理进收据 §(c''') 的"Owner 逐项过目参数"表，供 §3.5 引用
+- [ ] 🔴 v0.18 新增（Codex MSG-127 O1，diagnose env 生命周期可执行化，Bettor 批 Option A：pilot 窗口内启用）：记下本次 pilot 是否要用 §4.3 的 C 诊断端点（预期是要用的，它是充值前权威证明）——若要用，记候选**意图**：诊断端点授权窗口（本次 pilot 整个窗口内，非单次）+ 用哪个专属 tier（`ADMIN_SECRET_PILOT_DIAGNOSE`，**只声明用这个变量名，不含值**）+ `ADMIN_IP_ALLOWLIST` 拟设值意图（默认 loopback 是否够用，还是需要扩）
+- [ ] 专属 secret 值本身**不经候选值这一步产生**：跟 grant 的密钥材料同一套纪律——operator 在 §3.6/§4 之间自行生成一个随机值，只经 `kanet.env` 落地（同其余 `ADMIN_SECRET_*` tier 的既有操作模式，`checkAdminSecretTier` 读的就是普通 env var），**不进频道消息、不进收据明文字段**——收据只记"是否配置了""长度/熵是否合理"这类元信息，不记值本身
+- [ ] 候选钱包地址 + 候选 grant 字段值 + `CUSTODIAL_RELAY_ID` 拟设值 + 诊断端点授权意图整理进收据 §(c''') 的"Owner 逐项过目参数"表，供 §3.5 引用
 - [ ] 充值目标金额记为 **恰好 50 KAS**（围栏设计 §2.2 硬止损顶，候选值阶段只是写下这个数字，不是真充）
 - [ ] **relay 自身钱包**（executor-relay，收据 §(a) 上半）保持独立日常余额管理，不需要为 pilot 专门操作，不在本节范围内（v0.3 曾误列，v0.4 删除）
 
@@ -74,7 +77,7 @@
 
 **v0.6 追加（Codex 二轮）**：本节的 go 现在也是 §3→§3.6（真充值+真写 grant）的前置闸，不只是 §4（flag 开启）的前置闸——Owner 看到的是**候选值**（还没充的钱包地址、还没插库的 grant 字段），批完才允许 §3.6 真的动钱/写库。
 
-- [ ] **Owner 的 go 必须是对"这次激活整包具体候选参数"的知情同意，不是一句空白的"可以了"**（Bettor 定型的范围）：给 Owner 看的东西必须包含——部署 commit SHA（§(h)）、pilot relay **候选**参数（network=testnet-12+name，§2，relay 尚未创建）、专用 custodial 钱包**候选**地址（§3，尚未充值）、拟充值金额（须 = 50 KAS 硬顶，§3）、grant **候选**字段（source_scope/payee_scope/max_amount_sompi/valid_until，§3，尚未写入 registry）、`CUSTODIAL_RELAY_ID` 拟绑定对象（= §2 那个候选 name 指向的 relay，实际 id 值要等 §3.6 创建后才存在，尚未写入 `kanet.env`）、即将写入的两 flag 目标值（§(d)）、§4.5 smoke 测试参数（金额/收款地址）、回滚路径（§6）——**逐项过一遍具体值**，不是抽象地问"能不能 arm"
+- [ ] **Owner 的 go 必须是对"这次激活整包具体候选参数"的知情同意，不是一句空白的"可以了"**（Bettor 定型的范围）：给 Owner 看的东西必须包含——部署 commit SHA（§(h)）、pilot relay **候选**参数（network=testnet-12+name，§2，relay 尚未创建）、专用 custodial 钱包**候选**地址（§3，尚未充值）、拟充值金额（须 = 50 KAS 硬顶，§3）、grant **候选**字段（source_scope/payee_scope/max_amount_sompi/valid_until，§3，尚未写入 registry）、`CUSTODIAL_RELAY_ID` 拟绑定对象（= §2 那个候选 name 指向的 relay，实际 id 值要等 §3.6 创建后才存在，尚未写入 `kanet.env`）、🔴 v0.18 新增：**诊断端点授权意图**（是否本次 pilot 要用 §4.3 C 诊断+用哪个 tier 变量名+IP allowlist 范围，不含 secret 值）、即将写入的两 flag 目标值（§(d)）、§4.5 smoke 测试参数（金额/收款地址）、回滚路径（§6）——**逐项过一遍具体值**，不是抽象地问"能不能 arm"
 - [ ] **在执行 §3.6 或 §4 任何一步之前**，Owner 已就上面这包候选参数给出显式 go（非默许、非"之前讨论过就算数"——每次真实激活都是一次新的不可逆窗口打开，需要当次的显式确认，理由见频道纪律 `feedback-decision-making-discipline-consolidated`：重大决策需 Owner 终裁）
 - [ ] Owner go 的方式、时间戳、**Owner 当时看到的具体候选参数快照**（或指向收据其余字段的引用）记入收据（`docs/2026-07-24-m0c-1-pilot-activation-receipt-template.md` §(c'''），位置在 §(d) flag 回读之前
 - [ ] operator 未拿到这条明确记录之前，**不得**开始 §3.6（🔴 v0.15 更正：§3.6 现在只建零余额钱包+grant，不含充值——充值挪到 §4.4）或 §4 步骤 1——都已进入不允许中断的原子序列，不能"先斩后奏再补授权"
@@ -118,10 +121,13 @@
 
 0. **重启前查在途请求**（NWT note2：与今日 armed=on 重启前查在途 betting/settle 同款纪律，NO-TX-NO-STATE 相关——console 若在等 `custodial_transfer` 的 `sendCommandAsync` 回执时被杀，会有"不确定是否已执行"的悬空状态）：确认无正在处理中的 custodial_transfer 请求（pilot 阶段流量本就极低，直接看 relay 日志近几分钟无 `CUSTODIAL_TRANSFER` in-flight 行即可，无需查表）。
 1. 停 console（正规 stop，非强杀，防 WAL 未 flush；查 stale pidfile，见今日复现 3 次的坑）
-2. `kanet.env` 同一次编辑里加两行：
+2. `kanet.env` 同一次编辑里加两行（🔴 v0.18 新增，Codex MSG-127 O1：若本次 pilot 要用 §4.3 C 诊断，**这次编辑一并加三行 diagnose 相关 env**，不是等到 §4.3 才临时开——同两 flag 那次的坑：`kanet.env` 编辑在 console 已经在跑的时候不会让运行中进程的 `process.env` 变化，必须跟两 flag 一起、在这次重启前落地，重启后才对新进程生效）：
    ```
    ADMIN_CAPABILITY_GATEWAY_ENABLED=1
    ADMIN_M0C1_GATE_ARMED=1
+   ADMIN_DIAGNOSE_ENABLED=1
+   ADMIN_SECRET_PILOT_DIAGNOSE=<operator 自行生成的随机值，不进频道/收据明文>
+   ADMIN_IP_ALLOWLIST=<留默认 127.0.0.1,::1,::ffff:127.0.0.1，或按 §3.5 候选意图扩>
    ```
 3. 启动 console（不用 timeout 包裹，防连坐杀长驻 daemon）——🔴 v0.17 新增（J2 部署时序检查抓出的真实隐患，Bettor 定型）：**这次重启同时承担两件事：跑 `migrate.js` v193（`tg_custodial_wallets` 加 `access_mode` 列，既有行回填 `'normal'`）+ 加载新版 `tg-wallet.js`（`/send`/`/diagnose` 的 SQL 都会 `SELECT ... access_mode`）。migrate 必须先于路由开始 serving 请求**——若代码先跑起来对外服务、而 DB 还没跑 v193（`access_mode` 列不存在），`/send` 的 SELECT 会直接报 "no such column"，**全体用户的 `/send` 会断，不只 pilot 钱包**。Console 启动流程本身是"migrate 完成后才 listen"的既有顺序（非本次新引入的风险，只是 v193 这次新列让这个既有顺序第一次跟 pilot 隔离逻辑绑在一起，值得显式标注）——若启动脚本有任何"先 listen 后台跑 migrate"的变体用法，本次激活**不得用那种变体**
 4. **重启后立即验证**（四钥匙同款纪律）：
@@ -130,6 +136,7 @@
    - [ ] relay 群起零 crash-loop（`GATE_ARMED && !GRANT_ENVELOPE_IMPLEMENTED` 会 throw，能起来=前提满足）
    - [ ] armed 状态确认为 true（`kasia-relay/src/lib/authorize.mjs` `armReport()` 本身仍无 IPC/health endpoint 接线——见 §5；但网关侧已接线一个只读通道：`capability.js:163` `checkRelayArmed()` 调 `get_arm_status`（`origin='internal'`），2026-07-24 J2 `18e738bf` 落码，NWT round-trip 核过。用这条或日志法 `[M0c-1 gate LEGACY]` warn tell 均可，v0.3 曾错写"当前无接线的健康探针"，已更正）
    - [ ] `capability.js` 的 `GATEWAY_ENABLED()` 读到 true（curl `custodial_transfer` 路由确认从 503→非 503——该路由 2026-07-24 前是 501-scaffold-only，`18e738bf`/`cf680280` 落码后已实际 wire 业务逻辑，v0.3 的"501-scaffold"描述已过期，此处更正为探真实路由）
+   - [ ] 🔴 v0.18 新增（若本次 pilot 要用 §4.3 C 诊断）：**确认 diagnose 三个 env 在重启后运行时生效**——`ADMIN_DIAGNOSE_ENABLED`/`ADMIN_SECRET_PILOT_DIAGNOSE`（只确认"已配置"，不回读值本身）/`ADMIN_IP_ALLOWLIST` 三者都是"文件已写"+"重启后运行时读到"两层都要核（同 §(c'')⑤a/⑤b 那次教训，写文件≠进程读到）——收据 §(c'''')/§(d) 记这几项的文件值/运行时值/tier 配置态/生效 IP allowlist（**不记 `ADMIN_SECRET_PILOT_DIAGNOSE` 的值本身**）
    - [ ] 🔴 v0.8 新增（Codex 三轮反馈，`process.env` 回读时机修正的另一半）：**重启后**（此刻新进程真正读取了新版 `kanet.env`）`process.env.CUSTODIAL_RELAY_ID` 才第一次技术上有意义可查——用 `checkRelayArmed`/日志法或等价手段确认网关侧实际解析到的 relay id == §3.6 创建的那个 pilot relay id（收据 §(c'') ⑤==⑥）。§3.6 那步做的只是文件内容核对，这里才是运行时真回读，两者都要，不能只做一个当另一个的替代
    - [ ] **端到端冒烟（NWT note1，不可省；Bettor 定型：单一真相源非另建第二套）**：上面四点只验证"两个 flag 各自读到 true"，不证明组合后请求能实走通完整链路（若 env 变量拼写错/指错 relay id，四点独立检查仍可能全绿但请求实际打不通）。**"激活成功"判据 = 跑一次 G4 E2E harness 全量用例**（`kasia-console/test-framework/cases/m0c1-gate/g4-pilot-custodial-e2e.mjs`，J1 harness 域交付，本 runbook 不重建、直接调用；v0.4=27 用例（v0.3 起改用结构化 `phase` 判据取代日志正则+META-CHECK+relay_id mismatch，D 项落码后新增 BUST⑧ 畸形 cmd 场景），含 LAND/BUST①-⑧/REPLAY/REVOCATION/TAINT，2026-07-24 claim-to-code 三道核 GREEN，sanitized evidence 见 `docs/evidence/2026-07-24-m0c1-g4-pilot-custodial-e2e-v0.4-evidence.json`）——四点独立验证 + G4 全量跑绿，两者都要。**🔴 v0.4 诚实边界（Codex MSG-121 MUST-FIX 2）：G4 是隔离环境单元测试（独立 relay 子进程+独立 DB+throwaway 密钥），验证的是授权逻辑本身对不对，不侦测真实部署环境的配置错误（env 变量拼写错/指错真实 relay id 这类问题 G4 抓不到——v0.3 曾暗示"env 拼错会被 G4 抓出"是过度声称，已删）。真实部署配置正确性靠本 runbook 逐项 checklist + §4.5 真 live 冒烟兜底。**
 5. **收敛类 legacy-unmigrated 面照常不断**：跑几笔现网 pool/relay/trading 操作，确认无 fail-closed 断（今晨事故的直接回归检查）
@@ -138,7 +145,8 @@
 
 **核心纪律：钱包此刻仍是 §3.6 建号时的零余额状态。以下两项验证必须在这个零余额窗口内全过，才允许进 §4.4 充值。** 这样即便验证过程本身出岔子（诊断端点 bug、隔离检查漏配），暴露的钱包里也没有真钱可偷——这是本次重排的核心动机（Codex：C 项的"充值前证明"和 E 项的"结构性隔离"只有排在充值之前才真正起到"先证/先隔离"的作用，排在充值之后就只是"亡羊补牢"）。
 
-- [ ] **C 诊断**：🔴 v0.16 更正（Codex MSG-126 P1，诊断端点鉴权已收窄，不再挂 shared ingest secret）——`GET /api/tg-wallet/<pilot tg_user_id>/diagnose`，带三个 header/前置条件：`ADMIN_DIAGNOSE_ENABLED=1`（激活前显式开，用完记得关，非常驻端点）+ `x-kanet-admin-secret: <ADMIN_SECRET_PILOT_DIAGNOSE 值>`（独立 operator 级凭据，非 ingest secret）+ 从 `ADMIN_IP_ALLOWLIST` 允许的来源发起（默认 loopback）。`ok:true` 且返回的 `address` 与 §3.5 Owner 批准的候选地址逐字符一致，才算过。**这是充值前对"live Console 能真解密这行"的权威证明**（`§3.6` helper 自己的 readback 验证只是内部一致性，key 指纹人工核对只是早期 sanity check，均不能替代这一步；§4.5 那笔真转账是充值后的**又一道**独立验证，不是"本节不算数、等那边才算"）。若不一致或诊断本身报错——**停止激活**，不进 §4.4，回查是不是 canonical DB 路径/`CONSOLE_ENCRYPTION_KEY` 跟 helper 写入时用的不是同一个
+- [ ] **C 诊断**：🔴 v0.18 更正（Codex MSG-127 O1：diagnose 三个 env 已经在 §4 步骤 2 跟两 flag 同批写进 `kanet.env`、§4 步骤 4 已确认重启后运行时生效——这里不再是"激活前显式开"这个临时动作，是已经就绪的状态，直接调用）——`GET /api/tg-wallet/<pilot tg_user_id>/diagnose`，带三个 header/前置条件：`ADMIN_DIAGNOSE_ENABLED=1`（已在 §4 生效）+ `x-kanet-admin-secret: <ADMIN_SECRET_PILOT_DIAGNOSE 值>`（独立 operator 级凭据，非 ingest secret，值本身只有 operator 自己知道，不查频道记录）+ 从 `ADMIN_IP_ALLOWLIST` 允许的来源发起（默认 loopback）。`ok:true` 且返回的 `address` 与 §3.5 Owner 批准的候选地址逐字符一致，才算过。**这是充值前对"live Console 能真解密这行"的权威证明**（`§3.6` helper 自己的 readback 验证只是内部一致性，key 指纹人工核对只是早期 sanity check，均不能替代这一步；§4.5 那笔真转账是充值后的**又一道**独立验证，不是"本节不算数、等那边才算"）。若不一致或诊断本身报错——**停止激活**，不进 §4.4，回查是不是 canonical DB 路径/`CONSOLE_ENCRYPTION_KEY` 跟 helper 写入时用的不是同一个
+- [ ] 🔴 v0.18 新增（重启规则）：若 §4.3 这次诊断跟 §4.5/pilot 收尾之间**又发生过一次 console 重启**，§4.3 那次的 live 证明是对**旧进程**做的——新进程是否还能正确解密这行是**新事实**，不能用旧那次的结果顶替。规则：**任何一次重启之后，若还要继续走后续步骤（§4.4 充值/§4.5 smoke），必须重新跑一次 §4.3 诊断**，不得图省事复用重启前的记录
 - [ ] **E 隔离验证**：构造一次真实请求，持合法 `x-ingest-secret` + pilot `tg_user_id` 直接打 `POST /api/tg-wallet/<pilot tg_user_id>/send`（金额随意，反正没钱可转，这本身就是攻击场景复现）——**必须收到 403**（`tg-wallet.js` 经 `pilot-wallet-policy.js` 的 `isLegacySendAllowed()` 判定，`access_mode!=='normal'` 即拒——v0.16 起是共享策略 helper，非各自写字面量比较）。这是激活当次的**真实攻击验证**，不是引用 regression 测试报告了事——regression 证的是"这段代码逻辑对"，这一步证的是"这次激活里，这一行确实被正确标记+这条隔离确实在生效"
 - [ ] 两项都过，记入收据（新增字段：诊断结果+隔离验证结果+时间戳）——**任一没过，禁止进 §4.4**
 
@@ -168,6 +176,12 @@ G4（§4 步骤 4）证明的是"授权逻辑写对了"，不证明"真实部署
 同今晨验证过的路径：删 `kanet.env` 两行（`ADMIN_CAPABILITY_GATEWAY_ENABLED`/`ADMIN_M0C1_GATE_ARMED`）（或注释掉）→ 重启 → armed=off 全 inert，网关 503。**必须两行一起删/两行一起留**，不留中间态。
 
 🔴 v0.16 更正（Codex MSG-126 P2，v0.13 这句话在 v0.15 durable 列上线后已过期）：**`PILOT_WALLET_ADDRESSES` 不属于这次回退动作**，但语义已随 v0.15 变化——v0.13 写的时候这个 env 是隔离的唯一判据，删了 = legacy `/send` 重新对 pilot 钱包开放；**v0.15 之后不再是这样**：权威判据是 `tg_custodial_wallets.access_mode='capability_only'` 这个 durable 列（§3.6 建号时写死），删这个 env **不会**重新打开 legacy 路径（durable 列独立生效，跟 env 存在与否无关，见 `tg-wallet-pilot-isolation-regression.mjs` ⑥⑦ 两条 env-unset/畸形场景实测）。删这个 env 仍然**不建议**——它是 defense-in-depth 早拒层，删了少一层"更早、更省事"的防线，但不再是"删了就 fail-open"的危险动作。只要 `tg_custodial_wallets` 表里 pilot 那一行还有余额，这个 env 建议保留，直到 §(f) 走完吊销+确认钱包余额清零之后再考虑一并清理。
+
+🔴 v0.18 新增（Codex MSG-127 O1，diagnose env 的"用完关"可执行步骤）：`ADMIN_DIAGNOSE_ENABLED`/`ADMIN_SECRET_PILOT_DIAGNOSE`/`ADMIN_IP_ALLOWLIST` 这三个（若本次 pilot 配置过）跟 `PILOT_WALLET_ADDRESSES` 不是同一类——它们不影响资金隔离（隔离靠 durable 列），是"诊断端点还开不开"的问题，**pilot 结束/§(f) 走完吊销之后的那次收尾重启，把这三行从 `kanet.env` 删掉/`ADMIN_DIAGNOSE_ENABLED` 置 `0`**（同两 flag 一样，删 env 后要重启才对运行中进程生效）：
+- [ ] 收尾重启前确认没有还在用这个诊断端点的场景（pilot 已收尾，理论上不该再有 legit 调用）
+- [ ] `kanet.env` 删这三行（或至少 `ADMIN_DIAGNOSE_ENABLED` 置 `0`）
+- [ ] 重启后验证：`curl` 打 `/diagnose` 应该 503（`ADMIN_DIAGNOSE_ENABLED != 1`）
+- [ ] 记录 disable 时间进本次收尾收据
 
 ---
 
