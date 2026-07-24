@@ -5,6 +5,7 @@
 > **性质**: 部署编排 runbook，非设计文档——只讲"按什么顺序、每步怎么验"。
 > **v0.3 更新（2026-07-24，claim-to-code 事故后自我校准）**: v0.1/v0.2 原写"安全参数以围栏设计 doc 为准"——这正是 Codex RED 抓出的转引链风险（本 runbook 当时也没有独立验证被引用的数字是否真落码，2026-07-24 05:06 自曝）。现改为逐项标代码坐标，本文档自己对每个数字负一次独立验证责任：50 KAS 钱包顶（围栏设计 §2.2，运维配置值非代码常量）/ 2 KAS 单笔（`kasia-relay/src/lib/app-envelope.mjs:79` grant `max_amount_sompi` 字段 + `kasia-console/src/api/capability.js:126` 早拒检查）/ 3 笔每分钟限流（`capability.js:48-49` `RATE_LIMIT_WINDOW_MS`+`RATE_LIMIT_MAX`，J2 `cf680280` 落码，claim-to-code 三道核 GREEN）/ 5min custodial TTL（`app-envelope.mjs:57` `CUSTODIAL_PILOT_MAX_TTL_MS`，J1 `944f2a72` 落码）/ gateway pilot-wallet 白名单（`capability.js:206` `PILOT_WALLET_ADDRESSES`，J2 `cf680280` 落码，空=fail-closed）/ grant-scoped 白名单（`app-envelope.mjs:79` `source_scope` 字段）。均已通过 claim-to-code 三道核（自核+Bettor grep+NWT 独立扫描）确认真实存在。
 > **v0.4 更新（2026-07-24 06:17，Codex MSG-121 再审 MUST-FIX 1/2 + 三处校正）**: **§3 资金 checklist 全程指错钱包**——`custodial_transfer` 实际出钱的是 `tg_custodial_wallets` 表选出的托管钱包，不是 relay 自身钱包（`relay_nodes.address`），详见 `docs/2026-07-24-m0c-1-pilot-activation-receipt-template.md` §(a)(c)(c')。本版同步修正：①§3 资金 checklist 改查 custodial 地址、删 relay split-utxos 引用 ②§4 步骤 4 的 `armReport()`/501-scaffold 措辞更新为已接线现状 ③新增 §4.5 Owner 授权后真 live 冒烟（G4 是隔离环境单元测试，不侦测真实部署配置错误，这条是 MSG-121 指出的独立验证层，之前 runbook 暗示"G4 能抓 live 配错"是假声称，已删）。
+> **v0.5 更新（2026-07-24 08:xx，Codex MSG-122 pre-activation A 项：Owner-gate 时序）**: Bettor+NWT 独立核对确认的洞——v0.4 之前"Owner 显式授权"只挂在 §4.5（live 冒烟测试）前面，但真正让闸对全部真实流量生效、pilot custodial 地址暴露在真实攻击面下的动作是 §4（两 flag 原子开启）本身，不是 §4.5 那笔测试转账。旧文档把 Owner 知情同意安排在"闸已经开着"之后，等于决策权倒置给 operator。新增 **§3.5 Owner 显式 go/no-go**，作为 §4 的硬前置条件（未拿到 Owner go 不得开始 §4 步骤 1），与 §4.5 的授权检查点是两道独立的、不能互相替代的 gate（§3.5 gate "要不要开闸"，§4.5 gate "要不要发这笔测试转账"）；§4.5 原"不可逆动作前的最后一步"措辞已更正。
 
 ---
 
@@ -39,9 +40,19 @@
 - [ ] 该地址写入 `PILOT_WALLET_ADDRESSES` env + `grant.source_scope`，做收据模板 §(c') 四值一致核对
 - [ ] **relay 自身钱包**（executor-relay，收据 §(a) 上半）保持独立日常余额管理，不需要为 pilot 专门操作——`split-utxos`/UTXO 拓扑是 relay 自己的运维事，跟 custodial-source 地址的资金安全无关，**不再作为本 checklist 一项**（v0.3 曾误列，v0.4 删除；custodial 地址若未来需要 UTXO 整理，属于另一个操作面，未评估，不在本次 pilot 范围内）
 
+## 3.5. Owner 显式 go/no-go（🔴 v0.5 新增，Codex MSG-122 pre-activation A 项：arm 闸本身要 Owner 知情同意，不是只等最后那笔冒烟）
+
+**Bettor + NWT 独立核对确认的洞**：v0.4 之前，"Owner 显式授权"这句话只出现在 §4.5（live 冒烟测试）前面。但 §4（两 flag 原子开启）本身才是让 armed 闸对**全部真实流量**生效的那个动作——闸一开，pilot custodial 地址就暴露在真实攻击面下，**即便 operator 还没手动发 §4.5 那笔测试转账**。这才是真正不可逆（或至少高成本回退）的窗口打开点，不是 §4.5 那一笔测试转账。旧文档把 Owner 知情同意安排在"闸已经开着"之后，而不是"要不要开闸"之前，等于把决策权倒置给了 operator。
+
+- [ ] **Owner 的 go 必须是对"这次激活整包具体参数"的知情同意，不是一句空白的"可以了"**（Bettor 定型的范围）：给 Owner 看的东西必须包含——部署 commit SHA（§(h)）、专用 custodial 钱包地址（§3/§(a)）、充值金额（须 = 50 KAS 硬顶，§3）、grant 具体字段（source_scope/payee_scope/max_amount_sompi/valid_until，§(b)）、即将写入的两 flag 目标值（§(d)）、§4.5 smoke 测试参数（金额/收款地址）、回滚路径（§6）——**逐项过一遍具体值**，不是抽象地问"能不能 arm"
+- [ ] **在执行 §4 任何一步之前**（尤其是 §4 步骤 2 编辑 `kanet.env` 之前），Owner 已就上面这包具体参数给出显式 go（非默许、非"之前讨论过就算数"——每次真实激活都是一次新的不可逆窗口打开，需要当次的显式确认，理由见频道纪律 `feedback-decision-making-discipline-consolidated`：重大决策需 Owner 终裁）
+- [ ] Owner go 的方式、时间戳、**Owner 当时看到的具体参数快照**（或指向收据其余字段的引用）记入收据（`docs/2026-07-24-m0c-1-pilot-activation-receipt-template.md` §(c'''），位置在 §4 flag 回读之前
+- [ ] operator 未拿到这条明确记录之前，**不得**开始 §4 步骤 1（停 console）——§4 一旦启动就已进入不允许中断的原子序列，不能"先斩后奏再补授权"
+- [ ] §4.5（live 冒烟）仍保留独立的第二道 Owner 授权检查点（对"发这笔真实转账"本身的知情同意）——两道检查点不是同一件事、不能互相替代：本节 gate 的是"要不要让闸对真实流量生效"，§4.5 gate 的是"要不要现在发这笔真实测试转账"
+
 ## 4. 两 flag 原子开启顺序
 
-**核心纪律：不允许中间态**（只开一个 flag 的时间窗 = §1 描述的漏洞窗口暴露期）。
+**核心纪律：不允许中间态**（只开一个 flag 的时间窗 = §1 描述的漏洞窗口暴露期）。**前置条件：§3.5 Owner go 已拿到并记入收据，否则不得开始下面任何一步。**
 
 0. **重启前查在途请求**（NWT note2：与今日 armed=on 重启前查在途 betting/settle 同款纪律，NO-TX-NO-STATE 相关——console 若在等 `custodial_transfer` 的 `sendCommandAsync` 回执时被杀，会有"不确定是否已执行"的悬空状态）：确认无正在处理中的 custodial_transfer 请求（pilot 阶段流量本就极低，直接看 relay 日志近几分钟无 `CUSTODIAL_TRANSFER` in-flight 行即可，无需查表）。
 1. 停 console（正规 stop，非强杀，防 WAL 未 flush；查 stale pidfile，见今日复现 3 次的坑）
@@ -63,7 +74,7 @@
 
 G4（§4 步骤 4）证明的是"授权逻辑写对了"，不证明"真实部署环境配对了"。两者是不同的验证层，缺一不可：
 
-- [ ] Owner 显式授权后（本步骤本身是不可逆动作前的最后一步，需要 Owner 知情同意，非 operator 自行决定）
+- [ ] Owner 显式授权后（🔴 v0.5 更正：真正不可逆的窗口打开点是 §3.5 的 arm 授权，本节是**第二道独立**的 Owner 授权检查点——针对"现在发这笔真实测试转账"本身，不是 arm 闸本身；v0.4 曾把这句话误写成"不可逆动作前的最后一步"，暗示只有这一道检查点，已更正，见 §3.5）
 - [ ] 用真实 console（非 G4 的隔离 relay 子进程）+ 真实 grant（provision 脚本正式签发的那份，非 harness 临时生成）+ 真实 custodial 钱包（§3 充值的那个）跑一笔真实、最小额的 custodial_transfer
 - [ ] 记录真实 txId 进本次激活的收据（`docs/2026-07-24-m0c-1-pilot-activation-receipt-template.md`，新增字段：live 冒烟 txId + 时间戳）
 - [ ] 确认链上落地（`checkUtxoLanded` 或等价方式），非仅看 API 返回 `ok:true`
