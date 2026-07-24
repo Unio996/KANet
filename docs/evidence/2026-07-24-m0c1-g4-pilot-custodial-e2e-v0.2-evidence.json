@@ -1,6 +1,9 @@
 {
   "matrix_source": "docs/2026-07-23-m0c-1-path-b-pilot-containment-design.md §3 + relay-side §5",
   "codex_remediation": "RESPONSE-...PATHB-ACTIVATION(b93134e8) RED-not-ready 修正④: replay/吊销/taint/pilot专属TTL/限流 + 精确reason断言",
+  "source_commit": "2fbdb290",
+  "sanitize_note": "grep 核实零 64-hex 私钥形状命中 / 零 mnemonic 关键词命中 / 零 CONSOLE_ENCRYPTION_KEY 值命中 (TAINT-①/② 用例本身就是断言这一点, 本 sanitize 检查是发布前的独立复核, 非重复自证). grant_id 为随机 UUID, 非敏感材料. (J1 补, 与 KANet-UI 独立跑生成的这份实例合并元数据, 原重复文件 v02 命名版已删避免混淆)",
+  "naming_note": "NWT 05:24 澄清(供下轮 Codex 复核参照): Codex 原文点名符号 TEST_PRIV_HEX, 本次实现变量名为 w.privHex(freshGrantWallet 每用例独立生成) — 方法论完全对(exact-secret 真实值扫描, 非 64-hex 形状匹配), 命名不同且语义更强(每次运行生成新值, 非固定单一常量, 不会被'提前知道这个值'这种边缘情况绕过).",
   "summary": {
     "pass": 21,
     "fail": 0
