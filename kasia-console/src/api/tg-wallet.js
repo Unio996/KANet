@@ -23,9 +23,12 @@ import { verifyIngestRequest } from '../services/ingest-auth.js';
 const AUTH = { preHandler: [async (req, rep) => { await verifyIngestRequest(req, rep); }] };
 
 const NETWORK = 'testnet-12';
-// Path C (Bettor 拍): /send 经 relay 唯一链上出口转账。优先 CUSTODIAL_RELAY_ID, 退 FAUCET_RELAY_ID
-// (faucet relay 是现成 localhost relay, 有 RPC+wasm; key 是 Console 传入, relay 自己 key 不参与)。
-const CUSTODIAL_RELAY_ID = () => process.env.CUSTODIAL_RELAY_ID || process.env.FAUCET_RELAY_ID || null;
+// Path C (Bettor 拍): /send 经 relay 唯一链上出口转账。
+// 🔴 Codex MSG-124 真相校正 (K-13 一并了): 曾经 `|| process.env.FAUCET_RELAY_ID` 隐式 fallback
+// 到 faucet relay (身份完全不同的 relay) — 同款 capability.js:30/relay.js:75 footgun 家族，
+// 忘设 CUSTODIAL_RELAY_ID 会静默把 custodial_transfer 转发给错的 relay 处理，非本地址预期的
+// relay 身份。改为显式必设，未设直接 503 fail-closed (同 capability.js:30 那次修法)。
+const CUSTODIAL_RELAY_ID = () => process.env.CUSTODIAL_RELAY_ID || null;
 
 // Balance by address — reuse the relay.js:329 pattern (getWorkingRpc + RpcClient.getUtxosByAddresses).
 // Works for any address (custodial wallets have no relay process). Returns KAS number, or null on RPC fail.
@@ -99,10 +102,22 @@ export async function registerTgWalletRoutes(fastify) {
     if (!Number.isFinite(amountKas) || amountKas <= 0) return reply.code(400).send({ ok: false, error: '金额非法' });
 
     const relayId = CUSTODIAL_RELAY_ID();
-    if (!relayId) return reply.code(503).send({ ok: false, error: '转账暂不可用 (CUSTODIAL_RELAY_ID/FAUCET_RELAY_ID 未配)' });
+    if (!relayId) return reply.code(503).send({ ok: false, error: '转账暂不可用 (CUSTODIAL_RELAY_ID 未配)' });
 
     const w = sqlite.prepare('SELECT kaspa_address, mnemonic_encrypted, network FROM tg_custodial_wallets WHERE tg_user_id = ?').get(tgUser);
     if (!w) return reply.code(404).send({ ok: false, error: '你还没有钱包' });
+
+    // M0c-1 Path B pilot 隔离 (Codex MSG-124 MUST-FIX E): 这条 legacy 路径只挂 AUTH (shared
+    // ingest secret)，完全绕过 grant/source-scope/armed 闸/capability 网关 — pilot 钱包一旦充值，
+    // 持 ingest secret + pilot tg_user_id 者即可在 arm 前就经这条路径把钱转走，
+    // "fund-before-arm 安全" 的前提在这条路径上是假的。判据用查出的钱包地址 (fund-holder 本体，
+    // 比 tg_user_id 更根本 — 防"另一个 tg_user_id 映射到同一 pilot 地址"这类边缘情形)，
+    // 复用 capability.js:237 已用的 PILOT_WALLET_ADDRESSES 单一真相源，不新造第二个判据来源。
+    const pilotIsolationSet = new Set((process.env.PILOT_WALLET_ADDRESSES || '').split(',').map((s) => s.trim()).filter(Boolean));
+    if (pilotIsolationSet.has(w.kaspa_address)) {
+      return reply.code(403).send({ ok: false, error: 'M0c-1 pilot 隔离钱包: 本 legacy 路径已 fail-closed 禁用，请走 capability 网关 custodial_transfer 路径' });
+    }
+
     if (to === w.kaspa_address) return reply.code(400).send({ ok: false, error: '不能转给自己 (收款地址=你的钱包地址)' });
 
     // 事前余额校验 (NO TX 前堵空转): need amount + fee headroom (~0.05 KAS 覆盖 KIP-9 floor)。
