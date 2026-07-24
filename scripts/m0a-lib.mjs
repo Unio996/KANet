@@ -69,6 +69,23 @@ export const PROVISION_WRITER_ALLOWLIST = new Set([
   'kasia-console/scripts/m0c1-grant-provision.mjs', // M0c-1 app provision operator 离线签发脚本(唯一 registry 写入方)
 ]);
 
+// ── considered amendment #3(2026-07-24, Bettor 裁定·Codex MF2 步骤4 reviewed helper)：
+// 窄 capability m0c1-pilot-custodial-writer ──
+// m0c1-provision-writer 是 m0c1_app_grants(grant registry)那个写权威专锚——语义刻意窄化,
+// 不该被"写 tg_custodial_wallets(pilot custodial 钱包表)"的另一个 writer 蹭进同一
+// capability 名字(两张不同表/不同写权威, 混进一个名字会稀释每个 capability 的语义纯度,
+// 也给"以后随便什么 writer 都往 provision-writer 里塞"开口子)。故照抄 provision-writer
+// 的四约束模型新开一个专属窄 capability, 白名单只锚 m0c1-pilot-custodial-insert.mjs：
+//   ① 白名单有界 shrink-only(仅这一个文件, 扩张走 NWT 审 + Owner 知情)。
+//   ② content_digest TOCTOU 锚(批准时内容 sha256, 失配=改过没重审=拒)。
+//   ③ writer 不走 checkReadonlyConstraint(直写是其存在意义), 换专属静态负面检查：
+//      文件内禁 relay-manager import / 禁 http·fetch·listen·sendCommand 面(离线纯 DB 写)。
+//   ④ lint 是完整性门, NWT diff 审仍是唯一 load-bearing 闸(受控语义人审)。
+export const PILOT_CUSTODIAL_WRITER_CAP = 'm0c1-pilot-custodial-writer';
+export const PILOT_CUSTODIAL_WRITER_ALLOWLIST = new Set([
+  'kasia-console/scripts/m0c1-pilot-custodial-insert.mjs', // MF2 步骤4 reviewed helper(唯一 pilot custodial 钱包写入方)
+]);
+
 export const sha256Hex = (s) => crypto.createHash('sha256').update(Buffer.from(s, 'utf8')).digest('hex');
 
 const git = (root, args) =>
@@ -236,7 +253,7 @@ const MANIFEST_FIELDS = ['id', 'family', 'form', 'path', 'capability', 'justific
 // 七字段(MANIFEST_FIELDS)全必填对所有 capability 生效; content_digest 是"仅此 capability 附加必填"
 // (m0c-controlled-relay-endpoint), 单独校验(见 manifestChecks relay-manager 分支), 不并入 MANIFEST_FIELDS
 // —— 否则 db-readonly / test-fixture 存量条目会因缺新字段被全判挂(向后兼容, NWT 第4约束的兼容边界)。
-const CAPABILITIES = new Set(['db-readonly', 'test-fixture', CONTROLLED_RELAY_CAP, PROVISION_WRITER_CAP]);
+const CAPABILITIES = new Set(['db-readonly', 'test-fixture', CONTROLLED_RELAY_CAP, PROVISION_WRITER_CAP, PILOT_CUSTODIAL_WRITER_CAP]);
 
 export function manifestChecks(root) {
   const violations = [];
@@ -255,7 +272,7 @@ export function manifestChecks(root) {
     }
     if (!CAPABILITIES.has(e.capability)) {
       violations.push({ rule: 'R-M0A-MANIFEST-SCHEMA', file: MANIFEST_PATH,
-        msg: `manifest 条目 "${e.id}" capability "${e.capability}" 不在 {db-readonly, test-fixture, ${CONTROLLED_RELAY_CAP}}(设计 §5 + considered amendment)。` });
+        msg: `manifest 条目 "${e.id}" capability "${e.capability}" 不在 {${[...CAPABILITIES].join(', ')}}(设计 §5 + considered amendment)。` });
       continue;
     }
     if (e.family === 'relay-manager') {
@@ -340,6 +357,50 @@ export function manifestChecks(root) {
         continue;
       }
       // 全过: 合法 provision writer(白名单 + digest + 静态负面全净)。放行, 不落只读检查(writer 本意)。
+      continue;
+    }
+    if (e.capability === PILOT_CUSTODIAL_WRITER_CAP) {
+      // ↓↓↓ considered amendment #3: m0c1-pilot-custodial-writer 安全控制校验(照 provision-writer 四约束模型) ↓↓↓
+      if (e.family !== 'sqlite') {
+        violations.push({ rule: 'R-M0A-MANIFEST-SCHEMA', file: MANIFEST_PATH,
+          msg: `manifest 条目 "${e.id}" capability=${PILOT_CUSTODIAL_WRITER_CAP} 只适配 family=sqlite(reviewed helper 直写 tg_custodial_wallets 的裸 sqlite import), 不开其他族口。` });
+        continue;
+      }
+      if (!PILOT_CUSTODIAL_WRITER_ALLOWLIST.has(e.path)) {
+        violations.push({ rule: 'R-M0A-MANIFEST-SCHEMA', file: MANIFEST_PATH,
+          msg: `manifest 条目 "${e.id}" capability=${PILOT_CUSTODIAL_WRITER_CAP} 但 path ${e.path} 不在 pilot custodial writer 白名单 — 只有 {${[...PILOT_CUSTODIAL_WRITER_ALLOWLIST].join(', ')}} 可用此 capability(白名单 shrink-only, 扩张走 NWT 审 + Owner 知情)。` });
+        continue;
+      }
+      if (!('content_digest' in e) || e.content_digest === '' || e.content_digest == null) {
+        violations.push({ rule: 'R-M0A-MANIFEST-SCHEMA', file: MANIFEST_PATH,
+          msg: `manifest 条目 "${e.id}" capability=${PILOT_CUSTODIAL_WRITER_CAP} 缺 content_digest — writer 条目必填(批准时内容 sha256 hex, TOCTOU 防御, 同 provision-writer 先例约束)。` });
+        continue;
+      }
+      const pilotWriterContent = readStagedContent(root, e.path);
+      if (pilotWriterContent == null) {
+        violations.push({ rule: 'R-M0A-MANIFEST-SCHEMA', file: MANIFEST_PATH,
+          msg: `manifest 条目 "${e.id}" 指向的 writer 文件 ${e.path} 不存在于 index — path 锚定 fail-closed: 文件移动必须同步改 manifest。` });
+        continue;
+      }
+      const pilotWriterDigest = sha256Hex(pilotWriterContent);
+      if (pilotWriterDigest !== e.content_digest) {
+        violations.push({ rule: 'R-M0A-MANIFEST-SCHEMA', file: MANIFEST_PATH,
+          msg: `writer 文件 ${e.path} 内容变更(digest 失配: 现 ${pilotWriterDigest.slice(0, 12)}… ≠ manifest ${String(e.content_digest).slice(0, 12)}…)需重新 NWT 审并更新 content_digest。` });
+        continue;
+      }
+      // writer 静态负面检查(同 provision-writer 判据, 换成锚 tg_custodial_wallets 那个 writer):
+      // 离线纯 DB 写 = 零 relay 面 + 零网络面。任一出现 = writer 离线性质被破坏 = 拒(需重审)。
+      if (/(require\(\s*|from\s+|import\(\s*)['"][^'"]*relay-manager/.test(pilotWriterContent)) {
+        violations.push({ rule: 'R-M0A-OPS-NOT-READONLY', file: e.path,
+          msg: `${e.path} pilot custodial writer 文件内出现 relay-manager import — operator 离线密钥经手脚本没有碰 relay 的理由, 拒。` });
+        continue;
+      }
+      if (/\b(fetch\s*\(|https?\.|\.listen\s*\(|sendCommandAsync|createServer)/.test(pilotWriterContent)) {
+        violations.push({ rule: 'R-M0A-OPS-NOT-READONLY', file: e.path,
+          msg: `${e.path} pilot custodial writer 文件内出现网络/relay 面(fetch/http/listen/sendCommandAsync/createServer)— 离线纯 DB 写性质被破坏, 拒需重审。` });
+        continue;
+      }
+      // 全过: 合法 pilot custodial writer(白名单 + digest + 静态负面全净)。放行, 不落只读检查(writer 本意)。
       continue;
     }
     // 静态限制核验(读 index 内容)

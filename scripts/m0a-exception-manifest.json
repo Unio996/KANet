@@ -1,5 +1,5 @@
 {
- "_doc": "M0a 冻结后新增裸 import 的唯一合法通道(设计 v0.2 §5 + considered amendment 6c612df5+5d013865 + amendment#2 provision-writer 2026-07-23 NWT 快裁 GREEN)。七字段全必填: id/family/form/path/capability/justification/review_ref。capability ∈ {db-readonly, test-fixture, m0c-controlled-relay-endpoint, m0c1-provision-writer}。test-fixture 三静态限制全过可用 review_ref='self-serve:readonly-test'; db-readonly 必须人审锚(频道 txid / ledger)。relay-manager 族只经窄 capability m0c-controlled-relay-endpoint 放行受控 funnel(白名单 CONTROLLED_FUNNEL_ALLOWLIST shrink-only + content_digest[该文件批准时内容 sha256 hex]TOCTOU 防御 + NWT diff 审 load-bearing, NWT 4 约束); 其余 relay-manager import 一律硬拒走仓储层/API。m0c1-provision-writer=M0a 最敏感 capability(grant 铸造权威): 仅 PROVISION_WRITER_ALLOWLIST 单文件 shrink-only(扩张 NWT 审+Owner 知情硬锁) + content_digest 核心防护(脚本任何改动失配即重审, 防批准后改写别处/铸假 grant) + writer 静态负面检查(禁 relay-manager/网络面, 离线纯 DB 写)。",
+ "_doc": "M0a 冻结后新增裸 import 的唯一合法通道(设计 v0.2 §5 + considered amendment 6c612df5+5d013865 + amendment#2 provision-writer 2026-07-23 NWT 快裁 GREEN + amendment#3 pilot-custodial-writer 2026-07-24 Bettor 裁定)。七字段全必填: id/family/form/path/capability/justification/review_ref。capability ∈ {db-readonly, test-fixture, m0c-controlled-relay-endpoint, m0c1-provision-writer, m0c1-pilot-custodial-writer}。test-fixture 三静态限制全过可用 review_ref='self-serve:readonly-test'; db-readonly 必须人审锚(频道 txid / ledger)。relay-manager 族只经窄 capability m0c-controlled-relay-endpoint 放行受控 funnel(白名单 CONTROLLED_FUNNEL_ALLOWLIST shrink-only + content_digest[该文件批准时内容 sha256 hex]TOCTOU 防御 + NWT diff 审 load-bearing, NWT 4 约束); 其余 relay-manager import 一律硬拒走仓储层/API。m0c1-provision-writer=M0a 最敏感 capability(grant 铸造权威): 仅 PROVISION_WRITER_ALLOWLIST 单文件 shrink-only(扩张 NWT 审+Owner 知情硬锁) + content_digest 核心防护(脚本任何改动失配即重审, 防批准后改写别处/铸假 grant) + writer 静态负面检查(禁 relay-manager/网络面, 离线纯 DB 写)。m0c1-pilot-custodial-writer=第五种 capability(2026-07-24 新增, Codex MF2 步骤4 reviewed helper): 语义专锚 tg_custodial_wallets(pilot custodial 钱包表)写权威, 跟 m0c1-provision-writer 锚的 m0c1_app_grants(grant registry)是不同表/不同写权威, 刻意分开保每个 capability 语义纯度(非混进同一名字)。四约束模型跟 provision-writer 对称: 仅 PILOT_CUSTODIAL_WRITER_ALLOWLIST 单文件 shrink-only(扩张 NWT 审+Owner 知情硬锁) + content_digest 核心防护 + writer 静态负面检查(禁 relay-manager/网络面, 离线纯 DB 写)。",
  "entries": [
   {
    "id": "MRC-operator-settle",
@@ -39,6 +39,26 @@
    "capability": "test-fixture",
    "justification": "Codex v0.10 re-review 项②: provision --payee 强制规则(A3, cbec6837)regression 证据 artifact。文件在 test-framework/ 路径下(静态限制①满足)+全部 new Database() 调用字面带 readonly:true(静态限制②满足, checkReadonlyConstraint 可核)+不 import relay-manager(静态限制③满足)——三静态限制全过, 走文档 _doc 里定义的自助道 review_ref='self-serve:readonly-test'。用途: 真实调用 provision CLI(execFileSync, 非直调内部函数)后, 用只读 sqlite 连接旁路核对 payee_scope 真值(非只看 CLI exit code)。",
    "review_ref": "self-serve:readonly-test",
+   "content_digest": null
+  },
+  {
+   "id": "PCW-pilot-custodial-insert",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "path": "kasia-console/scripts/m0c1-pilot-custodial-insert.mjs",
+   "capability": "m0c1-pilot-custodial-writer",
+   "justification": "Codex v0.10 re-review MF2 步骤4 reviewed helper（scratch/j2-reviewed-helper-design.txt，Bettor+NWT+KANet-UI 三人红队 GREEN 批落码，落码前 4 条 refinement 全纳入）——取代 operator 手搓裸 SQL 做 pilot custodial 钱包 encrypt+insert（MF2 步骤4明禁手搓）。复用 tg-wallet.js:58-73 同一批 reviewed 函数（crypto.js encrypt()/decrypt() + wallet.js addressFromMnemonic()），不新造加密逻辑。9 步设计：①mnemonic 从 stdin 读一行（绝不进 CLI 参数/shell history/ps）②tg_user_id 非空+非占位符检查③insert 前先 derive-compare（候选值跟批准值不对提早 abort 不碰 DB，比 Codex 字面要求更早止损）④重复检查（友好报错，真防线是 PK/UNIQUE 约束，NWT 核实无洞）⑤encrypt(reviewed 路径)⑥INSERT⑦insert 后 in-process readback 验证（同一 better-sqlite3 连接，避免 WAL 可见性延迟误判——refinement②，KANet-UI+Bettor）⑧readback 失败 DELETE 自愈+CRITICAL⑨零化（best-effort：丢引用+不缓存+不重用，如实标注 JS string 无法真正内存覆写，去掉了最初设计里没有消费方的装饰性 Buffer——refinement①，Bettor）。--network 硬 required（refinement③）+ --db 默认目标就是生产 console.db（三处显式标注非隐式 fallback——refinement④，NWT）。no-key-leak 贯穿：全程只 log tg_user_id/address(公开信息)/PASS-FAIL 状态，绝不 log mnemonic 本身。真实调用测试（execFileSync + stdin 管道喂入非真实测试用 mnemonic）：13/13 PASS（候选匹配正常插入+readback PASS/候选不匹配 abort 不写库/占位符拒绝/重复拒绝+独立解密核对+TAINT 扫描零 64-hex 命中）。既有回归 26/2 零新增。M0a 治理：这是新开的第五种 capability（m0c1-pilot-custodial-writer，Bettor 裁定选②新窄 capability 非扩张 provision-writer——语义专锚 tg_custodial_wallets 写权威，跟 provision-writer 锚的 m0c1_app_grants 是不同表/不同权威，刻意分开保语义纯度），m0a-lib.mjs 照 provision-writer 四约束模型对称实现。Owner 已知情报备（M0a 规则'扩张走 NWT 审+Owner 知情'）。【2026-07-24 更新, NWT 首轮红队 GREEN+2 真发现修复】④--network 只做非空校验不够——wallet.js:4-11 getNetworkType() 对未识别值 default 落 mainnet(同 relay.js:75 footgun 家族)，加白名单校验(仅 testnet-12，未识别值直接拒绝退出，不进 mainnet-default 分支)。⑤补非法 mnemonic 错误路径测试——实测验证 kaspa-wasm 异常 e.message 恒 undefined，String(e) 只含失败原因描述(checksum 数字/'Bip39 error'这类)，从不回显原始输入，错误处理改用 String(e)(更有用且已验证安全，非假设)。regression 补两条用例(⑤network typo 拒绝/⑥非法 mnemonic 错误路径 TAINT，逐词扫描非只整串匹配，避免用真实英文单词造成跟错误文案模板固有词汇撞词的假阳性)。17/17 PASS(原 13 条 + 新 4 条)。既有回归 26/2 零新增 + lint 0 errors。",
+   "review_ref": "bed78d93",
+   "content_digest": "419f534be32d84fcd5b50c13cd1c537442233b500777bfd183fb0f386a92cb31"
+  },
+  {
+   "id": "TF-pilot-custodial-insert-regression",
+   "family": "sqlite",
+   "form": "import Database from better-sqlite3",
+   "path": "kasia-console/test-framework/cases/m0c1-gate/pilot-custodial-insert-regression.mjs",
+   "capability": "test-fixture",
+   "justification": "PCW-pilot-custodial-insert 的 regression 证据 artifact（密钥经手场景，虽三静态限制全过但走真人审非自助道——NWT 明确要求这类场景全程走完整 pending-review）。真实调用 helper CLI（spawnSync + stdin 管道喂 mnemonic，非 mock）覆盖①候选匹配②候选不匹配③占位符④重复+TAINT exact-secret 扫描。文件在 test-framework/ 路径（静态限制①满足）+全部 new Database() 字面 readonly:true（静态限制②满足）+不 import relay-manager（静态限制③满足）。",
+   "review_ref": "bed78d93",
    "content_digest": null
   }
  ]
