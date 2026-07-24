@@ -426,11 +426,24 @@ async function main() {
 
   await relayManager.stopRelay(RELAY_ID);
 
+  // Codex note(非 activation blocker, J1 认领→J1 不在改派 J2): evidence 文件嵌两个自描述字段，让
+  // 证据脱离 git 历史也能自证"是哪个 tip、哪版 harness 跑的"——sanitized evidence 发布进
+  // docs/evidence/ 时经常被单独 fetch/引用，读者手头未必有本地 git checkout 去反查。
+  //   - source_commit: 跑这次 harness 时 working tree 的 HEAD（git rev-parse HEAD）。
+  //   - harness_blob_sha: 本文件自身内容的 git blob sha（git hash-object，非任意 sha256——跟本轮
+  //     全程用的 blob-sha 核对方式统一，供读者用 `git cat-file blob <sha>` 直接核对文件内容一致）。
+  // 两者都是 best-effort：跑在非 git 环境(理论不会发生，但防御性处理)时不让 evidence 生成本身失败。
+  let sourceCommit = null, harnessBlobSha = null;
+  try { sourceCommit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim(); } catch { /* best-effort */ }
+  try { harnessBlobSha = execFileSync('git', ['hash-object', fileURLToPath(import.meta.url)], { cwd: ROOT, encoding: 'utf8' }).trim(); } catch { /* best-effort */ }
+
   const logPath = path.join(LOG_DIR, 'm0c1-g4-pilot-custodial-e2e-latest.json');
   writeFileSync(logPath, JSON.stringify({
     matrix_source: 'docs/2026-07-23-m0c-1-path-b-pilot-containment-design.md §3 + relay-side §5',
     codex_remediation: 'RESPONSE-...PATHB-ACTIVATION(b93134e8) RED-not-ready 修正④: replay/吊销/taint/pilot专属TTL/限流 + 精确reason断言',
     mf3_remediation: 'MF3(relay 571441ea + gateway 82df7b4f): 结构化 body.reason_code 判据取代 relayLastLog 正则 + META-CHECK(真实auth拒response喂入LAND判据验证真FAIL) + BUST⑦(relay_id mismatch)',
+    source_commit: sourceCommit,
+    harness_blob_sha: harnessBlobSha,
     summary: { pass, fail }, evidence,
   }, null, 2));
   console.log(`\nevidence log: ${logPath}`);
