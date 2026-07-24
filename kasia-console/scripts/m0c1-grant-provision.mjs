@@ -81,6 +81,17 @@ async function main() {
       if (!args[req]) { console.error(`缺 --${req}`); process.exit(1); }
     }
     if (!XONLY_HEX.test(args['app-pubkey'])) { console.error('--app-pubkey 须为 64 位 hex (x-only)'); process.exit(1); }
+    // Codex 三审 A3: --payee 对涉款命令(如 custodial_transfer)必须显式传, 否则 payee_scope 写 NULL
+    // ("缺维度默认最严", relay 会拒所有触及 payee 的 intent)——技术上是 fail-closed 安全的, 但会
+    // 让 operator 以为 grant 签发成功、pilot 却整体不可用(排错噪音), 尤其 Path B pilot 首签就该
+    // 是收窄成单 smoke 目标的 singleton payee_scope。commands 里没有涉款命令的一般用途 grant(如纯
+    // 只读 grant)不强制——payee_scope 对它们本来就是不相关维度, 硬性要求会过度约束通用工具。
+    const MONEY_MOVING_COMMANDS = ['custodial_transfer'];
+    const commandList = csv(args.commands);
+    if (commandList.some((c) => MONEY_MOVING_COMMANDS.includes(c)) && !args.payee) {
+      console.error(`--payee 必传（commands 含涉款命令 ${MONEY_MOVING_COMMANDS.filter((c) => commandList.includes(c)).join(',')}，缺省会让 payee_scope=NULL 导致所有 intent 被拒，非"不限制"）`);
+      process.exit(1);
+    }
     const db = openDb(args);
     const grantId = randomUUID();
     const nowSec = Math.floor(Date.now() / 1000);
