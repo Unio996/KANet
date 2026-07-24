@@ -27,7 +27,13 @@ import { privKeyHexFromMnemonic } from '../services/wallet.js';
 import { sendCommandAsync } from '../services/relay-manager.js';
 
 const GATEWAY_ENABLED = () => process.env.ADMIN_CAPABILITY_GATEWAY_ENABLED === '1';
-const CUSTODIAL_RELAY_ID = () => process.env.CUSTODIAL_RELAY_ID || process.env.FAUCET_RELAY_ID || null;
+// Codex pre-activation C 项修正(2026-07-24)：原来 CUSTODIAL_RELAY_ID 未设时静默 fallback 到
+// FAUCET_RELAY_ID——faucet relay 是另一个独立身份/余额的 relay 进程(专门给测试网水龙头用)，跟
+// custodial_transfer 该走的托管钱包执行 relay 完全是两回事。运营方漏配 CUSTODIAL_RELAY_ID 时，
+// 旧代码会悄悄把 custodial 转账路由到 faucet relay 执行——同款 relay.js:75 network||mainnet
+// 隐式 fallback 老坑变体(同一台 relay 冒充另一台的身份继续跑，不是拒绝，而是错配)。显式必设，
+// 不设直接拒绝——比静默 fallback 到错误身份安全得多。
+const CUSTODIAL_RELAY_ID = () => process.env.CUSTODIAL_RELAY_ID || null;
 
 /**
  * grant fresh 读（网关侧自己的 sqlite 连接，Console 本来就有——不是 relay 那种 readOnly node:sqlite
@@ -234,7 +240,7 @@ export async function registerCapabilityRoutes(fastify) {
         }
 
         const relayId = CUSTODIAL_RELAY_ID();
-        if (!relayId) return reply.code(503).send({ ok: false, error: '转账暂不可用（CUSTODIAL_RELAY_ID/FAUCET_RELAY_ID 未配）' });
+        if (!relayId) return reply.code(503).send({ ok: false, error: '转账暂不可用（CUSTODIAL_RELAY_ID 未配，拒绝 fallback 到其他 relay 身份）' });
 
         // 🔴 Path B 围栏 §2.7：真正转发前先查一次 relay armed 状态（纵深防御第二层，见函数注释）。
         // 放在 derive（AES 解密）之前——armed 查询本身也是 cheap-to-expensive 顺序的延伸：relay 未
