@@ -1,6 +1,6 @@
 # KANet-UI · Codex MSG-126 P1（收窄 /diagnose 授权 + 共享 policy helper）pending-review diff
 
-> **性质**: pending-review 工件（供 NWT 红队 + Owner 知情），代码在共享工作树未 committed（`git diff` 可直接看到实际改动）。
+> **性质**: 历史 pending-review 工件（**🔴 v0.1 更正，Codex MSG-127 O3 抓出的 stale 真相**：本文档原写"代码在共享工作树未 committed"，那是三方核实（我+NWT review_ref=53117aed+J2）通过前的状态——代码已正式 commit（`eae35ae4`，含 `tg-wallet.js`/新文件 `pilot-wallet-policy.js`/regression 测试），本文档降级为 P1 设计记录，不再是活跃 pending-review。当前实际代码状态以 `eae35ae4` + `git log -- kasia-console/src/api/tg-wallet.js` 为准）。
 > **依据**: `docs/2026-07-24-m0c1-pilot-codex-msg126-rectification.md` §P1（Bettor 批：复用 `operator-settle.js`/`coord-status.js` 既有 admin 端点模式，不新造 auth 机制）。
 > **用户面钱路 + 密钥经手**: 不自批，走完整 pending-review 周期。
 
