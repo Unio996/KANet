@@ -1,6 +1,6 @@
 # M0c-1 Path B Pilot 激活收据（KANet-UI 工作流⑦·空白模板）
 
-> **Status**: CURRENT（v0.10·空白模板·配套 `docs/2026-07-23-m0c-1-pilot-activation-runbook.md`）
+> **Status**: CURRENT（v0.11·空白模板·配套 `docs/2026-07-23-m0c-1-pilot-activation-runbook.md`）
 > **依据**: 2026-07-24 05:xx NWT 声称清单 grep 扫描发现 MSG-120 多处"声称已实现"实际代码不存在（TTL/限流/白名单/G4 用例），Bettor 认账根因="claim==code" completeness 交叉核缺失。本模板的存在意义：**激活当刻**从运行系统实际读到的值，不是从任何设计文档/频道消息转引的值。
 > **v0.2 更新**: 四条控制已全部补齐落码（J1 `944f2a72` TTL / J2 `cf680280` 限流+白名单 / J1 `2fbdb290` G4 harness v0.2 21/21），均经 claim-to-code 三道核（自核+Bettor grep+NWT 独立扫描）GREEN。下方 (b)(e) 已补代码坐标（供激活时对照查询用，坐标本身已核实存在，具体运行时值仍需激活当刻现查填空）。
 > **v0.3 更新（2026-07-24 06:17，Codex MSG-121 再审 MUST-FIX 1 修正）**: **v0.1/v0.2 全程查错钱包**——`custodial_transfer` 实际出钱的是 `tg_custodial_wallets` 表按 `fromAddress` 选出的托管钱包（`kasia-console/src/api/capability.js:163-164` `deriveCustodialExecFields`），**不是** relay 自身的运营钱包（`relay_nodes.address`，`GET /api/relay/:id/balance` 查的是这个，只用于 relay 付 gas/日常 IPC）。两者是完全不同的身份/余额。NWT 独立读码坐实"极其严重"。本版 §(a)(c) 已改为区分两个身份、余额回读改查 custodial 地址真实链上 UTXO。
@@ -11,6 +11,7 @@
 > **v0.8 更新（2026-07-24，Codex 三轮反馈第一轮自查）**: `source_scope`/`payee_scope` 是 membership set（JSON 数组，`parseJsonStringArray`+`scopeSet.includes()`），§(c')(c'') 原"直接相等"框架类型不对（单值 vs 集合），改成"singleton 集合+成员检查"框架。
 > **v0.9 更新（2026-07-24，Codex 三轮完整回合，`docs/2026-07-24-m0c1-pilot-comprehensive-defect-sweep.md` 一次性全改）**：v0.8 自查还不够彻底，本版是响应 Owner"别挤牙膏"指令的完整修复：① **A1/B5** §(c''') 候选表不再假设钱包地址已"建行待充"——现在必须是 offline/scratch 派生、未 insert 生产 DB、未生成加密 mnemonic；relay 候选同理改成"拟建 name"而非"已存在 id"（B4） ② **A2** §(h) 从硬编码单一 commit SHA 改成 `reviewed_package_commit`/`review_response_commit`/blob-sha 组字段，杜绝再抄任何过期示例值；CUSTODIAL_RELAY_ID fallback 描述改 CURRENT 时态（fallback 已被 C-gateway 去掉，旧描述降级为历史 note） ③ **A3** `payee_scope` 强制非空（删"若适用"），§(c'') ⑧∈⑨ 成员检查 ④ **A4** "使用方法"从"§4 走完后填"改成 5 相位框架（pre-auth 候选/Owner 决策/post-auth 执行/post-restart 运行时/post-smoke），§(d) 两 flag 也拆成 file-vs-runtime 两层（B1） ⑤ **B2** §(h) load-bearing 清单补 `m0c1-grant-provision.mjs`+`m0a-exception-manifest.json` ⑥ **B6** Status 头版本号更正。
 > **v0.10 更新（2026-07-24，NWT 三重深核后非阻塞问题收口）**：§(h)/§(g) 物理顺序颠倒（NWT 抓出，h 排在 g 前面字母序反了），已对调，内容本身无变化；对应 runbook v0.10 §3 offline 派生开放问题①收口。
+> **v0.11 更新（2026-07-24，Codex MSG-124 收口，对应 runbook v0.14）**：§(h) load-bearing 清单补 `m0c1-pilot-custodial-insert.mjs`/`m0c1-pilot-candidate-generate.mjs`/`crypto.js`（MF2 密钥经手全链路的三个关键文件，此前漏检）。
 > **性质**: 部署产物（filled-in receipt），非设计文档。每次真实激活（含未来 pilot 结束/重开）都产生一份新收据，不是写一次的模板本身。
 
 ---
@@ -208,6 +209,9 @@ G4（docs/evidence 那份）是隔离环境单元测试，不证明真实部署�
 | `kasia-console/src/db/migrate.js` | | | |
 | `kasia-console/scripts/m0c1-grant-provision.mjs`（🔴 v0.9 新增：grant 铸造权威唯一写手，manifest 锁定的敏感文件，漏检=可能拿旧版脚本签发不符合当前设计的 grant） | | | |
 | `scripts/m0a-exception-manifest.json`（🔴 v0.9 新增：M0a 裸 import 白名单+content_digest 锚，本身是安全边界的一部分） | | | |
+| `kasia-console/scripts/m0c1-pilot-custodial-insert.mjs`（🔴 v0.14 新增：MF2 步骤4-6 reviewed key-handoff writer，密钥经手，manifest `m0c1-pilot-custodial-writer` capability 锁定） | | | |
+| `kasia-console/scripts/m0c1-pilot-candidate-generate.mjs`（🔴 v0.14 新增：MF2 步骤1-3 offline 候选生成器，虽不触发 M0a 门但是密钥生命周期起点，漏检=候选生成逻辑可能被静默改而无人知） | | | |
+| `kasia-console/src/services/crypto.js`（🔴 v0.14 新增：加密核心，`encrypt()`/`decrypt()`/`currentKeyFingerprint()` 全仓托管钱包唯一信任的加密实现，漏检=加密逻辑可能被静默改动影响所有用户钱包） | | | |
 
 | migration 版本回读 | 实际值 |
 |---|---|

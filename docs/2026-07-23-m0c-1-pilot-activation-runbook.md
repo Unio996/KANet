@@ -1,6 +1,8 @@
 # M0c-1 Path B Pilot 激活部署 runbook（KANet-UI·工作流④）
 
-> **Status**: CURRENT（v0.12·docs 已 Codex GREEN，MF1[J2]/MF2 reviewed helper[J2 落码+KANet-UI 文档同步]均已三人红队 GREEN+ship，待 Bettor 最终 HEAD 重跑 evidence + Codex evidence-closure verdict + Owner 最后拍）
+> **Status**: CURRENT（v0.14·Codex MSG-124 五条 MUST-FIX(A/B/C/D/E)+真相校正全部落码, 三人红队+NWT独立复核 GREEN, 待 Bettor 最终整包整合(HEAD 重跑全测+新 blob manifest) + Codex evidence-closure verdict + Owner 最后拍）
+> **v0.13 更新**: PILOT_WALLET_ADDRESSES durability 纪律(NWT 追问坐实)——这个 env 是 E 项隔离检查唯一判据源, pilot 结束/§(f)吊销+确认余额清零前绝不能 unset, 语义跟 §4 两 flag(删=更安全)相反(删=更危险的 fail-open), §6 回退路径明确切开不属于本次回退动作。
+> **v0.14 更新（2026-07-24，Codex MSG-124 终审 5 条 MUST-FIX 全部收口，`docs/2026-07-24-m0c1-pilot-codex-msg124-rectification.md`）**：Codex 终判"G4 绑定 CLOSED/provision GREEN/M0a capability GREEN，但 A/B/C/D/E 五条 MUST-FIX 未闭+一条 over-claim（Bettor 认账: "三份 evidence 都自描述"实只 G4/"stdin 不回显"实假）"。本版一次性全改：**E**（KANet-UI 主，`fea2f4b7` 已 ship）legacy `tg-wallet.js` `/send` 对 pilot 钱包 fail-closed 隔离+去 FAUCET fallback，Bettor 全仓枚举 spend 路径确认无第三条绕过路径。**A+B**（J2，合并方案）根治"stdin 不回显"over-claim——不试图隐藏交互式终端输入，彻底不给这个选项，改用 `m0c1-pilot-candidate-generate.mjs` 同一 tick 加密落盘+`--candidate-file` 取代 stdin。**C**（J2 helper 半+KANet-UI runbook 半）`--db` 硬 required 去默认值+`currentKeyFingerprint()` 双处打印早期 sanity check+§4.5 live 冒烟升级为唯一权威最终证明。**D**（J2）`INSERT`+`readback` 包进同一 `db.transaction()`，事务内 throw 自动 ROLLBACK 取代手写 DELETE 自愈，真并发测试证明"从未提交"非"插入又清理"。真相校正（J2）两 regression evidence 补 source_commit/blob 自描述字段。33/33（helper+candidate 测试）+ 8/8（E regression）+ 13/13（provision regression）全绿，三人红队+NWT 独立复核 GREEN（review_ref=`a99c387b`/`42c96e8e`）。
 > **v0.12 更新（2026-07-24，reviewed helper `5964af91` ship 后，runbook 步骤 4-6 从"待定设计"改成引用实际实现）**：§3.6 MF2 步骤 4-6 原先是"helper 具体实现留 KANet-UI+J2 联合定"的占位描述，helper（`kasia-console/scripts/m0c1-pilot-custodial-insert.mjs`）落码 ship（三人红队 GREEN + NWT loop-closer 复核 GREEN，review_ref=`bed78d93`，含 NWT 红队抓出的两个真实缺口修复：`--network` 白名单堵 typo-fallback-mainnet footgun + 非法 mnemonic 错误路径 no-leak 测试）后，本版把步骤 4-6 改写为具体命令+行为描述，非泛泛"经一个 reviewed helper"这类占位措辞。
 > **v0.11 更新（2026-07-24，Codex v0.10 re-review "Remaining MUST-FIX 2"）**：明文候选 mnemonic 跨 §3（Owner go 前，offline 生成）→ §3.6（Owner go 后，真建行）两个相位，此前只说"留 scratch 不进消息"，没定义完整生命周期。补齐 6 步（Codex 原文逐字，见 `scratch/mf2-mnemonic-handoff-spec.txt`）：①隔离进程生成，mnemonic 不进 stdout/不做 shell 参数 ②仅存加密瞬态容器/受控 in-memory session，绝不明文文件/剪贴板/chat/log ③no-go/abort/mismatch → 立即销毁候选密钥，只记 public 地址/hash ④go 后经 reviewed helper 做 encrypt+insert，随即 in-process 解密 derive 地址跟候选比对，不 log secret ⑤零化瞬态明文 ⑥`tg_user_id` 必须显式唯一非空（更正 v0.10 曾写"留空/标记 pilot 专用"的错误措辞）。Codex 明确"不要求 HSM，是有界操作程序"——纯 runbook 章节扩写，非新钱路代码。步骤 4 的 reviewed helper 具体实现（新写小函数 vs 复用现有代码路径）留 KANet-UI+J2 联合定，本版只定操作程序本身。
 > **依据**: `docs/2026-07-23-m0c-1-path-b-pilot-containment-design.md`（围栏设计，本 runbook 是它的部署时序落地）+ 频道 19:44-19:46（两 flag 耦合 footgun）+ 19:33 relay-utxo-topology 老坑。
@@ -45,13 +47,17 @@
 
 **先读**：`docs/2026-07-24-m0c-1-pilot-activation-receipt-template.md` §(a)(c)(c')——`custodial_transfer` 实际出钱的是 `tg_custodial_wallets` 表按 `fromAddress` 选出的托管钱包（`capability.js:163-164`），**不是** pilot relay 自身的钱包（`relay_nodes.address`）。
 
-- [ ] 🔴 v0.10 修正（Codex 三轮 A1/B5，开放问题①收口）：**offline/scratch 环境**直接调用 `generateMnemonic()` + `addressFromMnemonic()`（`kasia-console/src/services/wallet.js`，纯函数，不碰 DB）生成**一个专用**托管钱包候选地址+mnemonic（非复用任何既有用户的托管钱包）——**不 insert 生产 `tg_custodial_wallets` 表**（那是 `tg-wallet.js:68` 单独一步，本节不碰）。旧 v0.6-v0.8 说"允许建行但不充值"不对：建行本身就是往生产 DB 写入加密 key material（真实 operational 身份），是 Owner 批前不该发生的真实状态变更。§3.6 用这里生成的**同一对** mnemonic+address 做真正建行，不重新生成——因此候选地址与最终生产地址保证逐字符相同，不存在"建号后地址对不上"的分支
+- [ ] 🔴 v0.14 重写（Codex MSG-124 A+B 合并修法，`kasia-console/scripts/m0c1-pilot-candidate-generate.mjs`，三人红队 GREEN + NWT 独立复核 GREEN，review_ref=`a99c387b`）：v0.10-v0.13 曾设计"用 `generateMnemonic()`+`addressFromMnemonic()` 生成后手动持有在内存/交互式 stdin 喂进 helper"——Codex 抓出这个流程里"人在真终端交互式敲入 mnemonic"这一步的"不回显"声称是假的（`readline({terminal:false})` 不禁终端 echo，人在真终端敲会显示在屏上+可能被录屏留）。v0.14 根治：**不试图隐藏交互式终端输入，而是彻底不给这个选项**——跑：
+  ```
+  node kasia-console/scripts/m0c1-pilot-candidate-generate.mjs <label>
+  ```
+  生成 mnemonic+派生地址后**同一 tick**（不经任何中间 `console.log`/写盘）用 `crypto.js` `encrypt()`（跟生产同一 reviewed 加密函数）把 mnemonic 加密，写进 `scratch/pilot-candidate-<label>-<ts>.enc.json`（含 `mnemonic_encrypted`/`address`/`network`/`key_fingerprint`——`key_fingerprint` 用 `crypto.js` 新增的 `currentKeyFingerprint()` 函数产出，同 §3.6 步骤 4 用同一份函数，防指纹算法两处实现漂移）。stdout **只**打印 address（供 Owner 审批）+ 候选文件路径 + key 指纹——**从不**打印/log mnemonic 明文，一次都不，全程没有交互式终端输入这一步。**不 insert 生产 `tg_custodial_wallets` 表**（那是 §3.6 单独一步）
 
-**🔴 v0.11 新增（Codex v0.10 re-review "Remaining MUST-FIX 2"，明文候选 mnemonic 跨 pre/post-Owner 两相的完整生命周期程序——逐字执行，私钥程序不许省步骤）：**
+**🔴 v0.14 新增（MF2 步骤 4-6，接续原步骤 1-3 编号——A+B 合并后步骤 1"读入方式"从 stdin 改为读候选文件，其余步骤号不变）：**
 
-- [ ] **[MF2 步骤 1] 隔离进程生成**：上面那对 mnemonic+address 必须在**隔离进程**里生成——mnemonic **绝不进 stdout**（不 `console.log`/不打印）、**绝不作为 shell 命令行参数暴露**（防落进 shell history / `ps` 进程列表）
-- [ ] **[MF2 步骤 2] 仅加密瞬态存储**：候选 mnemonic 生成后只存进**一个受批准的加密瞬态容器**，或保持在**单一受控的 in-memory session** 里——**绝不写进明文文件、剪贴板、频道消息、日志**（TAINT 纪律的候选密钥版：同 G4 harness §(TAINT) 的"HTTP 回执/relay 日志不含真实私钥值"同一条纪律，提前应用到候选阶段）
-- [ ] **[MF2 步骤 3] no-go / abort / mismatch 处置**：Owner 否决（no-go）、操作中止（abort）、或后续核对发现地址不匹配（mismatch）——**立即销毁候选密钥**（该加密瞬态容器/in-memory session 整个丢弃）。事后只记录 **public 地址 / hash**，**绝不记录 mnemonic 本身**（哪怕是"曾经生成过又销毁了"这种元信息也不带 mnemonic 值）
+- [ ] **[MF2 步骤 1，v0.14 更正读入方式] 隔离进程生成 + 从不经交互式终端**：上面那对 mnemonic+address 在隔离进程里生成，**从不经过任何交互式终端输入路径**（这正是根治 A 项 over-claim 的手段：没有交互路径 = 没有"是否回显"这个问题需要回答）
+- [ ] **[MF2 步骤 2] 仅加密瞬态存储**：候选 mnemonic 生成后**同一 tick 加密落盘**为 `scratch/pilot-candidate-*.enc.json`（"approved encrypted transient container"的具体形态——密文文件，非明文文件）——**绝不写进明文文件、剪贴板、频道消息、日志**
+- [ ] **[MF2 步骤 3] no-go / abort / mismatch 处置**：Owner 否决（no-go）、操作中止（abort）跑 `node m0c1-pilot-custodial-insert.mjs revoke --candidate-file <path>`（单纯 shred 候选文件，不碰 DB，此刻还没到 insert 步骤）；后续核对发现地址不匹配（mismatch，见 §3.6 步骤 4）由 insert 那端负责销毁。**shred 三档时机纪律（NWT 红队钉死，D 项落码时一起定的）**：只在①事务 commit 成功后（候选已用完）②genuine mismatch（候选内容本身跟批准值对不上/readback 真失败）③显式 revoke（no-go）这三种情形 shred；**绝不**在 transient infra 失败（DB locked / key 指纹不一致 / `tg_user_id` 重复 / `--network` typo 这类"候选文件本身没坏，只是这次调用参数不对"的场景）shred——那些场景允许 operator 换正确参数用**同一份候选文件**重试，shred 了就没法重试了
 
 - [ ] 起草 grant 候选字段值（`source_scope`=上面候选地址 / `payee_scope` / `max_amount_sompi`=2 KAS / `valid_until`），**本节不跑 provision 脚本、不写入 `m0c1_app_grants` 表**——provision 是"铸造授权"本身，即便此刻 gate 还没 arm、不会被 enforce，仍属于该等 Owner 批的动作，非"准备"
 - [ ] 记下 `CUSTODIAL_RELAY_ID` **拟设值**（🔴 v0.11 措辞更正：不是"§2 创建的 pilot relay id"——§2 此刻只有候选 name，relay 还没创建，没有 id 可引用；应写作"绑定到 §3.6 从这个候选 name 创建出来的那个 relay"）——目前还没写进 `kanet.env`，只是确定"届时要设成这个"（`capability.js:30`，C 项已去掉的 `FAUCET_RELAY_ID` 隐式 fallback 意味着这个值必须显式设对，写错/漏写=网关早拒或误路由到别的 relay 身份，Owner 该看这个值）
@@ -80,21 +86,21 @@
 - [ ] 现存 31 个 relay 已审计（2026-07-23）：100% `testnet-12`，此 pilot relay 是新增第 32 个，独立核验
 - [ ] 🔴 v0.10 修正（A1/B5 开放问题①收口，Bettor 批，NWT+KANet-UI 独立核实 `tg-wallet.js:58-68`）：**真正建 `tg_custodial_wallets` 行**——`generateMnemonic()`/`addressFromMnemonic()`（`kasia-console/src/services/wallet.js`）是**纯函数，不碰 DB**，只有 `sqlite.prepare(...INSERT...).run()`（`tg-wallet.js:68`）那一步才落库；`tg-wallet.js` 的 API 端点把"生成"和"插入"绑死在一次调用里，但底层两个纯函数本身可以拆开单独 offline 调用。执行：**用 §3 offline 阶段调这两个纯函数生成的那一对 mnemonic+address**（不是重新生成一对新的）——具体做法见下面 MF2 步骤 4-6，不是随便一条 INSERT 语句就完事
 
-**🔴 v0.11 新增（Codex "Remaining MUST-FIX 2" 步骤 4-6，接续 §3 步骤 1-3，明文候选密钥生命周期在这里收尾）：**
+**🔴 v0.14 重写（Codex MSG-124 MUST-FIX A+B+C+D 全部落码，三人红队 GREEN + NWT 独立复核 GREEN，review_ref=`a99c387b`；取代 v0.11-v0.12 的 stdin 交互式方案）：**
 
-**🔴 v0.12 更新（reviewed helper 已落码 ship，`5964af91`，M0a `m0c1-pilot-custodial-writer` capability + 三人红队 GREEN + NWT loop-closer 复核 GREEN，review_ref=`bed78d93`）：** 下面步骤 4-6 从"待定设计"改为引用**实际 ship 的 helper**，非占位描述：
-
-- [ ] **[MF2 步骤 4] go → 用 `kasia-console/scripts/m0c1-pilot-custodial-insert.mjs` 做 encrypt+insert，随即 in-process 验证**：Owner 批准（§3.5 go）后跑：
+- [ ] **[MF2 步骤 4] go → 用候选文件做 encrypt+insert，事务内 in-process 验证**：Owner 批准（§3.5 go）后跑：
   ```
   node kasia-console/scripts/m0c1-pilot-custodial-insert.mjs insert \
+    --candidate-file <§3 生成的 scratch/pilot-candidate-*.enc.json 路径> \
     --tg-user-id <pilot 专用唯一标识> --approved-address <Owner 批准的候选地址> \
-    --network testnet-12 [--db <path，默认生产 console.db>]
+    --network testnet-12 --db <canonical 生产 console.db 路径，硬 required 无默认值>
   ```
-  mnemonic 从脚本随后弹出的 stdin prompt 交互式喂入（**绝不用** `echo "mnemonic" | node ...` 这类喂法——echo 本身会把 mnemonic 写进 shell history + `ps` 进程表，等于把步骤 1 想堵的暴露面从 helper 挪到了喂法上，没堵住；必须交互式输入或受控管道）。该 helper 复用 `tg-wallet.js:58-73` 同一批 reviewed 函数（`crypto.js` `encrypt()`/`decrypt()` + `wallet.js` `addressFromMnemonic()`），非本次现改的裸 SQL；`--network` 走白名单校验（仅 `testnet-12`，拒绝任何 typo/未识别值，不进 `wallet.js` `getNetworkType()` 的 mainnet-default 分支——同 `relay.js:75` 那类 footgun 的反面教材）。**插入前先派生候选地址跟 `--approved-address` 比对**（不匹配立即 abort 不碰 DB，比"insert 后才发现"更早止损）；**插入后用同一个 better-sqlite3 连接**（非另开 readonly 连接，防 WAL 可见性延迟导致误判）**立即 in-process 解密、derive 出地址、再次跟批准候选地址逐字符比对**——两层验证目标不同（前者挡"候选值本身对不对"，后者挡"写进 DB 的加密副本解密回来还对不对"），双保险非冗余。任一层比对失败 → helper 自动 DELETE 刚插入那行（自愈，不留错误数据）+ CRITICAL 非零退出。**整个过程不 log mnemonic 本身**（console 输出只含 `tg_user_id`/地址/PASS-FAIL 状态）
-- [ ] **[MF2 步骤 5] 零化瞬态明文**：insert+验证完成后，helper 内部把持有 mnemonic 的局部变量重新赋值为空字符串丢弃引用。**诚实标注（非过度承诺）**：mnemonic 复用 `crypto.js`/`wallet.js` 现有函数的 `string` 签名（未改这两个已审函数去接 `Buffer`——那是范围外重构），JS `string` 不可变+由 GC 回收，**无法做到真正的内存覆写零化**（语言限制，非 helper 实现缺陷）；best-effort = 丢引用尽早失去可达性 + 不缓存/不重试重用，**不写"已零化"这种过度承诺的措辞**
-- [ ] **[MF2 步骤 6] 显式唯一 pilot `tg_user_id` 非空**：🔴 v0.11 更正（上一版本此处写"留空/标记 pilot 专用"是错的，Codex 明确要求非空）：用一个**显式、唯一**的 pilot `tg_user_id`（专用 pilot 标识符，非复用任何既有真实用户的 id）——helper 对空值/占位符字面量（`blank`/`mark pilot`/`pilot`/`test`/`placeholder`/`todo`/`tbd`，大小写不敏感）**精确拒绝**。既有 `tg-wallet` 路径把 `tg_user_id` 当稳定 lookup key，空值会被拒
+  **`--candidate-file` 取代 stdin**（v0.14 A+B 根治：不再有交互式终端输入这个选项）；`--db` **硬 required 无默认值**，若指向不存在的文件直接拒绝（不静默新建——canonical DB 应该已经存在，路径打错比新建更可能是真相，这是 C 项修法：旧 helper 默认猜一个 DB 路径，猜错时自读自过、live Console 却读不到这行）。执行顺序：读候选文件 → 候选文件里的 `address` 字段先跟 `--approved-address` 比对一次 → `decrypt()`（复用 `crypto.js` reviewed 函数）→ 重新 `addressFromMnemonic()` derive 一次交叉验证（双重防线，防候选文件本身被篡改成"address 字段对但 mnemonic 不对"）→ 候选文件里存的 `key_fingerprint` 跟当前 `currentKeyFingerprint(CONSOLE_ENCRYPTION_KEY)` 比对（诊断性，非安全边界，真安全边界是下一步的 AES-GCM auth tag）→ **`INSERT` + 同事务内 `SELECT+decrypt+derive+比对` 包进同一个 `db.transaction()`**（D 项修法：事务内任何 `throw` 触发 better-sqlite3 自动 ROLLBACK，取代旧版 INSERT→SELECT→条件 DELETE 三条独立语句之间的 crash 残留窗口——旧设计本身还有"如果 DELETE 也失败呢"的洞，事务化后这个洞结构性消失）。**整个过程不 log mnemonic 本身**
+- [ ] **[MF2 步骤 4，C 子项] key 指纹人工交叉核**：helper 启动时打印这次用的 `CONSOLE_ENCRYPTION_KEY` 指纹（`currentKeyFingerprint()`，sha256(key) 前 8 hex，不可逆推）；同一函数在 `kasia-console/src/index.js` 启动时也打印（供 live Console 进程侧对照）。**operator 在 insert 前人工比对这两处指纹是否一致**——这是**早期低成本 sanity check**（不一致=大概率 canonical `--db`/key 源没对齐 live Console，趁早发现比事后排查快），**不是**"live Console 能真解密这行"的权威证明（helper 自己的 readback 验证只证明"helper 自己 encrypt 的东西自己能 decrypt 回来"，即内部一致性，不证明 live Console 进程用同一把 key/同一个 DB 文件能读到这行——权威证明见下方 §4.5）
+- [ ] **[MF2 步骤 5] 零化瞬态明文**：insert 事务完成（成功或失败）后，候选文件按上方"shred 三档时机纪律"处置；helper 内部把持有 mnemonic 的局部变量重新赋值为空字符串丢弃引用。**诚实标注（非过度承诺）**：mnemonic 复用 `crypto.js`/`wallet.js` 现有函数的 `string` 签名，JS `string` 不可变+由 GC 回收，**无法做到真正的内存覆写零化**（语言限制，非 helper 实现缺陷）；候选文件的 shred 同样 best-effort（文件系统层覆写在 SSD 场景下未必物理生效）——**不写"已零化"/"已物理擦除"这种过度承诺的措辞**
+- [ ] **[MF2 步骤 6] 显式唯一 pilot `tg_user_id` 非空**：用一个**显式、唯一**的 pilot `tg_user_id`（专用 pilot 标识符，非复用任何既有真实用户的 id）——helper 对空值/占位符字面量（`blank`/`mark pilot`/`pilot`/`test`/`placeholder`/`todo`/`tbd`，大小写不敏感）**精确拒绝**
 - [ ] `tg_custodial_wallets` 表其余字段（`network`/`created_at`/`updated_at`）由 helper 按建行流程正常填
-- [ ] regression 证据：`test-framework/cases/m0c1-gate/pilot-custodial-insert-regression.mjs`（真实 CLI 调用，非 mock），17/17 PASS（候选匹配/不匹配/占位符/重复/network 白名单拒绝/非法 mnemonic 拒绝+无泄露/TAINT 全路径扫描）
+- [ ] regression 证据：`test-framework/cases/m0c1-gate/pilot-custodial-insert-regression.mjs`（真实调用两个 CLI，`spawnSync`/`execFileSync`，非 mock），33/33 PASS——含 D 项**真并发**测试（`Promise.all` 非顺序 await，两进程抢同一 `tg_user_id`，恰好 1 个成功+DB 恰好 1 行，证明输家的 INSERT 从未提交非"插入又清理"）+ shred 三档时机逐场景验证 + key 指纹不一致场景验证
 - [ ] 用上一步建好的地址充值 **恰好 50 KAS**（不多充——多充=硬止损形同虚设）
 - [ ] 充值后用 relay 只读命令 `get_address_utxos`（`relay.mjs:1189`，接受任意地址参数）查该地址链上余额，确认 = 50 KAS（**不是** `GET /api/relay/:id/balance`，那个查的是 relay 自身身份钱包）
 - [ ] 跑 provision 脚本正式签发 grant（`kasia-console/scripts/m0c1-grant-provision.mjs`，用 §3 起草、Owner 已批的候选字段值，非临时改动的新值；**必须显式传 `--payee`**——`m0c1-grant-provision.mjs:100` 默认 NULL，不传 = `payee_scope` 空 = 该维 NULL，J2 负责校验落码，本条是 runbook 侧的执行提醒）
@@ -132,6 +138,7 @@ G4（§4 步骤 4）证明的是"授权逻辑写对了"，不证明"真实部署
 - [ ] 用真实 console（非 G4 的隔离 relay 子进程）+ 真实 grant（provision 脚本正式签发的那份，非 harness 临时生成）+ 真实 custodial 钱包（§3 充值的那个）跑一笔真实、最小额的 custodial_transfer
 - [ ] 记录真实 txId 进本次激活的收据（`docs/2026-07-24-m0c-1-pilot-activation-receipt-template.md`，新增字段：live 冒烟 txId + 时间戳）
 - [ ] 确认链上落地（`checkUtxoLanded` 或等价方式），非仅看 API 返回 `ok:true`
+- [ ] 🔴 v0.14 新增（Codex MSG-124 MUST-FIX C 权威证明层，KANet-UI+J2 联合定）：**这笔真实转账的成功，本身就是"live Console 确实用同一个 DB、同一把 `CONSOLE_ENCRYPTION_KEY` 解密了 §3.6 helper 写的那一行"的权威证明**——`capability.js` 的 `deriveCustodialExecFields` 内部必须真的 `decrypt(mnemonic_encrypted)` 拿到 mnemonic 才能派生出 privkey 发起转账；若 §3.6 helper 当时写的是错误的 DB 文件、或用的 key 跟 live Console 实际用的不是同一把，这笔转账会在这一步失败（解密失败/派生出的地址跟预期不符），不会伪装成功。**这条证明不是 helper 自己关起门来做的（§3.6 步骤 4 的 in-process readback 只证明 helper 内部一致性），是 live Console 进程本身在真实业务路径上给出的证明**——§3.6 的 key 指纹人工核对是激活当刻的早期低成本 sanity check，本节这笔真转账才是唯一权威、最终的"live 已验证"依据
 
 ## 5. 已知缺口（诚实标，非 blocker，跟踪）
 
