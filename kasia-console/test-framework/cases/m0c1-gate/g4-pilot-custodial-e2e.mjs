@@ -15,6 +15,14 @@
 // 真实测试设计缺陷, 非产品 bug, 记录见下方 freshGrantWallet 注释)。修法: 每个需要精确验证"是哪个
 // 具体原因拒绝"的用例都用 freshGrantWallet() 拿一份全新的 grant+wallet, 各自独立的限流配额。
 //
+// 🔴 v0.3(2026-07-24·MF3 收口, relay 571441ea + gateway 82df7b4f 落地后): relayLastLog 正则猜测升级
+// 为结构化 body.reason_code 判据(isRelayDeniedResponse/relayDenyPhase, 见下方定义)——body 有无
+// reason_code 精确对应"这条响应是不是 relay denyResult 的拒绝分支"(capability.js:268-282, 只有
+// 403 authorization / 503 infra_error 两个拒绝分支带 reason_code)。新增 BUST①-结构化(source_scope
+// 不匹配, reason_code 精确命中) + META-CHECK(Bettor 06:35 mandate 落码为永久回归守卫: 把真实 auth
+// 拒响应喂进 LAND①-精确同款判据, 亲眼验证判据本身正确判定 FAIL, 非只审断言代码写对) + BUST⑦
+// (NWT 06:46 relay_id 不匹配场景移植进 G4 端到端)。旧 relayLastLog 断言保留作补充证据, 非主判据。
+//
 // 隔离架构（非 live 论证，同门⑤ harness 纪律）：
 // ① 独立临时 DB（process.env.DB_PATH 指向 scratch，非 console.db；db/client.js 在 MODULE LOAD 时
 //    一次性绑定路径，本文件在任何 import 触发 db/client.js 加载前先设好 env，保证绑定到隔离库）。
@@ -78,6 +86,20 @@ function notWronglyLanded(r) {
 }
 function isInfraFailure(r) {
   return r.status === 500 && /Relay not running|timeout/i.test(r.body?.error || '');
+}
+
+// MF3 结构化字段判定(v0.3, Codex/Bettor 强制升级, 替换 v0.2 的 relayLog 正则猜测)。
+// capability.js(82df7b4f) 按 relay 结构化 decision 的 phase 三档映射 HTTP 状态(J1 571441ea relay 侧
+// + J2 82df7b4f gateway 侧)。body 本身不直接回传 phase 字段(内部只用来选状态码, 不外泄), 但
+// body.reason_code 的"是否存在"本身就是精确判据: 只有 relay denyResult 的两个拒绝分支(403
+// authorization / 503 infra_error, capability.js:268-282) 才带 reason_code; 成功(200)、执行层无
+// txId 失败(503 无 reason_code)、gateway 早拒验(401/403/503 无 reason_code) 都不带。
+function isRelayDeniedResponse(r) {
+  return typeof r.body?.reason_code === 'string';
+}
+function relayDenyPhase(r) {
+  if (!isRelayDeniedResponse(r)) return null;
+  return r.status === 403 ? 'authorization' : (r.status === 503 ? 'infra_error' : 'unknown-status-with-reason_code');
 }
 
 async function main() {
@@ -195,8 +217,12 @@ async function main() {
     const r = await post(buildSignedEnvelope({ intent, grantId: w.grantId }));
     check('LAND① 最小正向: 到达 relay 执行层(非基础设施失败/非网关拒绝)', reachedExecLayer(r),
       `status=${r.status} body=${JSON.stringify(r.body)} | relayLog=${r.relayLastLog}`);
-    check('LAND①-精确 relay 侧确实处理了 custodial_transfer(非陈旧/无关日志残留)',
-      /custodial_transfer|GATE DENY/.test(r.relayLastLog), `relayLog=${r.relayLastLog}`);
+    // v0.3 升级(Codex/Bettor 强制, 替换 relayLog 正则猜测): body 有无 reason_code 是"这条响应是不是
+    // relay denyResult 拒绝分支"的精确结构化判据(非猜日志文本)。这条断言必须在真实 auth 拒场景下真
+    // 会 FAIL(Bettor 06:35 mandate: "不再像旧版把 GATE DENY 也当 LAND 过")——下方 BUST① 里的
+    // META-CHECK 直接把这个函数喂一份真实 deny 响应, 亲眼验证它确实 FAIL, 非只审断言代码写对。
+    check('LAND①-精确 body 无 reason_code(证明真到达 relay 执行层, 非 relay denyResult 拒绝分支)',
+      !isRelayDeniedResponse(r), `status=${r.status} body=${JSON.stringify(r.body)}`);
   }
 
   // ══ BUST①: 非白名单源地址(grant.source_scope 不含·relay 权威层职责) ══
@@ -208,6 +234,37 @@ async function main() {
     check('BUST① 非白名单源地址(grant 层)未被意外放行(且 relay 基础设施正常响应)',
       notWronglyLanded(r) && !isInfraFailure(r), `status=${r.status} body=${JSON.stringify(r.body)} | relayLog=${r.relayLastLog}`);
     check('BUST①-精确 relay 日志精确命中 source_scope(非泛泛拒绝)', /source_scope/.test(r.relayLastLog), `relayLog=${r.relayLastLog}`);
+    // v0.3 升级: 结构化断言取代纯日志正则(82df7b4f: gateway 纯按 relay phase 映射, body.reason_code
+    // 透传)——这正是 J2 真对抗测试用的原场景(source_scope 不匹配, 网关早拒验不覆盖·唯 relay
+    // checkIntentWithinGrant 权威拦), NWT 06:50 指定把它正式纳入 G4 端到端回归(非另起一套脚本重复
+    // 造轮子)。
+    check('BUST①-结构化 relay 权威闸真实拒绝(403·phase=authorization)+reason_code精确命中VALUE_NOT_IN_SCOPE_SOURCE',
+      r.status === 403 && r.body?.reason_code === 'VALUE_NOT_IN_SCOPE_SOURCE',
+      `status=${r.status} body=${JSON.stringify(r.body)}`);
+
+    // ══ META-CHECK(Bettor 06:35 mandate 直接落码为永久回归守卫, 非一次性人工验证): 把这条真实 auth
+    // 拒响应喂进 LAND①-精确 用的同一判据(isRelayDeniedResponse), 断言判据本身正确判定"这不是
+    // landed"。这是"故意造一个 auth 拒喂进 LAND 用例·亲眼看它 FAIL"的字面落地——不是审断言代码写对,
+    // 是拿真实 deny response 实测这个判据函数会不会被这类响应误判成 LAND 通过(v0.1/v0.2 的历史坑:
+    // 旧版"没被 400/401/403 拒=通过"的弱判据会被 503+GATE DENY 伪装成基础设施失败的响应骗过)。 ══
+    const wouldWronglyLandAsSuccess = r.status === 200 && r.body?.ok && r.body?.txId;
+    check('META: LAND①判据在真实 auth 拒(source_scope不匹配)响应上正确判定为FAIL(非误判GATE DENY为LAND通过)',
+      !wouldWronglyLandAsSuccess && isRelayDeniedResponse(r) && relayDenyPhase(r) === 'authorization',
+      `用 BUST① 真实拒绝 response 喂入 LAND 判据: status=${r.status} 若误判landed=${wouldWronglyLandAsSuccess} isDenied=${isRelayDeniedResponse(r)} phase=${relayDenyPhase(r)}`);
+  }
+
+  // ══ BUST⑦(NWT 06:46 场景①移植进 G4 端到端: relay_id 不匹配。网关不校验 envelope.relay_id 字段
+  // 内容, 只用它做路由(CUSTODIAL_RELAY_ID() 选转发到哪个 relay 进程), 真正的内容校验在 relay 侧
+  // verifyAppEnvelope 权威做——全 E2E HTTP 路径下依然到达 relay 并被 relay 权威闸拦, 非网关早拒验
+  // 覆盖场景, 同 BUST① 同款"网关放过·relay 兜底"结构) ══
+  {
+    const w = freshGrantWallet('bust7-relayid');
+    const intent = { fromAddress: w.address, target: DUMMY_TARGET, amount: '1', network: NETWORK };
+    const env = buildSignedEnvelope({ intent, grantId: w.grantId, overrides: { relay_id: 'WRONG-RELAY-ID-' + randomUUID() } });
+    const r = await post(env);
+    check('BUST⑦ relay_id 不匹配被 relay 权威闸拒(403·phase=authorization)+reason_code精确命中RELAY_ID_MISMATCH',
+      r.status === 403 && r.body?.reason_code === 'RELAY_ID_MISMATCH',
+      `status=${r.status} body=${JSON.stringify(r.body)}`);
   }
 
   // ══ BUST②: 超额度(amount 超 grant.max_amount_sompi=2 KAS·网关早拒验) ══
@@ -343,10 +400,11 @@ async function main() {
   writeFileSync(logPath, JSON.stringify({
     matrix_source: 'docs/2026-07-23-m0c-1-path-b-pilot-containment-design.md §3 + relay-side §5',
     codex_remediation: 'RESPONSE-...PATHB-ACTIVATION(b93134e8) RED-not-ready 修正④: replay/吊销/taint/pilot专属TTL/限流 + 精确reason断言',
+    mf3_remediation: 'MF3(relay 571441ea + gateway 82df7b4f): 结构化 body.reason_code 判据取代 relayLastLog 正则 + META-CHECK(真实auth拒response喂入LAND判据验证真FAIL) + BUST⑦(relay_id mismatch)',
     summary: { pass, fail }, evidence,
   }, null, 2));
   console.log(`\nevidence log: ${logPath}`);
-  console.log(`\n== G4 pilot custodial e2e harness v0.2: PASS ${pass} / FAIL ${fail} ==`);
+  console.log(`\n== G4 pilot custodial e2e harness v0.3: PASS ${pass} / FAIL ${fail} ==`);
   process.exit(fail === 0 ? 0 : 1);
 }
 
