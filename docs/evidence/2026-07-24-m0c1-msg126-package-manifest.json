@@ -1,0 +1,67 @@
+{
+  "_doc": "M0c-1 Path B pilot — Codex MSG-126整改(P1 /diagnose收窄+共享access_mode policy helper / P2 receipt v0.12+部署pin+truth对齐+v193时序) package manifest v3。绑reviewed_package_commit+4 evidence+harness+load-bearing(含P1新: pilot-wallet-policy.js/admin-secret-tier.mjs复用/tg-wallet.js收窄)。",
+  "reviewed_package_commit": "eae35ae4cadc2860c9358f29fcf65bd8863453f8",
+  "msg126_fix_commits": {
+    "P1_diagnose_narrow_and_policy_helper": "eae35ae4",
+    "P2_receipt_pins_truth": "ed23787b",
+    "P2_v193_deploy_ordering": "2ed0385d"
+  },
+  "evidence": [
+    {
+      "file": "docs/evidence/2026-07-24-m0c1-g4-pilot-custodial-e2e-v0.9-evidence.json",
+      "sha256": "6ef6e33f02529839243be1e45fd6bb113851a7c5a735df53a25cf6143d44a1dd",
+      "source_commit": "eae35ae4cadc2860c9358f29fcf65bd8863453f8",
+      "pass": 27,
+      "fail": 0
+    },
+    {
+      "file": "docs/evidence/2026-07-24-m0c1-provision-payee-regression-v4-evidence.json",
+      "sha256": "a94b84bf8e78de768824e2ad2eefcafd7bbe97d40d71bec20a38ec59b0b3f801",
+      "source_commit": "eae35ae4cadc2860c9358f29fcf65bd8863453f8",
+      "pass": 13,
+      "fail": 0
+    },
+    {
+      "file": "docs/evidence/2026-07-24-m0c1-pilot-custodial-insert-regression-v4-evidence.json",
+      "sha256": "2acd5a22aa48e6faf389e77dbd597a2f53ba5e24f7b74fd8f253aadb64b8d5fb",
+      "source_commit": "eae35ae4cadc2860c9358f29fcf65bd8863453f8",
+      "pass": 39,
+      "fail": 0
+    },
+    {
+      "file": "docs/evidence/2026-07-24-m0c1-tg-wallet-pilot-isolation-regression-v3-evidence.json",
+      "sha256": "14815c1f11613a8dbf7cdf4e1c154a1d04f3b5e781a17289654e1b63e97889e5",
+      "source_commit": "eae35ae4cadc2860c9358f29fcf65bd8863453f8",
+      "pass": 23,
+      "fail": 0
+    }
+  ],
+  "harness_blobs": {
+    "g4": "032de2a6ae3098497b9872c63c2db21f735594c2",
+    "provision_regression": "4e13dc06b73e7ad5c38c8560407c080b6168fdc5",
+    "custodial_insert_regression": "b347fa06a98aaf6dc6cd8f97f6790a39fd8d09b4",
+    "tg_wallet_isolation_regression": "afdfe470d6666a52a8a401f825ad066a16015601"
+  },
+  "load_bearing_blobs": {
+    "capability": "f3dc92a60215617544f65828174dc01e968378eb",
+    "tg_wallet": "585e6e81d058090cb14472293acc5ae04667ff05",
+    "pilot_wallet_policy": "338f0a835fa0c3ecdd29992a21ec70dea97e3868",
+    "admin_secret_tier": "6467bf1d92c2d2a000c15d1c2df0b1b9c52234de",
+    "db_client": "ce3ff393f312ea3af1c59a2388fde0f5d1f23a06",
+    "migrate": "20b71c0d74dfc6c10c2ea53ee1af10dfa848b64b",
+    "app_envelope": "a35a8c97f4f5edf8fd7fcd0796e70ded03a98d63",
+    "authorize": "40f6f2485890813abc2b0bc324b24c0358475aac",
+    "relay": "aa6fb71f023eba59fd751c451ad00641781fb3ba",
+    "grant_provision": "cf17d8fb8cfe423299f031c11ca845e285e8ed9b",
+    "pilot_custodial_insert": "4be043e26b343b7d94604d55a0b6a8ffe2c12d7e",
+    "pilot_candidate_generate": "d0fd02d12eeeb0a6ab9f6a39884c6f478bee877c",
+    "crypto": "c79f82bf555d6b688cdda04b8f5c9700623c0152",
+    "index": "c3b18246ffff4dbb96ba0a02204353c9fad59f1b",
+    "wallet": "e1c75187556a048c68f4a6a65318bd2408a4bf13",
+    "m0a_lib": "e1bfad6e2e8f0f144bbf514faee1a8530861fb75",
+    "m0a_manifest": "97749dea26ae38e50ef653a4c383a9c03f1fe9db",
+    "runbook": "b8103f9b80f51902841ce7a42622ea93fb0fa5b7",
+    "receipt": "43c60464dc470602b5da5606b79597c15a84ce85",
+    "database_md": "129234601c27cec00f9c2d357b9b36f3465d8b5a"
+  }
+}

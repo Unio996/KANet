@@ -1,0 +1,129 @@
+{
+  "source": "docs/2026-07-24-m0c1-pilot-codex-msg124-rectification.md §E",
+  "target": "kasia-console/src/api/tg-wallet.js POST /:tg_user_id/send",
+  "method": "真实 Fastify inject 调 tg-wallet.js 注册路由(非 mock/非直调内部函数) + 真 runMigrations schema",
+  "source_commit": "eae35ae4cadc2860c9358f29fcf65bd8863453f8",
+  "test_blob_sha": "afdfe470d6666a52a8a401f825ad066a16015601",
+  "target_blob_sha": "585e6e81d058090cb14472293acc5ae04667ff05",
+  "summary": {
+    "pass": 23,
+    "fail": 0
+  },
+  "evidence": [
+    {
+      "label": "①建 pilot 候选钱包",
+      "ok": true,
+      "detail": "{\"ok\":true,\"created\":true,\"address\":\"kaspatest:qzaushfvqtpxg2g0ghpsq86sxsme7a6umwkw8q8pl04jhxhut4cdu0tvtlc4g\",\"mnemonic\":\"cradle oak police distance forward clean trend reunion cry find tilt chef\",\"network\":\"testnet-12\"}"
+    },
+    {
+      "label": "①真攻击场景: 持 ingest secret+pilot tg_user_id 直接打 /send 被 403 拒",
+      "ok": true,
+      "detail": "status=403 body={\"ok\":false,\"error\":\"M0c-1 pilot 隔离钱包 (env allowlist): 本 legacy 路径已 fail-closed 禁用，请走 capability 网关 custodial_transfer 路径\"}"
+    },
+    {
+      "label": "①精确命中 pilot 隔离拒绝文案(非泛泛拒绝)",
+      "ok": true,
+      "detail": "M0c-1 pilot 隔离钱包 (env allowlist): 本 legacy 路径已 fail-closed 禁用，请走 capability 网关 custodial_transfer 路径"
+    },
+    {
+      "label": "②建非 pilot 钱包",
+      "ok": true,
+      "detail": "{\"ok\":true,\"created\":true,\"address\":\"kaspatest:qq6x573gqtc030afkkg5kkkq5vd2ml56mtrfyfja62wala6ysp53jga8fe7pa\",\"mnemonic\":\"between trash neutral then grab grass oil gossip achieve edit room citizen\",\"network\":\"testnet-12\"}"
+    },
+    {
+      "label": "②非 pilot 地址不被隔离检查拦(不是 403 pilot 隔离文案——后续因隔离 relay/RPC 不可用会以别的方式失败, 那是预期的, 只要不是这条隔离拒绝)",
+      "ok": true,
+      "detail": "status=400 body={\"ok\":false,\"error\":\"余额不足 (有 0 KAS, 需 ~1.05 KAS 含手续费)\"}"
+    },
+    {
+      "label": "③建钱包(测 relay id fallback)",
+      "ok": true,
+      "detail": "{\"ok\":true,\"created\":true,\"address\":\"kaspatest:qz2mh2hk3gq8a44xx2qzgymkjamkwrh24mmy5kcry2pr5xkthkmz2u808zgfg\",\"mnemonic\":\"pistol lamp day label possible load minute animal actor donate myth finish\",\"network\":\"testnet-12\"}"
+    },
+    {
+      "label": "③CUSTODIAL_RELAY_ID 未设(即便 FAUCET_RELAY_ID 有值)→ 503 fail-closed, 非静默 fallback",
+      "ok": true,
+      "detail": "status=503 body={\"ok\":false,\"error\":\"转账暂不可用 (CUSTODIAL_RELAY_ID 未配)\"}"
+    },
+    {
+      "label": "③精确命中\"CUSTODIAL_RELAY_ID 未配\"文案(不含 FAUCET_RELAY_ID, 证明 fallback 措辞也删了)",
+      "ok": true,
+      "detail": "转账暂不可用 (CUSTODIAL_RELAY_ID 未配)"
+    },
+    {
+      "label": "④建钱包(测 diagnose 正常路径)",
+      "ok": true,
+      "detail": "{\"ok\":true,\"created\":true,\"address\":\"kaspatest:qq9hsu52zeym0gazpxdyl5lh5w24tpp692gtx80g8mnmxslfzp6tjyjdvtq97\",\"mnemonic\":\"mixed illegal there favorite brief between isolate muscle chief screen among sting\",\"network\":\"testnet-12\"}"
+    },
+    {
+      "label": "④operator 授权+capability_only → live decrypt 成功且 derive 地址与行内 kaspa_address 逐字符一致 → ok:true",
+      "ok": true,
+      "detail": "status=200 body={\"ok\":true,\"address\":\"kaspatest:qq9hsu52zeym0gazpxdyl5lh5w24tpp692gtx80g8mnmxslfzp6tjyjdvtq97\"}"
+    },
+    {
+      "label": "④诊断回执不含 mnemonic/加密 blob(只 address, TAINT 纪律)",
+      "ok": true,
+      "detail": "{\"ok\":true,\"address\":\"kaspatest:qq9hsu52zeym0gazpxdyl5lh5w24tpp692gtx80g8mnmxslfzp6tjyjdvtq97\"}"
+    },
+    {
+      "label": "⑤只带 shared ingest secret(无 x-kanet-admin-secret operator tier) → 403 拒, 非静默放行",
+      "ok": true,
+      "detail": "status=403 body={\"ok\":false,\"error\":\"admin auth fail (x-kanet-admin-secret 缺失/不匹配, tier=ADMIN_SECRET_PILOT_DIAGNOSE)\"}"
+    },
+    {
+      "label": "⑥normal 钱包(access_mode=normal) 即便 operator 授权正确 → 解密前 403 拒, 不碰 decrypt",
+      "ok": true,
+      "detail": "status=403 body={\"ok\":false,\"error\":\"诊断端点只对 pilot 专属钱包(access_mode=capability_only)生效 (当前 access_mode=normal)\"}"
+    },
+    {
+      "label": "⑦unknown access_mode(非 normal 非 capability_only 的未来值) → 默认最严, 解密前拒(白名单式思路, 非黑名单)",
+      "ok": true,
+      "detail": "status=403 body={\"ok\":false,\"error\":\"诊断端点只对 pilot 专属钱包(access_mode=capability_only)生效 (当前 access_mode=some-future-unknown-value)\"}"
+    },
+    {
+      "label": "⑧建钱包(测 diagnose key 不一致路径)",
+      "ok": true,
+      "detail": "{\"ok\":true,\"created\":true,\"address\":\"kaspatest:qr8w7n68rg07mxe3lamymw9er8t9dd2rx0gj4ry5dw93gccfsr6q6uwttsvgz\",\"mnemonic\":\"medal example rug model lobster disagree monkey lounge violin abuse junk banner\",\"network\":\"testnet-12\"}"
+    },
+    {
+      "label": "⑧key 不一致(operator 授权对·access_mode 对) → decrypt 失败(auth tag 校验拦) → ok:false, 非静默放行",
+      "ok": true,
+      "detail": "status=500 body={\"ok\":false,\"error\":\"live decrypt 诊断失败 (检查 CONSOLE_ENCRYPTION_KEY 是否与写入这行时用的是同一把)\"}"
+    },
+    {
+      "label": "⑧key 不一致错误回执不含密钥材料(TAINT 纪律, exact-secret 扫描)",
+      "ok": true,
+      "detail": "{\"ok\":false,\"error\":\"live decrypt 诊断失败 (检查 CONSOLE_ENCRYPTION_KEY 是否与写入这行时用的是同一把)\"}"
+    },
+    {
+      "label": "⑨ADMIN_DIAGNOSE_ENABLED 未设(默认 off) → 503, 即便 operator 凭据+access_mode 都对",
+      "ok": true,
+      "detail": "status=503 body={\"ok\":false,\"error\":\"admin endpoint disabled (ADMIN_DIAGNOSE_ENABLED != 1)\"}"
+    },
+    {
+      "label": "⑩普通用户(access_mode=normal)走 /send 不被 access_mode 检查拦(非 403 pilot 隔离文案——收窄没误伤既有用户)",
+      "ok": true,
+      "detail": "status=400 body={\"ok\":false,\"error\":\"余额不足 (有 0 KAS, 需 ~1.05 KAS 含手续费)\"}"
+    },
+    {
+      "label": "⑪建钱包(测 durable 列独立生效)",
+      "ok": true,
+      "detail": "{\"ok\":true,\"created\":true,\"address\":\"kaspatest:qqdzk9zhk9rhmz8tdvw6gs98q2zeyt28fjzrt0r9ywh5q4kykyxh5jncqej39\",\"mnemonic\":\"horse ask forum bulk suggest drink horse exhaust flavor fly bring screen\",\"network\":\"testnet-12\"}"
+    },
+    {
+      "label": "⑪PILOT_WALLET_ADDRESSES 完全未设时, access_mode durable 列仍独立挡住 → 403(结构性, 非靠 env)",
+      "ok": true,
+      "detail": "status=403 body={\"ok\":false,\"error\":\"M0c-1 pilot 隔离钱包 (access_mode=capability_only): 本 legacy 路径已 fail-closed 禁用，请走 capability 网关 custodial_transfer 路径\"}"
+    },
+    {
+      "label": "⑫建钱包(测 durable 列在畸形 env 下仍生效)",
+      "ok": true,
+      "detail": "{\"ok\":true,\"created\":true,\"address\":\"kaspatest:qrrj46r7l7fn2kfhglc8y5rfxhtcznxwse3f5pta8yqnsg9dy6wwws0j3epsl\",\"mnemonic\":\"round write vacuum beach glance edit jeans famous endless stand recall work\",\"network\":\"testnet-12\"}"
+    },
+    {
+      "label": "⑫PILOT_WALLET_ADDRESSES 畸形值(空 Set)时, access_mode durable 列仍独立挡住 → 403",
+      "ok": true,
+      "detail": "status=403 body={\"ok\":false,\"error\":\"M0c-1 pilot 隔离钱包 (access_mode=capability_only): 本 legacy 路径已 fail-closed 禁用，请走 capability 网关 custodial_transfer 路径\"}"
+    }
+  ]
+}
