@@ -39,7 +39,8 @@
 
 - [ ] 生成/指定**一个专用**托管钱包候选地址（非复用任何既有用户的托管钱包）。若技术上必须建 `tg_custodial_wallets` 行才能拿到地址，允许建行，但**该行本次不充值**——地址存在不等于资金存在，风险面在充值那一刻发生，不在生成地址那一刻
 - [ ] 起草 grant 候选字段值（`source_scope`=上面候选地址 / `payee_scope` / `max_amount_sompi`=2 KAS / `valid_until`），**本节不跑 provision 脚本、不写入 `m0c1_app_grants` 表**——provision 是"铸造授权"本身，即便此刻 gate 还没 arm、不会被 enforce，仍属于该等 Owner 批的动作，非"准备"
-- [ ] 候选钱包地址 + 候选 grant 字段值整理进收据 §(c''') 的"Owner 逐项过目参数"表，供 §3.5 引用
+- [ ] 记下 `CUSTODIAL_RELAY_ID` **拟设值**（= §2 创建的 pilot relay id）——目前还没写进 `kanet.env`，只是确定"届时要设成这个"（`capability.js:30`，C 项已去掉的 `FAUCET_RELAY_ID` 隐式 fallback 意味着这个值必须显式设对，写错/漏写=网关早拒或误路由到别的 relay 身份，Owner 该看这个值）
+- [ ] 候选钱包地址 + 候选 grant 字段值 + `CUSTODIAL_RELAY_ID` 拟设值整理进收据 §(c''') 的"Owner 逐项过目参数"表，供 §3.5 引用
 - [ ] 充值目标金额记为 **恰好 50 KAS**（围栏设计 §2.2 硬止损顶，候选值阶段只是写下这个数字，不是真充）
 - [ ] **relay 自身钱包**（executor-relay，收据 §(a) 上半）保持独立日常余额管理，不需要为 pilot 专门操作，不在本节范围内（v0.3 曾误列，v0.4 删除）
 
@@ -49,7 +50,7 @@
 
 **v0.6 追加（Codex 二轮）**：本节的 go 现在也是 §3→§3.6（真充值+真写 grant）的前置闸，不只是 §4（flag 开启）的前置闸——Owner 看到的是**候选值**（还没充的钱包地址、还没插库的 grant 字段），批完才允许 §3.6 真的动钱/写库。
 
-- [ ] **Owner 的 go 必须是对"这次激活整包具体候选参数"的知情同意，不是一句空白的"可以了"**（Bettor 定型的范围）：给 Owner 看的东西必须包含——部署 commit SHA（§(h)）、专用 custodial 钱包**候选**地址（§3，尚未充值）、拟充值金额（须 = 50 KAS 硬顶，§3）、grant **候选**字段（source_scope/payee_scope/max_amount_sompi/valid_until，§3，尚未写入 registry）、即将写入的两 flag 目标值（§(d)）、§4.5 smoke 测试参数（金额/收款地址）、回滚路径（§6）——**逐项过一遍具体值**，不是抽象地问"能不能 arm"
+- [ ] **Owner 的 go 必须是对"这次激活整包具体候选参数"的知情同意，不是一句空白的"可以了"**（Bettor 定型的范围）：给 Owner 看的东西必须包含——部署 commit SHA（§(h)）、专用 custodial 钱包**候选**地址（§3，尚未充值）、拟充值金额（须 = 50 KAS 硬顶，§3）、grant **候选**字段（source_scope/payee_scope/max_amount_sompi/valid_until，§3，尚未写入 registry）、`CUSTODIAL_RELAY_ID` **拟设值**（= §2 pilot relay id，尚未写入 `kanet.env`，§3）、即将写入的两 flag 目标值（§(d)）、§4.5 smoke 测试参数（金额/收款地址）、回滚路径（§6）——**逐项过一遍具体值**，不是抽象地问"能不能 arm"
 - [ ] **在执行 §3.6 或 §4 任何一步之前**，Owner 已就上面这包候选参数给出显式 go（非默许、非"之前讨论过就算数"——每次真实激活都是一次新的不可逆窗口打开，需要当次的显式确认，理由见频道纪律 `feedback-decision-making-discipline-consolidated`：重大决策需 Owner 终裁）
 - [ ] Owner go 的方式、时间戳、**Owner 当时看到的具体候选参数快照**（或指向收据其余字段的引用）记入收据（`docs/2026-07-24-m0c-1-pilot-activation-receipt-template.md` §(c'''），位置在 §(d) flag 回读之前
 - [ ] operator 未拿到这条明确记录之前，**不得**开始 §3.6（充值/grant 签发）或 §4 步骤 1——两者都已进入不允许中断的原子序列，不能"先斩后奏再补授权"
@@ -63,6 +64,8 @@
 - [ ] 充值后用 relay 只读命令 `get_address_utxos`（`relay.mjs:1189`，接受任意地址参数）查该地址链上余额，确认 = 50 KAS（**不是** `GET /api/relay/:id/balance`，那个查的是 relay 自身身份钱包）
 - [ ] 跑 provision 脚本正式签发 grant（`kasia-console/scripts/m0c1-grant-provision.mjs`，用 §3 起草、Owner 已批的候选字段值，非临时改动的新值）
 - [ ] 候选地址写入 `PILOT_WALLET_ADDRESSES` env
+- [ ] **`CUSTODIAL_RELAY_ID` 写入 `kanet.env`**（🔴 Bettor+NWT 整序列反向扫抓出的缺口：v0.6 之前全文档只有"读取/核对 `CUSTODIAL_RELAY_ID` 值"这类验证性引用（收据 §(c'')⑤⑨），从没有一步是真正执行"把 `CUSTODIAL_RELAY_ID=xxx` 写进 `kanet.env`"这个动作——对比 §4 两 flag 那步有显式编辑指令，这里之前是空的）：写入值 = §3 记下的拟设值（= §2 pilot relay id），**不得留空指望 `FAUCET_RELAY_ID` 兜底**（C 项已去掉该 fallback，留空直接 503）
+- [ ] 写入后立即回读 `process.env.CUSTODIAL_RELAY_ID` 确认 = 写入的值（防编辑笔误），并与 §(c'') ⑥ pilot relay id 逐字符核对
 - [ ] 收据模板 §(c') 四值一致证明在充值+grant 签发后做一次
 
 ## 4. 两 flag 原子开启顺序
