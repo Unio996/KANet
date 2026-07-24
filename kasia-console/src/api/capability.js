@@ -259,8 +259,25 @@ export async function registerCapabilityRoutes(fastify) {
         };
         try {
           const result = await sendCommandAsync(relayId, cmd, undefined, 'app');
+          // Codex MUST-FIX 3（MF3）：relay 结构化 decision（authorize.mjs/app-envelope.mjs denyResult，
+          // 571441ea）三档 phase，分类下沉到 relay 源头（Bettor 06:35 定案）——relay 自己最清楚一条
+          // deny 是"我这边读/验证本身失败"还是"我判定这个请求不该被授权"，gateway 纯按 phase 三分支
+          // 映射 HTTP 状态，零 reason_code 知识：新增/调整任何 reason_code 都不用碰这段代码，分类
+          // 单一真相源在 relay 侧（避免 gateway 侧另维护一份例外表，跟 relay 定义分两处会漂移——
+          // relay 以后新增 infra 类 reason_code 忘了更新 gateway 表 = 默认落 403 掩盖故障）。
+          if (result?.denied === true) {
+            if (result.phase === 'infra_error') {
+              // relay 自己的读取/验证过程故障（DB 读失败/验证异常/功能未启用防御性拒绝）——非"此
+              // 请求违反规则"，是"relay 这次没能完成判定"，503（临时性语义，客户端该退避重试）。
+              return reply.code(503).send({ ok: false, error: 'relay 侧读取/验证失败: ' + (result.reason_code || 'UNKNOWN'), reason_code: result.reason_code || 'UNKNOWN' });
+            }
+            // phase==='authorization'（默认档）：relay 权威闸真实拒绝 = 403（永久性拒绝语义，客户端
+            // 不该重试同一请求）。reason_code 稳定枚举、按设计不泄密（denyResult 注释：非敏感原因
+            // 分类，供调用方精确判定，不含 privkey/助记词等）。
+            return reply.code(403).send({ ok: false, error: 'relay 拒绝: ' + (result.reason_code || 'DENIED'), reason_code: result.reason_code || 'DENIED' });
+          }
           const txId = result?.txId || null;
-          if (!txId) return reply.code(503).send({ ok: false, error: '转账未上链（relay 无 txId，可能 RPC down 或 relay 侧拒绝）' });
+          if (!txId) return reply.code(503).send({ ok: false, error: '转账未上链（relay 无 txId，可能 RPC down 或执行失败）' });
           // 🔴 no-key-leak: 回执只回 txId/amount/target/fromAddress（公开信息），绝不回 privkeyHex。
           return reply.send({ ok: true, txId, amount: cmd.amount, target: cmd.target, fromAddress: cmd.fromAddress });
         } catch (e) {
