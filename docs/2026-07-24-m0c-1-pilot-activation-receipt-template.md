@@ -3,6 +3,7 @@
 > **Status**: CURRENT（v0.1 空白模板·配套 `docs/2026-07-23-m0c-1-pilot-activation-runbook.md`）
 > **依据**: 2026-07-24 05:xx NWT 声称清单 grep 扫描发现 MSG-120 多处"声称已实现"实际代码不存在（TTL/限流/白名单/G4 用例），Bettor 认账根因="claim==code" completeness 交叉核缺失。本模板的存在意义：**激活当刻**从运行系统实际读到的值，不是从任何设计文档/频道消息转引的值。
 > **v0.2 更新**: 四条控制已全部补齐落码（J1 `944f2a72` TTL / J2 `cf680280` 限流+白名单 / J1 `2fbdb290` G4 harness v0.2 21/21），均经 claim-to-code 三道核（自核+Bettor grep+NWT 独立扫描）GREEN。下方 (b)(e) 已补代码坐标（供激活时对照查询用，坐标本身已核实存在，具体运行时值仍需激活当刻现查填空）。
+> **v0.3 更新（2026-07-24 06:17，Codex MSG-121 再审 MUST-FIX 1 修正）**: **v0.1/v0.2 全程查错钱包**——`custodial_transfer` 实际出钱的是 `tg_custodial_wallets` 表按 `fromAddress` 选出的托管钱包（`kasia-console/src/api/capability.js:163-164` `deriveCustodialExecFields`），**不是** relay 自身的运营钱包（`relay_nodes.address`，`GET /api/relay/:id/balance` 查的是这个，只用于 relay 付 gas/日常 IPC）。两者是完全不同的身份/余额。NWT 独立读码坐实"极其严重"。本版 §(a)(c) 已改为区分两个身份、余额回读改查 custodial 地址真实链上 UTXO。
 > **性质**: 部署产物（filled-in receipt），非设计文档。每次真实激活（含未来 pilot 结束/重开）都产生一份新收据，不是写一次的模板本身。
 
 ---
@@ -13,30 +14,59 @@
 
 ## 收据字段
 
-### (a) pilot 钱包身份 + network 回读
+### (a) 两个身份分列回读（🔴 v0.3 修正：executor-relay ≠ custodial-source，禁止混用）
+
+**executor-relay**（转发/签名验证发生的进程，不出钱，付 gas/IPC）:
 
 | 字段 | 查询方式 | 实际值 |
 |---|---|---|
 | pilot relay id | `relay_nodes` 表按 name 查 | |
-| pilot 钱包地址 | 同上 `address` 列 | |
+| relay 自身地址 | 同上 `address` 列（`GET /api/relay/:id/balance` 查的是**这个**，跟 pilot 出钱多少无关） | |
 | network 字段 | 同上 `network` 列，**必须 = testnet-12**（runbook §2 footgun 检查） | |
+
+**custodial-source**（`custodial_transfer` 实际出钱的身份，`capability.js:163-164` `deriveCustodialExecFields` 按 `fromAddress` 查 `tg_custodial_wallets` 表选出）:
+
+| 字段 | 查询方式 | 实际值 |
+|---|---|---|
+| custodial 地址（`kaspa_address` 列） | `tg_custodial_wallets` 表查 | |
+| network 字段 | 同上表 `network` 列，**必须 = testnet-12** | |
+| `mnemonic_encrypted` 是否存在 | 存在性检查（不读值，值本身绝不进收据） | |
 
 ### (b) pilot grant 逐字段回读（`m0c1_app_grants` 表，非设计文档写的值）
 
 | 字段 | grant registry 实际存的值 | 代码坐标（2026-07-24 claim-to-code 三道核后确认真实） |
 |---|---|---|
-| `source_scope` | | `kasia-relay/src/lib/app-envelope.mjs:79` SCALAR_DIMENSIONS，`grantCol='source_scope'`（membership，NULL=拒） |
+| `source_scope` | | `kasia-relay/src/lib/app-envelope.mjs:79` SCALAR_DIMENSIONS，`grantCol='source_scope'`（membership，NULL=拒）——**必须 = custodial-source 地址（(a) 表里那个），非 relay 自身地址** |
 | `payee_scope` | | 同上机制（若适用） |
 | `max_amount_sompi`（单笔上限，Bettor ratify=2 KAS） | | `app-envelope.mjs:79` `grantCol='max_amount_sompi'`；网关早拒检查 `capability.js:126` |
-| custodial_transfer 专属 TTL（Bettor ratify=5 min） | | `CUSTODIAL_PILOT_MAX_TTL_MS=5*60*1000`（`app-envelope.mjs:57`），enforce 于 `:157-158`（**2026-07-24 前是设计声称未落码，Codex RED 抓出，J1 `944f2a72` 补上**；全局 `MAX_ENVELOPE_TTL_MS` 仍是 1h `:49`，custodial_transfer 走专属收紧非改全局） |
 | `valid_from` / `valid_until` | | |
 
-### (c) pilot 钱包余额回读
+**relay 侧常量（🔴 v0.3 修正：非 grant registry 字段，是代码里的常量，不随 grant 变化，此处只做回读确认值对，不是"填 grant 存的值"）**:
+
+| 常量 | 代码坐标 | 当前值 |
+|---|---|---|
+| custodial_transfer 专属 TTL（Bettor ratify=5 min） | `CUSTODIAL_PILOT_MAX_TTL_MS`（`app-envelope.mjs:57`），enforce 于 `:157-158`（2026-07-24 前是设计声称未落码，Codex RED 抓出，J1 `944f2a72` 补上；全局 `MAX_ENVELOPE_TTL_MS` 仍是 1h `:49`，custodial_transfer 走专属收紧非改全局） | 5 min |
+
+### (c) custodial-source 钱包余额回读（🔴 v0.3 修正：查错钱包——旧版查的是 relay_nodes 余额，跟 pilot 实际能出多少钱无关）
 
 | 查询方式 | 实际值 |
 |---|---|
-| `GET /api/relay/:id/balance` | |
+| relay 只读命令 `get_address_utxos`（`kasia-relay/src/relay.mjs:1189`，接受任意 `address` 参数，非只查 relay 自己）对 (a) 表里 custodial 地址查询，汇总 UTXO 金额 | |
 | 是否 = 50 KAS 硬顶 | |
+| ~~`GET /api/relay/:id/balance`~~（**弃用**：查的是 relay 自身身份钱包，非 custodial-source） | — |
+| ~~relay `split-utxos`~~（**弃用**：那是 relay 自身 UTXO 管理，动的是错误钱包；custodial 地址若需要 UTXO 整理需另立专属操作+另审，本 runbook 不覆盖） | — |
+
+### (c') 四值一致性证明（🔴 v0.3 新增，Codex MSG-121 MUST-FIX 1 要求）
+
+激活前必须证明以下四者是**同一个地址**，逐项现查，不假设一致：
+
+| 值 | 来源 | 实际值 |
+|---|---|---|
+| ① `PILOT_WALLET_ADDRESSES` env（gateway 白名单） | `kanet.env` 实际内容 | |
+| ② `grant.source_scope`（relay 授权范围） | grant registry 查询 | |
+| ③ 签名 envelope 里的 `intent.fromAddress` | 一次真实/测试请求的 envelope 内容 | |
+| ④ 实际充值 50 KAS 的 custodial 地址 | `tg_custodial_wallets.kaspa_address` + (c) 表余额回读 | |
+| ①==②==③==④ ？ | 四者逐一比对 | |
 
 ### (d) 两 flag 状态同时回读（runbook §1 依赖，缺一不可）
 
@@ -63,6 +93,18 @@
 | revoke 命令执行时间 | | |
 | `grant.revoked` 回读 | 吊销后立即查 grant registry | |
 | 吊销后下一条请求是否即时拒 | 实发一条验证（G4 harness 或手工） | |
+
+### (g) Owner 授权后真 live 冒烟（🔴 v0.2 新增，runbook §4.5，Codex MSG-121 MUST-FIX 2 要求）
+
+G4（docs/evidence 那份）是隔离环境单元测试，不证明真实部署配置对。本节记录**唯一**的真实链上验证：
+
+| 字段 | 实际值 |
+|---|---|
+| Owner 授权时间/方式 | |
+| 真实 txId | |
+| 使用的 grant_id（provision 正式签发，非 harness 临时） | |
+| 链上落地确认方式（`checkUtxoLanded` 或等价） | |
+| 落地确认结果 | |
 
 ---
 
