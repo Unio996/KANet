@@ -47,6 +47,17 @@ process.env.ADMIN_SECRET_PILOT_DIAGNOSE = DIAGNOSE_SECRET;
 // 在 relayId 解析、balance 校验之前就会拦下(见下方对 handler 内检查顺序的核实), CUSTODIAL_RELAY_ID
 // 留空是刻意的(测 503 fallback-removed 那条用例专门验证这个)。
 
+// 🔴 Codex MSG-127 hygiene(非阻塞, Bettor 转达): /create 返回体含明文 throwaway mnemonic
+// (隔离测试用的假密钥, 非 live secret)——但"sanitized"的 published evidence artifact 该按
+// 形状 redact 掉任何 secret-shaped 值, 不因为"只是测试密钥不是真的"就留 BIP39 短语在里面。
+// 12-24 个小写字母单词的连续序列是 BIP39 mnemonic 的形状特征, 用这个特征而非白名单具体词
+// 表来 redact, 防止漏改未来测试用的新 mnemonic 词组。
+function redactMnemonicShape(obj) {
+  const cloned = JSON.parse(JSON.stringify(obj));
+  if (typeof cloned.mnemonic === 'string') cloned.mnemonic = '[REDACTED-MNEMONIC-SHAPE]';
+  return cloned;
+}
+
 let pass = 0, fail = 0;
 const evidence = [];
 function check(label, ok, detail) {
@@ -110,7 +121,7 @@ async function main() {
   {
     const tgUserId = 'pilot-e2e-isolation-' + Date.now();
     const created = await createWallet(tgUserId);
-    check('①建 pilot 候选钱包', created.ok && created.created, JSON.stringify(created));
+    check('①建 pilot 候选钱包', created.ok && created.created, JSON.stringify(redactMnemonicShape(created)));
 
     process.env.PILOT_WALLET_ADDRESSES = created.address; // 建号后才设隔离集, 模拟 §3.6/§(c'') 时序
     process.env.CUSTODIAL_RELAY_ID = 'dummy-relay-not-real'; // 保证走到隔离检查而非提前被 relayId 空值 503 拦
@@ -127,7 +138,7 @@ async function main() {
     delete process.env.PILOT_WALLET_ADDRESSES; // 清掉①的隔离集，模拟"这个地址从未进过隔离集"
     const tgUserId = 'non-pilot-e2e-' + Date.now();
     const created = await createWallet(tgUserId);
-    check('②建非 pilot 钱包', created.ok && created.created, JSON.stringify(created));
+    check('②建非 pilot 钱包', created.ok && created.created, JSON.stringify(redactMnemonicShape(created)));
 
     process.env.PILOT_WALLET_ADDRESSES = 'kaspatest:someotheraddressnotthisone'; // 隔离集存在但不含这个地址
     process.env.CUSTODIAL_RELAY_ID = 'dummy-relay-not-real';
@@ -152,7 +163,7 @@ async function main() {
 
     const tgUserId = 'no-relay-id-e2e-' + Date.now();
     const created = await createWallet(tgUserId);
-    check('③建钱包(测 relay id fallback)', created.ok && created.created, JSON.stringify(created));
+    check('③建钱包(测 relay id fallback)', created.ok && created.created, JSON.stringify(redactMnemonicShape(created)));
 
     const r = await send(tgUserId, DUMMY_TARGET, 1);
     check('③CUSTODIAL_RELAY_ID 未设(即便 FAUCET_RELAY_ID 有值)→ 503 fail-closed, 非静默 fallback',
@@ -168,7 +179,7 @@ async function main() {
   {
     const tgUserId = 'diagnose-match-' + Date.now();
     const created = await createWallet(tgUserId);
-    check('④建钱包(测 diagnose 正常路径)', created.ok && created.created, JSON.stringify(created));
+    check('④建钱包(测 diagnose 正常路径)', created.ok && created.created, JSON.stringify(redactMnemonicShape(created)));
     dbClient.prepare("UPDATE tg_custodial_wallets SET access_mode = 'capability_only' WHERE tg_user_id = ?").run(tgUserId);
 
     const r = await diagnose(tgUserId);
@@ -197,7 +208,7 @@ async function main() {
       r.status === 403 && /access_mode=normal/.test(r.body?.error || ''),
       `status=${r.status} body=${JSON.stringify(r.body)}`);
   }
-  // ⑦ unknown/null access_mode → 拒
+  // ⑦ unknown access_mode(未来字符串值) → 拒
   {
     const tgUserId = 'diagnose-unknownmode-' + Date.now();
     const created = await createWallet(tgUserId);
@@ -206,12 +217,34 @@ async function main() {
     check('⑦unknown access_mode(非 normal 非 capability_only 的未来值) → 默认最严, 解密前拒(白名单式思路, 非黑名单)',
       r.status === 403, `status=${r.status} body=${JSON.stringify(r.body)}`);
   }
+  // ⑦b 🔴 Codex MSG-127 措辞校正(Bettor over-claim 认账): 上条 ⑦ 只测了"unknown 字符串值"，
+  // "unknown/null" 这个描述里的 null 此前从未实测过——补一条显式 access_mode=NULL 的场景，
+  // 让 diagnose + send 两条路由都验证真拒绝，不是靠"字符串 unknown 场景理论上能覆盖 NULL"
+  // 这种推断带过。
+  {
+    const tgUserIdD = 'diagnose-nullmode-' + Date.now();
+    const createdD = await createWallet(tgUserIdD);
+    dbClient.prepare('UPDATE tg_custodial_wallets SET access_mode = NULL WHERE tg_user_id = ?').run(tgUserIdD);
+    const rD = await diagnose(tgUserIdD);
+    check('⑦b access_mode 显式 NULL(非字符串 "unknown"，是真 SQL NULL) → diagnose 解密前拒',
+      rD.status === 403, `status=${rD.status} body=${JSON.stringify(rD.body)}`);
+
+    const tgUserIdS = 'send-nullmode-' + Date.now();
+    const createdS = await createWallet(tgUserIdS);
+    dbClient.prepare('UPDATE tg_custodial_wallets SET access_mode = NULL WHERE tg_user_id = ?').run(tgUserIdS);
+    process.env.CUSTODIAL_RELAY_ID = 'dummy-relay-not-real';
+    delete process.env.PILOT_WALLET_ADDRESSES;
+    const rS = await send(tgUserIdS, DUMMY_TARGET, 1);
+    check('⑦b access_mode 显式 NULL → /send 也拒(isLegacySendAllowed(NULL)!==\'normal\')',
+      rS.status === 403 && /M0c-1 pilot 隔离钱包/.test(rS.body?.error || ''),
+      `status=${rS.status} body=${JSON.stringify(rS.body)}`);
+  }
   // ⑧ 错 live key → 无 secret 失败(同旧⑤逻辑, operator 授权对但 key 不对)
   {
     const tgUserId = 'diagnose-wrongkey-' + Date.now();
     const created = await createWallet(tgUserId);
     dbClient.prepare("UPDATE tg_custodial_wallets SET access_mode = 'capability_only' WHERE tg_user_id = ?").run(tgUserId);
-    check('⑧建钱包(测 diagnose key 不一致路径)', created.ok && created.created, JSON.stringify(created));
+    check('⑧建钱包(测 diagnose key 不一致路径)', created.ok && created.created, JSON.stringify(redactMnemonicShape(created)));
 
     const originalKey = process.env.CONSOLE_ENCRYPTION_KEY;
     process.env.CONSOLE_ENCRYPTION_KEY = randomBytes(32).toString('hex'); // 另一把不同的 key
@@ -253,7 +286,7 @@ async function main() {
   {
     const tgUserId = 'durable-noenv-' + Date.now();
     const created = await createWallet(tgUserId);
-    check('⑪建钱包(测 durable 列独立生效)', created.ok && created.created, JSON.stringify(created));
+    check('⑪建钱包(测 durable 列独立生效)', created.ok && created.created, JSON.stringify(redactMnemonicShape(created)));
     // 模拟真实 pilot 建号流程会做的事: 把这一行标成 capability_only(真实流程走
     // m0c1-pilot-custodial-insert.mjs helper 的 INSERT 语句, 这里直接 UPDATE 复现同样的行状态)。
     dbClient.prepare("UPDATE tg_custodial_wallets SET access_mode = 'capability_only' WHERE tg_user_id = ?").run(tgUserId);
@@ -268,7 +301,7 @@ async function main() {
   {
     const tgUserId = 'durable-malformedenv-' + Date.now();
     const created = await createWallet(tgUserId);
-    check('⑫建钱包(测 durable 列在畸形 env 下仍生效)', created.ok && created.created, JSON.stringify(created));
+    check('⑫建钱包(测 durable 列在畸形 env 下仍生效)', created.ok && created.created, JSON.stringify(redactMnemonicShape(created)));
     dbClient.prepare("UPDATE tg_custodial_wallets SET access_mode = 'capability_only' WHERE tg_user_id = ?").run(tgUserId);
 
     process.env.PILOT_WALLET_ADDRESSES = '   ,, ,'; // 畸形值(全逗号/空白, split+filter 后是空 Set)
