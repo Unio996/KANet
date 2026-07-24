@@ -12,9 +12,13 @@
 //   node kasia-console/scripts/m0c1-grant-provision.mjs gen-key
 //   node kasia-console/scripts/m0c1-grant-provision.mjs issue \
 //     --app-key-id <id> --app-pubkey <xonly-hex> --commands <a,b,c> --relay <relay_node_id[,..]> \
-//     --network <testnet-12> [--payee <addr1,addr2>] [--source <addr1,addr2>] [--max-amount-kas <N>] \
-//     [--market <m1,m2>] [--branch <b1,b2>] [--valid-days <30>] [--intent-version <1>] [--db <path>]
+//     --network <testnet-12> --payee <addr1,addr2>(涉款命令必传, 见下方) [--source <addr1,addr2>] \
+//     [--max-amount-kas <N>] [--market <m1,m2>] [--branch <b1,b2>] [--valid-days <30>] \
+//     [--intent-version <1>] [--db <path>]
 //     (--source = Path B pilot 围栏 §2.1: custodial_transfer 限定 fromAddress 出账源钱包集合)
+//     (--payee 对涉款命令[如 custodial_transfer]必传, 缺省即拒绝签发不写库——见下方 issue 分支
+//      MONEY_MOVING_COMMANDS 检查; synopsis 里特意不给它套 [] 方括号, 跟其余真可选参数区分开,
+//      避免 operator 一眼扫过 usage 就把它当"全局可选"——只对纯只读/非涉款 grant 才真可省略)
 //   node kasia-console/scripts/m0c1-grant-provision.mjs revoke --grant-id <G> [--db <path>]
 //   node kasia-console/scripts/m0c1-grant-provision.mjs list [--db <path>]
 //
