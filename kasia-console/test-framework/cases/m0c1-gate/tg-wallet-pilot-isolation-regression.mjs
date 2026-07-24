@@ -16,6 +16,7 @@
 
 import { existsSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -142,10 +143,18 @@ async function main() {
   }
 
   const logPath = path.join(LOG_DIR, 'tg-wallet-pilot-isolation-regression-latest.json');
+  // Codex MSG-124 真相校正一致性(Bettor grep 核出的缺口): G4/provision/custodial-insert 三份
+  // evidence 都已补自描述字段, 这份(MSG-124 之后新建的第 4 份 artifact)本次一起补齐, 逻辑照抄
+  // provision-payee-regression.mjs 已验证过的那段(execFileSync git rev-parse/hash-object, best-effort)。
+  const gitRevParse = () => { try { return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim(); } catch { return null; } };
+  const gitHashObject = (p) => { try { return execFileSync('git', ['hash-object', p], { cwd: ROOT, encoding: 'utf8' }).trim(); } catch { return null; } };
   writeFileSync(logPath, JSON.stringify({
     source: 'docs/2026-07-24-m0c1-pilot-codex-msg124-rectification.md §E',
     target: 'kasia-console/src/api/tg-wallet.js POST /:tg_user_id/send',
     method: '真实 Fastify inject 调 tg-wallet.js 注册路由(非 mock/非直调内部函数) + 真 runMigrations schema',
+    source_commit: gitRevParse(),
+    test_blob_sha: gitHashObject(path.relative(ROOT, fileURLToPath(import.meta.url)).split(path.sep).join('/')),
+    target_blob_sha: gitHashObject('kasia-console/src/api/tg-wallet.js'),
     summary: { pass, fail }, evidence,
   }, null, 2));
   console.log(`\nevidence log: ${logPath}`);
