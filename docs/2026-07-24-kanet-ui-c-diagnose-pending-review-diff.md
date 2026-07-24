@@ -1,6 +1,6 @@
 # KANet-UI · Codex MSG-125 MUST-FIX C — no-broadcast live-Console 解密诊断 pending-review diff
 
-> **性质**: pending-review 工件（供 NWT 红队 + Owner 知情），代码在共享工作树未 committed（`git diff kasia-console/src/api/tg-wallet.js` 可直接看到实际改动）。
+> **性质**: 历史 pending-review 工件（**🔴 v0.1 更正，Codex MSG-126 P2 抓出的 stale 真相**：本文档原写"代码在共享工作树未 committed"，那是 C 项刚落码时的状态——实际后续 E 路由半 ship 时（`0ed89d6f`）作为同一份 `tg-wallet.js` working tree 内容的一部分被一起 commit 了，此后又经 P1（`docs/2026-07-24-kanet-ui-p1-diagnose-narrowing-pending-review-diff.md`）进一步改造鉴权方式。本文档降级为"C 项最初设计记录"，当前实际代码状态以 P1 文档 + `git log -- kasia-console/src/api/tg-wallet.js` 为准，不再是"未 commit"的活跃 pending-review）。
 > **依据**: `docs/2026-07-24-m0c1-pilot-codex-msg125-rectification.md` §C（Bettor 批，refinement：`ok:true` 语义 = decrypt 成功 **且** derive 出的地址与行内 `kaspa_address` 逐字符一致，不是"decrypt 没抛异常"这么弱）。
 > **用户面钱路 + 密钥经手**: 不自批，走完整 pending-review 周期。
 

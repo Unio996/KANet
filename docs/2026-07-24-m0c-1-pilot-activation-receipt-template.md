@@ -1,6 +1,7 @@
 # M0c-1 Path B Pilot 激活收据（KANet-UI 工作流⑦·空白模板）
 
-> **Status**: CURRENT（v0.11·空白模板·配套 `docs/2026-07-23-m0c-1-pilot-activation-runbook.md`）
+> **Status**: CURRENT（v0.12·空白模板·配套 `docs/2026-07-23-m0c-1-pilot-activation-runbook.md`）
+> **v0.12 更新（2026-07-24，Codex MSG-126 P2）**：相位表扩为 7 相（新增 §4.3 pre-fund 验证闸 / §4.4 post-fund）；新增 §(c'''') 记录 C 诊断 + E 隔离攻击验证结果；§(h) load-bearing 清单补 `tg-wallet.js`/`client.js`/`pilot-wallet-policy.js`/`admin-secret-tier.mjs`。
 > **依据**: 2026-07-24 05:xx NWT 声称清单 grep 扫描发现 MSG-120 多处"声称已实现"实际代码不存在（TTL/限流/白名单/G4 用例），Bettor 认账根因="claim==code" completeness 交叉核缺失。本模板的存在意义：**激活当刻**从运行系统实际读到的值，不是从任何设计文档/频道消息转引的值。
 > **v0.2 更新**: 四条控制已全部补齐落码（J1 `944f2a72` TTL / J2 `cf680280` 限流+白名单 / J1 `2fbdb290` G4 harness v0.2 21/21），均经 claim-to-code 三道核（自核+Bettor grep+NWT 独立扫描）GREEN。下方 (b)(e) 已补代码坐标（供激活时对照查询用，坐标本身已核实存在，具体运行时值仍需激活当刻现查填空）。
 > **v0.3 更新（2026-07-24 06:17，Codex MSG-121 再审 MUST-FIX 1 修正）**: **v0.1/v0.2 全程查错钱包**——`custodial_transfer` 实际出钱的是 `tg_custodial_wallets` 表按 `fromAddress` 选出的托管钱包（`kasia-console/src/api/capability.js:163-164` `deriveCustodialExecFields`），**不是** relay 自身的运营钱包（`relay_nodes.address`，`GET /api/relay/:id/balance` 查的是这个，只用于 relay 付 gas/日常 IPC）。两者是完全不同的身份/余额。NWT 独立读码坐实"极其严重"。本版 §(a)(c) 已改为区分两个身份、余额回读改查 custodial 地址真实链上 UTXO。
@@ -20,13 +21,17 @@
 
 🔴 **v0.9 修正（Codex 三轮 A4(a)：旧版"runbook §4 走完后逐项填"这句话本身矛盾——§(c''') 必须在 §3.6/§4 之前就有值，不可能等 §4 走完才填第一格）**。本收据不是"一次性事后填空"，而是跟着激活流程分 **5 个相位**陆续填、每个相位对应字段只在该相位才有真实值——填某个字段时若它所属相位还没到，此格必须留空，不得抢先编造：
 
+🔴 **v0.12 更新（Codex MSG-126 P2，序列重排 arm-before-fund 后相位表扩为 7 相，取代 v0.9 的 5 相）**：
+
 | 相位 | 对应 runbook 阶段 | 本收据对应小节 |
 |---|---|---|
 | ① pre-auth 候选提案（Owner go 之前） | §2/§3（候选值起草，未创建/未充值/未写库） | §(c''') 的"候选参数"列 |
 | ② Owner 决策记录（Owner 给 go/no-go 那一刻） | §3.5 | §(c''') 的"授权字段"表 |
-| ③ post-auth/pre-arm 执行（Owner go 之后，两 flag 还没开） | §3.6 | §(a)(b)(c)(c')(c'')⑤a/§(h) 部署 commit（此项跟 arm 顺序无关，独立回读） |
-| ④ post-restart 运行时（§4 flag 开启+console 重启之后） | §4 | §(c'')⑤b/§(d) |
-| ⑤ post-smoke/revoke（§4.5 冒烟之后 / pilot 收尾） | §4.5、pilot 结束 | §(g)/§(f) |
+| ③ post-auth/pre-arm 执行（Owner go 之后，建零余额钱包+grant，两 flag 还没开） | §3.6 | §(a)(b)(c')(c'')⑤a/§(h) 部署 commit（此项跟 arm 顺序无关，独立回读） |
+| ④ post-restart 运行时（§4 flag 开启+console 重启之后，钱包仍零余额） | §4 | §(c'')⑤b/§(d) |
+| ⑤ pre-fund 零余额验证闸（🔴 新增，arm 后、充值前，钱包仍零余额） | §4.3 | §(c'''') C 诊断+E 隔离攻击验证 |
+| ⑥ post-fund（🔴 新增，验证闸全过、真充值之后） | §4.4 | §(c) 余额回读+§(c') 四值一致证明补做 |
+| ⑦ post-smoke/revoke（§4.5 冒烟之后 / pilot 收尾） | §4.5、pilot 结束 | §(g)/§(f) |
 
 每一格的值必须来自其相位对应的实际查询命令的真实输出，禁止照抄任何设计文档/频道消息里的声称数字。查不到 = 留空 + 标注原因，不得假填；相位还没到 = 留空 + 标注"待 §X 完成"，不得提前编。
 
@@ -141,6 +146,30 @@
 
 > 与 §(g) 的 live 冒烟授权是**两道独立**记录，不可用一条顶替另一条：本节记录"是否同意按这套候选参数动钱+开闸"，§(g) 记录"是否同意发这笔真实测试转账"。
 
+### (c'''') 零余额验证闸回读（🔴 v0.12 新增，Codex MSG-126 序列重排，runbook §4.3——必须在 §(c) 余额=50 KAS 出现之前填，此刻钱包应仍是零余额）
+
+**C 诊断**（`GET /api/tg-wallet/<pilot tg_user_id>/diagnose`，MSG-126 P1 收窄后三层授权：`ADMIN_DIAGNOSE_ENABLED=1` + `x-kanet-admin-secret`(独立 operator 凭据) + IP allowlist）：
+
+| 字段 | 实际值 |
+|---|---|
+| 诊断执行时间戳 | |
+| 诊断使用的 operator 身份/凭据来源（不记凭据本身） | |
+| 诊断返回的 `ok` | |
+| 诊断返回的 `address` | |
+| 该地址是否与 §3.5 Owner 批准的候选地址逐字符一致 | |
+
+**E 隔离攻击验证**（真实构造一次请求，持合法 `x-ingest-secret` + pilot `tg_user_id` 直打 `POST /:tg_user_id/send`）：
+
+| 字段 | 实际值 |
+|---|---|
+| 攻击验证执行时间戳 | |
+| HTTP 状态码（须 = 403） | |
+| 响应体 `error` 文案（须命中"M0c-1 pilot 隔离钱包"） | |
+
+| 验证闸判定 | 实际值 |
+|---|---|
+| C 诊断 + E 隔离攻击验证是否都通过（任一没过，不得进 §(c) 充值步骤） | |
+
 ### (d) 两 flag 状态同时回读（runbook §1 依赖，缺一不可；🔴 v0.9 修正 B1：file 值与 runtime 值拆开，不再混一格——同 §(c'') 那次教训，写文件≠进程读到）
 
 | flag | 阶段 | 查询方式 | 实际值 |
@@ -212,6 +241,10 @@ G4（docs/evidence 那份）是隔离环境单元测试，不证明真实部署�
 | `kasia-console/scripts/m0c1-pilot-custodial-insert.mjs`（🔴 v0.14 新增：MF2 步骤4-6 reviewed key-handoff writer，密钥经手，manifest `m0c1-pilot-custodial-writer` capability 锁定） | | | |
 | `kasia-console/scripts/m0c1-pilot-candidate-generate.mjs`（🔴 v0.14 新增：MF2 步骤1-3 offline 候选生成器，虽不触发 M0a 门但是密钥生命周期起点，漏检=候选生成逻辑可能被静默改而无人知） | | | |
 | `kasia-console/src/services/crypto.js`（🔴 v0.14 新增：加密核心，`encrypt()`/`decrypt()`/`currentKeyFingerprint()` 全仓托管钱包唯一信任的加密实现，漏检=加密逻辑可能被静默改动影响所有用户钱包） | | | |
+| `kasia-console/src/api/tg-wallet.js`（🔴 v0.12 新增，Codex MSG-126 P2：E 项 durable 拒绝 + C 项 live diagnose 两个 load-bearing 闭合都在这个文件，此前漏检） | | | |
+| `kasia-console/src/db/client.js`（🔴 v0.12 新增：诊断端点用的 live DB-path 权威——决定"诊断读的是不是真的 canonical DB"这件事的根） | | | |
+| `kasia-console/src/lib/pilot-wallet-policy.js`（🔴 v0.12 新增，Codex MSG-126 P1：`/send`+`/diagnose` 共用的唯一隔离规则来源，漏检=两路由可能静默 drift 出不一致的判定） | | | |
+| `kasia-console/src/lib/admin-secret-tier.mjs`（🔴 v0.12 新增：P1 `/diagnose` 三层授权里 operator 凭据校验的实现，money-path 相邻） | | | |
 
 | migration 版本回读 | 实际值 |
 |---|---|
