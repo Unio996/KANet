@@ -5,6 +5,7 @@
 > **v0.2 更新**: 四条控制已全部补齐落码（J1 `944f2a72` TTL / J2 `cf680280` 限流+白名单 / J1 `2fbdb290` G4 harness v0.2 21/21），均经 claim-to-code 三道核（自核+Bettor grep+NWT 独立扫描）GREEN。下方 (b)(e) 已补代码坐标（供激活时对照查询用，坐标本身已核实存在，具体运行时值仍需激活当刻现查填空）。
 > **v0.3 更新（2026-07-24 06:17，Codex MSG-121 再审 MUST-FIX 1 修正）**: **v0.1/v0.2 全程查错钱包**——`custodial_transfer` 实际出钱的是 `tg_custodial_wallets` 表按 `fromAddress` 选出的托管钱包（`kasia-console/src/api/capability.js:163-164` `deriveCustodialExecFields`），**不是** relay 自身的运营钱包（`relay_nodes.address`，`GET /api/relay/:id/balance` 查的是这个，只用于 relay 付 gas/日常 IPC）。两者是完全不同的身份/余额。NWT 独立读码坐实"极其严重"。本版 §(a)(c) 已改为区分两个身份、余额回读改查 custodial 地址真实链上 UTXO。
 > **v0.4 更新（2026-07-24 07:xx，Codex MSG-122 四 MUST-FIX 全 CLOSED+源码包 GREEN，armed=on 前 pre-activation B 项）**: 四 MUST-FIX 全部收口后，Codex 放行呈 Owner 做 Path B go/no-go 决策，但指出 claim-to-code（审过代码写对了）不等于 claim-to-deployed（真实跑的进程 == 审过的那份代码）——中间隔着一次部署动作没人核过。新增 §(h) 部署代码钉死回读：部署 commit SHA 核对 + 5 个 load-bearing 文件（authorize.mjs/app-envelope.mjs/relay.mjs/capability.js/migrate.js）sha256 交叉核 + migration 版本回读，任一不匹配即停激活重查。
+> **v0.5 更新（2026-07-24 07:4x，Codex MSG-122 pre-activation C 项·收据半）**: `capability.js:30` `CUSTODIAL_RELAY_ID` 定义为 `process.env.CUSTODIAL_RELAY_ID || process.env.FAUCET_RELAY_ID || null`——忘设前者会静默落到身份完全不同的 faucet relay（同款 `relay.js:75` `network||'mainnet'` 隐式 fallback 老坑的变体）。C 项拆两半：gateway 侧去 fallback 显式必设（J2 负责）+ 收据侧现场核对（本次）。新增 §(c'') relay 身份+network+target 等式：⑤env 实际值==⑥pilot relay id、⑦network==testnet-12、⑧intent.target==⑨grant.payee_scope 且是真实预期收款方。
 > **性质**: 部署产物（filled-in receipt），非设计文档。每次真实激活（含未来 pilot 结束/重开）都产生一份新收据，不是写一次的模板本身。
 
 ---
@@ -68,6 +69,20 @@
 | ③ 签名 envelope 里的 `intent.fromAddress` | 一次真实/测试请求的 envelope 内容 | |
 | ④ 实际充值 50 KAS 的 custodial 地址 | `tg_custodial_wallets.kaspa_address` + (c) 表余额回读 | |
 | ①==②==③==④ ？ | 四者逐一比对 | |
+
+### (c'') relay 身份 + network + target 等式（🔴 v0.5 新增，Codex MSG-122 pre-activation C 项收据半）
+
+`CUSTODIAL_RELAY_ID`（`kasia-console/src/api/capability.js:30`）实际定义为 `process.env.CUSTODIAL_RELAY_ID || process.env.FAUCET_RELAY_ID || null`——**若忘设 `CUSTODIAL_RELAY_ID`，网关会静默落到 `FAUCET_RELAY_ID`**（另一个身份完全不同的 relay，faucet 用途非 pilot custodial 用途），custodial_transfer 请求会被转发给错的 relay 处理。这是又一个"footgun 式隐式 fallback"（同款 `relay.js:75` `network || 'mainnet'` 那类），C 项要求 gateway 侧显式必设去 fallback（J2 负责代码），本节是收据侧的现场核对：
+
+| 值 | 来源 | 实际值 |
+|---|---|---|
+| ⑤ `process.env.CUSTODIAL_RELAY_ID`（激活环境，非猜测） | `kanet.env` 实际内容——**必须显式设置，不得留空指望 `FAUCET_RELAY_ID` 兜底**（J2 gateway 侧去 fallback 后未显式设=直接 503，若仍读到非 503 值说明 fallback 还没堵，需回查 J2 那半是否已部署） | |
+| ⑥ §2 创建的 pilot relay id | `relay_nodes` 表按 name 查（同 §(a) 上半那条） | |
+| ⑤==⑥ ？（gateway 实际转发目标 == 建的那个 pilot relay，非误落 faucet relay） | 逐字符比对 | |
+| ⑦ ⑤对应 relay 的 `network` 列 | `relay_nodes` 表查，**必须 = testnet-12** | |
+| ⑧ 一次真实/测试请求 envelope 里 `intent.target`（payee，对应 `grant.payee_scope`，`kasia-relay/src/lib/app-envelope.mjs:78` SCALAR_DIMENSIONS `dim:'payee'`） | envelope 实际内容 | |
+| ⑨ `grant.payee_scope` | grant registry 查询 | |
+| ⑧==⑨ ？（intent 里实际要付的地址 == grant 授权范围内，且是真实预期收款方，非笔误/测试残留地址） | 逐字符比对 + 人工确认这是真实预期收款方 | |
 
 ### (d) 两 flag 状态同时回读（runbook §1 依赖，缺一不可）
 
