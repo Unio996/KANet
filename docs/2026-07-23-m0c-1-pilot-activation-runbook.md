@@ -1,6 +1,6 @@
 # M0c-1 Path B Pilot 激活部署 runbook（KANet-UI·工作流④）
 
-> **Status**: CURRENT（🔴 v0.9 修正 B6：Status 行曾长期停留在 v0.1 描述，实际已迭代到 v0.9——v0.9 待 NWT+Bettor 三重深核 + Codex 三轮 re-review + Owner 最后拍）
+> **Status**: CURRENT（v0.10·v0.9 已经 NWT+Bettor 三重深核 GREEN，待 Codex 三轮 re-review + Owner 最后拍）
 > **依据**: `docs/2026-07-23-m0c-1-path-b-pilot-containment-design.md`（围栏设计，本 runbook 是它的部署时序落地）+ 频道 19:44-19:46（两 flag 耦合 footgun）+ 19:33 relay-utxo-topology 老坑。
 > **性质**: 部署编排 runbook，非设计文档——只讲"按什么顺序、每步怎么验"。
 > **v0.3 更新（2026-07-24，claim-to-code 事故后自我校准）**: v0.1/v0.2 原写"安全参数以围栏设计 doc 为准"——这正是 Codex RED 抓出的转引链风险（本 runbook 当时也没有独立验证被引用的数字是否真落码，2026-07-24 05:06 自曝）。现改为逐项标代码坐标，本文档自己对每个数字负一次独立验证责任：50 KAS 钱包顶（围栏设计 §2.2，运维配置值非代码常量）/ 2 KAS 单笔（`kasia-relay/src/lib/app-envelope.mjs:79` grant `max_amount_sompi` 字段 + `kasia-console/src/api/capability.js:126` 早拒检查）/ 3 笔每分钟限流（`capability.js:48-49` `RATE_LIMIT_WINDOW_MS`+`RATE_LIMIT_MAX`，J2 `cf680280` 落码，claim-to-code 三道核 GREEN）/ 5min custodial TTL（`app-envelope.mjs:57` `CUSTODIAL_PILOT_MAX_TTL_MS`，J1 `944f2a72` 落码）/ gateway pilot-wallet 白名单（`capability.js:206` `PILOT_WALLET_ADDRESSES`，J2 `cf680280` 落码，空=fail-closed）/ grant-scoped 白名单（`app-envelope.mjs:79` `source_scope` 字段）。均已通过 claim-to-code 三道核（自核+Bettor grep+NWT 独立扫描）确认真实存在。
@@ -10,6 +10,7 @@
 > **v0.7 更新**: 补 `CUSTODIAL_RELAY_ID` 完整性缺口（Bettor+NWT 整序列反向扫抓出）——全文档此前只有验证性引用，从没有一步真正执行"写进 `kanet.env`"，§3/§3.5/§3.6 补齐候选记录→Owner 过目→实写入的完整链路。
 > **v0.8 更新（2026-07-24，Codex 三轮反馈，Owner 明确要求这轮"全面梳理，不挤牙膏"）**: NWT+Bettor 全面自查（非等派工）抓出 4 类问题，本版一次性全改：① `source_scope`/`payee_scope` 是 membership set（JSON 数组，非标量），收据模板 §(c')(c'') 的"直接相等"框架类型不对，已改成员检查框架 ② **§2（创建 pilot relay）本身也排在 §3.5 Owner 授权之前**——建 `relay_nodes` 行是 Owner 批前的真实状态变更，跟 §3 资金那次同类问题，本版把 §2 改成"候选参数"（不实际创建），真正创建挪到 §3.6（Owner go 之后） ③ 收据 §(h) 曾硬编码具体 commit SHA 示例值（`26a23292`）作为"权威 tip"，此后多个 commit 落地已过期，改为强制现查最终轮 Codex GREEN 对应的 tip、禁止抄文档历史示例值 ④ `process.env.CUSTODIAL_RELAY_ID` 回读时机错误——console 重启前编辑 `kanet.env` 不会让已在跑的旧进程的 `process.env` 变化，§3.6 那步改核对文件内容，真正的运行时回读挪到 §4 步骤 4 重启完成之后。
 > **v0.9 更新（2026-07-24，Codex 三轮完整回合，`docs/2026-07-24-m0c1-pilot-comprehensive-defect-sweep.md` 一次性全改，Bettor+NWT 派工 A1/A2/A4/B1-B6）**：v0.8 的自查还不够彻底，Codex 三轮 + Bettor/NWT 反向扫又挖出更深一层：**A1/B5**（v0.8 说"§3 允许建 `tg_custodial_wallets` 行但不充值"仍然不对——建行本身就是生成+加密 mnemonic 写入生产 DB，是 Owner 批前不该发生的真实 key material 状态变更，非"无害占位"；改为 §3 阶段纯 offline/scratch 派生地址，真正建行连同加密 mnemonic 一起移到 §3.6）**A2**（§(h) 部署钉死回读从硬编码单一 commit 值改成 `reviewed_package_commit`/`review_response_commit`/`runbook_blob_sha`/`receipt_template_blob_sha`/`g4_evidence_blob_sha` 等运行时字段组，比对基准 = 当次 Owner 决策依据的那个包；CUSTODIAL_RELAY_ID fallback 描述改成 CURRENT 时态，旧洞降级为历史 revision note）**A4**（收据"使用方法"从"§4 走完后填"改成 5 相位框架，file-vs-runtime 两层核延伸到 §(d) 两 flag）**B1-B6**（补 `m0c1-grant-provision.mjs`+doc blob+manifest 进 load-bearing 清单/source_scope 同 payee 一样是 membership/relay 候选记法改成"拟建 name"非"已存在 id"/payee_scope 强制非空+provision 必传 `--payee`（J2 落码 `efac5c36`）/Status 头版本号更正）。**这轮流程也改了**：Bettor+NWT 承诺"一次全改完→三重深核（技术成立性/整序列反向扫/claim-to-code）→一次 Codex re-review"，不再分批送审。
+> **v0.10 更新（2026-07-24，NWT 三重深核后发现的两个非阻塞问题，Bettor 批 KANet-UI 收口）**：① v0.9 的"§3 offline 派生候选地址"留了一个开放问题（生产建号流程能不能指定用已派生地址）——NWT+KANet-UI 独立核实 `kasia-console/src/services/wallet.js` 的 `generateMnemonic()`/`addressFromMnemonic()` 是**纯函数不碰 DB**，只有 `tg-wallet.js:68` 那步 INSERT 才落库；§3 offline 阶段直接调这两个纯函数生成候选 mnemonic+address（不进生产 DB），§3.6 用**同一对**做真正建行（不重新生成），候选地址与生产地址因此保证逐字符相同，原开放问题收口，删掉"二选一按工具能力执行"的模糊措辞。② 收据模板 §(h)/§(g) 物理顺序颠倒（h 排在 g 前面，字母序反了，NWT 抓出），已对调，内容本身无变化。
 
 ---
 
@@ -42,7 +43,7 @@
 
 **先读**：`docs/2026-07-24-m0c-1-pilot-activation-receipt-template.md` §(a)(c)(c')——`custodial_transfer` 实际出钱的是 `tg_custodial_wallets` 表按 `fromAddress` 选出的托管钱包（`capability.js:163-164`），**不是** pilot relay 自身的钱包（`relay_nodes.address`）。
 
-- [ ] 🔴 v0.9 修正（Codex 三轮 A1/B5：连"只建行不充值"也不行）：**offline/scratch 环境**用生产同款派生机制生成**一个专用**托管钱包候选地址（非复用任何既有用户的托管钱包）——**不 insert 生产 `tg_custodial_wallets` 表、不生成/加密 mnemonic 落生产 DB**。旧 v0.6-v0.8 说"允许建行但不充值"仍然不对：建行本身就是往生产 DB 写入加密 key material（真实 operational 身份），是 Owner 批前不该发生的真实状态变更，不是"无害占位"。真正建行（连同加密 mnemonic 一起写库）移到 §3.6
+- [ ] 🔴 v0.10 修正（Codex 三轮 A1/B5，开放问题①收口）：**offline/scratch 环境**直接调用 `generateMnemonic()` + `addressFromMnemonic()`（`kasia-console/src/services/wallet.js`，纯函数，不碰 DB）生成**一个专用**托管钱包候选地址+mnemonic（非复用任何既有用户的托管钱包）——**不 insert 生产 `tg_custodial_wallets` 表**（那是 `tg-wallet.js:68` 单独一步，本节不碰）。生成的 mnemonic 只留在 scratch/隔离环境（不落生产 DB、不进频道消息/收据明文字段），地址可以进候选参数表给 Owner 看。旧 v0.6-v0.8 说"允许建行但不充值"不对：建行本身就是往生产 DB 写入加密 key material（真实 operational 身份），是 Owner 批前不该发生的真实状态变更。§3.6 用这里生成的**同一对** mnemonic+address 做真正建行，不重新生成——因此候选地址与最终生产地址保证逐字符相同，不存在"建号后地址对不上"的分支
 - [ ] 起草 grant 候选字段值（`source_scope`=上面候选地址 / `payee_scope` / `max_amount_sompi`=2 KAS / `valid_until`），**本节不跑 provision 脚本、不写入 `m0c1_app_grants` 表**——provision 是"铸造授权"本身，即便此刻 gate 还没 arm、不会被 enforce，仍属于该等 Owner 批的动作，非"准备"
 - [ ] 记下 `CUSTODIAL_RELAY_ID` **拟设值**（= §2 创建的 pilot relay id）——目前还没写进 `kanet.env`，只是确定"届时要设成这个"（`capability.js:30`，C 项已去掉的 `FAUCET_RELAY_ID` 隐式 fallback 意味着这个值必须显式设对，写错/漏写=网关早拒或误路由到别的 relay 身份，Owner 该看这个值）
 - [ ] 候选钱包地址 + 候选 grant 字段值 + `CUSTODIAL_RELAY_ID` 拟设值整理进收据 §(c''') 的"Owner 逐项过目参数"表，供 §3.5 引用
@@ -68,7 +69,8 @@
 - [ ] 用 §2 候选参数创建 pilot relay：请求体**显式**带 `network: 'testnet-12'`（不依赖默认值，`relay.js:75` footgun）
 - [ ] 创建后立即查 DB 复核：`SELECT network FROM relay_nodes WHERE id=?` == `testnet-12`
 - [ ] 现存 31 个 relay 已审计（2026-07-23）：100% `testnet-12`，此 pilot relay 是新增第 32 个，独立核验
-- [ ] 🔴 v0.9 修正（A1/B5）：**真正建 `tg_custodial_wallets` 行**（生成+加密 mnemonic 落生产 DB，v0.9 前这步曾被误判为"可以提前做的无害占位"，已更正——这是 Owner 批前不该发生的 key material 状态变更，现挪到这里）——地址须 == §3 offline 阶段派生的那个候选地址（若走生产建号流程会重新生成地址，需先确认生产流程能不能"指定使用某个已派生地址建号"，不能则改为"建号后核对新地址是否与候选地址一致，若不一致回 §3.5 重新过 Owner"，二选一按实际工具能力执行）
+- [ ] 🔴 v0.10 修正（A1/B5 开放问题①收口，Bettor 批，NWT+KANet-UI 独立核实 `tg-wallet.js:58-68`）：**真正建 `tg_custodial_wallets` 行**——`generateMnemonic()`/`addressFromMnemonic()`（`kasia-console/src/services/wallet.js`）是**纯函数，不碰 DB**，只有 `sqlite.prepare(...INSERT...).run()`（`tg-wallet.js:68`）那一步才落库；`tg-wallet.js` 的 API 端点把"生成"和"插入"绑死在一次调用里，但底层两个纯函数本身可以拆开单独 offline 调用。执行：**用 §3 offline 阶段调这两个纯函数生成的那一对 mnemonic+address**（不是重新生成一对新的）直接执行 encrypt+INSERT（同 `tg-wallet.js:62-68` 的逻辑，绕开该 API 端点的"生成即插入"耦合），使写入生产 DB 的地址与 Owner 在 §3.5 批准时看到的候选地址**逐字符相同**——不存在"建号后核对不一致回 Owner"的分支，因为地址本就是同一对 key material，不会不一致
+- [ ] `tg_custodial_wallets` 表其余字段（`network`/`created_at`/`updated_at`）按建行流程正常填，`tg_user_id` 留空/标记 pilot 专用（非复用任何既有用户）
 - [ ] 用上一步建好的地址充值 **恰好 50 KAS**（不多充——多充=硬止损形同虚设）
 - [ ] 充值后用 relay 只读命令 `get_address_utxos`（`relay.mjs:1189`，接受任意地址参数）查该地址链上余额，确认 = 50 KAS（**不是** `GET /api/relay/:id/balance`，那个查的是 relay 自身身份钱包）
 - [ ] 跑 provision 脚本正式签发 grant（`kasia-console/scripts/m0c1-grant-provision.mjs`，用 §3 起草、Owner 已批的候选字段值，非临时改动的新值；**必须显式传 `--payee`**——`m0c1-grant-provision.mjs:100` 默认 NULL，不传 = `payee_scope` 空 = 该维 NULL，J2 负责校验落码，本条是 runbook 侧的执行提醒）

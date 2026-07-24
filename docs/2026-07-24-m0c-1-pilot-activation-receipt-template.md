@@ -1,6 +1,6 @@
 # M0c-1 Path B Pilot 激活收据（KANet-UI 工作流⑦·空白模板）
 
-> **Status**: CURRENT（🔴 v0.9 修正 B6：Status 行曾长期停留在 v0.1 描述，实际已迭代到 v0.9·空白模板·配套 `docs/2026-07-23-m0c-1-pilot-activation-runbook.md`）
+> **Status**: CURRENT（v0.10·空白模板·配套 `docs/2026-07-23-m0c-1-pilot-activation-runbook.md`）
 > **依据**: 2026-07-24 05:xx NWT 声称清单 grep 扫描发现 MSG-120 多处"声称已实现"实际代码不存在（TTL/限流/白名单/G4 用例），Bettor 认账根因="claim==code" completeness 交叉核缺失。本模板的存在意义：**激活当刻**从运行系统实际读到的值，不是从任何设计文档/频道消息转引的值。
 > **v0.2 更新**: 四条控制已全部补齐落码（J1 `944f2a72` TTL / J2 `cf680280` 限流+白名单 / J1 `2fbdb290` G4 harness v0.2 21/21），均经 claim-to-code 三道核（自核+Bettor grep+NWT 独立扫描）GREEN。下方 (b)(e) 已补代码坐标（供激活时对照查询用，坐标本身已核实存在，具体运行时值仍需激活当刻现查填空）。
 > **v0.3 更新（2026-07-24 06:17，Codex MSG-121 再审 MUST-FIX 1 修正）**: **v0.1/v0.2 全程查错钱包**——`custodial_transfer` 实际出钱的是 `tg_custodial_wallets` 表按 `fromAddress` 选出的托管钱包（`kasia-console/src/api/capability.js:163-164` `deriveCustodialExecFields`），**不是** relay 自身的运营钱包（`relay_nodes.address`，`GET /api/relay/:id/balance` 查的是这个，只用于 relay 付 gas/日常 IPC）。两者是完全不同的身份/余额。NWT 独立读码坐实"极其严重"。本版 §(a)(c) 已改为区分两个身份、余额回读改查 custodial 地址真实链上 UTXO。
@@ -10,6 +10,7 @@
 > **v0.7 更新（2026-07-24 09:xx，Codex 二轮 MUST-FIX：§(c''') 改记候选值，非回读值）**: 对应 runbook v0.6 §3→§3.5→§3.6 三段重排——§(c''') Owner 逐项过目表现改为记录**候选值**（尚未充值的钱包地址/尚未 provision 的 grant 字段/CUSTODIAL_RELAY_ID 拟设值），并显式要求核对 Owner go 时间戳早于 §(a)(c)(c'')(d) 任何"实际发生"值出现之前——填表时若那些字段已有值，说明执行顺序倒了。
 > **v0.8 更新（2026-07-24，Codex 三轮反馈第一轮自查）**: `source_scope`/`payee_scope` 是 membership set（JSON 数组，`parseJsonStringArray`+`scopeSet.includes()`），§(c')(c'') 原"直接相等"框架类型不对（单值 vs 集合），改成"singleton 集合+成员检查"框架。
 > **v0.9 更新（2026-07-24，Codex 三轮完整回合，`docs/2026-07-24-m0c1-pilot-comprehensive-defect-sweep.md` 一次性全改）**：v0.8 自查还不够彻底，本版是响应 Owner"别挤牙膏"指令的完整修复：① **A1/B5** §(c''') 候选表不再假设钱包地址已"建行待充"——现在必须是 offline/scratch 派生、未 insert 生产 DB、未生成加密 mnemonic；relay 候选同理改成"拟建 name"而非"已存在 id"（B4） ② **A2** §(h) 从硬编码单一 commit SHA 改成 `reviewed_package_commit`/`review_response_commit`/blob-sha 组字段，杜绝再抄任何过期示例值；CUSTODIAL_RELAY_ID fallback 描述改 CURRENT 时态（fallback 已被 C-gateway 去掉，旧描述降级为历史 note） ③ **A3** `payee_scope` 强制非空（删"若适用"），§(c'') ⑧∈⑨ 成员检查 ④ **A4** "使用方法"从"§4 走完后填"改成 5 相位框架（pre-auth 候选/Owner 决策/post-auth 执行/post-restart 运行时/post-smoke），§(d) 两 flag 也拆成 file-vs-runtime 两层（B1） ⑤ **B2** §(h) load-bearing 清单补 `m0c1-grant-provision.mjs`+`m0a-exception-manifest.json` ⑥ **B6** Status 头版本号更正。
+> **v0.10 更新（2026-07-24，NWT 三重深核后非阻塞问题收口）**：§(h)/§(g) 物理顺序颠倒（NWT 抓出，h 排在 g 前面字母序反了），已对调，内容本身无变化；对应 runbook v0.10 §3 offline 派生开放问题①收口。
 > **性质**: 部署产物（filled-in receipt），非设计文档。每次真实激活（含未来 pilot 结束/重开）都产生一份新收据，不是写一次的模板本身。
 
 ---
@@ -168,7 +169,19 @@
 | `grant.revoked` 回读 | 吊销后立即查 grant registry | |
 | 吊销后下一条请求是否即时拒 | 实发一条验证（G4 harness 或手工） | |
 
-### (h) 部署代码钉死回读（🔴 v0.4 新增，Codex MSG-122 pre-activation B 项：claim-to-code 延伸到 claim-to-deployed）
+### (g) Owner 授权后真 live 冒烟（🔴 v0.2 新增，runbook §4.5，Codex MSG-121 MUST-FIX 2 要求）
+
+G4（docs/evidence 那份）是隔离环境单元测试，不证明真实部署配置对。本节记录**唯一**的真实链上验证：
+
+| 字段 | 实际值 |
+|---|---|
+| Owner 授权时间/方式 | |
+| 真实 txId | |
+| 使用的 grant_id（provision 正式签发，非 harness 临时） | |
+| 链上落地确认方式（`checkUtxoLanded` 或等价） | |
+| 落地确认结果 | |
+
+### (h) 部署代码钉死回读（🔴 v0.4 新增，Codex MSG-122 pre-activation B 项：claim-to-code 延伸到 claim-to-deployed；🔴 v0.10 修正 B3/③：本节此前物理排在 §(g) 前面，字母序颠倒，已挪到 §(g) 后面，内容本身无变化）
 
 > MSG-122 三道核（自核+Bettor grep+NWT 独立扫描）证明的是"审过的那个 commit 里代码写对了"，**不证明**"真实跑在生产 console/relay 进程里的代码 == 那个被审过的 commit"。两者中间隔着一次部署动作（拉代码/重启），必须显式核对，不能默认"刚部署过所以肯定是最新"——这条本身就是本次事故（claim-to-code）在运行时维度的延伸，不核就是同一个坑在新层面复发。
 
@@ -203,18 +216,6 @@
 | 两者一致？（若部署库版本落后于代码——DB schema 缺字段但代码假设字段存在，是另一类静默故障，需先跑 migrate 补齐） | |
 
 **纪律**：任一 load-bearing 文件 digest 不匹配、或部署 commit SHA ≠ `reviewed_package_commit` → **停止激活**，先查清楚差异来源（漏部署 / 部署后被改 / tip 记错），差异本身若涉及安全参数改动需重走 claim-to-code 三道核（对实际部署的那份代码，非旧审过的那份），不得凭"应该没差多少"跳过。
-
-### (g) Owner 授权后真 live 冒烟（🔴 v0.2 新增，runbook §4.5，Codex MSG-121 MUST-FIX 2 要求）
-
-G4（docs/evidence 那份）是隔离环境单元测试，不证明真实部署配置对。本节记录**唯一**的真实链上验证：
-
-| 字段 | 实际值 |
-|---|---|
-| Owner 授权时间/方式 | |
-| 真实 txId | |
-| 使用的 grant_id（provision 正式签发，非 harness 临时） | |
-| 链上落地确认方式（`checkUtxoLanded` 或等价） | |
-| 落地确认结果 | |
 
 ---
 
