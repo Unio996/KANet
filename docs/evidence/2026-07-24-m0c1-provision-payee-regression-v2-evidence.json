@@ -1,0 +1,79 @@
+{
+  "source": "docs/2026-07-24-m0c1-pilot-comprehensive-defect-sweep.md A3 + Codex v0.10 re-review 项②(regression evidence artifact)",
+  "target": "kasia-console/scripts/m0c1-grant-provision.mjs issue 子命令 --payee 强制规则(commit cbec6837)",
+  "method": "真实调用 CLI(execFileSync, 非 mock/非直调内部函数) + DB 旁路核对 payee_scope 真值",
+  "source_commit": "d439a504e00ac94d691abb39b4117c6c0e007cf0",
+  "test_blob_sha": "4e13dc06b73e7ad5c38c8560407c080b6168fdc5",
+  "target_blob_sha": "cf17d8fb8cfe423299f031c11ca845e285e8ed9b",
+  "summary": {
+    "pass": 13,
+    "fail": 0
+  },
+  "evidence": [
+    {
+      "label": "①custodial_transfer 不传 --payee → CLI 非零 exit code(拒绝签发)",
+      "ok": true,
+      "detail": "code=1 stderr=--payee 必传（commands 含涉款命令 custodial_transfer，缺省会让 payee_scope=NULL 导致所有 intent 被拒，非\"不限制\"）\n"
+    },
+    {
+      "label": "①stderr 精确提示\"--payee 必传\"(非泛泛报错)",
+      "ok": true,
+      "detail": "--payee 必传（commands 含涉款命令 custodial_transfer，缺省会让 payee_scope=NULL 导致所有 intent 被拒，非\"不限制\"）\n"
+    },
+    {
+      "label": "①DB 里确实没有这条 grant(拒绝发生在 openDb() 之前, 连表都未建——最强的\"未写库\"证据)",
+      "ok": true,
+      "detail": "(sqlite_master 里连 m0c1_app_grants 表都不存在)"
+    },
+    {
+      "label": "②custodial_transfer 传完整批准参数集 → CLI exit code=0(正常签发)",
+      "ok": true,
+      "detail": "code=0 stderr="
+    },
+    {
+      "label": "②payee_scope 恰好是 singleton [payeeAddr](非只含·非多余元素)",
+      "ok": true,
+      "detail": "[\"kaspatest:qregr0000000000000000000000000000000000000000000000000000\"]"
+    },
+    {
+      "label": "②source_scope 恰好是 singleton [sourceAddr]",
+      "ok": true,
+      "detail": "[\"kaspatest:qregrsrc00000000000000000000000000000000000000000000000\"]"
+    },
+    {
+      "label": "②relay_scope 恰好是 singleton [relayId](TN12 pilot relay)",
+      "ok": true,
+      "detail": "[\"tn12-pilot-relay-0001\"]"
+    },
+    {
+      "label": "②max_amount_sompi 精确 = 2 KAS(200000000 sompi, 非近似/非其他值)",
+      "ok": true,
+      "detail": "200000000"
+    },
+    {
+      "label": "②network 精确 = testnet-12",
+      "ok": true,
+      "detail": "testnet-12"
+    },
+    {
+      "label": "②无多余授权维度: market_scope/branch_scope/outpoint_scope 均为 NULL(只授了该授的)",
+      "ok": true,
+      "detail": "market=null branch=null outpoint=null"
+    },
+    {
+      "label": "③非涉款命令不传 --payee → CLI exit code=0(不误伤非涉款 grant)",
+      "ok": true,
+      "detail": "code=0 stderr="
+    },
+    {
+      "label": "③DB 里 payee_scope = NULL(该维度未授权, 非该维度不相关命令的错误值)",
+      "ok": true,
+      "detail": "null"
+    },
+    {
+      "label": "④commands 混合涉款+非涉款、不传 --payee → 仍拒绝(以最严命令为准)",
+      "ok": true,
+      "detail": "code=1 stderr=--payee 必传（commands 含涉款命令 custodial_transfer，缺省会让 payee_scope=NULL 导致所有 intent 被拒，非\"不限制\"）\n"
+    }
+  ]
+}

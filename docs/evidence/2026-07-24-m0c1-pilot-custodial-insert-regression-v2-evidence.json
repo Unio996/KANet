@@ -1,0 +1,172 @@
+{
+  "source": "scratch/j2-msg124-rectification-design.txt(A+B+C+D 整改) + scratch/j2-reviewed-helper-design.txt(基础9步)",
+  "target": "kasia-console/scripts/m0c1-pilot-candidate-generate.mjs + m0c1-pilot-custodial-insert.mjs",
+  "method": "真实调用两个 CLI(execFileSync, 非 mock) + Promise.all 真并发(非 mock)",
+  "source_commit": "d439a504e00ac94d691abb39b4117c6c0e007cf0",
+  "test_blob_sha": "224555e21dcf889e8eed443d881db74e99d82738",
+  "generate_blob_sha": "d0fd02d12eeeb0a6ab9f6a39884c6f478bee877c",
+  "insert_blob_sha": "32eaf28b5f53e369ec5d2dea959ba64c7d97a144",
+  "summary": {
+    "pass": 33,
+    "fail": 0
+  },
+  "evidence": [
+    {
+      "label": "①candidate-generate exit code=0",
+      "ok": true,
+      "detail": "code=0 stderr="
+    },
+    {
+      "label": "①候选文件是密文(grep 内容不含 mnemonic 相关明文结构, 只有 mnemonic_encrypted JSON 字段)",
+      "ok": true
+    },
+    {
+      "label": "①insert exit code=0",
+      "ok": true,
+      "detail": "code=0 stderr="
+    },
+    {
+      "label": "①stdout 报告 readback 验证 PASS",
+      "ok": true,
+      "detail": "[insert] CONSOLE_ENCRYPTION_KEY fingerprint: 501108e2\n插入成功: tg_user_id=j2-regr-match-1784900584844 address=kaspatest:qqcw9q7gpxlsf8gews6sfefl4z4c2c2gx22ar6t80lzqzx8nuh8wgkc3au6q3 network=testnet-12\nreadback 验证: PASS（同一事务内解密后重新派生地址与批准值逐字符一致）\n候选文件已 shred: D:\\kanet-tn12\\scratch\\pilot-candidate-regr\\pilot-candidate-regr-match-1784900584828.enc.json\n⚠ helper 自身验证只证内部一致性（自己写的自己能读回来），不证明 live Console 进程能用同一 DB/同一 key 读到这行——权威证明见 runbook §4.5 live 转账。\n"
+    },
+    {
+      "label": "①insert 后候选文件被 shred(不存在)",
+      "ok": true
+    },
+    {
+      "label": "①DB 行存在且 address 精确匹配",
+      "ok": true,
+      "detail": "kaspatest:qqcw9q7gpxlsf8gews6sfefl4z4c2c2gx22ar6t80lzqzx8nuh8wgkc3au6q3"
+    },
+    {
+      "label": "①独立解密+重新派生地址与批准值一致(不信 helper 自己的 readback 断言)",
+      "ok": true,
+      "detail": "kaspatest:qqcw9q7gpxlsf8gews6sfefl4z4c2c2gx22ar6t80lzqzx8nuh8wgkc3au6q3"
+    },
+    {
+      "label": "②候选文件 address 字段被篡改 → insert 非零 exit code(abort)",
+      "ok": true,
+      "detail": "code=1 stderr=候选文件记录的 address(kaspatest:qwrongaddr00000000000000000000000000000000000000000000000) != --approved-address(kaspatest:qzvejlvr57zh00g0s0crsy9fr4q5z2gvmxsf2vv8uchaz55smjpdyfvjufnks)，abort，候选文件已 shred，不碰 DB\n"
+    },
+    {
+      "label": "②stderr 精确提示候选文件记录的 address 不匹配(非泛泛报错)",
+      "ok": true,
+      "detail": "候选文件记录的 address(kaspatest:qwrongaddr00000000000000000000000000000000000000000000000) != --approved-address(kaspatest:qzvejlvr57zh00g0s0crsy9fr4q5z2gvmxsf2vv8uchaz55smjpdyfvjufnks)，abort，候选文件已 shred，不碰 DB\n"
+    },
+    {
+      "label": "②候选文件被 shred(genuine mismatch)",
+      "ok": true
+    },
+    {
+      "label": "②DB 里确实没有这条 wallet(abort 时不写库)",
+      "ok": true,
+      "detail": "(无行, 符合预期)"
+    },
+    {
+      "label": "③tg_user_id=占位符\"blank\" → CLI 非零 exit code(拒绝)",
+      "ok": true,
+      "detail": "code=1 stderr=--tg-user-id 非法：不得为空或占位符字面量（拒绝清单: blank/mark pilot/pilot/test/placeholder/todo/tbd/）——须为专用唯一 pilot 标识\n"
+    },
+    {
+      "label": "③stderr 精确提示占位符非法(非泛泛报错)",
+      "ok": true,
+      "detail": "--tg-user-id 非法：不得为空或占位符字面量（拒绝清单: blank/mark pilot/pilot/test/placeholder/todo/tbd/）——须为专用唯一 pilot 标识\n"
+    },
+    {
+      "label": "③候选文件未被 shred(占位符检查发生在候选文件处理之前, 非 genuine mismatch)",
+      "ok": true
+    },
+    {
+      "label": "④首次插入(为重复测试铺垫) → exit code=0",
+      "ok": true,
+      "detail": "code=0 stderr="
+    },
+    {
+      "label": "④同 tg_user_id 重复插入 → CLI 非零 exit code(拒绝)",
+      "ok": true,
+      "detail": "code=1 stderr=--tg-user-id=j2-regr-dup-1784900585458 已存在于 tg_custodial_wallets，本工具只做首次插入（吊销/更新走其他流程，非本工具范围）\n"
+    },
+    {
+      "label": "④stderr 精确提示已存在(友好报错先于 PK 约束报错)",
+      "ok": true,
+      "detail": "--tg-user-id=j2-regr-dup-1784900585458 已存在于 tg_custodial_wallets，本工具只做首次插入（吊销/更新走其他流程，非本工具范围）\n"
+    },
+    {
+      "label": "④候选文件未被 shred(重复检查非 genuine mismatch, 候选本身没坏, 换个 tg_user_id 可重试)",
+      "ok": true
+    },
+    {
+      "label": "⑤--network 打错(\"testnet12\"漏横杠) → CLI 非零 exit code(白名单拒绝)",
+      "ok": true,
+      "detail": "code=1 stderr=--network=testnet12 不在允许集合 {testnet-12}（拒绝, 防止 wallet.js getNetworkType() 对未识别值默认落 mainnet 的 footgun）\n"
+    },
+    {
+      "label": "⑤stderr 精确提示不在允许集合",
+      "ok": true,
+      "detail": "--network=testnet12 不在允许集合 {testnet-12}（拒绝, 防止 wallet.js getNetworkType() 对未识别值默认落 mainnet 的 footgun）\n"
+    },
+    {
+      "label": "⑥--db 指向不存在的文件 → CLI 非零 exit code(拒绝, 不静默新建)",
+      "ok": true,
+      "detail": "code=1 stderr=--db 指向的文件不存在: D:\\kanet-tn12\\scratch\\does-not-exist-canonical.db（这不是\"帮你新建一个\"的场景——canonical DB 应该已经存在, 路径打错比新建更可能是真相）\n"
+    },
+    {
+      "label": "⑥stderr 精确提示 DB 文件不存在(非泛泛报错)",
+      "ok": true,
+      "detail": "--db 指向的文件不存在: D:\\kanet-tn12\\scratch\\does-not-exist-canonical.db（这不是\"帮你新建一个\"的场景——canonical DB 应该已经存在, 路径打错比新建更可能是真相）\n"
+    },
+    {
+      "label": "⑥完全不传 --db → CLI 非零 exit code(硬 required, 无默认值)",
+      "ok": true,
+      "detail": "code=1 stderr=缺 --db\n"
+    },
+    {
+      "label": "⑥stderr 提示缺 --db",
+      "ok": true,
+      "detail": "缺 --db\n"
+    },
+    {
+      "label": "⑦候选文件用不同 key 生成 → insert 用另一把 key 时 CLI 非零 exit code(拒绝)",
+      "ok": true,
+      "detail": "code=1 stderr=候选文件的 key_fingerprint(19186c70) != 本次 insert 的 key fingerprint(501108e2)——两次调用用了不同 CONSOLE_ENCRYPTION_KEY，候选文件本身没坏，不 shred，请用正确的 key 重跑\n"
+    },
+    {
+      "label": "⑦stderr 精确提示 key fingerprint 不一致(非泛泛报错)",
+      "ok": true,
+      "detail": "候选文件的 key_fingerprint(19186c70) != 本次 insert 的 key fingerprint(501108e2)——两次调用用了不同 CONSOLE_ENCRYPTION_KEY，候选文件本身没坏，不 shred，请用正确的 key 重跑\n"
+    },
+    {
+      "label": "⑦候选文件未被 shred(key 不一致是配置问题非候选本身坏, 用正确 key 可重试)",
+      "ok": true
+    },
+    {
+      "label": "⑧真并发(Promise.all, 非顺序 await)抢同一 tg_user_id → 恰好 1 个成功(PK 约束在事务内生效, 非双写)",
+      "ok": true,
+      "detail": "rA.code=0 rB.code=1"
+    },
+    {
+      "label": "⑧表里对这个 tg_user_id 恰好 1 行(非 0/非 2——事务原子性: 输家的 INSERT 从未提交, 非\"插入又清理\")",
+      "ok": true,
+      "detail": "实际=1"
+    },
+    {
+      "label": "⑧输家候选文件未被 shred(UNIQUE 约束冲突是 transient 场景, 非 genuine mismatch, 候选本身没坏)",
+      "ok": true
+    },
+    {
+      "label": "⑨非法 mnemonic(合法 decrypt, 非法 BIP39) → CLI 非零 exit code(派生失败 abort)",
+      "ok": true,
+      "detail": "code=1 stderr=候选 mnemonic 派生地址失败（格式非法？）: Bip39 error——候选文件已 shred\n"
+    },
+    {
+      "label": "⑨非法 mnemonic 错误路径 stdout/stderr 不含原始输入片段(逐词扫描)",
+      "ok": true,
+      "detail": "干净"
+    },
+    {
+      "label": "⑨候选文件被 shred(候选本身内容坏了, genuine mismatch)",
+      "ok": true
+    }
+  ]
+}

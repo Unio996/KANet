@@ -1,0 +1,54 @@
+{
+  "source": "docs/2026-07-24-m0c1-pilot-codex-msg124-rectification.md §E",
+  "target": "kasia-console/src/api/tg-wallet.js POST /:tg_user_id/send",
+  "method": "真实 Fastify inject 调 tg-wallet.js 注册路由(非 mock/非直调内部函数) + 真 runMigrations schema",
+  "source_commit": "d439a504e00ac94d691abb39b4117c6c0e007cf0",
+  "test_blob_sha": "d5806af52829d3c2589dd79cb275010eddb3db2c",
+  "target_blob_sha": "f4b6022b550af16081effa6ad4b446936e5eebe7",
+  "summary": {
+    "pass": 8,
+    "fail": 0
+  },
+  "evidence": [
+    {
+      "label": "①建 pilot 候选钱包",
+      "ok": true,
+      "detail": "{\"ok\":true,\"created\":true,\"address\":\"kaspatest:qzzsv3jnvlka27qdzupqam5vds39pjdzezcwqek4czvvjf8mxl3z5f7jmvaq2\",\"mnemonic\":\"nasty arctic solar nurse report state torch sniff example cement million gentle\",\"network\":\"testnet-12\"}"
+    },
+    {
+      "label": "①真攻击场景: 持 ingest secret+pilot tg_user_id 直接打 /send 被 403 拒",
+      "ok": true,
+      "detail": "status=403 body={\"ok\":false,\"error\":\"M0c-1 pilot 隔离钱包: 本 legacy 路径已 fail-closed 禁用，请走 capability 网关 custodial_transfer 路径\"}"
+    },
+    {
+      "label": "①精确命中 pilot 隔离拒绝文案(非泛泛拒绝)",
+      "ok": true,
+      "detail": "M0c-1 pilot 隔离钱包: 本 legacy 路径已 fail-closed 禁用，请走 capability 网关 custodial_transfer 路径"
+    },
+    {
+      "label": "②建非 pilot 钱包",
+      "ok": true,
+      "detail": "{\"ok\":true,\"created\":true,\"address\":\"kaspatest:qrqp3s4u7e80vrjrvw9d3yfap32g4ycjrcxyn9eqjyeuzw5wq9ay2ayl9ej7s\",\"mnemonic\":\"network scorpion half into keen fancy banana crew topple tunnel happy buddy\",\"network\":\"testnet-12\"}"
+    },
+    {
+      "label": "②非 pilot 地址不被隔离检查拦(不是 403 pilot 隔离文案——后续因隔离 relay/RPC 不可用会以别的方式失败, 那是预期的, 只要不是这条隔离拒绝)",
+      "ok": true,
+      "detail": "status=400 body={\"ok\":false,\"error\":\"余额不足 (有 0 KAS, 需 ~1.05 KAS 含手续费)\"}"
+    },
+    {
+      "label": "③建钱包(测 relay id fallback)",
+      "ok": true,
+      "detail": "{\"ok\":true,\"created\":true,\"address\":\"kaspatest:qpz6glcwnw0jnaawju3qm22nzdfy0jacrxzj6gf3g03v706gra42uzvwcelac\",\"mnemonic\":\"rich acid tattoo drift stuff rely crawl orphan surprise perfect carry fade\",\"network\":\"testnet-12\"}"
+    },
+    {
+      "label": "③CUSTODIAL_RELAY_ID 未设(即便 FAUCET_RELAY_ID 有值)→ 503 fail-closed, 非静默 fallback",
+      "ok": true,
+      "detail": "status=503 body={\"ok\":false,\"error\":\"转账暂不可用 (CUSTODIAL_RELAY_ID 未配)\"}"
+    },
+    {
+      "label": "③精确命中\"CUSTODIAL_RELAY_ID 未配\"文案(不含 FAUCET_RELAY_ID, 证明 fallback 措辞也删了)",
+      "ok": true,
+      "detail": "转账暂不可用 (CUSTODIAL_RELAY_ID 未配)"
+    }
+  ]
+}

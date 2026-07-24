@@ -1,0 +1,63 @@
+{
+  "_doc": "M0c-1 Path B pilot — Codex MSG-124 五条MUST-FIX整改 package manifest。不可变绑定: reviewed_package_commit + 全4份evidence(各自sha256+source_commit) + harness blobs + load-bearing blobs。Codex真相校正option2(一份manifest绑全artifact+harness)。",
+  "reviewed_package_commit": "d439a504e00ac94d691abb39b4117c6c0e007cf0",
+  "must_fix_commits": {
+    "E_tg_wallet_isolation": "fea2f4b7",
+    "E_durability": "1aa2dbfd",
+    "ABCD_truth_correction": "f8609908",
+    "C_runbook": "32b9c536",
+    "E_test_selfdescribe": "d439a504"
+  },
+  "evidence": [
+    {
+      "file": "docs/evidence/2026-07-24-m0c1-g4-pilot-custodial-e2e-v0.7-evidence.json",
+      "sha256": "c86e2d397c8e677757160b37e56dd7f6c717ed87ca9af5dbb2eef12fe3cf2726",
+      "source_commit": "d439a504e00ac94d691abb39b4117c6c0e007cf0",
+      "pass": 27,
+      "fail": 0
+    },
+    {
+      "file": "docs/evidence/2026-07-24-m0c1-provision-payee-regression-v2-evidence.json",
+      "sha256": "8f019dae6dcd07c98caf864c05889f753a568fa41384117189ada7f62f8c5d16",
+      "source_commit": "d439a504e00ac94d691abb39b4117c6c0e007cf0",
+      "pass": 13,
+      "fail": 0
+    },
+    {
+      "file": "docs/evidence/2026-07-24-m0c1-pilot-custodial-insert-regression-v2-evidence.json",
+      "sha256": "b068b51542b743ea24d730933f6cb284f7efb59bca66eb8ad85a7144e5474b83",
+      "source_commit": "d439a504e00ac94d691abb39b4117c6c0e007cf0",
+      "pass": 33,
+      "fail": 0
+    },
+    {
+      "file": "docs/evidence/2026-07-24-m0c1-tg-wallet-pilot-isolation-regression-evidence.json",
+      "sha256": "d915a9211ee6905232eb6ceea7d8cd92683e10b98a027cb73d82ed45cc8f9d24",
+      "source_commit": "d439a504e00ac94d691abb39b4117c6c0e007cf0",
+      "pass": 8,
+      "fail": 0
+    }
+  ],
+  "harness_blobs": {
+    "g4": "032de2a6ae3098497b9872c63c2db21f735594c2",
+    "provision_regression": "4e13dc06b73e7ad5c38c8560407c080b6168fdc5",
+    "custodial_insert_regression": "224555e21dcf889e8eed443d881db74e99d82738",
+    "tg_wallet_isolation_regression": "d5806af52829d3c2589dd79cb275010eddb3db2c"
+  },
+  "load_bearing_blobs": {
+    "capability": "f3dc92a60215617544f65828174dc01e968378eb",
+    "tg_wallet": "f4b6022b550af16081effa6ad4b446936e5eebe7",
+    "app_envelope": "a35a8c97f4f5edf8fd7fcd0796e70ded03a98d63",
+    "authorize": "40f6f2485890813abc2b0bc324b24c0358475aac",
+    "relay": "aa6fb71f023eba59fd751c451ad00641781fb3ba",
+    "grant_provision": "cf17d8fb8cfe423299f031c11ca845e285e8ed9b",
+    "pilot_custodial_insert": "32eaf28b5f53e369ec5d2dea959ba64c7d97a144",
+    "pilot_candidate_generate": "d0fd02d12eeeb0a6ab9f6a39884c6f478bee877c",
+    "crypto": "c79f82bf555d6b688cdda04b8f5c9700623c0152",
+    "wallet": "e1c75187556a048c68f4a6a65318bd2408a4bf13",
+    "m0a_lib": "e1bfad6e2e8f0f144bbf514faee1a8530861fb75",
+    "m0a_manifest": "e49b81b79e53b0167af0996801ee9b80d82b7c26",
+    "runbook": "a616cdf4a265efc35986342e9a4b12436032fd95",
+    "receipt": "3725adeafc8e87ca23984b869720b0dc71dfd65e"
+  }
+}
