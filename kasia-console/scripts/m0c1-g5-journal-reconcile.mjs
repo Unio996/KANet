@@ -17,6 +17,18 @@
 //        spent → 'reconciled_spent_no_txid'（仍计入预算）; not-spent → 'failed'（不计入预算,
 //        释放这条对 gate⑦ 的阻塞）。
 //
+// 🔴 B5 加固(2026-07-25, Codex RESPONSE-20260725-G5-V2-COMMITTED-PARTIAL-CODEX-REVIEW B5,
+// team 三方审 GREEN): 原版 --note 只是自由文本, 没有绑定任何可验证证据、没有记录谁批准、没有
+// 复核——一次判断失误或被攻陷的 operator 就能凭空释放预算(not-spent 分支)。改成:
+//   - 两种 verdict 都必须 --evidence-file <可读文件>(判定依据的证据, digest 记入 journal 可
+//     审计, 文件本身不内嵌保持 journal 体积小)。
+//   - not-spent(释放预算, 风险最高)必须 --approver-1/--approver-2 两个不同的已知身份(白名单
+//     ALLOWED_APPROVER_NAMES, 硬拒同一人填两遍/拒绝白名单外的姓名)。
+//   - spent(不释放预算, 只是把 ambiguous 归档成"确认真花了")保持单人, 但也要 --approver-1
+//     在白名单内(判定人身份留痕)。
+//   - 诚实局限: 这不是密码学意义上的双人授权(没有签名, approver 姓名是白名单内的自由声明字段),
+//     是本地单机 CLI 工具能做到的最大化审计留痕, 不包装成比实际更强的机制。
+//
 // 用法:
 //   列出所有未 reconcile 记录:
 //     node m0c1-g5-journal-reconcile.mjs list
@@ -25,12 +37,23 @@
 //   呈证据(无 txId 记录, 只读不改):
 //     node m0c1-g5-journal-reconcile.mjs evidence <journal_id>
 //   写入人工判定(无 txId 记录, 唯一改状态的入口):
-//     node m0c1-g5-journal-reconcile.mjs resolve <journal_id> --verdict spent|not-spent --note "<人工判定依据摘要>"
+//     node m0c1-g5-journal-reconcile.mjs resolve <journal_id> --verdict spent \
+//       --evidence-file <path> --approver-1 <name> [--approver-1-note "<text>"]
+//     node m0c1-g5-journal-reconcile.mjs resolve <journal_id> --verdict not-spent \
+//       --evidence-file <path> \
+//       --approver-1 <name> [--approver-1-note "<text>"] \
+//       --approver-2 <name> [--approver-2-note "<text>"]   # 必须跟 approver-1 不同
 
-import { readFileSync, writeFileSync, renameSync, readdirSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, renameSync, readdirSync, existsSync, unlinkSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { getRepoRoot } from '../src/lib/repo-root.mjs';
+
+// B5: not-spent 释放预算风险最高, 双人复核的姓名字段收窄到已知身份白名单(NWT 2026-07-25 提:
+// 纯字符串比对 approver1 !== approver2 挡不住大小写/空格/昵称变体绕过, 白名单同时解决"防同一人
+// 填两遍"和"防打错字/写假名"两个问题)。
+const ALLOWED_APPROVER_NAMES = new Set(['Bettor', 'NWT', 'KANet-UI', 'Owner']);
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 // 🔴 这类"每个文件硬编码往上跳几层"的 bug 这轮连撞两次(health.js/本文件), 改用 getRepoRoot()
@@ -41,27 +64,51 @@ const NETWORK = 'testnet-12';
 const JOURNAL_DIR = path.join(ROOT, 'scratch/g5-journal');
 const UNRECONCILED_STATES = ['prepared', 'submitted', 'ambiguous'];
 
-function loadJournal(journalId) {
-  const full = path.join(JOURNAL_DIR, `${journalId}.json`);
-  if (!existsSync(full)) { console.error(`journal 不存在: ${full}`); process.exit(1); }
-  return { full, entry: JSON.parse(readFileSync(full, 'utf8')) };
+// B4(2026-07-25): tmp 孤儿(G5 fsync 已落盘但 crash 打断了 rename, 见
+// g5-pilot-custodial-real-chain-smoke.mjs journalWriteAtomic 头部注释)按 id 定位——文件名
+// 还没转正成 `<id>.json`, 只能扫描匹配 `.tmp-<id>-*` 前缀。
+function findJournalFile(journalId) {
+  const canonical = path.join(JOURNAL_DIR, `${journalId}.json`);
+  if (existsSync(canonical)) return { full: canonical, isOrphan: false };
+  if (existsSync(JOURNAL_DIR)) {
+    const prefix = `.tmp-${journalId}-`;
+    const orphan = readdirSync(JOURNAL_DIR).find((f) => f.startsWith(prefix));
+    if (orphan) return { full: path.join(JOURNAL_DIR, orphan), isOrphan: true };
+  }
+  return null;
 }
 
-function writeJournalAtomic(full, entry) {
-  const tmp = full + `.tmp-${Date.now()}`;
+function loadJournal(journalId) {
+  const found = findJournalFile(journalId);
+  if (!found) { console.error(`journal 不存在(既非 <id>.json 也非 tmp 孤儿文件): ${journalId}`); process.exit(1); }
+  return { full: found.full, isOrphan: found.isOrphan, entry: JSON.parse(readFileSync(found.full, 'utf8')) };
+}
+
+// 终态写入永远落到规范 `<id>.json` 名——若源是 tmp 孤儿, 顺带补完那次被 crash 打断的 rename
+// (旧孤儿文件随后删掉, 不留两份)。
+function writeJournalAtomic(srcFull, entry, isOrphan) {
+  const canonical = path.join(JOURNAL_DIR, `${entry.id}.json`);
+  const tmp = canonical + `.tmp-${Date.now()}`;
   writeFileSync(tmp, JSON.stringify(entry, null, 2));
-  renameSync(tmp, full);
+  renameSync(tmp, canonical);
+  if (isOrphan && srcFull !== canonical) {
+    try { unlinkSync(srcFull); }
+    catch (e) { console.error(`[reconcile] 警告: 旧 tmp 孤儿文件清理失败(不影响本次 resolve 已经成功, 但会留两份, 建议人工清理): ${srcFull} — ${e.message}`); }
+  }
 }
 
 function listUnreconciled() {
   if (!existsSync(JOURNAL_DIR)) { console.log('(无 journal 目录, 无记录)'); return; }
+  // B4(2026-07-25): tmp 孤儿(crash 打断了 rename)一并列出, 不能让它们对 list 隐身——否则
+  // operator 永远不知道有条记录卡着, gate⑦ 却会拦(见 sumSpentKasAndFindAmbiguous 同款逻辑)。
   const rows = readdirSync(JOURNAL_DIR)
-    .filter((f) => f.endsWith('.json') && !f.startsWith('.tmp-'))
-    .map((f) => ({ file: f, entry: JSON.parse(readFileSync(path.join(JOURNAL_DIR, f), 'utf8')) }))
+    .filter((f) => (f.endsWith('.json') && !f.startsWith('.tmp-')) || f.startsWith('.tmp-'))
+    .map((f) => ({ file: f, isOrphan: f.startsWith('.tmp-'), entry: JSON.parse(readFileSync(path.join(JOURNAL_DIR, f), 'utf8')) }))
     .filter((r) => UNRECONCILED_STATES.includes(r.entry.state));
   if (rows.length === 0) { console.log('无未 reconcile 记录。'); return; }
   for (const r of rows) {
-    console.log(`${r.entry.id}  state=${r.entry.state}  amount=${r.entry.amount_kas}KAS  txId=${r.entry.txId || '(无)'}  created_at=${r.entry.created_at}`);
+    const tag = r.isOrphan ? '(tmp 孤儿, rename 未完成)' : '';
+    console.log(`${r.entry.id}  state=${r.entry.state}${tag}  amount=${r.entry.amount_kas}KAS  txId=${r.entry.txId || '(无)'}  created_at=${r.entry.created_at}`);
   }
 }
 
@@ -79,13 +126,13 @@ async function withRpc(fn) {
 
 // ── ①有 txId: 全自动 checkUtxoLanded ──
 async function autoCheck(journalId) {
-  const { full, entry } = loadJournal(journalId);
+  const { full, isOrphan, entry } = loadJournal(journalId);
   if (!UNRECONCILED_STATES.includes(entry.state)) { console.log(`journal ${journalId} 已是终态(${entry.state}), 无需 reconcile。`); return; }
   if (!entry.txId) { console.log(`journal ${journalId} 无 txId, 走 'evidence'+'resolve' 流程, 不是 'check'。`); return; }
   const { checkUtxoLanded } = await import(pathToFileURL(path.join(ROOT, 'kasia-relay/src/lib/p2sh.mjs')).href);
   const r = await checkUtxoLanded(entry.payee_address, entry.txId, NETWORK, 20);
   if (r.landed) {
-    writeJournalAtomic(full, { ...entry, state: 'landed', landed_depth: r.depth, reconciled_at: new Date().toISOString() });
+    writeJournalAtomic(full, { ...entry, state: 'landed', landed_depth: r.depth, reconciled_at: new Date().toISOString() }, isOrphan);
     console.log(`journal ${journalId} → landed(depth=${r.depth})。已释放对 gate⑦ 的阻塞。`);
   } else {
     console.log(`journal ${journalId} txId=${entry.txId} 仍未确认落地(depth=${r.depth ?? '未知'}), 保持 ambiguous, 不下结论, 稍后重跑本命令再查。`);
@@ -123,16 +170,43 @@ async function showEvidence(journalId) {
   console.log(`\n判定后请跑: node m0c1-g5-journal-reconcile.mjs resolve ${journalId} --verdict spent|not-spent --note "<依据摘要>"\n`);
 }
 
-// ── 写入人工判定(唯一改无 txId 记录状态的入口) ──
-function resolve(journalId, verdict, note) {
+// ── 写入人工判定(唯一改无 txId 记录状态的入口) ── B5: evidence-file + approver 白名单加固
+function resolve(journalId, verdict, opts) {
   if (!['spent', 'not-spent'].includes(verdict)) { console.error(`--verdict 必须是 spent 或 not-spent, 收到: ${verdict}`); process.exit(1); }
-  if (!note || !note.trim()) { console.error(`--note 必传(判定依据摘要, 留痕可审计)`); process.exit(1); }
-  const { full, entry } = loadJournal(journalId);
+
+  const { evidenceFile, approver1, approver1Note, approver2, approver2Note } = opts;
+  if (!evidenceFile || !existsSync(evidenceFile)) { console.error(`--evidence-file 必传且必须是可读文件(判定依据的证据, digest 记入 journal 可审计)`); process.exit(1); }
+  const evidenceDigest = createHash('sha256').update(readFileSync(evidenceFile)).digest('hex');
+
+  let approvers;
+  if (verdict === 'not-spent') {
+    // 释放预算, 风险最高——双人复核, 姓名必须在白名单内且互不相同
+    if (!approver1 || !approver2) { console.error(`not-spent 判定必须提供 --approver-1 和 --approver-2 两个不同的批准人(释放预算需双人复核)`); process.exit(1); }
+    if (!ALLOWED_APPROVER_NAMES.has(approver1) || !ALLOWED_APPROVER_NAMES.has(approver2)) {
+      console.error(`--approver-1/--approver-2 必须是已知身份之一(${[...ALLOWED_APPROVER_NAMES].join('/')}), 收到: ${approver1} / ${approver2}`); process.exit(1);
+    }
+    if (approver1 === approver2) { console.error(`--approver-1 和 --approver-2 不能是同一人(双人复核要求两个独立视角)`); process.exit(1); }
+    approvers = [
+      { name: approver1, note: approver1Note || '', at: new Date().toISOString() },
+      { name: approver2, note: approver2Note || '', at: new Date().toISOString() },
+    ];
+  } else {
+    // spent: 不释放预算, 风险低——单人, 但身份仍须在白名单内(判定人留痕)
+    if (!approver1) { console.error(`spent 判定必须提供 --approver-1(判定人身份留痕)`); process.exit(1); }
+    if (!ALLOWED_APPROVER_NAMES.has(approver1)) { console.error(`--approver-1 必须是已知身份之一(${[...ALLOWED_APPROVER_NAMES].join('/')}), 收到: ${approver1}`); process.exit(1); }
+    approvers = [{ name: approver1, note: approver1Note || '', at: new Date().toISOString() }];
+  }
+
+  const { full, isOrphan, entry } = loadJournal(journalId);
   if (entry.txId) { console.error(`journal ${journalId} 有 txId, 应该用 'check'(全自动), 不该走人工 'resolve'。`); process.exit(1); }
   if (!UNRECONCILED_STATES.includes(entry.state)) { console.log(`journal ${journalId} 已是终态(${entry.state}), 无需 resolve。`); return; }
   const newState = verdict === 'spent' ? 'reconciled_spent_no_txid' : 'failed';
-  writeJournalAtomic(full, { ...entry, state: newState, reconciled_at: new Date().toISOString(), reconciled_verdict: verdict, reconciled_note: note });
-  console.log(`journal ${journalId} → ${newState}(人工判定: ${verdict}, 依据: ${note})。已释放对 gate⑦ 的阻塞。`);
+  writeJournalAtomic(full, {
+    ...entry, state: newState, reconciled_at: new Date().toISOString(), reconciled_verdict: verdict,
+    reconciled_evidence: { evidence_file: evidenceFile, evidence_digest: evidenceDigest },
+    reconciled_approvers: approvers,
+  }, isOrphan);
+  console.log(`journal ${journalId} → ${newState}(判定: ${verdict}, 批准人: ${approvers.map((a) => a.name).join('+')}, 证据digest: ${evidenceDigest.slice(0, 16)}...)。已释放对 gate⑦ 的阻塞。`);
 }
 
 async function main() {
@@ -144,8 +218,16 @@ async function main() {
   if (cmd === 'list') { listUnreconciled(); return; }
   if (cmd === 'check') { if (!arg2) { console.error('用法: check <journal_id>'); process.exit(1); } await autoCheck(arg2); return; }
   if (cmd === 'evidence') { if (!arg2) { console.error('用法: evidence <journal_id>'); process.exit(1); } await showEvidence(arg2); return; }
-  if (cmd === 'resolve') { if (!arg2) { console.error('用法: resolve <journal_id> --verdict spent|not-spent --note "..."'); process.exit(1); } resolve(arg2, flags.verdict, flags.note); return; }
-  console.error('用法: list | check <id> | evidence <id> | resolve <id> --verdict spent|not-spent --note "..."');
+  if (cmd === 'resolve') {
+    if (!arg2) { console.error('用法: resolve <journal_id> --verdict spent|not-spent --evidence-file <path> --approver-1 <name> [--approver-2 <name>]'); process.exit(1); }
+    resolve(arg2, flags.verdict, {
+      evidenceFile: flags['evidence-file'],
+      approver1: flags['approver-1'], approver1Note: flags['approver-1-note'],
+      approver2: flags['approver-2'], approver2Note: flags['approver-2-note'],
+    });
+    return;
+  }
+  console.error('用法: list | check <id> | evidence <id> | resolve <id> --verdict spent|not-spent --evidence-file <path> --approver-1 <name> [--approver-2 <name>]');
   process.exit(1);
 }
 

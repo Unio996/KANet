@@ -59,6 +59,26 @@ secret 从 G5 自己的环境变量读（跟 `KASPA_RPC_URL` 同款调用惯例�
 **负测试**（并入 regression 套件）：非 loopback IP → 403；loopback 但缺/错 secret → 403/503；
 两者都对 → 200 且内容不变。
 
+**落码后追加（2026-07-25 NWT review 抓到的机制性弱点，team 定案）**：fastify 实例带
+`trustProxy:'127.0.0.1'`，直连对端是 127.0.0.1 时 `request.ip` 会改读 `X-Forwarded-For` 头
+——单查 `request.ip` 不是 TCP 层意义上的"server-enforced loopback"。当前无实际敞口（KANet-UI
+实测：Console 只绑 `127.0.0.1` 非 `0.0.0.0`，且这台机器上没有任何 HTTP 反向代理在跑），但
+这是环境假设而非结构性保证。裁定：`runtime-identity` 端点（本轮新增，唯一消费方是本机跑的
+G5，零向后兼容负担）**同时核 `request.ip` 和 `request.socket.remoteAddress`**（TCP 层真对端，
+不受 XFF 影响），两者都必须在 allowlist 内才放行，成本≈零。`operator-settle.js:44`/
+`tg-wallet diagnose:117` 这两个既有同族端点**不动**（有真实调用方 + 反代场景潜在向后兼容
+负担，改要单独立项）。
+
+**追加待办（带触发条件，非无限期搁置，KANet-UI 精确化为两部分）**：
+1. 给 `operator-settle.js`/`tg-wallet diagnose` 这族既有 admin 端点也加
+   `request.socket.remoteAddress` 双核（跟 runtime-identity 一样的一行改法）。
+2. 给 `HOST` 配置加一道约束或启动告警（`HOST` 被设成非 loopback 值时对这族端点 LOUD 警告或
+   直接拒绝启动）——**触发条件本身是配置变化，光改①不够，因为当前"仅查 request.ip 不够严"
+   这件事之所以现在不可利用，根源是 Console 绑定 loopback + 无反代这两个环境事实，②这条才是
+   真正锁住触发条件的那一环**。
+2 个触发条件（任一发生即必须处理）：① `HOST` 环境变量被设成 `0.0.0.0`（代码默认值可被覆盖）
+② 前面架起反向代理。
+
 ---
 
 ## B2 — 启动冻结逐文件 digest manifest（取代/降级现有 git diff 等价判定）

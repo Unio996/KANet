@@ -58,11 +58,12 @@
 //   --db 已移除（P0-1, 不再是可设参数——db 路径永远来自 runtime-identity 端点的权威读数）。
 
 import { execFileSync } from 'node:child_process';
-import { readFileSync, writeFileSync, renameSync, mkdirSync, existsSync, readdirSync, unlinkSync, openSync, closeSync, writeSync, lstatSync, statSync } from 'node:fs';
+import { readFileSync, writeFileSync, renameSync, mkdirSync, existsSync, readdirSync, unlinkSync, openSync, closeSync, writeSync, fsyncSync, lstatSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { getRepoRoot } from '../../../src/lib/repo-root.mjs';
+import { RUNTIME_SCOPE_DIRS } from '../../../src/lib/runtime-scope-dirs.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 // 🔴 改用 getRepoRoot() 共享 helper(向上 walk 找 .git 目录), 不再硬编码'../../../..'层数——
@@ -83,7 +84,8 @@ const JOURNAL_DIR = path.join(ROOT, 'scratch/g5-journal'); // P0-5, 清理用独
 // P0-2 runtime-equivalence 范围(KANet-UI/NWT/Bettor 三方对齐 #zkip4w): package.json/
 // package-lock.json 纳入(依赖改动确实影响 runtime, 加进去成本≈免费)。node_modules 太大且
 // gitignore, 不纳入范围, 是已知局限如实标注(非隐藏)。
-const RUNTIME_SCOPE_DIRS = ['kasia-console/src', 'kasia-relay/src', 'package.json', 'package-lock.json'];
+// B2(2026-07-25): 抽到共享 lib, health.js 算 load-bearing digest 用同一份定义, 不各自维护
+// (见 runtime-scope-dirs.mjs 头部注释——抽取时顺带修了裸 'package.json' 路径不存在的 bug)。
 
 function parseArgs(argv) {
   const out = { confirm: false };
@@ -133,13 +135,30 @@ function acquireLock() {
 }
 function releaseLock() { try { unlinkSync(LOCK_PATH); } catch {} }
 
-// ── P0-5: atomic journal ──
+// ── P0-5 + B4(2026-07-25): atomic journal, 文件级 fsync ──
+// Codex RESPONSE-20260725-G5-V2-COMMITTED-PARTIAL-CODEX-REVIEW B4: writeFileSync+renameSync
+// 给 atomic 可见性但没 fsync, OS crash/断电时文件系统层可能还没把这次写入落盘。加文件级
+// fsync(FlushFileBuffers, 已在这台生产机器上实测有效, 见 B4 设计文档)+ rename + best-effort
+// 目录 fsync(Windows/NTFS 上 100% 抛 EPERM, 已实测坐实, 不是设计依赖的保护层, 见下方
+// try/catch)。真正的 durability 保证靠 sumSpentKasAndFindAmbiguous() 扫描 tmp 孤儿文件
+// (crash 发生在 fsync 完成之后、rename 完成之前, 内容已经真实落盘只是文件名还没转正)。
 function journalWriteAtomic(entry) {
   mkdirSync(JOURNAL_DIR, { recursive: true });
   const tmp = path.join(JOURNAL_DIR, `.tmp-${entry.id}-${Date.now()}`);
   const dest = path.join(JOURNAL_DIR, `${entry.id}.json`);
-  writeFileSync(tmp, JSON.stringify(entry, null, 2));
+  const fd = openSync(tmp, 'w');
+  writeSync(fd, JSON.stringify(entry, null, 2));
+  fsyncSync(fd); // 数据落盘, 这层是真实 durability 保证的来源
+  closeSync(fd);
   renameSync(tmp, dest); // 原子: 同文件系统内 rename 是 atomic 操作
+  try {
+    const dirFd = openSync(JOURNAL_DIR, 'r');
+    fsyncSync(dirFd);
+    closeSync(dirFd);
+  } catch (e) {
+    // Windows/NTFS 上目录 fd fsync 不通(已实测), best-effort, 不影响上面文件级 fsync 已经
+    // 提供的真实保证。
+  }
   return dest;
 }
 // 扫全部 journal, prepared/submitted/ambiguous/landed 全部计入累计(一笔钱一旦 submitted 就已经
@@ -162,11 +181,22 @@ function sumSpentKasAndFindAmbiguous() {
   let spentKas = 0;
   const ambiguous = [];
   for (const f of readdirSync(JOURNAL_DIR)) {
-    if (!f.endsWith('.json') || f.startsWith('.tmp-')) continue;
+    const isFinalName = f.endsWith('.json') && !f.startsWith('.tmp-');
+    // B4(2026-07-25): tmp 孤儿(fsync 已落盘但 crash 打断了 rename 那步, 见 journalWriteAtomic
+    // 头部注释)不能静默漏计——它就是一条 prepared 记录, 只是文件名还没转正。这个扫描发生在
+    // gate⑥(锁)拿到锁之后, 同一时刻不可能有另一个 G5 实例正在写 tmp(锁互斥), 所以扫到的
+    // tmp-* 一定是历史遗留孤儿, 不是别的进程正在写的半成品。
+    const isOrphanTmp = f.startsWith('.tmp-');
+    if (!isFinalName && !isOrphanTmp) continue;
     const full = path.join(JOURNAL_DIR, f);
     let entry;
     try { entry = JSON.parse(readFileSync(full, 'utf8')); }
     catch (e) { fail(`gate⑧ FAIL — journal 文件损坏无法解析: ${full} (${e.message})。不能静默跳过预算记账, 需人工排查这条记录到底代表什么状态后再继续`); }
+    if (isOrphanTmp) {
+      spentKas += Number(entry.amount_kas || 0);
+      ambiguous.push({ file: full, txId: entry.txId || null, state: `${entry.state}(tmp 孤儿, rename 未完成, 需 reconcile 收尾转正)`, entry });
+      continue;
+    }
     if (!['prepared', 'submitted', 'ambiguous', 'landed', 'failed', 'reconciled_spent_no_txid'].includes(entry.state)) {
       fail(`gate⑧ FAIL — journal ${full} state 字段非法: ${entry.state}`);
     }
@@ -214,7 +244,13 @@ async function verifyRuntimeIdentity(snap) {
   if (!['127.0.0.1', 'localhost'].includes(url.hostname)) {
     fail(`gate③ FAIL — G5_CONSOLE_BASE_URL host(${url.hostname}) 非 loopback, 拒绝(防止指向冒充身份的假服务器)`);
   }
-  const res = await fetch(`${CONSOLE_BASE_URL}/api/system/runtime-identity`, { signal: AbortSignal.timeout(8000) });
+  // B1(2026-07-25): 端点服务端加了 IP allowlist + admin-secret tier, G5 侧要带 header
+  // (secret 从 G5 自己的环境变量读, 跟 KASPA_RPC_URL 同款调用惯例; 未设=空字符串=端点 403/503
+  // fail-closed, 符合"未设=拒绝"既有铁律, 不需要 G5 侧另外判空)。
+  const res = await fetch(`${CONSOLE_BASE_URL}/api/system/runtime-identity`, {
+    headers: { 'x-kanet-admin-secret': process.env.ADMIN_SECRET_RUNTIME_IDENTITY || '' },
+    signal: AbortSignal.timeout(8000),
+  });
   if (!res.ok) fail(`gate③ FAIL — runtime-identity 端点 HTTP ${res.status}`);
   const ri = await res.json();
   // ① 进程自证: git_commit/db_stat 为 null(端点自己 best-effort 失败)必须当身份证明失败直接
@@ -222,15 +258,22 @@ async function verifyRuntimeIdentity(snap) {
   if (!ri.git_commit) fail('gate③ FAIL — runtime-identity 返回 git_commit=null(端点自己 git rev-parse 失败), 视为身份证明失败');
   if (!ri.db_stat) fail('gate③ FAIL — runtime-identity 返回 db_stat=null(端点自己 statSync 失败), 视为身份证明失败');
 
-  // ② 磁盘 runtime-equivalence: commit 逐字相等 或 RUNTIME_SCOPE_DIRS 范围内 diff 为空。
-  let diffOutput = '';
-  if (ri.git_commit !== snap.package_commit) {
-    try {
-      diffOutput = execFileSync('git', ['diff', '--stat', snap.package_commit, ri.git_commit, '--', ...RUNTIME_SCOPE_DIRS], { cwd: ROOT, encoding: 'utf8' });
-    } catch (e) { fail(`gate③ FAIL — git diff 比对 ${snap.package_commit}..${ri.git_commit} 失败: ${e.message}`); }
-    if (diffOutput.trim() !== '') {
-      fail(`gate③ FAIL — runtime 进程 commit(${ri.git_commit}) != accepted package(${snap.package_commit}), 且 RUNTIME_SCOPE_DIRS 范围内有真实差异(非等价):\n${diffOutput}`);
+  // ② B2(2026-07-25, Codex B2 要求): 磁盘 runtime-equivalence 判定改成逐字节比对启动时冻结的
+  // load-bearing tree digest, 取代仅靠 git diff 空判定等价——git diff 只证磁盘当前状态跟 git
+  // 历史比较, 证不了进程实际加载的字节(脏树启动后又被 revert 干净/generated 文件等情形 git
+  // diff 看不出)。git diff 降级为比对失败时的排障辅助输出, 不再是判定权威。
+  if (!ri.load_bearing_digest) fail('gate③ FAIL — runtime-identity 未返回 load_bearing_digest(端点自己计算失败), 视为身份证明失败');
+  if (ri.load_bearing_digest.dirty) fail('gate③ FAIL — runtime-identity 报告 load_bearing_digest.dirty=true(进程启动那刻 RUNTIME_SCOPE_DIRS 范围内有未 commit 改动), 不可比对, 拒绝');
+  if (!snap.expected_load_bearing_tree_digest) fail('gate③ FAIL — snapshot 未声明 expected_load_bearing_tree_digest, 无法比对(必须由 Owner/委派人在 re-activation 时算好写入 snapshot)');
+  if (ri.load_bearing_digest.treeDigest !== snap.expected_load_bearing_tree_digest) {
+    let diffOutput = '(commit 相同或未尝试排障)';
+    if (ri.git_commit !== snap.package_commit) {
+      try {
+        diffOutput = execFileSync('git', ['diff', '--stat', snap.package_commit, ri.git_commit, '--', ...RUNTIME_SCOPE_DIRS], { cwd: ROOT, encoding: 'utf8' })
+          || '(git diff 为空——差异来自 untracked/generated 文件, 这正是 B2 要补的盲区, digest 判定权威、git diff 只是排障辅助)';
+      } catch (e) { diffOutput = `(git diff 排障辅助本身失败: ${e.message})`; }
     }
+    fail(`gate③ FAIL — runtime load_bearing_digest.treeDigest(${ri.load_bearing_digest.treeDigest}) != snapshot 声明的 expected_load_bearing_tree_digest(${snap.expected_load_bearing_tree_digest})。排障辅助(git diff, 非判定依据): commit ${ri.git_commit} vs accepted package ${snap.package_commit}:\n${diffOutput}`);
   }
 
   // ③ db_path/db_stat 逐字段比对快照声明值。
@@ -238,7 +281,7 @@ async function verifyRuntimeIdentity(snap) {
   if (ri.db_stat.dev !== snap.db_stat?.dev || ri.db_stat.ino !== snap.db_stat?.ino) {
     fail(`gate③ FAIL — runtime db_stat(${JSON.stringify(ri.db_stat)}) != 快照声明(${JSON.stringify(snap.db_stat)})`);
   }
-  console.log(`[G5] gate③ PASS — runtime identity 双层证据全过(commit=${ri.git_commit}${diffOutput === '' && ri.git_commit !== snap.package_commit ? ' [runtime-equivalent to ' + snap.package_commit + ']' : ''}, db_path/db_stat 匹配)`);
+  console.log(`[G5] gate③ PASS — runtime identity 双层证据全过(commit=${ri.git_commit}, load_bearing_digest 逐字节匹配, db_path/db_stat 匹配)`);
   return ri;
 }
 
