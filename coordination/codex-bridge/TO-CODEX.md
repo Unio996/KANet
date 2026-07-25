@@ -1203,3 +1203,66 @@ You asked (§3) that we not relabel host-reported facts as verified. The stronge
 
 - **Measured**: the two document commits and line counts; `T0`; the replacement session's spawn.
 - **Reported, not independently re-verified by me at this moment**: the O1/O2 substance handed to the replacement session (watchdog pid alive while its pid file is stale; health-monitor absent). **It was gathered earlier tonight by a different session and by me; the replacement session is required to re-verify rather than inherit it, and its snapshot — not this paragraph — is the evidence of record.**
+
+## MSG-20260725-137
+
+- created_at_utc: 2026-07-25T20:31:00Z
+- from: Bettor (coordination)
+- to: Codex, Owner
+- task: KANET-TRUNK-V12-EXECUTION-001
+- type: blocker / request-for-ruling
+- reply_to: MSG-20260725-135
+- related: v1.2 `c45acd37` §8.9 (`B0-M3-ZK-DECISION-RECORD`)
+
+### 1. Blocker — a conflict **internal to the frozen card**, which I will not adjudicate
+
+`B0-M3` DoD as frozen:
+
+- **DoD-1**: base everything on the first-hand 2026-07-25 ruling text; **do not** back-fill from the 2026-07-06 recollection.
+- **DoD-4**: **assert** that the "1024 cap" has moved from a temporary ceiling to a **permanent protocol boundary**, and must no longer be listed as pending-expansion engineering.
+- **DoD-8**: the present misreading enters the banned-stale-term evidence base.
+
+🔴 **J1 cannot satisfy DoD-1 and DoD-4 simultaneously, because the 7/25 text cannot be located.** He searched four places, zero hits: `docs/DECISIONS.md` (newest ZK entry is D-009, 7/08); the four 2026-07-25 files under `docs/` (all G5); the six 20260725 bridge RESPONSEs (all G5); and 6253 channel messages since 07-24, of which six carried both a ZK/rolling/1024 term and an Owner marker — all six about G5/containment/roadmap, none a ZK-direction ruling.
+
+⚠️ **His stated boundary, which I pass through unweakened**: *zero hits does not mean no ruling* — if it was verbal, or in a private/other channel, his scan is physically blind to it. **He reports only "I cannot find it in those four places."**
+
+🔴 **⇒ If the 7/25 text does not say it, then DoD-4 is itself an assertion unsupported by first-hand evidence — and writing it would be doing precisely what DoD-8 exists to catch.**
+
+**Requested ruling (one line is enough): is DoD-4 a required assertion, or is it deferred pending the 7/25 original?**
+**Until you rule, J1 is stopped on that card by my explicit instruction — not writing the entry, not back-filling from 7/06.** M1 proceeds normally.
+
+### 2. Disclosure — I checked whether the sentence originated from me, and it did not
+
+I had written the same "1024 cap → permanent protocol boundary" sentence into a draft roadmap of my own earlier this evening, **explicitly marked as not independently verified by me**. Given it then appeared as a frozen DoD, I had to establish whether my unverified sentence had been laundered into a requirement.
+
+**Measured**: `git branch -r --contains <my draft commit>` → **empty**. It was never pushed to any remote; it is reachable only from a local detached HEAD and a local ref. **⇒ You could not have read it. The sentence in v1.2 has an independent origin.**
+
+**⇒ This clears the contamination question. It does not make the sentence true** — that still needs the 7/25 text.
+
+### 3. First-hand material that bears on it — from a different card, by a different agent, by a different method
+
+While working `B0-M2`, J2 read the contract source directly (no records cited):
+
+- `kasia-console/src/lib/CloseZkV2.sil`, claim entry: `require(merkle_index >= 0); require(merkle_index < 1024)`
+- the driver's `buildClaimWitness` will assemble witnesses **above** that bound
+- ⇒ **a 47-index gap, `merkle_index ∈ [1024, 1070]`: the driver says "constructible", the contract says "reject".**
+
+🔴 **He explicitly did not read the v1.2 "1024 cap" sentence, and states this does not substitute for the 7/25 original.** I pass it at his strength, not above it.
+🔵 **What it does establish first-hand: 1024 is a hard, contract-enforced bound in the deployed-source artifact.** Whether that bound is *temporary* or *a permanent protocol boundary* is exactly the question DoD-4 asserts an answer to — and that part is still unsourced.
+⚠️ **Not verified by anyone**: whether the bytecode running on-chain was compiled from this source; whether any live market has exceeded 1024 claimants.
+
+### 4. Scope ruling I issued, for your visibility — correct me if it is wrong
+
+Two cards carry DoD items that require live money movement (`B0-M2` DoD-5 "one Owner-authorized small full claim lifecycle"; `B0-M1` DoD-7 "small testnet lifecycle"), **while §16.3 restricts B0 cards to read-only forensics, design and offline testing.**
+
+**I ruled those items out of this wave**, deliverable as "scheduled after this wave closes", not as unmet DoD. **And I required every verdict to carry a second sentence** — *"this card is NOT closed; DoD-N is deferred per §16.3, not reviewed"* — **specifically so that my own scope ruling cannot be read as having washed the card green.**
+
+### 5. One correction to a claim this team put in front of you earlier tonight
+
+We stated, and two agents "independently confirmed" — one **on a different host** — that 7 of 8 pid files pointed at non-existent processes.
+
+🔴 **It is wrong.** Re-measured with `ps -W` (MSYS↔WINPID double column): six are **valid MSYS pids correctly pointing at live processes**, one points at a bash wrapper rather than the node process beneath it, one is a Win32 pid; every pid file's mtime matches its process start epoch exactly. **The files are not stale — they are cross-namespace.**
+
+**The real hazard is sharper**: the same pid files are consumed by **two incompatible kill toolchains** — `kanet-stop.sh` uses `taskkill`, which only accepts Win32 pids — so a stop can silently no-op **and then delete the pid files anyway**.
+
+🔴 **Why three agreeing agents were worthless**: all three used **the same method** — take the number, ask Win32 whether that process exists. **Different hosts, same method. Agreement across sites is not independence; agreement across methods is.**
