@@ -23,13 +23,15 @@
 //
 // 跑法(cwd=D:/kanet-tn12): node kasia-console/test-framework/cases/m0c1-gate/g5-real-chain-smoke-regression.mjs
 
-import { existsSync, rmSync, mkdirSync, writeFileSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, rmSync, mkdirSync, writeFileSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { execFileSync, spawn } from 'node:child_process';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { createServer } from 'node:http';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { getRepoRoot } from '../../../src/lib/repo-root.mjs';
+import { computeLoadBearingDigest } from '../../../src/lib/load-bearing-digest.mjs';
+import { RUNTIME_SCOPE_DIRS } from '../../../src/lib/runtime-scope-dirs.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = getRepoRoot(HERE); // 共享 helper, 不再硬编码层数(见 repo-root.mjs 头部背景)
@@ -161,7 +163,15 @@ async function main() {
 
   // ── HEAD(真实仓库 HEAD, 供正确快照+identity 用) ──
   const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim();
-  const goodIdentity = { git_commit: head, db_path: DB, db_stat: { dev: dbStat.dev, ino: dbStat.ino }, pid: 99999, started_at: new Date().toISOString() };
+  // B2(2026-07-25): 用真实 RUNTIME_SCOPE_DIRS 对当前工作树算一次真 digest(非造假值), goodIdentity
+  // 和 snapshot 都从这同一份算出来的值取, 保证"合法输入应该过 gate③"这条真的测到了 B2 逻辑,
+  // 不是绕过它。
+  const { treeDigest: goodTreeDigest, fileCount: goodFileCount } = computeLoadBearingDigest(ROOT, RUNTIME_SCOPE_DIRS);
+  const goodIdentity = {
+    git_commit: head, db_path: DB, db_stat: { dev: dbStat.dev, ino: dbStat.ino },
+    load_bearing_digest: { treeDigest: goodTreeDigest, fileCount: goodFileCount, dirty: false },
+    pid: 99999, started_at: new Date().toISOString(),
+  };
 
   function writeSnapshot(overrides = {}) {
     const snap = {
@@ -169,6 +179,7 @@ async function main() {
       candidate_address: CANDIDATE_ADDR, payee_address: PAYEE_ADDR, network: NETWORK,
       max_amount_sompi: 200000000, valid_until: nowSec + 86400, package_commit: head,
       db_path: DB, db_stat: { dev: dbStat.dev, ino: dbStat.ino },
+      expected_load_bearing_tree_digest: goodTreeDigest,
       source_scope: [CANDIDATE_ADDR], payee_scope: [PAYEE_ADDR], relay_scope: ['test-relay'],
       allowed_commands: ['custodial_transfer'],
       ...overrides,
@@ -178,6 +189,9 @@ async function main() {
   }
 
   const baseArgs = () => ['--snapshot', writeSnapshot(), '--app-priv-key-file', KEY_FILE, '--amount-kas', '0.5'];
+
+  const EVIDENCE_FILE = path.join(ROOT, 'scratch/g5-regression-evidence.txt');
+  writeFileSync(EVIDENCE_FILE, 'regression test synthetic evidence, no real chain interaction');
 
   // ══ ① 锁竞争: 预先占锁, G5 应在 gate⑥ abort, 不清理已存在的锁(非自己拿到的锁不该碰) ══
   cleanState();
@@ -197,6 +211,29 @@ async function main() {
     const r = await runG5(baseArgs());
     check('②坏journal: G5 abort(非0退出)', r.code !== 0, `code=${r.code}`);
     check('②坏journal: 报错提到损坏无法解析', /损坏无法解析/.test(r.stderr), r.stderr.slice(0, 200));
+  }
+
+  // ══ B4(2026-07-25): tmp 孤儿(crash 打断 rename)== 未 reconcile 状态, 不能被漏计/隐身 ══
+  cleanState();
+  {
+    const orphanId = randomUUID();
+    const orphanEntry = { id: orphanId, state: 'prepared', amount_kas: 0.4, grant_id: GRANT_ID, candidate_address: CANDIDATE_ADDR, payee_address: PAYEE_ADDR, created_at: new Date().toISOString(), txId: null, prepared_utxo_snapshot: [] };
+    // 手工模拟 journalWriteAtomic 里 fsync 已完成、rename 未完成那个瞬间(不经过正常 renameSync)
+    writeFileSync(path.join(JOURNAL_DIR, `.tmp-${orphanId}-${Date.now()}`), JSON.stringify(orphanEntry, null, 2));
+
+    const listR = await runReconcile(['list']);
+    check('B4: reconcile list 能看到 tmp 孤儿(不隐身)', listR.stdout.includes(orphanId) && listR.stdout.includes('tmp 孤儿'), listR.stdout.slice(0, 300));
+
+    const r = await runG5(baseArgs());
+    check('B4: G5 gate⑦ 把 tmp 孤儿当未 reconcile 记录拦新 run', r.code !== 0 && /未 reconcile 的 journal 记录/.test(r.stderr), r.stderr.slice(0, 200));
+
+    // resolve 应该能定位 tmp 孤儿(按 id, 非按文件名)并完成迟到的 rename
+    const resolveR = await runReconcile(['resolve', orphanId, '--verdict', 'not-spent', '--evidence-file', EVIDENCE_FILE, '--approver-1', 'NWT', '--approver-2', 'KANet-UI']);
+    check('B4: reconcile resolve 能按 id 定位 tmp 孤儿并 resolve', resolveR.stdout.includes('failed'), resolveR.stdout);
+    const canonicalPath = path.join(JOURNAL_DIR, `${orphanId}.json`);
+    check('B4: resolve 后孤儿的 rename 被补完(规范 <id>.json 文件真的存在)', existsSync(canonicalPath), `expected ${canonicalPath} to exist`);
+    const stillHasTmp = readdirSync(JOURNAL_DIR).some((f) => f.startsWith(`.tmp-${orphanId}-`));
+    check('B4: 旧 tmp 孤儿文件被清理(不留两份)', !stillHasTmp, `tmp file still present`);
   }
 
   // ══ ③ 预算累加(Bettor 点名: sum 真等于各条 amount 之和, 非只测超限) ══
@@ -271,24 +308,53 @@ async function main() {
     check('⑦错DB: db_path 不匹配 → abort', r.code !== 0, `code=${r.code}`);
   }
 
-  // ══ ⑧ 错进程身份: runtime-identity 报的 commit 跟 snapshot 声明的 accepted package 不一致
-  //     且 RUNTIME_SCOPE_DIRS 范围内有真实差异(用仓库里两个真实不同的历史 commit, 非虚构 SHA) ══
+  // ══ ⑧ 错进程身份 / B2 digest 不等价 ══
   cleanState();
   {
-    // 找一个改过 kasia-console/src 的历史 commit 作为"跟 accepted package 不 runtime-equivalent"的例子
+    // B2(2026-07-25): digest 比对是判定权威, git_commit 不同但 digest 相同应该 PASS(真正
+    // runtime-equivalent, 比如 revert-and-recommit 这种 SHA 变了但字节没变的情形)——这条验证
+    // B2 没有比旧的 git-diff 判定更严格到"连真等价都拒"。
     let olderCommit = null;
     try {
       olderCommit = execFileSync('git', ['log', '-1', '--format=%H', '--', 'kasia-console/src'], { cwd: ROOT, encoding: 'utf8' }).trim();
     } catch {}
     if (olderCommit && olderCommit !== head) {
-      identityResponse = { ...goodIdentity, git_commit: olderCommit };
-      const r = await runG5(baseArgs()); // snapshot 仍声明 package_commit=head, 但 identity 现在报 olderCommit
-      check('⑧错进程身份: runtime commit 跟 accepted package 有真实 src 差异 → abort', r.code !== 0, `code=${r.code}`);
-      check('⑧错进程身份: 报错提到 runtime 进程 commit 跟 accepted package 不等价', /accepted package.*非等价|RUNTIME_SCOPE_DIRS 范围内有真实差异/.test(r.stderr), r.stderr.slice(0, 300));
+      identityResponse = { ...goodIdentity, git_commit: olderCommit }; // digest 不变(还是 goodTreeDigest)
+      const r = await runG5(baseArgs());
+      check('⑧commit 不同但 digest 相同(runtime-equivalent) → gate③ 仍 PASS(不误拒)', /gate⑦ PASS/.test(r.stdout), r.stdout.slice(-300));
       identityResponse = goodIdentity; // 复位
     } else {
-      check('⑧错进程身份: 跳过(仓库里找不到独立的历史对照 commit)', true, 'skipped, not a real gap in coverage — just this environment lacks a fixture commit');
+      check('⑧commit-equivalence: 跳过(仓库里找不到独立的历史对照 commit)', true, 'skipped, not a real gap in coverage — just this environment lacks a fixture commit');
     }
+  }
+  {
+    // B2 核心: digest 真不匹配(不管 commit 是否相同)必须 fail, 且报错以 digest 为判定依据
+    // (git diff 只是排障辅助字样, 不是"报错提到差异"这类旧措辞)。
+    identityResponse = { ...goodIdentity, load_bearing_digest: { ...goodIdentity.load_bearing_digest, treeDigest: 'f'.repeat(64) } };
+    const r = await runG5(baseArgs());
+    check('⑧B2 digest 不匹配 → abort', r.code !== 0, `code=${r.code}`);
+    check('⑧B2 报错以 treeDigest 比对为判定依据(非旧的 git diff 措辞)', /load_bearing_digest\.treeDigest.*!= snapshot 声明的 expected_load_bearing_tree_digest/.test(r.stderr), r.stderr.slice(0, 300));
+    identityResponse = goodIdentity;
+  }
+  {
+    // B2: dirty=true 必须直接拒, 不可比对
+    identityResponse = { ...goodIdentity, load_bearing_digest: { ...goodIdentity.load_bearing_digest, dirty: true } };
+    const r = await runG5(baseArgs());
+    check('⑧B2 dirty=true → abort(不可比对)', r.code !== 0 && /dirty=true/.test(r.stderr), r.stderr.slice(0, 200));
+    identityResponse = goodIdentity;
+  }
+  {
+    // B2: load_bearing_digest 整体缺失(端点自己算失败)必须直接拒, 跟 git_commit=null 同款处理
+    identityResponse = { ...goodIdentity, load_bearing_digest: null };
+    const r = await runG5(baseArgs());
+    check('⑧B2 load_bearing_digest=null → abort(视为身份证明失败)', r.code !== 0 && /未返回 load_bearing_digest/.test(r.stderr), r.stderr.slice(0, 200));
+    identityResponse = goodIdentity;
+  }
+  {
+    // B2: snapshot 未声明 expected_load_bearing_tree_digest 必须直接拒(不能"没声明就跳过比对")
+    cleanState();
+    const r = await runG5(['--snapshot', writeSnapshot({ expected_load_bearing_tree_digest: undefined }), '--app-priv-key-file', KEY_FILE, '--amount-kas', '0.5']);
+    check('⑧B2 snapshot 未声明 expected_load_bearing_tree_digest → abort', r.code !== 0 && /snapshot 未声明 expected_load_bearing_tree_digest/.test(r.stderr), r.stderr.slice(0, 200));
   }
   {
     // git_commit=null(端点自己失败)必须直接拒
@@ -336,23 +402,59 @@ async function main() {
     rmSync(insideRepoKey);
   }
 
-  // ── reconcile 脚本: list/check/evidence 基础功能 ──
+  // ── reconcile 脚本: list/check/evidence 基础功能 + B5 双人复核加固负测试 ──
   cleanState();
   {
     const jid = randomUUID();
     writeJournalDirect({ id: jid, state: 'ambiguous', amount_kas: 0.5, grant_id: GRANT_ID, candidate_address: CANDIDATE_ADDR, payee_address: PAYEE_ADDR, created_at: new Date().toISOString(), txId: null, prepared_utxo_snapshot: [] });
     const listR = await runReconcile(['list']);
     check('reconcile list: 列出未 reconcile 记录', listR.stdout.includes(jid), listR.stdout.slice(0, 300));
-    const resolveR = await runReconcile(['resolve', jid, '--verdict', 'not-spent', '--note', 'regression test synthetic evidence, no real chain interaction']);
-    check('reconcile resolve: 写入 not-spent 判定后状态变 failed', resolveR.stdout.includes('failed'), resolveR.stdout);
+
+    // B5 负测试: 缺 --evidence-file → 拒
+    const noEvidenceR = await runReconcile(['resolve', jid, '--verdict', 'not-spent', '--approver-1', 'NWT', '--approver-2', 'Bettor']);
+    check('B5: not-spent 缺 --evidence-file → abort', noEvidenceR.code !== 0 && /--evidence-file 必传/.test(noEvidenceR.stderr), noEvidenceR.stderr.slice(0, 200));
+
+    // B5 负测试: not-spent 只给一个 approver → 拒
+    const oneApproverR = await runReconcile(['resolve', jid, '--verdict', 'not-spent', '--evidence-file', EVIDENCE_FILE, '--approver-1', 'NWT']);
+    check('B5: not-spent 只给一个 approver → abort(双人复核)', oneApproverR.code !== 0 && /两个不同的批准人/.test(oneApproverR.stderr), oneApproverR.stderr.slice(0, 200));
+
+    // B5 负测试: 两个 approver 同名 → 拒
+    const sameApproverR = await runReconcile(['resolve', jid, '--verdict', 'not-spent', '--evidence-file', EVIDENCE_FILE, '--approver-1', 'NWT', '--approver-2', 'NWT']);
+    check('B5: --approver-1/--approver-2 同名 → abort', sameApproverR.code !== 0 && /不能是同一人/.test(sameApproverR.stderr), sameApproverR.stderr.slice(0, 200));
+
+    // B5 负测试: approver 不在白名单 → 拒
+    const badNameR = await runReconcile(['resolve', jid, '--verdict', 'not-spent', '--evidence-file', EVIDENCE_FILE, '--approver-1', 'NWT', '--approver-2', 'some-random-name']);
+    check('B5: approver 不在白名单 → abort', badNameR.code !== 0 && /已知身份之一/.test(badNameR.stderr), badNameR.stderr.slice(0, 200));
+
+    // B5 快乐路径: 双人复核 + evidence-file 齐全 → 真的 resolve 成功
+    const resolveR = await runReconcile(['resolve', jid, '--verdict', 'not-spent', '--evidence-file', EVIDENCE_FILE, '--approver-1', 'NWT', '--approver-1-note', 'regression test', '--approver-2', 'Bettor', '--approver-2-note', 'regression test']);
+    check('reconcile resolve: 双人复核齐全 → 写入 not-spent 判定后状态变 failed', resolveR.stdout.includes('failed'), resolveR.stdout);
     const afterEntry = JSON.parse(readFileSync(path.join(JOURNAL_DIR, `${jid}.json`), 'utf8'));
-    check('reconcile resolve: journal 文件真的被更新为 failed + 留痕 note', afterEntry.state === 'failed' && afterEntry.reconciled_note?.includes('regression test'), JSON.stringify(afterEntry));
+    check(
+      'reconcile resolve: journal 文件真的被更新为 failed + evidence-digest + 双 approver 留痕',
+      afterEntry.state === 'failed'
+        && afterEntry.reconciled_evidence?.evidence_digest?.length === 64
+        && afterEntry.reconciled_approvers?.length === 2
+        && afterEntry.reconciled_approvers.map((a) => a.name).sort().join(',') === 'Bettor,NWT',
+      JSON.stringify(afterEntry),
+    );
+  }
+
+  // spent verdict: 单人但仍要白名单内 approver + evidence-file
+  cleanState();
+  {
+    const jid2 = randomUUID();
+    writeJournalDirect({ id: jid2, state: 'ambiguous', amount_kas: 0.3, grant_id: GRANT_ID, candidate_address: CANDIDATE_ADDR, payee_address: PAYEE_ADDR, created_at: new Date().toISOString(), txId: null, prepared_utxo_snapshot: [] });
+    const badSpentR = await runReconcile(['resolve', jid2, '--verdict', 'spent', '--evidence-file', EVIDENCE_FILE, '--approver-1', 'not-a-known-name']);
+    check('B5: spent 判定 approver 不在白名单 → abort', badSpentR.code !== 0 && /已知身份之一/.test(badSpentR.stderr), badSpentR.stderr.slice(0, 200));
+    const spentR = await runReconcile(['resolve', jid2, '--verdict', 'spent', '--evidence-file', EVIDENCE_FILE, '--approver-1', 'KANet-UI']);
+    check('reconcile resolve: spent 判定单人+白名单内 approver → 状态变 reconciled_spent_no_txid', spentR.stdout.includes('reconciled_spent_no_txid'), spentR.stdout);
   }
 
   // ── cleanup ──
   server.close();
   cleanState();
-  for (const f of [DB, DB + '-wal', DB + '-shm', KEY_FILE, SNAPSHOT_FILE]) { try { rmSync(f); } catch {} }
+  for (const f of [DB, DB + '-wal', DB + '-shm', KEY_FILE, SNAPSHOT_FILE, EVIDENCE_FILE]) { try { rmSync(f); } catch {} }
 
   console.log(`\n== G5 v2 regression: PASS ${pass} / FAIL ${fail} ==`);
   writeFileSync(path.join(ROOT, 'logs/test-runs/g5-real-chain-smoke-regression-latest.json'), JSON.stringify({
