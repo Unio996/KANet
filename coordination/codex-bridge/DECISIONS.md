@@ -118,3 +118,41 @@ Consequences:
 - **Batch 1/2 (endBlock-capture code, pruning-point monitor, ZK `checkLanded` unification, backup/restore/replay infrastructure) remain gated: each requires design ownership + red-team review + explicit Owner money-path/production authority before implementation or deployment.** Owner's "干" authorizes items 1–2 only, per the scope Bettor stated on receipt.
 - Bettor records Gate 0 artifact paths/commits in the bridge as they land and reports measured figures to Owner.
 - `DISC-20260717-001` moves to `decided` (authority recorded here).
+
+---
+
+## DEC-20260725-001 — Freeze trunk roadmap v1.2 and grant full TN12 execution authority
+
+- decided_at_utc: 2026-07-25T20:06:31Z
+- authority: Owner
+- status: active
+- related_discussion: Issue #5 / v1.2 convergence review
+- related_artifacts: `docs/2026-07-25-kanet-trunk-roadmap-modularization-and-external-access.md`; `FROM-CODEX.md` MSG-20260725-135
+
+Decision:
+
+Owner stated: “这本身就是测试网。全授权！”
+
+This is recorded as four explicit approvals:
+
+1. **A — yes:** run the user track and technical/safety track in parallel.
+2. **B — yes:** freeze the minimal M0b contract-v1 scope stated in v1.2; Agent Card, Discovery and Trust Facts remain deferred to M5/contract v2.
+3. **C — yes:** freeze KANet trunk roadmap v1.2 as `FROZEN-EXECUTING`, start §16.2 immediately, retain X2a as the covenant-native digital-asset ticket and keep X2b outside this execution line.
+4. **D — yes:** within the v1.2 dependency graph, fully authorize TN12 code changes, testnet deploy/restart, test-asset money paths, chain writes, signing/broadcast, controlled privileged actions, fixes and rollback. No further per-package Owner request is required once the roadmap's technical gates are met.
+
+The full authorization removes repeated Owner approval gates; it does **not** remove task dependencies, named ownership, design → NWT red-team → code → diff review → load order, fail-closed behavior, rollback or immutable evidence requirements. It excludes mainnet, fiat, real assets and product expansion outside v1.2.
+
+Consequences:
+
+- `T-authorize = 2026-07-25T20:06:31Z`.
+- By `2026-07-25T21:06:31Z`, Bettor must issue named ACKs for both 0A cards `B0-O1-KILL-SWITCH-INTEGRITY` and `B0-O2-HEALTH-MONITOR`, or record the exact blocker, responsible party and next decision point.
+- All eleven §16.2 cards enter Bettor manual intake now; before M0a is evidence-closed, no card is assigned without `MANUAL-INTAKE-PASS` plus a named DRI ACK.
+- Later waves unlock by the dependencies and DoD in v1.2. Compliant TN12 execution does not return to Owner for repeated authorization.
+- `BLOCKED_DO_NOT_RUN_G5` still blocks the known-bad package until its stated technical gates pass; full authorization is not permission to load a package that has failed or not yet passed its gates.
+- This decision does not silently supersede unrelated recovery-specific decisions unless that work is explicitly admitted into the v1.2 task graph.
+
+Supersedes:
+
+- v1.2 `FREEZE-CANDIDATE / AWAITING-OWNER-A-B-C` status;
+- the requirement for repeated per-package Owner approval for TN12 actions that are inside the v1.2 dependency graph and satisfy its execution gates.
+
