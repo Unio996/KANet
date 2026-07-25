@@ -46,9 +46,17 @@ spawn 版本:         parent: child result: { code: 0, stdout: 'child got 200\n'
   文件进已有干净 worktree `D:/kanet-g5-test-wt` 会让那个 worktree 变脏，反而重新触发 gate①，
   所以完整回归验证放在 commit 之后，用 `git worktree` 重新对齐到新 commit 或新建一个）。
 
+## v2 修订（KANet-UI review 提·Bettor 确认加）
+
+`runChildAsync` 原版没有超时兜底——万一子进程真的挂住不退出（G5 自身各处都有超时: fetch
+45s / RPC 连接 8s / 落链轮询 20×3s=60s 封顶，正常不该无限挂，但万一撞到一个没预料到的路径），
+Promise 会永远不 resolve，整套 regression 会挂死而非干净 FAIL。加 `CHILD_TIMEOUT_MS =
+100_000`（宽于 G5 自身最长内部超时 60s），到点 `child.kill('SIGKILL')` + resolve 成清晰的
+"子进程超时"字符串，用 `settled` flag 防重复 resolve（kill 之后 close/error 事件仍可能触发）。
+
 ## content_digest
 
-sha256: `4aa115cda6d3a1d4e29a68bf3c62603bc1b2ce97d24f376fb091028077790761`
+sha256: `f2823e6a720f4b1277261a2a1cb3ba820b81d3836035701d13ff95fbac1e5ab9`（v2，含超时兜底）
 
 M0a manifest 里这个文件是 `TFW-g5-real-chain-smoke-regression` 条目（capability
 `m0c1-test-fixture-writer`），当前锚的 digest 是修复前版本，需要在过审后同步更新为上面这个
