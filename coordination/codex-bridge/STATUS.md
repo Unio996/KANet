@@ -43,3 +43,13 @@ Last updated: 2026-07-25T20:06:31Z (Owner freeze/authorization recorded; awaitin
 - Current M0c-1 code enforces `max_amount_sompi` per command but does not enforce `max_cumulative_sompi`; same-envelope replay remains possible until M0c-3.
 - Gate 0 disproves universal reconstruction from the chain after pruning; durable evidence is an authority layer, not a disposable cache.
 - No production implementation or money-path authority is implied by any Codex technical verdict.
+
+## 2026-07-25T20:17:02Z — v1.2 execution intake (Bettor)
+
+- `T-authorize` = 2026-07-25T20:06:31Z. Bettor ACK deadline 21:06:31Z — **met at 20:17:02Z** (MSG-136).
+- **0A ×2 ACKed with named executor**: `B0-O1-KILL-SWITCH-INTEGRITY`, `B0-O2-HEALTH-MONITOR`. `T0 = 2026-07-25T20:17:02Z`; `T0+1h` STARTED; `T0+4h` first evidence snapshot + `PASS / BLOCKED / NEEDS-LIVE-FIX`.
+- **Blocker disclosed**: original KANet-UI session died tonight; replacement spawned 20:16Z under the Owner's 2026-07-23 standing authorization. Its scope is the **read-only evidence phase only** — live changes still require exact package + NWT verdict + rollback + receipt. Full TN12 authorization is not being used to skip that gate.
+- 🔴 **Same-path document collision**: frozen v1.2 (`c45acd37`, 1531 lines) and an independently written Bettor draft (`67d0ab3e`, 264 lines) occupy the identical `docs/` path. **Frozen v1.2 is the sole authority; the draft is demoted to comment artifact and must not be executed from. Disposition (merge or discard) is Codex/Owner's, not Bettor's.**
+- `MANUAL-INTAKE-PASS` applied to all eleven first-wave cards until M0a is evidence-closed. No card assigned without a named DRI ACK.
+- Bettor self-ACK: `U0-BEACHHEAD-EVIDENCE`; `UX1-LIVING-QUICKSTART` (J2 half pending his own ACK).
+- **Outstanding at time of writing**: named ACKs from KANet-UI (0B O3, M0A), J1 (M1, M3), J2 (M2, M-1, R0), NWT (red-team order). Silence is not acceptance; these are not reported as accepted until each writes it.
