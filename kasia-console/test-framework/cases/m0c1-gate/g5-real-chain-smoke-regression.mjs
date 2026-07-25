@@ -1,8 +1,15 @@
 // J2 2026-07-25 — G5 v2 real_chain smoke regression（Codex re-review entry condition①要求的
 // 测试：锁竞争/坏journal/kill-after-POST恢复/精确授权绑定/错DB/错进程身份，外加 Bettor 点名的
-// 预算累加测试）。真实调用 G5 CLI(execFileSync 子进程, 非 mock/非直调内部函数)，真实 DB(跑
+// 预算累加测试）。真实调用 G5 CLI(异步 spawn 子进程, 非 mock/非直调内部函数)，真实 DB(跑
 // migrate.js runMigrations()，非手搓 DDL)，本地 loopback HTTP stub 模拟 runtime-identity 端点
 // (gate③不需要真的活 Console 进程——它只是查一个 JSON 端点，测试可以自己起一个同形状的假的)。
+//
+// 🔴 子进程调用必须用异步 spawn，不能用 execFileSync（2026-07-25 worktree 首次全 gate 放行时
+// 撞出的真死锁，10 行最小复现独立验证过）：execFileSync 是完全同步阻塞调用，会冻结父进程整个
+// event loop（含 libuv），而父进程这时候还要用 http.createServer() 服务子进程 G5 gate③ 回调
+// 查询的 runtime-identity 端点——父进程被 execFileSync 冻住就没法处理这个 incoming 请求，子进程
+// 那头只能干等到自己的 8s AbortSignal 超时。之前在脏树里跑没暴露，是因为 gate① 每次都先 abort，
+// 根本没走到会触发死锁的 gate③ 那段代码路径。
 //
 // 🔴 已知局限(如实标注): gate①(git status --porcelain clean)要求本仓库工作树干净——这意味着
 // 本测试文件本身跟 G5 v2 主体必须已经 commit 才能真正跑通全部用例(跟这个仓库其余 regression
@@ -17,7 +24,7 @@
 // 跑法(cwd=D:/kanet-tn12): node kasia-console/test-framework/cases/m0c1-gate/g5-real-chain-smoke-regression.mjs
 
 import { existsSync, rmSync, mkdirSync, writeFileSync, readFileSync, statSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { createServer } from 'node:http';
 import path from 'node:path';
@@ -49,22 +56,53 @@ function cleanState() {
   mkdirSync(JOURNAL_DIR, { recursive: true });
 }
 
+// 宽于 G5 自身最长内部超时(落链轮询 20×3s=60s)——只兜完全未预料的挂死路径, 让它变成干净
+// FAIL(kill 子进程 + resolve)而不是把整个 regression 套件挂死(KANet-UI 2026-07-25 review 提)。
+const CHILD_TIMEOUT_MS = 100_000;
+
+function runChildAsync(cmd, args, opts) {
+  return new Promise((resolve) => {
+    let child;
+    try {
+      child = spawn(cmd, args, opts);
+    } catch (e) {
+      resolve({ code: 1, stdout: '', stderr: e.message });
+      return;
+    }
+    let stdout = '';
+    let stderr = '';
+    let settled = false;
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
+    child.stdout.on('data', (d) => { stdout += d; });
+    child.stderr.on('data', (d) => { stderr += d; });
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      child.kill('SIGKILL');
+      resolve({ code: 1, stdout, stderr: stderr + `\n[runChildAsync] 子进程超时(> ${CHILD_TIMEOUT_MS}ms 未 close, 已 kill)` });
+    }, CHILD_TIMEOUT_MS);
+    child.on('error', (e) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve({ code: 1, stdout, stderr: stderr || e.message });
+    });
+    child.on('close', (code) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve({ code: code ?? 1, stdout, stderr });
+    });
+  });
+}
+
 function runG5(args) {
-  try {
-    const stdout = execFileSync('node', [G5, ...args], { encoding: 'utf8', env: process.env, cwd: ROOT });
-    return { code: 0, stdout, stderr: '' };
-  } catch (e) {
-    return { code: e.status ?? 1, stdout: e.stdout?.toString() || '', stderr: e.stderr?.toString() || e.message };
-  }
+  return runChildAsync('node', [G5, ...args], { env: process.env, cwd: ROOT });
 }
 
 function runReconcile(args) {
-  try {
-    const stdout = execFileSync('node', [RECONCILE, ...args], { encoding: 'utf8', env: process.env, cwd: ROOT });
-    return { code: 0, stdout, stderr: '' };
-  } catch (e) {
-    return { code: e.status ?? 1, stdout: e.stdout?.toString() || '', stderr: e.stderr?.toString() || e.message };
-  }
+  return runChildAsync('node', [RECONCILE, ...args], { env: process.env, cwd: ROOT });
 }
 
 function writeJournalDirect(entry) {
@@ -146,7 +184,7 @@ async function main() {
   identityResponse = goodIdentity;
   writeFileSync(LOCK_PATH, JSON.stringify({ pid: 424242, started_at: new Date().toISOString() }));
   {
-    const r = runG5(baseArgs());
+    const r = await runG5(baseArgs());
     check('①锁竞争: 已占锁时 G5 abort(非0退出)', r.code !== 0, `code=${r.code}`);
     check('①锁竞争: 报错提到已存在的锁', /已存在锁/.test(r.stderr) || /已存在锁/.test(r.stdout), (r.stderr + r.stdout).slice(0, 200));
     check('①锁竞争: 原锁文件内容未被覆盖(不是自己抢到又释放)', existsSync(LOCK_PATH) && JSON.parse(readFileSync(LOCK_PATH, 'utf8')).pid === 424242, 'lock content changed');
@@ -156,7 +194,7 @@ async function main() {
   cleanState();
   writeFileSync(path.join(JOURNAL_DIR, 'corrupt.json'), '{ this is not valid json ');
   {
-    const r = runG5(baseArgs());
+    const r = await runG5(baseArgs());
     check('②坏journal: G5 abort(非0退出)', r.code !== 0, `code=${r.code}`);
     check('②坏journal: 报错提到损坏无法解析', /损坏无法解析/.test(r.stderr), r.stderr.slice(0, 200));
   }
@@ -170,7 +208,7 @@ async function main() {
     // 1.2+0.8=2.0 已花, 本次 0.5, 总 2.5 < SMOKE_BUDGET_KAS(5), 应该过 gate⑦ 继续往下走(会卡在真
     // RPC/gate⑧, 但那是预期——我们只验证 gate⑦ 真的算出了 2.0 而非 0 或 101(把 failed 那条 99 也
     // 算进去)。
-    const r = runG5(baseArgs());
+    const r = await runG5(baseArgs());
     const seenSum = /累计预算 (\d+(\.\d+)?) \+/.exec(r.stdout || r.stderr);
     check('③预算累加: gate⑦ 输出的累计值等于 landed 两条之和(2 KAS), 排除 failed 那条(99)', seenSum && Math.abs(Number(seenSum[1]) - 2) < 0.001, `matched=${seenSum ? seenSum[1] : '(未匹配到 gate⑦ PASS 输出, 说明卡在更早的 gate 或这条 assertion 的正则跟当前文案对不上)'}\nstdout=${r.stdout.slice(-400)}\nstderr=${r.stderr.slice(-400)}`);
   }
@@ -179,7 +217,7 @@ async function main() {
   cleanState();
   writeJournalDirect({ id: randomUUID(), state: 'landed', amount_kas: 4.8, grant_id: GRANT_ID, candidate_address: CANDIDATE_ADDR, payee_address: PAYEE_ADDR, created_at: new Date().toISOString(), txId: 'c'.repeat(64) });
   {
-    const r = runG5(baseArgs()); // 本次 0.5, 4.8+0.5=5.3 > 5
+    const r = await runG5(baseArgs()); // 本次 0.5, 4.8+0.5=5.3 > 5
     check('④超预算: G5 abort(非0退出)', r.code !== 0, `code=${r.code}`);
     check('④超预算: 报错提到累计冒烟预算超限', /累计冒烟预算超限/.test(r.stderr), r.stderr.slice(0, 200));
   }
@@ -188,7 +226,7 @@ async function main() {
   cleanState();
   writeJournalDirect({ id: randomUUID(), state: 'submitted', amount_kas: 0.3, grant_id: GRANT_ID, candidate_address: CANDIDATE_ADDR, payee_address: PAYEE_ADDR, created_at: new Date().toISOString(), txId: 'd'.repeat(64) });
   {
-    const r = runG5(baseArgs());
+    const r = await runG5(baseArgs());
     check('⑤未reconcile拦新run: G5 abort(非0退出)', r.code !== 0, `code=${r.code}`);
     check('⑤未reconcile拦新run: 报错提到未 reconcile 的 journal 记录', /未 reconcile 的 journal 记录/.test(r.stderr), r.stderr.slice(0, 200));
   }
@@ -196,26 +234,26 @@ async function main() {
   cleanState();
   writeJournalDirect({ id: randomUUID(), state: 'prepared', amount_kas: 0.3, grant_id: GRANT_ID, candidate_address: CANDIDATE_ADDR, payee_address: PAYEE_ADDR, created_at: new Date().toISOString() });
   {
-    const r = runG5(baseArgs());
+    const r = await runG5(baseArgs());
     check('⑤prepared态也被拦(非只拦ambiguous/submitted)', r.code !== 0 && /未 reconcile 的 journal 记录/.test(r.stderr), r.stderr.slice(0, 200));
   }
 
   // ══ ⑥ 精确授权绑定: snapshot 字段跟 grant 实际值不符应 abort ══
   cleanState();
   {
-    const r = runG5(['--snapshot', writeSnapshot({ grant_id: randomUUID() }), '--app-priv-key-file', KEY_FILE, '--amount-kas', '0.5']);
+    const r = await runG5(['--snapshot', writeSnapshot({ grant_id: randomUUID() }), '--app-priv-key-file', KEY_FILE, '--amount-kas', '0.5']);
     check('⑥精确绑定: grant_id 不匹配 → abort', r.code !== 0, `code=${r.code}`);
     check('⑥精确绑定: 报错提到 grant_id 不存在', /不存在于 live DB/.test(r.stderr), r.stderr.slice(0, 200));
   }
   cleanState();
   {
-    const r = runG5(['--snapshot', writeSnapshot({ source_scope: [CANDIDATE_ADDR, 'kaspatest:qextra00000000000000000000000000000000000000000000000000000'] }), '--app-priv-key-file', KEY_FILE, '--amount-kas', '0.5']);
+    const r = await runG5(['--snapshot', writeSnapshot({ source_scope: [CANDIDATE_ADDR, 'kaspatest:qextra00000000000000000000000000000000000000000000000000000'] }), '--app-priv-key-file', KEY_FILE, '--amount-kas', '0.5']);
     check('⑥精确绑定: source_scope 非 singleton(长度>1) → abort', r.code !== 0, `code=${r.code}`);
     check('⑥精确绑定: 报错提到 singleton scope enforce', /singleton scope enforce/.test(r.stderr), r.stderr.slice(0, 200));
   }
   cleanState();
   {
-    const r = runG5(['--snapshot', writeSnapshot({ allowed_commands: ['custodial_transfer', 'something_else'] }), '--app-priv-key-file', KEY_FILE, '--amount-kas', '0.5']);
+    const r = await runG5(['--snapshot', writeSnapshot({ allowed_commands: ['custodial_transfer', 'something_else'] }), '--app-priv-key-file', KEY_FILE, '--amount-kas', '0.5']);
     check('⑥精确绑定: allowed_commands 不恰好匹配 → abort', r.code !== 0, `code=${r.code}`);
   }
 
@@ -223,13 +261,13 @@ async function main() {
   cleanState();
   {
     const wrongStat = { dev: dbStat.dev, ino: dbStat.ino + 1 };
-    const r = runG5(['--snapshot', writeSnapshot({ db_stat: wrongStat }), '--app-priv-key-file', KEY_FILE, '--amount-kas', '0.5']);
+    const r = await runG5(['--snapshot', writeSnapshot({ db_stat: wrongStat }), '--app-priv-key-file', KEY_FILE, '--amount-kas', '0.5']);
     check('⑦错DB: db_stat(ino)不匹配 → abort', r.code !== 0, `code=${r.code}`);
     check('⑦错DB: 报错提到 db_stat 不匹配', /db_stat.*!= 快照声明/.test(r.stderr), r.stderr.slice(0, 200));
   }
   cleanState();
   {
-    const r = runG5(['--snapshot', writeSnapshot({ db_path: path.join(ROOT, 'scratch/some-other.db') }), '--app-priv-key-file', KEY_FILE, '--amount-kas', '0.5']);
+    const r = await runG5(['--snapshot', writeSnapshot({ db_path: path.join(ROOT, 'scratch/some-other.db') }), '--app-priv-key-file', KEY_FILE, '--amount-kas', '0.5']);
     check('⑦错DB: db_path 不匹配 → abort', r.code !== 0, `code=${r.code}`);
   }
 
@@ -244,7 +282,7 @@ async function main() {
     } catch {}
     if (olderCommit && olderCommit !== head) {
       identityResponse = { ...goodIdentity, git_commit: olderCommit };
-      const r = runG5(baseArgs()); // snapshot 仍声明 package_commit=head, 但 identity 现在报 olderCommit
+      const r = await runG5(baseArgs()); // snapshot 仍声明 package_commit=head, 但 identity 现在报 olderCommit
       check('⑧错进程身份: runtime commit 跟 accepted package 有真实 src 差异 → abort', r.code !== 0, `code=${r.code}`);
       check('⑧错进程身份: 报错提到 runtime 进程 commit 跟 accepted package 不等价', /accepted package.*非等价|RUNTIME_SCOPE_DIRS 范围内有真实差异/.test(r.stderr), r.stderr.slice(0, 300));
       identityResponse = goodIdentity; // 复位
@@ -255,14 +293,14 @@ async function main() {
   {
     // git_commit=null(端点自己失败)必须直接拒
     identityResponse = { ...goodIdentity, git_commit: null };
-    const r = runG5(baseArgs());
+    const r = await runG5(baseArgs());
     check('⑧错进程身份: identity git_commit=null → abort(非放行)', r.code !== 0 && /git_commit=null/.test(r.stderr), r.stderr.slice(0, 200));
     identityResponse = goodIdentity;
   }
   {
     // non-loopback host 拒绝
     process.env.G5_CONSOLE_BASE_URL = 'http://example.com:1234';
-    const r = runG5(baseArgs());
+    const r = await runG5(baseArgs());
     check('⑧错进程身份: 非 loopback host → abort', r.code !== 0 && /非 loopback/.test(r.stderr), r.stderr.slice(0, 200));
     process.env.G5_CONSOLE_BASE_URL = `http://127.0.0.1:${port}`;
   }
@@ -271,7 +309,7 @@ async function main() {
   //     都放行了合法输入, 不是"永远 abort"这种假阳性) ══
   cleanState();
   {
-    const r = runG5(baseArgs());
+    const r = await runG5(baseArgs());
     check('⑨合法输入: 卡在 gate⑧(真 RPC 相关), 非更早的 gate', /未设 KASPA_RPC_URL|RPC connect timeout|candidate 钱包链上真实余额/.test(r.stderr), r.stderr.slice(-300));
     check('⑨合法输入: gate①-⑦ 全部 PASS 过(输出里能看到 gate⑦ PASS)', /gate⑦ PASS/.test(r.stdout), r.stdout.slice(-500));
   }
@@ -279,12 +317,12 @@ async function main() {
   // ── P1-1 canonical decimal: 非法金额格式应拒 ──
   cleanState();
   {
-    const r = runG5(['--snapshot', writeSnapshot(), '--app-priv-key-file', KEY_FILE, '--amount-kas', '0.123456789']); // 9位小数, 超8位
+    const r = await runG5(['--snapshot', writeSnapshot(), '--app-priv-key-file', KEY_FILE, '--amount-kas', '0.123456789']); // 9位小数, 超8位
     check('P1-1: 超8位小数的金额格式 → abort', r.code !== 0 && /非 canonical decimal 字符串/.test(r.stderr), r.stderr.slice(0, 200));
   }
   cleanState();
   {
-    const r = runG5(['--snapshot', writeSnapshot(), '--app-priv-key-file', KEY_FILE, '--amount-kas', '3']); // 超 MAX_TRANSFER_KAS(2)
+    const r = await runG5(['--snapshot', writeSnapshot(), '--app-priv-key-file', KEY_FILE, '--amount-kas', '3']); // 超 MAX_TRANSFER_KAS(2)
     check('单笔硬cap: 超 MAX_TRANSFER_KAS → abort', r.code !== 0 && /超过硬 cap/.test(r.stderr), r.stderr.slice(0, 200));
   }
 
@@ -293,7 +331,7 @@ async function main() {
   {
     const insideRepoKey = path.join(ROOT, 'scratch/g5-key-inside-repo.hex');
     writeFileSync(insideRepoKey, randomBytes(32).toString('hex'));
-    const r = runG5(['--snapshot', writeSnapshot(), '--app-priv-key-file', insideRepoKey, '--amount-kas', '0.5']);
+    const r = await runG5(['--snapshot', writeSnapshot(), '--app-priv-key-file', insideRepoKey, '--amount-kas', '0.5']);
     check('P1-2: repo 内的 key 文件路径 → abort', r.code !== 0 && /不可位于 repo 根目录树下/.test(r.stderr), r.stderr.slice(0, 200));
     rmSync(insideRepoKey);
   }
@@ -303,9 +341,9 @@ async function main() {
   {
     const jid = randomUUID();
     writeJournalDirect({ id: jid, state: 'ambiguous', amount_kas: 0.5, grant_id: GRANT_ID, candidate_address: CANDIDATE_ADDR, payee_address: PAYEE_ADDR, created_at: new Date().toISOString(), txId: null, prepared_utxo_snapshot: [] });
-    const listR = runReconcile(['list']);
+    const listR = await runReconcile(['list']);
     check('reconcile list: 列出未 reconcile 记录', listR.stdout.includes(jid), listR.stdout.slice(0, 300));
-    const resolveR = runReconcile(['resolve', jid, '--verdict', 'not-spent', '--note', 'regression test synthetic evidence, no real chain interaction']);
+    const resolveR = await runReconcile(['resolve', jid, '--verdict', 'not-spent', '--note', 'regression test synthetic evidence, no real chain interaction']);
     check('reconcile resolve: 写入 not-spent 判定后状态变 failed', resolveR.stdout.includes('failed'), resolveR.stdout);
     const afterEntry = JSON.parse(readFileSync(path.join(JOURNAL_DIR, `${jid}.json`), 'utf8'));
     check('reconcile resolve: journal 文件真的被更新为 failed + 留痕 note', afterEntry.state === 'failed' && afterEntry.reconciled_note?.includes('regression test'), JSON.stringify(afterEntry));
