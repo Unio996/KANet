@@ -1,4 +1,5 @@
-> **Status**: DRAFT — team review pending (Bettor + NWT + KANet-UI)
+> **Status**: CURRENT — team 已收敛(Bettor+NWT+KANet-UI), 5 个待定问题全部有裁定, 本稿是
+> 落码依据。B4 段落含 2026-07-25 修订(dir-fsync 实测证伪原假设, 见该节)。
 
 # G5 v2 B1-B6 安全加固设计稿
 
@@ -41,12 +42,9 @@ fastify.get('/api/system/runtime-identity', async (request, reply) => {
 });
 ```
 
-**待team定的点**：新 tier `ADMIN_SECRET_RUNTIME_IDENTITY`（T-RUNTIME-IDENTITY）还是并入既有
-`T-READONLY`（`ADMIN_SECRET_READONLY`，现由 visibility 翻转 + zk-close-gate-debugger 共用，
-文档标注"零链上副作用"共享合理）？本端点虽也零链上副作用，但泄露的是文件系统绝对路径/PID
-这类主机层信息，风险类别跟"翻转一个显示开关"不完全一样。我倾向新开专属 tier（更符合
-admin-secret-tier.mjs 头部"每个端点认自己的 tier"的既定哲学），但这是低成本的判断题，team
-拍板即可，不影响整体设计。
+**team 裁定（2026-07-25，Bettor+NWT 一致）**：新开专属 tier `ADMIN_SECRET_RUNTIME_IDENTITY`，
+不并入 `T-READONLY`。理由：泄露文件系统绝对路径/PID 属主机层信息，跟"翻转显示开关"不是一个
+风险类别，符合 admin-secret-tier.mjs "每个端点认自己 tier" 的既定哲学。
 
 **G5 侧改动**：`verifyRuntimeIdentity()` 的 fetch 调用需要带上 header：
 ```js
@@ -114,10 +112,10 @@ generated/未追踪文件，git diff 看不出这些。
    debug 输出**（比对失败时打印出来帮排查哪个文件不一致，不再是判定权威——跟 Codex 原文
    "Directory-level Git diff is supplemental, not the authority" 要求一致）。
 
-**待team定的点**：`expected_load_bearing_tree_digest` 由谁在什么时候算/写进 snapshot——是
-"生成 snapshot 的那个（目前还不存在的）operator 工具"的职责范围，这个工具本身也没设计过。
-本稿只定 G5 消费端的比对逻辑，snapshot 生成端流程是另一块待补的设计（列进"未决"而非本稿
-现在展开，避免范围失控）。
+**team 裁定**：`expected_load_bearing_tree_digest` 的生成端流程 deferred 到 re-activation
+时机（跟既有"snapshot 由 Owner/委派人在 re-activation 时造"的口径一致）。本稿只落 G5 消费端
+的比对逻辑（`computeLoadBearingDigest()` + gate③逐字节比对 + git diff 降级为 supplemental），
+snapshot 生成端工具是 re-activation 流程的一部分，不在本轮范围内。
 
 ---
 
@@ -136,41 +134,66 @@ evidence only after explicit Owner authority"）覆盖范围，不是这轮能�
 可能还没把这次写入落盘（页缓存丢失），能丢失或错序这个本该已经"prepared"的 journal 条目——
 而 POST 可能已经真的发出去了（子进程被杀之前）。
 
-**设计**（POSIX durable-write pattern，写 tmp 文件 fsync + rename + fsync 目录）：
+**2026-07-25 修订（关键事实修正）**：设计初版假设"真实部署是 Linux，Windows 只是开发机的
+已知局限"——这个假设被证伪。KANet-UI 实测确认 **TN12 生产环境就是这台 Windows 机器本身**
+（`kaspad.exe` 是原生 Windows 可执行文件，PID 12100，非 WSL/非 Linux 子系统）。不存在"另有
+一个 Linux 生产环境保有完整保护力"这回事，目录 fsync 的降级在生产上同样发生，必须正面处理
+而非当作可接受的开发机限定局限。
+
+**实测（NWT + J2 各自独立在这台生产机器上跑同一个 probe，结果 100% 一致，非单次侥幸）**：
+
+```
+① 写 tmp 文件 + fsyncSync(fd):        OK, 干净成功, 零报错
+② renameSync(tmp, dest):              OK
+③ openSync(目录, 'r') + fsyncSync(fd): 100% 抛 EPERM: operation not permitted, fsync
+```
+
+结论：**文件内容层 fsync（对应 Windows `FlushFileBuffers` API）在生产环境上真实有效**——
+prepared/submitted 这两个 money-relevant 检查点的 JSON 内容一旦 `fsyncSync(fd)` 返回，就已经
+真实落盘，不依赖页缓存。**目录 fsync 在 Windows/NTFS 上不通**（不是"效果打折"，是这个操作
+本身在这个平台上不存在），意味着"rename 这个操作让新文件名对崩溃后重启可见"这一层，不能靠
+POSIX 目录 fsync 拿到。
+
+**最终设计（Bettor 裁定）：不依赖目录 fsync，durability 保证转移到 reconcile/gate⑦ 的
+budget 扫描逻辑上**——只保留文件级 fsync，目录 fsync 那段代码保留 try/catch（不让它在
+Windows 上抛出破坏写入流程，纯粹 best-effort，不再是设计依赖的保护层）：
 
 ```js
 function durableWriteJournal(dest, obj) {
   const tmp = `${dest}.tmp-${randomBytes(4).toString('hex')}`;
   const fd = openSync(tmp, 'w');
   writeSync(fd, JSON.stringify(obj, null, 2));
-  fsyncSync(fd); // 数据落盘, 非只在页缓存
+  fsyncSync(fd); // 数据落盘, 这层是真实 durability 保证的来源(FlushFileBuffers, 已实测有效)
   closeSync(fd);
   renameSync(tmp, dest); // atomic rename(已有行为不变)
   try {
     const dirFd = openSync(path.dirname(dest), 'r');
-    fsyncSync(dirFd); // 目录项(rename 本身)落盘——POSIX 上这一步才真正保证崩溃后能看到新文件名
+    fsyncSync(dirFd);
     closeSync(dirFd);
   } catch (e) {
-    // Windows 开发机上目录 fd fsync 语义跟 POSIX 不同/可能报错——如实记但不 fail(见下方局限标注)
-    console.error(`[durableWriteJournal] 目录 fsync 失败(非 fatal, 见已知局限): ${e.message}`);
+    // Windows/NTFS 上 100% 抛 EPERM(已实测坐实, 非猜测)——best-effort, 不是设计依赖的保护层
   }
 }
 ```
 
-只用在 `prepared`（pre-POST，money-relevant 的第一个检查点）和 `submitted`（POST 后写回
-txId）两个状态的写入，其余状态（`landed`/`failed`/`reconciled_*`）是事后收尾记录，crash 期间
-丢失只影响审计便利性不影响资金安全（reconcile 脚本本就要处理 ambiguous 情况）。
+**真正的 durability 靠孤儿 tmp 文件扫描而非目录 fsync**：如果崩溃恰好发生在 fsync 完成之后、
+rename 完成之前，`tmp-*` 文件本身内容已经真实落盘（① 已验证有效），只是还没改名成最终
+`<id>.json`。gate⑦ 的 journal 扫描 + reconcile 脚本的 `list` 命令，**scope 从只扫 `*.json`
+扩大到同时扫 `*.tmp-*`**：
 
-**已知局限如实标注**：本仓库开发环境是 Windows；`fsyncSync` 在打开一个目录的 fd 这件事上
-Windows/NTFS 跟 POSIX/ext4 语义不完全对等（Windows 目录本身不是常规可 fsync 的文件对象）。
-真实部署目标（TN12 节点）需要确认是 Linux（合理推断，需要跟 Bettor/KANet-UI 确认部署环境
-再定是否要加平台判断分支，或者干脆说明"crash-durable 设计以 Linux 部署为准, Windows 开发机
-上这层保护退化但不影响本地测试有效性"）。这条不是我能凭猜测下定论的事，写进本稿的"待确认"
-而非直接下结论。
+- 一个 tmp 孤儿文件的内容本身就是完整合法的 journal entry JSON（fsync 已保证），只是文件名
+  还没转正——**逻辑上等价于该条目卡在 `prepared` 状态**（对应 crash 发生在 POST 之前）；
+- gate⑦ 的 `UNRECONCILED_STATES` 扫描逻辑对 tmp 孤儿一视同仁地拦新 run（跟其他 `prepared`/
+  `submitted`/`ambiguous` 记录一样，必须先 reconcile 才能继续）；
+- reconcile `list`/`check`/`evidence`/`resolve` 都要能处理 tmp 命名的文件（`resolve` 写入
+  终态时把 tmp 名转正为标准 `<id>.json` 名，完成迟到的 rename，收尾这条记录）；
+- 这样即便目录 fsync 在 Windows 上完全不通，也不存在"crash 后一条真实发生的 POST 从此在
+  journal 里彻底消失、budget 扫描永远漏算"的风险——文件内容的 fsync 保证 + 孤儿扫描机制
+  组合起来提供了实际的 crash-safety，不依赖那个在这个平台上不存在的目录 fsync。
 
-**待team定的点**：真实部署环境是否是 Linux（决定目录 fsync 那段代码的实际保护力）；是否
-接受"Windows 开发机上这层退化"这个已知局限（我倾向接受，本身不影响 Linux 生产环境的保护
-效果，只是本地跑测试时少一层，跟 B4 本意不冲突）。
+这个方案的优势（NWT 2026-07-25 review 指出）：不是勉强模拟一个 Windows 做不到的 POSIX
+directory-fsync 语义，而是复用已经验证过的 `ambiguous`/`prepared` reconcile 处理路径多扫
+一类状态，没有新造一套单独的 durability 保证。
 
 ---
 
@@ -222,9 +245,17 @@ if (verdict === 'not-spent') {
 `--authorized-by <Owner或委派标识>` 这个 Codex 提到的字段，本稿建议做成 `--approver-1/-2`
 的姓名字段本身承担这个角色（谁填的名字就是谁的授权声明），不单独加一层，避免过度设计。
 
-**待team定的点**：`approver-1`/`approver-2` 的姓名字段要不要限制成一个白名单（比如只能填
-Bettor/NWT/KANet-UI/Owner 这几个已知身份，防打错字/防随便填个假名字）？我倾向加（低成本，
-`ALLOWED_APPROVER_NAMES` 常量白名单校验），但这是可以后补的加固，不阻塞本稿其余部分。
+**team 裁定（NWT 提，Bettor+KANet-UI 认同）**：白名单**这轮就加，不留后补**——理由：纯字符串
+比对 `approver1 !== approver2` 挡不住大小写/空格/昵称变体这类无意或有意的绕过（`'Bettor'` vs
+`'bettor'` vs `'Bettor '`），白名单校验同时解决"防同一人填两遍"和"防打错字/写假名"两个问题，
+成本低，该在这轮做：
+
+```js
+const ALLOWED_APPROVER_NAMES = new Set(['Bettor', 'NWT', 'KANet-UI', 'Owner']);
+if (!ALLOWED_APPROVER_NAMES.has(approver1) || !ALLOWED_APPROVER_NAMES.has(approver2)) {
+  fail(`--approver-1/--approver-2 必须是已知身份之一(${[...ALLOWED_APPROVER_NAMES].join('/')})`);
+}
+```
 
 ---
 
@@ -259,10 +290,9 @@ node kasia-console/scripts/m0c1-g5-generate-evidence-bundle.mjs > docs/evidence/
 `logs/test-runs/*-latest.json`（已存在，本次不用新造）一起提交，Issue #5 的 review request
 直接引用这个 evidence bundle 文件路径，Codex 可以直接读，不用东拼西凑散落的 commit message。
 
-**待team定的点**：这个脚本本身算不算又一个需要 M0a 治理的"写文件"动作？我认为不算——它只
-写 `docs/evidence/` 下的证据 JSON，不碰 DB/关系不到 money-path 执行路径，跟现有其他生成
-evidence 文件的脚本（如果有）同等对待，但如果 team 觉得应该也纳管，加一条 exception 也是
-低成本的事。
+**team 裁定**：不纳 M0a 治理（Bettor+NWT 确认）——只写 `docs/evidence/` 下的证据 JSON，读
+git+regression log+content digest，无 DB import，不碰 DB/不涉 money-path 执行路径，不构成
+M0a 覆盖范围内的"写文件"动作。
 
 ---
 
@@ -278,14 +308,18 @@ B1（小，唯一没有"待team定"未决项的，可以设计过审后立刻单
 
 ---
 
-## 需要 team 回答的问题汇总（不阻塞本稿本身，供 review 时逐条过）
+## team 裁定汇总（2026-07-25，全部已收敛）
 
-1. B1: 新 tier `ADMIN_SECRET_RUNTIME_IDENTITY` 还是并入既有 `T-READONLY`？
-2. B2: snapshot 生成端流程（谁在什么时候算 `expected_load_bearing_tree_digest` 写进
-   snapshot）——这是本稿故意没展开的一块，需要单独立项还是这次一起做？
-3. B4: 真实部署环境是否是 Linux？确认后决定目录 fsync 那段代码的实际保护力评估。
-4. B5: approver 姓名字段要不要加白名单？
-5. B6: evidence-bundle 生成脚本要不要走 M0a 治理？
+1. B1: 新专属 tier `ADMIN_SECRET_RUNTIME_IDENTITY`。✅ 已裁定。
+2. B2: snapshot 生成端流程 deferred 到 re-activation 时机，本轮只落 G5 消费端比对逻辑。✅ 已裁定。
+3. B4: 真实部署环境=这台 Windows 机器本身（KANet-UI 实测），目录 fsync 实测 100% EPERM（NWT+J2
+   双独立复现）。最终设计改为文件级 fsync + gate⑦/reconcile 扫描 tmp-\* 孤儿文件当 prepared
+   等价状态处理，不依赖目录 fsync。✅ 已裁定，见上方 B4 修订段落。
+4. B5: approver 白名单这轮就加（`ALLOWED_APPROVER_NAMES` 常量），不留后补。✅ 已裁定。
+5. B6: evidence-bundle 生成脚本不纳 M0a 治理（无 DB import，不碰 money-path 执行路径）。✅ 已裁定。
 
-Bettor/NWT/KANet-UI review 后我按裁定结果开始落码（B1 优先，其余按上面建议顺序或 team 重排
-的顺序）。containment(unarm) 保持跟这条工作完全独立，等 Owner 授权。
+落地顺序确认：B5 > B1 > B4 > B2 > B6（B5 堵最大的"单人释放预算"钱路口子优先，B6 收尾脚本
+排最后，需要前面都完成才有真数据可打包）。
+
+Bettor/NWT/KANet-UI 已 review 通过，本稿转入落码阶段。containment(unarm) 保持跟这条工作完全
+独立，等 Owner 授权。
