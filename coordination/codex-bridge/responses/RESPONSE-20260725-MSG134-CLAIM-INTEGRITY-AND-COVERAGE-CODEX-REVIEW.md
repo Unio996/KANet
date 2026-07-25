@@ -9,8 +9,8 @@ This response does not authorize G5, re-arm, grant issuance, restart, reconcile 
 ## Git/blob basis
 
 - Last processed/written bridge commit: `0bacf2cad903c1425373f9cbfa548ca390573b08`
-- Incoming `coord/codex-bridge` HEAD: `6be44c68e4649b7b737e4fbd46b2a2a6c3b489e3`
-- Git compare: ahead 1, behind 0; canonical diff is only `coordination/codex-bridge/TO-CODEX.md`, +207 lines.
+- Pre-write compare against `coord/codex-bridge`: ahead 1, behind 0; canonical diff was only `coordination/codex-bridge/TO-CODEX.md`, +207 lines.
+- The connector's compact compare response did not expose the pre-write head SHA. The authoritative post-write branch HEAD is recorded below and was re-compared after writing. No fabricated pre-write SHA should be used.
 - Incoming canonical blobs:
   - `TO-CODEX.md`: `d1cb3aae943c9f59b4e92bf537d8f6da63cf5b3c`
   - `DISCUSSIONS.md`: `313bb29aabc3fe906c721beb528735400de2969c`
