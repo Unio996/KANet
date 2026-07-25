@@ -86,6 +86,25 @@ export const PILOT_CUSTODIAL_WRITER_ALLOWLIST = new Set([
   'kasia-console/scripts/m0c1-pilot-custodial-insert.mjs', // MF2 步骤4 reviewed helper(唯一 pilot custodial 钱包写入方)
 ]);
 
+// ── considered amendment #4(2026-07-25, Bettor 裁定·G5 v2 regression 测试)：窄 capability
+// m0c1-test-fixture-writer ──
+// 前三个 writer capability(provision-writer/pilot-custodial-writer)的威胁模型是"离线纯 DB 写脚本
+// 不该有网络/relay 面"——但测试 harness 本质不同: 它天然需要起本地 stub 服务(http.createServer)+
+// 调子进程(经 execFileSync 打真 RPC), 硬套"零网络面"负面检查会把合法的测试基础设施误拒。这个
+// capability 的真实威胁模型是另一件事: "这份写入有没有可能碰到 live 数据"——所以负面检查换成
+// "文件内不得出现指向 live console.db 的硬编码路径"(kasia-console/data/console.db 那个具体路径
+// 字符串), 而非笼统禁网络面。
+//   ① 白名单有界 shrink-only(扩张走 NWT 审 + Owner 知情)。
+//   ② content_digest TOCTOU 锚(批准时内容 sha256, 失配=改过没重审=拒)。
+//   ③ 专属静态负面检查: 文件内不得硬编码 live console.db 路径字符串(防测试误写生产库的机械防线;
+//      "写的确实是隔离 scratch DB"这条实质判断仍是 NWT diff 审的活, 这条只是补一道机械兜底)。
+//   ④ lint 是完整性门, NWT diff 审仍是唯一 load-bearing 闸(受控语义人审)。
+export const TEST_FIXTURE_WRITER_CAP = 'm0c1-test-fixture-writer';
+export const TEST_FIXTURE_WRITER_ALLOWLIST = new Set([
+  'kasia-console/test-framework/cases/m0c1-gate/g5-real-chain-smoke-regression.mjs', // G5 v2 regression, 写隔离 scratch/g5-regression.db
+]);
+const LIVE_CONSOLE_DB_PATH_LITERAL = /kasia-console\/data\/console\.db|kasia-console[\\/]data[\\/]console\.db/;
+
 export const sha256Hex = (s) => crypto.createHash('sha256').update(Buffer.from(s, 'utf8')).digest('hex');
 
 const git = (root, args) =>
@@ -253,7 +272,7 @@ const MANIFEST_FIELDS = ['id', 'family', 'form', 'path', 'capability', 'justific
 // 七字段(MANIFEST_FIELDS)全必填对所有 capability 生效; content_digest 是"仅此 capability 附加必填"
 // (m0c-controlled-relay-endpoint), 单独校验(见 manifestChecks relay-manager 分支), 不并入 MANIFEST_FIELDS
 // —— 否则 db-readonly / test-fixture 存量条目会因缺新字段被全判挂(向后兼容, NWT 第4约束的兼容边界)。
-const CAPABILITIES = new Set(['db-readonly', 'test-fixture', CONTROLLED_RELAY_CAP, PROVISION_WRITER_CAP, PILOT_CUSTODIAL_WRITER_CAP]);
+const CAPABILITIES = new Set(['db-readonly', 'test-fixture', CONTROLLED_RELAY_CAP, PROVISION_WRITER_CAP, PILOT_CUSTODIAL_WRITER_CAP, TEST_FIXTURE_WRITER_CAP]);
 
 export function manifestChecks(root) {
   const violations = [];
@@ -401,6 +420,44 @@ export function manifestChecks(root) {
         continue;
       }
       // 全过: 合法 pilot custodial writer(白名单 + digest + 静态负面全净)。放行, 不落只读检查(writer 本意)。
+      continue;
+    }
+    if (e.capability === TEST_FIXTURE_WRITER_CAP) {
+      // ↓↓↓ considered amendment #4: m0c1-test-fixture-writer 安全控制校验(白名单+digest 同前例,
+      // 静态负面检查换成"不硬编码 live console.db 路径", 因为威胁模型不是"零网络面"而是"别碰 live 数据") ↓↓↓
+      if (e.family !== 'sqlite') {
+        violations.push({ rule: 'R-M0A-MANIFEST-SCHEMA', file: MANIFEST_PATH,
+          msg: `manifest 条目 "${e.id}" capability=${TEST_FIXTURE_WRITER_CAP} 只适配 family=sqlite, 不开其他族口。` });
+        continue;
+      }
+      if (!TEST_FIXTURE_WRITER_ALLOWLIST.has(e.path)) {
+        violations.push({ rule: 'R-M0A-MANIFEST-SCHEMA', file: MANIFEST_PATH,
+          msg: `manifest 条目 "${e.id}" capability=${TEST_FIXTURE_WRITER_CAP} 但 path ${e.path} 不在 test fixture writer 白名单 — 只有 {${[...TEST_FIXTURE_WRITER_ALLOWLIST].join(', ')}} 可用此 capability(白名单 shrink-only, 扩张走 NWT 审 + Owner 知情)。` });
+        continue;
+      }
+      if (!('content_digest' in e) || e.content_digest === '' || e.content_digest == null) {
+        violations.push({ rule: 'R-M0A-MANIFEST-SCHEMA', file: MANIFEST_PATH,
+          msg: `manifest 条目 "${e.id}" capability=${TEST_FIXTURE_WRITER_CAP} 缺 content_digest — writer 条目必填(批准时内容 sha256 hex, TOCTOU 防御, 同先例约束)。` });
+        continue;
+      }
+      const fixtureWriterContent = readStagedContent(root, e.path);
+      if (fixtureWriterContent == null) {
+        violations.push({ rule: 'R-M0A-MANIFEST-SCHEMA', file: MANIFEST_PATH,
+          msg: `manifest 条目 "${e.id}" 指向的 writer 文件 ${e.path} 不存在于 index — path 锚定 fail-closed: 文件移动必须同步改 manifest。` });
+        continue;
+      }
+      const fixtureWriterDigest = sha256Hex(fixtureWriterContent);
+      if (fixtureWriterDigest !== e.content_digest) {
+        violations.push({ rule: 'R-M0A-MANIFEST-SCHEMA', file: MANIFEST_PATH,
+          msg: `writer 文件 ${e.path} 内容变更(digest 失配: 现 ${fixtureWriterDigest.slice(0, 12)}… ≠ manifest ${String(e.content_digest).slice(0, 12)}…)需重新 NWT 审并更新 content_digest。` });
+        continue;
+      }
+      if (LIVE_CONSOLE_DB_PATH_LITERAL.test(fixtureWriterContent)) {
+        violations.push({ rule: 'R-M0A-OPS-NOT-READONLY', file: e.path,
+          msg: `${e.path} test fixture writer 文件内出现硬编码 live console.db 路径字符串 — 测试写入不该指向生产库, 拒需重审(机械兜底; "写的确实是隔离 scratch DB"这条实质判断仍需 NWT diff 审确认)。` });
+        continue;
+      }
+      // 全过: 合法 test fixture writer(白名单 + digest + 不碰 live db 路径全净)。放行, 不落只读检查(writer 本意)。
       continue;
     }
     // 静态限制核验(读 index 内容)

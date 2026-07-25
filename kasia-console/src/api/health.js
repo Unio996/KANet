@@ -4,17 +4,19 @@ import { dbPath } from '../db/client.js';
 import { execFileSync } from 'node:child_process';
 import { statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
+import { dirname } from 'node:path';
+import { getRepoRoot } from '../lib/repo-root.mjs';
 
 // M0c-1 G5 real_chain smoke P0-2（Codex RESPONSE-20260725-MSG131）: runtime identity self-report.
 // 这个进程自己在启动这一刻算一次 git_commit + db 的 {dev,ino}（不是每次请求现查——目的是证"这个
 // 进程实际在跑哪份代码/连的是哪份 db 文件", 进程启动后 working tree 再被后续 commit 改动不该污染
 // 这个读数, 缓存值才是真正对应 runtime 行为的锚点）。零鉴权只读零副作用, 但只在 loopback 场景暴露
 // 有意义（调用方自己决定是否只信 loopback 请求的响应）。
-// KANet-UI 2026-07-25 抓 bug: 这个文件在 kasia-console/src/api/health.js(距 repo root 3 层),
-// 不是 G5 那个 4 层深路径——照抄 G5 的 '../../../..' 会跳到 repo 外(D:\ 本身), 导致 git rev-parse
-// 静默失败(catch{} best-effort)返回 null, 是个会静默产出错误身份数据的真 bug, 不是 cosmetic。
-const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../..'); // D:/kanet-tn12
+// KANet-UI 2026-07-25 抓 bug(现已根治): 原来这里硬编码'../../..'数层数, 照抄 G5 的 4 层深模式
+// 但这个文件只 3 层深, 跳到 repo 外(D:\ 本身), 导致 git rev-parse 静默失败(catch{} best-effort)
+// 返回 null。这类"每个文件各自数斜杠"的 bug 这轮连撞两次(health.js + reconcile 脚本), 改用
+// getRepoRoot() 共享 helper(向上 walk 找 .git 目录, 不需要硬编码深度)根治整类问题。
+const ROOT = getRepoRoot(dirname(fileURLToPath(import.meta.url))); // D:/kanet-tn12
 // 模块加载时(进程启动早期, import 这个文件那一刻)立即算一次, 非等第一次请求才算——
 // 精确对应"这个进程从哪个 commit / 哪个 db 文件启动"这个事实, 全进程生命周期不变。
 function computeRuntimeIdentity() {
