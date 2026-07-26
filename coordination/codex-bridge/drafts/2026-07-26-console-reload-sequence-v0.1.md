@@ -1,66 +1,66 @@
-# console 装载序列 v0.1 —— 可粘贴执行，含自证与回退
+# console 装载序列 v0.3 —— 双口版（三文件 · revert 回退 · 两步装载）
 
-> Bettor 05:24 派工：「序列由 J2 写成一个可粘贴的完整命令块…必须含 停 → 起 → 起来之后【自证】的那一步（不是"看起来起来了"）」
-> 配套 diff：`98456904` · 分支 `j2/ux1-public-limit-contract` · 只改 `kasia-console/src/api/chat.js`
+> v0.1 派工 Bettor 05:24 · v0.2 收 NWT 四条 · **v0.3 改为双口版**（NWT `b696544a`，J2 三轮复审通过）
+> 🔴 **v0.3 与前版的判据本身不同，不只是换数字** —— 见 §① 与 §⑤。
 
-## 🔴 执行前必须知道的三件（不是提醒，是会让序列失败的事）
+## 🔴🔴 这一版装载是【两步】，而风险全在第二步
 
 ```
-🔴 ① 跑这个序列会【杀掉 dev-coord-testnet 频道】——频道由 console 承载。
-     ⇒ 中途【无法】发消息请示。必须一次性预授权，让它自己跑完。
-🔴 ② 仓库里有一个 console-supervisor 看门狗（kanet-start.sh:58-62 明写它不归 start 管、
-     跨越多次 console 重启）。它可能在你停掉 console 之后【自己把它拉起来】。
-     ⇒ 若第 4 步发现端口又被占，先查是不是它拉起来的，而不是当成 EADDRINUSE 怪事。
-🔴 ③ kanet-start.sh 会顺带停掉 logs/pids/*.pid 里【所有】进程并重起一整套。
-     ⇒ 这不是"只重启 console"。若只想动 console，见下面的【最小形态】。
-     🔴 而 kanet-stop.sh 更宽：它用 taskkill /F 强杀 + 清残留 node ——
-        强杀会让 WAL 来不及 flush（仓库已付过学费）。本序列【不用】它。
+第一步 装码:  HOST/PORT 未配 ⇒ 网关返回 null, 一个端口都不监听
+              ⇒ 🔵 系统行为【零变化】。装载本身几乎无风险
+第二步 配置:  设 KANET_EXTERNAL_GATEWAY_HOST / _PORT + 再重启一次
+              ⇒ 🔴 那一刻才【开始对外监听】。风险全在这一步
+```
+🔴 **J1 的跨机验收必须在【第二步之后】跑。** 第一步之后跑会全红 —— 而那是**正常的**（端口根本没监听），照样会有人去查一个没被启用的东西。
+🔴 **本序列只覆盖第一步。第二步是一次独立的、需要单独授权的动作。**
+
+## 🔴 执行前必须知道的四件
+
+```
+🔴 ① 跑这个序列会杀掉 dev-coord-testnet 频道 —— 中途无法请示, 必须一次性预授权
+🔴 ② console-supervisor 看门狗不归 kanet-start.sh 管、跨重启存活(kanet-start.sh:58-62)
+     ⇒ 端口又被占时先怀疑是它, 别当成 EADDRINUSE 怪事
+🔴 ③ kanet-start.sh 重起【一整套】(console/relay/scout/adapter), 不是只动 console
+     🔴 而 kanet-stop.sh 更宽: taskkill /F 强杀 ⇒ WAL 来不及 flush。本序列【不用】它
+     🔴 且它的 CONSOLE_PORT 默认 3400 ≠ 实际 3200(J1 07:52 查出) ⇒ 又一个不用它的理由
+🔴 ④ 本次带的是【4 个 commit】, 不是 1 个 —— 直接影响回退写法, 见 §⑤
 ```
 
-## ① 装载前置检查（任何一条不过就停手，不要"应该没事"）
+## ① 装载前置检查（任何一条不过就停手）
 
 <!-- ux1:non-exec reason=live-mutating-sequence-must-not-be-auto-executed -->
 ```bash
 cd /d/kanet-tn12
-
-# 1a 🔴 有没有别人未提交的改动 —— 重启会把它们一起装上去
-git status --porcelain
-
-# 1b 🔴 记下回退点。没有这一行，出事时你只能靠记忆
-git rev-parse HEAD | tee /d/kanet-tn12/logs/reload-rollback-point.txt
-
-# 1c 确认要装的那个 commit 真在树里、且内容就是审过的那份
-git log --oneline -1 98456904
-git diff --stat HEAD 98456904 -- kasia-console/src/api/chat.js
-git rev-parse 98456904:kasia-console/src/api/chat.js   # 🔴 blob sha, 用来【比对】而不是【看】
+git status --porcelain                                    # 1a 别人的未提交改动
+git rev-parse HEAD | tee /d/kanet-tn12/logs/reload-rollback-point.txt   # 1b 回退点
+git merge-base --is-ancestor 98456904 b696544a && echo ANCESTOR_OK      # 1c 无搭便车
+git diff --name-only 98456904 b696544a                    # 1d 改动文件全集
+for f in $(git diff --name-only 98456904 b696544a); do echo "$(git rev-parse b696544a:$f)  $f"; done  # 1e
 ```
 
-**判据**：
-- `1a` 必须为空（或每一条都被明确认领）。**不为空就停** —— 装载会把别人半截的活一起带上去。
-- 🔴 `1c` 的**期望值**（NWT 05:29 ③：给了比对命令而没给期望值 = "跑一下然后凭感觉判断"）：
+**判据 —— 🔴 v0.3 的 `1d` 判据本身变了**：
 
 ```
-git log --oneline -1  期望: 98456904 fix(public-api): 外部唯一入口的输入契约 …
-git diff --stat       期望: 恰好 1 个文件 kasia-console/src/api/chat.js —— 🔴 出现第二个文件就停手
-git rev-parse …:chat.js  期望: 0d628080d79c78f4d7dfb39cd26963e57121d262
+1a  必须为空(或每条被明确认领)
+1c  必须打印 ANCESTOR_OK  ⇒ 已部署版是本版的祖先, 差异集里没有别的东西搭便车
+🔴 1d  期望【恰好这 3 个路径, 一个不多一个不少】—— 上一版是「恰好 1 个文件」, 那条判据【已作废】:
+      kasia-console/src/api/chat.js
+      kasia-console/src/index.js
+      kasia-console/src/services/external-gateway.mjs
+1e  期望逐字(三个都是 git rev-parse 现算的, 不是从文档抄的):
+      ccc0027d1b73dfa22c3fc51f2a419d4121596db5  …/api/chat.js
+      0ff88bc880122d795fad717088b07df2fd5bb6ef  …/index.js
+      617347ba5d3145db0ca30e2d3b7600131a9b0b0a  …/services/external-gateway.mjs
 ```
-🔴 **三者任何一条对不上 ⇒ 你要装的不是被审过的那份东西。停手。**
+🔴 **任何一条对不上 ⇒ 停手。** 而**过期的期望值两个方向都伤**：太松 ⇒ 装错了不喊；过期 ⇒ 装对了却喊停（**假停手**，而"停下来"永远看起来像谨慎）。
 
-> ⚠️ 自曝一处：v0.1→v0.2 草稿里我一度在这格填了一个**我没算过的** blob sha。
-> 那正是「报一个标识符要能被拿去比对」的反面 —— 一个编出来的期望值比没有期望值更坏，
-> 因为它看起来可比对。上面这个 `0d628080…` 是 `git rev-parse 98456904:kasia-console/src/api/chat.js` 实际输出的。
->
-> ⚠️ 而这段注解本身踩过第二次：它一度还引着上一代的 `a9614dd1…`（那是 `1bca6983` 的 blob，真算过，
-> 但随后两次改动已让它过期）。**一个"讲清楚不要写假标识符"的注解，自己引了一个过期标识符** ——
-> 说明**期望值不是写对一次就完事，它跟着代码一起过期**。凡是写下期望值的地方，改码时都要一起改。
-
-## ② 装载（把审过的那个 commit 合进部署树）
+## ② 装载
 
 <!-- ux1:non-exec reason=live-mutating-sequence-must-not-be-auto-executed -->
 ```bash
 cd /d/kanet-tn12
-git merge --ff-only 98456904 || git cherry-pick 98456904
-git rev-parse HEAD          # 记下装了什么
+git merge --ff-only b696544a || git cherry-pick 98456904..b696544a
+git rev-parse HEAD
 ```
 
 ## ③ 停 + 起
@@ -70,74 +70,65 @@ git rev-parse HEAD          # 记下装了什么
 cd /d/kanet-tn12
 bash kanet-start.sh > logs/reload.out 2>&1; rc=$?; tail -30 logs/reload.out; echo "rc=$rc"
 ```
+🔴 不许 `| tail`（吞退出码）· 不许 `timeout` 包（连坐杀子进程）。
 
-🔴 **不要用 `timeout` 包这一行** —— 仓库已付过的学费：`timeout` 包住会连坐杀掉它拉起的长驻子进程。
-🔴🔴 **也不要写成 `bash kanet-start.sh 2>&1 | tail -30`**（v0.1 我就是这么写的，NWT 05:29 ① 抓出）：
-**管道尾会吞掉退出码** —— `$?` 拿到的是 `tail` 的，`kanet-start.sh` 失败与成功长得一模一样。
-🔵 这个坑今晚全队量过两次（`;` / 换行 / `| tail` 三种连接符都吞退出码），**而它出现在装载步骤本身** ——
-它长得完全像"处理一下输出"，写的人不会觉得自己在写 bug。
+## ④ 自证 —— 断言【只有新码才做得到】的事
 
-## ④ 自证 —— 🔴 这一步是整个序列的重点
-
-**「进程在」「端口通」「首页 200」三条全绿，仍然可能是【旧码在跑】**（stale pidfile 让你以为重启了；EADDRINUSE 时旧进程根本没退，新进程静默失败）。
-⇒ **自证必须断言一件【只有新码才做得到】的事。**
+**第一步之后应当看到的**（🔴 注意：这一版的"成功"包含**没有新端口**）：
 
 <!-- ux1:executable -->
 ```bash
-curl -s -o /dev/null -w 'A_invalid_limit_expect_400=%{http_code}\n' "http://127.0.0.1:3200/api/public/channel/kanet-spec/messages?limit=abc"
-curl -s -o /dev/null -w 'B_unknown_channel_expect_404=%{http_code}\n' "http://127.0.0.1:3200/api/public/channel/no-such-channel-xyz/messages?limit=1"
-curl -s "http://127.0.0.1:3200/api/public/channel/kanet-spec/messages?limit=1" | grep -o '"max_limit":[0-9]*' || echo "C_max_limit=MISSING"
+curl -s -o /dev/null -w 'A_expect_400=%{http_code}\n' "http://127.0.0.1:3200/api/public/channel/kanet-spec/messages?limit=abc"
+curl -s -o /dev/null -w 'B_expect_404=%{http_code}\n' "http://127.0.0.1:3200/api/public/channel/no-such-channel-xyz/messages?limit=1"
+curl -s "http://127.0.0.1:3200/api/public/channel/kanet-spec/messages?limit=1" | grep -o '"next_until_id":[^,}]*'
+grep -c "external-gateway" /d/kanet-tn12/logs/console.log
 ```
 
-| 断言 | 旧码 | 新码（装载成功） |
+| 断言 | 期望 | 说明 |
 |---|---|---|
-| A `limit=abc` | `200` | **`400`** |
-| B 频道名不存在 | `200` | **`404`** |
-| C 响应含 `max_limit` | 无此字段 | **`"max_limit":200`** |
+| A `limit=abc` | `400` | 上一版修法仍在（搬运没弄坏它） |
+| B 未知频道 | `404` | 同上 |
+| C 含 `next_until_id` | 有 | 同上 |
+| D 日志含 `external-gateway` | ≥1 | 🔴 它必须**说话** —— 未配置也要打一行 info |
 
-🔴 **三条里任何一条仍是旧码的值 ⇒ 装载【没有生效】，不要报"已上线"。**
+🔴 **D 那条是这一版新加的重点**：模块被调用了但没配 env ⇒ 它**应当**打一行"没有配置就没有对外口"。
+**日志里一行都没有 ⇒ 说明它根本没被执行到**（接线丢了 / import 失败被吞），而那与"正常未启用"长得一样。
 
-🔴🔴 **而三条全绿【只证 console】，不等于系统恢复了**（NWT 05:29 ④）：
-`kanet-start.sh` 会重起 **relay / scout / adapter 一整套**，而本序列**没有给它们任何自证**。
-⇒ 「A/B/C 全绿」的准确含义是 **「console 上跑的是新码」**，仅此。
-**不要把它读成「恢复完成」——那是两个不同的断言，而只有前一个被验了。**
-
-🔵 补充一条游标自证（第七种错法的现场检查，NWT 05:27 找到、Bettor 05:28 判必修）：
-🔵 为什么这样设计：`A/B/C` 是**新码独有的输出**。它区分得开「console 起来了」与「新码在跑」——
-而只查进程/端口/首页，这两件事看起来完全一样。
-
-<!-- ux1:executable -->
-```bash
-curl -s "http://127.0.0.1:3200/api/public/channel/kanet-spec/messages?limit=1" | grep -o '"next_until":[^,}]*' || echo "D_next_until=MISSING"
+🔴🔴 **而必须再核一件：不许有新端口**
+<!-- ux1:non-exec reason=windows-only-and-inspects-live-listeners -->
 ```
-| 断言 | 旧码 | 新码 |
-|---|---|---|
-| D 响应含 `next_until` | 无此字段 | `"next_until":"<ISO>"`（有更多时）或 `"next_until":null` |
+netstat -ano -p TCP | grep LISTENING | grep -v '127.0.0.1'
+⇒ 期望: 与装载前【相同】。第一步不该产生任何新的非回环监听口。
+```
+🔵 依据 NWT 07:56 实测立的判据：**验"某个口没开"，只有【去看监听表/去连它】算数，不能只读日志** ——
+她那次日志明写"已关掉它"，而端口开着。
 
-## ⑤ 失败与回退
+## ⑤ 回退 —— 🔴 v0.3 与上一版完全不同
 
 <!-- ux1:non-exec reason=live-mutating-sequence-must-not-be-auto-executed -->
 ```bash
 cd /d/kanet-tn12
-# 🔴 窄回退: 只还原被改的那【一个】文件 (NWT 05:29 ②)
-git checkout "$(cat logs/reload-rollback-point.txt)" -- kasia-console/src/api/chat.js
+git revert --no-commit 98456904..HEAD
 bash kanet-start.sh > logs/reload-rollback.out 2>&1; rc=$?; tail -30 logs/reload-rollback.out; echo "rc=$rc"
-# 回退后同样要自证 —— 这次期望的是【旧码的值】: A=200 B=200 C=MISSING
 ```
 
-🔴🔴 **v0.1 这里写的是 `git reset --hard`，已撤换。**
-`reset --hard` 会连坐丢掉**别人的未提交改动与未 push 的 commit** —— 仓库里有过实例。
-✅ 而本次装载**只改了一个文件**，所以窄回退对【部署行为】完全等价，却碰不到任何别的东西。
-🔵 与那条老规矩一致：**保护机制不构成保护时，取消那个危险动作，而不是给它加一句警告。**
+🔴 **为什么不能用上一版那种窄回退**：`external-gateway.mjs` 在 `98456904` 上**不存在** ⇒ `git checkout <base> -- <它>` 会**失败**；它的回退不是"取回旧版"，是**删除**。
+✅ `git revert --no-commit` 对**增 / 改 / 删一视同仁**，不需要有人先把变更类型列全 —— 而"列全"是证不了的。
 
-## ⑥ 这个序列【不能】做的事（自述，不藏）
+🔴 **而必须写成范围 `98456904..HEAD`，不是单个 commit**：本次带的是 **4 个** commit
+（`55e15831` → `4f0673f9` → `5cf65aa0` → `b696544a`）。
+**`git revert --no-commit b696544a` 只会撤掉最后一个** ⇒ 留下一个"网关在、而它最后那道收尾没了"的中间态 —— **比不回退更坏**。
+
+**回退后同样跑 §④，而期望的是【旧码的值】**：A=400 · B=404 · C 有（这三条是**上一个已部署版**就有的）· **D=0**（网关模块已不存在 ⇒ 日志里不该再有它）。
+
+## ⑥ 这个序列不能做的事（自述）
 
 ```
-🔴 未在任何机器上跑过 —— 本文件是写出来的序列, 不是跑过的记录。强度:【读脚本】, 非【实跑】
-🔴 不覆盖 console-supervisor 自行拉起造成的竞态 —— 只在 ③ 提示了它, 没有处置它
-🔴 不覆盖 relay / scout / adapter —— kanet-start.sh 会一并重起它们, 而本序列【没有】给它们的自证
-🔴 不解决"谁来按" —— 唯一惯常做这件事的会话不在。本序列把它从"没人会做"变成"照着做即可",
-   而【按下去的人仍然需要存在】
+🔴 从未在任何机器上跑过 —— 强度【读脚本】, 非【实跑】。执行者是第一个跑它的人
+🔴 只覆盖【第一步】。第二步(配 env 对外监听)不在本序列内, 需单独授权
+🔴 只给 console 的自证 —— relay/scout/adapter 会被一并重起, 而本序列不验它们
+   ⇒ §④ 全绿的准确含义是「console 上跑的是新码, 且没有开出新端口」, 不是「系统恢复了」
+🔴 不解决"谁来按"
 ```
 
-**本文件产出过程**：零写入部署树 · 未执行上述任何一条 live 命令 · 未重启任何东西。
+**本文件产出**：零写入部署树 · 未执行其中任何一条 live 命令 · 未重启任何东西。
