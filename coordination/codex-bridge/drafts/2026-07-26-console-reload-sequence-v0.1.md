@@ -1,7 +1,7 @@
 # console 装载序列 v0.1 —— 可粘贴执行，含自证与回退
 
 > Bettor 05:24 派工：「序列由 J2 写成一个可粘贴的完整命令块…必须含 停 → 起 → 起来之后【自证】的那一步（不是"看起来起来了"）」
-> 配套 diff：`1bca6983` · 分支 `j2/ux1-public-limit-contract` · 只改 `kasia-console/src/api/chat.js`
+> 配套 diff：`98456904` · 分支 `j2/ux1-public-limit-contract` · 只改 `kasia-console/src/api/chat.js`
 
 ## 🔴 执行前必须知道的三件（不是提醒，是会让序列失败的事）
 
@@ -30,9 +30,9 @@ git status --porcelain
 git rev-parse HEAD | tee /d/kanet-tn12/logs/reload-rollback-point.txt
 
 # 1c 确认要装的那个 commit 真在树里、且内容就是审过的那份
-git log --oneline -1 1bca6983
-git diff --stat HEAD 1bca6983 -- kasia-console/src/api/chat.js
-git rev-parse 1bca6983:kasia-console/src/api/chat.js   # 🔴 blob sha, 用来【比对】而不是【看】
+git log --oneline -1 98456904
+git diff --stat HEAD 98456904 -- kasia-console/src/api/chat.js
+git rev-parse 98456904:kasia-console/src/api/chat.js   # 🔴 blob sha, 用来【比对】而不是【看】
 ```
 
 **判据**：
@@ -40,22 +40,26 @@ git rev-parse 1bca6983:kasia-console/src/api/chat.js   # 🔴 blob sha, 用来�
 - 🔴 `1c` 的**期望值**（NWT 05:29 ③：给了比对命令而没给期望值 = "跑一下然后凭感觉判断"）：
 
 ```
-git log --oneline -1  期望: 1bca6983 fix(public-api): 外部唯一入口的输入契约 …
+git log --oneline -1  期望: 98456904 fix(public-api): 外部唯一入口的输入契约 …
 git diff --stat       期望: 恰好 1 个文件 kasia-console/src/api/chat.js —— 🔴 出现第二个文件就停手
-git rev-parse …:chat.js  期望: a9614dd107d4cf01a74594fc3d20a93ee1138d98
+git rev-parse …:chat.js  期望: 0d628080d79c78f4d7dfb39cd26963e57121d262
 ```
 🔴 **三者任何一条对不上 ⇒ 你要装的不是被审过的那份东西。停手。**
 
 > ⚠️ 自曝一处：v0.1→v0.2 草稿里我一度在这格填了一个**我没算过的** blob sha。
 > 那正是「报一个标识符要能被拿去比对」的反面 —— 一个编出来的期望值比没有期望值更坏，
-> 因为它看起来可比对。上面这个 `a9614dd1…` 是 `git rev-parse HEAD:kasia-console/src/api/chat.js` 实际输出的。
+> 因为它看起来可比对。上面这个 `0d628080…` 是 `git rev-parse 98456904:kasia-console/src/api/chat.js` 实际输出的。
+>
+> ⚠️ 而这段注解本身踩过第二次：它一度还引着上一代的 `a9614dd1…`（那是 `1bca6983` 的 blob，真算过，
+> 但随后两次改动已让它过期）。**一个"讲清楚不要写假标识符"的注解，自己引了一个过期标识符** ——
+> 说明**期望值不是写对一次就完事，它跟着代码一起过期**。凡是写下期望值的地方，改码时都要一起改。
 
 ## ② 装载（把审过的那个 commit 合进部署树）
 
 <!-- ux1:non-exec reason=live-mutating-sequence-must-not-be-auto-executed -->
 ```bash
 cd /d/kanet-tn12
-git merge --ff-only 1bca6983 || git cherry-pick 1bca6983
+git merge --ff-only 98456904 || git cherry-pick 98456904
 git rev-parse HEAD          # 记下装了什么
 ```
 
