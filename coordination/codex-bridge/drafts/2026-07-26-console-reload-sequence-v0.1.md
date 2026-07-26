@@ -1,4 +1,30 @@
-# console 装载序列 v0.3 —— 双口版（三文件 · revert 回退 · 两步装载）
+# console 装载序列 v0.4 —— 🔴 第一步【已执行完毕】，本文剩下的是回退与第二步
+
+> 🔴🔴 **2026-07-26 08:14 更新：装载已经发生，而它走的路径与 §①②【不同】。**
+> 实际路径：树先被切到功能分支（08:02 查出）→ 发现少 19 个 commit（08:07）→
+> **不切分支、直接把 `origin/bshard-m3-deploy` 那 19 条 merge 进来** → 重启一次（08:14）。
+>
+> **⇒ §①② 描述的是一次【没有发生过的】装载。保留它们只作为下次的模板，不许照它们核当前状态。**
+> ⚠️ 而这正是本文自己警告过的那件事：**期望值过期 ⇒ 照它比对会得到"装错了"的假结论 ⇒ 假停手。**
+> 本次它落在了本文自己头上。
+
+## 🔵 当前真实状态（J2 08:16 独立实跑，非转述）
+
+```
+分支  nwt/external-gateway   🔴 内容对了, 而分支名还是功能分支(NWT 08:16 指出的结构口, 未闭合)
+HEAD  679049ff (merge: p1=b696544a 网关线 · p2=05cca190 deploy 线)
+      落后 origin/bshard-m3-deploy = 0  ·  领先 14
+网关三文件(= 我复审过的那组, 一个字节没动):
+  ccc0027d…  chat.js      0ff88bc8…  index.js      617347ba…  external-gateway.mjs
+曾消失的三个文件(已回来, 用 hash-object 对值而不是"checkout 没报错"):
+  3e2423c9…  repo-root.mjs   a9cef25c…  runtime-scope-dirs.mjs   2dfe1f25…  load-bearing-digest.mjs
+```
+
+---
+
+# 附：原 v0.3 正文（下次装载的模板 · 🔴 期望值已过期，重用前必须全部重算）
+
+## v0.3 标题 —— 双口版（三文件 · revert 回退 · 两步装载）
 
 > v0.1 派工 Bettor 05:24 · v0.2 收 NWT 四条 · **v0.3 改为双口版**（NWT `b696544a`，J2 三轮复审通过）
 > 🔴 **v0.3 与前版的判据本身不同，不只是换数字** —— 见 §① 与 §⑤。
@@ -103,11 +129,43 @@ netstat -ano -p TCP | grep LISTENING | grep -v '127.0.0.1'
 🔵 依据 NWT 07:56 实测立的判据：**验"某个口没开"，只有【去看监听表/去连它】算数，不能只读日志** ——
 她那次日志明写"已关掉它"，而端口开着。
 
-## ⑤ 回退 —— 🔴 v0.3 与上一版完全不同
+## ⑤ 回退 —— 🔴🔴 v0.4 重写：现在树上是一个【合并】，`-m` 用错会撤错半边
+
+**🔴 当前真实的回退命令（v0.3 那条 `98456904..HEAD` 已【不适用】——树上不再是一条线性链）：**
 
 <!-- ux1:non-exec reason=live-mutating-sequence-must-not-be-auto-executed -->
 ```bash
 cd /d/kanet-tn12
+git revert --no-commit -m 2 679049ff     # 🔴 -m 2, 不是 -m 1
+```
+
+**为什么是 `-m 2`（实跑核过父序，不是凭印象）**：
+```
+【实跑】git log -1 --format='%p' 679049ff ⇒ b696544a 05cca190
+   p1 = b696544a  ← 网关那条线
+   p2 = 05cca190  ← origin/bshard-m3-deploy(那 19 条)
+
+git revert -m 1 ⇒ 以 p1(网关线) 为主干 ⇒ 撤掉 p2 的贡献 ⇒ 🔴🔴 把刚补回来的【19 条又撤一次】
+git revert -m 2 ⇒ 以 p2(deploy 线) 为主干 ⇒ 撤掉 p1 的贡献 ⇒ ✅ 只移除网关那 4 条
+```
+🔴 **⇒ `-m` 写反 = 原样复现我们 08:02–08:14 刚花半小时修的那次事故，而且是【故意执行一条回退命令】时发生的。**
+🔵 而它没有任何提示会告诉你选错了 —— 两个方向都"成功"。
+
+**⚠️ 回退后必须核的（不是"命令没报错"）**：
+```
+✅ 三个曾消失的文件仍在, hash-object 逐字 = 3e2423c9… / a9cef25c… / 2dfe1f25…
+   🔴 若它们不见了 ⇒ 你用了 -m 1, 立刻停手
+✅ external-gateway.mjs 【不存在】· chat.js 与 index.js = origin 上那版
+✅ 重启后自证期望【旧码值】, 且日志里【不该】再有 external-gateway
+```
+
+---
+
+### 🔴 以下是 v0.3 的原回退段，已被上面替代，保留只为说明它为什么不再适用
+
+<!-- ux1:non-exec reason=superseded-kept-for-the-record -->
+```bash
+# ❌ 不要用: 树上已不是线性链, 这条会在 merge 上失败或行为不符预期
 git revert --no-commit 98456904..HEAD
 bash kanet-start.sh > logs/reload-rollback.out 2>&1; rc=$?; tail -30 logs/reload-rollback.out; echo "rc=$rc"
 ```
