@@ -1,4 +1,4 @@
-// ux1-capability-manifest.mjs — UX1 能力清单【单一来源】v0.1 (J2, 契约 DRI)
+// ux1-capability-manifest.mjs — UX1 能力清单【单一来源】v0.3 (J2, 契约 DRI)
 //
 // 卡: c45acd37 v1.2 §6A.2 UX1-LIVING-QUICKSTART · 契约 DRI = J2
 //
@@ -15,7 +15,26 @@
 //   ⇒ 见 assertManifestProvenance(), 它在每次渲染时都跑, 不是一句注释。
 
 import { existsSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { resolve, dirname, parse as parsePath } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+/**
+ * 🔴🔴 v0.3 (NWT 04:52 红队⑤): 仓库根【由本模块自己定位】, 不由调用方给。
+ *   v0.1 是布尔参数, v0.2 换成路径参数 —— 病没消灭, 只换了一层:
+ *   两版的强度都取决于【调用方给什么】。而 manifest 在仓库里的位置是【仓库布局的事实】,
+ *   不是【谁在调用】的事实。
+ * 🔴 而"上溯 N 层"我不用 —— 今晚已查出"数斜杠算 ROOT"是缺陷温床(文件挪位置就静默出错)。
+ *   改为向上找 `.git`, 与本仓 repo-root.mjs 同一根治写法。
+ */
+function locateRepoRoot() {
+  let dir = dirname(fileURLToPath(import.meta.url));
+  const rootOf = parsePath(dir).root;
+  for (;;) {
+    if (existsSync(resolve(dir, '.git'))) return dir;
+    if (dir === rootOf) throw new Error('locateRepoRoot: 从本模块向上未找到 .git —— 无法定位仓库根');
+    dir = dirname(dir);
+  }
+}
 
 /** M0b manifest 的预期位置。M0b 落地后, 本文件改为从它生成, 而不是维护这份手写表。 */
 export const M0B_MANIFEST_PATH = 'kasia-console/src/contract/m0b-manifest.json'; // 🔴 当前不存在
@@ -38,12 +57,22 @@ export const REASON = Object.freeze({
   OUT_OF_SCOPE_BY_RULING: 'out_of_scope_by_ruling',
 });
 
-/** 深冻结 + 补默认 reason_class。v0.2 修 (NWT 04:46 小(a)): Object.freeze 是浅的。 */
-function deepFreeze(arr) {
+/**
+ * 规范化 + 校验 + 深冻结。
+ * 🔴 v0.3 改名 (NWT 04:52 红队⑥-i): v0.2 叫 deepFreeze 而它还【改数据】—— 名不副实。
+ * 🔴 v0.3 加 enforce (红队⑥-ii): v0.2 那条"写 OUT_OF_SCOPE_BY_RULING 必须给条号"
+ *    【只是一句注释】, 没有任何东西 enforce 它。而我整夜在把"靠自觉"换成"让它不可能"。
+ *    ⇒ 现在它在 freeze 之前校验, 缺条号直接抛 —— 让"故意不做"当不成万能借口。
+ */
+function normalizeValidateFreeze(arr) {
   for (const o of arr) {
-    // 缺省为 not_built。🔴 只有【有裁定明令不做】的才准写 OUT_OF_SCOPE_BY_RULING,
-    //   而写它的那一项必须在 why 里给出那条裁定的条号 —— 否则"故意不做"就成了万能借口。
     if (o.reason_class === undefined) o.reason_class = REASON.NOT_BUILT;
+    if (o.reason_class === REASON.OUT_OF_SCOPE_BY_RULING && !/§\s*[\d.]+/.test(o.why || '')) {
+      throw new Error(
+        `能力 "${o.id}" 标了 OUT_OF_SCOPE_BY_RULING, 而 why 里没有裁定条号(形如 §16.3)。` +
+          '⇒ 没有条号的"本版故意不做"不许存在 —— 那是万能借口, 不是裁定。',
+      );
+    }
     Object.freeze(o);
   }
   return Object.freeze(arr);
@@ -53,7 +82,7 @@ function deepFreeze(arr) {
  * 唯一来源。每一项必须写 why —— 因为外部评审者问的是"为什么不能用", 不是"能不能用"。
  * 🔴 status 一律按【现在】填, 不按【计划】填。§6A.2 DoD: 不得用愿景假装已经可用。
  */
-export const CAPABILITIES = deepFreeze([
+export const CAPABILITIES = normalizeValidateFreeze([
   {
     id: 'caller_identity',
     title: 'caller identity 与 capability 获取',
@@ -106,12 +135,12 @@ export const CAPABILITIES = deepFreeze([
  * 判据 (Bettor 04:41): M0b 落地之前, 任何人跑这套 mock, 都必须在输出里看见那句话。
  * @returns {{sameSource: boolean, notice: string}}
  */
-export function assertManifestProvenance(repoRoot) {
+export function assertManifestProvenance() {
   let exists = false;
   let probeError = null;
   try {
     // 🔴 检测【失败】必须 fail 成"喊", 不是 fail 成"静默通过" (NWT 04:43 压的那格)
-    exists = existsSync(resolve(repoRoot ?? process.cwd(), M0B_MANIFEST_PATH));
+    exists = existsSync(resolve(locateRepoRoot(), M0B_MANIFEST_PATH));
   } catch (e) {
     probeError = e && e.message ? e.message : String(e);
   }
@@ -160,8 +189,8 @@ function markOf(status) {
 }
 
 /** 渲染一: 机器可判 token, 进响应体。黑盒脚本可对它断言。 */
-export function toResponseTokens(repoRoot) {
-  const prov = assertManifestProvenance(repoRoot);
+export function toResponseTokens() {
+  const prov = assertManifestProvenance();
   return {
     capabilities: CAPABILITIES.map((c) => ({
       id: c.id,
@@ -175,8 +204,8 @@ export function toResponseTokens(repoRoot) {
 }
 
 /** 渲染二: 人可见, 未实现能力显式标红 (§16.3 :1489)。与渲染一同源。 */
-export function toMarkedDoc(repoRoot) {
-  const prov = assertManifestProvenance(repoRoot);
+export function toMarkedDoc() {
+  const prov = assertManifestProvenance();
   const lines = [];
   if (!prov.sameSource) lines.push(prov.notice, '');
   lines.push(PROVENANCE_OF_STATUSES, ''); // 🔴 v0.2 红队③: 在表【之前】, 读表的人绕不过
@@ -194,4 +223,4 @@ export function toMarkedDoc(repoRoot) {
 //   🔴 未做: proof_query 那项标 READ_ONLY, 而"用户实际拿到的是纯文本 txid"来自 NWT 04:05 实读,
 //            我未独立复核。
 //   🔴 未做: 本文件尚未被任何 CI 跑过 —— DoD「示例由 CI 实际运行」未满足。
-//   ⚠️ 待定: 文档与脚本谁是源 (NWT ① 那格), 我已问未答 ⇒ 本文件不预设方向, 只做数据源。
+//   ✅ 已闭合(Bettor 04:42 裁): 文档是源, runner 抽取并执行文档里的代码块。本文件是数据源, 不参与那个方向。
