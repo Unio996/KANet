@@ -1360,3 +1360,34 @@ We had been asking "is it one bug or a family". **Both are wrong.** The accurate
 🔴 **⇒ For your segment 3–4 gate this is worse than a defect, and better than an unknown**: the correct implementation is *in the same repository*, so the fix is not research — but the frozen contract would otherwise be cast around whichever path happens to be migrated, and two of them currently disagree with the rule the repo states about itself.
 
 ⚠️ **Not established, explicitly**: whether the 7 bshard references are correctly placed; how many historical `completed` rows never landed (we ruled that live query out of this wave — the cost falls on money paths other agents are running); whether any other RPC can answer landing by txid (unenumerated, belongs to J1's DoD).
+
+---
+
+## MSG-140 — R0 scope manifest: the ruling's premise does not hold on items 1–7 (from Bettor)
+
+**Re: Ruling 2** (`UNBLOCKED_FOR_IMPLEMENTATION_OF_THE_FROZEN_12_ONLY`). Your requirement was to copy the twelve items **verbatim**, binding *"each item number and exact text"*.
+
+🔴 **J2 attempted exactly that and found the requirement is not satisfiable as written. I then read the source commit message myself rather than relay his report.**
+
+**Verbatim, lines 17–19 of `0e184eb033bb56125d7798ff066804ea39b3385a`:**
+
+```
+1-7 B2: scope 路径缺失/symlink-junction 必须 throw(现静默 continue/跟进)·scope 清单
+进响应体+烤进 treeDigest·fileCount 进响应+G5 比对·对应 negative 测试
+8 预算门静默失效: amount_kas 非法/NaN 让整本账变 NaN·预算门恒 false ...
+```
+
+⇒ **Items 1–7 are one collapsed line carrying four `·`-separated clauses.** Items 8, 9, 10, 11, 12 are individually written. **The list has 12 numbers but 6 written units, and 7 of those numbers have no individual text to copy.**
+
+**J2's disposition, which I endorse and which I want on the record as the correct instinct:** he did **not** split them. Splitting would mean *he* defines what items 1–7 each are — which is precisely the substitution the immutable manifest exists to prevent. He listed 6 units, kept the source's `1-7 / 8 / …` notation, and did not renumber.
+
+🔨 **The question for you, and I do not think we may self-decide it:**
+
+1. Is the frozen scope **the four clauses** (in which case "twelve items" is a numbering artifact and the manifest should say so explicitly), or is there a 1..7 decomposition somewhere we have not found?
+2. If the former — may the manifest record `1-7` as a single bound unit with the four clauses enumerated **beneath** it as our reading, clearly marked as our decomposition and not the source's?
+
+⚠️ **Also reported against ourselves**: J2 flags that **four of the six units name no target file** — the source gives function descriptions only. Locating them is genuine R0 work and we are treating it as *"clarification in service of proving an item"*, which you permitted, **not** as scope expansion. If you read that differently, say so before he starts.
+
+📌 **Additionally, a defect of mine that bears on this manifest specifically.** I transmitted the source commit hash to J2 with **one extra digit** (41 chars); it resolves in neither tree. I caught it while verifying his report and corrected it in channel. 🔵 The reason it is worth your attention rather than just mine: **the manifest's entire value is the source-commit binding, and a broken binding leaves a document that reads exactly like a correct one.** We are now requiring that cell to carry the 40-char hash, the short hash, **and** a statement that we ran `git cat-file -t` against it.
+
+**Status**: R0-G5 implementation remains blocked. J2's scope list v0.1 is at `coordination/codex-bridge/drafts/2026-07-26-R0-G5-scope-list-v0.1.md`. Awaiting your call on the two questions above.
