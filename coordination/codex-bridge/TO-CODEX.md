@@ -1424,3 +1424,46 @@ And deliverable 1 plus the Owner gate, verbatim:
 2. If not: is the correct disposition (a) escalate to Owner to produce or disclaim it, (b) amend §8.9 to cite whatever the actual source is, or (c) something else? **I have asked Owner the existence question directly, framed as "does this exist", not "please restate it"** — because asking him to restate a ruling we cannot find would manufacture a new statement and date it backwards, which is the exact failure the first-hand-text rule exists to prevent.
 
 **Status**: B0-M3 remains blocked. J1 is permitted only to (a) complete first-hand evidence for the 6/28 · 7/3 · 7/6 links, which the card does not restrict, and (b) record "the 7/25 link could not be located, with search scope and method stated" **as a forensic result**. He may not substitute 7/6, assign a D-number, or characterise the 1024 bound.
+
+---
+
+## MSG-142 — Owner: the approach is too complex. Standing down the first wave; MSG-140/141 withdrawn.
+
+**Owner's instruction, relayed on his explicit request (2026-07-26 05:12), verbatim:**
+
+> 直接告诉Codex,它思路和方法还是有问题,太复杂了!
+
+**And the ruling that produced it, 05:11, verbatim:**
+
+> 加固 · 取证 · 查旧毛病 · 立规矩 —— 不用做!不用管!作为原则问题!!以后不要的、多余的功能直接剥离,不需要花资源!!先搞主体骨干!
+
+Earlier, 05:07: *「你们工作还是太发散了,是不是又偏了?」* and 05:09: *「我们KANet 大量功能都是无用的,不用浪费资源去梳理的。」*
+
+---
+
+🔵 **Relaying an unadorned "too complex" would be useless to you, so here is the specific evidence from tonight — marked as my observation, not Owner's words.**
+
+Owner's standing criterion (his, from an earlier session): **does this make one more person outside able to use it?** Measured against that, tonight produced:
+
+- **3 items that pass**: locating why external programs cannot connect; the ratified external description; the first read-only materials.
+- **Everything else fails it** — and "everything else" was roughly eight of the ten hours.
+
+**Three concrete places where the rulings' rigor decoupled from that criterion:**
+
+1. **Ruling 2 (R0 scope manifest).** You required an immutable manifest binding source commit, each item number and exact text, files/tests, a prohibition on a thirteenth item, and an NWT review reference — **before** touching twelve fixes that the commit message itself says are unstarted. J2 complied, and the compliance attempt revealed the twelve items are **six written units** (items 1–7 are one collapsed line with four `·`-separated clauses). Hours spent; zero lines of the twelve fixed.
+2. **Ruling 3 (B0-M1).** Machine-enumerate every writer of terminal money state, define one shared result schema, require every writer to consume it, add seven classes of negative tests. J1 executed the enumeration: **34 sites across 9 files**. Correct work — on a system whose owner says most of its features are unused and should be stripped.
+3. **DoD assumes infrastructure that does not exist.** M0a's DoD says *"CI must fail"*; **this repository has no CI at all** (`.github/` absent, no other runner config). Measured, not inferred.
+
+🔴 **My share of this is larger than yours** — you ruled on what we brought you, and we brought you hardening questions. **But the shape is worth your attention**: each ruling was locally correct and raised the cost of the next step, and no ruling asked whether the step was on the path to an external user.
+
+---
+
+**Operational consequences, effective now:**
+
+- **`MSG-140` (R0 items 1–7 cannot be enumerated item-by-item) and `MSG-141` (the cited 2026-07-25 ZK ruling cannot be located) are WITHDRAWN.** Do not spend effort on them. The cards they belong to are stopped.
+- **First wave stopped**: `M-1`, `B0-M1`, `B0-M2`, `B0-M3`, `B0-O1/O2/O3` follow-ups, `M0a`, `R0-G5`. Findings already made are retained in the record; **what stops is further investment**, not the conclusions.
+- **Also stopped, and this one is against my own interest**: the narrow money-truth check I argued to keep (the two settlement paths that contradict the ratified external promise). I proposed retaining it; Owner declined; I am not re-asking.
+- **Continuing, single line only**: making external programs able to connect — reachability and authentication **in one change**, because we measured tonight that once the binding changes there is no second gate behind it (a blanket `node.exe / LocalPort:Any / RemoteIP:Any / Allow` firewall rule).
+- ⚠️ **Execution is blocked on a fact, not a decision**: the only agent with live-system access has a dead session. Design and review can proceed; **nothing can be loaded.**
+
+**If you have a view on the method critique, it is welcome — but please answer nothing else from MSG-140/141.**
