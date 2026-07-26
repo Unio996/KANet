@@ -548,11 +548,40 @@ export async function registerChatRoutes(fastify) {
 
   // GET /api/public/channel/:name/messages — public message API (= task md §3.1)
   // Hard filter visibility='public' (= Track A internal 默认不泄露 per §3.4)
+  //
+  // 🔴 2026-07-26 J2 (Bettor 05:18/05:19 派工, 判据逐字:「外部集成方写错任何一样东西时,
+  //    能不能【从响应本身】看出来」)。这是外部程序【唯一】能调的入口, 而它此前对任何错误
+  //    输入都回 200 —— 集成方看不出自己写错了。实测(逐次数了返回条数, 非估算):
+  //      limit=abc → 50   · limit=0 → 50    (非法值静默退回默认)
+  //      limit=201 → 200  · limit=99999 → 200 (静默截断, 响应里无任何标记)
+  //      limit=-5  → 535  (Math.min 只压上界不压下界 ⇒ 负数进 SQL ⇒ 返回全部)
+  //      频道名打错 → 200 + 空数组 (与"公开频道但暂无消息"无法区分)
+  //    ⇒ 本次只动这一个 handler。同写法在 bettor.js 等处还有十余处, 【不动】(Owner 05:11 令)。
   fastify.get('/api/public/channel/:name/messages', async (request, reply) => {
     const { name } = request.params;
     const { since, until, tag, query, limit: rawLimit } = request.query;
-    if (!/^[a-z0-9-]{1,40}$/.test(name)) return reply.code(400).send({ error: 'invalid channel name' });
-    const limit = Math.min(parseInt(rawLimit) || 50, 200);
+    // 🔴 免责头提前设 —— 否则下面的 400/404 分支不带它, 而错误响应同样是对外响应
+    reply.header('X-KANet-Disclaimer', 'testnet-only-no-investment-advice');
+
+    const PUBLIC_MAX_LIMIT = 200;
+    const PUBLIC_DEFAULT_LIMIT = 50;
+
+    if (!/^[a-z0-9-]{1,40}$/.test(name)) {
+      return reply.code(400).send({ error: 'invalid_channel_name', hint: 'a-z 0-9 与连字符, 1-40 字符', got: String(name) });
+    }
+
+    // 🔴 limit 契约: 非法值【报错】, 不静默改成别的数字。
+    let limit = PUBLIC_DEFAULT_LIMIT;
+    let limitClamped = false;
+    if (rawLimit !== undefined && rawLimit !== '') {
+      if (!/^\d+$/.test(String(rawLimit))) {
+        // 负数走这里(有 '-' 不匹配 \d+) ⇒ 下界问题被【拒绝】而不是被夹紧, 调用方能看见
+        return reply.code(400).send({ error: 'invalid_limit', hint: `非负整数, 1..${PUBLIC_MAX_LIMIT}`, got: String(rawLimit) });
+      }
+      const n = Number(rawLimit);
+      if (n < 1) return reply.code(400).send({ error: 'invalid_limit', hint: `最小 1, 最大 ${PUBLIC_MAX_LIMIT}`, got: String(rawLimit) });
+      if (n > PUBLIC_MAX_LIMIT) { limit = PUBLIC_MAX_LIMIT; limitClamped = true; } else { limit = n; }
+    }
 
     let sql = `SELECT id, sender_address, content as message_text, tx_hash as txid, created_at as timestamp
                FROM broadcast_messages
@@ -563,11 +592,40 @@ export async function registerChatRoutes(fastify) {
     if (tag)   { sql += ' AND content LIKE ?'; params.push('%#' + tag + '%'); }
     if (query) { sql += ' AND content LIKE ?'; params.push('%' + query + '%'); }
     sql += ' ORDER BY created_at DESC LIMIT ?';
-    params.push(limit);
+    // 🔴 多取一行来判断"还有没有" —— 这样 has_more 是【实际探到的】, 不是从 length==limit 猜的
+    params.push(limit + 1);
 
-    const messages = sqlite.prepare(sql).all(...params);
-    reply.header('X-KANet-Disclaimer', 'testnet-only-no-investment-advice');
-    return reply.send({ messages, channel: name });
+    const rows = sqlite.prepare(sql).all(...params);
+    const hasMore = rows.length > limit;
+    const messages = hasMore ? rows.slice(0, limit) : rows;
+
+    // 🔴 404 的判据是【是不是公开频道】, 不是【频道存不存在】(Bettor 05:19 裁)。
+    //    ⇒ 内部频道(如 dev-coord-testnet)与一个拼错的名字拿到【同一个 404】, 泄露量为零。
+    //    ⚠️ 绝不去查 channels 表 —— 那才会泄露内部频道的存在。
+    //    🔴 且这一判必须【忽略 since/until/tag/query】: 过滤器筛出 0 条 ≠ 频道不存在,
+    //       否则一次搜不到就报 404, 那是把两种情况又混成一种。
+    if (messages.length === 0) {
+      const anyPublic = sqlite.prepare(
+        `SELECT 1 FROM broadcast_messages
+          WHERE channel_name = ? AND visibility = 'public' AND status != 'local' LIMIT 1`,
+      ).get(name);
+      if (!anyPublic) {
+        return reply.code(404).send({
+          error: 'channel_not_found_or_not_public',
+          hint: '该名字下没有任何公开消息 —— 可能是名字写错了, 也可能它不是公开频道',
+          channel: name,
+        });
+      }
+    }
+
+    return reply.send({
+      messages,
+      channel: name,
+      limit_applied: limit,            // 🔴 真正生效的值, 不让调用方猜
+      max_limit: PUBLIC_MAX_LIMIT,     // 🔴 上限写在响应里, 不要求对方去读文档
+      limit_clamped: limitClamped,     // 🔴 你要的比上限大 ⇒ 明说被压过
+      has_more: hasMore,               // 🔴 你只拿到一个窗口 ⇒ 明说后面还有
+    });
   });
 
   // GET /api/prediction-agent/stats — DM session stats for Agent tab UI wire
