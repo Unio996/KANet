@@ -56,13 +56,22 @@ export async function startExternalGateway() {
   //    ⇒ 这正是今晚那一族最贵的形态: 每一步看起来都成功, 而要发生的事没发生。
   //    ⇒ 所以给它一个硬上界: 超时 ⇒ 与其它任何"不是明确成功"的路径同样降级。
   const START_TIMEOUT_MS = Number(process.env.KANET_EXTERNAL_GATEWAY_START_TIMEOUT_MS) || 8000;
+  // 🔴 race 不取消输的那一方(J2 07:53): 超时后 _start() 仍在跑, 它可能【随后】把端口开起来
+  //    ⇒ 我们宣布没启动, 而口是开着的 —— 对一个安全相关的监听口这是最坏的一种。
+  //    ⇒ 用一个共享 state 让两边都能收尾: 外层置 cancelled + 尽力关; 内层 listen 之后自查。
+  const state = { cancelled: false, app: null };
   let timer = null;
   const timeout = new Promise((resolve) => {
     timer = setTimeout(() => resolve(_TIMED_OUT), START_TIMEOUT_MS);
   });
   try {
-    const r = await Promise.race([_start(), timeout]);
+    const r = await Promise.race([_start(state), timeout]);
     if (r === _TIMED_OUT) {
+      state.cancelled = true;
+      // 🔴 这里【不许】调 state.app.close() —— 实测: 对一个【还没 listen】的 fastify 实例调 close(),
+      //    之后它的 listen 仍会成功, 而第二次 close() 不再关掉那个新开的 socket ⇒ 口反而留下了。
+      //    ⇒ 收尾唯一有效的位置是【listen 成功之后】那一处(见 _start 里的迟到检查)。
+      //    ⇒ 而超时能赢 race, 恰恰意味着 listen 还没完成 ⇒ 此刻本来也没有口要关。
       console.error(
         `[external-gateway] 🔴 启动超过 ${START_TIMEOUT_MS}ms 仍未完成 ⇒ 放弃, console 继续跑。` +
           ' (卡住而不是抛 —— 例如 HOST 是个解析不了的主机名。不给上界的话, 它后面的 relay/bot/cron 全起不来。)',
@@ -78,7 +87,7 @@ export async function startExternalGateway() {
 /** 超时哨兵 —— 用 Symbol 保证它不可能与 _start() 的任何正常返回值相等。 */
 const _TIMED_OUT = Symbol('external-gateway-start-timeout');
 
-async function _start() {
+async function _start(state) {
   let app = null;
 
   /**
@@ -125,6 +134,7 @@ async function _start() {
     //    那会让下面"实际注册的 === 白名单"这条判据【永远对不上】, 于是只能放宽成"包含",
     //    而放宽之后它就挡不住"多注册了一条"这件事。⇒ 关掉它, 让判据保持【精确相等】。
     app = Fastify({ logger: false, exposeHeadRoutes: false });
+    state.app = app; // 🔴 让外层在超时时也能关掉它
 
     // 🔴🔴 白名单从【文档】变成【闸】(J2 07:37 residual ①):
     //    PROTOCOL_ROUTES 里的 method/path 本来只是描述 —— 没有任何东西保证 r.register()
@@ -153,6 +163,13 @@ async function _start() {
     }
 
     await app.listen({ port, host });
+
+    // 🔴 迟到检查: 外层可能已经超时并宣布没启动 ⇒ 那就【不许】把这个口留着。
+    if (state.cancelled) {
+      try { await app.close(); } catch { /* 尽力 */ }
+      console.error(`[external-gateway] 🔴 监听在超时【之后】才成功 ⇒ 已关掉它。绝不留一个我们说它没开、而它开着的口。`);
+      return null;
+    }
 
     console.log(
       `[external-gateway] listening on ${host}:${port} — 只暴露 ${PROTOCOL_ROUTES.length} 条协议面路由:\n` +
