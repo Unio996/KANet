@@ -546,127 +546,11 @@ export async function registerChatRoutes(fastify) {
     return reply.viewAsync('public-channel', { channelName: name, channels: PUBLIC_CHANNELS, lang });
   });
 
-  // GET /api/public/channel/:name/messages — public message API (= task md §3.1)
-  // Hard filter visibility='public' (= Track A internal 默认不泄露 per §3.4)
-  //
-  // 🔴 2026-07-26 J2 (Bettor 05:18/05:19 派工, 判据逐字:「外部集成方写错任何一样东西时,
-  //    能不能【从响应本身】看出来」)。这是外部程序【唯一】能调的入口, 而它此前对任何错误
-  //    输入都回 200 —— 集成方看不出自己写错了。实测(逐次数了返回条数, 非估算):
-  //      limit=abc → 50   · limit=0 → 50    (非法值静默退回默认)
-  //      limit=201 → 200  · limit=99999 → 200 (静默截断, 响应里无任何标记)
-  //      limit=-5  → 535  (Math.min 只压上界不压下界 ⇒ 负数进 SQL ⇒ 返回全部)
-  //      频道名打错 → 200 + 空数组 (与"公开频道但暂无消息"无法区分)
-  //    ⇒ 本次只动这一个 handler。同写法在 bettor.js 等处还有十余处, 【不动】(Owner 05:11 令)。
-  fastify.get('/api/public/channel/:name/messages', async (request, reply) => {
-    const { name } = request.params;
-    const { since, until, until_id: untilId, tag, query, limit: rawLimit } = request.query;
-    // 🔴 免责头提前设 —— 否则下面的 400/404 分支不带它, 而错误响应同样是对外响应
-    reply.header('X-KANet-Disclaimer', 'testnet-only-no-investment-advice');
-
-    const PUBLIC_MAX_LIMIT = 200;
-    const PUBLIC_DEFAULT_LIMIT = 50;
-
-    if (!/^[a-z0-9-]{1,40}$/.test(name)) {
-      return reply.code(400).send({ error: 'invalid_channel_name', hint: 'a-z 0-9 与连字符, 1-40 字符', got: String(name) });
-    }
-
-    // 🔴 limit 契约: 非法值【报错】, 不静默改成别的数字。
-    let limit = PUBLIC_DEFAULT_LIMIT;
-    let limitClamped = false;
-    if (rawLimit !== undefined && rawLimit !== '') {
-      if (!/^\d+$/.test(String(rawLimit))) {
-        // 负数走这里(有 '-' 不匹配 \d+) ⇒ 下界问题被【拒绝】而不是被夹紧, 调用方能看见
-        return reply.code(400).send({ error: 'invalid_limit', hint: `非负整数, 1..${PUBLIC_MAX_LIMIT}`, got: String(rawLimit) });
-      }
-      const n = Number(rawLimit);
-      if (n < 1) return reply.code(400).send({ error: 'invalid_limit', hint: `最小 1, 最大 ${PUBLIC_MAX_LIMIT}`, got: String(rawLimit) });
-      if (n > PUBLIC_MAX_LIMIT) { limit = PUBLIC_MAX_LIMIT; limitClamped = true; } else { limit = n; }
-    }
-
-    let sql = `SELECT id, sender_address, content as message_text, tx_hash as txid, created_at as timestamp
-               FROM broadcast_messages
-               WHERE channel_name = ? AND visibility = 'public' AND status != 'local'`;
-    const params = [name];
-    if (since) { sql += ' AND created_at > ?'; params.push(since); }
-    // 🔴🔴 复合游标 (Bettor 05:36 判必修)。单靠 created_at 的严格 `<` 会【静默漏行】:
-    //    同一毫秒的多条里, 只要有一条落在页尾, 其余同值行下一页就再也拿不到 ——
-    //    而集成方【没有任何信号】。那正是本次修法要消灭的那个病本身。
-    // 【实跑核】全表存在同 created_at 的行(最多 4 行同毫秒); 公开面此刻恰好 0 撞。
-    //    ⇒ 也就是说它现在不发作, 是因为公开面【碰巧】还没有同毫秒的行 —— 那不是一道保证。
-    // 【实跑核】id 是 TEXT PRIMARY KEY 且非空处唯一(127733/127748), 而【有 15 行 id 为 NULL】
-    //    (SQLite 的 TEXT PK 允许 NULL)。那 15 行当前全是 internal, 公开面为 0。
-    //    ⇒ 同样是"碰巧" ⇒ 游标必须 NULL 安全, 不能假设 id 一定有值。
-    //    ⇒ 用 COALESCE(id,'') 作为次序键: 空串小于任何 uuid, 于是 NULL-id 行在同毫秒内排最后,
-    //      且比较是【全序】—— 不会跳, 也不会重。
-    // 🔴 守卫只区分【有没有传这个参数】, 不看它是不是空串 (NWT 05:41):
-    //    页尾正好是 id=NULL 那行时, 游标值【就是】空串 —— 把空串排除掉, 等于把复合游标
-    //    唯一为之而建的那个输入排除掉。undefined(没传) 与 '' (传了空串) 必须分开。
-    if (until && untilId !== undefined && untilId !== null) {
-      sql += " AND (created_at < ? OR (created_at = ? AND COALESCE(id,'') < ?))";
-      params.push(until, until, String(untilId));
-    } else if (until) {
-      // 向后兼容: 老调用方只传 until。此路径仍是严格 `<`, 同毫秒行会被跳 —— 而它是【旧行为】,
-      // 不是新引入的。新调用方按响应里的 next_until + next_until_id 成对回传即可避开。
-      sql += ' AND created_at < ?';
-      params.push(until);
-    }
-    if (tag)   { sql += ' AND content LIKE ?'; params.push('%#' + tag + '%'); }
-    if (query) { sql += ' AND content LIKE ?'; params.push('%' + query + '%'); }
-    sql += " ORDER BY created_at DESC, COALESCE(id,'') DESC LIMIT ?";
-    // 🔴 多取一行来判断"还有没有" —— 这样 has_more 是【实际探到的】, 不是从 length==limit 猜的
-    params.push(limit + 1);
-
-    const rows = sqlite.prepare(sql).all(...params);
-    const hasMore = rows.length > limit;
-    const messages = hasMore ? rows.slice(0, limit) : rows;
-
-    // 🔴 404 的判据是【是不是公开频道】, 不是【频道存不存在】(Bettor 05:19 裁)。
-    //    ⇒ 内部频道(如 dev-coord-testnet)与一个拼错的名字拿到【同一个 404】, 泄露量为零。
-    //    ⚠️ 绝不去查 channels 表 —— 那才会泄露内部频道的存在。
-    //    🔴 且这一判必须【忽略 since/until/tag/query】: 过滤器筛出 0 条 ≠ 频道不存在,
-    //       否则一次搜不到就报 404, 那是把两种情况又混成一种。
-    if (messages.length === 0) {
-      const anyPublic = sqlite.prepare(
-        `SELECT 1 FROM broadcast_messages
-          WHERE channel_name = ? AND visibility = 'public' AND status != 'local' LIMIT 1`,
-      ).get(name);
-      if (!anyPublic) {
-        return reply.code(404).send({
-          error: 'channel_not_found_or_not_public',
-          hint: '该名字下没有任何公开消息 —— 可能是名字写错了, 也可能它不是公开频道',
-          channel: name,
-        });
-      }
-    }
-
-    // 🔴🔴 游标 (NWT 05:27 红队第七种错法, Bettor 05:28 判"必须修才能上"):
-    //    只给 has_more=true 而不给游标 ⇒ 集成方照直觉用 since 翻页 ⇒
-    //    SQL 是 created_at > since 且 ORDER BY created_at DESC ⇒ 拿回【同样那一批】,
-    //    has_more 仍为 true ⇒ 无限循环: 每次 200 OK · 每次相同数据 · 零错误信号。
-    //    ⇒ 正好落在本次要满足的那条判据的反面: 他做错了, 而响应告诉不了他。
-    // ⚠️ 方向: 排序是 DESC ⇒ 该给的是 `until` 侧游标, 不是 `since` 侧。给错方向 = 病换个地方复发。
-    // ⚠️ 两条路径的保证【不同】(NWT 05:41 指出上一版注释已过期):
-    //    · 复合路径(until + until_id 成对) ⇒ 全序比较 ⇒ 同毫秒行【不漏不重】
-    //    · 兼容路径(只传 until) ⇒ 仍是严格 `<` ⇒ 同毫秒行会被跳过 —— 那是【旧行为】, 非本次引入
-    // 🟡 已知残缺(NWT 提, Bettor 未派 ⇒ 本版不做, 记在这里不让它消失):
-    //    只传 until 的调用方【静默走有损路径】, 响应里没有任何提示 ——
-    //    严格说它违反本次那条唯一判据(集成方看不出自己在有损路径上)。
-    const lastRow = messages.length > 0 ? messages[messages.length - 1] : null;
-    const nextUntil = hasMore && lastRow ? lastRow.timestamp : null;
-    // 🔴 与 next_until 【成对】使用。单传 next_until 会退回旧的严格 `<` 路径 ⇒ 同毫秒行被静默跳过。
-    const nextUntilId = hasMore && lastRow ? (lastRow.id ?? '') : null;
-
-    return reply.send({
-      messages,
-      channel: name,
-      limit_applied: limit,            // 🔴 真正生效的值, 不让调用方猜
-      max_limit: PUBLIC_MAX_LIMIT,     // 🔴 上限写在响应里, 不要求对方去读文档
-      limit_clamped: limitClamped,     // 🔴 你要的比上限大 ⇒ 明说被压过
-      has_more: hasMore,               // 🔴 你只拿到一个窗口 ⇒ 明说后面还有
-      next_until: nextUntil,           // 🔴 翻下一页把它原样传回 ?until= ; has_more=false 时为 null
-      next_until_id: nextUntilId,      // 🔴 必须与 next_until 【成对】回传 ?until_id= , 否则同毫秒行会被跳
-    });
-  });
+  // 🔴 2026-07-26 NWT: 这条 handler 已搬进 registerPublicChannelReadRoute(见文件末)。
+  //    搬的理由: 对外网关实例要【只注册这一条】, 而 registerChatRoutes 里有 20 条 ——
+  //    直接调它会把 /api/chat/send 等 19 条一并暴露到外网(NWT 07:23 实测)。
+  //    🔴 而这里是【调用】不是【复制】: 全仓该路由的注册点必须始终只有 1 处, 否则两份实现会漂移。
+  await registerPublicChannelReadRoute(fastify);
 
   // GET /api/prediction-agent/stats — DM session stats for Agent tab UI wire
   // Per Bettor r100 R2 + sub-2c (KANet-UI):
@@ -964,4 +848,137 @@ async function triggerAutoReply(responder, channelName, senderAddress, content, 
       }, cascadeDelay);
     }
   }
+}
+
+
+/**
+ * 公开频道只读接口 —— 【唯一】注册点。
+ *
+ * 🔴 它被两个 Fastify 实例各注册一次, 而实现只有这一份:
+ *    · 控制面(现有 console, 绑 127.0.0.1) —— 经 registerChatRoutes 调用
+ *    · 对外网关(external-gateway.mjs, 绑对外)  —— 只调用它, 不调 registerChatRoutes
+ * 🔴 绝不允许在别处再写一份同能力的 handler —— 那是双权威源, 会漂移(J2 07:21 自陈)。
+ */
+export async function registerPublicChannelReadRoute(fastify) {
+  // GET /api/public/channel/:name/messages — public message API (= task md §3.1)
+  // Hard filter visibility='public' (= Track A internal 默认不泄露 per §3.4)
+  //
+  // 🔴 2026-07-26 J2 (Bettor 05:18/05:19 派工, 判据逐字:「外部集成方写错任何一样东西时,
+  //    能不能【从响应本身】看出来」)。这是外部程序【唯一】能调的入口, 而它此前对任何错误
+  //    输入都回 200 —— 集成方看不出自己写错了。实测(逐次数了返回条数, 非估算):
+  //      limit=abc → 50   · limit=0 → 50    (非法值静默退回默认)
+  //      limit=201 → 200  · limit=99999 → 200 (静默截断, 响应里无任何标记)
+  //      limit=-5  → 535  (Math.min 只压上界不压下界 ⇒ 负数进 SQL ⇒ 返回全部)
+  //      频道名打错 → 200 + 空数组 (与"公开频道但暂无消息"无法区分)
+  //    ⇒ 本次只动这一个 handler。同写法在 bettor.js 等处还有十余处, 【不动】(Owner 05:11 令)。
+  fastify.get('/api/public/channel/:name/messages', async (request, reply) => {
+    const { name } = request.params;
+    const { since, until, until_id: untilId, tag, query, limit: rawLimit } = request.query;
+    // 🔴 免责头提前设 —— 否则下面的 400/404 分支不带它, 而错误响应同样是对外响应
+    reply.header('X-KANet-Disclaimer', 'testnet-only-no-investment-advice');
+
+    const PUBLIC_MAX_LIMIT = 200;
+    const PUBLIC_DEFAULT_LIMIT = 50;
+
+    if (!/^[a-z0-9-]{1,40}$/.test(name)) {
+      return reply.code(400).send({ error: 'invalid_channel_name', hint: 'a-z 0-9 与连字符, 1-40 字符', got: String(name) });
+    }
+
+    // 🔴 limit 契约: 非法值【报错】, 不静默改成别的数字。
+    let limit = PUBLIC_DEFAULT_LIMIT;
+    let limitClamped = false;
+    if (rawLimit !== undefined && rawLimit !== '') {
+      if (!/^\d+$/.test(String(rawLimit))) {
+        // 负数走这里(有 '-' 不匹配 \d+) ⇒ 下界问题被【拒绝】而不是被夹紧, 调用方能看见
+        return reply.code(400).send({ error: 'invalid_limit', hint: `非负整数, 1..${PUBLIC_MAX_LIMIT}`, got: String(rawLimit) });
+      }
+      const n = Number(rawLimit);
+      if (n < 1) return reply.code(400).send({ error: 'invalid_limit', hint: `最小 1, 最大 ${PUBLIC_MAX_LIMIT}`, got: String(rawLimit) });
+      if (n > PUBLIC_MAX_LIMIT) { limit = PUBLIC_MAX_LIMIT; limitClamped = true; } else { limit = n; }
+    }
+
+    let sql = `SELECT id, sender_address, content as message_text, tx_hash as txid, created_at as timestamp
+               FROM broadcast_messages
+               WHERE channel_name = ? AND visibility = 'public' AND status != 'local'`;
+    const params = [name];
+    if (since) { sql += ' AND created_at > ?'; params.push(since); }
+    // 🔴🔴 复合游标 (Bettor 05:36 判必修)。单靠 created_at 的严格 `<` 会【静默漏行】:
+    //    同一毫秒的多条里, 只要有一条落在页尾, 其余同值行下一页就再也拿不到 ——
+    //    而集成方【没有任何信号】。那正是本次修法要消灭的那个病本身。
+    // 【实跑核】全表存在同 created_at 的行(最多 4 行同毫秒); 公开面此刻恰好 0 撞。
+    //    ⇒ 也就是说它现在不发作, 是因为公开面【碰巧】还没有同毫秒的行 —— 那不是一道保证。
+    // 【实跑核】id 是 TEXT PRIMARY KEY 且非空处唯一(127733/127748), 而【有 15 行 id 为 NULL】
+    //    (SQLite 的 TEXT PK 允许 NULL)。那 15 行当前全是 internal, 公开面为 0。
+    //    ⇒ 同样是"碰巧" ⇒ 游标必须 NULL 安全, 不能假设 id 一定有值。
+    //    ⇒ 用 COALESCE(id,'') 作为次序键: 空串小于任何 uuid, 于是 NULL-id 行在同毫秒内排最后,
+    //      且比较是【全序】—— 不会跳, 也不会重。
+    // 🔴 守卫只区分【有没有传这个参数】, 不看它是不是空串 (NWT 05:41):
+    //    页尾正好是 id=NULL 那行时, 游标值【就是】空串 —— 把空串排除掉, 等于把复合游标
+    //    唯一为之而建的那个输入排除掉。undefined(没传) 与 '' (传了空串) 必须分开。
+    if (until && untilId !== undefined && untilId !== null) {
+      sql += " AND (created_at < ? OR (created_at = ? AND COALESCE(id,'') < ?))";
+      params.push(until, until, String(untilId));
+    } else if (until) {
+      // 向后兼容: 老调用方只传 until。此路径仍是严格 `<`, 同毫秒行会被跳 —— 而它是【旧行为】,
+      // 不是新引入的。新调用方按响应里的 next_until + next_until_id 成对回传即可避开。
+      sql += ' AND created_at < ?';
+      params.push(until);
+    }
+    if (tag)   { sql += ' AND content LIKE ?'; params.push('%#' + tag + '%'); }
+    if (query) { sql += ' AND content LIKE ?'; params.push('%' + query + '%'); }
+    sql += " ORDER BY created_at DESC, COALESCE(id,'') DESC LIMIT ?";
+    // 🔴 多取一行来判断"还有没有" —— 这样 has_more 是【实际探到的】, 不是从 length==limit 猜的
+    params.push(limit + 1);
+
+    const rows = sqlite.prepare(sql).all(...params);
+    const hasMore = rows.length > limit;
+    const messages = hasMore ? rows.slice(0, limit) : rows;
+
+    // 🔴 404 的判据是【是不是公开频道】, 不是【频道存不存在】(Bettor 05:19 裁)。
+    //    ⇒ 内部频道(如 dev-coord-testnet)与一个拼错的名字拿到【同一个 404】, 泄露量为零。
+    //    ⚠️ 绝不去查 channels 表 —— 那才会泄露内部频道的存在。
+    //    🔴 且这一判必须【忽略 since/until/tag/query】: 过滤器筛出 0 条 ≠ 频道不存在,
+    //       否则一次搜不到就报 404, 那是把两种情况又混成一种。
+    if (messages.length === 0) {
+      const anyPublic = sqlite.prepare(
+        `SELECT 1 FROM broadcast_messages
+          WHERE channel_name = ? AND visibility = 'public' AND status != 'local' LIMIT 1`,
+      ).get(name);
+      if (!anyPublic) {
+        return reply.code(404).send({
+          error: 'channel_not_found_or_not_public',
+          hint: '该名字下没有任何公开消息 —— 可能是名字写错了, 也可能它不是公开频道',
+          channel: name,
+        });
+      }
+    }
+
+    // 🔴🔴 游标 (NWT 05:27 红队第七种错法, Bettor 05:28 判"必须修才能上"):
+    //    只给 has_more=true 而不给游标 ⇒ 集成方照直觉用 since 翻页 ⇒
+    //    SQL 是 created_at > since 且 ORDER BY created_at DESC ⇒ 拿回【同样那一批】,
+    //    has_more 仍为 true ⇒ 无限循环: 每次 200 OK · 每次相同数据 · 零错误信号。
+    //    ⇒ 正好落在本次要满足的那条判据的反面: 他做错了, 而响应告诉不了他。
+    // ⚠️ 方向: 排序是 DESC ⇒ 该给的是 `until` 侧游标, 不是 `since` 侧。给错方向 = 病换个地方复发。
+    // ⚠️ 两条路径的保证【不同】(NWT 05:41 指出上一版注释已过期):
+    //    · 复合路径(until + until_id 成对) ⇒ 全序比较 ⇒ 同毫秒行【不漏不重】
+    //    · 兼容路径(只传 until) ⇒ 仍是严格 `<` ⇒ 同毫秒行会被跳过 —— 那是【旧行为】, 非本次引入
+    // 🟡 已知残缺(NWT 提, Bettor 未派 ⇒ 本版不做, 记在这里不让它消失):
+    //    只传 until 的调用方【静默走有损路径】, 响应里没有任何提示 ——
+    //    严格说它违反本次那条唯一判据(集成方看不出自己在有损路径上)。
+    const lastRow = messages.length > 0 ? messages[messages.length - 1] : null;
+    const nextUntil = hasMore && lastRow ? lastRow.timestamp : null;
+    // 🔴 与 next_until 【成对】使用。单传 next_until 会退回旧的严格 `<` 路径 ⇒ 同毫秒行被静默跳过。
+    const nextUntilId = hasMore && lastRow ? (lastRow.id ?? '') : null;
+
+    return reply.send({
+      messages,
+      channel: name,
+      limit_applied: limit,            // 🔴 真正生效的值, 不让调用方猜
+      max_limit: PUBLIC_MAX_LIMIT,     // 🔴 上限写在响应里, 不要求对方去读文档
+      limit_clamped: limitClamped,     // 🔴 你要的比上限大 ⇒ 明说被压过
+      has_more: hasMore,               // 🔴 你只拿到一个窗口 ⇒ 明说后面还有
+      next_until: nextUntil,           // 🔴 翻下一页把它原样传回 ?until= ; has_more=false 时为 null
+      next_until_id: nextUntilId,      // 🔴 必须与 next_until 【成对】回传 ?until_id= , 否则同毫秒行会被跳
+    });
+  });
 }
