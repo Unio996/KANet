@@ -493,6 +493,14 @@ setInterval(() => {
 import { startZkProveServer } from './services/zk-prove-server.mjs';
 await startZkProveServer();
 
+// external-gateway: 对外协议面的【独立】Fastify 实例(与上面同一个形状: 不共用主 fastify/不共用绑定)。
+// 🔴 它默认【不启动】—— KANET_EXTERNAL_GATEWAY_HOST / _PORT 两个都显式配了才起。
+//    所以接这一行【不改变任何现有行为】: 不配 env ⇒ 它返回 null, 一个端口都不监听。
+// 🔴 而接线本身是必要的: 不接, 这个模块在运行时【从来不会被调用】—— 那样"装上去了"与
+//    "根本没跑"长得一模一样, 且验收(从另一台机器读)也无从跑起。(J2 07:37 residual ②)
+import { startExternalGateway } from './services/external-gateway.mjs';
+await startExternalGateway();
+
 // zk-prove-worker(缺件②, Bettor 2026-07-08 派工): 轮询 zk_prove_jobs 真跑 RISC0 proving + 铸 gate 注资。
 // ZK_PROVE_WORKER_ENABLED=1 才跑(默认 OFF, 真实 proving+真 KAS 注资, 同 SETTLE_DAEMON_ENABLED 模式)。
 import { startZkProveWorkerCron } from './services/zk-prove-worker.mjs';

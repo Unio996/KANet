@@ -7,15 +7,16 @@
 //    ⇒ 那条老规矩: 取消危险动作, 而不是给危险动作加一道闸。
 //
 // 🔴 而它同时把"可达与鉴权必须同一个变更"从【纪律】变成【结构】:
-//    这个对外监听口只有在白名单非空时才被创建 ⇒ 造不出"开了口而清单还没写"的中间态。
+//    这个对外监听口只有在白名单非空且 HOST/PORT 都显式配置时才被创建
+//    ⇒ 造不出"开了口而清单还没写"的中间态。
 //
 // 🔴 白名单只有【一条】(J2 6dec4d6f 分界线): 外部程序今天确实只能用这一条。
-//    deny 侧最不能漏的两条(J2 点名), 它们【不在这里注册】, 因此从这个口连不到:
+//    deny 侧最不能漏的几条(J2 点名 + Bettor 07:15 裁), 它们【不在这里注册】, 因此从这个口连不到:
 //      POST /api/agent/create              铸身份
 //      POST /api/relay/:id/publish-card    让我们的 relay 花我们的币发链上 TX
-//      POST /api/chat/send                 用【我们的钥匙】替调用方说话(Bettor 07:15 裁定 deny)
+//      POST /api/chat/send                 用【我们的钥匙】替调用方说话
 //
-// 🔴 控制面(现有 console)【零改动】: 仍绑 127.0.0.1, 且本版【不加 bearer】——
+// 🔴 控制面(现有 console)【行为零改动】: 仍绑 127.0.0.1, 且本版【不加 bearer】——
 //    实测每一个内部调用方都不带 Authorization 头, 加它 = 装载那一刻全部 401(含协调频道本身)。
 //    控制面本版的安全前提就是"继续绑回环"那一条, 而它没动。(NWT 07:25 · Bettor 07:26 裁)
 import Fastify from 'fastify';
@@ -36,52 +37,98 @@ const PROTOCOL_ROUTES = Object.freeze([
 ]);
 
 /**
- * 🔴 启动对外网关。fail-closed 的三道:
- *   ① 白名单为空        ⇒ 不启动(而不是启动一个空实例)
- *   ② 未配置对外端口     ⇒ 不启动。照 zk-prove-server 的先例: 缺配置 ⇒ NOT started, 不是 fail-open
- *   ③ 绑定地址未显式给出 ⇒ 不启动。绝不"默认 0.0.0.0" —— 暴露必须是一次显式决定
+ * 启动对外网关。
+ *
+ * 🔴🔴 本函数【从不抛】—— 这是它自己的属性, 不是每个调用点各自记得包 try/catch 的结果。
+ *    (放在调用点 ⇒ 下一个人再加一处调用就没了 —— J2 07:40)
+ *    而实现方式【不是逐个 catch 已知失败】: 那是列举, 而列举永远证不了完整
+ *    ("我们有三道 fail-closed"会让人以为覆盖是完整的, 而完整性从没被证明过 —— Bettor 07:41)。
+ *    ⇒ 整块包住: 任何不是【明确成功】的路径, 一律降级为「网关不启动 + 一条刺眼的日志」, console 继续。
+ *    ⇒ 与白名单那条同一个原理: default-deny 可以被证明完整, 逐条列举不能。
  *
  * @returns {Promise<null|{close: () => Promise<void>, host: string, port: number}>}
  */
 export async function startExternalGateway() {
-  if (PROTOCOL_ROUTES.length === 0) {
-    console.warn('[external-gateway] 白名单为空 ⇒ 不启动(fail-closed)。');
+  let app = null;
+
+  /** 统一的降级出口: 收掉可能已经半开的实例, 打一条刺眼日志, 返回 null。 */
+  const abort = async (msg) => {
+    if (app) {
+      try { await app.close(); } catch { /* 已经半开着也要尽量收 */ }
+    }
+    console.error(msg);
     return null;
-  }
+  };
 
-  const portRaw = process.env.KANET_EXTERNAL_GATEWAY_PORT;
-  const host = process.env.KANET_EXTERNAL_GATEWAY_HOST;
+  try {
+    if (PROTOCOL_ROUTES.length === 0) {
+      return await abort('[external-gateway] 🔴 白名单为空 ⇒ 不启动(fail-closed)。');
+    }
 
-  if (!portRaw || !host) {
-    console.warn(
-      '[external-gateway] 未配置 KANET_EXTERNAL_GATEWAY_HOST / _PORT ⇒ 不启动。' +
-        ' 🔴 这是 fail-closed: 没有默认对外绑定, 暴露必须是一次显式决定。',
+    const portRaw = process.env.KANET_EXTERNAL_GATEWAY_PORT;
+    const host = process.env.KANET_EXTERNAL_GATEWAY_HOST;
+
+    // 🔴 没有默认对外绑定 —— 暴露必须是一次显式配置决定。
+    //    env 未配 = 本模块被调用了、而一个端口都不监听 ⇒ 装载后行为零变化。
+    if (!portRaw || !host) {
+      return await abort(
+        '[external-gateway] 未配置 KANET_EXTERNAL_GATEWAY_HOST / _PORT ⇒ 不启动(fail-closed)。' +
+          ' 🔴 这不是错误: 没有配置就没有对外口。',
+      );
+    }
+
+    const port = Number(portRaw);
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+      return await abort(`[external-gateway] 🔴 KANET_EXTERNAL_GATEWAY_PORT 非法(${portRaw}) ⇒ 不启动。`);
+    }
+
+    // 🔴 exposeHeadRoutes:false —— fastify 默认会为每条 GET 自动加一条 HEAD。
+    //    那会让下面"实际注册的 === 白名单"这条判据【永远对不上】, 于是只能放宽成"包含",
+    //    而放宽之后它就挡不住"多注册了一条"这件事。⇒ 关掉它, 让判据保持【精确相等】。
+    app = Fastify({ logger: false, exposeHeadRoutes: false });
+
+    // 🔴🔴 白名单从【文档】变成【闸】(J2 07:37 residual ①):
+    //    PROTOCOL_ROUTES 里的 method/path 本来只是描述 —— 没有任何东西保证 r.register()
+    //    实际注册上去的就是它们。于是白名单可以【在自己不知情的情况下变宽】, 而它长得像一份权威清单。
+    const actuallyRegistered = [];
+    app.addHook('onRoute', (r) => {
+      const methods = Array.isArray(r.method) ? r.method : [r.method];
+      for (const m of methods) actuallyRegistered.push(`${m} ${r.url}`);
+    });
+
+    // 🔴 只注册白名单里的那几条 —— 【不调用 registerChatRoutes】。
+    //    它里面有 20 条路由(NWT 07:23 实测), 调它会把 /api/chat/send 等 19 条一并暴露到外网。
+    for (const r of PROTOCOL_ROUTES) {
+      await r.register(app);
+    }
+
+    const declared = PROTOCOL_ROUTES.map((r) => `${r.method} ${r.path}`).sort();
+    const actual = actuallyRegistered.slice().sort();
+    if (declared.length !== actual.length || declared.some((d, i) => d !== actual[i])) {
+      return await abort(
+        '[external-gateway] 🔴 实际注册的路由与白名单不一致 ⇒ 【不启动】(fail-closed)。\n' +
+          `  白名单声明: ${JSON.stringify(declared)}\n` +
+          `  实际注册的: ${JSON.stringify(actual)}\n` +
+          '  ⇒ 差集里的每一条都是【没有被审过就要对外暴露】的东西。',
+      );
+    }
+
+    await app.listen({ port, host });
+
+    console.log(
+      `[external-gateway] listening on ${host}:${port} — 只暴露 ${PROTOCOL_ROUTES.length} 条协议面路由:\n` +
+        PROTOCOL_ROUTES.map((r) => `  ${r.method} ${r.path}`).join('\n'),
     );
-    return null;
+    const started = app;
+    return { close: () => started.close(), host, port };
+  } catch (e) {
+    // 🔴 兜底: 不区分是哪一种失败(端口被占 / 路由冲突 / 权限 / 将来新增的任何一种)。
+    //    列举失败情形永远证不了完整; 而"不是明确成功就一律不启动"可以。
+    return await abort(
+      '[external-gateway] 🔴 启动过程中出现未预期失败 ⇒ 网关【不启动】, 而 console 继续跑。' +
+        ` 原因: ${e && e.code ? e.code + ' ' : ''}${e && e.message ? e.message : String(e)}`,
+    );
   }
-
-  const port = Number(portRaw);
-  if (!Number.isInteger(port) || port < 1 || port > 65535) {
-    console.warn(`[external-gateway] KANET_EXTERNAL_GATEWAY_PORT 非法(${portRaw}) ⇒ 不启动(fail-closed)。`);
-    return null;
-  }
-
-  const app = Fastify({ logger: false });
-
-  // 🔴 只注册白名单里的那几条 —— 【不调用 registerChatRoutes】。
-  //    registerChatRoutes 里有 20 条路由(NWT 07:23 实测), 直接调它会把 /api/chat/send 等
-  //    19 条一并暴露到外网 —— 那正是本设计要防的那件事。
-  for (const r of PROTOCOL_ROUTES) {
-    await r.register(app);
-  }
-
-  await app.listen({ port, host });
-  console.log(
-    `[external-gateway] listening on ${host}:${port} — 只暴露 ${PROTOCOL_ROUTES.length} 条协议面路由:\n` +
-      PROTOCOL_ROUTES.map((r) => `  ${r.method} ${r.path}`).join('\n'),
-  );
-
-  return { close: () => app.close(), host, port };
 }
 
 /** 供测试/审查用: 白名单本身。🔴 只读 —— 改它等于改暴露面, 必须走审。 */
