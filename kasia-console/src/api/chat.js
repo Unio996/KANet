@@ -559,7 +559,7 @@ export async function registerChatRoutes(fastify) {
   //    ⇒ 本次只动这一个 handler。同写法在 bettor.js 等处还有十余处, 【不动】(Owner 05:11 令)。
   fastify.get('/api/public/channel/:name/messages', async (request, reply) => {
     const { name } = request.params;
-    const { since, until, tag, query, limit: rawLimit } = request.query;
+    const { since, until, until_id: untilId, tag, query, limit: rawLimit } = request.query;
     // 🔴 免责头提前设 —— 否则下面的 400/404 分支不带它, 而错误响应同样是对外响应
     reply.header('X-KANet-Disclaimer', 'testnet-only-no-investment-advice');
 
@@ -588,10 +588,28 @@ export async function registerChatRoutes(fastify) {
                WHERE channel_name = ? AND visibility = 'public' AND status != 'local'`;
     const params = [name];
     if (since) { sql += ' AND created_at > ?'; params.push(since); }
-    if (until) { sql += ' AND created_at < ?'; params.push(until); }
+    // 🔴🔴 复合游标 (Bettor 05:36 判必修)。单靠 created_at 的严格 `<` 会【静默漏行】:
+    //    同一毫秒的多条里, 只要有一条落在页尾, 其余同值行下一页就再也拿不到 ——
+    //    而集成方【没有任何信号】。那正是本次修法要消灭的那个病本身。
+    // 【实跑核】全表存在同 created_at 的行(最多 4 行同毫秒); 公开面此刻恰好 0 撞。
+    //    ⇒ 也就是说它现在不发作, 是因为公开面【碰巧】还没有同毫秒的行 —— 那不是一道保证。
+    // 【实跑核】id 是 TEXT PRIMARY KEY 且非空处唯一(127733/127748), 而【有 15 行 id 为 NULL】
+    //    (SQLite 的 TEXT PK 允许 NULL)。那 15 行当前全是 internal, 公开面为 0。
+    //    ⇒ 同样是"碰巧" ⇒ 游标必须 NULL 安全, 不能假设 id 一定有值。
+    //    ⇒ 用 COALESCE(id,'') 作为次序键: 空串小于任何 uuid, 于是 NULL-id 行在同毫秒内排最后,
+    //      且比较是【全序】—— 不会跳, 也不会重。
+    if (until && untilId !== undefined && untilId !== null && untilId !== '') {
+      sql += " AND (created_at < ? OR (created_at = ? AND COALESCE(id,'') < ?))";
+      params.push(until, until, String(untilId));
+    } else if (until) {
+      // 向后兼容: 老调用方只传 until。此路径仍是严格 `<`, 同毫秒行会被跳 —— 而它是【旧行为】,
+      // 不是新引入的。新调用方按响应里的 next_until + next_until_id 成对回传即可避开。
+      sql += ' AND created_at < ?';
+      params.push(until);
+    }
     if (tag)   { sql += ' AND content LIKE ?'; params.push('%#' + tag + '%'); }
     if (query) { sql += ' AND content LIKE ?'; params.push('%' + query + '%'); }
-    sql += ' ORDER BY created_at DESC LIMIT ?';
+    sql += " ORDER BY created_at DESC, COALESCE(id,'') DESC LIMIT ?";
     // 🔴 多取一行来判断"还有没有" —— 这样 has_more 是【实际探到的】, 不是从 length==limit 猜的
     params.push(limit + 1);
 
@@ -626,7 +644,10 @@ export async function registerChatRoutes(fastify) {
     // ⚠️ 方向: 排序是 DESC ⇒ 该给的是 `until` 侧游标, 不是 `since` 侧。给错方向 = 病换个地方复发。
     // ⚠️ 已知边界(如实标, 不藏): until 是严格 `<`。若最后一条与更旧的某条 created_at 完全相同,
     //    下一页会把那些同值行跳过。本表 created_at 为毫秒 ISO, 相撞概率低而【不为零】。
-    const nextUntil = hasMore && messages.length > 0 ? messages[messages.length - 1].timestamp : null;
+    const lastRow = messages.length > 0 ? messages[messages.length - 1] : null;
+    const nextUntil = hasMore && lastRow ? lastRow.timestamp : null;
+    // 🔴 与 next_until 【成对】使用。单传 next_until 会退回旧的严格 `<` 路径 ⇒ 同毫秒行被静默跳过。
+    const nextUntilId = hasMore && lastRow ? (lastRow.id ?? '') : null;
 
     return reply.send({
       messages,
@@ -636,6 +657,7 @@ export async function registerChatRoutes(fastify) {
       limit_clamped: limitClamped,     // 🔴 你要的比上限大 ⇒ 明说被压过
       has_more: hasMore,               // 🔴 你只拿到一个窗口 ⇒ 明说后面还有
       next_until: nextUntil,           // 🔴 翻下一页把它原样传回 ?until= ; has_more=false 时为 null
+      next_until_id: nextUntilId,      // 🔴 必须与 next_until 【成对】回传 ?until_id= , 否则同毫秒行会被跳
     });
   });
 
