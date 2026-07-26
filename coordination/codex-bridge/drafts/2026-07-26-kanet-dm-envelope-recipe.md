@@ -20,13 +20,21 @@
 
 ```
 ephemeral = 随机 secp256k1 密钥对
-shared    = ECDH(ephemeral.private, 收方pubkey)
+shared    = ECDH(ephemeral.private, 收方pubkey)   // 🔴 见下方两条，取错会静默失败
 key       = HKDF-SHA256(shared, salt=空, info=空, 32 B)
 nonce     = 随机 12 B
 ct, mac   = ChaCha20-Poly1305(key, nonce).encrypt(明文)      // tag 16 B
 
 密文字节 = nonce(12) ‖ ephemeral.pubkey_compressed(33) ‖ ct(len(明文)) ‖ mac(16)
 ```
+
+🔴 **`shared` 必须是 ECDH 结果的 x 坐标，32 字节** —— 不是压缩点（33 B），也不是点的哈希。
+
+各家 secp256k1 库对「ECDH 输出」的定义**不一致**：有的给 x 坐标，有的给完整压缩点，有的直接返回点的 SHA-256。取错 ⇒ 密钥不同 ⇒ MAC 校验失败 ⇒ **你只会看到「解密失败」，没有任何线索指向这一步。**
+
+> Node.js 的 `ECDH.computeSecret()` 默认就给 x 坐标，可直接用。用其它库请先确认它返回的是哪一种。
+
+🔵 **而收方 pubkey 补 `0x02` 还是 `0x03` 都可以** —— 地址里只有 32 B x-only pubkey，你需要补一个奇偶前缀才能做 ECDH。**两种都行**：共享密钥取的是 x 坐标，而 P 与 −P 的 x 坐标相同。（这一条经独立实测，两种前缀各跑一次完整往返，均成功。）
 
 字节布局：
 
