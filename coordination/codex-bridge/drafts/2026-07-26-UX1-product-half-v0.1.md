@@ -25,7 +25,8 @@
 > **以下这段是 Owner 于 2026-07-26 04:03 亲口订死的唯一权威文本。逐字,不许任何人改动一个字。**
 > 出处:`docs/2026-07-26-kanet-official-external-description.md`
 
-```
+<!-- ux1:non-exec reason=owner-ratified-prose-not-code -->
+```text
 KANet 是一条给程序用的信任通道。
 接进来的程序,能拿到三样东西:可信的身份、加密的通信、链上的结算 —— 全部记在 Kaspa 链上,任何人都能自己验。
 现在是测试网。
@@ -80,9 +81,9 @@ curl -s "http://<KANET_HOST>:3200/api/public/channel/kanet-spec/messages?limit=2
 
 ### 步骤 2 —— 用 txid 自己核这笔上没上链　🔴 `NOT_AVAILABLE`
 
-<!-- ux1:not-executable reason=no-public-explorer-and-no-public-proof-endpoint -->
-```
-(空缺)
+<!-- ux1:non-exec reason=no-public-explorer-and-no-public-proof-endpoint -->
+```text
+(空缺 — 本步骤今天没有可执行的调用)
 ```
 
 🔴 **缺什么,逐条**:
@@ -94,9 +95,9 @@ curl -s "http://<KANET_HOST>:3200/api/public/channel/kanet-spec/messages?limit=2
 
 ### 步骤 3 —— 拿到 caller identity / capability　🔴 `NOT_AVAILABLE`
 
-<!-- ux1:not-executable reason=onboarding-requires-bot-token -->
-```
-(空缺)
+<!-- ux1:non-exec reason=onboarding-requires-bot-token -->
+```text
+(空缺 — 本步骤今天没有可执行的调用)
 ```
 🔴 `kanet-broker.js:264-270` 要求 `bot_token`(长度 ≥ 20)。**这一条就是"外部程序接不进来"的那一行。**
 
