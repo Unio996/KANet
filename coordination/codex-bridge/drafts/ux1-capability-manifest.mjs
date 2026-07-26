@@ -201,6 +201,34 @@ export const REACHABILITY_PRECONDITION =
   'kanet.env 无 HOST 行), NWT 与 J2 各自枚举运行时套接字确证 (pid 40232 绑 127.0.0.1:3200)。' +
   '⚠️ 这是【那一刻】的运行时事实, 不是配置承诺 —— 绑定改变则本条失效, 需重测。';
 
+/**
+ * 🔴🔴 v0.5 新增。J1 07:31 查出、J2 独立实读核实。
+ *
+ * 🔵 为什么它【不是】CAPABILITIES 里的第六行:
+ *   那张表回答"这个能力建了没有", 而这一条说的是"我们【怎么】读链"。
+ *   硬塞进那张表就要给它一个 MOCK_ONLY/NOT_AVAILABLE/READ_ONLY 之一 —— 三个都不合身。
+ *   ⇒ 把不合身的东西塞进枚举, 正是这份文件从 v0.1 起就在反对的事。所以它单列。
+ *
+ * 【实读】kasia-relay/src/lib/indexer.mjs:2  DEFAULT_INDEXER_URL = 'https://indexer.kasia.fyi'
+ * 【实读】kasia-relay/src/lib/indexer.mjs:44 process.env.KASIA_INDEXER_URL || DEFAULT_INDEXER_URL
+ * 【实读】唯一 import 点 = kasia-relay/src/chain.mjs:7  getIndexer
+ *
+ * ⚠️ 精度要紧, 两件别混:
+ *   🔴 事实: 【默认】指向一个我们不拥有的第三方服务
+ *   🔵 而它【不是硬接线】: 有 KASIA_INDEXER_URL 环境变量可改指
+ *   ⇒ 所以准确说法是「我们没有拥有它」, 不是「我们不可能拥有它」。
+ *   🔴【未做】自建 indexer 是否存在、是否可用 —— 没人验过。它挂了会怎样, 也没人验过。
+ */
+export const CHAIN_READ_DEPENDENCY =
+  '🔴 依赖披露: 消息【发现】(收方如何找到发给自己的链上消息) 走的是一个第三方 indexer —— ' +
+  '默认 https://indexer.kasia.fyi (kasia-relay/src/lib/indexer.mjs:2, 唯一调用方 chain.mjs:7)。' +
+  '⇒ 也就是说「被这张网认出来」这件事, 有一段【不在我们手里】。' +
+  '🔵 它可用 KASIA_INDEXER_URL 改指自建实例(:44) ⇒ 是【我们没有拥有它】, 不是【不可能拥有】。' +
+  '🔴 而 kanet.env 当前【没有设这个变量】(Bettor 07:32 实读) ⇒ 生效的就是那个第三方默认值 —— ' +
+  '"有 env 可覆盖"不许被读成"我们已经自建了"。' +
+  '⚠️ 而"自建实例是否存在/可用"、"它挂了会怎样", 至 2026-07-26 07:31 【无人验过】。' +
+  '⚠️ 本条不影响上表 read-only proof 那一格 —— 那一格说的是【外部拿 txid 自行核链】, 与我们用不用 indexer 无关。';
+
 /** 状态 → 人可见标记。🔴 穷尽映射, 不设 else —— 未知状态必须刺眼, 绝不默认绿。 */
 const STATUS_MARK = Object.freeze({
   [STATUS.NOT_AVAILABLE]: '🔴 ',
@@ -229,6 +257,7 @@ export function toResponseTokens() {
     manifest_notice: prov.notice || undefined, // 🔴 不同源时它必然出现在响应里
     status_provenance: PROVENANCE_OF_STATUSES, // 🔴 v0.2 红队③: 跟着响应走
     reachability_precondition: REACHABILITY_PRECONDITION, // 🔴 v0.4: 与上一条同理, 限定必须跟着结论走
+    chain_read_dependency: CHAIN_READ_DEPENDENCY, // 🔴 v0.5: 依赖披露, 同样必须跟着结论走
   };
 }
 
@@ -245,6 +274,7 @@ export function toMarkedDoc() {
   lines.push(REACHABILITY_PRECONDITION, '');
   if (!prov.sameSource) lines.push(prov.notice, '');
   lines.push(PROVENANCE_OF_STATUSES, ''); // 🔴 v0.2 红队③: 在表【之前】, 读表的人绕不过
+  lines.push(CHAIN_READ_DEPENDENCY, ''); // 🔴 v0.5: 依赖披露 (J1 07:31 查出, J2 独立实读核)
   lines.push('| 能力 | 状态 | 不可用的性质 | 为什么 |', '|---|---|---|---|');
   for (const c of CAPABILITIES) {
     const cls = c.reason_class === REASON.OUT_OF_SCOPE_BY_RULING ? '本版故意不做(有裁定)' : '尚未建';
