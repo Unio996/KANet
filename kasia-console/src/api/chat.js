@@ -618,6 +618,16 @@ export async function registerChatRoutes(fastify) {
       }
     }
 
+    // 🔴🔴 游标 (NWT 05:27 红队第七种错法, Bettor 05:28 判"必须修才能上"):
+    //    只给 has_more=true 而不给游标 ⇒ 集成方照直觉用 since 翻页 ⇒
+    //    SQL 是 created_at > since 且 ORDER BY created_at DESC ⇒ 拿回【同样那一批】,
+    //    has_more 仍为 true ⇒ 无限循环: 每次 200 OK · 每次相同数据 · 零错误信号。
+    //    ⇒ 正好落在本次要满足的那条判据的反面: 他做错了, 而响应告诉不了他。
+    // ⚠️ 方向: 排序是 DESC ⇒ 该给的是 `until` 侧游标, 不是 `since` 侧。给错方向 = 病换个地方复发。
+    // ⚠️ 已知边界(如实标, 不藏): until 是严格 `<`。若最后一条与更旧的某条 created_at 完全相同,
+    //    下一页会把那些同值行跳过。本表 created_at 为毫秒 ISO, 相撞概率低而【不为零】。
+    const nextUntil = hasMore && messages.length > 0 ? messages[messages.length - 1].timestamp : null;
+
     return reply.send({
       messages,
       channel: name,
@@ -625,6 +635,7 @@ export async function registerChatRoutes(fastify) {
       max_limit: PUBLIC_MAX_LIMIT,     // 🔴 上限写在响应里, 不要求对方去读文档
       limit_clamped: limitClamped,     // 🔴 你要的比上限大 ⇒ 明说被压过
       has_more: hasMore,               // 🔴 你只拿到一个窗口 ⇒ 明说后面还有
+      next_until: nextUntil,           // 🔴 翻下一页把它原样传回 ?until= ; has_more=false 时为 null
     });
   });
 
