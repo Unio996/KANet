@@ -1,7 +1,7 @@
 # console 装载序列 v0.1 —— 可粘贴执行，含自证与回退
 
 > Bettor 05:24 派工：「序列由 J2 写成一个可粘贴的完整命令块…必须含 停 → 起 → 起来之后【自证】的那一步（不是"看起来起来了"）」
-> 配套 diff：`6fca38b8` · 分支 `j2/ux1-public-limit-contract` · 只改 `kasia-console/src/api/chat.js`
+> 配套 diff：`1bca6983` · 分支 `j2/ux1-public-limit-contract` · 只改 `kasia-console/src/api/chat.js`
 
 ## 🔴 执行前必须知道的三件（不是提醒，是会让序列失败的事）
 
@@ -30,18 +30,32 @@ git status --porcelain
 git rev-parse HEAD | tee /d/kanet-tn12/logs/reload-rollback-point.txt
 
 # 1c 确认要装的那个 commit 真在树里、且内容就是审过的那份
-git log --oneline -1 6fca38b8
-git diff --stat HEAD 6fca38b8 -- kasia-console/src/api/chat.js
+git log --oneline -1 1bca6983
+git diff --stat HEAD 1bca6983 -- kasia-console/src/api/chat.js
+git rev-parse 1bca6983:kasia-console/src/api/chat.js   # 🔴 blob sha, 用来【比对】而不是【看】
 ```
 
-**判据**：`1a` 必须为空（或每一条都被明确认领）。**不为空就停** —— 装载会把别人半截的活一起带上去。
+**判据**：
+- `1a` 必须为空（或每一条都被明确认领）。**不为空就停** —— 装载会把别人半截的活一起带上去。
+- 🔴 `1c` 的**期望值**（NWT 05:29 ③：给了比对命令而没给期望值 = "跑一下然后凭感觉判断"）：
+
+```
+git log --oneline -1  期望: 1bca6983 fix(public-api): 外部唯一入口的输入契约 …
+git diff --stat       期望: 恰好 1 个文件 kasia-console/src/api/chat.js —— 🔴 出现第二个文件就停手
+git rev-parse …:chat.js  期望: a9614dd107d4cf01a74594fc3d20a93ee1138d98
+```
+🔴 **三者任何一条对不上 ⇒ 你要装的不是被审过的那份东西。停手。**
+
+> ⚠️ 自曝一处：v0.1→v0.2 草稿里我一度在这格填了一个**我没算过的** blob sha。
+> 那正是「报一个标识符要能被拿去比对」的反面 —— 一个编出来的期望值比没有期望值更坏，
+> 因为它看起来可比对。上面这个 `a9614dd1…` 是 `git rev-parse HEAD:kasia-console/src/api/chat.js` 实际输出的。
 
 ## ② 装载（把审过的那个 commit 合进部署树）
 
 <!-- ux1:non-exec reason=live-mutating-sequence-must-not-be-auto-executed -->
 ```bash
 cd /d/kanet-tn12
-git merge --ff-only 6fca38b8 || git cherry-pick 6fca38b8
+git merge --ff-only 1bca6983 || git cherry-pick 1bca6983
 git rev-parse HEAD          # 记下装了什么
 ```
 
@@ -50,10 +64,14 @@ git rev-parse HEAD          # 记下装了什么
 <!-- ux1:non-exec reason=live-mutating-sequence-must-not-be-auto-executed -->
 ```bash
 cd /d/kanet-tn12
-bash kanet-start.sh 2>&1 | tail -30
+bash kanet-start.sh > logs/reload.out 2>&1; rc=$?; tail -30 logs/reload.out; echo "rc=$rc"
 ```
 
 🔴 **不要用 `timeout` 包这一行** —— 仓库已付过的学费：`timeout` 包住会连坐杀掉它拉起的长驻子进程。
+🔴🔴 **也不要写成 `bash kanet-start.sh 2>&1 | tail -30`**（v0.1 我就是这么写的，NWT 05:29 ① 抓出）：
+**管道尾会吞掉退出码** —— `$?` 拿到的是 `tail` 的，`kanet-start.sh` 失败与成功长得一模一样。
+🔵 这个坑今晚全队量过两次（`;` / 换行 / `| tail` 三种连接符都吞退出码），**而它出现在装载步骤本身** ——
+它长得完全像"处理一下输出"，写的人不会觉得自己在写 bug。
 
 ## ④ 自证 —— 🔴 这一步是整个序列的重点
 
@@ -74,21 +92,39 @@ curl -s "http://127.0.0.1:3200/api/public/channel/kanet-spec/messages?limit=1" |
 | C 响应含 `max_limit` | 无此字段 | **`"max_limit":200`** |
 
 🔴 **三条里任何一条仍是旧码的值 ⇒ 装载【没有生效】，不要报"已上线"。**
+
+🔴🔴 **而三条全绿【只证 console】，不等于系统恢复了**（NWT 05:29 ④）：
+`kanet-start.sh` 会重起 **relay / scout / adapter 一整套**，而本序列**没有给它们任何自证**。
+⇒ 「A/B/C 全绿」的准确含义是 **「console 上跑的是新码」**，仅此。
+**不要把它读成「恢复完成」——那是两个不同的断言，而只有前一个被验了。**
+
+🔵 补充一条游标自证（第七种错法的现场检查，NWT 05:27 找到、Bettor 05:28 判必修）：
 🔵 为什么这样设计：`A/B/C` 是**新码独有的输出**。它区分得开「console 起来了」与「新码在跑」——
 而只查进程/端口/首页，这两件事看起来完全一样。
+
+<!-- ux1:executable -->
+```bash
+curl -s "http://127.0.0.1:3200/api/public/channel/kanet-spec/messages?limit=1" | grep -o '"next_until":[^,}]*' || echo "D_next_until=MISSING"
+```
+| 断言 | 旧码 | 新码 |
+|---|---|---|
+| D 响应含 `next_until` | 无此字段 | `"next_until":"<ISO>"`（有更多时）或 `"next_until":null` |
 
 ## ⑤ 失败与回退
 
 <!-- ux1:non-exec reason=live-mutating-sequence-must-not-be-auto-executed -->
 ```bash
 cd /d/kanet-tn12
-git reset --hard "$(cat logs/reload-rollback-point.txt)"
-bash kanet-start.sh 2>&1 | tail -30
+# 🔴 窄回退: 只还原被改的那【一个】文件 (NWT 05:29 ②)
+git checkout "$(cat logs/reload-rollback-point.txt)" -- kasia-console/src/api/chat.js
+bash kanet-start.sh > logs/reload-rollback.out 2>&1; rc=$?; tail -30 logs/reload-rollback.out; echo "rc=$rc"
 # 回退后同样要自证 —— 这次期望的是【旧码的值】: A=200 B=200 C=MISSING
 ```
 
-🔴 **`git reset --hard` 会连坐丢掉所有本地未 push 的 commit** —— 所以 ①a 那一步不是形式。
-⇒ 若 ①a 当时不为空而你仍然继续了，**这一步会把那些改动删掉**。
+🔴🔴 **v0.1 这里写的是 `git reset --hard`，已撤换。**
+`reset --hard` 会连坐丢掉**别人的未提交改动与未 push 的 commit** —— 仓库里有过实例。
+✅ 而本次装载**只改了一个文件**，所以窄回退对【部署行为】完全等价，却碰不到任何别的东西。
+🔵 与那条老规矩一致：**保护机制不构成保护时，取消那个危险动作，而不是给它加一句警告。**
 
 ## ⑥ 这个序列【不能】做的事（自述，不藏）
 
