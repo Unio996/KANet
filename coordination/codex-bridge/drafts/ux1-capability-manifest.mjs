@@ -1,4 +1,4 @@
-// ux1-capability-manifest.mjs — UX1 能力清单【单一来源】v0.3 (J2, 契约 DRI)
+// ux1-capability-manifest.mjs — UX1 能力清单【单一来源】v0.4 (J2, 契约 DRI)
 //
 // 卡: c45acd37 v1.2 §6A.2 UX1-LIVING-QUICKSTART · 契约 DRI = J2
 //
@@ -111,7 +111,13 @@ export const CAPABILITIES = normalizeValidateFreeze([
     id: 'external_onboarding',
     title: '外部程序自助接入 (HTTP)',
     status: STATUS.NOT_AVAILABLE,
-    why: '当前接入必须先自建 Telegram bot 并交出 token。HTTP 能力网关是 M0c-1 的目标, 未落地。',
+    // 🔴🔴 v0.4 修: v0.3 这里【只数了一道闸】。而实测是两道, 且我漏的那道在前面。
+    //   v0.3 原文: "当前接入必须先自建 Telegram bot 并交出 token" ⇒ 读的人会得出
+    //   "把凭证门拆了外部就能接" —— 而拆了之后外部程序【连 TCP 都连不上】。
+    //   ⇒ 这正是我整夜在别人稿子上点的那一类: 结论按【找到的第一个原因】写, 没做总判。
+    why:
+      '两道闸, 外部程序卡在【第一道】: ① 服务只在回环口监听 ⇒ 本机之外连不上 TCP; ' +
+      '② 即便连得上, 接入仍需自建 Telegram bot 并交出 token。HTTP 能力网关是 M0c-1 的目标, 未落地。',
   },
   {
     id: 'agent_card_discovery',
@@ -173,6 +179,28 @@ export function assertManifestProvenance() {
 export const PROVENANCE_OF_STATUSES =
   '⚠️ 上表每一格的状态来自【读卡与频道内的实测报告】, 未逐项对运行中的系统实跑核对 ⇒ 强度: 转述+读卡, 非实跑。';
 
+/**
+ * 🔴🔴 v0.4 新增。这一条是【我自己清单的缺陷】, 由 Bettor 04:57 的 loopback 实测打出来的。
+ *
+ *   v0.1–v0.3 那六格状态回答的是「这个能力建了没有」。
+ *   而这张卡的读者是【外部程序】, 他问的是「我能不能调到」。
+ *   ⇒ 两个问题的答案不同, 而我把前者的答案放在了后者的位置上。
+ *   ⇒ 只要服务绑在回环口, 对外部读者这六格【全都】调不到 —— 包括我标 ✅ READ_ONLY 那格。
+ *   ⇒ 也就是说: 我这张表整体带一个未言明的前提「你已经在这台机器上」。
+ *      而我整夜在别人稿子上执行的规矩逐字是: 【限定必须在结论位自带, 不靠交叉引用】。
+ *      我自己这份, 限定连交叉引用都没有 —— 它根本没被写下来过。
+ *
+ * 🔵 不对称 (NWT 05:00, 我采用): 回环绑定【单独足以】断定不可达; 全网卡绑定【不足以】断定可达。
+ *    本条只依赖前者 ⇒ 结论方向安全。
+ */
+export const REACHABILITY_PRECONDITION =
+  '🔴 前提 (先读这条, 再读下表): 下表回答的是「这个能力建了没有」, 不是「你调不调得到」。' +
+  '截至 2026-07-26 05:00, Console (:3200) 只在回环口 127.0.0.1 监听 ⇒ 【本机之外的程序, 下表六项一项都调不到】, ' +
+  '包括标 ✅ 的那项。⇒ 若你不在这台机器上, 请把下表整体读作「尚不可达」。' +
+  ' 依据强度: 【实跑】—— Bettor 实读源码 (kasia-console/src/index.js:474 `host: process.env.HOST || \'127.0.0.1\'`, ' +
+  'kanet.env 无 HOST 行), NWT 与 J2 各自枚举运行时套接字确证 (pid 40232 绑 127.0.0.1:3200)。' +
+  '⚠️ 这是【那一刻】的运行时事实, 不是配置承诺 —— 绑定改变则本条失效, 需重测。';
+
 /** 状态 → 人可见标记。🔴 穷尽映射, 不设 else —— 未知状态必须刺眼, 绝不默认绿。 */
 const STATUS_MARK = Object.freeze({
   [STATUS.NOT_AVAILABLE]: '🔴 ',
@@ -200,6 +228,7 @@ export function toResponseTokens() {
     manifest_same_source: prov.sameSource,
     manifest_notice: prov.notice || undefined, // 🔴 不同源时它必然出现在响应里
     status_provenance: PROVENANCE_OF_STATUSES, // 🔴 v0.2 红队③: 跟着响应走
+    reachability_precondition: REACHABILITY_PRECONDITION, // 🔴 v0.4: 与上一条同理, 限定必须跟着结论走
   };
 }
 
@@ -207,6 +236,13 @@ export function toResponseTokens() {
 export function toMarkedDoc() {
   const prov = assertManifestProvenance();
   const lines = [];
+  // 🔴🔴 v0.4: 可达性前提排在【所有】提示之前, 包括排在同源提示之前。
+  //   定序理由(是判断, 不是推导出来的, 所以写下来给下一个人攻):
+  //     · 同源提示说的是"这张表【怎么来的】" ⇒ 关乎表的可信度
+  //     · 可达性前提说的是"这张表【对你适不适用】" ⇒ 关乎读者能不能做任何事
+  //   ⇒ 一个此刻一格都调不到的读者, 不需要先知道这表是不是同源生成的。
+  //   ⚠️ 而两条都是 🔴 且都在表之前 ⇒ 谁先谁后【不承重】。不许有人把这个顺序当判据引用。
+  lines.push(REACHABILITY_PRECONDITION, '');
   if (!prov.sameSource) lines.push(prov.notice, '');
   lines.push(PROVENANCE_OF_STATUSES, ''); // 🔴 v0.2 红队③: 在表【之前】, 读表的人绕不过
   lines.push('| 能力 | 状态 | 不可用的性质 | 为什么 |', '|---|---|---|---|');
@@ -224,3 +260,26 @@ export function toMarkedDoc() {
 //            我未独立复核。
 //   🔴 未做: 本文件尚未被任何 CI 跑过 —— DoD「示例由 CI 实际运行」未满足。
 //   ✅ 已闭合(Bettor 04:42 裁): 文档是源, runner 抽取并执行文档里的代码块。本文件是数据源, 不参与那个方向。
+//
+// ⚠️ v0.4 追记两条 residual (NWT 05:00 verdict 判"不是打回, 是写进边界"; Bettor 05:00 裁 (a)):
+//
+//   🔴 residual ①: provenance 检查【出了这个 git 树就恒为"无法判定"】。
+//      逐字 (NWT 判词): 「对外部读者, 这个 provenance 检查恒为『无法判定』;
+//      它在仓库内是一道闸, 出了仓库只是一句固定的话。」
+//      成因: locateRepoRoot() 靠向上找 `.git`。而 UX1 的目标读者【拿到的东西不在我们的 git 树里】
+//      —— 那恰恰是这张卡存在的意义。一旦本模块被打包送出或 copy 进部署目录 ⇒ 抛 ⇒ 报"按未同源处理"。
+//      🔵 方向安全(喊, 不是静默放行) ⇒ 不判缺陷。而不许它被当成"外面也有闸"。
+//      🔨 挂 M0b: 实要对外发包时, 需要一个【不依赖 .git 的 provenance 锚】。现在不做。
+//      🔴【推论】NWT 自标: 未构造一个无 .git 的环境实跑; 我也未跑 ⇒ 本条两人皆为结构推论。
+//
+//   🔴 residual ②: 上面那条条号 enforce, 证的是【"有一个像条号的东西"】, 不是【那条裁定存在】。
+//      写 `§99.9` 同样通过。
+//      🔵 与 R0 的 `review_ref` 零校验、与 Bettor 自己 04:38 立的「批复必须带条号」是【同一族】:
+//         一个字段看起来是凭据, 而没有任何东西验它指向的东西存在。
+//      ✅ 保留它的理由: 它挡住的是"没有条号的万能借口", 这一档确实被挡住了, 且比注释硬。
+//      ⇒ 明确它挡什么、不挡什么, 而不是假装它验了裁定。
+//
+//   🔴 v0.4 主修那条【不是红队报的, 是我自己清单的病】, 记在这里免得只留在频道里:
+//      六格状态回答「建了没有」, 而卡的读者问「调不调得到」。前者的答案被放进了后者的位置。
+//      修法见 REACHABILITY_PRECONDITION。⇒ 教训: 我一整夜在别人稿子上执行「限定必须在结论位
+//      自带」, 而我自己这份的限定【从没被写下来过】—— 连可供交叉引用的那一处都不存在。
