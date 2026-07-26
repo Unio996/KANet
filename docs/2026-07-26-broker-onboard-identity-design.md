@@ -31,7 +31,7 @@ Owner 逐字:「**真正持有人继续使用这个地址;如果是假的,他相
 
 ---
 
-## 三、改动:两处,都是删和改,**零新机制**
+## 三、改动:三处,全是删,**零新机制**
 
 ### ① 删掉 `bot_token` 必填
 
@@ -39,13 +39,51 @@ Owner 逐字:「**真正持有人继续使用这个地址;如果是假的,他相
 ⚠️ 连带:`:280-288` 的 `getMe` 校验改为**仅当提供了 token 时执行**。
 🔵 顺带解掉一条活性:今天 `api.telegram.org` 不可达 = **谁都进不来**(第三方在关键路径上);改完它只影响提供了 token 的人。
 
-### ② `"TRUSTED PEER"` 换成事实陈述
+### ② 把 `identities.trust_level` 那一列的**两个含义拆开**
 
-【实读】`context-builder.mjs:578` 今天注入给模型的是一个**形容词**:`"This is a TRUSTED PEER. Their input is valuable."`
-🔴 改成**陈述已知事实**:这个地址由我们代管 / 曾自己签名证明过 / 有过 N 次链上结算 —— **让 Agent 自己判断**。
+> **v0.5 写的是「改 `context-builder.mjs:578` 那句话」。那只覆盖三个消费者中的一个。这一条一次覆盖三个,而且是删。**
 
-🔵 **理由与门无关,与攻击者无关**:我们在对**自己的推理引擎**说一句证据不支持的话。而它与对外那条同源 —— **把事实摆出来,不替任何人做判断。**
-🔴 **必须与 ① 一起走,不能排在后面**:今天库里 1 个 broker ⇒ 影响面 = 1;门一开,**影响面与「外部程序接入」的成功程度成正比** —— 这条缺陷的规模是被我们正在做的事**放大**的。
+【实读】`broker-bot-manager.js:73-80 approvedBrokers()`:
+```sql
+FROM broker_onboarding b LEFT JOIN identities i ON i.address = b.broker_address
+WHERE b.bot_token_encrypted IS NOT NULL AND i.trust_level IN ('owner','recommended')
+```
+
+`trust_level` 在同时干两件不相干的事:
+
+| | 含义 | 谁在消费 |
+|---|---|---|
+| **A** | **功能开关**:「这是一个已登记的 broker」 | `broker-bot-manager` 决定要不要 fork 他的机器人进程 |
+| **B** | **社交信任**:「这个人可信」 | `mind-manager` ⇒ ① `context-builder.mjs:578` 注入 `"This is a TRUSTED PEER."` · ② `intent-parser.mjs:58-68` 权限档 · ③ `senderMeta.authority`(`collaborate` / `view_partial`) |
+
+🔴 **onboarding 写一次 `recommended`,把 A 和 B 一起打开了。而它只想要 A。**
+🔴 **而更糟的一层(NWT 实读 `mind-manager.js:312-321`)**:`identities.trust_level` 是 `relation_states` 缺行时的 **fallback** —— 而**一个刚从外面进来的地址正好没有 `relation_states` 行** ⇒ **fallback 不是边角,它是每个新地址的默认路径。**
+
+✅ **切法**:`approvedBrokers()` 去掉 `trust_level` 条件、只认 `broker_onboarding`;onboarding 不再写 `identities.trust_level`。信任交回 `relation_states`(实际交互决定),**跟所有别人一样**。
+🔵 **谁都不挡** —— broker 照样即时生效、无许可。我们只是不再**替一个从没打过交道的人编造一个信任等级**。
+🔵 **也去掉一句我们对自己推理引擎说的、证据不支持的话**:「他持有那把私钥」不支持「他可信」。
+
+### ③ `/api/kanet-broker/onboard` **必须进外部网关白名单**
+
+🔴 **这不是附带项,是 ① 生效的前提**:若外面调不到这个端点,**删掉 `bot_token` 必填等于什么都没做**。
+
+⚠️ **本条推翻我 2026-07-26 08:37 的裁定**(当时钉死「不许进白名单」)。当初那三条理由**今天全部不成立**:
+- 「防接管获利」⇒ Owner 否(冒名者白干)
+- 「分级依据」⇒ Owner 否(不分级)
+- 「它验的是 Telegram 身份而不是地址」⇒ **`bot_token` 不再必填之后,这条自己消失了**
+
+🔵 而那条裁定当初还被误报成「已写进分界线文件」—— **实测文件里从来没有它**(J2 自曝:做了 Edit、没 commit、之后两次 rebase、没回头核)。
+🔨 **⇒ 一条【理由已空而结论还在】的裁定是最危险的一种:后来的人引用它的结论,而没有人会去看它的理由还在不在。**
+
+#### 🔴 ③ 的实现前置(NWT 实跑,不做则一步暴露 9 条)
+
+`kanet-broker.js` **只导出一个注册函数** `registerKanetBrokerRoutes(fastify)`,而它注册 **9 条**路由 —— 其中包括 `POST /api/kanet-broker/bots/stop`(**停掉任意 broker 的 bot**)。
+
+🔴 **⇒ 白名单里那个 `register` 字段若直接填 `registerKanetBrokerRoutes`,九条会一起上外网。**
+✅ **必须先把 onboard 那个 handler 抽成单路由注册函数**(`registerBrokerOnboardRoute`),与当初对 `chat.js` 的做法一致。
+
+🔵 **而填错不会静默暴露**:网关白名单要求**排序后完全相等**(不是包含)⇒ 多出的 8 条会让**网关起不来,并在日志里逐条列出**。
+🔵 **⇒ 这正是它当初被设计成"相等而非包含"的原因,今天第一次兑现。** 而同一个形状今早差点让我用 `registerChatRoutes`(20 条,含 `/api/chat/send`)。
 
 ---
 
