@@ -123,11 +123,17 @@ if (count(KIND.BAD_LABEL) > 0) problems.push(`🔴 ${count(KIND.BAD_LABEL)} 个�
 
 // ── ④ shrink-only 棘轮: 未标注数只许降 ────────────────────────────────────────
 const nUnlabeled = count(KIND.UNLABELED);
-let baseline = null;
-if (existsSync(RATCHET_PATH)) { try { baseline = JSON.parse(readFileSync(RATCHET_PATH, 'utf8')).unlabeled_max; } catch { baseline = null; } }
+// 🔴 首跑抓到的第二个自己的 bug: 基线原本是【全局单值】, 而 runner 会跑多份文档
+//   ⇒ 在 A 文档上收紧到 0, 会让 B 文档凭空变红。基线必须【按文档分键】。
+const docKey = docPath.replace(/\\/g, '/').split('/').pop();
+let store = {};
+if (existsSync(RATCHET_PATH)) { try { store = JSON.parse(readFileSync(RATCHET_PATH, 'utf8')); } catch { store = {}; } }
+if (typeof store.unlabeled_max === 'number') store = {}; // 旧的全局格式一律作废重建, 不迁移(它本来就是错的)
+let baseline = typeof store[docKey] === 'number' ? store[docKey] : null;
+const saveRatchet = (n) => { store[docKey] = n; writeFileSync(RATCHET_PATH, JSON.stringify(store, null, 2)); };
 if (baseline === null) {
-  console.log(`\n⚠️ 棘轮基线不存在 ⇒ 本次【建立】基线 = ${nUnlabeled}。🔴 首次建立不构成"通过", 它只是把现状记下来。`);
-  writeFileSync(RATCHET_PATH, JSON.stringify({ unlabeled_max: nUnlabeled, note: '只许降不许升。要升必须写具名理由 + 红队引用。' }, null, 2));
+  console.log(`\n⚠️ 「${docKey}」棘轮基线不存在 ⇒ 本次【建立】基线 = ${nUnlabeled}。🔴 首次建立不构成"通过", 它只是把现状记下来。`);
+  saveRatchet(nUnlabeled);
 } else if (nUnlabeled > baseline) {
   problems.push(`🔴 未标注块数 ${nUnlabeled} > 基线 ${baseline} ⇒ 棘轮只许降。要升必须写具名理由 + 红队引用, 不许改基线了事。`);
 } else if (nUnlabeled < baseline) {
@@ -138,10 +144,26 @@ if (baseline === null) {
 
 // ── ⑤ 状态词扫描: 拦"第二份权威" ─────────────────────────────────────────────
 const text = lines.join('\n');
-const hitWords = FORBIDDEN_STATUS_WORDS.filter((w) => text.includes(w));
+// 🔴 首跑就抓到自己一个假阳: 我在文档里【引用】那个词来解释它为什么被禁, 被当成了"在用它".
+//   与"计数把讨论自身计进去"同一形状。⇒ 需要一个【使用 vs 提及】的区分, 而它必须是显式的:
+//   行尾加 <!-- ux1:status-word-exempt reason=... -->, 且 reason 不许空(与 non-exec 同判据)。
+//   ⚠️ 豁免数【也要报出来】—— 静默的豁免等于没有检查。
+const EXEMPT_RE = /<!--\s*ux1:status-word-exempt\s+reason=(\S+)[^>]*-->/;
 console.log('\n## 状态词扫描 (拦"单一来源之外的第二份说法")');
-if (hitWords.length) problems.push(`🔴 文档里出现了 STATUS 枚举之外的能力状态词: ${hitWords.join(' / ')} ⇒ 应改为渲染能力清单, 不自己写词`);
-else console.log(`✅ 未命中黑名单词。文档里出现的枚举 token: ${STATUS_ENUM.filter((s) => text.includes(s)).join(', ') || '(无)'}`);
+const hits = [], exempted = [];
+for (const w of FORBIDDEN_STATUS_WORDS) {
+  for (let i = 0; i < lines.length; i++) {
+    if (!lines[i].includes(w)) continue;
+    const m = lines[i].match(EXEMPT_RE);
+    if (m) exempted.push({ w, line: i + 1, reason: m[1] });
+    else hits.push({ w, line: i + 1 });
+  }
+}
+for (const e of exempted) console.log(`🔵 L${e.line} 「${e.w}」已显式豁免 — reason=${e.reason}`);
+if (exempted.length) console.log(`⚠️ 共 ${exempted.length} 处豁免。豁免【不是通过】—— 每一处都要有人看得见。`);
+const hitWords = [...new Set(hits.map((h) => h.w))];
+if (hits.length) problems.push(`🔴 ${hits.length} 处 STATUS 枚举外的能力状态词 (${hits.map((h) => `L${h.line}「${h.w}」`).join(' · ')}) ⇒ 应改为渲染能力清单, 不自己写词`);
+else console.log(`✅ 无未豁免命中。文档里出现的枚举 token: ${STATUS_ENUM.filter((s) => text.includes(s)).join(', ') || '(无)'}`);
 console.log('⚠️ 强度限界: 这是【黑名单】, 只拦想到的词。拦得住"枚举外的词", 拦不住"枚举内但写错的那个词"。');
 console.log('   ⇒ 根治是产品面【渲染】能力清单; 本项只是渲染没被执行时的兜底。');
 
