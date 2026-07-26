@@ -493,13 +493,7 @@ setInterval(() => {
 import { startZkProveServer } from './services/zk-prove-server.mjs';
 await startZkProveServer();
 
-// external-gateway: 对外协议面的【独立】Fastify 实例(与上面同一个形状: 不共用主 fastify/不共用绑定)。
-// 🔴 它默认【不启动】—— KANET_EXTERNAL_GATEWAY_HOST / _PORT 两个都显式配了才起。
-//    所以接这一行【不改变任何现有行为】: 不配 env ⇒ 它返回 null, 一个端口都不监听。
-// 🔴 而接线本身是必要的: 不接, 这个模块在运行时【从来不会被调用】—— 那样"装上去了"与
-//    "根本没跑"长得一模一样, 且验收(从另一台机器读)也无从跑起。(J2 07:37 residual ②)
-import { startExternalGateway } from './services/external-gateway.mjs';
-await startExternalGateway();
+// 🔴 external-gateway 的接线【故意放在本文件最末尾】, 不在这里 —— 见文件末那一段的理由。
 
 // zk-prove-worker(缺件②, Bettor 2026-07-08 派工): 轮询 zk_prove_jobs 真跑 RISC0 proving + 铸 gate 注资。
 // ZK_PROVE_WORKER_ENABLED=1 才跑(默认 OFF, 真实 proving+真 KAS 注资, 同 SETTLE_DAEMON_ENABLED 模式)。
@@ -859,3 +853,19 @@ async function shutdown() {
 }
 process.on('SIGTERM', shutdown);
 process.on('SIGINT', shutdown);
+
+// ── external-gateway: 对外协议面的【独立】Fastify 实例 ────────────────────────────
+// 🔴 它默认【不启动】—— KANET_EXTERNAL_GATEWAY_HOST / _PORT 两个都显式配了才起。
+//    所以接这一行【不改变任何现有行为】: 不配 env ⇒ 返回 null, 一个端口都不监听。
+//
+// 🔴🔴 而它【放在本文件最末尾】是有意的(J2 07:46 提 · Bettor 07:48 批):
+//    它若【卡住】(不抛, 只是永不 resolve), 后面就没有别的东西要启动了 ⇒ 只卡它自己。
+//    放在中间的话, 它后面那 359 行(startAllRelays / tg-bot / brokerBot / 各 cron)
+//    一个都不会启动 —— 而 console 自己的 HTTP 更早就在监听了
+//    ⇒ 【进程活着、端口通、而整个栈没起来】, 这是最难看出来的那种坏法。
+//
+// ⚠️ 位置这一层保护【住在调用点】: 谁在它后面再加一行, 这层就没了。
+//    所以模块内部另有一个【自带的】上界(START_TIMEOUT_MS, 默认 8s, 已用注入 3s 阻塞实测拦住),
+//    那一层跟着模块走, 不依赖任何人记得维持这个顺序。两层各自独立成立。
+import { startExternalGateway } from './services/external-gateway.mjs';
+await startExternalGateway();

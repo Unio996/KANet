@@ -49,14 +49,53 @@ const PROTOCOL_ROUTES = Object.freeze([
  * @returns {Promise<null|{close: () => Promise<void>, host: string, port: number}>}
  */
 export async function startExternalGateway() {
+  // 🔴🔴 "从不抛"不够 —— 还必须【从不卡】(J2 07:46)。
+  //    index.js 里它是顶层 await, 而 relay / tg-bot / broker / cron 全在它【之后】启动。
+  //    ⇒ 它若卡住(不抛, 只是永不 resolve), 那些一个都起不来;
+  //      而 console 自己的 HTTP 在更早一行就已经在监听 ⇒ 【进程活着、端口通、而整个栈没起来】。
+  //    ⇒ 这正是今晚那一族最贵的形态: 每一步看起来都成功, 而要发生的事没发生。
+  //    ⇒ 所以给它一个硬上界: 超时 ⇒ 与其它任何"不是明确成功"的路径同样降级。
+  const START_TIMEOUT_MS = Number(process.env.KANET_EXTERNAL_GATEWAY_START_TIMEOUT_MS) || 8000;
+  let timer = null;
+  const timeout = new Promise((resolve) => {
+    timer = setTimeout(() => resolve(_TIMED_OUT), START_TIMEOUT_MS);
+  });
+  try {
+    const r = await Promise.race([_start(), timeout]);
+    if (r === _TIMED_OUT) {
+      console.error(
+        `[external-gateway] 🔴 启动超过 ${START_TIMEOUT_MS}ms 仍未完成 ⇒ 放弃, console 继续跑。` +
+          ' (卡住而不是抛 —— 例如 HOST 是个解析不了的主机名。不给上界的话, 它后面的 relay/bot/cron 全起不来。)',
+      );
+      return null;
+    }
+    return r;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/** 超时哨兵 —— 用 Symbol 保证它不可能与 _start() 的任何正常返回值相等。 */
+const _TIMED_OUT = Symbol('external-gateway-start-timeout');
+
+async function _start() {
   let app = null;
 
-  /** 统一的降级出口: 收掉可能已经半开的实例, 打一条刺眼日志, 返回 null。 */
-  const abort = async (msg) => {
+  /**
+   * 统一的降级出口: 收掉可能已经半开的实例, 打一条日志, 返回 null。
+   *
+   * 🔴 而【级别要分开】: "未配置"是装载第一步之后的【正常状态】(码装上了、env 还没配)。
+   *    若它每次启动都走 error 级别, 人会学会忽略这一行 —— 然后【真失败时长得一模一样】。
+   *    ⇒ 正常态走 info, 异常态走 error。这是"别让正常的东西喊得跟出事一样"。
+   * @param {string} msg
+   * @param {{expected?: boolean}} [opt] expected=true ⇒ 这是预期内的不启动, 不是故障
+   */
+  const abort = async (msg, opt) => {
     if (app) {
       try { await app.close(); } catch { /* 已经半开着也要尽量收 */ }
     }
-    console.error(msg);
+    if (opt && opt.expected) console.log(msg);
+    else console.error(msg);
     return null;
   };
 
