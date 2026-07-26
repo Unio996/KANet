@@ -598,7 +598,10 @@ export async function registerChatRoutes(fastify) {
     //    ⇒ 同样是"碰巧" ⇒ 游标必须 NULL 安全, 不能假设 id 一定有值。
     //    ⇒ 用 COALESCE(id,'') 作为次序键: 空串小于任何 uuid, 于是 NULL-id 行在同毫秒内排最后,
     //      且比较是【全序】—— 不会跳, 也不会重。
-    if (until && untilId !== undefined && untilId !== null && untilId !== '') {
+    // 🔴 守卫只区分【有没有传这个参数】, 不看它是不是空串 (NWT 05:41):
+    //    页尾正好是 id=NULL 那行时, 游标值【就是】空串 —— 把空串排除掉, 等于把复合游标
+    //    唯一为之而建的那个输入排除掉。undefined(没传) 与 '' (传了空串) 必须分开。
+    if (until && untilId !== undefined && untilId !== null) {
       sql += " AND (created_at < ? OR (created_at = ? AND COALESCE(id,'') < ?))";
       params.push(until, until, String(untilId));
     } else if (until) {
@@ -642,8 +645,12 @@ export async function registerChatRoutes(fastify) {
     //    has_more 仍为 true ⇒ 无限循环: 每次 200 OK · 每次相同数据 · 零错误信号。
     //    ⇒ 正好落在本次要满足的那条判据的反面: 他做错了, 而响应告诉不了他。
     // ⚠️ 方向: 排序是 DESC ⇒ 该给的是 `until` 侧游标, 不是 `since` 侧。给错方向 = 病换个地方复发。
-    // ⚠️ 已知边界(如实标, 不藏): until 是严格 `<`。若最后一条与更旧的某条 created_at 完全相同,
-    //    下一页会把那些同值行跳过。本表 created_at 为毫秒 ISO, 相撞概率低而【不为零】。
+    // ⚠️ 两条路径的保证【不同】(NWT 05:41 指出上一版注释已过期):
+    //    · 复合路径(until + until_id 成对) ⇒ 全序比较 ⇒ 同毫秒行【不漏不重】
+    //    · 兼容路径(只传 until) ⇒ 仍是严格 `<` ⇒ 同毫秒行会被跳过 —— 那是【旧行为】, 非本次引入
+    // 🟡 已知残缺(NWT 提, Bettor 未派 ⇒ 本版不做, 记在这里不让它消失):
+    //    只传 until 的调用方【静默走有损路径】, 响应里没有任何提示 ——
+    //    严格说它违反本次那条唯一判据(集成方看不出自己在有损路径上)。
     const lastRow = messages.length > 0 ? messages[messages.length - 1] : null;
     const nextUntil = hasMore && lastRow ? lastRow.timestamp : null;
     // 🔴 与 next_until 【成对】使用。单传 next_until 会退回旧的严格 `<` 路径 ⇒ 同毫秒行被静默跳过。
