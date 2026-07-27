@@ -646,8 +646,22 @@ async function catchUpHistory() {
 
   // 3. Historical comm messages — 从 kanet_message_index 取未处理的历史 comm TX
   //    按 txid 从链上取 payload → 调 processComm（和实时完全相同的路径）
+  //
+  // 🔴 2026-07-28 止血（J2 落码 · Bettor 21:18 审过放行）：本段默认【关闭】。
+  //   病因：下面那个 fetch 拿 TN12 的 txid 去问 api.kaspa.org（主网公共 API）
+  //         ⇒ 结构上永远 404 ⇒ 而失败路径不写 processed 标记 ⇒ 无限重试。
+  //   实测：console.log 267 万行里 228 万行是这一条在打转，且已把对方打到 429。
+  //   为什么停它零风险：实时收信【不经过这里】—— block-added 事件自带 payload
+  //         （handleBlock 直接读 tx.payload），所以"从现在起能不能收到"不受影响。
+  //   代价（明说）：历史那批继续留在 unprocessed —— 不丢，只是不再尝试。
+  //   回退：设 KANET_CATCHUP_COMM=on 即恢复原行为。无 schema 改动、无数据迁移。
+  //   根因修复另议（候选：有 block_hash ⇒ getBlock(includeTransactions:true) 取回 payload）。
+  const catchupCommEnabled = process.env.KANET_CATCHUP_COMM === 'on';
   let commCount = 0;
-  try {
+  if (!catchupCommEnabled) {
+    // 打一行说明它是【被关掉的】，否则下一个人看到不重试会以为它已经好了
+    log('catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed');
+  } else try {
     const res = await fetch(
       `${CONSOLE_URL}/api/discovery/message-index?type=comm&unprocessed=true`,
       { headers: { 'x-ingest-secret': process.env.INGEST_SECRET || '' }, signal: AbortSignal.timeout(10000) },
