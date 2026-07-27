@@ -9,6 +9,10 @@ import { parseLang, getT, isRtl, LANG_NAMES } from '../i18n/index.js';
 
 let _commTriggerRecent;
 
+// KANET_MSGINDEX_SERVE_COMM 抑制状态（见下方 GET /api/discovery/message-index 的说明）
+let _commServeSuppressedReqs = 0;
+let _commServeSuppressedLastLog = 0;
+
 export async function registerDiscoveryRoutes(fastify) {
 
   // --- UI routes (no auth, local only) ---
@@ -476,9 +480,51 @@ export async function registerDiscoveryRoutes(fastify) {
   });
 
   // GET /api/discovery/message-index — 查询消息索引（支持过滤）
+  //
+  // 🔴 KANET_MSGINDEX_SERVE_COMM（供给侧开关 · 默认 off · 2026-07-28 NWT，Bettor 批）
+  //   off ⇒ type=comm 的查询一律返回 []。
+  //         目的：relay 的 catchUpHistory 拿到空清单就不再逐条去问第三方主网 API。
+  //         那条路径拿 TN12 的 txid 去问主网，结构上永远 404，已累计 228 万次重试。
+  //         消费侧修复(608b79b5)只对【重启后装载了新码】的 relay 有效；本开关对
+  //         【所有 relay 立即有效，含仍跑老码的】—— 这是它存在的全部理由。
+  //   on  ⇒ 恢复原行为。
+  //   🔴 打开之前，先确认【所有 relay 都已装载 catch-up 修复】。否则那些未处理记录会
+  //      立刻涌向仍是老码的 relay，重新开始打第三方 API。走到这一步的人通常是
+  //      "已经出事了才来的"，这句必须在开关旁边，不能只写在文档里。
+  //   回退：设 KANET_MSGINDEX_SERVE_COMM=on 并重启 Console，清单立即恢复。
+  //   ⚠️ 抑制只发生在【发出清单】这一侧：索引写入(POST)不受影响，那些行仍然
+  //      unprocessed，仍是真相 —— 不在库里写任何一句假话。
   fastify.get('/api/discovery/message-index', async (request, reply) => {
     const { type, unprocessed } = request.query;
+    // 🔴 闸打在【结果层】而不是【请求参数层】(Bettor r-22:20 catch):
+    //    写成 `if (type === 'comm')` 时, 【不带 type 的请求】会整个绕过去 —— 而 type 是可选的。
+    //    今天唯一的 GET 调用方(relay)恰好写死了 ?type=comm, 所以看不出问题;
+    //    但那样一来这道闸的强度就取决于【所有调用方都恰好带某个参数】= 约定, 不是闸。
+    //    约定被违反时不会喊。所以: 无论请求怎么写, comm 行一律不出现在结果里。
+    const _serveComm = process.env.KANET_MSGINDEX_SERVE_COMM === 'on';
+    if (!_serveComm && (type === 'comm' || !type)) {
+      _commServeSuppressedReqs++;
+      const nowMs = Date.now();
+      // 每 5 分钟最多打一行：32 个 relay 各自每分钟来一次，逐次打会把日志冲爆。
+      // 而这一行必须【自述】：否则下一个人看到的空，与"真的没有待办"逐字相同 ——
+      // 那正是同夜那句 "0 historical comms processed" 打了 66,017 次的形态。
+      if (nowMs - _commServeSuppressedLastLog > 300000) {
+        const withheld = sqlite.prepare(
+          "SELECT COUNT(*) c FROM kanet_message_index WHERE payload_type = 'comm' AND processed_at IS NULL",
+        ).get().c;
+        console.log(`[discovery] msgindex: comm listing SUPPRESSED (KANET_MSGINDEX_SERVE_COMM!=on) — ${withheld} unprocessed withheld, ${_commServeSuppressedReqs} requests since last notice`);
+        _commServeSuppressedLastLog = nowMs;
+        _commServeSuppressedReqs = 0;
+      }
+    }
     let sql = 'SELECT txid, for_address, from_address, payload_type, block_time, indexed_by, processed_at FROM kanet_message_index WHERE 1=1';
+    // 无条件生效: type=comm ⇒ 与下面的 type 条件相交后自然得空; type 缺省 ⇒ comm 行被排除;
+    // type=其它 ⇒ 完全不受影响(这也正是双臂判据里臂 B 仍必须非空的原因)。
+    // 🔴 别因为"反正拿不到"就删掉这一行: 今天【不带 type 的请求】拿不到 comm, 是因为
+    //    ORDER BY block_time ASC LIMIT 100 被 11.5 万条更老的 bcast 积压占满了 ——
+    //    那是【数据分布】, 不是一道闸。bcast 积压一旦被清掉, comm 行就浮进前 100,
+    //    而它变活的那一刻不会有任何提示。【这一行才是那个保证。】
+    if (!_serveComm) { sql += " AND payload_type != 'comm'"; }
     const params = [];
     if (type) { sql += ' AND payload_type = ?'; params.push(type); }
     if (unprocessed === 'true') { sql += ' AND processed_at IS NULL'; }
