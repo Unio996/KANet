@@ -712,7 +712,12 @@ async function catchUpHistory() {
     log('catch-up: historical comm query failed:', err?.message || err);
   }
 
-  log(`catch-up done: ${handshakeCount} handshakes accepted, ${messageCount} messages replied, ${commCount} historical comms processed`);
+  // 🔴 这一句必须【自己】说清它的前提: 关闭时打 DISABLED 而不是 0。
+  //   否则 "0 historical comms" 在【关掉了】与【全都失败了】两种情况下逐字相同
+  //   (它坏着的时候打的也是 0 —— 19551 次 catch-up done 全是 0/0/0)。
+  //   而"上面还打过一行 DISABLED"救不了它: 两行相隔 55 行代码, 而日志里是 32 个
+  //   relay 交错输出 ⇒ 实际日志中它们几乎不可能相邻出现。
+  log(`catch-up done: ${handshakeCount} handshakes accepted, ${messageCount} messages replied, ${catchupCommEnabled ? commCount : 'DISABLED'} historical comms processed`);
 }
 
 async function _connect(wallet) {
