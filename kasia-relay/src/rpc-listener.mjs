@@ -658,6 +658,11 @@ async function catchUpHistory() {
   //   根因修复另议（候选：有 block_hash ⇒ getBlock(includeTransactions:true) 取回 payload）。
   const catchupCommEnabled = process.env.KANET_CATCHUP_COMM === 'on';
   let commCount = 0;
+  // 🔴 只报成功数的计数器, 在【全部失败】与【无事可做】两种情形下输出相同。
+  //   实证: 功能开着、每分钟失败几十次时, 这行汇总打的是 "0 historical comms
+  //   processed" —— 与"确实没有待处理"逐字一致, 而它已经这样打了 66,017 次。
+  //   ⇒ 同时报【尝试数】: 0/0 = 真的没事做; 0/67452 = 一眼就是坏的。
+  let commAttempted = 0;
   if (!catchupCommEnabled) {
     // 打一行说明它是【被关掉的】，否则下一个人看到不重试会以为它已经好了
     log('catch-up comm: DISABLED (KANET_CATCHUP_COMM!=on) — historical backfill skipped by design, not fixed');
@@ -672,6 +677,7 @@ async function catchUpHistory() {
         log(`catch-up: ${pendingComms.length} pending historical comm TX`);
       }
       for (const record of pendingComms) {
+        commAttempted++;   // 在 try 之前 —— 任何失败路径都已经计入
         try {
           // 请求间隔 150ms，避免 public API 限流
           await new Promise(r => setTimeout(r, 150));
@@ -717,7 +723,7 @@ async function catchUpHistory() {
   //   (它坏着的时候打的也是 0 —— 19551 次 catch-up done 全是 0/0/0)。
   //   而"上面还打过一行 DISABLED"救不了它: 两行相隔 55 行代码, 而日志里是 32 个
   //   relay 交错输出 ⇒ 实际日志中它们几乎不可能相邻出现。
-  log(`catch-up done: ${handshakeCount} handshakes accepted, ${messageCount} messages replied, ${catchupCommEnabled ? commCount : 'DISABLED'} historical comms processed`);
+  log(`catch-up done: ${handshakeCount} handshakes accepted, ${messageCount} messages replied, ${catchupCommEnabled ? `${commCount} processed / ${commAttempted} attempted` : 'DISABLED'} historical comms`);
 }
 
 async function _connect(wallet) {
