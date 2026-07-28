@@ -10,18 +10,27 @@
 
 **ZK（协议原生 `OpZkPrecompile` 链上验证 Groth16/RISC0·TN12 已 live）= committed 目标结算架构。rolling/covenant 联机跨节点 = 没前途、极脆弱的死路**（实践已验证：bshard `market_shards` 不跨节点同步、去中心委员无法独立跨节点重建验；ZK proof 每节点独立验、不需跨节点同步 = 解此死结）。**不准再往 rolling/covenant 跨节点方向投任何资源。**
 
-- **执行路径**：`silverc` 编译的 covenant → 调 ZK opcode → ZK 结算。J2 主攻。
-  🔴 **各步"做到哪了"一律以 `docs/DECISIONS.md` D-001 为准，本文件不记进度**（2026-07-28 立，见本节末通则）。
+- **执行路径**：自修 `silverc` 的 `pick_from_depth` OP_PICK off-by-one codegen bug（选项 A·有源码 `/d/silverscript`）→ 生成调 ZK opcode 的 covenant → ZK 结算。J2 主攻。
+  > 📌 **状态注记（2026-07-28 · 团队实核 · 不改上方 Owner 原话）**：
+  > 上方「自修 silverc OP_PICK codegen bug」这一步 **已于 2026-07-06 完成**
+  > （`silverc` HEAD `8065184`；J2 与 NWT 各自 `git merge-base --is-ancestor` 实核为 HEAD 祖先。
+  > 权威记录见 `docs/DECISIONS.md` D-001「✅ 执行路径实证达成」条）。
+  > 🔴 **执行路径的当前起点是「生成调 ZK opcode 的 covenant」，不是那个编译器 bug。**
+  > 🔴 **为什么这条注记是现役风险不是文档洁癖**：照上方原话读，会有人以为 ZK 这条路仍卡在编译器上，
+  > 从而去【重做】那一步——而 D-005 钉死 silverc 研究必须全隔离、绝不碰 live 节点的构建。
+  > 也就是说这句过期文字指向的是一个**会被真执行、且被铁律明令禁止**的动作。
+  > （今天 NWT 已照原话下过一次判断、Bettor 原样复述，差点派出一件"去查一个已被修掉的 bug"的活。）
 - **rolling 处置**：只维持 live 公测过渡（真人钱在里面·不停）·**零追加投入**。
 - **🚫 禁止把这个决策当"待定"重新讨论/调研/回退** —— Owner 已多次数落"之前共识过、你们一再耽搁回退、浪费无数资源"。**决策已定 = 执行·不再讨论**（违反 = 又一次炒陈饭·D-002 复发计数）。
 - **慎重铁律（D-005）**：ZK 全隔离开发·live 节点原地不动·真上线 = 充分测试后 Owner 拍的独立迁移。
 - **权威记录**：`docs/DECISIONS.md` D-001 + KB `architecture/zk-track-c §9` + memory `reference-zk-committed-rolling-crossnode-deadend`。
-- 🔨 **通则（2026-07-28 立·根治"接位必读文件里的过期指令"）**：**本文件只写「是什么」与「不许做什么」；「做到哪了」一律指向 `docs/DECISIONS.md`。**
-  🔴 **理由是实账不是洁癖**：同一个事实在两个文件里各存一份，必有一份会陈——而所有人先读本文件。
-  今天同一个病发作四次（`regression 永不退化` / `TEST-FRAMEWORK 自动化层` / 本条原写的「自修 OP_PICK bug」／某接位文件的 `tg-bot gitignored`），
-  其中本条的代价已经兑现：有人照它判断"那个 bug 还活着"，而它 2026-07-06 就修完了（`silverc` HEAD `8065184`，两人各自 `git merge-base` 实核），
-  差点派出一件"去查一个已被修掉的 bug"的活。
-  🔵 **修法是删掉会漂移的那份副本，不是去同步它**——同 `sendCommand` / `isApprovedTrust` 那两次。
+- 🔨 **通则（2026-07-28 立·根治"接位必读文件里的过期指令"）**：**本文件不新增「做到哪了」；进度一律以 `docs/DECISIONS.md` 为权威。**
+  已有的进度描述（尤其 Owner 钦定正文，**不改原话**）**紧贴其下**补一条带日期与出处的**状态注记**。
+  🔴 **理由是实账不是洁癖**：同一事实在两个文件里各存一份，必有一份会陈——而所有人先读本文件。
+  今天同族发作四次（`regression 永不退化` / `TEST-FRAMEWORK 自动化层` / 上方「自修 OP_PICK bug」／某接位文件的 `tg-bot gitignored`）。
+  🔨 **两类，修法不同**：
+  - **别处有权威副本** ⇒ **删掉会漂移的那份**（同 `sendCommand` / `isApprovedTrust`）；**动不得的（Owner 正文）⇒ 补状态注记，不改原话**。
+  - **它就是唯一记录**（如"某目录是不是 gitignored"——仓库结构自己是权威，且会变）⇒ **配一条自查命令**，让读的人一秒推翻它，而不是让他相信它。
 
 ## 你必须先读这些文档
 
