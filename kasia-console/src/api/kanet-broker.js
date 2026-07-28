@@ -20,10 +20,11 @@ import { computeMarketBrokerFee } from '../lib/broker-fee-chain.mjs';
 
 // 地址格式校验 (testnet-12 = kaspatest: / mainnet = kaspa:). 宽松长度界, 防垃圾提交.
 const KAS_ADDR_RE = /^kaspa(test)?:[a-z0-9]{50,80}$/;
-// 审批门 (Owner 钦定 复用 /identities trust): Owner 把该地址 trust 提到 owner/recommended = approved.
-function isApprovedTrust(trustLevel) {
-  return trustLevel === 'owner' || trustLevel === 'recommended';
-}
+// 🔴 isApprovedTrust() 已删除 (2026-07-28, 半A 裁定的直接后果):
+//   它的两个调用点(两个状态端点)已改为不再从 trust_level 派生"已批准"。
+//   而按 v0.6 定调【根本不存在审批这件事】⇒ 这个函数编码的正是那道不存在的门。
+//   🔴 留着它 = 把那个概念留在原地等下一个人重新接上 —— 与本仓那条同理:
+//     "只搬走用户而留着函数, 洞不是被堵上, 是被留在原地"。零调用点时删代价最小。
 
 export async function registerKanetBrokerRoutes(fastify) {
   // GET /api/kanet-broker/markets/:relay_id — 列名下市场 + 订单 (跨域)
@@ -267,91 +268,118 @@ export async function registerKanetBrokerRoutes(fastify) {
     if (!broker_address || !KAS_ADDR_RE.test(broker_address)) {
       return reply.code(400).send({ ok: false, error: 'valid broker_address (kaspatest:… / kaspa:…) required' });
     }
-    if (!bot_token || String(bot_token).trim().length < 20) {
-      return reply.code(400).send({ ok: false, error: 'bot_token (Telegram @BotFather token) required' });
-    }
+    // ① bot_token 不再必填 (设计 v0.6 · Bettor 2026-07-28 批): 它是【通知渠道】, 不是【身份】。
+    //   🔵 顺带解掉一条活性: 之前 api.telegram.org 不可达 = 谁都进不来 —— 一个第三方站在
+    //     "外部程序能不能接进来"的关键路径上, 而那正是这条路最不该有的形状。
+    //     改完它只影响【提供了 token 的人】。
     // 根治(2026-07-08, Owner "找根治问题" 指令, #12): bot_username 之前是 broker 自报字段, 从没验过跟
     // bot_token 是不是真的对应同一个 bot——broker 填错/填别人的 username, 下游(市场详情页/分享链接)会
     // 指向一个完全不同的 bot, 只有真的点开才会暴露。用 Telegram 自己的 getMe API(唯一权威源, 传
-    // bot_token 换它自己认的 username)校验, 同时顺手验了 token 本身是不是真的有效(之前只查字符串长度
-    // ≥20, 连是不是真 token 都没验)。getMe 失败(token 无效/网络问题)直接拒绝 onboarding, 不静默放行。
-    let verifiedUsername;
-    try {
-      const meRes = await fetch(`https://api.telegram.org/bot${String(bot_token).trim()}/getMe`, { signal: AbortSignal.timeout(8000) });
-      const meJson = await meRes.json();
-      verifiedUsername = meJson?.result?.username;
-      if (!meJson?.ok || !verifiedUsername) {
-        return reply.code(400).send({ ok: false, error: `bot_token 校验失败(getMe 返回: ${meJson?.description || 'invalid token'}) — 请确认这是从 @BotFather 拿到的真实 token` });
+    // bot_token 换它自己认的 username)校验。getMe 失败(token 无效/网络问题)直接拒绝, 不静默放行。
+    // 🔴 而这道校验【只在提供了 token 时】跑 —— 不是整个关掉: 给了 token 就必须是真的,
+    //   否则下游会指向一个不存在/别人的 bot。(验收对照臂: 带一个无效 token ⇒ 必须仍被拒。)
+    const hasToken = bot_token != null && String(bot_token).trim() !== '';
+    let verifiedUsername = null;
+    if (hasToken) {
+      try {
+        const meRes = await fetch(`https://api.telegram.org/bot${String(bot_token).trim()}/getMe`, { signal: AbortSignal.timeout(8000) });
+        const meJson = await meRes.json();
+        verifiedUsername = meJson?.result?.username;
+        if (!meJson?.ok || !verifiedUsername) {
+          return reply.code(400).send({ ok: false, error: `bot_token 校验失败(getMe 返回: ${meJson?.description || 'invalid token'}) — 请确认这是从 @BotFather 拿到的真实 token` });
+        }
+      } catch (e) {
+        return reply.code(502).send({ ok: false, error: `bot_token 校验失败(无法连接 Telegram API: ${e.message}) — 请稍后重试` });
       }
-    } catch (e) {
-      return reply.code(502).send({ ok: false, error: `bot_token 校验失败(无法连接 Telegram API: ${e.message}) — 请稍后重试` });
-    }
-    if (bot_username && String(bot_username).replace(/^@/, '') !== verifiedUsername) {
-      console.warn(`[kanet-broker/onboard] broker=${broker_address} 提交的 bot_username=@${bot_username} 跟 getMe 真值 @${verifiedUsername} 不符 — 已用真值覆盖, 不信自报`);
+      if (bot_username && String(bot_username).replace(/^@/, '') !== verifiedUsername) {
+        console.warn(`[kanet-broker/onboard] broker=${broker_address} 提交的 bot_username=@${bot_username} 跟 getMe 真值 @${verifiedUsername} 不符 — 已用真值覆盖, 不信自报`);
+      }
     }
     const now = new Date().toISOString();
-    const tokenEnc = encrypt(String(bot_token).trim());
+    const tokenEnc = hasToken ? encrypt(String(bot_token).trim()) : null;
     const net = broker_address.startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
 
     // upsert by address (地址制 UNIQUE)。重复提交 = 更新 token/username, status 保持 (approved 不回退到 pending)。
     // bot_username 存 verifiedUsername(getMe 真值), 不存 broker 自报的 bot_username 参数(防止 §上方 mismatch)。
     const existing = sqlite.prepare('SELECT id, status FROM broker_onboarding WHERE broker_address = ?').get(broker_address);
     if (existing) {
-      sqlite.prepare('UPDATE broker_onboarding SET bot_token_encrypted = ?, bot_username = ?, updated_at = ? WHERE broker_address = ?')
-        .run(tokenEnc, verifiedUsername, now, broker_address);
+      // 🔴 token 变可选之后, 重复提交【不带 token】不许把已有的 token/username 抹掉 ——
+      //   否则一个已经接好自己 bot 的 broker, 只要再提交一次(譬如改别的字段)就会把自己的 bot 弄没,
+      //   而他不会收到任何提示。⇒ 只在【本次带了 token】时才覆写这两列。
+      if (hasToken) {
+        sqlite.prepare('UPDATE broker_onboarding SET bot_token_encrypted = ?, bot_username = ?, updated_at = ? WHERE broker_address = ?')
+          .run(tokenEnc, verifiedUsername, now, broker_address);
+      } else {
+        sqlite.prepare('UPDATE broker_onboarding SET updated_at = ? WHERE broker_address = ?').run(now, broker_address);
+      }
     } else {
       sqlite.prepare(`INSERT INTO broker_onboarding (id, broker_address, bot_token_encrypted, bot_username, status, created_at, updated_at)
         VALUES (?,?,?,?,?,?,?)`).run(randomUUID(), broker_address, tokenEnc, verifiedUsername, 'pending', now, now);
     }
 
-    // Permissionless broker onboarding (Owner 2026-07-04 钦定: 测试网无许可自由进出, 移除人工审批门,
-    // Bettor 拍板 #5zftp1 — 只放行 broker 申请这一条路径, 不动 identities.trust_level 在别处的语义/含义):
-    // 提交即视为 recommended (= reconcileBrokerBots() 单源判定 trust_level IN ('owner','recommended') 直接放行)。
-    // 不降级既有更高信任(owner 不动)·不解封 blocked 地址(Owner 显式拉黑的另有原因, 申请 broker 不该悄悄解封)。
-    const existingIdn = sqlite.prepare('SELECT trust_level FROM identities WHERE address = ?').get(broker_address);
-    if (!existingIdn) {
-      sqlite.prepare(`INSERT INTO identities (id, network, address, display_name, identity_type, trust_level, created_at, updated_at)
-        VALUES (?,?,?,?,?,?,?,?)`).run(randomUUID(), net, broker_address, verifiedUsername, 'remote', 'recommended', now, now);
-    } else if (existingIdn.trust_level === 'normal') {
-      sqlite.prepare('UPDATE identities SET trust_level = ?, updated_at = ? WHERE address = ?').run('recommended', now, broker_address);
-    }
-    // existingIdn.trust_level in ('owner','recommended') → 已放行不动; 'blocked' → 不解封.
+    // ② 【已删除】onboarding 曾在这里写 identities.trust_level='recommended' (设计 v0.6 · Bettor 2026-07-28 批)。
+    //   删除理由 —— 那一列同时在干两件不相干的事:
+    //     A 功能开关:「这是一个已登记的 broker」 ← broker-bot-manager 据此决定要不要 fork 他的 bot
+    //     B 社交信任:「这个人可信」          ← mind 侧据此注入 "TRUSTED PEER" / 权限档 / senderMeta.authority
+    //   而 onboarding 写一次 recommended, 把 A 和 B 【一起】打开了 —— 它只想要 A。
+    //   🔴 更糟的一层: identities.trust_level 是 relation_states 缺行时的 fallback,
+    //     而一个刚从外面进来的地址【正好没有 relation_states 行】⇒ 那个 fallback 不是边角, 是新地址的默认路径。
+    //   ⇒ 信任交回 relation_states(由实际交互决定), 跟所有别人一样。谁都不挡: broker 照样即时生效、无许可。
+    //   🔵 也就去掉了一句我们对自己推理引擎说的、证据不支持的话:「他持有那把私钥」不支持「他可信」。
+    //   ⇒ 消费侧同批改: broker-bot-manager.approvedBrokers() 不再看 trust_level; 本文件两个状态端点同理。
 
-    return reply.send({ ok: true, broker_address, bot_username: verifiedUsername, status: 'approved', note: '已提交, 即时激活 (testnet 无许可进出, 无需人工审批)。bot_username 已经 getMe 校验为真值。' });
+    // 🔴 status 不再回 'approved' —— 按 v0.6 定调【根本不存在审批这件事】, 而回 'approved'
+    //   是在断言一道并不存在的门(Bettor 2026-07-28 半A 裁: 这不是措辞偏好, 是删掉一个假陈述)。
+    //   ⇒ 回【可核的事实】: 在册 + 有没有接自己的 bot。措辞归 Owner(半B), 本层只保证不说假话。
+    return reply.send({
+      ok: true,
+      broker_address,
+      bot_username: verifiedUsername,
+      registered: true,
+      has_own_bot: hasToken,
+      note: hasToken
+        ? '已登记, 即时生效(测试网无许可进出, 无人工审批)。bot_username 经 getMe 校验为真值。'
+        : '已登记, 即时生效(测试网无许可进出, 无人工审批)。未提供 bot_token ⇒ 未接自己的 TG bot。',
+    });
   });
 
   // GET /api/kanet-broker/onboard/status?address=… — 查单个地址 onboarding 状态 (token 永不回)。
   fastify.get('/api/kanet-broker/onboard/status', async (request, reply) => {
     const address = request.query.address;
     if (!address) return reply.code(400).send({ ok: false, error: 'address query param required' });
-    const row = sqlite.prepare('SELECT broker_address, bot_username, status, created_at, updated_at FROM broker_onboarding WHERE broker_address = ?').get(address);
+    // 🔴 半A(Bettor 2026-07-28): 不再从 identities.trust_level 派生 'approved'。
+    //   两个理由, 各自独立成立:
+    //   ① onboarding 已不再写那一列 ⇒ 继续读它, 新 broker 会被显示成【未批准】, 而他的 bot 照常在跑
+    //      ⇒ 系统行为与它对用户的自述相反, 而两边各自都"按代码正确工作"
+    //   ② 按 v0.6 定调根本不存在审批 ⇒ 'approved' 本身就是在断言一道不存在的门
+    //   ⇒ 改回可核的事实: 在册 + 有没有接自己的 bot。has_bot_token 之前是【硬编码 true】—— 那也是假的。
+    const row = sqlite.prepare('SELECT broker_address, bot_username, bot_token_encrypted, status, created_at, updated_at FROM broker_onboarding WHERE broker_address = ?').get(address);
     if (!row) return reply.send({ ok: true, onboarded: false });
-    const idn = sqlite.prepare('SELECT trust_level FROM identities WHERE address = ?').get(address);
-    const approved = isApprovedTrust(idn?.trust_level);
     return reply.send({
       ok: true, onboarded: true,
       broker_address: row.broker_address,
       bot_username: row.bot_username,
-      status: approved ? 'approved' : row.status,   // 审批门: trust 派生 approved
-      trust_level: idn?.trust_level || null,
-      has_bot_token: true,
+      registered: true,
+      has_own_bot: !!row.bot_token_encrypted,
+      status: row.status,          // broker_onboarding 自己那一列的原值, 不再被 trust 覆写
       created_at: row.created_at,
     });
   });
 
   // GET /api/kanet-broker/onboard/list — Owner/admin 看全部申请 (token 永不回)。
   fastify.get('/api/kanet-broker/onboard/list', async (request, reply) => {
+    // 🔴 半A 同上: 不再 LEFT JOIN identities 派生 'approved'(见 /onboard/status 处的两条理由)。
     const rows = sqlite.prepare(`
-      SELECT b.broker_address, b.bot_username, b.status, b.created_at, i.trust_level
+      SELECT b.broker_address, b.bot_username, b.bot_token_encrypted, b.status, b.created_at
       FROM broker_onboarding b
-      LEFT JOIN identities i ON i.address = b.broker_address
       ORDER BY b.created_at DESC
     `).all();
     const brokers = rows.map(r => ({
       broker_address: r.broker_address,
       bot_username: r.bot_username,
-      status: isApprovedTrust(r.trust_level) ? 'approved' : r.status,
-      trust_level: r.trust_level || null,
+      registered: true,
+      has_own_bot: !!r.bot_token_encrypted,
+      status: r.status,
       created_at: r.created_at,
     }));
     return reply.send({ ok: true, count: brokers.length, pending: brokers.filter(b => b.status === 'pending').length, brokers });

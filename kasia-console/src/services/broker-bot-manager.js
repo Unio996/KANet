@@ -63,19 +63,21 @@ function isAlive(rec) {
   return !!(rec?.child && rec.child.exitCode === null && !rec.child.signalCode && !rec.child.killed);
 }
 
-// approved = onboarded (token present) AND identities.trust_level elevated by Owner (审批门复用 trust).
-// ⚠ 审批真相源 = identities.trust_level, 单源 (Bettor 2026-06-23 拍 B)。broker_onboarding.status 是
-// vestigial (onboard 插 'pending', 没有任何路径把它设 'approved') —— 故【绝不要 gate b.status】, 加
-// `AND b.status='approved'` 会让所有 broker 永不 fork。status←trust auto-sync (方案 A) 经核为 cosmetic
-// (逻辑等价单 gate trust, 零额外保护) 且动共享 /identities 审批流, 不值当, 已弃。真分离 broker-approval 与
-// identity-trust 需独立"批准 broker bot"动作, 等真有外部 broker 规模化再上。
+// 🔴 2026-07-28 (设计 v0.6 · Bettor 批): 去掉 identities.trust_level 这个条件。
+//   根因: 那一列同时被当【功能开关】(这是一个已登记的 broker) 和【社交信任】(这个人可信) 用,
+//   而 onboarding 写一次 'recommended' 把两者一起打开了 —— 它只想要前者。信任交回 relation_states。
+//   ⇒ 这里只问一件可核的事: 【他有没有交 token】。没 token 就没有 bot 可 fork —— 那是功能前提,
+//     不是信任判断。谁都不挡: broker 照样即时生效、无许可。
+// ⚠ 保留的既有教训(勿改): broker_onboarding.status 是 vestigial (onboard 插 'pending',
+//   没有任何路径把它设 'approved') ⇒ 【绝不要 gate b.status】, 加 `AND b.status='approved'`
+//   会让所有 broker 永不 fork。
+// 🔴 而"哪些 broker 会被 fork"从今天起【只由 broker_onboarding 一张表决定】——
+//   与两个状态端点对用户说的话同源, 于是"页面说的"与"实际跑的"不会再分叉。
 function approvedBrokers() {
   return sqlite.prepare(`
-    SELECT b.broker_address, b.bot_token_encrypted, b.bot_username, i.trust_level
+    SELECT b.broker_address, b.bot_token_encrypted, b.bot_username
     FROM broker_onboarding b
-    LEFT JOIN identities i ON i.address = b.broker_address
     WHERE b.bot_token_encrypted IS NOT NULL
-      AND i.trust_level IN ('owner','recommended')
   `).all();
 }
 
