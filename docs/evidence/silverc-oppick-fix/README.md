@@ -60,10 +60,33 @@ git -C /d/silverscript branch -r --contains 8065184
 
 ```
 「OP_PICK off-by-one codegen bug：在【本机 /d/silverscript 的一个未推本地分支】上已修（8065184）；
-  🔴 而【upstream kaspanet/silverscript 未修】—— 任何用 upstream silverc 生成 .sil 的第三方，
+  🔴 而【截至我们最后一次 fetch，upstream 未修】—— 任何用 upstream silverc 生成 .sil 的第三方，
   这一族风险仍然存在。」
 ```
 🔴 **单说"silverc 已修"一律无效。** 而这条直接压在路线图「别人能接上结算」那条主线上——外面的人调的是上游。
 🔵 活体先例：`jepu1` 的 188 KAS（buggy codegen 已 baked 进链上不可变 redeem，修复不追溯）。
+
+### 🔴 而"upstream 未修"这半句本身也有作用域（NWT 2026-07-28 抓出）
+
+```
+【实测·只读，故意未 fetch】本树 refs/remotes/origin/master ⇒ d25bd34（.git/FETCH_HEAD 时间: 07-06 16:13）
+⇒ ⇒ 🔴 我们说的"upstream"，指的是【2026-07-06 那一刻的上游】，不是当前上游
+🔴 而 J1 实测当前上游 master = bfc5a45「compile.rs refactor (#178)」——
+   动的正是我们这个补丁所在的那个文件
+⇒ 当前上游到底修没修 OP_PICK，【没有人查过】。三种可能各自给出不同结论：
+   ①仍未修 ②refactor 顺手修了 ③refactor 换了实现、这个 bug 不再以同一形态存在
+```
+⚠️ **为什么本文不去 fetch 来消除这个未知**：D-005（silverc 研究全隔离）+ 此刻多方正在拿这棵树的 ref 做推理，
+`fetch` 会把别人的读数变成历史。**要答这一格，应在一份独立检出上做，而不是动这棵树。**
+
+### 🔴 这份 patch 能做什么、不能做什么
+
+```
+本 patch = 针对【d25bd34 那一版 compile.rs】的【1 文件 · 1 行删除】
+🔴 而上游已 refactor 了同一个文件 ⇒ 它【很可能 apply 不上 bfc5a45】
+✅ 它保住的是:【我们这棵树的可恢复性】
+❌ 它【不】意味着:「我们随时能把这个修复带到新版上游」
+   —— 后者需要在新码上【重新定位一次】那个 off-by-one，而那是一件独立的活
+```
 
 **要不要推上游 / 发 PR 给 `kaspanet/silverscript`** = 对外动作（以我们的名义向第三方项目提交）⇒ 归 Owner，不在本目录范围内。
