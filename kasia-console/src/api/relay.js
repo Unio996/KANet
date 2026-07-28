@@ -1547,10 +1547,17 @@ export async function registerRelayRoutes(fastify) {
           serviceTerms: (serviceTerms && typeof serviceTerms === 'object') ? serviceTerms : undefined,
         },
       }, 30000, 'internal');
-      // relay 侧异常走它自己的 catch, 回 { error, phase } —— 那不是 reject, 必须单独判, 否则会被当成成功。
-      if (result?.error) {
-        _logPublishCardFailure(request.params.id, result.error);
-        return reply.code(502).send({ ok: false, error: result.error, phase: result.phase });
+      // 🔴 成功的判据是【拿到 txId】, 不是"没抛错"。relay 侧有两种失败, 形状不同, 必须都判 (NWT diff 审 MUST-FIX):
+      //   ① 异常 → 它自己的 catch 回 { error, phase } —— 那不是 reject
+      //   ② 没广播成功 → 回 { txId: undefined, ok: false, phase } —— 🔴 这一支【不带 error】,
+      //      它用 ok:!!sent?.txId 自己建模了"没有 txId"这种结局。只判 error 会让它走到成功分支 ⇒
+      //      HTTP 200 + 卡没上链 = 本次要修的那个病原样复活, 只是换了个入口。
+      // 🔵 顺带堵掉一个自相矛盾: 旧写法 { ok:true, ...result } 里 result 展开在后 ⇒ result.ok=false 会
+      //    覆盖掉 ok:true ⇒ 回一个 HTTP 200 却 ok:false 的响应。判据收紧后这条路不再可达。
+      if (result?.error || result?.ok === false || !result?.txId) {
+        const why = result?.error || (result?.ok === false ? 'relay 报 ok:false' : '回执里没有 txId');
+        _logPublishCardFailure(request.params.id, why);
+        return reply.code(502).send({ ok: false, error: why, phase: result?.phase });
       }
       return reply.send({ ok: true, ...result });
     } catch (err) {
