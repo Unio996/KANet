@@ -18,9 +18,19 @@
 // 挂 pre-commit: `node scripts/check-tests-fresh.mjs || true`(同 check-tree-fresh)
 
 import { readdirSync, statSync, existsSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 
-const ROOT = process.env.KANET_ROOT || process.cwd();
+// 🔴 note-1(NWT): 判据源不许被环境变量改。本仓有【树分离】先例(第二棵树) ——
+//   若某人 shell 里 KANET_ROOT 指着另一棵树, hook 会去读【那棵树的】logs, 报的是别的仓库的
+//   新鲜度, 而输出里看不出来。⇒ 用 git 顶层目录, 拿不到才回落 cwd; 不读 KANET_ROOT。
+function repoRoot() {
+  try {
+    return execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim() || process.cwd();
+  } catch { return process.cwd(); }
+}
+const ROOT = repoRoot();
+const CASES_DIR = path.join(ROOT, 'kasia-console', 'test-framework', 'cases');
 const LOG_DIR = path.join(ROOT, 'logs', 'test-runs');
 const argDays = (process.argv.find((a) => a.startsWith('--days=')) || '').split('=')[1];
 const STALE_DAYS = Number(argDays || process.env.KANET_TESTS_STALE_DAYS || 7);
@@ -45,6 +55,28 @@ function collect() {
   return out;
 }
 
+// 🔴 MUST-FIX(NWT 06:58): 上面那个 collect() 数的是【留下过证据的】, 不是【存在的】——
+//   而一个【从来没跑过】的用例根本没有证据文件 ⇒ 对本检查【完全不可见】: 不计数、不点名、不告警。
+//   ⇒ 于是那行 "8 个用例 · 0 个超期" 的真实含义是「曾经跑过的那 8 个里没有超期的」,
+//     而一百多个从来没跑过的, 它一个字都不会说。
+//   🔴 最要紧的是: 本检查诞生的原因正是「m0c1-gate 那 10 个从未经 runner 跑过」——
+//     若不把总数数进来, 它【防不住那个让它诞生的病】。
+//   🔵 形状: 【被数到的那群】盖住【没被数到的那群】(与本文件上一版"新鲜存档盖住陈旧存档"同族, 上一层)。
+function countCases() {
+  let discoverable = 0, undiscoverable = 0;   // *.test.mjs(runner 收) vs 其它 .mjs(runner 收不到)
+  const walk = (dir) => {
+    let entries; try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) { walk(full); continue; }
+      if (!e.name.endsWith('.mjs')) continue;
+      if (e.name.endsWith('.test.mjs')) discoverable++; else undiscoverable++;
+    }
+  };
+  if (existsSync(CASES_DIR)) walk(CASES_DIR);
+  return { discoverable, undiscoverable, total: discoverable + undiscoverable };
+}
+
 const files = collect();
 const ageDays = (ms) => (Date.now() - ms) / 86_400_000;
 
@@ -65,8 +97,10 @@ const staleCount = staleFiles.length;
 //   后者会让"我今天跑了其中一个"把其余全部盖绿(自测时实际发生过, 见 collect() 上方那段)。
 const stale = staleCount > 0;
 
-// 带分母的汇总行 —— 三个数一起给: 用例份数 / 超期份数 / 最近一次多久前
-const denom = `${files.length} 个用例有运行证据 · ${staleCount} 个超 ${STALE_DAYS} 天 · 最近一次 ${newestAge.toFixed(1)} 天前(${newest.name.replace('-latest.json', '')})`;
+// 🔴 分母是【存在的用例总数】, 不是【留下过证据的数量】(NWT MUST-FIX)
+const cases = countCases();
+const neverRan = Math.max(0, cases.total - files.length);
+const denom = `${files.length} / ${cases.total} 个用例有过运行证据 · ${staleCount} 个超 ${STALE_DAYS} 天 · 最近一次 ${newestAge.toFixed(1)} 天前(${newest.name.replace('-latest.json', '')})`;
 
 if (stale) {
   console.error(c(R, `🔴 TESTS-STALE WARN: ${denom}`));
@@ -79,7 +113,16 @@ if (stale) {
 } else {
   console.error(c(G, `✅ tests fresh: ${denom}`));
 }
-// 🔴 这一行【无论 stale 与否都打】—— 边界不能只在报警时才出现, 否则绿色那次就没人看见它
+// 🔴 无论红绿都打的两行边界 —— 边界不能只在报警时出现, 否则绿色那次就没人看见它
+if (neverRan > 0) {
+  console.error(c(R, `   🔴 而 ${neverRan} 个用例【从来没有运行证据】—— 本检查对它们无话可说。`));
+  console.error(c(R, `      (其中 ${cases.undiscoverable} 个连 --domain/--all 都扫不到: 文件名不匹配 runner 的 *.test.mjs)`));
+}
 console.error(c(W, `   ⓘ 本检查回答的是【有没有人在跑】, 不是【跑的结果对不对】——它是陈旧度提示, 不是验收闸。`));
+// 🔴 note-2(NWT): -latest.json 在【失败时也会被写】(用例先 writeFileSync 再按 fail 决定退出码)
+//   ⇒ "fresh" 可能是"刚跑过而且是红的"。而那些文件里就有 summary:{pass,fail} —— 数据在手边而不读。
+//   🔴 这是【刻意的】, 不是漏: 本脚本只做陈旧度提示。一旦它开始读 pass/fail, 它就从"提示"
+//   变成了"验收闸", 而那正是上面那句边界要防的误读 —— 到那时"绿"会被当成"测试都过了"。
+//   ⇒ 谁要加"顺手把结果也读了", 请先改掉上面那句边界, 别让两者互相矛盾。
 
 process.exit(process.argv.includes('--strict') && stale ? 1 : 0);
