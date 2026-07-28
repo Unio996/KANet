@@ -82,6 +82,53 @@ kasia-console/src/services/broker-bot-manager.js:73-80  approvedBrokers()       
 ## 四、我填不了 / 不打算填的格
 
 - 🔴 **"approved" 这个词的用户面处置** —— 归 Owner/Bettor(见 ②涟漪)。我不自由发挥改文案。
-- 🔴 **`bot_token` 变可选之后,一个没 token 的 broker 在产品里到底能干什么** —— 我没读全下游(市场详情页/分享链接对没有 bot 的 broker 怎么显示)。**这一格若不清,①就可能造出一类"注册了但哪儿都用不了"的 broker。**
+- ~~🔴 **`bot_token` 变可选之后,一个没 token 的 broker 在产品里到底能干什么**~~ → ✅ **已补,见 §五**。
 - 🟡 **③ 抽函数会不会碰到别的 import** —— 我只核到"只导出一个注册函数",**没有**核全仓还有谁 import 它。
 - 🔴 **顺序**:①②③ 谁先谁后我给的默认是 ③ 最后(它把口开出去)。**若你要先开口再删必填,那中间会有一段"外面调得到但仍强制要 token"的窗口** —— 无害但会浪费一次外部尝试。
+
+---
+
+## 五、补回那格「没有 bot 的 broker 在产品里能干什么」(2026-07-28 实读下游,一好一坏)
+
+### ✅ 好消息:市场详情页**本来就有降级链**,不会造出"注册了但用不了"的 broker
+
+【实读 `kasia-console/src/ui/predictions-pool-detail.eta:575-591`】拿 TG 押注深链的顺序是:
+```
+① 先取该 broker 自己的 bot_username(/api/kanet-broker/onboard/status)
+② 取不到 ⇒ 回落到【平台自己的 tg-bot】(/api/tg-bot/status)
+③ 再取不到 ⇒ tgBetLink 保持 null, 页面不显示 TG 入口(不报错、不崩)
+```
+🔵 **⇒ 一个没有 bot_token 的 broker,他的市场仍然有 TG 押注入口 —— 走平台那只 bot。**
+⇒ **我原先担心的"注册了但哪儿都用不了"不成立**,这一格可以从风险清单里划掉。
+⚠️ **而它有一个归属上的后果,不是技术问题**:那样的 broker,其下注流量走**我们的** bot,
+署名/品牌也是我们的。**这是产品决定不是实现细节 ⇒ 归 Owner/Bettor**,我只把它摆出来。
+
+### 🔴 坏消息:有一句用户面文案会当场变成假话
+
+【实读 `kasia-console/src/ui/broker-home.eta:543-545`】`copyTgLink()`:
+```js
+const bot = this.onboard?.result?.bot_username;
+if (!bot) { alert('该 broker 无 TG bot 用户名·请先填写并提交 onboarding'); return; }
+```
+🔴 这句话把「没有 bot 用户名」**唯一地**归因成「你还没做完 onboarding」。
+而 `bot_token` 变可选之后,**一个已经完整注册好的 broker 也会没有它** ⇒
+**系统会叫一个已经注册完的人"去把注册做完"。**
+
+🔵 **⇒ 这与 §一②那个涟漪是同一个病的第二个实例**:
+> **一个字段同时被当作【功能开关】和【状态证明】用;
+> 当我们把写它的那一处拿掉,所有"读它来推断状态"的地方就开始说假话 —— 而它们各自都"按代码正确工作"。**
+
+🔨 **处置**:文案要改,但**改成什么是用户面** ⇒ 🔴 **我不自拟**。
+把两种情形分开是必须的(「还没注册」vs「注册了但没接自己的 bot」),而具体措辞归 Owner/Bettor。
+
+### 🔨 ⇒ 于是本方案的改动面要加一条
+
+原来写的是「三处改动 + ②的涟漪(三个消费者)」。**现在是:**
+```
+① 删 bot_token 必填 + getMe 改成"仅当提供了 token"
+② trust_level 拆两个含义 —— 🔴 三个消费者一起改(approvedBrokers + 两个 UI 状态端点)
+③ onboard 抽单路由函数 + 进网关白名单(动对外暴露面 ⇒ 建议 @NWT 单独红队审)
+④ 🔴 【新增】broker-home.eta copyTgLink 的文案 —— 用户面, 归 Owner/Bettor, 我不自拟
+```
+🔵 而**这四条里有三条是同一个根因的下游**:`bot_token` 与 `trust_level` 这两个字段,
+各自都被当成了"这个人到哪一步了"的证明,而它们本来只是"他有没有交这个东西"。
