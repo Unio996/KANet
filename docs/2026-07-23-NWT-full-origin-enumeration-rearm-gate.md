@@ -50,6 +50,40 @@
 - 覆盖别名调用（沿用 R-SCA-ALIAS-ORIGIN 的 call-arg-span 检测别名 call 的 origin·扩到直调）。
 - 这是事故的机制层根治（约定靠自觉守不住→上机制·铁律 0 同族）+第三族补全的驱动闸。
 
+## 🔴 补一个**枚举维度**（2026-07-28·NWT·Bettor 派工："补维度不是补条目"）
+
+**起因**：`POST /api/relay/:id/publish-card`（`api/relay.js:1512`）缺 origin，而它**四份权威枚举档全部零命中**（Bettor 实核）。
+**它为什么躲过了枚举**：本档与另三份枚举的键是 **「哪条路由 / 哪条命令」**，而这一条的特殊性**不在它是哪条路由,在它调了另一个函数** —— `sendCommand()` 而非 `sendCommandAsync()`。**按前者枚举,永远数不到它。**
+
+### 🔴🔴 而同一个盲点也在那条 linchpin lint 里 —— 所以"lint 全绿 ⇒ 无缺失"这个箭头不成立
+
+```
+【实读 scripts/lint-kanet.mjs】
+  R-SENDCMD-ORIGIN-REQUIRED :1558  const callRe = /(?:^|[^.\w$])sendCommandAsync\s*\(/
+  R-SCA-ALIAS-ORIGIN        :824-829  只认 sendCommandAsync 的别名/裸值传参
+  而 :1549 注释自述:「两规则合起来覆盖直调+别名全集」
+```
+🔴 **那个"全集"是【`sendCommandAsync` 调用的全集】,不是【进入 relay IPC 的命令的全集】。**
+⇒ `sendCommand()`(`relay-manager.js:247`,同样 `child.send`,且**不做 origin 权威设置**)对**两条规则都不可见**。
+⇒ ⇒ 所以本档 re-arm 门第 3 条「lint 上线(block) → 全 138 无缺失」**推不出它想推的结论**。今天差额 n=1(publish_card),而 lint 对"明天再加一个"提供**零保护**。
+
+### 🔨 维度修法：枚举与 lint 都改锚在**效果发生的那一点**,不锚在函数名
+
+```
+✅ 真正的收窄点是 child.send( —— 全仓【只有两处】(relay-manager.js:250 与 :317)
+   ⇒ 枚举/lint 锚这里, 任何新的"能把命令送进 relay"的函数都会当场现形
+❌ 锚 sendCommandAsync = 锚一个【名字】 ⇒ 换个名字就绕开, 而绕开时 lint 是绿的
+🔨 且照 Bettor 07-28 裁定的方向: publish_card 迁到 sendCommandAsync 之后,
+   让 sendCommand 【不存在】(n=1, 代价=一个调用点) —— 否则"补上参数两个函数并存"
+   等于把洞留在原地等下一次: 下一个人写新代码仍然可以选到没 origin 的那个
+🔨 配一条 lint: 除 sendCommandAsync 之外出现新的 child.send( 路径 = block
+   ⇒ 于是"完整性"从【枚举出来的】变成【结构上成立的】
+```
+
+🔵 **一句判据(与本仓规则 58 同族)**:枚举的键必须是**「能不能产生那个效果」**,不是**「这条语句/这个调用叫什么名字」**。按名字枚举时,**盲点与覆盖在报告里长得一模一样**。
+
+---
+
 ## re-arm 完整门（三族全修 + 双闸）
 
 1. ② 17 app→legacy（95b2bead·NWT 核）
