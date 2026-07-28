@@ -43,7 +43,10 @@
    - 三层结构：lib/(领域无关) + personas/(用户人格) + cases/<domain>/(业务场景)
    - 跑：`node scripts/test.mjs --domain=broker` (整 domain) / `--case=...` (单个) / `--all` (全部)
    - 实操教程 → `kasia-console/test-framework/README.md`
-   - 加新业务必同步加 case；修 bug 必同步加 regression case 守住
+   - 加新业务必同步加 case；修 bug 必同步加 regression case
+   - 🔴 **而 regression case 是【交付那一刻的证据】，不是【一直在岗的哨兵】**（2026-07-28 实测更正）：
+     本仓**没有自动回归** —— 无 CI、无 cron，`--domain`/`--all` 没有任何东西会去调它。
+     case 由**改动者手工跑**并留证据。别把"加了 regression case"读成"这个 bug 从此有人守着"。
 
 7. **系统架构（详细版）** → `docs/kanet-system-architecture.md`
    - 五大模块职责、25张表读写映射、数据流、已知裂缝、API 清单
