@@ -361,7 +361,14 @@ export async function registerKanetBrokerRoutes(fastify) {
       bot_username: row.bot_username,
       registered: true,
       has_own_bot: !!row.bot_token_encrypted,
-      status: row.status,          // broker_onboarding 自己那一列的原值, 不再被 trust 覆写
+      // 🔴 不再回 status(NWT 2026-07-28 装载前拦下, 走他的甲案):
+      //   broker_onboarding.status 是 vestigial —— 唯一写入是 INSERT 的 'pending', 没有任何路径把它设别的值
+      //   ⇒ 它只有一个可能值 ⇒ 零信息量。而它此前之所以"看起来对", 全靠 trust 派生的那个 override 盖着它。
+      //   ⇒ ⇒ 把 override 拿掉后它露出来, 而 UI 把 'pending' 读成【地址被标记 blocked, 需 Owner 手动放行】
+      //     ⇒ 每个注册成功的 broker 都会看到那句, 而那三句话一句都不成立。
+      //   🔴 所以回它 = 明知会让 UI 说假话还回。删掉这个字段是【删假陈述】, 不是【换一句话】。
+      // 🔵 而我原来的枚举停在 API 层("谁读 trust_level"), 漏了【谁读由它派生出来的东西】——
+      //   判据要再往下一层, 这是 NWT 抓出来的第四个消费者。
       created_at: row.created_at,
     });
   });
@@ -374,15 +381,21 @@ export async function registerKanetBrokerRoutes(fastify) {
       FROM broker_onboarding b
       ORDER BY b.created_at DESC
     `).all();
+    // 🔴 同上: status 与由它算出来的 pending 计数一并去掉 —— 那一列只有一个可能值,
+    //   于是 "pending" 恒等于总数, 它数的不是"有多少在等", 是"有多少行"。零信息量的计数比没有更坏。
     const brokers = rows.map(r => ({
       broker_address: r.broker_address,
       bot_username: r.bot_username,
       registered: true,
       has_own_bot: !!r.bot_token_encrypted,
-      status: r.status,
       created_at: r.created_at,
     }));
-    return reply.send({ ok: true, count: brokers.length, pending: brokers.filter(b => b.status === 'pending').length, brokers });
+    return reply.send({
+      ok: true,
+      count: brokers.length,
+      with_own_bot: brokers.filter(b => b.has_own_bot).length,   // 可核的事实: 有几个接了自己的 bot
+      brokers,
+    });
   });
 
   // ─── 多-bot tg-manager (Owner 钦定 2026-06-22): 每 approved broker 一个真 bot ─────────────
