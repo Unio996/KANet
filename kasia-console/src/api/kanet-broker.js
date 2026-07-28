@@ -26,6 +26,92 @@ const KAS_ADDR_RE = /^kaspa(test)?:[a-z0-9]{50,80}$/;
 //   🔴 留着它 = 把那个概念留在原地等下一个人重新接上 —— 与本仓那条同理:
 //     "只搬走用户而留着函数, 洞不是被堵上, 是被留在原地"。零调用点时删代价最小。
 
+// ③ 单路由注册函数 —— 外部网关白名单【只能】填这个, 不能填 registerKanetBrokerRoutes。
+//   它与主实例注册的是同一个 handler(同一份码, 不是副本)⇒ 两边行为不会漂移。
+//   🔴 而"这个口上有什么"由网关那份白名单负责判(它要求【排序后完全相等】), 不由这里负责。
+export function registerBrokerOnboardRoute(fastify) {
+  // POST /api/kanet-broker/onboard — 玩家自助申请当 broker。body: { broker_address, bot_token, bot_username? }
+  fastify.post('/api/kanet-broker/onboard', async (request, reply) => {
+    const { broker_address, bot_token, bot_username } = request.body || {};
+    if (!broker_address || !KAS_ADDR_RE.test(broker_address)) {
+      return reply.code(400).send({ ok: false, error: 'valid broker_address (kaspatest:… / kaspa:…) required' });
+    }
+    // ① bot_token 不再必填 (设计 v0.6 · Bettor 2026-07-28 批): 它是【通知渠道】, 不是【身份】。
+    //   🔵 顺带解掉一条活性: 之前 api.telegram.org 不可达 = 谁都进不来 —— 一个第三方站在
+    //     "外部程序能不能接进来"的关键路径上, 而那正是这条路最不该有的形状。
+    //     改完它只影响【提供了 token 的人】。
+    // 根治(2026-07-08, Owner "找根治问题" 指令, #12): bot_username 之前是 broker 自报字段, 从没验过跟
+    // bot_token 是不是真的对应同一个 bot——broker 填错/填别人的 username, 下游(市场详情页/分享链接)会
+    // 指向一个完全不同的 bot, 只有真的点开才会暴露。用 Telegram 自己的 getMe API(唯一权威源, 传
+    // bot_token 换它自己认的 username)校验。getMe 失败(token 无效/网络问题)直接拒绝, 不静默放行。
+    // 🔴 而这道校验【只在提供了 token 时】跑 —— 不是整个关掉: 给了 token 就必须是真的,
+    //   否则下游会指向一个不存在/别人的 bot。(验收对照臂: 带一个无效 token ⇒ 必须仍被拒。)
+    const hasToken = bot_token != null && String(bot_token).trim() !== '';
+    let verifiedUsername = null;
+    if (hasToken) {
+      try {
+        const meRes = await fetch(`https://api.telegram.org/bot${String(bot_token).trim()}/getMe`, { signal: AbortSignal.timeout(8000) });
+        const meJson = await meRes.json();
+        verifiedUsername = meJson?.result?.username;
+        if (!meJson?.ok || !verifiedUsername) {
+          return reply.code(400).send({ ok: false, error: `bot_token 校验失败(getMe 返回: ${meJson?.description || 'invalid token'}) — 请确认这是从 @BotFather 拿到的真实 token` });
+        }
+      } catch (e) {
+        return reply.code(502).send({ ok: false, error: `bot_token 校验失败(无法连接 Telegram API: ${e.message}) — 请稍后重试` });
+      }
+      if (bot_username && String(bot_username).replace(/^@/, '') !== verifiedUsername) {
+        console.warn(`[kanet-broker/onboard] broker=${broker_address} 提交的 bot_username=@${bot_username} 跟 getMe 真值 @${verifiedUsername} 不符 — 已用真值覆盖, 不信自报`);
+      }
+    }
+    const now = new Date().toISOString();
+    const tokenEnc = hasToken ? encrypt(String(bot_token).trim()) : null;
+    const net = broker_address.startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
+
+    // upsert by address (地址制 UNIQUE)。重复提交 = 更新 token/username, status 保持 (approved 不回退到 pending)。
+    // bot_username 存 verifiedUsername(getMe 真值), 不存 broker 自报的 bot_username 参数(防止 §上方 mismatch)。
+    const existing = sqlite.prepare('SELECT id, status FROM broker_onboarding WHERE broker_address = ?').get(broker_address);
+    if (existing) {
+      // 🔴 token 变可选之后, 重复提交【不带 token】不许把已有的 token/username 抹掉 ——
+      //   否则一个已经接好自己 bot 的 broker, 只要再提交一次(譬如改别的字段)就会把自己的 bot 弄没,
+      //   而他不会收到任何提示。⇒ 只在【本次带了 token】时才覆写这两列。
+      if (hasToken) {
+        sqlite.prepare('UPDATE broker_onboarding SET bot_token_encrypted = ?, bot_username = ?, updated_at = ? WHERE broker_address = ?')
+          .run(tokenEnc, verifiedUsername, now, broker_address);
+      } else {
+        sqlite.prepare('UPDATE broker_onboarding SET updated_at = ? WHERE broker_address = ?').run(now, broker_address);
+      }
+    } else {
+      sqlite.prepare(`INSERT INTO broker_onboarding (id, broker_address, bot_token_encrypted, bot_username, status, created_at, updated_at)
+        VALUES (?,?,?,?,?,?,?)`).run(randomUUID(), broker_address, tokenEnc, verifiedUsername, 'pending', now, now);
+    }
+
+    // ② 【已删除】onboarding 曾在这里写 identities.trust_level='recommended' (设计 v0.6 · Bettor 2026-07-28 批)。
+    //   删除理由 —— 那一列同时在干两件不相干的事:
+    //     A 功能开关:「这是一个已登记的 broker」 ← broker-bot-manager 据此决定要不要 fork 他的 bot
+    //     B 社交信任:「这个人可信」          ← mind 侧据此注入 "TRUSTED PEER" / 权限档 / senderMeta.authority
+    //   而 onboarding 写一次 recommended, 把 A 和 B 【一起】打开了 —— 它只想要 A。
+    //   🔴 更糟的一层: identities.trust_level 是 relation_states 缺行时的 fallback,
+    //     而一个刚从外面进来的地址【正好没有 relation_states 行】⇒ 那个 fallback 不是边角, 是新地址的默认路径。
+    //   ⇒ 信任交回 relation_states(由实际交互决定), 跟所有别人一样。谁都不挡: broker 照样即时生效、无许可。
+    //   🔵 也就去掉了一句我们对自己推理引擎说的、证据不支持的话:「他持有那把私钥」不支持「他可信」。
+    //   ⇒ 消费侧同批改: broker-bot-manager.approvedBrokers() 不再看 trust_level; 本文件两个状态端点同理。
+
+    // 🔴 status 不再回 'approved' —— 按 v0.6 定调【根本不存在审批这件事】, 而回 'approved'
+    //   是在断言一道并不存在的门(Bettor 2026-07-28 半A 裁: 这不是措辞偏好, 是删掉一个假陈述)。
+    //   ⇒ 回【可核的事实】: 在册 + 有没有接自己的 bot。措辞归 Owner(半B), 本层只保证不说假话。
+    return reply.send({
+      ok: true,
+      broker_address,
+      bot_username: verifiedUsername,
+      registered: true,
+      has_own_bot: hasToken,
+      note: hasToken
+        ? '已登记, 即时生效(测试网无许可进出, 无人工审批)。bot_username 经 getMe 校验为真值。'
+        : '已登记, 即时生效(测试网无许可进出, 无人工审批)。未提供 bot_token ⇒ 未接自己的 TG bot。',
+    });
+  });
+}
+
 export async function registerKanetBrokerRoutes(fastify) {
   // GET /api/kanet-broker/markets/:relay_id — 列名下市场 + 订单 (跨域)
   // Response: { relay_id, pool_markets: [...], retail_dex_orders: [...], totals: {...} }
@@ -262,86 +348,11 @@ export async function registerKanetBrokerRoutes(fastify) {
   //   多-bot tg-manager (托管各 broker token 同步呈现市场) = 下一步, 不在骨架。
   //   ⚠ 安全: bot_token = Telegram secret, 加密落库 (crypto.encrypt), 任何 GET 都不回 token。Bettor 审 onboarding 安全 + 命门④ fee 地址链锚。
 
-  // POST /api/kanet-broker/onboard — 玩家自助申请当 broker。body: { broker_address, bot_token, bot_username? }
-  fastify.post('/api/kanet-broker/onboard', async (request, reply) => {
-    const { broker_address, bot_token, bot_username } = request.body || {};
-    if (!broker_address || !KAS_ADDR_RE.test(broker_address)) {
-      return reply.code(400).send({ ok: false, error: 'valid broker_address (kaspatest:… / kaspa:…) required' });
-    }
-    // ① bot_token 不再必填 (设计 v0.6 · Bettor 2026-07-28 批): 它是【通知渠道】, 不是【身份】。
-    //   🔵 顺带解掉一条活性: 之前 api.telegram.org 不可达 = 谁都进不来 —— 一个第三方站在
-    //     "外部程序能不能接进来"的关键路径上, 而那正是这条路最不该有的形状。
-    //     改完它只影响【提供了 token 的人】。
-    // 根治(2026-07-08, Owner "找根治问题" 指令, #12): bot_username 之前是 broker 自报字段, 从没验过跟
-    // bot_token 是不是真的对应同一个 bot——broker 填错/填别人的 username, 下游(市场详情页/分享链接)会
-    // 指向一个完全不同的 bot, 只有真的点开才会暴露。用 Telegram 自己的 getMe API(唯一权威源, 传
-    // bot_token 换它自己认的 username)校验。getMe 失败(token 无效/网络问题)直接拒绝, 不静默放行。
-    // 🔴 而这道校验【只在提供了 token 时】跑 —— 不是整个关掉: 给了 token 就必须是真的,
-    //   否则下游会指向一个不存在/别人的 bot。(验收对照臂: 带一个无效 token ⇒ 必须仍被拒。)
-    const hasToken = bot_token != null && String(bot_token).trim() !== '';
-    let verifiedUsername = null;
-    if (hasToken) {
-      try {
-        const meRes = await fetch(`https://api.telegram.org/bot${String(bot_token).trim()}/getMe`, { signal: AbortSignal.timeout(8000) });
-        const meJson = await meRes.json();
-        verifiedUsername = meJson?.result?.username;
-        if (!meJson?.ok || !verifiedUsername) {
-          return reply.code(400).send({ ok: false, error: `bot_token 校验失败(getMe 返回: ${meJson?.description || 'invalid token'}) — 请确认这是从 @BotFather 拿到的真实 token` });
-        }
-      } catch (e) {
-        return reply.code(502).send({ ok: false, error: `bot_token 校验失败(无法连接 Telegram API: ${e.message}) — 请稍后重试` });
-      }
-      if (bot_username && String(bot_username).replace(/^@/, '') !== verifiedUsername) {
-        console.warn(`[kanet-broker/onboard] broker=${broker_address} 提交的 bot_username=@${bot_username} 跟 getMe 真值 @${verifiedUsername} 不符 — 已用真值覆盖, 不信自报`);
-      }
-    }
-    const now = new Date().toISOString();
-    const tokenEnc = hasToken ? encrypt(String(bot_token).trim()) : null;
-    const net = broker_address.startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
-
-    // upsert by address (地址制 UNIQUE)。重复提交 = 更新 token/username, status 保持 (approved 不回退到 pending)。
-    // bot_username 存 verifiedUsername(getMe 真值), 不存 broker 自报的 bot_username 参数(防止 §上方 mismatch)。
-    const existing = sqlite.prepare('SELECT id, status FROM broker_onboarding WHERE broker_address = ?').get(broker_address);
-    if (existing) {
-      // 🔴 token 变可选之后, 重复提交【不带 token】不许把已有的 token/username 抹掉 ——
-      //   否则一个已经接好自己 bot 的 broker, 只要再提交一次(譬如改别的字段)就会把自己的 bot 弄没,
-      //   而他不会收到任何提示。⇒ 只在【本次带了 token】时才覆写这两列。
-      if (hasToken) {
-        sqlite.prepare('UPDATE broker_onboarding SET bot_token_encrypted = ?, bot_username = ?, updated_at = ? WHERE broker_address = ?')
-          .run(tokenEnc, verifiedUsername, now, broker_address);
-      } else {
-        sqlite.prepare('UPDATE broker_onboarding SET updated_at = ? WHERE broker_address = ?').run(now, broker_address);
-      }
-    } else {
-      sqlite.prepare(`INSERT INTO broker_onboarding (id, broker_address, bot_token_encrypted, bot_username, status, created_at, updated_at)
-        VALUES (?,?,?,?,?,?,?)`).run(randomUUID(), broker_address, tokenEnc, verifiedUsername, 'pending', now, now);
-    }
-
-    // ② 【已删除】onboarding 曾在这里写 identities.trust_level='recommended' (设计 v0.6 · Bettor 2026-07-28 批)。
-    //   删除理由 —— 那一列同时在干两件不相干的事:
-    //     A 功能开关:「这是一个已登记的 broker」 ← broker-bot-manager 据此决定要不要 fork 他的 bot
-    //     B 社交信任:「这个人可信」          ← mind 侧据此注入 "TRUSTED PEER" / 权限档 / senderMeta.authority
-    //   而 onboarding 写一次 recommended, 把 A 和 B 【一起】打开了 —— 它只想要 A。
-    //   🔴 更糟的一层: identities.trust_level 是 relation_states 缺行时的 fallback,
-    //     而一个刚从外面进来的地址【正好没有 relation_states 行】⇒ 那个 fallback 不是边角, 是新地址的默认路径。
-    //   ⇒ 信任交回 relation_states(由实际交互决定), 跟所有别人一样。谁都不挡: broker 照样即时生效、无许可。
-    //   🔵 也就去掉了一句我们对自己推理引擎说的、证据不支持的话:「他持有那把私钥」不支持「他可信」。
-    //   ⇒ 消费侧同批改: broker-bot-manager.approvedBrokers() 不再看 trust_level; 本文件两个状态端点同理。
-
-    // 🔴 status 不再回 'approved' —— 按 v0.6 定调【根本不存在审批这件事】, 而回 'approved'
-    //   是在断言一道并不存在的门(Bettor 2026-07-28 半A 裁: 这不是措辞偏好, 是删掉一个假陈述)。
-    //   ⇒ 回【可核的事实】: 在册 + 有没有接自己的 bot。措辞归 Owner(半B), 本层只保证不说假话。
-    return reply.send({
-      ok: true,
-      broker_address,
-      bot_username: verifiedUsername,
-      registered: true,
-      has_own_bot: hasToken,
-      note: hasToken
-        ? '已登记, 即时生效(测试网无许可进出, 无人工审批)。bot_username 经 getMe 校验为真值。'
-        : '已登记, 即时生效(测试网无许可进出, 无人工审批)。未提供 bot_token ⇒ 未接自己的 TG bot。',
-    });
-  });
+  // ③ onboard 抽成【单路由注册函数】(设计 §三 · NWT §③ 前置):
+  //   本文件只导出一个 registerKanetBrokerRoutes, 而它注册 9 条路由 —— 其中含
+  //   POST /api/kanet-broker/bots/stop(停掉任意 broker 的 bot)。
+  //   🔴 外部网关白名单若直接填那个函数, 九条会一起上外网 ⇒ 必须有一个只注册 onboard 的入口。
+  registerBrokerOnboardRoute(fastify);
 
   // GET /api/kanet-broker/onboard/status?address=… — 查单个地址 onboarding 状态 (token 永不回)。
   fastify.get('/api/kanet-broker/onboard/status', async (request, reply) => {

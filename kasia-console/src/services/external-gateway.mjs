@@ -10,17 +10,61 @@
 //    这个对外监听口只有在白名单非空且 HOST/PORT 都显式配置时才被创建
 //    ⇒ 造不出"开了口而清单还没写"的中间态。
 //
-// 🔴 白名单只有【一条】(J2 6dec4d6f 分界线): 外部程序今天确实只能用这一条。
+// 🔴 白名单现在有【两条】(2026-07-28 加 broker onboard · 设计 v0.2 三方审毕):
+//      GET  /api/public/channel/:name/messages   读链上已公开的消息(只读)
+//      POST /api/kanet-broker/onboard           外部程序自助登记成为 broker(🔴 第一个对外的【写入口】)
 //    deny 侧最不能漏的几条(J2 点名 + Bettor 07:15 裁), 它们【不在这里注册】, 因此从这个口连不到:
 //      POST /api/agent/create              铸身份
 //      POST /api/relay/:id/publish-card    让我们的 relay 花我们的币发链上 TX
 //      POST /api/chat/send                 用【我们的钥匙】替调用方说话
+//    🔵 而 onboard 曾被质疑"它也在铸身份"(它当时会写 identities.trust_level='recommended',
+//      而那在 Agent 消息闸上是 120/时 + 多两档 authority ⇒ 匿名自助提权)。
+//      ✅ 该质疑【已被前置改动消解】: onboard 自 2026-07-28 起不再写 identities ——
+//      🔴 而这个前置是【硬前置】不是顺序建议: 若哪天有人把那段写回去, 本条就必须同时下架。
 //
 // 🔴 控制面(现有 console)【行为零改动】: 仍绑 127.0.0.1, 且本版【不加 bearer】——
 //    实测每一个内部调用方都不带 Authorization 头, 加它 = 装载那一刻全部 401(含协调频道本身)。
 //    控制面本版的安全前提就是"继续绑回环"那一条, 而它没动。(NWT 07:25 · Bettor 07:26 裁)
 import Fastify from 'fastify';
 import { registerPublicChannelReadRoute } from '../api/chat.js';
+import { registerBrokerOnboardRoute } from '../api/kanet-broker.js';
+
+// ── 资源控制(设计 docs/2026-07-28-broker-onboard-gateway-exposure-supplement.md v0.2 §六) ──
+// 🔴 分轴: 【资源按口 · 契约按路由】。这三样全部做在【实例级】覆盖该口全部路由 ——
+//   而不是只给 onboard: 同一个口上另一条路由若没有上限, 这个口的天花板就由它决定。
+//   (初版只给了 onboard ⇒ NWT MUST-FIX: "保护了一条路由, 而攻击面是一个口"。)
+const GW_BODY_LIMIT_BYTES = 8 * 1024;
+// 两档限频: 写入面(onboard)与读频道面分开 —— 只给一档会让【本来就要给外面用】的读接口吃写入面的紧额度。
+const GW_RATE_WRITE = { limit: 10, windowMs: 60 * 60 * 1000 };   // 注册对一个正当用户是"一辈子一次"的动作
+const GW_RATE_READ = { limit: 120, windowMs: 60 * 60 * 1000 };   // 读公开频道: 给外面用的, 不能按写入面卡
+const GW_MAX_INFLIGHT = 4;
+// 🔴 note-2(设计 §六): 这是【内存】计数 ⇒ 进程重启即清零。
+//   它挡的是【持续刷】, 不是【总量配额】—— 额度可以靠等一次重启重置。这一句必须留在码里, 不是文档里。
+const _rateBuckets = new Map();   // key = ip + '|' + tier → number[](窗口内的时间戳)
+let _inFlight = 0;
+
+// 🔴 note-1(设计 §六): 「每 IP」依赖【这个口前面没有反代】—— 该实例没有设 trustProxy。
+//   ⇒ 显式读 socket.remoteAddress, 【不读 request.ip】: 后者能被一个配置开关悄悄改掉,
+//     而那会让 per-IP 限频整个塌成一个共享桶, 且塌的那一刻没有任何提示。
+function _peerIp(req) {
+  return (req.socket && req.socket.remoteAddress) || 'unknown';
+}
+
+function _rateLimited(ip, tier, cfg, now) {
+  const key = ip + '|' + tier;
+  const arr = _rateBuckets.get(key) || [];
+  const cutoff = now - cfg.windowMs;
+  let i = 0;
+  while (i < arr.length && arr[i] <= cutoff) i++;   // 滑窗: 丢掉过期的
+  const live = i > 0 ? arr.slice(i) : arr;
+  if (live.length >= cfg.limit) {
+    _rateBuckets.set(key, live);
+    return Math.ceil((live[0] + cfg.windowMs - now) / 1000);   // Retry-After 秒
+  }
+  live.push(now);
+  _rateBuckets.set(key, live);
+  return 0;
+}
 
 /**
  * 协议面白名单 —— 唯一真相源。
@@ -38,6 +82,23 @@ const PROTOCOL_ROUTES = Object.freeze([
     path: '/api/public/channel/:name/messages',
     register: registerPublicChannelReadRoute,
     why: '读链上已公开的消息。不撮合·不托管·不定价·不审核参与者(无任何我们发放的凭证)。',
+  }),
+  Object.freeze({
+    method: 'POST',
+    path: '/api/kanet-broker/onboard',
+    register: registerBrokerOnboardRoute,
+    // 🔴 why 订正(NWT §③ MUST-FIX B): 上面那条的自述【对本条不成立】, 必须各写各的。
+    //   加了本条之后, 这个口【开始接收参与者】、且在调用方提供 token 时【托管一份第三方密钥】
+    //   ⇒ 若沿用"不托管·不审核参与者"那句, 它当场变假, 而全仓别处还在引它当这个口的定性。
+    why:
+      '外部程序自助登记成为 broker。逐条对齐 KANet-Positioning.md:78:' +
+      ' 不撮合(它只写一行登记, 不参与任何撮合)· 不定价(它不设任何价格)·' +
+      ' 不审核参与者(无许可: 谁提交谁登记, 没有人工批准这一步 —— 而正因如此它不发放任何凭证);' +
+      ' 🔴 而【不托管】这一条对本路由【不成立】: 调用方若提供 bot_token, 我们会加密托管它' +
+      '(那是他自己的第三方通知渠道密钥, 不是资金)。这一句必须留着 —— 它是这个口性质变化的那一格。',
+    // 🔵 而 NWT 曾据"本口 deny 铸身份"反对过本条(模块头把 POST /api/agent/create 列为 deny 例子):
+    //   ✅ 该反对【已被前置改动消解】—— onboard 在 2026-07-28 之后【不再写 identities】,
+    //     它不再是"铸身份"的一种形态。写在这里, 否则下一个人会以为我们无视了那条反对。
   }),
 ]);
 
@@ -138,8 +199,42 @@ async function _start(state) {
     // 🔴 exposeHeadRoutes:false —— fastify 默认会为每条 GET 自动加一条 HEAD。
     //    那会让下面"实际注册的 === 白名单"这条判据【永远对不上】, 于是只能放宽成"包含",
     //    而放宽之后它就挡不住"多注册了一条"这件事。⇒ 关掉它, 让判据保持【精确相等】。
-    app = Fastify({ logger: false, exposeHeadRoutes: false });
+    // 🔴 bodyLimit 实例级(设计 §六): 不设就吃 Fastify 默认 1 MiB, 而这个口的请求体是几百字节量级。
+    //   判据不是"设了", 是【超限必须回 413】而不是被静默截断。
+    app = Fastify({ logger: false, exposeHeadRoutes: false, bodyLimit: GW_BODY_LIMIT_BYTES });
     state.app = app; // 🔴 让外层在超时时也能关掉它
+
+    // ── 资源控制钩子(实例级, 覆盖该口全部路由) ──
+    // 🔴 用 onRequest 而不是 preHandler: 后者在【路由匹配 + body 解析之后】才跑, 而限频与并发
+    //   属于"在花任何代价之前就该判"的那一类。onRequest 是最早的钩子, 同样免费。
+    app.addHook('onRequest', (req, reply, done) => {
+      const ip = _peerIp(req);
+      const isWrite = req.method !== 'GET' && req.method !== 'HEAD';
+      const tier = isWrite ? 'w' : 'r';
+      const retryAfter = _rateLimited(ip, tier, isWrite ? GW_RATE_WRITE : GW_RATE_READ, Date.now());
+      if (retryAfter > 0) {
+        reply.header('Retry-After', String(retryAfter));
+        reply.code(429).send({ error: 'rate limited', retry_after_seconds: retryAfter });
+        return;   // 🔴 不 done() ⇒ 请求在这里终结, 且【还没有】占用 in-flight 槽位
+      }
+      if (_inFlight >= GW_MAX_INFLIGHT) {
+        // 🔴 立即拒绝, 【不排队】—— 排队会把"拒绝"变成"更长的占用", 那正是要防的东西。
+        reply.header('Retry-After', '1');
+        reply.code(503).send({ error: 'gateway busy', retry_after_seconds: 1 });
+        return;
+      }
+      _inFlight++;
+      // 🔴🔴 计数器【不能泄漏】(NWT 落码警告): 若只在正常响应时减, 而客户端在那最长 8 秒里断开
+      //   是【常态不是边角】⇒ 几个中途断开的请求就永久吃掉槽位 ⇒ 之后恒 503,
+      //   而【恒 503】与【正在被攻击】读数完全相同。
+      //   ⇒ 减计数挂在【请求终结的所有出口】上, 并用一次性闸保证恰好减一次。
+      let released = false;
+      const release = () => { if (!released) { released = true; _inFlight--; } };
+      reply.raw.on('finish', release);   // 正常响应写完
+      reply.raw.on('close', release);    // 连接关闭(含客户端中途 abort / 异常)
+      req.raw.on('aborted', release);    // 客户端显式中止
+      done();
+    });
 
     // 🔴🔴 白名单从【文档】变成【闸】(J2 07:37 residual ①):
     //    PROTOCOL_ROUTES 里的 method/path 本来只是描述 —— 没有任何东西保证 r.register()
