@@ -183,10 +183,39 @@ _maybeWriteStuckAlert(zk-autonomy-ticks.mjs:384) 每 2 小时朝 events 表插�
 **🟡 未定(8 盘,含 kr5l4 / 9jaty)**: leaf state 声称有钱,但**三类地址链上都查不到**——
 建盘 leaf 地址 / 当前 state 派生的 leaf 地址 / payout_shard genesis 地址,全 0。
 
+**🔨 追加一层(Bettor 06:02 派工「从 side_lock 往下再推一层」· 只读)**:
+
 ```
-🔴 剩下的唯一候选(未查): PS 地址本身也是 state-in-address, consolidate 之后它会推进
-   ⇒ 库里存的 payout_ps_addr 是创世那个, 真地址要 splice 当前 consolidated state 才能派生
-⇒ 这一层我【没查】。所以这 8 盘的钱在哪, 我交"不知道", 不交像答案的东西
+① PS 层: 在 kaspa_tx_log.outputs_json 里找【谁付给了 PS 地址】(= consolidate 那一步)
+   🔵 对照臂: 已 completed 的 85fit 同法查 ⇒ 命中 1 笔 / 907ms ⇒ 查询有功率
+   结果: kr5l4 / 9jaty / 9ez2u / s6zwj / tha3l / 3mzoh 各命中【1 笔】, 而那一笔是
+        20,000,000 sompi = 0.20 KAS 的【创世 dust mint】—— 不是池子的钱
+        j34vb / yxllc 命中 0 笔
+   ⇒ 🔵 结论: 这几盘的下注款【从来没有进过 PS】。consolidate 没发生, 不是"发生了钱走了"
+
+② shard 叶层(抽 kr5l4 的 3 个 side 地址, 全窗口 outputs_json 扫):
+   🔵 对照臂 85fit 的 side 地址 ⇒ 命中 1 笔 0.20 KAS(创世 dust)⇒ 有功率
+   kr5l4 三个地址 ⇒ 命中【0 笔】, 连 0.20 的创世 dust 都没有
+   ⇒ 🟡 读起来像"这些 shard 叶从来没在链上被铸出来过", 但这是 3/22 抽样, 我不外推到全盘
+```
+
+**🔴 而这一层同时【推翻了我自己上一步的一个推论】,必须写下来**:
+
+```
+我一度想用 side_lock_daa 是否为空当判据("空 = 没入过块")
+🔴 它是错的, 而推翻它的正是我自己前面的链上证据:
+   ldtyn / 8xykm / cswib / 7jy3s 四盘 side_lock_daa 【全为空】,
+   而它们的钱【实实在在锁在链上】(127.78 / 120.42 / 102.55 / 1.50, 分文不差)
+⇒ ⇒ side_lock_daa 为空只反映那一列的回填覆盖范围, 不反映有没有入块。不可当判据。
+🔵 记这一条的理由: 它长得非常像一个判据 —— 列名里带 daa, 语义上"入块高度",
+   而它恰好在 12 盘里有区分度(105/694 · 59/70 · 0 · 0 …), 看起来像信号。它不是。
+```
+
+```
+🔴 所以这 8 盘的钱在哪, 我仍然交"不知道"。而现在的"不知道"比上一版窄:
+   已排除: 建盘 leaf 地址 · 当前 state 派生的 leaf 地址 · PS 地址(只收过 0.20 创世 dust)
+   仍未查: 全部 22 个 shard 的 side 地址逐个全窗口扫(我只抽了 3 个)
+        + 下注方钱包侧: 那些 side_lock_tx 到底有没有落过链(本地索引查不到 ≠ 没上链)
 ```
 
 🔴 **而这里还有一格必须写进来: DB 自己的两套记账互相对不上。**
