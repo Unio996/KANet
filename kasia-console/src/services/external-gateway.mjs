@@ -26,6 +26,11 @@ import { registerPublicChannelReadRoute } from '../api/chat.js';
  * 协议面白名单 —— 唯一真相源。
  * 🔴 每一项必须写明【为什么它是协议面】, 判据用 docs/KANet-Positioning.md:78 那四条原文,
  *    不自创分类: 「不运营任何业务。不撮合交易, 不托管资金, 不设定价格, 不审核参与者。」
+ *
+ * 🔴 这份清单是【公开信息】, 不是内部知识 (NWT 提 · Bettor 2026-07-28 裁 · 落账在码不在频道):
+ *    本仓 origin 是公开 GitHub 仓库 ⇒ 本文件入库即发布 ⇒ 谁都读得到这个口开了哪条路由。
+ *    ⇒ 安全性必须完全来自【不在清单上的路由在这个实例上不存在】这一条结构事实,
+ *      而【不能】有任何一格依赖"外面的人不知道我们开了什么" —— 半年后读到这里的人别搞反。
  */
 const PROTOCOL_ROUTES = Object.freeze([
   Object.freeze({
