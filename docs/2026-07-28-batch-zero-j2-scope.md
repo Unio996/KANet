@@ -357,6 +357,42 @@ _maybeWriteStuckAlert(zk-autonomy-ticks.mjs:384) 每 2 小时朝 events 表插�
 
 ---
 
+## 4.5 审查边界: 我审了「那个文件」,而该审的是「会被执行到的那条路径」
+
+为 §2.7 的下一步(用既有链锚路径重建 leaf state)做安全前置审查时,我先报了一句
+**「`bshard-close-enforce.mjs` 956 行全文只有 2 条 DB 语句、都是 SELECT ⇒ 模块本身纯读」**。
+
+🔴 **那句只审了那一个文件,而它 `import` 了 8 个模块,我一个都没审。** 补审后:
+
+```
+7 个(judgeline / fee-split / pool-committee-sampler / pool-merkle-v06 /
+     oracle-evidence-extractors / pool-payout-root …): 零写语句
+🔴 shard-allocator.mjs 有【3 条写语句】:
+     INSERT INTO market_shards            (:111)
+     UPDATE market_shards SET status='sealed'  (:118)
+     UPDATE market_shards SET bettor_count=…   (:140)
+✅ 而 enforce 路径只 import 并调用它的 listShards(:151-153)—— 函数体是一条 SELECT
+```
+
+🔨 **⇒ 正确的说法**:不是「模块纯读」,是
+**「被调用的那个函数纯读,而模块里就放着三条写语句」**。
+🔵 两句的差别落在下一个人身上:前一句会让他觉得整个模块随便用,而那三条写语句就在同一个文件里,换个 import 就够得到。
+
+🔵 **触发本条的是 NWT 同日的同形状发现**(他审 sibling 伪造面时只 grep 了 `INSERT INTO relay_nodes`,
+而那道闸按 `address` 匹配 ⇒ `UPDATE` 改地址与 `INSERT` 等效 ⇒ 整个 UPDATE 面漏掉)。
+**⇒ 同族(2026-07-28 一天内三例)**:
+
+| 例 | 测量/审查实际覆盖的对象 | 被贴到的那个更大的对象 |
+|---|---|---|
+| NWT | `INSERT` 面 | 「能写 address 的路径」 |
+| Bettor | 「打断 0 个客户端」 | 「零代价」 |
+| 本条(J2) | 「这个文件」 | 「这条路径」 |
+
+🔨 **通则**:文件 / 一个关键字 / 一次测量,都是**手边最容易画的边界**,不是**正确的边界**。
+交付前问一次:**我这个判据实际覆盖的是什么,我要用它说的又是什么。**
+
+---
+
 ## 5. 强度总表(本文件每一格的定价)
 
 | 格 | 强度 |
