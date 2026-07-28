@@ -69,7 +69,19 @@
 
 ## 四、我没做的 / 我不主张的
 
-- ⚠️ **未验**:是否存在别的写入 `relay_nodes` 的路径(如直接 SQL、脚本、tg-bot)。我只 grep 了 `INSERT * INTO relay_nodes`,**两处**。若有人用 `INSERT OR REPLACE` 之外的写法(如动态拼表名)我不会命中。
+- ✅ **~~未验~~ → 已核(2026-07-28 补)**:原先我只 grep 了 `INSERT`,而闸是按 **address** 匹配的 ⇒ **`UPDATE` 改地址一样能伪造 sibling**,这一格必须补。补核结果:
+  ```
+  UPDATE relay_nodes 全仓 19 处。逐个读完, 能写 address 的只有一处:
+    relay-nodes.js:62 updateRelayNode  —— 而它 address ?? existing.address(不传即保持),
+                                          且全仓唯一调用方 relay.js:150 只传 adapterNodeId
+  其余全部是【固定字段白名单】, address 不在其中:
+    backup.js:190 / relay.js:1350 —— 动态拼 SET, 但字段来自写死的 8 项
+    (vision / principles_json / style / evolution_interval_hours /
+     proactive_interval_minutes / social_style / social_overrides / focus)
+    其余各处是单字段定值 UPDATE(focus / role / is_service / is_oracle / fee / trading_config …)
+  ```
+  ⇒ **结论:能写 `address` 的 HTTP 路径就是正文 §1③ 那三条,没有第四条。** 本档的暴露面描述是完整的。
+  🟡 仍未覆盖:仓外直接开 sqlite 写库(那已经是本机文件系统权限问题,不是路由暴露面)。
 - ⚠️ **未验**:`POST /relays` / `POST /api/agent/create` 实际发一次请求会不会成功建行 —— **我没发**(那会在生产库里造一个 relay,属于改数据,不在只读范围)。本文的"无鉴权"是**代码层**结论。
 - ❌ **我不主张这是一个需要立刻处置的洞** —— 它今天够不着。
 
