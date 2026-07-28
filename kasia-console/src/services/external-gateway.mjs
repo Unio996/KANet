@@ -50,6 +50,19 @@ function _peerIp(req) {
   return (req.socket && req.socket.remoteAddress) || 'unknown';
 }
 
+// 🔴🔴 限频表【自己】必须有界(NWT diff 审 MUST-FIX):
+//   一个防资源耗尽的机制, 若自己无界, 就带着它要防的那个洞 —— 而它【不会自己暴露】:
+//   内存慢慢涨, 期间限频完全正常工作。
+// 而这里做两层, 因为【只做懒清理不够】:
+//   甲(懒清理): live 为空时 delete 这个 key —— 🔴 但它只在【同一个 IP 再来】时才触发,
+//      而最该防的攻击形态恰恰是【很多 IP 各来一次、永不复访】⇒ 那些桶永远等不到被清
+//   乙(硬上限): 超过上限就整表清空 ⇒ 粗暴但【有界】
+// 🔴 乙的代价要说清: 清空 = 所有人的限频额度重置(对限频是 fail-open)。
+//   而它可接受的理由是【并发上限 4 不受影响】—— 那才是分布式流量下真正的兜底(设计 §六 note-3)。
+//   ⇒ 于是"内存有界"与"还有一道真闸"两件都成立, 而不是拿一个换另一个。
+const GW_RATE_BUCKET_CAP = 20000;
+let _rateBucketClears = 0;   // 🔵 清空次数 —— 见下: 它必须有出口, 否则"它有没有在涨"没人知道
+
 function _rateLimited(ip, tier, cfg, now) {
   const key = ip + '|' + tier;
   const arr = _rateBuckets.get(key) || [];
@@ -63,6 +76,24 @@ function _rateLimited(ip, tier, cfg, now) {
   }
   live.push(now);
   _rateBuckets.set(key, live);
+  if (_rateBuckets.size > GW_RATE_BUCKET_CAP) {
+    // 🔴 先只删【确定没信息】的桶: 窗口内一条记录都不剩的那些(甲)。
+    const maxWindow = Math.max(GW_RATE_WRITE.windowMs, GW_RATE_READ.windowMs);
+    for (const [k, v] of _rateBuckets) {
+      if (v.length === 0 || v[v.length - 1] <= now - maxWindow) _rateBuckets.delete(k);
+    }
+    // 🔴 清完仍超上限 ⇒ 说明是【大量活跃来源】而不是垃圾堆积 ⇒ 整表清空保住内存(乙)。
+    if (_rateBuckets.size > GW_RATE_BUCKET_CAP) {
+      _rateBuckets.clear();
+      _rateBucketClears++;
+      // 🔴 它必须【喊】: 否则"限频表被清空过"这件事没有任何出口, 而清空期间限频是失效的。
+      //   带累计数 ⇒ 一次与一直在发生读数不同(本仓: 只报成功数的计数器在两种世界里读数相同)。
+      console.warn(
+        `[external-gateway] 🔴 限频表超过 ${GW_RATE_BUCKET_CAP} 个桶 ⇒ 已整表清空(累计第 ${_rateBucketClears} 次)。` +
+          ' 清空期间【每 IP 限频失效】, 而并发上限仍在 —— 若这行反复出现, 说明该口正在被大量不同来源打。',
+      );
+    }
+  }
   return 0;
 }
 
