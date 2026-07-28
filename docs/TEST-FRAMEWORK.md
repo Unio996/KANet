@@ -125,17 +125,28 @@ case 用 `tags: ['real_chain']` 和 `skip_in_batch: true` 标识真链 case，ba
 
 tags 用于 cron 优先级：
 - `security`, `critical` — 必跑、必 PASS
-- `regression` — bug 修复后的永不退化守护
+- `regression` — bug 修复后的回归证据（🔴 **不是"永不退化守护"**：没有任何东西会自动跑它，见下节）
 - `ux` — 体验类
 - `real_chain` — 需要真钱包真上链
 
-## 自动化层（git hook + cron）
+## 自动化层 — 🔴 **不存在。以下是实况（2026-07-28 逐条实测更正）**
 
-**Pre-commit**：lint + 跑 `tags: ['critical']` case，30s 内
-**Post-commit**：跑相关 domain 全部 case，异步 broadcast 结果
-**Cron**：定期跑 `--all`，失败自动通报 dev-coord
+**本节以前用现在时描述了三个机制，而三个都没有实现过。** 原文与实况对照：
 
-（git hook + cron 实现进度见 issue tracker）
+| 原文声称 | 🔴 实况（实测） |
+|---|---|
+| **Pre-commit**：lint + 跑 `tags:['critical']` case，30s 内 | hook 确实在（`core.hooksPath=.githooks`），但它跑的是 **lint-kanet + check-tree-fresh + check-tests-fresh**，**一个 case 都不跑** |
+| **Post-commit**：跑相关 domain 全部 case，异步 broadcast | **`.githooks/` 里只有 `pre-commit` 一个文件**，`post-commit` 不存在 |
+| **Cron**：定期跑 `--all`，失败通报 dev-coord | **无 cron、无 CI**（无 `.github/workflows`，无任何 yml/ps1/sh 引用 `scripts/test.mjs`） |
+| （实现进度见 issue tracker） | **本仓没有 issue tracker**（无 `.github/`） |
+
+🔴 **⇒ 所以：用例只在【有人手敲】的时候跑。** 证据在 `logs/test-runs/<case>-latest.json`
+（覆盖式：只有最后一次，没有历史）。`scripts/check-tests-fresh.mjs` 在每次 commit 时提示这些证据有多旧——
+它只回答**有没有人在跑**，不回答**跑的结果对不对**。
+
+🔵 **记这一节的形状，因为它是本仓反复出现的那一类**：一份文档用现在时写下了一个**计划**，
+而读的人无法从措辞上分辨它是**已实现**还是**打算实现**——括号里那句"实现进度见 issue tracker"
+是唯一的对冲，而它指向一个同样不存在的东西。
 
 ## 用法速查
 

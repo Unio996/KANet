@@ -80,7 +80,13 @@
 - 内容: ① `lint-kanet` staged 文件 (block on fail) ② `check-tree-fresh` (warn-not-block·落后 canonical 超 20 commits LOUD warn)
 - doc-lint 规则内置于 lint-kanet: date-prefix 设计文档必住 `docs/` 根目录·同名多路径 → block
 
-**改 broker / agent 业务代码后必跑**: `cd kasia-console && node scripts/test.mjs --domain=<相关 domain>` — framework 一键回归。修 bug 必同步加 regression case 进 `kasia-console/test-framework/cases/<domain>/` 守住，永不退化。详见 `docs/TEST-FRAMEWORK.md`.
+**改 broker / agent 业务代码后必跑**: `cd kasia-console && node scripts/test.mjs --domain=<相关 domain>`。修 bug 必同步加 regression case 进 `kasia-console/test-framework/cases/<domain>/`。详见 `docs/TEST-FRAMEWORK.md`.
+
+🔴 **而这一段以前写的是「framework 一键回归…守住，永不退化」——那两句都不成立，2026-07-28 实测更正**：
+- **没有自动回归**：无 CI、无 cron。`--domain`/`--all` 只有**人手敲的时候**才跑。加了 regression case ≠ 从此有人守着。
+- 🔴 **而"手工跑 --domain 就行"也不够**：部分既有用例**连 `--domain` 都扫不到**——runner 只收 `*.test.mjs`，而 `cases/m0c1-gate/` 下 10 个文件无一匹配（含 5 个名字里带 `regression` 的）。见 `docs/2026-07-28-test-runner-discovery-and-real-chain-marker-design.md`。
+- **证据留在** `logs/test-runs/<case>-latest.json`（🟡 覆盖式：只有最后一次，没有历史）。
+- `scripts/check-tests-fresh.mjs` 在每次 commit 时提示这些证据有多旧——它只回答**有没有人在跑**，不回答**跑的结果对不对**。
 
 跳步 SOP = 重复犯错的根因 (Owner 2026-04-26 元问题). NWT 接位漏 ANTI-PATTERNS.md → 漏 QWEN Rule 11 → broker LLM 60-120s timeout 全崩, 是负面教材.
 
