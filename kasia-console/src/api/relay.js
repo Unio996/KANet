@@ -36,6 +36,23 @@ const MINDS_DIR = `${KANET_ROOT}/agent-mind/minds`;
 const SKILLS_DIR = `${KANET_ROOT}/agent-mind/src/skills`;
 const CONSOLE_PORT = process.env.PORT || '3100';
 
+// publish_card 失败落账 — 端点已经把错如实回给调用方了, 但那只到浏览器为止, 没人事后看得见。
+// 🔴 只打 console.log 等于没喊: 暴露面盘存卡 §3 实测过, console.log 那一路【没有读者机制】,
+//    它不是"失效的告警出口", 它根本不是告警出口。⇒ 同时写 events(有三处读者)。
+function _logPublishCardFailure(relayId, errMessage) {
+  const summaryLine = `publish_card 失败 relay=${String(relayId).slice(0, 8)}: ${errMessage}`;
+  console.error(`[publish-card] ${summaryLine}`);
+  try {
+    sqlite.prepare(`
+      INSERT INTO events (id, event_scope, event_type, source, level, summary, payload_json, created_at)
+      VALUES (?, 'system', 'publish_card_failed', 'api/relay', 'error', ?, ?, datetime('now'))
+    `).run(randomUUID(), summaryLine, JSON.stringify({ relayId, error: String(errMessage) }));
+  } catch (e) {
+    // 落账本身失败也不许静默 —— 但它不能反过来把主流程弄崩(端点已经在回错的路上)。
+    console.error(`[publish-card] events 落账失败 (non-fatal): ${e.message}`);
+  }
+}
+
 export async function registerRelayRoutes(fastify) {
   // T3 (2026-06-27): /integrations — TG bot management (moved from /relays, pure UI).
   fastify.get('/integrations', async (request, reply) => {
@@ -1508,18 +1525,40 @@ export async function registerRelayRoutes(fastify) {
       ? sqlite.prepare('SELECT card_root_tx, card_latest_tx FROM identities WHERE address = ?').get(relay.address)
       : null;
 
-    const sent = sendCommand(request.params.id, {
-      type: 'publish_card',
-      params: {
-        name: name.trim(), entityType: entityType || 'agent', skills,
-        summary: summary?.trim() || undefined, mode: mode || 'public',
-        rootTx: existingCard?.card_root_tx || null,
-        parentTx: existingCard?.card_latest_tx || null,
-        serviceTerms: (serviceTerms && typeof serviceTerms === 'object') ? serviceTerms : undefined,
-      },
-    });
-    if (!sent) return reply.code(503).send({ error: 'Relay not running' });
-    return reply.send({ ok: true });
+    // M0c-1 origin 迁移 (NWT 抓出 note-3 · Bettor 2026-07-28 裁 · 方案 docs/2026-07-28-publish-card-origin-migration-spec.md):
+    //   本条曾是全仓唯一一个用 sendCommand() 发的业务命令 —— 而 sendCommand 不挂 __origin,
+    //   于是它躲过了四份按【路由/命令】做的权威枚举: 它的特殊性不在它是哪条路由, 在它调了另一个函数。
+    //   armed=on 后没有 __origin 的命令会落到 authorize.mjs 被拒 ⇒ 发 Agent Card 这条路会断 ⇒ 本条是 arm 的硬前置。
+    // 🔴 【await 回执】(Bettor 改判走 A · 2026-07-28 06:37): 旧码 fire-and-forget, 端点在
+    //   什么都还没发生时就回 ok —— 那是 NO TX NO STATE 要防的形状。本次一并修掉, 而不是把它固化。
+    //   改判依据是一个【实测】: NWT 量到 sendKaspa 广播往返 13–23ms, 且 relay 侧 publish_card 确实
+    //   回 { txId, fee, ok, phase } ⇒ 阻塞是毫秒级不是 30s ⇒ 用户面无可感知变化 ⇒ 不构成铁律 0 的用户面改动。
+    //   ⚠ 边界照抄不改写: 那 13–23ms 测的是 sendKaspa 那一半; publish_card 的 draft 阶段走另一个函数, 未测。
+    // 🔴 失败一律【如实回传】, 不吞、不返回合法空值(本仓: catch 返回该类型的合法空值 = 把"失败"翻译成"没有数据")。
+    //   'Relay not running' 保持 503 —— 与旧码语义一致, 不凭空多出/少掉一类错误。
+    try {
+      const result = await sendCommandAsync(request.params.id, {
+        type: 'publish_card',
+        params: {
+          name: name.trim(), entityType: entityType || 'agent', skills,
+          summary: summary?.trim() || undefined, mode: mode || 'public',
+          rootTx: existingCard?.card_root_tx || null,
+          parentTx: existingCard?.card_latest_tx || null,
+          serviceTerms: (serviceTerms && typeof serviceTerms === 'object') ? serviceTerms : undefined,
+        },
+      }, 30000, 'internal');
+      // relay 侧异常走它自己的 catch, 回 { error, phase } —— 那不是 reject, 必须单独判, 否则会被当成成功。
+      if (result?.error) {
+        _logPublishCardFailure(request.params.id, result.error);
+        return reply.code(502).send({ ok: false, error: result.error, phase: result.phase });
+      }
+      return reply.send({ ok: true, ...result });
+    } catch (err) {
+      const msg = err?.message || String(err);
+      _logPublishCardFailure(request.params.id, msg);
+      if (/Relay not running/i.test(msg)) return reply.code(503).send({ error: 'Relay not running' });
+      return reply.code(502).send({ ok: false, error: msg });
+    }
   });
 
   // ── Onboarding: one-click agent creation ───────────────────────
