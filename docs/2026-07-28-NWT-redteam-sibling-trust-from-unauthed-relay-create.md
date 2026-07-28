@@ -33,8 +33,33 @@
 ### 「无鉴权」这句我没只看路由那一行
 
 全局 hook 实扫:`index.js` 里唯一的 `addHook('preHandler')` 是 **UTF-8 编码守卫**(`:171`),不是鉴权。
-其余 scoped hook 在 `context.js` / `discovery.js` / `ingest.js` / `skills.js` —— **`api/relay.js` 没有**。
 ⇒ 这两条路由**确实没有任何鉴权前置**。(强度: ✅ 已实测)
+
+### 🔴 更正(2026-07-28 补)+ 而更正后的机制,把这条发现从「两条路由」升成「默认不保护」
+
+**我原先写「其余 scoped hook 在 context/discovery/ingest/skills 四处」—— 「scoped」这个词是错的。**
+实读 `index.js:193-195`:这些是 `await registerIngestRoutes(fastify)` 这样**直接拿根实例调**的,**不是** `fastify.register(...)` ⇒ **没有 plugin 封装** ⇒ 那四个 `addHook('preHandler')` 全都是**全局 hook,每个请求都会跑**。
+它们之所以只保护自己那摊,是因为**hook 体内自己用 URL 前缀 if 住了**:
+
+```js
+// ingest.js:7      if (request.url.startsWith('/ingest/'))                 → verifyIngestRequest
+// context.js:5     if (request.url.startsWith('/api/context'))             → verifyIngestRequest
+// skills.js:100    if (startsWith('/api/skills') && !startsWith('/api/skills/role-compat'))
+// discovery.js:190 if (startsWith('/api/discovery') && !…/scanner && !…/list && !…/activity
+//                     && request.method !== 'GET')
+```
+
+🔴 **⇒ 机制是:Console 的鉴权由【一组写死的 URL 前缀】正向枚举 ⇒ 【不在这几个前缀里的一切,默认没有鉴权】。**
+
+```
+❌ 原来的读法:「这两条路由忘了加鉴权」—— 像是疏漏
+✅ 正确的读法:「这套架构没有默认保护。任何新路由生下来就是无鉴权的,
+              除非有人专门去某个 hook 里加一条前缀」
+```
+🔵 ⇒ 所以那两条路由不是被谁漏掉的,**它们就是默认状态**。而同一句话对**今后每一条新路由**都成立。
+🔵 ⇒ 且 `discovery.js` 那条已经是「前缀 + 三个排除 + 方法判断」的复合条件 —— **正向枚举 + 排除列表**正是本仓 ANTI-PATTERNS 规则 58(黑名单枚举天生不完备)咬人的地方。
+
+⚠️ **这条更正不改变本档结论**(那两条路由仍然无鉴权,挡着它们的仍然是绑回环)。**它改变的是这件事该被记在哪一层:模式层,不是这两条路由。**
 
 ---
 
