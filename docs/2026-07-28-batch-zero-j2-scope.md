@@ -141,8 +141,13 @@ tick: zkJudgeProposeAutonomousTick(kasia-console/src/lib/zk-autonomy-ticks.mjs:4
 
 | 族 | 盘 | 失败步 | 错误(逐字) |
 |---|---|---|---|
-| ① | 7jy3s · ldtyn · 8xykm · cswib · yxllc · s6zwj · tha3l · 3mzoh | `:424 judgeWinDir` / `:428 endBlockHash` | `getBlockAtDaa: backward walk exhausted MAX_WALK=250000 without crossing deadlineDaa=…` |
-| ② | 9ez2u · 9jaty · kr5l4 · j34vb | `:432 buildProposeCloseRequestV2` | 裸 `unreachable` |
+| ① (7 盘) | 7jy3s · ldtyn · 8xykm · cswib · yxllc · s6zwj(以上 `judge`)· 3mzoh(`endblockhash`) | `:424 judgeWinDir` / `:428 endBlockHash` | `getBlockAtDaa: backward walk exhausted MAX_WALK=250000 without crossing deadlineDaa=…` |
+| ② (5 盘) | 9ez2u · 9jaty · kr5l4 · j34vb · **tha3l** | `:432 buildProposeCloseRequestV2` | 裸 `unreachable` |
+
+> 🔴 **更正(2026-07-28,J2 自查)**: 本表初版写作「族① 8 盘 / 族② 4 盘」,把 `tha3l` 放进了族①。
+> **错因**: 我是从一屏日志输出里**目测**分的族,而不是按数据分组。改按 events 表逐盘取最近一条错误事件、
+> 用错误字符串分类后重跑 ⇒ `tha3l` 的最近错误是 `propose: unreachable`,属族②。
+> 🔵 这条更正**改变派工对象**——族① 是 J1 的 `getBlockAtDaa` 域,族② 不是,所以放错族 = 派错人。
 
 🟡 **族②的归因我不写** —— `unreachable` 是 wasm trap 的字面文本。我心里有候选(mega-UTXO 那族 wasm 崩),
 但那是**未验的猜**,不进结论。
@@ -158,6 +163,40 @@ tick: zkJudgeProposeAutonomousTick(kasia-console/src/lib/zk-autonomy-ticks.mjs:4
 🔴 且这些盘 deadline 已过 488h+ ⇒ 那个 DAA 离 tip 太远, 重试一万次也是同一个距离
    (这不是"重试会好"的错)
 ```
+
+### 2.4bis 🔵 而族① 的墙,在【我们这台】的索引里有一个更具体的形状
+
+J1 06:16 交了他那台的索引空洞体检(2 个洞)。**settle daemon 跑在我们这台** ⇒ 影响结算的洞在这边。
+同法在本机 `spc_daa_index` 跑(只读,一次有序扫描;🔵 对照臂:阈值降到平均间隙 8 ⇒ 报出 1569 个,证明循环有功率):
+
+```
+本机 spc_daa_index: 160 万行, 覆盖 DAA 56,983,539 → 69,329,387
+                    (2026-07-10T02:51Z → 2026-07-28T04:32Z)
+🔴 > MAX_WALK 的洞【3 个】(与 J1 那台的 2 个【窗口不重合】—— 两台各自独立, 本就没有理由重合):
+   ① DAA 58,168,048 → 59,053,402  间隙 885,354 (≈30.7h)  07-11T19:54Z → 07-13T02:39Z
+   ② DAA 60,735,480 → 61,371,827  间隙 636,347 (≈22.1h)  07-15T16:56Z → 07-16T15:01Z
+   ③ DAA 63,982,832 → 64,350,406  间隙 367,574 (≈12.8h)  07-20T10:49Z → 07-20T23:36Z
+```
+
+**而把 12 盘的 `deadline_daa` 对进去,族① 立刻有了一个干净的解释**:
+
+| 盘 | deadline_daa | 位置 |
+|---|---|---|
+| 7jy3s / ldtyn / 8xykm / cswib / yxllc / s6zwj | 55.37M–56.83M | 🟡 **全部在索引【地板】之下**(本机索引最早 56,983,539)—— 不是洞,是**从没覆盖过** |
+| 3mzoh | 63,404,896 | ✅ **在已覆盖区间内** ← 🔴 **族① 里唯一的例外** |
+| tha3l / 9ez2u / kr5l4 / j34vb / 9jaty(族②) | 57.79M–61.45M | ✅ 全在已覆盖区间内 |
+
+🔴 **⇒ 两条可交付给 J1 的线索(他的域,我不下判断)**:
+```
+① 族① 的 6 盘在索引地板之下 ⇒ 「把 MAX_WALK 调大」对它们【一定无效】——
+   缺的不是步数, 是那一段索引【从来就不存在】
+🔴 ② 而 3mzoh 是反例: 它的 deadline_daa 【在索引覆盖内】, 却仍报 backward walk exhausted
+   ⇒ 读起来像"能答这个问题的索引存在, 而那条路径没去问它"
+   🟡 但我【没有】读 getBlockAtDaa 的实现去确认它到底查不查 spc_daa_index ⇒ 这一格是【未验的观察】,
+      不是结论。归 J1 域, 由他核。
+```
+⚠️ **作用域**: 本体检查的是 `spc_daa_index`(DAA→block 映射)。而 §1/§2.6 里 lock tx 的覆盖率用的是
+`kaspa_tx_log` —— **两个不同的索引,本体检不覆盖后者**,别把这里的"3 个洞"读成那边的解释。
 
 ### 2.5 🔴 告警在响,而它响给谁看
 
