@@ -60,36 +60,50 @@ function convertBits(data, fromBits, toBits) {
 }
 
 /**
- * 从 kaspatest: 地址取出 32 字节 x-only 公钥。
+ * 从地址取出 32 字节 x-only 公钥。
  *
- * 🔴 版本字节【必须】检查。地址 payload 的第 0 个字节是版本：
- *      0 = P2PK(schnorr, 32 字节公钥)  ← 只有它能加密
- *      1 = P2PK(ecdsa,  33 字节公钥)
- *      8 = P2SH        (32 字节【脚本哈希】—— 不是公钥)
- *   🔴 P2SH 的哈希【也是 32 字节】⇒ 只查长度会让它整个通过，
- *      于是你会把一段脚本哈希当公钥用来加密，产出一个【谁都解不开】的密文 ——
- *      而它照样上链、照样扣费、照样有 txid、零错误。
+ * 🔴 分工是刻意的：**校验交给 kaspa-wasm 自己的 `Address` 解析器，这里只负责取字节。**
+ *
+ *   自己手写地址校验会漏掉整类问题，而漏掉的那类不会报错 ——
+ *   它会让你加密到一把错的公钥，产出一笔【照样上链、照样扣费、照样有 txid】的交易。
+ *   `new Address(s)` 会拒绝：校验和被改过的地址、别的网络的地址、乱前缀、没前缀。
+ *
+ *   🔴 而它拒绝时只抛一句 `unreachable` —— 什么都不说。所以下面把它翻译成人话。
+ *
+ *   还要额外检查两样（`Address` 接受、而我们不能接受的）：
+ *     · `prefix` 必须是 kaspatest —— 主网地址是合法地址，但不是这个网络的
+ *     · `version` 必须是 PubKey —— ScriptHash(P2SH，合约地址) 的脚本哈希也是 32 字节，
+ *       只看长度会让它整个通过，而加密到它 = 谁都解不开
  */
 function xOnlyPubkeyFromAddress(address) {
-  const i = address.indexOf(':');
-  if (i === -1) throw new Error('地址缺少 "kaspatest:" 前缀');
-  const payload = address.slice(i + 1);
+  let parsed;
+  try {
+    parsed = new Address(String(address));
+  } catch {
+    throw new Error(
+      `这个地址解析不了：${String(address).slice(0, 24)}…\n` +
+      `   （校验和不对、前缀不对、或者根本不是一个 Kaspa 地址。原始报错是一句什么都不说的 "unreachable"，所以这里换成了这句。）`
+    );
+  }
+  if (parsed.prefix !== 'kaspatest') {
+    throw new Error(`这个地址属于网络 "${parsed.prefix}"，而本例只发 TN12（前缀 kaspatest）。`);
+  }
+  if (parsed.version !== 'PubKey') {
+    throw new Error(
+      `这个地址的类型是 ${parsed.version}，而加密消息只能发给 PubKey 类型的地址。` +
+      (parsed.version === 'ScriptHash' ? ' 它是一个 P2SH（合约）地址 —— 发不到那里去。' : '')
+    );
+  }
+  // 走到这里，校验和/前缀/类型都由规范解析器确认过了，下面只做一次纯粹的取字节。
   const data5 = [];
-  for (const c of payload) {
+  for (const c of parsed.payload) {
     const idx = BECH32_CHARSET.indexOf(c);
     if (idx === -1) throw new Error(`地址含非 bech32 字符 '${c}'`);
     data5.push(idx);
   }
-  const bytes = convertBits(data5.slice(0, -8), 5, 8);   // 去掉 8 位校验和
+  const bytes = convertBits(data5.slice(0, -8), 5, 8);   // 校验和已由 Address 验过，这里才能安全丢掉
   if (!bytes || bytes.length < 2) throw new Error('地址解码失败');
-  const version = bytes[0];
-  if (version !== 0) {
-    throw new Error(
-      `这个地址不是 schnorr P2PK 地址（版本字节 = ${version}，需要 0）。` +
-      (version === 8 ? ' 它看起来是一个 P2SH（合约）地址 —— 加密消息发不到那里去。' : '')
-    );
-  }
-  const pub = bytes.slice(1);                            // 版本字节已校验，这里才能安全丢掉
+  const pub = bytes.slice(1);                            // 版本字节同上
   if (pub.length !== 32) throw new Error(`期望 32 字节公钥，得到 ${pub.length}`);
   return Buffer.from(pub);
 }
@@ -259,15 +273,39 @@ const keyIsEphemeral = !MY_PRIVKEY;
 const privKeyHex = MY_PRIVKEY || newPrivateKeyHex();
 const myAddress = addressOf(privKeyHex);
 
-/** 把"这把密钥是哪来的"讲清楚 —— 临时的就说临时，并给出固定它的确切命令。 */
-function printIdentity() {
+/**
+ * 把"这把密钥是哪来的"讲清楚 —— 而**默认绝不把密钥本身打出来**。
+ *
+ * 🔴 为什么这么设计（这一条是被审出来的，不是我们一开始就想到的）：
+ *   终端输出会落到 CI 日志、贴给别人的排查记录、录屏、截图、进程包装器的日志里。
+ *   一个把长期身份密钥打到 stdout 的例子，即使在测试网上，也是在教人用不安全的方式对待密钥。
+ *
+ * 规则：
+ *   · 来自 KANET_PRIVKEY 的那把 —— **任何情况下都不打印**（它是你长期持有的东西）
+ *   · 本次运行临时生成的那把 —— 默认也不打印；要看它，显式加 `--reveal-new-private-key`
+ *
+ * 返回要打印的行（而不是直接打印），是为了让自检能断言"这些行里没有密钥"。
+ */
+function identityLines() {
+  const out = [];
   if (keyIsEphemeral) {
-    console.log('🔴 私钥（本次运行【临时生成】，下次再跑会是另一把）:', privKeyHex);
-    console.log('   要固定成你的身份，设环境变量再跑：KANET_PRIVKEY=' + privKeyHex);
+    out.push('🔴 本次运行【临时生成】了一把密钥 —— 下次再跑会是另一把，地址也会跟着变。');
+    if (argv.includes('--reveal-new-private-key')) {
+      out.push('⚠️  你要求显示它。下面这一行是密钥本身 —— 不要贴进任何日志、聊天或截图：');
+      out.push('    KANET_PRIVKEY=' + privKeyHex);
+    } else {
+      out.push('   要把它固定成你的身份：重跑并加 --reveal-new-private-key 拿到它，');
+      out.push('   然后设进环境变量 KANET_PRIVKEY（本例默认不打印密钥）。');
+    }
   } else {
-    console.log('✅ 私钥（来自环境变量 KANET_PRIVKEY）:', privKeyHex);
+    out.push('✅ 身份来自环境变量 KANET_PRIVKEY（本例不回显它的值）。');
   }
-  console.log('   地址                        :', myAddress);
+  out.push('   地址: ' + myAddress);
+  return out;
+}
+
+function printIdentity() {
+  for (const line of identityLines()) console.log(line);
 }
 
 if (argv.includes('--self-check')) {
@@ -308,9 +346,12 @@ if (argv.includes('--self-check')) {
   //   🔴 为什么单列一条：自检 1–3 都是"加密给自己"，走的永远是 P2PK 地址 ——
   //      它们在这个检查存在与不存在时读数完全相同，所以它们【结构上抓不到这一格】。
   const P2SH_SAMPLE = 'kaspatest:pr89wgtzs5f9qphvrqvhhkqcggsua7j4nwc8npqsmxd9hwjmqlx36gz5l6t4g';
+  //   🔴 而这里断言的是【它被拒绝了】，不是【报错里有某句话】——
+  //      本条上一版断言的是报错文案，于是换了一种更好的实现之后它当场报红，
+  //      而那一版其实拒得更严。**断言要盯住要紧的那个谓词，不是盯住它此刻的措辞。**
   let rejected = false;
   try { sealEnvelope('x', P2SH_SAMPLE); }
-  catch (e) { rejected = /版本字节/.test(String(e.message)); }
+  catch { rejected = true; }
   console.log(rejected
     ? '✅ 自检 4（阴性对照）：合约(P2SH)地址被拒绝 —— 而只查长度的实现会放它过去'
     : '🔴 自检 4 未达预期：P2SH 地址没有被拒绝，别用这份代码加密任何东西');
@@ -367,7 +408,54 @@ if (argv.includes('--self-check')) {
     console.log('🔴 自检 6 挂了：' + (e?.message || e) + '　← 造交易那段有问题，别用它发交易');
   }
 
-  console.log('\n' + (back === plaintext && lenOk && dropped && rejected && planOk && buildOk
+  // 自检 ⑦：🔴 默认输出里【必须有地址、必须没有密钥】。
+  //   这一条是被外部审查逼出来的：此前这个例子每次自检都把私钥明文打出来，
+  //   包括【来自 KANET_PRIVKEY 的那一把】—— 而那是使用者长期持有的东西。
+  //   ⇒ 所以这里不只是"改了打印"，而是把它变成一条【会报红的断言】。
+  let secretOk = false;
+  try {
+    const shown = identityLines().join('\n');
+    const hasAddr = shown.includes(myAddress);
+    const shows = shown.includes(privKeyHex);
+    const asked = argv.includes('--reveal-new-private-key');
+    // 该不该出现，取决于两件事：你有没有显式要求，以及这把是不是临时生成的。
+    //   🔴 来自 KANET_PRIVKEY 的那把 —— 无论你怎么要求都不该出现。
+    const shouldShow = asked && keyIsEphemeral;
+    secretOk = hasAddr && (shows === shouldShow);
+    console.log(secretOk
+      ? (shouldShow
+          ? '✅ 自检 7：你显式要求了，临时密钥按要求显示（而来自 KANET_PRIVKEY 的那把任何时候都不显示）'
+          : '✅ 自检 7：输出里有地址、没有密钥')
+      : `🔴 自检 7 未达预期：地址在=${hasAddr} 密钥出现=${shows} 应当出现=${shouldShow}`);
+  } catch (e) {
+    console.log('🔴 自检 7 挂了：' + (e?.message || e));
+  }
+
+  // 自检 ⑧：🔴 地址校验交给了 kaspa-wasm 的 Address —— 这里证明它真的在拒绝坏地址。
+  //   🔵 而它必须用【几种不同的坏法】，因为此前那个只查版本字节的实现
+  //      对"校验和被改过"和"别的网络"这两类是完全看不见的。
+  let addrOk = false;
+  try {
+    const bad = [
+      ['校验和被改过', myAddress.slice(0, -1) + (myAddress.slice(-1) === 'q' ? 'p' : 'q')],
+      ['别的网络(主网前缀)', myAddress.replace('kaspatest:', 'kaspa:')],
+      ['乱前缀', myAddress.replace('kaspatest:', 'foo:')],
+      ['没有前缀', myAddress.slice(myAddress.indexOf(':') + 1)],
+      ['合约(P2SH)地址', 'kaspatest:pr89wgtzs5f9qphvrqvhhkqcggsua7j4nwc8npqsmxd9hwjmqlx36gz5l6t4g'],
+    ];
+    const rejected2 = bad.filter(([, s]) => { try { xOnlyPubkeyFromAddress(s); return false; } catch { return true; } });
+    // 阳性对照：正确地址必须【通过】—— 否则"全拒"与"这个检查坏了"读数相同
+    let goodPasses = false;
+    try { goodPasses = xOnlyPubkeyFromAddress(myAddress).length === 32; } catch { goodPasses = false; }
+    addrOk = rejected2.length === bad.length && goodPasses;
+    console.log(addrOk
+      ? `✅ 自检 8：${bad.length} 种坏地址全被拒，而正确地址通过（阳性对照，否则"全拒"与"检查坏了"分不开）`
+      : `🔴 自检 8 未达预期：拒掉 ${rejected2.length}/${bad.length}，正确地址通过=${goodPasses}`);
+  } catch (e) {
+    console.log('🔴 自检 8 挂了：' + (e?.message || e));
+  }
+
+  console.log('\n' + (back === plaintext && lenOk && dropped && rejected && planOk && buildOk && secretOk && addrOk
     ? '=== 步骤 1+2 通过。接下来需要一个 TN12 节点和一点测试币 —— 见 README.md §4 / §5。==='
     : '=== 有自检未通过，先别往下走。==='));
   process.exit(0);
