@@ -699,7 +699,7 @@ export async function registerChatRoutes(fastify) {
         // 🔴 因此这一行【保持 'pending' 不动】: 它既记录"可能已付", 又继续占住唯一约束。
         //   不许在此处写 'failed' —— 那等于把一个未知断言成"没付", 并放行再次发放。
         // 🟡 代价(已知并接受): 若实际未付, 该钱包在人工处置前领不到。
-        //   处置流程见 docs/2026-07-29-faucet-stuck-pending-operator.md(走链查证 + 时间下限 + 释放配额)。
+        //   处置流程见 docs/2026-07-29-faucet-stuck-pending-operator.md。
         return reply.code(503).send({
           error: 'faucet transfer 结果未知 (= relay 未返回 txId; 本次已记为 pending, 不会重复发放)',
           grant_id: grantId,
