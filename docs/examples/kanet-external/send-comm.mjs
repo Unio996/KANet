@@ -231,8 +231,12 @@ function buildGenerator(plan, myAddress, payloadStr) {
 async function broadcast(payloadStr, privKeyHex) {
   if (!RPC_URL) {
     throw new Error(
-      '没有 RPC 端点。设 KANET_RPC_URL=ws://<host>:17210 —— ' +
-      '🔴 而 README.md §4 写着：今天我们没有给外部提供一个够得到的 TN12 节点。'
+      '没有 RPC 端点。\n' +
+      '   🔵 而这个端点应当是【你自己的】TN12 节点 —— 不需要我们给你任何东西。\n' +
+      '   TN12 就是标准的 kaspad testnet：kaspad --testnet --netsuffix=12 --utxoindex\n' +
+      '   （实测：一台全新机器、不给任何 --addpeer，它自己查 DNS seeder 找到同伴并开始同步；\n' +
+      '     🟡 而"要多久追到链尖"我们没有那个数 —— 别按时间预期排计划。）\n' +
+      '   起好之后：KANET_RPC_URL=ws://127.0.0.1:17210 —— 详见 README.md §4。'
     );
   }
   const key = new PrivateKey(privKeyHex);
