@@ -33,9 +33,11 @@ git -C /d/silverscript apply --check --reverse \
   "D:/kanet-tn12/docs/evidence/silverc-oppick-fix/0001-Fix-OP_PICK-off-by-one-in-compile_byte_sequence_cast.patch"
 #   退出 0 = 🔵 HEAD 上确实applied（因为反向能套上）；非 0 = 没应用 / 已漂移
 
-# ③ 上游有没有？（回答"第三方拿到的是哪一版"）
+# ③ 上游有没有【拿走我们这个 commit】？
 git -C /d/silverscript branch -r --contains 8065184
-#   🔴 空 = 上游没有 ⇒ 任何用 upstream silverc 的第三方仍带这个 bug
+#   空 = 上游没有拿走它。🔴 而【空 ≠ 上游仍带这个 bug】——
+#   当前上游是靠 #178 的重构自己消掉了它(见上方"作用域"四点之②)。
+#   ⇒ 这条命令回答的是【我们这个 commit 有没有进上游】, 不回答【上游现在有没有这个 bug】。
 ```
 
 ⚠️ **①② 问的不是同一件事**：① 问「这个 commit 在不在这棵树的历史里」，
@@ -56,15 +58,24 @@ git -C /d/silverscript branch -r --contains 8065184
 
 ---
 
-## 🔴 作用域（引用时必须带，否则就是错的）
+## 🔴 作用域（引用时必须带,否则就是错的）—— **这一段是当前口径,照抄这一段**
 
 ```
-「OP_PICK off-by-one codegen bug：在【本机 /d/silverscript 的一个未推本地分支】上已修（8065184）；
-  🔴 而【截至我们最后一次 fetch，upstream 未修】—— 任何用 upstream silverc 生成 .sil 的第三方，
-  这一族风险仍然存在。」
+「OP_PICK off-by-one codegen bug:
+  ① 本机旧基线的 runtime(/d/silverscript 上一个未推本地分支 8065184)带那一行显式修复;
+  ② 🔴 而【当前上游已经没有这个 bug】—— 它在 #178 的 compile.rs 重构里被顺带消掉了
+     (不是因为拿了我们那个 commit);
+  ③ 而【钉在旧上游版本上的用户】仍可能带着它 —— 该 bug 存在于上游直到 aedad5b(2026-05-11);
+  ④ 🔴 本目录这份 patch【预期无法】套到重构后的当前上游 —— 它只保住我们这棵树的可恢复性。」
 ```
-🔴 **单说"silverc 已修"一律无效。** 而这条直接压在路线图「别人能接上结算」那条主线上——外面的人调的是上游。
+🔴 **单说"silverc 已修"一律无效**,单说"上游还带着这个 bug"**同样无效** —— 必须带上面四点里相关的那几条。
 🔵 活体先例：`jepu1` 的 188 KAS（buggy codegen 已 baked 进链上不可变 redeem，修复不追溯）。
+
+> ⚠️ **已废·2026-07-28**：本节此前写的是
+> 「而【截至我们最后一次 fetch，upstream 未修】—— 任何用 upstream silverc 生成 .sil 的第三方，这一族风险仍然存在」。
+> 🔴 **那句对【当前上游】不成立**（NWT 抓出"我们的 fetch 停在 07-06" → J1 实核当前 master `bfc5a45` 已无此 bug）。
+> 🔴 而它此前留在本节【正文】里、更正放在几十行之后 —— 于是**被节选的人拿到的是错的那一句**，
+> 而这一节的标题正是在叫人抄它。⇒ **更正已提到断言本身的位置；旧句只保留在这个"已废"框里。**
 
 ### 🔴 而"upstream 未修"这半句本身也有作用域（NWT 2026-07-28 抓出）
 
