@@ -656,6 +656,33 @@ export async function registerChatRoutes(fastify) {
         planned_amount: `${FAUCET_AMOUNT_KAS} testnet KAS`,
       });
     }
+    // 🔴 原子预留 (J2 2026-07-29 · 起因: Codex 对该端点写入顺序的 review)
+    //
+    //   不变量:【预留必须发生在不可逆动作之前】。
+    //   表上那条 `wallet_address TEXT NOT NULL UNIQUE` 是这里唯一的并发闸 ——
+    //   它只有在【转账之前】就被触发,才能在冲突时保证"还没花钱";
+    //   放在转账之后, 它就只能记录既成事实。⇒ 先 INSERT 'pending' 占位, 再转账。
+    //
+    //   🔵 本次不新增机制: UNIQUE 与 status CHECK ('pending'/'sent'/'failed') 建表时就有,
+    //     只是 'pending'/'failed' 此前从未被写过(2026-07-29 实测: 全表 82/82 行为 'sent')。
+    //     ⇒ 无需 migration。同族先例见 migrate.js 的四条 partial UNIQUE INDEX
+    //       (idx_mm_orders_payment_txhash_unique 等), 均以唯一约束承担同类并发保证。
+    //
+    //   🔴 而"结果未知"一律留在 'pending' —— 见下方两处 catch 点的说明。
+    let grantId;
+    try {
+      grantId = sqlite.prepare(`INSERT INTO faucet_grants (ip_address, wallet_address, granted_at, amount_sompi, txid, status, fingerprint_hash)
+                                VALUES (?, ?, ?, ?, NULL, 'pending', ?)`)
+        .run(ip, wallet_address, Math.floor(Date.now() / 1000), Math.round(FAUCET_AMOUNT_KAS * 1e8), fingerprintHash).lastInsertRowid;
+    } catch (e) {
+      // 唯一约束命中 = 该钱包已有一行(已发放 / 或另一个请求已占位)。
+      // 🔵 关键: 走到这里时【尚未动用任何资金】—— 这正是把预留放在转账之前换来的性质。
+      if (String(e?.code || '').startsWith('SQLITE_CONSTRAINT')) {
+        return reply.code(429).send({ error: 'wallet already granted or request in flight (= 永久 1 次 limit)' });
+      }
+      throw e;
+    }
+
     try {
       const { sendCommandAsync } = await import('../services/relay-manager.js');
       const result = await sendCommandAsync(FAUCET_RELAY_ID, {
@@ -665,14 +692,27 @@ export async function registerChatRoutes(fastify) {
       }, undefined, 'internal');
       const txid = result?.txId || null;
       if (!txid) {
-        return reply.code(503).send({ error: 'faucet transfer 未上链 (= relay 返回无 txId, 可能余额不足 OR relay down)' });
+        // 🔴 拿不到 txid = 【结果未知】, 不等于"确定没发出去"。
+        //   relay 当前在失败路径上只回一个自由文本 error + phase 字段, 而 phase 的语义是
+        //   "是否到达执行层", 不是"是否已提交"(2026-07-29 实读 relay.mjs 确认)——
+        //   ⇒ 没有任何结构化信号能把"未提交"与"已提交但响应丢失"分开。
+        // 🔴 因此这一行【保持 'pending' 不动】: 它既记录"可能已付", 又继续占住唯一约束。
+        //   不许在此处写 'failed' —— 那等于把一个未知断言成"没付", 并放行再次发放。
+        // 🟡 代价(已知并接受): 若实际未付, 该钱包在人工处置前领不到。
+        //   处置流程见 docs/2026-07-29-faucet-stuck-pending-operator.md(走链查证 + 时间下限 + 释放配额)。
+        return reply.code(503).send({
+          error: 'faucet transfer 结果未知 (= relay 未返回 txId; 本次已记为 pending, 不会重复发放)',
+          grant_id: grantId,
+        });
       }
-      sqlite.prepare(`INSERT INTO faucet_grants (ip_address, wallet_address, granted_at, amount_sompi, txid, status, fingerprint_hash)
-                      VALUES (?, ?, ?, ?, ?, 'sent', ?)`)
-        .run(ip, wallet_address, Math.floor(Date.now() / 1000), Math.round(FAUCET_AMOUNT_KAS * 1e8), txid, fingerprintHash);
+      sqlite.prepare("UPDATE faucet_grants SET status = 'sent', txid = ? WHERE id = ?").run(txid, grantId);
       return reply.send({ ok: true, txid, amount: `${FAUCET_AMOUNT_KAS} testnet KAS` });
     } catch (err) {
-      return reply.code(500).send({ error: `faucet transfer fail: ${err.message}` });
+      // 🔴 同上: 异常可能发生在提交之后 ⇒ 结果未知 ⇒ 保持 'pending', 不回滚该行。
+      return reply.code(500).send({
+        error: `faucet transfer fail (结果未知, 本次已记为 pending): ${err.message}`,
+        grant_id: grantId,
+      });
     }
   });
 
