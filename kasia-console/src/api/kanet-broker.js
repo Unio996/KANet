@@ -67,9 +67,10 @@ export function registerBrokerOnboardRoute(fastify) {
     const tokenEnc = hasToken ? encrypt(String(bot_token).trim()) : null;
     const net = broker_address.startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
 
-    // upsert by address (地址制 UNIQUE)。重复提交 = 更新 token/username, status 保持 (approved 不回退到 pending)。
+    // upsert by address (地址制 UNIQUE)。重复提交 = 更新 token/username。
+    //   (status 列已于 v194 移除 —— 它 vestigial·恒 'pending'·无产生路径; 见 migrate.js v194。)
     // bot_username 存 verifiedUsername(getMe 真值), 不存 broker 自报的 bot_username 参数(防止 §上方 mismatch)。
-    const existing = sqlite.prepare('SELECT id, status FROM broker_onboarding WHERE broker_address = ?').get(broker_address);
+    const existing = sqlite.prepare('SELECT id FROM broker_onboarding WHERE broker_address = ?').get(broker_address);
     if (existing) {
       // 🔴 token 变可选之后, 重复提交【不带 token】不许把已有的 token/username 抹掉 ——
       //   否则一个已经接好自己 bot 的 broker, 只要再提交一次(譬如改别的字段)就会把自己的 bot 弄没,
@@ -81,8 +82,8 @@ export function registerBrokerOnboardRoute(fastify) {
         sqlite.prepare('UPDATE broker_onboarding SET updated_at = ? WHERE broker_address = ?').run(now, broker_address);
       }
     } else {
-      sqlite.prepare(`INSERT INTO broker_onboarding (id, broker_address, bot_token_encrypted, bot_username, status, created_at, updated_at)
-        VALUES (?,?,?,?,?,?,?)`).run(randomUUID(), broker_address, tokenEnc, verifiedUsername, 'pending', now, now);
+      sqlite.prepare(`INSERT INTO broker_onboarding (id, broker_address, bot_token_encrypted, bot_username, created_at, updated_at)
+        VALUES (?,?,?,?,?,?)`).run(randomUUID(), broker_address, tokenEnc, verifiedUsername, now, now);
     }
 
     // ② 【已删除】onboarding 曾在这里写 identities.trust_level='recommended' (设计 v0.6 · Bettor 2026-07-28 批)。
@@ -364,7 +365,7 @@ export async function registerKanetBrokerRoutes(fastify) {
     //      ⇒ 系统行为与它对用户的自述相反, 而两边各自都"按代码正确工作"
     //   ② 按 v0.6 定调根本不存在审批 ⇒ 'approved' 本身就是在断言一道不存在的门
     //   ⇒ 改回可核的事实: 在册 + 有没有接自己的 bot。has_bot_token 之前是【硬编码 true】—— 那也是假的。
-    const row = sqlite.prepare('SELECT broker_address, bot_username, bot_token_encrypted, status, created_at, updated_at FROM broker_onboarding WHERE broker_address = ?').get(address);
+    const row = sqlite.prepare('SELECT broker_address, bot_username, bot_token_encrypted, created_at, updated_at FROM broker_onboarding WHERE broker_address = ?').get(address);
     if (!row) return reply.send({ ok: true, onboarded: false });
     return reply.send({
       ok: true, onboarded: true,
@@ -372,8 +373,8 @@ export async function registerKanetBrokerRoutes(fastify) {
       bot_username: row.bot_username,
       registered: true,
       has_own_bot: !!row.bot_token_encrypted,
-      // 🔴 不再回 status(NWT 2026-07-28 装载前拦下, 走他的甲案):
-      //   broker_onboarding.status 是 vestigial —— 唯一写入是 INSERT 的 'pending', 没有任何路径把它设别的值
+      // 🔴 不再回 status(NWT 2026-07-28 装载前拦下, 走他的甲案; 🔴 v194 已【DROP 该列】—— 列不再存在, 以下是当初拿掉返回字段的理由, 保留供记录):
+      //   broker_onboarding.status 曾是 vestigial —— 唯一写入是 INSERT 的 'pending', 没有任何路径把它设别的值
       //   ⇒ 它只有一个可能值 ⇒ 零信息量。而它此前之所以"看起来对", 全靠 trust 派生的那个 override 盖着它。
       //   ⇒ ⇒ 把 override 拿掉后它露出来, 而 UI 把 'pending' 读成【地址被标记 blocked, 需 Owner 手动放行】
       //     ⇒ 每个注册成功的 broker 都会看到那句, 而那三句话一句都不成立。
@@ -388,7 +389,7 @@ export async function registerKanetBrokerRoutes(fastify) {
   fastify.get('/api/kanet-broker/onboard/list', async (request, reply) => {
     // 🔴 半A 同上: 不再 LEFT JOIN identities 派生 'approved'(见 /onboard/status 处的两条理由)。
     const rows = sqlite.prepare(`
-      SELECT b.broker_address, b.bot_username, b.bot_token_encrypted, b.status, b.created_at
+      SELECT b.broker_address, b.bot_username, b.bot_token_encrypted, b.created_at
       FROM broker_onboarding b
       ORDER BY b.created_at DESC
     `).all();

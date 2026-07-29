@@ -102,6 +102,7 @@ export const PILOT_CUSTODIAL_WRITER_ALLOWLIST = new Set([
 export const TEST_FIXTURE_WRITER_CAP = 'm0c1-test-fixture-writer';
 export const TEST_FIXTURE_WRITER_ALLOWLIST = new Set([
   'kasia-console/test-framework/cases/m0c1-gate/g5-real-chain-smoke-regression.mjs', // G5 v2 regression, 写隔离 scratch/g5-regression.db
+  'kasia-console/test/broker-onboarding-status-drop.test.mjs', // v194 broker_onboarding.status DROP regression, 纯 :memory: DB(5 处 new Database(':memory:'), 零 live 路径), NWT 审 2026-07-29
 ]);
 const LIVE_CONSOLE_DB_PATH_LITERAL = /kasia-console\/data\/console\.db|kasia-console[\\/]data[\\/]console\.db/;
 

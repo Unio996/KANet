@@ -5600,5 +5600,26 @@ export function runMigrations() {
     }
   }
 
+  // v194 (KANet-UI 2026-07-29, Bettor 批 + NWT GREEN, 设计 docs/2026-07-29-broker-onboarding-status-vestigial-drop-design.md):
+  //   移除 broker_onboarding.status —— 它 vestigial: 唯一写入是 INSERT 的 'pending', 无任何路径把它设别的值。
+  //   🔴 留着它 = gate 陷阱: 谁哪天加 `AND b.status='approved'` ⇒ 对恒 'pending' 的列静默返回空 ⇒ 全 broker 永不 fork,
+  //     而该 SQL 完全合法、不报错。注释挡不住(写 SQL 的人不会先读注释); CHECK 只防写、陷阱在读。
+  //   ⇒ 唯 DROP 让列不存在: 任何 b.status 引用当场 `no such column`(fail-loud), 把静默锁死变成启动即崩、立刻发现。
+  //   消费侧同批改: kanet-broker.js 三处 SELECT 已删 status 字段(均为死读, 不入任何返回体/逻辑)。
+  //   前置断言(NWT 加固): 拿掉前先证无非 'pending' 行 —— `!= 'pending' OR IS NULL` 兜住未来 schema 若变 nullable 的漂移。
+  {
+    const cols = sqlite.prepare("PRAGMA table_info(broker_onboarding)").all();
+    if (cols.some(c => c.name === 'status')) {
+      const bad = sqlite.prepare(
+        "SELECT COUNT(*) AS n FROM broker_onboarding WHERE status != 'pending' OR status IS NULL"
+      ).get().n;
+      if (bad > 0) {
+        throw new Error(`[migrate v194] broker_onboarding 有 ${bad} 行 status 非 'pending' ⇒ 停止 DROP, 需人工处理这些行(设计时全表 0 行如此)。`);
+      }
+      sqlite.exec("ALTER TABLE broker_onboarding DROP COLUMN status");
+      console.log('[migrate] v194: broker_onboarding.status 已移除 (vestigial 恒 pending; 移除后任何 b.status gate 即 SQL 报错而非静默锁死全 broker fork).');
+    }
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
