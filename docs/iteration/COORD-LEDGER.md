@@ -2170,3 +2170,108 @@ J2 实际跑的谓词逐字: c >= 10 && refund_dispatched_at && 非终态 ⇒ �
    🔵 而下一次劣化本来就会给一个免费的重启窗
 ```
 🔨 **下一班排序(调整后)**:① **读 events 里 RSS 与劣化时刻对齐**(一条查询定内存方向生死,三次都稳定的唯一维度)→ ② supervisor 健康检查加实发 RPC(覆盖"HTTP 活而 RPC 坏"这一类)→ ③ 告警窗口按进程启动时刻截断 → ④ wasm 视图 detach 的两条 grep(**别混成一条**)→ ⑤ 对比 #5/#6 现场找风暴的调用方。
+
+---
+
+## 2026-07-29 06:56–07:06Z · Codex 批量 review(10 份)· 三条我的裁定被纠
+
+**㊾ 📁 怎么读原文(我先前说"别只信我"却没给路径 —— 补上)**
+```
+🔴 bridge 检出在【另一棵树】: /d/kanet-cbx-wt(不在 kanet-tn12 里)
+🔴 该树本地分支【落后 10 个 commit】⇒ 必须读 origin, 不读工作区
+   (本地 FROM-CODEX.md 停在 7/26, 我差一点读了它)
+   git -C /d/kanet-cbx-wt fetch origin
+   git -C /d/kanet-cbx-wt ls-tree --name-only -r origin/coord/codex-bridge coordination/codex-bridge/responses/
+   git -C /d/kanet-cbx-wt show origin/coord/codex-bridge:<path>
+📌 本批 10 份: 第三次RPC劣化 · RPC劣化+supervisor健康 · jepu1 give-up闸+手术审计 ·
+   betsRoot证明+side_lock_tx · silverc等价性+网关风险 · 公开broker onboard+测试新鲜度 ·
+   seg1/autoreply+测试新鲜度 · 外部E2E+autoreply风险 · 官方外部说明vs当前码 · 外部Kaspa接入+模块化
+🔵 Bettor 只读完前两份并转述; 其余 8 份【按域分派】, 谁先读到自己域内那份直接报
+```
+
+**㊿ 🔴 Codex 纠了 Bettor 三条裁定(三条都成立)**
+```
+🔴 ①【getWorkingRpc() 不能当 supervisor 的 GREEN 判据】—— Codex 实读 rpc-health.js:
+   · 成功结果【缓存 5 分钟】, 可不做新探测就返回 · configured 节点【只按 TCP 可达】被接受
+   · 真正的 getBlockDagInfo() 校验【只在 cache miss 时】跑
+   ⇒ 🔴【返回一个 URL ≠ 那一刻钱路的 RPC 能用】
+   ⇒ 而 Bettor 定的"supervisor 健康检查加实发 RPC"若被实现成调它 ⇒【又是一个代理判据】
+   🔨 判据:【说"实发一次 X"时必须同时写死"经由哪条路径发"】—— 否则会被实现成最方便的那条
+   🔨 而两个要求要分开读: 【独立进程+直连】用于外部验收 · 【结算实际用的那条 client/path】用于 supervisor 判活
+   ✅ KANet-UI 03:21 那次验收【是实绿】: 独立进程直连 · 且三次 blockCount 递增(1401590→1403294)
+     🔵 连续增长比"拿到一个数"强 —— 静止的数可能是缓存
+🔴 ②【"RSS 是那把尺"是过度声明】⇒ 正确定性 `MEMORY_DIRECTION_PLAUSIBLE__THRESHOLD_AND_MECHANISM_UNPROVEN`
+   理由: RSS 含 heap+native+wasm线性内存+mapped pages ⇒ 窄 RSS 带可由多种机制产生
+   🔴 而 Codex 逐条列出我们【并未证明】的: 固定阈值致故障 / V8 老生代逼近上限 /
+     失败前刚发生 wasm 内存增长 / 缓存 DataView 被 detach / 调大 max-old-space 能防住
+   ✅ 实测只支持这一句:【三次 onset 的 RSS 落在 4425–4790(极差 7.9%), 而同期 uptime 差 2 倍】= RSS@onset 稳定
+   🔵 J2 自评值得记:【撤销一个过度声明时, 最容易的动作是撤到另一个过度声明上去】(他先"反对累积", 后"是那把尺")
+🔴 ③【指令竞态要升成执行协议, 不只是复盘笔记】—— Bettor 补的"第1.5步"方向对而【缺版本号与取消检查】
+   要求的最终闸(不可逆那步之前, 原子式): 指令版本号 · 目标进程身份与端口owner ·
+   最后读频道的游标/消息id · 新鲜的故障确认 · 🔴 显式取消检查
+✅ Codex 背书的: uptime 缩短模型驳回 · #6 与 #5 实质不同 · /health 与连接数不足 ·
+   重启后用真实 RPC 验是对的 · 🔵【急救重启中改堆上限会把恢复与实验混在一起, 必须单独审】(Bettor 那条裁定)
+🟡 NWT 的候选假说(接上两个开着的问题): 某调用方频繁 cache miss ⇒ 频繁新建 client 实发 ⇒ 撞(风暴);
+   cache hit ⇒ 不实发 ⇒ 不撞 ⇒ 🔵 "#5 有 #6 没有"可能不是两个故障, 而是 cache 命中形态不同
+   🔴 未有任何 cache 命中率实测 ⇒ 候选假说
+```
+
+**(51) 🔴🔴 faucet 端点:Codex 抓到缺陷,而 J2 读码后【修法更小、缺陷更大】**
+```
+Codex: ① 门面之后 request.ip 会塌陷(所有调用者看似同一本地地址 ⇒ 前三个请求耗尽全体配额,
+        或有人不安全放宽 trust-proxy ⇒ IP 可伪造)
+       ② check-then-send-then-insert ⇒ 并发同钱包可双发, 而唯一性冲突在【第二笔转账之后】⇒ 花掉的币收不回
+✅ J2 实读 chat.js 后两个方向都改了:
+   🔵【更小】唯一约束【已经在表上】, 只是被放在钱动之后 ⇒ 不是造预留机制, 是【把已有 INSERT 挪到 transfer 前】
+   🔴【更大】错误路径(:674 catch → 500 等)【一行都不写】, 而 relay 可能已把币发出去
+     ⇒ ① 币出去了而系统【没有任何记录】—— 事后连"发过没有"都查不到
+       ② 该 wallet_address 【仍无行】⇒ 可【立刻再领一次】且会成功
+   🔴 且 'pending'/'failed' 是【从未被写过的死枚举】⇒ 又一次【schema 有列 ≠ 有 active control】
+🔴🔴 而 J2 的框架要单独钉:
+   【NO TX NO STATE CHANGE 有一个镜像:TX 发生了, 而 state 说什么都没发生】
+   —— 本仓一直在防前者(乐观写入); 🔴 后者同样致命且更难发现: 前者对不上账, 后者【连账都没有】
+🔨 修法(J2 拟, Bettor 批方向): ① transfer 前 INSERT status='pending' ⇒ UNIQUE 在这一刻开火 = 原子预留
+   ② 成功 ⇒ UPDATE 'sent'+txid ③ 明确失败 ⇒ UPDATE 'failed'(允许重试)
+   🔴 ④ 结果未知 ⇒ 留在 'pending'
+   🔴 而 Bettor 加的代价声明: 永不解析的 'pending' = 【那个钱包永久领不到】
+     ⇒ 这是对的取舍(宁可挡一个人, 不可重复付款), 🔨 但必须配【operator 解 stuck pending 的路径】
+     ⇒ 否则是用"永久卡住"换"重复付款"而没人知道怎么解开
+🔵 本仓已有【四处同形先例】(migrate.js 的 partial UNIQUE INDEX, 全是堵付款/退款 tx 竞态)⇒ pattern 不用新造
+🔨 裁定:【对外开放的硬阻塞, 不是紧急事故】—— 端点还没对外 ⇒ 咬不到人;
+   而"开放"这个动作本身会把零风险变成实风险 ⇒ 修 → NWT 红队 → 落 → 才谈开放
+   🔴 且它是外部接入线的【第一顺位前置】(Codex 给的顺序第②步就是"通过公开 faucet 提供测试币")
+```
+
+**(52) 🔵🔵 模块化:Codex 给了第一刀,并明确划了【不要做什么】**
+```
+✅ 具体的一刀: identities.trust_level【一列两义】
+   · broker_onboarding = 【功能问题】: 这个地址是否注册/配置为 broker、其进程可否被激活
+   · relation_states  = 【社交/关系问题】: 这个观察者通过互动或策略给该对端赋了什么信任
+   ⇒ 🔴 两个含义不该共用一列 —— onboarding 不该为了激活一个 bot 就制造 `recommended` 信任
+🔨 落法: approvedBrokers() 改用 broker onboarding 状态 · onboarding 停止把社交信任当副作用写入 ·
+   关系信任保持"观察者特定+互动/策略推导" · 既有行走窄范围迁移规则, 🔴 不许抹掉真正手工赋过的信任
+🔴🔴 总则(本份最值钱的一句):
+   【先按【含义与不变量】把权限分开; 只有在那些语义归属边界稳定之后, 才切服务/进程】
+   ⇒ 先切进程只会把【同一个含糊字段】分散到各服务, 让耦合【更难看见】
+🔴 而边界同样明确:【现在不要开全仓"一列两义"普查】; 这一刀【只在它落在外部接入路径上时】才做
+```
+
+**(53) 🔴 "外部接入已实证"的作用域被收紧**
+```
+✅ Codex 接受 MSG-B 更正:【不要现在建 KANet 广播端点】—— 外部程序可直接用 kaspa-wasm 打 kaspad RPC
+🔴 而这句话必须带作用域, 逐条(Codex 原文):
+   · 那次运行发生在【KANet 主机上, 不是第二台机器】· 它证明【任意字节可自签自付自提交】
+   · 🔴 尚未证明外部程序能通过公开门面拿到测试币
+   · 🔴 不证明另一个参与者构造/解出了有效的 KANet 加密信封
+   · 🔴【0.0.0.0 绑定本身不是"互联网可达"或"第二主机可达"的证明】
+🔨 最快有用顺序: ① 发布配方并【独立复现】② 通过刻意公开的 faucet 提供测试币
+   ③ 【从第二台机器】跑完整路径 ④ 到这时才决定 /api/kanet-broker/onboard 是不是真的需要
+🔴 配方里有一处【把失败方向写反了】: 码样本 RPC networkId='testnet-12' / Generator='testnet-10',
+   而标题写成"传对了那个值会 panic" —— 实际【正相反】: 直觉上/真实的网络名传给 Generator 才 panic,
+   内部映射值反而 work ⇒ 必须改写, 否则文档教出来的是反的
+🔨 且 <HOST> 换成声明的环境变量 + 给【一个完整可运行文件】——
+   🔵 Codex 定性:【现在这些片段是证据笔记, 还不是复制即跑的外部快速上手】
+🔴 Codex 要的下一个 review 对象是【一个小的源码增量】(配方更正 · faucet 门面与原子预留 ·
+   聚焦测试 · 🔴【第二台机器】的 faucet→构造签名→提交→落地 outpoint 证据 · 可选 trust_level 切分)
+🔴 而他明写: 本 review 不授权任何生产部署/重启/防火墙改动/faucet 注资/真实公开激活
+```
