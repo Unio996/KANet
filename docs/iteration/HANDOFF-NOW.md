@@ -61,7 +61,7 @@ coordination/codex-bridge/responses/ 下, 0728+0729 两天共【12 份】Codex r
 | **J1** | 🛑 批零【ZK D-number】**前提已撤**(我引的四句只存在于非权威那一份)<br/>✅ 仍成立的产出:他查出**两份路线图分叉**,并拿到了权威 v1.2 全文<br/>+ 顺手把 silverc 那张卡标成【当前不可执行 + 两条堵点】(两个前提他都实测缺) |
 | **J2** | 🛑 批零【claim-complete】**前提已撤**(那一格 07-28 早已成文于 `docs/2026-07-28-batch-zero-j2-scope.md`)<br/>✅ 仍成立的产出:① 用**生产谓词** `_scanJudgeProposeCandidates` 复核 ⇒ 那 12 盘逐个仍 verifying ⇒ **claim-complete 仍挡第三、四段,这一条与版本之争无关**<br/>② 他往路线图加的批零状态表**未 commit**,已撤审(它加在了非权威那一份上)<br/>+ §4 文案(行2 结论"量不出来 ≠ 否")记下一版,不单开闸 |
 | **NWT** | ①检测设计(数据源 = 链上答"烧多少" + `messages` 答"谁跟谁");diff 闸 |
-| **KANet-UI** | supervisor 归拢(探针已常驻 · `/health/rpc` · nonce 回读留痕 · 发送器补回读)<br/>🔴 + catch-up 空转的修法待核:**为什么一个 DISABLED 的东西每分钟跑 31 遍** |
+| **KANet-UI** | supervisor 归拢(探针已常驻 · `/health/rpc` · nonce 回读留痕 · 发送器补回读)<br/>🔴 + 🟡 catch-up 空转【与卡逐次对齐, 而因果未闭】—— 那些 catch-up 日志是卡【之后】才打的, 不直接证明它占了那 13 秒。下一步是同 epoch 抓 active handles / external+arrayBuffers / CPU delta |
 
 🔴 **eslint no-undef:裁定"现在不加"** —— J1 实测它对坏版本有判别力(命中 `best`),而 J2 已把该 bug 做成写不出来 + 自检可离线抓 ⇒ **用一个确定的新依赖成本,换一个推测的收益,现在不划算**。事实留档:哪天因别的理由带上 eslint,这一格顺手就有。
 
@@ -116,7 +116,9 @@ RSS 到 4400MB 一线时,看有没有**带 `getWorkingRpc` 失败签名**的劣�
 🔴 **到那个窗口时要看的是【有没有带 `getWorkingRpc` 失败签名的劣化】,不是"有没有卡"** —— 卡每 4 分钟就有一次,那个读数没有判别力。
 🔵 KANet-UI 已实证:**前三次劣化与 catch-up 卡是两个现象** ⇒ 该预测的对象未被推翻。
 
-🔵 **而"发消息失败 ← catch-up 卡"这条因果现在是实测的**:Bettor 10:48 一次 SEND-FAILED,与 lag 心跳 10:48:48 的 `gap=13968ms` **对上同一刻**(两把独立的尺)。
+🔵 **而"发消息失败 ↔ event-loop 卡"这一对是实测的**:Bettor 10:48 一次 SEND-FAILED,与 lag 心跳 10:48:48 的 `gap=13968ms` **对上同一刻**(两把独立的尺)。
+🔴 **而"卡是 catch-up 造成的"【没有】被证到,别把这两句连读**:那些 `catch-up done` 日志是卡**之后**才打的 ⇒ 它同样兼容"卡结束后缓冲输出被冲出来"。
+🔵 Codex 独立给的定性一致:证据**接受**,而**因果 OPEN**;并纠了我们两处过强(「坐实非 GC」应为「GC less likely,未排除」)。
 
 ## 🔨 本班新立、仍在生效的规矩
 
