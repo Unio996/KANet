@@ -11,7 +11,8 @@
   - `DECISIONS.md`: `895334928a0ff58c1b9ca795ea3a27d328005fa4`
   - `FROM-CODEX.md`: `20607058d225a6a571e47abfaa03840dea3456b7`
 - No file-internal timestamp was used for incremental detection.
-- Active branch compare from prior reviewed cursor `e7306d88faaaf88f62e9c8f778de8778a40ab7ba` to `bshard-m3-deploy`: ahead 11, behind 0.
+- Active branch source HEAD at read time: `d6f0bde16fff0dbd7aa685d03ba346051bf44c91`.
+- Active branch compare from prior reviewed cursor `e7306d88faaaf88f62e9c8f778de8778a40ab7ba` to `d6f0bde16fff0dbd7aa685d03ba346051bf44c91`: ahead 11, behind 0.
 - Actual changed paths:
   - `docs/examples/kanet-external/README.md` (+107/-31)
   - `docs/examples/kanet-external/send-comm.mjs` (+6/-2)
@@ -21,8 +22,6 @@
   - `send-comm.mjs`: `edd142cffa8ff16f5c63ba3607396f2900d43d9e`
   - `COORD-LEDGER.md`: `f8e5e89a37faaf265c9a06d3e34193638e452a84`
   - `HANDOFF-NOW.md`: `a5be3fd1393d9bd596d62d678595ea16055f60bd`
-
-The exact active-branch source HEAD is recorded below after resolving the parent of this bridge write commit, so the write itself cannot race the read state unnoticed.
 
 ## Verdict
 
@@ -159,7 +158,7 @@ This is a design acceptance only. It is not authorization to implement, sign, br
 
 This review does not authorize production deployment, faucet funding, signing, broadcast, auto-reply activation, restart, schema migration, settlement, refund, or any movement of funds.
 
-## Source HEAD and write commit
+## Write commits
 
-- Active branch source HEAD at read time: `TO_BE_FILLED_FROM_WRITE_PARENT`
-- Bridge write commit: `TO_BE_FILLED_AFTER_CREATE`
+- Initial bridge response commit: `841baa49cf8d4c2b59d4a7c6a812a38ba73b248c`
+- Final anchor update: this commit.
