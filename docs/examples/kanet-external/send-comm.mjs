@@ -153,14 +153,59 @@ async function broadcast(payloadStr, privKeyHex) {
   const { entries } = await rpc.getUtxosByAddresses([new Address(myAddress)]);
   if (!entries.length) throw new Error(`地址 ${myAddress} 上没有 UTXO —— 见 README.md §5（怎么拿测试币）`);
 
-  entries.sort((a, b) => (a.amount < b.amount ? 1 : -1));       // 降序，取最大那个
+  entries.sort((a, b) => (a.amount < b.amount ? 1 : -1));       // 降序
   const payloadBytes = Buffer.from(payloadStr, 'utf-8');
-  // 费用预留：结构底价 + 每字节 1000 sompi（与本网络现役实现同式）
-  const feeReserve = BigInt(payloadBytes.length) * 1000n + 200000n;
-  const best = entries[0];
-  if (best.amount < feeReserve * 2n) {
-    throw new Error(`最大的 UTXO 不够付这条消息的费用：需要约 ${feeReserve * 2n} sompi，只有 ${best.amount}`);
+
+  // ── KIP-9 storage mass ─────────────────────────────────────────────────────
+  // 🔴 这一段不是"多留点手续费"，它是在避开一条会让交易被整个拒绝的规则。
+  //
+  //   这笔交易是【自发自收】：输出打回自己，找零也回自己。
+  //   storage mass ≈ 10¹² × ( Σ(1/每个输出) − Σ(1/每个输入) )，上限 100,000（单位 sompi）。
+  //   ⇒ 输出越小，1/输出 越大。把 UTXO 几乎全额打出去 ⇒ 找零是一笔尘埃 ⇒ 冲破上限 ⇒ 被拒。
+  //   ⇒ 而输入越多、越碎，Σ(1/输入) 越大，反而把结果拉低 —— 所以“多凑几个输入”是有效的解法。
+  //
+  //   🔴 踩中时节点只回一句 `Storage mass exceeds maximum`：不提 UTXO、不提找零、
+  //      不告诉你该怎么办。所以下面【自己先算一遍】，并在发出去之前用人话拦住你。
+  const MASS_LIMIT = 100_000;
+  const MIN_CHANGE = 20_000_000n;                                // 0.2 KAS —— 找零不做成尘埃
+  const feeByBytes = BigInt(payloadBytes.length) * 1000n + 200000n;
+  const feeReserve = feeByBytes + MIN_CHANGE;                    // 预留 = 手续费 + 一笔像样的找零
+
+  const massOf = (ins, outs) => {
+    const inv = (v) => 1 / Number(v);
+    const si = ins.reduce((a, v) => a + inv(v), 0);
+    const so = outs.reduce((a, v) => a + inv(v), 0);
+    return Math.max(0, 1e12 * (so - si));
+  };
+  // 先试最大那一个；不够就把所有 UTXO 一起当输入（输入越多 mass 越低）。
+  const pick = (list) => {
+    const total = list.reduce((a, e) => a + e.amount, 0n);
+    if (total <= feeReserve) return null;
+    const main = total - feeReserve;
+    const mass = massOf(list.map((e) => e.amount), [main, MIN_CHANGE]);
+    return { list, total, main, mass };
+  };
+  let plan = pick(entries.slice(0, 1));
+  if (!plan || plan.mass > MASS_LIMIT) {
+    const all = pick(entries);
+    if (all && (!plan || all.mass < plan.mass)) plan = all;
   }
+  if (!plan) {
+    const totalAll = entries.reduce((a, e) => a + e.amount, 0n);
+    throw new Error(
+      `余额不够：全部 UTXO 合计 ${Number(totalAll) / 1e8} KAS，而这条消息需要预留 ` +
+      `${Number(feeReserve) / 1e8} KAS（手续费 ${Number(feeByBytes) / 1e8} + 找零 ${Number(MIN_CHANGE) / 1e8}）。`
+    );
+  }
+  if (plan.mass > MASS_LIMIT) {
+    throw new Error(
+      `凑不出一笔 KIP-9 允许的交易：算出来的 storage mass = ${Math.round(plan.mass)}，上限 ${MASS_LIMIT}。\n` +
+      `   你现在有 ${entries.length} 个 UTXO，合计 ${Number(plan.total) / 1e8} KAS。\n` +
+      `   🔵 解法是【让找零别太小】或【多凑几个输入】—— 见 README.md §6 坑 5。`
+    );
+  }
+  const selected = plan.list;
+  console.log(`   (KIP-9 storage mass = ${Math.round(plan.mass)} / 上限 ${MASS_LIMIT}，用了 ${selected.length} 个 UTXO)`);
 
   // comm 是【自发自收】：输出打回自己。收信方能不能读到与输出地址无关。
   const generator = new Generator({
