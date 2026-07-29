@@ -55,21 +55,23 @@ npm pack kaspa-wasm@1.1.0     ⇒  ETARGET  No matching version found
 
 ✅ **⇒ 从我们的仓库把 `shared/vendor/kaspa-wasm/` 整个目录拷走。** 这样你和我们跑的是同一份字节。
 
+**一条命令就够**（🔴 注意那个 `-b`，原因见下）：
+
 ```bash
-git clone https://github.com/Unio996/KANet.git
-cp -r KANet/shared/vendor/kaspa-wasm  ./kaspa-wasm
+git clone -b bshard-m3-deploy https://github.com/Unio996/KANet.git
+cp -r KANet/shared/vendor/kaspa-wasm            ./kaspa-wasm
+cp    KANet/docs/examples/kanet-external/send-comm.mjs  .
 ```
 
-> 🔴 **而这份文档和 `send-comm.mjs` 本身，此刻【不在默认分支 `master` 上】** ——
-> 它们在分支 `bshard-m3-deploy`。上面那条 `clone` 拿得到 `kaspa-wasm`（它在 `master` 上），
-> **但拿不到这两个文件**。要连它们一起拿：
+> 🔴 **为什么必须带 `-b`**：这份文档和 `send-comm.mjs` 此刻**不在默认分支 `master` 上**，
+> 它们在 `bshard-m3-deploy`。而 `kaspa-wasm` **两个分支上都有** ——
+> 所以带 `-b` 的这一条**一次就把三样都拿到了**，不需要 clone 两次。
 >
-> ```bash
-> git clone -b bshard-m3-deploy https://github.com/Unio996/KANet.git
-> ```
+> 🔵 **上面这三条命令是实测过的**（全新目录 · 从这个公开 URL 真克隆 · 跑完即删），
+> 拷完直接 `node send-comm.mjs --self-check` 四条自检全过。
 >
-> 🟡 这是**当前状态**，不是设计 —— 合并进 `master` 之后这一段就该删掉。
-> 若你 clone 默认分支后找不到 `docs/examples/kanet-external/`，**不是你做错了**。
+> 🟡 这是**当前状态**，不是设计 —— 合并进 `master` 之后 `-b` 那一段就该删掉。
+> 若你**不带** `-b` 去 clone，然后找不到 `docs/examples/kanet-external/`，**不是你做错了**。
 
 ### 🔴 也不要去 GitHub release 拿「v1.1.0」—— 那一份**也不是**我们跑的字节
 
@@ -133,6 +135,18 @@ const address = new PrivateKey(privKeyHex)
 ```
 
 ⇒ 地址应当以 `kaspatest:` 开头，冒号后 **61 个字符**（实测 200 个随机地址，长度全部是 61）。
+
+🔴 **而这里有一格容易断**：`send-comm.mjs --self-check` 在你**没有设** `KANET_PRIVKEY` 时，
+**每次运行都会新生成一把**密钥 —— 于是地址、样例输出全都会变。
+它会明确告诉你这一点，并把固定它的那条命令直接打出来：
+
+```bash
+node send-comm.mjs --self-check          # 输出里会给你 KANET_PRIVKEY=<那一串>
+export KANET_PRIVKEY=<那一串>            # 从此它就是你的身份，不再变
+```
+
+⇒ 之后每次跑都带着同一个身份。**第 5 步（广播）在没设它的时候会直接拒绝执行** ——
+因为那会往一把全新的、余额必然为 0 的密钥上跑，而报出来的错会指向别处（"没有 UTXO"）。
 
 ---
 

@@ -188,8 +188,22 @@ async function broadcast(payloadStr, privKeyHex) {
 const argv = process.argv.slice(2);
 const arg = (name) => { const i = argv.indexOf(name); return i === -1 ? null : argv[i + 1]; };
 
+// 🔴 没设 KANET_PRIVKEY 就【每次运行新生成一把】—— 下面所有输出都会跟着变。
+//    这个区别必须打印出来，否则一个照做的人会存下一把、下次再跑发现地址变了。
+const keyIsEphemeral = !MY_PRIVKEY;
 const privKeyHex = MY_PRIVKEY || newPrivateKeyHex();
 const myAddress = addressOf(privKeyHex);
+
+/** 把"这把密钥是哪来的"讲清楚 —— 临时的就说临时，并给出固定它的确切命令。 */
+function printIdentity() {
+  if (keyIsEphemeral) {
+    console.log('🔴 私钥（本次运行【临时生成】，下次再跑会是另一把）:', privKeyHex);
+    console.log('   要固定成你的身份，设环境变量再跑：KANET_PRIVKEY=' + privKeyHex);
+  } else {
+    console.log('✅ 私钥（来自环境变量 KANET_PRIVKEY）:', privKeyHex);
+  }
+  console.log('   地址                        :', myAddress);
+}
 
 if (argv.includes('--self-check')) {
   // 步骤 1+2 的离线自检 —— 不需要节点、不需要币、不上链。
@@ -197,8 +211,7 @@ if (argv.includes('--self-check')) {
   const envelope = sealEnvelope(plaintext, myAddress);          // 加密给自己，好当场解回来
   const payloadStr = buildCommPayload(MY_ALIAS, envelope);
 
-  console.log('私钥（保存好，它就是你的身份）:', privKeyHex);
-  console.log('地址                        :', myAddress);
+  printIdentity();
   console.log('');
   console.log('信封总长                    :', envelope.length, 'bytes');
   console.log('  nonce  [0..12)            :', envelope.subarray(0, 12).toString('hex'));
@@ -249,9 +262,19 @@ if (!to) {
   process.exit(2);
 }
 
+// 🔴 这条路要花钱，而没设 KANET_PRIVKEY 就是往一把【全新的、余额必为 0 的】密钥上跑。
+//    这里直接拦住，而不是让它跑到"没有 UTXO"再报一个指向别处的错。
+if (keyIsEphemeral) {
+  console.error(
+    '🔴 没有设 KANET_PRIVKEY —— 这会用一把【本次运行新生成的】密钥，它上面必然没有余额。\n' +
+    '   先跑 `node send-comm.mjs --self-check` 拿到一把，设成 KANET_PRIVKEY 再来。'
+  );
+  process.exit(2);
+}
+
 const plaintext = arg('--text') || 'hello from an external program';
 const payloadStr = buildCommPayload(MY_ALIAS, sealEnvelope(plaintext, to));
-console.log('我的地址:', myAddress);
+printIdentity();
 console.log('发给    :', to);
 let txid;
 try {
