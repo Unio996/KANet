@@ -203,7 +203,15 @@ DATABASE.md 有改动时（新表/删表/加字段），必须同步更新文档
 - **Exchange Phase 1 stress test 12/12 全绿**：发现并修复脆弱点 #4 (dispute resolve 缺失) 和 #5 (fund_lock 泄漏)，意外完成 KANet 第 16 笔 completed real E2E 交易
 - **脆弱点 #4 修复**：新 `POST /api/exchange/resolve/:id` 支持 maker_wins/taker_wins outcome，救活卡 2 天 f8e70ae1 dispute
 - **脆弱点 #5 修复**：transition() completed 分支 + handleExchangeDelivered 快捷路径双重 spendFunds，v59 backfill 回填 2 笔卡单
-- **脆弱点 #3 根治 (Week 2 Day 1)**：嵌入式 Kaspa TX indexer，Relay 订阅 block-added 写入 kaspa_tx_log (v60)，verifier 本地优先 RPC 降级。修复意外发现：之前 kaspa 分支是硬编码 `confirmed: true` stub，相当于关闭 Kaspa 验证。现在真正验证生效。
+- **脆弱点 #3 根治 (Week 2 Day 1)**：嵌入式 Kaspa TX indexer，Relay 订阅 block-added 写入 kaspa_tx_log (v60)，verifier 本地优先 RPC 降级。修复意外发现：之前 kaspa 分支是硬编码 `confirmed: true` stub，相当于关闭 Kaspa 验证。
+  > 🔴 **状态注记（2026-07-29 · J2 实核）**：**本次删掉了原文末尾那句「现在真正验证生效」**（照本文件通则第一支：会漂移且别处有权威副本的，删掉而不是留着加注）。
+  > **它不是笔误，是【作用域被略掉】——对验证器成立，对调用方不成立，而它会让下一个人跳过检查**：
+  > - ✅ **验证器本身**确实做好了（`cross-chain-verify.mjs` 的 kaspa 分支：`kaspa_tx_log` 优先 + RPC 降级）。
+  > - 🔴 **而 `exchange-machine.js` 的 kaspa 支付路径从来没调过它** —— 它在够到验证器之前就短路返回硬构造的"已确认"（`git log -S` 全 history 零命中 `verifyKaspaTx`）。那条短路是 2026-04-11 一笔**标题叫 `fix:` 的提交**装进去的，不是回退。
+  > - 🔴 **`bettor-prediction-settler.js` 同族**：拿到 txid 即推进 `completed`，无任何落链核实。
+  > - 🟡 两条路在**本机库**里痕迹全为 0（`payout_tx` / `verified_tx` / `payment_tx` 皆无）⇒ 从未执行过。**这是"缺陷没显形"，不是"风险低"。**
+  > - 🔵 正路在本仓是有的：`check_utxo_landed`（带 `minDepth`）在 `pool.js` / `bshard-close-enforce.mjs` 都在用。
+  > 🔨 判据：**修完被调方，必须再查调用方进不进得来** —— 4/13 修的是验证器，没人查过谁在调它。
 - **dispute 历史档案**：首次通过 resolve endpoint 把 f8e70ae1 从 disputed 推进到 cancelled，保留完整 meta
 - **窄门定位校准 (Owner 两次纠正)**：先从"集成 HL/Aave/Aevo"校准到"走协议窄门"，再从"只做协议"校准到"协议+完整集成+Agent 自动化三者有机整合"。KANet 占位 = "用 Kaspa 信任链把 AI Agent 连接到社交/购物/交易所有市场，全自动全可审计全链上履历"
 
