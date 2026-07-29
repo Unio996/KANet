@@ -133,6 +133,85 @@ function buildCommPayload(alias, envelope) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// 选输入 · KIP-9 storage mass
+//
+// 🔴 这一段不是"多留点手续费"，它是在避开一条会让交易被整个拒绝的规则。
+//
+//   这笔交易是【自发自收】：输出打回自己，找零也回自己。
+//   storage mass ≈ 10¹² × ( Σ(1/每个输出) − Σ(1/每个输入) )，上限 100,000（单位 sompi）。
+//   ⇒ 输出越小，1/输出 越大。把 UTXO 几乎全额打出去 ⇒ 找零是一笔尘埃 ⇒ 冲破上限 ⇒ 被拒。
+//   ⇒ 而输入越多、越碎，Σ(1/输入) 越大，反而把结果拉低 —— 所以“多凑几个输入”是有效的解法。
+//
+//   🔴 踩中时节点只回一句 `Storage mass exceeds maximum`：不提 UTXO、不提找零、
+//      不告诉你该怎么办。所以这里【自己先算一遍】，并在发出去之前用人话拦住你。
+//
+// 🔵 它被单独拆成一个函数，是为了让 `--self-check` 也能跑到它（见自检 5）——
+//    否则这段代码只有在"有节点 + 有币"时才会被执行一次，而那是它最容易带着错的时候。
+// ─────────────────────────────────────────────────────────────────────────────
+const MASS_LIMIT = 100_000;
+const MIN_CHANGE = 20_000_000n;                                  // 0.2 KAS —— 找零不做成尘埃
+
+function massOf(ins, outs) {
+  const inv = (v) => 1 / Number(v);
+  return Math.max(0, 1e12 * (outs.reduce((a, v) => a + inv(v), 0) - ins.reduce((a, v) => a + inv(v), 0)));
+}
+
+/** entries: [{amount: BigInt}, …]（降序无所谓，内部会排）。返回 {list, total, main, mass, feeReserve}。 */
+function planInputs(entries, payloadStr) {
+  const sorted = [...entries].sort((a, b) => (a.amount < b.amount ? 1 : -1));   // 降序
+  const payloadBytes = Buffer.from(payloadStr, 'utf-8');
+  const feeByBytes = BigInt(payloadBytes.length) * 1000n + 200000n;
+  const feeReserve = feeByBytes + MIN_CHANGE;
+
+  const pick = (list) => {
+    const total = list.reduce((a, e) => a + e.amount, 0n);
+    if (total <= feeReserve) return null;
+    const main = total - feeReserve;
+    return { list, total, main, feeReserve, mass: massOf(list.map((e) => e.amount), [main, MIN_CHANGE]) };
+  };
+
+  let plan = pick(sorted.slice(0, 1));                            // 先试最大那一个
+  if (!plan || plan.mass > MASS_LIMIT) {                          // 不够就全用上（输入越多 mass 越低）
+    const all = pick(sorted);
+    if (all && (!plan || all.mass < plan.mass)) plan = all;
+  }
+  if (!plan) {
+    const totalAll = sorted.reduce((a, e) => a + e.amount, 0n);
+    throw new Error(
+      `余额不够：全部 UTXO 合计 ${Number(totalAll) / 1e8} KAS，而这条消息需要预留 ` +
+      `${Number(feeReserve) / 1e8} KAS（手续费 ${Number(feeByBytes) / 1e8} + 找零 ${Number(MIN_CHANGE) / 1e8}）。`
+    );
+  }
+  if (plan.mass > MASS_LIMIT) {
+    throw new Error(
+      `凑不出一笔 KIP-9 允许的交易：算出来的 storage mass = ${Math.round(plan.mass)}，上限 ${MASS_LIMIT}。\n` +
+      `   你现在有 ${sorted.length} 个 UTXO，合计 ${Number(plan.total) / 1e8} KAS。\n` +
+      `   🔵 解法是【让找零别太小】或【多凑几个输入】—— 见 README.md §6 坑 5。`
+    );
+  }
+  return plan;
+}
+
+/**
+ * 用 planInputs() 的结果造交易。
+ *
+ * 🔴 它必须与 planInputs() 用【同一个 plan 对象】——
+ *    否则打印出来的 mass 描述的是一笔交易，真正广播的是另一笔，而两者没有任何东西会去比对。
+ * 🔵 单独成函数同样是为了让 `--self-check` 能真跑到它（见自检 6）。
+ */
+function buildGenerator(plan, myAddress, payloadStr) {
+  // comm 是【自发自收】：输出打回自己。收信方能不能读到与输出地址无关。
+  return new Generator({
+    entries: plan.list,                                    // 🔴 与算 mass 用的是同一批
+    outputs: [new PaymentOutput(new Address(myAddress), plan.main)],
+    priorityFee: 0n,
+    changeAddress: new Address(myAddress),
+    networkId: GENERATOR_NETWORK_ID,                       // 🔴 不是 NETWORK，见 README.md §6 坑 1
+    payload: new Uint8Array(Buffer.from(payloadStr, 'utf-8')),  // 🔴 必须 Uint8Array，见 README.md §6
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // 第 3 步 · 上链（需要节点 + 余额）
 // ─────────────────────────────────────────────────────────────────────────────
 async function broadcast(payloadStr, privKeyHex) {
@@ -153,69 +232,10 @@ async function broadcast(payloadStr, privKeyHex) {
   const { entries } = await rpc.getUtxosByAddresses([new Address(myAddress)]);
   if (!entries.length) throw new Error(`地址 ${myAddress} 上没有 UTXO —— 见 README.md §5（怎么拿测试币）`);
 
-  entries.sort((a, b) => (a.amount < b.amount ? 1 : -1));       // 降序
-  const payloadBytes = Buffer.from(payloadStr, 'utf-8');
+  const plan = planInputs(entries, payloadStr);                 // 见上面 planInputs()，失败会抛
+  console.log(`   (KIP-9 storage mass = ${Math.round(plan.mass)} / 上限 ${MASS_LIMIT}，用了 ${plan.list.length} 个 UTXO)`);
 
-  // ── KIP-9 storage mass ─────────────────────────────────────────────────────
-  // 🔴 这一段不是"多留点手续费"，它是在避开一条会让交易被整个拒绝的规则。
-  //
-  //   这笔交易是【自发自收】：输出打回自己，找零也回自己。
-  //   storage mass ≈ 10¹² × ( Σ(1/每个输出) − Σ(1/每个输入) )，上限 100,000（单位 sompi）。
-  //   ⇒ 输出越小，1/输出 越大。把 UTXO 几乎全额打出去 ⇒ 找零是一笔尘埃 ⇒ 冲破上限 ⇒ 被拒。
-  //   ⇒ 而输入越多、越碎，Σ(1/输入) 越大，反而把结果拉低 —— 所以“多凑几个输入”是有效的解法。
-  //
-  //   🔴 踩中时节点只回一句 `Storage mass exceeds maximum`：不提 UTXO、不提找零、
-  //      不告诉你该怎么办。所以下面【自己先算一遍】，并在发出去之前用人话拦住你。
-  const MASS_LIMIT = 100_000;
-  const MIN_CHANGE = 20_000_000n;                                // 0.2 KAS —— 找零不做成尘埃
-  const feeByBytes = BigInt(payloadBytes.length) * 1000n + 200000n;
-  const feeReserve = feeByBytes + MIN_CHANGE;                    // 预留 = 手续费 + 一笔像样的找零
-
-  const massOf = (ins, outs) => {
-    const inv = (v) => 1 / Number(v);
-    const si = ins.reduce((a, v) => a + inv(v), 0);
-    const so = outs.reduce((a, v) => a + inv(v), 0);
-    return Math.max(0, 1e12 * (so - si));
-  };
-  // 先试最大那一个；不够就把所有 UTXO 一起当输入（输入越多 mass 越低）。
-  const pick = (list) => {
-    const total = list.reduce((a, e) => a + e.amount, 0n);
-    if (total <= feeReserve) return null;
-    const main = total - feeReserve;
-    const mass = massOf(list.map((e) => e.amount), [main, MIN_CHANGE]);
-    return { list, total, main, mass };
-  };
-  let plan = pick(entries.slice(0, 1));
-  if (!plan || plan.mass > MASS_LIMIT) {
-    const all = pick(entries);
-    if (all && (!plan || all.mass < plan.mass)) plan = all;
-  }
-  if (!plan) {
-    const totalAll = entries.reduce((a, e) => a + e.amount, 0n);
-    throw new Error(
-      `余额不够：全部 UTXO 合计 ${Number(totalAll) / 1e8} KAS，而这条消息需要预留 ` +
-      `${Number(feeReserve) / 1e8} KAS（手续费 ${Number(feeByBytes) / 1e8} + 找零 ${Number(MIN_CHANGE) / 1e8}）。`
-    );
-  }
-  if (plan.mass > MASS_LIMIT) {
-    throw new Error(
-      `凑不出一笔 KIP-9 允许的交易：算出来的 storage mass = ${Math.round(plan.mass)}，上限 ${MASS_LIMIT}。\n` +
-      `   你现在有 ${entries.length} 个 UTXO，合计 ${Number(plan.total) / 1e8} KAS。\n` +
-      `   🔵 解法是【让找零别太小】或【多凑几个输入】—— 见 README.md §6 坑 5。`
-    );
-  }
-  const selected = plan.list;
-  console.log(`   (KIP-9 storage mass = ${Math.round(plan.mass)} / 上限 ${MASS_LIMIT}，用了 ${selected.length} 个 UTXO)`);
-
-  // comm 是【自发自收】：输出打回自己。收信方能不能读到与输出地址无关。
-  const generator = new Generator({
-    entries: [best],
-    outputs: [new PaymentOutput(new Address(myAddress), best.amount - feeReserve)],
-    priorityFee: 0n,
-    changeAddress: new Address(myAddress),
-    networkId: GENERATOR_NETWORK_ID,          // 🔴 不是 NETWORK，见 README.md §6 坑 1
-    payload: new Uint8Array(payloadBytes),    // 🔴 必须 Uint8Array，见 README.md §6
-  });
+  const generator = buildGenerator(plan, myAddress, payloadStr);
 
   let pending, txid = '';
   while ((pending = await generator.next())) {
@@ -295,7 +315,59 @@ if (argv.includes('--self-check')) {
     ? '✅ 自检 4（阴性对照）：合约(P2SH)地址被拒绝 —— 而只查长度的实现会放它过去'
     : '🔴 自检 4 未达预期：P2SH 地址没有被拒绝，别用这份代码加密任何东西');
 
-  console.log('\n' + (back === plaintext && lenOk && dropped && rejected
+  // 自检 ⑤：🔴 把【选输入 + 算 mass】那段真跑一遍，用假的 UTXO，不需要节点。
+  //   它存在的理由很具体：那段代码原本只有"有节点 + 有币"时才会被执行，
+  //   而它在那之前已经带着一个 `best is not defined` 上过线一次。
+  let planOk = false;
+  try {
+    const fake = [{ amount: 69_530_000n }, { amount: 44_940_000n }, { amount: 44_710_000n }];
+    const p1 = planInputs(fake, payloadStr);
+    // 只用得着最大那一个，且 mass 在限内
+    const single = p1.list.length === 1 && p1.mass < MASS_LIMIT;
+    // 而一个全是小额的钱包应当被"合并输入"救回来
+    const tiny = [{ amount: 12_000_000n }, { amount: 12_000_000n }, { amount: 12_000_000n }];
+    const p2 = planInputs(tiny, payloadStr);
+    const merged = p2.list.length === 3 && p2.mass < MASS_LIMIT;
+    // 而余额真不够时必须抛错，不是悄悄返回一个坏计划
+    let refused = false;
+    try { planInputs([{ amount: 1_000_000n }], payloadStr); } catch { refused = true; }
+    planOk = single && merged && refused;
+    console.log(planOk
+      ? `✅ 自检 5：选输入那段能跑（单 UTXO mass=${Math.round(p1.mass)}／合并 3 个 mass=${Math.round(p2.mass)}／余额不足会抛错）`
+      : `🔴 自检 5 未达预期：single=${single} merged=${merged} refused=${refused}`);
+  } catch (e) {
+    console.log('🔴 自检 5 挂了：' + (e?.message || e) + '　← 选输入那段有问题，别用它发交易');
+  }
+
+  // 自检 ⑥：🔴 把【真正造交易】那一步也跑一遍，用一个形状完整的假 UTXO，不需要节点。
+  //   它存在的理由同样具体：这一步曾两次带着错上线（一次逻辑、一次 `best is not defined`），
+  //   而两次都是"第一次真执行"才暴露 —— 因为在此之前没有任何东西会执行到它。
+  //   🔵 而它还顺带守住一件更隐蔽的事：造交易用的输入，必须与算 mass 用的是【同一批】。
+  let buildOk = false;
+  try {
+    const fakeEntry = (amount) => ({
+      address: new Address(myAddress),
+      outpoint: { transactionId: '00'.repeat(32), index: 0 },
+      amount,
+      scriptPublicKey: kaspa.payToAddressScript(new Address(myAddress)),
+      blockDaaScore: 0n,
+      isCoinbase: false,
+    });
+    const plan = planInputs([fakeEntry(69_530_000n)], payloadStr);
+    const gen = buildGenerator(plan, myAddress, payloadStr);
+    const pending = await gen.next();
+    const built = gen.summary();
+    // 造出来的输入个数必须与算 mass 时用的那一批一致 —— 否则打印的数描述的是另一笔交易
+    const sameInputs = Number(built.utxos) === plan.list.length;
+    buildOk = !!pending && sameInputs;
+    console.log(buildOk
+      ? `✅ 自检 6：造交易那段能跑（用了 ${built.utxos} 个输入，与算 mass 的那批一致；手续费 ${built.fees} sompi）`
+      : `🔴 自检 6 未达预期：pending=${!!pending} 输入个数 built=${built.utxos} vs plan=${plan.list.length}`);
+  } catch (e) {
+    console.log('🔴 自检 6 挂了：' + (e?.message || e) + '　← 造交易那段有问题，别用它发交易');
+  }
+
+  console.log('\n' + (back === plaintext && lenOk && dropped && rejected && planOk && buildOk
     ? '=== 步骤 1+2 通过。接下来需要一个 TN12 节点和一点测试币 —— 见 README.md §4 / §5。==='
     : '=== 有自检未通过，先别往下走。==='));
   process.exit(0);
