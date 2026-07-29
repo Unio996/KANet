@@ -114,23 +114,11 @@ const PROTOCOL_ROUTES = Object.freeze([
     register: registerPublicChannelReadRoute,
     why: '读链上已公开的消息。不撮合·不托管·不定价·不审核参与者(无任何我们发放的凭证)。',
   }),
-  Object.freeze({
-    method: 'POST',
-    path: '/api/kanet-broker/onboard',
-    register: registerBrokerOnboardRoute,
-    // 🔴 why 订正(NWT §③ MUST-FIX B): 上面那条的自述【对本条不成立】, 必须各写各的。
-    //   加了本条之后, 这个口【开始接收参与者】、且在调用方提供 token 时【托管一份第三方密钥】
-    //   ⇒ 若沿用"不托管·不审核参与者"那句, 它当场变假, 而全仓别处还在引它当这个口的定性。
-    why:
-      '外部程序自助登记成为 broker。逐条对齐 KANet-Positioning.md:78:' +
-      ' 不撮合(它只写一行登记, 不参与任何撮合)· 不定价(它不设任何价格)·' +
-      ' 不审核参与者(无许可: 谁提交谁登记, 没有人工批准这一步 —— 而正因如此它不发放任何凭证);' +
-      ' 🔴 而【不托管】这一条对本路由【不成立】: 调用方若提供 bot_token, 我们会加密托管它' +
-      '(那是他自己的第三方通知渠道密钥, 不是资金)。这一句必须留着 —— 它是这个口性质变化的那一格。',
-    // 🔵 而 NWT 曾据"本口 deny 铸身份"反对过本条(模块头把 POST /api/agent/create 列为 deny 例子):
-    //   ✅ 该反对【已被前置改动消解】—— onboard 在 2026-07-28 之后【不再写 identities】,
-    //     它不再是"铸身份"的一种形态。写在这里, 否则下一个人会以为我们无视了那条反对。
-  }),
+  // 🔴 2026-07-29 P0 收口 —— POST /api/kanet-broker/onboard 已【移出对外白名单】。
+  //   原因: 入站资源控制(限频/并发/body)不建立 broker-address ownership。
+  //   (定性见 Codex review verdict PUBLIC_BROKER_ONBOARD_P0_IDENTITY_HIJACK 与对应卡 —— 利用细节不在此复述。)
+  //   正解 = registration intent only + 地址控制挑战签名; 在其实现并测试之前【不得恢复本路由】。
+  //   onboard 仍在 console 内部(registerKanetBrokerRoutes)注册, 仅不再经对外网关暴露。
 ]);
 
 /**
