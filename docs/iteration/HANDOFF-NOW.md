@@ -159,10 +159,13 @@ coordination/codex-bridge/responses/ 下 0728+0729 共【12 份】Codex review(�
 
 | 谁 | 手上 |
 |---|---|
-| **J1** | 报那个"陌生人可自跑"脆弱性的细节;B0 八卡状态表(**状态以 bridge 入库记录为准**) |
-| **J2** | ✅ 配方修改已合入并补了勘误 commit ⇒ **空手,可接新活** |
-| **NWT** | 🔴 给 ②那一档补阳性杆(拿一条真 txid 喂进分类器,必须落 ②)· diff 闸已闭 |
-| **KANet-UI** | v194 integration receipt(**子进程 + `DB_PATH` 自证≠live + 阴性臂**)· 然后 supervisor 归拢 |
+| **J1** | 合成稿**独立核字节**(等 KANet-UI 推上分支后)· 那个"陌生人可自跑"脆弱性(**结论留他那台,不跨机传内容**)· settleMarketLive 独立复核(**换人是判据不是不信任**,改 payout-txid 落块法) |
+| **J2** | bridge review 清理(**按索引里被提到最多的文件排,不按日期**)· 反查索引入库(**边界句必须同文件入库**)· CLAUDE.md 那条 diff(已批,未 commit) |
+| **NWT** | ✅ ①检测三根杆全标定(阴A/阴B/阳C)⇒ **动手完成** · autoreply「②断」等 Owner 方向 |
+| **KANet-UI** | 合成稿推 tracked 路径 + 加 Z.0(gating 不解除)· 监控设计那 4 项需改(已吃 07-26 review) |
+
+🔴 **口径(对外/对 Owner 只能这么说)**:「**已确认存在编造,至少 17 条;总量未定**」——**不写"共 17 条"**
+(③核不到 77 那一档的成因尚未分辨完)。
 
 ## 🟡 待验的预测(见 ledger (84))
 
