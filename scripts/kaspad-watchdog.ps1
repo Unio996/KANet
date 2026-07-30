@@ -62,25 +62,60 @@ function Archive-IfExists($path) {
   }
 }
 
-Log "kaspad watchdog started (canonical cmd baked in, --enable-unsynced-mining + log redirection non-optional, log-archive-on-restart, try/catch loop)"
+# 🔴🔴 判据换法 (KANet-UI 2026-07-30 · Bettor #7a423c 二审通过+批准四必改 · 走铁律0 报备→审→批→测):
+#   旧判据 = 进程名 + CommandLine 含 netsuffix=12。它两机两形态坏(needs-change 台账 R5 + scratch/watchdog-fix/):
+#     · 模式A(本机): 运行中 kaspad 的 CommandLine 长度=0(实测·07-26 已量·07-30 重测一致)⇒ -like 恒不命中
+#         ⇒ 永远判 DEAD ⇒ 每 60s 空拉(撞数据目录锁 panic 秒死·18074 次假 DEAD·真 DEAD 与它逐字不可分)。
+#     · 模式B(另一台): 对照臂节点 CommandLine 命中 netsuffix=12 ⇒ 多一个匹配 ⇒ 假"活" ⇒ 真节点死不拉(闸关着)。
+#   新判据 = 问节点 borsh RPC 答不答(node helper kaspad-rpc-probe.mjs):
+#     · network === 'testnet-12'  ← 身份·承重(实测: 用错 networkId 构造 RpcClient 照样连上照样答 ⇒ 连上≠是TN12
+#         ⇒ 必须查此字段。此字段亦顶替原 netsuffix=12 那个 TN10/TN12 区分意图, 且不依赖 CommandLine 可读性)。
+#     · virtualDaaScore > 0        ← 数据真回来(不是"口通数据没回")。
+$probeScript = Join-Path $PSScriptRoot 'kaspad-rpc-probe.mjs'
+$FAIL_THRESHOLD = 3   # N 次连续失败才判 DEAD(防一次瞬时抖动/RPC 忙就拉一个竞争进程)
+$failCount = 0
+
+# 返回 @{Alive=$bool; Code=$int; Reason=$str}。helper 自带硬超时(TIMEOUT_MS*2)⇒ & node 必在 ~17s 内返回, 不挂。
+# 退码分开(Bettor 08:56 要求·别塌成一个"失败"): 0=ALIVE / 2=身份不符 / 3=数据空 / 4=超时 / 5=连不上 / 6=依赖缺失 / 1=其它。
+function Probe-Tn12Node {
+  try {
+    $out = & node $probeScript '--timeout-ms=8000' 2>&1
+    $code = $LASTEXITCODE
+    $reason = "$($out | Select-Object -Last 1)"
+    return @{ Alive = ($code -eq 0); Code = $code; Reason = $reason }
+  } catch {
+    return @{ Alive = $false; Code = -1; Reason = "probe-invoke-error: $($_.Exception.Message)" }
+  }
+}
+
+Log "kaspad watchdog started (RPC-liveness judge via kaspad-rpc-probe.mjs, --enable-unsynced-mining + log redirection non-optional, log-archive-on-restart, only-start-never-kill, try/catch loop)"
 
 while ($true) {
   try {
-    # Bettor 升级为结卡前必落(#lr32pt): 本机拓扑真实存在双kaspad(TN10 D:/kaspa-tn10-data 现在没跑但
-    # 随时可能被拉起挖矿)。按进程名匹配会把"TN10活着"误判成"TN12活着", watchdog对自己唯一职责静默失效。
-    # 改按 CommandLine 匹配 netsuffix=12(TN12专属), 不匹配任何TN10实例。
-    $p = Get-CimInstance Win32_Process -Filter "Name='kaspad.exe'" -ErrorAction SilentlyContinue |
-      Where-Object { $_.CommandLine -like '*netsuffix=12*' }
-    if (-not $p) {
-      Log "kaspad DEAD -> archiving prior stdout/stderr logs (if any) + starting canonical (--enable-unsynced-mining)"
-      Archive-IfExists $stdoutLog
-      Archive-IfExists $stderrLog
-      $proc = Start-Process -FilePath $kaspadExe -ArgumentList $kaspadArgs -WorkingDirectory (Split-Path $kaspadExe) `
-        -RedirectStandardOutput $stdoutLog -RedirectStandardError $stderrLog -WindowStyle Hidden -PassThru
-      Log "Start-Process dispatched, new PID=$($proc.Id) (does not yet confirm RPC ready, only that the OS process launched)"
+    $r = Probe-Tn12Node
+    if ($r.Alive) {
+      $failCount = 0
+    } else {
+      $failCount++
+      Log "kaspad probe FAIL ($failCount/$FAIL_THRESHOLD) code=$($r.Code): $($r.Reason)"
+      if ($failCount -ge $FAIL_THRESHOLD) {
+        # 🔴 只启不杀: 只 Start-Process, 永不 kill/Stop-Process。即使误判, 最坏是拉一个撞数据目录锁秒死的进程, 不伤 live。
+        Log "kaspad DEAD (>=$FAIL_THRESHOLD consecutive probe fails) -> archiving prior stdout/stderr logs (if any) + starting canonical (--enable-unsynced-mining)"
+        Archive-IfExists $stdoutLog
+        Archive-IfExists $stderrLog
+        $proc = Start-Process -FilePath $kaspadExe -ArgumentList $kaspadArgs -WorkingDirectory (Split-Path $kaspadExe) `
+          -RedirectStandardOutput $stdoutLog -RedirectStandardError $stderrLog -WindowStyle Hidden -PassThru
+        Log "Start-Process dispatched, new PID=$($proc.Id) (OS process launched; RPC readiness confirmed by post-start probe below)"
+        # 🔴 必改四: 拉起后【再探一次】确认真起来了(带超时·helper 自带)。不确认=假设, 而假设正是这一步要防的。
+        Start-Sleep -Seconds 8
+        $c = Probe-Tn12Node
+        if ($c.Alive) { Log "post-start probe OK: $($c.Reason)" }
+        else { Log "post-start probe still not-alive code=$($c.Code): $($c.Reason) (likely still starting / IBD; re-evaluate next tick)" }
+        $failCount = 0   # 动作已采取, 计数归零, 下一 tick 重新评估(不连锁重拉)
+      }
     }
   } catch {
-    # MUST-FIX②(NWT红队): 循环体任何异常(权限/瞬时WMI故障)绝不能让watchdog自己静默退出——
+    # MUST-FIX②(NWT红队): 循环体任何异常(权限/瞬时故障)绝不能让watchdog自己静默退出——
     # 那正是它本来要防的"进程死了没人拉"同款脆弱性。记日志, 继续循环。
     Log "WATCHDOG LOOP ERROR (caught, continuing): $($_.Exception.Message)"
   }
