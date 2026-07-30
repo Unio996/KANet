@@ -1,6 +1,12 @@
-# M-1.1 全命令能力/效果清单 v0.4（J2 主笔，J1 域视角复核已并入）
+# M-1.1 全命令能力/效果清单 v0.5（J2 主笔，J1 域视角复核已并入）
 
-> **Status**: v0.4（2026-07-30 · J2）· **待 @NWT 红队**（v0.4 的改动尚未被红队过）
+> **Status**: v0.5（2026-07-30 · J2）· **待 @NWT 红队**（v0.4/v0.5 的改动尚未被红队过）
+> **v0.5 修订记录**（相对已推的 v0.4 = commit `d029d166`）：**补齐 13 条从未被逐条列名的命令**，新增 §2.2。
+> - 触发：拿**代码**（`kasia-relay/src/lib/commands.mjs` 的 `COMMAND_PAYLOAD_SCHEMA`）与本卡逐条比对 ⇒ 51 条里 **11 条在任何文档里都没有名字**，其中 **8 条是类 B 盲签**（D2 只写了「PREDICTION_SETTLE_TX 等 9 条」，其余 8 条只以数量存在）。补写时重跑断言，又发现 **2 条类 A** 亦从未列名 ⇒ 合计 13 条。
+> - §2.2.1 写死**可推翻的穷尽性断言**（代码 51 / 覆盖 51 / 差 0）+ 取数命令 + 阳性对照。
+> - §2.2.5 一并处置原「4 条重复计数」：**本卡为唯一活清单**，D2 那份 A/B/C 分类已被 v1.2 取代（实测：v1.2 里相关命令名命中皆 0），是历史来源而非平级清单。
+> - 🔴 §2.2.6 标死证据强度：读的是 **payload schema + 源码注释**，**未逐条读 relay handler 函数体** ⇒ 「收款与输出约束」「幂等键」两列是从载荷字段推的，可能低估 handler 内部校验。
+> - 🔵 §2.2.4 记了一格方法：那条「差=0」的断言**我写进文档后第一次跑就是假的（差=2）** ⇒ 判据：**把可推翻的断言写进交付物之后，第一件事是自己去推翻它一次。**
 > **v0.4 修订记录**（2026-07-30 · 触发 = J2 对 M-1 DoD 五条逐条验收，结果 1 满足 / 4 不满足；Bettor 10:08 派工）：
 > - **只改了一件事**：§2 表里 5 条 `submit` 命令的「是否可进公开应用契约」由 **是 → 否**（`SEND_MESSAGE`/`SEND_BROADCAST`/`PUBLISH_CARD`/`SPLIT_UTXO`/`CONSOLIDATE_UTXO`），依据 = DoD「无 verifier 的默认 internal」。新增 **§2.1** 写明依据、逐条对照表、两条具体风险、以及**本次不做什么**。
 > - 🔴 **本版没有解决的 DoD 缺口（原样留着，不假装闭合）**：① 互斥性——`CHAIN_GET_*×3` 与 `GET_ADDRESS_UTXOS` 同时被 D2 类 A（6 条）与本卡 §2（16 条通用原语）各计一次 = **4 条重复计数**；② 14 列里**没有「经济效果 verifier」这一列**；⑤ **本清单本身从未被 NWT 红队过**（已有红队稿是 M-1.2 与 M-1.6，不是本卡）。
@@ -144,6 +150,90 @@
 🔴 **本次不做的**（说清边界，免得这条被读成"已经修好了"）：
 - 本次**只改清单标法**，**没有**在 relay 或 Console 侧加任何 enforcement —— 也就是说，**现在挡住这 5 条的是"公开契约里不写它们"，不是代码里的闸**。真正的闸属于 M0c（scope evaluator / caller identity / 审计回执）。
 - 我**没有核实**这 5 条此刻是否已经被任何既有的对外契约/文档暴露出去过。若已暴露，撤回它是一个单独的动作，不在本次范围。
+
+---
+
+## 2.2 v0.4 补齐：**11 条从未被逐条列名的命令**（其中 8 条是盲签类）
+
+### 2.2.0 为什么它们缺了 —— 根因一行
+
+`roadmap-v0.2 §D2` 逐字写的是「**类 B 盲签（9，风险排三类之首）：PREDICTION_SETTLE_TX 等 9 条**」——
+**只写了一个名字，其余 8 条只以"等 9 条"这个【数量】存在**。而本卡 §0 说「类 B 9 条以指针引用 D2」⇒ 指针指过去，那头没有名单。
+
+🔨 **于是两份文档的总数都对得上 51，而 8 条最危险的命令从来没有被逐条列过。**
+判据：**一份清单声称穷尽时，判据是「逐条点得出名」，不是「总数对得上」** —— "等 N 条"这种写法会让总数校验永远通过。
+
+### 2.2.1 可推翻的穷尽性断言（写死取数方法，让下一个人一条命令推翻它）
+
+```
+来源（唯一真相，不是另一份文档）：kasia-relay/src/lib/commands.mjs 的 COMMAND_PAYLOAD_SCHEMA
+取数命令：
+  grep -oE "^\s{2}[A-Z][A-Z0-9_]+:" kasia-relay/src/lib/commands.mjs | sed 's/[: ]//g' | sort -u | wc -l
+断言（2026-07-30 J2 实测）：
+  代码去重命令数 = 51 · 本卡逐条覆盖 = 51 · **差 = 0**
+🔵 阳性对照（证明比对有功率，而不是空读）：BSHARD_ZK_CLOSE 在本卡命中 > 0
+```
+
+🔴 **DoD① 的验收方法由此改**（Bettor 2026-07-30 10:25 立）：**「清单穷尽」必须对着【代码】断言，不许对着另一份文档断言**，且断言要带那个数（代码 N / 覆盖 N / 差 0）。
+
+### 2.2.2 那 8 条盲签（类 B，逐条列名 + 15 列）
+
+**共性列（8 条相同，说一次不重复）**：效果类 = `sign·submit`（`SWEEP_PER_BET` 另含 `transfer`）· 所用密钥 = **relay 自己的签名密钥，签的是调用方传入的 `redeem_script_hex`** · 允许资产与网络 = KAS / `wallet.getNetworkId()` · 调用方能力 = **无** · 审计回执 = **无** · 吊销机制 = **无** · **经济效果 verifier = 🔴 无**（relay 对调用方传入的脚本零结构/opcode 校验，实证 `relay.mjs:786-816`）· 是否可进公开应用契约 = **否**。
+
+| 命令 | 载荷字段（COMMAND_PAYLOAD_SCHEMA 原文） | 收款与输出约束 | 幂等键 | **经济效果 verifier** |
+|---|---|---|---|---|
+| `POOL_SETTLE_TX` | spine_p2sh_address · side_p2sh_addresses · spine_redeem_script_hex · side_redeem_script_hexes · required_input_outpoints · **outputs** · spine_sigs_by_input · spine_input_count · winner | **`outputs` 由调用方给** | 无 | 🔴 无 |
+| `POOL_REFUND_DISAGREEMENT_TX` | spine_p2sh_address · spine_redeem_script_hex · required_input_outpoints · **outputs** · spine_sigs_by_input · silent_oracle_index · signing_pair | **`outputs` 由调用方给** | 无 | 🔴 无 |
+| `POOL_REFUND_MAKER_UNJOINED_TX` | spine_p2sh_address · spine_redeem_script_hex · required_input_outpoint · **output** | **`output` 由调用方给** | 无 | 🔴 无 |
+| `POOL_SIDE_REFUND_CANCELLED_TX` | side_p2sh_address · side_redeem_script_hex · required_input_outpoint · **output** | **`output` 由调用方给** | 无 | 🔴 无 |
+| `PREDICTION_SETTLE_TX` | p2sh_address · redeem_script_hex · required_input_outpoints · **outputs** · sigs_by_input · winner | **`outputs` 由调用方给** | 无 | 🔴 无 |
+| `PREDICTION_SETTLE_CONSENSUAL_TX` | 同上 | **同上** | 无 | 🔴 无 |
+| `PREDICTION_REFUND_TX` | p2sh_address · redeem_script_hex · **branch** | 输出不在载荷里（分支由 `branch` 选） | 无 | 🔴 无 |
+| `STAKE_UNLOCK_TX` | p2sh_address · redeem_script_hex · **to_address** · lock_time | 🔴 **收款地址 `to_address` 完全由调用方给** | 无 | 🔴 无 |
+| `SWEEP_PER_BET` | per_bet_address · redeem_hex | 扫回 gateway（`transfer` 效果） | 无 | 🔴 无 |
+
+（上表 9 行 = `PREDICTION_SETTLE_TX`（D2 唯一列过名的那条）+ **此前缺名的 8 条**。）
+
+### 2.2.3 另外 3 条：任何分类里都没有出现过
+
+| 命令 | 载荷字段 | 效果类 | **经济效果 verifier** | 可进公开契约 |
+|---|---|---|---|---|
+| `GET_ARM_STATUS` | **`[]`**（无必填字段；源码注释：`Path B 围栏 §2.7 — read-only`） | read | n/a（只读，无经济效果） | 是 |
+| `PREDICTION_SETTLE_BUILD_PREIMAGE` | p2sh_address · required_input_outpoints · outputs | **build**（构造待签 preimage，载荷里**无** `redeem_script_hex`、**无** 签名） | 🔴 无 | **否**（`outputs` 由调用方给；它构造的 digest 会被后续签名命令消费） |
+| `PREDICTION_SETTLE_CONSENSUAL_BUILD_PREIMAGE` | p2sh_address · required_input_outpoints · outputs · winner | **build**（同上） | 🔴 无 | **否**（同上） |
+
+### 2.2.4 补：类 A 里只活在 D2、本卡从未列名的 2 条
+
+写完 2.2.2/2.2.3 后重跑那条穷尽性断言，**差不是 0，是 2** —— 以下 2 条只出现在 `roadmap-v0.2 §D2` 的类 A 名单里，本卡从未列过：
+
+| 命令 | 载荷字段 | 效果类 | 所用密钥 | **经济效果 verifier** | 可进公开契约 |
+|---|---|---|---|---|---|
+| `GET_PER_BET_ADDRESS` | （D2 原文：纯派生，relay 自己算 redeem_hex 返回，**零签名**） | derive·read | 无（不签名） | n/a（无经济效果，不动钱） | 是 |
+| `POOL_V07_COMPUTE_REFUND_MASS` | （D2 原文：纯计算） | derive·read | 无（不签名） | n/a（同上） | 是 |
+
+🔵 **这一格本身就是 2.2.1 那条断言的用处**：我先把断言写进文档，再跑一遍去验它 —— **而它当场就是假的（差=2）**。若只写不验，这份"全量清单"会带着一个"差=0"的自证条款发布出去。
+🔨 判据：**把可推翻的断言写进交付物之后，第一件事是自己去推翻它一次。**
+
+### 2.2.5 与 §2 通用原语表的重叠（原 (2) 消重复计数，一并解决）
+
+`CHAIN_GET_*×3` 与 `GET_ADDRESS_UTXOS` 这 4 条，同时出现在 D2 类 A（6 条）与本卡 §2（16 条通用原语）⇒ 原先两处各计一次。
+
+**处置（定一份为主）**：
+- ✅ **本卡（m1-1）为唯一的活清单**，51 条逐条在此覆盖。
+- 🔴 `roadmap-v0.2 §D2` 的 A/B/C 分类**已被 v1.2 取代**（实测：权威路线图 `docs/2026-07-25-kanet-trunk-roadmap-modularization-and-external-access.md` 里 `GET_ADDRESS_UTXOS`/`CHAIN_GET`/`类 A` 命中皆为 0；其中出现的 3 处 "D2" 是 mermaid 图节点 ID，与命令分类无关）⇒ **D2 那份是历史来源，不是与本卡平级的清单**，引用它时不得再作为"清单的另一半"。
+
+### 2.2.6 本节的证据强度边界（不许被读成"逐条审过 handler"）
+
+```
+✅ 我读的是 kasia-relay/src/lib/commands.mjs 的 COMMAND_PAYLOAD_SCHEMA（载荷字段 = 逐字原文）
+   + COMMAND_TYPES 的源码注释
+🔴 我**没有**逐条读这 11 条在 relay.mjs 里的 handler 函数体
+   ⇒ 「收款与输出约束」「幂等键」这两列是**从载荷字段推的**，不是从 handler 实读的
+   ⇒ 若某条 handler 内部另有校验，本表会**低估**它 ⇒ 这一格要 @J1 域复核或后续实读补强
+🔵 而「verifier = 无」这一列的依据是类 B 的共性（relay 对 caller 传入脚本零校验，
+   实证 relay.mjs:786-816 已在 D2 坐实）——**不是**我逐条重新验的
+🔴 且照 M-1 要求：**verifier 填"无"是把实况写下来，不是给它设计一个**。本节不提出任何修法。
+```
 
 ---
 
