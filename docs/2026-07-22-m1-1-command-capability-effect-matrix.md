@@ -450,14 +450,64 @@ const utxo = entries[0];               ← 有 N 个也只花第 1 个，剩下 
 🔵 **而这一格的"一致"是有信息量的**：J2 从**载荷字段推**得到"无"，KANet-UI 从**函数体实读**同样得到"无"
 ⇒ **不同来源 · 不同方法 · 同一结论**。（对照：两人 grep 同一个文件得到同一答案，只是同一次测量做了两遍。）
 
-### 🔴 covenant 层 —— 2 / 8 有逐字材料，6 / 8 **没查过**
+### 🔴 covenant 层 —— 3 / 8 有逐字材料，5 / 8 **没查过**（J1 2026-08-01 由 2/8 更新，见下方留痕）
 | 命令 | covenant 侧 | 强度 |
 |---|---|---|
 | `POOL_REFUND_MAKER_UNJOINED_TX` | `PoolSpine_v07.sil :: refund_maker_unjoined` —— require 逐字已抄 | **双层实读** |
 | `POOL_SIDE_REFUND_CANCELLED_TX` | `PoolSide_v07.sil :: refund_market_cancelled` —— require 逐字已抄 | **双层实读** |
-| 其余 6 条（结算类为主） | 🔴 **未读** —— 部分连"对应哪个 .sil"都未定 | **只有 relay 一层** |
+| `STAKE_UNLOCK_TX` | `OracleStake_v1.sil :: timeout_unlock` —— require 逐字已抄（**J1 2026-08-01 补，见 §2.4.6**）| **双层实读** |
+| 其余 5 条（结算类为主） | 🔴 **未读** —— 部分连"对应哪个 .sil"都未定 | **只有 relay 一层** |
+
+> 🔵 **计数变更留痕（J1 2026-08-01）**：本表原为 `2 / 8 已读 · 6 / 8 未读`，本次补 `STAKE_UNLOCK_TX`
+> ⇒ 现为 **3 / 8 已读 · 5 / 8 未读**。上方小节标题「2 / 8」那一行同步改。**只动这一格，其余一字未碰。**
 
 🔴 **"未读" ≠ "没有防线"。** 这两者在任何表上都必须看得出区别，否则读的人会把"没查过"读成"查过了没有"。
+
+### 2.4.6 `STAKE_UNLOCK_TX` 的 covenant 侧（J1 2026-08-01 · 只读 · 引 entrypoint 名 + require 原文，不引行号）
+
+**定位链条（三段独立互证，不是单靠注释）**：
+`relay.mjs :: case 'stake_unlock_tx'` 调 `unlockP2SH_SingleEntry` → `p2sh.mjs` 该函数文档注释自述
+"single-entry P2SH contract (= OracleStake_v1 timeout_unlock)" → 而 `OracleStake_v1.sil`
+**全文只有一个 entrypoint**（`timeout_unlock`）⇒ 🔵 **"single-entry ⇒ scriptSig 无 selector"这条спend 路径
+与合约结构自洽** —— 这是结构核实，不只是引注释。
+🔵 **且此处无版本歧义**（与 §2.4 边界②的 Pool* 情形相反）：仓内 `*.sil` 全量扫过，
+`OracleStake` 家族**只有 `_v1` 一个文件**。
+
+**🔴 决定性的一条 —— 它正面回答了 relay 侧那个 🔴**：
+
+§2.2.2 表里 `STAKE_UNLOCK_TX` 是唯一被标「**收款地址 `to_address` 完全由调用方给**」的。covenant 侧逐字：
+```
+byte[34] stakerLock = new ScriptPubKeyP2PK(pubkey(stakerPkX));
+require(tx.outputs[0].scriptPubKey == byte[](stakerLock));
+```
+`stakerPkX` 是 **ctor 形参** ⇒ 烤进 redeem 字节 ⇒ 进而烤进 P2SH 地址本身。
+⇒ 🔵 **调用方给的 `to_address` 并不自由：给成别的地址，relay 照样构造并签名，而 covenant 拒收。**
+🔨 **⇒ 本条的答案是「relay 不拦，covenant 拦死」** —— 而这正是 §2.4 这一节存在的理由：
+**"relay 侧无约束"单独一句会被读成"没有约束"，而这里它是错的。**
+
+**同 entrypoint 其余 require（一并抄全，免得下一个人再开一次文件）**：
+```
+require(checkSig(stakerSig, pubkey(stakerPkX)));   ← 只有 staker 本人能花
+require(tx.time >= lockUntilDaa);                  ← 锁时闸(DAA 模式, 见该文件头注)
+require(tx.inputs.length == 1);
+require(this.activeInputIndex == 0);
+require(tx.outputs.length == 1);
+require(tx.outputs[0].value <= tx.inputs[0].value - 1000);        ← MIN_FEE
+require(tx.outputs[0].value >= tx.inputs[0].value - 100000000);   ← MAX_FEE = 1 KAS
+require(tx.outputs[0].value >= 1000);                             ← dust floor
+```
+🔵 **构造侧与之逐条相容**（`unlockP2SH_SingleEntry` 实读，见 §2.4.5）：单输入 · 单输出 ·
+`activeInputIndex` 必 0（只有一个输入）⇒ **不是巧合，是同一套路径**。
+🔵 **fail-closed 一格**：relay 取 `lockTime = BigInt(cmd.lock_time || 0)` ⇒ 调用方漏传 ⇒ `tx.time = 0`
+⇒ `require(0 >= lockUntilDaa)` 不过 ⇒ **漏传是被拒，不是被放行**。
+
+**🔵 与 §2.4.5 那条静态 fee 的交叉（同一个函数，两条路，安全性完全不同）**：
+`unlockP2SH_SingleEntry` 里那个 `fee = kaspaToSompi('0.001')` = **100,000 sompi**，
+落在本合约的 `[1000, 100000000]` 区间内 ⇒ ✅ **这条路上它是被 covenant 兜住的**。
+🔴 **而同一个常数在 `SWEEP_PER_BET` 那条路上没有任何东西兜**（§2.4.5：per-bet redeem 是 JS 拼的
+单 `CHECKSIG`，**没有 covenant**）。
+🔨 **⇒ 同一行代码的安全性，由【它在花哪个 covenant】决定，而不是由它自己决定** ——
+读"这个常数安不安全"必须带上路径，否则两条路会互相担保。
 
 ### 🟡 三条边界（原样保留，不许在引用时省略）
 ```
@@ -473,6 +523,11 @@ const utxo = entries[0];               ← 有 N 个也只花第 1 个，剩下 
 
 ### 📌 未完成（明标，不是黑洞）
 ```
-· 6 条 covenant 侧未读 ⇒ 排 M-1 闭合之后；起点现成（本节 + 上述版本歧义注）
+· **5** 条 covenant 侧未读（J1 2026-08-01：原 6，`STAKE_UNLOCK_TX` 已补 §2.4.6）
+  剩：`POOL_SETTLE_TX` · `POOL_REFUND_DISAGREEMENT_TX` · `PREDICTION_SETTLE_TX` ·
+  `PREDICTION_SETTLE_CONSENSUAL_TX` · `PREDICTION_REFUND_TX`
+  ⇒ 排 M-1 闭合之后；起点现成（本节 + 上述版本歧义注）
+  🔨 **本次逮到这一格是因为改完全文搜了一遍那个数** —— 上面表里改成 3/8 时，这里的 6 原样活着。
+  **同一个数在同一份文件里存了两份，改一份不会有任何东西提醒你另一份。**
 · 穷尽性断言（代码 51 / 覆盖 51 / 差 0）⇒ 由 KANet-UI 用**不同谓词**独立 re-count 中
 ```
