@@ -1,6 +1,7 @@
-# M-1.1 全命令能力/效果清单 v0.6（J2 主笔，J1 域视角复核已并入）
+# M-1.1 全命令能力/效果清单 v0.7（J2 主笔，J1 域视角复核已并入）
 
-> **Status**: v0.6（2026-07-30 · J2）· **v0.6 = 新增 §2.3（交付③ 三态资格：retire 属生命周期轴，当前空集，写死 M0b 落地为其生效条件）**
+> **Status**: v0.7（2026-07-31 · J2）· **v0.7 = 新增 §2.4 三条边界实况**（redeem 建盘时存库/结算不编译 · 该 hex 零完整性校验 · branch→entrypoint 映射不确定 · 传输边界 = 进程内存边界）。只记实况,不下风险判断。
+> **Status(v0.6)**: v0.6（2026-07-30 · J2）· **v0.6 = 新增 §2.3（交付③ 三态资格：retire 属生命周期轴，当前空集，写死 M0b 落地为其生效条件）**
 > **Status(v0.5)**: v0.5（2026-07-30 · J2）· **待 @NWT 红队**（v0.4/v0.5 的改动尚未被红队过）
 > **v0.5 修订记录**（相对已推的 v0.4 = commit `d029d166`）：**补齐 13 条从未被逐条列名的命令**，新增 §2.2。
 > - 触发：拿**代码**（`kasia-relay/src/lib/commands.mjs` 的 `COMMAND_PAYLOAD_SCHEMA`）与本卡逐条比对 ⇒ 51 条里 **11 条在任何文档里都没有名字**，其中 **8 条是类 B 盲签**（D2 只写了「PREDICTION_SETTLE_TX 等 9 条」，其余 8 条只以数量存在）。补写时重跑断言，又发现 **2 条类 A** 亦从未列名 ⇒ 合计 13 条。
@@ -278,6 +279,82 @@ retired            ⇒ **生命周期轴**：这条命令曾经提供过、现�
 
 ---
 
+## 2.4 v0.7 新增：三条**边界实况**（M-1 = 安全边界发现；只记实况，不下风险判断）
+
+> 依据：Bettor 2026-07-31 派工 1️⃣2️⃣3️⃣。三条都属"**这些命令的可调用性由什么决定**"，
+> 而它们**不在任何一条命令的行里** —— 它们是绕过/穿透命令表的边界。
+
+### 2.4.1 那 8 条盲签的 `redeem_script_hex` 从哪来 —— **建盘时存库，结算时原样取出**
+
+```
+实读 kasia-console/src/services/pool-market-settler.js:
+  :2497  const spineRedeemHex = meta.spine_redeem_script_hex;
+  :2498  if (!spineRedeemHex) throw new Error('market.metadata missing spine_redeem_script_hex');
+  :2192  注释:「CRITICAL: spread prior metadata (= preserve spine_redeem_script_hex stashed at create time)」
+  :2540  注释:「meta.spine_redeem_script_hex — PoolSpine_v06 compiled redeem (stashed at create-time)」
+```
+
+⇒ **结算时不编译任何 `.sil`**。⇒ 因此"这条命令对应哪个 `.sil`"**没有单一答案**：它等于"那个盘建的时候用的是哪一份"。
+
+### 2.4.2 那份 hex 从存入到使用之间的完整性保护 = **无**
+
+| 层 | 查了什么 | 结果 |
+|---|---|---|
+| Console 取出侧 | `pool-market-settler.js` 三处取出点（:1903 / :2497 / :2567）往下 15 行 | 🔴 无地址反推、无哈希比对、无与链上比 |
+| relay 收到侧 | 逐个函数体查 `_addressFromRedeem`：`unlockPoolSpineP2SH` / `unlockPoolSpineRefundDisagreement` / `unlockP2SHMultiSig` / `unlockP2SHConsensual` / `unlockP2SH` / `unlockP2SHDual` / `unlockP2SH_SingleEntry` | 🔴 **7 / 7 命中皆为 0** |
+
+🔵 **阳性对照（证明该工具存在且被使用）**：`_addressFromRedeem` 在 **BSHARD 线**上有 5 处 —— `unlockBshardGenesisMintPayout`:1749 · `unlockBshardConsolidate`:1788/:1789 · `unlockBshardConsolidateV2`:1833/:1834。
+
+🔴 **而那 5 处的用途必须说准，否则会被读成校验**：它们是 `_matchUtxo(rpc, _addressFromRedeem(redeem), outpoint)` —— **先用调用方给的 redeem 推出地址，再去那个地址上找 UTXO**。
+⇒ 这是**用调用方的 redeem 决定花哪个 UTXO**，**不是**拿它与一个独立来源比对。⇒ **即便在 BSHARD 线上，它也不构成"这份 redeem 是合法的"这种校验。**
+
+🟡 **未查（明标）**：`pool_markets.metadata` 的**写入侧**有无保护（触发器/权限/只读约束）；exchange/prediction 线的 offer 表是否同样。
+
+### 2.4.3 `prediction_refund_tx` 的 branch → entrypoint 映射 = **不确定**
+
+```
+relay 侧(两个 unlock 函数逐个读函数体, 映射相同): **branch N → OP_N**
+   p2sh.mjs:275(unlockP2SH) / :770(unlockP2SHDual)  branch 0→'00' · 1→'51' · 2→'52'
+relay.mjs:1269 handler 注释: 「branch 1 = refund_both」「branch 2 = refund_maker_unjoined」
+
+而 escrow 合约有三份, **声明序互不相同**:
+   PredictionEscrowUnanimous5     OP_0 settle_dispute · OP_1 settle_consensual
+                                  · OP_2 refund_both · OP_3 refund_maker_unjoined
+   PredictionEscrowConsensualMid  OP_0 settle_consensual · OP_1 refund_timeout
+   PredictionEscrowMulti          OP_0 settleByMultiOracle · OP_1 refund
+```
+
+🔴 **⇒ 实况条目 = 「这条命令调到哪个 entrypoint —— 不确定，因为编号有两套且未对齐」。**
+
+**三条未验（决定这一格成不成立，逐条写上）**：
+1. 🔴 **selector 是否真的按声明序** —— 依据是既有的 covenant 审查经验，**未对这版编译器实测**；若排序不同，整条不成立。
+2. 🔴 **哪个 offer 用哪份合约** —— redeem 从库里 offer 取，未逐条解出对应哪份 `.sil`。
+3. 🔴 **未构造任何交易验证**（也不应验 —— 那是动钱）。
+
+🔵 **显形状态（实测）**：`exchange_offers` 总行 164 · **`refund_txid` 非空 = 0**（expired 74 / cancelled 66 / timed_out 8 / completed 6 …全部为 0）。阳性对照：有 `escrow_p2sh` 的行 = 16。
+⇒ **这条退款路一次都没有成功执行过。** 🔴 而"从未显形"同样兼容「路是通的，只是没人用过」—— 两者在这张表上读起来一样。
+
+### 2.4.4 这 ~50 条命令的可调用性由什么决定 —— **进程内存边界，不是密码学边界**
+
+**本节不重述论证，引出处**：`docs/2026-07-22-NWT-redteam-m1-2-threat-model.md` §1（T-1 / T-2 / T-3；Bettor 2026-07-22 14:01 交叉核 file:line 全属实）。
+
+```
+T-1  relay IPC = Node fork 通道, **进程成员资格 == 全权(零认证零授权)**
+     分发前唯一的门只校验 type 名 + 字段 typeof 形状, 零 caller 身份校验
+     ⇒ Console 进程内任何代码都能对任意 relayId 发任意命令
+T-2  console HTTP API(:3200) = **单一共享 secret**, 无身份/scope/nonce;
+     同一把钥匙被 16+ 个不相关路由复用 ⇒ 任一路由的调用方 == 全 API 面的调用方
+T-3  全链路零重放防护 ⇒ 一条抓到的合法请求可无限次重放
+```
+
+🔴 **明标空格（Bettor 2026-07-31 裁定的措辞，原样记，不在今天开新调查）**：
+
+> **传输边界 = 进程内存边界 ⇒ 而【谁能在该进程内执行代码】未被独立枚举 —— 空格，未查。**
+
+🔵 它**在范围内**（若边界是进程内存边界，那么谁能在那个进程里跑码 = 实际的能力边界，也就是"外部程序接入之后能做什么"的下一层），而本轮不查：它多半已被 M-1.2 场景 B（被攻陷 Console worker）覆盖一部分，且逐条枚举属新一轮调查。
+
+---
+
 ## 3. 汇总与下一步
 
 - 本卡覆盖：类 A6(指针) + 类 B9(指针) + 类 C20(本卡新增完整) + 通用原语 16(本卡新增) = 全部 ~50 条命令，无排除项。
@@ -285,53 +362,3 @@ retired            ⇒ **生命周期轴**：这条命令曾经提供过、现�
 - ~~**待办**：①②③三处 p2sh.mjs 深挖~~ **已闭（v0.3, J1 复核+J2 交叉核, 见 §1 回填）**。剩余待办：M-1.2 威胁模型（NWT, `0ec41001` 已交）与本卡"调用方能力/审计回执/吊销机制"三列（现状全部"无"）跟 M0c 七项设计对照，确认没有遗漏命令——排 M0c 设计批。
 
 **关联**：`docs/2026-07-22-kanet-base-modularization-roadmap-v0.2.md`（M-1 §3、D2 节）、`docs/2026-07-22-j1-covenant-domain-review-m1-1-m1-2.md`（v0.3 订正依据）、`docs/2026-07-22-NWT-redteam-m1-2-threat-model.md`（B-3 例证并入目标）、频道 dev-coord-testnet 2026-07-22 06:17 派工记录。
-
----
-
-## §2.4 「哪一层在拦」—— 8 条盲签命令的双层实读（v0.7 · 2026-07-30）
-
-> **并入者**：Bettor（J2 交 covenant 侧材料 · KANet-UI 交 relay 侧实读 · KANet-UI 确认本节）
-> 🔴 **本节不加表列**：加一列要动全表每一行，机械风险大于收益；而这份数据只覆盖 8 条，用一节记更准。
-
-### 🔴 结论(而它就是 M-1 要产出的那句话)
-```
-对这 8 条命令：**relay 会照单签发 —— 不检查收款方、不检查金额、没有幂等。**
-⇒ 拦不拦完全取决于 covenant 层，**而目前只验证了 8 条里的 2 条。**
-```
-
-### ✅ relay 层 —— 8 / 8 实读 handler
-| 结果 | 覆盖 |
-|---|---|
-| 收款与输出约束 = **无** · 幂等键 = **无** | **8 / 8** |
-| 唯一的 relay 级检查 | `prediction_refund_tx` 的 branch 必 1\|2，否则 throw —— 是**分支选择器**，不是收款约束 |
-| 低于 sign 类风险的 | 两条 `*_BUILD_PREIMAGE` = build-only，不签不广播 |
-
-🔵 **而这一格的"一致"是有信息量的**：J2 从**载荷字段推**得到"无"，KANet-UI 从**函数体实读**同样得到"无"
-⇒ **不同来源 · 不同方法 · 同一结论**。（对照：两人 grep 同一个文件得到同一答案，只是同一次测量做了两遍。）
-
-### 🔴 covenant 层 —— 2 / 8 有逐字材料，6 / 8 **没查过**
-| 命令 | covenant 侧 | 强度 |
-|---|---|---|
-| `POOL_REFUND_MAKER_UNJOINED_TX` | `PoolSpine_v07.sil :: refund_maker_unjoined` —— require 逐字已抄 | **双层实读** |
-| `POOL_SIDE_REFUND_CANCELLED_TX` | `PoolSide_v07.sil :: refund_market_cancelled` —— require 逐字已抄 | **双层实读** |
-| 其余 6 条（结算类为主） | 🔴 **未读** —— 部分连"对应哪个 .sil"都未定 | **只有 relay 一层** |
-
-🔴 **"未读" ≠ "没有防线"。** 这两者在任何表上都必须看得出区别，否则读的人会把"没查过"读成"查过了没有"。
-
-### 🟡 三条边界（原样保留，不许在引用时省略）
-```
-① makerStakeAmount 的 ctor 值与库列一致 ⇒ **已验 140/140（阴性对照 0/140）**
-   🔴 **作用域 = 那 140 个 pruned_expired_waived 盘**；其余 v0.7 盘没做过这个核
-   🔨 一条"已验证"若不带作用域，会被按最大范围读
-② 版本歧义：仓里有**两个 v0.7 家族的 .sil**，而库列只写 `v0.7` ⇒ 光看库列定不了版本
-   ⇒ 本次按 `*_v07` 读。**把"它曾经存在"也写下来** —— 否则下一个人会再撞一次
-③ 🔨 **引用 .sil 时引【entrypoint 名 + require 原文】，不要引行号**
-   —— 行号是一次手工测量的快照，.sil 一动它就陈，而没有任何检查会发现
-   （实例：本轮一条注释的行号已陈 6 行，而内容仍对；在册同族那次赔过钱）
-```
-
-### 📌 未完成（明标，不是黑洞）
-```
-· 6 条 covenant 侧未读 ⇒ 排 M-1 闭合之后；起点现成（本节 + 上述版本歧义注）
-· 穷尽性断言（代码 51 / 覆盖 51 / 差 0）⇒ 由 KANet-UI 用**不同谓词**独立 re-count 中
-```
