@@ -372,8 +372,35 @@ T-3  全链路零重放防护 ⇒ 一条抓到的合法请求可无限次重放
 🟡 而资金去向固定为 relay 自身地址 ⇒ 面是**让 relay 扫它本不该扫的地址**（噪音/关联性），**不是**资产转移给第三方。
 **幂等键**：载荷无；二次调用由 UTXO 双花在共识层挡住（与 UTXO-only 那 6 条同一档）。
 
-🟡 **本条未验**：`unlockP2SH_SingleEntry` 函数体我没读——
-"单 in/out · 无 fee-input · 无 selector" 是 `relay.mjs:687-689` **注释自述**，未逐行核实。
+✅ **原「本条未验」已收（J1 2026-08-01 · 逐行读 `kasia-relay/src/lib/p2sh.mjs:318-376`）**：
+`relay.mjs:687-689` 那三句注释自述**全部核实成立**——
+`:325 const utxo = entries[0]` 单输入 · `:342 outputs: [new TransactionOutput(outValue, toSpk)]` 单输出 ·
+`:327-328 fee` 从 `lockedAmount` 内扣 ⇒ **无 fee-input** · `:353 encodePayToScriptHashSignatureScript(sigHex)`
+⇒ scriptSig = `[sig][redeem]`，**无 selector 字节**。
+
+🔴 **而逐行读出两件注释没说的（这才是读它的收益，不是那三句对不对）**：
+
+**① `:325 entries[0]` —— 命令叫 `sweep`（扫），函数只取【第一个】UTXO，且无 length 检查、无循环。**
+```
+const { entries } = await rpc.getUtxosByAddresses([p2shAddress]);
+if (!entries?.length) throw ...        ← 只挡"一个都没有"
+const utxo = entries[0];               ← 有 N 个也只花第 1 个，剩下 N-1 个【无声留在原地】
+```
+🔴 **要害不是"扫不干净"，是它扫不干净时【返回 ok:true + sweep_txid】**（`relay.mjs:699`）。
+`relay.mjs:685-686` 注释说"未 sweep 由 reconciliation daemon 重试防失血"——那道兜底接的是
+**「sweep 失败」**这个信号；而这里的形态是**「sweep 报成功，钱却留了一部分」**，
+🔨 **两者在调用方那里读数不同：一个是错误，一个是成功。兜底若按"成不成"分诊，这一类结构上进不了它的视野。**
+🟡 **边界（不许省略）**：① 我**没有读** reconciliation daemon（J2 piece④）——它到底按什么分诊，未验；
+② per-bet 地址带 nonce 去重，正常应只有 1 个 UTXO ⇒ **N>1 能不能发生，我没证**。
+⇒ 本条报的是**结构**（"有 N 个只花 1 个且报成功"），**不是实例**。
+
+**② `:327 const fee = kaspaToSompi('0.001')` —— 静态常数 fee，非 mass-aware。**
+🔵 而同一个仓库里，另一条钱路被明令禁止这么写：`kasia-console/src/services/pool-market-settler.js:2470`
+逐字「**Bettor 红线 2 (Bettor r239): fee = mass × rate, 禁静态常数**」，并因此写了
+`computeMassAwareV07RefundFee`。⇒ **同一条红线在这条路上没有落到。**
+🟡 **分量压准，不报成缺陷**：这是 1-in/1-out + 68 字节 redeem 的固定小形状，
+100,000 sompi 大概率**高于** mempool floor（= 多付，不是过不去）⇒ 面是**浪费**不是**卡住**。
+🔴 而"大概率"是推理不是读数 —— **本节不给它一个实算值**（要给就得按 KIP-9 实算一次，那是另一格）。
 
 **② `POOL_SETTLE_TX`：分支与版本语义由【调用方载荷】决定**（补 2.4.3——那一节讲的是 `prediction_refund_tx`）
 
