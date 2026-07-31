@@ -327,9 +327,72 @@ relay.mjs:1269 handler 注释: 「branch 1 = refund_both」「branch 2 = refund_
 🔴 **⇒ 实况条目 = 「这条命令调到哪个 entrypoint —— 不确定，因为编号有两套且未对齐」。**
 
 **三条未验（决定这一格成不成立，逐条写上）**：
-1. 🔴 **selector 是否真的按声明序** —— 依据是既有的 covenant 审查经验，**未对这版编译器实测**；若排序不同，整条不成立。
+1. ~~🔴 **selector 是否真的按声明序**~~ ✅ **已答（J1 2026-08-01，读编译器源码，见 §2.5.3-bis）**
 2. 🔴 **哪个 offer 用哪份合约** —— redeem 从库里 offer 取，未逐条解出对应哪份 `.sil`。
-3. 🔴 **未构造任何交易验证**（也不应验 —— 那是动钱）。
+   🔵 **但 §2.5.3-bis 把它收窄了**：在役合约的产生方式已定死（现编 `.sil`，缓存键含 `.sil` 字节哈希）
+3. 🔴 **未构造任何交易验证**（也不应验 —— 那是动钱）。**本次仍未构造任何交易。**
+
+### 2.5.3-bis 🔴🔴 selector 语义已定死 —— 而 `prediction_refund_tx` 的 branch 编号【差一位】（J1 2026-08-01 · 全程只读）
+
+**① 未验 #1 已答：selector = entrypoint 在源码里的声明序下标，0 基，只数 entrypoint。**
+读编译器源码 `/d/silverscript`（HEAD `aedad5b` · 分支 `master` · **只跑只读命令，遵 D-005**），
+`silverscript-lang/src/compiler/compile.rs`：
+```rust
+// 收集: 按 AST 顺序过滤出 entrypoint —— 非 entrypoint 函数【不占下标】
+for func in &lowered_contract.functions { if func.entrypoint { compiled_entrypoints.push(...) } }
+// 分派: 下标就是 enumerate 的序号, 且是【数值比较】不是 opcode 字节匹配
+for (entrypoint_index, (_name, script)) in compiled_entrypoints.iter().enumerate() {
+    builder.add_op(OpDup); builder.add_i64(entrypoint_index as i64); builder.add_op(OpNumEqual); builder.add_op(OpIf);
+    ... // 最后一个的 else 分支: OpDrop; OpFalse; OpVerify  ⇒ 越界 selector = fail-closed
+}
+let without_selector = entrypoint_functions.len() == 1;   // ⇐ 同时确证了 §2.4.6 依赖的那条
+```
+🔵 **顺带确证 §2.4.6**：「单 entrypoint ⇒ 不推 selector」不再只是注释/结构推断，**是编译器里的一行**。
+🟡 **作用域**：这是**这份编译器源码**的行为。在役合约字节由某次 silverc 构建产出，
+**本节不声称部署字节就出自此 commit**（那是另一格）。
+
+**② 在役的是哪一份 —— 定死了（顺带纠一个陷阱）**
+`kasia-console/src/lib/prediction-escrow-ss.mjs` **现编 `.sil`**（`execFileSync(SILVERC, [SIL_SOURCE, '--ctor', …])`），
+缓存键 = `sha256(.sil 源字节 + ctor)` ⇒ **`.sil` 一改自动失效**，缓存落 `CACHE_DIR/<hash>.json`。
+🔴 **而 `src/lib/PredictionEscrowUnanimous5.json` 是个陷阱**：它与 `.sil` **同名同目录**，
+`contract_name` 也是 `PredictionEscrowUnanimous5`，**但它的 AST 只有 2 个 entrypoint**（`settle` / `refund`），
+而 `.sil` 有 4 个。⇒ **它是旧版本的编译产物，没有任何在役路径读它。**
+🔨 **同一个名字下挂着两套 entrypoint 编号，而其中一套躺在源码目录里长得像权威。**
+（同 §2.4 边界②那族，但更狠：那里是文件名不同，这里**文件名一样**。）
+
+**③ 🔴🔴 由 ①② 得出的实况：branch 编号差一位，且有一个 entrypoint 根本够不到**
+```
+在役 .sil 的 entrypoint 声明序(全 4 个都是 entrypoint, 中间无普通函数, 已核):
+   0 = settle_dispute   1 = settle_consensual   2 = refund_both   3 = refund_maker_unjoined
+
+relay 侧(relay.mjs :: case 'prediction_refund_tx' —— 它把 cmd.branch 【直接当 selector】传):
+   branch 1 → 注释自称 refund_both            → 实际 selector 1 = settle_consensual
+   branch 2 → 注释自称 refund_maker_unjoined  → 实际 selector 2 = refund_both
+   🔴 selector 3 (refund_maker_unjoined) 【发不出去】——
+      p2sh.mjs 两处编码同为 `branch===0?'00':branch===1?'51':'52'`(:275 与 :770)
+      = 三元链兜底到 OP_2, 结构上没有 OP_3 这条出路; 且 handler 对 branch∉{1,2} 直接 throw
+```
+🔵 **而 relay 构造的形状与它【自称】的那个 entrypoint 逐条吻合**：
+`branch 1` 走 `unlockP2SHDual` 建 2 in / 2 out ↔ `refund_both` 的 `require(tx.inputs.length==2)` + `outputs.length==2`；
+`branch 2` 走 `unlockP2SH` 建 1 in / 1 out ↔ `refund_maker_unjoined` 的 `inputs.length==1` + `outputs.length==1`。
+🔨 **⇒ 意图是对的，形状是对的，错的只有编号** —— 编号被当成常量写死，而它其实是**声明序的函数**，
+合约后来在前面加了两个 settle entrypoint，编号整体后移，调用方没跟。
+🔵 **那份陈产物正是这件事的化石**：它记录着这个合约名曾经只有 `settle`/`refund` 两个 entrypoint。
+
+**④ 后果（由 require 推，不由执行推 —— 本次未构造任何交易）**
+```
+branch 1 → settle_consensual: 该 entrypoint 收 (makerSig, takerSig, winner) 三个 witness,
+           而 relay 只放了一个 makerSig  ⇒ 过不去
+branch 2 → refund_both:       require(tx.inputs.length == 2), 而 relay 只建了 1 个输入 ⇒ 过不去
+```
+🔵 **与 §2.5.3 上面那条实测收敛**：`exchange_offers` 164 行、`refund_txid` 非空 = **0**。
+🔴 **而它解掉了那句歧义的一半**：原文说这个 0「同样兼容【路是通的，只是没人用过】」——
+**现在可以说得更强：就算有人用，它也过不去。** 这不需要知道有没有人用过。
+🟡 **仍未证的**：有没有人真试过（试了会留错误日志，未查）⇒ **不声称"因此"造成了那个 0，只说机制在。**
+🔴 **作用域（钉在这句里）**：本条对**用当前 `.sil` 编出来的那些 offer** 成立。
+更早的 offer 若由旧 `.sil` 编出，**其 redeem 字节与 P2SH 地址都不同**（缓存键含 `.sil` 哈希）⇒
+它们的 entrypoint 编号可能另有一套 ⇒ **逐 offer 定版本仍是未验 #2，本节没答它。**
+📌 **处置**：我只报，不改码（`prediction_refund_tx` 非我域 + 钱路走报备流程）。
 
 🔵 **显形状态（实测）**：`exchange_offers` 总行 164 · **`refund_txid` 非空 = 0**（expired 74 / cancelled 66 / timed_out 8 / completed 6 …全部为 0）。阳性对照：有 `escrow_p2sh` 的行 = 16。
 ⇒ **这条退款路一次都没有成功执行过。** 🔴 而"从未显形"同样兼容「路是通的，只是没人用过」—— 两者在这张表上读起来一样。
