@@ -192,7 +192,7 @@
 | `PREDICTION_SETTLE_CONSENSUAL_TX` | 同上 | **同上** | 无 | 🔴 无 |
 | `PREDICTION_REFUND_TX` | p2sh_address · redeem_script_hex · **branch** | 输出不在载荷里（分支由 `branch` 选） | 无 | 🔴 无 |
 | `STAKE_UNLOCK_TX` | p2sh_address · redeem_script_hex · **to_address** · lock_time | 🔴 **收款地址 `to_address` 完全由调用方给** | 无 | 🔴 无 |
-| `SWEEP_PER_BET` | per_bet_address · redeem_hex | 扫回 gateway（`transfer` 效果） | 无 | 🔴 无 |
+| `SWEEP_PER_BET` | per_bet_address · redeem_hex | 扫回 gateway（`transfer` 效果） | 无 | 🔵 **有（8 条里唯一）**：目的地 = `wallet.getAddress()`，relay 自取、**不接受调用方指定**（`relay.mjs:692` 实读，见 §2.4.5）|
 
 （上表 9 行 = `PREDICTION_SETTLE_TX`（D2 唯一列过名的那条）+ **此前缺名的 8 条**。）
 
@@ -352,6 +352,41 @@ T-3  全链路零重放防护 ⇒ 一条抓到的合法请求可无限次重放
 > **传输边界 = 进程内存边界 ⇒ 而【谁能在该进程内执行代码】未被独立枚举 —— 空格，未查。**
 
 🔵 它**在范围内**（若边界是进程内存边界，那么谁能在那个进程里跑码 = 实际的能力边界，也就是"外部程序接入之后能做什么"的下一层），而本轮不查：它多半已被 M-1.2 场景 B（被攻陷 Console worker）覆盖一部分，且逐条枚举属新一轮调查。
+
+### 2.4.5 `SWEEP_PER_BET` 定位 + `POOL_SETTLE_TX` 分支选择（J1 2026-07-31 · 只读源码 · 不与 2.4.1/2.4.3 重复）
+
+**① `SWEEP_PER_BET` —— 它没有 covenant，所以"对应哪个 `.sil`"永远定位不到**
+
+- redeem 由 JS 直接拼，不走 silverscript：`kasia-relay/src/lib/per-bet-p2sh.mjs:37-48` `perBetRedeem`
+  逐字形状 = `PUSH32 <nonce32> ǀ OP_DROP ǀ PUSH32 <gw_xonly_pk32> ǀ OP_CHECKSIG`（68 字节）
+  nonce 入 redeem 后随即 `OP_DROP` ⇒ 使每注 P2SH 唯一；`<gw x-only pk> OP_CHECKSIG` ⇒ **只有 gateway relay 能花**
+- 地址 = `payToScriptHashScript(redeem)`（同文件 :58-59）
+
+🔵 **而由此订正 §2 表里那一格**：本条的「收款与输出约束」**不是 🔴 无，而且它是这 8 条里唯一有硬约束的**——
+`kasia-relay/src/relay.mjs:692` 逐字 `const gwAddr = wallet.getAddress();`
+⇒ **扫回目的地由 relay 自己取，不接受调用方指定**（与其余 7 条 `outputs`/`output` 由调用方给**性质相反**）。
+
+🔴 **而调用方仍然给两样**：`per_bet_address` + `redeem_hex`（`commands.mjs:134` / `:208`）
+⇒ 调用方指定扫哪个地址并提供其赎回脚本，relay 用**自己的**密钥去签
+⇒ 可被指向任意"赎回脚本以 gateway 公钥 `CHECKSIG` 结尾"的 P2SH。
+🟡 而资金去向固定为 relay 自身地址 ⇒ 面是**让 relay 扫它本不该扫的地址**（噪音/关联性），**不是**资产转移给第三方。
+**幂等键**：载荷无；二次调用由 UTXO 双花在共识层挡住（与 UTXO-only 那 6 条同一档）。
+
+🟡 **本条未验**：`unlockP2SH_SingleEntry` 函数体我没读——
+"单 in/out · 无 fee-input · 无 selector" 是 `relay.mjs:687-689` **注释自述**，未逐行核实。
+
+**② `POOL_SETTLE_TX`：分支与版本语义由【调用方载荷】决定**（补 2.4.3——那一节讲的是 `prediction_refund_tx`）
+
+- `kasia-relay/src/relay.mjs:866` 逐字 `settleEntrypoint: cmd.settle_entrypoint || 0`
+  （注释自述：`1 = v08 settle_aggregate (entry1)`；`0 = v05/06/07 / v08 chunk`）
+- 同 handler `:837`：`committee_data` **仅当** `cmd.protocol_version` 为 `'v0.6'`/`'v0.7'` 时才转发
+
+⇒ **走哪条 covenant entrypoint、按哪个版本语义组装，取决于调用方给的字段。**
+🔴 **而"选错分支会不会被 covenant 挡住"未验**——各 entrypoint 有自己的 `require`，
+但那是**推理不是读数**；本节不下这个判断。
+
+🟡 **并存版本**（`p2sh.mjs` 注释实读）：`PoolSpine.sil` / `_v06` / `_v07` / `_v08_chunk` / `PoolSide.sil` / `_v07`
+分别出现在 `:810-811,845,955,1065,1195,1414` ⇒ **同一条命令在不同盘上落到不同合约**。
 
 ---
 
