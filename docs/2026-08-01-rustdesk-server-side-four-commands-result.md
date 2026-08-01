@@ -79,3 +79,31 @@ AMD Radeon(TM) Graphics                Status OK
 ---
 
 **相关**:`docs/2026-08-01-rustdesk-remote-disconnect-diagnosis.md`(J1 客户端侧原始诊断)、`docs/2026-08-01-j1tn-705-xnode-refund-request-list.md`
+
+---
+
+## 08-01 补充:NordVPN Threat Protection 假说 —— 已测,证据为负
+
+**动机**:①②③ 反证后,本机窗口内唯一真实新装的东西是 NordVPN 8.8.3.0(`nordsec-threatprotection-service`,深度包检测类服务),形状对得上症状(握手成功→活几秒→被 RST),遂列为候选。
+
+**尝试的因果测试**:`Stop-Service nordsec-threatprotection-service` —— **失败,权限不足**(本 shell 非管理员,且当轮 UAC 尝试同样卡在"连续 3 次被取消"那个坑里,详见上文)。
+
+**改用日志相关性测试(不需要权限,纯观察)**:
+```
+C:\ProgramData\NordVPN\logs\threat-protection-20260801.log   —— 覆盖 14:02-20:22,期间 RustDesk
+  每 ~20 秒断一次,而该日志在 14:02:54-14:22:17(断连最密集的一段)完全空白;
+  日志本身很啰嗦(连 pipe 池连接数过高都记),若真在拦截该有记录
+C:\ProgramData\NordVPN\logs\service-connection-20260801.log  —— 只有每 5 分钟一次的心跳(WAL开启),
+  与 RustDesk 精确断连时刻(14:30:26/14:30:51/14:36:10/14:36:26/14:36:52/...)逐秒对齐,零命中
+```
+
+**⇒ 两个独立日志源都不支持这个假说,撤。** 不排除 WFP/驱动层的拦截不写应用日志这一细分可能,但没有正面证据,不该再把它当在办候选往下投入。
+
+**当前真实状态:①②③ 已反证,NordVPN Threat Protection 证据为负,④(配置/注册表)仍未确证。**
+所有后续路径(注册表变更时间线比对、力控走中继、停整条 NordVPN 隧道做对照)都卡在同一个点:
+**本机需要一次成功的管理员提权,而它已经连续 3 次被取消**(15:22:08 / 15:24:17 / 15:35:51,报错均为 `The operation was canceled by the user`)。
+
+**下一步建议(排除法收敛,不再投入新猜测)**:
+1. **优先**:找一次不经过这条 RustDesk 会话本身的方式完成一次 UAC 确认(本机物理操作 / Tailscale 直连 / AnyDesk)——这是唯一能解锁后续所有测试的动作。
+2. 提权后立即做**对照实验**而不是查日志:整条停 NordVPN(不止 Threat Protection)5 分钟,观察断连是否停止——直接分岔"网络栈相关"与"服务/桌面相关"两个方向,比继续挖日志更快出结论。
+3. 若 NordVPN 也排除,再考虑注册表时间线扫描(当前无「改前」快照,证据强度天然弱于因果测试)。
