@@ -461,7 +461,14 @@ if (process.send) {
               const isMempoolReject = /already spent.*?in the mempool|already spent by transaction/i.test(bcastErrMsg);
               if (isMempoolReject && bcastAttempts < BCAST_MAX_ATTEMPTS - 1) {
                 // Best-effort outpoint extraction from RPC msg ('output (txid:index) already spent by ...')
-                const m = bcastErrMsg.match(/\(([a-f0-9]{64}):?(\d*)\)/i);
+                // 2026-08-01 J1 (Owner 直批·实测): 节点【实际】吐的是逗号+空格 —— `output (<txid>, 0) already spent by ...`
+                //   而原正则只认 `(<txid>)` / `(<txid>:0)` ⇒ 对真实报错串 match === null ⇒ markUtxoSpentByOutpoint
+                //   从部署起【一次都没被调用过】。失败方式是静默的: 不匹配不报错, 日志照打 "mempool reject, sleep..retry",
+                //   看起来在处理, 实则 4 次重试把【同一个】UTXO 又挑了 4 遍 (选币挑最大, 而最大那个正是被占的那个)。
+                //   实证: J1tn 3447 个 UTXO, 广播连续失败, 逐字报错 output (a9850a3d.., 0) already spent by 8ce100a1..
+                //   同族前科见 transaction.mjs L53-58 (entry.outpoint 嵌套读不到 → key 恒 ':0' → shadow-tracking 死代码)。
+                //   ⇒ 判据: 这类"从报错串里抽字段"的补救, 必须用【真实报错串】测过才算实现, 不能照着注释里的格式写。
+                const m = bcastErrMsg.match(/\(([a-f0-9]{64})[,:]?\s*(\d*)\)/i);
                 if (m) {
                   const { markUtxoSpentByOutpoint } = await import('./lib/transaction.mjs');
                   markUtxoSpentByOutpoint(m[1], m[2] ? Number(m[2]) : 0);

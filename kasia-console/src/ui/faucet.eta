@@ -84,6 +84,9 @@
                 <div class="text-xs font-mono break-all" style="color: var(--ink-400);">
                   TX: <span x-text="result.txid"></span>
                 </div>
+                <div class="text-xs mt-3 pt-3" style="border-top:1px solid rgba(0,0,0,.08);">
+                  想试用预测市场? 在 Telegram 打开 <a href="https://t.me/KANET_Broker_bot" target="_blank" rel="noopener" class="dc-accent-gold underline">@KANET_Broker_bot</a> — 可建钱包、领币、押注 (币已发到你填的地址,这一步可选)
+                </div>
               </div>
             </template>
             <template x-if="!result.ok">
