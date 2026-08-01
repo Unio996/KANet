@@ -1,16 +1,41 @@
 # 2026-08-01 · RustDesk 连上即掉（~19 秒）诊断 —— 客户端侧读数 + 定案命令
 
-> **Status: CURRENT（EVIDENCE + 判断分层标注，非已批准结论）。**
-> 出自 J1（客户端那台，`laptop-s6i31sri`）。对端 = `desktop-da9qq46`。
-> **交付走 git 而不是频道**：J1 的 kaspad 自 2026-08-01 08:19Z 卡死，广播发不出去
-> （详见文末「为什么这份走 git」）。**Bettor / KANet-UI：`git pull` 即可读，不依赖任何一台的 console。**
+> **Status: RESOLVED（2026-08-01 · 已根治，实测 + Owner 确认"一直稳定，再也没死"）。**
+> 最终结论见 **§0.1**。下方 §0–§7 是排查全过程，**保留作证据链** —— 其中"远端问题、服务端主动断"成立，
+> 但中途假设（数据面 MTU / VPN / 硬件编码）已被 §0.1 的对照实验取代，别再引用为根因。
+> 出自 J1（客户端 `laptop-s6i31sri`），对端 = `desktop-da9qq46`。**Bettor：`git pull` 即可读。**
 
 ---
 
-## 0. 一句话结论
+## 0.1 最终结论（根因 + 解法 · 已验证）
+
+**根因链**：ISP 级 **CGNAT**（路由器 WAN=`100.76.22.56` ∈ 100.64.0.0/10 共享地址；"公网"`27.130.17.100` 是运营商共享出口）
+→ **对称 NAT**（RustDesk 日志逐字 `Tested nat type: ASYMMETRIC`）
+→ RustDesk 默认走 P2P 打洞，**控制包通但视频数据面传不通** → 服务端 ~30–49 秒 `deadline`/`Timeout` 主动断，客户端收 `os error 10054`(RST)。
+
+**对照实验（定案，同一被控端、同一时段）**：
+```
+VP9 + 中继(create_relay, 法国 ovh-fr2)  → 稳 >4 分钟 ✅
+VP9 + 直连(Punch tcp hole)              → 49s Timeout 死 ❌
+Tailscale IP 直连(AV1 硬件编码)          → 稳 >60s, Owner 确认持续稳定 ✅
+⇒ 唯一变量是【传输路径】, 不是采集/编码。硬件编码 NVENC/AV1 在中继/Tailscale 上都稳。
+```
+
+**排除项（都实测过、都不是根因）**：显示器熄屏 · RustDesk 自更新 · 服务降权 · 显卡驱动 · 硬件编码 · NordVPN · MTU。
+
+**解法（根治）**：**RustDesk 走 Tailscale IP `100.99.147.101` 直连**（不用公网 ID）。
+Tailscale 用 UDP 41641 穿透 CGNAT 实现 P2P 直连（`active; direct`），加密 + 比公共中继快。客户端需入同 tailnet（`fossamagnadl@`）。
+🔴 **路由器改不了**：CGNAT 在 ISP 层，UPnP 端口映射做了但外部仍进不来（实测 J1→`27.130.17.100:21118`=False）。真公网直连只能找 ISP 要独立公网 IP。
+
+**运维入口**：`ssh admin@100.99.147.101`（走 Tailscale）。服务端 `direct-server='Y'` 保留（Tailscale 直连需监听 21118）。永久密码临时设为 `Kanet0801Test`。
+**Owner 面向的大白话操作指南**：已做成私有 Artifact（Tailscale + RustDesk IP 直连三步）。
+
+---
+
+## 0. 排查起点：一句话（中途结论，保留作证据链）
 
 **远端问题，不是客户端、不是网络。** 而且 **08-01 13:56 那次重启已经做过了，症状一秒没变** ——
-「剩下只有重启机器」这条路已经走完，别再往那儿投。
+「剩下只有重启机器」这条路已经走完。（⚠ 此节及以下是排查过程，根因以 §0.1 为准。）
 
 ---
 
