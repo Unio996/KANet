@@ -95,6 +95,14 @@ if (localBetCount > 0) {
 **锚不是"registered relay"(v1 提议,已证不成立),是"consumer 本地已经有的 maker pk"**:consumer 广播 `pool_refund_request_v1` 时,它自己的 `market.maker_relay_id` 字段里存的就是 `'cross-node:<pk>'`(建市场/ingest 市场时写入的,不是消息喂给它的)。⇒ producer 用**这个市场的 maker relay 私钥**签 `rejected_v1` payload,consumer 收到后**验签对自己本地已有的那个 pk**——checker 在决策那一刻读的是本地 binding 值,不是消息自带值,verify-value-source 合格,复用 `handlePoolOracleVote`(trade-protocol-filter.js:240-259)已验证过的 `kaspa.verifyMessage` 签名格式。
 
 ```js
+import { blake2b } from '@noble/hashes/blake2b';
+// 签名对象对齐既有先例(coord-status-sign.mjs,D-010,已带伪造负测试跑通产线):
+// 签 blake2b(JSON) 的 hex,不签裸字符串 —— pool_oracle_vote 签裸串是更早的模式,
+// Bettor 08-02T20:29 终裁本次走 D-010 这条(更新、经过对抗测试)。
+function hashPayloadHex(payloadObj) {
+  return Buffer.from(blake2b(Buffer.from(JSON.stringify(payloadObj), 'utf8'), { dkLen: 32 })).toString('hex');
+}
+
 async function maybeSendRefundRejected(market, betCount) {
   let meta = {};
   try { meta = JSON.parse(market.metadata || '{}'); } catch {}
@@ -103,8 +111,11 @@ async function maybeSendRefundRejected(market, betCount) {
   if (Date.now() - lastRejectSentAt <= THROTTLE_MS) return;
 
   const payload = { t: 'pool_refund_request_rejected_v1', market_id: market.id, reason: 'local_bet_count_nonzero', bet_count: betCount, rejected_at: new Date().toISOString() };
+  const contentHashHex = hashPayloadHex(payload);
   // 用 market.maker_relay_id(此刻已确认是本地真实 relay,见 handleRefunding L2577-2580)签名。
-  const signResult = await sendCommandAsync(market.maker_relay_id, { type: 'sign_message', message: JSON.stringify(payload) }, undefined, 'internal');
+  // IPC 名是 ecdsa_sign(kasia-relay/src/relay.mjs:638-652,J1 08-02T20:29 核实——遗留误命名,
+  // 底层实为 kaspa-wasm signMessage/schnorr,产线已用于 coord-status 签名门)。
+  const signResult = await sendCommandAsync(market.maker_relay_id, { type: 'ecdsa_sign', message: contentHashHex }, undefined, 'internal');
   if (!signResult?.ok || !signResult.signature) {
     console.warn(`[pool-settler:refunding] rejected_v1 sign fail market=${market.id.slice(0,12)}: ${signResult?.error}`);
     return;
@@ -130,10 +141,11 @@ async function handlePoolRefundRequestRejected(msg) {
   const makerPk = String(market.maker_relay_id || '').replace(/^cross-node:/, ''); // 本地已有,不信消息
   if (!makerPk) return; // 不是 cross-node 市场,这条消息跟我无关
   const unsigned = { ...msg }; delete unsigned.signature;
+  const contentHashHex = hashPayloadHex(unsigned); // 与签名侧同一套哈希规范化(见上 maybeSendRefundRejected)
   let sigValid = false;
   try {
     const kaspa = await import('kaspa-wasm');
-    sigValid = kaspa.verifyMessage({ message: JSON.stringify(unsigned), signature: msg.signature, publicKey: makerPk });
+    sigValid = kaspa.verifyMessage({ message: contentHashHex, signature: msg.signature, publicKey: makerPk });
   } catch (e) { console.warn(`[trade-filter:pool-refund-rejected] verify exception: ${e.message}`); return; }
   if (!sigValid) { console.warn(`[trade-filter:pool-refund-rejected] sig invalid market=${msg.market_id.slice(0,12)} — 可能是伪造拒绝,忽略`); return; }
   localMeta.refund_request_rejected_at = new Date().toISOString();
@@ -145,7 +157,7 @@ async function handlePoolRefundRequestRejected(msg) {
 
 **consumer 侧重试逻辑(`pool-market-settler.js:593-596` `needsBroadcast`)需要加一条**:`&& !meta0.refund_request_rejected_at`(不属于本设计的 handleRefunding 改动范围,但属于 r402 同一张卡——Bettor `#c8satt`③ 已裁定"consumer 侧改动归 r402 同卡,不另开 DRI")。
 
-**具体签名机制细节(用 `sign_message` IPC 类型是否存在、字段名是否准确)未逐行核实 relay 侧 IPC handler**——这部分需要 NWT 或熟悉 relay IPC 的人核一遍 `kasia-relay` 那侧有没有现成的通用签名命令可以直接调用,不要求新造签名逻辑。
+**签名 IPC 假设已核实存在(v2 首版此处标"未核",现已解开,三路核实——J2 问/J1 逐行读码/Bettor 复核,ledger (120) 已记)**:`ecdsa_sign`(`kasia-relay/src/relay.mjs:638-652`,配 `get_pubkey`:654)——签任意 payload,privkey 不 leak,是 D-010 coord-status 签名门同款原语(已带伪造负测试跑通产线)。**两点落码注意(Bettor 原话)**:(a) 签名对象对齐先例——签 `blake2b(payload)` 的 hex,别签裸串(上面代码已按此写);(b) `ecdsa_sign` 属盲签类 IPC(key-auth 分类,`reference-relay-command-classification-abc-2026-07-22`),**这个新调用方(rejected_v1)需要 NWT 复审时顺手进关分类表**——不是新增能力,是给已有能力多加一个已知调用者。
 
 **wire format 顾虑已解除**:v1 曾担心新增协议消息类型 `pool_refund_request_rejected_v1` 会不会破坏既有 wire format 约定。NWT finding⑥核实:`trade-protocol-filter.js` 的主 switch 加新 `t` 值是这个文件内**已有 13 次的既有模式**(见 `case` 列表 L84-106 附近逐条),不是破格新造,Bettor 终裁④已确认"wire 顾虑不构成选 B 弃 A 的理由"。
 
