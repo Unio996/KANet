@@ -4546,3 +4546,12 @@ pool-market-settler.js:2427-2459  dispatchRefund 本体    — 只查 isBshard, 
 **③ Owner 拍(2026-08-03 终端:"同意你的建议")**: 采纳 Bettor 执行方案——对抗轮收敛→D-012 落 DECISIONS.md((115) 补状态头:叙事 superseded、实核事实带作用域存活,不删)→Oracle Skill 设计先行(第一步只冻结接口与权限边界,三权分立烤进接口)→Broker 线既知欠账(/link file-only、onboarding 身份反转)并入主线排。D-012 文本出来后仍升 Owner 终裁。
 **④ 对抗轮 #c9pzp8 已开**(四镜头互不重叠,禁复述前提): J2=批注A Prediction 半边+三权分立在现有代码可切性 / J1=oracle 域今天违反"不碰钱"边界的点位清单 / KANet-UI="外人今天来当 Broker 卡死在哪一步"gap 排序 / NWT(r402 diff 复核完再进)=打框架本身找错分类反例+打两条批注。
 **⑤ r402 落码完成**(`911aa320`,三文件+regression case;lint 0 error;predictions domain 全量回归绿;J2 如实报 rejected_v1 广播路径无自动化覆盖=diff 复核重点;自查 R-SHARD-BLIND 警告不适用因 isBshard 已在 dispatchRefund fail-loud 拒绝)。待 NWT diff 复核→KANet-UI 按 (120) 预授权窗单部署。**r402 优先级 > 对抗轮。**
+
+---
+### (122) 2026-08-02 20:4x-20:5xZ — ✅ r402 部署完成(本机 producer,五检全过)· NWT diff 复核 GREEN 无 MUST-FIX
+- **NWT diff 复核 GREEN**(`d23539d0`,20:46): 全部自验零采信自查;落码比设计稿多出的细节(验签前删 `_tx/_from/_channel/_at` 四传输层注入字段)追传输层坐实为**必要**(漏删=合法签名 100% 假失败);全链留痕 `a52c70cd→778e71e9→91d24f93→d46400cc→d23539d0`,无一步顺着走。
+- **部署窗执行(KANet-UI,20:52-20:56,~4 分钟)**: 前置 a/b/c 全部**独立复核**非照抄(自跑 lint+regression case,trace `logs/test-runs/2026-08-02T20-49-24_*`);in-flight 双检(状态型: 过渡态 170 个、30 分钟零更新=停着的存量;定时器型: poolSettlerTick 实测 314ms 非长驻)。停机时验 port 实释放+PID 实消失(不信脚本退出码,08-01 "kanet-stop.sh 报完成没停"的坑不重蹈)。
+- **五检读数**: ①新 PID 12832 非旧进程复活 ②频道 API 活 ③装载代码==预期 `d23539d0`,r402 代码逐行核实在磁盘 ④migrate v9→v192 干净收尾零报错 ⑤settler tick 正常(verifying 111/refund 5/errored 0)+新模块 pool-refund-reject-sign.mjs import 测试过+broadcast 11 行无异常放量。console-supervisor 已重拉。
+- **窗内实证一条**: 停机前 tick 里**旧代码路径仍在实触发 0-bet refund dispatch**(ext-pool-v07,仅因 UTXO 不足失败)——本次部署是在追活缺陷,非预防。
+- **诚实边界**: rejected_v1 路径(自动化盲区)窗内未验,按裁定留待真实冲突流量或 J1 侧跨节点只读观察;M-1.1 矩阵加 ecdsa_sign 新调用点归 J2 下次碰该文档。
+- **下一步**: J1 台式机同序列部署(已通知,错开重启纪律);完成后 r402 主线闭环,剩余挂账=发送者绑定开放项((119))+rejected_v1 实弹验证。
