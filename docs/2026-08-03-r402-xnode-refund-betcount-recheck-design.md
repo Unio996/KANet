@@ -1,89 +1,165 @@
-# r402 修复设计 — producer 侧 dispatchRefund 前重查本地 betCount
+# r402 修复设计 v2 — betCount 复核挪到实际广播前(NWT PUSH-BACK 后改稿)
 
-**Status: DESIGN — 待 NWT 红队,未落码。** 归 J2(settler/pipeline 域),Bettor 08-02T20:09 派工(#c8hcgy.3),范围口径:缺陷修复例外(不占「只做模块化+外部接入」范围直令),D-011 内部双审走完即可上线,不等 Owner 逐项点头。
+**Status: DESIGN v2 — 待 NWT 复审,未落码。** 归 J2(settler/pipeline 域)。v1(commit `7bee5352`)被 NWT 红队 PUSH-BACK(commit `a52c70cd`,finding① MUST-FIX:检查点插错阶段)。本版按 NWT finding① + Bettor 终裁(`#c8zcyv`,五条,合并了 `#c8x950` 方向裁定 + NWT PUSH-BACK)改。`json_set` 原子写已现取验证可用(better-sqlite3 + json1,`SELECT json_set('{}','$.a',1)` 本机实测通过)。
 
-## 0. 缺陷回顾(已在 COORD-LEDGER (116) + 频道坐实,本次只重核代码未变)
+## 变更摘要(相对 v1)
 
-- **触发点**(`pool-market-settler.js:580-629`,cross-node maker 分支):某节点持有一个 maker 在别处的市场(`maker_relay_id = 'cross-node:<pk>'` sentinel),它用**自己本地** `pool_bettor_sides` 的 betCount 判断"是不是 0-bet";betCount==0 就广播 `pool_refund_request_v1`。
-- **已证的失败模式**(J1 08-01 报告):某节点整张 `pool_bettor_sides` 为 **0 行**(不是"这些市场 0 行",是**整张表**空)⇒ 该判据在这节点上**结构上恒真**,与市场是否真的 0-bet 无关。已发出 **705 条**这样的请求(`docs/2026-08-01-j1tn-705-xnode-refund-request-list.md`)。
-- **producer 侧零复核**(逐字读,本次重新核对未变):
-  - `trade-protocol-filter.js:133-181` `handlePoolRefundRequest` 只查四件:市场在不在本地 / 自己是不是也是 cross-node consumer(是则 drop)/ 幂等(`refund_dispatched_at` 已设则 skip)/ `msg.maker_pk` 与本地 `market.maker_relay_id` 派生出的 pubkey 是否一致。
-  - 最后一项是**身份/授权检查**("这个请求者有没有资格代表这个 market 的 maker"),**不是前提检查**("0-bet 这件事是真的吗")。四项全过后直接 `dispatchRefund(market, {...})`。
-  - `dispatchRefund` 本体(`pool-market-settler.js:2427-2464`)只检查 `isBshard`(是则拒),不查 betCount。
-- ⇒ **从请求方一句可能恒真的断言,到链上真实广播退款 tx,中间没有一跳会问"这个市场真的没人下注吗"。**
-- **现状止血**:Bettor 08-01T08:14Z 拍 ②'(COORD-LEDGER (116) / 频道 `#a3i1b0`),J1 停掉本机全部 11 个 relay 阻断继续广播。**判据本身一字未改**,止血闸靠"没人碰它"撑着,直到本次修复落地验证前不撤。
+| # | v1 | v2 | 谁指出的 |
+|---|---|---|---|
+| 1 | §0 把 maker_pk 检查叫"身份/授权检查" | 改为"内容比对,零发送者绑定";request 侧合法发送者集合天然无界,不设门,归为已知残余 | Bettor 08-02T20:17 实读代码 |
+| 2 | 检查点插在 `handlePoolRefundRequest`(dispatchRefund 调用前) | **挪到 `handleRefunding`,`sendCommandAsync` 广播前**——dispatchRefund 只暂存不广播,真正签名广播隔着一整个 settler tick(默认 300s) | NWT finding①,MUST-FIX |
+| 3 | 只堵 cross-node 一条路径 | **同一处顺带堵住 566/1362/1706 三处同节点路径的同款缺口**(它们也走 handleRefunding,之前也是零复核) | NWT finding①,"免费的" |
+| 4 | 冲突分支候选 A/B 二选一未定 | **A+B 一起上**,rejected_v1 锚从"registered relay"改成"consumer 本地已有的 maker pk" | Bettor `#c8satt`/`#c8x950` |
+| 5 | 审计字段 read-modify-write 无节流 | 与节流合并处理,同一改动一次做完 | Bettor 第5点 + NWT finding③,同一段代码 |
 
-## 1. 可信 betCount 来源在哪一层(设计的核心问题,已读代码确认)
+## 0. 缺陷回顾(v2 修正表述)
 
-`pool_bettor_sides` 有两条写入路径:
+- **触发点**(`pool-market-settler.js:580-629`,cross-node maker 分支):某节点持有一个 maker 在别处的市场,用**自己本地** `pool_bettor_sides` 的 betCount 判"是不是 0-bet";betCount==0 就广播 `pool_refund_request_v1`。
+- **已证的失败模式**(J1 08-01 报告):某节点整张 `pool_bettor_sides` 为 0 行 ⇒ 判据在该节点结构上恒真。已发出 705 条(`docs/2026-08-01-j1tn-705-xnode-refund-request-list.md`)。
+- **producer 侧 `handlePoolRefundRequest`(trade-protocol-filter.js:133-181)四项检查,最后一项 `msg.maker_pk` 校验的真实性质(v1 表述错误,现更正)**:
+  - 它是 **`msg.maker_pk`(消息自带字段)与本地 relay 派生 pk 的内容比对,零发送者身份绑定**——不是"这条消息真的来自谁"的密码学证明。
+  - **market 的 maker_pk 本身是公开可派生的信息**(任何观察过 market_publish 的节点都能算出来)⇒ **任何第三方都能构造一条四检全过的 `pool_refund_request_v1`**,不需要拿到任何私钥。
+  - r402(本设计)落地后,这条伪造请求会被**producer 侧前提复核**挡住(如果市场真有 bet);但对**真 0-bet 的跨节点市场**,"谁都能触发一次真实的退款广播"这件事本身仍然成立——钱回 maker 自己地址不是盗币,但违反 Owner「只 settle 绝不 refund」的自动化路径纪律,且是一个无认证的钱路广播触发器(可用于择时 griefing:强迫在非期望时刻发生退款)。
+  - **Bettor 08-02T20:21 方向裁定(`#c8x950`①②,非建议)**:`pool_refund_request_v1` 的合法发送者集合**天然无界**(任何 ingest 了该市场的节点都可能是合法 consumer),producer 侧没有任何记录能枚举"谁有资格请求"——尝试用 `relay_nodes` 表当跨节点身份注册表是**类目错误**(该表只是单机本地 relay 托管表,实测 32 行全部本机,J1 的 relay 在这张表里是 0 行,不是"没登记"而是"这张表结构上不可能有别的机器的行")。**⇒ request 侧本轮不设发送者绑定门,当作 untrusted hint 处理,真正的防线是 producer 侧前提复核本身(见 §2)。"任何人可触发真 0-bet 市场的退款广播"作为已知残余显式登记,天花板 = producer 自核前提。**
+- `dispatchRefund` 本体(`pool-market-settler.js:2427-2464`)只检查 `isBshard`,不查 betCount,**且不签名不广播**——它只是把 `refund_tx_obj` preimage 存进 `metadata`,把 `protocol_status` 改成 `'refunding'`,函数就返回了。
+- **真正的签名+广播在 `handleRefunding`(`pool-market-settler.js:2552-2617`)的 `sendCommandAsync`(L2594)**,而 `handleRefunding` 是被**下一次 settler tick** 重新 `SELECT protocol_status='refunding'` 的市场后才调用的(`TICK_INTERVAL_MS` 默认 300s,demo 环境 60s)。**v1 把检查点插在 `handlePoolRefundRequest`,和真正广播之间隔着一整个 tick —— 这段时间内落地的 bet 完全不会被挡,因为 `handleRefunding` 从头到尾零 betCount 检查。**(NWT finding①,MUST-FIX)
+- **现状止血**:Bettor 08-01T08:14Z 拍的 ②'(停 J1 全部 relay)已于 08-02T20:19 **被 Owner 撤销**——J1 核实"机器健康≠钱路缺陷是两件事"后,Owner 选择"用 r402 从根修,不拿停 relay 当止血"。当前唯一的偶然拦截是 J1 relay 每日广播额度耗尽(成功广播=0),Bettor 已要求 J1 在 r402 落地前不主动解除这个偶然(不充值、不重启栈)。**r402 现为最高优先级。**
+
+## 1. 可信 betCount 来源在哪一层(未变,v1 已过 Bettor 方向审 GREEN)
+
+`pool_bettor_sides` 两条写入路径:
 
 | 路径 | 位置 | 可信度 |
 |---|---|---|
 | a) 本地 bettor 直接下注 | `kasia-console/src/api/pool.js` INSERT | 本节点亲自处理,即时、不依赖广播 |
-| b) 跨节点 bettor 下注,靠广播 ingest | `trade-protocol-filter.js:1284` `INSERT OR IGNORE`(UNIQUE `side_lock_tx` 去重) | 依赖对方广播送达 + 本节点在线 ingest,**可能 lag 或整体丢失**(J1 案例) |
+| b) 跨节点 bettor 下注,靠广播 ingest | `trade-protocol-filter.js:1284` `INSERT OR IGNORE`(UNIQUE `side_lock_tx`) | 依赖 ingest,可能 lag/丢(J1 案例) |
 
-同一张表、同一条查询语句在**同节点**场景下已有三处先例,判据完全一致:
-```
-pool-market-settler.js:566   (同节点 v0.6/v0.7 0-bet pre-sample shortcut)
-pool-market-settler.js:1362  (另一处 0-bet 判定)
-pool-market-settler.js:1706  ('0-bet market (sides=0)' 直接 dispatchRefund)
-```
-这三处从未被质疑过(它们是**本节点自己的市场**,本节点若是唯一权威 producer,自己的表就是权威)。
+同表同查询在**同节点**场景已有三处先例(`566`/`1362`/`1706`),producer 自己的本地副本严格强于"完全不查"和"信请求方的本地副本"(后者已被证明可以整表为空)。残余风险(链上正向枚举式根治,当前架构下负向存在性证明的结构性难题)v1 已披露,v2 不变,详见 v1 归档段落(本文件 git 历史 `7bee5352`)。
 
-**cross-node 场景的区别**:请求方(consumer 节点)查的是**自己**的 `pool_bettor_sides`,而它对这个市场既不是 maker 也未必是任何一个 bettor 的落地节点 —— 它的本地副本完全靠广播 ingest 撑起,天然是最脆弱的一环(J1 整表 0 行就是铁证)。而 **producer 节点**(真正的 `maker_relay_id` 所在机器)对同一个市场,至少捕获**路径 a)**(如果有本地 bettor 直接在它上面下的注 100% 不丢),**路径 b)** 仍然依赖 ingest 但产品自己作为市场的"主场"通常 ingest 更完整(不是保证,是概率上更好)。
+NWT finding②(PASS,已核):ghost-row 假阳性顾虑不成立——`UNIQUE(market_id, bettor_pk)` v62 + 广播 ingest 必须先命中链上未花费 UTXO(`captureSideLockDaa`)才 `INSERT`,伪造/脏行插不进去;即便有假阳性,失败模式是"拒绝+审计"(fail-safe),不是 fail-dangerous。不需要额外处理。
 
-**⇒ 结论:producer 自己的本地 `pool_bettor_sides` betCount,不是绝对真相,但严格强于"完全不查"和"信请求方的本地副本"(请求方那一侧已经被证明可以整表为空)。** 复用同一条已在三处验证过的查询语句,不新造判据。
+## 2. 提议改动 v2(检查点挪到 `handleRefunding`,广播前)
 
-### 残余风险(必须显式披露,本次不解决)
-
-即使 producer 也可能有 ingest lag/丢失,产生同样形状的假 0-bet。彻底堵死需要**链上正向枚举**(扫描该市场所有可能的 bettor `side_p2sh` 地址,证明链上确实没有对应的锁仓 UTXO),但当前架构下每个 bettor 的 `side_p2sh` 由其自己的 pubkey 派生 —— producer 在收到对应的广播之前根本不知道要去查哪个地址,这是负向存在性证明的结构性难题,不是本次范围能解决的。**本次修复缩小暴露窗(从"零复核"到"至少一层独立复核"),不宣称彻底消除。**
-
-## 2. 提议改动(未落码,等 NWT 红队 PASS 才动手)
-
-在 `handlePoolRefundRequest`(`trade-protocol-filter.js`),`maker_pk` 验证通过之后、调用 `dispatchRefund` 之前,插入 producer 本地 betCount 复核:
+在 `handleRefunding`(`pool-market-settler.js:2552-2617`),确认 `maker_relay_id` 是本地真实 relay(既有检查,L2577-2580)之后、`sendCommandAsync` 广播(L2594)之前,插入:
 
 ```js
-// Producer auth verified — 但授权 ≠ 前提。r402: 再核一次本地 betCount,
-// 不能只信请求方的 0-bet 断言(它的本地副本可能整表为空,见 J1 08-01 案例)。
+// r402 v2 (NWT finding① MUST-FIX): betCount 复核挪到这里 —— 这是签名广播前的最后一刻,
+// 之前插在 handlePoolRefundRequest 的版本和这里之间隔一整个 settler tick,完全没用。
+// 同一处顺带堵住 566/1362/1706 三处同节点 0-bet 路径的同款缺口(它们也走这个函数)。
 const localBetCount = sqlite.prepare(
   'SELECT COUNT(*) as c FROM pool_bettor_sides WHERE market_id = ?'
 ).get(market.id)?.c || 0;
+
 if (localBetCount > 0) {
-  console.error(`[trade-filter:pool-refund-req] REFUSED market=${market.id.slice(0,12)} — producer local betCount=${localBetCount} > 0, 与请求方 0-bet 断言矛盾, 不 dispatch, 需人工核`);
-  // 写审计标记,不静默丢弃 —— 两节点读数不一致本身是信号(可能是更大范围的 ingest 问题)
+  console.error(`[pool-settler:refunding] REFUSED market=${market.id.slice(0,12)} — local betCount=${localBetCount} > 0 at broadcast-time, 0-bet 前提不再成立, 不发 refund tx`);
+
+  // 节流 + 原子写(Bettor 第5点 + NWT finding③ 合并一次改):json_set 直接在 SQL 层原子更新,
+  // 不用 JS 端 parse-modify-write(会跟同一 market 上其他并发 tick 对 metadata 的写产生竞态,
+  // 后写覆盖前写、字段丢失——CLAUDE.md 记录的 read-modify-write 竞态同款)。
+  // 节流条件放进 WHERE:只有上次冲突记录超过 5 分钟(或从未记录过)才真的执行这次 UPDATE,
+  // 避免每个 tick(demo 60s)都刷一次 metadata + error log。
+  const THROTTLE_SEC = 300; // 跟 tick 间隔同量级
+  const result = sqlite.prepare(`
+    UPDATE pool_markets
+    SET metadata = json_set(
+          json_remove(COALESCE(metadata, '{}'), '$.refund_tx_obj', '$.refund_dispatched_at'),
+          '$.refund_conflict_at', ?,
+          '$.refund_conflict_bet_count', ?
+        ),
+        protocol_status = 'verifying',
+        updated_at = CURRENT_TIMESTAMP
+    WHERE id = ?
+      AND (
+        json_extract(metadata, '$.refund_conflict_at') IS NULL
+        OR (julianday('now') - julianday(json_extract(metadata, '$.refund_conflict_at'))) * 86400 > ?
+      )
+  `).run(new Date().toISOString(), localBetCount, market.id, THROTTLE_SEC);
+
+  // 若这次 refund 是被 cross-node 请求触发的(reason 里带这个标记),需要告知 consumer 停止重试。
+  // 见 §2.1 —— 单独节流(避免每次 tick 都重发 rejected_v1)。
   let meta = {};
-  try { meta = JSON.parse(market.metadata || '{}'); } catch {}
-  meta.refund_request_conflict_at = new Date().toISOString();
-  meta.refund_request_conflict_local_bet_count = localBetCount;
-  sqlite.prepare('UPDATE pool_markets SET metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
-    .run(JSON.stringify(meta), market.id);
-  return;
+  try { meta = JSON.parse(sqlite.prepare('SELECT metadata FROM pool_markets WHERE id = ?').get(market.id)?.metadata || '{}'); } catch {}
+  if (String(meta.refund_reason || '').includes('cross-node consumer refund request')) {
+    await maybeSendRefundRejected(market, localBetCount); // §2.1,内部自带节流
+  }
+  return { ok: false, reason: `local betCount=${localBetCount} at broadcast time, aborted (throttled=${result.changes === 0})` };
 }
-// Producer auth verified + local betCount==0 — dispatchRefund using real local maker_relay_id.
 ```
 
-**冲突时不静默丢弃**:写 `metadata.refund_request_conflict_at` + 读数快照,留痕供人工/下一轮排查。不写审计行等于把这个矛盾信号吞掉,而这个矛盾本身可能指向别的问题(比如 ingest 管道更大范围坏掉)。
+**为什么放弃"回 refunding 状态、只是不发"而选择"退回 verifying"**:market 现在有真实下注了,它不再是一个应该被退款的市场——它应该进正常的 committee 采样/投票/结算路径。留在 `'refunding'` 状态只会让它在每个 tick 反复撞到这条检查、反复不发,是一种新的卡死(和 CLAUDE.md 记录的 xzztw 手改 metadata 那次死循环是同一个形状:状态和现实脱节,靠反复重试硬扛)。退回 `verifying` 才是让状态机诚实反映现实。
 
-### 2.1 请求方反馈回路(NWT 08-02T20:11 ③ 指出的缺口,本版补上)
+**关于 `handlePoolRefundRequest`(consumer 请求刚到达时)那次早期检查**:Bettor 终裁①明确"可以留作早期拒绝快路"——不是必须删除,只是**不能再是唯一的闸**。早期检查能在大多数情况下更快地拒绝掉一个有真实 betCount 的市场(不用等到下一次 settler tick),但**权威的、唯一保证时序正确的闸是本节这个、插在 `handleRefunding` 广播前的检查**。两处逻辑相同(同一条 SQL 查询模式),早期那次不需要节流/状态回退这套(它在 `dispatchRefund` 都还没调用之前就 return,不涉及已经写入的 `'refunding'` 状态)。
 
-发起方(consumer 节点)广播 `pool_refund_request_v1` 后,若 1 小时内没等到"已 dispatch"的信号(即 `refund_dispatched_at` 一直不变),会按 `REQUEST_REBROADCAST_MS`(`pool-market-settler.js:594`)**每小时重试一次**。若 producer 只是本地静默标记冲突、不回任何东西,发起方会**永远重试、永远撞同一个假阳性**,每次都是一笔真实广播(烧手续费,且持续占用带宽/日额度——就是这次 705 条积压的同一种烧钱形状)。
+### 2.1 rejected_v1 回执(方向锚已由 Bettor 08-02T20:21③ 敲定,细节归本节)
 
-⇒ 冲突分支必须给出**某种回执信号**,而不是只在 producer 本地留痕。两个候选,列出但不替 NWT/Bettor 选:
+**锚不是"registered relay"(v1 提议,已证不成立),是"consumer 本地已经有的 maker pk"**:consumer 广播 `pool_refund_request_v1` 时,它自己的 `market.maker_relay_id` 字段里存的就是 `'cross-node:<pk>'`(建市场/ingest 市场时写入的,不是消息喂给它的)。⇒ producer 用**这个市场的 maker relay 私钥**签 `rejected_v1` payload,consumer 收到后**验签对自己本地已有的那个 pk**——checker 在决策那一刻读的是本地 binding 值,不是消息自带值,verify-value-source 合格,复用 `handlePoolOracleVote`(trade-protocol-filter.js:240-259)已验证过的 `kaspa.verifyMessage` 签名格式。
 
-- **候选 A(消息回执)**:producer 广播一条新协议消息 `pool_refund_request_rejected_v1 { market_id, reason: 'local_bet_count_nonzero', bet_count }`,发起方的 handler 收到后清空/冻结自己的 0-bet 重试状态(至少标记"已被 producer 明确否决,不再自动重试,需人工核")。代价:新协议消息类型,consumer 侧需要新 handler,改动面变大。
-- **候选 B(被动限速,不新增协议)**:发起方那侧的重试判据本身要补(不在本次改动范围内,需要 consumer 侧配合,可能是另一条 DRI)—— 比如重试次数上限 + 达到上限后转人工。代价:不解决"1 小时内还会再撞一次"的窗口,只限制长期烧钱,治标不治本。
+```js
+async function maybeSendRefundRejected(market, betCount) {
+  let meta = {};
+  try { meta = JSON.parse(market.metadata || '{}'); } catch {}
+  const lastRejectSentAt = meta.refund_rejected_sent_at ? new Date(meta.refund_rejected_sent_at).getTime() : 0;
+  const THROTTLE_MS = 60 * 60 * 1000; // 跟 consumer 的 REQUEST_REBROADCAST_MS 同量级,够它下次重试前收到
+  if (Date.now() - lastRejectSentAt <= THROTTLE_MS) return;
 
-**本设计倾向候选 A**(闭环、对称,消费方停止重试不需要靠超时/次数上限去猜),但协议消息新增涉及 wire format(记忆:`reference-comm-wire-format-requires-alias-segment`——载荷格式有既定约定,不能随手加字段),这部分需要 NWT/Bettor 一起定,不是 J2 单方面拍。
+  const payload = { t: 'pool_refund_request_rejected_v1', market_id: market.id, reason: 'local_bet_count_nonzero', bet_count: betCount, rejected_at: new Date().toISOString() };
+  // 用 market.maker_relay_id(此刻已确认是本地真实 relay,见 handleRefunding L2577-2580)签名。
+  const signResult = await sendCommandAsync(market.maker_relay_id, { type: 'sign_message', message: JSON.stringify(payload) }, undefined, 'internal');
+  if (!signResult?.ok || !signResult.signature) {
+    console.warn(`[pool-settler:refunding] rejected_v1 sign fail market=${market.id.slice(0,12)}: ${signResult?.error}`);
+    return;
+  }
+  const bcastResult = await sendCommandAsync(market.maker_relay_id, {
+    type: 'send_broadcast', channel: 'kanet-prediction',
+    message: JSON.stringify({ ...payload, signature: signResult.signature }),
+  }, undefined, 'internal');
+  if (bcastResult?.ok) {
+    meta.refund_rejected_sent_at = new Date().toISOString();
+    sqlite.prepare('UPDATE pool_markets SET metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(JSON.stringify(meta), market.id);
+  }
+}
+```
+
+consumer 侧新增 handler(`trade-protocol-filter.js`,与 `handlePoolRefundRequest` 平级):
+
+```js
+async function handlePoolRefundRequestRejected(msg) {
+  const market = sqlite.prepare('SELECT * FROM pool_markets WHERE id = ?').get(msg.market_id);
+  if (!market) return;
+  const localMeta = JSON.parse(market.metadata || '{}');
+  const makerPk = String(market.maker_relay_id || '').replace(/^cross-node:/, ''); // 本地已有,不信消息
+  if (!makerPk) return; // 不是 cross-node 市场,这条消息跟我无关
+  const unsigned = { ...msg }; delete unsigned.signature;
+  let sigValid = false;
+  try {
+    const kaspa = await import('kaspa-wasm');
+    sigValid = kaspa.verifyMessage({ message: JSON.stringify(unsigned), signature: msg.signature, publicKey: makerPk });
+  } catch (e) { console.warn(`[trade-filter:pool-refund-rejected] verify exception: ${e.message}`); return; }
+  if (!sigValid) { console.warn(`[trade-filter:pool-refund-rejected] sig invalid market=${msg.market_id.slice(0,12)} — 可能是伪造拒绝,忽略`); return; }
+  localMeta.refund_request_rejected_at = new Date().toISOString();
+  localMeta.refund_request_rejected_reason = msg.reason;
+  sqlite.prepare('UPDATE pool_markets SET metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(JSON.stringify(localMeta), market.id);
+  console.log(`[trade-filter:pool-refund-rejected] market=${msg.market_id.slice(0,12)} producer 拒绝(bet_count=${msg.bet_count})— 停止重试`);
+}
+```
+
+**consumer 侧重试逻辑(`pool-market-settler.js:593-596` `needsBroadcast`)需要加一条**:`&& !meta0.refund_request_rejected_at`(不属于本设计的 handleRefunding 改动范围,但属于 r402 同一张卡——Bettor `#c8satt`③ 已裁定"consumer 侧改动归 r402 同卡,不另开 DRI")。
+
+**具体签名机制细节(用 `sign_message` IPC 类型是否存在、字段名是否准确)未逐行核实 relay 侧 IPC handler**——这部分需要 NWT 或熟悉 relay IPC 的人核一遍 `kasia-relay` 那侧有没有现成的通用签名命令可以直接调用,不要求新造签名逻辑。
+
+**wire format 顾虑已解除**:v1 曾担心新增协议消息类型 `pool_refund_request_rejected_v1` 会不会破坏既有 wire format 约定。NWT finding⑥核实:`trade-protocol-filter.js` 的主 switch 加新 `t` 值是这个文件内**已有 13 次的既有模式**(见 `case` 列表 L84-106 附近逐条),不是破格新造,Bettor 终裁④已确认"wire 顾虑不构成选 B 弃 A 的理由"。
 
 ## 3. 不在本次范围
 
-- **不处理已发出的 705 条历史存量。** KANet-UI 在做 191∩705 交集调查(独立轨道,Bettor 08-02 已催办),那是"已发生的伤害有多大"的问题;本设计只管"从现在起,不再无脑退一个可能有人下注的市场"。
-- **不做链上枚举式彻底根治**(见 §1 残余风险),只做"防止已知形状的矛盾被无视"这一层。
-- **不撤 ②' 止血闸** —— Bettor 已拍:本设计落地 + 验证前不撤(11 个 relay 继续停)。
+- **request 侧不设发送者绑定门**(Bettor 终裁③,与 NWT finding⑤ 两路收敛)——合法发送者集合无界(现状=任意节点的 settler tick 都能合法发这条广播,收窄到 committee_pks 会改变这个协议语义,超出"缺陷修复"范围,不做);`committee_pks` 候选已否决。
+  - **挂账登记(Bettor 记 ledger,原话摘录)**:「开放项:跨节点广播消息(`pool_refund_request_v1` 等)无发送者身份绑定。影响面按 NWT 校准记:伪造上限 = 让一个真 0-bet、已过 deadline、`verifying` 态的市场提前自我了结;§2 修复后不再是钱路问题,是时序问题。」—— 也就是说,本设计落地后,这条残余能做到的最坏事是"让一个反正迟早会被判 0-bet 退款的市场提前触发",不是"退错一个有人下注的市场"(那个洞由 §2 的 betCount 复核挡住了)。
+- **不处理已发出的 705 条历史存量**——KANet-UI 191∩705 交集调查是独立轨道。
+- **不做链上正向枚举式彻底根治**(§1 残余风险)。
+- **relay_nodes 表的写入面是否可被滥用** —— 已证明该表跟本设计无关(它不是跨节点身份注册表),这个问题若有别的用途需要查,另立卡,不在 r402 范围。
 
-## 4. 请 NWT 打的点
+## 4. 请 NWT 复审的点(v2 新增/变化的部分)
 
-1. **TOCTOU**:`localBetCount` 检查与 `dispatchRefund` 内部建 tx/签/广播之间存在时间窗口 —— 若同一时刻有个新 bet 落地(检查时 0、执行时非 0),这层检查是否被绕过?是否需要把检查挪进 `dispatchRefund` 内部、贴着建 tx 那一刻做,而不是留在 caller 侧?
-2. **假阳性代价**:这条 check 会不会误伤"producer 自己 ingest 出了脏行"的场景 —— 一个真正 0-bet 的市场,因为 producer 本地有条幽灵下注记录(比如未清理的测试数据/重复行未去重)而永久卡死不退款?去重索引(`UNIQUE(market_id, bettor_pk)` v62)是否已经堵住了"同一 bettor 计两次"这类假阳性?
-3. **审计字段竞态**:`refund_request_conflict_at` 这次 `UPDATE ... metadata` 是 read-modify-write,是否会被同一 market 的其他并发 tick(settler 别的分支同时在改 `metadata`)覆盖丢失 —— 类似 CLAUDE.md 记录的 xzztw 案例那种 racy 写入?
-4. **范围边界**:是否同意"不做链上枚举式根治"这个范围切法,还是认为残余风险大到必须本轮一并堵?
+1. **状态回退是否完整**:退回 `'verifying'` + 清掉 `refund_tx_obj`/`refund_dispatched_at` 是否够,还是有别的字段(比如 `pool_committee` 表里可能已经采样过、或者 `pool_snapshot`)也需要一并处理,才能让市场干净地重新进入正常路径?
+2. **`sign_message` IPC 是否存在**:§2.1 假设 relay 侧有一个通用"用这个 relay 的私钥签这段 payload"的 IPC 命令——我没有逐行核过 `kasia-relay` 侧,如果不存在,rejected_v1 这部分需要先加这个原语或者换个签名路径。
+3. **节流窗口选值**:conflict 写 5 分钟、rejected_v1 发送 1 小时,是否和实际 tick 间隔(demo 60s / prod 300s)匹配,会不会太松/太紧?
+4. **consumer 侧 `needsBroadcast` 加的那一条判据**,是否需要一并在本设计里给出完整 diff,还是可以留给落码阶段现场对齐(不影响红队 PASS/push-back 的判断)?
