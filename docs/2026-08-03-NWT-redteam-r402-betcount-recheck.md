@@ -109,3 +109,33 @@ Bettor 20:17 补的第 5 打点(冲突分支每小时重触发一次、无节流
 **总裁定:PUSH-BACK。r402 待①(与③一并,顺手)重做后再次红队,预期能给 GREEN。⑤ 不卡本轮,但需在 COORD-LEDGER 显式登记为开放项,不许静默消失。**
 
 — NWT
+
+---
+
+## v2 复审(commit `778e71e9`,Bettor 终裁 `#c8zcyv` 五条落地后)
+
+**结论:GREEN,一处 MUST-FIX-BEFORE-LANDING(非设计缺陷,是字符串写错)。**
+
+### 逐条复核
+
+1. **finding①(检查点位置)—— 已正确修复,PASS。** 独立读码确认:检查插在 `handleRefunding`(L2552-2617),确认 `market.maker_relay_id` 是本地真实 relay(既有检查 L2577-2580)之后、`sendCommandAsync` 真正广播(L2594)之前 —— 位置正确,是签名广播前的最后一刻。副作用(同一处顺带堵住 566/1362/1706 三处同节点路径同款缺口)独立核实成立:三处逐一读过,均为"0-bet 直接走 refund,不经 committee sampling/pool_snapshot"的 shortcut(`decideConsensusV06`/`dispatchPhase2` 注释原文"no votes needed"/"no losing pool, no economics"),结构上从未经过 committee 状态,retreat 到 `verifying` 不会留下不一致的委员状态。
+
+2. **finding②(ghost-row)—— 仍 PASS,未变。**
+
+3. **finding③(metadata 竞态 + 节流)—— 已用 `json_set`/`json_remove` 原子 SQL 写 + `julianday` 节流窗口合并解决,PASS。** 一次改动,未分两次碰同一段代码,符合要求。
+
+4. **状态回退完整性(J2 §4 提问①)—— 确认足够,不需要额外清理。** 见①的委员状态分析:0-bet shortcut 路径从未写入 `oracle_relay_ids`/`pool_snapshot`(那是委员采样阶段才做的事,0-bet 市场跳过了那个阶段),回 `'verifying'` 后市场在下一个 tick 会因为 `betCount>0` 使 `L565 if (betCount === 0)` 判假,自然落入正常 committee 采样路径 —— 不存在"回退不干净导致卡死"的缺口。
+
+5. **`sign_message` IPC 假设(J2 §4 提问②)—— 🔴 MUST-FIX-BEFORE-LANDING,但不是设计缺陷。** 逐字核实 `kasia-relay/src/relay.mjs`:不存在 `sign_message` 这个 case。真实存在且已注册(`COMMAND_TYPES`+`COMMAND_FIELD_TYPES` 双登记,非半截注册)、production 内 15+ 处调用的通用签名原语是 **`ecdsa_sign`**(`relay.mjs:638-652`,取任意 `cmd.message` 字符串 → `kaspa-wasm signMessage` → 返回 hex signature)。`handlePoolOracleVote` 复用的先例本身就是走这条命令签的。**签名/验签一对齐全**(`ecdsa_sign` + `kaspa.verifyMessage`,`coord-status-sign.mjs` D-010 门已有全链路活先例,含伪造负测试)。也独立追了签名内容的 JSON 序列化往返(sender 用 `JSON.stringify(payload)` 签,receiver 用 `JSON.stringify({...msg, signature 删除})` 验)——key 顺序在 `JSON.parse`→spread→`stringify` 全程保持不变,不会因为对象键序不同而验签假失败。**落码时把 `type: 'sign_message'` 改成 `type: 'ecdsa_sign'` 即可,不需要新造任何原语,不需要再走一轮设计审。**(J1、Bettor 已独立核实同一结论,三方收敛;Bettor 补充建议签 `blake2b(payload)` 的 hex 而非裸串,对齐 D-010 先例,同意。)
+
+6. **relay 命令风险分级(Bettor 派工,顺手做)**:`ecdsa_sign` 在 `docs/2026-07-22-m1-1-command-capability-effect-matrix.md`(M-1.1,J2 主笔)里已经归类——relay 对签名内容**零校验**,风险模式等同类 B 盲签 9 条(该文档 §2 原文:"ECDSA_SIGN...风险模式跟类 B 盲签 9 条几乎一样")。rejected_v1 的新调用点不引入新风险类别,是这个已知高风险原语的又一个调用方;核实过 `maybeSendRefundRejected` 里要签的 `payload` 全部字段(`market_id`/`bet_count`/`rejected_at`)均来自本地已确认数据(`market.id`、本函数刚算出的 `localBetCount`),**不含任何消息自带/攻击者可控输入**,签名内容本身干净。建议 M-1.1 文档 owner(J2)下次碰该文档时把这个新调用点加进去,不因为顺手就在本次 r402 审查里跨文档改动。
+
+7. **节流窗口取值(J2 §4 提问③)**:5 分钟(冲突写)与 tick 间隔(prod 300s/demo 60s)同量级,1 小时(rejected_v1)与 consumer 侧 `REQUEST_REBROADCAST_MS` 精确对齐——两个窗口都合理,不要求调整。
+
+8. **一处实现期提醒(非设计缺陷)**:`handlePoolRefundRequestRejected` 需要显式加进 `trade-protocol-filter.js` 主 switch(`case 'pool_refund_request_rejected_v1': ...`)才会被分派到——设计稿提到"平级"但没写这行 wiring,落码时别漏。
+
+### 总裁定
+
+**GREEN with one must-fix-before-landing**(`sign_message`→`ecdsa_sign` 字符串更正)。不要求 v3 设计文档,可以直接落码;落码后我会对实际 diff(而非设计稿)再看一眼两个改动文件(`trade-protocol-filter.js`+`pool-market-settler.js`),确认没有在从文字到代码的转译中引入新偏差——钱路代码"设计对不代表落码对",这一步不省。
+
+— NWT
