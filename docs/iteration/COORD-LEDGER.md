@@ -4533,3 +4533,16 @@ pool-market-settler.js:2427-2459  dispatchRefund 本体    — 只查 isBshard, 
 **③ J2 §4 承重假设(relay 签任意 payload)三路核实成立**: J2 提问→Bettor 核(`ecdsa_sign` relay.mjs:638-652 + `get_pubkey`:654;名为遗留误命名实为 schnorr,coord-status-sign.mjs:6;D-010 全链路活先例)→J1 独立逐行核(同结论,两个现成 IPC)。落码注意: 签 blake2b(payload) hex 对齐先例;`ecdsa_sign` 属盲签类(key-auth),NWT 复审 v2 时按 relay 命令 ABC 分类给 rejected_v1 新调用方定级。
 **④ 根目录杂散文件处置(KANet-UI 盘点 6/6 块,Bettor 裁)**: **照 2026-06-27 先例整体归档 `scratch/_archive_root_20260802/`,零物理删除**——类①(乱码名 0B 空文件,bash 发消息炸出,`feedback-never-put-executable-commands-in-shell-sent-messages` 的实例)/类②(截断 shell 重定向残留)/类③(cpuprofile、空 .lock、step5-envelope.mjs)/类④(tmp/ EK-sediment 有实内容文档)全移;类③④在频道挂认领窗(原作者 24h 内认领可取回),`.gitignore` 已盖 `_*`+`scratch/` 不影响库。执行=KANet-UI(运维域)。
 **⑤ r402 v2 已 push(`778e71e9`,J2 按五条终裁全落)**,待 NWT 复审(预期 GREEN)。
+
+---
+### (121) 2026-08-02 20:3x-20:4xZ — 🔴 Owner 总纲 reframe(终端提出)· Bettor 两条作用域批注 · Owner 同意执行方案 · 对抗轮 #c9pzp8 开题 · r402 落码完成待 diff 复核
+**① Owner 总纲(2026-08-03 终端亲述,要点五条,全文以 Bettor 频道转述 #c9pzp8 为准)**:
+1. (115) 框架错:把 KANet 当"向外卖的托管/原子交换技术"去问"外部程序为什么接入"。
+2. 正确框架:**KANet=正在运行的 Agent 应用**——Broker 找并组织需求/Maker 提供价值/Oracle Skill 把结果转成可验证条件/Kaspa 按事前规则结算分账;Prediction 与 Exchange=同一骨架(被锁价值→结算条件→链上结果)的两个已运行场景。
+3. 下一步:不发明"无签字 escrow",**从两应用抽统一 Oracle Skill**(边界钉死:Oracle 报告事实/规则解释事实/Covenant 放钱,Oracle 不碰钱无裁量)+ **Broker 做成开放入口**(不保管资金/不裁结果/身份=Kaspa 地址非 TG DM/佣金链上直分)。
+4. 外部接入正确问法:"愿意扮演什么经济角色"(Broker/Maker/Oracle Adapter/Verifier/界面)。
+5. 纪律保留:共同结构 ≠ Economic Kernel 已证;先冻结 Skill 接口与权限边界,再用第三个异质应用验证低 Diff 复用(EK H0 冻结纪律照守)。
+**② Bettor 批注(当面回 Owner,进对抗轮)**: A."条件放钱已存在"带作用域——Prediction 线成立(ZK settle D-001+claim merkle-binding),Exchange 线今天不成立((115) 实核:三份 escrow checkSig 9/4/1、hash 0/0/0 带阴性对照;跨链非原子;kaspa 验证短路);两条实核不随框架作废,是"Exchange 拉齐 Prediction 骨架"的施工图。B."没有人拥有自由裁量权"=目标不变量非现状(committee 盲签+driver-enforce 居多/VOTER 默认 OFF/诚实口径铁律在)。
+**③ Owner 拍(2026-08-03 终端:"同意你的建议")**: 采纳 Bettor 执行方案——对抗轮收敛→D-012 落 DECISIONS.md((115) 补状态头:叙事 superseded、实核事实带作用域存活,不删)→Oracle Skill 设计先行(第一步只冻结接口与权限边界,三权分立烤进接口)→Broker 线既知欠账(/link file-only、onboarding 身份反转)并入主线排。D-012 文本出来后仍升 Owner 终裁。
+**④ 对抗轮 #c9pzp8 已开**(四镜头互不重叠,禁复述前提): J2=批注A Prediction 半边+三权分立在现有代码可切性 / J1=oracle 域今天违反"不碰钱"边界的点位清单 / KANet-UI="外人今天来当 Broker 卡死在哪一步"gap 排序 / NWT(r402 diff 复核完再进)=打框架本身找错分类反例+打两条批注。
+**⑤ r402 落码完成**(`911aa320`,三文件+regression case;lint 0 error;predictions domain 全量回归绿;J2 如实报 rejected_v1 广播路径无自动化覆盖=diff 复核重点;自查 R-SHARD-BLIND 警告不适用因 isBshard 已在 dispatchRefund fail-loud 拒绝)。待 NWT diff 复核→KANet-UI 按 (120) 预授权窗单部署。**r402 优先级 > 对抗轮。**
