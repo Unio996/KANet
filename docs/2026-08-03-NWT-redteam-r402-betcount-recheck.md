@@ -138,4 +138,30 @@ Bettor 20:17 补的第 5 打点(冲突分支每小时重触发一次、无节流
 
 **GREEN with one must-fix-before-landing**(`sign_message`→`ecdsa_sign` 字符串更正)。不要求 v3 设计文档,可以直接落码;落码后我会对实际 diff(而非设计稿)再看一眼两个改动文件(`trade-protocol-filter.js`+`pool-market-settler.js`),确认没有在从文字到代码的转译中引入新偏差——钱路代码"设计对不代表落码对",这一步不省。
 
+---
+
+## 落码 diff 复核(commit `911aa320`,Bettor #c9c3il 部署前置条件 a 的验收)
+
+**结论:GREEN,无 MUST-FIX。** 全部结论基于我自己跑的命令/读的代码,没有一处直接采信 commit message 或频道自查报告。
+
+### 独立验证过的点
+
+1. **检查点位置** —— 读码确认插在 `handleRefunding` 内、`Skip cross-node markets` 检查(既有代码)之后、真正 `sendCommandAsync` 广播之前。与设计稿一致。
+
+2. **🔴 一个设计稿没有的细节,落码时被正确补上了** —— `handlePoolRefundRequestRejected` 在验签前额外 `delete unsigned._tx/_from/_channel/_at`(设计稿原版只删了 `signature`)。追了传输层代码坐实这不是多余动作:`trade-protocol-filter.js:49-52`(`onBroadcastWritten`)和 `:1000-1003`(`handlePoolMarketChunk` 重组路径)都会在消息进 handler **之前**往 `msg` 对象上注入 `_tx`/`_from`/`_channel`/`_at` 四个字段——这四个字段从未出现在签名侧构造的 `payload` 里(`maybeSendRefundRejected` 里 `payload` 只有 5 个字段,签名时也不含它们)。**若验签侧只删 `signature`,重建出的 `unsigned` 对象会比签名时多 4 个 key,`JSON.stringify` 结果永远对不上签名时的哈希输入,导致合法签名 100% 验证失败。** 逐字追了 JS 对象 key 顺序在 `JSON.parse`→spread→`delete`→`JSON.stringify` 全程保持不变(已在 key 全被正确剔除的前提下核实),确认修复后的版本能让合法签名正确验证通过。**这是落码阶段发现并堵住的一个真实缺口,不是我漏审——设计稿抽象层面没具体到"传输层会不会往消息对象上加字段"这一步,代码作者自己在实现时发现并处理了。**
+
+3. **R-SHARD-BLIND 自查(J2 主动报,非我抓到)—— 独立核实成立。** `dispatchRefund`(`pool-market-settler.js:2427-2464`)对 `isBshard` 市场在最前面 `fail-loud` 拒绝、直接 `return`,从不会走到 `preimage` 构建或 `protocol_status='refunding'` 那一步——这段我在 v1 红队时已经逐字读过。⇒ bshard 市场结构上永远到不了 `handleRefunding`,新加的 `r402BetCount` 查询与既有 566/587/1362 三处同款查询共享同一个"这里只处理非 bshard 市场"前提,不是新洞。
+
+4. **实测,不是信报告**:
+   - `node scripts/test.mjs --case=.../r402_refund_broadcast_betcount_recheck_regression.test.mjs` 自己跑了一遍:**1 PASS / 0 FAIL**。测试本身设计合理——用 `M_CONFLICT`(真有下注)与 `M_CLEAN`(真 0-bet)做阳性/阴性对照,断言状态回退、preimage 清理、审计字段、节流(第二次立即重跑必须 `changes:0`)四件事,且诚实标注"节流窗口内 SQL 本身不重新判 betCount,是 caller 的 `if (betCount>0)` 守着"这个边界,没把测试写成看起来比实际覆盖的还多。
+   - `node scripts/lint-kanet.mjs`(四个改动文件)自己跑了一遍:**0 errors**,226 条 warning 与改动前基线一致(R-SHARD-BLIND 4 处含新增那行,已在③解释;R-PHANTOM-FIELD 那条在 `trade-protocol-filter.js:559`,不在这次 diff 涉及的任何一段里,存量噪音)。
+
+5. **J2 如实报的未覆盖项(`rejected_v1` 的 `sendCommandAsync`/`ecdsa_sign`/`send_broadcast` 异步路径无自动化测试)—— 确认是真实边界,不是掩饰。** 接受这个边界不阻塞部署,理由:①用的是已在生产验证过的原语组合(`ecdsa_sign`+`kaspa.verifyMessage`,D-010 coord-status 签名门+现有 oracle-vote 签名路径两处活先例,含伪造负测试),不是新造机制;②Bettor 部署序列第 5 步本身就是"起后立即...r402 行为验(handleRefunding 日志或构造一次只读观察)"——这正是这条路径缺的活验证,不是被跳过而是被排进了部署流程里,不需要在落码这一步用 mock 补出来。
+
+6. **一个不阻塞的观察,供参考不要求改**:betCount 检查和真正的 `sendCommandAsync` 广播之间仍隔着一次 `await import('../lib/pool-refund-grace.mjs')`——理论上不是纯同步。但这是对一个大概率已被 Node 模块缓存的 ES module 的 dynamic import,只经过 microtask 边界,不会被外部 I/O(如另一条广播消息的 ingest,那是 macrotask)插进来打断,实际可利用窗口趋近于零,和 v1 的"一整个 settler tick"不是一个量级。不要求现在改,如果哪天顺手挪到 `sendCommandAsync` 调用正上方也无成本。
+
+### 落码 diff 总裁定
+
+**GREEN,可以进入 Bettor 部署序列。** 部署前置条件 a)"NWT diff 复核 GREEN"在此满足。
+
 — NWT
