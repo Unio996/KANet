@@ -4562,3 +4562,11 @@ pool-market-settler.js:2427-2459  dispatchRefund 本体    — 只查 isBshard, 
 - **部署清单去重(Bettor 裁 #cacqwz)**: r402 剩余部署目标=**J1 笔记本**(consumer 侧,r402 另半边——重试上限+rejected_v1 handler 在那台才有流量意义);J1 自己的窗,序列照 (120) 五检。他 19:30 报过的"重启换 relay spawn 序"风险已被本机 producer 侧 r402 压住,可重启。
 - **机器归属收口**: desktop-da9qq46 从此**单一 operator=KANet-UI**,J1 只配合不主动动。J1 留下的三格归 KANet-UI 核+拍: ①孤儿 kaspad 18480(canonical 配置,正给 settler 供 RPC)adopt/kill 重起——**收尾判据唯一: 最终跑着的 kaspad 必须在 watchdog 监护下**(无监护的 canonical 节点死了没人知道,比瞬断 RPC 贵) ②console×2 疑云(J1 看到两个,与五检①"旧 PID 实消失"读数冲突,必核父链) ③stratum-bridge 归属。J1 已自杀掉他起的 watchdog 18852+矿机 26444。
 - **根因与机制课(不追个人)**: "能 SSH 进 + Owner 让修" ≠ "这是我的机器"——跨机操作先核 hostname/归属再动手(J1 自提认账);今晚节点侧 churn 相当部分=**双操作者同机互不知情**(同族: memory 一名多物/镜像失效)。J1 的自纠形态好: 主动报、留证据、清自己起的进程、剩余请 owner 接管。
+
+---
+### (124) 2026-08-02 21:1xZ — ✅ 机器归属三格收口(KANet-UI)· 孤儿 kaspad adopt 生效 · 🔴 watchdog"恒判死空拉"复发(已处置,模式层 clamp 立卡)
+- **三格全核**(hostname 独立核过=DESKTOP-DA9QQ46): console×1("×2"是 kill/起新交替瞬间快照)· stratum-bridge=本机 mining-watchdog 子进程非孤儿 · kaspad 孤儿仅 18480 一个。
+- **18480 裁定 adopt 不 kill**(健康度实证: ~40 relay 持续从它同步、block 在涨;"杀健康同步节点换进程树好看不值"——引在册"停矿=链halt")。adopt 生效双佐证: 手动探测 ALIVE + 18480 CreationDate 全程未变,不单信新 watchdog(29632)日志沉默。
+- **🔴 顺带抓到并处置的独立 bug**: 本轮开机起的 kaspad-watchdog 实例(27196)自 03:53 起**恒判 DEAD(probe code=6)、每 ~3 分钟实拉新 kaspad**(实锤: 16092/31100/22892 三个被拉起、全部撞 port/数据目录锁秒死=脚本注释已知安全最坏情况)。手动同脚本三方式(bash 直跑/PS 换 cwd/完全复刻 detached 无 profile spawn)全 ALIVE ⇒ 坏的是**那一个长驻进程实例的状态**,非脚本/环境/配置。处置: 只重启 watchdog 本体(27196→29632),零碰 kaspad。
+- **🔨 复发认定+立卡(Bettor)**: 此形态=memory `reference-shared-code-fails-in-mirror-image-ways-per-machine` 里"恒判死空拉"那一臂的**复发**(前例 18074 次/分钟空拉)。按 D-002 复发=升级非重申 ⇒ **立卡(待认领,KANet-UI 域,非阻塞)**: watchdog 加 spawn 风暴断路器——"M 分钟内 spawn ≥N 次 且 独立探测读 ALIVE ⇒ 停止拉起+显式报警(带接收者)",把"白忙但安全"升级为"自报异常"。KANet-UI 留的根因待查项(长驻 PS 反复 spawn 后句柄/资源级衰退?)并入该卡,复现时一起查。
+- 今晚"节点反复起了又死"的 churn 由此三源合成: 双操作者同机 + watchdog 空拉循环 + 拉起即死的 port 锁——每源单看都自洽,合看才是全貌(同族: (111) 五人五窗口各自自洽)。
