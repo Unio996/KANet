@@ -4495,3 +4495,23 @@ pool-market-settler.js:2427-2459  dispatchRefund 本体    — 只查 isBshard, 
   - verdict 要点(已转述回频道): ✅方向认可(判别式有用但不完整,须补状态转换/各域可验什么/新增信任假设);🔴打回三条——「跨域交割=唯一不可替代位置」不成立(另有 HTLC/adaptor/轻客户端/委员会等路);原子性不必然要求单一中立裁决域(须分四形态:单域裁决/密码耦合本地裁决/外部见证/非原子顺序);哈希锁原像链上公开=实质隐私缺陷(可复用密钥/凭证不适用)。📌下一步建议=立「fair-exchange 具体设计卡」(含与不经 KANet 的纯 HTLC/adaptor 方案对比),design-only,而非「无签字 escrow」这个框。**§7.1 仍待 Owner 拍,材料已齐。**
   - 🔨 教训(枚举谓词选错,同族 memory 已有): 查「有没有给 Codex 看过」不能只 grep TO-CODEX.md `^## MSG`——bridge 有第二条通路(responses/ 主动 review)。memory `reference-codex-sync-github-bridge-method` 已补此坑。
 - **范围口径**: 回到 Owner 范围直令=只做模块化+外部程序接入;r402 按上述定性为缺陷修复例外,其余不开始。
+
+---
+### (118) 2026-08-02 20:1xZ — 🔴 ②' 被 Owner 直令撤销(经 J1 转述)· r402 升当前最高优先 · Bettor 方向审 GREEN-with-notes + 亲核新打点
+- **②' 撤销 = Owner 拍**(Owner 在 J1 终端旁,J1 20:17 转述): "这台已经没问题了,不需要停——②' 不执行,11 个 relay 保持运行"。J1 转述时**主动把定性说全**: 机器健康(isSynced/挖矿/全栈)≠ ②' 针对的钱路缺陷;Owner 的选择=**用 r402 从根修,不拿停 relay 当止血**。Bettor 收: 决策已定=执行,不再对抗。
+- **窗口实况(排班依据,非重议)**: J1 核过 xnode-refund 当前成功广播=**0**,拦着的是额度/relay 没钱这类**偶然**。⇒ r402 从正常队列升为**当前最高优先**。
+- **r402 进度**: J2 设计稿 `7bee5352`(半小时内交付)→ Bettor 方向审 **GREEN-with-notes**(§1 来源论证成立且诚实/复用三处已验判据/冲突不静默/范围切法同意)→ 待 NWT 红队(已催 ETA)。
+- **Bettor 亲核新打点(逐字读 trade-protocol-filter.js:133-181,非转述)**: 设计稿 §0 称 maker_pk 检查为"身份/授权检查",实况更弱——是 msg.maker_pk(消息自带内容)与本地 relay_nodes 派生 pk 的**内容对表匹配,零发送者绑定**;任何市场 maker_pk 公开可派生 ⇒ **任何第三方可构造四检全过的 pool_refund_request_v1**。r402 后有注市场被 betCount 挡;真 0-bet 跨节点市场仍=任何人可触发退款广播(钱回 maker 非盗币,但违「只settle绝不refund」+钱路广播无认证触发器)。**已交 NWT 裁: 发送者绑定进本轮还是登记后续卡——至少必须被登记,不许静默。**
+- **A/B 裁定(Bettor,方向)**: 不是二选一,**A(rejected_v1 回执)为主 + B(重试上限转人工)兜底**——回执走广播会丢,A 单独不闭环;B 单独永不闭环。consumer 侧改动归 r402 同卡。🔴 A 硬要求: rejected 回执 handler 不得信 sender_address(D-010 在册: bcast sender=output[0] 攻击者自选)、不得只做 content-match;真实性方案与请求侧发送者绑定**同一个洞两面,一处定,不许分两处各定一套**。
+- **部署序提前钉住**: 落码≠live——trade-protocol-filter.js 在 console 长驻进程内,**必须重启 console 生效**(committed-not-deployed 在册教训)。部署目标=producer 侧(本机 36k 行主暴露面 + J1 台式机)。本机 console 承载协调频道 ⇒ 重启窗按在册纪律**预授权整序列**,r402 过红队后 Bettor 出重启窗单。
+- **对 J1 两个不违直令的请求**: r402 落地前 ①别给 TestOracle-1 充值 ②非必要不重启栈(换 spawn 序=可能换中有钱 relay 当场发);额度/钱况有变第一时间报数。(J1 20:20 已确认全遵守,并钉:xnode-refund 成功广播仍=0,daily-limit 挡着,持续盯。)
+
+---
+### (119) 2026-08-02 20:2xZ — r402 红队轮一小时闭环: NWT PUSH-BACK(检查点插错阶段)→ Bettor 合并终裁 v2 五条 · 挂账一项显式登记
+**节奏实录**: J2 设计稿 `7bee5352`(20:15)→ Bettor 方向审 GREEN-with-notes+亲核 maker_pk 零发送者绑定(20:17)→ J2 提 relay_nodes 登记门(20:19)→ Bettor 实测证伪(本机 relay_nodes 32 行/J1 comm relay 0 行=该门恒拒合法跨节点请求;J2 同分钟独立自查到同一结论,两路收敛)→ NWT 红队 `a52c70cd` **PUSH-BACK**(20:22)→ Bettor 合并终裁 #c8zcyv(20:23)。
+- **NWT finding①(🔴 MUST-FIX,阻塞)**: 原设计检查点在 handlePoolRefundRequest/dispatchRefund——但 dispatchRefund(L2427-2464)只暂存 preimage+改 status='refunding',**不签名不广播**;真广播在下一个 settler tick 的 handleRefunding L2594 sendCommandAsync。⇒ 检查够不到广播时刻,TOCTOU 窗=一整个 tick(默认 300s)。**改法=复核挪到 handleRefunding 广播语句之前**;顺带堵掉 566/1362/1706 三处同节点路径的**原生**同款缺口(整条 refund 流水线从未在广播前复查过——非 r402 新引入)。
+- **finding②/④ PASS**: ghost-row 假阳性已被 UNIQUE(market_id,bettor_pk) v62+ingest 前链上 UTXO 现查两层挡住,且失败模式 fail-safe;范围切法(不做链上枚举根治)同意。
+- **finding③+Bettor 第5打点合并**: 审计字段 parse-modify-write 竞态(仅观测性)+ 冲突无节流 → v2 一次改(json_set 原子写+节流),同段代码不碰两次。
+- **finding⑤(Bettor 发现,NWT 独立复核确认)**: maker_pk 检查=内容对表匹配零发送者绑定,任何第三方可构造过检请求。**影响面校准(NWT)**: 该分支仅在 protocol_status='verifying'(已过 deadline)时进入 ⇒ 伪造上限=**提前触发**一个本来也会自我了结的真 0-bet 市场;但与 finding① 叠加=攻击者可免费无限重试赌 TOCTOU 窗。裁定: 发送者绑定不卡本轮,**前提=①本轮必修**(修完杠杆趋零,钱路问题退化为时序问题)。
+- **Bettor 终裁 v2 五条**(#c8zcyv): ①检查点挪 handleRefunding(request 侧那次留作早期拒绝快路);冲突时回退 status 归 J2 定 ②③合并改 ③request 侧发送者绑定本轮不做(committee_pks 候选也否——改协议语义超范围)④rejected_v1(A,锚=consumer 本地 market 行 maker pk 验签)+consumer 重试上限(B 兜底)入轮;A handler 不信 sender_address/不做裸 content-match ⑤v2 重过 NWT 红队(预期 GREEN)→落码→producer 侧 console 重启窗(Bettor 出单)。
+- **📌 挂账(显式开放项,待认领,不许沉底)**: **跨节点广播消息(pool_refund_request_v1 一族)无发送者身份绑定**。影响面按 NWT 校准口径记(见 finding⑤);r402 ① 落地后为时序问题非钱路问题。认领时注意: relay_nodes 是本地托管表不可作跨节点身份注册表(本轮实测证伪);committee_pks 方案=协议语义变更需单独设计轮。
