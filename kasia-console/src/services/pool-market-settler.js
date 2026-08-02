@@ -593,7 +593,10 @@ export async function poolSettlerTick() {
               const broadcastedAt = meta0.refund_request_broadcasted_at;
               const REQUEST_REBROADCAST_MS = 60 * 60 * 1000; // 1h re-broadcast if no response
               const needsBroadcast = !broadcastedAt || (Date.now() - new Date(broadcastedAt).getTime() > REQUEST_REBROADCAST_MS);
-              if (needsBroadcast && !meta0.refund_dispatched_at) {
+              // r402 §2.1 (Bettor 终裁): stop retrying once producer signed a rejected_v1 telling us
+              // this 0-bet claim is false (real bets exist on their side). Without this check,
+              // consumer keeps re-broadcasting the same false claim every hour forever.
+              if (needsBroadcast && !meta0.refund_dispatched_at && !meta0.refund_request_rejected_at) {
                 try {
                   // 提取 producer maker_pk (= 'cross-node:<pk>' sentinel 后半).
                   const makerPk = market.maker_relay_id.replace(/^cross-node:/, '');
@@ -2579,6 +2582,53 @@ export async function handleRefunding(market) {
     return { ok: false, reason: 'cross-node maker' };
   }
 
+  // r402 (NWT PUSH-BACK a52c70cd finding①, Bettor 终裁 #c8zcyv): betCount re-check belongs HERE,
+  // immediately before the real signature+broadcast (L2594 below) — not in dispatchRefund (only
+  // stashes preimage, doesn't broadcast) or handlePoolRefundRequest (a whole settler tick earlier).
+  // This is the last synchronous moment before money moves, and it's shared by ALL refund paths
+  // (566/1362/1706 same-node shortcuts + the cross-node request path at 580-629) — one check point,
+  // free coverage for the pre-existing TOCTOU gap in all of them, not just the cross-node one.
+  const r402BetCount = sqlite.prepare('SELECT COUNT(*) as c FROM pool_bettor_sides WHERE market_id = ?').get(market.id)?.c || 0;
+  if (r402BetCount > 0) {
+    console.error(`[pool-settler:refunding] REFUSED market=${market.id.slice(0,12)} — local betCount=${r402BetCount} > 0 at broadcast-time, 0-bet premise no longer holds, not sending refund tx`);
+
+    // Atomic SQL write (json_set/json_remove, NWT finding③ + Bettor 第5点合并处理): avoid a JS
+    // parse-modify-write race against any other concurrent tick touching this market's metadata.
+    // Throttle folded into the WHERE clause so this doesn't churn metadata/logs every tick.
+    const R402_CONFLICT_THROTTLE_SEC = 300; // same order of magnitude as the settler tick interval
+    sqlite.prepare(`
+      UPDATE pool_markets
+      SET metadata = json_set(
+            json_remove(COALESCE(metadata, '{}'), '$.refund_tx_obj', '$.refund_dispatched_at'),
+            '$.refund_conflict_at', ?,
+            '$.refund_conflict_bet_count', ?
+          ),
+          protocol_status = 'verifying',
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+        AND (
+          json_extract(metadata, '$.refund_conflict_at') IS NULL
+          OR (julianday('now') - julianday(json_extract(metadata, '$.refund_conflict_at'))) * 86400 > ?
+        )
+    `).run(new Date().toISOString(), r402BetCount, market.id, R402_CONFLICT_THROTTLE_SEC);
+    // Market goes back to 'verifying' — it now has real bets and belongs in the normal committee
+    // sample / vote / settle path, not stuck retrying a refund that's no longer valid (same shape
+    // as the xzztw metadata-hand-edit deadlock CLAUDE.md warns about: state that no longer matches
+    // reality, propped up by repeated retries instead of an honest transition).
+
+    // If this refund was triggered by a cross-node consumer's request, tell it to stop retrying —
+    // otherwise it re-broadcasts pool_refund_request_v1 every hour against the same false claim.
+    let r402Meta = {};
+    try {
+      r402Meta = JSON.parse(sqlite.prepare('SELECT metadata FROM pool_markets WHERE id = ?').get(market.id)?.metadata || '{}');
+    } catch {}
+    if (String(r402Meta.refund_reason || '').includes('cross-node consumer refund request')) {
+      await maybeSendRefundRejected(market, r402BetCount).catch(e =>
+        console.warn(`[pool-settler:refunding] r402 rejected_v1 send fail market=${market.id.slice(0,12)}: ${e.message}`));
+    }
+    return { ok: false, reason: `local betCount=${r402BetCount} at broadcast time, aborted` };
+  }
+
   const makerRow = sqlite.prepare('SELECT address FROM relay_nodes WHERE id = ?').get(market.maker_relay_id);
   if (!makerRow?.address) {
     console.warn(`[pool-settler:refunding] market=${market.id.slice(0,12)} no maker address (maker_relay_id=${market.maker_relay_id?.slice(0,12)})`);
@@ -2613,6 +2663,52 @@ export async function handleRefunding(market) {
   } catch (e) {
     console.error(`[pool-settler:refunding] submit exception market=${market.id?.slice(0,12)}: ${e.message}`);
     return { ok: false, reason: e.message };
+  }
+}
+
+// r402 §2.1 (Bettor 终裁 #c8zcyv④, anchor = consumer's own locally-derived maker pk, not any
+// message-supplied value — verify-value-source compliant): tell a cross-node consumer to stop
+// retrying pool_refund_request_v1 once producer's own betCount check has refused it. Without
+// this, consumer re-broadcasts every REQUEST_REBROADCAST_MS (1h, L~594) against the same false
+// claim forever — the same burn-fees shape as the 705-request backlog this whole fix responds to.
+// Throttled independently (1h, matches consumer's own retry interval) so this doesn't re-fire
+// every settler tick while the conflict persists.
+async function maybeSendRefundRejected(market, betCount) {
+  let meta = {};
+  try { meta = JSON.parse(market.metadata || '{}'); } catch {}
+  const lastRejectSentAt = meta.refund_rejected_sent_at ? new Date(meta.refund_rejected_sent_at).getTime() : 0;
+  const REJECT_THROTTLE_MS = 60 * 60 * 1000;
+  if (Date.now() - lastRejectSentAt <= REJECT_THROTTLE_MS) return;
+
+  const { hashPayloadHex } = await import('../lib/pool-refund-reject-sign.mjs');
+  const payload = {
+    t: 'pool_refund_request_rejected_v1',
+    market_id: market.id,
+    reason: 'local_bet_count_nonzero',
+    bet_count: betCount,
+    rejected_at: new Date().toISOString(),
+  };
+  const contentHashHex = hashPayloadHex(payload);
+  // ecdsa_sign (kasia-relay/src/relay.mjs:638-652, J1 08-02T20:29 核实 — 遗留误命名, 底层实为
+  // kaspa-wasm signMessage/schnorr, 产线已用于 D-010 coord-status 签名门, 含伪造负测试).
+  // Sign the hash, not the raw JSON (Bettor 终裁, 对齐 coord-status-sign.mjs 先例).
+  const signResult = await sendCommandAsync(market.maker_relay_id, { type: 'ecdsa_sign', message: contentHashHex }, undefined, 'internal');
+  if (!signResult?.ok || !signResult.signature) {
+    console.warn(`[pool-settler:refunding] rejected_v1 sign fail market=${market.id.slice(0,12)}: ${signResult?.error}`);
+    return;
+  }
+  const bcastResult = await sendCommandAsync(market.maker_relay_id, {
+    type: 'send_broadcast',
+    channel: 'kanet-prediction',
+    message: JSON.stringify({ ...payload, signature: signResult.signature }),
+  }, undefined, 'internal');
+  if (bcastResult?.ok) {
+    meta.refund_rejected_sent_at = new Date().toISOString();
+    sqlite.prepare('UPDATE pool_markets SET metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+      .run(JSON.stringify(meta), market.id);
+    console.log(`[pool-settler:refunding] rejected_v1 sent market=${market.id.slice(0,12)} bet_count=${betCount} txId=${bcastResult.txId?.slice(0,16)}`);
+  } else {
+    console.warn(`[pool-settler:refunding] rejected_v1 broadcast fail market=${market.id.slice(0,12)}: ${bcastResult?.error}`);
   }
 }
 

@@ -104,6 +104,10 @@ export async function onBroadcastWritten(row) {
         await handlePoolOracleTxSignResp(msg); break;  // J2-tn r374 (Bettor 15:02 catch): cross-node sign_resp ingest
       case 'kanet_pool_oracle_tx_sign_req_v1':
         await handlePoolOracleTxSignReq(msg); break;  // J1tn r361 (Bettor 15:05 钦定): cross-node sign_req trigger
+      case 'pool_refund_request_v1':
+        await handlePoolRefundRequest(msg); break;  // r402 (NWT v2 复审点⑧): 主 switch 直接分派小消息, 不只靠 chunk 重组路径
+      case 'pool_refund_request_rejected_v1':
+        await handlePoolRefundRequestRejected(msg); break;  // r402 §2.1
     }
   } catch (err) {
     console.error(`[trade-filter] Error processing ${msg.t}: ${err.message}`);
@@ -178,6 +182,45 @@ async function handlePoolRefundRequest(msg) {
   } catch (e) {
     console.warn(`[trade-filter:pool-refund-req] dispatchRefund fail market=${msg.market_id.slice(0,12)}: ${e.message}`);
   }
+}
+
+// r402 §2.1 (NWT GREEN v2 复审, Bettor 终裁 #c8zcyv④): producer refused our pool_refund_request_v1
+// (its own local betCount check found real bets) — stop retrying it. Anchor is verify-value-source
+// compliant: we verify against market.maker_relay_id's pk that's ALREADY on our own row (written at
+// market-construction/ingest time), never against anything the message itself carries — a forged
+// rejection can't be crafted without the real maker's private key.
+async function handlePoolRefundRequestRejected(msg) {
+  if (!msg.market_id || !msg.signature) return;
+  const market = sqlite.prepare('SELECT * FROM pool_markets WHERE id = ?').get(msg.market_id);
+  if (!market) return;
+  const makerPk = String(market.maker_relay_id || '').replace(/^cross-node:/, '');
+  if (!makerPk || makerPk === market.maker_relay_id) {
+    // Not a cross-node market on this node (maker_relay_id isn't a 'cross-node:<pk>' sentinel) —
+    // this rejection isn't addressed to us as a consumer, drop.
+    return;
+  }
+  const unsigned = { ...msg };
+  delete unsigned.signature; delete unsigned._tx; delete unsigned._from; delete unsigned._channel; delete unsigned._at;
+  let sigValid = false;
+  try {
+    const { hashPayloadHex } = await import('../lib/pool-refund-reject-sign.mjs');
+    const kaspa = await import('kaspa-wasm');
+    sigValid = kaspa.verifyMessage({ message: hashPayloadHex(unsigned), signature: msg.signature, publicKey: makerPk });
+  } catch (e) {
+    console.warn(`[trade-filter:pool-refund-rejected] verify exception market=${msg.market_id.slice(0,12)}: ${e.message}`);
+    return;
+  }
+  if (!sigValid) {
+    console.warn(`[trade-filter:pool-refund-rejected] sig invalid market=${msg.market_id.slice(0,12)} maker_pk=${makerPk.slice(0,12)} — 可能是伪造拒绝, 忽略`);
+    return;
+  }
+  let localMeta = {};
+  try { localMeta = JSON.parse(market.metadata || '{}'); } catch {}
+  localMeta.refund_request_rejected_at = new Date().toISOString();
+  localMeta.refund_request_rejected_reason = msg.reason;
+  sqlite.prepare('UPDATE pool_markets SET metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+    .run(JSON.stringify(localMeta), market.id);
+  console.log(`[trade-filter:pool-refund-rejected] market=${msg.market_id.slice(0,12)} producer 拒绝(bet_count=${msg.bet_count}) — 停止重试`);
 }
 
 // Idempotency = chain_events.txid UNIQUE.
@@ -979,6 +1022,8 @@ async function handlePoolMarketChunk(msg) {
       await handlePoolOracleTxSignResp(inner); break;
     case 'pool_refund_request_v1':
       await handlePoolRefundRequest(inner); break;  // J2-tn r402 P0-#3: cross-node maker refund
+    case 'pool_refund_request_rejected_v1':
+      await handlePoolRefundRequestRejected(inner); break;  // r402 §2.1
     default:
       console.warn(`[trade-filter:chunk] reassembled unknown type t=${inner.t} hash=${msg.hash.slice(0,12)} — drop`);
   }
