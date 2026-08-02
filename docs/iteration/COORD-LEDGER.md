@@ -4554,4 +4554,11 @@ pool-market-settler.js:2427-2459  dispatchRefund 本体    — 只查 isBshard, 
 - **五检读数**: ①新 PID 12832 非旧进程复活 ②频道 API 活 ③装载代码==预期 `d23539d0`,r402 代码逐行核实在磁盘 ④migrate v9→v192 干净收尾零报错 ⑤settler tick 正常(verifying 111/refund 5/errored 0)+新模块 pool-refund-reject-sign.mjs import 测试过+broadcast 11 行无异常放量。console-supervisor 已重拉。
 - **窗内实证一条**: 停机前 tick 里**旧代码路径仍在实触发 0-bet refund dispatch**(ext-pool-v07,仅因 UTXO 不足失败)——本次部署是在追活缺陷,非预防。
 - **诚实边界**: rejected_v1 路径(自动化盲区)窗内未验,按裁定留待真实冲突流量或 J1 侧跨节点只读观察;M-1.1 矩阵加 ecdsa_sign 新调用点归 J2 下次碰该文档。
-- **下一步**: J1 台式机同序列部署(已通知,错开重启纪律);完成后 r402 主线闭环,剩余挂账=发送者绑定开放项((119))+rejected_v1 实弹验证。
+- **下一步**: J1 台式机同序列部署(已通知,错开重启纪律);完成后 r402 主线闭环,剩余挂账=发送者绑定开放项((119))+rejected_v1 实弹验证。**⚠ 本行"J1 台式机"已被 (123) 纠正——该机不存在,见下条。**
+
+---
+### (123) 2026-08-02 21:0xZ — 🔴 身份纠正(J1 自报自纠): "J1 台式机" = KANet-UI 本机(desktop-da9qq46),部署清单重复计一台 · 机器归属收口
+- **纠正(J1 21:00,证据成立)**: J1 整晚在 Owner 直令下 SSH 进 desktop-da9qq46 修 RustDesk/救节点/拉栈,误以为它是"J1 台式机"——实为 **KANet-UI 本机**(证据: 被 KANet-UI kill 的 console PID 10660 随 kill 同时消失、36k 行 pool_bettor_sides 在这台)。⇒ 部署清单里"本机(36k)"与"J1 台式机(栈刚拉起)"=**同一台重复计**;(118)(120)(121)(122) 中"J1 台式机"字样以本条为准,史条目不回改。
+- **部署清单去重(Bettor 裁 #cacqwz)**: r402 剩余部署目标=**J1 笔记本**(consumer 侧,r402 另半边——重试上限+rejected_v1 handler 在那台才有流量意义);J1 自己的窗,序列照 (120) 五检。他 19:30 报过的"重启换 relay spawn 序"风险已被本机 producer 侧 r402 压住,可重启。
+- **机器归属收口**: desktop-da9qq46 从此**单一 operator=KANet-UI**,J1 只配合不主动动。J1 留下的三格归 KANet-UI 核+拍: ①孤儿 kaspad 18480(canonical 配置,正给 settler 供 RPC)adopt/kill 重起——**收尾判据唯一: 最终跑着的 kaspad 必须在 watchdog 监护下**(无监护的 canonical 节点死了没人知道,比瞬断 RPC 贵) ②console×2 疑云(J1 看到两个,与五检①"旧 PID 实消失"读数冲突,必核父链) ③stratum-bridge 归属。J1 已自杀掉他起的 watchdog 18852+矿机 26444。
+- **根因与机制课(不追个人)**: "能 SSH 进 + Owner 让修" ≠ "这是我的机器"——跨机操作先核 hostname/归属再动手(J1 自提认账);今晚节点侧 churn 相当部分=**双操作者同机互不知情**(同族: memory 一名多物/镜像失效)。J1 的自纠形态好: 主动报、留证据、清自己起的进程、剩余请 owner 接管。
