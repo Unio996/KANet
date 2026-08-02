@@ -4570,3 +4570,9 @@ pool-market-settler.js:2427-2459  dispatchRefund 本体    — 只查 isBshard, 
 - **🔴 顺带抓到并处置的独立 bug**: 本轮开机起的 kaspad-watchdog 实例(27196)自 03:53 起**恒判 DEAD(probe code=6)、每 ~3 分钟实拉新 kaspad**(实锤: 16092/31100/22892 三个被拉起、全部撞 port/数据目录锁秒死=脚本注释已知安全最坏情况)。手动同脚本三方式(bash 直跑/PS 换 cwd/完全复刻 detached 无 profile spawn)全 ALIVE ⇒ 坏的是**那一个长驻进程实例的状态**,非脚本/环境/配置。处置: 只重启 watchdog 本体(27196→29632),零碰 kaspad。
 - **🔨 复发认定+立卡(Bettor)**: 此形态=memory `reference-shared-code-fails-in-mirror-image-ways-per-machine` 里"恒判死空拉"那一臂的**复发**(前例 18074 次/分钟空拉)。按 D-002 复发=升级非重申 ⇒ **立卡(待认领,KANet-UI 域,非阻塞)**: watchdog 加 spawn 风暴断路器——"M 分钟内 spawn ≥N 次 且 独立探测读 ALIVE ⇒ 停止拉起+显式报警(带接收者)",把"白忙但安全"升级为"自报异常"。KANet-UI 留的根因待查项(长驻 PS 反复 spawn 后句柄/资源级衰退?)并入该卡,复现时一起查。
 - 今晚"节点反复起了又死"的 churn 由此三源合成: 双操作者同机 + watchdog 空拉循环 + 拉起即死的 port 锁——每源单看都自洽,合看才是全貌(同族: (111) 五人五窗口各自自洽)。
+
+---
+### (125) 2026-08-02 21:1x-21:2xZ — ✅ 总纲对抗轮收敛(四镜头全回,三镜头带自我更正)· D-012 草案落 `d2735fd8` 待 Owner 终裁
+- **四镜头产出**(全部 file:line 实读,无一空对空): J2=Prediction 线也有 r402 同形状洞(handlePoolOracleTxSignReq 盲签零前提复核;PB-S8 牙未装此路;修法=搬运) · J1=oracle 四权合一五点(最重: 私钥亲签放钱 TX)+诚实标 v0.7 未核项 · NWT=四 findings(**②最重: Bettor 批注 A/B 合读自相矛盾——A 的"Prediction 线成立"背书盖住了 B 点名的 committee-sig live 主力,Bettor 公开认领 #cayw15**;①Broker"不保管资金"与现存唯一 broker=托管钱包矛盾;③Exchange 裁决角色结构性空缺 concede-only;④Seeder=四角色外第五形态,角色清单须限定为外部接入者) · KANet-UI=Broker 六道墙逐条 file:line("外人今天来当 Broker 最先卡死在'无对外网络路径'而非 Bettor 点的那三条";佣金链上分账那半是实的但在全部墙后;broker v1/v2/v3 随部署 flag 漂移=口径必须带配置态)。
+- **D-012 草案**: `docs/2026-08-03-d012-kanet-agent-app-reframe-draft.md`(`d2735fd8`,Status: DRAFT 待 Owner 终裁)。核心结构: 总纲(角色经济)+"条件放钱"三段作用域表(①v0.7 ZK-native 成立②committee-sig 不享受背书③Exchange 裁决角色空缺)+Broker 目标/现状分写(六道墙)+执行序(Oracle Skill 边界冻结 J1 主笔×J2 审→NWT 红队;前置补课=v0.7 委员签与否;候选卡=PB-S8 搬运+Broker 地址所有权挑战;Exchange=接口冻结后第一个复用验证对象;EK H0 纪律保留)+文档处置((115) 叙事 superseded 实核条目带作用域存活/Codex 三打回转设计约束/§7.1 吸收)。
+- **方法记录**: 禁复述前提执行到位——本轮实际打掉了发起方(Bettor)自己的批注结构;Owner"认可方案"未被当作豁免。
