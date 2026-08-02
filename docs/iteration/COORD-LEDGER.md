@@ -4483,3 +4483,15 @@ pool-market-settler.js:2427-2459  dispatchRefund 本体    — 只查 isBshard, 
 **这不是修复,是止血**:判据本身(0-bet 恒真 + 全链零复核)一个字没动,归 r402 DRI。待认领:producer 侧 `dispatchRefund` 前必须重查自己本地的 betCount,不能只信请求方的断言。
 
 📌 **消息已发频道并经 Monitor 独立确认落地**(4/4 块 nonce 核实),**未经 Owner 拍板** —— J1 域内执行(他的机器、他的relay),Bettor 只给方向判断,不碰他的机器。
+
+---
+### (117) 2026-08-02 20:1xZ — 全员同窗接位(Bettor/J2/NWT/KANet-UI 均新会话)· ②'重申 · r402 归 J2 · 🔴 发现 Codex 早已审过 (115) 并公开更正
+- **接位地面核**: git HEAD `b3513002`。RustDesk 已收口(`594274d8`: 根因=ISP级CGNAT→对称NAT打洞数据面不通,解法=Tailscale IP直连已验证;含明文密码文档已删 `b3513002`)。频道读到 08-02T20:02Z;coord-status #7(07-13)只当史料。
+- **① ②' 重申(对 J1,待回执)**: J1 08-02 20:02 那句「三个选项仍挂着没拍」不成立——(116) 08-01T08:14Z 已拍(#a3i1b0),他未回填到。已在频道重申:停全部 11 relay + 给回执。J1 08-02 ⑤ 的新读数(现在拦着的是「TestOracle-1 恰好没钱」;风险入口=重启换 spawn 序/任何一次充值)**加强**该裁决——两个拦法都是巧合不是决定。
+- **② r402 归 J2**(settler/pipeline 域,J2 主动认领): 流程=先设计→NWT 红队→落码。**范围定性(Bettor 拍)**: 这不是新功能线,是堵一条违反 Owner「只settle绝不refund」铁律的自动退款路+撤掉"每天靠人工拍停"的临时闸 = 缺陷修复;D-011 下内部双审走完即可上线。②' 止血闸在 r402 落地验证前不撤。NWT 当晚已独立复核两跳属实(handlePoolRefundRequest 只验身份 / dispatchRefund 零 betCount 检查)并给红队三关注点:检查插入时序 vs bet 写入 race / 幂等标记与新检查先后 / betCount>0 时静默 drop 还是显式报。
+- **③ KANet-UI**: 191∩705 交集 + 口径声明(6月161/7月30 按创建时间还是退款时间切,口径归他定);J1 那半在 `f1963558`。另报根目录杂散未跟踪文件(乱码名/.cpuprofile/.lock/tmp/)→ 裁定:**先盘点不删**(来历不明的文件先识别再动)。
+- **④ 🔴 Codex 早已审过 (115)——Bettor 20:09 断言「从未发过」错误,20:12 已公开更正**:
+  - 实况: bridge `responses/RESPONSE-20260731-UNSYNCED-WHY-INTEGRATE-KANET-ADVERSARIAL-CONCLUSION-CODEX-REVIEW.md`(bridge commit `55a8d8e6`,07-31T08:07Z,**早于 Owner 15:28Z 那句直令 7 小时**——是 Codex 对 unsynced commit 的主动 review,不走 TO-CODEX.md MSG 序列)。`source_blob 76f97c1f` == 当前 HEAD 该文档 blob(rev-parse 双向核过)⇒ 审的正是现行版本。
+  - verdict 要点(已转述回频道): ✅方向认可(判别式有用但不完整,须补状态转换/各域可验什么/新增信任假设);🔴打回三条——「跨域交割=唯一不可替代位置」不成立(另有 HTLC/adaptor/轻客户端/委员会等路);原子性不必然要求单一中立裁决域(须分四形态:单域裁决/密码耦合本地裁决/外部见证/非原子顺序);哈希锁原像链上公开=实质隐私缺陷(可复用密钥/凭证不适用)。📌下一步建议=立「fair-exchange 具体设计卡」(含与不经 KANet 的纯 HTLC/adaptor 方案对比),design-only,而非「无签字 escrow」这个框。**§7.1 仍待 Owner 拍,材料已齐。**
+  - 🔨 教训(枚举谓词选错,同族 memory 已有): 查「有没有给 Codex 看过」不能只 grep TO-CODEX.md `^## MSG`——bridge 有第二条通路(responses/ 主动 review)。memory `reference-codex-sync-github-bridge-method` 已补此坑。
+- **范围口径**: 回到 Owner 范围直令=只做模块化+外部程序接入;r402 按上述定性为缺陷修复例外,其余不开始。
