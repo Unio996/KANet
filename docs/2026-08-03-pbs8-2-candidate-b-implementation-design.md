@@ -1,12 +1,18 @@
-# PB-S8-2 候选 B 实现设计 v4 — handlePoolOracleTxSignReq 签名前跨市场替换+毛额守恒检查
+# PB-S8-2 候选 B 实现设计 v5 — handlePoolOracleTxSignReq 签名前跨市场替换+毛额守恒检查
 
-**Status: DESIGN v4(design-only,不构成授权边界)— 待 NWT 红队,未落码。红队缺位期间产出,任何后续落码必标「红队缺位·事后补核」。**
+**Status: DESIGN v5(design-only,不构成授权边界)— NWT 红队 v4 出 🔴 PUSH-BACK,本版逐条处置,未落码。**
 
-> **v4 一句话变更(Codex 第三轮 bridge `83db3897`,Bettor `#dhy77e.6` 转)**: 本设计的三个锚点**全部降级为「便宜的拒绝信号」(cheap rejection signal),永不得升格为签名授权条件**。检查通过**不表示**这笔交易的市场成员资格 / 前态身份 / payout 正确性得到确立。**全文按这条边界重新校准措辞,见 §10。** 归 J2(settler/pipeline 域)。v2 被 Codex 主动审(bridge `16b71707`,Bettor 16:22 转 `#dft8gn`)挑出 6 处代码级假设,其中 3 条重;另加一条 RPC 失败语义的不变量升级。**Bettor 裁定:在 §5 那 6 条收口证据齐之前,本设计不许以"授权边界"的名义冻结,可以继续以 design 推进——本版就是推进,不是冻结。** v1→v2→v3 的历史留在文件里,不覆盖。
+> **v5 一句话变更**: NWT 两条(commingled-spine 零防御 / 守恒只有上界无下界)全部采纳为 MUST-FIX;**而在实核 NWT 读数时撞到一条更靠前、他和 Codex 都没提的**——**三个锚点读的 `market.*` 列,在这个函数的 SELECT 里根本没被取出来**(§11.1,`MUST-FIX-0`)。它使 v3/v4 的锚点①恒真拒签、并使 NWT 建议的那行守卫 fail-open 成装饰。**v4 的三个锚点在落码层面全部不可用,必须先修 MUST-FIX-0。**
+
+> **v4 一句话变更(Codex 第三轮 bridge `83db3897`,Bettor `#dhy77e.6` 转)**: 本设计的三个锚点**全部降级为「便宜的拒绝信号」(cheap rejection signal),永不得升格为签名授权条件**。检查通过**不表示**这笔交易的市场成员资格 / 前态身份 / payout 正确性得到确立。**全文按这条边界重新校准措辞,见 §10。**
+
+归 J2(settler/pipeline 域)。v2 被 Codex 主动审(bridge `16b71707`,Bettor 16:22 转 `#dft8gn`)挑出 6 处代码级假设,其中 3 条重;另加一条 RPC 失败语义的不变量升级。**Bettor 裁定:在 §5 那 6 条收口证据齐之前,本设计不许以"授权边界"的名义冻结,可以继续以 design 推进——本版就是推进,不是冻结。** v1→v2→v3 的历史留在文件里,不覆盖。
 
 ## 0. 覆盖边界(按 Bettor 裁定的精确措辞,不许说满)
 
 > **本设计覆盖:跨市场替换 + 毛额守恒。不覆盖:市场内胜方之间的再分配(可以被任意重分配,包括全给攻击者一个地址)。**
+>
+> **🔴 v5 追加·已知不覆盖项(NWT 红队补,按"覆盖边界是等号不是上界"纪律显式写出)**:**近乎清零输出的退化交易**——毛额守恒只有上界(`outputTotal ≤ inputTotal`),`outputs=[]` 或总额远低于池面值的"烧钱型"交易**照样过锚点②**。v5 §11.3 给了处置(非空 + 启发式下界,拒签+高噪),但**在该项落码前,本设计对这一类零覆盖**。
 >
 > **🔴 v4 追加(Codex 第三轮硬边界,优先于本节其余措辞)**:上面这行说的"覆盖"**指的是"能便宜地拒掉哪一类明显不对的东西",不是"这一类攻击已被堵死"**。三个锚点**全部**只是拒绝信号;**它们全过 ≠ 可以安全签名**,也不确立市场成员资格、前态身份、payout 正确性中的任何一项。理由见 §10.1(不是保守表述,是这一层检查的结构性上限)。
 
@@ -309,3 +315,115 @@ v3 §6.2 把"要不要为核完整输入集而新引入本地 `pool_bettor_sides
 
 - §8 六条**一条不减**。**尤其第 4/5 条(handler 级测试)今天仍未写** —— 本轮是设计层校准,不是证据层推进,**不许把 v4 记成"又推进了一格"**。
 - **新增记录(卡② 侧,与 §8 第 4 条有交集)**:Codex 同轮列出卡② 仍未关闭的七项——DB 异常与重试分类 / 重复同结果行 / 结果冲突即 equivocation / 同序并列与规范链上排序 / 陈旧或重放的投票回执 / **winner 对但 `phase2_tx_obj` 被篡改** / **自动纳入常规回归 runner**。其中**第 6 项正是 B 的靶心**(winner 方向对、tx 内容被改),**第 7 项**照 (133) 口径:**"可执行" 不得报成 "持续覆盖"** —— `npm run test:pbs8-handler` 仍在 runner 扫描面之外。
+
+---
+
+## 11. v5 修订(NWT 红队对 v4 `b2922d82` 出 🔴 PUSH-BACK,逐条处置)
+
+> NWT 结论原话:「commingled-spine 这条不解决前,不建议给这份设计任何 GREEN 字样」。**本版不自称 GREEN。**
+> 处置顺序按**落码依赖**排,不按提出顺序:**MUST-FIX-0 是另外两条的前置**——不先修它,MUST-FIX-1 的守卫会 fail-open 成装饰。
+
+### 11.1 🔴 MUST-FIX-0(J2 自查,在实核 NWT 读数时撞到;NWT 与 Codex 三轮均未提,Bettor 18:28 独立点到同一处)
+
+**事实(实读,非推断)**:`kasia-console/src/services/trade-protocol-filter.js:552-554`,`handlePoolOracleTxSignReq` 载入 market 的那条查询逐字是:
+
+```js
+const market = sqlite.prepare(
+  'SELECT id, protocol_status, metadata FROM pool_markets WHERE id = ?'
+).get(msg.market_id);
+```
+
+**⇒ 本设计三个锚点读的列,一个都不在这个 row 上**:锚点① 读 `market.spine_lock_tx`、锚点② 读 `market.spine_p2sh` 与 `market.maker_relay_id`(IPC 目标)。三者在 `pool_markets` 表里**都存在**(实核 `PRAGMA table_info`:`spine_p2sh`/`spine_lock_tx`/`protocol_version`/`maker_relay_id` 全在),**但没有被 SELECT 出来** ⇒ 在决策那一刻全是 `undefined`。
+
+🔴 **同一个漏读,在两处产生方向相反的坏,这是本条最该记住的地方**:
+
+| 位置 | `undefined` 之后发生什么 | 方向 |
+|---|---|---|
+| 锚点①(v3 §1) | `firstInput.previousOutpoint.transactionId !== undefined` **恒真** ⇒ **对每一个市场恒 `continue`** | **fail-closed 到极端 = 全线停签** ⇒ 顺 §3 那条路撞 `pool-market-settler.js:1149`(`collecting_sigs` 超时 ⇒ 强制 cancel + maker refund)⇒ **把"加一层检查"变成"全网市场自动退款" |
+| NWT 建议的 `isCommingledSpine(market.spine_p2sh, sqlite)` | `pool-commingle-detect.mjs:40` 逐字 `if (!spineP2sh) return false` ⇒ 守卫**永远返回"不是 commingled"** | **fail-open = 装饰守卫**,而日志上与"检查过了、确实干净"**完全同形** |
+
+**⇒ 判据(记进本设计,也建议进 ANTI-PATTERNS)**:**加守卫时必须核"守卫在决策那一刻真的读得到它要判的那个值"** —— 值在表里 ≠ 值在对象上。同族 memory `feedback-verify-value-source-checker-must-access-binding-at-decision-time`;而**它这次的新形态是"同一个漏读同时制造永远拒与永远过"**,任何只看其中一侧的复核都会漏掉另一侧。
+
+**修法(v5 落码第一步,先于 11.2/11.3)**:
+
+```js
+// v5 MUST-FIX-0: 三个锚点 + commingle 守卫读的列必须真被取出来, 否则一侧恒拒、一侧恒过(见 §11.1 表)
+const market = sqlite.prepare(
+  `SELECT id, protocol_status, metadata,
+          spine_p2sh, spine_lock_tx, protocol_version, maker_relay_id
+     FROM pool_markets WHERE id = ?`
+).get(msg.market_id);
+if (!market) { /* 原有 not-in-local-DB 分支不动 */ }
+// 🔴 取出来 ≠ 有值: NULL 列会让下面每一条检查静默退化(commingle 守卫尤其 fail-open)。
+//    ⇒ 缺任一承重列 = 本机没有判断资格 ⇒ 不签(弃权), 不是"跳过这层检查继续签"。
+for (const col of ['spine_p2sh', 'spine_lock_tx', 'maker_relay_id']) {
+  if (!market[col]) {
+    console.error(`[trade-filter:sign-req] PB-S8-2 弃权: market 缺承重列 ${col} ⇒ 本机无判断资格, 不签 market=${market.id.slice(0,12)}`);
+    return;
+  }
+}
+```
+
+**这条"缺列 ⇒ 弃权不签"与 Bettor 18:24 裁定同源**(cannot-verify ⇒ 弃权、零授权、**不得回落到 B 取得签名资格**)——**读不到判据的值也是一种 cannot-verify**,不许降级成"那就不查这层了"。
+
+### 11.2 🔴 MUST-FIX-1(NWT 主攻):commingled-spine 攻击族,v4 三锚零防御 —— **采纳**
+
+**NWT 的读数我逐处复核,全部成立**:
+- `pool-commingle-detect.mjs` 是 FINDING-2 单源守卫,判据 = `spine_p2sh` 被 >1 个 `protocol_version='v0.7'` 市场共享;已有两处独立设防(`bshard-close-voter.js:297` 签名前拒 / `pool-market-settler.js:407` 结算前 route-to-refund)。
+- 本函数的 market 查询**零 `protocol_version` 过滤**(见 11.1),且由 inbound 广播的 `msg.market_id` 驱动。
+- 叠加后的攻击面**逐条对上本设计的锚点**:锚点① 只比 `inputs[0]` 与 **market A 自己的** `spine_lock_tx:0`(过);锚点② 查的是 `get_address_utxos(market.spine_p2sh)`,而 **commingled 市场共享同一个 `spine_p2sh`** ⇒ market B 的 UTXO 一并返回 ⇒ 指向 market B 的额外输入被 `inputsAllMatched` 判真、面值计入 `inputTotalSompi` ⇒ **market B 的钱抬高了 market A 的"合法输入总额",毛额守恒对这一族当场失效**。
+
+🔴 **本机实数据(J2 现查 `data/console.db`,只读)——这不是理论面**:`protocol_version='v0.7'` 市场 **3700** 个;**当前有 49 组 commingled spine**,最大一组 **97 个市场共享同一 `spine_p2sh`**(另有 46 / 41 / 7 / 7 / 6 / 6 …)。⇒ 一个 97 市场的共享地址上,锚点② 的"链上真值"**天然混着 96 个别的市场的钱**。
+
+**处置:采纳为 v5 MUST-FIX,插在锚点序列最前面**(镜像 `bshard-close-voter.js:297` 已验证过的做法,import 单源函数不内联——`lint-kanet` R-COMMINGLE-GUARD 会拦内联):
+
+```js
+import { isCommingledSpine } from '../lib/pool-commingle-detect.mjs';  // 单源, 禁内联 SQL
+// v5 MUST-FIX-1 (NWT): commingled spine ⇒ 同址混着别市场的钱, 锚点②的"链上真值"不可用 ⇒ 不签。
+// 🔴 前置: 必须先做 MUST-FIX-0, 否则 market.spine_p2sh=undefined ⇒ 本守卫恒返 false = 装饰(§11.1)。
+if (isCommingledSpine(market.spine_p2sh, sqlite)) {
+  console.error(`[trade-filter:sign-req] PB-S8-2 拒签: spine_p2sh 为 commingled(FINDING-2, >1 个 v0.7 市场共享同址)⇒ 同址 UTXO 混入别市场资金, 毛额守恒不成立 market=${market.id.slice(0,12)}`);
+  continue;
+}
+```
+
+**📌 一并改正 §1 的一句话**:v3 §1 写"这正是 predictions domain 里 FINDING-2 同一攻击家族在签名端的镜像"——**在 v4 之前那是概念上认领、代码上没接住**(NWT 原话)。**v5 之后这句话才成立,而它成立的原因是这一行,不是原来那三个锚点。** 引用时别把 v3/v4 也算进去。
+
+### 11.3 MUST-FIX-2(NWT 次要):守恒只有上界、没有下界 —— **采纳,二选一里两个都做**
+
+**成立**:`outputTotalSompi > inputTotalSompi` 才拒 ⇒ `outputs=[]`(总额 0)或总额远低于池面值的**烧钱型退化交易**,在 spine input 合法时**直接过锚点②**。
+
+**处置(Bettor 18:28 要求"不许留白",故两侧都写死)**:
+1. **§0 已显式追加这条已知不覆盖项**(见本文件 §0 v5 段)——落码前它就是零覆盖,写清楚而不是说满。
+2. **落码补两条**,按 §1 锚点③"启发式 ⇒ 拒签 + 高噪告警、不当协议常量"的同一纪律:
+
+```js
+// v5 MUST-FIX-2 (NWT): 守恒只有上界 ⇒ 烧钱型退化 tx 照过。补非空 + 启发式下界。
+// 🔴 下界是启发式不是协议常量: 真实下界 = 池面值 - (miner fee + 各类 fee/bond), 而这些参数
+//    本机可得性未核(§1 未决参数, 等候选 A 一起查)⇒ 现在只挡"明显不成比例", 不假装能算准。
+if ((phase2TxObj.outputs || []).length === 0) {
+  console.error(`[trade-filter:sign-req] 🔴 PB-S8-2 拒签+高噪: outputs 为空 = 全额烧掉 market=${market.id.slice(0,12)}`);
+  continue;
+}
+const MIN_OUTPUT_RATIO_NUM = 90n, MIN_OUTPUT_RATIO_DEN = 100n; // 启发式: 派彩总额不应低于输入的 90%
+if (outputTotalSompi * MIN_OUTPUT_RATIO_DEN < inputTotalSompi * MIN_OUTPUT_RATIO_NUM) {
+  console.error(`[trade-filter:sign-req] 🔴 PB-S8-2 拒签+高噪: outputs 总额 ${outputTotalSompi} 低于输入 ${inputTotalSompi} 的 90%(启发式下界, 非协议常量)— 可能是烧钱型退化 tx, 也可能是本阈值/费用模型过期, 两者都需要人看 market=${market.id.slice(0,12)}`);
+  continue;
+}
+```
+   - **90% 这个数字同 64+10 一样是启发式**,红队/Bettor 可改;**它唯一的正当性是"拒绝信号"级别**(v4 §10.1),永不得被引用为"派彩金额已校验"。
+   - ⚠ **已知代价(如实标)**:若真实 fee/bond 占比超过 10%,这条会**误拒合法结算** ⇒ 又是 §3 那条通向 `:1149` 的路。**⇒ 落码前必须先把 §1 那组未决参数(oracleBond/minerFee/oracleCount)查出实际量级**,不能凭 90% 上线。**这是本条的落码前置,不是可选项。**
+
+### 11.4 Bettor 18:24 裁定入档(§10.4 上报的行为分岔已裁,本节记结论)
+
+- **裁定 = 采 J2 判断(Codex 收窄)**:`cannot-verify` ⇒ **弃权不签、零授权,不得回落到候选 B 取得签名资格;B 永远只有拒绝权。**
+- 决定性理由(Bettor 原话):回落会把 (136)「弃权率≈100% 当缺陷」硬要求**静默吃掉**——弃权被回落吸收、指标永远好看,正是"永远弃权与永远通过同形"的复刻。
+- **(134)「退化到 B 级检查」原文不动,已补作用域注**(= B 继续跑,只有拒绝权)。
+- **§10.3 照准**:维持只核 spine outpoint + 毛额守恒,不新增 `pool_bettor_sides` 依赖。
+- **代价记账**(Bettor 收下):弃权变多 ⇒ 流量压向 `:1149` —— **这是 P1 卡「验不成 ≠ 可以退款」该更早落地的理由,不是保留回落的理由。**
+
+### 11.5 v5 之后仍未推进的(不许被记成推进了一格)
+
+- §8 六条冻结前置**一条没减**;**第 4/5 条 handler 级测试仍未写**——而 v5 新增了三条必须被这些测试覆盖的行为(缺列弃权 / commingled 拒签 / 下界拒签)。**⇒ 测试面变大了,不是变小了。**
+- 11.3 的 90% 下界**有落码前置未做**(§1 未决参数实测)。
+- 本设计仍是 **DESIGN-ONLY,零生产代码改动**;NWT 已明确「commingle 闭前不得带 GREEN 字样」,v5 自身不主张 GREEN。
