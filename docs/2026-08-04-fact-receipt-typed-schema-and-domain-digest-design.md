@@ -1,4 +1,9 @@
-> **Status**: DRAFT v0.1 — J1 主笔 · 待 J2 审 → NWT 红队 · **design-only,零实现授权**
+> **Status**: DRAFT v0.2 — J1 主笔 · **J2 已审:方向 PASS + 3 处必改(本版逐条改完)** · 待 NWT 红队 · **design-only,零实现授权**
+> **v0.2 变更**(J2 review `#fffa41`…`#d73646`,三条我逐条独立复核后确认全部成立):
+> ① **承重**:`supersedes.prior_threshold` / `prior_committee_set_id` 改为**验证方独立查得**,wire 值不采信(§2.1)——原稿让 NWT 的 MUST-FIX ⑩ 只落一半。
+> ② `committee_set_id` **不再复用** `committee_pk_hash`(它是**有序序列**摘要且**无长度前缀**),改为本 schema 自定义(§2.3)。
+> ③ 删掉写死的键数(原稿两个数字都错),改成「= 下表全部键」(§2)。
+> 🔴 **④ 一处我自己写反了的,不是 J2 提的,是我照他给的 file:line 追下去发现的**:v0.1 把 feeRules canonicalize 当成「要躲的坑」——**实际本仓早已关掉它,而且正是用本稿 §3-2 那条规则关的**(见 §1-bis)。**这处更正的方向对我不利:我原以为自己在提出一条纪律,其实是在复述一条已被红队逼出来的既有纪律。**
 > **授权**: Bettor 2026-08-04 派工(`#dkt3k1`,ledger (139)补6 `49608682`)= **D-012 §6-1 冻结前置①「typed attestation schema + 域分隔摘要」**。NWT 18:42Z 明确"没越边界"。
 > **上位文本**: `docs/2026-08-03-oracle-skill-interface-permission-boundary-freeze-design.md` v0.5(`bc04f817`,NWT 已 GREEN)§2.1 十类绑定字段。
 > **作者**: J1tn · 2026-08-04 · 全部 file:line 与外部原语现读核实(非记忆)
@@ -28,9 +33,31 @@
 
 🔨 **判据**:**"我们没有这个能力"必须先去查,再决定造不造。** 本稿唯一真正新增的是 §4 的域分隔摘要与 §2 的字段表;其余全是复用。若审的人发现我这里重造了什么,请当缺陷提。
 
+### §1-bis 🔴 v0.2 自我更正:**那个"要躲的坑",本仓早已关掉,而且是用本稿 §3-2 那条规则关的**
+
+v0.1 把 Bettor 点名的 feeRules 坑(canonicalize 静默剥未知字段 ⇒ 不同载荷同 commit)当成**我要防的东西**。**追下去发现方向写反了**——
+
+| 读数(现读) | 出处 |
+|---|---|
+| `validateFeeRules` **顶层键白名单**,未知键 `throw` | `kasia-console/src/lib/fee-split.mjs:84-86` |
+| **role 级键白名单**,未知键同样 `throw` | `:100-102` |
+| 而它的注释**就是那次事故的判词** | `:81-83` 原文:「🔴 strict whitelist(NWT 落1 红队 F1, CONFIRMED repro): 未知键必 fail-loud——canonicalize 只拾取已知键,**未知键若放行会被静默剥除 → 两份语义不同的 feeRules 同 commit(链上 commit 验证被旁路)**。白名单强制"加字段必 bump schema_v"**从流程纪律升为机制**」 |
+| 🔴 **而 §3-2 那条顺序约束,这里已经是活实例**:`canonicalizeFeeRules` 的**第一行**就是 `validateFeeRules(feeRules)` —— **先验后规范化,不是并列关系** | `:146-147` |
+| 摘要族也一致 | `:162 computeFeeRulesCommit = blake2b-256(canonicalizeFeeRules(...))` |
+
+⇒ **三个后果,都得说**:
+1. **本稿 §3-2 不是我提出的新纪律,是我在复述一条已被红队逼出来、已升为机制的既有纪律。** 冻结文本应当**引它**而不是另立一条(承 §1 同一立场)。**这处更正的方向对我不利,但它让 §3-2 从"设计主张"变成"已有先例",反而更硬。**
+2. **本仓有一条我可以直接抄的措辞**:「**加字段必 bump schema_v** 从流程纪律升为机制」⇒ FactReceipt 的 `schema_version` 应当写同样的话:**扩字段必 bump 版本,禁静默附加。**
+3. ⚠ **一处必须分清、免得有人"顺手修错东西"**:`computeFeeRulesCommit` **没有长度前缀,而它不需要** —— 它 hash 的是**单个字符串**,不存在拼接歧义。§4 要求 LP 的是**拼接多段**的场合(域标签 ‖ 载荷、N 个 pk 相连)。**"哪里需要 LP"的判据是"有没有拼接",不是"是不是哈希"。**
+
 ## §2 FactReceipt wire schema(v0.5 §2.1 十类 → 具体字段)
 
-**顶层对象恰好 17 个键,多一个少一个都拒。** 类型列即 `validateEnvelopeStructure` 式的严格类型。
+**顶层对象的合法键集 = 下表全部键,多一个少一个都拒。** 类型列即 `validateEnvelopeStructure` 式的严格类型。
+
+> 🔴 **v0.2 改(J2 必改③,我自己数过确认他对)**:v0.1 在这里写死了一个键数,并在表后又写了一个行数 —— **两个数字互相不符,而且都与下表对不上**。
+> ⚠ **本注刻意不复述"正确的数字是多少"** —— 写上去就又造了第三份会漂的副本(这正是 J2 指出的那条)。**要数,去数下表。**
+> **在一个「多一个少一个都拒」的 schema 里,这个数字是规范性的**:照 17 实现的人会**拒掉每一份合法 receipt**,而 §6 的 1-15 条**全绿** —— 正是 §6-16 那条阴性对照要挡的形态。**我自己写的稿子里,自己踩了自己立的那个坑。**
+> ⇒ **处置:正文不再出现任何键数字面量,唯一真相是下表。** 理由同今天全队在数的那条:**同一事实存两份,必有一份陈。**
 
 | 键 | 类型 | 对应 §2.1 类 | 说明 / 取值约束 |
 |---|---|---|---|
@@ -54,17 +81,29 @@
 | `policy_version` | string | ⑨ | P2 期望的策略/解释版本 |
 | `signature` | string | — | 签名本身;**不进签名消息**(§4) |
 
-> 上表 18 行含 `signature`;**签名消息覆盖的是去掉 `signature` 之后的 17 个键**。
+> **签名消息覆盖的是上表去掉 `signature` 之后的全部键**(不写数字,见上方 v0.2 注)。
 
 ### §2.1 🔴 第 ⑩ 类(supersede 授权门槛)怎么落进 schema
 
 v0.5 §2.1 第 ⑩ 类要求:**supersede 的签名门槛与集合身份必须等于或高于被取代那一份,且必须显式核对同一 committee epoch。序号更晚不构成授权。**
 
-⇒ 落法:`supersedes` 非 null 时,**验证方必须**做且只接受以下全部成立:
-1. `supersedes.prior_committee_set_id` **等于**被取代那份 receipt 的 `committee_set_id`(不是"两份都有值"就算);
-2. 本份的有效签名数 **≥** `supersedes.prior_threshold`;
-3. 本份 `committee_epoch` 等于被取代那份的 `committee_epoch`(跨 epoch 更正**不由本 schema 授权** —— 它是另一件事,须独立授权);
-4. `supersedes.receipt_digest` 等于被取代那份的**摘要**(§4 定义的那个),**不是** market_id/nonce 之类的间接指认。
+> 🔴 **v0.2 承重修正(J2 必改①,我复核成立)**:v0.1 把 `prior_threshold` 与 `prior_committee_set_id` 放在 wire 上、由**新 receipt 自己填**。
+> **⇒ 条件 2 当场空转**:攻击者填 `prior_threshold: 1`,「本份签名数 ≥ prior_threshold」就变成「≥ 1」——**一个签名 supersede 掉一份 4-of-5 的 receipt。**
+> 🔨 **判词(值得单记)**:**NWT 的 MUST-FIX ⑩ 我只落了一半 —— 门槛写进了 wire,却没写「这个数从哪儿取」。一个由被检查方提供的门槛,不是门槛,是建议。**
+> ⇒ **处置**:这两个值**必须由验证方独立查得**,wire 值**不作为判据**。承载物 = `pool_committee.threshold`(列存在,见 §8 作用域注)。
+
+⇒ 落法:`supersedes` 非 null 时,**验证方必须**做且只接受以下全部成立。
+**记号**:`LOOKUP(x)` = 验证方**自己从本地权威表查得**的值;`WIRE(x)` = receipt 里带的值。**判据一律只用 `LOOKUP`。**
+
+1. `LOOKUP(prior.committee_set_id)` **等于** `LOOKUP(本份.committee_set_id)` —— 两边都是查出来的,不是读出来的(不是"两份都有值"就算);
+2. 本份的**有效签名数** ≥ `LOOKUP(prior.threshold)`(= `pool_committee.threshold`);
+3. `LOOKUP(prior.committee_epoch)` 等于本份 `committee_epoch`(跨 epoch 更正**不由本 schema 授权** —— 它是另一件事,须独立授权);
+4. `supersedes.receipt_digest` 等于被取代那份的**摘要**(§4 定义的那个),**不是** market_id/nonce 之类的间接指认。**这一项是 wire 值,但它无害**:它只用来**指认**被取代的对象,指错了就查不到、直接拒;它不参与任何门槛判定。
+
+🔴 **wire 上的 `supersedes.prior_threshold` / `prior_committee_set_id` 怎么办(二选一,我给推荐)**:
+- **推荐:从 wire 删掉**(纯派生)。少一个字段就少一处"看起来是判据、其实不是"的东西 —— 而**这种东西正是今天全队在数的失效形状**。
+- 若为可读性保留:schema 必须**明文写死**「wire 值仅作冗余展示,**与 `LOOKUP` 冲突时必须拒**(不是以 LOOKUP 为准继续,是拒)」。冲突意味着有人在撒谎或者数据不一致,**两种都不该放行**。
+- 🔨 **通则**:**任何"门槛/资格/权限"类的数,不得由被检查的那一方提供。** 它若出现在被检查对象里,只能是冗余,且冲突必拒。
 
 🔴 **schema 层必须写死的一句**:**`nonce` 与 `validity` 的先后关系,在任何情况下都不构成 supersede 授权。** 排序只决定"哪一份更晚",授权由上面四条决定。
 🔨 判据(承 v0.5):**「更正」是一次与原件同权的授权动作,不是一次记账动作。**
@@ -79,12 +118,39 @@ v0.5 §2.1 第 ⑩ 类要求:**supersede 的签名门槛与集合身份必须等
 ⇒ 这就是 v0.5 §2 P1 判据「**字节里没有逐方分配**」在 wire 层的落地形态:**固定 (事实, `policy_version`) 之后,分配完全不由 FactReceipt 决定。**
 ⚠ 承 D-012 §2-bis 注:**receipt 内不得含交易摘要** —— 含了,上面这条不变量当场失效。
 
+### §2.3 🔴 `committee_set_id` 的定义(v0.2 新增 · J2 必改②,我复核成立且他这一击很准)
+
+v0.1 提议直接复用 `pool_committee.committee_pk_hash`。**不能用**,两条独立理由:
+
+| 读数(现读) | 出处 |
+|---|---|
+| `computeCommitteePkHash = blake2b(Buffer.concat(committeePks.map(hex→Buffer)))` —— **纯拼接,零长度前缀** | `kasia-console/src/services/bshard-close-voter.js:573-576` |
+| **委员顺序 = SELECTION 序,明确不 sort**,且这是链上要求(relay 侧按 slot 配 sig↔pk,checkSig 逐 slot 依赖原序) | 同文件 `:561-563` 注释原文「committee slot 序 = SELECTION 序(不 sort)」;`p2sh.mjs:1981` |
+
+⇒ **后果一(可用性)**:它是**有序序列**的摘要,**不是集合的承诺**。同一批委员换个选择序 ⇒ 不同 hash ⇒ §2.1 条件 1 会**误拒一份合法的 supersede**(假阴)。
+⇒ **后果二(而这条打中我自己)**:🔴 **它正是我 §4 花一整段论证"不可省"的那个 LP 的反例。** 它今天安全**只因为输入恰好是定长 32 字节 x-only pk —— 而这一点在函数里没有任何校验**。
+🔨 **判词**:**"我复用了既有资产"不能顺带继承一个我刚论证过不该有的形状。** 复用是对的,**复用的边界是"这份资产满足我刚立的判据吗"** —— 我没问这一句。
+
+**⇒ 处置:FactReceipt 自定义 `committee_set_id`,与链上那个有序 hash 并存、用途分开、不互换。**
+```
+pks_sorted = 按字节序升序排序的成员 x-only pk(小写 hex → 32B)
+committee_set_id = blake2b256( LP("kanet.oracle.committee-set.v1") || LP(pks_sorted[0]) || … || LP(pks_sorted[n-1]) )
+```
+- **排序** ⇒ 它承诺的是**集合**,与选择序无关(这正是 §2.1 条件 1 需要的语义);
+- **逐项 LP** ⇒ 拼接无歧义,不依赖"输入恰好定长"这个未被校验的前提;
+- **域标签** ⇒ 不会与链上那个有序 hash 在任何上下文里互相冒充。
+- 🔴 **两者必须都留,不许合并**:链上那个**必须**保持选择序(checkSig 依赖它);本 schema 这个**必须**排序(它答的是"是不是同一批人")。**同一批 pk 的两个哈希,答的是两个不同的问题。**
+
+📌 **顺带一条给别人的,不归本稿改**:`computeCommitteePkHash` 对入参**没有宽度校验**,其正确性依赖"调用方总是传 32B pk"这个约定。**这是隐患不是缺陷**(今天没有非 32B 的调用路径),但**它没有守卫**。要不要补校验归 J2 域,我只报读数。
+
 ## §3 规范化规则
 
 1. **序列化**:`canonicalJson`(`shared/lib/app-envelope-canonical.mjs:45`)语义逐字节相同 —— 键递归字典序、字符串走 `JSON.stringify` 转义、`number` 必须有限、`undefined`/`NaN`/`Infinity`/`BigInt`/函数一律 `throw`。
 2. 🔴 **顺序是硬约束:先 strict-reject 验结构,后 canonicalize。任何情况下不得先规范化再校验。**
    **理由不是洁癖**:规范化的失败形态**不是"算错了"**,是**"两份不同的东西被算成同一个"** —— 而它在日志里与成功**完全同形**(今天全队在数的那一族)。把校验放在后面,等于让一份非法载荷先获得一个合法摘要。
-3. **未知字段必拒**(不是忽略、不是剥掉、不是警告)。**这条写在 schema 本体里,不留给实现层手感** —— Bettor 点名的 feeRules 坑(canonicalize 静默剥未知字段 ⇒ 不同载荷同 commit)正是"留给了手感"的产物。
+   🔵 **v0.2:本仓已有活实例,冻结文本应当引它而不是另立一条** —— `fee-split.mjs:146-147`,`canonicalizeFeeRules` 的**第一行**就是 `validateFeeRules(feeRules)`。**先验后规范化在本仓不是主张,是已落地的机制**(见 §1-bis)。
+3. **未知字段必拒**(不是忽略、不是剥掉、不是警告)。**这条写在 schema 本体里,不留给实现层手感。**
+   🔴 **v0.2 更正**:v0.1 说 feeRules 坑是"留给了手感"的产物 —— **说反了**。本仓 `fee-split.mjs:84-86/100-102` 早已用顶层 + role 级双层白名单把它关掉,且注释自陈是 **NWT 红队 F1 CONFIRMED repro** 逼出来的,原话是「白名单强制"加字段必 bump schema_v"**从流程纪律升为机制**」。⇒ **本条照抄那句措辞**:FactReceipt **扩字段必 bump `schema_version`,禁静默附加。**
 4. **缺字段必拒 / 类型错必拒 / 定值字段值不符必拒**(`protocol`/`domain`/`schema_version`)。
 5. **嵌套对象同样 strict**:`observation_anchor` / `validity` / `supersedes` 各自是**恰好那几个键**的封闭集合,不允许扩展。
 6. **数值纪律**:除 `schema_version` 与 `supersedes.prior_threshold` 外,**一切"大数"用十进制字符串**(DAA、epoch、state_version)。理由:JSON `number` 是 IEEE754,超 2^53 静默失真 —— 又一个"失败长成合法答案"。字符串侧用 `^(0|[1-9][0-9]*)$` 严格匹配,**禁前导零、禁正负号、禁空串**。
@@ -154,16 +220,28 @@ receipt_digest = blake2b256( LP(DOMAIN) || LP(signing_bytes) )
 
 🔴 **第 16 条不是凑数**:前 15 条全是"必须拒"。**一个把所有输入都拒掉的实现能让 1-15 全绿。** 没有 16,这套用例挡不住一个恒拒的实现。
 
+**v0.2 新增(对应本版三处必改,不加用例 = 改了但没人守)**:
+
+| # | 用例 | 必须红在 |
+|---|---|---|
+| 17 | supersede:wire 带 `prior_threshold: 1`,而 `LOOKUP(threshold)=4`,本份只有 1 个有效签名 ⇒ **必须拒** | §2.1 条件 2 只认 `LOOKUP`(**这条就是必改① 的守卫;删掉"只认 LOOKUP"这一步,它必须自己变红**) |
+| 18 | supersede:wire 的 `prior_committee_set_id` 与 `LOOKUP` 不一致 ⇒ **必须拒**(不是"以 LOOKUP 为准继续") | §2.1 冲突必拒 |
+| 19 | 同一批委员、**两种不同选择序** ⇒ `committee_set_id` **必须相同**(正向用例) | §2.3 排序语义;**用 `committee_pk_hash` 实现会红** —— 这正是换掉它的原因 |
+| 20 | 构造两组**不同**的 pk 序列,使其**无 LP 拼接**后字节相同 ⇒ 两者 `committee_set_id` **必须不同** | §2.3 逐项 LP(**阴性面**:照 `computeCommitteePkHash` 那种裸 concat 实现会红) |
+| 21 | 顶层多一个键但**未 bump `schema_version`** ⇒ 必须拒,且拒因须指向"扩字段必 bump 版本" | §3-3 措辞(照抄 `fee-split.mjs:81-83`) |
+
+🔨 **20 条的写法要注意**:它需要**构造**一对碰撞输入(如 `[AB, C]` 与 `[A, BC]` 在裸 concat 下同字节)。**这正是 `[[feedback_prove-volatility-by-construction]]` 那条 —— 证"它会变/它会撞"只能靠构造,不能靠"我没见过"。**
+
 ## §7 诚实标注:今天没有承载物的字段
 
 **schema 要求它在 ≠ 今天有东西能填它。** 这一格最容易被读成"已推进一格",所以单列:
 
 | 字段 | 今天的状况(现读) |
 |---|---|
-| `market_state_version` | **无承载物**。今天没有一个单调的市场状态版本可引。**不得**拿 `protocol_status` 顶替(它是枚举不是版本) |
-| `committee_epoch` | **无承载物**。`bettor-prediction-voter.js` 的 `unsignedPayload` 里有 `epoch: 1` 硬编码常量 ⇒ **是占位不是 epoch** |
-| `committee_set_id` | 有**近似**承载物 `pool_committee.committee_pk_hash`;是否满足"集合标识"的语义须 J2 判 |
-| `policy_version` | **无承载物**。费率/政策今天没有版本标识 |
+| `market_state_version` | **无承载物**。今天没有一个单调的市场状态版本可引。**不得**拿 `protocol_status` 顶替(它是枚举不是版本)。🔴 **v0.2 补(J2 给的诱饵排除,值钱)**:也**不得**拿 `pool_markets.market_metadata_hash` 顶 —— 它是**创建期**身份哈希(`pool.js:703` create 路径算),**不随状态变**;拿它当"状态版本"正踩在册那条「创建期静态字段 ≠ 当前链上状态」。**这条不是补充,是给下一个实现的人拆掉一个最像的陷阱。** |
+| `committee_epoch` | **无承载物**(定性不变)。`bettor-prediction-voter.js` 的 `epoch: 1` 是**硬编码常量 = 占位不是 epoch**。🔵 **v0.2 补近似物**:`pool_committee.vrf_seed` + `sampled_at` —— 它们标识**"哪一次抽样"**,不是单调 epoch;**记在这里免得下一个人再找一遍**。 |
+| `committee_set_id` | 🔴 **v0.2 改定性**:`committee_pk_hash` **不可用**(有序序列 + 无 LP,见 §2.3)⇒ 本 schema **自定义**该值,承载物 = `pool_committee.committee_pks`(存在) |
+| `policy_version` | 🔴 **v0.2 更正:有实承载物,v0.1 说"无"是错的**(J2 指出,我实读确认)。`kasia-console/src/lib/fee-split.mjs:146 canonicalizeFeeRules()` + `:162 computeFeeRulesCommit = blake2b-256(canonical(feeRules))`,落在 `pool_markets.fee_rules`,并配 lint `R-FEERULES-CANON-BYPASS` 封旁路。**摘要族与 §4 选的一致。** ⇒ **至少费率政策这一层今天就能填。**(⚠ 作用域:这覆盖的是**费率**政策;`policy_version` 若还要覆盖别的解释规则,那部分仍无承载物。) |
 | `observation_anchor` | 方法论已成文(frozen_evidence / `predicate.data_source_canonical`),**字段无承载物** |
 | `supersedes` | **无承载物**,今天不存在更正机制 |
 
@@ -177,14 +255,21 @@ receipt_digest = blake2b256( LP(DOMAIN) || LP(signing_bytes) )
 | §4 SilverScript 有 blake2b、grep 不到 sha256 原语 | `[CONFIRMED·外部文档实读]` `/d/silverscript/docs/TUTORIAL.md:824`;**作用域**:只覆盖 `docs/DECL.md`+`TUTORIAL.md` 两份,**未读编译器源码** |
 | §5 `ecdsa_sign` 通用盲签 + 六个调用点 | `[CONFIRMED·源码实读]` `relay.mjs:638-652` 等,file:line 见表 |
 | §7 各字段无承载物 | `[CONFIRMED·grep 实读]`,**但"无承载物"是全称否定** ⇒ 作用域 = 我搜过的路径;J2 若知道别处有,请当缺陷提 |
+| §1-bis / §3-2 既有先例(`fee-split.mjs:81-86/100-102/146-147/162`) | `[CONFIRMED·源码实读]` — v0.2 我照 J2 给的 file:line 追下去自查,**并因此更正了自己 v0.1 的方向** |
+| §2.3 `computeCommitteePkHash` 裸 concat 无 LP + 选择序不 sort | `[CONFIRMED·源码实读]` `bshard-close-voter.js:561-563/573-576` |
+| 🔴 `pool_committee.threshold` 的**值** | **`[UNVERIFIED-ON-THIS-NODE]`** —— **列存在**(我 `PRAGMA table_info` 现查),但**我这台库里 `pool_committee` 是 0 行**,J2 报的"样本 = 4"是**他机器上的读数,我复现不了**。⇒ **"承载物在库里"我只能确认到 schema 层,不到数据层。**(同 [[project_j1tn-boot-0801]] 那条:我这台是远端节点,多张表结构性为空。) |
 | **本稿 §2/§3/§4/§6 全部** | **`[DESIGN-ONLY·零实现·未审]`** —— schema 不存在于代码,用例一条没写。**本稿不使冻结前置① 从 OPEN 变 CLOSED。** |
 
 ## §9 交审点名
 
-1. **@J2**:①`committee_set_id` 用 `committee_pk_hash` 够不够(它是**选择序**哈希,而 §2.1 条件 1 要的是集合身份 —— 选择序不同但集合相同时会不会误判)?②§7 那几个"无承载物"里,有没有哪个其实你域内已有?
-2. **@NWT(红队)**:请优先攻 **§5** —— 我主张"域分隔在 `ecdsa_sign` 面前不是防线"。若你认为我把域分隔的作用**说小了**(它其实能挡住某类蓄意构造),请给反例;反之若你认为 §6 那 16 条里**缺一条能让整套用例全绿而实现仍然错**的,那条比什么都值钱。
+1. ✅ **@J2 已答并已并入 v0.2** —— ①`committee_pk_hash` **不够**(有序 + 无 LP)⇒ 改 §2.3;②`policy_version` **有**承载物 ⇒ 改 §7,并收下他排除的诱饵(`market_metadata_hash` = 创建期哈希)与补的近似物(`vrf_seed`/`sampled_at`)。**三处必改我逐条独立复核后确认全部成立,无一条照单全收**(键数我自己数了 19 行、`computeCommitteePkHash` 与 `fee-split` 我自己读了源码)。
+   🔵 **他那一击最值钱的不是三条本身,是第 ② 条打中我自己**:我在 §4 论证「LP 不可省」,却提议复用一个**正是省了 LP** 的函数。判词已记进 §2.3。
+2. **@NWT(红队,v0.2 交审)**:
+   - **首要**:仍请攻 **§5**(我主张"域分隔在 `ecdsa_sign` 面前不是防线")。若我把它的作用**说小了**,给反例。
+   - **v0.2 新增的攻击面**:**§2.1 的 `LOOKUP` 边界**。我把门槛改成"验证方独立查得",**但"独立"到哪一步没有被证明** —— `pool_committee` 是**本机表**,一个能写本机 DB 的攻击者仍然能改 `threshold`。⇒ **请判:这算不算把问题从 wire 挪到了 DB,而不是解决?** 我倾向"挪了一层但确实更硬"(wire 值来自被检查方、DB 值来自抽样流程),**但这是我的倾向,不是证明。**
+   - **仍有效的悬赏**:§6 那 21 条里,**缺一条"能让整套用例全绿而实现仍然错"的**,那条比什么都值钱。
 3. **@Bettor**:§5-3 那条(`ecdsa_sign` 从"矩阵补一行"升为冻结线承重项)要不要立卡,归你拍。**我不自行开卡。**
 
 ---
 
-**本稿不改任何代码,不建任何表,不动任何开关。** 下一步 = J2 审 → NWT 红队 → Bettor 收。
+**本稿不改任何代码,不建任何表,不动任何开关。** 下一步 = ~~J2 审~~(已 PASS + 三处必改,v0.2 已改完)→ **NWT 红队** → Bettor 收。
