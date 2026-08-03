@@ -1,6 +1,13 @@
-> **Status**: DRAFT v0.4 — J1 主笔 · J2 已审(v0.2)· NWT 红队 GREEN(v0.3)· **本版并入 Codex 第五轮三件(Bettor 派工 `#dn3m00`)** · 待 J2 审 → NWT 红队 · **design-only,零实现授权**
+> **Status**: DRAFT v0.5 — J1 主笔 · NWT 红队 GREEN(v0.3)· v0.4 并入 Codex 第五轮三件 · **J2 已审 v0.4:方向 PASS + 2 处必改,本版改完(并自查出同族第 3 处)** · 待 NWT 红队 · **design-only,零实现授权**
 > **v0.4 变更**:① **`policy_version` 移出 FactReceipt ⇒ 三对象分离**(§2.4)② **聚合证明信封 `QuorumEnvelope` 另定义**(§2.5)③ **摘要算法标识显式化 + UTF-8 政策冻结 + test vector**(§2.6)。
-> ⚠ 版本号以本稿为准(我在频道 ack 里手滑写成"v0.5",指的就是本版)。
+> **v0.5 变更(全部是"我立了新规则却没回头改旧文本"的内部不一致)**:
+> ① `committee_set_id` 补算法前缀,并**删掉 v0.4 表里那句"今天最接近的是 `committee_pk_hash`"**——它与 §2.3 的结论**正好相反**(@J2 抓);
+> ② `supersedes` 从三字段收成**只剩 `{receipt_digest}`**,`prior_threshold`/`prior_committee_set_id` **从 wire 删除**——§2.1 早已写死它们必须 `LOOKUP` 独立查得,而表没跟上(@J2 抓);
+> ③ **§3-7 hex 纪律**:原 `^[0-9a-f]{64}$` **会把带 `blake2b256:` 前缀的合法摘要判非法**,与 §2.6 直接打架 —— **这一处 @J2 没抓到,是我照他的判据反向自查出来的**,拆成"裸 hex 字段"与"带算法标识的摘要字段"两条正则;
+> ④ **§6 用例 10 / 11 / 17 / 18 重写** —— 它们仍在测**已从 wire 删除的字段**。**这一处 @J2 也没提,是我改完 ①② 之后照同一条判据再扫一遍自己扫出来的**:删字段不扫用例,等于留下四条**测一个不存在的东西**的用例(它们会永远绿,因为那个字段永远不出现)。
+> ⑤ `SettlementAuthorization` 按 Bettor 裁定**「绑定确切交易」写死,不放宽**(§2.4 末)。
+> 🔨 **①②③④ 四处同一个来源,这条判据是本版最值钱的产出**:**新增或删除一条规则时,没有反向扫"这份文档里还有哪些地方在说同一件事"** ⇒ 新旧文本在同一份文档里对打,而**实现者只会读离他最近的那一处**;更坏的是 ④ 那种 —— **守卫还在,守的东西没了,而它照样是绿的。**
+> 📌 **@J2 抓到 2 处,我照他的判据自查出另外 2 处。记这一句是因为:红队给的价值不止是那 2 处,是那条【可以拿去自查的判据】。**
 > **v0.3 变更**:① 补 NWT 终审 MUST-FIX —— `supersedes.receipt_digest` **解析不到必须硬拒**,禁止静默降级为「无 supersede」(§2.1 条件 4 + §6 第 22 条);② 两个悬赏 NWT 已判,结论都对本稿有利,§9 里从"待判"改为"已定"。
 > 🔴 **NWT 的 GREEN 是「契约条款经得住攻」,不是「可以着手实现」。冻结前置① 仍 OPEN。**
 > **v0.2 变更**(J2 review `#fffa41`…`#d73646`,三条我逐条独立复核后确认全部成立):
@@ -77,11 +84,11 @@ v0.1 把 Bettor 点名的 feeRules 坑(canonicalize 静默剥未知字段 ⇒ �
 | `evidence_digest` | string | ⑤ | `"blake2b256:"` + 64 hex |
 | `observation_anchor` | object | ⑤ | 恰好 `{source_canonical: string, finality_daa: string}` —— 承 frozen_evidence 方法论(委员**自己 fetch** `predicate.data_source_canonical` + finality 后取) |
 | `committee_epoch` | string | ⑥ | 十进制字符串(§7-1:今天无承载物) |
-| `committee_set_id` | string | ⑥ | 64 hex,= 该委员会集合的承诺(今天最接近的是 `pool_committee.committee_pk_hash`) |
+| `committee_set_id` | string | ⑥ | 🔴 **v0.5 改**:`"blake2b256:"` + 64 hex,**按 §2.3 定义(排序 + 逐项 LP)自行计算**。⚠ **明确不是** `pool_committee.committee_pk_hash`(它有序、无 LP,§2.3 已判不可用)——v0.4 表里那句"今天最接近的是 committee_pk_hash"**与 §2.3 相反,已删**(@J2 抓) |
 | `signer_pubkey` | string | ⑥ | 32-byte x-only hex(64 字符) |
 | `nonce` | string | ⑦ | 32-byte hex |
 | `validity` | object | ⑦ | 恰好 `{not_before_daa: string, expires_at_daa: string}` —— **用 DAA 不用墙钟**:墙钟不可被 covenant 验,DAA 可以 |
-| `supersedes` | null \| object | ⑧⑩ | `null` 或恰好 `{receipt_digest: string, prior_committee_set_id: string, prior_threshold: number}`(见 §2.1) |
+| `supersedes` | null \| object | ⑧⑩ | 🔴 **v0.5 改**:`null` 或**恰好** `{receipt_digest}` —— 只留**一个**字段(`"blake2b256:"` + 64 hex,§2.6 前缀规则)。**`prior_committee_set_id` / `prior_threshold` 从 wire 删除**(§2.1 已写死它们必须 `LOOKUP` 独立查得;留在 wire 上就是"看起来是判据、其实不是"的东西 —— 采纳 §2.1 里我自己给的推荐项,@J2 抓出表没跟上) |
 | ~~`policy_version`~~ | — | ~~⑨~~ | 🔴 **v0.4 移出本对象 ⇒ 迁入 `ConditionReceipt`**(§2.4)。**FactReceipt 不含任何政策/解释版本。** |
 | `signature` | string | — | 签名本身;**不进签名消息**(§4) |
 
@@ -109,10 +116,10 @@ v0.5 §2.1 第 ⑩ 类要求:**supersede 的签名门槛与集合身份必须等
    **为什么这条必须单写**:那样一来,**任何人只要在 `supersedes` 里填一串随机 hex,就能让整个 §2.1 门槛检查被跳过** —— 条件 1/2/3 全都挂在"有一个可解析的前件"上,前件一没有,它们**一条都不执行**,而流程**看起来完全正常**。
    🔨 **它是今天全场反复出现的同一形状**:`err` 被 `catch` 掉之后 `continue`/降级,而不是 fail-closed。⇒ **判词:一个"解析不出前件"的对象,不是"没有前件的对象"。**
 
-🔴 **wire 上的 `supersedes.prior_threshold` / `prior_committee_set_id` 怎么办(二选一,我给推荐)**:
-- **推荐:从 wire 删掉**(纯派生)。少一个字段就少一处"看起来是判据、其实不是"的东西 —— 而**这种东西正是今天全队在数的失效形状**。
-- 若为可读性保留:schema 必须**明文写死**「wire 值仅作冗余展示,**与 `LOOKUP` 冲突时必须拒**(不是以 LOOKUP 为准继续,是拒)」。冲突意味着有人在撒谎或者数据不一致,**两种都不该放行**。
-- 🔨 **通则**:**任何"门槛/资格/权限"类的数,不得由被检查的那一方提供。** 它若出现在被检查对象里,只能是冗余,且冲突必拒。
+🔴 **wire 上的 `supersedes.prior_threshold` / `prior_committee_set_id`:v0.5 已定 —— 从 wire 删除。**
+- **v0.4 这里写的是"二选一,我推荐删",而 §2 的 wire 表仍留着它们** ⇒ **同一份文档两处不一致,而实现者会照表写**(@J2 抓)。**v0.5 采纳我自己那条推荐并把表改齐:`supersedes` 只剩 `{receipt_digest}`。**
+- **理由(即当初推荐的理由)**:少一个字段就少一处"**看起来是判据、其实不是**"的东西 —— 而这种东西正是今天全队在数的失效形状。
+- 🔨 **通则(不变)**:**任何"门槛/资格/权限"类的数,不得由被检查的那一方提供。** 若因可读性非留不可,必须明文写死「仅冗余展示,与 `LOOKUP` 冲突**必须拒**」——**但本 schema 选择不留,因为"冗余字段"这条路要靠实现者记得不去用它。**
 
 🔴 **schema 层必须写死的一句**:**`nonce` 与 `validity` 的先后关系,在任何情况下都不构成 supersede 授权。** 排序只决定"哪一份更晚",授权由上面四条决定。
 🔨 判据(承 v0.5):**「更正」是一次与原件同权的授权动作,不是一次记账动作。**
@@ -177,7 +184,14 @@ committee_set_id = blake2b256( LP("kanet.oracle.committee-set.v1") || LP(pks_sor
 > 📌 **待办(我不擅自改已 GREEN 的稿)**:上位稿 §2.1 那个 ⚠ 块需要据此更新。**它已过 NWT 红队,改它要不要重走复核,请 @Bettor 拍。**
 
 📌 **`SettlementAuthorization` 有一个已在等它的外部消费方**(@J2 / @NWT 2026-08-04 19:46-19:48 议定的正路):settler 域的 `refund_authorization` 今天是**一个写在 `pool_markets.metadata` 里的字符串**,与其余字段共享同一次可写性 ⇒ 事后无法区分"经 `authorizeRefundByOwner` 走的"与"某人直接 UPDATE 的"。正路 = **域分隔 typed 授权对象 + 签名,字段只存对该对象的承诺**。
-⇒ **本稿按"它要能被 settler 域复用"来定义 `SettlementAuthorization`,不另造第二套授权语义**(那正好是"一个名字底下几个东西"的下一次复发)。**若判它不该由本线承载,请在审的时候驳回。**
+⇒ **本稿按"它要能被 settler 域复用"来定义 `SettlementAuthorization`,不另造第二套授权语义**(那正好是"一个名字底下几个东西"的下一次复发)。
+
+> ✅ **已裁(2026-08-04 20:12-20:13,@J2 审 + @Bettor 短裁)—— 而结论比"接受"更硬:不许为了迁就 settler 现状而放宽。**
+> · **@J2 自判**:「**应当由本线承载,但你现在的定义接不上我当前的流程,而该改的是我不是你。**」
+>   他的现状 = `authorizeRefundByOwner` 在**任何退款 tx 存在之前**授权(冻结态 → 人授权 → 之后才 `buildMakerRefundPreimage` 造 tx)⇒ **他授的是「这个市场可以退款」,本对象授的是「这一笔交易可以广播」。**
+>   🔴 **两者不是同一个对象。硬套会让 `SettlementAuthorization` 退化成一个不绑交易的字符串 —— 那就白分离了。**
+> · **@Bettor 裁定**:`SettlementAuthorization` **按"绑定确切交易"写死,不放宽**;settler 侧改造另立合并卡(「refund 授权结构化」,归 J2,排 `is_oracle` 迁移之后,**设计前置 = 本 schema 线冻结**)。
+> 🔨 **判词(J2 给的,我照收)**:**授权"某一笔确定交易"严格强于授权"可以退款" —— 迁就弱的一侧,等于把强的一侧也降到弱。** ⇒ **本稿在这一点上不给任何可配置的宽松档。**
 
 ### §2.5 🔴 聚合证明信封 `QuorumEnvelope`(v0.4 新增 · Codex #5 ②)
 
@@ -241,8 +255,12 @@ receipt_digest      = "blake2b256:" || hex(blake2b256( LP(DOMAIN) || LP(signing_
    🔴 **v0.2 更正**:v0.1 说 feeRules 坑是"留给了手感"的产物 —— **说反了**。本仓 `fee-split.mjs:84-86/100-102` 早已用顶层 + role 级双层白名单把它关掉,且注释自陈是 **NWT 红队 F1 CONFIRMED repro** 逼出来的,原话是「白名单强制"加字段必 bump schema_v"**从流程纪律升为机制**」。⇒ **本条照抄那句措辞**:FactReceipt **扩字段必 bump `schema_version`,禁静默附加。**
 4. **缺字段必拒 / 类型错必拒 / 定值字段值不符必拒**(`protocol`/`domain`/`schema_version`)。
 5. **嵌套对象同样 strict**:`observation_anchor` / `validity` / `supersedes` 各自是**恰好那几个键**的封闭集合,不允许扩展。
-6. **数值纪律**:除 `schema_version` 与 `supersedes.prior_threshold` 外,**一切"大数"用十进制字符串**(DAA、epoch、state_version)。理由:JSON `number` 是 IEEE754,超 2^53 静默失真 —— 又一个"失败长成合法答案"。字符串侧用 `^(0|[1-9][0-9]*)$` 严格匹配,**禁前导零、禁正负号、禁空串**。
-7. **hex 纪律**:全部**小写**,长度写死(64 / 64 / 64),`^[0-9a-f]{64}$`。大小写混用视为非法而非归一化 —— 归一化会制造"两份不同输入同一摘要"。
+6. **数值纪律**:🔴 **v0.5 改** —— **`schema_version` 是本 schema 里唯一的 JSON `number`**(`supersedes.prior_threshold` 已从 wire 删除,见 §2.1)。**一切"大数"用十进制字符串**(DAA、epoch、state_version)。理由:JSON `number` 是 IEEE754,超 2^53 静默失真 —— 又一个"失败长成合法答案"。字符串侧用 `^(0|[1-9][0-9]*)$` 严格匹配,**禁前导零、禁正负号、禁空串**。
+7. **hex / 摘要纪律**:🔴 **v0.5 改(这一处是我自己在 §2.6 立完前缀规则后没回头改的第三处,@J2 只抓到前两处,这条是我照他的判据自查出来的)**:
+   - **裸 hex 字段**(`genesis_hash` / `signer_pubkey` / `nonce`)= `^[0-9a-f]{64}$`,**全小写**;
+   - 🔴 **带算法标识的摘要字段**(`evidence_digest` / `committee_set_id` / `supersedes.receipt_digest`)= **`^blake2b256:[0-9a-f]{64}$`** —— v0.4 那句"长度写死 64,`^[0-9a-f]{64}$`"**会把带前缀的合法值判非法**,与 §2.6 直接打架。
+   - **大小写混用视为非法而非归一化**(归一化会制造"两份不同输入同一摘要");**算法前缀同样大小写敏感**。
+   🔨 **这三处不一致同一个来源,值得记**:我**先立了新规则(§2.3 / §2.6),没有回头把已经写好的表和纪律扫一遍**。⇒ **判据:新增一条全局规则时,必须反向扫一遍"这份文档里已有哪些地方在说同一件事" —— 否则新规则与旧文本会在同一份文档里对打,而实现者只会读离他最近的那一处。**
 
 ## §4 域分隔符与摘要定义(本稿唯一实质新增)
 
@@ -298,8 +316,8 @@ receipt_digest = blake2b256( LP(DOMAIN) || LP(signing_bytes) )
 | 7 | 大数用 JSON number 传(`market_state_version: 9007199254740993`) | 数值纪律(超 2^53 静默失真) |
 | 8 | hex 大写 / 长度不足 / 含非 hex 字符 | hex 纪律(**不得归一化,必须拒**) |
 | 9 | 十进制字符串带前导零(`"007"`)或负号 | 字符串数值正则 |
-| 10 | `supersedes` 非 null 但 `prior_committee_set_id` 与被取代那份不符 | §2.1 条件 1 |
-| 11 | `supersedes` 有效签名数 < `prior_threshold` | §2.1 条件 2(**这条是 NWT 的 MUST-FIX 本体**) |
+| 10 | 🔴 **v0.5 重写**:`supersedes` 非 null,且 `LOOKUP(被取代那份.committee_set_id)` 与 `LOOKUP(本份.committee_set_id)` **不符** ⇒ 必须拒 | §2.1 条件 1 —— **两边都是查出来的**;v0.4 这条测的是 wire 上的 `prior_committee_set_id`,而该字段已删 |
+| 11 | 🔴 **v0.5 重写**:本份有效签名数 < **`LOOKUP(pool_committee.threshold)`** ⇒ 必须拒 | §2.1 条件 2(**这条是 NWT 的 MUST-FIX 本体**);门槛**只认 LOOKUP** |
 | 12 | `supersedes` 跨 `committee_epoch` | §2.1 条件 3 |
 | 13 | 只靠更晚的 `nonce`/`validity` 去 supersede | §2.1 那句"排序不构成授权" |
 | 14 | 同一 receipt 除 `DOMAIN` 外字节相同,但域标签不同 ⇒ 摘要必须不同 | §4 域进摘要 |
@@ -312,8 +330,8 @@ receipt_digest = blake2b256( LP(DOMAIN) || LP(signing_bytes) )
 
 | # | 用例 | 必须红在 |
 |---|---|---|
-| 17 | supersede:wire 带 `prior_threshold: 1`,而 `LOOKUP(threshold)=4`,本份只有 1 个有效签名 ⇒ **必须拒** | §2.1 条件 2 只认 `LOOKUP`(**这条就是必改① 的守卫;删掉"只认 LOOKUP"这一步,它必须自己变红**) |
-| 18 | supersede:wire 的 `prior_committee_set_id` 与 `LOOKUP` 不一致 ⇒ **必须拒**(不是"以 LOOKUP 为准继续") | §2.1 冲突必拒 |
+| 17 | 🔴 **v0.5 重写**:`supersedes` 里带 `prior_threshold`(或任何第二个键)⇒ **必须拒为未知键** | §2 wire 表 `supersedes` **恰好一个键**。⚠ **原攻击面已由构造消除**(字段不存在 ⇒「填 1 把 4-of-5 降成 1」这条路不存在);**本用例现在守的是"它不许被悄悄加回来"** |
+| 18 | 🔴 **v0.5 重写**:`supersedes.receipt_digest` **缺算法前缀**(裸 64 hex)⇒ **必须拒**,不得按长度猜算法 | §2.6-① 前缀不匹配即拒(v0.4 这条测的是已删字段,换成守新规则的那条) |
 | 19 | 同一批委员、**两种不同选择序** ⇒ `committee_set_id` **必须相同**(正向用例) | §2.3 排序语义;**用 `committee_pk_hash` 实现会红** —— 这正是换掉它的原因 |
 | 20 | 构造两组**不同**的 pk 序列,使其**无 LP 拼接**后字节相同 ⇒ 两者 `committee_set_id` **必须不同** | §2.3 逐项 LP(**阴性面**:照 `computeCommitteePkHash` 那种裸 concat 实现会红) |
 | 21 | 顶层多一个键但**未 bump `schema_version`** ⇒ 必须拒,且拒因须指向"扩字段必 bump 版本" | §3-3 措辞(照抄 `fee-split.mjs:81-83`) |
@@ -381,7 +399,7 @@ receipt_digest = blake2b256( LP(DOMAIN) || LP(signing_bytes) )
 3. **@Bettor**:§5-3 那条(`ecdsa_sign` 从"矩阵补一行"升为冻结线承重项)要不要立卡,归你拍。**我不自行开卡。**
 4. 🔴 **@Bettor(v0.4 新增,两件都要你拍)**:
    - **(a) 上位稿 §2.1 那个 ⚠ 块需要更新**(见 §2.4 末的自我更正:三对象分离让那处紧张关系消失,v0.3 的原措辞重新成立)。**但那份稿子已过 NWT 红队** —— 改它要不要重走复核?**我不擅自动已 GREEN 的稿。**
-   - **(b) `SettlementAuthorization` 要不要承载 settler 域的 `refund_authorization` 正路**(@J2/@NWT 19:46-19:48 议的方向)。**我按"要能被复用"写了职责边界,但没有把 settler 的需求当作它的需求去设计** —— 若确定并线,`SettlementAuthorization` 应当由**我和 J2 一起**出字段表,而不是我单方猜他域内要什么。
+   - ✅ **(b) 已裁(20:12-20:13)**:由本线承载,**但按"绑定确切交易"写死、不为迁就 settler 现状放宽**;settler 侧改造另立合并卡(归 J2,设计前置 = 本 schema 线冻结)。详见 §2.4 末的裁定块。**⇒ 本条从"待拍"转"已定",字段表仍待本线冻结后与 J2 一起出。**
 5. **@J2(v0.4)**:§2.4 里 `ConditionReceipt` 消费的"规范输入集承诺"就是上位稿 §2.2 那六个字段 —— **你域内今天有几个是拿得到的?** 我在上位稿 §7 标过一批"无承载物",但那是按 FactReceipt 的口径标的,**输入集那六个我没有单独盘过**,不假装盘过了。
 6. **@NWT(v0.4 红队)**:优先攻 **§2.5-3 与 §2.6-②** —— 这两条的错误实现**在所有诚实输入上都正确**(数签名条数 / 顺手 NFC),我给的对抗用例(26/28)够不够?**若你能构造一个同时通过 26 和 28 但仍然错的实现,那条比什么都值钱。**
 
