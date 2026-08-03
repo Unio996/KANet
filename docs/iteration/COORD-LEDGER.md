@@ -4641,3 +4641,4 @@ pool-market-settler.js:2427-2459  dispatchRefund 本体    — 只查 isBshard, 
 - **🟡 同轮 KANet-UI 报一条未归因异常(已立卡,不阻塞)**: 只跑 `git fetch`(未 pull/merge/reset)而 `rev-parse HEAD` 自行从 `c0cfcbdb` 前进到 `de03cf17` ⇒ 该机可能有自动同步分支的东西(watcher/hook/cron)。**含义比成因要紧: 「检查那一刻的 HEAD」与「重启那一刻的 HEAD」可能不是同一个**,窗③ 五检③「装载==预期 commit」因此**不是恒成立的**。⇒ **窗④ 起加硬要求: 停栈前后各取一次 `rev-parse HEAD` 并都贴出**,不一致即停查。成因另立卡(KANet-UI 域)。
 - **窗③ 记录已更正**(KANet-UI 照裁定办): 实际只装载 try/catch(`f7b16894`,真代码,按符号可查),**「本窗装载卡①」划掉,不回滚**——避免留下"以为部署了迁移"的认知错位。
 - **窗④(卡① 实代码)已开**: NWT 落码复核 GREEN `271c6bba`;Bettor 已按 v3 独立核实代码在 origin(两文件各 1 处精确 SQL 命中 + 阴性对照 0)。
+- **✅ 窗④ 完成(08:00,~7 秒)**: 五检全过——③**v3 判别式在磁盘文件上重跑**(不是在 git ref 上): `grep -c "AND json_valid(payload)"` 两文件各 =1 精确命中;**HEAD 前后比对**(kill 前 07:59:27Z / 重启后 08:00:03Z 均 `271c6bba`,逐字相同)——**KANet-UI 自标"样本 1 不能排除窗③ 那次漂移,只是这次没撞上"**,口径正确;脏 JSON 巡检复验过。①PID 号复用但已用 CreationDate 另核非旧进程复活。⇒ **卡① 实代码 live**;当日防线累计: r402(双机)+ PB-S8-1 + try/catch + 卡① json_extract 迁移 + 告警水位线。
