@@ -66,14 +66,35 @@ ORDER BY observed_at ASC LIMIT 1
 
 **NWT 逐字复现的真实行为**(commit `290f69ae`):往 `chain_events` 插一行完全无关市场/无关委员的垃圾 JSON payload,再跑提议的 `json_extract` 查询(哪怕这行根本不该匹配任何 WHERE 条件)——**整条查询直接抛 `SqliteError: malformed JSON`**,不是那一行悄悄不匹配、其余正常返回。原因:SQLite 逐行求值 `WHERE` 子句时,`json_extract()` 本身在解析非法 JSON 时抛异常,这个异常不会被"反正这行不匹配"吸收——它发生在**决定这行匹不匹配之前**。`LIKE` 从不解析 JSON,永远不会有这个问题(纯字节层面的模式匹配)。
 
-**J2 独立复现(不是照抄 NWT 的结论,自己起了一个空库验证两组行为)**:
+**J2 独立复现(不是照抄 NWT 的结论,自己起了一个空库验证两组行为)——可重跑,不是"某人某次见过"(Bettor #cxdga7③ 要求)**:
+
+```bash
+cd kasia-console && node -e "
+const Database = require('better-sqlite3');
+const db = new Database(':memory:');
+db.exec(\`CREATE TABLE chain_events (id TEXT PRIMARY KEY, event_type TEXT, payload TEXT, observed_at TEXT)\`);
+db.prepare(\"INSERT INTO chain_events VALUES ('garbage','pool_oracle_vote','not json at all {{{','2026-01-01')\").run();
+db.prepare(\"INSERT INTO chain_events VALUES ('legit','pool_oracle_vote', ?, '2026-01-02')\").run(JSON.stringify({market_id:'m1', voter_pubkey:'pk1', outcome:'YES'}));
+
+try {
+  db.prepare(\"SELECT payload FROM chain_events WHERE event_type='pool_oracle_vote' AND json_extract(payload,'\$.market_id')=? AND json_extract(payload,'\$.voter_pubkey')=? ORDER BY observed_at ASC LIMIT 1\").get('m1','pk1');
+  console.log('WITHOUT guard: no throw (unexpected)');
+} catch (e) { console.log('WITHOUT guard: THROWS ->', e.message); }
+
+try {
+  const r = db.prepare(\"SELECT payload FROM chain_events WHERE event_type='pool_oracle_vote' AND json_valid(payload) AND json_extract(payload,'\$.market_id')=? AND json_extract(payload,'\$.voter_pubkey')=? ORDER BY observed_at ASC LIMIT 1\").get('m1','pk1');
+  console.log('WITH guard: no throw, result=', JSON.stringify(r));
+} catch (e) { console.log('WITH guard: THROWS (unexpected) ->', e.message); }
+"
 ```
-无 json_valid 守卫: db.prepare(...json_extract...).get('m1','pk1')
-  → 抛 "malformed JSON"(即使目标行 m1/pk1 是合法数据,只因表里还有一行垃圾 JSON)
-加 json_valid(payload) 守卫: 同样的库、同样的数据
-  → 正常返回目标行,不抛异常
+
+预期输出(2026-08-03 J2 本机实测):
 ```
-两组结果与 NWT 报告的现象一致,独立确认成立,不是单方转述。
+WITHOUT guard: THROWS -> malformed JSON
+WITH guard: no throw, result= {"payload":"{\"market_id\":\"m1\",\"voter_pubkey\":\"pk1\",\"outcome\":\"YES\"}"}
+```
+
+两组结果与 NWT 报告的现象一致,独立确认成立,不是单方转述,且**任何人现在都能照抄这段命令重跑**,不依赖"相信我看到过"。
 
 **为什么这不是"理论风险"(NWT 指出,已核实)**:`trade-protocol-filter.js:604-610`(PB-S8-1 的 `myVoteRow` 查询,今天 `847f091a` 刚落地、`520903b7` 已过 diff 复核)那次 `.get()` 调用**外面没有 try/catch**,所在的 `for (const oracle of localOracles)` 循环也没有——若真的迁移成不带守卫的 `json_extract`,`chain_events` 里**任意一行**(不论哪个市场、哪个委员)脏数据,都会让本机**所有** oracle 身份、**所有**市场的签名请求处理异常中断。这会把 PB-S8-1"选择性拒签一个可疑请求"的设计意图,退化成"一行脏数据能让整条签名流水线失能"——从功能缺陷升级成可用性/DoS 缺陷,而且是被**这次要做的"安全性升级"自己引入的**,不是既有代码的问题。`decideConsensusV06` 那处虽然有外层 per-market try/catch(不会崩整个 settler tick),但 `errored++` 累加会让 v0.6/v0.7 委员会结算整体卡住,且绕开了同函数里 `malformedCount` 已经妥善处理的容错路径(见 `pool-market-settler.js:1407-1417` 现有的 `try{JSON.parse}catch{malformedCount++}` 模式——加 `json_valid` 守卫后这条既有容错路径继续有效,不加则被短路)。
 
