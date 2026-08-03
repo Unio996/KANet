@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "start": "node src/index.js",
-    "dev": "node --watch src/index.js"
+    "dev": "node --watch src/index.js",
+    "test:pbs8-handler": "node --experimental-test-module-mocks --test src/services/pbs8-signreq-byzantine-handler.test.mjs"
   },
   "dependencies": {
     "@fastify/formbody": "^7.4.0",

@@ -163,6 +163,19 @@ node scripts/test.mjs --domain=broker
 node scripts/test.mjs --all
 ```
 
+## 另一类测试:src/ 下 colocated `*.test.mjs`(不走本框架)
+
+本文档以上全部讲的是 `test-framework/cases/` 那套(exec_sql/query_db fixture,`scripts/test.mjs` 驱动)。
+仓库里还有第二类,和被测代码放在同一目录、直接跑(`bshard-auto-settler.test.mjs`/`preprune-capture-worker.test.mjs` 等),
+两者**互不相交**,`scripts/test.mjs` 不会发现也不会跑第二类。
+
+大多数直接 `node src/services/X.test.mjs` 就行,文件头注释写着 `Run:` 那行。**少数需要额外 flag**——
+`pbs8-signreq-byzantine-handler.test.mjs`(PB-S8-1 真 handler 回归,mock 动态 import 用 `node:test` 的
+`mock.module()`,2026-08-03)必须带 `--experimental-test-module-mocks`,否则报错退出,而这个报错**不会被
+任何 domain/--all 扫到**——同本节上方"用例存在但 runner 扫不到=看起来有实际没有"同一类病(2026-08-03 Bettor
+`#czz7vi` 抓)。跑法已同时写进 `kasia-console/package.json` scripts(`npm run test:pbs8-handler`),不只
+留在文件头注释里——两处都能找到,任一处失效不至于让这条证据蒸发。
+
 ## 历史与决策记录
 
 - **2026-04-27 11:25 Owner 钦定** "把测试方式方法方案更上一个台阶, 实现自主开发自治开发自我迭代"
