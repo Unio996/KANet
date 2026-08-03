@@ -23,6 +23,12 @@ const TICK_INTERVAL_MS = Number(process.env.RPC_HEALTH_ALERT_TICK_MS) || 60_000;
 const STARTUP_GRACE_MS = 30_000;
 const WINDOW_MINUTES = Number(process.env.RPC_HEALTH_ALERT_WINDOW_MIN) || 3; // 统计过去几分钟内的失败次数
 const FAIL_THRESHOLD = Number(process.env.RPC_HEALTH_ALERT_THRESHOLD) || 5; // 窗口内达到几次判定"真劣化"非瞬时抖动
+// Codex 卡③(2026-08-03, D-012 §6-2 挂账): 水位线只堵死了"同一批旧数据被重报"(2026-08-03
+// 01:26/01:28 那种重启场景), 没堵住"同一个未中断的劣化 episode 里持续冒出新失败行, 每个都比水位线
+// 新一点, 于是每 tick 都重新算作'新数据'并重报"——实测坐实: 一个连续 6-tick 的持续劣化(每 tick 多
+// 一行新失败)会开 6 次 channel post, 而不是边沿触发该有的 1 次。冷却期把"有没有新数据"(水位线,
+// 决定跨重启去重)和"该不该现在就再吵一次"(冷却期,决定持续劣化期间的播报频率)分成两个独立判据。
+const COOLDOWN_MS = Number(process.env.RPC_HEALTH_ALERT_COOLDOWN_MS) || 30 * 60 * 1000; // 30min
 const ALERT_RELAY_ID = process.env.RPC_HEALTH_ALERT_RELAY_ID || 'f5cf6d85-58f4-4991-9cd5-7c6779f6822b'; // KANet-UI-tn
 const ALERT_CHANNEL = process.env.RPC_HEALTH_ALERT_CHANNEL || 'dev-coord-testnet';
 const CONSOLE_BASE = process.env.RPC_HEALTH_ALERT_CONSOLE_BASE || 'http://127.0.0.1:3200';
@@ -46,6 +52,21 @@ let running = false;
 //   不会被"曾经报过"这件事永久挡死。
 let _lastSeenMaxFailRowid = null;
 let _dbWatermarkChecked = false;
+// 冷却期水位线(与上面的 rowid 水位线是两件不同的事, 别合并): rowid 水位线答"有没有新数据"
+// (决定跨重启去重), _lastAlertPostedAt 答"该不该现在就再吵一次"(决定持续劣化期间的播报频率)。
+// 同样冷启动只从 DB 读一次(复用 _dbWatermarkChecked 这个标记, 两条水位线一起冷启动一起补)。
+let _lastAlertPostedAt = null;
+
+function _lastAlertedPostedAt() {
+  try {
+    const row = sqlite.prepare(`
+      SELECT created_at FROM events
+       WHERE event_type = 'rpc_health_degraded_onset'
+       ORDER BY rowid DESC LIMIT 1
+    `).get();
+    return row ? new Date(row.created_at + 'Z').getTime() : null; // SQLite datetime('now') 是 UTC, 补 Z 防本地时区误解析
+  } catch { return null; }
+}
 
 function _writeAlertEvent(summary, count, maxFailRowid) {
   try {
@@ -94,19 +115,31 @@ export async function rpcHealthAlertTick() {
     const count = row?.n || 0;
 
     if (count >= FAIL_THRESHOLD) {
-      // 进程生命周期内只查一次 DB 水位线(冷启动补内存的空缺); 之后全程只信内存, 便宜且够用。
+      // 进程生命周期内只查一次 DB(冷启动补内存的空缺, 两条水位线一起补); 之后全程只信内存, 便宜且够用。
       if (_lastSeenMaxFailRowid === null && !_dbWatermarkChecked) {
         _lastSeenMaxFailRowid = _lastAlertedMaxFailRowid();
+        _lastAlertPostedAt = _lastAlertedPostedAt();
       }
       _dbWatermarkChecked = true;
 
       const maxFailRowid = row.maxRowid;
-      if (_lastSeenMaxFailRowid != null && maxFailRowid != null && maxFailRowid <= _lastSeenMaxFailRowid) {
+      const hasNewData = !(_lastSeenMaxFailRowid != null && maxFailRowid != null && maxFailRowid <= _lastSeenMaxFailRowid);
+      if (!hasNewData) {
         // 没有比"上次算过账"的那一行更新的失败——同一批数据(不管是同进程还是跨重启看到的), 不重报。
         return { ok: true, degraded: true, alreadyAlerted: true, count };
       }
 
+      // 有新数据(可能是全新 episode, 也可能是同一个未中断 episode 里持续冒出的新失败行)——水位线
+      // 无论如何都要往前追, 否则下次比较基准是错的; 但"追了水位线"和"该不该真的再吵频道一次"分开判。
       _lastSeenMaxFailRowid = maxFailRowid;
+      const now = Date.now();
+      const inCooldown = _lastAlertPostedAt != null && (now - _lastAlertPostedAt) < COOLDOWN_MS;
+      if (inCooldown) {
+        console.warn(`[rpc-health-degradation-alert] DEGRADED (still, within ${COOLDOWN_MS / 60000}min cooldown, not re-posting): ${count} failures in ${WINDOW_MINUTES}min`);
+        return { ok: true, degraded: true, count, suppressedByCooldown: true };
+      }
+
+      _lastAlertPostedAt = now;
       const summary = `过去${WINDOW_MINUTES}分钟内 getWorkingRpc() 连续失败 ${count} 次(阈值${FAIL_THRESHOLD})— RpcClient 疑似进入劣化态, 结算/下注等所有需要RPC的路径可能受影响。已知修法(今天两次复发均验证过): 重启console。`;
       console.warn(`[rpc-health-degradation-alert] DEGRADED: ${count} failures in ${WINDOW_MINUTES}min`);
       _writeAlertEvent(summary, count, maxFailRowid);
@@ -114,9 +147,12 @@ export async function rpcHealthAlertTick() {
       return { ok: true, degraded: true, count };
     }
 
-    // 恢复(低于阈值)— 复位水位线, 下次再劣化会重新报警(但不重置 _dbWatermarkChecked: 本进程
-    // 已经知道自己不是刚冷启动, 真正恢复后的再劣化不该被一条已经翻篇的旧 DB 记录挡住)。
-    if (_lastSeenMaxFailRowid !== null && count === 0) _lastSeenMaxFailRowid = null;
+    // 恢复(低于阈值)— 复位两条水位线(rowid + 冷却期), 下次再劣化 = 全新 episode, 立即报警不用等
+    // 冷却期(但不重置 _dbWatermarkChecked: 本进程已经知道自己不是刚冷启动)。
+    if (count === 0) {
+      if (_lastSeenMaxFailRowid !== null) _lastSeenMaxFailRowid = null;
+      if (_lastAlertPostedAt !== null) _lastAlertPostedAt = null;
+    }
     return { ok: true, degraded: false, count };
   } catch (e) {
     console.warn(`[rpc-health-degradation-alert] tick fail (non-fatal, retry next cycle): ${e.message}`);
@@ -135,18 +171,20 @@ export function startRpcHealthDegradationAlertCron() {
 
 export function stopRpcHealthDegradationAlertCron() {
   if (timer) { clearInterval(timer); timer = null; }
-  // 对称清两个状态(同 _resetAlertStateForTest)——只清 _lastSeenMaxFailRowid 不清 _dbWatermarkChecked
+  // 对称清全部状态(同 _resetAlertStateForTest)——只清 _lastSeenMaxFailRowid 不清 _dbWatermarkChecked
   // 在当前唯一调用点(进程真退出)上无差别, 但若未来出现同进程内 stop()→start()(例如维护窗口暂停
   // 监控)会复活这次修的同一个 bug 的缩小版(NWT diff 复核 #145baeb8 抓到, 当时 grep 确认零调用点
   // 不阻塞, 现在顺手补上不留债)。
   _lastSeenMaxFailRowid = null;
+  _lastAlertPostedAt = null;
   _dbWatermarkChecked = false;
 }
 
 // 测试专用: 重置 module-level 水位线状态。清 _dbWatermarkChecked 是关键——它模拟"进程重启"
-// (下次 tick 会重新去 DB 查一次历史水位线), 不是模拟"已恢复"(那种情况只清 _lastSeenMaxFailRowid,
-// 见 rpcHealthAlertTick 的 count===0 分支, 不清 _dbWatermarkChecked)。
+// (下次 tick 会重新去 DB 查一次历史水位线), 不是模拟"已恢复"(那种情况只清 _lastSeenMaxFailRowid +
+// _lastAlertPostedAt, 见 rpcHealthAlertTick 的 count===0 分支, 不清 _dbWatermarkChecked)。
 export function _resetAlertStateForTest() {
   _lastSeenMaxFailRowid = null;
+  _lastAlertPostedAt = null;
   _dbWatermarkChecked = false;
 }

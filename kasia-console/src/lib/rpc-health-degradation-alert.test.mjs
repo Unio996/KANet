@@ -17,7 +17,13 @@ if (!process.env._RPCALERT_TEST_BOOTSTRAPPED) {
   execSync('node scripts/run-migrations.mjs', { cwd: process.cwd(), env: { ...process.env, DB_PATH: tmpDb }, stdio: 'pipe' });
   const r = spawnSync(process.execPath, [process.argv[1]], {
     cwd: process.cwd(), stdio: 'inherit',
-    env: { ...process.env, DB_PATH: tmpDb, _RPCALERT_TEST_BOOTSTRAPPED: '1' },
+    // short-ish cooldown (2500ms) so the cooldown-expiry case can use a real short sleep instead of
+    // mocking Date.now(). Must clear 1000ms+margin, not just "short": the cooldown seed is read back
+    // from SQLite's datetime('now'), which only has 1-SECOND resolution — a sub-1s cooldown value
+    // is racy (whether the test crosses a wall-clock second boundary changes the outcome, caught by
+    // an actual flaky run at 200ms during development). 2500ms is far below anything a real
+    // degradation window would use (default 30min) but comfortably clears SQLite's granularity.
+    env: { ...process.env, DB_PATH: tmpDb, _RPCALERT_TEST_BOOTSTRAPPED: '1', RPC_HEALTH_ALERT_COOLDOWN_MS: '2500' },
   });
   try { fs.unlinkSync(tmpDb); } catch {}
   process.exit(r.status ?? 1);
@@ -84,12 +90,22 @@ console.log('\n[test] simulated process restart mid-episode does NOT re-post the
   check('post-restart tick is deduped via rowid, not treated as a new episode', r.alreadyAlerted === true);
   check('post-restart tick does NOT fire a duplicate channel post', fetchCalls.length === 1);
 }
-console.log('\n[test] but if genuinely NEW failures land after the restart (not just old rows re-seen), it alerts again:');
+console.log('\n[test] genuinely NEW failures landing right after a restart-dedup do NOT immediately re-post — that would spam once per new row during one ongoing outage (Codex #cxk1gg finding, the sustained-degradation gap):');
 {
   insertFailEvent(0); // one fresh failure row, newer rowid than anything counted in the original alert
   const r = await rpcHealthAlertTick();
-  check('a truly new failure after restart is not suppressed', fetchCalls.length === 2);
-  check('tick correctly reports degraded:true for the fresh failure', r.degraded === true);
+  check('rowid watermark still advances (new data acknowledged internally)', r.degraded === true && !r.alreadyAlerted);
+  check('but the post itself is held back by the cooldown', r.suppressedByCooldown === true);
+  check('no duplicate channel post while within cooldown', fetchCalls.length === 1);
+}
+
+console.log('\n[test] once the cooldown genuinely elapses, a still-ongoing (never-recovered) degradation posts again:');
+{
+  await new Promise((resolve) => setTimeout(resolve, 3000)); // clear the 2500ms test cooldown with margin
+  insertFailEvent(0); // another fresh row — the outage never recovered, it is still actively happening
+  const r = await rpcHealthAlertTick();
+  check('post-cooldown tick fires (does not stay suppressed forever)', fetchCalls.length === 2);
+  check('post-cooldown tick reports degraded:true, not alreadyAlerted', r.degraded === true && !r.alreadyAlerted && !r.suppressedByCooldown);
 }
 
 console.log('\n[test] recovery resets edge-trigger, next degradation alerts again:');
@@ -113,12 +129,18 @@ console.log('\n[test] events table actually persisted the onset event (not just 
 
 console.log('\n[test] channel-post failure does not crash the tick (non-fatal, same discipline as settle-failed-alert):');
 sqlite.prepare("DELETE FROM events WHERE event_type='rpc_health_check_failed'").run();
+// Also clear onset history, not just in-memory state: _resetAlertStateForTest() simulates a restart,
+// which reseeds the cooldown watermark from the DB — if the previous test's real onset row is still
+// there (written moments ago), the reseed lands inside its own cooldown and this test would silently
+// exercise the cooldown-suppress path instead of ever reaching _postToChannel's throw at all.
+sqlite.prepare("DELETE FROM events WHERE event_type='rpc_health_degraded_onset'").run();
 _resetAlertStateForTest();
 globalThis.fetch = async () => { throw new Error('simulated network failure'); };
 for (let i = 0; i < 5; i++) insertFailEvent(1);
 {
   const r = await rpcHealthAlertTick();
   check('tick still returns ok:true even when the channel post itself throws', r.ok === true && r.degraded === true);
+  check('tick actually attempted to post (not silently cooldown-suppressed)', !r.suppressedByCooldown && !r.alreadyAlerted);
 }
 
 console.log(fails === 0 ? '\n✅ all checks passed' : `\n❌ ${fails} check(s) failed`);
