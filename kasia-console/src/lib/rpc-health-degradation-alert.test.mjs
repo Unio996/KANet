@@ -74,6 +74,24 @@ for (let i = 0; i < 5; i++) insertFailEvent(1); // 5 events == default threshold
   check('second tick does NOT fire another channel post', fetchCalls.length === 1);
 }
 
+console.log('\n[test] simulated process restart mid-episode does NOT re-post the same historical batch (2026-08-03 01:26/01:28 incident, dedup via events.rowid):');
+{
+  // Restart wipes in-memory _alerting, but the events table (failure rows + the onset event
+  // already written above) is untouched — this is exactly what a real console crash+restart does.
+  _resetAlertStateForTest();
+  const r = await rpcHealthAlertTick(); // same failure rows, same window, memory forgot we already alerted
+  check('post-restart tick still reports degraded:true (data is real)', r.degraded === true);
+  check('post-restart tick is deduped via rowid, not treated as a new episode', r.alreadyAlerted === true);
+  check('post-restart tick does NOT fire a duplicate channel post', fetchCalls.length === 1);
+}
+console.log('\n[test] but if genuinely NEW failures land after the restart (not just old rows re-seen), it alerts again:');
+{
+  insertFailEvent(0); // one fresh failure row, newer rowid than anything counted in the original alert
+  const r = await rpcHealthAlertTick();
+  check('a truly new failure after restart is not suppressed', fetchCalls.length === 2);
+  check('tick correctly reports degraded:true for the fresh failure', r.degraded === true);
+}
+
 console.log('\n[test] recovery resets edge-trigger, next degradation alerts again:');
 sqlite.prepare("DELETE FROM events WHERE event_type='rpc_health_check_failed'").run();
 {
@@ -83,14 +101,14 @@ sqlite.prepare("DELETE FROM events WHERE event_type='rpc_health_check_failed'").
 for (let i = 0; i < 5; i++) insertFailEvent(1); // degrade again
 {
   const r3 = await rpcHealthAlertTick();
-  check('re-degradation after recovery fires a NEW alert (edge re-armed)', fetchCalls.length === 2);
+  check('re-degradation after recovery fires a NEW alert (edge re-armed)', fetchCalls.length === 3);
   check('re-degradation tick reports degraded:true', r3.degraded === true);
 }
 
 console.log('\n[test] events table actually persisted the onset event (not just in-memory):');
 {
   const row = sqlite.prepare("SELECT COUNT(*) AS n FROM events WHERE event_type='rpc_health_degraded_onset'").get();
-  check('rpc_health_degraded_onset events were written to the events table', row.n === 2); // one per episode above
+  check('rpc_health_degraded_onset events were written to the events table', row.n === 3); // one per real episode above (dedup restart does NOT add one)
 }
 
 console.log('\n[test] channel-post failure does not crash the tick (non-fatal, same discipline as settle-failed-alert):');
