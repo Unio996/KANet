@@ -74,7 +74,8 @@
 | r402(producer 退款前复核)双机部署 | **[DEPLOYED-VERIFIED]** 两机装载 commit 实读(`d23539d0` 后代);非链上行为证据 |
 | r402 的保护**效果** | **[SUSPECTED·未实弹]** 无 cross-node 冲突流量触发;rejected_v1 无自动化覆盖 |
 | PB-S8-1(委员签名前投票自检)部署 | **[DEPLOYED-VERIFIED]** 装载 commit 实读 |
-| PB-S8-1 的保护**效果** | **[SUSPECTED·未实弹]** 现 regression 为 SQL fixture 重放、未执行 handler(Codex 指出);无 sign_req 实况流量 |
+| PB-S8-1 的保护**效果**(拜占庭 winner 检查) | **[TESTED-VERIFIED·未实弹]**(2026-08-03 16:0x 升格)——依据 **J1 代审注入实验**: 注掉检查本身 ⇒ 对应用例转红;且"正常票签一次"作阳性对照证明 mock 够得到 `sign_input_for_settle`,故三条"零签名"断言非空断言。⚠ **红队缺位,待 NWT 补核,不得写成"已过红队"**;"生产真挡下过一次"那格**仍空**。 |
+| 卡①`json_valid` 守卫的**测试锁定** | 🔴 **不升,维持未被该套件锁定** —— 同轮注入实验坐实: 只删 `AND json_valid(payload)` 时,**名字写着守卫的那条用例照样绿**,转红的是"正常票"那条(跨市场脏行+共用 chain_events 撞出的副产品,非设计断言);再删脏行 fixture ⇒ 5/5 全绿。**⇒ 任何一次正常测试卫生重构会静默删掉唯一告警而套件仍全绿。** MUST-FIX 已派(加"同市场内脏行排在合法行之前、断言仍签 count=1")。**不许与上一行合并成"卡②证了"。** |
 | 🔴 **PB-S8-1 的覆盖范围(2026-08-03 15:2xZ 补注,Bettor grep 实查)** | **仅覆盖【消息驱动的跨节点委员签名路】`handlePoolOracleTxSignReq`;不覆盖 driver-enforce 的 bshard 结算路**——`bshard-auto-settler.mjs:378/845` 直接 `relayPost({type:'sign_input_for_settle'})`,同文件 grep `byzantine|myVoteRow` **0 命中**;relay 该原语对内容零校验(M-1.1 B 类盲签)。⚠ **措辞纪律: 不许写成"委员签名前会先查自己的票"**,必须带路径限定。合 J1 §4.4(c)(自治 enforce voter 默认 OFF、理由 `D4 relay-gate 未闭`;真正退化的是**同机持 ≥4 委员 relay 的节点**,而**本机拓扑正是**——11 relay 含 4 oracle)⇒ **在本机,4-of-5 对 driver 不构成约束,一个 driver 进程可取得全部 4 个签名且中间零独立检查**。缺陷本身早登记(D4),新的是这两句的合取。修法归 §6-1 Oracle Skill 冻结线(**gate 应在持钥的 relay 侧,不在可绕的 driver 侧**),不单独打补丁。 |
 | ①v0.7 ZK-native 条件放钱成立 | **[CONFIRMED·链上]** ZK settle 交易 landed(D-001,NWT 独立核实) |
 | ②③ 各条现状 | **[CONFIRMED·源码实读]** 带 file:line,四镜头交叉核 |
