@@ -609,14 +609,20 @@ async function handlePoolOracleTxSignReq(msg) {
     // 失败语义——LIKE不解析JSON永远不抛, 今天"安全"是偶然不是设计。任何未来变体(含json_extract
     // 迁移落地后)若这条查询本身抛异常(不是"查不到", 是"查询本身出错"), 必须跟"查不到"同样处理:
     // 暂不签+待重试, 不能让异常穿透到for循环把其他oracle/其他input的签名一起中断。
+    // Card① json_extract迁移(NWT红队c0cfcbdb GREEN): json_valid守卫必须排在两个json_extract
+    // 之前(AND链左到右短路)。ORDER BY observed_at ASC = 取最早一条, 刻意继承
+    // bshard-close-voter.js D1 equivocation政策精神(market只能背书一个结果, 先到先得), 不是
+    // 未声明的偶然行为——同一把尺, pool-market-settler.js decideConsensusV06 原子同改。
     let myVoteRow;
     try {
       myVoteRow = sqlite.prepare(`
         SELECT payload FROM chain_events
         WHERE event_type = 'pool_oracle_vote'
-          AND payload LIKE ? AND payload LIKE ?
+          AND json_valid(payload)
+          AND json_extract(payload, '$.market_id') = ?
+          AND json_extract(payload, '$.voter_pubkey') = ?
         ORDER BY observed_at ASC LIMIT 1
-      `).get(`%"market_id":"${market.id}"%`, `%"voter_pubkey":"${voterPubkey}"%`);
+      `).get(market.id, voterPubkey);
     } catch (e) {
       console.error(`[trade-filter:sign-req] byzantine 防: 查询自己的投票记录出错(非"查不到", 是查询本身失败) voter_pubkey=${voterPubkey.slice(0,12)} market=${market.id.slice(0,12)}: ${e.message} — 暂不签, 待重试`);
       continue;

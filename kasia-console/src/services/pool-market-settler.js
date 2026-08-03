@@ -1395,13 +1395,27 @@ function decideConsensusV06(market) {
   const malformedSet = new Set();       // = invalid payload/enum = silent-equiv (forfeit per 5.2)
   for (let i = 0; i < 5; i++) {
     const voterPk = committeePks[i];
-    const row = sqlite.prepare(`
-      SELECT payload, observed_at FROM chain_events
-      WHERE event_type = 'pool_oracle_vote'
-        AND payload LIKE ?
-        AND payload LIKE ?
-      ORDER BY observed_at ASC LIMIT 1
-    `).get(`%"market_id":"${market.id}"%`, `%"voter_pubkey":"${voterPk}"%`);
+    // Card① json_extract迁移(NWT红队c0cfcbdb GREEN, PUSH-BACK 290f69ae后v2修复): json_valid
+    // 守卫必须排在两个json_extract之前(AND链左到右短路), 否则表里任意一行脏JSON会让整条
+    // 查询抛异常(NWT实测坐实)。ORDER BY observed_at ASC = 取最早一条, 刻意继承
+    // bshard-close-voter.js D1 equivocation政策精神(market只能背书一个结果, 先到先得),
+    // 不是未声明的偶然行为——同一把尺, trade-protocol-filter.js PB-S8-1 own-vote反查原子同改。
+    let row;
+    try {
+      row = sqlite.prepare(`
+        SELECT payload, observed_at FROM chain_events
+        WHERE event_type = 'pool_oracle_vote'
+          AND json_valid(payload)
+          AND json_extract(payload, '$.market_id') = ?
+          AND json_extract(payload, '$.voter_pubkey') = ?
+        ORDER BY observed_at ASC LIMIT 1
+      `).get(market.id, voterPk);
+    } catch (e) {
+      // 查询本身出错(不是"查不到")——按 malformed 同等对待(silent-equiv, forfeit per 5.2),
+      // 不让异常穿透 for 循环中断其余 4 个委员的计票(同 PB-S8-1 那处 #cx7hlc①的失败语义)。
+      console.error(`[pool-settler:decideConsensusV06] own-vote query error voter=${voterPk?.slice(0,12)} market=${market.id.slice(0,12)}: ${e.message}`);
+      malformedCount++; malformedSet.add(i); continue;
+    }
     if (!row) { trueSilentSet.add(i); continue; }
     let payload;
     try { payload = JSON.parse(row.payload); } catch { malformedCount++; malformedSet.add(i); continue; }

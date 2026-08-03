@@ -39,8 +39,23 @@ const mkVoteEvent = (id, voterPk, outcome) =>
   `VALUES ('${id}', '${id}_txid', 'pool_oracle_vote', 'test-fixture', '2026-08-03T06:00:00.000Z', ` +
   `'${JSON.stringify({ market_id: MARKET_ID, voter_pubkey: voterPk, outcome }).replace(/'/g, "''")}')`;
 
-// Byte-equivalent to the code (trade-protocol-filter.js handlePoolOracleTxSignReq, PB-S8-1 checkpoint).
+// Byte-equivalent to the shipped code (trade-protocol-filter.js handlePoolOracleTxSignReq PB-S8-1
+// checkpoint + pool-market-settler.js decideConsensusV06, card① json_extract迁移 NWT红队c0cfcbdb
+// GREEN, landed same commit as this test update). json_valid guard must precede both json_extract
+// calls (AND short-circuit) — a dirty row anywhere in the table would otherwise throw and abort
+// the whole query, see the dirty-row-first cases below.
 const OWN_VOTE_SQL = `
+  SELECT payload FROM chain_events
+  WHERE event_type = 'pool_oracle_vote'
+    AND json_valid(payload)
+    AND json_extract(payload, '$.market_id') = ?
+    AND json_extract(payload, '$.voter_pubkey') = ?
+  ORDER BY observed_at ASC LIMIT 1
+`;
+// Historical form (LIKE-based, no longer shipped as of card① landing) — kept only for the
+// equivalence comparison in the dirty-row-first section below, proving the migration didn't
+// silently change behavior for well-formed data while fixing the crash-on-dirty-data bug.
+const LEGACY_LIKE_SQL = `
   SELECT payload FROM chain_events
   WHERE event_type = 'pool_oracle_vote'
     AND payload LIKE ? AND payload LIKE ?
@@ -67,7 +82,7 @@ export default {
     // VOTER_PK_MISSING intentionally has no chain_events row — simulates the "not found yet" case.
 
     // ── assert: own-vote lookup finds the right row for a voter who voted YES ──
-    { id: 'lookup_yes_voter', action: 'query_db', sql: OWN_VOTE_SQL, params: [marketLike, pkLike(VOTER_PK_YES)],
+    { id: 'lookup_yes_voter', action: 'query_db', sql: OWN_VOTE_SQL, params: [MARKET_ID, VOTER_PK_YES],
       expect: { must: { rows_min: 1 } } },
     { id: 'lookup_yes_voter_outcome', action: 'query_db',
       sql: `SELECT json_extract(payload, '$.outcome') AS outcome FROM chain_events WHERE event_type='pool_oracle_vote' AND payload LIKE ? AND payload LIKE ?`,
@@ -81,7 +96,7 @@ export default {
       expect: { must: { rows_min: 1, row_assert: { outcome: 'NO' } } } },
 
     // ── assert: a voter with no chain_events row at all — the "not found, retry later" branch ──
-    { id: 'lookup_missing_voter', action: 'query_db', sql: OWN_VOTE_SQL, params: [marketLike, pkLike(VOTER_PK_MISSING)],
+    { id: 'lookup_missing_voter', action: 'query_db', sql: OWN_VOTE_SQL, params: [MARKET_ID, VOTER_PK_MISSING],
       expect: { must: { result_field_equals: { count: 0 } } } },
 
     // ── winner(0/1) -> expectedOutcome('YES'/'NO') mapping is a pure JS ternary in the code
@@ -109,11 +124,11 @@ export default {
       // observed_at earlier than every other __test_pbs8_% row seeded above (2026-08-03T06:00:00.000Z).
       sql: mkGarbageRow('__test_pbs8_garbage_first__', '2026-08-03T05:00:00.000Z') },
 
-    // ── ① currently-deployed LIKE-based query is unaffected by the dirty row regardless of its
-    //    sort position — this locks TODAY's live behavior (still LIKE, card① json_extract
-    //    migration has not landed as of this test) so this case stays a valid regression guard
-    //    both before and after that migration lands. ──
-    { id: 'like_query_survives_dirty_row_first', action: 'query_db', sql: OWN_VOTE_SQL, params: [marketLike, pkLike(VOTER_PK_YES)],
+    // ── ① historical LIKE-based query (no longer shipped, LEGACY_LIKE_SQL) is unaffected by the
+    //    dirty row regardless of sort position — LIKE never parses JSON, so this was never the
+    //    vulnerable half. Kept as an equivalence comparison against the now-shipped guarded
+    //    json_extract query (② below) — same correct result, different implementation. ──
+    { id: 'like_query_survives_dirty_row_first', action: 'query_db', sql: LEGACY_LIKE_SQL, params: [marketLike, pkLike(VOTER_PK_YES)],
       expect: { must: { rows_min: 1 } } },
     { id: 'like_query_still_finds_correct_outcome', action: 'query_db',
       sql: `SELECT json_extract(payload, '$.outcome') AS outcome FROM chain_events WHERE event_type='pool_oracle_vote' AND payload LIKE ? AND payload LIKE ?`,
@@ -127,10 +142,9 @@ export default {
     //    around the action handler), so asserting a throw here would make this regression suite
     //    permanently red, not lock the finding. ──
 
-    // ── ② the json_valid-guarded query (card① v2 proposed fix) survives the same dirty-row-first
-    //    data and still returns the correct row — proves the guard actually fixes the crash,
-    //    not just moves it. This is the query card① will ship; locking it now means the moment
-    //    card① lands, this assertion already exists to protect it. ──
+    // ── ② the json_valid-guarded query (card① shipped form, now == OWN_VOTE_SQL above) survives
+    //    the same dirty-row-first data and still returns the correct row — proves the guard
+    //    actually fixes the crash, not just moves it. ──
     { id: 'guarded_json_extract_survives_dirty_row_first', action: 'query_db',
       sql: `SELECT json_extract(payload,'$.outcome') AS outcome FROM chain_events WHERE event_type='pool_oracle_vote' AND json_valid(payload) AND json_extract(payload,'$.market_id')=? AND json_extract(payload,'$.voter_pubkey')=? ORDER BY observed_at ASC LIMIT 1`,
       params: [MARKET_ID, VOTER_PK_YES],
