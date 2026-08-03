@@ -61,7 +61,9 @@ function writeState(lastSeenTs) {
 }
 
 async function fetchLatestTs() {
-  const r = await fetch(`${CONSOLE_BASE}/api/chat/messages?channel=${encodeURIComponent(channel)}&limit=20`);
+  const r = await fetch(`${CONSOLE_BASE}/api/chat/messages?channel=${encodeURIComponent(channel)}&limit=20`, {
+    signal: AbortSignal.timeout(8000),
+  });
   const j = await r.json();
   const msgs = (j.messages || []).slice().sort((a, b) => ((a.created_at || '') < (b.created_at || '') ? -1 : 1));
   return msgs.length ? msgs[msgs.length - 1].created_at : null;
@@ -72,6 +74,7 @@ async function broadcast(message) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ relayId, channel, message }),
+    signal: AbortSignal.timeout(8000),
   });
   const j = await r.json().catch(() => ({}));
   if (!j.ok) console.error(`[盲窗检查] 播报失败: HTTP ${r.status} ${JSON.stringify(j).slice(0, 160)}`);
