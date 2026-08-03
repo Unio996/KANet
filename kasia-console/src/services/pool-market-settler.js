@@ -198,6 +198,218 @@ export function stopPoolMarketSettlerCron() {
   if (timer) { clearInterval(timer); timer = null; }
 }
 
+// ── P1「验不成 ≠ 可以退款」授权白名单(单源) ───────────────────────────────────────────
+//  设计: docs/2026-08-04-p1-cannot-verify-is-not-refund-authorization-design.md §4.1/§10.2
+//  🔴 白名单不是黑名单(ANTI-PATTERNS 规则 58): 枚举"不算证据的理由"天生不完备——今天写死
+//     "超时不算", 明天新加一个 watchdog 又是一条新的超时路; 只放行【已知好值】才封闭。
+//  🔴 取值一律是【肯定式证据】= 有人/有事实肯定地说了什么, 不是"我们等了多久 / 试了多少次"。
+//     计时器与重试计数【永远】不得进本表, 也不得新增以时间或次数为唯一内容的取值。
+//  🔴 名字不叫 refund_evidence: 那个名字已被 admin-dedup.js 占用(含义是"实际付了谁多少"的
+//     【事后】凭据, 且是 bond reclaim 闸②的判据)。同名两物且两个都在钱路上 ⇒ 本表用
+//     refund_authorization(白名单【字符串】), 占用方是 object, 结构上也区分得开。
+export const REFUND_AUTHORIZATION_WHITELIST = Object.freeze([
+  'bettors_absent',                    // 本市场 0 bet(⚠ 本批判据仅本地 betCount==0, 见下方 tier)
+  'committee_affirmative_unjudgeable', // ≥4 委员【主动】投 ABSTAIN = 有人明确说了"判不了"
+  'structurally_invalid_market',       // commingled spine 等结构性无效(单源 isCommingledSpine)
+  'pool_below_minimum',                // 池总额 < 门槛, 协议设计上就不结算(NWT 2026-08-04 补, 可测量事实非计时器)
+  'owner_authorized',                  // 另行授权(必须带授权引用: 谁/何时/依据)
+]);
+
+// 🔴 弱证据分级(NWT 2026-08-04 19:19 裁定 (a) 的硬条件①): bettors_absent 本批的判据只有
+//    【本地 pool_bettor_sides 聚合】, 链上等式(spine UTXO 面值 == maker stake)尚未实现。
+//    要求"可查询"而不只是注释——将来链上等式落地后, 要能按本字段把"用弱证据授权过的历史盘"
+//    筛出来回头补验, 而不是让它们和强证据的盘混在一起再也分不开。
+export const EVIDENCE_TIER_LOCAL_ONLY = 'local_only';
+
+// ── 退款失败分型: 结构性 vs 瞬时(设计 §10.4, NWT 2026-08-04 次条) ────────────────────
+//  🔴 为什么必须分型: "连续 N 次失败就转出口"对两类失败用同一个 N 是错的 ——
+//     结构性失败【重试第 1 次与第 10000 次结果完全相同】(cross-node maker 永远不会变成本机
+//     maker), 给它 N 次只是白等; 瞬时失败(RPC/mass/IO)才值得有界重试。
+//  🔴 这正是库里那 4 个盘卡了 55 天的直接成因: 结构性失败被当成"可以重试"处理了两个月,
+//     而 logThrottled 把日志也压住了, 没有任何东西升级。
+//  🔴 fail-closed 默认: 【认不出来的失败按结构性处理】—— 宁可早转人工, 不可无限重试。
+//     新增 buildMakerRefundPreimage 的 return {ok:false} 分支时不必记得改这里, 默认就是安全的。
+const TRANSIENT_REFUND_FAILURE_PATTERNS = Object.freeze([
+  /rpc/i, /timeout/i, /ECONN/i, /socket/i, /temporarily/i, /mass/i,
+]);
+function isStructuralRefundFailure(errorText) {
+  const s = String(errorText || '');
+  return !TRANSIENT_REFUND_FAILURE_PATTERNS.some((re) => re.test(s));
+}
+
+// 🔴 SQL 侧的 IN 列表【从常量生成】, 不手抄一份 —— 手抄的第二份必然与常量漂移(本仓在册的
+//    "同一事实存两份必有一份陈"), 而漂移的方向是【闸少认一个合法值 ⇒ 静默挡住合法退款】。
+//    值全部是代码内常量(非用户输入), 仍加正则断言: 若有人将来塞进带引号/空格的值, 这里当场
+//    抛而不是拼出一条语义被改写的 SQL。
+const REFUND_AUTHORIZATION_SQL_IN = (() => {
+  for (const v of REFUND_AUTHORIZATION_WHITELIST) {
+    if (!/^[a-z][a-z0-9_]*$/.test(v)) {
+      throw new Error(`refund_authorization 白名单取值非法(只允许 [a-z0-9_]): ${JSON.stringify(v)}`);
+    }
+  }
+  return REFUND_AUTHORIZATION_WHITELIST.map((v) => `'${v}'`).join(', ');
+})();
+
+/**
+ * freezeAwaitingAuthorization — 「无法判定」的唯一去处(设计 §4.2)。
+ *
+ * 🔴 它【不是】disputed 的改名: disputed 自带一条通往退款的定时器; 本状态没有定时器 ——
+ *    时间在这里不产生任何权力。市场停在这里不会因为"停得够久"而自动变成可以退款。
+ * 🔴 它不建 refund_tx_obj、不改钱路、不广播任何东西。离开本状态的唯一方式是拿到白名单
+ *    授权(含 owner_authorized), 见 authorizeRefundByOwner。
+ * 🔴 刻意【不】进 :355/:1096/:1174 三条 tick 查询, 也【不】进 :248-268 那条 bettor 退款扫描
+ *    —— 后者正是它不触发自动退款的原因。可见性由 reportUnauthorizedRefundBacklog 负责,
+ *    不是靠"某条查询碰巧会扫到它"。
+ *
+ * @param {object} market  pool_markets row(至少含 id, metadata)
+ * @param {string} reason  为什么判不了(原样入库, 供人看)
+ * @param {object} [extra] 追加 metadata 字段(如 evidence_gap / structural_error)
+ */
+function freezeAwaitingAuthorization(market, reason, extra = {}) {
+  try {
+    let meta = {};
+    try { meta = JSON.parse(market.metadata || '{}'); } catch {}
+    const newMeta = {
+      ...meta,
+      ...extra,
+      unresolved_reason: reason,
+      unresolved_at: new Date().toISOString(),
+    };
+    // 🔴 白名单式 WHERE(lint R-STATUS-GUARD-BLACKLIST 同向): 只允许从【本来就该被冻结的那几个
+    //    状态】转入, 而不是"排除掉几个不该碰的"。黑名单枚举活库状态集天生不完备。
+    const res = sqlite.prepare(`
+      UPDATE pool_markets
+      SET protocol_status = 'unresolved_needs_authorization',
+          metadata = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+        AND protocol_status IN ('verifying', 'collecting_sigs', 'disputed', 'refunding')
+    `).run(JSON.stringify(newMeta), market.id);
+    if (res.changes === 0) {
+      // 没改到 ≠ 成功。可能是状态已被别的 tick 推走 —— 说出来, 不要静默当作已冻结。
+      console.warn(`[pool-settler:P1-freeze] market=${market.id.slice(0, 12)} 未转入冻结态(当前状态不在允许转入集合内) reason=${reason}`);
+      return false;
+    }
+    console.warn(`[pool-settler:P1-freeze] market=${market.id.slice(0, 12)} → unresolved_needs_authorization(无举证不退款, 等另行授权) reason=${reason}`);
+    return true;
+  } catch (e) {
+    console.error(`[pool-settler:P1-freeze] 🔴 冻结写入失败 market=${market.id?.slice(0, 12)}: ${e.message}`);
+    return false;
+  }
+}
+
+/**
+ * authorizeRefundByOwner — 冻结态的【唯一出口】(设计 §4.2/§9.2②, NWT 落码前置②)。
+ *
+ * 🔴 为什么必须有它, 而且必须真的能被调到: 一个没有出口的冻结态就是"把钱静静锁死",
+ *    而"没人能放行"与"没人需要放行"在读数上完全相同 —— 本卡防的就是这类同形。
+ * 🔴 时间在冻结态里不产生任何权力: 离开的唯一方式是【有人带着依据签字】, 不是"停够久了"。
+ *
+ * 调用方 = 运维脚本 `scripts/p1-authorize-refund.mjs`(operator 手动, 不开 HTTP 面)。
+ * 刻意不加 HTTP endpoint: 那是用户面/钱路, 要另走铁律 0 的报备-审核-批准, 不搭本批便车。
+ *
+ * @param {string} marketId
+ * @param {object} opts
+ * @param {string} opts.authorization  必须 ∈ 白名单(通常是 'owner_authorized')
+ * @param {string} opts.reference      授权依据(谁/何时/依据), 空串不接受 —— 无依据的授权
+ *                                     等于把"我说可以"当证据, 正是本卡要消灭的东西
+ */
+export function authorizeRefundByOwner(marketId, { authorization, reference } = {}) {
+  if (!REFUND_AUTHORIZATION_WHITELIST.includes(authorization)) {
+    return { ok: false, error: `authorization 不在白名单: ${JSON.stringify(authorization)}` };
+  }
+  if (!reference || String(reference).trim().length < 8) {
+    return { ok: false, error: '必须给出授权依据(谁/何时/依据), 且不得是空串或占位符' };
+  }
+  const market = sqlite.prepare('SELECT id, protocol_status, metadata FROM pool_markets WHERE id = ?').get(marketId);
+  if (!market) return { ok: false, error: 'market not found' };
+  if (market.protocol_status !== 'unresolved_needs_authorization') {
+    // 白名单式判断: 只有冻结态可以被授权放行, 不是"排除掉几个不能放的"。
+    return { ok: false, error: `market 当前状态 ${market.protocol_status} 不是冻结态, 不适用本出口` };
+  }
+  let meta = {};
+  try { meta = JSON.parse(market.metadata || '{}'); } catch {}
+  const newMeta = {
+    ...meta,
+    refund_authorization: authorization,
+    refund_authorization_reference: String(reference),
+    refund_authorization_at: new Date().toISOString(),
+  };
+  // 授权之后落回 'cancelled': 这才是 :248-268 那条 bettor 退款扫描认的终态 —— 而它现在【同时】
+  // 要求 refund_authorization, 所以"进得去扫描"与"有授权"是同一件事, 不再是两件。
+  sqlite.prepare(`
+    UPDATE pool_markets SET protocol_status = 'cancelled', metadata = ?, updated_at = CURRENT_TIMESTAMP
+    WHERE id = ? AND protocol_status = 'unresolved_needs_authorization'
+  `).run(JSON.stringify(newMeta), marketId);
+  console.warn(`[pool-settler:P1-authz] ✅ 授权放行 market=${marketId.slice(0, 12)} authorization=${authorization} ref=${String(reference).slice(0, 80)}`);
+  return { ok: true, marketId, authorization };
+}
+
+/**
+ * reportUnauthorizedRefundBacklog — P1 授权闸的【计数与告警】半边(设计 §10.1/§10.3(a)/§10.5)。
+ *
+ * 🔴 为什么它必须存在, 而不是让闸静静地挡:
+ *   "退款被闸挡住了" 与 "没人来 claim" 在读数上完全相同 —— 这正是本卡从头到尾在防的那类
+ *   同形失效, 只不过这次是【我们自己的新闸】制造出来的。闸挡掉多少钱, 必须有人看得见。
+ *
+ * 🔴 双覆盖(Bettor 2026-08-04 19:11 硬条件(b) + 设计 §10.5): 只数新状态是不够的 ——
+ *   那 4 个卡了 55 天的盘停在 protocol_status='disputed', 若只数 unresolved_needs_authorization,
+ *   面板会显示 "0 个待处理", 完美地什么都不说。所以本函数数两类:
+ *     ① 被授权闸挡下的 bettor side(谓词与候选查询逐字相同, 只去掉授权那一段)
+ *     ② 事实上卡住但状态仍是旧值的市场(disputed 且过 grace 远超, 且从未 dispatch 过退款)
+ */
+function reportUnauthorizedRefundBacklog(unfixableIds, nowSec) {
+  try {
+    const ph = unfixableIds.length ? unfixableIds.map(() => '?').join(',') : "''";
+    // ① 与候选查询【同谓词】, 只去掉授权那一段 ⇒ 它数的就是"若无此闸本可放行"的那批,
+    //    不是另一个近似口径(近似口径会让两个数字对不上, 而没人知道该信哪个)。
+    const blocked = sqlite.prepare(`
+      SELECT COUNT(*) AS sides, COUNT(DISTINCT pm.id) AS markets,
+             COALESCE(SUM(pbs.stake_amount), 0) AS stake
+      FROM pool_bettor_sides pbs
+      JOIN pool_markets pm ON pm.id = pbs.market_id
+      WHERE (
+              (pm.protocol_version IS NULL OR pm.protocol_version = 'v0.5')
+              OR pm.id IN (${ph})
+              OR (pm.protocol_status IN ('cancelled', 'refunded')
+                  AND pm.protocol_version IN ('v0.6', 'v0.7'))
+            )
+        AND pm.deadline <= ?
+        AND pbs.side_lock_tx IS NOT NULL
+        AND pbs.claim_txid IS NULL
+        AND NOT (
+              json_valid(pm.metadata)
+              AND json_extract(pm.metadata, '$.refund_authorization') IN (${REFUND_AUTHORIZATION_SQL_IN})
+            )
+    `).get(...unfixableIds, nowSec);
+
+    // ② 事实上卡住、但状态还是旧值的那一类(新状态之外的另一半, 否则告警面板天生看不见它们)。
+    const legacyStuck = sqlite.prepare(`
+      SELECT COUNT(*) AS markets
+      FROM pool_markets
+      WHERE protocol_status = 'disputed'
+        AND json_valid(metadata)
+        AND json_extract(metadata, '$.dispute_started_at') IS NOT NULL
+        AND json_extract(metadata, '$.refund_dispatched_at') IS NULL
+    `).get();
+
+    const frozen = sqlite.prepare(`
+      SELECT COUNT(*) AS markets FROM pool_markets
+      WHERE protocol_status = 'unresolved_needs_authorization'
+    `).get();
+
+    // 🔴 长期为 0 与长期很大【都】要有人看见: 长期 0 说明这条路根本没通(闸是装饰),
+    //    长期很大说明有系统性验证故障。所以三个数一起打, 不做"为 0 就不打"的优化。
+    logThrottled('p1-refund-authz-backlog',
+      `[pool-settler:P1-authz] 授权闸拦下 ${blocked.sides} 个 bettor side / ${blocked.markets} 个市场 / ` +
+      `${(Number(blocked.stake) / 1e8).toFixed(1)} KAS 未领 · 冻结态(unresolved_needs_authorization)市场 ${frozen.markets} 个 · ` +
+      `旧状态但事实卡住(disputed 未 dispatch)市场 ${legacyStuck.markets} 个 — ` +
+      `这三个数长期为 0 与长期很大都需要人看: 前者说明闸没通, 后者说明验证侧有系统性故障`);
+  } catch (e) {
+    // 🔴 计数失败不得吞成"没有积压"——那正好又是一次"失败长成合法答案"。
+    console.error(`[pool-settler:P1-authz] 🔴 积压计数【本身】失败(不是"积压为 0"): ${e.message}`);
+  }
+}
+
 // J2-tn r391 (#28 Bettor ③ APPROVE v2 + Owner 终裁 修法 A 解冻):
 // legacy ver=null/v0.5 markets 卡死 (43c06c7 deadline-watcher 'separate concern flagged not touched').
 // 走 PoolSide.sil entry 3 refund_market_cancelled (= bettorSig + tx.time>=deadline*1000 ms, 无 grace).
@@ -265,9 +477,24 @@ async function legacyRefundBuilderTick() {
         AND pbs.side_lock_tx IS NOT NULL
         AND pbs.claim_txid IS NULL
         AND (pbs.refund_attempted_at IS NULL OR pbs.refund_attempted_at < datetime('now', '-1 hour'))
+        -- ── P1「验不成 ≠ 可以退款」授权闸 (设计 docs/2026-08-04-p1-cannot-verify-is-not-refund-authorization-design.md
+        --    §10.1, NWT 主条, Bettor 19:07②) ─────────────────────────────────────────────
+        --  为什么闸在【这里】而不是只收紧上游: 上游写 cancelled/refunded 的地方是【开放集合】
+        --  (今天 8 处, 明天第 9 处的人不会知道这条不变量存在); 而真正花钱的动作只有本条扫描
+        --  这【一处】。枚举坏入口永远不完备, 守住唯一出口才完备(同 ANTI-PATTERNS 规则 58 白名单)。
+        --  🔴 闸必须盖住上面【三个并列入口】(v0.5/NULL · unfixable-root · cancelled/refunded),
+        --     不是只盖第三个 —— 第一个入口压根不看 protocol_status。
+        --  json_valid 必须排在 json_extract 之前(AND 左到右短路): 表里任意一行坏 JSON 会让整条
+        --  查询抛异常, 不是该行返回 NULL(卡① NWT 已纠正过这个错误假设)。
+        AND json_valid(pm.metadata)
+        AND json_extract(pm.metadata, '$.refund_authorization') IN (${REFUND_AUTHORIZATION_SQL_IN})
       ORDER BY pbs.stake_amount ASC
       LIMIT ?
     `).all(...unfixableIds, nowSec, (parseInt(process.env.LEGACY_REFUND_BATCH, 10) || 1) * 4);
+    // 🔴 被闸挡下的必须【可计数、不静默】(设计 §10.1/§10.3(a))——否则"退款被挡住了"与"没人来
+    //    claim"在读数上完全相同, 而这正是本卡要根治的那一类同形。计数与候选查询【同谓词、只去掉
+    //    授权那一段】, 所以它数的就是"若无此闸本可放行"的那批, 不是另一个近似口径。
+    reportUnauthorizedRefundBacklog(unfixableIds, nowSec);
     // J2-tn r391 关2 硬门: 默认 batch=1 trial 模式. Bettor ④ 验过最小 1 笔 chain accept + bettor 实收
     // 后 env LEGACY_REFUND_BATCH=5 bump 进 batch. 不接受未验 ramp.
     // 2026-07-14 修法B: LIMIT 放宽到 batch*4(多取候选), 熔断闸(见 sideRefundCircuitGate)先滤掉永久
@@ -419,7 +646,7 @@ export async function poolSettlerTick() {
           market_id: market.id, reason: 'commingled_spine_finding2', spine_p2sh: market.spine_p2sh, cancelled_at: new Date().toISOString(),
         }));
         // maker refund (outpoint-precise spine_lock_tx:0 → 本盘 maker 地址; J1 独立 co-verify commingle-safe). in-place·不 orphan.
-        await dispatchRefund(market, { action: 'refund', reason: 'commingled_spine (FINDING-2): structurally-invalid market — refund not settle (cross-market substitution risk)' });
+        await dispatchRefund(market, { action: 'refund', authorization: 'structurally_invalid_market', reason: 'commingled_spine (FINDING-2): structurally-invalid market — refund not settle (cross-market substitution risk)' });
         // per-bettor refund-available (per-side outpoint-precise; legacyRefundBuilderTick 实退). 镜像 doomed self-heal.
         // lint-allow-shard-blind: commingled 盘是 non-bshard (上面 isBshard-skip 已早退·commingled⊄bshard) → bettor 按 logical market_id 存·无 shard 可漏
         const cmSides = sqlite.prepare(`
@@ -463,7 +690,7 @@ export async function poolSettlerTick() {
           delete curMetaPre.skip_until_ms;  // clear backoff so refund path 不被卡
           sqlite.prepare("UPDATE pool_markets SET protocol_status = 'cancelled', metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
             .run(JSON.stringify(curMetaPre), market.id);
-          dispatchRefund(market, { action: 'refund', reason: 'min_pot_undersize cancel-refund (pre-backoff override)' }).catch(e =>
+          dispatchRefund(market, { action: 'refund', authorization: 'pool_below_minimum', reason: 'min_pot_undersize cancel-refund (pre-backoff override)' }).catch(e =>
             console.warn(`[pool-settler:min-pot] pre-backoff maker dispatchRefund market=${market.id.slice(0,12)}: ${e.message}`));
           refund++;
           continue;
@@ -516,6 +743,7 @@ export async function poolSettlerTick() {
             // Auto maker refund
             await dispatchRefund(market, {
               action: 'refund',
+              authorization: 'pool_below_minimum',   // 池子不够大到能结算(可测量事实, 不是计时器)
               reason: `legacy doomed self-heal: needs_larger_pot=true, est_mass=${doomedMeta.est_storage_mass}`,
             });
             // Per-bettor events
@@ -570,7 +798,7 @@ export async function poolSettlerTick() {
               try { meta0 = JSON.parse(market.metadata || '{}'); } catch {}
               if (!meta0.refund_dispatched_at) {
                 console.log(`[pool-settler] 0-bet pre-sample shortcut market=${market.id.slice(0,12)} pv=${market.protocol_version} → dispatchRefund (skip committee sampling + voting)`);
-                await dispatchRefund(market, { action: 'refund', reason: '0-bet market, refund_maker_unjoined (pre-sample shortcut)' });
+                await dispatchRefund(market, { action: 'refund', authorization: 'bettors_absent', reason: '0-bet market, refund_maker_unjoined (pre-sample shortcut)' });
                 refund++;
               } else {
                 pending++;  // already dispatched, wait handleRefunding tick
@@ -668,7 +896,7 @@ export async function poolSettlerTick() {
               curMeta1.cancelled_at = new Date().toISOString();
               sqlite.prepare("UPDATE pool_markets SET protocol_status = 'cancelled', metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
                 .run(JSON.stringify(curMeta1), market.id);
-              dispatchRefund(market, { action: 'refund', reason: 'min_pot_undersize cancel-refund (retroactive)' }).catch(e =>
+              dispatchRefund(market, { action: 'refund', authorization: 'pool_below_minimum', reason: 'min_pot_undersize cancel-refund (retroactive)' }).catch(e =>
                 console.warn(`[pool-settler:min-pot] retroactive maker dispatchRefund market=${market.id.slice(0,12)}: ${e.message}`));
               refund++;
               continue;
@@ -746,7 +974,9 @@ export async function poolSettlerTick() {
                 urMeta.unrecoverable_at = new Date().toISOString();
                 sqlite.prepare("UPDATE pool_markets SET metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(JSON.stringify(urMeta), market.id);
                 console.warn(`[pool-settler] UNRECOVERABLE market=${market.id.slice(0,12)} Δ=${tipDaaUR - deadlineDaa} > MAX_WALK−MARGIN ${REFUND_THRESHOLD} → dispatchRefund 终态 (停永重试 SPC-walk)`);
-                await dispatchRefund(market, { action: 'refund', reason: urMeta.unrecoverable_reason });
+                // P1: 与 committee_unformed 同族(委员不可采样 ⇒ 没有任何判定), 冻结等授权。
+                freezeAwaitingAuthorization(market, urMeta.unrecoverable_reason,
+                  { evidence_gap: 'committee_unsamplable_spc_walk' });
                 refund++;
                 continue;
               }
@@ -828,7 +1058,11 @@ export async function poolSettlerTick() {
                 sqlite.prepare('UPDATE pool_markets SET metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
                   .run(JSON.stringify(cur), market.id);
                 // Trigger maker refund; if cross-node, dispatchRefund 内 skip 自家 log (r402 broadcast path)
-                await dispatchRefund(market, { action: 'refund', reason: `committee_unformed (sample_fail=${cur.sample_fail_count}, last=${cur.sample_last_err?.slice(0,80) || 'n/a'})` });
+                // P1(Bettor 2026-08-04 19:22 拍): 抽样失败 N 次是【重试计数】不是证据, 与超时同族;
+                // 而且这一族连判定都没有(委员会压根没组成), 比 quorum-timeout 更该冻。
+                freezeAwaitingAuthorization(market,
+                  `committee_unformed(sample_fail=${cur.sample_fail_count}, last=${cur.sample_last_err?.slice(0,80) || 'n/a'})— 抽样失败次数不构成退款授权`,
+                  { evidence_gap: 'committee_never_formed' });
                 // r417 (Bettor r419/r420 monitor): emit bettor_refund_available for any sides
                 // so bettor-refund-claim-auto cron can sweep + dispatch PoolSide entry 2 refund.
                 // 7un1d 实证缺这步 — maker refund 落链 但 bettor side 5 KAS 没出 refund_available.
@@ -976,7 +1210,7 @@ export async function poolSettlerTick() {
               sqlite.prepare("UPDATE pool_markets SET protocol_status = 'cancelled', metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
                 .run(JSON.stringify(curMeta0), market.id);
               // maker dispatchRefund (= 已有 pool_refund_maker_unjoined_tx 流) 异步, 不等待.
-              dispatchRefund(market, { action: 'refund', reason: 'min_pot_undersize cancel-refund' }).catch(e =>
+              dispatchRefund(market, { action: 'refund', authorization: 'pool_below_minimum', reason: 'min_pot_undersize cancel-refund' }).catch(e =>
                 console.warn(`[pool-settler:min-pot] maker dispatchRefund market=${market.id.slice(0,12)}: ${e.message}`));
               refund++;
               continue;
@@ -995,7 +1229,17 @@ export async function poolSettlerTick() {
           let meta = {};
           try { meta = JSON.parse(market.metadata || '{}'); } catch {}
           if (!meta.refund_dispatched_at) {
-            await dispatchRefund(market, decision);
+            const r = await dispatchRefund(market, decision);
+            // P1: dispatchRefund 在缺授权时 fail-closed 返回 unauthorized ——【必须】接住并转冻结态。
+            // 若这里不接, 市场会停在原状态、下个 tick 再判一次, 变成无限重试且没有任何东西升级
+            // (库里那 4 个卡了 55 天的盘就是这个形状)。
+            if (r && r.unauthorized) {
+              freezeAwaitingAuthorization(market, decision.reason, { evidence_gap: 'decide_consensus_no_affirmative_evidence' });
+            } else if (r && r.ok === false && r.structural) {
+              // 结构性失败(cross-node maker / bshard 无 legacy 路 / 版本不支持)重试一万次结果相同
+              // ⇒ 第一次就转出口, 不计数不等待(设计 §10.4)。
+              freezeAwaitingAuthorization(market, `退款构造结构性失败: ${r.reason}`, { structural_error: r.reason });
+            }
           }
         } else if (decision.action === 'refund_disagreement') {
           refund++;
@@ -1024,7 +1268,11 @@ export async function poolSettlerTick() {
               // 终态: grace 过 → dispatchRefund (复用现有硬化退款路 + grace, 可 scale)。
               logThrottled(`dispute-term:${market.id}`, `[pool-settler] DISPUTE terminal market=${market.id.slice(0,12)} grace ${DISPUTE_GRACE_MIN}min 过 → dispatchRefund (档1 自治终态)`);
               if (!meta.refund_dispatched_at) {
-                await dispatchRefund(market, { action: 'refund', reason: `dispute grace timeout → refund (${meta.dispute_reason || decision.reason})` });
+                // P1: grace 到期不带任何新证据 —— 10 分钟之后并没有多出支持"该退款"的东西。
+                // (Owner r518 终裁那一层已由 Owner 2026-08-04 亲口交回, Bettor 19:07 裁定解锁。)
+                freezeAwaitingAuthorization(market,
+                  `dispute grace 超时(${meta.dispute_reason || decision.reason})— 超时不构成退款授权`,
+                  { evidence_gap: 'dispute_unresolved_no_new_evidence' });
               }
               refund++;
             } else {
@@ -1049,7 +1297,10 @@ export async function poolSettlerTick() {
             sqlite.prepare('UPDATE pool_markets SET metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
               .run(JSON.stringify(meta), market.id);
             console.warn(`[pool-settler] QUORUM-TIMEOUT-REFUND market=${market.id.slice(0,12)} ${meta.quorum_timeout_reason}`);
-            await dispatchRefund(market, { action: 'refund', reason: meta.quorum_timeout_reason });
+            // P1: "等够了还没达 quorum" 是计时器不是证据; 且它连"为什么没达"都不区分
+            // (委员投了反对 / 根本没投 / 本机没收到 / RPC 坏了, 在触发式里读数相同)。
+            freezeAwaitingAuthorization(market, meta.quorum_timeout_reason,
+              { evidence_gap: 'quorum_unreached_cause_unknown' });
             refund++;
           } else {
             pending++;
@@ -1124,7 +1375,12 @@ export async function poolSettlerTick() {
               await dispatchPhase2(wm, decision);
               watchdogFired++;
             } else if (decision.action === 'refund' && !meta.refund_dispatched_at) {
-              await dispatchRefund(wm, decision);
+              const r = await dispatchRefund(wm, decision);
+              if (r && r.unauthorized) {
+                freezeAwaitingAuthorization(wm, decision.reason, { evidence_gap: 'decide_consensus_no_affirmative_evidence' });
+              } else if (r && r.ok === false && r.structural) {
+                freezeAwaitingAuthorization(wm, `退款构造结构性失败: ${r.reason}`, { structural_error: r.reason });
+              }
               watchdogFired++;
             }
           } catch (e) {
@@ -1142,14 +1398,16 @@ export async function poolSettlerTick() {
             if (sigCount < 4 && !meta.refund_dispatched_at) {
               console.warn(`[pool-settler:watchdog-b] market=${wm.id.slice(0,12)} collecting_sigs ageMin=${Math.floor(phase2AgeMs/60000)} sigs=${sigCount}/4 → force cancel + maker refund (silent stuck)`);
               try {
-                meta.cancel_reason = 'collecting_sigs_silent_timeout';
-                meta.cancelled_at = new Date().toISOString();
-                sqlite.prepare("UPDATE pool_markets SET protocol_status='cancelled', metadata=?, updated_at=CURRENT_TIMESTAMP WHERE id=?")
-                  .run(JSON.stringify(meta), wm.id);
-                await dispatchRefund(wm, { action: 'refund', reason: 'watchdog-b: collecting_sigs silent timeout' });
+                // P1(设计 §4.3/§8.3②): 签名收不齐【不是】退款授权 —— 而且 sigCount 是【本机知道的
+                // 签名数】, 跨节点回执没 ingest 时, 它与"委员真的没签"读数完全相同。
+                // 🔴 一步到位进冻结态, 【不得】先写 cancelled: 只要中途经过 cancelled/refunded,
+                //    :248-268 那条 bettor 退款扫描当场就会把它收编, 之后再改状态也追不回来。
+                freezeAwaitingAuthorization(wm,
+                  `watchdog-b: collecting_sigs 静默超时(本机可见 sigs=${sigCount}/4)— 签不齐不构成退款授权`,
+                  { evidence_gap: 'signatures_incomplete_local_view_only' });
                 watchdogFired++;
               } catch (e) {
-                console.warn(`[pool-settler:watchdog-b] dispatchRefund fail market=${wm.id.slice(0,12)}: ${e.message}`);
+                console.warn(`[pool-settler:watchdog-b] 冻结失败 market=${wm.id.slice(0,12)}: ${e.message}`);
               }
             }
           }
@@ -1364,7 +1622,7 @@ function decideConsensusV06(market) {
   // wait — return refund immediately. Works for both v0.6 + v0.7.
   const betCount = sqlite.prepare('SELECT COUNT(*) as c FROM pool_bettor_sides WHERE market_id = ?').get(market.id)?.c || 0;
   if (betCount === 0) {
-    return { action: 'refund', reason: `0-bet market past deadline (no votes possible, refund_maker_unjoined)` };
+    return { action: 'refund', authorization: 'bettors_absent', reason: `0-bet market past deadline (no votes possible, refund_maker_unjoined)` };
   }
   let oracleIds;
   try { oracleIds = JSON.parse(market.oracle_relay_ids || '[]'); } catch { oracleIds = []; }
@@ -1461,6 +1719,8 @@ function decideConsensusV06(market) {
       silentIdx = _findSilentForWinner('YES');
       // r414: 4-YES + 1-ABSTAIN edge — _findSilentForWinner 返 null = 仅 abstain 剩, spec 5.5 不损 stake.
       if (silentIdx === null) {
+        // 🔴 P1 故意【不给】authorization: 这里只有 1 票 ABSTAIN, 不是 ≥4 的 affirmative-unjudgeable
+        //    supermajority ——「凑不够共识」不是「有人说判不了」。dispatchRefund 会拒, caller 转冻结态。
         return { action: 'refund', reason: `v0.6 4-of-5 forfeit_1 无合法 silent slot (5th = ABSTAIN, spec 5.5 不损 stake) → refund_consensus_insufficient (YES=${yesCount}/5 ABSTAIN=${abstainCount})` };
       }
     }
@@ -1479,6 +1739,8 @@ function decideConsensusV06(market) {
       silentIdx = _findSilentForWinner('NO');
       // r414: 4-NO + 1-ABSTAIN edge — 同上.
       if (silentIdx === null) {
+        // 🔴 P1 故意【不给】authorization: 这里只有 1 票 ABSTAIN, 不是 ≥4 的 affirmative-unjudgeable
+        //    supermajority ——「凑不够共识」不是「有人说判不了」。dispatchRefund 会拒, caller 转冻结态。
         return { action: 'refund', reason: `v0.6 4-of-5 forfeit_1 无合法 silent slot (5th = ABSTAIN, spec 5.5 不损 stake) → refund_consensus_insufficient (NO=${noCount}/5 ABSTAIN=${abstainCount})` };
       }
     }
@@ -1502,7 +1764,8 @@ function decideConsensusV06(market) {
   // ① abstain-refund: ≥4 委员【主动】投 ABSTAIN (affirmative-unjudgeable supermajority) = genuinely
   //    不可判 → 合法 refund。门槛由旧 ≥2 抬到 ≥4 (= griefer 腐蚀 1-2 委员凑不出, 落 dispute 不奖)。
   if (abstainCount >= 4) {
-    return { action: 'refund', reason: `档1 abstain≥4 (${abstainCount}/5) affirmative-unjudgeable supermajority → 合法 refund (genuinely 不可判)` };
+    // P1: 这是白名单里【唯一一条『有人明确说了判不了』】的证据型退款 —— 与『没人说话所以退款』是两回事。
+    return { action: 'refund', authorization: 'committee_affirmative_unjudgeable', reason: `档1 abstain≥4 (${abstainCount}/5) affirmative-unjudgeable supermajority → 合法 refund (genuinely 不可判)` };
   }
 
   // ② else catch-all → dispute: 既非 4-同向 settle 也非 ≥4-abstain。覆盖 split (3y2n/3y1n1a…) /
@@ -1720,7 +1983,7 @@ export async function dispatchPhase2(market, decision) {
     // Avoids brittle error-string matching in catch (= ee92218 first attempt missed qlfpv case).
     if (sides.length === 0) {
       console.log(`[pool-settler] dispatchPhase2 market=${market.id.slice(0,12)} 0-bet shortcut → dispatchRefund`);
-      await dispatchRefund(market, { action: 'refund', reason: '0-bet market (sides=0), refund_maker_unjoined' });
+      await dispatchRefund(market, { action: 'refund', authorization: 'bettors_absent', reason: '0-bet market (sides=0), refund_maker_unjoined' });
       return;
     }
 
@@ -1876,6 +2139,7 @@ export async function dispatchPhase2(market, decision) {
         // 2. Auto maker refund (= spine refund_maker_unjoined via existing dispatchRefund path)
         await dispatchRefund(market, {
           action: 'refund',
+          authorization: 'pool_below_minimum',
           reason: `thin-market cancel: losing_pool=${losingPool} < threshold=${thinThreshold}`,
         });
         // 3. Per-bettor cancel events for client-side self-claim. settler can't sign because no privkey.
@@ -1987,7 +2251,7 @@ export async function dispatchPhase2(market, decision) {
         || msg.includes('less than broker_fee');
       if (is0Bet) {
         console.log(`[pool-settler] dispatchPhase2 market=${market.id.slice(0,12)} 0-bet (${msg.slice(0,80)}) → route to dispatchRefund`);
-        await dispatchRefund(market, { action: 'refund', reason: '0-bet market, refund_maker_unjoined' });
+        await dispatchRefund(market, { action: 'refund', authorization: 'bettors_absent', reason: '0-bet market, refund_maker_unjoined' });
         return;
       }
       console.warn(`[pool-settler] dispatchPhase2 market=${market.id.slice(0,12)} computePoolPayouts fail: ${e.message}`);
@@ -2150,6 +2414,7 @@ export async function dispatchPhase2(market, decision) {
         `).run(`market_cancelled:${market.id.slice(0,12)}:${Date.now()}`, cancelEventPayload);
         await dispatchRefund(market, {
           action: 'refund',
+          authorization: 'structurally_invalid_market',   // 结算 TX 造不出来(mass 超上限)= 结构性, 不是'池子小'
           reason: `thin-market cancel: est_storage_mass=${estMass} > cap=${STORAGE_MASS_CAP}`,
         });
         for (const side of sides) {
@@ -2453,8 +2718,23 @@ export async function dispatchRefund(market, decision) {
       return { ok: false, reason: 'bshard market — legacy refund path structurally invalid' };
     }
 
+    // ── P1「验不成 ≠ 可以退款」: 授权在【唯一咽喉】处强制, 不散在各调用点 ──────────────
+    //  设计 §4.1/§10.1。为什么放这儿: 退款的建立只有 dispatchRefund 这一个入口, 而"记得写
+    //  授权"若靠 8 个调用点各自自觉, 第 9 个调用点的作者不会知道有这条规矩(与闸放在花钱点
+    //  而不是放在上游写点, 是同一个理由: 守闭合处, 不守开放集合)。
+    //  🔴 fail-closed: 没有合法授权 ⇒ 不建 refund_tx_obj、不改 status、不动钱, 由调用方决定
+    //     转冻结态。缺授权【不是】"那就先退了再说"。
+    const authorization = decision?.authorization;
+    if (!REFUND_AUTHORIZATION_WHITELIST.includes(authorization)) {
+      console.error(
+        `[pool-settler] 🔴 dispatchRefund 拒绝: 无合法 refund_authorization(得到 ${JSON.stringify(authorization)}) ` +
+        `market=${market.id.slice(0, 12)} reason=${decision?.reason} — 退款需要肯定式证据, ` +
+        `"超时/重试用尽"不构成授权(设计 docs/2026-08-04-p1-cannot-verify-is-not-refund-authorization-design.md §4.1)`);
+      return { ok: false, reason: 'no refund_authorization (P1 invariant)', unauthorized: true };
+    }
+
     const preimage = await buildMakerRefundPreimage(market);
-    if (!preimage.ok) return { ok: false, reason: preimage.error };
+    if (!preimage.ok) return { ok: false, reason: preimage.error, structural: isStructuralRefundFailure(preimage.error) };
 
     // 4. Stash refund metadata + transition to refunding (single-sig path skips collecting_sigs)
     let prevMeta = {};
@@ -2465,6 +2745,14 @@ export async function dispatchRefund(market, decision) {
       refund_reason: decision.reason,
       refund_dispatched_at: new Date().toISOString(),
       refund_amount: preimage.makerRefundAmount,
+      // P1: 授权字段随退款一起落库 —— bettor 那条腿的闸(见 legacyRefundBuilderTick)读的就是它。
+      refund_authorization: authorization,
+      // 弱证据分级(NWT 裁定 (a) 硬条件①): bettors_absent 目前【只有本地 pool_bettor_sides 聚合】
+      // 这一个判据, 链上等式(spine UTXO 面值 == maker stake)尚未实现 ⇒ 打成可查询的标记, 将来
+      // 等式落地后能把"用弱证据授权过的历史盘"筛出来回头补验, 而不是永远混在强证据里分不开。
+      ...(authorization === 'bettors_absent'
+        ? { refund_authorization_tier: EVIDENCE_TIER_LOCAL_ONLY }
+        : {}),
     };
     sqlite.prepare('UPDATE pool_markets SET metadata = ?, protocol_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
       .run(JSON.stringify(newMeta), 'refunding', market.id);
@@ -3203,7 +3491,13 @@ async function handleCollectingSigs(market) {
           sqlite.prepare("UPDATE pool_markets SET protocol_status='cancelled', metadata=?, updated_at=CURRENT_TIMESTAMP WHERE id=?")
             .run(JSON.stringify(cur), market.id);
           console.warn(`[pool-settler:collecting] pool_settle_tx submit GIVE-UP market=${market.id.slice(0,12)} count=${cur.submit_fail_count} (${SETTLE_SUBMIT_GIVEUP}) → cancelled + maker refund (永久 submit fail, 停无限重试)`);
-          await dispatchRefund(market, { action: 'refund', reason: `settle_submit_giveup: ${cur.submit_fail_count} fails, ${cur.submit_last_err}` });
+          // 🔴 P1(J2 提, NWT 收回原建议, Bettor 19:22 拍): 这里【委员已经达成共识】——
+          //    正确终态是 settle(付给赢家), 不是把钱退还给所有人。手里有判定结果却执行相反的
+          //    钱路, 是整份文件里最直接违反 Owner「只 settle 绝不 refund」的一处。
+          //    而"重试 N 次放弃"本身仍是计数器, 不是证据。⇒ 冻结, 由人决定重试/换 fee/另行授权。
+          freezeAwaitingAuthorization(market,
+            `settle_submit_giveup: ${cur.submit_fail_count} fails, ${cur.submit_last_err} — 共识已达成但广播失败, 退款与判定相反, 不自动退`,
+            { evidence_gap: 'consensus_reached_but_broadcast_failed' });
           return;
         }
         const submitBackoffSec = Math.min(60 * Math.pow(2, Math.max(0, cur.submit_fail_count - 1)), 3600);
