@@ -598,6 +598,34 @@ async function handlePoolOracleTxSignReq(msg) {
       console.log(`[trade-filter:sign-req] oracle=${oracle.name} forfeit_1 silent (idx=${myIdx}) — skip sign`);
       continue;
     }
+    // PB-S8-1 搬运(bettor-prediction-voter.js:1100-1126 同款模式, NWT红队774806d7 GREEN,
+    // Bettor方向审GREEN #cvind4): myIdx 只核身份(在不在委员名单)——不核前提(自己当时投的
+    // 票是不是这个 winner)。cross-node 场景 msg.winner/phase2_tx_obj 都可能是消息自带值,
+    // 委员身份一确认就无条件签会构成"授权≠前提"的洞(同 r402)。反查自己当时的投票记录
+    // (同 decideConsensusV06 既有查询, pool-market-settler.js:1398-1404), 不一致拒签。
+    // 只锁 winner 方向一致性, 不锁 tx_obj payout 结构(金额/地址)——那是独立登记的 PB-S8-2,
+    // 不在本次范围内(NWT 记账措辞要求, #cvind4)。
+    const myVoteRow = sqlite.prepare(`
+      SELECT payload FROM chain_events
+      WHERE event_type = 'pool_oracle_vote'
+        AND payload LIKE ? AND payload LIKE ?
+      ORDER BY observed_at ASC LIMIT 1
+    `).get(`%"market_id":"${market.id}"%`, `%"voter_pubkey":"${voterPubkey}"%`);
+    if (!myVoteRow) {
+      // 同 PB-S8-1 原版语义: 找不到自己的投票记录不是"通过", 也不是永久拒绝——投票 oracle
+      // 与签名 oracle 是同机直写(Bettor #cvind4 现取核实: bettor-prediction-voter.js:483-491
+      // 广播后直插 chain_events, 不依赖广播 ingest), 结构上不该系统性缺失; 若真缺失, 留给
+      // sign_req 下一次重发再试, 不阻塞其他委员/其他 input。
+      console.warn(`[trade-filter:sign-req] byzantine 防: 本地找不到自己(voter_pubkey=${voterPubkey.slice(0,12)})对 market=${market.id.slice(0,12)} 的投票记录, 暂不签, 待重试`);
+      continue;
+    }
+    let myOutcome;
+    try { myOutcome = JSON.parse(myVoteRow.payload).outcome; } catch { myOutcome = null; }
+    const expectedOutcome = msg.winner === 0 ? 'YES' : (msg.winner === 1 ? 'NO' : null);
+    if (myOutcome !== expectedOutcome) {
+      console.error(`[trade-filter:sign-req] byzantine 防触发: oracle=${oracle.name} 自己投的=${myOutcome} ≠ 消息声称的winner对应=${expectedOutcome}(msg.winner=${msg.winner}) market=${market.id.slice(0,12)} — 拒签`);
+      continue;
+    }
     // 4. Sign each spine input + broadcast sign_resp.
     for (let inputIdx = 0; inputIdx < spineInputCount; inputIdx++) {
       // Idempotent: skip if already signed (chain_events local)
