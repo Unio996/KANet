@@ -26,6 +26,9 @@ import { decrypt } from './crypto.js';
  */
 export { _executeHedge as executeHedge };
 export { _autoPayExchange as triggerAutoPay, _autoSettleAsset, _autoSettleAsset as _autoSendKas };
+// 卡②(J2, PB-S8-1真handler回归, Bettor #czopcr P1): 测试需要真import+调用这个函数(不是重放
+// 它的SQL), 加具名导出使其可测——不改函数本体, 只加一行可见性。
+export { handlePoolOracleTxSignReq };
 
 export async function onBroadcastWritten(row) {
   // Pre-filter to skip non-protocol broadcasts cheaply (full JSON.parse only if prefix match).
