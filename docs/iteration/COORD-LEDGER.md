@@ -4593,3 +4593,10 @@ pool-market-settler.js:2427-2459  dispatchRefund 本体    — 只查 isBshard, 
 - **🔴 覆盖边界(NWT 要求,按等号记)**: PB-S8-1 只锁 **winner 方向一致性**;**不锁 tx_obj payout 结构(金额/地址)**——sign_input_for_settle 仍对消息喂来的 tx_obj 结构签名,那半=PB-S8-2 领地。**不许读成"委员盲签已修完"。**
 - **部署序**: 搭 KANet-UI 小窗(告警持久化+PB-S8-1 一次重启带两件),窗单沿 (120) 五检;PB-S8-1 行为验最低面=起栈后 sign_req 无 byzantine 误拒。**待 KANet-UI 回窗口时间。**
 - **J1 笔记本 r402 窗**: 06:51 报执行中(ETA ~10 分钟),07:02 仍未报五检(超时,已二追;可能其 console 重启窗内无法发信)。**挂着,下一节拍必核。**
+
+---
+### (128) 2026-08-03 07:0x-07:1xZ — ✅ 小窗完成: PB-S8-1+告警水位线上线(五检全过)· Codex 主动审四缺口全立卡 · 🔴 J1 沉默 25+ 分钟升级
+- **Codex 主动审**(bridge `c99f7751`,本次第二通路盯到没漏): 两方向 ACCEPTED,四实缺口,均不阻塞部署(两件皆严格增益)——**卡①**(J2 认领)投票查询 LIKE→json_extract 规范键查+equivocation 规则,**约束: checker 与 decideConsensusV06 计票必须同卡原子改**(只改一处=两把尺分裂,比不改糟);**卡②**(J2 认领)PB-S8-1 真 handler 回归(现 case=SQL fixture 重放,未执行 handler,证不了拒签真拦调用;需 mock IPC+调用次数断言);**卡③**(KANet-UI 认领,方向=冷却政策而非 episode 状态机)告警同劣化期重启后新失败行会再报+stop/start 同进程绕过水位线恢复;**PB-S8-2 优先级上调**(Codex: "not optional——live 放钱签名路径剩下的 authorization-to-bytes 绑定",D-012 终裁后第一批)。J2 对两卡"认账不辩护",排期=部署窗后出计划。
+- **小窗执行**(KANet-UI,07:10-07:12,~2 分钟): 前置 HEAD=`55175d4a`==origin(ls-remote 现查,含 520903b7+7a2bb5e7+145baeb8);in-flight 双检过。五检: ①新 PID 13256 非复活 ②频道 API 活 ③装载==origin HEAD ④迁移干净 ⑤行为验**带诚实边界**——sign_req 无 cross-node 流量可验(同 r402 rejected_v1 已知缺口,不硬造)、告警冷启动零报错但水位线读回路径无 live 劣化流量触发,靠 regression suite(6 check 全过)。
+- **当前防线态**: r402(producer 侧退款复核)+ PB-S8-1(委员签名前投票自检)+ 告警水位线,三件全部 live。剩余挂账: PB-S8-2(上调)/发送者绑定/rejected_v1 实弹/卡①②③/r402 consumer 半边(J1 笔记本,窗口状态成谜)。
+- **🔴 J1 状态**: 06:51"此刻执行中"后沉默 25+ 分钟,频道四追无应,git 全分支零 push——其 console 重启窗疑似卡死,远程无信道可达。**已升 Owner(终端): 若可物理/RustDesk 触达其笔记本,看一眼。**
