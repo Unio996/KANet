@@ -1,6 +1,11 @@
-# P1「验不成 ≠ 可以退款」不变量落地 — 设计 v0.1
+# P1「验不成 ≠ 可以退款」不变量落地 — 设计 v0.2
 
-> **Status**: CURRENT · **DESIGN-ONLY,零代码改动,不构成授权边界** — 待 NWT 红队设计审,过了才实现(Bettor 2026-08-04 18:38 派工 `#dkoy25.1`,ledger (139)补5 `d6d4604e`)。
+> **Status**: CURRENT · **DESIGN-ONLY,零代码改动,不构成授权边界** — NWT 红队对 v0.1 出 🔴 PUSH-BACK(三项),v0.2 逐条处置,仍待复审
+>
+> 🔴 **v0.2 头号变更 = 撤回 v0.1 §3.2 的核心判断,方向是【我说小了】**:我当时说"末端对有 bet 的市场付不出去(r402 拦)"。**实查:钱早就付出去了。** `:1149` 与 `:1052` 两条纯超时路径累计已退 **62,698.8 KAS 的 bettor 本金**(39 个市场、848 个 bettor side、其中 841 个已带 `claim_txid`)。原因见 §8:**r402 只守 maker 那条腿,bettor 的钱走的是另一条我当时没找到的独立扫描**。
+> 🔴 **v0.2 第二处更正(NWT 对账打中)**:v0.1 §2 报 `:1052` 为 **8** 个,实为 **11** 个 —— 我把计数键在了一个**内嵌运行时变量的字符串**上(`verifying <N>min > grace …`,N 实际有 120/121/123 三种),精确匹配漏掉 3 个。**教训:统计口径不许用含变量的整串做等值匹配。**
+>
+> — 待 NWT 红队设计审,过了才实现(Bettor 2026-08-04 18:38 派工 `#dkoy25.1`,ledger (139)补5 `d6d4604e`)。
 > 归 J2(settler 域)。上游:Codex 第三轮 P2/收口证据第 5 条 · Bettor 16:28 实查立卡(ledger (137))· Owner 铁律「只 settle 绝不 refund」([[project-owner-settle-not-refund-orphan-permanent-loss-precedent]])。
 
 ## 0. 一页结论
@@ -145,3 +150,97 @@
 3. **§3.1 那两处覆盖**:我判"幂等性没破"是基于 `refund_dispatched_at` 存活;请攻这个判断(有没有 `dispatchRefund` 中途失败、把两个标记都留成空的路径)。
 4. **§3.2 的"末端付不出去"是不是被我说小了** —— 特别是 bshard 与 v0.5 两条我明标未追的分支。
 5. **规则 66 判别式套在本设计上**:新加的 `refund_evidence` 字段,在决策那一刻真读得到吗?(它由谁写、写在哪、会不会又被 §3.1 那种覆盖擦掉。)
+
+---
+
+## 8. 🔴 v0.2 自我更正:v0.1 §3.2「末端付不出去」是错的 —— 钱早就动了,54,082 KAS
+
+> **这是一条对我自己有利的结论,而它经不起再查一层。记法照 memory `feedback-convenient-conclusion-and-scope-misalignment`:有利结论必须按更高强度查,而我 v0.1 没查够。**
+
+### 8.1 我当时错在哪
+
+v0.1 §3.2 只追了 **maker 那条腿**:`dispatchRefund` → `handleRefunding` →(r402 `betCount>0` ⇒ REFUSED),于是得出"对有 bet 的市场付不出去"。
+
+**漏掉的是 bettor 那条腿**,它是一条**独立扫描**(`pool-market-settler.js:248-268`),条件与 `dispatchRefund`/`handleRefunding` 完全无关:
+
+```sql
+JOIN pool_markets pm ON pm.id = pbs.market_id
+WHERE ( … OR ( pm.protocol_status IN ('cancelled', 'refunded')
+               AND pm.protocol_version IN ('v0.6','v0.7') ) )
+  AND pm.deadline <= ?  AND pbs.side_lock_tx IS NOT NULL
+  AND pbs.claim_txid IS NULL  AND (pbs.refund_attempted_at IS NULL OR …)
+```
+
+⇒ **只要市场的 `protocol_status` 落进 `cancelled`/`refunded`,bettor 的钱就会被自动退**,`r402` 在这条路上**没有任何位置**(r402 只在 `handleRefunding` 里,那是 maker 腿)。
+🔴 而代码注释自陈这是**刻意加宽的**:「r1016(NWT r1108 catch):DROPPED the <1e10 pool-size filter … 旧过滤 WRONGLY excluded large (c) quorum-timeout-refunded markets → bettor stake stuck despite maker refund landed(**NWT 4万 locked**)」——**这条路正是为了让"quorum 超时退款"的市场把 bettor 的钱退掉而扩的。**
+
+### 8.2 实测(只读现查,数字即证据)
+
+| 触发点 | 市场数 | 全部落到的 status | bettor side 数 | 已带 `claim_txid` | 本金合计 |
+|---|---|---|---|---|---|
+| `:1149` watchdog-b collecting_sigs 超时 | 28 | **全部 `refunded`** | 518 | 511 | **15,054.9 KAS** |
+| `:1052` verifying 超 grace 未达 quorum | **11**(非 v0.1 写的 8,见头注 + NWT 18:52 独立对账) | **全部 `refunded`** | 330 | **330(全部)** | **47,643.9 KAS** |
+| 合计 | **39** | — | **848** | **841** | **62,698.8 KAS** |
+
+⇒ **「验不成 ⇒ 自动退款」不是一个理论缺口,是一条已经搬走了 6.27 万 KAS bettor 本金的生产通道**,而支持这些退款的全部证据就是**两个计时器**(30 分钟 / 120 分钟)。
+
+### 8.3 对设计的三处实质影响(不只是改个措辞)
+
+1. **紧急度上调**:v0.1 结尾我写"不许据此说这卡不紧急";现在更准确的说法是——**这卡是已发生损害的收口,不是预防性加固**。
+2. 🔴 **`:1149` 的改法必须更严**:它在调 `dispatchRefund` **之前**就写了 `protocol_status='cancelled'`。**光把 `dispatchRefund` 换成"设新状态"不够** —— 只要中途经过 `cancelled`,bettor 扫描就已经把这些市场收编了。**⇒ `:1149` 的新路径不得写 `cancelled`,必须直接进 `unresolved_needs_authorization`,一步到位、无中间态。**
+3. **`bettors_absent` 白名单项的含义要收紧**:它证的是"没有 bettor 需要退",**不是**"可以退 bettor 的钱"。这两句在 8.1 那条扫描面前是不同的命题。
+
+### 8.4 方法论记档(自罚一条)
+
+**我查了被调方(`handleRefunding`),没查"还有谁也会因为这个状态动钱"。** 这与我今天自己抓到的 MUST-FIX-0 是**同一个形状的镜像**:那次是"守卫读不到值",这次是"我读不到另一条读同一个状态的路"。
+⇒ **判据:改/评估一个【状态字段】的语义时,必须枚举【所有以该字段为条件动钱的查询】,不能只追自己手里那条调用链。** `grep "protocol_status IN"` 是这次本该第一步就做的动作(NWT 为了另一个问题做了它,我因此才发现)。
+
+---
+
+## 9. v0.2 对 NWT PUSH-BACK 三项的逐条处置
+
+### 9.1 NWT ①:`:1027` 保留 `dispatchRefund` ⇒ 一个 flag 永久卡在"已尝试"而操作从未完成 —— **采纳**
+
+**复核成立(我自读一遍,读数与他一致)**:`buildMakerRefundPreimage` 内 `market.maker_relay_id.startsWith('cross-node:') ⇒ return { ok:false, error:'cross-node maker (skip)' }`;而 `dispatchRefund` 的 `if (!preimage.ok) return …` **排在 `newMeta` 写入之前**。
+⇒ 时序:调用方先把自己的时间戳 flag 写进 DB → `dispatchRefund` 在 preimage 处早退 → **flag 留在库里,退款从未发生** → 调用方守卫下次 tick 恒 false ⇒ **该市场永远不再被这条路径尝试**。
+**且 NWT 的定性对**:cross-node maker **不是边角情况,是多节点部署的常态**。
+
+**处置**:
+- `:1052`/`:1149`/`Case 3` 按 §4.3 改为直接设状态、不再调 `dispatchRefund` ⇒ 这三处的该坑随之消失。
+- 🔴 **`:1027` 维持 Owner r518 终裁不改结构**,但**落码时必须补收尾**(具体收尾动作见下方更正)。**不作为改动 Owner 终裁语义。**
+
+**🔴 但 `:1027` 的失败形态与 `:1052`/`:1149` 不是同一种,这一点要改正(我上一句"清掉自己刚写的 flag"套在 `:1027` 上是错的)**:
+- `:1052`/`:1149` **调用前先写一个自己的时间戳 flag** ⇒ preimage 失败时 flag 存活 ⇒ **永久静默卡死**(NWT ① 描述的那种)。
+- `:1027` **调用前不写任何自己的 flag**(`dispute_started_at` 是上一 tick 写的、且是进入条件不是完成标记)⇒ preimage 失败时守卫 `!meta.refund_dispatched_at` **下次 tick 仍为真** ⇒ **不是卡死,是每 tick 无限重试**。
+- **⇒ `:1027` 该补的收尾不是"清 flag",是"失败要有出口"**:连续 N 次 preimage 失败(尤其 `cross-node maker (skip)` 这种**结构性、重试一万次也不会变**的原因)必须转 `unresolved_needs_authorization` 并告警,而不是永远重试。
+
+**🔴 现存实例(我现查,只读)——这一条不是 latent,是已经跑了 55 天的活事故**:
+- 库里**当前有 4 个市场卡在 `protocol_status='disputed'`**,`dispute_started_at` = **2026-06-10 / 06-12**(距今约 **55 天**),`refund_dispatched_at` **全为空**,且**四个全是 `maker_relay_id LIKE 'cross-node:%'`**。
+- ⇒ 它们每一个 settler tick 都在走 `:1027 → dispatchRefund → buildMakerRefundPreimage → cross-node maker (skip) → ok:false`,**已经这样重试了约两个月**,没有任何东西升级或告警(`logThrottled` 把日志也压下去了)。
+- 📌 **与 Bettor/NWT 那条"0 现存事故"的关系(不冲突,是两种形态)**:NWT 18:52 查的是**"flag 设了但从未完成"**那一种,`:1052`/`:1149` 确实 **0**(11/11 与 28/28 全部完成),**他的结论我引用、不重复查**。**而 `:1027` 这 4 个是另一种形态(无 flag ⇒ 无限重试),没有被那次检查覆盖到。** ⇒ **「latent 未来风险」这个定性对 `:1052`/`:1149` 成立,对 `:1027` 不成立。**
+- **量级口径**:活跃市场(`verifying/collecting_sigs/refunding/disputed`)共 116 个,其中 cross-node maker **仅 4 个** —— 即 NWT 说的"cross-node 是常态"在**部署拓扑**意义上成立,但在**本机当前活跃盘**里只占 3.4%;**而这 4 个 100% 卡住了**。两个数都要报,只报一个都会误导。
+
+### 9.2 NWT ②:新状态**没有任何现存查询看得见** —— **采纳,升为落码硬前置**
+
+**复核成立**:主 settler tick `:355` 选 `('verifying','collecting_sigs','refunding','disputed')`;两个 watchdog `:1096`/`:1174` 选 `('verifying','collecting_sigs')`;bettor 退款扫描 `:260` 选 `('cancelled','refunded')`。**`unresolved_needs_authorization` 不在其中任何一个集合里。**
+
+🔴 **NWT 那句定性必须原样抄进来**:「"新状态没有定时器"这个不变量现在**确实成立,但成立的原因不是设计对,是没人在看它**」——这正是在册的**"永远弃权与永远通过在日志里同形"**族。**一个没人查询的状态,它的所有安全性质都是空的。**
+
+**⇒ 三条落码硬前置(不齐不许落码,写进 §9.4 清单)**:
+1. **计数查询 + 告警接收者**:数这个状态里有多少市场、锁着多少钱,接给告警。**长期为 0 与长期暴涨都必须有人看见**(长期 0 ⇒ 这条路根本没通 = 装饰)。
+2. **`owner_authorized` 出口路径**:谁调、写哪个字段、写完之后状态机怎么继续 —— 目前**纯 prose,零接口**。
+3. **显式声明它不在哪些集合里**:在改动处写死注释,说明它被**刻意**排除在 `:355`/`:1096`/`:1174`/`:260` 之外,以及**这是设计意图不是遗漏**(尤其 `:260` —— 被排除正是它不触发 bettor 自动退款的原因,见 §8)。
+
+### 9.3 NWT ③:`bettors_absent` 的链上等式**今天不存在对应代码** —— **采纳**
+
+他 grep 确认:现役 0-bet 判定用的是 `getBettorSumSompi`/`betCount`(**读本地 `pool_bettor_sides` 聚合**),**没有任何地方做过"spine UTXO 面值 == maker stake"这个链上等式**。
+⇒ v0.1 §1 那条链上可核性是我**推的**,不是现成的。**落码前必须先把它写出来并实测**,否则 `bettors_absent` 这一项的"可核实"是空头承诺 —— 而它一旦落空,白名单里最常用的那一项就退化成"信本地聚合",正是 r402 那类假阳性面。
+
+### 9.4 落码前置清单(v0.2 收口,与 §5 测试并列)
+
+1. §9.2 三条(计数查询 / `owner_authorized` 出口 / 排除集合显式注释)
+2. §9.3 的链上等式实现 + 实测
+3. §8.3② 的 `:1149` 一步到位、**不得经过 `cancelled`**
+4. §9.1 的 `:1027` preimage 失败清 flag 收尾
+5. §5 的测试(含阳性对照与判别式)
+6. NWT + 我共同待办:**bshard / v0.5 两条末端分支逐条追完**(双方都明标未做,不算已核)
