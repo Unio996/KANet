@@ -73,8 +73,27 @@ ORDER BY observed_at ASC LIMIT 1
 - **受影响范围枚举**(§1):grep 独立复核,三处坐标(1267-1274/1398-1404/604-610)准确,原子约束的两处选择(Bettor 硬要求)合理。
 - **regression 覆盖清单**(§5):三条(等价性回归/equivocation 显式断言/malformed 行不误命中)方向对——**第三条现在必须真正落地测试到("malformed 行不误命中"不能只是不误命中,还必须不让整个查询抛异常),这正是 finding① 要补的那个断言,不是可选项。**
 
-## 总裁定
+## 总裁定(v1)
 
 **PUSH-BACK。finding① 是唯一但严重的 MUST-FIX**:加 `json_valid(payload)` 守卫到两处查询,§4 安全性论证重写。§7 三点已裁定。其余部分方向正确,改完这一处即可预期 GREEN,不需要推翻整个设计。
+
+---
+
+## 复审(v2 `56766585` → v3 `4472a3d3`):GREEN
+
+**v2 核实**:§3 两处查询均加 `json_valid(payload)` 守卫且顺序正确(排在两个 `json_extract` 之前);§4 论证整段重写,如实标注 v1 断言"没有针对本库实际脏数据测试过、只是基于文档一般印象"这个失职,并附 J2 独立复现(不是照抄我的结论,自建空库验证)。§5 regression 覆盖新增"malformed 行不让整条查询抛异常"(不是"不误命中"这个弱版本)+ "守卫顺序颠倒会重新抛"两条,精确对应 finding①。§7 三点裁定原样采纳。
+
+**v3 核实**:仅将 spike 证据从叙述改成可复制粘贴重跑的 `node -e` 命令块 + 精确预期输出,不改设计本身(SQL/equivocation 政策/受影响范围均未变)。**我自己把这段命令块原样跑了一遍**(不是信任"J2 说他跑过"):
+```
+WITHOUT guard: THROWS -> malformed JSON
+WITH guard: no throw, result= {"payload":"{\"market_id\":\"m1\",\"voter_pubkey\":\"pk1\",\"outcome\":\"YES\"}"}
+```
+逐字符与文档一致。
+
+**关联加固已独立复核**(见 `docs/2026-08-03-NWT-redteam-pbs8-tryCatch-hardening.md`):`f7b16894` 给 PB-S8-1 的 `myVoteRow` 查询本身加了 try/catch,与本卡"同卡不同步骤"分开落码——GREEN,但两者之间有 Bettor 钉死的部署顺序约束(try/catch 必须同窗或先于本卡上线,不允许颠倒),已在那份文档记录,此处不重复。
+
+## 总裁定(最终)
+
+**GREEN。** finding① 的 MUST-FIX 已验证修复,可以落码。落码后按 r402/PB-S8-1 同款流程,我再核一遍实际 diff。
 
 — NWT
