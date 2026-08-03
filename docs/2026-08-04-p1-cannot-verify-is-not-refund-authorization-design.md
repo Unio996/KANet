@@ -357,3 +357,13 @@ WHERE ( … OR ( pm.protocol_status IN ('cancelled', 'refunded')
 | 10 | §5 全部测试(v0.3 又新增三类:授权闸阴性对照 / 结构性-瞬时二分 / 存量 cutoff) | §5 / §10.8 |
 | 11 | **多段 patch 拼成一个函数体时,执行顺序必须在 PR 描述/注释显式写死** | NWT 对 PB-S8-2 v5 的同族提醒,本卡同样适用 |
 | 12 | 共同待办:**bshard / v0.5 两条末端分支逐条追完**(J2 与 NWT 两轮都明标未做) | §3.2② / NWT ④ |
+
+### 10.10 `refund_authorization` 的强度边界(NWT 2026-08-04 19:47/19:49 裁定 · 口径以此为准)
+
+**起因**:Codex 第五轮要求 owner 出口必须是「显式授权对象」,不是 operator 改 metadata。J2 自评"不够格",**NWT 的分析比这个自评准,照录**:
+
+- **`authorizeRefundByOwner` 是"约定的强制点",不是"结构上不可绕过的强制点"** —— 它做到了白名单校验 / 只认冻结态转入 / 不开 HTTP 面 / 强制 `reference`;它没做到的是"任何有本机 DB 写权限的路径都绕不过它"。**比"完全没有约束"强很多,但没解决"本机 DB 可被绕过写入"这个更深的问题。**
+- 🔴 **而这个更深的问题对本系统一视同仁**:`is_oracle` / `committee_pks` / `protocol_status` 全都是同一份可写性上的字段。⇒ **单独对 `owner_authorized` 提高标准不是修特例,是在质疑地基,而地基不该由这张止血卡来扛。**
+- 🔴 **五个白名单值里,只有一条不对称**:`bettors_absent` / `committee_affirmative_unjudgeable` / `structurally_invalid_market` / `pool_below_minimum` 是**代码在可判定的触发条件下自动写入**(0 注 / abstain≥4 / commingled / min-pot);**`owner_authorized` 的 `reference` 是自陈文本,系统不核实真伪** —— 这是唯一只针对它、不对称适用于另外四类的观察。
+- **⇒ 引用口径(全队照此)**:`owner_authorized` = **operator 手工操作 + 事后可读的一行 metadata**,**强度不等于"系统验证过 Owner 授权"**。另外四值 = 代码在可判定条件下自动写入,强度受那些条件本身的可验证性约束(其中 `bettors_absent` 目前仍是**本地聚合弱判据**,带 `refund_authorization_tier: 'local_only'` 标记)。
+- **正路(已认可,属下一步独立工作,不是本批门槛)**:域分隔 typed 授权对象 + 签名,**并进 J1 的 FactReceipt 线**,而不是在 settler 里另造第二套授权语义(那是"一个名字底下几个东西"的下一次复发)。另已建议开独立 hardening 卡:`refund_authorization` 的写入路径应与其余 `market.metadata` 字段分离,不共享同一次可写性。
