@@ -16,18 +16,29 @@
 // DB (runMigrations, real schema+triggers, not a live-DB copy — feedback-offline-test-must-use-real-
 // schema-with-triggers).
 import assert from 'node:assert/strict';
+import { pathToFileURL as _pathToFileURL } from 'node:url';
 import { mkdirSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
+// 🔴 硬编码绝对路径 D:/kanet-tn12 已改为【相对本文件】解析(2026-08-04 J1, Bettor 派工 #dmvn2r)。
+// D:/kanet-tn12 是旧代码库路径, 本机不存在 ⇒ import 抛 ERR_MODULE_NOT_FOUND, 而 runner 的
+// `await import()`(scripts/test.mjs:122) 无 try/catch ⇒ 整批在这里中断, 后面的用例一个都不跑。
+// 同一个坑 NWT 在 99b224ee 修过一次(见同目录 c1_folded_shard_anchor_regression.test.mjs:13-14),
+// 这两个文件当时漏了 —— 各 agent 的检出路径不同(D:/kanet/KANet vs D:/kanet-tn12), 绝对路径必坏。
+import path from 'node:path';
+import { fileURLToPath as _fileURLToPath } from 'node:url';
+const _HERE = path.dirname(_fileURLToPath(import.meta.url));
+const _CONSOLE_ROOT = path.resolve(_HERE, '../../../../');   // → kasia-console
+const _SCRATCH = path.resolve(_HERE, '../../../../../scratch'); // → repo root/scratch (gitignored, CLAUDE.md 临时脚本铁律)
 
-const TEST_DB = `D:/kanet-tn12/scratch/_shard9_exclude_test_${randomUUID().slice(0, 8)}.db`;
-mkdirSync('D:/kanet-tn12/scratch', { recursive: true });
+const TEST_DB = `${_SCRATCH}/_shard9_exclude_test_${randomUUID().slice(0, 8)}.db`;
+mkdirSync(_SCRATCH, { recursive: true });
 process.env.DB_PATH = TEST_DB;
-const { runMigrations } = await import('file:///D:/kanet-tn12/kasia-console/src/db/migrate.js');
+const { runMigrations } = await import(_pathToFileURL(path.join(_CONSOLE_ROOT, 'src/db/migrate.js')).href);
 runMigrations();
 
-const { sqlite } = await import('file:///D:/kanet-tn12/kasia-console/src/db/client.js');
-const { getSidesByShard, getMarketBets } = await import('file:///D:/kanet-tn12/kasia-console/src/lib/pool-bettor-sides-query.mjs');
-const { loadBettorsCrossShard } = await import('file:///D:/kanet-tn12/kasia-console/src/services/bshard-close-voter.js');
+const { sqlite } = await import(_pathToFileURL(path.join(_CONSOLE_ROOT, 'src/db/client.js')).href);
+const { getSidesByShard, getMarketBets } = await import(_pathToFileURL(path.join(_CONSOLE_ROOT, 'src/lib/pool-bettor-sides-query.mjs')).href);
+const { loadBettorsCrossShard } = await import(_pathToFileURL(path.join(_CONSOLE_ROOT, 'src/services/bshard-close-voter.js')).href);
 
 let failures = 0;
 function check(cond, msg) { if (!cond) { failures++; console.error(`❌ ${msg}`); } else { console.log(`✅ ${msg}`); } }
@@ -89,4 +100,12 @@ check(JSON.stringify(lbAllAfter) === JSON.stringify(lbAll), 'loadBettorsCrossSha
 check(REAL_SUM !== '64824000000', 'sanity: synthetic fixture Σ is NOT the real 28mln shard9 value (fixture is isolated, not accidentally aliasing prod data)');
 
 console.log(failures === 0 ? `\n✅ ALL PASS (0 failures)` : `\n❌ ${failures} FAILURE(S)`);
-process.exit(failures === 0 ? 0 : 1);
+// 🔴 顶层 process.exit 会杀死 runner(2026-08-04 J1, Bettor 派工 #dmvn2r; J2 报的根因)。
+// scripts/test.mjs:121-124 逐个 `await import()` 每个 *.test.mjs —— 顶层 exit 在【import 阶段】就结束
+// 整个 runner 进程 ⇒ walk 顺序排在本文件之后的用例【一个都不会被 import】, 而 runner 以本文件的退出码
+// 收场。实测(改前): `--domain=predictions` 零 runner 统计行、exit 0 = 整批看起来"跑完且全过"。
+// ⇒ 只在本文件被【直接执行】时才 exit; 被 import 时不碰进程状态(也不设 exitCode —— 本文件无 default
+//   export, runner 不计分, 若在这里改 exitCode 会让 runner 的 all-pass 汇总配一个非零退出码, 更难读)。
+const _directRun = !!process.argv[1] && _pathToFileURL(process.argv[1]).href === import.meta.url;
+if (_directRun) process.exit(failures === 0 ? 0 : 1);
+else console.log(`[imported] 本文件是自跑脚本(无 default export), runner 不计分; 自身判定=${failures === 0 ? 'PASS' : 'FAIL'}`);

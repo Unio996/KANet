@@ -25,24 +25,35 @@
 // 唯一权威 schema 定义源, index.js 启动时也调这个)在全新空文件上建表——零生产数据、零 WAL 撕裂风险、
 // 秒级完成, 且 schema/triggers 与生产环境保证同源(不是另一套手搓 CREATE TABLE mock)。
 import assert from 'node:assert/strict';
+import { pathToFileURL as _pathToFileURL } from 'node:url';
 import { mkdirSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
+// 🔴 硬编码绝对路径 D:/kanet-tn12 已改为【相对本文件】解析(2026-08-04 J1, Bettor 派工 #dmvn2r)。
+// D:/kanet-tn12 是旧代码库路径, 本机不存在 ⇒ import 抛 ERR_MODULE_NOT_FOUND, 而 runner 的
+// `await import()`(scripts/test.mjs:122) 无 try/catch ⇒ 整批在这里中断, 后面的用例一个都不跑。
+// 同一个坑 NWT 在 99b224ee 修过一次(见同目录 c1_folded_shard_anchor_regression.test.mjs:13-14),
+// 这两个文件当时漏了 —— 各 agent 的检出路径不同(D:/kanet/KANet vs D:/kanet-tn12), 绝对路径必坏。
+import path from 'node:path';
+import { fileURLToPath as _fileURLToPath } from 'node:url';
+const _HERE = path.dirname(_fileURLToPath(import.meta.url));
+const _CONSOLE_ROOT = path.resolve(_HERE, '../../../../');   // → kasia-console
+const _SCRATCH = path.resolve(_HERE, '../../../../../scratch'); // → repo root/scratch (gitignored, CLAUDE.md 临时脚本铁律)
 
-const TEST_DB = `D:/kanet-tn12/scratch/_zk_autonomy_ticks_test_${randomUUID().slice(0, 8)}.db`;
-mkdirSync('D:/kanet-tn12/scratch', { recursive: true });
+const TEST_DB = `${_SCRATCH}/_zk_autonomy_ticks_test_${randomUUID().slice(0, 8)}.db`;
+mkdirSync(_SCRATCH, { recursive: true });
 process.env.DB_PATH = TEST_DB;
-const { runMigrations } = await import('file:///D:/kanet-tn12/kasia-console/src/db/migrate.js');
+const { runMigrations } = await import(_pathToFileURL(path.join(_CONSOLE_ROOT, 'src/db/migrate.js')).href);
 runMigrations();
 
-const { sqlite } = await import('file:///D:/kanet-tn12/kasia-console/src/db/client.js');
+const { sqlite } = await import(_pathToFileURL(path.join(_CONSOLE_ROOT, 'src/db/client.js')).href);
 const {
   parseCloseZkV2State, nullifierBitPosition, isNullifierBitSet, spliceClaimContinuationRedeem,
-} = await import('file:///D:/kanet-tn12/kasia-console/src/lib/closezk-v2-claim-builder.mjs');
-const { advanceZkContinuationAfterSpend, writeZkContinuation } = await import('file:///D:/kanet-tn12/kasia-console/src/lib/closezk-v2-mint.mjs');
-const { _splicePayoutV2CloseRedeem } = await import('file:///D:/kanet-tn12/kasia-console/src/lib/bshard-close-enforce.mjs');
+} = await import(_pathToFileURL(path.join(_CONSOLE_ROOT, 'src/lib/closezk-v2-claim-builder.mjs')).href);
+const { advanceZkContinuationAfterSpend, writeZkContinuation } = await import(_pathToFileURL(path.join(_CONSOLE_ROOT, 'src/lib/closezk-v2-mint.mjs')).href);
+const { _splicePayoutV2CloseRedeem } = await import(_pathToFileURL(path.join(_CONSOLE_ROOT, 'src/lib/bshard-close-enforce.mjs')).href);
 const {
   zkCloseTickV2, claimAutonomousTick, zkHandoffAutonomousTick, zkJudgeProposeAutonomousTick, _zkAutonomyLeasesForTest,
-} = await import('file:///D:/kanet-tn12/kasia-console/src/lib/zk-autonomy-ticks.mjs');
+} = await import(_pathToFileURL(path.join(_CONSOLE_ROOT, 'src/lib/zk-autonomy-ticks.mjs')).href);
 
 let failures = 0;
 function check(cond, msg) { if (!cond) { failures++; console.error(`❌ ${msg}`); } else { console.log(`✅ ${msg}`); } }
@@ -538,4 +549,12 @@ function cleanupJudgeProposeMarket(marketId) { sqlite.prepare('DELETE FROM pool_
 }
 
 console.log(`\n${failures === 0 ? '✅ ALL PASS' : `❌ ${failures} FAILURE(S)`}`);
-process.exit(failures === 0 ? 0 : 1);
+// 🔴 顶层 process.exit 会杀死 runner(2026-08-04 J1, Bettor 派工 #dmvn2r; J2 报的根因)。
+// scripts/test.mjs:121-124 逐个 `await import()` 每个 *.test.mjs —— 顶层 exit 在【import 阶段】就结束
+// 整个 runner 进程 ⇒ walk 顺序排在本文件之后的用例【一个都不会被 import】, 而 runner 以本文件的退出码
+// 收场。实测(改前): `--domain=predictions` 零 runner 统计行、exit 0 = 整批看起来"跑完且全过"。
+// ⇒ 只在本文件被【直接执行】时才 exit; 被 import 时不碰进程状态(也不设 exitCode —— 本文件无 default
+//   export, runner 不计分, 若在这里改 exitCode 会让 runner 的 all-pass 汇总配一个非零退出码, 更难读)。
+const _directRun = !!process.argv[1] && _pathToFileURL(process.argv[1]).href === import.meta.url;
+if (_directRun) process.exit(failures === 0 ? 0 : 1);
+else console.log(`[imported] 本文件是自跑脚本(无 default export), runner 不计分; 自身判定=${failures === 0 ? 'PASS' : 'FAIL'}`);

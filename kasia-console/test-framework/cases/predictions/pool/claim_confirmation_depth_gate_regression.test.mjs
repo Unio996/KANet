@@ -10,6 +10,7 @@
 // ③ 正常路径: landed:true + (verifyClosedLanded 金额匹配) → 尽快返回 true, 不多余轮询。
 
 import assert from 'node:assert/strict';
+import { pathToFileURL as _pathToFileURL } from 'node:url';
 import { verifyClosedLanded, verifyClaimLanded } from '../../../../src/services/bshard-auto-settler.mjs';
 
 function mockCtx({ relayPostSequence, utxoEntries }) {
@@ -69,5 +70,14 @@ function mockCtx({ relayPostSequence, utxoEntries }) {
 }
 
 console.log('✅ claim_confirmation_depth_gate_regression: all cases pass — depth fail-closed + amount double-check + fast-path locked');
-process.exit(0); // test ② leaves a dangling 20-attempt retry promise running (by design, to prove fail-closed
+// 🔴 顶层 process.exit 会杀死 runner(2026-08-04 J1, Bettor 派工 #dmvn2r; J2 报的根因)。
+// scripts/test.mjs:121-124 逐个 `await import()` 每个 *.test.mjs —— 顶层 exit 在【import 阶段】就结束
+// 整个 runner 进程 ⇒ walk 顺序排在本文件之后的用例【一个都不会被 import】, 而 runner 以本文件的退出码
+// 收场。实测(改前): `--domain=predictions` 零 runner 统计行、exit 0 = 整批看起来"跑完且全过"。
+// ⇒ 只在本文件被【直接执行】时才 exit; 被 import 时不碰进程状态(也不设 exitCode —— 本文件无 default
+//   export, runner 不计分, 若在这里改 exitCode 会让 runner 的 all-pass 汇总配一个非零退出码, 更难读)。
+const _directRun = !!process.argv[1] && _pathToFileURL(process.argv[1]).href === import.meta.url;
+if (_directRun) process.exit(0);
+else console.log(`[imported] 本文件是自跑脚本(无 default export), runner 不计分; 自身判定=${'PASS'}`);
+// test ② leaves a dangling 20-attempt retry promise running (by design, to prove fail-closed
                   // behavior without waiting out the full ~60s loop) — force clean exit once assertions pass.
