@@ -1,6 +1,6 @@
-# PB-S8-2 候选 B 实现设计 v2 — handlePoolOracleTxSignReq 签名前跨市场替换+毛额守恒检查
+# PB-S8-2 候选 B 实现设计 v3 — handlePoolOracleTxSignReq 签名前跨市场替换+毛额守恒检查
 
-**Status: DESIGN v2(可审 diff 粒度)— 待 NWT 红队,未落码。** 归 J2(settler/pipeline 域),Bettor 15:14 派工(#dddkaz①)。v1(commit `7a15bfc6`)方向审 GREEN-with-notes(`#ddnzvm`),但威胁模型 §3 被判"框架写窄了"——本版按裁定重写:RPC 失败不是"检查被绕过",是**状态转移操纵**(逼结算改道成退款)。缓存(v1 §4)从"性能优化"并入这次修正,是同一问题的另一面。流程照今天全部条目:先设计 → NWT 红队 → 落码。
+**Status: DESIGN v3(design-only,不构成授权边界)— 待 NWT 红队,未落码。** 归 J2(settler/pipeline 域)。v2 被 Codex 主动审(bridge `16b71707`,Bettor 16:22 转 `#dft8gn`)挑出 6 处代码级假设,其中 3 条重;另加一条 RPC 失败语义的不变量升级。**Bettor 裁定:在 §5 那 6 条收口证据齐之前,本设计不许以"授权边界"的名义冻结,可以继续以 design 推进——本版就是推进,不是冻结。** v1→v2→v3 的历史留在文件里,不覆盖。
 
 ## 0. 覆盖边界(按 Bettor 裁定的精确措辞,不许说满)
 
@@ -56,7 +56,7 @@ const inputTotalSompi = (phase2TxObj.inputs || []).reduce((sum, inp) => {
 const inputsAllMatched = (phase2TxObj.inputs || []).every(inp =>
   spineUtxos.some(u => u.outpoint.transactionId === inp.previousOutpoint?.transactionId
     && Number(u.outpoint.index) === Number(inp.previousOutpoint?.index)));
-const outputTotalSompi = (phase2TxObj.outputs || []).reduce((s, o) => s + BigInt(o.amountSompi || o.value || 0), 0n);
+const outputTotalSompi = (phase2TxObj.outputs || []).reduce((s, o) => s + readOutputValueSompi(o), 0n); // §6.1: .value 是真实字段, 严格解析函数定义见 §6.1
 if (!inputsAllMatched || outputTotalSompi > inputTotalSompi) {
   console.error(`[trade-filter:sign-req] PB-S8-2 拒签: 毛额守恒失败 outputs=${outputTotalSompi} inputs(链上现查)=${inputTotalSompi} all_matched=${inputsAllMatched} market=${market.id.slice(0,12)}`);
   continue;
@@ -66,6 +66,8 @@ if (!inputsAllMatched || outputTotalSompi > inputTotalSompi) {
 **这条检查对本地数据完整性零依赖**——它不问"这个市场一共有多少 bettor",只问"这笔 tx 声称要花的每一笔钱,链上真的有那么多吗",链上 UTXO 集合是客观事实,不受本地 ingest 进度影响。这正是它能绕开候选 A 那个假阳性面的原因(Bettor 09:04③ 指出的"用链上守恒把本地数据全不全变成可判定",本条走的是同一个精神但更直接——不需要先证明本地数据完整,直接查链上真值)。
 
 **§1 修订记录**:本节初稿猜测了一个不存在的 IPC 名字(`get_utxos_by_address`),写完设计稿后自己去 `commands.mjs`/`relay.mjs`/`p2sh.mjs` 核实,发现真实命令是 `get_address_utxos`(2026-07-18 J1tn 已有先例调用方,纯只读原语,不需要新造)。现在的版本已按逐字核实结果改写,不再是推断。
+
+**🔴 v3 修订(Codex 主动审,§6 有完整改法,这里只留指针不重复贴代码)**:上面这段代码有两处被 Codex 找到问题——①`outputTotalSompi` 那行的字段名 `.amountSompi || .value` 猜错了优先级,真实字段是 `.value`,§6.1 已给出严格解析的 `readOutputValueSompi()` 并替换了上面这行 ②本节锚点①只核 `inputs[0]`,没核完整输入集,§6.2 给出改法(但引入新的本地数据依赖,取舍未定)③锚点②依赖的 `get_address_utxos` 是当前节点视图快照,不是密码学前态证明,§6.3 如实标注了这条结构性上限。**读这段代码前请先读 §6,上面这段是 v2 版本,已知有问题。**
 
 ### 锚点③:outputs 数量/形状上界
 
@@ -146,3 +148,94 @@ const spineUtxoCache = new Map(); // 具体存储层(进程内 Map / 持久化)�
 3. **缓存的具体失效策略**——§3.1 只给了方向(key=市场+spine outpoint,miss 即拒签),没有给出"缓存该在哪一层持久化/要不要跨 tick 存活/要不要有独立 TTL"这些实现细节,留给红队通过后的落码阶段还是现在就要定,请 NWT 判断。
 4. **"暂不签"计数+告警的具体落点**——是复用今天刚修好的 `rpc-health-degradation-alert.mjs` 那条(冷却+episode 语义已经修好),还是需要一条新的、专门针对"committee 因验证依赖卡签名"的独立信号,这条我没有设计,列为开放项。
 5. **锚点③的数字(64+10)出处**——`migrate.js:5037`,原文带"~",红队判断是否有更新版本。
+
+## 6. v3 修订(Codex 主动审,Bettor `#dft8gn` 转,三条重的逐条改)
+
+### 6.1 锚点②重写:字段名不再猜(`.amountSompi` 是错的,`.value` 才是真实字段)
+
+**Codex 指出**(重的第③条):`amountSompi || value` 是猜的字段名,且 JS 真值回退对合法 0 值不安全(`0 || o.value` 在 `amountSompi` 合法为 `0` 时会误取 `.value`)。**必须从 builder/serializer 实读字段。**
+
+**逐字核实(不是再猜一次)**:
+- `kasia-relay/src/lib/p2sh.mjs:684-687`(`buildSettleTxPreimage` 内部构造 `TransactionOutput` 时):输入参数确实叫 `o.amountSompi`——**但这是调用方传给 builder 的输入参数名,不是 builder 产出的 `txObj.outputs[i]` 的属性名**。
+- `kasia-console/src/lib/settle-safe-json.mjs:29`(`toSettleSafeJsonTxHex`,这是 `phase2TxObj` 真正被消费/序列化的地方,PB-S8-2 要读的就是这同一个 `phase2TxObj`):`parsed.outputs = parsed.outputs.map(o => ({ ...o, value: BigInt(o.value || 0) }))`——**这里读的是 `o.value`,不是 `o.amountSompi`**。
+- ⇒ **`phase2TxObj.outputs[i]` 的真实字段是 `.value`(kaspa-wasm `TransactionOutput` 序列化后的属性名),`.amountSompi` 只在 IPC 请求参数层出现过,从未出现在这个对象本身上。** v1/v2 的 `o.amountSompi || o.value` 猜测优先级是反的,现改为:
+
+```js
+// Codex 主动审(v3 修订): 字段名从 settle-safe-json.mjs:29 逐字核实为 .value, 不是 .amountSompi
+// (那是IPC参数名不是对象属性名); 严格解析不用 || 真值回退(0是合法值).
+function readOutputValueSompi(o) {
+  if (o.value === undefined || o.value === null) {
+    throw new Error(`output missing .value field: ${JSON.stringify(o).slice(0, 100)}`);
+  }
+  return BigInt(o.value);
+}
+const outputTotalSompi = (phase2TxObj.outputs || []).reduce((s, o) => s + readOutputValueSompi(o), 0n);
+```
+
+### 6.2 锚点①重写:核实完整输入集,不是只核 `inputs[0]`
+
+**Codex 指出**(重的第②条):v1/v2 只检查 `phase2TxObj.inputs[0]` 是不是本市场当前 spine outpoint——**漏了额外输入、重复输入、次级 spine 被替换、同市场陈旧状态输入**。只核第一个输入不等于核整个输入集。
+
+**改法**:B 需要定义**完整的允许输入类别 + 确定性排序**,不是抽查一个位置。逐字核实 `pool-market-settler.js:2082-2086`(`dispatchPhase2` 构造 `requiredInputOutpoints` 的地方,`phase2_tx_obj` 就是从这个数组建出来的),输入集的**结构定义**是:
+
+```
+inputs[0]                       = spine maker-stake outpoint(market.spine_lock_tx:0)
+inputs[1 .. spineInputCount-1]  = oracle bond 存款 outpoint(N 笔, N = pool_oracle_deposit 事件数)
+inputs[spineInputCount ..]      = bettor side outpoint(N 笔, N = 本地已知 side_lock_tx 数)
+```
+
+```js
+// Codex 主动审(v3 修订): 核完整输入集, 不只核 inputs[0]。allowed set = spine + 本地已知
+// oracle_deposit outpoints + 本地已知 bettor side outpoints 的并集, 顺序不作为安全判据
+// (只判"每个 input 都在允许集合里", 不判"顺序对不对"——顺序错但集合对不构成资金风险,
+// 顺序是 dispatchPhase2 自己的构造惯例, 不是 SS 层面的安全要求, 未核实 SS 是否对顺序敏感,
+// 若敏感这条要收紧, 列为待 NWT 核实项)。
+const knownOracleDeposits = sqlite.prepare(
+  `SELECT payload FROM chain_events WHERE event_type = 'pool_oracle_deposit' AND payload LIKE ?`
+).all(`%"market_id":"${market.id}"%`).map(r => {
+  try { return JSON.parse(r.payload).deposit_tx; } catch { return null; }
+}).filter(Boolean);
+const knownSideOutpoints = sqlite.prepare(
+  `SELECT side_lock_tx FROM pool_bettor_sides WHERE market_id = ? AND side_lock_tx IS NOT NULL`
+).all(market.id).map(r => r.side_lock_tx);
+const allowedTxids = new Set([market.spine_lock_tx, ...knownOracleDeposits, ...knownSideOutpoints]);
+const disallowedInputs = (phase2TxObj.inputs || []).filter(inp => !allowedTxids.has(inp.previousOutpoint?.transactionId));
+if (disallowedInputs.length > 0) {
+  console.error(`[trade-filter:sign-req] PB-S8-2 拒签: ${disallowedInputs.length} 个 input 的 outpoint 不在本地已知的允许集合里(疑似额外/替换输入) market=${market.id.slice(0,12)}`);
+  continue;
+}
+```
+
+**这条重新引入了 r402 同款的本地数据完整性问题(如实标注,不回避)**:`knownSideOutpoints` 依赖本地 `pool_bettor_sides` 完整——如果本地 ingest 不全,一笔合法的 bettor input 会被误判成"不在允许集合里"而拒签(假阳性,伤可用性不伤安全性,因为拒签是保守方向)。**这与 §0 说的"绕开 r402 式假阳性"不完全一致了**——v2 的毛额守恒检查确实绕开了(只查链上 UTXO 面值),但 v3 这条新加的"完整输入集"检查用了本地表。这是一个需要在红队阶段拍板的取舍:**要么接受这个新假阳性面(可用性代价),要么把"输入集完整性"检查降级成"只核 spine 那一笔 outpoint 的身份(维持 v2 §1 锚点①原样)+ 毛额守恒兜底”**(不单独判断每个 input 是不是"认识"的,只判总账对不对)——**J2 倾向后者(不新增本地完整性依赖)但这是妥协,不是没有更强方案,留给 NWT/Bettor 定。**
+
+### 6.3 锚点②"link 验证仅是当前节点视图"的诚实标注(不能解决,只能标注范围)
+
+**Codex 指出**(重的第①条):`get_address_utxos` 是**当前节点的链视图快照**,可能陈旧/不完整,也可能在输入已被花费后才查到——**不是权威的"输入选取那一刻"前态证明**。
+
+**核实过是否有更强的原语**:查了 `kasia-relay/src/lib/commands.mjs` 全部 UTXO/链相关命令,`check_utxo_landed` 只返回 `{landed, depth}`(不含金额/脚本),没有比 `get_address_utxos` 更精确的"查这一个具体 outpoint 现在的金额+脚本"原语。**造一个新原语超出本设计范围**(候选 B 的既定纪律是复用不新造)。
+
+**如实标注(不是回避)**:锚点②的毛额守恒检查,其安全性上限是"relay 当前这一次 RPC 查询看到的链视图"——不是密码学意义上的"输入选取时刻的不可篡改证明"。**这正是 Bettor/Codex 已经定的口径("B 检查通过不得被表述为可以安全签名")的具体理由之一,不是本次新增的缺陷,是这条检查这个层级的结构性上限。**
+
+## 7. RPC 失败/验证不可用 = 状态机不变量(Codex 升级为不变量,Bettor 采纳,v2 §3.1 那段"未解决的开放项"部分收口)
+
+**不变量(硬性,不是建议)**:
+
+> **验证不可用 ⇒ 验证者结论 = inconclusive ⇒ 不签名,且不产生任何自动退款授权。**
+> **deadline 到期不得把"缺证据"变成"执行另一条不可逆钱路(退款)的许可"。退款转移必须另行授权、另行证明,不能是"验证一直没跑成"的默认后果。**
+
+**本设计(B)对这条不变量的贡献边界**:B 本身只做"拒绝签名"这一件事,不触碰 refund 状态机——**这意味着 B 天然不违反这条不变量(它不产生任何转移授权,只产生"不签"),但 B 也不能证明"deadline 到期后的退款路径"本身遵守这条不变量**——那是 v2 §3.1 已经指出的、**独立于 B 之外**的开放项(退款分支自己要不要检查"我是不是因为验证依赖不可用才走到这里"),本设计不解决它,只确保 B 自己不是那个违反不变量的推手。
+
+## 8. §5 收口证据清单(Codex 给,Bettor 收下当冻结前置——记录用,不是本轮要交付)
+
+在以下 6 条齐之前,本设计**不得**以"授权边界"名义冻结(可继续以 design 推进):
+1. typed attestation schema + 域分隔摘要(J1 冻结稿范围,不是 B)
+2. 证明 oracle 角色够不到通用签名入口(J1 冻结稿范围)
+3. v0.7 完整交易形状 + sighash 域分析(J1 冻结稿范围)
+4. **handler 级测试断言"RPC 错 / 缺输入 / 多输入 / 陈旧 outpoint / 坏金额 / 超量输出 / payout 篡改"各自零签名调用**(B 范围,今天未写,§9 记为下一步)
+5. **一条证明"验证中断不会把市场路由进自动退款"的测试**(B 范围,今天未写)
+6. 候选 A 的规范输入输出集绑定设计(A 范围,尚未开工)
+
+## 9. 下一步(未做,如实列出)
+
+- §6.2 的"完整输入集是否要依赖本地 pool_bettor_sides"这个取舍,需要 NWT/Bettor 先拍,再决定 §8 第 4 条测试怎么写。
+- §8 第 4/5 条的测试今天没有写(节奏上先把设计里的代码级错误改对,测试是下一轮的活),留给下一次开工。
