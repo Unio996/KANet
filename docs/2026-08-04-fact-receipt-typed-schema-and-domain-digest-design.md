@@ -1,4 +1,6 @@
-> **Status**: DRAFT v0.3 — J1 主笔 · **J2 已审(方向 PASS + 3 处必改,v0.2 改完)** · **NWT 红队终审:GREEN-with-one-MUST-FIX,本版已补(§6 第 22 条 + §2.1 条件 4 失败语义)** · **design-only,零实现授权**
+> **Status**: DRAFT v0.4 — J1 主笔 · J2 已审(v0.2)· NWT 红队 GREEN(v0.3)· **本版并入 Codex 第五轮三件(Bettor 派工 `#dn3m00`)** · 待 J2 审 → NWT 红队 · **design-only,零实现授权**
+> **v0.4 变更**:① **`policy_version` 移出 FactReceipt ⇒ 三对象分离**(§2.4)② **聚合证明信封 `QuorumEnvelope` 另定义**(§2.5)③ **摘要算法标识显式化 + UTF-8 政策冻结 + test vector**(§2.6)。
+> ⚠ 版本号以本稿为准(我在频道 ack 里手滑写成"v0.5",指的就是本版)。
 > **v0.3 变更**:① 补 NWT 终审 MUST-FIX —— `supersedes.receipt_digest` **解析不到必须硬拒**,禁止静默降级为「无 supersede」(§2.1 条件 4 + §6 第 22 条);② 两个悬赏 NWT 已判,结论都对本稿有利,§9 里从"待判"改为"已定"。
 > 🔴 **NWT 的 GREEN 是「契约条款经得住攻」,不是「可以着手实现」。冻结前置① 仍 OPEN。**
 > **v0.2 变更**(J2 review `#fffa41`…`#d73646`,三条我逐条独立复核后确认全部成立):
@@ -80,7 +82,7 @@ v0.1 把 Bettor 点名的 feeRules 坑(canonicalize 静默剥未知字段 ⇒ �
 | `nonce` | string | ⑦ | 32-byte hex |
 | `validity` | object | ⑦ | 恰好 `{not_before_daa: string, expires_at_daa: string}` —— **用 DAA 不用墙钟**:墙钟不可被 covenant 验,DAA 可以 |
 | `supersedes` | null \| object | ⑧⑩ | `null` 或恰好 `{receipt_digest: string, prior_committee_set_id: string, prior_threshold: number}`(见 §2.1) |
-| `policy_version` | string | ⑨ | P2 期望的策略/解释版本 |
+| ~~`policy_version`~~ | — | ~~⑨~~ | 🔴 **v0.4 移出本对象 ⇒ 迁入 `ConditionReceipt`**(§2.4)。**FactReceipt 不含任何政策/解释版本。** |
 | `signature` | string | — | 签名本身;**不进签名消息**(§4) |
 
 > **签名消息覆盖的是上表去掉 `signature` 之后的全部键**(不写数字,见上方 v0.2 注)。
@@ -149,6 +151,85 @@ committee_set_id = blake2b256( LP("kanet.oracle.committee-set.v1") || LP(pks_sor
 - 🔴 **两者必须都留,不许合并**:链上那个**必须**保持选择序(checkSig 依赖它);本 schema 这个**必须**排序(它答的是"是不是同一批人")。**同一批 pk 的两个哈希,答的是两个不同的问题。**
 
 📌 **顺带一条给别人的,不归本稿改**:`computeCommitteePkHash` 对入参**没有宽度校验**,其正确性依赖"调用方总是传 32B pk"这个约定。**这是隐患不是缺陷**(今天没有非 32B 的调用路径),但**它没有守卫**。要不要补校验归 J2 域,我只报读数。
+
+### §2.4 🔴 三对象分离(v0.4 新增 · Codex #5 ①)
+
+**Codex 的要求**:`policy_version` 挪出 FactReceipt,拆成三个对象;第 9 类(防重放绑定的策略/解释版本)随之挪到 `ConditionReceipt`。
+**它给的理由**:**payout 政策变更不应迫使事实重签。**
+
+| 对象 | 承载哪一权(§2) | 消费什么 | 产出什么 | 谁签 |
+|---|---|---|---|---|
+| **`FactReceipt`** | **P1 报告事实** | 链外观测(§2 第 ⑤ 类的证据摘要/规范观测锚) | 一个**被签的事实声明** | committee 成员 |
+| **`ConditionReceipt`** | **P2 规则解释** | `FactReceipt` 的**摘要** + `policy_version` + **规范输入集承诺**(§2.2 那六个字段) | `payout_root` + 总额记账 | 复算者(可多方,可零签名——它是**可独立复算**的,见 §4.3 上位文本) |
+| **`SettlementAuthorization`** | **P3 放钱** | `ConditionReceipt` 的**承诺** + **确切的被消费前态**(outpoint/版本) + **序列化交易语义** | 对**某一笔确定交易**的授权 | 持钥方(或纯 covenant 消费,零签名) |
+
+🔵 **三个对象正好对上 P1/P2/P3,一权一对象。** ⇒ **权限边界从"文档里的一张三行表"变成"三个类型不同的对象"** —— 这是 D-012 §6-1 「三权分立烤进接口签名」那句话第一次有了具体形状:**跨权限的越界不再需要靠检查发现,它在类型上就构造不出来。**
+
+**分离带来的三条硬性质(每条都可被红队直接攻)**:
+1. **换 payout 政策 ⇒ 只需重发 `ConditionReceipt`,`FactReceipt` 一个字节不动、一个签名不重收。**
+2. **换交易构造(fee/change/输入集顺序)⇒ 只需重发 `SettlementAuthorization`**,前两者不动。
+3. 🔴 **反向也必须成立(这条才是安全性)**:**持有 `FactReceipt` 签名权的人,不能凭它产出 `ConditionReceipt` 或 `SettlementAuthorization`** —— 三者是**不同的域标签 + 不同的 schema**,一份 FactReceipt 的字节在另外两个 verifier 眼里**结构上不合法**(§2.6 域标签进摘要 + §3 strict-reject)。
+
+> 🔴 **v0.4 自我更正(不是 Codex 提的,是它这一击让我看见的,方向对我不利)**
+> 上位稿 `2026-08-03-oracle-skill-interface-permission-boundary-freeze-design.md` **§2.1 末的 ⚠ 块**记着:我为了让 Codex 第 9 类(绑策略版本)成立,**把 P1 判据从「payout 变了字节不能变」重述成「字节里没有逐方分配」**,并写明"两者不能同时成立,请二选一"。
+> **三对象分离之后,那个紧张关系直接消失了** —— `policy_version` 不在 FactReceipt 里,所以**动 payout 政策确实不改事实签名的任何一个字节**,v0.3 的原措辞**重新成立**。
+> 🔨 **判词**:**当时那不是措辞问题,是【对象边界画错】的症状。一个对象被要求同时承载"事实"和"怎么解释事实",它的判据就必然要在两者之间打折。我改的是措辞,Codex 改的是边界 —— 后者才是根治。**
+> 📌 **待办(我不擅自改已 GREEN 的稿)**:上位稿 §2.1 那个 ⚠ 块需要据此更新。**它已过 NWT 红队,改它要不要重走复核,请 @Bettor 拍。**
+
+📌 **`SettlementAuthorization` 有一个已在等它的外部消费方**(@J2 / @NWT 2026-08-04 19:46-19:48 议定的正路):settler 域的 `refund_authorization` 今天是**一个写在 `pool_markets.metadata` 里的字符串**,与其余字段共享同一次可写性 ⇒ 事后无法区分"经 `authorizeRefundByOwner` 走的"与"某人直接 UPDATE 的"。正路 = **域分隔 typed 授权对象 + 签名,字段只存对该对象的承诺**。
+⇒ **本稿按"它要能被 settler 域复用"来定义 `SettlementAuthorization`,不另造第二套授权语义**(那正好是"一个名字底下几个东西"的下一次复发)。**若判它不该由本线承载,请在审的时候驳回。**
+
+### §2.5 🔴 聚合证明信封 `QuorumEnvelope`(v0.4 新增 · Codex #5 ②)
+
+**Codex 的要求**:**单个 receipt 证不了 4-of-5。** 一份 `FactReceipt` 只证明"**某一个签名者**说了什么";"委员会达成了门槛"是**另一个层次的断言**,需要自己的对象。
+
+**`QuorumEnvelope` 必须覆盖的七项,逐项给判据(不给实现)**:
+
+| # | 覆盖什么 | 判据(可被红队直接攻的形态) |
+|---|---|---|
+| 1 | **成员集承诺** | 信封绑定 `committee_set_id`(§2.3 定义的**排序 + 逐项 LP** 那个),**不是**链上那个选择序 hash |
+| 2 | **门槛 + epoch** | `threshold` 与 `committee_epoch` **必须由验证方 `LOOKUP` 独立查得**(承 §2.1 v0.2 那条:**由被检查方提供的门槛不是门槛**);信封内即便带也只是冗余,冲突必拒 |
+| 3 | **唯一签名者证明** | 计数前必须证明**每个被计入的签名来自不同成员** —— 判据:对签名者身份集合做**去重后基数** == 计入数;**不许**按"签名条数"计数 |
+| 4 | **重复拒绝** | 同一签名者的两份**相同**声明 ⇒ 计一次,且**必须可计数地记录被折叠了几份**(折叠数长期为 0 与长期暴涨都要有人看,承 (136) 弃权率同族) |
+| 5 | **成员证明** | 每个签名者**属于该 `committee_set_id` 所承诺的集合**必须可验证(集合承诺 + 成员证明,或全集合内联);**不许**靠"我这台库里 `is_oracle=1`"当成员证明(那是本机表,承 §2.1 LOOKUP 的边界:它关闭的是"不必碰机器就能得手"那一类,不是全部) |
+| 6 | **确定性排序** | 信封的规范字节序**唯一** ⇒ 同一组签名在任意两方产出**逐字节相同**的信封摘要;排序规则本身是被承诺的一部分(承 §2.2 第 3 项) |
+| 7 | 🔴 **equivocation** | **同一签名者对同一 `(市场身份, committee_epoch, outcome_namespace)` 签出两个不同 `outcome`** ⇒ 这是**可证明的作恶**,不是"取新的那个"。判据:**信封验证方必须能拒绝,且必须能把两份冲突声明作为证据留存**;**明令禁止**按 `nonce`/时间新旧择一(那是把作恶判定降级成排序判定,同 §2.1 supersede 那条) |
+
+🔴 **一条贯穿七项的失败语义**:**任何一项证不了 ⇒ 信封判定为 `inconclusive`,零授权,且不得回落到"按已收到的签名条数凑数"**(承上位稿 §2.2/§4.5 那条"弃权必须是终点,不是分支")。
+
+### §2.6 🔴 摘要算法标识显式化 + UTF-8 政策冻结(v0.4 新增 · Codex #5 ③)
+
+**问题**:v0.3 的 `receipt_digest = blake2b256(LP(DOMAIN) || LP(signing_bytes))` **算法只写在文档里,不写在数据里** ⇒ 将来换算法(或有人以为换了)时,**旧摘要与新摘要在类型上无法区分**。同族:`evidence_digest` 我给了 `"blake2b256:"` 前缀,而 receipt 自己的摘要**没有**。
+
+**① 算法标识必须随摘要走**:
+```
+receipt_digest      = "blake2b256:" || hex(blake2b256( LP(DOMAIN) || LP(signing_bytes) ))
+```
+· 一切**出现在 wire 上或被别的对象引用**的摘要(`supersedes.receipt_digest` / `ConditionReceipt` 引用的 FactReceipt 摘要 / `SettlementAuthorization` 引用的 ConditionReceipt 承诺)**一律带前缀**;
+· **前缀不匹配 ⇒ 拒,不做兼容尝试**(不许"看长度像 32 字节就当 blake2b");
+· 🔨 判据:**摘要是一个"带类型的值",不是"一串 hex"。** 不带算法标识的摘要,在换算法那天**无法与旧值区分**,而两者都是 64 个 hex 字符。
+
+**② UTF-8 政策冻结(byte-exact,零 normalization)**:
+| 规则 | 说明 |
+|---|---|
+| 编码 | `signing_bytes` = `canonicalJson(...)` 输出的 **UTF-8 字节**。UTF-8 是**唯一**编码,不接受任何其它编码的等价物 |
+| 🔴 **零 normalization** | **不做 NFC / NFD / NFKC / NFKD,不做大小写折叠,不做空白折叠。** 两个 Unicode 上"看起来一样"、但码点序列不同的字符串,**是两个不同的值,产出两个不同的摘要** |
+| 拒绝 | 落单代理(lone surrogate)、非法 UTF-8 序列 ⇒ **拒**(不是替换成 U+FFFD ——替换会把两个不同的非法输入映射成同一个合法输出) |
+| BOM | 不接受前导 BOM(U+FEFF);它出现在任何字符串值里都视为普通码点,**不剥离** |
+
+🔨 **为什么"零 normalization"必须写死而不是留给实现**:normalization 是一个**多对一**映射 —— 它的失败形态正是本稿反复在防的那个:**两份不同的输入被算成同一个摘要**,而它在日志里与成功完全同形。**任何"顺手规范化一下"的实现都是在悄悄制造碰撞面。**
+
+**③ test vector(冻结件的一部分,不是附录)**:实现必须能复现下列三对,**且第 2、3 对必须产出【不同】的摘要**:
+
+| # | 输入(`outcome` 字段的值,其余字段固定) | 期望 |
+|---|---|---|
+| T1 | `"YES"` | 产出一个确定摘要 `D1`(实现间必须逐字节相同) |
+| T2 | `"café"`(**NFC**:`caf` + U+00E9) | `D2` |
+| T3 | `"café"`(**NFD**:`caf` + U+0065 U+0301) | `D3`,且 **`D3 != D2`** |
+| T4 | 含 lone surrogate 的字符串 | **拒绝**,不产出摘要 |
+| T5 | 值前加 BOM(U+FEFF) | `D5`,且 **`D5 != D1`**(不剥离) |
+
+🔴 **T3 与 T5 是这组 vector 的全部意义**:一个做了 normalization 的实现会让 `D3 == D2`(或 `D5 == D1`)**而 T1 照样通过** —— 只测 T1 的 vector 挡不住它。**这与 §6-16、§6-22 是同一族:只测"正常路径"的用例,挡不住把不同输入折叠成同一输出的实现。**
 
 ## §3 规范化规则
 
@@ -242,6 +323,19 @@ receipt_digest = blake2b256( LP(DOMAIN) || LP(signing_bytes) )
 **一个把 `resolve` 失败 `try/catch` 吞掉然后继续走正常路径的实现,能让 1-21 条全绿** —— 因为它对每一份**格式合法**的 receipt 都表现正确;而它对"填一串随机 hex 的 `supersedes`"表现为**跳过整个 §2.1 门槛检查**(条件 1/2/3 全挂在有前件上,前件没了它们一条都不跑),流程还**看起来完全正常**。
 🔨 **它与第 16 条构成一对**:16 防**恒拒**装饰,22 防**静默降级**。**这两种坏,前 15 条都测不出来。**
 
+**v0.4 新增 23-28(对应本版三件;改了不加用例 = 没人守)**:
+
+| # | 用例 | 必须红在 |
+|---|---|---|
+| 23 | `FactReceipt` 里出现 `policy_version` 键 ⇒ **必须拒** | §2.4 三对象分离(它现在确实是未知键,但**单列**:守的是"事实不含解释",不是"未知键") |
+| 24 | 只改 `ConditionReceipt` 里的 `policy_version` ⇒ `FactReceipt` 的摘要**必须逐字节不变** | §2.4 性质 1(**正向用例**:证明政策变更不迫使事实重签) |
+| 25 | 拿一份合法 `FactReceipt` 的字节去喂 `ConditionReceipt` / `SettlementAuthorization` 的 verifier ⇒ **两边都必须拒** | §2.4 性质 3(域标签 + schema 双重不合法) |
+| 26 | `QuorumEnvelope`:**同一签名者的 4 份签名** ⇒ **不得**判定达到 4-of-5 | §2.5-3 唯一签名者(**按签名条数计数的实现会绿**) |
+| 27 | `QuorumEnvelope`:同一签名者对同一 `(市场, epoch, 命名空间)` 给出**两个不同 `outcome`** ⇒ **必须拒并留证**,**不得**按 nonce 取新 | §2.5-7 equivocation |
+| 28 | **T3 / T5**(§2.6):NFC 与 NFD 的 `"café"` 摘要**必须不同**;带 BOM 与不带 BOM 的摘要**必须不同** | §2.6-② 零 normalization(**做了 normalization 的实现在 T1 上照样绿**) |
+
+🔴 **26 与 28 是本批最容易被"实现看起来对"骗过去的两条**:26 的错误实现(数签名条数)在**所有诚实输入**上都给出正确答案;28 的错误实现(顺手 NFC)在**所有 ASCII 输入**上都给出正确答案。⇒ **两条都必须用【构造出来的对抗输入】,不能靠正常样本。**(承 `[[feedback_prove-volatility-by-construction]]`)
+
 🔨 **20 条的写法要注意**:它需要**构造**一对碰撞输入(如 `[AB, C]` 与 `[A, BC]` 在裸 concat 下同字节)。**这正是 `[[feedback_prove-volatility-by-construction]]` 那条 —— 证"它会变/它会撞"只能靠构造,不能靠"我没见过"。**
 
 ## §7 诚实标注:今天没有承载物的字段
@@ -270,6 +364,7 @@ receipt_digest = blake2b256( LP(DOMAIN) || LP(signing_bytes) )
 | §1-bis / §3-2 既有先例(`fee-split.mjs:81-86/100-102/146-147/162`) | `[CONFIRMED·源码实读]` — v0.2 我照 J2 给的 file:line 追下去自查,**并因此更正了自己 v0.1 的方向** |
 | §2.3 `computeCommitteePkHash` 裸 concat 无 LP + 选择序不 sort | `[CONFIRMED·源码实读]` `bshard-close-voter.js:561-563/573-576` |
 | 🔴 `pool_committee.threshold` 的**值** | **`[UNVERIFIED-ON-THIS-NODE]`** —— **列存在**(我 `PRAGMA table_info` 现查),但**我这台库里 `pool_committee` 是 0 行**,J2 报的"样本 = 4"是**他机器上的读数,我复现不了**。⇒ **"承载物在库里"我只能确认到 schema 层,不到数据层。**(同 [[project_j1tn-boot-0801]] 那条:我这台是远端节点,多张表结构性为空。) |
+| **v0.4 新增 §2.4 / §2.5 / §2.6** | **`[DESIGN-ONLY·零实现·未审]`** —— 🔴 **三对象里今天只有 `FactReceipt` 有 schema 定义**;`ConditionReceipt` / `SettlementAuthorization` 本版**只给了职责与消费/产出边界,没给字段表**(它们的字段依赖 §2.2 输入集与交易语义,应各自单独成稿)。`QuorumEnvelope` 同理:**七项是判据不是 schema**。**引用时不许说"三对象已定义"。** |
 | **本稿 §2/§3/§4/§6 全部** | **`[DESIGN-ONLY·零实现·未审]`** —— schema 不存在于代码,用例一条没写。**本稿不使冻结前置① 从 OPEN 变 CLOSED。** |
 
 ## §9 交审点名
@@ -284,6 +379,11 @@ receipt_digest = blake2b256( LP(DOMAIN) || LP(signing_bytes) )
        ⚠ **同时收下他给的边界**:本系统几乎所有判据最终都归约到"信任本机 DB"(`committee_pks` / `is_oracle` / `protocol_status` 皆然)⇒ **「本地 DB 完整性」是系统级假设,不是本 schema 该单独解决的问题**;本条关闭的是**"不必碰机器就能得手"那一整类**。
    - ✅ **§6 悬赏也被他领走了** ⇒ 第 22 条(见 §6)。**那正是我要的那种:能让整套用例全绿而实现仍然错。**
 3. **@Bettor**:§5-3 那条(`ecdsa_sign` 从"矩阵补一行"升为冻结线承重项)要不要立卡,归你拍。**我不自行开卡。**
+4. 🔴 **@Bettor(v0.4 新增,两件都要你拍)**:
+   - **(a) 上位稿 §2.1 那个 ⚠ 块需要更新**(见 §2.4 末的自我更正:三对象分离让那处紧张关系消失,v0.3 的原措辞重新成立)。**但那份稿子已过 NWT 红队** —— 改它要不要重走复核?**我不擅自动已 GREEN 的稿。**
+   - **(b) `SettlementAuthorization` 要不要承载 settler 域的 `refund_authorization` 正路**(@J2/@NWT 19:46-19:48 议的方向)。**我按"要能被复用"写了职责边界,但没有把 settler 的需求当作它的需求去设计** —— 若确定并线,`SettlementAuthorization` 应当由**我和 J2 一起**出字段表,而不是我单方猜他域内要什么。
+5. **@J2(v0.4)**:§2.4 里 `ConditionReceipt` 消费的"规范输入集承诺"就是上位稿 §2.2 那六个字段 —— **你域内今天有几个是拿得到的?** 我在上位稿 §7 标过一批"无承载物",但那是按 FactReceipt 的口径标的,**输入集那六个我没有单独盘过**,不假装盘过了。
+6. **@NWT(v0.4 红队)**:优先攻 **§2.5-3 与 §2.6-②** —— 这两条的错误实现**在所有诚实输入上都正确**(数签名条数 / 顺手 NFC),我给的对抗用例(26/28)够不够?**若你能构造一个同时通过 26 和 28 但仍然错的实现,那条比什么都值钱。**
 
 ---
 
