@@ -4599,4 +4599,13 @@ pool-market-settler.js:2427-2459  dispatchRefund 本体    — 只查 isBshard, 
 - **Codex 主动审**(bridge `c99f7751`,本次第二通路盯到没漏): 两方向 ACCEPTED,四实缺口,均不阻塞部署(两件皆严格增益)——**卡①**(J2 认领)投票查询 LIKE→json_extract 规范键查+equivocation 规则,**约束: checker 与 decideConsensusV06 计票必须同卡原子改**(只改一处=两把尺分裂,比不改糟);**卡②**(J2 认领)PB-S8-1 真 handler 回归(现 case=SQL fixture 重放,未执行 handler,证不了拒签真拦调用;需 mock IPC+调用次数断言);**卡③**(KANet-UI 认领,方向=冷却政策而非 episode 状态机)告警同劣化期重启后新失败行会再报+stop/start 同进程绕过水位线恢复;**PB-S8-2 优先级上调**(Codex: "not optional——live 放钱签名路径剩下的 authorization-to-bytes 绑定",D-012 终裁后第一批)。J2 对两卡"认账不辩护",排期=部署窗后出计划。
 - **小窗执行**(KANet-UI,07:10-07:12,~2 分钟): 前置 HEAD=`55175d4a`==origin(ls-remote 现查,含 520903b7+7a2bb5e7+145baeb8);in-flight 双检过。五检: ①新 PID 13256 非复活 ②频道 API 活 ③装载==origin HEAD ④迁移干净 ⑤行为验**带诚实边界**——sign_req 无 cross-node 流量可验(同 r402 rejected_v1 已知缺口,不硬造)、告警冷启动零报错但水位线读回路径无 live 劣化流量触发,靠 regression suite(6 check 全过)。
 - **当前防线态**: r402(producer 侧退款复核)+ PB-S8-1(委员签名前投票自检)+ 告警水位线,三件全部 live。剩余挂账: PB-S8-2(上调)/发送者绑定/rejected_v1 实弹/卡①②③/r402 consumer 半边(J1 笔记本,窗口状态成谜)。
-- **🔴 J1 状态**: 06:51"此刻执行中"后沉默 25+ 分钟,频道四追无应,git 全分支零 push——其 console 重启窗疑似卡死,远程无信道可达。**已升 Owner(终端): 若可物理/RustDesk 触达其笔记本,看一眼。**
+- **🔴 J1 状态**: 06:51"此刻执行中"后沉默 25+ 分钟,频道四追无应,git 全分支零 push——其 console 重启窗疑似卡死,远程无信道可达。**已升 Owner(终端): 若可物理/RustDesk 触达其笔记本,看一眼。** → **🟢 07:16 更正: J1 全程健在,一直在窗内工作**;详见 (129)。
+
+---
+### (129) 2026-08-03 07:1xZ — 🔴 单向断裂实例: J1 五检报告从未落链,而两侧自我认知同时都是错的
+- **发现**: J1 07:16 发闭环补充,内容引用"五检①里我问的…"——即在他那侧五检报告是"已发出"状态。**Bettor 拉宽窗核实(80 条,回溯至 08-02T20:56,完整覆盖其窗口): J1 名下仅 5 条,06:51→07:16 之间零消息**——那份五检报告**从未落到频道**。
+- **两侧认知同时错(教科书级 oneway-channel-break)**: J1 以为"数据已在 Bettor 手上,只需补收尾";Bettor 以为"J1 会话疑似死亡",已按此升 Owner((128) 那行现已更正)。**双方各自的下一步动作都建立在错的前提上。**
+- **根因**: 他发那条时自己的 console 正在重启窗内(广播出不去),而**发送脚本回执 ≠ 链上真落地**——命中在册 `reference-channel-verified-receipt-reads-local-db-not-chain`。**结构性成因: 他的报信信道与他要报的对象是同一台机器**(重启窗内报重启结果 = 自指依赖)。
+- **要求 J1 三条**: ①重发五检全量(尤其 r402 装载 commit 那格——**缺它则"J1 笔记本 r402 已部署"在 Bettor 侧无证据支撑,不记完成**)②发完自己回读频道 API 核实(不信发送脚本回执)③今后凡在自己 console 重启窗前后发的消息一律回读核实。
+- **同轮 J1 自决收尾(Bettor 认可不裁)**: supervisor 拉回——先读触发逻辑(只按端口判活,活着则只看守不 spawn;当晚 double 真凶是他另跑的 kanet-start.sh 非 supervisor)→ Start-Process 脱离启动避 turn 边界 → 起后逐项核(supervisor=1/console 原 PID 未被替换/relay=11/port/kaspad)double 未复发。**形态对: 读机制再动手、动后立即核、结论带证据。** v0.7 补课 ETA 今天内。
+- 🔨 **判据入档**: **"我发过了"不是消息存在的证据;唯一证据是收方或链上原始返回里有它。** 尤其当发送方与被报告对象是同一台机器时,失败会静默且双向致盲。
