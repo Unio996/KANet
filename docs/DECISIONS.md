@@ -55,6 +55,13 @@
 | Covenant 放钱(payout 树→winner P2PK) | `CloseZkV2.claim` 纯 covenant merkle+nullifier | 无签 |
 - ⇒ **v0.7 里委员签名权已精确收窄到「事实证言」这一权**,与放钱、与规则解释分离干净——**这正是 §6-1 要冻结的边界的已存在实例**;live-wired 非 design-only(`bshard-close-voter.js` W2 自治-enforce;`p2sh.mjs:1969`;pxvml 2026-07-08 实战撞过门①)。
 - 🔴 作用域自纠(J1 主动): 「oracle 私钥亲自签放钱 TX」对 v0.5/v0.6 成立、**对 v0.7 不成立**——v0.7 走 `sign_input_for_settle` 的那笔是 `close_attest_v2`(attest 类、守恒、不放钱)。**ZK-native 路上「委员签放钱」不成立,委员只签 winner。**
+- 🔴🔴 **作用域补注(2026-08-03 16:2xZ · Codex 独立审 bridge `16b71707` 打中 · Bettor 认并记账 · 不改上方 Owner 终裁原文)**: 上表「守恒不动钱」**说满了**。`require(outputs[selfOutIdx].value == consolidated_pool)` 只证**那一个 covenant 输出自身守恒**;而 **SIGHASH_ALL 签名承诺的是整笔序列化交易**——同一笔中仍可含**他方控制的额外输入 / 搬走无关价值的额外输出 / 被改的 fee 与 change**。⇒ **自输出守恒 clamp 本身不能证明「该签名挪不动别的钱」。**
+  - **可用措辞(照 Codex 原意)**: 「**被引用的 covenant 在那几个 entry 上强制其自身 consolidated-pool 输出守恒**」;**禁止**写成「委员签名不动钱」或据此把 v0.7 当「三权已分离」的**通用先例**。
+  - **该先例要成立的前置**: 需给出**完整交易形状约束 + sighash 域分析**(今天没有)。
+  - **正路(Codex 给的目标形态,并入 §6-1)**: oracle 应签**域分隔的 FactReceipt / OutcomeAttestation** 对象——绑定协议版本/网络/市场身份/结果命名空间/证据承诺/有效期/oracle 身份/防重放序号,**对象内不含任何交易输入输出、地址、金额、fee、change**;covenant 独立消费该 receipt 校验交易授权;持钥方拒绝一切不匹配该 typed schema + 域分隔符的请求。**若要保持「payout 变化不改变 P1 字节」这个不变量,receipt 内不得含交易摘要。**
+  - **🔴 冻结前置(6 条,齐了才准以「授权边界」名义冻结;在此之前可继续以 design 推进)**: ①typed attestation schema + 域分隔摘要 ②证明 oracle 角色**够不到**通用交易签名入口 ③v0.7 完整交易形状 + sighash 分析 ④handler 级测试: RPC 错 / 缺输入 / 多输入 / 陈旧 outpoint / 坏金额 / 超量输出 / payout 篡改 **各自零签名调用** ⑤**一条证明「验证中断不会把市场路由进自动退款」的测试** ⑥候选 A 的规范输入集/输出集重算与绑定设计。
+  - **🔴 同轮采纳为状态机不变量(Codex 升格 Bettor 的威胁模型)**: `验证不可用 → 验证者 inconclusive → 不签名,且不产生任何自动退款授权`。**deadline 到期不得把「缺证据」变成「执行另一条不可逆钱路的许可」**;退款转移必须**另行授权、另行证明**。这是不变量,不是只有计数器与告警。
+  - **PB-S8-2 候选 B 定性(Codex 确认我方自我收窄措辞正确,keep)**: 它是**预筛不是授权边界**——不能证明收款人集合/各自金额/费用分配/排序/漏项/状态版本/payout 树正确性。**B 检查通过不得被表述为「可以安全签名」。**
 
 #### §3 Broker: 目标与现状分写(现状均属 Track A 实况陈述)
 - **目标不变量(Track B)**: 不保管资金/不裁结果/身份=Kaspa 地址/佣金链上直分。
