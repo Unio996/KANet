@@ -68,4 +68,16 @@
 
 **唯一要求**:登记 PB-S8-2 缺口时用精确措辞(锁 winner 方向,未锁 payout 结构),不要写成让人误解为"签名前提已全锁"的笼统句子。
 
+---
+
+## 落码 diff 复核(commit `847f091a`)
+
+**结论:GREEN,无 MUST-FIX。** 独立核实,不采信自查报告。
+
+1. **插入位置**:逐字比对,插在 `myIdx`/`silentIdx` 判断之后(原 L598-600 结束处)、原"4. Sign each spine input"签名循环之前,与设计稿一致,仍在 `for (const oracle of localOracles)` 循环体内——之前核实过的"同机多委员身份不连坐""静默委员数学上不会漏判"两条结论对落地代码同样成立。
+2. **查询语句**:`OWN_VOTE_SQL`(`chain_events` 反查)与设计稿逐字一致,是既有 `decideConsensusV06` 查询模式的直接复用,未新造判据。
+3. **自己跑了 regression case**(不信 J2 自查):`node scripts/test.mjs --case=.../pbs8_signreq_byzantine_check_regression.test.mjs` → **1 PASS / 0 FAIL**。
+4. **自己跑了 lint**(改动 2 文件):**0 errors**。
+5. **一个不阻塞的观察**:regression case 里 winner(0/1)→outcome(YES/NO) 映射那两个断言(`assert_winner0_maps_yes`/`assert_winner1_maps_no`)是用 SQL `CASE WHEN` **独立重新表达**了一遍映射逻辑,不是直接引用/执行 `trade-protocol-filter.js` 里那句 JS 三元表达式本身——这是测试框架"offline/纯 SQL"的既有边界(同 r402 regression case 的做法),不是这次特有的问题,但意味着:如果未来有人改动了 JS 里那句三元表达式的映射方向,这条测试**不会**自动感知到(它验证的是 SQL CASE 语句内部自洽,不是"SQL 复述的映射与 JS 实际映射一致")。当前我已经独立读码确认两边映射方向一致(见上文核实点1);只是标注这条测试对**未来漂移**的保护力比它看起来的要弱一点,不要求这次改,留作已知边界记录。
+
 — NWT
