@@ -3007,3 +3007,24 @@ WHERE id IN (...) AND protocol_status IN ('verifying', 'pending_bettors')
 
 **为什么条目在这**：接位文件在 C 盘不入 git 跨机不同步（7/12 结构卡教训），ANTI-PATTERNS 在 git 内全员自动同步——规矩钉在这里是主保险，接位文件拷贝是双保险。
 
+
+## 规则 66 —— 守卫读的字段必须在决策那一刻真的在对象上：「列在表里」≠「列被 SELECT 出来」，而同一个漏读会同时造出"永远拒"和"永远过"两种相反的坏
+
+**触发**（2026-08-03/04，J2 写 PB-S8-2 候选 B 设计稿时自己撞出；NWT 红队与 Codex 三轮主动审都没提到这一层，Bettor 同时独立点到同一处）：
+
+设计稿三个签名前检查全部读 `market.spine_lock_tx` / `market.spine_p2sh` / `market.maker_relay_id`，并在文中写明"这些是本地 `pool_markets` 列（建市场时写入，不依赖消息）"——**这句话是对的，而它不成立的地方在于：`handlePoolOracleTxSignReq` 载入 market 的那条查询逐字是 `SELECT id, protocol_status, metadata FROM pool_markets WHERE id = ?`**（`trade-protocol-filter.js:552`）。三个列在表里都存在（`PRAGMA table_info` 现查过），**但没有一个被取出来** ⇒ 检查执行的那一刻全是 `undefined`。
+
+**🔴 这一条最该记住的不是"会失效"，是它失效的形状——同一个漏读，在两处产生方向相反的坏**：
+
+| 位置 | `undefined` 之后 | 方向 |
+|---|---|---|
+| `x !== market.spine_lock_tx` 型比较 | 条件**恒真** ⇒ 对每一个市场恒拒 | **fail-closed 到极端 = 整条路停摆**（本例：全网市场停签 ⇒ 顺 `pool-market-settler.js:1149` 的 `collecting_sigs` 超时分支流向自动退款 —— 一层"加固"变成全网自动退款） |
+| `isCommingledSpine(market.spine_p2sh, db)` 型守卫 | `pool-commingle-detect.mjs:40` 逐字 `if (!spineP2sh) return false` ⇒ **恒返"干净"** | **fail-open = 装饰守卫**，日志与"检查过了、确实干净"**完全同形** |
+
+⇒ **只看其中一侧的复核必然漏掉另一侧**：看到"怎么全拒了"会去查检查逻辑写错没有；而 fail-open 那侧**不会有任何人去查**，因为它什么都不说。
+
+**铁律**：
+- 加任何守卫/检查前，**核"守卫在决策那一刻读得到它要判的那个值"**——不是核"这个列存在"，是核**取值的那条语句**（SELECT 列清单 / 函数入参 / 消息字段）。同族已有 memory `feedback-verify-value-source-checker-must-access-binding-at-decision-time`；本条是它的**双向形态**版本。
+- **扩了 SELECT 也不够**：取出来 ≠ 有值。承重列为 NULL 时**必须显式弃权**（本例：`缺任一承重列 ⇒ 不签`），**禁"那就跳过这层检查继续走"**——读不到判据的值是一种 cannot-verify，与「cannot-verify ⇒ 零授权、不得回落到更弱检查取得授权资格」（Bettor 2026-08-04 裁定）同源。
+- **判别式（沿用规则族既有形状）**：把该字段人为置空跑一遍——**日志里看得出来吗？** 看不出来 = 这个守卫在那条路上是装饰。
+- **机器 clamp（提案，未实装）**：lint 规则——同一函数内出现 `market.<col>` 而该函数的 `SELECT ... FROM pool_markets` 列清单不含 `<col>` ⇒ 报错。需按规则 65 走 warn-first + NWT verdict，**不许顺手 push**。
