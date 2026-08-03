@@ -381,9 +381,16 @@ function reportUnauthorizedRefundBacklog(unfixableIds, nowSec) {
         AND pm.deadline <= ?
         AND pbs.side_lock_tx IS NOT NULL
         AND pbs.claim_txid IS NULL
-        AND NOT (
-              json_valid(pm.metadata)
-              AND json_extract(pm.metadata, '$.refund_authorization') IN (${REFUND_AUTHORIZATION_SQL_IN})
+        -- 🔴 三支【显式】拆开, 不能写成 NOT (json_valid AND ... IN (...))。
+        --    2026-08-04 上线首 tick 实证: 缺字段的行 json_extract 返回 NULL,
+        --    而 NULL IN (...) 的结果是 NULL 不是 FALSE, NOT (1 AND NULL) 仍是 NULL,
+        --    WHERE 只收 TRUE ⇒ 那 125 笔【本该被数出来的积压】被自己的计数条件筛掉, 读数 0。
+        --    ⚠ 光把 IN 改成 NOT IN 也不行: NULL NOT IN (...) 同样是 NULL。
+        --    ⇒ IS NULL 那一支必须单列且排在前面。
+        AND (
+              json_valid(pm.metadata) = 0
+              OR json_extract(pm.metadata, '$.refund_authorization') IS NULL
+              OR json_extract(pm.metadata, '$.refund_authorization') NOT IN (${REFUND_AUTHORIZATION_SQL_IN})
             )
     `).get(...unfixableIds, nowSec);
 
@@ -499,7 +506,8 @@ async function legacyRefundBuilderTick() {
     // 🔴 被闸挡下的必须【可计数、不静默】(设计 §10.1/§10.3(a))——否则"退款被挡住了"与"没人来
     //    claim"在读数上完全相同, 而这正是本卡要根治的那一类同形。计数与候选查询【同谓词、只去掉
     //    授权那一段】, 所以它数的就是"若无此闸本可放行"的那批, 不是另一个近似口径。
-    reportUnauthorizedRefundBacklog(unfixableIds, nowSec);
+    // (计数已挪到 poolSettlerTick 末尾 —— 见下方 return 带出的 unfixableIds。
+    //  原来放这里会在同一个 tick 的 freeze 发生【之前】打印, 冻结态数天然滞后一拍。)
     // J2-tn r391 关2 硬门: 默认 batch=1 trial 模式. Bettor ④ 验过最小 1 笔 chain accept + bettor 实收
     // 后 env LEGACY_REFUND_BATCH=5 bump 进 batch. 不接受未验 ramp.
     // 2026-07-14 修法B: LIMIT 放宽到 batch*4(多取候选), 熔断闸(见 sideRefundCircuitGate)先滤掉永久
@@ -507,7 +515,7 @@ async function legacyRefundBuilderTick() {
     const _gatedCount = sidesRaw.filter((s) => sideRefundCircuitGate(s.side_id)).length;
     const sides = sidesRaw.filter((s) => !sideRefundCircuitGate(s.side_id)).slice(0, parseInt(process.env.LEGACY_REFUND_BATCH, 10) || 1);
     if (_gatedCount > 0) console.log(`[pool-settler:legacy-refund] [circuit-breaker] ${_gatedCount} side(s) gated this tick (熔断, 跳过)`);
-    if (!sides.length) return { processed: 0, gated: _gatedCount };
+    if (!sides.length) return { processed: 0, gated: _gatedCount, unfixableIds };
     let triggered = 0, failed = 0;
     for (const side of sides) {
       try {
@@ -533,7 +541,7 @@ async function legacyRefundBuilderTick() {
         recordSideRefundFailure(side.side_id, e.message);
       }
     }
-    return { processed: sides.length, triggered, failed };
+    return { processed: sides.length, triggered, failed, unfixableIds };
   } catch (e) {
     console.error('[pool-settler:legacy-refund] tick exception:', e.message);
     return { error: e.message };
@@ -548,6 +556,9 @@ export async function poolSettlerTick() {
     // J2-tn r391 #28: legacy-refund-builder before main tick. 解冻 ver=null/v0.5 卡单.
     // 独立 path 不碰 committee 路 (= Bettor ③ 关1 护栏达标).
     const legacyResult = await legacyRefundBuilderTick();
+    // P1 积压计数放在【本 tick 全部处置跑完之后】(见函数注释): 它要数的"冻结态市场数"必须
+    // 包含本 tick 刚冻结的那些, 否则读数永远滞后一拍(上线首 tick 就是这样打出 0 的)。
+    const _p1BacklogIds = Array.isArray(legacyResult?.unfixableIds) ? legacyResult.unfixableIds : [];
     if (legacyResult.processed > 0) {
       console.log(`[pool-settler:legacy-refund] tick: processed=${legacyResult.processed} triggered=${legacyResult.triggered} failed=${legacyResult.failed}`);
     }
@@ -1492,6 +1503,12 @@ export async function poolSettlerTick() {
     } catch (e) {
       console.warn(`[broker-fee-emit] phase fail: ${e.message}`);
     }
+
+    // ── P1 授权闸积压计数(放在本 tick 全部处置之后, 见 reportUnauthorizedRefundBacklog 注释) ──
+    //  上线首 tick 实证: 原来放在 legacyRefundBuilderTick 里(tick 早期), 打印时本 tick 的 freeze
+    //  还没发生 ⇒ "冻结态市场数"天然滞后一拍(打 0, 而稍后实际冻了 5 个)。挪到这里, 数的就是本
+    //  tick 结束时的真实状态。
+    reportUnauthorizedRefundBacklog(_p1BacklogIds, Math.floor(Date.now() / 1000));
 
     return { ok: true, processed: markets.length, consensus, refund, pending, doomed, errored, pathBReconciled, bshardSkipped, commingledRefund, brokerFeeEmit };
   } finally {
