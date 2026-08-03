@@ -45,6 +45,7 @@ function readState() {
     const raw = readFileSync(statePath, 'utf8');
     const j = JSON.parse(raw);
     if (!j || typeof j.lastSeenTs !== 'string') return null;
+    if (Number.isNaN(new Date(j.lastSeenTs).getTime())) return null; // 语法合法但不是可解析日期,同样当首次武装(NWT红队①)
     return j;
   } catch {
     return null; // 损坏 = 当首次武装,不崩
