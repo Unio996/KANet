@@ -4617,4 +4617,15 @@ pool-market-settler.js:2427-2459  dispatchRefund 本体    — 只查 isBshard, 
 - **🔴 新实况(J1 ⑤)**: xnode-refund **现在真的在 fire**(不再是"0 fire"),卡在 `UTXO too small for payload (need ~3 KAS, have 2.5)`。NO TX NO STATE 正确未推进。
 - **裁定: 不补 funding UTXO(Bettor)**——理由非省费: **这条广播不携带信息**。J1 那台 `pool_bettor_sides` 整表 0 行 ⇒ "该市场 0 注"结构上恒真,分不清"真无人下注"与"我从未同步到注"。producer 侧 r402 已 live 会复核 ⇒ 不再危险,**但"不危险"≠"该发"**。
 - **📌 立卡(J2 域,非阻塞,排在 Codex 卡①②之后): consumer 侧自知之明闸 = r402 的镜像**——广播 `pool_refund_request_v1` 前先查本机 `pool_bettor_sides` 整表是否为空/该市场是否从未 ingest 过注;整表 0 行 ⇒ 本机无判断资格,不广播,记可计数 skip(不静默)。判据照 J1 自己 08-01 原话:"表空是 ingest 坏了还是真没注,两者读数相同,我不猜"——**读数相同就不该下断言**。r402 让接收方不轻信,本卡让发送方不乱说。
-- **J1 剩余单格**: v0.7 补课(closezk-v2 纯 covenant 还是仍有委员签),Oracle Skill 边界冻结的前置,ETA 今日内。
+- **J1 剩余单格**: v0.7 补课(closezk-v2 纯 covenant 还是仍有委员签),Oracle Skill 边界冻结的前置,ETA 今日内。→ ✅ 07:28 交付,见 (131)。
+
+---
+### (131) 2026-08-03 07:2x-07:4xZ — 🏛 **D-012 Owner 终裁生效** · J1 v0.7 补课闭卡 · J1 关机(quorum 实查无阻塞)· 卡① PUSH-BACK 命中已上线代码
+- **✅ D-012 生效**(`6962da4a`,已并入 `docs/DECISIONS.md`): Owner 终裁前提三点修正,全部为硬约束——**§0 Track 边界**(角色开放=Track B 协议承诺/fork 自担;**Track A 七铁律原样有效**;**§3 六道墙不是待拆清单,数道正是该留的墙**;判据"引用前先答哪条 Track,答不出不得据本条行动")· **§4 H0 量级诚实标注**(Broker=1 外部=0;"插件可当 Broker"是未检验假设;可证伪判据预注册 90 天窗口)· **§5 证据层级**(r402/PB-S8-1 = DEPLOYED-VERIFIED 部署已核 + **SUSPECTED 未实弹**;未实弹的保护不得表述为"已生效")。**(115) 已盖章 SUPERSEDED-by D-012(仅叙事层),仍有效的实核条目逐条列出、引用需带作用域。**
+- **J1 v0.7 补课闭卡(07:28,读码只读)**: closezk-v2 **放款纯 covenant 零委员签**(CloseZkV2.sil 全文零 checkSig);唯一 4-of-5 委员签在上游 `close_attest` 且**守恒不动钱、只签 winner**。⇒ **v0.7 三权已天然分离**(见 D-012 §2-bis),Oracle Skill 冻结工作由"从零发明"改为"把已存在形状推广成接口契约并覆盖子集②"。J1 同时**自纠**其"oracle 私钥亲签放钱"一句的作用域(仅 v0.5/v0.6)。
+- **J1 笔记本按 Owner 令关机(Bettor 批准,quorum 影响面实查)**: **当前待 attest 三市场委员 5/5 全本机,零阻塞**;含 J1 oracle 的未终态市场 8 个全为 archived/disputed(不动)。🔴 **真风险在未来**: 待办但尚未抽样市场 95 个,抽样器不问 liveness ⇒ 选中已下线 oracle 即凑不齐 4-of-5。**方法论记档**: 首个谓词用 `ecdsa_pubkey_xonly`(全表 NULL)得出"委员 0 个是本机"的**假阴性**,换 `committee_relay_ids` 地址映射+阳性对照(32 relay 名全解析)+阴性对照(伪造地址 0 命中)后才成立——空读长成合法答案的又一实例。
+  - 📌 立卡: **committee 抽样 liveness 门**(J2 域,非阻塞)——候选集排除无心跳 oracle,或选中后给可观测"quorum 不可达"告警(带接收者)。与 r402/自知之明闸同族: **都是"选了个不能兑现的前提"**。
+  - 📌 KANet-UI 已上穷人版监控(60s 轮询新抽样委员会,含 J1 四个 oracle 地址即报频道)。
+- **🔴 卡①(json_extract 迁移)NWT PUSH-BACK(`290f69ae`)——命中今天刚上线的 PB-S8-1**: 设计稿称"json_extract 遇 malformed 返 NULL 不抛"被**实测证伪**(better-sqlite3 会抛);而 PB-S8-1 的 `myVoteRow.get()`(trade-protocol-filter.js:604-610)**外层无 try/catch、for 循环也无** ⇒ 表内任意一行脏 JSON 会中断**该机所有 oracle 身份、所有市场**的签名请求处理。**把"防单笔恶意签名"变成"整机拒签"——安全检查改成可用性炸弹,而它长得像加固。** 已验证修法: `AND json_valid(payload) AND json_extract(...)=?`(AND 链短路)。
+  - **Bettor 加两条**: ①那处 `.get()` **无论走不走 json_extract 都该有自己的失败语义**(查不到=暂不签待重试;**查询出错=也暂不签并显式报**,不许异常穿透)——今天 LIKE 版安全是**偶然**(LIKE 不抛)不是设计;②回归必须含**"脏行排在合法行之前"**排列(脏行在后会被 LIMIT 1 躲过 ⇒ 假绿)。
+  - **顺序调整**: 卡①从"排卡②后"提到**卡②前**(它触及已上线代码的失败语义,非未来功能)。**过渡期约束**: 卡①落地前 PB-S8-1 LIKE 版不动;**任何人不许往 `pool_oracle_vote` 手工写测试数据**(今天这条防线的安全性依赖"表里没有脏 JSON",而这是个没人守的前提);KANet-UI 巡检加 `json_valid(payload)=0` 计数非零即报。J2 07:41 已推 v2 修复。
