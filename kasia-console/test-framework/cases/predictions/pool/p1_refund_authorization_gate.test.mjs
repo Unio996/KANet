@@ -66,7 +66,29 @@ for (let i = _src.indexOf(GUARD_PREDICATE); i !== -1; i = _src.indexOf(GUARD_PRE
     throw new Error(`P1 授权闸的 json_valid 守卫必须紧排在 json_extract 之前(短路顺序), 出现点 offset=${i} 缺前置`);
   }
 }
-// ③ 白名单取值从生产常量提取, 不手抄 —— 生产改了本用例自动跟着改。
+// ③ 🔴 regression(NWT diff 审 2026-08-04 抓出的钱路死结, 修完必须锁住):
+//    冻结调用【前面】不得有把状态写成冻结白名单之外的值(典型是 'cancelled')的 UPDATE ——
+//    freezeAwaitingAuthorization 只允许从 verifying/collecting_sigs/disputed/refunding 转入,
+//    先写 'cancelled' 会让它 UPDATE 0 行 ⇒ 市场既没退款也没冻结, 而 authorizeRefundByOwner
+//    只认冻结态 ⇒ 【没有任何出口】。原 bug 就在 settle_submit_giveup 那处(watchdog-b 改对了、
+//    兄弟路径漏改)。这里写成【通用判据】而不是只钉那一处, 否则下一条新路径会以同样方式复发。
+{
+  const FREEZE_CALL = 'freezeAwaitingAuthorization(';
+  const ALLOWED_IN = ["'verifying'", "'collecting_sigs'", "'disputed'", "'refunding'"];
+  for (let i = _src.indexOf(FREEZE_CALL); i !== -1; i = _src.indexOf(FREEZE_CALL, i + 1)) {
+    const before = _src.slice(Math.max(0, i - 600), i);
+    if (before.includes('function freezeAwaitingAuthorization')) continue;   // 定义处本身, 跳过
+    const m = [...before.matchAll(/protocol_status\s*=\s*('[a-z_]+')/g)];
+    const bad = m.filter((x) => !ALLOWED_IN.includes(x[1]));
+    if (bad.length) {
+      throw new Error(
+        `冻结调用点(offset=${i})前面把 protocol_status 写成了 ${bad.map((x) => x[1]).join(',')} —— ` +
+        '不在 freezeAwaitingAuthorization 允许转入的集合里, 冻结会静默失败, 市场将没有任何出口');
+    }
+  }
+}
+
+// ④ 白名单取值从生产常量提取, 不手抄 —— 生产改了本用例自动跟着改。
 const _wlBlock = _src.match(/REFUND_AUTHORIZATION_WHITELIST\s*=\s*Object\.freeze\(\[([\s\S]*?)\]\)/);
 if (!_wlBlock) throw new Error('提不到生产的 REFUND_AUTHORIZATION_WHITELIST 常量');
 const WHITELIST = [..._wlBlock[1].matchAll(/'([a-z][a-z0-9_]*)'/g)].map((m) => m[1]);

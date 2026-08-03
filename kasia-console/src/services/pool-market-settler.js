@@ -261,14 +261,19 @@ const REFUND_AUTHORIZATION_SQL_IN = (() => {
  *    —— 后者正是它不触发自动退款的原因。可见性由 reportUnauthorizedRefundBacklog 负责,
  *    不是靠"某条查询碰巧会扫到它"。
  *
- * @param {object} market  pool_markets row(至少含 id, metadata)
- * @param {string} reason  为什么判不了(原样入库, 供人看)
- * @param {object} [extra] 追加 metadata 字段(如 evidence_gap / structural_error)
+ * @param {object} market     pool_markets row(至少含 id, metadata)
+ * @param {string} reason     为什么判不了(原样入库, 供人看)
+ * @param {object} [extra]    追加 metadata 字段(如 evidence_gap / structural_error)
+ * @param {object} [baseMeta] 🔴 调用方若在本次 tick 里【已经改过】meta(如刚 ++ 了 submit_fail_count),
+ *   必须把那份【当前】对象传进来。否则本函数会去 parse `market.metadata` —— 那是**读市场行那一刻
+ *   的旧字符串**, 用它整体覆盖会把调用方刚写的字段擦掉。这正是本卡设计稿 §3.1 记的 RMW 覆盖形状
+ *   (:1052/:1149 已经因此擦掉过 36 次审计痕迹), 不要在新代码里重犯一次。
  */
-function freezeAwaitingAuthorization(market, reason, extra = {}) {
+function freezeAwaitingAuthorization(market, reason, extra = {}, baseMeta = null) {
   try {
     let meta = {};
-    try { meta = JSON.parse(market.metadata || '{}'); } catch {}
+    if (baseMeta && typeof baseMeta === 'object') meta = baseMeta;
+    else { try { meta = JSON.parse(market.metadata || '{}'); } catch {} }
     const newMeta = {
       ...meta,
       ...extra,
@@ -3486,18 +3491,25 @@ async function handleCollectingSigs(market) {
         // 镜像 J1 门B refund-dis give-up: count >= SETTLE_SUBMIT_GIVEUP → cancelled + dispatchRefund 终态
         // (committee 共识有但 settle TX 提不上链 = 退款保护 winner, 安全终止)。cancelled 被 L311 主查询排除.
         if (cur.submit_fail_count >= SETTLE_SUBMIT_GIVEUP && !cur.refund_dispatched_at) {
-          cur.cancel_reason = 'settle_submit_giveup';
-          cur.cancelled_at = new Date().toISOString();
-          sqlite.prepare("UPDATE pool_markets SET protocol_status='cancelled', metadata=?, updated_at=CURRENT_TIMESTAMP WHERE id=?")
-            .run(JSON.stringify(cur), market.id);
-          console.warn(`[pool-settler:collecting] pool_settle_tx submit GIVE-UP market=${market.id.slice(0,12)} count=${cur.submit_fail_count} (${SETTLE_SUBMIT_GIVEUP}) → cancelled + maker refund (永久 submit fail, 停无限重试)`);
           // 🔴 P1(J2 提, NWT 收回原建议, Bettor 19:22 拍): 这里【委员已经达成共识】——
           //    正确终态是 settle(付给赢家), 不是把钱退还给所有人。手里有判定结果却执行相反的
           //    钱路, 是整份文件里最直接违反 Owner「只 settle 绝不 refund」的一处。
           //    而"重试 N 次放弃"本身仍是计数器, 不是证据。⇒ 冻结, 由人决定重试/换 fee/另行授权。
+          //
+          // 🔴🔴 NWT diff 审 2026-08-04 抓出的真 bug, 这两行注释是防复发的:
+          //    原实现在这里【先写 protocol_status='cancelled'】再调 freeze, 而 freeze 的白名单
+          //    WHERE 不含 'cancelled' ⇒ UPDATE 0 行 ⇒ 市场卡死在 cancelled: 既不退 maker(旧的
+          //    dispatchRefund 已被替换掉), 也没真进冻结态, 而 authorizeRefundByOwner 只认冻结态
+          //    ⇒ 这个市场【没有任何出口】。
+          //    与 watchdog-b(:1149) 是同一件事的兄弟路径 —— 那处我删对了"先写 cancelled",
+          //    这处漏改。⇒ 一步到位进冻结, 不经 cancelled。
+          //    并且把【当前】cur 传给 baseMeta: 上面刚 ++ 过 submit_fail_count, 而 market.metadata
+          //    还是读行那一刻的旧字符串, 不传就会把这次的计数擦掉(同 §3.1 那个 RMW 覆盖形状)。
+          console.warn(`[pool-settler:collecting] pool_settle_tx submit GIVE-UP market=${market.id.slice(0,12)} count=${cur.submit_fail_count} (${SETTLE_SUBMIT_GIVEUP}) → 冻结待授权(共识已达成但广播失败, 不自动退款)`);
           freezeAwaitingAuthorization(market,
             `settle_submit_giveup: ${cur.submit_fail_count} fails, ${cur.submit_last_err} — 共识已达成但广播失败, 退款与判定相反, 不自动退`,
-            { evidence_gap: 'consensus_reached_but_broadcast_failed' });
+            { evidence_gap: 'consensus_reached_but_broadcast_failed', settle_giveup_at: new Date().toISOString() },
+            cur);
           return;
         }
         const submitBackoffSec = Math.min(60 * Math.pow(2, Math.max(0, cur.submit_fail_count - 1)), 3600);
