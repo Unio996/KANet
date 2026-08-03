@@ -4609,3 +4609,12 @@ pool-market-settler.js:2427-2459  dispatchRefund 本体    — 只查 isBshard, 
 - **要求 J1 三条**: ①重发五检全量(尤其 r402 装载 commit 那格——**缺它则"J1 笔记本 r402 已部署"在 Bettor 侧无证据支撑,不记完成**)②发完自己回读频道 API 核实(不信发送脚本回执)③今后凡在自己 console 重启窗前后发的消息一律回读核实。
 - **同轮 J1 自决收尾(Bettor 认可不裁)**: supervisor 拉回——先读触发逻辑(只按端口判活,活着则只看守不 spawn;当晚 double 真凶是他另跑的 kanet-start.sh 非 supervisor)→ Start-Process 脱离启动避 turn 边界 → 起后逐项核(supervisor=1/console 原 PID 未被替换/relay=11/port/kaspad)double 未复发。**形态对: 读机制再动手、动后立即核、结论带证据。** v0.7 补课 ETA 今天内。
 - 🔨 **判据入档**: **"我发过了"不是消息存在的证据;唯一证据是收方或链上原始返回里有它。** 尤其当发送方与被报告对象是同一台机器时,失败会静默且双向致盲。
+
+---
+### (130) 2026-08-03 07:2xZ — ✅ r402 全线闭环(双机部署证据齐)· 拍不补 funding UTXO · 立 consumer 侧自知之明闸(r402 镜像卡)
+- **J1 五检重发(07:24,认账假阳性回执并自证发后回读)**: ①console=1/relay=11/port 干净(**迟到根因: 停机脚本漏杀 kanet-console-supervisor.sh → 它重拉 + J1 又跑 kanet-start.sh = double-start,relay 一度 16;已全停再单启**)②频道 live ③**装载 commit `d1a40346`(含 r402 `d23539d0` 后代)** ④migrations v192 ⑤settler 起+跑。
+- **⇒ r402 全线闭环**: producer 侧(KANet-UI 本机)+ consumer 侧(J1 笔记本)双半部署完成。全链: J1 发现(07-31)→ ②'止血 → Owner 改判根修 → J2 设计 → NWT 两轮红队 → 落码 → 双机部署 → 证据齐,今日收口。
+- **🔴 新实况(J1 ⑤)**: xnode-refund **现在真的在 fire**(不再是"0 fire"),卡在 `UTXO too small for payload (need ~3 KAS, have 2.5)`。NO TX NO STATE 正确未推进。
+- **裁定: 不补 funding UTXO(Bettor)**——理由非省费: **这条广播不携带信息**。J1 那台 `pool_bettor_sides` 整表 0 行 ⇒ "该市场 0 注"结构上恒真,分不清"真无人下注"与"我从未同步到注"。producer 侧 r402 已 live 会复核 ⇒ 不再危险,**但"不危险"≠"该发"**。
+- **📌 立卡(J2 域,非阻塞,排在 Codex 卡①②之后): consumer 侧自知之明闸 = r402 的镜像**——广播 `pool_refund_request_v1` 前先查本机 `pool_bettor_sides` 整表是否为空/该市场是否从未 ingest 过注;整表 0 行 ⇒ 本机无判断资格,不广播,记可计数 skip(不静默)。判据照 J1 自己 08-01 原话:"表空是 ingest 坏了还是真没注,两者读数相同,我不猜"——**读数相同就不该下断言**。r402 让接收方不轻信,本卡让发送方不乱说。
+- **J1 剩余单格**: v0.7 补课(closezk-v2 纯 covenant 还是仍有委员签),Oracle Skill 边界冻结的前置,ETA 今日内。
