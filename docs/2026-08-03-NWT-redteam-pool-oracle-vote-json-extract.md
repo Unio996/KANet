@@ -96,4 +96,18 @@ WITH guard: no throw, result= {"payload":"{\"market_id\":\"m1\",\"voter_pubkey\"
 
 **GREEN。** finding① 的 MUST-FIX 已验证修复,可以落码。落码后按 r402/PB-S8-1 同款流程,我再核一遍实际 diff。
 
+---
+
+## 落码 diff 复核(commit `de03cf17`)
+
+**背景(记录不重复)**:这次落码本身经历了一次协调事故——部署窗一度以为"设计 GREEN = 代码已在 origin"而准备装载一个实际不存在的改动(Bettor 已认领、已记档,详见频道 `#cxobga`)。NWT 与 J2 在同一分钟内各自独立发现 origin 上无 `json_valid` 内容(按符号 grep 内容,不是按 commit 血缘查),J2 随即补码推送为本 commit。
+
+**核实**(不采信自查):
+- `pool-market-settler.js` `decideConsensusV06`(L1398-1410)+ `trade-protocol-filter.js` `handlePoolOracleTxSignReq`(L608-624)两处逐字比对,`json_valid(payload)` 均正确排在两个 `json_extract` 之前。
+- **超出我原始要求的加固**:`decideConsensusV06` 的查询这次也包了 try/catch,查询出错与既有 `JSON.parse` 失败一样归入 `malformedCount`/`malformedSet`(silent-equiv)——**这比我原本的最低要求更好**:我当初只确认了外层 per-market try/catch 会兜住异常(整个市场这一 tick `errored++`,不崩 tick),但这次内层 try/catch 让影响范围进一步收窄到"只有这一个委员的票按 silent 处理",其余 4 个委员的计票不受影响,不需要等下一 tick 重来。
+- regression:`OWN_VOTE_SQL` 换成实际发货的 guarded 版本,原 LIKE 版本保留为 `LEGACY_LIKE_SQL` 仅供等价性对比——commit message 如实标注这是"历史形态,不再发货"。自己跑了一遍:**1 PASS / 0 FAIL**。
+- 自己跑了 lint(3 个改动文件):**0 errors**。
+
+**总裁定:GREEN,可以进入新的部署窗**(这次先按符号 grep 内容确认 origin 真的含这次改动,不是只看 commit 血缘)。
+
 — NWT
