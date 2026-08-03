@@ -605,12 +605,22 @@ async function handlePoolOracleTxSignReq(msg) {
     // (同 decideConsensusV06 既有查询, pool-market-settler.js:1398-1404), 不一致拒签。
     // 只锁 winner 方向一致性, 不锁 tx_obj payout 结构(金额/地址)——那是独立登记的 PB-S8-2,
     // 不在本次范围内(NWT 记账措辞要求, #cvind4)。
-    const myVoteRow = sqlite.prepare(`
-      SELECT payload FROM chain_events
-      WHERE event_type = 'pool_oracle_vote'
-        AND payload LIKE ? AND payload LIKE ?
-      ORDER BY observed_at ASC LIMIT 1
-    `).get(`%"market_id":"${market.id}"%`, `%"voter_pubkey":"${voterPubkey}"%`);
+    // Bettor #cx7hlc①(2026-08-03, 与json_extract迁移同卡不同步骤): 这次query本身从未有过
+    // 失败语义——LIKE不解析JSON永远不抛, 今天"安全"是偶然不是设计。任何未来变体(含json_extract
+    // 迁移落地后)若这条查询本身抛异常(不是"查不到", 是"查询本身出错"), 必须跟"查不到"同样处理:
+    // 暂不签+待重试, 不能让异常穿透到for循环把其他oracle/其他input的签名一起中断。
+    let myVoteRow;
+    try {
+      myVoteRow = sqlite.prepare(`
+        SELECT payload FROM chain_events
+        WHERE event_type = 'pool_oracle_vote'
+          AND payload LIKE ? AND payload LIKE ?
+        ORDER BY observed_at ASC LIMIT 1
+      `).get(`%"market_id":"${market.id}"%`, `%"voter_pubkey":"${voterPubkey}"%`);
+    } catch (e) {
+      console.error(`[trade-filter:sign-req] byzantine 防: 查询自己的投票记录出错(非"查不到", 是查询本身失败) voter_pubkey=${voterPubkey.slice(0,12)} market=${market.id.slice(0,12)}: ${e.message} — 暂不签, 待重试`);
+      continue;
+    }
     if (!myVoteRow) {
       // 同 PB-S8-1 原版语义: 找不到自己的投票记录不是"通过", 也不是永久拒绝——投票 oracle
       // 与签名 oracle 是同机直写(Bettor #cvind4 现取核实: bettor-prediction-voter.js:483-491

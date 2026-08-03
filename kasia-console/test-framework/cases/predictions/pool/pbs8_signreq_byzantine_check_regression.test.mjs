@@ -26,6 +26,14 @@ const VOTER_PK_YES = 'test_pbs8_voter_pk_voted_yes';
 const VOTER_PK_NO = 'test_pbs8_voter_pk_voted_no';
 const VOTER_PK_MISSING = 'test_pbs8_voter_pk_no_vote_on_record';
 
+// Bettor #cx7hlc②(2026-08-03): dirty row must sort BEFORE the legit row in observed_at — a dirty
+// row placed AFTER could be skipped by LIMIT 1 finding the legit row first, making the test
+// falsely green without ever exercising the crash path. This row's id/observed_at are chosen to
+// sort earliest among all __test_pbs8_% rows.
+const mkGarbageRow = (id, observedAt) =>
+  `INSERT INTO chain_events (id, txid, event_type, observed_by, observed_at, payload) ` +
+  `VALUES ('${id}', '${id}_txid', 'pool_oracle_vote', 'test-fixture', '${observedAt}', 'not valid json {{{')`;
+
 const mkVoteEvent = (id, voterPk, outcome) =>
   `INSERT INTO chain_events (id, txid, event_type, observed_by, observed_at, payload) ` +
   `VALUES ('${id}', '${id}_txid', 'pool_oracle_vote', 'test-fixture', '2026-08-03T06:00:00.000Z', ` +
@@ -94,6 +102,39 @@ export default {
       sql: `SELECT (json_extract(payload, '$.outcome') != 'YES') AS mismatch FROM chain_events WHERE event_type='pool_oracle_vote' AND payload LIKE ? AND payload LIKE ?`,
       params: [marketLike, pkLike(VOTER_PK_NO)],
       expect: { must: { rows_min: 1, row_assert: { mismatch: 1 } } } },
+
+    // ── dirty-row-first scenario (Bettor #cx7hlc②, 2026-08-03): a malformed payload row sorted
+    //    BEFORE the legit voter's row in observed_at. Locks two facts: ──
+    { id: 'seed_garbage_row_first', action: 'exec_sql',
+      // observed_at earlier than every other __test_pbs8_% row seeded above (2026-08-03T06:00:00.000Z).
+      sql: mkGarbageRow('__test_pbs8_garbage_first__', '2026-08-03T05:00:00.000Z') },
+
+    // ── ① currently-deployed LIKE-based query is unaffected by the dirty row regardless of its
+    //    sort position — this locks TODAY's live behavior (still LIKE, card① json_extract
+    //    migration has not landed as of this test) so this case stays a valid regression guard
+    //    both before and after that migration lands. ──
+    { id: 'like_query_survives_dirty_row_first', action: 'query_db', sql: OWN_VOTE_SQL, params: [marketLike, pkLike(VOTER_PK_YES)],
+      expect: { must: { rows_min: 1 } } },
+    { id: 'like_query_still_finds_correct_outcome', action: 'query_db',
+      sql: `SELECT json_extract(payload, '$.outcome') AS outcome FROM chain_events WHERE event_type='pool_oracle_vote' AND payload LIKE ? AND payload LIKE ?`,
+      params: [marketLike, pkLike(VOTER_PK_YES)],
+      expect: { must: { rows_min: 1, row_assert: { outcome: 'YES' } } } },
+
+    // ── (the "unguarded json_extract throws on this exact data" claim is independently verified
+    //    outside this suite — bash spike in-turn + design doc §4 — and NOT reproduced as a step
+    //    here: this runner's query_db action has no "expect throw" assertion, any step that
+    //    throws marks the whole case FAILED (test-framework/lib/runner.mjs:2153-2200 try/catch
+    //    around the action handler), so asserting a throw here would make this regression suite
+    //    permanently red, not lock the finding. ──
+
+    // ── ② the json_valid-guarded query (card① v2 proposed fix) survives the same dirty-row-first
+    //    data and still returns the correct row — proves the guard actually fixes the crash,
+    //    not just moves it. This is the query card① will ship; locking it now means the moment
+    //    card① lands, this assertion already exists to protect it. ──
+    { id: 'guarded_json_extract_survives_dirty_row_first', action: 'query_db',
+      sql: `SELECT json_extract(payload,'$.outcome') AS outcome FROM chain_events WHERE event_type='pool_oracle_vote' AND json_valid(payload) AND json_extract(payload,'$.market_id')=? AND json_extract(payload,'$.voter_pubkey')=? ORDER BY observed_at ASC LIMIT 1`,
+      params: [MARKET_ID, VOTER_PK_YES],
+      expect: { must: { rows_min: 1, row_assert: { outcome: 'YES' } } } },
 
     // ── teardown ──
     { id: 'clean', action: 'exec_sql',
