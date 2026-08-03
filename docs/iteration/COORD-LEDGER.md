@@ -4576,3 +4576,11 @@ pool-market-settler.js:2427-2459  dispatchRefund 本体    — 只查 isBshard, 
 - **四镜头产出**(全部 file:line 实读,无一空对空): J2=Prediction 线也有 r402 同形状洞(handlePoolOracleTxSignReq 盲签零前提复核;PB-S8 牙未装此路;修法=搬运) · J1=oracle 四权合一五点(最重: 私钥亲签放钱 TX)+诚实标 v0.7 未核项 · NWT=四 findings(**②最重: Bettor 批注 A/B 合读自相矛盾——A 的"Prediction 线成立"背书盖住了 B 点名的 committee-sig live 主力,Bettor 公开认领 #cayw15**;①Broker"不保管资金"与现存唯一 broker=托管钱包矛盾;③Exchange 裁决角色结构性空缺 concede-only;④Seeder=四角色外第五形态,角色清单须限定为外部接入者) · KANet-UI=Broker 六道墙逐条 file:line("外人今天来当 Broker 最先卡死在'无对外网络路径'而非 Bettor 点的那三条";佣金链上分账那半是实的但在全部墙后;broker v1/v2/v3 随部署 flag 漂移=口径必须带配置态)。
 - **D-012 草案**: `docs/2026-08-03-d012-kanet-agent-app-reframe-draft.md`(`d2735fd8`,Status: DRAFT 待 Owner 终裁)。核心结构: 总纲(角色经济)+"条件放钱"三段作用域表(①v0.7 ZK-native 成立②committee-sig 不享受背书③Exchange 裁决角色空缺)+Broker 目标/现状分写(六道墙)+执行序(Oracle Skill 边界冻结 J1 主笔×J2 审→NWT 红队;前置补课=v0.7 委员签与否;候选卡=PB-S8 搬运+Broker 地址所有权挑战;Exchange=接口冻结后第一个复用验证对象;EK H0 纪律保留)+文档处置((115) 叙事 superseded 实核条目带作用域存活/Codex 三打回转设计约束/§7.1 吸收)。
 - **方法记录**: 禁复述前提执行到位——本轮实际打掉了发起方(Bettor)自己的批注结构;Owner"认可方案"未被当作豁免。
+
+---
+### (126) 2026-08-03 01:2xZ — ✅ RPC 饱和型 WASM 腐化(今日第三次)· supervisor 自动恢复闭环 · 三方并发只读诊断零冲突
+- **事件**: 01:26Z 自动告警(getWorkingRpc 3 分钟 3569 败)。**崩前形态(Bettor 重启前 tail 实录)**: `Offset is outside the bounds of the DataView`+`memory access out of bounds` 每调必错=饱和型 WASM 腐化;**rss=4768MB + 事件循环卡 14.1s**(时间相关性记档: 腐化时巨大 RSS,新进程 483MB);kaspad 18480 全程 TCP ok 无辜未被碰;in-flight 30 分钟市场零更新。
+- **恢复**: console-supervisor 3/3 health fail → 01:27:59Z 判死 → kanet-start-headless 自动拉起 → 01:28 就绪(7.3s)。**人工零动作,安全网自闭环**(告警模块设计上只报不动=Bettor 7/21 定的"告警先行";supervisor 兜底,两层分工生效)。事后核: 严格晚于 01:28:10 的 RPC 失败=0,chat API 200,settler/voter tick 正常。
+- **01:28 第二条告警=假新发作**(KANet-UI 核): 告警"报过不重报"边沿状态是进程内存,崩即归零;统计窗覆盖到崩前失败段 ⇒ 重启后首 tick 又报一次旧数据。**待认领(并入 (111) 告警重设计 0d62b9d2 同卡)**: 边沿触发状态跨重启持久化(写 DB 非内存)。
+- **r402 存活确认**: 新 console 装载=HEAD `8363238d`(r402 代码 `d23539d0` 后代,其上仅 docs)⇒ producer 侧防线随重启存活;额度重新上膛在本机无害。J1 笔记本 consumer 半边仍待部署,其"额度归零上膛"提醒继续有效。
+- **协作样板记档**: 三方(Bettor 崩前形态/KANet-UI 恢复机制+假告警解释/NWT 现时健康)并发只读诊断,零冲突零重复动作,J1 主动自证节点无辜——对照 7/21 双会话并行发言事故的反面。今日第三次同款腐化,频率已档;根因调查不在范围直令,不开卡。
