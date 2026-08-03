@@ -135,7 +135,12 @@ export function startRpcHealthDegradationAlertCron() {
 
 export function stopRpcHealthDegradationAlertCron() {
   if (timer) { clearInterval(timer); timer = null; }
+  // 对称清两个状态(同 _resetAlertStateForTest)——只清 _lastSeenMaxFailRowid 不清 _dbWatermarkChecked
+  // 在当前唯一调用点(进程真退出)上无差别, 但若未来出现同进程内 stop()→start()(例如维护窗口暂停
+  // 监控)会复活这次修的同一个 bug 的缩小版(NWT diff 复核 #145baeb8 抓到, 当时 grep 确认零调用点
+  // 不阻塞, 现在顺手补上不留债)。
   _lastSeenMaxFailRowid = null;
+  _dbWatermarkChecked = false;
 }
 
 // 测试专用: 重置 module-level 水位线状态。清 _dbWatermarkChecked 是关键——它模拟"进程重启"
