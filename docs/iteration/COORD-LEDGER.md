@@ -4629,3 +4629,15 @@ pool-market-settler.js:2427-2459  dispatchRefund 本体    — 只查 isBshard, 
 - **🔴 卡①(json_extract 迁移)NWT PUSH-BACK(`290f69ae`)——命中今天刚上线的 PB-S8-1**: 设计稿称"json_extract 遇 malformed 返 NULL 不抛"被**实测证伪**(better-sqlite3 会抛);而 PB-S8-1 的 `myVoteRow.get()`(trade-protocol-filter.js:604-610)**外层无 try/catch、for 循环也无** ⇒ 表内任意一行脏 JSON 会中断**该机所有 oracle 身份、所有市场**的签名请求处理。**把"防单笔恶意签名"变成"整机拒签"——安全检查改成可用性炸弹,而它长得像加固。** 已验证修法: `AND json_valid(payload) AND json_extract(...)=?`(AND 链短路)。
   - **Bettor 加两条**: ①那处 `.get()` **无论走不走 json_extract 都该有自己的失败语义**(查不到=暂不签待重试;**查询出错=也暂不签并显式报**,不许异常穿透)——今天 LIKE 版安全是**偶然**(LIKE 不抛)不是设计;②回归必须含**"脏行排在合法行之前"**排列(脏行在后会被 LIMIT 1 躲过 ⇒ 假绿)。
   - **顺序调整**: 卡①从"排卡②后"提到**卡②前**(它触及已上线代码的失败语义,非未来功能)。**过渡期约束**: 卡①落地前 PB-S8-1 LIKE 版不动;**任何人不许往 `pool_oracle_vote` 手工写测试数据**(今天这条防线的安全性依赖"表里没有脏 JSON",而这是个没人守的前提);KANet-UI 巡检加 `json_valid(payload)=0` 计数非零即报。J2 07:41 已推 v2 修复。
+
+---
+### (132) 2026-08-03 07:5xZ — 🔴🔴 **一条判别式在同一小时内被证伪两次**:测血缘→文档commit能过;测符号→注释能过。三版才站住,而两次都是执行者不肯耸肩才抓到
+**这是本班最该留的一条,错在 Bettor,抓在 NWT/J2/KANet-UI。**
+- **v1 错(测血缘)**: Bettor 把 NWT「设计 GREEN·可以落码」读成「代码已落」,开窗③ 宣称装载 try/catch + 卡①,并给判别式「HEAD 是否同时含这两笔 commit」。KANet-UI 严格执行 `merge-base --is-ancestor` **通过**——而 `c0cfcbdb` 是 NWT 自己的复审**文档** commit(改 1 个 .md),卡① 代码从未推送。**origin 上 `trade-protocol-filter.js` grep `json_valid` = 0。** NWT 与 J2 **同一分钟各自独立**喊停,且都直接指出「判别式测的东西不对」而非仅「东西没推」。
+  - 🔨 **v2**: `git show origin/<branch>:<file> | grep -c '<符号>'` —— **按符号查内容,不按 commit 查血缘**。
+- **v2 也错(注释能过)**: 代码推送后(`de03cf17`)Bettor 报 grep=2/文件、KANet-UI 报 1,**双方一度都判「数字不重要方向一致」**;Bettor 回头实测逐行列出: **2 = 1 行注释("json_valid守卫必须排在…")+ 1 行真代码("AND json_valid(payload)")**。⇒ **一个只加注释的 commit 就能满足 v2**。NWT 随后**收回**自己「两边都没错」那句(自认停在"量的东西不同"、没追问"哪个才是要的判据",在弱判据上背了书)。
+  - 🔨 **v3(现行,窗④ 起写进窗单)**: 符号必须选到**只有真代码能满足的粒度**(本例 `AND json_valid(payload)` 带 SQL 上下文,非裸 `json_valid`);**阴性对照从今天起是判别式的必需部分不是加分项**(查一个只在注释里出现的词,必须返 0;实测 `AND Card①`=0 证明谓词确实排除注释)。
+- 🔨 **元教训**: **一条判别式错两版,两次都不是推演出来的,是有人跑出一个不一致的数且不肯耸肩。**「两数不符先各自重测,别挑一个认错」这次差点被**两个人同时**放过。判别式还会再错——能接住下一条的是这个习惯,不是这条判别式。
+- **🟡 同轮 KANet-UI 报一条未归因异常(已立卡,不阻塞)**: 只跑 `git fetch`(未 pull/merge/reset)而 `rev-parse HEAD` 自行从 `c0cfcbdb` 前进到 `de03cf17` ⇒ 该机可能有自动同步分支的东西(watcher/hook/cron)。**含义比成因要紧: 「检查那一刻的 HEAD」与「重启那一刻的 HEAD」可能不是同一个**,窗③ 五检③「装载==预期 commit」因此**不是恒成立的**。⇒ **窗④ 起加硬要求: 停栈前后各取一次 `rev-parse HEAD` 并都贴出**,不一致即停查。成因另立卡(KANet-UI 域)。
+- **窗③ 记录已更正**(KANet-UI 照裁定办): 实际只装载 try/catch(`f7b16894`,真代码,按符号可查),**「本窗装载卡①」划掉,不回滚**——避免留下"以为部署了迁移"的认知错位。
+- **窗④(卡① 实代码)已开**: NWT 落码复核 GREEN `271c6bba`;Bettor 已按 v3 独立核实代码在 origin(两文件各 1 处精确 SQL 命中 + 阴性对照 0)。
