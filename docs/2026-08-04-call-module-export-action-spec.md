@@ -44,6 +44,7 @@
 |---|---|---|---|
 | `refund-authorization` | `src/lib/refund-authorization.mjs` | `assertBettorRefundAuthorized` | P1 共享授权验证器本体 —— Codex 点名要求"调 helper 本体" |
 | `bettor-refund-claim-auto` | `src/services/bettor-refund-claim-auto.mjs` | `claimAutoDispatcherTick` | P1 旁路的**生产消费者**本体 —— Codex 点名要求"调生产消费者" |
+| `pool-buildBettorRefundClaim` | `src/api/pool.js` | `buildBettorRefundClaim` | 🔴 **v2 补(NWT 08:18 ①)**: 两个 IPC 调用点的**另一个**。只放 cron 那条, e2e 就只证明了一半旁路真的闭了 —— 而 settler tick 与无鉴权 HTTP 端点都经这个函数。**漏了它, #11 的 regression 会留一个与 Codex round 6 同形的洞(证明了 A 闭合就当成两条都闭合)。** |
 
 **为什么必须是 allowlist 而不是任意导出**(照抄 Bettor 的理由并补一条):
 - 「别把它做成"能调任意导出"的万能口 —— 那等于给测试框架开一条绕过一切声明式约束的路,以后没人知道某个用例到底碰了什么。」
@@ -83,3 +84,38 @@
 2. allowlist 内的模块 + 不允许的导出 ⇒ 拒(阴性)。
 3. 正常调用 ⇒ `reply` 里出现被调函数真实返回值的字段(阳性对照,防"全拒装饰")。
 4. 被调函数抛 ⇒ `threw:true` 且**不**被记成"拒绝"。
+
+## §8 v2 修订(NWT 08:18/08:19 审)—— §5 那句我说宽了,改成"靠代码检查"不是"靠注释排序"
+
+### §8.1 🔴 `$db` 只对**显式收 db 参数**的导出成立,而 allowlist 里三条有两条不是
+
+**实读**(不是同意转述):
+- `assertBettorRefundAuthorized({ marketId, db })` ⇒ **收 db 参数** ⇒ `$db` 占位符**够得到**。✅
+- `claimAutoDispatcherTick()` ⇒ `bettor-refund-claim-auto.mjs:31` **零参数**;db 来自 **模块顶层** `:11 import { sqlite } from '../db/client.js'` ⇒ **`$db` 完全够不到它**。
+- `buildBettorRefundClaim(marketId, {bettorPk, sideId})` ⇒ 同上,也不收 db。
+
+⇒ **我 §5 写的"`$db` 拿到的就是隔离库"只对三分之一成立。** 另外两条的隔离**来自完全不同的一条路**:`env-bootstrap.mjs` 作为 side-effect import **排在 `runner.mjs` 之前**跑,先把 `DB_PATH`/`KANET_DB_PATH` 设好,于是 `db/client.js` 顶层 const 求值时读到的已经是隔离库。
+
+### §8.2 🔴 而那条路的保证今天**只是一行注释**
+
+`env-bootstrap.mjs:14-15` 逐字:「**必须在 runner.mjs import 之前 import**……本模块作为 side-effect import 排在 runner 之前 → env 先就位」。
+
+**这正是我自己 08:12 立的那条判据打在自己身上**:**「任何写在被调方文件里的警告,都拦不住调用方。」** 这里被调方 = `db/client.js`,调用方 = 未来的 `call_module_export` 实现。
+🔴 **失败模式不是报错,是静默**:若谁改了 import 顺序、或本 action 的动态 import 在 env-bootstrap 完成前被触发 ⇒ `db/client.js:10` 的 `resolve(process.env.DB_PATH || './data/console.db')` 落到 **CWD 相对的生产默认路径** ⇒ **用例照样全绿,只是它打的是生产库**。(而"cwd 漂移"这条本仓 memory 里就有,今早我自己刚撞过一次。)
+
+### §8.3 ⇒ 落码硬要求(把安全性质从"靠排序"改成"靠检查")
+
+**在第一次动态 import 任何 allowlist 模块之前**,`call_module_export` 内部必须做一次**运行时断言**:
+```
+确认 process.env.DB_PATH 当前值落在 test-framework/data/ 下(不是生产默认路径)
+  ├─ 满足 ⇒ 继续
+  └─ 不满足 ⇒ fail-loud 拒绝(ok:false + 明确 reason), 不静默放行
+```
+- 🔵 **这不是给卡加范围**,是把 §5 已经声称成立的安全性质**换一个更硬的守护方式** —— 与全队今早在发送器上做的是同一件事(把"记得"换成"走不通"),只是换了个位置。
+- 🔴 **断言必须在 import 之前**:import 一旦发生,`db/client.js` 的顶层 const 就已经求值,那时再检查是**检查了一个已经定型的值**,救不回来。
+- §7 的落码后判据**追加第 5 条**:把 `DB_PATH` 人为指向生产默认路径 ⇒ 本 action 必须**拒绝并说明**,而不是照常返回结果。
+
+### §8.4 记账
+
+- allowlist 由 2 条 → **3 条**(补 `pool-buildBettorRefundClaim`)。**理由不是"顺手多加一个"**:两个 IPC 调用点只测一个,等于把 Codex round 6 那个"证明了 A 闭合就当成两条都闭合"的洞原样搬进 regression。
+- §5 原文**不删**(保留历史),由本节收窄 —— 与本仓"动不得的原文补注、能删的漂移副本才删"的通则一致。
