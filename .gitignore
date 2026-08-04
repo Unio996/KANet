@@ -7,6 +7,7 @@ node_modules/
 
 # === 子项目运行时数据（不是源码）===
 kasia-console/data/
+kasia-console/test-framework/data/
 kasia-relay/state/
 kaspa-scout/data/
 

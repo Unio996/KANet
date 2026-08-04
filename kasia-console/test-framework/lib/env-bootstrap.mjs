@@ -38,3 +38,52 @@ function deriveConsolePort() {
 const port = deriveConsolePort();
 if (!process.env.PORT) process.env.PORT = port;
 if (!process.env.KANET_CONSOLE_URL) process.env.KANET_CONSOLE_URL = `http://127.0.0.1:${port}`;
+
+// ── DB 隔离 (KANet-UI, Bettor/NWT 2026-08-04 拍板, runner 硬化卡) ──────────────────
+//
+// 根因(两条独立路径,同一个"顶层 const 绑定时机"形状):
+//   (a) src/db/client.js:10  `resolve(process.env.DB_PATH || './data/console.db')`
+//   (b) test-framework/lib/runner.mjs:20-21  `process.env.KANET_DB_PATH || .../data/console.db`
+// 两者都是顶层 const,一旦任何模块先 import 就绑死——之前没人在"任何用例被 import 之前"统一设好
+// DB_PATH/KANET_DB_PATH,于是 test-framework 默认直接打生产库 kasia-console/data/console.db。
+// 2026-08-03 夜同时坑了两个人: J2 的用例每跑一次往生产插 5 市场+5 side 再删(跑了 7 次);
+// J1 的两个自跑脚本在 runner 进程里把测试行写进了生产库(4 市场+2 分片+5 side)。
+//
+// 修法(照抄本文件上面 PORT 派生用过的同一手法——side-effect import 排在 runner.mjs 之前):
+//   若 DB_PATH/KANET_DB_PATH 未被显式设(尊重手动 override,不覆盖调试者的意图),
+//   统一指向一个独立文件 test-framework/data/test-console.db,并在这里删重建
+//   (含 WAL 模式的 -wal/-shm 附属文件),再触发一次 runMigrations() 建出带真实 trigger
+//   的完整 schema(不手搓空表,复用 scripts/run-migrations.mjs 同一个 runMigrations 入口)。
+//
+// 范围边界(spec-first 报审已钉,NWT 裁定为准): 落码前逐条扫过 test-framework/cases/ 全部用例,
+// 确认"实调 relay/真实链上"那类用例(数据源是链上/relay,不读写本地 SQLite)不受这条隔离影响——
+// 这条隔离对它们是 no-op 不是误伤,不需要单独放行,因为它们本来就不会去碰 DB_PATH 指向的东西。
+
+function deriveTestDbPath() {
+  const __dirname = path.dirname(fileURLToPath(import.meta.url));
+  // lib → test-framework → data/test-console.db
+  return path.join(__dirname, '..', 'data', 'test-console.db');
+}
+
+function rebuildTestDb(testDbPath) {
+  const dir = path.dirname(testDbPath);
+  fs.mkdirSync(dir, { recursive: true });
+  for (const suffix of ['', '-wal', '-shm']) {
+    const f = testDbPath + suffix;
+    try { if (fs.existsSync(f)) fs.rmSync(f); } catch { /* 删不掉不阻塞, migrate 会在旧文件上出错并暴露问题 */ }
+  }
+}
+
+if (!process.env.DB_PATH && !process.env.KANET_DB_PATH) {
+  const testDbPath = deriveTestDbPath();
+  rebuildTestDb(testDbPath);
+  process.env.DB_PATH = testDbPath;
+  process.env.KANET_DB_PATH = testDbPath;
+  // 动态 import: 必须晚于上面两行 env 赋值, 这样 src/db/client.js 的顶层 const 求值时
+  // 读到的已经是 test db 路径, 不是生产库路径。
+  const { runMigrations } = await import('../../src/db/migrate.js');
+  runMigrations();
+} else {
+  // 尊重显式覆盖(比如手动指了 DB_PATH 想跑真实数据做集成调试)——只提醒,不强制。
+  process.stderr.write(`[env-bootstrap] DB_PATH/KANET_DB_PATH 已被显式设置,跳过隔离(${process.env.DB_PATH || process.env.KANET_DB_PATH})\n`);
+}
