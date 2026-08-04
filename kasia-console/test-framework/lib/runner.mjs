@@ -725,6 +725,94 @@ const actions = {
    * (INSERT/UPDATE/DELETE — query_db 仅 SELECT)
    * step: { action: 'exec_sql', sql, params? } — returns { ok, changes }
    */
+  /**
+   * call_module_export — 调用【allowlist 内】的生产模块导出, 把返回值交给断言。
+   *
+   * 设计: docs/2026-08-04-call-module-export-action-spec.md(NWT 08:25 GREEN)
+   *
+   * 🔴 为什么框架需要它: Codex 第八轮要求 P1 旁路测试"必须调生产消费者与授权 helper 本体,
+   *    不得复刻 SQL 或做源码文本检查"(复制谓词会产出两个互相同意、而实现已漂移的测试);
+   *    而 Bettor 要求测试必须在 runner 扫描面内。此前 36 个 action 无一能调模块导出 ⇒
+   *    两条硬要求互斥。本 action 就是让它们不互斥的那一块。
+   * 🔴 allowlist 不是任意路径: 万能口等于给测试框架开一条绕过一切声明式约束的路, 且会把
+   *    cases/ 的信任级别提到与生产代码同级 —— 而 cases/ 的准入门槛远低于生产代码。
+   */
+  async call_module_export(step, ctx) {
+    const path = await import('node:path');
+    const url = await import('node:url');
+
+    // ── allowlist(改这张表 = 改 spec + 过审, 不许就地加) ────────────────────────
+    const ALLOWLIST = {
+      'refund-authorization': {
+        rel: '../../src/lib/refund-authorization.mjs',
+        exports: ['assertBettorRefundAuthorized'],
+      },
+      'bettor-refund-claim-auto': {
+        rel: '../../src/services/bettor-refund-claim-auto.mjs',
+        exports: ['claimAutoDispatcherTick'],
+      },
+      'pool-buildBettorRefundClaim': {
+        rel: '../../src/api/pool.js',
+        exports: ['buildBettorRefundClaim'],
+      },
+    };
+
+    const entry = ALLOWLIST[step.module];
+    if (!entry) {
+      return { ok: false, error: `module '${step.module}' 不在 allowlist(可用: ${Object.keys(ALLOWLIST).join(', ')})——本 action 不接受路径, 只接受 allowlist 键`, reply: '__NOT_ALLOWLISTED__' };
+    }
+    if (!entry.exports.includes(step.export)) {
+      return { ok: false, error: `export '${step.export}' 不在 '${step.module}' 的允许集合(允许: ${entry.exports.join(', ')})`, reply: '__EXPORT_NOT_ALLOWED__' };
+    }
+
+    // ── 🔴 DB_PATH 断言: 必须在【任何动态 import 之前】(spec §8.3) ─────────────
+    //  理由: allowlist 里三条有两条零参数、db 来自模块顶层 import('../db/client.js'),
+    //  而 client.js:10 是 resolve(process.env.DB_PATH || './data/console.db') —— 顶层 const,
+    //  **import 一发生就求值完毕**。那时再检查是在检查一个已经定型的值, 救不回来。
+    //  失败模式不是报错是静默: 用例照样全绿, 只是它打的是生产库。
+    //  ⚠ Windows: DB_PATH 可能是反斜杠形式 ⇒ 两边都 path.resolve 规整再比前缀,
+    //     不用裸字符串 includes(NWT 08:25 实现提醒; 本仓全程 win32)。
+    const dbPathRaw = process.env.DB_PATH || process.env.KANET_DB_PATH || '';
+    const expectedDir = path.resolve(path.dirname(url.fileURLToPath(import.meta.url)), '..', 'data');
+    const dbResolved = dbPathRaw ? path.resolve(dbPathRaw) : '';
+    if (!dbResolved || !dbResolved.startsWith(expectedDir)) {
+      return {
+        ok: false,
+        error: `P1 隔离断言失败: DB_PATH=${JSON.stringify(dbPathRaw)} 解析为 ${JSON.stringify(dbResolved)}, 不在测试库目录 ${expectedDir} 下 —— 拒绝 import 任何生产模块(否则它们的顶层 db 会绑到生产库, 而用例照样全绿)`,
+        reply: '__DB_PATH_NOT_ISOLATED__',
+      };
+    }
+
+    // ── 到这里才允许动态 import ────────────────────────────────────────────────
+    let db = null;
+    try {
+      const here = path.dirname(url.fileURLToPath(import.meta.url));
+      const abs = path.resolve(here, entry.rel);
+      const mod = await import(url.pathToFileURL(abs).href);
+      const fn = mod[step.export];
+      if (typeof fn !== 'function') {
+        return { ok: false, error: `export ${step.export} 不是函数(得到 ${typeof fn})`, reply: '__NOT_A_FUNCTION__' };
+      }
+      const subst = (a) => {
+        if (a === '$db') { db = db || new Database(DB_PATH); return db; }
+        if (a && typeof a === 'object' && !Array.isArray(a)) {
+          const o = { ...a };
+          for (const k of Object.keys(o)) if (o[k] === '$db') { db = db || new Database(DB_PATH); o[k] = db; }
+          return o;
+        }
+        return a;
+      };
+      const result = await fn(...(step.args || []).map(subst));
+      if (db) { try { db.close(); } catch {} }
+      return { ok: true, result, reply: JSON.stringify(result ?? null) };
+    } catch (e) {
+      if (db) { try { db.close(); } catch {} }
+      // 🔴 抛异常与"返回了拒绝"必须分得开: 否则"函数崩了"会被读成"函数拒绝了",
+      //    而本卡要证的恰恰是"它拒绝了"。
+      return { ok: false, error: e.message, threw: true, reply: `__THREW__: ${e.message}` };
+    }
+  },
+
   async exec_sql(step, ctx) {
     if (!step.sql) return { ok: false, error: 'sql required' };
     const db = new Database(DB_PATH);
