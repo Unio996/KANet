@@ -772,15 +772,34 @@ const actions = {
     //  失败模式不是报错是静默: 用例照样全绿, 只是它打的是生产库。
     //  ⚠ Windows: DB_PATH 可能是反斜杠形式 ⇒ 两边都 path.resolve 规整再比前缀,
     //     不用裸字符串 includes(NWT 08:25 实现提醒; 本仓全程 win32)。
-    const dbPathRaw = process.env.DB_PATH || process.env.KANET_DB_PATH || '';
+    //  🔴 v2(NWT 08:32 打中): 原实现写成 `DB_PATH || KANET_DB_PATH`(任一满足即可)是**错的** ——
+    //     两条真实消费路径**各自只认死其中一个**:
+    //       · `$db` 替换 → 用 runner.mjs 自己的模块顶层 DB_PATH 常量(:20)= `KANET_DB_PATH || 默认`,
+    //         **从不看 process.env.DB_PATH**;
+    //       · 模块顶层 import → 走 src/db/client.js:10 = `resolve(process.env.DB_PATH || './data/console.db')`,
+    //         **只看 DB_PATH**。
+    //     ⇒ 只设其中一个时, 断言会因为读到"那个被设了的"而通过, 而实际连接走的是"没被设的那个"
+    //        ⇒ 悄悄落回默认(生产)路径。**断言说安全, 连接其实没安全** —— 今天这个形状的第 N 次,
+    //        而这次在我自己刚写的断言里。
+    //  ⇒ 两个变量**各自独立**检查, 缺一不可。
+    //  🔴 并且用**路径分隔符边界**比, 不用裸 startsWith: 否则兄弟目录 `data2/` / `data-legacy/`
+    //     会因字符串前缀重合被认成"在 data 下"(NWT 同条顺带指出)。
     const expectedDir = path.resolve(path.dirname(url.fileURLToPath(import.meta.url)), '..', 'data');
-    const dbResolved = dbPathRaw ? path.resolve(dbPathRaw) : '';
-    if (!dbResolved || !dbResolved.startsWith(expectedDir)) {
-      return {
-        ok: false,
-        error: `P1 隔离断言失败: DB_PATH=${JSON.stringify(dbPathRaw)} 解析为 ${JSON.stringify(dbResolved)}, 不在测试库目录 ${expectedDir} 下 —— 拒绝 import 任何生产模块(否则它们的顶层 db 会绑到生产库, 而用例照样全绿)`,
-        reply: '__DB_PATH_NOT_ISOLATED__',
-      };
+    const underTestDir = (raw) => {
+      if (!raw) return false;
+      const r = path.resolve(raw);
+      return r === expectedDir || r.startsWith(expectedDir + path.sep);
+    };
+    for (const varName of ['DB_PATH', 'KANET_DB_PATH']) {
+      const raw = process.env[varName];
+      if (!underTestDir(raw)) {
+        return {
+          ok: false,
+          error: `P1 隔离断言失败: ${varName}=${JSON.stringify(raw || null)} 未落在测试库目录 ${expectedDir} 下 —— 拒绝 import 任何生产模块。` +
+                 `(两个变量必须【各自】满足: $db 走 runner 的 KANET_DB_PATH, 模块顶层 import 走 client.js 的 DB_PATH; 只设一个 ⇒ 另一条路悄悄落回生产库)`,
+          reply: '__DB_PATH_NOT_ISOLATED__',
+        };
+      }
     }
 
     // ── 到这里才允许动态 import ────────────────────────────────────────────────

@@ -58,6 +58,17 @@ if (!process.env.KANET_CONSOLE_URL) process.env.KANET_CONSOLE_URL = `http://127.
 // 范围边界(spec-first 报审已钉,NWT 裁定为准): 落码前逐条扫过 test-framework/cases/ 全部用例,
 // 确认"实调 relay/真实链上"那类用例(数据源是链上/relay,不读写本地 SQLite)不受这条隔离影响——
 // 这条隔离对它们是 no-op 不是误伤,不需要单独放行,因为它们本来就不会去碰 DB_PATH 指向的东西。
+//
+// 🔴 已知项(NWT 08:28 提出/08:32 坐实具体受害路径,2026-08-04): 下面 DB_PATH/KANET_DB_PATH 两个
+// 变量【总是一起设】,今天没有任何分裂风险——但若以后有人只单独设其中一个,两条消费路径各自只认
+// 死一个,不会互相兜底:
+//   · src/db/client.js:10(assertBettorRefundAuthorized 等走 $db 替换的 helper 走这条)只读 DB_PATH,
+//     从不看 KANET_DB_PATH。
+//   · test-framework/lib/runner.mjs:20-21(claimAutoDispatcherTick/buildBettorRefundClaim 这类走
+//     模块顶层 import、db 来自 client.js 单例的消费者,最终还是落到上面那条 client.js:10)。
+// ⇒ 只设 KANET_DB_PATH 不设 DB_PATH 时,client.js 那条路会摸不到 override,悄悄落回生产默认路径
+//   ——"断言读到了某个变量" ≠ "实际生效的那条路读的是同一个变量"。今天不改(两个变量总是同时设,
+//   不触发),仅记录具体受害路径,供以后任何"只设一个"的改动前先看这条。
 
 function deriveTestDbPath() {
   const __dirname = path.dirname(fileURLToPath(import.meta.url));

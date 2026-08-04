@@ -346,7 +346,14 @@ export function authorizeRefundByOwner(marketId, { authorization, reference } = 
  *     ① 被授权闸挡下的 bettor side(谓词与候选查询逐字相同, 只去掉授权那一段)
  *     ② 事实上卡住但状态仍是旧值的市场(disputed 且过 grace 远超, 且从未 dispatch 过退款)
  */
-function reportUnauthorizedRefundBacklog(unfixableIds, nowSec) {
+function reportUnauthorizedRefundBacklog(unfixableIds, nowSec, upstreamTickErrored = false) {
+  // 🔴 上游 tick 抛过异常 ⇒ unfixableIds 不完整 ⇒ 这一 tick 的积压数【算不准】。
+  //    打 "未知" 而不是打 0 —— 否则 "tick 崩了" 与 "真的没有积压" 读出同一个数,
+  //    正是本卡从头到尾在防的那类同形(而我修的上一个 bug 就是它的 SQL 版)。
+  if (upstreamTickErrored) {
+    console.error(`[pool-settler:P1-authz] 🔴 积压计数本轮【未知】: 上游 legacyRefundBuilderTick 抛异常, 候选集不完整 —— 不打 0, 因为 0 会被读成"没有积压"`);
+    return;
+  }
   try {
     const ph = unfixableIds.length ? unfixableIds.map(() => '?').join(',') : "''";
     // ① 与候选查询【同谓词】, 只去掉授权那一段 ⇒ 它数的就是"若无此闸本可放行"的那批,
@@ -528,7 +535,11 @@ async function legacyRefundBuilderTick() {
     return { processed: sides.length, triggered, failed, unfixableIds };
   } catch (e) {
     console.error('[pool-settler:legacy-refund] tick exception:', e.message);
-    return { error: e.message };
+    // 🔴 NWT 08:24 标、J2 08:25 认领: catch 分支若不带 unfixableIds, call site 会拿到 []
+    //    ⇒ 那一 tick 的积压计数打出 "0" 而不是 "未知" ⇒ **"tick 崩了" 与 "真的没有积压"
+    //    读出同一个数**。我修的上一个 bug 正是"缺字段被折成 0", 这里等于把同形失效从 SQL 层
+    //    挪到控制流层。⇒ 带上标记, 让计数函数能分开这两种。
+    return { error: e.message, tickErrored: true };
   }
 }
 
@@ -1490,7 +1501,7 @@ export async function poolSettlerTick() {
     //  上线首 tick 实证: 原来放在 legacyRefundBuilderTick 里(tick 早期), 打印时本 tick 的 freeze
     //  还没发生 ⇒ "冻结态市场数"天然滞后一拍(打 0, 而稍后实际冻了 5 个)。挪到这里, 数的就是本
     //  tick 结束时的真实状态。
-    reportUnauthorizedRefundBacklog(_p1BacklogIds, Math.floor(Date.now() / 1000));
+    reportUnauthorizedRefundBacklog(_p1BacklogIds, Math.floor(Date.now() / 1000), !!legacyResult?.tickErrored);
 
     return { ok: true, processed: markets.length, consensus, refund, pending, doomed, errored, pathBReconciled, bshardSkipped, commingledRefund, brokerFeeEmit };
   } finally {
