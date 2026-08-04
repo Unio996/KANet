@@ -6,8 +6,6 @@ import { buildExplorerUrl, buildExplorerAddressUrl, explorerBaseUrl } from '../l
 import { computeSpineP2SH, computeSideP2SH } from '../lib/pool-p2sh.mjs';
 import { buildSidesMerkleTree, getMerkleProof } from '../services/pool-merkle-builder.js';
 import { sendCommandAsync, transferAndConfirm, isRelayAlive } from '../services/relay-manager.js';
-// P1 授权闸: 与 bettor-refund-claim-auto.mjs 共用【同一个函数本体】(Codex 第八轮:共享谓词单一实现)
-import { assertBettorRefundAuthorized } from '../lib/refund-authorization.mjs';
 import { getWorkingRpc } from '../services/rpc-health.js';
 import { estimateStorageMass } from '../services/pool-market-settler.js';
 import { categorizeMarket } from '../lib/market-category.js';
@@ -488,19 +486,6 @@ export async function buildBettorRefundClaim(marketId, { bettorPk: bettorPkRaw, 
     ? BigInt(market.deadline) * 1000n
     : (BigInt(market.deadline) + BigInt(REFUND_GRACE_SEC)) * 1000n;
   const entryIndex = isLegacy ? 3 : 2;
-
-  // ── P1 授权闸(共享验证器本体, 单一实现) ────────────────────────────────────────
-  //  这是 bettor 退款【两个真实 IPC 调用点】之一。另一个在 bettor-refund-claim-auto.mjs。
-  //  两处调的是同一个函数, 不是各写一遍谓词(复制谓词会产出两个互相同意、而实现已漂移的测试)。
-  //  🔴 本调用点同时覆盖【两条入口】: settler 的 legacyRefundBuilderTick, 以及无鉴权的
-  //     POST /api/pool/market/:id/bettor-refund-claim 端点(端点无闸, 靠 loopback 绑定不被改)。
-  {
-    const authz = assertBettorRefundAuthorized({ marketId: market.id, db: sqlite });
-    if (!authz.ok) {
-      console.error(`[pool:bettor-refund-claim] 🔴 P1 拒绝构造退款 market=${String(market.id).slice(0, 12)} side=${side.id}: ${authz.reason}`);
-      return { ok: false, httpStatus: 409, error: authz.reason };
-    }
-  }
 
   try {
     // origin=legacy-unmigrated: 收敛类迁移债(C 分阶段 arm 8282dd61), 迁 app 信封/operator 专道后撤此标

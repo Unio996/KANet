@@ -52,11 +52,6 @@ function recordSideRefundFailure(sideId, reason) {
 }
 // FINDING-2 (NWT) commingled-spine detection — SINGLE SOURCE (J1 pool-commingle-detect). 禁内联.
 import { isCommingledSpine } from '../lib/pool-commingle-detect.mjs';
-// P1 授权白名单/共享验证器的【单一实现】—— Codex 第八轮硬要求「共享谓词单一实现」。
-// 本文件的 SQL 闸与 pool.js / bettor-refund-claim-auto.mjs 两个 IPC 调用点共用同一份。
-import {
-  REFUND_AUTHORIZATION_WHITELIST, EVIDENCE_TIER_LOCAL_ONLY, REFUND_AUTHORIZATION_SQL_IN,
-} from '../lib/refund-authorization.mjs';
 // broker 佣金到账 emit (Owner 主线·链验金额·post-index pass). 设计: docs/2026-06-28-broker-fee-landed-emit-pass-spec.md
 import { brokerFeeLandedEmitTick } from './broker-fee-emit.mjs';
 // J1tn r303 P0-#1 sweep helper refactor (Bettor r346/r366b 钦定 fork 合 1 helper): KIP-9
@@ -212,9 +207,19 @@ export function stopPoolMarketSettlerCron() {
 //  🔴 名字不叫 refund_evidence: 那个名字已被 admin-dedup.js 占用(含义是"实际付了谁多少"的
 //     【事后】凭据, 且是 bond reclaim 闸②的判据)。同名两物且两个都在钱路上 ⇒ 本表用
 //     refund_authorization(白名单【字符串】), 占用方是 object, 结构上也区分得开。
-// 🔴 白名单/SQL-IN/tier 已搬到单源 lib(src/lib/refund-authorization.mjs) —— Codex 第八轮硬要求:
-//    「共享谓词单一实现」。这里【只 re-export】,不再本地定义, 否则就是那份会漂的第二份。
-export { REFUND_AUTHORIZATION_WHITELIST, EVIDENCE_TIER_LOCAL_ONLY, REFUND_AUTHORIZATION_SQL_IN };
+export const REFUND_AUTHORIZATION_WHITELIST = Object.freeze([
+  'bettors_absent',                    // 本市场 0 bet(⚠ 本批判据仅本地 betCount==0, 见下方 tier)
+  'committee_affirmative_unjudgeable', // ≥4 委员【主动】投 ABSTAIN = 有人明确说了"判不了"
+  'structurally_invalid_market',       // commingled spine 等结构性无效(单源 isCommingledSpine)
+  'pool_below_minimum',                // 池总额 < 门槛, 协议设计上就不结算(NWT 2026-08-04 补, 可测量事实非计时器)
+  'owner_authorized',                  // 另行授权(必须带授权引用: 谁/何时/依据)
+]);
+
+// 🔴 弱证据分级(NWT 2026-08-04 19:19 裁定 (a) 的硬条件①): bettors_absent 本批的判据只有
+//    【本地 pool_bettor_sides 聚合】, 链上等式(spine UTXO 面值 == maker stake)尚未实现。
+//    要求"可查询"而不只是注释——将来链上等式落地后, 要能按本字段把"用弱证据授权过的历史盘"
+//    筛出来回头补验, 而不是让它们和强证据的盘混在一起再也分不开。
+export const EVIDENCE_TIER_LOCAL_ONLY = 'local_only';
 
 // ── 退款失败分型: 结构性 vs 瞬时(设计 §10.4, NWT 2026-08-04 次条) ────────────────────
 //  🔴 为什么必须分型: "连续 N 次失败就转出口"对两类失败用同一个 N 是错的 ——
@@ -232,7 +237,18 @@ function isStructuralRefundFailure(errorText) {
   return !TRANSIENT_REFUND_FAILURE_PATTERNS.some((re) => re.test(s));
 }
 
-// (REFUND_AUTHORIZATION_SQL_IN 现由单源 lib 提供并在本文件 re-export —— 见文件顶部 import。)
+// 🔴 SQL 侧的 IN 列表【从常量生成】, 不手抄一份 —— 手抄的第二份必然与常量漂移(本仓在册的
+//    "同一事实存两份必有一份陈"), 而漂移的方向是【闸少认一个合法值 ⇒ 静默挡住合法退款】。
+//    值全部是代码内常量(非用户输入), 仍加正则断言: 若有人将来塞进带引号/空格的值, 这里当场
+//    抛而不是拼出一条语义被改写的 SQL。
+const REFUND_AUTHORIZATION_SQL_IN = (() => {
+  for (const v of REFUND_AUTHORIZATION_WHITELIST) {
+    if (!/^[a-z][a-z0-9_]*$/.test(v)) {
+      throw new Error(`refund_authorization 白名单取值非法(只允许 [a-z0-9_]): ${JSON.stringify(v)}`);
+    }
+  }
+  return REFUND_AUTHORIZATION_WHITELIST.map((v) => `'${v}'`).join(', ');
+})();
 
 /**
  * freezeAwaitingAuthorization — 「无法判定」的唯一去处(设计 §4.2)。
@@ -975,13 +991,8 @@ export async function poolSettlerTick() {
                 sqlite.prepare("UPDATE pool_markets SET metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(JSON.stringify(urMeta), market.id);
                 console.warn(`[pool-settler] UNRECOVERABLE market=${market.id.slice(0,12)} Δ=${tipDaaUR - deadlineDaa} > MAX_WALK−MARGIN ${REFUND_THRESHOLD} → dispatchRefund 终态 (停永重试 SPC-walk)`);
                 // P1: 与 committee_unformed 同族(委员不可采样 ⇒ 没有任何判定), 冻结等授权。
-                // freeze 返回值必检(同 committee_unformed 那处): 冻结失败 ⇒ 零计数、不推进,
-                // 下一 tick 再试 —— 不许"没冻上也照记一笔 refund"。
-                if (!freezeAwaitingAuthorization(market, urMeta.unrecoverable_reason,
-                  { evidence_gap: 'committee_unsamplable_spc_walk' })) {
-                  console.error(`[pool-settler] 🔴 P1: SPC-walk unrecoverable 冻结失败 market=${market.id.slice(0,12)} — 零计数, 等下一 tick`);
-                  continue;
-                }
+                freezeAwaitingAuthorization(market, urMeta.unrecoverable_reason,
+                  { evidence_gap: 'committee_unsamplable_spc_walk' });
                 refund++;
                 continue;
               }
@@ -1065,25 +1076,32 @@ export async function poolSettlerTick() {
                 // Trigger maker refund; if cross-node, dispatchRefund 内 skip 自家 log (r402 broadcast path)
                 // P1(Bettor 2026-08-04 19:22 拍): 抽样失败 N 次是【重试计数】不是证据, 与超时同族;
                 // 而且这一族连判定都没有(委员会压根没组成), 比 quorum-timeout 更该冻。
-                // 🔴 freeze 返回值【必检】(Codex 第八轮 / NWT: 这是纵深的一半, 另一半是消费端的
-                //    共享验证器)。原实现把返回值丢掉, 然后【无条件】往下发事件 —— 于是
-                //    "冻结失败" 与 "冻结成功" 走同一条路, 而事件一发出去就是永久审计行。
-                const _frozen = freezeAwaitingAuthorization(market,
+                freezeAwaitingAuthorization(market,
                   `committee_unformed(sample_fail=${cur.sample_fail_count}, last=${cur.sample_last_err?.slice(0,80) || 'n/a'})— 抽样失败次数不构成退款授权`,
                   { evidence_gap: 'committee_never_formed' });
-                if (!_frozen) {
-                  // fail-closed: 零事件、零计数、不推进。下一 tick 再试, 而不是"没冻上也照发事件"。
-                  console.error(`[pool-settler] 🔴 P1: committee_unformed 冻结失败 market=${market.id.slice(0,12)} — 不发 bettor_refund_available, 不计 refund, 等下一 tick`);
-                  continue;
+                // r417 (Bettor r419/r420 monitor): emit bettor_refund_available for any sides
+                // so bettor-refund-claim-auto cron can sweep + dispatch PoolSide entry 2 refund.
+                // 7un1d 实证缺这步 — maker refund 落链 但 bettor side 5 KAS 没出 refund_available.
+                const sides = sqlite.prepare('SELECT id, bettor_pk, side_p2sh, side_lock_tx, stake_amount, direction FROM pool_bettor_sides WHERE market_id = ?').all(market.id);
+                for (const side of sides) {
+                  const bettorRefundPayload = JSON.stringify({
+                    market_id: market.id,
+                    bettor_pk: side.bettor_pk,
+                    side_p2sh: side.side_p2sh,
+                    side_lock_tx: side.side_lock_tx,
+                    stake: side.stake_amount,
+                    direction: side.direction,
+                    reason: 'committee_unformed',
+                    claim_entry: 'PoolSide_v07 entry 2 refund_market_cancelled',
+                  });
+                  sqlite.prepare(`
+                    INSERT INTO chain_events (id, txid, event_type, from_address, to_address, payload, observed_by, observed_at)
+                    VALUES (lower(hex(randomblob(16))), ?, 'bettor_refund_available', NULL, NULL, ?, 'pool-settler', CURRENT_TIMESTAMP)
+                  `).run(`bettor_refund:${market.id.slice(0,12)}:${String(side.bettor_pk).slice(0,12)}:${Date.now()}`, bettorRefundPayload);
                 }
-                // 🔴 冻结成功 ⇒ 【不再发 bettor_refund_available】。
-                //    理由(Codex 原话): 「历史 bettor_refund_available 行是持久的【审计数据】,
-                //    不是持久的【授权】」——市场此刻是"待授权"而非"可退款", 发事件等于给一张
-                //    永久有效的票, 而消费端要到拿到白名单授权才认。两头都做 = 纵深:
-                //    这里少发一张票(纵深), 消费端每次动钱前现问一次授权(主防线)。
-                // (原 r417 的 per-side bettor_refund_available emit 循环已整段删除 —— 见上方理由。
-                //  删而不是留一个跑不到的循环: 留着会变成"看起来还在发事件"的死代码, 而下一个
-                //  读它的人得先证明它跑不到才敢改。删掉, 语义就写在上面那段注释里。)
+                if (sides.length > 0) {
+                  console.log(`[pool-settler] committee_unformed market=${market.id.slice(0,12)} emitted ${sides.length} bettor_refund_available event(s)`);
+                }
                 refund++;
                 continue;
               }

@@ -10,8 +10,6 @@
 
 import { sqlite } from '../db/client.js';
 import { sendCommandAsync } from './relay-manager.js';
-// P1 授权闸: 与 pool.js 共用【同一个函数本体】, 不是各写一遍谓词
-import { assertBettorRefundAuthorized } from '../lib/refund-authorization.mjs';
 import { isRelayAlive } from './relay-manager.js';
 // J1tn r303 (Bettor 03:19 v3 approve): de-dup REFUND_GRACE_SEC hardcode → shared const.
 import { REFUND_GRACE_SEC } from '../lib/pool-refund-grace.mjs';
@@ -57,28 +55,10 @@ export async function claimAutoDispatcherTick() {
     if (sides.length === 0) return { ok: true, processed: 0 };
 
     const relayCandidates = sqlite.prepare('SELECT id, address FROM relay_nodes WHERE address IS NOT NULL').all();
-    let dispatched = 0, skippedRemote = 0, errored = 0, unauthorized = 0;
+    let dispatched = 0, skippedRemote = 0, errored = 0;
 
     for (const side of sides) {
       try {
-        // ── P1 授权闸(与 pool.js 那处是【同一个函数本体】, 不是各写一遍谓词) ──────────
-        //  🔴 位置刻意放在【每个 side 的最开头, relay 匹配之前】, 理由两条:
-        //   ① 安全等价: 它仍然在唯一那条真实 IPC(pool_side_refund_cancelled_tx)之前;
-        //   ② 可观测性更好: 放在 relay 匹配【之后】的话, 跨节点 side 会先被判 skippedRemote
-        //      而根本走不到授权检查 ⇒ unauthorized 永远数不到它们, 而本机恰好就是这种拓扑
-        //      (95 笔全 skippedRemote)。那样这个计数器会在最需要它的场景下永远打 0。
-        //  🔴 这条路是【事件驱动】的: 候选来自 chain_events 的 bettor_refund_available。
-        //     而「历史 bettor_refund_available 行是持久的【审计数据】, 不是持久的【授权】」
-        //     (Codex 原话) —— 事件一旦 emitted 永久留在库里, 重启后重扫照样会走到这里,
-        //     所以授权必须在【每次真要动钱之前】现问一次, 不能靠"当初发过事件"。
-        {
-          const authz = assertBettorRefundAuthorized({ marketId: side.market_id, db: sqlite });
-          if (!authz.ok) {
-            unauthorized++;
-            console.warn(`[claim-auto] 🔴 P1 拒绝 side=${side.id} market=${String(side.market_id).slice(0, 12)}: ${authz.reason}`);
-            continue;
-          }
-        }
         // Resolve signing relay (= deriveXOnlyPubkey match, 同 endpoint 逻辑).
         let signingRelay = null;
         for (const row of relayCandidates) {
@@ -153,10 +133,8 @@ export async function claimAutoDispatcherTick() {
       }
     }
 
-    console.log(`[claim-auto] tick: ${sides.length} unclaimed, dispatched=${dispatched} skippedRemote=${skippedRemote} errored=${errored} unauthorized=${unauthorized}`);
-    // 🔴 unauthorized 必须出现在 tick 结果与日志里: 被闸拦下的不许静默 ——
-    //    "退款被挡住了" 与 "没人来 claim" 读数相同, 正是本卡要根治的那一类同形。
-    return { ok: true, processed: sides.length, dispatched, skippedRemote, errored, unauthorized };
+    console.log(`[claim-auto] tick: ${sides.length} unclaimed, dispatched=${dispatched} skippedRemote=${skippedRemote} errored=${errored}`);
+    return { ok: true, processed: sides.length, dispatched, skippedRemote, errored };
   } finally {
     running = false;
   }
