@@ -407,7 +407,7 @@ receipt_digest = blake2b256( LP(DOMAIN) || LP(signing_bytes) )
 |---|---|
 | §1 既有资产的每一行 | `[CONFIRMED·源码实读]` `shared/lib/app-envelope-canonical.mjs:18/41-43/45-65/91-94/101-115` |
 | §4 SilverScript 有 blake2b、grep 不到 sha256 原语 | `[CONFIRMED·外部文档实读]` `/d/silverscript/docs/TUTORIAL.md:824`;**作用域**:只覆盖 `docs/DECL.md`+`TUTORIAL.md` 两份,**未读编译器源码** |
-| §5 `ecdsa_sign` 通用盲签 + 六个调用点 | `[CONFIRMED·源码实读]` `relay.mjs:638-652` 等,file:line 见表 |
+| §5 `ecdsa_sign` 通用盲签 + ~~六个~~ **10 个**调用点 | `[CONFIRMED·源码实读]` `relay.mjs:638-652`。🔴 **2026-08-04 重数更正:实为 10 处 / 7 文件**(`coord-status.js:29` · `oracle-pool.js:56,85` · `pool.js:292,3985` · `bettor-prediction-voter.js:248,428` · `oracle-pool-renewal-cron.mjs:104` · `pool-market-settler.js:3019` · `prediction-params-cache.js:152`)。与上位冻结稿同族错法(**清单对、紧挨着的数字错**),处置与判据见该稿 §7-2 更正注记 |
 | §7 各字段无承载物 | `[CONFIRMED·grep 实读]`,**但"无承载物"是全称否定** ⇒ 作用域 = 我搜过的路径;J2 若知道别处有,请当缺陷提 |
 | §1-bis / §3-2 既有先例(`fee-split.mjs:81-86/100-102/146-147/162`) | `[CONFIRMED·源码实读]` — v0.2 我照 J2 给的 file:line 追下去自查,**并因此更正了自己 v0.1 的方向** |
 | §2.3 `computeCommitteePkHash` 裸 concat 无 LP + 选择序不 sort | `[CONFIRMED·源码实读]` `bshard-close-voter.js:561-563/573-576` |
