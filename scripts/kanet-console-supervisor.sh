@@ -89,8 +89,45 @@ record_restart() {
   echo "$(date +%s) $(date -u '+%Y-%m-%dT%H:%M:%SZ') restart" >> "$RESTART_HISTORY"
 }
 
+announce_restart() {
+  # fail-loud not fail-closed (KANet-UI, Bettor 派工③ 2026-08-04): 自愈本身零改动, 只在拉起前
+  # 把"这次自愈装载的是什么状态的工作树"从静默变成有记录——供人事后判"那次重启是不是把未审
+  # 代码带进了 live"。同族根因: 2026-08-04 早晨 supervisor 自愈过两次(00:51/05:34), 频道里
+  # 没有任何人知道, 直到有人偶然核 PID 才发现。
+  local status
+  status="$(git -C "$KANET_ROOT" status --porcelain 2>&1)" || { log "[fail-loud] git status error (not blocking restart): $status"; return 0; }
+  # 日志行(本地文件,可中文,不经 curl/JSON 编码链路)
+  local log_line
+  # 播报行(纯 ASCII——bash→curl 这条链路传中文实测会丢编码变问号乱码,2026-08-04 KANet-UI 实测
+  # 复现:同一条消息本地 log() 正常、频道收到的是"[supervisor??] fail-loud????"。播报是给人看
+  # 的可观测性信号,内容准确比语言统一更要紧,改英文避开整条编码坑,比修编码链路更简单可靠。)
+  local bcast_line
+  if [[ -z "$status" ]]; then
+    log_line="[supervisor] 自愈重启 · 工作树 clean"
+    bcast_line="[supervisor] auto-restart, worktree CLEAN"
+  else
+    local files
+    files="$(echo "$status" | awk '{print $2}' | head -8 | tr '\n' ',' | sed 's/,$//')"
+    local n
+    n="$(echo "$status" | wc -l)"
+    log_line="[supervisor] 自愈重启 · 工作树 dirty · ${n}个文件: ${files}$( [[ $n -gt 8 ]] && echo " 等${n}个")"
+    bcast_line="[supervisor] auto-restart, worktree DIRTY (${n} files): ${files}"
+  fi
+  log "$log_line"
+  # 播报走 KANet-UI relay(operator 域自动化脚本身份)。--max-time 3: 触发场景恰恰是 console
+  # 可能 down/半死, 裸 curl 可能"连上但不回应"而非直接拒连, 必须有超时——这条新逻辑唯一的
+  # 承诺就是"不阻塞不拖慢重启", 没超时的网络调用正好会做反面(NWT 红队抓到, 2026-08-04)。
+  local payload
+  payload="$(node -e 'process.stdout.write(JSON.stringify({relayId:"f5cf6d85-58f4-4991-9cd5-7c6779f6822b",channel:"dev-coord-testnet",message:require("fs").readFileSync(0,"utf8")}))' <<< "$bcast_line")"
+  curl -sf --max-time 3 -X POST "http://127.0.0.1:${CONSOLE_PORT}/api/chat/send" \
+    -H "Content-Type: application/json" \
+    -d "$payload" \
+    >> "$LOG" 2>&1 || log "[fail-loud] 播报失败(不阻塞,不重试——console 本来就可能连不上,日志是保底证据)"
+}
+
 restart_console() {
   log "Console death detected — invoking kanet-start-headless.sh"
+  announce_restart
   bash "$KANET_ROOT/kanet-start-headless.sh" >> "$LOG" 2>&1 || log "kanet-start-headless fail"
   sleep 5
   if console_alive; then
