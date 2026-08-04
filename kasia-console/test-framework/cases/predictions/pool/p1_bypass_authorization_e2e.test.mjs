@@ -115,6 +115,23 @@ export default {
       module: 'bettor-refund-claim-auto', export: 'claimAutoDispatcherTick',
       expect: { must: { reply_contains: ['"unauthorized":4', '"dispatched":0'] } } },
 
+    // ══ G. 🔴 **另一个** IPC 调用点: buildBettorRefundClaim(settler tick + 无鉴权 HTTP 端点共用)══
+    //  NWT 08:36 判决点名的那条 —— 而它抓的是我一个具体的半成品:
+    //  **我把 pool-buildBettorRefundClaim 加进了 allowlist(spec v2 §3), 却没有写任何一步去调它。**
+    //  ⇒ A–F 六步实际只碰了两个 module(refund-authorization ×5 / bettor-refund-claim-auto ×1),
+    //     两个真实 IPC 调用点仍然**只测了 cron 那一个** —— 正是我加 allowlist 时说要防的那个洞
+    //     (Codex round 6: 证明了 A 闭合就当成两条都闭合), 我把它在 regression 里又造了一遍。
+    //  🔨 **判据: 往 allowlist 加一条 ≠ 覆盖。允许调用的清单和实际调用的步骤是两份东西。**
+    //
+    //  断言: 对无授权市场, 该函数必须返回拒绝形状(ok:false), 而不是走到 IPC 去构造退款。
+    { id: 'G_other_ipc_call_site_also_gated', action: 'call_module_export',
+      module: 'pool-buildBettorRefundClaim', export: 'buildBettorRefundClaim',
+      args: [M_NO_AUTH, { bettorPk: `aa${M_NO_AUTH.length}` }],
+      // 🔴 断言必须锚到【闸自己的拒绝理由】(P1 前缀), 不能只断言 ok:false ——
+      //    注入实验实证: 把闸整段删掉, 只断言 ok:false 的版本【照样绿】, 因为它读到的是
+      //    另一条 404(no local relay matches bettor_pk), 与闸无关。同 F 步第一版的病。
+      expect: { must: { reply_contains: ['"ok":false', 'P1'] } } },
+
     // ── teardown ──
     ...ALL.map((m, i) => ({ id: `td_side_${i}`, action: 'exec_sql', sql: `DELETE FROM pool_bettor_sides WHERE market_id = '${m}'` })),
     ...ALL.map((m, i) => ({ id: `td_evt_${i}`, action: 'exec_sql', sql: `DELETE FROM chain_events WHERE txid = 'evt_${m}'` })),

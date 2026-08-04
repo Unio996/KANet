@@ -98,3 +98,25 @@ if (!process.env.DB_PATH && !process.env.KANET_DB_PATH) {
   // 尊重显式覆盖(比如手动指了 DB_PATH 想跑真实数据做集成调试)——只提醒,不强制。
   process.stderr.write(`[env-bootstrap] DB_PATH/KANET_DB_PATH 已被显式设置,跳过隔离(${process.env.DB_PATH || process.env.KANET_DB_PATH})\n`);
 }
+
+// ── 🔴 KASPA_RPC_URL: 让【离线用例能 import 生产模块】,不是让它连链(J2 2026-08-04) ──────
+//  起因: #11 的 e2e 要真调 pool.js 的 buildBettorRefundClaim(两个真实 IPC 调用点之一)。
+//  而 pool.js:11 → services/rpc-health.js:19 是**模块顶层 fail-fast**:
+//      const LOCAL_RPC = process.env.KASPA_RPC_URL;
+//      if (!LOCAL_RPC) throw new Error('KASPA_RPC_URL not set — ...');
+//      const LOCAL_PORT = parseInt(new URL(LOCAL_RPC).port);
+//  ⇒ **只要没设, 整个 pool.js 连 import 都失败** ⇒ 任何离线测试都碰不到里面的函数。
+//     (这也解释了这条钱路此前为什么没有 live 测试覆盖 —— 不是没人想写, 是 import 就过不去。)
+//  🔵 该检查是【存在性 + URL 可解析】, **不连接、不发请求** ⇒ 给一个语法合法的占位值即可让
+//     import 通过, 而**被测的授权闸跑在任何 IPC/网络动作之前**, 所以断言仍然是真的。
+//  🔴 边界(别把这条读大): 这个占位值**不使任何"真的碰链"的用例变得可信** —— 它只解开
+//     import 期的那道门。真要打链的用例本来就不属于离线射程(同本文件 DB 隔离那条的边界)。
+//  🔨 枚举而不是打地鼠: 我第一次只补了 KASPA_RPC_URL, 重跑又撞 KASPA_NETWORK ⇒ 停下来
+//     一次 grep 完 import 链上【所有】模块顶层 env fail-fast(rpc-health.js:19/:22 共两处),
+//     而不是一个一个试出来。同今天'枚举所有以该字段为条件动钱的查询'那条。
+if (!process.env.KASPA_RPC_URL) {
+  process.env.KASPA_RPC_URL = 'http://127.0.0.1:1/offline-test-placeholder';
+}
+if (!process.env.KASPA_NETWORK) {
+  process.env.KASPA_NETWORK = 'testnet-12';
+}
