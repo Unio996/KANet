@@ -16,6 +16,18 @@
 //   ⇒ 场景 E(重放)就是钉这一句: 修法若只挡"新事件不发", 重启后重扫历史事件照样付。
 //
 // Offline: exec_sql fixtures + call_module_export(进程内直调) + teardown。不碰链、不碰 relay。
+//
+// 【怎么跑 —— 完整命令, 照抄即可(接位者只看本仓就能跑起来, 不必问人)】
+//   cd D:/kanet-tn12/kasia-console
+//   node scripts/test.mjs --case=test-framework/cases/predictions/pool/p1_bypass_authorization_e2e.test.mjs
+//   ⚠ `--case=` 收的是**路径**不是 id —— 传 id 会报 ERR_MODULE_NOT_FOUND(实撞, 2026-08-05)。
+//   证据落 logs/test-runs/<时间戳>_p1_bypass_authorization_e2e.log(🟡 覆盖式, 只留最后一次)。
+//
+// 🔴 **绿了不等于它在守东西 —— 每次改完必须做一次注入对照**(本文件已两次因此改写):
+//   最便宜的做法是**翻转 fixture** 而不是改生产代码(生产是钱路, live 进程随时可能重载):
+//   把某个"必须拒"的市场种上一个**合法授权**再跑 ⇒ 那一步必须变红。
+//   2026-08-05 对 M_C5_COMBO 实跑过: 塞入 `refund_authorization:"bettors_absent"` ⇒ 该步当场 FAIL
+//   (回执 `{"ok":true,...}`)⇒ 证明断言读的是真实授权判定, 不是装饰。跑完记得还原。
 
 const M_NO_AUTH   = '__test_p1e2e_noauth__';    // 有历史事件、无授权 ⇒ 必须零 dispatch
 const M_AUTHED    = '__test_p1e2e_authed__';    // 有授权 ⇒ 阳性对照, helper 必须放行
@@ -24,6 +36,42 @@ const M_OLDFIELD  = '__test_p1e2e_oldfield__';  // 只有被占用的旧字段 r
 const M_FROZEN    = '__test_p1e2e_frozen__';    // 冻结态 + 历史事件 ⇒ 拒(重放场景的核心)
 
 const ALL = [M_NO_AUTH, M_AUTHED, M_BOGUS, M_OLDFIELD, M_FROZEN];
+
+// ─── Codex Required #5 的五项阴性 + 一条组合(J2, 2026-08-05; Bettor 16:21 开闸的四条对抗条件)───
+//
+// Codex `e41c0553` §「Required next evidence」逐字:
+//   「Negative tests proving old **status**, old **refund_txid**, **age**, **Owner action**,
+//     or **missing metadata** alone cannot generate authorization.」
+//   ⇒ 五项【单独】都不得产生授权。上面 A–E 覆盖的是"伪值/撞名字段/重放"那一族,
+//     **没有一条**覆盖这五项 —— 而那 125 行真实积压【同时具备】旧 status + 旧 refund_txid + 年龄。
+//
+// 🔴 为什么这六个市场【故意不建 side 行】(不是省事, 不这样会静默弄坏别人):
+//   F 步断言 `"unauthorized":4` —— 那个数来自 cron 扫到的 side。任何新市场只要带 side,
+//   这个数就变, F 会红在【与它要守的东西无关】的地方。而 `assertBettorRefundAuthorized`
+//   只读 pool_markets(实读 lib/refund-authorization.mjs:80 的 SELECT), 压根不需要 side。
+//   ⇒ 加用例时必须先问"我这条会不会改掉别人断言里的那个数"。
+const M_C5_STATUS = '__test_p1c5_status__';   // ⓐ 只有旧 protocol_status
+const M_C5_TXID   = '__test_p1c5_txid__';     // ⓑ 只有 refund_txid 列有值
+const M_C5_AGE    = '__test_p1c5_age__';      // ⓒ 只有"很旧"
+const M_C5_OWNER  = '__test_p1c5_owner__';    // ⓓ 只有 Owner 动作痕迹(带 reference/at, 独缺授权值本身)
+const M_C5_NOMETA = '__test_p1c5_nometa__';   // ⓔ metadata 整列为 NULL
+const M_C5_COMBO  = '__test_p1c5_combo__';    // 组合: ⓐ+ⓑ+ⓒ+ⓓ+ 一起, 仍必须拒
+const C5 = [M_C5_STATUS, M_C5_TXID, M_C5_AGE, M_C5_OWNER, M_C5_NOMETA, M_C5_COMBO];
+
+// 这几行要设 refund_txid / created_at / NULL metadata, mkMarket() 给不了 ⇒ 单独写。
+const mkC5 = (id, { status = 'cancelled', meta = `'{}'`, refundTxid = 'NULL', deadline = 1780000000,
+  createdAt = 'CURRENT_TIMESTAMP' } = {}) =>
+  `INSERT INTO pool_markets (id, maker_relay_id, spine_p2sh, market_metadata_hash, deadline,
+                             protocol_status, protocol_version, metadata, refund_txid, created_at)
+   VALUES ('${id}', 'testrelay', 'kaspatest:spine', 'abcd', ${deadline},
+           '${status}', 'v0.7', ${meta}, ${refundTxid}, ${createdAt})`;
+
+// ⓓ 的 metadata 是本组里最阴的一个: 它带着 authorizeRefundByOwner 会写的**两个伴随字段**
+// (`refund_authorization_reference` / `_at`, 实读 pool-market-settler.js:323-324), 唯独没有
+// `refund_authorization` 本身。⇒ 断言"有人动过手"不等于"有授权"。
+const OWNER_TRACE = `'{"refund_authorization_reference":"owner-ticket-123",` +
+  `"refund_authorization_at":"2026-06-01T00:00:00.000Z",` +
+  `"owner_note":"Owner said go ahead in the channel"}'`;
 
 const mkMarket = (id, status, metaJson) =>
   `INSERT INTO pool_markets (id, maker_relay_id, spine_p2sh, market_metadata_hash, deadline, protocol_status, protocol_version, metadata)
@@ -52,6 +100,7 @@ export default {
     ...ALL.map((m, i) => ({ id: `pc_side_${i}`, action: 'exec_sql', sql: `DELETE FROM pool_bettor_sides WHERE market_id = '${m}'` })),
     ...ALL.map((m, i) => ({ id: `pc_evt_${i}`, action: 'exec_sql', sql: `DELETE FROM chain_events WHERE txid = 'evt_${m}'` })),
     ...ALL.map((m, i) => ({ id: `pc_mkt_${i}`, action: 'exec_sql', sql: `DELETE FROM pool_markets WHERE id = '${m}'` })),
+    ...C5.map((m, i) => ({ id: `pc_c5_${i}`, action: 'exec_sql', sql: `DELETE FROM pool_markets WHERE id = '${m}'` })),
 
     // ── setup ──
     { id: 'seed_noauth', action: 'exec_sql', sql: mkMarket(M_NO_AUTH, 'refunded', `'{"refund_reason":"watchdog-b: collecting_sigs silent timeout"}'`) },
@@ -59,6 +108,20 @@ export default {
     { id: 'seed_bogus', action: 'exec_sql', sql: mkMarket(M_BOGUS, 'refunded', `'{"refund_authorization":"timeout_is_fine"}'`) },
     { id: 'seed_oldfield', action: 'exec_sql', sql: mkMarket(M_OLDFIELD, 'refunded', `'{"refund_evidence":{"refunded_by":"x","refunds":[]}}'`) },
     { id: 'seed_frozen', action: 'exec_sql', sql: mkMarket(M_FROZEN, 'unresolved_needs_authorization', `'{"unresolved_reason":"quorum unreachable"}'`) },
+    // ── Codex#5 六行(故意无 side, 理由见上方常量段) ──
+    { id: 'seed_c5_status', action: 'exec_sql', sql: mkC5(M_C5_STATUS, { status: 'refunded' }) },
+    { id: 'seed_c5_txid', action: 'exec_sql',
+      sql: mkC5(M_C5_TXID, { refundTxid: `'${'ab'.repeat(32)}'` }) },
+    { id: 'seed_c5_age', action: 'exec_sql',
+      sql: mkC5(M_C5_AGE, { deadline: 1748000000, createdAt: `'2026-06-01T00:00:00.000Z'` }) },
+    { id: 'seed_c5_owner', action: 'exec_sql', sql: mkC5(M_C5_OWNER, { meta: OWNER_TRACE }) },
+    // ⓔ metadata 整列 NULL —— 与"有 metadata 但没有授权键"是两回事(我 16:02 报备时把两者混为一谈,
+    //    Bettor 16:21 抓出。前者若代码走默认分支会静默放行, 而它在日志里与正常拒绝同形)。
+    { id: 'seed_c5_nometa', action: 'exec_sql', sql: mkC5(M_C5_NOMETA, { meta: 'NULL' }) },
+    { id: 'seed_c5_combo', action: 'exec_sql',
+      sql: mkC5(M_C5_COMBO, { status: 'refunded', meta: OWNER_TRACE,
+        refundTxid: `'${'cd'.repeat(32)}'`, deadline: 1748000000, createdAt: `'2026-06-01T00:00:00.000Z'` }) },
+
     ...ALL.map((m, i) => ({ id: `seed_side_${i}`, action: 'exec_sql', sql: mkSide(m) })),
     ...ALL.map((m, i) => ({ id: `seed_evt_${i}`, action: 'exec_sql', sql: mkEvent(m) })),
 
@@ -132,7 +195,57 @@ export default {
       //    另一条 404(no local relay matches bettor_pk), 与闸无关。同 F 步第一版的病。
       expect: { must: { reply_contains: ['"ok":false', 'P1'] } } },
 
+    // ══ Codex Required #5: 五项【单独】都不得产生授权 + 一条组合 ═══════════════════
+    //  全部经 call_module_export 真调生产 helper 本体(Bettor 对抗条件②: 不得 mock 授权逻辑)。
+    //  🔴 断言锚到【闸自己的拒绝理由前缀 'P1'】而不是只看 ok:false —— 同 G 步注入实验的教训:
+    //     只断言 ok:false 时, 一条与闸无关的 404 也能让它绿。
+    //  ✅ 阳性对照不另建: 同文件 B 步(M_AUTHED)走的就是这一个函数、这一条代码路径
+    //     (Bettor 对抗条件④), 所以"全拒型实现"会让 B 红。
+
+    // ⓐ 旧 protocol_status='refunded' 单独 ⇒ 拒。**这是那 121 行真实具备的形状之一。**
+    { id: 'H_c5_old_status_alone_rejected', action: 'call_module_export',
+      module: 'refund-authorization', export: 'assertBettorRefundAuthorized',
+      args: [{ marketId: M_C5_STATUS, db: '$db' }],
+      expect: { must: { reply_contains: ['"ok":false', 'P1'] } } },
+
+    // ⓑ refund_txid 列有值 单独 ⇒ 拒。「退过一次」不是「现在被授权再退」。
+    { id: 'I_c5_old_refund_txid_alone_rejected', action: 'call_module_export',
+      module: 'refund-authorization', export: 'assertBettorRefundAuthorized',
+      args: [{ marketId: M_C5_TXID, db: '$db' }],
+      expect: { must: { reply_contains: ['"ok":false', 'P1'] } } },
+
+    // ⓒ 年龄单独 ⇒ 拒。Codex §4 逐字否掉的正是"因为这行旧就给它盖章"。
+    //    (冻结态的设计注释同源: 「时间在这里不产生任何权力」—— pool-market-settler.js:24x)
+    { id: 'J_c5_age_alone_rejected', action: 'call_module_export',
+      module: 'refund-authorization', export: 'assertBettorRefundAuthorized',
+      args: [{ marketId: M_C5_AGE, db: '$db' }],
+      expect: { must: { reply_contains: ['"ok":false', 'P1'] } } },
+
+    // ⓓ Owner 动作痕迹单独 ⇒ 拒。metadata 里带着 _reference 与 _at 两个伴随字段,
+    //    独缺 refund_authorization 本身 —— 「有人动过手」不等于「有授权」。
+    { id: 'K_c5_owner_action_trace_alone_rejected', action: 'call_module_export',
+      module: 'refund-authorization', export: 'assertBettorRefundAuthorized',
+      args: [{ marketId: M_C5_OWNER, db: '$db' }],
+      expect: { must: { reply_contains: ['"ok":false', 'P1'] } } },
+
+    // ⓔ metadata 整列 NULL ⇒ 拒, **且拒绝理由必须打出来(不得静默)**。
+    //    Bettor 16:21 硬要求: 关键字段缺失是 default-allow 最可能的藏身处, 而静默放行
+    //    在日志里与正常拒绝同形。⇒ 断言里带上理由文本, 不只断 ok:false。
+    { id: 'L_c5_missing_metadata_rejected_and_not_silent', action: 'call_module_export',
+      module: 'refund-authorization', export: 'assertBettorRefundAuthorized',
+      args: [{ marketId: M_C5_NOMETA, db: '$db' }],
+      expect: { must: { reply_contains: ['"ok":false', 'P1', 'refund_authorization'] } } },
+
+    // 🔴 组合: 五项凑齐仍必须拒(Bettor 对抗条件③)。
+    //    理由不是"更保险", 是**真实数据就是组合形状** —— 导出的那 125 行同时具备 ⓐ+ⓑ+ⓒ。
+    //    要防的失效: 单项各自被拒, 而凑齐时落进某条"看起来够完整了"的分支。
+    { id: 'M_c5_all_signals_combined_still_rejected', action: 'call_module_export',
+      module: 'refund-authorization', export: 'assertBettorRefundAuthorized',
+      args: [{ marketId: M_C5_COMBO, db: '$db' }],
+      expect: { must: { reply_contains: ['"ok":false', 'P1'] } } },
+
     // ── teardown ──
+    ...C5.map((m, i) => ({ id: `td_c5_${i}`, action: 'exec_sql', sql: `DELETE FROM pool_markets WHERE id = '${m}'` })),
     ...ALL.map((m, i) => ({ id: `td_side_${i}`, action: 'exec_sql', sql: `DELETE FROM pool_bettor_sides WHERE market_id = '${m}'` })),
     ...ALL.map((m, i) => ({ id: `td_evt_${i}`, action: 'exec_sql', sql: `DELETE FROM chain_events WHERE txid = 'evt_${m}'` })),
     ...ALL.map((m, i) => ({ id: `td_mkt_${i}`, action: 'exec_sql', sql: `DELETE FROM pool_markets WHERE id = '${m}'` })),
