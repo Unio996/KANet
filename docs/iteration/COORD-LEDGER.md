@@ -4785,6 +4785,17 @@ ws 增长率(85 个非尖峰点):        17.72 MB/min
 - ✅ **J1 那格从"弱支持"降为【不构成检验】(J2 提出,Bettor 采纳)**: 他那台 93 点 gap 单点尖峰 = 0,自标"零预测零 ⇒ 支持很弱";🔴 **但要在他那台算出预测值,需要【进程启动那刻的 priv】——而采样从 90 分钟前才开始,进程已跑 30+ 小时** ⇒ **若它自启动累积了 200 MB 则应看到约 200 MB 的尖峰(基线才 ~93,极显眼);若自启动没累积则预测 ≈0,与观测一致但无信息** ⇒ **两种可能给出完全相反的预测且无法分辨** ⇒ 🔨 **该检验【无法执行】,不是"执行了但支持弱"——若只报"验证通过、支持弱",这一格会以"已验证"的身份留在账上。**
 - 📌 **要让 J1 那台真能检验这条,需要的不是更多采样点(再采 5 小时也补不出启动时刻),而是【等他那台下一次自然重启后从 uptime≈0 开始采】。** ⚠ **J2 明确不建议为此重启——那台没毛病,为验证假说去重启健康机器是本末倒置;等自然重启。**
 
+### (140)BAk — Codex `f5979c3d` review 固化复现 A: 方法接受、结果未建立 + 4 处加固(明天) · redacted manifest=关闭"结果可复现"caveat 路径 · 两采样器完成归档(伴生量)
+> ⏱ 2026-08-06 19:1xZ · **上报后 Codex 第三条 review(继 3b50dfaf/7e18ab30),这次审固化复现 A 的三脚本 + 证据缺口。**
+- ✅ **Codex 接受"方法可复现"这半**(3 脚本: 路径参数化/DB 只读/敏感数据不入公开 repo/selftest 走真实 CSV parser)—— 与 BAj、J2 一致。
+- 🔴 **"结果可复现"未建立**(另一 reviewer 不能从 committed 复现 108/17 或 125/1208.46)+ 4 处(明天 A 加固):
+  ① **txid ≠ outpoint**: `p1_classify_dryrun` 用 `side_lock_tx` 当 outpoint,但一 tx 多输出、只一个是 bettor-side covenant 输出;live-set 格式未定义/验证 ⇒ **加对抗 fixture: 同 txid 两输出、只错的活着 ⇒ 必须拒**。
+  ② **cohort export 不 pin**: 不 pin DB 快照 digest/源 commit/schema/评估时间、省运行时 arm B(`_p1BacklogIds`)⇒ 不能证行与原 in-process backlog 相同。🔵 **Codex 给关闭路径: committed redacted manifest(每行 salted/stable 标识+金额+类+Merkle/SHA-256 digest)⇒ 允许独立守恒+集合身份检查、不发 bettor keys** —— **解了"数据不入库 vs 结果可复现"两难,优先**。
+  ③ **sompi 用 BigInt 非 Number**(JS Number 求和精度损失随数据集增长)。
+  ④ **moneypath regex 非完整清单**: 漏 external/shell/RPC/DB-triggered 路径、over-report 不可达(17→14 false-positive 已证需 code-level 验)⇒ Closure 需 AST/call-graph + 手工验证 sink registry(tx 构造/claim/签名/广播)、每 sink+caller exact path/function/commit + production 负测试。
+- 🔵 **两采样器完成归档(伴生量·AAL)**: `tw-17210`(b9cy40unh)+ `round5`(btb8zm4f5)均 exit 0、覆盖 episode 7 窗;但连接/TIME_WAIT 数据**对 episode 7 根因不承重**(根因=getBlock 剪枝/wasm 内存,从 console.log wasm 帧查清、非连接;连接假说 ZZx 已叫停)⇒ 数据存 scratch 备查、**归档不深挖**。
+- 📌 **明天**: A 加固 4 处(② redacted manifest 优先=关闭 Codex "结果可复现" caveat)。**P1 OPEN · D4 BLOCKED · 无授权。**
+
 ### (140)BAj — 今日尾段收尾: episode 7 根因收窄(getBlock 打剪枝块)+治本框架(明天设计稿) · 周期定性升级(负载代理正面读数+可证伪验收) · 固化复现 A 闭 · push 对齐(共享checkout搭车/author不可归属) · 六载体+卡面约定
 > ⏱ 2026-08-06 18:2x-18:5xZ · **BAi 之后一段的收尾。今天到此各线全部收口或排明天;接位者读本条即掌握尾段全貌。**
 - 🔴 **episode 7 根因收窄(J1)**: 不是 MAX_STEPS(少数支),是 **`getBlock` 打在已剪枝的块上**(`cannot find header`;deadline 过 33 天、块被 prune)⇒ 177 永久失败=恒定负载源。修法方向=用索引覆盖下界判"节点还供不供得出这个块"、已剪枝别再试(**换一个量、非改 MAX_WALK**)。碰钱路 `pool-market-settler-v06.mjs` ⇒ 走完整流程、**不疲劳末端落、明天设计稿**。两半输入钉完(J1 根因 + J2 负载源量化 + 可证伪验收判据"下次陷阱前 tick 62~68")。做不了那半(退避/上界取值)=钱路需 Owner。
