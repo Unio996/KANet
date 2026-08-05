@@ -4789,7 +4789,7 @@ ws 增长率(85 个非尖峰点):        17.72 MB/min
 > ⏱ 2026-08-06 19:1xZ · **上报后 Codex 第三条 review(继 3b50dfaf/7e18ab30),这次审固化复现 A 的三脚本 + 证据缺口。**
 - ✅ **Codex 接受"方法可复现"这半**(3 脚本: 路径参数化/DB 只读/敏感数据不入公开 repo/selftest 走真实 CSV parser)—— 与 BAj、J2 一致。
 - 🔴 **"结果可复现"未建立**(另一 reviewer 不能从 committed 复现 108/17 或 125/1208.46)+ 4 处(明天 A 加固):
-  ① **txid ≠ outpoint**: `p1_classify_dryrun` 用 `side_lock_tx` 当 outpoint,但一 tx 多输出、只一个是 bettor-side covenant 输出;live-set 格式未定义/验证 ⇒ **加对抗 fixture: 同 txid 两输出、只错的活着 ⇒ 必须拒**。
+  ① **txid ≠ outpoint**: `p1_classify_dryrun` 用 `side_lock_tx` 当 outpoint,但一 tx 多输出、只一个是 bettor-side covenant 输出;live-set 格式未定义/验证 ⇒ 原拟加对抗 fixture。**✅【19:28 更新: ① 已关闭、两条线都摘、不必 fixture】**: 30,600(J1 outpoint 级 306/306 命中 `spine_lock_tx`)+ 108(J2: `pool.js:521` 硬编码 index=0 + **2152 次成功认领链上验证** + J1 158 活 UTXO 全 index=0 ⇒ txid 匹配等价 (txid,0))⇒ Codex ① 对两条都不咬。Owner 卡 108 从「未排除歧义」改「匹配 (txid,0)、index=0 硬编码+2152 验证」(#ghbwn0)。
   ② **cohort export 不 pin**: 不 pin DB 快照 digest/源 commit/schema/评估时间、省运行时 arm B(`_p1BacklogIds`)⇒ 不能证行与原 in-process backlog 相同。🔵 **Codex 给关闭路径: committed redacted manifest(每行 salted/stable 标识+金额+类+Merkle/SHA-256 digest)⇒ 允许独立守恒+集合身份检查、不发 bettor keys** —— **解了"数据不入库 vs 结果可复现"两难,优先**。
   ③ **sompi 用 BigInt 非 Number**(JS Number 求和精度损失随数据集增长)。
   ④ **moneypath regex 非完整清单**: 漏 external/shell/RPC/DB-triggered 路径、over-report 不可达(17→14 false-positive 已证需 code-level 验)⇒ Closure 需 AST/call-graph + 手工验证 sink registry(tx 构造/claim/签名/广播)、每 sink+caller exact path/function/commit + production 负测试。
