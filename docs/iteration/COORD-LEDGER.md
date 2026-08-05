@@ -4785,6 +4785,17 @@ ws 增长率(85 个非尖峰点):        17.72 MB/min
 - ✅ **J1 那格从"弱支持"降为【不构成检验】(J2 提出,Bettor 采纳)**: 他那台 93 点 gap 单点尖峰 = 0,自标"零预测零 ⇒ 支持很弱";🔴 **但要在他那台算出预测值,需要【进程启动那刻的 priv】——而采样从 90 分钟前才开始,进程已跑 30+ 小时** ⇒ **若它自启动累积了 200 MB 则应看到约 200 MB 的尖峰(基线才 ~93,极显眼);若自启动没累积则预测 ≈0,与观测一致但无信息** ⇒ **两种可能给出完全相反的预测且无法分辨** ⇒ 🔨 **该检验【无法执行】,不是"执行了但支持弱"——若只报"验证通过、支持弱",这一格会以"已验证"的身份留在账上。**
 - 📌 **要让 J1 那台真能检验这条,需要的不是更多采样点(再采 5 小时也补不出启动时刻),而是【等他那台下一次自然重启后从 uptime≈0 开始采】。** ⚠ **J2 明确不建议为此重启——那台没毛病,为验证假说去重启健康机器是本末倒置;等自然重启。**
 
+### (140)BAj — 今日尾段收尾: episode 7 根因收窄(getBlock 打剪枝块)+治本框架(明天设计稿) · 周期定性升级(负载代理正面读数+可证伪验收) · 固化复现 A 闭 · push 对齐(共享checkout搭车/author不可归属) · 六载体+卡面约定
+> ⏱ 2026-08-06 18:2x-18:5xZ · **BAi 之后一段的收尾。今天到此各线全部收口或排明天;接位者读本条即掌握尾段全貌。**
+- 🔴 **episode 7 根因收窄(J1)**: 不是 MAX_STEPS(少数支),是 **`getBlock` 打在已剪枝的块上**(`cannot find header`;deadline 过 33 天、块被 prune)⇒ 177 永久失败=恒定负载源。修法方向=用索引覆盖下界判"节点还供不供得出这个块"、已剪枝别再试(**换一个量、非改 MAX_WALK**)。碰钱路 `pool-market-settler-v06.mjs` ⇒ 走完整流程、**不疲劳末端落、明天设计稿**。两半输入钉完(J1 根因 + J2 负载源量化 + 可证伪验收判据"下次陷阱前 tick 62~68")。做不了那半(退避/上界取值)=钱路需 Owner。
+- 🔨 **周期定性最终(多轮收窄)**: 非时间(J1 硬反例 3011.9 分/10.4 倍零发作硬证)+ 负载相关(J2 `scanned` 负载代理正面读数 tick 65/64 差 1.5%,主语对同轴;**非精确调用计数**、n=2 支持非证明、可证伪预测登记);J1 台 9/65=14% 定量反例。⚠ 本机负载恒定 ⇒ 时间与计数共线、分不开,判别力全在 J1 台。
+- ✅ **固化复现 A 闭(`4af9b2de`,随本条 push 入 origin)**: 3 脚本入 `test-framework/standalone/`(tools/ gitignored=**我指令的坑、被 J2 git add 被拒实撞修正**)+ `KANET_ROOT` + 数据本机(每行 pk/地址/txid、origin 公开=Owner 决策)+ 重跑验逐字 + 删漂移副本。= Codex caveat 的"方法可复现"这半达成(结果复现留授权时 typed 重建)。
+- 🔴 **push 对齐(在册 parked-commit-rides-along 实际命中)**: 我这台=**共享 checkout** ⇒ J2 的 `26c11dc6` 被我 push ledger **rides-along 带上 origin**(J2"未 push"认知不准);`4af9b2de` 本地领先=本次 push 带上。J1 台=独立 checkout、无搭车队列。⇒ **共享 checkout 里 commit=交给下一个 push 的人**。都我批过、无害,但认知对齐。
+- 🔨 **author 不可归属(J2 实撞)**: 本仓 git author 全队共用 ⇒ `--author` 不能归属谁做;J1"最新 commit 作者 J1tn"**不构成"他做了它"的证据**。状态脚本改报"vs origin: N local ride next push + commits today 全体不可归属"。
+- 🔨 **今日六载体全景("一句实话被读成另一层")**: 主语(maker/bettor)/批次(两轮 DAA)/动词(尝试/完成)/标签(两个 17)/状态标记(merkle_index INSERT-only)/**动作 vs 状态**(我 push 带上=动作被读成状态 · J1 状态变非我动作却署我名)。⇒ 集体校正成卡面约定(降一格/限定同句/代码审)+ memory `calibrate-confidence` 第三轴。
+- 📌 **排明天**: 治本设计稿 / J1 scratch 脚本同款固化 / lint `R-LEDGER-SCRATCH-SCRIPT`(已批·warn 非 block·先验今天 16 命中) / J1 发送器"引用那一刻"结构解 / J2 状态脚本(已改验)。
+- 🔴 **P1 OPEN · D4 BLOCKED · 无 money path 授权,一字未松。**
+
 ### (140)BAi — 🔴 Codex `7e18ab30` 上报后 review 收窄 P1 第二问: 本地 relay 不匹配=【执行拓扑限制】非"钥匙在外部" · 40KAS 不可恢复性未证 · 三硬禁止 · 授权≠执行
 > ⏱ 2026-08-06 18:2xZ · **上报(#gdoc8i)后 Codex 独立读 live builder,收窄第二问措辞 —— 上报≠终稿,Codex 上报后 review 必扫(节拍器② 命中扫出)。**
 - ✅ **Codex 独立读 live `buildBettorRefundClaim`(active HEAD)**: 枚举本地 `relay_nodes`、派生 pubkey、要求=`side.bettor_pk`、无匹配 404;**无 fallback**(远程 signer/bettor 钱包/可移植 claim/外部签名路径)。
