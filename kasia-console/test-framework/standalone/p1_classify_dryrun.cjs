@@ -100,13 +100,80 @@ if (process.argv.includes('--selftest')) {
     console.log((got.cls === want ? 'PASS' : 'FAIL') + '  ' + name.padEnd(24) + ' -> ' + got.cls);
   }
   fs.unlinkSync(tmp);
-  console.log('\n' + (cases.length - bad) + '/' + cases.length + ' branches reachable via the real parser; failures=' + bad);
-  console.log('NOTE: proves the branches are exercisable and the parser feeds them correctly.');
-  console.log('      Does NOT prove any real row is classified correctly — that rests on the chain read.');
+
+  // ---- v4 negative fixtures --------------------------------------------------------------------
+  // 🔴 Every guard below gets an input that MUST be refused. A guard tested only with good input
+  //   proves nothing: today three separate throwaway checks in this investigation returned a
+  //   plausible number while being completely broken, and in each case the missing arm was the one
+  //   whose expected answer differs from the failure output. Positive-only coverage is how a check
+  //   that never fires passes forever.
+  const wrote = (name, text) => { const p = S + name; fs.writeFileSync(p, text); return p; };
+  const mustThrow = (name, fn, needle) => {
+    let msg = null;
+    try { fn(); } catch (e) { msg = e.message; }
+    const ok = msg !== null && (!needle || msg.includes(needle));
+    console.log((ok ? 'PASS' : 'FAIL') + '  ' + name.padEnd(34) + ' -> ' +
+      (msg === null ? 'NO ERROR RAISED (guard is not firing)' : msg.slice(0, 70) + '…'));
+    if (!ok) bad++;
+  };
+  const H = 'market_id,side_rowid,side_lock_tx,stake_amount,auth\n';
+  console.log('');
+
+  // A (positive + the assertion that actually fails on the pre-fix code): CRLF must parse to
+  // exactly the same fields as LF. The `auth` column is deliberately LAST and non-empty in row 1 —
+  // with a single row or an empty last cell, `.trim()` removes the trailing CR and both arms agree
+  // for the wrong reason. That false negative happened during this investigation; hence this shape.
+  const body = '"m1","1","aa","100","AUTH-EXISTS"\n"m2","2","bb","100",""\n';
+  const lf = parseCsv(wrote('_st_lf.csv', H + body));
+  const crlf = parseCsv(wrote('_st_crlf.csv', (H + body).replace(/\n/g, '\r\n')));
+  const sameFields = JSON.stringify(lf) === JSON.stringify(crlf);
+  const keyClean = Object.keys(crlf[0]).includes('auth') && !Object.keys(crlf[0]).some((k) => k.includes('\r'));
+  const authKept = crlf[0].auth === 'AUTH-EXISTS';
+  for (const [n, ok] of [['CRLF parses identically to LF', sameFields],
+                         ['CRLF leaves no \\r in header keys', keyClean],
+                         ['CRLF keeps the last column value', authKept]]) {
+    console.log((ok ? 'PASS' : 'FAIL') + '  ' + n.padEnd(34) + ' -> ' + (ok ? 'ok' : 'MISMATCH'));
+    if (!ok) bad++;
+  }
+
+  mustThrow('A-bis: field containing a newline',
+    () => parseCsv(wrote('_st_nl.csv', H + '"m1","1","aa","100","half\n')), 'odd number of quotes');
+  mustThrow('B: same cohort row twice',
+    () => parseCsv(wrote('_st_duprow.csv', H + '"m1","1","aa","100",""\n"m1","1","aa","100",""\n')), 'the same cohort row');
+  mustThrow('B: two rows, one side_lock_tx',
+    () => parseCsv(wrote('_st_dupmoney.csv', H + '"m1","1","aa","100",""\n"m2","2","aa","100",""\n')), 'SAME side_lock_tx');
+  const hex = 'a'.repeat(64);
+  mustThrow('C: duplicate live-set entries',
+    () => loadLiveSet([`${hex}:0`, `${hex}:0`], 'fixture'), 'duplicate outpoint');
+  mustThrow('C: bare txid in live set',
+    () => loadLiveSet([hex], 'fixture'), 'bare txid');
+  for (const f of ['_st_lf.csv', '_st_crlf.csv', '_st_nl.csv', '_st_duprow.csv', '_st_dupmoney.csv'])
+    { try { fs.unlinkSync(S + f); } catch { /* fixture already gone */ } }
+
+  console.log('\n' + (bad === 0 ? 'all' : 'SOME FAILED —') + ' branch + guard fixtures done; failures=' + bad);
+  console.log('NOTE: proves the branches are exercisable, the parser feeds them correctly, and each');
+  console.log('      guard actually refuses its bad input. Does NOT prove any real row is classified');
+  console.log('      correctly — that rests on the chain read.');
   process.exit(bad ? 1 : 0);
 }
 
 // ---- CSV: a real quoted-field splitter; refuses to guess when the field count disagrees ----------
+// 🔴 v4 (2026-08-06, Codex §3 + Bettor A-加固档) — four defects that Codex listed as MISSING TESTS
+//   turned out to be LIVE BUGS when the tests were actually run. They are fixed here, and the
+//   distinction is worth keeping: "缺一个测试" and "有一个 bug" read identically in a review, and
+//   only running the missing test separates them.
+//     A   CRLF   -> the last header cell became `md_valid\r`, so THAT COLUMN read as undefined on
+//                   every row. If `auth` had been the last column, "125/125 authorization is NULL"
+//                   would have been true by construction, independent of the data.
+//     B   dup rows      -> the same side counted twice; conservation still balances, total is wrong.
+//     C   dup live set  -> `new Set()` deduped silently; 3 identical lines printed "loaded 1".
+//     D   empty input   -> "0 sides / 0.00 KAS" and exit 0, i.e. an empty run looks like a good one.
+function stripCr(line) {
+  // CRLF is the line ending RFC 4180 actually specifies, so this accepts it rather than tolerating
+  // it. Only a trailing CR is removed: a CR anywhere else is real content and must survive to be
+  // caught by the field-count / quote checks instead of being silently swallowed here.
+  return line.endsWith('\r') ? line.slice(0, -1) : line;
+}
 function splitCsvLine(line) {
   const out = []; let cur = '', q = false;
   for (let i = 0; i < line.length; i++) {
@@ -123,26 +190,51 @@ function splitCsvLine(line) {
   return out;
 }
 function parseCsv(p) {
-  const L = fs.readFileSync(p, 'utf8').trim().split('\n');
+  const L = fs.readFileSync(p, 'utf8').trim().split('\n').map(stripCr);
   const h = splitCsvLine(L[0]);
-  return L.slice(1).map((l, n) => {
+  const rows = L.slice(1).filter((l) => l !== '').map((l, n) => {
+    // A field spanning a newline would already have been cut in half by the split above, and the
+    // failure would surface as a field-count mismatch — i.e. the right refusal with the wrong
+    // reason. Say what actually happened instead; we do not support multi-line fields and this
+    // dataset (txids, integers, statuses) has no use for them.
+    if ((l.match(/"/g) || []).length % 2 !== 0)
+      throw new Error(`${p} line ${n + 2}: odd number of quotes — looks like a field containing a newline; this script does not support multi-line CSV fields`);
     const v = splitCsvLine(l);
     if (v.length !== h.length)
       throw new Error(`${p} line ${n + 2}: ${v.length} fields, header has ${h.length} — refusing to guess alignment`);
     return Object.fromEntries(h.map((k, i) => [k, v[i]]));
   });
+  assertNoDuplicateRows(rows, p);
+  return rows;
 }
 
-// ---- real run ------------------------------------------------------------------------------------
-const rows = parseCsv(S + 'j2-cohort-rows.csv');
-let live = null;
-try {
-  // 🔴 The live set must be CANONICAL OUTPOINTS (`<64-hex txid>:<index>`), never bare txids.
-  //   The bare-txid file this script used to read was produced by regexing 64-hex out of chat
-  //   messages — that extraction silently dropped the index, i.e. half of an outpoint, and nobody
-  //   noticed for a day. Refusing bare txids here is the whole point of the v3 hardening: a
-  //   silently-degraded input must fail loudly instead of being matched on the half that survived.
-  const raw = fs.readFileSync(S + 'j1-158-received.txt', 'utf8').trim().split('\n').map((s) => s.trim()).filter(Boolean);
+// B — two duplicate checks, deliberately kept separate because they are different invariants and a
+// violation of each means something different (Bettor asked which key; the answer is "both"):
+//   row identity   (market_id, side_rowid)  -> the exporter emitted the same DB row twice
+//   money identity  side_lock_tx            -> two DIFFERENT rows claim the same locked output.
+// The second one is not a formatting complaint: it is a finding about the data, so it says so.
+// 🔵 money identity upgrades to (side_p2sh, side_lock_tx) once the cohort carries the side address —
+//   one tx can legitimately fund two different side addresses, and only the address separates them.
+function assertNoDuplicateRows(rows, p) {
+  const seenRow = new Map(), seenMoney = new Map();
+  let noLockTx = 0;
+  rows.forEach((r, i) => {
+    const rk = `${r.market_id}|${r.side_rowid}`;
+    if (seenRow.has(rk))
+      throw new Error(`${p}: rows ${seenRow.get(rk) + 2} and ${i + 2} are the same cohort row (market_id, side_rowid)=${rk} — the export emitted it twice; counting it twice would double this side's stake`);
+    seenRow.set(rk, i);
+    if (!r.side_lock_tx) { noLockTx++; return; }
+    if (seenMoney.has(r.side_lock_tx))
+      throw new Error(`${p}: rows ${seenMoney.get(r.side_lock_tx) + 2} and ${i + 2} are different cohort rows claiming the SAME side_lock_tx ${String(r.side_lock_tx).slice(0, 12)}… — that is a data finding, not a format error: either the export is wrong or two sides are recorded against one locked output`);
+    seenMoney.set(r.side_lock_tx, i);
+  });
+  if (noLockTx) console.log('note: %d row(s) carry no side_lock_tx — exempt from the money-identity check by construction, not by oversight', noLockTx);
+}
+
+// C — the live set was built with `new Set(...)`, which deduped silently: a file with three
+// identical lines reported "loaded 1 outpoints". That made the loaded count useless as a
+// completeness check against "158 received", which is exactly what it was being used for.
+function loadLiveSet(raw, where) {
   const bare = raw.filter((s) => /^[0-9a-f]{64}$/i.test(s));
   const canonical = raw.filter((s) => /^[0-9a-f]{64}:\d+$/i.test(s));
   if (bare.length) {
@@ -152,11 +244,52 @@ try {
       'were the side output. Regenerate the file from the chain reader with the index column ' +
       '(entry.outpoint.index), e.g. "<txid>:0" per line, then re-run.');
   }
-  if (canonical.length !== raw.length) {
+  if (canonical.length !== raw.length)
     throw new Error(`live set: ${raw.length - canonical.length} line(s) match neither bare txid nor <txid>:<index> — refusing to guess`);
+  const set = new Set(canonical);
+  if (set.size !== canonical.length) {
+    const dup = canonical.filter((s, i) => canonical.indexOf(s) !== i);
+    throw new Error(`${where}: ${canonical.length - set.size} duplicate outpoint line(s) (e.g. ${[...new Set(dup)].slice(0, 3).join(', ')}). Deduping them silently would make the loaded count disagree with the number of records the chain returned, and that count is used as evidence of completeness`);
   }
-  live = new Set(canonical);
+  return set;
+}
+
+// ---- real run ------------------------------------------------------------------------------------
+// A cohort that fails its own integrity checks used to come out as a raw stack trace (exit 1).
+// It is loud either way, but an evidence tool should say what it refused and why, and use a code a
+// caller can branch on: 0 ok / 2 chain read degraded / 3 empty input / 5 cohort input rejected.
+let rows;
+try {
+  rows = parseCsv(S + 'j2-cohort-rows.csv');
+} catch (e) {
+  console.error('🔴 cohort REJECTED: ' + (e && e.message ? e.message : String(e)));
+  console.error('   Refusing to classify a cohort that does not pass its own integrity checks.');
+  process.exit(5);
+}
+// D — an empty cohort used to print "0 sides / 0.00 KAS / 0 of 0" and exit 0. A run that classified
+// nothing is not a clean run; if the export upstream silently produced no rows, this is the only
+// place that would have noticed, and it was reporting success.
+if (rows.length === 0) {
+  console.error('🔴 cohort is EMPTY (0 data rows) in %sj2-cohort-rows.csv', S);
+  console.error('   Exiting 3 rather than printing a 0-row report: "classified nothing" and');
+  console.error('   "classified everything and found nothing" must not share an exit code.');
+  process.exit(3);
+}
+let live = null;
+try {
+  // 🔴 The live set must be CANONICAL OUTPOINTS (`<64-hex txid>:<index>`), never bare txids.
+  //   The bare-txid file this script used to read was produced by regexing 64-hex out of chat
+  //   messages — that extraction silently dropped the index, i.e. half of an outpoint, and nobody
+  //   noticed for a day. Refusing bare txids here is the whole point of the v3 hardening: a
+  //   silently-degraded input must fail loudly instead of being matched on the half that survived.
+  const raw = fs.readFileSync(S + 'j1-158-received.txt', 'utf8').trim().split('\n').map((s) => stripCr(s).trim()).filter(Boolean);
+  live = loadLiveSet(raw, S + 'j1-158-received.txt');
   console.log('live UTXO set loaded: %d outpoints (J1, getUtxosByAddresses over the 27 side_p2sh)', live.size);
+  if (live.size === 0) {
+    console.error('🔴 live set is EMPTY (file present, zero usable entries) — every row would fall to');
+    console.error('   UNCLASSIFIED_NO_CHAIN_READ and the run would print a tidy report that means nothing.');
+    process.exit(3);
+  }
 } catch (e) {
   // 🔴 This catch used to swallow everything, which silently neutralised the format guard added
   //   above: a malformed live set produced "no chain read" and a tidy 125-row UNCLASSIFIED report
@@ -189,6 +322,22 @@ console.log('\n== DRY RUN (subject = bettor side): %d sides. NO authorization wr
 for (const [k, n] of Object.entries(t).sort((a, b) => b[1] - a[1]))
   console.log('  ' + k.padEnd(42) + ' ' + String(n).padStart(4) + ' sides  ' + (kas[k] / 1e8).toFixed(2).padStart(9) + ' KAS');
 console.log('\n  total staked across all classes: %s KAS', (Object.values(kas).reduce((a, b) => a + b, 0) / 1e8).toFixed(2));
+
+// Conservation (Codex §2): every row lands in exactly one class and no stake is created or lost on
+// the way. 🔴 Note what this does NOT catch: duplicate rows inflate both sides equally, so the
+// identity still holds. B's dedup check is not redundant with this — each catches what the other
+// cannot, which is why both are here.
+{
+  const nClass = Object.values(t).reduce((a, b) => a + b, 0);
+  const sumClass = Object.values(kas).reduce((a, b) => a + b, 0);
+  const sumCohort = rows.reduce((a, r) => a + Number(r.stake_amount || 0), 0);
+  if (nClass !== out.length)
+    throw new Error(`conservation: classes hold ${nClass} sides but the cohort has ${out.length}`);
+  if (sumClass !== sumCohort)
+    throw new Error(`conservation: classes hold ${sumClass} sompi but the cohort has ${sumCohort} (difference ${sumClass - sumCohort})`);
+  console.log('  conservation: %d sides and %s KAS accounted for, matching the cohort exactly',
+    nClass, (sumCohort / 1e8).toFixed(2));
+}
 console.log('  rows whose refund_authorization is NULL: %d / %d  (no class here creates refund authority)',
   out.filter((r) => !r.auth).length, out.length);
 console.log('\nwritten: %sj2-dryrun-classification.csv', S);
