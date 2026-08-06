@@ -56,3 +56,63 @@ sha256sum <你的文件>          # 与上表比对；不等 = 不是同一批�
 
 🔴 **它证明"是不是同一份文件"，不证明"文件内容是对的"。** 后者依赖当时的链读与代码，见
 `docs/iteration/COORD-LEDGER.md` 当日记录与 `p1_classify_dryrun.cjs` 的注释。
+
+
+
+---
+
+## J1 本机产物锚（由 J1 提供，**本机无法独立重算**）
+
+> **来源**：`dev-coord-testnet` 频道消息，时间戳 `2026-08-06T06:52:04.010Z`（J1 关机前的完整 sha256 版，
+> 取代他更早那份 16 位前缀版）。本节由 `scratch/j2-replace-j1-anchor.cjs` **从频道库程序化提取**，
+> 未经人手抄录。
+> 🔴 **限定**：这些哈希对应的文件在 **J1 那台**，本机没有 ⇒ 我**无法验证它们对不对**，只能保证**转录无误**。
+> ✅ **唯一的例外，而且这次是全长比对**：`j1-side-liveset-0806.txt` 的 sha256
+> 两台**各自独立计算、全 64 位逐字节一致**（本次已复核）。
+> 🔵 **为什么仍要收**：他那台可能清盘，届时这些是**唯一能核对重建结果**的东西；其中
+> `j1-side-utxos.csv` **从未在任何地方发过**。
+
+**（以下为 J1 原文逐字，本机未改一字）**
+
+环境: virtualDaaScore(观测锚) = 75,052,666 · networkId = testnet-12 · isSynced=true · hasUtxoIndex=true
+      节点剪枝点 daaScore = 73,347,712(落后当时 tip 1,365,095;每秒前进, 与读数同批才有意义)
+
+内容 sha256(非 git blob id):
+  j1-side-triples-0806.txt
+    sha256 adc32a1a6ee5b6481d3b8e1b1775a950931c0efd17f7891a4d5101e541838952  (21962 B)
+    158 行 <side_p2sh>,<txid>,<index>  已逐字发过频道
+  j1-side-liveset-0806.txt
+    sha256 d0bd17ff3725041b100277a4c7f1217dd0707c600c1d67c49835f0d94b9854aa  (10586 B)
+    158 行 <txid>:<index>  已发过; 两台互证(J2 锚里已有)
+  j1-amt-exceptions.txt
+    sha256 2bc3dc65b9934431c4f44c1af00ecd0bba7237a6d8ca2d3e638dc1875310e501  (2126 B)
+    30 行 非 5.00 KAS 金额例外  已发过
+  j1-side-utxos.csv
+    sha256 08034e7f6087cb66f7962ca800b122cb686f1d38baae9f686eac21bdd67ba6bc  (26464 B)
+    158 行 含 blockDaaScore/depth 两列  从未发过 ⇒ 清盘即失
+  j1-side-addrs.txt
+    sha256 01f03e86bba2722ec2c34dbfe76d1564fcefc105186806b5a7b042303d0f9a4a  (1944 B)
+    27 个 side 地址  J2 台有同一份(摘要 6bdff301 互证)
+  j1-spine-dist-0806.mjs
+    sha256 4e2b3764e7648b320bbd1201ba117256f0027fff86526a9fc85f301b619e1fe1  (2463 B)
+    306 行 outpoint 级 DB↔链对账
+  j1-spine-idx-0806.mjs
+    sha256 1a06a7d18518c9f92f3bea415af1d2d3e52e475d77a2db1318495e5bd4a72d27  (1868 B)
+    index=0 × 306
+  j1-spine-total-0806.mjs
+    sha256 59f6f8ea76b514797e8c1dcece65b6dfe9eb166dc113ef68cff3779e000cec9f  (2156 B)
+    1317 地址全量批查 ⇒ 306 / 30,600 KAS
+  j1-prunepoint-0806.mjs
+    sha256 c56d5409ce24bdea72e46b9ecd41ee6b7a30c37e51900add74931ac16e0dd0c5  (1478 B)
+    节点剪枝点 daaScore
+  j1-prune-horizon-0806.mjs
+    sha256 94eb1bee46b9aea35a426d9d223053a8c0e1fc38d9faac9868ff19db0fc37953  (2075 B)
+    二分夹地平线(含不成立的单调性假设, 留着看得出)
+  j1-side-refresh-0806.mjs
+    sha256 88596ef53e724f540ea3ce3b6be374285e72ff750982505e9c32a0b89301649a  (1430 B)
+    27 地址 → 158 活 outpoint(现跑非快照)
+
+重建配方(比脚本本身值钱):
+  new RpcClient({ url:ws://127.0.0.1:17210, encoding:Encoding.Borsh, networkId:testnet-12 })
+  · 17210 是 wRPC 口(16210 是 P2P, 我踩过) · networkId 必传(kaspatest 不是合法值)
+  · 地址可批量传(实测 120/批稳; 1,317 址 11 批 0 失败)⇒ 能出精确总额而非外推
