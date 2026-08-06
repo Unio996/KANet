@@ -31,6 +31,8 @@
 
 const M_NO_AUTH   = '__test_p1e2e_noauth__';    // 有历史事件、无授权 ⇒ 必须零 dispatch
 const M_AUTHED    = '__test_p1e2e_authed__';    // 有授权 ⇒ 阳性对照, helper 必须放行
+                                               // 🔴 它【不插 bettor side】, 因为它的标签是 bettors_absent。
+                                               //    理由见下方 seed_side 那段(2026-08-06 修的反转 bug)。
 const M_BOGUS     = '__test_p1e2e_bogus__';     // 授权值不在白名单 ⇒ 拒
 const M_OLDFIELD  = '__test_p1e2e_oldfield__';  // 只有被占用的旧字段 refund_evidence ⇒ 拒
 const M_FROZEN    = '__test_p1e2e_frozen__';    // 冻结态 + 历史事件 ⇒ 拒(重放场景的核心)
@@ -122,7 +124,27 @@ export default {
       sql: mkC5(M_C5_COMBO, { status: 'refunded', meta: OWNER_TRACE,
         refundTxid: `'${'cd'.repeat(32)}'`, deadline: 1748000000, createdAt: `'2026-06-01T00:00:00.000Z'` }) },
 
-    ...ALL.map((m, i) => ({ id: `seed_side_${i}`, action: 'exec_sql', sql: mkSide(m) })),
+    // 🔴🔴 M_AUTHED 【故意不插 side】—— 这一行是修一个把阳性对照做成反面的 bug
+    //   (NWT 2026-08-06 判为 ②-a 合稿与 ⑤ 形态裁定的前置条件; 缺陷本身记在
+    //    docs/2026-08-04-precond2a-merged-magnitude-estimate.md §4.1-bis)
+    //
+    //   原来这里是 `ALL.map(...)` —— 给【每一个】市场都插了一条 bettor side, 包括 M_AUTHED。
+    //   而 M_AUTHED 的授权标签逐字是 `bettors_absent`, 意思就是**这个盘没有下注人**。
+    //   ⇒ 那一步于是在断言:「一个【与事实相反】的标签能过闸」—— **这是阳性对照的反面**。
+    //   它当时全绿, 而绿的原因恰恰是缺陷: 闸做的是**标签检查不是事实检查**(§4.1-bis),
+    //   所以自相矛盾的 fixture 照样放行。
+    //
+    //   🔨 判据(全队已收): **阳性对照全绿时, 要问的不是「它过了吗」, 是「它证明的是我要的
+    //      那件事, 还是它的反面」。** 一个恒拒的实现会让所有阴性臂全绿; 而一个**只看标签**的
+    //      实现会让"标签撒谎"的阳性臂也全绿 —— 两种绿看起来完全一样。
+    //
+    //   ⚠ 本修复【不改变闸的行为】, 只让 fixture 自洽: `bettors_absent` 现在名副其实。
+    //      "闸只查标签不查事实"这个真缺陷**仍然存在**, 归「标签不是证据」卡(typed 授权对象),
+    //      不是这一行能修的 —— 别把这次 fixture 修复读成那个缺陷被关掉了。
+    //   ⚠ F 步的 `"unauthorized":4` 不受影响: 那 4 来自四个【无授权】市场各自的 side,
+    //      M_AUTHED 是授权通过的那个, 本来就不在这个计数里。
+    ...ALL.filter((m) => m !== M_AUTHED)
+      .map((m, i) => ({ id: `seed_side_${i}`, action: 'exec_sql', sql: mkSide(m) })),
     ...ALL.map((m, i) => ({ id: `seed_evt_${i}`, action: 'exec_sql', sql: mkEvent(m) })),
 
     // ══ A. 无授权(有历史事件)⇒ helper 本体必须判否 ══════════════════════════════
