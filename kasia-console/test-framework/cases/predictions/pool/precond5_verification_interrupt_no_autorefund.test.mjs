@@ -212,15 +212,34 @@ export default {
     //        · 仍冻结(今天) ⇒ state = 原因全文     ⇒ 不含 magic ⇒ 🔴 红, 且红里就是原因
     //        · 阳性对照建成 ⇒ 子查询空 ⇒ state = magic ⇒ ✅ 绿
     //      🔨 即 Bettor 那条判据的落地: **断言写【完成态】, 不写当前态。**
+    //   🔴🔴 极性修正(2026-08-06 · 上一版是【会为错误理由变绿】的假绿, 已入库过一次, 别改回去):
+    //      上一版断言的是「status **不是** unresolved_needs_authorization」。**否定式** ⇒ 任何第三种
+    //      结果都能满足它。实测: 把 protocol_version 由 v0.5 改成 v0.6, 该盘被一个**不相干的闸**
+    //      取消(`cancel_reason: min_pot_undersize`, 空池)⇒ 断言当场变绿并自称 POSITIVE_CONTROL_ESTABLISHED,
+    //      **而 bettors_absent 那条路根本没走到。**
+    //   🔨 修法 = 断言【目标态本身】(设计稿 §3.2 断言②原文): refund_authorization 落库 = 'bettors_absent'。
+    //   🔴 而【只断言这一个字段还不够】—— 我自己做反向对照时就靠"往 fixture 里种它"把它送绿了:
+    //      这个字段既是 dispatchRefund 的输出, 也是【可以被种进去的输入】⇒ 单读它, 假绿只是换了个来源。
+    //      ⇒ 改断 dispatchRefund 成功时【一起写下】的那一组(settler:2758-2772 逐字):
+    //        refund_authorization ∧ refund_dispatched_at ∧ refund_tx_obj ∧ protocol_status='refunding'。
+    //      🔵 单种一个字段不再能满足它; 要伪造得把四样一起种 —— 那是刻意行为, 不是失手。
     { id: 'P1_positive_control_NOT_ESTABLISHED_red_until_zero_bet_fixture', action: 'query_db',
-      sql: `SELECT COALESCE((SELECT '🔴 本轮无法建立阳性对照(缺真实 bettors_absent 数据): 此臂 fixture 与阴性臂逐字段相同, 预期同态冻结 ⇒ 这条红【不是行为缺陷】, 别去查 status。往 metadata 种 refund_authorization 无效(settler:1640 自行推导), 出路见卡 P5-POSITIVE-CONTROL-VIA-ZERO-BET-FIXTURE'
-                              FROM pool_markets WHERE id = '${M_P1}' AND protocol_status = 'unresolved_needs_authorization'),
-                            'POSITIVE_CONTROL_ESTABLISHED') AS state`,
+      sql: `SELECT COALESCE((SELECT 'POSITIVE_CONTROL_ESTABLISHED' FROM pool_markets
+                              WHERE id = '${M_P1}'
+                                AND json_extract(metadata,'$.refund_authorization') = 'bettors_absent'
+                                AND json_extract(metadata,'$.refund_dispatched_at') IS NOT NULL
+                                AND json_extract(metadata,'$.refund_tx_obj')         IS NOT NULL
+                                AND protocol_status = 'refunding'),
+                            '🔴 本轮未建立阳性对照(卡 P5-POSITIVE-CONTROL-VIA-ZERO-BET-FIXTURE): 此臂 fixture 与阴性臂逐字段相同 ⇒ 这条红【不是行为缺陷】, 别去查 status。实测下一道拦路闸是 min_pot_undersize(池非空), **不是 deadline**(v0.6 下宽限内/远早两种 deadline 读数完全相同)。本断言只在 metadata.refund_authorization 真落 bettors_absent 时才转绿') AS state`,
       expect: { must: { row_assert: { state_contains: 'POSITIVE_CONTROL_ESTABLISHED' } } } },
     { id: 'P2_positive_control_NOT_ESTABLISHED_red_until_abstain_supermajority_fixture', action: 'query_db',
-      sql: `SELECT COALESCE((SELECT '🔴 本轮无法建立阳性对照(缺真实 committee_affirmative_unjudgeable 数据): 此臂 fixture 与阴性臂逐字段相同, 预期同态冻结 ⇒ 这条红【不是行为缺陷】, 别去查 status。该授权由 settler:1783 从弃权票自行推导, 种 metadata 无效'
-                              FROM pool_markets WHERE id = '${M_P2}' AND protocol_status = 'unresolved_needs_authorization'),
-                            'POSITIVE_CONTROL_ESTABLISHED') AS state`,
+      sql: `SELECT COALESCE((SELECT 'POSITIVE_CONTROL_ESTABLISHED' FROM pool_markets
+                              WHERE id = '${M_P2}'
+                                AND json_extract(metadata,'$.refund_authorization') = 'committee_affirmative_unjudgeable'
+                                AND json_extract(metadata,'$.refund_dispatched_at') IS NOT NULL
+                                AND json_extract(metadata,'$.refund_tx_obj')         IS NOT NULL
+                                AND protocol_status = 'refunding'),
+                            '🔴 本轮未建立阳性对照: 需要「档1 弃权≥4/5」的真实委员票据(settler:1783 自行推导该授权) ⇒ 这条红【不是行为缺陷】, 别去查 status。本断言只在 metadata.refund_authorization 真落 committee_affirmative_unjudgeable 时才转绿') AS state`,
       expect: { must: { row_assert: { state_contains: 'POSITIVE_CONTROL_ESTABLISHED' } } } },
 
     // ── teardown(幂等) ──
