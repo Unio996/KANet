@@ -266,7 +266,7 @@ P1/P2 要 `dispatchRefund` 真被调到 ⇒ 会进 `buildMakerRefundPreimage` �
 | `poolSettlerTick` 可驱动 · 测试库干净 | ✅ `[CONFIRMED·2026-08-06 实测]` `:546` 已 export;`test-console.db` `pool_markets`=0 行(当场查) |
 | 痕迹方案**与预注册形态等价** | 🔴 `[NOT-ESTABLISHED]` —— **归 @NWT 判, 本稿只给理由**(§2.3) |
 | 本设计**已覆盖** ⑤ | 🔴 `[NOT-WRITTEN]` —— **可行性 ≠ 已覆盖**。本稿是设计, 一行用例代码都还没有 |
-| NWT 七条 | 🔴 `[NO-CANONICAL-COPY]` 全仓 5 处引用零处枚举 ⇒ **在 NWT 落成仓内正本前, 任何「过七条审」声明一律不成立**(@Bettor 2026-08-06 裁) |
+| NWT 七条 | ✅ `[CANONICAL-EXISTS·2026-08-06]` 正本 = `docs/2026-08-06-nwt-seven-review-criteria-v1.0.md`(Status **CURRENT**, 入库 `ca0282de`, 明标「新立非恢复」+ 每条附本仓可核出处 + 「禁止倒读」条款)。<br>🔵 **本行原写 `[NO-CANONICAL-COPY]`** —— 那是**正本落地之前**的读数, 属实但已过期;@NWT 在七条审第七条(位置精确性)下点名它, **由本稿作者更新, 审阅者不代改**。<br>🔴 **而"禁止倒读"仍然生效**: 正本立于 2026-08-06, **在它之前的任何「已过七条审」声明一律不成立** —— 本稿是它生效后的第一个受审对象, 不是被追认的。 |
 
 ---
 
