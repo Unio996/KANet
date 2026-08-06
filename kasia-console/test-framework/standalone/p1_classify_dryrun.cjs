@@ -30,11 +30,31 @@ const S = (process.env.KANET_SCRATCH || path.join(ROOT, 'scratch')) + path.sep;
 // Codex §6 wants at least six classes. Three of his six cannot be filled with the instruments we
 // have, and they are named as such rather than folded into a neighbour — inventing a verdict is
 // exactly what v1 did.
+// 🔴 v3 (2026-08-06, Codex `6a4cba9d` ①) — the live set is keyed by CANONICAL OUTPOINT, not txid.
+//   v2 asked `liveSet.has(side_lock_tx)`, i.e. it treated a txid as if it identified an output.
+//   One tx has many outputs and only one of them is the bettor-side covenant output, so a live
+//   *sibling* output would have counted the side as still locked.
+//   For this cohort the side output is at index 0 — production hardcodes it
+//   (`kasia-console/src/api/pool.js` buildBettorRefundClaim: `outpointIndex: 0`) and 2,152 claims
+//   have succeeded through that path. But **an invariant being true is not the tool enforcing it**:
+//   v2 would have kept returning the same answer after the convention changed. So the index is now
+//   part of the key, asserted per row, and a nonzero-index live output is an explicit reject.
+const SIDE_OUTPUT_INDEX = 0;                    // asserted, not assumed — see SIDE_INDEX_SOURCE
+const SIDE_INDEX_SOURCE = 'kasia-console/src/api/pool.js buildBettorRefundClaim ⇒ outpointIndex: 0';
+
 function classify(row, liveSet) {
   const R = (cls, why) => ({ cls, why });
   if (!row.side_lock_tx) return R('NO_SIDE_LOCK_RECORDED', 'row carries no side_lock_tx');
   if (!liveSet) return R('UNCLASSIFIED_NO_CHAIN_READ', 'no live UTXO set supplied');
-  if (liveSet.has(row.side_lock_tx))
+  // Live at the index this cohort's sides are built at ⇒ the side output itself is unspent.
+  const sideOutpoint = `${row.side_lock_tx}:${SIDE_OUTPUT_INDEX}`;
+  // A live output of the SAME tx at a DIFFERENT index says nothing about the side output; if that
+  // is all we have, the side is absent and must be classified as such rather than as still-locked.
+  const siblingLive = [...liveSet].some((k) => k.startsWith(row.side_lock_tx + ':') && k !== sideOutpoint);
+  if (!liveSet.has(sideOutpoint) && siblingLive)
+    return R('SIDE_UTXO_ABSENT__SIBLING_OUTPUT_LIVE',
+      `only a non-index-${SIDE_OUTPUT_INDEX} output of ${row.side_lock_tx.slice(0, 12)}… is live; the side output itself is gone. Side index source: ${SIDE_INDEX_SOURCE}`);
+  if (liveSet.has(sideOutpoint))
     // The money is demonstrably still sitting at the side address, unspent, and unclaimed.
     // This is Codex's "still-spendable predecessor" — WITHOUT the second half of his phrase
     // ("with independently valid refund evidence"): refund_authorization is NULL on all 125.
@@ -57,14 +77,19 @@ if (process.argv.includes('--selftest')) {
   //    fed wrong values by the layer above it. ⇒ this selftest goes through parseCsv() too.
   const tmp = S + '_selftest_rows.csv';
   fs.writeFileSync(tmp, 'market_id,side_rowid,side_lock_tx,stake_amount,auth\n' +
-    '"m1","1","aaaa","100",""\n' +      // in live set   -> LIVE
-    '"m2","2","bbbb","100",""\n' +      // not in set    -> ABSENT
-    '"m3","3","","100",""\n');          // no lock tx    -> NO_SIDE_LOCK_RECORDED  (adjacent empties!)
+    '"m1","1","aaaa","100",""\n' +      // aaaa:0 live        -> LIVE
+    '"m2","2","bbbb","100",""\n' +      // only bbbb:1 live   -> SIBLING_OUTPUT_LIVE (the adversarial one)
+    '"m3","3","","100",""\n' +          // no lock tx         -> NO_SIDE_LOCK_RECORDED (adjacent empties!)
+    '"m4","4","cccc","100",""\n');      // nothing of cccc    -> ABSENT
   const rows = parseCsv(tmp);
-  const live = new Set(['aaaa']);
+  // Canonical outpoints. `bbbb:1` is the adversarial one Codex asked for: the tx is present in the
+  // live set, but only at an index that is NOT where this cohort's side output lives. Matching on
+  // txid alone would call it locked; it must be rejected instead.
+  const live = new Set(['aaaa:0', 'bbbb:1']);
   const cases = [
     ['live outpoint', rows[0], live, 'SIDE_UTXO_LIVE__UNCLAIMED'],
-    ['absent outpoint', rows[1], live, 'SIDE_UTXO_ABSENT__SPENT_OR_NEVER_EXISTED'],
+    ['sibling output live only', rows[1], live, 'SIDE_UTXO_ABSENT__SIBLING_OUTPUT_LIVE'],
+    ['absent outpoint', rows[3], live, 'SIDE_UTXO_ABSENT__SPENT_OR_NEVER_EXISTED'],
     ['no lock tx recorded', rows[2], live, 'NO_SIDE_LOCK_RECORDED'],
     ['no chain read', rows[0], null, 'UNCLASSIFIED_NO_CHAIN_READ'],
   ];
@@ -112,9 +137,39 @@ function parseCsv(p) {
 const rows = parseCsv(S + 'j2-cohort-rows.csv');
 let live = null;
 try {
-  live = new Set(fs.readFileSync(S + 'j1-158-received.txt', 'utf8').trim().split('\n').map((s) => s.trim()));
+  // 🔴 The live set must be CANONICAL OUTPOINTS (`<64-hex txid>:<index>`), never bare txids.
+  //   The bare-txid file this script used to read was produced by regexing 64-hex out of chat
+  //   messages — that extraction silently dropped the index, i.e. half of an outpoint, and nobody
+  //   noticed for a day. Refusing bare txids here is the whole point of the v3 hardening: a
+  //   silently-degraded input must fail loudly instead of being matched on the half that survived.
+  const raw = fs.readFileSync(S + 'j1-158-received.txt', 'utf8').trim().split('\n').map((s) => s.trim()).filter(Boolean);
+  const bare = raw.filter((s) => /^[0-9a-f]{64}$/i.test(s));
+  const canonical = raw.filter((s) => /^[0-9a-f]{64}:\d+$/i.test(s));
+  if (bare.length) {
+    throw new Error(
+      `live set has ${bare.length} bare txid line(s) with no ":<index>" (of ${raw.length}). ` +
+      'An outpoint is (txid, index); matching on txid alone counts a live sibling output as if it ' +
+      'were the side output. Regenerate the file from the chain reader with the index column ' +
+      '(entry.outpoint.index), e.g. "<txid>:0" per line, then re-run.');
+  }
+  if (canonical.length !== raw.length) {
+    throw new Error(`live set: ${raw.length - canonical.length} line(s) match neither bare txid nor <txid>:<index> — refusing to guess`);
+  }
+  live = new Set(canonical);
   console.log('live UTXO set loaded: %d outpoints (J1, getUtxosByAddresses over the 27 side_p2sh)', live.size);
-} catch { console.log('!! no live UTXO set — every row falls to UNCLASSIFIED_NO_CHAIN_READ'); }
+} catch (e) {
+  // 🔴 This catch used to swallow everything, which silently neutralised the format guard added
+  //   above: a malformed live set produced "no chain read" and a tidy 125-row UNCLASSIFIED report
+  //   instead of the loud refusal it was written to be. A missing file is a legitimate state; a
+  //   present-but-wrong file is not, and the two must not collapse into the same output.
+  if (e && e.code === 'ENOENT') {
+    console.log('!! no live UTXO set file — every row falls to UNCLASSIFIED_NO_CHAIN_READ');
+  } else {
+    console.error('🔴 live set REJECTED: ' + (e && e.message ? e.message : String(e)));
+    console.error('   Refusing to classify against a degraded chain read. Fix the input, then re-run.');
+    process.exit(2);
+  }
+}
 
 const out = rows.map((r) => {
   const v = classify(r, live);
