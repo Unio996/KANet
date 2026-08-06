@@ -755,6 +755,18 @@ const actions = {
         rel: '../../src/api/pool.js',
         exports: ['buildBettorRefundClaim'],
       },
+      // 🔴 第 4 条(spec §10 v3, 2026-08-07 · NWT + Bettor 条件批准 · commit 848a1146)
+      //  ⚠ 它与上面三条【不是同一类东西】—— 上三条是【判定/构造】(你问它一件事, 它回答);
+      //     poolSettlerTick 是【驱动生产结算】的 tick 本体: 它写库, 且其 tick 区间内有真实外呼
+      //     (:960/:980/:999 三次链上读)。⇒ 本表因此从"可调的判定函数集合"扩到"可驱动的生产流程"。
+      //     批准是在知道这一点的前提下给的(spec §10.2), 不是批一行表。
+      //  🔴 只放开 poolSettlerTick 一个导出(约束 D): 同文件还有 dispatchRefund /
+      //     authorizeRefundByOwner 等**直接动钱**的导出 —— 放开文件 ≠ 放开文件里的一切。
+      //     该粒度由下方 `entry.exports.includes(step.export)` 机器强制, 不靠本注释。
+      'pool-market-settler': {
+        rel: '../../src/services/pool-market-settler.js',
+        exports: ['poolSettlerTick'],
+      },
     };
 
     const entry = ALLOWLIST[step.module];
@@ -798,6 +810,35 @@ const actions = {
           error: `P1 隔离断言失败: ${varName}=${JSON.stringify(raw || null)} 未落在测试库目录 ${expectedDir} 下 —— 拒绝 import 任何生产模块。` +
                  `(两个变量必须【各自】满足: $db 走 runner 的 KANET_DB_PATH, 模块顶层 import 走 client.js 的 DB_PATH; 只设一个 ⇒ 另一条路悄悄落回生产库)`,
           reply: '__DB_PATH_NOT_ISOLATED__',
+        };
+      }
+    }
+
+    // ── 🔴 G: RPC 不可达断言(spec §10.3-G · 2026-08-07 · NWT 提 + Bettor 加码为【断言非设置】)──
+    //  为什么它必须在这里、且必须是断言:
+    //   · import pool-market-settler.js 会传递性 import rpc-health.js, 而它在【模块加载时】fail-fast
+    //     (rpc-health.js:18 缺 KASPA_RPC_URL 抛 / :22 缺 KASPA_NETWORK 抛)。
+    //   🔴 两条路都坏, 而坏的方向【不对称】:
+    //       不设      ⇒ import 就抛      = 吵闹的失败, 安全
+    //       继承真实的 ⇒ 测试打到 live 节点 = 安静的成功, 危险 —— 而它是"什么都不做"时的默认行为
+    //     对一个处理退款/授权的 settler tick 来说, 后者不是"测试数据错了", 是"测试可能真的对 live 动作"。
+    //   🔴 与上面 DB_PATH 那段同一理由(spec §8.3): **设置会被别的用例覆盖、被环境继承、被顺序打乱;
+    //     而断言在决策点上读到什么就是什么。** 所以这里读的是"此刻的值", 不是"我们有没有设过"。
+    //  哨兵判据: 只接受 loopback 且端口 ∈ {9(discard), 1} —— 保证连不上, 且一眼看得出是故意的。
+    {
+      const raw = process.env.KASPA_RPC_URL;
+      let unreachable = false;
+      try {
+        const u = new URL(String(raw));
+        unreachable = (u.hostname === '127.0.0.1' || u.hostname === 'localhost') && (u.port === '9' || u.port === '1');
+      } catch { unreachable = false; }
+      if (!unreachable) {
+        return {
+          ok: false,
+          error: `G 断言失败: KASPA_RPC_URL=${JSON.stringify(raw || null)} 不是哨兵(不可达)地址 —— 拒绝 import 任何生产模块。` +
+                 ` 期望 ws://127.0.0.1:9 这类 loopback+discard 端口。理由: 继承真实 RPC 会让测试打到 live 节点,` +
+                 ` 而那是"什么都不做"时的默认行为(spec §10.3-G)。`,
+          reply: '__RPC_URL_NOT_SENTINEL__',
         };
       }
     }
