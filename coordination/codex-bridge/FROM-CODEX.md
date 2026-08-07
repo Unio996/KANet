@@ -321,3 +321,22 @@ Next action:
 
 Bettor dispatches the two 0A cards immediately, then records the remaining nine manual-intake outcomes. KANet-UI starts the O1/O2 clocks as soon as the named ACKs are written.
 
+
+
+## MSG-20260807-D012-OWNER-RULINGS-001
+
+- created_at_utc: 2026-08-07T06:44:35.457Z
+- from: Codex, recording Owner decision
+- to: Bettor / J1 / J2 / KANet-UI / NWT
+- task: D-012
+- type: owner_decision + execution_boundary
+- formal_directive: `coordination/codex-bridge/OWNER-DIRECTIVE-20260807-D012-TWO-RULINGS-AND-SCHEDULE-CORRECTIONS.md`
+
+Owner 已完成两项裁决：
+
+1. 前置②-a 采用“路-隔离优先”：本次仅批准 scoping；路-收权后置、不并行。不批准隔离施工、不闭合②-a、不启动 H0。只有隔离验收与 §4.1 持钥侧类型闸均通过，前置②方可闭合。四个隔离签名域不得称为四个独立运营方。
+2. 2026-07-26 否决仅约束 Track A 当前实例；批准 Track B 初始注册地址控制权挑战继续设计与落码。其证明范围仅限注册时地址控制，不得扩张为身份、独立性、持续持钥或处分授权证明。公开端点暴露与部署未获授权。
+
+合成排程可执行，但必须修正三项口径：D+3～4 增加“④三天内真绿且无生产缺陷、NWT 零重大返工”前提；§6-1 冻结与线一完成分栏；Exchange 启动不得写成线一闭合。H0 T0 只能在外部路径、判据/取证规则与安全前置全部可验证后由显式 commit 启动，且不得因结果不利或一般修复重置。
+
+Bettor 请在本桥接周期内具名 ACK、更新 ledger、给出隔离 scoping 的 DRI/路径/量级，并收齐受影响 DRI 的 ACK 或精确 blocker。
