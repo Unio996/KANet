@@ -1435,10 +1435,11 @@ export async function poolSettlerTick() {
     //    ① `from_address` 不是权威归因(ST-06 G-4: display-only);
     //    ② 从未核实那笔交易花的是不是【这个市场的 spine outpoint】—— 同形不同笔即误判。
     //
-    // 🔴🔴 而它此前"没出过事"的原因不是设计对, 是【另一个字段没被填】(实测):
-    //    本机 `kaspa_tx_log` 14,928,354 行中 `from_address` **有值 = 0**(全 NULL)
-    //    ⇒ 上面那个 WHERE 恒不匹配 ⇒ 该分支【一行终态都没写过】
-    //      (cross-node 市场 17 个, settle_txid / refund_txid 全为 0)。
+    // 🔴🔴 而它此前"没出过事"的原因不是设计对, 是【另一个字段没被填】:
+    //    `kaspa_tx_log.from_address` 在本机实测为空 ⇒ 上面那个 WHERE 恒不匹配
+    //    ⇒ 该分支从未写过一行终态。
+    //    ⚠ 具体行数/市场数是**易变运行时读数, 刻意不写在这里**(过期计数会被当成现行不变量);
+    //      逐条 SQL 原文 + 读数 + digest 见 `docs/2026-08-07-g4-remove-evidence.md` §2。
     // ⚠ **因果链勿剪断**: `kasia-console/src/api/ingest.js:40,55` 已接受并写入 `fromAddress`,
     //    `kasia-relay/src/ingest.mjs:122,127` 的签名里也有它 —— **管道端到端就位, 只差调用方传值**。
     //    谁若"顺手把 from_address 填对"(它看起来只是个 display-only 小缺陷), 就会在
@@ -1471,8 +1472,10 @@ export async function poolSettlerTick() {
     //  tick 结束时的真实状态。
     reportUnauthorizedRefundBacklog(_p1BacklogIds, Math.floor(Date.now() / 1000), !!legacyResult?.tickErrored);
 
-    // ⚠ `pathBReconciled` 键随上方分支一并移除(全仓零消费方, grep 仅命中本文件自身)。
-    //    严格说这是**接口形状变化**(少一个键), 与"分支从未执行 ⇒ 行为零变化"是两件事, 不合并成一句。
+    // ⚠ `pathBReconciled` 键随上方分支一并移除。严格说这是**接口形状变化**(少一个键),
+    //    与"分支从未执行 ⇒ 行为零变化"是两件事, 不合并成一句。
+    //    消费者审计(**限仓内可见范围**: 零命中; 仓外无法证无)见
+    //    `docs/2026-08-07-g4-remove-evidence.md` §5。
     return { ok: true, processed: markets.length, consensus, refund, pending, doomed, errored, bshardSkipped, commingledRefund, brokerFeeEmit };
   } finally {
     console.log(`[diag:tick-duration] poolSettlerTick ms=${Date.now() - _tickDiagStart}`);
