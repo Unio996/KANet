@@ -25,6 +25,14 @@
 //     · 生产改了白名单取值 ⇒ 用例自动跟着改, 不会出现"测试还绿、生产已变"的漂移
 //   不 import 生产模块本身(那会带进 sqlite/定时器副作用), 只读文本。
 //
+// 🔴 两处提取源不是同一个文件(2026-08-07 NWT 修·根因 = 常量 10b770f6 搬家后本用例红了 2 天没人跑):
+//   · 闸谓词本体(①-③, GUARD_PREDICATE/json_valid顺序/freeze前置检查)—— 花钱点仍在
+//     pool-market-settler.js, 继续读那个文件。
+//   · 白名单取值(④)—— `REFUND_AUTHORIZATION_WHITELIST` 已搬到单源共享 lib
+//     `src/lib/refund-authorization.mjs`(pool-market-settler.js 现在只 import + re-export,
+//     文件里不再有 `Object.freeze([...])` 字面量), 读那个文件才是读到设计上的单源, 不是
+//     "跟着这次搬迁改一次路径"这种下次搬家还会再红的脆弱修法。
+//
 // Offline: 读源码 + exec_sql fixtures + read-only query_db + teardown。不起服务、不碰链、不碰 relay。
 
 import fs from 'node:fs';
@@ -34,8 +42,12 @@ import { fileURLToPath } from 'node:url';
 const SETTLER_SRC = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   '../../../../src/services/pool-market-settler.js');
+const REFUND_AUTH_LIB_SRC = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  '../../../../src/lib/refund-authorization.mjs');
 
 const _src = fs.readFileSync(SETTLER_SRC, 'utf8');
+const _refundAuthLibSrc = fs.readFileSync(REFUND_AUTH_LIB_SRC, 'utf8');
 
 const GUARD_PREDICATE = "AND json_extract(pm.metadata, '$.refund_authorization') IN (${REFUND_AUTHORIZATION_SQL_IN})";
 
@@ -89,8 +101,10 @@ for (let i = _src.indexOf(GUARD_PREDICATE); i !== -1; i = _src.indexOf(GUARD_PRE
 }
 
 // ④ 白名单取值从生产常量提取, 不手抄 —— 生产改了本用例自动跟着改。
-const _wlBlock = _src.match(/REFUND_AUTHORIZATION_WHITELIST\s*=\s*Object\.freeze\(\[([\s\S]*?)\]\)/);
-if (!_wlBlock) throw new Error('提不到生产的 REFUND_AUTHORIZATION_WHITELIST 常量');
+// 读单源共享 lib(src/lib/refund-authorization.mjs), 不读 pool-market-settler.js ——
+// 后者自 10b770f6 起只 import + re-export, 字面量定义已不在那儿。
+const _wlBlock = _refundAuthLibSrc.match(/REFUND_AUTHORIZATION_WHITELIST\s*=\s*Object\.freeze\(\[([\s\S]*?)\]\)/);
+if (!_wlBlock) throw new Error('提不到 src/lib/refund-authorization.mjs 里的 REFUND_AUTHORIZATION_WHITELIST 常量');
 const WHITELIST = [..._wlBlock[1].matchAll(/'([a-z][a-z0-9_]*)'/g)].map((m) => m[1]);
 if (WHITELIST.length < 2) throw new Error(`白名单提取结果异常: ${JSON.stringify(WHITELIST)}`);
 
