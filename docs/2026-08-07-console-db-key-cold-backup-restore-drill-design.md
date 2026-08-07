@@ -1,4 +1,4 @@
-# 运营方 console.db + CONSOLE_ENCRYPTION_KEY 冷备 / 恢复演练 · 设计稿 v0.1
+# 运营方 console.db + CONSOLE_ENCRYPTION_KEY 冷备 / 恢复演练 · 设计稿 v0.2(NWT 审后更正)
 
 > **Status**: CURRENT
 
@@ -20,7 +20,7 @@
 ### 0.2 CONSOLE_ENCRYPTION_KEY
 - 位置: `kanet.env`(仓库根),单机单文件,`.gitignore` 排除(从不进 git,故 git 历史也不构成备份)。
 - 加密范围: `relay_nodes.privkey_encrypted`/`.mnemonic_encrypted`(relay/agent 私钥)、`tg_custodial_wallets.mnemonic_encrypted`(托管钱包助记词)、`broker_onboarding.bot_token_encrypted`、多个 CEX/链 API key。
-- **预测市场关键字段不受此 key 影响**——`side_lock_tx`/`side_p2sh`/`side_lock_daa`/`current_leaf_outpoint`/`current_leaf_state`/`payout_redeem_hex` 在 `pool_bettor_sides`/`market_shards`/`payout_shards` 里是明文列,key 丢失不直接摧毁这部分。但 key 丢失摧毁 relay 私钥与托管钱包助记词——这两类资产同样是真钱。
+- **预测市场关键字段不受此 key 影响**——`side_lock_tx`/`side_p2sh`/`side_lock_daa`/`side_redeem_script_hex`/`current_leaf_outpoint`/`current_leaf_state`/`shard_redeem_hex`/`payout_redeem_hex` 在 `pool_bettor_sides`/`market_shards`/`payout_shards` 里是明文列,key 丢失不直接摧毁这部分。但 key 丢失摧毁 relay 私钥与托管钱包助记词——这两类资产同样是真钱。
 - **零备份、零工具化**:`backup.js` 自己的注释把 key 备份推给"owner 单独备份";`install.sh:117` 只在首次安装时打印一行提示文案,没有任何自动化。CLAUDE.md/README/系统架构文档三处都写着"丢失=不可恢复"的警告,但今天没有任何机制兜着这句话。
 
 ### 0.3 可复用先例
@@ -28,7 +28,7 @@
 - 用纯文件系统 `cp` 三件套(`console.db`+`-wal`+`-shm`),**不用** `sqlite .backup()` / `VACUUM INTO`(会对活库强制 WAL checkpoint,造成争用——已有独立记忆 `feedback-heavy-read-ops-on-live-wal-db-cause-contention.md` 记录过 40-60x 延迟尖峰)。
 - 拷贝目标必须是隔离路径(`scratch/` 下),绝不写回 `data/`。
 - 已有操作纪律(Bettor 2026-07-16 定):重活读操作应在 **tree-kill console(quiesce)之后**做,不对活库直接跑,即使是"只读"操作。
-- 该次演练做了 `PRAGMA integrity_check`(7.3GB 上耗时 82962ms)+ `pool_markets`/`pool_bettor_sides` 行数与抽样行比对,**没有**专门校验 `side_lock_daa`/`current_leaf_outpoint`/`current_leaf_state`/`payout_redeem_hex` 这几个"一旦损坏就不可能从链上补回"的字段——本稿在这一点上比 Gate0 多做一步。
+- 该次演练做了 `PRAGMA integrity_check`(7.3GB 上耗时 82962ms)+ `pool_markets`/`pool_bettor_sides` 行数与抽样行比对,**没有**专门校验 `side_lock_daa`/`side_redeem_script_hex`/`current_leaf_outpoint`/`current_leaf_state`/`shard_redeem_hex`/`payout_redeem_hex` 这几个"一旦损坏就不可能从链上补回"的字段——本稿在这一点上比 Gate0 多做一步。
 
 ---
 
@@ -46,11 +46,15 @@
 
 ## §2 提案 Ⅰ:console.db 标准化快照
 
-- **触发时机**:console tree-kill(常规重启/supervisor 自愈)之后立即执行,而不是活库时定时执行——复用 Gate0 已验证的"quiesce 后 cp"安全窗口,避免新引入活库争用面。
+- **触发时机**:console tree-kill(常规重启/supervisor 自愈)之后、且新进程已拉起完成之后执行(精确位置见下),而不是活库时定时执行——复用 Gate0 已验证的"quiesce 后 cp"安全窗口,避免新引入活库争用面。
 - **方法**:文件系统级 `cp` 三件套(不用 sqlite 层 API),目标为独立于 `data/` 的快照目录,文件名带 UTC 时间戳。
 - **完整性校验**(比 Gate0 多一层):
   1. `PRAGMA integrity_check`(基础)。
-  2. **byte-exact 校验四个不可逆字段**——对快照与拷贝时刻的 live 库跑同一条 `SELECT` 取 `side_lock_daa`/`current_leaf_outpoint`/`current_leaf_state`/`payout_redeem_hex` 逐行 diff,而不是只信 schema 层面的 integrity_check(它查的是 B-tree 结构完整,不查内容语义正确)。
+  2. **byte-exact 校验六个不可逆字段**(2026-08-07 NWT 审补两个,原四个基础上加)——对快照与拷贝时刻的 live 库跑同一条 `SELECT` 取 `side_lock_daa`/`side_redeem_script_hex`/`current_leaf_outpoint`/`current_leaf_state`/`shard_redeem_hex`/`payout_redeem_hex` 逐行 diff,而不是只信 schema 层面的 integrity_check(它查的是 B-tree 结构完整,不查内容语义正确)。`side_redeem_script_hex`(`pool_bettor_sides`,migrate v136)与 `shard_redeem_hex`(`market_shards`,migrate v172,`current_leaf_outpoint`/`current_leaf_state` 的"第三个兄弟"、spliceLeafState 续约的 splice base)均是"丢了无法从链上补回"的字段。**判空用 `<> ''` 不用 `IS NOT NULL`**(J2 07:32Z 实测教训:`side_redeem_script_hex` 大量行是空字符串而非 NULL,`IS NOT NULL` 会把这些误判为"有值")。
+- **触发时机的精确位置(NWT 07:32Z 审问,补答,且这里有一个我自己发现的取舍未拍死)**:有两个候选窗口,各自代价不同,本稿不代为拍定,列出来交落码 spec 阶段定:
+  - **候选 A(tree-kill 之后、新进程拉起之前)**:文件真正静态(旧进程已死、新进程未写),与 Gate0 精神完全一致,零争用风险;**代价 = 阻塞本次重启的可用性恢复**,给现在每次~5小时一轮的常规重启额外拖数十秒到几分钟(12.5GB 量级估算,Gate0 那次 7.3GB 花 16.4 秒,同盘顺序拷贝同速率外推)。
+  - **候选 B(supervisor 拉起新进程之后,与新进程并行/后台执行)**:不阻塞可用性恢复;**代价 = cp 期间新进程可能已开始写 WAL,重新引入"活库时 cp"的争用风险**(即 §0.3 引用的那条 40-60x 延迟尖峰记忆所警告的场景),只是窗口窄(刚启动、负载低)而非消除。
+  - 本稿倾向 A(优先数据一致性,接受数分钟级重启拖时,且 console 本身已是间歇性服务,这点延迟边际代价可能不大),但这是可讨论的权衡不是既定结论,落码 spec 阶段需要 Bettor/NWT 明确选一个,不能含糊过去。
 - **轮换/留存**:建议保留最近 N 份(N 待定,不在本稿拍死——量级取决于磁盘容量,交 Bettor/Owner 定,§4 一起送审)。
 - **落点**:落码前需要一份具体脚本 spec(路径/触发钩子/校验命令),本稿只定方法论,脚本 spec 过审后另出。
 
