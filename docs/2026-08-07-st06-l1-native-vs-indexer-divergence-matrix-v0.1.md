@@ -1,4 +1,5 @@
-> **Status**: DRAFT v0.1 · **ST-06 · L1 原生事实与 Indexer 分歧测试** · 主笔 J1 × 协议复核 J2 × Gate NWT · **BATCH-0: 只设计+现状盘点+证据缺口, 不实跑/不改码/不拉取** · 承 `OWNER-DIRECTIVE-20260806-POST-TOCCATA-INSTITUTIONAL-STRESS-TEST` ST-06
+> **Status**: DRAFT v0.2 · **ST-06 · L1 原生事实与 Indexer 分歧测试** · 主笔 J1 × 协议复核 J2 × Gate NWT · **BATCH-0: 只设计+现状盘点+证据缺口, 不实跑/不改码/不拉取** · 承 `OWNER-DIRECTIVE-20260806-POST-TOCCATA-INSTITUTIONAL-STRESS-TEST` ST-06
+> **v0.2 变更(Bettor 08:17 派)**: G-4 按 Codex `87d546af` 升格 + J2 实测收窄(惰性缺陷·两台 from_address 全 NULL·从未击发)+ Bettor 拆弹裁定(移除 cross-node chain re-derive 分支, 卡 `G4-SETTLER-CHAIN-REDERIVE-BRANCH`)改写; 命名按 Bettor 08:24 全称+与 m0c-1 Path B 围栏消歧; §3 表行 + §7 汇总同步。Codex 定本稿"有用的 draft 非 VERIFIED, 三分类方向被认"。
 
 # ST-06 · L1 原生事实 vs Indexer 分歧矩阵 (现状盘点 v0.1)
 
@@ -29,7 +30,7 @@
 | money-path 读取点 | 形态 | indexer 不可用/分歧时 |
 |---|---|---|
 | `cross-chain-verify.mjs:474-537` kaspa 分支 | **indexer(kaspa_tx_log)优先 + RPC L1 降级** | ✅ 有 L1 fallback ⇒ 可独立判定 = **VERIFIED-path 候选**(待实跑注入) |
-| `pool-market-settler.js:1432-1465` spine-spend 判终态 | **纯 indexer**(从 `kaspa_tx_log.outputs_json` 找 spine spend, 无 L1 交叉核) | 🔴 indexer 漏该 spend ⇒ 误判"未花" ⇒ **无 L1 独立判定** = **NOT_PROVEN**(Gate 命中: 不得标 VERIFIED) |
+| `pool-market-settler.js` cross-node chain re-derive 分支(`pathBReconciled`, 旧称 Path B; **与 m0c-1 Path B 围栏无关**) | **纯 indexer + 非权威 from_address 索引 + 基数代理** | 🔴🔴 **惰性完整性缺陷**(Codex `87d546af` 升格 → J2 实测收窄, 卡 `G4-SETTLER-CHAIN-REDERIVE-BRANCH`): 用 `from_address=spine_p2sh` 选花费 + `outputCount>=2⇒completed/==1⇒refunded` 写终态; 但 `kaspa_tx_log.from_address` 两台节点全 NULL ⇒ 恒空 ⇒ **从未击发**(上膛未击发, 非现役写错)。Bettor 裁移除, NWT PASS 落码在途 — 详见 G-4 |
 | `trade-protocol-filter.js:792` 存在性 | **L1 直读**(getUtxosByAddresses) | ✅ 本就是 L1 = 独立判定 = **VERIFIED** |
 | `trade-protocol-filter.js:1184` side_lock_daa | **indexer 取 block_hash + L1 取 daaScore** | 🟡 依赖 indexer 有 block_hash(fail-loud 拒), 但**该 tx 若不在 indexer 覆盖窗则永拒** = **PARTIAL**(见 §5 两堵墙) |
 - 🔵 **本机独立 TN12 节点 = 本项的第二 L1 源**: indexer 分歧时能否独立判定, 需要一个**不由 KANet console 自身 indexer 供数**的 L1 视图 —— 本机节点正是(别台拿不到第二台独立节点核)。
@@ -55,7 +56,13 @@ BATCH-0 只设计 corpus 结构 + 期望值, 不实跑:
 - **G-1**: KANet-UI 台 `7b1e18cc` 的共识承重段未与 ab4c51a byte-exact 核 ⇒ "三台节点独立判定一致"未全证。修法: 拿今日两台 diff 的同一套六段哈希核第三台(需该台配合或 fetch 其 commit)。
 - **G-2**: canonical L1 fields 是否穷尽 money-path 依赖 —— 本稿覆盖 5 文件, 未全仓穷举。
 - **G-3**: "无一处 money-path 用 from_address 判值"是全称否定, 需全仓 grep 收窄。
-- **G-4**: `settler:1432` 纯 indexer 判终态 **无 L1 交叉核** ⇒ Gate 命中不得标 VERIFIED; 需设计一条 L1-only 交叉核(BATCH-1)。
+- **G-4** 🔴 **卡 `G4-SETTLER-CHAIN-REDERIVE-BRANCH`(Codex `87d546af` 升格 → J2 实测收窄 → Bettor 裁拆弹 → NWT PASS 落码在途, 2026-08-07)**:
+  - **对象命名(Bettor 08:24 钉死)**: `pool-market-settler.js` 的 **cross-node chain re-derive 分支(`pathBReconciled`, 旧称 Path B)** —— 🔴 **与 `m0c-1 Path B 围栏`(托管钱路保护装置, `docs/2026-07-23-m0c-1-path-b-pilot-containment-design.md`)毫无关系, 同名两物勿混**。
+  - **缺陷**: 用非权威 `from_address` 索引(`:1458 WHERE from_address=<spine_p2sh> ORDER BY block_time DESC LIMIT 1`, 拿地址去索引里【搜】= 猜"发生了哪笔交易")选 spine 花费, 再仅凭输出个数写终态(`:1468 outputCount>=2⇒completed` / `:1474 ==1⇒refunded`, 同形不同笔花费可有相同基数)。
+  - **J2 实测收窄 + 我第二源(均未发到频道前 NWT 已独立跑 console.db 确认)**: `kaspa_tx_log.from_address` 在 J2 台 14,928,354 行 + 本机 16,219 行 **两台全 NULL**(relay indexer 根本不填此列)⇒ 查询恒空 ⇒ **活跃性 0、历史写过 0 条终态** ⇒ 不是"现役写错", 是**上膛未击发的惰性缺陷**。
+  - 🔴 **它今天零风险的原因是【另一个字段没被填】, 而管道端到端已就位**(J2 实证: `ingest.mjs:122` `ingestKaspaTx({…fromAddress…})` 签名里已有此参, `:127 fromAddress||null`)⇒ **不需任何人"加功能", 只要 relay 侧调用处开始传这一个字段(看似修一个 §2 那条 display-only 小缺陷)⇒ settler 一字节没改就活过来**。同一字段"不填"是 §2 的特性 + 本缺陷的引信保险销, 修它一举两失 ⇒ Bettor `from_address` 挂"禁止顺手修"牌。
+  - **Bettor 裁拆弹(在册「保护不成立首选取消而非加固」+「safe-by-inert 风险在激活那刻」)**: 移除整段死代码(J2 出 diff+证据包, `pathBReconciled` 全仓零消费方 ⇒ 行为零变化 / 接口少一键但无消费者 = 影响零, **两句分开不合并**); NWT 独立审 PASS(自读 `:1430-1485/:1506` + 自跑 from_address SQL + grep 零消费方)。
+  - **⇒ 本行验收级别: 从我 v0.1 的 NOT_PROVEN 改为【惰性缺陷·移除落码在途】; 而 G-4 本体(九项清单的真对账能力)独立保留 OPEN** —— 移除后那些市场终态 = unresolved/manual-evidence-required(诚实态), 对账建设按 Codex 九项排期。修法归 J2(gap `:138` owned by J2-tn r418/r419)。
 - **G-5**: PSKT 是否进 money-path 组装 —— 待 J2 协议复核。
 
 ## §7 验收级别汇总 (本稿口径: design/现状盘点级, 非"能力已验证")
@@ -63,7 +70,7 @@ BATCH-0 只设计 corpus 结构 + 期望值, 不实跑:
 |---|---|---|
 | ① canonical L1 fields | VERIFIED(枚举) / PARTIAL(穷尽性 G-2) | — |
 | ② from_address display-only | VERIFIED(实证) | 全称需收窄 G-3 |
-| ③ indexer 分歧独立判定 | MIXED: L1直读 VERIFIED · indexer优先+降级 VERIFIED-候选 · **纯indexer NOT_PROVEN** | 🔴 settler:1432 命中 Gate, G-4 |
+| ③ indexer 分歧独立判定 | MIXED: L1直读 VERIFIED · indexer优先+降级 VERIFIED-候选 · **chain re-derive 分支 惰性缺陷(移除落码在途)** | 🔴 该分支 from_address 两台全 NULL 从未击发, 卡 `G4-SETTLER-CHAIN-REDERIVE-BRANCH` Bettor 裁移除; 真对账能力 G-4 独立 OPEN |
 | ④ corpus | NOT-RUN(BATCH-0 设计层) | 实跑待 BATCH-1 |
 | ⑤ 无 indexer 最小路 | VERIFIED(存在) / NOT_PROVEN(全覆盖) | G-4 |
 - 🔴 **一句不许被读歪**: 本稿证的是"L1-native 判定在**部分** money-path 上已是真源、在 `settler:1432` 那条上**还不是**", 不是"KANet 的 L1 独立性已验证"。**§3 那张三态表就是防止把好的那两态读成全体。**
