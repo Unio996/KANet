@@ -13,7 +13,8 @@
 | KANet console 运行时 | PID **32688** · T0=`2026-08-07T06:44:18Z`(OS netstat 实核非 supervisor 报数) | (140)BBj | 🔴 装载的是启动时刻树状态;import-at-start,commit 后不重启不生效 |
 | rusty-kaspa 源码树(本机) | `90dbf074`(+4 行未提交) | `git -C /d/rusty-kaspa rev-parse HEAD` | 🔴 **与 J1 那台 `ab4c51af` 不是同一版**((140)BBa 发现,两锚并列,不得混用) |
 | rusty-kaspa 源码树(J1 机) | `ab4c51af`(= 其 live 二进制自报 commit) | J1 06:33 报,二进制自报>树 HEAD 锚强序 | 待 J1 补启动横幅原文进本表 |
-| kaspad 二进制自报版本(两机) | **待补**(J1 + KANet-UI 各自) | 启动横幅 grep | 锚强弱序: 二进制自报 > 树 HEAD > 树 HEAD+未查改动((140)BBa) |
+| kaspad 二进制自报版本(本机) | `v1.1.1-toc.1-7b1e18cc`(KANet-UI 07:06Z 供,横幅原文) | `logs/kaspad-tn12.out.log` / `logs/kaspad.log` | ⚠ **横幅最后落盘 2026-07-15,而当前进程 PID 18480 起于 08-03**(疑日志目标换位)⇒ 版本按 D-005(禁 rebuild live 节点)推定不变,**但"横幅=当前进程自报"未核**——KANet-UI 如实标,不补成已核 |
+| kaspad 二进制自报版本(J1 机) | **待补**(J1) | 启动横幅 grep | 锚强弱序: 二进制自报 > 树 HEAD > 树 HEAD+未查改动((140)BBa) |
 | silverscript 编译器 | 本地分支 `j2-oppick-fix-2026-07-06` @ `8065184`(**含 OP_PICK 修复,从未推上游**) | `git -C /d/silverscript rev-parse HEAD` | 🔴 上游无此修复 ⇒ 第三方生成的 covenant 带已知 codegen bug(CLAUDE.md 状态注记;ST-01 known-divergence 第一行) |
 | kaspa-wasm SDK | vendored(`shared/vendor/kaspa-wasm`,无 package.json 版本号) | artifact 锚: `kaspa_bg.wasm` sha256=`51cec45e7f21dd7962bcc1830a4236c514d8f829d2babca30e77602a214c3791` | 版本号不可得 ⇒ 以字节哈希为身份 |
 | Node 运行时 | v24.14.1 | `node --version` | — |
