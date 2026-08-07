@@ -2,6 +2,7 @@
 
 > **Status**: DRAFT(v0.2 · 首交付截止 2026-08-08T02:00+07 · BATCH-0 docs/evidence-only)
 > **v0.2 变更(2026-08-07 10:2xZ)**: §2#3 并入退出图 v4 与 spine 普查数字;§3 对 CURRENT_PATH 场景做五要素展开;#7 divergence 实例按当日实测更正(OP_PICK 候选撤回、.sil 源码版本 epoch 实证);#4 并入 G-4 全弧证据。
+> **v0.2-a 措辞降级(2026-08-07 11:1xZ · Codex 3486cb17 审后)**: 🔴 **本文件全部资金/计数数字(171,227 / 81,665 / 48% / 52% / 701 / 21+6 / 36,012 / 26 / 6,360 / 1,341 / 99.5% / 40-40 / 14-14 / 2,863 …)一律为 `OBSERVED · NOT-YET-INDEPENDENTLY-REPRODUCIBLE`**——它们是本机运行时观察,证据包 `docs/2026-08-07-st00-exposure-evidence.md`(J2 编,Codex 八项形态)落地并经 NWT 抽验前,**不得升为 VERIFIED 制度性主张**。唯一被 Codex 升级的是 **#5 V1 PayoutShard liveness 失败 = CONFIRMED-AT-CODE-LEVEL**(逐行读 `PayoutShard.sil`:cancel_attest 要 validSigs>=4、`closed 0→2`、零 tx.time/timelock/无许可逃生;作用域**仅 V1 PayoutShard 一族,禁外推**)。
 > **DRI**: Bettor · 支持: KANet-UI · 红队: NWT(跨项,专查"必要条件被写成充分条件")
 > **上游**: `coordination/codex-bridge/OWNER-DIRECTIVE-20260806-POST-TOCCATA-INSTITUTIONAL-STRESS-TEST.md` + Codex ACK(4f202a58)
 > **本稿纪律**: 每个 claim 无精确锚 = NOT PROVEN,不用推断补齐;统一验收语言五级(PROTOCOL CAPABILITY / TESTABLE MACHINERY / VERIFIED PATH / USABLE INFRASTRUCTURE / NOT PROVEN)。
@@ -37,7 +38,8 @@
 
 ## §2-bis 退出图 v4 与量化(2026-08-07 当日实测,并入 #3 行的数字底座)
 
-- **非终态 v0.7 市场 381 个,377 个链上仍有钱,合计 ≈171,227 KAS**(直连 kaspad 全量普查,去重口径):**≈81,665(48%)在 spine 层 = bettor 零自主退出**(唯 `settle_aggregate` 5 委员 / `refund_maker_unjoined` maker 限额);≈89,496(52%)在 side 层=自主路可用(受两格: 私钥托管 / redeem+outpoint 数据)。
+> ⚠ **本节全部数字 = OBSERVED·NOT-YET-INDEPENDENTLY-REPRODUCIBLE**(证据包待落,见文件头 v0.2-a)。
+- **非终态 v0.7 市场 381 个,377 个链上仍有钱,合计 ≈171,227 KAS**(直连 kaspad 全量普查,去重口径):**≈81,665(48%)在 spine 层 = bettor 零自主退出**(唯 `settle_aggregate` 5 委员 / `refund_maker_unjoined` maker 限额);≈89,496(52%)在 side 层——🔴 **脚本层暴露自主退出分支 = 必要条件,非充分**: 用户还须实际持有私钥 + redeem script + outpoint/proof 材料才真能退出(见 §2-bis 四路 + tg 托管那格: 钥匙在运营方 ⇒ 脚本有分支而用户退不出)。**"side=自主退出可用"是脚本能力陈述,不是可操作退出性陈述。**
 - **四路退出形态**: bshard V1(701 shards)=5 委员签零 timelock 永锁面 🔴 · bshard V2+ZK close(21+6)=零签名 merkle 自证 🔵 · PoolSide(36,012 sides)=自签+不可 grief ctor deadline 🟡 · tg 托管(26)=钥匙大概率在运营方 🔴。**全局: 退出强弱差在要不要签名,瓶颈四路一致=链下数据在谁手上;零签名把依赖从私钥换成数据,没有消除依赖。**
 - **锚材料实况**: 两套架构双锚(side_redeem_script_hex 6,360 条 99.5% 当前版可 byte-exact 再生成、31 条旧版可枚举 / shard_redeem_hex 1,341 全有 40/40 实测)——"实无从锚"档趋近空集;再生成前置=钉住 .sil 源码版本。**锚得住≠退得出。**
 - 与 33,735 KAS 卡(`pruned_expired_waived` 137 盘)= **基本独立两问题**(A=没人去做,B=做不了;读数同处置反,维持两卡;65 KAS 双重归属扣重)。
@@ -64,7 +66,7 @@
 
 **#3 剪枝越窗**: 前置=非终态市场 side 已越 pruningPoint(实况: 可测 2,863 条 100% 已越)。注入=无需注入,已是现状。可观察量=`side_lock_daa` vs 节点 `pruningPointDaa`(⚠ 覆盖率仅 8%,SIDE-LOCK-DAA-COVERAGE-8PCT 卡)。预期行为=**资金可花性不受影响**(剪枝丢历史不丢 UTXO 集,J1 38/38 实测),失去的是独立归属证明。恢复=归档锚 `hash(构造参数拼出的脚本)==UTXO 当前 scriptPubKey`(剪枝免疫,双架构实测 40/40+14/14)。不变量=锚得住≠退得出。状态=**PARTIAL**(现象已实测;可信归档 manifest 在途)。
 **#4 indexer 失真**: 见 §3 表行 G-4 全弧。预期 fail-closed=终态只能由权威 outpoint 级对账写(九项清单),缺则 unresolved。状态=**PARTIAL**(危险分支已移除;对账能力 NOT-RUN)。
-**#5 oracle 委员失效**: 前置=V1 盘(701)委员不可用。注入=委员不签 `cancel_attest`。可观察量=`closed` 停 0、spine 资金不动(实测: 81,665 KAS 正处此态族)。预期=**当前无 fail-safe——零 timelock 即永锁**(实测现状,非假设)。恢复=无协议内路径;升 V2 形态或委员恢复。不变量=「验不成 ≠ 可退款」同时成立 ⇒ 双向都不许自动。状态=**FAIL(as-is 记录)**——这是 ST-05/②-a liveness 面要解的本体。
+**#5 oracle 委员失效**: 前置=V1 PayoutShard 盘(≈701 OBSERVED)委员不可用。注入=委员不签 `cancel_attest`。可观察量=`closed` 停 0、spine 资金不动。预期=**当前无 fail-safe——`cancel_attest` 要 validSigs>=4、合约内零 tx.time/timelock/无许可逃生分支 ⇒ 委员签不出即永锁**。恢复=无协议内路径;升 V2 形态或委员恢复。不变量=「验不成 ≠ 可退款」同时成立 ⇒ 双向都不许自动。状态=🔴 **CONFIRMED-AT-CODE-LEVEL(Codex 3486cb17 逐行读 `PayoutShard.sil` 确认;作用域仅 V1 PayoutShard 一族)**——**这是本压力测试第一条被外部独立审升到代码级确认的实质缺陷**;是 ST-05/②-a liveness 面要解的本体。⚠ **禁外推**: `PredictionEscrowUnanimous5.sil` 等有 deadline refund 分支,是不同合约族不同退出模型,不适用本结论(Codex 明令,每行退出带确切合约文件名)。
 **#6 部分签名**: 前置=collecting_sigs。注入=签名凑不齐。可观察量=`:1149` watchdog-b 超时 → cancel+maker refund 通道(实存)。预期=按 D-012 不变量,缺证据不得转成另一条不可逆钱路的许可——现状该通道自动,**与不变量的张力在案**(P1 卡族)。状态=**PARTIAL**。
 **#7 工具链漂移**: 见 §3 表行两活体。预期=fail-closed: 再生成必须钉 .sil 版本+编译器身份,mismatch 即拒。状态=**PARTIAL**(判别器已有: hex 长度直方图;守卫未机制化)。
 **#8 费用暴涨**: 前置=90% 下界参数。注入=fee/输入 涨至 ~19.6e6 sompi(观测 max 的 7.8 倍)。可观察量=毛额守恒锚拒签。预期=误拒即正确告警(J2 1c 实测判据: "不误拒"非"够防";10 KAS 抽水盲区已量化进 §0 已知不覆盖)。状态=**PARTIAL·参数已实测**。
