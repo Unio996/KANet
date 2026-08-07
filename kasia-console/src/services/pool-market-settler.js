@@ -1427,62 +1427,30 @@ export async function poolSettlerTick() {
       console.warn(`[pool-settler:watchdog] phase fail: ${e.message}`);
     }
 
-    // r419 (Bettor r429 关2 推进 Path B): re-derive from chain — authoritative 收敛.
-    // 防 Path A push broadcast 丢失. settler tick 扫 verifying cross-node markets, 查
-    // kaspa_tx_log 是否有 TX spend spine UTXO (= from_address = spine_p2sh). 找到即终态:
-    // - outputs ≥ 2 → settle (settle_aggregate 多输出: maker+bettors+oracles)
-    // - outputs = 1 → refund (refund_maker_unjoined 单输出)
-    // 仅 cross-node (= maker_relay_id 'cross-node:...') 走此路径 — local maker 由 settler 主线驱.
-    let pathBReconciled = 0;
-    try {
-      const stuckMarkets = sqlite.prepare(`
-        SELECT id, spine_p2sh, maker_relay_id, protocol_status, protocol_version
-        FROM pool_markets
-        WHERE protocol_status IN ('verifying', 'collecting_sigs')
-          AND maker_relay_id LIKE 'cross-node:%'
-          AND settle_txid IS NULL
-          AND refund_txid IS NULL
-      `).all();
-      for (const sm of stuckMarkets) {
-        // 🔴 反向结构隔离(2026-07-06 NWT 自动进程横扫抓出，开盘前必堵): 这个 Path B reconcile 块漏了
-        // main loop(L356)/watchdog(L1072)都有的 isBshard-skip——bshard 市场(含今天新增的 ZK-native)
-        // 归 bshard-settle-daemon.mjs 独家负责终态判定，不该被这里按 spine_p2sh 上任意一笔花费的
-        // output 数量强行猜成 completed/refunded。若不排除，一旦 ZK 管线自己的 consolidate/zk_handoff
-        // 交易花了 spine_p2sh，这段代码会误读成"最终结算"，跟真正的 zk_settled 写入抢跑/冲突——不是
-        // 浪费费用，是状态被写错。补齐跟另外两处同款的 guard，不是新逻辑，是补齐既有纪律的漏网之鱼。
-        const isBshardPathB = !!sqlite.prepare('SELECT 1 FROM market_shards WHERE logical_market_id = ? LIMIT 1').get(sm.id);
-        if (isBshardPathB) continue;
-        const chainTx = sqlite.prepare(`
-          SELECT tx_id, outputs_json, block_time
-          FROM kaspa_tx_log
-          WHERE from_address = ?
-          ORDER BY block_time DESC
-          LIMIT 1
-        `).get(sm.spine_p2sh);
-        if (!chainTx) continue;
-        let outputCount = 0;
-        try {
-          const outs = JSON.parse(chainTx.outputs_json || '[]');
-          outputCount = Array.isArray(outs) ? outs.length : 0;
-        } catch {}
-        if (outputCount >= 2) {
-          // Settle: many outputs (maker+bettors+oracles).
-          sqlite.prepare('UPDATE pool_markets SET settle_txid = ?, protocol_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
-            .run(chainTx.tx_id, 'completed', sm.id);
-          console.log(`[pool-settler:path-b] re-derive cross-node SETTLED market=${sm.id.slice(0,12)} settle_txid=${chainTx.tx_id.slice(0,16)} outputs=${outputCount} (was ${sm.protocol_status})`);
-          pathBReconciled++;
-        } else if (outputCount === 1) {
-          // Refund: single output (maker).
-          sqlite.prepare('UPDATE pool_markets SET refund_txid = ?, protocol_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
-            .run(chainTx.tx_id, 'refunded', sm.id);
-          console.log(`[pool-settler:path-b] re-derive cross-node REFUNDED market=${sm.id.slice(0,12)} refund_txid=${chainTx.tx_id.slice(0,16)} (was ${sm.protocol_status})`);
-          pathBReconciled++;
-        }
-      }
-      if (pathBReconciled > 0) console.log(`[pool-settler:path-b] reconciled ${pathBReconciled} cross-node market(s) from chain this tick`);
-    } catch (e) {
-      console.warn(`[pool-settler:path-b] phase fail: ${e.message}`);
-    }
+    // ── 已移除: cross-node chain re-derive 分支(`pathBReconciled`, 旧称 "Path B")──
+    //  卡 G4-SETTLER-CHAIN-REDERIVE-BRANCH · Bettor 2026-08-07 裁定移除 · NWT 独立审 PASS
+    //
+    // 🔴 为什么移除(而不是加一个 disabled 标记): 它只凭 `kaspa_tx_log` 里【按 from_address 搜出的
+    //    最近一笔】交易的**输出个数**就写终态(>=2⇒completed / ==1⇒refunded)。两处非权威:
+    //    ① `from_address` 不是权威归因(ST-06 G-4: display-only);
+    //    ② 从未核实那笔交易花的是不是【这个市场的 spine outpoint】—— 同形不同笔即误判。
+    //
+    // 🔴🔴 而它此前"没出过事"的原因不是设计对, 是【另一个字段没被填】(实测):
+    //    本机 `kaspa_tx_log` 14,928,354 行中 `from_address` **有值 = 0**(全 NULL)
+    //    ⇒ 上面那个 WHERE 恒不匹配 ⇒ 该分支【一行终态都没写过】
+    //      (cross-node 市场 17 个, settle_txid / refund_txid 全为 0)。
+    // ⚠ **因果链勿剪断**: `kasia-console/src/api/ingest.js:40,55` 已接受并写入 `fromAddress`,
+    //    `kasia-relay/src/ingest.mjs:122,127` 的签名里也有它 —— **管道端到端就位, 只差调用方传值**。
+    //    谁若"顺手把 from_address 填对"(它看起来只是个 display-only 小缺陷), 就会在
+    //    【本文件一个字节都没改】的情况下把这段逻辑武装起来。⇒ 只有移除拆得掉这条因果链。
+    //
+    // ⚠ 命名: 本分支旧称 "Path B", 与 `m0c-1 Path B 围栏`
+    //    (docs/2026-07-23-m0c-1-path-b-pilot-containment-design.md —— custodial_transfer 托管围栏 /
+    //     grant registry source_scope / gateway 限流)**毫无关系**。同名两物, 勿混。
+    //
+    // 📌 移除的是【危险】不是【需求】: 这些 cross-node 市场仍需要真正的对账路径, 归 G-4 本体
+    //    (Codex 九项最低清单)独立 OPEN; 在它建成前, 这些市场终态保持
+    //    unresolved / manual-evidence-required(诚实态), 不由本文件猜。
 
     // broker 佣金到账 emit pass (Owner 主线): completed 盘 settle TX 进 kaspa_tx_log 后·从 outputs_json 按 broker
     // 地址取链验金额 emit broker_fee_landed (tg-bot DM consumer 消费)。post-index·非 settle-submit 点 (那时没 index)。
@@ -1503,7 +1471,9 @@ export async function poolSettlerTick() {
     //  tick 结束时的真实状态。
     reportUnauthorizedRefundBacklog(_p1BacklogIds, Math.floor(Date.now() / 1000), !!legacyResult?.tickErrored);
 
-    return { ok: true, processed: markets.length, consensus, refund, pending, doomed, errored, pathBReconciled, bshardSkipped, commingledRefund, brokerFeeEmit };
+    // ⚠ `pathBReconciled` 键随上方分支一并移除(全仓零消费方, grep 仅命中本文件自身)。
+    //    严格说这是**接口形状变化**(少一个键), 与"分支从未执行 ⇒ 行为零变化"是两件事, 不合并成一句。
+    return { ok: true, processed: markets.length, consensus, refund, pending, doomed, errored, bshardSkipped, commingledRefund, brokerFeeEmit };
   } finally {
     console.log(`[diag:tick-duration] poolSettlerTick ms=${Date.now() - _tickDiagStart}`);
     running = false;
