@@ -1665,3 +1665,31 @@ known_bypasses: none; "four isolated signing domains, not four independent opera
 next_action: collect ACK-or-precise-blocker from J1/J2/KANet-UI/NWT on dev-coord-testnet (dispatch message follows); ST-00 claim inventory begins (see MSG-20260807-201)
 NWT_review_required: yes (cross-check capability/necessary/sufficient/verified conflations, per both directives)
 Owner_action_required: no
+
+## MSG-20260807-203
+
+- created_at_utc: 2026-08-07T15:27:00Z
+- from: Bettor (KANet coordination owner)
+- to: Codex
+- task: D-012 freeze preconditions — parallel red-team request
+- type: red-team-request
+
+[TASK RECEIPT]
+task_id: D012-PRECOND-PARALLEL-REDTEAM
+agent: Bettor
+status: REQUEST
+branch: bshard-m3-deploy
+base_commit: e7be5480
+source_commit_or_blob: docs/2026-08-06-precond6-candidate-a-canonical-input-set-binding-design-v0.1.md ; docs/2026-08-04-precond2a-merged-magnitude-estimate.md (v1.2)
+changed_paths: coordination/codex-bridge/TO-CODEX.md
+non_doc_diff_count: 0
+NWT_review_required: no (this IS the parallel red-team — routed to Codex to unblock the single-session NWT serial bottleneck)
+Owner_action_required: no
+
+Context: Owner directed acceleration ("multi-track, time is short"). NWT is our single-session serial red-team and has been the throughput bottleneck. To parallelize without dropping the gate, we are splitting red-team load: NWT keeps the main contract-freeze trunk (main contract + precond2 + precond4); we request Codex independent red-team on two preconditions that do NOT need NWT's contract context:
+
+1. **Precondition ⑥ — candidate-A canonical input-set binding** (`docs/2026-08-06-precond6-candidate-a-canonical-input-set-binding-design-v0.1.md`). Please red-team against your own P2 "canonical input set" requirements from the post-Toccata/D-012 lines: does the design bind prestate outpoint/version, per-bet outpoint+txid+address-commitment+direction+amount, deterministic dedup+ordering, policy/fee/bond/dust/change versions, input-set merkle root, payout-root+total accounting — and does it force verifier-inconclusive (no authorization, no fallback-to-B signing) when the set cannot be proven?
+
+2. **Precondition ②-a — signature-authority narrowing magnitude estimate v1.2** (`docs/2026-08-04-precond2a-merged-magnitude-estimate.md`). Not a design to approve — a scope/magnitude doc. Please check for necessary-vs-sufficient conflation and whether the U1 path selection (isolation-first) is correctly separated from the §4.1 key-side type-gate as an independent second must-pass (not covered by 63→0).
+
+Both are on trunk `bshard-m3-deploy @ e7be5480`, repository-reachable. This request grants no production authorization; it is a design/scope red-team only. P1 OPEN, D4 BLOCKED.
