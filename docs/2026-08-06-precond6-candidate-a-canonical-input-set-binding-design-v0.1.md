@@ -1,4 +1,5 @@
-> **Status**: DRAFT **v0.2** · v0.1 作者 J3(J1 顶替工作代理),committed `4aa4ea3b`,2026-08-06 · **v0.2 主笔 J1tn**(Bettor 2026-08-07 16:18Z 频道 `#j5gfyh` 派「@J1 你顶替主笔,出 v0.2」)· DESIGN-ONLY 零实现授权 · 待复审
+> **Status**: DRAFT **v0.2.1** · 🔴 **v0.2.1 = 我自己推出 v0.2 后自查发现的三条更正(见文末「v0.2.1 自纠块」): R-2b 机制破两处 · `oracle_fee_bps` 同样没有链上权威 ⇒ R-3 范围扩大到整个费率层 · R-3 一句支撑推理错但结论更硬。** 引用本稿任何关于 `redeem_ctor` / 费率权威的结论前, **先读文末自纠块**。
+> **Status(承上)**: v0.1 作者 J3(J1 顶替工作代理),committed `4aa4ea3b`,2026-08-06 · **v0.2 / v0.2.1 主笔 J1tn**(Bettor 2026-08-07 16:18Z 频道 `#j5gfyh` 派「@J1 你顶替主笔,出 v0.2」)· DESIGN-ONLY 零实现授权 · 待复审
 > **v0.2 依据**: Codex 红队 `b563d585`(`coordination/codex-bridge/responses/RESPONSE-20260807-PRECOND6-CIS-ROOT-AND-PRECOND2A-MAGNITUDE-CODEX-REDTEAM.md`)判 **`PRECOND6_DIRECTION_ACCEPTED_BUT_V01_IS_RED`**,MUST-FIX 两条 + 强制变异测试 + 阳性对照收紧。
 > **文件名注**: 文件名保留 `-v0.1.md` 不改(改名会撞 doc-lint「同名多路径」且让 `4aa4ea3b` 之后的既有引用失效)。**版本以本 Status 行与标题为准,不以文件名为准。**(同 ③ 稿既定编法)
 > **v0.2 编法**: **原文一字不删**。所有 v0.2 变更走**独立修订块**(标 `🆕 v0.2`),紧贴被修订的原段落之下;被改的表格格子在修订块里重述「原值 → 新值 → 为什么变」,原表原样保留并在其上加指针。
@@ -669,6 +670,73 @@ guest 产 proof,journal 绑三元组                         CloseZkV2.sil:45
 
 ---
 
+> ## 🔴🔴 🆕 **v0.2.1 自纠块**(J1tn 同日晚, v0.2 推出后自查发现)—— **R-2b 塌了一半, R-3 的范围要扩大**
+>
+> **由来(方法论比结论重要)**:我在做 ST-02 取证时看见 `PoolSpine_v06.sil` / `PoolSpine_v07.sil` 是**独立合约源文件**,
+> 与 v0.2 里"全仓只有一个 spine ctor 构造器"那句直接冲突。按 [[correction-must-propagate-backward]],
+> 回头重判所有靠那句支撑的结论 —— 结果是 **R-3 更硬了, 而 R-2b 破了**。
+>
+> ### C-1 · R-3 的一句支撑是错的, 但**结论不但站得住, 证据还更强**
+>
+> | | v0.2 写的 | 实况 | 影响 |
+> |---|---|---|---|
+> | spine ctor 数量 | "全仓只有这一个构造器 ⇒ v0.5/v0.6/v0.7 共用同一份 ctor" | 🔴 **错**。三份独立合约:`PoolSpine.sil`(v0.5, 烤 3 个 oracle PK)/ `PoolSpine_v06.sil`(改烤 `poolMerkleRoot`)/ `PoolSpine_v07.sil`(v0.6 + `shard_id`/`shard_count`/`market_id`);至少两个构造器(`pool-p2sh.mjs computeSpineP2SH` + `pool-p2sh-v06.mjs computeSpineP2SH_v06`) | **推理错, 结论对** |
+>
+> 🔵 **而 R-3 的结论现在是对三份真合约源逐一核过的**(`[CONFIRMED·源码实读]` ctor 参数表原文):
+> - `PoolSpine_v06.sil:46-57` = `makerPk, brokerPk, poolMerkleRoot, deadline, minerFee, brokerFeePct, oracleFeePct, oracleBondAmount, makerStakeAmount, marketMetadataHash`
+> - `PoolSpine_v07.sil:69-84` = 同上 + `shard_id, shard_count, market_id`
+> - **三个版本的 ctor 里都没有 maker 费率。**(`makerStakeAmount` 是 maker 本金, 不是费率 —— 别看混。)
+> ⇒ **R-3 由"只查了一个构造器的推断"升为"对三份合约源的直接核实"。**
+>
+> ### 🔴 C-2 · **`oracle_fee_bps` 也没有链上权威 —— R-3 不是一个字段的事, 是整个费率层**
+>
+> v0.2 的 R-3 表把 `oracle_fee_bps` 判为 🟢 `redeem_ctor` 可用。**那一格现在要改成 🔴。**
+>
+> **两条证据**:
+> 1. **`brokerFeePct` / `oracleFeePct` 在 v0.6/v0.7 合约体内零使用** `[CONFIRMED·源码实读]` —— 它们只出现在 ctor 参数表
+>    (`PoolSpine_v06.sil:52,53` / `PoolSpine_v07.sil:75,76`);而 `makerStakeAmount`/`minerFee` **是真被用的**
+>    (`v06:240-242,285` / `v07:282-285,291,395-396` 的 `require`)。
+> 2. **未被使用的 ctor 参数会被编译器丢出 redeem** —— 这不是推测, 是本仓一条**有真实资金后果**的在册缺陷:
+>    `pool-commingle-detect.mjs:3-7`(NWT FINDING-2)逐字记着「pre-fix `PoolSpine_v07.sil` didn't bake `market_id`
+>    into the redeem (**unused ctor param dropped**)」⇒ 只差 `market_id` 的市场坍缩成**同一个 spine_p2sh**, 资金混同。
+>
+> ⇒ 🔴 **在 v0.6/v0.7 上, `oracleFeePct` 与 `brokerFeePct` 极可能根本不在 redeem 里** ⇒ 它们**不影响 P2SH** ⇒
+> **"重算 P2SH 比对"认证不到它们** ⇒ 它们和 `maker_fee_bps` 一样没有链上权威。
+> **R-3 的结论因此扩大**:不是"一个字段卡住 ⑥", 而是 **v0.6/v0.7 上整个费率层都没有链上权威**。
+> 🔵 `broker_fee_bps` 尚有 DB 列可作(弱)交叉核;`oracle_fee_bps` 连列都没有 ⇒ 与 `maker_fee_bps` 同档。
+>
+> 🔴 **证据层级必须说准**:上面是「**在册的编译器行为 + 合约体零使用**」两条合起来的**强推断**, **不是实测**。
+> 我设计了构造式判据(同一 ctor 只改 `oracleFeePct`, 看 v0.6 spine P2SH 变不变; 以 `minerFee` 变更作阳性对照证明尺子能量出差异),
+> **但它没跑成** —— 见 C-3。**在它跑出来之前, 本条标 `[强推断·未实测]`, 谁都不许把它当已证。**
+>
+> ### 🔴 C-3 · R-2b 的机制本身破了两处
+>
+> **破口一(概念)**:R-2b 说"重算 P2SH 一次比对**认证整个 ctor 元组**"。**这句话过头了。**
+> 它只能认证**活到 redeem 里的那些参数**;**声明了但没被使用的参数对 P2SH 毫无影响, 该机制对它们完全瞎。**
+> 🔨 **判据(比这一处大)**:**「在 ctor 参数表里」不等于「被烤进 redeem」。** 本仓已为这个差别付过一次资金混同的代价。
+> ⇒ R-2b 的正确表述:**它认证的是"编译后 redeem 实际承诺的那些量", 而哪些量在里面, 必须逐合约实测, 不能从参数表推。**
+>
+> **破口二(可用性)**:**这台节点根本跑不了 R-2b。** `[CONFIRMED·实跑报错]`
+> `pool-p2sh.mjs:19` pin 的编译器 `D:/silverscript/versioned-builds/silverc-legacy-2c46231.exe` —— `spawnSync … ENOENT`。
+> (`/d/silverscript` 源码树在, 但那个 pin 的构建产物不在。CLAUDE.md「silverc build 必全节点 pin 同字节」在本机不成立。)
+> ⇒ **我提议用作 `policy_source=redeem_ctor` 权威的那个机制, 在队里第二台全节点上无法执行。**
+> 🔴 **这直接反噬 ⑥ 的可实现性**:一个"独立验证者必须能自己算"的权威, 如果**只有部署机算得出**, 它就不是独立权威。
+>
+> ### C-4 · 由此产生的动作(不自行拍板)
+>
+> 1. **@J2 / @NWT 优先**:替我把 C-2 的构造式判据**在有编译器的机器上跑一次**(纯本地编译+哈希, 零链上零资金)。
+>    **必须带阳性对照**(改 `minerFee` 必须让 P2SH 变), 否则"没变"可能只是尺子坏了。**跑出来才算数。**
+> 2. **R-2b 若被 C-2 坐实** ⇒ `redeem_ctor` 在 v0.6/v0.7 上能覆盖的政策字段**远少于 v0.2 假设的**,
+>    ⇒ **R-3.4 推荐的出路 (ii) 更重要了**(它不依赖 redeem 里有没有那个字段)。
+> 3. **前一版 R-3 表里 `oracle_fee_bps` 那格 🟢 请勿引用** —— 以本自纠块为准。
+> 4. **ST-02 交叉记账**:C-3 破口二(pin 的 silverc 缺失)+ ZK-SDK `D:/rusty-kaspa-zksdk-isolated` **本机不存在**,
+>    两者都是 ST-02 第 4 项(program / proving key / descriptor 可获得性)的实锚, 已在此登记, 待并入 ST-02 稿。
+>
+> 🔨 **一句留给下一个人的**:v0.2 我自己写下"边界:该机制只能认证 ctor 里有的字段" —— **我把边界划在了参数表上,
+> 而真正的边界在编译产物上。** 划错一层的边界比不划更危险, 因为它读起来像已经谨慎过了。
+>
+> ---
+>
 > ## 🆕 v0.2 · §9-bis 交审点名(替换上面 §9 的分工,原 §9 保留不删)
 >
 > 1. **@Bettor(裁定,挡在最前面)**:
