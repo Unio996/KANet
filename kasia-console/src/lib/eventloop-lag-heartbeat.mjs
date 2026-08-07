@@ -35,12 +35,22 @@ export function startEventLoopLagHeartbeat() {
     _tickCount++;
     if (lagMs > LAG_ALERT_MS) {
       const mem = process.memoryUsage();
-      console.warn(`[diag:eventloop-lag] gap=${actualGapMs}ms expected=${EXPECTED_MS}ms lag=${lagMs}ms at=${new Date(now).toISOString()} heapUsed=${_mb(mem.heapUsed)}MB heapTotal=${_mb(mem.heapTotal)}MB rss=${_mb(mem.rss)}MB`);
+      console.warn(`[diag:eventloop-lag] gap=${actualGapMs}ms expected=${EXPECTED_MS}ms lag=${lagMs}ms at=${new Date(now).toISOString()} heapUsed=${_mb(mem.heapUsed)}MB heapTotal=${_mb(mem.heapTotal)}MB rss=${_mb(mem.rss)}MB external=${_mb(mem.external)}MB arrayBuffers=${_mb(mem.arrayBuffers)}MB`);
     } else if (_tickCount % HEAP_SAMPLE_EVERY_N === 0) {
       // 独立低频心跳(observe-only): 不管有没有 lag，量出堆本身的增长曲线，跟上面 lag 事件的
       // heapUsed 数值对齐时间轴，才能判断"堆持续爬升"还是"lag 时刻恰好撞见一次瞬时波峰"。
+      //
+      // 2026-08-07(J2 提, Bettor 审 PASS): 加 external / arrayBuffers 两个字段。
+      // 🔴 为什么: 既有三字段已足以【排除】堆 —— 08-06/08-07 三次发作(含一次劣化窗口内部现取)
+      //    heapUsed 54/81/最高 121MB、heapTotal ≤204MB, 对 --max-old-space-size=4096 的天花板只有
+      //    约 1.3–3%; 而同期 rss 从 606MB 涨到 4.5GB, 之后又【两次阶跃掉回 840MB】(-1.63GB/-2.06GB)
+      //    而失败次数反而从 3568 涨到 10706。⇒ 涨落的那 3.7GB 全在堆之外, 且与故障不同向。
+      // 🔴 但三字段【不能指认】非堆里的哪一块; wasm 线性内存与外部缓冲正计在这两个字段。
+      //    ⇒ 这两个字段把"排除法"变成"指认"。
+      // ⚠ 作用域(Bettor 提醒, 别被读歪): 它回答的是"下一次劣化时涨/掉的是哪一块内存",
+      //    **不回答"为什么会劣化"** —— 内存与该故障的因果已被四条独立证据否掉。
       const mem = process.memoryUsage();
-      console.log(`[diag:heap-sample] at=${new Date(now).toISOString()} heapUsed=${_mb(mem.heapUsed)}MB heapTotal=${_mb(mem.heapTotal)}MB rss=${_mb(mem.rss)}MB`);
+      console.log(`[diag:heap-sample] at=${new Date(now).toISOString()} heapUsed=${_mb(mem.heapUsed)}MB heapTotal=${_mb(mem.heapTotal)}MB rss=${_mb(mem.rss)}MB external=${_mb(mem.external)}MB arrayBuffers=${_mb(mem.arrayBuffers)}MB`);
     }
     _lastFireAt = now;
   }, EXPECTED_MS);
