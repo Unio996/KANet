@@ -1435,9 +1435,12 @@ export async function poolSettlerTick() {
     //    ① `from_address` 不是权威归因(ST-06 G-4: display-only);
     //    ② 从未核实那笔交易花的是不是【这个市场的 spine outpoint】—— 同形不同笔即误判。
     //
-    // 🔴🔴 而它此前"没出过事"的原因不是设计对, 是【另一个字段没被填】:
-    //    `kaspa_tx_log.from_address` 在本机实测为空 ⇒ 上面那个 WHERE 恒不匹配
-    //    ⇒ 该分支从未写过一行终态。
+    // 🔴🔴 而它此前"没出过事"的原因不是设计对, 是【另一个字段没被填】。
+    //    ⚠ 措辞按 Codex a19087c7 降级(原写"从未写过一行终态"强于证据可证):
+    //    **被检本机留存数据集上 `from_address` 无非空行, 故被移除查询无可匹配行;
+    //      留存 cross-node 市场集无 settle/refund txid 终态写痕;
+    //      分支历史调用本身、其他节点与已不留存数据上的行为, 双向皆未证。**
+    //    (现态查询 ≠ 历史执行台账; 且"进分支查空"本身也是一次执行。)
     //    ⚠ 具体行数/市场数是**易变运行时读数, 刻意不写在这里**(过期计数会被当成现行不变量);
     //      逐条 SQL 原文 + 读数 + digest 见 `docs/2026-08-07-g4-remove-evidence.md` §2。
     // ⚠ **因果链勿剪断**: `kasia-console/src/api/ingest.js:40,55` 已接受并写入 `fromAddress`,
@@ -1473,7 +1476,7 @@ export async function poolSettlerTick() {
     reportUnauthorizedRefundBacklog(_p1BacklogIds, Math.floor(Date.now() / 1000), !!legacyResult?.tickErrored);
 
     // ⚠ `pathBReconciled` 键随上方分支一并移除。严格说这是**接口形状变化**(少一个键),
-    //    与"分支从未执行 ⇒ 行为零变化"是两件事, 不合并成一句。
+    //    与"该分支在被检数据集上无可匹配行 ⇒ 行为零变化"是两件事, 不合并成一句。
     //    消费者审计(**限仓内可见范围**: 零命中; 仓外无法证无)见
     //    `docs/2026-08-07-g4-remove-evidence.md` §5。
     return { ok: true, processed: markets.length, consensus, refund, pending, doomed, errored, bshardSkipped, commingledRefund, brokerFeeEmit };
