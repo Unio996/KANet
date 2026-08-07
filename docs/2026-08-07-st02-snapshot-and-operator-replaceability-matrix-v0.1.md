@@ -137,6 +137,30 @@ node D:/kanet/kanet/scratch/j1-prunepoint-0808.mjs
 **出口是一支跑在原运营方机器上的本地脚本。运营方永久消失 ⇒ 该出口随之消失 ⇒ 冻结态没有任何 covenant / timelock 级替代路径。**
 ⇒ **第 7 项 = `NOT_PROVEN`。用户无许可退出:不成立。**
 
+#### 🔴 2.7-bis · **退款构造被绑死在原产节点上 —— n=1293 的实证** `[CONFIRMED·DB实读 + 源码实读]`
+
+现读全表 `SELECT protocol_status, COUNT(*) FROM pool_markets GROUP BY 1`(**零过滤**):
+`unresolved_needs_authorization` = **1293** · `pending_bettors` = 24 · 无其它取值。
+再读这 1293 盘的 `metadata.unresolved_reason`(**全量,零截断**):**1293 盘全部是同一个值** ——
+**`退款构造结构性失败: cross-node maker (skip)`**。
+
+> 🔴 **我第一版把它写成「本机 98.2% 的市场坐在冻结洞里、暴露面已实现」—— 那是错的, 已整段重写。**
+> 错在**作用域**:这 1293 盘是**别的节点建的市场**,我这台是**观察者**(`maker_relay_id` 是 `cross-node:<pk>` 哨兵)。
+> 我的节点构造不了别人 maker 的退款,于是跳过并冻结 —— **那是正确行为,不是暴露。**
+> 🔨 **判据**:`protocol_status` 这一列上,「**我不该管**」与「**该管却卡住了**」读数完全相同。只差一次 `unresolved_reason` 查询就能分开,而我差点没查就报出去。
+
+🔵 **但拆开之后, 这里有一个比原来那版更硬的 ST-02 发现**:
+
+`pool-market-settler.js:796` 逐字:「**cross-node refund 必 producer node 干**」;
+`:803` 判据 `maker_relay_id.startsWith('cross-node:')`;
+`:219-222` 把这类失败归为**结构性**——「结构性失败**重试第 1 次与第 10000 次结果完全相同**(cross-node maker 永远不会变成本机 maker)」,因此按 fail-closed 直接转人工出口而不是无限重试。
+
+⇒ 🔴 **退款构造能力被绑死在【原产节点】上。一个观察完整、数据齐全、软件同版本的第二节点, 对这 1293 盘能采取的行动是【零】。**
+⇒ **这正是 ST-02 要问的"运营方可替换性",而这里有一个 n=1293 的实证答案:不可替换。**
+🔨 **它比 §2.7 那条更强的地方**:§2.7 说的是"运营方消失后没有出口"(条件句);**这一条说的是"第二运营方【此刻】就已经什么都做不了"(现在时)。**
+
+🔵 **本条不覆盖的**:这 1293 盘**在它们各自产节点上的权威状态**如何,**我判不了**(要跨节点读数 ⇒ 要频道 ⇒ 见 §3-2)。**别把本机读数当成这些市场的全局状态。**
+
 🔵 **一处必须同批说的例外(否则本项被外推)**:v0.7 的 **`closezk-v2` 放款是纯 covenant、零委员签**(记忆 `reference-v07-closezk-committee-sig-scope`)。⇒ **走到 zk_close 的那条路不依赖运营方签字。**
 🔴 **但它不解本项**:① 走到 zk_close 需要 proving,而**proving 的工件在第 4 项已判不可获得**;② 冻结态**恰恰是没走到那一步的那些盘**。
 🔨 **⇒ 存在一条 covenant 放款路,与"冻结态有出口"是两回事。别用前者去答后者。**
@@ -161,6 +185,8 @@ node D:/kanet/kanet/scratch/j1-prunepoint-0808.mjs
 | `ST02-G5-FREEZE-NO-COVENANT-EXIT` | 冻结态唯一出口是 operator 本地脚本,无 covenant/timelock 替代 | Bettor / Owner(设计决策) |
 | `ST02-G6-MALICIOUS-SOURCE` | abstain-not-guess 防"源坏/源没到",**不防"源说谎"**;有无对抗机制未查 | NWT |
 | `ST02-G7-DETERMINISM-INPUT` | 纯函数在但输入无权威(费率层)⇒ resume 不确定。**与前置⑥ R-3/C-2 同源,不要各修一遍** | 并入 ⑥ |
+| 🔴 `ST02-G8-CROSSNODE-REFUND-BOUND-TO-PRODUCER` | 退款构造绑死原产节点(`settler:796` 逐字「cross-node refund 必 producer node 干」),第二节点对 **1293 盘可行动数 = 0**(§2.7-bis)。**这是可替换性的直接反例,不是配置问题** —— 需要的是设计裁定,不是"给第二节点开权限" | Bettor / Owner |
+| `ST02-G9-CROSSNODE-AUTHORITATIVE-STATUS` | 那 1293 盘**在各自产节点上**的真实状态,我判不了(要跨节点读数)。**本机读数只说明我能不能动它们,不说明它们好不好** | 需频道恢复 / J2 |
 
 ## §5 交审点名
 
