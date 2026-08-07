@@ -1,10 +1,32 @@
-> **Status**: DRAFT v0.1 · 作者 J3(J1 顶替工作代理,Bettor 派工)· 2026-08-06 · DESIGN-ONLY 零实现授权 · 待 NWT 红队
+> **Status**: DRAFT **v0.2** · v0.1 作者 J3(J1 顶替工作代理),committed `4aa4ea3b`,2026-08-06 · **v0.2 主笔 J1tn**(Bettor 2026-08-07 16:18Z 频道 `#j5gfyh` 派「@J1 你顶替主笔,出 v0.2」)· DESIGN-ONLY 零实现授权 · 待复审
+> **v0.2 依据**: Codex 红队 `b563d585`(`coordination/codex-bridge/responses/RESPONSE-20260807-PRECOND6-CIS-ROOT-AND-PRECOND2A-MAGNITUDE-CODEX-REDTEAM.md`)判 **`PRECOND6_DIRECTION_ACCEPTED_BUT_V01_IS_RED`**,MUST-FIX 两条 + 强制变异测试 + 阳性对照收紧。
+> **文件名注**: 文件名保留 `-v0.1.md` 不改(改名会撞 doc-lint「同名多路径」且让 `4aa4ea3b` 之后的既有引用失效)。**版本以本 Status 行与标题为准,不以文件名为准。**(同 ③ 稿既定编法)
+> **v0.2 编法**: **原文一字不删**。所有 v0.2 变更走**独立修订块**(标 `🆕 v0.2`),紧贴被修订的原段落之下;被改的表格格子在修订块里重述「原值 → 新值 → 为什么变」,原表原样保留并在其上加指针。
 > **授权**: D-012 §6-1 冻结前置⑥(`docs/DECISIONS.md:69` 六条前置之⑥「候选 A 的规范输入集/输出集重算与绑定设计」)。Bettor 2026-08-06 直令派工。
 > **约束**: 本稿只新增本文件,零代码/零 DB 写/零链上/零频道/零 commit。对 settler / P1 / pool 全部只读。每条事实断言带 file:line(本会话现读核实,非记忆);推断显式标注。
 > **证据分级**: `[CONFIRMED·源码实读]` 现读代码坐实 / `[CONFIRMED·DB实读]` 对 live `data/console.db` 只读 PRAGMA 坐实 / `[CONFIRMED·外部文档实读]` 现读 silverscript 文档坐实 / `[推断]` 带依据的推理 / `[未验]` 需实测或他人 domain 才能定。
 > **上位文本**(不与之冲突,冲突以上位为准):`docs/DECISIONS.md` §2-bis Codex 第三轮三条 · `docs/2026-08-03-oracle-skill-interface-permission-boundary-freeze-design.md` §2.2 · `docs/2026-08-04-fact-receipt-typed-schema-and-domain-digest-design.md`(摘要/域分隔规则唯一来源,本稿不另立第二套)· `docs/2026-08-06-precond3-v07-tx-shape-sighash-analysis-v0.1.md`(前置③,本稿 §5 与之接缝)。
 
-# 候选 A · 规范输入集/输出集重算与绑定设计(D-012 §6-1 冻结前置⑥)
+# 候选 A · 规范输入集/输出集重算与绑定设计(D-012 §6-1 冻结前置⑥)· **v0.2**
+
+---
+
+## 🆕 v0.2 · 变更总览(先给结论,细节各自在原段落下)
+
+| # | Codex 要求 | v0.2 的处置 | 落在哪 |
+|---|---|---|---|
+| **R-1** | MUST-FIX 1:root 公式没绑住 schema 声称绑的全部 | **选 Codex 修法 (a)**:新立 `cis_digest` = 全 body 摘要 = **唯一授权承诺**;`input_set_root` **降级为派生索引**(仍在 body 内 ⇒ 被传递性绑定 ⇒ 不能撒谎),两者的传递关系写死并可机械测 | §2.3 下 R-1 |
+| **R-2** | MUST-FIX 2:`policy_source="explicit"` 不是独立权威 | **删掉 `explicit`**。合法源收敛为三个;并把 `policy_source` 从**对象级**改成**逐字段级**(证据逼出来的:同一个 policy 对象里,各字段的权威**不同级**) | §2.1-E / §3.3-E 下 R-2 |
+| **R-2b** | (Codex 未点名,R-2 的落地形态) | `redeem_ctor` 的机械形态定为**重算 spine P2SH 比对**,不是"解析 redeem 字节取偏移" —— 一次比对同时认证整个 ctor 元组,且绕开硬编码 offset 的 DoD 风险 | §3.3 下 R-2b |
+| **🔴 R-3** | (v0.2 新发现,**本次最承重的一条**) | 应用 R-2 后,**`maker_fee_bps` 在四个可能的权威源上全部零命中** ⇒ 存量 subset② 上**每一份 CIS 必然 inconclusive** ⇒ **候选 A 零签名授权**。且对存量**不可补救**(redeem 建市即烤死) | §1.3 下 R-3 |
+| **R-4** | (v0.2 新发现) | `minerFee` 烤进 spine ctor,但 v0.6/v0.7 结算实际用的是现算的 `dynamicFee` ⇒ **动钱的值 ≠ 链上承诺的值**。`[未验/需 J2]` | §1.2-i 下 R-4 |
+| **R-5** | Codex 第 3 条:强制变异测试 | 新增 **C-8**,且要求**由 schema 定义本身驱动枚举**(手写清单 = v0.1 缺陷的同一个病);含对排除集 S 自身的阴性对照 | §4.2 下 R-5 |
+| **R-6** | Codex §1.4:阳性对照必须证一条可达的合法路径 | C-3 收紧:fixture **禁止接受任何 producer 提供的 CIS**(签名层杜绝);并如实标 **C-3 今天 NOT-RUNNABLE**(被 R-3 卡住),不是 pending | §4.2 下 R-6 |
+| **R-7** | Codex:no-fallback-to-B 正确·保持 | **保持,一字不改**(§4.1-2 / C-2)。v0.2 未削弱任何一条 fail-closed 语义 | — |
+
+🔨 **v0.2 全稿仍是 DESIGN-ONLY**:不改任何代码、不建表、不动开关、零链上、零钱路。**本稿仍不使前置⑥ 从 OPEN 变 CLOSED** —— R-3 反而给它加了一个必须先被裁定的前置。
+
+---
 
 ## §0 作用域与本稿要回答的那一个问题
 
@@ -74,12 +96,76 @@
 **生产侧唯一存在的闭合检查**:`:2339-2345` ⑥守恒 assert(`Σoutputs == totalPool − minerFee`,不闭则 abort)。
 🔴 **它只在生产者自己进程内跑**;`phase2_tx_obj` 一旦落进 `metadata`(`:2488-2502`)并被广播(`:2596-2602`),接收方**没有任何东西可以重放这个断言** —— 因为 (h)(i)(m) 三项接收方要么取不到、要么取到的是自己代码里的常量。
 
+> ### 🆕 v0.2 · R-4 修订块(接上表 (i) 行)——**烤在链上的 `minerFee` 与实际动钱的 `minerFee` 不是同一个值**
+>
+> 原表 (i) 行只说 `minerFee` 是"代码常量 + 本地 metadata、每次现算"。**v0.2 补上它漏掉的另一半,而这一半更要紧**:
+>
+> - **`minerFee` 是 spine ctor 的一个参数,建市那一刻烤进 P2SH** `[CONFIRMED·源码实读]`:`pool-p2sh.mjs:135`(`validateInt(args.minerFee,…)`)→ `:150`(`intExpr(minerFee)` 进 `ctorJson`)。
+> - **但 v0.6/v0.7 结算时用的不是它** `[CONFIRMED·源码实读]`:`pool-market-settler.js:2211` `baseMinerFee = parseInt(market.miner_fee,10) || 20000` → `:2214-2215` `isAnonymousPool = protocol_version ∈ {v0.6, v0.7}` ⇒ `minerFeeFinal = isAnonymousPool ? dynamicFee : baseMinerFee`,而 `dynamicFee` 由 `:2195-2206` 现算(`MASS_MULTIPLIER_X10=30` / `SETTLE_FEE_MIN=2_000_000` / `totalMassEst*110`,上限 `MAX_TX_FEE_SOMPI`)。
+>
+> 🔴 **⇒ 对 v0.6/v0.7:改变每个赢家到手金额的那个 `minerFee`,与 spine P2SH 所承诺的那个 `minerFee`,是两个独立的量。** CIS 的 `miner_fee_sompi` 因此**不能**简单标 `policy_source="redeem_ctor"` —— 那会让 CIS 承诺一个**不是实际被用**的值,比不承诺更坏(它给出一个通过的读数)。
+>
+> **v0.2 的处置(不越界)**:`miner_fee_sompi` 的 `policy_source` 在 R-2 的三值里**暂无一个成立**,按 R-2 总则 ⇒ **inconclusive**;并新增开放题 §7-8 交 J2:**covenant 到底强不强制那个烤死的 `minerFee`?** `[未验]`
+> - 若**强制** ⇒ `dynamicFee ≠ 烤死值` 的交易本该在链上被拒 ⇒ 要么两者实际总相等(需实测),要么这类 tx 从未成功过(需查痕)。
+> - 若**不强制** ⇒ 链上那个烤死值是**无牙的**,CIS 更不能拿它当权威。
+> 🔨 **两条分支都不导向"可以用它"** —— 所以本稿不等答案就先判 inconclusive,答案只决定后续怎么修,不决定现在能不能签。
+
 ### 1.3 §1 小结:三条承重读数
 
 1. 🔴 **签名侧零输入集**:候选 A 的插入点今天不消费任何输入集对象,只消费 7 个消息字段 + 4 个本机表。
 2. 🔴 **政策不是数据,是代码版本**:`oracle_fee_pct`/`maker_fee_pct` 无列(`[CONFIRMED·DB实读]`),`minerFee` 现算。**两个跑着不同代码版本的节点会"确定性地"算出不同 payout,而双方都认为自己对** —— 这正是 `DECISIONS.md:64` 那句话所描述的失败形态,在本仓有一个具体载体。
    🔵 **而这些值的权威副本其实在链上**:`oracleFeePct` 是 spine 合约的 ctor 参数,建市时烤进 P2SH(`kasia-console/src/api/pool.js:654-657` 收参 → `:747 computeSpineP2SH({… oracleFeePct …})` → `kasia-console/src/lib/pool-p2sh.mjs:138,152` 进 ctor)。`pool.js:3362` 的注释自陈「oracle_fee_pct not directly stored」。⇒ **§2 的政策字段应当从 redeem 反推,不是从 DB 查。**
 3. 🔵 **输入面值来源不对称**:子集② 从 DB 列取(`:2370-2374`),v0.7 从 redeem 链锚现读(`bshard-close-enforce.mjs:96/515`)。**后者是对的做法,已在本仓跑着。**
+
+> ### 🔴🔴 🆕 v0.2 · R-3 修订块 —— **`maker_fee_bps` 一个合法权威源都没有,而它动钱**
+>
+> **由来**:Codex MUST-FIX 2 要求「给每一个 `explicit` 值定义它背后的权威,或者删掉 `explicit`」。v0.2 选了删(见 R-2)。**删完之后必须逐字段回答"那它的权威在哪"** —— 这一问把一个 v0.1 没看见的洞照出来了。
+>
+> #### R-3.1 逐字段权威盘点(四个候选源全查,不是抽查)`[CONFIRMED·源码实读 + CONFIRMED·DB实读]`
+>
+> | 政策字段 | ① spine ctor(烤进 P2SH) | ② `pool_markets` 列 | ③ `marketMetadataHash` 原像 | ④ `feeRules` | ⇒ 合法 LOOKUP 源 |
+> |---|---|---|---|---|---|
+> | `broker_fee_bps` | ✅ `brokerFeePct` `pool-p2sh.mjs:136` → ctorJson `:151` | ✅ `broker_fee_pct` | ❌ | ❌ | 🟢 `redeem_ctor` |
+> | `oracle_fee_bps` | ✅ `oracleFeePct` `:138` → `:152` | ❌ 无列 | ❌ | ❌ | 🟢 `redeem_ctor` |
+> | `oracle_bond_sompi` | ✅ `oracleBondAmount` `:139` → `:153` | ✅ `oracle_bond_amount` | ❌ | ❌ | 🟢 `redeem_ctor` |
+> | `miner_fee_sompi` | ✅ `minerFee` `:135` → `:150` | ✅ `miner_fee` | ❌ | ❌ | 🟡 **见 R-4** —— 烤死值 ≠ 实际用值,判 inconclusive |
+> | 🔴 **`maker_fee_bps`** | ❌ | ❌ | ❌ | ❌ | 🔴 **无。四个源全部零命中。** |
+>
+> **四个"无"各自的证据(逐条现读,不靠 v0.1 转述)**:
+> 1. **不在 spine ctor**:`pool-p2sh.mjs:144` 注释逐字列出 ctor 序 = `maker, broker, oracle1-3, deadline, minerFee, brokerFeePct, oracleFeePct, oracleBondAmount, makerStakeAmount, marketMetadataHash`,`:145-156` `ctorJson` 逐项与之对齐 —— **无 `makerFeePct`**。
+>    🔴 **且全仓只有这一个 spine ctor 构造器**:`grep computeSpineP2SH|SPINE_SIL|ctorJson` 于 `pool-p2sh.mjs` ⇒ `computeSpineP2SH` 唯一(`:122`),`SPINE_SIL` 单一路径(`:20`),另一个 `ctorJson`(`:191`)属 `PoolSide`。**⇒ v0.5/v0.6/v0.7 共用同一份 spine ctor,不存在"某个版本里有"的可能。**
+> 2. **无 DB 列**:`PRAGMA table_info(pool_markets)` ⇒ 34 列,`maker_fee_pct = false`(`oracle_fee_pct` 同样 false;`broker_fee_pct`/`oracle_bond_amount`/`miner_fee`/`fee_rules` 为 true)。
+>    🔵 **作用域订正(v0.1 §8 的一处)**:v0.1 这条读的是 `D:/kanet-tn12/kasia-console/data/console.db` —— 那是**旧代码库路径**(`CLAUDE.md` 已记本机现用库为 `D:\kanet\KANet\`)。**v0.2 在现用库 `D:/kanet/kanet/kasia-console/data/console.db` 上重跑,结论相同**;作用域仍**只等于本机这一份库**,别的节点未查。
+> 3. **不在 `marketMetadataHash` 原像**:`pool.js:734-741` `metaInput = JSON.stringify({source, condition, token, side, end, rule})` → `:741` sha256。**六个键里零费率字段。**
+> 4. **不在 `feeRules`**:`fee-split.mjs:60-68` roles = `provider / broker / introducer? / oracle / node`,**没有 `maker` 角色**;且这是**另一套** fee 通道(preset `prediction-v1-interim`),与 settler 的 broker/oracle/maker 三费不是同一层。
+>
+> #### R-3.2 而它确实在动钱 `[CONFIRMED·源码实读]`
+>
+> `pool-market-settler.js:1820` `makerBps = BigInt(Number.isFinite(args.makerFeePct) ? args.makerFeePct : 10)` → `:1825` `makerFeeBI = (totalPoolBI * makerBps) / 10000n` ⇒ **总池的 0.1% 被划为 maker fee**。
+> 调用侧 `:2221` `makerFeePct: parseInt(market.maker_fee_pct, 10) || 10` —— **读的是一个不存在的列** ⇒ `parseInt(undefined)` ⇒ `NaN` ⇒ `|| 10` ⇒ **恒取字面量 10**。
+> 🔨 **这正是 `DECISIONS.md:64` 那句话的活体**:两台机器"确定性地"一致,**恰恰因为它在两边都是同一个写死的常量** —— 一致性来自巧合,不来自共识。换一个代码版本,它就是另一个数,而没有任何东西会报。
+>
+> #### R-3.3 结论(这是 v0.2 最需要被读到的一句)
+>
+> 🔴 **按 Codex MUST-FIX 2 修完后,`maker_fee_bps` 在存量 subset② 市场上没有任何合法 LOOKUP 源 ⇒ 按 §3.3 总则必然 `verifier-inconclusive` ⇒ 候选 A 在存量盘上产生零签名授权。**
+> **这不是一个设计取舍,是当前链上与库上事实的直接推论。**
+>
+> 🔴 **而且它对存量【不可补救】**:spine redeem 在建市那一刻烤死且不可变(同 §3.2-(a) 已认定的理由)。`makerFeePct` 不在那份 ctor 里 ⇒ **未来任何代码改动都无法给一个已存在的市场造出 `redeem_ctor` 权威。** 时间不会解决这条。
+>
+> #### R-3.4 三条出路(我给推荐,不摆菜单;裁定归 Bettor,涉及在飞合约的那条归 Owner)
+>
+> | 出路 | 覆盖面 | 代价 / 障碍 | 我的判断 |
+> |---|---|---|---|
+> | **(i)** 新市场 spine ctor 增加 `makerFeePct` | **只有新盘** | 改在飞合约相邻面 ⇒ 需独立决策(D-005/D-009 冻结精神,本稿不提议);且存量盘一个都救不到 | **不解决本卡**(⑥ 要覆盖的正是存量) |
+> | 🔵 **(ii) 判定 `maker_fee_bps` 是【协议常量】而非市场政策**,并为它建一份**被承诺的「版本 → 常量表」**(`protocol_constants_digest`) | **存量 + 新盘全覆盖** | 需要新建那份映射并给它一个权威;**但"这个市场适用哪个版本"这一半已经有独立权威了** —— 见下 | **✅ 我推荐这条** |
+> | **(iii)** 接受存量盘 maker fee 不被授权 | — | 候选 A 在存量上永远 inconclusive ⇒ 压力全压 `authorizeRefundByOwner` 人工出口(`:289-296`)= §7-1 那条风险的极端形态 | 只能作**兜底**,不能作方案 |
+>
+> 🔵 **(ii) 为什么可行 —— 它缺的那一半比看上去少**:验证方要独立确定"本市场适用哪个协议版本",**不必信 DB 的 `protocol_version` 列**:
+> spine P2SH **本身就是对整个 ctor 元组的密码学承诺**(`pool-p2sh.mjs:158` 编译 → `:161` `blake2b(scriptBytes)` = P2SH hash)。⇒ 验证方可以**用候选(版本, ctor 参数)重算 P2SH,与链上 spine 地址比对,匹配的那一个即权威版本**。
+> ⇒ **(ii) 真正缺的只是「版本 → 常量表」这一份映射的承诺物**,而不是"怎么知道版本"。
+>
+> **依赖**:@Bettor 裁 (i)/(ii)/(iii);@J2 复核 R-3.1 第 1 条(spine ctor 唯一性)与 R-2b 的重算比对在 v0.5/v0.6/v0.7 上是否都成立。
+> 🔴 **在这条被裁定之前,前置⑥ 不具备"可实现"状态** —— v0.1 §8 说本稿"只让 ⑥ 可被实现";**v0.2 必须收回半句:在 R-3 被裁定前,它连可被实现都还不成立。**
 
 ---
 
@@ -149,6 +235,29 @@
 2. 🔴 **`miner_fee_sompi` 必须是**值**,`miner_fee_formula_version` 必须是**版本**,两者都在场** —— `dynamicFee` 是现算的(`:2197-2230`),依赖 `MASS_MULTIPLIER_X10=30`(`:2219`)、`SETTLE_FEE_MIN`(`:2221`)、以及 `metadata.spine_redeem_script_hex` 的字节长度(`:2199-2200`)。**改这三样任一 ⇒ distributable 变 ⇒ 每个赢家的钱都变**,而这在今天不留任何痕迹。
 3. `fee_rules_commit` 复用既有单源 `computeFeeRulesCommit = blake2b256(canonicalizeFeeRules(...))`(`kasia-console/src/lib/fee-split.mjs:163`),**不另造** —— 且必须与 `fact-receipt` §7 认定的「费率政策这一层今天就能填」对齐。
 
+> ### 🆕 v0.2 · R-2 修订块(改 E 组第 1 条)—— **删掉 `explicit`,并把 `policy_source` 改成逐字段**
+>
+> **Codex MUST-FIX 2 原话**:`explicit` 若指"生产者把这个值写进了 CIS",那就是 **WIRE,不是独立证据,不能授权动钱**。
+>
+> **改动一 · 枚举收敛**(原值 → 新值 → 为什么):
+>
+> | | v0.1 | v0.2 | 为什么变 |
+> |---|---|---|---|
+> | 合法值 | `"redeem_ctor"` \| `"explicit"` | `"redeem_ctor"` \| `"chain_state"` \| `"policy_receipt"` | `explicit` 是被检查方自己的声明 ⇒ 正撞 `fact-receipt` §2.1「由被检查方提供的门槛不是门槛」 |
+> | 禁止值 | `"code_default"` | `"code_default"` **与** `"explicit"` | 同上 |
+>
+> **三个合法源的定义(缺一不可,不许"看着办")**:
+> - **`redeem_ctor`** —— 值可被**重算 spine P2SH 比对**认证(机械形态见 R-2b)。**唯一今天就成立的源。**
+> - **`chain_state`** —— 值从链上 covenant 状态现读(v0.7 既有做法 `bshard-close-enforce.mjs:96/510-515`)。
+> - **`policy_receipt`** —— 独立认证、带版本的政策回执。**⚠ 今天不存在**,在此定义是为了让 R-3.4-(ii) 有一个可落的形状,而不是给一条现在就能走的路。它成立的最低要求:① 自带域分隔摘要(复用 `fact-receipt` §4 规则,不另立)② 由一个**其 pk 被不可变前态绑定**的权威签署 ③ 版本号进摘要。**三条缺任一 ⇒ 不算 `policy_receipt`,回落 inconclusive。**
+>
+> 🔴 **改动二 · `policy_source` 从对象级改为逐字段级**:v0.1 给整个 `policy` 对象**一个** `policy_source`。**R-3 的盘点证明这个形状表达不了真相** —— 同一个 policy 对象里 `oracle_fee_bps` 有 `redeem_ctor` 权威、`maker_fee_bps` 一个权威都没有、`miner_fee_sompi` 是第三种情况(R-4)。一个对象级标签只能在"全部说成有"和"全部说成没有"之间二选一,**两个都是假话**。
+> ⇒ **字段改为** `policy_sources`:object,键集 **恰好等于** `policy` 里每一个取值字段的键集(多一个少一个都拒 —— 与 §2.1 顶层同一条 strict-reject 纪律),值 ∈ 上述三个枚举。
+> ⇒ **验证规则**:逐字段独立判。**任一承重政策字段取不到其声明的源 ⇒ 整份 CIS inconclusive**(不是"跳过那一个字段")—— 承 §4.3。
+> 🔨 **为什么这条值得单独改 schema**:一个"整体权威等级"的标签,会让**最弱的那个字段搭上最强那个字段的车**。R-3 的洞在对象级标签下是**看不见**的。
+>
+> **改动三 · §2.1 E 组表格里 `policy` 的键集同步**:`policy_source`(单数,string)→ `policy_sources`(object)。其余键不变。
+
 #### F 组 · 承诺与记账(Codex ⑤⑥)
 
 | 键 | 类型 | 说明 |
@@ -206,6 +315,52 @@ input_set_root = "blake2b256:" ‖ hex( blake2b256(
 - **`i64le` 用 `serializeI64`**(`pool-payout-root.mjs:15-36`,JS 精确移植 rusty-kaspa `serialize_i64`)—— 不另写第二个整数编码。
 - **叶子全定宽 ⇒ 不需要逐字段 LP**,但**域标签必须 LP**(它是变长的);三棵树根归并处必须 LP(变长 canonicalJson 段)。🔴 **这一条必须写死而不是"看着办"**:`computeCommitteePkHash` 就是一个裸 concat 无 LP 的既有反例,它今天安全**只因为输入恰好定宽,而函数里没有任何校验**(`bshard-close-voter.js:573-576`,`fact-receipt` §2.3 已判)。
 
+> ### 🔴 🆕 v0.2 · R-1 修订块(改 §2.3 全节)—— **授权承诺换成 `cis_digest`;`input_set_root` 降级为派生索引**
+>
+> **Codex 主 RED 原话**:`input_set_root` 只 hash 了 domain/policy/order_rule/prior_state/三棵树 root,**漏了** `bets_excluded[]`/`network`/`genesis_hash`/`market_id`/`schema_version`/`output_layout_version`/`payout_root`/`accounting`/replay envelope。最清楚的利用:**两个 CIS 带不同排除集却算出同一 root**,击穿"让隐藏排除可见且被绑"的设计目的。
+>
+> #### R-1.1 选 Codex 修法 (a),理由是 (b) 刚刚在本稿身上失败过
+>
+> Codex 给了两条修法:(a) 全 body 摘要;(b) 扩 root 公式使每个授权相关字段传递性 committed + 显式列出故意不授权的信封字段。
+>
+> 🔨 **选 (a)。判据一句话:v0.1 的缺陷【本身就是 (b) 的失败形态】** —— 一张手工维护的"哪些字段进 root"的清单,漏了九项而没有任何东西会报。**选 (b) = 选择继续手工维护那张刚刚失败过的清单。**
+> (a) 把「新加的字段默认被绑」变成**默认行为**,而不是**需要有人记得去做的动作**。⇒ 同一个人下次加字段忘了改公式时,(a) 自动正确,(b) 自动错误。
+>
+> #### R-1.2 规范构造(唯一授权承诺)
+>
+> ```
+> S              = 自引用排除集,【穷举】= { cis_digest }
+>                  // 今天 CIS 里没有签名字段。将来若新增任何签名/自摘要字段,
+>                  // 加入 S 【必须】与 R-5 的阴性对照同批加,否则 S 会悄悄变大而没人知道。
+> CIS_BODY       = CIS 对象去掉 S 中的键(其余【全部】在内,含 nonce / validity / producer_pk)
+> cis_digest     = "blake2b256:" ‖ hex( blake2b256( LP(DOMAIN_CIS) ‖ LP(canonicalJson(CIS_BODY)) ) )
+> ```
+>
+> - **`cis_digest` 是唯一授权承诺。** §3.2-(b) 里 `ConditionReceipt` 消费的"规范输入集承诺"**就是它**;签名只绑它。
+> - **`input_set_root` 保留,但降级**:它不再是授权承诺,而是一个**派生的成员证明索引**。
+>
+> #### R-1.3 两个承诺的传递关系(Codex 要求"写死并被测",这就是那份写死)
+>
+> Codex 原话:**不许留两个模糊重叠的承诺,除非精确的传递绑定关系被指定且被测试。** 本稿的指定如下,两条缺一不可:
+>
+> 1. **`input_set_root` 是 `CIS_BODY` 的一个字段** ⇒ 由 `cis_digest = H(domain ‖ canonicalJson(CIS_BODY))` **传递性绑定** ⇒ 改 `input_set_root` 必改 `cis_digest`。**它无法被替换。**
+> 2. **验证方【必须】从 `bets[]` / `other_inputs[]` / `outputs[]` 重算 `input_set_root`,并要求逐字节相等**;不等 ⇒ inconclusive。**它无法撒谎。**
+>
+> ⇒ 重叠被消解成:**一个授权承诺 + 一个被它绑定且被强制重算的派生量**。这不是"两个承诺",是"一个承诺 + 一个可验证的索引"。
+> **`input_set_root` 的构造公式本身(原 §2.3 的三棵树 + 归并)一字不改** —— 它作为索引仍然正确,原节的三条理由(membership proof / `serializeI64` 单源 / 定宽叶子免 LP)全部继续成立。
+>
+> #### R-1.4 为什么不把 `input_set_root` 直接删掉
+>
+> 因为它答的是另一个问题:**第三方只拿一笔注就能证明它在集合里**(原 §2.3 第一条理由:候选 A 的假阳性诊断、跨节点争议定位都要用)。`cis_digest` 是对整个 body 的扁平摘要,**做不了成员证明**。⇒ 两者不是冗余,是分工;而分工必须靠 R-1.3 的两条钉死,否则就退回 Codex 说的"模糊重叠"。
+>
+> #### R-1.5 「故意不授权的信封字段」清单 = 空
+>
+> Codex 在修法 (b) 下要求显式列出这份清单。**在 (a) 下这份清单就是 S,而 S 只有 `cis_digest` 自己一个** ——
+> 🔴 **特别地:`nonce` / `validity` / `producer_pk` 全部【被绑定】。** 这不与 §2.1-G 组「`producer_pk` 仅归属标注,不是授权」冲突 —— **"被绑定"与"被授权"是两件事**:
+> - **被绑定** = 改了它,`cis_digest` 就变(⇒ 不能在不改承诺的前提下换掉它);
+> - **不授权** = 验证方**不得**因为它是某个 pk 就放宽任何检查。
+> **v0.2 两条同时成立,不许把前者读成后者。**
+
 ---
 
 ## §3 承诺与验证
@@ -259,6 +414,33 @@ guest 产 proof,journal 绑三元组                         CloseZkV2.sil:45
 
 🔴 **一条容易被跳过的**:第 5 步比对的对象是 `phase2_tx_obj`,而**它自己也是消息自带的**(§1.1-#7)。⇒ **CIS 通过 ≠ 被签的字节就是 CIS 描述的那笔交易**;两者的桥是第 5 步的逐笔全等 + 第 7 步的 hash 闭合。**少任一步,CIS 就退化成一份漂亮的、与实际被签字节无关的附件。**
 
+> ### 🆕 v0.2 · R-2b 修订块 —— **`redeem_ctor` 的机械形态 = 重算 P2SH 比对,不是解析 redeem 取偏移**
+>
+> v0.1 §3.3-E 只说政策"从 spine redeem 反推",没说**怎么**反推;§6-2 又把"需 J2 确认各版本 ctor 布局与偏移"列为成本中心,并点了 `bshard-close-enforce.mjs:148-154` 那组硬编码 offset 的 DoD 风险。**v0.2 把它定死成另一种做法,顺手消掉那个风险。**
+>
+> **机械形态(两步,全部复用既有函数)**:
+> 1. 验证方从本机数据**提出**一个候选 ctor 元组 `(makerPk, brokerPk, oraclePks[3], deadline, minerFee, brokerFeePct, oracleFeePct, oracleBondAmount, makerStakeAmount, marketMetadataHash)`;
+> 2. 调既有 `computeSpineP2SH(...)`(`pool-p2sh.mjs:122`)重算 P2SH,与**链上 spine 地址**比对。**相等 ⇒ 该元组的每一个字段同时被认证。**
+>
+> 🔵 **为什么这算"独立 LOOKUP"而不是"信了 WIRE"**(红队一定会问这一句,先答):
+> 值可以由 WIRE **提出**,但它是被**链上那个 P2SH 承诺**认证的 —— `P2SH = blake2b(编译(ctor 元组))`(`pool-p2sh.mjs:158` → `:161`)。**提出方无法让一个错的元组匹配上链上的 hash。** ⇒ 这符合 §3.3 总则「对象里带的值只用于比对,永不用于取值」:它被用于**比对**,权威是链。
+>
+> 🔵 **三个白拿的好处**:① 一次比对认证**整个元组**(pk / deadline / 三个费率 / bond / maker 本金 / metadata hash 全覆盖),不必逐字段各写一个反推器;② **不需要知道任何字节偏移** ⇒ `bshard-close-enforce.mjs:148-154` 那类硬编码 offset 的 DoD 风险在这条路上不存在;③ 顺带认证了"本市场适用哪个 SS 版本"(哪份 `.sil` + 哪个 ctor 布局能重现该 P2SH),**这正是 R-3.4-(ii) 需要的那一半**。
+>
+> 🔴 **边界(必须同批说,否则这条会被外推)**:该机制**只能认证 ctor 里有的字段**。ctor 里没有的东西,重算多少次都变不出权威 —— **`maker_fee_bps` 就死在这条边界上**(R-3)。**这不是本机制的缺陷,是它的作用域;把它读成"反推能解决政策问题"就会错过 R-3。**
+>
+> **`[未验/需 J2]`**:`computeSpineP2SH` 当前硬要求 `oraclePks.length === 3`(`pool-p2sh.mjs:125-127`,注释自陈 `= v0.5 3-of-3`),而 v0.6/v0.7 是 5 委员匿名池(`pool-market-settler.js:2224` `oracleCount: isAnonymousPool ? 5 : 3`)。**⇒ 这条重算路径在 v0.6/v0.7 上能否原样跑,我没有实测,不假装有。** 交 J2 复核(接 §9-2)。
+>
+> #### R-2b-附 · §3.3「比对序」第 3/4 步同步改写(承 R-1)
+>
+> | 步 | v0.1 | v0.2 |
+> |---|---|---|
+> | 3 | 用 LOOKUP 值自行构造 CIS,算出 `input_set_root'` | 用 LOOKUP 值自行构造 CIS,算出 **`cis_digest'`** —— **并同时**重算 `input_set_root'` |
+> | 4 | `input_set_root' == WIRE(input_set_root)`?否 ⇒ inconclusive | **`cis_digest' == WIRE(cis_digest)`** ∧ **`input_set_root' == WIRE(input_set_root)`**,**两条都要**;任一不等 ⇒ inconclusive |
+>
+> 🔨 第 4 步保留对 `input_set_root` 的独立比对,是 R-1.3 第 2 条(「它无法撒谎」)的落点 —— **传递性绑定只保证它不能被换掉,不保证它被算对**。两件事,两道检查。
+> 其余各步(1/2/5/6/7)一字不改;**第 7 步的 C3 式 TOCTOU 闭合仍是硬要求**。
+
 ---
 
 ## §4 inconclusive 路径(可测试判据)
@@ -291,6 +473,50 @@ guest 产 proof,journal 绑三元组                         CloseZkV2.sil:45
 
 **注入对照(落码时必须实跑一次,承⑤ §3.4 的做法)**:把 C-2 的 fixture 里 CIS 改成合法 ⇒ **C-2 必须当场变红**。跑完还原。
 🔴 **不许用改生产码的方式做注入**(钱路 + live 进程随时重载)。
+
+> ### 🆕 v0.2 · R-5 修订块 —— **新增 C-8 变异测试(Codex 判为强制)**
+>
+> **Codex 原话**:「逐 schema 字段变异 → 断言每个授权相关变异都改变 committed digest 或触发严格拒;**`bets_excluded[]` 是第一个必需阴性对照**。」
+>
+> | # | 判据 | fixture | 断言(全部成立才算过) | 它防的是 |
+> |---|---|---|---|---|
+> | **C-8** | **schema 全字段变异 ⇒ 承诺必变或必拒** | 一份合法 CIS + 由 **schema 定义本身**枚举出的字段清单 | 见下四条 | 「对象里有这个字段」与「承诺真的绑住它」之间的缝(= v0.1 的缺陷本体) |
+>
+> **C-8 的四条断言**:
+> 1. **全称句**:`∀ 字段 f ∉ S`,变异 f ⇒ (`cis_digest` 改变) ∨ (strict-reject 拒)。**二者居一即可,但必须命中其一** —— 既不变也不拒 = 红。
+> 2. 🔴 **对 S 自身的阴性对照**:`∀ f ∈ S`,变异 f ⇒ `cis_digest` **不变**。**没有这一条,一个把 S 悄悄撑大的实现会让第 1 条的全称范围缩到很小而仍然全绿。**
+> 3. 🔴 **S 的穷举断言**:`S == {cis_digest}` 逐元素相等,且 `枚举字段集 \ S` **非空**并等于 schema 键集减 S。承本仓「不许静默截断」纪律:**清单缺了要喊,不能安静地少测几个。**
+> 4. **变异面必须下探,不止顶层键**:含 ① `bets[]` / `other_inputs[]` / `outputs[]` **元素内部**字段 ② **数组重排** ③ **删元素** ④ **加未知键**(应触发 strict-reject)。
+>
+> 🔴 **C-8 的枚举必须由 schema 定义本身驱动,不许在测试里手写一份字段清单。**
+> 🔨 **理由就是这份稿子自己**:v0.1 的 RED 正是"一份手工维护的字段清单漏了九项"。**在测试里再写一份手工清单 = 把同一个病复制到守卫上** —— 而那时候它更隐蔽,因为守卫全绿。⇒ 枚举源与 strict-reject 用的**是同一个 schema 定义对象**;加字段自动生成新变异用例。
+>
+> #### C-8-a · `bets_excluded[]` 首个必需阴性对照(Codex 点名)—— **它必须先在 v0.1 公式上是红的**
+>
+> 具体形态:两份 CIS,**除 `bets_excluded[]` 外逐字节相同**。
+> - **在 v0.1 的 `input_set_root` 公式下** ⇒ 两者算出**同一个 root** ⇒ **该用例必须当场变红**;
+> - **在 v0.2 的 `cis_digest` 下** ⇒ 两者摘要不同 ⇒ 绿。
+>
+> 🔨 **落码时必须把这两次都真跑出来并留证据**(承记忆 `[[test-name-must-be-the-one-that-reddens]]`:**用例名字写着守什么,把那个守卫拆掉时就得它自己红**)。只跑绿的那一次 ⇒ 这条用例证明不了它在守什么 —— 它可能因为任何别的原因绿。
+>
+> ### 🆕 v0.2 · R-6 修订块 —— **C-3 阳性对照收紧,并如实标它今天跑不出来**
+>
+> **Codex §1.4 原话**:阳性 fixture 必须由**可独立重建**的数据推出,并必须证明**送进 `sign_input_for_settle` 的那串字节,就是其完整输入/输出/政策/记账状态被验过的那串**;「一份把所有 CIS 字段都由同一个生产者填好的 fixture,不是有效的阳性对照。」
+>
+> **C-3 改写(原表 C-3 那一行的替换定义)**:
+>
+> | | v0.1 | v0.2 |
+> |---|---|---|
+> | fixture | 「CIS 全过 ∧ B 全过」 | **只给三样**:链上 spine P2SH 地址 + 被签 tx 字节 + 本机 DB。**不给任何 producer 提供的 CIS 对象。** |
+> | 构造 | 未约束 | 验证方**自己走完整 LOOKUP 路径**造出 CIS,自算 `cis_digest'` 与 `input_set_root'` |
+> | 断言 | 调用次数 == 期望 input 数 | ① 调用次数 == 期望 input 数(非 0)② **被签字节的 hash == 第 7 步闭合 hash**(TOCTOU 闭合真的合上了,不只是流程走完) |
+>
+> 🔴 **做成机械可测,不靠自觉**:C-3 的 fixture 构造函数**签名上就不接受 CIS 参数**。⇒ 「不小心用了 producer 的 CIS」这件事**在类型层就写不出来**,而不是靠 review 时有人记得看。
+>
+> 🔴 **而 C-3 今天 NOT-RUNNABLE,不是 pending —— 必须这样标**:
+> 完整 LOOKUP 路径里 `maker_fee_bps` 无合法源(R-3)⇒ 任何真实市场上跑 C-3 都必然停在 inconclusive ⇒ **拿不到阳性读数**。
+> 🔨 **这两种状态导出的动作完全不同**:「pending」= 排队等人跑;「NOT-RUNNABLE」= **在 R-3 被裁定前,跑它是浪费,且跑出来的红会被误读成实现有 bug**。**混成一句,下一个人会去跑,然后修错东西。**
+> 🔵 **可先跑的替身**(不冒充阳性对照):用一个**构造出来的**市场(政策字段全部有 `redeem_ctor` 源)证明 C-3 的**机制**成立。**它证明代码路径通,不证明存量盘可达** —— 两句都要写在用例头注释里,否则它会被当成阳性对照引用。
 
 ### 4.3 一条必须写进 schema 层的失败语义
 
@@ -379,6 +605,23 @@ guest 产 proof,journal 绑三元组                         CloseZkV2.sil:45
 6. **候选 B 的三个锚点在 CIS 上线后还留不留。** `[待 Bettor 裁]`
    按 §4.1-2,B 只有拒绝权;CIS 上线后 B 的每一条都被 CIS 严格包含。**保留 B = 多一条更便宜的早拒路径(省算力);删掉 B = 少一处会漂的重复实现。** 两边都有理,我不替 Bettor 拍。
 
+> ### 🆕 v0.2 · R-7 修订块 —— **§7 开放题的收窄、新增与一条降级**
+>
+> **7-2 收窄**(原问「`policy_source=="redeem_ctor"` 在 v0.5/v0.6 上能不能真做到」):R-2b 把做法从"解析 redeem 取偏移"换成"重算 P2SH 比对"⇒ **不再需要任何字节布局知识**。**剩下的问题只有一个,而且更小**:`computeSpineP2SH` 硬要求 3 个 oracle pk(`pool-p2sh.mjs:125-127`),v0.6/v0.7 是 5 委员 ⇒ **这条重算路径在 v0.6/v0.7 上能否原样跑?** `[未验/需 J2]`
+>
+> **7-4 降级但不撤**(原问 `market_state_version` 用 `prior_state.outpoint` 顶替是否成立):v0.2 未获得新证据,**维持 `[推断,待 NWT 判]` 原样**。🔵 但可加一句降低它的紧要度:R-1 之后 `market_state_version` 与 `prior_state` **都在 `CIS_BODY` 内、都被 `cis_digest` 绑定** ⇒ 即便顶替关系判错,**也不会产生"承诺没绑住它"这一类失败**,只会产生"语义标签选得不好"。**两种失败的严重性差一个量级。**
+>
+> **🆕 7-7(新增,承 R-3)· `maker_fee_bps` 的权威从哪来 —— 这是 ⑥ 现在的头号阻塞** `[待 Bettor 裁 · 涉在飞合约的那条待 Owner]`
+> 三条出路与我的推荐(**(ii) 协议常量 + 被承诺的版本→常量表**)见 R-3.4。🔴 **在这条被裁定前,⑥ 不具备"可实现"状态**,C-3 阳性对照 NOT-RUNNABLE(R-6)。
+>
+> **🆕 7-8(新增,承 R-4)· covenant 到底强不强制烤死的 `minerFee`?** `[未验/需 J2]`
+> v0.6/v0.7 动钱用的是现算 `dynamicFee`(`pool-market-settler.js:2215`),而 spine ctor 里烤的是另一个 `minerFee`(`pool-p2sh.mjs:150`)。**强制与不强制两条分支都不导向"CIS 可以用那个烤死值"**(理由见 R-4),所以本稿不等答案先判 inconclusive;答案只决定后续怎么修。
+>
+> **🆕 7-9(新增)· `bets_excluded[]` 这个字段本身会不会成为攻击面?** `[未验]`
+> R-1 让它被绑定了,`_shard9PhantomExcludeFor`(`bshard-close-voter.js:178`)那类隐藏排除因此变成可比对的一行 —— **这是好事**。但反过来:一个能构造 CIS 的生产者,现在可以**光明正大地**在 `bets_excluded[]` 里排除任意注,只要它同时把 `payout_root`/`accounting` 算得自洽。⇒ **绑住它 ≠ 限制它。** 谁有权排除、以什么理由排除,**是一条本稿没有回答的授权问题**,交 NWT 判是否需要在 ⑥ 内解决(还是属于另一张卡)。
+>
+> **7-3 补充**(广播体积):R-1 之后**授权承诺是 32 字节的 `cis_digest`** ⇒ "只广播承诺"这条省法的成本更低了。但原问题**不变**:只播承诺 ⇒ 两边用的是不是同一集合又交还给本地数据。**仍需 NWT 判它会不会把 CIS 削回成被否掉的"确定性一致"形态。**
+
 ---
 
 ## §8 证据层级自标(D-012 §5 纪律)
@@ -395,6 +638,22 @@ guest 产 proof,journal 绑三元组                         CloseZkV2.sil:45
 | §2 的字段表 / §2.3 的 root 构造 / §4.2 的用例 | `[DESIGN-ONLY·零实现·未审]` —— **本稿不使冻结前置⑥ 从 OPEN 变 CLOSED**;它只让 ⑥ 可被实现 |
 | §7 各条 | 各自标注 `[未验]` / `[推断]` / `[待裁]` |
 
+> ### 🆕 v0.2 · R-8 修订块 —— v0.2 新增读数的证据层级(全部本会话现读)
+>
+> | 陈述 | 层级 |
+> |---|---|
+> | **R-3.1 · spine ctor 十项参数逐项 + 无 `makerFeePct`** | `[CONFIRMED·源码实读]` `kasia-console/src/lib/pool-p2sh.mjs:134-141`(逐参数 `validateInt`/`validateHashHex`)+ `:144` 注释的 ctor 序 + `:145-156` `ctorJson` 逐项 |
+> | **R-3.1 · 全仓只有一个 spine ctor 构造器**(⇒ v0.5/v0.6/v0.7 共用) | `[CONFIRMED·源码实读]` `grep -n "computeSpineP2SH\|SPINE_SIL\|ctorJson" pool-p2sh.mjs` ⇒ `computeSpineP2SH` 唯一 `:122`,`SPINE_SIL` 单一 `:20`,另一 `ctorJson` `:191` 属 `PoolSide`。**作用域:只覆盖 `pool-p2sh.mjs`;未在全仓范围搜索是否有第二个 spine P2SH 计算实现** |
+> | 🔴 **R-3.1 · `maker_fee_pct` / `oracle_fee_pct` 无 DB 列** | `[CONFIRMED·DB实读]` `PRAGMA table_info(pool_markets)` on **`D:/kanet/kanet/kasia-console/data/console.db`**(现用库,只读)⇒ 34 列;`maker_fee_pct=false` `oracle_fee_pct=false`;`broker_fee_pct`/`oracle_bond_amount`/`miner_fee`/`fee_rules`=true。**🔵 作用域订正:v0.1 §8 同一条读的是 `D:/kanet-tn12/…` 旧库路径,v0.2 在现用库复核,结论相同。作用域仍只等于本机这一份库。** |
+> | **R-3.1 · `marketMetadataHash` 原像六键无费率** | `[CONFIRMED·源码实读]` `kasia-console/src/api/pool.js:734-741` `metaInput = {source, condition, token, side, end, rule}` → `:741` sha256 |
+> | **R-3.1 · `feeRules` 无 maker 角色** | `[CONFIRMED·源码实读]` `kasia-console/src/lib/fee-split.mjs:60-68` roles = provider/broker/introducer?/oracle/node |
+> | **R-3.2 · `makerFeePct` 恒取字面量 10 且动钱** | `[CONFIRMED·源码实读]` `pool-market-settler.js:1820`(`?? 10`)/ `:1825`(`makerFeeBI = totalPool*bps/10000n`)/ `:2221`(`parseInt(market.maker_fee_pct,10) || 10`,读不存在的列) |
+> | **R-4 · `minerFee` 烤进 ctor 但 v0.6/v0.7 用 `dynamicFee`** | `[CONFIRMED·源码实读]` `pool-p2sh.mjs:135/150` · `pool-market-settler.js:2195-2206`(dynamicFee 现算)/ `:2211`(baseMinerFee)/ `:2214-2215`(isAnonymousPool 三元) |
+> | **R-2b · P2SH = blake2b(编译后 redeem)** | `[CONFIRMED·源码实读]` `pool-p2sh.mjs:158`(`compileAndComputeP2SH`)→ `:161`(`blake2b(result.scriptBytes,{dkLen:32})`) |
+> | **R-2b · `computeSpineP2SH` 硬要求 3 个 oracle pk** | `[CONFIRMED·源码实读]` `pool-p2sh.mjs:125-127`;**v0.6/v0.7 为 5 委员** `pool-market-settler.js:2224` ⇒ 该路径在 v0.6/v0.7 能否原样跑 = `[未验/需 J2]` |
+> | **R-1 / R-2 / R-5 / R-6 的构造与用例** | `[DESIGN-ONLY·零实现·未审]` |
+> | 🔴 **v0.2 对 v0.1 §8 末行的收回** | v0.1 写「本稿不使 ⑥ 从 OPEN 变 CLOSED,它只让 ⑥ 可被实现」。**后半句 v0.2 收回**:R-3 证明在 `maker_fee_bps` 权威被裁定前,⑥ **连"可被实现"都不成立**。 |
+
 ## §9 交审点名
 
 1. **@NWT(红队)**:
@@ -407,3 +666,21 @@ guest 产 proof,journal 绑三元组                         CloseZkV2.sil:45
 ---
 
 **本稿不改任何代码、不建任何表、不动任何开关、不发频道、不 commit。**
+
+---
+
+> ## 🆕 v0.2 · §9-bis 交审点名(替换上面 §9 的分工,原 §9 保留不删)
+>
+> 1. **@Bettor(裁定,挡在最前面)**:
+>    - 🔴 **7-7 / R-3.4:`maker_fee_bps` 走 (i)/(ii)/(iii) 哪条。我推荐 (ii)**(协议常量 + 被承诺的版本→常量表),理由是它**唯一同时覆盖存量与新盘**,且不动任何在飞合约。**在这条拍板前,⑥ 不具备"可实现"状态** —— 这不是催,是说明后面所有工作的前置。
+>    - 原 §7-1(弃权率上升 ⇒ 人工授权出口吞吐)与 §7-6(候选 B 留不留)**仍挂着,v0.2 未推进**。
+> 2. **@J2(settler / redeem / p2sh 域)**:
+>    - **R-2b 的重算比对在 v0.6/v0.7 上成不成立** —— `computeSpineP2SH` 硬要求 3 个 oracle pk(`pool-p2sh.mjs:125-127`),而 v0.6/v0.7 是 5 委员。**这条不通,R-2b 就只覆盖 v0.5。**
+>    - **7-8:covenant 强不强制烤死的 `minerFee`**(R-4)。
+>    - **复核 R-3.1 第 1 条**:我只在 `pool-p2sh.mjs` 内确认了 spine ctor 构造器唯一;**全仓是否有第二个 spine P2SH 计算实现,我没查**(作用域已在 §8 标)。**若有,R-3 的"四个源全零命中"要重跑。**
+> 3. **@NWT / @Codex(红队)**:
+>    - **首攻 R-1.3 的传递关系**:我声称"`input_set_root` 在 body 内 ⇒ 被 `cis_digest` 传递性绑定 ⇒ 不能被换掉",并另加一道强制重算防它"算错"。**若你能构造一份 CIS,使 `cis_digest` 正确而 `input_set_root` 语义上仍可被利用,那这条就没关严。**
+>    - **次攻 R-2b 的"提出-比对"是否算独立 LOOKUP** —— 我的辩护是"权威是链上那个 P2SH 承诺,WIRE 只负责提出"。**这条如果站不住,R-2b 连同 R-3.4-(ii) 一起塌。**
+>    - **7-9(新增)**:R-1 让 `bets_excluded[]` 被绑定了,但**绑住它 ≠ 限制它**。谁有权排除、凭什么排除,本稿没答 —— 请判这该在 ⑥ 内解决还是另开一张卡。
+>    - **C-8 的枚举驱动方式**(R-5):我要求由 schema 定义本身驱动、禁止测试里手写清单。**若你认为这在本仓的测试框架下做不到,请直说** —— 那会让 C-8 退化成一份会漂的清单,而那正是 v0.1 出事的原因。
+> 4. 🔴 **本稿仍是 DESIGN-ONLY**:不构成任何实现授权、不授权 role enforcement / 密钥移动 / 闸武装 / 部署 / 重启 / 结算 / 退款 / 签名 / 广播。
