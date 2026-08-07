@@ -100,7 +100,7 @@ const mkEvent = (marketId) =>
 
 export default {
   id: 'precond5_verification_interrupt_no_autorefund',
-  description: 'D-012 前置⑤: 验证中断 ⇒ 零退款痕迹 · 六臂(N1-a/N2/P1/P2/A0/I0 · N1-b 已按三方裁定摘除) · 驱动真实 poolSettlerTick · 🔴 P1/P2 本轮【故意红】= 阳性对照未建立',
+  description: 'D-012 前置⑤(c)半闭: 阴性安全性质【验证中断 ⇒ 不路由进自动退款】闭合 · 驱动真实 poolSettlerTick · 泛仪器(processed)+ 窄仪器 A0′(evidence_gap 两臂分岔)双层证非空绿 · 🔴 P1/P2 阳性臂【离线射程外】(第五道闸=Relay not running), 待新卡 P5-POSITIVE-VIA-FAKE-RELAY-SINK, 不冒充不降级断言',
   domain: 'predictions',
   tags: ['regression', 'refund', 'money-path', 'precond5', 'd012', 'offline'],
   skip_in_batch: false,
@@ -117,7 +117,24 @@ export default {
     { id: 'seed_n2', action: 'exec_sql',
       sql: mkMarket(M_N2, 'collecting_sigs', `'{"phase2_dispatched_at":"2026-01-01T00:00:00.000Z"}'`) },
     // P1/P2: 阳性对照 —— 期望【不】落冻结态(与四条阴性臂分岔 = A0 的阳性证据)
-    { id: 'seed_p1', action: 'exec_sql', sql: mkMarket(M_P1, 'verifying', `'{}'`) },
+    // 🔴 P1 臂 fixture(2026-08-07 J2, 预登记于频道 15:29Z 后落)。
+    //    ⚠ 实跑撞出的闸是【五道】不是两道 —— 下面两条是本 fixture 能解的, 另三道见本臂断言的失败文案:
+    //      ③ relay_nodes 要有 maker_relay_id 那行带 address(否则 buildMakerRefundPreimage → no maker address)
+    //      ④ metadata.spine_redeem_script_hex(否则 v0.7 mass 计算失败)
+    //      ⑤ 🔴 Relay not running —— 构造退款交易要活 relay, **离线无解**, 这是 (c) 半闭的原因。
+    //    ③④ 本用例【不种】: 种了也过不了 ⑤, 徒增 fixture 复杂度而不改变红绿(实测确认)。
+    //    以下两条是 settler 侧的闸, 不是这条用例的问题:
+    //    ① `protocol_version` 必须是 v0.6/v0.7 —— 默认 mkMarket 插的是 **v0.5**,
+    //       而 MIN_POT 前置(settler:691-692)与 0-bet 捷径(settler:801-802)**两处都要求 v0.6|v0.7**
+    //       ⇒ v0.5 连分支都进不去(此前"造不出"的真正原因, 不是 deadline 也不是别的)。
+    //    ② `maker_stake_amount >= 1e10`(100 KAS = MIN_POT)—— MIN_POT 前置算的是
+    //       **maker_stake + bettorSum**(settler:693), 0 注时 bettorSum=0, maker stake 不够即被
+    //       `min_pot_undersize` 先取消(2026-08-06 BBd 已实测过这一支)。
+    //    ⇒ 只改其一仍红; 两条同时满足, 0-bet 捷径才写下 authorization='bettors_absent'。
+    { id: 'seed_p1', action: 'exec_sql',
+      sql: mkMarket(M_P1, 'verifying', `'{}'`, {
+        cols: 'maker_stake_amount', vals: '10000000000',
+      }).replace("'v0.5'", "'v0.7'") },
     { id: 'seed_p2', action: 'exec_sql', sql: mkMarket(M_P2, 'verifying', `'{}'`) },
     // I0: 终态盘(tick 扫不到)+ 亲手种下全套痕迹 ⇒ 验的是【查询】不是【行为】
     { id: 'seed_i0', action: 'exec_sql',
@@ -230,7 +247,13 @@ export default {
                                 AND json_extract(metadata,'$.refund_dispatched_at') IS NOT NULL
                                 AND json_extract(metadata,'$.refund_tx_obj')         IS NOT NULL
                                 AND protocol_status = 'refunding'),
-                            '🔴 本轮未建立阳性对照(卡 P5-POSITIVE-CONTROL-VIA-ZERO-BET-FIXTURE): 此臂 fixture 与阴性臂逐字段相同 ⇒ 这条红【不是行为缺陷】, 别去查 status。实测下一道拦路闸是 min_pot_undersize(池非空), **不是 deadline**(v0.6 下宽限内/远早两种 deadline 读数完全相同)。本断言只在 metadata.refund_authorization 真落 bettors_absent 时才转绿') AS state`,
+                            '🔴 阳性对照【离线射程外】—— 不是 fixture 没造对(2026-08-07 J2 实测: fixture 已把前四道闸全部打通)。'
+                            || '闸链逐道实测: ①protocol_version v0.5→v0.7(否则不进分支) ②maker_stake>=1e10(否则 MIN_POT 先取消) '
+                            || '③relay_nodes 要有 maker_relay_id 那行带 address(否则 no maker address) ④metadata.spine_redeem_script_hex(否则 v0.7 mass 计算失败) '
+                            || '⇒ 四道全通后走到 dispatchRefund, 而第五道是【Relay not running】: 构造退款交易要活 relay, 离线必失败 '
+                            || '⇒ refund_authorization/dispatched_at/tx_obj 三字段都不会落库 ⇒ 本四字段合取断言【离线不可能满足】。'
+                            || '⇒ NWT 2026-08-07 裁: ⑤ 按(c)半闭交付, 本臂如实标射程外, 不冒充; 改生产码加痕迹来让它可观测 = 正对 D4 靶心(用被禁止的那类动作去解锁禁止它的闸), 已拆独立卡。'
+                            || '⚠ 这条红【不是行为缺陷】, 别去查 status。') AS state`,
       expect: { must: { row_assert: { state_contains: 'POSITIVE_CONTROL_ESTABLISHED' } } } },
     { id: 'P2_positive_control_NOT_ESTABLISHED_red_until_abstain_supermajority_fixture', action: 'query_db',
       sql: `SELECT COALESCE((SELECT 'POSITIVE_CONTROL_ESTABLISHED' FROM pool_markets
@@ -239,7 +262,11 @@ export default {
                                 AND json_extract(metadata,'$.refund_dispatched_at') IS NOT NULL
                                 AND json_extract(metadata,'$.refund_tx_obj')         IS NOT NULL
                                 AND protocol_status = 'refunding'),
-                            '🔴 本轮未建立阳性对照: 需要「档1 弃权≥4/5」的真实委员票据(settler:1783 自行推导该授权) ⇒ 这条红【不是行为缺陷】, 别去查 status。本断言只在 metadata.refund_authorization 真落 committee_affirmative_unjudgeable 时才转绿') AS state`,
+                            '🔴 阳性对照【离线射程外】—— 与 P1 臂同一堵墙, 且比它多一段前置。'
+                            || '构造要求(NWT 2026-08-07 探清): 1 个市场 + committee_pks 5 个 + chain_events 里 >=4 行 event_type=pool_oracle_vote, '
+                            || 'payload $.market_id 匹配 / $.voter_pubkey 匹配(小写比对) / $.outcome=ABSTAIN, 每 voter 取 observed_at 最早一行(settler:1783 据此自行推导授权)。'
+                            || '⇒ 但即便全部造齐, 终点同样是 dispatchRefund ⇒ 同样撞【Relay not running】⇒ 三字段同样不落库。'
+                            || '⇒ NWT 裁: 与 P1 同按(c)半闭标记, 不各撞一次墙。⚠ 这条红【不是行为缺陷】, 别去查 status。') AS state`,
       expect: { must: { row_assert: { state_contains: 'POSITIVE_CONTROL_ESTABLISHED' } } } },
 
     // ── teardown(幂等) ──
