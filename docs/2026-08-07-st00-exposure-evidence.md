@@ -115,7 +115,13 @@ SELECT covenant_family, COUNT(*) AS n, COUNT(DISTINCT logical_market_id) AS logi
 | **`v1_committee`** | **701** | 701 |
 | `v2_zk` | 21 | 21 |
 
-⇒ **主力是 V1**(`PayoutShard.sil`):`refund_claim` 要求 `closed==2`,而 `closed=2` **只能由 `cancel_attest` 设**,后者要 **5 个委员签名**,且该文件 **`tx.time` 出现 0 次 = 零 timelock** ⇒ **无许可逃生路不存在**。(此格 Codex `3486cb17` 逐行读 `PayoutShard.sil` **代码级确认**。)
+⇒ **主力是 V1**(`PayoutShard.sil`):`refund_claim` 要求 `closed==2`,而 `closed=2` **只能由 `cancel_attest` 设**,后者要 **4-of-5 委员签名**(`require(validSigs >= 4)`,`PayoutShard.sil` entry3 逐字;🔴 我原写"5 个"= 把【签名参数个数】当成了【门槛】),且该文件 **`tx.time` 出现 0 次 = 零 timelock** ⇒ **无许可逃生路不存在**。(此格 Codex `3486cb17` 逐行读 `PayoutShard.sil` **代码级确认**。)
+
+🔨 **这处更正连带改变了严重性,必须一起说(不是纯措辞)**:
+- **4-of-5 容忍 1 个委员失效** ⇒ 「**缺任一即永锁**」是错的,准确说法是「**须坏 ≥2 个才永锁**」;
+- **但结论方向不变**: 仍需 4 个委员主动配合、`PayoutShard.sil` 仍**零 timelock**、仍**无无许可逃生路** ⇒ **liveness 失败面成立,只是门槛比我原写的低一格。**
+🔨 **判据(Bettor 入册,我这处是触发实例)**: **报 M-of-N 门控的严重性,必须同时带 M 和 N 两个数** —— 只说"要委员签"或只说一个数,会让"签不出"被读成"全体签不出",而实际是"够不到阈值"。
+⚠ **我这次的具体错法**: **读了签名【参数个数】(5 个 `sig` 形参),把它当成了【门槛】** —— 而门槛在下面的 `require(validSigs >= 4)` 里,源码注释甚至逐字写着 `threshold t=4-of-5`。**参数个数 ≠ 门槛。**
 
 ### 1.6 tg 托管钱包
 
@@ -160,9 +166,9 @@ SELECT COUNT(*) AS markets, COUNT(DISTINCT spine_p2sh) AS distinct_spine FROM po
 
 | 层 | sompi | KAS | 谁能动它 |
 |---|---|---|---|
-| **spine** | 8,166,500,000,000 | **81,665.00** | 只有 `settle_aggregate`(5 委员)/ `refund_maker_unjoined`(maker 自己,封顶自己那份) |
+| **spine** | 8,166,500,000,000 | **81,665.00** | 只有 `settle_aggregate`(**4-of-5**,`validSigs >= 4`)/ `refund_maker_unjoined`(maker 自己,封顶自己那份) |
 | **side** | 8,949,618,000,000 | **89,496.18** | bettor 自己签 + timelock(`refund_market_cancelled`) |
-| payout | 6,600,000,000 | 66.00 | V1 = 5 委员 `cancel_attest` 之后才可 `refund_claim` |
+| payout | 6,600,000,000 | 66.00 | V1 = **4-of-5** 委员 `cancel_attest` 之后才可 `refund_claim` |
 | shard | 20,000,000 | 0.20 | — |
 | ⚠ 跨层地址(**单列,未归类**) | 60,000,000 | 0.60 | 3 个地址同时出现在多层 ⇒ **不硬归类,亦不计入上面四行** |
 
