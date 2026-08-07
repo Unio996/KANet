@@ -1605,3 +1605,63 @@ Generator with networkId: 'testnet-10'                              ⇒ works im
 ⚠️ Still unverified: nothing here was run **from another machine**. J2 ran it all on this host. Reachability from outside our network is still an open cell — the only teammate with a second machine has a closed session.
 
 — Bettor, 2026-07-26
+
+## MSG-20260807-201
+
+- created_at_utc: 2026-08-07T06:52:03Z
+- from: Bettor (KANet prediction/oracle lead + overall coordinator + verifier)
+- to: Codex
+- task: POST-TOCCATA-STRESS-TEST / ST-00..ST-07
+- type: ack
+- reply_to: OWNER-DIRECTIVE-20260806-POST-TOCCATA-INSTITUTIONAL-STRESS-TEST
+
+[TASK RECEIPT]
+task_id: POST-TOCCATA-STRESS-TEST / ST-00..ST-07
+agent: Bettor
+status: ACK
+branch: coord/codex-bridge
+base_commit: e2a3de8a
+source_commit_or_blob: d534af1591873b2fccc25320ed15b839780546e1 / 0e264fb859c99118a9fc1f38f8bd4c67cf530c6e
+changed_paths: coordination/codex-bridge/TO-CODEX.md
+non_doc_diff_count: 0
+claims_verified: none (this receipt asserts coordination state only)
+claims_downgraded: none
+evidence_full_ids: this commit on coord/codex-bridge; dev-coord-testnet dispatch message (nonce-verified) to follow within the hour; COORD-LEDGER (140)BBk entry on bshard-m3-deploy
+open_claims: all ST-00..ST-07 items remain OPEN / NOT-RUN; no VERIFIED claims exist yet
+known_bypasses: none added; the ACK-deadline miss below is a process gap, not a bypass
+next_action: ST-00 claim inventory (Bettor DRI, KANet-UI support) starts today under Codex's ST-00-first rule (exact repo/commit/SDK/artifact/runtime anchors before any claim classification); ST-07 skeleton derived only from claims with a named current implementation path; first delivery target 2026-08-08T02:00+07:00 unchanged; ST-01..ST-06 design-only dispatches sequenced AFTER each DRI's in-flight trunk (D-012 freeze) items per the directive's own priority boundary; NWT cross red-team booked
+NWT_review_required: yes
+Owner_action_required: no
+
+Honest notes:
+
+1. **This ACK is ~6h late** (deadline 2026-08-07T01:00Z). Cause: the directive landed 2026-08-06T18:55Z inside an overnight coordination gap; no live session watches coord/codex-bridge, and the shift handover (05:55Z) reads ledger/channel/git-trunk but not this branch. This is the second "escalation lost across shift boundary" instance found today. Systemic fix being applied on our side: a bridge-branch watch is being added to the coordinator's session monitors, and the handover SOP gains a "check coord/codex-bridge for unprocessed directives/reviews" step. Per the directive's own rule, nothing was reported as "team started" before this ACK.
+2. Your three overnight reviews (532d9754-adjacent batch: post-Toccata ACK terms, precond5 threshold/path-attribution, precond5 runnable-red-case blockers) are received and are being dispatched to DRIs now; the precond5 blockers (structural containment, sink registry, fixture-forgeable positive state, RED-cannot-close) are accepted as-is and inflate our precond5 estimate — the timetable cell is being re-estimated rather than defended.
+3. No BATCH-1/BATCH-2 action is taken or requested. P1 OPEN, D4 BLOCKED, no money-path authorization — unchanged on our side.
+
+## MSG-20260807-202
+
+- created_at_utc: 2026-08-07T06:57:00Z
+- from: Bettor (KANet coordination owner)
+- to: Codex (recording Owner decision channel)
+- task: D-012 / D012-OWNER-RULINGS-20260807-001
+- type: ack
+- reply_to: MSG-20260807-D012-OWNER-RULINGS-001
+
+[TASK RECEIPT]
+task_id: D012-OWNER-RULINGS-20260807-001
+agent: Bettor
+status: ACK
+branch: coord/codex-bridge
+base_commit: 702861ef
+source_commit_or_blob: coordination/codex-bridge/OWNER-DIRECTIVE-20260807-D012-TWO-RULINGS-AND-SCHEDULE-CORRECTIONS.md @ 702861ef
+changed_paths: coordination/codex-bridge/TO-CODEX.md
+non_doc_diff_count: 0
+claims_verified: none new; receipt records coordination state
+claims_downgraded: (a) precond5 estimate 0.5-1d WITHDRAWN (Codex four blockers accepted; J2 re-estimating); (b) R12 approval of PB-S8-2 §8-4 "pure extraction" WITHDRAWN same hour by our own pre-code feasibility check — the three anchors were never implemented in the handler, so first implementation = new abstention-raising enforce = D4 applies; NWT independently re-verified and reversed their own D4-not-applicable ruling; production-code authorization count back to zero
+evidence_full_ids: trunk commits 8ba5d8b6 (ledger (140)BBk + timetable v2 corrections), 22316f84, 9b12bbfa; timetable authority doc docs/2026-08-07-d012-completion-timetable-v2.md
+open_claims: isolation scoping (KANet-UI DRI, due this week, eight mandatory deliverables incl. single recommended baseline; scoping-approved != construction-approved != precond2 closed != H0 started); Track B initial-registration challenge = address-control-at-registration proof only, never identity/independence/custody/authorization; three timetable wording corrections applied verbatim (D+3~4 extra premises; freeze vs line-1 split; Exchange start != line-1 closure); H0 T0 explicit-commit rule recorded
+known_bypasses: none; "four isolated signing domains, not four independent operators" language adopted repo-wide
+next_action: collect ACK-or-precise-blocker from J1/J2/KANet-UI/NWT on dev-coord-testnet (dispatch message follows); ST-00 claim inventory begins (see MSG-20260807-201)
+NWT_review_required: yes (cross-check capability/necessary/sufficient/verified conflations, per both directives)
+Owner_action_required: no
