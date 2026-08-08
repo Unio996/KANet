@@ -56,6 +56,35 @@
 #   - braking on an unknown reading turns a probe bug into a guaranteed dead chain;
 #   - a dead chain is loud and immediate, DAG pollution is silent (15h unnoticed).
 # So: unknown -> keep mining + alert. Known-bad -> brake. Known-good -> mine.
+#
+# ---------------------------------------------------------------------------
+# MINER IDENTITY IS THREE-VALUED, NOT BOOLEAN (Codex 2026-08-08 round 3 MUST-FIX)
+# ---------------------------------------------------------------------------
+# Get-MinerState returns OWNED_RUNNING / CONFIRMED_ABSENT / UNKNOWN_OR_CONFLICT,
+# not a boolean. A round-2 fix made the STOP path safe (never touch a process you
+# can't confirm you own) but every auto-START call site still read "not confirmed
+# running" as one thing -- so a transient identity-check failure (CIM query hiccup,
+# unreadable pid file) while the real miner was alive and well would launch a
+# SECOND miner, reproducing the exact death spiral this breaker exists to prevent.
+# Same lesson as the DAG-probe section above: an absent positive reading has two
+# causes (genuinely gone vs. can't tell), and only one of them is safe to act on.
+# Start-Miner-Unless-Paused is the single choke point all 4 auto-start call sites
+# go through -- it only starts on CONFIRMED_ABSENT, no-ops silently on
+# OWNED_RUNNING, and Alerts without starting on UNKNOWN_OR_CONFLICT (this is also
+# the "stale/corrupt pid-file metadata needs an explicit operator look, not a
+# silent auto-start" requirement -- an unparsable pid file is UNKNOWN_OR_CONFLICT).
+# Five scenarios this must get right (traced by hand; no PS test harness exists for
+# this script, verification is manual code trace + will be exercised live once
+# deployed): (1) CIM query fails transiently while the real miner is alive -> no
+# recorded commandLine changes, but Win32_Process query throws -> UNKNOWN_OR_CONFLICT,
+# no second miner. (2) commandLine unreadable (recorded null, e.g. Start-Miner's own
+# readback failed) -> UNKNOWN_OR_CONFLICT. (3) PID reuse, an unrelated (non-bridge)
+# process now owns that PID -> .Path mismatch -> CONFIRMED_ABSENT, safe to start.
+# (4) pid file missing/corrupt while a real miner happens to be running untracked
+# -> UNKNOWN_OR_CONFLICT (cannot prove absence without name-matching, which round 1
+# already rejected as unsafe) -- accepted limitation, strictly safer than fail-open.
+# (5) normal case, miner genuinely exited, pid file intact and consistent -> Get-Process
+# returns nothing for that PID -> CONFIRMED_ABSENT, restarts normally.
 $ErrorActionPreference = 'Continue'
 
 # --- thresholds (hysteresis; see baseline note above) ---
@@ -121,29 +150,48 @@ function Get-Tips {
 # closed, per the project's "deny 绝不 fail-open" convention -- an unconfirmed
 # process must never be treated as ours to stop, and an unconfirmed absence must
 # never suppress a legitimate Start-Miner).
-function Get-OwnedMinerProcess {
-  if (-not (Test-Path $minerPidFile)) { return $null }
+# Codex 2026-08-08 round 3 MUST-FIX: the round-2 fix (commandLine match) was correct
+# for the STOP direction but Get-OwnedMinerProcess's null return conflated three
+# different facts into one falsy value: CONFIRMED_ABSENT (pid file missing / OS
+# confirms nothing runs at that PID / that PID belongs to something that isn't any
+# stratum-bridge) and UNKNOWN_OR_CONFLICT (pid file unparsable, or a real
+# stratum-bridge IS running there but a transient CIM query failure or a
+# commandLine mismatch means we can't confirm it's ours). Every prior call site
+# read null as "safe to start a new miner" -- so a one-shot CIM hiccup while our
+# own miner was alive and well would launch a SECOND miner, reproducing the exact
+# death spiral this breaker exists to prevent. "Absent" has two causes (confirmed
+# gone vs can't tell) and they demand opposite actions on the start path, even
+# though round 2 correctly treated them the same way on the stop path (don't touch
+# what you can't confirm).
+function Get-MinerState {
+  if (-not (Test-Path $minerPidFile)) { return @{ State = 'CONFIRMED_ABSENT'; Process = $null } }
   $raw = Get-Content $minerPidFile -Raw -ErrorAction SilentlyContinue
-  if (-not $raw) { return $null }
-  try { $rec = $raw | ConvertFrom-Json } catch { Log "Get-OwnedMinerProcess: pid file unparsable -- treating as not owned"; return $null }
-  if (-not $rec.pid) { return $null }
+  if (-not $raw) { return @{ State = 'CONFIRMED_ABSENT'; Process = $null } }
+  $rec = $null
+  try { $rec = $raw | ConvertFrom-Json } catch {
+    Log "Get-MinerState: pid file unparsable -- UNKNOWN_OR_CONFLICT (needs operator look at $minerPidFile before this will auto-start again)"
+    return @{ State = 'UNKNOWN_OR_CONFLICT'; Process = $null }
+  }
+  if (-not $rec.pid) { return @{ State = 'CONFIRMED_ABSENT'; Process = $null } }
   $proc = Get-Process -Id $rec.pid -ErrorAction SilentlyContinue
-  if (-not $proc) { return $null }
-  if ($proc.Path -ne $bridgeExe) { return $null }  # PID reuse landed on an unrelated process
+  if (-not $proc) { return @{ State = 'CONFIRMED_ABSENT'; Process = $null } }  # OS-level fact: nothing runs at that PID
+  if ($proc.Path -ne $bridgeExe) { return @{ State = 'CONFIRMED_ABSENT'; Process = $null } }  # that PID isn't any stratum-bridge -- ours is gone, PID recycled
   if (-not $rec.commandLine) {
-    Log "Get-OwnedMinerProcess: PID=$($rec.pid) has no recorded commandLine -- cannot confirm identity, treating as not owned"
-    return $null
+    Log "Get-MinerState: PID=$($rec.pid) has no recorded commandLine -- UNKNOWN_OR_CONFLICT (a stratum-bridge IS running at this PID/path, cannot confirm it's ours)"
+    return @{ State = 'UNKNOWN_OR_CONFLICT'; Process = $proc }
   }
   $currentCmdLine = $null
   try { $currentCmdLine = (Get-CimInstance Win32_Process -Filter "ProcessId=$($rec.pid)" -ErrorAction Stop).CommandLine } catch {}
-  if ($currentCmdLine -ne $rec.commandLine) {
-    Log "Get-OwnedMinerProcess: PID=$($rec.pid) commandLine mismatch (PID reuse or an unrelated stratum-bridge instance at the same path) -- not touching it"
-    return $null
+  if (-not $currentCmdLine) {
+    Log "Get-MinerState: PID=$($rec.pid) CommandLine query failed (transient CIM hiccup?) -- UNKNOWN_OR_CONFLICT, not touching, not starting a second instance"
+    return @{ State = 'UNKNOWN_OR_CONFLICT'; Process = $proc }
   }
-  return $proc
+  if ($currentCmdLine -ne $rec.commandLine) {
+    Log "Get-MinerState: PID=$($rec.pid) commandLine mismatch (PID reuse or an unrelated stratum-bridge instance at the same path) -- UNKNOWN_OR_CONFLICT"
+    return @{ State = 'UNKNOWN_OR_CONFLICT'; Process = $proc }
+  }
+  return @{ State = 'OWNED_RUNNING'; Process = $proc }
 }
-
-function Miner-Running { [bool](Get-OwnedMinerProcess) }
 
 function Start-Miner {
   $env:BRIDGE_SKIP_SYNC_GATE = '1'
@@ -151,7 +199,7 @@ function Start-Miner {
     -RedirectStandardOutput "D:\kaspa-tn12-mining\_bridge_tn12.log" `
     -RedirectStandardError  "D:\kaspa-tn12-mining\_bridge_tn12_err.log" -WindowStyle Hidden -PassThru
   # Record the exact command line the OS sees for this PID right now, not $bridgeArgs
-  # verbatim -- Win32_Process's CommandLine is what Get-OwnedMinerProcess will compare
+  # verbatim -- Win32_Process's CommandLine is what Get-MinerState will compare
   # against later, so the recorded value must come from the same source it will be
   # checked against (quoting/exe-path formatting can differ between the two).
   Start-Sleep -Milliseconds 200
@@ -163,14 +211,17 @@ function Start-Miner {
 }
 
 function Stop-Miner {
-  $proc = Get-OwnedMinerProcess
-  if ($proc) {
-    Stop-Process -Id $proc.Id -Force -Confirm:$false -ErrorAction SilentlyContinue
-    Log "Stop-Miner: stopped owned PID=$($proc.Id)"
+  $s = Get-MinerState
+  if ($s.State -eq 'OWNED_RUNNING') {
+    Stop-Process -Id $s.Process.Id -Force -Confirm:$false -ErrorAction SilentlyContinue
+    Log "Stop-Miner: stopped owned PID=$($s.Process.Id)"
+    Remove-Item $minerPidFile -ErrorAction SilentlyContinue
+  } elseif ($s.State -eq 'UNKNOWN_OR_CONFLICT') {
+    Log "Stop-Miner: state UNKNOWN_OR_CONFLICT -- not touching (cannot confirm ownership); pid file left as-is for operator inspection"
   } else {
     Log "Stop-Miner: no owned instance on record -- not touching other stratum-bridge processes"
+    Remove-Item $minerPidFile -ErrorAction SilentlyContinue
   }
-  Remove-Item $minerPidFile -ErrorAction SilentlyContinue
 }
 
 # Bettor 2026-08-08 10:17Z: PID tracking cannot express "operator deliberately
@@ -184,6 +235,15 @@ function Stop-Miner {
 function Start-Miner-Unless-Paused {
   if (Test-Path $pausedFile) {
     Log "Start-Miner skipped: $pausedFile present (operator pause) -- remove that file to allow mining again"
+    return
+  }
+  # Codex 2026-08-08 round 3 MUST-FIX, checked here once so every call site
+  # inherits it instead of each one having to separately remember "only start on
+  # CONFIRMED_ABSENT" -- a repeat of the exact bug class this fix closes.
+  $s = Get-MinerState
+  if ($s.State -eq 'OWNED_RUNNING') { return }  # already running -- silent, this is the expected steady state
+  if ($s.State -eq 'UNKNOWN_OR_CONFLICT') {
+    Alert "Start-Miner skipped: state UNKNOWN_OR_CONFLICT -- a stratum-bridge may already be running and not confirmed ours; starting another would risk a double-miner. Needs operator look at $minerPidFile."
     return
   }
   Start-Miner
@@ -210,7 +270,7 @@ while ($true) {
     if ($probeFails -eq 1 -or $probeFails % 20 -eq 0) {
       Alert "DAG probe unreadable x$probeFails -- mining left AS-IS (unknown != bad). Check node RPC / probe at $probe"
     }
-    if (-not $braked -and -not (Miner-Running)) { Log "bridge DEAD -> starting (probe blind)"; Start-Miner-Unless-Paused }
+    if (-not $braked) { Start-Miner-Unless-Paused }  # self-guards: no-op if OWNED_RUNNING, alerts (no start) if UNKNOWN_OR_CONFLICT, starts only if CONFIRMED_ABSENT
     Start-Sleep -Seconds $POLL_SEC
     continue
   }
@@ -232,7 +292,7 @@ while ($true) {
     Log "braked, waiting to digest (tips=$tips, need <$TIPS_RESUME)"
   }
   else {
-    if (-not (Miner-Running)) { Log "bridge DEAD -> starting (tips=$tips)"; Start-Miner-Unless-Paused }
+    Start-Miner-Unless-Paused  # self-guards: no-op if OWNED_RUNNING, alerts (no start) if UNKNOWN_OR_CONFLICT, starts only if CONFIRMED_ABSENT
   }
 
   Start-Sleep -Seconds $POLL_SEC
