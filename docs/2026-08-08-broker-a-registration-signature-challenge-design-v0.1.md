@@ -1,6 +1,7 @@
-# Broker (a) 初始注册签名挑战 · 设计稿 v0.6
+# Broker (a) 初始注册签名挑战 · 设计稿 v0.7
 
 > **Status**: CURRENT
+> 🔴 **v0.7 变更（Codex 2026-08-08 四审 MUST-FIX：永久证据档实为可覆盖缓存）**：§5 要求签名+被签字节永久可复验，但落地方式（§9）一直是 `broker_onboarding` 可变行上的 `last_proof_*` 缓存列——第二次 `update_bot_token` 会覆盖第一次的证据，历史写入无法再被审计。新增 §5-bis：append-only 表 `broker_registration_proofs`，每次验证通过 `INSERT` 一行（含 `resulting_mutation` 快照），`last_proof_*` 降级为便捷指针，不再是唯一记录。§6-bis 第③步、§9 DB 迁移、§10 验收标准同步更新。（不在 critical path 上，但是真实的 audit-integrity 缺口，Bettor 派工确认要修。）
 > 🔴 **v0.4 变更（Codex 2026-08-08 一审 MUST-FIX，两条一起闭）**：
 > 1. **唯一挑战寻址**（§4）：提交载荷补 `nonce` 字段，验证改为按 `nonce` 精确定位单条记录，不再对"同一 `broker_address` 下可能有多条未消费 nonce"这件事做隐含假设。
 > 2. **变更绑定**（§2-bis 新增）：`descriptor` 的输入集合从"随最终形态定"冻结为一个封闭定义，机械绑定操作类型 + bot/token 绑定语义 + role/network/address，堵住"合法签名被拿去打不同写入"的重放缺口。
@@ -135,6 +136,32 @@ bot_token_hash: <blake2b(bot_token)；未提供 token 时为 null——原文 to
 
 ---
 
+## §5-bis 永久证据档必须是 append-only 表，不能是可变行上的缓存字段（Codex 2026-08-08 四审 MUST-FIX）
+
+**问题**：§5 要求"落库必须存签名 + 被签字节原文……使任何第三方能离线自行复验"——这句话的隐含前提是**每一次成功验证都留下一份独立、不可覆盖的证据**。但 v0.1-v0.6 的落地方式（§9）一直是把 `last_proof_signature` / `last_proof_payload` / `last_proof_at` 存成 `broker_onboarding`（可变行）上的几个列。这是**缓存**，不是**存档**：一个地址先 `register`、再 `update_bot_token`（换一次 token）、再 `update_bot_token`（再换一次），三次都各自产生一份合法的签名证据，但**只有最后一次留在库里**——前两次的证据被物理覆盖，无法再被任何人（包括我们自己）取出来验证"当时那次写入确实经过了签名授权"。这不是假设性的：§10 验收标准里"二次写入未带新签名要拒绝"这条本身就预设了"存在多次写入"，而多次写入现在只有最后一次可审计。
+
+**修法**：新增一张 **append-only** 表 `broker_registration_proofs`，每次验证通过的写入都 `INSERT` 一行（永不 `UPDATE`/`DELETE`），字段：
+
+```
+id                 uuid, PK
+broker_address     TEXT
+operation          TEXT   -- "register" | "update_bot_token"，与该次 descriptor 的 operation 一致
+descriptor_hash    TEXT
+payload            TEXT   -- 被签字节原文，逐字保存（同 §5 拱心石要求，不重新拼）
+signature          TEXT
+nonce              TEXT   -- 消费掉的那个 nonce，可 JOIN 回 broker_registration_nonces 拿到完整挑战上下文
+verified_at        TEXT
+resulting_mutation TEXT   -- JSON，记录这次证据具体授权、且已实际落库的效果快照（register: 新建行的关键字段；
+                           -- update_bot_token: 本次写入后的 bot_username/bot_token_hash——不存 token 原文，
+                           -- 理由同 §2-bis）——这是"哪个证据对应哪次历史写入"这条链路的落点，不能省
+```
+
+`broker_onboarding.last_proof_*` 三列**可以留着**，但降级为"最近一次证据的便捷指针缓存"，**不再是唯一记录**——查询最新证据可以继续读它（快，不用 JOIN），但审计/复核任何**历史**写入必须查 `broker_registration_proofs`。这条表的写入是 §6-bis 事务里的第③步（写入这张新表，而不是只更新 `broker_onboarding` 上的缓存列），事务边界不变（仍是 `BEGIN IMMEDIATE` → ⓪①②③ → `COMMIT`，见 §6-bis）。
+
+**验收标准（新增）**：同一地址依次 `register` → `update_bot_token`(A) → `update_bot_token`(B)，产生三份合法证据。验收要求**这三份都能各自独立取出、各自独立复验**（用各自存档的 `payload`+`signature` 离线验签，都必须通过），且各自的 `resulting_mutation` 精确对应它授权的那次写入（不是笼统指向"当前状态"）——**任何一份被覆盖或与其它两份合并成一份，判失败**。
+
+---
+
 ## §6 Provenance 两档（复用 07-26 v0.2 §4.5，按新措辞调整）
 
 同一个验签通过的结果，在托管地址和非托管地址上证明的东西不同：
@@ -154,13 +181,13 @@ bot_token_hash: <blake2b(bot_token)；未提供 token 时为 null——原文 to
 
 ## §6-bis 四步写入必须在一个事务里（Codex 一审 MUST-FIX v0.3，二审 B4 MUST-FIX v0.5 补事务边界）
 
-§4 已要求 nonce 消费本身是原子 UPDATE（防并发重放），但一次成功注册实际要做**四件事**：**⓪ 复查 operation 与挑战签发时是否一致**（见 §2-bis）①标记 nonce 已消费 ②写/更新 `broker_onboarding` 行 ③落 `last_proof_*` 归档字段。**这几步若分开提交，中间任一步失败/或步骤之间存在窗口都会留下问题**——最典型的坏结果：nonce 已消费（第①步提交成功），但 `broker_onboarding` 写入失败（第②步报错），此时这个地址的这次控钥证明**被永久烧掉**（nonce 不可能重发），而注册本身**没有生效**——申请人无法重试（同一 nonce 已废），只能整个挑战流程重来。
+§4 已要求 nonce 消费本身是原子 UPDATE（防并发重放），但一次成功注册实际要做**四件事**：**⓪ 复查 operation 与挑战签发时是否一致**（见 §2-bis）①标记 nonce 已消费 ②写/更新 `broker_onboarding` 行 ③**`INSERT` 一行进 `broker_registration_proofs`（永久证据档，见 §5-bis）**，顺带同步 `broker_onboarding.last_proof_*` 三个便捷指针列（这三列现在只是缓存，不是本步骤的重点）。**这几步若分开提交，中间任一步失败/或步骤之间存在窗口都会留下问题**——最典型的坏结果：nonce 已消费（第①步提交成功），但 `broker_onboarding` 写入失败（第②步报错），此时这个地址的这次控钥证明**被永久烧掉**（nonce 不可能重发），而注册本身**没有生效**——申请人无法重试（同一 nonce 已废），只能整个挑战流程重来。
 
 **硬要求：⓪①②③必须包在同一个 SQLite 事务里，全成功才提交，任一步失败整体回滚**（`BEGIN` → 四步 → `COMMIT`，出错走 `ROLLBACK`，不允许部分提交）。
 
 🔴 **v0.5 补（Codex 二审 B4 MUST-FIX）：⓪ 那一步——operation 一致性复查——必须是事务内的第一条语句，不能是事务外/`BEGIN` 之前的一次独立 SELECT**。v0.4 把它写在"验证提交时，服务端重新查一次"，没有说清这次查询相对 `BEGIN` 的时序——如果它在 `BEGIN` 之前跑，复查和真正的 ①②③ 写入之间仍有一个窗口：另一个并发请求可以在"复查通过"之后、"事务开始写入"之前，把这个地址的行状态改掉（例如复查时还没有行、判定 operation=register，但在本请求真正执行 INSERT 之前，另一个并发请求先把行建出来了），复查形同虚设，TOCTOU 原样复活——这与 §4 原子 UPDATE 要防的并发窗口是同一类问题，只是发生在事务边界而不是行锁边界。
 
-**精确写法**：`BEGIN IMMEDIATE`（不是默认的 deferred transaction——`IMMEDIATE` 在事务开始时就取写锁，堵住"读的时候没锁、写的时候才发现被抢"这个 SQLite 特有的窗口）→ ⓪ 在事务内重新 `SELECT` 该地址当前行是否存在，比对与挑战签发时记录的 `operation` 是否一致，不一致 `ROLLBACK` 并拒绝（提示"状态已变化，请重新发起挑战"）→ ① nonce 原子 UPDATE（§4，`WHERE nonce=? AND consumed_at IS NULL`，0 行受影响同样 `ROLLBACK` 并拒绝）→ ② 写/更新 `broker_onboarding` → ③ 落 `last_proof_*` → `COMMIT`。四步都在同一把写锁之内，中间没有能被其他连接打进来的窗口。
+**精确写法**：`BEGIN IMMEDIATE`（不是默认的 deferred transaction——`IMMEDIATE` 在事务开始时就取写锁，堵住"读的时候没锁、写的时候才发现被抢"这个 SQLite 特有的窗口）→ ⓪ 在事务内重新 `SELECT` 该地址当前行是否存在，比对与挑战签发时记录的 `operation` 是否一致，不一致 `ROLLBACK` 并拒绝（提示"状态已变化，请重新发起挑战"）→ ① nonce 原子 UPDATE（§4，`WHERE nonce=? AND consumed_at IS NULL`，0 行受影响同样 `ROLLBACK` 并拒绝）→ ② 写/更新 `broker_onboarding` → ③ `INSERT` 进 `broker_registration_proofs`（+ 同步 `last_proof_*` 缓存列）→ `COMMIT`。四步都在同一把写锁之内，中间没有能被其他连接打进来的窗口。
 
 **验收标准（新增，落码后必须能测）**：并发场景——两个请求几乎同时提交同一挑战流程产生的、针对同一 `broker_address` 的注册（例如一个走 `register`，另一个是同一地址稍后发起的 `update_bot_token`，中间故意制造行状态变化）→ 有且只有符合当前真实行状态的那个请求成功，另一个必须因 operation 不一致被拒绝，不允许出现"两个都成功但语义互相矛盾"或"复查通过了但实际写入时状态已经变了"这类结果。
 
@@ -180,14 +207,18 @@ bot_token_hash: <blake2b(bot_token)；未提供 token 时为 null——原文 to
 
 `broker_onboarding` 需新增（草案，非最终 DDL）：
 - `provenance TEXT`（`produced-by-us` | `provenance-unknown`）
-- `last_proof_signature TEXT`（最近一次成功验证的签名，原文保存）
-- `last_proof_payload TEXT`（对应的被签字节原文，逐字保存，不重新拼）
-- `last_proof_at TEXT`（该签名验证通过的时间戳）
+- `last_proof_signature TEXT`（**便捷指针，非唯一档，见 §5-bis**——最近一次成功验证的签名，原文保存）
+- `last_proof_payload TEXT`（同上，对应的被签字节原文，逐字保存，不重新拼）
+- `last_proof_at TEXT`（同上，该签名验证通过的时间戳）
 
 新增独立表 `broker_registration_nonces`（草案）：
 - `id / broker_address / operation / role / descriptor_hash / nonce / expires_at / consumed_at / created_at`
 - 🔴 `nonce` 列必须 `UNIQUE`（v0.4 新增要求，配合 §4 的"提交按 nonce 唯一寻址"——没有 UNIQUE 约束，§4 的 `SELECT ... WHERE nonce = ?` 理论上能返回多行，寻址就又不唯一了）。
 - `operation` 列对应 §2-bis：签发挑战时按当前是否已存在该 `broker_address` 的行写死，验证提交时重新查一次现状核对一致性。
+
+🔴 新增独立表 `broker_registration_proofs`（v0.7 新增，Codex 四审 MUST-FIX，草案，append-only——只 `INSERT`，代码层面不给这张表任何 `UPDATE`/`DELETE` 路径）：
+- `id / broker_address / operation / descriptor_hash / payload / signature / nonce / verified_at / resulting_mutation`，字段定义见 §5-bis。
+- `nonce` 建议加索引（非 `UNIQUE`——`broker_registration_nonces.nonce` 才是唯一约束的那个；这张表的 `nonce` 只是用来 `JOIN` 回挑战上下文，一次成功验证对应一行，天然不重复，但约束加在源头表更清楚）。
 
 ---
 
@@ -199,7 +230,8 @@ bot_token_hash: <blake2b(bot_token)；未提供 token 时为 null——原文 to
 4b. nonce **并发**重放（NWT 2026-08-08 红队 MUST-FIX 补）：两个请求同时携带同一未消费 nonce 提交 → 有且只有一个成功、另一个拒绝（410）——这一条直接对应§4的原子 UPDATE 约束，测的是实现选择本身，不是顺序重放能覆盖的场景。
 5. P2SH 地址 → 拒绝（400，且报文明确说明"地址类型不支持"，不是通用签名失败）。
 6. 跨网络字段不匹配（signed 时写的 network 与请求网络不一致）→ 拒绝。
-7. 合法 P2PK 地址 + 正确签名 + 未过期 nonce → 通过，写入 `provenance-unknown`，`last_proof_*` 字段落库。
+7. 合法 P2PK 地址 + 正确签名 + 未过期 nonce → 通过，写入 `provenance-unknown`，`broker_registration_proofs` 新增一行 + `last_proof_*` 缓存列同步。
+11. 🔴 **永久证据档不可覆盖（Codex 四审 MUST-FIX 补，v0.7 新增）**：同一地址依次 `register` → `update_bot_token`(A) → `update_bot_token`(B) → `broker_registration_proofs` 必须有三行，各自 `payload`+`signature` 可独立离线复验通过，各自 `resulting_mutation` 精确对应各自那次写入——查询 `broker_onboarding.last_proof_*` 只应看到第三次的缓存值，但 `broker_registration_proofs` 三行必须都在，不能因为缓存列被覆盖就误以为前两次的证据也没了。
 8. 二次写入（换 bot_token）未带新签名 → 拒绝，UPDATE 路径与 INSERT 同等把关。
 9. 🔴 **descriptor 跨写入重放（Codex 2026-08-08 二审 MUST-FIX 补，v0.4 新增）**：用一次合法签名（对 `operation=register`、`bot_token_hash=H1` 签的）去打同一地址后续的 `update_bot_token` 提交（无论是否换了 token）→ 必须因 descriptor 不匹配被拒（401，不是 410，因为 nonce 本身可能仍在有效期内、问题在于载荷不匹配而非 nonce 状态）。同理反过来：拿一次 `update_bot_token` 的合法签名去打 `register`（地址当时已存在行，但换个时间点该行被删/未建）→ 同样必须拒绝。
 10. 🔴 **nonce 唯一寻址（Codex 2026-08-08 二审 MUST-FIX 补，v0.4 新增）**：同一 `broker_address` 名下同时存在两条未消费、未过期的 nonce（例如先后请求了两次挑战）→ 提交必须携带其中一条 `nonce` 才能定位到对应记录并验证；缺失 `nonce` 字段 → 拒绝（400，"nonce 必填"，不做地址下枚举猜测）；提交了一个不存在/已消费/已过期的 `nonce` → 拒绝（410）。
