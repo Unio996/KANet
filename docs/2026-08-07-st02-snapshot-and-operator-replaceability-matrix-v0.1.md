@@ -1,4 +1,8 @@
-> **Status**: DRAFT v0.1 · **ST-02 · Snapshot 与运营方可替换性矩阵** · DRI J1(J1tn) × 协议复核 J2 × 红队 NWT
+> **Status**: DRAFT **v0.2** · **ST-02 · Snapshot 与运营方可替换性矩阵** · DRI J1(J1tn) × 协议复核 J2 × 红队 NWT
+> 🆕 **v0.2(2026-08-08, J1tn)**:**文件名不改, 版本以本行为准**;**v0.1 原文一字不删**, 修订见文末 §6。
+> **触发**: Codex 两份独立红队 `8258e70e`(第 1 项 seed dependency) + `ddd4acee`(2.7-bis 措辞与证据等级)。
+> 🔴 **净变化**: **第 1 项 v0.7 那格降级**(链上可导 → 本地种子集上的链上验证);**2.7-bis 措辞收窄**;
+> **n=1293 补可重放证据包 —— 而做这个包当场抓出我 v0.1 把出处写错了(见 §6.3)。**
 > **授权**: `OWNER-DIRECTIVE-20260806-POST-TOCCATA-INSTITUTIONAL-STRESS-TEST` ST-02(`origin/coord/codex-bridge:coordination/codex-bridge/`)。**BATCH-0 = 只做设计 + 现状盘点 + 证据缺口;不实跑 / 不改码 / 不拉取上游。**
 > **验收五级**(directive 定):`PROTOCOL_CAPABILITY` → `TESTABLE_MACHINERY` → `VERIFIED_PATH` → `USABLE_INFRASTRUCTURE`,**无锚 = `NOT_PROVEN`**。
 > **约束**: 本稿只新增本文件。零代码 / 零 DB 写 / 零链上 / 零钱路。每条事实断言带 file:line 或命令输出(本会话现读,非记忆);推断显式标注。
@@ -194,3 +198,100 @@ node D:/kanet/kanet/scratch/j1-prunepoint-0808.mjs
 2. **@NWT(红队)**:**首攻 §2.5 的 `malicious` 那一格** —— 我明说没锚。若 canonical 源被攻陷时委员会一致取到同一个假值并一致签名,那 abstain-not-guess 这套**对最坏那类攻击是零防御**,而它读起来很像已经防住了。
 3. **@Bettor**:§4 的 G1/G2/G5 是制度题不是技术题 —— **工件分发与冻结态出口,都不是写代码能解决的。**
 4. 🔴 **本稿是 BATCH-0 现状盘点,不使 ST-02 从 OPEN 变 CLOSED,不构成任何实现/部署/钱路授权。**
+
+---
+
+# 🆕 v0.2 — 对 Codex 两份红队的回应与自纠
+
+> 下面每条我都**自己在代码/库上重跑过一遍**，不转述。承 `[[feedback_test-name-must-be-the-one-that-reddens]]` 同族纪律。
+
+## §6.1 🔴 第 1 项 v0.7 那格降级 —— **我把"链上验证"写成了"链上发现"**
+
+**Codex(`8258e70e`) 的指控成立** `[CONFIRMED·源码实读]`：
+`oracle-pool-chain-scanner.mjs:99` 在任何 RPC 之前先查**本地 SQLite**：
+
+```sql
+SELECT staker_pk_x, lock_until_daa, p2sh_addr FROM oracle_stake_enrollments
+WHERE active = 1 AND source = 'chain_envelope'
+```
+`:110` 才对**本地枚举出的** `p2sh_addr` 调 `getUtxosByAddresses()`。
+⇒ 得到的 `oracle_pool_chain_view` root 是「**在一个本地种子集上做链上验证**」，
+**不是**「从链上独立发现」。v0.1 §2.1 写成后者，**是错的**。
+
+**⇒ 分级改为(采纳 Codex 的拆分)**：
+| 断言 | 级别 |
+|---|---|
+| `V07_POOL_ROOT_RECOMPUTATION_FROM_A_GIVEN_LOCAL_SEED_SET` | `TESTABLE_MACHINERY` |
+| `V07_FRESH_OPERATOR_BOOTSTRAP_OF_THE_COMPLETE_SEED_SET_FROM_L1` | 🔴 **`NOT_PROVEN`** |
+
+🔵 **而我要给 Codex 的结论补一层它没看到的**(方向不改，理由要更准)：
+**种子集在【设计上】是可从链重放的**，团队早有自陈(`oracle-pool.js:22-26`，逐字)：
+> `scanAndDerivePool 当前读本地 oracle_stake_enrollments 表 = 跨节点同 chain state 但表内容不同 → poolMerkleRoot 分歧.`
+> `路 A 修法: 每笔 enrollment 上链广播 oracle_stake_enroll_v1 envelope, trade-protocol-filter 消费 → UPSERT source='chain_envelope'.`
+
+⇒ 准确说法**不是**「新接手方无路可走」，而是：
+**种子集由【另一条链上管线】填充(envelope → `chain_events` → UPSERT)，而那条管线的【完整重放能力】未经证明、且受剪裁窗封顶。**
+🔨 **⇒ 第 1 项与第 6 项在这里交汇**：本稿 §2.6 实测剪裁地平线 ≈ **1.4 天**
+⇒ **落在窗外的 envelope，新节点重放不出来** ⇒ 这是比"剪裁"更早生效的一道墙。
+**Codex 说「pruning 不是唯一硬边界」——对，而准确的顺序是：enrollment 重放先卡，剪裁其次。**
+
+## §6.2 🔴 2.7-bis 措辞收窄 —— "绑死在原产节点"给强了
+
+**Codex(`ddd4acee`) 确认了机制，但判措辞过强，我接受。**
+代码证明的**不是**对历史物理主机的密码学/物理绑定，而是：
+> **当前退款实现绑定在【maker relay 身份 + 签名能力本地可行动】的那个托管域上；
+> 只持有 `cross-node:<pk>` 哨兵的观察者无法行动。**
+
+⇒ **v0.1 那句「refund construction is bound to the originating node」作废，以上句为准。**
+🔴 **但这不放松制度结论**：若要求是「接手方无需 incumbent 同意、也无需 incumbent 交出密钥」，
+**当前实现仍然不满足** —— 拷贝/迁移 incumbent 私钥是**托管权移交式的连续性**，
+**不是** incumbent-independent 的可替换性。**两者不许混为一谈。**
+
+## §6.3 🔴 n=1293 补可重放证据包 —— **而做这个包当场抓出我 v0.1 记错了出处**
+
+Codex 判 `n=1293` 为 `OBSERVED / NOT YET REPLAYABLE`，要求提交证据包才准升 VERIFIED。
+**做包的过程直接证明了这条要求的价值**：
+
+🔴 **v0.1 把这 1293 行说成在一张叫 `unresolved_needs_authorization` 的【表】里 —— 本机没有这张表**
+(113 张表零命中)。它其实是 **`pool_markets.protocol_status` 的一个【取值】**。
+⇒ **数字是对的，出处是错的。** 一个不可重放的数字，连自己的来源都可能记错，而**没有任何检查会发现**。
+
+✅ **证据包已入库**：`scripts/st02-crossnode-refund-evidence.mjs`(committed，**含它跑的 SQL 原文**)。
+现读结果：
+
+| 量 | 值 |
+|---|---|
+| `pool_markets` 总行 | **1317** |
+| `protocol_status='unresolved_needs_authorization'` | **1293** |
+| 且 `maker_relay_id LIKE 'cross-node:%'` | **1293**（= 全部） |
+| distinct id | 1293（无重复） |
+| `idsSha256` | `cc124dfec023d8ab5d54a7784e148f453c08f09abf8651c40b44e3e169d6a4ef` |
+| 另一格 | `pending_bettors` = 24（1293+24=1317 自洽） |
+
+**复现**：`node scripts/st02-crossnode-refund-evidence.mjs`（只读，可指定 `ST02_DB=`）。
+🔴 **作用域**：这是**一份 DB 的行**，证明的是**本节点记了什么**，
+**不等于**任何别的运营方库里是什么，**也不是链上观测**。
+
+## §6.4 验收判据改为 **fresh-successor test**，不是 second-observer test
+
+采纳 Codex 的收口测试形状。**关键差别**：不是"另一个观察者能不能看到"，
+而是**从【故意清空的】接手方状态出发**——
+不复制 incumbent 的 `console.db`、不导入任何 incumbent 表、不迁移 incumbent 私钥：
+
+1. 固定链/节点身份 + 固定目标 `snapshot_daa`；
+2. 接手方 `oracle_stake_enrollments` / `oracle_pool_chain_view` / `pool_snapshots` **全空**；
+3. **仓库内有版本的算法**，从独立可得来源发现或重放每一条权威 enrollment 事实；
+4. **任何 incumbent 导出的 DB/表/行都不算输入**；
+5→8. 重建候选集 → 逐条 L1 验证 → 导出 root → 与 covenant/市场锚比对；
+9. 对抗控制：漏登记 / 重复 envelope / 过期续期 / 已花 stake / 畸形 envelope / 历史低于剪裁点。
+
+🔴 **若"迁移密钥"是被明确接受的运营模型，那要【单独测】并叫它 custody-transfer continuity，
+不许叫 permissionless / operator-independent recovery。**
+
+## §6.5 v0.2 未动的
+
+- §2.2 第 2 项(`PayoutShard.sil:36` ctor + 逐委员 merkle)**不变**，仍是本稿唯一真锚。
+- §2.4 第 4 项两个硬洞(pin 的 silverc ENOENT / ZK-SDK 目录不存在)**不变**——
+  Codex `8258e70e` 另外确认：v0.6 builder 走 `pool-p2sh.mjs` 的通用 `compileAndComputeP2SH`，
+  **同样 pin 那把 legacy 编译器** ⇒ 这个可复现性阻塞**不止影响 legacy v0.5 builder**，范围比 v0.1 写的更大。
+- **ST-02 总判仍为 `NOT_PROVEN`**，v0.2 只是把**理由换成了更准确、更难反驳的那一个**。
