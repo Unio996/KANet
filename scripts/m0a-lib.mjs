@@ -104,6 +104,33 @@ export const TEST_FIXTURE_WRITER_ALLOWLIST = new Set([
   'kasia-console/test-framework/cases/m0c1-gate/g5-real-chain-smoke-regression.mjs', // G5 v2 regression, 写隔离 scratch/g5-regression.db
   'kasia-console/test/broker-onboarding-status-drop.test.mjs', // v194 broker_onboarding.status DROP regression, 纯 :memory: DB(5 处 new Database(':memory:'), 零 live 路径), NWT 审 2026-07-29
 ]);
+
+// ── considered amendment #5(2026-08-08, NWT 提案·Bettor 批·⑤(d) 阳性臂 fake relay sink)：
+// 窄 capability m0c1-test-fixture-relay-sink ──
+// family=relay-manager 此前只开一条路(m0c-controlled-relay-endpoint, 专为生产 money-path 受控
+// funnel 设计, 白名单锚的是真实 HTTP 端点)。⑤(d) 这个用例语义完全不同: 测试 fixture 导入
+// relay-manager.js 的 startRelay, 目的是把 RELAY_DIR 重定向到一个放假 relay.mjs 的 scratch 目录,
+// 驱动一个假子进程进 _relays, 隔离验证 settler→relay 这条接线本身(而非任何生产 funnel)。硬塞进
+// m0c-controlled-relay-endpoint 既过不了它自己的白名单校验, 也会把测试代码混进生产 funnel 同一
+// 信任层, 稀释那个 capability 的语义纯度——同 provision-writer/pilot-custodial-writer/
+// test-fixture-writer 三次先例一样的道理: 威胁模型不对口就新开窄 capability, 不硬塞。
+//   ① 白名单有界 shrink-only(仅 p5_positive_via_fake_relay_sink.test.mjs 一个文件, 扩张走 NWT 审
+//      + Owner 知情)。
+//   ② content_digest TOCTOU 锚(批准时内容 sha256, 失配=改过没重审=拒)。
+//   ③ 专属静态负面检查: 文件必须在 test-framework/ 路径下(同 self-serve test-fixture 限制①)。
+//      这条挡不住"起了假 relay 但没做隔离"这种语义问题——那部分不是机械检查能判的, 仍是 NWT diff
+//      审的活(同 test-fixture-writer 先例的坦诚做法: 机械检查只是兜底, 不是唯一防线)。
+//   ④ lint 是完整性门, NWT diff 审仍是唯一 load-bearing 闸(受控语义人审)。
+// 🔵 范围说明(NWT 2026-08-08 gate-integrity 复核发现, 单独立卡处理, 不在本 amendment 范围内):
+//    M0a 的 grep 检测器只认字面量引号紧邻 import(/require(, 对计算式路径(如
+//    `import(pathToFileURL(path.join(...)).href)`)结构性看不见。g4-pilot-custodial-e2e.mjs:174
+//    正是用这种写法真 fork relay, 从未被 baseline/manifest 登记过——这是检测器本身的盲区, 与本
+//    amendment(白名单 capability 校验)是两个不同层面的问题, 检测器覆盖面的修复排单独节奏。
+export const TEST_FIXTURE_RELAY_SINK_CAP = 'm0c1-test-fixture-relay-sink';
+export const TEST_FIXTURE_RELAY_SINK_ALLOWLIST = new Set([
+  'kasia-console/test-framework/cases/predictions/pool/p5_positive_via_fake_relay_sink.test.mjs', // ⑤(d) 阳性臂, 假 relay sink 隔离测试(J2, NWT 审 2026-08-08)
+]);
+const TEST_FRAMEWORK_PATH_PREFIX = 'kasia-console/test-framework/';
 const LIVE_CONSOLE_DB_PATH_LITERAL = /kasia-console\/data\/console\.db|kasia-console[\\/]data[\\/]console\.db/;
 
 export const sha256Hex = (s) => crypto.createHash('sha256').update(Buffer.from(s, 'utf8')).digest('hex');
@@ -273,7 +300,7 @@ const MANIFEST_FIELDS = ['id', 'family', 'form', 'path', 'capability', 'justific
 // 七字段(MANIFEST_FIELDS)全必填对所有 capability 生效; content_digest 是"仅此 capability 附加必填"
 // (m0c-controlled-relay-endpoint), 单独校验(见 manifestChecks relay-manager 分支), 不并入 MANIFEST_FIELDS
 // —— 否则 db-readonly / test-fixture 存量条目会因缺新字段被全判挂(向后兼容, NWT 第4约束的兼容边界)。
-const CAPABILITIES = new Set(['db-readonly', 'test-fixture', CONTROLLED_RELAY_CAP, PROVISION_WRITER_CAP, PILOT_CUSTODIAL_WRITER_CAP, TEST_FIXTURE_WRITER_CAP]);
+const CAPABILITIES = new Set(['db-readonly', 'test-fixture', CONTROLLED_RELAY_CAP, PROVISION_WRITER_CAP, PILOT_CUSTODIAL_WRITER_CAP, TEST_FIXTURE_WRITER_CAP, TEST_FIXTURE_RELAY_SINK_CAP]);
 
 export function manifestChecks(root) {
   const violations = [];
@@ -296,43 +323,79 @@ export function manifestChecks(root) {
       continue;
     }
     if (e.family === 'relay-manager') {
-      // considered amendment(NWT 4 约束): relay-manager 族只经窄 capability m0c-controlled-relay-endpoint
-      // 放行受控 funnel。其他 capability = 保持既有硬拒(既有 block, 非新增)。
-      if (e.capability !== CONTROLLED_RELAY_CAP) {
+      // considered amendment(NWT 4 约束) + considered amendment #5(NWT, m0c1-test-fixture-relay-sink):
+      // relay-manager 族只经这两条窄 capability 之一放行(受控生产 funnel / 受控测试 fixture)。
+      // 其他 capability(db-readonly/test-fixture/任何 writer)= 保持既有硬拒(既有 block, 非新增)。
+      if (e.capability !== CONTROLLED_RELAY_CAP && e.capability !== TEST_FIXTURE_RELAY_SINK_CAP) {
         violations.push({ rule: 'R-M0A-MANIFEST-SCHEMA', file: MANIFEST_PATH,
-          msg: `manifest 条目 "${e.id}" family=relay-manager 只能经窄 capability ${CONTROLLED_RELAY_CAP}(受控 funnel), 不开 db-readonly/test-fixture 口 —— 其余 relay-manager import 一律正规审批走仓储层/API(设计 §5 + considered amendment)。` });
+          msg: `manifest 条目 "${e.id}" family=relay-manager 只能经窄 capability {${CONTROLLED_RELAY_CAP}, ${TEST_FIXTURE_RELAY_SINK_CAP}} 之一, 不开 db-readonly/test-fixture/writer 口 —— 其余 relay-manager import 一律正规审批走仓储层/API(设计 §5 + considered amendment #5)。` });
         continue;
       }
-      // ↓↓↓ 本 amendment 新增的 m0c-controlled-relay-endpoint 安全控制校验 ↓↓↓
-      // NWT diff 审(6c612df5)GREEN → fail-closed block(规则65"NWT GREEN 后升 block"触发点)。
-      // 判据精确(白名单命中 + digest 匹配), 无误拦 dev 活风险, relay-import 安全控制该硬 block 非 warn。
-      // 既有 relay-manager 硬拒(上面 capability!==cap 分支)本就 block, 与此一致。约束②: NWT diff 审
-      // 是唯一 load-bearing 闸; lint 是完整性门, 此处硬拒即"完整性不满足"。
-      // 约束③ 白名单有界、shrink-only: 非白名单文件用此 capability = 拒。
-      if (!CONTROLLED_FUNNEL_ALLOWLIST.has(e.path)) {
-        violations.push({ rule: 'R-M0A-MANIFEST-SCHEMA', file: MANIFEST_PATH,
-          msg: `manifest 条目 "${e.id}" capability=${CONTROLLED_RELAY_CAP} 但 path ${e.path} 不在受控 funnel 白名单 — 只有 {${[...CONTROLLED_FUNNEL_ALLOWLIST].join(', ')}} 可用此 capability(白名单 shrink-only, 扩张走 NWT 审 + Owner 知情)。` });
+      if (e.capability === CONTROLLED_RELAY_CAP) {
+        // ↓↓↓ 本 amendment 新增的 m0c-controlled-relay-endpoint 安全控制校验 ↓↓↓
+        // NWT diff 审(6c612df5)GREEN → fail-closed block(规则65"NWT GREEN 后升 block"触发点)。
+        // 判据精确(白名单命中 + digest 匹配), 无误拦 dev 活风险, relay-import 安全控制该硬 block 非 warn。
+        // 既有 relay-manager 硬拒(上面 capability 不在集合内分支)本就 block, 与此一致。约束②: NWT diff
+        // 审是唯一 load-bearing 闸; lint 是完整性门, 此处硬拒即"完整性不满足"。
+        // 约束③ 白名单有界、shrink-only: 非白名单文件用此 capability = 拒。
+        if (!CONTROLLED_FUNNEL_ALLOWLIST.has(e.path)) {
+          violations.push({ rule: 'R-M0A-MANIFEST-SCHEMA', file: MANIFEST_PATH,
+            msg: `manifest 条目 "${e.id}" capability=${CONTROLLED_RELAY_CAP} 但 path ${e.path} 不在受控 funnel 白名单 — 只有 {${[...CONTROLLED_FUNNEL_ALLOWLIST].join(', ')}} 可用此 capability(白名单 shrink-only, 扩张走 NWT 审 + Owner 知情)。` });
+          continue;
+        }
+        // 约束④ TOCTOU 防御: content_digest 仅此 capability 必填, 核现文件内容 sha256 == 批准时 digest。
+        if (!('content_digest' in e) || e.content_digest === '' || e.content_digest == null) {
+          violations.push({ rule: 'R-M0A-MANIFEST-SCHEMA', file: MANIFEST_PATH,
+            msg: `manifest 条目 "${e.id}" capability=${CONTROLLED_RELAY_CAP} 缺 content_digest — 受控 funnel 条目必填(该文件批准时内容的 sha256 hex, TOCTOU 防御, NWT 第4约束)。` });
+          continue;
+        }
+        const funnelContent = readStagedContent(root, e.path);
+        if (funnelContent == null) {
+          violations.push({ rule: 'R-M0A-MANIFEST-SCHEMA', file: MANIFEST_PATH,
+            msg: `manifest 条目 "${e.id}" 指向的受控文件 ${e.path} 不存在于 index — path 锚定 fail-closed: 文件移动必须同步改 manifest。` });
+          continue;
+        }
+        const actualDigest = sha256Hex(funnelContent);
+        if (actualDigest !== e.content_digest) {
+          violations.push({ rule: 'R-M0A-MANIFEST-SCHEMA', file: MANIFEST_PATH,
+            msg: `受控文件 ${e.path} 内容变更(digest 失配: 现 ${actualDigest.slice(0, 12)}… ≠ manifest ${String(e.content_digest).slice(0, 12)}…)需重新 NWT 审并更新 content_digest。` });
+          continue;
+        }
+        // 全过: 合法受控 funnel relay import(白名单命中 + digest 匹配)。放行。
         continue;
       }
-      // 约束④ TOCTOU 防御: content_digest 仅此 capability 必填, 核现文件内容 sha256 == 批准时 digest。
+      // e.capability === TEST_FIXTURE_RELAY_SINK_CAP(considered amendment #5)
+      // 约束① 白名单有界、shrink-only: 非白名单文件用此 capability = 拒。
+      if (!TEST_FIXTURE_RELAY_SINK_ALLOWLIST.has(e.path)) {
+        violations.push({ rule: 'R-M0A-MANIFEST-SCHEMA', file: MANIFEST_PATH,
+          msg: `manifest 条目 "${e.id}" capability=${TEST_FIXTURE_RELAY_SINK_CAP} 但 path ${e.path} 不在白名单 — 只有 {${[...TEST_FIXTURE_RELAY_SINK_ALLOWLIST].join(', ')}} 可用此 capability(白名单 shrink-only, 扩张走 NWT 审 + Owner 知情)。` });
+        continue;
+      }
+      // 约束③ 专属静态负面检查: 文件必须在 test-framework/ 路径下(同 self-serve test-fixture 限制①)。
+      if (!e.path.startsWith(TEST_FRAMEWORK_PATH_PREFIX)) {
+        violations.push({ rule: 'R-M0A-MANIFEST-SCHEMA', file: MANIFEST_PATH,
+          msg: `manifest 条目 "${e.id}" capability=${TEST_FIXTURE_RELAY_SINK_CAP} 但 path ${e.path} 不在 ${TEST_FRAMEWORK_PATH_PREFIX} 下 — 这条 capability 只为隔离测试 fixture 开, 不适配其他路径。` });
+        continue;
+      }
+      // 约束② TOCTOU 防御: content_digest 仅此 capability 必填, 核现文件内容 sha256 == 批准时 digest。
       if (!('content_digest' in e) || e.content_digest === '' || e.content_digest == null) {
         violations.push({ rule: 'R-M0A-MANIFEST-SCHEMA', file: MANIFEST_PATH,
-          msg: `manifest 条目 "${e.id}" capability=${CONTROLLED_RELAY_CAP} 缺 content_digest — 受控 funnel 条目必填(该文件批准时内容的 sha256 hex, TOCTOU 防御, NWT 第4约束)。` });
+          msg: `manifest 条目 "${e.id}" capability=${TEST_FIXTURE_RELAY_SINK_CAP} 缺 content_digest — 该 capability 条目必填(批准时内容 sha256 hex, TOCTOU 防御)。` });
         continue;
       }
-      const funnelContent = readStagedContent(root, e.path);
-      if (funnelContent == null) {
+      const sinkContent = readStagedContent(root, e.path);
+      if (sinkContent == null) {
         violations.push({ rule: 'R-M0A-MANIFEST-SCHEMA', file: MANIFEST_PATH,
-          msg: `manifest 条目 "${e.id}" 指向的受控文件 ${e.path} 不存在于 index — path 锚定 fail-closed: 文件移动必须同步改 manifest。` });
+          msg: `manifest 条目 "${e.id}" 指向的文件 ${e.path} 不存在于 index — path 锚定 fail-closed: 文件移动必须同步改 manifest。` });
         continue;
       }
-      const actualDigest = sha256Hex(funnelContent);
-      if (actualDigest !== e.content_digest) {
+      const sinkDigest = sha256Hex(sinkContent);
+      if (sinkDigest !== e.content_digest) {
         violations.push({ rule: 'R-M0A-MANIFEST-SCHEMA', file: MANIFEST_PATH,
-          msg: `受控文件 ${e.path} 内容变更(digest 失配: 现 ${actualDigest.slice(0, 12)}… ≠ manifest ${String(e.content_digest).slice(0, 12)}…)需重新 NWT 审并更新 content_digest。` });
+          msg: `文件 ${e.path} 内容变更(digest 失配: 现 ${sinkDigest.slice(0, 12)}… ≠ manifest ${String(e.content_digest).slice(0, 12)}…)需重新 NWT 审并更新 content_digest。` });
         continue;
       }
-      // 全过: 合法受控 funnel relay import(白名单命中 + digest 匹配)。放行, 不落 sqlite 只读检查。
+      // 全过: 合法测试 fixture relay-sink import(白名单命中 + path 在 test-framework/ 下 + digest 匹配)。放行。
       continue;
     }
     if (e.capability === PROVISION_WRITER_CAP) {

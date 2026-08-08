@@ -91,6 +91,16 @@
    "justification": "v194 broker_onboarding.status DROP regression（Bettor 2026-07-29 批 migration + CLAUDE.md 修 bug 同步加 regression）。裸 better-sqlite3 import 建立【纯 :memory: 隔离 fixture】——5 处全部 new Database(':memory:')，零 live 文件路径、零磁盘 DB，测试结束进程销毁即回收。复现 v173 broker_onboarding schema（含 status 列）后跑 v194 DROP 逻辑，验 5 条：①DROP 后 status 列不在(PRAGMA) ②反向 SELECT status 抛 no such column(fail-loud=改动全部目的) ③INSERT 6 列无 status 成功(守住 grep 复验抓到的 §5 漏改 INSERT 的洞) ④approvedBrokers 式查询不依赖 status ⑤前置断言有非 pending 行时 throw。走 m0c1-test-fixture-writer 而非 self-serve test-fixture：后者要 readonly:true，而本 test 需【写】(建表/DROP/INSERT)——:memory: 写零 live 风险，但静态 readonly 检查不满足（正是 Bettor 08:43 记的假阳性：闸的键是裸 import 而非连哪个库）。本 test 纯内存写、不起网络面(无 http/listen/createServer)、不 spawn 子进程、只 import node:test/assert/better-sqlite3(无 live 模块副作用)。本地 5/5 PASS。NWT 审核心点(08:45 判据)：Database 打开的是 :memory: 非 live、写全在内存、不 import 副作用 live 模块——答案在 :49/:59/:71/:87/:103 全 ':memory:'。",
    "review_ref": "db6cd70828f05799",
    "content_digest": "8784682788fb632ed5523d3ba3bdc6754ce14c70aec0f58daebe7739cb3e7076"
+  },
+  {
+   "id": "TF-p5-positive-fake-relay-sink",
+   "family": "relay-manager",
+   "form": "const { startRelay } = await import(relay-manager.js)",
+   "path": "kasia-console/test-framework/cases/predictions/pool/p5_positive_via_fake_relay_sink.test.mjs",
+   "capability": "m0c1-test-fixture-relay-sink",
+   "justification": "⑤(d) 阳性臂: P1 refund preimage 构造流程离线可观测（J2, 2026-08-08, NWT 预登记三判据审 GREEN + 实现审 GREEN）。裸 import 是本臂机制本身：把 RELAY_DIR（relay-manager.js:19 模块加载期 const）重定向到一个放假 relay.mjs 的 scratch 目录，经【合法公开 API】startRelay() fork 假子进程登记进 _relays，驱动 settler 经 sendCommandAsync(relayId,…) 打到假 sink，隔离验证 settler→relay 这条接线（非任何生产 funnel，不适配 m0c-controlled-relay-endpoint 那个 capability 的白名单/威胁模型）。三条预登记判据（NWT 审 GREEN，动手前定，跑完不改）：①哨兵值——现生 randomUUID 嵌进假 sink 回的 tx_obj（NWT 裁：走 prediction_settle_build_preimage 的返回本身，而非侧路 get_pubkey 探针，理由是走被测代码路径本身且避免另开 m0c-controlled-relay-endpoint 白名单口），断言 refund_tx_obj 含本次现生 SENTINEL，不中即 hard fail abort，后续断言不跑；②DB_PATH 复合项——写库前先断 resolve(DB_PATH) 路径身份（≠ live console.db），事后用现生一次性 relay id + throwaway 私钥回读校验；③阴性对照——复现 g4-pilot:62-65 已在册的雷（RELAY_DIR 未设→硬编码 fallback 不存在路径→spawn ENOENT），移开假 sink 脚本后确认 startRelay().ok 仍撒谎（返回 {ok:true,pid,name}，spawn 失败是异步 error 事件追不上那个同步 return），而哨兵照样正确报红——实测坐实'startRelay().ok 不是 relay 起来了的证据，哨兵才是'（此前只是既有代码注释里的一句话）。文件在 test-framework/ 路径下（本 capability 静态负面检查③满足）。实测：阳性臂转绿（bettors_absent 四字段合取满足，protocol_status='refunding'）+ 阴性对照按预期红（哨兵未命中）+ teardown 三表零残留 + 无孤儿进程（父断即自退实测）。零链上写 · 零生产 DB 写 · 零生产码。NWT 独立复核：预登记三判据逐条核过（哨兵非失败态同形/先断哨兵再做别的/DB_PATH 先guard后写无竞态窗口）+ J2 自纠两处（09:49 RELAY_DIR 换脚本语义未验证先说后补双臂实测坐实；09:58 判据②改法先报不偷改）均属实。",
+   "review_ref": "PENDING-fill-with-landing-commit-hash",
+   "content_digest": "3c1aebf3b00dab668e1dd5c9c79023063c03a495fa872d5e016d2f2d1f59dad2"
   }
  ]
 }
