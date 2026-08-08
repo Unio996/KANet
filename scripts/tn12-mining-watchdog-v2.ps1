@@ -52,13 +52,19 @@ $POLL_SEC    = if ($env:TN12_POLL_SEC)    { [int]$env:TN12_POLL_SEC }    else { 
 $MAX_ROUNDS  = if ($env:TN12_MAX_ROUNDS)  { [int]$env:TN12_MAX_ROUNDS }  else { 0 }    # 0 = run forever
 
 $addr        = "kaspatest:qrys4yax468rrm988kyqjtncvstcelgzktml0m3rvdvvktrll0gdxuyu34fru"
-$CPU_THREADS = 2
+$CPU_THREADS = 1  # Bettor 2026-08-08 10:12Z: was 2, dropped to 1 -- the incident's root imbalance
+                  # (produce rate > verify rate) gets worse not better at 2 threads, and the
+                  # deployed default had silently drifted back to 2 despite J1 reporting "already
+                  # on 1" (NWT caught the mismatch). 1 is the conservative safe value while the
+                  # brake's steady-state behavior is still being observed; final production
+                  # thread count is still an Owner-layer decision, not settled here.
 $bridgeExe   = "D:\rusty-kaspa-tn10-build\release\stratum-bridge.exe"
 $bridgeArgs  = "--config D:/kaspa-tn12-mining/bridge-tn12-config.yaml --node-mode external --kaspad-address 127.0.0.1:16210 --testnet --print-stats true --internal-cpu-miner --internal-cpu-miner-address $addr --internal-cpu-miner-threads $CPU_THREADS"
 
 $probe       = "D:\kaspa-tn12-mining\tn12-dag-health-probe.mjs"
 $wlog        = "D:\kaspa-tn12-mining\_watchdog.log"
 $alertFile   = "D:\kaspa-tn12-mining\_DAG_ALERT.txt"   # deliberately NOT over Kaspa
+$minerPidFile = "D:\kaspa-tn12-mining\_watchdog_miner.pid"
 
 function Log($m) { "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') $m" | Out-File $wlog -Append -Encoding UTF8 }
 
@@ -80,17 +86,40 @@ function Get-Tips {
   } catch { return $null }
 }
 
-function Miner-Running { [bool](Get-Process -Name 'stratum-bridge' -ErrorAction SilentlyContinue) }
+# Codex 2026-08-08 Finding 3: matching by process NAME kills/misses across instances --
+# a different stratum-bridge we don't own reads as "healthy" while our target is dead,
+# or gets killed by mistake. Track the PID we actually launched and verify identity
+# (exe path) before trusting or touching anything -- never act on the name alone.
+function Get-OwnedMinerProcess {
+  if (-not (Test-Path $minerPidFile)) { return $null }
+  $savedPid = Get-Content $minerPidFile -ErrorAction SilentlyContinue
+  if (-not $savedPid) { return $null }
+  $proc = Get-Process -Id $savedPid -ErrorAction SilentlyContinue
+  if (-not $proc) { return $null }
+  if ($proc.Path -ne $bridgeExe) { return $null }  # PID reuse landed on an unrelated process
+  return $proc
+}
+
+function Miner-Running { [bool](Get-OwnedMinerProcess) }
 
 function Start-Miner {
   $env:BRIDGE_SKIP_SYNC_GATE = '1'
-  Start-Process -FilePath $bridgeExe -ArgumentList $bridgeArgs -WorkingDirectory (Split-Path $bridgeExe) `
+  $p = Start-Process -FilePath $bridgeExe -ArgumentList $bridgeArgs -WorkingDirectory (Split-Path $bridgeExe) `
     -RedirectStandardOutput "D:\kaspa-tn12-mining\_bridge_tn12.log" `
-    -RedirectStandardError  "D:\kaspa-tn12-mining\_bridge_tn12_err.log" -WindowStyle Hidden
+    -RedirectStandardError  "D:\kaspa-tn12-mining\_bridge_tn12_err.log" -WindowStyle Hidden -PassThru
+  $p.Id | Out-File $minerPidFile -Encoding ascii
+  Log "Start-Miner: launched PID=$($p.Id)"
 }
 
 function Stop-Miner {
-  Get-Process -Name 'stratum-bridge' -ErrorAction SilentlyContinue | Stop-Process -Force -Confirm:$false -ErrorAction SilentlyContinue
+  $proc = Get-OwnedMinerProcess
+  if ($proc) {
+    Stop-Process -Id $proc.Id -Force -Confirm:$false -ErrorAction SilentlyContinue
+    Log "Stop-Miner: stopped owned PID=$($proc.Id)"
+  } else {
+    Log "Stop-Miner: no owned instance on record -- not touching other stratum-bridge processes"
+  }
+  Remove-Item $minerPidFile -ErrorAction SilentlyContinue
 }
 
 $braked      = $false
