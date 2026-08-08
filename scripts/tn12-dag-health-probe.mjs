@@ -50,6 +50,28 @@ function loadWasm(require) {
   throw new Error('no kaspa-wasm candidate resolved -- ' + tried.join(' | '));
 }
 
+// TWO FAILURE MODES, TWO CRITERIA -- they imply OPPOSITE actions, so one number cannot serve both.
+//
+//   runaway  : tips explode. The miner is producing faster than the node can UTXO-validate.
+//              Action: STOP MINING and let it digest.       (2026-08-07/08, peak 18132 tips)
+//   starved  : tips are FINE (single digits) but the node is far behind and not advancing,
+//              because its peers stopped feeding it.
+//              Action: ADD A PEER. Stopping anything makes it worse. (2026-08-08, 4h of zero
+//              progress at tips=1 while 172,337 blocks behind)
+//
+// 🔴 The asymmetry that makes this necessary: a MINING host is structurally immune to
+// `starved` -- it produces its own blocks, so it reports perfect health while a pure
+// receiver next to it is dead. The healthy node will never raise this alarm for you.
+const RUNAWAY_TIPS = Number(process.env.DAG_PROBE_RUNAWAY_TIPS || 500);
+const STARVED_LAG_SEC = Number(process.env.DAG_PROBE_STARVED_LAG_SEC || 600);
+
+function diagnose({ tips, lagSeconds, isSynced }) {
+  if (tips >= RUNAWAY_TIPS) return 'runaway';           // checked first: it is the dangerous one
+  if (lagSeconds !== null && lagSeconds >= STARVED_LAG_SEC) return 'starved';
+  if (!isSynced) return 'behind';                        // lagging but under threshold; watch it
+  return 'healthy';
+}
+
 try {
   const require = createRequire(REQUIRE_BASE);
   const { mod, via } = loadWasm(require);
@@ -59,13 +81,39 @@ try {
   await Promise.race([rpc.connect({}), t(8000, 'connect timeout')]);
   const dag = await Promise.race([rpc.getBlockDagInfo(), t(8000, 'rpc timeout')]);
   const si = await Promise.race([rpc.getServerInfo(), t(8000, 'rpc timeout')]);
+
+  // Lag is measured against an ABSOLUTE anchor (sink block timestamp vs wall clock), not
+  // against another node's numbers -- comparing two nodes cannot tell you that BOTH are stuck,
+  // which is exactly what happened on 2026-08-07 (identical readings, both dead).
+  let sinkTsMs = null;
+  const sinkHash = dag?.sink ?? null;
+  if (sinkHash) {
+    const b = await Promise.race([
+      rpc.getBlock({ hash: sinkHash, includeTransactions: false }).catch(() => null),
+      t(8000, 'rpc timeout'),
+    ]).catch(() => null);
+    sinkTsMs = Number(b?.block?.header?.timestamp ?? b?.header?.timestamp ?? 0) || null;
+  }
   await rpc.disconnect();
+
+  const tips = (dag?.tipHashes ?? []).length;
+  const lagSeconds = sinkTsMs ? Math.max(0, Math.round((Date.now() - sinkTsMs) / 1000)) : null;
+  const blockCount = Number(dag?.blockCount ?? 0);
+  const headerCount = Number(dag?.headerCount ?? 0);
+  const isSynced = !!si?.isSynced;
+
   out({
     ok: true,
-    tips: (dag?.tipHashes ?? []).length,
+    diagnosis: diagnose({ tips, lagSeconds, isSynced }),
+    tips,
+    lagSeconds,
+    // header > block means the node is pulling headers ahead of bodies = IBD in progress.
+    // A starved node shows lag WITHOUT this gap: it is not even trying.
+    headerMinusBlock: headerCount - blockCount,
+    isSynced,
     virtualDaaScore: String(dag?.virtualDaaScore ?? ''),
-    blockCount: String(dag?.blockCount ?? ''),
-    isSynced: !!si?.isSynced,
+    blockCount: String(blockCount),
+    thresholds: { runawayTips: RUNAWAY_TIPS, starvedLagSec: STARVED_LAG_SEC },
     via,
     ts: new Date().toISOString(),
   });
