@@ -95,6 +95,7 @@ return reply.send(stopBrokerBot(addr));
 ⑤ 用 P2SH 地址尝试（如果该地址曾以某种方式进了 broker_onboarding）⇒ 必须在验签前被拒绝，不是验签失败后才发现
 ⑥ 不带 token 的 onboard 重新提交（幂等更新场景）⇒ 仍不要求签名（验证本设计没有误伤既有的"无 token 更新 updated_at"路径）
 ⑦ 全新地址首次 onboard（无论带不带 token）⇒ 仍不要求签名（验证首次注册门槛未被本设计意外收紧）
+⑧ 用自己地址签的合法 stop_bot payload（签名/地址/nonce/expires_at 全部有效）去打 onboard 覆盖端点（或反过来）⇒ 必须因 action 不匹配被拒（NWT 2026-08-08 红队 MUST-FIX：§3.1 已论证"action 必须绑进 payload，否则一份签名能套到另一个 action 上"，但原七条判据没有一条实测这件事——设计说清楚的风险必须进验收清单，否则落码后这个洞不会被任何回归测试挡住）
 ```
 
 ## 六、我填不了的格
