@@ -7,7 +7,7 @@
 # 候选 A · 存量市场遗留费率证明(precond6 R-3.4-(甲))· v0.1 草判据
 
 ## §0 (甲)要解的那一个问题
-R-3 已实测坐实(J1 v0.2.1 + J2 三版本):存量 subset② 市场的 `maker_fee_bps`/`oracle_fee_bps` **在链上/DB 四个权威源全部零命中**,恒取部署代码常量(maker=10 / oracle=100,`pool-market-settler.js:2244-2245` `|| 10 / || 100`,`[CONFIRMED·源码实读]`;DB 无列 `[CONFIRMED·DB实读]`)。⇒ 候选 A 对存量必然 `verifier-inconclusive`,且 covenant 烤死不可补 ctor 权威。(i) 只救新盘。**存量需要一个不改 covenant、不撒谎的费率权威来源。**
+R-3 已实测坐实(J1 v0.2.1 + J2 三版本):存量 subset② 市场的费率(policy schema 字段名 `maker_fee_bps`/`oracle_fee_bps`)**在链上/DB 四个权威源全部零命中**,恒取部署代码常量。🔴 **引用按符号不按行号(NWT #6 MUST-FIX:原引 `pool-market-settler.js:2244-2245`/`_bbps` 在当前树 grep 零命中——行号偏 400+、真实标识符是 `_pct` 后缀)**:实际代码路径 `kasia-console/src/services/pool-market-settler.js` 读 `market.maker_fee_pct || 10` / `market.oracle_fee_pct || 100`——而 `maker_fee_pct`/`oracle_fee_pct` **DB 无此列**(`[CONFIRMED·DB实读]` PRAGMA)⇒ `parseInt(undefined) → NaN → || 常量`,恒取 10/100(部署代码属性,非市场属性)。⇒ 候选 A 对存量必然 `verifier-inconclusive`,且 covenant 烤死不可补 ctor 权威。(i) 只救新盘。**存量需要一个不改 covenant、不撒谎的费率权威来源。**
 
 ## §1 (甲)的核心命题(它成立当且仅当下面全真)
 🔴 **(甲)不是"给存量发明费率",是把【一个已经是事实的、且已封闭的历史属性】一次性承诺下来**:
