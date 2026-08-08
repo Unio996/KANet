@@ -366,9 +366,24 @@ function Start-Miner {
   }
   if (-not $cmdLine) {
     Log "Start-Miner: FAILED to establish ownership for PID=$($p.Id) after $maxAttempts attempts -- killing it rather than leaving a miner this breaker could never stop again"
-    Stop-Process -Id $p.Id -Force -Confirm:$false -ErrorAction SilentlyContinue
+    # Bettor 2026-08-08 14:20: -ErrorAction Stop + a post-kill Get-Process check so
+    # a failed Stop-Process is never silent. Not trying to guarantee the orphan is
+    # eliminated (NWT's observation: a kill that silently fails here is real but
+    # doesn't reproduce the death spiral -- invariant (1) is still protected, the
+    # next Start-Miner attempt's host-wide scan will see this orphan and refuse to
+    # start a duplicate) -- just refusing to let it pass as a clean success.
+    $killVerified = $false
+    try {
+      Stop-Process -Id $p.Id -Force -Confirm:$false -ErrorAction Stop
+      Start-Sleep -Milliseconds 200
+      $killVerified = -not (Get-Process -Id $p.Id -ErrorAction SilentlyContinue)
+    } catch {}
     Remove-Item $minerPidFile -ErrorAction SilentlyContinue
-    Alert "Start-Miner ABORTED: launched PID=$($p.Id) but could not confirm its commandLine after $maxAttempts attempts -- killed it, no miner is running from this attempt. Will retry next loop iteration if still CONFIRMED_ABSENT."
+    if ($killVerified) {
+      Alert "Start-Miner ABORTED: launched PID=$($p.Id) but could not confirm its commandLine after $maxAttempts attempts -- killed it (verified gone). No miner is running from this attempt. Will retry next loop iteration if still CONFIRMED_ABSENT."
+    } else {
+      Alert "Start-Miner ABORTED but KILL NOT VERIFIED: launched PID=$($p.Id), could not confirm its commandLine, attempted to kill it but could not confirm it is actually gone -- possible orphan process at PID=$($p.Id), needs operator look. Not recorded as owned, so the next start attempt's host-wide scan will see it and refuse to start a duplicate, but this automation cannot stop this specific orphan on its own."
+    }
     return
   }
   # Bettor 2026-08-08 14:17: also capture StartTime (as .Ticks -- a plain int64,
