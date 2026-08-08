@@ -99,7 +99,7 @@
    "path": "kasia-console/test-framework/cases/predictions/pool/p5_positive_via_fake_relay_sink.test.mjs",
    "capability": "m0c1-test-fixture-relay-sink",
    "justification": "⑤(d) 阳性臂: P1 refund preimage 构造流程离线可观测（J2, 2026-08-08, NWT 预登记三判据审 GREEN + 实现审 GREEN）。裸 import 是本臂机制本身：把 RELAY_DIR（relay-manager.js:19 模块加载期 const）重定向到一个放假 relay.mjs 的 scratch 目录，经【合法公开 API】startRelay() fork 假子进程登记进 _relays，驱动 settler 经 sendCommandAsync(relayId,…) 打到假 sink，隔离验证 settler→relay 这条接线（非任何生产 funnel，不适配 m0c-controlled-relay-endpoint 那个 capability 的白名单/威胁模型）。三条预登记判据（NWT 审 GREEN，动手前定，跑完不改）：①哨兵值——现生 randomUUID 嵌进假 sink 回的 tx_obj（NWT 裁：走 prediction_settle_build_preimage 的返回本身，而非侧路 get_pubkey 探针，理由是走被测代码路径本身且避免另开 m0c-controlled-relay-endpoint 白名单口），断言 refund_tx_obj 含本次现生 SENTINEL，不中即 hard fail abort，后续断言不跑；②DB_PATH 复合项——写库前先断 resolve(DB_PATH) 路径身份（≠ live console.db），事后用现生一次性 relay id + throwaway 私钥回读校验；③阴性对照——复现 g4-pilot:62-65 已在册的雷（RELAY_DIR 未设→硬编码 fallback 不存在路径→spawn ENOENT），移开假 sink 脚本后确认 startRelay().ok 仍撒谎（返回 {ok:true,pid,name}，spawn 失败是异步 error 事件追不上那个同步 return），而哨兵照样正确报红——实测坐实'startRelay().ok 不是 relay 起来了的证据，哨兵才是'（此前只是既有代码注释里的一句话）。文件在 test-framework/ 路径下（本 capability 静态负面检查③满足）。实测：阳性臂转绿（bettors_absent 四字段合取满足，protocol_status='refunding'）+ 阴性对照按预期红（哨兵未命中）+ teardown 三表零残留 + 无孤儿进程（父断即自退实测）。零链上写 · 零生产 DB 写 · 零生产码。NWT 独立复核：预登记三判据逐条核过（哨兵非失败态同形/先断哨兵再做别的/DB_PATH 先guard后写无竞态窗口）+ J2 自纠两处（09:49 RELAY_DIR 换脚本语义未验证先说后补双臂实测坐实；09:58 判据②改法先报不偷改）均属实。",
-   "review_ref": "PENDING-fill-with-landing-commit-hash",
+   "review_ref": "0d2aac00",
    "content_digest": "3c1aebf3b00dab668e1dd5c9c79023063c03a495fa872d5e016d2f2d1f59dad2"
   }
  ]
