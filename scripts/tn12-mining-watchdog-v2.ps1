@@ -117,6 +117,17 @@ $CPU_THREADS = 1  # Bettor 2026-08-08 10:12Z: was 2, dropped to 1 -- the inciden
                   # brake's steady-state behavior is still being observed; final production
                   # thread count is still an Owner-layer decision, not settled here.
 $bridgeExe   = "D:\rusty-kaspa-tn10-build\release\stratum-bridge.exe"
+$bridgeExeNorm = [System.IO.Path]::GetFullPath($bridgeExe)
+# NWT 2026-08-08 13:19: raw string -eq on .Path is fragile to path-representation
+# differences (relative segments, separator style) even when it's genuinely the
+# same file; GetFullPath normalizes that (PowerShell string -eq is already
+# case-insensitive, so casing alone was never the risk). Symlinks/junctions and
+# 8.3 short-path forms are NOT resolved by this -- accepted residual, see
+# Test-SameExePath below and the account-visibility note near Get-AnyBridgeInstance.
+function Test-SameExePath($candidatePath) {
+  if (-not $candidatePath) { return $false }
+  try { return ([System.IO.Path]::GetFullPath($candidatePath)) -eq $bridgeExeNorm } catch { return $false }
+}
 $bridgeArgs  = "--config D:/kaspa-tn12-mining/bridge-tn12-config.yaml --node-mode external --kaspad-address 127.0.0.1:16210 --testnet --print-stats true --internal-cpu-miner --internal-cpu-miner-address $addr --internal-cpu-miner-threads $CPU_THREADS"
 
 $probe       = "D:\kaspa-tn12-mining\tn12-dag-health-probe.mjs"
@@ -197,13 +208,25 @@ function Get-Tips {
 # enumeration failure (not just individual per-process access errors) to a
 # terminating error we catch, so a partial/failed scan is never silently read as
 # "confirmed empty."
+# 🔴 ACCEPTED BOUNDARY (Bettor 2026-08-08 13:20, documented not silently assumed):
+# Get-Process only enumerates processes visible to the account running this
+# watchdog. A stratum-bridge instance started under a DIFFERENT account would not
+# appear here at all -- this scan would return Ok=$true, Process=$null (a clean
+# "found nothing" from its own point of view) even though a real instance exists.
+# This watchdog assumes the miner and the watchdog run under the same account (the
+# deployment sequence documented at the top of this file already implies this --
+# there is no cross-account launch path anywhere in this script). If that
+# assumption is ever violated, this is a real gap; it is not fixed here because
+# doing so needs either running this scan elevated or switching to a system-wide
+# CIM query, both of which change this script's privilege requirements and are an
+# Owner/ops decision, not a silent code change bundled into an unrelated fix.
 function Get-AnyBridgeInstance {
   try {
     $procs = Get-Process -ErrorAction Stop
   } catch {
     return @{ Ok = $false; Process = $null }
   }
-  return @{ Ok = $true; Process = ($procs | Where-Object { $_.Path -eq $bridgeExe } | Select-Object -First 1) }
+  return @{ Ok = $true; Process = ($procs | Where-Object { Test-SameExePath $_.Path } | Select-Object -First 1) }
 }
 
 function Resolve-AbsentOrUnknown([string]$reason) {
@@ -230,7 +253,7 @@ function Get-MinerState {
 
   $proc = Get-Process -Id $rec.pid -ErrorAction SilentlyContinue
   if (-not $proc) { return Resolve-AbsentOrUnknown "recorded PID=$($rec.pid) is not running" }
-  if ($proc.Path -ne $bridgeExe) { return Resolve-AbsentOrUnknown "recorded PID=$($rec.pid) now belongs to a different, non-bridge process (PID recycled)" }
+  if (-not (Test-SameExePath $proc.Path)) { return Resolve-AbsentOrUnknown "recorded PID=$($rec.pid) now belongs to a different, non-bridge process (PID recycled)" }
 
   if (-not $rec.commandLine) {
     Log "Get-MinerState: PID=$($rec.pid) has no recorded commandLine -- UNKNOWN_OR_CONFLICT (a stratum-bridge IS running at this PID/path, cannot confirm it's ours)"
