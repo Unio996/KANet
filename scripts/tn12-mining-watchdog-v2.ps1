@@ -170,6 +170,36 @@
 # stop/kill, read ownership (Get-MinerState, verified continuously by
 # construction since every branch either positively confirms or explicitly
 # returns UNKNOWN_OR_CONFLICT)}.
+# 🔴 Round 8 correction (Codex -- invariant (2) COMPLETENESS, not a missing action
+# point this time): verifying persistence (round 7) and verifying kill (round 6)
+# were each correct in isolation, but their COMPOUND failure -- the durable write
+# fails AND the abort-kill also fails -- used to fall through to unconditionally
+# discarding the in-memory provenance (pid/cmdLine/startTimeTicks) that Start-Miner
+# still holds in scope at that point, via an unconditional Remove-Item. The
+# surviving process (kill failed, it's still running) became a permanent orphan:
+# host-wide scanning still protects invariant (1) (won't start a duplicate) but
+# that alone doesn't restore invariant (2) (being able to target THIS one to stop
+# it). Fix: Write-BestEffortOwnershipRecord -- one plain (non-atomic, unverified)
+# write attempt using the values already in scope, tried only on this compound-
+# failure path, before falling back to discarding the record. It cannot make
+# things worse (if it also fails, behavior is identical to before this fix) and
+# gives the next Get-MinerState poll a chance to recognize the survivor via either
+# the commandLine match or the StartTime fallback. Applied to BOTH Start-Miner
+# failure branches (commandLine-readback failure and persistence-verification
+# failure) via one shared function, not two copies -- and StartTime capture moved
+# to immediately after launch (it never depended on the commandLine check
+# succeeding) so it's available for the recovery record in either branch, not just
+# the happy path.
+# Adversarial scenario traced (no automated harness for this script; verification
+# is by code trace, per this file's established practice): write fails -> kill
+# fails -> process survives -> Write-BestEffortOwnershipRecord succeeds -> next
+# loop iteration's Get-MinerState reads the recovered record, finds the process
+# still running with matching commandLine (or StartTime if commandLine was never
+# captured), returns OWNED_RUNNING -> Stop-Miner can target and retry stopping it.
+# If the best-effort write ALSO fails, the orphan is undetectable to this specific
+# retry mechanism (same residual as before this fix), but is still caught by the
+# host-wide scan on the next start attempt, which still refuses to start a
+# duplicate -- invariant (1) never depends on this fix succeeding.
 $ErrorActionPreference = 'Continue'
 
 # --- thresholds (hysteresis; see baseline note above) ---
@@ -384,6 +414,23 @@ function Kill-AndVerify([int]$targetPid) {
   } catch { return $false }
 }
 
+# Codex 2026-08-08 round 8 MUST-FIX: used only on the COMPOUND failure path (the
+# durable/verified write already failed, AND the abort-kill also failed, so a
+# process we launched is surviving with no recoverable record). A single plain
+# write, no temp+rename+read-back -- if that stronger mechanism just failed,
+# retrying it identically is unlikely to differ, and what a surviving orphan needs
+# most is SOME record for the next cycle to target, not a perfectly verified one.
+# Shared by both Start-Miner failure branches so the recovery behavior can't drift
+# between them (the same class of bug -- "fix in one place, sibling location not
+# updated" -- has recurred multiple times today; one implementation closes it here).
+function Write-BestEffortOwnershipRecord([int]$targetPid, $commandLine, $startTimeTicks) {
+  try {
+    (@{ pid = $targetPid; commandLine = $commandLine; startTimeTicks = $startTimeTicks } | ConvertTo-Json -Compress) |
+      Out-File $minerPidFile -Encoding utf8 -ErrorAction Stop
+    return $true
+  } catch { return $false }
+}
+
 # Codex 2026-08-08 round 5 MUST-FIX (invariant (2): must always be able to stop
 # what this breaker started): the old behaviour on a failed commandLine readback
 # was to warn, record commandLine=null, and leave the just-launched process
@@ -405,6 +452,16 @@ function Start-Miner {
   # verbatim -- Win32_Process's CommandLine is what Get-MinerState will compare
   # against later, so the recorded value must come from the same source it will be
   # checked against (quoting/exe-path formatting can differ between the two).
+  # Bettor 2026-08-08 14:17, moved earlier per round-8 fix below: capture
+  # StartTime (as .Ticks -- a plain int64, avoids any JSON date-format round-trip
+  # ambiguity) right after launch, not gated behind a successful commandLine
+  # readback. StartTime doesn't depend on CIM at all, so it's available even when
+  # the CIM-based commandLine check below is struggling -- and round 8 needs it
+  # available for BOTH failure branches' best-effort recovery record, not just
+  # the happy path.
+  $startTimeTicks = $null
+  try { $startTimeTicks = (Get-Process -Id $p.Id -ErrorAction Stop).StartTime.Ticks } catch {}
+
   $cmdLine = $null
   $maxAttempts = 5
   for ($i = 1; $i -le $maxAttempts -and -not $cmdLine; $i++) {
@@ -414,22 +471,19 @@ function Start-Miner {
   if (-not $cmdLine) {
     Log "Start-Miner: FAILED to establish ownership for PID=$($p.Id) after $maxAttempts attempts -- killing it rather than leaving a miner this breaker could never stop again"
     $killVerified = Kill-AndVerify $p.Id
-    Remove-Item $minerPidFile -ErrorAction SilentlyContinue
     if ($killVerified) {
+      Remove-Item $minerPidFile -ErrorAction SilentlyContinue
       Alert "Start-Miner ABORTED: launched PID=$($p.Id) but could not confirm its commandLine after $maxAttempts attempts -- killed it (verified gone). No miner is running from this attempt. Will retry next loop iteration if still CONFIRMED_ABSENT."
     } else {
-      Alert "Start-Miner ABORTED but KILL NOT VERIFIED: launched PID=$($p.Id), could not confirm its commandLine, attempted to kill it but could not confirm it is actually gone -- possible orphan process at PID=$($p.Id), needs operator look. Not recorded as owned, so the next start attempt's host-wide scan will see it and refuse to start a duplicate, but this automation cannot stop this specific orphan on its own."
+      $recovered = Write-BestEffortOwnershipRecord $p.Id $null $startTimeTicks
+      if ($recovered) {
+        Alert "Start-Miner COMPOUND FAILURE: launched PID=$($p.Id), could not confirm its commandLine, AND the abort-kill could not be confirmed -- process likely still running. commandLine unavailable, but wrote a best-effort record with StartTime so the next cycle's Get-MinerState can still recognize and target this PID via the CIM-free fallback. Needs operator look."
+      } else {
+        Alert "Start-Miner COMPOUND FAILURE: launched PID=$($p.Id), could not confirm its commandLine, abort-kill could not be confirmed, AND the best-effort recovery write also failed -- possible orphan process at PID=$($p.Id) with NO ownership record, needs operator look. The next start attempt's host-wide scan should still catch it and refuse to start a duplicate."
+      }
     }
     return
   }
-  # Bettor 2026-08-08 14:17: also capture StartTime (as .Ticks -- a plain int64,
-  # avoids any JSON date-format round-trip ambiguity) so Get-MinerState has a
-  # CIM-free fallback for confirming ownership when a later CommandLine query
-  # fails transiently. This is what lets the brake still stop a miner it started
-  # even on a CIM hiccup, instead of reading UNKNOWN_OR_CONFLICT and refusing to
-  # touch it.
-  $startTimeTicks = $null
-  try { $startTimeTicks = (Get-Process -Id $p.Id -ErrorAction Stop).StartTime.Ticks } catch {}
 
   # Bettor 2026-08-08 16:11 MUST-FIX (W2 -- the PERSISTENCE action itself needed
   # efficacy verification too, same class as launch/kill: a failed or truncated
@@ -457,11 +511,30 @@ function Start-Miner {
   if (-not $writeVerified) {
     Log "Start-Miner: FAILED to durably persist ownership record for PID=$($p.Id) (write/rename/read-back verification failed) -- killing it rather than leaving a miner with no recoverable ownership record"
     $killVerified = Kill-AndVerify $p.Id
-    Remove-Item $minerPidFile -ErrorAction SilentlyContinue
     if ($killVerified) {
+      Remove-Item $minerPidFile -ErrorAction SilentlyContinue
       Alert "Start-Miner ABORTED: launched PID=$($p.Id), ownership confirmed in-memory, but the pid-file write could not be verified -- killed it (verified gone). No miner is running from this attempt."
     } else {
-      Alert "Start-Miner ABORTED but KILL NOT VERIFIED: launched PID=$($p.Id), pid-file write failed verification AND the abort-kill itself could not be confirmed -- possible orphan process at PID=$($p.Id) with NO ownership record, needs operator look. The next start attempt's host-wide scan should still catch it and refuse to start a duplicate."
+      # Codex 2026-08-08 round 8 MUST-FIX: this compound-failure branch used to
+      # unconditionally Remove-Item the pid file here, discarding the in-memory
+      # provenance (pid/cmdLine/startTimeTicks) we still hold in this scope even
+      # though the durable write we JUST attempted failed -- the surviving,
+      # unkillable process became a permanent orphan the breaker could never again
+      # recognize, even though the values needed to recognize it were sitting
+      # right here. Host-wide scanning still protects invariant (1) (won't start a
+      # duplicate), but that alone doesn't restore invariant (2) (being able to
+      # stop this specific one). Fix: attempt one more plain best-effort write
+      # (not the full temp+rename+read-back dance again -- if that mechanism is
+      # broken, retrying the same way is unlikely to differ, and a survivor here
+      # needs SOME record more than it needs a perfectly verified one) before
+      # giving up. If it also fails, we're no worse off than discarding outright.
+      $recovered = Write-BestEffortOwnershipRecord $p.Id $cmdLine $startTimeTicks
+      if ($recovered) {
+        Alert "Start-Miner COMPOUND FAILURE: launched PID=$($p.Id), pid-file write verification failed AND the abort-kill could not be confirmed -- process likely still running. Wrote a best-effort (unverified) ownership record so the next cycle's Get-MinerState has a chance to recognize and target it for stop/reconcile. Needs operator look."
+      } else {
+        Remove-Item $minerPidFile -ErrorAction SilentlyContinue
+        Alert "Start-Miner COMPOUND FAILURE: launched PID=$($p.Id), pid-file write verification failed, abort-kill could not be confirmed, AND the best-effort recovery write also failed -- possible orphan process at PID=$($p.Id) with NO ownership record, needs operator look. The next start attempt's host-wide scan should still catch it and refuse to start a duplicate."
+      }
     }
     return
   }
