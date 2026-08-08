@@ -1,7 +1,10 @@
 # TN12 virtual 停滞 — 跨节点实证与作用域 v0.1
 
-> **Status**: CURRENT · v0.1 · 2026-08-08T07:4xZ · J1tn 现取实测 · **零链上写 · 零 DB 写 · 零生产动作**
+> **Status**: CURRENT · **v0.2** · 2026-08-08T09:5xZ · J1tn 现取实测
 > ⚠ 本文全部读数是**会动的量**；结论(§0/§3)稳定，**数字必须用 §4 现取**。
+> 🆕 **v0.2(同日晚些, Owner 令「彻底修复」后)**：v0.1 只是**诊断**且写于事故进行中；
+> **§6 起是根因、修复与验证**。v0.1 原文一字不删。
+> 🔴 **v0.2 起本文不再是零生产动作**：停/起矿工、部署 watchdog v2 均已实施，逐条记在 §6.3。
 **为什么走 git 而不是频道**：频道此刻对**全队**不通（见 §2）。git 是当前唯一验证可达的团队通道。
 
 ---
@@ -112,3 +115,90 @@ J1_PROBE_URL=ws://127.0.0.1:17211 node D:/kanet/kanet/scratch/j1-peer-node-probe
 - **tip 爆炸是因还是果** —— 上一班对"tip 数=病态"留过保留意见，本班只把它降级为**同步增长的伴随量**，
   **不作因果断言**。（可证伪判据仍是上一班那条：若节点后来自己追平，tip 数就是症状不是病因。）
 - **矿工是谁在挖**（远端 `via submit block`）——未查，不猜。
+
+---
+
+# 🆕 v0.2 — 根因、修复、验证
+
+## §6.1 根因：分两层，只有第二层可根治
+
+**第一层 · 触发** `[未查清 · 不写成结论]`
+节点 sync rate 从 0.48 掉到 **0.05**（`rusty-kaspa.log`，2026-08-08 01:45+08）。
+那台同时扛着 30+ relay / llama-server / 多个 Claude 会话 / 三个 bot ⇒ 资源争用**最可能**，
+但**我没有直接证据**。⚠ 这一层大概率**根除不了**（扰动总会发生），所以它不是修复的着力点。
+
+**第二层 · 放大** `[CONFIRMED · 源码 + 日志 + 实测]`
+1. 两道同步闸被**同时**关掉：kaspad `--enable-unsynced-mining`
+   + bridge `BRIDGE_SKIP_SYNC_GATE=1`（写死于 `tn12-mining-watchdog.ps1`，注释自陈为防 TN12 halt 的 bootstrap 措施）。
+2. 节点落后后矿工**照常挖**（`via submit block` 2006 次/小时，同期 `via relay` = **0** ⇒ 全网只有我们在挖）。
+3. **产块 0.56/s > UTXO 验证 0.2/s** ⇒ tips 堆积 ⇒ mergeset 顶到上限 248 ⇒ 验证更慢 ⇒ **更多 tips**。
+   **正反馈，不自愈**：无人干预跑了 15 小时，tips 到 **18132**。
+
+🔨 **一句话**：那两个开关的名字听起来是「让它能挖」，**作用是「拆掉保护」**。
+它把一次**能自愈的落后**，变成了**不可自愈的 DAG 污染**。
+
+🔴 **而这两个 flag 【不能删】——我中途判断错过一次，已纠正并记在这里**：
+`rpc/service/src/service.rs:308` 的守卫由 `is_synced` 驱动，而 `is_synced` 看 sink 时间戳。
+删掉 flag ⇒ 无新块 ⇒ sink 永远陈旧 ⇒ 永远 not-synced ⇒ 永远拒绝 submitBlock ⇒ **永远没有新块 = 死锁**。
+⇒ **正解是给它配熔断，不是拆掉它。**
+
+## §6.2 为什么 15 小时没人知道 —— 这条比故障本身更该留下
+
+**唯一的告警通道是频道，而频道正是被这次故障打掉的组件。** 全队 relay 广播都被 not-synced 拒绝。
+事故不是被系统发现的，是 **Owner 恰好来问**才被发现的。
+🔨 **判据（已在册，这次是它的又一个实例）**：**报障通道不得依赖被报障的组件。**
+⇒ 修复里的 `_DAG_ALERT.txt` 走本地文件、**刻意不经 Kaspa**。
+
+## §6.3 已实施的修复（全部现已 live）
+
+| 动作 | 结果 |
+|---|---|
+| 停 5 个 `tn12-mining-watchdog` 实例 + 停矿工 | 两台**立刻**开始消化 |
+| 观察恢复 | tips 18132 → 11096 → **2**；两台 `isSynced` false → **true**；mergeset 248 → 87 |
+| 部署 `scripts/tn12-dag-health-probe.mjs` | DAG 宽度探针（tips/isSynced/blockCount），**按候选发现 wasm 路径**不写死 |
+| 部署 `scripts/tn12-mining-watchdog-v2.ps1` | keepalive **+ tips 熔断**，detached 常驻（WMI Create，不依附任何会话） |
+| v1 备份 | `tn12-mining-watchdog.v1.bak`（原脚本一字未改） |
+
+**熔断设计**：`tips > 500 ⇒ 停挖等消化` / `tips < 50 ⇒ 恢复挖`（迟滞防抖）。
+**阈值依据是实测不是拍脑袋**：健康态 tips = **2**（个位数），事故峰值 **18132** ⇒ 中间四个数量级，不是临界判断。
+
+🔴 **探针失败时【继续挖 + 高噪告警】，这是刻意的**：
+「探针读不到」与「DAG 坏了」是两个不同读数，**导出的动作相反**。
+拿未知读数去刹车，会把探针 bug 变成**确定的链停**；而链停是立刻可见的，DAG 污染是静默的（本次静默 15h）。
+⇒ **未知 ⇒ 保持现状并喊；已知坏 ⇒ 刹车。**
+
+## §6.4 熔断器已被【实际触发过】—— 不是装饰
+
+**一个从没有人故意触发过的熔断器，「因为一切正常所以没响」和「因为它坏了所以没响」读数完全相同。**
+所以阈值做成 env 可覆盖，用**同一份生产脚本**演练（不另写副本，否则测的不是要交付的东西）：
+
+```
+TN12_TIPS_BRAKE=1 TN12_TIPS_RESUME=0 TN12_POLL_SEC=5 TN12_MAX_ROUNDS=4 \
+  powershell -File D:\kaspa-tn12-mining\tn12-mining-watchdog-v2.ps1
+```
+实测输出（`_DAG_ALERT.txt`）：
+```
+BRAKE ENGAGED: tips=2 > 1. Miner stopped so the node can digest. Will resume under 0.
+```
+且演练退出时**自动把矿工放回来**（`miner after exercise: 1`）——bounded 模式不会把矿工遗留在停止态。
+
+## §6.5 自查命令（照 CLAUDE.md 通则）
+
+```
+# 那台（挖矿主机）
+node D:\kaspa-tn12-mining\tn12-dag-health-probe.mjs        # tips 现值
+Get-Content D:\kaspa-tn12-mining\_watchdog.log -Tail 5     # 熔断/keepalive 动作
+Get-Content D:\kaspa-tn12-mining\_DAG_ALERT.txt -Tail 5    # 只在异常时才有内容
+```
+🔵 **两个脚本已入库**（`scripts/`），**仓库名与部署名一致**——
+避免「库里那份」和「跑着的那份」不是同一个东西。
+🔴 **但部署副本本身仍在 git 之外**（`D:\kaspa-tn12-mining\`）：
+改了库里的**不会**自动生效，必须重新 scp + 重启 watchdog。**这是已知缺口，不是已解决项。**
+
+## §6.6 仍然没有解决的
+
+- **第一层触发未查清**（为什么 sync rate 会掉到 0.05）。熔断器让它**不再致命**，但**没有消除它**。
+- **只有那台装了熔断**。我这台（J1 :3300）不挖矿，不需要；**若将来有第三台挖矿，必须同装**。
+- **告警靠文件，没有推送**：`_DAG_ALERT.txt` 要有人去看。**比 15 小时静默好，但不等于有人会知道。**
+- **本机事故中 DAG 曾破洞**（最近窗口 `Orphaned 180 / Unorphaned 0` = 孤块进得去出不来），
+  已随消化恢复，**未单独复盘**。
