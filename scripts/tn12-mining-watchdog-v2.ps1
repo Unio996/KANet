@@ -97,6 +97,46 @@
 # 4's core fix; round 3 would have wrongly returned CONFIRMED_ABSENT here). (5)
 # normal case, miner genuinely exited, pid file intact, and the independent scan
 # also finds nothing at $bridgeExe anywhere -> CONFIRMED_ABSENT, restarts normally.
+#
+# ---------------------------------------------------------------------------
+# TWO INVARIANTS (Bettor 2026-08-08 14:11 -- every round-1-through-5 finding was
+# one of these two violated somewhere; self-certified here per state transition,
+# not just patched at the one spot each round's finding pointed at)
+# ---------------------------------------------------------------------------
+# (1) NEVER start a duplicate miner.
+# (2) ALWAYS be able to stop a miner this breaker itself started.
+# Start (Start-Miner, reached only via Start-Miner-Unless-Paused):
+#   - Unless-Paused only calls Start-Miner when Get-MinerState = CONFIRMED_ABSENT,
+#     itself only reachable when either the tracked PID is independently proven
+#     gone AND a host-wide scan independently proves nothing else is running at
+#     $bridgeExe, or that scan is what concluded absence in the first place ->
+#     satisfies (1): nothing already running when we launch.
+#   - Start-Miner does not return successfully until it has re-read the live
+#     commandLine for the PID it just launched and persisted it; on failure it
+#     kills what it just started instead of leaving it running unconfirmed ->
+#     satisfies (2): a successful Start-Miner return means Get-MinerState will
+#     read OWNED_RUNNING next check, and Stop-Miner can act on it.
+# Stop (Stop-Miner, reached from brake-engage/brake-hold, and the exercise-mode
+# exit path resumes rather than stops so it doesn't apply here):
+#   - Only ever kills a process when Get-MinerState = OWNED_RUNNING (positively
+#     identified via PID + normalized path + matching commandLine) -> can't
+#     violate (1) (stopping isn't starting) and satisfies (2) whenever ownership
+#     is currently confirmable.
+#   - UNKNOWN_OR_CONFLICT: Stop-Miner deliberately does not touch it. This is
+#     correct when the process ISN'T ours (touching it would be the round-1
+#     mistake). It would violate (2) if a process WE started ever durably landed
+#     here -- round 5 closed the only durable path into that (a launch that never
+#     got ownership confirmed). What remains is a TRANSIENT case: a later
+#     Win32_Process query for an already-owned, already-confirmed PID can itself
+#     fail once (CIM hiccup), reading as UNKNOWN_OR_CONFLICT for that single poll
+#     cycle even though the process is genuinely ours. This is bounded and
+#     self-healing (next $POLL_SEC cycle re-queries and typically re-confirms
+#     OWNED_RUNNING), consistent with this file's existing "unknown != bad, don't
+#     flip-flop on a blip, alert loudly" stance for the DAG probe above -- treating
+#     a single transient miss as "permanently unstoppable" would be a worse
+#     failure mode (killing a healthy miner, or refusing to ever re-evaluate) than
+#     tolerating a brief delay before the brake can act. Documented as an accepted
+#     residual, not a silent gap.
 $ErrorActionPreference = 'Continue'
 
 # --- thresholds (hysteresis; see baseline note above) ---
@@ -272,6 +312,18 @@ function Get-MinerState {
   return @{ State = 'OWNED_RUNNING'; Process = $proc }
 }
 
+# Codex 2026-08-08 round 5 MUST-FIX (invariant (2): must always be able to stop
+# what this breaker started): the old behaviour on a failed commandLine readback
+# was to warn, record commandLine=null, and leave the just-launched process
+# running. That process is real and ours, but Get-MinerState can never re-confirm
+# it (no commandLine on record -> UNKNOWN_OR_CONFLICT), and Stop-Miner deliberately
+# never touches UNKNOWN_OR_CONFLICT (correct for processes we DIDN'T start -- wrong
+# here, since we know for a fact we just started this one). The brake could then
+# never stop a miner it launched itself. Ownership establishment is now part of
+# what "starting successfully" means: retry the readback briefly, and if it never
+# succeeds, kill the process we just started rather than leave an unconfirmable
+# miner running. A launch that can't prove itself is treated as a launch that
+# failed, not a launch that succeeded with degraded tracking.
 function Start-Miner {
   $env:BRIDGE_SKIP_SYNC_GATE = '1'
   $p = Start-Process -FilePath $bridgeExe -ArgumentList $bridgeArgs -WorkingDirectory (Split-Path $bridgeExe) `
@@ -281,12 +333,21 @@ function Start-Miner {
   # verbatim -- Win32_Process's CommandLine is what Get-MinerState will compare
   # against later, so the recorded value must come from the same source it will be
   # checked against (quoting/exe-path formatting can differ between the two).
-  Start-Sleep -Milliseconds 200
   $cmdLine = $null
-  try { $cmdLine = (Get-CimInstance Win32_Process -Filter "ProcessId=$($p.Id)" -ErrorAction Stop).CommandLine } catch {}
-  if (-not $cmdLine) { Log "Start-Miner: WARNING could not read back commandLine for PID=$($p.Id) -- ownership checks will fail closed (treat as not-owned) until next successful start" }
+  $maxAttempts = 5
+  for ($i = 1; $i -le $maxAttempts -and -not $cmdLine; $i++) {
+    Start-Sleep -Milliseconds 200
+    try { $cmdLine = (Get-CimInstance Win32_Process -Filter "ProcessId=$($p.Id)" -ErrorAction Stop).CommandLine } catch {}
+  }
+  if (-not $cmdLine) {
+    Log "Start-Miner: FAILED to establish ownership for PID=$($p.Id) after $maxAttempts attempts -- killing it rather than leaving a miner this breaker could never stop again"
+    Stop-Process -Id $p.Id -Force -Confirm:$false -ErrorAction SilentlyContinue
+    Remove-Item $minerPidFile -ErrorAction SilentlyContinue
+    Alert "Start-Miner ABORTED: launched PID=$($p.Id) but could not confirm its commandLine after $maxAttempts attempts -- killed it, no miner is running from this attempt. Will retry next loop iteration if still CONFIRMED_ABSENT."
+    return
+  }
   (@{ pid = $p.Id; commandLine = $cmdLine } | ConvertTo-Json -Compress) | Out-File $minerPidFile -Encoding utf8
-  Log "Start-Miner: launched PID=$($p.Id) commandLine-recorded=$([bool]$cmdLine)"
+  Log "Start-Miner: launched PID=$($p.Id), ownership confirmed"
 }
 
 function Stop-Miner {
