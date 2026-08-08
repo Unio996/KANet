@@ -1,9 +1,12 @@
-# Broker (a) 初始注册签名挑战 · 设计稿 v0.4
+# Broker (a) 初始注册签名挑战 · 设计稿 v0.5
 
 > **Status**: CURRENT
-> 🔴 **v0.4 变更（Codex 2026-08-08 二审 MUST-FIX，Bettor 派工 @KANet-UI 接，本次两条一起闭）**：
+> 🔴 **v0.4 变更（Codex 2026-08-08 一审 MUST-FIX，两条一起闭）**：
 > 1. **唯一挑战寻址**（§4）：提交载荷补 `nonce` 字段，验证改为按 `nonce` 精确定位单条记录，不再对"同一 `broker_address` 下可能有多条未消费 nonce"这件事做隐含假设。
 > 2. **变更绑定**（§2-bis 新增）：`descriptor` 的输入集合从"随最终形态定"冻结为一个封闭定义，机械绑定操作类型 + bot/token 绑定语义 + role/network/address，堵住"合法签名被拿去打不同写入"的重放缺口。
+> 🔴 **v0.5 变更（Codex 2026-08-08 二审 MUST-FIX，仍是"仍 RED"判定，本次两条一起闭）**：
+> - **B3**（§2-bis 改）：v0.4 的 descriptor 仍把客户端自报的 `bot_username` 签进去，而生产写入的是 `getMe` 派生的 `verifiedUsername`——同一个"绑定值≠生效值"洞，这次踩在 §2-bis 自己身上。改为**不签 `bot_username`**：descriptor 对最终落库的用户名不作任何独立断言，唯一权威来自 `bot_token_hash` 锁定的 token 经既有 `getMe` 规则（确定性函数）派生的结果。
+> - **B4**（§6-bis 改）：operation 一致性复查必须搬进 §6-bis 那个 `BEGIN...COMMIT` 事务内部、紧跟在 `BEGIN IMMEDIATE` 之后，不能是事务外/事务前的一次独立 SELECT——否则复查和真正的写入之间仍有窗口，TOCTOU 原样复活。
 
 **Owner**: KANet-UI
 **日期**: 2026-08-08
@@ -62,7 +65,7 @@ expires: <ISO8601>
 
 ---
 
-## §2-bis Canonical mutation digest（Codex 2026-08-08 二审 MUST-FIX，v0.4 新增）
+## §2-bis Canonical mutation digest（Codex 2026-08-08 一审 MUST-FIX v0.4，二审 MUST-FIX B3 v0.5）
 
 **问题**：v0.1-v0.3 把 descriptor 的输入集合留白（"具体字段随 Track B 该注册端点最终形态定"）。留白意味着**签名没有机械绑定"申请人实际在授权哪一次写入"**——同一把私钥签出的合法签名，理论上可以被拿去打一次跟原意图不同的写入（换 bot_token、换 bot_username、甚至从"register"语义偷换成"update"语义），只要 `broker_address/role/network` 三项凑巧一致。这正是 Broker (b) 设计（`docs/2026-08-04-broker-variant-action-caller-auth-design.md` 验收条⑧）已经踩过、并已用"把 action 绑进签名载荷"堵死的同一类洞——(a) 这里之前留白，是同一类洞留了个缺口没堵。
 
@@ -72,11 +75,14 @@ expires: <ISO8601>
 operation: "register" | "update_bot_token"
 broker_address: <与七要素里的 broker_address 相同>
 network: <与七要素里的 network 相同>
-bot_username: <本次提交的 bot_username；未提供 token 时为 null>
 bot_token_hash: <blake2b(bot_token)；未提供 token 时为 null——原文 token 不入签名载荷，只入落库的加密列>
 ```
 
-- **`operation` 由服务端决定，不由客户端自报**：与 `kasia-console/src/api/kanet-broker.js:73` 现有分支逻辑同源——服务端在**签发挑战时**先查 `broker_address` 是否已有行，查到就是 `update_bot_token`，没查到就是 `register`，写入 nonce 记录随 descriptor 一起持久化（§4）。**验证提交时**，服务端重新查一次同一地址的当前行是否存在；若与挑战签发时记的 `operation` 不一致（例如挑战签发后、提交前，另一次请求先把行建出来了），判定挑战已过期失效，拒绝并提示"状态已变化，请重新发起挑战"——不静默按旧 operation 语义写入，也不改写客户端签名覆盖的语义。
+🔴 **v0.4 曾在这里放过一个 `bot_username` 字段（客户端提交的自报值），v0.5 删掉了它，理由是 Codex 二审 B3 MUST-FIX（NWT 与 Bettor 均已认账，判据 `reference-bound-value-silently-separated-from-effective-value` 收进常设审查标准）**：`kanet-broker.js:53-64` 现有行为是——提供了 `bot_token` 时，服务端调用 Telegram `getMe` 得到 `verifiedUsername`，**落库的是这个派生值，不是客户端自报的 `bot_username`**（两者不符时只 `warn`，用 `verifiedUsername` 覆盖，不拒绝）。v0.4 把客户端自报值签进 descriptor，等于**签的是一个会被服务端悄悄换掉的值**——这正是本节存在的目的要堵的那类洞（"绑定值≠生效值"），却在本节自己身上犯了一次。
+
+**修法**：descriptor **不对最终落库的用户名作任何独立断言**。`bot_username` 唯一的权威来源是 `bot_token_hash` 锁定的那个 token，经由现有 `getMe` 规则（固定、确定性、不受客户端输入影响）派生。由于同一个 token 经 `getMe` 恒定产出同一个 `verifiedUsername`，**"签的是 X、写的是 Y"这种分岔不可能发生**——唯一能分岔的输入是 token 本身，而 token 已经被 `bot_token_hash` 锁死（提交一个不同的 token，hash 就对不上，签名验证失败）。客户端自报的 `bot_username` 参数继续存在（`kanet-broker.js` 现有 mismatch-warn 行为不变），但它本来就不是可信输入，从未、也不需要进入签名的证明范围。
+
+- **`operation` 由服务端决定，不由客户端自报**：与 `kasia-console/src/api/kanet-broker.js:73` 现有分支逻辑同源——服务端在**签发挑战时**先查 `broker_address` 是否已有行，查到就是 `update_bot_token`，没查到就是 `register`，写入 nonce 记录随 descriptor 一起持久化（§4）。**验证提交时**，复查方式见 §6-bis（v0.5 起：复查必须在事务内做，不是这里描述的一次独立 SELECT）；不一致时判定挑战已过期失效，拒绝并提示"状态已变化，请重新发起挑战"——不静默按旧 operation 语义写入，也不改写客户端签名覆盖的语义。
 - **为什么不含 `bot_token` 原文**：nonce 记录与 `last_proof_payload`（§5 拱心石）都要落库保存，token 原文落进这类审计字段会造成明文密钥外泄面；哈希已经足够证明"签的是这个 token"，原文只走既有的 `encrypt()` 加密列（不变）。
 - **为什么不含 §1 现存两条历史行涉及的字段**：现存行（`@younio2024` / 测试行）都在 `provenance` 分档下按 §6 单独处置，不经过挑战流程，不受本节约束。
 - **对 §7"每次写入都要签名"的收紧**：之前"每次写入都要签名"只保证**有**签名，没保证签名**覆盖这次写的是什么**。加上本节后，"未带新签名走 UPDATE 分支"和"带一个为别的写入签的合法签名走 UPDATE 分支"是同一类攻击的两种形式，现在都会被 descriptor 不匹配挡住——后者是 v0.1-v0.3 遗漏的部分。
@@ -127,11 +133,17 @@ bot_token_hash: <blake2b(bot_token)；未提供 token 时为 null——原文 to
 
 ---
 
-## §6-bis 三步写入必须在一个事务里（Codex 2026-08-08 红队 MUST-FIX，比 §4 的原子 UPDATE 更深一层）
+## §6-bis 四步写入必须在一个事务里（Codex 一审 MUST-FIX v0.3，二审 B4 MUST-FIX v0.5 补事务边界）
 
-§4 已要求 nonce 消费本身是原子 UPDATE（防并发重放），但一次成功注册实际要做**三件事**：①标记 nonce 已消费 ②写/更新 `broker_onboarding` 行 ③落 `last_proof_*` 归档字段。**这三步若分开提交，中间任一步失败都会留下 split state**——最典型的坏结果：nonce 已消费（第①步提交成功），但 `broker_onboarding` 写入失败（第②步报错），此时这个地址的这次控钥证明**被永久烧掉**（nonce 不可能重发），而注册本身**没有生效**——申请人无法重试（同一 nonce 已废），只能整个挑战流程重来。
+§4 已要求 nonce 消费本身是原子 UPDATE（防并发重放），但一次成功注册实际要做**四件事**：**⓪ 复查 operation 与挑战签发时是否一致**（见 §2-bis）①标记 nonce 已消费 ②写/更新 `broker_onboarding` 行 ③落 `last_proof_*` 归档字段。**这几步若分开提交，中间任一步失败/或步骤之间存在窗口都会留下问题**——最典型的坏结果：nonce 已消费（第①步提交成功），但 `broker_onboarding` 写入失败（第②步报错），此时这个地址的这次控钥证明**被永久烧掉**（nonce 不可能重发），而注册本身**没有生效**——申请人无法重试（同一 nonce 已废），只能整个挑战流程重来。
 
-**硬要求：①②③必须包在同一个 SQLite 事务里，全成功才提交，任一步失败整体回滚**（`BEGIN` → 三步 → `COMMIT`，出错走 `ROLLBACK`，不允许部分提交）。
+**硬要求：⓪①②③必须包在同一个 SQLite 事务里，全成功才提交，任一步失败整体回滚**（`BEGIN` → 四步 → `COMMIT`，出错走 `ROLLBACK`，不允许部分提交）。
+
+🔴 **v0.5 补（Codex 二审 B4 MUST-FIX）：⓪ 那一步——operation 一致性复查——必须是事务内的第一条语句，不能是事务外/`BEGIN` 之前的一次独立 SELECT**。v0.4 把它写在"验证提交时，服务端重新查一次"，没有说清这次查询相对 `BEGIN` 的时序——如果它在 `BEGIN` 之前跑，复查和真正的 ①②③ 写入之间仍有一个窗口：另一个并发请求可以在"复查通过"之后、"事务开始写入"之前，把这个地址的行状态改掉（例如复查时还没有行、判定 operation=register，但在本请求真正执行 INSERT 之前，另一个并发请求先把行建出来了），复查形同虚设，TOCTOU 原样复活——这与 §4 原子 UPDATE 要防的并发窗口是同一类问题，只是发生在事务边界而不是行锁边界。
+
+**精确写法**：`BEGIN IMMEDIATE`（不是默认的 deferred transaction——`IMMEDIATE` 在事务开始时就取写锁，堵住"读的时候没锁、写的时候才发现被抢"这个 SQLite 特有的窗口）→ ⓪ 在事务内重新 `SELECT` 该地址当前行是否存在，比对与挑战签发时记录的 `operation` 是否一致，不一致 `ROLLBACK` 并拒绝（提示"状态已变化，请重新发起挑战"）→ ① nonce 原子 UPDATE（§4，`WHERE nonce=? AND consumed_at IS NULL`，0 行受影响同样 `ROLLBACK` 并拒绝）→ ② 写/更新 `broker_onboarding` → ③ 落 `last_proof_*` → `COMMIT`。四步都在同一把写锁之内，中间没有能被其他连接打进来的窗口。
+
+**验收标准（新增，落码后必须能测）**：并发场景——两个请求几乎同时提交同一挑战流程产生的、针对同一 `broker_address` 的注册（例如一个走 `register`，另一个是同一地址稍后发起的 `update_bot_token`，中间故意制造行状态变化）→ 有且只有符合当前真实行状态的那个请求成功，另一个必须因 operation 不一致被拒绝，不允许出现"两个都成功但语义互相矛盾"或"复查通过了但实际写入时状态已经变了"这类结果。
 
 ## §7 每次写入都要签名，不只是 INSERT（复用 07-26 v0.2 §4.6-1，实錯的原因写清）
 
