@@ -1,4 +1,4 @@
-# Broker (a) 初始注册签名挑战 · 设计稿 v0.5
+# Broker (a) 初始注册签名挑战 · 设计稿 v0.6
 
 > **Status**: CURRENT
 > 🔴 **v0.4 变更（Codex 2026-08-08 一审 MUST-FIX，两条一起闭）**：
@@ -7,6 +7,7 @@
 > 🔴 **v0.5 变更（Codex 2026-08-08 二审 MUST-FIX，仍是"仍 RED"判定，本次两条一起闭）**：
 > - **B3**（§2-bis 改）：v0.4 的 descriptor 仍把客户端自报的 `bot_username` 签进去，而生产写入的是 `getMe` 派生的 `verifiedUsername`——同一个"绑定值≠生效值"洞，这次踩在 §2-bis 自己身上。改为**不签 `bot_username`**：descriptor 对最终落库的用户名不作任何独立断言，唯一权威来自 `bot_token_hash` 锁定的 token 经既有 `getMe` 规则（确定性函数）派生的结果。
 > - **B4**（§6-bis 改）：operation 一致性复查必须搬进 §6-bis 那个 `BEGIN...COMMIT` 事务内部、紧跟在 `BEGIN IMMEDIATE` 之后，不能是事务外/事务前的一次独立 SELECT——否则复查和真正的写入之间仍有窗口，TOCTOU 原样复活。
+> 🔴 **v0.6 变更（Codex 2026-08-08 三审 MUST-FIX：v0.5 的 B3 修法本身又过度断言了一次）**：v0.5 声称"同一 token 经 `getMe` 恒定产出同一 `verifiedUsername`，分岔不可能发生"——premise 太强：`getMe` 背后是 Telegram（外部、可变权威），同一 token 在不同时刻可能因 bot 改名/重新绑定而返回不同 username。改为（§2-bis）：`bot_username` 明确归类为签名语义之外的派生/缓存外部元数据，descriptor 不对它作任何时效性绑定断言；并补一份系统性自查表，逐个字段核对"落库生效值会不会跟签的值分岔"，证明这不是孤立打补丁。
 
 **Owner**: KANet-UI
 **日期**: 2026-08-08
@@ -80,7 +81,25 @@ bot_token_hash: <blake2b(bot_token)；未提供 token 时为 null——原文 to
 
 🔴 **v0.4 曾在这里放过一个 `bot_username` 字段（客户端提交的自报值），v0.5 删掉了它，理由是 Codex 二审 B3 MUST-FIX（NWT 与 Bettor 均已认账，判据 `reference-bound-value-silently-separated-from-effective-value` 收进常设审查标准）**：`kanet-broker.js:53-64` 现有行为是——提供了 `bot_token` 时，服务端调用 Telegram `getMe` 得到 `verifiedUsername`，**落库的是这个派生值，不是客户端自报的 `bot_username`**（两者不符时只 `warn`，用 `verifiedUsername` 覆盖，不拒绝）。v0.4 把客户端自报值签进 descriptor，等于**签的是一个会被服务端悄悄换掉的值**——这正是本节存在的目的要堵的那类洞（"绑定值≠生效值"），却在本节自己身上犯了一次。
 
-**修法**：descriptor **不对最终落库的用户名作任何独立断言**。`bot_username` 唯一的权威来源是 `bot_token_hash` 锁定的那个 token，经由现有 `getMe` 规则（固定、确定性、不受客户端输入影响）派生。由于同一个 token 经 `getMe` 恒定产出同一个 `verifiedUsername`，**"签的是 X、写的是 Y"这种分岔不可能发生**——唯一能分岔的输入是 token 本身，而 token 已经被 `bot_token_hash` 锁死（提交一个不同的 token，hash 就对不上，签名验证失败）。客户端自报的 `bot_username` 参数继续存在（`kanet-broker.js` 现有 mismatch-warn 行为不变），但它本来就不是可信输入，从未、也不需要进入签名的证明范围。
+🔴 **v0.5 当时给的"修法"段落本身又过度断言了一次（Codex 三审 MUST-FIX，NWT 独立认账）——v0.6 改成这一版**：v0.5 写"同一个 token 经 `getMe` 恒定产出同一个 `verifiedUsername`，'签的是 X、写的是 Y'这种分岔不可能发生"。**这个 premise 太强**：`bot_token_hash` 机械锁定的是 **token**，不是 **Telegram（一个外部、可变的权威）对这个 token 未来任意时刻的响应**——bot 拥有者在 BotFather 侧改名、或把同一个 token 重新绑定到不同的 bot，都会让*同一个* token 在不同时刻喂给 `getMe` 得到*不同*的 `username`。这不是假设性的边角：`username` 本来就独立于 `token` 可变，只是恰好大多数时候不变。
+
+**修法（Codex 给的二选一，本稿采纳 (a)）**：
+- **(a) 采纳** —— **显式把 `bot_username` 归类为签名语义之外的派生/缓存外部元数据**，本节到此为止，**不再声称对它有任何"机械防分岔"的绑定保证**。descriptor 的证明范围严格止于 `descriptor_payload` 里列出的四个字段（`operation/broker_address/network/bot_token_hash`）——`bot_username` 从落库那一刻起就是"用当次验证过的 token，此刻查一次 `getMe` 得到的结果"，**是一个随时可能因外部系统状态变化而与"注册时" 的值不同的缓存值，签名对它不作任何时效性断言**。这与本设计的硬边界一致（§0：只证"注册当时对该地址私钥的控制"，不做身份/持续性断言）——`bot_username` 本来就更适合归入"运营便利信息"而非"被证明的东西"。
+- **(b) 未采纳的备选**（记录理由，供以后 `bot_username` 若真的变成授权相关字段时参考）：把签发挑战时查到的 `verifiedUsername`（而不是客户端自报值）纳入 descriptor、提交时重新查一次 `getMe` 核对未漂移——这能做到"签的就是写的"，但代价是挑战签发这一步要多打一次 Telegram API（新增外部依赖和失败模式），且仍然只能覆盖"挑战有效期内没变"，覆盖不了"写入之后 Telegram 侧又变了"这种事后漂移（因为 §6 provenance 语义本来就是"注册当时"，不承诺持续有效）。**本设计今天不需要 `bot_username` 承担授权语义**（现有代码里它只用于通知渠道展示，不参与任何权限判断），(a) 已经足够，且更简单——(b) 留给以后 `bot_username` 真的被需要当作被证明的字段时再启用。
+
+**系统性自查（Bettor 2026-08-08 13:11 派工：不是只补 Codex 点出的那一个，逐个签名/绑定值都要问"它等于实际落库的生效值吗"）**——把这个问题过一遍七要素 + descriptor_payload 的每个字段：
+
+| 字段 | 落库的"生效值"从哪来 | 会不会分岔 |
+|---|---|---|
+| `broker_address` | 就是它本身（主键，不派生） | 不会——没有派生步骤可以偏离 |
+| `network` | `broker_address` 前缀的纯函数（`kaspatest:` → `testnet-12`），今天代码里甚至没有独立的 `network` 列去存它 | 不会——`broker_address` 本身已锁死，且推导是无外部依赖的纯函数 |
+| `role` | 常量 `broker`，今天没有第二个值 | 不会 |
+| `nonce` / `expires` | 服务端生成的协议记账值，不是"业务上被写入的效果"，一次性消费 | 不适用（不是"被写入的业务状态"这个范畴） |
+| `operation` | 服务端在**同一事务内**（§6-bis v0.5 起）重查行是否存在决定 | 已堵：B4 修复后复查与写入之间没有窗口 |
+| `bot_token_hash` | 同一次请求里，验证签名用的 token 与随后 `encrypt()` 落库的 token 是同一个内存变量，没有经过任何外部系统 | 不会——不涉及外部权威，哈希和加密用的是同一份原文 |
+| `bot_username`（v0.4 曾签，v0.5 起已移出 descriptor） | Telegram `getMe`（外部系统，可随时间变化） | **会**——这正是本节本身在改的那条 |
+
+**结论**：`bot_username` 是这批字段里唯一依赖外部可变权威的一个，也是唯一被这次自查揪出问题的——不是巧合遗漏，是它的"值的来源"性质本来就和其余字段不同类。其余字段要么是纯函数/常量，要么是同一请求内的原文直传，要么是刚被 §6-bis 堵上窗口的服务端派生值，都没有"外部系统可能在任意时刻改变答案"这个风险面。
 
 - **`operation` 由服务端决定，不由客户端自报**：与 `kasia-console/src/api/kanet-broker.js:73` 现有分支逻辑同源——服务端在**签发挑战时**先查 `broker_address` 是否已有行，查到就是 `update_bot_token`，没查到就是 `register`，写入 nonce 记录随 descriptor 一起持久化（§4）。**验证提交时**，复查方式见 §6-bis（v0.5 起：复查必须在事务内做，不是这里描述的一次独立 SELECT）；不一致时判定挑战已过期失效，拒绝并提示"状态已变化，请重新发起挑战"——不静默按旧 operation 语义写入，也不改写客户端签名覆盖的语义。
 - **为什么不含 `bot_token` 原文**：nonce 记录与 `last_proof_payload`（§5 拱心石）都要落库保存，token 原文落进这类审计字段会造成明文密钥外泄面；哈希已经足够证明"签的是这个 token"，原文只走既有的 `encrypt()` 加密列（不变）。
