@@ -126,17 +126,19 @@
 #     correct when the process ISN'T ours (touching it would be the round-1
 #     mistake). It would violate (2) if a process WE started ever durably landed
 #     here -- round 5 closed the only durable path into that (a launch that never
-#     got ownership confirmed). What remains is a TRANSIENT case: a later
-#     Win32_Process query for an already-owned, already-confirmed PID can itself
-#     fail once (CIM hiccup), reading as UNKNOWN_OR_CONFLICT for that single poll
-#     cycle even though the process is genuinely ours. This is bounded and
-#     self-healing (next $POLL_SEC cycle re-queries and typically re-confirms
-#     OWNED_RUNNING), consistent with this file's existing "unknown != bad, don't
-#     flip-flop on a blip, alert loudly" stance for the DAG probe above -- treating
-#     a single transient miss as "permanently unstoppable" would be a worse
-#     failure mode (killing a healthy miner, or refusing to ever re-evaluate) than
-#     tolerating a brief delay before the brake can act. Documented as an accepted
-#     residual, not a silent gap.
+#     got ownership confirmed). A transient one remained: a later Win32_Process
+#     query for an already-owned, already-confirmed PID could itself fail once
+#     (CIM hiccup), reading as UNKNOWN_OR_CONFLICT for that poll cycle -- Bettor
+#     2026-08-08 14:17 judged this unacceptable specifically because it sits on
+#     the brake's EMERGENCY STOP path (a brake blinded by the same failure mode
+#     it exists to survive is not an acceptable residual there, even a bounded
+#     one) and asked for it closed, not documented. Closed via Test-OwnedByStartTime:
+#     PID + normalized path + StartTime (from plain Get-Process, no CIM needed) is
+#     used as a CIM-free ownership confirmation whenever the CommandLine check
+#     can't run -- PID reuse essentially never reproduces the exact recorded
+#     StartTime, so this is a solid anchor. Only ever used to CONFIRM ownership,
+#     never to weaken CONFIRMED_ABSENT (that still requires the independent
+#     host-wide scan).
 $ErrorActionPreference = 'Continue'
 
 # --- thresholds (hysteresis; see baseline note above) ---
@@ -283,6 +285,21 @@ function Resolve-AbsentOrUnknown([string]$reason) {
   return @{ State = 'CONFIRMED_ABSENT'; Process = $null }
 }
 
+# Bettor 2026-08-08 14:17: the documented residual (an already-owned PID reading
+# as UNKNOWN_OR_CONFLICT for one poll cycle on a transient CIM failure) sits on
+# the brake's STOP path -- an emergency brake that can be blinded by exactly the
+# same failure mode it exists to survive is not an acceptable residual there, even
+# a bounded/self-healing one. CIM-free fallback: PID + normalized exe path +
+# StartTime together are a strong anti-PID-reuse anchor (PID reuse essentially
+# never reproduces the exact same StartTime), available from plain Get-Process
+# without depending on CIM/WMI at all. Only used to CONFIRM ownership when the
+# CommandLine check can't run -- never used to weaken CONFIRMED_ABSENT, which
+# still requires Resolve-AbsentOrUnknown's independent host-wide scan.
+function Test-OwnedByStartTime($proc, $rec) {
+  if (-not $rec.startTimeTicks) { return $false }
+  try { return $proc.StartTime.Ticks -eq [int64]$rec.startTimeTicks } catch { return $false }
+}
+
 function Get-MinerState {
   if (-not (Test-Path $minerPidFile)) { return Resolve-AbsentOrUnknown "no pid file" }
   $raw = Get-Content $minerPidFile -Raw -ErrorAction SilentlyContinue
@@ -296,13 +313,21 @@ function Get-MinerState {
   if (-not (Test-SameExePath $proc.Path)) { return Resolve-AbsentOrUnknown "recorded PID=$($rec.pid) now belongs to a different, non-bridge process (PID recycled)" }
 
   if (-not $rec.commandLine) {
-    Log "Get-MinerState: PID=$($rec.pid) has no recorded commandLine -- UNKNOWN_OR_CONFLICT (a stratum-bridge IS running at this PID/path, cannot confirm it's ours)"
+    if (Test-OwnedByStartTime $proc $rec) {
+      Log "Get-MinerState: PID=$($rec.pid) has no recorded commandLine, but StartTime matches recorded launch -- OWNED_RUNNING (CIM-free confirmation)"
+      return @{ State = 'OWNED_RUNNING'; Process = $proc }
+    }
+    Log "Get-MinerState: PID=$($rec.pid) has no recorded commandLine and StartTime fallback couldn't confirm it either -- UNKNOWN_OR_CONFLICT (a stratum-bridge IS running at this PID/path, cannot confirm it's ours)"
     return @{ State = 'UNKNOWN_OR_CONFLICT'; Process = $proc }
   }
   $currentCmdLine = $null
   try { $currentCmdLine = (Get-CimInstance Win32_Process -Filter "ProcessId=$($rec.pid)" -ErrorAction Stop).CommandLine } catch {}
   if (-not $currentCmdLine) {
-    Log "Get-MinerState: PID=$($rec.pid) CommandLine query failed (transient CIM hiccup?) -- UNKNOWN_OR_CONFLICT, not touching, not starting a second instance"
+    if (Test-OwnedByStartTime $proc $rec) {
+      Log "Get-MinerState: PID=$($rec.pid) CommandLine query failed, but StartTime matches recorded launch -- OWNED_RUNNING (CIM-free fallback confirmation, the brake can still stop this)"
+      return @{ State = 'OWNED_RUNNING'; Process = $proc }
+    }
+    Log "Get-MinerState: PID=$($rec.pid) CommandLine query failed (transient CIM hiccup?) and StartTime fallback couldn't confirm it either -- UNKNOWN_OR_CONFLICT, not touching, not starting a second instance"
     return @{ State = 'UNKNOWN_OR_CONFLICT'; Process = $proc }
   }
   if ($currentCmdLine -ne $rec.commandLine) {
@@ -346,8 +371,16 @@ function Start-Miner {
     Alert "Start-Miner ABORTED: launched PID=$($p.Id) but could not confirm its commandLine after $maxAttempts attempts -- killed it, no miner is running from this attempt. Will retry next loop iteration if still CONFIRMED_ABSENT."
     return
   }
-  (@{ pid = $p.Id; commandLine = $cmdLine } | ConvertTo-Json -Compress) | Out-File $minerPidFile -Encoding utf8
-  Log "Start-Miner: launched PID=$($p.Id), ownership confirmed"
+  # Bettor 2026-08-08 14:17: also capture StartTime (as .Ticks -- a plain int64,
+  # avoids any JSON date-format round-trip ambiguity) so Get-MinerState has a
+  # CIM-free fallback for confirming ownership when a later CommandLine query
+  # fails transiently. This is what lets the brake still stop a miner it started
+  # even on a CIM hiccup, instead of reading UNKNOWN_OR_CONFLICT and refusing to
+  # touch it.
+  $startTimeTicks = $null
+  try { $startTimeTicks = (Get-Process -Id $p.Id -ErrorAction Stop).StartTime.Ticks } catch {}
+  (@{ pid = $p.Id; commandLine = $cmdLine; startTimeTicks = $startTimeTicks } | ConvertTo-Json -Compress) | Out-File $minerPidFile -Encoding utf8
+  Log "Start-Miner: launched PID=$($p.Id), ownership confirmed (startTime-recorded=$([bool]$startTimeTicks))"
 }
 
 function Stop-Miner {
