@@ -99,46 +99,58 @@
 # also finds nothing at $bridgeExe anywhere -> CONFIRMED_ABSENT, restarts normally.
 #
 # ---------------------------------------------------------------------------
-# TWO INVARIANTS (Bettor 2026-08-08 14:11 -- every round-1-through-5 finding was
-# one of these two violated somewhere; self-certified here per state transition,
-# not just patched at the one spot each round's finding pointed at)
+# TWO INVARIANTS (Bettor 2026-08-08 14:11, upgraded 15:22 -- every round-1-through-6
+# finding was one of these two violated somewhere; self-certified here per state
+# transition, not just patched at the one spot each round's finding pointed at)
 # ---------------------------------------------------------------------------
 # (1) NEVER start a duplicate miner.
 # (2) ALWAYS be able to stop a miner this breaker itself started.
+# 🔴 Round 6 correction (Codex found a CORE-BREAK in the actual brake, Bettor
+# 15:22): the round-5 self-certification below checked STATE REACHABILITY --
+# "does the code only attempt to stop/start when the state permits it" -- but not
+# ACTION EFFICACY -- "did the stop/start actually work". Stop-Miner used to fire
+# Stop-Process, unconditionally log "stopped", and delete the ownership record
+# with no check that the process was actually gone; a silent kill failure meant a
+# FALSE report of invariant (2) holding while the miner kept running, now
+# untracked and permanently unstoppable. Every action point below is now verified,
+# not just reachability-gated:
 # Start (Start-Miner, reached only via Start-Miner-Unless-Paused):
 #   - Unless-Paused only calls Start-Miner when Get-MinerState = CONFIRMED_ABSENT,
 #     itself only reachable when either the tracked PID is independently proven
 #     gone AND a host-wide scan independently proves nothing else is running at
 #     $bridgeExe, or that scan is what concluded absence in the first place ->
 #     satisfies (1): nothing already running when we launch.
-#   - Start-Miner does not return successfully until it has re-read the live
-#     commandLine for the PID it just launched and persisted it; on failure it
-#     kills what it just started instead of leaving it running unconfirmed ->
-#     satisfies (2): a successful Start-Miner return means Get-MinerState will
-#     read OWNED_RUNNING next check, and Stop-Miner can act on it.
+#   - Efficacy: Start-Miner does not return "successful" until it has re-read the
+#     LIVE commandLine for the PID it just launched via a fresh query (which can
+#     only succeed against a genuinely running process) and persisted it; on
+#     failure it kills what it just started (itself now verified, see below)
+#     instead of leaving it running unconfirmed -> satisfies (2): a successful
+#     Start-Miner return means Get-MinerState will read OWNED_RUNNING next check.
 # Stop (Stop-Miner, reached from brake-engage/brake-hold, and the exercise-mode
 # exit path resumes rather than stops so it doesn't apply here):
-#   - Only ever kills a process when Get-MinerState = OWNED_RUNNING (positively
-#     identified via PID + normalized path + matching commandLine) -> can't
-#     violate (1) (stopping isn't starting) and satisfies (2) whenever ownership
-#     is currently confirmable.
+#   - Only ever attempts to kill a process when Get-MinerState = OWNED_RUNNING
+#     (positively identified via PID + normalized path + matching commandLine or
+#     the StartTime fallback) -> can't violate (1) (stopping isn't starting).
+#   - Efficacy (round 6 fix): the kill is followed by a Get-Process re-check.
+#     Confirmed gone -> log success, clear the pid file. NOT confirmed gone ->
+#     the pid file is left AS-IS (state stays OWNED_RUNNING, which is still an
+#     accurate read -- the process really is still alive), no success is
+#     reported, and the next loop iteration retries the stop instead of the
+#     breaker silently believing it already won.
 #   - UNKNOWN_OR_CONFLICT: Stop-Miner deliberately does not touch it. This is
 #     correct when the process ISN'T ours (touching it would be the round-1
 #     mistake). It would violate (2) if a process WE started ever durably landed
 #     here -- round 5 closed the only durable path into that (a launch that never
-#     got ownership confirmed). A transient one remained: a later Win32_Process
-#     query for an already-owned, already-confirmed PID could itself fail once
-#     (CIM hiccup), reading as UNKNOWN_OR_CONFLICT for that poll cycle -- Bettor
-#     2026-08-08 14:17 judged this unacceptable specifically because it sits on
-#     the brake's EMERGENCY STOP path (a brake blinded by the same failure mode
-#     it exists to survive is not an acceptable residual there, even a bounded
-#     one) and asked for it closed, not documented. Closed via Test-OwnedByStartTime:
-#     PID + normalized path + StartTime (from plain Get-Process, no CIM needed) is
-#     used as a CIM-free ownership confirmation whenever the CommandLine check
-#     can't run -- PID reuse essentially never reproduces the exact recorded
-#     StartTime, so this is a solid anchor. Only ever used to CONFIRM ownership,
-#     never to weaken CONFIRMED_ABSENT (that still requires the independent
-#     host-wide scan).
+#     got ownership confirmed), and round 6's Test-OwnedByStartTime closes the
+#     remaining transient/persistent CIM-failure path (PID + normalized path +
+#     StartTime, from plain Get-Process, is used as a CIM-free ownership
+#     confirmation whenever the CommandLine check can't run). Only ever used to
+#     CONFIRM ownership, never to weaken CONFIRMED_ABSENT (that still requires the
+#     independent host-wide scan).
+# Start-Miner's own abort-kill path (established ownership fails after launch,
+# see below) got the same efficacy check first (dbd5f4b1) -- round 6 mirrors it
+# to the primary Stop-Miner path, which is the one that actually matters for the
+# brake's core job.
 $ErrorActionPreference = 'Continue'
 
 # --- thresholds (hysteresis; see baseline note above) ---
@@ -398,12 +410,34 @@ function Start-Miner {
   Log "Start-Miner: launched PID=$($p.Id), ownership confirmed (startTime-recorded=$([bool]$startTimeTicks))"
 }
 
+# Codex 2026-08-08 round 6 MUST-FIX (CORE-BREAK, on the actual brake -- Bettor
+# 15:22, self-certification round 6 had checked state REACHABILITY (only acts on
+# OWNED_RUNNING) but not ACTION EFFICACY (did the stop actually work). A silent
+# Stop-Process failure here used to report a false "stopped" AND delete the
+# ownership record -- the brake would believe the death spiral was contained while
+# the miner it thought it killed kept running, now untracked and permanently
+# unstoppable by this automation. This is the same verify-the-kill pattern round
+# 5's abort-kill path already got (dbd5f4b1) -- it had not been mirrored here, the
+# actual primary stop path, which is the one that matters most.
 function Stop-Miner {
   $s = Get-MinerState
   if ($s.State -eq 'OWNED_RUNNING') {
-    Stop-Process -Id $s.Process.Id -Force -Confirm:$false -ErrorAction SilentlyContinue
-    Log "Stop-Miner: stopped owned PID=$($s.Process.Id)"
-    Remove-Item $minerPidFile -ErrorAction SilentlyContinue
+    $stopVerified = $false
+    try {
+      Stop-Process -Id $s.Process.Id -Force -Confirm:$false -ErrorAction Stop
+      Start-Sleep -Milliseconds 200
+      $stopVerified = -not (Get-Process -Id $s.Process.Id -ErrorAction SilentlyContinue)
+    } catch {}
+    if ($stopVerified) {
+      Log "Stop-Miner: stopped owned PID=$($s.Process.Id) (verified gone)"
+      Remove-Item $minerPidFile -ErrorAction SilentlyContinue
+    } else {
+      # Do NOT delete the pid file and do NOT report success -- leave the state
+      # as OWNED_RUNNING (the record is still accurate, the process is still
+      # alive) so the next loop iteration re-attempts the stop instead of
+      # silently believing the brake engaged.
+      Alert "Stop-Miner FAILED to stop owned PID=$($s.Process.Id) -- kill attempt did not confirm the process is gone. Miner may still be running. NOT marking as stopped, NOT clearing ownership record -- will retry next cycle. Needs operator look if this repeats."
+    }
   } elseif ($s.State -eq 'UNKNOWN_OR_CONFLICT') {
     Log "Stop-Miner: state UNKNOWN_OR_CONFLICT -- not touching (cannot confirm ownership); pid file left as-is for operator inspection"
   } else {
