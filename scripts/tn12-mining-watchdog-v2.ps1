@@ -104,17 +104,42 @@ function Get-Tips {
   } catch { return $null }
 }
 
-# Codex 2026-08-08 Finding 3: matching by process NAME kills/misses across instances --
-# a different stratum-bridge we don't own reads as "healthy" while our target is dead,
-# or gets killed by mistake. Track the PID we actually launched and verify identity
-# (exe path) before trusting or touching anything -- never act on the name alone.
+# Codex 2026-08-08 Finding 3 (round 1): matching by process NAME kills/misses across
+# instances -- a different stratum-bridge we don't own reads as "healthy" while our
+# target is dead, or gets killed by mistake. Track the PID we actually launched and
+# verify identity before trusting or touching anything -- never act on the name alone.
+#
+# Codex 2026-08-08 round 2 MUST-FIX: PID + exe path alone is still not identity.
+# Two stratum-bridge processes at the SAME exe path but launched with different
+# --config/--kaspad-address/--internal-cpu-miner-threads (someone else's manual
+# run, a leftover from a prior deploy, or an ordinary PID-reuse collision after our
+# instance exited) satisfy "PID matches, .Path matches" without being the instance
+# we started. $minerPidFile now records the exact command line captured at OUR
+# Start-Miner call; ownership requires that recorded command line to match the
+# CURRENT command line running at that PID, not just the PID number and exe path.
+# No commandLine on record, or a query failure, or a mismatch -> not owned (fail
+# closed, per the project's "deny 绝不 fail-open" convention -- an unconfirmed
+# process must never be treated as ours to stop, and an unconfirmed absence must
+# never suppress a legitimate Start-Miner).
 function Get-OwnedMinerProcess {
   if (-not (Test-Path $minerPidFile)) { return $null }
-  $savedPid = Get-Content $minerPidFile -ErrorAction SilentlyContinue
-  if (-not $savedPid) { return $null }
-  $proc = Get-Process -Id $savedPid -ErrorAction SilentlyContinue
+  $raw = Get-Content $minerPidFile -Raw -ErrorAction SilentlyContinue
+  if (-not $raw) { return $null }
+  try { $rec = $raw | ConvertFrom-Json } catch { Log "Get-OwnedMinerProcess: pid file unparsable -- treating as not owned"; return $null }
+  if (-not $rec.pid) { return $null }
+  $proc = Get-Process -Id $rec.pid -ErrorAction SilentlyContinue
   if (-not $proc) { return $null }
   if ($proc.Path -ne $bridgeExe) { return $null }  # PID reuse landed on an unrelated process
+  if (-not $rec.commandLine) {
+    Log "Get-OwnedMinerProcess: PID=$($rec.pid) has no recorded commandLine -- cannot confirm identity, treating as not owned"
+    return $null
+  }
+  $currentCmdLine = $null
+  try { $currentCmdLine = (Get-CimInstance Win32_Process -Filter "ProcessId=$($rec.pid)" -ErrorAction Stop).CommandLine } catch {}
+  if ($currentCmdLine -ne $rec.commandLine) {
+    Log "Get-OwnedMinerProcess: PID=$($rec.pid) commandLine mismatch (PID reuse or an unrelated stratum-bridge instance at the same path) -- not touching it"
+    return $null
+  }
   return $proc
 }
 
@@ -125,8 +150,16 @@ function Start-Miner {
   $p = Start-Process -FilePath $bridgeExe -ArgumentList $bridgeArgs -WorkingDirectory (Split-Path $bridgeExe) `
     -RedirectStandardOutput "D:\kaspa-tn12-mining\_bridge_tn12.log" `
     -RedirectStandardError  "D:\kaspa-tn12-mining\_bridge_tn12_err.log" -WindowStyle Hidden -PassThru
-  $p.Id | Out-File $minerPidFile -Encoding ascii
-  Log "Start-Miner: launched PID=$($p.Id)"
+  # Record the exact command line the OS sees for this PID right now, not $bridgeArgs
+  # verbatim -- Win32_Process's CommandLine is what Get-OwnedMinerProcess will compare
+  # against later, so the recorded value must come from the same source it will be
+  # checked against (quoting/exe-path formatting can differ between the two).
+  Start-Sleep -Milliseconds 200
+  $cmdLine = $null
+  try { $cmdLine = (Get-CimInstance Win32_Process -Filter "ProcessId=$($p.Id)" -ErrorAction Stop).CommandLine } catch {}
+  if (-not $cmdLine) { Log "Start-Miner: WARNING could not read back commandLine for PID=$($p.Id) -- ownership checks will fail closed (treat as not-owned) until next successful start" }
+  (@{ pid = $p.Id; commandLine = $cmdLine } | ConvertTo-Json -Compress) | Out-File $minerPidFile -Encoding utf8
+  Log "Start-Miner: launched PID=$($p.Id) commandLine-recorded=$([bool]$cmdLine)"
 }
 
 function Stop-Miner {
