@@ -190,15 +190,31 @@ function Get-Tips {
 # "ours" for the purpose of STOPPING or claiming ownership; here a match only ever
 # pushes the verdict toward the cautious UNKNOWN_OR_CONFLICT, never toward trusting
 # it as owned. Absence of a match is what earns CONFIRMED_ABSENT.
+# Bettor 2026-08-08 13:18 MUST-FIX: the scan Resolve-AbsentOrUnknown leans on needs
+# its own verification -- an empty result has two causes (genuinely scanned and
+# found nothing / the scan itself failed to run), same shape as every other
+# absence-has-two-causes case in this file. -ErrorAction Stop promotes ANY
+# enumeration failure (not just individual per-process access errors) to a
+# terminating error we catch, so a partial/failed scan is never silently read as
+# "confirmed empty."
 function Get-AnyBridgeInstance {
-  Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $bridgeExe } | Select-Object -First 1
+  try {
+    $procs = Get-Process -ErrorAction Stop
+  } catch {
+    return @{ Ok = $false; Process = $null }
+  }
+  return @{ Ok = $true; Process = ($procs | Where-Object { $_.Path -eq $bridgeExe } | Select-Object -First 1) }
 }
 
 function Resolve-AbsentOrUnknown([string]$reason) {
-  $any = Get-AnyBridgeInstance
-  if ($any) {
-    Log "Get-MinerState: $reason, but a stratum-bridge process IS running at $bridgeExe (PID=$($any.Id)) -- UNKNOWN_OR_CONFLICT, cannot confirm ownership"
-    return @{ State = 'UNKNOWN_OR_CONFLICT'; Process = $any }
+  $scan = Get-AnyBridgeInstance
+  if (-not $scan.Ok) {
+    Log "Get-MinerState: $reason, and the independent host-wide scan itself failed -- cannot confirm either way -- UNKNOWN_OR_CONFLICT"
+    return @{ State = 'UNKNOWN_OR_CONFLICT'; Process = $null }
+  }
+  if ($scan.Process) {
+    Log "Get-MinerState: $reason, but a stratum-bridge process IS running at $bridgeExe (PID=$($scan.Process.Id)) -- UNKNOWN_OR_CONFLICT, cannot confirm ownership"
+    return @{ State = 'UNKNOWN_OR_CONFLICT'; Process = $scan.Process }
   }
   Log "Get-MinerState: $reason, and independently confirmed no process at $bridgeExe anywhere on the host -- CONFIRMED_ABSENT"
   return @{ State = 'CONFIRMED_ABSENT'; Process = $null }
