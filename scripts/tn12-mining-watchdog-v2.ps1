@@ -58,7 +58,7 @@
 # So: unknown -> keep mining + alert. Known-bad -> brake. Known-good -> mine.
 #
 # ---------------------------------------------------------------------------
-# MINER IDENTITY IS THREE-VALUED, NOT BOOLEAN (Codex 2026-08-08 round 3 MUST-FIX)
+# MINER IDENTITY IS THREE-VALUED, NOT BOOLEAN (Codex 2026-08-08 rounds 3+4 MUST-FIX)
 # ---------------------------------------------------------------------------
 # Get-MinerState returns OWNED_RUNNING / CONFIRMED_ABSENT / UNKNOWN_OR_CONFLICT,
 # not a boolean. A round-2 fix made the STOP path safe (never touch a process you
@@ -68,23 +68,35 @@
 # SECOND miner, reproducing the exact death spiral this breaker exists to prevent.
 # Same lesson as the DAG-probe section above: an absent positive reading has two
 # causes (genuinely gone vs. can't tell), and only one of them is safe to act on.
+# Round 3 introduced the three states but round 4 caught that CONFIRMED_ABSENT was
+# still reachable from missing/empty/unparsable pid-file metadata alone -- that's
+# absence of OUR bookkeeping, not proof the process is gone. Resolve-AbsentOrUnknown
+# is the fix: CONFIRMED_ABSENT now requires an independent host-wide scan for any
+# process at $bridgeExe to come back empty; a match (tracked or not) always yields
+# UNKNOWN_OR_CONFLICT instead. This uses path-matching differently from what round
+# 1 rejected: round 1's Finding 3 was about trusting a name/path match AS ownership
+# (for stopping/restarting); here a match only ever pushes toward the cautious
+# state, never toward trusting it as owned.
 # Start-Miner-Unless-Paused is the single choke point all 4 auto-start call sites
 # go through -- it only starts on CONFIRMED_ABSENT, no-ops silently on
 # OWNED_RUNNING, and Alerts without starting on UNKNOWN_OR_CONFLICT (this is also
 # the "stale/corrupt pid-file metadata needs an explicit operator look, not a
-# silent auto-start" requirement -- an unparsable pid file is UNKNOWN_OR_CONFLICT).
-# Five scenarios this must get right (traced by hand; no PS test harness exists for
-# this script, verification is manual code trace + will be exercised live once
-# deployed): (1) CIM query fails transiently while the real miner is alive -> no
-# recorded commandLine changes, but Win32_Process query throws -> UNKNOWN_OR_CONFLICT,
-# no second miner. (2) commandLine unreadable (recorded null, e.g. Start-Miner's own
-# readback failed) -> UNKNOWN_OR_CONFLICT. (3) PID reuse, an unrelated (non-bridge)
-# process now owns that PID -> .Path mismatch -> CONFIRMED_ABSENT, safe to start.
-# (4) pid file missing/corrupt while a real miner happens to be running untracked
-# -> UNKNOWN_OR_CONFLICT (cannot prove absence without name-matching, which round 1
-# already rejected as unsafe) -- accepted limitation, strictly safer than fail-open.
-# (5) normal case, miner genuinely exited, pid file intact and consistent -> Get-Process
-# returns nothing for that PID -> CONFIRMED_ABSENT, restarts normally.
+# silent auto-start" requirement).
+# Scenarios this must get right (traced by hand; no PS test harness exists for this
+# script, verification is manual code trace + will be exercised live once deployed):
+# (1) CIM query fails transiently while the real miner is alive -> recorded PID
+# matches path but Win32_Process query throws -> UNKNOWN_OR_CONFLICT, no second
+# miner. (2) commandLine unreadable (recorded null, e.g. Start-Miner's own readback
+# failed) -> UNKNOWN_OR_CONFLICT. (3) PID reuse, an unrelated (non-bridge) process
+# now owns that PID, AND no other stratum-bridge is running anywhere on the host ->
+# CONFIRMED_ABSENT (independently verified), safe to start. (3b) same PID reuse, but
+# a stratum-bridge IS running under some other PID -> UNKNOWN_OR_CONFLICT, not
+# CONFIRMED_ABSENT (round 4's fix -- round 3 would have missed this). (4) pid file
+# missing/corrupt while a real miner happens to be running untracked -> the
+# independent scan finds it -> UNKNOWN_OR_CONFLICT, not a silent auto-start (round
+# 4's core fix; round 3 would have wrongly returned CONFIRMED_ABSENT here). (5)
+# normal case, miner genuinely exited, pid file intact, and the independent scan
+# also finds nothing at $bridgeExe anywhere -> CONFIRMED_ABSENT, restarts normally.
 $ErrorActionPreference = 'Continue'
 
 # --- thresholds (hysteresis; see baseline note above) ---
@@ -163,19 +175,47 @@ function Get-Tips {
 # gone vs can't tell) and they demand opposite actions on the start path, even
 # though round 2 correctly treated them the same way on the stop path (don't touch
 # what you can't confirm).
-function Get-MinerState {
-  if (-not (Test-Path $minerPidFile)) { return @{ State = 'CONFIRMED_ABSENT'; Process = $null } }
-  $raw = Get-Content $minerPidFile -Raw -ErrorAction SilentlyContinue
-  if (-not $raw) { return @{ State = 'CONFIRMED_ABSENT'; Process = $null } }
-  $rec = $null
-  try { $rec = $raw | ConvertFrom-Json } catch {
-    Log "Get-MinerState: pid file unparsable -- UNKNOWN_OR_CONFLICT (needs operator look at $minerPidFile before this will auto-start again)"
-    return @{ State = 'UNKNOWN_OR_CONFLICT'; Process = $null }
+# Codex 2026-08-08 round 4 MUST-FIX: round 3 still let CONFIRMED_ABSENT be reached
+# from missing/empty/unparsable pid-file metadata alone. That's an absence of OUR
+# OWN BOOKKEEPING, not a positive proof the process is gone -- the pid file could
+# have been deleted or truncated externally, or lost across a watchdog restart,
+# while a miner we actually started keeps running under a PID we no longer have on
+# record. Every prior branch that concluded CONFIRMED_ABSENT from "no metadata"
+# was the same fail-open shape round 3 just fixed for the tracked-PID case, just
+# one layer up: "no evidence of X" collapsed into "X is false" instead of "unknown
+# whether X". Fix: CONFIRMED_ABSENT now requires an INDEPENDENT positive check --
+# scanning all running processes for anything at $bridgeExe -- before it can be
+# concluded from missing metadata. This is a different use of path-matching than
+# round 1 rejected: round 1's Finding 3 was about treating a name/path match as
+# "ours" for the purpose of STOPPING or claiming ownership; here a match only ever
+# pushes the verdict toward the cautious UNKNOWN_OR_CONFLICT, never toward trusting
+# it as owned. Absence of a match is what earns CONFIRMED_ABSENT.
+function Get-AnyBridgeInstance {
+  Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $bridgeExe } | Select-Object -First 1
+}
+
+function Resolve-AbsentOrUnknown([string]$reason) {
+  $any = Get-AnyBridgeInstance
+  if ($any) {
+    Log "Get-MinerState: $reason, but a stratum-bridge process IS running at $bridgeExe (PID=$($any.Id)) -- UNKNOWN_OR_CONFLICT, cannot confirm ownership"
+    return @{ State = 'UNKNOWN_OR_CONFLICT'; Process = $any }
   }
-  if (-not $rec.pid) { return @{ State = 'CONFIRMED_ABSENT'; Process = $null } }
+  Log "Get-MinerState: $reason, and independently confirmed no process at $bridgeExe anywhere on the host -- CONFIRMED_ABSENT"
+  return @{ State = 'CONFIRMED_ABSENT'; Process = $null }
+}
+
+function Get-MinerState {
+  if (-not (Test-Path $minerPidFile)) { return Resolve-AbsentOrUnknown "no pid file" }
+  $raw = Get-Content $minerPidFile -Raw -ErrorAction SilentlyContinue
+  if (-not $raw) { return Resolve-AbsentOrUnknown "pid file empty/unreadable" }
+  $rec = $null
+  try { $rec = $raw | ConvertFrom-Json } catch { return Resolve-AbsentOrUnknown "pid file unparsable" }
+  if (-not $rec.pid) { return Resolve-AbsentOrUnknown "pid file has no pid field" }
+
   $proc = Get-Process -Id $rec.pid -ErrorAction SilentlyContinue
-  if (-not $proc) { return @{ State = 'CONFIRMED_ABSENT'; Process = $null } }  # OS-level fact: nothing runs at that PID
-  if ($proc.Path -ne $bridgeExe) { return @{ State = 'CONFIRMED_ABSENT'; Process = $null } }  # that PID isn't any stratum-bridge -- ours is gone, PID recycled
+  if (-not $proc) { return Resolve-AbsentOrUnknown "recorded PID=$($rec.pid) is not running" }
+  if ($proc.Path -ne $bridgeExe) { return Resolve-AbsentOrUnknown "recorded PID=$($rec.pid) now belongs to a different, non-bridge process (PID recycled)" }
+
   if (-not $rec.commandLine) {
     Log "Get-MinerState: PID=$($rec.pid) has no recorded commandLine -- UNKNOWN_OR_CONFLICT (a stratum-bridge IS running at this PID/path, cannot confirm it's ours)"
     return @{ State = 'UNKNOWN_OR_CONFLICT'; Process = $proc }
