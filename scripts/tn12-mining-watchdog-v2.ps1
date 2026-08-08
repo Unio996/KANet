@@ -3,6 +3,23 @@
 # Replaces: tn12-mining-watchdog.ps1 (kept intact at .v1.bak -- v1 had keepalive only).
 #
 # ---------------------------------------------------------------------------
+# DEPLOYMENT SEQUENCE (NWT 2026-08-08 10:17Z -- read this before (re)deploying)
+# ---------------------------------------------------------------------------
+# This revision introduces $minerPidFile, which no process running under the
+# OLD script has ever written. Dropping this file in place and letting the
+# old watchdog loop "pick up" the new code on its next iteration does NOT
+# work -- the old loop is still running the old functions until it's killed,
+# and the old Get-Process -Name matching would see whatever the new script
+# starts too. If both scripts are ever running at once, or if the new script
+# starts while an old, unmanaged stratum-bridge is still alive, the new
+# watchdog reads "no owned instance" and launches a SECOND miner: two
+# processes mining at once, doubling production rate -- the exact failure
+# mode this circuit breaker exists to prevent.
+# Deploy = stop the old watchdog process AND any running stratum-bridge
+# process, confirm clean (no stratum-bridge in the process list), THEN start
+# this script. Never deploy by just replacing the .ps1 file in place.
+#
+# ---------------------------------------------------------------------------
 # WHAT BROKE (read this before changing any threshold)
 # ---------------------------------------------------------------------------
 # Two sync gates are deliberately disabled so TN12 can bootstrap and not halt:
@@ -65,6 +82,7 @@ $probe       = "D:\kaspa-tn12-mining\tn12-dag-health-probe.mjs"
 $wlog        = "D:\kaspa-tn12-mining\_watchdog.log"
 $alertFile   = "D:\kaspa-tn12-mining\_DAG_ALERT.txt"   # deliberately NOT over Kaspa
 $minerPidFile = "D:\kaspa-tn12-mining\_watchdog_miner.pid"
+$pausedFile   = "D:\kaspa-tn12-mining\_MINER_PAUSED.txt"
 
 function Log($m) { "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') $m" | Out-File $wlog -Append -Encoding UTF8 }
 
@@ -122,6 +140,22 @@ function Stop-Miner {
   Remove-Item $minerPidFile -ErrorAction SilentlyContinue
 }
 
+# Bettor 2026-08-08 10:17Z: PID tracking cannot express "operator deliberately
+# stopped this" -- and that IS the reason the brake exists (the incident's own
+# fix was "stop mining"; auto-reviving fights the emergency stop). The tips
+# brake and this sentinel are deliberately two different mechanisms:
+#   - tips brake: automatic, self-resuming, never touches $pausedFile
+#   - $pausedFile: only a human creates/removes it, and it overrides everything
+# Every call site that would otherwise call Start-Miner must go through this,
+# not call Start-Miner directly.
+function Start-Miner-Unless-Paused {
+  if (Test-Path $pausedFile) {
+    Log "Start-Miner skipped: $pausedFile present (operator pause) -- remove that file to allow mining again"
+    return
+  }
+  Start-Miner
+}
+
 $braked      = $false
 $probeFails  = 0
 $round       = 0
@@ -131,7 +165,7 @@ while ($true) {
   $round++
   if ($MAX_ROUNDS -gt 0 -and $round -gt $MAX_ROUNDS) {
     # Bounded run (brake-exercise mode). Never leave the miner braked on exit.
-    if ($braked) { Log "maxRounds reached while braked -> restarting miner before exit"; Start-Miner }
+    if ($braked) { Log "maxRounds reached while braked -> restarting miner before exit"; Start-Miner-Unless-Paused }
     Log "watchdog v2 exiting after $MAX_ROUNDS rounds (exercise mode)"
     break
   }
@@ -143,7 +177,7 @@ while ($true) {
     if ($probeFails -eq 1 -or $probeFails % 20 -eq 0) {
       Alert "DAG probe unreadable x$probeFails -- mining left AS-IS (unknown != bad). Check node RPC / probe at $probe"
     }
-    if (-not $braked -and -not (Miner-Running)) { Log "bridge DEAD -> starting (probe blind)"; Start-Miner }
+    if (-not $braked -and -not (Miner-Running)) { Log "bridge DEAD -> starting (probe blind)"; Start-Miner-Unless-Paused }
     Start-Sleep -Seconds $POLL_SEC
     continue
   }
@@ -158,14 +192,14 @@ while ($true) {
   elseif ($braked -and $tips -lt $TIPS_RESUME) {
     $braked = $false
     Alert "BRAKE RELEASED: tips=$tips < $TIPS_RESUME. Resuming mining."
-    Start-Miner
+    Start-Miner-Unless-Paused
   }
   elseif ($braked) {
     Stop-Miner   # hold the brake; nothing else may resurrect the miner meanwhile
     Log "braked, waiting to digest (tips=$tips, need <$TIPS_RESUME)"
   }
   else {
-    if (-not (Miner-Running)) { Log "bridge DEAD -> starting (tips=$tips)"; Start-Miner }
+    if (-not (Miner-Running)) { Log "bridge DEAD -> starting (tips=$tips)"; Start-Miner-Unless-Paused }
   }
 
   Start-Sleep -Seconds $POLL_SEC
