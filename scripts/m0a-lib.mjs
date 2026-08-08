@@ -129,6 +129,7 @@ export const TEST_FIXTURE_WRITER_ALLOWLIST = new Set([
 export const TEST_FIXTURE_RELAY_SINK_CAP = 'm0c1-test-fixture-relay-sink';
 export const TEST_FIXTURE_RELAY_SINK_ALLOWLIST = new Set([
   'kasia-console/test-framework/cases/predictions/pool/p5_positive_via_fake_relay_sink.test.mjs', // ⑤(d) 阳性臂, 假 relay sink 隔离测试(J2, NWT 审 2026-08-08)
+  'kasia-console/test-framework/cases/predictions/pool/precond4_handler_zero_sign_calls.test.mjs', // D-012 前置④, handler 七场景零签名调用测量(J2, NWT 审 2026-08-09, 与 p5 同机制不同命题故分文件锚)
 ]);
 const TEST_FRAMEWORK_PATH_PREFIX = 'kasia-console/test-framework/';
 const LIVE_CONSOLE_DB_PATH_LITERAL = /kasia-console\/data\/console\.db|kasia-console[\\/]data[\\/]console\.db/;

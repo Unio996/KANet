@@ -1,0 +1,77 @@
+{
+ "version": 0,
+ "inputs": [
+  {
+   "previousOutpoint": {
+    "transactionId": "eec3f29976c0ab9f206042d27b9beed3c1f8c8b28b95c2937e1325babc888dd9",
+    "index": 0
+   },
+   "signatureScript": "",
+   "sequence": "0",
+   "sigOpCount": 8,
+   "utxo": {
+    "entry": {
+     "address": {
+      "version": "ScriptHash",
+      "prefix": "kaspatest",
+      "payload": "pqkm7gm2grehpx82rf9x5lx48yndwwz9m2k9q3khdu9j9urmsxyfusp7gqlhj"
+     },
+     "outpoint": {
+      "transactionId": "eec3f29976c0ab9f206042d27b9beed3c1f8c8b28b95c2937e1325babc888dd9",
+      "index": 0
+     },
+     "amount": "10000000000",
+     "scriptPublicKey": {
+      "version": 0,
+      "script": "aa202dbf236a40f37098ea1a4a6a7cd53926d73845daac5046d76f0b22f07b81889e87"
+     },
+     "blockDaaScore": "26207849",
+     "isCoinbase": false
+    },
+    "outpoint": {
+     "transactionId": "eec3f29976c0ab9f206042d27b9beed3c1f8c8b28b95c2937e1325babc888dd9",
+     "index": 0
+    },
+    "address": {
+     "version": "ScriptHash",
+     "prefix": "kaspatest",
+     "payload": "pqkm7gm2grehpx82rf9x5lx48yndwwz9m2k9q3khdu9j9urmsxyfusp7gqlhj"
+    },
+    "amount": "10000000000",
+    "isCoinbase": false,
+    "blockDaaScore": "26207849",
+    "scriptPublicKey": {
+     "version": 0,
+     "script": "aa202dbf236a40f37098ea1a4a6a7cd53926d73845daac5046d76f0b22f07b81889e87"
+    }
+   }
+  }
+ ],
+ "outputs": [
+  {
+   "value": "5000000",
+   "scriptPublicKey": {
+    "version": 0,
+    "script": "2020f208b765fe9d61e50e68231cb851c725e6637189df4ba0ef5213a814d81fb6ac"
+   }
+  },
+  {
+   "value": "1000390000",
+   "scriptPublicKey": {
+    "version": 0,
+    "script": "207212edc7dc7de937adb961d76299c2cadd32ece322361aeafaf830d0e7fe6579ac"
+   }
+  },
+  {
+   "value": "1000390000",
+   "scriptPublicKey": {
+    "version": 0,
+    "script": "204a355a772446add9a98f92344059f36878b0d841e7d508aa27bc4ffe2d3a57b1ac"
+   }
+  }
+ ],
+ "lockTime": "0",
+ "gas": "0",
+ "subnetworkId": "0000000000000000000000000000000000000000",
+ "payload": ""
+}

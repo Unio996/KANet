@@ -64,9 +64,25 @@ process.on('message', (msg) => {
       });
       break;
 
+    case 'sign_input_for_settle':
+      // 🔴 前置④ 要数的就是这条命令。sink 无论认不认都会 record(), 但认它可以让
+      //    handler 走完整条成功路径, 从而把"该签的场景确实签了 N 次"测准。
+      //    返回的签名是【显式伪造】的: 带 __FAKE_SINK_NOT_A_REAL_SIGNATURE__, 任何人 dump 到都看得出。
+      reply({ ok: true, signature: '00'.repeat(64), __FAKE_SINK_NOT_A_REAL_SIGNATURE__: true, __fake_sink_sentinel: SENTINEL });
+      break;
+
     case 'get_pubkey':
-      // 备用探针路(若裁定保留"先探针后断言"的时间序)。实 relay 回 {ok,pubkey}, 无此 key。
-      reply({ ok: true, __fake_sink_sentinel: SENTINEL });
+      // 两个用途, 都保留哨兵(实 relay 回 {ok,pubkey}, 永远没有 __fake_sink_sentinel 这个 key):
+      //  ① 备用探针路(⑤(d) 用不到, 但留着);
+      //  ② 🔴 前置④ handler 级用例【必须】用到 —— `handlePoolOracleTxSignReq` 是经 IPC 问 relay 要
+      //     公钥的(`trade-protocol-filter.js:594` `sendCommandAsync(oracle.id,{type:'get_pubkey'})`),
+      //     拿不到 `x_only_pubkey` 就 `continue` 跳过该 oracle ⇒ 永远走不到签名循环 ⇒ "零签名调用"
+      //     会因为【根本没跑到】而恒真。要让那条断言有判别力, sink 必须能回一个落在 committee_pks
+      //     里的公钥。⇒ 由 env 传入, 不写死。
+      //  ⚠ 附加而非改写: 未设 env 时行为与原来【逐字节相同】(只有哨兵), 故不影响已过审的 ⑤(d) 用例。
+      reply(process.env.FAKE_SINK_XONLY_PUBKEY
+        ? { ok: true, x_only_pubkey: process.env.FAKE_SINK_XONLY_PUBKEY, __fake_sink_sentinel: SENTINEL }
+        : { ok: true, __fake_sink_sentinel: SENTINEL });
       break;
 
     default:
