@@ -151,6 +151,25 @@
 # see below) got the same efficacy check first (dbd5f4b1) -- round 6 mirrors it
 # to the primary Stop-Miner path, which is the one that actually matters for the
 # brake's core job.
+# 🔴 Round 7 correction (Bettor 2026-08-08 16:11 -- the enumeration of "action
+# points" itself was incomplete, not the fixes): rounds 5-6 verified three PROCESS
+# actions (launch, abort-kill, main-stop) but missed a fourth action this
+# invariant also depends on -- PERSISTING the ownership record. Start-Miner used
+# to write the pid file with a plain Out-File and no read-back; a failed or
+# truncated write there would leave a genuinely-running, in-memory-confirmed
+# miner with no durable record to reconstruct OWNED_RUNNING from on the next
+# poll -- and unlike a transient CIM hiccup, this failure does NOT self-heal
+# (Start-Miner doesn't get called again just because the file write failed).
+# Fixed: write to a temp file in the same directory (Move-Item into place is a
+# same-volume rename, effectively atomic, not copy+delete) then read the
+# destination back and verify it parses to the exact pid/commandLine just
+# written. A write that can't be verified aborts the launch via the same
+# Kill-AndVerify path as the commandLine-readback failure above -- persistence
+# is now a fourth verified action point alongside launch/abort-kill/main-stop.
+# The complete action-point set as of round 7: {launch, persist ownership,
+# stop/kill, read ownership (Get-MinerState, verified continuously by
+# construction since every branch either positively confirms or explicitly
+# returns UNKNOWN_OR_CONFLICT)}.
 $ErrorActionPreference = 'Continue'
 
 # --- thresholds (hysteresis; see baseline note above) ---
@@ -349,6 +368,22 @@ function Get-MinerState {
   return @{ State = 'OWNED_RUNNING'; Process = $proc }
 }
 
+# Shared by every kill path (Start-Miner's abort-kill and Stop-Miner's main
+# stop): -ErrorAction Stop + a post-kill Get-Process re-check so a failed
+# Stop-Process is never silently treated as success. Not trying to guarantee an
+# orphan is eliminated (a kill that fails here is real but, in Start-Miner's
+# abort-kill case, doesn't reproduce the death spiral -- invariant (1) is still
+# protected because the next Start-Miner attempt's host-wide scan will see the
+# orphan and refuse to start a duplicate) -- just refusing to let it pass as a
+# clean success anywhere it's used.
+function Kill-AndVerify([int]$targetPid) {
+  try {
+    Stop-Process -Id $targetPid -Force -Confirm:$false -ErrorAction Stop
+    Start-Sleep -Milliseconds 200
+    return -not (Get-Process -Id $targetPid -ErrorAction SilentlyContinue)
+  } catch { return $false }
+}
+
 # Codex 2026-08-08 round 5 MUST-FIX (invariant (2): must always be able to stop
 # what this breaker started): the old behaviour on a failed commandLine readback
 # was to warn, record commandLine=null, and leave the just-launched process
@@ -378,18 +413,7 @@ function Start-Miner {
   }
   if (-not $cmdLine) {
     Log "Start-Miner: FAILED to establish ownership for PID=$($p.Id) after $maxAttempts attempts -- killing it rather than leaving a miner this breaker could never stop again"
-    # Bettor 2026-08-08 14:20: -ErrorAction Stop + a post-kill Get-Process check so
-    # a failed Stop-Process is never silent. Not trying to guarantee the orphan is
-    # eliminated (NWT's observation: a kill that silently fails here is real but
-    # doesn't reproduce the death spiral -- invariant (1) is still protected, the
-    # next Start-Miner attempt's host-wide scan will see this orphan and refuse to
-    # start a duplicate) -- just refusing to let it pass as a clean success.
-    $killVerified = $false
-    try {
-      Stop-Process -Id $p.Id -Force -Confirm:$false -ErrorAction Stop
-      Start-Sleep -Milliseconds 200
-      $killVerified = -not (Get-Process -Id $p.Id -ErrorAction SilentlyContinue)
-    } catch {}
+    $killVerified = Kill-AndVerify $p.Id
     Remove-Item $minerPidFile -ErrorAction SilentlyContinue
     if ($killVerified) {
       Alert "Start-Miner ABORTED: launched PID=$($p.Id) but could not confirm its commandLine after $maxAttempts attempts -- killed it (verified gone). No miner is running from this attempt. Will retry next loop iteration if still CONFIRMED_ABSENT."
@@ -406,8 +430,42 @@ function Start-Miner {
   # touch it.
   $startTimeTicks = $null
   try { $startTimeTicks = (Get-Process -Id $p.Id -ErrorAction Stop).StartTime.Ticks } catch {}
-  (@{ pid = $p.Id; commandLine = $cmdLine; startTimeTicks = $startTimeTicks } | ConvertTo-Json -Compress) | Out-File $minerPidFile -Encoding utf8
-  Log "Start-Miner: launched PID=$($p.Id), ownership confirmed (startTime-recorded=$([bool]$startTimeTicks))"
+
+  # Bettor 2026-08-08 16:11 MUST-FIX (W2 -- the PERSISTENCE action itself needed
+  # efficacy verification too, same class as launch/kill: a failed or truncated
+  # write here would leave a miner genuinely running with no durable ownership
+  # record, and every future Get-MinerState read would see a missing/corrupt pid
+  # file and never re-confirm OWNED_RUNNING -- the brake could never stop it, and
+  # this specific failure mode isn't self-healing (the write doesn't get retried
+  # once Start-Miner has returned). Write to a temp file in the same directory
+  # (same volume -> Move-Item is a rename, effectively atomic, not a copy+delete
+  # that could leave a half-written destination), then read back and verify it
+  # parses to the exact pid/commandLine just written -- a write that can't be
+  # verified is treated as a failed launch, not a successful one with an
+  # unreadable record.
+  $tmpFile = "$minerPidFile.tmp"
+  $writeVerified = $false
+  try {
+    (@{ pid = $p.Id; commandLine = $cmdLine; startTimeTicks = $startTimeTicks } | ConvertTo-Json -Compress) |
+      Out-File $tmpFile -Encoding utf8 -ErrorAction Stop
+    Move-Item -Path $tmpFile -Destination $minerPidFile -Force -ErrorAction Stop
+    $readBack = Get-Content $minerPidFile -Raw -ErrorAction Stop | ConvertFrom-Json
+    $writeVerified = ($readBack.pid -eq $p.Id) -and ($readBack.commandLine -eq $cmdLine)
+  } catch {}
+  Remove-Item $tmpFile -ErrorAction SilentlyContinue
+
+  if (-not $writeVerified) {
+    Log "Start-Miner: FAILED to durably persist ownership record for PID=$($p.Id) (write/rename/read-back verification failed) -- killing it rather than leaving a miner with no recoverable ownership record"
+    $killVerified = Kill-AndVerify $p.Id
+    Remove-Item $minerPidFile -ErrorAction SilentlyContinue
+    if ($killVerified) {
+      Alert "Start-Miner ABORTED: launched PID=$($p.Id), ownership confirmed in-memory, but the pid-file write could not be verified -- killed it (verified gone). No miner is running from this attempt."
+    } else {
+      Alert "Start-Miner ABORTED but KILL NOT VERIFIED: launched PID=$($p.Id), pid-file write failed verification AND the abort-kill itself could not be confirmed -- possible orphan process at PID=$($p.Id) with NO ownership record, needs operator look. The next start attempt's host-wide scan should still catch it and refuse to start a duplicate."
+    }
+    return
+  }
+  Log "Start-Miner: launched PID=$($p.Id), ownership confirmed and durably persisted (startTime-recorded=$([bool]$startTimeTicks))"
 }
 
 # Codex 2026-08-08 round 6 MUST-FIX (CORE-BREAK, on the actual brake -- Bettor
@@ -422,12 +480,7 @@ function Start-Miner {
 function Stop-Miner {
   $s = Get-MinerState
   if ($s.State -eq 'OWNED_RUNNING') {
-    $stopVerified = $false
-    try {
-      Stop-Process -Id $s.Process.Id -Force -Confirm:$false -ErrorAction Stop
-      Start-Sleep -Milliseconds 200
-      $stopVerified = -not (Get-Process -Id $s.Process.Id -ErrorAction SilentlyContinue)
-    } catch {}
+    $stopVerified = Kill-AndVerify $s.Process.Id
     if ($stopVerified) {
       Log "Stop-Miner: stopped owned PID=$($s.Process.Id) (verified gone)"
       Remove-Item $minerPidFile -ErrorAction SilentlyContinue
