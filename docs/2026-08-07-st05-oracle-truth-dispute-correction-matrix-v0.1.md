@@ -1,4 +1,8 @@
-> **Status**: DRAFT v0.1 · **ST-05 · Oracle truth / dispute / correction 制度矩阵** · DRI J1(J1tn) × 协调 Bettor × 红队 NWT
+> **Status**: DRAFT **v0.2** · **ST-05 · Oracle truth / dispute / correction 制度矩阵** · DRI J1(J1tn) × 协调 Bettor × 红队 NWT
+> 🆕 **v0.2(2026-08-08, J1tn)**:**文件名不改,版本以本行为准**(同 ⑥/③ 稿编法);**v0.1 原文一字不删**,修订以 `🆕 v0.2` 块紧贴原文追加。
+> **触发**: Codex 独立红队 `26b9ec14`(`coordination/codex-bridge/responses/RESPONSE-20260807-UNSYNCED-ST05-DISPUTE-REVEAL-NOT-ACCOUNTABILITY-CODEX-REVIEW.md`)。
+> **净变化**: **§1 第 3 项 `PROTOCOL_CAPABILITY` → `NOT_PROVEN`(降级)**;§3.1 拆四张卡;新增三条 Codex 未提的(其中两条是我自己该认的)。
+> 🔴 **方向**: 红队让这一格**更severe,不是更轻** —— 我 v0.1 把 `dispute_reveal` 记宽了。
 > **授权**: `OWNER-DIRECTIVE-20260806-POST-TOCCATA-INSTITUTIONAL-STRESS-TEST` ST-05(`origin/coord/codex-bridge:coordination/codex-bridge/`)。**BATCH-0 = 只做设计 + 现状盘点 + 证据缺口;不实跑 / 不改码 / 不拉取上游。**
 > **Gate(directive 原文)**: **「接入 Oracle API」不得被表述为 truth layer 已解决。**
 > **验收五级**: `PROTOCOL_CAPABILITY` → `TESTABLE_MACHINERY` → `VERIFIED_PATH` → `USABLE_INFRASTRUCTURE`,**无锚 = `NOT_PROVEN`**。
@@ -26,7 +30,7 @@
 |---|---|---|---|
 | 1 | **委员分裂** | 🟡 分裂 ⇒ 凑不齐阈值 ⇒ 冻结(有机制,非终裁) | `TESTABLE_MACHINERY` |
 | 2 | **阈值刚好无法形成** | 🟡 同上,`sigCount<4` ⇒ `freezeAwaitingAuthorization` | `TESTABLE_MACHINERY` |
-| 3 | 🔴 **多数签署错误事实** | 🔴 **合约有问责入口,代码无调用点;经济后果无强制** | `PROTOCOL_CAPABILITY` 而已 |
+| 3 | 🔴 **多数签署错误事实** | 🔴 ~~合约有问责入口,代码无调用点;经济后果无强制~~ → 🆕 **v0.2**:入口存在,但**不绑争议事实、不绑真委员、结算后不可用、输出零约束** | ~~`PROTOCOL_CAPABILITY` 而已~~ → 🆕 **v0.2: `NOT_PROVEN`** |
 | 4 | 🔴 **证据随后被撤回或纠正** | 🔴 **不是被处理,是被假设掉**(「FINAL 赛果 immutable」) | `NOT_PROVEN` |
 | 5 | **现实事实长期歧义** | 🟡 弃签 ⇒ 冻结;**无延期机制**,时间不产生权力 | `TESTABLE_MACHINERY`(但出口见 ST-02 §2.7) |
 | 6 | 🔴 **自动结算已执行后的错误恢复边界** | 🔴 **无回退路径 —— 边界就是"没有"** | `NOT_PROVEN` |
@@ -88,6 +92,94 @@
 ⇒ 🔴 **合起来**:委员多数签了错误事实 ⇒ 合约里那个专为问责设的入口**没有调用方**;链下那个 slash 字段**是自报的、且本机为空**。
 **当前栈里,签错事实没有任何被强制执行的经济后果。**
 🔨 **这正撞 Gate**:有 `dispute_reveal` 这个**协议能力**,不等于有一个**争议制度**。两者差的是"谁在什么条件下、按什么程序去调它",而那部分不存在。
+
+---
+
+#### 🆕 v0.2 修订 · **上面 (a) 说的"合约侧有入口"给宽了 —— 那个入口连"协议能力"都不成立**
+
+> **来源**: Codex 独立红队 `26b9ec14`。🔴 **我没有转述它,下面每条都是我自己在 v06/v07 源码上重读一遍的结果**
+> (承 `[[feedback_test-name-must-be-the-one-that-reddens]]` 同族纪律:红队说的要自己红一次才算)。
+> **v0.1 的 (b) `NO-CALLER` 与 (c) `slashed_amount` 自报 仍然成立、不撤** —— 但它们**降为次要**:
+> 🔨 **就算今天给它加上调用方,下面四条也一条都不会被修好。**
+
+**G1A · `disputeOutcomeHash` 收了但从不消费** `[CONFIRMED·源码实读]`
+全文件 grep `disputeOutcomeHash` ⇒ **v06 命中 2 处 = `:247`(注释) + `:251`(参数声明);v07 = `:343` + `:347`**。
+**函数体零引用**,无任何 `require` 把它绑到 covenant 状态、tx 输出、先前结算承诺或其它已认证事实。
+⇒ 注释所称「individual sig over `disputeOutcomeHash`」**在机制上不成立**:`checkSig` 验的是**交易签名上下文**,
+不因为参数表里有这个名字就产生一个被认证的争议事实。**争议对象本身没有被绑。**
+
+**G1B · 委员身份两侧都是 caller 供给** `[CONFIRMED·源码实读]`
+`dispute_reveal` 算 `dHash = blake2b(c0Pk||…||c4Pk)` 并 `require(dHash == committeePkHash)`,
+**而 `committeePkHash` 自己就是同一个 caller 传的入口参数**(v06 `:250` / v07 `:346`)。
+无 merkle 证明、无 ctor 锚、无 covenant 状态比对 ⇒ **只证明了两个 witness 值互相自洽。**
+🔴 **对照同文件的 `settle_aggregate`,差距是结构性的**:它对**每个**委员 pk 走 depth-8 position-aware merkle 爬升,
+终点 `require(cNCur == poolMerkleRoot)` —— **五段各自落在 v06 `:118` / `:139` / `:160` / `:181` / `:202`**,根是 ctor-baked。
+**同一份合约里,一个入口锚到链上根,另一个没有。**
+
+**G1C · 结算花掉 spine,无 continuation ⇒ 事后结构上不可用** `[CONFIRMED·源码实读]`
+`settle_aggregate` 的输出结构逐条实读(v06 `:204-235`,注释起点 `:204`、输出 require 段 `:210-235`):
+`outputs[0]`=broker fee、`outputs[1..5]`=五委员 bond 返还、`outputs[6..]`=bettor 赔付。
+**没有任何一条 require 把某个输出约束回同一 PoolSpine covenant。**
+⇒ spine UTXO 被 settle 花掉之后,**那个 UTXO 不存在了**,`dispute_reveal` 是同一个可花费 covenant 上的**替代入口**,不是一个独立留存的事后记录对象。
+🔨 **⇒ 对已完成结算的市场,这个"问责入口"不是"没人调",是【调不了】。**
+
+**G1D · 输出零约束** `[CONFIRMED·源码实读]`
+入口结尾只有 `require(tx.inputs.length >= 1); require(tx.outputs.length >= 1);`(v06 `:268-269` / v07 `:364-365`)。
+**无罚没、无 bond 重定向、无证据落链、无 continuation 状态、无补偿、无纠正语义。**
+
+**⇒ §3.1 定级改写(替换 v0.1 的 `PROTOCOL_CAPABILITY`)**:
+> 合约源码存在名为 `dispute_reveal` 的 **spend entrypoint**,但本次审查**未能证明**它绑定争议事实、绑定实际委员会、执行罚没,或在 settlement 之后仍可调用。
+> ⇒ 作为「事后问责 / 纠错机制」应记 **`NOT_PROVEN`**,而非已成立的 `PROTOCOL_CAPABILITY`。
+
+##### 🆕 v0.2 追加三条(Codex 未提;前两条是我自己该认的)
+
+**(甲) 🔴 作者自陈已经写在注释里,而我读的时候把它略掉了** `[CONFIRMED·源码实读]`
+合约头注释逐字写着:**`dispute_reveal binding via committeePkHash arg (off-chain coordinator-provided)`**
+(v06 `:36` / v07 `:59`)。⇒ **合约作者当时就知道这个绑定是【链下协调器提供】的。**
+🔴 **而 SilverScript/enforce-lib 的作者是 J1 = 我自己。** 这不是"合约骗了我",
+是**我在 ST-05 里读自己写的注释时,把 `off-chain` 那半略掉了,只留下 `binding` 两个字**,于是记成了链上问责能力。
+🔨 **判据**:**引一句注释当能力证据时,必须把它的限定语一起引** —— 限定语正是它与"机制"的全部差距。
+
+**(乙) 「参数表 ≠ 编译产物」24 小时内第三次命中,这次命中的是我自己给的绿灯** `[强推断·未实测]`
+我在 ⑥ precond6 **v0.2.1 的 C-2/C-3 刚立过**这条判据(未使用的参数会被编译器丢出 redeem;
+在册实例 = NWT FINDING-2 丢掉未用的 `market_id` ⇒ 资金混同)。
+`disputeOutcomeHash` 正是**零引用参数**。
+🔴 **但作用域必须钉死,别顺手推广**:C-2/C-3 讲的是 **ctor 参数**,`disputeOutcomeHash` 是 **entrypoint witness 参数**,
+两者的编译处置**未必相同**。**「它是否真被丢出 redeem」= 未实测。**
+🔴 **而且本机测不了** —— `pool-p2sh.mjs:19` pin 的 `silverc-legacy-2c46231.exe` **ENOENT**
+(同一个洞已在 ST-02 第 4 项与 ⑥ v0.2.1 的 C-3 记过两次)。⇒ **标 `[强推断·未实测]`,谁有编译器谁来落。**
+🔵 **它不影响 G1A 的结论**:G1A 只需要"函数体不消费它",那是源码级已证的。
+
+**(丙) 注释与代码相反 = 本稿 G7 同族,而这一条更毒** `[CONFIRMED·源码实读]`
+头注释说这个入口是 **`for per-oracle bond forfeiture`**(v06 `:29` / v07 `:52`),
+entry 注释说它 **`about establishing individual accountability for slashing`**(v06 `:248` / v07 `:344`)。
+**而代码里罚没为零、bond 重定向为零(见 G1D)。**
+🔨 与 v0.1 已抓的 **G7**(`settler:1408` 日志打 "force cancel + maker refund",`:1407` 实际是冻结)**同一形状**:
+**唯一的人类可读描述与事实相反。** 而这一条更毒,因为**注释是最有说服力的指路牌**
+(承 `[[feedback_docs-that-teach-the-hole]]`):下一个人读到 "slashing" 就会以为罚没机制在,
+**而他越信任源码注释就越会被骗。**
+
+##### 🔴 v0.2 新增:一条**不属于 ST-05、但必须在这里说出口**的安全项
+
+Codex 提出、我采纳并单列(**不混进问责那格,免得两件事互相稀释**):
+`dispute_reveal` 是 PoolSpine covenant 上一个**独立的花钱入口**,其**授权约束需要单独的对抗性审查** ——
+它不是一个惰性的问责挂钩。合起来看:**任何持有 5 个 pk 并能凑齐 5 个签名的人,可以用它花掉一个【尚未结算】的 spine UTXO,
+而合约对输出只要求 `>= 1`。**
+🔴 **标 `[强推断·未构造]`**:我**没有、也不会**构造任何针对它的交易(BATCH-0 = 零链上)。
+⇒ 📌 **归 ST-02/安全线,不归本稿定级**;**请 Bettor 决定派给谁做对抗性审查。**
+
+##### 🆕 v0.2 证据卡(替换 §5 中 ST-05 第 3 项那张,原卡不删)
+
+| 卡号 | 断言 | 级别 |
+|---|---|---|
+| `ST05-G1A-DISPUTE-FACT-UNBOUND` | `disputeOutcomeHash` 被接受但不被任何不变式消费 | `[CONFIRMED·源码实读]` |
+| `ST05-G1B-DISPUTE-COMMITTEE-UNBOUND` | 供给的委员哈希未锚到 pool root / 结算记录 | `[CONFIRMED·源码实读]` |
+| `ST05-G1C-DISPUTE-POSTSETTLE-UNAVAILABLE` | 结算花掉 spine;无留存争议对象/continuation | `[CONFIRMED·源码实读]` |
+| `ST05-G1D-DISPUTE-OUTPUT-UNCONSTRAINED` | 入口不强制任何罚没/补偿/纠正输出语义 | `[CONFIRMED·源码实读]` |
+| `ST05-G1E-DISPUTE-SPEND-PATH-UNREVIEWED` | 该入口是独立花钱路径,授权约束未经对抗性审查 | `[强推断·未构造]` |
+
+**Codex 那份红队的其余裁定我全部接受**:ST-05 总判 `NOT_PROVEN` **ACCEPTED**;
+事前 `abstain-not-guess` **directionally supported**;`FINAL immutable` 是假设不是纠错机制;无申诉/终裁制度;无结算后回退路径 —— **均与 v0.1 一致,不改。**
 
 ### 3.2 🔴 必覆盖 4 · **证据被撤回或纠正 —— 这不是被处理的情形,是被假设掉的情形**
 
