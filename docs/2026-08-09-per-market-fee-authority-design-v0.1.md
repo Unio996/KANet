@@ -103,7 +103,7 @@ require(tx.outputs[0].value >= makerStakeAmount - marketMaxFee);   // marketMaxF
 
 | DoD | 本稿如何满足 | 状态 |
 |---|---|---|
-| ①**编得进** | 费率必须在 **.sil 函数体内被引用**才会进 redeem;验收=变异测试改费率→P2SH 必变 | 🔴 **未实测**(见 §7) |
+| ①**编得进** | 费率必须在 **.sil 函数体内被引用**才会进 redeem;验收=变异测试改费率→redeem 必变 | ✅ **已实测**(见 §8) |
 | ②**绑得住** | §4 形态:界为 ctor 值 + `require` 直接夹 `tx.outputs[].value` = 约束落在**实际花费**上,非只 check 承诺值 | 设计已定 |
 | ③**逐入口** | `scripts/fee-authority-enumerate.mjs` 逐 entrypoint 出判级,**指不出约束行的入口即报** | ✅ **已实现并跑出 18 个洞** |
 | ④**验得出** | 枚举器 + 变异测试脚本入库,**不靠人记得**;新增合约自动纳入(不写死版本表) | ✅ 枚举器已入库;变异测试见 §7 |
@@ -122,10 +122,61 @@ require(tx.outputs[0].value >= makerStakeAmount - marketMaxFee);   // marketMaxF
 
 ## §7 未决 / 不写成已知
 
-- 🔴 **DoD ① 的变异测试本机跑不了**:`pool-p2sh.mjs:19` pin 的 `silverc-legacy-2c46231.exe` **ENOENT**
-  (同一个洞已在 ST-02 第 4 项与 ⑥ v0.2.1 C-3 记过两次)。**⇒ "改费率→P2SH 变"目前仍是 `[强推断]`,不是已证。**
-  **谁有编译器谁来落**;阳性对照用 `minerFee` 变更(已知它进 redeem,J2 对照臂证过)。
+- ✅ **DoD ① 已实测,见 §8** —— 此前三份稿子(本稿 v0.1 初稿 / ST-02 第 4 项 / ⑥ v0.2.1 C-3)都把它写成
+  "本机 pin 的 silverc ENOENT ⇒ 跑不了"。**那个阻塞判断是错的**:pin 的编译器**在挖矿主机上一直存在**,
+  我只是一直在错的机器上找。🔨 **判据教训:"我这台没有"不等于"我们没有"——说"跑不了"之前要先枚举【所有】机器。**
 - **`dispute_reveal` 的花费到底由什么夹住** —— 本稿只证了"该入口内零 `outputs[].value` 约束",
   **没有**核它在实际构造时是否被链下逻辑或别的 require 间接限制。**别替我外推成"任意金额可花"。**
 - **v0.8 三件套的部署状态未查**(哪些在飞、哪些只是源码),(i) 的落地顺序取决于此 ⇒ 需 J2/Bettor 给口径。
 - **存量盘不可补救那条不变**(⑥ R-3):redeem 建市即烤死,本设计只对**新市场**成立。
+
+
+---
+
+# 🆕 §8 DoD ① 实测结果 `[CONFIRMED·实测]`
+
+**编译器**: `D:/silverscript/versioned-builds/silverc-legacy-2c46231.exe`(**生产 pin 的那把**,在挖矿主机上)
+**复现**: `node scripts/fee-mutation-test.mjs`(只读;`FEE_MUT_LIB` / `SILVERC_LEGACY_PATH` 可覆盖)
+**判据**: 直接比 **redeem script**(P2SH = blake2b(redeem) 是确定性函数 ⇒ redeem 变 ⟺ P2SH 变)。
+
+| 合约 | 字段 | 角色 | 结果 |
+|---|---|---|---|
+| v0.6 (redeem 1946B) | `oracleFeePct` | SUBJECT | 🔴 **UNCHANGED ⇒ 不在 redeem** |
+| v0.6 | `brokerFeePct` | SUBJECT | 🔴 **UNCHANGED ⇒ 不在 redeem** |
+| v0.6 | `minerFee` / `deadline` | CONTROL | ✅ / ✅ 都变 |
+| v0.7 (redeem 2135B) | `oracleFeePct` | SUBJECT | 🔴 **UNCHANGED ⇒ 不在 redeem** |
+| v0.7 | `brokerFeePct` | SUBJECT | 🔴 **UNCHANGED ⇒ 不在 redeem** |
+| v0.7 | `market_id` | SUBJECT | ✅ **changed ⇒ 确实烤进 redeem** |
+| v0.7 | `minerFee` / `deadline` | CONTROL | ✅ / ✅ 都变 |
+
+**baselines 2/2 · controls 4/4 全部移动** ⇒ 未变的 SUBJECT 是**编译器的真实行为**,不是死 harness。
+
+## §8.1 这把 ⑥ v0.2.1 的 C-2 从 `[强推断]` 升为 `[CONFIRMED]`
+
+C-2 断言「未被函数体引用的 ctor 参数会被编译器丢出 redeem」⇒ **v0.6/v0.7 双版本实测成立**。
+⇒ **`brokerFeePct` / `oracleFeePct` 不被 P2SH 承诺** ⇒ 对这两个字段,
+「该市场承诺了这个费率」这句话**在密码学上是假的** —— 不是"没强制",是**根本没承诺**。
+⇒ 与 §2 的 `GLOBAL-LITERAL` / `NO-FEE-CONSTRAINT` 合起来看:
+**费率既没被承诺(编不进),也没被强制(入口不 require)。(i) 必须同时补这两半,补一半等于没补。**
+
+## §8.2 🔵 顺带证实一条资金安全修复**是真生效的**
+
+`market_id` 是在册 NWT FINDING-2 里「未用参数被丢弃 ⇒ 资金混同」的那个字段。
+v0.7 把它加进 ctor,**实测它确实进了 redeem** ⇒ **那条修复不是纸面的。**
+🔨 值得记的是方法:**同一个测试同时给出一个坏消息和一个好消息**,
+因为它测的是**机制**(参数存活与否),不是某个预设结论。
+
+## §8.3 阳性对照为什么不可省(本次真的救了场)
+
+第一版 harness 有一个洞:`let controlsOk = true`,**编译全失败时它照样打印"controls OK"** ——
+**"全部通过"与"一次都没跑"输出完全相同**。改成计数(`controlsRun` / `controlsMoved`)后,
+那次失败运行如实打出 `NO CONTROL EVER RAN -- this run proves NOTHING`。
+🔴 **这正是本稿反复在防的形状,而我自己的验收脚本第一版就犯了。**
+
+## §8.4 作用域(不说满)
+
+- 只测了 **v0.6 / v0.7** 两个合约。其余五个(v0.5 / v0_7_1 / v08×3)**未测**。
+- 走的是 **silverc + ctor JSON** 这条路,**未**经过 `pool-p2sh.mjs` 的地址派生
+  (那步 `await import('kaspa-wasm')` 在挖矿主机解析不到:三个 `node_modules/kaspa-wasm` 都是空壳,
+  只有 `shared/vendor` 是真的)。⇒ **编译器与 ctor 序列化与生产同,地址派生代码路径未覆盖。**
+- 用的是 pin 的 legacy 编译器。**换编译器就是换实验**(该树另有 `silverc-zk-8065184.exe`)。
