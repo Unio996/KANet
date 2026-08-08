@@ -97,6 +97,14 @@ J1_PROBE_URL=ws://127.0.0.1:17211 node D:/kanet/kanet/scratch/j1-peer-node-probe
 
 ---
 
+## §4-bis 第三台独立机器确认（KANet-UI，操作员机，2026-08-08，读数现取）
+
+- 本机（:3200 生产 console 所在机，独立 appdir，独立运行时）现读 `getServerInfo`/`getBlockDagInfo`：`isSynced=false`，`virtualDaaScore=76181041`，`blockCount=1104732`——**与上表两台逐字相同**。8 秒 delta 复测：`virtualDaaScore`/`blockCount` 完全冻结，`tipHashes` 从 18108 涨到 18118（仍在长，同一"DAG 宽度涨、共识不前进"模式）。
+- **尝试走频道广播实测失败**：`_kanetui_send.cjs` 返回 `HTTP 500 {"error":"RPC node is not synced"}`——与本文 §2 的判词完全吻合（relay not-synced 闸生效，广播被拒，不是频道 API 本身坏）。
+- 🔴 **独立性必须如实标注收窄，不能照抄"两台独立"升级成"三台独立"就完事**：`netstat` 现查，本机对外连接**正是同一对** `152.53.236.224:16311` / `86.48.24.208:16311`（`ESTABLISHED`，非本机 peer 自选的巧合——这两个 IP 与 J1tn/DESKTOP-DA9QQ46 完全相同）。⇒ **本次确认排除的是"某一台机器/appdir 本地损坏"这个假设（现在是三台独立存储、三份运行时收敛到同一冻结态），但不能拉近 §5 那条"这 2 个 peer 是网络代表还是它们自己坏了"的悬而未决**——三台都经由同一对 peer 连接整个 TN12，仪器的够达范围完全一致，没有变宽。
+
+---
+
 ## §5 我不知道的（不写成已知）
 
 - **TN12 真正的链尖在哪** —— 够不到第三个源。
