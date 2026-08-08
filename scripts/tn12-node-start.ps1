@@ -46,6 +46,16 @@ param(
   # whether the two public TN12 peers are alive. Empty = rely on public peers only (the
   # configuration that starved on 2026-08-08).
   [string[]] $AddPeer  = @('100.99.147.101:16311'),
+  # RocksDB cache multiplier. Measured on the J1 receiver 2026-08-09 while it was falling
+  # behind at 4.4 blk/s against an 8.0 blk/s network:
+  #   kaspad CPU 7.1% of 14 cores, but ONE thread pegged at 99.7%
+  #   disk queue 0.11 (idle), pages output/sec 0 (no swap pressure)
+  #   cache faults/sec 18,209   <-- the pegged thread is stalling on mmap reads
+  # So the limit is a SERIAL section starved of cache, not cores, not disk, not RAM pressure.
+  # More cores cannot help a single-threaded stage; a bigger block cache can, by making that
+  # stage's reads hit memory. Upstream guidance is ~3.0-4.0 for ~64GB hosts; this box has
+  # 15.4GB with ~1.8GB free, so start conservative and raise only with a measurement.
+  [double] $RamScale   = 1.5,
   [switch] $WhatIf
 )
 
@@ -64,6 +74,7 @@ $argList = @(
   "--rpclisten-borsh=$RpcListen"
 )
 foreach ($p in $AddPeer) { if ($p) { $argList += "--addpeer=$p" } }
+if ($RamScale -gt 0 -and $RamScale -ne 1.0) { $argList += "--ram-scale=$RamScale" }
 if ($Role -eq 'miner') { $argList += '--enable-unsynced-mining' }
 
 $cmdline = "$Exe " + ($argList -join ' ')

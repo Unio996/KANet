@@ -65,11 +65,53 @@ function loadWasm(require) {
 const RUNAWAY_TIPS = Number(process.env.DAG_PROBE_RUNAWAY_TIPS || 500);
 const STARVED_LAG_SEC = Number(process.env.DAG_PROBE_STARVED_LAG_SEC || 600);
 
-function diagnose({ tips, lagSeconds, isSynced }) {
+// 🔴 `catching-up` is NOT cosmetic. Without it this probe cries `starved` every time the node
+// restarts, because a restarting node is legitimately far behind for a few minutes. Acting on
+// that ("add a peer") would be wrong -- it already has peers and is using them. Caught on
+// 2026-08-09 by running the probe against a node that had just restarted: it said `starved`
+// while the log showed headers streaming in at 16% -> 33% -> 49%.
+//
+// The discriminator is headerMinusBlock: a node pulling headers ahead of bodies is in IBD and
+// is FEEDING. Real starvation looked nothing like it -- headerMinusBlock was 0 and the node
+// processed literally zero blocks for four hours. Lag alone cannot tell those apart, and they
+// take opposite actions (wait vs. intervene).
+const IBD_GAP = Number(process.env.DAG_PROBE_IBD_GAP || 100);
+
+function diagnose({ tips, lagSeconds, isSynced, headerMinusBlock }) {
   if (tips >= RUNAWAY_TIPS) return 'runaway';           // checked first: it is the dangerous one
-  if (lagSeconds !== null && lagSeconds >= STARVED_LAG_SEC) return 'starved';
+  const lagging = lagSeconds !== null && lagSeconds >= STARVED_LAG_SEC;
+  if (lagging && headerMinusBlock >= IBD_GAP) return 'catching-up';  // behind BUT being fed
+  if (lagging) return 'starved';                        // behind AND not being fed -> intervene
   if (!isSynced) return 'behind';                        // lagging but under threshold; watch it
   return 'healthy';
+}
+
+// --selftest exercises diagnose() against constructed inputs. It exists because the branches
+// that matter only appear when something is WRONG: once the node is healthy you can no longer
+// reach them from live data, and "never fired" then reads the same whether the logic is right
+// or broken. Each case below is anchored to a real observation, not an invented shape.
+if (process.argv.includes('--selftest')) {
+  const cases = [
+    // 2026-08-07/08 mining host at the peak of the stall.
+    { name: 'runaway: tips exploded',        in: { tips: 18132, lagSeconds: 40000, isSynced: false, headerMinusBlock: 0 },    want: 'runaway' },
+    // 2026-08-08 this node: 4h of zero progress, DAG pristine, nobody feeding it.
+    { name: 'starved: behind, not fed',      in: { tips: 1, lagSeconds: 14400, isSynced: false, headerMinusBlock: 0 },        want: 'starved' },
+    // 2026-08-09 right after a restart: equally far behind, but headers streaming in.
+    { name: 'catching-up: behind, being fed',in: { tips: 1, lagSeconds: 744, isSynced: false, headerMinusBlock: 3960 },       want: 'catching-up' },
+    // runaway must win: it is the one with a destructive remedy if missed.
+    { name: 'runaway outranks starved',      in: { tips: 9000, lagSeconds: 14400, isSynced: false, headerMinusBlock: 0 },     want: 'runaway' },
+    { name: 'behind: lagging under thresh',  in: { tips: 2, lagSeconds: 60, isSynced: false, headerMinusBlock: 0 },           want: 'behind' },
+    { name: 'healthy: steady state',         in: { tips: 2, lagSeconds: 0, isSynced: true, headerMinusBlock: 0 },             want: 'healthy' },
+  ];
+  let bad = 0;
+  for (const c of cases) {
+    const got = diagnose(c.in);
+    const ok = got === c.want;
+    if (!ok) bad++;
+    console.log(`${ok ? 'PASS' : 'FAIL'}  ${c.name}  want=${c.want} got=${got}`);
+  }
+  console.log(bad === 0 ? `ALL ${cases.length} PASS` : `${bad} FAILED`);
+  process.exit(bad === 0 ? 0 : 1);
 }
 
 try {
@@ -104,7 +146,7 @@ try {
 
   out({
     ok: true,
-    diagnosis: diagnose({ tips, lagSeconds, isSynced }),
+    diagnosis: diagnose({ tips, lagSeconds, isSynced, headerMinusBlock: headerCount - blockCount }),
     tips,
     lagSeconds,
     // header > block means the node is pulling headers ahead of bodies = IBD in progress.
