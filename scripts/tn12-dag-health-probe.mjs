@@ -442,6 +442,27 @@ if (process.argv.includes('--selftest')) {
       want: (c) => c.priorIsStale === true && c.risingStreak === null && c.detachedSince === T0,
       why: 'no prior observation means nothing to be continuous with; unknown must fail',
     },
+    // NWT named this cell explicitly before re-reviewing: a state record that EXISTS but whose
+    // `ts` is missing or the wrong type must fall back to UNKNOWN, never default to "fresh".
+    // It is the nastier variant of the null-state case, because everything else in the record
+    // looks usable -- streak, streakStartTs, detachedSince are all present and inviting.
+    {
+      name: 'corrupt: prior state exists but ts is missing -> stale, not fresh',
+      prev: { tips: 100, risingStreak: 3, streakStartTips: 100, streakStartTs: T0 - 7200_000, detachedSince: T0 - 1800_000 },
+      now: T0, tips: 200, peerCount: 0,
+      want: (c) => c.priorIsStale === true && c.risingStreak === null && c.detachedSince === T0,
+      why: 'a record with no timestamp cannot establish that anything was continuous',
+    },
+    {
+      name: 'corrupt: ts present but not a number -> stale, not fresh',
+      prev: { ts: '2026-08-10T03:00:00Z', tips: 100, risingStreak: 3, streakStartTips: 100, detachedSince: T0 - 1800_000 },
+      now: T0, tips: 200, peerCount: 0,
+      // A string ts would make (now - prevTs) NaN, and NaN > freshMaxSec is FALSE -- i.e. a
+      // corrupt timestamp would have been silently accepted as fresh by a naive comparison.
+      // Number.isFinite is what makes unknown fail instead of pass.
+      want: (c) => c.priorIsStale === true && c.risingStreak === null && c.detachedSince === T0,
+      why: 'NaN comparisons are false, so a naive gap check treats a corrupt ts as fresh',
+    },
     {
       name: 'stale prior + high tips still cannot brake (end-to-end through diagnose)',
       prev: { ts: T0 - 3600_000, tips: 100, risingStreak: 9, streakStartTips: 100, streakStartTs: T0 - 7200_000 },
