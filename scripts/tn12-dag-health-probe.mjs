@@ -233,6 +233,60 @@ function diagnose({ tips, lagSeconds, isSynced, headerMinusBlock, peerCount, tip
 // defect leaves the suite ALL PASS -- I verified that rather than assuming it. A green suite was
 // therefore evidence about the callee only, while the claim being made was about the system.
 // So this one reads the source on purpose: the property under test IS a property of the source.
+// Continuity across samples, extracted as a PURE function on 2026-08-10 so it can be tested.
+//
+// It was inline before, and that is precisely why Codex found two unsound continuity claims that
+// a green 36-case suite had nothing to say about: every fixture called diagnose() directly, so
+// none of them could reach the state-carry-forward logic at all. Same shape as the call-site
+// parity defect from the same day -- the tests covered the callee while the claim was about the
+// system. Extracting it is not tidiness; it is what makes the adversarial stale-state fixtures
+// below possible to write.
+//
+// `now` and `prev` are parameters rather than Date.now()/a file read for the same reason: a
+// continuity rule whose inputs cannot be constructed cannot be adversarially tested.
+function computeContinuity(prev, now, { tips, peerCount, freshMaxSec }) {
+  // A prior observation is usable ONLY if it is recent enough that the interval between it and
+  // now can be treated as covered. Missing/unreadable prior state is stale BY DEFINITION -- there
+  // is nothing to be continuous with. Unknown fails; it does not pass.
+  const prevTs = Number.isFinite(prev?.ts) ? prev.ts : null;
+  const priorIsStale = prevTs === null || ((now - prevTs) / 1000) > freshMaxSec;
+
+  let tipsTrend = null, prevTips = null, risingStreak = null, streakStartTips = null, streakStartTs = null;
+  if (!priorIsStale && Number.isFinite(prev?.tips)) {
+    prevTips = prev.tips;
+    tipsTrend = tips - prev.tips;
+    const prevStreak = Number.isFinite(prev?.risingStreak) ? prev.risingStreak : 0;
+    risingStreak = tipsTrend > 0 ? prevStreak + 1 : 0;
+    // Where the current rising run began -- reset whenever the run breaks, so the factor is
+    // measured against the run's own start rather than against any fixed baseline.
+    streakStartTips = tipsTrend > 0
+      ? (Number.isFinite(prev?.streakStartTips) && prevStreak > 0 ? prev.streakStartTips : prevTips)
+      : tips;
+    // Codex MUST-FIX #2: the streak counted SAMPLES, so "4 consecutive rises" meant a different
+    // amount of real time depending on how often the watchdog happened to poll. A criterion about
+    // a TREND has to be anchored in time.
+    streakStartTs = tipsTrend > 0
+      ? (Number.isFinite(prev?.streakStartTs) && prevStreak > 0 ? prev.streakStartTs : prevTs)
+      : now;
+  }
+  // Stale prior => every one of the above stays null => risingStreak null => diagnose() cannot
+  // reach 'overproduction' (it requires risingStreak != null). One fresh observation after a gap
+  // can no longer fabricate a multi-hour climb, which was the branch that fed the brake.
+
+  // Wall-clock anchor for an UNBROKEN run of "not attached" (peerCount 0 or unreadable). Cleared
+  // the moment any caller observes a real peer count -- clearing on anyone's good sample only
+  // shortens runs, so it can make this probe slower to cry isolation, never quicker.
+  const detached = (peerCount === 0 || peerCount == null);
+  const detachedSince = detached
+    ? ((!priorIsStale && Number.isFinite(prev?.detachedSince)) ? prev.detachedSince : now)
+    : null;
+  // After a gap the run restarts at `now`: we know only that we are detached at THIS instant, so
+  // the measured duration begins here and reads 0 -- correctly failing ISOLATED_MIN_SEC until
+  // fresh consecutive observations have actually established a duration.
+
+  return { priorIsStale, tipsTrend, prevTips, risingStreak, streakStartTips, streakStartTs, detachedSince };
+}
+
 // Note on what #1 actually is, because it started as luck and is now deliberate: the regex also
 // matches the DECLARATION's destructuring pattern, which appears first. So each call site is
 // compared against diagnose()'s own parameter list rather than against a sibling call. That is the
@@ -351,6 +405,62 @@ if (process.argv.includes('--selftest')) {
     if (!ok) bad++;
     console.log(`${ok ? 'PASS' : 'FAIL'}  ${c.name}  want=${c.want} got=${got}`);
   }
+  // --- Codex MUST-FIX 2026-08-10: adversarial STALE PRIOR STATE ---
+  // Codex named the exact hole in the first round of fixtures: they only fed diagnose() directly,
+  // so nothing exercised the state carried between samples. These construct `prev` explicitly and
+  // then run the REAL verdict path (computeContinuity -> diagnose), which is the only way to show
+  // that a gap cannot be spent as evidence.
+  const T0 = 1_000_000_000_000;      // fixed epoch: Date.now() must not enter a continuity test
+  const FRESH = 300;
+  const contCases = [
+    {
+      name: 'stale: 30min gap cannot fabricate a climb (this is the branch that brakes)',
+      prev: { ts: T0 - 1800_000, tips: 100, risingStreak: 3, streakStartTips: 100, streakStartTs: T0 - 7200_000 },
+      now: T0, tips: 200, peerCount: 3,
+      // Before the fix this yielded streak=4, a 2h span and 2x growth from ONE fresh sample.
+      want: (c) => c.risingStreak === null && c.priorIsStale === true,
+      why: 'risingStreak must be UNKNOWN after a gap, so diagnose() cannot reach overproduction',
+    },
+    {
+      name: 'stale: 30min gap cannot fabricate continuous detachment',
+      prev: { ts: T0 - 1800_000, tips: 5, detachedSince: T0 - 1800_000 },
+      now: T0, tips: 5, peerCount: 0,
+      // Before the fix: detachedSeconds ~= 1800 -> immediate 'isolated' on two instants 30min apart.
+      want: (c) => c.detachedSince === T0,
+      why: 'the run must restart at now, giving duration 0, not inherit across an unobserved gap',
+    },
+    {
+      name: 'fresh: a normal 30s gap DOES carry continuity (the guard must not break normal use)',
+      prev: { ts: T0 - 30_000, tips: 5, detachedSince: T0 - 120_000, risingStreak: 3, streakStartTips: 100, streakStartTs: T0 - 200_000 },
+      now: T0, tips: 200, peerCount: 0,
+      want: (c) => c.priorIsStale === false && c.risingStreak === 4 && c.detachedSince === T0 - 120_000,
+      why: 'a guard that also blocks the healthy path would just be removed by the next person',
+    },
+    {
+      name: 'stale: missing prior state is stale by definition, not treated as fresh',
+      prev: null, now: T0, tips: 200, peerCount: 0,
+      want: (c) => c.priorIsStale === true && c.risingStreak === null && c.detachedSince === T0,
+      why: 'no prior observation means nothing to be continuous with; unknown must fail',
+    },
+    {
+      name: 'stale prior + high tips still cannot brake (end-to-end through diagnose)',
+      prev: { ts: T0 - 3600_000, tips: 100, risingStreak: 9, streakStartTips: 100, streakStartTs: T0 - 7200_000 },
+      now: T0, tips: 400, peerCount: 3,
+      want: (c) => diagnose({
+        tips: 400, lagSeconds: 700, isSynced: true, headerMinusBlock: 0, peerCount: 3,
+        tipsTrend: c.tipsTrend, risingStreak: c.risingStreak, streakStartTips: c.streakStartTips,
+        streakSeconds: null, detachedSeconds: null,
+      }) !== 'overproduction',
+      why: 'the whole point: stale history must not reach the watchdog brake string',
+    },
+  ];
+  for (const c of contCases) {
+    const got = computeContinuity(c.prev, c.now, { tips: c.tips, peerCount: c.peerCount, freshMaxSec: FRESH });
+    const ok = c.want(got);
+    if (!ok) bad++;
+    console.log(`${ok ? 'PASS' : 'FAIL'}  continuity/${c.name}  (${c.why})`);
+  }
+
   // The wiring check runs LAST and counts into the same total, so "ALL n PASS" means both kinds
   // of claim held. Reading our own source is safe here: this file is the deployed artifact.
   // NOT `new URL(import.meta.url)`: this module declares `const URL = <rpc address>` at the top,
@@ -359,7 +469,10 @@ if (process.argv.includes('--selftest')) {
   const wiring = checkCallSiteParity(fsx.readFileSync(import.meta.filename, 'utf8'));
   for (const p of wiring) { bad++; console.log(`FAIL  call-site parity: ${p}`); }
   if (!wiring.length) console.log('PASS  call-site parity: every diagnose() call site passes the same arguments');
-  console.log(bad === 0 ? `ALL ${cases.length + 1} PASS` : `${bad} FAILED`);
+  // Count every assertion actually run (verdict fixtures + continuity fixtures + the wiring
+  // check). A total that silently excludes a group reports more coverage than was exercised.
+  const total = cases.length + contCases.length + 1;
+  console.log(bad === 0 ? `ALL ${total} PASS` : `${bad} FAILED`);
   process.exit(bad === 0 ? 0 : 1);
 }
 
@@ -453,28 +566,28 @@ try {
   // 🔨 判据: 派生 key 时截断的是【编码后的串】而不是内容, "看起来够长"不等于"区分得开"。
   const STATE_PATH = process.env.DAG_PROBE_STATE || pathx.join(osx.tmpdir(),
     `tn12-dag-probe-state-${cryptox.createHash('sha256').update(URL).digest('hex').slice(0, 16)}.json`);
-  let tipsTrend = null, prevTips = null, risingStreak = null, streakStartTips = null, streakStartTs = null;
-  try {
-    const prev = JSON.parse(fsx.readFileSync(STATE_PATH, 'utf8'));
-    if (Number.isFinite(prev?.tips)) {
-      prevTips = prev.tips;
-      tipsTrend = tips - prev.tips;
-      const prevStreak = Number.isFinite(prev?.risingStreak) ? prev.risingStreak : 0;
-      risingStreak = tipsTrend > 0 ? prevStreak + 1 : 0;
-      // Where the current rising run began -- reset whenever the run breaks, so the factor is
-      // measured against the run's own start rather than against any fixed baseline.
-      streakStartTips = tipsTrend > 0
-        ? (Number.isFinite(prev?.streakStartTips) && prevStreak > 0 ? prev.streakStartTips : prevTips)
-        : tips;
-      // Codex MUST-FIX #2: the streak counted SAMPLES, so "4 consecutive rises" meant a
-      // different amount of real time depending on how often the watchdog happened to poll.
-      // Speed the poller up and four samples become twenty seconds of noise; slow it down and
-      // the same four span ten minutes. A criterion about a TREND has to be anchored in time.
-      streakStartTs = tipsTrend > 0
-        ? (Number.isFinite(prev?.streakStartTs) && prevStreak > 0 ? prev.streakStartTs : (Number.isFinite(prev?.ts) ? prev.ts : Date.now()))
-        : Date.now();
-    }
-  } catch { /* no prior sample -> stays null -> reported as trend-unknown, not as flat */ }
+  // 🔴 FRESHNESS CEILING (Codex MUST-FIX, 2026-08-10). Read BEFORE any continuity logic, because
+  // BOTH continuity claims in this file read the same persisted record and both were unsound in
+  // the same way: elapsed wall-clock between two OBSERVATIONS was being treated as evidence of a
+  // CONTINUOUS condition between them. It is not. If the probe does not run for 30 minutes and
+  // both the before and after samples happen to show peerCount=0, the code proved "detached at two
+  // instants 30 minutes apart" and reported "detached continuously for 1800s".
+  // The rising trend had the identical hole and it is the worse one, because the watchdog brakes
+  // on `diagnosis == 'overproduction'`: after a long gap a SINGLE fresh observation with higher
+  // tips could inherit an old streak and an old streakStartTs, yielding streak>=4, a multi-hour
+  // span that trivially clears RISE_MIN_SEC, and >=1.5x growth -- a fabricated "unbroken climb"
+  // from one sample. That defect predates this file's wall-clock work; the time anchor did not
+  // introduce it, it just made the span large enough to notice.
+  // 🔨 A gap does not mean "nothing happened during it" -- it means WE DO NOT KNOW what happened,
+  // and unknown must not be spent as evidence for either verdict.
+  // Ceiling from MEASURED cadences, not taste: the mining-host watchdog polls every 30s
+  // (TN12_POLL_SEC default), my own DAG monitor every 90s. 300s clears the slowest real caller by
+  // >3x while cutting the 30-minute counterexample by two orders of magnitude.
+  const FRESH_MAX_SEC = Number(process.env.DAG_PROBE_FRESH_MAX_SEC || 300);
+  let prevState = null;
+  try { prevState = JSON.parse(fsx.readFileSync(STATE_PATH, 'utf8')); } catch { prevState = null; }
+  const { priorIsStale, tipsTrend, prevTips, risingStreak, streakStartTips, streakStartTs, detachedSince } =
+    computeContinuity(prevState, Date.now(), { tips, peerCount, freshMaxSec: FRESH_MAX_SEC });
 
   // Per-sample deltas of the two independent counters. THIS is the real progress signal the
   // pulse duty cycle needs (Codex MUST-FIX #1): bodiesDelta > 0 means the node is actually
@@ -487,20 +600,6 @@ try {
     if (blocksSubmitted !== null && Number.isFinite(prev2?.blocksSubmitted)) submittedDelta = blocksSubmitted - prev2.blocksSubmitted;
     if (bodiesProcessed !== null && Number.isFinite(prev2?.bodiesProcessed)) bodiesDelta = bodiesProcessed - prev2.bodiesProcessed;
   } catch { /* stays null = unknown, which callers must treat as "do not act", not as zero */ }
-
-  // Wall-clock anchor for an UNBROKEN run of "not attached to the network" (peerCount 0 or
-  // unreadable). Set on the first such sample, carried forward while the condition holds, and
-  // cleared the moment any caller observes a real peer count. Clearing on any observer's good
-  // sample is the conservative direction -- it shortens runs, so it can only make this probe
-  // slower to cry isolation, never quicker.
-  const detached = (peerCount === 0 || peerCount == null);
-  let detachedSince = null;
-  try {
-    const prev3 = JSON.parse(fsx.readFileSync(STATE_PATH, 'utf8'));
-    detachedSince = detached
-      ? (Number.isFinite(prev3?.detachedSince) ? prev3.detachedSince : Date.now())
-      : null;
-  } catch { detachedSince = detached ? Date.now() : null; }
 
   try { fsx.writeFileSync(STATE_PATH, JSON.stringify({ tips, ts: Date.now(), risingStreak: risingStreak ?? 0, streakStartTips: streakStartTips ?? tips, streakStartTs: streakStartTs ?? Date.now(), blocksSubmitted, bodiesProcessed, detachedSince })); } catch {}
   // How long the current detachment has lasted:
