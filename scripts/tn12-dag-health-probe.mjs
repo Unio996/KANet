@@ -83,6 +83,15 @@ function diagnose({ tips, lagSeconds, isSynced, headerMinusBlock, peerCount }) {
   // Isolation outranks every lag-based verdict: with no peers you are not observing the network,
   // so any statement about the network from this node is unsupported. Reported as its own state
   // so nobody re-runs 2026-08-09's inference ("my DAA is frozen" -> "the chain is idle").
+  // NWT red-team 2026-08-09 on f9ca965c: the first version only protected peerCount === 0.
+  // null means "could not determine whether we are attached to the network at all", which is
+  // NOT 0 (known isolated) and NOT 3 (known fine) -- it means every statement this probe makes
+  // ABOUT THE NETWORK is unsupported. Letting it fall through to a lag verdict re-runs tonight's
+  // bad inference with a different missing input, and 'starved' would tell an operator to add
+  // peers on evidence that cannot support it.
+  // I had written "null = could not read, NOT zero. Do not collapse them." in a comment above
+  // and then collapsed them in the logic. Stating a distinction is not the same as enforcing it.
+  if (lagging && peerCount === null) return 'peers-unknown';
   if (lagging && peerCount === 0) return 'isolated';
   if (lagging && headerMinusBlock >= IBD_GAP) return 'catching-up';  // behind BUT being fed
   if (lagging) return 'starved';                        // behind AND not being fed -> intervene
@@ -106,6 +115,14 @@ if (process.argv.includes('--selftest')) {
     { name: 'runaway outranks starved',      in: { tips: 9000, lagSeconds: 14400, isSynced: false, headerMinusBlock: 0 },     want: 'runaway' },
     { name: 'behind: lagging under thresh',  in: { tips: 2, lagSeconds: 60, isSynced: false, headerMinusBlock: 0 },           want: 'behind' },
     { name: 'healthy: steady state',         in: { tips: 2, lagSeconds: 0, isSynced: true, headerMinusBlock: 0 },             want: 'healthy' },
+    // Bettor's 2026-08-09 misdiagnosis: frozen DAA read as "chain idle" while his own node
+    // had dropped to 0 peers. With no peers this node observes nothing, so say so.
+    { name: 'isolated: lagging, zero peers', in: { tips: 3, lagSeconds: 5000, isSynced: false, headerMinusBlock: 0, peerCount: 0 },    want: 'isolated' },
+    // NWT red-team: unreadable peer count must NOT fall through to a lag verdict.
+    { name: 'peers-unknown: lagging, peerCount null', in: { tips: 3, lagSeconds: 5000, isSynced: false, headerMinusBlock: 0, peerCount: null }, want: 'peers-unknown' },
+    // ...but a healthy node with an unreadable peer count is still healthy: the guard must not
+    // fire when there is nothing wrong, or it becomes noise and gets ignored.
+    { name: 'peerCount null but not lagging => healthy', in: { tips: 2, lagSeconds: 0, isSynced: true, headerMinusBlock: 0, peerCount: null }, want: 'healthy' },
   ];
   let bad = 0;
   for (const c of cases) {
