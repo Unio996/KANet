@@ -1,0 +1,38 @@
+diff --git a/scripts/tn12-mining-watchdog-v2.ps1 b/scripts/tn12-mining-watchdog-v2.ps1
+index 33267a65..a4bc4fff 100644
+--- a/scripts/tn12-mining-watchdog-v2.ps1
++++ b/scripts/tn12-mining-watchdog-v2.ps1
+@@ -211,6 +211,10 @@ $TIPS_BRAKE  = if ($env:TN12_TIPS_BRAKE)  { [int]$env:TN12_TIPS_BRAKE }  else {
+ $TIPS_RESUME = if ($env:TN12_TIPS_RESUME) { [int]$env:TN12_TIPS_RESUME } else { 50 }   # back below -> resume
+ $POLL_SEC    = if ($env:TN12_POLL_SEC)    { [int]$env:TN12_POLL_SEC }    else { 30 }
+ $MAX_ROUNDS  = if ($env:TN12_MAX_ROUNDS)  { [int]$env:TN12_MAX_ROUNDS }  else { 0 }    # 0 = run forever
++# Duty cycle used while braked. Must stay well under POLL_SEC's cadence so each poll still
++# re-reads tips before deciding again; 20s was chosen because measured pulses of 60-75s
++# overshot (-44 tips in one round) and finer steps give the loop more chances to exit.
++$PULSE_SEC   = if ($env:TN12_PULSE_SEC)   { [int]$env:TN12_PULSE_SEC }   else { 20 }
+ 
+ $addr        = "kaspatest:qrys4yax468rrm988kyqjtncvstcelgzktml0m3rvdvvktrll0gdxuyu34fru"
+ $CPU_THREADS = 1  # Bettor 2026-08-08 10:12Z: was 2, dropped to 1 -- the incident's root imbalance
+@@ -636,8 +640,20 @@ while ($true) {
+     Start-Miner-Unless-Paused
+   }
+   elseif ($braked) {
+-    Stop-Miner   # hold the brake; nothing else may resurrect the miner meanwhile
+-    Log "braked, waiting to digest (tips=$tips, need <$TIPS_RESUME)"
++    # DEADLOCK FIX (J1tn 2026-08-09, after this branch stopped the chain for 4.5h).
++    # Holding the miner off until tips fall never terminates: the DAG only digests tips when
++    # NEW BLOCKS arrive to advance virtual, so "stop mining and wait" removes the very thing
++    # that would drain them. Live: braked at tips=525, then 4.5 hours pinned at 536.
++    # Measured way out: pulses of 60-75s moved tips 498 -> 77 (-32..-44 per round). While
++    # virtual can advance, mining DRAINS tips -- each block merges a whole mergeset and adds
++    # only itself. It only piles them up when virtual is stuck. So the brake is a duty cycle.
++    # Both invariants hold: starting still goes through Start-Miner-Unless-Paused (three-valued
++    # guard + operator pause file), stopping still goes through Stop-Miner (owned-only +
++    # Kill-AndVerify). No new start path is introduced.
++    Start-Miner-Unless-Paused
++    Start-Sleep -Seconds $PULSE_SEC
++    Stop-Miner
++    Log "braked: pulsed ${PULSE_SEC}s to drain (tips=$tips, need <$TIPS_RESUME)"
+   }
+   else {
+     Start-Miner-Unless-Paused  # self-guards: no-op if OWNED_RUNNING, alerts (no start) if UNKNOWN_OR_CONFLICT, starts only if CONFIRMED_ABSENT
