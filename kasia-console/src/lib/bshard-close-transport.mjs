@@ -319,8 +319,20 @@ export async function buildProposeCloseRequestV2(marketId, judged) {
       // genesis 字节, 任何下游独立读这一列的代码(诊断脚本/committee voter 若也走 DB 重建)会算出错误的
       // genesis 地址(consolidated_pool=旧值), 找不到钱(钱其实在正确的 post-splice 地址, 一分没丢, 只是
       // 地址算错了)。必须把 absorbedRedeemHex 也 UPDATE 回表, 不能只更新 payout_ps_outpoint。
-      try { sqlite.prepare('UPDATE payout_shards SET payout_redeem_hex = ?, payout_ps_outpoint = ? WHERE logical_market_id = ?').run(absorbedRedeemHex, consolidateRes.psOutpoint, marketId); } catch {}
-      ps = { ...ps, payout_redeem_hex: absorbedRedeemHex, payout_ps_outpoint: consolidateRes.psOutpoint };
+      // §1.C: absorb 原位 splice 了 consolidated_pool ⇒ redeem 变了 ⇒ payout_ps_addr 必须同步刷,
+      // 否则 coherence gate step(d) 会拿新 redeem 比 genesis 陈旧 addr, 必不等而拦住结算。
+      // p2shFn(line 285) 与 gate 同款算法且同在 needConsolidate 块内 —— 作用域已实核可用。
+      // 降级纪律同 §1.A: addr 算不出来时仍写 redeem/outpoint, 绝不因 addr 失败丢掉承重的两列。
+      let absorbedPsAddr = null;
+      try { absorbedPsAddr = p2shFn(absorbedRedeemHex); }
+      catch (e) { console.warn(`[bshard-close-transport] market=${marketId.slice(-8)} payout_ps_addr 计算失败, 仅写 redeem/outpoint: ${e.message}`); }
+      try {
+        if (absorbedPsAddr) sqlite.prepare('UPDATE payout_shards SET payout_redeem_hex = ?, payout_ps_outpoint = ?, payout_ps_addr = ? WHERE logical_market_id = ?').run(absorbedRedeemHex, consolidateRes.psOutpoint, absorbedPsAddr, marketId);
+        else sqlite.prepare('UPDATE payout_shards SET payout_redeem_hex = ?, payout_ps_outpoint = ? WHERE logical_market_id = ?').run(absorbedRedeemHex, consolidateRes.psOutpoint, marketId);
+      } catch {}
+      // 内存里的 ps 也要跟着走, 否则同一 tick 后续读到的仍是陈旧 addr(设计稿 §1.C)。
+      // addr 算失败时不写这一键 —— 让它保持原值, 与 DB 落库结果一致, 不制造内存/DB 分叉。
+      ps = { ...ps, payout_redeem_hex: absorbedRedeemHex, payout_ps_outpoint: consolidateRes.psOutpoint, ...(absorbedPsAddr ? { payout_ps_addr: absorbedPsAddr } : {}) };
     }
   }
   // 🔴 STOP修正(第二次propose实战撞到, 2026-07-08): psTx/psIdxStr 必须从上面 consolidation 之后的 ps

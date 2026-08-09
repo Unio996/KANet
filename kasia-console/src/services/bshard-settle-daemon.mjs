@@ -233,7 +233,20 @@ async function consolidateAndBuildPsState(marketId, ps, ctx) {
     // (res.redeemHex, 与 relay 广播时用的字节同源), 不再靠数值反推重编译。自愈写回同批覆盖两列(NWT
     // finding⑤: 之前只写 payout_ps_outpoint 一列, payout_redeem_hex 留旧值会造成两列配对不一致)。
     psRedeemHex = res.redeemHex;
-    try { sqlite.prepare('UPDATE payout_shards SET payout_ps_outpoint = ?, payout_redeem_hex = ? WHERE logical_market_id = ?').run(res.psOutpoint, psRedeemHex, marketId); } catch {}
+    // payout_ps_addr 必须跟着 redeem 一起刷: 它是 write-once 陈列(genesis 时 = p2sh(redeem)), 而这里
+    // splice 出了新 redeem。漏刷 ⇒ K-18 §3.3 coherence gate step(d) 拿【当前 redeem】比【genesis addr】
+    // 必然不等 ⇒ throw ⇒ 结算被拦。设计: docs/2026-08-09-zk-settle-writer-fix-design-v0.1.md §1.A
+    // 🔴 有意偏离设计稿一处: addr 单独 try, 算不出来就【退回只写两列】, 不进下面那个 try。
+    //    原稿把 _p2shCache 放进同一个 try —— 那样它一 throw, redeem+outpoint 的写入会被一起吞掉,
+    //    而那两列才是承重的。addr 陈旧是今天就有的状态(gate 拦着), redeem 陈旧则会让下游读到过期
+    //    字节。降级方向必须是"回到今天", 不能是"比今天更坏"。
+    let psAddrNew = null;
+    try { psAddrNew = _p2shCache(psRedeemHex); }
+    catch (e) { console.warn(`[bshard-settle] market=${marketId.slice(-8)} payout_ps_addr 计算失败, 仅写 redeem/outpoint(addr 保持陈旧, gate 仍会拦): ${e.message}`); }
+    try {
+      if (psAddrNew) sqlite.prepare('UPDATE payout_shards SET payout_ps_outpoint = ?, payout_redeem_hex = ?, payout_ps_addr = ? WHERE logical_market_id = ?').run(res.psOutpoint, psRedeemHex, psAddrNew, marketId);
+      else sqlite.prepare('UPDATE payout_shards SET payout_ps_outpoint = ?, payout_redeem_hex = ? WHERE logical_market_id = ?').run(res.psOutpoint, psRedeemHex, marketId);
+    } catch {}
     log(`${marketId.slice(-8)} consolidated ${res.consolidatedShards} shard(s) → ${res.psOutpoint} pool=${consolidatedPool}`);
   } else {
     [psOutpointTxid, psIdx] = String(ps.payout_ps_outpoint).split(':'); psIdx = Number(psIdx);
@@ -295,7 +308,14 @@ async function consolidateAndBuildPsState(marketId, ps, ctx) {
         // 好的字节(与 relay/consolidateAllShards 同一权威), 不重编译。自愈写回同批覆盖两列(NWT finding⑤:
         // 只写 payout_ps_outpoint 会让 payout_redeem_hex 继续留旧值, 两列配对不一致, 下次 Tier1 又会判"不新鲜")。
         psRedeemHex = resumePoint.redeemHex;
-        try { sqlite.prepare('UPDATE payout_shards SET payout_ps_outpoint = ?, payout_redeem_hex = ? WHERE logical_market_id = ?').run(`${psOutpointTxid}:${psIdx}`, psRedeemHex, marketId); } catch {}
+        // 同 §1.A: Tier2 genesis-walk 重建出新 redeem, addr 必须同步刷。同样的降级纪律。
+        let psAddrNew2 = null;
+        try { psAddrNew2 = _p2shCache(psRedeemHex); }
+        catch (e) { console.warn(`[bshard-settle] market=${marketId.slice(-8)} payout_ps_addr 计算失败(Tier2), 仅写 redeem/outpoint: ${e.message}`); }
+        try {
+          if (psAddrNew2) sqlite.prepare('UPDATE payout_shards SET payout_ps_outpoint = ?, payout_redeem_hex = ?, payout_ps_addr = ? WHERE logical_market_id = ?').run(`${psOutpointTxid}:${psIdx}`, psRedeemHex, psAddrNew2, marketId);
+          else sqlite.prepare('UPDATE payout_shards SET payout_ps_outpoint = ?, payout_redeem_hex = ? WHERE logical_market_id = ?').run(`${psOutpointTxid}:${psIdx}`, psRedeemHex, marketId);
+        } catch {}
         log(`${marketId.slice(-8)} Tier2 重建命中: payout_ps_outpoint/payout_redeem_hex 自愈为 ${psOutpointTxid}:${psIdx} pool=${consolidatedPoolReal}(redeemFresh=${redeemFresh})`);
       } else {
         // autoDetectConsolidateResume 返回 null 有两种原因(NWT 复核观察 b, 区分记录方便排查):

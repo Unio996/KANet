@@ -657,15 +657,38 @@ export function stopBshardCloseSubmitV2Cron() { if (submitTimer) { clearInterval
  *   witness 结构固定)。写失败不影响 attest 本身已落链的事实(try/catch, 只 log 不 throw, 镜像
  *   _tryEnqueueZkProve 同款"钱路已成立, 记账失败不倒灌回钱路状态"纪律)。
  */
-function _persistAttestedPsState(marketId, req, txId) {
+async function _persistAttestedPsState(marketId, req, txId, psContAddress) {
   try {
     const preRedeemHex = req.closeInputs.payoutshard.redeem_hex;
     const spliced = _splicePayoutV2CloseRedeem(preRedeemHex, {
       newPayoutRootHex: req.claimedPayoutRoot, newAttestedWinner: req.new_attestedWinner,
       newBetsRootHex: req.new_betsRoot, newRefundRootHex: req.new_refundRoot, newAttestedAtMs: req.new_attestedAtMs,
     });
-    sqlite.prepare('UPDATE payout_shards SET payout_redeem_hex = ?, payout_ps_outpoint = ? WHERE logical_market_id = ?')
-      .run(spliced, `${txId}:0`, marketId);
+    // payout_ps_addr 必须跟着 splice 后的 redeem 一起刷(设计 §1.D), 否则 coherence gate step(d)
+    // 拿新 redeem 比 genesis 陈旧 addr 必不等 ⇒ 拦住结算。
+    // 🔴 三个前置都是实核过的, 不是照抄设计稿:
+    //  ① wasm: bshardCloseSubmitV2Tick 这条路径【没有】调过 ensureKaspaWasm(全函数内零命中),
+    //     所以 p2shFromRedeemSync 会 throw ⇒ 本函数改 async 并在此 await 一次。
+    //  ② network: 本函数拿不到 voter(tick 内无此变量), 改用调用点都已有的 psContAddress ——
+    //     它本身就是 kaspa 地址, 判法与 buildEnforceCtx(line 138) 同款同源。
+    //  ③ 降级方向: addr 单独 try。原稿把它放在 UPDATE 之前的主流程里, 而本函数整体
+    //     try/catch 的既有纪律是"记账失败不倒灌钱路" —— 那样一 throw, redeem+outpoint 也一起
+    //     写不进去, 比今天(只有 addr 陈旧)更坏。attest 已落链是既成事实, 降级必须回到今天。
+    let splicedAddr = null;
+    try {
+      await ensureKaspaWasm();
+      const network = String(psContAddress || '').startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
+      splicedAddr = p2shFromRedeemSync(spliced, network);
+    } catch (e) {
+      console.warn(`[bshard-close-submit-v2] market=${marketId.slice(-8)} payout_ps_addr 计算失败, 仅写 redeem/outpoint(addr 保持陈旧, gate 仍会拦住而不是放行): ${e.message}`);
+    }
+    if (splicedAddr) {
+      sqlite.prepare('UPDATE payout_shards SET payout_redeem_hex = ?, payout_ps_outpoint = ?, payout_ps_addr = ? WHERE logical_market_id = ?')
+        .run(spliced, `${txId}:0`, splicedAddr, marketId);
+    } else {
+      sqlite.prepare('UPDATE payout_shards SET payout_redeem_hex = ?, payout_ps_outpoint = ? WHERE logical_market_id = ?')
+        .run(spliced, `${txId}:0`, marketId);
+    }
     console.log(`[bshard-close-submit-v2] ✅ market=${marketId.slice(-8)} payout_shards 状态持久化(closed=1, outpoint=${txId}:0)`);
   } catch (e) {
     console.error(`[bshard-close-submit-v2] 🔴 market=${marketId.slice(-8)} payout_shards 状态持久化 FAILED (attest 本身已落链, 不受影响, 但下游 zk_handoff 会读到 stale 值): ${e.message}`);
@@ -734,7 +757,7 @@ export async function bshardCloseSubmitV2Tick() {
       if (pendingTx?.txid) {
         const landedNow = await _pollLanded(pendingTx.psContAddress, pendingTx.txid, 1, 0);
         if (landedNow) {
-          _persistAttestedPsState(market.id, req, pendingTx.txid);
+          await _persistAttestedPsState(market.id, req, pendingTx.txid, pendingTx.psContAddress);
           clearCloseRequest(market.id, 'attested_v2');
           _tryEnqueueZkProve(market, req);
           submitted++;
@@ -762,7 +785,7 @@ export async function bshardCloseSubmitV2Tick() {
       // 否则 broadcast 声称成功但 tx 被节点拒绝/mempool 丢弃时, DB 会乐观地记成"已提交"而链上其实什么都没发生。
       const landedOk = await _pollLanded(r.psContAddress, r.txId);
       if (!landedOk) { failed++; console.warn(`[bshard-close-submit-v2] market=${market.id.slice(-8)} txId=${r.txId} broadcast OK 但等待窗口内未确认 landed — txId 已持久化(bshard_close_submit_v2_pending_txid), 下轮 tick 只查这一笔, 不重复 broadcast`); continue; }
-      _persistAttestedPsState(market.id, req, r.txId);
+      await _persistAttestedPsState(market.id, req, r.txId, r.psContAddress);
       clearCloseRequest(market.id, 'attested_v2');   // 独立 status 值, 跟 V1 completed/refunding 区分——后续链条(zk_handoff)接手。
       _tryEnqueueZkProve(market, req);
       submitted++;
