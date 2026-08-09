@@ -33,6 +33,7 @@ import { zkCloseTickV2, claimAutonomousTick, zkHandoffAutonomousTick, zkJudgePro
 import { buildZkHandoffRequestV2, buildProposeCloseRequestV2 } from '../lib/bshard-close-transport.mjs';   // 第五/六件 ctx 注入(dispatchUnlockZkClose 同惯例, 本 daemon 不重新实现门①/propose 逻辑)
 import { randomUUID } from 'crypto';
 import { createRequire } from 'node:module';
+import { persistPayoutShardState } from '../lib/payout-shard-persist.mjs';
 const _require = createRequire(import.meta.url);
 // 同 zk-prove-worker.mjs 完全一致的 isolated zk-sdk WASM 路径(D-005 隔离铁律: ZK 工具链绝不碰 live kaspa-wasm,
 // 独立 clone 出的 zk-sdk 构建)——gate witness 重建需要跟铸 gate 时同一份 ZkScriptBuilder API。
@@ -233,20 +234,9 @@ async function consolidateAndBuildPsState(marketId, ps, ctx) {
     // (res.redeemHex, 与 relay 广播时用的字节同源), 不再靠数值反推重编译。自愈写回同批覆盖两列(NWT
     // finding⑤: 之前只写 payout_ps_outpoint 一列, payout_redeem_hex 留旧值会造成两列配对不一致)。
     psRedeemHex = res.redeemHex;
-    // payout_ps_addr 必须跟着 redeem 一起刷: 它是 write-once 陈列(genesis 时 = p2sh(redeem)), 而这里
-    // splice 出了新 redeem。漏刷 ⇒ K-18 §3.3 coherence gate step(d) 拿【当前 redeem】比【genesis addr】
-    // 必然不等 ⇒ throw ⇒ 结算被拦。设计: docs/2026-08-09-zk-settle-writer-fix-design-v0.1.md §1.A
-    // 🔴 有意偏离设计稿一处: addr 单独 try, 算不出来就【退回只写两列】, 不进下面那个 try。
-    //    原稿把 _p2shCache 放进同一个 try —— 那样它一 throw, redeem+outpoint 的写入会被一起吞掉,
-    //    而那两列才是承重的。addr 陈旧是今天就有的状态(gate 拦着), redeem 陈旧则会让下游读到过期
-    //    字节。降级方向必须是"回到今天", 不能是"比今天更坏"。
-    let psAddrNew = null;
-    try { psAddrNew = _p2shCache(psRedeemHex); }
-    catch (e) { _logAddrDegraded(marketId, e); }
-    try {
-      if (psAddrNew) sqlite.prepare('UPDATE payout_shards SET payout_ps_outpoint = ?, payout_redeem_hex = ?, payout_ps_addr = ? WHERE logical_market_id = ?').run(res.psOutpoint, psRedeemHex, psAddrNew, marketId);
-      else sqlite.prepare('UPDATE payout_shards SET payout_ps_outpoint = ?, payout_redeem_hex = ? WHERE logical_market_id = ?').run(res.psOutpoint, psRedeemHex, marketId);
-    } catch {}
+    // payout_ps_addr 必须跟着 redeem 一起刷(设计 §1.A)。写入收在唯一入口 persistPayoutShardState:
+    // 收成一个函数, 是为了让守卫能判【结构配对】而不是【物理邻近】—— 见该模块头注释(Codex MUST-FIX)。
+    persistPayoutShardState({ sqlite, marketId, redeemHex: psRedeemHex, outpoint: res.psOutpoint, p2sh: _p2shCache, source: 'bshard-settle-daemon' });
     log(`${marketId.slice(-8)} consolidated ${res.consolidatedShards} shard(s) → ${res.psOutpoint} pool=${consolidatedPool}`);
   } else {
     [psOutpointTxid, psIdx] = String(ps.payout_ps_outpoint).split(':'); psIdx = Number(psIdx);
@@ -308,14 +298,8 @@ async function consolidateAndBuildPsState(marketId, ps, ctx) {
         // 好的字节(与 relay/consolidateAllShards 同一权威), 不重编译。自愈写回同批覆盖两列(NWT finding⑤:
         // 只写 payout_ps_outpoint 会让 payout_redeem_hex 继续留旧值, 两列配对不一致, 下次 Tier1 又会判"不新鲜")。
         psRedeemHex = resumePoint.redeemHex;
-        // 同 §1.A: Tier2 genesis-walk 重建出新 redeem, addr 必须同步刷。同样的降级纪律。
-        let psAddrNew2 = null;
-        try { psAddrNew2 = _p2shCache(psRedeemHex); }
-        catch (e) { _logAddrDegraded(marketId, e); }
-        try {
-          if (psAddrNew2) sqlite.prepare('UPDATE payout_shards SET payout_ps_outpoint = ?, payout_redeem_hex = ?, payout_ps_addr = ? WHERE logical_market_id = ?').run(`${psOutpointTxid}:${psIdx}`, psRedeemHex, psAddrNew2, marketId);
-          else sqlite.prepare('UPDATE payout_shards SET payout_ps_outpoint = ?, payout_redeem_hex = ? WHERE logical_market_id = ?').run(`${psOutpointTxid}:${psIdx}`, psRedeemHex, marketId);
-        } catch {}
+        // 同 §1.A(Tier2 genesis-walk 重建出新 redeem), 同一个唯一写入口。
+        persistPayoutShardState({ sqlite, marketId, redeemHex: psRedeemHex, outpoint: `${psOutpointTxid}:${psIdx}`, p2sh: _p2shCache, source: 'bshard-settle-daemon' });
         log(`${marketId.slice(-8)} Tier2 重建命中: payout_ps_outpoint/payout_redeem_hex 自愈为 ${psOutpointTxid}:${psIdx} pool=${consolidatedPoolReal}(redeemFresh=${redeemFresh})`);
       } else {
         // autoDetectConsolidateResume 返回 null 有两种原因(NWT 复核观察 b, 区分记录方便排查):
@@ -381,21 +365,6 @@ function buildCtx() {
 }
 // kaspa-wasm p2sh/p2pk are sync after module load; pre-warm in tick. computeSettlePlan/settleMarketLive call them sync.
 let _k = null;
-function _logAddrDegraded(marketId, err) {
-  // J2 红队 2026-08-09 (实证驱动, 非假想): addr 计算走 kaspa-wasm, 而 08-07T20:55 起的 wasm trap
-  // 持续 33.7 小时 —— 那种窗口里本补丁会【每次都走降级】: 刷 redeem、不刷 addr ⇒ gate 继续拦 ⇒ 结算
-  // 继续停, 而现象与"还没修"完全一致。console 输出不够: 结算停 20 天零人察觉就是证据。
-  // ⇒ 降级必须落进 events(读侧认识 level='error'), 让"补丁正在降级"成为可观测量而不是沉默。
-  // 落账失败本身不许把主流程弄崩 —— 钱路已成立, 记账不倒灌。
-  const summary = `payout_ps_addr 刷新失败 market=${String(marketId).slice(-8)} — 仅写 redeem/outpoint, coherence gate step(d) 将继续拦住该盘结算`;
-  console.warn(`[bshard-settle-daemon] 🔴 ${summary}: ${err && err.message}`);
-  try {
-    sqlite.prepare(`INSERT INTO events (id, event_scope, event_type, source, level, summary, payload_json, created_at)
-      VALUES (?, 'system', 'payout_ps_addr_refresh_degraded', 'bshard-settle-daemon', 'error', ?, ?, datetime('now'))`)
-      .run(randomUUID(), summary, JSON.stringify({ marketId, error: String(err && err.message || err) }));
-  } catch (e) { console.error(`[bshard-settle-daemon] events 落账失败 (non-fatal): ${e.message}`); }
-}
-
 function _p2shCache(redeemHex) { return _k.addressFromScriptPublicKey(_k.ScriptBuilder.fromScript(new Uint8Array(Buffer.from(redeemHex, 'hex'))).createPayToScriptHashScript(), NETWORK).toString(); }
 function _p2pkAddrSync(pkHex) { return new _k.PublicKey(pkHex).toAddress(_k.NetworkType.Testnet).toString(); }
 function _p2pkSpkSync(addr) { const s = _k.payToAddressScript(new _k.Address(addr)); return (s.script ?? s).toString(); }

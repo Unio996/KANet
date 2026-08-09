@@ -30,7 +30,7 @@ import { collectCloseSigsV2, clearCloseRequest, markSubmittedV2, QUORUM } from '
 import { _splicePayoutV2CloseRedeem, readPayoutShardV2AttestedState } from '../lib/bshard-close-enforce.mjs';
 import { deriveSettlementFeeLeaves } from '../lib/pool-shard-settle.mjs';
 import { enqueueZkProveJob } from '../lib/zk-prove-enqueue.mjs';
-import { randomUUID } from 'node:crypto';
+import { persistPayoutShardState } from '../lib/payout-shard-persist.mjs';
 
 const TICK_MS = 30_000;   // 30s tick (close_attest 时效性 > 普通 vote; settler 等 quorum)
 let timer = null, running = false;
@@ -658,21 +658,6 @@ export function stopBshardCloseSubmitV2Cron() { if (submitTimer) { clearInterval
  *   witness 结构固定)。写失败不影响 attest 本身已落链的事实(try/catch, 只 log 不 throw, 镜像
  *   _tryEnqueueZkProve 同款"钱路已成立, 记账失败不倒灌回钱路状态"纪律)。
  */
-function _logAddrDegraded(marketId, err) {
-  // J2 红队 2026-08-09 (实证驱动, 非假想): addr 计算走 kaspa-wasm, 而 08-07T20:55 起的 wasm trap
-  // 持续 33.7 小时 —— 那种窗口里本补丁会【每次都走降级】: 刷 redeem、不刷 addr ⇒ gate 继续拦 ⇒ 结算
-  // 继续停, 而现象与"还没修"完全一致。console 输出不够: 结算停 20 天零人察觉就是证据。
-  // ⇒ 降级必须落进 events(读侧认识 level='error'), 让"补丁正在降级"成为可观测量而不是沉默。
-  // 落账失败本身不许把主流程弄崩 —— 钱路已成立, 记账不倒灌。
-  const summary = `payout_ps_addr 刷新失败 market=${String(marketId).slice(-8)} — 仅写 redeem/outpoint, coherence gate step(d) 将继续拦住该盘结算`;
-  console.warn(`[bshard-close-submit-v2] 🔴 ${summary}: ${err && err.message}`);
-  try {
-    sqlite.prepare(`INSERT INTO events (id, event_scope, event_type, source, level, summary, payload_json, created_at)
-      VALUES (?, 'system', 'payout_ps_addr_refresh_degraded', 'bshard-close-submit-v2', 'error', ?, ?, datetime('now'))`)
-      .run(randomUUID(), summary, JSON.stringify({ marketId, error: String(err && err.message || err) }));
-  } catch (e) { console.error(`[bshard-close-submit-v2] events 落账失败 (non-fatal): ${e.message}`); }
-}
-
 async function _persistAttestedPsState(marketId, req, txId, psContAddress) {
   try {
     const preRedeemHex = req.closeInputs.payoutshard.redeem_hex;
@@ -680,31 +665,17 @@ async function _persistAttestedPsState(marketId, req, txId, psContAddress) {
       newPayoutRootHex: req.claimedPayoutRoot, newAttestedWinner: req.new_attestedWinner,
       newBetsRootHex: req.new_betsRoot, newRefundRootHex: req.new_refundRoot, newAttestedAtMs: req.new_attestedAtMs,
     });
-    // payout_ps_addr 必须跟着 splice 后的 redeem 一起刷(设计 §1.D), 否则 coherence gate step(d)
-    // 拿新 redeem 比 genesis 陈旧 addr 必不等 ⇒ 拦住结算。
-    // 🔴 三个前置都是实核过的, 不是照抄设计稿:
-    //  ① wasm: bshardCloseSubmitV2Tick 这条路径【没有】调过 ensureKaspaWasm(全函数内零命中),
-    //     所以 p2shFromRedeemSync 会 throw ⇒ 本函数改 async 并在此 await 一次。
-    //  ② network: 本函数拿不到 voter(tick 内无此变量), 改用调用点都已有的 psContAddress ——
-    //     它本身就是 kaspa 地址, 判法与 buildEnforceCtx(line 138) 同款同源。
-    //  ③ 降级方向: addr 单独 try。原稿把它放在 UPDATE 之前的主流程里, 而本函数整体
-    //     try/catch 的既有纪律是"记账失败不倒灌钱路" —— 那样一 throw, redeem+outpoint 也一起
-    //     写不进去, 比今天(只有 addr 陈旧)更坏。attest 已落链是既成事实, 降级必须回到今天。
-    let splicedAddr = null;
-    try {
-      await ensureKaspaWasm();
-      const network = String(psContAddress || '').startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
-      splicedAddr = p2shFromRedeemSync(spliced, network);
-    } catch (e) {
-      _logAddrDegraded(marketId, e);
-    }
-    if (splicedAddr) {
-      sqlite.prepare('UPDATE payout_shards SET payout_redeem_hex = ?, payout_ps_outpoint = ?, payout_ps_addr = ? WHERE logical_market_id = ?')
-        .run(spliced, `${txId}:0`, splicedAddr, marketId);
-    } else {
-      sqlite.prepare('UPDATE payout_shards SET payout_redeem_hex = ?, payout_ps_outpoint = ? WHERE logical_market_id = ?')
-        .run(spliced, `${txId}:0`, marketId);
-    }
+    // payout_ps_addr 必须跟着 splice 后的 redeem 一起刷(设计 §1.D), 走唯一写入口。
+    // 🔴 wasm 前置是实核的: bshardCloseSubmitV2Tick 全函数【零命中】ensureKaspaWasm ⇒ p2shFromRedeemSync
+    //    会抛 ⇒ 本函数改 async 并在此 await 一次(NWT: trap 家族下同进程重试无效, 但首次加载仍需保证)。
+    // 🔴 network 来源: tick 内没有 voter, 改用两个调用点都已持有的 psContAddress —— 它本身就是 kaspa
+    //    地址, 判法与 buildEnforceCtx(:138) 同款同源, 不新造真相来源。
+    try { await ensureKaspaWasm(); } catch { /* 交给 p2sh 那一层记账降级, 不在这里吞掉主流程 */ }
+    const network = String(psContAddress || '').startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
+    persistPayoutShardState({
+      sqlite, marketId, redeemHex: spliced, outpoint: `${txId}:0`,
+      p2sh: (hex) => p2shFromRedeemSync(hex, network), source: 'bshard-close-submit-v2',
+    });
     console.log(`[bshard-close-submit-v2] ✅ market=${marketId.slice(-8)} payout_shards 状态持久化(closed=1, outpoint=${txId}:0)`);
   } catch (e) {
     console.error(`[bshard-close-submit-v2] 🔴 market=${marketId.slice(-8)} payout_shards 状态持久化 FAILED (attest 本身已落链, 不受影响, 但下游 zk_handoff 会读到 stale 值): ${e.message}`);
