@@ -77,9 +77,13 @@ const STARVED_LAG_SEC = Number(process.env.DAG_PROBE_STARVED_LAG_SEC || 600);
 // take opposite actions (wait vs. intervene).
 const IBD_GAP = Number(process.env.DAG_PROBE_IBD_GAP || 100);
 
-function diagnose({ tips, lagSeconds, isSynced, headerMinusBlock }) {
+function diagnose({ tips, lagSeconds, isSynced, headerMinusBlock, peerCount }) {
   if (tips >= RUNAWAY_TIPS) return 'runaway';           // checked first: it is the dangerous one
   const lagging = lagSeconds !== null && lagSeconds >= STARVED_LAG_SEC;
+  // Isolation outranks every lag-based verdict: with no peers you are not observing the network,
+  // so any statement about the network from this node is unsupported. Reported as its own state
+  // so nobody re-runs 2026-08-09's inference ("my DAA is frozen" -> "the chain is idle").
+  if (lagging && peerCount === 0) return 'isolated';
   if (lagging && headerMinusBlock >= IBD_GAP) return 'catching-up';  // behind BUT being fed
   if (lagging) return 'starved';                        // behind AND not being fed -> intervene
   if (!isSynced) return 'behind';                        // lagging but under threshold; watch it
@@ -124,6 +128,22 @@ try {
   const dag = await Promise.race([rpc.getBlockDagInfo(), t(8000, 'rpc timeout')]);
   const si = await Promise.race([rpc.getServerInfo(), t(8000, 'rpc timeout')]);
 
+  // 🔴 peerCount added 2026-08-09 because its ABSENCE caused a real misdiagnosis the same night.
+  // Without it this probe reports a frozen DAA/blockCount and nothing else -- and "the network
+  // stopped producing" and "I lost my peers and can no longer see new blocks" produce a
+  // BYTE-IDENTICAL reading. Bettor read a frozen DAA off this probe across 6+ polls and
+  // concluded "chain idle, must restart mining"; it was actually his own node down to 0-2 peers
+  // while others read peers=3, synced=true, DAA advancing. His words: "before asserting the
+  // network isn't moving, first confirm I'm still attached to the network."
+  // A health probe that cannot tell you whether you are still connected is telling you about
+  // yourself while sounding like it is telling you about the world.
+  let peerCount = null;
+  try {
+    const pi = await Promise.race([rpc.getConnectedPeerInfo(), t(8000, 'rpc timeout')]);
+    const list = pi?.peerInfo ?? pi?.infos ?? pi?.peers ?? [];
+    peerCount = Array.isArray(list) ? list.length : null;
+  } catch { peerCount = null; }   // null = could not read, NOT zero. Do not collapse them.
+
   // Lag is measured against an ABSOLUTE anchor (sink block timestamp vs wall clock), not
   // against another node's numbers -- comparing two nodes cannot tell you that BOTH are stuck,
   // which is exactly what happened on 2026-08-07 (identical readings, both dead).
@@ -146,8 +166,10 @@ try {
 
   out({
     ok: true,
-    diagnosis: diagnose({ tips, lagSeconds, isSynced, headerMinusBlock: headerCount - blockCount }),
+    diagnosis: diagnose({ tips, lagSeconds, isSynced, headerMinusBlock: headerCount - blockCount, peerCount }),
     tips,
+    // null means UNREADABLE, not zero -- see the note above; conflating them is the bug.
+    peerCount,
     lagSeconds,
     // header > block means the node is pulling headers ahead of bodies = IBD in progress.
     // A starved node shows lag WITHOUT this gap: it is not even trying.
