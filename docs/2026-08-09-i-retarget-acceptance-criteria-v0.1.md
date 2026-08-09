@@ -1,6 +1,7 @@
-> **Status**: ACCEPTANCE CRITERIA v0.1 · NWT · design-only · 零改码/零部署
+> **Status**: ACCEPTANCE CRITERIA v0.2 · NWT · design-only · 零改码/零部署
 > **为什么写**: Bettor 14:15 派活("(i)/⑥ retarget 的 DoD = Codex 五条验收证据, NWT主"), 承 `docs/2026-08-09-i-proto-redteam.md`(我的原始红队) + Codex 独立复审(`coordination/codex-bridge/responses/...I-PROTO-SEMANTIC-REDTEAM-CODEX-REVIEW.md`) + 我自己对 H1 框架错误的更正。
 > **这份文档不是实现** —— 是给将来实现 (i) retarget 的人(不论是谁)当验收靶子用的清单。实现前必须先走铁律0(报计划→审→批→做)。
+> **v0.2**: Bettor 14:20 APPROVED v0.1 作 ⑥ retarget 验收基线, 加两条补全(见 §1⑤ 与新增 §1.5)。
 
 # (i) retarget 验收标准 —— Codex 五条 + NWT 一条框架更正
 
@@ -36,8 +37,12 @@
 - **怎么证**: 复用既有 mutation-test 工具,不新建;对照组(`market_id`/`minerFee` 等已知会变的参数)必须同批同时验证仍然正确,排除工具本身坏掉的可能。
 
 ### ⑤ 正 + 对抗 tx 测试
-- **验什么**: 至少覆盖 —— 舍入(链上 floor 顺序 vs 链下 floor 顺序是否逐字节一致,§5 提过的"先除后乘"顺序问题)、零费市场(`brokerFeePct==0` 时 output 结构怎么处理,不能撞 dust 下限)、溢出安全(`pot*bps` 在 i64 下的安全乘除顺序)、output-index 正确性(不能被恶意委员改写成别的 index)、总值守恒(broker+oracle+bettor 输出总和不超过 pot,无隐藏铸币/漏出)。
+- **验什么**: 至少覆盖 —— 舍入(链上 floor 顺序 vs 链下 floor 顺序是否逐字节一致,§5 提过的"先除后乘"顺序问题)、零费市场(`brokerFeePct==0` 时 output 结构怎么处理,不能撞 dust 下限)、溢出安全(`pot*bps` 在 i64 下的安全乘除顺序)、output-index 正确性(不能被恶意委员改写成别的 index)、**总值守恒**(v0.2 修正,Bettor 补全①:不是"broker+oracle+bettor 输出总和不超过 pot"——这漏了网络费 output,一笔藏在 minerFee 槽里的漏出检不出、或合法网络费被误判超支。改成**全部 output(winners+broker+oracle+network fee)总和 == pot**,无隐藏铸币/漏出)。
 - **怎么证**: 每一条至少一个正向用例 + 一个对抗用例(蓄意构造边界值/恶意委员输入),不接受"设计上应该没问题"的口头论证。
+
+### ⑥ (v0.2 新增,Bettor 补全②,承重) retarget 不能拆掉 refund 那条合法的网络费保护
+- **验什么**: retarget 的目标是**在 `settle_aggregate` 新增政策费率权威**,不是删掉 `refund_maker_unjoined` 里那个合法的网络费 haircut——`marketMinFee/Max` 在退款处作网络费 bound 本身是**对**的(Codex 确认这是 qlfpv 防砖槽的正当用途),错的只是它被**冒充**成市场费率权威(§0 那条语义错位)。**修语义错位 ≠ 拆掉退款保护。**
+- **怎么证**: retarget 后跑一次回归——`refund_maker_unjoined` 的网络费 haircut 逻辑(§4-H1/H2/H3 已验的那部分:range 夹住 stake 折扣、per-market 化、无重定向盗取面)**仍在、仍正确**,不因为新增了 settle 侧的政策费率约束而被连带改动或删除。同 [[feedback-verify-fix-does-not-reproduce-same-bug-elsewhere]] 的反面——修一处别碰坏邻居。
 
 ## §2 H1 的完整条件集(不止 min<=max)
 
