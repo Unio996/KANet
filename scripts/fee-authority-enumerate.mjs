@@ -43,6 +43,13 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_DIR = path.resolve(__dirname, '..', 'kasia-console', 'src', 'lib');
 const DIR = process.env.FEE_ENUM_DIR || DEFAULT_DIR;
 const FILE_RE = /^PoolSpine.*\.sil$/;
+// 🔴 A prototype living in the same directory was being counted as production: dropping
+// PoolSpine_i_proto.sil into kasia-console/src/lib moved the headline from 0/22 to 25/25 purely
+// because the scan is a filename pattern over a directory. The positive control must be VISIBLE
+// (a detector that has never detected anything is not trustworthy) but must not enter the
+// denominator -- nothing about a non-deployed experiment belongs in a statement about what the
+// deployed spine authorizes. Reported separately, never summed.
+const PROTO_RE = /_proto\.sil$/;
 
 // Fee-ish ctor params are DISCOVERED from each contract's own signature, never hardcoded --
 // v0.8 introduced maxChunkFee and v0.7.1 dropped minerFee entirely; a fixed list would have
@@ -57,9 +64,23 @@ const SPEND_RE = /tx\.outputs?\[[^\]]*\]\.value/;
 // Family of a fee-ish param name. market = the maker/oracle POLICY rate (what (i) is about);
 // network = the miner/chain transaction fee (a different quantity that must NOT count as market
 // authority). unknown params are surfaced separately rather than silently folded either way.
+// 🔴 POSITIVE-ORACLE FAILURE, 2026-08-09 (Codex asked for this control; it failed on first run):
+// run against the (i) prototype -- v0.7's refund with its two global literals replaced by
+// ctor-committed per-market bounds, structurally identical otherwise -- this returned
+//     PoolSpine_v07.sil::refund_maker_unjoined      -> GLOBAL-LITERAL
+//     PoolSpine_i_proto.sil::refund_maker_unjoined  -> NO-FEE-CONSTRAINT
+// i.e. the enumerator could see the LITERAL form and went blind on the CTOR-COMMITTED form,
+// which is the exact form (i) introduces. So the 0/22 headline was measured with an instrument
+// that cannot see the thing (i) creates: ship (i) and this tool would still have reported 0.
+// Cause: `marketMinFee` matches none of the patterns below and fell to 'unknown', and unknown
+// was silently excluded from the verdict -- a false negative wearing the same output as a real
+// zero. The list encoded "what a market-fee param has looked like so far" instead of what one
+// IS (see memory: criterion-by-definition-not-correlation / enumerating-tools-must-discover).
 function feeFamily(name) {
   if (/miner|chunk/i.test(name)) return 'network';           // minerFee, maxChunkFee, chunkMinerFee
-  if (/pct$|bps$/i.test(name) || /(broker|oracle|maker).*fee/i.test(name)) return 'market'; // brokerFeePct, oracleFeePct
+  // market-family: a policy rate OR a per-market bound on one. Bounds are what (i) commits.
+  if (/pct$|bps$/i.test(name) || /(broker|oracle|maker|market).*fee/i.test(name)) return 'market';
+  if (/fee.*(min|max|bound|floor|cap)/i.test(name) || /(min|max).*fee/i.test(name)) return 'market';
   return 'unknown';
 }
 
@@ -220,10 +241,16 @@ for (const f of files) {
     const marketRanged = market.filter((x) => x.kind === 'require-RANGE');
     const literal = detectLiteralFeeBound(lines, ep.start, ep.end);
     // Verdicts are ordered by how much authority the MARKET actually has over its own fee.
+    // An unclassifiable fee param that is actually REQUIRED on must never leave through the
+    // NO-FEE-CONSTRAINT exit: "I could not place this parameter" and "this entrypoint has no fee
+    // handling at all" are opposite findings and used to print the same word. Ranked just above
+    // the empty verdict so it can never be masked by one.
+    const unknownRequired = found.filter((x) => x.family === 'unknown');
     const verdict = marketBound.length ? 'PER-MARKET(eq)'      // this market's committed rate binds the spend
       : marketRanged.length ? 'PER-MARKET(range)'              // committed rate only sanity-checked
       : literal.length ? 'GLOBAL-LITERAL'                      // bounded, but by a constant, not by this market
       : market.length ? 'referenced-only'                      // market rate referenced but never required
+      : unknownRequired.length ? 'UNCLASSIFIED-FEE-PARAM'      // 🔴 detector gap, NOT a clean zero
       : 'NO-FEE-CONSTRAINT';                                   // no MARKET-rate handling at all
     entry.entrypoints.push({
       name: ep.name,
@@ -263,14 +290,29 @@ if (process.argv.includes('--json')) {
   //   PER-MARKET(range) : the committed value is only sanity-checked, never tied to the spend
   //   GLOBAL-LITERAL    : the spend is bounded, but by a constant shared by every market
   //   NO-FEE-CONSTRAINT : nothing at all for the MARKET rate (a minerFee binding may still exist)
-  const allEps = report.flatMap((c) => c.entrypoints.map((e) => ({ c: c.contract, e })));
+  // Prototypes are reported but never summed into the headline (see PROTO_RE).
+  const everyEp = report.flatMap((c) => c.entrypoints.map((e) => ({ c: c.contract, e })));
+  const allEps = everyEp.filter(({ c }) => !PROTO_RE.test(c));
+  const protoEps = everyEp.filter(({ c }) => PROTO_RE.test(c));
   const perMarketEq = allEps.filter(({ e }) => e.verdict === 'PER-MARKET(eq)');
   const holes = allEps.filter(({ e }) => e.verdict !== 'PER-MARKET(eq)')
     .map(({ c, e }) => `${c}::${e.name} -> ${e.verdict}`);
   const networkEq = allEps.filter(({ e }) => e.networkFee.some((n) => n.role.startsWith('NETWORK-FEE(eq')));
 
   console.log(`\n================ SUMMARY (market fee rate = brokerFeePct / oracleFeePct) ================`);
-  console.log(`total money-moving entrypoints: ${allEps.length}`);
+  console.log(`total money-moving entrypoints: ${allEps.length}   (deployed spine only)`);
+  if (protoEps.length) {
+    // A detector that has never once detected the thing it looks for is not a measurement.
+    // This block is the positive control: it must be non-empty and must show the ctor-committed
+    // form being SEEN, otherwise the zero above is indistinguishable from a blind instrument.
+    const seen = protoEps.filter(({ e }) => String(e.verdict).startsWith('PER-MARKET'));
+    console.log(`
+POSITIVE CONTROL -- prototypes, excluded from every count above:`);
+    for (const { c, e } of protoEps) console.log(`   ${c}::${e.name} -> ${e.verdict}`);
+    console.log(seen.length
+      ? `   ✅ detector CAN see ctor-committed per-market bounds (${seen.length}) => the zero above is a real zero`
+      : `   🔴 detector saw NOTHING in the prototype => the zero above may be a false negative, do not quote it`);
+  }
   console.log(`PER-MARKET(eq) -- market's committed rate binds the spend: ${perMarketEq.length}`);
   for (const { c, e } of perMarketEq) console.log(`   ${c}::${e.name}`);
   console.log(`\n🔴 entrypoints where THIS MARKET's committed rate does NOT bind the spend: ${holes.length}/${allEps.length}`);
