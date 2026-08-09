@@ -29,6 +29,12 @@ PoolSpine_v06.sil::refund_maker_unjoined param=minerFee  :285  require(...== mak
 
 **修法(给 J1)**: FEEISH 要把 `minerFee` 排除(它是网络费不是费率),或单列一类 `NETWORK-FEE` 不计入 `PER-MARKET(eq)`;重跑;(i) 头条 3→0 改写 + §2 底账表同步。
 
+🔵 **关键补充(校准: 这不是"你不懂",是同一份稿两段自相矛盾)`[CONFIRMED·稿内实读]`**:
+(i) 稿 **§DoD①(line 144-150)J1 自己就把 `minerFee` 列为 CONTROL、把 `brokerFeePct`/`oracleFeePct` 列为 SUBJECT**,并结论 SUBJECT "UNCHANGED ⇒ 不在 redeem"。
+⇒ **J1 本人清楚 minerFee ≠ 市场费率**(正是拿它当对照组,因为它总被绑)。
+🔴 **但 §2 底账(line 10/49-50)把那几行 `==makerStakeAmount−minerFee` 数成"3 个让【市场承诺的费率】绑住花费"** —— 这跟他自己 §DoD① 的分类**直接打架**: §DoD① 说市场费率(broker/oraclePct)根本不进 redeem、从不被绑,§2 却说有 3 个绑住了。
+⇒ 病根是**枚举器 PER-MARKET(eq) 把 minerFee 和费率混为一谈(FEEISH=/fee/i),§2 头条继承了这个混淆**。按 §DoD① 那半(权威、且与 R-3 一致),市场费率口径 = **0/21**。两段取 §DoD① 为准、§2 随枚举器修正后对齐。
+
 ## MF-2 🟡 枚举器不可复现: 默认路径是死的,且 PoolSpine*.sil 不在主树 `[CONFIRMED·实跑复现]`
 
 - `const DIR = process.env.FEE_ENUM_DIR || 'D:/kanet/kanet/kasia-console/src/lib'`(:23)——该默认路径**本机不存在**(`ls` ⇒ No such file or directory)。
