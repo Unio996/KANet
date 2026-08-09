@@ -202,3 +202,63 @@ v0.7 把它加进 ctor,**实测它确实进了 redeem** ⇒ **那条修复不是
   (那步 `await import('kaspa-wasm')` 在挖矿主机解析不到:三个 `node_modules/kaspa-wasm` 都是空壳,
   只有 `shared/vendor` 是真的)。⇒ **编译器与 ctor 序列化与生产同,地址派生代码路径未覆盖。**
 - 用的是 pin 的 legacy 编译器。**换编译器就是换实验**(该树另有 `silverc-zk-8065184.exe`)。
+
+---
+
+# 🆕 §9 (i).sil 原型:**可构造性已证**,而它同时暴露了一条会改变 (i) 含义的事 `[CONFIRMED·实测]`
+
+## §9.1 原型做了什么(`01eb8f3d` · `kasia-console/src/lib/PoolSpine_i_proto.sil`)
+
+取 v0.7,把 refund 路那两个**全局字面量**换成**ctor 承诺的每市场界**,函数体真的引用它们:
+
+```
+v0.7:   require(tx.outputs[0].value <= makerStakeAmount - 50000);
+        require(tx.outputs[0].value >= makerStakeAmount - 100000000);
+原型:   require(tx.outputs[0].value <= makerStakeAmount - marketMinFee);
+        require(tx.outputs[0].value >= makerStakeAmount - marketMaxFee);
+```
+
+**形状保留 v0.7 的区间**(qlfpv 那次卡死不会回来)——**变的只是"谁来承诺这个区间"**。
+
+## §9.2 在生产 pin 的编译器上突变实测(`silverc-legacy-2c46231.exe`)
+
+```
+marketMaxFee 改动 → redeem 变        ✅ 真的进了 baked-in
+marketMinFee 改动 → redeem 变        ✅
+brokerFeePct / oracleFeePct → 不变   🔴 同一次编译里, 依然被编译器丢弃
+controls (minerFee/deadline) 4/4 全动 ✅ 不是死 harness
+```
+
+🔴 **阴性对照与阳性同等重要**:同一次编译中,那两个"声明了但没人引用"的费率参数**仍然缺席**。
+⇒ **进 redeem 不是白给的,是靠【被函数体引用】换来的**——这正是 §3 那条退化的机制层解释。
+
+## §9.3 一个我差点当成故障归档的读数
+
+原型 baseline 与 v0.7 **逐字节相同**,看起来绝不可能。原因是我挑的基线值正好等于 v0.7 的字面量
+(50000 / 100000000),编译器把 ctor 常量**内联到了字面量原来的位置**。
+⇒ **这不是故障,是第三条证据**:committed 值落在字面量占据的同一位置。
+🔨 **判据**:一个"太整齐"的读数先问它是不是**实验设计本身造成的**,再判它是故障。
+
+## §9.4 🔴 而阳性对照顶掉了本稿一个隐含前提:**(i) 给的是【区间授权】,不是【绑定】**
+
+跑 enumerator(修复后,`45891f24`)对原型:
+
+```
+PoolSpine_v07.sil::refund_maker_unjoined      -> GLOBAL-LITERAL
+PoolSpine_i_proto.sil::refund_maker_unjoined  -> PER-MARKET(range)     ← 不是 (eq)
+部署 spine 头条仍 0/22(逐 entrypoint 判词零差异)
+```
+
+🔴 **DoD ③ 问的是「**这个市场承诺的费率**是否【绑定】这笔花费」——而 `range` 只是【框住】它。**
+在 `marketMinFee` 与 `marketMaxFee` 之间,**实际收多少费仍然不由承诺值决定**。
+
+⇒ **(i) 如本原型所构造,把权威从「全局常数」搬到了「本市场承诺的区间」,这是真进步;**
+   **但它【没有】把 DoD ③ 那个洞补到 `PER-MARKET(eq)`。**
+⇒ 若 DoD ③ 要的是绑定,还需要一条把**承诺费率本身**与 `tx.outputs[..].value` 用 `==` 拴起来的 require,
+   **而那会取消 v0.7 有意保留的浮动(qlfpv)** —— **这是个政策选择,不是实现细节,该由 Owner 拍。**
+
+## §9.5 作用域(不说满)
+
+- 原型**只改了 refund 一条路**;其余 entrypoint 未动(仍 `NO-FEE-CONSTRAINT`)。
+- **原型没接进任何 builder、没部署、不能用它建市场。** 它回答"造得出来吗",不回答"该不该上线"。
+- 未验:多市场同时存在时 P2SH 分叉对既有 outpoint 的影响;`marketMinFee > marketMaxFee` 这类构造期无效区间的拒绝路径。
