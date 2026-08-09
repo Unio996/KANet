@@ -16,10 +16,24 @@
  *
  * 用法:
  *   node scripts/check-deployed-drift.mjs                     # 只查本机部署根
- *   DRIFT_SSH=admin@100.99.147.101 node scripts/check-deployed-drift.mjs   # 连远端一起查
+ *   DRIFT_SSH=<user@挖矿机> node scripts/check-deployed-drift.mjs   # 连远端一起查
+ *
+ * 🔴 这里【故意用占位符】而不是真实 user@host, 原因是实账不是洁癖:
+ *    我第一版在这写了具体的 `admin@<点分四段>`, 然后把这一行【原样 copy 进了 dev-coord 频道】——
+ *    而那个频道是【链上明文, 永久且公开】, 发出去撤不回。@J2 与 @Bettor 当场抓到。
+ *    🔨 判据: **用法示例是最有说服力的指路牌** —— 是这行注释教我泄的, 不是我一时忘了纪律。
+ *    ⇒ 具体连接目标放本地 env / `kanet.env` / `scratch/`, 不进注释、不进 commit、不进频道。
+ *    ⚠ 作用域: 本条只处理【我这个工具的传播路径】。同一地址在本仓多处文档与
+ *      `kasia-console/src/services/zk-prove-server.mjs` 里早已存在 —— 那是另一件事, 我没动, 也不假装动了。
  * 环境:
  *   DRIFT_ROOTS   逗号分隔的部署根目录(默认见下)
  *   DRIFT_SSH     远端 user@host; 设了就用 PowerShell Get-FileHash 远程算
+ *
+ * ⚠ 认证来源(@NWT 复核时问的, 确实该写出来): SSH 参数里强制 `PreferredAuthentications=password`
+ *   且 `PubkeyAuthentication=no`, 而脚本里【看不到任何密码】—— 密码由调用方经 OpenSSH 的
+ *   `SSH_ASKPASS` + `SSH_ASKPASS_REQUIRE=force` 提供(本机放在 scratch/ 的一个 askpass 脚本)。
+ *   ⇒ 直接 `node scripts/check-deployed-drift.mjs` 带 DRIFT_SSH 跑而没配 askpass 的人会卡在认证上,
+ *     那不是 bug。**不配置就走本机模式**(不设 DRIFT_SSH), 一样能查本机可达的部署根。
  */
 import fsx from 'node:fs';
 import pathx from 'node:path';
