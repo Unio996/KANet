@@ -59,6 +59,25 @@ db.prepare('INSERT INTO payout_shards VALUES (?,?,?,?,?)')
   .run('mkt-divergent-002', 'v2_zk', redeemB, 'kaspatest:qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq', '11'.repeat(32) + ':0');
 db.prepare('INSERT INTO payout_shards VALUES (?,?,?,?,?)')
   .run('mkt-unreadable-03', 'v2_zk', null, 'kaspatest:whatever', '22'.repeat(32) + ':0');   // redeem 为空
+
+// 🔴 Codex RED / MUST-FIX 的阴性对照集: 畸形 payout_ps_outpoint 曾【全部静默变成 output 0】,
+// 于是 verifier 会对着一个没人在核的 outpoint 给出确认, 回填就在假权威上写 addr ——
+// 那正是本设计存在的理由本身(用改数据把 gate 的真报警消音)。
+// 每一行都构造成 divergent(addr 是假的), 所以只要解析放行, 它们就会一路走到探链那一步。
+const TX = '33'.repeat(32);
+const FAKE_ADDR = 'kaspatest:qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq';
+const MALFORMED = [
+  ['mkt-mal-no-index', TX],                 // 缺分隔符   ⇒ 旧版 parts[1]=undefined ⇒ NaN ⇒ 回落 0
+  ['mkt-mal-empty-ix', TX + ':'],           // 空 index   ⇒ 旧版 Number('')===0 ⇒【看起来合法】的 0
+  ['mkt-mal-nan-ixxx', TX + ':foo'],        // 非数       ⇒ 旧版 NaN ⇒ 回落 0
+  ['mkt-mal-negative', TX + ':-1'],         // 负         ⇒ 旧版原样通过
+  ['mkt-mal-fraction', TX + ':1.5'],        // 小数       ⇒ 旧版原样通过
+  ['mkt-mal-extra-se', TX + ':0:extra'],    // 多分隔符
+  ['mkt-mal-shorttxi', 'abcd:0'],           // txid 长度不对
+];
+for (const [id, op] of MALFORMED) {
+  db.prepare('INSERT INTO payout_shards VALUES (?,?,?,?,?)').run(id, 'v2_zk', 'cc'.repeat(60), FAKE_ADDR, op);
+}
 db.close();
 
 const run = (env, expectExit = 0) => {
@@ -69,8 +88,12 @@ const run = (env, expectExit = 0) => {
 
 // ---- 1. 枚举三分 ----
 const dry = run({ PS_ADDR_BACKFILL_NO_CHAIN: '1' });
-ok('dry-run 枚举: 3 行里恰好 1 行 divergent, 1 行无法判定',
-   /全表 3 行 · divergent 1 行 · 无法判定 1 行/.test(dry.out), dry.out.slice(0, 300));
+// 数字从 fixture 推导, 不写死: 我上一版写死了"3 行/1 divergent", 加了 7 个畸形 fixture 之后
+// 它就红在了一个与它名字无关的地方 —— 那种红会把人引去查错的东西。
+const TOTAL = 3 + MALFORMED.length;          // 自洽 1 + divergent 1 + redeem 为空 1 + 畸形若干
+const DIVERGENT = 1 + MALFORMED.length;      // 畸形行的 addr 也是假的, 同样进 divergent
+ok(`dry-run 枚举: ${TOTAL} 行里恰好 ${DIVERGENT} 行 divergent, 1 行无法判定`,
+   new RegExp(`全表 ${TOTAL} 行 · divergent ${DIVERGENT} 行 · 无法判定 1 行`).test(dry.out), dry.out.slice(0, 300));
 ok('已自洽的行不进 divergent(回填不会去动它)', !dry.out.includes('mkt-coherent-0001'.slice(-8)), dry.out.slice(0, 200));
 // 无法判定的必须被喊出来 —— 沉默会让人把它读成"没问题"
 ok('无法判定的行被单独喊出来, 而不是静默归入已好', /⚠ 无法判定 .*payout_redeem_hex 为空/.test(dry.out), dry.out.slice(0, 300));
@@ -91,10 +114,41 @@ if (!chainReachable) {
 } else {
   ok('阴性对照 C: 链上未确认 ⇒ 打 SKIP 而不是回填', /⏭ SKIP .*chain_unconfirmed/.test(real.out), real.out.slice(0, 400));
   ok('阴性对照 C: 链上未确认 ⇒ 那一行的 addr 【一个字节都没变】', after === before, `before=${before} after=${after}`);
-  ok('阴性对照 C: 全局重枚举仍报非空(没有假装修完)', /剩余 divergent = 1/.test(real.out), real.out.slice(-300));
+  // 期望 8 = 1 个链上未确认 + 7 个 outpoint 畸形。写死"1"会在加 fixture 时过期而红在错的地方 ——
+  // 这里要断言的是"脚本没有假装修完", 所以按【本 fixture 集里本就不该被回填的行数】算。
+  ok('阴性对照 C: 全局重枚举仍报非空(没有假装修完)',
+     new RegExp('剩余 divergent = ' + (1 + MALFORMED.length)).test(real.out), real.out.slice(-300));
   const ev = new DatabaseSync(DB, { readOnly: true }).prepare("SELECT COUNT(*) c FROM events WHERE event_type='payout_ps_addr_backfill_skipped'").get().c;
   ok('阴性对照 C: skip 留下了可查的证据行', ev >= 1, `events 行数=${ev}`);
 }
+
+// ---- 4. 🔴 Codex RED 阴性对照: 畸形 outpoint 一律不探链、不回填、DB 逐字节不动 ----
+const dbRO = () => new DatabaseSync(DB, { readOnly: true });
+const addrOf = (id) => dbRO().prepare('SELECT payout_ps_addr a FROM payout_shards WHERE logical_market_id = ?').get(id).a;
+const beforeMal = Object.fromEntries(MALFORMED.map(([id]) => [id, addrOf(id)]));
+const mal = run({ PS_ADDR_BACKFILL_CONFIRMED: '1' });
+
+const missed = MALFORMED.filter(([id]) => !mal.out.includes('MALFORMED ' + id.slice(-8)));
+ok('畸形 outpoint: 7 种全部被判 MALFORMED(旧版会把它们全静默变成 output 0)',
+   missed.length === 0, '漏判: ' + missed.map(([id]) => id).join(','));
+
+const written = MALFORMED.filter(([id]) => addrOf(id) !== beforeMal[id]);
+ok('畸形 outpoint: 一行 addr 都没被改(DB 逐字节不动)',
+   written.length === 0, '被写了: ' + written.map(([id]) => id).join(','));
+
+ok('畸形 outpoint: 【不探链】—— 判词是"outpoint畸形(未探)"而不是"未命中"',
+   mal.out.includes('outpoint畸形(未探)'), mal.out.slice(-400));
+
+// 按【去重市场数】而不是行数: 本测试对同一个库跑了两次 CONFIRMED(第 3 节一次、本节一次),
+// 每次都会为同一批畸形行各写一条 —— 断言行数会因为"跑了几次"而变, 那测的是测试自己不是脚本。
+const malMarkets = dbRO().prepare(
+  "SELECT COUNT(DISTINCT json_extract(payload_json,'$.marketId')) c FROM events WHERE payload_json LIKE '%malformed_outpoint%'").get().c;
+ok('畸形 outpoint: 每一行都留下可查的 events 证据(按去重市场数)',
+   malMarkets === MALFORMED.length, `distinct markets=${malMarkets} 期望=${MALFORMED.length}`);
+
+// 🔵 @J2 要的反向对照 —— 严格解析若把【良构】行判错, 就是另一种假阳性, 同样要红。
+ok('反向对照: 良构 outpoint 没有被新解析误判成畸形',
+   !mal.out.includes('MALFORMED ' + 'mkt-divergent-002'.slice(-8)), mal.out.slice(0, 400));
 
 console.log(failed ? `\n${failed} FAILED` : '\nALL PASS');
 process.exit(failed ? 1 : 0);

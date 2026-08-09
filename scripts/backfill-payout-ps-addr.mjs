@@ -99,19 +99,61 @@ function logEvent(type, marketId, payload) {
   } catch (e) { console.error('   events 落账失败(non-fatal): ' + e.message); }
 }
 
+/**
+ * 🔴 严格解析 payout_ps_outpoint(Codex RED / MUST-FIX, 2026-08-09) —— 这条是我自己写进去的洞。
+ *
+ * 原实现: `const idx = Number(parts[1]); ... Number.isFinite(idx) ? idx : 0`
+ * ⇒ 畸形 outpoint 【全部静默变成 output 0】:
+ *     'txid'      ⇒ parts[1]=undefined ⇒ NaN ⇒ 回落 0
+ *     'txid:'     ⇒ Number('')===0     ⇒ 【看起来合法】的 0
+ *     'txid:foo'  ⇒ NaN ⇒ 回落 0        'txid:-1' / 'txid:1.5' ⇒ 原样通过
+ * 🔴 危险链: 畸形 ⇒ 被替换成 index 0 ⇒ 若该 txid 的 output0 恰好 == p2sh(当前 redeem)
+ *    ⇒ verifier 对着【一个我没在核的 outpoint】给出确认 ⇒ 回填在假权威上写 addr
+ *    ⇒ **这正是 §2.4 存在的理由本身: 用改数据把 gate 的真报警消音。**
+ * 🔵 当前暴露面 = 0(@J2 实测 722 行全良构), 但写侧 schema 是裸 TEXT 无 CHECK, 而回填是单向写
+ *    ⇒ 零暴露不降低必修性。
+ *
+ * 纪律: **绝不默认 0**。判不了就判不了, 单列、不探链、不写。
+ */
+const MAX_OUTPUT_INDEX = 65535;   // 理智上界; 越界一律拒, 不猜
+function parseOutpoint(raw) {
+  if (typeof raw !== 'string' || raw.length === 0) return { ok: false, reason: '为空或非字符串' };
+  if (raw !== raw.trim()) return { ok: false, reason: '首尾有空白' };
+  const parts = raw.split(':');
+  if (parts.length < 2) return { ok: false, reason: '缺少分隔符(没有 index)' };
+  if (parts.length > 2) return { ok: false, reason: `分隔符过多(${parts.length - 1} 个)` };
+  const [txid, idxStr] = parts;
+  if (!/^[0-9a-fA-F]{64}$/.test(txid)) return { ok: false, reason: 'txid 不是 64 位十六进制' };
+  // 只接受无前导零的非负十进制整数: 挡掉 '' / '-1' / '1.5' / '1e0' / ' 1' / '01'
+  if (!/^(0|[1-9][0-9]*)$/.test(idxStr)) return { ok: false, reason: `index 非法('${idxStr}')` };
+  const index = Number(idxStr);
+  if (!Number.isSafeInteger(index) || index > MAX_OUTPUT_INDEX) return { ok: false, reason: `index 越界(${idxStr})` };
+  return { ok: true, txid: txid.toLowerCase(), index };
+}
+
 const report = [];
+const malformed = [];
 for (const { r, derived } of divergent) {
   const marketId = r.logical_market_id;
-  const parts = String(r.payout_ps_outpoint || '').split(':');
-  const txid = parts[0];
-  const idx = Number(parts[1]);
+  const parsed = parseOutpoint(r.payout_ps_outpoint);
+  if (!parsed.ok) {
+    // fail-closed 且【不探链】: 连"要核哪个 outpoint"都不知道时, 任何链上确认都是在核别的东西。
+    console.log(`   🔴 MALFORMED ${String(marketId).slice(-8)} — payout_ps_outpoint ${parsed.reason} ⇒ 不探链、不回填、DB 逐字节不动`);
+    malformed.push({ marketId, raw: r.payout_ps_outpoint, reason: parsed.reason });
+    report.push({ marketId, family: r.covenant_family, oldAddr: r.payout_ps_addr, derived, chainOk: 'malformed' });
+    if (CONFIRMED) logEvent('payout_ps_addr_backfill_skipped', marketId, { marketId, reason: 'malformed_outpoint', detail: parsed.reason, raw: r.payout_ps_outpoint });
+    continue;
+  }
+  const txid = parsed.txid;
+  const idx = parsed.index;
   let chainOk = null;   // null = 未探(仅离线自测); true/false = 探过
   if (!NO_CHAIN) {
     // §2.4: 复用既有原语, 不新写探链逻辑。命中 = 链上真金确实在 p2sh(redeem) 派生的地址上。
     try {
       chainOk = await verifyRedeemMatchesChainObservedOutput({
         db: sqlite, p2sh, candidateRedeemHex: r.payout_redeem_hex,
-        outpointTxid: txid, outpointIdx: Number.isFinite(idx) ? idx : 0, getUtxos,
+        // idx 已过严格解析 —— 这里【不再】有任何回落默认值。喂给 verifier 的就是库里那个精确 outpoint。
+        outpointTxid: txid, outpointIdx: idx, getUtxos,
       });
     } catch (e) { chainOk = false; console.log(`   ⚠ ${String(marketId).slice(-8)} 链上确认异常(按未命中处理): ${e.message}`); }
   }
@@ -122,7 +164,7 @@ for (const { r, derived } of divergent) {
     // fail-closed: 链上没替我们背书 redeem 权威 ⇒ 不改, 不猜。
     // 盲改会把 addr 对齐到一份可能是坏的 redeem —— 那等于【用改数据把 gate 的真报警消音】。
     console.log(`   ⏭ SKIP ${String(marketId).slice(-8)} — chain_unconfirmed, 不回填(交人工)`);
-    logEvent('payout_ps_addr_backfill_skipped', marketId, { reason: 'chain_unconfirmed', derived, oldAddr: r.payout_ps_addr });
+    logEvent('payout_ps_addr_backfill_skipped', marketId, { marketId, reason: 'chain_unconfirmed', derived, oldAddr: r.payout_ps_addr });
     continue;
   }
   // 乐观并发保护(§2.3): 把旧 addr 放进 WHERE —— 若这一刻写方刚好刷过它, 不命中、不误写。
@@ -131,7 +173,7 @@ for (const { r, derived } of divergent) {
     .run(derived, marketId, r.payout_ps_addr);
   if (info.changes !== 1) {
     console.log(`   ⏭ SKIP ${String(marketId).slice(-8)} — 乐观并发未命中(期间被别人改过), 不覆盖`);
-    logEvent('payout_ps_addr_backfill_skipped', marketId, { reason: 'concurrent_modification', derived });
+    logEvent('payout_ps_addr_backfill_skipped', marketId, { marketId, reason: 'concurrent_modification', derived });
     continue;
   }
   // §2.5 逐盘: 直接调既有 gate 函数断言 —— 不复制判据。回填完 gate 仍不过 = 该盘还有别的不自洽。
@@ -139,18 +181,25 @@ for (const { r, derived } of divergent) {
   const gate = assertPayoutShardCoherence(after, { p2sh, tier: 'full' });
   if (gate.ok) {
     console.log(`   ✅ ${String(marketId).slice(-8)} 回填并通过 gate`);
-    logEvent('payout_ps_addr_backfilled', marketId, { derived, oldAddr: r.payout_ps_addr, provenance: 'chain_confirmed' });
+    logEvent('payout_ps_addr_backfilled', marketId, { marketId, derived, oldAddr: r.payout_ps_addr, provenance: 'chain_confirmed' });
   } else {
     console.log(`   🔴 ${String(marketId).slice(-8)} 回填后 gate 仍不过 (failedStep=${gate.failedStep}) — 记录, 不吞, 交人工`);
-    logEvent('payout_ps_addr_backfill_gate_still_failing', marketId, { derived, failedStep: gate.failedStep, reason: gate.reason });
+    logEvent('payout_ps_addr_backfill_gate_still_failing', marketId, { marketId, derived, failedStep: gate.failedStep, reason: gate.reason });
   }
 }
 
 console.log('\n' + (CONFIRMED ? '=== 回填结果 ===' : '=== DRY-RUN(零写入) ==='));
 for (const x of report) {
-  console.log(`  ${String(x.marketId).slice(-8)}  family=${x.family}  chain=${x.chainOk === null ? '未探' : x.chainOk ? '确认' : '未命中'}`);
+  const chainWord = x.chainOk === 'malformed' ? '🔴outpoint畸形(未探)' : x.chainOk === null ? '未探' : x.chainOk ? '确认' : '未命中';
+  console.log(`  ${String(x.marketId).slice(-8)}  family=${x.family}  chain=${chainWord}`);
   console.log(`      stored  : ${x.oldAddr}`);
   console.log(`      derived : ${x.derived}`);
+}
+if (malformed.length) {
+  // 单列且醒目: 畸形行既不在"已回填"里也不在"链上未命中"里, 混在一起会让人以为它们只是差个确认。
+  console.log(`
+🔴 payout_ps_outpoint 畸形 ${malformed.length} 行 —— 这些【永远不会被本脚本回填】, 需人工判定:`);
+  for (const m of malformed) console.log(`   ${String(m.marketId).slice(-8)}  ${m.reason}  raw=${JSON.stringify(m.raw)}`);
 }
 if (!CONFIRMED) {
   console.log(`\n⚠ 这是 dry-run: 上面 ${report.length} 行【一行都没写】。人工过完这份报告再设 PS_ADDR_BACKFILL_CONFIRMED=1。`);
