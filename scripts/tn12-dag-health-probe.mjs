@@ -111,6 +111,27 @@ const RISE_FACTOR = Number(process.env.DAG_PROBE_RISE_FACTOR || 1.5);
 // with real margin under the live event.
 const RISE_MIN_SEC = Number(process.env.DAG_PROBE_RISE_MIN_SEC || 60);
 const RISE_FLOOR = Number(process.env.DAG_PROBE_RISE_FLOOR || 150);
+// How long detachment must PERSIST before this probe will call it isolated/peers-unknown.
+//
+// Why a debounce exists at all -- measured 2026-08-10, and it corrects my own earlier fix.
+// Removing the `lagging &&` gate from these two branches was right (a freshly detached node has
+// lag ~= 0, so gating detachment behind lag meant it could never be reported at the only moment
+// reporting it would help). But that gate was ALSO, accidentally, suppressing something I did not
+// know it was carrying: on a node whose only durable links are the two public TN12 peers,
+// peerCount === 0 is a ROUTINE TRANSIENT, not an event. Both peers reset ~30x/hour with a ~30s
+// reconnect backoff, so each is out of the set ~12% of the time and the two gaps overlap often
+// enough to be sampled. Shipping the ungated branch without a debounce would have converted a
+// real fix for under-reporting into a new and frequent source of over-reporting.
+//
+// Why 90s, from the sample record rather than from taste (260 samples, remote node, 20s cadence):
+//   peerCount===0 occurred in 11 unbroken runs; 10 of them lasted a single sample (<20s),
+//   the longest spanned 21.1s. The genuine starvation of 2026-08-08 lasted FOUR HOURS.
+//   Transient and real are separated by two orders of magnitude, so any threshold in that gap
+//   works; 90s sits ~4x above the longest transient seen and ~160x below the real event.
+// 🔴 Scope of that measurement: one node, one 8-hour window. It bounds the transients I OBSERVED,
+//   not the transients that exist. If a longer double-gap ever shows up, this number is the thing
+//   to revisit -- so detachedSeconds is exported, to be chosen from data again rather than argued.
+const ISOLATED_MIN_SEC = Number(process.env.DAG_PROBE_ISOLATED_MIN_SEC || 90);
 
 // J2 red-team 2026-08-09, the finding that mattered most: during tonight's climb tips went
 // 194 -> 499 -> 506, so RUNAWAY_TIPS=500 never fired, while lag was already past 600 -- meaning
@@ -124,7 +145,7 @@ const RISE_FLOOR = Number(process.env.DAG_PROBE_RISE_FLOOR || 150);
 // A threshold must be chosen relative to the cliff, and we chose wrong (500 vs the real 248
 // mergeset cap). A derivative needs no knowledge of where the cliff is: 194->499 is rising from
 // the first minute.
-function diagnose({ tips, lagSeconds, isSynced, headerMinusBlock, peerCount, tipsTrend, risingStreak, streakStartTips, streakSeconds }) {
+function diagnose({ tips, lagSeconds, isSynced, headerMinusBlock, peerCount, tipsTrend, risingStreak, streakStartTips, streakSeconds, detachedSeconds }) {
   if (tips >= RUNAWAY_TIPS) return 'runaway';           // checked first: it is the dangerous one
   // J2 2026-08-09, definitional rather than tuning: lagSeconds = now - sink header timestamp,
   // i.e. how long the SELECTED CHAIN has failed to advance -- a symptom shared by starvation AND
@@ -161,8 +182,20 @@ function diagnose({ tips, lagSeconds, isSynced, headerMinusBlock, peerCount, tip
   // attachment state has nothing to do with how far behind we are -- with no peers, or a count we
   // cannot read, this node is not observing the network at all, so every claim it makes about the
   // network is unsupported whether lag is 5 seconds or 5000.
-  if (peerCount === 0) return 'isolated';
-  if (peerCount == null) return 'peers-unknown';   // == catches undefined; null is not zero
+  // Debounced in WALL-CLOCK, deliberately not in samples. The state file is keyed by RPC URL and
+  // is shared by every caller of this probe (the watchdog and the channel monitor both invoke it),
+  // so a counter of consecutive samples measures "how many times anyone happened to ask" -- which
+  // is exactly the defect Codex MUST-FIX #2 found in the rising streak. Repeating it here would
+  // make the debounce tighten or loosen depending on how many processes are polling.
+  // detachedSeconds === null means "no prior sample": unknown duration must not satisfy a minimum
+  // (that would report isolation on the very first run), so null fails the test rather than passing.
+  const detachedLongEnough = detachedSeconds != null && detachedSeconds >= ISOLATED_MIN_SEC;
+  if (peerCount === 0 && detachedLongEnough) return 'isolated';
+  if (peerCount == null && detachedLongEnough) return 'peers-unknown';   // == catches undefined; null is not zero
+  // Below the debounce we deliberately fall through to the lag ladder, i.e. back to the behaviour
+  // that shipped before the ungating. A brief double-gap between two flapping peers is not a
+  // statement about the network, and saying 'isolated' about it would spend the word on noise --
+  // after which nobody reacts to it when it is real.
   const lagging = lagSeconds !== null && lagSeconds >= STARVED_LAG_SEC;
   // Isolation outranks every lag-based verdict: with no peers you are not observing the network,
   // so any statement about the network from this node is unsupported. Reported as its own state
@@ -188,6 +221,39 @@ function diagnose({ tips, lagSeconds, isSynced, headerMinusBlock, peerCount, tip
 // that matter only appear when something is WRONG: once the node is healthy you can no longer
 // reach them from live data, and "never fired" then reads the same whether the logic is right
 // or broken. Each case below is anchored to a real observation, not an invented shape.
+// Wiring assertion, deliberately source-level rather than behavioural.
+//
+// Why it exists: on 2026-08-10 the two diagnose() call sites disagreed -- the sample-log one
+// passed streakSeconds, the stdout one (the ONLY one the watchdog reads) did not. Because an
+// omitted argument is undefined and `undefined == null`, the minimum-span guard silently
+// evaluated to "pass" on the load-bearing path for as long as it had existed. The fix was real
+// and reviewed; it just never reached its consumer.
+// 🔴 And every one of the behavioural cases below was blind to it, structurally: they call
+// diagnose() directly, so no fixture can ever exercise an argument list. Re-injecting that exact
+// defect leaves the suite ALL PASS -- I verified that rather than assuming it. A green suite was
+// therefore evidence about the callee only, while the claim being made was about the system.
+// So this one reads the source on purpose: the property under test IS a property of the source.
+// Note on what #1 actually is, because it started as luck and is now deliberate: the regex also
+// matches the DECLARATION's destructuring pattern, which appears first. So each call site is
+// compared against diagnose()'s own parameter list rather than against a sibling call. That is the
+// stronger check -- adding a parameter and wiring it at only one site still fails -- and it is
+// stated here so a later reader does not "tidy up" the declaration out of the match set.
+function checkCallSiteParity(src) {
+  const calls = [...src.matchAll(/diagnose\(\{([^}]*)\}\)/g)].map((m) => m[1]);
+  if (calls.length < 2) return ['diagnose() call sites found: ' + calls.length + ' -- expected at least 2; this check just went blind, treat as FAIL not as pass'];
+  const keysOf = (s) => new Set(s.split(',').map((p) => p.split(':')[0].trim()).filter(Boolean));
+  const sets = calls.map(keysOf);
+  const problems = [];
+  for (let i = 1; i < sets.length; i++) {
+    const missing = [...sets[0]].filter((k) => !sets[i].has(k));
+    const extra = [...sets[i]].filter((k) => !sets[0].has(k));
+    if (missing.length || extra.length) {
+      problems.push(`call site #${i + 1} differs from #1 -- missing [${missing}] extra [${extra}]`);
+    }
+  }
+  return problems;
+}
+
 if (process.argv.includes('--selftest')) {
   const cases = [
     // 2026-08-07/08 mining host at the peak of the stall.
@@ -202,9 +268,30 @@ if (process.argv.includes('--selftest')) {
     { name: 'healthy: steady state',         in: { tips: 2, lagSeconds: 0, isSynced: true, headerMinusBlock: 0, peerCount: 3, tipsTrend: 0 },        want: 'healthy' },
     // Bettor's 2026-08-09 misdiagnosis: frozen DAA read as "chain idle" while his own node
     // had dropped to 0 peers. With no peers this node observes nothing, so say so.
-    { name: 'isolated: lagging, zero peers', in: { tips: 3, lagSeconds: 5000, isSynced: false, headerMinusBlock: 0, peerCount: 0 },    want: 'isolated' },
+    { name: 'isolated: lagging, zero peers', in: { tips: 3, lagSeconds: 5000, isSynced: false, headerMinusBlock: 0, peerCount: 0, detachedSeconds: 300 },    want: 'isolated' },
     // NWT red-team: unreadable peer count must NOT fall through to a lag verdict.
-    { name: 'peers-unknown: lagging, peerCount null', in: { tips: 3, lagSeconds: 5000, isSynced: false, headerMinusBlock: 0, peerCount: null }, want: 'peers-unknown' },
+    { name: 'peers-unknown: lagging, peerCount null', in: { tips: 3, lagSeconds: 5000, isSynced: false, headerMinusBlock: 0, peerCount: null, detachedSeconds: 300 }, want: 'peers-unknown' },
+    // --- the debounce contrast pair (2026-08-10). These two differ in ONE field, and that field
+    // is the whole claim: a detachment is only reportable once it has LASTED. Measured basis:
+    // 11 observed zero-peer runs, longest 21.1s, versus a real starvation of 4 hours.
+    // If the debounce is deleted, the first of these turns red -- it is named for what it guards.
+    { name: 'debounce: single transient zero-peer sample is NOT isolated',
+      in: { tips: 2, lagSeconds: 0, isSynced: true, headerMinusBlock: 0, peerCount: 0, detachedSeconds: 0 },  want: 'healthy' },
+    { name: 'debounce: 21s double-gap (longest ever measured) is NOT isolated',
+      in: { tips: 2, lagSeconds: 0, isSynced: true, headerMinusBlock: 0, peerCount: 0, detachedSeconds: 21 }, want: 'healthy' },
+    { name: 'debounce: sustained detachment IS isolated',
+      in: { tips: 2, lagSeconds: 0, isSynced: true, headerMinusBlock: 0, peerCount: 0, detachedSeconds: 90 }, want: 'isolated' },
+    // Unknown duration must FAIL the minimum, not satisfy it -- the inverse of how streakSeconds
+    // treats null, and deliberately so: an unknown SPAN must not disarm a brake, but an unknown
+    // DURATION must not arm an accusation. The asymmetry is the point, not an oversight.
+    { name: 'debounce: unknown duration does not support an isolation claim',
+      in: { tips: 2, lagSeconds: 0, isSynced: true, headerMinusBlock: 0, peerCount: 0, detachedSeconds: null }, want: 'healthy' },
+    { name: 'debounce: transient unreadable count is not peers-unknown either',
+      in: { tips: 2, lagSeconds: 0, isSynced: true, headerMinusBlock: 0, peerCount: null, detachedSeconds: 10 }, want: 'healthy' },
+    // And the debounce must NOT be able to suppress the brake: a climb still wins outright,
+    // whatever the detachment duration says. This is the branch whose ordering I once broke.
+    { name: 'debounce never outranks the brake: sustained detachment + climb = overproduction',
+      in: { tips: 200, lagSeconds: 700, isSynced: true, headerMinusBlock: 0, peerCount: 0, tipsTrend: 25, risingStreak: 4, streakStartTips: 100, streakSeconds: 200, detachedSeconds: 9999 }, want: 'overproduction' },
     // ...but a healthy node with an unreadable peer count is still healthy: the guard must not
     // fire when there is nothing wrong, or it becomes noise and gets ignored.
     // Behaviour change (Codex #3): an unreadable peer count now speaks even when nothing else is
@@ -216,13 +303,13 @@ if (process.argv.includes('--selftest')) {
     // climb coincides with peer loss, which is what tonight's real brake looked like.
     { name: 'climbing + peers=0 must still brake, not report isolated',    in: { tips: 200, lagSeconds: 700, isSynced: true, headerMinusBlock: 0, peerCount: 0,    tipsTrend: 25, risingStreak: 4, streakStartTips: 100, streakSeconds: 200 }, want: 'overproduction' },
     { name: 'climbing + peers unreadable must still brake',                in: { tips: 200, lagSeconds: 700, isSynced: true, headerMinusBlock: 0, peerCount: null, tipsTrend: 25, risingStreak: 4, streakStartTips: 100, streakSeconds: 200 }, want: 'overproduction' },
-    { name: 'peers=0 without a climb still reports isolated',              in: { tips: 20,  lagSeconds: 700, isSynced: true, headerMinusBlock: 0, peerCount: 0,    tipsTrend: 1,  risingStreak: 1, streakStartTips: 19, streakSeconds: 200 }, want: 'isolated' },
+    { name: 'peers=0 without a climb still reports isolated',              in: { tips: 20,  lagSeconds: 700, isSynced: true, headerMinusBlock: 0, peerCount: 0,    tipsTrend: 1,  risingStreak: 1, streakStartTips: 19, streakSeconds: 200, detachedSeconds: 300 }, want: 'isolated' },
     // Codex MUST-FIX #2 -- the same rise, judged by how long it actually took.
     { name: 'rise: 4 samples spanning 20s = poll noise, not a trend', in: { tips: 200, lagSeconds: 700, isSynced: true, headerMinusBlock: 0, peerCount: 3, tipsTrend: 25, risingStreak: 4, streakStartTips: 100, streakSeconds: 20 },  want: 'starved' },
     { name: 'rise: same 4 samples spanning 200s = real trend',       in: { tips: 200, lagSeconds: 700, isSynced: true, headerMinusBlock: 0, peerCount: 3, tipsTrend: 25, risingStreak: 4, streakStartTips: 100, streakSeconds: 200 }, want: 'overproduction' },
     { name: 'rise: unknown span does not disarm the brake',          in: { tips: 200, lagSeconds: 700, isSynced: true, headerMinusBlock: 0, peerCount: 3, tipsTrend: 25, risingStreak: 4, streakStartTips: 100, streakSeconds: null }, want: 'overproduction' },
-    { name: 'peers-unknown even when not lagging',      in: { tips: 2, lagSeconds: 0, isSynced: true, headerMinusBlock: 0, peerCount: null }, want: 'peers-unknown' },
-    { name: 'isolated even when not lagging',           in: { tips: 2, lagSeconds: 0, isSynced: true, headerMinusBlock: 0, peerCount: 0 },    want: 'isolated' },
+    { name: 'peers-unknown even when not lagging',      in: { tips: 2, lagSeconds: 0, isSynced: true, headerMinusBlock: 0, peerCount: null, detachedSeconds: 300 }, want: 'peers-unknown' },
+    { name: 'isolated even when not lagging',           in: { tips: 2, lagSeconds: 0, isSynced: true, headerMinusBlock: 0, peerCount: 0, detachedSeconds: 300 },    want: 'isolated' },
     // J2's finding: tonight's entire climb (194->499) sat under RUNAWAY_TIPS=500 while lag was
     // already past 600, so it was labelled starved -- remedy "add hashrate" -- when the truth
     // was overproduction and the remedy was the opposite.
@@ -264,7 +351,15 @@ if (process.argv.includes('--selftest')) {
     if (!ok) bad++;
     console.log(`${ok ? 'PASS' : 'FAIL'}  ${c.name}  want=${c.want} got=${got}`);
   }
-  console.log(bad === 0 ? `ALL ${cases.length} PASS` : `${bad} FAILED`);
+  // The wiring check runs LAST and counts into the same total, so "ALL n PASS" means both kinds
+  // of claim held. Reading our own source is safe here: this file is the deployed artifact.
+  // NOT `new URL(import.meta.url)`: this module declares `const URL = <rpc address>` at the top,
+  // which SHADOWS the global URL constructor. It fails loudly here ("URL is not a constructor"),
+  // but the same shadowing would silently mislead anyone who later reaches for URL in this file.
+  const wiring = checkCallSiteParity(fsx.readFileSync(import.meta.filename, 'utf8'));
+  for (const p of wiring) { bad++; console.log(`FAIL  call-site parity: ${p}`); }
+  if (!wiring.length) console.log('PASS  call-site parity: every diagnose() call site passes the same arguments');
+  console.log(bad === 0 ? `ALL ${cases.length + 1} PASS` : `${bad} FAILED`);
   process.exit(bad === 0 ? 0 : 1);
 }
 
@@ -393,7 +488,28 @@ try {
     if (bodiesProcessed !== null && Number.isFinite(prev2?.bodiesProcessed)) bodiesDelta = bodiesProcessed - prev2.bodiesProcessed;
   } catch { /* stays null = unknown, which callers must treat as "do not act", not as zero */ }
 
-  try { fsx.writeFileSync(STATE_PATH, JSON.stringify({ tips, ts: Date.now(), risingStreak: risingStreak ?? 0, streakStartTips: streakStartTips ?? tips, streakStartTs: streakStartTs ?? Date.now(), blocksSubmitted, bodiesProcessed })); } catch {}
+  // Wall-clock anchor for an UNBROKEN run of "not attached to the network" (peerCount 0 or
+  // unreadable). Set on the first such sample, carried forward while the condition holds, and
+  // cleared the moment any caller observes a real peer count. Clearing on any observer's good
+  // sample is the conservative direction -- it shortens runs, so it can only make this probe
+  // slower to cry isolation, never quicker.
+  const detached = (peerCount === 0 || peerCount == null);
+  let detachedSince = null;
+  try {
+    const prev3 = JSON.parse(fsx.readFileSync(STATE_PATH, 'utf8'));
+    detachedSince = detached
+      ? (Number.isFinite(prev3?.detachedSince) ? prev3.detachedSince : Date.now())
+      : null;
+  } catch { detachedSince = detached ? Date.now() : null; }
+
+  try { fsx.writeFileSync(STATE_PATH, JSON.stringify({ tips, ts: Date.now(), risingStreak: risingStreak ?? 0, streakStartTips: streakStartTips ?? tips, streakStartTs: streakStartTs ?? Date.now(), blocksSubmitted, bodiesProcessed, detachedSince })); } catch {}
+  // How long the current detachment has lasted:
+  //   null -> not detached at all
+  //   0    -> detached, but this is the first sample of the run (no duration established yet)
+  //   n    -> detached continuously for n seconds
+  // Both null and 0 fail the minimum-duration test, which is the point: neither can support a
+  // claim that this node has stopped observing the network.
+  const detachedSeconds = detachedSince ? Math.max(0, Math.round((Date.now() - detachedSince) / 1000)) : null;
   // Wall-clock span of the current rising run. null when there is no run or no prior sample --
   // and null must NOT be read as 0, or an unknown span would satisfy a minimum-span test.
   const streakSeconds = (streakStartTs && risingStreak) ? Math.max(0, Math.round((Date.now() - streakStartTs) / 1000)) : null;
@@ -411,9 +527,9 @@ try {
   const MAX_LOG = Number(process.env.DAG_PROBE_LOG_MAX || 5000);
   const sample = {
     ts: new Date().toISOString(),
-    diagnosis: diagnose({ tips, lagSeconds, isSynced, headerMinusBlock: headerCount - blockCount, peerCount, tipsTrend, risingStreak, streakStartTips, streakSeconds }),
+    diagnosis: diagnose({ tips, lagSeconds, isSynced, headerMinusBlock: headerCount - blockCount, peerCount, tipsTrend, risingStreak, streakStartTips, streakSeconds, detachedSeconds }),
     tips, virtualParents, submittedDelta, bodiesDelta, chainBlocks,
-    risingStreak, streakSeconds, sampleAgeSec, lagSeconds, peerCount,
+    risingStreak, streakSeconds, sampleAgeSec, lagSeconds, peerCount, detachedSeconds,
   };
   try {
     const NL = '\n';
@@ -428,8 +544,21 @@ try {
 
   out({
     ok: true,
-    diagnosis: diagnose({ tips, lagSeconds, isSynced, headerMinusBlock: headerCount - blockCount, peerCount, tipsTrend, risingStreak, streakStartTips }),
+    // 🔴 streakSeconds was MISSING from this call while the sample-log call above had it, so the
+    // two call sites of the same function could return DIFFERENT verdicts for one sample -- and
+    // this is the load-bearing one: the watchdog parses THIS stdout, not the sample log.
+    // Consequence, concretely: diagnose() computes `spanOk = (streakSeconds == null) || (>= 60s)`,
+    // and an omitted argument is undefined, and `undefined == null` is true. So the minimum-span
+    // guard added for Codex MUST-FIX #2 evaluated to "pass" every single time on the only path
+    // that reaches the brake. The fix shipped; the consumer never received it.
+    // 🔨 Same shape as the finding I logged on 2026-07-29: after repairing the callee, check that
+    // the CALLER actually gets there. A fix verified only at its definition is not deployed.
+    // Safe to enable against observed behaviour: the two brakes that have ever fired had
+    // risingStreak 22 and 27 at ~20s/sample, i.e. spans far above the 60s floor.
+    diagnosis: diagnose({ tips, lagSeconds, isSynced, headerMinusBlock: headerCount - blockCount, peerCount, tipsTrend, risingStreak, streakStartTips, streakSeconds, detachedSeconds }),
     tips,
+    // How long detachment has persisted; exported so ISOLATED_MIN_SEC stays data-chosen.
+    detachedSeconds,
     // null means UNREADABLE, not zero -- see the note above; conflating them is the bug.
     peerCount,
     tipsTrend,   // null = no prior sample; sign is what matters, not magnitude
