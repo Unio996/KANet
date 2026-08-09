@@ -1,4 +1,4 @@
-> **Status**: CURRENT
+> **Status**: CURRENT · **v0.2**(2026-08-10, 承 NWT 红队: §2 漏数第三/第四处, 已补 §2.2b/§3.5/§4⑥)
 > **性质**: 设计稿 · **零改码** · Bettor 2026-08-09 20:15 指派（「V2 `cancelMarketLive` 缺口 = J1 域的并行 design 活，**先出设计不动手**，与双边 canary 并行、不 gate 它」）
 > **作者**: J1tn · **待审**: NWT 红队 · **待批**: Bettor 排期后才落码
 > **波及**: 5 个单边盘 / ~3,509 KAS（J2 20:13 实测，其中 3,500 是 `9ez2u` 一家）。**9jaty 是双边，不走这条路。**
@@ -61,6 +61,35 @@ expectedCancelledAddr = ctx.p2shAddr(cancelledRedeem);
 - `compilePayoutShardRedeem` = **V1 专属编译器**（`pool-shard-register.mjs:117`）；
 - `payoutRoot: refundRootHex` = **V1 的写法：复用 payoutRoot 槽装 refundRoot**（源码注释原话「payoutRoot 槽复用装 refundRoot」）。
   **而 V2 有专属的 `refundRoot@256`** ⇒ 这不只是长度差，是**语义差**：V2 里 refundRoot 有自己的位置，payoutRoot 槽另有其用。
+
+### 2.2b 第三、第四处：`refund_claim` 穿线循环（NWT 红队 2026-08-09 20:46 抓，v0.2 补）
+
+🔴 **我 v0.1 只数了两处，漏了闸【之后】那一整段。** 实读 `cancelMarketLive:872-899`：
+
+```js
+:872-873  let curState  = { consolidated_pool, closed: 2, payoutRoot: plan.refundRoot };
+          for (let i = 0; i < 17; i++) curState['w' + i] = 0;          // ← V1 形状
+:874      let curRedeem = compilePayoutShardRedeem({ … closed: 2, payoutRoot: plan.refundRoot });
+                                                                       // ← V1 编译器, 第三次
+:897-899  const newState = { consolidated_pool: …, closed: 2, payoutRoot: plan.refundRoot };
+          for (let i = 0; i < 17; i++) newState['w' + i] = curState['w' + i];
+                                                                       // ← 每个 bettor 迭代重建一次
+```
+
+⇒ **整条 refund_claim 穿线路径都是 V1 形状**，且 `payoutRoot: plan.refundRoot` 又是 V1 的槽复用写法。
+
+🔴 **它与 §2.1/§2.2 有一个关键差别：它在 `:833` 那道闸【之后】** ⇒ **驱动侧没有任何东西在保护它**。
+🔵 失败模式因此不同，说精确（这决定它的定级）：
+- §2.1/§2.2 错 ⇒ 撞驱动侧硬闸 ⇒ **不广播**（我们自己拦住）。
+- §2.2b 错 ⇒ redeem 与链上 script 对不上 ⇒ **共识层拒**，或 claim 不落链被 `verifyClaimLanded` 拦（`NO-TX-NO-STATE`）。
+  ⇒ 仍然 fail-closed，**但拦它的是链和事后校验，不是我们的设计**。
+  **后果不是"打错一笔"，是"cancel_attest 落了链、钱却一分退不出去"** —— 盘停在 `closed=2` 而 refund 全卡。
+
+🔨 **判据（记这一条比记这个 bug 值）**：我只查了闸【之前】的路径，因为闸是我关注的对象。
+**一道闸把注意力吸到它两侧，而它保护不到的那一段恰恰在它下游。**
+
+🔵 w0..w16 那 17 个 nullifier 槽本身两版本共用（§2.1），**这一段里对 w 的位运算逻辑可原样保留**；
+要改的是它周围那些字段。
 
 ### 2.3 🔴 为什么必须一起改
 
@@ -145,6 +174,18 @@ ctorBytes32(z32), // init_refundRootBaked
 若性能不允许，替代判据必须是**从链上 redeem 字节本身推出的**（如长度 ≥ `_PSV2_STATE_END_OFF`），
 **不得**用 DB 里的版本字符串——那是"记着的"不是"读出来的"。
 
+### 3.5 修法④：`refund_claim` 穿线循环（v0.2 补，对应 §2.2b）
+
+```
+:874 curRedeem      不再 compilePayoutShardRedeem，改用【cancel_attest 实际落链的那份 redeem 字节】
+                    —— 它此刻已经存在（§3.2 splice 的产物），直接用，不重算
+:872 curState       字段集补齐 V2 尾 4 字段，取值来自 §3.1 读取器读【落链那份】
+:897 newState       每轮沿用同源；refundRoot 写 refundRoot@256，payoutRoot@19 保留链上值
+```
+🔵 **这里有个白拿的简化**：cancel_attest 刚落链，它的 redeem 我们**手上就有**（§3.2 刚 splice 出来、且 `verifyClosedLanded` 已核过它落在 `expectedCancelledAddr`）。
+⇒ **穿线的起点不需要"再算一次"，只需要"接着用"**。少一次重算 = 少一个可以算错的地方。
+🔴 而每轮 `newState` 仍要重建（因为 consolidated_pool 递减 + w 位要更新）—— **那是真需要，不能省。**
+
 ---
 
 ## §4 验收（不是"补丁看着对"）
@@ -159,6 +200,12 @@ ctorBytes32(z32), // init_refundRootBaked
                     (b) 用 compilePayoutShardV2Redeem 重编译代替 splice ⇒ ③ 必须红（尾字段被清零）
                     (c) 让两侧共用同一个算地址的 helper ⇒ ① 仍绿但 ② 恒绿 = 保护消失，需另有断言点名它
 ⑤ V1 不回归        既有 V1 盘走 cancelMarketLive 的行为逐字不变
+⑥ 端到端（v0.2 补，对应 §2.2b）
+   cancel_attest 落链后，【第一笔 refund_claim 必须真落链】才算这条路通。
+   🔴 只验到"cancel 落链"是不够的 —— §2.2b 那段在闸之后，它错的表现恰恰是
+      "cancel 成功了、钱一分退不出去"。**闸绿 ≠ 钱走了。**
+   🔵 断言点：curRedeem 必须 === cancel_attest 实际落链的那份字节（§3.5），
+      不是"重算出来一份相等的" —— 相等可以是巧合，同源才是保证。
 ```
 
 🔴 **④(c) 是本设计最容易被"优化"掉的那一格**：把两处算地址的代码合并成一个 helper 看起来是消除重复，
