@@ -50,3 +50,22 @@ Codex 独立审(`RESPONSE-20260808-UNSYNCED-PRECOND4-FEE-AUTHORITY-CODEX-REVIEW.
 - J2 "过窄"那条**已修好**: `detectLiteralFeeBound` 正确把 `tx.outputs[].value ± 字面量` 判为 `GLOBAL-LITERAL`,与 `NO-FEE-CONSTRAINT` 区分开了——实跑见 v07/v08/v0_7_1 的 refund 均判 GLOBAL-LITERAL,对。
 - DoD①(`fee-mutation-test.mjs`,带对照、pinned compiler,证 unreferenced ctor fee 不进 redeem)独立成立,不受本 note 影响。
 - 作用域自纠(3 版本→7 spine)对,枚举器扫 `PoolSpine*.sil` 不写死版本,对。
+
+## 修复记录(2026-08-09 · Bettor-dispatch · 只改诊断脚本,不碰 covenant/结算/DB/链上)`[实跑]`
+
+MF-1 与 MF-2 均已修 `scripts/fee-authority-enumerate.mjs`(唯一改动文件):
+- **家族分类**:每个 fee-ish ctor 参数经 `feeFamily()` 分为 `market`(brokerFeePct/oracleFeePct,匹配 `/pct$|bps$/i` 或 broker/oracle/maker+fee)/ `network`(minerFee/maxChunkFee,匹配 `/miner|chunk/i`)/ `unknown`。`minerFee` 不再计入市场费率。
+- **结构化 `==` 判定**(取代裸行正则):`splitTopLevelComparison()` 在括号深度 0 找比较符,`analyzeLine()` 只有当同一条 require 的 `==` 一侧是花费原语 `tx.outputs[..].value`、另一侧含该参数时才判 `bindsSpend`。**PER-MARKET(eq) 仅当 market 家族参数如此绑住花费**;minerFee 的等值绑定单列 `NETWORK-FEE(eq-binds-spend)`,不计入。
+- **DIR 死路径修复(MF-2)**:默认路径由 `import.meta.url` 解析到本仓 `kasia-console/src/lib`(spine 文件现已 tracked 进主树),`FEE_ENUM_DIR` 仍可覆盖;缺目录/缺文件时明确报错 exit 2。
+
+**重跑真实 .sil(主树 7 个 PoolSpine,`node scripts/fee-authority-enumerate.mjs`)关键数字**:
+- **市场费率(brokerFeePct/oracleFeePct)口径 PER-MARKET(eq) = 0 / 22**(坐实红队订正的 0/N;主树现有 22 个 money-moving 入口,非 note 写的 21——版本快照差,如实标)。broker/oraclePct 在所有 PoolSpine 入口里**从不出现在任何 require**(仅 ctor 声明+注释)⇒ 全 `NO-FEE-CONSTRAINT`/`GLOBAL-LITERAL`,无一 PER-MARKET(range)。
+- 原先 4 个假阳 PER-MARKET(eq)(PoolSpine 3 + v06 1)现全部归入 **NETWORK-FEE(eq-binds-spend)**;v06/v07/v08_agg 的 `minerFee>0 / <1e8` 与 v08_chunk 的 `chunkMinerFee<=maxChunkFee` 现判 **NETWORK-FEE(range)**(原误报 PER-MARKET(range))。
+- `GLOBAL-LITERAL`(v07/v08_agg/v08_chunk refund、v0_7_1 settle+refund)不受影响,保持。
+
+**阴性对照(证没修过头,`FEE_ENUM_DIR=<scratch>` 合成 .sil)**:同一合约三入口——
+`require(tx.outputs[1].value == spendable * brokerFeePct / 10000)` ⇒ **PER-MARKET(eq)**(真绑定仍被抓,✓);
+`require(tx.outputs[0].value == makerStakeAmount - minerFee)` ⇒ NETWORK-FEE(eq),非 PER-MARKET(✓);
+`require(oracleFeePct >= 500)` ⇒ PER-MARKET(range)(市场费率 sanity-check 与网络费 range 区分,✓)。
+
+**诚实边界**:仅静态行级模式匹配单行 require;本合约族无多行 require,故未实现跨行拼接。`unknown` 家族当前为空(无未分类 fee 参数)。未改任何 .sil、covenant、结算或 DB。
