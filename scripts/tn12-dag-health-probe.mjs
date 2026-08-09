@@ -18,6 +18,9 @@
 // Exit code is always 0 on a produced reading. Probe failure prints ok:false --
 // callers MUST distinguish "probe broke" from "DAG is bad": they imply opposite actions.
 import { createRequire } from 'node:module';
+import fsx from 'node:fs';
+import osx from 'node:os';
+import pathx from 'node:path';
 
 const REQUIRE_BASE = process.env.DAG_PROBE_REQUIRE_BASE || 'D:/kanet-tn12/kasia-console/package.json';
 const URL = process.env.DAG_PROBE_URL || 'ws://127.0.0.1:17210';
@@ -77,7 +80,19 @@ const STARVED_LAG_SEC = Number(process.env.DAG_PROBE_STARVED_LAG_SEC || 600);
 // take opposite actions (wait vs. intervene).
 const IBD_GAP = Number(process.env.DAG_PROBE_IBD_GAP || 100);
 
-function diagnose({ tips, lagSeconds, isSynced, headerMinusBlock, peerCount }) {
+// J2 red-team 2026-08-09, the finding that mattered most: during tonight's climb tips went
+// 194 -> 499 -> 506, so RUNAWAY_TIPS=500 never fired, while lag was already past 600 -- meaning
+// the whole actionable window was labelled `starved`, whose remedy is ADD hashrate, when the
+// truth was overproduction and the remedy was REDUCE it. The label pointed the opposite way for
+// the entire time it could still have helped.
+//
+// His fix is a derivative, not another threshold:
+//     lagging AND tips rising       -> overproduction (arriving faster than they merge)
+//     lagging AND tips flat/falling -> starved (nothing to merge)
+// A threshold must be chosen relative to the cliff, and we chose wrong (500 vs the real 248
+// mergeset cap). A derivative needs no knowledge of where the cliff is: 194->499 is rising from
+// the first minute.
+function diagnose({ tips, lagSeconds, isSynced, headerMinusBlock, peerCount, tipsTrend }) {
   if (tips >= RUNAWAY_TIPS) return 'runaway';           // checked first: it is the dangerous one
   const lagging = lagSeconds !== null && lagSeconds >= STARVED_LAG_SEC;
   // Isolation outranks every lag-based verdict: with no peers you are not observing the network,
@@ -91,9 +106,13 @@ function diagnose({ tips, lagSeconds, isSynced, headerMinusBlock, peerCount }) {
   // peers on evidence that cannot support it.
   // I had written "null = could not read, NOT zero. Do not collapse them." in a comment above
   // and then collapsed them in the logic. Stating a distinction is not the same as enforcing it.
-  if (lagging && peerCount === null) return 'peers-unknown';
+  if (lagging && peerCount == null) return 'peers-unknown';   // == catches undefined too
   if (lagging && peerCount === 0) return 'isolated';
   if (lagging && headerMinusBlock >= IBD_GAP) return 'catching-up';  // behind BUT being fed
+  // null = no previous sample (first run / cleared state). Unknown is not "flat": calling it
+  // starved here would be the same collapse as null-peerCount, so it gets its own answer.
+  if (lagging && tipsTrend == null) return 'trend-unknown';   // == catches undefined too: an omitted field is unknown, not flat
+  if (lagging && tipsTrend > 0) return 'overproduction';  // REDUCE hashrate -- opposite of starved
   if (lagging) return 'starved';                        // behind AND not being fed -> intervene
   if (!isSynced) return 'behind';                        // lagging but under threshold; watch it
   return 'healthy';
@@ -106,15 +125,15 @@ function diagnose({ tips, lagSeconds, isSynced, headerMinusBlock, peerCount }) {
 if (process.argv.includes('--selftest')) {
   const cases = [
     // 2026-08-07/08 mining host at the peak of the stall.
-    { name: 'runaway: tips exploded',        in: { tips: 18132, lagSeconds: 40000, isSynced: false, headerMinusBlock: 0 },    want: 'runaway' },
+    { name: 'runaway: tips exploded',        in: { tips: 18132, lagSeconds: 40000, isSynced: false, headerMinusBlock: 0, peerCount: 2, tipsTrend: 300 }, want: 'runaway' },
     // 2026-08-08 this node: 4h of zero progress, DAG pristine, nobody feeding it.
-    { name: 'starved: behind, not fed',      in: { tips: 1, lagSeconds: 14400, isSynced: false, headerMinusBlock: 0 },        want: 'starved' },
+    { name: 'starved: behind, not fed',      in: { tips: 1, lagSeconds: 14400, isSynced: false, headerMinusBlock: 0, peerCount: 2, tipsTrend: 0 },  want: 'starved' },
     // 2026-08-09 right after a restart: equally far behind, but headers streaming in.
-    { name: 'catching-up: behind, being fed',in: { tips: 1, lagSeconds: 744, isSynced: false, headerMinusBlock: 3960 },       want: 'catching-up' },
+    { name: 'catching-up: behind, being fed',in: { tips: 1, lagSeconds: 744, isSynced: false, headerMinusBlock: 3960, peerCount: 3, tipsTrend: 0 }, want: 'catching-up' },
     // runaway must win: it is the one with a destructive remedy if missed.
-    { name: 'runaway outranks starved',      in: { tips: 9000, lagSeconds: 14400, isSynced: false, headerMinusBlock: 0 },     want: 'runaway' },
-    { name: 'behind: lagging under thresh',  in: { tips: 2, lagSeconds: 60, isSynced: false, headerMinusBlock: 0 },           want: 'behind' },
-    { name: 'healthy: steady state',         in: { tips: 2, lagSeconds: 0, isSynced: true, headerMinusBlock: 0 },             want: 'healthy' },
+    { name: 'runaway outranks starved',      in: { tips: 9000, lagSeconds: 14400, isSynced: false, headerMinusBlock: 0, peerCount: 3, tipsTrend: 50 }, want: 'runaway' },
+    { name: 'behind: lagging under thresh',  in: { tips: 2, lagSeconds: 60, isSynced: false, headerMinusBlock: 0, peerCount: 3, tipsTrend: 0 },     want: 'behind' },
+    { name: 'healthy: steady state',         in: { tips: 2, lagSeconds: 0, isSynced: true, headerMinusBlock: 0, peerCount: 3, tipsTrend: 0 },        want: 'healthy' },
     // Bettor's 2026-08-09 misdiagnosis: frozen DAA read as "chain idle" while his own node
     // had dropped to 0 peers. With no peers this node observes nothing, so say so.
     { name: 'isolated: lagging, zero peers', in: { tips: 3, lagSeconds: 5000, isSynced: false, headerMinusBlock: 0, peerCount: 0 },    want: 'isolated' },
@@ -123,6 +142,15 @@ if (process.argv.includes('--selftest')) {
     // ...but a healthy node with an unreadable peer count is still healthy: the guard must not
     // fire when there is nothing wrong, or it becomes noise and gets ignored.
     { name: 'peerCount null but not lagging => healthy', in: { tips: 2, lagSeconds: 0, isSynced: true, headerMinusBlock: 0, peerCount: null }, want: 'healthy' },
+    // J2's finding: tonight's entire climb (194->499) sat under RUNAWAY_TIPS=500 while lag was
+    // already past 600, so it was labelled starved -- remedy "add hashrate" -- when the truth
+    // was overproduction and the remedy was the opposite.
+    { name: 'overproduction: lagging, tips rising', in: { tips: 400, lagSeconds: 5000, isSynced: false, headerMinusBlock: 0, peerCount: 3, tipsTrend: 60 },  want: 'overproduction' },
+    { name: 'starved: lagging, tips falling',       in: { tips: 3,   lagSeconds: 5000, isSynced: false, headerMinusBlock: 0, peerCount: 3, tipsTrend: -5 },  want: 'starved' },
+    { name: 'starved: lagging, tips flat',          in: { tips: 3,   lagSeconds: 5000, isSynced: false, headerMinusBlock: 0, peerCount: 3, tipsTrend: 0 },   want: 'starved' },
+    { name: 'trend-unknown: no prior sample',       in: { tips: 400, lagSeconds: 5000, isSynced: false, headerMinusBlock: 0, peerCount: 3, tipsTrend: null },want: 'trend-unknown' },
+    // an omitted field is unknown, not flat -- guards against a caller silently getting starved
+    { name: 'trend-unknown: field omitted entirely',in: { tips: 400, lagSeconds: 5000, isSynced: false, headerMinusBlock: 0, peerCount: 3 },                 want: 'trend-unknown' },
   ];
   let bad = 0;
   for (const c of cases) {
@@ -176,6 +204,15 @@ try {
   await rpc.disconnect();
 
   const tips = (dag?.tipHashes ?? []).length;
+  // Previous sample, persisted between runs -- the probe is a one-shot process, so the
+  // derivative needs somewhere to live. Any read/parse failure yields null (unknown), never 0.
+  const STATE_PATH = process.env.DAG_PROBE_STATE || pathx.join(osx.tmpdir(), `tn12-dag-probe-state-${Buffer.from(URL).toString('hex').slice(0, 12)}.json`);
+  let tipsTrend = null, prevTips = null;
+  try {
+    const prev = JSON.parse(fsx.readFileSync(STATE_PATH, 'utf8'));
+    if (Number.isFinite(prev?.tips)) { prevTips = prev.tips; tipsTrend = tips - prev.tips; }
+  } catch { /* no prior sample -> stays null -> reported as trend-unknown, not as flat */ }
+  try { fsx.writeFileSync(STATE_PATH, JSON.stringify({ tips, ts: Date.now() })); } catch {}
   const lagSeconds = sinkTsMs ? Math.max(0, Math.round((Date.now() - sinkTsMs) / 1000)) : null;
   const blockCount = Number(dag?.blockCount ?? 0);
   const headerCount = Number(dag?.headerCount ?? 0);
@@ -183,10 +220,12 @@ try {
 
   out({
     ok: true,
-    diagnosis: diagnose({ tips, lagSeconds, isSynced, headerMinusBlock: headerCount - blockCount, peerCount }),
+    diagnosis: diagnose({ tips, lagSeconds, isSynced, headerMinusBlock: headerCount - blockCount, peerCount, tipsTrend }),
     tips,
     // null means UNREADABLE, not zero -- see the note above; conflating them is the bug.
     peerCount,
+    tipsTrend,   // null = no prior sample; sign is what matters, not magnitude
+    prevTips,
     lagSeconds,
     // header > block means the node is pulling headers ahead of bodies = IBD in progress.
     // A starved node shows lag WITHOUT this gap: it is not even trying.
