@@ -86,6 +86,19 @@ const RISE_STREAK = Number(process.env.DAG_PROBE_RISE_STREAK || 4);
 // grown by a FACTOR over where it started. That is still scale-free -- 5->8 and 200->320 both
 // qualify -- so it keeps J2's property that the derivative need not know where the cliff is.
 const RISE_FACTOR = Number(process.env.DAG_PROBE_RISE_FACTOR || 1.5);
+// J2 caught this before it ran a full cycle: a RELATIVE factor is MORE sensitive near zero,
+// not less. 5->8 is 1.6x and would fire, and 5-to-30 is exactly the healthy jitter band, so the
+// factor alone just moved the false-brake window from 26-30 down to single digits instead of
+// closing it. A floor is required with it.
+// A floor is NOT the cliff constant the derivative exists to avoid: the cliff is "where does it
+// become unrecoverable" (mergeset cap 248), whereas this only says "below this the DAG is too
+// small to be worth acting on".
+// 150 comes from J2's measurement, not from my guess: after a drain, NORMAL refill sweeps
+// 9 -> 191, so a floor of 50 would read most of an ordinary refill as overproduction. He put
+// the usable range at 150-200; 150 leaves ~98 tips of headroom below the 248 cliff to act in.
+// The two conditions guard different false positives and neither alone suffices (J2/NWT):
+// the floor rejects SMALL signals, the streak+factor reject single-sample JITTER.
+const RISE_FLOOR = Number(process.env.DAG_PROBE_RISE_FLOOR || 150);
 
 // J2 red-team 2026-08-09, the finding that mattered most: during tonight's climb tips went
 // 194 -> 499 -> 506, so RUNAWAY_TIPS=500 never fired, while lag was already past 600 -- meaning
@@ -115,6 +128,7 @@ function diagnose({ tips, lagSeconds, isSynced, headerMinusBlock, peerCount, tip
   // Both conditions, deliberately: long enough to not be jitter, AND large enough to be growth.
   // Requiring only one of them is what produced the false brakes.
   if (risingStreak != null && risingStreak >= RISE_STREAK
+      && tips >= RISE_FLOOR
       && streakStartTips != null && tips >= streakStartTips * RISE_FACTOR) return 'overproduction';
   const lagging = lagSeconds !== null && lagSeconds >= STARVED_LAG_SEC;
   // Isolation outranks every lag-based verdict: with no peers you are not observing the network,
@@ -169,13 +183,26 @@ if (process.argv.includes('--selftest')) {
     { name: 'overproduction: rising streak reached', in: { tips: 400, lagSeconds: 5000, isSynced: false, headerMinusBlock: 0, peerCount: 3, tipsTrend: 60, risingStreak: 4, streakStartTips: 200 }, want: 'overproduction' },
     // The blind spot this fix exists for: tonight, lag=344 (under the 600 gate) while tips ran
     // 48 -> 106. The old ordering said `healthy` through the whole actionable window.
-    { name: 'overproduction: climbing BEFORE lag gate opens', in: { tips: 106, lagSeconds: 344, isSynced: true, headerMinusBlock: 0, peerCount: 3, tipsTrend: 2, risingStreak: 5, streakStartTips: 48 }, want: 'overproduction' },
+    // Still guards "the lag gate must not silence the derivative": lag=344 is under the 600
+    // gate, yet this must fire. Values raised above the floor because 48->106 is inside the
+    // measured normal-refill sweep and is genuinely indistinguishable from it at that size --
+    // the floor buys correctness there at the cost of acting later.
+    { name: 'overproduction: climbing BEFORE lag gate opens', in: { tips: 240, lagSeconds: 344, isSynced: true, headerMinusBlock: 0, peerCount: 3, tipsTrend: 12, risingStreak: 5, streakStartTips: 150 }, want: 'overproduction' },
     // The two false brakes this factor exists to stop: healthy-band jitter reached streak 4
     // (tips=30 from 26, tips=28 from 24) and braked the miner for 38 seconds each time.
     { name: 'no false brake: streak reached but growth tiny', in: { tips: 30, lagSeconds: 85, isSynced: true, headerMinusBlock: 0, peerCount: 3, tipsTrend: 1, risingStreak: 4, streakStartTips: 26 }, want: 'healthy' },
     { name: 'no false brake: second live case',               in: { tips: 28, lagSeconds: 86, isSynced: true, headerMinusBlock: 0, peerCount: 3, tipsTrend: 2, risingStreak: 4, streakStartTips: 24 }, want: 'healthy' },
     // scale-free: a small-but-real run still qualifies, so the factor is not a hidden cliff
-    { name: 'overproduction: small scale but real growth',    in: { tips: 12, lagSeconds: 700, isSynced: false, headerMinusBlock: 0, peerCount: 3, tipsTrend: 2, risingStreak: 4, streakStartTips: 5 }, want: 'overproduction' },
+    // J2, before this ran a full cycle: a relative factor is MORE sensitive near zero. 5->12 is
+    // 2.4x and would have fired, yet 5-30 IS the healthy band -- the factor alone moved the
+    // false-brake window into single digits rather than closing it. Hence the floor.
+    { name: 'no false brake: big ratio but tiny absolute',    in: { tips: 12, lagSeconds: 700, isSynced: false, headerMinusBlock: 0, peerCount: 3, tipsTrend: 2, risingStreak: 4, streakStartTips: 5 }, want: 'starved' },
+    { name: 'no false brake: healthy jitter 5->8',            in: { tips: 8,  lagSeconds: 0,   isSynced: true,  headerMinusBlock: 0, peerCount: 3, tipsTrend: 1, risingStreak: 4, streakStartTips: 5 }, want: 'healthy' },
+    // above the floor AND growing by the factor -> the real thing
+    // Inside the measured normal-refill sweep (9 -> 191): must NOT be read as overproduction.
+    { name: 'no false brake: normal refill 55->90',           in: { tips: 90,  lagSeconds: 300, isSynced: true,  headerMinusBlock: 0, peerCount: 3, tipsTrend: 8,  risingStreak: 4, streakStartTips: 55 },  want: 'healthy' },
+    // Above the floor AND growing by the factor: the real thing, with room before the 248 cliff.
+    { name: 'overproduction: above floor and growing',        in: { tips: 200, lagSeconds: 300, isSynced: true,  headerMinusBlock: 0, peerCount: 3, tipsTrend: 15, risingStreak: 4, streakStartTips: 120 }, want: 'overproduction' },
     // debounce must hold: a couple of rising samples is normal jitter, not a verdict
     { name: 'short rising streak stays healthy',    in: { tips: 6, lagSeconds: 0, isSynced: true, headerMinusBlock: 0, peerCount: 3, tipsTrend: 1, risingStreak: 2, streakStartTips: 4 }, want: 'healthy' },
     { name: 'starved: lagging, tips falling',       in: { tips: 3,   lagSeconds: 5000, isSynced: false, headerMinusBlock: 0, peerCount: 3, tipsTrend: -5 },  want: 'starved' },
