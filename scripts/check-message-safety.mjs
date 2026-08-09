@@ -28,12 +28,32 @@ try { message = JSON.parse(fsx.readFileSync(file, 'utf8')).message; }
 catch (e) { console.error('🔴 读不出 payload.message: ' + e.message); process.exit(2); }
 if (typeof message !== 'string') { console.error('🔴 payload.message 不是字符串'); process.exit(2); }
 
+// 🔵 零信息地址放行(本闸第一次真用就撞到, 而它是按本闸自己的原则修的):
+// 我写完这道闸之后, 第一条被它拦下的消息是【我自己在讲探针 RPC】的那条, 命中 `127.0.0.1`。
+// 环回地址不泄露任何拓扑 —— 拦它保护不了任何东西, 只制造噪音。而这个闸的注释自己写着
+// "爱喊狼的闸会被人常开 override, 等于没有" ⇒ 按那条原则, 该放行的必须放行。
+// ⚠ 只放行【确实零信息】的那几类。Tailscale/CGNAT(100.64.0.0/10)、私网、公网一律照拦 ——
+//   今天真泄露的正是 CGNAT 那一类, 放宽到"所有非公网可路由"就等于把闸拆了。
+function isZeroInfoAddr(o) {
+  if (o[0] === 127) return true;                        // 环回
+  if (o[0] === 0 && o[1] === 0 && o[2] === 0 && o[3] === 0) return true;      // 0.0.0.0
+  if (o.every((x) => x === 255)) return true;           // 广播
+  return false;
+}
+
 const hits = [];
 message.split('\n').forEach((line, i) => {
-  // 点分四段: 逐段校验 <=255。判据要实现【定义】而不是"看起来像" —— 否则版本号 1.2.3.4 会被误拦,
-  // 而误拦多了这道闸就会被人用 override 常开, 等于没有。
+  // 点分四段: 逐段校验 <=255。
+  // 🔴 更正我自己写过两遍的一句: 我说过"版本号不会被误拦"。**四段版本号会被拦。**
+  //   我当时只测了三段的 `1.2.3`(它确实放行), 然后把结论推广成了"版本号" —— 而
+  //   `1.2.3.4` 与一个 IP 在【语法上无法区分】, 没有任何按定义的判法能分开它们。
+  //   ⇒ 拦是对的安全默认(宁可让人加 override, 不可让坐标溜过去); 错的是我那句断言。
+  //   实测四例: 127.0.0.1 放 · 0.0.0.0 放 · 100.99.x.x 拦 · 192.168.x.x 拦 · 1.2.3.4 拦。
   for (const m of line.matchAll(/\b(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})\b/g)) {
-    if (m.slice(1, 5).every((o) => Number(o) <= 255)) hits.push([i + 1, '点分四段', m[0]]);
+    const octets = m.slice(1, 5).map(Number);
+    if (!octets.every((o) => o <= 255)) continue;
+    if (isZeroInfoAddr(octets)) continue;
+    hits.push([i + 1, '点分四段', m[0]]);
   }
   // user@host: @ 前要有用户名(排除 @J1 这类点名), @ 后要含点(排除 @中文名)
   for (const m of line.matchAll(/\b[A-Za-z0-9_.-]{2,}@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+/g)) {
