@@ -271,6 +271,44 @@ try {
     ]).catch(() => null);
     sinkTsMs = Number(b?.block?.header?.timestamp ?? b?.header?.timestamp ?? 0) || null;
   }
+  // 🔵 THE INSTRUMENT THAT CAN ACTUALLY DISCRIMINATE (added 2026-08-09, read-only).
+  // J2 spent tonight trying to tell "miner too fast" from "node too slow" using
+  // getBlockDagInfo().blockCount vs daaScore, and every sample came back EXACTLY equal
+  // (7.0/7.0, 12/12, 40/40). That is not a coincidence and no amount of extra sampling
+  // would have broken it -- rusty-kaspa consensus/src/consensus/mod.rs:824 defines
+  //     block_count = virtual_score - retention_period_root_score
+  // so blockCount IS an affine transform of the DAA score. Its derivative is the DAA
+  // derivative, identically. The ruler had ZERO discriminating power BY CONSTRUCTION.
+  // Live proof of how far off it is: nodeDatabaseBlocksCount=1,125,718 while the real
+  // arrival counter read 3,182 at the same instant.
+  // getMetrics exposes two genuinely INDEPENDENT accumulators, one per side:
+  //   nodeBlocksSubmittedCount -> blocks arriving  (production side)
+  //   nodeBodiesProcessedCount -> bodies validated (digestion side)
+  // Cumulative since node start => callers MUST difference them; a single point says nothing.
+  // networkVirtualParentHashesCount is the mergeset-width quantity -- i.e. the 248 cliff itself,
+  // rather than tips, which is only a proxy for it.
+  let blocksSubmitted = null, bodiesProcessed = null, chainBlocks = null, virtualParents = null;
+  try {
+    const mx = await Promise.race([rpc.getMetrics({
+      // All six flags must be present: the wasm binding does not default the missing ones and
+      // the call silently yields no consensusMetrics if any are absent. Caught only because the
+      // live run came back all-null while a standalone probe with the full set returned data --
+      // the selftest was green either way.
+      consensusMetrics: true, processMetrics: false, connectionMetrics: false,
+      bandwidthMetrics: false, storageMetrics: false, customMetrics: false,
+    }), t(8000, 'rpc timeout')]);
+    const cm = mx?.consensusMetrics ?? null;
+    // Number(): these arrive as BigInt and would poison JSON.stringify. null stays null --
+    // an unreadable counter is not a zero counter (the same conflation NWT caught in peerCount).
+    const num = (v) => (v === undefined || v === null ? null : Number(v));
+    if (cm) {
+      blocksSubmitted = num(cm.nodeBlocksSubmittedCount);
+      bodiesProcessed = num(cm.nodeBodiesProcessedCount);
+      chainBlocks     = num(cm.nodeChainBlocksProcessedCount);
+      virtualParents  = num(cm.networkVirtualParentHashesCount);
+    }
+  } catch { /* older node / method absent -> all stay null, never 0 */ }
+
   await rpc.disconnect();
 
   const tips = (dag?.tipHashes ?? []).length;
@@ -292,7 +330,20 @@ try {
         : tips;
     }
   } catch { /* no prior sample -> stays null -> reported as trend-unknown, not as flat */ }
-  try { fsx.writeFileSync(STATE_PATH, JSON.stringify({ tips, ts: Date.now(), risingStreak: risingStreak ?? 0, streakStartTips: streakStartTips ?? tips })); } catch {}
+
+  // Per-sample deltas of the two independent counters. THIS is the real progress signal the
+  // pulse duty cycle needs (Codex MUST-FIX #1): bodiesDelta > 0 means the node is actually
+  // digesting right now. tips alone cannot say that -- a falling tip count and a stalled node
+  // mid-reorg look the same from tips.
+  let submittedDelta = null, bodiesDelta = null, sampleAgeSec = null;
+  try {
+    const prev2 = JSON.parse(fsx.readFileSync(STATE_PATH, 'utf8'));
+    if (Number.isFinite(prev2?.ts)) sampleAgeSec = Math.max(0, Math.round((Date.now() - prev2.ts) / 1000));
+    if (blocksSubmitted !== null && Number.isFinite(prev2?.blocksSubmitted)) submittedDelta = blocksSubmitted - prev2.blocksSubmitted;
+    if (bodiesProcessed !== null && Number.isFinite(prev2?.bodiesProcessed)) bodiesDelta = bodiesProcessed - prev2.bodiesProcessed;
+  } catch { /* stays null = unknown, which callers must treat as "do not act", not as zero */ }
+
+  try { fsx.writeFileSync(STATE_PATH, JSON.stringify({ tips, ts: Date.now(), risingStreak: risingStreak ?? 0, streakStartTips: streakStartTips ?? tips, blocksSubmitted, bodiesProcessed })); } catch {}
   const lagSeconds = sinkTsMs ? Math.max(0, Math.round((Date.now() - sinkTsMs) / 1000)) : null;
   const blockCount = Number(dag?.blockCount ?? 0);
   const headerCount = Number(dag?.headerCount ?? 0);
@@ -308,6 +359,9 @@ try {
     risingStreak, // consecutive rising samples -- exported so RISE_STREAK can be set from data
     streakStartTips, // tips where the current rising run began (the factor is measured against this)
     prevTips,
+    // --- real instrument (read-only; NOT consumed by diagnose() and NOT by the brake) ---
+    blocksSubmitted, bodiesProcessed, chainBlocks, virtualParents,
+    submittedDelta, bodiesDelta, sampleAgeSec,
     lagSeconds,
     // header > block means the node is pulling headers ahead of bodies = IBD in progress.
     // A starved node shows lag WITHOUT this gap: it is not even trying.
