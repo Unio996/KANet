@@ -127,6 +127,15 @@ function diagnose({ tips, lagSeconds, isSynced, headerMinusBlock, peerCount, tip
   // conservative and risingStreak is exported so it can be chosen from data rather than guessed.
   // Both conditions, deliberately: long enough to not be jitter, AND large enough to be growth.
   // Requiring only one of them is what produced the false brakes.
+  // Codex MUST-FIX #3 / NWT: these were still gated behind `lagging`, which is the very defect
+  // fixed for overproduction and then NOT generalised to its siblings -- "applied the lesson
+  // once and stopped". Attachment state does not depend on how far behind we are: with no peers
+  // (or an unreadable count) this node is not observing the network AT ALL, so every statement
+  // it makes about the network is unsupported whether lag is 5 seconds or 5000.
+  // Deliberately ranked below runaway/overproduction: those are read off the LOCAL DAG, which
+  // stays true regardless of peers, and their remedy is urgent.
+  if (peerCount === 0) return 'isolated';
+  if (peerCount == null) return 'peers-unknown';   // == catches undefined; null is not zero
   if (risingStreak != null && risingStreak >= RISE_STREAK
       && tips >= RISE_FLOOR
       && streakStartTips != null && tips >= streakStartTips * RISE_FACTOR) return 'overproduction';
@@ -142,8 +151,6 @@ function diagnose({ tips, lagSeconds, isSynced, headerMinusBlock, peerCount, tip
   // peers on evidence that cannot support it.
   // I had written "null = could not read, NOT zero. Do not collapse them." in a comment above
   // and then collapsed them in the logic. Stating a distinction is not the same as enforcing it.
-  if (lagging && peerCount == null) return 'peers-unknown';   // == catches undefined too
-  if (lagging && peerCount === 0) return 'isolated';
   if (lagging && headerMinusBlock >= IBD_GAP) return 'catching-up';  // behind BUT being fed
   // null = no previous sample (first run / cleared state). Unknown is not "flat": calling it
   // starved here would be the same collapse as null-peerCount, so it gets its own answer.
@@ -176,7 +183,11 @@ if (process.argv.includes('--selftest')) {
     { name: 'peers-unknown: lagging, peerCount null', in: { tips: 3, lagSeconds: 5000, isSynced: false, headerMinusBlock: 0, peerCount: null }, want: 'peers-unknown' },
     // ...but a healthy node with an unreadable peer count is still healthy: the guard must not
     // fire when there is nothing wrong, or it becomes noise and gets ignored.
-    { name: 'peerCount null but not lagging => healthy', in: { tips: 2, lagSeconds: 0, isSynced: true, headerMinusBlock: 0, peerCount: null }, want: 'healthy' },
+    // Behaviour change (Codex #3): an unreadable peer count now speaks even when nothing else is
+    // wrong, because "I cannot tell whether I am attached" is itself the finding. It is a
+    // diagnosis label only -- the watchdog brakes on runaway/overproduction, never on this.
+    { name: 'peers-unknown even when not lagging',      in: { tips: 2, lagSeconds: 0, isSynced: true, headerMinusBlock: 0, peerCount: null }, want: 'peers-unknown' },
+    { name: 'isolated even when not lagging',           in: { tips: 2, lagSeconds: 0, isSynced: true, headerMinusBlock: 0, peerCount: 0 },    want: 'isolated' },
     // J2's finding: tonight's entire climb (194->499) sat under RUNAWAY_TIPS=500 while lag was
     // already past 600, so it was labelled starved -- remedy "add hashrate" -- when the truth
     // was overproduction and the remedy was the opposite.
