@@ -5,6 +5,7 @@
 // 零 schema churn: 请求存 pool_markets.metadata.bshard_close_request; sig 存 chain_events event_type='bshard_close_sig'。
 
 import { sqlite } from '../db/client.js';
+import { randomUUID } from 'node:crypto';
 
 const QUORUM = 4;   // 4-of-5 committee (close_attest .sil require ≥4 distinct sig)
 
@@ -325,7 +326,7 @@ export async function buildProposeCloseRequestV2(marketId, judged) {
       // 降级纪律同 §1.A: addr 算不出来时仍写 redeem/outpoint, 绝不因 addr 失败丢掉承重的两列。
       let absorbedPsAddr = null;
       try { absorbedPsAddr = p2shFn(absorbedRedeemHex); }
-      catch (e) { console.warn(`[bshard-close-transport] market=${marketId.slice(-8)} payout_ps_addr 计算失败, 仅写 redeem/outpoint: ${e.message}`); }
+      catch (e) { _logAddrDegraded(marketId, e); }
       try {
         if (absorbedPsAddr) sqlite.prepare('UPDATE payout_shards SET payout_redeem_hex = ?, payout_ps_outpoint = ?, payout_ps_addr = ? WHERE logical_market_id = ?').run(absorbedRedeemHex, consolidateRes.psOutpoint, absorbedPsAddr, marketId);
         else sqlite.prepare('UPDATE payout_shards SET payout_redeem_hex = ?, payout_ps_outpoint = ? WHERE logical_market_id = ?').run(absorbedRedeemHex, consolidateRes.psOutpoint, marketId);
@@ -590,3 +591,18 @@ export async function buildZkHandoffRequestV2(marketId, args) {
 }
 
 export { QUORUM };
+
+function _logAddrDegraded(marketId, err) {
+  // J2 红队 2026-08-09 (实证驱动, 非假想): addr 计算走 kaspa-wasm, 而 08-07T20:55 起的 wasm trap
+  // 持续 33.7 小时 —— 那种窗口里本补丁会【每次都走降级】: 刷 redeem、不刷 addr ⇒ gate 继续拦 ⇒ 结算
+  // 继续停, 而现象与"还没修"完全一致。console 输出不够: 结算停 20 天零人察觉就是证据。
+  // ⇒ 降级必须落进 events(读侧认识 level='error'), 让"补丁正在降级"成为可观测量而不是沉默。
+  // 落账失败本身不许把主流程弄崩 —— 钱路已成立, 记账不倒灌。
+  const summary = `payout_ps_addr 刷新失败 market=${String(marketId).slice(-8)} — 仅写 redeem/outpoint, coherence gate step(d) 将继续拦住该盘结算`;
+  console.warn(`[bshard-close-transport] 🔴 ${summary}: ${err && err.message}`);
+  try {
+    sqlite.prepare(`INSERT INTO events (id, event_scope, event_type, source, level, summary, payload_json, created_at)
+      VALUES (?, 'system', 'payout_ps_addr_refresh_degraded', 'bshard-close-transport', 'error', ?, ?, datetime('now'))`)
+      .run(randomUUID(), summary, JSON.stringify({ marketId, error: String(err && err.message || err) }));
+  } catch (e) { console.error(`[bshard-close-transport] events 落账失败 (non-fatal): ${e.message}`); }
+}

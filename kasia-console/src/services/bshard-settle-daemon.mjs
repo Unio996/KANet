@@ -242,7 +242,7 @@ async function consolidateAndBuildPsState(marketId, ps, ctx) {
     //    字节。降级方向必须是"回到今天", 不能是"比今天更坏"。
     let psAddrNew = null;
     try { psAddrNew = _p2shCache(psRedeemHex); }
-    catch (e) { console.warn(`[bshard-settle] market=${marketId.slice(-8)} payout_ps_addr 计算失败, 仅写 redeem/outpoint(addr 保持陈旧, gate 仍会拦): ${e.message}`); }
+    catch (e) { _logAddrDegraded(marketId, e); }
     try {
       if (psAddrNew) sqlite.prepare('UPDATE payout_shards SET payout_ps_outpoint = ?, payout_redeem_hex = ?, payout_ps_addr = ? WHERE logical_market_id = ?').run(res.psOutpoint, psRedeemHex, psAddrNew, marketId);
       else sqlite.prepare('UPDATE payout_shards SET payout_ps_outpoint = ?, payout_redeem_hex = ? WHERE logical_market_id = ?').run(res.psOutpoint, psRedeemHex, marketId);
@@ -311,7 +311,7 @@ async function consolidateAndBuildPsState(marketId, ps, ctx) {
         // 同 §1.A: Tier2 genesis-walk 重建出新 redeem, addr 必须同步刷。同样的降级纪律。
         let psAddrNew2 = null;
         try { psAddrNew2 = _p2shCache(psRedeemHex); }
-        catch (e) { console.warn(`[bshard-settle] market=${marketId.slice(-8)} payout_ps_addr 计算失败(Tier2), 仅写 redeem/outpoint: ${e.message}`); }
+        catch (e) { _logAddrDegraded(marketId, e); }
         try {
           if (psAddrNew2) sqlite.prepare('UPDATE payout_shards SET payout_ps_outpoint = ?, payout_redeem_hex = ?, payout_ps_addr = ? WHERE logical_market_id = ?').run(`${psOutpointTxid}:${psIdx}`, psRedeemHex, psAddrNew2, marketId);
           else sqlite.prepare('UPDATE payout_shards SET payout_ps_outpoint = ?, payout_redeem_hex = ? WHERE logical_market_id = ?').run(`${psOutpointTxid}:${psIdx}`, psRedeemHex, marketId);
@@ -381,6 +381,21 @@ function buildCtx() {
 }
 // kaspa-wasm p2sh/p2pk are sync after module load; pre-warm in tick. computeSettlePlan/settleMarketLive call them sync.
 let _k = null;
+function _logAddrDegraded(marketId, err) {
+  // J2 红队 2026-08-09 (实证驱动, 非假想): addr 计算走 kaspa-wasm, 而 08-07T20:55 起的 wasm trap
+  // 持续 33.7 小时 —— 那种窗口里本补丁会【每次都走降级】: 刷 redeem、不刷 addr ⇒ gate 继续拦 ⇒ 结算
+  // 继续停, 而现象与"还没修"完全一致。console 输出不够: 结算停 20 天零人察觉就是证据。
+  // ⇒ 降级必须落进 events(读侧认识 level='error'), 让"补丁正在降级"成为可观测量而不是沉默。
+  // 落账失败本身不许把主流程弄崩 —— 钱路已成立, 记账不倒灌。
+  const summary = `payout_ps_addr 刷新失败 market=${String(marketId).slice(-8)} — 仅写 redeem/outpoint, coherence gate step(d) 将继续拦住该盘结算`;
+  console.warn(`[bshard-settle-daemon] 🔴 ${summary}: ${err && err.message}`);
+  try {
+    sqlite.prepare(`INSERT INTO events (id, event_scope, event_type, source, level, summary, payload_json, created_at)
+      VALUES (?, 'system', 'payout_ps_addr_refresh_degraded', 'bshard-settle-daemon', 'error', ?, ?, datetime('now'))`)
+      .run(randomUUID(), summary, JSON.stringify({ marketId, error: String(err && err.message || err) }));
+  } catch (e) { console.error(`[bshard-settle-daemon] events 落账失败 (non-fatal): ${e.message}`); }
+}
+
 function _p2shCache(redeemHex) { return _k.addressFromScriptPublicKey(_k.ScriptBuilder.fromScript(new Uint8Array(Buffer.from(redeemHex, 'hex'))).createPayToScriptHashScript(), NETWORK).toString(); }
 function _p2pkAddrSync(pkHex) { return new _k.PublicKey(pkHex).toAddress(_k.NetworkType.Testnet).toString(); }
 function _p2pkSpkSync(addr) { const s = _k.payToAddressScript(new _k.Address(addr)); return (s.script ?? s).toString(); }

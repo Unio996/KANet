@@ -30,6 +30,7 @@ import { collectCloseSigsV2, clearCloseRequest, markSubmittedV2, QUORUM } from '
 import { _splicePayoutV2CloseRedeem, readPayoutShardV2AttestedState } from '../lib/bshard-close-enforce.mjs';
 import { deriveSettlementFeeLeaves } from '../lib/pool-shard-settle.mjs';
 import { enqueueZkProveJob } from '../lib/zk-prove-enqueue.mjs';
+import { randomUUID } from 'node:crypto';
 
 const TICK_MS = 30_000;   // 30s tick (close_attest 时效性 > 普通 vote; settler 等 quorum)
 let timer = null, running = false;
@@ -657,6 +658,21 @@ export function stopBshardCloseSubmitV2Cron() { if (submitTimer) { clearInterval
  *   witness 结构固定)。写失败不影响 attest 本身已落链的事实(try/catch, 只 log 不 throw, 镜像
  *   _tryEnqueueZkProve 同款"钱路已成立, 记账失败不倒灌回钱路状态"纪律)。
  */
+function _logAddrDegraded(marketId, err) {
+  // J2 红队 2026-08-09 (实证驱动, 非假想): addr 计算走 kaspa-wasm, 而 08-07T20:55 起的 wasm trap
+  // 持续 33.7 小时 —— 那种窗口里本补丁会【每次都走降级】: 刷 redeem、不刷 addr ⇒ gate 继续拦 ⇒ 结算
+  // 继续停, 而现象与"还没修"完全一致。console 输出不够: 结算停 20 天零人察觉就是证据。
+  // ⇒ 降级必须落进 events(读侧认识 level='error'), 让"补丁正在降级"成为可观测量而不是沉默。
+  // 落账失败本身不许把主流程弄崩 —— 钱路已成立, 记账不倒灌。
+  const summary = `payout_ps_addr 刷新失败 market=${String(marketId).slice(-8)} — 仅写 redeem/outpoint, coherence gate step(d) 将继续拦住该盘结算`;
+  console.warn(`[bshard-close-submit-v2] 🔴 ${summary}: ${err && err.message}`);
+  try {
+    sqlite.prepare(`INSERT INTO events (id, event_scope, event_type, source, level, summary, payload_json, created_at)
+      VALUES (?, 'system', 'payout_ps_addr_refresh_degraded', 'bshard-close-submit-v2', 'error', ?, ?, datetime('now'))`)
+      .run(randomUUID(), summary, JSON.stringify({ marketId, error: String(err && err.message || err) }));
+  } catch (e) { console.error(`[bshard-close-submit-v2] events 落账失败 (non-fatal): ${e.message}`); }
+}
+
 async function _persistAttestedPsState(marketId, req, txId, psContAddress) {
   try {
     const preRedeemHex = req.closeInputs.payoutshard.redeem_hex;
@@ -680,7 +696,7 @@ async function _persistAttestedPsState(marketId, req, txId, psContAddress) {
       const network = String(psContAddress || '').startsWith('kaspatest:') ? 'testnet-12' : 'mainnet';
       splicedAddr = p2shFromRedeemSync(spliced, network);
     } catch (e) {
-      console.warn(`[bshard-close-submit-v2] market=${marketId.slice(-8)} payout_ps_addr 计算失败, 仅写 redeem/outpoint(addr 保持陈旧, gate 仍会拦住而不是放行): ${e.message}`);
+      _logAddrDegraded(marketId, e);
     }
     if (splicedAddr) {
       sqlite.prepare('UPDATE payout_shards SET payout_redeem_hex = ?, payout_ps_outpoint = ?, payout_ps_addr = ? WHERE logical_market_id = ?')
