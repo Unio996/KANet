@@ -35,6 +35,10 @@ PoolSpine_v06.sil::refund_maker_unjoined param=minerFee  :285  require(...== mak
 🔴 **但 §2 底账(line 10/49-50)把那几行 `==makerStakeAmount−minerFee` 数成"3 个让【市场承诺的费率】绑住花费"** —— 这跟他自己 §DoD① 的分类**直接打架**: §DoD① 说市场费率(broker/oraclePct)根本不进 redeem、从不被绑,§2 却说有 3 个绑住了。
 ⇒ 病根是**枚举器 PER-MARKET(eq) 把 minerFee 和费率混为一谈(FEEISH=/fee/i),§2 头条继承了这个混淆**。按 §DoD① 那半(权威、且与 R-3 一致),市场费率口径 = **0/21**。两段取 §DoD① 为准、§2 随枚举器修正后对齐。
 
+### MF-1 与 Codex 独立收敛（两条 lane 撞同一个根 · 高置信）`[CONFIRMED·Codex审实读]`
+Codex 独立审(`RESPONSE-20260808-UNSYNCED-PRECOND4-FEE-AUTHORITY-CODEX-REVIEW.md` §3,02:05Z,**在本 catch 之前**)已判枚举器 `classify()` 有 **too-wide 假阳性 MUST-FIX**,根因描述与本 note 完全一致(`==` 不查花费侧)。Codex 举的例子恰是 `require(minerFee == maxAllowedFee)`。
+🔴 **但 Codex 用的是"a future line(未来某行)"假设语气——它判了机制缺陷、没发现【当前那 3 个 PER-MARKET(eq) 已经全是 minerFee 假阳性、头条 3 此刻就是错的】。** 本 catch 补的正是这半:**不是"将来可能",是"现在 0/21 而非 3/21"**。⇒ 两条独立 lane 同根 = 修法无争议:`classify()`→`PER-MARKET(eq)` 必须机械证明**同一条 require 里两侧都在**(市场承诺的费率/bound ∧ 承载花费的 `tx.outputs[..].value` 或显式枚举的 money-flow 原语),用小型 AST/数据流,不用行正则(Codex §3 MUST-FIX 原文)。
+
 ## MF-2 🟡 枚举器不可复现: 默认路径是死的,且 PoolSpine*.sil 不在主树 `[CONFIRMED·实跑复现]`
 
 - `const DIR = process.env.FEE_ENUM_DIR || 'D:/kanet/kanet/kasia-console/src/lib'`(:23)——该默认路径**本机不存在**(`ls` ⇒ No such file or directory)。
