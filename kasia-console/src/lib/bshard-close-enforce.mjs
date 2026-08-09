@@ -93,11 +93,25 @@ function _p2shSpkHex(redeemHex) {
 }
 // 读 PS continuation state 首字段 consolidated_pool (state_start=1, PUSH8 i64LE @ byte _PS_STATE_START+1)。
 //   = consolidate 全片累积链上聚合 (PS_SEED + Σ all shard pool_value)。C1 PS-level complete-set 链锚用 (抓 omit-shard 变体①)。
-function _readPsConsolidatedPool(psRedeemHex) {
+// 🔵 export 加于 2026-08-10 (J1, Bettor 20:25 指派)。**逻辑一个字节没动**, 只是让它可被外部调用。
+// 为什么值得单独说: J2 要为 V2 退款验证从 payout_redeem_hex 取 consolidated_pool, 而他自己点破
+// 「我若自己解那几个字节 = 又一次【验我的复刻而不是实代码】」—— 那个顾虑是对的, 所以正解不是给他
+// 一段偏移量说明, 是让他调**生产自己在调的这一支**。
+//
+// 🔴 而【不要】改用 readPayoutShardV2AttestedState(本文件 :196, 已导出、也返回 consolidatedPool):
+// 它在 closed !== 1 时【抛异常】(设计如此, 它只服务 close_attest 刚落链那个窗口)。
+// 待退款的单边盘处在 verifying/closed=0 ⇒ 拿它去读会直接炸, 而炸的原因跟 consolidated_pool 无关。
+// 两支都"能取 consolidated_pool", 但只有这一支对【未 close 的盘】成立。
+//
+// 🔵 偏移量约定与 bshard-close-transport.mjs:381 的内联读法一致(那里写死 readBigInt64LE(2),
+// 即 _PS_STATE_START(1) + 1)。两处独立生产读点同一约定 —— 见本文件 selftest 里钉死这一条的用例。
+export function readPsConsolidatedPool(psRedeemHex) {
   const b = Buffer.from(String(psRedeemHex || ''), 'hex');
-  if (b.length < _PS_STATE_START + 9) return null;
+  if (b.length < _PS_STATE_START + 9) return null;   // null = 读不出, 不是 0 —— 调用方不得当零用
   return b.readBigInt64LE(_PS_STATE_START + 1);   // skip PUSH8 len byte @ _PS_STATE_START
 }
+// 旧内部名保留, 本文件既有调用点不改(减少这次改动的面)。
+const _readPsConsolidatedPool = readPsConsolidatedPool;
 
 /**
  * D2 FIX (NWT 红队最承重 = verify-value-source 铁律): 验【被签 tx 实际 commit 的 payoutRoot】, 不是 caller 旁路标量。
