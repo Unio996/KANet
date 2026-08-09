@@ -1,4 +1,4 @@
-> **Status**: CURRENT · **v0.3**（2026-08-10）
+> **Status**: CURRENT · **v0.3.1**（2026-08-10 · 并入 Codex 二轮 §4 六条验收；§5 把「谁触发退款」从边界升为【闸②·正在挡 canary#1·无人负责】）
 > **性质**: 设计稿 · **零改码** · Bettor 2026-08-09 20:15 指派（「V2 `cancelMarketLive` 缺口 = J1 域的并行 design 活，**先出设计不动手**，与双边 canary 并行、不 gate 它」）
 > **作者**: J1tn · **待审**: NWT 红队（**请审 v0.3；v0.1/v0.2 有三处误判，已在 §2.3/§6 逐条标出**）· **待批**: Bettor 排期后才落码
 > **波及**: 5 个单边盘 / ~3,509 KAS（J2 20:13 实测，其中 3,500 是 `9ez2u` 一家）。**9jaty 是双边，不走这条路。**
@@ -165,6 +165,25 @@ compilePayoutShardRedeem  →  compileSil(PayoutShard.sil, …)     ← 【另�
 ⚠ **lint 帮不上忙**（J2 20:50）：`R-PS-FAMILY-DISPATCH` 白名单是**文件级**，而 `bshard-auto-settler.mjs` 整个在白名单里
 ⇒ **在这个文件里新增第 N 个 compile 调用点，lint 不会响。别把"lint 绿"当成"没漏下一处"。**
 
+### §4bis Codex 二轮（bridge `09ad5d01` §4）六条实现验收，原样并入
+
+Bettor 21:17 指派并入。**这六条是「动钱之前必须证到」的下限，不是可选项**：
+
+```
+1. expectedCancelledAddr 必须由【当前真实 V2 redeem 经一次有界状态转移】导出，
+   不得由 V1 重编译得来
+2. cancel 落链后的 refund 穿线，必须从【那一份落链的 V2 continuation redeem 字节谱系】起步，
+   不得独立重建一个"等价"合约
+3. 每一次 refund continuation 必须保留 >=205 的字节，除非该字段是 V2 covenant 规定要变的；
+   对 refund_claim 而言，V2 尾字段应【逐字节不变】
+4. 🔴 必须有一条 byte-exact 测试，对着【真正编译出来的 V2 合约 / 交易产物】比对预期 continuation，
+   **不能只对着一个复刻的 parser 比** —— 这一条是 Codex 对本稿 §2/§3 全部结论的权威验收层，
+   两个读取器互相一致【不构成】部署布局的证明（他对 `readPsConsolidatedPool` 那条也是这么限定的）
+5. 驱动侧闸保持 fail-closed。**任何"修法"都不得以绕过 `psContAddress === expectedCancelledAddr` 的形式出现**
+6. 本 review 不授权任何生产退款 / 结算 / signer-broadcaster 改动 / 密钥移动
+```
+🔵 第 4 条的执行体 = 「乙」（J2 的 build-only 稿，Bettor 21:00 拍为 §4 验收装置，排在本稿落码之后）。
+
 ---
 
 ## §5 明确不在范围
@@ -172,7 +191,25 @@ compilePayoutShardRedeem  →  compileSil(PayoutShard.sil, …)     ← 【另�
 - 不动 `:833` 那道闸（它是对的）。
 - **不动 §2.3 那三处**（不是缺陷，改了会坏）。
 - **不动 relay 侧**（NWT 20:53 + J2 20:56 双人实读：cancel/refund 两支都不需改）。
-- 不解决「谁来触发退款」：现状要 caller 先确认"真·永久无解"（`:729`）。
+- 🔴 **不解决「谁来触发退款」—— 而这一格现在【正在挡 canary#1】，必须单独立项，不许并进本稿**：
+  ```
+  grep 'cancelMarketLive(' 全仓（去注释去测试）⇒ 唯一命中 = 它自己的定义行 :811
+  ⇒ 【零调用方】。没有任何 daemon / tick / api 在调它。
+  ```
+  ⇒ **本稿两处修完、退款路完全正确之后，tha3l 仍然不会被退款**，因为没有东西会走那条路。
+  🔴 **它现在的实际卡点比本稿更靠前**：`bshard-close-transport.mjs:384` 的 `throw`（close/propose 路，
+  由 `zkJudgeProposeTick` 驱动，每 8 分钟一次），**根本没走到退款路**。
+  ```
+  闸① K-18 coherence        ✅ 回填已拆（1207→0，有天然对照组）
+  闸② degenerate → 无路可走  🔴 close 路 throw + 退款路零调用方   ← tha3l 现在在这
+  闸③ 退款路对 V2 坏         🔴 本稿要修的
+  ```
+  **闸② 在闸③ 前面。只修③，tha3l 仍卡在②。**
+  🙋 我 20:10 就查到过"没有自动 caller"，**但把它当边界写进范围外就放过了**，没标成独立一格。
+  🔨 **判据：写「不在范围内」时要分清是【别人负责的一格】还是【没有人负责的一格】。**
+  后者写进范围外，等于把它变成没人看的洞 —— **而它读起来跟前者一模一样。**
+  📌 ② 怎么修（自动触发 / 人工 operator / 其他）**不是技术题是政策题**：`closed` 是一次性 XOR 闩，
+  锁 2 之后这个市场永远不能再正常结算（`bshard-auto-settler.mjs:726-729`）。**归属与做法等 Bettor 拍。**
 - 零改码。落码需 Bettor 排期 + NWT 红队；真跑到广播需按钱路规矩单独授权。
 
 ---
