@@ -654,15 +654,28 @@ while ($true) {
   # advancing while the DAG narrows. That distinction is the whole reason this is safe to wire.
   $verdict = if ($health) { [string]$health.diagnosis } else { '' }
   $overproducing = ($verdict -eq 'overproduction')
+  # "the climb has stopped" -- computed here, before the if/elseif chain, because an assignment
+  # placed between if and elseif silently breaks the chain (PowerShell parses it, so a syntax
+  # check passes while the logic is severed). Caught by reading the file rather than trusting
+  # the parser's OK.
+  $climbBroken = ($null -ne $health -and $null -ne $health.risingStreak -and [int]$health.risingStreak -eq 0)
   if (-not $braked -and ($tips -gt $TIPS_BRAKE -or $overproducing)) {
     $braked = $true
     Stop-Miner
     $why = if ($tips -gt $TIPS_BRAKE) { "tips=$tips > $TIPS_BRAKE" } else { "diagnosis=overproduction (tips=$tips, streak=$($health.risingStreak), lag=$($health.lagSeconds)) -- braking on the trend, not the cliff" }
     Alert "BRAKE ENGAGED: $why. Entering pulse duty cycle; will resume under $TIPS_RESUME."
   }
-  elseif ($braked -and $tips -lt $TIPS_RESUME) {
+  # DIMENSION FIX (2026-08-09): release needs the trend too, not just the level.
+  # Engaging looks at the trend and ignores absolute tips; releasing looked ONLY at absolute
+  # tips. So a brake that engaged at tips=30 already satisfied its own release condition
+  # (30 < 50) and popped back open 38 seconds later, having stopped the miner for nothing.
+  # Requiring the rising run to be broken as well puts both directions on the same quantity.
+  # It adds no new constant: risingStreak == 0 simply means "the climb stopped".
+  # The level test is KEPT rather than replaced -- a flat-but-high DAG (tonight's 536 wedge sat
+  # perfectly still) must not read as recovered just because it stopped rising.
+  elseif ($braked -and $tips -lt $TIPS_RESUME -and $climbBroken) {
     $braked = $false
-    Alert "BRAKE RELEASED: tips=$tips < $TIPS_RESUME. Resuming mining."
+    Alert "BRAKE RELEASED: tips=$tips < $TIPS_RESUME and climb broken (streak=0). Resuming mining."
     Start-Miner-Unless-Paused
   }
   elseif ($braked) {
