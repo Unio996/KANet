@@ -248,8 +248,25 @@ function computeContinuity(prev, now, { tips, peerCount, freshMaxSec }) {
   // A prior observation is usable ONLY if it is recent enough that the interval between it and
   // now can be treated as covered. Missing/unreadable prior state is stale BY DEFINITION -- there
   // is nothing to be continuous with. Unknown fails; it does not pass.
+  // 🔴 Codex MUST-FIX 2026-08-10 round 2: the first version asked only "is it too OLD", which
+  // let a prior record dated in the FUTURE through as fresh -- (now - prevTs) is then negative,
+  // and negative is not > freshMaxSec. A future-dated record could hand over risingStreak,
+  // streakStartTs and detachedSince from an observation that cannot have happened yet, and that
+  // state feeds the exact `overproduction` string the watchdog brakes on.
+  // It is not hypothetical bookkeeping: clock steps (NTP correction, VM resume, a state file
+  // carried between hosts) produce exactly this.
+  // 🔨 The shape of my mistake, twice in a row on this one function: the guard was right in the
+  // direction I was thinking about and absent in the other. Round 1 had no ceiling at all;
+  // round 2 had a ceiling but no floor. So the test is now stated as a WINDOW with both ends,
+  // not as a comparison.
+  // `now` is validated too: a non-finite now makes every comparison false, which would silently
+  // mean "nothing is ever stale" -- the failure would look like normal operation.
+  // freshMaxSec comes from an env var, so a garbage or non-positive value must not widen the
+  // window either; unusable config fails closed to "prior unusable", never to "everything fresh".
   const prevTs = Number.isFinite(prev?.ts) ? prev.ts : null;
-  const priorIsStale = prevTs === null || ((now - prevTs) / 1000) > freshMaxSec;
+  const windowOk = Number.isFinite(freshMaxSec) && freshMaxSec > 0;
+  const ageSec = (prevTs === null || !Number.isFinite(now)) ? null : (now - prevTs) / 1000;
+  const priorIsStale = !windowOk || ageSec === null || ageSec < 0 || ageSec > freshMaxSec;
 
   let tipsTrend = null, prevTips = null, risingStreak = null, streakStartTips = null, streakStartTs = null;
   if (!priorIsStale && Number.isFinite(prev?.tips)) {
@@ -463,6 +480,59 @@ if (process.argv.includes('--selftest')) {
       want: (c) => c.priorIsStale === true && c.risingStreak === null && c.detachedSince === T0,
       why: 'NaN comparisons are false, so a naive gap check treats a corrupt ts as fresh',
     },
+    // Codex round 2: a prior observation dated in the FUTURE is not fresh, it is impossible.
+    // Both ends of the window are now asserted, because round 1 checked neither and round 2
+    // checked only the far end.
+    {
+      name: 'future: prev.ts 1ms ahead of now -> unusable, not fresh',
+      prev: { ts: T0 + 1, tips: 150, risingStreak: 3, streakStartTips: 100, streakStartTs: T0 - 7200_000, detachedSince: T0 - 1800_000 },
+      now: T0, tips: 200, peerCount: 0,
+      want: (c) => c.priorIsStale === true && c.risingStreak === null && c.detachedSince === T0,
+      why: 'negative age is not "recent", and a 1ms skew must fail the same way an hour does',
+    },
+    {
+      name: 'future: prev.ts 1h ahead -> cannot hand over a brake-supporting streak',
+      prev: { ts: T0 + 3600_000, tips: 150, risingStreak: 3, streakStartTips: 100, streakStartTs: T0 - 7200_000 },
+      now: T0, tips: 200, peerCount: 3,
+      want: (c) => c.priorIsStale === true && c.risingStreak === null,
+      why: 'this is the exact counterexample Codex constructed; it feeds the overproduction string',
+    },
+    {
+      name: 'invalid now: non-finite now makes every comparison false -> must fail closed',
+      prev: { ts: T0 - 30_000, tips: 150, risingStreak: 3, streakStartTips: 100, streakStartTs: T0 - 200_000 },
+      now: NaN, tips: 200, peerCount: 3,
+      want: (c) => c.priorIsStale === true && c.risingStreak === null,
+      why: 'without this, a broken clock reads as "nothing is ever stale" and looks like normal operation',
+    },
+    // 🔴 These two use NaN / Infinity ON PURPOSE, and the first version of this case did not.
+    // I originally wrote freshMaxSec: 0, which passes whether or not the config guard exists --
+    // with age 30 and ceiling 0, the ordinary `age > ceiling` comparison already says stale. So
+    // the case was named for the guard it did not exercise. Deleting `windowOk` left the suite
+    // fully green, which is how I found it.
+    // NaN and Infinity are the values where the ceiling comparison goes SILENTLY FALSE
+    // (`30 > NaN` and `30 > Infinity` are both false) and the record would be inherited as fresh.
+    // DAG_PROBE_FRESH_MAX_SEC is an env var, so `Number("abc")` -> NaN is one typo away.
+    {
+      name: 'invalid window: freshMaxSec=NaN would read as "never stale" without the config guard',
+      prev: { ts: T0 - 30_000, tips: 150, risingStreak: 3, streakStartTips: 100, streakStartTs: T0 - 200_000 },
+      now: T0, tips: 200, peerCount: 3, freshMaxSec: NaN,
+      want: (c) => c.priorIsStale === true && c.risingStreak === null,
+      why: 'age > NaN is false, so a typo in the env var would silently disable staleness entirely',
+    },
+    {
+      name: 'invalid window: freshMaxSec=Infinity likewise cannot mean "everything is fresh"',
+      prev: { ts: T0 - 30_000, tips: 150, risingStreak: 3, streakStartTips: 100, streakStartTs: T0 - 200_000 },
+      now: T0, tips: 200, peerCount: 3, freshMaxSec: Infinity,
+      want: (c) => c.priorIsStale === true && c.risingStreak === null,
+      why: 'an unbounded window is the same failure wearing a plausible-looking number',
+    },
+    {
+      name: 'invalid window: freshMaxSec=0 (guarded by the ceiling too, kept as a boundary case)',
+      prev: { ts: T0 - 30_000, tips: 150, risingStreak: 3, streakStartTips: 100, streakStartTs: T0 - 200_000 },
+      now: T0, tips: 200, peerCount: 3, freshMaxSec: 0,
+      want: (c) => c.priorIsStale === true && c.risingStreak === null,
+      why: 'honest label: this one passes via the ceiling as well, it does not prove the config guard',
+    },
     {
       name: 'stale prior + high tips still cannot brake (end-to-end through diagnose)',
       prev: { ts: T0 - 3600_000, tips: 100, risingStreak: 9, streakStartTips: 100, streakStartTs: T0 - 7200_000 },
@@ -476,7 +546,9 @@ if (process.argv.includes('--selftest')) {
     },
   ];
   for (const c of contCases) {
-    const got = computeContinuity(c.prev, c.now, { tips: c.tips, peerCount: c.peerCount, freshMaxSec: FRESH });
+    // c.freshMaxSec lets a case exercise unusable config; `??` not `||`, so 0 reaches the code
+    // under test instead of being silently replaced by the default -- 0 is the value being tested.
+    const got = computeContinuity(c.prev, c.now, { tips: c.tips, peerCount: c.peerCount, freshMaxSec: c.freshMaxSec ?? FRESH });
     const ok = c.want(got);
     if (!ok) bad++;
     console.log(`${ok ? 'PASS' : 'FAIL'}  continuity/${c.name}  (${c.why})`);
