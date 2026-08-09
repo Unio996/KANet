@@ -80,6 +80,12 @@ const STARVED_LAG_SEC = Number(process.env.DAG_PROBE_STARVED_LAG_SEC || 600);
 // take opposite actions (wait vs. intervene).
 const IBD_GAP = Number(process.env.DAG_PROBE_IBD_GAP || 100);
 const RISE_STREAK = Number(process.env.DAG_PROBE_RISE_STREAK || 4);
+// A streak alone is not enough. In the healthy band tips jitter between roughly 5 and 30, so
+// four consecutive upticks happen routinely and fired two false brakes (tips=30 and tips=28,
+// both healthy). The fix is NOT to reintroduce a cliff constant: require that the run has also
+// grown by a FACTOR over where it started. That is still scale-free -- 5->8 and 200->320 both
+// qualify -- so it keeps J2's property that the derivative need not know where the cliff is.
+const RISE_FACTOR = Number(process.env.DAG_PROBE_RISE_FACTOR || 1.5);
 
 // J2 red-team 2026-08-09, the finding that mattered most: during tonight's climb tips went
 // 194 -> 499 -> 506, so RUNAWAY_TIPS=500 never fired, while lag was already past 600 -- meaning
@@ -93,7 +99,7 @@ const RISE_STREAK = Number(process.env.DAG_PROBE_RISE_STREAK || 4);
 // A threshold must be chosen relative to the cliff, and we chose wrong (500 vs the real 248
 // mergeset cap). A derivative needs no knowledge of where the cliff is: 194->499 is rising from
 // the first minute.
-function diagnose({ tips, lagSeconds, isSynced, headerMinusBlock, peerCount, tipsTrend, risingStreak }) {
+function diagnose({ tips, lagSeconds, isSynced, headerMinusBlock, peerCount, tipsTrend, risingStreak, streakStartTips }) {
   if (tips >= RUNAWAY_TIPS) return 'runaway';           // checked first: it is the dangerous one
   // J2 2026-08-09, definitional rather than tuning: lagSeconds = now - sink header timestamp,
   // i.e. how long the SELECTED CHAIN has failed to advance -- a symptom shared by starvation AND
@@ -106,7 +112,10 @@ function diagnose({ tips, lagSeconds, isSynced, headerMinusBlock, peerCount, tip
   // Debounced by a rising STREAK, not a magnitude, so it still needs no cliff constant.
   // RISE_STREAK should be set from J2's 30s-resolution curve; the default is deliberately
   // conservative and risingStreak is exported so it can be chosen from data rather than guessed.
-  if (risingStreak != null && risingStreak >= RISE_STREAK) return 'overproduction';
+  // Both conditions, deliberately: long enough to not be jitter, AND large enough to be growth.
+  // Requiring only one of them is what produced the false brakes.
+  if (risingStreak != null && risingStreak >= RISE_STREAK
+      && streakStartTips != null && tips >= streakStartTips * RISE_FACTOR) return 'overproduction';
   const lagging = lagSeconds !== null && lagSeconds >= STARVED_LAG_SEC;
   // Isolation outranks every lag-based verdict: with no peers you are not observing the network,
   // so any statement about the network from this node is unsupported. Reported as its own state
@@ -157,12 +166,18 @@ if (process.argv.includes('--selftest')) {
     // J2's finding: tonight's entire climb (194->499) sat under RUNAWAY_TIPS=500 while lag was
     // already past 600, so it was labelled starved -- remedy "add hashrate" -- when the truth
     // was overproduction and the remedy was the opposite.
-    { name: 'overproduction: rising streak reached', in: { tips: 400, lagSeconds: 5000, isSynced: false, headerMinusBlock: 0, peerCount: 3, tipsTrend: 60, risingStreak: 4 }, want: 'overproduction' },
+    { name: 'overproduction: rising streak reached', in: { tips: 400, lagSeconds: 5000, isSynced: false, headerMinusBlock: 0, peerCount: 3, tipsTrend: 60, risingStreak: 4, streakStartTips: 200 }, want: 'overproduction' },
     // The blind spot this fix exists for: tonight, lag=344 (under the 600 gate) while tips ran
     // 48 -> 106. The old ordering said `healthy` through the whole actionable window.
-    { name: 'overproduction: climbing BEFORE lag gate opens', in: { tips: 106, lagSeconds: 344, isSynced: true, headerMinusBlock: 0, peerCount: 3, tipsTrend: 2, risingStreak: 5 }, want: 'overproduction' },
+    { name: 'overproduction: climbing BEFORE lag gate opens', in: { tips: 106, lagSeconds: 344, isSynced: true, headerMinusBlock: 0, peerCount: 3, tipsTrend: 2, risingStreak: 5, streakStartTips: 48 }, want: 'overproduction' },
+    // The two false brakes this factor exists to stop: healthy-band jitter reached streak 4
+    // (tips=30 from 26, tips=28 from 24) and braked the miner for 38 seconds each time.
+    { name: 'no false brake: streak reached but growth tiny', in: { tips: 30, lagSeconds: 85, isSynced: true, headerMinusBlock: 0, peerCount: 3, tipsTrend: 1, risingStreak: 4, streakStartTips: 26 }, want: 'healthy' },
+    { name: 'no false brake: second live case',               in: { tips: 28, lagSeconds: 86, isSynced: true, headerMinusBlock: 0, peerCount: 3, tipsTrend: 2, risingStreak: 4, streakStartTips: 24 }, want: 'healthy' },
+    // scale-free: a small-but-real run still qualifies, so the factor is not a hidden cliff
+    { name: 'overproduction: small scale but real growth',    in: { tips: 12, lagSeconds: 700, isSynced: false, headerMinusBlock: 0, peerCount: 3, tipsTrend: 2, risingStreak: 4, streakStartTips: 5 }, want: 'overproduction' },
     // debounce must hold: a couple of rising samples is normal jitter, not a verdict
-    { name: 'short rising streak stays healthy',    in: { tips: 6, lagSeconds: 0, isSynced: true, headerMinusBlock: 0, peerCount: 3, tipsTrend: 1, risingStreak: 2 }, want: 'healthy' },
+    { name: 'short rising streak stays healthy',    in: { tips: 6, lagSeconds: 0, isSynced: true, headerMinusBlock: 0, peerCount: 3, tipsTrend: 1, risingStreak: 2, streakStartTips: 4 }, want: 'healthy' },
     { name: 'starved: lagging, tips falling',       in: { tips: 3,   lagSeconds: 5000, isSynced: false, headerMinusBlock: 0, peerCount: 3, tipsTrend: -5 },  want: 'starved' },
     { name: 'starved: lagging, tips flat',          in: { tips: 3,   lagSeconds: 5000, isSynced: false, headerMinusBlock: 0, peerCount: 3, tipsTrend: 0 },   want: 'starved' },
     { name: 'trend-unknown: no prior sample',       in: { tips: 400, lagSeconds: 5000, isSynced: false, headerMinusBlock: 0, peerCount: 3, tipsTrend: null },want: 'trend-unknown' },
@@ -224,7 +239,7 @@ try {
   // Previous sample, persisted between runs -- the probe is a one-shot process, so the
   // derivative needs somewhere to live. Any read/parse failure yields null (unknown), never 0.
   const STATE_PATH = process.env.DAG_PROBE_STATE || pathx.join(osx.tmpdir(), `tn12-dag-probe-state-${Buffer.from(URL).toString('hex').slice(0, 12)}.json`);
-  let tipsTrend = null, prevTips = null, risingStreak = null;
+  let tipsTrend = null, prevTips = null, risingStreak = null, streakStartTips = null;
   try {
     const prev = JSON.parse(fsx.readFileSync(STATE_PATH, 'utf8'));
     if (Number.isFinite(prev?.tips)) {
@@ -232,9 +247,14 @@ try {
       tipsTrend = tips - prev.tips;
       const prevStreak = Number.isFinite(prev?.risingStreak) ? prev.risingStreak : 0;
       risingStreak = tipsTrend > 0 ? prevStreak + 1 : 0;
+      // Where the current rising run began -- reset whenever the run breaks, so the factor is
+      // measured against the run's own start rather than against any fixed baseline.
+      streakStartTips = tipsTrend > 0
+        ? (Number.isFinite(prev?.streakStartTips) && prevStreak > 0 ? prev.streakStartTips : prevTips)
+        : tips;
     }
   } catch { /* no prior sample -> stays null -> reported as trend-unknown, not as flat */ }
-  try { fsx.writeFileSync(STATE_PATH, JSON.stringify({ tips, ts: Date.now(), risingStreak: risingStreak ?? 0 })); } catch {}
+  try { fsx.writeFileSync(STATE_PATH, JSON.stringify({ tips, ts: Date.now(), risingStreak: risingStreak ?? 0, streakStartTips: streakStartTips ?? tips })); } catch {}
   const lagSeconds = sinkTsMs ? Math.max(0, Math.round((Date.now() - sinkTsMs) / 1000)) : null;
   const blockCount = Number(dag?.blockCount ?? 0);
   const headerCount = Number(dag?.headerCount ?? 0);
@@ -242,12 +262,13 @@ try {
 
   out({
     ok: true,
-    diagnosis: diagnose({ tips, lagSeconds, isSynced, headerMinusBlock: headerCount - blockCount, peerCount, tipsTrend, risingStreak }),
+    diagnosis: diagnose({ tips, lagSeconds, isSynced, headerMinusBlock: headerCount - blockCount, peerCount, tipsTrend, risingStreak, streakStartTips }),
     tips,
     // null means UNREADABLE, not zero -- see the note above; conflating them is the bug.
     peerCount,
     tipsTrend,   // null = no prior sample; sign is what matters, not magnitude
     risingStreak, // consecutive rising samples -- exported so RISE_STREAK can be set from data
+    streakStartTips, // tips where the current rising run began (the factor is measured against this)
     prevTips,
     lagSeconds,
     // header > block means the node is pulling headers ahead of bodies = IBD in progress.
