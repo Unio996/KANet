@@ -21,6 +21,7 @@ import { createRequire } from 'node:module';
 import fsx from 'node:fs';
 import osx from 'node:os';
 import pathx from 'node:path';
+import cryptox from 'node:crypto';
 
 const REQUIRE_BASE = process.env.DAG_PROBE_REQUIRE_BASE || 'D:/kanet-tn12/kasia-console/package.json';
 const URL = process.env.DAG_PROBE_URL || 'ws://127.0.0.1:17210';
@@ -348,7 +349,15 @@ try {
   const tips = (dag?.tipHashes ?? []).length;
   // Previous sample, persisted between runs -- the probe is a one-shot process, so the
   // derivative needs somewhere to live. Any read/parse failure yields null (unknown), never 0.
-  const STATE_PATH = process.env.DAG_PROBE_STATE || pathx.join(osx.tmpdir(), `tn12-dag-probe-state-${Buffer.from(URL).toString('hex').slice(0, 12)}.json`);
+  // 🔴 state 文件必须按【整个 URL】派生, 不是按前缀。原写法是
+  //     Buffer.from(URL).toString('hex').slice(0, 12)
+  // —— hex 前 12 位只等于 URL 的【前 6 个字节】= "ws://1", 于是 ws://127.0.0.1:17210 与 :17211
+  // 撞进同一个文件。实测撞到: 我把远端节点的 RPC 隧道到 17211 采样, 两个节点开始共用状态 ⇒
+  // 计数器差分算成 产Δ=4468758(两台累计值相减), 而 tipsTrend/risingStreak 也在互相串 ——
+  // **而本机那条曲线正是 overproduction 判据在用的**, 所以这不是"远端那份不准", 是判据被污染。
+  // 🔨 判据: 派生 key 时截断的是【编码后的串】而不是内容, "看起来够长"不等于"区分得开"。
+  const STATE_PATH = process.env.DAG_PROBE_STATE || pathx.join(osx.tmpdir(),
+    `tn12-dag-probe-state-${cryptox.createHash('sha256').update(URL).digest('hex').slice(0, 16)}.json`);
   let tipsTrend = null, prevTips = null, risingStreak = null, streakStartTips = null, streakStartTs = null;
   try {
     const prev = JSON.parse(fsx.readFileSync(STATE_PATH, 'utf8'));
