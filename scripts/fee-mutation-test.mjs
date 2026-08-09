@@ -45,6 +45,12 @@ const SHAPES = {
     b32(f.makerPk), b32(f.brokerPk), b32(f.poolMerkleRoot), i(f.deadline), i(f.minerFee),
     i(f.brokerFeePct), i(f.oracleFeePct), i(f.oracleBondAmount), i(f.makerStakeAmount), b32(f.marketMetadataHash),
   ],
+  // (i) prototype: v0.7 plus marketMinFee/marketMaxFee, both referenced in refund_maker_unjoined.
+  'PoolSpine_i_proto': (f) => [
+    b32(f.makerPk), b32(f.brokerPk), b32(f.poolMerkleRoot), i(f.deadline), i(f.minerFee),
+    i(f.brokerFeePct), i(f.oracleFeePct), i(f.oracleBondAmount), i(f.makerStakeAmount), b32(f.marketMetadataHash),
+    i(f.shard_id), i(f.shard_count), b32(f.market_id), i(f.marketMinFee), i(f.marketMaxFee),
+  ],
   'PoolSpine_v07': (f) => [
     b32(f.makerPk), b32(f.brokerPk), b32(f.poolMerkleRoot), i(f.deadline), i(f.minerFee),
     i(f.brokerFeePct), i(f.oracleFeePct), i(f.oracleBondAmount), i(f.makerStakeAmount), b32(f.marketMetadataHash),
@@ -57,6 +63,7 @@ const BASE = {
   minerFee: 50000, brokerFeePct: 100, oracleFeePct: 500, oracleBondAmount: 100000000,
   makerStakeAmount: 10000000000, marketMetadataHash: META,
   shard_id: 0, shard_count: 1, market_id: MKID,
+  marketMinFee: 50000, marketMaxFee: 100000000,
 };
 
 const MUTATIONS = [
@@ -66,6 +73,9 @@ const MUTATIONS = [
   // commingling. v0.7 added it to the ctor; whether it survives into the redeem is a
   // money-safety question, not a style one.
   { field: 'market_id', to: '00000000000000000000000000000000000000000000000000000000000000bb', role: 'SUBJECT', only: ['PoolSpine_v07'] },
+  // (i) SUBJECT: does a per-market fee bound actually survive into the redeem?
+  { field: 'marketMaxFee', to: 90000000, role: 'SUBJECT', only: ['PoolSpine_i_proto'] },
+  { field: 'marketMinFee', to: 60000,    role: 'SUBJECT', only: ['PoolSpine_i_proto'] },
   { field: 'minerFee', to: 77777, role: 'CONTROL' },
   { field: 'deadline', to: 1900000000, role: 'CONTROL' },
 ];
