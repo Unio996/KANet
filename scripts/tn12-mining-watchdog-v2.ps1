@@ -253,13 +253,17 @@ function Alert($m) {
   Log "ALERT: $m"
 }
 
-function Get-Tips {
+# Returns the whole health object, not just tips. Previously this returned an int, so the
+# probe's verdict could not reach the brake at all -- J2 grepped the script and found
+# diagnosis/starved/isolated with ZERO hits, i.e. every verdict we refined tonight was
+# decoration. The brake read a raw number and nothing else.
+function Get-Health {
   try {
     $raw = & node $probe 2>$null
     if (-not $raw) { return $null }
     $j = $raw | ConvertFrom-Json
     if (-not $j.ok) { return $null }
-    return [int]$j.tips
+    return $j
   } catch { return $null }
 }
 
@@ -614,7 +618,8 @@ while ($true) {
     Log "watchdog v2 exiting after $MAX_ROUNDS rounds (exercise mode)"
     break
   }
-  $tips = Get-Tips
+  $health = Get-Health
+  $tips = if ($health) { [int]$health.tips } else { $null }
 
   if ($null -eq $tips) {
     # UNKNOWN -- keep current mining behaviour, but make the blindness loud.
@@ -629,10 +634,31 @@ while ($true) {
 
   if ($probeFails -gt 0) { Log "DAG probe readable again after $probeFails failure(s)"; $probeFails = 0 }
 
-  if (-not $braked -and $tips -gt $TIPS_BRAKE) {
+  # ROOT FIX (2026-08-09): brake on the VERDICT as well as the raw number.
+  #
+  # Until now braking required tips > 500, so nothing whatsoever constrained the climb below
+  # that. Tonight it climbed twice at a steady ~13/min with zero deceleration (Bettor's
+  # four-read, J2's 18 minutes of per-minute samples, my rising streak of 21) and each time we
+  # simply waited for the wedge. NWT's phrasing: pulse fixed "stuck above 500 with no way out"
+  # and left "no deceleration at all below 500" untouched.
+  #
+  # Every other knob is already at its limit: hashrate has been at the floor of 1 thread since
+  # 2026-08-08 and still overproduces, J2 withdrew the lower-threshold proposal because braking
+  # costs block production, and the pulse drains without preventing. Consuming the verdict is
+  # what remains on our side of the consensus parameter.
+  #
+  # `overproduction` is the derivative verdict: tips rising for RISE_STREAK consecutive samples,
+  # debounced, and independent of any cliff constant. Measured tonight it fires at tips=153 with
+  # lag=490 -- roughly 350 tips before the threshold would have. Braking there does NOT stop
+  # block production, because braked now means the pulse duty cycle, so the chain keeps
+  # advancing while the DAG narrows. That distinction is the whole reason this is safe to wire.
+  $verdict = if ($health) { [string]$health.diagnosis } else { '' }
+  $overproducing = ($verdict -eq 'overproduction')
+  if (-not $braked -and ($tips -gt $TIPS_BRAKE -or $overproducing)) {
     $braked = $true
     Stop-Miner
-    Alert "BRAKE ENGAGED: tips=$tips > $TIPS_BRAKE. Miner stopped so the node can digest. Will resume under $TIPS_RESUME."
+    $why = if ($tips -gt $TIPS_BRAKE) { "tips=$tips > $TIPS_BRAKE" } else { "diagnosis=overproduction (tips=$tips, streak=$($health.risingStreak), lag=$($health.lagSeconds)) -- braking on the trend, not the cliff" }
+    Alert "BRAKE ENGAGED: $why. Entering pulse duty cycle; will resume under $TIPS_RESUME."
   }
   elseif ($braked -and $tips -lt $TIPS_RESUME) {
     $braked = $false
