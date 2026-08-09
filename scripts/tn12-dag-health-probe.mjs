@@ -138,15 +138,6 @@ function diagnose({ tips, lagSeconds, isSynced, headerMinusBlock, peerCount, tip
   // conservative and risingStreak is exported so it can be chosen from data rather than guessed.
   // Both conditions, deliberately: long enough to not be jitter, AND large enough to be growth.
   // Requiring only one of them is what produced the false brakes.
-  // Codex MUST-FIX #3 / NWT: these were still gated behind `lagging`, which is the very defect
-  // fixed for overproduction and then NOT generalised to its siblings -- "applied the lesson
-  // once and stopped". Attachment state does not depend on how far behind we are: with no peers
-  // (or an unreadable count) this node is not observing the network AT ALL, so every statement
-  // it makes about the network is unsupported whether lag is 5 seconds or 5000.
-  // Deliberately ranked below runaway/overproduction: those are read off the LOCAL DAG, which
-  // stays true regardless of peers, and their remedy is urgent.
-  if (peerCount === 0) return 'isolated';
-  if (peerCount == null) return 'peers-unknown';   // == catches undefined; null is not zero
   // Codex MUST-FIX #2: the sample count is poll-rate dependent, so the run must also span real
   // time. streakSeconds === null means UNKNOWN span, and unknown must not silently satisfy a
   // minimum -- but it must not veto either: a null span only occurs when state was just lost,
@@ -158,6 +149,19 @@ function diagnose({ tips, lagSeconds, isSynced, headerMinusBlock, peerCount, tip
       && spanOk
       && tips >= RISE_FLOOR
       && streakStartTips != null && tips >= streakStartTips * RISE_FACTOR) return 'overproduction';
+  // Ranked AFTER overproduction, and the ordering is load-bearing rather than stylistic.
+  // I shipped this block ABOVE overproduction in e5ebc8ea while the commit message claimed it
+  // was below -- NWT caught the contradiction by reading the code, J2 supplied the consequence:
+  // the watchdog matches diagnosis == 'overproduction' as an exact string, so any earlier branch
+  // that fires SILENCES THE BRAKE. Tonight's only genuine brake (15:55, tips=150, streak=27) was
+  // sampled at peerCount=0, so my own change would have disarmed the one event that has worked.
+  // Why after: runaway/overproduction are read off the LOCAL DAG and stay true while detached,
+  // and their remedy is urgent. Why still ungated from `lagging` (the MUST-FIX #3 point, intact):
+  // attachment state has nothing to do with how far behind we are -- with no peers, or a count we
+  // cannot read, this node is not observing the network at all, so every claim it makes about the
+  // network is unsupported whether lag is 5 seconds or 5000.
+  if (peerCount === 0) return 'isolated';
+  if (peerCount == null) return 'peers-unknown';   // == catches undefined; null is not zero
   const lagging = lagSeconds !== null && lagSeconds >= STARVED_LAG_SEC;
   // Isolation outranks every lag-based verdict: with no peers you are not observing the network,
   // so any statement about the network from this node is unsupported. Reported as its own state
@@ -205,6 +209,13 @@ if (process.argv.includes('--selftest')) {
     // Behaviour change (Codex #3): an unreadable peer count now speaks even when nothing else is
     // wrong, because "I cannot tell whether I am attached" is itself the finding. It is a
     // diagnosis label only -- the watchdog brakes on runaway/overproduction, never on this.
+    // NWT 2026-08-09: every overproduction fixture pinned peerCount:3, so "climbing AND
+    // detached" -- the combination that decides which branch wins -- had never been tested at
+    // all. The regression these catch is one I shipped: the brake going silent exactly when a
+    // climb coincides with peer loss, which is what tonight's real brake looked like.
+    { name: 'climbing + peers=0 must still brake, not report isolated',    in: { tips: 200, lagSeconds: 700, isSynced: true, headerMinusBlock: 0, peerCount: 0,    tipsTrend: 25, risingStreak: 4, streakStartTips: 100, streakSeconds: 200 }, want: 'overproduction' },
+    { name: 'climbing + peers unreadable must still brake',                in: { tips: 200, lagSeconds: 700, isSynced: true, headerMinusBlock: 0, peerCount: null, tipsTrend: 25, risingStreak: 4, streakStartTips: 100, streakSeconds: 200 }, want: 'overproduction' },
+    { name: 'peers=0 without a climb still reports isolated',              in: { tips: 20,  lagSeconds: 700, isSynced: true, headerMinusBlock: 0, peerCount: 0,    tipsTrend: 1,  risingStreak: 1, streakStartTips: 19, streakSeconds: 200 }, want: 'isolated' },
     // Codex MUST-FIX #2 -- the same rise, judged by how long it actually took.
     { name: 'rise: 4 samples spanning 20s = poll noise, not a trend', in: { tips: 200, lagSeconds: 700, isSynced: true, headerMinusBlock: 0, peerCount: 3, tipsTrend: 25, risingStreak: 4, streakStartTips: 100, streakSeconds: 20 },  want: 'starved' },
     { name: 'rise: same 4 samples spanning 200s = real trend',       in: { tips: 200, lagSeconds: 700, isSynced: true, headerMinusBlock: 0, peerCount: 3, tipsTrend: 25, risingStreak: 4, streakStartTips: 100, streakSeconds: 200 }, want: 'overproduction' },
