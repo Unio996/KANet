@@ -1,8 +1,9 @@
-> **Status**: ACCEPTANCE CRITERIA v0.3 · NWT · design-only · 零改码/零部署
+> **Status**: ACCEPTANCE CRITERIA v0.3.1 · NWT · design-only · 零改码/零部署
 > **为什么写**: Bettor 14:15 派活("(i)/⑥ retarget 的 DoD = Codex 五条验收证据, NWT主"), 承 `docs/2026-08-09-i-proto-redteam.md`(我的原始红队) + Codex 独立复审(`coordination/codex-bridge/responses/...I-PROTO-SEMANTIC-REDTEAM-CODEX-REVIEW.md`) + 我自己对 H1 框架错误的更正。
 > **这份文档不是实现** —— 是给将来实现 (i) retarget 的人(不论是谁)当验收靶子用的清单。实现前必须先走铁律0(报计划→审→批→做)。
 > **v0.2**: Bettor 14:20 APPROVED v0.1 作 ⑥ retarget 验收基线, 加两条补全(见 §1⑤ 与新增 §1.5)。
 > **v0.3**: Bettor 15:14 认 Codex RED——v0.2 的 §1⑤ conservation("全 output 总和==pot,含网络费 output")本身是错的: Kaspa 网络费是 `sum(inputs)−sum(outputs)` 的残差,不是一个 output;settle_aggregate 没有网络费输出。**v0.2 那句"定稿"作废,v0.3 才是基线**(§1⑤ 换成 Codex 给的正确公式,§1⑥ 与创建路径拒非法两条 Codex ACCEPTED,保留不变)。
+> **v0.3.1**: Codex 复审 v0.3(16:13)ACCEPTED/CLOSED 了 conservation 公式,同时补一条防同义反复的精度(见 §1⑤ 末段)。**Codex 明示只闭合了 conservation 这一格** —— (i) retarget 其余项(settle 侧权威绑定/创建路径拒非法/编译 mutation/枚举器语义硬化/舍入溢出测/链上实据)仍全部 OPEN,待实现后独立验。
 
 # (i) retarget 验收标准 —— Codex 五条 + NWT 一条框架更正
 
@@ -42,6 +43,7 @@
   - **守恒按真实 tx 值模型**:`sum(全部 inputs) == sum(全部 outputs) + 实际 network fee`(fee 建模成残差,不建模成 output)。
   - **政策分配单独证**,且 basis(全局 pot vs shard-local)必须显式:broker 政策额 = 承诺费率 × 承诺 basis 的确定函数;oracle 额(含拆分/舍入规则);winner = 剩余;**bond-return 本金不得被算成政策费或 winner pot**;network fee = 残差且满足其 bound。
   - **两个对抗用例**:① `sum(outputs)` 故意正确但声称的 fee basis 错;② 一个隐藏/额外 output 使 naive 的 broker+oracle+winners 和看着对、但破坏完整 input/output 守恒。
+  - 🔴 **v0.3.1 补(Codex 16:13,防同义反复)**:`actual_network_fee` **必须从序列化后的真实 tx 机械导出**(真 `sum(inputs)−sum(outputs)`,再拿去对照意图的 fee bound 核),**绝不能是调用方传入/单独声称的标量**——否则 `inputs == outputs + claimed_fee` 这条断言的两边用的是同一个 `claimed_fee`,变成恒真或可被伪造,等于没有在验证守恒,只是在验证"我把同一个数抄了两遍"。
 - **怎么证**: 每一条至少一个正向用例 + 一个对抗用例(蓄意构造边界值/恶意委员输入),不接受"设计上应该没问题"的口头论证。
 
 ### ⑥ (v0.2 新增,Bettor 补全②,承重) retarget 不能拆掉 refund 那条合法的网络费保护
