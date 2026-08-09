@@ -211,6 +211,34 @@ Bettor 21:17 指派并入。**这六条是「动钱之前必须证到」的下�
   后者写进范围外，等于把它变成没人看的洞 —— **而它读起来跟前者一模一样。**
   📌 ② 怎么修（自动触发 / 人工 operator / 其他）**不是技术题是政策题**：`closed` 是一次性 XOR 闩，
   锁 2 之后这个市场永远不能再正常结算（`bshard-auto-settler.mjs:726-729`）。**归属与做法等 Bettor 拍。**
+
+  ---
+  #### 闸② 的最低验收（Codex 独立复核 bridge `6fdb8ab0` 后给出，原样记在此供接手者起步）
+
+  🔵 **Codex 独立确认了闸② 存在**，并补了一格我没有的证据：settle daemon 的 import 列表里
+  只有 `computeSettlePlan / settleMarketLive / deriveResumePlanFromEvidence`，**没有 `cancelMarketLive`**。
+  判词：`degenerate payout → 正常 close/propose 抛出 → 无自主 cancel/refund 调用方 → 即使闸③ 修好，盘仍可能滞留`
+  = **CONFIRMED / OPEN**。
+
+  🔴 **而他同时点名了两条【不许用】的捷径**（正是最容易被当成"顺手修掉"的两种）：
+  ```
+  ❌ 让 buildProposeCloseRequestV2() 在 degenerate 时【静默 fall through】进退款
+  ❌ 一观察到 degenerate / ABSTAIN 就【自动调】cancelMarketLive()
+  理由: closed=2 是【不可逆】的、正常结算的替代路径 —— 触发权必须有明确的政策授权
+  ```
+
+  **七条最低验收**（他明说：**本次 review 不授权实现**，这是生产钱路决定）：
+  ```
+  1. 一个机器可读的【终局退款资格】状态，与"一次瞬时 judge 失败 / 一次 pm.degenerate"区分开
+  2. 关于"为什么正常结算永久不可用"的【持久证据】
+  3. 明确的宽限/重试策略 + 重启安全的计数器/状态
+  4. 单一权威调用路径，带 kill switch 与 canary 上限
+  5. 一条用例证明：普通可恢复/临时的 ABSTAIN 或 degenerate【锁不上】 closed=2
+  6. 一条用例证明：合格的终局场景【恰好一次】进入退款规划器
+  7. 不得绕过既有的 V2 退款地址 / 字节谱系验收闸（即本稿 §4 / §4bis）
+  ```
+  🔨 第 5 条与第 6 条是一对：**一个防"不该锁的锁了"，一个防"该走的走了两次或没走"** ——
+  缺任何一条，这道闸都会在它最要紧的那个方向上没有守卫。
 - 零改码。落码需 Bettor 排期 + NWT 红队；真跑到广播需按钱路规矩单独授权。
 
 ---
