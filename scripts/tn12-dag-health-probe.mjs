@@ -393,6 +393,30 @@ try {
   const headerCount = Number(dag?.headerCount ?? 0);
   const isSynced = !!si?.isSynced;
 
+  // 🔴 采样留痕 (2026-08-09): 楔死/爬升相位是【瞬态】的, 而它正是 MUST-FIX #1 唯一缺的数据。
+  // 我已经错过两次同一个窗口 —— 第一次手动起采样时它已在排空, 第二次我那行 one-liner 自己有语法
+  // 错误、8 次采样全挂而窗口关掉了。**靠人在正确的时刻手快, 不是采集方案。**
+  // 探针本来就被 watchdog 和 monitor 每几秒调一次, 让它顺手把每次读数落一行, 下一次爬升就自动留证。
+  // 有界: 只保留最近 MAX_LOG 行, 免得无人看管地长成第二个 12GB。
+  const LOG_PATH = process.env.DAG_PROBE_LOG || pathx.join(osx.tmpdir(), 'tn12-dag-probe-samples.jsonl');
+  const MAX_LOG = Number(process.env.DAG_PROBE_LOG_MAX || 5000);
+  const sample = {
+    ts: new Date().toISOString(),
+    diagnosis: diagnose({ tips, lagSeconds, isSynced, headerMinusBlock: headerCount - blockCount, peerCount, tipsTrend, risingStreak, streakStartTips, streakSeconds }),
+    tips, virtualParents, submittedDelta, bodiesDelta, chainBlocks,
+    risingStreak, streakSeconds, sampleAgeSec, lagSeconds, peerCount,
+  };
+  try {
+    const NL = '\n';
+    fsx.appendFileSync(LOG_PATH, JSON.stringify(sample) + NL);
+    // 便宜的截断: 只在文件明显偏大时才读回重写, 不是每次都做。
+    const st = fsx.statSync(LOG_PATH);
+    if (st.size > MAX_LOG * 300) {
+      const keep = fsx.readFileSync(LOG_PATH, 'utf8').trim().split(NL).slice(-MAX_LOG);
+      fsx.writeFileSync(LOG_PATH, keep.join(NL) + NL);
+    }
+  } catch { /* 留痕失败绝不影响判词输出 —— 这是观测的观测, 不能反过来弄坏被观测的东西 */ }
+
   out({
     ok: true,
     diagnosis: diagnose({ tips, lagSeconds, isSynced, headerMinusBlock: headerCount - blockCount, peerCount, tipsTrend, risingStreak, streakStartTips }),
