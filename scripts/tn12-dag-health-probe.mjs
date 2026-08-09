@@ -98,6 +98,17 @@ const RISE_FACTOR = Number(process.env.DAG_PROBE_RISE_FACTOR || 1.5);
 // the usable range at 150-200; 150 leaves ~98 tips of headroom below the 248 cliff to act in.
 // The two conditions guard different false positives and neither alone suffices (J2/NWT):
 // the floor rejects SMALL signals, the streak+factor reject single-sample JITTER.
+// Wall-clock floor for a rising run. Set from MEASURED poll rate, not from an assumed one:
+// live sample showed risingStreak=19 spanning streakSeconds=72, i.e. ~3.8s per sample, because
+// the state file is keyed by RPC URL alone and BOTH the watchdog and the channel monitor call
+// this probe -- so risingStreak counts "how many times anyone sampled", not a system property.
+// That is Codex MUST-FIX #2 in a sharper form than it was filed, and it is why the time anchor
+// is load-bearing rather than cosmetic.
+// I first wrote 90 (a 4-sample span at an ASSUMED 30s rate). At the real rate tonight's genuine
+// brake -- streak=27 -- spans ~103s, so 90 sat right on the edge of disarming the one event that
+// has actually worked. 60 keeps the 20s jitter case excluded (it needs ~16 samples at this rate)
+// with real margin under the live event.
+const RISE_MIN_SEC = Number(process.env.DAG_PROBE_RISE_MIN_SEC || 60);
 const RISE_FLOOR = Number(process.env.DAG_PROBE_RISE_FLOOR || 150);
 
 // J2 red-team 2026-08-09, the finding that mattered most: during tonight's climb tips went
@@ -112,7 +123,7 @@ const RISE_FLOOR = Number(process.env.DAG_PROBE_RISE_FLOOR || 150);
 // A threshold must be chosen relative to the cliff, and we chose wrong (500 vs the real 248
 // mergeset cap). A derivative needs no knowledge of where the cliff is: 194->499 is rising from
 // the first minute.
-function diagnose({ tips, lagSeconds, isSynced, headerMinusBlock, peerCount, tipsTrend, risingStreak, streakStartTips }) {
+function diagnose({ tips, lagSeconds, isSynced, headerMinusBlock, peerCount, tipsTrend, risingStreak, streakStartTips, streakSeconds }) {
   if (tips >= RUNAWAY_TIPS) return 'runaway';           // checked first: it is the dangerous one
   // J2 2026-08-09, definitional rather than tuning: lagSeconds = now - sink header timestamp,
   // i.e. how long the SELECTED CHAIN has failed to advance -- a symptom shared by starvation AND
@@ -136,7 +147,15 @@ function diagnose({ tips, lagSeconds, isSynced, headerMinusBlock, peerCount, tip
   // stays true regardless of peers, and their remedy is urgent.
   if (peerCount === 0) return 'isolated';
   if (peerCount == null) return 'peers-unknown';   // == catches undefined; null is not zero
+  // Codex MUST-FIX #2: the sample count is poll-rate dependent, so the run must also span real
+  // time. streakSeconds === null means UNKNOWN span, and unknown must not silently satisfy a
+  // minimum -- but it must not veto either: a null span only occurs when state was just lost,
+  // in which case risingStreak would be null too and we never reach here. Treating unknown as
+  // non-blocking therefore preserves the behaviour measured tonight (fires at 150, cliff 248)
+  // rather than quietly disarming the brake on a fresh state file.
+  const spanOk = (streakSeconds == null) || (streakSeconds >= RISE_MIN_SEC);
   if (risingStreak != null && risingStreak >= RISE_STREAK
+      && spanOk
       && tips >= RISE_FLOOR
       && streakStartTips != null && tips >= streakStartTips * RISE_FACTOR) return 'overproduction';
   const lagging = lagSeconds !== null && lagSeconds >= STARVED_LAG_SEC;
@@ -186,6 +205,10 @@ if (process.argv.includes('--selftest')) {
     // Behaviour change (Codex #3): an unreadable peer count now speaks even when nothing else is
     // wrong, because "I cannot tell whether I am attached" is itself the finding. It is a
     // diagnosis label only -- the watchdog brakes on runaway/overproduction, never on this.
+    // Codex MUST-FIX #2 -- the same rise, judged by how long it actually took.
+    { name: 'rise: 4 samples spanning 20s = poll noise, not a trend', in: { tips: 200, lagSeconds: 700, isSynced: true, headerMinusBlock: 0, peerCount: 3, tipsTrend: 25, risingStreak: 4, streakStartTips: 100, streakSeconds: 20 },  want: 'starved' },
+    { name: 'rise: same 4 samples spanning 200s = real trend',       in: { tips: 200, lagSeconds: 700, isSynced: true, headerMinusBlock: 0, peerCount: 3, tipsTrend: 25, risingStreak: 4, streakStartTips: 100, streakSeconds: 200 }, want: 'overproduction' },
+    { name: 'rise: unknown span does not disarm the brake',          in: { tips: 200, lagSeconds: 700, isSynced: true, headerMinusBlock: 0, peerCount: 3, tipsTrend: 25, risingStreak: 4, streakStartTips: 100, streakSeconds: null }, want: 'overproduction' },
     { name: 'peers-unknown even when not lagging',      in: { tips: 2, lagSeconds: 0, isSynced: true, headerMinusBlock: 0, peerCount: null }, want: 'peers-unknown' },
     { name: 'isolated even when not lagging',           in: { tips: 2, lagSeconds: 0, isSynced: true, headerMinusBlock: 0, peerCount: 0 },    want: 'isolated' },
     // J2's finding: tonight's entire climb (194->499) sat under RUNAWAY_TIPS=500 while lag was
@@ -315,7 +338,7 @@ try {
   // Previous sample, persisted between runs -- the probe is a one-shot process, so the
   // derivative needs somewhere to live. Any read/parse failure yields null (unknown), never 0.
   const STATE_PATH = process.env.DAG_PROBE_STATE || pathx.join(osx.tmpdir(), `tn12-dag-probe-state-${Buffer.from(URL).toString('hex').slice(0, 12)}.json`);
-  let tipsTrend = null, prevTips = null, risingStreak = null, streakStartTips = null;
+  let tipsTrend = null, prevTips = null, risingStreak = null, streakStartTips = null, streakStartTs = null;
   try {
     const prev = JSON.parse(fsx.readFileSync(STATE_PATH, 'utf8'));
     if (Number.isFinite(prev?.tips)) {
@@ -328,6 +351,13 @@ try {
       streakStartTips = tipsTrend > 0
         ? (Number.isFinite(prev?.streakStartTips) && prevStreak > 0 ? prev.streakStartTips : prevTips)
         : tips;
+      // Codex MUST-FIX #2: the streak counted SAMPLES, so "4 consecutive rises" meant a
+      // different amount of real time depending on how often the watchdog happened to poll.
+      // Speed the poller up and four samples become twenty seconds of noise; slow it down and
+      // the same four span ten minutes. A criterion about a TREND has to be anchored in time.
+      streakStartTs = tipsTrend > 0
+        ? (Number.isFinite(prev?.streakStartTs) && prevStreak > 0 ? prev.streakStartTs : (Number.isFinite(prev?.ts) ? prev.ts : Date.now()))
+        : Date.now();
     }
   } catch { /* no prior sample -> stays null -> reported as trend-unknown, not as flat */ }
 
@@ -343,7 +373,10 @@ try {
     if (bodiesProcessed !== null && Number.isFinite(prev2?.bodiesProcessed)) bodiesDelta = bodiesProcessed - prev2.bodiesProcessed;
   } catch { /* stays null = unknown, which callers must treat as "do not act", not as zero */ }
 
-  try { fsx.writeFileSync(STATE_PATH, JSON.stringify({ tips, ts: Date.now(), risingStreak: risingStreak ?? 0, streakStartTips: streakStartTips ?? tips, blocksSubmitted, bodiesProcessed })); } catch {}
+  try { fsx.writeFileSync(STATE_PATH, JSON.stringify({ tips, ts: Date.now(), risingStreak: risingStreak ?? 0, streakStartTips: streakStartTips ?? tips, streakStartTs: streakStartTs ?? Date.now(), blocksSubmitted, bodiesProcessed })); } catch {}
+  // Wall-clock span of the current rising run. null when there is no run or no prior sample --
+  // and null must NOT be read as 0, or an unknown span would satisfy a minimum-span test.
+  const streakSeconds = (streakStartTs && risingStreak) ? Math.max(0, Math.round((Date.now() - streakStartTs) / 1000)) : null;
   const lagSeconds = sinkTsMs ? Math.max(0, Math.round((Date.now() - sinkTsMs) / 1000)) : null;
   const blockCount = Number(dag?.blockCount ?? 0);
   const headerCount = Number(dag?.headerCount ?? 0);
@@ -357,6 +390,7 @@ try {
     peerCount,
     tipsTrend,   // null = no prior sample; sign is what matters, not magnitude
     risingStreak, // consecutive rising samples -- exported so RISE_STREAK can be set from data
+    streakSeconds, // wall-clock span of that run; the sample count alone is poll-rate dependent
     streakStartTips, // tips where the current rising run began (the factor is measured against this)
     prevTips,
     // --- real instrument (read-only; NOT consumed by diagnose() and NOT by the brake) ---
