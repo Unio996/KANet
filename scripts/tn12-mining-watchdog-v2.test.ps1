@@ -366,5 +366,37 @@ Run-Rel2 'PULSE_CHECK == MAX_PULSES -> kept'       @{ 'TN12_MAX_PULSES' = '5'; '
 Run-Rel2 'normal multi-window (20/5) -> kept'      @{ 'TN12_MAX_PULSES' = '20'; 'TN12_PULSE_CHECK' = '5' } 20 5 0
 
 Say ''
+Say '--- part 6: the config surface is CLOSED (this is the completion state, not another square) ---'
+# 🔴 @Bettor 12:2x 说得对:**无限递归不是闸, 是没定义完成态**。前六格每闭一格就暴露下一个未校验量,
+#    而"我觉得查完了"不是完成态。这一条把完成态写成【机械可判】的:
+#      配置面闭合 ⇔ 文件里每一个 TN12_ 环境读取点, 要么走受控解析器, 要么在豁免表里带理由。
+# 🔴 它【去发现, 不去记住】(在册: enumerating-tools-must-discover-not-remember):
+#    名单从文件正文扫出来, 不是我写死的一张表 —— 所以将来谁加第九个裸读, 是【这条用例】红,
+#    而不是等下一轮外部复审替我们发现。递归就是在这里终止的。
+$src = ($lines -join "`n")
+$found = @{}
+foreach ($m in [regex]::Matches($src, '\$env:(TN12_\w+)')) { $found[$m.Groups[1].Value] = $true }
+# 🔴 单双引号都要认。只认单引号的扫描器, 会让一个用双引号写的新 knob 静默漏掉 ——
+#    而扫描器漏掉的东西不会有任何提示, 它只是安静地少数一个。
+foreach ($m in [regex]::Matches($src, 'GetEnvironmentVariable\(["''](TN12_\w+)["'']')) { $found[$m.Groups[1].Value] = $true }
+$bounded = @{}
+foreach ($m in [regex]::Matches($src, 'Get-BoundedEnv ["''](TN12_\w+)["'']')) { $bounded[$m.Groups[1].Value] = $true }
+# 豁免必须带理由, 而且理由要能被下一个人核。这里只有一个:
+$EXEMPT = @{ 'TN12_DAA_SETTLE_MS' = 'has its own dedicated validator (floor + ceiling derived from PULSE_SEC + pair fallback); covered by parts 4 and 5' }
+$uncovered = @()
+foreach ($n in $found.Keys) { if (-not $bounded.ContainsKey($n) -and -not $EXEMPT.ContainsKey($n)) { $uncovered += $n } }
+$staleExempt = @()
+foreach ($n in $EXEMPT.Keys) { if (-not $found.ContainsKey($n)) { $staleExempt += $n } }
+$surfaceOk = ($uncovered.Count -eq 0) -and ($staleExempt.Count -eq 0)
+if ($surfaceOk) { $script:pass++ } else { $script:fail++ }
+# 标签要说准: $found 数的是【直接读环境的地方】, 那 7 个是以字面量传给受控解析器的、不走 $env:。
+# 上一版把它标成 "discovered=1", 读起来像"只扫到 8 个入口里的 1 个" —— 一个会让人误判覆盖面的标签,
+# 与它要防的那类静默漏报是同一个病。
+Say ("[{0}] {1,-42} rawReads={2} viaValidator={3} exempt={4}" -f $(if ($surfaceOk) { 'PASS' } else { 'FAIL' }), 'every TN12_ env read has a domain', $found.Count, $bounded.Count, $EXEMPT.Count)
+foreach ($n in $uncovered) { Say "       🔴 $n is read from the environment with no domain and no stated exemption" }
+# 陈豁免也要红: 一条指向已经不存在的变量的豁免, 会在将来某个同名变量出现时【无声地】覆盖它。
+foreach ($n in $staleExempt) { Say "       🔴 exemption for $n is stale -- that name is no longer read anywhere" }
+
+Say ''
 Say ("result: {0} PASS / {1} FAIL" -f $script:pass, $script:fail)
 if ($script:fail) { exit 1 }
