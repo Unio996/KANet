@@ -69,15 +69,58 @@ if (-not (Test-Path $cron)) { throw "找不到包装脚本: $cron" }
 $cronPosix = $sentinelPosix -replace 'j1-watchdog-sentinel-once\.sh$', 'j1-watchdog-sentinel-cron.sh'
 $inner     = "J1_WD_SENTINEL_LOG='$($LogPath -replace '\\','/')' sh '$cronPosix'"
 
+# 🔴 本函数【只取读数, 不做判定】—— 判定全部交给 j1-watchdog-health-verify.sh。
+#    这一版是被 Codex 2026-08-10 判 RED/MUST-FIX 打出来的: 上一版的 -Verify 验的是
+#    「注册了 + 没禁用」, 而包装层故意 `exit 0` ⇒ LastTaskResult=0 什么也不证明
+#    ⇒ **一个每 5 分钟持续 rc=2 的瞎哨兵能让 -Verify 通过。**
+#    🔴🔴 最难看的是: `.alive` 戳正是我为了"日志为空有两种读法"专门加的, 却没接进闸。
+#         **仪器只有被判据读到才算数。**
 function Show-State {
   $t = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-  if (-not $t) { Write-Host "ARMED=no   计划任务 '$TaskName' 不存在"; return $false }
-  $i = Get-ScheduledTaskInfo -TaskName $TaskName -ErrorAction SilentlyContinue
-  Write-Host "ARMED=yes  state=$($t.State)  lastRun=$($i.LastRunTime)  lastResult=$($i.LastTaskResult)  nextRun=$($i.NextRunTime)"
-  # 🔴 存在 != 在跑: 禁用态与不存在在"没有响声"上读数相同。
-  if ($t.State -eq 'Disabled') { Write-Host "🔴 但它是 Disabled —— 不会被调用。" ; return $false }
-  Write-Host "log=$LogPath  (只在响的时候写; 文件不存在 = 至今没响过, 【不等于】它在跑)"
-  return $true
+  $state = if ($t) { [string]$t.State } else { 'absent' }
+  $last  = ''
+  if ($t) {
+    $i = Get-ScheduledTaskInfo -TaskName $TaskName -ErrorAction SilentlyContinue
+    if ($i) {
+      $last = [string]$i.LastTaskResult
+      Write-Host "task: state=$state  lastRun=$($i.LastRunTime)  lastResult=$last  nextRun=$($i.NextRunTime)"
+      # 🔴 这两个不是"失败", 是"还没有结果" —— 把它们当失败会把人引向错的修法。
+      #    0x41303 SCHED_S_TASK_HAS_NOT_RUN(267011) / 0x41301 SCHED_S_TASK_RUNNING(267009)
+      #    ⇒ 传空(未知), 让 .alive 那一支去回答"到底跑成过没有"。
+      if ($last -eq '267011' -or $last -eq '267009') {
+        Write-Host "      ↑ 该码意为「$(if ($last -eq '267011') { '从未运行' } else { '正在运行' })」, 不是失败 ⇒ 按未知处理"
+        $last = ''
+      }
+    }
+  } else {
+    Write-Host "task: 不存在 '$TaskName'"
+  }
+
+  $alivePath = "$LogPath.alive"
+  $alive = ''
+  if (Test-Path $alivePath) { $alive = (Get-Content $alivePath -Raw -ErrorAction SilentlyContinue).Trim() }
+  Write-Host "alive: $(if ($alive) { $alive } else { '(无记录)' })   [$alivePath]"
+
+  $verifier = Join-Path $SelfDir 'j1-watchdog-health-verify.sh'
+  if (-not (Test-Path $verifier)) { Write-Host "🔴 找不到判定层: $verifier"; return $false }
+  $vPosix = $sentinelPosix -replace 'j1-watchdog-sentinel-once\.sh$', 'j1-watchdog-health-verify.sh'
+
+  $env:J1_HV_TASK_STATE  = $state
+  $env:J1_HV_LAST_RESULT = $last
+  $env:J1_HV_ALIVE       = $alive
+  $env:J1_HV_INTERVAL    = [string]$IntervalMinutes
+  # 🔴 必须把判定层的输出【显式接住再打印】, 不能让它落进函数的输出流 ——
+  #    上一版直接 `& $bash ...`, 于是 `$ok = Show-State` 把判定输出连同布尔一起收成【数组】,
+  #    而非空数组恒真 ⇒ **判定层判了"不健康", 闸却报健康。**
+  #    🔨 同一族的最阴一种: **本该证明健康的那段输出, 自己变成了"通过"。**
+  $vout = & $bash -lc "sh '$vPosix'" 2>&1
+  $rc   = $LASTEXITCODE
+  foreach ($line in $vout) { Write-Host $line }
+  Remove-Item Env:J1_HV_TASK_STATE, Env:J1_HV_LAST_RESULT, Env:J1_HV_ALIVE, Env:J1_HV_INTERVAL -ErrorAction SilentlyContinue
+
+  if ($rc -eq 0) { Write-Host "✅ HEALTHY — 在岗, 且最近一次真的跑成了" }
+  $script:VerifyRc = $rc
+  return ($rc -eq 0)
 }
 
 if ($Uninstall) {
@@ -104,6 +147,8 @@ if ($Install) {
 }
 
 # 默认 -Verify
+# 退码透传判定层的三态(0 健康 / 1 在岗但功能不正常 / 2 没在岗), 不压成 0-1 ——
+# 「没在岗」与「在岗但瞎」导出的动作不同(去装 vs 去修可达性)。
 $ok = Show-State
-if (-not $ok) { exit 1 }
-exit 0
+if ($ok) { exit 0 }
+exit $(if ($script:VerifyRc) { $script:VerifyRc } else { 1 })
