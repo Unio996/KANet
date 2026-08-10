@@ -8,6 +8,15 @@
 
 ---
 
+### (141) 2026-08-10 06:3x-06:5xZ — 🔄 全员会话重启后接位记账(Bettor 新会话)· J2 双断确认缺位 · J2 带外块转发更正 RPC 归因(NWT DB 独立核实)· 点名收束
+> ⏱ 2026-08-10 06:38-06:50Z · 前任 Bettor 06:25Z 收束(接位快照在 memory `project-settlement-recovery-state-2026-08-10`, NWT 已按 J1 更正修过 kr5l4 段)。⚠ 08-09/08-10 夜窗(RPC 两事件/canary#2 clear-to-GO/kr5l4 定案更正/getBlockAtDaa v0.3 GREEN)未及回写本 ledger, 权威=该 memory + 频道 06:2x-06:3xZ 段 + git(69ce2b9e/6f6c9e3b)。
+- **点名收束**: J1 06:38(自己节点, healthy)· NWT 06:40(无在跑活)· KANet-UI 06:40(digest bump commit 93ef6ff1 已推 origin, Bettor 落地核: ahead=0 工作树净)。**J2 双断确认缺位**: 频道发送断(J2-tn UTXO 2.87<3 KAS, 08-09 22:09 起)+ 本机无其会话(KANet-UI 父链定树: 4 进程=Bettor×2+NWT+KANet-UI)。⇒ **Owner 桌上加一件 (D): spawn J2 新会话 + 给 J2-tn relay(kaspatest:qzcpypy…)补 ≥3 KAS**(小额钱路, Bettor 不自执行)。settler/pipeline 域执行活(canary#2 六步/getBlockAtDaa 落码)在 J2 回来前无执行人。
+- **🔴 RPC 05:00 事件归因降级为【未定】**(Bettor 转发 J2 带外块 #mv6io2, 来源=getblockatdaa 设计稿文件头; **NWT 06:44 直查 console.db events 表逐秒吻合确认非转述失实**): 1078 次失败全落 04:58:00→06 的 6 秒窗, J1 探测起始≈04:58:10 晚约 4 秒 ⇒ "探测诱发"顺序可能反; 昨晚隔离实验两分支同读数=证不了归因。**运营结论不变**(瞬态自愈/无需重启/canary#2 clear-to-GO 维持)。钉死待 J1 报 30 请求首个时刻(NWT 已确认 console 无持久 access log, 别处问不到)。memory 快照 RPC 段已同步更正。
+- **告警语义卡(KANet-UI 认领, P2/P3 自排)**: rpc-degradation 告警一条文本盖三现象(贴阈噪声计时器/70min 真故障/6 秒瞬态)且都写死"重启"处方 ⇒ 改法=加"恢复"边沿事件+onset 去掉写死处方, 阈值/窗口/冷却不动。流程: diff→NWT 审→commit; **in-process 模块 committed≠live, 装载搭下个自然重启窗**。
+- **Codex 桥**: 无未 ACK 指令(20260807 已 ACK); 最新 review(08-09 22:06Z)freshness=GREEN/CLOSED-IN-CODE · V2 refund gate-2 触发缺口=CONFIRMED/OPEN, 均已折进主干(b6eab0e7/d54a3ae5)。桥分支 watch 已 arm(10min 一拍)。
+- **待 Owner 拍三件不变**: (A) canary#2=j34vb 回填 GO(clear-to-GO) (B) getBlockAtDaa 落码 GO(v0.3 GREEN, 已进 git 69ce2b9e) (C) V2 退款触发器政策(Codex 判自动化 NOT AUTHORIZED)。
+- **P1 OPEN · D4 BLOCKED · 无 money path 授权 · 本段零生产码零链上零生产 DB 写。**
+
 ## 🔖 下一班 Bettor 接位·当前活状态快照(2026-07-17 17:1xZ·Bettor 会话交接·从这里接)
 
 > 本会话(7/15 凌晨接位→7/17)超长, 操作员将执行合并重启窗=整机重启会结束本会话。新会话从本快照+下方各段接力, 状态全外置零损耗。
