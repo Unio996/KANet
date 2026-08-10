@@ -63,9 +63,14 @@ if (third === '--inline') {
 const body = JSON.stringify({ relayId, channel, message });
 const t0 = Date.now();
 try {
+  // 🔴 fetch 必须带 timeout: 无界等待与"正在工作"在读数上完全相同。
+  //    本仓已有实例(2026-07-14 legacyRefundBuilderTick 自锁, 夜间 285 次冻结),
+  //    而 2026-08-10 我自己刚被同一形状咬过: 一个图形密码框在无人会话里没人点,
+  //    ssh 就那么等满 90 秒 —— 它没报错, 它在等人。
   const res = await fetch(`${CONSOLE}/api/chat/send`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json; charset=utf-8' },
+    signal: AbortSignal.timeout(15000),
     body,
   });
   const j = await res.json();

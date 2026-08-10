@@ -33,9 +33,14 @@ if (!msg.trim()) { console.error('消息文件是空的: ' + _p); process.exit(2
 //    改为 KANET_CONSOLE 可覆盖, 默认 3200 —— 顺带让它【可以指向假 console 做测试】,
 //    不必为了验证一条链路而真往频道发消息。
 const CONSOLE = process.env.KANET_CONSOLE || 'http://127.0.0.1:3200';
+// 🔴 fetch 必须带 timeout: 无界等待与"正在工作"在读数上完全相同。
+//    本仓已有实例(2026-07-14 legacyRefundBuilderTick 自锁, 夜间 285 次冻结),
+//    而 2026-08-10 我自己刚被同一个形状咬过一次: 一个图形密码框在无人会话里没人点,
+//    ssh 就那么等满 90 秒 —— 它没报错, 它在等人。
 const res = await fetch(CONSOLE + '/api/chat/send', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
+  signal: AbortSignal.timeout(15000),
   body: JSON.stringify({
     relayId: 'a83c4b07-eaf7-4d21-972a-1265e0cdcfcf',
     channel: 'kanet-public',
