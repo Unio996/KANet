@@ -613,6 +613,12 @@ startPoolMarketSettlerCron();
 import { startEventLoopLagHeartbeat } from './lib/eventloop-lag-heartbeat.mjs';
 startEventLoopLagHeartbeat();
 
+// TEMPORARY diagnostic (2026-08-10, Bettor approval #ntlj8t) — irregular multi-GB Private-commit
+// spike investigation, see utxo-fetch-allocation-probe.mjs header. Delete both this call and the
+// import once the allocator is identified or this line of inquiry is abandoned.
+import { installUtxoFetchProbe } from './lib/utxo-fetch-allocation-probe.mjs';
+installUtxoFetchProbe();
+
 // DoD C 收尾 (Bettor r393): 5min cron 自动领 unclaimed bettor refunds for cancelled markets.
 // J1 2026-06-20: env gate (BETTOR_REFUND_CLAIM_ENABLED=0 disable). claimAutoDispatcherTick 在 255-market backlog 上每 tick
 //   重同步 DB 查(better-sqlite3 native)打满 console CPU(node --prof 钉死, 见记忆 console-restart-storm)→ 100% peg 堵死

@@ -15,6 +15,12 @@
 // 大小(不管有没有 lag, 量出堆本身的增长曲线)——两条线对齐时间轴, 堆持续爬升 + lag 事件与堆峰值
 // 重合 = GC 假说坐实; 堆平稳则排除, 转查别的候选(relay stdout 缓冲/sqlite 语句句柄/大查询结果滞留)。
 
+// TEMPORARY (2026-08-10, Bettor approval #ntlj8t): wasmBytes field added alongside the existing
+// heapUsed/heapTotal/rss/external/arrayBuffers fields — the only direct read of the wasm module's
+// own linear memory (external/rss are aggregates that cannot isolate it). Remove alongside
+// utxo-fetch-allocation-probe.mjs (same removal card) once the multi-GB spike investigation closes.
+import { wasmBufferBytesMB, utxoFetchCallCount } from './utxo-fetch-allocation-probe.mjs';
+
 const EXPECTED_MS = Number(process.env.EVENTLOOP_HEARTBEAT_MS) || 1000; // 1s 心跳
 const LAG_ALERT_MS = Number(process.env.EVENTLOOP_LAG_ALERT_MS) || 1000; // 偏差 >1s 才打日志(不刷屏)
 const HEAP_SAMPLE_EVERY_N = Number(process.env.EVENTLOOP_HEAP_SAMPLE_EVERY_N) || 60; // 每 60 个心跳(≈60s)无条件打一行堆大小
@@ -35,7 +41,7 @@ export function startEventLoopLagHeartbeat() {
     _tickCount++;
     if (lagMs > LAG_ALERT_MS) {
       const mem = process.memoryUsage();
-      console.warn(`[diag:eventloop-lag] gap=${actualGapMs}ms expected=${EXPECTED_MS}ms lag=${lagMs}ms at=${new Date(now).toISOString()} heapUsed=${_mb(mem.heapUsed)}MB heapTotal=${_mb(mem.heapTotal)}MB rss=${_mb(mem.rss)}MB external=${_mb(mem.external)}MB arrayBuffers=${_mb(mem.arrayBuffers)}MB`);
+      console.warn(`[diag:eventloop-lag] gap=${actualGapMs}ms expected=${EXPECTED_MS}ms lag=${lagMs}ms at=${new Date(now).toISOString()} heapUsed=${_mb(mem.heapUsed)}MB heapTotal=${_mb(mem.heapTotal)}MB rss=${_mb(mem.rss)}MB external=${_mb(mem.external)}MB arrayBuffers=${_mb(mem.arrayBuffers)}MB wasmBytes=${wasmBufferBytesMB()} utxoFetchCalls=${utxoFetchCallCount()}`);
     } else if (_tickCount % HEAP_SAMPLE_EVERY_N === 0) {
       // 独立低频心跳(observe-only): 不管有没有 lag，量出堆本身的增长曲线，跟上面 lag 事件的
       // heapUsed 数值对齐时间轴，才能判断"堆持续爬升"还是"lag 时刻恰好撞见一次瞬时波峰"。
@@ -50,7 +56,7 @@ export function startEventLoopLagHeartbeat() {
       // ⚠ 作用域(Bettor 提醒, 别被读歪): 它回答的是"下一次劣化时涨/掉的是哪一块内存",
       //    **不回答"为什么会劣化"** —— 内存与该故障的因果已被四条独立证据否掉。
       const mem = process.memoryUsage();
-      console.log(`[diag:heap-sample] at=${new Date(now).toISOString()} heapUsed=${_mb(mem.heapUsed)}MB heapTotal=${_mb(mem.heapTotal)}MB rss=${_mb(mem.rss)}MB external=${_mb(mem.external)}MB arrayBuffers=${_mb(mem.arrayBuffers)}MB`);
+      console.log(`[diag:heap-sample] at=${new Date(now).toISOString()} heapUsed=${_mb(mem.heapUsed)}MB heapTotal=${_mb(mem.heapTotal)}MB rss=${_mb(mem.rss)}MB external=${_mb(mem.external)}MB arrayBuffers=${_mb(mem.arrayBuffers)}MB wasmBytes=${wasmBufferBytesMB()} utxoFetchCalls=${utxoFetchCallCount()}`);
     }
     _lastFireAt = now;
   }, EXPECTED_MS);
