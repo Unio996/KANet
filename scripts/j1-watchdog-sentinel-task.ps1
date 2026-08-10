@@ -105,10 +105,34 @@ function Show-State {
   if (-not (Test-Path $verifier)) { Write-Host "🔴 找不到判定层: $verifier"; return $false }
   $vPosix = $sentinelPosix -replace 'j1-watchdog-sentinel-once\.sh$', 'j1-watchdog-health-verify.sh'
 
+  # 🔴 新鲜度那把尺【从已注册的触发器读】, 不听 -IntervalMinutes ——
+  #    Codex 2026-08-10 的反例: 任务真装 5 分钟, 运维跑 -Verify -IntervalMinutes 1000
+  #    ⇒ 上界 120120 秒 ⇒ 一条 1000 秒的陈旧记录被判健康。判尺不能由调用方给。
+  #    ⇒ -IntervalMinutes 只在 -Install 时有意义; -Verify 时传了会被【忽略并提示】。
+  $trigMin = $null
+  if ($t) {
+    foreach ($tr in $t.Triggers) {
+      $iv = $tr.Repetition.Interval          # ISO8601 时段, 例 "PT5M"
+      if ($iv -and $iv -match '^PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?$') {
+        $trigMin = ([int]$Matches[1]) * 60 + ([int]$Matches[2]) + [math]::Ceiling(([int]$Matches[3]) / 60.0)
+        break
+      }
+    }
+  }
+  if ($t -and -not $trigMin) {
+    Write-Host "🔴 读不出已注册触发器的重复间隔 — 拒绝改用命令行值去判新鲜度"
+    return $false
+  }
+  if ($t -and $PSBoundParameters.ContainsKey('IntervalMinutes') -and $IntervalMinutes -ne $trigMin) {
+    Write-Host "⚠ -IntervalMinutes=$IntervalMinutes 与已注册触发器的 ${trigMin}m 不符 — 【以触发器为准】, 参数忽略"
+  }
+  Write-Host "interval: ${trigMin}m (读自已注册触发器)"
+
   $env:J1_HV_TASK_STATE  = $state
   $env:J1_HV_LAST_RESULT = $last
   $env:J1_HV_ALIVE       = $alive
-  $env:J1_HV_INTERVAL    = [string]$IntervalMinutes
+  $env:J1_HV_INTERVAL    = [string]$(if ($trigMin) { $trigMin } else { $IntervalMinutes })
+  $env:J1_HV_INTERVAL_SRC = 'trigger'
   # 🔴 必须把判定层的输出【显式接住再打印】, 不能让它落进函数的输出流 ——
   #    上一版直接 `& $bash ...`, 于是 `$ok = Show-State` 把判定输出连同布尔一起收成【数组】,
   #    而非空数组恒真 ⇒ **判定层判了"不健康", 闸却报健康。**
@@ -116,7 +140,7 @@ function Show-State {
   $vout = & $bash -lc "sh '$vPosix'" 2>&1
   $rc   = $LASTEXITCODE
   foreach ($line in $vout) { Write-Host $line }
-  Remove-Item Env:J1_HV_TASK_STATE, Env:J1_HV_LAST_RESULT, Env:J1_HV_ALIVE, Env:J1_HV_INTERVAL -ErrorAction SilentlyContinue
+  Remove-Item Env:J1_HV_TASK_STATE, Env:J1_HV_LAST_RESULT, Env:J1_HV_ALIVE, Env:J1_HV_INTERVAL, Env:J1_HV_INTERVAL_SRC -ErrorAction SilentlyContinue
 
   if ($rc -eq 0) { Write-Host "✅ HEALTHY — 在岗, 且最近一次真的跑成了" }
   $script:VerifyRc = $rc

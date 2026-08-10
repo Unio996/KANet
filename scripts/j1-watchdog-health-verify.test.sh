@@ -12,8 +12,12 @@ FRESH="2026-08-06T07:06:20Z"      # = NOW - 20s
 OLD="2026-08-06T06:40:00Z"        # = NOW - 1600s (> 上界 720s)
 FUTURE="2026-08-06T07:36:40Z"     # = NOW + 1800s
 
-run() { # name  state  lastResult  alive  expect_rc  expect_kw
-  out=$(J1_HV_TASK_STATE="$2" J1_HV_LAST_RESULT="$3" J1_HV_ALIVE="$4" J1_HV_NOW="$NOW" sh "$S" 2>&1); rc=$?
+# 🔴 间隔/来源/认领用【位置参数】传, 不用前缀赋值 —— 前缀赋值加在【函数】调用前会留在 shell 里,
+#    污染后面所有用例。而"污染了"和"没污染"在全绿时读数相同。
+#    且一律用 ${N-默认} 而不是 ${N:-默认}: 后者对【显式传空】也套默认 ⇒ "来源未声明"那格根本测不到。
+run() { # name state lastResult alive expect_rc expect_kw [interval] [src] [unsafe_ack]
+  out=$(J1_HV_TASK_STATE="$2" J1_HV_LAST_RESULT="$3" J1_HV_ALIVE="$4" J1_HV_NOW="$NOW" \
+    J1_HV_INTERVAL="${7-5}" J1_HV_INTERVAL_SRC="${8-trigger}" J1_HV_UNSAFE_TEST="${9-}" sh "$S" 2>&1); rc=$?
   ok=1
   [ "$rc" != "$5" ] && ok=0
   if [ -n "$6" ]; then case "$out" in *"$6"*) ;; *) ok=0 ;; esac
@@ -49,6 +53,33 @@ run "malformed alive (garbage)"      "Ready"    "0" "hello world"          1 "�
 run "malformed rc (1-2)"             "Ready"    "0" "$FRESH rc=1-2"        1 "不是整数"
 run "malformed rc (--5)"             "Ready"    "0" "$FRESH rc=--5"        1 "不是整数"
 run "unparseable timestamp"          "Ready"    "0" "2026-13-45T99:99:99Z rc=0" 1 "解析不了"
+
+
+# ── 新鲜度那把尺【自己的出处】(Codex 2026-08-10 判 RED 的那格) ────────────────
+# 🔴 头一条就是他给的反例原样: 任务真装 5 分钟, 调用方要 1000 分钟, 记录已 1000 秒。
+#    旧版会把它判健康(上界被撑到 120120 秒), 新版必须拒。
+STALE1000="2026-08-06T06:50:00Z"   # = NOW - 1000s
+# Codex 反例: 任务真装 5 分钟, 调用方想用 1000 分钟去判一条已 1000 秒的记录。
+# 走 test 来源而不显式认领 ⇒ 拒。
+run "Codex 反例: 要1000m判1000s旧记录" "Ready" "0" "$STALE1000 rc=0"  2 "没有显式认领"  1000 test
+run "来源未声明"                       "Ready" "0" "$FRESH rc=0"      2 "来源未声明"    5    ""
+run "来源不认识"                       "Ready" "0" "$FRESH rc=0"      2 "来源不认识"    5    bogus
+run "test 来源 + 显式认领 ⇒ 放行但打横幅" "Ready" "0" "$FRESH rc=0"   0 "不是生产判词"  1000 test 1
+# 🔴 这一格【故意断言放行】, 并且它不是洞 —— 把两层的职责说清楚:
+#    本文件信任 SRC=trigger 这个声明; **"声明的间隔是否真等于已注册触发器"由 PS 侧强制**
+#    (它从 $t.Triggers[].Repetition.Interval 读, 并忽略命令行传入的值)。
+#    ⇒ 若间隔【真的】是 1000 分钟, 那 1000 秒本来就该算新鲜。绑定在装置层, 不在这里。
+run "SRC=trigger 且间隔真为1000m ⇒ 1000s算新鲜(职责在PS侧)" "Ready" "0" "$STALE1000 rc=0" 0 "" 1000 trigger
+# 间隔的域
+run "间隔 0"             "Ready" "0" "$FRESH rc=0"  2 "越界"      0    trigger
+run "间隔负数"           "Ready" "0" "$FRESH rc=0"  2 "越界"      -5   trigger
+run "间隔 1441 (超上限)"  "Ready" "0" "$FRESH rc=0"  2 "越界"      1441 trigger
+run "间隔 1440 (上限内)"  "Ready" "0" "$FRESH rc=0"  0 ""          1440 trigger
+run "间隔非整数 (1-2)"   "Ready" "0" "$FRESH rc=0"  2 "不是整数"  1-2  trigger
+run "间隔非整数 (abc)"   "Ready" "0" "$FRESH rc=0"  2 "不是整数"  abc  trigger
+# 边界随【真实间隔】走, 不是写死 720
+run "间隔1m ⇒ 上界240s · 239s 新鲜" "Ready" "0" "2026-08-06T07:02:41Z rc=0" 0 ""     1 trigger
+run "间隔1m ⇒ 上界240s · 241s 陈旧" "Ready" "0" "2026-08-06T07:02:39Z rc=0" 1 "陈旧" 1 trigger
 
 echo ""
 echo "result: $pass PASS / $fail FAIL"

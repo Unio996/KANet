@@ -21,7 +21,48 @@
 #   J1_HV_INTERVAL    调度间隔分钟(缺省 5) ⇒ 新鲜度上界 = 2*间隔 + 120s
 #
 # 退码: 0 = 在岗且功能正常 · 1 = 在岗但功能不正常 · 2 = 没在岗/装置态不对
+# 🔴🔴 新鲜度窗口的【出处】必须验, 不只验它的值(Codex 2026-08-10 判 RED, fail-open 权限错位):
+#    原先 `INTERVAL=${J1_HV_INTERVAL:-5}` —— 这把尺由【调用方】给。他给的反例:
+#      任务真实装在 5 分钟档 · .alive 已 1000 秒(按 720 秒上界必须判陈旧)
+#      · 运维跑 `-Verify -IntervalMinutes 1000` ⇒ 上界变 120120 秒 ⇒ **同一条陈旧记录被放行**。
+#    🔨 判据: **判「活没活」的那把尺, 必须绑在【被验的那个调度】上, 不能谁调它谁给。**
+#       否则这个闸可以被"调用它的人"独立放宽, 而放宽不留痕。
+#    ⇒ 生产路径要求 J1_HV_INTERVAL_SRC=trigger(由安装单元从【已注册的触发器】读出);
+#      测试要用别的值, 必须**显式声明这是测试**并且**结论不算生产判词**。
 INTERVAL=${J1_HV_INTERVAL:-5}
+SRC=${J1_HV_INTERVAL_SRC:-}
+BANNER=''
+
+case "$SRC" in
+  trigger) ;;
+  test)
+    if [ "${J1_HV_UNSAFE_TEST:-}" != "1" ]; then
+      echo "🔴 间隔来源标为 test 但没有显式认领: 需 J1_HV_UNSAFE_TEST=1 — 测试值不许悄悄放宽生产新鲜度"
+      exit 2
+    fi
+    BANNER='⚠ 本次用的是【测试间隔】, 不是从已注册触发器读出的 —— 本结论不是生产判词。' ;;
+  '')
+    echo "🔴 间隔来源未声明(J1_HV_INTERVAL_SRC) — 拒绝用来源不明的尺去判新鲜度"
+    exit 2 ;;
+  *)
+    echo "🔴 间隔来源不认识: ${SRC} — 不认识的来源一律不放行"
+    exit 2 ;;
+esac
+
+# 间隔本身也要验域: 非整数 / 0 / 负 / 超大 都不许进算式(超大 = 把上界撑到永不陈旧)。
+n=$INTERVAL
+case "$n" in -*) n=${n#-} ;; esac
+case "$n" in
+  ''|*[!0-9]*)
+    echo "🔴 间隔不是整数: [${INTERVAL}] — 读不懂的值不当成好消息"
+    exit 2 ;;
+esac
+if [ "$INTERVAL" -lt 1 ] || [ "$INTERVAL" -gt 1440 ]; then
+  echo "🔴 间隔越界: ${INTERVAL} 分钟 (允许 1..1440) — 越界值会把新鲜度上界撑成永不陈旧"
+  exit 2
+fi
+[ -n "$BANNER" ] && echo "$BANNER"
+
 MAX_AGE=$(( INTERVAL * 60 * 2 + 120 ))
 MIN_AGE=-60
 NOW=${J1_HV_NOW:-$(date -u +%s)}

@@ -34,6 +34,12 @@ mut "缺 .alive 当健康"                's/^  echo "🔴 注册了但【从未
 #    留着这行注释, 因为"变异改不动文件"会伪装成"已检出", 是我特意单列 INERT 那一类的原因。
 mut "rc 整数判据被短路 (n=\$rc → n=0)"  's/^n=\$rc$/n=0/'
 mut "间隔上界放大 10 倍"              's/^MAX_AGE=.*/MAX_AGE=$(( INTERVAL * 60 * 20 + 120 ))/'
+# ── Codex 2026-08-10 第三轮点的那格: 新鲜度那把尺【自己的出处】 ──────────────
+mut "不验间隔来源(任何来源都放行)"    's/^  trigger) ;;/  *) ;;\n  trigger) ;;/'
+mut "test 来源不要求显式认领"         's/if \[ "\${J1_HV_UNSAFE_TEST:-}" != "1" \]; then/if [ "x" = "y" ]; then/'
+mut "间隔不验域(0\/负\/超大都放行)"    's/if \[ "\$INTERVAL" -lt 1 \] || \[ "\$INTERVAL" -gt 1440 \]; then/if [ "$INTERVAL" -lt -99999 ]; then/'
+mut "间隔上限 1440 → 99999"           's/-gt 1440 \]/-gt 99999 ]/'
+mut "间隔非整数判据被短路"            's/^n=\$INTERVAL$/n=0/'
 
 echo ""
 echo "detected=$det  MISSED=$miss  INERT=$inert"
