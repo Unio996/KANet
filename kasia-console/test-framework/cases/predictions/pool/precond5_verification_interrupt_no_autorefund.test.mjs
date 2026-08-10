@@ -244,6 +244,16 @@ export default {
     //      ⇒ 改断 dispatchRefund 成功时【一起写下】的那一组(settler:2758-2772 逐字):
     //        refund_authorization ∧ refund_dispatched_at ∧ refund_tx_obj ∧ protocol_status='refunding'。
     //      🔵 单种一个字段不再能满足它; 要伪造得把四样一起种 —— 那是刻意行为, 不是失手。
+    // ── 2026-08-10 J2, NWT 07:24 裁准(仅本 P1 臂) ───────────────────────────────────────
+    //  本臂的阳性对照【已由独立用例补上】: cases/predictions/pool/p5_positive_via_fake_relay_sink.test.mjs
+    //  (臂 (d) 假 relay sink)。2026-08-10 06:50Z 实跑 PASS, 哨兵 sentinel=f415e28e 现证 IPC 命令
+    //  确实被路由到 sink, settler 走完 DISPATCHED Refund → refunding。
+    //  NWT 核过两者是【同一目标态、同一判定路径】(p5:161 标题 / p5:215-218 断言
+    //  refund_authorization='bettors_absent' == 本臂 :250), 不是同名不同物。
+    //  🔴 must → should 【不是把红改绿】: 查询与失败正文一字未删, 失败时仍逐字打印; 只是不再让本
+    //     用例整体失败 —— 因为补它的那条臂已经存在且是绿的。要阳性对照的证据, 去跑 p5, 别在这里找。
+    //  ⚠ 落码时踩过一次(2026-08-10, 用例当场抓出): 这段注释最初被我写进了下面那个 SQL 模板字符串
+    //     【里面】⇒ `//` 变成 SQL 正文 ⇒ `near "/": syntax error`。JS 注释只能在模板字符串【外】。
     { id: 'P1_positive_control_NOT_ESTABLISHED_red_until_zero_bet_fixture', action: 'query_db',
       sql: `SELECT COALESCE((SELECT 'POSITIVE_CONTROL_ESTABLISHED' FROM pool_markets
                               WHERE id = '${M_P1}'
@@ -257,8 +267,19 @@ export default {
                             || '⇒ 四道全通后走到 dispatchRefund, 而第五道是【Relay not running】: 构造退款交易要活 relay, 离线必失败 '
                             || '⇒ refund_authorization/dispatched_at/tx_obj 三字段都不会落库 ⇒ 本四字段合取断言【离线不可能满足】。'
                             || '⇒ NWT 2026-08-07 裁: ⑤ 按(c)半闭交付, 本臂如实标射程外, 不冒充; 改生产码加痕迹来让它可观测 = 正对 D4 靶心(用被禁止的那类动作去解锁禁止它的闸), 已拆独立卡。'
-                            || '⚠ 这条红【不是行为缺陷】, 别去查 status。') AS state`,
-      expect: { must: { row_assert: { state_contains: 'POSITIVE_CONTROL_ESTABLISHED' } } } },
+                            || '⚠ 这条红【不是行为缺陷】, 别去查 status。'
+                            || ' ⇒ 2026-08-10 更新(NWT 07:24 裁准, 仅 P1): 本臂阳性对照已由独立用例 p5_positive_via_fake_relay_sink 提供'
+                            || '(06:50Z 实跑 PASS, 哨兵 f415e28e 现证 IPC 真被路由到 sink), 故本条降为 should。') AS state`,
+      expect: { should: { row_assert: { state_contains: 'POSITIVE_CONTROL_ESTABLISHED' } } } },
+    // ── 2026-08-10 J2, NWT 07:24 裁【不准】把本臂跟 P1 一起降级 ────────────────────────────
+    //  🔴 本臂【维持 must、维持故意红】, 只改指针措辞。
+    //  我原提案是把 P1/P2 两条一起标成"已由臂 (d) 覆盖" —— 那是错的, 而否掉它的依据在
+    //  【我自己写的那个文件的文件头】: p5_positive_via_fake_relay_sink.test.mjs:25 逐字写着
+    //  「不测 P2 臂(committee_affirmative_unjudgeable) —— 它多一段委员票据前置, 不在本卡」。
+    //  ⇒ **臂 (d) 自己不认这一臂。**
+    //  🔨 我把两条当成「两条阳性臂」这个并列描述去处理, 于是让 P2 静默继承了 P1 的裁定;
+    //     NWT 没信那个并列, 逐个打开核"对象是不是同一个命题" —— 那一步是我漏的。
+    //     ⇒ 判据: **并列描述会让两个不同的东西继承同一个判定。拆开各核一次再下结论。**
     { id: 'P2_positive_control_NOT_ESTABLISHED_red_until_abstain_supermajority_fixture', action: 'query_db',
       sql: `SELECT COALESCE((SELECT 'POSITIVE_CONTROL_ESTABLISHED' FROM pool_markets
                               WHERE id = '${M_P2}'
@@ -270,7 +291,10 @@ export default {
                             || '构造要求(NWT 2026-08-07 探清): 1 个市场 + committee_pks 5 个 + chain_events 里 >=4 行 event_type=pool_oracle_vote, '
                             || 'payload $.market_id 匹配 / $.voter_pubkey 匹配(小写比对) / $.outcome=ABSTAIN, 每 voter 取 observed_at 最早一行(settler:1783 据此自行推导授权)。'
                             || '⇒ 但即便全部造齐, 终点同样是 dispatchRefund ⇒ 同样撞【Relay not running】⇒ 三字段同样不落库。'
-                            || '⇒ NWT 裁: 与 P1 同按(c)半闭标记, 不各撞一次墙。⚠ 这条红【不是行为缺陷】, 别去查 status。') AS state`,
+                            || '⇒ NWT 裁: 与 P1 同按(c)半闭标记, 不各撞一次墙。⚠ 这条红【不是行为缺陷】, 别去查 status。'
+                            || ' ⇒ 2026-08-10 指针更正(NWT 07:24 裁): 本臂【不】由 p5_positive_via_fake_relay_sink 覆盖'
+                            || '(该用例文件头 :25 自己声明不测 P2)。本臂待【新的、覆盖 committee_affirmative_unjudgeable 路径'
+                            || '(含委员票据前置)的阳性臂用例】—— 尚未立卡。别把它读成跟 P1 一起解决了。') AS state`,
       expect: { must: { row_assert: { state_contains: 'POSITIVE_CONTROL_ESTABLISHED' } } } },
 
     // ── teardown(幂等) ──
