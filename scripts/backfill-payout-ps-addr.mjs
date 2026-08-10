@@ -21,6 +21,18 @@
  *   KASPA_NETWORK           默认 testnet-12
  *   KASPA_RPC_URL           默认 ws://127.0.0.1:17210
  *   PS_ADDR_BACKFILL_NO_CHAIN=1   跳过链上确认 ⇒ 🔴 只允许离线自测, 与真实回填互斥(见下)
+ *   PS_ADDR_BACKFILL_ONLY=<完整 logical_market_id>
+ *                           canary: 本次只处理这一个盘。**精确匹配, 不支持后缀。**
+ *                           匹配 0 行 ⇒ 大声报错 exit(既不跑全量也不静默跑空)。
+ *                           枚举与计数始终是全量 —— 见下方过滤器处的注释, 那个位置是承重的。
+ *   PS_ADDR_BACKFILL_ALL=1  🔴 显式 opt-in 才允许【写入】多于一个盘。
+ *                           CONFIRMED=1 而 ONLY 与 ALL 都没设 ⇒ **拒跑**(不是静默跑全量)。
+ *                           理由见下方那道闸的注释: 默认值出错时不报错, 所以默认不许是"全量"。
+ *
+ * 🔴 写入侧的组合只有两种合法形态:
+ *     canary : PS_ADDR_BACKFILL_ONLY=<完整 id>  PS_ADDR_BACKFILL_CONFIRMED=1
+ *     全量   : PS_ADDR_BACKFILL_ALL=1           PS_ADDR_BACKFILL_CONFIRMED=1
+ *   两者同时设 = 意图矛盾 ⇒ 拒跑。dry-run(不设 CONFIRMED)不受这道闸影响, 照旧全量出报告。
  */
 import fsx from 'node:fs';
 import { createRequire } from 'node:module';
@@ -33,6 +45,38 @@ const NETWORK = process.env.KASPA_NETWORK || 'testnet-12';
 const RPC_URL = process.env.KASPA_RPC_URL || 'ws://127.0.0.1:17210';
 const CONFIRMED = process.env.PS_ADDR_BACKFILL_CONFIRMED === '1';
 const NO_CHAIN = process.env.PS_ADDR_BACKFILL_NO_CHAIN === '1';
+// canary 过滤器 (Bettor 2026-08-09 14:01 派工 A, NWT 审): 只处理一个 logical_market_id。
+// 🔴 只接受【完整 id 精确匹配】—— 不做后缀/模糊匹配。理由: 后缀若意外命中两个盘, 就会回填一个
+//    没打算动的市场, 而 canary 存在的全部意义正是"这一跑只碰这一个"。宁可让操作者多贴一次全 id。
+const ONLY = process.env.PS_ADDR_BACKFILL_ONLY || null;
+// 全量 opt-in (Bettor 2026-08-09 15:46 荐加, NWT 审): 见下方那道 fail-closed 闸。
+const ALL = process.env.PS_ADDR_BACKFILL_ALL === '1';
+
+// 🔴🔴 fail-closed 默认: 【写入】时"处理多于一个盘"必须显式 opt-in。
+//  为什么它比"起跑前 grep 一下过滤器还在不在"强(那是 J2 原来的建议, 已被这条取代):
+//    grep 是 runbook 的一步 —— **会被忘**, 而忘了不报错。这条是代码里的不变量 —— 忘不了。
+//  🔴 它盖的【只有一个】失效模式, 别读大(Bettor + NWT 2026-08-09 15:51 同时指出我原注释自指):
+//    ✅ 盖: **过滤器在场, 但 ONLY 忘了设 / 变量名拼错** ⇒ CONFIRMED=1 拒跑, 不静默回填全部 13
+//         (含占 ~93% 金额的 9jaty)。
+//    🔴 【盖不了】: 过滤器整段被 revert / stash / 或有人在没有这段代码的旧检出上跑 ——
+//         **因为这道 guard 自己就在那段代码里**: 它没了, guard 也没了, 脚本回到"默认全量"。
+//         那一格由**另外两件**盖, 不由本 guard 盖:
+//           · `git commit`(本文件已提交 ⇒ 工作树里被挪走也能恢复出带过滤器的版本)
+//           · 起跑前 `grep -c PS_ADDR_BACKFILL_ONLY <本文件>` 非 0 才开跑
+//             (它查的是【起跑那一刻的实际文件】, 与在哪个检出上无关 ⇒ 正好补 commit 的盲区)
+//  🔵 只管写入侧: dry-run(不设 CONFIRMED)照旧全量出报告 —— 那正是我们判断分集用的东西。
+if (CONFIRMED && !ONLY && !ALL) {
+  console.error('🔴 拒绝: CONFIRMED=1 但既没有 PS_ADDR_BACKFILL_ONLY=<完整 market id>, 也没有 PS_ADDR_BACKFILL_ALL=1。');
+  console.error('   "回填全部 divergent 盘"必须【显式 opt-in】—— 它不是默认行为, 因为默认值出错时不报错。');
+  console.error('   · canary(推荐): PS_ADDR_BACKFILL_ONLY=<完整 id> PS_ADDR_BACKFILL_CONFIRMED=1 …');
+  console.error('   · 全量:          PS_ADDR_BACKFILL_ALL=1      PS_ADDR_BACKFILL_CONFIRMED=1 …');
+  process.exit(2);
+}
+// 两个一起设 = 意图矛盾(既说"只这一个"又说"全部")。不猜哪个优先, 停下让人说清。
+if (ONLY && ALL) {
+  console.error('🔴 拒绝: PS_ADDR_BACKFILL_ONLY 与 PS_ADDR_BACKFILL_ALL 同时设置 —— 意图矛盾, 不替你选。');
+  process.exit(2);
+}
 
 // 🔴 fail-closed: 生产回填【必须】过链上确认。跳过探链只为离线自测存在, 所以它与写入互斥 ——
 // 否则这个开关本身就成了"绕过安全核心、把 gate 的真报警消音"的那条路, 而 §2.4 正是要堵它。
@@ -74,6 +118,29 @@ for (const r of rows) {
 console.log(`[backfill] 全表 ${rows.length} 行 · divergent ${divergent.length} 行 · 无法判定 ${unreadable.length} 行 · network=${NETWORK}`);
 // 🔴 无法判定的必须单独喊出来: 它们既不在"要修"里也不在"已好"里, 而沉默会让人把它们读成后者。
 for (const u of unreadable) console.log(`   ⚠ 无法判定 ${String(u.r.logical_market_id).slice(-8)}: ${u.why}`);
+
+// ---- canary 过滤器: 【必须在上面那行计数之后】────────────────────────────────────────────
+// 🔴 位置是承重的, 不是风格问题: 前置②那道已商定的闸读的就是上面打印的 `divergent N 行`
+//    (判据: "分集不再是 13/9/4 就停下报")。若把过滤器塞进 §2.1 的枚举里, 那个计数会跟着过滤
+//    一起变小 ⇒ 闸永远"看起来对", 而它在 canary 那一跑里已经【自动失效且看不出来】。
+//    ⇒ 枚举与报告始终是全量; 过滤只决定【这一跑动谁】。
+const targets = ONLY ? divergent.filter(({ r }) => r.logical_market_id === ONLY) : divergent;
+if (ONLY) {
+  if (targets.length === 0) {
+    // 🔴 fail-loud: 设了过滤却一个都没匹配 = 操作者的意图没有被执行。这时【既不能跑全量】
+    //    (那是最坏况: 想跑 1 个结果跑了 13 个), 也不能静默跑空(那会被读成"没什么要修的")。
+    console.error(`🔴 PS_ADDR_BACKFILL_ONLY='${ONLY}' 匹配 0 行 divergent ⇒ 中止, 不回填任何东西。`);
+    console.error(`   注意: 只接受【完整 logical_market_id 精确匹配】, 不支持后缀。当前 divergent 的完整 id:`);
+    for (const { r } of divergent) console.error(`     ${r.logical_market_id}`);
+    process.exit(2);
+  }
+  if (targets.length > 1) {
+    // 结构上到不了(id 是主键式唯一), 但若哪天成立, "canary 只碰一个"就已经不成立了 ⇒ 宁可停。
+    console.error(`🔴 PS_ADDR_BACKFILL_ONLY='${ONLY}' 匹配到 ${targets.length} 行 ⇒ 中止(canary 必须恰好一个)。`);
+    process.exit(2);
+  }
+  console.log(`[backfill] 🎯 canary 模式: 只处理 ${ONLY} —— 其余 ${divergent.length - 1} 行本次【不碰】`);
+}
 
 // ---- getUtxos: 直连本机节点的只读查询 ----
 // 设计稿写的是"经 relay(Console 不碰链)"。本脚本不是 Console 请求路径, 也没有 relay 会话上下文, 而
@@ -133,7 +200,7 @@ function parseOutpoint(raw) {
 
 const report = [];
 const malformed = [];
-for (const { r, derived } of divergent) {
+for (const { r, derived } of targets) {
   const marketId = r.logical_market_id;
   const parsed = parseOutpoint(r.payout_ps_outpoint);
   if (!parsed.ok) {
@@ -207,7 +274,26 @@ if (!CONFIRMED) {
   // §2.5 全局: 重跑枚举, 应为空(幂等 + 完备的双重确认)
   const left = sqlite.prepare('SELECT * FROM payout_shards').all()
     .filter((r) => { try { return r.payout_redeem_hex && p2sh(r.payout_redeem_hex) !== r.payout_ps_addr; } catch { return true; } });
-  console.log(`\n全局重枚举: 剩余 divergent = ${left.length} ` + (left.length ? '🔴 非空 — 有盘没被修好(见上面的 SKIP / gate 记录)' : '✅ 空'));
+  if (!ONLY) {
+    console.log(`\n全局重枚举: 剩余 divergent = ${left.length} ` + (left.length ? '🔴 非空 — 有盘没被修好(见上面的 SKIP / gate 记录)' : '✅ 空'));
+  } else {
+    // 🔴 canary 下这道检查的【期望值变了】, 必须跟着改, 否则它每次都打红字。
+    //    不改的话: 只跑 1 个盘 ⇒ left 必然剩 12 ⇒ "🔴 非空 — 有盘没被修好" ⇒ 一次成功的 canary
+    //    会以一条读起来像失败的红字收尾。而"预期内的红"用不了几次就会被当成背景噪音。
+    // 🔴 两个问题必须【分开数】, 不能压进同一个减法:
+    //    「目标盘修好没有」与「有没有碰别人」是独立的两件事, 而 canary 被 SKIP 是【预期内的正常结果】
+    //    (那 4 个 chain=未命中 的盘就该 SKIP)。若把 expected 写成 divergent−1, 就等于默认目标一定被修好
+    //    ⇒ 一次【正确的 SKIP】会打出"这一跑动了不该动的盘"这种指控式假警报。
+    //    (这个 bug 是阴性臂跑出来的 —— 阳性臂全绿, 只跑阳性会把它交出去。)
+    const canaryLeft = left.some((r) => r.logical_market_id === ONLY);
+    const restLeft = left.length - (canaryLeft ? 1 : 0);
+    const expectedRest = divergent.length - 1;   // 其余 N−1 个本次没动 ⇒ 应原样还在
+    console.log(`\ncanary 重枚举: 目标盘 ${canaryLeft
+      ? '🔴 仍 divergent — 没修好(若上面是 chain_unconfirmed SKIP, 这是【预期内】, 不是故障)'
+      : '✅ 已不再 divergent'}`);
+    console.log(`               其余: 剩余 ${restLeft}, 预期 ${expectedRest} ` +
+      (restLeft === expectedRest ? '✅ 相符(未碰其他盘)' : '🔴 不符 — 这一跑动了不该动的盘, 或期间有别人在写'));
+  }
 }
 if (_rpc) { try { await _rpc.disconnect(); } catch { /* 关连接失败不影响已完成的回填 */ } }
 sqlite.close();
