@@ -37,12 +37,33 @@ parse failure costs nothing because the old watchdog is still running at that mo
 3. on target: hash the staged file             -> must equal 1a232417d632…  (content, not mtime)
 4. promote:   _staged-watchdog.ps1  ->  tn12-mining-watchdog-v2.ps1
 5. stop PID 28080, then VERIFY it is gone      -> not assumed gone (A4)
-6. start: powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden
-              -File D:\kaspa-tn12-mining\tn12-mining-watchdog-v2.ps1
+6. start via WMI, NOT Start-Process:
+      Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{
+        CommandLine = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden
+                       -File D:\kaspa-tn12-mining\tn12-mining-watchdog-v2.ps1' }
+   6b. 🔴 verify it is still there from a NEW ssh session -- started is not alive
 7. verify A1-A5 (below), then report readings, not conclusions
 ```
 
 🔵 Steps 1-3 are reversible and change nothing live. The first irreversible step is 4.
+
+## 🔴 What actually went wrong at execution (14:09Z) — read this before the next deployment
+
+Step 6 originally said `Start-Process`. **It started, logged its banner, and was gone by the next
+ssh call.** A process started with `Start-Process` from an SSH-invoked PowerShell is a child of
+that session and dies with it. For about 70 seconds (14:09:11Z → 14:10:21Z) there was **no
+watchdog at all** and the miner ran unsupervised — precisely the outcome this component exists
+to prevent, caused by the deployment of the component.
+
+🔨 This is the same shape as fault mode ② in my own handoff file (a session-scoped background
+process is reaped at the session boundary). That entry describes the Claude Code turn boundary;
+this was an SSH session boundary. **I recognised the shape and did not recognise it wearing a
+different shell.** The information needed to avoid it was already in my own notes: the previous
+instance (PID 28080) had been started via WMI Create precisely because it is genuinely detached.
+
+⇒ Step 6 now uses `Invoke-CimMethod Win32_Process Create`, and step 6b requires re-checking from
+a **new** ssh session. **"It started" and "it is running" are different readings**, and the first
+one is what a deployment naturally produces.
 
 ## A1–A5 verification, with the exact string to look for
 
