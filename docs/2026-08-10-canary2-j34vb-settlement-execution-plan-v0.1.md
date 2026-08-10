@@ -154,6 +154,63 @@ node scripts/backfill-payout-ps-addr.mjs
 
 ---
 
+---
+
+# ✅ 执行记录(2026-08-10 13:5xZ · 授权: Bettor 13:52「S4 照走」+ 13:53 整序列一次授权 · NWT 13:53 核过裁定逻辑)
+
+> 🔵 **本块落 git 是 Bettor 13:53 指定的**: 「S5 证据先落 git…频道断了 git 是通道」——重启窗会打断频道。
+
+## S1 前态重取(执行前)· ✅ 与 §1 一致,期间无人动过
+```
+payout_ps_addr : kaspatest:ppyzcu2zl7nn229krn2r5g7kgzpxs5xkmgs0tq30a7a6gelruhc6j5zrdwa8k
+outpoint       : 1c25bed7d2138de8f746ad8bfe5032accb4d58b033d663882026e4dd0ebe67d9:0
+family=v2_zk · redeem len 16564 · 两行 settle_txid=null
+```
+
+## S3 独立派生 · ✅ 通过(**我自己算的,非抄脚本**)
+```
+我算 derived : kaspatest:ppg2jkcv4h9xehxnj9drzw335wvg276d02ga3jemlklk3ymf642rxjmd8q66f
+脚本 derived : (同上)   全串一致 = true   与 stored 不同 = true
+```
+
+## S4 实回填 · ✅ 成功(**本次唯一写操作**)· 原始输出
+```
+[backfill] 全表 722 行 · divergent 12 行 · 无法判定 0 行 · network=testnet-12
+[backfill] 🎯 canary 模式: 只处理 ext-pool-v07-1783969245093-j34vb —— 其余 11 行本次【不碰】
+   ✅ 93-j34vb 回填并通过 gate
+=== 回填结果 ===
+  93-j34vb  family=v2_zk  chain=确认
+      stored  : kaspatest:ppyzcu2zl7nn229krn2r5g7kgzpxs5xkmgs0tq30a7a6gelruhc6j5zrdwa8k
+      derived : kaspatest:ppg2jkcv4h9xehxnj9drzw335wvg276d02ga3jemlklk3ymf642rxjmd8q66f
+canary 重枚举: 目标盘 ✅ 已不再 divergent
+               其余: 剩余 11, 预期 11 ✅ 相符(未碰其他盘)
+```
+🔵 命令逐字与 §2-S4 相同;**未设** `PS_ADDR_BACKFILL_ALL`、**未设** `PS_ADDR_BACKFILL_NO_CHAIN`。三条 fail-closed 停止条件**一条都没命中**。
+
+## S5 落值核实 · ✅ 全过
+```
+payout_ps_addr 现值 == 期望 derived : true
+                    != 旧值        : true
+outpoint 未变 / family 未变 / redeem len 未变 : true / true / true
+market …j34vb      verifying       settle_txid = null
+market …j34vb-s0   shard_internal  settle_txid = null
+```
+🔴 **`settle_txid` 仍为 null 是【预期】** —— 回填只解数据不自动结算。**本盘尚未结算,任何"canary#2 完成"的表述现在都不成立。**
+
+## 🔴 S5.5 判别窗(Bettor 13:54 插入 · 2 tick ≈ 15 分钟)—— **进行中,尚无结论**
+
+执行前实况: `zkJudgeProposeTick_propose market=93-j34vb: unreachable`,13:20:37 / 13:27:34 / 13:34:48 / 13:42:57 **四次,每 ~7 分钟一次**。
+
+**预登记两支(写在观察之前,不许事后挑)**:
+| 支 | 下一 tick 读数 | 含义 | 下一步 |
+|---|---|---|---|
+| **甲1** | 错误**消失**或变成**另一种**形态 | 陈 addr **本身就是** wasm trap 的触发源(J1 证据: 仓内逐字记载"wasm unreachable = 无效地址崩溃")⇒ **回填即修复** | 记读数继续 S6;**且这对其余 11 盘/93 盘积压是重大结论** |
+| **甲2/乙** | `unreachable` **原样仍在** | 回填不是这条 trap 的解;毒化实例仍在 | 交 @KANet-UI 开预授权重启窗(同窗装载 committed-not-live 件),重启后再测一次 |
+
+⚠ **两支都要求拿 errMsg 全文**(J1 提:别只看摘要)。⚠ **判别窗未走完之前,不许把任何一支写成结论。**
+
+---
+
 ## §3 我【不做】什么(边界,写死)
 
 - **不碰其余 divergent 盘**(canary = 恰好一个,脚本 `:139` 结构上也拒)。
