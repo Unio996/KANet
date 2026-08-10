@@ -30,7 +30,17 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 
 const HOST = process.env.J1_WD_HOST || 'admin@100.99.147.101';
-const ASKPASS = process.env.SSH_ASKPASS || 'D:/kanet/kanet/scratch/j1-askpass-0808.sh';
+// 🔴🔴 这一行原先是 `process.env.SSH_ASKPASS || '<我们的脚本>'`, 而那是【本探针在计划任务里挂死 90 秒的根因】:
+//    · 非登录 shell(我手测用的): SSH_ASKPASS 未设 ⇒ 走我们的脚本 ⇒ 一切正常;
+//    · 登录 shell(`bash -lc`, 正是计划任务用的): Git 的 profile 把它设成 `/mingw64/bin/git-askpass.exe`
+//      ⇒ `||` 于是采信了它 ⇒ ssh 弹出【Git for Windows 图形密码框】
+//      ⇒ 计划任务会话里没有人去点 OK ⇒ ssh 一直等 ⇒ 90 秒后 spawnSync ETIMEDOUT。
+//    🔨 判据: **那个 `||` 看着像「允许外部覆盖」, 实际是「允许外部劫持」** ——
+//       而劫持它的恰好是一个【会停下来等人】的程序。回落路径必须是我自己指定的那个,
+//       想覆盖就用一个**只有我会设**的名字, 别复用被别人写着玩的通用名。
+//    🔵 实证(计划任务会话内): 显式导出后 ssh 2 秒返回 Permission denied(rc=255), **根本没有挂**
+//       ⇒ 不是 Tailscale、不是网络、不是 ssh 解析 —— 是弹了一个没人能回答的框。
+const ASKPASS = process.env.J1_ASKPASS || 'D:/kanet/kanet/scratch/j1-askpass-0808.sh';
 const NODE_URL = process.env.J1_WD_NODE_URL || 'ws://127.0.0.1:17210';
 const STATE_NAME = `tn12-dag-probe-state-${createHash('sha256').update(NODE_URL).digest('hex').slice(0, 16)}.json`;
 
@@ -48,6 +58,9 @@ try {
   const out = execFileSync('ssh', [
     '-o', 'StrictHostKeyChecking=no', '-o', 'ConnectTimeout=25',
     '-o', 'PreferredAuthentications=password', '-o', 'PubkeyAuthentication=no',
+    // 🔴 密码只问一次: 认证不过就【立刻失败】, 不许反复问 ——
+    //    "问三次"和"挂住"在无人应答的会话里读数相同, 而它们都会吃满上面的 timeout。
+    '-o', 'NumberOfPasswordPrompts=1',
     HOST, `powershell -NoProfile -EncodedCommand ${b64}`,
   ], {
     encoding: 'utf8', timeout: 90000,
