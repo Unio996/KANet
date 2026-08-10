@@ -369,6 +369,7 @@ function checkScratchClutter() {
     '_launch_tg_bot.mjs', '_launch_broker_bot.mjs', '_launch_owner_bot.mjs',
     '_autobet_config_parse.mjs', '_bettor_ticket_byteeq.mjs', '_fee_single_source.mjs',
     '_j2tn_backfill_snapshot_v2.mjs', '_nwt_tn_autobet_loop.mjs',
+    '_kanetui_monitor.cjs',
   ]);
   let clutter;
   try {
