@@ -61,7 +61,31 @@ j34vb 总 side 行 10 · side_lock_daa NULL = 8 · 有值 = 2
 🔵 同族在册:对照臂必须走同一条路径;「没找到」与「没看完/机器坏了」读数相同。
 
 **探针必须只读**: 只调 `captureSideLockDaa` 取返回值并打印,**不调 `recaptureSideLockDaaForMarket`**(后者会写)。
-⚠ 落码时逐字确认 `captureSideLockDaa` 自身无写入 —— **我还没读它**,这是 S-A 落码前的前置。
+
+### ✅ 只读性前置 —— **已消(2026-08-10 14:2xZ 现读,零写)**
+`captureSideLockDaa`(`trade-protocol-filter.js:1183-1280`)全函数体扫 `INSERT|UPDATE|DELETE|.run(|sendCommand|broadcast` ⇒ **计数 0**。
+体内只有 `SELECT`(`kaspa_tx_log` / `spc_daa_index` / `spc_daa_index_coverage`)+ RPC 读(`getBlock` / `getBlockDagInfo`),返回值不落库。**⇒ 前置解除,探针可放心调它。**
+
+### 🔵 A1 锚点检查 —— **已完成(不碰 wasm,故未等窗)**
+```
+spc_daa_index_coverage 区间 61,371,827 → 61,806,506   ← 覆盖 deadline_daa=61,421,827 ✓
+spc_daa_index ≥hint 最近锚点 daa = 61,421,827          ← 即 deadline_daa 本身, 零距离
+```
+⇒ 探针**不会**退化成"从 tip 硬走"(`:1204-1206` 注释所述的那条死路)。
+🔴 **粗算旁证**: j34vb 过期 ~25 天 ⇒ 从 tip 走要跨约 200 万 DAA,而 `MAX_STEPS=10000` × 实测 ~2 DAA/步 ≈ 2 万 DAA ⇒ **差约 100 倍**。
+**⇒ 25 天前「7 个 walk 余量不够」很可能是【索引覆盖此区间之前】的读数,不是数据真丢。**
+🟠 但锚点只解决"从哪开始走",**不解决"要走多远"** —— 仍须在 10000 步内撞到 `side_lock_tx`(a4343 实测 5839 步)。**期望值上调,不是结论。**
+
+### 🔨 A2 新增判别维度:**函数自带机器可读的 `reason` 码**(比我原设计强,采之)
+`:1187/:1249/:1254/:1266/:1272/:1275` 返回的 `reason` 有六种,**天然分开"环境坏"与"数据没找到"**:
+| reason | 含义 | 归属 |
+|---|---|---|
+| `no-rpc` / `rpc-fail: …` | 连不上 / RPC 抛错(**wasm trap 会落这里**) | 🔴 **环境问题** ⇒ 读数作废,重测 |
+| `no-block-hash` | 索引未命中 **且** 回走 10000 步没撞到 | 🟠 **数据/距离问题** ⇒ 才是"可能真丢" |
+| `daa-unresolved` | 找到块但 header 无 daaScore | 🟠 异常,单独报 |
+| `not-yet-finality-safe` | 块深度 < `CAPTURE_FINALITY_DEPTH`(50) | 🔵 对 25 天前的 bet 不可能命中;若命中说明我找错块 |
+| `ok` | 拿到 daa | ✅ 可恢复 |
+⇒ **A2 必须逐行记录 `reason`,不许只记 daa 是否为 null。** 「null」把上面五种完全不同的情况压成了一个读数 —— 那正是本计划要避免的。
 
 ---
 
