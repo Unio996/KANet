@@ -42,7 +42,11 @@ chk() { # name  actual  expect
   else fail=$((fail+1)); printf '[FAIL] %-40s got[%s] want[%s]\n' "$1" "$2" "$3"; fi
 }
 alive_alert() { sed -n 's/^.* alert=\(.*\)$/\1/p' "$LOG.alive"; }
-sent_count() { grep -c 'ALERT-SENT' "$LOG" 2>/dev/null || echo 0; }
+# 🔴 `grep -c` 无匹配时退码非零 ⇒ `|| echo 0` 会【再追加一个 0】, 得到两行 "0\n0"。
+#    注入回归那次的失败输出 got[0\n0] 就是它 —— 计数为 0 恰恰是最需要读准的那种时候,
+#    而它偏偏在那时坏掉。改成始终数行, 不靠 grep 的退码。
+sent_count()   { grep 'ALERT-SENT' "$LOG" 2>/dev/null | wc -l | tr -d ' '; }
+throttle_count() { grep 'ALERT-THROTTLED' "$LOG" 2>/dev/null | wc -l | tr -d ' '; }
 
 # 时间线(限流窗 3600s): T0 首发 → T0+300/+600/+3599 被限流 → T0+3600 重发
 T0=1786000000
@@ -74,8 +78,29 @@ kill "$FPID" 2>/dev/null; sleep 1
 chk "console 挂掉 (T+7200): cron 退码" "$(cycle $((T0+7200)))" "1"
 chk "console 挂掉: .alive alert=1"     "$(alive_alert)"        "1"
 chk "console 挂掉: 没有新增送出"       "$(sent_count)"         "2"
-# 🔴 而它【不许占用限流额度】—— 否则 console 恢复后还要再哑一小时
-chk "console 恢复窗内 (T+7201): 立刻再试" "$(cycle $((T0+7201)))" "1"
+chk "console 仍挂 (T+7201): 继续失败"  "$(cycle $((T0+7201)))" "1"
+
+# 🔴🔴 这一格是 Codex 2026-08-10 打回来的, 而**打的是用例名字在说谎**:
+#    上一版最后一格叫「console 恢复窗内…立刻再试」, 而我 kill 了假 console 之后**从没重启它** ——
+#    它跑在一个死 console 上、期望 rc=1 ⇒ 它证的是"还在失败", 不是"恢复后立刻重试"。
+#    🔴 他点出为什么这不只是措辞: **若有回归在发送失败时写了限流状态, 这一格照样绿**,
+#       因为死 console 两种情况都失败。承重的那条性质(失败不占额度)**根本没被测到**。
+#    🔨 在册判据: **用例名字必须是【红的那条】** —— 名字写着守什么, 删掉那个守卫时就得它自己红。
+#    ⇒ 真把 console 起回来, 断言"立刻送出", 而**不是被限流**。
+node "$SELF_DIR/j1-fake-console.mjs" "$PORT" \
+  '{"ok":true,"txId":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"}' \
+  > /tmp/j1mc-console2.out 2>&1 &
+FPID=$!
+i=0; while [ $i -lt 50 ]; do grep -q READY /tmp/j1mc-console2.out 2>/dev/null && break; i=$((i+1)); sleep 0.2; done
+
+# T+7202 距上次【成功】送出(T+3600)已 3602s > 3600s —— 但这一格要证的不是"窗口过了",
+# 而是**失败那两次没有把额度吃掉**: 若失败时写了 STATE(T+7200/7201), 窗口就会被推到 T+10800,
+# 这里就会变成 ALERT-THROTTLED 而不是送出 ⇒ 那个回归会在这里【红】。
+chk "console 恢复 (T+7202): cron 退码"    "$(cycle $((T0+7202)))" "0"
+chk "console 恢复: .alive alert=0(送出)"  "$(alive_alert)"        "0"
+chk "console 恢复: 累计 3 条(立刻补喊)"   "$(sent_count)"         "3"
+chk "console 恢复: 不是被限流(限流数不变)" "$(throttle_count)" "3"
+rm -f /tmp/j1mc-console2.out
 
 echo ""
 echo "result: $pass PASS / $fail FAIL"
