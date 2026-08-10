@@ -108,17 +108,34 @@ console.log('\n[test] once the cooldown genuinely elapses, a still-ongoing (neve
   check('post-cooldown tick reports degraded:true, not alreadyAlerted', r.degraded === true && !r.alreadyAlerted && !r.suppressedByCooldown);
 }
 
-console.log('\n[test] recovery resets edge-trigger, next degradation alerts again:');
+console.log('\n[test] recovery resets edge-trigger AND fires a recovery post with a real duration, next degradation alerts again:');
 sqlite.prepare("DELETE FROM events WHERE event_type='rpc_health_check_failed'").run();
 {
   const rRecovered = await rpcHealthAlertTick(); // 0 events now → recovered
   check('tick after recovery reports degraded:false', rRecovered.degraded === false);
+  check('recovery fires exactly one channel post (an onset had been posted this episode)', fetchCalls.length === 3);
+  check('recovery post mentions duration/自愈', /自愈/.test(fetchCalls[2]?.body?.message || ''));
 }
 for (let i = 0; i < 5; i++) insertFailEvent(1); // degrade again
 {
   const r3 = await rpcHealthAlertTick();
-  check('re-degradation after recovery fires a NEW alert (edge re-armed)', fetchCalls.length === 3);
+  check('re-degradation after recovery fires a NEW alert (edge re-armed)', fetchCalls.length === 4);
   check('re-degradation tick reports degraded:true', r3.degraded === true);
+}
+
+console.log('\n[test] recovering from a state that never actually crossed the threshold (never posted an onset) does NOT fire a spurious recovery post:');
+sqlite.prepare("DELETE FROM events WHERE event_type='rpc_health_check_failed'").run();
+_resetAlertStateForTest(); // does NOT touch the events table — the onset-count assertion below still needs those 3 rows intact
+fetchCalls = [];
+{
+  // _lastAlertPostedAt/_episodeStartedAt stay null because count never crosses FAIL_THRESHOLD below,
+  // so the recovery guard (`_episodeStartedAt !== null && _lastAlertPostedAt !== null`) must hold.
+  for (let i = 0; i < 2; i++) insertFailEvent(1); // below threshold, no onset
+  await rpcHealthAlertTick();
+  sqlite.prepare("DELETE FROM events WHERE event_type='rpc_health_check_failed'").run();
+  const r = await rpcHealthAlertTick(); // recovers from a state that never alerted
+  check('tick reports degraded:false', r.degraded === false);
+  check('no spurious recovery post when no onset was ever posted', fetchCalls.length === 0);
 }
 
 console.log('\n[test] events table actually persisted the onset event (not just in-memory):');

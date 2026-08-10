@@ -56,6 +56,21 @@ let _dbWatermarkChecked = false;
 // (决定跨重启去重), _lastAlertPostedAt 答"该不该现在就再吵一次"(决定持续劣化期间的播报频率)。
 // 同样冷启动只从 DB 读一次(复用 _dbWatermarkChecked 这个标记, 两条水位线一起冷启动一起补)。
 let _lastAlertPostedAt = null;
+// 本次(未中断)劣化 episode 的起点(ms epoch, 取当次首次跨阈值 tick 的窗口内最早一条失败行
+// created_at 近似) — 与上面两条水位线同一套冷启动纪律: 只在 _episodeStartedAt 仍为 null 时
+// 赋值(同进程内跨 tick 不重算), 从 DB 的上一条 onset 事件 payload 里带回(跨重启不丢), 恢复
+// (count===0)时清空。J2 06:42 指出同一句"已知修法:重启console"盖住了三种不同现象(计时器噪声/
+// 真故障/瞬时抖动), Bettor 批复(#mvcezr.2)方向对但要求 diff 附三种现象各自输出——见本文件同批
+// commit message, 这里只加"恢复"边沿事件本身。
+let _episodeStartedAt = null;
+
+function _formatDuration(ms) {
+  const totalSec = Math.max(0, Math.round(ms / 1000));
+  if (totalSec < 60) return `${totalSec}秒`;
+  const totalMin = Math.round(totalSec / 60);
+  if (totalMin < 60) return `${totalMin}分钟`;
+  return `${Math.floor(totalMin / 60)}小时${totalMin % 60}分钟`;
+}
 
 function _lastAlertedPostedAt() {
   try {
@@ -68,13 +83,25 @@ function _lastAlertedPostedAt() {
   } catch { return null; }
 }
 
-function _writeAlertEvent(summary, count, maxFailRowid) {
+function _writeAlertEvent(summary, count, maxFailRowid, episodeStartedAt) {
   try {
     sqlite.prepare(`
       INSERT INTO events (id, event_scope, event_type, source, level, summary, payload_json, created_at)
       VALUES (?, 'system', 'rpc_health_degraded_onset', 'rpc-health-degradation-alert', 'error', ?, ?, datetime('now'))
-    `).run(randomUUID(), summary, JSON.stringify({ windowMinutes: WINDOW_MINUTES, failCount: count, threshold: FAIL_THRESHOLD, maxFailRowid }));
+    `).run(randomUUID(), summary, JSON.stringify({ windowMinutes: WINDOW_MINUTES, failCount: count, threshold: FAIL_THRESHOLD, maxFailRowid, episodeStartedAt }));
   } catch (e) { console.warn(`[rpc-health-degradation-alert] events insert fail (non-fatal): ${e.message}`); }
+}
+
+// 边沿触发②(新增): episode 从劣化回落到 count===0 时报一次, 带真实持续时长——不是判据, 纯信息,
+// 不影响任何门控。event_type 与 onset 分开(rpc_health_recovered vs rpc_health_degraded_onset),
+// 不吃 onset 那条 events.n===3 的既有回归断言。
+function _writeRecoveryEvent(summary, durationMs) {
+  try {
+    sqlite.prepare(`
+      INSERT INTO events (id, event_scope, event_type, source, level, summary, payload_json, created_at)
+      VALUES (?, 'system', 'rpc_health_recovered', 'rpc-health-degradation-alert', 'info', ?, ?, datetime('now'))
+    `).run(randomUUID(), summary, JSON.stringify({ durationMs }));
+  } catch (e) { console.warn(`[rpc-health-degradation-alert] recovery event insert fail (non-fatal): ${e.message}`); }
 }
 
 function _lastAlertedMaxFailRowid() {
@@ -87,6 +114,19 @@ function _lastAlertedMaxFailRowid() {
     if (!row) return null;
     const parsed = JSON.parse(row.payload_json || '{}');
     return typeof parsed.maxFailRowid === 'number' ? parsed.maxFailRowid : null;
+  } catch { return null; }
+}
+
+function _lastAlertedEpisodeStartedAt() {
+  try {
+    const row = sqlite.prepare(`
+      SELECT payload_json FROM events
+       WHERE event_type = 'rpc_health_degraded_onset'
+       ORDER BY rowid DESC LIMIT 1
+    `).get();
+    if (!row) return null;
+    const parsed = JSON.parse(row.payload_json || '{}');
+    return typeof parsed.episodeStartedAt === 'number' ? parsed.episodeStartedAt : null;
   } catch { return null; }
 }
 
@@ -109,18 +149,25 @@ export async function rpcHealthAlertTick() {
   running = true;
   try {
     const row = sqlite.prepare(`
-      SELECT COUNT(*) AS n, MAX(rowid) AS maxRowid FROM events
+      SELECT COUNT(*) AS n, MAX(rowid) AS maxRowid, MIN(created_at) AS minCreatedAt FROM events
        WHERE event_type = 'rpc_health_check_failed' AND created_at > datetime('now', ?)
     `).get(`-${WINDOW_MINUTES} minutes`);
     const count = row?.n || 0;
 
     if (count >= FAIL_THRESHOLD) {
-      // 进程生命周期内只查一次 DB(冷启动补内存的空缺, 两条水位线一起补); 之后全程只信内存, 便宜且够用。
+      // 进程生命周期内只查一次 DB(冷启动补内存的空缺, 三条水位线一起补); 之后全程只信内存, 便宜且够用。
       if (_lastSeenMaxFailRowid === null && !_dbWatermarkChecked) {
         _lastSeenMaxFailRowid = _lastAlertedMaxFailRowid();
         _lastAlertPostedAt = _lastAlertedPostedAt();
+        _episodeStartedAt = _lastAlertedEpisodeStartedAt();
       }
       _dbWatermarkChecked = true;
+      // 仍为 null ⇒ 真·全新 episode(冷启动无历史 或 上次已恢复清空过)——只在这里赋值一次, 同
+      // episode 内后续 tick 不再改写(近似值: 取本次窗口内最早一条失败行的时间, 而非精确的"第一次
+      // 跨阈值那一刻", 窗口只有 WINDOW_MINUTES 分钟, 精度足够报持续时长用)。
+      if (_episodeStartedAt === null) {
+        _episodeStartedAt = row.minCreatedAt ? new Date(row.minCreatedAt + 'Z').getTime() : Date.now();
+      }
 
       const maxFailRowid = row.maxRowid;
       const hasNewData = !(_lastSeenMaxFailRowid != null && maxFailRowid != null && maxFailRowid <= _lastSeenMaxFailRowid);
@@ -140,18 +187,38 @@ export async function rpcHealthAlertTick() {
       }
 
       _lastAlertPostedAt = now;
-      const summary = `过去${WINDOW_MINUTES}分钟内 getWorkingRpc() 连续失败 ${count} 次(阈值${FAIL_THRESHOLD})— RpcClient 疑似进入劣化态, 结算/下注等所有需要RPC的路径可能受影响。已知修法(今天两次复发均验证过): 重启console。`;
+      // 2026-08-10 改法(J2 #mv6io2.4 指出/Bettor #mvcezr.2 批): 不再在 onset 时点断言"已知修法:
+      // 重启console"——同一句话盖住了三种不同现象(阈值噪声/真故障/瞬时抖动)。保留"重启是已验证过
+      // 的修法"这条信息本身(不能丢, 否则真故障那种场景的读者少了行动指引), 但把"现在就该重启"这个
+      // 判断权交给持续时长: 会补发一条带真实持续时长的"已恢复"播报; 迟迟不来才是该重启的信号。
+      // 🔴 措辞刻意不写"数秒~数十秒内自愈"——count 是过去 WINDOW_MINUTES 分钟的滚动窗口计数, 不是
+      // 瞬时状态: 哪怕真实故障只有 6 秒(04:58 那次实况), 那批失败行仍会持续留在窗口里直到它们各自
+      // 过期, 恢复播报最快也要等约 WINDOW_MINUTES 分钟后才会出现——文案必须诚实标这个滞后, 否则读者
+      // 会拿"已恢复播报"的到达时刻直接当真实故障时长用(下面 summary 原样带出这句)。
+      const summary = `过去${WINDOW_MINUTES}分钟内 getWorkingRpc() 连续失败 ${count} 次(阈值${FAIL_THRESHOLD})— RpcClient 疑似进入劣化态, 结算/下注等所有需要RPC的路径可能受影响。是否需要重启视持续时长而定: 会补发一条带持续时长的"已恢复"播报(受滚动窗口影响, 该播报最快约${WINDOW_MINUTES}分钟后才会出现, 时长数字也会比真实故障多出这一截——几分钟内到达优先判定为瞬时抖动); 迟迟不见恢复播报, 按已验证过的修法重启console。`;
       console.warn(`[rpc-health-degradation-alert] DEGRADED: ${count} failures in ${WINDOW_MINUTES}min`);
-      _writeAlertEvent(summary, count, maxFailRowid);
+      _writeAlertEvent(summary, count, maxFailRowid, _episodeStartedAt);
       await _postToChannel(`🔴【rpc-health-degradation-alert·自动监控】RPC疑似劣化\n${summary}`);
       return { ok: true, degraded: true, count };
     }
 
-    // 恢复(低于阈值)— 复位两条水位线(rowid + 冷却期), 下次再劣化 = 全新 episode, 立即报警不用等
-    // 冷却期(但不重置 _dbWatermarkChecked: 本进程已经知道自己不是刚冷启动)。
+    // 恢复(低于阈值)— 复位三条水位线(rowid + 冷却期 + episode起点), 下次再劣化 = 全新 episode,
+    // 立即报警不用等冷却期(但不重置 _dbWatermarkChecked: 本进程已经知道自己不是刚冷启动)。
     if (count === 0) {
+      // 边沿触发②: 只在"这次 episode 确实报过 onset"时才补发恢复播报(_lastAlertPostedAt 非 null
+      // = 至少 posted 过一次, 不管是否被冷却期挡过后续追加播报)——避免在"从未真的进入过劣化播报"
+      // 的边界上凭空报一条恢复。
+      if (_episodeStartedAt !== null && _lastAlertPostedAt !== null) {
+        const durationMs = Date.now() - _episodeStartedAt;
+        const durationText = _formatDuration(durationMs);
+        const summary = `RPC 劣化已自愈, 本次持续 ${durationText}(滚动窗口检测口径, 含约${WINDOW_MINUTES}分钟固定滞后——真实故障时长可能比这个数字短; 用于分辨"几分钟量级的瞬时抖动"vs"几十分钟以上的真故障", 不做秒级精度)。`;
+        console.warn(`[rpc-health-degradation-alert] RECOVERED: duration=${durationText}`);
+        _writeRecoveryEvent(summary, durationMs);
+        await _postToChannel(`✅【rpc-health-degradation-alert·自动监控】RPC已恢复\n${summary}`);
+      }
       if (_lastSeenMaxFailRowid !== null) _lastSeenMaxFailRowid = null;
       if (_lastAlertPostedAt !== null) _lastAlertPostedAt = null;
+      _episodeStartedAt = null;
     }
     return { ok: true, degraded: false, count };
   } catch (e) {
@@ -178,13 +245,16 @@ export function stopRpcHealthDegradationAlertCron() {
   _lastSeenMaxFailRowid = null;
   _lastAlertPostedAt = null;
   _dbWatermarkChecked = false;
+  _episodeStartedAt = null;
 }
 
 // 测试专用: 重置 module-level 水位线状态。清 _dbWatermarkChecked 是关键——它模拟"进程重启"
 // (下次 tick 会重新去 DB 查一次历史水位线), 不是模拟"已恢复"(那种情况只清 _lastSeenMaxFailRowid +
-// _lastAlertPostedAt, 见 rpcHealthAlertTick 的 count===0 分支, 不清 _dbWatermarkChecked)。
+// _lastAlertPostedAt + _episodeStartedAt, 见 rpcHealthAlertTick 的 count===0 分支, 不清
+// _dbWatermarkChecked)。
 export function _resetAlertStateForTest() {
   _lastSeenMaxFailRowid = null;
   _lastAlertPostedAt = null;
   _dbWatermarkChecked = false;
+  _episodeStartedAt = null;
 }
