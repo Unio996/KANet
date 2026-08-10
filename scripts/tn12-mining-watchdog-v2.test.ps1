@@ -216,5 +216,49 @@ Say ("[{0}] {1,-40} seq = {2}" -f $(if ($ordered) { 'PASS' } else { 'FAIL' }), '
 if (-not $ordered) { Say "       expected a millisecond sleep strictly between Stop-Miner and the DAA read" }
 
 Say ''
+Say '--- part 4: settle-window override validation (Codex: the guarantee was overrideable) ---'
+# 抽文件里那段真校验块来跑。这里测的是【一个安全常量能不能被 env 悄悄削掉】,
+# 而不是它等于多少 —— 具体毫秒数按机器测, 焊进用例就会在别的机器上说谎。
+$vs = -1; $ve = -1
+for ($i = 0; $i -lt $lines.Count; $i++) { if ($lines[$i] -match '^if \(\$DAA_SETTLE_RAW\) \{') { $vs = $i; break } }
+if ($vs -lt 0) { throw 'FIXTURE-BROKEN: cannot find the settle override validation block' }
+$d = 0
+for ($i = $vs; $i -lt $lines.Count; $i++) {
+  $c = if ($lines[$i] -match '^\s*#') { '' } else { $lines[$i] }
+  $d += ([regex]::Matches($c, '\{')).Count; $d -= ([regex]::Matches($c, '\}')).Count
+  if ($d -le 0 -and $i -gt $vs) { $ve = $i; break }
+}
+if ($ve -lt 0) { throw 'FIXTURE-BROKEN: settle validation block never closed' }
+$validate = ($lines[$vs..$ve] -join "`n")
+if ($validate -notmatch 'TryParse') { throw 'FIXTURE-BROKEN: extracted block is not the parser' }
+# 🔴 初值那一行也必须【从文件里抽】, 不能由假体自己写。
+#    变异测试第三次抓到同一个形状: 我先前在 harness 里写死 $DAA_SETTLE_MS = $DAA_SETTLE_DEFAULT_MS,
+#    而 mut9 改的正是那一行 ⇒ 假体供给了它本该检验的东西, 变异体全绿。
+#    "安全默认先赋值、覆盖只在校验通过后替换"这个写法本身就是守卫的一半, 所以它必须在被测范围内。
+$initLine = ($lines | Where-Object { $_ -match '^\$DAA_SETTLE_MS\s+=' })
+if (-not $initLine) { throw 'FIXTURE-BROKEN: cannot find the $DAA_SETTLE_MS initialisation line' }
+Say ("extracted lines {0}-{1} ({2} lines) + init line" -f ($vs+1), ($ve+1), ($ve-$vs+1))
+
+function Run-Settle($name, $raw, $expMs, $expReject) {
+  $script:alerts = @(); $script:logs = @()
+  $DAA_SETTLE_FLOOR_MS = 1000; $DAA_SETTLE_DEFAULT_MS = 1500
+  $DAA_SETTLE_RAW = $raw
+  . ([scriptblock]::Create("function Alert(`$m){ `$script:alerts += @(`$m) }`nfunction Log(`$m){ `$script:logs += @(`$m) }`n" + $initLine + "`n" + $validate))
+  $rejected = ($script:alerts.Count -gt 0)
+  $ok = ($DAA_SETTLE_MS -eq $expMs) -and ($rejected -eq $expReject)
+  if ($ok) { $script:pass++ } else { $script:fail++ }
+  Say ("[{0}] {1,-38} raw='{2}' -> {3}ms rejected={4}" -f $(if ($ok) { 'PASS' } else { 'FAIL' }), $name, $raw, $DAA_SETTLE_MS, $rejected)
+  if (-not $ok) { Say ("       expected {0}ms rejected={1}" -f $expMs, $expReject) }
+}
+
+Run-Settle 'unset -> default'              $null  1500 $false
+Run-Settle 'zero -> rejected, keeps 1500'  '0'    1500 $true
+Run-Settle 'negative -> rejected'          '-500' 1500 $true
+Run-Settle 'malformed -> rejected'         'abc'  1500 $true
+Run-Settle 'below floor (999) -> rejected' '999'  1500 $true
+Run-Settle 'at floor (1000) -> accepted'   '1000' 1000 $false
+Run-Settle 'above floor (3000) -> accepted' '3000' 3000 $false
+
+Say ''
 Say ("result: {0} PASS / {1} FAIL" -f $script:pass, $script:fail)
 if ($script:fail) { exit 1 }

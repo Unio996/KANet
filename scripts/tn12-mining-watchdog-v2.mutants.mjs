@@ -35,3 +35,8 @@ mutate('mut7', '$daaPost -le $daaPre', '-not $daaAdvancing');
 mutate('mut8',
   '      Start-Sleep -Milliseconds $DAA_SETTLE_MS\n      $daaPost = Get-DaaNow',
   '      $daaPost = Get-DaaNow\n      Start-Sleep -Milliseconds $DAA_SETTLE_MS');
+// ⑨ 把结算窗改回"无校验直接吃 env"—— Codex 这一轮 MUST-FIX 的原缺陷本身
+mutate('mut9', /^\$DAA_SETTLE_MS         = \$DAA_SETTLE_DEFAULT_MS$/m,
+  '$DAA_SETTLE_MS         = if ($DAA_SETTLE_RAW) { [int]$DAA_SETTLE_RAW } else { $DAA_SETTLE_DEFAULT_MS }');
+// ⑩ 下限闸放行 0/负数(只挡乱码) —— 最像"顺手简化"的那种削弱
+mutate('mut10', '$parsed -lt $DAA_SETTLE_FLOOR_MS', '$parsed -lt -999999');

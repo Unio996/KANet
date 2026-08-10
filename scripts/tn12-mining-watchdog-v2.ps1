@@ -263,7 +263,22 @@ $PULSE_SEC   = if ($env:TN12_PULSE_SEC)   { [int]$env:TN12_PULSE_SEC }   else { 
 # ~9.5s wall clock (node start + wasm + RPC), so the race was already covered by roughly 20x --
 # by accident. This constant converts that accident into a stated guarantee that survives the
 # probe ever getting faster.
-$DAA_SETTLE_MS = if ($env:TN12_DAA_SETTLE_MS) { [int]$env:TN12_DAA_SETTLE_MS } else { 1500 }
+#
+# 🔴 Codex 2026-08-10, and he is right: the paragraph above claims a guarantee while the line
+# below accepted ANY env value -- 0, a value under the measured envelope, a negative, a typo.
+# In every one of those the code and its own stated guarantee diverge, and today that divergence
+# is hidden by the ~9.5s probe latency, i.e. by an accident rather than by a check.
+# So the override survives (other machines need different numbers) but it is now bounded by a
+# floor derived from THIS machine's measurement, and a rejected override is loud, never silent.
+# FLOOR = 1000ms: the braking machine's measured max is 483ms at 100ms granularity, so the true
+# max could be ~583ms; 1000 is ~2x that. DEFAULT = 1500 is ~3x. Both are this-host numbers.
+$DAA_SETTLE_FLOOR_MS   = 1000
+$DAA_SETTLE_DEFAULT_MS = 1500
+$DAA_SETTLE_RAW        = $env:TN12_DAA_SETTLE_MS
+# Safe value first; the override only ever replaces it after passing validation below. Written
+# this way round deliberately: if the validation block is ever deleted, what survives is the
+# safe default rather than an unchecked env read.
+$DAA_SETTLE_MS         = $DAA_SETTLE_DEFAULT_MS
 $MAX_PULSES  = if ($env:TN12_MAX_PULSES)  { [int]$env:TN12_MAX_PULSES }  else { 20 }  # consecutive pulses before we stop and shout
 $PULSE_CHECK = if ($env:TN12_PULSE_CHECK) { [int]$env:TN12_PULSE_CHECK } else { 5 }   # every N pulses, did tips actually fall?
 
@@ -690,6 +705,23 @@ Log "watchdog v2 started (brake>$TIPS_BRAKE resume<$TIPS_RESUME poll=${POLL_SEC}
 # silently clamp the value -- that would hide an operator's intent instead of contradicting it.
 # Exercise it (this must print a loud alert, and the run must continue):
 #   TN12_TIPS_BRAKE=999 TN12_MAX_ROUNDS=1 powershell -File tn12-mining-watchdog-v2.ps1
+# Settle-window override validation. Lives here rather than beside the constant because Alert is
+# defined further down, and a config check that cannot shout is not a check.
+# Fail-closed means the LONGER value: a rejected override falls back to the default, never to the
+# smaller number the operator asked for. It does shout while doing so -- clamping silently would
+# be hiding intent, which is the objection I raised against clamping TIPS_BRAKE; announcing the
+# clamp is what makes the two consistent.
+if ($DAA_SETTLE_RAW) {
+  $parsed = 0
+  if (-not [int]::TryParse($DAA_SETTLE_RAW, [ref]$parsed)) {
+    Alert "SETTLE OVERRIDE REJECTED (malformed): TN12_DAA_SETTLE_MS='$DAA_SETTLE_RAW' is not an integer. Using $DAA_SETTLE_DEFAULT_MS ms. The pulse-scoring guarantee depends on this window, so an unparseable value is refused rather than coerced."
+  } elseif ($parsed -lt $DAA_SETTLE_FLOOR_MS) {
+    Alert "SETTLE OVERRIDE REJECTED (below floor): TN12_DAA_SETTLE_MS=$parsed is under the measured floor of $DAA_SETTLE_FLOOR_MS ms for this host (measured max 483ms at 100ms granularity). Using $DAA_SETTLE_DEFAULT_MS ms. A shorter window can score a working pulse as a wedge."
+  } else {
+    $DAA_SETTLE_MS = $parsed
+    Log "settle window overridden to ${DAA_SETTLE_MS}ms (>= floor ${DAA_SETTLE_FLOOR_MS}ms)"
+  }
+}
 if ($TIPS_BRAKE -ge $MERGESET_CLIFF) {
   Alert "MISCONFIGURED BACKSTOP: TIPS_BRAKE=$TIPS_BRAKE is at or above the mergeset cliff ($MERGESET_CLIFF). A level brake past the cliff can only fire after the DAG is already unrecoverable, so this backstop is currently decoration. The derivative verdict (diagnosis=overproduction) is unaffected and still brakes. Set TN12_TIPS_BRAKE below $MERGESET_CLIFF."
 }
