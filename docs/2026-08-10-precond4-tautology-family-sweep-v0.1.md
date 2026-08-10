@@ -1,6 +1,50 @@
 # D-012 格④ · §8-4「恒真墙」同族扫射 v0.1 —— 【DESIGN-ONLY·零生产码·零用例改动】
 
-> **Status**: CURRENT
+> **Status**: CURRENT · **v0.2(2026-08-10 07:4xZ)**
+> **v0.2 编法**: 原文一字不删。变更走本修订块,被推翻的段落在原处仍可读 —— 因为**它错在哪比它说了什么更有用**。
+
+---
+
+# 🔴🔴 v0.2 修订块 —— §4 整条推翻,而 §3 的恒真风险【坐实并加重】
+
+> 三方独立同结论(J2 实测数字 / NWT 走代码路线 / Bettor 现读行号),2026-08-10 07:3x-07:4xZ 频道。
+
+## R1. 🔴 §4「测试默认库 = 生产库」**整条撤回** —— 它不是发现,是一个 2026-08-04 已修问题的**问题陈述**
+
+- `kasia-console/scripts/test.mjs:10` **第一行 import** 就是 `../test-framework/lib/env-bootstrap.mjs`,**排在 runner 之前**。
+- `env-bootstrap.mjs:88` 若 `DB_PATH`/`KANET_DB_PATH` **未显式设** ⇒ `:79-86 rebuildTestDb` **无条件删掉** db + `-wal` + `-shm`,`:95` `runMigrations()` 重建,并把**两个** env 都指向 `test-framework/data/test-console.db`。
+- 🔴 **而该文件头 `:46-48` 逐字引的就是我 §4 引的那两行 `runner.mjs:20-21`** —— **那是它要解决的问题陈述,不是现状。**(2026-08-04 立,NWT 当时提出。)
+- ⇒ **走标准入口的每一次运行都是【全新空库】。§4 全错,由它衍生的卡 `TEST-RUNNER-DEFAULT-DB-IS-PROD` 已由 Bettor 撤销。**
+- 🔨 **我错的形状**: **读了库里的默认值,没查入口有没有 bootstrap** —— 与我在本轮 D2 复核里批评别人的那条(读了闸没读调用点)**同形**。
+
+## R2. 🔴🔴 而恒真风险**不但成立,还比 v0.1 重得多** —— 因为 v0.1 的数量**量在了错的库上**
+
+| 量 | v0.1 写的(❌ **prod 库手工读,非运行时生效库**) | ✅ 生效库 `test-framework/data/test-console.db` 实测 |
+|---|---|---|
+| `pool_bettor_sides` 非空 `side_lock_tx` | 36,012 / 36,012 | **0** |
+| `pool_settle_consensual_dispatched` | 13 | **0** |
+| `chain_events` | 252,126 | **1** |
+| `market_shards` distinct logical(NWT 07:17 引 657) | 657 | **0** |
+
+⇒ **§2 表里那些「🔵 干净」的零断言,在标准入口下【此刻就是 vacuous 绿】**,不是"将来可能"。
+⇒ 而因为 bootstrap **每次重建**,这**不是偶发状态,是常态**。
+⇒ **§3.1 那句「今日实测它不空,但那是数据给的」作废** —— 它连"数据给的"都不是,**它是我量错库给的**。
+⇒ **§5 建议③(补 `c_min`)从「卫生习惯」升为「这些用例现在就是空绿的」**,已由 Bettor 并入格④ 恒真墙族的量级表。
+
+🔵 **同时被 NWT 自己作废的一行**(他 07:37 发):他 07:17 格④ 裁决里「今天现查 `market_shards`=657 ⇒ 今天这条不是 vacuous」同属量错库,**已由他本人标作废**。
+
+## R3. 🟠 残余风险另立小卡(Bettor 07:36):`TEST-ENTRY-BYPASS-HITS-PROD`
+
+**绕过 `scripts/test.mjs` 的直接调用路径**(需 `--experimental-test-module-mocks` 的用例 / 手册里 `node --test` 那类命令)**才真的踩生产库**。射程 = 枚举绕行面 + 给每个绕行命令补显式 env 前缀。P3,排冻结后。
+
+## R4. 🔨 判据(本轮全队第 4 次同族,"绑定值≠生效值")
+
+**报"某某默认打 X"之前,先跑一次,再看【哪个文件的 mtime 动了】。**
+我手上一直有 trace(`07:27:46`)和 db mtime(`14:27:46`)—— **秒级对齐**,却先去读代码推。
+🔵 **而这一族有两个方向,今天两个都出现了**: 把**没修的**报成修好了(常见),和**把修好的报成还没修**(本条)。
+⇒ 在册 memory 已按此补注:`reference-test-db-never-reset-measures-history-not-code-deterministic-step-not-flaky`。
+
+---
 > **作者**: J2 · 2026-08-10 07:1xZ · 派工来源 @Bettor 07:07(排序第一项,时间表 `:17`「同族扫射(J2,半天)」)
 > **本稿不改任何代码、任何用例、任何开关。** 全部读数为现读/现跑,逐条带 file:line。
 
