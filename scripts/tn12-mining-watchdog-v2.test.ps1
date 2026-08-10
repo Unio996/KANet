@@ -373,41 +373,44 @@ Say '--- part 6: the config surface is CLOSED (this is the completion state, not
 # 🔴 它【去发现, 不去记住】(在册: enumerating-tools-must-discover-not-remember):
 #    名单从文件正文扫出来, 不是我写死的一张表 —— 所以将来谁加第九个裸读, 是【这条用例】红,
 #    而不是等下一轮外部复审替我们发现。递归就是在这里终止的。
-$src = ($lines -join "`n")
-$found = @{}
-foreach ($m in [regex]::Matches($src, '\$env:(TN12_\w+)')) { $found[$m.Groups[1].Value] = $true }
-# 🔴 单双引号都要认。只认单引号的扫描器, 会让一个用双引号写的新 knob 静默漏掉 ——
-#    而扫描器漏掉的东西不会有任何提示, 它只是安静地少数一个。
-foreach ($m in [regex]::Matches($src, 'GetEnvironmentVariable\(["''](TN12_\w+)["'']')) { $found[$m.Groups[1].Value] = $true }
-# @NWT 红队找到的两条真缝, 收掉。他判"不卡部署"的理由是这两种写法在本文件全篇零出现 —— 理由成立,
-# 🔴 但那是一个**关于未来代码的频率论证**, 而这条用例的全部意义正是【不指望人记得照抄风格】。
-#    一个"今天没人这么写"的缝, 与"今天没人加没有域的 knob"是同一句话 —— 而后者正是我们不接受的。
-foreach ($m in [regex]::Matches($src, '\$\{env:(TN12_\w+)\}'))     { $found[$m.Groups[1].Value] = $true }  # ${env:X}
-foreach ($m in [regex]::Matches($src, '(?i)\bEnv:(TN12_\w+)'))     { $found[$m.Groups[1].Value] = $true }  # Get-Item Env:X / Test-Path Env:X
-# 🔵 最后一条会顺带把 $env:X 也匹配到(它含 env:X)。多匹配是安全的: 名字进了 $found 之后仍要
-#    过 bounded/exempt 检查, 而一个已经受控的名字重复出现不会改变结论。**宁可多认, 不可漏认。**
-$bounded = @{}
-foreach ($m in [regex]::Matches($src, 'Get-BoundedEnv ["''](TN12_\w+)["'']')) { $bounded[$m.Groups[1].Value] = $true }
-# 豁免必须带理由, 而且理由要能被下一个人核。这里只有一个:
-$EXEMPT = @{ 'TN12_DAA_SETTLE_MS' = 'has its own dedicated validator (floor + ceiling derived from PULSE_SEC + pair fallback); covered by parts 4 and 5' }
-$uncovered = @()
-foreach ($n in $found.Keys) { if (-not $bounded.ContainsKey($n) -and -not $EXEMPT.ContainsKey($n)) { $uncovered += $n } }
-$staleExempt = @()
-foreach ($n in $EXEMPT.Keys) { if (-not $found.ContainsKey($n)) { $staleExempt += $n } }
-$surfaceOk = ($uncovered.Count -eq 0) -and ($staleExempt.Count -eq 0)
-if ($surfaceOk) { $script:pass++ } else { $script:fail++ }
-# 标签要说准: $found 数的是【直接读环境的地方】, 那 7 个是以字面量传给受控解析器的、不走 $env:。
-# 上一版把它标成 "discovered=1", 读起来像"只扫到 8 个入口里的 1 个" —— 一个会让人误判覆盖面的标签,
-# 与它要防的那类静默漏报是同一个病。
-Say ("[{0}] {1,-42} rawReads={2} viaValidator={3} exempt={4}" -f $(if ($surfaceOk) { 'PASS' } else { 'FAIL' }), 'every TN12_ env read has a domain', $found.Count, $bounded.Count, $EXEMPT.Count)
-foreach ($n in $uncovered) { Say "       🔴 $n is read from the environment with no domain and no stated exemption" }
-# 陈豁免也要红: 一条指向已经不存在的变量的豁免, 会在将来某个同名变量出现时【无声地】覆盖它。
-# ✅ 这一支【由构造证实过】, 不是靠"它与上一支结构对称"推的(@KANet-UI 复审时明说他只读了代码、
-#    没造对抗测试, 并把这个取舍写了出来 —— 那是诚实的, 而这里把它从判断变成证据)。
-#    复现方法(照做即可, 别只信这行字):把本文件拷一份, 在 $EXEMPT 里加一条指向文件中根本不存在的
-#    名字(如 'TN12_LONG_GONE_KNOB'), 带 WD_PATH 指向真 watchdog 跑那份拷贝 ⇒ 本条必须 FAIL。
-#    2026-08-10 实跑读数: exempt=2 ⇒ [FAIL], 45 PASS / 1 FAIL。
-foreach ($n in $staleExempt) { Say "       🔴 exemption for $n is stale -- that name is no longer read anywhere" }
+# 🔴🔴 2026-08-10 重写: Codex 打掉了上一版, 而他打中的是这条判据的【根】——
+#    上一版证的是【名字】不是【读取点】:
+#      $PULSE_SEC = Get-BoundedEnv 'TN12_PULSE_SEC' ...   ← 名字进了 $bounded
+#      $rawAgain  = $env:TN12_PULSE_SEC                   ← 绕开校验值, 而用例照样绿
+#    豁免那条更糟: 按【名字】豁免 ⇒ 将来任何一处对 TN12_DAA_SETTLE_MS 的裸读都被老豁免自动罩住。
+#    🔨 **加再多语法正则也修不了「名字→站点」这个证明错位。** 语法缝和语义缝是两件事。
+#    ⇒ 采他给的第 ② 条路(最强的那条): **站点制** —— 逐个列出每一处 TN12 环境读取【occurrence】,
+#      每一处都必须是【被批准的站点】; 豁免按【整行原文】而不是按名字。
+$readSites = [System.Collections.ArrayList]::new()
+for ($i = 0; $i -lt $lines.Count; $i++) {
+  $l = $lines[$i]
+  if ($l -match '^\s*#') { continue }                      # 注释里的示例不算读取点
+  if ($l -match '\$env:TN12_\w+' -or $l -match '\$\{env:TN12_\w+\}' -or
+      $l -match 'GetEnvironmentVariable\(["'']TN12_\w+["'']' -or $l -match '(?i)\bEnv:TN12_\w+') {
+    [void]$readSites.Add([pscustomobject]@{ n = $i + 1; t = $l.Trim() })
+  }
+}
+# 被批准的站点: 按【整行】匹配。今天恰好一处 —— 那条喂给专属 settle 校验器的裸读。
+# 🔴 站点级而不是名字级, 正是 Codex 那条的要害: 同一个变量在别处再读一次, 是【另一行】, 就是违规。
+$APPROVED_SITES = @(
+  '$DAA_SETTLE_RAW        = $env:TN12_DAA_SETTLE_MS'
+)
+$violations = [System.Collections.ArrayList]::new()
+foreach ($s in $readSites) { if ($APPROVED_SITES -notcontains $s.t) { [void]$violations.Add($s) } }
+# 陈站点也要红: 一条指向已经不存在的行的批准, 会在将来某行恰好长成那样时无声地罩住它。
+$staleSites = [System.Collections.ArrayList]::new()
+foreach ($a in $APPROVED_SITES) { $hit = $false; foreach ($s in $readSites) { if ($s.t -eq $a) { $hit = $true } }; if (-not $hit) { [void]$staleSites.Add($a) } }
+$siteOk = ($violations.Count -eq 0) -and ($staleSites.Count -eq 0)
+if ($siteOk) { $script:pass++ } else { $script:fail++ }
+Say ("[{0}] {1,-42} readSites={2} approved={3} violations={4}" -f $(if ($siteOk) { 'PASS' } else { 'FAIL' }), 'every TN12 env READ SITE is approved', $readSites.Count, $APPROVED_SITES.Count, $violations.Count)
+foreach ($v in $violations) { Say ("       [RED] line {0}: {1}" -f $v.n, $v.t) }
+foreach ($a in $staleSites) { Say ("       [RED] approved site no longer present: {0}" -f $a) }
+
+# 🔴 这里原本还有一条【按名字】的检查(每个 TN12_ 名字必须有域)。**删掉了, 不是因为重复, 是因为它在
+#    对抗输入上打绿灯**: Codex 点名的两条阴性(已受控名字的第二次裸读 / 已豁免名字的第二次裸读)
+#    实跑读数 —— 站点检查 FAIL, 而那条名字检查【两次都 PASS】。
+#    ⇒ 站点检查严格更强(逐处 vs 逐名), 而一条会在真缺陷面前打绿的检查留着, 只会在将来有人
+#      拆掉站点检查时给出假安慰。**能被证明不足的完成态判据, 不该留在文件里冒充第二道闸。**
 
 Say ''
 Say ("result: {0} PASS / {1} FAIL" -f $script:pass, $script:fail)
