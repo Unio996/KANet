@@ -25,6 +25,10 @@
 // gets anywhere near the actual (still-unknown, and never to be tested for real) crash point.
 const TICK_INTERVAL_MS = Number(process.env.MINING_CONSOLIDATE_TICK_MS) || 60_000; // 1min
 const STARTUP_GRACE_MS = 60_000;
+// Kill-switch (2026-08-10, stop-the-bleeding for the wasm re-poisoning trigger — see
+// TREASURY-UTXO-UNREADABLE card): default ON = unchanged behavior. Set to 'false' in a
+// given machine's kanet.env to disable this cron entirely without touching the target address.
+const CONSOLIDATE_ENABLED = (process.env.MINING_CONSOLIDATE_ENABLED || 'true').trim().toLowerCase() !== 'false';
 const MIN_FRAGMENTS = Number(process.env.MINING_CONSOLIDATE_MIN_FRAGMENTS) || 20; // don't bother consolidating below this count
 const ALERT_THRESHOLD = Number(process.env.MINING_CONSOLIDATE_ALERT_THRESHOLD) || 400; // tripwire, well under the 546 known-clean ceiling
 
@@ -102,6 +106,10 @@ export async function miningConsolidateTick() {
 
 export function startMiningConsolidateCron() {
   if (timer) return;
+  if (!CONSOLIDATE_ENABLED) {
+    console.log('[mining-consolidate] MINING_CONSOLIDATE_ENABLED=false — cron not started (kill-switch, see TREASURY-UTXO-UNREADABLE card)');
+    return;
+  }
   const relayId = _miningRelayId();
   if (!relayId) {
     console.log('[mining-consolidate] MINING_RELAY_ID not set — cron not started (set in kanet.env once new mining address relay exists)');

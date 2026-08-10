@@ -11,6 +11,14 @@ import { sendCommandAsync } from './relay-manager.js';
 // J2 raw log 03:09:34 累积 17 次 Trader-B Reply send failed. 调到 8 给高频 Agent 留余量.
 const TARGET_UTXO_COUNT = 8;
 
+// TREASURY-UTXO-UNREADABLE card (2026-08-10): these two addresses' UTXO sets are so large that
+// getUtxosByAddresses traps the wasm client (kaspa-wasm has no server-side pagination). autoSplitAll
+// must never touch them until the card's root-cause fix lands — each attempt re-poisons the process.
+const UNREADABLE_RELAY_IDS = new Set([
+  'd9a8fffb-e9d6-4019-a9cb-fcdb4760dea1', // FaucetRelay-tn-2
+  'ce43e1b1-f16b-4e2b-ba22-56cc9bb26762', // MiningRelay-tn12-new
+]);
+
 /**
  * Split UTXOs for a single relay account via Relay IPC.
  */
@@ -37,6 +45,10 @@ export async function autoSplitAll() {
 
   let splitCount = 0;
   for (const a of accounts) {
+    if (UNREADABLE_RELAY_IDS.has(a.id)) {
+      console.warn(`[utxo-splitter] ${a.name}: skipped: address unreadable, see card (TREASURY-UTXO-UNREADABLE)`);
+      continue;
+    }
     try {
       const result = await splitUtxos(a.id);
       if (result.split) {
