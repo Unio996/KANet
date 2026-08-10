@@ -229,14 +229,71 @@ $MERGESET_CLIFF = 248
 # conditions were all satisfied at 12:04:50Z (tips=104, streak=14, span=288s, 104/64=1.63) while
 # the verdict waited until 12:10:17Z (tips=152) -- RISE_FLOOR alone cost 5.5 minutes of warning
 # and 48 of the 96 tips of headroom under the cliff. Tune THAT if you want earlier braking.
-$TIPS_BRAKE  = if ($env:TN12_TIPS_BRAKE)  { [int]$env:TN12_TIPS_BRAKE }  else { 220 }  # above -> stop mining, digest
-$TIPS_RESUME = if ($env:TN12_TIPS_RESUME) { [int]$env:TN12_TIPS_RESUME } else { 50 }   # back below -> resume
-$POLL_SEC    = if ($env:TN12_POLL_SEC)    { [int]$env:TN12_POLL_SEC }    else { 30 }
-$MAX_ROUNDS  = if ($env:TN12_MAX_ROUNDS)  { [int]$env:TN12_MAX_ROUNDS }  else { 0 }    # 0 = run forever
+# ── 配置域校验:一次把整张图走完 ────────────────────────────────────────────────
+# 🔴 起因是 Codex 的第五格, 而 @Bettor 把它的形状说准了:**每补一道校验, 就暴露它依赖的下一个
+# 未校验量**。前四格是 DAA_SETTLE_MS 自己;第五格是我用来给它算天花板的 PULSE_SEC ——
+# **用未校验的量去校验别的量**。一格一格补下去是挤牙膏, 所以这里一次走完依赖图。
+#
+# 事实是这八个 env 覆盖点【全部】是同一个缺陷类:`[int]$env:X` 对 'abc' 直接抛异常, 于是一个
+# 手滑的环境变量把 watchdog 变成启动即死 —— 而 watchdog 死掉正是它存在要防的那件事。
+#
+# 依赖序(校验必须按这个顺序, 因为后者用前者算界):
+#   DAA_SETTLE_FLOOR/DEFAULT(纯常量) → PULSE_SEC(要与 settle 兼容) → DAA_SETTLE_MS(界取自 PULSE_SEC)
+#
+# 统一规矩(与已被两位复审接受的 settle 那条同构):**拒绝 + 回落安全默认 + 大声喊**, 绝不静默钳位。
+# Alert 在本文件更靠后才定义, 所以这里只收集, 到启动横幅那里统一喊 —— 一个喊不出来的校验不算校验。
+# 🔴 ArrayList + .Add() 而不是数组 + `+=`, 而这不是风格问题:
+#    `$script:X += ...` 是【重新赋值】, 它绑到哪个 script 作用域取决于这段代码是怎么被加载的;
+#    `.Add()` 是【就地变异】, 谁持有这个引用谁就看得见。
+#    这一条是组合用例当场逼出来的:拒绝确实生效了(值正确回落), 但问题一条都没被记下来 ——
+#    **"校验生效了"和"校验记下来了"是两件事, 而只有后者会被人看见。**
+$CFG_ISSUES = [System.Collections.ArrayList]::new()
+function Get-BoundedEnv($name, $default, $min, $max, $why) {
+  $raw = [Environment]::GetEnvironmentVariable($name)
+  if ([string]::IsNullOrEmpty($raw)) { return $default }
+  $parsed = 0
+  if (-not [int]::TryParse($raw, [ref]$parsed)) {
+    [void]$CFG_ISSUES.Add("CONFIG REJECTED (malformed): $name='$raw' is not an integer. Using $default. $why")
+    return $default
+  }
+  if ($parsed -lt $min -or $parsed -gt $max) {
+    [void]$CFG_ISSUES.Add("CONFIG REJECTED (out of domain): $name=$parsed is outside [$min, $max]. Using $default. $why")
+    return $default
+  }
+  return $parsed
+}
+
+# TIPS_BRAKE 的域只挡"根本不是一个 tips 数"的值。它与悬崖的关系【仍然只告警不拒绝】——
+# 那是运行点选择(操作员有权把兜底放在别处), 不是派生安全界的输入, 与 PULSE_SEC 性质不同。
+# 🔴 这个区别是刻意的, 别顺手统一成拒绝:两者都要"喊", 但只有【被别的校验当作输入】的量才必须拒。
+$TIPS_BRAKE  = Get-BoundedEnv 'TN12_TIPS_BRAKE'  220 1 100000 'It is a tip count; a non-positive or absurd value is not an operating point.'
+$TIPS_RESUME = Get-BoundedEnv 'TN12_TIPS_RESUME'  50 1 100000 'Release level; must be a positive tip count.'
+# POLL_SEC 下界 1:0 会把主循环变成忙等, 把这台机器烧掉而 watchdog 看起来还活着。
+# 上界 600:超过十分钟一轮, 楔死时的响应延迟已经超过 2026-08-08 那次事故的整个可干预窗口。
+$POLL_SEC    = Get-BoundedEnv 'TN12_POLL_SEC'     30 1 600 'A 0s poll is a busy loop; a >10min poll responds slower than the 2026-08-08 incident window.'
+# MAX_ROUNDS 0 = 永远跑, 是合法值 ⇒ 下界 0 而不是 1。
+$MAX_ROUNDS  = Get-BoundedEnv 'TN12_MAX_ROUNDS'    0 0 1000000 '0 means run forever and is legitimate; negative is not.'
+# settle 的两个纯常量【必须在 PULSE_SEC 之前定义】—— 依赖序如此:PULSE_SEC 的合法下界由它们导出,
+# 而 DAA_SETTLE_MS 的上界又由 PULSE_SEC 导出。把定义顺序摆成依赖顺序, 是这次"一次走完图"的一半。
+# (这两个数的实测出处见下面 DAA_SETTLE_MS 那段长注释, 不在此重复。)
+$DAA_SETTLE_FLOOR_MS   = 1000
+$DAA_SETTLE_DEFAULT_MS = 1500
+
 # Duty cycle used while braked. Must stay well under POLL_SEC's cadence so each poll still
 # re-reads tips before deciding again; 20s was chosen because measured pulses of 60-75s
 # overshot (-44 tips in one round) and finer steps give the loop more chances to exit.
-$PULSE_SEC   = if ($env:TN12_PULSE_SEC)   { [int]$env:TN12_PULSE_SEC }   else { 20 }
+#
+# 🔴 Codex 第五格:这个值现在【参与派生安全界】(settle 的天花板 = PULSE_SEC*1000), 所以它自己
+# 必须有机械强制的域。他给的三个反例都成立:
+#   0  ⇒ 天花板变 0ms, 而且脉冲时长为零 ⇒ 控制器不再执行那个"它声称在给它打分"的动作
+#   -1 ⇒ Start-Sleep -Seconds -1 越出域, 可能让控制循环出错而不是 fail closed
+#   巨值 ⇒ 上一格那类"可用性失能"只是外移了一层, 拒绝超天花板的 settle 挡不住它
+# 下界【推导自兼容性】而不是拍的:脉冲本身必须至少能容下强制的 settle 默认窗, 否则
+# "测量一发不该超过这一发"这个语义在默认配置下就自相矛盾 ⇒ 下界 = ceil(DEFAULT/1000) = 2s。
+# 上界 120s:2026-08-09 实测 60-75s 的脉冲已经过冲(一轮 -44 tips), 120s 是它的两倍,
+# 再长就不是"占空比"而是"一直挖", 恢复预算也失去粒度。
+$PULSE_SEC_MIN = [int][math]::Ceiling($DAA_SETTLE_DEFAULT_MS / 1000.0)
+$PULSE_SEC   = Get-BoundedEnv 'TN12_PULSE_SEC' 20 $PULSE_SEC_MIN 120 "A pulse must at least contain the enforced settle default (${DAA_SETTLE_DEFAULT_MS}ms), or the 'measuring a pulse must not exceed the pulse' rule contradicts itself at default config; measured 60-75s pulses already overshot by -44 tips in one round."
 # --- pulse safety (Codex 2026-08-10 RED: the pulse acts on an UNVERIFIED premise) ---
 # The braked branch below is built on "while virtual can advance, mining DRAINS tips". That
 # sentence is a CONDITIONAL, and the code never established the condition before acting.
@@ -272,15 +329,17 @@ $PULSE_SEC   = if ($env:TN12_PULSE_SEC)   { [int]$env:TN12_PULSE_SEC }   else { 
 # floor derived from THIS machine's measurement, and a rejected override is loud, never silent.
 # FLOOR = 1000ms: the braking machine's measured max is 483ms at 100ms granularity, so the true
 # max could be ~583ms; 1000 is ~2x that. DEFAULT = 1500 is ~3x. Both are this-host numbers.
-$DAA_SETTLE_FLOOR_MS   = 1000
-$DAA_SETTLE_DEFAULT_MS = 1500
+# 🔵 FLOOR/DEFAULT 现在定义在【上面 PULSE_SEC 之前】(依赖序), 这里不再重复定义 ——
+#    同一个常量在一个文件里出现两次, 迟早有人只改其中一处, 而两处都会看起来对。
 $DAA_SETTLE_RAW        = $env:TN12_DAA_SETTLE_MS
 # Safe value first; the override only ever replaces it after passing validation below. Written
 # this way round deliberately: if the validation block is ever deleted, what survives is the
 # safe default rather than an unchecked env read.
 $DAA_SETTLE_MS         = $DAA_SETTLE_DEFAULT_MS
-$MAX_PULSES  = if ($env:TN12_MAX_PULSES)  { [int]$env:TN12_MAX_PULSES }  else { 20 }  # consecutive pulses before we stop and shout
-$PULSE_CHECK = if ($env:TN12_PULSE_CHECK) { [int]$env:TN12_PULSE_CHECK } else { 5 }   # every N pulses, did tips actually fall?
+# 下界都是 1 且都不能是 0:MAX_PULSES=0 会让刹车一发都不打(等于回到那次 4.5 小时死锁),
+# PULSE_CHECK=0 则让 `$pulseCount % $PULSE_CHECK` 直接除零。上界 10000 只是挡"明显不是这个量"的值。
+$MAX_PULSES  = Get-BoundedEnv 'TN12_MAX_PULSES'  20 1 10000 'MAX_PULSES=0 would pulse zero times while braked, i.e. the 4.5h deadlock again.'
+$PULSE_CHECK = Get-BoundedEnv 'TN12_PULSE_CHECK'  5 1 10000 'PULSE_CHECK=0 divides by zero in the efficacy check.'
 
 $addr        = "kaspatest:qrys4yax468rrm988kyqjtncvstcelgzktml0m3rvdvvktrll0gdxuyu34fru"
 $CPU_THREADS = 1  # Bettor 2026-08-08 10:12Z: was 2, dropped to 1 -- the incident's root imbalance
@@ -705,6 +764,12 @@ Log "watchdog v2 started (brake>$TIPS_BRAKE resume<$TIPS_RESUME poll=${POLL_SEC}
 # silently clamp the value -- that would hide an operator's intent instead of contradicting it.
 # Exercise it (this must print a loud alert, and the run must continue):
 #   TN12_TIPS_BRAKE=999 TN12_MAX_ROUNDS=1 powershell -File tn12-mining-watchdog-v2.ps1
+# 把配置域校验收集到的问题在这里统一喊出来。收集与喊分开, 是因为 Alert 定义在常量之后 ——
+# 🔴 而这一段【必须存在】: 一个只把问题存进数组、从不喊出来的校验器, 与没有校验器读数完全相同,
+#    并且更坏, 因为文件里看得见一个"校验过了"的形状。
+foreach ($issue in $CFG_ISSUES) { Alert $issue }
+if ($CFG_ISSUES.Count -eq 0) { Log "config domain check: all env overrides within domain (or unset)" }
+
 # Settle-window override validation. Lives here rather than beside the constant because Alert is
 # defined further down, and a config check that cannot shout is not a check.
 # Fail-closed means the LONGER value: a rejected override falls back to the default, never to the

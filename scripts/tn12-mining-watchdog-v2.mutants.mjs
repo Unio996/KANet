@@ -42,3 +42,10 @@ mutate('mut9', /^\$DAA_SETTLE_MS         = \$DAA_SETTLE_DEFAULT_MS$/m,
 mutate('mut10', '$parsed -lt $DAA_SETTLE_FLOOR_MS', '$parsed -lt -999999');
 // ⑪ 拆掉上界【拒绝】那一支 —— 笔误多打几个 0 会被接受, 脉冲间隔拉到天级 = 安全系统实质失能
 mutate('mut11', /  \} elseif \(\$parsed -gt \(\$PULSE_SEC \* 1000\)\) \{[\s\S]*?\n  \} else \{/, '  } else {');
+// ⑫ 🔴 Codex 第五格本身: PULSE_SEC 退回无域校验的裸 env 读 ⇒ 用未校验的量去校验别的量
+mutate('mut12', /^\$PULSE_SEC   = Get-BoundedEnv 'TN12_PULSE_SEC'.*$/m,
+  '$PULSE_SEC   = if ($env:TN12_PULSE_SEC) { [int]$env:TN12_PULSE_SEC } else { 20 }');
+// ⑬ 校验照跑但没人喊 —— "存进数组从不喊出来"与"没有校验器"读数相同, 且更坏(文件里看得见一个校验的形状)
+mutate('mut13', 'foreach ($issue in $CFG_ISSUES) { Alert $issue }', '# (emit removed)');
+// ⑭ ArrayList 退回数组 `+=` —— 就是组合用例当场逼出来的那个作用域坑: 拒绝生效但一条都没记下
+mutate('mut14', '$CFG_ISSUES = [System.Collections.ArrayList]::new()', '$CFG_ISSUES = @()');

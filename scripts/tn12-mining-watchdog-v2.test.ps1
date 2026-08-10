@@ -268,5 +268,60 @@ Run-Settle 'over ceiling -> REJECTED'       '999999999' 1500 $true
 Run-Settle 'one ms over ceiling -> REJECTED' '20001' 1500 $true
 
 Say ''
+Say '--- part 5: the real config-composition path (Codex: part 4 always injected PULSE_SEC=20) ---'
+# 🔴 part 4 把 $PULSE_SEC=20 注进一个只抽了 settle 校验的片段 ⇒ 它证明的是"在一个被信任的 fixture 下
+#    settle 分支对", 而不是"这个脚本实际用的配置组合对"。Codex 点名要这一格。
+#    这里把【配置块】与【settle 校验块】一起抽出来拼起来跑, 并且用【真的 env 变量】驱动, 不注入任何值。
+$cs = -1; $ce = -1
+for ($i = 0; $i -lt $lines.Count; $i++) { if ($lines[$i] -match '^\$CFG_ISSUES = ') { $cs = $i; break } }
+if ($cs -lt 0) { throw 'FIXTURE-BROKEN: cannot find the config block start' }
+for ($i = $cs; $i -lt $lines.Count; $i++) { if ($lines[$i] -match "^\`$PULSE_CHECK = Get-BoundedEnv") { $ce = $i; break } }
+if ($ce -lt 0) { throw 'FIXTURE-BROKEN: cannot find the config block end' }
+$cfgBlock = ($lines[$cs..$ce] -join "`n")
+if ($cfgBlock -notmatch 'TN12_PULSE_SEC') { throw 'FIXTURE-BROKEN: extracted config block does not contain PULSE_SEC' }
+# 🔴 把【喊出来】那一行也抽进来。第一版漏了它 ⇒ 组合路径里问题被记下却从没被喊, 基线自己就红了 ——
+#    这是好事: 漏抽的那一段立刻显形, 而不是悄悄让某个变异体变绿。
+#    (它在生产文件里位于 settle 校验块之前, 中间只有函数定义, 所以拼接顺序就是真实执行顺序。)
+$emitLine = ($lines | Where-Object { $_ -match '^foreach \(\$issue in \$CFG_ISSUES\)' })
+if (-not $emitLine) { $emitLine = '# (emit line absent in this build)' }
+Say ("extracted config lines {0}-{1} + the settle validator ({2} lines total)" -f ($cs+1), ($ce+1), (($ce-$cs+1) + ($ve-$vs+1)))
+
+$ENV_NAMES = @('TN12_PULSE_SEC','TN12_DAA_SETTLE_MS','TN12_POLL_SEC','TN12_MAX_PULSES','TN12_PULSE_CHECK','TN12_TIPS_BRAKE')
+function Run-Compose($name, $env, $expPulse, $expSettle, $expIssues) {
+  foreach ($n in $ENV_NAMES) { [Environment]::SetEnvironmentVariable($n, $null) }
+  foreach ($k in $env.Keys) { [Environment]::SetEnvironmentVariable($k, $env[$k]) }
+  $script:alerts = @(); $script:logs = @()
+  # 组合路径: 配置块 → (真实脚本里这中间只有函数定义) → settle 校验块
+  $sb = [scriptblock]::Create(
+    "function Alert(`$m){ `$script:alerts += @(`$m) }`nfunction Log(`$m){ `$script:logs += @(`$m) }`n" +
+    $cfgBlock + "`n" + $emitLine + "`n" + $initLine + "`n" + '$DAA_SETTLE_RAW = [Environment]::GetEnvironmentVariable("TN12_DAA_SETTLE_MS")' + "`n" + $validate)
+  . $sb
+  foreach ($n in $ENV_NAMES) { [Environment]::SetEnvironmentVariable($n, $null) }
+  # 🔴 只数【喊出来的】, 不数【记下来的】。第一版我写的是 CFG_ISSUES.Count + alerts.Count,
+  #    于是拆掉"把配置问题喊出来"那一步的变异体(mut13)【全绿】—— 问题仍被记着, 只是没人听见。
+  #    而这正是我在代码注释里刚写过的那句: 存进数组从不喊出来, 与没有校验器读数完全相同。
+  #    **我断言了错的那个量。** 断言必须落在【操作员真的会看到的东西】上。
+  $issues = $script:alerts.Count
+  $ok = ($PULSE_SEC -eq $expPulse) -and ($DAA_SETTLE_MS -eq $expSettle) -and ($issues -eq $expIssues)
+  if ($ok) { $script:pass++ } else { $script:fail++ }
+  Say ("[{0}] {1,-42} PULSE_SEC={2,-4} SETTLE={3,-8} issues={4}" -f $(if ($ok) { 'PASS' } else { 'FAIL' }), $name, $PULSE_SEC, $DAA_SETTLE_MS, $issues)
+  if (-not $ok) { Say ("       expected PULSE_SEC={0} SETTLE={1} issues={2}" -f $expPulse, $expSettle, $expIssues) }
+}
+
+Run-Compose 'defaults'                      @{} 20 1500 0
+Run-Compose 'PULSE_SEC malformed -> default' @{ 'TN12_PULSE_SEC' = 'abc' } 20 1500 1
+Run-Compose 'PULSE_SEC=0 -> rejected'        @{ 'TN12_PULSE_SEC' = '0' }   20 1500 1
+Run-Compose 'PULSE_SEC=-1 -> rejected'       @{ 'TN12_PULSE_SEC' = '-1' }  20 1500 1
+# 🔴 下界是【推导的】: 脉冲必须至少容得下强制的 settle 默认 1500ms ⇒ 1s 不合法, 2s 合法。
+Run-Compose 'PULSE_SEC=1 below derived min'  @{ 'TN12_PULSE_SEC' = '1' }   20 1500 1
+Run-Compose 'PULSE_SEC=2 at derived min'     @{ 'TN12_PULSE_SEC' = '2' }    2 1500 0
+Run-Compose 'PULSE_SEC=99999 -> rejected'    @{ 'TN12_PULSE_SEC' = '99999' } 20 1500 1
+# 🔴 组合路径的全部意义在这两条: settle 的天花板【随 PULSE_SEC 一起动】。
+#    part 4 那种写死 20 的 fixture 结构上测不到它们。
+Run-Compose 'ceiling follows PULSE_SEC (ok)' @{ 'TN12_PULSE_SEC' = '60'; 'TN12_DAA_SETTLE_MS' = '50000' } 60 50000 0
+Run-Compose 'same settle now over ceiling'   @{ 'TN12_PULSE_SEC' = '30'; 'TN12_DAA_SETTLE_MS' = '50000' } 30 1500 1
+Run-Compose 'bad PULSE_SEC + settle at old ceiling' @{ 'TN12_PULSE_SEC' = 'abc'; 'TN12_DAA_SETTLE_MS' = '20000' } 20 20000 1
+
+Say ''
 Say ("result: {0} PASS / {1} FAIL" -f $script:pass, $script:fail)
 if ($script:fail) { exit 1 }
