@@ -237,6 +237,18 @@ $MAX_ROUNDS  = if ($env:TN12_MAX_ROUNDS)  { [int]$env:TN12_MAX_ROUNDS }  else { 
 # re-reads tips before deciding again; 20s was chosen because measured pulses of 60-75s
 # overshot (-44 tips in one round) and finer steps give the loop more chances to exit.
 $PULSE_SEC   = if ($env:TN12_PULSE_SEC)   { [int]$env:TN12_PULSE_SEC }   else { 20 }
+# --- pulse safety (Codex 2026-08-10 RED: the pulse acts on an UNVERIFIED premise) ---
+# The braked branch below is built on "while virtual can advance, mining DRAINS tips". That
+# sentence is a CONDITIONAL, and the code never established the condition before acting.
+# Both regimes are on the record, on this very machine:
+#   A) virtual advancing, DAG merely backlogged -> pulses drain      (2026-08-09: 498 -> 77)
+#   B) virtual STALLED, DAA frozen              -> pulses ADD to it  (2026-08-08: 178 -> 506,
+#      three-source confirmed, and that climb is what re-wedged it past the old 500 brake)
+# In regime B the pulse is not merely useless, it is the thing making recovery harder.
+# ⇒ Prove the premise before pulsing, measure whether the pulse worked, and cap how long we
+#   are willing to keep doing something that is not working.
+$MAX_PULSES  = if ($env:TN12_MAX_PULSES)  { [int]$env:TN12_MAX_PULSES }  else { 20 }  # consecutive pulses before we stop and shout
+$PULSE_CHECK = if ($env:TN12_PULSE_CHECK) { [int]$env:TN12_PULSE_CHECK } else { 5 }   # every N pulses, did tips actually fall?
 
 $addr        = "kaspatest:qrys4yax468rrm988kyqjtncvstcelgzktml0m3rvdvvktrll0gdxuyu34fru"
 $CPU_THREADS = 1  # Bettor 2026-08-08 10:12Z: was 2, dropped to 1 -- the incident's root imbalance
@@ -630,6 +642,17 @@ function Start-Miner-Unless-Paused {
 $braked      = $false
 $probeFails  = 0
 $round       = 0
+# --- pulse-safety state ---
+# 🔴 Deliberately this process's OWN memory, not the probe's persisted state file. That file is
+# keyed by RPC URL and is written by every caller of the probe (the channel monitor and the remote
+# sampler both call it), so a delta read from it answers "did anything change between two samples
+# taken by anyone", not "did virtual advance between MY two observations". The brake must not be
+# gated on a quantity a passing observer can perturb.
+$prevDaa      = $null   # virtualDaaScore at this loop's previous observation
+$daaAdvancing = $null   # $true / $false / $null(unknown) -- three states, never collapsed to two
+$pulseCount   = 0       # consecutive pulses since the brake engaged
+$pulseRefTips = $null   # tips at the start of the current efficacy window
+$pulseHalted  = $false  # pulsing gave up; miner stays stopped and a human is needed
 Log "watchdog v2 started (brake>$TIPS_BRAKE resume<$TIPS_RESUME poll=${POLL_SEC}s threads=$CPU_THREADS maxRounds=$MAX_ROUNDS cliff=$MERGESET_CLIFF)"
 # The guard lives next to the constant rather than in a test file, deliberately: a test asserting
 # "TIPS_BRAKE < 248" can be satisfied by a repo the deployed machine is not running, and this
@@ -655,6 +678,22 @@ while ($true) {
   }
   $health = Get-Health
   $tips = if ($health) { [int]$health.tips } else { $null }
+
+  # --- is virtual actually advancing? (the premise the pulse rests on) ---
+  # 🔴 [uint64] is load-bearing, not tidiness. The probe emits virtualDaaScore as a JSON STRING
+  # ("76812253"), and PowerShell compares two strings LEXICOGRAPHICALLY: "9" -gt "10" is $true.
+  # An unconverted comparison would therefore report "advancing" and "stalled" at essentially
+  # arbitrary moments, and it would look completely normal in the log either way.
+  # 🔴 Three states, and the third is not a rounding error: no reading / no previous reading
+  # means UNKNOWN, and unknown must not be silently read as either advancing or stalled --
+  # each of those two answers sends the brake in an opposite direction.
+  $daaNow = $null
+  if ($health -and $health.virtualDaaScore) {
+    try { $daaNow = [uint64]$health.virtualDaaScore } catch { $daaNow = $null }
+  }
+  if ($null -eq $daaNow -or $null -eq $prevDaa) { $daaAdvancing = $null }
+  else { $daaAdvancing = ($daaNow -gt $prevDaa) }
+  if ($null -ne $daaNow) { $prevDaa = $daaNow }
 
   if ($null -eq $tips) {
     # UNKNOWN -- keep current mining behaviour, but make the blindness loud.
@@ -698,6 +737,9 @@ while ($true) {
     $braked = $true
     Stop-Miner
     $why = if ($tips -gt $TIPS_BRAKE) { "tips=$tips > $TIPS_BRAKE" } else { "diagnosis=overproduction (tips=$tips, streak=$($health.risingStreak), lag=$($health.lagSeconds)) -- braking on the trend, not the cliff" }
+    # Each engagement starts a fresh pulse budget and a fresh efficacy reference. Carrying them
+    # over would let an old, unrelated failed episode disarm the pulse for a healthy one.
+    $pulseCount = 0; $pulseRefTips = $tips; $pulseHalted = $false
     Alert "BRAKE ENGAGED: $why. Entering pulse duty cycle; will resume under $TIPS_RESUME."
   }
   # DIMENSION FIX (2026-08-09): release needs the trend too, not just the level.
@@ -710,6 +752,7 @@ while ($true) {
   # perfectly still) must not read as recovered just because it stopped rising.
   elseif ($braked -and $tips -lt $TIPS_RESUME -and $climbBroken) {
     $braked = $false
+    $pulseCount = 0; $pulseRefTips = $null; $pulseHalted = $false
     Alert "BRAKE RELEASED: tips=$tips < $TIPS_RESUME and climb broken (streak=0). Resuming mining."
     Start-Miner-Unless-Paused
   }
@@ -724,10 +767,57 @@ while ($true) {
     # Both invariants hold: starting still goes through Start-Miner-Unless-Paused (three-valued
     # guard + operator pause file), stopping still goes through Stop-Miner (owned-only +
     # Kill-AndVerify). No new start path is introduced.
-    Start-Miner-Unless-Paused
-    Start-Sleep -Seconds $PULSE_SEC
-    Stop-Miner
-    Log "braked: pulsed ${PULSE_SEC}s to drain (tips=$tips, need <$TIPS_RESUME)"
+    #
+    # PROGRESS GATE (2026-08-10, closing Codex's RED on this exact branch).
+    # Everything above is the regime-A argument and it stays true; what was missing is that the
+    # code never checked which regime it was in before acting on regime A's conclusion.
+    if ($pulseHalted) {
+      # Terminal state within one brake episode. We keep the miner stopped and keep saying so:
+      # a halted pulse means neither pulsing NOR waiting will recover this, which is precisely
+      # the situation that needs a person, not another automatic retry.
+      if ($round % 20 -eq 0) { Alert "PULSE HALTED and still braked (tips=$tips, daaAdvancing=$daaAdvancing). Miner stays stopped. Neither pulsing nor waiting recovers a wedged virtual -- this needs an operator." }
+    }
+    elseif ($null -eq $daaAdvancing) {
+      # 🔴 The default action must be the one that does not act. UNKNOWN here means we have no
+      # second observation yet (first braked round, or the probe just came back). Pulsing on an
+      # unknown premise is exactly the bug being fixed; one poll of patience costs 30 seconds.
+      Log "braked: NOT pulsing -- virtual progress UNKNOWN (no comparable previous DAA reading yet). Will re-evaluate next tick."
+    }
+    elseif (-not $daaAdvancing) {
+      # Regime B. This is the 2026-08-08 shape: DAA frozen while tips climb. Pulsing here feeds
+      # the backlog that has to be digested later, so the safe action is to stop feeding it.
+      # 🔴 Consequence stated plainly rather than buried: with the miner stopped and virtual
+      # wedged, block production halts. That is a worse-looking but smaller harm than deepening
+      # the wedge -- and unlike the silent version, it is announced.
+      $pulseHalted = $true
+      Alert "PULSE SUPPRESSED: virtual is NOT advancing (virtualDaaScore flat at $prevDaa) while braked at tips=$tips. Pulsing in this state ADDS to the backlog -- measured 2026-08-08, tips 178 -> 506 with DAA frozen throughout. Miner stays stopped. This is the wedge case and it needs an operator."
+    }
+    elseif ($pulseCount -ge $MAX_PULSES) {
+      # Bounded budget. Not a timeout for its own sake: it bounds how long we are willing to keep
+      # taking an action whose whole justification is that it works.
+      $pulseHalted = $true
+      Alert "PULSE BUDGET EXHAUSTED: $pulseCount consecutive pulses and still braked (tips=$tips, need <$TIPS_RESUME). Virtual is advancing, so this is not the wedge case -- but the pulse is not getting us out either. Miner stays stopped pending an operator."
+    }
+    else {
+      Start-Miner-Unless-Paused
+      Start-Sleep -Seconds $PULSE_SEC
+      Stop-Miner
+      $pulseCount++
+      Log "braked: pulsed ${PULSE_SEC}s to drain (tips=$tips, need <$TIPS_RESUME, pulse $pulseCount/$MAX_PULSES, daaAdvancing=$daaAdvancing)"
+      # EFFICACY. "The pulse ran" and "the pulse helped" are two different claims, and only the
+      # first one was ever logged. Compare against the tips we had when this window opened; if
+      # the DAG is no lower after PULSE_CHECK pulses, the remedy is not working and continuing
+      # would just be repetition with a confident-looking log line behind it.
+      if ($pulseCount % $PULSE_CHECK -eq 0) {
+        if ($null -ne $pulseRefTips -and $tips -ge $pulseRefTips) {
+          $pulseHalted = $true
+          Alert "PULSE INEFFECTIVE: $PULSE_CHECK pulses moved tips $pulseRefTips -> $tips (no reduction) while virtual IS advancing. The duty cycle is not draining this DAG; continuing would be repetition, not recovery. Miner stays stopped pending an operator."
+        } else {
+          Log "braked: efficacy ok over last $PULSE_CHECK pulses (tips $pulseRefTips -> $tips)"
+          $pulseRefTips = $tips
+        }
+      }
+    }
   }
   else {
     Start-Miner-Unless-Paused  # self-guards: no-op if OWNED_RUNNING, alerts (no start) if UNKNOWN_OR_CONFLICT, starts only if CONFIRMED_ABSENT
