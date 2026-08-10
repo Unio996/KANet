@@ -1,129 +1,162 @@
 # KANet-UI-tn 接位文档（:3200 operator + 单 git 写者 + 部署执行）
 
-> 写于 2026-06-19 by Bettor-tn（协调者，刚重新接位）。团队重新聚拢、对齐后再出发。**先全读再动手。** 姊妹文档：`docs/2026-06-19-J2-tn-handoff.md`（同批写）。旧的 `2026-06-15-KANet-UI-operator-handoff.md` 已**整体过时**（通篇 #27a batch2.2 deploy，全部 superseded），只保留它的 §4 部署规程 / §5 沟通 / §7 纪律仍有效。
+> 原写于 2026-06-19（Bettor-tn）。**2026-08-07 KANet-UI 本人重写**：06-19 那版内容（世界杯 demo/relay 泄漏风暴/两大任务）**全部过期，不留旧文字**——不是漂移修正，是通篇换稿。理由：中间经过 D-012 一整条主线，旧内容会让接位者从错的起点出发，比没有更坏。**Owner 已下令加速（"之前系统和节点坏了好几天，抢进度"），本文件按"能让下一个人最快接上手"的标准写，历史叙事一律不进本文件——那是 `docs/iteration/COORD-LEDGER.md` 的活。**
+
+> 🔵 **2026-08-10 KANet-UI 补丁式更新**（不重写，补 §9 当前待办）：§2 的 00:29/05:00 两次 RPC 发作对照已由 NWT 同夜补上，我这次只加 §9。08-09 夜到 08-10 凌晨一整晚的 canary#2/getBlockAtDaa/kr5l4 调查细节**不进本文件**，那是 `docs/iteration/COORD-LEDGER.md` 和频道历史的活；本文件只留**下一个人立刻用得上的判据和当前卡点清单**。
 
 ---
 
-## 0. 你是谁 / 你的角色（不可越界）
+## 0. 你是谁 / 你的角色（不可越界，这条没变）
 
 你是 **KANet-UI-tn**，三个绑定职责：
-1. **:3200 节点 operator** —— 你 own :3200 Console + 本机 tn12 kaspad + 所有 relay 的部署、运维、operator-vantage 验证与健康监控。
-2. **单 git 写者（single writer）** —— **整个团队只有你能写 git**（cherry-pick/merge/push/FF）。硬纪律，防多 agent 共享 working-tree 的 revert/reapply thrash war（6-14 真发生过，HEAD 每几秒翻）。其他 agent（含我 Bettor、J2、NWT）只 read-only git。
-3. **部署执行者** —— 别人审码定方案，你执行落地（deploy 序见 §4）。
+1. **:3200 节点 operator** —— console + 本机 tn12 kaspad + 所有 relay 的部署、运维、健康监控。
+2. **单 git 写者（single writer）** —— 团队只有你能写 git（cherry-pick/merge/push/FF）。其他 agent（Bettor/J2/NWT/J1/J3）只 read-only git，改动经你 commit/push。
+3. **部署执行者** —— 别人审码定方案，你执行落地。
 
-**relay 身份（频道发言用）**: `relayId = f5cf6d85-58f4-4991-9cd5-7c6779f6822b`（name=KANet-UI-tn）
+**relay 身份（频道发言用）**：`relayId = f5cf6d85-58f4-4991-9cd5-7c6779f6822b`（脚本 `_kanetui_send.cjs` 内已写死，用它发不要手打）。
 
-**别越界**: 不抢别人 slice 的码（determinism 判 = Bettor/NWT 域，settler/mass = J2 域，SS = J1 域）。你最常见出问题是"手痒替别人改"或"git 乱写捆改"。守单写者 + operator 域。
-
----
-
-## 1. 当前运维状态（2026-06-19，本会话 Bettor 临时代你稳定了，你接回）
-
-⚠ 你不在线期间 Bettor 代行了部分 operator 活把系统拉稳。**你接回后核一遍现状**：
-
-- **tn12 kaspad**：UP（PID 见 `Get-Process kaspad`，06-17 17:58 启动）。启动命令 = `D:/rusty-kaspa/target/release/kaspad.exe --testnet --netsuffix=12 --appdir=D:/kaspa-tn12-data --utxoindex --rpclisten-borsh=0.0.0.0:17210`。已同步到链尖。
-- **Console :3200**：UP（HTTP 302 = 活；注意没有 /api/health 路由，404 是正常）。
-- **tg-bot**：已修复重启。**坑**：旧进程跑 29h 但 grammy getUpdates poller 静默死了（manager 报 `running:true` = 假活）→ DM 无反应。修法 = `POST /api/tg-bot/stop` 然后 `start`（**body 必带 `{}`**，否则 400）。诊断必打 Telegram API（getMe/getWebhookInfo/getUpdates/sendMessage）非看 manager flag。详见记忆 `reference-tg-bot-false-alive-diagnosis`。
-- **⚠ relay 连接泄漏风暴（你要长期盯）**：本会话发现单 relay 泄漏 957 条 ws 到 kaspad:17210（全网累计 1184 条）钉死 wRPC → **广播 ingest 静默失效**（dev-coord 频道收不到外部消息，但节点 synced+押注正常，两条路独立易误判）。诊断 = `netstat -ano | grep -c "127.0.0.1:17210.*ESTABLISHED"`（正常 ~22-50，几百/上千=泄漏）+ 按 owning PID 拆。修 = `Stop-Process` 杀泄漏 relay PID，relay-health-monitor 30s 自动重拉（2368→44）。详见记忆 `reference-relay-ws-connection-leak-storm`。**这是 operator 长期健康项，可能复发。**
-- **世界杯押注 demo**：10 个世界杯队单（Brazil/England/USA/Mexico/South Korea/Croatia/Ivory Coast/Egypt/Morocco/Cape Verde）已被 6 agent 两边激活，74 笔上链。maker=maker-1(cdb1f91d, 840k KAS)。**AutoBetter-3 的 UTXO 碎片化**（storage mass exceeds max）押注会失败，要恢复得先 UTXO consolidation。
+**别越界**：不抢别人 slice 的码。你最常见出问题是"手痒替别人改"或"git 乱写捆改"。守单写者 + operator 域。
 
 ---
 
-## 2. 项目当前真实状态（别信旧 handoff）
+## 1. 现在立刻要做的第一件事（自查命令，别信下面任何静态数字）
 
-**已闭环**:
-- **W1 = DoD #5 用户路机制闭环 PASS**（06-16）：电报 `/bet` v0.7 → register → 跨节点 5/5 自主委员判 → settle `6460bae0` → winner 实收 7.16 KAS。诚实定语：内部 AutoBetter-1 非真外部人。
-- **bshard（人数无限制）= 设计 sound + PARKED(post-demo)，e2e 从没跑通**（`market_shards=0`、零 v0.8 市场、orchestration 没接线）。
+**当前分支/HEAD 自查**（这两行本身会陈，别信写在这里的值，跑命令）：
+```bash
+cd /d/kanet-tn12 && git branch --show-current && git rev-parse HEAD && git status --short
+```
 
-**Git**: 当前 branch `bshard-m3-deploy`，master 是主干。working-tree 有未提交改动（`git status` 自己核）。**deploy-critical 跨节点必 whole-repo sync 同 commit 同 tree**，禁 cherry-pick 单文件（:3300 实测漂移过 voter17+settler113 行）。
+**console 健康自查**：
+```bash
+curl -s -o /dev/null -w "HTTP_CODE:%{http_code} TIME:%{time_total}s\n" http://127.0.0.1:3200/ --max-time 5
+netstat -ano | grep ":3200" | grep LISTENING
+tail -20 /d/kanet-tn12/logs/console-supervisor.log
+```
 
-**频道**: dev-coord-testnet 从 06-16 02:07 STAND DOWN 后静默至今。Owner 现在重新聚拢团队。
-
----
-
-## 3. 接下来两大任务（Owner 钦定）+ 你的 slice
-
-### 任务一：测试人数无限制（bshard e2e）
-- **你的 slice = 部署 + operator-vantage 验落链**：bshard SS/builder 改动 → 你 whole-repo sync 部署到 :3200（**ctor16 两节点同 commit 同 tree**，否则异 P2SH 异市场）→ J2/Bettor 跑 e2e driver → 你 operator vantage 用 `check_utxo_landed`(output 地址) 独立核每相落链。
-- 主攻是 J2（settler/mass）+ J1（SS）+ Bettor（审/验），你管部署落地 + :3200 数据查证。
-
-### 任务二：完善预言机（域信息源白名单 + 判断构造 → oracle 技能）
-- **你的 slice = 部署 oracle 码改 + operator 验**：D-L1 确定性 judgeLine / A-ramp 现成字段 / deriveVote 改动落 :3200 → 你部署 → 跑 shadow-accuracy harness 看准确率 → operator vantage 验。
-- 守 5 终裁 gating（新活源进 settle 必 Owner 批 + 冻结快照），你部署时别把未 gated 的活源 wire 进 settle 路。
-
-**现在别自己起活**——团队对齐中，等 Owner/Bettor 定优先级。
+**频道最新 20 条**（补吐窗，重 arm 时会有短暂盲窗，见 §5）：
+```bash
+node -e "fetch('http://127.0.0.1:3200/api/chat/messages?channel=dev-coord-testnet&limit=20').then(r=>r.json()).then(j=>{for(const m of (j.messages||j).slice(-20)){console.log((m.created_at||'').slice(0,16)+' '+(m.sender||m.senderName||'')+': '+(m.content||m.message||'').replace(/\n/g,' ').slice(0,120))}})"
+```
 
 ---
 
-## 4. 部署规程（你的核心动作·照做别跳）
+## 2. console 健康 —— 你长期要盯的运维项（2026-08-07 定型，取代 06-19 那版的 relay 泄漏风暴）
+
+**已知复发模式：CONSOLE-4H50M-DEGRADATION**（卡名故意不预设机制，见下）
+- 现象：console 进程存活约 4h47m~5h02m 后，RPC 层（`getWorkingRpc()`）开始连续失败（近期样本单次爆发 3000+ 次/3 分钟），HTTP 层可能同步或稍后失去响应。**进程不一定死，是"活着但 RPC 通路坏了"**，supervisor 的 HTTP health check 有时能自愈重启，有时你要手动介入。
+- 五个存活时长样本：5h02m / 4h47m / 4h51m / 4h53m / 4h47m —— 间隔一致性已确认，**机制未定**。
+- 🔴 **已知会犯的错，别重犯**：`--max-old-space-size=4096` 卡的是 V8 老生代堆，不是 `ws`(RSS)。拿 RSS 去跟这个上限比是**跨轴比较**，今天已经在这上面栽过一次并全队更正。
+- 🔴 **"内存到 4GB 导致死亡"这个假说 2026-08-05 已被实测推翻**（三条独立证据：越线无失败实例 / 同 T1 点 ws 相差 427MB 无一致阈值 / 内存急涨发生在失败**之后**，因果方向是反的）。**排查前先读 memory `project-rpc-degradation-2026-08-05-state`**，别从零重新怀疑内存。
+- 更可能的方向（同向证据，非新证据）：wasm 实例被 `unreachable`(Rust panic) 或类似 trap 毒化，此后凡是过 wasm 的调用全坏（今天读数：旧日志 `Offset is outside the bounds of the DataView` 7166 次，不只在 rpc-health、也在 `broker pk→addr` 地址派生路径），**只有重启能换新实例**。
+- **下次复发死前现场采集必须加一条**（能立刻把机制定案，不用再攒样本）：`process.memoryUsage()` 的 `heapUsed`/`heapTotal`/`external`/`arrayBuffers` 四个字段，堆增长 vs wasm 线性内存增长这一条读数就能分开。
+
+### 🔴 2026-08-09/10 夜两次新发作（NWT 会话，供下次复发对照）
+
+- **00:29**：`getWorkingRpc()` 3 分钟内连失 5 次。console HTTP 全程仍 302（没有全断），只是内部 RpcClient 卡死——与上面的"活着但 RPC 通路坏了"签名一致。KANet-UI 走标准六步 SOP 重启（新 PID，日志 `no RPC node available` 计数在重启后归零），三源独立确认恢复（NWT 直查 events 表 / J1 跨节点广播确认落链 / KANet-UI 直接探活）。**这一次是真 wasm-trap，机制未变。**
+- **05:00**（距上次约 4.5h，但**不构成"周期"证据**，见下）：`getWorkingRpc()` 3 分钟内连失 **1078 次**，量级远超 00:29。console 在这次事件中出现过至少一次短暂的 HTTP 完全不响应（curl 返回 000，几秒后自愈为 302）——**这是本次新出现的现象，00:29 那次没有**。J1 事后自查发现自己为诊断"频道哨兵取不到"，在事件前约 1 分钟对 console 连发了 30 个请求（20 个 `limit=200&after=` 重查询 @2s + 10 个轻查询 @1s，约 50 秒内），并提出一个具体机制：`/api/chat/messages`（`kasia-console/src/api/chat.js:133`）虽然函数签名是 `async`，内部用的是**同步** `better-sqlite3`（`sqlite.prepare(sql).all(...)`），一次重查询会占住 Node 主线程；连续密集查询可能让 RpcClient 的 WebSocket 心跳/重连错过窗口而掉线，之后每次调用都失败——**这能解释单次失败为何会滚成上千次**（不是打了 1078 次，是打掉线后内部持续自失败）。J1 停手后 console 自愈，未重启。**NWT 已核实"同步调用"这半为真**（代码直读确认），但"是否真的够长到卡住心跳"需要在 live 进程 + 并发写压下才能测，NWT 本机空闲连接对同一条 SQL 计时只要 1.77ms，不足以证实或证伪——**这半仍开着**。
+- **⇒ 两次事件目前判定为不同签名，不是同一个 4.5h 周期**：00:29 = 真 wasm-trap；05:00 = 可能由批量查询诱发的瞬态（J1 已把频道哨兵完全切到自己的 console，之后对本机零常规轮询，只剩发消息时的送达自证轻读——这是观察"05:00 那类现象在无该负载下还会不会发作"的干净基线，值得留意后续是否复现）。
+- **下次复发若怀疑是查询负载诱发**：除了原有的 `process.memoryUsage()` 四字段，额外留一份 console HTTP access log 里对应时间窗的请求时间戳（尤其是不是有 `limit=200` 这类重查询），能直接检验 J1 这条机制，不用等下次再攒。
+
+**标准重启流程（五步）**：
+```
+1. curl 探测 + tail supervisor 日志 判断是 HTTP 死还是 RPC 层单独坏
+2. 记录当前 PID 与创建时间：netstat -ano | grep ":3200" | grep LISTENING → 拿 PID → 
+   powershell -Command "Get-Process -Id <PID> | Select-Object Id,StartTime"
+3. git status --short 确认工作树干净（不干净先问一句，别吞）
+4. taskkill //PID <旧PID> //F  →  bash kanet-start-headless.sh
+5. 五项阳性证据：HTTP 302 快响应 / settle-daemon tick 跑通 / pool-settler started / git HEAD 重启前后一致 / 用 netstat 核实新监听 PID（supervisor 报的 PID 与 OS 实际监听 PID 常常不是同一个数字，两个都记）
+```
+重启会顺带杀掉频道通道本身（频道也跑在这个 console 上）。若是配合团队排的"冻结窗"重启，遵守 §3 的窗口纪律；若是你自己响应告警的独立重启，正常走完五步、报告即可，不需要预授权。
+
+**发送脚本崩溃时的固定动作**（2026-08-06 立，别再犯）：崩了 → 先 curl 频道查最近 N 条有没有本次的碎片落地（按 nonce 或首句）→ 再决定重发还是续发；**不要 `tail -3` 看发送脚本输出**，错误经常在被截掉的那几行里。
+
+---
+
+## 3. 共享工作树纪律（今天一直在用，别忘）
+
+- **部署窗/重启窗 = 共享工作区冻结窗**：宣布"工作区冻结中"后，其他 agent 不得向这个 checkout commit（scratch 不受限）；你窗内攒的东西窗关后一次补。
+- **push 前必跑** `git log origin/..HEAD --oneline`：队列里每一项必须是"你批过"或"你自己写的"，出现其他项立刻停手问归属，不猜。
+- **commit 前若涉及 M0a/敏感面**：两人独立扫描（口径不共用，各配阳性+阴性对照），过了才推。地址清单/可能带资金信号的数据**不进公开频道**（频道是链上明文，发出去=永久公开发布）。
+- **引用坐标写全路径，不简写**：本仓至少两个文件名含 `daemon` 等常见词，简写坐标看起来和完整坐标一样精确，实际会被猜成另一个文件。今天已经因为这个在 ledger 里绕了一整圈。
+- **推送引用 rusty-kaspa 等外部代码行号时带上自己那台的 HEAD**：不同机器的 checkout 可能不是同一个 commit（今天刚发现两台差 567 个 commit），行号可能不指同一行。
+
+---
+
+## 4. 部署规程（结构没变，细节照旧）
 
 ### 4a. 轻量重 deploy（纯码改，无 schema/migration）
 ```
 1. git fetch origin
-2. 确认 Bettor 审过放行（频道有明确 "放行/GO"）
+2. 确认审过放行（频道有明确 "放行/GO"）
 3. git merge --ff-only origin/<ref>   # 或 cherry-pick 指定 commit（单写者只你做）
-4. 贴 HEAD sha + tree(git rev-parse <sha>^{tree}) 给 Bettor 审 diff（== 预期 scope）
-5. push origin（两节点同 sha 前提）
-6. tree-kill Console PID（taskkill //T //F，relay 是子进程不自退=orphan/dup-signing 隐患）→ start Console
-7. 贴 running sha + curl :3200 /api/pool/markets=200 确认活
-8. 通知 J1 :3300 同步同 sha（whole-repo）
+4. 贴 HEAD sha + tree(git rev-parse <sha>^{tree}) 给审核方核对 diff（== 预期 scope）
+5. push origin
+6. tree-kill Console PID（taskkill //T //F）→ start Console
+7. 贴 running sha + curl :3200 确认活
+8. 若有第二节点，通知同步同 sha（whole-repo，非 cherry-pick）
 ```
 
 ### 4b. 带 migration/backfill 的重 deploy
 ```
-先停 supervisor 再停 Console（防 supervisor ~90s auto-restart 中途加载新码采半盲数据）
-→ node scripts/run-migrations.mjs → node scripts/backfill-*.mjs(先 --dry-run) → start Console
+先停 supervisor 再停 Console → node scripts/run-migrations.mjs → node scripts/backfill-*.mjs(先 --dry-run) → start Console
 ```
 migrate.js 版本号必接当前最新（改表前必查 `docs/DATABASE.md`）。
 
-### ⚠️ 部署陷阱（必避）
-- **tg-bot 单 owner**：start-scripts 不再启 bot（Console manager 单 owner）。别手动起第二个 poller（Telegram 409 双 poller 冲突）。
-- **committed ≠ deployed ≠ 链上验证**：报"已部署"前必核实际 restart 时点的 HEAD/sha。三状态分清报。
-- **tree-hash 跨节点核**：重 deploy 后 `git rev-parse <sha>^{tree}` 两节点必相同（byte-identical 铁证），贴给 Bettor/J1 co-verify。
-- **node_modules junction 别动**：boot 崩报某 import 找不到 = 本地依赖损坏非 code 问题，修依赖别改 code。
-- **CONSOLE_ENCRYPTION_KEY 持久化**（丢失=所有加密数据不可恢复）；kanet.env 新 key 要进 start.sh allowlist 才生效。
+### ⚠️ 部署陷阱（必避，没变）
+- **committed ≠ deployed ≠ 链上验证** —— 报"已部署"前必核实际 restart 时点的 HEAD/sha。
+- **tree-hash 跨节点核** —— 重 deploy 后 `git rev-parse <sha>^{tree}` 两节点必相同。
+- **CONSOLE_ENCRYPTION_KEY 持久化**（丢失=所有加密数据不可恢复）。
 
 ---
 
-## 5. 频道沟通（dev-coord-testnet）—— 真送达四纪律
+## 5. 频道沟通（dev-coord-testnet）
 
-**读频道**:
-```bash
-node -e "fetch('http://127.0.0.1:3200/api/chat/messages?channel=dev-coord-testnet&limit=12').then(r=>r.json()).then(j=>{for(const m of (j.messages||j).slice(-12)){console.log((m.created_at||'').slice(11,16)+' '+(m.content||m.message||'').replace(/\n/g,' ').slice(0,90))}})"
-```
-**发频道**（你的 relayId）:
-```bash
-node -e "fetch('http://127.0.0.1:3200/api/chat/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({relayId:'f5cf6d85-58f4-4991-9cd5-7c6779f6822b',channel:'dev-coord-testnet',message:'你的消息'})}).then(r=>r.json()).then(j=>console.log(j.ok?'sent '+(j.txId||'').slice(0,12):'FAIL '+JSON.stringify(j)))"
-```
-**四纪律（违反 Owner 暴怒）**: ①**真发**（必跑命令确认 HTTP 200 + txId，不只写 response 文本——前任死在这）②**880 墙**→拆 <800 字符多条 ③**@具体人名**禁@团队 ④派工末尾 `👉@名字【必回】认领+ETA`。**工具调用永远是真 invocation 非文本。**
+**发频道**：用 `_kanetui_send.cjs --file <路径>`（gitignored scratch 目录写文件，脚本自动分段+发送+回读 txId 确认，别自己拼 fetch）。
+
+**四纪律**：①**真发**（必须看到实际 HTTP 200 + txId，不是"写了就当发了"）②880 字节墙自动拆分，脚本已处理③@具体人名，禁@团队④崩溃/续发按 §2 末尾的固定动作处理。
+
+**Monitor 重 arm 时的盲窗**：重 arm 那一刻本身是个观测盲区（GAP 检测覆盖不到自己诞生的那一刻）。若你需要重 arm，先读一遍 `logs/monitor-lastseen-kanetui.json`（如果存在）里的 lastSeen，再 arm，不要凭感觉重来。
 
 ---
 
-## 6. 团队花名册 & 你跟谁对接
+## 6. 团队花名册（relay id 只写你能验证的，其余标"自查"）
 
-| Agent | 角色 | relay id | 在线 |
-|---|---|---|---|
-| **Bettor-tn**（协调者） | 方向/驱动/审码/determinism 判/验落链。你跟我要"审过没/放行没" | `5c07f7e5-...` | ✅（刚接位）|
-| **J1tn** | :3300 独立节点 operator + SS 作者。跨节点同步跟他 | （:3300 机器）| ✅（一直在）|
-| **NWT-tn** | 对抗验证 + determinism lead | `8dd59acb-...` | ✅（已拉起）|
-| **J2-tn** | settler/mass 域 + oracle 工程侧 | `102cbb99-...` | 接位中 |
-| **Owner** | 终裁。要全自动无人干涉、盯紧别 stall、报数诚实 | — | — |
+| Agent | 角色 | 在线方式 |
+|---|---|---|
+| **Bettor**（协调者） | 方向/驱动/审码/派工。出码/部署前后跟他要"审过没/放行没" | 频道 |
+| **J1 / J1tn** | 独立第二节点 operator + SS 域 + 共识源码读数。跨节点核对跟他 | 频道（曾有过节点下线/IBD 期，上线先看他自报 isSynced） |
+| **NWT** | 对抗验证 + 七条审查准则持有人（`docs/2026-08-06-nwt-seven-review-criteria-v1.0.md`） | 频道 |
+| **J2 / J2-tn** | settler/mass 域 + 测试框架 harness 域 | 频道 |
+| **J3** | J1 顶替出现过（Bettor 派工代理），职责跟着当时的具体任务走，非固定角色 | 视频道当时状态 |
+| **Owner** | 终裁。要全自动无人干涉、盯紧别 stall、报数诚实、**现在要求加速** | — |
 
-**对接重点**: 出码/部署前后必跟 **Bettor**（审/放行）；:3300 同步跟 **J1**；验证结果给 **NWT/J2** co-verify。
+relay id 不在这里静态列出——今天已经出过"文档里的版本号只对某一台机器成立"的坑，团队编号也一样会变。要发消息用你自己的 `_kanetui_send.cjs`（relayId 已写死在脚本里）；要核对别人的身份，问频道或看最近消息的 sender 字段。
 
 ---
 
-## 7. 硬纪律速记（违 = 退回/Owner 怒）
+## 7. 硬纪律速记（违 = 退回/Owner 怒，一条没变）
 
 - **NO TX NO STATE CHANGE** —— 广播/TX 没上链 = 什么都没发生。
-- **verify-not-echo** —— 别信别人报数，自己查 DB/链/tree 实证（你是 operator 有 :3200 数据权）。
-- **单 git 写者** —— 只有你写 git，写前 `git status`+`git diff --staged` 核清楚别捆改（f022b491 教训：docs commit 捆走了 feature-revert）。
-- **每笔链上交易必入库**（地址+TX 双锚点）；链上验用 relay `check_utxo_landed` 走本地 kaspad 看 **output 地址**。
-- **跨节点 whole-repo sync 非 cherry-pick**（determinism-critical）。
+- **verify-not-echo** —— 别信别人报数，自己查 DB/链/tree 实证。
+- **单 git 写者** —— 只有你写 git，写前 `git status` + `git diff --staged` 核清楚别捆改。
+- **每笔链上交易必入库**（地址+TX 双锚点）；链上验用 relay `check_utxo_landed`，看 output 地址，不信 DB 读数当链上真相。
+- **跨节点 whole-repo sync 非 cherry-pick**。
 - **诚实分级披露** —— committed/deployed/链上验证三态分清；出岔子立即透明说别藏。
+- **money-path（P1 相关任何东西）零授权不落生产码**——测试代码可以写、可以红、可以 commit；生产结算逻辑改动一律等 Owner 授权，赶进度不改这一条。
 
 ---
 
 ## 8. 一句话上手
 
-你是 :3200 operator + 单 git 写者 + 部署执行。**现在团队重新聚拢、对齐中**——接位先：①核当前运维状态（§1：kaspad/Console/bot/连接数/押注 demo 都已稳，Bettor 代行的你接回）②读频道最新对齐 ③等两大任务优先级定下来再动部署。长期盯 **relay 连接泄漏风暴**（可能复发）+ tg-bot 假活。守单写者 + verify-not-echo + 频道四纪律。疑问频道 `👉@Bettor-tn【必回】`。
+你是 :3200 operator + 单 git 写者 + 部署执行。接位先：①跑 §1 的自查命令，别信任何写在文档里的静态数字②读频道最近 20 条，找当前谁在等你③console 若有 RPC 劣化告警，直接走 §2 的五步重启，不需要额外请示。**Owner 已下令加速，别把时间花在重新核实这份文档里已经写好的东西上——花在跑 §1 那三条命令上。** 疑问频道 `👉@Bettor【必回】`。
+
+---
+
+## 9. 当前卡点（2026-08-10 06:30 快照，会陈，跟频道核）
+
+- **canary#2 = j34vb**：设计安全（双边盘，不吃已知的 V2 退款路缺陷）+ RPC 三源确认健康 + ingest 通，**唯一待 = Owner GO**。tha3l（canary#1）已回填、K-18 那道闸已因果证明解开（1207 次失败→0，有天然对照组），但它是单边盘，卡在 V2 退款路（`cancelMarketLive` 零调用方，见下），端到端还没走通——**canary#1 的价值是"证明回填有效"，不是"证明结算复活"，别混着报**。
+- **getBlockAtDaa 修法 = 设计 v0.3 已 commit（`69ce2b9e`）并推 origin，NWT 终审 GREEN，等 Owner GO 落码**。解 6 个卡住的盘（426 KAS）：chain-walk 解 2 个（3mzoh/s6zwj），backfill 解 4 个（cswib/8xykm/ldtyn/7jy3s，~1.61M DAA ≈ 8.3 分钟）。
+- **V2 退款触发器（`cancelMarketLive` 谁调）= Owner 政策决策，不是纯技术活**：Codex 明确这是"谁/何时授权把 `closed:0→2`（不可逆）"的编排问题，不能 naive 接调用方或首次 degenerate/ABSTAIN 就自动触发。J1 已把 Codex 七条验收折进设计（`b6eab0e7`），等 Owner 拍触发器本身该长什么样。影响 5 个单边盘（~3,509 KAS，其中 9ez2u 一家占 3,500）。
+- **kr5l4（分片 21 未封片，22 人 · 820 KAS）= 无法定案，机制未闭合**：J1 的 canonical UTXO 直查已跑过两次，但结构上定不了"leaf 真丢没"（缺一条高检出率的历史链上索引源）。**安全红线钉死：绝不能照 shard-9 phantom 那个"标 manual_recovery_refunded 排除"的修法办**——那会把 22 人的 820 KAS 排除出结算，是实实损失，不是同类问题。
+- **一处待补的 commit：`p5_positive_via_fake_relay_sink.test.mjs` / `precond4_handler_zero_sign_calls.test.mjs` 各一行认领注释**（Bettor 已授权，diff 已核对是纯注释无逻辑改动）——卡在 `scripts/m0a-exception-manifest.json` 的 pinned `content_digest` 失配，pre-commit 闸要求"重新 NWT 审并更新 digest"。我没有自己越权更新这个安全 manifest；等 NWT 在频道明确对这两个文件的新 digest 表态后，照常 commit 即可（diff 极小，不是真正的阻塞）。
+- **git 状态**：`bshard-m3-deploy` 与 origin 同步（`69ce2b9e`）。今夜确认team其他人（J1/Bettor）也在直接 push origin——§7 那条"单 git 写者"在实践里已经不是绝对的，接位先跑 §1 自查命令看真实 ahead/behind，别假设自己是唯一写者。
