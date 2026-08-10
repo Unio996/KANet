@@ -70,16 +70,69 @@ const repoByName = new Map();
   }
 })(REPO);
 
-let drifted = 0, matched = 0, ambiguous = 0, unreachable = 0;
+// 🔴 本工具存在的理由是「承重的东西住在 git 之外, 而没有任何检查会发现它陈了」——
+//    而它自己一直在犯这条: 上面那个 walk 扫【整棵工作树】, 包括 `.gitignore:26` 忽略掉的 `scratch/`。
+//    ⇒ 部署那份只要跟一份【未入库的 scratch 副本】字节相同, 就会被判"一致"、静静计入 matched,
+//      而那份副本换机 / 清 scratch / 重 clone 之后就不存在了 —— 正是它要防的东西。
+//    实测(2026-08-10, 本机): 索引里 1,221 个候选未入库; 1,114 个文件名的候选【全部】未入库;
+//      9 个是入库+未入库混合, 而混合里恰好包含 `tn12-mining-watchdog-v2.ps1` /
+//      `kaspad-watchdog.ps1` / `kaspad-rpc-probe.mjs` —— 也就是这台机器上真正在跑的那几支。
+//    ⇒ 匹配必须落在【入库】那份上才算数; 只匹配上未入库副本要单独出声, 不许塌进"一致"。
+// 🔴 拿不到 tracked 名单时【不】默默当成全部入库 —— 那会把"不知道"读成"没问题"。出声, 并标注结论已降级。
+let trackedSet = null;
+try {
+  trackedSet = new Set(
+    execFileSync('git', ['-C', REPO, 'ls-files'], { encoding: 'utf8', maxBuffer: 1 << 28 })
+      .split('\n').filter(Boolean).map((r) => pathx.resolve(REPO, r).replace(/\\/g, '/'))
+  );
+} catch (e) {
+  trackedSet = null;
+}
+const isTracked = (abs) => (trackedSet ? trackedSet.has(abs.replace(/\\/g, '/')) : true);
+
+let drifted = 0, matched = 0, ambiguous = 0, unreachable = 0, untrackedMatch = 0;
 const say = (s) => console.log(s);
+if (!trackedSet) {
+  say('🔴 拿不到 git ls-files —— 无法区分"仓库里那份"与"只是工作树里那份"。');
+  say('   本次所有"一致"都【降级】为"与工作树某份相同", 不等于"与入库那份相同"。');
+}
+
+// 🔴 让它自己跑, 需要的不是循环, 是【把"漂移集合变了没有"和"有没有漂移"分开】。
+// 由来: 本机今天实扫是 12 处漂移, 其中 11 处是 2026-04-09 的陈文件, 天天都在。
+// 一个"只要非空就报警"的哨兵在这里【永远是红的】, 而永远红等于没有哨兵 —— 真正要紧的那一处
+// (今天是我改了 watchdog 阈值、live 还没跟上)会被 11 条噪音埋掉, 没有人会去看第 12 行。
+// ⇒ 记录漂移集合本身的指纹, 只在【集合发生变化】时出声。新出现一处、消失一处, 都是事件。
+// 🔴 而"安静"必须只有一个含义。够不到 / 判据坏了 / 首次没有基线 —— 这三种都【不是】没变化,
+//    它们各自出声, 因为它们导出的动作不同(修连接 / 修工具 / 只是记下基线)。
+//    设了 DRIFT_STATE 就【一定】打出 DRIFT-BASELINE / DRIFT-UNCHANGED / DRIFT-CHANGED 三者之一,
+//    调用方据此能分清"它说没变"和"它根本没跑完"——后者在只 grep 关键词的哨兵里长得和前者一样。
+const STATE = process.env.DRIFT_STATE || '';
+const driftSet = [];
 
 function compare(name, deployedPath, deployedHash, deployedMtime) {
   const candidates = repoByName.get(name) || [];
   if (!candidates.length) return;                       // 部署目录里的私有文件, 与仓库无关
   const pairs = candidates.map((p) => bothHashes(fsx.readFileSync(p)));
-  if (pairs.some(([r, n]) => r === deployedHash || n === deployedHash)) { matched++; return; }
+  const hit = candidates.filter((p, i) => pairs[i][0] === deployedHash || pairs[i][1] === deployedHash);
+  if (hit.length) {
+    const trackedHit = hit.filter(isTracked);
+    if (trackedHit.length) { matched++; return; }
+    // 匹配上了, 但匹配上的每一份都不在 git 里 ⇒ 这【不是】一致, 这正是本工具要抓的那件事。
+    untrackedMatch++;
+    // 也进指纹: 它从"只对上未入库副本"变成"漂移"或"一致", 都是要有人知道的事。
+    driftSet.push(`UNTRACKED-ONLY|${deployedPath}|${deployedHash}`);
+    say(`🟠 只对上未入库副本  ${deployedPath}`);
+    say(`        部署 ${deployedHash.slice(0, 12)}  mtime=${deployedMtime}`);
+    for (const h of hit) say(`        对上的是 ${pathx.relative(REPO, h)} —— 【不在 git 里】`);
+    say('        ⇒ 在跑的那份没有任何入库版本与之相同。重 clone / 清 scratch / 换机 = 它就没了, 而没有检查会发现。');
+    return;
+  }
   const hashes = pairs.map(([r]) => r);
   drifted++;
+  // 指纹只取【部署路径 + 部署侧哈希】: 仓库侧改动会换哈希, 部署侧换文件也会换哈希, 两个方向都算事件。
+  // 不含 mtime —— mtime 会自己动(见 memory: Windows LastWriteTime 对持续追加的打开文件是陈的),
+  // 把会自己动的量放进指纹, 哨兵就会为"什么都没发生"报警。
+  driftSet.push(`${deployedPath}|${deployedHash}`);
   if (candidates.length > 1) ambiguous++;
   say(`🔴 漂移  ${deployedPath}`);
   say(`        部署 ${deployedHash.slice(0, 12)}  mtime=${deployedMtime}`);
@@ -130,13 +183,52 @@ if (SSH) {
 }
 
 say('');
-say(`扫描完成: 一致 ${matched} · 漂移 ${drifted}${ambiguous ? ` (其中 ${ambiguous} 个仓库里有同名多份, 无法确定它该跟哪一份)` : ''} · 够不到 ${unreachable}`);
-if (!matched && !drifted) {
+say(`扫描完成: 一致 ${matched} · 漂移 ${drifted}${ambiguous ? ` (其中 ${ambiguous} 个仓库里有同名多份, 无法确定它该跟哪一份)` : ''} · 只对上未入库副本 ${untrackedMatch} · 够不到 ${unreachable}`);
+if (!matched && !drifted && !untrackedMatch) {
   // 判据自体检: 一个可比文件都没找到时, "零漂移"会假装成通过。
   say('🔴 一个可比对的文件都没找到 —— 大概率是根目录写错或够不到, 【不要】把这读成"没有漂移"。');
+  // 🔴 这一支也必须打标记, 而且必须在退出【之前】打。
+  //    不变量: 设了 DRIFT_STATE 的每一次运行, 有且只有一个 DRIFT-* 标记。
+  //    没有它, 一个只 grep DRIFT-CHANGED 的哨兵在这条最坏的路径上【完全沉默】——
+  //    而"根目录写错了"与"一切正常"在那个哨兵眼里读数完全相同。
+  //    这条洞是我加完变化检测之后自己测出来的, 不是设计时想到的。
+  if (STATE) say('DRIFT-NO-COMPARABLES 扫描没找到任何可比文件 —— 基线【未更新】, 本次不产生结论。');
   process.exit(2);
 }
-say(drifted || unreachable
-  ? '🔴 有漂移或有够不到的部署根 —— 在跑的那份与你复核的那份【不是同一份】。'
-  : '✅ 扫到的部署副本都与仓库一致。');
-process.exit(drifted || unreachable ? 1 : 0);
+say(drifted || unreachable || untrackedMatch
+  ? '🔴 有漂移 / 够不到 / 只对上未入库副本 —— 在跑的那份与你复核的【入库那份】不是同一份。'
+  : '✅ 扫到的部署副本都与【入库的】仓库版本一致。');
+
+// ---- 变化检测(仅当设了 DRIFT_STATE) ----
+if (STATE) {
+  const sorted = driftSet.slice().sort();
+  const fp = createHash('sha256').update(sorted.join('\n')).digest('hex').slice(0, 12);
+  // 🔴 够不到的时候【不写状态】。若写了, 那次残缺的扫描会变成下一次的基线,
+  //    于是"连不上"会静悄悄地把真实漂移洗成"没变化"—— 一个哨兵最坏的失败方式是
+  //    它把自己的故障记成了正常。⇒ 够不到就出声并保留上一次的基线不动。
+  if (unreachable) {
+    say(`DRIFT-UNREACHABLE ${unreachable} 个部署根够不到 —— 基线【未更新】, 本次不产生"变没变"的结论。`);
+  } else {
+    let prev = null;
+    try { prev = JSON.parse(fsx.readFileSync(STATE, 'utf8')); } catch { prev = null; }
+    const prevList = Array.isArray(prev?.set) ? prev.set : null;
+    if (!prevList) {
+      say(`DRIFT-BASELINE ${fp} — 记录了 ${sorted.length} 处漂移作为基线。`);
+      say('  🔴 这【不是】"没问题", 只是"没有可比的上一次"。第一次跑必然走到这一支。');
+    } else {
+      const prevSet = new Set(prevList), nowSet = new Set(sorted);
+      const added = sorted.filter((x) => !prevSet.has(x));
+      const gone = prevList.filter((x) => !nowSet.has(x));
+      if (!added.length && !gone.length) {
+        say(`DRIFT-UNCHANGED ${fp} — ${sorted.length} 处漂移, 与上次逐项相同。`);
+      } else {
+        say(`DRIFT-CHANGED ${prev.fp} -> ${fp} — 新增 ${added.length} · 消失 ${gone.length}`);
+        for (const a of added) say(`  ➕ 新出现漂移: ${a.split('|')[0]}`);
+        for (const g of gone) say(`  ➖ 不再漂移(被部署了, 或文件没了 —— 这两件不一样, 去看哪一个): ${g.split('|')[0]}`);
+      }
+    }
+    try { fsx.writeFileSync(STATE, JSON.stringify({ fp, ts: new Date().toISOString(), set: sorted }, null, 1)); }
+    catch (e) { say(`DRIFT-STATE-WRITE-FAILED ${String(e.message).slice(0, 80)} — 下次会把本次当成首次。`); }
+  }
+}
+process.exit(drifted || unreachable || untrackedMatch ? 1 : 0);
