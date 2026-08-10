@@ -395,6 +395,11 @@ if ($surfaceOk) { $script:pass++ } else { $script:fail++ }
 Say ("[{0}] {1,-42} rawReads={2} viaValidator={3} exempt={4}" -f $(if ($surfaceOk) { 'PASS' } else { 'FAIL' }), 'every TN12_ env read has a domain', $found.Count, $bounded.Count, $EXEMPT.Count)
 foreach ($n in $uncovered) { Say "       🔴 $n is read from the environment with no domain and no stated exemption" }
 # 陈豁免也要红: 一条指向已经不存在的变量的豁免, 会在将来某个同名变量出现时【无声地】覆盖它。
+# ✅ 这一支【由构造证实过】, 不是靠"它与上一支结构对称"推的(@KANet-UI 复审时明说他只读了代码、
+#    没造对抗测试, 并把这个取舍写了出来 —— 那是诚实的, 而这里把它从判断变成证据)。
+#    复现方法(照做即可, 别只信这行字):把本文件拷一份, 在 $EXEMPT 里加一条指向文件中根本不存在的
+#    名字(如 'TN12_LONG_GONE_KNOB'), 带 WD_PATH 指向真 watchdog 跑那份拷贝 ⇒ 本条必须 FAIL。
+#    2026-08-10 实跑读数: exempt=2 ⇒ [FAIL], 45 PASS / 1 FAIL。
 foreach ($n in $staleExempt) { Say "       🔴 exemption for $n is stale -- that name is no longer read anywhere" }
 
 Say ''
