@@ -1,4 +1,4 @@
-function Say($m) { [Console]::WriteLine($m) }
+﻿function Say($m) { [Console]::WriteLine($m) }
 
 $ErrorActionPreference = 'Stop'
 $path = if ($env:WD_PATH) { $env:WD_PATH } else { Join-Path $PSScriptRoot 'tn12-mining-watchdog-v2.ps1' }
@@ -379,6 +379,13 @@ foreach ($m in [regex]::Matches($src, '\$env:(TN12_\w+)')) { $found[$m.Groups[1]
 # 🔴 单双引号都要认。只认单引号的扫描器, 会让一个用双引号写的新 knob 静默漏掉 ——
 #    而扫描器漏掉的东西不会有任何提示, 它只是安静地少数一个。
 foreach ($m in [regex]::Matches($src, 'GetEnvironmentVariable\(["''](TN12_\w+)["'']')) { $found[$m.Groups[1].Value] = $true }
+# @NWT 红队找到的两条真缝, 收掉。他判"不卡部署"的理由是这两种写法在本文件全篇零出现 —— 理由成立,
+# 🔴 但那是一个**关于未来代码的频率论证**, 而这条用例的全部意义正是【不指望人记得照抄风格】。
+#    一个"今天没人这么写"的缝, 与"今天没人加没有域的 knob"是同一句话 —— 而后者正是我们不接受的。
+foreach ($m in [regex]::Matches($src, '\$\{env:(TN12_\w+)\}'))     { $found[$m.Groups[1].Value] = $true }  # ${env:X}
+foreach ($m in [regex]::Matches($src, '(?i)\bEnv:(TN12_\w+)'))     { $found[$m.Groups[1].Value] = $true }  # Get-Item Env:X / Test-Path Env:X
+# 🔵 最后一条会顺带把 $env:X 也匹配到(它含 env:X)。多匹配是安全的: 名字进了 $found 之后仍要
+#    过 bounded/exempt 检查, 而一个已经受控的名字重复出现不会改变结论。**宁可多认, 不可漏认。**
 $bounded = @{}
 foreach ($m in [regex]::Matches($src, 'Get-BoundedEnv ["''](TN12_\w+)["'']')) { $bounded[$m.Groups[1].Value] = $true }
 # 豁免必须带理由, 而且理由要能被下一个人核。这里只有一个:
