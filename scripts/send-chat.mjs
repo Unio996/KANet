@@ -28,7 +28,12 @@
 
 import fs from 'node:fs';
 
-const CONSOLE = process.env.KANET_CONSOLE || 'http://localhost:3100';
+// 🔴 端口: console 于 2026-07-11 从 3100 迁到 3200(kanet.env `PORT=3200`), 而本文件一直写死 3100
+//    ⇒ 它此前【一直是死的】—— 任何调用都只会拿到 fetch failed, 而那看起来像"网络问题"。
+//    实核(2026-08-10): 本机只有 3200 在 Listen, 3100 无人。
+//    改为 KANET_CONSOLE 可覆盖, 默认 3200 —— 顺带让它【可以指向假 console 做测试】,
+//    不必为了验证一条链路而真往频道发消息。
+const CONSOLE = process.env.KANET_CONSOLE || 'http://127.0.0.1:3200';
 
 const args = process.argv.slice(2);
 if (args.length < 3) {
