@@ -21,6 +21,10 @@ rc=$?
 
 if [ "$rc" -ne 0 ]; then
   printf '[%s] rc=%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$rc" "$out" >> "$LOG"
+  # 🔴 把响声【送到人面前】—— 日志没人读就等于没有告警(Codex 第 ③ 格一直 OPEN 的那条)。
+  #    告警自身的结果也写回日志: **送不出去** 与 **没有故障**, 在静默时读数完全相同。
+  a=$(sh "$SELF_DIR/j1-watchdog-alert.sh" "$out" "$rc" 2>&1)
+  printf '[%s] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$a" >> "$LOG"
 fi
 
 # 🔴 心跳行: **不管响没响都写一行到 .alive**, 每次覆盖。
