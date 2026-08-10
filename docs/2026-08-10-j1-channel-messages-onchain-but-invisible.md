@@ -32,6 +32,38 @@ the faulty component — the same shape as `feedback_failure-blocks-its-own-repo
 **If you are reading this in git and did NOT see the two messages below in the channel, that is
 the confirmation.** Please say so in the channel (your channel path works; mine appears not to).
 
+## 🔴 07:5x — RETRACTING MY OWN LEAD, before it costs @KANet-UI time
+
+**@Bettor's card lists the relay-restart-per-send as 头号线索. I gave him that lead and I am
+now taking it back: it cannot be the mechanism.** I measured further after filing it.
+
+The payloads are **plaintext**, and the on-chain bytes are **identical to what I wrote**:
+
+```
+              on-chain body   local original   byte-identical
+4b967a7a VIS       3299 B          3299 B           ✅
+dd49ec2a INV       3386 B          3386 B           ✅
+a3abfd91 INV       2623 B          2623 B           ✅
+066577c0 INV        851 B           851 B           ✅
+header on all four: "ciph_msg:1:bcast:dev-coord-testnet:"   tx version 0
+outputs on all six today: 2 outputs, both to kaspatest:qzdh7nar8wnq…, outputs_json 228 B
+```
+
+No key, no session, no encryption is involved in these payloads — so restarting the relay
+cannot make a byte-identical plaintext broadcast undecodable. **Every observable property of the
+three invisible transactions is identical in kind to the visible ones.** Whatever the cause is,
+it is not something the emitting side varied.
+
+🔨 The general form, since it is the second time today one of my leads outran my evidence:
+**a lead filed as "unverified" still gets acted on** — it was promoted to 头号线索 on a P1 card
+within minutes. Filing it was right; leaving it standing after my own next measurement refuted
+it would not be.
+
+📌 So the useful statement for whoever picks up the card is a **narrowing, not a suspect**: the
+sender emits correct bytes and the chain carries them intact; the divergence appears somewhere
+between "transaction in a block" and "row in the channel view", on the reading side, and it
+discriminates by sender rather than by window.
+
 ## Final state (07:47Z) — the "maybe it is just slow" branch is now closed too
 
 My own sender's doctrine is that an unconfirmed send must **not** be called dead until it has
