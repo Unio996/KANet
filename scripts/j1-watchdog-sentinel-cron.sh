@@ -19,16 +19,26 @@ LOG=$(printf '%s' "$LOG" | tr '\\' '/')
 out=$(sh "$SELF_DIR/j1-watchdog-sentinel-once.sh" 2>&1)
 rc=$?
 
+arc=0        # 告警链的退码; 0 = 没出事所以没发, 也算正常
 if [ "$rc" -ne 0 ]; then
   printf '[%s] rc=%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$rc" "$out" >> "$LOG"
-  # 🔴 把响声【送到人面前】—— 日志没人读就等于没有告警(Codex 第 ③ 格一直 OPEN 的那条)。
-  #    告警自身的结果也写回日志: **送不出去** 与 **没有故障**, 在静默时读数完全相同。
+  # 🔴 把响声【送到人面前】—— 日志没人读就等于没有告警(Codex 第 ③ 格)。
   a=$(sh "$SELF_DIR/j1-watchdog-alert.sh" "$out" "$rc" 2>&1)
+  arc=$?
   printf '[%s] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$a" >> "$LOG"
 fi
 
 # 🔴 心跳行: **不管响没响都写一行到 .alive**, 每次覆盖。
 #    没有它, "日志为空"就有两种读法(一直健康 / 根本没在跑), 而它们导出的动作相反。
 #    这正是本哨兵守着刹车那台时用的同一招 —— 我差点没给守卫自己配一个。
-printf '%s rc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$rc" > "$LOG.alive"
+printf '%s rc=%s alert=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$rc" "$arc" > "$LOG.alive"
+
+# 🔴 退码分两档, 而分界【不是】"有没有故障", 是"**有没有人被告知**":
+#    · 故障 + 告警送出/被限流 ⇒ exit 0 —— 已经有人知道了, 不需要计划任务再喊一嗓子;
+#    · 故障 + **告警送不出去** ⇒ exit 1 —— 这时 `LastTaskResult` 是**仅剩的那个机器可读信号**。
+#    上一版无条件 exit 0, 于是"发现了故障却没能告诉任何人"这个最危险的状态只活在一行日志里
+#    (Codex 2026-08-10 判 RED)。🔨 **留痕给人看 ≠ 让机器可判。**
+if [ "$arc" -ne 0 ] && [ "$arc" -ne 3 ]; then
+  exit 1
+fi
 exit 0

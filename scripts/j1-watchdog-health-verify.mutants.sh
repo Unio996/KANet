@@ -28,7 +28,9 @@ mut "上界 -gt → -ge (边界)"           's/\[ "\$age" -gt "\$MAX_AGE" \]/[ "
 mut "不判未来时间戳"                  's/if \[ "\$age" -lt "\$MIN_AGE" \]; then/if [ "$age" -lt -99999999 ]; then/'
 mut "Disabled 也放行"                 's/^  Disabled)/  __never_disabled__)/'
 mut "不认识的状态也放行"              's/^  Ready|Running) ;;/  *) ;;/'
-mut "不判 LastTaskResult"             's/if \[ "\$J1_HV_LAST_RESULT" -ne 0 \]; then/if [ "$J1_HV_LAST_RESULT" -ne 999999 ]; then/'
+# 判据行加了 `&& != 1` 之后, 旧的那条 sed 不再匹配 —— 它当场变 INERT 而不是悄悄"通过"。
+# 🔨 这正是单列 INERT 一类的用处: **变异表会随被测代码漂移, 而漂移后的默认表现是"看起来仍在测"。**
+mut "不判 LastTaskResult"             's/-ne 0 \] \&\& \[ "\$J1_HV_LAST_RESULT" -ne 1 \]/-ne 999998 ] \&\& [ "$J1_HV_LAST_RESULT" -ne 999999 ]/'
 mut "缺 .alive 当健康"                's/^  echo "🔴 注册了但【从未跑成过】.*$/  exit 0/'
 # 🔴 这一条原先写成一个 sed 里带 \n 的表达式 —— 它改不动文件, 于是被记为 INERT。
 #    留着这行注释, 因为"变异改不动文件"会伪装成"已检出", 是我特意单列 INERT 那一类的原因。
@@ -40,6 +42,12 @@ mut "test 来源不要求显式认领"         's/if \[ "\${J1_HV_UNSAFE_TEST:-}
 mut "间隔不验域(0\/负\/超大都放行)"    's/if \[ "\$INTERVAL" -lt 1 \] || \[ "\$INTERVAL" -gt 1440 \]; then/if [ "$INTERVAL" -lt -99999 ]; then/'
 mut "间隔上限 1440 → 99999"           's/-gt 1440 \]/-gt 99999 ]/'
 mut "间隔非整数判据被短路"            's/^n=\$INTERVAL$/n=0/'
+
+# ── alert= 那一格(Codex 第三轮) ──────────────────────────────────────────
+mut "不判 alert(送不出去也放行)"     's/-ne 0 \] \&\& \[ "\$arc" -ne 3 \]/-ne 999 ] \&\& [ "$arc" -ne 998 ]/'
+mut "alert 非整数判据被短路"         's/^  n=$arc$/  n=0/'
+mut "限流(3) 也当告警失败"           's/-ne 3 ]; then/-ne 33 ]; then/'
+mut "alert 判据整段不生效"            's/^if \[ -n "\$arc" \]; then/if [ -n "__never__" ]; then/'
 
 echo ""
 echo "detected=$det  MISSED=$miss  INERT=$inert"

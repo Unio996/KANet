@@ -31,6 +31,17 @@ mut "空内容也发"                      's/\[ -z "\$BODY" \]/[ -z "__never__"
 mut "payload 不带响声原文"            's/^  body,$/  "",/'
 mut "payload 不带 rc"                 's/"rc=" + process.env.J1_A_RC/""/'
 
+# ── Codex 2026-08-10 判 RED 的那格: 失败必须【非零退出】, 不能只留一行日志 ──
+mut "🔴 发送失败吞成 exit 0"              "s/^exit 1$/exit 0/"
+mut "限流退码 3 → 0 (不可分辨)"          "s/^  exit 3$/  exit 0/"
+mut "应答校验: 只要含 txId 就算成功"      "s/okFlag && typeof tx/true && typeof tx/"
+mut "应答校验: txid 不验形状"             's#\.test(tx)#.length > 0 \&\& true#'
+# 🔴 这里原本有一条「不看 curl 退码」的变异, **它当时 MISSED** —— 拆掉那道 `if [ "$crc" -eq 0 ]`
+#    全部用例照样绿, 因为 curl 失败时 $out 是错误文本, 过不了应答校验。
+#    ⇒ 处理方式不是"给它补个用例", 是**把那道冗余守卫删掉**: 冗余 + 没有用例守得住 = 负债,
+#      它会让读代码的人以为多了一道防线。变异测试在这里的作用是**指出一段代码不承重**。
+mut "构造失败也继续(拆掉 exit)"           's/; exit 1; }/; exit 0; }/'
+
 echo ""
 echo "detected=$det  MISSED=$miss  INERT=$inert"
 [ "$miss" = "0" ] && [ "$inert" = "0" ] || exit 1

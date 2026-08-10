@@ -13,6 +13,19 @@
 # 🔴 送不出去也要留痕: 若 console 本身挂了(告警链路与被告警系统共享依赖),
 #    静默失败与"没有故障"读数相同。⇒ 发送结果一律写回日志。
 #
+# 🔴🔴 退码必须分档, 而这一版是被 Codex 2026-08-10 判 RED 打出来的:
+#    上一版**检测到发送失败、打印了 ALERT-SEND-FAILED, 然后照样 `exit 0`** ——
+#    「A human who later reads the log can distinguish them, but the supervisory chain cannot.」
+#    ⇒ 我在**同一个文件的头注释里**写着"送不出去与没有故障读数相同, 必须留痕",
+#      然后把唯一能被机器读到的那个信号(退码)抹平了。
+#    🔨 判据: **留痕给人看 ≠ 让机器可判。** 而这套东西存在的全部理由, 就是消灭"没人读日志"这个终态
+#       —— 那就不能把终态又押回一行日志上。
+#
+# 退码:
+#   0 = 已送出        3 = 被限流(此前已成功送过一条, 非致命)
+#   1 = 送不出去(构造/传输/应答校验失败) —— **发现了故障却没能告诉任何人**
+#   2 = 没有内容可发
+#
 # 用法(由 j1-watchdog-sentinel-cron.sh 在 rc!=0 时调用):
 #   sh j1-watchdog-alert.sh "<哨兵输出>" "<rc>"
 # 环境:
@@ -36,7 +49,7 @@ case "$last" in ''|*[!0-9]*) last=0 ;; esac      # 读不懂的当没发过, 不
 age=$(( NOW - last ))
 if [ "$last" -ne 0 ] && [ "$age" -lt "$MIN" ] && [ "$age" -ge 0 ]; then
   echo "ALERT-THROTTLED 距上次 ${age}s < ${MIN}s"
-  exit 0
+  exit 3
 fi
 
 TS=$(date -u +%FT%TZ)
@@ -61,22 +74,43 @@ const msg = [
 fs.writeFileSync(process.env.J1_A_OUT, JSON.stringify({
   relayId: process.env.J1_A_RELAY, channel: "dev-coord-testnet", message: msg,
 }), "utf8");
-' || { echo "ALERT-FAIL 构造 payload 失败"; exit 1; }
+' || { echo "ALERT-BUILD-FAILED 构造 payload 失败"; exit 1; }
 
 if [ "${J1_ALERT_DRYRUN:-}" = "1" ]; then
   echo "ALERT-DRYRUN 已构造 payload, 未发送: $PAYLOAD"
   printf '%s' "$NOW" > "$STATE"
   exit 0
 fi
+[ -z "$BASE" ] && { echo "ALERT-SEND-FAILED 没有 console 地址"; exit 1; }
 
 out=$(curl -s -m 30 -X POST "$BASE/api/chat/send" -H 'Content-Type: application/json' \
       --data-binary @"$PAYLOAD" 2>&1)
-case "$out" in
-  *'"success":true'*|*'"ok":true'*|*txId*|*tx_hash*)
-    printf '%s' "$NOW" > "$STATE"
-    echo "ALERT-SENT $(printf '%s' "$out" | cut -c1-120)" ;;
-  *)
-    # 🔴 不写 STATE: 没发出去就不该占用限流额度, 否则下一小时也不会再试。
-    echo "ALERT-SEND-FAILED $(printf '%s' "$out" | cut -c1-160)" ;;
-esac
-exit 0
+crc=$?
+
+# 🔴 应答校验按【定义】判成功, 不按"看起来像": 必须同时拿到成功标记【和】一个像样的 txid。
+#    只认 `txId` 三个字母会把 `{"error":"...txId required"}` 判成成功 —— 错误文案里也会出现它。
+# 🔴 这里【不再】先看 curl 退码。原先有一层 `if [ "$crc" -eq 0 ]`, 变异测试证明它是**冗余的**:
+#    把它拆掉, 全部用例照样绿 —— 因为 curl 失败时 $out 是错误文本, 过不了下面的应答校验。
+#    ⇒ **冗余 + 没有任何用例守得住它 = 负债**(它会让人以为多了一道防线)。curl_rc 仍打进日志当诊断。
+ok=0
+if true; then
+  J1_A_RESP="$out" node -e '
+    const s = process.env.J1_A_RESP || "";
+    let j; try { j = JSON.parse(s) } catch { process.exit(1) }      // 不是合法 JSON ⇒ 不算成功
+    const okFlag = j.ok === true || j.success === true;
+    const tx = j.txId || j.tx_hash || j.txid;
+    process.exit(okFlag && typeof tx === "string" && /^[0-9a-f]{64}$/.test(tx) ? 0 : 1);
+  ' 2>/dev/null && ok=1
+fi
+
+if [ "$ok" -eq 1 ]; then
+  printf '%s' "$NOW" > "$STATE"
+  echo "ALERT-SENT $(printf '%s' "$out" | cut -c1-120)"
+  exit 0
+fi
+
+# 🔴 不写 STATE: 没发出去就不该占用限流额度, 否则一次失败会顺带吃掉下一小时。
+# 🔴 且必须【非零退出】: 这是"发现了故障却没能告诉任何人"——本链最危险的一个状态,
+#    它不能只活在一行日志里(Codex 2026-08-10)。
+echo "ALERT-SEND-FAILED curl_rc=${crc} $(printf '%s' "$out" | cut -c1-160)"
+exit 1
