@@ -277,6 +277,13 @@ for ($i = 0; $i -lt $lines.Count; $i++) { if ($lines[$i] -match '^\$CFG_ISSUES =
 if ($cs -lt 0) { throw 'FIXTURE-BROKEN: cannot find the config block start' }
 for ($i = $cs; $i -lt $lines.Count; $i++) { if ($lines[$i] -match "^\`$PULSE_CHECK = Get-BoundedEnv") { $ce = $i; break } }
 if ($ce -lt 0) { throw 'FIXTURE-BROKEN: cannot find the config block end' }
+# 关系不变式(边集)在那些 Get-BoundedEnv 之后, 必须一起抽 —— 第一版终点停在 PULSE_CHECK 那行,
+# 于是关系用例全绿地测了个空气(与之前漏抽 emit 行同一形状: 抽少了)。
+# 🔵 找不到就【不延伸】而不是抛 FIXTURE-BROKEN: 这样"删掉关系块"的变异体会让【用例变红】,
+#    而不是让 fixture 先炸 —— 真失败信号不该被更早的断言盖住(part 2 那条教训)。
+# 锚在一个【不随被测代码消失】的标记上。原先拿"关系 if 那一行"当锚, 于是删掉一个关系块的变异体
+# 会把两个都排除出被测范围, 红的条数超出它真实的波及面 —— 报出来的是锚的脆弱程度, 不是缺陷大小。
+for ($i = $ce; $i -lt $lines.Count; $i++) { if ($lines[$i] -match 'CONFIG-DOMAIN-END') { $ce = $i; break } }
 $cfgBlock = ($lines[$cs..$ce] -join "`n")
 if ($cfgBlock -notmatch 'TN12_PULSE_SEC') { throw 'FIXTURE-BROKEN: extracted config block does not contain PULSE_SEC' }
 # 🔴 把【喊出来】那一行也抽进来。第一版漏了它 ⇒ 组合路径里问题被记下却从没被喊, 基线自己就红了 ——
@@ -286,7 +293,7 @@ $emitLine = ($lines | Where-Object { $_ -match '^foreach \(\$issue in \$CFG_ISSU
 if (-not $emitLine) { $emitLine = '# (emit line absent in this build)' }
 Say ("extracted config lines {0}-{1} + the settle validator ({2} lines total)" -f ($cs+1), ($ce+1), (($ce-$cs+1) + ($ve-$vs+1)))
 
-$ENV_NAMES = @('TN12_PULSE_SEC','TN12_DAA_SETTLE_MS','TN12_POLL_SEC','TN12_MAX_PULSES','TN12_PULSE_CHECK','TN12_TIPS_BRAKE')
+$ENV_NAMES = @('TN12_PULSE_SEC','TN12_DAA_SETTLE_MS','TN12_POLL_SEC','TN12_MAX_PULSES','TN12_PULSE_CHECK','TN12_TIPS_BRAKE','TN12_TIPS_RESUME','TN12_MAX_ROUNDS')
 function Run-Compose($name, $env, $expPulse, $expSettle, $expIssues) {
   foreach ($n in $ENV_NAMES) { [Environment]::SetEnvironmentVariable($n, $null) }
   foreach ($k in $env.Keys) { [Environment]::SetEnvironmentVariable($k, $env[$k]) }
@@ -308,6 +315,33 @@ function Run-Compose($name, $env, $expPulse, $expSettle, $expIssues) {
   if (-not $ok) { Say ("       expected PULSE_SEC={0} SETTLE={1} issues={2}" -f $expPulse, $expSettle, $expIssues) }
 }
 
+# 关系不变式的两个驱动器。与 Run-Compose 同一条组合路径, 只是断言落在【那一对】上。
+function Invoke-Cfg($env) {
+  foreach ($n in $ENV_NAMES) { [Environment]::SetEnvironmentVariable($n, $null) }
+  foreach ($k in $env.Keys) { [Environment]::SetEnvironmentVariable($k, $env[$k]) }
+  $script:alerts = @(); $script:logs = @()
+  $sb = [scriptblock]::Create(
+    "function Alert(`$m){ `$script:alerts += @(`$m) }`nfunction Log(`$m){ `$script:logs += @(`$m) }`n" +
+    $cfgBlock + "`n" + $emitLine)
+  . $sb
+  foreach ($n in $ENV_NAMES) { [Environment]::SetEnvironmentVariable($n, $null) }
+  return @{ brake = $TIPS_BRAKE; resume = $TIPS_RESUME; maxp = $MAX_PULSES; chk = $PULSE_CHECK; alerts = $script:alerts.Count }
+}
+function Run-Rel($name, $env, $expBrake, $expResume, $expAlerts) {
+  $r = Invoke-Cfg $env
+  $ok = ($r.brake -eq $expBrake) -and ($r.resume -eq $expResume) -and ($r.alerts -eq $expAlerts)
+  if ($ok) { $script:pass++ } else { $script:fail++ }
+  Say ("[{0}] {1,-42} BRAKE={2,-4} RESUME={3,-4} alerts={4}" -f $(if ($ok) { 'PASS' } else { 'FAIL' }), $name, $r.brake, $r.resume, $r.alerts)
+  if (-not $ok) { Say ("       expected BRAKE={0} RESUME={1} alerts={2}" -f $expBrake, $expResume, $expAlerts) }
+}
+function Run-Rel2($name, $env, $expMaxP, $expChk, $expAlerts) {
+  $r = Invoke-Cfg $env
+  $ok = ($r.maxp -eq $expMaxP) -and ($r.chk -eq $expChk) -and ($r.alerts -eq $expAlerts)
+  if ($ok) { $script:pass++ } else { $script:fail++ }
+  Say ("[{0}] {1,-42} MAX_PULSES={2,-4} CHECK={3,-4} alerts={4}" -f $(if ($ok) { 'PASS' } else { 'FAIL' }), $name, $r.maxp, $r.chk, $r.alerts)
+  if (-not $ok) { Say ("       expected MAX_PULSES={0} CHECK={1} alerts={2}" -f $expMaxP, $expChk, $expAlerts) }
+}
+
 Run-Compose 'defaults'                      @{} 20 1500 0
 Run-Compose 'PULSE_SEC malformed -> default' @{ 'TN12_PULSE_SEC' = 'abc' } 20 1500 1
 Run-Compose 'PULSE_SEC=0 -> rejected'        @{ 'TN12_PULSE_SEC' = '0' }   20 1500 1
@@ -321,6 +355,15 @@ Run-Compose 'PULSE_SEC=99999 -> rejected'    @{ 'TN12_PULSE_SEC' = '99999' } 20 
 Run-Compose 'ceiling follows PULSE_SEC (ok)' @{ 'TN12_PULSE_SEC' = '60'; 'TN12_DAA_SETTLE_MS' = '50000' } 60 50000 0
 Run-Compose 'same settle now over ceiling'   @{ 'TN12_PULSE_SEC' = '30'; 'TN12_DAA_SETTLE_MS' = '50000' } 30 1500 1
 Run-Compose 'bad PULSE_SEC + settle at old ceiling' @{ 'TN12_PULSE_SEC' = 'abc'; 'TN12_DAA_SETTLE_MS' = '20000' } 20 20000 1
+
+# ── 关系不变式(边集)。🔴 Codex 纠的是我"走完了图"那句话本身: 我走的是节点集, 没走边集。
+#    这几条的共同点: **每个值单独看都在域内**, 坏的是【组合】—— 所以只测单变量的用例结构上看不见它们。
+Run-Rel 'RESUME >= BRAKE (inverted) -> pair reset' @{ 'TN12_TIPS_BRAKE' = '220'; 'TN12_TIPS_RESUME' = '500' } 220 50 1
+Run-Rel 'RESUME == BRAKE (equality) -> pair reset' @{ 'TN12_TIPS_BRAKE' = '300'; 'TN12_TIPS_RESUME' = '300' } 220 50 1
+Run-Rel 'RESUME < BRAKE (coherent) -> kept'        @{ 'TN12_TIPS_BRAKE' = '300'; 'TN12_TIPS_RESUME' = '80'  } 300 80 0
+Run-Rel2 'PULSE_CHECK > MAX_PULSES -> pair reset'  @{ 'TN12_MAX_PULSES' = '4'; 'TN12_PULSE_CHECK' = '5' } 20 5 1
+Run-Rel2 'PULSE_CHECK == MAX_PULSES -> kept'       @{ 'TN12_MAX_PULSES' = '5'; 'TN12_PULSE_CHECK' = '5' }  5 5 0
+Run-Rel2 'normal multi-window (20/5) -> kept'      @{ 'TN12_MAX_PULSES' = '20'; 'TN12_PULSE_CHECK' = '5' } 20 5 0
 
 Say ''
 Say ("result: {0} PASS / {1} FAIL" -f $script:pass, $script:fail)

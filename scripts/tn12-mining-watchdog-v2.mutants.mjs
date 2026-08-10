@@ -49,3 +49,9 @@ mutate('mut12', /^\$PULSE_SEC   = Get-BoundedEnv 'TN12_PULSE_SEC'.*$/m,
 mutate('mut13', 'foreach ($issue in $CFG_ISSUES) { Alert $issue }', '# (emit removed)');
 // ⑭ ArrayList 退回数组 `+=` —— 就是组合用例当场逼出来的那个作用域坑: 拒绝生效但一条都没记下
 mutate('mut14', '$CFG_ISSUES = [System.Collections.ArrayList]::new()', '$CFG_ISSUES = @()');
+// ⑮ 拆掉迟滞关系检查 —— TIPS_BRAKE/TIPS_RESUME 各自都在域内, 坏的是【组合】
+mutate('mut15', /^if \(\$TIPS_RESUME -ge \$TIPS_BRAKE\) \{[\s\S]*?\n\}\n/m, '');
+// ⑯ 拆掉效力窗关系检查 —— 预算能被烧光而 tips 效力检查一次都没跑
+mutate('mut16', /^if \(\$PULSE_CHECK -gt \$MAX_PULSES\) \{[\s\S]*?\n\}\n/m, '');
+// ⑰ 关系不成立时只回落【一个】而不是【一对】—— 看起来像修好了, 组合仍可能不相容
+mutate('mut17', '$TIPS_BRAKE = 220; $TIPS_RESUME = 50', '$TIPS_RESUME = 50');

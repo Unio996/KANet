@@ -279,9 +279,14 @@ $MAX_ROUNDS  = Get-BoundedEnv 'TN12_MAX_ROUNDS'    0 0 1000000 '0 means run fore
 $DAA_SETTLE_FLOOR_MS   = 1000
 $DAA_SETTLE_DEFAULT_MS = 1500
 
-# Duty cycle used while braked. Must stay well under POLL_SEC's cadence so each poll still
-# re-reads tips before deciding again; 20s was chosen because measured pulses of 60-75s
-# overshot (-44 tips in one round) and finer steps give the loop more chances to exit.
+# Duty cycle used while braked.
+# 🔴 这里原本写着"必须远小于 POLL_SEC 的节奏, 好让每一轮 poll 都先重读 tips 再决定" ——
+#    **那句话不成立, Codex 点掉了它, 而他要求的是"要么强制、要么改写", 不许留一句听起来像安全约束、
+#    却被接受的配置空间直接反驳的话。** 我选改写, 因为强制它没有依据:
+#    这个循环是【同步】的 —— 一轮的真实节奏 = 脉冲 + 结算窗 + 探针(~9.5s) + POLL_SEC 休眠,
+#    脉冲并不是"塞进"一个固定定时器里的东西, 所以 PULSE_SEC < POLL_SEC 既非必要也不承载任何不变式。
+#    真正约束 PULSE_SEC 的是它自己那两条(下界要容得下结算窗, 上界来自过冲实测), 不是 POLL_SEC。
+# 20s 的由来是实测: 60-75s 的脉冲已经过冲(一轮 -44 tips), 更细的步长给循环更多退出机会。
 #
 # 🔴 Codex 第五格:这个值现在【参与派生安全界】(settle 的天花板 = PULSE_SEC*1000), 所以它自己
 # 必须有机械强制的域。他给的三个反例都成立:
@@ -340,6 +345,30 @@ $DAA_SETTLE_MS         = $DAA_SETTLE_DEFAULT_MS
 # PULSE_CHECK=0 则让 `$pulseCount % $PULSE_CHECK` 直接除零。上界 10000 只是挡"明显不是这个量"的值。
 $MAX_PULSES  = Get-BoundedEnv 'TN12_MAX_PULSES'  20 1 10000 'MAX_PULSES=0 would pulse zero times while braked, i.e. the 4.5h deadlock again.'
 $PULSE_CHECK = Get-BoundedEnv 'TN12_PULSE_CHECK'  5 1 10000 'PULSE_CHECK=0 divides by zero in the efficacy check.'
+
+# ── 关系不变式(边集) ───────────────────────────────────────────────────────────
+# 🔴 Codex 说得对, 而他纠的是我那句话本身:我上一版说"一次把配置图走完", 但我走的是【节点集】
+#    —— 每个变量各自的域 —— **没走边集**。逐个合法不等于组合合法。
+# 🔴 回落时【成对回落】而不是各自回落: 只把其中一个改回默认, 仍可能配出另一对不相容的值。
+if ($TIPS_RESUME -ge $TIPS_BRAKE) {
+  # 状态机假定的迟滞: tips > BRAKE 才刹, tips < RESUME 才松。RESUME >= BRAKE 时,
+  # 一次在 220 以上刹下的车可以在 tips 仍然很高时(只要 < 500 且爬升停了)就松开
+  # ⇒ 在一个仍然越过刹车运行点的水位上反复刹/松。两个值各自都在域内, 组合是坏的。
+  [void]$CFG_ISSUES.Add("CONFIG REJECTED (relation): TIPS_RESUME=$TIPS_RESUME is not below TIPS_BRAKE=$TIPS_BRAKE, which defeats the hysteresis the state machine assumes (engage above BRAKE, release below RESUME). Falling back to the default PAIR 220/50 -- one of the two would still leave an incoherent combination.")
+  $TIPS_BRAKE = 220; $TIPS_RESUME = 50
+}
+if ($PULSE_CHECK -gt $MAX_PULSES) {
+  # 效力检查只在 `pulseCount % PULSE_CHECK -eq 0` 时跑。PULSE_CHECK > MAX_PULSES 时,
+  # 整个预算可以烧完而这个检查【一次都没跑过】。
+  # 🔵 这不是旧的"盲脉冲"那一类: 逐发 DAA 付账检查仍在挡真正的楔死。被配没的是另一条独立的
+  #    不变式 —— **反复脉冲必须真的把 tips 压下去, 而不是花光预算才发现没压下去。**
+  [void]$CFG_ISSUES.Add("CONFIG REJECTED (relation): PULSE_CHECK=$PULSE_CHECK exceeds MAX_PULSES=$MAX_PULSES, so an episode could spend its entire pulse budget without the tips-efficacy check ever running. Falling back to the default PAIR 20/5.")
+  $MAX_PULSES = 20; $PULSE_CHECK = 5
+}
+# ── CONFIG-DOMAIN-END ── (用例按这个标记确定配置段的终点)
+# 🔴 存在的理由: 用例原本拿"关系 if 那一行"当延伸锚, 于是删掉【一个】关系块的变异体会把
+#    【两个】都排除出被测范围 ⇒ 它红的条数超出它真实的波及面。
+#    一个会随被测代码一起消失的锚, 报出来的不是缺陷的大小而是锚的脆弱程度。
 
 $addr        = "kaspatest:qrys4yax468rrm988kyqjtncvstcelgzktml0m3rvdvvktrll0gdxuyu34fru"
 $CPU_THREADS = 1  # Bettor 2026-08-08 10:12Z: was 2, dropped to 1 -- the incident's root imbalance
