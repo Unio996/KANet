@@ -68,6 +68,56 @@ node scripts/backfill-payout-ps-addr.mjs
 3. **`oldAddr` 不等于 §1 记录的那个值** ⇒ 停。
 4. 出现 `⚠ 无法判定` 且其中包含 j34vb ⇒ 停。
 
+---
+
+## 🔴 S2 实测(2026-08-10 13:4xZ · @Bettor 13:39 批 dry-run 先行 · **零写入**)· **停止条件①命中,已查清,不自行放行**
+
+**canary 跑原始输出**:
+```
+[backfill] 全表 722 行 · divergent 12 行 · 无法判定 0 行 · network=testnet-12
+[backfill] 🎯 canary 模式: 只处理 ext-pool-v07-1783969245093-j34vb —— 其余 11 行本次【不碰】
+=== DRY-RUN(零写入) ===
+  93-j34vb  family=v2_zk  chain=确认
+      stored  : kaspatest:ppyzcu2zl7nn229krn2r5g7kgzpxs5xkmgs0tq30a7a6gelruhc6j5zrdwa8k
+      derived : kaspatest:ppg2jkcv4h9xehxnj9drzw335wvg276d02ga3jemlklk3ymf642rxjmd8q66f
+⚠ 这是 dry-run: 上面 1 行【一行都没写】。
+```
+**全量跑(同代码路径,去掉 ONLY,仍零写入)—— 12 行全表**:
+```
+chain=未命中(4): 00-pxvml · 52-1dv70 · 91-tyr91 · 58-bvh2c
+chain=确认  (8): 03-s6zwj · 75-b0uoi · 81-a4343 · 13-9jaty · 00-9ez2u · 93-j34vb · 40-3mzoh · 77-gxrr4
+全部 family=v2_zk
+```
+
+### 🔴 停止条件①命中:实测分集 = **12 = 8 确认 / 4 未命中**,在册判据是 **13/9/4**
+
+按 §0 纪律②我**停在这里,不自行判断"应该是等价的"**。但把停因查成了读数:
+
+✅ **已验证的解释(不是假说了)**:`tha3l`(canary#1)**现已 `stored == derived`**(现查,只读):
+```
+tha3l | stored==derived ? true   (…2g3v3v0p8vk9lx == …2g3v3v0p8vk9lx)
+j34vb | stored==derived ? false  (…ruhc6j5zrdwa8k != …f642rxjmd8q66f)
+```
+⇒ tha3l 回填后**离开了 divergent 集**,而它属于 **chain=确认** 那一支
+⇒ **13→12 · 9→8 · 4 不变**,**算术分毫不差**。
+⇒ **⇒ 在册判据 `13/9/4` 是【陈的】**:它写于 canary#1 落地之前。**闸没有失效,是判据没跟着更新。**
+
+🔴 **我不自行放行**,请 @Bettor / @NWT 二选一裁:
+- **(A)** 把在册判据更新为 **`12/8/4`(理由:canary#1=tha3l 已回填出集)**,S2①视为通过 ⇒ 我继续 S3;
+- **(B)** 你们认为这个偏差另有含义 ⇒ 我停,按你们指示查。
+
+✅ **S2 另外三条停止条件:全部通过**
+| 条 | 判据 | 实测 | 结论 |
+|---|---|---|---|
+| ② | `chainOk === true` | `chain=确认` | ✅ 通过 |
+| ③ | `oldAddr` == §1 记录 | `ppyzcu2zl7nn229krn2r5g7kgzpxs5xkmgs…`(§1 当时截断到 45 字符,前缀逐字一致;全值见上) | ✅ 通过 |
+| ④ | 无 `⚠ 无法判定` 含 j34vb | `无法判定 0 行` | ✅ 通过 |
+
+🔵 **顺带坐实了 §2-S2 里我请 NWT 验的那一格**:canary 跑打印的是 **`divergent 12`(全表)**,不是 1 ——
+证明过滤器确实在计数**之后**(`:124-128`),**那道闸在单盘跑里没有被自动架空**。这条现在是实测,不是我读注释的推断。
+
+---
+
 ### S3 · 核对 dry-run 输出与派生预期(纯人工比对,零命令)
 把 S2 打印的 `derived` 与我独立算一次的 `p2sh(payout_redeem_hex)` 并排比。
 🔴 **停止条件**:两者不一致 ⇒ 停(说明我或脚本有一方对派生的理解错了)。
