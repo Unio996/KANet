@@ -27,7 +27,11 @@ if ($end -lt 0) { throw 'FIXTURE-BROKEN: chain never closed' }
 $chain = ($lines[$start..$end] -join "`n")
 $branches = ([regex]::Matches($chain, '(?m)^\s*(elseif|else)\b')).Count + 1
 Say ("extracted lines {0}-{1} ({2} lines, {3} branches)" -f ($start+1), ($end+1), ($end-$start+1), $branches)
-if ($branches -lt 5) { throw "FIXTURE-BROKEN: only $branches branches extracted -- the chain has more, the test would silently cover a fragment" }
+# 锚点故意【不是】分支数: 分支数每改一次结构就要跟着改一次, 而一个需要被维护的守卫最后总会被
+# 改成"让它别叫"。改锚在【链的最后一支里那个动作本身】—— 抽早了它就不在, 而它不是任何一条用例
+# 在检验的性质(同 part 2 那条教训: fixture 只许锚在它不测的东西上)。
+if ($chain -notmatch 'Start-Sleep -Seconds \$PULSE_SEC') { throw 'FIXTURE-BROKEN: extraction stopped before the pulse action -- the test would silently cover a fragment' }
+if ($chain -notmatch 'Stop-Miner') { throw 'FIXTURE-BROKEN: extracted chain has no Stop-Miner -- not the braked branch' }
 Say ''
 
 $stubs = @'
@@ -36,6 +40,9 @@ function Stop-Miner { $global:STOPPED++ }
 function Start-Sleep { param($Seconds) $global:SLEPT += $Seconds }
 function Alert($m) { $global:ALERTS += @($m) }
 function Log($m)   { $global:LOGS   += @($m) }
+# part 1 隔离的是【tips 效力那一格】, 所以这里让每一发都付账(DAA 前进), 好让 DAA 那道闸不参与判定。
+# DAA 闸本身归 part 3 —— 它是跨轮的, part 1 这种单轮注入结构上够不到(这正是 Codex 指出的那点)。
+function Get-DaaNow { return [uint64]($global:SIM_DAA + 5) }
 '@
 
 $script:pass = 0; $script:fail = 0
@@ -45,6 +52,7 @@ function Run-Case($name, $halted, $adv, $count, $tips, $refTips, $expPulsed, $ex
   $pulseHalted = $halted; $daaAdvancing = $adv; $pulseCount = $count
   $pulseRefTips = $refTips; $MAX_PULSES = 20; $PULSE_CHECK = 5
   $PULSE_SEC = 20; $TIPS_RESUME = 50; $round = 20; $prevDaa = 123456
+  $global:SIM_DAA = 1000; $daaNow = [uint64]1000
   . ([scriptblock]::Create($stubs + "`n" + $chain))
   $pulsed = ($global:STARTED -gt 0)
   $ok = ($pulsed -eq $expPulsed) -and ($pulseHalted -eq $expHalted)
@@ -56,8 +64,10 @@ function Run-Case($name, $halted, $adv, $count, $tips, $refTips, $expPulsed, $ex
 }
 
 Run-Case 'already halted -> no pulse'     $true  $true   3 150 200 $false $true
-Run-Case 'DAA unknown -> no pulse'        $false $null   0 150 200 $false $false
-Run-Case 'DAA flat (wedge) -> suppress'   $false $false  3 150 200 $false $true
+# 🔴 这里原本有两条前置 DAA 用例(unknown -> 不脉冲 / flat -> 抑制)。它们随 2026-08-10 的改写【消失了】,
+#    因为那两个判定从"脉冲前看上一轮"挪到了"脉冲后看这一发", 而这一挪正是 Codex 那条 MUST-FIX 的内容。
+#    删掉而不是留着改绿: 一条名字还在、检验的东西已经没了的用例, 比没有用例更坏。
+#    等价覆盖在 part 3(wedged from the start / DAA unreadable), 而且那里才测得到跨轮的那一半。
 Run-Case 'budget exhausted -> halt'       $false $true  20 150 200 $false $true
 Run-Case 'normal -> pulse'                $false $true   1 150 200 $true  $false
 Run-Case 'checkpoint, tips NOT down'      $false $true   4 210 200 $true  $true
@@ -107,6 +117,77 @@ Run-Daa 'went backwards 100 -> 99'              ([uint64]100) '99'  'False'
 Run-Daa 'lexicographic trap: 9 -> 10 must rise' ([uint64]9)   '10'  'True'
 Run-Daa 'lexicographic trap: 99 -> 100 rises'   ([uint64]99)  '100' 'True'
 Run-Daa 'garbage score -> unknown, not false'   ([uint64]100) 'abc' 'unknown'
+
+Say ''
+Say '--- part 3: multi-round loop state (Codex: parts 1 and 2 cannot see the feedback loop) ---'
+# 前两部分测的是【谓词】: part 1 直接给 $daaAdvancing 赋值, part 2 单独跑推导。
+# 两者都看不见 Codex 抓到的那件事 —— 那是【跨轮】的: 一发脉冲改变了下一轮读到的 DAA。
+# 这里把真实的 braked 分支【连跑多轮】, 配一个只在脉冲跑过时才涨的 DAA 源, 也就是那条链本身的物理:
+# 这条网络上虚拟只在有块到达时推进, 而块只在我们挖的时候到达(08-09 排空阶段实测, submittedDelta=0
+# 的每一次 chainBlocks 都不动)。⇒ 这个假体不是方便, 它就是被测环境。
+
+$multiStubs = @'
+function Start-Miner-Unless-Paused { $script:pulsedThisRound = $true; $script:started++ }
+function Stop-Miner { $script:stopped++ }
+function Start-Sleep { param($Seconds) }
+function Alert($m) { $script:alerts += @($m) }
+function Log($m)   { }
+function Get-DaaNow {
+  if ($script:daaUnknown) { return $null }
+  if ($script:pulsedThisRound -and $script:wedged -eq $false) { $script:simDaa = $script:simDaa + 5 }
+  return $script:simDaa
+}
+'@
+
+function Run-Rounds($name, $wedgeAfterPulse, $daaUnknown, $rounds, $expPulses, $expHaltedBy, $expAlert) {
+  $script:simDaa = [uint64]1000; $script:started = 0; $script:stopped = 0; $script:alerts = @()
+  $script:daaUnknown = $daaUnknown
+  $script:wedged = ($wedgeAfterPulse -eq 0)
+  $pulseHalted = $false; $pulseCount = 0; $pulseRefTips = 200
+  $MAX_PULSES = 20; $PULSE_CHECK = 5; $PULSE_SEC = 20; $TIPS_RESUME = 50; $round = 0
+  $tips = 200
+  $haltedAt = $null
+  $sb = [scriptblock]::Create($multiStubs + "`n" + $chain)
+  # 🔴 这里【必须】照真实循环那样每轮重算 $daaAdvancing, 哪怕新代码的闸不再读它。
+  #    变异测试证明了原因: 我第一版不设它, 于是"把授权接回自证信号"那个变异体在测试里是【惰性】的
+  #    —— 而那正是 Codex 抓到的原缺陷本身。假体少建模一个真实存在的变量, 就等于替被测代码
+  #    挡掉了一整类重注入。
+  $prevSim = $null
+  for ($r = 1; $r -le $rounds; $r++) {
+    $round = $r
+    $script:pulsedThisRound = $false
+    # 健康跑够 N 发后转楔死 —— 这是"中途由健康转楔死"那一格
+    if ($wedgeAfterPulse -gt 0 -and $pulseCount -ge $wedgeAfterPulse) { $script:wedged = $true }
+    $daaNow = if ($daaUnknown) { $null } else { $script:simDaa }
+    $daaAdvancing = if ($null -eq $daaNow -or $null -eq $prevSim) { $null } else { ($daaNow -gt $prevSim) }
+    if ($null -ne $daaNow) { $prevSim = $daaNow }
+    $tips = [Math]::Max(1, 200 - $pulseCount * 12)   # 健康时 tips 随脉冲下降
+    . $sb
+    if ($pulseHalted -and $null -eq $haltedAt) { $haltedAt = $pulseCount }
+  }
+  $okPulses = ($pulseCount -eq $expPulses)
+  $okHalt = ($haltedAt -eq $expHaltedBy)
+  # 断言【是哪一种告警】, 不只断言"停了": 变异测试证明"读不到"与"没付账"两条路殊途同归到
+  # 同样的发数与停手, 于是一条以"读不到"命名的用例, 在守卫被删掉之后照样绿。
+  # 两者导出的操作动作不同(修仪器 vs 查楔死), 所以诊断本身就是要守的东西。
+  $okAlert = $true
+  if ($expAlert) { $okAlert = ($script:alerts.Count -gt 0 -and $script:alerts[0] -like "*$expAlert*") }
+  $ok = $okPulses -and $okHalt -and $okAlert
+  if ($ok) { $script:pass++ } else { $script:fail++ }
+  Say ("[{0}] {1,-40} pulses={2,-3} haltedAtPulse={3,-4} alerts={4}" -f $(if ($ok) { 'PASS' } else { 'FAIL' }), $name, $pulseCount, "$haltedAt", $script:alerts.Count)
+  if (-not $ok) { Say ("       expected pulses={0} haltedAtPulse={1}" -f $expPulses, $expHaltedBy) }
+  if ($script:alerts.Count) { Say ('       ' + $script:alerts[0].Substring(0, [Math]::Min(76, $script:alerts[0].Length))) }
+}
+
+# 楔死态: 第一发就不付账 ⇒ 恰好花掉【一发】然后停。这就是那条被明写为"有意接受"的风险的上界。
+Run-Rounds 'wedged from the start -> 1 pulse'   0  $false 10  1  1     'DID NOT PAY FOR ITSELF'
+# 健康态: 每一发都拉动 DAA ⇒ 持续脉冲, 不因自证而停也不因自证而失控
+Run-Rounds 'healthy -> keeps pulsing'          99  $false  6  6  $null $null
+# 中途转楔死: 健康 3 发后楔住 ⇒ 第 4 发白花, 停在 4。【转换点只赔一发】
+Run-Rounds 'healthy 3 then wedges -> halts at 4' 3 $false 10  4  4     'DID NOT PAY FOR ITSELF'
+# 读不到 DAA: 未知不许当成成功。断言告警是【UNKNOWN 那一条】而不只是"停了" ——
+# 变异测试证明: 少了这个断言, 删掉 unknown 守卫后本条照样绿。
+Run-Rounds 'DAA unreadable -> UNKNOWN halt'     99 $true  10  1  1     'PULSE OUTCOME UNKNOWN'
 
 Say ''
 Say ("result: {0} PASS / {1} FAIL" -f $script:pass, $script:fail)

@@ -5,23 +5,28 @@ const src = fs.readFileSync(new URL('./tn12-mining-watchdog-v2.ps1', import.meta
 
 // 每个变异都必须【确实改到了东西】。改不到而继续跑 = 拿原文当变异体测,
 // 结果全绿, 而那个全绿会被读成"守卫是承重的"—— 恰好相反的结论。
+// 🔴 两次写错都出在【空格数】上: `  {4}` 是 1+4=5 个空格, 缩进是 4 ⇒ 永不匹配。
+//    我第一次把它误诊成 CRLF(这份工作树其实是 LF), 差点去修一个不存在的病。
 function mutate(name, from, to) {
-  const out = typeof from === 'string' ? src.replace(from, to) : src.replace(from, to);
+  const out = src.replace(from, to);
   if (out === src) throw new Error(`MUTATION-INERT: ${name} 没有改到任何东西 —— 不能据此下结论`);
-  const p = `${SP}/wd-${name}.ps1`;
-  fs.writeFileSync(p, out);
-  console.log(`${name}: 写出 ${p}  (长度差 ${out.length - src.length})`);
+  fs.writeFileSync(`${SP}/wd-${name}.ps1`, out);
+  console.log(`${name}: 写出  (长度差 ${out.length - src.length})`);
 }
 
-// ① 拆掉「DAA 未推进 ⇒ 抑制脉冲」那一支(楔死保护)
-// 🔴 两次写错都出在【空格数】上, 记下来: `  {4}` 是 1+4=5 个空格, 而缩进是 4 ⇒ 永不匹配。
-//    我第一次把它误诊成 CRLF(这份工作树其实是 LF), 差点去修一个不存在的病 ——
-//    MUTATION-INERT 那道守卫是唯一拦住我的东西, 否则我会拿原文当变异体测出一片全绿。
-mutate('mut1', / {4}elseif \(-not \$daaAdvancing\) \{[\s\S]*?\n {4}\}\n/, '');
-// ② 让预算闸永不触发
-mutate('mut2', 'elseif ($pulseCount -ge $MAX_PULSES) {', 'elseif ($pulseCount -ge 999999) {');
-// ③ 效力判据 off-by-one: -ge 改 -gt(tips 与参考值相等时漏判)
-mutate('mut3', '$tips -ge $pulseRefTips', '$tips -gt $pulseRefTips');
-// ④ 把 UNKNOWN 塌成"在推进"(默认动作改成会动作的那个 —— 正是 feedback_default-action-must-be-the-non-spending-one)
-mutate('mut4', /  if \(\$null -eq \$daaNow -or \$null -eq \$prevDaa\) \{ \$daaAdvancing = \$null \}/,
-  '  if ($null -eq $daaNow -or $null -eq $prevDaa) { $daaAdvancing = $true }');
+// ① 拆掉「这一发没拉动 DAA ⇒ 停手」—— 楔死态该无限连发
+mutate('mut1', / {6}elseif \(\$daaPost -le \$daaPre\) \{[\s\S]*?\n {6}\}\n/, '');
+// ② off-by-one: -le 改 -lt ⇒ DAA 持平(楔死最典型的样子)被当成推进
+mutate('mut2', '$daaPost -le $daaPre', '$daaPost -lt $daaPre');
+// ③ 拆掉「读不到就不算成功」⇒ 未知被当成付了账
+mutate('mut3', /      if \(\$null -eq \$daaPre -or \$null -eq \$daaPost\) \{[\s\S]*?\n      \}\n/, '      if ($false) {\n      }\n');
+// ④ 预算闸永不触发
+mutate('mut4', 'elseif ($pulseCount -ge $MAX_PULSES) {', 'elseif ($pulseCount -ge 999999) {');
+// ⑤ tips 效力判据 off-by-one: -ge 改 -gt(漏掉持平)
+mutate('mut5', '$tips -ge $pulseRefTips', '$tips -gt $pulseRefTips');
+// ⑥ 去掉 uint64 强转 ⇒ 字符串比较, "9" -gt "10" 为真
+mutate('mut6', 'try { $daaNow = [uint64]$health.virtualDaaScore } catch { $daaNow = $null }',
+  'try { $daaNow = $health.virtualDaaScore } catch { $daaNow = $null }');
+// ⑦ 🔴 把授权信号【接回循环顶部那个 $daaAdvancing】—— 即 Codex 抓到的原缺陷本身, 重新注入。
+//    这一条是本组最重要的: 它检验的不是某个 off-by-one, 而是【那个自证回路会不会被人接回来】。
+mutate('mut7', '$daaPost -le $daaPre', '-not $daaAdvancing');
