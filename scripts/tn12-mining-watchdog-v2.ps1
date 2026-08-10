@@ -717,28 +717,26 @@ if ($DAA_SETTLE_RAW) {
     Alert "SETTLE OVERRIDE REJECTED (malformed): TN12_DAA_SETTLE_MS='$DAA_SETTLE_RAW' is not an integer. Using $DAA_SETTLE_DEFAULT_MS ms. The pulse-scoring guarantee depends on this window, so an unparseable value is refused rather than coerced."
   } elseif ($parsed -lt $DAA_SETTLE_FLOOR_MS) {
     Alert "SETTLE OVERRIDE REJECTED (below floor): TN12_DAA_SETTLE_MS=$parsed is under the measured floor of $DAA_SETTLE_FLOOR_MS ms for this host (measured max 483ms at 100ms granularity). Using $DAA_SETTLE_DEFAULT_MS ms. A shorter window can score a working pulse as a wedge."
+  } elseif ($parsed -gt ($PULSE_SEC * 1000)) {
+    # 🔴 2026-08-10 二改: 上一版这里是"告警但接受", Codex 推翻, NWT 自己也认原判轻了, Bettor 裁定
+    # 部署闸上采 Codex。他对, 而我错在哪值得写下来:
+    # **我把「拒绝」和「静默钳位」当成了同一件事。** 我一直反对的是【静默】—— 而"拒绝 + 退回默认
+    # + 大声喊"根本不静默, 它正是我在【下界】上已经用对了的那个形态。我没把它对称地用到上界。
+    # 而"接受"的代价不对称: 一个原始 env 值(笔误多几个 0)可以直接把安全系统的脉冲间隔拉到天级
+    # = 实质失能。NWT 原来的理由是"这类失能会自暴露", 但自暴露需要有人在看 —— 而失能掉的正是
+    # 那个在看的东西。⇒ 上界与下界同构: 拒绝, 回落默认, 喊。
+    $days = [math]::Round($parsed / 86400000.0, 2)
+    $mins = [math]::Round($parsed / 60000.0, 1)
+    Alert "SETTLE OVERRIDE REJECTED (above ceiling): TN12_DAA_SETTLE_MS=$parsed exceeds the $($PULSE_SEC * 1000)ms pulse it is supposed to measure. Accepting it would make every pulse wait ${mins} minutes (${days} days) with the MINER STOPPED, which disables the brake. Using $DAA_SETTLE_DEFAULT_MS ms. If you meant it, the ceiling is PULSE_SEC and it moves with it."
   } else {
     $DAA_SETTLE_MS = $parsed
-    Log "settle window overridden to ${DAA_SETTLE_MS}ms (>= floor ${DAA_SETTLE_FLOOR_MS}ms)"
+    Log "settle window overridden to ${DAA_SETTLE_MS}ms (in [${DAA_SETTLE_FLOOR_MS}, $($PULSE_SEC * 1000)]ms)"
     # @NWT's minor note, and he is right that it deserves the same treatment I argued for on
     # TIPS_BRAKE. A typo with extra zeros passes the floor happily: 999999999ms would leave the
     # miner stopped for ~11.5 days per pulse, which disables the watchdog without breaking any
-    # of the correctness holes now closed.
-    # ACCEPTED rather than rejected, because the risk class is different -- this is operator
-    # intent producing an availability problem, not a silent correctness failure, and it shows
-    # itself by the next pulse simply never being logged. Silently clamping it would be hiding
-    # intent, which is the thing I objected to on TIPS_BRAKE.
-    # The ceiling is derived, not chosen: the time spent MEASURING a pulse should not exceed the
-    # pulse itself. So the alert fires above PULSE_SEC.
-    # 🔴 The alert states the consequence in wall clock, not the raw number. An operator who typed
-    # one zero too many recognises "the miner will sit stopped for 11.6 days" instantly and will
-    # read straight past "999999999 ms".
-    $ceilingMs = $PULSE_SEC * 1000
-    if ($DAA_SETTLE_MS -gt $ceilingMs) {
-      $days = [math]::Round($DAA_SETTLE_MS / 86400000.0, 2)
-      $mins = [math]::Round($DAA_SETTLE_MS / 60000.0, 1)
-      Alert "SETTLE WINDOW IS LONGER THAN THE PULSE: TN12_DAA_SETTLE_MS=$DAA_SETTLE_MS exceeds the ${ceilingMs}ms pulse. Accepted as deliberate, but every pulse will now wait ${mins} minutes (${days} days) with the MINER STOPPED before it can score itself, which effectively disables the brake's ability to drain. If this was a typo, that is what it will look like: the next pulse simply never appears in this log."
-    }
+    # of the correctness holes now closed. The over-ceiling branch above now REJECTS it; the
+    # earlier accept-and-warn version of this block has been deleted rather than left behind,
+    # because dead code that still reads like a guard is exactly what misleads the next reader.
   }
 }
 if ($TIPS_BRAKE -ge $MERGESET_CLIFF) {

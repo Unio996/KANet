@@ -258,12 +258,14 @@ Run-Settle 'malformed -> rejected'         'abc'  1500 $true
 Run-Settle 'below floor (999) -> rejected' '999'  1500 $true
 Run-Settle 'at floor (1000) -> accepted'   '1000' 1000 $false
 Run-Settle 'above floor (3000) -> accepted' '3000' 3000 $false
-# @NWT 的 minor note: 只有下界没有上界。上界【不拒绝】—— 风险类别不同(操作员意图导致的可用性问题,
-# 而且它显式可见: 下一发脉冲永远不出现), 但必须出声。断言的是【接受了 + 喊了】这个组合,
-# 因为"拒绝"与"接受但告警"在只看告警数时读数相同, 而两者导出的动作完全不同。
-# 上界是推导的不是拍的: 测量一发脉冲花的时间不该超过这发脉冲本身 ⇒ 阈值 = PULSE_SEC。
-Run-Settle 'at ceiling (20000) -> quiet'    '20000' 20000 $false
-Run-Settle 'over ceiling -> accepted+loud'  '999999999' 999999999 $true
+# 上界。🔴 上一版这两条断言的是"接受了 + 喊了", Codex 推翻、NWT 自撤原判、Bettor 裁定采 Codex ——
+# 于是【期望值本身翻了】: over-ceiling 现在必须【拒绝并回落 1500】。
+# 我错在把"拒绝"与"静默钳位"当成一回事: 我反对的是【静默】, 而"拒绝+回落+喊"不静默,
+# 它正是下界那条已经用对的形态, 我没把它对称地用到上界。
+# 上界仍是推导的: 测量一发脉冲花的时间不该超过这发脉冲本身 ⇒ 阈值 = PULSE_SEC。
+Run-Settle 'at ceiling (20000) -> accepted' '20000' 20000 $false
+Run-Settle 'over ceiling -> REJECTED'       '999999999' 1500 $true
+Run-Settle 'one ms over ceiling -> REJECTED' '20001' 1500 $true
 
 Say ''
 Say ("result: {0} PASS / {1} FAIL" -f $script:pass, $script:fail)

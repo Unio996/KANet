@@ -40,5 +40,5 @@ mutate('mut9', /^\$DAA_SETTLE_MS         = \$DAA_SETTLE_DEFAULT_MS$/m,
   '$DAA_SETTLE_MS         = if ($DAA_SETTLE_RAW) { [int]$DAA_SETTLE_RAW } else { $DAA_SETTLE_DEFAULT_MS }');
 // ⑩ 下限闸放行 0/负数(只挡乱码) —— 最像"顺手简化"的那种削弱
 mutate('mut10', '$parsed -lt $DAA_SETTLE_FLOOR_MS', '$parsed -lt -999999');
-// ⑪ 拆掉上界告警(@NWT minor note 的守卫) —— 笔误多打几个 0 会静默通过
-mutate('mut11', /    if \(\$DAA_SETTLE_MS -gt \$ceilingMs\) \{[\s\S]*?\n    \}\n/, '');
+// ⑪ 拆掉上界【拒绝】那一支 —— 笔误多打几个 0 会被接受, 脉冲间隔拉到天级 = 安全系统实质失能
+mutate('mut11', /  \} elseif \(\$parsed -gt \(\$PULSE_SEC \* 1000\)\) \{[\s\S]*?\n  \} else \{/, '  } else {');
