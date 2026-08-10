@@ -75,16 +75,35 @@ $probeScript = Join-Path $PSScriptRoot 'kaspad-rpc-probe.mjs'
 $FAIL_THRESHOLD = 3   # N 次连续失败才判 DEAD(防一次瞬时抖动/RPC 忙就拉一个竞争进程)
 $failCount = 0
 
-# 返回 @{Alive=$bool; Code=$int; Reason=$str}。helper 自带硬超时(TIMEOUT_MS*2)⇒ & node 必在 ~17s 内返回, 不挂。
+# 返回 @{Alive=$bool; Verdict=$str; Code=$int; Reason=$str}。helper 自带硬超时(TIMEOUT_MS*2)
+# ⇒ & node 必在 ~17s 内返回, 不挂。
 # 退码分开(Bettor 08:56 要求·别塌成一个"失败"): 0=ALIVE / 2=身份不符 / 3=数据空 / 4=超时 / 5=连不上 / 6=依赖缺失 / 1=其它。
+#
+# 🔴🔴 MUST-FIX(J1tn 2026-08-10 只读实测坐实, 移交本域): 旧写法 `Alive = ($code -eq 0)` 把"探针自己
+# 崩了"和"探针查出节点真的连不上"塌成同一个"失败"——8.4 天日志里 2,383 次 FAIL 中 1,799 次(75.5%)
+# 是 node 子进程自己被 Windows 结构化异常杀死(`code=-1073740791`, libuv 断言 `!(handle->flags &
+# UV_HANDLE_CLOSING)`, 与 kaspad 是死是活无关), 只是被"只启不杀"哲学(数据目录锁挡着二次拉起)兜住
+# 没出事, 不代表判据是对的。
+# 隔壁 tn12-mining-watchdog-v2.ps1 对同一类问题的处理已经是团队认定的正确写法(DAG 探针 `ok:false` /
+# `$null -eq $tips` ⇒ UNKNOWN != bad, 维持原样、不当证据用)——本次照抄同一分类, 不是发明新判据:
+#   Verdict=Alive  : code=0(探针连上+身份对+数据真, 见 kaspad-rpc-probe.mjs 注释)
+#   Verdict=Fail   : code∈{2,3,4,5} —— 探针成功探测到具体问题(身份不符/数据空/超时/连不上), 这是
+#                    探针"做出了判断"的四种失败, 计入 DEAD 判据(原意图不变)。
+#   Verdict=Unknown: 其余一切(含 code=6/依赖缺失——探针自己脚注写着"探测器自身坏,不是节点坏";
+#                    code=1/其它异常——探针自己的兜底 catch, 不携带具体节点状态信息;以及任何不在
+#                    探针自身声明退码集合 {0,1,2,3,4,5,6} 里的值——包括 PowerShell 侧 invoke 失败的
+#                    -1, 和这次坐实的原生崩溃退码)。UNKNOWN 不计入、也不清零 $failCount——我们对
+#                    节点状态没有任何新证据, 计数器该停在原地, 既不该被一次探针自己的崩溃拉去重启,
+#                    也不该让它悄悄清空一个已经在累积的真实劣化信号。
 function Probe-Tn12Node {
   try {
     $out = & node $probeScript '--timeout-ms=8000' 2>&1
     $code = $LASTEXITCODE
     $reason = "$($out | Select-Object -Last 1)"
-    return @{ Alive = ($code -eq 0); Code = $code; Reason = $reason }
+    $verdict = if ($code -eq 0) { 'Alive' } elseif ($code -in 2,3,4,5) { 'Fail' } else { 'Unknown' }
+    return @{ Alive = ($verdict -eq 'Alive'); Verdict = $verdict; Code = $code; Reason = $reason }
   } catch {
-    return @{ Alive = $false; Code = -1; Reason = "probe-invoke-error: $($_.Exception.Message)" }
+    return @{ Alive = $false; Verdict = 'Unknown'; Code = -1; Reason = "probe-invoke-error: $($_.Exception.Message)" }
   }
 }
 
@@ -93,8 +112,20 @@ Log "kaspad watchdog started (RPC-liveness judge via kaspad-rpc-probe.mjs, --ena
 while ($true) {
   try {
     $r = Probe-Tn12Node
-    if ($r.Alive) {
+    if ($r.Verdict -eq 'Alive') {
       $failCount = 0
+    } elseif ($r.Verdict -eq 'Unknown') {
+      # UNKNOWN != bad(照抄 tn12-mining-watchdog-v2.ps1 同款判据): 探针自己崩了/环境依赖缺失,
+      # 对节点状态没有任何证据 ⇒ $failCount 原地不动(既不累加走向误拉, 也不清零抹掉已积累的真实信号)。
+      # 🔴 本行故意全 ASCII, 不用中文破折号(踩过·2026-08-10 KANet-UI 自查坐实): 本文件既有全部
+      # Log 双引号字符串一律纯 ASCII, 中文说明只放 # 注释里——这不是巧合的风格统一, 是防坑: 本文件
+      # 无 BOM 的 UTF-8, 若读取环境把它当系统默认代码页解, 双引号字符串里的多字节字符可能被拆成
+      # 单字节误读成引号本身, 提前把字符串截断(本次实测: 中文破折号"—"的 UTF-8 三字节序列里
+      # 有一字节在 cp1252 下解码成引号, 用 [System.Management.Automation.Language.Parser]::ParseFile
+      # 复现过一次, 报错精确落在这一行)。# 注释不受影响(不管怎么误读都只是行尾前的哑文本), 只有
+      # 双引号字符串会被截断——今后本文件新增 Log 字符串, 中文一律留在同行紧邻的 # 注释, 字符串
+      # 本体只用 ASCII。
+      Log "kaspad probe UNKNOWN (probe itself failed, no signal about node -- not counted, failCount stays $failCount) code=$($r.Code): $($r.Reason)"
     } else {
       $failCount++
       Log "kaspad probe FAIL ($failCount/$FAIL_THRESHOLD) code=$($r.Code): $($r.Reason)"
