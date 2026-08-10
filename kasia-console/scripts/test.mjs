@@ -118,10 +118,43 @@ async function main() {
   const isBatch = !caseFile && adversarial === null;
   // Build unified case list: file-loaded + adapter-loaded adversarial probes
   const casesToRun = [];
+  // ── ② 检测哨: import 期 env 污染 trip-wire(Bettor 2026-08-09 16:47 裁 · J2 实现 · NWT 审)──
+  // 🔴 它防的那件事(2026-08-09 实测): 用例文件在【模块体】改 process.env, 而本循环是
+  //    **先把全部文件 import 完再开始跑** ⇒ 那次改动发生在【任何 case 开跑之前】,
+  //    并留给之后每一个用例。实历: 一个文件把 DB_PATH 指向 scratch 且不还原 ⇒
+  //    后面 3 个用例的隔离守卫一律拒绝 import 生产模块 ⇒ 33 次 __DB_PATH_NOT_ISOLATED__。
+  // 🔵 为什么"每例前快照/还原"救不了: 污染早于第一个 case, 快照到的已经是脏值。
+  //    ⇒ 唯一能抓到它的位置就是【这个 import 循环里】, 逐文件比对。
+  // 🔨 它是 trip-wire 不是判官: **只报不 fail**。报出来的分两档, 由人判:
+  //      档1 = bug(非 case 文件污染全局)⇒ 修
+  //      档2 = 合法(用例确需在 import 前置环境, 如把假 relay 塞进模块私有状态)⇒ 认领并注释
+  //    自动判红会把档2 一起打死, 而它们是过审的设计。
+  const _envOffenders = [];
   for (const file of files) {
+    const _envPre = { ...process.env };
     const mod = await import(pathToFileURL(file).href);
+    // 逐文件比对 ⇒ 直接点名源头, 而不是只说"import 之后 env 变了"
+    const changed = [];
+    for (const k of new Set([...Object.keys(_envPre), ...Object.keys(process.env)])) {
+      if (_envPre[k] !== process.env[k]) changed.push(k);
+    }
+    if (changed.length) _envOffenders.push({ file, keys: changed });
     if (mod.default?.id) casesToRun.push(mod.default);
     else if (!quietFlag) console.log(`SKIP (no default export): ${file}`);
+  }
+  if (_envOffenders.length) {
+    console.log('');
+    console.log('⚠⚠ import 期 process.env 被改动 —— 这些改动【早于任何 case 开跑】, 会留给之后所有用例:');
+    for (const o of _envOffenders) {
+      console.log(`   ${o.file}`);
+      console.log(`      改了: ${o.keys.join(', ')}`);
+    }
+    const isoKeys = _envOffenders.flatMap((o) => o.keys).filter((k) => k === 'DB_PATH' || k === 'KANET_DB_PATH' || k === 'KASPA_RPC_URL');
+    if (isoKeys.length) {
+      console.log(`   🔴 其中 ${[...new Set(isoKeys)].join(', ')} 是【隔离守卫读的键】—— 改了它, 之后的用例会被守卫拒绝 import 生产模块。`);
+    }
+    console.log('   🔨 人来分档: 非 case 文件污染全局 = bug 要修; 用例确需前置环境 = 合法, 请在该文件加注释认领。');
+    console.log('');
   }
   for (const adv of adversarialCases) casesToRun.push(adv);
   for (const testCase of casesToRun) {

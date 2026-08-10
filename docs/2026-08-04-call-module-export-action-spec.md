@@ -198,3 +198,56 @@
 
 - **本条不改 §3 原表, 不改 §4 失败语义, 不改 §8.3 的落码硬要求** —— 它复用它们, 并额外加 §10.3 四条。
 - 🔴 **若审阅者认为 §10.2 那条性质扩张不可接受**, 正确处置不是削弱约束, 而是**否掉本条并让 ⑤ 的用例另寻形态** —— 那时 ⑤ 的落码路径需要重新设计, 而这比"批了一条自己不理解的 allowlist"便宜。
+
+## §11 v4 修订(2026-08-09 · J2)—— 新增第 5 条 allowlist 导出 `pool-market-settler / decideConsensus`
+
+> **授权**: @Bettor 2026-08-09 15:10 裁「② = A(加进 ALLOWLIST), 走正规流程不就地加」·
+> 并明示该表属 **test-framework/QA 基建 = Owner 委派给 Bettor 的技术域**(不碰钱路/用户面/covenant);
+> 「若有人认为这张 allowlist 的 spec 是 Owner 亲有、不可委派, 喊一声转 Owner」。
+> **用途**: ⑤ 的 **P2 臂**(`committee_affirmative_unjudgeable`)用例需要调 `decideConsensus`。
+> **原文一字未删**;本节是独立变更块。
+
+### §11.1 申请增加的条目
+
+| 键 | 实际模块 | 申请追加的导出 | 为什么它该在表里 |
+|---|---|---|---|
+| `pool-market-settler`(**键已存在, 本条只加一个导出**) | `src/services/pool-market-settler.js` | `decideConsensus` | P2 的命题是「委员 abstain≥4 ⇒ 合法 refund(`committee_affirmative_unjudgeable`)」。该判定**整个发生在 `decideConsensus` 内**, 它是唯一能直接问到这个命题的入口。 |
+
+### §11.2 🔵 这一条与 §10 那条**方向相反**(请对着 §10.2 读)
+
+```
+§10 新增的 poolSettlerTick  : 【驱动生产结算】—— 写 DB, tick 区间内 3 处读返回值的外呼
+                              ⇒ 它把 allowlist 的性质【扩张】了
+§11 申请的 decideConsensus  : 【判定】—— 你问它一件事, 它回答
+                              ⇒ 它回到现有前三条(assertBettorRefundAuthorized 等)的同一类
+```
+🔵 **⇒ 本条【不】扩张 allowlist 的性质, 它落在已被批准的性质【内部】, 且严格弱于同键已放开的 `poolSettlerTick`。**
+
+**两处独立实读(不是互相转述)**:
+- **J2**: `:1500 export function decideConsensus(market)` 接收**传入的** market 对象(不自己查库取 market), 向下走 `decideConsensusV06`;该路径上只有 `SELECT`(`pool_committee` / `chain_events`)。
+- **NWT 2026-08-09 15:09 独立复核**: 逐行找过, **无 `UPDATE`/`INSERT`/`DELETE`, 无 `fetch`/外呼**。
+
+### §11.3 附带的硬约束(与条目同批生效)
+
+| # | 约束 | 为什么 |
+|---|---|---|
+| A | **沿用 §8.3 的 DB_PATH 双变量断言** | `decideConsensus(market)` 只收 market, **db 来自模块顶层 import** ⇒ `$db` 占位符够不到它(与 §8.1 / §10.3-A 同类)。它虽只读, 但**读错库会给出一个关于别的市场的、看起来完全正常的答案** —— 这比写错库更难发现。 |
+| B | **本条只追加 `decideConsensus` 一个导出** | 同文件仍有 `dispatchRefund` / `authorizeRefundByOwner` 等**直接动钱**的导出。粒度仍是"键 + 允许的导出集合", 由 `entry.exports.includes(step.export)` 机器强制。 |
+| C | 🔴 **import 该模块需要 `KASPA_NETWORK` 已设, 否则在 import 期就 throw** | **实跑发现(J2 2026-08-09)**: 传递依赖 `src/services/rpc-health.js:22` 顶层 `if (!LOCAL_NETWORK) throw`。⇒ 这不是 decideConsensus 的性质, 是**该模块整体的 import 前置**, 同样作用于已批的 `poolSettlerTick`。**本节把它记下来, 因为 §10 当时没有发现它。** |
+| D | 🔴 **用例必须自证 fixture 完整** | 实跑发现: 委员抽样那一步**同时写两处**(`pool_committee` **与** `pool_markets.oracle_relay_ids`, `:1023-1024`)。只种一处 ⇒ 停在 `:1619-1621` 的 `oracle_relay_ids` 闸并返回 `action:'pending'` —— **那个返回看起来像被测逻辑给出的结论**。⇒ 注入前置时必须注入那一步写的**全部**字段。 |
+
+### §11.4 我明确**没有**验的(标死, 不许被读成已验)
+
+- 🔴 **`decideConsensus` 的非-V06 分支我没有跑过**: `:1500` 是 dispatcher, `:1507-1509` 另有一支(`expected 3`, 非 v0.6/v0.7)。**它的"纯读"性质是读码得到的, 不是实跑得到的。**
+  🔵 **该读码这次是【带阳性对照】做的**(2026-08-09 · J2): 对 `:1500-1609` 枚举 `UPDATE|INSERT|DELETE|.run(|fetch(|relayPost|sendCommand` ⇒ **0 命中**;
+  同一段先跑一次**必然命中**的对照式(`decideConsensus|oracleIds` ⇒ 8 命中)证明**文件确实被读到了**。
+  🔴 **加这个对照是因为第一次做时它坏了**: 命令用相对路径, `sed` 报"文件不存在", 而我写的 `|| echo "(无写、无外呼)"` **照样打出了阴性结论**
+  —— **一次根本没读到文件的检查, 输出得和验过了一模一样。** ⇒ **枚举式的"0 命中"必须配一个"必然非 0"的对照, 否则那个 0 同时意味着"没有"和"没读到"。**
+- 🔴 **⑥ 委员抽样在真实数据上到不了**: 活库 93 个 `verifying` 市场**零 `pool_committee` 行**(255 个有委员的市场无一在 `verifying`)⇒ **用例必然在【注入的前置】上测 ⑨**, 这一点必须写进用例文件头, 不许被读成端到端。
+- 🔵 **我没有核该模块 import 是否起后台定时器** —— §10.4 同一格当时也没核, 本条不假装补上了。
+
+### §11.5 记账
+
+- 本条**不改** §3 原表结构、§4 失败语义、§8.3 落码硬要求、§10 全节;它只在同一个已有键上**追加一个导出**并附 §11.3 四条。
+- 🔵 **一个结构性优势(供审阅者定权重)**: P2 断言的是 `decideConsensus` **返回值**(代码构造的对象), **不是 DB 字段** ⇒ fixture **无法把结论种进去**。本仓 2026-08-06 吃过的「fixture 自己把结论种进去」那类假绿, 在本用例上**结构性不成立**。
+- 🔴 **若审阅者认为"同键追加导出"也应视同新条**, 按新条走即可 —— 本节已按新条的规格写全(§11.2 性质对比 / §11.3 约束 / §11.4 未验项), **不要因为"只是加个导出"就降低审的强度**。

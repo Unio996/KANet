@@ -45,7 +45,7 @@ const _NULLIFIER_WORDS = 17;
  */
 export function parseCloseZkV2State(redeemHex, opts = {}) {
   // ⚠ 不能用 `opts.expectedClosed ?? 2` — `??`把显式传入的 null 也当 undefined 处理, 会静默把 peek 模式
-  // (故意传 null 跳过值比对)吃成默认值 2, 峰值检测测试当场抓到过这个坑(zk_autonomy_ticks_regression.test.mjs
+  // (故意传 null 跳过值比对)吃成默认值 2, 峰值检测测试当场抓到过这个坑(zk_autonomy_ticks_regression.mjs
   // §1)。必须用 'in' 显式区分"没传"vs"传了 null"。
   const expectedClosed = 'expectedClosed' in opts ? opts.expectedClosed : 2;
   const redeem = Buffer.from(String(redeemHex || ''), 'hex');

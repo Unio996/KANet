@@ -11,7 +11,7 @@
 //   - passing excludeSideLockTx precisely excludes the matching rows (and only those)
 //   - NOT passing it (all pre-existing callers) is byte-identical to pre-change behavior
 //
-// Same convention as zk_autonomy_ticks_regression.test.mjs: node assert, `node <file>` directly (not the
+// Same convention as zk_autonomy_ticks_regression.mjs: node assert, `node <file>` directly (not the
 // declarative test-framework runner — these are JS function calls, not SQL-only checks), fresh migrated
 // DB (runMigrations, real schema+triggers, not a live-DB copy — feedback-offline-test-must-use-real-
 // schema-with-triggers).

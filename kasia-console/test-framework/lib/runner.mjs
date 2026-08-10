@@ -763,9 +763,18 @@ const actions = {
       //  🔴 只放开 poolSettlerTick 一个导出(约束 D): 同文件还有 dispatchRefund /
       //     authorizeRefundByOwner 等**直接动钱**的导出 —— 放开文件 ≠ 放开文件里的一切。
       //     该粒度由下方 `entry.exports.includes(step.export)` 机器强制, 不靠本注释。
+      // 🔵 第 5 条(spec §11 v4, 2026-08-09 · Bettor 15:10 裁 A「走正规流程不就地加」·
+      //    NWT 15:17 审 GREEN)—— 在**同一个键**上追加 `decideConsensus`。
+      //    ⚠ 它与上一行的 `poolSettlerTick` **方向相反**: poolSettlerTick 是驱动生产结算的 tick
+      //    本体(写库 + 外呼), 而 decideConsensus 是【判定】类 —— 接收传入的 market, 只 SELECT
+      //    (pool_committee / chain_events)返回一个对象, 无写、无外呼(J2 + NWT 各自实读)。
+      //    ⇒ 本条**不扩张** allowlist 的性质, 落在前三条已被批准的性质内部, 且严格弱于同键的
+      //      poolSettlerTick。粒度仍由下方 `entry.exports.includes(step.export)` 机器强制。
+      //    🔴 spec §11.3-C(实跑发现, §10 当时漏掉): import 本模块需 `KASPA_NETWORK` 已设,
+      //      否则传递依赖 rpc-health.js:22 顶层就 throw —— 这条同样作用于已批的 poolSettlerTick。
       'pool-market-settler': {
         rel: '../../src/services/pool-market-settler.js',
-        exports: ['poolSettlerTick'],
+        exports: ['poolSettlerTick', 'decideConsensus'],
       },
     };
 
@@ -2301,6 +2310,45 @@ export async function runCase(testCase) {
     try {
       const stepResult = await handler(step, ctx);
       stepLog.result = stepResult;
+
+      // ── ② WARN 档(Bettor 2026-08-09 16:15 派工 J2 / NWT 审 · MUST-FIX 第一形态)────────
+      // 🔴 被修的洞: 本循环**从不检查 handler 的返回值**, 只按 step 自己声明的 expect 判红绿。
+      //    而 `exec_sql` 这类纯种数据步骤通常不带 expect(没什么好断言的)⇒ 它 `{ok:false}` 抛错时
+      //    这一步**照样显示 ✓** ⇒ "✓" 的真实含义是「没有断言反驳它」, 不是「这一步成功了」。
+      //    (实历: 两处列型写错 + 一处外键失败, 六个 exec_sql 全绿, 失败只在下游以一个
+      //     **看起来完全合法的裁决**显形。)
+      // 🔵 为什么第一形态只 WARN 不判红(Bettor 钉): 170 个用例里有 125 个**没有任何 PASS 证据**,
+      //    直接硬判红会把"真假绿"和"良性 ok:false"混在一起要盲筛。先跑一遍拿真实分布再定型。
+      // 🔴 **WARN 是一次性测量仪, 不是常驻档** —— 全量跑完并分类后【立即】翻硬红。
+      //    一个没人强制的告警等级比 info 还安静, 留着它等于什么都没修。
+      // 🔵 判据用 `=== false` 而不是 `!stepResult.ok`(承重): 现有 action **并非都返回 `ok` 字段**,
+      //    后者会把它们一并算进来 ⇒ 那不是测量, 是造一片噪音。
+      if (stepResult && stepResult.ok === false) {
+        // 🔵 顺带记"这一步有没有声明 expect"(Bettor 16:27 荐, 决定权给 J2+NWT; J2 采纳)。
+        //    它把分布【当场】分成两堆, 省掉第 3 步分类时为每一处命中回头翻 step 定义:
+        //      无 expect ⇒ 疑【真假绿】(失败被吞, 用例其实没测到)
+        //      有 expect ⇒ 疑【良性】(用例自己在检查这次失败的内容)
+        //    ⚠ 它只是**分类线索不是判据** —— 一个 expect 完全可能与这次失败无关而照样通过
+        //      (今晚在别处刚踩过)。所以第 3 步仍要人看, 这一格只是把人要看的东西排好序。
+        const hasExpect = Object.keys(step.expect || {}).length > 0;
+        stepLog.step_ok_false = true;
+        stepLog.step_ok_false_has_expect = hasExpect;
+        result.step_ok_false_count = (result.step_ok_false_count || 0) + 1;
+        if (!hasExpect) result.step_ok_false_no_expect = (result.step_ok_false_no_expect || 0) + 1;
+        result.warnings = result.warnings || [];
+        const detail = `handler 返回 ok:false(本步${hasExpect ? '有' : '无'} expect)— ${String(stepResult.error || '(无 error 字段)').slice(0, 200)}`;
+        if (hasExpect) {
+          // 档2 保留为 warning: 这一步自己声明了 expect ⇒ 由它的断言裁, 我们不越过它判红。
+          // (实历: p5/precond4 那类"故意调一个会失败的动作、靠断言检查失败内容"的用例。)
+          result.warnings.push({ step: step.action, key: '__STEP_OK_FALSE_WITH_EXPECT__', msg: detail });
+        } else {
+          // 🔴 硬红(Bettor 2026-08-09 17:21 解锁 ② · gating 条件已满足: 无-expect 计数跨 5 轮稳定 = 0)
+          //   这一支就是那个洞本身: 步骤失败了, 而**没有任何断言会去看它** ⇒ 从前它显示 ✓。
+          //   ⇒ 判红, 不再只是 warning。翻硬红前先跑 WARN 档量分布, 正是为了确认这一刀不会误伤既有用例。
+          result.pass = false;
+          result.failed_assertions.push({ step: step.action, key: '__STEP_OK_FALSE_NO_EXPECT__', msg: detail });
+        }
+      }
       stepLog.duration_ms = Date.now() - stepLog.started_at;
 
       // run assertions — split must (hard fail) vs should (warning only)
@@ -2433,7 +2481,10 @@ export function formatResult(result) {
     const tag = s.error
       ? '✗'
       : (s.assertions?.every(a => a.pass || a.severity === 'should') ? '✓' : '✗');
-    lines.push(`  ${tag} step "${s.action}" (${s.duration_ms || 0}ms)`);
+    // ② WARN 档: handler 报了失败但没有断言拦它 ⇒ 步骤前缀改成 ⚠, 否则它长得和成功一模一样。
+    lines.push(`  ${s.step_ok_false ? '⚠' : tag} step "${s.action}" (${s.duration_ms || 0}ms)`
+      + (s.step_ok_false ? '  ← handler ok:false(WARN 档, 未改判定)' : ''));
+    if (s.step_ok_false) lines.push(`     ⚠ step_ok_false: ${String(s.result?.error || '(无 error 字段)').slice(0, 160)}`);
     if (s.error) lines.push(`     ERROR: ${s.error}`);
     if (s.result?.reply) lines.push(`     reply: ${String(s.result.reply).slice(0, 160).replace(/\n/g, ' ')}`);
     for (const a of (s.assertions || [])) {
@@ -2446,6 +2497,21 @@ export function formatResult(result) {
   if (!result.pass) {
     lines.push('');
     lines.push(`  Failed assertions: ${result.failed_assertions.length}`);
+    // 🔴 只打计数不打 key ⇒ "红了但说不清是哪一类", 读的人得去翻 trace 才知道根因。
+    //   本仓 2026-08-09 实测: ② 的 regression 正是卡在这一格 —— 判红对了, 但屏幕上无从归类。
+    //   ⇒ 打出 key + 短消息(截断防刷屏), 明细仍在 trace 里。
+    for (const f of result.failed_assertions.slice(0, 8)) {
+      lines.push(`     ✗ ${f.key}: ${String(f.msg || '').slice(0, 160).replace(/\n/g, ' ')}`);
+    }
+    if (result.failed_assertions.length > 8) {
+      lines.push(`     … 另 ${result.failed_assertions.length - 8} 条见 trace`);
+    }
+  }
+  // ② WARN 档: 计数进 summary —— 它是这一轮全量跑要收集的那个分布。
+  //    🔴 PASS 的用例里出现这一行, 就是"这一步其实失败了而用例没发现"的候选。
+  if (result.step_ok_false_count) {
+    const noExp = result.step_ok_false_no_expect || 0;
+    lines.push(`  ⚠ step_ok_false: ${result.step_ok_false_count}(其中【无 expect】${noExp} = 疑真假绿 · 有 expect ${result.step_ok_false_count - noExp} = 疑良性)`);
   }
   // 'no log no pass' (Owner 钦定): trace 文件路径打印, 任何人 cat 即可审计
   if (result.trace_file) {
