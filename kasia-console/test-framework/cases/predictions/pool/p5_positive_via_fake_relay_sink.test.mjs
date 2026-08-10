@@ -111,6 +111,10 @@ let seededPrivkeyRoundTrip = 'not-run';
 if (!guardFail) {
   try {
     // 本用例自己拥有的值 ⇒ 设置(不是隔离性质, 隔离性质一律断言)。
+    // ✅ 认领(Bettor 2026-08-09 17:10 授权 · 档2): **本用例故意在模块体设 env** —— 假 relay 必须在
+    //    任何生产模块 import 之前就位(见文件头"为什么必须在模块体里做"那段)。
+    //    ⇒ `scripts/test.mjs` 的**导入期 env 哨每次都会点名本文件**, 那是【预期】, **不是污染 bug**。
+    //    档1(真污染: 非 case 文件改 DB_PATH 等隔离键)已于同日修掉; 本文件属档2, 保留。
     process.env.RELAY_DIR = FIXTURE_DIR;
     process.env.FAKE_SINK_SENTINEL = SENTINEL;
     process.env.FAKE_SINK_LOG = path.join(EXPECTED_DB_DIR, `fake-sink-${RELAY_NAME}.jsonl`);

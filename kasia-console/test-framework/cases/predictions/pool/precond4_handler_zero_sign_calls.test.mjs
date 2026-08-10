@@ -115,6 +115,10 @@ const observed = [];   // { id, signCalls, expect, pass }
 
 if (!guardFail) {
   try {
+    // ✅ 认领(Bettor 2026-08-09 17:10 授权 · 档2): **本用例故意在模块体设 env** —— 假 relay 必须在
+    //    任何生产模块 import 之前就位(同 p5_positive_via_fake_relay_sink 的理由)。
+    //    ⇒ `scripts/test.mjs` 的**导入期 env 哨每次都会点名本文件**, 那是【预期】, **不是污染 bug**。
+    //    档1(真污染: 非 case 文件改 DB_PATH 等隔离键)已于同日修掉; 本文件属档2, 保留。
     process.env.RELAY_DIR = FIXTURE_DIR;
     process.env.FAKE_SINK_SENTINEL = SENTINEL;
     process.env.FAKE_SINK_XONLY_PUBKEY = ORACLE_XONLY;   // handler 经 IPC 问公钥, 必须落在 committee_pks 里
