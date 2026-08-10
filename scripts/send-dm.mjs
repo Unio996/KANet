@@ -9,8 +9,11 @@
 // 用法:
 //   1. Write tool 写消息到 /tmp/msg.txt (UTF-8)
 //   2. node scripts/send-dm.mjs <relayId> <target_kasia> <message-file>
-// 或短路径 (仅 ASCII):
-//   node scripts/send-dm.mjs <relayId> <target_kasia> --inline "ASCII only"
+// 🔴 --inline 已于 2026-08-10 取消(J1)。上面那段只讲了【编码】问题, 而它还有第二个:
+//    **命令行上的文本会先经过调用方的 shell**, 反引号在 bash 双引号串里是命令替换。
+//    2026-07-25 真实事故: 消息代码块里的一行命令被真执行, 线上一个 grant 被实际吊销。
+//    ⇒ 注入发生在脚本被调起【之前】, 脚本无法自我防御 —— 只能取消入口。
+//    (2026-07-25 Bettor #08sosv 派工原意; 当时没覆盖本文件, J1 2026-08-10 扫库补上。)
 //
 // Relay IDs 速查:
 //   J2       c9c37c37-9a8c-484c-9893-20185d97ccf9
@@ -20,12 +23,17 @@
 
 import fs from 'node:fs';
 
-const CONSOLE = process.env.KANET_CONSOLE || 'http://localhost:3100';
+// 🔴 端口: console 于 2026-07-11 从 3100 迁到 3200(kanet.env `PORT=3200`), 而本文件一直写死 3100
+//    ⇒ 它此前【一直是死的】—— 任何调用都只会拿到 fetch failed, 而那看起来像"网络问题"。
+//    实核(2026-08-10): 本机只有 3200 在 Listen, 3100 无人。
+//    改为 KANET_CONSOLE 可覆盖, 默认 3200 —— 顺带让它【可以指向假 console 做测试】,
+//    不必为了验证一条链路而真往频道发消息。
+const CONSOLE = process.env.KANET_CONSOLE || 'http://127.0.0.1:3200';
 
 const args = process.argv.slice(2);
 if (args.length < 3) {
   console.error('usage: node send-dm.mjs <relayId> <target_kasia> <message-file-path>');
-  console.error('   or: node send-dm.mjs <relayId> <target_kasia> --inline "ASCII message"');
+  console.error('🔴 file-only: 消息只能走文件, --inline 已取消(理由见文件头注释)。');
   process.exit(1);
 }
 
@@ -33,11 +41,13 @@ const [relayId, target, third, ...rest] = args;
 
 let message;
 if (third === '--inline') {
-  message = rest.join(' ');
-  if (!message) { console.error('--inline 后必须跟消息文本'); process.exit(1); }
-  if (/[^\x00-\x7F]/.test(message)) {
-    console.error('⚠  --inline 含非 ASCII 字符. PowerShell shell encoding 可能 corrupt CJK. 中文 / emoji 用文件: Write 到 UTF-8 文件 + 传文件路径.');
-  }
+  // 🔴 硬拒, 不是"警告后照发" —— 原版对非 ASCII 只打一句警告然后继续,
+  //    那正是"闸声明了但不击发"的形状(2026-08-10 同族在 watchdog 上修过三次)。
+  console.error('🔴 --inline 已取消: 命令行上的消息文本会先经过【调用方的 shell】,');
+  console.error('   反引号在 bash 双引号串里是命令替换 —— 2026-07-25 真实事故里,');
+  console.error('   消息代码块中的一行命令被真执行, 线上一个 grant 被实际吊销。');
+  console.error('   ⇒ 把消息用 Write 写成 UTF-8 文件, 再传文件路径。');
+  process.exit(2);
 } else {
   const filePath = third;
   if (!fs.existsSync(filePath)) { console.error('文件不存在:', filePath); process.exit(2); }
@@ -48,9 +58,14 @@ if (third === '--inline') {
 const body = JSON.stringify({ type: 'send_message', target, message });
 const t0 = Date.now();
 try {
+  // 🔴 fetch 必须带 timeout: 无界等待与"正在工作"在读数上完全相同。
+  //    本仓已有实例(2026-07-14 legacyRefundBuilderTick 自锁, 夜间 285 次冻结),
+  //    而 2026-08-10 我自己刚被同一形状咬过: 一个图形密码框在无人会话里没人点,
+  //    ssh 就那么等满 90 秒 —— 它没报错, 它在等人。
   const res = await fetch(`${CONSOLE}/api/relay/${relayId}/send-command`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json; charset=utf-8' },
+    signal: AbortSignal.timeout(15000),
     body,
   });
   const j = await res.json();

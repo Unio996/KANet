@@ -89,7 +89,12 @@ if [ -n "$J1_HV_LAST_RESULT" ]; then
       echo "🔴 LastTaskResult 不是整数: ${J1_HV_LAST_RESULT} — 读不懂的值不当成好消息"
       exit 2 ;;
   esac
-  if [ "$J1_HV_LAST_RESULT" -ne 0 ]; then
+  # 🔴 契约必须【封闭】: 2026-08-10 我给包装层加了一个**故意的**非零退码(1 = 发现故障但告警送不出去),
+  #    而这里旧规则是"非零 = 包装层崩了" ⇒ 它把那个故意的信号读成了崩溃,
+  #    并打出"闸根本没被执行到" —— **闸明明跑了**。归错因的告警会把人引向错的修法。
+  #    ⇒ 1 是【已定义值】, 交给下面的 alert= 那一支去说清楚; 其余非零才是包装层自己坏了
+  #      (历史实例: 2 = 内联 shell 被嵌套双引号截断的语法错误)。
+  if [ "$J1_HV_LAST_RESULT" -ne 0 ] && [ "$J1_HV_LAST_RESULT" -ne 1 ]; then
     echo "🔴 包装层本身失败: LastTaskResult=${J1_HV_LAST_RESULT} — 闸根本没被执行到"
     exit 2
   fi
@@ -100,9 +105,12 @@ if [ -z "$J1_HV_ALIVE" ]; then
   exit 1
 fi
 
-# 记录格式钉死: `<ISO8601Z> rc=<整数>`。用【定义】判, 不用"它通常长什么样"。
-ts=$(printf '%s' "$J1_HV_ALIVE" | sed -n 's/^\([0-9TZ:-]\{20\}\) rc=.*$/\1/p')
-rc=$(printf '%s' "$J1_HV_ALIVE" | sed -n 's/^[0-9TZ:-]\{20\} rc=\(.*\)$/\1/p')
+# 记录格式钉死: `<ISO8601Z> rc=<整数>[ alert=<整数>]`。用【定义】判, 不用"它通常长什么样"。
+# `alert=` 是 2026-08-10 加的一格(Codex 判 RED): 光有 rc 说不出
+# **"发现了故障, 但没能告诉任何人"** —— 那是本链最危险的状态, 必须机器可判。
+ts=$(printf '%s' "$J1_HV_ALIVE"    | sed -n 's/^\([0-9TZ:-]\{20\}\) rc=.*$/\1/p')
+rc=$(printf '%s' "$J1_HV_ALIVE"    | sed -n 's/^[0-9TZ:-]\{20\} rc=\([^ ]*\).*$/\1/p')
+arc=$(printf '%s' "$J1_HV_ALIVE"   | sed -n 's/^.* alert=\(.*\)$/\1/p')
 if [ -z "$ts" ] || [ -z "$rc" ]; then
   echo "🔴 .alive 记录读不懂: [${J1_HV_ALIVE}] — 格式应为 '<ISO8601Z> rc=<整数>'"
   exit 1
@@ -131,6 +139,22 @@ if [ "$age" -lt "$MIN_AGE" ]; then
   echo "🔴 .alive 来自【未来】: ${age}s — 时钟跳变/文件被搬动, 这个读数不可信"
   exit 1
 fi
+# 🔴 告警链先判, 且【比哨兵 rc 更要紧】: 哨兵报故障还有人能看见, 而告警送不出去
+#    意味着**这个故障没有任何人知道** —— 两者都非零时, 要说出的是后面这句。
+if [ -n "$arc" ]; then
+  n=$arc
+  case "$n" in -*) n=${n#-} ;; esac
+  case "$n" in
+    ''|*[!0-9]*)
+      echo "🔴 .alive 里的 alert 不是整数: [${arc}] — 读不懂的值不当成好消息"
+      exit 1 ;;
+  esac
+  if [ "$arc" -ne 0 ] && [ "$arc" -ne 3 ]; then
+    echo "🔴🔴 发现了故障, 而【告警没能送出去】(alert=${arc}, 哨兵 rc=${rc}, ${age}s 前) — 这个故障目前【没有任何人知道】"
+    exit 1
+  fi
+fi
+
 if [ "$rc" -ne 0 ]; then
   echo "🔴 在岗但【功能不正常】: 最近一次哨兵 rc=${rc} (${age}s 前) — 它在跑, 而它读不出东西"
   exit 1

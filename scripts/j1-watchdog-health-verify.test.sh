@@ -34,6 +34,10 @@ run "task Disabled"                  "Disabled" ""  "$FRESH rc=0"          2 "�
 run "unknown task state"             "Weird"    ""  "$FRESH rc=0"          2 "无法识别"
 # 包装层自身失败(这一格对计划任务可见, 对日志不可见)
 run "wrapper failed LastTaskResult=2" "Ready"   "2" "$FRESH rc=0"          2 "包装层本身失败"
+# 🔴 1 是包装层【故意】的信号(发现故障但告警送不出去), 不是崩溃 ——
+#    旧规则"非零=崩了"会打出"闸根本没被执行到", 而闸明明跑了。归错因 ⇒ 引向错的修法。
+run "LastTaskResult=1 是已定义值不是崩溃" "Ready" "1" "$FRESH rc=1 alert=1" 1 "没有任何人知道"
+run "LastTaskResult=127 仍算包装层坏"     "Ready" "127" "$FRESH rc=0"        2 "包装层本身失败"
 run "LastTaskResult non-integer"      "Ready"   "x" "$FRESH rc=0"          2 "不是整数"
 # registered-but-never-ran
 run "registered but never ran"       "Ready"    "0" ""                     1 "从未跑成过"
@@ -54,6 +58,19 @@ run "malformed rc (1-2)"             "Ready"    "0" "$FRESH rc=1-2"        1 "�
 run "malformed rc (--5)"             "Ready"    "0" "$FRESH rc=--5"        1 "不是整数"
 run "unparseable timestamp"          "Ready"    "0" "2026-13-45T99:99:99Z rc=0" 1 "解析不了"
 
+
+# ── `.alive` 里的 alert= 那一格(Codex 2026-08-10 第三轮 RED) ──────────────────
+# 🔴 它要说的是一句 rc 说不出来的话: **发现了故障, 而【没能告诉任何人】**。
+#    这是本链最危险的状态 —— 它必须机器可判, 不能只活在一行日志里。
+run "alert=0 (已送出)"          "Ready" "0" "$FRESH rc=1 alert=0"  1 "功能不正常"
+run "alert=3 (被限流·非致命)"   "Ready" "0" "$FRESH rc=1 alert=3"  1 "功能不正常"
+run "🔴 alert=1 (告警送不出去)" "Ready" "0" "$FRESH rc=1 alert=1"  1 "没有任何人知道"
+run "alert 非整数"              "Ready" "0" "$FRESH rc=0 alert=x"  1 "alert 不是整数"
+run "健康 + alert=0"            "Ready" "0" "$FRESH rc=0 alert=0"  0 ""
+run "旧格式(无 alert=)仍可读"   "Ready" "0" "$FRESH rc=0"          0 ""
+# 🔴 优先级: 两个都非零时, 要说出的是【没人知道】那句, 不是【读不出东西】那句 ——
+#    前者比后者严重, 而它们的处置不同(去修告警链 vs 去修哨兵)。
+run "rc=2 且 alert=1 ⇒ 报没人知道" "Ready" "0" "$FRESH rc=2 alert=1" 1 "没有任何人知道"
 
 # ── 新鲜度那把尺【自己的出处】(Codex 2026-08-10 判 RED 的那格) ────────────────
 # 🔴 头一条就是他给的反例原样: 任务真装 5 分钟, 调用方要 1000 分钟, 记录已 1000 秒。
