@@ -127,12 +127,17 @@ Say '--- part 3: multi-round loop state (Codex: parts 1 and 2 cannot see the fee
 # 的每一次 chainBlocks 都不动)。⇒ 这个假体不是方便, 它就是被测环境。
 
 $multiStubs = @'
-function Start-Miner-Unless-Paused { $script:pulsedThisRound = $true; $script:started++ }
-function Stop-Miner { $script:stopped++ }
-function Start-Sleep { param($Seconds) }
+function Start-Miner-Unless-Paused { $script:pulsedThisRound = $true; $script:started++; $script:seq += @('start') }
+function Stop-Miner { $script:stopped++; $script:seq += @('stop') }
+function Start-Sleep {
+  param([int]$Seconds, [int]$Milliseconds)
+  # 两种 sleep 必须分得开: 脉冲时长走 -Seconds, 结算窗走 -Milliseconds。
+  if ($Milliseconds -gt 0) { $script:seq += @("settle:$Milliseconds") } else { $script:seq += @("pulse:$Seconds") }
+}
 function Alert($m) { $script:alerts += @($m) }
 function Log($m)   { }
 function Get-DaaNow {
+  $script:seq += @('read')
   if ($script:daaUnknown) { return $null }
   if ($script:pulsedThisRound -and $script:wedged -eq $false) { $script:simDaa = $script:simDaa + 5 }
   return $script:simDaa
@@ -141,7 +146,9 @@ function Get-DaaNow {
 
 function Run-Rounds($name, $wedgeAfterPulse, $daaUnknown, $rounds, $expPulses, $expHaltedBy, $expAlert) {
   $script:simDaa = [uint64]1000; $script:started = 0; $script:stopped = 0; $script:alerts = @()
+  $script:seq = @()
   $script:daaUnknown = $daaUnknown
+  $DAA_SETTLE_MS = 1500
   $script:wedged = ($wedgeAfterPulse -eq 0)
   $pulseHalted = $false; $pulseCount = 0; $pulseRefTips = 200
   $MAX_PULSES = 20; $PULSE_CHECK = 5; $PULSE_SEC = 20; $TIPS_RESUME = 50; $round = 0
@@ -188,6 +195,25 @@ Run-Rounds 'healthy 3 then wedges -> halts at 4' 3 $false 10  4  4     'DID NOT 
 # 读不到 DAA: 未知不许当成成功。断言告警是【UNKNOWN 那一条】而不只是"停了" ——
 # 变异测试证明: 少了这个断言, 删掉 unknown 守卫后本条照样绿。
 Run-Rounds 'DAA unreadable -> UNKNOWN halt'     99 $true  10  1  1     'PULSE OUTCOME UNKNOWN'
+
+# 结算窗(@NWT 提的 MUST-FIX): 断言的是【顺序】—— stop 之后、read 之前必须有一段毫秒级 sleep。
+# 🔴 不断言"存在一个 sleep": 常量原地不动而 sleep 被挪到别处, 保证就没了而断言照样绿。
+#    也不断言具体毫秒数: 那个数按机器测(刹车那台 max 483ms vs console 那台 <=110ms, 差 4 倍),
+#    把它焊进用例等于让用例在另一台机器上说谎。
+$script:simDaa = [uint64]1000; $script:started = 0; $script:stopped = 0; $script:alerts = @(); $script:seq = @()
+$script:daaUnknown = $false; $script:wedged = $false; $script:pulsedThisRound = $false
+$pulseHalted = $false; $pulseCount = 0; $pulseRefTips = 200; $MAX_PULSES = 20; $PULSE_CHECK = 5
+$PULSE_SEC = 20; $DAA_SETTLE_MS = 1500; $TIPS_RESUME = 50; $round = 1; $tips = 200
+$daaNow = [uint64]1000; $daaAdvancing = $null
+. ([scriptblock]::Create($multiStubs + "`n" + $chain))
+$iStop = [Array]::IndexOf($script:seq, 'stop')
+$iRead = [Array]::IndexOf($script:seq, 'read')
+$iSettle = -1
+for ($i = 0; $i -lt $script:seq.Count; $i++) { if ($script:seq[$i] -like 'settle:*') { $iSettle = $i; break } }
+$ordered = ($iStop -ge 0 -and $iSettle -gt $iStop -and $iRead -gt $iSettle)
+if ($ordered) { $script:pass++ } else { $script:fail++ }
+Say ("[{0}] {1,-40} seq = {2}" -f $(if ($ordered) { 'PASS' } else { 'FAIL' }), 'settle window sits stop->settle->read', ($script:seq -join ' -> '))
+if (-not $ordered) { Say "       expected a millisecond sleep strictly between Stop-Miner and the DAA read" }
 
 Say ''
 Say ("result: {0} PASS / {1} FAIL" -f $script:pass, $script:fail)

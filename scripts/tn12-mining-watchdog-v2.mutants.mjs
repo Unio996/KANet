@@ -30,3 +30,8 @@ mutate('mut6', 'try { $daaNow = [uint64]$health.virtualDaaScore } catch { $daaNo
 // ⑦ 🔴 把授权信号【接回循环顶部那个 $daaAdvancing】—— 即 Codex 抓到的原缺陷本身, 重新注入。
 //    这一条是本组最重要的: 它检验的不是某个 off-by-one, 而是【那个自证回路会不会被人接回来】。
 mutate('mut7', '$daaPost -le $daaPre', '-not $daaAdvancing');
+// ⑧ 🔴 把结算窗挪到 Stop-Miner【之前】—— 常量原地不动、sleep 也还在, 只有【顺序】没了。
+//    这正是"断言存在一个 sleep"抓不到而"断言顺序"能抓到的那种静默失效。
+mutate('mut8',
+  '      Start-Sleep -Milliseconds $DAA_SETTLE_MS\n      $daaPost = Get-DaaNow',
+  '      $daaPost = Get-DaaNow\n      Start-Sleep -Milliseconds $DAA_SETTLE_MS');

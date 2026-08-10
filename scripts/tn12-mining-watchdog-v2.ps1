@@ -247,6 +247,23 @@ $PULSE_SEC   = if ($env:TN12_PULSE_SEC)   { [int]$env:TN12_PULSE_SEC }   else { 
 # In regime B the pulse is not merely useless, it is the thing making recovery harder.
 # ⇒ Prove the premise before pulsing, measure whether the pulse worked, and cap how long we
 #   are willing to keep doing something that is not working.
+# How long to let virtualDaaScore settle after the miner stops, before reading it as this pulse's
+# outcome. Without it the pay-for-itself check can sample a DAA that has not yet absorbed the
+# blocks the pulse just produced, and score a working pulse as a wedge -- the failure would look
+# exactly like the thing the gate exists to detect. Raised by @NWT; @KANet-UI measured it first.
+#
+# 🔴 Measured ON THE MACHINE THAT BRAKES (J1tn 2026-08-10, read-only over the RPC tunnel, 15s,
+# 61 blocks, 32 DAA transitions): p50 441ms / p90 475ms / max 483ms, with a 100ms polling
+# granularity so those are UPPER BOUNDS rather than exact values.
+# 🔴 That is ~4x @KANet-UI's reading of <=110ms on the console host. Same protocol, same code,
+# different hardware -- so "1s gives 9x margin" holds on his machine and gives barely 2x on
+# this one. THIS NUMBER DOES NOT TRANSFER BETWEEN MACHINES; re-measure before trusting it
+# anywhere else. 1500ms is ~3x the measured max here.
+# 🔵 Honest note on what this changes today: Get-DaaNow spawns the probe process, which takes
+# ~9.5s wall clock (node start + wasm + RPC), so the race was already covered by roughly 20x --
+# by accident. This constant converts that accident into a stated guarantee that survives the
+# probe ever getting faster.
+$DAA_SETTLE_MS = if ($env:TN12_DAA_SETTLE_MS) { [int]$env:TN12_DAA_SETTLE_MS } else { 1500 }
 $MAX_PULSES  = if ($env:TN12_MAX_PULSES)  { [int]$env:TN12_MAX_PULSES }  else { 20 }  # consecutive pulses before we stop and shout
 $PULSE_CHECK = if ($env:TN12_PULSE_CHECK) { [int]$env:TN12_PULSE_CHECK } else { 5 }   # every N pulses, did tips actually fall?
 
@@ -834,6 +851,11 @@ while ($true) {
       Start-Miner-Unless-Paused
       Start-Sleep -Seconds $PULSE_SEC
       Stop-Miner
+      # Settle window: see $DAA_SETTLE_MS. This must sit BETWEEN the stop and the read, and it is
+      # the ordering that carries the meaning -- moving it anywhere else leaves the constant in
+      # place while the guarantee is gone, which is why the test asserts the order and not the
+      # presence of a sleep.
+      Start-Sleep -Milliseconds $DAA_SETTLE_MS
       $daaPost = Get-DaaNow
       $pulseCount++
       Log "braked: pulsed ${PULSE_SEC}s to drain (tips=$tips, need <$TIPS_RESUME, pulse $pulseCount/$MAX_PULSES, daa $daaPre -> $daaPost)"
