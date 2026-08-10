@@ -6,7 +6,10 @@
 #    去制造一次真故障】。取读数那一半(probe)另有单发实测, 两半分开, 各自可证。
 # 🔴 断言【退码 + 输出关键词】两样, 不只断言"有没有喊":
 #    "取不到"(2) 与 "故障"(1) 在只看有没有输出时读数相同, 而它们导出的动作相反(修链路 vs 救矿机)。
-S=/d/kanet/kanet/scripts/j1-watchdog-sentinel-once.sh
+# 路径从本文件位置推导, 不写死 —— @NWT 2026-08-10 实测: 她那台检出在 /d/kanet-tn12,
+# 写死 /d/kanet/kanet/... 的版本在她机器上直接 "No such file or directory"。
+SELF_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd) || SELF_DIR=.
+S=${J1_SENTINEL_UNDER_TEST:-$SELF_DIR/j1-watchdog-sentinel-once.sh}
 pass=0; fail=0
 
 run() { # name  line  expect_rc  expect_kw
@@ -36,6 +39,16 @@ run "slightly future, in window"  "WD=1 MINER=1 HB=-1000"     0 ""
 run "missing heartbeat (none)"    "WD=1 MINER=1 HB=none"      1 "心跳不可用"
 run "malformed heartbeat (bad)"   "WD=1 MINER=1 HB=bad"       1 "心跳不可用"
 run "empty heartbeat"             "WD=1 MINER=1 HB="          1 "心跳不可用"
+# 🔴 @KANet-UI 2026-08-10 实测打穿的那一族: 全由【数字和连字符】组成, 因此穿过旧字符类,
+#    再让 `[ -gt ]` 报 integer expression expected ⇒ if 当假 ⇒ 两道阈值走空 ⇒ 静默 exit 0。
+#    失败方向朝着"没事" = 最坏的一种。这几行就是那个缺陷本身。
+run "KUI: dash inside (1-2)"      "WD=1 MINER=1 HB=1-2"       1 "心跳不可用"
+run "KUI: double minus (--5)"     "WD=1 MINER=1 HB=--5"       1 "心跳不可用"
+run "lone dash"                   "WD=1 MINER=1 HB=-"         1 "心跳不可用"
+run "trailing dash (5-)"          "WD=1 MINER=1 HB=5-"        1 "心跳不可用"
+run "minus in middle (30-000)"    "WD=1 MINER=1 HB=30-000"    1 "心跳不可用"
+run "plus sign (+5)"              "WD=1 MINER=1 HB=+5"        1 "心跳不可用"
+run "negative zero (-0)"          "WD=1 MINER=1 HB=-0"        0 ""
 # 进程数
 run "watchdog gone (WD=0)"        "WD=0 MINER=1 HB=30000"     1 "实例数=0"
 run "two watchdogs (WD=2)"        "WD=2 MINER=1 HB=30000"     1 "实例数=2"
