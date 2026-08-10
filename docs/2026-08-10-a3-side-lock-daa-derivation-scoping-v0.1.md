@@ -97,6 +97,36 @@ import { canonicalBetOrder, computeBetsRoot, payoutRoot as computeMerkleRoot } f
 
 ---
 
+### 路 D · 从 **UTXO 条目自带的 `blockDaaScore`** 取值 —— 🔴 **已实测,对 side 侧【不成立】**
+
+> 来源:@J1tn 2026-08-10 16:42 源码实核(`utxo_validation.rs:147` `pov_daa_score` → `utxo_diff.rs:234` `UtxoEntry::new(value, spk, block_daa_score, …)`)。
+> **想法本身是对的**:UTXO 集是剪裁**不删**的那部分,条目里的 daa 是**接受块 DAA、共识值、被剪裁点 MuHash 承诺覆盖** ⇒ **它在 §2 确定性轴上结构性合格**。J1 在 `spine_p2sh` 上实测三盘全部读得出(块本身已 `cannot find header`)。
+
+🔴 **而打在 `side_p2sh` 上就不成立 —— J2 2026-08-10 16:4xZ 实测**:
+```
+阳性对照(2 行【已有】side_lock_daa, 同调用同类地址 = 真·同路径):
+   库存 59,950,126 → utxo=1 daa=59,562,352   🔴 不等
+   库存 60,244,919 → utxo=1 daa=59,562,352   🔴 不等
+待测 8 行: 全部 utxo=1 · daa=59,562,352 · 值=0.2 KAS
+```
+**根因(现查坐实)**:该市场 `side_p2sh` **只有 1 个不同值、被 10 行共用**;`side_redeem_script_hex` **长度 0**
+⇒ **bshard 共享池形态:每个 bettor 根本没有独立的 side UTXO。** 那 0.2 KAS 是 `PS_SEED`(`pool-shard-register.mjs:79` = 20,000,000 sompi),**不是任何人的注**。
+⇒ **不是"被花了",是【从来就没有过】。**
+
+#### 🔴🔴 这一格拦下的东西,是本稿存在的理由
+**若没有那 2 行阳性对照,这一跑会输出「🟢 8/8 可取 daa」** —— 而那个 daa 是**分片种子块的、十个人完全相同**。
+喂进 `canonicalBetOrder` ⇒ **排序键全相等** ⇒ 退化成 tiebreak ⇒ **payoutRoot 与真值不同,且【每个委员各自重算也会一致地错】**。
+🔨 **⇒ 一个"所有节点都同意"的错值,比一个不一致的错值更危险** —— 前者过得了 §2 的确定性轴,而确定性轴正是本稿用来筛路的那把尺。**确定性合格 ≠ 正确。**
+
+#### 🙋 而这个坑本仓早已写下,是我没先读到
+`trade-protocol-filter.js:1194-1196` 逐字:
+> **不走「查 `side_p2sh` 未花费 UTXO 反推」那条路**(2026-07-08 method switch 注释里明确记录的历史假阴性:bet 落地后可能被 register-v07 吸收进 shard 聚合 leaf,UTXO 不再"未花费"——对已吸收的合法 bet 会误判查无此 tx)。
+
+**那条注释就是为挡这条路写的。** 我为确认该函数只读而读过这个文件,**却没读到这一段就动了手**。记 J2 账上。
+🔵 **边界一并入档(免得下一个人重跑)**:**J1 的方法对 `spine_p2sh` 一类值有效;对 `side_lock_daa` 无效。**
+
+---
+
 ## §4 我的判断(标明是判断,不是结论)
 
 **路 A 收益近零;路 C 是钱路决策不是技术活;⇒ 唯一有技术含量的是路 B,而路 B 的代价【不是工作量,是信任模型】。**
