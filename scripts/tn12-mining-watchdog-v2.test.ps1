@@ -398,13 +398,25 @@ $APPROVED_SITES = @(
 $violations = [System.Collections.ArrayList]::new()
 foreach ($s in $readSites) { if ($APPROVED_SITES -notcontains $s.t) { [void]$violations.Add($s) } }
 # 陈站点也要红: 一条指向已经不存在的行的批准, 会在将来某行恰好长成那样时无声地罩住它。
+# 🔴 而【出现次数】也要卡死 —— @NWT 13:19 指出: 按整行文本匹配时, 把已批准那行逐字复制到别处,
+#    两处都会被判"已批准"(集合成员检查不查次数)。
+#    他判不卡部署, 理由是那需要开发者【故意】复制一行去骗测试, 而本用例的信任模型是"防无意回归"
+#    不是"防故意后门" —— 这个理由本身成立, 我不争。
+#    🔨 **但他那条覆盖不到一个无意路径: 重构时的复制粘贴会产生一模一样的局面, 而"无意"正是信任模型之内。**
+#    ⇒ 既然修它几乎免费(一次计数), 就不必去裁决威胁模型: 每条批准站点必须【恰好出现一次】。
 $staleSites = [System.Collections.ArrayList]::new()
-foreach ($a in $APPROVED_SITES) { $hit = $false; foreach ($s in $readSites) { if ($s.t -eq $a) { $hit = $true } }; if (-not $hit) { [void]$staleSites.Add($a) } }
-$siteOk = ($violations.Count -eq 0) -and ($staleSites.Count -eq 0)
+$dupSites = [System.Collections.ArrayList]::new()
+foreach ($a in $APPROVED_SITES) {
+  $hits = @($readSites | Where-Object { $_.t -eq $a })
+  if ($hits.Count -eq 0) { [void]$staleSites.Add($a) }
+  elseif ($hits.Count -gt 1) { [void]$dupSites.Add("$a  (x$($hits.Count): lines $(($hits | ForEach-Object { $_.n }) -join ', '))") }
+}
+$siteOk = ($violations.Count -eq 0) -and ($staleSites.Count -eq 0) -and ($dupSites.Count -eq 0)
 if ($siteOk) { $script:pass++ } else { $script:fail++ }
 Say ("[{0}] {1,-42} readSites={2} approved={3} violations={4}" -f $(if ($siteOk) { 'PASS' } else { 'FAIL' }), 'every TN12 env READ SITE is approved', $readSites.Count, $APPROVED_SITES.Count, $violations.Count)
 foreach ($v in $violations) { Say ("       [RED] line {0}: {1}" -f $v.n, $v.t) }
 foreach ($a in $staleSites) { Say ("       [RED] approved site no longer present: {0}" -f $a) }
+foreach ($d in $dupSites) { Say ("       [RED] approved site appears more than once: {0}" -f $d) }
 
 # 🔴 这里原本还有一条【按名字】的检查(每个 TN12_ 名字必须有域)。**删掉了, 不是因为重复, 是因为它在
 #    对抗输入上打绿灯**: Codex 点名的两条阴性(已受控名字的第二次裸读 / 已豁免名字的第二次裸读)
