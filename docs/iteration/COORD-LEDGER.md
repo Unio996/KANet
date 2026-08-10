@@ -8,6 +8,14 @@
 
 ---
 
+### (145) 2026-08-10 13:2x-14:1xZ — 🚀 Owner 全线放行 · canary#2 执行(S1-S5 落地·三层堵点拆二定位一)· watchdog 部署上机 A1-A5 全过 · RPC 20 天不稳总根源钉死(60s cron 对不可读金库地址自杀循环)
+> ⏱ Owner 直令"按建议尽快推进"→四线放行(watchdog 部署/canary#2/②-a 施工/getBlockAtDaa)。
+- **canary#2(j34vb)**: "六步清单"证实无书面正本(Bettor 引用未核, 认账)→ J2 起草书面执行计划(34887024→6190c81c→dbe3a83c 执行记录), 四条纪律头部预登记。执行弧: dry-run 停止条件真实击发(12/8/4 vs 在册 13/9/4)→ Bettor 独立 DB 核+逐 id 差集裁定(9/4 子分组证实无 id 级正本, 以今日 8/4 为新基线; 聚合自洽≠身份层验证, NWT/J1 合流)→ **S4 回填执行(全日唯一写, CAS, ONLY 限死)+S5 独立核实通过**→ 判别窗 2-tick: unreachable 原样 ⇒ 甲2/乙(进程毒化)坐实。**三层堵点模型定案(J2)**: ①陈 payout_ps_addr(✅回填拆)②wasm trap(✅重启拆·会复发)③bettor 4173a91c 缺 side_lock_daa(🔴新现形=25 天前"7 个 walk 余量不够"旧账, 修复线=getBlockAtDaa 落码, 三线会师)。**settle_txid 仍 null, canary#2 未成功**——准确口径:"三层已拆二、第三层已定位有修法有归属"。
+- **watchdog 部署(J1)**: Codex 末轮(34d9060c)read-site CLOSED 零新格 ⇒ 闸开, 按 runbook(ea2c7563+NWT step5 阻塞式收紧)执行, **A1-A5 全过**。事故如实报: 新实例中途死一次(矿机无监管 ~70s, WMI Create 重起)。报告口径守判据稿 B 段: 无刹车事件="not yet exercised"。
+- **🔴 RPC 总根源(KANet-UI 读码钉死, Bettor 假说对一半)**: ①启动 6 秒 trap=`index.js:749 autoSplitAll()` 碰不可读地址 ②1.2 次/分背景流=`mining-utxo-consolidate.mjs` 60s cron 打 MiningRelay(10.76 亿·不可读)——**每分钟对读不动的地址自杀一次=持续再毒化**; FAUCET_RELAY_ID 实指健康的 tn-1(Bettor 猜错处 KANet-UI 修正)。止血=cron env 开关+不可读地址跳过守卫(diff 审后随重启窗#2 装载, 同窗 b2a628a7); 验收判据照 J2 写"≤2~3 次/10 分钟"非"归零"(0.2/分未知残余不许被叙事吃掉)。根治仍归 TREASURY-UTXO-UNREADABLE 卡。
+- **重启窗#1(KANet-UI)**: b2a628a7 因 NWT 复审晚到几秒被按"未定"剔除(预授权序列正确行为, NWT 认可, PASS 留下窗用)——纯清毒重启, 五检过, 计数 86→2(1 真 trap 6 秒复发=触发源在, 如实两向记)。
+- 其余: J1 穷尽查证"30 请求首时刻"双侧无痕迹=永久不可归因(如实收尾)· Broker(b) 证实交付物从未存在(改明晨, KANet-UI)· ②-a 双 runbook 交付(回退 fd86b600 NWT PASS/正向 544af3ee 含 D1-D6 待 Owner 清单已单点上报)。
+
 ### (144) 2026-08-10 08:2x-09:2xZ — 🏆 watchdog 全弧四件闭合(J1 落码×5 · KANet-UI/NWT 双审×4 · Codex 独立抓洞×2)· 预登记判据稿批为闸契约 · 格① J1 接(a) · 待 Owner: 部署 GO
 > ⏱ 08:20-09:18Z · 全程零部署零链上, 每一环全闸。
 - **四件依序闭合**: ①自证回路(Codex 抓"pulse N 的 DAA 推进被 N+1 当授权"⇒ J1 选显式弱化不变量路线[路①在此拓扑结构性不可得, 实测背书], 5d44706b 逐发自测+MAX_PULSES, Codex 复核 CLOSED-IN-CODE) ②settle 时序(NWT 抓 Stop-Miner 后零沉降即读 virtualDaaScore; KANet-UI 1 分钟内实测本机上界≤110ms+J1 刹车机实测 p50 441/max 483ms——**跨机 caveat 应验, 差 4 倍**; 1f43e2d0 取 1500ms, J1 自查出 Get-DaaNow ~9.5s 一直偶然掩盖竞态→转显式保证, NWT 关) ③env 覆盖无校验(Codex 抓安全常量可被 env 设 0/负/低于包络而与正上方安全论证静默分叉; 04c83c62 五件闭: safe-value-first/TryParse/fail-closed 取更长值且 loud/floor=1000ms/七种阴性用例; mut9=原缺陷重注被抓) ④上界 minor(NWT 提, J1 不因"不卡部署"搁置, 131fe708 warn-not-reject 风险类别自洽)。终态: **28/28 测试+11 mutant 全咬, 双复审 PASS, 仍零部署**。
