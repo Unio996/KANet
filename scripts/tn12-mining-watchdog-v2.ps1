@@ -720,6 +720,25 @@ if ($DAA_SETTLE_RAW) {
   } else {
     $DAA_SETTLE_MS = $parsed
     Log "settle window overridden to ${DAA_SETTLE_MS}ms (>= floor ${DAA_SETTLE_FLOOR_MS}ms)"
+    # @NWT's minor note, and he is right that it deserves the same treatment I argued for on
+    # TIPS_BRAKE. A typo with extra zeros passes the floor happily: 999999999ms would leave the
+    # miner stopped for ~11.5 days per pulse, which disables the watchdog without breaking any
+    # of the correctness holes now closed.
+    # ACCEPTED rather than rejected, because the risk class is different -- this is operator
+    # intent producing an availability problem, not a silent correctness failure, and it shows
+    # itself by the next pulse simply never being logged. Silently clamping it would be hiding
+    # intent, which is the thing I objected to on TIPS_BRAKE.
+    # The ceiling is derived, not chosen: the time spent MEASURING a pulse should not exceed the
+    # pulse itself. So the alert fires above PULSE_SEC.
+    # 🔴 The alert states the consequence in wall clock, not the raw number. An operator who typed
+    # one zero too many recognises "the miner will sit stopped for 11.6 days" instantly and will
+    # read straight past "999999999 ms".
+    $ceilingMs = $PULSE_SEC * 1000
+    if ($DAA_SETTLE_MS -gt $ceilingMs) {
+      $days = [math]::Round($DAA_SETTLE_MS / 86400000.0, 2)
+      $mins = [math]::Round($DAA_SETTLE_MS / 60000.0, 1)
+      Alert "SETTLE WINDOW IS LONGER THAN THE PULSE: TN12_DAA_SETTLE_MS=$DAA_SETTLE_MS exceeds the ${ceilingMs}ms pulse. Accepted as deliberate, but every pulse will now wait ${mins} minutes (${days} days) with the MINER STOPPED before it can score itself, which effectively disables the brake's ability to drain. If this was a typo, that is what it will look like: the next pulse simply never appears in this log."
+    }
   }
 }
 if ($TIPS_BRAKE -ge $MERGESET_CLIFF) {
