@@ -207,7 +207,29 @@ $ErrorActionPreference = 'Continue'
 # A circuit breaker nobody ever tripped on purpose is decoration: you cannot tell
 # "never fires because all is well" from "never fires because it is broken".
 # Verify with:  TN12_TIPS_BRAKE=1 TN12_TIPS_RESUME=0 TN12_POLL_SEC=5 TN12_MAX_ROUNDS=4
-$TIPS_BRAKE  = if ($env:TN12_TIPS_BRAKE)  { [int]$env:TN12_TIPS_BRAKE }  else { 500 }  # above -> stop mining, digest
+# The mergeset cliff, traced to source rather than repeated from memory (J1tn 2026-08-10).
+# It had been quoted as "248" in every discussion for two days without anyone naming where it
+# comes from, which is exactly how a number survives being wrong. On rusty-kaspa HEAD ab4c51a:
+#   TESTNET12_PARAMS inherits ..TESTNET_PARAMS -> blockrate = BlockrateParams::new::<10>()
+#   -> Bps<10>::ghostdag_k() = 124 -> mergeset_size_limit() = 124 * 2 = 248
+# 🔴 Scope: read on MY tree. Other machines' checkouts differ (J2/Bettor read v2.0.0 at the same
+# path on 2026-08-06), so re-derive rather than trust this line if the network params ever move.
+$MERGESET_CLIFF = 248
+# 🔴 Was 500 until 2026-08-10, i.e. 252 tips ABOVE the cliff it was supposed to back up: a level
+# brake set past the point of no return can only fire after the damage, which makes it decoration.
+# That argument is structural and needs no frequency data.
+# 220 is chosen with ~28 tips of margin under the cliff. Measured false-brake cost of 220 = ZERO:
+# across the full 18.7h remote sample record (scratch/tn12-remote-dag-samples.jsonl) max tips was
+# 155 and the count of samples above 180 was 0.
+# 🔴 READ THIS BEFORE TUNING IT: this is the BACKSTOP, not the primary criterion, and lowering it
+# does NOT make the brake fire earlier. In all three recorded climb cycles (2026-08-09 12:0x/3x/5x)
+# the brake was engaged by the `overproduction` DERIVATIVE verdict every single time, and this
+# level threshold fired exactly zero times in the whole record. What actually gates how early the
+# brake speaks is the probe's RISE_FLOOR (150): in cycle 1 the streak, span and 1.5x-growth
+# conditions were all satisfied at 12:04:50Z (tips=104, streak=14, span=288s, 104/64=1.63) while
+# the verdict waited until 12:10:17Z (tips=152) -- RISE_FLOOR alone cost 5.5 minutes of warning
+# and 48 of the 96 tips of headroom under the cliff. Tune THAT if you want earlier braking.
+$TIPS_BRAKE  = if ($env:TN12_TIPS_BRAKE)  { [int]$env:TN12_TIPS_BRAKE }  else { 220 }  # above -> stop mining, digest
 $TIPS_RESUME = if ($env:TN12_TIPS_RESUME) { [int]$env:TN12_TIPS_RESUME } else { 50 }   # back below -> resume
 $POLL_SEC    = if ($env:TN12_POLL_SEC)    { [int]$env:TN12_POLL_SEC }    else { 30 }
 $MAX_ROUNDS  = if ($env:TN12_MAX_ROUNDS)  { [int]$env:TN12_MAX_ROUNDS }  else { 0 }    # 0 = run forever
@@ -608,7 +630,20 @@ function Start-Miner-Unless-Paused {
 $braked      = $false
 $probeFails  = 0
 $round       = 0
-Log "watchdog v2 started (brake>$TIPS_BRAKE resume<$TIPS_RESUME poll=${POLL_SEC}s threads=$CPU_THREADS maxRounds=$MAX_ROUNDS)"
+Log "watchdog v2 started (brake>$TIPS_BRAKE resume<$TIPS_RESUME poll=${POLL_SEC}s threads=$CPU_THREADS maxRounds=$MAX_ROUNDS cliff=$MERGESET_CLIFF)"
+# The guard lives next to the constant rather than in a test file, deliberately: a test asserting
+# "TIPS_BRAKE < 248" can be satisfied by a repo the deployed machine is not running, and this
+# script's whole history is one of live/repo drift. Here it is checked on the machine that brakes,
+# at the moment it starts, using the value that machine actually has -- including one handed in by
+# env, which no repo-side test can see at all.
+# It ALERTS and keeps running rather than refusing to start: a watchdog that exits leaves the miner
+# entirely unsupervised, which is strictly worse than a badly-placed backstop. It also does not
+# silently clamp the value -- that would hide an operator's intent instead of contradicting it.
+# Exercise it (this must print a loud alert, and the run must continue):
+#   TN12_TIPS_BRAKE=999 TN12_MAX_ROUNDS=1 powershell -File tn12-mining-watchdog-v2.ps1
+if ($TIPS_BRAKE -ge $MERGESET_CLIFF) {
+  Alert "MISCONFIGURED BACKSTOP: TIPS_BRAKE=$TIPS_BRAKE is at or above the mergeset cliff ($MERGESET_CLIFF). A level brake past the cliff can only fire after the DAG is already unrecoverable, so this backstop is currently decoration. The derivative verdict (diagnosis=overproduction) is unaffected and still brakes. Set TN12_TIPS_BRAKE below $MERGESET_CLIFF."
+}
 
 while ($true) {
   $round++
