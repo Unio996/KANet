@@ -8,6 +8,13 @@
 
 ---
 
+### (143) 2026-08-10 07:4x-07:5xZ — 🔴 J1 出站频道腿断(链上有·视图无·仅他)· pulse 权衡 Bettor 二审背书 · watchdog 5 进程仍跑旧逻辑警报 · D-012 下午段: ⑤① 设计两轮/④扫射 v0.2/4cf59f14 过审
+> ⏱ 07:40-07:55Z · J1 全程经 git 路由交流(频道即故障件, 正确地不用故障件报故障)。
+- **🔴→✅ J1-OUTBOUND-CHANNEL-INVISIBLE(08:0x 结案换轨)**: 症状=J1 07:14/07:33/07:41 三条链上确认而视图无。**根因(KANet-UI 坐实)= :3200 kaspa-scout scanner 07:11:16Z 被停 49 分钟**——它是跨节点 bcast 入库唯一路径(rpc-listener PROCESSABLE_TYPES 不含 bcast); 本机四人走 chat.js:269 本地 INSERT 不经 scanner ⇒ "只丢 J1"是拓扑假象非消息特异性(卡面原前提作废; J2 对照臂自撤=与故障段零共享组件, 对照臂族新形态: **只共享"频道"这个名字不算同路径**)。scanner 已重启(PID 33248, checkpoint 实时)+孤儿清除, **J1 08:06 首条消息落视图=腿复活实证**。裁定: **断窗 3 条不手工回填**(先例=(139) CATCHUP_COMM OFF·状态活 ledger; 内容已由 J1 git 稿送达并全部处理, txid dd49ec2a/a3abfd91/066577c0 留证)。**立卡 SCANNER-STOP-UNATTRIBUTED(P2, KANet-UI)**: ①停启事件落盘(现只存内存) ②**checkpoint 心跳纳监控**——断 49 分钟零告警, 且现有频道缺口监视器结构上抓不到(本地流量掩盖跨节点断流) ③07:11:16Z 调用者归因, 查不出如实记。头号线索(J1 relay 每发一次重启)排除。**修复前 J1 官方通道=git**(已恢复, 该行历史保留)。J1 方法论产出: 窗口查询须先证窗口盖住问的时刻(`feedback_window-must-cover-the-moment-asked-about`); 首轮 created_at 键比对全失配(各 console 自盖戳)改内容键。
+- **✅ pulse 权衡二审(J1 点名, Bettor 背书)**: wedge 态压制 pulse 接受停块——在册实证(悬崖夜=stalled 态加块爬回 506), 停块=可恢复已知态, 加深 mergeset=楔死 17h 那个态。背书只盖逻辑方向, 部署授权仍 Owner-gated(Codex 扣着)。
+- **🔴 watchdog 5 进程旧逻辑(J1 稿§3)**: a9f5abee 在盘, 但 5 个 watchdog 进程 08-03 起跑(-File 启动即读定)至今执行旧逻辑, 零播报——"repo 修复≠live"第 N 次。交付口径改"已提交未生效, 生效判据=进程启动时刻晚于 commit"; 重启 5 进程入部署清单(刹车机, J1 域)。另: J1 自纠"deployed 与 repo 逐字节一致"验证无效(反斜杠被 Git Bash 吃掉, 验了个寂寞), 行为层证据不受影响。
+- **D-012 下午段**: 4cf59f14(J1 progress-gate 修复, 带 test+mutants)KANet-UI 审 PASS(自跑 16/16+自造 4 mutant 验测试咬人)· ⑤① 遏制设计 J2 v0.1(92cc56c0)→NWT PUSH-BACK(MUST-FIX: buildBettorRefundClaim 调用链绕过 RELAY_DIR 遏制点, 今天没炸只靠 P1 闸未被断言的早退顺序——且该顺序历史上已被违反过一次注入实验为证)→J2 v0.2(bd70357d)折入+严重度自抬 · 扫射稿 v0.2(17ecca5d)按裁重标完。J2 当日五连自纠+设计稿 §6 主动披露本班失误率作审查输入。
+
 ### (141) 2026-08-10 06:3x-06:5xZ — 🔄 全员会话重启后接位记账(Bettor 新会话)· J2 双断确认缺位 · J2 带外块转发更正 RPC 归因(NWT DB 独立核实)· 点名收束
 > ⏱ 2026-08-10 06:38-06:50Z · 前任 Bettor 06:25Z 收束(接位快照在 memory `project-settlement-recovery-state-2026-08-10`, NWT 已按 J1 更正修过 kr5l4 段)。⚠ 08-09/08-10 夜窗(RPC 两事件/canary#2 clear-to-GO/kr5l4 定案更正/getBlockAtDaa v0.3 GREEN)未及回写本 ledger, 权威=该 memory + 频道 06:2x-06:3xZ 段 + git(69ce2b9e/6f6c9e3b)。
 - **点名收束**: J1 06:38(自己节点, healthy)· NWT 06:40(无在跑活)· KANet-UI 06:40(digest bump commit 93ef6ff1 已推 origin, Bettor 落地核: ahead=0 工作树净)。**J2 双断确认缺位**: 频道发送断(J2-tn UTXO 2.87<3 KAS, 08-09 22:09 起)+ 本机无其会话(KANet-UI 父链定树: 4 进程=Bettor×2+NWT+KANet-UI)。⇒ **Owner 桌上加一件 (D): spawn J2 新会话 + 给 J2-tn relay(kaspatest:qzcpypy…)补 ≥3 KAS**(小额钱路, Bettor 不自执行)。settler/pipeline 域执行活(canary#2 六步/getBlockAtDaa 落码)在 J2 回来前无执行人。
@@ -16,6 +23,19 @@
 - **Codex 桥**: 无未 ACK 指令(20260807 已 ACK); 最新 review(08-09 22:06Z)freshness=GREEN/CLOSED-IN-CODE · V2 refund gate-2 触发缺口=CONFIRMED/OPEN, 均已折进主干(b6eab0e7/d54a3ae5)。桥分支 watch 已 arm(10min 一拍)。
 - **待 Owner 拍三件不变**: (A) canary#2=j34vb 回填 GO(clear-to-GO) (B) getBlockAtDaa 落码 GO(v0.3 GREEN, 已进 git 69ce2b9e) (C) V2 退款触发器政策(Codex 判自动化 NOT AUTHORIZED)。
 - **P1 OPEN · D4 BLOCKED · 无 money path 授权 · 本段零生产码零链上零生产 DB 写。**
+
+### (142) 2026-08-10 06:4x-07:0xZ — 🚀 Owner 直令"今天 D-012 显著进展" ⇒ 全员切主线, 三格当场出产 · 💸 J2-tn 补币 10 万 KAS 落链(Owner 直令·差额如实报) · 两大金库不可读实证
+> ⏱ 2026-08-10 06:46-07:05Z · Owner 终端直令两条: ①"今天要看到 D-012 显著进展, 不能再拖"②"直接给 J2 转 100 万测试币, 这需要我拍吗"(=钱路 GO)。
+- **派工(#mvehl6)与产出(90 分钟内)**: **格⑥** NWT 裁决 PUSH-BACK(1 MUST-FIX: C-2 fixture 必含"maker_fee_bps 单字段失败其余全成功"形状=R-3 证明的存量必然形状 + 1 补规则: input_set_root 消费方必须同批验 cis_digest; NWT 超出稿面直读 silverscript 编译器源码核 outpoint 内省)· **格③** NWT 裁决 PUSH-BACK(1 MUST-FIX: D2 循环须 covOuts.length===1, 否则 driver 可自资"影子 covenant UTXO"同 P2SH 并存 + 2 加固含"共识拒绝≠RPC 沉默"探针判据)· **格②-a** KANet-UI scoping 八项清单交付(6977773a 已推; §11 回退张力两路径摆给 Owner 不代拍; 排 NWT 队列#6)。⏳ 格① J1 两次追 ACK 未回(其节点域三连发: watchdog 阈值 diff 68d552fc 送审/watchdog 8.4 天 382 次拉起中 75% 是探针自崩/震荡停 12h)。
+- **🔴 §7-7 maker_fee_bps (i)/(ii)/(iii) 裁决 = Bettor 手上头号卡**(NWT 格⑥ 裁决点名: 不裁则 ⑥ 不具备"可实现"): (i) 线已有 retarget 验收判据 v0.3.1(Codex 只闭 conservation 格)+ PoolSpine_i_proto 红队(证 (i) 给 range authority 非 binding)——裁决须先并读 (i) 线成果与 (ii) 推荐, 本班内出。
+- **🔴 "J2 缺位"判定被 J2 本人推翻(07:04), Bettor 认账**: PID 26788 一直是 J2 会话(13:28 起)——KANet-UI"4=Bettor×2"是**排除法负结论无正向证据**, 我照单收下还报上 Owner 桌。🔨 判据: **排除法指认在座者, 每格都要正向证据(如 10948 的 monitor cmdline), 缺一格只能说"未知"**。Owner 桌 (D) 撤销(补币完成+会话本就活着)。
+- **格⑤ 重估交付(J2, 5f4c77f9)**: Codex 四 blocker ③④已闭(阳性对照今天成立·现生 UUID 哨兵 fixture 种不出)/②半闭(签名计数器在, 缺常设断言)/①实剩 ⇒ **量级 1.75-2.75 天**取代"作废重估中"。格④ 如实拆: 只动了"量"(precond4 现跑 6/6 阴性仍被签=缺口实测), 同族扫射未开始。PB-S8-2 今天零动(J2 自撤"三格都动"过头话)。J2 并独立复核格③ MUST-FIX=CONFIRMED+加深一层(为"不必查个数"背书的注释 :146-147 必须连删)。
+- **🏛 §7-7 裁决(Bettor, #mw2lv7)**: maker_fee_bps 权威走 **(ii) 协议常量+被承诺的版本→常量表**。边界三条: 版本判定 P2SH 重算成立(合约体互异)但单字段覆盖须逐合约实测(C-2)/常量表按 policy_receipt 三条最低要求·权威归 ⑥ v0.3 设计题/**(ii) 独立权威运营前置=pin silverc 全节点可得**(J1 机 ENOENT 实证, 立卡 PINNED-SILVERC-DISTRIBUTION 归 KANet-UI 域)。两条不漂: 不废 (i)-retarget 线(另一张卡·Owner-gated); (iii) 只经显式裁决启用。配套: J2 跑 C-2 编译判据(带 minerFee 阳性对照); 排序拍"④扫射→C-2→③④收口"。
+- **✅ C-2 实测落地(J2 探针, 07:17)**: v0.6 spine 的 `oracleFeePct`/`brokerFeePct` **均未烤进 redeem**(改值后 P2SH 字节同哈希; minerFee 阳性对照变=尺子好; cacheHit 列证非缓存假象; J2 自扣: A2 cacheHit=true 不证编译器确定性)。**作用域自限 v0.6 spine 一格**, 不外推 v0.5/v0.7/PoolSide。⇒ R-3"整个费率层无链上权威"该格从[强推断]升[实测]; (ii) 裁决前提加固。⑥ v0.3 折入以此为据。
+- **✅ 格④ 扫射稿 NWT 审(07:17)**: PASS-with-反例(NWT 加第 9 个文件: row_assert 写法零断言, J2 grep 模式够不到; 与 TEST-RUNNER-DEFAULT-DB-IS-PROD 卡交叉——默认库换隔离库后 zero_violations_count 将绿得无意义, 已点名)。④ 定性=design-done·同族扫射第一步已交付。
+- **🔴 卡 TEST-RUNNER-DEFAULT-DB-IS-PROD 撤销(07:3x, 立卡人 Bettor 认账)**: §4"测试默认打生产库"是 **08-04 env-bootstrap 已修问题的问题陈述**(`scripts/test.mjs:10` 首行 import → `env-bootstrap.mjs:88-96` 双 env 指隔离库+每跑删重建+动态 import 序保 client.js 生效)——三路独立收敛(J2 mtime 实测/NWT 代码现读/Bettor grep)。**卡形定案**: ①"空库恒真"并进格④ 恒真墙族(全表不变式用例自 08-04 起每跑对空库 = **现在就空绿**, 扫射稿引的 36012/657/13 全是 prod 手工读数非运行时生效库; J2 出扫射 v0.2 重标+④量级重报; NWT 657 那行自翻) ②残余立小卡 TEST-ENTRY-BYPASS-HITS-PROD(绕过 test.mjs 的直接调用才踩 prod, P3) 。当日"绑定值≠生效值"族四连现身, 双向都错得出: 把已修的隔离当没修来报 / 把字面默认当生效值。
+- **🔴 两笔同族"声明不存在的限制"当日对照**: J2"主树无 PoolSpine_v06.sil"(head 截断结果集当完整集, 自撤)/Bettor 首轮 find 同样被 head 截断但答前用 git ls-tree 双核拦住 ⇒ 判据: **"没找到"和"没看完"读数完全相同, 声明"没有"前先 wc -l 或全量**。
+- **💸 J2-tn 补币(唯一钱路动作, Owner 直令)**: FaucetRelay-tn(发前实探拓扑: 25 UTXO 干净)→ J2-tn **100,000 KAS**, txid `f02187a0e4d8…`, 链上 UTXO 集直查确认(单 UTXO 10 万, DAA 76816372)。病灶三方吻合: J2-tn 6863 碎 UTXO 最大 2.87165554 == 报错值。**Owner 令 100 万实转 10 万**: FaucetRelay-tn-2(3.85 亿)/MiningRelay(10.76 亿)两金库地址 getUtxosByAddresses 即 wasm trap(对照臂三地址正常 ⇒ 地址级 UTXO 集过大)——08-09 faucet 告警从"疑似"升"实测复现"。**立卡 TREASURY-UTXO-UNREADABLE(无主)**: 14 亿测试币两地址发不出任何一笔钱; 修法=分批 consolidate 或绕 wasm 读。J2 补齐 100 万等此卡。⚠ J2 会话仍未开(Owner 桌上 (D) 剩这一半)。
 
 ## 🔖 下一班 Bettor 接位·当前活状态快照(2026-07-17 17:1xZ·Bettor 会话交接·从这里接)
 
