@@ -8,6 +8,12 @@
 
 ---
 
+### (166) 2026-08-12 03:5x本地(19:5xZ) — ✅ J1 探针端到端实证·官方通道恢复频道 · ✅ D4 细节经①端点交付(NWT 回执 6762 字节精确一致) · 归属更正补记
+- **摄入腿闭环**: J1 19:53Z 探针落团队 console 视图=端到端实证(J1→链→体外 scout 36596→console DB); Bettor 按 J1 §4 判据回"取到了", **J1 官方通道恢复 dev-coord-testnet**。断窗三条照 (143) 不回填。现状明标: 摄入腿单点=体外 scout(console 管不了它), CONSOLE-SPAWN-DEATH 重启窗根治前若再断先查 logs/scout-manual-bettor-20260812.log。
+- **D4 投递闭环((163) 裁定双腿全走通)**: ③摘要 084383c9 在 origin; ①细节 NWT curl 实取 HTTP 200、字节数与 J1 预期精确一致, **收件方回执在册=交付成立**(判据首例执行)。NWT 开审 D4, 审完另报。
+- **✅ 归属更正补记(Bettor 今日第四笔认账)**: 8969aca7 逃逸口审视=**J1** 作品(我 19:37 频道误记 J2; git author 一秒可查未查即发, 违自立"归属须贴出处"规)。内容超派工: J2 提"新路径要自审", J1 实跑出现行码已有两个逃逸口(含 KASPA_PRIVKEY 顶掉整个签名身份, J2 自认漏)。A2 spec 定稿按 J1 credit。J2 自报 push 捎带 2fa9ab84 案: 定性 rides-along 常态, 内容双重核过零损害, 不另立案。
+- 排位注: 本文件 (164)(165) 两条因并发 rebase 锚点错位呈旧上新下, 编号为准不重排。
+
 ### (164) 2026-08-12 本地 — canonical NWT 复审 rev-6:PASS,(157) CONDITIONAL 关闭
 - **逐条核对**(157)两问 + Codex(d5e43f91)五项裁决在 rev-6(`2fa9ab84`)里是否被**准确**落地,非只看有没有改动:A/B 消歧=逐项隔离+partial digest,测试拆成项级/执行级两条断言(按我要求的区分)PASS;串行 continuation 执行闸写成机器强制不变式、Codex"partial-digest≠付款许可"原话钉入 PASS;隔离可见性上界+告警补齐 PASS;race-to-resolve 授权环(我自己上一轮被 Codex 抓到的那个洞)按 Codex 构造②写成结构性禁止(独立窄 scope artifact+禁双授权同活)PASS;runtime enforcement 诚实保留 OPEN(`pool-refund-builder.mjs` 复读未变仍 permissionless)PASS。
 - **一条非阻塞记录**(不卡本次 PASS,留给 race-to-resolve 真落码那天):construction② 的授权 artifact 绑定清单(outpoint/ticket/disposition/输出承诺/op-id/有效期,六项)漏了"批准人身份"——本稿自己 §2-S5 8 字段表把这条列为独立必需项,construction② 同族却没重复要求。现在不影响判定(机制 RED 锁死不可用),建议落码前补。
