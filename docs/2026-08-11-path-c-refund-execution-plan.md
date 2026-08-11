@@ -1,6 +1,6 @@
 # 路 C 退款执行计划 —— 9 盘链上派生永久不可得市场的退款框架
 
-> **Status**: CURRENT (rev-5 · 2026-08-11 · Codex 84983bca（GitHub bridge，Bettor 交接时未转发成，本节直读桥上原文补上）：rev-4 的"新范围=原范围−链上已确认完成项"漏了第三态——广播未确认（in-flight）。补一个 item 级状态机 + 隔离逻辑。rev-4：Codex c2eb00d7，撤回"续做靠 DB 自然消失"，改为逐 ticket 链上确认事实派生剩余集。rev-3：Codex 7f26224a，S5/S6 授权 artifact 从"单次 op-id"改为会话状态机。rev-2：Codex ebe3417e，S5/S6 从"人贴一句批准"改为机器可验授权 artifact + 执行层 fail-closed 验证)
+> **Status**: CURRENT (rev-6 · 2026-08-12 · **by KANet-UI 顶替臂（Bettor spawn）**· 折 NWT 红队 157（941d4ad8 + fc5ec74d 并发会话补充）+ Codex 独立裁决 d5e43f91：①`broadcast_pending` A/B 消歧——记账语义裁定为**逐项隔离 + partial digest**，"整体阻塞"读法删除；同时把串行 continuation 拓扑写成显式**执行闸**——消歧是记账语义，不是执行许可；②隔离态补可观察时长上界 + 越界告警要求；③race-to-resolve 机制收录但按 Codex 判 **RED**——授权语义按其"窄 scope 冲突解决授权"构造写定，落码+验收前不得使用；④Codex 落码闸 7 条验收判据原样收录进验收节。rev-5 · 2026-08-11 · Codex 84983bca（GitHub bridge，Bettor 交接时未转发成，本节直读桥上原文补上）：rev-4 的"新范围=原范围−链上已确认完成项"漏了第三态——广播未确认（in-flight）。补一个 item 级状态机 + 隔离逻辑。rev-4：Codex c2eb00d7，撤回"续做靠 DB 自然消失"，改为逐 ticket 链上确认事实派生剩余集。rev-3：Codex 7f26224a，S5/S6 授权 artifact 从"单次 op-id"改为会话状态机。rev-2：Codex ebe3417e，S5/S6 从"人贴一句批准"改为机器可验授权 artifact + 执行层 fail-closed 验证)
 
 **Author**: KANet-UI
 **日期**: 2026-08-11
@@ -144,7 +144,7 @@ issued（签发，尚未开始执行）
 >
 > **rev-4 的公式会把状态 3 机械地塞回新范围**（因为它"还没确认完成"）——这不安全：若替代会话把它重新授权/广播一次，而旧交易此刻仍有机会落地，就会出现**两个不同的授权会话同时覆盖同一个经济项**，谁先确认就归谁生效，但**这笔退款从此再也不能唯一归属到某一个存活的授权区间**，直接违反 S5/S6 那道闸存在的意义（"每一笔广播都必须能追溯到唯一一份仍然有效的授权"）。**反过来悄悄排除它也错**——NO TX NO STATE 意味着它尚未真正完成，若旧交易最终没能落地，这笔退款就会永久丢失，无人再去补。
 
-**要求：显式的 item 级状态机，替代会话 digest 必须等到每一项都分类到终态/可重授权态后才能计算**：
+**要求：显式的 item 级状态机；替代会话 digest 的计算采用逐项隔离语义（rev-6 消歧，见下方裁决——rev-5 此处原写"必须等每一项都到终态后才能计算"，与下文"未决项不计入新范围"互斥，NWT 157 指认，两读法作废其一）**：
 
 ```
 not_started
@@ -154,8 +154,11 @@ not_started
     → （仍处 broadcast_pending，未解决）
 ```
 
-- **替代会话的范围计算时机**：必须等旧会话涉及的**每一个** bettor 都被归类到 `chain_confirmed_completed` 或 `safely_absent` 之后，才能计算新范围 digest。**任何仍处于 `broadcast_pending`（未解决）的 bettor，必须被隔离（quarantine）——既不计入新范围（防止双重授权同一项），也不视为已完成而丢弃（防止 NO-TX-NO-STATE 意义上的永久遗失）**。隔离态的处理是"暂不动它，留到状态解决后再处理"，不是"排除"或"完成"里的任何一个。
-- **"旧交易不可能再落地"这个判据需要针对 Kaspa/relay 这条实际路径写死**，本稿不预写具体实现（这是落码阶段的工作，可能涉及：mempool 逐出通知、UTXO 花费冲突检测、协议层面的可复活窗口判定等）——**一次性 RPC 超时或单次查询未命中不足以证明"不可能再落地"**，必须是协议语义上真正确定的判据，不能靠猜。这条留给 J1/J2（更熟悉 relay/kaspad 交互层）在落码阶段具体定义，本稿只钉死"必须存在这样一个判据，且判据强度必须达到协议确定性，而不是超时启发式"这个要求。
+- 🔴 **记账语义消歧裁决（rev-6 · NWT 157 问 1 + Codex d5e43f91 §3）**：rev-5 原文对同一 `broadcast_pending` 情形同时写了两种互斥读法——"必须等每一个 bettor 到终态才能计算新 digest"（整体阻塞）与"未决项隔离、不计入新范围"（逐项隔离）——两者会长成完全不同的代码（NWT 157 的 A/B 对照表）。**rev-6 裁定：记账语义取逐项隔离 + partial digest，整体阻塞读法作废删除**。即：替代会话的范围 digest 在签发时即可计算，范围 = 原范围 −（`chain_confirmed_completed` 项）−（仍处 `broadcast_pending` 的隔离项）；隔离项**既不计入新范围**（防双重授权同一经济项），**也不视为已完成而丢弃**（防 NO-TX-NO-STATE 意义上的永久遗失），留待其到终态后由后续会话单独覆盖。裁决理由：(a) 与"quarantine"语义自洽；(b) 不让一笔协议层意外把同分片其余干净 bettor 的**授权记账**无限期挂起（kr5l4 22 分片/694 人是决定性场景，NWT 157）；(c) 串行 continuation 拓扑（下一条）已在执行层独立保证安全——整体阻塞读法在执行层提供的额外保护是零，只剩运维代价。
+- 🔴🔴 **消歧是记账语义，不是执行许可——串行 continuation 拓扑写成显式执行闸（Codex d5e43f91 §3 明示要求保留）**：本 pool 的退款是**单一 P2SH 续接 UTXO 串行链**——每笔退款消费上一笔的 continuation 输出（fc5ec74d 折入的 NWT 并发会话现读 `pool-refund-builder.mjs` 确认，亦与 §2-S6"逐笔发起"建议的理由同源）。⇒ 若存在一笔未决的前置花费（`broadcast_pending`），**下一笔合法的 pool outpoint 本身就是未知数**，后续退款执行在物理上推进不过去。**执行闸（不变式，落码必须机器强制）**：builder 在构造任何一笔退款前，必须现读链上当前**已确认**的 continuation UTXO；若该 UTXO 之上存在未解决的在途花费，**拒绝构造/广播——不论替代会话的 partial digest 是否包含该 bettor**。partial digest 只回答"这个 bettor 在不在这份授权范围里"，**绝不回答"现在能不能给他付钱"**——不得把"选了 partial-digest 记账"读成"后面的 bettor 可以先拿钱"（Codex 原话：the spec "must not imply that choosing partial-digest bookkeeping magically permits later bettors to be paid while the predecessor pool spend is unresolved"）。
+- 🔴 **隔离态可见性上界（rev-6 · NWT 157 问 2）**：`broadcast_pending` 隔离态必须带**可观察时长上界 + 越界告警**——隔离超过某个窗口（具体数值留给落码阶段定）必须能被外部看到（日志/告警/频道通知任一形式均可），不能是"数据库里一行 quarantined 状态，没人知道要去看"。理由：永远卡住的隔离态与刚被隔离一分钟的隔离态，在无此要求的读数下**同形**（同 (140)BAn"永远弃权与永远通过在日志里同形"）。本条与 §5 留白纪律同规格：不预写实现，只钉死"必须有"。
+- **"旧交易不可能再落地"这个判据需要针对 Kaspa/relay 这条实际路径写死**，本稿不预写具体实现（这是落码阶段的工作，可能涉及：mempool 逐出通知、UTXO 花费冲突检测、协议层面的可复活窗口判定等）。这条留给 J1/J2（更熟悉 relay/kaspad 交互层）在落码阶段具体定义，本稿只钉死"必须存在这样一个判据，且判据强度必须达到协议确定性，而不是超时启发式"这个要求。
+  🔴 **负面清单（rev-6 按 Codex d5e43f91 §2 补全，落码时必须逐条有阴性测试）**：`broadcast_pending → safely_absent` 是**承载授权后果的转移**（它就是允许同一经济项被重新授权的那一步），必须机器可验、fail-closed。以下任一**单独**均不构成合格判据：timeout 启发式、本地 DB 标志（如 `refund_attempted_at`）、进程重启、relay 断连、单次 mempool/RPC 查询未命中、**操作员断言**。合格判据的一个例子：同一 outpoint 已被另一笔**已确认**交易冲突花费（协议终局的结构性死亡）——这正是下方 race-to-resolve 机制（若其授权语义落码）能主动制造的确定性答案。
 
 **补充测试用例（Codex c2eb00d7 + 84983bca，并入 §-S5/S6 落码前置的验收门列表）**：
 - 会话在 N 笔确认后过期，重入时必须精确识别出"已完成 N 笔"而非重新枚举出全部
@@ -163,18 +166,41 @@ not_started
 - 广播已发出、链上尚未确认、DB 还没来得及更新时崩溃 → 重启后必须能识别"这一笔在途"而不是当作"未开始"重复触发
 - DB 记录 `refund_attempted_at` 有值，但链上该 ticket 从未被消费（DB 说做了、链没做）→ 判定为未完成，不得因为 DB 有记录就跳过
 - 链上该 ticket 已被消费为一笔退款，但 DB 字段是陈旧的未更新状态（链做了、DB 没跟上）→ 判定为已完成，不得重复触发
-- 替代会话的范围 digest 必须精确等于"原范围 − 链上已确认完成项"，一个不多一个不少
+- 替代会话的范围 digest 必须精确等于"原范围 − 链上已确认完成项 − 仍处 `broadcast_pending` 的隔离项"（rev-6 按逐项隔离语义订正，rev-4 原文无隔离项一减），一个不多一个不少
 - 已完成的 bettor 不得出现在新会话里被重新"授权"（即使只是形式上再走一遍也不行——见上条零追加原则的另一面）
 - 不允许新 bettor 被追加进续做的范围（范围只能收窄，扩大必须是独立授权事件）
 - 🔴 **rev-5 新增**：旧会话过期时某笔已广播但未确认（`broadcast_pending`）→ 替代会话生成时必须**排除**该项在外（不计入新范围，也不当已完成处理），且旧交易之后若真的确认了 → 不得触发替代会话对同一项的第二次广播
 - 🔴 **rev-5 新增**：旧会话过期时某笔已广播且被证实不可能再落地（safely_absent，如已被驱逐且协议确认不可复活）→ 该项可以且只能被新会话重新授权**恰好一次**
 - 🔴 **rev-5 新增**：进程在状态未解决期间重启 → 不得产生重复广播，也不得静默判定为已完成
-- 🔴 **rev-5 新增**：替代会话 digest 计算时机验证——若旧会话仍有任何 item 处于 `broadcast_pending` 未解决状态，替代会话签发流程本身必须阻塞/拒绝，不得提前计算 digest 把未决项强行归类
+- 🔴 **rev-6 改写（原 rev-5 第 4 条按逐项隔离语义拆成两条断言——NWT 157 问 1 明确要求区分"这一项被拒绝纳入"和"整个签发流程被阻塞"）**：
+  - **（项级断言）**旧会话有 item 处于 `broadcast_pending` 未解决 → 替代会话签发**可以**进行（不整体阻塞），但该项必须被拒绝纳入新 digest（隔离），不得被强行归类为已完成或未开始；
+  - **（执行级断言）**替代会话即使已 `active`，只要链上当前已确认 continuation UTXO 之上存在未解决的在途花费，对**任何** bettor（含 digest 内干净 bettor）的构造/广播请求都必须被执行闸拒绝
+- 🔴 **rev-6 新增（Codex 落码闸第 7 条的用例化）**：串行 continuation 行为——未解决的前置花费阻塞一切后续推进，除非一条**独立授权**的冲突解决路径（见 §-race-to-resolve）先建立了新的已确认 continuation
 
 - **不可变范围 digest**（第 2 项）在会话创建时锁定，`active` 期间**不允许追加/收窄**——若发现范围枚举本身有误（比如 S2 漏了一行），正确做法是作废整个会话、回到 S1-S4 重新走一遍，签发一份新会话，**不允许对活跃会话打补丁**。
 - **机器维护的已完成子集**（或等价形式：为每个 bettor 派生一个子 op-id，形如 `session_id + bettor_pk` 的确定性哈希，每个子 op-id 各自单次消费）——两种实现路径均可，本稿不指定，落码阶段选一种；**要求是**：给定同一个 bettor，同一个会话内不能被重复退款（防重放），但会话内的其余 bettor 不受影响（不会因为一笔已完成就锁死整个会话）。
 - **重启必须重建会话状态**：若执行在 bettor N 与 N+1 之间崩溃/重启，恢复后必须能够**精确续做剩余范围**——已完成的不重做（防重放），未完成的不遗漏（防静默排除，直接呼应 §0 红线），且**不允许在重启后扩大范围**（不能借着"重新读一次 S2"混入原本不在这份授权 digest 里的新行）。
 - **链上 spent-once 票不能替代这一层**（Codex 明示）：`PoolSide` ticket 本身是链上一次性消费不假，但那只保证"同一笔 stake 不会被退两次"这个链上事实，**不保证"KANet 这一层有没有在没有效授权的情况下发起了这笔广播"**——授权会话的状态机是 KANet 侧的闸，链上票据是另一层独立的保护，两者不互相替代。
+
+### 🔴 §-race-to-resolve 冲突解决机制（rev-6 新增 · NWT fc5ec74d 提出 · Codex d5e43f91 §4 判 RED——授权语义落码+验收前不得使用）
+
+**机制**（NWT 并发会话提出，fc5ec74d 折入）：操作员从最后**已确认**的 continuation 状态，构造一笔付给**另一个** bettor 的竞争交易，与卡住的旧广播 race——先确认者赢，另一笔因其消费的 outpoint 已被冲突 txid 花掉而**结构性确定死亡**。这同时是 `safely_absent` 判据的一种可操作实现路径：主动让协议给出确定性答案，而不是坐等或靠超时启发式。
+
+**Codex 裁决：机制条件性有效，但 RED**——它是一笔**新的生产钱路广播**，不自动被 rev-5 授权：原会话已过期则不能借用其授权（不能因为"目的是把旧交易逼进 `safely_absent`"就借尸还魂）；而替代会话按定义又等不到该项安全、无法覆盖它——没有显式规则就形成**授权环**。**恢复授权绝不能成为绕过会话过期的通用后门**（Codex 原话："A recovery authorization must not be a generic bypass around session expiry"）。
+
+**rev-6 写定的授权语义（按 Codex 给出的两条可接受构造落地）**：
+
+1. **平凡合法情形（Codex 构造①）**：竞争交易本来就落在**仍然有效**的原授权的不可变 scope + 有效期内（原会话未过期，且该竞争支付的 market/shard、bettor、金额均在原 digest/承诺内）——此时它就是原会话内的一笔普通执行，无需任何新授权，也不涉及本节其余内容。
+2. **一般情形（Codex 构造②，指定为本稿的冲突解决授权路径）**：签发一份**独立的窄 scope 冲突解决授权 artifact**——与 S5 普通退款会话**不同型**，必须绑定：
+   - 精确 pool outpoint（被竞争消费的那个已确认 continuation UTXO）；
+   - 精确竞争 ticket/item（付给哪个 bettor）；
+   - 处置字面量（与 `disposition = refund` 区分的独立值，防止与普通退款授权互相冒用）；
+   - 输出/金额承诺；
+   - 操作 id（op-id）+ 防重放；
+   - 有效期。
+
+   且**不得**在签发它的同时给未决的原 item 再发一份普通退款二次授权——两份授权同时存活 = 又造出"同一经济项双重授权"，正是 item 级状态机要防的那个洞（Codex 明示"without simultaneously authorizing the unresolved original item under a second normal refund session"）。
+3. 🔴 **fail-closed 边界**：在上述冲突解决授权 artifact 类型落码、且通过 Codex 落码闸第 5 条验收（授权显式建模+测试、过期普通会话授权不可被隐式复用）**之前，race-to-resolve 不得在任何一盘上使用**——卡住的项按隔离态原样挂着（其"卡多久必须被看见"由上方隔离态可见性上界+告警兜底），宁可慢，不可造授权环。
 
 ### 🔴 S6 · 执行层验证 + 逐笔广播（仅在 S5 会话 `active` 后）
 
@@ -198,6 +224,17 @@ not_started
   10. 阳性路径：合法会话 + 合法逐笔请求 → 全部放行，`active`→`completed` 状态正确转移
 
   这与今天 CIS role_code 那条"注释级警告没有运行时闸"的教训是同一个形状——本节把它在设计阶段就钉死，不留到落码时才发现。
+
+- 🔴 **Codex 落码闸 7 条验收判据（d5e43f91 "Acceptance criteria before this blocker can close in code" 原样收录，rev-6）**——与上列十条并行适用，重叠不豁免，两份都得过；引文保留英文原文不转译，防转述漂移：
+  1. Machine-defined `broadcast_pending -> chain_confirmed_completed` and `broadcast_pending -> safely_absent` predicates, with negative tests showing timeout / DB attempted flag / single RPC miss do not qualify.
+  2. Crash/restart persistence of unresolved item state.
+  3. No replacement-session authorization for any unresolved item.
+  4. Late confirmation of an old broadcast cannot coexist with a second normal authorization for the same item.
+  5. If conflict/race recovery is supported, its authorization is explicitly modeled and tested; expired ordinary session authority cannot be reused implicitly.
+  6. Builder/relay/broadcast path consumes and validates the authorization/session/item state before gaining broadcast capability.
+  7. Tests cover serial continuation UTXO behavior: unresolved predecessor blocks advancement unless a separately authorized conflict-resolution path establishes a new confirmed continuation.
+
+- **Codex d5e43f91 对 rev-5 的定性（rev-6 如实收录，防止本节被读成"已闭环"）**：rev-5 状态机 spec 层 **ACCEPTED**、rev-4 二元分类缺陷 spec 层 **CLOSED**；但 **runtime 强制仍 OPEN**——`pool-refund-builder.mjs` 至今在应用接口层 permissionless（`buildRefundCommand()` 不消费任何授权/会话/item 状态，Codex 复读 blob `d64eda8` 确认未变），与 §1.2 推论 3 一致。**rev-6 仍是 spec 改进，不是"可执行边界已关闭"的证据。**
 
 ### S7 · 验收（每笔 + 整盘两级）
 - **每笔**：`check_utxo_landed`（复用今晚反复验证过的方法论：NO TX NO STATE，链上有 UTXO 落地才算数，不是"relay 返回了 txid"就算完成）确认 payout 输出真实到账 `bettorAddress`。
@@ -254,4 +291,4 @@ A-3 §4.3 已标记这条 `[未查·白班可做]`——若路 C 执行后这 9 
 
 ---
 
-**本稿到此，交 NWT 审（队列③，红线核对：全员退款零排除有没有被稀释）。逐盘执行各自独立走 §2-S5 的显式授权，不因本稿本身获批而自动获得任何一盘的执行许可。**
+**本稿到此。rev-6 已折入 NWT 157 CONDITIONAL 的两问（A/B 消歧 + 隔离可见性）与 Codex d5e43f91 全部裁决项，交 NWT 复审（其 157 结论：小改后可转 PASS）。逐盘执行各自独立走 §2-S5 的显式授权，不因本稿本身获批而自动获得任何一盘的执行许可。**
