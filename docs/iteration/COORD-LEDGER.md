@@ -8,6 +8,37 @@
 
 ---
 
+### (156) 2026-08-12 01:3x本地(18:3xZ) — 🔄 Bettor 新会话接位 · 🏛 A2 同源判定信任模型裁定: 走①公钥指纹·②自陈登记否决(解 J2 停点=冻结唯一码堆) · 点名发出
+- **接位 SOP 全跑(地面核过)**: coord-status 最新签名摘要停在 07-13(陈, 未据以决策)· ledger(155)/频道(最后一段=08-11 18:2x Bettor/J2 双交接)/git HEAD 9da732d5=origin 同步/Codex 桥无未 ACK 指令(84983bca in-flight 边界 RED 已由 KANet-UI 自主接手, rev-5 679472bf 在库=债清)。前任在途未提交的 (152)-(155) 由本会话 pathspec 补 commit(全为 Bettor 域账目, 逐 hunk 核过)。本机 4 个 claude 会话活着(18:2x-18:3xZ 起=交接后新批; 正向归属待各自报到, 不做排除法指认)。
+- **🏛 A2 裁定(自决轨: 共识+文档对齐)**: 同源判定走 **① 公钥指纹落库**; **② 派生路径自陈登记否决**——判据即 J2 拒自拍时自己给的那条: u1 的目的=域间互不信任, 一道靠自陈的闸唯一要挡的人恰是不配合的运营方 ⇒ ② 结构性不成立, 非工作量取舍。**设计硬要求一条(verify-value-source)**: "同源"绑定必须可验非自陈——登记根(xpub/指纹)与 relay 实际 pubkey 之间要有**派生证明**(验证方能从登记根推导 relay 子 pubkey 并比对), 否则①退化成换皮的②。流程照铁律: J2 出 A2 设计稿(含存量 32 行 `ecdsa_pubkey_xonly` 全空的补齐路径+验收判据)→ NWT 红队设计审 → 落码。Owner 保留否决。
+- 今日主线不变: D-012 冻结, 实剩 ②-a=物理机堆(Owner 资源, 已上桌)+A2 码堆(本条解锁)。归档节点=永久不办(155), 不再上桌。
+
+### (155) 2026-08-12 ~11:xx本地 — 🔴 Owner 钦定: 归档节点【永久不办】· Bettor 反复推它是错误认知全作废
+- **Owner 直令原话**: "我们永远不会跑所谓归档节点。" ⇒ **Bettor 08-10~08-11 反复上桌的"归档节点封顶未来损失/量化紧急/剪裁墙每天前移多几行"= 错误认知, 全部作废, 不再上桌不再讨论不再当选项。**
+- **不改变的**: 剪裁墙受影响 9 盘/30,533.25 KAS 链上派生不可得(已终裁)→ 走**路 C 退款**(方向不变)。归档节点从来不是这批盘的解, 我把"未来盘的封顶"当成主线紧急件推错了方向。
+- **仍有效、别混**: **U1 隔离宿主机(②-a 步骤1)与归档节点无关**——那是密钥隔离用的物理机, Owner 未否, 仍在桌(资源件)。冻结前实剩 ②-a 施工(物理机堆=隔离宿主 + A2 码堆=J2)不变。
+- 记忆已同步更新(handoff 快照 + settlement-recovery-state)。
+
+### (154) 2026-08-11 10:4xZ — 🟢🟢 窗#5: 契约九格 committed→live 全绿(三方独立实查)· 冻结前实剩 ②-a 施工的物理机堆+A2 码堆
+- **J2 拆②-a 可执行度=三堆**(非两堆): ①物理机堆(采购/装机=Owner 资源, 非键盘活)②码堆(A2 同源判定实现, J2 可现做)③**已落码未生效堆**——现撞实例: v195 migration commit 了但 live 库无 u1_domain_assignment 表(committed≠live 教科书例)。
+- **窗#5(KANet-UI, 新 PID 36768)**: 一次装载全部当日已审落码 committed→live(v195 迁移+CIS 三件+role_code 闸+D2 fix+⑤(C) env-bootstrap)。四项行为证据实查(v195 建表 log+实 SELECT 双证; role_code live 模块 grep; 非假设)。**三方独立核**: NWT 单独 SELECT 表实在+live 模块 ROLE_CODES_RATIFIED=false; J1 复核臂在 J2 补后新码上重跑摘闸 8/8 全守·4 格缺口逐格闭·用例 5→12 格。
+- 🔴 **Bettor 方法论更正(NWT clamp)**: 我 migration 验收约束引了 `PRAGMA user_version`——**这仓不用它**(runMigrations 是幂等 CREATE IF NOT EXISTS/带列存在检查的 ALTER 顺序执行, 无 user_version 版本追踪, 读数恒 0 非异常)。正确验法=新表/新列实查。记 Bettor 账: 验收机制也要先查它适不适用本仓。
+- **契约冻结记分(live)**: 主契约/①/§6-1/④/⑥/⑤(C)/③D2 **九格 live 全绿**。**冻结前实剩: ②-a 施工的【物理机堆=Owner 资源】+【A2 同源判定码堆=J2 现做】**——落码工作全完, 剩的是真实硬件到位+一段码。物理机堆 Bettor 上 Owner(与归档节点同属"需真机", 可并办)。
+
+### (153) 2026-08-11 10:0x-10:3xZ — ✅ D2 三件 evidence-closed(双机复核抓出主审漏的 V2 覆盖洞)· 契约冻结前实剩 ②-a 施工一件
+- **D2 双机复核兑现价值**: J1 复核臂(摘闸变异法, 独立于 NWT 读码闸)抓出 **V2 只一个用例、V1 三用例零碰 V2** = Codex 条件② 对抗只覆盖 V1、V2 那半空(同"allowlist 空条目=已覆盖同形"族: 修了 V2 码没测 V2)。**NWT 当场收回自己 D2 PASS 改判"实现 PASS·覆盖 CONDITIONAL"**——单审会放过。Bettor 裁: 补 V2 四用例=③D2 收尾件(不新卡), 补齐前记分标"实现在库·覆盖待补"不许写已闭。
+- **收尾闭合**: J2 补 V2 四格(value/SPK/零 covOut/阳性对照, 照 J1 §2)+ §1.2 争议决定性读数(NWT 向对/J1 §1.2 那格站不住, 两数不符重测裁决)→ **NWT 最终复审 PASS**(亲手跑: 用例过/摘 N3 变红/V2 stub 恒拒被五条断言同时拒=比补测前更狠证伪"恒拒骗过用例")。**③D2 evidence-closed**。
+- **契约冻结记分(实时)**: 主契约/①/§6-1/④/⑥✅ · ⑤(C)✅ · **③D2✅(evidence-closed)** · **冻结前实剩: ②-a 施工执行一件**(设计+决策锁全清, J2 卡, 等施工窗)。退款执行轨设计侧持续硬化(Codex 连抓 S5/S6 程序性→机器 artifact→op-id 会话状态机→过期会话重入, KANet-UI rev-4 折入, 不 gate 冻结, 执行排冻结后)。
+- 🔵 冲刺方法论净收: 双机交叉复核(谁落谁不审自己)抓住单审盲区·预登记复核判据(看码前写死防倒推)·条件式 GO(报备换"有人知道爆炸半径"非"等 GO 拖时间")·承重引用发出前现查(名单/版本号/hash 今日高发已 clamp)。
+
+### (152) 2026-08-11 08:2x-09:5xZ — 🚀 冻结冲顶: 三线并行(单人瓶颈解除)· ⑤(C)+D2 落码 · 契约仅剩 ②-a 施工待窗
+> ⏱ 冲刺尾段。J2 提议 ⑤ 交 J1(并行省一轮)Bettor 采纳=Owner"多线并举"正解落地。
+- **⑤ blocker①(C) 落码闭(J1, 789d10f8)**: J2 资产盘点锁到"(C) 缺遏制时 import 前 fail-closed"一件+书面交接单(ff28bcbe, NWT 六事实独立核)→ J1 落 env-bootstrap(报备爆炸半径=所有走 test.mjs 的跑 fail-closed, 铁律 0)→ Bettor 条件式 GO(回归+阴性对照+预登记对齐三条自贴即推)→ **NWT 亲手跑 selfproof PASS**(端到端实证非桩·覆盖 ENOENT 更宽情形·变异磁盘替换·278 增 0 删)。残余敞口 relay-gate-driver.mjs:17 硬编码(挂 m0c1-gate/ 10 文件无 .test.mjs=runner discovery gap 在册)范围界定准。J1 自曝"看过 J2 预登记[1/4]格"(零增量=交接单原文)=声明诚实纪律活样本。
+- **交叉复核换向**: ⑤ J1 落→J2 复核臂(预登记判据看码前写死防倒推); D2 三件 J2 落→J1 跨机复核(T2 对抗)。互为第二只眼谁落谁不审自己, NWT 两件皆主审。
+- **③D2 三件同包落码(J2, 推 origin)**: 修复码(covOuts 基数+value 绑定)+对抗用例(T2 两同 SPK 异 value)+allowlist §12(NWT 穷举可达调用图 PASS)。**V2 导出验收门**: verifyClosePayoutV2Binding 由无 export→export(1 符号命中)——防"allowlist 有键模块没导出=空条目静默=已覆盖同形"。待 NWT 审跑 T2 红→绿基线。
+- **退款执行轨设计闭(不 gate 冻结)**: KANet-UI rev-3(d9a4a80f)NWT PASS——Codex 抓 S5/S6 程序性→机器可验 artifact 八字段+builder fail-closed; op-id 单次 vs 多笔 bettor 歧义→issued/active/completed 会话状态机+10 验收门(kr5l4 694 人=极端案例)。
+- **契约冻结记分**: 主契约/①/§6-1/④/⑥✅ · ⑤(C)✅(距 evidence-closed 差 Codex blocker② 半闭)· ③(D2 落码待 NWT 审)· **冻结前实剩: D2 三审收 + ②-a 施工执行(设计锁全开·等窗)**。
+
 ### (151) 2026-08-11 07:0x-08:2xZ — 🚀 冻结冲刺: 契约九格一上午从"路径清晰"推到"实现在库", 冻结前收窄到四件
 > ⏱ Owner 总动员后连续交付。全程 §5 分级/未实弹禁"已生效"/diff 走文件/git-first(频道对 Bettor 间歇吞发)。
 - **今日实交(全过审)**: §6-1 rev-7 收口(NWT PASS·J2 三条 critique 全落)· **⑥ CIS 落码**(17de8485·25→实为18用例/18变异·含 Codex 攻击用例; 经一场三 commit 指针混乱[c428c11c/122fb1da/17de8485]后 NWT 撤 PUSH-BACK 改 PASS-with-note)+role_code 运行时闸(a3179732: ROLE_CODES_RATIFIED=false+assertRoleCodesRatified, 把注释级护栏升硬闸, 诚实标残余绕行面)· **④ 量级重报**(design-done; NWT 把 §5"从没跑过"从 CONFIRMED 降 🟡——证据在 gitignore 的 logs/test-runs, 三台机三份互不同步[J1 7份/NWT 35份/J2 各异]谁都非权威=gitignored 产物不算可复核证据)· **D2 修复设计+allowlist §12**(NWT 穷举可达调用图确认纯判定函数·V2 未导出→"空条目静默=已覆盖同形"升验收门)· 分配算法 spec(施工设计锁开)· D2 补件走 C。
