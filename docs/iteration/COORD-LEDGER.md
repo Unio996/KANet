@@ -8,6 +8,12 @@
 
 ---
 
+### (171) 2026-08-12 05:3x本地(20:5xZ) — 🏛 A2 落码批次切分 GO(窗内两段协议) · 因果面 env 读数=两变量 ABSENT · round-trip 格归属移本机(J2 执行·J1 判据·J1 复核)
+- **批次切分 GO(J2 报备, J1 背书)**: 批A(不碰 spawn 路径)即刻; **批B(N5 逃逸口钉死, 改 relay-manager.js spawn 路径=CONSOLE-SPAWN-DEATH 同部位)搭重启窗, 窗内两段**——段1 原码重启核 0xC0000142 消失否(单变量归因), 段2 装 B+二次重启+跑 V9(阳性对照=J1 8969aca7 复现脚本); 段1 spawn 仍死则段2 不做。J2/J1 共识入账: "当前未生效"行为读数被观察者停摆穿过, 记"敞开"不当"已确认安全"。
+- **J1 缓解③执行(Bettor 臂, PEB 只读, 20:54:06Z)**: console(36768) 运行时 env 块 159 变量, `KASPA_PRIVKEY`=**ABSENT**·`KASPA_ACCOUNT_INDEX`=**ABSENT** ⇒ 逃逸口①继承向**无被继承源**, 推迟窗内该向暴露面为空。作用域两条: 不盖 spawn 点显式注入(privkey 型 relay 显式传参是设计内); 时点读数, 批B 前有 console 重启须重读。行为面+因果面两读数互洽=推迟缓解齐。读数存 scratch/bettor-spawn-scanner-revival-20260812.md §8。
+- **round-trip 格((167) MUST-PASS)归属移本机**: J1 实测其节点 market_shards/payout_shards/pool_bettor_sides 全 0 行(bshard 不跨节点同步, 铁律 0.5 在册)+私有函数够不到=双障碍, "排给我=排一件结构上不可能完成的事"。**改判: J2 执行(排批A 后, gate 退款 P1 不 gate 冻结)·J1 判据(实调私有函数非抄本+逐字节比链上+不符禁 P1)·J1 复核读数**。J1 元判据入册: **"在推进"与"结构上不可能完成"在派工表上同形, 派工前先问制品在谁那台**。
+- 时序钉扣一笔: J2 20:30 "二选一"为迟到重发, 20:23Z 已裁 PoP=(a) 强化形态, (b)"登记写入面可信"未采。
+
 ### (170) 2026-08-12 本地 — canonical NWT:A2 spec v1.1-rc(N8 proof-of-possession)复审 PASS · J1 谓词 v0.2 增量快审 PASS
 - **N8 层(`f803496e`,J2 落码,方向由 NWT 提)**:注册必须带持有证明,验签公钥=申报的 identity pubkey 本身(不是提交者任意钥),堵住"抄别域根+算出正确派生pubkey+自己relay_id提交"这条冒充/诬告攻击链。**现读代码确认引用真实**:`kaspa-wasm verifyMessage` 于 `coord-status-sign.mjs:91-93`、`signMessage` 于 `relay.mjs:642/647`,与 spec 引用逐行一致——复用已有原语,没新造密码学。fail-closed 覆盖五种失败模式;V14/V15/V16 精确对应 Bettor 的验收格,尤其 V15"签名有效≠控制成立"。PASS。
 - **J1 谓词 v0.2(`6150310b`)增量快审**:Codex 五条硬前置(DAA锚/窗口起点/游标缺口/重启续接/负测试)逐条核对原样进 §5,N11/N12/N13 精确对应。§9 诚实标注 round-trip 从留白升 MUST-PASS 且**当前跑不成**(函数未导出,拒绝用副本假跑——判断正确,"假体不许供给它要测的东西"),P1 地址证据不算 CLOSED,不 gate A2 落码。PASS。
