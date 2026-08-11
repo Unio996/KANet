@@ -153,7 +153,16 @@ if ($Uninstall) {
 }
 
 if ($Install) {
-  $act  = New-ScheduledTaskAction -Execute $bash -Argument "-lc `"$inner`""
+  # 🔴 不直接起 `bash.exe` —— 它是控制台程序, 而任务 LogonType 是 Interactive
+  #    (改 S4U 要管理员, 本机会话没提权 ⇒ Register 直接 Access is denied)
+  #    ⇒ **每 5 分钟在用户桌面闪一个命令框**。2026-08-11 Owner 报"频繁跳出命令框, 前几天没有过",
+  #    就是这个任务, 我当天装的。🔨 **我加的自动化, 它的噪音也是我加的。**
+  # 🔴 经 wscript 隐藏拉起, 且**只传一个参数**(sh 脚本的 POSIX 路径) ——
+  #    上一版把整条 bash 命令当参数传, 造出三层嵌套引号, 任务 0x800710E0 失败、`.alive` 不写,
+  #    **而它失败得很安静: 窗口确实不弹了, 哨兵也确实死了。** 少传一个参数就少一层引号。
+  $vbs = Join-Path $SelfDir 'j1-run-hidden.vbs'
+  if (-not (Test-Path $vbs)) { throw "找不到隐藏启动器: $vbs" }
+  $act  = New-ScheduledTaskAction -Execute 'wscript.exe' -Argument "//nologo `"$vbs`" `"$cronPosix`""
   $trg  = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) `
             -RepetitionInterval (New-TimeSpan -Minutes $IntervalMinutes)
   $set  = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
