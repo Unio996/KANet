@@ -171,3 +171,28 @@ v0.2 §5.3 建议「各补一条 `c_min` 形态的总体非空断言…**成本�
    > ⇒ **"零签名调用"根本不可观测,闸在与不在读数一样** —— 与本稿的恒真族是同一个病的两个部位。
    > 🔨 **判据(我自己在册那条)**:写「本文不覆盖 X」时必须分清 **X 有人负责** 还是 **X 没人负责**;
    > 两者读数相同,而后者会变成没人看的洞。本条原来正是后一种写法,已改。
+
+   > ### 🔴 收尾坐实(@Bettor 2026-08-11 17:2x 派工第 2 项 · 全部 `git show origin/bshard-m3-deploy:<file>` 现读)
+   >
+   > 派工原话要我坐实的是「handler 面**已修**」。**逐条量下来,该坐实的不是这句** ——
+   > 我 §7.4 上一段写的是「handler 那一面**已经有人做了**」,指的是**用例存在**,
+   > 而那个用例**恰恰被设计成红的,因为 handler 本体没修**。两句差一整档,量的结果站在后一句这边。
+   >
+   > | 问 | 现读 | 判 |
+   > |---|---|---|
+   > | J2 那个用例在 origin 吗 | `cat-file -e …/precond4_handler_zero_sign_calls.test.mjs` ⇒ **在** | ✅ 有人管 |
+   > | handler 本体有那四个修复符号吗 | `trade-protocol-filter.js`(**`handlePoolOracleTxSignReq` 的定义处**)⇒ `outputTotalSompi` / `inputTotalSompi` / `MIN_OUTPUT_RATIO` / `isCommingledSpine` **各 0** | 🔴 未修 |
+   > | 闸的实现存在吗 | `pbs8-2-signreq-anchors.mjs` ⇒ 同四个符号 **7 / 10 / 5 / 4** | ✅ **闸造出来了** |
+   > | 🔴 handler 调它吗 | 该文件对 anchors 的 import **任何形态 0 处**(含动态/别名);闸的 5 个导出名(`evaluateSignReqAnchors`/`MAX_REASONABLE_OUTPUTS`/`MIN_OUTPUT_RATIO_NUM`/`MIN_OUTPUT_RATIO_DEN`/`readOutputValueSompi`)在 handler 文件**各 0 次** | 🔴 **未接** |
+   > | 闸有生产调用方吗 | 全仓非测试 importer **只有** `scripts/pbs8-2-abstention-replay.mjs`(一个 replay 脚本) | 🔴 不在签名路径上 |
+   >
+   > ⇒ **准确说法:闸【已在库】,handler【没有调它】。**
+   > ⇒ **「handler 面已修」不成立**;J2 那个用例今天该红,与本表一致 —— 它红得对。
+   >
+   > 🔨 **这正是 `CLAUDE.md` 2026-07-29 那条注记的同一形态,原话:「修完被调方,必须再查调用方进不进得来」。**
+   > 上一次是 4/13 修好了 kaspa 验证器而没人查谁在调它;这一次是闸造好了而 handler 不引它。
+   > 🔵 **两次都不是"没修",是"修在了够不到的地方"** —— 而这两种在「符号 grep 有命中」这把尺上**读数相同**。
+   > ⇒ 坐实一条「已修」,**必须同时给出被调方与调用方两侧的读数**;只给被调方那侧,就是这个病。
+   >
+   > 🔴 **按 @Bettor 边界(「都不落码,你只出独立读数+证据;撞到不一致即报,不自己改」),本节只报不改。**
+   > 接闸与否 = 让生产真拒签 = 钱路行为改变 = **Owner 闸**(Bettor 2026-08-08 10:42 裁定),不在本稿射程。
