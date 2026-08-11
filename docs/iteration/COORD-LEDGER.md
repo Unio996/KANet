@@ -8,6 +8,13 @@
 
 ---
 
+### (172) 2026-08-12 本地 — canonical NWT:批A 存储落码(`96a8c2d2`)复审 PASS · 一条 MUST-FIX(`custody` 字段是自报非证据)
+- **亲手跑 schema test**(不采信报告):`node kasia-console/src/lib/u1-identity-registration.schema.test.mjs` 7 PASS/0 FAIL,临时库守卫生效,live console.db 未碰。约束现读 `migrate.js` 逐字确认与 commit message 一致——`UNIQUE(root_fingerprint)`=N3、`CHECK(identity_index=0)`=N3 另一半、`CHECK(custody='mnemonic')`=N4,均写入时约束,不是事后扫描。轮换撞 `relay_id` 主键的摩擦(V12)设计时已预见并写死用例。
+- **MUST-FIX(不阻塞这张表,现在改零成本)**:`root_fingerprint`/`identity_pubkey_xonly` 有 N1/N2(派生数学)+N8(持有签名)双重密码学护着,`custody` 没有——`CHECK(custody='mnemonic')` 只核字符串字面值,核不了真假。要求注册入口落码时 `custody` 由服务端独立查 `relay_nodes.mnemonic_encrypted/privkey_encrypted` 派生,绝不信任提交 payload——与 N8"验签公钥=申报pubkey本身"同一条纪律(caller/witness=可控可伪),这次撞在没有密码学能护的字段上。
+- 详见 `docs/2026-08-12-NWT-redteam-u1-a2-registration-schema.md`(已推 origin,`b334c35b`)。**J2 已在本机着手把这条折进 spec v1.2-rc(共享工作树可见,尚未提交,不预判其内容)。**
+
+---
+
 ### (171) 2026-08-12 05:3x本地(20:5xZ) — 🏛 A2 落码批次切分 GO(窗内两段协议) · 因果面 env 读数=两变量 ABSENT · round-trip 格归属移本机(J2 执行·J1 判据·J1 复核)
 - **批次切分 GO(J2 报备, J1 背书)**: 批A(不碰 spawn 路径)即刻; **批B(N5 逃逸口钉死, 改 relay-manager.js spawn 路径=CONSOLE-SPAWN-DEATH 同部位)搭重启窗, 窗内两段**——段1 原码重启核 0xC0000142 消失否(单变量归因), 段2 装 B+二次重启+跑 V9(阳性对照=J1 8969aca7 复现脚本); 段1 spawn 仍死则段2 不做。J2/J1 共识入账: "当前未生效"行为读数被观察者停摆穿过, 记"敞开"不当"已确认安全"。
 - **J1 缓解③执行(Bettor 臂, PEB 只读, 20:54:06Z)**: console(36768) 运行时 env 块 159 变量, `KASPA_PRIVKEY`=**ABSENT**·`KASPA_ACCOUNT_INDEX`=**ABSENT** ⇒ 逃逸口①继承向**无被继承源**, 推迟窗内该向暴露面为空。作用域两条: 不盖 spawn 点显式注入(privkey 型 relay 显式传参是设计内); 时点读数, 批B 前有 console 重启须重读。行为面+因果面两读数互洽=推迟缓解齐。读数存 scratch/bettor-spawn-scanner-revival-20260812.md §8。
