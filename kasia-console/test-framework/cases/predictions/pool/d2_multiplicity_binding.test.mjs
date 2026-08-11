@@ -28,6 +28,22 @@
 const SYNTH_REDEEM = 'ab'.repeat(1024);          // 2048 hex chars, 合成定长
 const RE_DERIVED_ROOT = 'aa'.repeat(32);
 const COV_ID = 'cc'.repeat(32);
+
+// ── 🔴 N3 覆盖(v0.2 补 · @J1 摘闸复核 73aea286 §1 抓出 N3 两支都"摘掉不红")─────────
+//  他的机制诊断准确(§2): 原用例唯一使用 V2 的那格构造了 2 个 covOuts ⇒ **N1 先拒并早退**
+//  ⇒ N3 那几行【从来没被执行到】。修法按他给的形状: 一格只有 1 个 covOut 且 value 不符。
+//
+//  🔵 为此需要与 SYNTH_REDEEM 匹配的 expectedSpk。**这不是复刻内部逻辑** ——
+//    是把生产函数在【固定输入】下的输出记成【测试向量】(取法: 用必然不匹配的 SPK 触发一次
+//    reject, 函数自己在 reject 路回传 expectedSpk; 全程没碰 _p2shSpkHex/_splice*)。
+//  🔴 向量会不会腐烂: 会 —— 若 splice/hash 逻辑变了它就不再匹配。**而那时用例变【红】**,
+//    不是变绿。fail-loud 方向正确, 这正是可以接受它的理由。
+const SPK_V1 = '0000aa200339cd51d8cb75dd723b9ec32fdef93ad9f4995e9b8b11790d9e0fb35645852b87';
+const SPK_V2 = '0000aa20c4ff3547bcab50b81aa7929635d42e9787bd8a6d04b0e17f3bdfa566ae17543a87';
+//  合成 redeem 的那几个字节按 i64LE 解出来是个负数 —— 不是 bug, 是"合成输入不是真 state"的
+//  必然结果。N3 只判"等不等", 与它是不是一个语义合理的池值无关。
+const SYNTH_POOL = '-6076574518398440533';
+const WRONG_VALUE = '12345';                      // 任取, 只要 != SYNTH_POOL
 const spk = (b) => String(b).repeat(35);
 const covOut = (s, v) => ({ value: String(v), scriptPublicKey: s, covenant: { covenantId: COV_ID } });
 const tx = (outs) => JSON.stringify({ version: 1, outputs: outs });
@@ -71,6 +87,29 @@ export default {
       args: [{ txSafeJson: tx([{ value: '1', scriptPublicKey: spk('11'), covenant: null }]),
                psRedeemHex: SYNTH_REDEEM, reDerivedRoot: RE_DERIVED_ROOT }],
       expect: { must: { reply_contains: ['"ok":false', '无 covenant continuation output'] } } },
+
+    // ══ T4 · N3 value 守恒必须真的挡(v0.2 补, @J1 摘闸抓出这格原先没被执行到)═══════
+    //   1 个 covOut · SPK 用向量(过 root 检查)· value 不符 ⇒ 必须命中 N3
+    { id: 'T4_v1_single_wrong_value_rejected_by_N3', action: 'call_module_export',
+      module: 'bshard-close-enforce', export: 'verifyClosePayoutRootBinding',
+      args: [{ txSafeJson: tx([covOut(SPK_V1, WRONG_VALUE)]),
+               psRedeemHex: SYNTH_REDEEM, reDerivedRoot: RE_DERIVED_ROOT }],
+      expect: { must: { reply_contains: ['"ok":false', 'N3 value'] } } },
+
+    { id: 'T4_v2_single_wrong_value_rejected_by_N3', action: 'call_module_export',
+      module: 'bshard-close-enforce', export: 'verifyClosePayoutV2Binding',
+      args: [{ txSafeJson: tx([covOut(SPK_V2, WRONG_VALUE)]),
+               psv2RedeemHex: SYNTH_REDEEM, reDerivedRoot: RE_DERIVED_ROOT,
+               attestedWinner: 1, betsRootHex: 'bb'.repeat(32), refundRootHex: 'dd'.repeat(32), attestedAtMs: 1786000000000 }],
+      expect: { must: { reply_contains: ['"ok":false', 'N3 value'] } } },
+
+    // ══ T1 · N3 的阳性对照 —— 没有它, 一个"恒拒"的 N3 会让 T4 两格照样绿 ═════════════
+    //   🔴 在册: 全拒型装饰。value 对上 ⇒ 必须 pass, 证明 N3 判的是"等不等"而不是"一律拒"。
+    { id: 'T1_v1_correct_value_passes_positive_control', action: 'call_module_export',
+      module: 'bshard-close-enforce', export: 'verifyClosePayoutRootBinding',
+      args: [{ txSafeJson: tx([covOut(SPK_V1, SYNTH_POOL)]),
+               psRedeemHex: SYNTH_REDEEM, reDerivedRoot: RE_DERIVED_ROOT }],
+      expect: { must: { reply_contains: ['"ok":true', '"matchedOutputs":1'] } } },
 
     // ══ I0 · 仪器自检: 三个 reject 若都因为同一个早退原因(如 splice fail), 上面全绿是假的 ══
     //   🔴 这一步存在的理由: T0/T2/T3 期望的都是 "ok:false"。若函数在 splice 阶段就恒返回 false,
