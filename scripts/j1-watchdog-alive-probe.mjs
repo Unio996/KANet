@@ -59,15 +59,21 @@ const ps = [
   //    (10:38:19 ENGAGED → 10:42:27 RELEASED, 本地 UTC+7)。事后查: marker 就在窗口里, **原因至今未明**。
   //    ⇒ 推不出来就别猜, **让它下次自己说清楚**: 把 marker 的时刻打出来,
   //      下一次误判时一眼能看出它读的是哪一行(以及是不是根本没读到)。
-  '$brkat = "-"',
+  // 🔴 **年龄由【这台机器自己】算, 不要把本地时间戳丢回去让调用方换算** ——
+  //    marker 是无时区的本地时间(UTC+7), 跨机换算正是我 2026-08-10 栽过的坑
+  //    (两把尺不同时区, 差点把"第二源读错节点 11.6 小时"报出去)。
+  //    host 侧算年龄 ⇒ 判据只看一个整数秒, 与时区无关。
+  '$brkat = "-"; $brkage = "-"',
   'try { $bl = Get-Content "D:\\kaspa-tn12-mining\\_watchdog.log" -Tail 800 -ErrorAction Stop | ' +
     'Where-Object { $_ -match "BRAKE ENGAGED|BRAKE RELEASED" } | Select-Object -Last 1; ' +
-    'if ($bl) { if ($bl -match "^(\\S+ \\S+)") { $brkat = $Matches[1] -replace " ", "T" } }; ' +
-    'if ($bl -match "BRAKE ENGAGED") { $brake = "yes" } elseif ($bl -match "BRAKE RELEASED") { $brake = "no" } } catch { $brake = "unknown"; $brkat = "readfail" }',
+    'if ($bl -and $bl -match "^(\\d{4}-\\d{2}-\\d{2}) (\\d{2}:\\d{2}:\\d{2})") { ' +
+      '$brkat = $Matches[1] + "T" + $Matches[2]; ' +
+      'try { $brkage = [int](((Get-Date) - [datetime]($Matches[1] + " " + $Matches[2])).TotalSeconds) } catch { $brkage = "parsefail" } }; ' +
+    'if ($bl -match "BRAKE ENGAGED") { $brake = "yes" } elseif ($bl -match "BRAKE RELEASED") { $brake = "no" } } catch { $brake = "unknown"; $brkat = "readfail"; $brkage = "readfail" }',
   `$sp = Join-Path $env:TEMP "${STATE_NAME}"`,
   '$hb = "none"',
   'if (Test-Path $sp) { try { $j = (Get-Content $sp -Raw | ConvertFrom-Json); if ($j.ts) { $hb = [long]([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - [long]$j.ts) } } catch { $hb = "bad" } }',
-  'Write-Output ("WD=" + $w.Count + " MINER=" + $m.Count + " HB=" + $hb + " BRAKE=" + $brake + " BRKAT=" + $brkat)',
+  'Write-Output ("WD=" + $w.Count + " MINER=" + $m.Count + " HB=" + $hb + " BRAKE=" + $brake + " BRKAT=" + $brkat + " BRKAGE=" + $brkage)',
 ].join('; ');
 const b64 = Buffer.from(ps, 'utf16le').toString('base64');
 

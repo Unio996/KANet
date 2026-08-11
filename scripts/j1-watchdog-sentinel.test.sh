@@ -56,7 +56,7 @@ run "miner gone (MINER=0)"        "WD=1 MINER=0 HB=30000"     1 "矿机数=0"
 # ── 刹车状态那一格(2026-08-10 23:51 第一次真响就是误报在这里) ──────────────
 # 🔴 方向是承重的: 只有【明确在刹车】才静默; 读不到一律出声。
 #    反过来会把一次真正的矿机死亡永久静音。
-run "MINER=0 且在刹车 ⇒ 静默"      "WD=1 MINER=0 HB=30000 BRAKE=yes"     0 ""
+run "MINER=0 且在刹车(带年龄) ⇒ 静默" "WD=1 MINER=0 HB=30000 BRAKE=yes BRKAGE=20" 0 ""
 run "MINER=0 且不在刹车 ⇒ 出声"    "WD=1 MINER=0 HB=30000 BRAKE=no"      1 "不在刹车中"
 run "MINER=0 刹车状态 unknown ⇒ 出声" "WD=1 MINER=0 HB=30000 BRAKE=unknown" 1 "读不到"
 run "MINER=0 完全没有 BRAKE 字段 ⇒ 出声" "WD=1 MINER=0 HB=30000"          1 "读不到"
@@ -65,9 +65,22 @@ run "刹车中但 WD=0 ⇒ 仍出声"       "WD=0 MINER=0 HB=30000 BRAKE=yes"   
 run "刹车中但心跳陈旧 ⇒ 仍出声"    "WD=1 MINER=0 HB=3600000 BRAKE=yes"   1 "心跳陈旧"
 # 🔴 带 BRKAT 字段(BRAKE 之后还有别的字段)时, BRAKE 与 HB 都不能被解坏 ——
 #    加 BRAKE 字段那次就把 HB 的贪婪正则弄坏过一次, 这几格钉住以后再加字段。
-run "BRKAT 在后: 刹车中仍静默"   "WD=1 MINER=0 HB=30000 BRAKE=yes BRKAT=2026-08-11T10:38:19" 0 ""
+run "BRKAT+BRKAGE 在后: 刹车中静默" "WD=1 MINER=0 HB=30000 BRAKE=yes BRKAT=2026-08-11T10:38:19 BRKAGE=45" 0 ""
 run "BRKAT 在后: 不在刹车仍出声" "WD=1 MINER=0 HB=30000 BRAKE=no BRKAT=2026-08-11T10:42:27"  1 "不在刹车中"
 run "BRKAT 在后: 心跳仍解得出"   "WD=1 MINER=1 HB=3600000 BRAKE=no BRKAT=x"                 1 "心跳陈旧"
+# ── 豁免的【授权时效】(Codex 2026-08-11 判 RED 的那格) ────────────────────
+# 🔴 BRAKE=yes 不再自动等于静默 —— 授予它的那个 marker 自己也要够新。
+#    上界 1800s = 20 脉冲 × ~70s × 1.3 余量(刹车是一整集, 不是一次 20 秒脉冲)。
+run "刹车 20s 前 ⇒ 静默"          "WD=1 MINER=0 HB=30000 BRAKE=yes BRKAGE=20"     0 ""
+run "刹车 1799s 前 ⇒ 仍静默(边界)" "WD=1 MINER=0 HB=30000 BRAKE=yes BRKAGE=1799"   0 ""
+run "刹车 1800s 前 ⇒ 仍静默(边界)" "WD=1 MINER=0 HB=30000 BRAKE=yes BRKAGE=1800"   0 ""
+run "🔴 陈旧 ENGAGED 1801s ⇒ 出声" "WD=1 MINER=0 HB=30000 BRAKE=yes BRKAGE=1801"   1 "陈旧"
+run "🔴 陈旧 ENGAGED 6 小时 ⇒ 出声" "WD=1 MINER=0 HB=30000 BRAKE=yes BRKAGE=21600" 1 "陈旧"
+run "标记来自未来 ⇒ 出声"          "WD=1 MINER=0 HB=30000 BRAKE=yes BRKAGE=-600"   1 "未来"
+run "年龄读不出(readfail) ⇒ 出声"  "WD=1 MINER=0 HB=30000 BRAKE=yes BRKAGE=readfail" 1 "读不出"
+run "年龄字段缺失 ⇒ 出声"          "WD=1 MINER=0 HB=30000 BRAKE=yes"               1 "读不出"
+run "年龄非整数(1-2) ⇒ 出声"       "WD=1 MINER=0 HB=30000 BRAKE=yes BRKAGE=1-2"    1 "读不出"
+run "矿机正常时年龄陈旧无所谓"     "WD=1 MINER=1 HB=30000 BRAKE=yes BRKAGE=99999"  0 ""
 # ssh 取不到 ⇒ rc 2, 与故障分开
 run "ssh unreachable"             "UNREACHABLE:Command failed" 2 "取不到"
 run "garbage line"                "hello"                      2 "取不到"

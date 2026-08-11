@@ -55,6 +55,13 @@ mut "任何刹车状态都静默"            's/\" = "no"/\" = "__never__"/'
 mut "刹车豁免提前到心跳之前"        's/^# 心跳都过了/exit 0\n# 心跳都过了/'
 mut "HB 正则退回贪婪(吞掉 BRAKE)"    's/\[^ \]/[^Z]/'
 
+# ── 豁免时效那一格(Codex 2026-08-11 判 RED · 新的静默口, 必须能拆红) ────────
+mut "陈旧标记也给豁免(去掉上界)"   's/-gt "\$BRK_MAX_AGE"/-gt 99999999/'
+mut "上界 1800 → 99999"            's/^BRK_MAX_AGE=1800/BRK_MAX_AGE=99999/'
+mut "上界 -gt → -ge (边界)"         's/-gt "\$BRK_MAX_AGE"/-ge "\$BRK_MAX_AGE"/'
+mut "不判未来标记"                 's/-lt "\$BRK_MIN_AGE"/-lt -99999999/'
+mut "年龄非整数也给豁免"           "s/^      ''|\\*\\[!0-9\\]\\*)/      __never__)/"
+
 echo ""
 echo "detected=$det  MISSED=$miss  INERT=$inert  BROKEN=$broken"
 [ "$miss" = "0" ] && [ "$inert" = "0" ] && [ "$broken" = "0" ] || exit 1

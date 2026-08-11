@@ -69,6 +69,21 @@ if [ "$WD" != "1" ]; then
   exit 1
 fi
 BR=$(echo "$OUT" | sed -n 's/.*BRAKE=\([a-z]*\).*/\1/p')
+BRKAGE=$(echo "$OUT" | sed -n 's/.*BRKAGE=\([^ ]*\).*/\1/p')
+
+# 🔴🔴 豁免的【授权时效】—— Codex 2026-08-11 判 RED 的正是这一格:
+#    上一版把 BRKAT 只当展示字段打出来, **判据一个字都没读它** ⇒ 授予静默的那个 marker
+#    **没有任何年龄约束**。若 RELEASED 丢失/被截断/读竞态, 一个陈旧的 ENGAGED 会
+#    **无限期静音 MINER=0** —— 而 WD 与心跳都正常, 看起来一切健康。
+#    🔨 又是同一个病: **仪器加了, 没接进判据**(今晚 .alive 那次一模一样)。
+#
+# 🔴 上界怎么定, 说清楚, 因为它【不能】按 Codex 说的"远低于心跳上界(300s)"来:
+#    刹车不是一次 20 秒脉冲, 是**一整集**最多 20 个脉冲; 实测脉冲间隔约 70 秒
+#    ⇒ 一集合法地可以持续 ~23 分钟, 期间 ENGAGED 一直是最后一个 marker。
+#    ⇒ 取 MAX_PULSES(20) × 脉冲间隔(70s) × 1.3 余量 ≈ 1800 秒。
+#    比 300 秒大得多是**必须的**, 否则正常刹车会被判成"陈旧"而误报; 但它仍然是**有界的**。
+BRK_MAX_AGE=1800
+BRK_MIN_AGE=-60
 
 # 🔴 矿机数=0 在【刹车脉冲】期间是正常的 —— watchdog 每轮会停矿机 20 秒。
 #    2026-08-10 23:51 哨兵第一次真响就是撞上这个, 而告警自动发进了协调频道, 吃掉队友注意力
@@ -86,6 +101,23 @@ if [ "$MN" != "1" ]; then
     miner_msg="🔴 watchdog 在但矿机数=$MN (应为 1), 且【不在刹车中】(BRAKE=no) — 矿机异常"
   elif [ "$BR" != "yes" ]; then
     miner_msg="🔴 watchdog 在但矿机数=$MN (应为 1), 而【刹车状态读不到】(BRAKE=${BR:-缺失}) — 按异常处理, 不假定它在刹车"
+  else
+    # BRAKE=yes —— 但必须【它自己也够新】才作数。年龄由那台机器算好后带回(整数秒)。
+    n=$BRKAGE
+    case "$n" in -*) n=${n#-} ;; esac
+    case "$n" in
+      ''|*[!0-9]*)
+        miner_msg="🔴 矿机数=$MN, 声称在刹车但【刹车年龄读不出】(BRKAGE=${BRKAGE:-缺失}) — 不给豁免"
+        ;;
+      *)
+        if [ "$BRKAGE" -gt "$BRK_MAX_AGE" ]; then
+          miner_msg="🔴 矿机数=$MN, 声称在刹车但那个标记已【${BRKAGE}s 陈旧】(> ${BRK_MAX_AGE}s) — 刹车早该结束了, 不给豁免"
+        elif [ "$BRKAGE" -lt "$BRK_MIN_AGE" ]; then
+          miner_msg="🔴 矿机数=$MN, 刹车标记来自【未来】(${BRKAGE}s) — 时钟不可信, 不给豁免"
+        fi
+        # 年龄在界内 ⇒ miner_msg 保持空 ⇒ 静默(真正的刹车脉冲)
+        ;;
+    esac
   fi
 fi
 
