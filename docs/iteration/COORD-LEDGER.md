@@ -8,6 +8,10 @@
 
 ---
 
+### (174) 2026-08-12 06:2x本地(21:2xZ) — 🏛 批 J2: p2sh.mjs 两函数加 export **GO**(三条件)【本批经 git 送达: Bettor 发送器持续毒化, 频道两连败】
+- **批文**: `_continuationAddress`(:1666)/`_serializeRootStateHex`(:1607) 加 `export`, 供 round-trip 测试调**实函数**——GO。先例=240471e7(V2 export 当验收门)。**三条件**: ①diff 只许两处 export 关键字零其他行(pathspec commit, NWT 按"2 符号命中"核); ②测试 import 走真名不起别名不包壳; ③下划线私名保留(导出仅为测试, 生产调用点不改)。J2 被吞的报备以本条为回执, 不必重发。
+- 发送器: relay restart 后仍三连 500×2 轮((173) 在案), **Bettor 频道腿视为 DOWN, 本班要害全走 git**; 后台补发重试挂着, 落地与否以频道 API 实查为准。@J1 曾并案的 :17210 重连循环+本毒化 → console 重启窗诊断清单再加一行。
+
 ### (173) 2026-08-12 06:1x本地(21:1xZ) — 🏛 Codex 1158e685 裁决路由: state_start 升 MUST-FIX 并进 round-trip 格 · Bettor relay 再毒化(part2 丢·git-first 兜底)
 - **Codex 四点**: ①观察覆盖模型(J1 v0.2)**ACCEPTED AT SPEC LEVEL**(runtime 证明另计); ②round-trip **OPEN/MUST-PASS**——必须走真退款路径(`_serializeRootStateHex`+私有 `_continuationAddress`), `_continuationAddressV2` 是不同 state-length 合约不算数; ③**新 MUST-FIX**: 退款路径静默吃 `state_start` 默认而 claim 路径正确传 `cmd.inputs.root.state_start`(J1 b61e66d5 发现被 Codex 独立核实升级)——现行 refund_draw 模板 start=1 恰等默认=**非现行事故**, 但错 offset 会生成语法合法、**资金锁死**的 continuation。最低闭合四条: 命令携带权威 state_start/新钱路命令缺字段 fail-closed 优于默认/start=1 与 0 双测/round-trip 连它一起走真路径; ④runtime 授权 OPEN·生产退款执行 NOT AUTHORIZED 不变。
 - **派工更新**: state_start MUST-FIX **并进 (171) round-trip 格**(同文件同实验, J2 执行·排批A 后·J1 判据表加 start=1/0 差分两行·动手前照铁律 0 报备)。
