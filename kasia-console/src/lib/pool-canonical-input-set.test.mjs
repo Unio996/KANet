@@ -10,7 +10,7 @@
 import assert from 'node:assert';
 import {
   sealCis, verifyCis, cisDigest, assertCisStructure, betLeaf,
-  CIS_PROTOCOL, CIS_DOMAIN, CIS_SCHEMA_VERSION,
+  CIS_PROTOCOL, CIS_DOMAIN, CIS_SCHEMA_VERSION, ROLE_CODES_RATIFIED, assertRoleCodesRatified,
 } from './pool-canonical-input-set.mjs';
 
 const betLeafHexOf = (b) => betLeaf(b).toString('hex');
@@ -192,6 +192,19 @@ t('金标准向量: bet 叶子(丢 LP 域标签会红)', () => {
 });
 t('金标准向量: input_set_root(归并处丢 LP 会红)', () => {
   assert.strictEqual(sealCis(baseBody()).input_set_root, GOLDEN_INPUT_SET_ROOT, 'input_set_root 字节变了 —— 同上');
+});
+
+// ── role_code 未裁定标记(NWT 2026-08-11 复审 note)──────────────────────────
+// 🔴 这三格守的是【状态被程序读得到】, 不是「有守卫了」。库拦不住不肯配合的调用方,
+//    真正的闸在签名边界(D-012 ②)。名字里不写"守卫"两个字, 免得下一个人读大一档。
+t('未裁定标记为 false(裁定前它必须是假的)', () => {
+  assert.strictEqual(ROLE_CODES_RATIFIED, false, '若这格红了: 要么已裁定(那就同时把表搬回设计稿), 要么有人擅自翻了它');
+});
+t('assertRoleCodesRatified 在未裁定时必抛', () => {
+  assert.throws(() => assertRoleCodesRatified('测试调用点'), /尚未裁定/);
+});
+t('抛出的话里必须点出【是哪个调用点】(否则报错等于没报)', () => {
+  assert.throws(() => assertRoleCodesRatified('some-signing-path'), /some-signing-path/);
 });
 
 console.log('');
