@@ -89,11 +89,18 @@ export function computeBetsRoot(orderedBets) {
   );
 }
 
-function levelsOf(winners) {
-  if (winners.length > CAP) throw new Error(`>${CAP} winners needs depth>${DEPTH} (SS climb is depth-${DEPTH}; >${CAP} → rolling payout-shard)`);
+// 叶子泛型的 depth-10 position-aware merkle。**本仓只此一处实现。**
+// 🔴 抽出来的理由(2026-08-11, D-012 冻结前置⑥): CIS 要对 bets/other_inputs/outputs 三组
+//    各建一棵同形状的树, 而 precond6 设计 §2.0 写死「重造 canonicalJson / 第二套摘要 /
+//    第二种排序的实现, 按缺陷提」。⇒ 复用这一份, 不另写。
+// 🔴 这是【纯重构, 零行为变化】: levelsOf 只是把它的叶子喂进来。改动前后 payoutRoot /
+//    betsRoot / merkleProof 的输出经金标准逐字节比对相同(scratch/j1-golden-payoutroot.mjs)。
+//    钱路文件的"纯重构"也必须能证明零漂移, 不能只声称。
+export function levelsOfLeaves(leaves) {
+  if (leaves.length > CAP) throw new Error(`>${CAP} leaves needs depth>${DEPTH} (SS climb is depth-${DEPTH}; >${CAP} → rolling payout-shard)`);
   const levels = [];
   let level = new Array(CAP).fill(ZERO32);
-  winners.forEach((w, i) => { level[i] = payoutLeaf(w.pk, w.amount); });
+  leaves.forEach((leaf, i) => { level[i] = leaf; });
   levels.push(level);
   for (let d = 0; d < DEPTH; d++) {
     const next = [];
@@ -101,6 +108,14 @@ function levelsOf(winners) {
     levels.push(next); level = next;
   }
   return levels;
+}
+
+// depth-10 root over arbitrary leaves. CIS 的三棵子树用它。
+export function merkleRootOfLeaves(leaves) { return levelsOfLeaves(leaves)[DEPTH][0]; }
+
+function levelsOf(winners) {
+  if (winners.length > CAP) throw new Error(`>${CAP} winners needs depth>${DEPTH} (SS climb is depth-${DEPTH}; >${CAP} → rolling payout-shard)`);
+  return levelsOfLeaves(winners.map((w) => payoutLeaf(w.pk, w.amount)));
 }
 
 // depth-8 position-aware merkle root = plan_commit (committee-sign in chunk_0).
