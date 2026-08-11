@@ -8,6 +8,13 @@
 
 ---
 
+### (162) 2026-08-12 02:3x本地(19:3xZ) — 🏛 Owner 直令: 全自动全力推主线 · Codex d5e43f91 对 rev-5 裁决收 · spawn 两 KANet-UI 顶替臂(scanner+rev-6) · safely_absent 谓词派 J1
+- **Owner 直令(Bettor 终端, 19:1xZ)**: "你全自动, 全力推动主线开发" ⇒ 关键路径不等缺位者, spawn 顶上(授权=project-owner-authorizes-spawn 在册 7/23 钦定, 锚全中: KANet-UI 沉默自 18:13Z+频道他人活跃+追两次无回; 事后知会非请示)。
+- **Codex(桥 d5e43f91)对退款 rev-5 裁决**: 状态机 spec 层 **ACCEPTED**/前 review 二元缺陷 **CLOSED**; **safely_absent 谓词=落码闸 MUST-FIX**(timeout/DB 标志/单次 RPC miss/操作员断言均不合格); **A/B 消歧必须做但不得暗示 partial-digest=执行许可**(串行 continuation 拓扑: 前置未决后续本来推进不过去, 该不变式须显式写成执行闸); **race-to-resolve 判 RED**(授权循环: 竞争交易是新钱路动作, 不能借过期会话授权; Codex 给两条可接受构造); runtime enforcement **OPEN**(pool-refund-builder 仍无授权闸); 落码闸 7 条验收判据原样收录。
+- **spawn 两臂(KANet-UI 域顶替)**: 臂a=scanner 诊断救活(约束: 禁 console 重启/禁杀 relay/kill 前父链归因/必须重启 console 才能修则停手上报); 臂b=rev-6 主笔(折 NWT(157)+fc5ec74d+Codex d5e43f91 三源; 只 pathspec commit 不 push, Bettor 核后统一推)。产出全走审: rev-6 → canonical NWT + Codex 循环, 不因顶替降审。
+- **📌 safely_absent 谓词设计派 @J1**(rev-5 留白件, 链上真相域): 机器判据"旧广播不可能再落地"——方向提示: 被消费的 pool outpoint 已被另一确认 txid 花掉且深度≥N=结构性死(check_utxo_landed/minDepth 先例在 pool.js); 负面清单照 Codex; fail-closed; 附负测试清单。交付走 git(其频道腿断, 我们的频道消息 J1 可见)。
+- A2 线不干预: J2 v0.3 §5-A-ter 给 NWT 抽样数加 stake 加权条件(22.2% 是均匀抽样数, 抽样器实为 stake 加权)——审改循环自转中。
+
 ### (161) 2026-08-12 02:1x本地(19:1xZ) — 🔴 J1 在座但不可见: :3200 链上摄入腿自 18:23:56Z 断((143) scanner 同族复发)· 点名收账 · 追 KANet-UI(其域两件无人执行)
 - **J1 ✅ 报到(经 git acdc24ed, 链上证据带块哈希)**: 三条消息(10:41 D2 复核更正/18:42 接位报到/18:52 "D4 投递路径前提不成立")全部上链, 团队 console 自 18:23:56Z 一条未摄入而本地写入正常到 18:57:25Z ⇒ 断的是**链上摄入腿**。J1 判据入册: ①"那台消息很多"证不了摄入健康——四个本机 relay 全走本地写入不经摄入腿, **唯一真走过该组件的样本=J1 的消息**(组件健康只能由走过它的样本证); ②撤回其上一班"10:41 真丢"判定——"那台没有"判不了"链上没有", 两者导出动作相反(重发=永久链上重复), 本次不重发=对。
 - **📌 派工(@KANet-UI, console 域)**: ①救活 kaspa-scout scanner(对照 (143): PID/checkpoint 实查+停启归因)②SCANNER-STOP-UNATTRIBUTED 卡复发记账——上次 49 分钟断窗零告警的监控缺口这次原样应验: 断 ~50 分钟, 发现者是链对面的 J1, 不是本机任何监控。**修复前 J1 官方通道=git**(J1 已自行如此; 我们发的频道消息 J1 侧照常可见=单向断)。
