@@ -1,4 +1,9 @@
-# safely_absent 谓词设计 v0.1 —— 它不是等出来的,是**做出来或算出来**的
+# safely_absent 谓词设计 **v0.2** —— 它不是等出来的,是**做出来或算出来**的
+
+> **v0.2 变更**(2026-08-12,收 @NWT PASS-with-MUST-FIX + Codex `90215dfd`):
+> §5「观察链完备性」由**自洽性**升为**覆盖性**硬前置(五条,DAA 锚)· §8 新增 N11/N12/N13 ·
+> §9 把 round-trip 从「留白」升为 **MUST-PASS**(不符则禁用 P1)· P2 授权补 approver 身份/角色 ·
+> 明确「规范进展 ≠ 运行时闭合」。
 
 > **Status**: CURRENT
 
@@ -72,6 +77,30 @@ safely_absent_P1(T) ⟺  以下全部成立
 
 ## 5. P1 的前提:可证完备的 continuation 观察链(这条是本设计的新东西)
 
+> ## 🔴 v0.2 修订(2026-08-12)—— 本节 v0.1 的写法**不成立**,已被两方独立打掉
+>
+> **@NWT(PASS-with-MUST-FIX)与 Codex `90215dfd` §2 独立收敛到同一条,我认,且这条是我自己该抓到的:**
+>
+> **v0.1 §5 只证了「状态转移的连续性」,没证「观察者的覆盖」。**
+> 观察者**自己静默停摆**、而那段窗口里目标地址**恰好零事件** ⇒ 重启后 value 链**依然完美连续**。
+> ⇒ 从 value 连续性**分不出**「观察者活着且确实没发生事」与「观察者是瞎的、因此无法排除发生过」。
+> 而 (d) 是**授权性**的负向事实(它准许同一笔经济项被重新授权)⇒ **这个缺口必须 fail-closed**。
+>
+> 🔴 **它不是理论**:就在今天这几小时,本队**两次**发生「扫描/摄入组件静默停摆、靠外部信号才被发现」
+> (:3200 摄入腿断 18:28→19:17Z;CONSOLE-SPAWN-DEATH)。**第一次那个还是我自己报的** ——
+> 我一边拿它当判据教训,一边在自己的设计里犯了同一个:**我加了连续性校验,却没让任何判据去读"观察者还活着吗"。**
+> (在册同族:仪器要被判据读到才算数 / 沉默与没事读数相同。)
+>
+> ### ⇒ P1 的硬前置(五条,缺一即 `unresolved`,照 Codex §2 逐条采纳)
+> 1. **持久化的观察者覆盖证据,锚在单调的链上区间(DAA)上** —— **不是**墙钟心跳文本。
+> 2. **证明窗口的起点不得晚于「T 最早可能落链的时刻」**,并**延伸到做判定的那一刻**。
+> 3. **任何心跳/checkpoint/扫描游标的缺口,都使该区间的负向臂失效** —— 哪怕 pool_value 序列完全连续。
+> 4. **重启必须恢复此前的覆盖边界**,不许静默开一个新的「完备」窗口。
+> 5. **负测试必须包含**:静默停摆 + 目标地址零转移 + value 连续的重启 ⇒ 必须判 `coverage_gap → unresolved`。
+>
+> 🔨 **一句留给下一个设计者的**:**「我的数据自洽」不等于「我一直在看」。**
+> 自洽性校验只能证**已观察到的那些**之间没有矛盾,证不了**没被观察的那段**里什么都没发生。
+
 一般索引的缺席不可用;**但 continuation 是一条链表**:每一环的 `pool_value` 必须等于上一环减去某个已知 stake。
 ⇒ **缺口是可检测的**:相邻两环对不上账,就说明中间掉了环。
 
@@ -115,6 +144,9 @@ safely_absent_P1(T) ⟺  以下全部成立
 | N8 | `equal_stake_collision_uses_txid` | `stake(B') == stake(B)`(地址重合) | **按 outpoint.txid 判**,T'≠T 才准 |
 | N9 | `late_confirmation_revokes_absent` | 判 `safely_absent` 后 T 才确认 | 升 `conflict`,且证明无第二份普通授权 |
 | N10 | `instrument_failure_is_not_a_verdict` | relay 不可达 | **拒**(`unresolved`) |
+| N11 | `silent_observer_outage_with_zero_transitions` | 观察者静默停摆 + 该窗口目标地址**零转移** + value 连续的重启 | **判 `coverage_gap` → `unresolved`**(v0.2 新增) |
+| N12 | `restart_must_not_open_a_fresh_complete_window` | 重启后不恢复旧覆盖边界 | **拒**,并保留原缺口(v0.2 新增) |
+| N13 | `address_roundtrip_mismatch_disables_p1` | state→address 复算与链上实物不符 | **禁用 P1**,**不得**退回缺席启发式(v0.2 新增) |
 | P+ | `authorized_conflict_tx_establishes_absent` | P2 的 T'' 确认且 depth≥20 | **准**(唯一的阳性对照) |
 
 🔴 **阳性对照 `P+` 不是可选项**:一张只会「拒」的判据表,**全体拒绝也能全绿**。
@@ -124,6 +156,13 @@ safely_absent_P1(T) ⟺  以下全部成立
 
 - **未落码**(边界)。runtime enforcement 那格(`buildRefundCommand()` 仍无授权 artifact,Codex §5)**不在本文范围**,
   🔴 **而它有人管**:Bettor (165) 记的「退款轨剩 runtime enforcement」就是它 —— 不是没人看的洞。
-- `_continuationAddress` 的 state 序列化我**读了实现、没跑**过一次 round-trip;
-  P1 落码前**必须先跑一次**:给定已知 state → 算地址 → 与链上实际 continuation 逐字节比对。**这是 P1 的承重前提。**
+- 🔴 **v0.2 更正(Codex §3 判 MUST-PASS,它不再是「留白」)**:`_continuationAddress` 的 state→address
+  round-trip 是**硬前置**。在用**已知前驱 state + 已知 refund 转移**复算出的地址/outpoint 关系与**链上实物
+  逐字节相同**之前,P1 的地址证据**不算 CLOSED**;**复算不符必须禁用 P1,不许退回缺席启发式**(见 N13)。
+  **我去跑,跑完单独交。**
+- 🔴 **P2 的授权 artifact 补一格(Codex §4)**:除 outpoint / 竞争项 / 处置 / output-value 承诺 / op-id /
+  expiry / 重放保护之外,还必须绑 **approver 身份与角色**。本文**不授权**任何 P2 生产使用。
+- 🔴 **规范进展 ≠ 运行时闭合(Codex §5 + 他对 ledger 那句下的 status correction)**:
+  `buildRefundCommand()` 至今**不收**任何授权/会话/项状态 artifact,仅凭技术性 refund 输入就能构造
+  `bshard_refund_cancelled`。⇒ 「退款轨设计侧全闭」这句**对运行时不成立**,别按已闭记账。
 - §5 观察链要不要复用 `preprune-capture-worker` 的宿主,归基础设施域主拍(我不自决)。
