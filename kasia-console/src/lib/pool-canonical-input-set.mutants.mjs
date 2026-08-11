@@ -54,6 +54,13 @@ const MUTANTS = [
     (s) => s.replace("serializeI64(BigInt(roleCode(OUTPUT_ROLE_CODE, o.role, 'outputs[]')), 1),", '')],
   ['verify 不重算 bets_root_legacy(只比 CIS 那一个)',
     (s) => s.replace('if (legacy !== cis.bets_root_legacy) {', 'if (false) {')],
+  // ── 未裁定标记(NWT 2026-08-11 note)。注释变不成闸, 而【改成会抛的断言】能被变异体拆掉验。
+  ['未裁定标记被翻成 true(擅自宣布已裁定)',
+    (s) => s.replace('export const ROLE_CODES_RATIFIED = false;', 'export const ROLE_CODES_RATIFIED = true;')],
+  ['assertRoleCodesRatified 变成不抛(退回注释级警告)',
+    (s) => s.replace('if (!ROLE_CODES_RATIFIED) {', 'if (false) {')],
+  ['抛出的话不点出调用点(报错等于没报)',
+    (s) => s.replace('`CIS: ${where} 拒绝执行', '`CIS: 拒绝执行')],
 ];
 
 let det = 0; let miss = 0; let inert = 0; let broken = 0;

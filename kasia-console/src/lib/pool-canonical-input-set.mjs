@@ -45,6 +45,26 @@ const SELF_REFERENTIAL_KEYS = Object.freeze(['cis_digest']);
 //       (裁定后请把它搬回设计稿, 让设计而不是实现成为单源。)
 const INPUT_ROLE_CODE = Object.freeze({ maker_stake: 1, oracle_bond: 2, fee_funding: 3 });
 const OUTPUT_ROLE_CODE = Object.freeze({ broker_fee: 1, committee: 2, winner: 3, maker_fee: 4, maker_extra: 5 });
+
+// 🔴 上面那段警告【原先只是注释】—— NWT 2026-08-11 复审点名: 注释不是闸,
+//    这个模块此刻被任何签名路径 import 并调用, 没有任何机制会因"未裁定"而拒绝。
+//    这跟我在册的一条同族: **仪器只有被判据读到才算数**(我加过 .alive 却没接进闸, 瞎哨兵照样过)。
+// ⇒ 于是把它变成一个可被读到的量 + 一个会抛的断言。
+export const ROLE_CODES_RATIFIED = false;   // 有人裁定并把表搬回设计稿后, 这里改 true(且只改这一处)
+export function assertRoleCodesRatified(where) {
+  if (!ROLE_CODES_RATIFIED) {
+    throw new Error(
+      `CIS: ${where} 拒绝执行 —— role→role_code 映射尚未裁定(ROLE_CODES_RATIFIED=false)。`
+      + ' 该表是实现自填的定值, 两个独立实现会算出不同字节; 裁定前不得据它产出任何进入签名路径的字节。',
+    );
+  }
+}
+// 🔴🔴 **别把上面这两行读成"现在有守卫了"** —— 库拦不住不肯配合的调用方:
+//    谁直接调 sealCis/cisDigest 而不调 assertRoleCodesRatified, 照样拿得到字节。
+//    **真正的闸在签名边界**(D-012 ② "证明 oracle 角色够不到通用交易签名入口"), 不在这个文件里。
+//    这里能做到的是: ①把未裁定状态变成一个**可被程序读到**的量(而不是只有人读得到的注释);
+//    ②给肯配合的调用方一个**会抛**的断言。**范围就这么大, 不要写成更大。**
+//    今日实测: 全仓对本模块的调用点 = 0(不带扩展名过滤扫过, 含动态 import 与别名形态)。
 const roleCode = (table, role, where) => {
   if (!Object.prototype.hasOwnProperty.call(table, role)) {
     throw new Error(`CIS: ${where} 的 role 不认识: ${JSON.stringify(role)}(合法: ${Object.keys(table).join('/')})`);
