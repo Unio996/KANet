@@ -135,6 +135,26 @@ witness: { self_out_idx: 0, … }
 
 🔴 **T2 是这份修法的存在理由，必须先在【未修的代码】上跑出 pass** —— 拿不到那个 pass，就证明不了我们修的是一个真存在的洞（在册：把被测缺陷重新注入一次，绿灯还变不变红）。
 
+### §6-bis 修前实测读数（2026-08-11 · 已跑 · 原样抄进本稿）
+
+**为什么抄进来**：探针在 `scratch/`（gitignored）⇒ 它随时可能不在了，而**在册那条说得很清楚：gitignored 产物不算交付**。
+落码之后探针要退役（§8 ⚠），到那时这几行就是"修之前它确实是通的"唯一还留得住的记录。
+
+```
+调用方式: 直接 import 生产导出 verifyClosePayoutRootBinding(未修版本)
+输入:     库里真实 payout_redeem_hex(len>1000) · reDerivedRoot='aa'×32 · 零写入
+expectedSpk = 0000aa20c3ab44d766886a643267…   (由函数自己在 reject 路回传, 未碰内部函数)
+
+T1  1 个 covenant, SPK 正确                → pass    matchedOutputs=1   ✅ 本该 pass
+T2  2 个 covenant, SPK 都对, value 100/900  → pass    matchedOutputs=2   🔴 缺陷显形
+T3  1 个 covenant, SPK 错                  → reject                     ✅ 本该 reject
+T4  1 个 covenant, SPK 对但 value=999999999 → pass    matchedOutputs=1   🔴 缺陷显形
+```
+
+⇒ **T2 与 T4 各自证明了 N1 与 N3 所要挡的东西在修之前【确实是通的】。**
+⚠ **这四行是【证据】不是【回归哨兵】** —— 它证明"修之前有洞"，**不证明"以后不会再有洞"**；
+后者要等 §8 第③件（正式用例进 runner）落地。**两者不可互相冒充。**
+
 ---
 
 ## §7 证据层级
