@@ -47,10 +47,27 @@ const STATE_NAME = `tn12-dag-probe-state-${createHash('sha256').update(NODE_URL)
 const ps = [
   '$w = @((Get-CimInstance Win32_Process) | Where-Object { $_.CommandLine -ne $null -and $_.CommandLine -match "tn12-mining-watchdog" })',
   '$m = @((Get-CimInstance Win32_Process) | Where-Object { $_.Name -eq "stratum-bridge.exe" })',
+  // 🔴 刹车状态: 2026-08-10 23:51 哨兵第一次真响, 报的是 `MINER=0` —— 而那是【刹车脉冲】,
+  //    watchdog 每轮会停掉矿机 20 秒。误报自动发进了协调频道, 吃掉了队友的注意力。
+  //    🔨 修法照我当时自己说的那条: **让哨兵拿到刹车状态, 而不是放宽阈值。**
+  //    状态从 watchdog 日志推(它没有专门的状态文件): 最后一个 BRAKE ENGAGED/RELEASED marker。
+  //    🔴 取不到时【必须报 unknown, 而 unknown 一律按"没在刹车"处理】——
+  //       反过来(默认当成在刹车)会让一次真正的矿机死亡被永久静音。默认必须是出声的那个。
+  '$brake = "unknown"',
+  // 🔴 一并带出【它依据的那个 marker 是哪一条】。
+  //    2026-08-11 03:41:32Z 这里报了 BRAKE=no, 而 watchdog 日志显示当时正在刹车中
+  //    (10:38:19 ENGAGED → 10:42:27 RELEASED, 本地 UTC+7)。事后查: marker 就在窗口里, **原因至今未明**。
+  //    ⇒ 推不出来就别猜, **让它下次自己说清楚**: 把 marker 的时刻打出来,
+  //      下一次误判时一眼能看出它读的是哪一行(以及是不是根本没读到)。
+  '$brkat = "-"',
+  'try { $bl = Get-Content "D:\\kaspa-tn12-mining\\_watchdog.log" -Tail 800 -ErrorAction Stop | ' +
+    'Where-Object { $_ -match "BRAKE ENGAGED|BRAKE RELEASED" } | Select-Object -Last 1; ' +
+    'if ($bl) { if ($bl -match "^(\\S+ \\S+)") { $brkat = $Matches[1] -replace " ", "T" } }; ' +
+    'if ($bl -match "BRAKE ENGAGED") { $brake = "yes" } elseif ($bl -match "BRAKE RELEASED") { $brake = "no" } } catch { $brake = "unknown"; $brkat = "readfail" }',
   `$sp = Join-Path $env:TEMP "${STATE_NAME}"`,
   '$hb = "none"',
   'if (Test-Path $sp) { try { $j = (Get-Content $sp -Raw | ConvertFrom-Json); if ($j.ts) { $hb = [long]([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - [long]$j.ts) } } catch { $hb = "bad" } }',
-  'Write-Output ("WD=" + $w.Count + " MINER=" + $m.Count + " HB=" + $hb)',
+  'Write-Output ("WD=" + $w.Count + " MINER=" + $m.Count + " HB=" + $hb + " BRAKE=" + $brake + " BRKAT=" + $brkat)',
 ].join('; ');
 const b64 = Buffer.from(ps, 'utf16le').toString('base64');
 

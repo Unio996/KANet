@@ -53,6 +53,21 @@ run "negative zero (-0)"          "WD=1 MINER=1 HB=-0"        0 ""
 run "watchdog gone (WD=0)"        "WD=0 MINER=1 HB=30000"     1 "实例数=0"
 run "two watchdogs (WD=2)"        "WD=2 MINER=1 HB=30000"     1 "实例数=2"
 run "miner gone (MINER=0)"        "WD=1 MINER=0 HB=30000"     1 "矿机数=0"
+# ── 刹车状态那一格(2026-08-10 23:51 第一次真响就是误报在这里) ──────────────
+# 🔴 方向是承重的: 只有【明确在刹车】才静默; 读不到一律出声。
+#    反过来会把一次真正的矿机死亡永久静音。
+run "MINER=0 且在刹车 ⇒ 静默"      "WD=1 MINER=0 HB=30000 BRAKE=yes"     0 ""
+run "MINER=0 且不在刹车 ⇒ 出声"    "WD=1 MINER=0 HB=30000 BRAKE=no"      1 "不在刹车中"
+run "MINER=0 刹车状态 unknown ⇒ 出声" "WD=1 MINER=0 HB=30000 BRAKE=unknown" 1 "读不到"
+run "MINER=0 完全没有 BRAKE 字段 ⇒ 出声" "WD=1 MINER=0 HB=30000"          1 "读不到"
+run "MINER=1 带 BRAKE=yes 仍正常"  "WD=1 MINER=1 HB=30000 BRAKE=yes"     0 ""
+run "刹车中但 WD=0 ⇒ 仍出声"       "WD=0 MINER=0 HB=30000 BRAKE=yes"     1 "实例数=0"
+run "刹车中但心跳陈旧 ⇒ 仍出声"    "WD=1 MINER=0 HB=3600000 BRAKE=yes"   1 "心跳陈旧"
+# 🔴 带 BRKAT 字段(BRAKE 之后还有别的字段)时, BRAKE 与 HB 都不能被解坏 ——
+#    加 BRAKE 字段那次就把 HB 的贪婪正则弄坏过一次, 这几格钉住以后再加字段。
+run "BRKAT 在后: 刹车中仍静默"   "WD=1 MINER=0 HB=30000 BRAKE=yes BRKAT=2026-08-11T10:38:19" 0 ""
+run "BRKAT 在后: 不在刹车仍出声" "WD=1 MINER=0 HB=30000 BRAKE=no BRKAT=2026-08-11T10:42:27"  1 "不在刹车中"
+run "BRKAT 在后: 心跳仍解得出"   "WD=1 MINER=1 HB=3600000 BRAKE=no BRKAT=x"                 1 "心跳陈旧"
 # ssh 取不到 ⇒ rc 2, 与故障分开
 run "ssh unreachable"             "UNREACHABLE:Command failed" 2 "取不到"
 run "garbage line"                "hello"                      2 "取不到"

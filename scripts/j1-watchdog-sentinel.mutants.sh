@@ -8,12 +8,19 @@ SELF_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd) || SELF_DIR=.
 S=$SELF_DIR/j1-watchdog-sentinel-once.sh
 T=$SELF_DIR/j1-watchdog-sentinel.test.sh
 TMP=$(mktemp -t wd-sent-mut.XXXXXX.sh)
-det=0; miss=0; inert=0
+det=0; miss=0; inert=0; broken=0
 
 mut() { # name  sed-expr
   sed "$2" "$S" > "$TMP"
   if cmp -s "$S" "$TMP"; then
     inert=$((inert+1)); printf '[INERT ] %-30s 变异没改动文件 —— 这条什么也没测\n' "$1"; return
+  fi
+  # 🔴 还要分出第三类: **改成了语法坏的**。
+  #    2026-08-10 我写坏一条 sed(表达式被 shell 吃掉), 它把文件改残了 ⇒ 用例当然全红
+  #    ⇒ 被记成 [detect]。**而它证明的不是守卫被拆掉, 是文件被毁了。**
+  #    INERT 只分"改没改动", 分不出"改坏了" —— 坏文件【必然】检出, 是个假阳性。
+  if ! sh -n "$TMP" 2>/dev/null; then
+    broken=$((broken+1)); printf '[BROKEN] %-30s 变异体语法就是坏的 —— 它必然"检出", 什么也没证\n' "$1"; return
   fi
   # 用【用例文件自己提供的注入口】指向变异体, 不再 sed 改写它的 S= 行 ——
   # 改写等于每次都在测一个"被我编辑过的用例文件", 而我要测的是【提交进库的那一份】。
@@ -42,6 +49,12 @@ mut "取不到 exit 2 → exit 1"     's/^    exit 2/    exit 1/'
 mut "任何输入都当合法读数"        's/^  WD=\*) ;;/  *) ;;/'
 mut "故障 exit 1 → exit 0 (全部)" 's/^  exit 1$/  exit 0/'
 
+# ── 刹车豁免那一格(新加的【静默口】, 必须能被拆红) ──────────────────────
+mut "unknown 也当成在刹车(静音真死)" 's/\" != "yes"/\" = "__never__"/'
+mut "任何刹车状态都静默"            's/\" = "no"/\" = "__never__"/'
+mut "刹车豁免提前到心跳之前"        's/^# 心跳都过了/exit 0\n# 心跳都过了/'
+mut "HB 正则退回贪婪(吞掉 BRAKE)"    's/\[^ \]/[^Z]/'
+
 echo ""
-echo "detected=$det  MISSED=$miss  INERT=$inert"
-[ "$miss" = "0" ] && [ "$inert" = "0" ] || exit 1
+echo "detected=$det  MISSED=$miss  INERT=$inert  BROKEN=$broken"
+[ "$miss" = "0" ] && [ "$inert" = "0" ] && [ "$broken" = "0" ] || exit 1
