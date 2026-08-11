@@ -8,6 +8,11 @@
 
 ---
 
+### (173) 2026-08-12 06:1x本地(21:1xZ) — 🏛 Codex 1158e685 裁决路由: state_start 升 MUST-FIX 并进 round-trip 格 · Bettor relay 再毒化(part2 丢·git-first 兜底)
+- **Codex 四点**: ①观察覆盖模型(J1 v0.2)**ACCEPTED AT SPEC LEVEL**(runtime 证明另计); ②round-trip **OPEN/MUST-PASS**——必须走真退款路径(`_serializeRootStateHex`+私有 `_continuationAddress`), `_continuationAddressV2` 是不同 state-length 合约不算数; ③**新 MUST-FIX**: 退款路径静默吃 `state_start` 默认而 claim 路径正确传 `cmd.inputs.root.state_start`(J1 b61e66d5 发现被 Codex 独立核实升级)——现行 refund_draw 模板 start=1 恰等默认=**非现行事故**, 但错 offset 会生成语法合法、**资金锁死**的 continuation。最低闭合四条: 命令携带权威 state_start/新钱路命令缺字段 fail-closed 优于默认/start=1 与 0 双测/round-trip 连它一起走真路径; ④runtime 授权 OPEN·生产退款执行 NOT AUTHORIZED 不变。
+- **派工更新**: state_start MUST-FIX **并进 (171) round-trip 格**(同文件同实验, J2 执行·排批A 后·J1 判据表加 start=1/0 差分两行·动手前照铁律 0 报备)。
+- **🔴 Bettor relay 再毒化(21:0x)**: #p5k48v part2 三连 500 未落地(part1 已落), relay restart(新 PID 25324)后单发仍 500——**幂次超过在册"restart 即愈"处方**, 与 (165) 小卡 :17210 5s 重连循环可能同源, 升该卡优先级(console 域, 重启窗一并查)。本条走 git-first, 频道补发后台重试中; **频道读者注意 #p5k48v 只有 part1, 派工半段以本条为准**。
+
 ### (172) 2026-08-12 本地 — canonical NWT:批A 存储落码(`96a8c2d2`)复审 PASS · 一条 MUST-FIX(`custody` 字段是自报非证据)
 - **亲手跑 schema test**(不采信报告):`node kasia-console/src/lib/u1-identity-registration.schema.test.mjs` 7 PASS/0 FAIL,临时库守卫生效,live console.db 未碰。约束现读 `migrate.js` 逐字确认与 commit message 一致——`UNIQUE(root_fingerprint)`=N3、`CHECK(identity_index=0)`=N3 另一半、`CHECK(custody='mnemonic')`=N4,均写入时约束,不是事后扫描。轮换撞 `relay_id` 主键的摩擦(V12)设计时已预见并写死用例。
 - **MUST-FIX(不阻塞这张表,现在改零成本)**:`root_fingerprint`/`identity_pubkey_xonly` 有 N1/N2(派生数学)+N8(持有签名)双重密码学护着,`custody` 没有——`CHECK(custody='mnemonic')` 只核字符串字面值,核不了真假。要求注册入口落码时 `custody` 由服务端独立查 `relay_nodes.mnemonic_encrypted/privkey_encrypted` 派生,绝不信任提交 payload——与 N8"验签公钥=申报pubkey本身"同一条纪律(caller/witness=可控可伪),这次撞在没有密码学能护的字段上。
