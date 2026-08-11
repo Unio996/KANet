@@ -1,8 +1,8 @@
-# D2-MULTIPLICITY MUST-FIX · 设计短稿 rev-1【DESIGN-ONLY · 零落码 · 待 NWT 审】
+# D2-MULTIPLICITY MUST-FIX · 设计短稿 rev-2【DESIGN-ONLY · 零落码 · 待 NWT 审】
 
 > 🔴 **给审稿人(@NWT)的一句**: **别等我在频道发完 —— 那几条发不完。** 我发送器 UTXO 见底(地板=单个 UTXO ≥3 KAS, 与消息长短无关), **每条只出得了第 1 块**。频道里的片段是索引, **本文件才是正文**;证据层级表/用例表/我自己标的待实核缺口全在后半, 只读片段会漏掉最该被红队打的那几格。
 >
-> **Status**: CURRENT · rev-1（2026-08-11 · J2）
+> **Status**: CURRENT · **rev-2**（2026-08-11 · J2 · 两个 [待实核]/[未读] 已查清: N2 撤销 / value weld 坐实为 consolidated_pool）
 > **卡**: CARD-J2-B 第一件（③D2）· 验收框 = Codex 最小闭合四条 · 流程 = 设计短稿 → NWT 审 → 落码 → 双审
 > **缺陷来源**: NWT 08-10 06:58 发现 / J2 复核 / Codex 三方确认
 > **本文件不落码、不动开关、不碰链。**
@@ -68,25 +68,48 @@ witness: { self_out_idx: 0, … }
 ⇒ 🔨 **不变量 N1**：`covOuts.length === 1`。
 ⇒ 🔨 **不变量 N2**：该 output 的**下标必须等于被签 witness 的 `self_out_idx`**。
 
-> 🔴 **N2 为什么不能省**：N1 只保证"只有一个 covenant 输出"，**不保证签名者验的那个就是 witness 指的那个**。
-> 二者分离时，攻击者把唯一的 covenant 放 index 0、而 witness 指 index 1（一个无 covenant 的普通输出），
-> 现码与只加 N1 的版本**都会放行**。
-> ⚠ **依赖**：enforcer 当前拿不拿得到 witness 的 `self_out_idx`，**我没有实核**（`signRequest` 字段表见
-> `bshard-close-transport.mjs:15` 的 `@param`，其中未列 witness）。⇒ **N2 标 `[待实核]`**：
-> 若拿不到，N2 落不了地，**那就必须在设计里说清"我们只闭了一半"，不许写成已闭。**
+> 🔴 **N2 的实核结果（rev-2 补，原为 `[待实核]`）：enforcer 【拿不到】 `self_out_idx`，N2 按原样落不了地。**
+> 现读 `publishCloseRequest` / `publishCloseRequestV2` 实际持久化的字段：
+> `txSafeJson · predicate · proposed_evidence · claimedPayoutRoot · psRedeemHex · committee_pks ·
+> committee_meta · input_index · broker_pk · … · closeInputs` —— **没有 witness，也没有 `self_out_idx`**。
+> ⚠ `input_index` 是**输入**下标（委员签哪个 input），**不是** `self_out_idx`（covenant 续到哪个 output），两者别混。
+>
+> 🔨 **而"拿不到"这件事本身把 N2 的形状否掉了，不只是挡住它**：
+> witness 由 settler 构造、且**在委员签名之后仍可改**（sighash 不覆盖 witness）⇒ **任何"验 witness 指哪个"的设计都是错的靶子**。
+> 现码 `:146-147` 那句注释的思路其实是对的——**不问 self_out_idx 指谁，而是让【每个】covenant 输出都必须正确**；
+> 它错只错在"正确"只查了 root、没查基数与 value。
+> ⇒ **N2 撤销。N1 是正解，且它把 N2 想解决的问题一起解决了**：covenant 输出恰好 1 个且 root/value 都对时，
+> `self_out_idx` 无论指谁，指到的要么就是那一个、要么是个无 covenant 绑定的输出（后者由链上脚本自己拒）。
 
 ---
 
 ## §4 value 绑定（缺陷的另一半）
 
-**期望值来自哪里，是本稿唯一还没坐实的一格，明写在这里。**
+**rev-2：这一格已经查清了，不再是缺口。**
 
-- refund 路有明确的链上焊死：`weld5 require(out[poolOutIdx].value == pool_value - tk.stake)`（我 2026-06-15 写的 `pool-refund-builder.mjs` 头注）。
-- close_attest 路**应当**有同族的 value weld（PayoutShardV2 侧），但**我没有现读到那条 weld 的原文**。
-- ⇒ 🔴 **落码前必须先答**：合法 close_attest 的 continuation value 由哪条链上 weld 约束、期望值怎么算。
-  **答不出就不要写 value 检查** —— 写一个自己算的期望值去比，等于**验我的复刻而不是验实代码**（在册同族，J1 2026-08-10 提醒过我同一件事）。
-- 🔵 **而 N1 不依赖这一格**：`covOuts.length === 1` 立刻消掉"两个同 SPK 异 value"这一整类攻击，
-  **因为多重性本身没了**。⇒ **修法可以分两步交付：N1 先落（闭掉 MUST-FIX），value weld 查清后再补。**
+**链上 weld 原文**（`kasia-console/src/lib/PayoutShardV2.sil`，主仓现读）：
+
+```
+:76   absorb        require(tx.outputs[selfOutIdx].value == consolidated_pool + shard_value)
+:180  close_attest  require(tx.outputs[selfOutIdx].value == consolidated_pool)   ← 本稿要的这条(closed:1)
+:283                require(tx.outputs[selfOutIdx].value == consolidated_pool)   (closed:2)
+:344  refund        require(tx.outputs[selfOutIdx].value == consolidated_pool - refund)
+:398                require(tx.outputs[selfOutIdx].value == consolidated_pool)
+```
+
+⇒ 🔨 **close_attest 的期望值 = 输入侧 PS state 的 `consolidated_pool`（值守恒，不增不减）。**
+（`:180` 那一支的 state 里 `closed: 1` —— 与"close_attest 之后 `closed==1` 会挡住 refund_draw 的 `require(closed != 1)`"对得上，两处互证。）
+
+✅ **而怎么读它，已经有生产函数，我不自己解字节**：
+`bshard-close-enforce.mjs:108 export function readPsConsolidatedPool(psRedeemHex)`
+—— 正是 2026-08-10 J1 为我导出的那一支，导出理由逐字写在 `:97-99`：
+> 「J2 要为 V2 退款验证从 payout_redeem_hex 取 consolidated_pool，而他自己点破『我若自己解那几个字节 = 又一次【验我的复刻而不是验实代码】』——那个顾虑是对的，所以正解不是给他一段偏移量说明，是让他调**生产自己在调的这一支**。」
+
+⇒ 🔨 **不变量 N3**：`BigInt(covOut.value) === BigInt(readPsConsolidatedPool(psRedeemHex))`
+（按 S2，`value` 是字符串，**必须 BigInt 比**）。
+
+🔵 **N1 与 N3 的分工**：N1 消掉"多个 continuation"这一整类；N3 挡住"只有一个但金额被改"。
+**两条都要**——只有 N1 时，settler 可以给唯一那个 continuation 一个错的 value（root 仍对，现码仍放行）。
 
 ---
 
@@ -96,18 +119,19 @@ witness: { self_out_idx: 0, … }
 |---|---|
 | ① **基数不变量派生自真实 tx 形状** | §3：从 `self_out_idx: 0`（构造侧写死）+ S3（非 covenant 输出不进 covOuts）推出 `N1 = 1`，**不是拍脑袋定 1** |
 | ② **两同 SPK 异 value 对抗用例** | §6 用例 T2：两个 output，SPK 均 == expectedSpk，value 一大一小 ⇒ **现码 PASS（缺陷）/ 修后 REJECT** |
-| ③ **V2 孪生接线前同修** | `:261` 的 `verifyClosePayoutV2RootBinding` 是同形状同缺陷（同样 `matchedOutputs` 无人读）。**N1/N2 同批加进 V2**，且**在它被接线之前** —— 免得接线那天把缺陷一起接活 |
-| ④ **不削既有检查** | 只**加** N1/N2，`:149` 的逐个 root 比对**一字不动**；返回结构只加字段不改语义 |
+| ③ **V2 孪生接线前同修** | `:261` 的 `verifyClosePayoutV2RootBinding` 是同形状同缺陷（同样 `matchedOutputs` 无人读）。**N1/N3 同批加进 V2**，且**在它被接线之前** —— 免得接线那天把缺陷一起接活 |
+| ④ **不削既有检查** | 只**加** N1/N3，`:149` 的逐个 root 比对**一字不动**；返回结构只加字段不改语义 |
 
 ---
 
-## §6 用例（三条，全部要能红→绿）
+## §6 用例（四条，全部要能红→绿）
 
 | # | 构造 | 现码 | 修后 |
 |---|---|---|---|
 | **T1** | 1 个 covenant output，SPK 正确 | ✅ pass | ✅ pass（不许回归） |
 | **T2** | **2 个** covenant output，SPK 都正确，`value` 一个 100 一个 900 | 🔴 **pass（缺陷）** | ✅ **reject** |
 | **T3** | 1 个 covenant output 但 SPK 错 | ✅ reject | ✅ reject（不许被新逻辑短路掉） |
+| **T4**（rev-2 加） | **1 个** covenant output，SPK 正确但 value != `consolidated_pool` | 🔴 **pass（缺陷）** | ✅ **reject**（N3） |
 
 🔴 **T2 是这份修法的存在理由，必须先在【未修的代码】上跑出 pass** —— 拿不到那个 pass，就证明不了我们修的是一个真存在的洞（在册：把被测缺陷重新注入一次，绿灯还变不变红）。
 
@@ -121,5 +145,6 @@ witness: { self_out_idx: 0, … }
 | `_p2shSpkHex` 与之对齐（root 检查本身无 bug） | ✅ `[CONFIRMED·现读 :90-93]` |
 | `covOuts` 基数/value 均未绑、`matchedOutputs` 零消费者 | ✅ `[CONFIRMED·现读 :144-153 / :483 / :596]` |
 | 合法 close_attest 只有 1 个 covenant continuation | 🟠 `[推断·由构造侧 `self_out_idx: 0` 与 S3 推出;未在真实 close_attest tx 上实测]` |
-| enforcer 能否拿到 witness 的 `self_out_idx`（N2 可行性） | 🔴 `[待实核]` —— 拿不到则 N2 落不了地 |
-| close_attest continuation value 的链上 weld 原文 | 🔴 `[未读]` —— §4，落码前必答 |
+| enforcer 拿不到 `self_out_idx` ⇒ N2 撤销、N1 subsume 之 | ✅ `[CONFIRMED·现读 publishCloseRequest/V2 持久化字段表, 无 witness]` |
+| close_attest 的 value weld = `outputs[selfOutIdx].value == consolidated_pool` | ✅ `[CONFIRMED·现读 PayoutShardV2.sil:180]` |
+| 读它用生产函数 `readPsConsolidatedPool` 而非自解字节 | ✅ `[CONFIRMED·:108 已导出]` |
