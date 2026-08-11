@@ -8,6 +8,14 @@
 
 ---
 
+### (168) 2026-08-12 本地 — canonical NWT 队列③:A2 spec v1.0-rc 复审 PASS,可进落码
+- **逐条对代码重新核实(不采信转述)**:N5 两个逃逸口——`relay-manager.js:70/85-87`(全量继承 `process.env`,mnemonic 分支未 delete 继承来的 `KASPA_PRIVKEY`)与 `wallet.mjs:104-118`(`KASPA_PRIVKEY` 先查命中即 return,`KASPA_MNEMONIC` 只是兜底)现读逐字与 spec 引用一致;N6(登记根不进公开面)——抽查已提交三份 A2 文档搜索实际 xpub/tpub/xprv 字符串,零命中,规矩在产出物里也确实守住,不只是政策文字。N3(锁 1)零放大论证结构性成立。V1-V9 覆盖完整。
+- **追记**:J2 在我审到之前主动自贴 `972db61b`,自己抓到 §5-6"两个逃逸口当前均未生效"的判据样本(`broadcast_messages`)与我给 safely_absent 的 MUST-FIX 同族——该观察者今晚同样静默停摆过(:3200 摄入腿、CONSOLE-SPAWN-DEATH),核实补丁准确、方向标注正确(覆盖变少非结论变错),不需要我重复要求。
+- **一条非阻塞提醒**:§5-5(形态 A 新派生路径需自带逃逸口审视)落码时应与 N5 同等级别对待,不要降级成"顺手做"。
+- 详见 `docs/2026-08-12-NWT-redteam-u1-a2-spec-v1.0.md`(已推 origin,`bc7287f2`)。**Bettor 显式队列(D4→safely_absent→A2)三件全闭。**
+
+---
+
 ### (167) 2026-08-12 本地 — canonical NWT 队列②:safely_absent 谓词 v0.1 复审 PASS,一条 MUST-FIX(观察完整性证据来源)
 - **Bettor 指定重点(P1 承重前提:`getAddressUtxos` 拿 txid 但不带深度)现读代码逐点核实,CONFIRMED 干净**:`p2sh.mjs:1516 getAddressUtxos` 确无深度字段;`p2sh.mjs:1484 checkUtxoLanded` 现读——`minDepth>0` 时拿不到 `blockDaaScore` 直接 fail-closed(`landed:false,depth:null`),无静默忽略路径。**设计稿 P1 条件(c) 精确走 `check_utxo_landed(minDepth=20)` 这条深度感知路径,深度要求没被踩空。**
 - **一条 MUST-FIX(非否定方向)**:§5"观察链 value 连续性成立⇒该窗口可证完备"——**value 连续性抓不住"观察者本身静默停摆、且该窗口内目标地址恰好零事件"这类缺口**(此时事后 value 依然连续,但那段时间其实是盲的)。**非纯理论**:本仓过去数小时内两次真实发生"扫描/摄入组件静默停摆、靠外部信号才被发现"(:3200 摄入腿(161)、CONSOLE-SPAWN-DEATH(165))。建议把"观察者自身心跳/checkpoint 证据(非纯 value 事后推导)"钉成 §5 硬要求(J1 已提 preprune-capture-worker 先例,只是没写成强制),补一条负测试:静默停摆但 value 链恰好连续 ⇒ 仍须判 `coverage_gap`。**这条不阻塞骨架,落码前域主确认写法即可,不必重新走设计审。**
