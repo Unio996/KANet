@@ -8,6 +8,13 @@
 
 ---
 
+### (167) 2026-08-12 本地 — canonical NWT 队列②:safely_absent 谓词 v0.1 复审 PASS,一条 MUST-FIX(观察完整性证据来源)
+- **Bettor 指定重点(P1 承重前提:`getAddressUtxos` 拿 txid 但不带深度)现读代码逐点核实,CONFIRMED 干净**:`p2sh.mjs:1516 getAddressUtxos` 确无深度字段;`p2sh.mjs:1484 checkUtxoLanded` 现读——`minDepth>0` 时拿不到 `blockDaaScore` 直接 fail-closed(`landed:false,depth:null`),无静默忽略路径。**设计稿 P1 条件(c) 精确走 `check_utxo_landed(minDepth=20)` 这条深度感知路径,深度要求没被踩空。**
+- **一条 MUST-FIX(非否定方向)**:§5"观察链 value 连续性成立⇒该窗口可证完备"——**value 连续性抓不住"观察者本身静默停摆、且该窗口内目标地址恰好零事件"这类缺口**(此时事后 value 依然连续,但那段时间其实是盲的)。**非纯理论**:本仓过去数小时内两次真实发生"扫描/摄入组件静默停摆、靠外部信号才被发现"(:3200 摄入腿(161)、CONSOLE-SPAWN-DEATH(165))。建议把"观察者自身心跳/checkpoint 证据(非纯 value 事后推导)"钉成 §5 硬要求(J1 已提 preprune-capture-worker 先例,只是没写成强制),补一条负测试:静默停摆但 value 链恰好连续 ⇒ 仍须判 `coverage_gap`。**这条不阻塞骨架,落码前域主确认写法即可,不必重新走设计审。**
+- 详见 `docs/2026-08-12-NWT-redteam-safely-absent-predicate.md`(已推 origin,`0cc36b6f`)。**退款轨设计侧至此全闭**(rev-6 PASS + 谓词 v0.1 PASS-with-MUST-FIX)。队列③(A2 spec v1.0-rc,J2 `e18595c3`)接续审。
+
+---
+
 ### (166) 2026-08-12 03:5x本地(19:5xZ) — ✅ J1 探针端到端实证·官方通道恢复频道 · ✅ D4 细节经①端点交付(NWT 回执 6762 字节精确一致) · 归属更正补记
 - **摄入腿闭环**: J1 19:53Z 探针落团队 console 视图=端到端实证(J1→链→体外 scout 36596→console DB); Bettor 按 J1 §4 判据回"取到了", **J1 官方通道恢复 dev-coord-testnet**。断窗三条照 (143) 不回填。现状明标: 摄入腿单点=体外 scout(console 管不了它), CONSOLE-SPAWN-DEATH 重启窗根治前若再断先查 logs/scout-manual-bettor-20260812.log。
 - **D4 投递闭环((163) 裁定双腿全走通)**: ③摘要 084383c9 在 origin; ①细节 NWT curl 实取 HTTP 200、字节数与 J1 预期精确一致, **收件方回执在册=交付成立**(判据首例执行)。NWT 开审 D4, 审完另报。
