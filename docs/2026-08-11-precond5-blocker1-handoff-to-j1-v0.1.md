@@ -1,6 +1,6 @@
-# ⑤ blocker① 结构性遏制 · 落码交接单（J2 → J1）v0.1
+# ⑤ blocker① 结构性遏制 · 落码交接单（J2 → J1）v0.2
 
-> **Status**: CURRENT · 2026-08-11 · J2
+> **Status**: CURRENT · **v0.2**（2026-08-11 · J2 · 按 @NWT 独立复核更正**陷阱二**：fallback 的实况不是"真目录"，而是"**不存在的目录 + 异步 error 不抛**"，见 §3）
 > **派工**: @Bettor 17:3x 采 J2 提议 —— **⑤ blocker① 落码 = J1 主**（消除单人瓶颈）；J2 出交接材料并转为 ⑤ 的**独立复核臂**。
 > **上游设计**: `docs/2026-08-10-precond5-blocker1-structural-containment-design-v0.1.md`
 > （**v0.2 = `bd70357d`**，含 NWT 07:45 MUST-FIX 折入版。⚠ 派工里一度引 `500a246d` —— **那是另一份文档**（canary#2 第三层探针计划），已在频道更正。）
@@ -38,11 +38,29 @@
 🔴 **⇒ 遏制靠"谁先加载"这件事成立。顺序一变遏制就没了，而【没有任何东西会报错】** —— 出站会安安静静打到**真 relay**。
 **(C) 要挡的正是这个。** `skip_in_batch: true` 是**症状不是解法**：它靠"别让它进批量"回避问题，而不是让问题变响。
 
-### 陷阱二 · fallback 是**真目录**
-`cases/m0c1-gate/g4-pilot-custodial-e2e.mjs:62-65` 记着：`RELAY_DIR` 没设 ⇒ relay-manager 落到**硬编码 fallback**。
+### 陷阱二 · fallback —— **v0.2 更正：我原来的说法（"fallback 是真目录"）不准确，而准确的版本更难防**
 
-🔴 **⇒ (C) 不能只判「env 设没设」，要判「当前生效的 `RELAY_DIR` 是不是假体」。**
-判前者会被 fallback 骗过去 —— **env 未设时它不是"没有遏制"，是"遏制指向了真 relay"**，而这两者在"env 是否为空"这个检查下读数相同。
+> 🙋 **本节 2026-08-11 按 @NWT 独立复核更正。** 我原写「env 未设 ⇒ 遏制指向了真 relay」；
+> 他去读了完整注释，**实况比这更糟也更有意思**，我核过原文属实（`cases/m0c1-gate/g4-pilot-custodial-e2e.mjs:62-69`）：
+
+那次真撞过的 fallback 是硬编码到一个**根本不存在的目录** `D:/Anthropic/kasia-relay`：
+
+```
+fork() 的 child cwd 指向不存在目录 ⇒ spawn ENOENT ⇒ relay 从未真正启动
+🔴 而 startRelay() 仍【同步返回 {ok:true}】—— spawn 失败是 fork() 之后的【异步 'error' 事件】,
+   不会让 startRelay 的 try 块本身抛出
+⇒ 第一次跑那个 harness: 5/5 全 PASS, 而其中 3 条其实是 relay 未启动 ⇒ sendCommandAsync
+   拒绝 'Relay not running'(HTTP 500) 被误判为「未被 400/401/403 拒 = 通过」的假阳性
+```
+
+🔴 **⇒ 两条推论，第二条是我原稿没有的**：
+
+1. **(C) 不能只判「env 设没设」** —— 要判「**当前生效的 `RELAY_DIR` 是不是假体**」。
+2. 🔴 **而"不是假体"有【至少两种】长相**：指向**真 relay**（出站真的发出去了）、指向**不存在的目录**（出站根本没发出去，而调用方拿到 `ok:true`）。
+   **两种都不是遏制，且两种的失败都不抛。**
+   ⇒ **别把判据写窄成只匹配一种具体错法**（NWT 原话）。**正面判「它是不是那个假体」，而不是反面枚举「它可能是哪些坏值」。**
+
+🔵 **这一格本身就是 §4 那句话的实例**：那次 harness **5/5 全绿**，而三条是假阳性 —— 读 evidence log 才发现。
 
 ---
 
