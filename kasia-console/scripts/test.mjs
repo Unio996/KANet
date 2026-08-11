@@ -133,6 +133,11 @@ async function main() {
   for (const file of files) {
     const _envPre = { ...process.env };
     const mod = await import(pathToFileURL(file).href);
+    // 🔴 ⑤ blocker① (C) 的第二道:交接单陷阱一 —— 遏制靠"谁先加载"成立, 顺序一变遏制就没了,
+    //    而【没有任何东西会报错】, 出站会安安静静打到真 relay。bootstrap 那一道只看得见它自己
+    //    那一刻;用例在【自己的模块加载期】把 RELAY_DIR 改走, 只有这里看得见。
+    //    ⇒ 在跑该用例的任何 step 之前就抛, 这才是"import 前即 fail"里的"前"。
+    (await import('../test-framework/lib/containment-guard.mjs')).assertContained(`case:${path.basename(file)}`);
     // 逐文件比对 ⇒ 直接点名源头, 而不是只说"import 之后 env 变了"
     const changed = [];
     for (const k of new Set([...Object.keys(_envPre), ...Object.keys(process.env)])) {

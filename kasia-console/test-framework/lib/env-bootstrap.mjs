@@ -120,3 +120,17 @@ if (!process.env.KASPA_RPC_URL) {
 if (!process.env.KASPA_NETWORK) {
   process.env.KASPA_NETWORK = 'testnet-12';
 }
+
+// ── ⑤ blocker① (C):全量重定向到假体 + 缺遏制即 fail(J1, 2026-08-11, Bettor 17:3x 派) ──
+// 🔴 落在本文件不是随手挑的:本文件头部那段理由(「必须在 runner.mjs import 之前 import,
+//    因为那些是顶层 const、静态 import 即求值」)**与 relay-manager.js:19 的 RELAY_DIR
+//    加载期 const 是同一个形状**。遏制要在任何生产模块把它冻住之前就位, 就得在这里。
+// 🔴 而"设了就算遏制"是错的 —— relay-manager.js:18-19 两层 `env || 默认`, 默认值是**真目录**,
+//    所以判据必须是「生效目录是不是假体」。判据与自证在 containment-guard.mjs。
+// 🟠 本闸只覆盖【经 RELAY_DIR 的那一族出站】。另一族 `lib/relay-gate-driver.mjs:17` 硬编码
+//    真 kasia-relay 并直接 fork, **绕过 RELAY_DIR ⇒ 本闸管不到**(现读: 它的使用方全在
+//    `cases/m0c1-gate/` 那 10 个 runner 扫不到的文件里, 无任何 `*.test.mjs` 够到它)。
+//    ⇒ **别把本闸读成"测试框架不会碰真 relay"**;它只保证经 RELAY_DIR 这条路不会。
+const { redirectToFixture, assertContained } = await import('./containment-guard.mjs');
+if (process.env.KANET_ALLOW_REAL_RELAY !== '1') redirectToFixture();
+assertContained('env-bootstrap');

@@ -1,0 +1,12 @@
+这个文件的存在 = 本目录声明自己是【遏制假体】(fake relay sink),不是真 relay。
+
+⑤ blocker① (C) 的判据读的就是它 —— 见 test-framework/lib/containment-guard.mjs。
+
+🔴 不要把这个文件复制到任何真 relay 目录。
+   它是「是不是假体」这件事的【定义】;复制过去 = 让遏制闸对着真 relay 放行,
+   而闸不会报错(它只会看见标记在)。
+
+🔴 也不要删它。删掉 ⇒ 所有走 scripts/test.mjs 的运行会在 bootstrap 期直接拒绝启动
+   (fail-closed 是有意的: 没有判据就不许跑,而不是"没判据就放行")。
+
+出站进程的可执行文件本身在 src/relay.mjs(假体),台账写在 FAKE_SINK_LOG。
