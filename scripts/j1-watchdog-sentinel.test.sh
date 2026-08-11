@@ -90,7 +90,16 @@ run "预算耗尽 ⇒ 出声且措辞独有"     "WD=1 MINER=0 HB=30000 BRAKE=ha
 run "预算耗尽 + 年龄很大仍出声"     "WD=1 MINER=0 HB=30000 BRAKE=halted BRKAGE=99999" 1 "脉冲预算耗尽"
 run "预算耗尽 + 年龄读不出仍出声"   "WD=1 MINER=0 HB=30000 BRAKE=halted"              1 "脉冲预算耗尽"
 run "预算耗尽不能被说成标记陈旧"    "WD=1 MINER=0 HB=30000 BRAKE=halted BRKAGE=99999" 1 "等操作员"
-run "矿机在跑时 halted 不出声"      "WD=1 MINER=1 HB=30000 BRAKE=halted BRKAGE=30"    0 ""
+# 🔴 这一格原先断言"矿机在跑时 halted 不出声" —— 那是【把 bug 钉成契约】(Codex 2026-08-11 判 RED)。
+#    halted 意味着 watchdog 已退出自治监督、在等人; 采样瞬间矿机在不在【不改变这件事】,
+#    矿机可能是人手动起的, 也可能是进程账目陈旧。已翻转。
+run "矿机在跑时 halted 仍然出声"    "WD=1 MINER=1 HB=30000 BRAKE=halted BRKAGE=30"    1 "退出自治监督"
+run "halted + 多个矿机 仍然出声"    "WD=1 MINER=3 HB=30000 BRAKE=halted BRKAGE=30"    1 "退出自治监督"
+run "halted + 矿机数=0 仍然出声"    "WD=1 MINER=0 HB=30000 BRAKE=halted BRKAGE=30"    1 "脉冲预算耗尽"
+# 心跳坏时先报心跳(它让别的读数都不可信), 但【绝不静默】
+run "halted + 心跳陈旧 ⇒ 报心跳"    "WD=1 MINER=1 HB=3600000 BRAKE=halted BRKAGE=30"  1 "心跳陈旧"
+run "halted + 心跳未来 ⇒ 报心跳"    "WD=1 MINER=1 HB=-120000 BRAKE=halted BRKAGE=30"  1 "未来"
+run "halted + WD=0 ⇒ 报实例数"      "WD=0 MINER=1 HB=30000 BRAKE=halted BRKAGE=30"    1 "实例数=0"
 # ssh 取不到 ⇒ rc 2, 与故障分开
 run "ssh unreachable"             "UNREACHABLE:Command failed" 2 "取不到"
 run "garbage line"                "hello"                      2 "取不到"
