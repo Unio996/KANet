@@ -8,6 +8,10 @@
 
 ---
 
+### (176) 2026-08-12 07:1x本地(22:1xZ) — ✅ Codex 裁可 round-trip 零广播替代(17a9c42e·CONDITIONALLY ACCEPTED)· 闭合系于 B-1 生产调用点变异击杀 · 执行=J2·审=NWT
+- **裁可要点**: 旧原文"必须走真实退款路径"**被本包正式取代**(Codex 自读码确认无 build-only 出口+start=1 恰等默认的不可分性, 与 J2/J1 读数一致)。**条件**: ①A 格四条——import 真符号/前驱 redeem_hex+state+state_start+期望 continuation 必须来自**同一次历史退款迁移**(不许拼装无关制品)/state_start 取自权威 descriptor **非测试字面量**/逐字节比链上实物; ②Fix 格——命令携带权威 state_start+`unlockBshardRefund` 显式传参+新钱路命令缺字段 fail-closed+**兼容行为显式圈死在旧命令, 不许为兼容全局放宽**; ③**B-1=决定性格**: 变异生产调用点传错 start, **必须至少一个指定测试因正确理由翻红**——可用封闭/mock RPC 边界但必须**执行真 unlockBshardRefund 到 continuation 构造、在 submit 前观测产物**(grep 调用点或直调 helper 不满足); 变异下仍绿=如实报但**条件 4 不闭**; ④B-2——start=1/0 各一+可区分 layout fixture 上错 start 必产不同地址。**零生产授权不变**。
+- **派工**: J2 按包执行(A+Fix+B-1 harness+B-2, 钱路码动手前报备)·NWT 审(重点 B-1 harness 真走生产码非包壳)·J1 判据表对照。record: 本格从"重塑待认可"转"**已认可待执行**"。
+
 ### (175) 2026-08-12 06:5x本地(21:5xZ) — 🏛 round-trip 格重塑裁定: 采 A/B-1/B-2 零广播分解 · 替代方案交回 Codex 认可(不自 declare 条件 4 满足) · :2804 修复同包
 - **前提(J2 报备+J1 独立验证)**: 真实退款入口(`unlockBshardRefundClaim` 族 :2603+)无 dry-run、地址不外露、直通 `submitTransaction` ⇒ "走真实路径"=必须链上实花费, J2 停在报备=对。J1 自纠 ③-B: start=1 恰等默认 ⇒ "传了 1"与"吃默认 1"产出逐字节相同地址, **输出侧原理上不可分**——静态事实不当可观测读数用(自纠入册)。
 - **🏛 裁定: 采 J1 重塑**——**A**=导出函数(174 GO 三条件不变)+显式 start+与链上 continuation 逐字节比(证 splice/序列化口径); **B-1**=:2804 调用点变异观察(改错 start 必须有东西红; 仍全绿则"无人观察此调用点"本身就是交付读数); **B-2**=start=1/0 双测(Codex 闭合条件 3, start=0 唯一让默认现形)。**本格零广播**; 端到端实退款广播=另一个决定非本格前置。**:2804 修复(传权威 state_start+新命令缺字段 fail-closed, Codex 闭合 1&2)与本格同包**——钱路码, J2 动手前报备, NWT 审。
