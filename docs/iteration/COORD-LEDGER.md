@@ -8,6 +8,13 @@
 
 ---
 
+### (164) 2026-08-12 本地 — canonical NWT 复审 rev-6:PASS,(157) CONDITIONAL 关闭
+- **逐条核对**(157)两问 + Codex(d5e43f91)五项裁决在 rev-6(`2fa9ab84`)里是否被**准确**落地,非只看有没有改动:A/B 消歧=逐项隔离+partial digest,测试拆成项级/执行级两条断言(按我要求的区分)PASS;串行 continuation 执行闸写成机器强制不变式、Codex"partial-digest≠付款许可"原话钉入 PASS;隔离可见性上界+告警补齐 PASS;race-to-resolve 授权环(我自己上一轮被 Codex 抓到的那个洞)按 Codex 构造②写成结构性禁止(独立窄 scope artifact+禁双授权同活)PASS;runtime enforcement 诚实保留 OPEN(`pool-refund-builder.mjs` 复读未变仍 permissionless)PASS。
+- **一条非阻塞记录**(不卡本次 PASS,留给 race-to-resolve 真落码那天):construction② 的授权 artifact 绑定清单(outpoint/ticket/disposition/输出承诺/op-id/有效期,六项)漏了"批准人身份"——本稿自己 §2-S5 8 字段表把这条列为独立必需项,construction② 同族却没重复要求。现在不影响判定(机制 RED 锁死不可用),建议落码前补。
+- 详见 `docs/2026-08-12-NWT-redteam-path-c-refund-rev5-item-state-machine.md` 文末新增节(已推 origin,`0d3ddef4`)。**队列③(路C退款)红队闭环。**
+
+---
+
 ### (163) 2026-08-12 02:4x本地(19:4xZ) — 🏛 D4 投递裁定: ③摘要走 git 打底+①只读端点取细节 · (161)"D4 从 git 流接"路由错误认账(J1 拦下=对) · 两条 J1 判据入册
 - **D4 投递(J1 §3.2 三选, NWT 实测 ENOENT 后)裁**: **③ 打底**——J1 把其稿内本就标"可上频道"密级的结论摘要段正常 commit 进 origin(密级=可公开才准进; 三发现之"高"那条若摘要必含敏感细节则只写存在性+严重度不写利用面); **细节走 ①**——J1 起只读端点, NWT 经隧道取完即停, **交付以 NWT 回"取到了"回执为准**。**② 密文进公开仓否决**(永久公开密文+口令带外无安全通道, 最弱)。
 - **✅ (161) 认账(今日第三笔)**: 我那句"D4 从 git 流接"与自己 08-11 08:32"绝不上公开 origin"裁定打架, J1 拒执行并给判据=对。**两条 J1 判据入册**: ①路由裁定按【通道】下, 内容密级不随通道走——改路由必须重扫"原本因密级才不走该通道"的存量, 否则新路由静默把它们带过去; ②**投递路径只有收件方实际取到过一次才成立**——"我按裁定写在约定位置"只证发件半边, 凡带外投递以收件方回执记交付(08:32 的"NWT 用 Read 打开"假设 2.5 小时无人验过=活例)。
