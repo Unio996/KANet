@@ -111,6 +111,31 @@ export default {
                psRedeemHex: SYNTH_REDEEM, reDerivedRoot: RE_DERIVED_ROOT }],
       expect: { must: { reply_contains: ['"ok":true', '"matchedOutputs":1'] } } },
 
+    // ══ V2 侧补齐四格(v0.3 · @NWT 改判 CONDITIONAL 时点名要的)══════════════════════
+    //   她的诊断: 原用例 V2 只有一格且构造 2 个 covOuts ⇒ V2 的 SPK 绑定 / value / 零 covOut
+    //   三条路【一条都没被测过】。T4_v2 已在上面补了 value 那条, 这里补其余三条。
+    { id: 'T3_v2_single_wrong_spk_still_root_reject', action: 'call_module_export',
+      module: 'bshard-close-enforce', export: 'verifyClosePayoutV2Binding',
+      args: [{ txSafeJson: tx([covOut(spk('11'), SYNTH_POOL)]),
+               psv2RedeemHex: SYNTH_REDEEM, reDerivedRoot: RE_DERIVED_ROOT,
+               attestedWinner: 1, betsRootHex: 'bb'.repeat(32), refundRootHex: 'dd'.repeat(32), attestedAtMs: 1786000000000 }],
+      expect: { must: { reply_contains: ['"ok":false', '!= re-derive'], reply_does_not_contain: ['N1 基数', 'N3 value'] } } },
+
+    { id: 'T0_v2_zero_continuation_rejected', action: 'call_module_export',
+      module: 'bshard-close-enforce', export: 'verifyClosePayoutV2Binding',
+      args: [{ txSafeJson: tx([{ value: '1', scriptPublicKey: SPK_V2, covenant: null }]),
+               psv2RedeemHex: SYNTH_REDEEM, reDerivedRoot: RE_DERIVED_ROOT,
+               attestedWinner: 1, betsRootHex: 'bb'.repeat(32), refundRootHex: 'dd'.repeat(32), attestedAtMs: 1786000000000 }],
+      expect: { must: { reply_contains: ['"ok":false', '无 covenant continuation output'] } } },
+
+    //   🔴 V2 的阳性对照 —— 没有它, 一个"V2 恒拒"的实现会让上面三格 V2 用例全绿
+    { id: 'T1_v2_correct_passes_positive_control', action: 'call_module_export',
+      module: 'bshard-close-enforce', export: 'verifyClosePayoutV2Binding',
+      args: [{ txSafeJson: tx([covOut(SPK_V2, SYNTH_POOL)]),
+               psv2RedeemHex: SYNTH_REDEEM, reDerivedRoot: RE_DERIVED_ROOT,
+               attestedWinner: 1, betsRootHex: 'bb'.repeat(32), refundRootHex: 'dd'.repeat(32), attestedAtMs: 1786000000000 }],
+      expect: { must: { reply_contains: ['"ok":true', '"matchedOutputs":1'] } } },
+
     // ══ I0 · 仪器自检: 三个 reject 若都因为同一个早退原因(如 splice fail), 上面全绿是假的 ══
     //   🔴 这一步存在的理由: T0/T2/T3 期望的都是 "ok:false"。若函数在 splice 阶段就恒返回 false,
     //      三条会一起绿而【一条都没测到要测的东西】。本步用一个【必然走到 root 检查】的构造,
