@@ -251,3 +251,58 @@
 - 本条**不改** §3 原表结构、§4 失败语义、§8.3 落码硬要求、§10 全节;它只在同一个已有键上**追加一个导出**并附 §11.3 四条。
 - 🔵 **一个结构性优势(供审阅者定权重)**: P2 断言的是 `decideConsensus` **返回值**(代码构造的对象), **不是 DB 字段** ⇒ fixture **无法把结论种进去**。本仓 2026-08-06 吃过的「fixture 自己把结论种进去」那类假绿, 在本用例上**结构性不成立**。
 - 🔴 **若审阅者认为"同键追加导出"也应视同新条**, 按新条走即可 —— 本节已按新条的规格写全(§11.2 性质对比 / §11.3 约束 / §11.4 未验项), **不要因为"只是加个导出"就降低审的强度**。
+
+---
+
+## §12 v5 修订(2026-08-11 · J2)—— 新增第 6 条 allowlist 键 `bshard-close-enforce`
+
+> **授权**: @Bettor 2026-08-11 15:5x 裁「改 ALLOWLIST 加键 = 走正规流程, **是 CARD-J2-B「③D2」的一个子步, 不是新卡**」。
+> **用途**: D2-MULTIPLICITY MUST-FIX 的**对抗用例**(Codex 最小闭合四条之②「两同 SPK 异 value 对抗用例」)
+> —— 该用例**除了调这两支判定函数本身, 没有别的入口**;复刻它们的谓词正是本 spec §0 要挡的东西。
+> 设计稿: `docs/2026-08-11-d2-multiplicity-fix-design-v0.1.md`(rev-3, §8 第②件)。
+> **原文一字未删**;本节是独立变更块。
+
+### §12.1 申请增加的条目
+
+| 键 | 实际模块 | 申请放开的导出 | 为什么它该在表里 |
+|---|---|---|---|
+| `bshard-close-enforce`(**新键**) | `src/lib/bshard-close-enforce.mjs` | `verifyClosePayoutRootBinding`(V1)<br>`verifyClosePayoutV2Binding`(V2) | 缺陷(covenant continuation 的**基数**与 **value** 未绑)**就在这两支函数体内**;用例要证的命题是"给它这样一份 txSafeJson, 它必须拒" —— **只有直接问它本人才算数**。 |
+
+🔴 **只放开这两个导出, 不是放开文件。** 同文件还有 `enforceCloseAttest` / `enforceCloseAttestV2` 等**驱动型**导出
+(它们查库、走链锚、跑完整 enforce 链) —— **不在申请范围内**。粒度由现有的 `entry.exports.includes(step.export)` **机器强制**, 不靠本注释。
+
+### §12.2 🔵 性质定位:落在**已批准的性质内部**, 不扩张(对着 §10.2 / §11.2 读)
+
+```
+§10 poolSettlerTick   : 【驱动生产结算】写 DB + 3 处外呼   ⇒ 扩张了性质
+§11 decideConsensus   : 【判定】只 SELECT, 无写无外呼        ⇒ 不扩张
+§12 本条两支           : 【判定】连 SELECT 都没有 —— 纯函数   ⇒ 不扩张, 且【严格弱于 §11】
+```
+
+**逐条实读(2026-08-11 · J2)**:
+- `verifyClosePayoutRootBinding`(`:130`)函数体内 `INSERT|UPDATE|DELETE|fetch(|sqlite|prepare(` **命中 0**;
+  它做的全部事情 = `JSON.parse(txSafeJson)` → 类型闸 → `blake2b` 派生 expectedSpk → 字符串比对。**参数进、结论出。**
+- `verifyClosePayoutV2Binding`(`:242`)同上, 命中 **0**。
+- **模块顶层无 DB import** —— 顶层只 import `blake2b` / `judgeline` / `fee-split` / `pool-committee-sampler` /
+  `pool-merkle-v06` / `oracle-evidence-extractors` / `shard-allocator` 等纯计算或惰性模块。
+  🔵 **且这一条已被实跑证过**: `scratch/_j2_d2_t2_probe.mjs` 直接 import 本模块并调用成功, **未设任何特殊 env**
+  ⇒ 不重演 §11.3-C 那格(`pool-market-settler` 需 `KASPA_NETWORK` 否则传递依赖顶层就 throw)。
+
+### §12.3 🔴 一个必须与本条同批处理的依赖(否则 V2 那一半落不了地)
+
+**`verifyClosePayoutV2Binding` 当前【没有 export 关键字】**(`:242 function verifyClosePayoutV2Binding(...)`),
+只有 V1 那支是 `export function`(`:130`)。
+
+⇒ **本条批准之后, 用例仍调不到 V2 那支**, 除非 D2 修复本体(§8 第①件)**同批把它导出**。
+⇒ 🔨 **两件事必须绑在一起交, 否则会出现"allowlist 里有这个导出、而模块根本没导出它"的空条目** ——
+   而那种空条目**不会报错**, 只会让 V2 用例静默缺席, 与"V2 已被覆盖"在记分板上同形。
+   **本 spec 不接受这种半截状态**: 要么两支同批到位, 要么本条只申请 V1、V2 另立。
+
+### §12.4 未验项(如实标, 不藏)
+
+| # | 项 | 层级 |
+|---|---|---|
+| 1 | 两支函数体内零写库零外呼 | ✅ `[CONFIRMED·逐行 grep + 实跑 import]` |
+| 2 | 模块顶层无 DB 依赖、无特殊 env 要求 | ✅ `[CONFIRMED·探针实跑成功]` |
+| 3 | `verifyClosePayoutV2Binding` 未导出 | ✅ `[CONFIRMED·现读 :242 无 export]` |
+| 4 | 放开这两支之后, `cases/` 是否可能借它们**间接**触到驱动型逻辑 | 🟠 `[推断·未穷举]` —— 两支都是纯函数、不回调, 我判断不可能;**但这是"我判断"不是"我穷举过"**, 请审阅者据此定权重 |
