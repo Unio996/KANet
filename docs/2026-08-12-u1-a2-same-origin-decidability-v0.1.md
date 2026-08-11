@@ -29,8 +29,7 @@ address 重复组（同址两行）          = 0
 mnemonic 密文去重                  = 30 / 30  （AES-256-GCM 带 IV ⇒ 密文不可比对，**不能**拿密文判同源）
 ```
 ```bash
-node scratch/_j2_a2_probe_20260812.cjs          # 上表前 4 行
-node scratch/_j2_a2_addrdup_20260812.cjs        # 重复 address / 密文去重
+node scripts/u1-a2-decidability-probes.mjs      # ← 进仓·跨节点可跑, 输出 ①(本表)
 ```
 
 **现行派生路径**（`kasia-relay/src/lib/wallet.mjs:39-50`，console 侧 `kasia-console/src/services/wallet.js:28-34` 同形）：
@@ -57,7 +56,7 @@ grep -rn "KASPA_ACCOUNT_INDEX" --include=*.js --include=*.mjs --include=*.sh . |
 ⚠ 全程用**当场随机生成**的助记词，**未解密任何在库真实密钥**。
 
 ```bash
-node scratch/_j2_a2_derivation_probe_20260812.mjs
+node scripts/u1-a2-decidability-probes.mjs      # 输出 ②
 ```
 ```
 A 同一 mnemonic · acct 0 两次  : IDENTICAL
@@ -80,7 +79,7 @@ C 不同 mnemonic · acct 0       : DIFFER
 
 **实测**（本仓 wasm，不是引 BIP32 教科书）：
 ```bash
-node scratch/_j2_a2_hardened_gap_probe_20260812.mjs
+node scripts/u1-a2-decidability-probes.mjs      # 输出 ③
 ```
 ```
 ① master XPub -> deriveChild(44, HARDENED)      : 抛错 "Bip32 -> Invalid child number"
@@ -107,7 +106,7 @@ node scratch/_j2_a2_hardened_gap_probe_20260812.mjs
 **它可以纯从 `address` 算出来，byte-exact 回推验证通过 4/4**：
 
 ```bash
-node scratch/_j2_a2_addr_pubkey_bijection_20260812.mjs
+node scripts/u1-a2-decidability-probes.mjs      # 输出 ④
 # J2test / NWT / maker-1 / maker-2 : 回推 == 原地址 YES ×4
 ```
 
@@ -128,7 +127,7 @@ m / 44' / 111111' / 0' / 0 / i        ← i = 该 seed 下第 i 个委员身份
 - ⚠ **一条必须写明的代价 —— 已由我自己实测坐实（v0.2 升级：原为 🟠 未测，现 ✅ CONFIRMED，带对照臂）**：
   账户层 xpub 公开 + 该账户下**任一**非硬化子私钥泄露 ⇒ **可反推账户 xprv ⇒ 该账户全部兄弟私钥沦陷**。
 ```bash
-node scratch/_j2_a2_xpub_leak_probe_20260812.mjs
+node scripts/u1-a2-decidability-probes.mjs      # 输出 ⑤
 ```
 ```
 反推出的账户私钥 == 真账户私钥 ? 🔴 YES — 反推成立
