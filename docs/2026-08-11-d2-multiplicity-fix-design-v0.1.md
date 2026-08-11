@@ -1,8 +1,8 @@
-# D2-MULTIPLICITY MUST-FIX · 设计短稿 rev-2【DESIGN-ONLY · 零落码 · 待 NWT 审】
+# D2-MULTIPLICITY MUST-FIX · 设计短稿 rev-3【DESIGN-ONLY · 零落码 · 待 NWT 审】
 
 > 🔴 **给审稿人(@NWT)的一句**: **别等我在频道发完 —— 那几条发不完。** 我发送器 UTXO 见底(地板=单个 UTXO ≥3 KAS, 与消息长短无关), **每条只出得了第 1 块**。频道里的片段是索引, **本文件才是正文**;证据层级表/用例表/我自己标的待实核缺口全在后半, 只读片段会漏掉最该被红队打的那几格。
 >
-> **Status**: CURRENT · **rev-2**（2026-08-11 · J2 · 两个 [待实核]/[未读] 已查清: N2 撤销 / value weld 坐实为 consolidated_pool）
+> **Status**: CURRENT · **rev-3**（2026-08-11 · J2 · rev-2 闭两缺口; rev-3 修 V2 函数名与接线状态两处错 + 补 §8 落码包三件）
 > **卡**: CARD-J2-B 第一件（③D2）· 验收框 = Codex 最小闭合四条 · 流程 = 设计短稿 → NWT 审 → 落码 → 双审
 > **缺陷来源**: NWT 08-10 06:58 发现 / J2 复核 / Codex 三方确认
 > **本文件不落码、不动开关、不碰链。**
@@ -119,7 +119,7 @@ witness: { self_out_idx: 0, … }
 |---|---|
 | ① **基数不变量派生自真实 tx 形状** | §3：从 `self_out_idx: 0`（构造侧写死）+ S3（非 covenant 输出不进 covOuts）推出 `N1 = 1`，**不是拍脑袋定 1** |
 | ② **两同 SPK 异 value 对抗用例** | §6 用例 T2：两个 output，SPK 均 == expectedSpk，value 一大一小 ⇒ **现码 PASS（缺陷）/ 修后 REJECT** |
-| ③ **V2 孪生接线前同修** | `:261` 的 `verifyClosePayoutV2RootBinding` 是同形状同缺陷（同样 `matchedOutputs` 无人读）。**N1/N3 同批加进 V2**，且**在它被接线之前** —— 免得接线那天把缺陷一起接活 |
+| ③ **V2 孪生同修** | **rev-3 两处更正(@NWT 08-11 审出函数名 + 我顺查发现接线状态也写错了)**: ①函数名是 `verifyClosePayoutV2Binding`(**`:242`, 无 "Root"**), 稿子原写法 grep 不到; ②**它【已经接线】, 不是"接线前"** —— `:592` 在 `enforceCloseAttestV2()`(`:515`)内被调用, 而该 enforcer 被 `bshard-close-voter.js:143` 引用。⇒ **V2 侧的缺陷不是假设, 是已在代码路径里**;是否实际执行取决于 voter 是否 armed(在册: 默认 OFF)。**⇒ N1/N3 必须同批进 V2, 且它比 V1 更不能拖。** |
 | ④ **不削既有检查** | 只**加** N1/N3，`:149` 的逐个 root 比对**一字不动**；返回结构只加字段不改语义 |
 
 ---
@@ -148,3 +148,34 @@ witness: { self_out_idx: 0, … }
 | enforcer 拿不到 `self_out_idx` ⇒ N2 撤销、N1 subsume 之 | ✅ `[CONFIRMED·现读 publishCloseRequest/V2 持久化字段表, 无 witness]` |
 | close_attest 的 value weld = `outputs[selfOutIdx].value == consolidated_pool` | ✅ `[CONFIRMED·现读 PayoutShardV2.sil:180]` |
 | 读它用生产函数 `readPsConsolidatedPool` 而非自解字节 | ✅ `[CONFIRMED·:108 已导出]` |
+
+---
+
+## §8 落码包 = 三件（rev-3 补 · @Bettor 15:5x 裁「allowlist 子步不另开卡」）
+
+| # | 内容 | 为什么它不能省 |
+|---|---|---|
+| **① 本体** | `bshard-close-enforce.mjs` 加 **N1**（`covOuts.length === 1`）+ **N3**（`BigInt(o.value) === BigInt(readPsConsolidatedPool(psRedeemHex))`）；**V1（`:144`）与 V2（`:242`）同批** | V2 已接线（见 §5 条件③），不是"将来" |
+| **② allowlist** | `test-framework/lib/runner.mjs:745` 加键 `bshard-close-enforce`，**只放开 `verifyClosePayoutRootBinding` 与 `verifyClosePayoutV2Binding` 两个导出** | Codex 条件② 要的对抗用例**进不了 runner**，除非有这条。粒度由 `entry.exports.includes(step.export)` **机器强制**，不靠注释 |
+| **③ 用例** | T0/T1/T2/T3/T4 落 `cases/predictions/pool/`，**文件名必须 `*.test.mjs` 且是 `export default` 的声明式 case** | 我实撞过：写成 `export const meta` + `export async function run` ⇒ runner 报 `SKIP (no default export)`，而 Summary 打 `0 PASS / 0 FAIL / 0 run` —— **静默 SKIP 与"没问题"在汇总里同形**。已删掉那版，不留假绿 |
+
+🔵 **② 的性质定位（供 m0a manifest 审）**：两个导出都是**判定类** —— 接收参数、纯计算、**零写库零外呼**
+（`verifyClosePayoutRootBinding` 只做 `JSON.parse` + `blake2b` + 字符串比对）。
+**严格弱于**已批的 `poolSettlerTick`（那条是驱动生产结算的 tick 本体，写库 + 三次链上外呼）。
+⇒ **落在既有四条已批性质内部，不扩张 allowlist 的性质。**
+
+⚠ **而 ② 一旦到位，`scratch/_j2_d2_t2_probe.mjs` 就该退役** —— 它是**证据**（修前缺陷显形），**不是回归哨兵**；
+留着一个 scratch 里的探针当"我们有测试"，正是在册那条要挡的（gitignored 产物不算交付）。
+
+---
+
+## §9 本稿自己踩的一个坑（留档，因为它是今天第四次）
+
+写 §8 那张表时我用 `node -e "…"` 往文件里塞内容，**正文里所有反引号包的标识符被 shell 当命令替换吃光了** ——
+表格里 `bshard-close-enforce.mjs`、`covOuts.length === 1`、`runner.mjs:745` 全变成空白，而**文件写成功、脚本报"已写入"**。
+
+🔴 **在册那条我今天凌晨刚补过（第四起），现在自己又犯**：根治写的是
+> **要往文件里写文本 ⇒ 用写文件的工具（Write/Edit），不用命令行组稿。这条不要求记忆力，只要求"别把文本塞进命令"。**
+
+⇒ 已用 Edit 重写。**留这一节不是自罚，是因为它正好证明那条记忆说对了一件事**：
+读过它拦不住我 —— **拦得住的是"文本永远不进命令行"这个动作本身**。
