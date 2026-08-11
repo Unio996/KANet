@@ -776,6 +776,18 @@ const actions = {
         rel: '../../src/services/pool-market-settler.js',
         exports: ['poolSettlerTick', 'decideConsensus'],
       },
+      // 🔵 第 6 条(spec §12 v5, 2026-08-11 · Bettor 16:3x 批「准」· NWT 审 PASS 并把 §12.4 第 4 项
+      //    从"我判断"升级成"我穷举过调用图")—— D2-MULTIPLICITY MUST-FIX 的对抗用例专用。
+      //    性质: 【判定】且**连 SELECT 都没有** —— 两支都是纯函数(JSON.parse → 类型闸 → blake2b 派生
+      //    expectedSpk → 字符串/BigInt 比对), 函数体内 INSERT|UPDATE|DELETE|fetch|sqlite|prepare 命中 0,
+      //    模块顶层无 DB import(探针实跑未设任何特殊 env 即 import 成功 ⇒ 不重演 §11.3-C 那格)。
+      //    ⇒ 落在已批性质内部, 且**严格弱于同表的 decideConsensus**(那条至少还 SELECT)。
+      //    🔴 只放这两支【判定】导出。同文件的 enforceCloseAttest / enforceCloseAttestV2 是**驱动型**
+      //    (查库 + 链锚 + 跑完整 enforce 链), **不在范围内** —— 粒度由下方 entry.exports.includes 机器强制。
+      'bshard-close-enforce': {
+        rel: '../../src/lib/bshard-close-enforce.mjs',
+        exports: ['verifyClosePayoutRootBinding', 'verifyClosePayoutV2Binding'],
+      },
     };
 
     const entry = ALLOWLIST[step.module];

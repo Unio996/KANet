@@ -144,11 +144,39 @@ export function verifyClosePayoutRootBinding({ txSafeJson, psRedeemHex, reDerive
   const covOuts = (Array.isArray(signedTx.outputs) ? signedTx.outputs : []).filter(o => o && o.covenant && o.covenant.covenantId);
   if (covOuts.length === 0) return { ok: false, reason: 'D2: 被签 tx 无 covenant continuation output — 非合法 close_attest (弃签)' };
   // 每个 covenant continuation output 必 commit re-derived root (防 decoy: 真 continuation 必是 cov_id-bound 那个;
-  //   settler 加假根 cov_id-output → 任一不符 → BUST; 全部都对 → 无论 final witness self_out_idx 指哪个都安全)。
+  //   settler 加假根 cov_id-output → 任一不符 → BUST)。
+  // 🔴 D2-MULTIPLICITY MUST-FIX (2026-08-11 J2, 设计 docs/2026-08-11-d2-multiplicity-fix-design-v0.1.md rev-3,
+  //    NWT 2026-08-10 06:58 发现 / Codex 三方确认):
+  //    上一行注释原本还有半句「全部都对 → 无论 final witness self_out_idx 指哪个都安全」——**那半句在 root 轴成立,
+  //    在 value 轴不成立**, 已删。旧码只比 scriptPublicKey(=root), 不比【基数】也不比【value】⇒ settler 可以放两个
+  //    同 SPK 异 value 的 continuation, 两个都过 root 检查, 而 self_out_idx 指谁决定多少钱留在 covenant 里。
+  //    修前实测(未修生产代码, 见设计稿 §6-bis): 两个同 SPK 异 value ⇒ pass(matchedOutputs=2);
+  //    单个但 value=999999999 ⇒ pass。两条都是通的。
+  // N1 · 基数: 恰好 1 个。**派生自真实 tx 形状不是硬编码**——构造侧 bshard-close-transport.mjs:414 的 witness
+  //    写死 self_out_idx:0, 且非 covenant 输出(covenant:null)不进 covOuts。
+  //    🔵 为什么不改成"验 witness 指的那个": witness 由 settler 构造且【签名后仍可改】(sighash 不覆盖它)
+  //       ⇒ 验它是错的靶子。正解是让 covenant 输出集本身没有多重性。
+  if (covOuts.length !== 1) {
+    return { ok: false, reason: `D2 REJECT (N1 基数): covenant continuation output 有 ${covOuts.length} 个, 合法 close_attest 恰好 1 个 — 多重 continuation 使 self_out_idx 指向可被 settler 事后选择 (弃签)`, expectedSpk, matchedOutputs: covOuts.length };
+  }
   for (const o of covOuts) {
     if (String(o.scriptPublicKey || '').toLowerCase() !== expectedSpk) {
       return { ok: false, reason: `D2 REJECT: 被签 tx continuation output commit 的根 != re-derive — settler 旁路标量伪装 (spk ${String(o.scriptPublicKey).slice(0, 24)}.. != expected ${expectedSpk.slice(0, 24)}..)`, expectedSpk };
     }
+  }
+  // N3 · value: 必须等于输入侧 PS state 的 consolidated_pool(值守恒)。
+  //    链上焊死原文 PayoutShardV2.sil:180 (close_attest 支, state 里 closed:1):
+  //      require(tx.outputs[selfOutIdx].value == consolidated_pool)
+  //    🔵 读它用生产函数 readPsConsolidatedPool(:108) 而不是自解字节 —— 否则是"验我的复刻而不是验实代码"。
+  //    ⚠ value 在 serializeToSafeJSON 里是【字符串】(实测), 必须 BigInt 比: Number() 在 >2^53 会静默失真。
+  let expectedValue;
+  try { expectedValue = BigInt(readPsConsolidatedPool(psRedeemHex)); }
+  catch (e) { return { ok: false, reason: `D2: 读 consolidated_pool 失败 (${e.message}) — 无法验 continuation value, fail-closed 弃签`, expectedSpk }; }
+  let gotValue;
+  try { gotValue = BigInt(covOuts[0].value); }
+  catch { return { ok: false, reason: `D2 REJECT (N3 value): continuation output.value=${JSON.stringify(covOuts[0].value)} 非合法整数 (弃签)`, expectedSpk }; }
+  if (gotValue !== expectedValue) {
+    return { ok: false, reason: `D2 REJECT (N3 value): continuation value ${gotValue} != consolidated_pool ${expectedValue} — 链上 weld PayoutShardV2.sil:180 要求值守恒 (弃签)`, expectedSpk };
   }
   return { ok: true, expectedSpk, matchedOutputs: covOuts.length };
 }
@@ -239,7 +267,10 @@ export function readPayoutShardV2AttestedState(psv2RedeemHex) {
  * (D2 草稿 §"D2-style tx-binding 扩展": 逐个反解比对, 任一不匹配 fail-closed)。
  * ⚠ version>=1 malleability gate 照抄 V1(NWT finding④: 不能丢) — covenant binding 仅 sighash 覆盖于 tx.version>=1。
  */
-function verifyClosePayoutV2Binding({ txSafeJson, psv2RedeemHex, reDerivedRoot, attestedWinner, betsRootHex, refundRootHex, attestedAtMs }) {
+// 🔵 export 加于 2026-08-11 (J2, D2-MULTIPLICITY MUST-FIX 同批 · @Bettor 验收门 · spec §12.3):
+//    allowlist 放开这一支给对抗用例调 —— 而"表里有键、模块没这个导出"会让 V2 用例缺席。
+//    **逻辑一个字节没动因导出而变**;下面 N1/N3 那两段才是本次的行为改动。
+export function verifyClosePayoutV2Binding({ txSafeJson, psv2RedeemHex, reDerivedRoot, attestedWinner, betsRootHex, refundRootHex, attestedAtMs }) {
   let signedTx;
   try { signedTx = JSON.parse(String(txSafeJson || '')); } catch { return { ok: false, reason: 'D2-V2: txSafeJson parse fail — 无法验被签 tx commit 的值 (弃签)' }; }
   const _ver = signedTx.version;
@@ -253,10 +284,29 @@ function verifyClosePayoutV2Binding({ txSafeJson, psv2RedeemHex, reDerivedRoot, 
   } catch (e) { return { ok: false, reason: `D2-V2: continuation redeem splice fail (${e.message})` }; }
   const covOuts = (Array.isArray(signedTx.outputs) ? signedTx.outputs : []).filter(o => o && o.covenant && o.covenant.covenantId);
   if (covOuts.length === 0) return { ok: false, reason: 'D2-V2: 被签 tx 无 covenant continuation output — 非合法 close_attest (弃签)' };
+  // 🔴 D2-MULTIPLICITY MUST-FIX 的 V2 孪生 (2026-08-11 J2, 与 V1 同批 · Codex 条件③)。
+  //    ⚠ 这一支**已经接线**(:592 在 enforceCloseAttestV2 内被调, 该 enforcer 被 bshard-close-voter.js:143 引用),
+  //      不是"将来才接" ⇒ V2 侧的缺陷此前是活的(是否执行取决于 voter 是否 armed, 在册默认 OFF)。
+  // N1 · 基数(同 V1, 理由见 V1 那段)
+  if (covOuts.length !== 1) {
+    return { ok: false, reason: `D2-V2 REJECT (N1 基数): covenant continuation output 有 ${covOuts.length} 个, 合法 close_attest 恰好 1 个 — 多重 continuation 使 self_out_idx 指向可被 settler 事后选择 (弃签)`, expectedSpk, matchedOutputs: covOuts.length };
+  }
   for (const o of covOuts) {
     if (String(o.scriptPublicKey || '').toLowerCase() !== expectedSpk) {
       return { ok: false, reason: `D2-V2 REJECT: 被签 tx continuation output commit 的值 != re-derive (payoutRoot/attestedWinner/betsRoot/refundRoot/attestedAtMs 任一漂) — settler 旁路标量伪装 (spk ${String(o.scriptPublicKey).slice(0, 24)}.. != expected ${expectedSpk.slice(0, 24)}..)`, expectedSpk };
     }
+  }
+  // N3 · value 守恒 (PayoutShardV2.sil:180 close_attest 支: outputs[selfOutIdx].value == consolidated_pool)。
+  //    🔵 用同一支生产 reader; 已实测它对 v1_committee 与 v2_zk 两个 covenant_family 的 redeem 都读得出
+  //       (2026-08-11 各取样本, 均返回 consolidated_pool=20,000,000=PS_SEED) ⇒ 不是"我推它 V2 也适用"。
+  let expectedValue;
+  try { expectedValue = BigInt(readPsConsolidatedPool(psv2RedeemHex)); }
+  catch (e) { return { ok: false, reason: `D2-V2: 读 consolidated_pool 失败 (${e.message}) — 无法验 continuation value, fail-closed 弃签`, expectedSpk }; }
+  let gotValue;
+  try { gotValue = BigInt(covOuts[0].value); }
+  catch { return { ok: false, reason: `D2-V2 REJECT (N3 value): continuation output.value=${JSON.stringify(covOuts[0].value)} 非合法整数 (弃签)`, expectedSpk }; }
+  if (gotValue !== expectedValue) {
+    return { ok: false, reason: `D2-V2 REJECT (N3 value): continuation value ${gotValue} != consolidated_pool ${expectedValue} — 链上 weld PayoutShardV2.sil:180 要求值守恒 (弃签)`, expectedSpk };
   }
   return { ok: true, expectedSpk, matchedOutputs: covOuts.length };
 }
