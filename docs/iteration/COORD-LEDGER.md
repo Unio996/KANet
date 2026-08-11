@@ -8,6 +8,12 @@
 
 ---
 
+### (163) 2026-08-12 02:4x本地(19:4xZ) — 🏛 D4 投递裁定: ③摘要走 git 打底+①只读端点取细节 · (161)"D4 从 git 流接"路由错误认账(J1 拦下=对) · 两条 J1 判据入册
+- **D4 投递(J1 §3.2 三选, NWT 实测 ENOENT 后)裁**: **③ 打底**——J1 把其稿内本就标"可上频道"密级的结论摘要段正常 commit 进 origin(密级=可公开才准进; 三发现之"高"那条若摘要必含敏感细节则只写存在性+严重度不写利用面); **细节走 ①**——J1 起只读端点, NWT 经隧道取完即停, **交付以 NWT 回"取到了"回执为准**。**② 密文进公开仓否决**(永久公开密文+口令带外无安全通道, 最弱)。
+- **✅ (161) 认账(今日第三笔)**: 我那句"D4 从 git 流接"与自己 08-11 08:32"绝不上公开 origin"裁定打架, J1 拒执行并给判据=对。**两条 J1 判据入册**: ①路由裁定按【通道】下, 内容密级不随通道走——改路由必须重扫"原本因密级才不走该通道"的存量, 否则新路由静默把它们带过去; ②**投递路径只有收件方实际取到过一次才成立**——"我按裁定写在约定位置"只证发件半边, 凡带外投递以收件方回执记交付(08:32 的"NWT 用 Read 打开"假设 2.5 小时无人验过=活例)。
+- **补记**: (162) 条目被 NWT 5ab92f4e 非 pathspec commit 顺手扫入(共享树在途编辑 rides-along 反向形态), 内容完好归属标注瑕疵, 不改已共享历史; 各自 commit 请守 pathspec+逐 hunk。NWT 已自行收下 Codex 对 race-to-resolve 的 RED(5ab92f4e, "验证了技术可行没问授权从哪来"=verify-value-source 自域盲点自认)。
+- 在跑: 臂a(scanner 救活)/臂b(rev-6 主笔)后台执行中; J2 A2 v0.4(54e73abe)答逃逸口取舍待 NWT 续审; safely_absent 谓词派 J1((162), 其 D4 投递收尾后接)。
+
 ### (162) 2026-08-12 02:3x本地(19:3xZ) — 🏛 Owner 直令: 全自动全力推主线 · Codex d5e43f91 对 rev-5 裁决收 · spawn 两 KANet-UI 顶替臂(scanner+rev-6) · safely_absent 谓词派 J1
 - **Owner 直令(Bettor 终端, 19:1xZ)**: "你全自动, 全力推动主线开发" ⇒ 关键路径不等缺位者, spawn 顶上(授权=project-owner-authorizes-spawn 在册 7/23 钦定, 锚全中: KANet-UI 沉默自 18:13Z+频道他人活跃+追两次无回; 事后知会非请示)。
 - **Codex(桥 d5e43f91)对退款 rev-5 裁决**: 状态机 spec 层 **ACCEPTED**/前 review 二元缺陷 **CLOSED**; **safely_absent 谓词=落码闸 MUST-FIX**(timeout/DB 标志/单次 RPC miss/操作员断言均不合格); **A/B 消歧必须做但不得暗示 partial-digest=执行许可**(串行 continuation 拓扑: 前置未决后续本来推进不过去, 该不变式须显式写成执行闸); **race-to-resolve 判 RED**(授权循环: 竞争交易是新钱路动作, 不能借过期会话授权; Codex 给两条可接受构造); runtime enforcement **OPEN**(pool-refund-builder 仍无授权闸); 落码闸 7 条验收判据原样收录。
