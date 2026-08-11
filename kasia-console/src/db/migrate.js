@@ -5621,5 +5621,38 @@ export function runMigrations() {
     }
   }
 
+  // v195 (J2 2026-08-11, CARD-J2-A / Owner D-012 主线, runbook docs/2026-08-10-u1-key-isolation-construction-runbook-v0.1.md §1a,
+  //       D1 落定 = 5 域):
+  //   u1 密钥隔离施工的【域 → relay-ID 映射记录表】。回退 runbook §0.1 依赖它: 没有这张表, 回退时无从知道
+  //   "第 N 把密钥当初生成在哪台宿主上" —— 而那正是回退唯一需要的信息。runbook 原话: 别等到"回头需要回退时
+  //   才发现从来没人记过这份映射"。
+  //   🔵 建表零风险: 新表, 不改任何既有表/既有行为/既有查询。
+  //   🔴 定位写死在这里, 因为它决定了未来能不能加东西: **这是【纯记录表】, 不参与任何签名/授权判定。**
+  //     故意【不】加到 relay_nodes 的外键、不加触发器 —— 一旦它被接进签名路径, 它就从"忘了记会给回退添麻烦"
+  //     升级成"写错一行会让某个 relay 静默获得/失去签名资格"(同 is_oracle 那条在册迁移卡的形状)。
+  //     谁要让它承重, 走独立设计 + 红队, 不要顺手 JOIN 进来。
+  //   D1=5 域 ⇒ domain 取值 1..5, 用 CHECK 挡住手滑写 0/6(写侧防御; 读侧不依赖它做任何判定, 见上)。
+  //
+  //   🔴🔴 **对 runbook §1a 原文加了一条约束 `UNIQUE(relay_id)`, 并在此写明理由, 供审者驳回**:
+  //     runbook 给的是 `PRIMARY KEY (domain, relay_id)` —— 我自测发现它**允许同一个 relay_id 同时挂在域 1 和域 2**
+  //     (主键是复合的, 只挡"同域同 relay"重复)。而**一个 relay 跨两个域, 正是"隔离域"这个词要排除的那件事**:
+  //     域之间的独立性一旦被同一个 relay 共享, 5 域的数学保证(D1 花一台机器买的那个)就退化。
+  //     ⇒ 加 `UNIQUE(relay_id)` 让它在**写入那一刻**失败, 而不是等回退时才发现映射自相矛盾。
+  //     ⚠ 这是**我对已授权 runbook 文本的偏离**, 不是笔误。空表加约束零成本可逆 ——
+  //       **@NWT / @Bettor 若认为跨域挂载是合法场景(例如迁移过渡期一个 relay 暂属两域), 删掉这一行即可**,
+  //       但那样就需要在别处回答"过渡期谁来保证两域不同时签同一笔"。
+  {
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS u1_domain_assignment (
+        domain      INTEGER NOT NULL CHECK (domain BETWEEN 1 AND 5),
+        relay_id    TEXT    NOT NULL UNIQUE,
+        host_label  TEXT    NOT NULL,
+        assigned_at TEXT    NOT NULL DEFAULT (datetime('now')),
+        PRIMARY KEY (domain, relay_id)
+      )
+    `);
+    console.log('[migrate] v195: u1_domain_assignment 建表完成 (u1 隔离施工的域→relay 映射记录; 纯记录表, 不参与签名判定).');
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
