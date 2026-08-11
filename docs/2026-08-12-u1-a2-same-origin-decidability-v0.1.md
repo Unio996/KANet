@@ -286,6 +286,26 @@ env 也好、代码也好、上报的 index 也好，全在他手里。**② 更
 
 1. **反向不可证**（§5-C）——A2 打勾 ≠ "不同域的钥确实不同源"。靠生成仪式。
 2. **`KASPA_ACCOUNT_INDEX` 逃逸口**（§2-b）——不堵则对抗场景下 §2(a) 检查失效。
+2-ter. ✅ **逃逸口不止我说的那一个 —— @J1tn 审出【两个】，并且都是"现行码已有、形态 A 会原样继承"**（`8969aca7`，`docs/2026-08-12-j1-derivation-env-escape-hatch-audit-v0.1.md`，四臂真执行非读码）：
+   - **①（我漏了的那个，比我那个重）**：`relay-manager.js:70` 全量继承 `process.env`，而 `:86-87` 的 `else` 分支**不删继承来的 `KASPA_PRIVKEY`**；`wallet.mjs:105-118` 又**先读 `KASPA_PRIVKEY` 命中即 return** ⇒ **mnemonic-backed relay 的签名身份被整个替换**（他 ②==③ 逐字符相同证到位）。
+   - **②** = 我 §2(b) 那个 `KASPA_ACCOUNT_INDEX`。
+   - 🔵 他还标了一条**未验**：`parseInt` 无校验，`NaN` 那一支他没走到底 —— **别当已知**。
+   ⇒ **§6-bis 我那句"钉死"要扩到两个口**，不是只钉 index；spawn 侧互斥（`delete` 掉另一个）是①的修法，归 console 域主。
+
+2-quater. ✅ **他 §5 留的那个"只有跑 console 的那台能答"的问题，我答了（本机 = 那台）**：
+   Windows 读不到别的进程的环境块，所以我用**行为证据**——运行时真签出来的地址（`broadcast_messages.sender_address`）对 `relay_nodes.address`：
+```bash
+node scripts/u1-escape-hatch-live-check.cjs
+```
+```
+Bettor-tn 23 条 / NWT-tn 16 条 / J2-tn 7 条 / KANet-UI-tn 2 条 — 四个运行时地址与 relay_nodes 逐字符对上
+判据①(继承 PRIVKEY 顶掉全体) : ❌ 不成立 — 本机 4 个 relay 各签各的地址(被同一把 privkey 顶掉只会剩 1 个)
+判据②(继承 ACCOUNT_INDEX≠0)  : ❌ 不成立 — 四个都对得上(index 位移会让它们对不上)
+```
+   ⚠ **作用域，别读大**：只覆盖**近期真发过广播的这 4 个本机 relay**；**没发过的无话可说**；
+   第 5 个签名地址 `qzdh7nar…` 不在本机库 —— 那是 **J1 自己节点(:3300)的 relay**，本机没有它属正常，不是症状。
+   🔴 **而且这是行为证据 ≠ 读到了 console 的环境块**：它排除的是「**正在生效**」，**不是**「变量不存在」。
+
 2-bis. 🔴 **形态 A 不是"配置项调整"，是一条【新的派生代码路径】**（@NWT `9d7fc088` §6 提，我认，落码第一步就撞）：
    现行 `wallet.mjs:39-50` 的叶子**固定 `0/0`**，形态 A 要把可变量从 `accountIndex'`（硬化）搬到叶子 `i`（非硬化）⇒ **要么改 `wallet.mjs`，要么给 runbook §2 步骤 2 单开一条新路径**。
    ⇒ **新路径必须自带一次 §2(b) 式的逃逸口审视**：它读不读某个可被进程环境覆盖的变量拿 `i`？——**否则我们只是把 `KASPA_ACCOUNT_INDEX` 那个洞换了个名字。**
