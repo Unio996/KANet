@@ -70,7 +70,15 @@ N8 那次撞在有密码学能护的字段上（所以能用签名解决）；**
 ### N5 · 两个逃逸口一起钉死（@J1tn `8969aca7` · 我原先只报了第二个）
 | # | 逃逸口 | 钉法 |
 |---|---|---|
-| **①** | `relay-manager.js:70` 全量继承 `process.env`，`:86-87` 的 `else` 分支**不删继承来的 `KASPA_PRIVKEY`**，而 `wallet.mjs:105-118` **先读 `KASPA_PRIVKEY` 命中即 return** ⇒ **mnemonic relay 的签名身份被整个替换** | **spawn 侧互斥写死**：设一个必 `delete` 另一个 |
+| **①** | `relay-manager.js:70` 全量继承 `process.env`，`:86-87` 的 `else` 分支**不删继承来的 `KASPA_PRIVKEY`**，而 `wallet.mjs:105-118` **先读 `KASPA_PRIVKEY` 命中即 return** ⇒ **mnemonic relay 的签名身份被整个替换** | **spawn 侧互斥写死，且【双向】**：`if (privkey) { set PRIVKEY; delete MNEMONIC } else { set MNEMONIC; delete PRIVKEY }` |
+
+🔴 **N5-① 的第二个方向不是对称强迫症，理由在这里**（@J1tn 21:12Z，我认，落码照此）：
+privkey 分支里**继承来的 `KASPA_MNEMONIC` 今天是惰性的** —— 但它的惰性**只由 `wallet.mjs` 的一处优先级维持**（privkey 命中即 return）。
+**那处优先级一旦被改动、或被一条新路径绕过，它就活了，而且是静默的。**
+🔨 **判据（可推广）**：**把「靠某行【不存在】维持的保护」换成「靠某行【存在】维持的保护」** ——
+后者被破坏时是**一次可见的 diff**，前者不是（它只是某个人某天顺手改了别处的优先级）。
+
+🔵 **与 env 读数的关系（@J1tn ④）**：这两行落地之后，「console 进程 env 里没有这两个变量」这个**时点读数就不必再维持** —— **那时才是不变量**。在此之前「重启过就重读」成立，但触发条件可收窄成**「console 被人从一个新 shell 起过」**（启动侧 `kanet.env` / `kanet-start.sh` 零处设置这两个变量 ⇒ 它们只可能来自更外层 shell）。
 | **②** | `KASPA_ACCOUNT_INDEX` 走继承（全仓一处读、零处写 ⇒ 只可能来自继承环境） | **不许走继承**：由 console 按 relay 显式传；解析结果 `Number.isInteger` 校验，**坏值抛而不是静默取 0/NaN** |
 
 🔴 **N5 的作用域，必须与条款同页写死**（否则又是「局部性质写成全局保证」）：
