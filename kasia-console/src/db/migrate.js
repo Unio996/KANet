@@ -5654,5 +5654,44 @@ export function runMigrations() {
     console.log('[migrate] v195: u1_domain_assignment 建表完成 (u1 隔离施工的域→relay 映射记录; 纯记录表, 不参与签名判定).');
   }
 
+  // v196 (J2 2026-08-12): u1 A2 同源判定的【登记表】。
+  //   规范单源: docs/2026-08-12-u1-a2-same-origin-spec-v1.0.md (v1.1-rc · NWT PASS 20:06Z + N8 PASS 20:28Z)
+  //   设计: docs/2026-08-12-j2-a2-registration-storage-design-v0.1.md (b55e60cb)
+  //
+  //   🔴 **为什么是新表, 不是给 v195 那张加列**: v195 自己把定位写死成「纯记录表, 不参与签名判定」,
+  //     且 spec I2 要求它**永不进授权语句**。身份来源证据是**承重**的, 挂上去等于让一个表名底下
+  //     同时存在两种读法(在册: 一名多物)。⇒ 职责单一, 分开建。
+  //
+  //   🔴 **两条约束把 spec 的 N3/N4 从"事后检查"升成"写入时结构约束"** ——
+  //     理由是本仓在册那条: 扫描器只有【有人跑它】的时候才说话, 而约束是写入时的、不依赖任何人记得跑。
+  //     · `UNIQUE(root_fingerprint)` = N3(identities-per-account 锁死 1, @Bettor 19:57Z 裁)
+  //       ⇒ 同一登记根下第二个身份**写不进来**, 不必等检查器发现。
+  //     · `CHECK(identity_index = 0)` = 同上的另一半(锁 1 ⇒ 合法索引只有 0)。
+  //     · `CHECK(custody = 'mnemonic')` = N4(委员必须 mnemonic 型, ledger (159) §8.3, privkey-only 不入委员)。
+  //   ⚠ **约束挡不住什么, 一并写在这里**: 它只挡【同一张表内】的同根重复;
+  //     **挡不住同一 seed 的另一个硬化账户**(那是两个不同的根 ⇒ 两条各自合法的记录)——
+  //     那一半永远是 spec §1 的 C 边界(仪式域), 不要读成"数据库保证了不同源"。
+  //   ⚠ **轮换会撞这个 UNIQUE**(R5: 换钥不搬钥 ⇒ 新根新行): **旧行必须先归档/删除**。
+  //     这条摩擦是我建表时就预见到的, 写在这里免得第一次轮换才发现。
+  //
+  //   🔵 **本迁移对 live 零即时影响**: 建表是 additive + IF NOT EXISTS, 且**今天没有任何写入方**
+  //     (注册入口尚未落码, 等 A-2 余下部分)。migrate 在 console 启动时跑 ⇒ 下一个重启窗才生效。
+  //   ⚠ **表结构本身尚未拿到单独的红队 PASS**(设计稿 b55e60cb 已公开, @Bettor 批 A GO 覆盖批次,
+  //     但没人对这张表的形状单独判过) ⇒ **若审者要改形状, 现在是零成本的**(空表 + 无写入方)。
+  {
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS u1_identity_registration (
+        relay_id              TEXT    PRIMARY KEY,
+        root_fingerprint      TEXT    NOT NULL UNIQUE,
+        root_xpub             TEXT    NOT NULL,
+        identity_index        INTEGER NOT NULL DEFAULT 0 CHECK (identity_index = 0),
+        identity_pubkey_xonly TEXT    NOT NULL,
+        custody               TEXT    NOT NULL CHECK (custody = 'mnemonic'),
+        registered_at         TEXT    NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+    console.log('[migrate] v196: u1_identity_registration 建表完成 (A2 同源判定登记表; N3 锁1/N4 mnemonic 型已落成 UNIQUE+CHECK 结构约束; 今日无写入方).');
+  }
+
   console.log('[migrate] DB migrations complete.');
 }
