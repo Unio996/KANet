@@ -25,7 +25,7 @@
 //    serializeI64 / depth-10 merkle ← pool-payout-root.mjs(本次把 merkle 抽成叶子泛型, 零漂移已证)
 import { blake2b } from '@noble/hashes/blake2b';
 import { canonicalJson } from '../../../shared/lib/app-envelope-canonical.mjs';
-import { serializeI64, merkleRootOfLeaves } from './pool-payout-root.mjs';
+import { serializeI64, merkleRootOfLeaves, computeBetsRoot } from './pool-payout-root.mjs';
 
 export const CIS_PROTOCOL = 'kanet-canonical-input-set';
 export const CIS_DOMAIN = 'kanet.pool.canonical-input-set.v1';
@@ -34,6 +34,31 @@ export const CIS_SCHEMA_VERSION = 1;
 // 🔴 S = 自引用排除集, **穷举**。今天 CIS 里没有签名字段, 所以只有 cis_digest 自己。
 //    将来若新增任何签名/自摘要字段, 加进 S **必须与阴性对照同批加** —— 否则 S 会悄悄变大而没人知道。
 const SELF_REFERENTIAL_KEYS = Object.freeze(['cis_digest']);
+
+
+// 🔴🔴 **设计缺口, 由本实现填, 必须被复审 —— 不要读成"设计已规定"**:
+//    precond6 v0.2.1 的叶子公式用 `role_code`(§2.3), 而字段表里对象携带的是 `role`(字符串),
+//    **全稿没有任何一处定义 role → role_code 的映射**; outputs 的 role 枚举也只在正文里以
+//    "broker→5 委员→winners→makerFee→makerExtra" 的散文形式出现, 没有列成枚举。
+//    ⇒ 两个独立实现会算出【不同的字节】, 而这恰恰是 CIS 存在要消灭的那件事。
+//    ⇒ 本表是我填的定值。**在有人裁定之前, 不得据它上任何签名路径。**
+//       (裁定后请把它搬回设计稿, 让设计而不是实现成为单源。)
+const INPUT_ROLE_CODE = Object.freeze({ maker_stake: 1, oracle_bond: 2, fee_funding: 3 });
+const OUTPUT_ROLE_CODE = Object.freeze({ broker_fee: 1, committee: 2, winner: 3, maker_fee: 4, maker_extra: 5 });
+const roleCode = (table, role, where) => {
+  if (!Object.prototype.hasOwnProperty.call(table, role)) {
+    throw new Error(`CIS: ${where} 的 role 不认识: ${JSON.stringify(role)}(合法: ${Object.keys(table).join('/')})`);
+  }
+  return table[role];
+};
+// outpoint 恰好 {txid,index} —— 设计写死"地址是类型, outpoint 才是那一个"(commingled-spine 攻击族)
+const outpointOf = (o, where) => {
+  if (!o || typeof o !== 'object' || Array.isArray(o)) throw new Error(`CIS: ${where}.outpoint 必须是对象`);
+  const k = Object.keys(o).sort().join(',');
+  if (k !== 'index,txid') throw new Error(`CIS: ${where}.outpoint 键必须恰好 {txid,index}, 收到 {${k}}`);
+  if (!Number.isInteger(o.index) || o.index < 0) throw new Error(`CIS: ${where}.outpoint.index 必须是非负整数`);
+  return { txid: hexBuf(o.txid, `${where}.outpoint.txid`), index: o.index };
+};
 
 const HEX32 = /^[0-9a-f]{64}$/;                 // 裸 hex: 全小写, 大小写混用视为非法【而非归一化】
 const DIGEST = /^blake2b256:[0-9a-f]{64}$/;     // 带算法标识的摘要字段
@@ -56,32 +81,37 @@ const bigOf = (s, name) => {
 
 // ── 叶子: 全定宽拼接 ⇒ 逐字段不需要 LP; 但**域标签是变长的, 必须 LP** ───────────
 export function betLeaf(b) {
+  const op = outpointOf(b.outpoint, 'bets[]');
   return h32(Buffer.concat([
     LP(U('kanet.pool.cis.bet.v1')),
-    hexBuf(b.txid, 'bets[].txid'), i32le(b.index),
-    hexBuf(b.pk, 'bets[].pk'), hexBuf(b.addr_commit, 'bets[].addr_commit'),
-    serializeI64(bigOf(b.stake, 'bets[].stake'), 8),
+    op.txid, i32le(op.index),
+    hexBuf(b.bettor_pk, 'bets[].bettor_pk'),
+    hexBuf(b.address_commitment, 'bets[].address_commitment'),
+    serializeI64(bigOf(b.stake_sompi, 'bets[].stake_sompi'), 8),
     serializeI64(BigInt(b.direction), 1),
     serializeI64(bigOf(b.lock_daa, 'bets[].lock_daa'), 8),
   ]));
 }
 
 export function otherInputLeaf(o) {
+  const op = outpointOf(o.outpoint, 'other_inputs[]');
   return h32(Buffer.concat([
     LP(U('kanet.pool.cis.other-input.v1')),
-    hexBuf(o.txid, 'other_inputs[].txid'), i32le(o.index),
-    serializeI64(BigInt(o.role_code), 1),
-    hexBuf(o.addr_commit, 'other_inputs[].addr_commit'),
-    serializeI64(bigOf(o.value, 'other_inputs[].value'), 8),
+    op.txid, i32le(op.index),
+    serializeI64(BigInt(roleCode(INPUT_ROLE_CODE, o.role, 'other_inputs[]')), 1),
+    hexBuf(o.address_commitment, 'other_inputs[].address_commitment'),
+    serializeI64(bigOf(o.value_sompi, 'other_inputs[].value_sompi'), 8),
   ]));
 }
 
 export function outputLeaf(o) {
+  if (!Number.isInteger(o.index) || o.index < 0) throw new Error('CIS: outputs[].index 必须是非负整数');
   return h32(Buffer.concat([
     LP(U('kanet.pool.cis.output.v1')),
-    i32le(o.index), serializeI64(BigInt(o.role_code), 1),
-    hexBuf(o.addr_commit, 'outputs[].addr_commit'),
-    serializeI64(bigOf(o.value, 'outputs[].value'), 8),
+    i32le(o.index),
+    serializeI64(BigInt(roleCode(OUTPUT_ROLE_CODE, o.role, 'outputs[]')), 1),
+    hexBuf(o.address_commitment, 'outputs[].address_commitment'),
+    serializeI64(bigOf(o.value_sompi, 'outputs[].value_sompi'), 8),
   ]));
 }
 
@@ -129,6 +159,23 @@ export function verifyCis(cis) {
     // 🔴 不给"差不多"的余地: 派生索引对不上 ⇒ inconclusive, 不是警告。
     return { ok: false, reason: 'input_set_root 与 bets/other_inputs/outputs 重算不符', detail: { claimed: cis.input_set_root, recomputed: wantRoot } };
   }
+  // 🔴 `bets_root_legacy` —— 设计写死「CIS 验证方**必须两个都算、两个都比**」。
+  //    它是 v0.7 链上已烤进 covenant 的那个 hash-chain(CloseZkV2.sil:18 betsRootBaked)。
+  //    **并存不合并**: 链上那个改不了(改 = 换 covenant), CIS 这个答的是另一个问题
+  //    (成员证明 / 带 outpoint 与政策的集合承诺)。⇒ 只比其中一个, 就等于放掉另一半。
+  //    为 null 表示这份 CIS 不针对已烤 covenant 的市场; 非 null 就必须对上。
+  if (cis.bets_root_legacy !== null) {
+    if (typeof cis.bets_root_legacy !== 'string' || !HEX32.test(cis.bets_root_legacy)) {
+      return { ok: false, reason: 'bets_root_legacy 必须是 64 位小写 hex 或 null' };
+    }
+    const legacy = computeBetsRoot(cis.bets.map((b) => ({
+      pk: b.bettor_pk, stake: BigInt(b.stake_sompi), direction: b.direction,
+    }))).toString('hex');
+    if (legacy !== cis.bets_root_legacy) {
+      return { ok: false, reason: 'bets_root_legacy 与链上口径重算不符', detail: { claimed: cis.bets_root_legacy, recomputed: legacy } };
+    }
+  }
+
   const wantDigest = cisDigest(cis);
   if (cis.cis_digest !== wantDigest) {
     return { ok: false, reason: 'cis_digest 与全 body 重算不符', detail: { claimed: cis.cis_digest, recomputed: wantDigest } };
@@ -141,6 +188,7 @@ export function verifyCis(cis) {
 //    而照数字实现的人会拒掉每一份合法对象。判据永远对着键集本身, 不对着它的计数。
 const TOP_KEYS = Object.freeze([
   'protocol', 'domain', 'schema_version', 'network', 'genesis_hash', 'market_id',
+  'market_state_version', 'bets_root_legacy',
   'prior_state', 'bets', 'bets_excluded', 'other_inputs', 'outputs', 'output_layout_version',
   'order_rule', 'policy', 'payout_root', 'accounting', 'producer_pk', 'nonce', 'validity',
   'input_set_root', 'cis_digest',
