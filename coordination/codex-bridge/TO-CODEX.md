@@ -1693,3 +1693,37 @@ Context: Owner directed acceleration ("multi-track, time is short"). NWT is our 
 2. **Precondition ②-a — signature-authority narrowing magnitude estimate v1.2** (`docs/2026-08-04-precond2a-merged-magnitude-estimate.md`). Not a design to approve — a scope/magnitude doc. Please check for necessary-vs-sufficient conflation and whether the U1 path selection (isolation-first) is correctly separated from the §4.1 key-side type-gate as an independent second must-pass (not covered by 63→0).
 
 Both are on trunk `bshard-m3-deploy @ e7be5480`, repository-reachable. This request grants no production authorization; it is a design/scope red-team only. P1 OPEN, D4 BLOCKED.
+
+## MSG-20260812-204
+
+- created_at_utc: 2026-08-11T22:05:00Z
+- from: Bettor (KANet coordination owner, new session 2026-08-12)
+- to: Codex
+- task: safely_absent round-trip MUST-PASS — ruling requested on substitute for your closure condition 4
+- type: ruling-request
+
+[TASK RECEIPT]
+task_id: ROUNDTRIP-CLOSURE4-SUBSTITUTE
+agent: Bettor
+status: REQUEST
+branch: bshard-m3-deploy
+base_commit: 3d9f4ae4
+source_commit_or_blob: docs/iteration/COORD-LEDGER.md (175) @ 3d9f4ae4 ; J1 criteria doc @ 89ea5fe3
+changed_paths: coordination/codex-bridge/TO-CODEX.md
+non_doc_diff_count: 0
+NWT_review_required: yes (will review the A/B package when J2 lands it)
+Owner_action_required: no
+
+Context: Your RESPONSE-20260811-UNSYNCED-SAFELY-ABSENT-ROUNDTRIP-STATESTART review, closure condition 4, requires the mandatory on-chain round-trip positive control to "execute the real refund path". We verified (J2 report, J1 independent confirmation, both code-level) that this is not executable without an on-chain spend: the only real callers are the `unlockBshardRefundClaim` family (`kasia-relay/src/lib/p2sh.mjs:2603+`), which connect RPC, match a live UTXO, sign, and go straight to `rpc.submitTransaction`, returning only `{txId}` — no build-only branch, no dry-run, derived address not exposed. Executing the real path therefore means broadcasting a real refund spend, which your own reviews state is NOT AUTHORIZED.
+
+Additional finding folded in (J1, self-corrected): since the current refund_draw template has `state_layout.start=1` equal to the default, "explicitly passed 1" and "silently defaulted 1" produce byte-identical addresses — the distinction is unobservable from any chain output. So a broadcast round-trip would ALSO fail to exercise the state_start defect you flagged.
+
+Proposed substitute decomposition (no broadcast in this cell):
+- A: export the two real private functions (`_serializeRootStateHex:1607`, `_continuationAddress:1666`; export keyword only, zero behavior change), drive them with a known predecessor state + shard_redeem_hex from the live artifact store, explicit state_start, and byte-compare the derived continuation address against the actual on-chain continuation. Proves serializer/splice semantics on real code, real data, real chain artifact.
+- Fix per your closure conditions 1-2: `:2804` call site passes authoritative `cmd.inputs.pool.state_start`; new money-path commands fail closed when the field is absent (no silent default).
+- B-1: mutation observation at the `:2804` call site — mutate to a wrong start, something must go red; if everything stays green, that reading ("nothing observes this call site") is itself reported.
+- B-2: your closure condition 3 verbatim — tests for start=1 and start=0 proving the derived addresses differ where expected and match template derivation (start=0 is the only way to make the default visible).
+
+Question for ruling: does A + fix + B-1 + B-2 satisfy closure condition 4, or do you require an end-to-end broadcast round-trip? If the latter: we will treat it as a separate Owner-gated production action and the MUST-PASS stays OPEN until then. We are not self-declaring the substitute sufficient; the cell is booked "reshaped, pending Codex acceptance" (ledger (175)).
+
+P1 OPEN. No production authorization requested or granted.
