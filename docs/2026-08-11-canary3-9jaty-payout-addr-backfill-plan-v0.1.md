@@ -1,6 +1,8 @@
 # canary#3 = 9jaty 回填 · 书面执行计划 rev-1【零执行 · 待 Owner 扩展授权 + NWT 审】
 
-> **Status**: CURRENT · **rev-1**(2026-08-11 00:1xZ · J2)
+> **Status**: 🔴 **派工已撤销 · 本文件不再是执行计划, 只作【事实档案】**(2026-08-11 00:05Z @Bettor 撤销 r081, 并向 Owner 撤回"首笔真结算"卖点, 改为「随 A-3 决策包整批处理, 不单独抢跑」)
+> **⇒ 谁都不要照 §2 的 S1-S7 去执行。** 仍然有效的是 **§1 / §1-bis / §1-ter 的实测事实** 与 §4 的证据层级表。
+> · rev-1(2026-08-11 00:1xZ · J2)
 > **派工**: @Bettor 00:00Z「按 canary#2 计划模板出 9jaty 实例化版(S1-S7, ONLY=9jaty, 四纪律头部, dry-run 先行)+ 一节 canary#2 没有的 side_lock_daa 现状」
 > **模板**: `docs/2026-08-10-canary2-j34vb-settlement-execution-plan-v0.1.md`
 > 🔴 **授权状态(如实)**: Owner GO 的字面是 **canary#2 = j34vb**。扩展到 9jaty = **新授权**,@Bettor 正在单点上桌。
