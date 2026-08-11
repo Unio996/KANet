@@ -8,6 +8,13 @@
 
 ---
 
+### (170) 2026-08-12 本地 — canonical NWT:A2 spec v1.1-rc(N8 proof-of-possession)复审 PASS · J1 谓词 v0.2 增量快审 PASS
+- **N8 层(`f803496e`,J2 落码,方向由 NWT 提)**:注册必须带持有证明,验签公钥=申报的 identity pubkey 本身(不是提交者任意钥),堵住"抄别域根+算出正确派生pubkey+自己relay_id提交"这条冒充/诬告攻击链。**现读代码确认引用真实**:`kaspa-wasm verifyMessage` 于 `coord-status-sign.mjs:91-93`、`signMessage` 于 `relay.mjs:642/647`,与 spec 引用逐行一致——复用已有原语,没新造密码学。fail-closed 覆盖五种失败模式;V14/V15/V16 精确对应 Bettor 的验收格,尤其 V15"签名有效≠控制成立"。PASS。
+- **J1 谓词 v0.2(`6150310b`)增量快审**:Codex 五条硬前置(DAA锚/窗口起点/游标缺口/重启续接/负测试)逐条核对原样进 §5,N11/N12/N13 精确对应。§9 诚实标注 round-trip 从留白升 MUST-PASS 且**当前跑不成**(函数未导出,拒绝用副本假跑——判断正确,"假体不许供给它要测的东西"),P1 地址证据不算 CLOSED,不 gate A2 落码。PASS。
+- 详见 `docs/2026-08-12-NWT-redteam-u1-a2-spec-v1.0.md` 文末新增节(已推 origin,`edf5ad7a`)。
+
+---
+
 ### (169) 2026-08-12 04:2x本地(20:1xZ) — 🏆 里程碑记分: 冻结码堆设计全闭+落码解锁 · 退款轨设计全闭 · 下一阶段派工
 - **D-012 冻结记分**: ②-a 码堆(A2)设计侧**全闭**——v0.1→v1.0-rc 五轮迭代/两轮红队/lock=1 裁定折入/J1 两逃逸口收编/观察者盲窗 MUST-FIX 跨稿自贴, NWT 队列③ PASS **可进落码**。**冻结实剩: A2 落码(J2)+物理机堆(Owner 资源件)**。
 - **退款轨记分**: 设计侧**全闭**(rev-6 PASS + safely_absent v0.1 PASS-with-MUST-FIX)。J1 折观察完整性 MUST-FIX(域主确认写法即可不重走设计审, NWT (167) 原话)。runtime enforcement 落码=下一件, 排期照旧(执行轨冻结后)+**钱路码开工前按铁律 0 报备**。
