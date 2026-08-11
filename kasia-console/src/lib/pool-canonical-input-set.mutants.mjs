@@ -41,6 +41,19 @@ const MUTANTS = [
     (s) => s.replace('LP(U(CIS_DOMAIN)), LP(U(ctx)),', 'U(CIS_DOMAIN), U(ctx),')],
   ['bets 叶子不含 lock_daa(排序键不进承诺)',
     (s) => s.replace("serializeI64(bigOf(b.lock_daa, 'bets[].lock_daa'), 8),", '')],
+  // ── 下面五条守的是 2026-08-11 那次「形状对不上设计」的改正。
+  //    改正本身不算数, 【拆掉它能看见红】才算数。
+  ['outpoint 结构闸放行(扁平/多余键都收)',
+    (s) => s.replace("if (k !== 'index,txid')", 'if (false)')],
+  ['bets 叶子不含 outpoint(commingled-spine 可冒用)',
+    (s) => s.replace('op.txid, i32le(op.index),\n    hexBuf(b.bettor_pk', "hexBuf(b.bettor_pk")],
+  ['不认识的 role 静默当 0',
+    (s) => s.replace('if (!Object.prototype.hasOwnProperty.call(table, role)) {', 'if (false) {')
+      .replace('return table[role];', 'return table[role] ?? 0;')],
+  ['outputs 叶子不含 role_code(角色可互换)',
+    (s) => s.replace("serializeI64(BigInt(roleCode(OUTPUT_ROLE_CODE, o.role, 'outputs[]')), 1),", '')],
+  ['verify 不重算 bets_root_legacy(只比 CIS 那一个)',
+    (s) => s.replace('if (legacy !== cis.bets_root_legacy) {', 'if (false) {')],
 ];
 
 let det = 0; let miss = 0; let inert = 0; let broken = 0;
