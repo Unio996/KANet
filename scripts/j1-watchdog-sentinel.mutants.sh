@@ -62,6 +62,10 @@ mut "上界 -gt → -ge (边界)"         's/-gt "\$BRK_MAX_AGE"/-ge "\$BRK_MAX_
 mut "不判未来标记"                 's/-lt "\$BRK_MIN_AGE"/-lt -99999999/'
 mut "年龄非整数也给豁免"           "s/^      ''|\\*\\[!0-9\\]\\*)/      __never__)/"
 
+# ── 第三个终态 halted(源码 :983) —— 最危险的变异是「把它当普通刹车给豁免」 ──
+mut "halted 当普通刹车(给豁免)"     's/\[ "\$BR" = "halted" \]/[ "$BR" = "__never__" ]/'
+mut "halted 落进陈旧那句(归错因)"   's/脉冲预算耗尽/标记陈旧/'
+
 echo ""
 echo "detected=$det  MISSED=$miss  INERT=$inert  BROKEN=$broken"
 [ "$miss" = "0" ] && [ "$inert" = "0" ] && [ "$broken" = "0" ] || exit 1

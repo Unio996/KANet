@@ -81,6 +81,16 @@ run "年龄读不出(readfail) ⇒ 出声"  "WD=1 MINER=0 HB=30000 BRAKE=yes BRK
 run "年龄字段缺失 ⇒ 出声"          "WD=1 MINER=0 HB=30000 BRAKE=yes"               1 "读不出"
 run "年龄非整数(1-2) ⇒ 出声"       "WD=1 MINER=0 HB=30000 BRAKE=yes BRKAGE=1-2"    1 "读不出"
 run "矿机正常时年龄陈旧无所谓"     "WD=1 MINER=1 HB=30000 BRAKE=yes BRKAGE=99999"  0 ""
+# ── 第三个终态: PULSE BUDGET EXHAUSTED(watchdog 源码 :983, 我先前没建模) ──────
+# 🔴 它蕴含「还 braked 着」, 但结论与普通刹车【相反】: 永不豁免, 且与年龄无关 ——
+#    watchdog 自己判定"打不出去了, 矿机停着等操作员"。这是最需要人的那个状态。
+# 🔴 而它必须有【自己的措辞】: 落进"标记陈旧"那句会把人指向"刹车状态不可信",
+#    而真相是"预算耗尽在等人"。归错因的告警让人去修错的东西。
+run "预算耗尽 ⇒ 出声且措辞独有"     "WD=1 MINER=0 HB=30000 BRAKE=halted BRKAGE=30"    1 "脉冲预算耗尽"
+run "预算耗尽 + 年龄很大仍出声"     "WD=1 MINER=0 HB=30000 BRAKE=halted BRKAGE=99999" 1 "脉冲预算耗尽"
+run "预算耗尽 + 年龄读不出仍出声"   "WD=1 MINER=0 HB=30000 BRAKE=halted"              1 "脉冲预算耗尽"
+run "预算耗尽不能被说成标记陈旧"    "WD=1 MINER=0 HB=30000 BRAKE=halted BRKAGE=99999" 1 "等操作员"
+run "矿机在跑时 halted 不出声"      "WD=1 MINER=1 HB=30000 BRAKE=halted BRKAGE=30"    0 ""
 # ssh 取不到 ⇒ rc 2, 与故障分开
 run "ssh unreachable"             "UNREACHABLE:Command failed" 2 "取不到"
 run "garbage line"                "hello"                      2 "取不到"

@@ -64,12 +64,22 @@ const ps = [
   //    (两把尺不同时区, 差点把"第二源读错节点 11.6 小时"报出去)。
   //    host 侧算年龄 ⇒ 判据只看一个整数秒, 与时区无关。
   '$brkat = "-"; $brkage = "-"',
+  // 🔴 **必须认第三个 marker**: `PULSE BUDGET EXHAUSTED`。
+  //    源码 tn12-mining-watchdog-v2.ps1:983 —— pulseCount >= MAX_PULSES 时设 pulseHalted,
+  //    发这条, 然后 **矿机一直停着等人**($braked 仍为 true, 不会自己 RELEASED)。
+  //    ⇒ 只认 ENGAGED/RELEASED 的话, 这个状态下最后一个可见 marker 仍是 ENGAGED,
+  //      年龄一路涨过 1800s ⇒ 哨兵会喊"标记陈旧, 刹车早该结束了"。
+  //    🔴 **喊是对的(确实需要人), 而那句话是错的** —— 它把人指向"刹车状态不可信",
+  //      而真相是"脉冲预算耗尽, 在等操作员"。**最需要人介入的那个状态, 被我描述错了。**
   'try { $bl = Get-Content "D:\\kaspa-tn12-mining\\_watchdog.log" -Tail 800 -ErrorAction Stop | ' +
-    'Where-Object { $_ -match "BRAKE ENGAGED|BRAKE RELEASED" } | Select-Object -Last 1; ' +
+    'Where-Object { $_ -match "BRAKE ENGAGED|BRAKE RELEASED|PULSE BUDGET EXHAUSTED" } | Select-Object -Last 1; ' +
     'if ($bl -and $bl -match "^(\\d{4}-\\d{2}-\\d{2}) (\\d{2}:\\d{2}:\\d{2})") { ' +
       '$brkat = $Matches[1] + "T" + $Matches[2]; ' +
       'try { $brkage = [int](((Get-Date) - [datetime]($Matches[1] + " " + $Matches[2])).TotalSeconds) } catch { $brkage = "parsefail" } }; ' +
-    'if ($bl -match "BRAKE ENGAGED") { $brake = "yes" } elseif ($bl -match "BRAKE RELEASED") { $brake = "no" } } catch { $brake = "unknown"; $brkat = "readfail"; $brkage = "readfail" }',
+    // 顺序要紧: EXHAUSTED 先判 —— 它蕴含"还 braked 着", 但结论与普通刹车相反(不给豁免)。
+    'if ($bl -match "PULSE BUDGET EXHAUSTED") { $brake = "halted" } ' +
+    'elseif ($bl -match "BRAKE ENGAGED") { $brake = "yes" } ' +
+    'elseif ($bl -match "BRAKE RELEASED") { $brake = "no" } } catch { $brake = "unknown"; $brkat = "readfail"; $brkage = "readfail" }',
   `$sp = Join-Path $env:TEMP "${STATE_NAME}"`,
   '$hb = "none"',
   'if (Test-Path $sp) { try { $j = (Get-Content $sp -Raw | ConvertFrom-Json); if ($j.ts) { $hb = [long]([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - [long]$j.ts) } } catch { $hb = "bad" } }',
