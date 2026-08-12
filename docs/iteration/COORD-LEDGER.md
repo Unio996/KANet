@@ -6,6 +6,12 @@
 > 最近刷新:**2026-07-06(Bettor 恢复状态层·§8.4 断档 6/29→7/06 补回)**。此前刷新 2026-06-29。
 > ⚠ **断档教训(2026-07-06 Owner+J1 抓)**: 7/1-7/06 公测一周激烈工作(结算/daemon/ZK-covenant/框架决策)**全没回写本 ledger、活在会滚走的频道** = §8.4 铁律违反(频道当记忆)。协调者(Bettor)失职。**恢复纪律: 每决议回写本 ledger + DECISIONS.md。**
 
+### (190) 2026-08-12 18:0xZ — 🔴 停摆解除记账 + CP1 gating 答(KANet-UI: 两 typed 路径 cmd.type 分派=Codex 要的绑定层)+ 🔴 挖出潜在真 bug: claim 单入口需 start=0 可能吃默认 1=资金锁死
+> ⏱ **~8h 停摆(09:26→17:56Z)根因**: J2 关键路径空转(以为"等实证"而实证是它自己的活)+ Bettor 被动守(违 Owner"主动盯住", 该给带截止交付项没给)。全员实活着(KANet-UI 无待办正常静默/J2 空转/进程 4 会话全在)。**解法**: J2 接管+顶替臂撤(TaskStop, 零 push)+带截止 CP1/CP2 检查点+Bettor 后台定时器 18:30Z 主动查。机制修法入册: **开放式派工是停摆机理, 关键路径必带截止交付项+协调者主动追不等**。
+- **CP1 gating 已答(KANet-UI, relay.mjs+p2sh.mjs:1668 现读)**: 退款**两条 typed 路径按 cmd.type 显式分派**——`bshard_refund_cancelled`→`unlockBshardRefund`=PoolRoot 多入口 **start=1**; `bshard_refund_claim`→`unlockBshardRefundClaim`=单入口 RefundClaim **start=0**。⇒ **该 typed 分派本身=Codex 要的"构造时 typed 绑定"层**(非字节猜)。Fix 简化: 每 typed 路径绑自身模板已知 start, 不反解 redeem。KANet-UI 2026-06-20 注释(三方 offset bug 诊断)早预言此。
+- **🔴 挖出潜在真 bug(Bettor steer, J2 CP1 必验)**: J2 5f14effb 称"两支都吃默认 `_POOL_STATE_START=1`"。**若 `unlockBshardRefundClaim`(单入口需 start=0)也吃默认 1 ⇒ 非 correct-by-accident, 是真算错偏移=资金锁死**, 比 refund 支严重。J2 必验三点: ①claim continuation 是否真走吃默认的 `_continuationAddress`②实际用 0 还是 1③claim 路径接线否(refund builder 已证未接线)。答"claim 吃默认 1 且需 0"=本格挖出真缺陷 Fix 须修两支; 答"claim 另有正确路径/未接线"=如实标, 范围=两支都上权威绑定+fail-closed。
+- **口径**: round-trip Fix OPEN, B-1/B-2 accepted 不闭(B-1 post-Fix 打两支传播重跑)。CP1 交付=三点结论+证据行号(不落码)。
+
 ### (189) 2026-08-12 09:4xZ — 🏛 Codex 复审 provenance(78113ea6)与 Bettor/J2 全收敛 + 锐化: 构造时 typed 绑定 > 反解字节 · PoolRoot-only 可达性须【机器保证】非"目前只有" · Fix 仍 OPEN
 - **Codex 七点(与 (187)/(188) 收敛)**: 0x51 循环 fixture=A 臂要防的族(正确拒); census 值≠身份证明(0x6b 常见 ≠ 0x6b⟺PoolRoot, 不得当 offset 选择器); **not-wired=上线前安全要求, 好消息但不降验收标准**; B-1/B-2 有用不闭 Fix(B-1 须 post-Fix 重跑); builder blob 仍无 state_start ⇒ **Fix OPEN**。
 - **🏛 方向锐化(Codex 背书 Bettor/J2 倾向)**: **构造时绑定 > 反解字节**——若路径结构只 PoolRoot, 在**构造时**用 typed 路径/描述符把权威 state_start=1 带进命令(生产者本就知道身份), relay 验证+缺/错/不匹配 fail-closed; 反解 redeem 前缀去重新发现生产者已知的身份=更弱更易循环。**单/多入口问题从未来生产调用图/模板源答, 非现 DB 频率; 且 PoolRoot-only 可达性须【机器保证】(typed 构造/描述符强制), 不是"目前只有 PoolRoot"**——否则未来单-entry 调用方静默拿错 offset。
