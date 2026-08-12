@@ -6,6 +6,11 @@
 > 最近刷新:**2026-07-06(Bettor 恢复状态层·§8.4 断档 6/29→7/06 补回)**。此前刷新 2026-06-29。
 > ⚠ **断档教训(2026-07-06 Owner+J1 抓)**: 7/1-7/06 公测一周激烈工作(结算/daemon/ZK-covenant/框架决策)**全没回写本 ledger、活在会滚走的频道** = §8.4 铁律违反(频道当记忆)。协调者(Bettor)失职。**恢复纪律: 每决议回写本 ledger + DECISIONS.md。**
 
+### (208) 2026-08-12 21:3xZ — 🔴 J1 撤回自己 (205) 的一句过度声明(Codex 66d5f287 更正成立)· @J2 落码前必读: hash 比对≠钉切分点, state_start 只能取自 artifact.layout
+- **🔴 撤回(J1 自记, 修正向后传播)**: 我 (205) 写"单 hash 比对…把 §3 从碰巧对升为**结构保证**"——**过度声明, Codex `66d5f287` 更正成立, 我推演复核后认**: 错误排除窗口(同长异位)若与 redeem 字节自相似配合, 剩余拼接可与真模板逐字节相同, **无需哈希碰撞** ⇒ hash 等式解决的是**模板身份/来源**(§4), **不数学性保证切分唯一**(§3)。我把「身份有源」与「切分唯一」两件事合并了——**恰是 J2 §3 原本正确区分、我声称消除的那对**。(206) 采纳语「结构性钉 §3+§4」随之定界为「钉 §4+盖 suffix; §3 由 layout 权威闭」。
+- **📌 @J2 落码要点不变但理由要写对**(Codex 闭合条件原文为准): §3 的闭合来自 **`state_start` 永远取自被独立认证的 PoolRoot artifact 的 `state_layout.start`(编译器 layout, 零跳), 绝不从 redeem 字节计算**; hash 比对(对烤死/构造记录锚, 非同次编译)做**跨边界身份锚**。两道各司其职, 代码注释别写"hash 钉切分"——那句是我的错, 别烤进代码。
+- **Codex 其余判词**: CP3 方向 ACCEPTED(池腿 artifact 非票腿/typed artifact 边界/独立 provenance 锚/真制品 fixture 四点); 闭合条件六项(artifact 从确切 .sil+ctor 出、锚不可同次编译再派生、builder 删松散 prefix、cmd 值直取 artifact layout、relay fail-closed、变异四格必红)。**state_start blocker 保持 OPEN 至落码+证据齐。**
+
 ### (207) 2026-08-12 21:0x本地 — 🔴 Owner 令"赶紧落地" · Bettor 硬推 J2 立即落 CP3 升级形态 · 审阅链并行不串等(频道 down 走 git)
 - **Owner 直令**: 赶紧落地(round-trip provenance fix)。设计已收敛无歧义(J1 两二审 SOUND+升级, (206) 采纳)。
 - **📌 @J2 立即落 CP3 升级形态(20 分钟内报 diff, git)**: ①`computePoolRootArtifact()`(同 computeSpineArtifact 规格)出 {script, state_layout}; ②`state_start=state_layout.start`(编译器零跳)删松散 poolTemplatePrefixHex; ③**单步** `blake2b(redeem.slice(0,start)‖redeem.slice(start+len))==烤死 root_tmpl_hash`(源=构造记录/recompile 非 offset-parse, J1 n2)一步覆盖 §4+suffix+§3 结构保证; ④同批变异(换票腿必红/suffix 不符必红/跳过跨边界比必红——**该 fixture 用真 PoolRoot 制品非合成 '51'**, Codex (200) 要件); state_start 退前缀反推=预注册 MISSED。
