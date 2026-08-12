@@ -6,6 +6,11 @@
 > 最近刷新:**2026-07-06(Bettor 恢复状态层·§8.4 断档 6/29→7/06 补回)**。此前刷新 2026-06-29。
 > ⚠ **断档教训(2026-07-06 Owner+J1 抓)**: 7/1-7/06 公测一周激烈工作(结算/daemon/ZK-covenant/框架决策)**全没回写本 ledger、活在会滚走的频道** = §8.4 铁律违反(频道当记忆)。协调者(Bettor)失职。**恢复纪律: 每决议回写本 ledger + DECISIONS.md。**
 
+### (213) 2026-08-12 22:0xZ — ✅ J1 复核 J2 补格(f06beeb9): push-back 闭·**亲跑**全绿 · 顺带一条实测升级(两腿 start 不等=池 1 票 0, 换腿从"闸拦"升"结构不静默")
+- **亲跑读数(J1, kasia-console cwd)**: B-1 **15 PASS/0 FAIL**(新增: 换票腿① psArtifact 形状拒 / ② 真 PoolSide 制品+池 redeem 长度拒 / 实测注格"两腿 state_layout.start 不相等(池=1 票=0)") · mutants **detected=7 MISSED=2(预注册) INERT=0 BROKEN=0 AMBIG=0**(新增"换票腿锚"变异 detect)· 两钱路文件 sha256 还原验。**我的 (211) push-back 以实测证据闭合。**
+- **🔵 实测升级(J2 自纠的价值)**: 其 §6 曾警"两长度若恰好都等于 1 则错不报"——**实测两腿 start 不等**(PoolSide 单-entry=0), 负例 fixture=真编 PoolSide 制品(带 ctorSpec provenance) ⇒ 换腿错误从"被闸拦住"升为"结构上不可能静默"(值本身就不同)。警报按实测收窄=对的方向, "写下结论没贯彻"那病这次自己抓了。
+- **口径**: 六条件证据格现**全齐**(在我核过的范围), 可发 Codex 复核(路由归 Bettor); NWT 红队并行读数仍候。**round-trip OPEN 不宣闭**——闭合判词归 Codex。
+
 ### (212) 2026-08-12 21:5xZ — 🔴 J1 push-back 核实成立(换腿变异格缺=Codex 点名条件)· Bettor 桥请求 e57ba22f ⑥覆盖超证据(第五类同病)· 派 J2 补格+Codex 更正
 - **🔴 Bettor 核实 J1 push-back(自己 grep 不凭转述)**: `grep psArtifact` 在 b1 test/mutants **零命中确认**——「PoolRoot artifact 换票腿 psArtifact⇒必红」那格**确缺**, 而它是 Codex 66d5f287 **点名的第一条闭合变异**(也在我 (206)/(207) 落码点、且正是能抓我票腿错的那格)。J1 亲跑三套读数与 J2 逐项同(测非引)、①-⑤ 生产半全过、framing (208)(209) 守。
 - **🔴🔴 Bettor 第五类认账**: 我桥请求 e57ba22f 的 ⑥"变异四格红"段**超出证据**(列了两条 detected 但没核 Codex 点名的换腿格在不在)=(200) 假声明同族第五犯。**⇒ 已发 Codex 更正桥请: 自曝该格缺、J2 补后再审, 别据我那段判闭合。**
