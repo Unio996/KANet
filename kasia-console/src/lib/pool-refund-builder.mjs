@@ -19,9 +19,10 @@ import { blake2b } from '@noble/hashes/blake2b';
 
 // PoolRoot（多-entry，selector dispatch 前导 1B）的 state_layout.start —— **仅作防御断言用**。
 // 🔴 **它不是权威**（Codex `0741bae0` 明裁：字面量作唯一权威 = REJECTED）。
-//    权威 = **构造方传进来的 `templatePrefix.length`** —— 拼这份 redeem 的人手上就有它
-//    （`scripts/bshard-e2e-flow.mjs:114`：`rootRedeem = templatePrefix + state + templateSuffix`
-//     ⇒ `start ≡ templatePrefix.length`）。本常量只在传入值与本 typed 路径的已知族不符时**喊出手滑**。
+// 🔨 **CP3 更新（2026-08-13）**：权威**不再是** CP2 那版的「构造方传进来的 `templatePrefix.length`」——
+//    它与真权威**恒等但远一跳**，而那一跳正落在"构造方自觉传对前缀"上，即 Codex 抓的松散点。
+//    **权威 = silverc 吐出的 `state_layout.start`**（`computePoolRootArtifact()`，零跳）。
+//    本常量只在该值与本 typed 路径的已知族不符时**喊出手滑**。
 const POOLROOT_STATE_START = 1;
 
 /**
@@ -65,30 +66,44 @@ export function buildRefundWitness(o) {
  * (on-chain L238) self-checked here: payout(stake) + pool_out(poolValue-stake) == poolValue (no value created).
  * @returns {object} relay command (action='bshard_refund_cancelled')
  */
-export function buildRefundCommand({ witness, poolOutpointTxid, poolRedeemHex, poolTemplatePrefixHex, currentPoolState, ticketOutpointTxid, ticketRedeemHex, ticketState, poolValueSompi, bettorAddress, poolContinuationState, changeAddress }) {
+export function buildRefundCommand({ witness, poolOutpointTxid, poolRedeemHex, poolRootArtifact, expectedRootTmplHashHex, currentPoolState, ticketOutpointTxid, ticketRedeemHex, ticketState, poolValueSompi, bettorAddress, poolContinuationState, changeAddress }) {
   if (!poolOutpointTxid || !ticketOutpointTxid) throw new Error('poolOutpointTxid + ticketOutpointTxid required');
-  // 🔴 **权威 = 拼装这份 redeem 用的模板前缀本身**（Codex `0741bae0`：字面量作唯一权威 = REJECTED）。
-  //    收前缀而不是收一个数，是因为**数可以被随手填对，而前缀能被验**：
-  //    `rootRedeem = templatePrefix + state + templateSuffix`（`scripts/bshard-e2e-flow.mjs:114`）
-  //    ⇒ ① `start ≡ templatePrefix.length` 由它**派生**，不是申报；
-  //       ② 且必须**验证这份 redeem 确实以该前缀开头** —— 这一步把「描述符」与「实际会上链的那段脚本」
-  //          绑在一起，正是 Codex 要的"绑定 redeem 身份"。
-  if (typeof poolTemplatePrefixHex !== 'string' || !/^[0-9a-fA-F]+$/.test(poolTemplatePrefixHex) || poolTemplatePrefixHex.length % 2 !== 0) {
-    throw new Error('poolTemplatePrefixHex required (拼 pool redeem 用的模板前缀 hex) — 缺失/非法即 fail-closed, 不默认');
+  // ── CP3 (J2 2026-08-13; @J1tn (205) 升级, @Bettor 21:0xZ 采纳为设计定向) ───────────────
+  // 权威 = **silverc 吐出的 `state_layout.start`**（零跳）, 不再从调用方给的前缀长度反推。
+  // 认证 = **一步跨边界比**: 用这份 redeem 自己的 prefix‖suffix 算 blake2b, 与**另一端**烤死的
+  //        `root_tmpl_hash` 比。另一端必须来自构造记录/链上烤死值 —— **不能**是同一次编译的输出,
+  //        否则左右同源、比不出任何东西（CP3 §4）。
+  // 🔵 这一比同时覆盖 **suffix 段**（原方案只绑前缀+总长, suffix 异的 redeem 会漏到远处才报错, @J1tn (205)）。
+  // 🔴 **不写"hash 钉住了切分点"** —— 那句已被 @J1tn (208) 自己 + Codex `66d5f287` 撤回。
+  //    本比对认证的是**模板身份**; 链上原语的 prefix_len 由 witness 传, 不归构造侧管。
+  if (!poolRootArtifact || !Array.isArray(poolRootArtifact.script) || !poolRootArtifact.state_layout) {
+    throw new Error('poolRootArtifact {script, state_layout} required (computePoolRootArtifact) — 缺失即 fail-closed, 不默认');
   }
-  if (typeof poolRedeemHex !== 'string' || !poolRedeemHex.toLowerCase().startsWith(poolTemplatePrefixHex.toLowerCase())) {
-    throw new Error('poolRedeemHex 不以 poolTemplatePrefixHex 开头 ⇒ 该前缀不是这份 redeem 的模板 ⇒ 拒（描述符必须绑到实际脚本上）');
+  const { start: poolStateStart, len: poolStateLen } = poolRootArtifact.state_layout;
+  if (!Number.isInteger(poolStateStart) || !Number.isInteger(poolStateLen)) {
+    throw new Error(`poolRootArtifact.state_layout.{start,len} 必须是整数, 得到 {${poolStateStart}, ${poolStateLen}}`);
   }
-  //    ⚠ **作用域注(@J1tn 19:50Z 二审)**: 本路径的气密性**有一半来自下面那道族断言钉死长度**，
-  //       不是 `startsWith` 单独给的 —— `startsWith` 挡不住**前缀截断**(传模板前缀的更短前段:
-  //       它照样是 redeem 的前缀, 照样过 startsWith, 却派生出更小的 start)。这里之所以安全，
-  //       是因为族断言把派生值钉死在 1，可接受的前缀只剩 redeem 自己的第一个字节。
-  //       🔴 **将来 start≠1 的路径若只抄 `startsWith` 而不配等价的钉法, 这道绑定就是漏的。**
-  const poolStateStart = poolTemplatePrefixHex.length / 2;   // ← 派生, 非申报
-  // 🔵 常量在这里**只作防御断言**：它不产生权威，只在派生值与本 typed 路径（PoolRoot 多-entry）
-  //    的已知族不符时把手滑/换模板喊出来。
+  if (typeof expectedRootTmplHashHex !== 'string' || !/^[0-9a-f]{64}$/i.test(expectedRootTmplHashHex)) {
+    throw new Error('expectedRootTmplHashHex required (32B hex; 源=构造记录/链上烤死 root_tmpl_hash, 非同次编译产物)');
+  }
+  if (typeof poolRedeemHex !== 'string' || !/^[0-9a-fA-F]+$/.test(poolRedeemHex) || poolRedeemHex.length % 2 !== 0) {
+    throw new Error('poolRedeemHex 必须是偶数长 hex');
+  }
+  const poolRedeem = Buffer.from(poolRedeemHex, 'hex');
+  if (poolRedeem.length !== poolRootArtifact.script.length) {
+    throw new Error(`poolRedeemHex 长度 ${poolRedeem.length} 与 PoolRoot 模板总长 ${poolRootArtifact.script.length} 不符 ⇒ 拒`);
+  }
+  const actualTmplHash = Buffer.from(blake2b(
+    Buffer.concat([poolRedeem.subarray(0, poolStateStart), poolRedeem.subarray(poolStateStart + poolStateLen)]),
+    { dkLen: 32 },
+  )).toString('hex');
+  if (actualTmplHash !== expectedRootTmplHashHex.toLowerCase()) {
+    throw new Error(`pool redeem 模板认证失败: blake2b(prefix‖suffix)=${actualTmplHash.slice(0, 12)} != 烤死 root_tmpl_hash ${expectedRootTmplHashHex.slice(0, 12)} ⇒ 拒`);
+  }
+  // 🔵 CP2 那版(收松散 poolTemplatePrefixHex + startsWith + 常量族断言)已被上方单步比对取代。
+  //    保留一条防御断言: 派生值若与本 typed 路径已知族不符, 喊出手滑/换模板(它不产生权威)。
   if (poolStateStart !== POOLROOT_STATE_START) {
-    throw new Error(`派生 state_start=${poolStateStart} 与本 typed 路径(bshard_refund_cancelled ⇒ PoolRoot 多-entry, ${POOLROOT_STATE_START}) 不符 ⇒ 拒`);
+    throw new Error(`state_layout.start=${poolStateStart} 与本 typed 路径(bshard_refund_cancelled ⇒ PoolRoot 多-entry, ${POOLROOT_STATE_START}) 不符 ⇒ 拒`);
   }
   if (!currentPoolState) throw new Error('currentPoolState (current pool 7-field state; relay computes current per-state pool address) required');
   if (!ticketState) throw new Error('ticketState {bettorPk, direction, stake, shardPoolId} (relay computes ticket address) required');

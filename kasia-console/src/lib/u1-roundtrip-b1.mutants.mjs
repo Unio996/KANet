@@ -35,13 +35,16 @@ const shas = new Map(FILES.map((f) => [f, createHash('sha256').update(originals.
 // 🔵 形状换成 [名, 文件, **锚点**, 替换文本, 预期] —— 不再是闭包:
 //    闭包把锚点藏在 `.replace()` 里, **外面数不出它命中几次**, 这正是上面那道守卫补不上的原因。
 const MUTANTS = [
-  // ── 权威产生步(builder) —— CP2-rev 新增的那一层 ─────────────────────────────
-  ['权威步: builder 不再从前缀派生, 改回常量', BUILDER,
-    'const poolStateStart = poolTemplatePrefixHex.length / 2;',
-    'const poolStateStart = POOLROOT_STATE_START;', 'expect-MISSED-structural'],
-  ['权威步: 拆掉"前缀必须确属这份 redeem"的绑定检查', BUILDER,
-    '!poolRedeemHex.toLowerCase().startsWith(poolTemplatePrefixHex.toLowerCase())',
-    'false', 'expect-detect'],
+  // ── 权威产生步(builder) —— CP3: 权威=state_layout.start(零跳), 认证=单步跨边界 hash 比 ──
+  ['权威步: state_start 改回从前缀长度反推(等价变异, 预期抓不到)', BUILDER,
+    'const { start: poolStateStart, len: poolStateLen } = poolRootArtifact.state_layout;',
+    'const poolStateLen = poolRootArtifact.state_layout.len; const poolStateStart = POOLROOT_STATE_START;',
+    'expect-MISSED-structural'],
+  ['权威步: 拆掉单步跨边界 hash 比对', BUILDER,
+    'if (actualTmplHash !== expectedRootTmplHashHex.toLowerCase()) {', 'if (false) {', 'expect-detect'],
+  ['权威步: hash 只覆盖 prefix(丢掉 suffix 段)——J1 (205) 补的那格', BUILDER,
+    'Buffer.concat([poolRedeem.subarray(0, poolStateStart), poolRedeem.subarray(poolStateStart + poolStateLen)]),',
+    'poolRedeem.subarray(0, poolStateStart),', 'expect-detect'],
   ['权威步: builder 不把 state_start 写进命令', BUILDER,
     '        state_start: poolStateStart,\n', '', 'expect-detect'],
   // ── 传播 + 消费(relay) ────────────────────────────────────────────────────
@@ -54,6 +57,7 @@ const MUTANTS = [
   ['闸: 族不符不再抛', RELAY,
     'if (Number(poolStateStart) !== _POOL_STATE_START) {', 'if (false) {', 'expect-detect'],
 ];
+
 
 // 🔵 **守卫自检**: 一道没人见它响过的闸, 与没有这道闸在读数上一模一样(这正是被 push-back 的那半句
 //    注释的病)。用合成串当场证明分类逻辑会响, 再去跑真锚点。

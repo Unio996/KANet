@@ -10,6 +10,7 @@
 // 🔵 **观察点**: 假 RPC 的 `submitTransaction` **不广播**, 只截获 tx ⇒ 从 `outputs[pool_out_idx]` 读出
 //    continuation 的 scriptPubKey ⇒ 与描述符推导的期望地址逐字节比。
 // ⚠ 全程零广播、零真实密钥(一次性 privkey)、不连链。
+import { readFileSync } from 'node:fs';
 import assert from 'node:assert';
 import { register } from 'node:module';
 import { pathToFileURL } from 'node:url';
@@ -147,31 +148,46 @@ await t('Fix⑤ · state_start 与本 typed 路径的族不符 ⇒ 抛', async (
 // ── 权威产生步（builder 侧）—— Codex ⑦ 要的决定性变异打的就是这里 ────────────────
 // 🔴 没有这两格，针对"权威怎么来的"那几行的变异就【无人观察】。
 const { buildRefundCommand } = await import('./pool-refund-builder.mjs');
+// 🔴 真 PoolRoot 编译制品(非合成) —— Codex (200) 要件。我上一轮用自造的 '51' 当首字节, 结果
+//    夹具与实现共享了同一个发明、彼此同意。这次的字节来自真编 PoolRoot.sil, 首字节 0x6b 与链上普查一致。
+const PINNED = JSON.parse(readFileSync(new URL('./fixtures/poolroot-artifact.pinned.json', import.meta.url), 'utf8'));
 const refundArgs = (over = {}) => ({
   witness: { poolOutIdx: 0, payoutOutIdx: 1, ticketInIdx: 1, ticket_prefix_len: 0, ticket_suffix_len: 0,
     ticket_prefix: Buffer.alloc(0), ticket_suffix: Buffer.alloc(0), bettorPk: 'aa'.repeat(32), stake: 100n },
-  poolOutpointTxid: 'aa'.repeat(32), poolRedeemHex: POOL_REDEEM, poolTemplatePrefixHex: POOL_PREFIX_HEX,
+  poolOutpointTxid: 'aa'.repeat(32), poolRedeemHex: PINNED.scriptHex,
+    // ⚠ script 必须是**普通数组**——真 compileSil 出的就是数组, 传 Buffer 会被 Array.isArray 守卫拦下(我先踩了一次)
+  poolRootArtifact: { script: [...Buffer.from(PINNED.scriptHex, 'hex')], state_layout: PINNED.state_layout },
+  expectedRootTmplHashHex: PINNED.rootTmplHashHex,
   currentPoolState: STATE, ticketOutpointTxid: 'bb'.repeat(32), ticketRedeemHex: TICKET_REDEEM,
   ticketState: { bettorPk: 'aa'.repeat(32), direction: 1, stake: 100n, shardPoolId: 1 },
   poolValueSompi: 1000n, bettorAddress: ADDR, poolContinuationState: { ...STATE, closed: 2 },
   changeAddress: ADDR, ...over,
 });
 
-await t('权威步 · builder 从模板前缀【派生】state_start 并写进命令（不是字面量）', () => {
+await t('权威步 · state_start 取自【编译器吐出的 state_layout.start】(零跳, 非前缀反推)', () => {
   const cmd = buildRefundCommand(refundArgs());
-  assert.strictEqual(cmd.inputs.pool.state_start, POOL_PREFIX_HEX.length / 2,
-    'builder 写进命令的值必须等于前缀长度 —— 那才是权威, 常量只是防御断言');
+  assert.strictEqual(cmd.inputs.pool.state_start, PINNED.state_layout.start,
+    'builder 写进命令的值必须等于编译器给的 state_layout.start —— 那才是权威');
 });
 
-await t('权威步 · 前缀与 redeem 对不上 ⇒ builder 拒（描述符必须绑到实际脚本上）', () => {
-  assert.throws(() => buildRefundCommand(refundArgs({ poolTemplatePrefixHex: '6b' })),
-    /不以 poolTemplatePrefixHex 开头/,
-    '拿一个不属于这份 redeem 的前缀也能过 ⇒ "权威"退化成申报');
+await t('§4 身份 · 烤死 hash 对不上 ⇒ builder 拒(跨边界比对是这一步的全部意义)', () => {
+  assert.throws(() => buildRefundCommand(refundArgs({ expectedRootTmplHashHex: 'ab'.repeat(32) })),
+    /模板认证失败/, '拿一个不属于这份 redeem 的烤死 hash 也能过 ⇒ 认证退化成走过场');
 });
 
-await t('权威步 · 缺前缀 ⇒ builder 拒(fail-closed, 不默认)', () => {
-  assert.throws(() => buildRefundCommand(refundArgs({ poolTemplatePrefixHex: undefined })), /required/);
+await t('§4 身份 · suffix 段被改 ⇒ builder 拒(原方案只绑前缀+总长, 这一格是 J1 (205) 补的)', () => {
+  const tampered = Buffer.from(PINNED.scriptHex, 'hex');
+  tampered[tampered.length - 1] ^= 0xff;   // 只动最后一字节 = suffix 段
+  assert.throws(() => buildRefundCommand(refundArgs({ poolRedeemHex: tampered.toString('hex') })),
+    /模板认证失败/, 'suffix 异的 redeem 若能过, 就要靠远处的 UTXO 匹配才报错');
 });
 
+await t('fail-closed · 缺 poolRootArtifact ⇒ 拒(不默认)', () => {
+  assert.throws(() => buildRefundCommand(refundArgs({ poolRootArtifact: undefined })), /required/);
+});
+
+await t('fail-closed · redeem 总长与模板不符 ⇒ 拒', () => {
+  assert.throws(() => buildRefundCommand(refundArgs({ poolRedeemHex: PINNED.scriptHex + 'ff' })), /长度/);
+});
 console.log(`\n${fail === 0 ? '✅' : '🔴'} u1-roundtrip-b1: ${pass} PASS / ${fail} FAIL`);
 if (fail > 0) process.exitCode = 1;

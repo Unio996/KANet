@@ -82,6 +82,32 @@ export const ctorBytes32 = (hexOrBuf) => {
 export const ctorInt = (n) => ({ kind: 'int', data: Number(n) });
 
 /**
+ * PoolRoot artifact (CP3, J2 2026-08-13 · @Bettor 21:0xZ 采纳 @J1tn (205) 升级为设计定向).
+ *
+ * 为什么要这个函数（而不是继续让调用方传一个松散前缀串）:
+ *   `buildRefundCommand` 原先收 `poolTemplatePrefixHex` —— 一个**调用方自己给的**字符串, 只验 hex 格式 +
+ *   `redeem.startsWith(它)`。那只证明"调用方回传了这份 redeem 的前几个字节", **不证明这些字节来自
+ *   被认证的 PoolRoot 模板** (Codex 抓的松散点)。而 `state_layout.start` 是 **silverc 对这份 .sil 直接吐出的**
+ *   state 起始 offset —— 池腿的权威一直在这里, 不用新造, 只是以前没被取用。
+ *
+ * ⚠ 本函数**只出编译产物**, 不在这里算 `blake2b(prefix‖suffix)` 当"自验":
+ *   那样左右两边都来自**同一次编译**, 等于自己跟自己比(CP3 §4)。跨边界的那一比在 builder 里做,
+ *   另一端必须是**烤死/构造记录**的 `root_tmpl_hash`。
+ *
+ * @param {string} poolRootSilPath
+ * @param {Array} poolRootCtor  16 项, 见 pool-bshard-market-setup.mjs:45-49
+ * @returns {{script:number[], state_layout:{start:number,len:number}, redeemLen:number}}
+ */
+export function computePoolRootArtifact(poolRootSilPath, poolRootCtor, silvercPath = SILVERC) {
+  const compiled = compileSil(poolRootSilPath, poolRootCtor, silvercPath);
+  const sl = compiled.state_layout;
+  if (!Number.isInteger(sl?.start) || !Number.isInteger(sl?.len)) {
+    throw new Error(`computePoolRootArtifact: state_layout.{start,len} 必须是整数, 得到 ${JSON.stringify(sl)}`);
+  }
+  return { script: compiled.script, state_layout: { start: sl.start, len: sl.len }, redeemLen: compiled.script.length };
+}
+
+/**
  * Spine artifact (PoolSpine_v08_shard): compile with the market's spine ctor → extract template artifact.
  * @param {string} spineSilPath
  * @param {Array} spineCtor  [c0..c4Pk, market_id, deadline, init_closed, init_winningSide, init_payoutRoot, init_fold_tmpl_hash, init_shard_count]
