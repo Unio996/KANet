@@ -6,6 +6,14 @@
 > 最近刷新:**2026-07-06(Bettor 恢复状态层·§8.4 断档 6/29→7/06 补回)**。此前刷新 2026-06-29。
 > ⚠ **断档教训(2026-07-06 Owner+J1 抓)**: 7/1-7/06 公测一周激烈工作(结算/daemon/ZK-covenant/框架决策)**全没回写本 ledger、活在会滚走的频道** = §8.4 铁律违反(频道当记忆)。协调者(Bettor)失职。**恢复纪律: 每决议回写本 ledger + DECISIONS.md。**
 
+### (202) 2026-08-12 20:5xZ — 🟢 J2 CP3 provenance 评估(49673ba8, 读 silverc 源码)= 缺口拆两层, 均命中在册纪律族 · 现做不卡接线 · 两格路由 J2
+- **J2 深度评估(源码实读 compile.rs:1874-1892, 非推断; 未跑链)**: provenance 缺口是**两层**——
+  - **§4 身份绑定层(共享来源佐证是空的族)**: `buildRefundWitness:47-49` 的 `blake2b(prefix‖suffix)==templateHashHex` **自验空**——两边同一次编译(左 blake2b 用该次 prefix/suffix, 右同次 hash), 只证"silverc 输出内部自洽", **不证"== 链上烤死的 ps_tmpl_hash"**; 换 .sil/ctor 两边一起变自验照过。**修法(console 侧现做)**: buildRefundCommand 收链上烤死的 `expectedPsTmplHashHex`(redeem 里 ctor 常量, 拼 redeem 的人有, 同 CP2 前缀来源, **不能是同次 compileSil 输出**), 比 `psArtifact.templateHashHex===expectedPsTmplHashHex` fail-closed。判据: 比较**跨没跨"编译产物 vs 链上烤死值"边界**, 跨了才有信息量。链上绑定链本在(pool-bshard-artifacts.mjs:146 烤 spine.templateHashHex 进 PoolSide), 缺的是构造侧独立比对。
+  - **§3 切分点层(correct-by-accident-依赖对面不变族)**: ps_tmpl_hash+P2SH 钉 prefix_len+suffix_len 的**和**(P2SH OpEqual 重建长==真实 redeem 长), **不钉切分**——挪 prefix_len δ/suffix_len -δ, 和不变 P2SH 过, state 窗口平移读错字节; 今天对靠"模板字节无自相似"=碰巧对非结构不可能。**需单独格**: 钉前缀长度==构造用前缀长(同 CP2 pool 侧动作, 换腿)。
+- **KANet-UI 确认(20:49)**: pool 侧 CP2-rev 现走 startsWith 弱绑(:76-92), 非 ticket 那种 hash 自验(:45-49 只验 ticket); 要强绑需给 PoolRoot.sil 写 computeSpineArtifact 同款 compile-time artifact 函数。
+- **🔵 J2 安全纪律守住**: 不在频道/公开 origin 做可利用性分析(频道链上明文), 需要走最窄通道。**方向 fail-closed(对不上=花时被 covenant 拒=白费 tx 非资金损失)⇒ 无 live 紧急, 但是闭合要件。**
+- **📌 派 @J2 两格设计(报我审→J1 二审→Codex 复核)**: A=身份绑定跨边界比对(收链上烤死 hash 独立比); B=切分点钉长度。都 console 侧现做。**不宣任何闭合。** @KANet-UI computeSpineArtifact 同款函数你熟, J2 要时给一手。
+
 ### (201) 2026-08-12 20:4xZ — 🔴 Bettor 全员驱动令(Owner 斥被动·(200)后 29min 无人动)· 逐 agent 派实活+短截止 · 检查点收到 10min
 > ⏱ Owner 20:4x 斥"全部都停了/装死": (200)(20:12Z)后 29min 零 commit——我又设长检查点被动等。收令: 主动连续督促全员, 检查点收 30→10min。本机 4 会话活(34376/18948/29964/37240)。
 - **📌 @J2 CP3 provenance(关键路径, 已停 29min)**: 立即报 ps_tmpl_hash 能否绑模板身份的**评估结论**(能现做/接线耦合)+设计骨架 or 卡点。**20 分钟内 git 报一条**(卡点本身合格)。不许再坐。
