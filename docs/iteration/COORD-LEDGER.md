@@ -6,6 +6,11 @@
 > 最近刷新:**2026-07-06(Bettor 恢复状态层·§8.4 断档 6/29→7/06 补回)**。此前刷新 2026-06-29。
 > ⚠ **断档教训(2026-07-06 Owner+J1 抓)**: 7/1-7/06 公测一周激烈工作(结算/daemon/ZK-covenant/框架决策)**全没回写本 ledger、活在会滚走的频道** = §8.4 铁律违反(频道当记忆)。协调者(Bettor)失职。**恢复纪律: 每决议回写本 ledger + DECISIONS.md。**
 
+### (186) 2026-08-12 09:1xZ — 🏛 Codex 裁 state_start Fix 边界(5939f389): 中间路——PoolRoot 身份绑定即可(非全框架)· B-1/B-2 accepted 但 B-1 须对 post-Fix 缝重跑 · Fix scope 派 J2
+- **Codex 裁定(我 (184) 架构方向认可+收窄范围)**: ①全局常量+相等测试=`LITERAL-DIVERGENCE CLOSED / FIX-AUTHORITY OPEN`, **不是本格闭合**(只证一致不证正确; start 模板相关, 全局值不能授权任意命令的 offset)。②**最小 Fix 闭合(比全框架窄)**: 机器绑定 offset 到**确切 PoolRoot 模板/covenant 身份**(最小 registry/descriptor 条目: 身份→start=1), builder 从该绑定派生/查+写入命令, 身份取不到 offset=fail-closed, `unlockBshardRefund` **显式消费 `cmd.inputs.pool.state_start`**(新命令缺/非法**不静默回落** `_POOL_STATE_START`), relay/上游 validator 拦"与绑定 PoolRoot 身份不一致的 offset"。通用 per-template 描述符=follow-on 非前置。③导出的 `_POOL_STATE_START` 可作绑定内的值但**本身不是权威**——权威=机器可验关系「确切模板身份→state_start」。
+- **B-1/B-2 验收(Codex)**: B-2 accepted(start=0/1 差分有意义)。**B-1 accepted 为"生产缝敏感性证据"但须对 post-Fix 缝重跑**——当前变异打的是没有命令传参的调用点, 修后决定性变异必须打**真权威传播路径**(忽略/篡改 builder 发出的 `cmd.inputs.pool.state_start`), 指定测试因 continuation 不匹配翻红, 否则只证参数敏感不证新权威到达生产。
+- **📌 Fix scope 派 @J2(钱路码, 8 条闭合判据照 Codex 原文)**: 建 PoolRoot 身份→start 绑定 + refund builder 派生写入 + fail-closed + 调用点显式消费 + validator 拦不一致 + A 用同一生产绑定+历史 continuation + B-1 对修后缝重跑 + B-2 保持。动手前报备(已在报备轨)。**round-trip 闭合口径明确**: 现状=测试臂在库/A 待/Fix 待落, **未 CLOSED**, 记"B-1/B-2 accepted·Fix-authority OPEN"。
+
 ### (185) 2026-08-12 09:0xZ — ✅ B-1 验落链在范围(p2sh 零改动·变异 detected=2/MISSED=0)· 🔴 NWT 疑似下线(两腿12h静默·重启后未复)· round-trip 验收审路由 Codex(不阻塞缺席审阅者)
 - **B-1 验落链(8c6d930b, Bettor 逐 diff+stat 核)**: 仅新增 3 测试/harness 文件(u1-roundtrip-b1 .hooks/.mutants/.test.mjs), **p2sh.mjs 零改动**(git show -- p2sh.mjs 空)。设计满足 Codex B-1: ESM loader 钩子只换 kaspa-wasm 的 RpcClient ⇒ `unlockBshardRefund` 原封生产码跑到 continuation 构造、submit 前 fake 捕获; 变异生产调用点 :2812 传 start=0/2 **两个都翻红**(排除只对 0 敏感), baseline 先绿+sha256 还原; fake 按调用序发 UTXO(_addressFromRedeem 未导出)⇒ 不编码被检验的地址假设=避"correct by accident"。**detected=2/MISSED=0/INERT=0/BROKEN=0**。强产物。
 - **round-trip 测试臂状态**: B-1✅+B-2✅(均验在范围)· A 臂待 J2(生产符号 import+逐字节比历史 continuation)· Fix 臂待 Codex 边界(桥 0c2ca79f)。
