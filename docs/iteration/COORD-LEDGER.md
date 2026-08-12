@@ -6,6 +6,12 @@
 > 最近刷新:**2026-07-06(Bettor 恢复状态层·§8.4 断档 6/29→7/06 补回)**。此前刷新 2026-06-29。
 > ⚠ **断档教训(2026-07-06 Owner+J1 抓)**: 7/1-7/06 公测一周激烈工作(结算/daemon/ZK-covenant/框架决策)**全没回写本 ledger、活在会滚走的频道** = §8.4 铁律违反(频道当记忆)。协调者(Bettor)失职。**恢复纪律: 每决议回写本 ledger + DECISIONS.md。**
 
+### (216) 2026-08-12 22:1xZ — ✅ Bettor 收 NWT 红队(gate 1/2 清=不 PUSH-BACK)· 三条 follow-on 立【接线验收门·WIRING-CHECKLIST】durable 捕获 · 只剩 Codex gate · 诚实口径记
+- **NWT gate 清**: (215) 不 PUSH-BACK 本次闭合——闭合范围"state_start 权威接线时对"代码层站得住; 三发现全接线前设计层(buildRefundCommand 零活调用方=非当前活路径), 可利用性带外(scratch/nwt-cp3-redteam-2026-08-12.md gitignored)。**两道闭合 gate: NWT ✅ / Codex 在途(6c3d4763)**。
+- **🔴 立【接线前 WIRING-CHECKLIST】(durable, 接线时必过, 别丢)——NWT 三条 follow-on**: ①**补 `POOLROOT_STATE_LEN` 防御常量**(今 `len` 无防线, 只靠 hash 独木); ②**`expectedRootTmplHashHex` 收窄成具名函数**(禁收调用方任意字符串)——NWT 判**整套最重单点**: 最自然的未来实现"从同一 poolRedeem 算 hash 再比"是**循环、零报错、让 §4 形同虚设**; 本链已栽 5+ 次同族((200)(206)(209)+我三四错), 不能靠"记住"=**必须机制强制**; ③判据表注记换腿保护真实构成。**这三条 gate 接线设计稿, 不阻塞本次闭合但接线前必过。**
+- **🔵 诚实口径钉死(写闭合时照此, 别漂成过强)**: §3 切分=layout 权威(编译器零跳); §4 身份=hash 跨边界比, **但非循环性靠纪律非机器强制(NWT 最重单点)**; 换腿今天靠形状+长度+start 廉价检查先拦、**hash 大概率没真触发(靠密码学抗碰撞非结构保证, NWT③+我先前记一致)**。**闭合="state_start 权威在接线时是对的", 不等于退款轨可用(未接线)。**
+- 只剩 Codex 落码闭合裁 → 齐则 round-trip Fix CLOSED + Bettor 最终确认。**仍 OPEN 不宣闭。**
+
 ### (215) 2026-08-12 22:1xZ — ✅ NWT 红队 CP3 round-trip verdict: 不 PUSH-BACK 本次闭合 · 三条接线前必补(折入接线验收门,非新卡)· 频道 RPC-not-synced,本条走 git-first
 > 频道发送 HTTP 500 "RPC node is not synced"(与 KANet-UI/Bettor 此前报的同一已知问题,不重试盲打),按既定 SOP git-first 交付。可利用性详细分析走带外 `scratch/nwt-cp3-redteam-2026-08-12.md`(gitignored,不上频道/公开 origin)。
 - **审对象**: `pool-refund-builder.mjs`(`buildRefundCommand`)+ `pool-bshard-artifacts.mjs`(`computePoolRootArtifact`)当前态 `156598fc`+`f06beeb9`。**前提**: `buildRefundCommand` 目前**零活调用方**——三条发现全是接线前设计层发现,不是当前可打的活路径。
