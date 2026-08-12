@@ -6,6 +6,12 @@
 > 最近刷新:**2026-07-06(Bettor 恢复状态层·§8.4 断档 6/29→7/06 补回)**。此前刷新 2026-06-29。
 > ⚠ **断档教训(2026-07-06 Owner+J1 抓)**: 7/1-7/06 公测一周激烈工作(结算/daemon/ZK-covenant/框架决策)**全没回写本 ledger、活在会滚走的频道** = §8.4 铁律违反(频道当记忆)。协调者(Bettor)失职。**恢复纪律: 每决议回写本 ledger + DECISIONS.md。**
 
+### (195) 2026-08-12 19:1xZ — 🏛 land 决策: 不 land 常量版(Codex 判权威不足)· CP2-rev=真权威从拼装点 templatePrefix.length 派生(不卡接线, 现在可做)· J1 三点 PASS 折入
+- **Codex 0741bae0(Bettor 读原文, 非信 J1 转述)**: ①claim→1 taxonomy ACCEPTED; ②**CP2 权威 STILL OPEN/MUST-FIX**——`const POOLROOT_STATE_START=1` 写进命令是"重复断言, 非从产 poolRedeemHex 的确切模板 artifact 派生/绑定; 注释描述的 provenance 比代码实际强"; 最小可接受=**生产构造方从确切 artifact 算 `state_start=templatePrefix.length` 传进 buildRefundCommand**, 或 PoolRoot 描述符绑 redeem 身份+builder/relay fail-closed 验; 常量**可留作防御断言但不能当唯一权威**; ③MISSED equivalent-mutant **仅在真权威链落地后**才算可接受(须 post-Fix 缝证: 缺失拒/错值拒/真派生值到达 seam/变异"权威产生或校验步"被杀——非砍等价 helper 参数); ④96B defusal 方向 ACCEPTED。
+- **J1 二审(读原文核)**: (a)(b)(c) PASS-to-land(builder type 硬编:80 机器保证只 cancelled/默认改 undefined 调用点普查全:1807-2985 逐一/defusal 逻辑对)+3 非阻塞: **①`===undefined` 漏 `null`(splice 当 0)⇒ 改 `== null`【折入】**②防御只拦"省参"写法, `??` 习语在进函数前已转 1 会绕过⇒doc/lint 补③96B 非唯一指认 RootClaim(旧 depth-8 PayoutShard 也 96B, 已 superseded; fail-closed 故安全侧仅文案)。**同批硬约束**: B-1 mutants CALLSITE(u1-roundtrip-b1.mutants.mjs:27)钉旧 :2812 文本, diff 落即失配→harness BROKEN, post-Fix 测试必同批。
+- **🏛 land 决策: HOLD 常量版, CP2-rev 再 land**——真权威可现在做不卡接线: `bshard-e2e-flow.mjs:114` 拼装点已持 `m.rootArtifact.templatePrefix`(`.length`=state_start)⇒ **构造方算 templatePrefix.length 传进 builder**(buildRefundCommand 拿不到 prefix 单独量, 无法自算, 必构造方传), builder 写传入值+断言存在, **常量只留 relay 防御断言(==_POOL_STATE_START)**。relay require+assert+defusal(安全件)保留+折 J1 null-check。post-Fix B-1 变异打**权威产生/校验步**(非等价 helper 参)+CALLSITE 更新+B-2 同批。
+- **📌 派 @J2 CP2-rev**(钱路码, 报 rev-diff 我审): 权威改 templatePrefix.length 构造方派生。**round-trip 仍 OPEN**(常量版不 land, rev 落+B-1 打真权威+Codex 复核才闭)。J1 三点/Codex §2 已给全, 无歧义。
+
 ### (194) 2026-08-12 19:0xZ — 📌 显式派工 @J1 审 CP2 diff(git-first, 频道 down)+ MISSED 残余已发 Codex 桥(3aac67e8)· Bettor CP2 检查点抓 28min 停顿(任务没显式交手)
 - **🔴 CP2 检查点自查(Bettor 主动定时器 19:02Z 触发)**: 自 (193) 起 ~28min 无活动——两审阅者(J1/Codex)未动, **根因=我没把动作显式交手**(Codex 只写 ledger 没发桥, J1 任务埋在 (193) 密集裁定里)。检查点在 28min 抓住, 非 8h(机制生效)。**修法即做**: ↓
 - **① Codex 桥请裁已发(`3aac67e8`)**: round-trip CP2 那格结构 MISSED 残余(relay 砍 `_continuationAddress` 第 4 参靠 PoolRoot 默认 1 恰对而 survive)——请 Codex 裁"文档化残余可接受 vs 须消除"。Bettor 倾向前者不自决。
