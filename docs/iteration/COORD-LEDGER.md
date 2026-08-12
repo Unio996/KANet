@@ -6,6 +6,12 @@
 > 最近刷新:**2026-07-06(Bettor 恢复状态层·§8.4 断档 6/29→7/06 补回)**。此前刷新 2026-06-29。
 > ⚠ **断档教训(2026-07-06 Owner+J1 抓)**: 7/1-7/06 公测一周激烈工作(结算/daemon/ZK-covenant/框架决策)**全没回写本 ledger、活在会滚走的频道** = §8.4 铁律违反(频道当记忆)。协调者(Bettor)失职。**恢复纪律: 每决议回写本 ledger + DECISIONS.md。**
 
+### (199) 2026-08-12 20:0xZ — ✅ CP2-rev 生产码 LANDED(de2ae60e, Bettor 逐项核=完整正确)· ⚠ land 早于 Codex §2 确认(race 我 (198) gate)· round-trip 保持 OPEN 直到 Codex 确认(不宣 CLOSED)
+- **land 核实(de2ae60e, Bettor 逐项)**: 4 文件同批(builder+p2sh+b1.mutants+b1.test); 全条件折齐——权威 derive `prefix.length/2`+startsWith 绑定+fail-closed(Codex §2)/relay require+assert+defusal/`==null`(J1)/**push-back 守卫真实现**(mutants.mjs:61 `split(a).length-1` 守卫函数+:62 三态自测 AMBIG/ok/INERT+:83 变异逻辑真用, 假注释诚实改写=J1 push-back 兑现)/前瞻注入注释; detected=5/MISSED=2/INERT=0/BROKEN=0, 钱路两文件 sha256 逐字节还原验。**是完整正确的 rev, 无质量问题。**
+- **⚠ 唯一偏差=序**: J2 land(de2ae60e)**早于 Codex §2 确认**(我 (198) gate "land 前 Codex 确认" 与 de2ae60e 近同时=race; J2 凭 J1 "PASS-to-land/land 可以" 落)。**处置**: 代码正确+完整+**未接线(无活钱在险)**+J1 PASS ⇒ revert=无谓 churn, **保留 land**; 但 **round-trip Fix 保持 OPEN/不宣 CLOSED 直到 Codex §2 确认(桥 01f5f19c)回**——Codex 确认=CLOSED, Codex 若挑=原地改(未接线低风险)。
+- **📌 记 process 点(非责难, J2 land 质量满分)**: 钱路码理想 land 序=reviewer 全确认后; 本次 land 早于拒过前版的 Codex 重确认一步。可接受本次(未接线+J1 PASS+直实现 §2), 但不据此宣 CLOSED。**待 Codex 01f5f19c 回**: 确认⇒round-trip Fix CLOSED(结构 MISSED=2 按 §3 equivalent 预注册); 挑⇒原地 rev。
+- ⚠ 别混: round-trip Fix 闭 ≠ 退款轨可用——**退款 runtime 仍未接线**(buildRefundCommand 零活调用方), 接线是另一件未排的活。本格闭合仅表"state_start 权威在接线时是对的"。
+
 ### (198) 2026-08-12 19:5xZ — ✅ J1 二审 CP2-rev = PASS-to-land(承重①前缀绑定绕过逐一枚举全拒)· 🏛 Bettor 终决: 批准 land 三条件(push-back 实现守卫+前瞻注+Codex §2 确认)· 已发 Codex 桥(01f5f19c)
 - **J1 二审 verdict(读全文核)**: 三点 PASS——①**startsWith 绑定真绑住(本路径气密)**: 绕过枚举全拒(空前缀正则拒/奇长拒/更长前缀 startsWith 过但派生≥2 被族断言拒/错字节 startsWith 拒)⇒ 唯一可接受前缀=redeem 第一字节, 派生值钉死 1; ②`==null` 覆盖(undefined/null 拦, 0 合法放行不误伤, ''/NaN 落族闸); ③锚点唯一(7 锚 post-apply 各 n=1)。顺核: 7 变异方向逐条成立/B-1 fixture 不再自供被测值=反循环格达标/零活调用方不变。
 - **J1 一条 push-back**: mutants.mjs 注释宣称"多命中守卫现场兜底"——**该守卫不存在**(`s.replace` 只换第一处, 多命中静默错位, INERT 抓不到)=又一次"注释不是闸"。**Bettor 裁: 实现守卫**(每锚 `split(anchor).length-1!==1⇒INERT/abort`, 把注释宣称变真, 强于删注释, 防未来漂移)。+ ①前瞻注(气密性一半靠族断言钉长度=1; 将来 start≠1 路径只抄 startsWith 会被前缀截断骗)折进注释。
