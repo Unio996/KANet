@@ -29,7 +29,14 @@ const census = (table, col) => {
     console.log(`\n${table}.${col}  (共 ${total} 份)`);
     if (!rows.length) { console.log('  (无数据)'); return; }
     rows.forEach((r) => console.log(`  0x${r.p}  ×${r.n}${rows.length === 1 ? '   ← 唯一形态' : ''}`));
-    if (rows.length > 1) console.log('  ⚠ 存在多种首字节 ⇒ 身份判别不能只看这一字节');
+    if (rows.length > 1) {
+      console.log('  ⚠ 存在多种首字节 ⇒ 身份判别不能只看这一字节');
+    } else {
+      // 🔴 @Bettor 2026-08-12 09:26Z 的提醒, 直接写进输出, 免得下一个人(包括我)读反:
+      console.log('  🔴 只有一种取值 ⇒ 这【不是】"判别符成立"的证据 ——');
+      console.log('     恰恰相反, 它说明该字节在这批数据上【没有判别力】(everything matches).');
+      console.log('     它能支持的只有"断言不变量"(不是这个值就 fail-closed), 不能支持"按它选分支"。');
+    }
   } catch (e) { console.log(`\n${table}.${col}: ${e.message.slice(0, 80)}`); }
 };
 
