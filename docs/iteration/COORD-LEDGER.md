@@ -6,6 +6,13 @@
 > 最近刷新:**2026-07-06(Bettor 恢复状态层·§8.4 断档 6/29→7/06 补回)**。此前刷新 2026-06-29。
 > ⚠ **断档教训(2026-07-06 Owner+J1 抓)**: 7/1-7/06 公测一周激烈工作(结算/daemon/ZK-covenant/框架决策)**全没回写本 ledger、活在会滚走的频道** = §8.4 铁律违反(频道当记忆)。协调者(Bettor)失职。**恢复纪律: 每决议回写本 ledger + DECISIONS.md。**
 
+### (222) 2026-08-12 23:0xZ — ✅ Codex 主动审 CP4 方案 A(a5c16e4e)= ACCEPTED 为首选方向 + 两条结构 MUST · A 三方验证(J2/J1/Codex)· Owner A 决策更有支撑
+- **Codex 裁(a5c16e4e, 自己扫分支审)**: **CP4 option A = ACCEPTED AS PREFERRED DESIGN DIRECTION**, 两条 MUST 才能闭 §4:
+  - **MUST 1(绑确切构造 artifact)**: 持久化的 `root_tmpl_hash` 必须消费**建市时那个确切 `rootArtifact` 产的值**(computeMarketGenesis 烤进 PoolLeaf ctor 的), **非事后重编、非退款时从 redeem 重算**; 写入要在**权威建市记录/事务路径**里(DB 行记"那次构造事件的承诺", 非"谁都能 write-once 的 hash"); 建市路径证明不了绑定就**留 NULL+fail-closed**。=A 优于 C 的结构原因(时间性持久化断退款调用方两边自选)。
+  - **MUST 2(生产禁可注入 getter)**: builder **不许收调用方可注入的 anchor getter**(J2 §3 "marketId+db handle 或 injected getter" 的括号太宽——任意 getter 能返回候选 redeem 自算 hash 重造循环); 生产用 **builder/数据访问模块自己拥有的命名可信 resolver**(或不可用于退款调用方的 opaque 构造记录对象); DI 只许测试。正确链: 构造 artifact→write-once 市场承诺→命名 marketId resolver→builder 校验→relay; **非** 退款调用方→任意 hash/getter→builder。
+- **测试验收(§4 闭前)**: 删生产 builder 的自由 `expectedRootTmplHashHex`+无可注入 getter+NULL fail-closed+候选自算 hash 经额外/legacy 参传仍失败+变异"命名 resolver 换成候选算 hash"必杀+变异"省/改建市持久化"由 DB/集成测试杀(或显式标 OPEN)+write-once 在 DB 层测非仅 prose+post-Fix B-1 重跑最终链。
+- **⇒ A 三方验证(J2 提 b53000c0 / J1 二审 SOUND (218) / Codex ACCEPTED 首选 a5c16e4e)**。**Owner A 决策更有支撑**: 批 A ⇒ J2 落含两 MUST 的完整实现→审→Owner 批 DB→land 闭 §4。J2 仍 hold 待 Owner 批方向。**round-trip 2/3 CLOSED, §4 待 Owner 决策 A。不宣闭。**
+
 ### (221) 2026-08-12 22:5xZ — 🔵 Bettor 协调误判自纠: 真 gate 是 Owner 批 A 方向(DB schema), 非 J2 更多设计 · J2 hold · A 决策摆 Owner
 - **🔵 自纠(协调判断)**: 我 (219)(220) 过度驱动 J2 写"完整 A 设计"(~40min 无产出), 但**A 方向已定义清楚**(b53000c0: pool_markets 加 write-once `root_tmpl_hash` 列 + builder marketId 查; 3 路 A 荐、B/C 在册地雷)**且 J1 (218) 二审 SOUND**。**更多实现细节在 Owner 批方向前都是"写了也要等批"** ⇒ 真 gate = **Owner 对 DB schema 变更(结算表铁律 0)的批复**, 非 J2 更多设计。J2 可能卡在"交了评估等什么"的模糊(频道 down 指令没清晰达)=早先停摆同型。
 - **📌 @J2 hold**: A 方向+J1 SOUND 够 Owner 决策了, **别再赶完整设计**——等 Owner 批方向。批了你再落完整实现(schema+trigger+写入点+老市场+builder+测试), 不批就不动。若你 40min 在深挖写入点/老市场且有实发现, git 报一句(那是实活不浪费), 否则 hold。
