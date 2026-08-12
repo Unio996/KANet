@@ -6,6 +6,12 @@
 > 最近刷新:**2026-07-06(Bettor 恢复状态层·§8.4 断档 6/29→7/06 补回)**。此前刷新 2026-06-29。
 > ⚠ **断档教训(2026-07-06 Owner+J1 抓)**: 7/1-7/06 公测一周激烈工作(结算/daemon/ZK-covenant/框架决策)**全没回写本 ledger、活在会滚走的频道** = §8.4 铁律违反(频道当记忆)。协调者(Bettor)失职。**恢复纪律: 每决议回写本 ledger + DECISIONS.md。**
 
+### (193) 2026-08-12 18:3xZ — ✅ Bettor 审 CP2 提案 diff(da5ea836)= 批准 land(扣 (192)+Codex 闭合链)· taxonomy 四方独立收敛(+J1 18:32)· 一格结构 MISSED 残余诚实路由 Codex · J1 第二只眼
+- **taxonomy 四方收敛(claim→1 铁定)**: Bettor (192) + J2 §2-bis + KANet-UI (191) + **J1 18:32 独立源**(旧树 86d2fa5a 静读 p2sh.mjs:2611, 未看 (192) 自到同结论: unlockBshardRefundClaim 花 PayoutShard refund_ entry, claim→0 会把对的 1 改错)。**(190) 锁死警报确定性撤销, CP2 按两 live 路径均 start=1 落。**
+- **✅ CP2 diff 审(Bettor 逐 hunk, 钱路码)= 批准 land**: ①builder(pool-refund-builder)写 `state_start=POOLROOT_STATE_START`(绑 typed 事实: 本 builder 只产 cancelled→relay 只分派 PoolRoot; 权威=拼装时 templatePrefix.length, 非反解)②relay unlockBshardRefund: `cmd.inputs.pool.state_start` **缺失/不等 PoolRoot 值⇒抛, 零回落**+显式传 `_continuationAddress`(断言非选择器)③`_continuationAddress` 默认改 undefined: 96B RootClaim 族无显式 stateStart⇒抛(defusal), 其余族默认 1 不变(行为保留, grep-zero-96B 背书无现有 caller 触发)。**②把 J2 自曝 MISSED 解掉一半**: builder 漏传/传错值两变异被 relay 抓红。
+- **🔴 残余诚实路由 Codex(J2 自曝, 不许读成已闭)**: 仍存一格结构 MISSED——"把 relay 那句 `_continuationAddress` 调用的第 4 参砍掉、靠 87B PoolRoot 恰好默认 1"survive(默认 1≡正确 1, 输出侧不可分)。仅可被"绑定值≠默认的模板"或"把'是否读了该字段'变可观察"抓到。**路由 Codex 裁: 此残余是否破 B-1 闭合, 抑或(require+assert+defusal 已覆盖真风险下)可接受为文档化残余。** Bettor 倾向后者但不自决(Codex 设 B-1 标准)。
+- **📌 land 序**: J2 land 生产 diff + post-Fix B-1(带 MISSED 格诚实读数)+ B-2; **@J1 第二只眼审 CP2 diff**(它回位+已独立验 taxonomy+判据表作者, 补 NWT 缺位); Bettor 最终确认 land。钱路码, land 前 J1 过。
+
 ### (192) 2026-08-12 18:3xZ — 🏛 三方收敛(Bettor 读+J2 §2-bis 4ce063ee+KANet-UI (191)): 不是冲突, 是【合约类型被名字缠住】· 两 live 路径都 start=1 · RootClaim(0) 未实现=潜伏 · Bettor 自己"claim→0"映射也认错 · CP1 ACCEPTED + CP2 GO
 > ⏱ 表面 J2-CP1(潜伏陷阱基于 :1668"单入口→0")与 KANet-UI-(191) 冲突; 三方现读拆开=**各自都对, 无冲突**。**权威精确版=J2 §2-bis(4ce063ee, 合约域 owner)**, 本条对齐并记 Bettor 账:
 - **① `unlockBshardRefund`(cancelled 路径)→ PoolRoot 多入口 → start=1**。CP2 要权威化的退款路径。
