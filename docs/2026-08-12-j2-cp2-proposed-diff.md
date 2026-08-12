@@ -25,7 +25,38 @@
 
 ---
 
-## 提案 diff（`git apply` 可直接用）
+## 🔴 收 @J1tn 19:09Z 二审 + Codex `0741bae0`（**本节晚于下方 diff，以本节为准**）
+
+**J1 判 (a)(b)(c) 三点 PASS-to-land，三条非阻塞 hardening 里【第一条是我 diff 的真漏洞】，逐条认领：**
+
+1. 🔴 **`stateStart === undefined` 会被显式 `null` 穿透** —— 调用方传 `null` 时不触发排雷，
+   而 splice 会把 `null` **当 0 静默用** ⇒ 正是我要防的那类失败，却从我的闸底下走过去。
+   ✅ **改一行：`stateStart == null`**（同时收 `undefined` 与 `null`）。**这条我认，属实漏**。
+2. ⚠ **防御深度的实话（必须写进文档，别让人以为排雷全覆盖）**：现存调用点普遍用
+   `?? _POOL_STATE_START` 这个习语 —— 它**在进函数之前**就把 undefined 换成 1，
+   ⇒ 我这道排雷**只拦"省略第 4 参"那种写法**；**将来照抄主流习语的人会绕过它**。
+   ⇒ 它是**减少一类误用**，不是"该族再也不会吃错默认"。
+3. ⚠ **96B 不唯一指认 RootClaim 族**：`p2sh.mjs:1554` 注明**旧 depth-8 PayoutShard state 也是 96B**（已 superseded）。
+   方向仍是 fail-closed（抛而非算错）⇒ **安全侧**；但**我的报错文案把 96B 直接说成"单-entry RootClaim 族"是误导**，
+   ✅ 文案改成"该长度对应多于一族（含已 superseded 的 depth-8 PayoutShard），必须显式传 stateStart"。
+
+**🔴 Codex `0741bae0` 否掉了本 diff 的 builder 那半的【权威性】（我认，且它是对的）**：
+> `POOLROOT_STATE_START = 1` **字面量作唯一权威 = REJECTED / MUST-FIX**。
+> 常量可留作**防御断言**，但**权威必须来自构造时 `templatePrefix.length`**，或绑定 redeem 身份的描述符。
+
+⇒ **这正好是我 CP1 自己写下的结论，而我在 diff 里没有贯彻到底** —— 我写了"权威来自构造时"，
+却仍然落成了一个**手写的 1**。⇒ **builder 需要拿到 artifact（`templatePrefix`），而不是一个常量**；
+现签名只收 `poolRedeemHex`，所以这一格要么加参数、要么由调用方传 `state_start` 进来。
+**⇒ 本 diff 的定性随之下调：它是【防御性增量】（J1 三点过可 land），而 Fix-authority 那格仍 OPEN。**
+
+**同批硬约束（J1 复核确认，我原已列，此处强化）**：
+`u1-roundtrip-b1.mutants.mjs:27` 的 `CALLSITE` 常量**钉死旧 `:2812` 的行文本** ⇒ 本 diff 一 land 即失配
+⇒ 变异器会变成 **BROKEN 而不是红** —— **那是最坏的读数形态（看起来"跑了"，其实什么也没测）**。
+**post-Fix 测试改动必须同批 land。**
+
+---
+
+## 提案 diff（`git apply` 可直接用 · ⚠ 上一节的三处修正尚未并入下方文本）
 
 ```diff
 diff --git a/kasia-console/src/lib/pool-refund-builder.mjs b/kasia-console/src/lib/pool-refund-builder.mjs
