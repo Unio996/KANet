@@ -14,6 +14,9 @@ import { resolve } from 'path';
 import { sqlite } from '../db/client.js';
 import { getConfig } from '../data/settings/configs.js';
 import { getRelayMnemonic, getRelayPrivkey } from '../data/settings/relay-nodes.js';
+// N5(A2 spec §N5): 密钥 env 的构造是【纯函数】, 抽在 lib 里 —— 这样用例引它不必裸 import 本文件
+// (M0a 门: 新增裸 relay-manager import 即败, 那道闸是对的, 不绕)。
+import { buildRelayKeyEnv } from '../lib/u1-relay-key-env.mjs';
 
 const KANET_ROOT = process.env.KANET_ROOT || 'D:/Anthropic';
 const RELAY_DIR = resolve(process.env.RELAY_DIR || `${KANET_ROOT}/kasia-relay`);
@@ -21,6 +24,7 @@ const CONSOLE_PORT = process.env.PORT || '3100';
 
 // relayNodeId → { child, pid, startedAt, lastLog }
 const _relays = {};
+
 
 /**
  * Start a relay process for a specific account.
@@ -83,8 +87,9 @@ export async function startRelay(relayNodeId) {
     M0C1_GRANT_DB_PATH: resolve(process.env.DB_PATH || './data/console.db'),
   };
   // r281: pass exactly one of KASPA_PRIVKEY / KASPA_MNEMONIC (privkey wins). wallet.mjs reads them.
-  if (privkey) env.KASPA_PRIVKEY = privkey;
-  else env.KASPA_MNEMONIC = mnemonic;
+  // 🔴 N5(A2 spec v1.2-rc · @J1tn 审视 8969aca7 · @Bettor 批B GO): **互斥必须双向 + 切断继承向**。
+  //   见下方 buildRelayKeyEnv 的头注 —— 这三行是那份读数的落码, 别单独读。
+  Object.assign(env, buildRelayKeyEnv({ privkey, mnemonic }));
 
   try {
     const child = fork('src/relay.mjs', [], {
