@@ -182,6 +182,33 @@ await t('§4 身份 · suffix 段被改 ⇒ builder 拒(原方案只绑前缀+�
     /模板认证失败/, 'suffix 异的 redeem 若能过, 就要靠远处的 UTXO 匹配才报错');
 });
 
+// 🔴 Codex 66d5f287 点名的第一条闭合变异 / @J1tn (211)(212) 抓我【设计里写了没落】的那格:
+//    喂【票腿】制品必须被拒。我在 §6 设计里点名要这格, 然后没落 —— 同一个病(写下结论没贯彻)。
+const PS_PINNED = JSON.parse(readFileSync(new URL('./fixtures/poolside-artifact.pinned.json', import.meta.url), 'utf8'));
+
+await t('换票腿① · 票腿 psArtifact(prefix/suffix 形状, 无 script) ⇒ 拒', () => {
+  assert.throws(() => buildRefundCommand(refundArgs({ poolRootArtifact: { templatePrefix: Buffer.alloc(1), templateSuffix: Buffer.alloc(1), templateHashHex: 'ab'.repeat(32) } })), /required/);
+});
+
+await t('换票腿② · 真 PoolSide 编译制品 + 池腿 redeem ⇒ 拒(长度就对不上: 票腿 96B vs 池腿 2315B)', () => {
+  assert.throws(() => buildRefundCommand(refundArgs({
+    poolRootArtifact: { script: [...Buffer.from(PS_PINNED.scriptHex, 'hex')], state_layout: PS_PINNED.state_layout },
+  })), /长度/);
+});
+
+await t('换票腿③ · 【自洽的票腿整套】(票制品+票 redeem) 仍必须被池腿烤死 hash 拒', () => {
+  // 这一格才是承重的: ①②靠形状/长度就拦下了, 而③里票腿自己内部完全自洽 ——
+  // 拦住它的只能是【池腿那个烤死锚】。锚要是没绑住腿, 这格就会绿。
+  assert.throws(() => buildRefundCommand(refundArgs({
+    poolRootArtifact: { script: [...Buffer.from(PS_PINNED.scriptHex, 'hex')], state_layout: PS_PINNED.state_layout },
+    poolRedeemHex: PS_PINNED.scriptHex,
+  })), /模板认证失败|不符/);
+});
+
+await t('实测注 · 两腿 state_layout.start 【不相等】(池=1 票=0) ⇒ 绑错腿不会静默', () => {
+  assert.notStrictEqual(PINNED.state_layout.start, PS_PINNED.state_layout.start,
+    '若两者相等, 绑错腿就是【语法合法、资金锁死、全程不报错】那一族; 实测不等, 族断言会喊');
+});
 await t('fail-closed · 缺 poolRootArtifact ⇒ 拒(不默认)', () => {
   assert.throws(() => buildRefundCommand(refundArgs({ poolRootArtifact: undefined })), /required/);
 });

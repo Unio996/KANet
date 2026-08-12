@@ -40,6 +40,11 @@ const MUTANTS = [
     'const { start: poolStateStart, len: poolStateLen } = poolRootArtifact.state_layout;',
     'const poolStateLen = poolRootArtifact.state_layout.len; const poolStateStart = POOLROOT_STATE_START;',
     'expect-MISSED-structural'],
+  // 🔴 Codex 66d5f287 点名的**第一条闭合变异** —— 也正是 @Bettor 20:47Z 那处绑错腿的**精确形态**:
+  //    把池腿的烤死锚换成**票腿的** `ps_tmpl_hash`。@J1tn (211)(212) 抓到我设计里写了这格却没落。
+  ['换票腿: 池腿烤死锚换成票腿 ps_tmpl_hash', BUILDER,
+    'if (actualTmplHash !== expectedRootTmplHashHex.toLowerCase()) {',
+    'if (actualTmplHash !== String(witness.ps_tmpl_hash).toLowerCase()) {', 'expect-detect'],
   ['权威步: 拆掉单步跨边界 hash 比对', BUILDER,
     'if (actualTmplHash !== expectedRootTmplHashHex.toLowerCase()) {', 'if (false) {', 'expect-detect'],
   ['权威步: hash 只覆盖 prefix(丢掉 suffix 段)——J1 (205) 补的那格', BUILDER,
