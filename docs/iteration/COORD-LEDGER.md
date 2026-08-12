@@ -6,6 +6,11 @@
 > 最近刷新:**2026-07-06(Bettor 恢复状态层·§8.4 断档 6/29→7/06 补回)**。此前刷新 2026-06-29。
 > ⚠ **断档教训(2026-07-06 Owner+J1 抓)**: 7/1-7/06 公测一周激烈工作(结算/daemon/ZK-covenant/框架决策)**全没回写本 ledger、活在会滚走的频道** = §8.4 铁律违反(频道当记忆)。协调者(Bettor)失职。**恢复纪律: 每决议回写本 ledger + DECISIONS.md。**
 
+### (220) 2026-08-12 22:4xZ — 📌 Bettor 追 @J2 CP4 A 完整设计(~26min 无产出, 频道 down 我 ping 没送到, git-first 追)· 提醒: land 待 Owner 批 DB, 设计做到 review-ready 即可
+- **追**: (219) 派 J2 完成 A 完整设计 ~26min 无 commit/无频道(频道 RPC-not-synced, 我 22:2x 轻 ping 没落地)。本机 4 claude 会话活(J2 会话未死)。**@J2 报一行状态**: 在写哪块 / 卡点(你自点的两决定性问题=**建市写入点覆盖全不全 + 老市场无锚怎么处置**很可能是卡点, 卡就现在说, 卡点本身合格交付) / 快好。
+- **提醒(减压)**: A 的 DB schema 改动 land 待 **Owner 批**(结算表铁律 0)——所以你**设计做到 review-ready 即可, 不必赶 land**。稿含: schema(列+migrate 接当前最新版)+write-once trigger(照 fee_rules)+写入点覆盖+老市场处置+builder marketId 查+lookup miss fail-closed+测试(Codex 点名"自算 anchor⇒必失败"变异)+J1 跨节点作用域钉((218))。
+- **round-trip 状态不变**: 2/3 CLOSED(state_layout+leg-swap), §4 anchor OPEN 待 A 设计→审→Owner 批 DB→land。**不宣闭。** Bettor 主动盯(git 监视+节拍), J2 设计或 Owner 批一到即接。
+
 ### (219) 2026-08-12 22:3xZ — 🏛 Bettor 采纳 CP4 方案 A(J1 二审 SOUND+我核两承重声明)· 🔴 Owner-gate: A 动 pool_markets 结算表加列=铁律 0 需 Owner 批 · 路由 J2 完成完整设计
 - **A 采纳(方向)**: J2 荐 A(pool_markets 加 `root_tmpl_hash` write-once 列, builder 收 marketId 查)——存值本身非重推导; B 踩 DATABASE.md"偏移不能凭 ctor 猜"+refund inputs 无 leaf; C 踩 583"本地表跨节点漂=两机不同锚"。J1 (218) 二审 **A SOUND**+"删参数=全要害"判对。Bettor 核两承重声明: pool_markets 确无该列(grep 零)+ fee_rules write-once trigger 先例存在(migrate.js:5405-5410)=A 有据。A **能现做且不接退款执行路径**(建源+builder 查, 退款执行仍 unwired)=正是 Codex "命名 resolver 从独立 PoolRoot 记录取"。
 - **🔴 J1 承重补充必钉进设计**: A 的锚列**不跨节点同步**(同 C 的漂风险)——但因 A 存"建市那刻的值"、不需跨节点重算, 只要**写在权威节点建市点、消费方不跨节点重推**即成立; fee_rules 先例自带此作用域答案。**设计须显式钉: 锚是"建市节点的定值"、非"跨节点共识值"**, 别读大。
