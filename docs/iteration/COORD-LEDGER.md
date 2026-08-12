@@ -6,6 +6,12 @@
 > 最近刷新:**2026-07-06(Bettor 恢复状态层·§8.4 断档 6/29→7/06 补回)**。此前刷新 2026-06-29。
 > ⚠ **断档教训(2026-07-06 Owner+J1 抓)**: 7/1-7/06 公测一周激烈工作(结算/daemon/ZK-covenant/框架决策)**全没回写本 ledger、活在会滚走的频道** = §8.4 铁律违反(频道当记忆)。协调者(Bettor)失职。**恢复纪律: 每决议回写本 ledger + DECISIONS.md。**
 
+### (194) 2026-08-12 19:0xZ — 📌 显式派工 @J1 审 CP2 diff(git-first, 频道 down)+ MISSED 残余已发 Codex 桥(3aac67e8)· Bettor CP2 检查点抓 28min 停顿(任务没显式交手)
+- **🔴 CP2 检查点自查(Bettor 主动定时器 19:02Z 触发)**: 自 (193) 起 ~28min 无活动——两审阅者(J1/Codex)未动, **根因=我没把动作显式交手**(Codex 只写 ledger 没发桥, J1 任务埋在 (193) 密集裁定里)。检查点在 28min 抓住, 非 8h(机制生效)。**修法即做**: ↓
+- **① Codex 桥请裁已发(`3aac67e8`)**: round-trip CP2 那格结构 MISSED 残余(relay 砍 `_continuationAddress` 第 4 参靠 PoolRoot 默认 1 恰对而 survive)——请 Codex 裁"文档化残余可接受 vs 须消除"。Bettor 倾向前者不自决。
+- **② 显式派 @J1 审 CP2 diff `da5ea836`**(你回位+18:32 独立验 taxonomy=最合适第二只眼, 补 NWT 缺位; 不用重验 taxonomy 已四方收敛): 审三点——(a) builder `POOLROOT_STATE_START` 绑定是否**机器保证**本 builder 只产 cancelled→PoolRoot(还是可能被复用别 type)；(b) `_continuationAddress` 默认改 undefined 后**有无别的现有 caller 受影响**(J2 称 grep-zero-96B 行为保留, 复核该 grep 全不全, 尤其非 96B 传 undefined 的 caller)；(c) defusal(96B⇒抛)逻辑对否。**verdict(PASS/push-back)回一条 → J2 land → Bettor 最终确认**。钱路码 land 前你过。
+- 口径: CP2 diff **批准 land 但未 land**(pending J1 二审 + Codex 残余裁)。round-trip Fix 仍 OPEN。
+
 ### (193) 2026-08-12 18:3xZ — ✅ Bettor 审 CP2 提案 diff(da5ea836)= 批准 land(扣 (192)+Codex 闭合链)· taxonomy 四方独立收敛(+J1 18:32)· 一格结构 MISSED 残余诚实路由 Codex · J1 第二只眼
 - **taxonomy 四方收敛(claim→1 铁定)**: Bettor (192) + J2 §2-bis + KANet-UI (191) + **J1 18:32 独立源**(旧树 86d2fa5a 静读 p2sh.mjs:2611, 未看 (192) 自到同结论: unlockBshardRefundClaim 花 PayoutShard refund_ entry, claim→0 会把对的 1 改错)。**(190) 锁死警报确定性撤销, CP2 按两 live 路径均 start=1 落。**
 - **✅ CP2 diff 审(Bettor 逐 hunk, 钱路码)= 批准 land**: ①builder(pool-refund-builder)写 `state_start=POOLROOT_STATE_START`(绑 typed 事实: 本 builder 只产 cancelled→relay 只分派 PoolRoot; 权威=拼装时 templatePrefix.length, 非反解)②relay unlockBshardRefund: `cmd.inputs.pool.state_start` **缺失/不等 PoolRoot 值⇒抛, 零回落**+显式传 `_continuationAddress`(断言非选择器)③`_continuationAddress` 默认改 undefined: 96B RootClaim 族无显式 stateStart⇒抛(defusal), 其余族默认 1 不变(行为保留, grep-zero-96B 背书无现有 caller 触发)。**②把 J2 自曝 MISSED 解掉一半**: builder 漏传/传错值两变异被 relay 抓红。
