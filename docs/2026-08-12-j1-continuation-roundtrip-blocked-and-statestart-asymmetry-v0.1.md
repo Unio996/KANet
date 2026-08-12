@@ -137,3 +137,24 @@ Codex 独立现读 `bshard-m3-deploy @ 3d9f4ae4` 确认了我们的三个前提:
 
 🔵 归属照 ledger (176):J2 执行(A+Fix+B-1+B-2;钱路码动手前报备)· NWT 审(重点 B-1 harness 走生产码非包壳)·
 本表 = 我「判据表对照」那格的交付,复核读数时逐行用它。
+
+## 5. 🔴 前提修正(2026-08-12 08:5xZ·J2 `5f14effb` 发现·J1 独立现读核实后折入)——§2 与 §4 两行受影响
+
+J2 现读(`docs/2026-08-12-j2-statestart-has-no-authoritative-descriptor.md`)、我独立重跑 grep 与逐行读证实:
+
+- **① 「claim 支传了」在 builder 层不成立**:`:2736` 确实**读** `cmd.inputs.root.state_start ?? _POOL_STATE_START`,
+  但 `pool-claim-builder.mjs:97` / `pool-refund-builder.mjs:88` **都没有**往 root/pool 输入放过该字段
+  (我自己 grep `pool:/root:{...state_start` = **0 命中**)⇒ **两支今天拿到的值都是默认**。
+  §2 那张三行表的「传了/没传」列**描述的是调用点读不读字段,不是值的来源**——不对称仍在(退款支连读都不读),
+  但 MUST-FIX 的性质变了:**不是漏传已有权威值,是权威值从未被生产出来过**。
+  (旁注:`state_start: 1` 字面量存在于 **payoutshard 族**(`bshard-close-transport.mjs:407`/`pool-shard-settle.mjs:484`),
+  那是另一族输入,不是 PoolRoot 的 claim/refund。)
+- **② 对 §4 判据表的影响,精确到行**:
+  | 行 | 影响 |
+  |---|---|
+  | **A** | 「`state_start` 取自权威描述符制品」**今天无源可取**。在 @Bettor/@NWT 拍权威源口径(J2 doc §3 三选一)前,**可接受的过渡态** = 从生产符号 import(如 `_POOL_STATE_START`)而非测试写死 `1`,且**读数里必须写明这个限制**——它仍满足"不是测试字面量",但不满足"权威描述符",闭格与否由 Codex 对过渡态的认可决定 |
+  | **Fix** | 前提展开为四步:**①定义权威源(新东西,待拍)** ②builder 从它取 ③relay 侧消费 ④新命令缺字段 fail-closed。**①未拍板前 Fix 落不了码**(落了=字面量搬家) |
+  | **B-1 / B-2** | **不受影响,照跑**(测的是"传错会不会被发现/差分可辨",与权威源在哪无关) |
+- **③ 上游注意**:Codex 裁决原文的前提句「The claim path already propagates `cmd.inputs.root.state_start`」
+  被本修正覆盖——**替代包本身不因此失效**(B-1/B-2 是决定性件,未动),但 A/Fix 两件的可满足性叙述变了,
+  **建议随 §3 口径问题一并交回 Codex 知会**(路由归 Bettor)。
