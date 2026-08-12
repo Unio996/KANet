@@ -6,6 +6,13 @@
 > 最近刷新:**2026-07-06(Bettor 恢复状态层·§8.4 断档 6/29→7/06 补回)**。此前刷新 2026-06-29。
 > ⚠ **断档教训(2026-07-06 Owner+J1 抓)**: 7/1-7/06 公测一周激烈工作(结算/daemon/ZK-covenant/框架决策)**全没回写本 ledger、活在会滚走的频道** = §8.4 铁律违反(频道当记忆)。协调者(Bettor)失职。**恢复纪律: 每决议回写本 ledger + DECISIONS.md。**
 
+### (191) 2026-08-12 18:2xZ — 🔴 KANet-UI 紧急更正(git-first, 频道再撞 not-synced+去重): (190) 的"潜在真 bug"前提有误 -- unlockBshardRefundClaim 大概率没有 bug, 是我把两个同名不同物看串了
+- **撤回**: 我 18:02Z 说 `unlockBshardRefundClaim` 走的是"单入口 RefundClaim, 需 start=0"——**这个前提错**。
+- **现读坐实**: `PayoutShard.sil`/`PayoutShardV2.sil` 都是 5 入口 selector-dispatch 合约(`absorb`=OP_0 / `close_attest`=OP_1 / `claim`=OP_2 / `cancel_attest`=OP_3 / `refund_claim`=OP_4), 与 `unlockBshardRefundClaim`(p2sh.mjs:2611)scriptSig 里的选择子 `OP_4='54'` 精确对上——它是**多入口** covenant 的第 4 个 entry, 跟 `unlockBshardRefund`(OP_2 那条)**同一个 selector-dispatch 家族, state_start=1 是对的**, 不是"单入口需 0"。
+- **混淆源**: 我早前引的 `RefundClaim.sil` 文件头写死"1-entry: refund_payout"——**那是完全独立的另一个合约**(单入口, 无 selector), 走 `pool.js`/`refund-authorization.mjs`/`bettor-refund-claim-auto.mjs`/`pool-market-settler.js` 这条老 / 非-bshard "pool" 市场取消退款路径, **从没进过 `p2sh.mjs` 的 `unlockBshardRefundClaim`**。两个名字("refund_claim" 作为 entry 名 vs `RefundClaim.sil` 作为独立文件名)撞了, 我看串了没查清楚就发了。
+- **结论**: `unlockBshardRefundClaim` 现吃默认 `_POOL_STATE_START=1` **大概率是对的**, 不是漏传 0 的 bug。**(190) 那条"资金锁死"警报按此撤销, 别照它去"修"这个函数**——反而会把对的值改错。`RefundClaim.sil` 那条独立老路径若真要查 state_start, 需另开一格单独查(不复用本条结论, 归属完全不同的代码路径)。
+- **本条走 git-first**: 频道再次撞 `RPC node is not synced`(与 (183) 链级爬行同族)+ 一次去重缓存误伤(前一次失败尝试仍被记成"发过"), 追平频道后请照此条为准, 别按我 18:02Z 那条继续。
+
 ### (190) 2026-08-12 18:0xZ — 🔴 停摆解除记账 + CP1 gating 答(KANet-UI: 两 typed 路径 cmd.type 分派=Codex 要的绑定层)+ 🔴 挖出潜在真 bug: claim 单入口需 start=0 可能吃默认 1=资金锁死
 > ⏱ **~8h 停摆(09:26→17:56Z)根因**: J2 关键路径空转(以为"等实证"而实证是它自己的活)+ Bettor 被动守(违 Owner"主动盯住", 该给带截止交付项没给)。全员实活着(KANet-UI 无待办正常静默/J2 空转/进程 4 会话全在)。**解法**: J2 接管+顶替臂撤(TaskStop, 零 push)+带截止 CP1/CP2 检查点+Bettor 后台定时器 18:30Z 主动查。机制修法入册: **开放式派工是停摆机理, 关键路径必带截止交付项+协调者主动追不等**。
 - **CP1 gating 已答(KANet-UI, relay.mjs+p2sh.mjs:1668 现读)**: 退款**两条 typed 路径按 cmd.type 显式分派**——`bshard_refund_cancelled`→`unlockBshardRefund`=PoolRoot 多入口 **start=1**; `bshard_refund_claim`→`unlockBshardRefundClaim`=单入口 RefundClaim **start=0**。⇒ **该 typed 分派本身=Codex 要的"构造时 typed 绑定"层**(非字节猜)。Fix 简化: 每 typed 路径绑自身模板已知 start, 不反解 redeem。KANet-UI 2026-06-20 注释(三方 offset bug 诊断)早预言此。
