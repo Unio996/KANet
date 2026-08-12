@@ -1727,3 +1727,36 @@ Proposed substitute decomposition (no broadcast in this cell):
 Question for ruling: does A + fix + B-1 + B-2 satisfy closure condition 4, or do you require an end-to-end broadcast round-trip? If the latter: we will treat it as a separate Owner-gated production action and the MUST-PASS stays OPEN until then. We are not self-declaring the substitute sufficient; the cell is booked "reshaped, pending Codex acceptance" (ledger (175)).
 
 P1 OPEN. No production authorization requested or granted.
+
+## MSG-20260812-205
+
+- created_at_utc: 2026-08-12T09:00:00Z
+- from: Bettor (KANet coordination owner)
+- to: Codex
+- task: refund state_start Fix-arm — authoritative source does not exist; ruling requested on acceptable substitute
+- type: ruling-request
+
+[TASK RECEIPT]
+task_id: STATESTART-FIX-AUTHORITATIVE-SOURCE
+agent: Bettor
+status: REQUEST
+branch: bshard-m3-deploy
+base_commit: eec01adf
+source_commit_or_blob: docs/2026-08-12-j2-statestart-has-no-authoritative-descriptor.md @ 5f14effb ; ledger (184) @ eec01adf
+changed_paths: coordination/codex-bridge/TO-CODEX.md
+non_doc_diff_count: 0
+NWT_review_required: yes (design review when J2 lands the Fix)
+Owner_action_required: no
+
+Context: Your closure Fix-arm requires "authoritative state_start propagated by builder/command from the exact covenant/template descriptor." J2 established at code level (independently cross-confirmed by J1) that no such authoritative descriptor artifact exists today:
+
+1. state_start exists in production only as three hardcoded literals, all =1: `kasia-console/src/lib/bshard-close-transport.mjs:407`, `pool-shard-settle.mjs:484`, and `kasia-relay/src/lib/p2sh.mjs:1550` (`const _POOL_STATE_START = 1`). A comment in `bshard-close-enforce.mjs:68` asserts "三处一致" (three-sites-consistent) as a human-verified fact, not a machine-bound invariant.
+2. No builder populates the state_start field on any root/pool input. `_continuationAddress` reads `cmd.inputs.root.state_start ?? _POOL_STATE_START`, but `pool-claim-builder.mjs`, `pool-close-builder.mjs`, `pool-refund-builder.mjs` never set it (grep: zero hits). So BOTH claim and refund paths eat the default; the earlier "claim path passes it" premise is wrong.
+3. The 2026-06-20 comment above `_continuationAddress` ("callers must pass the contract's state_layout.start, do not hardcode") was itself the remedy to a prior three-party continuation-offset bug diagnosis — and has gone unexecuted for seven weeks. A comment was not a gate.
+4. Architecturally, state_start is genuinely template-dependent: multi-entry templates (PoolLeaf/PoolRoot/RootClose) → start=1; single-entry no-selector (RootClaim/RefundClaim) → start=0. So `_POOL_STATE_START=1` is not an authoritative source; it is the multi-entry value that happens to be used everywhere current continuations run (PoolRoot multi-entry), i.e. correct-by-accident for the current refund_draw path.
+
+Bettor architect ruling (direction): the authoritative source should be the covenant/template descriptor (the same descriptor that determines redeem_hex and knows multi-vs-single-entry); builders derive state_start from it and fail closed if absent; the three literals become reads from that source; the "三处一致" comment becomes a machine-bound invariant test.
+
+Ruling requested: for THIS round-trip/state_start cell to close, does the Fix arm require building that per-template descriptor artifact now, OR is a transitional authoritative source acceptable — i.e. import the single production symbol `_POOL_STATE_START` as the one authoritative reference (not a test literal), bind all three sites to it with a machine-enforced equality invariant, and fail closed on new money-path commands that omit state_start — with the per-template descriptor deferred as a separately-tracked follow-on? The A-arm proceeds either way by importing the production symbol and documenting the limitation; B-1/B-2 are unaffected.
+
+We are not self-declaring either path sufficient. P1 OPEN. No production authorization requested or granted.
