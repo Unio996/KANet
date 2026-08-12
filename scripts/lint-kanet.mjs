@@ -134,6 +134,40 @@ function checkR_STATUS_GUARD_BLACKLIST(fp, content) {
   }
 }
 
+// ── R-BYTE-CENSUS-PREDICATE [WARN] (COORD-LEDGER (188), 2026-08-12): redeem/covenant 字节谓词禁凭记忆/猜写 ──
+// 根因(J2 撞过一次, a113e3a3 已回退): 把"多-entry PoolRoot"识别写成 `首字节 == 0x51`(从注释推的), 而
+// 生产真实制品一律 0x6b——测试夹具也是自己编的同一个发明字节, 于是全绿掩盖了这条 fail-closed 谓词会挡死
+// 所有退款。同族三周前(2026-07-21)已撞过一次(decodeV1State 查 buf[0] 而 marker 在 buf[1])——两次都是
+// "点状加固"(只修当次 fixture)没传播到"下一个在这写字节谓词的人"。派生纪律: 任何 redeem/covenant 字节
+// 相等谓词落码前必须先跑 `scripts/tn12-redeem-prefix-census.cjs`(20s, 只读)核对真实制品, 不能凭注释/记
+// 忆写死。本规则只在 kasia-relay/kasia-console 里"看起来在读 redeem/covenant 字节"的文件生效, 启发式非
+// 精确 AST(同 R-STATUS-GUARD-BLACKLIST 精神), 误报走转义: 同段内已引用 census 脚本 / k18 offset 定稿文档 /
+// 显式 `// lint-allow-byte-census: <reason>` 三者之一即视为已核实, 不告警。WARN 不阻塞(非 gating, 归 lint
+// 域 KANet-UI/巡探跟)。
+function checkR_BYTE_CENSUS_PREDICATE(fp, content) {
+  if (!/\.(mjs|js|cjs)$/.test(fp)) return;
+  if (!/kasia-relay[\\/]src|kasia-console[\\/]src/.test(fp)) return;
+  // 范围收窄: 文件路径或前 2000 字符提及 redeem/covenant/continuation 相关词, 才判定"在读链上字节"
+  const scopeHint = /redeem|covenant|continuation|PoolRoot|PayoutShard|state_layout/i;
+  if (!scopeHint.test(fp) && !scopeHint.test(content.slice(0, 2000))) return;
+  const lines = content.split('\n');
+  // 谓词形态: buf-like[N] 或 .readUInt8(N)/.readUint8(N) 与 0x 十六进制字面量做 ===/==/!== 比较
+  const bytePredicate = /(?:\[\s*\d+\s*\]|\.readU?int8\s*\(\s*\d*\s*\))\s*(?:===?|!==?)\s*0x[0-9a-fA-F]{1,2}\b|0x[0-9a-fA-F]{1,2}\b\s*(?:===?|!==?)\s*\w+(?:\[\s*\d+\s*\]|\.readU?int8\s*\()/i;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (/^\s*(\/\/|\*|\/\*)/.test(line)) continue;   // 纯注释行不算谓词
+    if (!bytePredicate.test(line)) continue;
+    const window = lines.slice(Math.max(0, i - 4), Math.min(lines.length, i + 2)).join('\n');
+    // 已核实转义: census 脚本引用 / k18 offset 定稿文档引用 / 显式 escape hatch —— 窗口内 OR 文件头
+    // (本仓惯例: 出处常写在文件顶部 header comment, 不是每处谓词旁边都重复引用一次)
+    const escapeRe = /tn12-redeem-prefix-census|k18-landing-design|实测|lint-allow-byte-census:\s*\S/;
+    if (escapeRe.test(window) || escapeRe.test(content.slice(0, 3000))) continue;
+    warn('R-BYTE-CENSUS-PREDICATE',
+      `redeem/covenant 字节相等谓词(疑似凭记忆/注释猜的常量, 未见 census/实测引用)——同族已撞两次(0x51 vs 真 0x6b; buf[0] vs marker 真在 buf[1]), 根因都是"点状修复没传播"。落码前跑 \`node scripts/tn12-redeem-prefix-census.cjs\`(20s, 只读)核对真实制品分布, 核完在附近加一行引用(如 "// 实测见 docs/2026-07-21-...k18...md" 或census脚本文件名)消除本告警; 若确认非"猜的"(如已有独立密码学/结构证明), 加 \`// lint-allow-byte-census: <reason>\`。`,
+      fp, i + 1);
+  }
+}
+
 // ── R-EXPLORER-URL-BYPASS [ERROR, 硬阻塞]: explorer 死域名字面量禁散装 ──
 // (explorer 死链全库收敛设计 §3, docs/2026-07-12-explorer-url-dead-link-consolidation-design.md, NWT diff审
 // d7c28353 提醒: helper 契约改了但零调用点, 各消费点各自 inline null-safe 重写——不是这条规则堵复发, 收敛
@@ -1458,6 +1492,7 @@ for (const fp of targets) {
   checkR_PS_FAMILY_DISPATCH(fp, content);      // R-PS-FAMILY-DISPATCH [ERROR] (K-18 §3.4 2026-07-21): compilePayoutShardRedeem/V2Redeem 调用点白名单, 防绕过 coherence gate
   checkR_SCA_ALIAS_ORIGIN(fp, content);        // R-SCA-ALIAS-ORIGIN [ERROR] (M0c-1 批C 2026-07-23): sendCommandAsync 别名 call 缺 origin/裸值传参检测, 防 armed 后漏标断路
   checkR_SENDCMD_ORIGIN_REQUIRED(fp, content); // R-SENDCMD-ORIGIN-REQUIRED [WARN→ERROR] (第三断路族根治 2026-07-23): 直调缺 origin 检测, 57 处补标驱动器
+  checkR_BYTE_CENSUS_PREDICATE(fp, content);   // R-BYTE-CENSUS-PREDICATE [WARN] (COORD-LEDGER (188) 2026-08-12): redeem/covenant 字节谓词禁凭记忆猜写, 落码前先跑 census
 }
 checkR10();
 checkR_NULLIFIER_I64();
