@@ -1671,7 +1671,24 @@ export function _continuationAddressV2(inputRedeemHex, newStateHex, networkId, s
 //    (pool-claim/close/refund-builder 三个逐个查, 全无) ⇒ **该指令 7 周来从未被执行, 两支都吃默认**。
 //    ⇒ 又一次「注释不是闸」。详见 docs/2026-08-12-j2-statestart-has-no-authoritative-descriptor.md
 // 🔵 export 同上: 仅为可测性, 行为零改动。
-export function _continuationAddress(inputRedeemHex, newStateHex, networkId, stateStart = _POOL_STATE_START) {
+export function _continuationAddress(inputRedeemHex, newStateHex, networkId, stateStart = undefined) {
+  // 🔴 **潜伏陷阱的拆除**（J2 2026-08-12 报；今日零 caller 故非现行事故）:
+  //    下方长度白名单**收 `_ROOTCLAIM_STATE_LEN`(96B)**，而旧默认是多-entry 的 1
+  //    ⇒ 将来第一个实现该长度族 continuation 的人会被**白名单放行**（等于被告知"这个 state 类型合法"）、
+  //      拿到**可能错的 offset**，产出**语法合法、资金锁死**的地址且**全程不报错**。⇒ 该长度**必须显式传**。
+  //    ⚠ `== null` 而非 `=== undefined`（@J1tn 19:09Z 抓）: 显式传 `null` 会穿透 `===`，
+  //       而 splice 会把 `null` 当 0 静默用 —— **正是这道闸要防的失败，从闸底下走过去**。
+  //    ⚠ **防御深度的实话**: 现存调用点普遍写 `?? _POOL_STATE_START`，那个习语**在进本函数前**
+  //       就把 undefined 换成 1 ⇒ 本闸**只拦"省略第 4 参"的写法**，照抄主流习语的人绕得过去。
+  //       它减少一类误用，**不等于**该族再也不会吃错默认。
+  if (stateStart == null) {
+    if (Buffer.from(newStateHex, 'hex').length === _ROOTCLAIM_STATE_LEN) {
+      // ⚠ 96B 不唯一指认某一族（`:1554`: 已 superseded 的 depth-8 PayoutShard state 也是 96B）
+      //    ⇒ 文案不下断言，只要求显式传（方向 fail-closed，抛而非算错）。
+      throw new Error(`_continuationAddress: ${_ROOTCLAIM_STATE_LEN}B state 对应多于一族（RootClaim 族 / 已 superseded 的 depth-8 PayoutShard）⇒ 必须显式传 stateStart，不猜`);
+    }
+    stateStart = _POOL_STATE_START;
+  }
   const redeem = Buffer.from(inputRedeemHex, 'hex');
   const stateBytes = Buffer.from(newStateHex, 'hex');
   if (![_LEAF_STATE_LEN, _ROOT_STATE_LEN, _ROOTCLAIM_STATE_LEN, _PAYOUTSHARD_STATE_LEN].includes(stateBytes.length)) {
@@ -2809,7 +2826,19 @@ export async function unlockBshardRefund(args) {
     const ticketUtxo = await _matchUtxo(rpc, _addressFromRedeem(cmd.inputs.ticket.redeem_hex, networkId), cmd.inputs.ticket.outpointTxid);
     const matched = [poolUtxo, ticketUtxo];
 
-    const newPoolAddr = _continuationAddress(cmd.inputs.pool.redeem_hex, _serializeRootStateHex(cmd.outputs.pool_continuation.state), networkId);
+    // 🔴 Fix ④：**只断言，不选择**。本路径由 relay 按 `cmd.type='bshard_refund_cancelled'` 显式分派，
+    //    花的必然是 PoolRoot（多-entry）⇒ start 必须是 `_POOL_STATE_START`。
+    //    缺失/不符 ⇒ **抛**，不静默回落 —— 回落正是上方注释要求过、却七周无人执行的那条。
+    //    ⚠ 形状是**断言**不是选择器：这里没有"选 0"的分支，因为该 typed 路径永不花单-entry
+    //      （`bshard_refund_claim` 那条花的是 PayoutShard，start 同为 1；两个 "RefundClaim" 是同名不同物）。
+    const poolStateStart = cmd.inputs.pool.state_start;
+    if (poolStateStart == null) {
+      throw new Error('bshard_refund: cmd.inputs.pool.state_start 缺失 — typed 路径必须由 builder 携带（builder 侧由模板前缀派生）；fail-closed，不回落默认');
+    }
+    if (Number(poolStateStart) !== _POOL_STATE_START) {
+      throw new Error(`bshard_refund: state_start=${poolStateStart} 与本 typed 路径的 PoolRoot 族（${_POOL_STATE_START}）不符 ⇒ 拒`);
+    }
+    const newPoolAddr = _continuationAddress(cmd.inputs.pool.redeem_hex, _serializeRootStateHex(cmd.outputs.pool_continuation.state), networkId, Number(poolStateStart));
     const outputs = [];
     outputs[w.payout_out_idx] = new TransactionOutput(BigInt(cmd.outputs.payout.amountSompi), payToAddressScript(new Address(cmd.outputs.payout.address)));
     outputs[w.pool_out_idx] = new TransactionOutput(BigInt(cmd.outputs.pool_continuation.amountSompi), payToAddressScript(new Address(newPoolAddr)));

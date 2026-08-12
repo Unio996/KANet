@@ -59,7 +59,11 @@ const t = async (name, fn) => {
 // 字段序逐字抄生产 `_serializeRootStateHex`，不是我编的
 const STATE = { local_yes: '11', local_no: '22', count: '3', pool_value: '444', closed: '0', winningSide: '0', payoutRoot: 'ab'.repeat(32) };
 const stateHex = p2sh._serializeRootStateHex(STATE);
-const POOL_REDEEM = '51' + stateHex + 'ff'.repeat(8);
+// ⚠ 前缀是**合成 fixture 的**，不冒充生产模板字节（生产实测首字节是 0x6b，见
+//    `scripts/tn12-redeem-prefix-census.cjs`）。本用例测的是**传播与断言**，不是模板身份识别，
+//    所以这里只需要"一个长度为 1 的前缀"，且**长度由它自己派生**而不是写死。
+const POOL_PREFIX_HEX = '51';
+const POOL_REDEEM = POOL_PREFIX_HEX + stateHex + 'ff'.repeat(8);
 const TICKET_REDEEM = '51' + stateHex + 'ee'.repeat(8);
 const priv = new kaspa.PrivateKey('11'.repeat(32));
 const ADDR = priv.toKeypair().toAddress(kaspa.NetworkType.Testnet).toString();
@@ -69,7 +73,9 @@ async function runRefundAndCaptureContinuationSpk() {
   captured = null;
   globalThis.__FAKE_TXID_QUEUE__ = ['aa'.repeat(32), 'bb'.repeat(32)];
   const cmd = {
-    inputs: { pool: { redeem_hex: POOL_REDEEM, outpointTxid: 'aa'.repeat(32) },
+    // post-Fix: 命令必须携带 state_start。这里**照 builder 的方式派生**（模板前缀长度），
+    // 而不是写一个字面量 —— 用例若自己写死 1，就又变成"夹具与实现共享同一个发明"。
+    inputs: { pool: { redeem_hex: POOL_REDEEM, outpointTxid: 'aa'.repeat(32), state_start: POOL_PREFIX_HEX.length / 2 },
       ticket: { redeem_hex: TICKET_REDEEM, outpointTxid: 'bb'.repeat(32) } },
     outputs: { payout: { amountSompi: '500000000', address: ADDR },
       pool_continuation: { amountSompi: '500000000', state: STATE },
@@ -103,6 +109,68 @@ await t('B-1 对照臂 · start=0 的期望与 start=1 【不同】(否则决定
   const at1 = spkOfAddress(p2sh._continuationAddress(POOL_REDEEM, stateHex, NET, 1));
   const at0 = spkOfAddress(p2sh._continuationAddress(POOL_REDEEM, stateHex, NET, 0));
   assert.notStrictEqual(at1, at0, 'start=1 与 0 产出同一个 spk ⇒ 本用例无法察觉调用点传错 start');
+});
+
+// ── post-Fix 两道 fail-closed 闸（Codex Fix ④ + Bettor 18:18Z typed 绑定） ──────
+const cmdWithPool = (poolExtra) => ({
+  inputs: { pool: { redeem_hex: POOL_REDEEM, outpointTxid: 'aa'.repeat(32), ...poolExtra },
+    ticket: { redeem_hex: TICKET_REDEEM, outpointTxid: 'bb'.repeat(32) } },
+  outputs: { payout: { amountSompi: '500000000', address: ADDR },
+    pool_continuation: { amountSompi: '500000000', state: STATE }, change_address: ADDR },
+  witness: { pool_out_idx: 0, payout_out_idx: 1, ticket_in_idx: 1, ticket_prefix_len: 0, ticket_suffix_len: 0 },
+});
+const runWith = (cmd) => p2sh.unlockBshardRefund({
+  wallet: { getPrivateKey: () => priv, getNetworkId: () => NET }, cmd, networkId: NET,
+});
+
+await t('Fix④ · 缺 state_start ⇒ 生产码【抛】且未走到 submit（不静默回落默认）', async () => {
+  captured = null;
+  globalThis.__FAKE_TXID_QUEUE__ = ['aa'.repeat(32), 'bb'.repeat(32)];
+  await assert.rejects(() => runWith(cmdWithPool({})), /state_start 缺失/, '缺失竟未抛 ⇒ 回落默认那条路还在');
+  assert.strictEqual(captured, null, '抛之前不该已经走到 submit');
+});
+
+await t('Fix④-bis · 显式传 null 也必须抛（=== undefined 会被它穿透, splice 把 null 当 0）', async () => {
+  captured = null;
+  globalThis.__FAKE_TXID_QUEUE__ = ['aa'.repeat(32), 'bb'.repeat(32)];
+  await assert.rejects(() => runWith(cmdWithPool({ state_start: null })), /state_start 缺失/,
+    'null 穿透 ⇒ 正是这道闸要防的失败从闸底下走过去（@J1tn 19:09Z 抓）');
+});
+
+await t('Fix⑤ · state_start 与本 typed 路径的族不符 ⇒ 抛', async () => {
+  captured = null;
+  globalThis.__FAKE_TXID_QUEUE__ = ['aa'.repeat(32), 'bb'.repeat(32)];
+  await assert.rejects(() => runWith(cmdWithPool({ state_start: 0 })), /不符/,
+    '不符的 offset 被放行 ⇒ 错 offset = 语法合法但资金锁死的 continuation');
+});
+
+// ── 权威产生步（builder 侧）—— Codex ⑦ 要的决定性变异打的就是这里 ────────────────
+// 🔴 没有这两格，针对"权威怎么来的"那几行的变异就【无人观察】。
+const { buildRefundCommand } = await import('./pool-refund-builder.mjs');
+const refundArgs = (over = {}) => ({
+  witness: { poolOutIdx: 0, payoutOutIdx: 1, ticketInIdx: 1, ticket_prefix_len: 0, ticket_suffix_len: 0,
+    ticket_prefix: Buffer.alloc(0), ticket_suffix: Buffer.alloc(0), bettorPk: 'aa'.repeat(32), stake: 100n },
+  poolOutpointTxid: 'aa'.repeat(32), poolRedeemHex: POOL_REDEEM, poolTemplatePrefixHex: POOL_PREFIX_HEX,
+  currentPoolState: STATE, ticketOutpointTxid: 'bb'.repeat(32), ticketRedeemHex: TICKET_REDEEM,
+  ticketState: { bettorPk: 'aa'.repeat(32), direction: 1, stake: 100n, shardPoolId: 1 },
+  poolValueSompi: 1000n, bettorAddress: ADDR, poolContinuationState: { ...STATE, closed: 2 },
+  changeAddress: ADDR, ...over,
+});
+
+await t('权威步 · builder 从模板前缀【派生】state_start 并写进命令（不是字面量）', () => {
+  const cmd = buildRefundCommand(refundArgs());
+  assert.strictEqual(cmd.inputs.pool.state_start, POOL_PREFIX_HEX.length / 2,
+    'builder 写进命令的值必须等于前缀长度 —— 那才是权威, 常量只是防御断言');
+});
+
+await t('权威步 · 前缀与 redeem 对不上 ⇒ builder 拒（描述符必须绑到实际脚本上）', () => {
+  assert.throws(() => buildRefundCommand(refundArgs({ poolTemplatePrefixHex: '6b' })),
+    /不以 poolTemplatePrefixHex 开头/,
+    '拿一个不属于这份 redeem 的前缀也能过 ⇒ "权威"退化成申报');
+});
+
+await t('权威步 · 缺前缀 ⇒ builder 拒(fail-closed, 不默认)', () => {
+  assert.throws(() => buildRefundCommand(refundArgs({ poolTemplatePrefixHex: undefined })), /required/);
 });
 
 console.log(`\n${fail === 0 ? '✅' : '🔴'} u1-roundtrip-b1: ${pass} PASS / ${fail} FAIL`);
