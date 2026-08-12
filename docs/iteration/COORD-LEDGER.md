@@ -6,6 +6,12 @@
 > 最近刷新:**2026-07-06(Bettor 恢复状态层·§8.4 断档 6/29→7/06 补回)**。此前刷新 2026-06-29。
 > ⚠ **断档教训(2026-07-06 Owner+J1 抓)**: 7/1-7/06 公测一周激烈工作(结算/daemon/ZK-covenant/框架决策)**全没回写本 ledger、活在会滚走的频道** = §8.4 铁律违反(频道当记忆)。协调者(Bettor)失职。**恢复纪律: 每决议回写本 ledger + DECISIONS.md。**
 
+### (185) 2026-08-12 09:0xZ — ✅ B-1 验落链在范围(p2sh 零改动·变异 detected=2/MISSED=0)· 🔴 NWT 疑似下线(两腿12h静默·重启后未复)· round-trip 验收审路由 Codex(不阻塞缺席审阅者)
+- **B-1 验落链(8c6d930b, Bettor 逐 diff+stat 核)**: 仅新增 3 测试/harness 文件(u1-roundtrip-b1 .hooks/.mutants/.test.mjs), **p2sh.mjs 零改动**(git show -- p2sh.mjs 空)。设计满足 Codex B-1: ESM loader 钩子只换 kaspa-wasm 的 RpcClient ⇒ `unlockBshardRefund` 原封生产码跑到 continuation 构造、submit 前 fake 捕获; 变异生产调用点 :2812 传 start=0/2 **两个都翻红**(排除只对 0 敏感), baseline 先绿+sha256 还原; fake 按调用序发 UTXO(_addressFromRedeem 未导出)⇒ 不编码被检验的地址假设=避"correct by accident"。**detected=2/MISSED=0/INERT=0/BROKEN=0**。强产物。
+- **round-trip 测试臂状态**: B-1✅+B-2✅(均验在范围)· A 臂待 J2(生产符号 import+逐字节比历史 continuation)· Fix 臂待 Codex 边界(桥 0c2ca79f)。
+- **🔴 NWT 疑似下线(正向证据非排除法)**: 最后频道发言 08-11 21:02Z, 今日 git 零提交(近期 commit 均旧 broker 活)。**console 重启(180)治好频道后 J1/J2 均恢复、唯 NWT 两腿(频道+git)全静默至今 ~12h**——基础设施已复而它未复=会话大概率 down(区别于 J1/J2 gap 期 git-first 在干活)。Bettor 已两 ping(r021/r023)无回。
+- **🏛 处置: round-trip 验收审路由 Codex(不阻塞缺席审阅者)**: Codex 是设 (176) 闭合条件的独立红队、一直代码级审 ⇒ 审 B-1/B-2(及 A 落地后)对其自设条件, 独立性≥内部第二只眼。NWT 内部第二只眼待其回位补。**NWT 疑似下线上 Owner**(可如 KANet-UI 人工再派)。
+
 ### (184) 2026-08-12 08:5xZ — 🟢 Bettor 主动追平 git 工作流(此前只盯频道漏了真进度)· J1 关机确认 · B-2 验落链在范围 · 🏛 state_start 裁定+路由 Codex · J2 回执窗
 - **🔵 方法论认账(Owner 08:4xZ 点)**: 团队 git-first 干活而我只盯频道 monitor ⇒ 漏掉 J2 已交的批B(N5, afa3ceca)/B-2(d686e5cd)/state_start 实发现(5f14effb)。**已加 origin/bshard-m3-deploy 提交流主动监视**(120s 一拍)。教训: 频道腿抖时, 真相在 git commit 流不在频道, 协调者必须主动拉。
 - **J1 关机确认(Owner 转达)**: J1 交付全在 git(判据表 6a782393/safely_absent v0.2 6150310b/(183) 链级读数), durable; 已交叉复核完 J2 state_start 发现。**无关键路径单卡在 J1**(round-trip 主审=NWT)。J1 离线期其节点链爬监视停(非关键)。(183) 链级发现(链停⇒全员频道腿一起退化, 因消息=链上 TX, 两节点交叉证实)存档=基础设施共享根因, 归 KANet-UI/巡探跟。
