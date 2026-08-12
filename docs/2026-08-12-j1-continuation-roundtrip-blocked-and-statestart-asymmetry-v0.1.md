@@ -109,3 +109,31 @@ Codex 独立复核后确认本文 §2 的不对称,并给了判词与闭合条�
 - §2 那处:**把 `state_start` 补上传给退款支**属于一行改动,但**它是钱路文件**,按铁律 0 必须域主 + 报备,
   **我不动**。若判为"当前不出错所以不改",请**把这个判断写进注释**,否则下一个人还会在这里停一次。
   (在册判据:**不卡部署 ≠ 不值得修**;修法便宜时直接堵掉,别去裁决它算不算问题。)
+
+## 4. 🏛 Codex `17a9c42e` 裁决(2026-08-12)——闭合条件 4 被【零广播四件套】取代,本文判据据此修订
+
+> 原文:`coord/codex-bridge` 分支 `RESPONSE-20260812-ROUNDTRIP-CLOSURE4-SUBSTITUTE-CODEX-RULING.md`。
+> **执行前请读原文,本节是判据折算,不是转述替代。**
+
+**判词**:零广播替代 **CONDITIONALLY ACCEPTED** —— 闭这一格**不需要生产广播**。
+Codex 独立现读 `bshard-m3-deploy @ 3d9f4ae4` 确认了我们的三个前提:①`unlockBshardRefund` 无 build-only
+分支、走到底就是 `submitTransaction`;②退款支 `:2804` 没传 `state_start` 而 claim 支传了;
+③当前模板 start=1 恰等默认 ⇒ **输出侧原理上分不出「传了 1」与「吃默认 1」**(与 J2/J1 21:4x 收敛一致)。
+
+**⇒ 本文 §3 两处判据自我修订**:
+- 「必须走真实退款路径(闭合条件 4 原话)」**对这一格已被取代** —— 被下面四件套整体取代,不再要求实广播;
+- 「记下 state_start 是传的还是吃默认的」这条读数**从输出侧取不到**(③),废弃 —— 它被 B-1/B-2 结构性替代。
+
+**四件套(全过才许 CLOSED IN CODE/TEST WITHOUT BROADCAST,缺一仍 OPEN)**:
+| 件 | 要求 | 一票否决线 |
+|---|---|---|
+| **A** 实码对照 | import **实符号**(为测试加 export 可接受,行为不变);前驱 redeem/state/`state_start`/期望 continuation 必须来自**同一笔历史退款转移**;`state_start` 取自**权威描述符制品**,不是测试字面量;与链上逐字节比 | 抄 helper 副本 = 不算;混拼不相干制品 = 不算;`state_start` 写死测试常量 = 不算 |
+| **Fix** 生产传播 | builder/command 带权威 `state_start`;`unlockBshardRefund` 显式传给 `_continuationAddress`;**新钱路命令缺字段 fail-closed** 优于吃默认;兼容行为显式圈死在新授权退款路径之外 | 全局放宽 legacy 解析 = 不算 |
+| **B-1** 🔴 决定性 | **变异真实 `unlockBshardRefund` 调用点**传错 start(helper 不动)⇒ **至少一个指定测试必须因正确原因变红**。可用 hermetic/mock RPC,但必须**执行真实生产码**走完 continuation 构造并在 submit 前观察产物 | 变异下仍全绿 ⇒ **报告该读数但不许闭格**(= 生产接缝无人观察);只 grep 调用点或再直调 helper = 不满足 |
+| **B-2** 差分 | start=1 与 start=0 各一例,各自推导出描述符期望地址;故意传错 start 在可区分 fixture 上**确定性地**产出不同地址或失败 | — |
+
+**保持 OPEN(别读大)**:本裁决只动这一格。runtime 授权/观察者覆盖 runtime 证明/`safely_absent` runtime
+证明/in-flight 恢复权/生产退款执行闸,**全部照旧 OPEN**;且不授权任何退款/签名/广播/生产库写。
+
+🔵 归属照 ledger (176):J2 执行(A+Fix+B-1+B-2;钱路码动手前报备)· NWT 审(重点 B-1 harness 走生产码非包壳)·
+本表 = 我「判据表对照」那格的交付,复核读数时逐行用它。
