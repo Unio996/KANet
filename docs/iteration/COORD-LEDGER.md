@@ -6,6 +6,11 @@
 > 最近刷新:**2026-07-06(Bettor 恢复状态层·§8.4 断档 6/29→7/06 补回)**。此前刷新 2026-06-29。
 > ⚠ **断档教训(2026-07-06 Owner+J1 抓)**: 7/1-7/06 公测一周激烈工作(结算/daemon/ZK-covenant/框架决策)**全没回写本 ledger、活在会滚走的频道** = §8.4 铁律违反(频道当记忆)。协调者(Bettor)失职。**恢复纪律: 每决议回写本 ledger + DECISIONS.md。**
 
+### (207) 2026-08-12 21:0x本地 — 🔴 Owner 令"赶紧落地" · Bettor 硬推 J2 立即落 CP3 升级形态 · 审阅链并行不串等(频道 down 走 git)
+- **Owner 直令**: 赶紧落地(round-trip provenance fix)。设计已收敛无歧义(J1 两二审 SOUND+升级, (206) 采纳)。
+- **📌 @J2 立即落 CP3 升级形态(20 分钟内报 diff, git)**: ①`computePoolRootArtifact()`(同 computeSpineArtifact 规格)出 {script, state_layout}; ②`state_start=state_layout.start`(编译器零跳)删松散 poolTemplatePrefixHex; ③**单步** `blake2b(redeem.slice(0,start)‖redeem.slice(start+len))==烤死 root_tmpl_hash`(源=构造记录/recompile 非 offset-parse, J1 n2)一步覆盖 §4+suffix+§3 结构保证; ④同批变异(换票腿必红/suffix 不符必红/跳过跨边界比必红——**该 fixture 用真 PoolRoot 制品非合成 '51'**, Codex (200) 要件); state_start 退前缀反推=预注册 MISSED。
+- **审阅链并行(提速非跳审)**: @NWT 立即红队落地形态(可利用性走带外禁上频道); @J1 J2 落码即照判据表核实现; Codex 我 land 后立即发桥复核; **Bettor 最终确认放最慢(三错重靠兜)但审不减**。钱路码, land 前 J1 实现核过。**Owner 要快=落地不是跳审。**
+
 ### (206) 2026-08-12 21:2xZ — 🔴 Bettor 自记第三错(从我记, 非仅 J1 catch 验实)· 🏛 采纳 J1 升级为设计定向(单 hash 比对结构性钉 §3+§4)· 路由 NWT 红队+J2 落码
 - **🔴 Bettor 认账第三笔(自记)**: 我 20:47Z r039 route "用 witness prefix_len(psArtifact)"=**票腿定池 offset**(A 模板定 B 模板), J2 e919fb2e 拦、J1 (205) 验实。**round-trip 三错**: ①startsWith 绑身份②B-1 用真制品(假 '51')③票腿定池 offset——全被队友/Codex 兜。**元点(诚实, 已上 Owner)**: 会话 ~26h, 我深审错率升, 建议 Owner 酌情换新鲜 Bettor 接深审线; 在此前我审放最慢、每断言贴行号、重靠 NWT/J1/Codex 兜。
 - **🏛 采纳 J1 (205) 升级为设计定向**: 不走 J2 三步(绑前缀+总长+分开 §4 比), 走**一步**——`blake2b(redeem.slice(0,state_layout.start) ‖ redeem.slice(start+len)) == 烤死 root_tmpl_hash`(源照 J1 n2: 构造记录/recompile, 非 offset-parse)。一步同覆盖: 跨"编译产物 vs 链上烤死"边界(§4)+ suffix + **§3 切分点从"碰巧对"升结构保证**(切错 offset⇒hash 不匹配)。state_start=state_layout.start(编译器零跳)。变异加"suffix 不符必红"; "跳过跨边界比⇒红"格 fixture **须真 PoolRoot 制品/pinned**(非合成)。
