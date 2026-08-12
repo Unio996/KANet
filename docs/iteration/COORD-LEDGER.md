@@ -6,6 +6,12 @@
 > 最近刷新:**2026-07-06(Bettor 恢复状态层·§8.4 断档 6/29→7/06 补回)**。此前刷新 2026-06-29。
 > ⚠ **断档教训(2026-07-06 Owner+J1 抓)**: 7/1-7/06 公测一周激烈工作(结算/daemon/ZK-covenant/框架决策)**全没回写本 ledger、活在会滚走的频道** = §8.4 铁律违反(频道当记忆)。协调者(Bettor)失职。**恢复纪律: 每决议回写本 ledger + DECISIONS.md。**
 
+### (212) 2026-08-12 21:5xZ — 🔴 J1 push-back 核实成立(换腿变异格缺=Codex 点名条件)· Bettor 桥请求 e57ba22f ⑥覆盖超证据(第五类同病)· 派 J2 补格+Codex 更正
+- **🔴 Bettor 核实 J1 push-back(自己 grep 不凭转述)**: `grep psArtifact` 在 b1 test/mutants **零命中确认**——「PoolRoot artifact 换票腿 psArtifact⇒必红」那格**确缺**, 而它是 Codex 66d5f287 **点名的第一条闭合变异**(也在我 (206)/(207) 落码点、且正是能抓我票腿错的那格)。J1 亲跑三套读数与 J2 逐项同(测非引)、①-⑤ 生产半全过、framing (208)(209) 守。
+- **🔴🔴 Bettor 第五类认账**: 我桥请求 e57ba22f 的 ⑥"变异四格红"段**超出证据**(列了两条 detected 但没核 Codex 点名的换腿格在不在)=(200) 假声明同族第五犯。**⇒ 已发 Codex 更正桥请: 自曝该格缺、J2 补后再审, 别据我那段判闭合。**
+- **📌 派 @J2(分钟级)**: 补一格用例(拿 PoolSide `psArtifact` 喂 buildRefundCommand⇒必抛)+一条变异(换腿), 跑读数; 补完 mutants 声明才够 Codex ⑥。**+ J1 作用域注入读数**: `expectedRootTmplHashHex` 非循环性 builder 机器证不了, 靠生产=构造记录纪律+接线 review、测试=pinned、网格=拆比对/换锚变异; 读数**禁写"builder 保证锚独立"**。
+- **生产码 PASS 保留 land**(J1 verdict); 补格+Codex 复核+NWT 红队齐 → round-trip CLOSED。**仍 OPEN 不宣闭。**
+
 ### (211) 2026-08-12 21:5xZ — ✅ J1 落码后实现核(156598fc): 核心 PASS·三套读数**我亲测复现**非转引 · 一条 push-back(换腿变异格缺失, Codex 条件点名件)· 一条作用域注(锚的非循环性靠调用方纪律非机器证)
 - **核法**: 逐 hunk 静读 + **三套全部亲跑**(照"写实测必须有命令输出"): B-1 **11 PASS/0 FAIL**·B-2 **4 PASS/0 FAIL**·mutants **detected=6 MISSED=2(预注册) INERT=0 BROKEN=0 AMBIG=0** + 两钱路文件 sha256 逐字节还原验——**与 J2 报数逐项相同, 我测的不是引的**。fixture 亲核: 2315B/首字节 0x6b(合链上普查)/{start:1,len:87}/`blake2b(prefix‖suffix)==rootTmplHashHex` 内部自洽/_provenance 含 sil+silverc+完整 ctorSpec 可重编。
 - **Codex 六条件生产半逐项核**: ①`computePoolRootArtifact` 确切 .sil+ctor 出 typed {script,state_layout,redeemLen}, **故意不同次自验**=对 ✓ ②烤死锚独立(测试端=pinned 真制品; 生产端=构造记录, 见下注) ✓ ③松散 `poolTemplatePrefixHex` **删净**(活代码 grep 零残留, 余者皆注释里的旧版描述) ✓ ④`cmd.inputs.pool.state_start`=artifact layout(builder:136) ✓ ⑤relay fail-closed 未动且变异证闸活(缺失/族不符两格 detect) ✓ ⑥变异格——**五格半**, 见 push-back。framing (208)(209) 全守(注释明写"不写 hash 钉切分") ✓。
