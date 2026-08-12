@@ -6,6 +6,12 @@
 > 最近刷新:**2026-07-06(Bettor 恢复状态层·§8.4 断档 6/29→7/06 补回)**。此前刷新 2026-06-29。
 > ⚠ **断档教训(2026-07-06 Owner+J1 抓)**: 7/1-7/06 公测一周激烈工作(结算/daemon/ZK-covenant/框架决策)**全没回写本 ledger、活在会滚走的频道** = §8.4 铁律违反(频道当记忆)。协调者(Bettor)失职。**恢复纪律: 每决议回写本 ledger + DECISIONS.md。**
 
+### (219) 2026-08-12 22:3xZ — 🏛 Bettor 采纳 CP4 方案 A(J1 二审 SOUND+我核两承重声明)· 🔴 Owner-gate: A 动 pool_markets 结算表加列=铁律 0 需 Owner 批 · 路由 J2 完成完整设计
+- **A 采纳(方向)**: J2 荐 A(pool_markets 加 `root_tmpl_hash` write-once 列, builder 收 marketId 查)——存值本身非重推导; B 踩 DATABASE.md"偏移不能凭 ctor 猜"+refund inputs 无 leaf; C 踩 583"本地表跨节点漂=两机不同锚"。J1 (218) 二审 **A SOUND**+"删参数=全要害"判对。Bettor 核两承重声明: pool_markets 确无该列(grep 零)+ fee_rules write-once trigger 先例存在(migrate.js:5405-5410)=A 有据。A **能现做且不接退款执行路径**(建源+builder 查, 退款执行仍 unwired)=正是 Codex "命名 resolver 从独立 PoolRoot 记录取"。
+- **🔴 J1 承重补充必钉进设计**: A 的锚列**不跨节点同步**(同 C 的漂风险)——但因 A 存"建市那刻的值"、不需跨节点重算, 只要**写在权威节点建市点、消费方不跨节点重推**即成立; fee_rules 先例自带此作用域答案。**设计须显式钉: 锚是"建市节点的定值"、非"跨节点共识值"**, 别读大。
+- **🔴🔴 Owner-gate(铁律 0)**: A 是 **pool_markets(结算表)schema 变更**(加列+write-once trigger+migrate 版本)⇒ 钱路/结算表改动**必须 Owner 批才能 land**。设计走完审(J2 完整稿→J1/NWT→Codex 确认 §4 闭)后, **DB 变更单独上 Owner 批**再 land。design-ahead-of-wiring 低风险(additive/write-once), 但闸不跳。
+- **📌 派 @J2 完成 A 完整设计(报审)**: schema(列+migrate 接当前最新版本后)+write-once trigger(照 fee_rules)+**建市写入点覆盖分析+老市场处置**(J2 自己点的决定性问题)+builder marketId→查+lookup miss/write-point-未覆盖 fail-closed+测试(含 Codex 点名"调用方试图自算 anchor⇒必失败"变异)+J1 跨节点作用域钉死。→ J1 二审→NWT 红队→Codex 确认 §4 闭→**Owner 批 DB 变更**→land。**round-trip 仍 OPEN 不宣闭。**
+
 ### (218) 2026-08-12 22:3xZ — 🔵 J1 二审 CP4 设计(b53000c0): 方案 A SOUND·「删参数=全部要害」判对 · 一条承重补充(A 的锚列**不跨节点同步**——先例 fee_rules 自带在册答案, 设计须钉作用域)· C 的否决再加一条在册弹药
 - **二审判**: A(建市写库 write-once + builder 收 marketId/named getter + **删自由参数**) **SOUND**。「**不可用**才叫结构、**不该用**只是纪律」这句判对了 Codex 311f12f8 的要害; B 否决成立(DATABASE.md 在册禁令: payout_redeem_hex 偏移**不能凭 ctor 声明顺序猜** + refund inputs 无 leaf); 老市场 NULL⇒fail-closed + 回填故意不顺手定 = 对(顺手定=重演同一 MUST-FIX)。迁移号 v197 亲核空闲(migrate.js 现最新 v196)。
 - **🔴 承重补充(A 必须钉进设计的作用域句)**: A 照抄的先例 **fee_rules(v184) 自带 Bettor 在册注——「列不跨节点同步, 委员侧不读本列, enforce 只吃 attest 载荷+链上 commit hash-bind」**(DATABASE.md v184 段)。⇒ `pool_markets.root_tmpl_hash` 同族: **锚只存在于建市那台 console**。今天 builder 单机跑=够用; 但设计稿须明写两句: ①锚的可及范围=建市 console 本机, 换机/重建库=锚丢=fail-closed(与 fee_rules"丢失=不可 settle"同形); ②**将来任何跨节点/委员侧消费此锚 = 禁读本列**, 必须走链上携带/烤死值(照 fee_rules 先例)。J2 拿"本地表跨节点必漂"否 C 时, 同一把尺子也要量 A 的读取面——A 过得去(值是建市时刻写死的、不漂, 只是**不到场**), 但"不到场"要写明, 别让接线的人当它全网可查。
