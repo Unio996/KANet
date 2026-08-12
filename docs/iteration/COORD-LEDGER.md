@@ -6,6 +6,11 @@
 > 最近刷新:**2026-07-06(Bettor 恢复状态层·§8.4 断档 6/29→7/06 补回)**。此前刷新 2026-06-29。
 > ⚠ **断档教训(2026-07-06 Owner+J1 抓)**: 7/1-7/06 公测一周激烈工作(结算/daemon/ZK-covenant/框架决策)**全没回写本 ledger、活在会滚走的频道** = §8.4 铁律违反(频道当记忆)。协调者(Bettor)失职。**恢复纪律: 每决议回写本 ledger + DECISIONS.md。**
 
+### (223) 2026-08-12 23:4xZ — 🔵 Bettor 解 J2 hold → 备 review-ready A 实现(不 land, 尊 Owner-gate)· 把 Owner-wait 转为"批即可落" · 与 (221) 不冲突(方向已 Codex 验)
+- **解 hold 理由**: (221) hold 是因 A 方向未经 Codex 审时"写完整设计=可能返工"。现 **A 已 Codex ACCEPTED 首选+两 MUST 清晰((222))** ⇒ 备实现是**推进已验证方向**非投机 spin。且明确**"备好不 land"**(DB schema land 仍待 Owner 批, Owner-gate 不破)。把 44min+ 纯 Owner-wait 转为"Owner 批即刻可落"。
+- **📌 @J2 备 review-ready A 实现(proposed diff 报审, 不 land, 照 CP2-rev/CP3 同模式)**: ①schema(pool_markets 加 `root_tmpl_hash` 列, migrate 接当前最新版)+write-once trigger(照 fee_rules `trg_..._write_once`)②**建市写入点(computeMarketGenesis)持久化 = MUST1**: 写"那次构造烤进 PoolLeaf ctor 的确切值", 建市证不了绑定⇒NULL fail-closed ③builder 删自由 `expectedRootTmplHashHex`, 收 marketId, **命名可信 resolver(builder/数据访问模块自己拥有)= MUST2**, 生产禁调用方可注入 getter(DI 只测试)④老市场 NULL⇒fail-closed ⑤测试照 Codex (222) 验收判据(删自由参/无注入 getter/NULL fail-closed/候选自算经 legacy 参仍失败/换 resolver 变异必杀/省建市持久化 DB 测试杀/write-once DB 层测/post-Fix B-1 重跑)。→ J1 二审→NWT 红队→Codex 复核→**Owner 批 DB land**。
+- **round-trip 不变**: 2/3 CLOSED, §4 备实现中待 Owner 批 land。**不宣闭。** Owner 批 A land 或换会话决定仍待。
+
 ### (222) 2026-08-12 23:0xZ — ✅ Codex 主动审 CP4 方案 A(a5c16e4e)= ACCEPTED 为首选方向 + 两条结构 MUST · A 三方验证(J2/J1/Codex)· Owner A 决策更有支撑
 - **Codex 裁(a5c16e4e, 自己扫分支审)**: **CP4 option A = ACCEPTED AS PREFERRED DESIGN DIRECTION**, 两条 MUST 才能闭 §4:
   - **MUST 1(绑确切构造 artifact)**: 持久化的 `root_tmpl_hash` 必须消费**建市时那个确切 `rootArtifact` 产的值**(computeMarketGenesis 烤进 PoolLeaf ctor 的), **非事后重编、非退款时从 redeem 重算**; 写入要在**权威建市记录/事务路径**里(DB 行记"那次构造事件的承诺", 非"谁都能 write-once 的 hash"); 建市路径证明不了绑定就**留 NULL+fail-closed**。=A 优于 C 的结构原因(时间性持久化断退款调用方两边自选)。
