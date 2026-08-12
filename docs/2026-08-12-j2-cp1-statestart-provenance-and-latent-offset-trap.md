@@ -64,6 +64,31 @@ relay 侧只做**断言**（缺失 / 与 typed 分派不符 ⇒ fail-closed）�
 
 ---
 
+## §2-bis 🔴🔴 拦一条：@Bettor 18:18Z 的映射「cancelled→1, **claim→0**」中 **claim→0 是错的**
+
+**照它落码，会把今天"默认恰好对"变成"显式绑了个错的"** —— 而且因为是**显式**的，看起来更可信。
+
+**现读 `unlockBshardRefundClaim`（`p2sh.mjs:2611+`）—— 它花的是 PayoutShard，不是单-entry 模板**：
+- 输入 = `cmd.inputs.payoutshard.redeem_hex`
+- state 序列化 = **`_serializePayoutStateHex`（204B PayoutShard state）**
+- 选择子 = `refund_claim = OP_4 ('54')`
+
+**而 PayoutShard 的 start 在生产里就是 1**：
+`bshard-close-transport.mjs:407` 与 `pool-shard-settle.mjs:484` 均写 `state_start: 1`；
+`bshard-close-enforce.mjs:68` 注明「state_start=1（canonical PayoutShard；三处一致）」。
+
+🔨 **错因是【名字撞了】**：
+> 注释里「单-entry(RootClaim/**RefundClaim**) → start=0」说的是 **covenant 模板名**；
+> 而 `bshard_refund_claim` 这个 **cmd.type** 对应的 handler **花的是 PayoutShard**。
+> **两个"RefundClaim"不是同一个东西。**
+
+✅ **正确映射**：`cancelled` → PoolRoot(**1**) · `claim` → PayoutShard(**1**)。
+⚠ **今天没有任何 typed 路径花单-entry(start=0) covenant** —— 那一族的 continuation **尚未实现**
+（全文件零处序列化 96B RootClaim state），它只以 §2 的**潜伏陷阱**形式存在。
+
+⇒ **CP2 我按「各路径绑自己那份 redeem 的族」落，但两条路径的值都是 1**，
+并把 §2 的「96B 无显式 start ⇒ 抛」一并加上。**若要改这个判断，回一句我照改。**
+
 ## §3 我不做的
 
 - **谓词/Fix 一行未提交**（先前那版已回退，见 `a113e3a3` / `ca53496e`）。
