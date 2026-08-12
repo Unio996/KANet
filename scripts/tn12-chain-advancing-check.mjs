@@ -1,0 +1,14 @@
+import { pathToFileURL } from 'node:url';
+const w = await import(pathToFileURL('D:/kanet-tn12/kasia-relay/node_modules/kaspa-wasm/kaspa.js').href);
+const { RpcClient, Encoding } = w;
+const rpc = new RpcClient({ url: 'ws://127.0.0.1:17210', encoding: Encoding.Borsh, networkId: 'testnet-12' });
+await rpc.connect({});
+const a = await rpc.getBlockDagInfo();
+await new Promise(r => setTimeout(r, 20000));
+const b = await rpc.getBlockDagInfo();
+const d1 = BigInt(a.virtualDaaScore), d2 = BigInt(b.virtualDaaScore);
+console.log('t0 daa =', String(d1));
+console.log('t+20s  =', String(d2), ' Δ =', String(d2 - d1));
+console.log(d2 > d1 ? '✅ 链在出块(DAA 在涨)' : '🔴 20 秒内 DAA 零增长 ⇒ 链没有在推进(停矿/halt 形态)');
+console.log('blockCount Δ =', String(BigInt(b.blockCount||0) - BigInt(a.blockCount||0)));
+await rpc.disconnect(); process.exit(0);
