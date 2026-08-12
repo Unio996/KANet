@@ -6,6 +6,13 @@
 > 最近刷新:**2026-07-06(Bettor 恢复状态层·§8.4 断档 6/29→7/06 补回)**。此前刷新 2026-06-29。
 > ⚠ **断档教训(2026-07-06 Owner+J1 抓)**: 7/1-7/06 公测一周激烈工作(结算/daemon/ZK-covenant/框架决策)**全没回写本 ledger、活在会滚走的频道** = §8.4 铁律违反(频道当记忆)。协调者(Bettor)失职。**恢复纪律: 每决议回写本 ledger + DECISIONS.md。**
 
+### (218) 2026-08-12 22:3xZ — 🔵 J1 二审 CP4 设计(b53000c0): 方案 A SOUND·「删参数=全部要害」判对 · 一条承重补充(A 的锚列**不跨节点同步**——先例 fee_rules 自带在册答案, 设计须钉作用域)· C 的否决再加一条在册弹药
+- **二审判**: A(建市写库 write-once + builder 收 marketId/named getter + **删自由参数**) **SOUND**。「**不可用**才叫结构、**不该用**只是纪律」这句判对了 Codex 311f12f8 的要害; B 否决成立(DATABASE.md 在册禁令: payout_redeem_hex 偏移**不能凭 ctor 声明顺序猜** + refund inputs 无 leaf); 老市场 NULL⇒fail-closed + 回填故意不顺手定 = 对(顺手定=重演同一 MUST-FIX)。迁移号 v197 亲核空闲(migrate.js 现最新 v196)。
+- **🔴 承重补充(A 必须钉进设计的作用域句)**: A 照抄的先例 **fee_rules(v184) 自带 Bettor 在册注——「列不跨节点同步, 委员侧不读本列, enforce 只吃 attest 载荷+链上 commit hash-bind」**(DATABASE.md v184 段)。⇒ `pool_markets.root_tmpl_hash` 同族: **锚只存在于建市那台 console**。今天 builder 单机跑=够用; 但设计稿须明写两句: ①锚的可及范围=建市 console 本机, 换机/重建库=锚丢=fail-closed(与 fee_rules"丢失=不可 settle"同形); ②**将来任何跨节点/委员侧消费此锚 = 禁读本列**, 必须走链上携带/烤死值(照 fee_rules 先例)。J2 拿"本地表跨节点必漂"否 C 时, 同一把尺子也要量 A 的读取面——A 过得去(值是建市时刻写死的、不漂, 只是**不到场**), 但"不到场"要写明, 别让接线的人当它全网可查。
+- **🔵 C 的否决 + 一条在册弹药**: C(按市场参数重编现算)除 J2 列的疑点外, 还踩在册坑「**silverc build 必全节点 pin 同字节**」(J1 SS 踩坑库)——重编把锚的正确性额外挂在编译器二进制逐字节一致上, A 存值天然免疫此依赖。
+- **测试格补一句**: 「传多余 expectedRootTmplHashHex 必须被完全忽略且库锚不符照样拒」这格形态对; write-once trigger 变异若本批不做 DB 层用例, **"没人守"那句要抄进 WIRING-CHECKLIST**, 别只留在设计稿。
+- **verdict**: **PASS 进入下一站**(NWT 红队/Bettor 审序照 (217)); 落码后我照判据表复核。**round-trip 仍 OPEN。**
+
 ### (217) 2026-08-12 22:0xZ — 🔴 Codex 闭合裁(311f12f8): round-trip 【NOT YET CLOSED】· 2/3 闭(state_layout 权威+leg-swap)· §4 身份锚独立源 OPEN/MUST-FIX(与 NWT ② 收敛)· 修法派 J2 · 不宣闭
 - **Codex 裁定**: ①state_layout 权威 **ACCEPTED IN CODE**; ②leg-swap 格 **CLOSED IN CODE/TEST**; B-1/B-2 accepted, 两 same-value equivalent mutant 不必强杀; ③**PoolRoot 身份锚独立源 OPEN/MUST-FIX BEFORE WIRING**; **④整体 round-trip blocker NOT YET CLOSED IN CODE**。
 - **🔴 §4 OPEN(Codex+NWT 独立收敛=同一点)**: buildRefundCommand 收 `expectedRootTmplHashHex` 是**调用方任意 32B 串**, builder 不机器约束来源 ⇒ **循环调用方**(拿同一 poolRedeem 去 state 窗、hash 剩余、当 expected 传回)使跨边界比对**同义反复**。零活调用方降当前可利用性, **但不把未强制的 provenance 不变量变成已闭代码不变量**。=NWT ② "整套最重单点"。
