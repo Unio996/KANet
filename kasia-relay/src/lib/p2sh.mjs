@@ -1604,7 +1604,10 @@ function _serializeLeafStateHex(s) {
 }
 
 // 序列化 PoolRoot 7-field State → 87B hex (固定 PUSH8/PUSH32, State 声明序). NWT 2-impl byte-match 此格式.
-function _serializeRootStateHex(s) {
+// 🔵 export 仅为可测性(A2/round-trip 四件套 A 与 B-2 要求 import **实符号**, 抄 helper 副本不算数);
+//    **行为零改动** —— 判据 `3b395e6c` §4 明写「为测试加 export 可接受, 行为不变」。
+//    同族的 `_continuationAddressV2`(:1650) 本来就是 export, 这里是补回对称。
+export function _serializeRootStateHex(s) {
   let out = _encodePushDataHex(_i64LE(s.local_yes))
     + _encodePushDataHex(_i64LE(s.local_no))
     + _encodePushDataHex(_i64LE(s.count))
@@ -1663,7 +1666,12 @@ export function _continuationAddressV2(inputRedeemHex, newStateHex, networkId, s
 //   len = newStateHex 字节数 (leaf 36 / root 87 自适应; new state 与 baked genesis state 同布局=同长).
 // stateStart: state 区在 redeem 的起始 offset. 多-entry(PoolLeaf/PoolRoot/RootClose)有 selector dispatch 前导 → state_layout.start=1(_POOL_STATE_START 默认);
 //   单-entry no-selector(RootClaim/RefundClaim)无前导 → start=0. caller 经 cmd 传合约 state_layout.start, 别硬编 (KANet-UI 2026-06-20, J2/J1/NWT 三方诊断 continuation offset bug).
-function _continuationAddress(inputRedeemHex, newStateHex, networkId, stateStart = _POOL_STATE_START) {
+// 🔴 上面那句「caller 经 cmd 传合约 state_layout.start, 别硬编」是 2026-06-20 三方诊断 continuation
+//    offset bug 之后写下的 —— 而 2026-08-12 现读: **没有任何 builder 往 root/pool 输入里放过这个字段**
+//    (pool-claim/close/refund-builder 三个逐个查, 全无) ⇒ **该指令 7 周来从未被执行, 两支都吃默认**。
+//    ⇒ 又一次「注释不是闸」。详见 docs/2026-08-12-j2-statestart-has-no-authoritative-descriptor.md
+// 🔵 export 同上: 仅为可测性, 行为零改动。
+export function _continuationAddress(inputRedeemHex, newStateHex, networkId, stateStart = _POOL_STATE_START) {
   const redeem = Buffer.from(inputRedeemHex, 'hex');
   const stateBytes = Buffer.from(newStateHex, 'hex');
   if (![_LEAF_STATE_LEN, _ROOT_STATE_LEN, _ROOTCLAIM_STATE_LEN, _PAYOUTSHARD_STATE_LEN].includes(stateBytes.length)) {
