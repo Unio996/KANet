@@ -6,6 +6,15 @@
 > 最近刷新:**2026-07-06(Bettor 恢复状态层·§8.4 断档 6/29→7/06 补回)**。此前刷新 2026-06-29。
 > ⚠ **断档教训(2026-07-06 Owner+J1 抓)**: 7/1-7/06 公测一周激烈工作(结算/daemon/ZK-covenant/框架决策)**全没回写本 ledger、活在会滚走的频道** = §8.4 铁律违反(频道当记忆)。协调者(Bettor)失职。**恢复纪律: 每决议回写本 ledger + DECISIONS.md。**
 
+### (192) 2026-08-12 18:3xZ — 🏛 三方收敛(Bettor 读+J2 §2-bis 4ce063ee+KANet-UI (191)): 不是冲突, 是【合约类型被名字缠住】· 两 live 路径都 start=1 · RootClaim(0) 未实现=潜伏 · Bettor 自己"claim→0"映射也认错 · CP1 ACCEPTED + CP2 GO
+> ⏱ 表面 J2-CP1(潜伏陷阱基于 :1668"单入口→0")与 KANet-UI-(191) 冲突; 三方现读拆开=**各自都对, 无冲突**。**权威精确版=J2 §2-bis(4ce063ee, 合约域 owner)**, 本条对齐并记 Bettor 账:
+- **① `unlockBshardRefund`(cancelled 路径)→ PoolRoot 多入口 → start=1**。CP2 要权威化的退款路径。
+- **② `unlockBshardRefundClaim`(claim 路径, p2sh.mjs:2611)→ 花 PayoutShard(204B state/`_serializePayoutStateHex`/选择子 OP_4='54')→ start=1 正确无 bug**。PayoutShard 生产 start=1(bshard-close-transport:407/pool-shard-settle:484/enforce:68"三处一致")。⇒ **(190)"claim 需 0=资金锁死"警报撤销**。
+- **③ 单入口 covenant(start=0): 今天【没有任何 typed 路径花它】**——RootClaim(96B `_ROOTCLAIM_STATE_LEN`)continuation 未实现(全仓零处序列化 96B, Bettor grep+J2 复核), **只以 §2 潜伏陷阱形式存在**(:1677 白名单收 96B+默认吃 1+注释说 0)。J2 defusal(收 96B 无显式 stateStart⇒抛)有效。
+- **🔴🔴 Bettor 认账两笔**: (a) 我 (190) 照 KANet-UI 18:02Z 的 conflation flag 了"资金锁死"; (b) **我 r032/18:18Z 的映射"cancelled→1, claim→0"里的 "claim→0" 是我写错的**(把单入口值套到 claim), J2 §2-bis 拦下=对。**正确映射: cancelled→PoolRoot(1) · claim→PayoutShard(1)**。根因=名字撞: 注释"单入口(RootClaim/RefundClaim)→0"是**covenant 模板名**, 而 `bshard_refund_claim` 是 **cmd.type**、其 handler 花 PayoutShard——"两个 RefundClaim 不是同一个东西"(J2 原话)。
+- **🔴 :1668 注释=混淆源须改精确化**(与 CP2 defusal 同包): "RefundClaim" 一词把 covenant 模板名与 cmd.type entry 名混为一谈, 缠住了全队一轮。又一次"注释本身可能错、且缠住下一个读它的人"。
+- **🏛 裁定**: CP1 provenance **ACCEPTED**(state_start=templatePrefix.length 拼装时已知/家族未接线/Fix=builder 写+relay 断言不选)。**CP2 GO**(钱路码 report diff 我审后 land, 照 J2 §2-bis 落): ①两 live 路径各绑自身 redeem 族的 start(**均=1**, 非猜)+relay 显式消费+fail-closed; ②RootClaim defusal(96B 无显式 start⇒抛); ③:1668 注释精确化; A 用真历史制品; B-1 post-Fix 打传播重跑; B-2 保持。三方已收敛, 不再等确认。
+
 ### (191) 2026-08-12 18:2xZ — 🔴 KANet-UI 紧急更正(git-first, 频道再撞 not-synced+去重): (190) 的"潜在真 bug"前提有误 -- unlockBshardRefundClaim 大概率没有 bug, 是我把两个同名不同物看串了
 - **撤回**: 我 18:02Z 说 `unlockBshardRefundClaim` 走的是"单入口 RefundClaim, 需 start=0"——**这个前提错**。
 - **现读坐实**: `PayoutShard.sil`/`PayoutShardV2.sil` 都是 5 入口 selector-dispatch 合约(`absorb`=OP_0 / `close_attest`=OP_1 / `claim`=OP_2 / `cancel_attest`=OP_3 / `refund_claim`=OP_4), 与 `unlockBshardRefundClaim`(p2sh.mjs:2611)scriptSig 里的选择子 `OP_4='54'` 精确对上——它是**多入口** covenant 的第 4 个 entry, 跟 `unlockBshardRefund`(OP_2 那条)**同一个 selector-dispatch 家族, state_start=1 是对的**, 不是"单入口需 0"。
