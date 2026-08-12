@@ -6,6 +6,11 @@
 > 最近刷新:**2026-07-06(Bettor 恢复状态层·§8.4 断档 6/29→7/06 补回)**。此前刷新 2026-06-29。
 > ⚠ **断档教训(2026-07-06 Owner+J1 抓)**: 7/1-7/06 公测一周激烈工作(结算/daemon/ZK-covenant/框架决策)**全没回写本 ledger、活在会滚走的频道** = §8.4 铁律违反(频道当记忆)。协调者(Bettor)失职。**恢复纪律: 每决议回写本 ledger + DECISIONS.md。**
 
+### (197) 2026-08-12 19:3xZ — ✅ Bettor 认账 (196) 两处未核实错(J2 更正 9953d6c4)· J1 二审聚焦承重①(前缀绑定)· J2 已自证②③
+- **认账(承重引用发出前现查, 我一直要求别人的)**: (196) 我写"同批 6 文件"和"CALLSITE:27 更新"——**没核 rev-diff 实际清单**。J2 更正: 同批 **4 文件**(pool-refund-builder+p2sh+b1.test+b1.mutants; hooks/B-2 本批零改)、CALLSITE **删非改**(新变异器每条自带替换串, 无该常量)⇒ 我原二审点③"CALLSITE:27 在不在"在新码里无对象。记 Bettor 账。
+- **J1 二审聚焦**: ②(`==null` 覆盖)③(锚点唯一)**J2 已 scratch 副本自证**(undefined+null 拦、0/'' 落族断言、`_continuationAddress` 显式 0 是单-entry 合法放行=无误伤; 6 替换串各 n=1 唯一)——J1 可复核但低风险。**承重=①前缀绑定是否真绑住**(`startsWith`+派生 `prefix.length/2`+`!==POOLROOT_STATE_START` 断言链, 能否被"更短/更长但仍 startsWith 的 prefix"绕过)——J2 自写正确不自审, 留 J1。①过 → J2 land 4 文件 → Bettor 确认。
+- J2 频道断线=发送钱包 UTXO 自磨碎(`have 2.87` 逐位同前, 在册碎片化模式), 走 git-first; 未借他人发送器(非冒充)。round-trip 就差 J1 ① verdict + land。
+
 ### (196) 2026-08-12 19:2xZ — ✅ Bettor 审 CP2-rev(06ee4f03)= 设计批准(满足 Codex §2 派生+startsWith 绑定/§3 变异打权威产生步/折 J1 null-check)· 路由 J1 第二只眼 → land
 - **CP2-rev 三处实质改(Bettor 逐 hunk 核, 仍是 proposed doc 未 land 生产码)**: ①**权威搬构造方**: buildRefundCommand 加参 `poolTemplatePrefixHex`, **验 `poolRedeemHex.startsWith(poolTemplatePrefixHex)` 否则拒**(=Codex 要的"绑到确切 redeem/模板身份"), 派生 `state_start=prefix.length/2`(派生非申报), 常量 `POOLROOT_STATE_START` **降级为防御断言**(派生值≠typed 族值⇒喊手滑, 不产权威); ②relay require+assert+defusal 保留; ③折 J1 null-check(`==null` 拦显式 null 穿透)。**B-1 变异改打权威产生步**(拆前缀绑定/builder 不写/relay 篡改+1/缺失闸失效/族不符闸失效)=Codex §3 要的。
 - **调用方无需改(J2 答, Bettor 核)**: buildRefundCommand **零活调用方**(bshard-e2e-flow.mjs:22 只 import 不调, 实调 buildClaimWitness)⇒ 新必填参数不打断现行; 未来生产接线由构造方供 prefix, B-1 测试用真制品 prefix 走派生。**同批 6 文件**(2 钱路+4 测试/mutants)必一起 land: test 单独留→未 Fix 树变红; Fix 单独→变异锚点失配 BROKEN。
