@@ -97,3 +97,76 @@ require blake2b(actual_template) == expected_template_hash
   节点 `RPC node is not synced`，KANet-UI 20:45Z 已答本机域穷尽、实旋钮在共识层归 Owner）。
   ⇒ §3 目前是**源码推演级证据**，标签就该按这个记，别当实测。
 - **未落码**：本文是评估 + 骨架，**没有动任何生产文件**。落码要 @Bettor 排（且 §4 落在钱路）。
+
+## §6 对 @Bettor 20:47Z 修法的确认 + 一处必须改的绑腿（设计报审）
+
+**原则我同意**：删掉松散的 `poolTemplatePrefixHex` 串，改绑**已自验的 artifact**。
+Codex 抓的那点成立——松散串 + `startsWith` 只证「调用方回传了首字节」，不证它来自被 `ps_tmpl_hash` 认证的模板。
+
+🔴 **但修法里写的绑定对象是错腿，照做会引入 CP1 那个资金锁死族的缺陷**：
+
+> 修法原话：「用 witness 携带的 verified prefix_len(**源自 psArtifact**，已在 :47-49 对 ps_tmpl_hash 自验)」
+
+- `psArtifact` = **PoolSide（票）**模板 —— `bshard-e2e-flow.mjs:37` 用它拼 **ticket** redeem。
+- `poolTemplatePrefixHex` 要描述的是 **PoolRoot（池）**模板 —— 同文件 `:114` 用 **`rootArtifact`** 拼 **pool** redeem。
+
+⇒ 这是**两份不同的模板**。拿票腿的 `prefix_len` 去当池腿 redeem 的 `state_start`，
+就是**用 A 模板的权威去定 B 模板的 offset**。`:47-49` 那道自验再严，验的也是**票**那份。
+
+🔴 **而这个错的最坏形态是它今天可能【不报错】**：若两个长度当前恰好都等于 1，
+一切照常绿，直到某天两份模板的前导长度分叉——那正是 CP1 记的
+「**语法合法、资金锁死、全程不报错**」。（两个长度我**没有实测**；
+🔵 但结论不依赖它：靠两份无关模板的长度碰巧相等，本身就是不该建立的依赖。）
+
+### 改法（保住修法的意图，换对腿）
+
+**绑 `rootArtifact`，不绑 `psArtifact`。** 但**我先撤回自己上一稿的一句**：
+
+> ~~池腿**已经有**完全同款的机制，不用新造。~~ —— **错**。@KANet-UI 20:49Z 说得对，两腿**不同款**。
+
+实读 `pool-bshard-market-setup.mjs:50-56`：
+
+```js
+const rootCompiled = compileSil(poolRootSilPath, rootCtor, silvercPath);
+const rsl = rootCompiled.state_layout;
+const rootPrefix = rootRedeem.slice(0, rsl.start), rootSuffix = rootRedeem.slice(rsl.start + rsl.len);
+const rootTmplHash = blake2b(rootPrefix ‖ rootSuffix)          // ← JS 本地算的
+const rootArtifact = { templatePrefix: rootPrefix, templateSuffix: rootSuffix, templateHashHex: rootTmplHash };
+```
+
+- 票腿：`templateHashHex` 由 **silverc 吐出**（`extractTemplateArtifact(...).expectedTemplateHashHex`）。
+- 池腿：`templateHashHex` 是 **JS 现算的** `blake2b(自己切出来的两段)`。
+  ⇒ 拿它去做「自验」会是**自己跟自己比**，比票腿那道更空。**照抄票腿的形状到池腿是错的。**
+
+🔵 **而实读顺出一个比两边提案都更根的东西 —— 池腿的权威根本不用造，编译器已经吐了**：
+
+**`rootCompiled.state_layout.start`** 就是 silverc 对这份 PoolRoot 给出的 state 起始 offset，
+而上面那行 `rootRedeem.slice(0, rsl.start)` 意味着 **`rootPrefix.length ≡ rsl.start` 恒等**。
+
+⇒ CP2 费力从「模板前缀长度」派生出来的那个 `state_start`，**它的上游权威一直在 `state_layout.start`**。
+   CP2 的派生**不是错的**（两者恒等），但它比真正的权威**远了一跳**，
+   而那一跳正好落在「构造方自觉传对前缀」上 —— 也就是 Codex 抓的那个松散点。
+
+具体三步（修正版）：
+1. `buildRefundCommand` 收 **PoolRoot 的编译产物**（`{ script, state_layout }` 或包一层 `computePoolRootArtifact()`，
+   与 `computeSpineArtifact()` 同规格），删掉松散的 `poolTemplatePrefixHex`。
+   —— 这正是 @KANet-UI ② 说的"给 PoolRoot.sil 写一个 compile-time artifact 函数"，**我同意，且它是必需的不是可选的**。
+2. `state_start = state_layout.start`（**编译器权威，零跳**），不再从前缀长度反推。
+3. 保留并加强现有绑定：`poolRedeemHex` 必须以 `script.slice(0, start)` 开头 **且** 长度等于 `script.length`
+   —— 把「编译器说的那份模板」绑到「这一份会上链的 redeem」上。
+   🔵 这一步替代了原来的 `startsWith(松散串)`：**前缀不再是调用方给的，是编译产物给的**。
+
+⚠ **§4 那个跨边界比对（对链上烤死的 `root_tmpl_hash`）仍然要做**，且现在更清楚了：
+`root_tmpl_hash` 被烤进 **PoolLeaf ctor**（`:40-41` 注释：seal_to_root 的 foreign-template anchor），
+⇒ 那是**另一端**的值，拿它和本次编译产物比才跨得过边界。而**池腿现在这个 JS 自算的 hash 比不出任何东西**。
+
+### 同批测试（否则又是没人观察的接缝）
+- 变异「把池腿的产物换成票腿的（`rootCompiled` → `psArtifact`）」⇒ **必须变红**。
+  这是本节的核心断言 —— 它正是 20:47Z 修法里那处绑错腿，没有这一格等于没防住它。
+- 变异「`state_start` 改回从前缀长度反推」⇒ 应当**抓不到**（两者恒等）。
+  🔵 **这一格要预注册为结构性 MISSED**，别当漏网：和 CP2 那两条同源 ——
+  **权威与其等价式在数值上不可分**，可分的只有「取值来源」这件事本身。
+- 变异「跳过对烤死 `root_tmpl_hash` 的跨边界比对」⇒ 必须变红。
+- fail-closed：编译产物缺失 / redeem 与 `script` 不一致 / 长度不符，三格分别抛。
+
+⚠ **未落码**，等 @Bettor 审这版绑腿后再动；照 CP2 的规矩**一批做完**（生产 + 测试 + 变异同批）。
