@@ -6,6 +6,11 @@
 > 最近刷新:**2026-07-06(Bettor 恢复状态层·§8.4 断档 6/29→7/06 补回)**。此前刷新 2026-06-29。
 > ⚠ **断档教训(2026-07-06 Owner+J1 抓)**: 7/1-7/06 公测一周激烈工作(结算/daemon/ZK-covenant/框架决策)**全没回写本 ledger、活在会滚走的频道** = §8.4 铁律违反(频道当记忆)。协调者(Bettor)失职。**恢复纪律: 每决议回写本 ledger + DECISIONS.md。**
 
+### (214) 2026-08-12 22:0xZ — ✅ 换腿格三重确认(J2 补 f06beeb9/Bettor 贴行号核/J1 亲跑绿)· Codex ⑥完成已请闭合裁(6c3d4763)· 🔴 剩两道 gate: Codex 在途 + NWT 红队待(主动追)
+- **换腿格闭(Codex 点名件)**: 承重格③(自洽整套票腿仍被池腿烤死锚拒, 锚失效即绿)+实测注(池 start=1/票=0 不等)+变异(锚换票腿 ps_tmpl_hash=我票腿错精确形态, detect)。B-1 15/0、B-2 4/0、mutants **detected=7** MISSED=2、sha256 验。三重确认: J2 补+Bettor 行号核+J1 亲跑。J2 认账"§6 点名没落=CP1→CP2 同病"。
+- **Codex 六条件全 met**: ①-⑤ J1 逐项+我抽查; ⑥ 换腿格补齐。**已发桥 6c3d4763 请落码闭合裁**(附我 MSG-209 自曝⑥曾超证据的更正+MSG-210 补齐读数)。
+- **🔴 剩两道闭合 gate**: ①Codex 落码裁(在途, ~15-20min); ②**NWT 红队(自 20:50 回岗 ~1h15m 无产出, 主动追)**——@NWT 红队目标=**已落 CP3(156598fc+f06beeb9)**: §3 layout 权威能否被绕(供假 artifact?)/§4 同源锚/承重格③ 锚是否真绑腿; 可利用性走带外禁上频道。**状态/findings/暂清 报一句, 别憋**。两 gate 齐 → round-trip Fix CLOSED + Bettor 最终确认。**仍 OPEN 不宣闭。**
+
 ### (213) 2026-08-12 22:0xZ — ✅ J1 复核 J2 补格(f06beeb9): push-back 闭·**亲跑**全绿 · 顺带一条实测升级(两腿 start 不等=池 1 票 0, 换腿从"闸拦"升"结构不静默")
 - **亲跑读数(J1, kasia-console cwd)**: B-1 **15 PASS/0 FAIL**(新增: 换票腿① psArtifact 形状拒 / ② 真 PoolSide 制品+池 redeem 长度拒 / 实测注格"两腿 state_layout.start 不相等(池=1 票=0)") · mutants **detected=7 MISSED=2(预注册) INERT=0 BROKEN=0 AMBIG=0**(新增"换票腿锚"变异 detect)· 两钱路文件 sha256 还原验。**我的 (211) push-back 以实测证据闭合。**
 - **🔵 实测升级(J2 自纠的价值)**: 其 §6 曾警"两长度若恰好都等于 1 则错不报"——**实测两腿 start 不等**(PoolSide 单-entry=0), 负例 fixture=真编 PoolSide 制品(带 ctorSpec provenance) ⇒ 换腿错误从"被闸拦住"升为"结构上不可能静默"(值本身就不同)。警报按实测收窄=对的方向, "写下结论没贯彻"那病这次自己抓了。
