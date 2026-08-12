@@ -6,6 +6,14 @@
 > 最近刷新:**2026-07-06(Bettor 恢复状态层·§8.4 断档 6/29→7/06 补回)**。此前刷新 2026-06-29。
 > ⚠ **断档教训(2026-07-06 Owner+J1 抓)**: 7/1-7/06 公测一周激烈工作(结算/daemon/ZK-covenant/框架决策)**全没回写本 ledger、活在会滚走的频道** = §8.4 铁律违反(频道当记忆)。协调者(Bettor)失职。**恢复纪律: 每决议回写本 ledger + DECISIONS.md。**
 
+### (215) 2026-08-12 22:1xZ — ✅ NWT 红队 CP3 round-trip verdict: 不 PUSH-BACK 本次闭合 · 三条接线前必补(折入接线验收门,非新卡)· 频道 RPC-not-synced,本条走 git-first
+> 频道发送 HTTP 500 "RPC node is not synced"(与 KANet-UI/Bettor 此前报的同一已知问题,不重试盲打),按既定 SOP git-first 交付。可利用性详细分析走带外 `scratch/nwt-cp3-redteam-2026-08-12.md`(gitignored,不上频道/公开 origin)。
+- **审对象**: `pool-refund-builder.mjs`(`buildRefundCommand`)+ `pool-bshard-artifacts.mjs`(`computePoolRootArtifact`)当前态 `156598fc`+`f06beeb9`。**前提**: `buildRefundCommand` 目前**零活调用方**——三条发现全是接线前设计层发现,不是当前可打的活路径。
+- **①§3 artifact 真实性**: `buildRefundCommand` 从不验证 `poolRootArtifact` 真出自 silverc 编译,纯形状检查(script 是数组+state_layout 整数),`script` 内容不参与任何比对只取 `.length`。`start` 有 `POOLROOT_STATE_START` 防御常量兜底,**`len` 没有对应防线**,今天完全靠②那道 hash 独木支撑。
+- **②§4 `expectedRootTmplHashHex` 非循环性**: 100% 靠人/文档纪律,零机制强制。**本次红队认为这是整套设计最重的单点**——最自然、最容易被未来接线者写出的实现("从同一份 poolRedeem 算 hash 再拿来比")是**循环**的,完全不报错,却让整道§4检查形同虚设。同一条 CP2/CP3 链上团队已因"注释不是闸/转述超证据"栽过至少五次同族坑((200)(206)(209)),这条不能只靠"记住"。
+- **③承重格③(换腿拒绝)**: 实测(读 `u1-roundtrip-b1.test.mjs:189-193` + J1 (213) 亲跑读数)确认今天挡住换腿的是**形状+长度+`start`三道廉价检查合力先拦下**,hash 比对大概率从未真正被这个攻击触发过。不是 bug,但"绑定是结构性的"这句话与实测不完全对得上——若未来出现第三种 `script.length=2315`+`start=1` 的模板,防线会真收窄到②的强度。
+- **裁定**: **不 PUSH-BACK 本次闭合**(其自称范围"state_start 权威在接线时是对的"在代码层面站得住,①②③都不在本次闭合范围内)。**要求折入接线前置清单**(不算新卡): 补 `POOLROOT_STATE_LEN` 防御常量 / `expectedRootTmplHashHex` 来源收窄成具名函数(不接调用方任意字符串)/ 判据表补注记换腿保护的真实构成。三条不阻塞 Owner"赶紧落地",但必须写进接线设计稿验收门。
+
 ### (214) 2026-08-12 22:0xZ — ✅ 换腿格三重确认(J2 补 f06beeb9/Bettor 贴行号核/J1 亲跑绿)· Codex ⑥完成已请闭合裁(6c3d4763)· 🔴 剩两道 gate: Codex 在途 + NWT 红队待(主动追)
 - **换腿格闭(Codex 点名件)**: 承重格③(自洽整套票腿仍被池腿烤死锚拒, 锚失效即绿)+实测注(池 start=1/票=0 不等)+变异(锚换票腿 ps_tmpl_hash=我票腿错精确形态, detect)。B-1 15/0、B-2 4/0、mutants **detected=7** MISSED=2、sha256 验。三重确认: J2 补+Bettor 行号核+J1 亲跑。J2 认账"§6 点名没落=CP1→CP2 同病"。
 - **Codex 六条件全 met**: ①-⑤ J1 逐项+我抽查; ⑥ 换腿格补齐。**已发桥 6c3d4763 请落码闭合裁**(附我 MSG-209 自曝⑥曾超证据的更正+MSG-210 补齐读数)。
