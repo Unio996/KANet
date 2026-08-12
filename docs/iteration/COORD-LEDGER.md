@@ -6,6 +6,12 @@
 > 最近刷新:**2026-07-06(Bettor 恢复状态层·§8.4 断档 6/29→7/06 补回)**。此前刷新 2026-06-29。
 > ⚠ **断档教训(2026-07-06 Owner+J1 抓)**: 7/1-7/06 公测一周激烈工作(结算/daemon/ZK-covenant/框架决策)**全没回写本 ledger、活在会滚走的频道** = §8.4 铁律违反(频道当记忆)。协调者(Bettor)失职。**恢复纪律: 每决议回写本 ledger + DECISIONS.md。**
 
+### (189) 2026-08-12 09:4xZ — 🏛 Codex 复审 provenance(78113ea6)与 Bettor/J2 全收敛 + 锐化: 构造时 typed 绑定 > 反解字节 · PoolRoot-only 可达性须【机器保证】非"目前只有" · Fix 仍 OPEN
+- **Codex 七点(与 (187)/(188) 收敛)**: 0x51 循环 fixture=A 臂要防的族(正确拒); census 值≠身份证明(0x6b 常见 ≠ 0x6b⟺PoolRoot, 不得当 offset 选择器); **not-wired=上线前安全要求, 好消息但不降验收标准**; B-1/B-2 有用不闭 Fix(B-1 须 post-Fix 重跑); builder blob 仍无 state_start ⇒ **Fix OPEN**。
+- **🏛 方向锐化(Codex 背书 Bettor/J2 倾向)**: **构造时绑定 > 反解字节**——若路径结构只 PoolRoot, 在**构造时**用 typed 路径/描述符把权威 state_start=1 带进命令(生产者本就知道身份), relay 验证+缺/错/不匹配 fail-closed; 反解 redeem 前缀去重新发现生产者已知的身份=更弱更易循环。**单/多入口问题从未来生产调用图/模板源答, 非现 DB 频率; 且 PoolRoot-only 可达性须【机器保证】(typed 构造/描述符强制), 不是"目前只有 PoolRoot"**——否则未来单-entry 调用方静默拿错 offset。
+- **闭合条件精炼(Codex, 最窄可接受)**: 权威 PoolRoot 身份/制品 → builder 发 state_start → 命令携带 → relay 显式消费 → 缺/非法/不匹配 fail-closed → post-Fix 生产缝变异杀测试 → A 用真历史生产制品(非手搓 redeem 字面量)。全通用描述符框架**非必需**(若 PoolRoot-only 可达性机器保证)。**未绑定全局常量/首字节 census/手搓 fixture 均不足充当权威。**
+- **派 @J2(provenance 收尾即照此落 Fix)**: 别反解字节; 从构造路径 typed 绑定; 机器保证 PoolRoot-only 可达(或加真判别符); A 用历史制品。**round-trip 口径不变: Fix OPEN, B-1/B-2 accepted-不闭。**
+
 ### (188) 2026-08-12 09:3xZ — 🔵 J2 provenance 三答(ca53496e)+ 重定位: round-trip Fix 在【未接线】路上做对(非修活 bug)· 循环 fixture 病三周内同族复发=点状加固不传播 · 断言写成选择器=死分支
 - **三问已答(Bettor 逐条核)**: ①PoolRoot redeem 落 `payout_shards.payout_redeem_hex`(写入 pool-shard-register `ensurePayoutShard/V2`, DATABASE.md:642-646); **`buildRefundCommand` 零活调用方**——Bettor 独立 grep 证实: 唯一 import 在 `scripts/bshard-e2e-flow.mjs`(e2e 脚本)+两 worktree 陈旧副本, **无生产 runtime 调用** ⇒ 退款轨 runtime **未接线**, 这解释"命令无 state_start 至今零现网症状"。②`0x6b` 是三周前实测钉死值(`docs/2026-07-21-...k18-landing-design.md`, 4 样本 ozzeu/pb73v/f08c4/vmhud, KANet-UI 测)——J2 §1"发现 0x6b"更正为"没查已有实测值"。③discriminator 充分性未答(见下)。
 - **🔵 重定位(承重)**: round-trip Fix 是在**尚未接线的退款路径**上把 state_start 权威做对=**上线前做对的最佳时机**, 非修活 bug ⇒ 无 live 钱路在险, 可从容做对不抢。**接线**(buildRefundCommand 接生产调用方)本身是另一件未排的 runtime 活, 排 Fix 后。
