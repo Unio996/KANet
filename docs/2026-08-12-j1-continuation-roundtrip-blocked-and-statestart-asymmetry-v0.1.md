@@ -158,3 +158,33 @@ J2 现读(`docs/2026-08-12-j2-statestart-has-no-authoritative-descriptor.md`)、
 - **③ 上游注意**:Codex 裁决原文的前提句「The claim path already propagates `cmd.inputs.root.state_start`」
   被本修正覆盖——**替代包本身不因此失效**(B-1/B-2 是决定性件,未动),但 A/Fix 两件的可满足性叙述变了,
   **建议随 §3 口径问题一并交回 Codex 知会**(路由归 Bettor)。
+
+## 6. 状态注记(2026-08-13·CP2-rev 已 land 而闭合被 Codex 再拒——§4 四件套逐行现状·J1 折入)
+
+> 依据(执行前读原文,本节是判据折算): Codex `0741bae0`(字面量权威 REJECTED)与
+> `3fcc9280` = `RESPONSE-20260812-CP2-REV-PREFIX-PROVENANCE-CODEX-REVIEW.md`(CP2-rev 闭合 REJECTED)·
+> land commit `de2ae60e`(同批 4 文件)· ledger (192)-(199)。
+
+**先钉当天最容易被摘走的三句**:
+1. **taxonomy 已四方收敛且 Codex ACCEPTED**: `bshard_refund_claim` 花的是 PayoutShard(多-entry, start=1);
+   「claim→0」是同名混淆(`RefundClaim.sil` 1-entry `refund_payout` **零接线**, 与函数同名不同物)。
+2. **`de2ae60e` 是 land 了的防御性增量, 不是闭合**: 派生+startsWith+fail-closed+`==null`+双文件变异器(带锚点唯一性守卫)
+   全部在库; **Fix-authority 格仍 OPEN**。
+3. 🔨 **判据条(本轮最贵的一课): 值正确 ≠ 身份有源**。startsWith+1 字节族断言把「可接受前缀」坍缩到
+   redeem 自己的首字节 ⇒ 值上气密(J1 二审 ①), 但它只证明「调用方与 redeem 在第 0 字节上一致」,
+   **证不了这个字节来自构造该 redeem 的那份模板制品**(Codex 升为闭合阻塞)。同一事实, 两个审级, 两种严重度——
+   作用域注在二审里是"非阻塞", 在闭合裁决里是"the remaining gap"。
+
+**§4 四件套现状(2026-08-13 晨)**:
+| 件 | 现状 |
+|---|---|
+| **A** | 仍待。且门槛被 `3fcc9280` 钉尖: **合成前缀('51')证不了模板身份**——A 必须用真生产制品(历史退款转移全套) |
+| **Fix** | **传播半已 land**(`de2ae60e`: builder 派生+写命令, relay require+assert+显式传参); **权威半 OPEN**——新最小闭合 = 未来生产构造边界发 **typed artifact**(确切模板身份/承诺+构造数据), builder 吃 artifact 非散前缀, **禁止再造 redeem 字节嗅探**(Codex 原文五点) |
+| **B-1** | post-Fix 形态已 land: 9 PASS, 变异 detected=5/**MISSED=2(预注册结构性残余, Codex 认可为 documented equivalent, 不阻塞也不闭格)**; 生产缝证据被 Codex 接受 |
+| **B-2** | 不动, 4 PASS |
+
+**旁记两条**(下个人别重踩):
+- 桥请求里「B-1 用了真生产制品前缀」被 Codex 原文戳破(fixture 自己注明 synthetic)——**转述判据强度必须≤证据强度**,
+  同族于"写「实测」必须有命令输出"。
+- 变异器注释曾宣称"多命中检查兜底"而代码没有(J1 二审 push-back, `de2ae60e` 已补 probe/AMBIG)——
+  同族于"注释不是闸", 但这次发生在**测试仪器自己身上**: 仪器的守卫也要被核, 不能因为它是"查别人的"就免检。
