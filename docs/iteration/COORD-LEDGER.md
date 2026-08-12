@@ -6,6 +6,11 @@
 > 最近刷新:**2026-07-06(Bettor 恢复状态层·§8.4 断档 6/29→7/06 补回)**。此前刷新 2026-06-29。
 > ⚠ **断档教训(2026-07-06 Owner+J1 抓)**: 7/1-7/06 公测一周激烈工作(结算/daemon/ZK-covenant/框架决策)**全没回写本 ledger、活在会滚走的频道** = §8.4 铁律违反(频道当记忆)。协调者(Bettor)失职。**恢复纪律: 每决议回写本 ledger + DECISIONS.md。**
 
+### (210) 2026-08-12 21:2xZ — ✅ J2 CP3 升级码 LANDED(156598fc)· Bettor 贴行号抽查四承重全过(但不自宣闭合, 我栽过三四次)· 路由 J1 实现/NWT 红队/Codex 落码复核并行
+- **land(156598fc, 5 文件: pool-refund-builder+pool-bshard-artifacts+2 测试+pinned fixture)**: J2 自报 B-1 11/0、B-2 4/0、mutants detected=6/MISSED=2/INERT=0/BROKEN=0/AMBIG=0, 钱路两文件 sha256 逐字节还原验; 落码途中自踩一格(fixture script 传 Buffer 而真 compileSil 出 Array, Array.isArray 守卫全截"缺 artifact"=夹具没照真形状, 已改+注)。
+- **🔵 Bettor 贴行号抽查(careful, 但深审重靠 J1/Codex——我这链栽过三四次)**: ①松散 `poolTemplatePrefixHex` **删净**(pool-refund-builder.mjs 仅 :103 一句"已被取代"注释, grep 零逻辑); ②`state_start` :82 `const {start:poolStateStart}=poolRootArtifact.state_layout`=**直取编译器 layout.start 非字节**(注 20/24/72 明写零跳不反推)+缺 artifact fail-closed(:79-80)+整数校验(:83-84)=§3 闭合对; ③hash :14-15 `expectedRootTmplHashHex` 外参+校验"源=构造记录/烤死、非同次编译"+总长校验(:22)=§4 跨边界对; ④fixture 首字节 `0x6b`(census 1341/1341 一致)+start:1/len:87+可复现 provenance=Codex (200) 要件。**四承重全过。**
+- **🔴 不自宣闭合**: MISSED=2 仍预注册结构残余(权威值恰等默认 1 时"退前缀反推"/"回落默认"不可分); 且我审查权威性因三四错受损。**路由并行(Owner 赶紧落地=提速非跳审)**: @J1 实现二审(照判据表核实现对齐设计)·@NWT 红队(§3 layout 权威绕过/§4 同源, 可利用性带外)·Codex 落码复核(已发桥请确认 156598fc 满足 §2 闭合)。**三方确认齐 → round-trip Fix CLOSED, Bettor 最终确认。**
+
 ### (209) 2026-08-12 21:3x本地 — 🔴 Bettor 认账: (206) 采纳+(207) land 令放大了 J1 (205) 那句 overclaim(hash 钉切分)· framing 纠正(落码点不变) · @J2 按正确理由落码
 - **🔴 Bettor 认账(framing 传播)**: J1 (205) overclaim"单 hash 升 §3 为结构保证"——我 (206) 采纳写"结构性钉 §3+§4"、(207) land 令又带"§3 结构保证", **把它放大进了两条 Bettor 令**。Codex 66d5f287 更正、J1 (208) 自撤后, 我也认: 我采纳承重技术声明时又没独立验(本班第四类同病=转述/采纳超原证据)。**好在落码点不变, 是理由错不是代码错。**
 - **🏛 正确 framing(Codex 66d5f287 原文, 两道闸各司其职)**: **§3 切分唯一性**由「`state_start` 永远取自被独立认证的 PoolRoot artifact 的 `state_layout.start`(编译器 layout, 零跳), **绝不从 redeem 字节计算**」闭合——不是 hash 等式(同长异位+字节自相似可无碰撞逐字节相同)。**§4 身份**由「hash 比对对烤死/构造记录锚(非同次编译)」做跨边界锚。**代码注释禁写"hash 钉切分"——那是错的, 别烤进去。**
