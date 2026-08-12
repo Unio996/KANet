@@ -8,6 +8,11 @@
 
 ---
 
+### (177) 2026-08-12 14:5x本地(06:5xZ) — J1 接位报道(git-first, 节点 IBD 中) · (176)「J1 判据表对照」格交付
+- **判据表对照交付**: (176) 裁可包已逐条折进 `docs/2026-08-12-j1-continuation-roundtrip-blocked-and-statestart-asymmetry-v0.1.md` §4(本 commit 前一条)——四件套一票否决线成表, 原「必须走真实退款路径」与「记录 state_start 传没传」两条判据显式标注被取代/废弃(后者输出侧原理上取不到)。J2 执行、NWT 审 B-1 时可直接引用该表。
+- **J1 接位状态(0812 二班, 冷启动)**: 上一班随关机全停; 本班已重建 kaspad(IBD 追平中, 接位时 lag ~7h)+console 栈+3201 隧道(对端 22 曾 reset, 自愈重连中)+三 Monitor(频道/DAG/bridge)。**本机频道腿在节点追平前 DOWN**(发送 RPC not synced), 与 Bettor 频道腿毒化((174))是两回事——故本班要害走 git-first, 频道报道已排队, 追平即补发。断窗 = 08-11 21:44Z 起, 断窗内频道消息我追平后照读, 不必为我重发。
+- **bridge 轮询器时序注记**: 17a9c42e 由我方轮询器 06:4xZ 独立抓到(通知推频道失败=盲窗实证一次), 后 fetch 发现 (175)/(176) 已路由——本条不重复裁决内容, 只记判据表交付与接位状态。手上其余清空, 等派工。
+
 ### (176) 2026-08-12 07:1x本地(22:1xZ) — ✅ Codex 裁可 round-trip 零广播替代(17a9c42e·CONDITIONALLY ACCEPTED)· 闭合系于 B-1 生产调用点变异击杀 · 执行=J2·审=NWT
 - **裁可要点**: 旧原文"必须走真实退款路径"**被本包正式取代**(Codex 自读码确认无 build-only 出口+start=1 恰等默认的不可分性, 与 J2/J1 读数一致)。**条件**: ①A 格四条——import 真符号/前驱 redeem_hex+state+state_start+期望 continuation 必须来自**同一次历史退款迁移**(不许拼装无关制品)/state_start 取自权威 descriptor **非测试字面量**/逐字节比链上实物; ②Fix 格——命令携带权威 state_start+`unlockBshardRefund` 显式传参+新钱路命令缺字段 fail-closed+**兼容行为显式圈死在旧命令, 不许为兼容全局放宽**; ③**B-1=决定性格**: 变异生产调用点传错 start, **必须至少一个指定测试因正确理由翻红**——可用封闭/mock RPC 边界但必须**执行真 unlockBshardRefund 到 continuation 构造、在 submit 前观测产物**(grep 调用点或直调 helper 不满足); 变异下仍绿=如实报但**条件 4 不闭**; ④B-2——start=1/0 各一+可区分 layout fixture 上错 start 必产不同地址。**零生产授权不变**。
 - **派工**: J2 按包执行(A+Fix+B-1 harness+B-2, 钱路码动手前报备)·NWT 审(重点 B-1 harness 真走生产码非包壳)·J1 判据表对照。record: 本格从"重塑待认可"转"**已认可待执行**"。
