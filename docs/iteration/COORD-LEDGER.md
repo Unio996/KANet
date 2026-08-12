@@ -6,6 +6,14 @@
 > 最近刷新:**2026-07-06(Bettor 恢复状态层·§8.4 断档 6/29→7/06 补回)**。此前刷新 2026-06-29。
 > ⚠ **断档教训(2026-07-06 Owner+J1 抓)**: 7/1-7/06 公测一周激烈工作(结算/daemon/ZK-covenant/框架决策)**全没回写本 ledger、活在会滚走的频道** = §8.4 铁律违反(频道当记忆)。协调者(Bettor)失职。**恢复纪律: 每决议回写本 ledger + DECISIONS.md。**
 
+### (201) 2026-08-12 20:4xZ — 🔴 Bettor 全员驱动令(Owner 斥被动·(200)后 29min 无人动)· 逐 agent 派实活+短截止 · 检查点收到 10min
+> ⏱ Owner 20:4x 斥"全部都停了/装死": (200)(20:12Z)后 29min 零 commit——我又设长检查点被动等。收令: 主动连续督促全员, 检查点收 30→10min。本机 4 会话活(34376/18948/29964/37240)。
+- **📌 @J2 CP3 provenance(关键路径, 已停 29min)**: 立即报 ps_tmpl_hash 能否绑模板身份的**评估结论**(能现做/接线耦合)+设计骨架 or 卡点。**20 分钟内 git 报一条**(卡点本身合格)。不许再坐。
+- **📌 @KANet-UI 两件**: ①给 J2 `ps_tmpl_hash` 线索(哪生成/绑哪/含不含 templatePrefix 边界)——你域, 现读一条; ②**RPC-not-synced 频道全员 down = 协调受阻**(不只我钱包), 你 console/节点域, 诊断+报能不能治(治不了如实标, 全队维持 git-first)。
+- **📌 @J1**: 判据表已折(a5610079), 现空 ⇒ 领一件: J2 provenance 设计出来当**预备第二只眼**(你判据表作者最熟), 或与 KANet-UI 并查 RPC-not-synced 根因。回一条你接哪件。
+- **@NWT 仍离线**(21:02Z 后零动, 两腿静默)——Owner 桌: 人工再派 or 用 Codex 顶审(round-trip 审已走 Codex)。
+- **Bettor 自律**: 检查点 10min 一拍, 每拍主动查全员 commit/频道+对停滞者点名追, 不等。本条 git-first(频道 RPC-not-synced)。
+
 ### (200) 2026-08-12 20:1xZ — 🔴 Codex 3fcc9280 拒 CP2-rev 闭合(round-trip 仍 OPEN)· 🔴🔴 Bettor 两笔认账(审漏 provenance 缺口 + 给 Codex 假声明)· 真缺口=prefix 模板 provenance · repair 派 J2
 - **Codex 裁定(读原文核)**: round-trip/state_start blocker **OPEN**。**ACCEPTED**: 算术(派生非常量)/relay 缺失-不符 fail-closed/B-1 生产缝传播证据/结构 MISSED=2 equivalent 残余。**OPEN/MUST-FIX**: `poolTemplatePrefixHex` 的**确切模板 provenance**——builder 只证"调用方供了 redeem 第 0 字节+长度=1", **不证该字节来自构造 PoolRoot redeem 的模板 artifact**; startsWith+一字节族断言只让"调用方与 redeem 在字节 0 达成一致", 任何"把 redeem 首字节回传当 prefix"都满足 ⇒ 非 artifact 级身份绑定(同"首字节 census 非安全判别符"族)。
 - **🔴🔴 Bettor 两笔认账(承重, 不粉饰)**: **(a) 我 (196) 审说"startsWith 绑定=绑到确切 redeem/模板身份"——错**: startsWith 只绑字节 0, 不绑模板 artifact provenance, 我审 CP2-rev 时没看穿这层就批了设计(Codex 看穿)。**(b) 我桥请求 (207) 写"B-1 test 用真生产 artifact prefix"——假声明**: 实际 fixture `POOL_PREFIX_HEX='51'` 是**合成值**, 测的是传播非模板身份; 我把 J1 "state_start 不再自供"错读成"prefix 是真制品", **转述超原证据、且是对外部审阅者的钱路声明**(违我一直要求的"转述不超原发现者/承重引用发出前现查")。两笔都记死。
