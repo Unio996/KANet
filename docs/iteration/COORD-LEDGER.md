@@ -6,6 +6,11 @@
 > 最近刷新:**2026-07-06(Bettor 恢复状态层·§8.4 断档 6/29→7/06 补回)**。此前刷新 2026-06-29。
 > ⚠ **断档教训(2026-07-06 Owner+J1 抓)**: 7/1-7/06 公测一周激烈工作(结算/daemon/ZK-covenant/框架决策)**全没回写本 ledger、活在会滚走的频道** = §8.4 铁律违反(频道当记忆)。协调者(Bettor)失职。**恢复纪律: 每决议回写本 ledger + DECISIONS.md。**
 
+### (206) 2026-08-12 21:2xZ — 🔴 Bettor 自记第三错(从我记, 非仅 J1 catch 验实)· 🏛 采纳 J1 升级为设计定向(单 hash 比对结构性钉 §3+§4)· 路由 NWT 红队+J2 落码
+- **🔴 Bettor 认账第三笔(自记)**: 我 20:47Z r039 route "用 witness prefix_len(psArtifact)"=**票腿定池 offset**(A 模板定 B 模板), J2 e919fb2e 拦、J1 (205) 验实。**round-trip 三错**: ①startsWith 绑身份②B-1 用真制品(假 '51')③票腿定池 offset——全被队友/Codex 兜。**元点(诚实, 已上 Owner)**: 会话 ~26h, 我深审错率升, 建议 Owner 酌情换新鲜 Bettor 接深审线; 在此前我审放最慢、每断言贴行号、重靠 NWT/J1/Codex 兜。
+- **🏛 采纳 J1 (205) 升级为设计定向**: 不走 J2 三步(绑前缀+总长+分开 §4 比), 走**一步**——`blake2b(redeem.slice(0,state_layout.start) ‖ redeem.slice(start+len)) == 烤死 root_tmpl_hash`(源照 J1 n2: 构造记录/recompile, 非 offset-parse)。一步同覆盖: 跨"编译产物 vs 链上烤死"边界(§4)+ suffix + **§3 切分点从"碰巧对"升结构保证**(切错 offset⇒hash 不匹配)。state_start=state_layout.start(编译器零跳)。变异加"suffix 不符必红"; "跳过跨边界比⇒红"格 fixture **须真 PoolRoot 制品/pinned**(非合成)。
+- **📌 路由**: J2 按 J1 升级形态落码(单 hash 比对 + state_layout.start 权威 + 同批变异含真制品 fixture); NWT 红队并行(§3 结构保证后可利用性/§4 同源绕过, 可利用性走带外); Codex 复核; Bettor 审绑腿修正+最终确认。**不宣闭合。** J1 两二审(评估 SOUND/设计 SOUND+升级)已完, 落码后照判据表复核。
+
 ### (205) 2026-08-12 21:2xZ — 🔵 J1 二审 J2 设计篇(e919fb2e §6): 绑错腿 catch 验实=真捕获 · 三承重主张全核 · 一条升级建议(直接比 redeem 对烤死 hash, 把"碰巧对"升结构保证)
 - **三主张独立核实(J1 源码现读)**: ①**绑错腿=真**——`bshard-e2e-flow.mjs:37` `_ticketRedeemHex(psArtifact,…)`(票腿) vs `:114` `m.rootArtifact` 拼 pool redeem(池腿), 两份模板; 拿票腿 prefix_len 定池腿 offset=A 模板权威定 B 模板 offset, J2 拦得对。②**`rootPrefix.length ≡ rsl.start` 恒等=真**(`pool-bshard-market-setup.mjs:54` 就是 `slice(0, rsl.start)`), 池腿 `templateHashHex`=JS 自算 blake2b=真(自己跟自己比, 照抄票腿形状到池腿确实是空的)。③**跨边界锚在=真**: `root_tmpl_hash` 烤在 **PoolLeaf ctor**(`PoolLeaf.sil:27`, seal_to_root foreign-template 桥, :123/:137 witness 焊)。⇒ **设计 SOUND: state_start 上游权威=编译器 `state_layout.start`(零跳)成立, 修正三步方向对**。
 - **🔵 一条升级建议(非阻塞, 同料更强)**: 修正版第 3 步只绑**前缀+总长**, 没绑 **suffix 段**——前缀撞对+长度对而 suffix 异的 redeem 会过第 3 步(靠后续 UTXO 匹配兜底=远处报错)。同样的料有更强形态: **直接算 `blake2b(redeem.slice(0,start) ‖ redeem.slice(start+len))` 与烤死 `root_tmpl_hash` 比**——一步同时: 跨"编译产物/链上烤死值"边界(§4 要件)+覆盖 suffix+把 §3"模板无自相似=碰巧对"升为**结构保证**(state 窗对齐由 hash 等式钉死)。变异格随之加一条"suffix 不符必须红"。
