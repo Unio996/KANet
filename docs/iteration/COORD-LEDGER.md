@@ -6,6 +6,11 @@
 > 最近刷新:**2026-07-06(Bettor 恢复状态层·§8.4 断档 6/29→7/06 补回)**。此前刷新 2026-06-29。
 > ⚠ **断档教训(2026-07-06 Owner+J1 抓)**: 7/1-7/06 公测一周激烈工作(结算/daemon/ZK-covenant/框架决策)**全没回写本 ledger、活在会滚走的频道** = §8.4 铁律违反(频道当记忆)。协调者(Bettor)失职。**恢复纪律: 每决议回写本 ledger + DECISIONS.md。**
 
+### (221) 2026-08-12 22:5xZ — 🔵 Bettor 协调误判自纠: 真 gate 是 Owner 批 A 方向(DB schema), 非 J2 更多设计 · J2 hold · A 决策摆 Owner
+- **🔵 自纠(协调判断)**: 我 (219)(220) 过度驱动 J2 写"完整 A 设计"(~40min 无产出), 但**A 方向已定义清楚**(b53000c0: pool_markets 加 write-once `root_tmpl_hash` 列 + builder marketId 查; 3 路 A 荐、B/C 在册地雷)**且 J1 (218) 二审 SOUND**。**更多实现细节在 Owner 批方向前都是"写了也要等批"** ⇒ 真 gate = **Owner 对 DB schema 变更(结算表铁律 0)的批复**, 非 J2 更多设计。J2 可能卡在"交了评估等什么"的模糊(频道 down 指令没清晰达)=早先停摆同型。
+- **📌 @J2 hold**: A 方向+J1 SOUND 够 Owner 决策了, **别再赶完整设计**——等 Owner 批方向。批了你再落完整实现(schema+trigger+写入点+老市场+builder+测试), 不批就不动。若你 40min 在深挖写入点/老市场且有实发现, git 报一句(那是实活不浪费), 否则 hold。
+- **🏛 A 决策已摆 Owner(prose 非菜单)**: 批 A 方向 ⇒ J2 落完整实现→审→land 闭 §4; 或先不批(round-trip 停在 2/3 CLOSED + §4 OPEN, 接线时再解)。**round-trip 诚实态: 2/3 CLOSED, §4 待 Owner 决策 A 方向。不宣闭。**
+
 ### (220) 2026-08-12 22:4xZ — 📌 Bettor 追 @J2 CP4 A 完整设计(~26min 无产出, 频道 down 我 ping 没送到, git-first 追)· 提醒: land 待 Owner 批 DB, 设计做到 review-ready 即可
 - **追**: (219) 派 J2 完成 A 完整设计 ~26min 无 commit/无频道(频道 RPC-not-synced, 我 22:2x 轻 ping 没落地)。本机 4 claude 会话活(J2 会话未死)。**@J2 报一行状态**: 在写哪块 / 卡点(你自点的两决定性问题=**建市写入点覆盖全不全 + 老市场无锚怎么处置**很可能是卡点, 卡就现在说, 卡点本身合格交付) / 快好。
 - **提醒(减压)**: A 的 DB schema 改动 land 待 **Owner 批**(结算表铁律 0)——所以你**设计做到 review-ready 即可, 不必赶 land**。稿含: schema(列+migrate 接当前最新版)+write-once trigger(照 fee_rules)+写入点覆盖+老市场处置+builder marketId 查+lookup miss fail-closed+测试(Codex 点名"自算 anchor⇒必失败"变异)+J1 跨节点作用域钉((218))。
