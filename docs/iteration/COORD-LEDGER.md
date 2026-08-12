@@ -6,6 +6,12 @@
 > 最近刷新:**2026-07-06(Bettor 恢复状态层·§8.4 断档 6/29→7/06 补回)**。此前刷新 2026-06-29。
 > ⚠ **断档教训(2026-07-06 Owner+J1 抓)**: 7/1-7/06 公测一周激烈工作(结算/daemon/ZK-covenant/框架决策)**全没回写本 ledger、活在会滚走的频道** = §8.4 铁律违反(频道当记忆)。协调者(Bettor)失职。**恢复纪律: 每决议回写本 ledger + DECISIONS.md。**
 
+### (217) 2026-08-12 22:0xZ — 🔴 Codex 闭合裁(311f12f8): round-trip 【NOT YET CLOSED】· 2/3 闭(state_layout 权威+leg-swap)· §4 身份锚独立源 OPEN/MUST-FIX(与 NWT ② 收敛)· 修法派 J2 · 不宣闭
+- **Codex 裁定**: ①state_layout 权威 **ACCEPTED IN CODE**; ②leg-swap 格 **CLOSED IN CODE/TEST**; B-1/B-2 accepted, 两 same-value equivalent mutant 不必强杀; ③**PoolRoot 身份锚独立源 OPEN/MUST-FIX BEFORE WIRING**; **④整体 round-trip blocker NOT YET CLOSED IN CODE**。
+- **🔴 §4 OPEN(Codex+NWT 独立收敛=同一点)**: buildRefundCommand 收 `expectedRootTmplHashHex` 是**调用方任意 32B 串**, builder 不机器约束来源 ⇒ **循环调用方**(拿同一 poolRedeem 去 state 窗、hash 剩余、当 expected 传回)使跨边界比对**同义反复**。零活调用方降当前可利用性, **但不把未强制的 provenance 不变量变成已闭代码不变量**。=NWT ② "整套最重单点"。
+- **Codex 最小修法(非全框架)**: 去掉 builder 边界任意 provenance——expected 承诺来自 **typed/named PoolRoot 构造记录/pinned/链上 artifact**, 其源**不能被退款调用方用同一候选 redeem 重算替换**; builder 消费该 typed 源(或只有该源能返回的值), 非自由 `expectedRootTmplHashHex` 参数。修后加变异: 调用方试图从候选 redeem 自算 anchor ⇒ 必失败/结构不可用。POOLROOT_STATE_LEN(NWT①)次要, 接线时。
+- **📌 派 @J2(CP4 anchor-provenance, Codex 已给形状)**: 评估+设计——expected anchor 改从 **typed 源**(computePoolRootArtifact 的 .sil 编译 hash? 命名 resolver 取 pinned/链上?)取, 调用方不能自算替换; 判**能现做(computePoolRootArtifact 本从 .sil 独立于候选 redeem)还是接线耦合**。报设计我审→J1 二审→NWT 红队→Codex 复核。**round-trip 仍 OPEN 不宣闭**。**诚实口径: "赶紧落地"落了码+闭 2/3, 第 3 块 §4 还差这一个 typed anchor 源修法, 非停摆是真实剩余。**
+
 ### (216) 2026-08-12 22:1xZ — ✅ Bettor 收 NWT 红队(gate 1/2 清=不 PUSH-BACK)· 三条 follow-on 立【接线验收门·WIRING-CHECKLIST】durable 捕获 · 只剩 Codex gate · 诚实口径记
 - **NWT gate 清**: (215) 不 PUSH-BACK 本次闭合——闭合范围"state_start 权威接线时对"代码层站得住; 三发现全接线前设计层(buildRefundCommand 零活调用方=非当前活路径), 可利用性带外(scratch/nwt-cp3-redteam-2026-08-12.md gitignored)。**两道闭合 gate: NWT ✅ / Codex 在途(6c3d4763)**。
 - **🔴 立【接线前 WIRING-CHECKLIST】(durable, 接线时必过, 别丢)——NWT 三条 follow-on**: ①**补 `POOLROOT_STATE_LEN` 防御常量**(今 `len` 无防线, 只靠 hash 独木); ②**`expectedRootTmplHashHex` 收窄成具名函数**(禁收调用方任意字符串)——NWT 判**整套最重单点**: 最自然的未来实现"从同一 poolRedeem 算 hash 再比"是**循环、零报错、让 §4 形同虚设**; 本链已栽 5+ 次同族((200)(206)(209)+我三四错), 不能靠"记住"=**必须机制强制**; ③判据表注记换腿保护真实构成。**这三条 gate 接线设计稿, 不阻塞本次闭合但接线前必过。**
