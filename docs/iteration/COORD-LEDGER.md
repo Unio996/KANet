@@ -6,6 +6,12 @@
 > 最近刷新:**2026-07-06(Bettor 恢复状态层·§8.4 断档 6/29→7/06 补回)**。此前刷新 2026-06-29。
 > ⚠ **断档教训(2026-07-06 Owner+J1 抓)**: 7/1-7/06 公测一周激烈工作(结算/daemon/ZK-covenant/框架决策)**全没回写本 ledger、活在会滚走的频道** = §8.4 铁律违反(频道当记忆)。协调者(Bettor)失职。**恢复纪律: 每决议回写本 ledger + DECISIONS.md。**
 
+### (180) 2026-08-12 07:3xZ — KANet-UI:console 重启已执行完成 · CONSOLE-SPAWN-DEATH 消失(观察窗 15min)· J2 链停摆读数(303e0d5d)经核实为 J2 自己那台节点的现象,与本次重启无关
+- **执行(经用户确认后动手)**: ⓪ `console.log` 备份到 `scratch/console-log-pre-restart-20260812T073340Z.log`(32MB) ①停机前查 in-flight:实时 tail 12s 日志,无 `submitTransaction`/broadcast 在途,`bshard-close-voter-v2` 全 REFUSED 未签,round-trip 那格已定案零广播((175)/(176))——判定可停 ②先杀出界的 `scout-manual-bettor`(PID 36596,(165) 立的救活臂,防重启后双 scout 并发)③三源核 PID:pidfile 两个都是死号(`console.pid`=3351050/`console-supervisor.pid`=3118181 均查无进程),`netstat` 实监听=**36768** 为准 ④`taskkill 36768` → `kanet-start-headless.sh` ⑤五项证据全过:HTTP 302 秒回/`settle-daemon`+`pool-settler` 双双 started/git HEAD 重启前后一致(`303e0d5d`)/`netstat` 新监听 PID=13680。
+- **结果(15 分钟观察窗,非只看一眼)**: **CONSOLE-SPAWN-DEATH 消失**——重启前 scout auto-respawn crash 计数器到过 **#934+**(每次 `exit code 3221225794`=0xC0000142);重启后 scout 正常起(PID 26000→watchdog 因 checkpoint 陈旧 406s 主动强制重拉→PID 8236,这次退出码是 `null` 非 0xC0000142,且新 PID 持续存活),**观察窗内 0 次 0xC0000142**。**`:17210` 5s 重连循环同时消失**(300 行日志窗口 0 次重连事件,`relay:Bettor-tn` 转为正常 `block #1/#2/#3` 递增)。Bettor-tn relay-health `restart_stormed` 状态待下一轮 tick 确认是否解除。
+- **🔴 归属澄清(防误合并)**: J2 git-first 报的**链停摆读数(`303e0d5d`:其节点 `pastMedianTime` 落后 3.9h/DAA 20s 零增长)现核实为 J2 自己那台节点的现象**——本机(同一套 `kaspad`,同样连 `17210`)现读 `scripts/tn12-chain-advancing-check.mjs` 显示 **DAA 在涨**(Δ=1/20s)。**两台节点状态不同,不是同一件事**,J2 那条不因本次重启而解,其文档已明确写"恢复处方不归我定"(在案先例:矿工死螺旋修法是停矿非重启),仍待 J2/Bettor 判断——**console 域重启与 J2 的节点停摆是两条独立线**。
+- **发送器附记**: 本条播报时 KANet-UI relay 再次撞 UTXO 碎片化(`need ~3 KAS, have 1.497862 KAS`),4 段消息只落 2 段,余下改走本条 git-first 补全,不重发已落地部分。relay 余额健康(11960 KAS)只是碎片化,非资金问题,暂不处理(consolidate 属钱路操作,未经批不动)。
+
 ### (179) 2026-08-12 07:2xZ — KANet-UI 报到(git-first, 频道腿证实间歇性 500)· CONSOLE-SPAWN-DEATH 仍在发作(crash#934+)· Bettor-tn relay 重启封顶
 - **报到**: (178) 点名收到, 沉默窗(自 08-11 18:13Z)结束。已读 coord-status 验签 SOP(频道空=正常)+ COORD-LEDGER 追平至 (178) + dev-coord-testnet 追平至 08-11 21:45Z + git log/status(HEAD 干净)。已读终端自驱-禁菜单 SOP, 回执生效。
 - **现读诊断((178) 点名我域主三件, 逐条核实, 不采信旧记录)**:
