@@ -6,6 +6,11 @@
 > 最近刷新:**2026-07-06(Bettor 恢复状态层·§8.4 断档 6/29→7/06 补回)**。此前刷新 2026-06-29。
 > ⚠ **断档教训(2026-07-06 Owner+J1 抓)**: 7/1-7/06 公测一周激烈工作(结算/daemon/ZK-covenant/框架决策)**全没回写本 ledger、活在会滚走的频道** = §8.4 铁律违反(频道当记忆)。协调者(Bettor)失职。**恢复纪律: 每决议回写本 ledger + DECISIONS.md。**
 
+### (182) 2026-08-12 07:5xZ — KANet-UI:v196 `u1_identity_registration` 迁移现读确认 live(批A `96a8c2d2` 随重启生效)· 发送器 UTXO rebalance(1164→10 utxo)
+- **DB 现读(readonly 连接,console.db)**: 表存在,DDL 逐字核对三条约束齐全 `UNIQUE(root_fingerprint)` / `CHECK(identity_index=0)` / `CHECK(custody='mnemonic')`,与 (172) NWT 审的原文一致;0 行(符合预期,注册入口未落码前无写入方)。批A 随 (180) 重启确认生效。
+- **发送器维护**: KANet-UI relay 反复撞 UTXO 碎片化(1164 个小 UTXO,需 ~3 KAS 单笔常年凑不出),用既有 `POST /api/relay/:id/split-utxos?force=true` rebalance 成 10 个(txId `c5d9bf06…`,fee 1.207216 KAS)——本条走 git-first 是因为 relay 侧的**去重缓存在广播失败前就已记录该条内容**(与"UTXO 太小"这类失败无关的另一个独立坑,发送同一段文字换几次都被判"重复"),不是余额问题,记账供其他 agent 排查同款坑时参考。
+- **🔵 共享工作树现读旁记**(不影响本条): `git status` 现读到 `kasia-console/src/services/relay-manager.js` / `kasia-relay/src/lib/wallet.mjs` 有未提交改动 + 新文件 `u1-n5-escape-hatch.test.mjs`,像是别人(推测 @J2)正在做 A2 批B(N5 逃逸口互斥)在途编辑——本条只 pathspec 提交 `COORD-LEDGER.md`,未碰这些文件。
+
 ### (181) 2026-08-12 07:4xZ — 🟢 真相大白: "9h 静默=都在等"是假象, 是全员频道腿各自 DOWN(非死亡)· J2 二班在座确认 · 🟢 J2 round-trip 无歧义总 GO(已在 (174)/(176), J2 stale 未读到)· spawn 顶替臂不起
 - **🔵 根因订正(接 (178))**: 08-11 21:45Z 起的"静默窗"**不是任何人下线**, 是**三方频道腿各自 DOWN 同时发生**——J2 发送被打回(其节点 RPC `not synced`)/J1 节点 IBD(发送 RPC not synced)/Bettor relay 毒化(连接层)。三人全程 git-first 在干活。**KANet-UI console 重启(180)一举治好全员频道腿**(Bettor 07:38Z 实证一条落地, J2 07:40Z 频道发言恢复)。教训: 多方同时"发不出"在协调者视角与"多方下线"读数完全相同——**静默的归因必须逐腿查, 不能从"没声音"推"没人在"**(呼应 (178) 我把 21:45Z 旧状态当现在的更正)。
 - **J2 二班在座(303e0d5d 现读确认)**: 静默期全程推进, 进度全在 origin——A2 判定器 52a95a69(16 用例/10 变异)/N8 PoP 28f855f2(11/12)/v196 96a8c2d2/注册入口 941d8ff5(V7/V17/V18)/spec v1.2-rc(NWT 三审全 PASS)。**J2 唯一卡点=一句 GO**(export 两函数+:2804 可还原变异)。
