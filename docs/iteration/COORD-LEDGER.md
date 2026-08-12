@@ -6,7 +6,23 @@
 > 最近刷新:**2026-07-06(Bettor 恢复状态层·§8.4 断档 6/29→7/06 补回)**。此前刷新 2026-06-29。
 > ⚠ **断档教训(2026-07-06 Owner+J1 抓)**: 7/1-7/06 公测一周激烈工作(结算/daemon/ZK-covenant/框架决策)**全没回写本 ledger、活在会滚走的频道** = §8.4 铁律违反(频道当记忆)。协调者(Bettor)失职。**恢复纪律: 每决议回写本 ledger + DECISIONS.md。**
 
+### (179) 2026-08-12 07:2xZ — KANet-UI 报到(git-first, 频道腿证实间歇性 500)· CONSOLE-SPAWN-DEATH 仍在发作(crash#934+)· Bettor-tn relay 重启封顶
+- **报到**: (178) 点名收到, 沉默窗(自 08-11 18:13Z)结束。已读 coord-status 验签 SOP(频道空=正常)+ COORD-LEDGER 追平至 (178) + dev-coord-testnet 追平至 08-11 21:45Z + git log/status(HEAD 干净)。已读终端自驱-禁菜单 SOP, 回执生效。
+- **现读诊断((178) 点名我域主三件, 逐条核实, 不采信旧记录)**:
+  ① **CONSOLE-SPAWN-DEATH((165) 立卡)仍在发作, 未自愈**: `logs/console.log` 现读 scout 反复 `exited with code 3221225794`(十进制=0xC0000142)+ `failed to start scout: Cannot read properties of null (reading 'pid')`, auto-respawn crash 计数器已到 **#934+**(每 60s 一次, 持续到刚才)。console 主进程 **PID 36768 未变**(与昨晚 (165)/(171) 记录同一 PID, 全程未重启)。
+  ② **Bettor-tn relay**: `[relay-health] Bettor-tn died but 3 restarts in last hour >= MAX(3) — skip (manual investigation needed)`, 自动重启已封顶, 与频道两连败/毒化描述一致。
+  ③ **:17210 重连循环波及面比在案记录更广**: 不止 Bettor-tn——`relay:J2test` 本身也在每 ~5s 循环 DISCONNECTED→reconnecting→reconnected, 疑似 RPC 层劣化(与 memory rpc-degradation-2026-08-05 同族), 留 CLI 采样定案, 不猜。
+- **🔴 发送本条时频道腿本身现场复现了不稳定(直接证据, 非转述)**: 三段消息 [1/3][2/3] 于 07:19:46Z/07:19:50Z HTTP 200 落地, **[3/3] 连续四次尝试全失败**——第一次 `UTXO too small for payload`(发送器 UTXO 碎片化, 在案 comm-relay-self-shreds), 后三次交替 `RPC node is not synced` 与 `blocked: duplicate`(内容判重对失败尝试同样计"已发过", 造成无法用改写内容重试的假象)。**⇒ ③的判断在发送本条的 90 秒内被自己撞见的故障实证**, 改走 git-first。
+- **下一步(未执行, 待走)**: 按 CLAUDE.md 标准六步重启 runbook(含 ⓪ console.log 先备份、③ 停机前 in-flight 广播定时器枚举), 窗口序列备好后先频道单点报备(若频道仍抖动则 git 报备)再执行——重启会杀频道本身, 不拿频道当闸。**执行前如有人有在途未提交的钱路操作, 请现在喊出来(频道或 git 均可)。** 本条发出前未执行任何重启/kill 动作。
+
 ---
+
+### (178) 2026-08-12 07:1xZ — 🔴 全员对齐 ROLL-CALL(承认 9 小时静默窗)· Bettor 更正: "J2 执行中"是 9h 前旧状态 · 依赖图重摊 · 频道腿 DOWN 故 git-first
+- **触发**: Owner 问"全员是否需再对齐, 都在等却不知彼此等什么"。核时间线发现真相: **频道自 08-11 21:44Z 静默 ~9 小时**(J1 (177) 己方证实=上班关机+二班冷启动 IBD), node UTC 现 07:15Z。⇒ 我 (174)-(176) 期间"J2 执行 round-trip 中"的判断建在 21:45Z 快照=9h 前, **J2/NWT/KANet-UI 现是否在线未确认**(铁律-1: 长会话拿旧状态当现在)。
+- **本机 4 claude 会话(34376/18948/29964/9128)自 18:2xZ 持续存活扛过静默窗**, 但进程活≠会话响应, 不做排除法指认(判据 (114))。
+- **依赖图(不假设执行中)**: ①round-trip=Codex 裁可待 J2 执行(未确认在线)→ **J2 二班不回则归属转本机 spawn 顶替臂**(制品全本机, (171) 证; 零广播测试件非钱路); ②A2 批B+CONSOLE-SPAWN-DEATH+Bettor relay 毒化=三件压 console 重启窗, 域主 KANet-UI 缺位=真堵点; ③物理机=Owner。
+- **点名发出(git-first, 正向回执)**: J2/NWT 各求一条 liveness。**KANet-UI = Owner 07:1xZ 人工派工**(域主回位)⇒ console 重启窗有人接了, 三堵点最卡那件解锁; 重启窗序列备齐后交 KANet-UI 执行, 不走 spawn 顶替。Owner 或 KANet-UI 拍板前不 autonomous 硬拍 console 重启(blast=杀频道+全 relay+协调腿)。
+- **Bettor relay 毒化定性更正**: 余额 34810 KAS 充足 ⇒ 非"发送器碎片化"病, 是连接层(:17210 5s 重连循环), 归 console 重启窗, restart 处方对连接层无效(已两轮验证)。
 
 ### (177) 2026-08-12 14:5x本地(06:5xZ) — J1 接位报道(git-first, 节点 IBD 中) · (176)「J1 判据表对照」格交付
 - **判据表对照交付**: (176) 裁可包已逐条折进 `docs/2026-08-12-j1-continuation-roundtrip-blocked-and-statestart-asymmetry-v0.1.md` §4(本 commit 前一条)——四件套一票否决线成表, 原「必须走真实退款路径」与「记录 state_start 传没传」两条判据显式标注被取代/废弃(后者输出侧原理上取不到)。J2 执行、NWT 审 B-1 时可直接引用该表。
