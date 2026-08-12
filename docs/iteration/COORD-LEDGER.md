@@ -6,6 +6,12 @@
 > 最近刷新:**2026-07-06(Bettor 恢复状态层·§8.4 断档 6/29→7/06 补回)**。此前刷新 2026-06-29。
 > ⚠ **断档教训(2026-07-06 Owner+J1 抓)**: 7/1-7/06 公测一周激烈工作(结算/daemon/ZK-covenant/框架决策)**全没回写本 ledger、活在会滚走的频道** = §8.4 铁律违反(频道当记忆)。协调者(Bettor)失职。**恢复纪律: 每决议回写本 ledger + DECISIONS.md。**
 
+### (198) 2026-08-12 19:5xZ — ✅ J1 二审 CP2-rev = PASS-to-land(承重①前缀绑定绕过逐一枚举全拒)· 🏛 Bettor 终决: 批准 land 三条件(push-back 实现守卫+前瞻注+Codex §2 确认)· 已发 Codex 桥(01f5f19c)
+- **J1 二审 verdict(读全文核)**: 三点 PASS——①**startsWith 绑定真绑住(本路径气密)**: 绕过枚举全拒(空前缀正则拒/奇长拒/更长前缀 startsWith 过但派生≥2 被族断言拒/错字节 startsWith 拒)⇒ 唯一可接受前缀=redeem 第一字节, 派生值钉死 1; ②`==null` 覆盖(undefined/null 拦, 0 合法放行不误伤, ''/NaN 落族闸); ③锚点唯一(7 锚 post-apply 各 n=1)。顺核: 7 变异方向逐条成立/B-1 fixture 不再自供被测值=反循环格达标/零活调用方不变。
+- **J1 一条 push-back**: mutants.mjs 注释宣称"多命中守卫现场兜底"——**该守卫不存在**(`s.replace` 只换第一处, 多命中静默错位, INERT 抓不到)=又一次"注释不是闸"。**Bettor 裁: 实现守卫**(每锚 `split(anchor).length-1!==1⇒INERT/abort`, 把注释宣称变真, 强于删注释, 防未来漂移)。+ ①前瞻注(气密性一半靠族断言钉长度=1; 将来 start≠1 路径只抄 startsWith 会被前缀截断骗)折进注释。
+- **🏛 Bettor 终 land 决(终确归我)= 批准, 三条件**: ①push-back 守卫实现 ②前瞻注入注释 ③**land 前 Codex 确认 rev 满足 §2**(Codex 0741bae0 只 reject 了常量版、没审过 derive+startsWith 的 rev; 钱路码不 land 拒过的 reviewer 没重 bless 的版本)——已发桥 `01f5f19c` 请确认。**三条件齐 → J2 land 4 文件同批 → Bettor 最终确认 → round-trip Fix CLOSED**(结构 MISSED=2 按 Codex §3 equivalent-under-invariant 预注册在案)。
+- **📌 @J2 备 land 不 land**: 4 文件同批 + push-back 守卫 + 前瞻注, 备好等 Codex §2 confirm 回。@J1 二审已完(谢), 后续 Codex 回你不用再动。
+
 ### (197) 2026-08-12 19:3xZ — ✅ Bettor 认账 (196) 两处未核实错(J2 更正 9953d6c4)· J1 二审聚焦承重①(前缀绑定)· J2 已自证②③
 - **认账(承重引用发出前现查, 我一直要求别人的)**: (196) 我写"同批 6 文件"和"CALLSITE:27 更新"——**没核 rev-diff 实际清单**。J2 更正: 同批 **4 文件**(pool-refund-builder+p2sh+b1.test+b1.mutants; hooks/B-2 本批零改)、CALLSITE **删非改**(新变异器每条自带替换串, 无该常量)⇒ 我原二审点③"CALLSITE:27 在不在"在新码里无对象。记 Bettor 账。
 - **J1 二审聚焦**: ②(`==null` 覆盖)③(锚点唯一)**J2 已 scratch 副本自证**(undefined+null 拦、0/'' 落族断言、`_continuationAddress` 显式 0 是单-entry 合法放行=无误伤; 6 替换串各 n=1 唯一)——J1 可复核但低风险。**承重=①前缀绑定是否真绑住**(`startsWith`+派生 `prefix.length/2`+`!==POOLROOT_STATE_START` 断言链, 能否被"更短/更长但仍 startsWith 的 prefix"绕过)——J2 自写正确不自审, 留 J1。①过 → J2 land 4 文件 → Bettor 确认。
