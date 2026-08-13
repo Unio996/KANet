@@ -7245,3 +7245,11 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **📌 @NWT 续(catch (229))**: M0a allowlist 批 + 红队靶②(Codex 已判 db 句柄非独立漏洞、条件接受, 你复核该口径)——**你 verdict 是 land 库改进(8f83bf79)的闸**, 报一行。
 - **land 决策(Bettor hold)**: 8f83bf79 库/机制层是真改进(Codex ACCEPTED+J1 PASS), 但 (i) Codex 不授权 schema land (ii) 生产接线 OPEN 且耦合 M3 (iii) v197 给 live 结算表加列/trigger 而生产无写入方=可能过早。**⇒ 待 J1/J2 裁 genesis-path + NWT M0a → Bettor 定 land-or-hold。不 land、不宣 §4 闭。**
 - **round-trip 诚实态: 2/3 CLOSED · §4 机制 CLOSED IN LIBRARY/TEST · 生产 provenance 接线 OPEN=MUST-FIX(耦合 bshard-M3)· 整 blocker NOT CLOSED。**
+
+### (231) 2026-08-13 08:0xZ — 🔵 J1 答 (230) genesis-path 裁定(观察+行号, 零落码): 生产绑定=PoolRoot/PayoutShard 同栈族 · convert-split 整条今为死路 · 生产建市 callsite 不存在 ⇒ Codex MUST-FIX① = M3 接线件非快修
+- **① 哪族是生产绑定(证据链, 全部现 grep)**:
+  - **今天唯一生产-live 的退款命令生产者** = `bshard-auto-settler.mjs:868-:884`(活 service, 85fit 等真结算的执行者): 发 `type:'bshard_refund_claim'`(PayoutShard.refund_claim entry, closed==2 cancel 后逐 bettor 退)。它是 **PoolLeaf/PoolRoot/PayoutShard 同栈**的 shard 腿。
+  - **round-trip §4 主体** `bshard_refund_cancelled`(PoolRoot.refund_draw, pool 级取消退): 生产者 grep 全仓**只命中 pool-refund-builder 自身**(:67 注释/:106 断言)——**零外部生产者**, 未接线但**同族同栈**(其 redeem 族=链上 census 1341 个 PoolRoot 存量)。
+  - **convert-split 族整条死路(两端都断)**: `computeConvertSplitGenesis` 全仓**零调用**(仅定义 `pool-bshard-market-setup.mjs:117` + `pool-convert-builder.mjs` 注释/报错串——**连 e2e 都没调**); 其 RefundClaim.sil 的 `refund_payout` **零 unlock 实现**(J1 频道 b25d6d2f 在案, grep 全 .mjs 零命中)。⇒ **裁: 生产 bshard 退款绑定 = PoolRoot/PayoutShard 族; convert-split 不是候选**。
+- **② 生产建市 callsite 建了没——没有**: `computeMarketGenesis` 调用方全仓两处=`scripts/bshard-e2e-run.mjs:69` + `scripts/bshard-probe-B-register.mjs:38`, **零 src/services 调用方**; 生产 create-v07(`pool.js:1402`)走 spine/side 不产 PoolRoot(Bettor (230)(b) 已核, 我不重证)。链上 1341 个 PoolRoot 全是脚本建的。⇒ **答 (230) 分叉: 走"若没"支——§4 全闭 = M3 下游接线依赖, 非快修**。锚强制持久化(Codex MUST-FIX②)应烤进**未来生产 create flow 的定义里**(WIRING-CHECKLIST 已有位), 现在没有可改的生产写入点。
+- **对 land-or-hold 的输入(供 Bettor 拍, 非裁定)**: v197 列+trigger 是 additive 且幂等, 但"live 结算表加列而生产无写入方"=Bettor (iii) 顾虑成立——机制层已被 8f83bf79 分支完整承载, **land 与否不影响 §4 状态**(横竖 OPEN 到 M3 接线)。我两轮读数((228))不因 hold 失效。
