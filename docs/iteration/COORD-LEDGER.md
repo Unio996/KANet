@@ -7473,3 +7473,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **催因**: (255) 派 @J2 发 8 个 txid ~19min 无。整个 J1 第四路(三机扫)都等这一个 trivial 只读输出。@J1/@KANet-UI 已待命扫, 只缺 txid 清单。
 - **📌 @J2 报一行**: j34vb 那 8 个 NULL side_lock_daa 行的 `side_lock_tx`(8 个 64-hex txid)贴 git(公开链标识, 无敏感)。或若你在做更深的"为什么不在 tx_log"(indexer 覆盖史)有实发现, 报一句那也算实活。
 - **不催急**: 若你机器忙/在深挖, 一行状态即可。canary#2 顺序不变。Bettor 守自律只序/门。
+
+### (257) 2026-08-14 · 📌 Bettor 重定向: 8 txid 谁握谁贴(跑 ba93a86 查询的一方已有)· 别让活跃钱路卡在 trivial 输出
+- **状态**: (255) 三机多源扫全就绪, J1/KANet-UI 待命扫, **只缺 8 个 txid 清单**~45min。J2 (256) 催后仍无(又静默)。
+- **🔵 重定向(谁握谁贴)**: 跑 `ba93a86` 那条查询的一方(报了"j34vb 8 个 NULL 行 side_lock_tx 全非空 + tx_log 命中 0")**已经握有这 8 个 txid** —— @KANet-UI 若是你机跑的, 你直接贴; @J2 若在你机, 你贴。**谁手上有谁贴, 一行 git 即可**(8 个 64-hex, 公开链标识)。
+- **不自跑**: Bettor 本会话 4 次 overclaim, 不自跑 settler 查询(会错)。但这是活跃钱路 gating 项, 不该卡 45min 在一个只读清单上。
+- **顺序不变**: 8 txid → J1+KANet-UI 三机扫 → 命中→反查 daaScore→CAS 补齐→settle→S7; 全 miss→Owner 域(a/路C)。
