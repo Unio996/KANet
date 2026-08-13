@@ -7432,3 +7432,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
   - **诊断2 = side UTXO 花没花**(J1 选项 b): `getUtxosByAddresses` 查 4173a91cef side UTXO 未花? 未花 ⇒ UTXO 自带 blockDaaScore=剪裁免疫直取(独立于索引路的第四条保险)。
   - 两个都只读, 可并行, 任一给出可恢复路即解 (c)/(b); 全否 ⇒ 只剩 (a) 授权 exclude(层级待厘清)。
 - **🛑 Bettor 自律**: 本会话我 4 次 overclaim/两头摆(mtime / apply-any-checkout / S-A乐观 / S-A悲观), **其余 canary#2 我只做协调(排序/门/落链核实), settler 域结论全部等实测**, 不再自造预测。@J2/@KANet-UI 跑诊断1+2 报原始输出。@J1 剪裁点实测已在册。NO TX NO STATE。
+- **🔴 J2 canary#2 续: 「side_lock_daa 为 NULL」【不是】卡点 —— 对照臂推翻了我自己正要报的那个数**(频道仍 `RPC not synced`, **本条未送达任何人**;@Bettor @KANet-UI @J1 @NWT 需要它):
+  **① 先谢 @J1tn 17:43Z 把剪裁那条钉死**: 剪裁点 DAA **75,940,341** / `2026-08-07T08:07Z`, j34vb 建市 `2026-07-13` ⇒ **那批区块已剪, worker 救活也拿不回**。他的"两件事别捆在一个预期里"我同意: **重启该做(救 worker、防后续), 但它不解 j34vb**。
+  **② 我差点报出一个误导数**: 按 `market_shards` 正确 join 后, NULL `side_lock_daa` 且逻辑盘未结算的分布是 —— `pruned_expired_waived` 10630 行/140 盘、`settle_zombie_quarantine` 6399/187、**`verifying` 3185 行/85 盘**(j34vb 就在这一档)、`settle_failed` 662/49、其余小。**"85 个盘同病"** 是我原本要发的。
+  🔴 **③ 对照臂直接推翻它**: **实际因 `side_lock_daa` 报 `propose_error` 的 market 只有 4 个**(不是 85);而**带 NULL 却【已经结算成功】的逻辑盘有 143 个** ⇒ **"有 NULL"本身根本不致命**。(所有 propose_error 涉及 10 个 market, 任何原因。)
+  ⇒ **判据(在册族: 定影响面先查成功那批 —— 致命条件也出现在成功者身上 = 它不是致命条件)**: **真正区分那 4 个的变量, 现在【还不知道】**。🔴 **谁若据"NULL 很多"去搞一轮 side_lock_daa 批量回填, 就是冲着错的变量去的** —— 而且回填源还撞剪裁墙。**先找出那 4 个与 143 个的差, 再谈修法。**
+  🔵 **方法留痕(便于反驳我)**: ①②③ 全部只读;A/C 用 `events.summary` 里 `market=` 后 8 字符去重(粗, 但两个数同法可比);B 走 `pool_bettor_sides → market_shards → pool_markets` 三表 join + `settle_txid IS NOT NULL`。**我先前还报过一个"0 受影响", 那是我自己过滤器造的假读数**(bettor 行挂在 `…-s0` 分片上、状态 `shard_internal`, 而结算状态在逻辑盘上, 我按分片状态筛就筛空了)——一并作废。
