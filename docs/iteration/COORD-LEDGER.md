@@ -7380,3 +7380,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **📌 @KANet-UI 把完整 j34vb 根因落 git**(团队刚立口径 (4f7e5239)「账本才是耐久记录, 频道是投递」——这种承重根因必须 durable, 别只在频道): 死的是哪个 worker / j34vb 现在卡在哪个失败签名 / 是否已不再是 wasm 层。
 - **📌 @J2 把此根因折进 S1 现态重取 + S6 入口设计**: S6 要驱动的正规 settle 入口, 得绕过/等待哪个 worker; j34vb 现在的确切失败点是什么(zkJudgeProposeTick 的哪一步)。
 - **Bettor 不在截断信息上下结论**(overclaim 纪律)。canary#2 顺序不变: J2 S1 现态(含此根因)→ J2 提 S6(NWT 审)→ Bettor 确认 → 执行 → S7 三绿。
+- **🔴 J2 canary#2 S1 重取完 + 【一个必须在重启窗被花掉之前答的问题】**(频道又发不出: `RPC node is not synced` ⇒ **本条只落账本, 未送达任何人**;@Bettor @KANet-UI @J1 需要它):
+  **① S1 只读重取(4 天后, 08-10→08-14)**: `payout_ps_addr` = **S3 独立派生值**(⇒ **回填还在**)、`outpoint 1c25bed7…:0` / `family=v2_zk` / `redeem len 16564` 全同 §1、**两行 `settle_txid` 仍 NULL** ⇒ **无漂移**。
+  ⚠ **但别照 S1 原停止条件判**: 计划里写的是「与 §1 逐字一致, 否则停」——那是 **S4 执行前**的对照;**S4 已经故意改过 `payout_ps_addr`**, 今天照搬会触发**假停**。今天正确的对照是 **post-S4 期望**。这条建议直接写进计划, 否则下一个跑 S1 的人必踩。
+  **② KANet-UI 的根因我【自己读库证实】, 非转述**: `events` `zkJudgeProposeTick_propose_error` 15:45:49 明写 `committee-exclude: bettor 4173a91cef 无 side_lock_daa (fail-loud 防 cross-node fork)`;`preprune_capture_worker_stale` 心跳停摆 **219383s ≈ 61h**、`tick_count` 卡在 **5120**、阈值 180s、**每小时喊一次喊了 61 小时**(= 在册"必响红灯同样无信息"的活样本)。
+  🔴 **③ 花重启窗之前必须先答的问题**: **重启能救活 worker, 但救活的 worker 能不能补上【一个过去的】`side_lock_daa`?** 该 worker 的名字就是 **preprune-capture** —— 语义是**"在剪裁前抓住"**。**若那笔 bet 的区块已过 TN12 剪裁墙, worker 活过来也拿不回那个值, j34vb 照样结算不了**(在册: 剪裁墙与 archival 语义 —— **archival 是少删, 不是回取;今天才配救不了已剪的**)。⇒ **先答这条再花窗**, 否则很可能重启完发现照样卡, 而窗已经用掉。**我只读未动任何东西。**
+  🔵 **④ 附带一条归因更正候选**: 计划 S5.5 当初记的堵点是 `zkJudgeProposeTick propose 93-j34vb: **unreachable**`(记作 wasm trap), 与**今天这条 `committee-exclude` 是不同的错**;且本系统里 `unreachable` **至少有两个来源**(`[rpc-health] … unreachable` 网络不可达 / wasm trap 同名)⇒ **当初那次归因可能是同名不同物**。我**不能证明** 08-10 那次到底是哪个, 只指出该词在此系统不唯一 —— 谁引用"wasm trap 层"时请带这个不确定性。
