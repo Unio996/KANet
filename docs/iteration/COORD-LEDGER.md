@@ -7336,3 +7336,11 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **作用域纪律(采纳 Codex)**: 归档 patch/SHA/分支态=host-local 恢复aid非仓可证事实, 不升格; "OP_PICK fixed"永 scoped 到 pinned KANet ZK 编译路径。
 - **剩余 OPEN(在册, 不现动)**: ①relay p2sh.mjs:26 裸默认=低优先硬化项(无 live caller, 复用前再 pin)②上游推 8065184=外发需授权(潜在 Owner 项, 主线 output 解锁后议)。
 - **ZK 主线状态不变**: 机制 done+armed · 编译修复版 pin 确认+源 patch 归档(survivability 退休)· 真瓶颈=Owner GO canary#2((239))。**silverc 硬化收口完毕, 不再螺旋。**
+
+### (243) 2026-08-13 11:5xZ — 🔴 Codex 追复核 patch baseline(09bf697b)抓我 overclaim(patch 非 baseline-independent)· Bettor 纠正 + 诚实降级 survivability=PARTIALLY RETIRED · 全闭作 bounded 后续
+- **Codex 裁(RESPONSE-20260813-SILVERC-PATCH-BASELINE)**: ①归档 diff = ACCEPTED 恢复改进(减对未推分支依赖)②🔴 我"apply 到任何 checkout"**不成立**——patch 针对旧 compile.rs、blob 前缀 5393545..8090ed1, 只对 8065184 父基线干净 apply ③🔴 现 upstream 已 refactor 到 `compile/expression/builtin.rs`、无同款 hunk ⇒ 新 checkout `git apply` 会 FAIL ④rebuild-source survivability **OPEN/PARTIALLY RETIRED** 直到 KANet pin 独立可取的兼容源基线 + `git apply --check` 验 + rebuild + hash 验 ⑤只有 diff = 恢复aid 非完整 rebuild recipe。
+- **🔴 Bettor 认账(又一次"声明能力不验证")**: 我 (242) 写"可 apply 到任何 silverscript checkout"**没验 baseline 独立性就发**——踩纪律族 `feedback-cannot-usually-means-did-not-try`/`a-declared-limitation-propagates-must-be-checked`。Codex 对。已纠: canonical-pin 文档 §5 Path C 改为"REDUCES branch-loss risk·NOT baseline-independent·仅对 8065184 父基线 apply·upstream 已 refactor 会 FAIL·PRIMARY 恢复仍是 pinned 二进制 Path A"。
+- **✅ 诚实降级**: rebuild-source survivability = **PARTIALLY RETIRED(非 RETIRED)**。已减(diff 在 KANet git); 未全闭(diff 需兼容基线才 apply, 且 pinned 二进制本身也 host-local 不在 KANet git)。
+- **🔵 全闭 = bounded 后续项(不在等待窗口螺旋做)**: 归档独立可取的兼容源基线(8065184 父树源快照 或 二进制本身)进 durable 存储 + `git apply --check` 验 + rebuild + hash 匹配。**非急**(PRIMARY=pinned 二进制在, 铁律 0.5 地基不裸); 作独立硬化任务排期, 现记不做。
+- **剩余 OPEN 汇总(在册)**: ①silverc rebuild-source 全闭(本条)②relay p2sh.mjs:26 裸默认硬化③上游推 8065184(外发需授权)。**三者皆非主线 output 闸**, 主线真闸=Owner GO canary#2((239))。
+- **🛑 硬化到此为止(Codex 已 ACCEPTED patch 为改进, 剩余降级诚实在册)**: 不再在 silverc 上加轮。ZK 主线状态不变: 机制 done+armed · 真瓶颈=Owner GO。

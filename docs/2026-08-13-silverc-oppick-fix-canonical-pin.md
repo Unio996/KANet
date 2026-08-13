@@ -170,22 +170,31 @@ sha256sum ...   # confirm == 9de7f2f682...  (a matching hash proves the fix is p
 ```
 The single fix hunk is one deleted line in `silverscript-lang/src/compiler/compile.rs` (`compile_byte_sequence_cast_call`, the 2-arg `byte[](val,size)` branch — remove the spurious `stack_depth` increment).
 
-### Path C — apply the archived patch (survives loss of BOTH binary AND local branch)
+### Path C — apply the archived patch (REDUCES branch-loss risk; NOT a complete standalone rebuild recipe)
 
-**🔵 The exact fix diff is now archived inside THIS repo** (retires Codex `9cf5b1e6`'s "rebuild-source survivability OPEN"):
+**🔵 The exact fix diff is archived inside THIS repo:**
 ```
 docs/silverc-patches/8065184-oppick-offbyone-fix.patch
 ```
-Even if `D:/silverscript` is re-cloned from upstream (which lacks the fix) and the `j2-oppick-fix-2026-07-06` branch is gone, restore the fixed compiler by applying it to any silverscript checkout, then rebuild:
+This materially reduces dependence on the one unpushed local branch: the diff itself now survives in KANet git.
+
+**🔴 CORRECTION (Codex `09bf697b`) — this patch is NOT baseline-independent; an earlier version of this section wrongly said "apply to any silverscript checkout":**
+- The patch targets the OLD `silverscript-lang/src/compiler/compile.rs` implementation and carries blob prefixes `5393545..8090ed1`. It only `git apply`s cleanly against **commit `8065184`'s parent baseline**.
+- **Current public `kaspanet/silverscript` has refactored this area** into `silverscript-lang/src/compiler/compile/expression/builtin.rs`; the current `compile_byte_sequence_cast_call` no longer has the same two-argument branch/hunk (upstream removed the bug via a different mechanism, #178). ⇒ **`git apply` of this patch against a fresh current upstream checkout will FAIL** — a fresh checkout is NOT a demonstrated compatible base.
+- Therefore recovery via Path C requires the **compatible source baseline** (commit `8065184`'s parent tree). If only the diff is present, it is a recovery *aid*, not a complete rebuild recipe.
+
+Rebuild (ONLY against the compatible baseline — the `8065184` parent tree, e.g. the local `/d/silverscript` tree while it still exists):
 ```
-git -C /d/silverscript apply /d/kanet-tn12/docs/silverc-patches/8065184-oppick-offbyone-fix.patch
+git -C /d/silverscript apply --check /d/kanet-tn12/docs/silverc-patches/8065184-oppick-offbyone-fix.patch  # MUST pass first
+git -C /d/silverscript apply       /d/kanet-tn12/docs/silverc-patches/8065184-oppick-offbyone-fix.patch
 cargo build --release --manifest-path /d/silverscript/Cargo.toml
 cp /d/silverscript/target/release/silverc.exe /d/silverscript/versioned-builds/silverc-zk-8065184.exe
 sha256sum ...   # confirm == 9de7f2f682...  (matching hash proves the fix is present)
 ```
-The patch is a single-line deletion in `silverscript-lang/src/compiler/compile.rs::compile_byte_sequence_cast_call` (remove the spurious `*ctx.stack_depth += 1;` in the 2-arg `byte[](val,size)` branch). Because the patch lives in KANet's own git, Layer B no longer depends on the survival of one unpushed local branch.
 
-> ⚠ **Scope note (Codex 9cf5b1e6):** the archived `.patch`, the SHA256 values, and the branch-containment claims in §2 are *host-local evidence*, not independently verifiable from this repo's immutable objects alone. They are recovery aids, not proof; and any "OP_PICK is fixed" statement stays scoped to the pinned KANet ZK compiler path (§6) unless upstream/source provenance is separately demonstrated.
+**🔴 PRIMARY recovery remains Path A (the pinned binary `silverc-zk-8065184.exe`, hash `9de7f2f6…`).** The binary itself is host-local (on the `/d/silverscript` tree, NOT in KANet git). ⇒ **rebuild-source survivability is PARTIALLY RETIRED, still OPEN** — full retirement requires archiving an independently-retrievable compatible source baseline (or the binary) into durable storage + verifying `git apply --check` against that baseline + rebuild + hash-match. Logged as a bounded follow-up (COORD-LEDGER (243)); NOT done in this pass.
+
+> ⚠ **Scope note (Codex 9cf5b1e6/09bf697b):** the archived `.patch`, the SHA256 values, and the branch-containment claims in §2 are *host-local evidence*, not independently verifiable from this repo's immutable objects alone. They are recovery aids, not proof; and any "OP_PICK is fixed" statement stays scoped to the pinned KANet ZK compiler path (§6) unless upstream/source provenance is separately demonstrated.
 
 ---
 
