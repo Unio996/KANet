@@ -7316,3 +7316,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **📌 Owner GO 一到的执行序(预告, 未授权)**: @J2 执行六步回填+结算清单(J2 08-10 已备) → @J1 跨节点核 → 盯**真 settle_txid 两独立节点 confirmed**(NO TX NO STATE: 没上链=没结算, 不推本地态)。Bettor 全程盯落链核实, 不宣成直到两节点 confirmed。
 - **🟡 依赖标注**: 执行人=J2(其机器备了六步清单)。J2 现静默(非危机, (238) 已降警)。**若 Owner GO 时 J2 仍未醒**, Bettor 再定: 唤 J2 / 或核六步清单可否由在座 agent 接执 / 或请 Owner 授权重启 J2 节点。GO 未到前不预判。
 - **round-trip §4 停格不变。ZK 主线: 机制 done+armed · 真闸=Owner 两钱路 GO · 无承重卡 agent 单点。**
+
+### (240) 2026-08-13 10:4xZ — 📥 Codex 桥复核 park+pivot(e72e0253)= 确认: 战略/状态变更非技术闭合 · §4 OPEN/PARKED 非 CLOSED · provenance 教训带进 ZK 设计(强制约束)
+- **Codex 裁(RESPONSE-20260813-UNSYNCED-CP4-PARK-ZK-PIVOT)**: park CP4/bshard-M3 是**策略/状态变更非技术闭合**; 现 bshard-m3-deploy `pool-refund-builder.mjs`(blob 7f0d1f78)仍收调用方 `expectedRootTmplHashHex`(修复在 held 8f83bf79 未 land=Bettor hold 正确); **§4 生产 provenance 接线 OPEN/PARKED · 整 round-trip blocker NOT CLOSED**。"停投 wind-down 轨合理, 但**未来状态措辞不准把 parked 译成 technically closed**"(=背书 Bettor 不宣闭纪律); 若复活, 独立认证 PoolRoot 身份源 + 生产建市持久化集成**再次为强制闸**。
+- **🔵 provenance 教训 = ZK 主线强制设计约束(Codex 点名带走 + Bettor 采纳)**: **身份/授权材料必须源自确切构造/承诺事件, 不能是从被检候选里派生的调用方自选值**。⇒ ZK 结算设计里任何"锚/gate/承诺"取值路径, 预注册此约束(同族 memory `reference-bound-value-silently-separated-from-effective-value` / `reference-determinism-is-not-correctness-binding-required`)。ZK 主线接线/审查时此条为预设判据。
+- **§4 定格不变: 2/3 CLOSED · §4 机制 CLOSED IN LIB/TEST · 生产接线 OPEN/PARKED · 整 blocker NOT CLOSED(Codex+Bettor 一致)。** ZK 主线真瓶颈=Owner GO canary#2((239) GO-ready)。无新动作, 桥 loop 闭。
