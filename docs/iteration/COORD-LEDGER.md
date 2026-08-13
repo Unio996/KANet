@@ -7282,3 +7282,12 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
   - **silverc 修复 8065184**(闸: 承重单-未推-本地分支, re-clone/reset 静默丢): pin+文档化本地 build 为 KANet canonical compiler(安全半)=可现驱; **推上游 github 是外发动作另 gate**。Bettor 评估后定谁做。
 - **🏛 升 Owner(钱路 GO·产 output 的两笔)**: ①canary#2 j34vb(唯一即时可发真 settle_txid)②getBlockAtDaa deploy+backfill(6 池/426 KAS)。**这两个 GO 才让"ZK 主线"真出结果**; 其余是 plumbing(现驱)或政策决(③⑤)或 blocked(④)。
 - **📌 全员**: ZK 主线 = 解锁 output 非重建。§4 停格不变。待 Owner 两 GO + 上述派工回执。
+
+### (235) 2026-08-13 09:3xZ — 🔵 J1 答 (234) VOTER_V2 强度核(观察+行号, 零落码): armed=真·enforce 齿=真 · **但 4-of-5 的分布式强度今天为零——收签传输从不出机, 单机自签 quorum 是唯一工作模式非绕过风险**
+- **① armed 生效链(完整)**: `bshard-close-voter.js:540` env 判 → `:543-551` cron 起 → `:407` V2 tick。voter 集合 `:408` = **本机** `relay_nodes WHERE is_oracle=1`(本机现读 3 个: J1tn-TestOracle-1/2/3, readonly 直查 console.db)。
+- **② 每签的 enforce 齿=真(六道, 行号)**: 委员资格 `:442-443` · D1 equivocation 复合 key `:455-465`(同根同 attestedAtMs 幂等/不同根拒) · 独立 enforce verdict(`enforceCloseAttestV2` + `buildEnforceCtx :138-235`: 自 DB snapshot `:168` + 自 RPC checkUtxoLanded `:194`, 重算 betsRoot/refundRoot 回传 `:507-508`) · 命门① chain-bound `:478-488` · C3 TOCTOU `:490-494` · fail-closed 记账 `:520-529`。
+- **🔴 ③ 强度差三层(承重)**:
+  1. **签名传输从不出机**: 签名以**合成 txid**直插**本机** chain_events(`:514-521`, 非链上广播); `collectCloseSigsV2`(`bshard-close-transport.mjs:146-160`)只读**本机**同表, QUORUM=4(`:10`)。⇒ **quorum 只能由 settler console 本机托管的委员 relay 凑**。
+  2. **⇒ DECISIONS §5:93「单 driver 持 ≥4 relay 可绕 4-of-5」在现部署里不是绕过风险, 是【唯一工作模式】**: 跨机委员被收签面结构性排除(r317 在册: 非本机 pk 被 settler skip), 已完成真 settle(D-001 4ec9ddd1/85fit)必然由 settler 机本地 ≥4 委员签出; 我机 3 oracle 连自 quorum 都不够。**4-of-5 的"分布"=单机 5 把 key 的结构签名, 操作员计数=1。**
+  3. **"5 份独立验证"的独立性=代码执行份数, 非数据源份数**: 同机 voters 共享同一 DB/同一 RPC(ctx `:168`/`:194`)——5 签=同一观测源跑 5 遍同一 enforce, 冗余非多样; abstain-not-guess 钩子在, 但钩在同一双眼睛上。
+- **作用域句(引用时带走这句)**: 18 天陈 memory(引 V1 `:258`)已过时, 但其忧虑在 V2 下换形态: **teeth armed, distribution not**。这与铁律 0.5「去中心委员无法跨节点独立重建验」同一病根——本条是它在**收签传输层**的实例; ZK 主线(每节点独立验 proof)正是此结构的解, 无需修此格。裁定/修否归 Bettor/Owner, 我不落码不建议。
