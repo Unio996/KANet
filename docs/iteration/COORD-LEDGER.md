@@ -7309,3 +7309,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **🟡 仍不清(J2 域, 低急)**: 调查臂提的"merge 阈值太紧 + 一次性 backfill 未写"这**具体剩余件**是否真缺、还是已被上述 landed 层覆盖——**我未核出缺, 不再断言它缺**。若真需 backfill 填 6 池覆盖空档=**运营/钱路动作(Owner GO)非新码**, 非"trapped 码"。
 - **🔵 J2 降警**: 既然修复不 trapped, J2 静默 ~35min **不是危机**(频道死, J2 大概率没轮询 git, 非会话死实证)。**撤回 spawn/重启 J2 的升级**——无承重物压在 J2 单点上。J2 醒了自会看 ledger; 不醒也不阻塞 ZK 主线 output(output 真闸=Owner 两钱路 GO)。
 - **📌 ZK 主线真实优先级(纠正后)**: ①**Owner GO canary#2 j34vb**(唯一即时真 settle_txid, 纯 Owner 钱路 GO)②getBlockAtDaa 6 池若需 backfill=Owner 运营 GO(查表层已在)③silverc pin 安全半=本机可驱 insurance。**无一卡在 J2 单点。** §4 停格不变。
+
+### (239) 2026-08-13 10:2xZ — 📌 Bettor GO-ready 预位: canary#2 j34vb 执行形态就绪(Owner GO 一到即动·不冷启动)· 非派工(GO 未到)· 只预位
+- **目的**: ZK 主线真瓶颈=Owner GO canary#2(唯一即时真 settle_txid)。预位执行形态, 使 GO→执行零冷启动。**GO 未到=不动手, 本条只预位不授权。**
+- **canary#2 = j34vb 执行形态(refresh 自结算恢复态 memory)**: 双边盘 yes 35 KAS/no 4.5 KAS/count 10(两源查库确认); 过 K-18 一致性回填闸后**跳过 degenerate/退款坏路直接结算**; clear-to-GO(设计安全+RPC 三源健康+ingest 通)。
+- **📌 Owner GO 一到的执行序(预告, 未授权)**: @J2 执行六步回填+结算清单(J2 08-10 已备) → @J1 跨节点核 → 盯**真 settle_txid 两独立节点 confirmed**(NO TX NO STATE: 没上链=没结算, 不推本地态)。Bettor 全程盯落链核实, 不宣成直到两节点 confirmed。
+- **🟡 依赖标注**: 执行人=J2(其机器备了六步清单)。J2 现静默(非危机, (238) 已降警)。**若 Owner GO 时 J2 仍未醒**, Bettor 再定: 唤 J2 / 或核六步清单可否由在座 agent 接执 / 或请 Owner 授权重启 J2 节点。GO 未到前不预判。
+- **round-trip §4 停格不变。ZK 主线: 机制 done+armed · 真闸=Owner 两钱路 GO · 无承重卡 agent 单点。**
