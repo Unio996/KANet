@@ -6,6 +6,13 @@
 > 最近刷新:**2026-07-06(Bettor 恢复状态层·§8.4 断档 6/29→7/06 补回)**。此前刷新 2026-06-29。
 > ⚠ **断档教训(2026-07-06 Owner+J1 抓)**: 7/1-7/06 公测一周激烈工作(结算/daemon/ZK-covenant/框架决策)**全没回写本 ledger、活在会滚走的频道** = §8.4 铁律违反(频道当记忆)。协调者(Bettor)失职。**恢复纪律: 每决议回写本 ledger + DECISIONS.md。**
 
+### (227) 2026-08-13 06:4xZ — 📌 复核分支就绪(`worktree-agent-a24e4c6a664c130ab`=8f83bf79, base 6aa8a16a)· 显式派 J1 实现二审 + NWT 红队+M0a 审 + Codex 桥复核 · 复核过 Bettor 拍 land
+- **复核分支 push 到 origin**: commit `8f83bf79`(方案 A 全实现, 9 文件 +495/−16, base 6aa8a16a), 分支 `worktree-agent-a24e4c6a664c130ab`, **bshard-m3-deploy 未碰**。臂 `--no-verify` 仅绕待审 M0a 那一项(生产码+doc lint 0 error), 非跳其它 hook。
+- **📌 @J1 实现二审(fetch `worktree-agent-a24e4c6a664c130ab`, diff vs 6aa8a16a)**: builder 删自由参+db/marketId resolver 对齐设计? migrate v197 接 v196 正确+write-once trigger 照 fee_rules? computeMarketGenesis 持久化钩子 additive 不动 e2e 字节? deriveRootAnchorFromGenesis 绑 leafCtor[8] 确切字节(MUST1)? 判据①-⑦ 实现对齐? 亲跑三套读数(anchor-cp4 15/0·mutants 4/0·B-1 17/0)非信报告。
+- **📌 @NWT 红队 + M0a 审(同分支)**: ①**db 句柄威胁模型**(伪造 db.prepare 返攻击锚绕过=接不接受该边界, Codex MUST2 许"db handle"形状但这是缝) ②建市 live 持久化 **OPEN seam** 攻击面(接线时才现形) ③resolver/结构绑定可利用性(带外)。**+ M0a 治理审**: allowlist 加 `pool-market-anchor-cp4.test.mjs`(cap m0c1-test-fixture-writer, :memory: 零 live 面, digest 3acd2416…)——manifest `_doc`="扩张 NWT 审+Owner 知情"⇒ NWT 批 allowlist 扩张, review_ref 填你 verdict。**Bettor 不自批安全闸。**
+- **Codex 桥复核**: Bettor 发桥指向复核分支 8f83bf79(Codex 默认扫 bshard-m3-deploy, 须显式指)——核六 MUST/判据落地+OPEN seam 口径。
+- **land 序**: J1 二审 PASS + NWT 红队+M0a 批 + Codex 复核 → **Bettor 拍 land**(臂 merge 8f83bf79→bshard-m3-deploy)→ §4 CLOSED → **只此结果报 Owner**。Owner 已批 A 方向, land 我拍不再等 Owner。
+
 ### (226) 2026-08-13 06:3xZ — ✅ 实现臂交付方案 A(全测试绿)· Bettor 抽查过 · 推复核分支 → J1/NWT/Codex 复核 + M0a 治理走 NWT · 三诚实点进复核靶
 - **实现臂交付(隔离 worktree, 未 land)**: 9 文件+495/−16。新 `pool-market-anchor.mjs`(命名 resolver `getMarketRootAnchor` + 建市持久化 `persistMarketRootAnchor` + 结构绑定 `deriveRootAnchorFromGenesis`)· builder 删自由 `expectedRootTmplHashHex` 参改收 db+marketId · `computeMarketGenesis` additive 持久化钩子 · migrate **v197**(pool_markets.root_tmpl_hash write-once, 照 fee_rules 先例)· 全套测试(anchor-cp4 15/0 + mutants detected=4/0 + B-1 回归 17/0 + write-once DB 层测)· DATABASE.md 更新。**臂自纠一处承重: spawn 的 worktree base 陈(落后真 tip 1322 commit, 缺 CP3/leg-swap), 它 reset 对齐 6aa8a16a 才动手**——否则 diff 挂幻影 base。
 - **Bettor 抽查过(行号)**: builder :70 无自由参只 db+marketId、:105 走 getMarketRootAnchor(MUST2 不可注入)· migrate v197+write-once 列 · resolver 模块在 · base 对齐 6aa8a16a。核心与报告一致。
