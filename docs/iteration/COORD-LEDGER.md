@@ -7355,3 +7355,13 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
   **① B-2 交付**: `u1-continuation-statestart.test.mjs` **4 PASS / 0 FAIL**, 且 **CP2 与 CP3 两轮改动后各复跑一次均不受影响**。三格: `start=0` 与 `start=1` 产出的 continuation 地址**不同**(证参数真敏感, 不是对该参数无感的断言);同一 start 两次**逐字节相同**(排除"每次都不同"这种假差分);🔴 **默认参数 == 显式传 1**。
   **② 承重的是第三格**: `p2sh.mjs` 那句「caller 经 `cmd.inputs.root.state_start` 传」的注释, 写下后**七周无人执行** —— 三个 builder 逐个查(pool-claim / close / refund)**全无**, 两支都在吃默认。**而它能七周零症状, 机制就在 B-2-ter**: **默认值恰好等于要传的值** ⇒ 「传了 1」与「吃默认 1」在输出上**完全同形**, **没有任何观察量会分岔**。
   🔨 **判据(值得进 ANTI-PATTERNS 同族)**: **注释不是闸**;而**"默认值恰好等于正确值"这种接缝, 缺席时连一个红灯都不会亮** —— 它不是"告警没人看", 是**根本没有告警可看**。存档 `docs/2026-08-12-j2-statestart-has-no-authoritative-descriptor.md`。**CP2/CP3 的 state_start 权威改造正是冲这条去的**, 而 CP3 那两条预注册的结构性 MISSED 是**同一个机制的残留**(权威值恰等于默认值 ⇒ 变异不可分)——**同源, 不是两件事**。
+
+### (245) 2026-08-14 · 🟢 canary#2 GO 后 Bettor 恢复真实状态(执行计划 doc 实读)+ 频道恢复 + J2 活 · 重派: 不是从零, 是**完成已回填但未结算**的盘
+- **🔵 频道恢复 + J2 活**: J2 [17:30] dev-coord-testnet 发消息(补报 B-2)⇒ RPC-not-synced 频道中断自愈, J2 可达。**执行人在座**, 不必 spawn/重启。
+- **🔴 canary#2 真实状态(读 `docs/2026-08-10-canary2-j34vb-settlement-execution-plan-v0.1.md`, 非记忆)**: 
+  - **S1-S5 已于 08-10 执行(Bettor 13:52 授权 S4 照走)**: **S4 回填成功** —— j34vb(`ext-pool-v07-1783969245093-j34vb`)`payout_ps_addr` 已回填为 derived、**过 K-18 coherence gate step(d)**、已不再 divergent; S5 核实落值全过, **settle_txid 仍 NULL**(回填不自动结算, 预期)。
+  - **🔴 S5.5 发现第二层堵点**: `zkJudgeProposeTick propose 93-j34vb: unreachable`(wasm trap)回填后**仍在**(两 tick 逐字相同)⇒ 结论: 堵点**至少两层**, 回填拆了 K-18 那层, 前面还有 wasm trap 层, 需 KANet-UI 重启窗。**两层互不替代。**
+  - **🔴 S6(真正 settle tick 入口)= NOT-WRITTEN**: J2 拒凭印象填 settle 命令进钱路计划, 标"要 NWT 指认正规入口(daemon tick/export/relay 命令)+ dry-run 形态"。
+- **⇒ GO 后真实剩余工作(非从零)**: ①**@J2 按 S1 重取 j34vb 现态**(已过 4 天=08-10→08-14, 漂移必查: 回填是否还在? settle_txid 是否仍 NULL? wasm trap 层是否已被某次重启修掉?)②**wasm trap 层状态确认**(若仍在→KANet-UI 重启窗)③**@NWT 指认 S6 settle 入口** + J2 补 S6 到 S1-S5 同规格(确切命令+期望+停止条件)④ **Bettor/NWT 审 S6 → 才执行** ⑤ S6 执行 → **S7 两独立节点 confirmed settle_txid + relay check_utxo_landed=true + Bettor 链上直查**。
+- **🔴 NO TX NO STATE / 逐步贴证 / 任一步不符即停报 Bettor** —— 照原计划 §0 纪律。**不宣 canary#2 完成直到 S7 三绿。**
+- **📌 派**: @J2 起步(S1 重取现态 + 报一行) · @NWT 指认 S6 入口 · Bettor 全程盯 + 审 S6。频道恢复=频道+git 双通道。
