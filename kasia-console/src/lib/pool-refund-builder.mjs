@@ -16,6 +16,7 @@
 // closed flips 0→2 (write-once latch): first refund implicit-cancels, blocking late close (require closed==0). See F2 fix.
 
 import { blake2b } from '@noble/hashes/blake2b';
+import { getMarketRootAnchor } from './pool-market-anchor.mjs';
 
 // PoolRoot（多-entry，selector dispatch 前导 1B）的 state_layout.start —— **仅作防御断言用**。
 // 🔴 **它不是权威**（Codex `0741bae0` 明裁：字面量作唯一权威 = REJECTED）。
@@ -66,25 +67,28 @@ export function buildRefundWitness(o) {
  * (on-chain L238) self-checked here: payout(stake) + pool_out(poolValue-stake) == poolValue (no value created).
  * @returns {object} relay command (action='bshard_refund_cancelled')
  */
-export function buildRefundCommand({ witness, poolOutpointTxid, poolRedeemHex, poolRootArtifact, expectedRootTmplHashHex, currentPoolState, ticketOutpointTxid, ticketRedeemHex, ticketState, poolValueSompi, bettorAddress, poolContinuationState, changeAddress }) {
+export function buildRefundCommand({ witness, poolOutpointTxid, poolRedeemHex, poolRootArtifact, db, marketId, currentPoolState, ticketOutpointTxid, ticketRedeemHex, ticketState, poolValueSompi, bettorAddress, poolContinuationState, changeAddress }) {
   if (!poolOutpointTxid || !ticketOutpointTxid) throw new Error('poolOutpointTxid + ticketOutpointTxid required');
   // ── CP3 (J2 2026-08-13; @J1tn (205) 升级, @Bettor 21:0xZ 采纳为设计定向) ───────────────
   // 权威 = **silverc 吐出的 `state_layout.start`**（零跳）, 不再从调用方给的前缀长度反推。
   // 认证 = **一步跨边界比**: 用这份 redeem 自己的 prefix‖suffix 算 blake2b, 与**另一端**烤死的
-  //        `root_tmpl_hash` 比。另一端必须来自构造记录/链上烤死值 —— **不能**是同一次编译的输出,
-  //        否则左右同源、比不出任何东西（CP3 §4）。
+  //        `root_tmpl_hash` 比。
   // 🔵 这一比同时覆盖 **suffix 段**（原方案只绑前缀+总长, suffix 异的 redeem 会漏到远处才报错, @J1tn (205)）。
   // 🔴 **不写"hash 钉住了切分点"** —— 那句已被 @J1tn (208) 自己 + Codex `66d5f287` 撤回。
   //    本比对认证的是**模板身份**; 链上原语的 prefix_len 由 witness 传, 不归构造侧管。
+  //
+  // ── CP4 §4 (J2 2026-08-13; Codex 66d5f287 两 MUST · 方案 A GO (225)) ──────────────────────
+  // 🔴 **另一端(expected)不再是调用方自由参数** —— 那是 Codex 311f12f8/NWT ② 抓的循环白验点。
+  //    改成: 调用方只给 `marketId`(名字) + `db` 句柄, 由 builder **自持**的命名 resolver
+  //    `getMarketRootAnchor(db, marketId)` 去 write-once 的 `pool_markets.root_tmpl_hash`(建市持久化 =
+  //    那次构造烤进 PoolLeaf ctor 的确切值)取。**签名里没有任何可传 hash/getter 的口子**(不可用才叫结构)。
+  //    db 是**受信基础设施**(共享 console 连接), 非调用方伪造的数据面; 取锚的**逻辑**由本模块自持不可注入。
   if (!poolRootArtifact || !Array.isArray(poolRootArtifact.script) || !poolRootArtifact.state_layout) {
     throw new Error('poolRootArtifact {script, state_layout} required (computePoolRootArtifact) — 缺失即 fail-closed, 不默认');
   }
   const { start: poolStateStart, len: poolStateLen } = poolRootArtifact.state_layout;
   if (!Number.isInteger(poolStateStart) || !Number.isInteger(poolStateLen)) {
     throw new Error(`poolRootArtifact.state_layout.{start,len} 必须是整数, 得到 {${poolStateStart}, ${poolStateLen}}`);
-  }
-  if (typeof expectedRootTmplHashHex !== 'string' || !/^[0-9a-f]{64}$/i.test(expectedRootTmplHashHex)) {
-    throw new Error('expectedRootTmplHashHex required (32B hex; 源=构造记录/链上烤死 root_tmpl_hash, 非同次编译产物)');
   }
   if (typeof poolRedeemHex !== 'string' || !/^[0-9a-fA-F]+$/.test(poolRedeemHex) || poolRedeemHex.length % 2 !== 0) {
     throw new Error('poolRedeemHex 必须是偶数长 hex');
@@ -97,6 +101,8 @@ export function buildRefundCommand({ witness, poolOutpointTxid, poolRedeemHex, p
     Buffer.concat([poolRedeem.subarray(0, poolStateStart), poolRedeem.subarray(poolStateStart + poolStateLen)]),
     { dkLen: 32 },
   )).toString('hex');
+  // MUST2: 锚**只**从 builder 自持的命名可信 resolver 来(marketId→write-once 列)。查不到/NULL ⇒ 抛(fail-closed)。
+  const expectedRootTmplHashHex = getMarketRootAnchor(db, marketId);
   if (actualTmplHash !== expectedRootTmplHashHex.toLowerCase()) {
     throw new Error(`pool redeem 模板认证失败: blake2b(prefix‖suffix)=${actualTmplHash.slice(0, 12)} != 烤死 root_tmpl_hash ${expectedRootTmplHashHex.slice(0, 12)} ⇒ 拒`);
   }

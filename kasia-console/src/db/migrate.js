@@ -7,6 +7,7 @@ import { encrypt } from '../services/crypto.js';
 import { categorizeMarket } from '../lib/market-category.js';
 import { classifyPayoutShardFamily } from '../lib/bshard-payout-family-coherence.mjs';
 import { M0C1_GRANT_TABLE, M0C1_GRANT_DDL } from './m0c1-grant-registry-schema.js';
+import { ROOT_TMPL_HASH_COLUMN, ROOT_TMPL_HASH_TRIGGER_NAME, ROOT_TMPL_HASH_WRITE_ONCE_TRIGGER_SQL } from '../lib/pool-market-anchor.mjs';
 
 export function runMigrations() {
   sqlite.exec(`
@@ -5691,6 +5692,29 @@ export function runMigrations() {
       )
     `);
     console.log('[migrate] v196: u1_identity_registration 建表完成 (A2 同源判定登记表; N3 锁1/N4 mnemonic 型已落成 UNIQUE+CHECK 结构约束; 今日无写入方).');
+  }
+
+  // v197 (2026-08-13, J2, CP4 §4 身份锚 provenance · 方案 A GO (225) · Codex 66d5f287 两 MUST · 设计
+  //   docs/2026-08-13-j2-cp4-identity-anchor-typed-source-design.md): pool_markets 加 root_tmpl_hash 列——
+  //   建市那次构造烤进 PoolLeaf ctor 的 blake2b(PoolRoot prefix‖suffix)。buildRefundCommand 的跨边界模板
+  //   认证从"调用方自由参数 expectedRootTmplHashHex"改为"builder 自持命名 resolver getMarketRootAnchor 查本列"
+  //   (删循环白验点, Codex 311f12f8/NWT ②)。write-once: 照 fee_rules(v184b)先例——已有值禁改写/清空, NULL→值
+  //   允许一次, 等值 UPDATE 放行(settler 整行 UPDATE 不误伤)。DDL 单源自 lib/pool-market-anchor.mjs(防漂)。
+  //   🔵 作用域(J1 (218) 钉, 同 fee_rules 段): 本列**不跨节点同步**——锚只存在于建市那台 console; 委员/跨节点
+  //     侧**禁读本列**, 必须走链上携带/烤死值。老市场 root_tmpl_hash IS NULL ⇒ 退款 builder fail-closed。
+  //   🔴 生效边界: additive + 无写入方追溯——今天**无生产建市事务**写本列(computeMarketGenesis 仅 e2e/probe
+  //     调, 持久化钩子接线是 OPEN seam)。live 零即时影响, 下个 console 重启窗跑 migrate。
+  {
+    const cols = sqlite.pragma('table_info(pool_markets)').map((c) => c.name);
+    if (!cols.includes(ROOT_TMPL_HASH_COLUMN)) {
+      sqlite.exec(`ALTER TABLE pool_markets ADD COLUMN ${ROOT_TMPL_HASH_COLUMN} TEXT`);
+      console.log('[migrate] v197a: pool_markets.root_tmpl_hash 列(CP4 §4 建市身份锚, write-once).');
+    }
+    const trg = sqlite.prepare(`SELECT name FROM sqlite_master WHERE type='trigger' AND name=?`).get(ROOT_TMPL_HASH_TRIGGER_NAME);
+    if (!trg) {
+      sqlite.exec(ROOT_TMPL_HASH_WRITE_ONCE_TRIGGER_SQL);
+      console.log('[migrate] v197b: root_tmpl_hash write-once trigger(照 fee_rules 先例, L4 结构性不可变).');
+    }
   }
 
   console.log('[migrate] DB migrations complete.');

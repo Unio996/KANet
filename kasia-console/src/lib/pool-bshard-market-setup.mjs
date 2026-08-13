@@ -13,6 +13,7 @@
 import { blake2b } from '@noble/hashes/blake2b';
 import { compileSil, computePoolSideArtifact, ctorBytes32, ctorInt } from './pool-bshard-artifacts.mjs';
 import { serializeLeafState } from './pool-shard-state-serialize.mjs';
+import { persistMarketRootAnchor } from './pool-market-anchor.mjs';
 
 const ZERO32_HEX = '00'.repeat(32);
 // 事故硬化(2026-07-08 backlog 调查, Bettor④指令): target/release/silverc.exe 会随任意 cargo build 原地漂移,
@@ -80,7 +81,7 @@ export function computeMarketGenesis(o) {
   const expectState = serializeLeafState(genesisState);
   if (!bakedState.equals(expectState)) throw new Error(`genesis baked leaf state != serializeLeafState(genesisState) (baked ${bakedState.toString('hex').slice(0, 24)} vs ${expectState.toString('hex').slice(0, 24)})`);
 
-  return {
+  const result = {
     leafCtor, rootCtor,
     redeemHexForGenesisState: redeem.toString('hex'), // PoolLeaf genesis redeem (operator computeP2SH → genesis leaf addr)
     scriptHashHex: Buffer.from(blake2b(redeem, { dkLen: 32 })).toString('hex'),
@@ -91,6 +92,21 @@ export function computeMarketGenesis(o) {
     rootTmplHash, rootInitPayoutRoot, committeePks, deadline, // PoolRoot deploy inputs (root_tmpl_hash baked in leaf)
     firstTicketState: { bettorPk: firstBet.bettorPk, direction: firstBet.side, stake: stake.toString(), shardPoolId },
   };
+
+  // ── CP4 §4 MUST1 (J2 2026-08-13): 在**权威建市点**把 root_tmpl_hash 持久化 = **这次构造烤进 PoolLeaf ctor
+  //    的确切值**(leafCtor[8]), 与算它的**同一次**里写库(晚一步写就可能写成另一次编译的值)。
+  //    结构绑定由 persistMarketRootAnchor→deriveRootAnchorFromGenesis 校验(rootTmplHash == leafCtor[8] 字节)。
+  //    加列/write-once = DB 层(migrate v197)。**additive/guarded**: 只有调用方显式传 {persistDb, persistMarketId}
+  //    才写库(建市行须先建); e2e/probe 不传 ⇒ 行为字节不动。
+  //    🔵 作用域(J1 (218) 钉): 锚是"建市那台 console 的定值"、非跨节点共识值; 换机/重建库=锚丢=fail-closed。
+  //    🔴 **接线现状(诚实标)**: 今天**无生产建市事务**调 computeMarketGenesis(仅 e2e/probe 脚本), 故此持久化
+  //       钩子的**接线是 OPEN seam** —— 机制+结构绑定已落且 DB 层测过(见 pool-market-anchor-cp4.test.mjs),
+  //       但"某条 live 建市路径会传 persistDb"尚不存在(与退款轨零活调用方同态)。
+  if (o.persistDb && o.persistMarketId) {
+    persistMarketRootAnchor(o.persistDb, o.persistMarketId, result); // 证不了绑定 ⇒ 抛(不落一个假锚)
+  }
+
+  return result;
 }
 
 /**

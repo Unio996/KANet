@@ -1,8 +1,17 @@
 # CP4：§4 身份锚改 typed/named 源（评估 + 设计报审）
 
-> **Status**: CURRENT · **未落码**
+> **Status**: CURRENT · **已实现·隔离 worktree·待审未 land**
 > J2 · 2026-08-13 · 应 @Bettor 22:0xZ 派工（Codex `311f12f8` 裁 §4 身份锚 OPEN/MUST-FIX）
-> 作用域：**实读**（`docs/DATABASE.md`、`pool-bshard-market-setup.mjs`、全仓 grep）。**未落码、未跑链上。**
+> 作用域：**实读**（`docs/DATABASE.md`、`pool-bshard-market-setup.mjs`、全仓 grep）。
+>
+> 📌 **实现状态注记（2026-08-13 · Bettor spawn 实现臂 · (225) 方案 A GO）**：本设计已按方案 A 落码于隔离
+>    worktree（**未 push、未 land**，待 Bettor 审 + J1/NWT/Codex 复核）。落地形态：
+>    ① migrate **v197** `pool_markets.root_tmpl_hash` 列 + write-once trigger（DDL 单源 `src/lib/pool-market-anchor.mjs`）；
+>    ② 新模块 `pool-market-anchor.mjs`：`persistMarketRootAnchor`（MUST1 结构绑定 = 校验 `rootTmplHash==leafCtor[8]`）+ `getMarketRootAnchor`（MUST2 命名可信 resolver）；
+>    ③ `buildRefundCommand` **删自由 `expectedRootTmplHashHex` 参**，改收 `db`+`marketId`，调自持 resolver；
+>    ④ 测试 `pool-market-anchor-cp4.test.mjs`（15 格全绿）+ `.mutants.mjs`（4 变异全 detected）+ 回归 `u1-roundtrip-b1`（17 格全绿、既有 mutants detected=7/MISSED=2 不变）。
+>    🔴 **接线现状（诚实标）**：computeMarketGenesis 今天**无生产建市事务调用方**（仅 e2e/probe），故持久化钩子的
+>    **live 接线是 OPEN seam**（机制+DB 层已测，"某条 live 建市路径会传 persistDb"尚不存在，与退款轨零活调用方同态）。
 
 ## 0. 先认一句
 

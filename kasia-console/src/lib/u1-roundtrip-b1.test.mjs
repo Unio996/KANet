@@ -148,16 +148,22 @@ await t('Fix⑤ · state_start 与本 typed 路径的族不符 ⇒ 抛', async (
 // ── 权威产生步（builder 侧）—— Codex ⑦ 要的决定性变异打的就是这里 ────────────────
 // 🔴 没有这两格，针对"权威怎么来的"那几行的变异就【无人观察】。
 const { buildRefundCommand } = await import('./pool-refund-builder.mjs');
-// 🔴 真 PoolRoot 编译制品(非合成) —— Codex (200) 要件。我上一轮用自造的 '51' 当首字节, 结果
-//    夹具与实现共享了同一个发明、彼此同意。这次的字节来自真编 PoolRoot.sil, 首字节 0x6b 与链上普查一致。
+// CP4 §4 (2026-08-13): 锚不再是自由参数, 而是 builder 自持 resolver 从 pool_markets.root_tmpl_hash 查。
+// 🔵 本文件是 post-Fix B-1 回归(判据⑦), 只需证 builder 端到端走 resolver ⇒ 用**轻量 fake db**(DI 只测试),
+//    resolver 的**逻辑**(NULL/缺锚/hex 校验)照样真跑, 只把存储换掉。真 sqlite 的 write-once DB 层证据在
+//    pool-market-anchor-cp4.test.mjs(判据⑥, 那里必须真库), 本文件不再引 better-sqlite3(不扩 M0a 面)。
+// 🔴 真 PoolRoot 编译制品(非合成) —— Codex (200) 要件。字节来自真编 PoolRoot.sil, 首字节 0x6b 与链上普查一致。
 const PINNED = JSON.parse(readFileSync(new URL('./fixtures/poolroot-artifact.pinned.json', import.meta.url), 'utf8'));
+const ANCHOR_TABLE = { 'mkt-ok': PINNED.rootTmplHashHex, 'mkt-wrong': 'ab'.repeat(32), 'mkt-null': null };
+// getMarketRootAnchor 只发一种查询(SELECT root_tmpl_hash AS anchor WHERE id=?) ⇒ fake 按 marketId 返回对应行形状。
+const ANCHOR_DB = { prepare: () => ({ get: (id) => (id in ANCHOR_TABLE ? { anchor: ANCHOR_TABLE[id] } : undefined) }) };
 const refundArgs = (over = {}) => ({
   witness: { poolOutIdx: 0, payoutOutIdx: 1, ticketInIdx: 1, ticket_prefix_len: 0, ticket_suffix_len: 0,
     ticket_prefix: Buffer.alloc(0), ticket_suffix: Buffer.alloc(0), bettorPk: 'aa'.repeat(32), stake: 100n },
   poolOutpointTxid: 'aa'.repeat(32), poolRedeemHex: PINNED.scriptHex,
     // ⚠ script 必须是**普通数组**——真 compileSil 出的就是数组, 传 Buffer 会被 Array.isArray 守卫拦下(我先踩了一次)
   poolRootArtifact: { script: [...Buffer.from(PINNED.scriptHex, 'hex')], state_layout: PINNED.state_layout },
-  expectedRootTmplHashHex: PINNED.rootTmplHashHex,
+  db: ANCHOR_DB, marketId: 'mkt-ok',
   currentPoolState: STATE, ticketOutpointTxid: 'bb'.repeat(32), ticketRedeemHex: TICKET_REDEEM,
   ticketState: { bettorPk: 'aa'.repeat(32), direction: 1, stake: 100n, shardPoolId: 1 },
   poolValueSompi: 1000n, bettorAddress: ADDR, poolContinuationState: { ...STATE, closed: 2 },
@@ -170,9 +176,19 @@ await t('权威步 · state_start 取自【编译器吐出的 state_layout.start
     'builder 写进命令的值必须等于编译器给的 state_layout.start —— 那才是权威');
 });
 
-await t('§4 身份 · 烤死 hash 对不上 ⇒ builder 拒(跨边界比对是这一步的全部意义)', () => {
-  assert.throws(() => buildRefundCommand(refundArgs({ expectedRootTmplHashHex: 'ab'.repeat(32) })),
-    /模板认证失败/, '拿一个不属于这份 redeem 的烤死 hash 也能过 ⇒ 认证退化成走过场');
+await t('§4 身份 · 库锚(marketId)对不上这份 redeem ⇒ builder 拒(跨边界比对是这一步的全部意义)', () => {
+  assert.throws(() => buildRefundCommand(refundArgs({ marketId: 'mkt-wrong' })),
+    /模板认证失败/, '库里存的锚不属于这份 redeem 也能过 ⇒ 认证退化成走过场');
+});
+
+await t('§4 身份 · 老市场 root_tmpl_hash NULL ⇒ builder fail-closed(不默认不回落)', () => {
+  assert.throws(() => buildRefundCommand(refundArgs({ marketId: 'mkt-null' })),
+    /NULL|fail-closed/, 'NULL 锚被放行 = 未绑锚的老市场也能退款 ⇒ §4 形同虚设');
+});
+
+await t('§4 身份 · marketId 查不到 ⇒ builder fail-closed', () => {
+  assert.throws(() => buildRefundCommand(refundArgs({ marketId: 'nope' })),
+    /不存在|fail-closed/, '查不到的 marketId 被放行 ⇒ 锚可绕过');
 });
 
 await t('§4 身份 · suffix 段被改 ⇒ builder 拒(原方案只绑前缀+总长, 这一格是 J1 (205) 补的)', () => {
