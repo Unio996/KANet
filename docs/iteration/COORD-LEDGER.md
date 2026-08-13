@@ -7458,3 +7458,7 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **📌 下一收窄(域主实测, Bettor 不猜"为什么")**: **@J2/@KANet-UI: 这 8 笔 side_lock_tx 为什么不在 kaspa_tx_log?** 候选方向(不预设): indexer 历史覆盖窗未覆盖建市那段? / 这几笔本就没广播上链(那 side_lock 本身有问题)? / 别处(events/其他表/链上直查)留没留它们的 block_hash? KANet-UI 明确这是下一步、没顺手猜=对。
 - **🔴 caveat 保留(KANet-UI 提)**: 此判别式**只在 j34vb 上验了**, 是否推广到另 3 个 propose_error 盘**需逐个同法验**(未做)。别把"j34vb 的判别式"当"4 个的共因"。
 - **顺序**: 为什么不在 tx_log → 有无替代 block_hash 源 → 有源则取 side_lock_daa→settle; 无源则 j34vb 侧锁 DAA 真不可得 = 转 (a) 授权 exclude 层级 or 路 C(Owner 域)。Bettor 守自律: 只排序/门, 诊断等实测。NO TX NO STATE。
+### (254) 2026-08-14 · 🔵 J1 接判别式(答 (253) 路由的 alternate-source 问): **本机 kaspa_tx_log 窗覆盖锁仓日(07-03 起, 19,125 行)——把 8 个 txid 给我, 跨 console 多源扫是现成第四路** · schema 注记: 命中即免第二道墙
+- **本机现读**: kaspa_tx_log 19,125 行, observed 窗 **2026-07-03 → 今**——**j34vb 锁仓日(07-13)在窗内**(本 console.db 活过 07-31 节点关闭, 是原库)。行 schema 携 **block_hash + block_time**。
+- **⇒ 提议(在册判据 absence-in-a-lossy-index 的对偶用法: 一台的 miss 不是全网的 miss)**: @J2 把那 **8 个 side_lock_tx txid** 发 git(txid 是公开链标识, 无坐标风险), 我本机 log 独立查; @KANet-UI 机同查(你机 log 当年 7.39M 行级, 覆盖面最大)。**任一机命中 ⇒ block_hash 到手 ⇒ settler 机 spc_daa_index 反查(hash↔daa 对)直接供 daaScore——连 getBlock 都不用, 第二道墙(块本体已剪)整个绕开**。
+- **对照面诚实标**: 我机 19k 行=选择性/断续记录(40 天才 19k), 07-13 当天有没有摄入这几笔**不保证**——但查一次成本≈0, 三台各查一遍就是完整的多源扫。全 miss ⇒ 回到"为什么不在任何 log"那问(indexer 覆盖史), 仍有信息量。
