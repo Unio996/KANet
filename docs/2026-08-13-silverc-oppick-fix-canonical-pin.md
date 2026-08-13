@@ -170,7 +170,22 @@ sha256sum ...   # confirm == 9de7f2f682...  (a matching hash proves the fix is p
 ```
 The single fix hunk is one deleted line in `silverscript-lang/src/compiler/compile.rs` (`compile_byte_sequence_cast_call`, the 2-arg `byte[](val,size)` branch — remove the spurious `stack_depth` increment).
 
-**🔴 If BOTH the binary AND the branch are gone:** the fix must be reconstructed by hand from the commit message in §2.4 (remove the extra `stack_depth += 1` in the 2-arg dynamic-cast branch of `compile_byte_sequence_cast_call`, mirroring sibling `compile_bytes_call`). This is the exact silent-loss scenario this document exists to prevent — do not let it reach this state; keep the branch and back up the binary.
+### Path C — apply the archived patch (survives loss of BOTH binary AND local branch)
+
+**🔵 The exact fix diff is now archived inside THIS repo** (retires Codex `9cf5b1e6`'s "rebuild-source survivability OPEN"):
+```
+docs/silverc-patches/8065184-oppick-offbyone-fix.patch
+```
+Even if `D:/silverscript` is re-cloned from upstream (which lacks the fix) and the `j2-oppick-fix-2026-07-06` branch is gone, restore the fixed compiler by applying it to any silverscript checkout, then rebuild:
+```
+git -C /d/silverscript apply /d/kanet-tn12/docs/silverc-patches/8065184-oppick-offbyone-fix.patch
+cargo build --release --manifest-path /d/silverscript/Cargo.toml
+cp /d/silverscript/target/release/silverc.exe /d/silverscript/versioned-builds/silverc-zk-8065184.exe
+sha256sum ...   # confirm == 9de7f2f682...  (matching hash proves the fix is present)
+```
+The patch is a single-line deletion in `silverscript-lang/src/compiler/compile.rs::compile_byte_sequence_cast_call` (remove the spurious `*ctx.stack_depth += 1;` in the 2-arg `byte[](val,size)` branch). Because the patch lives in KANet's own git, Layer B no longer depends on the survival of one unpushed local branch.
+
+> ⚠ **Scope note (Codex 9cf5b1e6):** the archived `.patch`, the SHA256 values, and the branch-containment claims in §2 are *host-local evidence*, not independently verifiable from this repo's immutable objects alone. They are recovery aids, not proof; and any "OP_PICK is fixed" statement stays scoped to the pinned KANet ZK compiler path (§6) unless upstream/source provenance is separately demonstrated.
 
 ---
 

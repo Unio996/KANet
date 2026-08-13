@@ -1,0 +1,37 @@
+From 80651849962f1d83eb941c2c913eaaea06e867b7 Mon Sep 17 00:00:00 2001
+From: "J2 (KANet)" <j2-agent@kanet.local>
+Date: Mon, 6 Jul 2026 21:14:56 +0700
+Subject: [PATCH] Fix OP_PICK off-by-one in compile_byte_sequence_cast_call
+
+Remove spurious stack_depth increment in the 2-argument byte[](val,size)
+dynamic cast branch. The sister function compile_bytes_call's equivalent
+branch does not have this extra increment; OpNum2Bin's own -1 correction
+already accounts for the net pop2-push1 effect.
+
+Symptom: covenants referencing a byte[](val,size)-derived local variable
+downstream would get progressively miscalculated PICK indices, eventually
+producing 'pick at an invalid location' once the accumulated off-by-one
+pushed an index out of bounds.
+
+Verified: cargo test --release all green (500+ tests, 0 regressions),
+full covenant re-broadcast on TN12 testnet confirms non-vacuous binding
+and continuation state transitions now execute correctly.
+---
+ silverscript-lang/src/compiler/compile.rs | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/silverscript-lang/src/compiler/compile.rs b/silverscript-lang/src/compiler/compile.rs
+index 5393545..8090ed1 100644
+--- a/silverscript-lang/src/compiler/compile.rs
++++ b/silverscript-lang/src/compiler/compile.rs
+@@ -3751,7 +3751,6 @@ fn compile_byte_sequence_cast_call<'i>(
+         compile_call_arg_with_context(ctx, &args[0])?;
+         if args.len() == 2 {
+             compile_call_arg_with_context(ctx, &args[1])?;
+-            *ctx.stack_depth += 1;
+             ctx.builder.add_op(OpNum2Bin)?;
+             *ctx.stack_depth -= 1;
+         }
+-- 
+2.53.0.windows.2
+

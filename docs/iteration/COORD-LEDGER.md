@@ -7329,3 +7329,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **🟡 唯一裸默认 = `kasia-relay/src/lib/p2sh.mjs:26`**(默认 target/release, kanet.env 无 override ⇒ 现解析到 legacy 未修复)。**低暴露**: 其 compileEscrow 用单参 `byte[](buyerLock)` cast(非修复针对的双参)+ **无 live caller**(原 demo escrow, 已被 bshard 机制取代)。**低优先硬化项在册**(照 kasia-console pin 法), 不现修(risk asymmetry: 工作配置+无 live caller, 改默认反引风险)。
 - **🔵 上游推 OPEN(潜在 Owner 项, 非急)**: 8065184 仍未推 github.com/kaspanet/silverscript=外发动作(origin 推=公开 commit, 安全基线), 需显式授权。直服铁律 0.5「别人能接上结算」线(第三方用 stock upstream 编 OP_PICK-correct covenant 需此推)。**Bettor 不自推**; 待主线 output 解锁后可作独立 Owner 决策上报。
 - **ZK 主线状态不变**: 机制 done+armed · 修复版编译已 pin 确认(ZK 无暴露)· 真瓶颈=Owner GO canary#2((239) GO-ready)。
+
+### (242) 2026-08-13 11:2xZ — 📥 Codex 复核 silverc pin(9cf5b1e6)= ACCEPTED · Bettor 关掉其点名的 rebuild-source-survivability OPEN(patch 归档进 KANet 仓)· 硬化收口
+- **Codex 裁(RESPONSE-20260813-SILVERC-PIN)**: ZK call-site 版本 pin **ACCEPTED IN CODE**(pool-shard-register 显式 pin zk-8065184)· relay p2sh.mjs 裸默认 **OPEN HARDENING**(且明: 未证 2 参 OP_PICK 缺陷影响 compileEscrow 今天, 但裸默认在复用前是硬化项)· host-local 证据(SHA/分支态)**RECORDED BUT NOT INDEPENDENTLY GITHUB-VERIFIED**(不因写进 committed 文档就升格)· runtime pin(仓码支持)vs rebuild provenance(依赖本地源)是**两个不同不变量** · **rebuild-source survivability OPEN** · "OP_PICK fixed" claim 必 scoped 到 pinned ZK 路径。**不授权部署/外发。**
+- **✅ Bettor 关 rebuild-source-survivability OPEN(廉价收口)**: 把修复实际 patch(`git format-patch 8065184`)归档进 KANet 自己的仓 → `docs/silverc-patches/8065184-oppick-offbyone-fix.patch`(37 行, compile.rs 删 `*ctx.stack_depth += 1;` 一行)。**Layer B 不再仅依赖那一个未推本地分支**——重 clone 丢分支后可 `git apply` 此 patch 重建。canonical-pin 文档 §5 加 Path C。**这是 KANet 自己的工作进自己仓=常规流程(全 .sil 源码本就在此公开仓), 非 Codex 说的"推第三方 upstream 需授权"。**
+- **作用域纪律(采纳 Codex)**: 归档 patch/SHA/分支态=host-local 恢复aid非仓可证事实, 不升格; "OP_PICK fixed"永 scoped 到 pinned KANet ZK 编译路径。
+- **剩余 OPEN(在册, 不现动)**: ①relay p2sh.mjs:26 裸默认=低优先硬化项(无 live caller, 复用前再 pin)②上游推 8065184=外发需授权(潜在 Owner 项, 主线 output 解锁后议)。
+- **ZK 主线状态不变**: 机制 done+armed · 编译修复版 pin 确认+源 patch 归档(survivability 退休)· 真瓶颈=Owner GO canary#2((239))。**silverc 硬化收口完毕, 不再螺旋。**
