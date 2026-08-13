@@ -7386,3 +7386,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
   **② KANet-UI 的根因我【自己读库证实】, 非转述**: `events` `zkJudgeProposeTick_propose_error` 15:45:49 明写 `committee-exclude: bettor 4173a91cef 无 side_lock_daa (fail-loud 防 cross-node fork)`;`preprune_capture_worker_stale` 心跳停摆 **219383s ≈ 61h**、`tick_count` 卡在 **5120**、阈值 180s、**每小时喊一次喊了 61 小时**(= 在册"必响红灯同样无信息"的活样本)。
   🔴 **③ 花重启窗之前必须先答的问题**: **重启能救活 worker, 但救活的 worker 能不能补上【一个过去的】`side_lock_daa`?** 该 worker 的名字就是 **preprune-capture** —— 语义是**"在剪裁前抓住"**。**若那笔 bet 的区块已过 TN12 剪裁墙, worker 活过来也拿不回那个值, j34vb 照样结算不了**(在册: 剪裁墙与 archival 语义 —— **archival 是少删, 不是回取;今天才配救不了已剪的**)。⇒ **先答这条再花窗**, 否则很可能重启完发现照样卡, 而窗已经用掉。**我只读未动任何东西。**
   🔵 **④ 附带一条归因更正候选**: 计划 S5.5 当初记的堵点是 `zkJudgeProposeTick propose 93-j34vb: **unreachable**`(记作 wasm trap), 与**今天这条 `committee-exclude` 是不同的错**;且本系统里 `unreachable` **至少有两个来源**(`[rpc-health] … unreachable` 网络不可达 / wasm trap 同名)⇒ **当初那次归因可能是同名不同物**。我**不能证明** 08-10 那次到底是哪个, 只指出该词在此系统不唯一 —— 谁引用"wasm trap 层"时请带这个不确定性。
+
+### (248) 2026-08-14 · 🔵 J1 答"重启窗前必答"(71b74ec9): **实测=剪裁墙确实让救活的 worker 也补不回 j34vb 那笔**——重启 ≠ canary 解堵, 两件别捆 · 解堵两选项(一窄例外先查)
+- **实测(本机独立节点现取)**: 剪裁点 DAA 75,940,341 · 时间戳 **2026-08-07T08:07Z** —— 比 j34vb 建市(2026-07-13T04:20Z, 市场 id 自带 1783969245093)**晚 25 天** ⇒ 07-13 锁仓块全网物理不可取(剪裁保留=共识级, 结论不限本机)。
+- **叠两条在册判据**: ① DATABASE.md side_lock_daa 段原话"过物理剪裁点=**永久性, 非待补**"; ② **K-17 设计于 07-17, 晚于 j34vb 锁仓 4 天**——它活着时也从没机会捕获这批(backward-walk 需块本体)。
+- **⇒ 限定**: 重启复活 K-17 对 bettor 4173a91cef 的 side_lock_daa **零作用**(结构性永久缺失)。重启的正当理由是**另一个**: 止住对未来/其他池的持续捕获损失(61h 报警无人接)。**重启 ≠ 解堵, 预期别捆。**
+- **解堵真选项(供裁, 我不拍)**: (a) committee-exclude 带授权照走(17:11:58 那条 events 本来的判法); (b) **窄例外先证伪再定**: 若该 bettor side UTXO 恰好未花(未归集), UTXO 条目自带 blockDaaScore=免疫剪裁的共识源可直取——settler 机一条 getUtxosByAddresses 即证; 已花 ⇒ (a) 唯一。side UTXO 花没花在 settler 机查(我本机 0 行)。频道同文已发(txId 见发送器判词)。
