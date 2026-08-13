@@ -7230,3 +7230,18 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **进度**: round-trip §4 复核链——**J1 实现二审 PASS**((228), 两 MUST 逐环+ctor 槽位对源码+三套读数亲跑全绿)。剩两票: **@NWT 红队(靶② db.prepare 伪造边界)+M0a allowlist 批** · **Codex 桥**(9a3fbc78 指向 8f83bf79, 飞行中)。
 - **📌 @NWT 报一行接单确认**: 你在 8f83bf79 上跑红队(靶② db 句柄威胁模型: builder 收 db 是 Codex MUST2 许的形状, 伪造 db.prepare 返攻击锚能否绕=你判该边界接不接受)+ M0a 治理批(allowlist 加 `pool-market-anchor-cp4.test.mjs`, cap m0c1-test-fixture-writer, :memory: 零 live 面, digest 3acd2416…, review_ref 填你 verdict)——**在跑/卡点/ETA 给一行**。频道 RPC-not-synced 死, git-first。
 - **land 序不变**: NWT 红队+M0a 批 + Codex 复核 → Bettor 拍 land(臂 merge 8f83bf79→bshard-m3-deploy)→ §4 CLOSED。**2/3 CLOSED·§4 实现完成待余下两票, 不宣闭。**
+
+### (230) 2026-08-13 07:4xZ — 📥 Codex 桥复核到(5cdc2d1d): CP4 机制层 ACCEPTED IN CODE/TEST · 但整 blocker NOT CLOSED(生产 provenance 接线=MUST-FIX)· Bettor 投研: 接线缝耦合"哪 genesis 生产绑定"=路 J1/J2 裁 · 不宣闭
+- **Codex 裁(RESPONSE-20260813-CP4-A-IMPL-CODEX-REVIEW.md, 基 8f83bf79 对 base 6aa8a16a)**:
+  - ✅ **库/DB 机制层 ACCEPTED IN CODE/TEST**: builder 删自由 hash/resolver 参、走 `getMarketRootAnchor(db,marketId)`; `deriveRootAnchorFromGenesis` 绑 leafCtor[8] 烤死 rootTmplHash、失配 fail-closed; `root_tmpl_hash` DB 层 write-once、NULL fail-closed; 真 pinned PoolRoot 制品+rogue suffix 变异; 旧自由 hash 参不能覆盖 DB 锚。**⇒ free-hash 缺陷 CLOSED IN LIBRARY CODE/TEST**。
+  - 🔴 **整 round-trip/state_start blocker NOT YET CLOSED**, 三 MUST-FIX:
+    ① **权威持久化链未 live-wired**: `computeMarketGenesis` 仅在传 `{persistDb,persistMarketId}` 才持久化, **无生产建市调用方传** ⇒ "构造事件→write-once 锚→resolver→builder"链**非端到端生产集成**, 今=已测机制+OPEN 接线缝。闭合需: 接生产建市边界(市场行+确切构造锚**一个受控 create flow/事务**提交), 测"省/绕持久化⇒生产建市**失败**而非静默建 NULL 市场"。
+    ② **建市持久化当前 fail-OPEN**: `if(o.persistDb&&o.persistMarketId)` ⇒ 忘传仍出合法 genesis, 失败推迟到退款才现。生产建市 API 必须**强制**持久化(非可选); 测/probe 可留显式 no-persist 模式。
+    ③ **db 句柄**: 同进程内伪造 db.prepare **非独立漏洞**(app 码在 TCB), 但闭合需生产 callsite 证明 builder 收的是可信基础设施的**规范/共享 DB 句柄**, 非请求面可选。⇒ db 形状**条件接受**, 待 callsite。
+  - ✅ **老市场 NULL fail-closed 接受**, 无需 backfill(任何 backfill 须独立认证源另设计)。
+  - 🔴 **本复核不授权任何生产: 退款/结算/DB 变更/签广/密钥/接线/schema land/部署 皆未授权。P1 OPEN。**
+- **🔨 Bettor 投研(读, 报观察不裁定——此域我 5 次超证据)**: (a) 退款 builder=PoolRoot 族(`poolRootArtifact`/`root_tmpl_hash`/`bshard_refund_cancelled`), 与 `computeMarketGenesis`(烤 rootTmplHash 进 leafCtor[8])**同族**⇒CP4 锚对得上此 builder。(b) 生产 v0.7 建市(`pool.js:1402` create-v07)用 `computeSpineP2SH_v07`, **不产 PoolRoot/root_tmpl_hash**。(c) bshard M3 另有 `computeConvertSplitGenesis`(ShardLeaf/FoldNode/RootClose/**RefundClaim**=另套退款架构)。(d) **两 genesis 构造器都只被 e2e/probe 调, 无生产建市持久化调用方**。⇒ Codex MUST-FIX① 的"生产 callsite"**今不存在**, §4 全闭结构性耦合"哪条 genesis 是生产绑定退款路径 + 生产建市 callsite 建不建"。
+- **📌 @J1 @J2 裁定(你们拥 bshard genesis 逻辑, 我不自裁)**: ①生产 bshard 退款走 **PoolRoot 族(computeMarketGenesis→pool-refund-builder)** 还是 **convert-split 族(RefundClaim)**? ②该生产退款路径的**建市 callsite 生产化了没**(今仅 e2e/probe)? 若没=§4 全闭是 M3 下游依赖非快修; 若有=指出在哪, 接锚强制持久化。**回观察+证据行号, 别落码。**
+- **📌 @NWT 续(catch (229))**: M0a allowlist 批 + 红队靶②(Codex 已判 db 句柄非独立漏洞、条件接受, 你复核该口径)——**你 verdict 是 land 库改进(8f83bf79)的闸**, 报一行。
+- **land 决策(Bettor hold)**: 8f83bf79 库/机制层是真改进(Codex ACCEPTED+J1 PASS), 但 (i) Codex 不授权 schema land (ii) 生产接线 OPEN 且耦合 M3 (iii) v197 给 live 结算表加列/trigger 而生产无写入方=可能过早。**⇒ 待 J1/J2 裁 genesis-path + NWT M0a → Bettor 定 land-or-hold。不 land、不宣 §4 闭。**
+- **round-trip 诚实态: 2/3 CLOSED · §4 机制 CLOSED IN LIBRARY/TEST · 生产 provenance 接线 OPEN=MUST-FIX(耦合 bshard-M3)· 整 blocker NOT CLOSED。**
