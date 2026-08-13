@@ -7267,3 +7267,18 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **§4 定格(final)**: round-trip **2/3 CLOSED · §4 机制 CLOSED IN LIB/TEST(Codex+J1 双认)· 8f83bf79 HOLD 不 land(ready 分支留存)· 生产接线 = 不做**。§4 provenance 教训(锚绑构造制品非调用方串)携带进 ZK 结算设计。**round-trip 线正式停格, 不再投。**
 - **🔵 pivot: 全员力气回 ZK committed 主线**(铁律 0.5 执行路径: 自修 silverc OP_PICK off-by-one codegen bug → 生成调 ZK opcode 的 covenant → ZK 结算; J2 主攻)。Bettor 摸 ZK 主线当前实况(DECISIONS D-001 + 结算恢复态 + OP_PICK 修复推没推 + voter/委员绑定)后, 定各 agent 驱动点并派工。
 - **📌 全员**: §4/退款轨 stand down; 待 Bettor ZK 主线 orientation + 派工。NWT 8f83bf79 M0a/红队顺延(分支 hold, 不失效)。
+
+### (234) 2026-08-13 09:0xZ — 🔵🔵 ZK 主线实况反转(全景实核): ZK 机制**已建成+生产 armed**·"停摆"=liveness/治理 5 闸非 ZK · Bettor 重构 backlog + 派工(引 memory 佐证)
+- **🔵 反转(纠正"转回 ZK=去建 ZK"的误框)**: ZK committed 结算**机制层早已 DONE 且生产 armed**——首笔真 ZK settle 2026-07-06 上链(D-001:225, txId 4ec9ddd1…, NWT 验)· kanet.env 全开关=1(SETTLE_DAEMON/ZK_PROVE_WORKER/ZK_CLOSE_TICK_V2/ZK_CLAIM/ZK_HANDOFF/ZK_JUDGE/BSHARD_CLOSE_VOTER_V2/ADMIN_ZK_CLOSE_V2 皆 1)· index.js:680 起 5 条 ZK autonomy cron · covenant CloseZkV2.sil + OpZkPrecompile(=166, TN12 live) + Groth16 guest(zk-payout-guest RISC0) 全接生产。**⇒ ZK 主线不是"去建", 是"解锁 output"**。
+- **🔴 "20 天停摆"= D-007 liveness 病非 ZK, 分解 5 闸(各自归属)**:
+  ① **canary#2 = j34vb K-18 backfill**: 唯一能立刻发**真 settle_txid** 的池, clear-to-GO, **等 Owner GO(钱路)**。=证主线真出 output 的最快一笔。
+  ② **getBlockAtDaa deadline 派生 bug**(6 池/426 KAS): 修复设计 NWT-GREEN(`docs/2026-08-10-getblockatdaa-spc-index-fix-design-v0.1.md`)但**只躺 J2 机器·未 commit·不在 origin**=承重修复漂在 git 外(check-deployed-drift 正为此建)。**commit 入库=非钱路·可现驱**; deploy+backfill=钱路 Owner GO。
+  ③ **degenerate→refund(tha3l 类)**: V2 refund 自动化 Codex 裁 NOT AUTHORIZED=Owner 政策决。
+  ④ **kr5l4(25,075 KAS/694 人)**: 无高检出历史链源不可裁定=**blocked-pending-tooling·不 gating 主线**。
+  ⑤ **剪裁墙→路 C 退款**(Owner 08-12)· archival 永否。
+- **📌 派工(非钱路·现驱)**:
+  - **@J2**: 把 getBlockAtDaa 修复(设计+码)从你机器 **commit → push origin**(闸②, 退承重-修复-漂-git-外风险; 非钱路我自驱)。若你机器/会话活报一行接单。deploy/backfill 另等 Owner GO。
+  - **@J1**: 核 `BSHARD_CLOSE_VOTER_V2_ENABLED=1` 的**实际生效强度**——读全 `kasia-console/src/services/bshard-close-voter.js` V2 gating body(memory `reference-trustless-teeth-built-but-not-armed-voter-off` 18 天陈、引的是 V1 开关 voter.js:258; V2 已 armed 但**driver 自授权 vs 委员 enforce 的强度差**未核, DECISIONS §5:93 单 driver 持 ≥4 relay 可绕 4-of-5)。回观察+行号, 别落码。
+  - **silverc 修复 8065184**(闸: 承重单-未推-本地分支, re-clone/reset 静默丢): pin+文档化本地 build 为 KANet canonical compiler(安全半)=可现驱; **推上游 github 是外发动作另 gate**。Bettor 评估后定谁做。
+- **🏛 升 Owner(钱路 GO·产 output 的两笔)**: ①canary#2 j34vb(唯一即时可发真 settle_txid)②getBlockAtDaa deploy+backfill(6 池/426 KAS)。**这两个 GO 才让"ZK 主线"真出结果**; 其余是 plumbing(现驱)或政策决(③⑤)或 blocked(④)。
+- **📌 全员**: ZK 主线 = 解锁 output 非重建。§4 停格不变。待 Owner 两 GO + 上述派工回执。
