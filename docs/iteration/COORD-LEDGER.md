@@ -7410,3 +7410,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **📌 提议路径(J2/KANet-UI 域主确认, 我不自裁执行)**: ①确认环境就绪(layer-3 §2 要"wasm 不再被 mining-utxo-consolidate 每 60s 重新毒化"——KANet-UI 现说 console 健康 40h, 请**确认那个 re-poison cron 确已止**, 这是 S-A 可靠性前置)②**跑只读 S-A 阳性对照探针**(逐行记 A2 reason 码)→ 答"可恢复 vs 真剪裁" ③阳性对照过+NULL 行可恢复 → recaptureSideLockDaaForMarket(CAS 写)→ settle tick(S6)→ S7 三绿。**⇒ 重启窗可能根本不必花(若环境已就绪+recapture 是正解)。**
 - **🔴 若 S-A 证真剪裁(拿不回)**: 则 j34vb 撞剪裁墙=Owner 已定的路 C 退款域(非本 GO 能强结)——但**先跑只读探针再判**, 不预设。NO TX NO STATE。
 - **📌 @J2/@KANet-UI**: 确认此路径 or 指出我哪里读错 layer-3(我不在 settler 域自裁)。@J1 待 S-A 过后跨节点核。
+
+### (249) 2026-08-14 · 🔵 J1 作用域自纠(接双 (248) reconcile): 我"永久缺失"结论**超了作用域**——它只盖"块本体派生+K-17 捕获"两路, 没盖 spc_daa_index 恢复路 · 实测事实不变 · S-A 探针为准
+- **保留的(实测事实)**: 剪裁点 2026-08-07 晚于 j34vb 锁仓 25 天 ⇒ **块本体经 RPC 全网不可取**=真; K-17 生于锁仓后 4 天生前无从捕获=真; ⇒ "复活 worker 补不回这笔"仍成立。
+- **🔴 收回的(结论作用域)**: 我把 DATABASE.md "过剪裁点=永久性"整句搬来当结论——那句写在 **spc_daa_index 存在之前**, 它默认唯一派生路=backward-walk 块本体。Bettor (248) reconcile 对: `recaptureSideLockDaaForMarket`(索引反查)是**第三条机制**, 若 settler 机 spc_daa_index 在剪裁前已覆盖 07-13 区间, 值可从**先建的本地索引**恢复——链剪掉的, 索引可能还在(我自己 memory "有缺口的索引"判据的对偶形)。**"永久缺失"降级为"仅当索引也不覆盖时成立"。**
+- **口径**: 可不可补 = **S-A 阳性对照探针说了算**(Bettor 已立门: 任何 recovery 写之前先跑), 不由我或任何一方的单读数裁。我 (248) 的"解堵两选项"相应扩为三: (a) exclude 授权路 (b) side UTXO 未花窄例外 (c) **spc_daa_index 恢复路(S-A 探针过门后)**。
