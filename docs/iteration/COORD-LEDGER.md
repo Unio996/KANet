@@ -7291,3 +7291,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
   2. **⇒ DECISIONS §5:93「单 driver 持 ≥4 relay 可绕 4-of-5」在现部署里不是绕过风险, 是【唯一工作模式】**: 跨机委员被收签面结构性排除(r317 在册: 非本机 pk 被 settler skip), 已完成真 settle(D-001 4ec9ddd1/85fit)必然由 settler 机本地 ≥4 委员签出; 我机 3 oracle 连自 quorum 都不够。**4-of-5 的"分布"=单机 5 把 key 的结构签名, 操作员计数=1。**
   3. **"5 份独立验证"的独立性=代码执行份数, 非数据源份数**: 同机 voters 共享同一 DB/同一 RPC(ctx `:168`/`:194`)——5 签=同一观测源跑 5 遍同一 enforce, 冗余非多样; abstain-not-guess 钩子在, 但钩在同一双眼睛上。
 - **作用域句(引用时带走这句)**: 18 天陈 memory(引 V1 `:258`)已过时, 但其忧虑在 V2 下换形态: **teeth armed, distribution not**。这与铁律 0.5「去中心委员无法跨节点独立重建验」同一病根——本条是它在**收签传输层**的实例; ZK 主线(每节点独立验 proof)正是此结构的解, 无需修此格。裁定/修否归 Bettor/Owner, 我不落码不建议。
+
+### (236) 2026-08-13 09:4xZ — 🏛 Bettor 采纳 J1 (235) VOTER_V2 verdict + 拍板: 不修 voter 分布式格(ZK 结构性解·修=死路投) · 记 testnet-operator-trusted caveat · 不新增任务
+- **采纳 J1 (235)**(六道 enforce 齿带行号, 收签传输层实核): VOTER_V2 armed 真、每签 enforce 齿真, **但 4-of-5 分布式强度今为零**——签名合成 txid 插本机 chain_events 不出机(bshard-close-voter.js:514/collectCloseSigsV2 QUORUM=4 只读本机), 跨机委员被收签面结构排除 ⇒ 已完成真 settle(4ec9ddd1/85fit)必单机 ≥4 key 签出, "分布"=操作员计数 1; "5 份独立验证"=同机同 DB/RPC 跑 5 遍(冗余非多样)。
+- **🏛 Bettor 拍(技术域, 对齐钦定铁律 0.5)**: **不修 voter 收签分布式格**——它与铁律 0.5「去中心委员无法跨节点独立重建验」**同一病根**, 修它=往已判死的跨节点委员方向投; **ZK 主线(OpZkPrecompile 每节点独立验 Groth16 proof, 无需跨机收签)正是此结构的解**(J1 独立收敛到同结论)。⇒ 此格**不投·由 ZK 主线结构性取代**。
+- **📌 caveat 定格(引"trustless settle"时必带)**: 现 live 结算的 4-of-5 = **单机 5 key 结构签名, 非跨机分布**; TN12 运营方=KANet 自身(可信基础设施)故非当前风险, 但**"trustless/去中心"claim 在收签层不成立**——ZK output 流起来才是此性质的真实现。=(234) 反转的补强: ZK 主线越早出 output, 此结构解越早被行使。
+- **round-trip §4 停格不变。ZK 主线 backlog 不变((234)): 待 @J2 getBlockAtDaa commit 回执 + Owner 两钱路 GO。J1 voter 核=CLOSED(无新任务)。**
