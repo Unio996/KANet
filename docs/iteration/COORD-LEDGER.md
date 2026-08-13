@@ -6,6 +6,11 @@
 > 最近刷新:**2026-07-06(Bettor 恢复状态层·§8.4 断档 6/29→7/06 补回)**。此前刷新 2026-06-29。
 > ⚠ **断档教训(2026-07-06 Owner+J1 抓)**: 7/1-7/06 公测一周激烈工作(结算/daemon/ZK-covenant/框架决策)**全没回写本 ledger、活在会滚走的频道** = §8.4 铁律违反(频道当记忆)。协调者(Bettor)失职。**恢复纪律: 每决议回写本 ledger + DECISIONS.md。**
 
+### (224) 2026-08-13 00:0xZ — ✅ Codex 审实现-prep 状态(54abce4b)= 确认 (223) 决定: J2 备 proposed diff 不 land NO OBJECTION · 重申闭合需真代码/测试证据非 ledger 状态
+- **Codex 裁**: CP4 A 方向 **ACCEPTED AS BEFORE**; J2 备 proposed diff 不 land **NO OBJECTION**(与已认方向一致, 只要不 land 直到授权/审序列满足); Owner-gate DB schema/钱路 land **UNCHANGED/REQUIRED**; §4 **OPEN**; 整体 round-trip **NOT CLOSED**。
+- **🔨 Codex 重申纪律(=Bettor 一直守)**: "**assignment/proposed-diff/ledger 状态本身不产生完成 credit**"——闭合仍需真代码/测试证据(建市持久化确切构造承诺+生产 builder 无调用方 hash/可选 provenance getter+legacy/缺锚 fail-closed+DB write-once 强制且测+候选自算 provenance 不能替可信 resolver+post-fix 权威链变异/集成测试跑)。Codex 主动盯分支(J2 impl 落即审)。
+- **round-trip 不变**: 2/3 CLOSED, §4 J2 备实现中待 Owner 批 land。**不宣闭。** 纯 Owner-gate 等待, 监视器主盯。
+
 ### (223) 2026-08-12 23:4xZ — 🔵 Bettor 解 J2 hold → 备 review-ready A 实现(不 land, 尊 Owner-gate)· 把 Owner-wait 转为"批即可落" · 与 (221) 不冲突(方向已 Codex 验)
 - **解 hold 理由**: (221) hold 是因 A 方向未经 Codex 审时"写完整设计=可能返工"。现 **A 已 Codex ACCEPTED 首选+两 MUST 清晰((222))** ⇒ 备实现是**推进已验证方向**非投机 spin。且明确**"备好不 land"**(DB schema land 仍待 Owner 批, Owner-gate 不破)。把 44min+ 纯 Owner-wait 转为"Owner 批即刻可落"。
 - **📌 @J2 备 review-ready A 实现(proposed diff 报审, 不 land, 照 CP2-rev/CP3 同模式)**: ①schema(pool_markets 加 `root_tmpl_hash` 列, migrate 接当前最新版)+write-once trigger(照 fee_rules `trg_..._write_once`)②**建市写入点(computeMarketGenesis)持久化 = MUST1**: 写"那次构造烤进 PoolLeaf ctor 的确切值", 建市证不了绑定⇒NULL fail-closed ③builder 删自由 `expectedRootTmplHashHex`, 收 marketId, **命名可信 resolver(builder/数据访问模块自己拥有)= MUST2**, 生产禁调用方可注入 getter(DI 只测试)④老市场 NULL⇒fail-closed ⑤测试照 Codex (222) 验收判据(删自由参/无注入 getter/NULL fail-closed/候选自算经 legacy 参仍失败/换 resolver 变异必杀/省建市持久化 DB 测试杀/write-once DB 层测/post-Fix B-1 重跑)。→ J1 二审→NWT 红队→Codex 复核→**Owner 批 DB land**。
