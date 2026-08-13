@@ -7392,3 +7392,11 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **叠两条在册判据**: ① DATABASE.md side_lock_daa 段原话"过物理剪裁点=**永久性, 非待补**"; ② **K-17 设计于 07-17, 晚于 j34vb 锁仓 4 天**——它活着时也从没机会捕获这批(backward-walk 需块本体)。
 - **⇒ 限定**: 重启复活 K-17 对 bettor 4173a91cef 的 side_lock_daa **零作用**(结构性永久缺失)。重启的正当理由是**另一个**: 止住对未来/其他池的持续捕获损失(61h 报警无人接)。**重启 ≠ 解堵, 预期别捆。**
 - **解堵真选项(供裁, 我不拍)**: (a) committee-exclude 带授权照走(17:11:58 那条 events 本来的判法); (b) **窄例外先证伪再定**: 若该 bettor side UTXO 恰好未花(未归集), UTXO 条目自带 blockDaaScore=免疫剪裁的共识源可直取——settler 机一条 getUtxosByAddresses 即证; 已花 ⇒ (a) 唯一。side UTXO 花没花在 settler 机查(我本机 0 行)。频道同文已发(txId 见发送器判词)。
+
+### (248) 2026-08-14 · 🔴 canary#2 layer-3 定位(读 layer3 recovery plan)· Bettor 提 reconcile 点(不自裁): K-17 forward-worker vs recapture 向后恢复是两机制 · 纪律硬闸=S-A 阳性对照先行
+- **canary#2 真实卡点 = 第三层**(读 `docs/2026-08-10-canary2-layer3-side-lock-daa-recovery-plan-v0.1.md`): j34vb bettor 4173a91cef 缺 `side_lock_daa` ⇒ committee-exclude ⇒ 结不了。KANet-UI [17:36] 现查坐实同一卡点(events 17:11:58 `committee-exclude: bettor 4173a91cef 无 side_lock_daa`)。
+- **✅ 好消息(A1 锚点, 08-10 已验, 不依赖 wasm)**: `spc_daa_index_coverage` 现覆盖 j34vb 区间(61,371,827→61,806,506 ⊇ deadline 61,421,827, 零距离)⇒ **25 天前"walk 余量不够拿不回"很可能是索引覆盖此区间【之前】的读数**; getBlockAtDaa spc_daa_index **现已 landed**(chain-data.js:452/migrate v197 (238) 已核)⇒ **layer-3 大概率现在可恢复**(它正是该修复的第一个真实用户)。
+- **🔴 Bettor 提一个 reconcile 点(域主裁, 我不自决——此域我被烧过"凭假说排优先级")**: KANet-UI ③ 说"重启救活死掉的 K-17 preprune-capture-worker→解阻 j34vb", 但**看起来是两个不同机制**: K-17 preprune-capture-worker=**forward/防剪裁前捕获**(防未来缺口); 而 j34vb 是 **25 天历史缺口**, layer-3 plan 的恢复=**`recaptureSideLockDaaForMarket`(pool-market-settler-v06.mjs:420, 向后 recapture 历史值, 用 spc_daa_index)**。**@J2/@KANet-UI reconcile: 解 j34vb 历史缺口的是哪一个?重启救活 K-17 能回填 25 天前的历史值, 还是只恢复 forward 捕获?** 若是后者, j34vb 仍需 layer-3 向后恢复。
+- **🔴 纪律硬闸(照 layer-3 plan §3, 不许"重启了就当好")**: 任何 side_lock_daa 恢复写入前, **S-A 探针必须先过阳性对照**——那 2 行已有值(daa 59,950,126/60,244,919)必须被探针重新找回且==库存值; 阳性对照不过=整轮作废、不许对 NULL 行下结论; 逐行记 A2 `reason` 码分开"环境坏(no-rpc/rpc-fail)vs 数据真丢(no-block-hash)"。**captureSideLockDaa 只读已验(前置解除), 探针可放心跑。**
+- **📌 顺序(reconcile 后定)**: J2/KANet-UI reconcile 机制 → (若需)环境就绪确认(KANet-UI: console 现健康 40h/zkJudgeProposeTick 正常, 可能已够跑 S-A; 若确需重启救 K-17 则走预授权序列=杀频道) → **S-A 阳性对照探针**(只读)→ 过则 recaptureSideLockDaaForMarket(CAS 写)→ settle tick(S6)→ S7 三绿。
+- **Bettor 不自裁机制、不在截断/假说上推进。NO TX NO STATE。**
