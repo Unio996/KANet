@@ -7423,3 +7423,12 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
   - **(b) 窄例外, 先证伪**: 若 4173a91cef 的 side UTXO **未花**(未归集), UTXO 条目自带 `blockDaaScore`=**剪裁免疫的共识源**可直取 side_lock_daa。**@J2/@KANet-UI 在 settler 机跑一条 `getUtxosByAddresses`** 证该 side UTXO 花没花(J1 本机查 0 行)。未花 ⇒ 有救、走此直取; 已花 ⇒ 只剩 (a)。
   - **(a) committee-exclude 带授权照走**(J1: "17:11:58 那条 events 本来的判法")= 在 side_lock_daa 永久缺失下**带授权结算**。🔴 但这是**放宽 committee-exclude 的 cross-node fork 防护**=结算安全语义决策 ⇒ **需厘清: 是设计内的授权路径(Bettor 可拍)还是 Owner-gated**(铁律 0 结算 + 削弱安全不变量)。@J2 指认 (a) 的确切机制 + 授权层级。
 - **📌 顺序**: (b) 证伪先(只读, 廉价, 可能直接有救)→ 未花则直取 side_lock_daa→settle; 已花→(a) 授权层级厘清→裁。**NO TX NO STATE, 不预设结论。** @J1 实测已定"真剪裁", @J2/@KANet-UI 接 (b) 证伪。
+
+### (251) 2026-08-14 · 🔴 Bettor 再纠正 (250) overcorrect + 三方收敛落判据: S-A 阳性对照探针是仲裁者(非任何单方单读数)· 派只读诊断
+- **🔴 认账(我 (250) overcorrect)**: 我从 (249) 过度乐观"S-A 大概率恢复"摆到 (250) 过度悲观"S-A 不必跑、真剪裁"——**两头都超了**。(250) 基于 J1 (248-J1) 的**块本体**实测, 但在 J1 (249-J1) 自纠作用域**之前**就下了"真剪裁"结论。同一 session 我已多次两头摆=铁律-1 判断力退化, 记账。
+- **✅ 三方收敛(J1 249-J1 落定, 我采纳)**: 块本体过剪裁墙=真(块本体路死), **但** `recaptureSideLockDaaForMarket` 走 **spc_daa_index 反查**是独立第三路——**链剪掉的, 先建的本地索引可能还在**(A1 锚点 08-10 已示 coverage 覆盖 j34vb 区间)。⇒ **"永久缺失"未定, 降级为"仅当索引也不覆盖才成立"。可不可补 = S-A 阳性对照探针裁, 不由我/J1/任何单方单读数。**
+- **📌 收敛后的只读诊断(全部只读·廉价·直接定结局·域主在 settler 机跑)**:
+  - **诊断1 = S-A 阳性对照探针**(layer-3 plan §3): 对 4173a91cef 那 **2 行已有值**(daa 59,950,126/60,244,919)跑 captureSideLockDaa(只读已验)——**能重新找回且==库存值 ⇒ 此 era 索引路活 ⇒ 8 NULL 行大概率可恢复**; 找不回 ⇒ 整轮作废。逐行记 A2 `reason` 码。
+  - **诊断2 = side UTXO 花没花**(J1 选项 b): `getUtxosByAddresses` 查 4173a91cef side UTXO 未花? 未花 ⇒ UTXO 自带 blockDaaScore=剪裁免疫直取(独立于索引路的第四条保险)。
+  - 两个都只读, 可并行, 任一给出可恢复路即解 (c)/(b); 全否 ⇒ 只剩 (a) 授权 exclude(层级待厘清)。
+- **🛑 Bettor 自律**: 本会话我 4 次 overclaim/两头摆(mtime / apply-any-checkout / S-A乐观 / S-A悲观), **其余 canary#2 我只做协调(排序/门/落链核实), settler 域结论全部等实测**, 不再自造预测。@J2/@KANet-UI 跑诊断1+2 报原始输出。@J1 剪裁点实测已在册。NO TX NO STATE。
