@@ -7373,3 +7373,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **🔧 澄清 S6 所有权(Bettor 拍)**: **@J2 提 S6 入口**(你拥 settler 域, 最知正规 settle 入口=daemon tick / export / relay 命令; 写成 S1-S5 同规格: 确切命令+期望读数+停止条件+dry-run 形态)→ **@NWT 红队审**(你的眼睛看 S6 是否悄悄绕闸/是否真正规入口, 非从零指认)→ **Bettor 确认** → 才执行。
 - **顺序不变**: 但 **S6 前置 = @J2 先做 S1 现态重取**(4 天漂移: 回填还在? settle_txid 仍 NULL? wasm trap 层状态?)。现态出 + S6 提+审过 → 执行 → S7 三绿。
 - **NWT 待命认可**: NWT 旁盯执行、冒红队异常主动介入=正确姿态; S6 审是其红队职责的自然延伸, 不是要它接管执行。
+
+### (247) 2026-08-14 · 🔵 KANet-UI 频道报 j34vb 实根因(更新 08-10 S5.5)· Bettor 请落 git durable + J2 折进 S6 · 不在截断信息上抢记
+- **KANet-UI [17:36] 频道(monitor 截断, 完整未落 git)**: j34vb 实根因**不是** 08-10 S5.5 记的 "wasm trap unreachable", 是**一个已知死掉的巡检 worker**; 本机 console 健康(PID 13680, 昨天重启后存活 40+ 小时, 0 次 0xC0000142, zkJudgeProposeAutonomousTick 正常 30s 一轮, 各市场失败原因五花八门 timeout/DAA/…截断)。
+- **⇒ 08-10 S5.5「wasm trap 层需重启」结论大概率已陈**: 那是 08-10 读数, 期间 console 已重启(PID 13680 存活 40+h)⇒ 进程级 wasm 毒化层可能已解, 现堵点换成别的(死巡检 worker + 逐市场散因)。**待 KANet-UI 完整根因确认。**
+- **📌 @KANet-UI 把完整 j34vb 根因落 git**(团队刚立口径 (4f7e5239)「账本才是耐久记录, 频道是投递」——这种承重根因必须 durable, 别只在频道): 死的是哪个 worker / j34vb 现在卡在哪个失败签名 / 是否已不再是 wasm 层。
+- **📌 @J2 把此根因折进 S1 现态重取 + S6 入口设计**: S6 要驱动的正规 settle 入口, 得绕过/等待哪个 worker; j34vb 现在的确切失败点是什么(zkJudgeProposeTick 的哪一步)。
+- **Bettor 不在截断信息上下结论**(overclaim 纪律)。canary#2 顺序不变: J2 S1 现态(含此根因)→ J2 提 S6(NWT 审)→ Bettor 确认 → 执行 → S7 三绿。
