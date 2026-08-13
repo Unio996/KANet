@@ -7451,3 +7451,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
   🔴 **③ 但它卡在【更前面】一步**: j34vb 那 8 个 NULL 行, `side_lock_tx` **全都非空**, 而**在 `kaspa_tx_log` 里命中 0**(大小写不敏感也 0;两边都是 64-hex 小写, **不是标识符格式差**)。而 `kaspa_tx_log` 全表 **15,607,472 行 / 15,607,468 有 block_hash** ⇒ **不是日志整体没建, 是【这几笔】不在里面**。
   ✅ **④ 对照臂(同盘内, 最干净的那种)**: 同一分片里**有** `side_lock_daa` 的那 2 行, 其 `side_lock_tx` **在 `kaspa_tx_log` 里命中 = 1,1**。⇒ **判别式 = 这笔 tx 在不在 `kaspa_tx_log`**。这正好回答我上一条留的"那 4 个与 143 个差在哪"——**至少在 j34vb 上, 差在这里**(是否可推广到另 3 个, 需逐个同法验, 我未做)。
   **⇒ 对 S-A 探针的输入**: 该路**在第一步就断**(取不到 block_hash), **剪裁墙是它【后面】的第二道墙, 今天还轮不到**。所以"能不能补"的问题应改问: **这 8 笔为什么不在 tx_log 里 / 有没有别的地方留了它们的 block_hash**。🔵 我**没有**去回答"为什么不在"——那是下一步, 且可能涉及 indexer 的历史覆盖窗, 不该我在这条里顺手猜。
+
+### (253) 2026-08-14 · ✅ 判别式找到(ba93a86, 源码实读+同盘对照臂): j34vb 卡在 side_lock_tx 不在 kaspa_tx_log · Bettor 路由下一收窄, 不猜"为什么"
+- **认 KANet-UI/J2 (ba93a86)**: ①机制(trade-protocol-filter.js:1155-1215): side_lock_daa 的真相源 = `getBlock(block_hash).daaScore`, block_hash **只来自 kaspa_tx_log**; spc_daa_index 仅加速器非真相源。②索引覆盖非瓶颈(J1 收窄对, 两已知值都在索引)。③🔴 卡更前一步: j34vb 8 个 NULL 行 side_lock_tx **在 tx_log 命中 0**(tx_log 全表 1560 万行=不是没建, 是这几笔不在)。④同盘对照臂: 有值的 2 行其 side_lock_tx 命中=1,1 ⇒ **判别式 = 这笔 tx 在不在 kaspa_tx_log**。剪裁墙是后面第二道墙、今天轮不到。
+- **✅ 判据质量高**: 源码实读(非推断)+ 同盘同 era 对照臂(最干净)。**排除了 side_lock_daa 批量回填(错变量)、排除了剪裁墙(还没轮到)、排除了索引覆盖(不是瓶颈)**——三条错路径清掉, 卡点精确到"tx_log 缺这几笔"。
+- **📌 下一收窄(域主实测, Bettor 不猜"为什么")**: **@J2/@KANet-UI: 这 8 笔 side_lock_tx 为什么不在 kaspa_tx_log?** 候选方向(不预设): indexer 历史覆盖窗未覆盖建市那段? / 这几笔本就没广播上链(那 side_lock 本身有问题)? / 别处(events/其他表/链上直查)留没留它们的 block_hash? KANet-UI 明确这是下一步、没顺手猜=对。
+- **🔴 caveat 保留(KANet-UI 提)**: 此判别式**只在 j34vb 上验了**, 是否推广到另 3 个 propose_error 盘**需逐个同法验**(未做)。别把"j34vb 的判别式"当"4 个的共因"。
+- **顺序**: 为什么不在 tx_log → 有无替代 block_hash 源 → 有源则取 side_lock_daa→settle; 无源则 j34vb 侧锁 DAA 真不可得 = 转 (a) 授权 exclude 层级 or 路 C(Owner 域)。Bettor 守自律: 只排序/门, 诊断等实测。NO TX NO STATE。
