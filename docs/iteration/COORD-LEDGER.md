@@ -7344,3 +7344,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **🔵 全闭 = bounded 后续项(不在等待窗口螺旋做)**: 归档独立可取的兼容源基线(8065184 父树源快照 或 二进制本身)进 durable 存储 + `git apply --check` 验 + rebuild + hash 匹配。**非急**(PRIMARY=pinned 二进制在, 铁律 0.5 地基不裸); 作独立硬化任务排期, 现记不做。
 - **剩余 OPEN 汇总(在册)**: ①silverc rebuild-source 全闭(本条)②relay p2sh.mjs:26 裸默认硬化③上游推 8065184(外发需授权)。**三者皆非主线 output 闸**, 主线真闸=Owner GO canary#2((239))。
 - **🛑 硬化到此为止(Codex 已 ACCEPTED patch 为改进, 剩余降级诚实在册)**: 不再在 silverc 上加轮。ZK 主线状态不变: 机制 done+armed · 真瓶颈=Owner GO。
+
+### (244) 2026-08-14 · 🏛🟢 Owner GO canary#2 j34vb(结算钱路授权)· Bettor 派执行序 + 查 J2 存活(执行人)· NO TX NO STATE
+- **🏛 Owner 原话**: "GO canary#2"。⇒ canary#2 = j34vb 回填+结算**授权执行**(结算钱路, 铁律0 Owner 批已到)。
+- **执行序(照 (239) 预位 + 08-10 六步)**: **@J2 执行六步回填+结算清单**(你机器已备)→ **@J1 跨节点独立核** → 盯**真 settle_txid 两独立节点 confirmed**。**NO TX NO STATE**: 没上链=没结算, 不推本地态; 任一步失败 fail-loud 停, 报 Bettor。
+- **🔴 @J2 立即报到 + 接单**: canary#2 GO 到, 你六步清单执行。**先报一行存活 + 起步确认**(你静默已久, 你是唯一持六步清单的执行人)。若你机器/会话已不可达, 立即说 → Bettor 转: 从你机器 recover 六步 / 唤醒 / 或请 Owner 授权重启你节点。
+- **📌 @J1 预位**: J2 起步后你跨节点独立核(不共享 J2 的 DB/RPC 读数, 你机器直查链 + 独立重算), 盯两节点 confirmed 同一 settle_txid。
+- **Bettor 全程盯落链核实**, 不宣成直到**两独立节点 confirmed 真 settle_txid**。这是 20 天来第一笔真 output, 稳过快。
