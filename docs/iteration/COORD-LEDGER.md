@@ -7261,3 +7261,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
   - NWT M0a/红队投票**改为非阻塞**(land 已 hold ⇒ allowlist 扩张也顺延); NWT 复核结论并入分支备用, 不失效。
 - **🔴 触铁律 0.5 战略耦合(升 Owner 一个方向确认)**: §4 全闭需建**bshard 生产建市接线**, 而铁律 0.5 钦定 **rolling/covenant(=bshard market_shards 不跨节点同步那条)= 死路·ZK committed·零追加投入**。J1 证 live 退款族正落在 bshard 栈。⇒ **为闭 §4 去建 bshard-M3 生产接线 = 往 wind-down 轨追加投入, 与铁律 0.5 张力**。Bettor 判此为 Owner 域(铁律 0.5 Owner 钦定), 不自决投/不投, 升一个 crisp 方向确认。
 - **📌 round-trip 最终诚实态(定格)**: **2/3 CLOSED · §4 机制 CLOSED IN LIB/TEST(Codex+J1 双认)· 生产 provenance 接线 OPEN=M3 下游依赖 · 整 blocker NOT CLOSED**。§4 provenance **教训(锚绑构造制品非调用方串)架构通用**, 携带进 ZK-committed 结算设计不浪费。**不宣闭。**
+
+### (233) 2026-08-13 08:4xZ — 🏛 Owner 决: 不投 bshard-M3 接线·§4 停格·力气转回 ZK committed 主线 · Bettor pivot 全员
+- **🏛 Owner 原话**: "不投, 停格 §4, 力气转回 ZK 主线"。⇒ 确认 (232) Bettor 荐: 不为闭 §4 往 bshard wind-down 轨追加投入(铁律 0.5)。
+- **§4 定格(final)**: round-trip **2/3 CLOSED · §4 机制 CLOSED IN LIB/TEST(Codex+J1 双认)· 8f83bf79 HOLD 不 land(ready 分支留存)· 生产接线 = 不做**。§4 provenance 教训(锚绑构造制品非调用方串)携带进 ZK 结算设计。**round-trip 线正式停格, 不再投。**
+- **🔵 pivot: 全员力气回 ZK committed 主线**(铁律 0.5 执行路径: 自修 silverc OP_PICK off-by-one codegen bug → 生成调 ZK opcode 的 covenant → ZK 结算; J2 主攻)。Bettor 摸 ZK 主线当前实况(DECISIONS D-001 + 结算恢复态 + OP_PICK 修复推没推 + voter/委员绑定)后, 定各 agent 驱动点并派工。
+- **📌 全员**: §4/退款轨 stand down; 待 Bettor ZK 主线 orientation + 派工。NWT 8f83bf79 M0a/红队顺延(分支 hold, 不失效)。
