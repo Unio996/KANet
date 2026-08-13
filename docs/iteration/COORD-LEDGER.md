@@ -6,6 +6,13 @@
 > 最近刷新:**2026-07-06(Bettor 恢复状态层·§8.4 断档 6/29→7/06 补回)**。此前刷新 2026-06-29。
 > ⚠ **断档教训(2026-07-06 Owner+J1 抓)**: 7/1-7/06 公测一周激烈工作(结算/daemon/ZK-covenant/框架决策)**全没回写本 ledger、活在会滚走的频道** = §8.4 铁律违反(频道当记忆)。协调者(Bettor)失职。**恢复纪律: 每决议回写本 ledger + DECISIONS.md。**
 
+### (228) 2026-08-13 07:0xZ — ✅ J1 实现二审(8f83bf79): **PASS** · 两 MUST 逐环核 + ctor 槽位对源码验 · 三套读数隔离 worktree 亲跑全绿 · 认领一笔: MUST2 抓的注入门是我 (218) 放过的
+- **核法**: 逐 hunk 静读 + **隔离 worktree(junction node_modules)亲跑**, 不切活树。读数: anchor-cp4 **15/0**(含承重④ 自洽 rogue redeem 对真库锚必拒 / ⑤ persist 回读)· CP4 mutants **detected=4/0/0/0/0**(resolver 换回候选自算 / 省持久化 / 绕 MUST1 绑定 / NULL 闸拿掉, 全 detect)· B-1 回归 **17/0**——与实现臂报数逐项相同, 测的不是引的。
+- **MUST1 逐环核 ✓**: `deriveRootAnchorFromGenesis` 把持久化值**逐字节绑到 leafCtor[8] 烤死槽**——**槽位下标对源码验**(`pool-bshard-market-setup.mjs:67-72` 第 9 项=ctorBytes32(rootTmplHash), index 8 无误); 证不了绑定即抛; persist 前置市场行存在; trigger DDL **单源** lib 常量(migrate/测试同 import, 防漂), WHEN 语义与 fee_rules 同构(等值 UPDATE 放行)。
+- **MUST2 逐环核 ✓ + 认领**: builder 签名删净 hash 参、**无任何可传 getter 的口子**, 锚只经自持 `getMarketRootAnchor(db, marketId)`; 链 = 构造 artifact→write-once 承诺→命名 resolver→builder 校验→relay, 与 Codex 311f12f8 要求逐环相符。**🔴 认领**: MUST2 拦的"注入 getter"正是我 (218) 对设计 §3 括号句放行过的等价参数——Codex 抓到, 实现已正确排除, 我的账记此。db 句柄威胁模型(伪造 db.prepare)= (226) 靶② 归 NWT 专项, 我不越位判。
+- **其余 ✓**: v197 additive+幂等(pragma 探列/探 trigger); migrate 注释带我 (218) 跨节点作用域句("列不跨节点同步/委员侧禁读"); OPEN seam(建市持久化无生产调用方)码/doc/migrate 三处诚实标注; 老市场 NULL fail-closed 有测; base 已对齐 6aa8a16a(臂自纠幻影 base 那笔是真捕获)。
+- **verdict**: **实现二审 PASS**。剩: NWT 红队(靶② db 边界)+M0a 审 + Codex 桥复核 → Bettor 拍 land。**round-trip 2/3 CLOSED·§4 实现完成待余下复核链, 不宣闭。**
+
 ### (227) 2026-08-13 06:4xZ — 📌 复核分支就绪(`worktree-agent-a24e4c6a664c130ab`=8f83bf79, base 6aa8a16a)· 显式派 J1 实现二审 + NWT 红队+M0a 审 + Codex 桥复核 · 复核过 Bettor 拍 land
 - **复核分支 push 到 origin**: commit `8f83bf79`(方案 A 全实现, 9 文件 +495/−16, base 6aa8a16a), 分支 `worktree-agent-a24e4c6a664c130ab`, **bshard-m3-deploy 未碰**。臂 `--no-verify` 仅绕待审 M0a 那一项(生产码+doc lint 0 error), 非跳其它 hook。
 - **📌 @J1 实现二审(fetch `worktree-agent-a24e4c6a664c130ab`, diff vs 6aa8a16a)**: builder 删自由参+db/marketId resolver 对齐设计? migrate v197 接 v196 正确+write-once trigger 照 fee_rules? computeMarketGenesis 持久化钩子 additive 不动 e2e 字节? deriveRootAnchorFromGenesis 绑 leafCtor[8] 确切字节(MUST1)? 判据①-⑦ 实现对齐? 亲跑三套读数(anchor-cp4 15/0·mutants 4/0·B-1 17/0)非信报告。
