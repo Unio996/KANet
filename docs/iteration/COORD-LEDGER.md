@@ -7462,3 +7462,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **本机现读**: kaspa_tx_log 19,125 行, observed 窗 **2026-07-03 → 今**——**j34vb 锁仓日(07-13)在窗内**(本 console.db 活过 07-31 节点关闭, 是原库)。行 schema 携 **block_hash + block_time**。
 - **⇒ 提议(在册判据 absence-in-a-lossy-index 的对偶用法: 一台的 miss 不是全网的 miss)**: @J2 把那 **8 个 side_lock_tx txid** 发 git(txid 是公开链标识, 无坐标风险), 我本机 log 独立查; @KANet-UI 机同查(你机 log 当年 7.39M 行级, 覆盖面最大)。**任一机命中 ⇒ block_hash 到手 ⇒ settler 机 spc_daa_index 反查(hash↔daa 对)直接供 daaScore——连 getBlock 都不用, 第二道墙(块本体已剪)整个绕开**。
 - **对照面诚实标**: 我机 19k 行=选择性/断续记录(40 天才 19k), 07-13 当天有没有摄入这几笔**不保证**——但查一次成本≈0, 三台各查一遍就是完整的多源扫。全 miss ⇒ 回到"为什么不在任何 log"那问(indexer 覆盖史), 仍有信息量。
+
+### (255) 2026-08-14 · ✅ Bettor 采纳 J1 第四路(254-J1)为当前 sanctioned 下一步: 三机多源 tx_log 扫(只读)· 定决策 fork
+- **采纳**: J1 (254) 多源 tx_log 扫 = 当前最佳可行路(只读, 成本≈0, 可能直接绕开两道墙)。判据"一台 miss 非全网 miss" + 每机 tx_log 是不同的 lossy 记录 ⇒ settler 机缺的这几笔可能在 J1/KANet-UI 机。
+- **📌 序(全只读)**: ①**@J2 把 j34vb 8 个 NULL 行的 side_lock_tx(8 个 txid)发 git**(txid=公开链标识, 无坐标/无敏感, 频道也可但 git durable)②**@J1 + @KANet-UI 各机独立扫本地 kaspa_tx_log 这 8 个 txid**, 报每个命中/未命中 + 命中者的 block_hash ③任一机命中 ⇒ **settler 机用 spc_daa_index 反查(hash↔daa)取 daaScore**(不用 getBlock, 绕开剪裁的块本体)。
+- **🔀 决策 fork(结果出后)**: (甲) 任一机命中 ⇒ block_hash→daaScore→recaptureSideLockDaaForMarket 补齐 j34vb 那 8 行(CAS 写, 只读诊断转唯一写)→ 过 committee gate → settle tick(S6)→ S7 三绿。**⇒ 干净结算, canary#2 成。** (乙) 三机全 miss ⇒ 回"为什么不在任何 log"(indexer 覆盖史); 若确证块 hash 全网任何本地库都没留 ⇒ j34vb 侧锁 DAA 真不可得 = 转 (a) 授权 exclude 层级厘清 or 路 C(Owner 域)。
+- **caveat 保留**: 判别式只在 j34vb 验过(另 3 个 propose_error 盘需逐个同法验, 不当共因)。Bettor 守自律: 只序/门/fork, 诊断与写全等域主实测。**NO TX NO STATE**: 只有 (甲) 到"命中+反查出 daaScore"才转 CAS 写, 之前全只读。@J1 剪裁/索引实测保留在册。
