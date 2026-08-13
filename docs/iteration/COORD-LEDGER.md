@@ -6,6 +6,13 @@
 > 最近刷新:**2026-07-06(Bettor 恢复状态层·§8.4 断档 6/29→7/06 补回)**。此前刷新 2026-06-29。
 > ⚠ **断档教训(2026-07-06 Owner+J1 抓)**: 7/1-7/06 公测一周激烈工作(结算/daemon/ZK-covenant/框架决策)**全没回写本 ledger、活在会滚走的频道** = §8.4 铁律违反(频道当记忆)。协调者(Bettor)失职。**恢复纪律: 每决议回写本 ledger + DECISIONS.md。**
 
+### (226) 2026-08-13 06:3xZ — ✅ 实现臂交付方案 A(全测试绿)· Bettor 抽查过 · 推复核分支 → J1/NWT/Codex 复核 + M0a 治理走 NWT · 三诚实点进复核靶
+- **实现臂交付(隔离 worktree, 未 land)**: 9 文件+495/−16。新 `pool-market-anchor.mjs`(命名 resolver `getMarketRootAnchor` + 建市持久化 `persistMarketRootAnchor` + 结构绑定 `deriveRootAnchorFromGenesis`)· builder 删自由 `expectedRootTmplHashHex` 参改收 db+marketId · `computeMarketGenesis` additive 持久化钩子 · migrate **v197**(pool_markets.root_tmpl_hash write-once, 照 fee_rules 先例)· 全套测试(anchor-cp4 15/0 + mutants detected=4/0 + B-1 回归 17/0 + write-once DB 层测)· DATABASE.md 更新。**臂自纠一处承重: spawn 的 worktree base 陈(落后真 tip 1322 commit, 缺 CP3/leg-swap), 它 reset 对齐 6aa8a16a 才动手**——否则 diff 挂幻影 base。
+- **Bettor 抽查过(行号)**: builder :70 无自由参只 db+marketId、:105 走 getMarketRootAnchor(MUST2 不可注入)· migrate v197+write-once 列 · resolver 模块在 · base 对齐 6aa8a16a。核心与报告一致。
+- **📌 复核链(我路由, 复核后我拍 land)**: 臂推复核分支 `worktree-agent-a24e4c6a664c130ab` 到 origin(非 bshard-m3-deploy)→ **@J1 实现二审 + @NWT 红队 + Codex 复核**。**复核靶单(臂三诚实点, 必查)**: ①建市 live 持久化**无生产调用方=OPEN seam**(computeMarketGenesis 仅 e2e/probe 调, 同退款轨未接线; 码/doc/migrate 三处已标)——"缺陷没显形"非"低风险" ②**db 句柄威胁模型**: builder 收 db 是 Codex MUST2 许的形状, 但伪造 db.prepare 返攻击锚能绕——NWT 专项判该边界接不接受 ③老市场 NULL⇒fail-closed(回填值来源另定, 不顺手做)。
+- **🔴 M0a 治理条目(臂没自批=对)**: 判据⑥ write-once DB 层测逼出真 sqlite import, M0a 差分门拦; 臂已把 M0a 面收敛到唯一文件 `pool-market-anchor-cp4.test.mjs`(:memory: 零 live 面)。allowlist 扩张按 manifest `_doc`="扩张 NWT 审 + Owner 知情硬锁" ⇒ **走 @NWT 审, Owner 经本 ledger 知情**(digest 3acd2416…, review_ref 待 NWT 填)。**Bettor 不自批安全闸。**
+- **round-trip: 2/3 CLOSED, §4 实现完成待复核链+M0a→Bettor 拍 land。** 复核过我拍板落, 不再等 Owner(方案 A Owner 已批+Bettor 拍)。
+
 ### (225) 2026-08-13 06:1xZ — 🏛🔴 Owner 直令: Bettor 拍板具体方案不等 Owner(我过度设闸 6h 认账)· 方案 A GO(我拍)· spawn 实现臂(J2 6h 无响应)
 - **🏛 Owner 直令(原话)**: "我仅仅定大目标, 具体方案你们对抗性讨论, 最后你拍。不要耽搁时间和进度。" + "批准!"⇒ **重申 Bettor tech-decision-hub**: 已充分对抗审的技术方案由 Bettor 拍, **不拿具体方案等 Owner**。Owner 只定大目标+终极 backstop(如归档节点永久否/路 C 政策那类)。
 - **🔴 Bettor 认账(过度设闸)**: 我把 §4 的 pool_markets 加列当"结算表铁律 0 必 Owner 批"死等 ~6h(219→225), 而方案 A 早 (222) 三方验证 ACCEPTED(J2/J1/Codex)——**我本就有权拍板推进**, 却耗了 Owner 时间+停了进度。校准: 铁律 0"结算表 Owner 批"指**新方向/有争议**改动; 已对抗审透的技术实现=Bettor 拍。
