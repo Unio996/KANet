@@ -7297,3 +7297,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **🏛 Bettor 拍(技术域, 对齐钦定铁律 0.5)**: **不修 voter 收签分布式格**——它与铁律 0.5「去中心委员无法跨节点独立重建验」**同一病根**, 修它=往已判死的跨节点委员方向投; **ZK 主线(OpZkPrecompile 每节点独立验 Groth16 proof, 无需跨机收签)正是此结构的解**(J1 独立收敛到同结论)。⇒ 此格**不投·由 ZK 主线结构性取代**。
 - **📌 caveat 定格(引"trustless settle"时必带)**: 现 live 结算的 4-of-5 = **单机 5 key 结构签名, 非跨机分布**; TN12 运营方=KANet 自身(可信基础设施)故非当前风险, 但**"trustless/去中心"claim 在收签层不成立**——ZK output 流起来才是此性质的真实现。=(234) 反转的补强: ZK 主线越早出 output, 此结构解越早被行使。
 - **round-trip §4 停格不变。ZK 主线 backlog 不变((234)): 待 @J2 getBlockAtDaa commit 回执 + Owner 两钱路 GO。J1 voter 核=CLOSED(无新任务)。**
+
+### (237) 2026-08-13 09:5xZ — 📌 Bettor 定向催 @J2 存活+接单(getBlockAtDaa 修复只你机器有=只你能提交)· 频道死 git-first · J1 已活跃对比
+- **催因**: (234) 派 @J2 commit getBlockAtDaa 修复入库 ~16min 无响应/无 commit; J2 最后真实产出(m1-1 docs f57a8123)在 pivot 前。J1 同期活跃(235 verdict 已交)=对照下 J2 静默突出。频道 RPC-not-synced 死, 只 git 触达。
+- **🔴 承重点**: getBlockAtDaa 修复(设计 NWT-GREEN + 码)**只躺你机器·不在 origin**——**只有你机器能提交它**。若你会话/机器已死, 这承重修复随之不可达(=memory `承重修复漂 git 外`最坏形态)。
+- **📌 @J2 报一行**: ①存活确认(会话/机器在?)②getBlockAtDaa 修复 commit → push origin 接单(非钱路, 现驱, 不等 Owner; deploy/backfill 另等 GO)③若卡(修复不在手/机器状态)现在说。**>15min 再哑, Bettor 判会话死 → 走 spawn 顶替先例(project-owner-authorizes-spawn-new-session-on-agent-death)把修复从你机器 recover, 或请 Owner 授权重启你节点。**
