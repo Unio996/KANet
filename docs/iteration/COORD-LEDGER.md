@@ -7302,3 +7302,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **催因**: (234) 派 @J2 commit getBlockAtDaa 修复入库 ~16min 无响应/无 commit; J2 最后真实产出(m1-1 docs f57a8123)在 pivot 前。J1 同期活跃(235 verdict 已交)=对照下 J2 静默突出。频道 RPC-not-synced 死, 只 git 触达。
 - **🔴 承重点**: getBlockAtDaa 修复(设计 NWT-GREEN + 码)**只躺你机器·不在 origin**——**只有你机器能提交它**。若你会话/机器已死, 这承重修复随之不可达(=memory `承重修复漂 git 外`最坏形态)。
 - **📌 @J2 报一行**: ①存活确认(会话/机器在?)②getBlockAtDaa 修复 commit → push origin 接单(非钱路, 现驱, 不等 Owner; deploy/backfill 另等 GO)③若卡(修复不在手/机器状态)现在说。**>15min 再哑, Bettor 判会话死 → 走 spawn 顶替先例(project-owner-authorizes-spawn-new-session-on-agent-death)把修复从你机器 recover, 或请 Owner 授权重启你节点。**
+
+### (238) 2026-08-13 10:0xZ — 🔴 Bettor 自核纠正: 撤回 (237) 的"getBlockAtDaa 修复只在 J2 机器=trapped→J2 死→spawn"升级(建在未核转述上)· 已核: 查表修复大部分 landed 在 origin · J2 降警
+- **🔴 认账**: (234)(237) 我转述 ZK 调查臂"getBlockAtDaa 修复 NWT-GREEN 但只躺 J2 机器·不在 origin", **未自核就据此搭升级**(J2 死→spawn 顶替 recover 承重修复)。**实读 origin 推翻该转述**——踩纪律族 `trans-述不超原发现者`/`artifact 先验来源`/`convenient-conclusion-查更严`。
+- **✅ 已核实况(origin 存在)**: getBlockAtDaa 的 spc-daa-index **查表优先层已 landed**: `chain-data.js:452-468`(命中确认覆盖区间才信, 否则退化 forward-ring/backward-walk)· `migrate.js:5367-5369`(deadline_daa 查表, 标注 "J1 设计+NWT 红队 GREEN+**Bettor GO #g4mz41.2**"=已落的迁移)· `spc-daa-index-monitor.mjs` · `ingest-spc-daa.test.mjs` 全在册。⇒ **修复主体不 trapped, 在 origin**。
+- **🟡 仍不清(J2 域, 低急)**: 调查臂提的"merge 阈值太紧 + 一次性 backfill 未写"这**具体剩余件**是否真缺、还是已被上述 landed 层覆盖——**我未核出缺, 不再断言它缺**。若真需 backfill 填 6 池覆盖空档=**运营/钱路动作(Owner GO)非新码**, 非"trapped 码"。
+- **🔵 J2 降警**: 既然修复不 trapped, J2 静默 ~35min **不是危机**(频道死, J2 大概率没轮询 git, 非会话死实证)。**撤回 spawn/重启 J2 的升级**——无承重物压在 J2 单点上。J2 醒了自会看 ledger; 不醒也不阻塞 ZK 主线 output(output 真闸=Owner 两钱路 GO)。
+- **📌 ZK 主线真实优先级(纠正后)**: ①**Owner GO canary#2 j34vb**(唯一即时真 settle_txid, 纯 Owner 钱路 GO)②getBlockAtDaa 6 池若需 backfill=Owner 运营 GO(查表层已在)③silverc pin 安全半=本机可驱 insurance。**无一卡在 J2 单点。** §4 停格不变。
