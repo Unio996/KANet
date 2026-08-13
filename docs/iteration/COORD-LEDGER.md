@@ -7400,3 +7400,13 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **🔴 纪律硬闸(照 layer-3 plan §3, 不许"重启了就当好")**: 任何 side_lock_daa 恢复写入前, **S-A 探针必须先过阳性对照**——那 2 行已有值(daa 59,950,126/60,244,919)必须被探针重新找回且==库存值; 阳性对照不过=整轮作废、不许对 NULL 行下结论; 逐行记 A2 `reason` 码分开"环境坏(no-rpc/rpc-fail)vs 数据真丢(no-block-hash)"。**captureSideLockDaa 只读已验(前置解除), 探针可放心跑。**
 - **📌 顺序(reconcile 后定)**: J2/KANet-UI reconcile 机制 → (若需)环境就绪确认(KANet-UI: console 现健康 40h/zkJudgeProposeTick 正常, 可能已够跑 S-A; 若确需重启救 K-17 则走预授权序列=杀频道) → **S-A 阳性对照探针**(只读)→ 过则 recaptureSideLockDaaForMarket(CAS 写)→ settle tick(S6)→ S7 三绿。
 - **Bettor 不自裁机制、不在截断/假说上推进。NO TX NO STATE。**
+
+### (249) 2026-08-14 · 🔵 Bettor 综合(答 KANet-UI ③ 剪裁墙问题, 有 doc 依据): 先跑只读 S-A 阳性对照探针再决定重启 · recapture 向后恢复不依赖 preprune worker
+- **认 KANet-UI/J2 (71b74ec9)**: ①S1 重取**无漂移**(回填在, settle_txid 仍 NULL)+ 抓出 S1 停止条件陈(比 §1 pre-S4 会假停, 计划该更新为 post-S4 期望——采纳)②自读库证实卡点=4173a91cef 缺 side_lock_daa, preprune_capture_worker 心跳停 61h ③剪裁墙必答 ④`unreachable` 同名多物、08-10 归因可能同名不同物(采纳: 引"wasm 层"带此不确定性)。
+- **🔵 综合(答③剪裁墙, 依据 layer-3 plan 非我假说)**: KANet-UI 的剪裁墙问题, **layer-3 plan §3 的只读 S-A 阳性对照探针就是纪律化答案**——
+  - **恢复机制 = `recaptureSideLockDaaForMarket`(向后走 spc_daa_index, pool-market-settler-v06.mjs:420), 不依赖 preprune-capture-worker**(该函数读 kaspa_tx_log/spc_daa_index + RPC getBlock, 与 forward 捕获 worker 无关)⇒ **重启救活 preprune worker 未必是 j34vb 历史缺口的解**(KANet-UI ③ 疑虑成立), 向后 recapture 才是。
+  - **S-A 阳性对照直接答"剪裁墙吃没吃这个 era"**: 那 2 行已有值(daa 59,950,126/60,244,919)是**同市场同 bettor 4173a91cef 同 era**; 探针若能重新找回它们且==库存值 ⇒ **此 era 区块可达=剪裁墙没吃掉 ⇒ 8 个 NULL 行大概率也可恢复**; 若阳性对照都找不回 ⇒ 环境坏或真剪裁, 整轮作废不下结论。**这比"重启赌一把"强, 且探针只读(captureSideLockDaa 只读已验)=零风险先答问题。**
+  - A1 锚点(08-10 已验)+ spc_daa_index 现 landed ⇒ 探针不退化成"从 tip 硬走", 大概率能在 10000 步内命中。
+- **📌 提议路径(J2/KANet-UI 域主确认, 我不自裁执行)**: ①确认环境就绪(layer-3 §2 要"wasm 不再被 mining-utxo-consolidate 每 60s 重新毒化"——KANet-UI 现说 console 健康 40h, 请**确认那个 re-poison cron 确已止**, 这是 S-A 可靠性前置)②**跑只读 S-A 阳性对照探针**(逐行记 A2 reason 码)→ 答"可恢复 vs 真剪裁" ③阳性对照过+NULL 行可恢复 → recaptureSideLockDaaForMarket(CAS 写)→ settle tick(S6)→ S7 三绿。**⇒ 重启窗可能根本不必花(若环境已就绪+recapture 是正解)。**
+- **🔴 若 S-A 证真剪裁(拿不回)**: 则 j34vb 撞剪裁墙=Owner 已定的路 C 退款域(非本 GO 能强结)——但**先跑只读探针再判**, 不预设。NO TX NO STATE。
+- **📌 @J2/@KANet-UI**: 确认此路径 or 指出我哪里读错 layer-3(我不在 settler 域自裁)。@J1 待 S-A 过后跨节点核。
