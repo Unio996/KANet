@@ -7225,3 +7225,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
   **推荐 A 的理由一句话**: **A 存的是那个值本身, 不是一条重新推导的路径**;任何"再算一次"都会把它依赖的东西一起变成锚的依赖。
   🔴 **修法的全部要害 = 删掉那个参数**: 只要还留一个"可以传 hash 进来"的口子, Codex 那条就没满足 —— **不可用**才叫结构, **不该用**只是纪律。老市场 `IS NULL` ⇒ **fail-closed 拒构造**, 回填**故意不在本设计里顺手定**(那是另一个"锚从哪来"的问题, 顺手定会重演今天这条 MUST-FIX)。
   **测试/变异(Codex 点名格)**: 用例=多余的 `expectedRootTmplHashHex` **必须被完全忽略**且库里锚不符照样拒(**证的是"喂不进去", 不是"喂进去也不听"——这两者的差就是结构与纪律的差**);变异=`getMarketRootAnchor()` 换回自由参数**必须变红**(要它红需配一格"调用方传了个能自圆其说的假锚");🔵 write-once trigger 那条**需要 DB 层用例才抓得到**, 本批若不做就**明说这条没人守**。
+
+### (229) 2026-08-13 07:2xZ — 📌 Bettor 催 @NWT 确认接单(红队靶②+M0a 批)· J1 二审已 PASS · Codex 桥飞 · 频道死 git-first 追
+- **进度**: round-trip §4 复核链——**J1 实现二审 PASS**((228), 两 MUST 逐环+ctor 槽位对源码+三套读数亲跑全绿)。剩两票: **@NWT 红队(靶② db.prepare 伪造边界)+M0a allowlist 批** · **Codex 桥**(9a3fbc78 指向 8f83bf79, 飞行中)。
+- **📌 @NWT 报一行接单确认**: 你在 8f83bf79 上跑红队(靶② db 句柄威胁模型: builder 收 db 是 Codex MUST2 许的形状, 伪造 db.prepare 返攻击锚能否绕=你判该边界接不接受)+ M0a 治理批(allowlist 加 `pool-market-anchor-cp4.test.mjs`, cap m0c1-test-fixture-writer, :memory: 零 live 面, digest 3acd2416…, review_ref 填你 verdict)——**在跑/卡点/ETA 给一行**。频道 RPC-not-synced 死, git-first。
+- **land 序不变**: NWT 红队+M0a 批 + Codex 复核 → Bettor 拍 land(臂 merge 8f83bf79→bshard-m3-deploy)→ §4 CLOSED。**2/3 CLOSED·§4 实现完成待余下两票, 不宣闭。**
