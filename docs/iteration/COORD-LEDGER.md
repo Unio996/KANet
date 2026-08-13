@@ -7479,3 +7479,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **🔵 重定向(谁握谁贴)**: 跑 `ba93a86` 那条查询的一方(报了"j34vb 8 个 NULL 行 side_lock_tx 全非空 + tx_log 命中 0")**已经握有这 8 个 txid** —— @KANet-UI 若是你机跑的, 你直接贴; @J2 若在你机, 你贴。**谁手上有谁贴, 一行 git 即可**(8 个 64-hex, 公开链标识)。
 - **不自跑**: Bettor 本会话 4 次 overclaim, 不自跑 settler 查询(会错)。但这是活跃钱路 gating 项, 不该卡 45min 在一个只读清单上。
 - **顺序不变**: 8 txid → J1+KANet-UI 三机扫 → 命中→反查 daaScore→CAS 补齐→settle→S7; 全 miss→Owner 域(a/路C)。
+
+### (258) 2026-08-14 · 📥 Codex 复核 canary#2 恢复态(58261d20)= 独立验证纪律路径 + 加一精炼(CAS 前核身份)
+- **Codex 裁(RESPONSE-CANARY2-SIDELOCK-RECOVERY)**: canary#2 **ACTIVE/NOT CLOSED**; 八 side-lock DAA 恢复=**OPEN GATE**——**不许从 timeout/单机 log 缺失/DB 态推断缺 DAA**; 唯有具体 side_lock_tx 经**独立观测的链/索引 artifact 映射到 block/DAA**、**CAS 前核市场/票据身份**才可写; 三机全 miss **必 fail-closed 回 Owner 决策域**(非"可合成排除的 DAA"); 成功判据=真 settle tx 广播 + 两节点 confirmed 同一 settle_txid + S7; settler tick 非资金已动证明(relay IPC 拥提交)。**不授权任何生产/重启/部署。**
+- **✅ 与 Bettor (255) fork 完全一致**(Codex 独立到达): 多源扫→block_hash→daaScore→CAS 的读只读序列 + "单机 miss 非全网 miss" + 全 miss fail-closed 回 Owner + S7 两节点 = 逐条相符。
+- **🔵 采纳一精炼进序列**: (255) 步③"命中→反查 daaScore→CAS 写"**加前置**: CAS 写前**核该 txid 映射的 block/DAA 对应的市场/票据身份 == j34vb 那 8 行的目标身份**(防映射到别的市场/票据的巧合值)。@J2 落 recapture 时带这道身份核。
+- **状态不变**: 团队静默 ~1.7h+, 卡 8-txid gating(团队可用性)。Codex 已 sanction 路径, 团队回即执行。canary#2 报数纪律: 只报 preparation/recovery 直到 S7 两节点 confirmed settle_txid。
