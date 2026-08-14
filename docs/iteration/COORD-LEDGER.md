@@ -7485,3 +7485,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **✅ 与 Bettor (255) fork 完全一致**(Codex 独立到达): 多源扫→block_hash→daaScore→CAS 的读只读序列 + "单机 miss 非全网 miss" + 全 miss fail-closed 回 Owner + S7 两节点 = 逐条相符。
 - **🔵 采纳一精炼进序列**: (255) 步③"命中→反查 daaScore→CAS 写"**加前置**: CAS 写前**核该 txid 映射的 block/DAA 对应的市场/票据身份 == j34vb 那 8 行的目标身份**(防映射到别的市场/票据的巧合值)。@J2 落 recapture 时带这道身份核。
 - **状态不变**: 团队静默 ~1.7h+, 卡 8-txid gating(团队可用性)。Codex 已 sanction 路径, 团队回即执行。canary#2 报数纪律: 只报 preparation/recovery 直到 S7 两节点 confirmed settle_txid。
+
+### (259) 2026-08-14 · 📥 Codex 强化 identity-before-CAS 闸(beea62bf): 必须链-artifact-到-行绑定, DB 自指不足 · 采纳进序列 step4
+- **Codex 裁(RESPONSE-CANARY2-CAS-IDENTITY)**: (258) 的"CAS 前核身份"方向对, 但必须是**证据绑定非标签比对**——`block_hash→daaScore` 只证 txid 在某块, **不证它是 j34vb 那行的真侧锁**; `txid→block_hash→daaScore` + 从同一可变 DB 行重读 market_id = **不足够独立身份证据**。
+- **✅ 采纳进恢复序列(强化 (255)+(258) 的 step4)**: 每行 CAS 前绑定 `target side_id + target market_id + stored side_lock_tx` **且**独立恢复的链 artifact 证该 txid 确是那行的真侧锁——**核恢复 tx 的目标脚本/地址/金额 vs `side_p2sh` / `stake_amount`**(或协议已存等价不可变承诺)。CAS 保持窄: 只更该目标行 + `side_lock_daa IS NULL`; 任一身份字段变/行缺/artifact 绑不上/观察者分歧 ⇒ **fail-closed, 不合成不写 DAA**。
+- **完整恢复序列(Codex 7 步, 定稿供 J2 执行)**: ①取 8 个具体 side_lock_tx ②各 tx 独立链/索引证据定位 ③导 block_hash→daaScore ④**绑恢复 tx artifact 到确切 bettor/market 侧锁身份(链-到-行, 非 DB 自指)** ⑤只 CAS 仍 NULL 的目标行 ⑥过 committee/settlement 闸 ⑦成功=真 settle tx 两节点 confirmed 同 settle_txid + S7。
+- **裁**: (258) 精炼 ACCEPTED AS COORDINATION REFINEMENT(非闭合证据); canary#2 ACTIVE/NOT CLOSED; 8 行恢复 OPEN GATE; **CAS 身份绑定 MUST 链-artifact-到-行, DB 自指不足**。不授权任何生产。
+- **状态**: 团队静默 ~2.5h+, 卡 8-txid gating。序列现 Codex 双轮加固完备, 团队回即照此执行。
