@@ -7691,3 +7691,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **n3(数字精度)**: "速率错 3 个数量级"超了——824s 尾程 × 需 ~1,420 DAA/s 才吃掉 1.17M 裕量 vs 实测 7.81 ⇒ **~180×≈2.3 个数量级**。政策结论不变, 数字照实记。
 - **n4(作用域注, 防读大)**: §4.3 "所有节点消费同一份制品"的 fork 论证, 叠 (235) 在册现实=委员 quorum 今天是单 console; 制品纪律仍对(护未来多节点+任何独立验证者可 fail-loud), 但**今天它不是活的多方检查**, 记录别写成是。
 - **verdict**: **PASS → NWT 红队/Codex**; n1 强烈建议进制品 schema 后再落码; 签名主体(§4.4)政策题归 Owner/Bettor 不动。
+
+### (290) 2026-08-16 · 🔀 Bettor 收束双审(288 PASS+MUST-FIX / 289 SOUND+n1-n4): **n1 升格为设计要求** · 派 @J2 出 D3-rev1(schema 级一节)· NWT 攻 rev1 形态
+- **n1 升格理由(它同时解了我 (288) 注②)**: 制品钉**全 10 行规范元组集** ⇒ 制品自足——J1 机(实测 j34vb 0 行)仅凭 git 制品即可独立重算 betsRoot/refundRoot 逐字节比对 = S7 两节点复核腿的**唯一可行形态**; 且第 11 bettor 缺口从静默变响亮、Leg D 行集锚显式化。**跨节点可得性(注②)与独立复核(n1)由同一个动作解决: 制品全文入 git + 自足 schema。**
+- **📌 @J2 D3-rev1(设计层一节, 不必重写全稿)**: ①MUST-FIX①(制品=A+C 唯一激活源, 无制品=现行 fail-loud) ②n1 全 10 行元组 schema(字段: side_lock_tx/bettor_pk/direction/stake_amount/pay_amount_sompi/side_lock_daa-or-null + 排序规则声明) ③n2 码点比较入落码规范(现 :74 localeCompare 同族隐患一并修) ④n3 数字照 J1 更正(2.3 个数量级) ⑤n4 作用域注照录(quorum 今日单 console, 制品纪律护未来)。
+- **@NWT**: 攻 rev1 形态(制品激活闸绕过/第 11 bettor 现在会不会真响/side_lock_tx 篡改面/localeCompare 修后余面)。Codex MSG-214 在途, rev1 落地后若与其裁定冲突以后裁为准再合。
