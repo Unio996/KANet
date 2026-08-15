@@ -7562,3 +7562,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
   - **⇒ 我收回 (263)①/(267) 隐含的"停矿≈20min 消化"预期(08-08 剧本对本楔不适用)**: v2 刹车期间(矿停·tips 63)virtual 仍楔死不自愈——**本楔不是(或不只是)过产型, 停矿是止损不是解楔**。今天停桥窗 tips 3311→3296 + DAA 爬行加快(+125/13min vs (261) +69/25h)说明楔态可能已变化, 消化按【假设】对待, (263) 的 20min 进度门就是为此留的, 继续用。
   - **⇒ 解楔 = J1 postmortem A3(回滚/重启/全网协调), 在册归 Owner 拍**; 我下一步职责 = 汇齐 A3 决策输入(J1 双节点观测 A4 在岗)呈 Owner, 不自裁不催跳步。停矿补完(②)照旧执行——止损与解楔是两件事, 别捆一个预期(J1 (261) 原话)。
 - **canary#2 维持 FAIL-CLOSED; NO TX NO STATE。**
+
+### (270) 2026-08-16 · 🔵 J1 执行记录补正((269) 一处时序印象)+ 事故史两笔自纠 · v2 现活且刹车态 · tips 稳定 3300
+- **执行序补正(带证据, (269) "v2 started out-of-order while v1+bridge still alive"不成立)**: 我 03:0x 杀 v1 watchdog ×2(PID 4628/30344, 路径精确谓词)+复活桥(PID 29292)→ **CLEAN-CONFIRMED: 连续 3 采样×45s(>v1 60s tick 窗) v1=0 bridge=0** → 才起 v2(03:07:46)。**杀进程不写 watchdog 日志**——只读 log 会得出"v2 起时 bridge 还活"的印象, 实际清场在先。v2 活性以**它自己的日志**为准(03:07:46 两行: started + config domain check pass; 进程计数查询含自匹配伪影, 我先前被 count=3/count=2 误导过两拍——**仪器要被判据读到, log 才是这里的判据**)。
+- **🔴 事故史两笔自纠(J1, 折 watchdog log 实读, postmortem 同步修)**: ①我 postmortem 层1"熔断器 v1 静默死"**错**——log 实况: **08-15 05:43-05:57 v2 在岗且已正确刹车(tips=63, "needs an operator" 告警在喊)**; 06:05:37 **boot-card 拉起的 v1 把刹车松开**(bridge DEAD→starting, skip-sync-gate), 无刹矿把 tips 63→3300+。**不是"守卫死了", 是"正确刹住的守卫被开机卡换成了不带刹车的"。** ②我 (264)/postmortem"熔断器进程零命中"的扫描谓词漏 'watchdog'——半停事故((267))与误判同源: **识别与动手必须同一谓词, 且谓词要枚举发现不许记忆**。
+- **现态**: v2 在岗(brake>220 resume<50 cliff=248), tips=3300 远超 brake 阈 ⇒ **v2 保持刹车、不会起矿**(其三态判定拒绝双起)。tips 稳定于 3300(停矿生效, 不再堆积)。**楔死本体未解**(v2 05:43 的告警原话: "Neither pulsing nor waiting recovers a wedged virtual — this needs an operator")——解楔=A3 Owner 域, (269) 已定。
