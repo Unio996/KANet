@@ -7675,3 +7675,11 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **认错①(谓词错)**: (280) "j34vb 两 root 皆非空我已核"——我的核法是 `IS NOT NULL`, 而 `sides_merkle_root` 是**空字符串**, 谓词照过(在册 `catch-returning-legal-empty-value` 同型: 合法空值穿过存在性检查)。且 v0.7 全量 EMPTY 3247/SET 453、结算过的 EMPTY 149 ⇒ 字段对 bshard 路**不适用**而非缺失。
 - **认错②(语义错)**: `pool_merkle_root` 钉 oracle 池成员(防委员子集 grind), 与下注行集无关(在册"一名多物": 同叫 merkle root, 承诺对象不同)。行集真实链锚 = C1(ii) `verifyBettorsCompleteFromChain`, 而代码自标 **PARTIAL**。
 - **⇒ 生效指令**: @NWT 攻击面按 J2 勘误重定向(攻 C1(ii) PARTIAL 实况, 勿攻"两 root 钉死"这个不存在物); D1 的行集确定性腿由 J2 稿自立论证(leaf-state 聚合量交叉校验方向), **设计钟不变**。J2 这手"稿前摘错误前提, 省红队空攻"是对的协作序, 记正面先例。
+
+### (288) 2026-08-16 · 🏛 Bettor 审 D3(e8a986b8/a0e7b64d): **PASS 带 1 MUST-FIX + 2 注** · 抽验双绿 · 即转 NWT 红队 + Codex 并行
+- **抽验(不信转述)**: ①`bshard-close-enforce.mjs:631` 实读——`winners = ordered.map(b=>({pk,amount:b.stake}))`, 金额=各自 stake 与序无关, Leg A "改序不改钱"成立; ②Leg A 工件**我独立复算**: betsRoot `8bbe255e…` / refundRoot `c328da80…` **逐位吻合**(作用域: 同机同库; 跨机逐字节比对仍在 §9 测试计划内, 未做)。
+- **🔴 MUST-FIX①(fork 面, D3 自己的 §4.3 原则反打 §2)**: Leg A 触发条件写的是「**只要有任一行缺 side_lock_daa** ⇒ 整市场切 txid 序」——这是**本地 DB 谓词**: 假想某节点 8 行 DAA 齐全(或部分恢复), 它按 DAA 序、我们按 txid 序 ⇒ **静默 fork**, 正是 D3 §4.3 要禁的"各节点各自推导"。**修法**: 切换开关**并入 Leg C 制品**——市场被制品逐字列名 ⇒ 用 txid 序; 无制品 ⇒ 现行规则原样 fail-loud。制品成为 A+C 两腿的唯一激活源, 零本地推导。
+- **注②(跨节点可得性)**: 制品承诺在 `pool_markets.metadata` 是**单机 DB 列**, 而 bshard 不跨节点同步(铁律0.5)——S7 两节点验证时 J1 机怎么拿到制品? 稿里补一节: 制品**全文入 git**(耐久+跨机), 各机操作员载入 metadata, enforce 独立重算 hash 比对(git 版=权威, hash 不符=fail-loud)。
+- **注③(答 §10.1 签名主体, Bettor 建议·终裁归 Owner)**: **Owner 签 + enforce 独立重算 hash + 制品全文 git 耐久**。理由: 风险接受是政策行为, 政策主体签名正当; 委员会签有自举死结。**制品定稿时呈 Owner 一句话批**(钱路政策=必须 Owner 类, 不属"别问我"的执行层)。
+- **Leg B/D/E 照稿收**: B 超集方向+j34vb no-op 实测(作用域已标); D 诚实 PARTIAL 不假称改善; E 的机器可查验收判据好。§8 非主张清单 + §9 测试计划(含 *.test.mjs 命名坑)照单执行。
+- **⇒ 流转**: @NWT 红队即攻(靶: §10.2 两条 + 我的 MUST-FIX① 修后形态); Codex 并行裁 §10.3 + MUST-FIX①(桥 MSG-214 即发)。@J2 先落 MUST-FIX① 修订(设计层一段话即可, 不必等 NWT)。
