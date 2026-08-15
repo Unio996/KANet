@@ -2,17 +2,18 @@
 
 ## Git/object basis
 
-This review is triggered by substantive commits on `bshard-m3-deploy` while the canonical bridge itself remained unchanged.
+At run start, `coord/codex-bridge` HEAD was exactly the prior processed SHA `fec980ea2266c9f3b5e3d93acb824ed62479760b`; the required first compare was identical (`ahead=0`, `behind=0`, no changed files). The five canonical blobs were re-read from that Git object, not from file timestamps.
 
-- bridge starting HEAD / prior processed SHA: `fec980ea2266c9f3b5e3d93acb824ed62479760b`
-- bridge compare: identical (`ahead=0`, `behind=0`, no changed files)
-- canonical blobs re-read from that exact Git object:
-  - `TO-CODEX.md` `f7d8a0e0f0f19a239b6b2244b56ffbcc2b31f70c`
-  - `DISCUSSIONS.md` `313bb29aabc3fe906c721beb528735400de2969c`
-  - `STATUS.md` `c4be60e4c4380e1401f2f718d17d94dc19ff7809`
-  - `DECISIONS.md` `895334928a0ff58c1b9ca795ea3a27d328005fa4`
-  - `FROM-CODEX.md` `0023782bbe6f0fa649100ac726f1c4fbadd3e769`
-- related dev branch compare: `9e82097d951bca8b78e8c8cbbf3001b579d08e65..88c25e4df90c3408b02c368ea244521b7bc917e7`, `ahead=15`, `behind=0`.
+While the code review was in progress, a concurrent bridge commit landed: `608257e08907f56f427bc38a9a99329350c04c55` (`fec980ea..608257e0`: ahead 1, only `TO-CODEX.md`, +35/-0). I separately read that actual diff. It adds `MSG-20260815-212`, routing exactly the two canary#2 correction questions reviewed below, so it is incorporated rather than treated as unseen concurrent noise.
+
+Canonical blobs after that inbound bridge commit and before this Codex response:
+- `TO-CODEX.md` `07c03757c08c72a51681668ec4ad1feeb44288d7`
+- `DISCUSSIONS.md` `313bb29aabc3fe906c721beb528735400de2969c`
+- `STATUS.md` `c4be60e4c4380e1401f2f718d17d94dc19ff7809`
+- `DECISIONS.md` `895334928a0ff58c1b9ca795ea3a27d328005fa4`
+- `FROM-CODEX.md` `0023782bbe6f0fa649100ac726f1c4fbadd3e769`
+
+Related dev branch compare: `9e82097d951bca8b78e8c8cbbf3001b579d08e65..88c25e4df90c3408b02c368ea244521b7bc917e7`, `ahead=15`, `behind=0`.
 
 No file-internal timestamp is used as an increment criterion.
 
@@ -45,7 +46,7 @@ That makes `pool_bet_preps` the available **construction-time address provenance
 
 ### Required recovery gate before any CAS
 
-For each of the eight target rows, first attempt to resolve exactly one compatible prep record using the immutable logical-market relation plus the row’s `bettor_pk`, `direction`, and `pay_amount_sompi` / prep `exact_stake_sompi` (and `bet_id` if an independently preserved linkage exists). Then require the independently recovered transaction identified by the row’s exact `side_lock_tx` to contain the expected output to **that persisted per-bet `pay_addr` for that exact amount**. The recovered block then supplies the candidate `daaScore`.
+For each of the eight target rows, first attempt to resolve exactly one compatible prep record using the logical-market relation plus the row’s `bettor_pk`, `direction`, and `pay_amount_sompi` / prep `exact_stake_sompi` (and `bet_id` if an independently preserved linkage exists). Then require the independently recovered transaction identified by the row’s exact `side_lock_tx` to contain the expected output to **that persisted per-bet `pay_addr` for that exact amount**. The recovered block then supplies the candidate `daaScore`.
 
 - unique prep + exact txid + exact constructed pay_addr + exact amount + block/DAA evidence → eligible to proceed to the narrow `side_lock_daa IS NULL` CAS gate;
 - missing prep, ambiguous prep match, conflicting address/amount, txid mismatch, or disagreement between independent chain observers → **fail closed**;
