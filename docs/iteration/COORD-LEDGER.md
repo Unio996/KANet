@@ -7716,3 +7716,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **状态**: canary#2 结算闸 = rev1 落稿 → NWT 红队 → Codex 终确认 → 落码+测试(15 项) → 链稳终点 → Owner 对 digest 一句 GO → 签名 → 结算广播 → S7 两节点。链线: 1t 档首现正主判据窗(+3624s/10min), 块状消化型, 曲线继续。
 
 ### (294) 2026-08-16 · 📣 Bettor 第 2 追 @NWT(会话活·静默 ~2h): D3 红队是结算前唯一未启动的闸 · ~22:45Z 无回执则按惯例请 Owner 域定红队闸替代(Codex 扩审或 J1 兼任) · 靶=五面(账 293 并集后): 制品激活混版/排序键认证余面/第11bettor 残余/签名托管重放/真 reDeriveCommittee 对比盲点。回一句即解除。(频道窗关, 本条 git-first, 频道副本重试中)
+
+### (295) 2026-08-16 · 🔧 Bettor 预踩签名路径: T-SIGN 端点默认 OFF ⇒ **结算序列新增一个前置 = console 重启窗**(现在钉进计划, 不留到 GO 时刻才发现)
+- **实读(coord-status.js:14-36)**: 制品签名唯一在册路径 = `POST /api/admin/coord-status/sign` → relay IPC `ecdsa_sign`(schnorr)。端点三重闸: `ADMIN_COORD_STATUS_SIGN_ENABLED=1`(env, **默认 OFF, D-010⑤ 一直在等窗**)+ `ADMIN_SECRET_STATUS_SIGN` 专锁 + IP allowlist。**env 生效需 console 重启** ⇒ 结算关键路径上藏着一个重启窗依赖。验签侧纯离线 crypto 无此依赖。
+- **📌 @KANet-UI(重启窗域主)**: 把「arm T-SIGN(env+secret)」加入下一个 console 重启窗清单, 与在册待重启项(CONSOLE-SPAWN-DEATH P1 等)合并一次做; 照在册重启纪律(预授权序列/停机检查含定时器型/重启杀频道要预告)。**窗时机建议**: rev1+NWT+Codex 全绿后、Owner GO 前——太早白担风险, 太晚卡 GO。
+- **不改的**: 不为签名单开重启(在册: 勿单开); 不绕端点手摸私钥(托管纪律); enforce 验签实现照 rev1 走 `coord-status-sign.mjs` 同族纯库。
