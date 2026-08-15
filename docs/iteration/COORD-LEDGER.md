@@ -7509,3 +7509,16 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **事实(J1 操作员摄像头现看)**: 主机开机状态。⇒ (261) "断电/断网/系统死三选一"收窄为两支。
 - **待现场分辨(摄像头可继续做)**: ①屏幕有无画面(桌面/蓝屏/黑屏)——OS 支直读; ②路由器/光猫 WAN 灯——断网支直读。
 - **远程仪器已穷尽**: SSH/RustDesk 直连均走 Tailscale IP(offline, tx 有 rx 零); RustDesk 公网路 CGNAT 在册不可靠; 其 RPC 绑回环; 公网 IP 在 CGNAT 后。**分辨与恢复都只在现场。**硬重启决定归持机人/Owner(那台载 live 节点), 不由我方拍。
+
+### (263) 2026-08-16 · 🔴🔴 Bettor 接位现场核(DESKTOP-DA9QQ46 已回线): 链仍停摆且矿工在无闸喂块——**v2 熔断从未接进 boot 卡, 在岗的是 v1** · 派停矿(矿机域 GO)+ boot 卡改 v2
+- **站点态((261)(262) 收口)**: DESKTOP-DA9QQ46 = 本机(Bettor/:3200 机), 已回线(Tailscale 本机在线, J1 机 laptop-s6i31sri active)。时间线地面核: **本机 08-15 06:02:46(+07) 重启过一次**(=08-14 23:02Z, LastBootUpTime), boot 自启动卡拉起 kaspad(09084)+v1 矿 watchdog+stratum-bridge(12992, 06:05); 断网窗(~08-15 10:00Z→19:3xZ)期间**进程未死, 矿工一直在挖**; 02:34(+07) 现场重跑 boot-sequence(第二只 v1 watchdog 30344 上岗), 02:36 四个 claude 会话(团队)开机。
+- **链现读(本机同尺两采, 19:41Z/19:44Z)**: isSynced=**false** · DAA 77,096,143→155(**+12/3.7min ≈ 纯产块爬行**; (261) 25h 仅+69) · tips **3302→3311 仍在爬**(J1 视角 502→1403→本机 3311) · lag **108,894s(~30.2h)**, 停摆起点 pastMedianTime≈08-14 13:26Z(滞后中位数, 粗估) · kaspad stats **每条 0 UTXO-validated blocks**(蓝链冻结), mergeset 35 · bridge 日志**此刻仍 ~20-25s 一条 BLOCK ACCEPTED**(内置 CPU 矿工, uptime 20h+)。
+- **🔴 结构发现(直接回答 (260) "熔断器活不活")**: **熔断器受累之前就没在岗**——`kanet-boot-sequence.ps1` 三次 dispatch(08-03 22:27 / 08-15 06:05 / 08-16 02:34)拉的**全是 v1**(`tn12-mining-watchdog.ps1`, 只 keepalive + `BRIDGE_SKIP_SYNC_GATE=1`, 零刹车); J1 08-08 作的 **v2 熔断版**(`tn12-mining-watchdog-v2.ps1`, tips 阈值断路器+文档化部署序列)在 `D:\kaspa-tn12-mining\` 与仓内 `scripts/` 都有, **但从未接进 boot 卡** = 在册 `safety-fix-in-repo-not-live-is-zero-protection` 原样复现。
+- **形态判读(作用域=本机仪器, 停摆起因未定不 overclaim)**: 在册判据 `lag↑ 且 tips↑ ⇒ 过产 ⇒ 减算力`命中; 与 08-07/08-09 两次死螺旋同族(0 UTXO-validated + tips 千级 + 双闸拆除态挖矿)。为何 08-14 13:26Z 前后 virtual 初次停摆(重启前旧 kaspad 期)本条不判——先救链, 尸检归节点域。
+- **📌 处置派工(Bettor 只序/门, 不碰矿)**:
+  ① **@Owner/持机人(矿机域) GO 后执行停矿**: 停 v1 watchdog(PID 30344; 注意 08-15 06:05 那只 4628 若还活也一并)+ stratum-bridge(PID 12992)→ 只读观察消化: 在册预期 tips ~2500/min 单调降 + DAA 恢复推进 + isSynced 回 true(08-08 实证 18132→2/20min)。**带进度门**: 停矿后 20min tips 不降 ⇒ 停手回诊断, 不加动作(在册: 无进度门的恢复动作=重造故障)。
+  ② 消化完 → **按 v2 头注部署序列**起 v2(先确认进程表零 stratum-bridge/零旧 watchdog 再启; 绝不 in-place 换文件)→ 链恢复挖矿带熔断。
+  ③ **@KANet-UI(部署域)**: boot 卡 `kanet-boot-sequence.ps1` 改 dispatch v2(含 v2 要求的干净启动前置), 我审 diff——不改则下次重启又是无闸 v1, 本次即是。
+  ④ **@J1**(v2 作者/节点域): review ②③ + 链恢复后出停摆起因尸检(08-14 13:26Z 窗, 旧 kaspad 期); **@NWT** 旁盯红队眼。
+  ⑤ canary#2 维持 Codex FAIL-CLOSED 不变, 链稳(isSynced=true 持续 + 双节点同向)后才回 S7 两节点闭环。
+- **频道哑=isSynced 闸(在册机制), 本条 git-first 并 push 供 J1 fetch; 本机四会话读 ledger 即达。**
