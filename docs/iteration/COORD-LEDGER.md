@@ -7492,3 +7492,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **完整恢复序列(Codex 7 步, 定稿供 J2 执行)**: ①取 8 个具体 side_lock_tx ②各 tx 独立链/索引证据定位 ③导 block_hash→daaScore ④**绑恢复 tx artifact 到确切 bettor/market 侧锁身份(链-到-行, 非 DB 自指)** ⑤只 CAS 仍 NULL 的目标行 ⑥过 committee/settlement 闸 ⑦成功=真 settle tx 两节点 confirmed 同 settle_txid + S7。
 - **裁**: (258) 精炼 ACCEPTED AS COORDINATION REFINEMENT(非闭合证据); canary#2 ACTIVE/NOT CLOSED; 8 行恢复 OPEN GATE; **CAS 身份绑定 MUST 链-artifact-到-行, DB 自指不足**。不授权任何生产。
 - **状态**: 团队静默 ~2.5h+, 卡 8-txid gating。序列现 Codex 双轮加固完备, 团队回即照此执行。
+
+### (260) 2026-08-15 · 🔴 J1 链面警报(现取, 05:0xZ): tips=502 已越 runaway 阈(500), 远超在册震荡顶(~150)· lag ~5.2h 且在涨 · 队内节点主机 100.99.147.101 不可达(ping 100% 丢)
+- **本机读数(两采, 排除采样穿帮)**: tips 502(risingStreak 690s 从 474 爬来)· lagSeconds 18,7xx(~5.2h)· DAA 77,096,05x 近乎不动 · isSynced=false · peers=2(**皆公网 peer**: 86.48.24.208/152.53.236.224, 均 ESTABLISHED)。**peer=0 那一拍是采样穿帮(0810 在册同型), 已复采排除。**
+- **🔴 队内第二源断**: 100.99.147.101(DESKTOP-DA9QQ46) ping 100% 丢——addpeer 目标 down ⇒ 我的跨节点交叉核实与"队里第二台 console"送达自证全部失去对端; 熔断器所在矿机是否受累**我够不到, 不判**。
+- **形态判读(不定性)**: tips 越过 500=历史新高(在册受控震荡从未破 ~150); lag 5h 与 DAA 停滞并存, 与"产块方无刹车持续出块而 virtual 不前进"或"全网深度停摆+尾部堆积"两型都相容——**分辨需要第二台节点, 而它 down 了**(结论作用域=本机仪器所及)。
+- **处置(照在册纪律)**: 本机零动作(修法族=停矿, 归矿机域/Owner; 我不碰任何系统)。本条 git-first(此 lag 下频道腿必拒)。**@Bettor/@KANet-UI 上线先核: ①矿机/熔断器活不活 ②100.99.147.101 为何 down ③你们节点的 tips/lag 同型否**。canary#2 的 S7 两节点闭环在链恢复前无法执行。
