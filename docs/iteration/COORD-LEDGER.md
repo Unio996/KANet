@@ -7638,3 +7638,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
   - **D2 显式风险接受排除**: Codex 留的 separate-risk-acceptance 分支——8 行显式标记 excluded(非合成 DAA), Owner 已给结果导向授权; 资金处置必须同案设计(排除出 committee ≠ 没收本金, 退出路径见在册 pool exit-paths), 8 个 bettor 的本金腿要有交代。
 - **📌 派工(Owner 直令节奏)**: @J2 **≤2h 出设计稿**(D1/D2/第三案 + fork 风险论证 + 资金处置), 我审 → @NWT 红队(现在就预热攻击面: 行集一致性/排除确定性/资金腿) → Codex 复核 → 落码 → 链稳(终点判据在跑, 现 reg60m=0)即结算。**质量闸一个不跳, 但全并行零空转。**
 - **复核命令(只读)**: `SELECT MIN(substr(updated_at,1,10)),MAX(...) FROM pool_markets WHERE settle_txid IS NOT NULL AND EXISTS(SELECT 1 FROM pool_bettor_sides s WHERE s.market_id=pool_markets.id AND s.side_lock_daa IS NULL)` ⇒ 06-01..06-14; `git log -S "fail-loud 防 cross-node fork"` ⇒ 2d79347f/54e45176。
+
+### (281) 2026-08-16 · 📥 Codex 秒回 (2b1fe7c3) 给设计立硬约束(稿前送达 J2, 省一轮返工)· D1/D2 原样均 RED · Bettor 附量化风险输入
+- **Codex 四裁(全文 responses/RESPONSE-…-RETIRED-DAA-ALT-PATH…)**: ①块体恢复族 ACCEPTED/DO-NOT-REPEAT(窄作用域: 只这 8 行); ②(254) 臂命中仍有效/miss 仍无排除力; ③**D1 RED**: `side_lock_daa` 承重两件事——排序 + **deadline 前入场谓词**(`side_lock_daa<=deadline_daa`); 降锚只解排序, txid 证不了"deadline 前锁入", merkle 成员证不了共识时间 ⇒ D1 必须独立恢复 admissibility 谓词, 否则= **风险政策变更**(要按此定性走, 不许叫"等价"); ④**D2 RED**: 只改 committee 排除不够——必须 committee+payout/承诺+complete-set+**8 人本金处置**四位一体一稿; "排除出委员会"不得静默变成"排除出经济权益"。
+- **📌 @J2 稿件必备节(把 Codex 检查单烤进去)**: fork 论证 / admissibility 处置(见下) / 资金腿 / 四位一体一致性。**≤2h 钟不变**(从 (280) 起算)。
+- **🔵 Bettor 量化风险输入(只读实据, 供 admissibility 的 risk-policy 节用, 不冒充共识证明)**: 两条链锚对照行**夹住**了 8 行的大部分——row id 35965-35973(7 行)插入序在 control#1(35974, daa=59,950,126)之前, 35975/35977/35978 在 control#2(35976, daa=60,244,919)前后; deadline_daa=61,421,827 ⇒ **锚点到 deadline 余量 ≥1.17M DAA(J2 在册速率 7.81/s ≈ 1.7 天)**; J2 07-17 插值全体落 59.63M-60.25M ≪ deadline。⇒ "这 8 注在 deadline 后才入场"需要插入序造假+速率错三个数量级才成立——**风险小且可量化, 但它是政策接受, 不是证明**, 稿里要按 Codex 定性如实写。
+- **意义**: 若纯共识源的 admissibility 不可得(大概率, 块体已剪), D1 与 D2 收敛为同一类【显式风险接受的确定性设计】——Owner 已给结果导向授权, 稿子把风险写透+机制确定性写死即可过闸。
