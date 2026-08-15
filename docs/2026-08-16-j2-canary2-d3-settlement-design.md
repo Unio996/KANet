@@ -203,6 +203,53 @@ Codex (281)④ 点名："排除出委员会"不得静默变成"排除出经济�
 
 ---
 
+## 9-bis. 🔬 Leg A 的可复现产物（**已跑**，用仓内现成函数，零落码）
+
+> 与 §9 的"待做"分清楚：**下面这些是已经跑出来的数**，而 §9 的用例仍未写。
+> 用的是 `kasia-console/src/lib/pool-payout-root.mjs` 的**现成导出**，我没有自造哈希。
+
+**① 全序无并列（Leg A 的前提）**：10 行 `side_lock_tx` **distinct = 10** ⇒ 字典序是全序，无 tiebreak 需求。
+
+**② D3 规范序（`side_lock_tx` ASC）**：
+
+| idx | row | dir | stake | side_lock_daa | side_lock_tx |
+|----|-----|-----|-------|---------------|--------------|
+| 0 | 35977 | 0 | 5000000000 | NULL | `0ae3860499be9cc8b5ba…` |
+| 1 | 35978 | 1 | 1500000000 | NULL | `35f45414e304e1c84b1d…` |
+| 2 | 35970 | 0 | 5000000000 | NULL | `3e8d263696b2e0000a65…` |
+| 3 | 35972 | 0 | 5000000000 | NULL | `6920cc8b9cee8e6d41e1…` |
+| 4 | 35973 | 1 | 1500000000 | NULL | `88a441a70a240b8469ee…` |
+| 5 | 35965 | 0 | 5000000000 | NULL | `952a4f68c790bfe4001c…` |
+| 6 | 35975 | 1 | 1500000000 | NULL | `a422b5e8c171778efd96…` |
+| 7 | 35974 | 0 | 5000000000 | **59950126** | `ae6a7a04e7e9630979d4…` |
+| 8 | 35976 | 0 | 5000000000 | **60244919** | `afbaaf628aeae3c24919…` |
+| 9 | 35971 | 0 | 5000000000 | NULL | `ff62a67e35864c7fccb2…` |
+
+**③ 根值（供跨机比对；两台机独立跑应逐字节相同）**：
+```
+betsRoot   (D3 序) = 8bbe255e8f2a8e078adfa9f45c4642d2bca18ccf3dd8d436d56b0c55c0818c11
+refundRoot (D3 序) = c328da80433d24dfa4398e0de31878dfb06565606a9864095542776b1f204fec
+```
+
+**④ 对照臂（我没有【断言】现行规则会 throw，我把它跑了）**：对同一批行调现行 `canonicalBetOrder` ⇒
+`canonicalBetOrder: bettor 4173a91cef 无 side_lock_daa (未链锚, fail-loud, 不回退本地序)` ✅ 与 §1 描述一致。
+
+**⑤ 弱注入臂（在册：正+反只证会红会绿，必须有第三条）**：只把 row35965 的 `side_lock_tx` **首字符 9→0**
+⇒ 该行序位 **5 → 0**，`betsRoot` **改变**。⇒ **根确实绑在 txid 上，不是碰巧对。**
+
+**⚠ 一处会绊倒下一个人的命名坑**：`bshard-close-enforce.mjs:633` 调的 `computeMerkleRoot` **不是** `pool-payout-root` 的导出名——
+`:30` 是 `import { … payoutRoot as computeMerkleRoot } …`。**照 enforce 里的名字去 import 会拿到 `undefined` 而不是报错**
+（我就先撞了这一下）。在册同族：`一名多物`。
+
+**复现（只读，~10 行）**：
+```js
+const pr = await import('file:///D:/kanet-tn12/kasia-console/src/lib/pool-payout-root.mjs');
+// rows = SELECT id,bettor_pk pk,direction,stake_amount stake,side_lock_tx FROM pool_bettor_sides WHERE market_id LIKE '%j34vb%'
+const ordered = rows.sort((a,b)=> a.side_lock_tx.toLowerCase() < b.side_lock_tx.toLowerCase() ? -1 : 1);
+pr.computeBetsRoot(ordered.map(b=>({pk:b.pk,stake:b.stake,direction:b.direction}))).toString('hex');
+pr.payoutRoot   (ordered.map(b=>({pk:b.pk,amount:b.stake})))                     .toString('hex');
+```
+
 ## 10. 给审阅者的三个明确问题
 
 1. **@Bettor / Owner 域**：4.4 的**签名主体**取哪个（委员会签 / Owner 签 + enforce 独立验 hash）？这是政策决定，我不自裁。
