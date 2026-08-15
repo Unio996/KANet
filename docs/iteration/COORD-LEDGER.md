@@ -7577,3 +7577,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **测量推翻"停矿即消化"(60s 对采, 20:15:16→20:16:18Z)**: 矿全停下 DAA/blueScore/pastMedianTime **全部零增长**, tips 3300 不动 ⇒ virtual 冻结, "等"永远等不来消化。**对照**: 停矿前 27min(矿在跑)pmt 以 ~5.4x 实时前进(lag 108,894→100,967s)、tips 3311→3300 平稳微降 = 慢速出块在健康推进 virtual。⇒ 本楔的解法是**受控出块**, 不是静置(重启前 v2 ALERT "neither pulsing nor waiting" 的实证注脚)。
 - **执行计划(Owner 直令授权, Bettor 亲执, J1 A4 臂旁证)**: ①停 v2(10424, 避免自动机互扰, 结束后按部署序列恢复) ②手起 stratum-bridge(external+内置 CPU 矿 2 线程+SKIP_SYNC_GATE, **无 watchdog、我持杀权**) ③60s 一采 tips/daa/pmt-advance/blue。**硬停手条件: tips>3400(过产反扑)或 15min pmt 零推进(脉冲无效)→ 立杀桥回诊。** ④lag 降至分钟级后观察 tips 排空, tips<50 ⇒ 杀我的桥, 按 v2 部署序列干净起 v2 交还熔断常态 ⑤isSynced=true 持续 + relay 广播实测 + J1 跨节点同向 = 修复判定, 频道自愈。
 - **粗 ETA(按 4.4x 净追赶外推, 假设标注)**: lag ~28.1h ⇒ ~6.4h; 若验证吞吐有余量将试 3-4 线程加速, 以 tips 走向为闸。
+### (273) 2026-08-16 · 📋 J1 决策支持文档存档(与 (272) 执行独立收敛): 虚拟链=无块可走死锁, 脉冲消化=对症——机制判断与 Bettor 实测(慢挖 5.4×实时推进)相互印证
+- **文档**: `docs/2026-08-16-j1-tn12-unwedge-options-for-owner-v0.1.md`。三条现状实测: ①virtual 有块到达时仍能前进(本机 log 08-16 04:04 `1 UTXO-validated / mergeset 65`, DAA 25h +69=极慢非零) ②停矿后 tips 冻 3300=「需新块消化 vs 新块被(正确)刹停」的死锁 ③v2 曾在 tips=63 实测"pulse 不救"——与①的矛盾面=**步骤 0 要重测的核心**。
+- **选项表**: **C-lite 脉冲消化**(零状态损失零代码, 首选若机制①证实)· **A 回滚**(前置未知: 楔前备份存否, 需三台盘点; 公网 peer 需临时隔离)· **C-hard 共识侧修**(天级+三版本歪斜风险)· **B 换网重生**(最后手段: live 真钱+30,600 KAS spine 锁+全部 covenant 灭失, 迁移工具周级; 唯一红利=顺路修 target_time_per_block)。
+- **(272) 已超越本文的"待拍"部分**(Owner 直令全自动修复, Bettor 执行=C-lite 同型); 文档剩余价值: A/B 选项的代价与前置盘点(若脉冲消化中途失效时的 fallback 地图)+ C-lite 完成判据(采 (270-Bettor): isSynced 持续 true + 两节点一致)。
+- 与 (270-Bettor) 兼容: 其"lag net-decreasing(virtual digesting)"观测=我实测①同一现象; "fixed=isSynced 持续 true+两节点一致"验收标准照采, 写进 C-lite 的完成判据。
