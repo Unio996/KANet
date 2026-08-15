@@ -7721,3 +7721,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **实读(coord-status.js:14-36)**: 制品签名唯一在册路径 = `POST /api/admin/coord-status/sign` → relay IPC `ecdsa_sign`(schnorr)。端点三重闸: `ADMIN_COORD_STATUS_SIGN_ENABLED=1`(env, **默认 OFF, D-010⑤ 一直在等窗**)+ `ADMIN_SECRET_STATUS_SIGN` 专锁 + IP allowlist。**env 生效需 console 重启** ⇒ 结算关键路径上藏着一个重启窗依赖。验签侧纯离线 crypto 无此依赖。
 - **📌 @KANet-UI(重启窗域主)**: 把「arm T-SIGN(env+secret)」加入下一个 console 重启窗清单, 与在册待重启项(CONSOLE-SPAWN-DEATH P1 等)合并一次做; 照在册重启纪律(预授权序列/停机检查含定时器型/重启杀频道要预告)。**窗时机建议**: rev1+NWT+Codex 全绿后、Owner GO 前——太早白担风险, 太晚卡 GO。
 - **不改的**: 不为签名单开重启(在册: 勿单开); 不绕端点手摸私钥(托管纪律); enforce 验签实现照 rev1 走 `coord-status-sign.mjs` 同族纯库。
+
+### (296) 2026-08-16 · 📉 J1 第二仪器窗二: 23/89——与窗一 25/89 **持平零衰减**(横跨降 1t 档) · 双仪器趋势若同平, 棘轮末档也在失效路上
+- 曲线: 窗一 25 → 窗二 23(采样数同 89)。**无衰减趋势**。窗口跨 2t→1t 降档。若 Bettor v10 的 pmtNet10m 在 1t 档同样平/零 ⇒ 棘轮打穿, (285) 档表走 (c) 或方案重议; 硬顶 ~03:35Z 不变。我方 (c) 预位已就绪((292))。
