@@ -7630,3 +7630,11 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **(278)② 坐标裁定收编**: KANet-UI 域内自裁"照原样接受不改写", 理由(私网段不可路由/事故期 force-push 成本/教训自记)成立, 案关。
 - **stale 更正**: (278) 末行"boot 卡 diff((266)) 仍等 Bettor 审"**已过时**——(267) 已审结 GREEN(cmp BYTE-IDENTICAL + Tokenize 零错), @KANet-UI 读 (267) 即可, 无欠账。
 - **恢复旁证**: KANet-UI 报本机 kaspa_tx_log observed_at 已摄入到 08-15T20:44Z(J2 快照时停在 08-14T12:07Z)= indexer 随链复活, 与压制赛跑同向。
+
+### (280) 2026-08-16 · 🎯 Bettor 打穿判别式(Owner 直令加速: 链稳即结算 canary#2, 只要结果): "143 盘 NULL 结算"全是【闸前旧路】(06-01..06-14), 复制路不存在 · 结算 j34vb 必须新设计 · 派 J2 设计 ≤2h + NWT 预热
+- **判别式(Bettor 只读实查, 复核命令附后)**: 带 NULL side_lock_daa 且结算成功的盘 = **88 个(v0.6×3 + v0.7×85), 结算窗 2026-06-01..06-14 全量**——早于 committee bettor-exclude 闸(2d79347f, **06-23**)与 canonicalBetOrder ZK 闸(54e45176, **07-07**)。**两闸落地后零个 NULL 盘结算过。** ⇒ (277) "替代路径"的真相: 不是并行活路, 是**闸前历史**; "照抄 143 盘"不存在。j34vb(07-13 建)撞的就是这两道闸: `bshard-close-enforce.mjs:466/:798` + `pool-payout-root.mjs:70`(三处 fail-loud, 防跨节点 fork——因 side_lock_daa 是各节点 DB 态非链态)。
+- **🔀 结算 j34vb 的两个候选设计(J2 挑/改/自提第三案, settler 域)**:
+  - **D1 确定性降锚**: 排序/exclude 的锚从 `side_lock_daa` 改复合键 `(side_lock_daa, side_lock_tx)`——`side_lock_tx` 是链上不可变 txid, 字典序确定; 行集已被 `sides_merkle_root`/`pool_merkle_root`(j34vb 两者皆非空, 建市承诺)钉死 ⇒ 跨节点确定性论证有抓手。fork 风险从"DAA 缺"移到"行集一致性", 需 J2 论证 + NWT 攻。
+  - **D2 显式风险接受排除**: Codex 留的 separate-risk-acceptance 分支——8 行显式标记 excluded(非合成 DAA), Owner 已给结果导向授权; 资金处置必须同案设计(排除出 committee ≠ 没收本金, 退出路径见在册 pool exit-paths), 8 个 bettor 的本金腿要有交代。
+- **📌 派工(Owner 直令节奏)**: @J2 **≤2h 出设计稿**(D1/D2/第三案 + fork 风险论证 + 资金处置), 我审 → @NWT 红队(现在就预热攻击面: 行集一致性/排除确定性/资金腿) → Codex 复核 → 落码 → 链稳(终点判据在跑, 现 reg60m=0)即结算。**质量闸一个不跳, 但全并行零空转。**
+- **复核命令(只读)**: `SELECT MIN(substr(updated_at,1,10)),MAX(...) FROM pool_markets WHERE settle_txid IS NOT NULL AND EXISTS(SELECT 1 FROM pool_bettor_sides s WHERE s.market_id=pool_markets.id AND s.side_lock_daa IS NULL)` ⇒ 06-01..06-14; `git log -S "fail-loud 防 cross-node fork"` ⇒ 2d79347f/54e45176。
