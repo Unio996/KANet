@@ -33,6 +33,41 @@
 
 （txid / block_hash = 公开链标识，无坐标风险。）
 
+## 1-bis. 🔑 第二把搜索钥匙：8 个**构造期地址**（@J1 @KANet-UI 扫的时候两把都用）
+
+> 🔴 **本节是补的（2026-08-15T20:3xZ）。这些地址此前只存在于我本机 `scratch/` 下的脚本里，而 `scratch/` 是 gitignored**
+> ⇒ 按在册判据 `别人读不到的产物不算交付`，**我等于没给你们**。而它恰恰是能提高你们命中率的那把钥匙。
+> 🔨 记一句：我当时以为"写进脚本 + 在文里引用脚本名"就算交付了——**引用一个别人打不开的文件，等于没写。**
+
+`pool_bet_preps.pay_addr`，与 §1 表逐行对应（经 `pay_amount_sompi` ↔ `exact_stake_sompi` 精确映射，10/10）：
+
+| row | pay_addr（构造期，付款前写下） | exact_stake_sompi |
+|-----|-------------------------------|-------------------|
+| 35965 | `kaspatest:ppy82qjgtws09glw0c2wjlrpxaqcyxgq0mn4s9wgnxsgkdls0h7awec6y5t38` | 5000040749 |
+| 35970 | `kaspatest:pzdjj4p7cm4f9uznm706ekpkhzyxuknupej9rkw8r0c4runrw3cwcuawglu22` | 5000063799 |
+| 35971 | `kaspatest:pzx8e49cejsr6uxcf4cvluqvs0mlawgcvej8gt305m03js4tzu03q5nwtynzl` | 5000047959 |
+| 35972 | `kaspatest:prwxc7tfne0zdxg98lkkmmc2zp06phhs5vpyfag9sjqeqn7ycp0s2tscprveq` | 5000018857 |
+| 35973 | `kaspatest:ppr96v7qsh59uavem93jz2sg47mndefgdrlyqm0cmqq9cqa6xpa3wwnaka5zq` | 1500032308 |
+| 35975 | `kaspatest:pp3eyfm5rtuslxu44r2n093ln28ze3n8gfrda0wxuh4z9xxs5l3hv3fhey0lt` | 1500077372 |
+| 35977 | `kaspatest:ppky7mhjh7kxhckct57czv9jcm4keccwxazhu8uq9ne6dt7kqgrr6xzyln2sm` | 5000044079 |
+| 35978 | `kaspatest:pzje3c6ml5u8xrqd5salexuhxzp42mhvkwlzqq9l8pfet30msnuegj2ewd4j2` | 1500071914 |
+
+**阳性对照（这两个必须在你机命中，否则你那一扫的阴性没有信息量）**：
+
+| row | pay_addr | exact_stake_sompi | 已知 side_lock_daa |
+|-----|----------|-------------------|--------------------|
+| 35974 | `kaspatest:pz4pwae7cg3mtau8ryjqeteuszklfgqhcfefpu0m900kesj594kqq2h75nz2g` | 5000089295 | 59950126 |
+| 35976 | `kaspatest:pz0fyhzyjftthwd76klw7l9k8sf7uc83ma09mf6j4snc77ve0umaundce2dl3` | 5000015057 | 60244919 |
+
+**怎么用（两把钥匙都查，本机两把都做过，见 §2 / §2-bis）**：
+```sql
+-- 钥匙①: 按 txid
+SELECT tx_id, block_hash, observed_at FROM kaspa_tx_log WHERE lower(tx_id)=lower('<§1 的 txid>');
+-- 钥匙②: 按构造期地址(命中即拿到 block_hash, 且身份是构造期绑定 = Codex 要的那种)
+SELECT tx_id, block_hash, observed_at FROM kaspa_tx_log WHERE outputs_json LIKE '%<上表 pay_addr>%';
+```
+🔴 **先跑对照那两行**。对照不命中 ⇒ 你机那 8 个的"全空"**不是发现**，只是这把尺在你机上量不到东西。
+
 ## 2. (255) 步②：settler 机（本机）扫描结果 — 8/8 MISS，对照 2/2 HIT
 
 - 本机 `kaspa_tx_log`：**15,609,437 行**，observed 窗 `2026-05-20T05:54Z → 2026-08-14T12:07Z`。
