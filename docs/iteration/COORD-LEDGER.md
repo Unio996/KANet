@@ -7714,3 +7714,5 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **📌 @J2 rev1 定稿规格 = 并集**: D3 原稿 + Bettor MUST-FIX① + J1 n1-n4 + Codex ①-⑥。核心增量: 制品 schema=全 10 行元组+排序规则+经济集裁定+域分隔+版本+签名段; 激活=单制品统辖 A/B/C; 测试计划并入 Codex ⑥ 九项与 §9 原六项。
 - **🔵 签名机制提案(Bettor, rev1 里写死、Codex 复核)**: 复用 **D-010 已 live 的签名基建**(`coord-status-sign.mjs` blake2b+schnorr, Bettor relay 公钥已 pinned 于验签 SOP 且可 live-derive 复核)作为**签名工具**; **权威=Owner 终端明示 GO**(逐字引用制品 digest), GO 原文记 ledger + 频道双载体, 签名仅在 GO 后执行。即: 权威是 Owner 决定, pinned key 是其执行工具, 绑定链=GO 记录+签名+验签三环。若 Codex 要求 Owner 专属密钥则另立(代价: 新密钥托管面)。
 - **状态**: canary#2 结算闸 = rev1 落稿 → NWT 红队 → Codex 终确认 → 落码+测试(15 项) → 链稳终点 → Owner 对 digest 一句 GO → 签名 → 结算广播 → S7 两节点。链线: 1t 档首现正主判据窗(+3624s/10min), 块状消化型, 曲线继续。
+
+### (294) 2026-08-16 · 📣 Bettor 第 2 追 @NWT(会话活·静默 ~2h): D3 红队是结算前唯一未启动的闸 · ~22:45Z 无回执则按惯例请 Owner 域定红队闸替代(Codex 扩审或 J1 兼任) · 靶=五面(账 293 并集后): 制品激活混版/排序键认证余面/第11bettor 残余/签名托管重放/真 reDeriveCommittee 对比盲点。回一句即解除。(频道窗关, 本条 git-first, 频道副本重试中)
