@@ -7589,3 +7589,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **收尾自动化在跑**: 仪表环(60s)持续盯 synced 持久性/tips 排空/过产反扑(tips>3400 自动杀桥); tips<50 ⇒ 杀脉冲桥→按部署序列起 v2 交还熔断常态。**@J1 A4 臂**: 报你机 tips/synced 同向读数(两节点判据闭环)。排空若持续 ~2/min 慢速会评估加线程(以 tips 走向为闸), 不盲加。
 - **📥 Codex 两轮新裁(68fb0245/a8fc43c6)路由 @J2**: ①fork乙正式退役(RULING: 无独立证明完整覆盖的源, 任何 miss 不得造 DAA/缺席/Owner 恢复授权); ②side_p2sh 判据撤回(Codex 独立从 recordBettor() 证实字段语义); ③**你的 pay_amount_sompi 三腿判据被拒当主闸**——Codex 指出更强路径: **`pool_bet_preps` 构造期记录**(`_v07PrepConfirmPrelude()` 付款前持久化 per-bet `pay_addr`+`exact_stake_sompi`)⇒ 恢复闸=唯一 prep 匹配 + 恢复 tx 含【该 prep pay_addr + 精确金额】输出 + block/DAA 证据 → 才进窄 CAS; prep 缺失/多义/冲突 ⇒ fail-closed 明报, 弱判据只能作为**单独的风险接受决策**讨论, 不得标成精确身份证明。**📌 @J2: 查这 8 行能否唯一 join 到 pool_bet_preps 历史记录**(能→按 Codex 闸走; 不能→明报, 走风险接受分支)。
 - **canary#2 仍 FAIL-CLOSED**(链稳判据未全闭: 两节点同向未回、tips 未排空)。NO TX NO STATE(脉冲桥的 coinbase 走既有 MiningRelay 地址, 无新钱路)。
+
+### (274) 2026-08-16 · 📏 Bettor 步骤 0 实测判决(覆盖 J1 unwedge 文档 b2642575 的核心判别)· 机制半①半②: 供块即活但消化远慢于理论 · 残余 tips 处置裁决权交 J1
+- **J1 unwedge 文档三事实对照我的脉冲实测(~10min, 20+ 块)**: ①"无块可走"**证实**——供块后 isSynced 翻 TRUE 稳定、tx 真落链、DAA 推进; ②"50 块应显著降 tips(65/块)"**证伪**——tips 3300→~3285 平台(净 ~-15), kaspad stats mergeset 时 35-65 时 0; ③v2 08-15 05:43 "脉冲无效"观察与本次矛盾面**部分解释**: 脉冲确实推不动 tips 消化, 但能推动 virtual/synced(两个不同的"推进")。
+- **⇒ 交还死结**: v2 brake>220 与 3300 残余 tips 结构性不相容(交还即刹停即再冻)。三选一已发频道交 @J1(v2 作者+节点域)裁: (a) C-lite 续跑观察消化加速 (b) 宽 DAG 判无害共存+调 v2 阈值 (c) A 路备份盘点。**Bettor 桥在岗持有不动, 等裁。**
+- **Owner 最小拍板问题现状**: 步骤 0=已做(直令覆盖); C-lite=事实上在跑; A 备份盘点=若 J1 选 (c) 再派; B=没人主张上桌。
