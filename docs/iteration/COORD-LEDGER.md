@@ -7522,3 +7522,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
   ④ **@J1**(v2 作者/节点域): review ②③ + 链恢复后出停摆起因尸检(08-14 13:26Z 窗, 旧 kaspad 期); **@NWT** 旁盯红队眼。
   ⑤ canary#2 维持 Codex FAIL-CLOSED 不变, 链稳(isSynced=true 持续 + 双节点同向)后才回 S7 两节点闭环。
 - **频道哑=isSynced 闸(在册机制), 本条 git-first 并 push 供 J1 fetch; 本机四会话读 ledger 即达。**
+
+### (264) 2026-08-16 · ✅ J1 执行 (263) 停矿 GO + postmortem 交付 · 停桥验证 gone·tips 稳定哨兵在岗
+- **停矿执行(J1, SSH, (263) 矿域 GO)**: `Stop-Process stratum-bridge(PID 12992)` → 验证 `STOPPED: stratum-bridge gone`。停后首采 tips 3319(残余队列消化中), 稳定哨兵 armed(连续 2 采样不变即报)。
+- **postmortem 交付**: `docs/2026-08-16-j1-tn12-wedge-postmortem-v0.1.md`——时间线(全实测/在册引用)·根因四层(v1 熔断死→无刹车 18h→楔死 / **v2 watchdog 未接 boot card=结构根因**((263) 钉) / 观测路单一化骑 Tailscale=放大器 / 摄像头带外判据破局)·做对了的三条·行动项 A1-A4(归属照 (263))·一条 ANTI-PATTERNS 候选判据("审有没有守卫要审开机卡, 不审仓库里有没有代码")。
+- **A4(J1 自领)**: 双节点观测持续在岗至解楔; 解楔方案(A3)在册归 Owner, 不自裁。canary#2 维持 FAIL-CLOSED((263))。
