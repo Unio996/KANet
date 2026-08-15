@@ -1,7 +1,19 @@
 ﻿# KANet TN12 开机启动序 — 响应 Bettor 加急卡 #lqp8vg(2026-07-15, 两起故障"进程死了没人拉"放大成全线故障)
 #
 # 顺序(Bettor #lqtxe6 GREEN-with-notes 折入): kaspad-watchdog(拉起kaspad) → 等RPC ready(超时5min)
-#   → tn12-mining-watchdog(现成不动) → kanet-start.sh(全栈, 显式Git-Bash绝对路径) → console-supervisor.sh(显式起, 不假设side-effect)
+#   → tn12-mining-watchdog-v2(熔断版, 见下 note④) → kanet-start.sh(全栈, 显式Git-Bash绝对路径) → console-supervisor.sh(显式起, 不假设side-effect)
+#
+# 🔴 note④(KANet-UI 2026-08-16, ledger (263) Bettor 派工·根治 08-15 18h 停摆结构因): 本卡此前三次
+#   dispatch(08-03/08-15/08-16)拉的全是无闸 v1(`tn12-mining-watchdog.ps1`, 只 keepalive)——v2 熔断
+#   (`tn12-mining-watchdog-v2.ps1`, J1 08-08 作, tips 阈值断路器)写好后从未接进本卡, 是 08-15 链
+#   停摆(0 UTXO-validated + tips 破千 + lag 30h)的结构性根因(在册 safety-fix-in-repo-not-live-is-
+#   zero-protection 原样复现)。本次改③步派 v2。**v2 自身头注 DEPLOYMENT SEQUENCE 明确: 一次性
+#   切换(停旧 v1 watchdog + stratum-bridge, 确认干净, 才起 v2)是一次性 cutover 动作, 不是本卡的
+#   职责——本卡只在真机重启后"进程表本就干净"的前提下按顺序拉起, 一次性切换归 Bettor 派工②步/
+#   矿机域执行, 不在此文件里重复实现。若本卡被在【非真重启】场景下手工 Run Now(本次停摆现场就
+#   踩过这条), v2 自身三态身份判定(OWNED_RUNNING/CONFIRMED_ABSENT/UNKNOWN_OR_CONFLICT)会在存量
+#   进程含糊时拒绝二次起矿并报警, 不会像 v1 那样无脑重复拉起——这是 v2 设计内的保护, 本卡不用
+#   再加一层判断。
 #
 # 🔴 note②(Bettor#lqtxe6.1): bash 若走 PATH 解析可能命中 C:\WINDOWS\system32\bash.exe(WSL存根, 完全不是
 #   Git-Bash, 实测坐实此机确有此坑)——本脚本全程用 Git-Bash 绝对路径, 禁裸 `bash` 命令。
@@ -75,8 +87,8 @@ for ($i = 0; $i -lt 60; $i++) {
 }
 if ($ready) { Log "kaspad RPC ready after $($i*5)s" } else { Log "WARN: kaspad RPC not ready after 300s timeout, proceeding anyway (mining/console will keep retrying)" }
 
-# ③ 挖矿 watchdog(现成脚本不动, detached)
-Start-Watched "powershell.exe" @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "D:\kaspa-tn12-mining\tn12-mining-watchdog.ps1") "tn12-mining-watchdog.ps1" | Out-Null
+# ③ 挖矿 watchdog v2(熔断版, detached; 见上 note④——v1 已停用, 不再从本卡派发)
+Start-Watched "powershell.exe" @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "D:\kaspa-tn12-mining\tn12-mining-watchdog-v2.ps1") "tn12-mining-watchdog-v2.ps1" | Out-Null
 
 # ④ kanet-start.sh(全栈: console+relay+bridge stack; 显式Git-Bash绝对路径, 不走PATH裸 `bash`)
 # 守卫: kanet-start.sh 本身对 :3200 无端口占用检测, 硬起会 EADDRINUSE 崩+pidfile 被覆盖留 debris。
