@@ -383,6 +383,13 @@ kaspa 支持的 sighash 类型:`SIG_HASH_ALL=0x01 / SIG_HASH_NONE=0x02 / SIG_HAS
 > **提级理由**:(A) 关掉绕过路之后,**池安全 = 一行 `require(tx.outputs[selfOutIdx].value == consolidated_pool)`(`PayoutShardV2.sil:180`)+ `validateOutputState`(`:170-179`),后面没有第二道防线**。而委员侧唯一核对该 clamp 目标的东西是 D2 的 SPK 重建,它建立在一组**硬编码字节 offset**(`bshard-close-enforce.mjs:148-154`)之上、**从未与真实编译产物做过 byte-exact diff**。
 > **该打的具体缝**:driver 控 `selfOutIdx`(witness 值)与输出数组构造 ⇒ 攻「D2 要求**所有** covenant 输出 SPK 匹配」与「SS 只锁 `outputs[selfOutIdx]`」之间的边界差;配合 offset 假设,看能否让价值从 §4-D 那个零强制的输出面漏走。**这一点 v0.1 已写(原 §7-3),v0.2 只改顺位与理由,内容不变。**
 
+> ## 🔴🔴 NWT 红队指针 · 2026-08-16 ·【本点的"多重性"半已闭,"offset"半仍开——原文不改,以此块为准】
+> 📌 **本块不改本节任何论点,不动 v0.2 编法**(原文一字未删)。全文红队 verdict 见 `docs/2026-08-16-NWT-redteam-precond3-tx-shape-sighash-v0.2.md`。
+>
+> 🔴 **§6-5(多 covenant 输出下 D2 for 循环语义)描述的场景已经不存在了**:`bshard-close-enforce.mjs:144-181`(commit `a2ea5ce8`,2026-08-11)现在是 **`covOuts.length !== 1` 直接 REJECT('N1 基数')** —— 不再是"全部匹配才过",是"多于 1 个根本不许进下一步",结构上排除了"多 covenant 输出"这整条攻击面,不是"全部匹配 vs 只锁一个"之间还有缝。同批还加了 **N3**(`BigInt(covOuts[0].value) == BigInt(readPsConsolidatedPool(psRedeemHex))`,生产函数读值,非自解字节)。此修复即本稿顶部「J2 独立复核块」引的**同一个** NWT 08-10 06:58 发现,设计稿 `docs/2026-08-11-d2-multiplicity-fix-design-v0.1.md` rev-3,我(NWT)08-11 10:0x-10:3xZ 亲手复审 PASS(过程含一次自我退判 CONDITIONAL,逼 J2 补 V2 覆盖后终审)、08-11 10:4xZ 窗#5 装载后独立 SELECT 实查确认 live——COORD-LEDGER (152)(153)(154) 全程在案。
+> ✅ **§6-4(D2 offset 假设:硬编码字节偏移是否 byte-exact 匹配真实编译产物)仍然真开着**,未被上述修复触碰,代码自身注释(`:184-189`)明说"仍是源码级推导...不能只信这次推导"。
+> ⇒ **本点(1️⃣)收窄为单一议题:§6-4 offset byte-exact diff。§6-5 的合取部分从清单摘除(已闭,非降级,是真的没有可打的东西了)。**
+
 **2️⃣(新)负向测试装置自身 + build 作用域 —— 这是 (A) 之后真正剩下的、值得打的东西**
 > 🔴 **该打的不是「共识会不会拒」(已答),是「我们能不能证明它拒了」**。这个负向测试有一个**失败长成合法答案**的结构:
 > - `p2sh.mjs:2068` **硬编码 `version:1`** ⇒ 现有构造路根本发不出 version=0 的 tx,必须另写构造器;
