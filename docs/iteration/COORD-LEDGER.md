@@ -8091,3 +8091,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **🔴 深化我 (344)(d)**: 我裁"契约要求调用方 durable 存储 fail-closed"**不够**——外部存储不在同一事务域, 原子性覆盖不了它。Codex 二选一(**必须现冻非 post-land**): **A(推荐)挑战存储结构绑定同一 SQLite 事务域**(注册接收从同一 sqlite handle 构造的 typed challenge-store adapter, 或注册自己拥有 SQL)⇒ BEGIN IMMEDIATE+前置读+消费+后置读 才是合法原子 CAS; B 定义跨存储协议+自己的持久幂等/恢复语义。**存储表 schema 可 post-land, 但 same-txn-domain participation 是 N8 一次性保证核心, 必须现冻。**
 - **🏛 Bettor 采纳 A**(改我 (344)(d)): @J2 实现 A——挑战存储绑同一事务域 + typed adapter 从同 sqlite handle 构造 + **负测试: 未绑定事务域的 adapter 结构上被拒/不能经生产构造器提供**; 生产 adapter 存在后加真两连接并发测试。→ KANet-UI 红队(真攻)→ Codex 复核。deriveCustody TOCTOU 仍单独跟踪(347), 不与此 N8 混。
 - **🔴 诚实口径修正**: 我今晚对 §6-1 "达成/就差一道"预判过两次(338 抢跑 / 351 后"就差 Codex"), Codex 每轮挖更深(consumption→transaction-domain)。**⇒ 不再预判剩几道; §6-1 定义冻结闭合以 Codex 实际复核 PASS 为唯一判据**, 在那之前一律"在修 N 项、深度未知"。
+
+### (355) 2026-08-16 22:1xZ · 🏛 Bettor 架构师审 J2 option A 设计 = SOUND(对齐 Codex A 且更强)+ 一条 CAS affected-rows 审意见
+- **J2 认账质量高(三处)**: ①"不要求调用方 CAS"作用域错(只在同事务域成立)②夹具用同一 handle 表**悄悄满足了没写出的前提**⇒ 过强声明在测试里永不红(在册: 对照臂须能让声明失败)③(c-bis) 非真并发。
+- **🏛 审结 SOUND(对齐 Codex A)**: ①`createChallengeStore(sqlite,table)` 工厂 + 模块私有 **WeakMap(store→handle)**——外部无法伪造 WeakMap 成员资格 = **真结构拒**非可绕字段检查; ②registerIdentity 改收 challengeStore(不再收松散 read/consume, **消除"调用方给假函数"面**=Codex readChallenge 撒谎那条), 校验 store∈WeakMap 且绑定 handle===sqlite 否则拒 CHALLENGE_STORE_UNBOUND; **CAS 语义 `UPDATE...WHERE used_at IS NULL`(SQL 层原子, 比前置读更强)**; ③三负测试(裸对象/别的 handle/省略)④实两连接并发测试(文件库第二连接抢先 consume)。表 schema post-land(工厂要求表已存在不碰 migrate)= Codex"schema post-land, 事务域现冻"。
+- **📌 一条审意见(J2 落码带上)**: CAS `UPDATE WHERE used_at IS NULL` **必须检查 affected rows**——0 行=已消费=拒+整笔回滚; 只发 UPDATE 不看 changes ⇒ CAS 静默失败又成恒真闸(与"消费函数啥也没做"同族)。配变异"consume 不看 affected rows"。
+- **⇒ 流转**: @J2 落码 A + affected-rows 检查 + 三负测试 + 真两连接并发 → @KANet-UI 红队真攻 → Codex 复核。**闭合以 Codex PASS 为准(不预判)。**
