@@ -320,6 +320,17 @@ NWT 说"没追到底，交 J2/域主"。追完了，答案让这条 gate 比他�
 ⚠ **诚实边界**：这只把信任根从"本机 DB"移到"Owner 私钥 + 公钥钉死处"，**没有**解决节点独立性为零这个结构问题
 （那条按 NWT ②-3 归 D-012 §6-1 的路，D3 不扛）。
 
+## 9-quater. ✅ NWT 复核 §9-ter：三条代码声明逐条现读验证通过，④⑤ 逻辑站得住，补一条小的（不阻塞）
+
+**核过，不是信转述**：
+- `pool-shard-register.mjs:404` `if (!regTx || !await landed(...)) throw` 在 `:406`(`recordBettor`)`:407`(`onBettorRegistered`)**之前** ✅ 与②描述一致。
+- `pool.js:1534` `landed()`：`check_utxo_landed` + `minDepth: REORG_SAFE_MIN_DEPTH`,`REORG_SAFE_MIN_DEPTH=20`(`pool-shard-register.mjs:88`,J1 phantom-leaf 根治值,非占位),poll 25×2s,超时返 `false` ⇒ caller throw ✅ 不是 stub。
+- `pool.js:1553-1558` `recordBettor`:`INSERT OR IGNORE` + `catch(e){console.warn(...)}` ✅ 异常被吞、函数从不 throw ⇒ `:406` 之后必然走到 `:407`,与③"链腿有闸、DB 腿没有"的根因描述一致。
+
+**④⑤ 认同**:同一台机器同一份 DB 上,`pool_bettor_sides` 与 `pool_markets.metadata` 没有理由有不同的写保护——攻击者能改一个就能改另一个,"承诺物与被承诺的东西一起被改、重算照样相符"这个推论成立。Owner 签名 + 公钥钉在 DB 外,是把信任根真正挪出这台机器的正确方向,认同。
+
+**补一条(不阻塞落码,建议同批做,省得以后再补一轮)**:§4.3 的制品摘要目前是 `blake2b(canonical_json)`,**没有域标签**。这正是本仓自己在 `fact-receipt` §4 立死的规则(「域标签必须进摘要,防另一个协议/另一类对象的字节流被当成这份声明」)——Owner 私钥今天在签什么、以后可能还会被要求签别的类型的对象(FactReceipt/ConditionReceipt/这份 admissibility 裁决制品……),**没有域分隔,就存在"一份合法签名在另一个上下文里被读成不同声明"的老问题重演的可能**(哪怕今天只有一种用途,签名基础设施一旦复用就会撞上)。建议摘要公式改成 `blake2b(LP("kanet.canary2.admissibility-artifact.v1") ‖ LP(canonical_json))`,照抄 fact-receipt §4 的做法,不新造。**这条不影响本设计任何其它结论,是把 Owner 签名这件事做扎实的免费补丁。**
+
 ## 10. 给审阅者的三个明确问题
 
 1. **@Bettor / Owner 域**：4.4 的**签名主体**取哪个（委员会签 / Owner 签 + enforce 独立验 hash）？这是政策决定，我不自裁。
