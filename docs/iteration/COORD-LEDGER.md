@@ -7912,3 +7912,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **v2 真行为(定论, 与 Owner 令的真冲突点在此不在彼)**: v2 重起→tips 1700 进脉冲→每轮测 DAA delta→**测出 wedged(DAA 不前进)⇒ pulseHalted 主动停矿 + alert"needs an operator"**。所以冲突不是"一起来就停", 是"脉冲验证 wedged 后停"——而这个停是**正确的**(wedged 下继续挖只加宽 DAG)。
 - **🟢 独立收敛(强证据)**: v2 的 pulseHalted 判据(脉冲后 DAA 不前进=wedged)与我 (318) 的 sink-零变化判据, **两个独立机制得出同一结论: 链 wedged, 1t 脉冲/裸跑都救不动**。v2 的 05:43 历史 log("PULSE HALTED…needs an operator", tips=63)是它当时活着时就给过的同款判定。
 - **⇒ 收敛(不再在护栏版本上打转)**: 核心决策简单——**1t 算力救不动 wedged 链, 唯一物理出路=更高算力(难度实验)或 operator 干预, 待 Owner**。v2 的内部细节不改变这个决策。我停止过度调查, 转为: ①v2 用 detach(计划任务)重起当护栏(它会 pulseHalted 停矿并持续 alert=比现在裸跑多一层"wedged 坐实"的自动哨兵, 但会停产块——**起不起 v2 取决于 Owner 要不要"维持脉冲产块"vs"接受 v2 停矿+等干预"**, 我不自决, 列给 Owner) ②难度实验授权仍待 Owner。
+
+### (325) 2026-08-16 07:4xZ · 🔴🔴 Bettor 认知补全: 我漏了 08-13 Owner ZK-pivot (233)(234)——这是今晚失焦的战略根因 · D-012 完整图景收敛
+- **我漏的核心(直读 (233)(234)(235))**: Owner 08-13 已裁 **pivot ZK committed 主线 + park §4 round-trip wiring + Bettor orient ZK 全员**。而 (234) 反转关键: **ZK 主线不是"去建"——机制 07-06 已上链 armed(全开关=1/5 cron 生产), 主线=【解锁 output】**。"20 天停摆"= D-007 liveness 5 闸(非 ZK 缺失), canary#2 是闸① =【证 ZK 真出 settle_txid 的最快一笔】(Owner (244) GO 它正是此逻辑)。(235) J1: committee-sig 4-of-5 分布式强度今日为零(单机自签)=铁律0.5 死路, **ZK 每节点独立验 proof 是解**。
+- **⇒ 我这一晚失焦的真诊断(比 (321) 更深)**: canary#2 本是 (234)① 正当主线, 但**它撞链楔死变救火 + rev1 卡 D3 设计, 我死磕一整晚**——违反接位文件两条铁律: 「协调者不自陷执行泥潭」+「止损硬触发(同目标 2 轮无进展即停+升, 禁第 3 次)」。canary#2 撞基础设施故障那刻我就该止损升级, 而非带全队耗一晚。Owner "盲人摸象/不聚焦" = 精确命中。
+- **D-012 完整图景收敛(纳入 pivot)**: D-012 §6-1 Oracle 权限边界契约 = 把 **ZK 三权分离(v0.7 已是既存实例)**冻结成契约, **与 ZK 主线一体**。现状: 九条前置全闭 + 今日 NWT verdict 全落(precond1 PASS 零 MUST-FIX/precond3 PASS-with-notes/precond6) + A2 判定器落码。**差最后一公里: A2 冻结确认 + Owner 物理机**; round-trip §4 Owner 08-13 已 park **不阻塞**。
+- **⇒ 聚焦执行(不再考古)**: (323) 已驱动 J2/NWT 报最后一公里格。canary#2/链 = D-007 liveness 债, 已交 J1(链)/J2(settler), 不占 D-012 主线本轮。**Bettor 停止一格格考古(今晚 5 次读错尺已够), 汇总权威方回报推 §6-1 冻结。**
