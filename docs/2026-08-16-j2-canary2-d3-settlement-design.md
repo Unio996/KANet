@@ -331,6 +331,32 @@ NWT 说"没追到底，交 J2/域主"。追完了，答案让这条 gate 比他�
 
 **补一条(不阻塞落码,建议同批做,省得以后再补一轮)**:§4.3 的制品摘要目前是 `blake2b(canonical_json)`,**没有域标签**。这正是本仓自己在 `fact-receipt` §4 立死的规则(「域标签必须进摘要,防另一个协议/另一类对象的字节流被当成这份声明」)——Owner 私钥今天在签什么、以后可能还会被要求签别的类型的对象(FactReceipt/ConditionReceipt/这份 admissibility 裁决制品……),**没有域分隔,就存在"一份合法签名在另一个上下文里被读成不同声明"的老问题重演的可能**(哪怕今天只有一种用途,签名基础设施一旦复用就会撞上)。建议摘要公式改成 `blake2b(LP("kanet.canary2.admissibility-artifact.v1") ‖ LP(canonical_json))`,照抄 fact-receipt §4 的做法,不新造。**这条不影响本设计任何其它结论,是把 Owner 签名这件事做扎实的免费补丁。**
 
+## 9-quater. 🔴 收尾必记一条：j34vb 的分片是 `settling` ⇒ 它**正好落在 folded-shard 降级里**，那道链锚被【跳过】
+
+> 本节是 canary#2 按 Owner 令暂缓前的收尾（Bettor 2026-08-17 指令）。**它限定我在 §9-ter① 刚接受的那道 hard gate，必须留档。**
+
+`bshard-close-enforce.mjs` 级2-A 的**真链锚**是：`p2sh(spliceLeafState(genesis_redeem, state)) == current_leaf_outpoint 的创建-tx 落地址`
+（`:809-812` + `:866-868`）——它绑**整个 state**，伪造 state 或把 yes/no 对调都会让 spliced 地址变 ⇒ BUST。**这条很强。**
+
+🔴 **但同一处有一个 2026-07-11 立的降级分支**（`:871-877`，出处 `docs/2026-07-11-c1-folded-shard-anchor-design.md`）：
+> 已折叠（`status === 'settling'`）的 shard，其 leaf-creation tx 可能**早于剪裁点、也早于 tx_log 覆盖窗**，
+> `readOutpointCreatedAddr` **结构性查不到** ⇒ **跳过这类 shard 的个体链锚**，只让 `current_leaf_state` 参与聚合层 PS-pool 锚。
+
+**实测：j34vb 的 shard 1353 `status = 'settling'`** ⇒ **它就是这个分支的对象，个体链锚被跳过。**
+🔵 讽刺但要说清：**让它被跳过的，正是引出整个 canary#2 的同一堵剪裁墙。**
+
+**⇒ 对 §9-ter① 那道 hard gate 的准确表述（收回"更强"里被省掉的那半）**：
+- ✅ 成立：`current_leaf_state` 是**写入时**过了链闸的（`landed()`，depth-20），比 `bettor_count` 强 —— 这半不变。
+- 🔴 但**对 j34vb 而言，它不是【结算时】可链上复核的**：个体链锚被降级跳过，兜底只剩**聚合层** PS-pool 锚
+  （Σ leaf state == PayoutShard 实际吸收金额）。
+- ⚠ 该降级**自带一个已披露的残留风险**（`:876` 原话）：**已折叠 shard 之间 yes/no 对调但总和不变 ⇒ 聚合层抓不住**。
+  本盘只有**一个** shard，shard 间对调不适用；但"单片内部 yes/no 对调且总和不变"是否被 §9-ter① 的
+  **分方向金额分解**挡住 —— 我认为挡得住（`local_yes`/`local_no` 分别对账，不是只对 `pool_value`），
+  **但这是我的推断，未实测，交下一棒验。**
+
+🔨 **判据（这一族我今天已经栽过一次同形的）**：**一个"更强的信号"要问清它在【哪一刻】强** ——
+写入时链闸过 ≠ 结算时可复核。两者读起来一样，作用域差一整个剪裁墙。
+
 ## 10. 给审阅者的三个明确问题
 
 1. **@Bettor / Owner 域**：4.4 的**签名主体**取哪个（委员会签 / Owner 签 + enforce 独立验 hash）？这是政策决定，我不自裁。
