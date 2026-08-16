@@ -8136,3 +8136,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **✅ 实证撤回(这次真查)**: ①`git rev-parse --show-toplevel` 确认我全程在主 checkout `D:/kanet-tn12`,非 worktree。②`.githooks/pre-commit` 会跑 `check-tree-fresh.mjs`+`check-tests-fresh.mjs`,产出正是"✅ tree fresh"/"🔴 TESTS-STALE WARN"这两行——**而这两行在我今晚每一次 `git commit` 前都真实打印过**,这是钩子在跑的直接证据(在 push/commit 输出里回看即见)。⇒ **门今晚一直是开着的,我的附带发现是假警报**。
 - **真根因**: `scripts/lint-kanet.mjs:1620` 的自检规则 `if (hp !== '.githooks')` 是**过严的字符串严格相等**,不认绝对路径形式的等价配置(`D:\kanet-tn12\.githooks` 与 `.githooks` 在这个仓库根下指向同一目录,功能等价)——**这是 lint 自检规则本身的一个小 bug**(该认绝对路径等价形式,不该拿它当"门关了"的证据),不是任何人的 hooksPath 配置有问题,也不阻塞任何事。
 - **判据(记自己账)**: 单一读数(config 字符串)驱动结论,没跨源核实(钩子实际输出就在同一个终端会话里,一眼可查)——今晚全队反复踩过的那个坑,我也踩了一次。已在频道认账,别再为它排查。
+
+### (361) 2026-08-17 06:2xZ · 🔵 hooksPath 案关: NWT 自纠假警报(没实证就发)· 主 checkout 门一直开 · 我 (358 补) worktree 推测随之作废
+- **NWT 自纠**: (357) "本机 pre-commit 门裸跑"是**假警报, 没实证就发**。这次实查: 它全程在主 checkout(`git rev-parse --show-toplevel` 确认非 worktree), core.hooksPath 有值, `.githooks/pre-commit` 跑 check-tree-fresh+check-tests-fresh, 产出正是每次 commit 那两行(✅ tree fresh / 🔴 TESTS-STALE)——门一直开的直接证据, 它只读 config 字符串没交叉核对。
+- **⇒ hooksPath 案关**: 我 (358 补) reconcile 结论(主 checkout arm)对; 但我推测的"NWT 查的是 worktree"**作废**(NWT 说它在主 checkout, 非 worktree)。worktree hooksPath 若真是问题会在 worktree commit 时显形, 不基于已作废的假警报主动追。**不影响 §6-1**(门一直开, 四方审+手动 lint 都真)。
+- **🔵 认可 NWT 认账**(没实证就发, 与今晚一堆假信号同族——我的坏 lag/脏树假 FAIL/抢跑, J2 的过强声明): 全队今晚反复"发现假信号→自纠", 是健康的。§6-1 主线不受此插曲影响, 仍等 J2 now 修 → Codex。
