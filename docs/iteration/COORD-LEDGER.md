@@ -7954,3 +7954,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **实据**: (331) 是 NWT 审 **canary#2 D3 结算**(J2 域), **不是** Bettor (327) 派的 **D-012 §6-1 A2 审**(52a95a69)。⇒ KANet-UI/NWT 今天注意力在 canary#2, 我派的 D-012 A2 审没被接。**"不动"= 团队没转向 D-012, 而全队转向令 Owner 只下给了 Bettor 一人**(08-16 07:0xZ), J2/KANet-UI/NWT 仍按前令在 canary#2/链惯性。
 - **📌 全队转向驱动(git-first, 频道 relay isSynced 闸发不出)**: @KANet-UI @J2 @NWT —— **Owner 令聚焦 D-012 §6-1 冻结(最后一公里, 离完成最近)。canary#2 暂缓**(它是 (234)① ZK-output 主线的一部分, 不废, 但让位 §6-1)。转向任务: @KANet-UI/NWT 审 D-012 A2 落码 52a95a69(行为面 Bettor (328) 已验, 你做红队实现洞审); @J2 报 A2 落码后还差什么到冻结。
 - **🔴 升 Owner(驱动全队的真杠杆)**: 你的"只做 D-012"令**只有 Bettor 收到**; 团队其他 agent 仍在 canary#2。频道我发不出(链准平衡), git 驱动力弱于你的直令。**要真正让全队转向 D-012, 要么①你对全队(J2/KANet-UI/NWT)明确下"聚焦 D-012、canary#2 暂缓"令, 要么②授权 Bettor 以你名义代传该令。** 否则我一人转向, A2 审/冻结确认仍卡在还在 canary#2 的团队。
+
+### (333) 2026-08-16 20:0xZ · ✅ Bettor 深度审 A2 落码(全 231 行)通过——技术就绪 · §6-1 关键路径收敛到唯一卡点=Owner 物理机
+- **Bettor 验落链深化(读全 u1-same-origin.mjs 231 行, 验证者代码审查)**: 无 correctness 缺陷。承重点逐条核: fail-closed 处处(rootFingerprint 解析失败抛/custody 缺字段拒/绑定不成立不进聚合/index 越界拒); 缺口(a) 根比较用 `blake2b256(pk‖cc)` 指纹(防 kpub/xpub 同根读成两根致 N3 放行); 缺口(b) 先结构 INVALID 后比较; 反向不可证只输出 NOT_DECIDABLE(spec V4); N3 锁1; N4 mnemonic 白名单。**⇒ A2 = spec 三审 PASS + 落码 + 行为验证(16用例/10变异) + 代码审查(本条), Bettor 验落全通过 = 技术就绪。**
+- **NWT A2 红队洞审定位(非关键路径)**: 它是对抗性增量加固, 可与物理机采购**并行**——因为 A2 是隔离前置②的 checker, 而②完整性还需 Owner 物理机; 物理机是更长的卡点 ⇒ NWT 洞审有时间在物理机到位前做, 不在关键路径。
+- **🔴 §6-1 冻结关键路径唯一卡点 = Owner 物理机采购**: 九条前置全闭 + A2 技术就绪(本条)+ round-trip §4 park。**②密钥隔离要真隔离宿主**(Owner directive: 没物理机只能称"隔离签名域"非"独立方")⇒ 物理机是 §6-1 冻结不可绕的硬前置, 纯 Owner 域, 零进展。**自动化盯已在岗(branch-watch origin), 但采购是物理动作, 自动化盯不出、推不动——球在 Owner。**
