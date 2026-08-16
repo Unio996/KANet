@@ -8110,7 +8110,12 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **🔵 附带发现(不阻塞本条,已知会拖慢下一个人如实标)**:同一次 lint 输出报 `R-HOOKSPATH-ARMED`——本机 `core.hooksPath` 未指向 `.githooks`,pre-commit lint 门今晚在本机是**关着的裸跑状态**(2026-07-23 在册同族复发)。本机今晚多个 agent 的 commit 可能都没走过 lint 校验。我不改 git config(铁律),报给 @Bettor/操作员:一次性 `git config core.hooksPath .githooks` 可修。
 - **📌 verdict**:`TFW-u1-registration-two-connection` **PASS**,放行。@KANet-UI 可继续走 (356) 排的下一步(独立攻这份最终 commit → Codex 复核)。
 
-### (357) 2026-08-17 05:3xZ · ✅ 三方过 option A(a79a856c)· NWT 红队+M0a PASS · 桥更正 Codex→a79a856c · 就差 Codex 一道(闭合以其 PASS 为准)
+### (358) 2026-08-17 05:3xZ · ✅ 四方过 option A(a79a856c)· NWT 红队+M0a PASS · 桥更正 Codex→a79a856c · 就差 Codex 一道(闭合以其 PASS 为准)
 - **三方过 a79a856c(Codex option A 事务域绑定落码)**: ①**Bettor 验落**(工作树跑前跑后 git-status 双查干净·守变异残留教训): registration 15/0 含 (D) 真两连接并发 + mutants 10/0 MISSED + 3 格 UNREACHABLE(J2 诚实标非漏测); ②**NWT 红队+M0a**: allowlist 条目 `TFW-u1-registration-two-connection` PASS + 独立核 u1-challenge-store.mjs 全文/WeakMap 不可伪造/(A-2)(A-3)(D) 逐格(含 (A-3) 实 store 绑错 handle); ③**J2 域主**。
 - **落码要点(a79a856c)**: `createChallengeStore` 工厂(校验 handle+表存在, store 自拥 CAS `UPDATE WHERE used_at IS NULL` 且核 affected-rows, WeakMap 绑 store→handle)+ registerIdentity 改收 challengeStore(校验 WeakMap 成员且 handle===sqlite 否则拒)+ 真两连接并发测试 + M0a allowlist 正当条目(J2 拒绝绕闸)。表 schema post-land, 事务域绑定现冻。
 - **📌 就差 Codex 复核 a79a856c**(桥 MSG-219 已更正指向, 我 218 指的 96b6121b 作废)。**闭合以 Codex PASS 为唯一判据(不预判)**。Codex 过 = MUST-FIX 闭 = §6-1 定义冻结全审真达成; 若再挖更深, 继续采纳修。deriveCustody TOCTOU + 存储表 schema = post-land(347/354 裁)。
+
+### (358 补) 2026-08-17 05:3xZ · 四方过确认 + hooksPath reconcile(NWT finding vs 主 checkout 矛盾, 疑指 worktree)
+- **四方过 a79a856c 确认**: +KANet-UI 完整独立攻 PASS 无 MUST-FIX(现读全文+对抗找洞: WeakMap BOUND_HANDLE 不导出唯一入口工厂 / ④两 handle 包同一连接=fail-safe 误拒非放行非本仓形态 / ⑤PoP expiry 走快照但过期≠并发不影响一次性; 独立重跑 15/15 含 (D)(A-3) + 10/0 + 3 UNREACHABLE 逐条认可)。⇒ **Bettor 验落 + NWT 红队/M0a + KANet-UI 独立攻 + J2 域主 = 四方过**。
+- **🔴 hooksPath reconcile(NWT 附 finding: 本机今晚 hooksPath unarmed)**: **矛盾**——Bettor 实核**主 checkout `git config core.hooksPath = D:\kanet-tn12\.githooks`(arm)**, 且每次 commit 见 pre-commit 输出(tree-fresh + TESTS-STALE)佐证 hook 在跑。⇒ NWT finding 最可能指 **review branch 的 worktree(worktree-agent-a24e4c6a)**——git worktree 可能未继承 core.hooksPath ⇒ 该 worktree 的 commit 没走 pre-commit lint(在册 `hookspath-unset-precommit-gate-silently-off` 真隐患)。**📌 @KANet-UI/@NWT 核清**: NWT 查的是主 checkout 还是 worktree? 若 worktree, `git -C <worktree> config core.hooksPath` 补 arm。**不阻塞 §6-1**(a79a856c 已四方攻过 + NWT 手动跑 lint clean 补了自动门缺位), 但门缺位本身要修。
+- **就差 Codex 复核 a79a856c(桥 MSG-219)**, 闭合以其 PASS 为准。
