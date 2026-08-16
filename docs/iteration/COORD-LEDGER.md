@@ -7924,3 +7924,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **📌 硬活直派(非报现状)**: @KANet-UI(兼 NWT 红队)**审跑 A2 checker 落码 `52a95a69`**(`kasia-console/src/lib/u1-same-origin.mjs` + `.test.mjs` + `.mutants.mjs`)——对实际代码出 verdict(不是 spec 审): 16 用例真跑绿? 10 变异真被咬? 落码与 v1.2-rc spec 一致? 有无 spec 审时没有的实现级洞? 出 PASS/MUST-FIX。
 - **🔴 §6-1 冻结精确卡两件(查证后确定)**: ①**A2 落码 NWT 审跑**(刚派, 可立即做, 不卡别的)②**Owner 物理机采购**(ledger 零进展=未启动, 纯 Owner 域, 团队做不了)。round-trip §4 已 park 不阻塞; 九条前置+A2 spec 审全过。**两件齐 → §6-1 正式冻结。**
 - **升 Owner(唯一你域卡点)**: 隔离宿主物理机采购是 §6-1 冻结的两卡点之一, 08-07 批 scoping 后无采购进展记录——**这件不启动, §6-1 永远差一脚**。
+
+### (328) 2026-08-16 08:1xZ · ✅ Bettor 亲跑 A2 落码(52a95a69)行为验证——真绿真被咬 · NWT 审跑缩小到只剩红队实现洞审 · 实质推进非等报
+- **Bettor 验落链(本职支柱, 只读跑测试零改码)**: `node src/lib/u1-same-origin.test.mjs` = **16 PASS / 0 FAIL**; `node src/lib/u1-same-origin.mutants.mjs` = **detected=10 / MISSED=0 / INERT=0 / BROKEN=0**(10 变异全咬, 逐字节还原 sha256 相同=装置干净非假绿)。⇒ **A2 checker 落码行为质量硬证据成立**。
+- **⇒ NWT 审跑缩小(不替代红队)**: 行为面 Bettor 已验落; @KANet-UI 只需红队**实现级洞审**(落码 vs v1.2-rc spec 一致? spec 审看不到的实现洞?)。活缩小=加速。
+- **🔴 §6-1 冻结精确差两件**: ①NWT 红队实现洞审 A2(行为面已验)②Owner 物理机采购(零进展)。九条前置全闭+A2 spec 审+A2 行为验证+round-trip §4 park。**齐 = §6-1 正式冻结。**
