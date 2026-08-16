@@ -11,8 +11,8 @@
 //   ③ **落库**: N3(锁 1)与 N4 由 v196 的 `UNIQUE(root_fingerprint)` / `CHECK` 在**写入那一刻**兜底
 //      —— 即使上面两道将来被谁改松, 数据库这一层仍然拒。
 //
-// 🔵 **挑战串的签发与持久化【不在本模块】**(同 u1-registration-pop.mjs 的边界): 本模块收一个
-//    已查出来的 `challengeRecord`。
+// 🔵 **挑战串的【签发】仍不在本模块**(同 u1-registration-pop.mjs 的边界) —— 但**读取它的权威在本模块**:
+//    自 (359) 起, 本模块**不再接收调用方给的 `challengeRecord`**(该参数已删), record 一律从 bound store 现读。
 //
 // 🔴 **(343) MUST-FIX 之后, 上面那句的后半截【已经不成立, 别照旧版理解】** ——
 //    旧版原话是"调用方必须把'用掉'真的持久化, 否则一次性就退化成可重放", 而它把保证**托付**给了调用方:
@@ -36,6 +36,14 @@
 //    ③ 事务内: **前置读**(必须仍 unused, 防并发重放)→ 消费 → **后置读**(必须已 used, 防空消费);
 //       任一不满足 ⇒ 抛出 ⇒ INSERT 一并回滚;
 //    ④ 事务用 `.immediate`(BEGIN IMMEDIATE), 使写锁的取得**与语句顺序无关**。
+//
+// 🔴 **(359) 又收窄一层 —— 前面收的是【消费】的 authority, 这一层收的是【签发/过期】的**:
+//    Codex 3c6fccf8 判 a79a856c 三项 CLOSED, 但 PoP 验的 `challengeRecord` 仍是**调用方直接递进来的**
+//    ⇒ 他可以递一个【伪造的 / 未过期的】record 骗过 PoP, **即使 store 里那条早已过期或已用**。
+//    ⇒ ⑤ `challengeRecord` 参数**删除**; record 由本模块从 bound store 现读(唯一来源, 不比对不兜底);
+//      ⑥ 事务内**除 usedAt 外还查 expiresAt**(第二次、在写锁之内), 过期即 `CHALLENGE_EXPIRED` 回滚。
+//    🔨 这三层是同一个主题的三问: **谁有权说"它被用掉了" / "它和身份表在同一事务里" / "它还没过期"** ——
+//       每一层我都以为已经收完了, 每一层 Codex 都往上游再问一次"这个事实的出处是谁"。
 //    ⚠ 验签(async)留在事务**外**先跑: better-sqlite3 的事务是同步的, 里面不能 await。
 //    ⚠ 表 schema 可 post-land; `createChallengeStore` 要求表**已存在**, 不自建、不碰 migrate.js。
 import { rootFingerprint, verifyRegistrationBinding } from './u1-same-origin.mjs';
@@ -55,6 +63,7 @@ export const REG_REJECT = Object.freeze({
   CHALLENGE_NOT_CONSUMED: 'CHALLENGE_NOT_CONSUMED',         // 消费"成功"但重读仍非 used ⇒ 整笔回滚(防空消费)
   CHALLENGE_ALREADY_USED: 'CHALLENGE_ALREADY_USED',         // 事务内前置重读发现已被并发用掉 ⇒ 拒(防并发重放)
   CHALLENGE_STORE_UNBOUND: 'CHALLENGE_STORE_UNBOUND',       // store 不是本进程用【同一 sqlite handle】造的 ⇒ 拒(事务域不同=原子性不成立)
+  CHALLENGE_EXPIRED: 'CHALLENGE_EXPIRED',                   // (359) 事务内重读发现已过期 ⇒ 拒(签发/过期 authority 归 store)
 });
 
 // 事务内用的内部错误标记: better-sqlite3 事务靠抛异常回滚, 抛出后在外层按 code 分流。
@@ -89,14 +98,13 @@ export function deriveCustody(sqlite, relayId) {
  * @param {object} a
  * @param {object} a.sqlite            better-sqlite3 句柄
  * @param {object} a.submission        { relayId, rootXpub, identityIndex, identityPubkeyXOnly, challenge, signature, ...(custody 若有, 一律忽略) }
- * @param {object|null} a.challengeRecord
  * @param {Date|number} a.now
  * @param {object} a.challengeStore     **必传**: 由 `createChallengeStore(【同一个】sqlite handle, table)` 造。
  *                                     未绑定同一事务域 ⇒ 拒 `CHALLENGE_STORE_UNBOUND`(理由见文件头 (354) 那段)。
  *                                     store 自己拥有 SQL(消费是 CAS), 调用方没有机会把它写成非 CAS。
  * @param {function} [a.verifyMessageFn]   仅测试注入
  */
-export async function registerIdentity({ sqlite, submission, challengeRecord, now, challengeStore, verifyMessageFn } = {}) {
+export async function registerIdentity({ sqlite, submission, now, challengeStore, verifyMessageFn } = {}) {
   const s = submission || {};
 
   // ① N4-bis —— 注意: **完全不看 s.custody**
@@ -108,10 +116,6 @@ export async function registerIdentity({ sqlite, submission, challengeRecord, no
     rootXpub: s.rootXpub, identityIndex: s.identityIndex, identityPubkeyXOnly: s.identityPubkeyXOnly,
   });
   if (!bind.ok) return { ok: false, code: REG_REJECT.BINDING_INVALID, reason: bind.reason };
-
-  // ②-b N8 PoP
-  const pop = await verifyRegistrationPop({ submission: s, challengeRecord, now, verifyMessageFn });
-  if (!pop.ok) return { ok: false, code: REG_REJECT.POP_FAILED, reason: `${pop.code}: ${pop.reason}` };
 
   // ②-c 🔴 (343)+(354): 挑战存储**必须在落库之前就具备, 且必须与身份表同一事务域**, 否则拒。
   //      放在这里(验签之后、写库之前)是有意的: 拒的时候**一个字节都还没写**。
@@ -132,6 +136,15 @@ export async function registerIdentity({ sqlite, submission, challengeRecord, no
     };
   }
 
+  // ②-d 🔴 (359) Codex 3c6fccf8: **challenge record 只能从 bound store 取, 不收调用方给的**。
+  //    上一版 PoP 验的是调用方直接递进来的 challengeRecord ⇒ 他可以递一个【伪造/未过期】的,
+  //    即使 store 里那条早已过期或已用 —— 签发/过期的 authority 还在调用方手上, 消费的 authority 才被我收回。
+  //    ⇒ 这里【不比对、不兜底】, 直接以 store 为唯一来源: 调用方连递的机会都没有(参数已删)。
+  const storeRecord = challengeStore.read(s.challenge);
+
+  // ②-b N8 PoP —— 用 store 取出来的 record 验(含 usedAt / expiresAt 两项)
+  const pop = await verifyRegistrationPop({ submission: s, challengeRecord: storeRecord, now, verifyMessageFn });
+  if (!pop.ok) return { ok: false, code: REG_REJECT.POP_FAILED, reason: `${pop.code}: ${pop.reason}` };
   // ③ 落库 + 消费 —— **同一事务**。N3/N4 由 v196 的 UNIQUE/CHECK 在写入那一刻兜底。
   const fp = rootFingerprint(s.rootXpub);
   const runTx = sqlite.transaction(() => {
@@ -143,7 +156,7 @@ export async function registerIdentity({ sqlite, submission, challengeRecord, no
         custody.custody);   // 🔴 服务端派生值, 不是 s.custody
 
     // 🔴 **前置条件(并发重放闸, J2 自查补)**: 在【持有写锁的事务内】重读一次, 必须仍是 unused。
-    //    为什么必需: PoP 那步是在事务【外】用调用方递进来的 challengeRecord 判的 ⇒ 两个并发请求
+    //    为什么必需: PoP 那步是在事务【外】用 store 现读的 record 判的 ⇒ 两个并发请求
     //    可以【都】拿着 usedAt=null 通过验证。若消费实现写成无条件 `SET used_at=?`(而非 CAS),
     //    两笔都会把它置上、后置条件也都满足 ⇒ **同一挑战注册两次**。
     //    🔴 它成立的【前提】必须写出来(上一版漏写, 被 Codex c0a1f50c 抓下):
@@ -153,6 +166,19 @@ export async function registerIdentity({ sqlite, submission, challengeRecord, no
     if (!before || before.usedAt) {
       throw new _RegTxError(REG_REJECT.CHALLENGE_ALREADY_USED,
         `事务内重读: 挑战已被并发请求用掉(或已不存在) ⇒ 拒, 整笔回滚(usedAt=${before?.usedAt ?? 'record-missing'})`);
+    }
+    // 🔴 (359): 事务内**同样要查过期**, 不只查 usedAt。
+    //    ②-d 的 PoP 已经用 store record 验过一次过期, 这里是**第二次、在写锁之内**再验一次 ——
+    //    因为那两次之间 store 里的 expiresAt 仍可能被改(它是一张普通表)。
+    //    ⚠ 诚实边界: 本检查用的是**同一个 `now`**(调用方传入的请求时刻) ⇒ 它挡的是
+    //       "记录本身在两次读之间变了", **挡不住**"真实时间在本次请求内跨过了 expiresAt"。
+    //       后者的暴露窗 = 单次请求耗时(进程内微秒级), 且方向是**放行一个刚过期的**, 不是放行一个已用的。
+    //       要连它也挡住, 得让 `now` 在事务内重取 —— 那会让注入 `now` 的用例失去可确定性, 故未做, 明写于此。
+    const expMs = before.expiresAt instanceof Date ? before.expiresAt.getTime() : Number(before.expiresAt);
+    const nowMs = now instanceof Date ? now.getTime() : Number(now);
+    if (!Number.isFinite(expMs) || !Number.isFinite(nowMs) || expMs <= nowMs) {
+      throw new _RegTxError(REG_REJECT.CHALLENGE_EXPIRED,
+        `事务内重读: 挑战已过期或 expiresAt 不可读 ⇒ 拒, 整笔回滚(expiresAt=${before.expiresAt}, now=${nowMs})`);
     }
 
     // 消费: 抛错即回滚(连同上面那条 INSERT)

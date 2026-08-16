@@ -37,6 +37,11 @@ const MUTANTS = [
     (s) => s.replace('if (!bind.ok) return { ok: false, code: REG_REJECT.BINDING_INVALID, reason: bind.reason };', 'if (false) return null;')],
   ['③N8 PoP 闸拆掉(签名/挑战不合格也继续走)',
     (s) => s.replace('if (!pop.ok) return { ok: false, code: REG_REJECT.POP_FAILED, reason: `${pop.code}: ${pop.reason}` };', 'if (false) return null;')],
+  // ── (359): 签发/过期 authority ──
+  ['🔴 record 改回收调用方给的(退回 (359) 原病: 伪造/未过期 record 骗过 PoP)',
+    (s) => s.replace('  const storeRecord = challengeStore.read(s.challenge);', '  const storeRecord = arguments[0]?.challengeRecord ?? challengeStore.read(s.challenge);')],
+  ['事务内 expiry 重检拆掉(过期发生在 PoP 之后就没人管)',
+    (s) => s.replace('    if (!Number.isFinite(expMs) || !Number.isFinite(nowMs) || expMs <= nowMs) {', '    if (false) {')],
   // ── (343)+(354): 一次性挑战 + 事务域绑定, 每一段都要被咬 ──
   ['fail-closed 闸拆掉: 不给 challengeStore 也放行(退回 optional, 即 (343) 原病)',
     (s) => s.replace('  if (!challengeStore) {', '  if (false) {')],
