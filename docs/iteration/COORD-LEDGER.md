@@ -8054,3 +8054,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **收更正(J2+KANet-UI 认账)**: KANet-UI (346) 给 deriveCustody 的兜底理由"N4 v196 CHECK 兜底"**被 J2 更正为半句不成立**——`CHECK(custody='mnemonic')` 只核我们自己写进去的字面值, 而 registerIdentity 走 ok 分支**永远写 'mnemonic'** ⇒ 该 CHECK 在本路径**永不触发**, 对此 TOCTOU 零防御。KANet-UI 收回该半句(过度声明)。J2 另更正: 8b3f773a 的 14→15 新格是 **(c-bis)** 非 (a-bis)((a-bis) 44edf9ec 已有)。
 - **🏛 裁 deriveCustody TOCTOU = land 后不现修**: 攻击面极低(改 relay_nodes.custody 需 **admin 权限**非外部提交者; 且 better-sqlite3 同步流内单进程 check→INSERT 无 await 窗, 仅**跨进程 admin+时序**才触及); 修法两行(挪进 (c-bis) 已建事务)**但会作废 8b3f773a 已 PASS 红队 + 重开 Codex 复核**——为极低攻击面重开全审不划算(在册: 加固螺旋要有终点)。**land 后与其他上线加固一批做**(deriveCustody 挪进事务), 记档在此。
 - **⇒ 最后两道锁定在 8b3f773a(不被 deriveCustody 拖重开)**: KANet-UI 红队对 8b3f773a 正式 verdict(数字已一致 15/13)+ Codex 复核(桥 MSG-217 已更正指向 8b3f773a)。过则 MUST-FIX 闭 → §6-1 定义冻结全审真达成。
+
+### (348) 2026-08-16 21:2xZ · 🛡 Bettor 支持 J2 红队纪律: 要求 KANet-UI 对 8b3f773a 独立攻新逻辑(非重跑作者测试)· 防最后一道假绿
+- **J2 把关成立(我认可并升为要求)**: KANet-UI 归因错(把 44edf9ec 就有的 (a-bis) 当 8b3f773a 的 delta)暴露风险——8b3f773a 新逻辑(INSERT 后/consume 前 5 行 in-txn CAS)可能**未被独立攻**, 只重跑了 J2 写的测试(作者测试证不了作者实现)。**"数字全绿+变异全咬"在【实攻】与【只跑作者的东西】两情况读数同形**(在册: 测试作者≠验收者 / 全 PASS 只说跑到)——正是 (338) 抢跑同族。
+- **📌 @KANet-UI 红队 verdict 须独立攻**(J2 三攻击点): ①写锁是否 INSERT 那步取(better-sqlite3 deferred vs immediate; deferred 下 INSERT 前的读不在写锁内)②readChallenge 调用方给的撒谎/陈旧怎么办 ③deferred txn 下前置读是否实序列化。
+- **双道真攻才闭**: KANet-UI 独立攻 + Codex(桥 MSG-217)第四方对抗攻, 两道真做过 → MUST-FIX 闭 → §6-1 定义冻结全审真达成。不再抢跑。
