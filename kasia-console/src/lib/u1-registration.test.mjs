@@ -80,6 +80,21 @@ await t('V7 · privkey-only relay ⇒ 拒(fail-closed), 且理由可读', async 
   assert.match(r.reason, /不入委员/);
 });
 
+// ── 绑定闸(②)在入口层仍然把关(不是只在 u1-same-origin.mjs 里) ─────────────
+// 🔴 本格是变异测试抓出来的洞, 不是想到的: 拆掉 registerIdentity() 里的 `if (!bind.ok) return ...`
+//    后, 上面几格用例全绿——没有任何一格提交过一个绑定对不上的注册请求走完整入口流程。
+await t('绑定闸 · identityPubkeyXOnly 与登记根派生的不一致 ⇒ 拒 BINDING_INVALID, 且不落库', async () => {
+  const relayId = insRelay({ mnemonic: 'enc-mnemonic-blob' });
+  const id = makeIdentity();
+  const ch = 'ch-bind';
+  const sub = submissionFor(relayId, id, ch, { identityPubkeyXOnly: 'a'.repeat(64) });   // 声称的 pubkey 对不上派生结果
+  const r = await registerIdentity({ sqlite, submission: sub, challengeRecord: okChallenge(ch), now: Date.now() });
+  assert.strictEqual(r.ok, false, `绑定对不上还能过 ⇒ 派生证明没在入口层真的守着`);
+  assert.strictEqual(r.code, REG_REJECT.BINDING_INVALID, `实际 ${r.code}: ${r.reason}`);
+  assert.strictEqual(sqlite.prepare('SELECT COUNT(*) n FROM u1_identity_registration WHERE relay_id = ?').get(relayId).n, 0,
+    '绑定没过还落了库 = 最坏的那种失败');
+});
+
 // ── V17 · 提交方说谎 ⇒ 拒(服务端派生值说了算) ────────────────────────────────
 await t('V17 · privkey-only relay 提交 custody:"mnemonic" ⇒ 仍必须拒(提交值不被采信)', async () => {
   const relayId = insRelay({ privkey: 'enc-privkey-blob' });
