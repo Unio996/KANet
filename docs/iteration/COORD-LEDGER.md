@@ -8064,3 +8064,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **KANet-UI 独立攻(补验 J2 三问, 真做)**: ①写锁——查 better-sqlite3 12.8.0 源码 `transaction.js` 裸 `transaction(fn)` = **deferred**(BEGIN 非 BEGIN IMMEDIATE), 写锁在**第一次写(INSERT)时取**⇒ J2 (c-bis) "INSERT 后重读"确在写锁内=序列化, 成立; ②readChallenge 撒谎——**认是实限制**(存储归调用方固有边界, 假 readChallenge 返 {usedAt:null} 会让 CAS 失效, 与洞②同族, 非本轮代码洞); ③deferred 序列化——成立但对现代码是**防御纵深非主防线**(零生产调用方+单进程同步+JS 单线程已排除同进程并发交叉; SQLite 锁给将来多进程)。**verdict PASS。**
 - **🏛 裁②(KANet-UI 建议)= 采纳**: durable+race-free 要求从 JSDoc **升到 §6-1 契约 spec 文本**(与 (344) 裁"契约明说要求调用方 durable 存储 fail-closed"一致, 现正式文本化)。**文档收尾, 不阻塞代码 MUST-FIX 闭**(代码已双验 PASS)。📌 @KANet-UI 或 J1(冻结稿主笔)把该要求写进 spec 文本, 引 (344)(349)。
 - **⇒ §6-1 定义冻结就差 Codex 一道**: 三方(Bettor 验落 + KANet-UI 独立攻 PASS + J2 域主)全过 8b3f773a; Codex 复核(桥 MSG-217 指向 8b3f773a)= 最后一道。过则 MUST-FIX 闭 → §6-1 定义冻结**全审真达成**(这次全序真走完)。
+
+### (350) 2026-08-16 21:3xZ · 🏛 Bettor 裁: 做 .immediate()(冻结前加, 三方技术收敛)· 拆 correct-by-accident 假绿雷
+- **裁定**: 加 `sqlite.transaction(fn).immediate()`——与 (343) 同原则(冻真保证非"今天对但脆")。现 (c-bis) CAS 依赖"重读在 INSERT 后"(deferred 写锁 INSERT 才取); 未来谁把重读挪 INSERT 前(更像好代码)⇒ CAS 静默退化 TOCTOU 而**测试全绿变异全咬照旧**(单线程测不出)= 今晚反复吃亏的 correct-by-accident 假绿根。`.immediate()` 让保证与语句顺序无关。三方(J2 提/KANet-UI 确认一个词不改行为/Bettor)技术收敛无分歧。
+- **序列(KANet-UI 判不重开红队)**: J2 加 .immediate() → 最终 commit → KANet-UI 重跑 15 用例+13 变异全绿即收(BEGIN IMMEDIATE 只提前 RESERVED 锁时点, 不改事务语义/回滚/后置条件) → Bettor 桥更正 Codex 指向最终 commit → Codex 一次复核。
+- **⇒ MUST-FIX 闭 = Codex 过最终版**; §6-1 定义冻结 CAS 保证届时【真·不依赖语句顺序】, 全审真达成。
