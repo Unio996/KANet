@@ -143,7 +143,17 @@ export async function registerIdentity({ sqlite, submission, challengeRecord, no
       throw new _RegTxError(REG_REJECT.CHALLENGE_NOT_CONSUMED,
         '消费后重读挑战仍非 used ⇒ 消费未真正持久化, 整笔回滚(空消费不算成功)');
     }
-  });
+  }).immediate;
+  // 🔴 **`.immediate` 不是可有可无的修饰** (三方 2026-08-17 收敛, @Bettor 裁"契约要冻就冻真的"):
+  //    `sqlite.transaction(fn)` 直接调用走的是 `default` = 裸 `BEGIN`(better-sqlite3
+  //    `lib/methods/transaction.js:42`), 而 SQLite 里裸 BEGIN 即 **DEFERRED** ——
+  //    DEFERRED 事务要到【第一条写语句】才取 RESERVED 锁。
+  //    ⇒ 上面那段 CAS 在 default 下**只是碰巧成立**: 因为 INSERT 恰好排在前置重读之前。
+  //    🔴 谁把前置重读挪到 INSERT **之前**(而"先检查再写"看起来更自然、更像好代码),
+  //       锁就还没取, CAS **静默**退化成 TOCTOU —— 而**测试全绿、变异全咬**(单线程测不出并发),
+  //       没有任何东西会告诉他。在册: `correct by accident 依赖对面不变`。
+  //    ⇒ `BEGIN IMMEDIATE` 在 BEGIN 那一刻就取写锁 ⇒ 保证与**语句顺序无关**, 拆掉这颗雷。
+  //    ⚠ 语义不变: 只提前 RESERVED 锁的取得时点, 不改事务/回滚/后置条件行为。
 
   try { runTx(); }
   catch (e) {
