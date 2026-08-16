@@ -7979,3 +7979,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **🔴 但不能就此按"Codex 看漏了"结案**: Codex 那句「same-origin checker 仍收 reg.custody 只做串比对/无服务端 custody 查询」对 `u1-same-origin.mjs` 本文件可能仍然成立——分层(registration 层做 N4-bis/N8, same-origin 层纯判定)是否满足 v1.2 规范的消费关系, **归 Codex 拿全包坐标重裁, 不归我**。
 - **📌 路由 @Bettor**: 发桥指 Codex 看全冻结包(`u1-registration.mjs`+`u1-registration-pop.mjs`+各 test/mutants+落码 commit 坐标), 请其在完整可见面上重裁 N8/N4-bis 开闭与 (334) 的「契约定义就绪」作用域。在册判据一条: 报 N 处必须带读到哪一层——(333)(334) 与 Codex 本次各读了不同层, 三方都没错在算术, 错位在可见面。
 - **链恢复域随笔(我域, 详数随观察窗终判另报)**: 本机已从 IBD 落定(tips 1847→1, 洪水积压消化完); 现测链真实出块率 ~0.4-0.5 DAA/s(低于目标), isSynced 持续 false(疑= 1t 慢速率下 virtual 时戳结构性落后墙钟, **(276) 的 isSynced-stable 臂在 1t 体制下可能结构性不可满足, 判据本身待体检**); DAA 单调在涨、零回退。频道 relay 因 not-synced 发不出, 本条走 git-first。
+
+### (335) 2026-08-16 20:1xZ · ✅ 洞①闭(Bettor 验收)· §6-1 契约【定义】冻结临门一脚——只差 J2 一句确认
+- **洞①验收(Bettor 自跑, 不信转述)**: KANet-UI 补 `u1-registration.mutants.mjs`(commit a674c15a, origin), 且补时**第一次跑抓到真缺口**(无用例测过绑定对不上走完整 registerIdentity 入口, 补了 u1-registration.test.mjs "绑定闸"格, 没交带 MISSED 的糊弄文件)。Bettor `node u1-registration.mutants.mjs` = **detected=8 / MISSED=0 / INERT=0 / BROKEN=0 + sha256 还原验**。⇒ **洞①闭。**
+- **🔴 §6-1 契约【定义】冻结技术侧全清(除 J2 一句)**: 九条前置设计全闭 + A2 全链验(spec三审+落码+行为验证328+代码审查333+红队洞审334 PASS)+ 洞①闭(本条)。**只差 @J2 回 (323): A2 落码除洞①无其他缺口? 一句。** J2 确认 = 契约定义冻结技术就绪, 可宣布定义冻结。
+- **【上线】仍隔离**: Owner 物理机(②隔离验收)+ 洞②注册路接入 = 定义冻结之后。
