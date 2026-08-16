@@ -54,6 +54,8 @@ const MUTANTS = [
   //    没有它, (b) 只能证明"消费失败会返回 false", 证明不了"INSERT 真的跟着回滚了"。
   ['摘掉事务(照旧版: 先提交 INSERT 再消费)⇒ 消费失败时 INSERT 已落库',
     (s) => s.replace('  const runTx = sqlite.transaction(() => {', '  const runTx = ((__f) => __f)(() => {')],
+  ['前置重读拆掉(并发重放闸)⇒ 陈旧记录 + 非 CAS 消费能把同一挑战用两次',
+    (s) => s.replace('    if (!before || before.usedAt) {', '    if (false) {')],
 ];
 
 let det = 0; let miss = 0; let inert = 0; let broken = 0;

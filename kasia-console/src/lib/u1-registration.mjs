@@ -40,6 +40,7 @@ export const REG_REJECT = Object.freeze({
   CHALLENGE_CONSUME_MISSING: 'CHALLENGE_CONSUME_MISSING',   // 没给消费/重读能力 ⇒ 拒(不静默成功)
   CHALLENGE_CONSUME_FAILED: 'CHALLENGE_CONSUME_FAILED',     // 消费本身抛了 ⇒ 整笔回滚
   CHALLENGE_NOT_CONSUMED: 'CHALLENGE_NOT_CONSUMED',         // 消费"成功"但重读仍非 used ⇒ 整笔回滚(防空消费)
+  CHALLENGE_ALREADY_USED: 'CHALLENGE_ALREADY_USED',         // 事务内前置重读发现已被并发用掉 ⇒ 拒(防并发重放)
 });
 
 // 事务内用的内部错误标记: better-sqlite3 事务靠抛异常回滚, 抛出后在外层按 code 分流。
@@ -117,6 +118,18 @@ export async function registerIdentity({ sqlite, submission, challengeRecord, no
       .run(s.relayId, fp, String(s.rootXpub).trim(), s.identityIndex,
         String(s.identityPubkeyXOnly).trim().toLowerCase(),
         custody.custody);   // 🔴 服务端派生值, 不是 s.custody
+
+    // 🔴 **前置条件(并发重放闸, J2 自查补)**: 在【持有写锁的事务内】重读一次, 必须仍是 unused。
+    //    为什么必需: PoP 那步是在事务【外】用调用方递进来的 challengeRecord 判的 ⇒ 两个并发请求
+    //    可以【都】拿着 usedAt=null 通过验证。若消费实现写成无条件 `SET used_at=?`(而非 CAS),
+    //    两笔都会把它置上、后置条件也都满足 ⇒ **同一挑战注册两次**。
+    //    上面那条 INSERT 已经取了写锁, 所以这里读到的是序列化之后的值 —— 这一读把它变成真正的 CAS,
+    //    而且**不要求调用方自己实现 CAS**(要求了也无法验证, 契约不该依赖对面的自觉)。
+    const before = readChallenge(s.challenge);
+    if (!before || before.usedAt) {
+      throw new _RegTxError(REG_REJECT.CHALLENGE_ALREADY_USED,
+        `事务内重读: 挑战已被并发请求用掉(或已不存在) ⇒ 拒, 整笔回滚(usedAt=${before?.usedAt ?? 'record-missing'})`);
+    }
 
     // 消费: 抛错即回滚(连同上面那条 INSERT)
     try { consumeChallenge(s.challenge); }

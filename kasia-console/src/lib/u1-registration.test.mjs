@@ -272,6 +272,30 @@ await t('(c) 成功边界【之后】拿同一挑战重放 ⇒ 必拒(这是"一
   assert.strictEqual(row2, undefined, '重放被拒但落了库');
 });
 
+await t('(c-bis) 并发重放: 陈旧 challengeRecord + 非 CAS 的消费实现 ⇒ 必须被事务内前置重读拦住', async () => {
+  // 🔴 这一格是我交付后自查补的, 不在 (343) 点名的三格里。
+  //    形态: PoP 在事务【外】判, 用的是调用方递进来的记录 ⇒ 两个并发请求可以【都】拿着 usedAt=null 过验证。
+  //    这里用"存储已 used, 而手上记录仍说 unused"来复现【第二个请求】的视角。
+  const relayId = insRelay({ mnemonic: 'enc-m-concurrent' });
+  const id = makeIdentity();
+  const ch = 'ch-concurrent';
+  const st = chStore(); st.issue(ch);
+  const staleRecord = st.read(ch);          // ← 请求 B 早先读到的(那时确实 unused)
+  st.consume(ch);                           // ← 请求 A 抢先提交了
+
+  const r = await registerIdentity({
+    sqlite, submission: submissionFor(relayId, id, ch), challengeRecord: staleRecord, now: Date.now(),
+    // 🔴 故意用【非 CAS】的消费实现: 无条件 SET, 不看当前是不是 unused。
+    //    没有前置重读的话, 它会把 used_at 再置一遍 ⇒ 后置条件也满足 ⇒ 同一挑战注册两次。
+    consumeChallenge: (c) => { sqlite.prepare('UPDATE _test_challenge SET used_at = ? WHERE challenge = ?').run(Date.now(), c); },
+    readChallenge: (c) => st.read(c),
+  });
+  assert.strictEqual(r.ok, false, '陈旧记录 + 非 CAS 消费竟然注册成功 = 同一挑战可用两次');
+  assert.strictEqual(r.code, REG_REJECT.CHALLENGE_ALREADY_USED, `期望 CHALLENGE_ALREADY_USED, 实际 ${r.code}: ${r.reason}`);
+  const row = sqlite.prepare('SELECT 1 FROM u1_identity_registration WHERE relay_id = ?').get(relayId);
+  assert.strictEqual(row, undefined, '并发重放被拒但落了库');
+});
+
 sqlite.close();
 rmSync(dir, { recursive: true, force: true });
 console.log(`\n${fail === 0 ? '✅' : '🔴'} u1-registration: ${pass} PASS / ${fail} FAIL`);
