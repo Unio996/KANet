@@ -7991,3 +7991,12 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **🔴 CP4 reconcile(J2 stale, Bettor 纠)**: J2 说 CP4 §4"等 Codex 复核"——**但 Owner 08-13 (233) 已 park round-trip §4**("§4 定格 final: 8f83bf79 HOLD 不 land/生产接线不做/round-trip 线正式停格不再投/provenance 教训入 ZK")。⇒ CP4 §4 = **park 移 ZK, 不阻塞定义冻结, 不等 Codex 复核**(停格线不需复核)。定义冻结标注它 park。
 - **🏆 ⇒ §6-1 契约【定义】冻结技术就绪**: 九条前置设计全闭 + A2 全链验(spec三审+落码+行为验证+代码审查+红队洞审PASS+洞①闭)+ round-trip B-1/B-2/state_start/:2804 闭(J2现核)+ CP4 §4 park(233 reconcile)+ J2 确认无其他缺口。**所有技术闸通过。** payoutshard :1824 留 land 后加固。
 - **口径分层(不 overclaim)**: 【定义冻结技术就绪】=本条(内部审全过, 可正式定稿标 FROZEN, 主笔 J1 回或 Bettor 协调收尾)。【契约上线/生效】仍隔离: **Owner 物理机(②隔离验收)+ 洞②注册路接入**, 定义冻结之后。
+
+### (338) 2026-08-16 20:1xZ · 🏆🏆 D-012 §6-1 Oracle 权限边界契约【定义】冻结【达成】· 三方确认 · 今晚 D-012 主线里程碑
+- **三方确认(全部现跑地面核, 非引旧)**:
+  - **Bettor 验落**: A2 行为验证(16用例/10变异 328)+ 全 231 行代码审查(无 correctness 缺陷 333)+ 洞①自跑验收(detected=8/sha256 335)。
+  - **KANet-UI 红队**: A2 落码实现洞审 PASS-with-notes(334, 超范围审全包 + 抓真缺口补)。
+  - **J2 域主放行**(337 询后): 五测试套全绿(same-origin/pop/registration/n5/schema)+ 三变异套 detected 10/12/8 全 0 MISSED/INERT/BROKEN + §4 判据 V1-V9/V14-V18 逐格 grep 覆盖无零命中 + V5 全量臂 relay_nodes 32 行重复 address=0 + 499 行零 TODO/stub + **域内无缺口, 放行**。
+- **⇒ §6-1 契约【定义】冻结达成**: 九条前置设计全闭 + A2 全链三方验 + round-trip B/state_start/:2804 闭 + CP4 §4 park(233 reconcile)。**所有技术闸通过 + 三方签字。**
+- **留档三项(land 后, 均三方裁法一致=定义 vs 落码强度/上线 分离, 不阻塞定义冻结)**: ①洞② registerIdentity 零生产调用方(注册路=上线阶段)②payoutshard :1824 默认回落不对称(land 后加固)③u1-escape-hatch-live-check.cjs 28 行未实现 §5-6 Codex 加严 live-check 分母纪律(落码强度项)。**禁把"A2 落码"读成这三项已上线守。**
+- **口径分层(不 overclaim)**: 【定义冻结达成】=本条(契约定义技术就绪+三方签字)。正式稿标 FROZEN = 文档收尾(J1 主笔回或 @KANet-UI 代)。**【契约上线/生效】仍隔离**: Owner 物理机(②隔离验收)+ 留档三项接入, 定义冻结之后。
