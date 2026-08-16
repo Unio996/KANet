@@ -7885,3 +7885,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **⇒ D-012 §6-1 实际=【差最后一公里】不是【卡在起点】**: 08-12 冻结实剩(169 原文)= **①A2 落码后的正式冻结确认 + round-trip B-1/B-2 交付验收 ②Owner 物理机采购**。**然后 08-12→08-16 被 canary#2 + 链停摆打断 4 天**(全队含 J2 被吸走, 我这一晚全程在那)。
 - **🔴 我今晚连环误判收口(第 4 类同族)**: 链用 pastMedianTime(伪影)/canary#2 追已闭案两天/D-012 读稿子 Status——**三个域全部"读错尺, 而权威源一直都在"**。根因同一: 没读 ledger/sink/DECISIONS 权威, 用手边二手量外推。Owner "盲人摸象"诊断三域全中。已入 memory `feedback-a-single-instrument-must-be-cross-checked-before-driving-decisions`。
 - **真正下一步(不卡 NWT, 不需 spawn)**: 核 08-12 后 A2/round-trip B-1B-2/物理机三件现状 → 接上最后一公里 → §6-1 正式冻结。@J2 是落码执行人(08-12 在座推进, 非沉默)。
+
+### (323) 2026-08-16 07:3xZ · 📌 Bettor 驱动 D-012 §6-1 最后一公里(Owner 令全员聚焦 D-012)· 让权威方报格, 不自己考古
+- **已核准现状(直读 ledger, 非稿子 Status)**: 九条前置 08-11/12 全闭 + 今日 precond3 KANet-UI(兼NWT)PASS-with-notes(ff7b3107, 14:21+07); A2 判定器落码主分支(52a95a69); round-trip CP2-rev(de2ae60e)/CP3(156598fc)已落, CP4 §4 anchor(8f83bf79 review branch)等审(Codex (217) 裁 round-trip 2/3 closed, Sec4 OPEN)。⇒ **§6-1 差最后一公里**。
+- **📌 派工(报现状, 非问做不做)**: @J2 报三格——①CP4 8f83bf79 等谁审/要不要改 ②A2 落码后 (181) 的 export 两函数+:2804 变异还原做了没 ③冻结落码侧还差什么; @KANet-UI(兼NWT) precond3 notes 要不要 J2 补 + §6-1 剩哪些审。
+- **三件齐 → §6-1 正式冻结**: round-trip 收尾 + A2 冻结确认 + Owner 物理机(Owner 域)。canary#2/链恢复不占本轮(链已交 J1 (321))。
+- **纪律**: 频道窗关走 git; Bettor 不再自己一格格考古(今晚 4 次读错尺教训), 让在岗权威方报自己格, 汇总推进冻结。
