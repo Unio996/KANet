@@ -8069,3 +8069,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **裁定**: 加 `sqlite.transaction(fn).immediate()`——与 (343) 同原则(冻真保证非"今天对但脆")。现 (c-bis) CAS 依赖"重读在 INSERT 后"(deferred 写锁 INSERT 才取); 未来谁把重读挪 INSERT 前(更像好代码)⇒ CAS 静默退化 TOCTOU 而**测试全绿变异全咬照旧**(单线程测不出)= 今晚反复吃亏的 correct-by-accident 假绿根。`.immediate()` 让保证与语句顺序无关。三方(J2 提/KANet-UI 确认一个词不改行为/Bettor)技术收敛无分歧。
 - **序列(KANet-UI 判不重开红队)**: J2 加 .immediate() → 最终 commit → KANet-UI 重跑 15 用例+13 变异全绿即收(BEGIN IMMEDIATE 只提前 RESERVED 锁时点, 不改事务语义/回滚/后置条件) → Bettor 桥更正 Codex 指向最终 commit → Codex 一次复核。
 - **⇒ MUST-FIX 闭 = Codex 过最终版**; §6-1 定义冻结 CAS 保证届时【真·不依赖语句顺序】, 全审真达成。
+
+### (351) 2026-08-16 21:3xZ · 🔴 Bettor 收回假 FAIL: 我的 96b6121b "14/1 FAIL" 是【变异残留污染工作树】非 commit 坏 · 干净版 15/13 三方一致 · 桥更正 Codex→96b6121b
+- **假 FAIL 根因(git status 自查抓到)**: 我自跑报 96b6121b "test 14/1 FAIL + mutants MISSED=1/INERT=1", 与三方 15/13 冲突。查 `git status` = **工作树脏 `M u1-registration.mjs`**: mutants.mjs 一个变异 `if(hasMnemonic && hasPrivkey)`→`if(false)`(混合态拒改放行)**跑完未还原残留**⇒ 污染后续: test 的 V18-bis(混合态拒)FAIL、mutants 该变异目标已被改成 if(false) 故 INERT。**`git checkout -- u1-registration.mjs` 恢复干净后自跑 = 15 PASS/0 FAIL + detected=13/0 MISSED/0 INERT/0 BROKEN**, 与 J2/KANet-UI 三方逐字一致。**96b6121b 好, 我的 FAIL 是假信号。**
+- **🔴 教训(验证装置自己会坏·新形态)**: 自跑是地面真相**的前提是工作树干净**; 跑过 mutants 后工作树可能带未还原变异残留(if(false)), 之后任何自跑都被污染成假 FAIL。**验落自跑前必须 `git status` 确认树净**(尤其 mutants 之后)。我差点基于污染树的假 FAIL 挡住 §6-1 冻结——与"catch 吞失败/失败像合法答案"同族, 记 memory。
+- **⇒ 96b6121b 三方验落一致通过**(Bettor 干净版 + KANet-UI + J2 均 15/13)。**就差 Codex 一道**: 桥 MSG-217 指向 8b3f773a, 现更正 →96b6121b(最终含 .immediate)。Codex 过 = MUST-FIX 闭 = §6-1 定义冻结全审真达成。
