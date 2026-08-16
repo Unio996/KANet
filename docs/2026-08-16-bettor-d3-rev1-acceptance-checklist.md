@@ -30,6 +30,7 @@
 - [ ] 签名域分隔绑定 market_id + 版本 + scope + digest + **一次性/防重放**语义（旧签名不能复用到别 market/版本）。
 - [ ] T-SIGN 路径 arm 后不得让同一 relay 既选策略内容又自授权（enforce pinned-pubkey 独立验签闭掉"driver 自检自己制品"洞）。
 - [ ] 依据: 签名工具复用 D-010 基建(`coord-status-sign.mjs`)；权威=Owner 终端逐字 GO digest（Bettor (293) 提案，待 Codex 终确）。
+- [ ] 🔴 **Codex (6d2d8607) 补强**: E 的一次性/防重放**不能是勾选框, rev1 必须做成机器可验证**——确切签名 canonical bytes/域 + market/版本/scope/digest 绑定 + **fail-closed verifier/state 规则**阻止"已消费/已被取代的裁决"被复用。prose 勾选不算该属性的证据。
 
 ## F. Leg B 真委员路径（Codex (293)⑤/MSG-215 面5）
 - [ ] 无条件排除通过**真 `reDeriveCommittee`**（poolMerkleRoot 锚定树）验证，非 standalone selector fixture。
