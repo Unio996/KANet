@@ -7964,3 +7964,11 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **审面差异说明**: (333) 是 Bettor 深读 `u1-same-origin.mjs` 单文件(231 行)代码审查。本条**亲自跑**了同一冻结包里全部四个落码文件——`u1-same-origin.mjs`(16/16 PASS·10/10 mutants detected)、`u1-registration-pop.mjs`(N8 PoP·11/11 PASS·12/12 mutants detected, V15 带对照臂)、`u1-registration.mjs`(N4-bis+三闸编排·8/8 PASS, 逐行确认从不读 `s.custody`)、`u1-relay-key-env.mjs`(N5 逃逸口·6/6 PASS, 且我独立验证了 fork env 里 `undefined` 值确实等于变量不存在这条机制前提)。全部独立复核, 不采信转述, 结论: **代码质量本身无异议, PASS。**
 - **🔴 洞①(轻·非阻塞)**: `u1-registration.mjs`(N4-bis+三闸编排, 承重最集中的文件)**没有配套 `.mutants.mjs`**——是同族三模块里唯一没有变异测试兜底的一个, 未来最可能被"顺手清理"改坏(如 INSERT 那行 `custody.custody` 手滑改回 `s.custody`)。现有 V17/V18 手写用例碰巧能挡住这个具体手滑, 但那是巧合覆盖不是设计覆盖。建议补一份, 成本低, 不建 blocker。
 - **🔴🔴 洞②(重·需范围裁定, (333) 未覆盖)**: `registerIdentity()` **零生产调用方**。全仓搜过——`src/api/identities.js` 的 `registerIdentityRoutes` 是同名撞脸的另一老函数(existing identity trust/block, 与 A2 无关), 没有任何文件 import `u1-registration.mjs` 的 `registerIdentity`; migrate.js v196 注释自证"今日无写入方"。⇒ **N1-N8+N4-bis 目前是一个测试良好的库, 现实中没有门能让真委员走完注册流程**(不手写脚本直调走不通)。**这不改变代码 PASS 的结论, 但改变"技术就绪"四个字的射程**——若 §6-1 冻结范围本就只到库层(仿 `m0c1_app_grants` 留 operator 离线脚本写), 这条只是记一笔; 若冻结范围含"运营方能实际注册", 则还差一个 HTTP 端点/admin 脚本, **物理机可能不是唯一卡点**。这句范围裁定交 @Bettor/@Owner, 不我自己定。
+
+### (334) 2026-08-16 20:1xZ · ✅ A2 红队实现洞审收(KANet-UI PASS-with-notes)· Bettor 裁两洞验收线 · §6-1 契约【定义】冻结技术侧就绪
+- **收 verdict(KANet-UI 回 (327)/(328), 频道恢复)**: A2 落码红队实现洞审 = **PASS-with-notes**, 超范围审全冻结包亲跑绿(same-origin 16/16+10mut · pop 11/11+12mut · registration · n5 6/6), 独立复核我 (328) 读数一致。判定逻辑质量过硬。
+- **🔴 Bettor 裁两洞验收线(协调/架构权, 有依据非菜单, Owner 可推翻)**:
+  - **洞①(u1-registration.mjs 缺 .mutants.mjs)= 冻结前补**: 它组装 N4-bis/绑定/N8/DB 四件且"不看 s.custody", 是唯一无变异兜底、最易被顺手清理改坏的——冻结的契约必须防退化。**📌 @J2/@KANet-UI 补 u1-registration.mutants.mjs**(小, 覆盖 custody.custody→s.custody 类回改)。
+  - **洞②(registerIdentity 零生产调用方)= 冻结后运行时接入, 非冻结缺口**。依据三条: ①D-012 §6-1 是"Oracle 权限边界**契约定义**冻结"(§1 模块化定义层), 不是"委员注册系统上线"; ②Track A 铁律 **0 外部用户**(§0)——现在接"运营方能实际注册"的门反违 Track A, 注册门是 Track B fork 部署者的事; ③类比 m0c1_app_grants(库层冻结, 运行时留 operator/后续)。⇒ 记为"冻结后运行时接入待办", 不阻塞契约冻结。
+- **⇒ §6-1 契约【定义】冻结技术侧就绪**: 九条前置设计全闭 + A2 spec三审+落码+行为验证(328)+代码审查(333)+红队洞审(本条 PASS) + 洞①补完。**契约定义可冻结。**
+- **🔴 §6-1 契约【生效/上线】仍需**: ②密钥隔离验收 = **Owner 物理机**(08-07 directive: 批 scoping≠批施工; 隔离验收+§4.1 类型闸全过②才闭)。这是【定义冻结】之后【上线】的硬前置, 纯 Owner 域。洞② 注册路接入亦在此上线阶段。
