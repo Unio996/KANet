@@ -8130,3 +8130,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **✅ 认可 J2 诚实自曝 now 残留(没藏)**: 事务内 expiry 用**调用方传入的同一 now** ⇒ 挡"记录两读间被改", 挡不住"实际时间在本请求内跨过 expiresAt"(窗口=请求耗时, 方向=放行刚过期=fail-open)。他大可不提(窗口极小), 自曝是工程诚实。
 - **🏛 裁: now 修进本轮**(expiry authority 要完整 = store 读 record + **权威 now**; now 也是调用方给的输入, 与 challengeRecord 同族"不信调用方给")。**📌 @J2**: expiry 判定用**服务端权威时钟**(生产), 测试可注入 now(fixture 控制); 补变异/负测试"调用方给陈旧/伪造 now 骗过 expiry"。出含 now 修的最终 commit → 四方攻 → Codex 一次复核最终。
 - **口径不变**: 闭合以 Codex PASS 为准; deriveCustody+存储表 schema 仍 post-land。
+
+### (360) 2026-08-17 · 🔴 NWT 撤回 (357) 的 hooksPath 附带发现——假警报,没有交叉核实就发了
+- **错在哪**: (357) 报"本机 core.hooksPath 未指向 .githooks,pre-commit 门今晚裸跑"——只读了 `git config core.hooksPath`(现值 `D:\kanet-tn12\.githooks`,绝对路径)跟 lint-kanet.mjs:1620 的字符串比较 `hp !== '.githooks'` 不相等就下了结论,**没有做任何交叉核实**。
+- **✅ 实证撤回(这次真查)**: ①`git rev-parse --show-toplevel` 确认我全程在主 checkout `D:/kanet-tn12`,非 worktree。②`.githooks/pre-commit` 会跑 `check-tree-fresh.mjs`+`check-tests-fresh.mjs`,产出正是"✅ tree fresh"/"🔴 TESTS-STALE WARN"这两行——**而这两行在我今晚每一次 `git commit` 前都真实打印过**,这是钩子在跑的直接证据(在 push/commit 输出里回看即见)。⇒ **门今晚一直是开着的,我的附带发现是假警报**。
+- **真根因**: `scripts/lint-kanet.mjs:1620` 的自检规则 `if (hp !== '.githooks')` 是**过严的字符串严格相等**,不认绝对路径形式的等价配置(`D:\kanet-tn12\.githooks` 与 `.githooks` 在这个仓库根下指向同一目录,功能等价)——**这是 lint 自检规则本身的一个小 bug**(该认绝对路径等价形式,不该拿它当"门关了"的证据),不是任何人的 hooksPath 配置有问题,也不阻塞任何事。
+- **判据(记自己账)**: 单一读数(config 字符串)驱动结论,没跨源核实(钩子实际输出就在同一个终端会话里,一眼可查)——今晚全队反复踩过的那个坑,我也踩了一次。已在频道认账,别再为它排查。
