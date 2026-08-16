@@ -8097,3 +8097,15 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **🏛 审结 SOUND(对齐 Codex A)**: ①`createChallengeStore(sqlite,table)` 工厂 + 模块私有 **WeakMap(store→handle)**——外部无法伪造 WeakMap 成员资格 = **真结构拒**非可绕字段检查; ②registerIdentity 改收 challengeStore(不再收松散 read/consume, **消除"调用方给假函数"面**=Codex readChallenge 撒谎那条), 校验 store∈WeakMap 且绑定 handle===sqlite 否则拒 CHALLENGE_STORE_UNBOUND; **CAS 语义 `UPDATE...WHERE used_at IS NULL`(SQL 层原子, 比前置读更强)**; ③三负测试(裸对象/别的 handle/省略)④实两连接并发测试(文件库第二连接抢先 consume)。表 schema post-land(工厂要求表已存在不碰 migrate)= Codex"schema post-land, 事务域现冻"。
 - **📌 一条审意见(J2 落码带上)**: CAS `UPDATE WHERE used_at IS NULL` **必须检查 affected rows**——0 行=已消费=拒+整笔回滚; 只发 UPDATE 不看 changes ⇒ CAS 静默失败又成恒真闸(与"消费函数啥也没做"同族)。配变异"consume 不看 affected rows"。
 - **⇒ 流转**: @J2 落码 A + affected-rows 检查 + 三负测试 + 真两连接并发 → @KANet-UI 红队真攻 → Codex 复核。**闭合以 Codex PASS 为准(不预判)。**
+
+### (357) 2026-08-17 · ✅ NWT 审 M0a allowlist 新条目 `TFW-u1-registration-two-connection` = PASS,放行(账 356 裁定路由)
+- **背景**:J2 交付 Codex option A(挑战存储结构绑定同一 SQLite 事务域,`u1-challenge-store.mjs` WeakMap 工厂 + `registerIdentity` 改收 `challengeStore`)。新增的真两连接并发测试(A-3/D 两格)触发 M0a 裸 sqlite import 门,Bettor (356) 裁走 allowlist 通道(不删测试不绕闸),路由 NWT 审。
+- **✅ 独立核实(现读代码,非采信转述)**:
+  - `u1-challenge-store.mjs` 全文读过:表名白名单正则防注入、消费用 `UPDATE ... WHERE used_at IS NULL` 真 SQL 级 CAS、`WeakMap(store→handle)` 无外部写入口,`isStoreBoundTo` 判据不可伪造。
+  - `u1-registration.mjs` diff 读过:`challengeStore` 必传→`isStoreBoundTo` 结构核验→事务内前置读/消费/后置读,`.immediate` 使写锁与语句顺序无关。
+  - `u1-registration.test.mjs` diff 读过:(A-2)裸对象伪造 store 被拒(验证结构闸非鸭子类型)· (A-3)**真** store 但绑在另一个 `new Database(dbPath)` 连接上被拒(直接测 Codex 说的跨事务域)· (D)另一真连接**实际 UPDATE 掉挑战**后主路径前置读正确拦住(补上 (c-bis) 未证明的真并发)。
+  - **DB 路径核实**:`dbPath` 源自 `mkdtempSync` 临时目录 + 文件自带 `assert.ok(dbPath.startsWith(dir))` 安全闸,两个新连接开的是同一份**临时**文件,全文零 live `console.db` 路径硬编码。
+  - **content_digest 核对**:现文件 sha256 = manifest 记录值 `5a519a2...` 逐字节一致。
+  - **lint 核实**:`node scripts/lint-kanet.mjs` 对三个文件 0 errors(M0a 门通过)。
+- **🔵 附带发现(不阻塞本条,已知会拖慢下一个人如实标)**:同一次 lint 输出报 `R-HOOKSPATH-ARMED`——本机 `core.hooksPath` 未指向 `.githooks`,pre-commit lint 门今晚在本机是**关着的裸跑状态**(2026-07-23 在册同族复发)。本机今晚多个 agent 的 commit 可能都没走过 lint 校验。我不改 git config(铁律),报给 @Bettor/操作员:一次性 `git config core.hooksPath .githooks` 可修。
+- **📌 verdict**:`TFW-u1-registration-two-connection` **PASS**,放行。@KANet-UI 可继续走 (356) 排的下一步(独立攻这份最终 commit → Codex 复核)。
