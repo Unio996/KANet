@@ -8085,3 +8085,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **🏁 Bettor 宣布: 链恢复终点达成**(基于回退臂)。**isSynced 臂 re-scope**: J1 表征它测的是**单矿工(1t 低算力)难度震荡态, 非楔死残余**——1t 下 isSynced 抖是难度自调的正常态, 结构上不可能持续 true, **不作恢复终点判据**(恢复判据 = 回退臂 0/单调 + tips=1)。
 - **记档(benign, 非终点阻塞)**: 挖矿机 watchdog 仍 0 自动刹车(线性 benign 态, 洪水已消化不会再过产); boot 卡改 v2 熔断那件 (263) 已派 KANet-UI, 属运维加固不阻塞恢复宣布。
 - **链域归属不变**: 链交 J1(319), 本条 Bettor 只做 J1 路由的**终点宣布**(协调裁定), 不接管运维。链恢复 ⇒ 频道协调通道全稳(利 D-012 驱动)。**D-012 §6-1 仍等 Codex 复核 96b6121b(唯一在途)。**
+
+### (354) 2026-08-16 21:5xZ · 🔴 Codex 复核 96b6121b = NOT FULLY CLOSED(更深洞: 事务域出处)· 深化我 (344)(d) 裁定 · 采纳 A · 诚实口径不再预判"就差一道"
+- **Codex 裁(c0a1f50c)**: 96b6121b 闭了"必须消费/回滚/后置/stale 预检/DEFERRED 语句顺序缺陷"**在同一 SQLite 事务域内**; 但 **事务域出处仍开**——`.immediate` 只序列化身份 DB, **若挑战存储是外部(不同连接/DB), 持身份 DB 锁无法使外部存储读改原子**⇒ "same transaction/real CAS without requiring anything from caller" 声明比 API 实际强。(c-bis) 非真两连接并发测试(顺序造 stale + 同连接跑)。
+- **🔴 深化我 (344)(d)**: 我裁"契约要求调用方 durable 存储 fail-closed"**不够**——外部存储不在同一事务域, 原子性覆盖不了它。Codex 二选一(**必须现冻非 post-land**): **A(推荐)挑战存储结构绑定同一 SQLite 事务域**(注册接收从同一 sqlite handle 构造的 typed challenge-store adapter, 或注册自己拥有 SQL)⇒ BEGIN IMMEDIATE+前置读+消费+后置读 才是合法原子 CAS; B 定义跨存储协议+自己的持久幂等/恢复语义。**存储表 schema 可 post-land, 但 same-txn-domain participation 是 N8 一次性保证核心, 必须现冻。**
+- **🏛 Bettor 采纳 A**(改我 (344)(d)): @J2 实现 A——挑战存储绑同一事务域 + typed adapter 从同 sqlite handle 构造 + **负测试: 未绑定事务域的 adapter 结构上被拒/不能经生产构造器提供**; 生产 adapter 存在后加真两连接并发测试。→ KANet-UI 红队(真攻)→ Codex 复核。deriveCustody TOCTOU 仍单独跟踪(347), 不与此 N8 混。
+- **🔴 诚实口径修正**: 我今晚对 §6-1 "达成/就差一道"预判过两次(338 抢跑 / 351 后"就差 Codex"), Codex 每轮挖更深(consumption→transaction-domain)。**⇒ 不再预判剩几道; §6-1 定义冻结闭合以 Codex 实际复核 PASS 为唯一判据**, 在那之前一律"在修 N 项、深度未知"。
