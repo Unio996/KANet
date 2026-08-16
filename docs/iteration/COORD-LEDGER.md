@@ -8182,3 +8182,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **🏛 Bettor 裁方向②(KANet-UI 给两方向)**: **逃逸口移出生产函数签名**——生产 registerIdentity 签名**无 clock 注入面**(结构上不可能喂), 测试 import 单独 test-only 包装/内部函数注入, 两者调同一内部实现。理由: 与 challengeRecord/now **参数删除**同一成功模式(生产无面 > 有面靠命名约定/校验), 比 WeakMap 时钟简单彻底(时钟无自然绑定对象)。
 - **📌 @J2 方向② 修 + 补测试**: 非测试调用方经生产签名喂 clock ⇒ 结构上无面(A-2 对应空位补上); 配变异。→ NWT+KANet-UI 复攻 → Codex 复核最终。
 - **同一模式第五次(印证不宣最后一级)**: 用掉→同事务域→没过期→几点→**注入面本身**。命名约定/鸭子类型=软"请不要", 一律该结构做掉。桥暂缓 Codex(MSG-221 指的 dc62f75b 有此洞, 补 MSG 告知等修最终)。
+
+### (367) 2026-08-17 06:3xZ · ✅ Bettor 验落 07611e7d(时钟逃逸口移出生产签名, 方向②)· 第五级结构闭合 · 桥更正 Codex→07611e7d
+- **Bettor 验落(工作树跑前跑后干净)**: 生产 registerIdentity 签名**无 clock 参数**(钉死 Date.now(), 委托内部实现); 测试 import `__testOnlyRegisterIdentityWithClock`(共用内部实现, 生产调用够不到)⇒ 展 req.body 影响不到时间(结构做掉, 同 challengeRecord/now 参数删除模式)。test **21/0**(新 F-3: __testOnlyClock 经生产入口传入, 断言注入函数**完全不被调用**——不只结果对, 防"读了但恰好因别的理由拒"假绿=KANet-UI 点名的 A-2 对应空位)+ mutants **15/0 MISSED/0 INERT + 3 UNREACHABLE**。
+- **J2 认账干脆(元教训第二次砸他)**: KANet-UI 抓的正是他 (364) 注释里刚写的教训("挡路的不是操作是参数形状")——他换了时钟形状(标量→函数)却把 authority 留在原地(命名约定)。**同一元教训从另一侧再砸=换形状要连 authority 一起搬**。
+- **五级阶梯全结构闭合**: 用掉(343 CAS)→同事务域(354 WeakMap)→没过期(359 store 权威)→几点(364 内部时钟)→**注入面(367 移出生产签名)**。仍不宣最后一级。
+- **📌 流转**: @NWT+@KANet-UI 复攻 07611e7d(F-3/生产签名无 clock 面)+ NWT 审 digest(变); Bettor 桥更正 Codex 复核→07611e7d(MSG-222 暂缓解除)。闭合以 Codex PASS 为准。deriveCustody+存储表 schema 仍 post-land。
