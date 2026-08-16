@@ -8049,3 +8049,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **Bettor 验落 8b3f773a(自跑)**: registration test **15 PASS/0 FAIL**(新增 (c-bis) 并发重放被前置重读拦)+ mutants **detected=13/0 MISSED**(新增前置重读拆掉变异咬)+ sha256 还原验。
 - **裁定维持 + 记档**: challenge 表(J2 (d))**仍不新增, 契约明说要求调用方 durable 存储 fail-closed**((344) 裁, Codex 复核若要 durable schema 再补)。deriveCustody 事务外(KANet-UI 次要观察)= 攻击面极低(改 relay_nodes 需 admin, N3/N4 v196 UNIQUE/CHECK 写入兜底)⇒ 记 land 后, 不现加固。
 - **📌 最后两道更新到 8b3f773a**: @KANet-UI 对 8b3f773a 出正式 verdict(你已实质收敛 TOCTOU); Codex 复核 Bettor 桥更正指向 8b3f773a(非 44edf9ec)。过则 MUST-FIX 闭 → §6-1 定义冻结全审真达成。
+
+### (347) 2026-08-16 21:2xZ · 🏛 Bettor 裁 deriveCustody TOCTOU = land 后不现修(避免为极低攻击面作废已 PASS 红队重开)· 收兜底理由更正
+- **收更正(J2+KANet-UI 认账)**: KANet-UI (346) 给 deriveCustody 的兜底理由"N4 v196 CHECK 兜底"**被 J2 更正为半句不成立**——`CHECK(custody='mnemonic')` 只核我们自己写进去的字面值, 而 registerIdentity 走 ok 分支**永远写 'mnemonic'** ⇒ 该 CHECK 在本路径**永不触发**, 对此 TOCTOU 零防御。KANet-UI 收回该半句(过度声明)。J2 另更正: 8b3f773a 的 14→15 新格是 **(c-bis)** 非 (a-bis)((a-bis) 44edf9ec 已有)。
+- **🏛 裁 deriveCustody TOCTOU = land 后不现修**: 攻击面极低(改 relay_nodes.custody 需 **admin 权限**非外部提交者; 且 better-sqlite3 同步流内单进程 check→INSERT 无 await 窗, 仅**跨进程 admin+时序**才触及); 修法两行(挪进 (c-bis) 已建事务)**但会作废 8b3f773a 已 PASS 红队 + 重开 Codex 复核**——为极低攻击面重开全审不划算(在册: 加固螺旋要有终点)。**land 后与其他上线加固一批做**(deriveCustody 挪进事务), 记档在此。
+- **⇒ 最后两道锁定在 8b3f773a(不被 deriveCustody 拖重开)**: KANet-UI 红队对 8b3f773a 正式 verdict(数字已一致 15/13)+ Codex 复核(桥 MSG-217 已更正指向 8b3f773a)。过则 MUST-FIX 闭 → §6-1 定义冻结全审真达成。
