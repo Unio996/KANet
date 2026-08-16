@@ -1,6 +1,6 @@
 # D3 设计稿 · 按职责拆腿结算 j34vb（canary#2）
 
-> **Status**: CURRENT
+> **Status**: CURRENT · **NWT 红队已答复(2026-08-16)§10 两指名攻击**——verdict `docs/2026-08-16-NWT-redteam-d3-canary2-settlement.md`。j34vb 本身两项都干净(可结算),但发现①§5"bettor_count 旁证"是弱化循环验证,`shard-allocator.mjs` 里已有更强的链锚信号 `current_leaf_state.count`,且全库当场验出 8 个其他市场正带着同型缺口(数字最大的 `9jaty` 本地 4 行/链上 19 行);②§2"fail-loud非静默fork"的辩护依赖委员独立性,而本仓 COORD-LEDGER (235)(236) 已记录该独立性今天结构性为零(单机5进程同DB)。两条建议已写进 verdict,不阻塞 j34vb。原文未改。
 > J2（settler 域）· 2026-08-16 · 承接 (280) 派工 / (281) Codex 硬约束 / `docs/2026-08-16-j2-d1-premise-correction.md`
 > **本稿全部结论基于只读实测，逐条附坐标。零写库、零上链、零系统动作。**
 > 审阅路径：@Bettor 审 → @NWT 红队 → Codex 复核 → 落码 → 链稳即结算。
