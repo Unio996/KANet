@@ -37,6 +37,14 @@ const MUTANTS = [
     (s) => s.replace('if (!bind.ok) return { ok: false, code: REG_REJECT.BINDING_INVALID, reason: bind.reason };', 'if (false) return null;')],
   ['③N8 PoP 闸拆掉(签名/挑战不合格也继续走)',
     (s) => s.replace('if (!pop.ok) return { ok: false, code: REG_REJECT.POP_FAILED, reason: `${pop.code}: ${pop.reason}` };', 'if (false) return null;')],
+  // ── (364): 时钟 authority ──
+  ['🔴 时钟改回收调用方的 now(退回 (364) 原病: 伪造 now 同时骗过两处过期检查)',
+    (s) => s.replace("  const clock = typeof __testOnlyClock === 'function' ? __testOnlyClock : () => Date.now();", "  const clock = typeof __testOnlyClock === 'function' ? __testOnlyClock : () => (arguments[0]?.now ?? Date.now());")],
+  ['事务内不再重取时钟(退回用 PoP 那一刻的时间)',
+    (s) => s
+      .replace('  const clock = typeof __testOnlyClock ===', '  let __popSnap = null;\n  const clock = typeof __testOnlyClock ===')
+      .replace('now: clock(), verifyMessageFn });', 'now: (__popSnap = clock()), verifyMessageFn });')
+      .replace('    const nowTx = clock();', '    const nowTx = __popSnap;')],
   // ── (359): 签发/过期 authority ──
   ['🔴 record 改回收调用方给的(退回 (359) 原病: 伪造/未过期 record 骗过 PoP)',
     (s) => s.replace('  const storeRecord = challengeStore.read(s.challenge);', '  const storeRecord = arguments[0]?.challengeRecord ?? challengeStore.read(s.challenge);')],

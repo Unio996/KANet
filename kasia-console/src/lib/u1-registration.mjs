@@ -42,8 +42,15 @@
 //    ⇒ 他可以递一个【伪造的 / 未过期的】record 骗过 PoP, **即使 store 里那条早已过期或已用**。
 //    ⇒ ⑤ `challengeRecord` 参数**删除**; record 由本模块从 bound store 现读(唯一来源, 不比对不兜底);
 //      ⑥ 事务内**除 usedAt 外还查 expiresAt**(第二次、在写锁之内), 过期即 `CHALLENGE_EXPIRED` 回滚。
-//    🔨 这三层是同一个主题的三问: **谁有权说"它被用掉了" / "它和身份表在同一事务里" / "它还没过期"** ——
-//       每一层我都以为已经收完了, 每一层 Codex 都往上游再问一次"这个事实的出处是谁"。
+//
+// 🔴 **(364) 第四级 —— 谁有权说"现在几点"**(@KANet-UI 抓, 我没想到; @Bettor 裁结构做掉不走书面要求):
+//    过期链两处都直接信调用方传入的 `now` ⇒ 一个把 `now` 接成客户端请求体里时间戳的调用方,
+//    能用同一个伪造值**同时**骗过 PoP 与事务内重检(两处都信它, 不是各自量一次)。
+//    ⇒ ⑦ `now` 参数**删除**, 模块自取服务端时钟; 测试注入点是 `__testOnlyClock`
+//      (带 `__testOnly` 前缀 = 生产调用方没有面可以喂时间)。
+//    🔨 **四级同一主题**: 谁有权说"它被用掉了" / "它和身份表在同一事务里" / "它还没过期" / "现在几点"。
+//    🔨 而四级里有三级的修法**都不是"在 spec 里要求调用方"**, 是把它在**结构上**做掉 ——
+//       (343)(354) 两次证明"契约要求调用方提供 X" = 冻一个假保证; 第四级本来差点又走上那条路。
 //    ⚠ 验签(async)留在事务**外**先跑: better-sqlite3 的事务是同步的, 里面不能 await。
 //    ⚠ 表 schema 可 post-land; `createChallengeStore` 要求表**已存在**, 不自建、不碰 migrate.js。
 import { rootFingerprint, verifyRegistrationBinding } from './u1-same-origin.mjs';
@@ -98,14 +105,19 @@ export function deriveCustody(sqlite, relayId) {
  * @param {object} a
  * @param {object} a.sqlite            better-sqlite3 句柄
  * @param {object} a.submission        { relayId, rootXpub, identityIndex, identityPubkeyXOnly, challenge, signature, ...(custody 若有, 一律忽略) }
- * @param {Date|number} a.now
  * @param {object} a.challengeStore     **必传**: 由 `createChallengeStore(【同一个】sqlite handle, table)` 造。
  *                                     未绑定同一事务域 ⇒ 拒 `CHALLENGE_STORE_UNBOUND`(理由见文件头 (354) 那段)。
  *                                     store 自己拥有 SQL(消费是 CAS), 调用方没有机会把它写成非 CAS。
  * @param {function} [a.verifyMessageFn]   仅测试注入
+ * @param {function} [a.__testOnlyClock]   **仅测试注入**的时钟(返回 ms)。生产不传 ⇒ 走 `Date.now()`。
+ *                                     (364): 时间的 authority 不归调用方 —— 名字里的 `__testOnly` 就是它的用法边界。
+ *                                     它被调用**两次**(PoP 前 / 事务内), 测试可让两次返回不同值来打那个窗口。
  */
-export async function registerIdentity({ sqlite, submission, now, challengeStore, verifyMessageFn } = {}) {
+export async function registerIdentity({ sqlite, submission, challengeStore, verifyMessageFn, __testOnlyClock } = {}) {
   const s = submission || {};
+  // 🔴 (364) 时钟 authority: **不从调用方收 now**, 本模块自取服务端时钟。
+  //    注入点带 __testOnly 前缀且只在测试里用 —— 生产调用方没有面可以喂时间。
+  const clock = typeof __testOnlyClock === 'function' ? __testOnlyClock : () => Date.now();
 
   // ① N4-bis —— 注意: **完全不看 s.custody**
   const custody = deriveCustody(sqlite, s.relayId);
@@ -143,7 +155,7 @@ export async function registerIdentity({ sqlite, submission, now, challengeStore
   const storeRecord = challengeStore.read(s.challenge);
 
   // ②-b N8 PoP —— 用 store 取出来的 record 验(含 usedAt / expiresAt 两项)
-  const pop = await verifyRegistrationPop({ submission: s, challengeRecord: storeRecord, now, verifyMessageFn });
+  const pop = await verifyRegistrationPop({ submission: s, challengeRecord: storeRecord, now: clock(), verifyMessageFn });
   if (!pop.ok) return { ok: false, code: REG_REJECT.POP_FAILED, reason: `${pop.code}: ${pop.reason}` };
   // ③ 落库 + 消费 —— **同一事务**。N3/N4 由 v196 的 UNIQUE/CHECK 在写入那一刻兜底。
   const fp = rootFingerprint(s.rootXpub);
@@ -170,12 +182,15 @@ export async function registerIdentity({ sqlite, submission, now, challengeStore
     // 🔴 (359): 事务内**同样要查过期**, 不只查 usedAt。
     //    ②-d 的 PoP 已经用 store record 验过一次过期, 这里是**第二次、在写锁之内**再验一次 ——
     //    因为那两次之间 store 里的 expiresAt 仍可能被改(它是一张普通表)。
-    //    ⚠ 诚实边界: 本检查用的是**同一个 `now`**(调用方传入的请求时刻) ⇒ 它挡的是
-    //       "记录本身在两次读之间变了", **挡不住**"真实时间在本次请求内跨过了 expiresAt"。
-    //       后者的暴露窗 = 单次请求耗时(进程内微秒级), 且方向是**放行一个刚过期的**, 不是放行一个已用的。
-    //       要连它也挡住, 得让 `now` 在事务内重取 —— 那会让注入 `now` 的用例失去可确定性, 故未做, 明写于此。
+    //    🔵 **(364) 之后这里【重取一次时钟】** —— 上一版我在这写过一条诚实边界:
+    //       "用的是同一个 now, 挡不住真实时间在本次请求内跨过 expiresAt", 并说明"重取会破坏注入 now 的确定性"。
+    //       **把 now 改成内部时钟之后, 那个代价没了**: 注入的是一个【函数】, 测试可以让它两次返回不同值,
+    //       既能重取、又仍然确定。⇒ 那条残留一并闭掉, 不再是残留。
+    //    🔨 记一句: 我当时把"做不到"写得太笃定了 —— 真正挡路的不是"重取"这件事,
+    //       而是我当时的**参数形状**(收一个标量 now)。**换了形状, 限制就不存在了。**
     const expMs = before.expiresAt instanceof Date ? before.expiresAt.getTime() : Number(before.expiresAt);
-    const nowMs = now instanceof Date ? now.getTime() : Number(now);
+    const nowTx = clock();
+    const nowMs = nowTx instanceof Date ? nowTx.getTime() : Number(nowTx);
     if (!Number.isFinite(expMs) || !Number.isFinite(nowMs) || expMs <= nowMs) {
       throw new _RegTxError(REG_REJECT.CHALLENGE_EXPIRED,
         `事务内重读: 挑战已过期或 expiresAt 不可读 ⇒ 拒, 整笔回滚(expiresAt=${before.expiresAt}, now=${nowMs})`);
