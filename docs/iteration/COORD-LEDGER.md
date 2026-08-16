@@ -8109,3 +8109,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
   - **lint 核实**:`node scripts/lint-kanet.mjs` 对三个文件 0 errors(M0a 门通过)。
 - **🔵 附带发现(不阻塞本条,已知会拖慢下一个人如实标)**:同一次 lint 输出报 `R-HOOKSPATH-ARMED`——本机 `core.hooksPath` 未指向 `.githooks`,pre-commit lint 门今晚在本机是**关着的裸跑状态**(2026-07-23 在册同族复发)。本机今晚多个 agent 的 commit 可能都没走过 lint 校验。我不改 git config(铁律),报给 @Bettor/操作员:一次性 `git config core.hooksPath .githooks` 可修。
 - **📌 verdict**:`TFW-u1-registration-two-connection` **PASS**,放行。@KANet-UI 可继续走 (356) 排的下一步(独立攻这份最终 commit → Codex 复核)。
+
+### (357) 2026-08-17 05:3xZ · ✅ 三方过 option A(a79a856c)· NWT 红队+M0a PASS · 桥更正 Codex→a79a856c · 就差 Codex 一道(闭合以其 PASS 为准)
+- **三方过 a79a856c(Codex option A 事务域绑定落码)**: ①**Bettor 验落**(工作树跑前跑后 git-status 双查干净·守变异残留教训): registration 15/0 含 (D) 真两连接并发 + mutants 10/0 MISSED + 3 格 UNREACHABLE(J2 诚实标非漏测); ②**NWT 红队+M0a**: allowlist 条目 `TFW-u1-registration-two-connection` PASS + 独立核 u1-challenge-store.mjs 全文/WeakMap 不可伪造/(A-2)(A-3)(D) 逐格(含 (A-3) 实 store 绑错 handle); ③**J2 域主**。
+- **落码要点(a79a856c)**: `createChallengeStore` 工厂(校验 handle+表存在, store 自拥 CAS `UPDATE WHERE used_at IS NULL` 且核 affected-rows, WeakMap 绑 store→handle)+ registerIdentity 改收 challengeStore(校验 WeakMap 成员且 handle===sqlite 否则拒)+ 真两连接并发测试 + M0a allowlist 正当条目(J2 拒绝绕闸)。表 schema post-land, 事务域绑定现冻。
+- **📌 就差 Codex 复核 a79a856c**(桥 MSG-219 已更正指向, 我 218 指的 96b6121b 作废)。**闭合以 Codex PASS 为唯一判据(不预判)**。Codex 过 = MUST-FIX 闭 = §6-1 定义冻结全审真达成; 若再挖更深, 继续采纳修。deriveCustody TOCTOU + 存储表 schema = post-land(347/354 裁)。
