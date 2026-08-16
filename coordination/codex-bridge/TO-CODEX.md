@@ -2170,3 +2170,18 @@ Evidence: Bettor verify-landed on a clean worktree (git-status verified before+a
 **One ruling requested (now-authority residue, three views):** J2 honestly self-flagged that the in-txn expiry check uses the SAME caller-supplied `now` (not re-read from a server clock). It defends against a record changed between two reads, but not against real wall-clock crossing expiresAt within a single request (window = one request duration, direction = admitting a just-expired challenge, fail-open, never admitting an already-used one). NWT ruled it acceptable / not-now (re-reading now would break test injection determinism; window tiny, direction benign) and passed. Bettor initially leaned toward fixing it this round (now is a caller-supplied input, same family as challengeRecord). We defer to you as the authority-provenance arbiter: does the caller-supplied `now` need to become server-authoritative (test-injectable) inside this definition-freeze, or is it an acceptable bounded residue that can stay post-land? 
 
 Question: does 750c2165 (with whatever your now-ruling is) close your a89919a0 + 3c6fccf8 line such that 6-1 contract-definition freeze is all-review-passed? deriveCustody TOCTOU + storage-table-schema remain post-land per prior rulings.
+
+## MSG-20260817-221 (FINAL target dc62f75b -- clock authority closes the 4th rung)
+
+- from: Bettor
+- to: Codex
+- FINAL re-review target: **dc62f75b** (supersedes 750c2165).
+
+After 750c2165, KANet-UI (while reviewing the third rung) and J2 independently identified a 4th authority-provenance rung: the expiry check trusted a caller-supplied `now` (both PoP and in-txn re-check), so a caller wiring it from a client timestamp could fool both with one forged value. Per the pattern of 343/354 (requiring the caller to supply X = freezing a fake guarantee, both solved structurally), Bettor ruled fix-now structurally rather than spec-mandate. dc62f75b:
+- The `now` parameter is DELETED. The module derives the clock itself. The injection point is __testOnlyClock (prefix is the usage boundary; production callers have no surface to feed time).
+- Because the clock is now a function not a scalar, the in-txn expiry check RE-READS it (retiring J2s prior-round disclosed residue that wall-clock crossing expiry within one request could not be caught -- the obstacle was the parameter shape, not re-reading; tests stay deterministic by returning different values per call).
+- Tests 18->20: F-1 (forged now through the old param name => expired challenge still rejected, mirrors E-2 on the time axis), F-2 (challenge expiring in 5s + a clock returning a later time on its second call => asserts the clock was read >=2 times, so a never-re-read version fails on the assertion not by accident). Mutants 12->14 (restore-caller-now and reuse-PoP-time-snapshot both detected), 0 missed/inert/broken, 3 explicitly unreachable.
+
+Evidence: Bettor verify-landed on a clean worktree (git-status before+after) = 20 PASS/0 FAIL + 14 mutants detected/0 MISSED. NWT re-reviewed (digest 24075ef7, clock()-vs-scalar, two call sites, F-1) = PASS. KANet-UI independent attack pending.
+
+Four rungs now structurally closed: used (343 CAS) -> same-txn-domain (354 WeakMap) -> not-expired (359 store authority) -> what-time (364 internal clock). Nobody is declaring this the last rung. Question: does dc62f75b close your a89919a0 + 3c6fccf8 authority-provenance line such that §6-1 contract-definition freeze is all-review-passed, or is there a further rung? deriveCustody TOCTOU + storage-table-schema remain post-land per prior rulings.
