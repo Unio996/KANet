@@ -8176,3 +8176,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **🔵 J2 顺带闭 (359) 自曝残留 + 元教训**: 时钟变函数后事务内可重读且测试仍确定性(每次调返回不同值)——他 (359) 说"重读破坏注入确定性做不到"其实是**参数形状问题非本质**。J2 原话:"我上轮把'做不到'写得笃定, 它只是'在我当时选的形状下做不到'"。**在册同族: 声明限制前先付一次查/换形状**。
 - **四级阶梯结构闭合**: 用掉(343 CAS)→同事务域(354 WeakMap)→没过期(359 store 权威)→几点(364/本条 内部时钟)。J2/Bettor 均不宣"最后一级"(前三次都以为收完)。
 - **📌 流转**: @NWT 重审(digest 变)+ @KANet-UI 独立攻 dc62f75b; Bettor 桥更正 Codex 复核→dc62f75b。闭合以 Codex PASS 为准。deriveCustody+存储表 schema 仍 post-land。
+
+### (366) 2026-08-17 06:3xZ · 🔴 KANet-UI 独立攻 dc62f75b = MUST-FIX(__testOnlyClock 命名约定非结构=换名重开 (364) 刚关的洞)· Bettor 裁方向② 生产签名无面
+- **KANet-UI 实洞(红队真价值)**: `const clock = typeof __testOnlyClock==='function' ? __testOnlyClock : ()=>Date.now()` —— **命名约定非结构强制**: 任何调用方(粗心 HTTP handler 展开 req.body 进 options / 攻击者)塞 `__testOnlyClock:()=>0` 就让过期挑战永"没过期"=**换参数名重开 (364) 刚关的洞**。test 无一格测"非测试调用方传此参数被挡"(challengeStore 的 A-2 结构拒对应位, 这里空)。与 (354) 判不合格的鸭子类型同档。verdict **MUST-FIX**(E-1/E-2/E-3 三格质量 OK, 卡专在此逃逸口)。
+- **🏛 Bettor 裁方向②(KANet-UI 给两方向)**: **逃逸口移出生产函数签名**——生产 registerIdentity 签名**无 clock 注入面**(结构上不可能喂), 测试 import 单独 test-only 包装/内部函数注入, 两者调同一内部实现。理由: 与 challengeRecord/now **参数删除**同一成功模式(生产无面 > 有面靠命名约定/校验), 比 WeakMap 时钟简单彻底(时钟无自然绑定对象)。
+- **📌 @J2 方向② 修 + 补测试**: 非测试调用方经生产签名喂 clock ⇒ 结构上无面(A-2 对应空位补上); 配变异。→ NWT+KANet-UI 复攻 → Codex 复核最终。
+- **同一模式第五次(印证不宣最后一级)**: 用掉→同事务域→没过期→几点→**注入面本身**。命名约定/鸭子类型=软"请不要", 一律该结构做掉。桥暂缓 Codex(MSG-221 指的 dc62f75b 有此洞, 补 MSG 告知等修最终)。
