@@ -8029,3 +8029,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **裁定: FIX(实现 durable single-use challenge consumption), 不 rescope**。理由: 一次性挑战消费的 unused→consumed 原子保证是 **N8 契约 API 内部的核心安全保证**(防注册重放), 不是"缺 HTTP 端点"那类可推后的上线接线; rescope 掉 = 弱化契约本身(冻结一个"一次性闸但实际非一次性"的契约 = 冻结一个假保证)。**契约要冻就冻真的。**
 - **📌 @J2 实现(注册域)**: `consumeChallenge` 从 optional+non-atomic 改为——注册成功**必须**要求挑战消费能力, 省略 fail-closed(非静默成功); unused→consumed 与身份注册**原子/事务**(或等强幂等不变量); 补变异咬 (a)省略消费 (b)验证后消费失败 (c)成功边界后重放。→ KANet-UI 红队 + Codex 复核。
 - **⇒ §6-1 定义冻结真实状态**: 三方过 + Codex 审出此 1 MUST-FIX, **裁定 FIX**; MUST-FIX 闭 + Codex 复核过 = 定义冻结全审真达成。冻结稿 FROZEN 标记加注"含 1 待闭 MUST-FIX(挑战消费), 裁 FIX"。**在它闭之前, §6-1 定义冻结是"技术近成、1 项在修", 不是 (338) 我说的"达成"。**
+
+### (344) 2026-08-16 21:1xZ · 🏛 Bettor 架构师审 J2 MUST-FIX 设计(动手前报备)= (a)(b)(c) SOUND + 裁 (d) 存储表 + 一条并发确认
+- **J2 认账质量高**: 他把"§4 判据有对应用例"读成"判据成立"(V16 测 verifyRegistrationPop 谓词"标 used 就拒", 但**没有东西让记录变 used** ⇒ 谓词恒实放行 = 在册"闸强度在调用点不在闸里"); 且自罚"KANet-UI 洞①一小时前报过同形状我读了还 grep 放行"。根因三层挖得比 Codex 深: ①optional 静默 ②非原子次序在后 ③**挑战存储根本不存在**(全库无 challenge 表)。
+- **🏛 审结 (a)(b)(c) SOUND**: (a) consumeChallenge 必传缺失 reject(CHALLENGE_CONSUME_MISSING)不静默=解①; (b) 同步+与 INSERT 同一 better-sqlite3 事务(pop async 留事务外先跑不阻塞原子性=对)=解②; (c) 事务内消费后经注入 readChallenge 重读 usedAt 未置则整笔回滚(防"消费函数啥也没做"恒实闸)=解 Codex "验证后消费失败"变异。形状批准。
+- **🏛 裁 (d) 存储表**: **不新增表**(J2 倾向), **但契约 spec 必须明说"registerIdentity 要求调用方提供 durable challenge 存储 + 原子 unused→consumed 消费, 缺/失败 fail-closed"** —— 与洞②/物理机同层(定义要求、实现上线)。若 Codex 复核认为 durable 必须含存储 schema, 再补 v197(那时定义内 schema)。
+- **📌 一条审意见(J2 落码带上)**: pop 验证(事务外)与消费(事务内)间的**并发/TOCTOU** 面显式验证——两注册抢同挑战 ⇒ 只一个成功(事务内原子消费 + (c) 后置条件应已覆盖, 但要有并发用例证)。
+- **⇒ 流转**: @J2 落 (a)(b)(c) + 并发用例 + 三变异 → @KANet-UI 红队 → Codex 复核 → MUST-FIX 闭 → §6-1 定义冻结全审真达成。
