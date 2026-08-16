@@ -37,9 +37,23 @@ const MUTANTS = [
     (s) => s.replace('if (!bind.ok) return { ok: false, code: REG_REJECT.BINDING_INVALID, reason: bind.reason };', 'if (false) return null;')],
   ['③N8 PoP 闸拆掉(签名/挑战不合格也继续走)',
     (s) => s.replace('if (!pop.ok) return { ok: false, code: REG_REJECT.POP_FAILED, reason: `${pop.code}: ${pop.reason}` };', 'if (false) return null;')],
-  // 一次性挑战的"用掉"必须真的持久化
-  ['成功后不再消费挑战串(一次性保证失守, 可重放)',
-    (s) => s.replace("  if (typeof consumeChallenge === 'function') await consumeChallenge(s.challenge);\n", '')],
+  // ── (343) MUST-FIX 之后新增五格: 一次性挑战消费契约的每一段都要被咬 ──
+  //    (Codex a89919a0 抓的原病 = optional + non-atomic; 修完必须证明"修的地方真的在挡")
+  ['fail-closed 闸拆掉: 不给消费能力也放行(退回 optional, 即原病)',
+    (s) => s.replace("  if (typeof consumeChallenge !== 'function' || typeof readChallenge !== 'function') {",
+      '  if (false) {')],
+  ['只要 consumeChallenge 不要 readChallenge(半套接线放行 ⇒ 空消费分辨不出来)',
+    (s) => s.replace(" || typeof readChallenge !== 'function'", '')],
+  ['后置条件拆掉: 消费后不再重读(空消费读成成功 ⇒ 又一个恒真闸)',
+    (s) => s.replace('    if (!after || !after.usedAt) {', '    if (false) {')],
+  ['消费抛错被吞(不回滚 ⇒ 已注册但挑战仍 unused)',
+    (s) => s.replace(
+      "    catch (e) { throw new _RegTxError(REG_REJECT.CHALLENGE_CONSUME_FAILED, `挑战消费失败, 整笔回滚: ${e?.message || e}`); }",
+      '    catch (e) { /* 吞掉 */ }')],
+  // 🔴 这一格直接摘掉事务本身 —— 它是"原子性"那格用例的对照臂:
+  //    没有它, (b) 只能证明"消费失败会返回 false", 证明不了"INSERT 真的跟着回滚了"。
+  ['摘掉事务(照旧版: 先提交 INSERT 再消费)⇒ 消费失败时 INSERT 已落库',
+    (s) => s.replace('  const runTx = sqlite.transaction(() => {', '  const runTx = ((__f) => __f)(() => {')],
 ];
 
 let det = 0; let miss = 0; let inert = 0; let broken = 0;

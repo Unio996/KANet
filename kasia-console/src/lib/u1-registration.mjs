@@ -12,8 +12,20 @@
 //      —— 即使上面两道将来被谁改松, 数据库这一层仍然拒。
 //
 // 🔵 **挑战串的签发与持久化【不在本模块】**(同 u1-registration-pop.mjs 的边界): 本模块收一个
-//    已查出来的 `challengeRecord`, 并在成功时调用 `consumeChallenge()` —— **调用方必须把"用掉"
-//    真的持久化**, 否则一次性就退化成可重放。这条写在这里, 因为它是本模块**管不到**的那一半。
+//    已查出来的 `challengeRecord`。
+//
+// 🔴 **(343) MUST-FIX 之后, 上面那句的后半截【已经不成立, 别照旧版理解】** ——
+//    旧版原话是"调用方必须把'用掉'真的持久化, 否则一次性就退化成可重放", 而它把保证**托付**给了调用方:
+//    `consumeChallenge` 是 optional(不传照样注册成功、静默不消费), 且消费发生在 INSERT **提交之后、事务之外**
+//    ⇒ 中途抛错/进程死 = 已注册但挑战仍 unused。Codex a89919a0 判: **冻结一个"一次性闸但实际非一次性"的契约
+//    = 冻结一个假保证**。@Bettor (343) 裁 FIX 不 rescope。
+//
+// 🔨 **现在的契约(本模块【自己】强制, 不再托付)**:
+//    ① `consumeChallenge` / `readChallenge` **都必传**, 缺一 ⇒ 直接拒(`CHALLENGE_CONSUME_MISSING`), **不静默成功**;
+//    ② 两者必须**同步**, 与 INSERT 跑在**同一个 better-sqlite3 事务**里 ⇒ 要么都提交要么都不提交;
+//    ③ 消费后在**同一事务内**用 `readChallenge` 重读并要求 `usedAt` 已置 —— 这条是为了让
+//       **"消费函数其实什么都没做"读不成成功**(否则又是一个恒真闸, 正是本次被抓的那个形状)。
+//    ⚠ 验签(async)留在事务**外**先跑: better-sqlite3 的事务是同步的, 里面不能 await。
 import { rootFingerprint, verifyRegistrationBinding } from './u1-same-origin.mjs';
 import { verifyRegistrationPop } from './u1-registration-pop.mjs';
 
@@ -24,7 +36,16 @@ export const REG_REJECT = Object.freeze({
   BINDING_INVALID: 'BINDING_INVALID',
   POP_FAILED: 'POP_FAILED',
   CONSTRAINT: 'CONSTRAINT',
+  // ── (343) MUST-FIX: 一次性挑战消费的三种拒因, 三种都【不落库】 ──
+  CHALLENGE_CONSUME_MISSING: 'CHALLENGE_CONSUME_MISSING',   // 没给消费/重读能力 ⇒ 拒(不静默成功)
+  CHALLENGE_CONSUME_FAILED: 'CHALLENGE_CONSUME_FAILED',     // 消费本身抛了 ⇒ 整笔回滚
+  CHALLENGE_NOT_CONSUMED: 'CHALLENGE_NOT_CONSUMED',         // 消费"成功"但重读仍非 used ⇒ 整笔回滚(防空消费)
 });
+
+// 事务内用的内部错误标记: better-sqlite3 事务靠抛异常回滚, 抛出后在外层按 code 分流。
+class _RegTxError extends Error {
+  constructor(code, reason) { super(reason); this.regCode = code; this.regReason = reason; }
+}
 
 const nonEmptyCol = (v) => typeof v === 'string' && v.trim() !== '';
 
@@ -55,10 +76,13 @@ export function deriveCustody(sqlite, relayId) {
  * @param {object} a.submission        { relayId, rootXpub, identityIndex, identityPubkeyXOnly, challenge, signature, ...(custody 若有, 一律忽略) }
  * @param {object|null} a.challengeRecord
  * @param {Date|number} a.now
- * @param {function} [a.consumeChallenge]  成功后调用; 调用方负责把"已用"持久化
+ * @param {function} a.consumeChallenge  **必传·同步**: (challenge) => void, 把 unused→consumed 持久化。
+ *                                       与落库同事务; 抛错 ⇒ 整笔回滚。
+ * @param {function} a.readChallenge     **必传·同步**: (challenge) => {usedAt}|null, 供事务内后置条件重读。
+ *                                       缺它就无法分辨"真消费"与"空消费" ⇒ 同样 fail-closed。
  * @param {function} [a.verifyMessageFn]   仅测试注入
  */
-export async function registerIdentity({ sqlite, submission, challengeRecord, now, consumeChallenge, verifyMessageFn } = {}) {
+export async function registerIdentity({ sqlite, submission, challengeRecord, now, consumeChallenge, readChallenge, verifyMessageFn } = {}) {
   const s = submission || {};
 
   // ① N4-bis —— 注意: **完全不看 s.custody**
@@ -75,19 +99,44 @@ export async function registerIdentity({ sqlite, submission, challengeRecord, no
   const pop = await verifyRegistrationPop({ submission: s, challengeRecord, now, verifyMessageFn });
   if (!pop.ok) return { ok: false, code: REG_REJECT.POP_FAILED, reason: `${pop.code}: ${pop.reason}` };
 
-  // ③ 落库 —— N3/N4 由 v196 的 UNIQUE/CHECK 在写入那一刻兜底
+  // ②-c 🔴 (343): 消费能力**必须在落库之前就具备**, 否则拒。
+  //      放在这里(验签之后、写库之前)是有意的: 拒的时候**一个字节都还没写**。
+  if (typeof consumeChallenge !== 'function' || typeof readChallenge !== 'function') {
+    return {
+      ok: false, code: REG_REJECT.CHALLENGE_CONSUME_MISSING,
+      reason: '注册要求一次性挑战消费能力: consumeChallenge 与 readChallenge 必须都是函数(fail-closed, 不静默跳过消费)',
+    };
+  }
+
+  // ③ 落库 + 消费 —— **同一事务**。N3/N4 由 v196 的 UNIQUE/CHECK 在写入那一刻兜底。
   const fp = rootFingerprint(s.rootXpub);
-  try {
+  const runTx = sqlite.transaction(() => {
     sqlite.prepare(`INSERT INTO u1_identity_registration
       (relay_id, root_fingerprint, root_xpub, identity_index, identity_pubkey_xonly, custody)
       VALUES (?, ?, ?, ?, ?, ?)`)
       .run(s.relayId, fp, String(s.rootXpub).trim(), s.identityIndex,
         String(s.identityPubkeyXOnly).trim().toLowerCase(),
         custody.custody);   // 🔴 服务端派生值, 不是 s.custody
-  } catch (e) {
+
+    // 消费: 抛错即回滚(连同上面那条 INSERT)
+    try { consumeChallenge(s.challenge); }
+    catch (e) { throw new _RegTxError(REG_REJECT.CHALLENGE_CONSUME_FAILED, `挑战消费失败, 整笔回滚: ${e?.message || e}`); }
+
+    // 🔴 后置条件: 事务内重读, 必须真的变成 used。
+    //    没有这一条, 一个【什么也不做】的 consumeChallenge 会读成成功 —— 那正是本次被抓的形状
+    //    (谓词对, 但没有东西让它的前提成立)。
+    const after = readChallenge(s.challenge);
+    if (!after || !after.usedAt) {
+      throw new _RegTxError(REG_REJECT.CHALLENGE_NOT_CONSUMED,
+        '消费后重读挑战仍非 used ⇒ 消费未真正持久化, 整笔回滚(空消费不算成功)');
+    }
+  });
+
+  try { runTx(); }
+  catch (e) {
+    if (e instanceof _RegTxError) return { ok: false, code: e.regCode, reason: e.regReason };
     return { ok: false, code: REG_REJECT.CONSTRAINT, reason: `落库被约束拒: ${e?.message || e}` };
   }
 
-  if (typeof consumeChallenge === 'function') await consumeChallenge(s.challenge);
   return { ok: true, rootFingerprint: fp, custody: custody.custody, verifiedWith: pop.verifiedWith };
 }
