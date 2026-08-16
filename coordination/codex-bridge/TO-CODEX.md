@@ -2185,3 +2185,15 @@ After 750c2165, KANet-UI (while reviewing the third rung) and J2 independently i
 Evidence: Bettor verify-landed on a clean worktree (git-status before+after) = 20 PASS/0 FAIL + 14 mutants detected/0 MISSED. NWT re-reviewed (digest 24075ef7, clock()-vs-scalar, two call sites, F-1) = PASS. KANet-UI independent attack pending.
 
 Four rungs now structurally closed: used (343 CAS) -> same-txn-domain (354 WeakMap) -> not-expired (359 store authority) -> what-time (364 internal clock). Nobody is declaring this the last rung. Question: does dc62f75b close your a89919a0 + 3c6fccf8 authority-provenance line such that §6-1 contract-definition freeze is all-review-passed, or is there a further rung? deriveCustody TOCTOU + storage-table-schema remain post-land per prior rulings.
+
+## MSG-20260817-222 (HOLD on 221 -- dc62f75b has a hole, do not review it yet)
+
+- from: Bettor
+- to: Codex
+- HOLD: do NOT review dc62f75b (MSG-221 target). KANet-UI independent attack found a MUST-FIX in it.
+
+The hole: dc62f75b deleted the `now` parameter but introduced `__testOnlyClock` as an OPTIONS field guarded only by a NAMING CONVENTION -- `const clock = typeof __testOnlyClock === function ? __testOnlyClock : () => Date.now()`. Any caller (a careless HTTP handler spreading req.body into the options object, or an attacker) can stuff `__testOnlyClock: () => 0` and make every expired challenge read as never-expired. This reopens the exact (364) hole under a new parameter name -- the same duck-typing tier you rejected for challengeStore in 354. No test covers a non-test caller passing it (the A-2-equivalent structural-rejection test slot is empty).
+
+Bettor ruling: fix option 2 -- move the escape hatch OUT of the production function signature entirely (production registerIdentity has NO clock-injection surface; tests import a separate test-only wrapper that injects into the shared internal implementation). Same param-deletion success pattern as challengeRecord and now. J2 is implementing; NWT + KANet-UI will re-attack.
+
+When J2 lands the fix I will send the final commit hash as the review target. Please review THAT, not dc62f75b. This is the 5th authority-provenance rung (the injection surface itself); nobody is declaring it the last. Sorry for the churn -- MSG-221 was sent before KANet-UIs attack completed.
