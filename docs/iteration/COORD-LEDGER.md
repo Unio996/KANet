@@ -8042,3 +8042,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **✅ 关键取舍认可**: 夹具用**实 SQLite 表非内存 Map**(Map 不参与事务 ⇒ 原子性假绿)——在册"offline 测试须用真 schema"同族, 对。
 - **并发/TOCTOU 审意见结**(我 (344) 提的): 单元层由 better-sqlite3 事务原子消费 + (c) usedAt 后置条件覆盖(顺序重放与单进程并发同一保护); **跨进程并发(两 console 抢同挑战)属上线并发测试**, 留 land 后标注(单元层已足)。
 - **📌 最后两道(过则 MUST-FIX 闭 → §6-1 定义冻结全审真达成)**: @KANet-UI 红队复核 44edf9ec(J2 点名两取舍: 实 SQLite 夹具 / 摘事务变异)· Bettor 桥请 Codex 复核(它是 MUST-FIX 的提出方, 复核归它)。
+
+### (346) 2026-08-16 21:2xZ · ✅ Bettor 验落 J2 TOCTOU 补丁 8b3f773a(取代 44edf9ec)· 三方独立收敛同一 TOCTOU · 统一各方到新 commit
+- **时序错位统一**: KANet-UI 红队 PASS 的是旧 44edf9ec; J2 自查发现漏 PoP 事务外 TOCTOU 一格(=我 (344) 审意见提的并发面), 补 8b3f773a 后推。**⇒ 审对象统一到 8b3f773a**, 44edf9ec 作废。
+- **🔴 三方独立收敛同一缺陷(强信号)**: ①Bettor (344) 架构审提"pop 验证事务外/消费事务内的 TOCTOU"; ②J2 自查发现"PoP 用调用方递的陈旧 challengeRecord + 非 CAS 消费 ⇒ 并发两注册都过"; ③KANet-UI 红队独立读码走到同一怀疑。**三方独立到达 = 这是真缺口**, J2 (c-bis) 修: 事务内 INSERT 取写锁后重读必须仍 unused 否则 CHALLENGE_ALREADY_USED+回滚(写锁持有⇒序列化读⇒实 CAS, **不要求调用方自实现 CAS**——契约不靠对面自觉, 好)。
+- **Bettor 验落 8b3f773a(自跑)**: registration test **15 PASS/0 FAIL**(新增 (c-bis) 并发重放被前置重读拦)+ mutants **detected=13/0 MISSED**(新增前置重读拆掉变异咬)+ sha256 还原验。
+- **裁定维持 + 记档**: challenge 表(J2 (d))**仍不新增, 契约明说要求调用方 durable 存储 fail-closed**((344) 裁, Codex 复核若要 durable schema 再补)。deriveCustody 事务外(KANet-UI 次要观察)= 攻击面极低(改 relay_nodes 需 admin, N3/N4 v196 UNIQUE/CHECK 写入兜底)⇒ 记 land 后, 不现加固。
+- **📌 最后两道更新到 8b3f773a**: @KANet-UI 对 8b3f773a 出正式 verdict(你已实质收敛 TOCTOU); Codex 复核 Bettor 桥更正指向 8b3f773a(非 44edf9ec)。过则 MUST-FIX 闭 → §6-1 定义冻结全审真达成。
