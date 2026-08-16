@@ -37,14 +37,21 @@ const MUTANTS = [
     (s) => s.replace('if (!bind.ok) return { ok: false, code: REG_REJECT.BINDING_INVALID, reason: bind.reason };', 'if (false) return null;')],
   ['③N8 PoP 闸拆掉(签名/挑战不合格也继续走)',
     (s) => s.replace('if (!pop.ok) return { ok: false, code: REG_REJECT.POP_FAILED, reason: `${pop.code}: ${pop.reason}` };', 'if (false) return null;')],
+  // ── (366): 逃逸口必须在生产签名【之外】 ──
+  //    ⚠ 这三格的锚点随 (366) 改签名一起换过 —— 旧锚点已不在文件里, 留着会变 INERT(等于什么都没测)。
+  ['🔴 把时钟逃逸口搬回生产签名(退回 (364) 的命名约定档: 调用方塞同名字段即可伪造时间)',
+    (s) => s.replace(
+      '  return _registerIdentityWithClock(args, () => Date.now());',
+      "  return _registerIdentityWithClock(args, typeof args?.__testOnlyClock === 'function' ? args.__testOnlyClock : () => Date.now());")],
   // ── (364): 时钟 authority ──
-  ['🔴 时钟改回收调用方的 now(退回 (364) 原病: 伪造 now 同时骗过两处过期检查)',
-    (s) => s.replace("  const clock = typeof __testOnlyClock === 'function' ? __testOnlyClock : () => Date.now();", "  const clock = typeof __testOnlyClock === 'function' ? __testOnlyClock : () => (arguments[0]?.now ?? Date.now());")],
+  ['🔴 生产入口改收调用方的 now(退回 (364) 原病: 伪造 now 骗过过期检查)',
+    (s) => s.replace(
+      '  return _registerIdentityWithClock(args, () => Date.now());',
+      '  return _registerIdentityWithClock(args, () => (args?.now ?? Date.now()));')],
   ['事务内不再重取时钟(退回用 PoP 那一刻的时间)',
     (s) => s
-      .replace('  const clock = typeof __testOnlyClock ===', '  let __popSnap = null;\n  const clock = typeof __testOnlyClock ===')
-      .replace('now: clock(), verifyMessageFn });', 'now: (__popSnap = clock()), verifyMessageFn });')
-      .replace('    const nowTx = clock();', '    const nowTx = __popSnap;')],
+      .replace('now: clock(), verifyMessageFn });', 'now: (globalThis.__popSnap = clock()), verifyMessageFn });')
+      .replace('    const nowTx = clock();', '    const nowTx = globalThis.__popSnap;')],
   // ── (359): 签发/过期 authority ──
   ['🔴 record 改回收调用方给的(退回 (359) 原病: 伪造/未过期 record 骗过 PoP)',
     (s) => s.replace('  const storeRecord = challengeStore.read(s.challenge);', '  const storeRecord = arguments[0]?.challengeRecord ?? challengeStore.read(s.challenge);')],

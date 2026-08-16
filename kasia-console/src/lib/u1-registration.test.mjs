@@ -23,7 +23,7 @@ const { verifyMessage } = await import('kaspa-wasm');
 const realVerifyMessage = (args) => verifyMessage(args);
 const { deriveIdentityPubkey, rootFingerprint } = await import('./u1-same-origin.mjs');
 const { buildPopPayload, popMessageHashHex } = await import('./u1-registration-pop.mjs');
-const { registerIdentity, deriveCustody, REG_REJECT } = await import('./u1-registration.mjs');
+const { registerIdentity, deriveCustody, REG_REJECT, __testOnlyRegisterIdentityWithClock } = await import('./u1-registration.mjs');
 const { createChallengeStore } = await import('./u1-challenge-store.mjs');
 
 let pass = 0; let fail = 0;
@@ -395,16 +395,37 @@ await t('(F-2) 🔴 (364) 时钟在事务内【重取】: 真实时间在请求�
   sqlite.prepare('UPDATE _test_challenge SET expires_at = ? WHERE challenge = ?').run(base + 5_000, ch);   // 5 秒后过期
 
   let calls = 0;
-  const r = await registerIdentity({
-    sqlite, submission: submissionFor(relayId, id, ch), ...wire(st),
+  const r = await __testOnlyRegisterIdentityWithClock(
+    { sqlite, submission: submissionFor(relayId, id, ch), ...wire(st) },
     // 第 1 次(PoP 前)= 还没过期; 第 2 次(事务内)= 已经跨过 expiresAt
-    __testOnlyClock: () => { calls += 1; return calls === 1 ? base : base + 10_000; },
-  });
+    () => { calls += 1; return calls === 1 ? base : base + 10_000; },
+  );
   assert.ok(calls >= 2, `时钟必须被取【两次】(PoP 前 + 事务内), 实际 ${calls} 次 ⇒ 事务内没重取, 本格判据失效`);
   assert.strictEqual(r.ok, false, '时间在请求内跨过 expiresAt 仍注册成功 ⇒ 事务内没重取时钟');
   assert.strictEqual(r.code, REG_REJECT.CHALLENGE_EXPIRED, `必须由事务内 expiry 重检拦下, 实际 ${r.code}: ${r.reason}`);
   assert.strictEqual(sqlite.prepare('SELECT COUNT(*) n FROM u1_identity_registration WHERE relay_id = ?').get(relayId).n, 0, '拒了却落了库');
   assert.strictEqual(st.read(ch)?.usedAt, null, '拒的路径不该消费掉挑战');
+});
+
+await t('(F-3) 🔴 (366) 生产入口塞时钟【无效】: 这一格是 A-2 在时间维度上的对应物', async () => {
+  // 🔴 @KANet-UI 点名的空缺: challengeStore 有 (A-2)「伪造的假 store 必须被拒」,
+  //    而时钟这边**当时没有对应的一格** —— 所以 (364) 的  是纯命名约定, 没人测过它挡不挡。
+  //    (366) 把逃逸口搬出生产签名之后, 这一格才有意义: 塞进去的字段【根本不会被读】。
+  const relayId = insRelay({ mnemonic: 'enc-m-clock-esc' });
+  const id = makeIdentity();
+  const ch = 'ch-clock-escape';
+  const st = chStore(); st.issue(ch);
+  sqlite.prepare('UPDATE _test_challenge SET expires_at = ? WHERE challenge = ?').run(Date.now() - 60_000, ch);
+  let called = 0;
+  const r = await registerIdentity({
+    sqlite, submission: submissionFor(relayId, id, ch), ...wire(st),
+    // ← 模拟一个把 req.body 展开进来的粗心 handler / 故意构造这种输入的攻击者
+    __testOnlyClock: () => { called += 1; return 0; },   // 想让永远没过期成立
+  });
+  assert.strictEqual(called, 0, '🔴 生产入口竟然调用了调用方给的时钟 ⇒ (364) 的洞换个名字又开着');
+  assert.strictEqual(r.ok, false, '🔴 塞进来的时钟让过期挑战通过了');
+  assert.strictEqual(r.code, REG_REJECT.POP_FAILED, `实际 ${r.code}: ${r.reason}`);
+  assert.strictEqual(sqlite.prepare('SELECT COUNT(*) n FROM u1_identity_registration WHERE relay_id = ?').get(relayId).n, 0, '拒了却落了库');
 });
 
 sqlite.close();

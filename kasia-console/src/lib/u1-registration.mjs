@@ -109,15 +109,31 @@ export function deriveCustody(sqlite, relayId) {
  *                                     未绑定同一事务域 ⇒ 拒 `CHALLENGE_STORE_UNBOUND`(理由见文件头 (354) 那段)。
  *                                     store 自己拥有 SQL(消费是 CAS), 调用方没有机会把它写成非 CAS。
  * @param {function} [a.verifyMessageFn]   仅测试注入
- * @param {function} [a.__testOnlyClock]   **仅测试注入**的时钟(返回 ms)。生产不传 ⇒ 走 `Date.now()`。
- *                                     (364): 时间的 authority 不归调用方 —— 名字里的 `__testOnly` 就是它的用法边界。
- *                                     它被调用**两次**(PoP 前 / 事务内), 测试可让两次返回不同值来打那个窗口。
  */
-export async function registerIdentity({ sqlite, submission, challengeStore, verifyMessageFn, __testOnlyClock } = {}) {
+export async function registerIdentity(args = {}) {
+  // 🔴 (366) 生产入口**不接收任何时钟**, 也不看 args 里有没有类时钟的字段 ——
+  //    时钟由这里【钉死】成服务端 `Date.now()`, 调用方在这条路上没有任何面可以影响它。
+  //    ⇒ 就算有人把 `req.body` 整个展开进来, 也影响不到时间判定。
+  return _registerIdentityWithClock(args, () => Date.now());
+}
+
+/**
+ * 🔴 **仅测试可用的时钟注入入口 —— 生产代码禁止 import 本导出**。
+ * (366) @KANet-UI 抓: (364) 我把 `__testOnlyClock` 放在生产签名里, 那只是**命名约定**没有结构强制 ——
+ * 任何调用方(含把 `req.body` 展开进 options 的粗心 handler)塞一个同名函数就能伪造时间,
+ * **等于把 (364) 刚关掉的洞换个参数名重开了一次**。他判得对: 那和 (354) 被否掉的"鸭子类型检查"同一档。
+ * ⇒ 修法取他建议里更强的那条: **把逃逸口整个搬出生产签名**。
+ *   生产 `registerIdentity` 的签名里**不存在**这个参数, 测试改 import 本函数。
+ *   两者走同一份实现, 但**生产路径上没有这个参数名可写**。
+ * @param {object} args    同 registerIdentity
+ * @param {function} clock 返回 ms 的时钟; 被调用两次(PoP 前 / 事务内)
+ */
+export async function __testOnlyRegisterIdentityWithClock(args, clock) {
+  return _registerIdentityWithClock(args, clock);
+}
+
+async function _registerIdentityWithClock({ sqlite, submission, challengeStore, verifyMessageFn } = {}, clock) {
   const s = submission || {};
-  // 🔴 (364) 时钟 authority: **不从调用方收 now**, 本模块自取服务端时钟。
-  //    注入点带 __testOnly 前缀且只在测试里用 —— 生产调用方没有面可以喂时间。
-  const clock = typeof __testOnlyClock === 'function' ? __testOnlyClock : () => Date.now();
 
   // ① N4-bis —— 注意: **完全不看 s.custody**
   const custody = deriveCustody(sqlite, s.relayId);
