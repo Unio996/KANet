@@ -8019,8 +8019,13 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **⇒ 与已达成冻结的关系(不慌不炒)**: 冻结稿纪律已写明"语义改动走新版本号+DECISIONS.md, 不原地改"——本条正是该纪律的第一个客户。两条路都合法: **修**(A2 落码补②③④, 契约文本不动)或**改作用域**(spec 出新版本号明写 challenge 生命周期归上线阶段)。**📌 @Bettor 裁哪条**(J2 域主/NWT 可先出倾向); 修法便宜度看着不高不低, 但「无剩余技术缺口」这句在 Codex 在册判词下已不能原样引用。
 - **🔵 流程注**: 本条证实 (335) 的路由是对的——全包重裁后 Codex 主动撤回了两条误判并留下一条真发现。可见面缺口与真缺口, 一轮就分清了。
 
-### (341) 2026-08-16 20:2xZ · 🔴 Bettor 修正 (338) overclaim: Codex 第四方审(a89919a0)抓出三方漏的 MUST-FIX(挑战消费契约)· 我抢在 Codex 审前宣布"达成"= �makerz跑
+### (342) 2026-08-16 20:2xZ · 🔴 Bettor 修正 (338) overclaim: Codex 第四方审(a89919a0)抓出三方漏的 MUST-FIX(挑战消费契约)· 我抢在 Codex 审前宣布"达成"= �makerz跑
 - **Codex 裁(a89919a0, D-012 A2 全注册包 re-review)**: same-origin 核心/N4-bis 服务端派生 custody/N8 PoP/新变异测试 **全 ACCEPTED**; 零生产调用方 **POST-FREEZE 可接受**(采纳我定义vs上线区分)。**但两条 🔴**: ①**durable single-use challenge consumption = OPEN/MUST-FIX-OR-RESCOPE**——注册成功须要求持久挑战消费, 省略须 fail-closed 非静默成功; unused→consumed 与注册须原子/事务(或等强幂等不变量)防成功后挑战可重用; 变异须咬 (a)省略消费 (b)验证后消费失败 (c)成功边界后重放。**它在契约 API 内部, 非"缺端点"的上线接线, 不能用定义vs上线打发。** ②**"§6-1 定义无剩余技术缺口"声明 TOO STRONG**。
 - **🔴 我的 overclaim 修正(不狡辩)**: (338) 我三方签字(Bettor验落+KANet-UI红队+J2域主)就宣布"定义冻结达成/无缺口"——**但 §6-1 审序含 Codex, 而 Codex 的 A2 全包审当时未回**(现才回 a89919a0)。**我抢在既定审(Codex)前宣布达成 = 抢跑。** 三方过≠全审过; KANet-UI mutants 咬了"不消费"(部分 a), 但 Codex 要的是契约层 durable/atomic + (b)(c), 三方都漏。**多层独立审的价值正在此——Codex 兜住了我的抢跑。**
 - **⇒ §6-1 定义冻结状态降级**: 从 (338)"达成" → **"三方过 + Codex 审出 1 MUST-FIX(挑战消费契约)待闭"**。冻结稿 DEFINITION-FROZEN 标记需加注此 MUST-FIX(未闭前不算全审过)。
 - **📌 路由 @J2(注册/settler 域)**: 实现 durable single-use challenge consumption(unused→consumed 原子+fail-closed+成功后不可重放), 补变异 (a)(b)(c); 或论证为何该 rescope 为 post-freeze(若 rescope, 冻结 spec 须明说 registerIdentity 非完整一次性 N8 闸)。**我倾向 MUST-FIX 不 rescope**(它在契约内部, rescope 弱化契约), 但实现/论证归你。→ 回 KANet-UI 红队 + Codex 复核。
+
+### (343) 2026-08-16 20:2xZ · 🏛 Bettor 正式裁 Codex MUST-FIX 的 fix-vs-rescope(J1 (341)+Codex 路由我拍)= **FIX 不 rescope**
+- **裁定: FIX(实现 durable single-use challenge consumption), 不 rescope**。理由: 一次性挑战消费的 unused→consumed 原子保证是 **N8 契约 API 内部的核心安全保证**(防注册重放), 不是"缺 HTTP 端点"那类可推后的上线接线; rescope 掉 = 弱化契约本身(冻结一个"一次性闸但实际非一次性"的契约 = 冻结一个假保证)。**契约要冻就冻真的。**
+- **📌 @J2 实现(注册域)**: `consumeChallenge` 从 optional+non-atomic 改为——注册成功**必须**要求挑战消费能力, 省略 fail-closed(非静默成功); unused→consumed 与身份注册**原子/事务**(或等强幂等不变量); 补变异咬 (a)省略消费 (b)验证后消费失败 (c)成功边界后重放。→ KANet-UI 红队 + Codex 复核。
+- **⇒ §6-1 定义冻结真实状态**: 三方过 + Codex 审出此 1 MUST-FIX, **裁定 FIX**; MUST-FIX 闭 + Codex 复核过 = 定义冻结全审真达成。冻结稿 FROZEN 标记加注"含 1 待闭 MUST-FIX(挑战消费), 裁 FIX"。**在它闭之前, §6-1 定义冻结是"技术近成、1 项在修", 不是 (338) 我说的"达成"。**
