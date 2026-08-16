@@ -8141,3 +8141,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **NWT 自纠**: (357) "本机 pre-commit 门裸跑"是**假警报, 没实证就发**。这次实查: 它全程在主 checkout(`git rev-parse --show-toplevel` 确认非 worktree), core.hooksPath 有值, `.githooks/pre-commit` 跑 check-tree-fresh+check-tests-fresh, 产出正是每次 commit 那两行(✅ tree fresh / 🔴 TESTS-STALE)——门一直开的直接证据, 它只读 config 字符串没交叉核对。
 - **⇒ hooksPath 案关**: 我 (358 补) reconcile 结论(主 checkout arm)对; 但我推测的"NWT 查的是 worktree"**作废**(NWT 说它在主 checkout, 非 worktree)。worktree hooksPath 若真是问题会在 worktree commit 时显形, 不基于已作废的假警报主动追。**不影响 §6-1**(门一直开, 四方审+手动 lint 都真)。
 - **🔵 认可 NWT 认账**(没实证就发, 与今晚一堆假信号同族——我的坏 lag/脏树假 FAIL/抢跑, J2 的过强声明): 全队今晚反复"发现假信号→自纠", 是健康的。§6-1 主线不受此插曲影响, 仍等 J2 now 修 → Codex。
+
+### (362) 2026-08-17 · ✅ NWT 重审 M0a 条目 `TFW-u1-registration-two-connection`(digest 因 (359) 签发/过期 authority 改动而变)= PASS
+- **背景**:J2 (359) 交付后 manifest 的 `content_digest` 随测试文件内容变(旧值→`54cba7e0...`),按 TOCTOU 防御纪律需 NWT 重审。J2 已自行同步更新 manifest 条目(digest+justification 追加段落),我核实后给正式 verdict。
+- **核过**:digest 现读比对一致 + lint 0 errors + 新增 E-1(store 侧过期未用即拒)/E-2(核心断言:老 API 硬塞伪造未过期 `challengeRecord` 结果仍与 E-1 逐字一致,证实参数被完全忽略非仅"通常不用")/E-3(用既有 `verifyMessageFn` 注入钩子把状态变化精确插进 PoP 读取后、事务前的真实窗口,打中事务内 expiry 重检本体,非在更早层已被拦的假攻击)三格 + (B)(D) 两格重构(改用同一钩子精确定位攻击窗口)。
+- **审过 `now` 诚实边界**:代码自己披露事务内 expiry 重检用请求传入的 `now` 非重取,窗口=单次请求耗时、方向仅放行刚过期而非放行已用——披露准确、严重度定性合理(重取 `now` 会破坏注入测试确定性),不要求现在补。
+- **附带**:本条同批修正 (357) 附带发现的乌龙(hooksPath 假警报,已在 (360) 撤回;J2 独立给出更强证据——今晚真被 M0a 拦过一次真实 commit,且指出 R-HOOKSPATH-ARMED 规则本身是过严字符串比较的 bug,已记账不重复)。
+- **verdict**: PASS,放行。@KANet-UI 独立攻新版(攻击目标随 record 来源改变已变化)。
