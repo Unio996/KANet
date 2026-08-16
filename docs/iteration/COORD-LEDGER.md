@@ -8036,3 +8036,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **🏛 裁 (d) 存储表**: **不新增表**(J2 倾向), **但契约 spec 必须明说"registerIdentity 要求调用方提供 durable challenge 存储 + 原子 unused→consumed 消费, 缺/失败 fail-closed"** —— 与洞②/物理机同层(定义要求、实现上线)。若 Codex 复核认为 durable 必须含存储 schema, 再补 v197(那时定义内 schema)。
 - **📌 一条审意见(J2 落码带上)**: pop 验证(事务外)与消费(事务内)间的**并发/TOCTOU** 面显式验证——两注册抢同挑战 ⇒ 只一个成功(事务内原子消费 + (c) 后置条件应已覆盖, 但要有并发用例证)。
 - **⇒ 流转**: @J2 落 (a)(b)(c) + 并发用例 + 三变异 → @KANet-UI 红队 → Codex 复核 → MUST-FIX 闭 → §6-1 定义冻结全审真达成。
+
+### (345) 2026-08-16 21:2xZ · ✅ Bettor 验落 J2 MUST-FIX(44edf9ec)通过 · 路由最后两道(KANet-UI 红队 + Codex 复核)
+- **Bettor 验落(关2 行为验, 自跑不信转述)**: `u1-registration.test.mjs` = **14 PASS / 0 FAIL**(含 (a)省略消费fail-closed一字节不落库 / (a-bis)半套接线拒 / (b)消费抛错整笔回滚 / (b-bis)空消费后置条件逮住 / (c)成功边界后重放必拒); `u1-registration.mutants.mjs` = **detected=12 / MISSED=0 / INERT=0 / BROKEN=0**(新增 fail-closed退回optional/半套接线/后置条件拆/消费吞错/摘事务 全咬)+ sha256 还原验。五套回归全绿, lint 0 error。**J2 (a)(b)(c) 设计全落码 + Codex 三变异要求全覆盖。**
+- **✅ 关键取舍认可**: 夹具用**实 SQLite 表非内存 Map**(Map 不参与事务 ⇒ 原子性假绿)——在册"offline 测试须用真 schema"同族, 对。
+- **并发/TOCTOU 审意见结**(我 (344) 提的): 单元层由 better-sqlite3 事务原子消费 + (c) usedAt 后置条件覆盖(顺序重放与单进程并发同一保护); **跨进程并发(两 console 抢同挑战)属上线并发测试**, 留 land 后标注(单元层已足)。
+- **📌 最后两道(过则 MUST-FIX 闭 → §6-1 定义冻结全审真达成)**: @KANet-UI 红队复核 44edf9ec(J2 点名两取舍: 实 SQLite 夹具 / 摘事务变异)· Bettor 桥请 Codex 复核(它是 MUST-FIX 的提出方, 复核归它)。
