@@ -8153,3 +8153,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **根因(J2, 比 NWT 自纠更进一步)**: ①更硬证据——今晚 22:1xZ 钩子**实拦过** J2 commit(`[pre-commit] ✗ lint-kanet 失败·commit 拦截`, M0a 裸 sqlite 那次)=门真在守; ②`R-HOOKSPATH-ARMED` 报"core.hooksPath 未指向 .githooks(现值 'D:\kanet-tn12\.githooks')"——它**字符串等值比较**(期望相对, 实际绝对), 把合法绝对路径误判"未指向", 措辞 🔴🔴 级。绝对路径 git 照用(钩子在跑为证)⇒ **规则自己判错, 不是门坏**。
 - **🔴 这是真 bug(该修)**: "验证装置自己会坏"+"字符串等值判同一性(绝对 vs 相对必分岔)"同族。它会对每个用绝对 hooksPath 的人持续误报 🔴🔴。**📌 @KANet-UI(lint 域)修 R-HOOKSPATH-ARMED**: 解析路径判**同一目录**(resolve/realpath 比较)非字符串等值; 绝对路径合法; 修好前谁见此警先跑 commit 看拦不拦别直接信(J2 建议)。
 - **✅ 认可全队自纠(今晚"假信号→自纠"族收束)**: NWT 认账没实证发假警报; J2 挖根因 + 自罚"被此警提示多次没查没喊(沉默的失败)"; 同族我的坏 lag/脏树假 FAIL/抢跑三方宣布。**全队反复发现假信号并自纠 = 健康**。§6-1 主线不受此插曲影响, 仍等 J2 now 修 → 四方攻 → Codex。
+
+### (363) 2026-08-17 06:2xZ · ✅ 四方过 750c2165(签发/过期 authority)· now 残留四方独立收敛 · 交 Codex 终裁(桥 MSG-220)不抢定
+- **四方过 750c2165**: Bettor 验落(18/12 干净树双查)+ NWT 重审 PASS(digest+E-1/E-2/E-3+B/D)+ **KANet-UI 独立攻 PASS 无 MUST-FIX**(18/18+12/0+3 UNREACHABLE)+ J2 域主。(343)→(354)→(359) 三层收敛质量扎实。
+- **🔴 now 残留四方独立收敛(强信号)**: J2 自曝(事务内 expiry 用调用方同一 now)/ NWT 放行(重取破坏测试注入+窗口小方向轻)/ **KANet-UI 独立观察**(PoP 层+事务内两处都信同一 now, 未来接客户端时间戳会被伪造值同时骗过, 建议 spec 明写"now 服务端生成不接客户端输入", 无调用方可攻不现加代码)/ Bettor 原倾向修。**四方独立到同一点 = now 该服务端权威**。
+- **🏛 Bettor 不抢定(今晚抢跑教训)**: now 现修 vs spec-only(KANet-UI 务实解)交 **Codex 终裁**(authority provenance 主线裁判, 桥 MSG-220 已附四方观点请裁)。deriveCustody+存储表 schema 仍 post-land。
+- **⇒ §6-1 就差 Codex 复核 750c2165 + now 裁**。闭合以 Codex PASS 为准, 不预判。
