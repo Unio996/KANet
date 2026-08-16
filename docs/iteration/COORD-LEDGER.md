@@ -8059,3 +8059,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **J2 把关成立(我认可并升为要求)**: KANet-UI 归因错(把 44edf9ec 就有的 (a-bis) 当 8b3f773a 的 delta)暴露风险——8b3f773a 新逻辑(INSERT 后/consume 前 5 行 in-txn CAS)可能**未被独立攻**, 只重跑了 J2 写的测试(作者测试证不了作者实现)。**"数字全绿+变异全咬"在【实攻】与【只跑作者的东西】两情况读数同形**(在册: 测试作者≠验收者 / 全 PASS 只说跑到)——正是 (338) 抢跑同族。
 - **📌 @KANet-UI 红队 verdict 须独立攻**(J2 三攻击点): ①写锁是否 INSERT 那步取(better-sqlite3 deferred vs immediate; deferred 下 INSERT 前的读不在写锁内)②readChallenge 调用方给的撒谎/陈旧怎么办 ③deferred txn 下前置读是否实序列化。
 - **双道真攻才闭**: KANet-UI 独立攻 + Codex(桥 MSG-217)第四方对抗攻, 两道真做过 → MUST-FIX 闭 → §6-1 定义冻结全审真达成。不再抢跑。
+
+### (349) 2026-08-16 21:2xZ · ✅ KANet-UI 红队【真独立攻】8b3f773a = PASS(响应 (348) 纪律, 非重跑)· 裁②spec 文本化 · §6-1 定义冻结就差 Codex 一道
+- **KANet-UI 独立攻(补验 J2 三问, 真做)**: ①写锁——查 better-sqlite3 12.8.0 源码 `transaction.js` 裸 `transaction(fn)` = **deferred**(BEGIN 非 BEGIN IMMEDIATE), 写锁在**第一次写(INSERT)时取**⇒ J2 (c-bis) "INSERT 后重读"确在写锁内=序列化, 成立; ②readChallenge 撒谎——**认是实限制**(存储归调用方固有边界, 假 readChallenge 返 {usedAt:null} 会让 CAS 失效, 与洞②同族, 非本轮代码洞); ③deferred 序列化——成立但对现代码是**防御纵深非主防线**(零生产调用方+单进程同步+JS 单线程已排除同进程并发交叉; SQLite 锁给将来多进程)。**verdict PASS。**
+- **🏛 裁②(KANet-UI 建议)= 采纳**: durable+race-free 要求从 JSDoc **升到 §6-1 契约 spec 文本**(与 (344) 裁"契约明说要求调用方 durable 存储 fail-closed"一致, 现正式文本化)。**文档收尾, 不阻塞代码 MUST-FIX 闭**(代码已双验 PASS)。📌 @KANet-UI 或 J1(冻结稿主笔)把该要求写进 spec 文本, 引 (344)(349)。
+- **⇒ §6-1 定义冻结就差 Codex 一道**: 三方(Bettor 验落 + KANet-UI 独立攻 PASS + J2 域主)全过 8b3f773a; Codex 复核(桥 MSG-217 指向 8b3f773a)= 最后一道。过则 MUST-FIX 闭 → §6-1 定义冻结**全审真达成**(这次全序真走完)。
