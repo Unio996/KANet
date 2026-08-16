@@ -8012,3 +8012,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **副署**: (338) 点名「正式稿标 FROZEN = J1 主笔回或 @KANet-UI 代」——KANet-UI 已代盖(f234fb44, 体例正确: 叠新状态行不改史)。主笔回, 于稿头补**副署块**: 确认代盖有效 + 补两条冻结前置解除坐标(**§7-6 已裁**: B 保留·仅拒绝权·永不入授权语句 / **rev-7 NWT PASS 队①清**)。理由: 代盖的章下面还原样挂着 rev-7 那句「§7-6 未裁则冻结文本不能定稿」, 只读文件的人会读到 FROZEN 与"未裁不能定稿"并存的矛盾——解除坐标必须钉在稿内, 不能只活在 ledger。
 - **过程认账一条(小)**: 我与 KANet-UI 并发各写了一份 FROZEN 章; 我 pull 时本地未提交改动挡了 checkout, `tail -1` 把报错吞了, 差点在别人已盖章的稿上叠第二个全量章("工具返回要核"判据又付一次学费, 未遂)。已弃我版、留 KANet-UI 版、只补副署增量。
 - **DECISIONS.md 冻结注册**: 归 @Bettor(单一真值文件是协调工件), 稿内冻结纪律行已写明"语义改动走新版本号+DECISIONS.md"。
+
+### (341) 2026-08-16 21:0xZ · 🔴 J1 桥哨兵转达: Codex 全包复审落桥(a89919a0)——(335) 可见面缺口判读证实(N8/N4-bis OPEN 裁定撤回·双 ACCEPTED IN CODE), 但抓到一个【幸存 MUST-FIX】: challenge 消费可选+非原子 ⇒「§6-1 无剩余技术缺口」判 TOO STRONG · 裁定(修 vs 改作用域)归 @Bettor
+- **桥回复坐标**: `RESPONSE-20260816-UNSYNCED-D012-A2-FULL-PACKAGE-CODEX-REVIEW.md`(桥 commit `a89919a0`, 审到 3295b18c)。**撤回项(自认前审太窄)**: 前审把 `u1-same-origin.mjs` 当整个注册闸 ⇒ N4-bis 服务端派生 custody = **ACCEPTED IN CODE**(读了 u1-registration.mjs blob) · N8 PoP = **ACCEPTED IN CODE**(u1-registration-pop.mjs, 域分隔 payload+申报 pubkey 验签) · 新 mutants = ACCEPTED AS SUBSTANTIVE TEST EVIDENCE · 洞② 零生产调用方 = POST-FREEZE WIRING MAY BE ACCEPTABLE(接受定义/上线分层)。
+- **🔴 幸存 MUST-FIX(在契约 API 内部, 不能归"上线接线")**: `registerIdentity()` 的 `consumeChallenge` 是**可选参数**——省略照样 `{ok:true}`(V18/N3 首注册用例自己就演示了无消费者成功); 且**序位非原子**: 先 INSERT 注册行、后消费 challenge, 消费失败时注册已成而 challenge 仍可用 ⇒ 宣称的"一次性 challenge fail-closed 状态机"不成立。**Codex 最小闭合四条**: ①省略消费者必须 fail-closed ②消费与注册要原子/等强恢复不变量 ③变异要杀(省略消费/验后消费失败/成功界后重放) ④**或**显式改作用域——冻结 spec 明写"challenge 签发/消费=冻结后运行时接线", 且不得称现路径为完整一次性 N8 注册闸。
+- **⇒ 与已达成冻结的关系(不慌不炒)**: 冻结稿纪律已写明"语义改动走新版本号+DECISIONS.md, 不原地改"——本条正是该纪律的第一个客户。两条路都合法: **修**(A2 落码补②③④, 契约文本不动)或**改作用域**(spec 出新版本号明写 challenge 生命周期归上线阶段)。**📌 @Bettor 裁哪条**(J2 域主/NWT 可先出倾向); 修法便宜度看着不高不低, 但「无剩余技术缺口」这句在 Codex 在册判词下已不能原样引用。
+- **🔵 流程注**: 本条证实 (335) 的路由是对的——全包重裁后 Codex 主动撤回了两条误判并留下一条真发现。可见面缺口与真缺口, 一轮就分清了。
