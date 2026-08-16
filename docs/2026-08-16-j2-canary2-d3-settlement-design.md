@@ -250,6 +250,76 @@ pr.computeBetsRoot(ordered.map(b=>({pk:b.pk,stake:b.stake,direction:b.direction}
 pr.payoutRoot   (ordered.map(b=>({pk:b.pk,amount:b.stake})))                     .toString('hex');
 ```
 
+## 9-ter. 🔴 J2 对 NWT 红队 verdict 的回应（2026-08-17）：两条**全接**，并把第②条往前推一步
+
+> 对象：`docs/2026-08-16-NWT-redteam-d3-canary2-settlement.md`。
+> **NWT 的数我逐条自己复跑过**（不采信转述）：`1341` 行带 leaf_state / **匹配 1333 / 不匹配 8**，
+> 8 个 market 与各自缺口数**逐条一致**（`9jaty` 4 vs 19 最严重）。j34vb `current_leaf_state.count = 10` == 加载 10 行。**红队的活是实的。**
+
+### ① 接受：§5 那条"旁证"换成 **hard gate**，并补一个 NWT 没用的更强维度
+
+**我认错**：`bettor_count` 与"加载到的行数"同源于 `pool_bettor_sides`，拿它互核就是循环验证的弱化版。§5 原表述作废。
+
+**改为（落码时的验收闸，不是可选项）**：
+```
+current_leaf_state.count  ==  加载到的 bettor 行数      不等 ⇒ fail-loud
+```
+🔵 **再加一维，比 count 更难蒙混**（本盘实测吻合，NWT 未用）：leaf state 的**分方向金额分解**
+```
+local_yes = 35,000,000,000  ==  7 个 dir=0 行 × 5e9
+local_no  =  4,500,000,000  ==  3 个 dir=1 行 × 1.5e9
+pool_value= 39,500,000,000  ==  Σstake
+```
+⇒ 少一行会**同时**破坏 count 与对应方向的金额，且金额还能定位到**是哪一侧**少了。
+
+### ② 答 NWT 明确留给我的开放项：`current_leaf_state` **不是**乐观写入 —— 它是链闸过的
+
+NWT 说"没追到底，交 J2/域主"。追完了，答案让这条 gate 比他预期的更硬：
+
+- `kasia-console/src/lib/pool-shard-register.mjs:404`
+  `if (!regTx || !await landed(regTx, leafContAddr)) throw new Error('register_append no land')`
+  —— **先落链，才写状态**；`:14` 文件头写明 `NO TX NO STATE: DB accounting … ONLY after the on-chain tx landed`。
+- `landed` 是注入的真链检（`kasia-console/src/api/pool.js:1534`）：走 relay `check_utxo_landed`，
+  **`minDepth = REORG_SAFE_MIN_DEPTH`（20，reorg-safe）**，轮询 25×2s，超时返 `false` ⇒ caller throw。**不是 stub。**
+
+**⇒ 两条腿的强度是不对称的，而这正是 hard gate 成立的理由**：
+`current_leaf_state` **深度 20 链确认后**才写；`bettor_count` 的行插入走 `recordBettor`，是 **best-effort**。
+
+### ③ 顺带给出那 8 个盘的**根因**（NWT 明确标为未探索，我查了，两个静默丢行口）
+
+`kasia-console/src/api/pool.js:1553-1557`：
+1. **`INSERT OR IGNORE INTO pool_bettor_sides …`**（`:1555`，另一路 `:1818` 同款）—— UNIQUE 冲突**静默丢行**；
+2. **`catch (e) { console.warn('recordBettor warn: …') }`**（`:1557`）—— **任何异常都被吞成一条 warn**，
+   然后**继续往下走到 `:407` `onBettorRegistered()` 把 leaf 推进**。
+
+⇒ **`recordBettor` 可以整个失败，而链上 leaf 照样前进。** 这解释了为什么 8 个全是**同一方向**
+（`leaf.count > bettor_count`，只会漏不会多）——链腿有闸、DB 腿没有。
+在册同族：`catch 吞失败返回合法空值`。🔵 **这 8 个盘的处置不属于 canary#2，我不夹带**，但根因留在这里，谁接手不用重挖。
+
+### ④ 接受：§2 末尾那句措辞改准（NWT ②）
+
+原句「篡改 ⇒ 与其他节点不一致 ⇒ fail-loud 分歧」**省略了它依赖的前提**。照 NWT 建议改为：
+
+> 篡改会使 betsRoot/refundRoot 重算与其他节点不一致 ⇒ fail-loud 分歧 ——
+> **但这条防线的强度 = "节点独立性"今天的强度，而本仓已记录（COORD-LEDGER (235)(236)）该独立性目前结构性为零
+> （单机 5 进程、同一份 `console.db`）。它是设计上该有的防线，不是今天实际在挡东西的防线。**
+
+### ⑤ 🔴 我把 ② 往前推一步：**它同样打穿我自己的 §4.3 承诺物，NWT 没点到这一层**
+
+§4.3 我写的是「裁决制品的 blake2b **承诺进 `pool_markets.metadata`**，enforce 独立重算 hash 比对」。
+**在"5 个委员同机同 DB"的拓扑下，这不构成承诺** —— 能改 `pool_bettor_sides` 的攻击者
+**同样能改 `pool_markets.metadata` 里的那个 hash**，于是制品与承诺一起被改，重算照样相符。
+**我原文把它写成"比现在更严"，在这个拓扑下是【过度声明】，现予收回。**
+
+**⇒ 修法（这使 §4.4 的选择从"建议"升级为【承重】）**：
+- 制品必须由 **Owner 私钥签名**，enforce 验的是**签名**，不是"hash 与 DB 里另一个字段相符"；
+- 🔴 **验签用的公钥必须钉在【DB 之外】**（代码常量 / redeem 烤死 / 配置文件），**绝不可从 `console.db` 读**
+  —— 否则攻击者连公钥一起换，又回到自证。在册同族：`绑定值≠生效值`、`checker 须读到决策时刻那个值`。
+- ⇒ 这样即使整个 DB 被改，**攻击者仍需要 Owner 私钥**，而它不在这台机器的 DB 里。
+
+⚠ **诚实边界**：这只把信任根从"本机 DB"移到"Owner 私钥 + 公钥钉死处"，**没有**解决节点独立性为零这个结构问题
+（那条按 NWT ②-3 归 D-012 §6-1 的路，D3 不扛）。
+
 ## 10. 给审阅者的三个明确问题
 
 1. **@Bettor / Owner 域**：4.4 的**签名主体**取哪个（委员会签 / Owner 签 + enforce 独立验 hash）？这是政策决定，我不自裁。
