@@ -111,6 +111,16 @@
    "justification": "D-012 冻结前置④: handler 级『七场景各自零签名调用』measurement harness（J2, 2026-08-09）。裁定=选项1（Bettor 2026-08-08 18:09, #kouwx9.2）：白名单加第二个文件，不与 p5 共用同一文件同一 digest 锚——两者测的是不同命题（p5=阳性放行路径, 本文件=七场景阴性零签名+一条阳性对照), 混锚会让改一个引发另一个重审。裸 import 的必要性同 p5 机制本身：handler(`trade-protocol-filter.js:594` `sendCommandAsync(oracle.id,{type:'get_pubkey'})`)经 IPC 问 relay 要公钥, 无 relay 时请求直接 reject 被 handler 自己 catch(`:676` sign IPC fail)——『签名调用发生了但失败』与『闸拦住了』在读数上不可区分, 假 sink 把它变成可证伪读数(FAKE_SINK_LOG 逐条留痕 sign_input_for_settle 调用)。【定稿版, 01d2b80a, 取代首版占位 digest】J2 首版用 mkOut() 合成 tx 形状(裸 scriptPublicKey 字符串/缺 utxo 字段), NWT 与 J2 各自独立实跑撞到同一症状: 阳性对照 0 次——根因是 `settle-safe-json.mjs` 的 `new Transaction(parsed)`(真 kaspa-wasm 绑定)在合成形状上于闸之前就抛(WASM 侧非标准 Error, `.message` undefined), 六条阴性因【序列化失败】显示 0 次签名, 与『闸拦住了』读数同形——本仓已在册的『失败像合法答案』陷阱又一实例。定稿改用本机实抓 `phase2_tx_obj` 结构当底样(`fixtures/phase2-tx-sample/phase2_tx_obj.sample.json`, 仅 txid 替换为合成值), 每场景经 `withSpine`/`mkOutFrom` 只改被测那一处, 其余字段保持真实序列化器可接受的形状。另修一处环境时序 bug: `FAKE_SINK_LOG` 原写在逐场景循环内, 但子进程 env 在 `fork()` 那一刻即冻结, 循环内改动对已起的 sink 进程无效(首版遗留的 log 文件名跟场景 id 对不上, 全部落到以 relay 名命名的单一文件——NWT 独立复现过这个具体现象); 定稿改为 startRelay 前一次性设定共享路径 + 逐场景 truncate。sink 新增 `sign_input_for_settle`(显式伪造签名, 带 `__FAKE_SINK_NOT_A_REAL_SIGNATURE__`)与 `get_pubkey` 的 `FAKE_SINK_XONLY_PUBKEY` env 门控分支, 均为纯附加(未设 env 时逐字节行为不变)。NWT 独立复核: ①handler 引用行号(`:552-554`/`:594`/`:676`)逐行核对与当前源码一致；②`pool_markets`/`pool_committee` 全部 NOT NULL 列均在 INSERT 覆盖(PRAGMA 实读非猜)；③隔离守卫在任何生产模块 import 之前跑, guardFail 时整块跳过, 零生产触碰；④七场景每条只改 `phase2_tx_obj` 一处, 阳性对照排在阴性汇总断言之前防『零次』其实是『根本没跑到』；⑤第七场景 payout 篡改如实标 NOT-COVERED(候选 B 三锚点结构上看不见逐方分配, J1 precond6 v0.2 §4 已判), 不假装能过；⑥独立重跑 `p5_positive_via_fake_relay_sink.test.mjs`（已过审, 共用改动后的 fixture）确认零回归, PASS；⑦独立重跑本文件, 复现 J2 报的读数逐字一致: G0/G1/C0(阳性对照)三绿 + P4 命题本体红『6/6 条阴性场景仍被签名, 各 1 次』——这条红是 D-012 前置④的交付证据本体, 不是待修。零链上写 · 零生产 DB 写 · design-only harness。",
    "review_ref": "01d2b80a",
    "content_digest": "6275db4de47c0e510b618f5eefaf60b9d47fb1d5099254c6de846aeb7f948d0f"
+  },
+  {
+   "id": "TFW-u1-registration-two-connection",
+   "family": "sqlite",
+   "form": "const { default: Database } = await import(better-sqlite3)",
+   "path": "kasia-console/src/lib/u1-registration.test.mjs",
+   "capability": "m0c1-test-fixture-writer",
+   "justification": "(354) Codex c0a1f50c 判 96b6121b NOT FULLY CLOSED: 事务域出处仍开 —— .immediate 只序列化身份连接, 挑战存储若在别的连接/别的库, 我持的锁管不到它; 且我上一版 (c-bis) 是「顺序造 stale 记录 + 同连接跑」, 被 Codex 明确批为非真并发。@Bettor (355)(356) 采纳 Codex option A, 并裁定走本 allowlist 通道(不删测试、不绕闸)。 本文件因此需要【可写】的第二连接, 两格用途: (A-3) 用另一个 handle 造的【真】store(由 createChallengeStore 造、行为无可挑剔, 唯一问题是 handle 不同) 必须被 CHALLENGE_STORE_UNBOUND 拒 —— 这格直接测 Codex 说的跨事务域; (D) 另一连接【真的抢先 UPDATE 掉挑战】之后, 事务内前置读必须拦住 —— 这格补的正是 (c-bis) 没证明的跨连接原子性。 readonly 连接做不了 (D)(它要真写), 所以走 writer 档而非 self-serve readonly test-fixture。 威胁模型同 amendment#4 先例: 不是「零网络面」, 而是「会不会碰 live 数据」—— 机械兜底满足: DB 路径来自 mkdtempSync 临时目录(process.env.DB_PATH), 文件第 17 行有 assert.ok(dbPath.startsWith(dir)) 安全闸守着, 全文零 live console.db 硬编码路径串; 纯 *.test.mjs, 不被任何生产码 import。 读数: 15 PASS / 0 FAIL · 变异 10 detected / 0 MISSED / 0 INERT / 0 BROKEN (另 3 格明列为「结构上测不到」并附逐条理由 —— 不静默删、也不让它挂成永久 MISSED)。",
+   "review_ref": "ledger-356-bettor-ruling-a",
+   "content_digest": "5a519a23795c7f39a55424ac17d8f7ba87f0e328bdc5a72c7421cebb5472d51b"
   }
  ]
 }

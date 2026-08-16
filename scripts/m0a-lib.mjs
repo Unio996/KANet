@@ -103,6 +103,14 @@ export const TEST_FIXTURE_WRITER_CAP = 'm0c1-test-fixture-writer';
 export const TEST_FIXTURE_WRITER_ALLOWLIST = new Set([
   'kasia-console/test-framework/cases/m0c1-gate/g5-real-chain-smoke-regression.mjs', // G5 v2 regression, 写隔离 scratch/g5-regression.db
   'kasia-console/test/broker-onboarding-status-drop.test.mjs', // v194 broker_onboarding.status DROP regression, 纯 :memory: DB(5 处 new Database(':memory:'), 零 live 路径), NWT 审 2026-07-29
+  // ⬇ 2026-08-17 扩张 · @Bettor (356) 裁 (a) 走 allowlist / @NWT 审白名单条目 / Owner 知情记在 commit
+  //   为什么必须【可写】的第二连接(所以走 writer 档而非 self-serve readonly test-fixture):
+  //   Codex c0a1f50c 要求"真两连接并发"证 CAS 跨事务域 —— 一格用另一 handle 造真 store 必须被拒,
+  //   另一格要另一连接【真的抢先 UPDATE 掉挑战】。readonly 连接做不了后者, 那格就退化成我被批评过的
+  //   "顺序造 stale + 同连接跑"。⇒ 威胁模型同先例: 不是"零网络面", 是"会不会碰 live 数据"。
+  //   机械兜底满足: 库路径来自 mkdtemp 临时目录(process.env.DB_PATH), 且文件内有断言
+  //   `assert.ok(dbPath.startsWith(dir))` 守着, 零 live console.db 硬编码路径串。
+  'kasia-console/src/lib/u1-registration.test.mjs',
 ]);
 
 // ── considered amendment #5(2026-08-08, NWT 提案·Bettor 批·⑤(d) 阳性臂 fake relay sink)：

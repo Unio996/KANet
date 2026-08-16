@@ -20,14 +20,27 @@
 //    ⇒ 中途抛错/进程死 = 已注册但挑战仍 unused。Codex a89919a0 判: **冻结一个"一次性闸但实际非一次性"的契约
 //    = 冻结一个假保证**。@Bettor (343) 裁 FIX 不 rescope。
 //
-// 🔨 **现在的契约(本模块【自己】强制, 不再托付)**:
-//    ① `consumeChallenge` / `readChallenge` **都必传**, 缺一 ⇒ 直接拒(`CHALLENGE_CONSUME_MISSING`), **不静默成功**;
-//    ② 两者必须**同步**, 与 INSERT 跑在**同一个 better-sqlite3 事务**里 ⇒ 要么都提交要么都不提交;
-//    ③ 消费后在**同一事务内**用 `readChallenge` 重读并要求 `usedAt` 已置 —— 这条是为了让
-//       **"消费函数其实什么都没做"读不成成功**(否则又是一个恒真闸, 正是本次被抓的那个形状)。
+// 🔴 **(354) 之后, 上面那版契约【又被收窄了一次】—— 收两个自由函数是不够的**:
+//    Codex c0a1f50c 判 96b6121b NOT FULLY CLOSED。上一版我写"BEGIN IMMEDIATE + 前置读 + 消费 + 后置读
+//    = 真 CAS, 且不要求调用方自己实现 CAS" —— **那句话的作用域是错的**:
+//    `.immediate` 只序列化【身份表所在的那个连接】; 挑战存储若坐在**另一个连接 / 另一个库**上,
+//    我持的锁**管不到它**, 那四步就不是原子的。⇒ 原子性不是写法能挣来的, **它只在同一事务域内成立**。
+//    ⚠ 而我上一版的用例**没能让这句话变红**, 因为夹具用的就是同一个 handle 的表 —— 夹具替我满足了
+//       我没写出来的前提(在册: 注入物/对照臂必须能让声明失败, 否则绿灯无信息)。
+//
+// 🔨 **现在的契约(结构绑定, 不是检查)**:
+//    ① `challengeStore` **必传**, 缺 ⇒ 拒 `CHALLENGE_CONSUME_MISSING`, **不静默成功**;
+//    ② 它必须由 `createChallengeStore(sqlite, table)` 用**与本次注册同一个 sqlite handle** 造出来,
+//       否则拒 `CHALLENGE_STORE_UNBOUND` —— 判据是**模块私有 WeakMap 的成员资格**, 外部无法伪造
+//       (鸭子类型/Symbol 都可伪造 = 还是靠调用方自觉, 正是被判不合格的那一档);
+//    ③ 事务内: **前置读**(必须仍 unused, 防并发重放)→ 消费 → **后置读**(必须已 used, 防空消费);
+//       任一不满足 ⇒ 抛出 ⇒ INSERT 一并回滚;
+//    ④ 事务用 `.immediate`(BEGIN IMMEDIATE), 使写锁的取得**与语句顺序无关**。
 //    ⚠ 验签(async)留在事务**外**先跑: better-sqlite3 的事务是同步的, 里面不能 await。
+//    ⚠ 表 schema 可 post-land; `createChallengeStore` 要求表**已存在**, 不自建、不碰 migrate.js。
 import { rootFingerprint, verifyRegistrationBinding } from './u1-same-origin.mjs';
 import { verifyRegistrationPop } from './u1-registration-pop.mjs';
+import { isStoreBoundTo } from './u1-challenge-store.mjs';
 
 export const REG_REJECT = Object.freeze({
   RELAY_UNKNOWN: 'RELAY_UNKNOWN',
@@ -41,6 +54,7 @@ export const REG_REJECT = Object.freeze({
   CHALLENGE_CONSUME_FAILED: 'CHALLENGE_CONSUME_FAILED',     // 消费本身抛了 ⇒ 整笔回滚
   CHALLENGE_NOT_CONSUMED: 'CHALLENGE_NOT_CONSUMED',         // 消费"成功"但重读仍非 used ⇒ 整笔回滚(防空消费)
   CHALLENGE_ALREADY_USED: 'CHALLENGE_ALREADY_USED',         // 事务内前置重读发现已被并发用掉 ⇒ 拒(防并发重放)
+  CHALLENGE_STORE_UNBOUND: 'CHALLENGE_STORE_UNBOUND',       // store 不是本进程用【同一 sqlite handle】造的 ⇒ 拒(事务域不同=原子性不成立)
 });
 
 // 事务内用的内部错误标记: better-sqlite3 事务靠抛异常回滚, 抛出后在外层按 code 分流。
@@ -77,13 +91,12 @@ export function deriveCustody(sqlite, relayId) {
  * @param {object} a.submission        { relayId, rootXpub, identityIndex, identityPubkeyXOnly, challenge, signature, ...(custody 若有, 一律忽略) }
  * @param {object|null} a.challengeRecord
  * @param {Date|number} a.now
- * @param {function} a.consumeChallenge  **必传·同步**: (challenge) => void, 把 unused→consumed 持久化。
- *                                       与落库同事务; 抛错 ⇒ 整笔回滚。
- * @param {function} a.readChallenge     **必传·同步**: (challenge) => {usedAt}|null, 供事务内后置条件重读。
- *                                       缺它就无法分辨"真消费"与"空消费" ⇒ 同样 fail-closed。
+ * @param {object} a.challengeStore     **必传**: 由 `createChallengeStore(【同一个】sqlite handle, table)` 造。
+ *                                     未绑定同一事务域 ⇒ 拒 `CHALLENGE_STORE_UNBOUND`(理由见文件头 (354) 那段)。
+ *                                     store 自己拥有 SQL(消费是 CAS), 调用方没有机会把它写成非 CAS。
  * @param {function} [a.verifyMessageFn]   仅测试注入
  */
-export async function registerIdentity({ sqlite, submission, challengeRecord, now, consumeChallenge, readChallenge, verifyMessageFn } = {}) {
+export async function registerIdentity({ sqlite, submission, challengeRecord, now, challengeStore, verifyMessageFn } = {}) {
   const s = submission || {};
 
   // ① N4-bis —— 注意: **完全不看 s.custody**
@@ -100,12 +113,22 @@ export async function registerIdentity({ sqlite, submission, challengeRecord, no
   const pop = await verifyRegistrationPop({ submission: s, challengeRecord, now, verifyMessageFn });
   if (!pop.ok) return { ok: false, code: REG_REJECT.POP_FAILED, reason: `${pop.code}: ${pop.reason}` };
 
-  // ②-c 🔴 (343): 消费能力**必须在落库之前就具备**, 否则拒。
+  // ②-c 🔴 (343)+(354): 挑战存储**必须在落库之前就具备, 且必须与身份表同一事务域**, 否则拒。
   //      放在这里(验签之后、写库之前)是有意的: 拒的时候**一个字节都还没写**。
-  if (typeof consumeChallenge !== 'function' || typeof readChallenge !== 'function') {
+  if (!challengeStore) {
     return {
       ok: false, code: REG_REJECT.CHALLENGE_CONSUME_MISSING,
-      reason: '注册要求一次性挑战消费能力: consumeChallenge 与 readChallenge 必须都是函数(fail-closed, 不静默跳过消费)',
+      reason: '注册要求一次性挑战存储: challengeStore 必传(fail-closed, 不静默跳过消费)',
+    };
+  }
+  // 🔴 (354) Codex c0a1f50c: 上一版收两个自由函数并声称"真 CAS", **作用域错了** ——
+  //    `.immediate` 只序列化【身份表所在那个连接】; 存储若在别的连接/别的库, 我持的锁管不到它。
+  //    ⇒ 这里不是"检查它长得像不像 store"(鸭子类型可伪造), 而是问
+  //      **它是不是本进程用【同一个 sqlite handle】造出来的** —— 外部无法伪造 WeakMap 成员资格。
+  if (!isStoreBoundTo(challengeStore, sqlite)) {
+    return {
+      ok: false, code: REG_REJECT.CHALLENGE_STORE_UNBOUND,
+      reason: 'challengeStore 未绑定到本次注册所用的 sqlite 事务域(必须由 createChallengeStore(同一 handle) 构造)⇒ 原子 CAS 不成立, 拒',
     };
   }
 
@@ -123,22 +146,23 @@ export async function registerIdentity({ sqlite, submission, challengeRecord, no
     //    为什么必需: PoP 那步是在事务【外】用调用方递进来的 challengeRecord 判的 ⇒ 两个并发请求
     //    可以【都】拿着 usedAt=null 通过验证。若消费实现写成无条件 `SET used_at=?`(而非 CAS),
     //    两笔都会把它置上、后置条件也都满足 ⇒ **同一挑战注册两次**。
-    //    上面那条 INSERT 已经取了写锁, 所以这里读到的是序列化之后的值 —— 这一读把它变成真正的 CAS,
-    //    而且**不要求调用方自己实现 CAS**(要求了也无法验证, 契约不该依赖对面的自觉)。
-    const before = readChallenge(s.challenge);
+    //    🔴 它成立的【前提】必须写出来(上一版漏写, 被 Codex c0a1f50c 抓下):
+    //       store 与身份表**同一事务域**(由 ②-c 的 `isStoreBoundTo` 结构保证)+ `.immediate` 已持写锁。
+    //       **离开这个前提, 这一读就不是 CAS** —— 跨连接时我的锁根本管不到对面那个库。
+    const before = challengeStore.read(s.challenge);
     if (!before || before.usedAt) {
       throw new _RegTxError(REG_REJECT.CHALLENGE_ALREADY_USED,
         `事务内重读: 挑战已被并发请求用掉(或已不存在) ⇒ 拒, 整笔回滚(usedAt=${before?.usedAt ?? 'record-missing'})`);
     }
 
     // 消费: 抛错即回滚(连同上面那条 INSERT)
-    try { consumeChallenge(s.challenge); }
+    try { challengeStore.consume(s.challenge); }
     catch (e) { throw new _RegTxError(REG_REJECT.CHALLENGE_CONSUME_FAILED, `挑战消费失败, 整笔回滚: ${e?.message || e}`); }
 
     // 🔴 后置条件: 事务内重读, 必须真的变成 used。
-    //    没有这一条, 一个【什么也不做】的 consumeChallenge 会读成成功 —— 那正是本次被抓的形状
+    //    没有这一条, 一个【什么也不做】的 consume 会读成成功 —— 那正是 (343) 被抓的形状
     //    (谓词对, 但没有东西让它的前提成立)。
-    const after = readChallenge(s.challenge);
+    const after = challengeStore.read(s.challenge);
     if (!after || !after.usedAt) {
       throw new _RegTxError(REG_REJECT.CHALLENGE_NOT_CONSUMED,
         '消费后重读挑战仍非 used ⇒ 消费未真正持久化, 整笔回滚(空消费不算成功)');

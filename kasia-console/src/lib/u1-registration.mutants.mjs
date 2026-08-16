@@ -37,25 +37,21 @@ const MUTANTS = [
     (s) => s.replace('if (!bind.ok) return { ok: false, code: REG_REJECT.BINDING_INVALID, reason: bind.reason };', 'if (false) return null;')],
   ['③N8 PoP 闸拆掉(签名/挑战不合格也继续走)',
     (s) => s.replace('if (!pop.ok) return { ok: false, code: REG_REJECT.POP_FAILED, reason: `${pop.code}: ${pop.reason}` };', 'if (false) return null;')],
-  // ── (343) MUST-FIX 之后新增五格: 一次性挑战消费契约的每一段都要被咬 ──
-  //    (Codex a89919a0 抓的原病 = optional + non-atomic; 修完必须证明"修的地方真的在挡")
-  ['fail-closed 闸拆掉: 不给消费能力也放行(退回 optional, 即原病)',
-    (s) => s.replace("  if (typeof consumeChallenge !== 'function' || typeof readChallenge !== 'function') {",
-      '  if (false) {')],
-  ['只要 consumeChallenge 不要 readChallenge(半套接线放行 ⇒ 空消费分辨不出来)',
-    (s) => s.replace(" || typeof readChallenge !== 'function'", '')],
-  ['后置条件拆掉: 消费后不再重读(空消费读成成功 ⇒ 又一个恒真闸)',
-    (s) => s.replace('    if (!after || !after.usedAt) {', '    if (false) {')],
-  ['消费抛错被吞(不回滚 ⇒ 已注册但挑战仍 unused)',
-    (s) => s.replace(
-      "    catch (e) { throw new _RegTxError(REG_REJECT.CHALLENGE_CONSUME_FAILED, `挑战消费失败, 整笔回滚: ${e?.message || e}`); }",
-      '    catch (e) { /* 吞掉 */ }')],
-  // 🔴 这一格直接摘掉事务本身 —— 它是"原子性"那格用例的对照臂:
-  //    没有它, (b) 只能证明"消费失败会返回 false", 证明不了"INSERT 真的跟着回滚了"。
-  ['摘掉事务(照旧版: 先提交 INSERT 再消费)⇒ 消费失败时 INSERT 已落库',
-    (s) => s.replace('  const runTx = sqlite.transaction(() => {', '  const runTx = ((__f) => __f)(() => {')],
-  ['前置重读拆掉(并发重放闸)⇒ 陈旧记录 + 非 CAS 消费能把同一挑战用两次',
+  // ── (343)+(354): 一次性挑战 + 事务域绑定, 每一段都要被咬 ──
+  ['fail-closed 闸拆掉: 不给 challengeStore 也放行(退回 optional, 即 (343) 原病)',
+    (s) => s.replace('  if (!challengeStore) {', '  if (false) {')],
+  ['🔴 事务域绑定检查拆掉: 任何长得像 store 的对象都放行((354) 原病)',
+    (s) => s.replace('  if (!isStoreBoundTo(challengeStore, sqlite)) {', '  if (false) {')],
+  ['前置重读拆掉(并发重放闸)⇒ 另一连接已用掉也照样注册',
     (s) => s.replace('    if (!before || before.usedAt) {', '    if (false) {')],
+];
+
+// 🔴 **结构上测不到的三格 —— 不是漏测, 是 (354) 之后它们【进不去】了; 明列出来, 不删也不算进 MISSED**
+//    为什么不静默删: 一个永远 MISSED 的变异会训练人忽略 MISSED; 而静默删掉又会让下一个人以为这三处有覆盖。
+const UNREACHABLE = [
+  ['消费抛错被吞', '前置读已保证 unused + store 的 CAS UPDATE 在同一事务/同一连接内必然 changes=1 ⇒ consume 在前置读通过后【不可能失败】。catch 是给将来存储不再同域留的纵深, 现在无法从外部触发。'],
+  ['后置条件拆掉', 'SQL 归 store 拥有且是 CAS, 调用方【构造不出】空消费 ⇒ 后置读永远为真。这是 (354) 用结构替掉运行时检查的直接后果。'],
+  ['摘掉 .immediate', 'DEFERRED 与 IMMEDIATE 的差别只在【并发取锁时刻】; 本用例是单进程顺序执行, 观察不到。要测它需要两个进程真争锁, 超出本 harness。'],
 ];
 
 let det = 0; let miss = 0; let inert = 0; let broken = 0;
@@ -78,5 +74,7 @@ try {
   console.log(back === originalSha ? '\n[restore] 逐字节还原已验(sha256 相同)' : `\n🔴🔴 [restore] 还原【对不上】! 手工检查 ${SRC}`);
   if (back !== originalSha) process.exit(2);
 }
-console.log(`detected=${det}  MISSED=${miss}  INERT=${inert}  BROKEN=${broken}`);
+console.log('\n[结构上测不到 · 明列, 不计入 MISSED]');
+for (const [n, why] of UNREACHABLE) console.log(`  · ${n} — ${why}`);
+console.log(`\ndetected=${det}  MISSED=${miss}  INERT=${inert}  BROKEN=${broken}  UNREACHABLE=${UNREACHABLE.length}`);
 if (miss || inert || broken) process.exit(1);

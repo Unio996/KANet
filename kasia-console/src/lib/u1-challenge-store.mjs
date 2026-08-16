@@ -1,0 +1,69 @@
+// u1 · N8 一次性挑战存储 —— **结构绑定到某一个 SQLite 事务域**
+// 承接: Codex c0a1f50c 复核 96b6121b = NOT FULLY CLOSED · @Bettor (354) 采纳 option A。
+//
+// 🔴 **它解决的是什么(别读成"又一层封装")**:
+//    上一版把 `consumeChallenge` / `readChallenge` 收成两个**自由函数**, 并声称
+//    "BEGIN IMMEDIATE + 前置读 + 消费 + 后置读 = 真 CAS, 且不要求调用方自己实现 CAS"。
+//    **那句话的作用域是错的** —— `.immediate` 只序列化【身份表所在的那个连接】。
+//    挑战存储若坐在**另一个连接 / 另一个库**上, 我持的锁管不到它, 那四步就不是原子的。
+//    ⇒ 原子性不是"写法"能挣来的, 它**只在同一个事务域内成立** ⇒ 存储必须**结构上**被钉在那个域里。
+//
+// 🔨 **为什么用模块私有 WeakMap, 不用 Symbol / 不用鸭子类型检查**:
+//    鸭子类型(`typeof s.consume === 'function'`)与 Symbol 标记都是**可以伪造**的 ——
+//    任何人构造一个长得像的对象就绕过去了, 那还是"靠调用方自觉", 正是 Codex 判不合格的那一档。
+//    WeakMap 的成员资格**没有外部入口**: 只有本模块的 `createChallengeStore()` 能写进去。
+//    ⇒ 未绑定事务域的 store **在结构上进不来**, 不是"检查时被拦下"。
+//
+// ⚠ 表 schema 按 Codex 可 post-land: 本工厂**要求表已存在**, 不自建表、不碰 migrate.js。
+
+const BOUND_HANDLE = new WeakMap();   // store 对象 → 构造它时用的那个 sqlite handle(唯一写入口在下面)
+
+/**
+ * 造一个绑定到 `sqlite` 这个事务域的一次性挑战存储。
+ * @param {object} sqlite  better-sqlite3 handle —— **必须与 registerIdentity 收到的是同一个对象**
+ * @param {string} table   挑战表名(需已存在; 列: challenge TEXT PK, used_at INTEGER, expires_at INTEGER)
+ */
+export function createChallengeStore(sqlite, table) {
+  if (!sqlite || typeof sqlite.prepare !== 'function') {
+    throw new Error('createChallengeStore: 需要一个可用的 better-sqlite3 handle');
+  }
+  if (typeof table !== 'string' || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(table)) {
+    // 🔴 表名要拼进 SQL(不能参数化), 所以只收白名单形状的标识符 —— 不是洁癖, 是注入面。
+    throw new Error(`createChallengeStore: 表名非法(只允许 [A-Za-z_][A-Za-z0-9_]*): ${table}`);
+  }
+  const exists = sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name = ?").get(table);
+  if (!exists) {
+    // fail-closed: 表不存在就别造一个"看起来能用、其实每次都查空"的 store。
+    throw new Error(`createChallengeStore: 表 ${table} 在这个 handle 上不存在(schema 未落 or handle 拿错)`);
+  }
+
+  const readStmt = sqlite.prepare(`SELECT challenge, used_at, expires_at FROM ${table} WHERE challenge = ?`);
+  // 🔴 消费必须是 CAS(`WHERE used_at IS NULL`), 不是无条件 SET ——
+  //    无条件 SET 会让"已被别人用掉"读起来仍像成功。SQL 归 store 自己拥有, 正是为了
+  //    **不让调用方有机会把它写成非 CAS**(上一版就是把这件事托付出去才出的洞)。
+  const consumeStmt = sqlite.prepare(`UPDATE ${table} SET used_at = ? WHERE challenge = ? AND used_at IS NULL`);
+
+  const store = {
+    read(challenge) {
+      const r = readStmt.get(String(challenge));
+      return r ? { challenge: r.challenge, usedAt: r.used_at, expiresAt: r.expires_at } : null;
+    },
+    consume(challenge, nowMs = Date.now()) {
+      const info = consumeStmt.run(nowMs, String(challenge));
+      if (info.changes !== 1) {
+        throw new Error(`挑战不可消费(不存在 / 已被用掉): ${challenge}`);
+      }
+    },
+  };
+  BOUND_HANDLE.set(store, sqlite);
+  return store;
+}
+
+/**
+ * 这个 store 是不是【本模块造的】且【绑在 expectedSqlite 这个事务域上】。
+ * 外部无法把自己塞进 BOUND_HANDLE ⇒ 伪造的 store 在这里必然 false。
+ */
+export function isStoreBoundTo(store, expectedSqlite) {
+  if (!store || typeof store !== 'object') return false;
+  return BOUND_HANDLE.get(store) === expectedSqlite;
+}
