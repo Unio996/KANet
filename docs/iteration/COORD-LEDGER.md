@@ -7985,3 +7985,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **洞①验收(Bettor 自跑, 不信转述)**: KANet-UI 补 `u1-registration.mutants.mjs`(commit a674c15a, origin), 且补时**第一次跑抓到真缺口**(无用例测过绑定对不上走完整 registerIdentity 入口, 补了 u1-registration.test.mjs "绑定闸"格, 没交带 MISSED 的糊弄文件)。Bettor `node u1-registration.mutants.mjs` = **detected=8 / MISSED=0 / INERT=0 / BROKEN=0 + sha256 还原验**。⇒ **洞①闭。**
 - **🔴 §6-1 契约【定义】冻结技术侧全清(除 J2 一句)**: 九条前置设计全闭 + A2 全链验(spec三审+落码+行为验证328+代码审查333+红队洞审334 PASS)+ 洞①闭(本条)。**只差 @J2 回 (323): A2 落码除洞①无其他缺口? 一句。** J2 确认 = 契约定义冻结技术就绪, 可宣布定义冻结。
 - **【上线】仍隔离**: Owner 物理机(②隔离验收)+ 洞②注册路接入 = 定义冻结之后。
+
+### (336) 2026-08-16 20:1xZ · 🏆 D-012 §6-1 契约【定义】冻结技术就绪(J2 (323) 确认无其他缺口 + CP4 park reconcile)· 今晚 D-012 主线第一个里程碑
+- **J2 (323) 现场核回答**: ①CP4 8f83bf79 不在主线(worktree 分支, J2 无待改项)②export 两函数(_serializeRootStateHex:1610/_continuationAddress:1674)+:2804 双闭合(builder 传权威值+relay fail-closed)全落, B-2 重跑 4 PASS ③**冻结落码侧无别的缺口**(除洞①, 已闭)。留档一条不阻塞不对称: payoutshard 腿 :1824 仍 `state_start ?? _POOL_STATE_START`(refund 腿已 fail-closed, payoutshard 腿没被点名, J2 不夹带, 留 land 后项)。
+- **🔴 CP4 reconcile(J2 stale, Bettor 纠)**: J2 说 CP4 §4"等 Codex 复核"——**但 Owner 08-13 (233) 已 park round-trip §4**("§4 定格 final: 8f83bf79 HOLD 不 land/生产接线不做/round-trip 线正式停格不再投/provenance 教训入 ZK")。⇒ CP4 §4 = **park 移 ZK, 不阻塞定义冻结, 不等 Codex 复核**(停格线不需复核)。定义冻结标注它 park。
+- **🏆 ⇒ §6-1 契约【定义】冻结技术就绪**: 九条前置设计全闭 + A2 全链验(spec三审+落码+行为验证+代码审查+红队洞审PASS+洞①闭)+ round-trip B-1/B-2/state_start/:2804 闭(J2现核)+ CP4 §4 park(233 reconcile)+ J2 确认无其他缺口。**所有技术闸通过。** payoutshard :1824 留 land 后加固。
+- **口径分层(不 overclaim)**: 【定义冻结技术就绪】=本条(内部审全过, 可正式定稿标 FROZEN, 主笔 J1 回或 Bettor 协调收尾)。【契约上线/生效】仍隔离: **Owner 物理机(②隔离验收)+ 洞②注册路接入**, 定义冻结之后。
