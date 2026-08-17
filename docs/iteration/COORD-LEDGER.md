@@ -8328,3 +8328,11 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **DECISIONS.md 已补权威注记(2026-08-17)纠正上条 08-16「达成」为过早**(三方 PASS≠all-review-passed, 其后 Codex 又挖 7 级)。真闭合日期/判据以 08-17 Codex promote 为准。
 - **今夜方法论(值得记)**: 九级全部走「Codex 给具体攻击路径 → J2 结构修(FIX-not-rescope, 永不"要求调用方提供 X") → Bettor 隔离 worktree 验落(不信转述) → 四方对抗攻 → Codex 复核」; 闭合以 Codex PASS 为准, 全程不自宣。元教训: 绑对象身份≠绑对象行为; 枚举参数≠枚举 authority 维度≠枚举可执行 capability。
 - **收口后立即启**: harness② + store-mutants 打包(已锁, J2 主修)。§6-1 LIVE 仍卡 Owner 物理机。
+
+### (388) 2026-08-17 · harness② 开发事故(误报放大的 node_modules 惊吓)· 校准事实 + 仪器未自证不信任
+- **事件**: J2 建 harness②(变异跑隔离 worktree + junction node_modules)时报"共享树 `kasia-console/node_modules` 被删空(0 项)"。
+- **校准事实(不让误报留档)**: 那个"0 项"是**错 cwd 下 ls 的误读**(J2 自认犯了今晚自己抓过别人三次的错——报警读数本身也要绝对路径复核)。better-sqlite3/fastify **因被运行进程占用而幸存**。Bettor 只读实核吻合(225 项 + 关键 deps 全在), 且 Bettor 刚 `node -e` 成功 require better-sqlite3 跑 PRAGMA = 原生模块可加载=一次已过实况 smoke。**实际损坏远小于初报**(可能仅误读 + npm install 顺带补齐 225→229)。
+- **两处真隐患(设计层, 已防)**: ①Windows **junction 被递归删穿**风险(rm -rf/worktree remove 跟 junction 删目标内容)——改 NODE_PATH 或清理只 `rmdir` 链接不删目标。②**"零写入"自证只覆盖 J2 想到的那类写入**(量一个源文件 sha256, 毁的却是 node_modules)——已补**整树 node_modules 项数前后比对, 不一致即抛**。
+- **处置正确点**: Bettor "此刻绝不能重启 console/relay" 警告被遵守 ⇒ 那两进程占着 `.node` + 没重启 ⇒ 关键 deps 没丢(救命)。恢复用 `npm install` 不用 `npm ci`(Bettor 原建议 ci 会先清空撞锁 EPERM, J2 没照搬=对; 更正入账: live 进程持原生模块锁时用 install)。
+- **🔴 harness② 仍不算可信**: 它是验证仪器且刚闯祸("验证装置自己会坏")。解冻可跑但**先验落自己**(registration 19det/store 12det 逐字不变 + 注入已知变异经副本被 detect + 整树项数不变全绿)→ NWT/KANet-UI 独立过一眼 harness diff → 才升标准。
+- 教训已入记忆 `reference-a-zero-write-self-check-only-covers-the-writes-you-imagined`。§6-1 定义冻结不受本事故影响(那是已锁 commit 154291d8, 与本仪器开发无关)。
