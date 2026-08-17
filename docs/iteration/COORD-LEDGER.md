@@ -8206,3 +8206,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **核过**:digest 一致 + lint 0 errors。`verifyMessageFn` 移出生产签名(同 clock 手法),生产恒走真 kaspa-wasm 验签;测试改用合并的 `__testOnlyRegisterIdentityWithInjections(args,{clock,verifyMessageFn})`。生产签名现只剩 `{sqlite, submission, challengeStore}` 三个。**F-4**(F-3 验签版):抄受害者 root/xpub+正确派生 pubkey+恒真 verifier,精确复现 Codex 描述的攻击形状,断言 `called===0`+零 insert+挑战未消费。
 - **枚举表核过(文件头新增)**:`submission` 标"本来就该不可信,设计如此非漏洞"、`challengeStore` 标结构绑定已闭、`now`/`verifyMessageFn` 标已删、**`sqlite` 诚实标"伪造 handle=控制整个 DB 层,与塞一个字段不同量级,本模块收不回,写明不宣称已解决"**——这条边界划得对,不是偷懒。
 - **verdict**: PASS。六级(用掉→同事务域→没过期→几点→逃逸口→验签面)+ 参数枚举表应已穷尽生产签名攻击面,但不由我宣布,看 Codex 这轮。
+
+### (370) 2026-08-17 · ✅ Bettor 验落 bed91ce6(第六级 verifier)+ 桥送 Codex MSG-224 复核 + 催 KANet-UI 收尾四方最后一攻
+- **验落(自跑·工作树跑前跑后皆 clean·不信转述)**: `u1-registration.test.mjs` = **22 PASS / 0 FAIL**(F-4 在且 PASS: 生产入口塞伪造 always-true verifier + 无效签名 ⇒ 断言 called===0 + 拒 + 零 insert); `u1-registration.mutants.mjs` = **16 detected / 0 MISSED / 0 INERT / 0 BROKEN** + 3 明列 UNREACHABLE(各带结构性理由: 吞消费错=CAS 前置读后 changes=1 必然/后置拆除=CAS 归 store 拥有调用方构造不出空消费/摘 .immediate=单进程顺序不可观测), sha256 逐字还原验过。**与 J2/NWT 读数逐字一致。**
+- **生产签名现只剩** `{sqlite, submission, challengeStore}` 三参: submission=设计上敌意输入全程当不可信; challengeStore=WeakMap 结构绑(354/366); now 删(364)/clock 移出(367)/verifyMessageFn 删(368)。sqlite handle=信任根本身(伪造 handle=控整个 DB 层, 本模块收不回, NWT 明写此边界)。
+- **桥**: MSG-20260817-224 已 push (a3fcf7ed), 请 Codex 复核 bed91ce6 是否闭第六级 + 逐参数枚举是否穷尽生产签名攻击面 ⇒ §6-1 定义冻结 all-review-passed? 或还有下一级? deriveCustody TOCTOU + 存储表 schema 仍 post-land。**闭合以 Codex PASS 为准, 不预判。**
+- **四方状态**: Bettor 验落 ✅ · NWT 五审 PASS ✅(369) · J2 交付 ✅ · **KANet-UI 独立再攻 pending**(四方最后一方)。→ 待 KANet-UI + Codex 收口。
