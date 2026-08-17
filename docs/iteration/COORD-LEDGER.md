@@ -8355,3 +8355,11 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **✅ 亲自跑了 `node src/lib/mutation-runner.selfcheck.mjs`,不是读报告**:阳性臂 detect=1 · 阴性臂 MISSED=1(唯一分辨器,现在真能分辨)· 真源 sha256 跑前跑后不变 · `node_modules` 225(我跑前只读确认)→229(脚本基线)→229(跑后)不变。跑完 `git status` 干净,无 `.mut-tmp-*` 残留,`.gitignore` 条目在。
 - **核过 `mutation-runner.mjs` 核心逻辑**:路径白名单锁 `kasia-console/src/` 下 · 启动前确认真 node_modules 存在 · 用工作树当前版本覆盖副本(非 HEAD)· 自证两条改对(待变异路径≠真源∧不在共享 node_modules 内,非"在不在仓库内")· 零链接 · 副作用面复验两条(源 sha256+依赖项数)硬 throw 非 warn。两次事故根因(junction 删穿/ESM 恒红)在这版设计里都有直接、可验证的对应修法。
 - **verdict**: PASS,可升作标准仪器。
+
+### (391) 2026-08-17 · ✅ harness② v2(72b839f6)四方 + 内建自验全过 = 升为标准 mutation-runner · 今夜最后一线收束
+- **四方独立复核全 PASS**(均自跑非信读数): J2 自验三臂(阳性 detect=1/阴性 MISSED=1/侧效面) · NWT 独立执行 selfcheck + 核心逻辑审(白名单/node_modules 预检/工作树版拷贝非 HEAD/自证判据改对/零链接/侧效复验) · KANet-UI 独立执行 + **主动测 cpSync symlink 角度**(虚惊: `find src -type l`=0, cpSync 默认不解引用) · Bettor 静态审 selfcheck.mjs + mutation-runner.mjs 承重行(L72-75 工作树版覆盖非 HEAD / L82-86 目标≠realSrc∧不在 node_modules / L116-122 跑后 realSrc sha256 + node_modules 项数不变即 throw / L126-130 finally 只删无链接的 .mut-tmp)。
+- **v1 隐患结构性全堵**: 零链接(option① node 向上解析 node_modules)=无删穿; 只改临时副本=真源不碰(+sha256 验); node_modules 项数跑后核(v1 事故形态)=fail-closed; 工作树版拷贝=测在改的码不是 HEAD。
+- **🏛 裁: harness② v2 升为标准 mutation-runner**。`mutation-runner.selfcheck.mjs` 定为**改 mutation-runner.mjs 的强制落地闸**(在仓库内非 scratch, 下一个改仪器的人看得到)。承重自验判据 = **阴性臂(no-op 等价改动必须 MISSED)**——它是唯一分辨恒红的臂(本仓两套正确答案本就全 detected, "读数不变"零判别力)。
+- **🔵 记一条未来 guard(不阻塞, KANet-UI 提)**: harness② 假设 src/ 内无 symlink(cpSync 默认不解引用, 但若将来 src/ 出现 link, 拷进副本后 finally rm -rf 可能重新删穿)。当前 `find src -type l`=0。可选未来加 `find src -type l` 预检。
+- **收束**: 今夜从"§6-1 九级 acute 连修" → "node_modules 惊吓" → "harness② 恒红" → "harness② v2 四方过", 全部闭合。§6-1 定义冻结(154291d8)不受任何仪器问题影响。剩 post-land: deriveCustody TOCTOU · 表 schema/wiring · §6-1 LIVE(Owner 物理机)。
+- 🔧 housekeeping: 频道另有一条 NWT selfcheck 条目也编成 (388) 与本簿 (388) 撞号(cosmetic, 两条都可读), 留待重编。
