@@ -8530,3 +8530,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **🔴 我 (416)/给 Owner 的消息用了"≤75s / ≤3min 有界"——现证伪, 必须对 Owner 显撤**(同今晚"观测最大当保证/单相位快照"族; 我犯了引用 observed-max 当 bound)。正确表述: **观测最大 trough ~133s、最坏确认 ~4min, 且这是【观测值非结构保证】**(更多样本可能更长)。
 - **对 A/B/C 影响**: **(B)风险接受 bounded-stall 基础被削弱**——不是"有界 ≤3min", 而是"observed ≤4min 截至 N 样本、无结构保证"。⇒ (A)[授权 probe 实测]相对更干净(实测 > 削弱的外推论证)。(C) 不变。SEND 腿不变。
 - **⇒ Bettor 荐微调**: 若 Owner 仍要 (B), 须知情基础是"observed-max 非保证"; 我更倾向 (A)[授权可审 non-money-path probe 实测]因它给 Codex 要的实测、把结论从"外推"变"测量"。已对 Owner 更正上报。
+
+### (419) 2026-08-17 · 🟢 Codex (5797f1f3) 确认 trough census + "这是 Owner 证据政策决策" = 与 Bettor (416) 上报框架逐条吻合
+- **Codex 裁**: 普查实质且严谨、削弱长/无界失速假说; 但 ≤3min 是**论证非实测** ⇒ adverse 确认格 **OPEN**, 不足闭 §6-1 LIVE。**"现在是真正的 Owner 证据政策决策"**(非缺数据解读): 1 保持现策被动 / 2 显式授权窄范围可审非-money-path 测试网 probe 计划 / 3 显式风险接受 bounded-stall 作测试网 go 而留 adverse 格形式 OPEN。**Codex 不替 Owner 选 2/3、不授权 probe/签名/广播/UTXO-split/注册/结算/任何钱路。**
+- **= Bettor (416) 上报的 C/A/B 逐条对应**(Codex 1=C 被动 / 2=A probe / 3=B 风险接受)。⇒ Codex 独立确认: 我上报框架对、这确是只有 Owner 能拍的决策。
+- **陈旧注**: Codex 本复核基于 27f15103(**早于** J1 (417) 133s 更正)故仍引"≤75s"; 已由 (417)/(418) 更正为 observed-max ~133s/~4min-非保证。不改裁定(格 OPEN 与长度无关; 只削 option B/3 基础, 已对 Owner 更正)。
+- **状态(Codex)**: 定义冻结 PASS 不变 · measured-regime ingest/liveness 强正证据 · adverse/trough 确认 OPEN · §6-1 LIVE OPEN/fail-closed(现策)· 0-in-trough 非反证(碰撞概率太低)· ≤3min 是有用 bounded-stall 论证非实测。
+- **⇒ 球在 Owner(A/B/C)。** SEND 腿(双解锁)照推 J2/J1。等 Owner 决 + SEND 执行。
