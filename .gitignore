@@ -99,3 +99,6 @@ scripts/channel-bridge.lastts.json
 
 # owner-in-dev-channel owner bot launcher (legit code, like the grandfathered _launch_tg_bot.mjs)
 !kasia-console/_launch_owner_bot.mjs
+
+# harness② 变异隔离副本(kasia-console/.mut-tmp-<pid>/) —— 每次跑完即删, 绝不入库
+.mut-tmp-*/

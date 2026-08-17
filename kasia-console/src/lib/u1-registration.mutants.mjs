@@ -4,9 +4,13 @@
 // 也是未来最可能被"顺手清理"改坏的地方(Bettor 20:09Z 点名: custody.custody → s.custody 这类回改)。
 // 🔴 三类计数缺一不可: MISSED(拆了没红) / INERT(没改到文件) / BROKEN(改成语法坏的, 必然"检出")。
 // 🔴 收尾验还原逐字节相同 —— 变异体留在库里比不跑变异更糟。
-// ✅ **本套已走隔离执行器**(harness② · mutation-runner.mjs): 变异发生在临时 git worktree 里,
-//    共享工作树全程零写入, 且【每次跑都正向自证】(打印变异目标绝对路径 + 共享树 sha256 跑前跑后比对)。
-//    ⇒ 旧版那句它会原地改生产文件、请自己在隔离树里跑**已不再成立**, 别照旧版理解。
+// ✅ **本套走隔离执行器**(harness② · mutation-runner.mjs): 变异只改 `kasia-console/.mut-tmp-<pid>/` 里的**副本**,
+//    共享工作树零写入(每次跑都实测复验: 真源 sha256 + node_modules 项数)。
+// 🔴 **而"零写入自证是绿的"救不了这个仪器 —— 实测两次**(细节见 mutation-runner.mjs 抬头):
+//    一次自证全绿却毁了 node_modules(量错了范围), 一次**恒红**却读数完全正常(ESM 不认 NODE_PATH)。
+//    ⇒ **能给这些数字撑腰的只有【阴性对照臂】**(等价改写必须 MISSED), 不是"读数和上次一样"——
+//    本套的正确答案本来就是全 detected, **恒红装置产出一模一样的数字**。
+//    改了 mutation-runner.mjs ⇒ 先跑 `scratch/_j2_harness2_selfverify.mjs` 三臂全过, 再信下面的读数。
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runMutationsIsolated } from './mutation-runner.mjs';
