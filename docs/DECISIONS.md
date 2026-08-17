@@ -128,6 +128,13 @@
 > 🔴 **口径分层(不 overclaim)**:【定义冻结】= 契约文本 + A2 全链判定逻辑技术就绪, **已达成**。**【契约上线/生效】仍隔离, 未达成** —— 硬前置 = **Owner 物理机(②密钥隔离验收, 08-07 directive: 批 scoping≠批施工)** + 留档三项接入(registerIdentity 零生产调用方 / payoutshard :1824 默认回落不对称 / u1-escape-hatch-live-check.cjs 未实现 §5-6 加严分母纪律), 均在定义冻结**之后**。
 > 出处: COORD-LEDGER (336)(337)(338)(340) · 冻结稿 Status 行(f234fb44/f1cdad1f)。
 
+> 📌 **状态注记(2026-08-17 · §6-1 定义冻结【真·all-review-passed】· Bettor 注册 · 纠正上条 08-16「达成」为过早)**:
+> 🔴 **上条 08-16「定义冻结达成/三方地面核」是【过早声明】**: 三方 PASS ≠ all-review-passed。其后 Codex 逐级红队(每级给出具体攻击路径)在 08-16→08-17 又挖出 **7 级**权威 seam, 均 FIX-not-rescope 结构修复并经四方对抗 + Codex 复核。上条【定义 vs 上线】口径分层仍成立, 但「达成」的**日期与判据**以本条为准。
+> 🏆 **真·闭合: 2026-08-17 Codex 正式 PROMOTE(桥 `65ee6818` / RESPONSE-...-FINAL-DEFINITION-FREEZE)**——**§6-1 Oracle 权限边界契约【定义】冻结 = ALL-REVIEW-PASSED, 锁定不可变 target `154291d8d89adf8966d538e55ade78eb2ef2eec5`**(Codex 基于独立代码/测试制品复读, 非仅四方转述)。
+> **九级权威阶梯全结构闭合**(生产路径): ①挑战一次性 CAS(`WHERE used_at IS NULL`)②同 sqlite 事务域(WeakMap 绑 handle + IMMEDIATE 事务)③签发/过期权威(生产不收调用方挑战记录, 重读 canonical store, 事务内重检过期)④时钟(生产钉 `Date.now()`, 注入仅 test-only 入口)⑤PoP 验证器(生产落真 kaspa-wasm verifyMessage, 无调用方可选)⑥canonical 挑战 namespace(钉 `CANONICAL_CHALLENGE_TABLE`, 绑定验 handle∧表身份, `expectedTable` 必填不可静默消失)⑦持有 token 方法替换(返回冻结无方法 opaque token)⑧可执行能力泄漏(删 exported `getBoundOps`; `readBoundChallenge/consumeBoundChallenge` 内部验绑定→跑私有 op→只回数据, ops 永不出模块)。另 Codex 确认 N4-bis 托管源(从 `relay_nodes` 服务端态派生, 不信 `submission.custody`)+ N8 绑定/PoP 核。测试制品 I-1(遍历导出面测属性非名字)/I-2/I-3 + 专属 `u1-challenge-store.mutants.mjs`(攻能力暴露/token 方法回归/绑定弱化/CAS 移除)。
+> 🔴 **范围边界(Codex 明令不 over-promote)**: 本条**仅【定义冻结】**, **非** §6-1 LIVE/部署/迁移生产 schema/移钥/注册生产身份/签名广播/动任何生产钱路的授权。**post-land 闸原样保留**: `deriveCustody` pre-tx 读↔注册写之间的 TOCTOU 加严 · 具体持久表 schema/迁移/索引 + 生产 wiring · mutation-harness 改「变异临时副本」重构 · **Owner 物理机/LIVE 授权 + wiring 后运行证据**。⚠ **不 grandfather**: 未来生产 wiring 若改动被审信任形状(新参 / 调用方可选 provider / 对调用方态的新 `x.y()` 解引用), 本 PASS **不自动覆盖**, 须重跑参数/解引用 authority 枚举。
+> 出处: COORD-LEDGER (368)-(386) · 桥 MSG-224..231 + Codex responses(bcc8dd28/e008bbbc/3ae9e7eb/80b34870/e9eb0cc4/**65ee6818**) · target `154291d8`。
+
 ### D-011 钱路改动"审核关卡 ≠ Owner 逐项点头"——去 Owner-gate 化,内部双审纪律不降 (2026-07-21 · Owner 频道直令 · Bettor 记账)
 - **触发**: #28/K-18 §3.4 修复清单里 Bettor 列了一条"等老板正式点头"才能上线,Owner 当场纠正:"这不是你决定做就可以的吗?你看看自己职责?我这块只看目标!具体做什么都是你排版,你驱动团队做事。"
 - **决策**: 涉钱路/covenant/结算的改动,**不再要求 Owner 对每一项逐笔点头才能上线**。Owner 只定方向、看结果;"什么时候技术上具备上线条件"由 Bettor 协调团队自行判定并驱动执行。

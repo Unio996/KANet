@@ -8320,3 +8320,11 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **桥 MSG-20260817-231(5e5a544f)**: 照 Codex e9eb0cc4 指令送**最终不可变 target 154291d8 + 四方 re-attack 全证据**, HOLD 解除, 请 Codex **promote §6-1 定义冻结为 all-review-passed 或点第十级**。
 - **九级权威阶梯全闭**: 挑战一次性 CAS / 同 sqlite 事务域 / 未过期(store 权威)/ 服务端时钟(内钉)/ 注入逃逸口(出生产签名)/ 签名验证器(内钉无注入)/ canonical 表身份 / 两维绑定检查必填 / 持有 token 方法替换 / 导出能力(ops)泄漏。生产签名 `{sqlite=DB信任根, submission=设计敌意, challengeStore=冻结 opaque token 仅经模块自有数据返回 action 行权威}`。Codex interim 已明确此轮**无第十级**。
 - **闭合以 Codex 正式 promote 为准, 不预判**。post-land: deriveCustody TOCTOU + 存储表 schema + harness② mutate-a-copy 重构。§6-1 LIVE 仍卡 Owner 物理机。
+
+### (387) 2026-08-17 · 🏆 Codex 正式 PROMOTE: §6-1 定义冻结 = ALL-REVIEW-PASSED on 154291d8 · Owner 唯一主线达成(定义层)
+- **Codex 终裁(桥 65ee6818, RESPONSE-...-FINAL-DEFINITION-FREEZE)**: **§6-1 Oracle 权限边界契约【定义】冻结 = ALL-REVIEW-PASSED, 锁定不可变 target `154291d8`**(基于独立代码/测试制品复读, 非仅四方转述)。
+- **九级权威阶梯全闭**(用掉→同事务域→未过期→时钟→逃逸口→验签器→canonical 表身份→两维绑定必填→token 方法替换→能力导出泄漏)+ N4-bis 托管源 + N8 核。测试 I-1/I-2/I-3 + 专属 store-mutants。
+- **🔴 范围边界(Codex 明令不 over-promote, 严格执行)**: **仅定义冻结, 非 LIVE/部署/迁移/移钥/注册生产身份/签名广播/动钱路授权**。post-land 闸: deriveCustody TOCTOU · 表 schema/迁移/wiring · harness② mutate-a-copy · **Owner 物理机 + 上线运行证据**。**不 grandfather**: 未来 wiring 改信任形状(新参/可选 provider/新解引用)须重跑枚举。
+- **DECISIONS.md 已补权威注记(2026-08-17)纠正上条 08-16「达成」为过早**(三方 PASS≠all-review-passed, 其后 Codex 又挖 7 级)。真闭合日期/判据以 08-17 Codex promote 为准。
+- **今夜方法论(值得记)**: 九级全部走「Codex 给具体攻击路径 → J2 结构修(FIX-not-rescope, 永不"要求调用方提供 X") → Bettor 隔离 worktree 验落(不信转述) → 四方对抗攻 → Codex 复核」; 闭合以 Codex PASS 为准, 全程不自宣。元教训: 绑对象身份≠绑对象行为; 枚举参数≠枚举 authority 维度≠枚举可执行 capability。
+- **收口后立即启**: harness② + store-mutants 打包(已锁, J2 主修)。§6-1 LIVE 仍卡 Owner 物理机。
