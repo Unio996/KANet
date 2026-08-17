@@ -8657,3 +8657,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **J1 (3d83f288) 抓到并修**: git 换行规范化会改 committed blob 字节 → content sha256 ≠ PINNED → fresh checkout 上仪器 fail-closed 自拒(且与 Codex blob 级验证不符)。加 `.gitattributes: scripts/probe-deps/* -text` 保字节。
 - **Bettor 端到端实核**: 仪器 `PINNED_SENDER_SHA=c70c76d4…5980f` == **git-committed 依赖 content sha256 = c70c76d4…5980f** == 工作区 sha256(全一致)。`.gitattributes -text` 在库(L23)。⇒ **fail-closed 闸在 committed 态通过、fresh checkout 保字节不自拒、且真强制钉定依赖**。fix#1 端到端成立(不是只"有比对代码", 是"比对在 committed 态真过")。
 - ⇒ probe v3 我方验证完整(4 MUST-FIX 真实现 + fix#1 端到端 content-hash 自验过)。MSG-235 已路由 Codex; 补 content-sha256 确认(MSG-235 给的是 git blob id, 本条给 content-hash 端到端证)。等 Codex 接受。
+
+### (438) 2026-08-17 · 🟡 Codex (aaddc1c6) probe v3 = 5/6 接受(含 content-SHA)· 仅剩 1 MUST-FIX: txid 绑定 fail-closed 非 warn → J1 v4
+- **Codex 裁**: v3 实质闭前 4 缺陷 + CRLF/content-SHA 修法(3d83f288 + MSG-236)有效风险退休。**接受 5 项**: ①依赖 pin 真运行时闸 ②CRLF 修 ③firstSeen 需 64-hex tx_hash ④第二节点 at-trigger 同期 ⑤excluded submit 与确认证据分离。§6-1 定义冻结 PASS@154291d8 不变。
+- **🟡 仅剩 1 MUST-FIX(fail-open provenance seam)**: 发送器只打 **8-hex 前缀**, 仪器取 submitPrefix + 从唯一-TAG console 行取 64-hex tx_hash 当 fullTxid; **前缀不符时现只 `console.log(WARN)`**——那条可能对不上的行**仍能成 firstSeen/confirmed 进 JSONL 当 node-health 证据 = fail-open**。mismatch = 仪器没证明 console 行=发送器报的那笔 tx。
+- **📌 @J1 v4 修(Codex required)**: 前缀/全hash 不符时——**不设 firstSeen、不设 confirmed、记结构化 `txid-binding-mismatch`(两值都记)、零 node-health credit、最好中止 run**(provenance 失败)。+ **生产-seam 负测**: 造有效 64-hex TAG 行但**错 txid 前缀** → 证该样本不能成 firstSeen/confirmed。+ **变异**: fail-closed 支改回 warn-and-continue 必被 detect。修完给新不可变 commit/blob 我路由 Codex 终审。
+- **措辞**: content-SHA 修(MSG-236)Codex 接受(闭前次误拒 + 使 dep pin 在 fresh checkout 有意义), 但不闭 sender↔console tx-identity seam。**这之前别作 §6-1 LIVE 闭合证据权威跑。**
+- 同今晚族: 只 warn=fail-open 应 refuse=fail-closed。这是最后一处 provenance seam。→ J1 v4 → Codex 终审 → J2-tn trough 跑 → artifact#3 → node-health 格。
