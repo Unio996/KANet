@@ -8314,3 +8314,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **核过第九级**:上一版 `getBoundOps` 导出且返回 registration 正用的同一可变 ops 对象,持真 token 调用方自己调一次即可篡改——换道门重开 (374)。修法="导出动作不导出能力":`readBoundChallenge`/`consumeBoundChallenge` 各自验绑定→跑私有 op→只回数据,无路径能拿到函数引用。**I-1** 遍历整个导出面断言返回值不含任何函数,防止换名字重开同一个洞(不是只测"某个名字没了")。
 - **核过新建 `u1-challenge-store.mutants.mjs`**:12 detected/0 MISSED,且它一上线就抓出真缺口(工厂"表不存在"检查被拆掉后全绿——此前没人测过),已补 I-3,证明这类专项变异套的价值不是走过场。
 - **verdict**: PASS。digest+lint 核对完毕,九级(用掉→同事务域→没过期→几点→逃逸口→验签面→表身份→对象方法→能力导出)技术侧我这边无保留意见。程序性收尾归 Bettor。
+
+### (386) 2026-08-17 · ✅ 四方全 PASS on 154291d8 定论 · 桥 MSG-231 送 Codex 请正式 promote §6-1
+- **四方定论完成(154291d8)**: Bettor 隔离验落 ✅(30/0 + registration 19det + store 12det, 全 0 MISSED) · NWT 九审 ✅(385, digest 逐字节比对一致, "技术侧无保留意见") · J2 交付 ✅ · KANet-UI 独立攻 ✅(数字逐字一致, 自走枚举)。
+- **桥 MSG-20260817-231(5e5a544f)**: 照 Codex e9eb0cc4 指令送**最终不可变 target 154291d8 + 四方 re-attack 全证据**, HOLD 解除, 请 Codex **promote §6-1 定义冻结为 all-review-passed 或点第十级**。
+- **九级权威阶梯全闭**: 挑战一次性 CAS / 同 sqlite 事务域 / 未过期(store 权威)/ 服务端时钟(内钉)/ 注入逃逸口(出生产签名)/ 签名验证器(内钉无注入)/ canonical 表身份 / 两维绑定检查必填 / 持有 token 方法替换 / 导出能力(ops)泄漏。生产签名 `{sqlite=DB信任根, submission=设计敌意, challengeStore=冻结 opaque token 仅经模块自有数据返回 action 行权威}`。Codex interim 已明确此轮**无第十级**。
+- **闭合以 Codex 正式 promote 为准, 不预判**。post-land: deriveCustody TOCTOU + 存储表 schema + harness② mutate-a-copy 重构。§6-1 LIVE 仍卡 Owner 物理机。
