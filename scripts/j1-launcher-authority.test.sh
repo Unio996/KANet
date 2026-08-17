@@ -4,11 +4,12 @@
 # 跑法: bash scripts/j1-launcher-authority.test.sh   (树净且 HEAD 即被测状态)
 cd "$(dirname "$0")/.." || exit 1
 HEADC=$(git rev-parse HEAD)
-TMP=$(mktemp -d)
+TMP=scratch/.launcher-authority-test-$
+mkdir -p "$TMP"   # 🔴 副本放仓库【内】: cd 能解析回仓库根 ⇒ 触发的是 $0 字节检(目标防线), 不是 cd 失败的副作用
 trap 'rm -rf "$TMP"' EXIT
 PASS=0; FAIL=0
 run_case() { # $1=名 $2=launcher路径 $3=期望串
-  OUT=$(J1_PROBE_APPROVED_COMMIT=$HEADC J1_PROBE_RELAY_ID=102cbb99-test sh "$2" 999 1 2>&1 | head -3)
+  OUT=$(J1_PROBE_APPROVED_COMMIT=$HEADC J1_PROBE_RELAY_ID=102cbb99-test sh "$2" 999 1 2>&1)
   if echo "$OUT" | grep -q "$3"; then PASS=$((PASS+1)); echo "  ✅ $1"; else FAIL=$((FAIL+1)); echo "  ❌ $1 — got: $OUT"; fi
 }
 # L-0 阳性对照: 规范 launcher 全检通过并到达仪器(仪器拒非法 cap = 证明穿透到内层)
