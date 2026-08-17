@@ -128,7 +128,9 @@ fi
 if [ "${J1_ALLOW_INFRA_ADDR:-0}" != "1" ]; then
   # 闸本体住在【仓库里】(scripts/check-message-safety.mjs), 不内嵌在本文件 ——
   # 本文件是 gitignored 的 scratch, 把一道安全闸放在这里, 就是我今天刚提交检查器要治的那个病。
-  node /d/kanet/kanet/scripts/check-message-safety.mjs "$PAYLOAD" || die2 "坐标硬闸未通过（见上）"
+  # 🔴 从本脚本自身位置派生仓库根(J2 (476) 抓: 原为硬编码 /d/kanet/kanet/, 在别台检出根=/d/kanet-tn12/ 时指向不存在的路径 ⇒ 第一样本 ABORT)。
+  #   _SELF_ABS(:50)=本脚本绝对路径(.../scripts/probe-deps/j1-send-one.sh); 检查器在 .../scripts/check-message-safety.mjs = ../ 一层。可移植, 不再写死任一台的根。
+  node "$(dirname "$_SELF_ABS")/../check-message-safety.mjs" "$PAYLOAD" || die2 "坐标硬闸未通过（见上）"
 fi
 
 # ── 避免两个发送进程并发 restart relay 互相掐断 ─────────────────────────────

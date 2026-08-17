@@ -7,7 +7,7 @@
 #   ⑤J1_PROBE_RELAY_ID 前缀 == 102cbb99(J2-tn)
 # 用法(执行方检出根): J1_PROBE_APPROVED_COMMIT=<被审 commit> J1_PROBE_RELAY_ID=<完整 relayId> bash scripts/j1-trough-probe-launch.sh [TIME_CAP<=360] [DRYRUN]
 cd "$(dirname "$0")/.." || exit 1
-REF_INSTRUMENT_SHA=5c2b001cd3f9fc36e9039f87b14ada5a3038ef72852688a826ad2e36e6aa8933
+REF_INSTRUMENT_SHA=ef0fcf1fac68f1ac8e62018617b17d67f26b07c15524c5374f737568ec91eaba
 if [ -z "$J1_PROBE_APPROVED_COMMIT" ]; then echo "LAUNCH-REFUSED: 缺 J1_PROBE_APPROVED_COMMIT(外部批准 commit, 从 Codex ACCEPT/ledger 记录抄入)"; exit 1; fi
 HEADC=$(git rev-parse HEAD)
 APPR=$(git rev-parse "$J1_PROBE_APPROVED_COMMIT" 2>/dev/null)
