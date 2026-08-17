@@ -8537,3 +8537,12 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **陈旧注**: Codex 本复核基于 27f15103(**早于** J1 (417) 133s 更正)故仍引"≤75s"; 已由 (417)/(418) 更正为 observed-max ~133s/~4min-非保证。不改裁定(格 OPEN 与长度无关; 只削 option B/3 基础, 已对 Owner 更正)。
 - **状态(Codex)**: 定义冻结 PASS 不变 · measured-regime ingest/liveness 强正证据 · adverse/trough 确认 OPEN · §6-1 LIVE OPEN/fail-closed(现策)· 0-in-trough 非反证(碰撞概率太低)· ≤3min 是有用 bounded-stall 论证非实测。
 - **⇒ 球在 Owner(A/B/C)。** SEND 腿(双解锁)照推 J2/J1。等 Owner 决 + SEND 执行。
+
+### (420) 2026-08-17 · 🟢 Owner「按你意见办!赶紧」= 授权 (A)probe 测试计划(改证据政策)+ SEND 腿先行 · Bettor 派工
+- **Owner 授权**: 终端「按你意见办!赶紧」⇒ 采纳 Bettor (416)/(418) 荐路 = (A/Codex option 2)显式改证据政策授权**窄范围可审非-money-path probe 测试计划** + SEND 腿先行。DECISIONS 已记权威注记(08-17c)。护栏: probe 非钱路/全程 JSONL 可审 / SEND 腿钱路走 J2/J1+内部双审 / 测试网限定 / probe 须分 broadcast-fail(SEND)vs confirm-slow(node-health)。
+- **🔴 承重排序**: **SEND 腿拆分【先】** —— probe 的前提(trough 期单 UTXO 连 probe 都发不出=撞 SEND 腿; 拆出多笔 ≥3KAS 后 probe/自然流量才能在 trough 真广播 → 才测确认)。
+- **📌 派工(git-first, 频道对 Bettor down)**:
+  · **@J2/@J1 [P0 最高优先] SEND 腿执行**: `splitUtxosRelay(N, {force:true})`(N~8-20 → 每笔 ≫3KAS), 择健康/burst 相位(J1 制品#1 有相位数据)· 逐轮确认 · 内部双审(D-011)· 报 txid + 前后 UTXO 直方图。方案见 (411)(守卫全内建/no-op 已排)。这解频道广播 + 为 probe/node-health 铺路。
+  · **@J1 probe 测试计划(SEND 腿修好后跑)**: 授权已下。窄范围: trough 期发**一条微频道 probe tx**, 测确认延迟, **区分**广播失败(SEND, 排除)vs 已进 mempool 确认慢(node-health 数据); 3 样本或时限; 全 JSONL; 作 artifact #3。
+- **桥 MSG 告 Codex**: Owner 已显式改证据政策授权可审 non-money-path probe 测试计划(option 2)+ 上述窄范围, 请 Codex 认收其证据入 node-health 格。
+- **⇒ 关键路径**: SEND 腿拆分(P0)→ 频道恢复 + probe 可跑 → node-health 确认格填 → §6-1 LIVE 就差 post-land wiring。
