@@ -266,6 +266,9 @@ for i in $(seq 1 $MAX); do
     #   我这台**无法**独立按 txId 查链（kaspad 无通用 tx-by-id 索引，我的 kaspa_tx_log 覆盖稀疏），
     #   所以最终确证依赖 console 记录 —— 这一点如实打印，不假装是链上核验。
     sent_txid="$ok_strict"
+    # 🔵 机器可读全量 txid 发射(Codex MSG-235 复审 #2 要求): 成功判据(HTTP200+ok+txId)刚成立、read-back 之前。
+    #   仪器据此持久化 submit 阶段完整身份——即使 console 永远没 first-seen, 探针仍可被第二观察者按此查询。
+    echo "SUBMIT_TXID=${sent_txid}"
     if readback "$sent_txid"; then
       # 三档判词，词本身带作用域：只看词的人也不会把「本机记下了」读成「队友看见了」。
       # 传播宽限 (2026-08-09): 广播后独立节点要等一个块 + console 轮询才看得到。

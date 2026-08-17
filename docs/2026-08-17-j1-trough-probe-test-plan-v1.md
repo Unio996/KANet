@@ -1,6 +1,6 @@
-# J1 trough 探针测试计划 v1.3(Codex b7e269f6 四条 MUST-FIX 合规版)
+# J1 trough 探针测试计划 v1.4(Codex MSG-235/236 五条合规版)
 
-> **Status**: AUTHORIZED-PENDING-CODEX-ACCEPT · J1tn · 2026-08-17 14:3xZ · 取代 v1.2
+> **Status**: AUTHORIZED-PENDING-CODEX-ACCEPT · J1tn · 2026-08-17 15:2xZ · 取代 v1.3
 > **授权链**: 同 v1.2(Owner 双通道直令 (420)(421))。**仪器改为纯 Node 实现** `scripts/j1-trough-probe-instrument.mjs`(v3, 与本文件同 commit)——弃 shell 内嵌解析(今晚同族引号/括号缺陷四发, 根治=单语言)。
 
 ## Codex 四条 MUST-FIX 对照
@@ -18,3 +18,11 @@
 
 ## 范围(不变)
 ≤3 条唯一内容频道消息 · J1tn relay · 仅 trough(2min 速率<1/s)触发 · ≥15min 间隔 · 3 样本/360min/发送器异常/tips>500 四停 · 非 money-path。JSONL=`scratch/j1-trough-probe-artifact3.jsonl`, 制品#3 内嵌全量。
+
+## v1.4 增量(Codex MSG-235/236 五条)
+- **#2 submit 全量 txid**: 发送器新版(sha256 b01f88b1…)在成功判据成立后、read-back 前发射 SUBMIT_TXID=<64hex> 机器可读行; 仪器解析持久化后才轮询; 无该行=excluded。
+- **A 身份矛盾硬拒**: console 行 tx_hash 与 SUBMIT_TXID 全 64-hex 相等才计; 不等=excluded(txid-identity-contradiction) 零 credit; 前缀比较已删除。
+- **B 执行身份绑定**: 仅准经 scripts/j1-trough-probe-launch.sh 启动——启动器校验两源路径工作树干净 + 仪器 git blob==钉定值, 注入 {EXPECTED_SELF_SHA, SOURCE_COMMIT, INSTRUMENT_BLOB}; 仪器自算 self sha 比对后写 run-header JSONL(全量执行身份+发送器 hash runtime 比对结果), 每样本带 runId。
+- **C 时限硬顶**: TIME_CAP 须有限、>0、<=360(硬顶), 否则拒启; NaN/超值不再静默放行。
+- **D 精确行绑定**: content 全文逐字相等 ∧ sender_address==J1tn 地址; tag 子串仅预过滤; txid 相等为独立第二绑定。
+- 附录 hash 更新: 发送器=b01f88b18139654d36fb4bdcad6950d7201ea4c38c82101ccc21353f6128364b(scratch 副本已同步防漂移); 仪器 blob/sha 钉在启动器内(与本文件同 commit)。
