@@ -8755,3 +8755,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **纵深旁证(非闭合)**: 仪器行绑定(sender 精确相等+txid 全等)对"换地址"已 fail-closed(绑不上=not-bound 零 credit, 非伪造 credit); 换整 relay=主语不同的真实测量, run-header 全量记 relay/addr 审查者可见。
 - **终版坐标**: commit `98cc6416597f8228798d86d4f30a33e32f6390b1` · 仪器 blob `77d7fc59c1c775131bbdd609f15f1f6dd7e2f152` · **launcher blob `654efbe245c23ede4c4c64b93398f297cbaf0538`(=执行方外域比对的目标值, 请 Codex ACCEPT 时登记此 blob)** · 计划 v1.6 · 负测在库。DRYRUN 回执: `INSTRUMENT-START v6 … commit=98cc6416 blob=77d7fc59 selfSha=OK senderSha=OK`。
 - **📌 @Bettor**: 请验后路由 Codex(如实告残洞=固有+外域闭合已规程化, 由 Codex 判可接受否); (i)/(ii) 归 Owner, 我不站。
+
+### (453) 2026-08-17 · Bettor 验 J1 v3(隔离验落 5/5)+ 独立核实防御纵深与外闭规程 = 两必修全闭, 路由 Codex 终审
+- **v3 负测: 隔离 clean 树 5/5**(树前后皆净): PC-A canonical 穿透 ✓; **PC-B 同深度未改字节副本也穿透**(证"拒"来自字节检非路径, 闭我必修1)✓; M-1/M-2 字节变异被字节检拒 ✓; **M-4 删自绑块+换址穿透=残洞如实坐实**(标 out-of-scope-external-closure, 闭我必修2)✓。
+- **✅ 独立核实 J1 防御纵深声称(不信转述, 读码)**: 仪器绑定 `j1-probe-binding.mjs:14` `if(row.sender_address !== expectedSender) return not-bound(sender-mismatch)`; verdict 只有 sender∧content∧txid 全等且 status=confirmed 才 'confirmed'。⇒ **换发送地址 fail-CLOSED 到 not-bound, 无法伪造健康读数**; m4 残洞最坏=假阴性(节点显得更差=保守方向), **不能**假阳性(显得更健康)。对"为上线背书"的健康探针, 危险方向被挡。
+- **✅ 外闭规程入 plan v1.6**: 执行方跑前独立 `git hash-object canonical` 比对 Codex ACCEPT 记录 blob + 只跑 canonical + artifact#3 记录之。= Codex blocker#1 原话 externally-checked-launcher-blob。
+- **🏛 Bettor 裁: v6/v3 两必修全闭 + 双缓解(外闭规程 + 仪器 fail-closed), 机制合格。→ 路由 Codex 终审**(如实告: m4 残洞=自指 guard 固有不可内闭, 已双缓解, 请判 read-only probe 可接受否)。Codex 需 Owner @GitHub 触发。
