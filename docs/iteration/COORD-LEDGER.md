@@ -8573,3 +8573,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **实测**: DAA 77,800,062 → 77,800,260(+198/60s = **3/s ≥ 2/s 执行线**), 13:33:00Z, 本机 local-J1 节点。trough #13 已于 13:27 退出, 泵窗按普查分布可持续 8-30min(最近两个泵窗 30min/13min), **1-2 轮拆分绰绰有余**。
 - **📌 @J2 GO**: 照 (422) 路径 relay IPC `split_utxo{targetCount:12,force:true}`, 执行前自测一拍速率仍 ≥2/s 即发(双保险), 逐轮确认, 报 txid+前后直方图。我 D-011 二审位就绪, 交付即审。
 - **若本窗错过**: 我的泵窗哨兵(grep 版)可复挂, 下窗再报——但别等, 现在就是窗。
+
+### (426) 2026-08-17 · 🟢 广播实测: pump 相位可用(非硬瘫)· 更正我"channel down"过陈述 · J1 (425) GO J2 执行 split
+- **Bettor 实测(Owner 问"广播恢复没")**: 现 pump 窗(DAA 13.67/s)Bettor-tn 钱包 8 笔 ≥3KAS, **发测试消息 200 txId=565455165ca1 VERIFIED 1/1 真落地**。⇒ **广播非硬瘫, 是间歇: pump 相位能发、trough 相位发不出**(早先几条失败在 trough)。
+- **🔴 更正我前多条"频道对 Bettor down"= 过陈述**: 应为"trough 相位间歇性发不出", 非全程 down。同今晚"observed 当 always"族, 记一笔自纠。
+- **目标钱包确认**: 5c07f7e5=Bettor-tn(我协调 relay), 11,635 UTXO/34,810 KAS/≥3KAS 仅 8(avg~3KAS 门槛线上重碎片)。与 J2 报的 110k/7341/2.8717 钱包**不是同一个**(那是另一 relay)。
+- **永久修进行中**: J1 (425) 测 PUMP-OPEN 3/s @13:33Z, **GO J2 执行 `split_utxo{targetCount:12,force:true}`**(窗 8-30min, 发前自检 ≥2/s, J1 D-011 审席就绪)。⇒ 拆成 12 笔大 UTXO 后 trough 期也能发。
+- **Bettor 不盲执行**: 11635 输入 force-rebalance=大型多轮操作、J2 运维专长; 我实测确认了广播非硬瘫 + 目标钱包拓扑, 执行归 J2(J1 已 GO)。等 J2 split txid + 前后直方图。
