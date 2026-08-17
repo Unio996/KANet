@@ -1,12 +1,20 @@
-# J1 trough 探针测试计划 v1.1(非 money-path · Owner 政策变更授权 · SEND 腿修复后执行)
+# J1 trough 探针测试计划 v1.2(Codex MSG-233 复审 5 条 MUST-FIX 合规版)
 
-> **Status**: AUTHORIZED-PENDING-SEND-LEG · J1tn · 2026-08-17 13:0xZ
-> **授权链**: Owner 双通道直令(Bettor 终端「按你意见办!赶紧」+ J1 终端「按你推荐干, 不要耽搁」, 同刻同向)⇒ (420) 政策变更+派工。**排序遵 (420): SEND 腿 UTXO 拆分先行**——trough 期单 UTXO 发不出探针, 先拆分否则测量被广播失败污染。
-> Codex 两留门条件: ①Owner 显式改政策=双通道直令在案 ②授权/范围可复核=本文件+(420)(421)。Codex 事后审, 判不采则结果作废。
+> **Status**: AUTHORIZED-PENDING-SEND-LEG · J1tn · 2026-08-17 13:3xZ · 取代 v1.1(五条 MUST-FIX 全落)
+> **授权链**: Owner 双通道直令(ledger (420) Bettor 终端 +(421) J1 终端佐证)= 显式证据政策变更; Codex f76372cb: 政策变更 ACCEPTED · 概念 ACCEPTED IN PRINCIPLE · 本文件即其要求的可复核测试权威。
+> **排序**: SEND 腿拆分 landed 之后执行((420) 承重排序)。
 
-## 范围(窄, 超出即违规)
-- **动作**: 最多 **3 条**频道文本消息(dev-coord-testnet), 唯一内容+随机尾, J1tn 自己的 relay。**非 money-path**。
-- **触发**: SEND 腿拆分 landed 之后; 本机 2min DAA 速率 <1/s(trough); 间隔 ≥15min。
-- **测量与区分((420) 硬要求)**: 每样本必须区分 **broadcast-fail(=SEND 腿证据, 排除出本格)** vs **已进 mempool/落库但确认慢(=node-health 证据)**——判据: 发送器 HTTP 200+txId=已广播; 其后 confirmed 延迟才计入 node-health。
-- **中止**: ①3 样本满 ②发送器 REFUSED/异常 ⇒ 停并报 ③链判词 runaway ⇒ 停。
-- **仪器**: scratch/j1-trough-tx-0817.sh((414) payload 自检版)。结果 JSONL+制品#3 落 git。
+## MUST-FIX 合规对照
+1. **节点身份绑定+同期第二节点**: 发送观测节点=`local-J1 ws://127.0.0.1:17210 (testnet-12)`; 第二节点=`mining-host 100.99.147.101:17210`(SSH 隧道), **每样本一读**, 不可达记 `{absent, reason}`。
+2. **总时限**: 3 样本 **或 360min 总时限**(仪器参数 TIME_CAP_MIN, 默认 360)先到者停; 另两条中止判据(发送器异常/判词 runaway)保留。
+3. **仪器入 git**: `scripts/j1-trough-probe-instrument.sh`(与本文件同 commit, 即不可变权威)。
+4. **三段证据分离**: submit-accepted(发送器 HTTP200+ok+txId, **仅记录, 不作链观测**)/ first-seen(本机 console 出现消息+tx_hash=链摄入观测)/ confirmed(status=confirmed)——**只 first-seen 与 confirmed 计入 node-health**。发送器语义未经独立核实, 故采分离记录路径(Codex 给的两选之二)。
+5. **逐样本字段**: trigger{t,d1,d3} · submit{t0,ok,txid} · firstSeen{t,status,txhash} · confirmed{t}|timeout · secondNode{daa,synced,t}|{absent,reason} · exclusion(null | `broadcast-fail⇒SEND 腿证据, 零 node-health credit`)。JSONL=`scratch/j1-trough-probe-artifact3.jsonl`, 制品#3 内嵌全量后 commit。
+
+## 范围(不变)
+≤3 条唯一内容频道消息(dev-coord-testnet, J1tn 自己的 relay)· 仅 trough(2min DAA<1/s)触发 · 间隔 ≥15min · 非 money-path 零交集。
+
+## 附录: 依赖工具 sha256 钉定(执行时仪器自检发送器 3/3 保护, 不符拒启)
+- j1-send-one.sh: `c70c76d47d279e3956faafeae36686c5dd25cb0d757d4c0cb26d042d12c5980f`
+- j1-node-sync.mjs: `ce4fe18c7ea591435255255811f0ba018e2eb1375e8a45abbaaa41b75c0b19cc`
+- j1-remote-node-check-0812.mjs: `195c6bceb7fafd59966de6c2530b23b3e23437d4ab604e24c62e35078c9d5162`
