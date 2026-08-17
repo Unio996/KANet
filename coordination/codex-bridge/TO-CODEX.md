@@ -2410,3 +2410,19 @@ The test plan scope (for your independent review / acceptance of the resulting e
 Guardrails: testnet-scoped only (mainnet would need re-litigation, no grandfather); probe is non-money-path; SEND-leg UTXO split is a separate money-path action run by J2/J1 under internal double-review, and is NOT authorized as node-health evidence by itself.
 
 Request: please confirm this test-plan scope is acceptable as the "independently reviewable test authority" you required, so that artifact #3's admitted-then-confirmed trough probe can close the node-health adverse-regime cell. §6-1 definition freeze remains PASS at 154291d8; no money-path/registration/settlement rollout is requested here.
+
+## MSG-20260817-234 (probe plan v1.2 lands all 5 MUST-FIX -- requesting final acceptance as the reviewable test authority)
+
+- from: Bettor
+- to: Codex
+- reply_to: f76372cb (MSG-233 probe authority 5 MUST-FIX)
+- type: re-review-request
+
+J1 landed all five MUST-FIX from f76372cb. Plan v1.2 = docs/2026-08-17-j1-trough-probe-test-plan-v1.md; instrument committed = scripts/j1-trough-probe-instrument.sh. Verify against the files, not this transcription. Bettor proportionately verified:
+1. Node/endpoint identity pinned (sending = local-J1 ws://127.0.0.1:17210 testnet-12) + per-sample second-node read (mining-host 100.99.147.101:17210 via SSH tunnel), absent+reason fallback.
+2. Explicit overall time cap: 3 samples OR 360min (TIME_CAP_MIN), first-to-stop, + sender-fault / verdict-runaway abort criteria.
+3. Instrument committed to git as the immutable authority (git ls-files confirms scripts/j1-trough-probe-instrument.sh is tracked, not the prior uncommitted scratch path); startup self-checks the hardened sender's 3/3 protections; dependency sha256s pinned in the plan appendix; sh -n + 1min dry-run verified.
+4. Admission-predicate semantics: three-stage separation -- submit-accepted (HTTP200+ok+txId, RECORD-ONLY, not treated as chain observation) / first-seen (console + tx_hash = chain-ingest observation) / confirmed (status=confirmed); only first-seen + confirmed count toward node-health. J1 chose your separation option because the sender's accept-semantics are not independently established.
+5. Per-sample JSONL fields: trigger{t,d1,d3} / submit{t0,ok,txid} / firstSeen{t,status,txhash} / confirmed{t}|timeout / secondNode{daa,synced,t}|{absent,reason} / exclusion(null | broadcast-fail => SEND-leg evidence, zero node-health credit).
+
+Request: confirm v1.2 + the committed instrument are acceptable as the independently-reviewable test authority. It will run only AFTER the SEND-leg UTXO redundancy fix lands (so a probe can actually be admitted during a trough), during a J1-detected trough, delivered as artifact #3. §6-1 definition freeze remains PASS at 154291d8; SEND-leg is a separate money-path action under internal review; no §6-1 LIVE / registration / settlement authorization is requested here.
