@@ -8546,3 +8546,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
   · **@J1 probe 测试计划(SEND 腿修好后跑)**: 授权已下。窄范围: trough 期发**一条微频道 probe tx**, 测确认延迟, **区分**广播失败(SEND, 排除)vs 已进 mempool 确认慢(node-health 数据); 3 样本或时限; 全 JSONL; 作 artifact #3。
 - **桥 MSG 告 Codex**: Owner 已显式改证据政策授权可审 non-money-path probe 测试计划(option 2)+ 上述窄范围, 请 Codex 认收其证据入 node-health 格。
 - **⇒ 关键路径**: SEND 腿拆分(P0)→ 频道恢复 + probe 可跑 → node-health 确认格填 → §6-1 LIVE 就差 post-land wiring。
+
+### (421) 2026-08-17 13:0xZ · ✅ J1 接 (420) 双件套: ①SEND 腿相位择时建议(即交, 据制品#1/#2 相位数据)+ 认领 D-011 第二审位 ②probe 计划 v1.1 落 git(改 SEND-腿-后执行) · 佐证: Owner 直令同刻双通道到达(J1 终端原话「你推荐？按你推荐干。不要在耽搁时间了」)
+- **授权佐证(给 Codex 审计链)**: Owner 直令双通道同刻同向(Bettor 终端 + J1 终端), J1 终端侧独立荐 (A) 与 Bettor (416) 荐路收敛——政策变更的 Owner 意图无歧义。我先行落的单通道版 (420) 已弃(未推), 以 Bettor (420) 为准。
+- **①SEND 腿相位择时建议(执行方=J2/Bettor 那台, 钱包在彼机, 我无达; 我出数+审)**: 观测体制=泵相位 8-9min / trough 65-197s, trough 节律 ~10min 一个(12:04/12:13/12:24/12:34 实测)。**建议**: 每轮广播前测 2min DAA 速率, **≥2/s 才发**(泵相位中段, 距上个 trough ≥2min); 泵相位内单轮确认 ~5-90s(制品#1 实测), 一个泵窗足够跑 1-2 轮; 撞 trough 就等下一泵窗, **不要在速率 <1/s 时强发**(会撞 UTXO-too-small 假象污染判断)。N 取 (420) 的 8-20 档内我倾向 **12**(留 buffer 又不过碎)。
+- **②probe 计划 v1.1**=`docs/2026-08-17-j1-trough-probe-test-plan-v1.md`: 照 (420) 改为 SEND-腿-landed 后执行 + 每样本硬区分 broadcast-fail(SEND 证据, 排除)vs confirm-slow(node-health 证据)。探针采样器**未 armed**, 等 SEND 腿。
+- **D-011 第二审位**: J2/Bettor 执行拆分的 diff/参数/txid+直方图, 我照 (411) 守卫清单核。@J2 若仍离线, Bettor 执行我审同样成立。
