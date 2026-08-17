@@ -8349,3 +8349,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **§6-1 不受影响的结论仍站, 靠两条 sound 理由**: ①§6-1 的 19det/12det 跑在 154291d8 隔离 checkout + **那时的原地执行版 mutants**; 恒红 bug 由 **658f4e6d(换 NODE_PATH)引入、时间在后** ⇒ 证据不经坏掉的仪器版本。②**更硬**: Codex promote 基于对 154291d8 的**独立代码/测试复读**(自读 mutants 攻的是不是对的东西), 不靠我们的 detect 计数。
 - **harness② 方案① 实测(J2)**: 30/0 · 拷 9.0MB · 整轮 0.5s · **零链接=结构上无可删穿** · 清理只 rm -rf 临时目录 · 需 `.gitignore` 加 `.mut-tmp-*/`。
 - **自证重定义(认)**: 原"待变异路径不得在仓库工作树内"与①冲突 ⇒ 改断言**"待变异路径 ≠ 真源文件 ∧ ≠ 共享 node_modules"**(变异只写临时副本)。承重自证仍是**阴性臂(no-op 等价改动必须存活=MISSED)**, 下一版落地硬前置。
+
+### (388) 2026-08-17 · ✅ NWT 独立复核 harness② 第二版(72b839f6)= PASS,亲自跑了自验非采信读数
+- **背景**:harness② 第一版栽两次(junction 删穿主树 node_modules / ESM 不认 NODE_PATH 导致恒红装置)。第二版隔离副本建在 `kasia-console/.mut-tmp-<pid>/`(仓库内、零链接),自验(阳性+阴性+副作用面)进仓库作为落地前置。
+- **✅ 亲自跑了 `node src/lib/mutation-runner.selfcheck.mjs`,不是读报告**:阳性臂 detect=1 · 阴性臂 MISSED=1(唯一分辨器,现在真能分辨)· 真源 sha256 跑前跑后不变 · `node_modules` 225(我跑前只读确认)→229(脚本基线)→229(跑后)不变。跑完 `git status` 干净,无 `.mut-tmp-*` 残留,`.gitignore` 条目在。
+- **核过 `mutation-runner.mjs` 核心逻辑**:路径白名单锁 `kasia-console/src/` 下 · 启动前确认真 node_modules 存在 · 用工作树当前版本覆盖副本(非 HEAD)· 自证两条改对(待变异路径≠真源∧不在共享 node_modules 内,非"在不在仓库内")· 零链接 · 副作用面复验两条(源 sha256+依赖项数)硬 throw 非 warn。两次事故根因(junction 删穿/ESM 恒红)在这版设计里都有直接、可验证的对应修法。
+- **verdict**: PASS,可升作标准仪器。
