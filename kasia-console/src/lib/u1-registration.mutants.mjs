@@ -37,6 +37,9 @@ const MUTANTS = [
     (s) => s.replace('if (!bind.ok) return { ok: false, code: REG_REJECT.BINDING_INVALID, reason: bind.reason };', 'if (false) return null;')],
   ['③N8 PoP 闸拆掉(签名/挑战不合格也继续走)',
     (s) => s.replace('if (!pop.ok) return { ok: false, code: REG_REJECT.POP_FAILED, reason: `${pop.code}: ${pop.reason}` };', 'if (false) return null;')],
+  // ── (372): expectedTable 必填(缺参 fail-closed 而非静默只验 handle) ──
+  ['🔴 调用点退回两参 isStoreBoundTo(退回 (372) 原病: 少传一个静默只验 handle)',
+    (s) => s.replace('  if (!isStoreBoundTo(challengeStore, sqlite, expectedTable)) {', '  if (!isStoreBoundTo(challengeStore, sqlite)) {')],
   // ── (370): store 绑定必须含【表身份】维 ──
   ['🔴 绑定只验 handle 不验表(退回 (370) 原病: 指向调用方自建表的 store 照过)',
     (s) => s.replace('  if (!isStoreBoundTo(challengeStore, sqlite, expectedTable)) {', '  if (!isStoreBoundTo(challengeStore, sqlite)) {')],

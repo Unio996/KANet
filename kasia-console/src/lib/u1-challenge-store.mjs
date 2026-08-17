@@ -69,11 +69,21 @@ export function createChallengeStore(sqlite, table) {
  * 外部无法把自己塞进 BOUND_HANDLE ⇒ 伪造的 store 在这里必然 false。
  */
 export function isStoreBoundTo(store, expectedSqlite, expectedTable) {
+  // 🔴 (372) expectedTable **必填, 缺参即拒** —— 上一版把它做成可选(`expectedTable !== undefined` 时才比),
+  //    那意味着**将来任何一个两参调用会静默退回只验 handle**, 而 (370) 那个洞就原样回来了,
+  //    且没有任何东西会喊。可选参数 = 少传一个就静默降级, 与 (343) 的 optional consumeChallenge 同族;
+  //    今晚唯一调用点已武装所以不急这个论证已被推翻两次((364) 命名约定 / (359) 书面要求)。
+  //    ⇒ 不留这个形状。
+  // 🔨 **为什么是 throw 不是 return false**(@Bettor 指定, 我认): 缺参是**编程错误**, 不是运行时输入错误。
+  //    返回 false 会被"某个忽略返回值 / 只在 if 里用一半"的调用点悄悄吞掉, 而 throw 吞不掉。
+  //    ⚠ 且它**永远不可能被外部输入触发** —— 唯一调用点固定传三参, 所以 throw 不会变成可被打的拒绝路径。
+  if (expectedTable === undefined) {
+    throw new Error('isStoreBoundTo: expectedTable 必填 —— 缺它会静默退回只验 handle, 而 (370) 那个洞就原样回来了');
+  }
+  if (typeof expectedTable !== 'string' || expectedTable === '') return false;
   if (!store || typeof store !== 'object') return false;
   const b = BOUND.get(store);
   if (!b) return false;
-  // 🔴 (370): 两维都要 —— handle **且** 表身份。只验 handle 时, 指向别的表的 store 照样过。
-  if (b.sqlite !== expectedSqlite) return false;
-  if (expectedTable !== undefined && b.table !== expectedTable) return false;
-  return true;
+  // 两维都要 —— handle **且** 表身份。只验 handle 时, 指向别的表的 store 照样过。
+  return b.sqlite === expectedSqlite && b.table === expectedTable;
 }

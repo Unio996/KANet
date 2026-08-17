@@ -24,7 +24,7 @@ const realVerifyMessage = (args) => verifyMessage(args);
 const { deriveIdentityPubkey, rootFingerprint } = await import('./u1-same-origin.mjs');
 const { buildPopPayload, popMessageHashHex } = await import('./u1-registration-pop.mjs');
 const { registerIdentity, deriveCustody, REG_REJECT, __testOnlyRegisterIdentityWithInjections } = await import('./u1-registration.mjs');
-const { createChallengeStore, CANONICAL_CHALLENGE_TABLE } = await import('./u1-challenge-store.mjs');
+const { createChallengeStore, CANONICAL_CHALLENGE_TABLE, isStoreBoundTo } = await import('./u1-challenge-store.mjs');
 
 let pass = 0; let fail = 0;
 const t = async (name, fn) => {
@@ -488,6 +488,22 @@ await t('(G-2) 绑定两维缺一不可: 规范表 + 另一个 handle ⇒ 仍拒
   assert.strictEqual(r.ok, false, '表名对了就放行 ⇒ handle 维被 (370) 改丢了');
   assert.strictEqual(r.code, REG_REJECT.CHALLENGE_STORE_UNBOUND, `实际 ${r.code}: ${r.reason}`);
   assert.strictEqual(sqlite.prepare('SELECT COUNT(*) n FROM u1_identity_registration WHERE relay_id = ?').get(relayId).n, 0, '拒了却落了库');
+});
+
+await t('(G-3) 🔴 (372) 两参调用 isStoreBoundTo ⇒ 必须 throw, 不许静默退回只验 handle', () => {
+  // 🔴 上一版 expectedTable 是可选的: 少传一个就静默只验 handle ⇒ (370) 那个洞原样回来, 且没有东西会喊。
+  //    本格钉的就是「少传一个」这件事本身 —— 不是测判定结果对不对, 是测**这种调用形状根本不被允许**。
+  //    🔨 它与 F-3/F-4 同一手法: 断言"那条路走不通", 而不是"走通了但结果恰好对"。
+  const st = chStore();
+  assert.throws(
+    () => isStoreBoundTo(st.typed, sqlite),          // ← 只传两参
+    /expectedTable 必填/,
+    '两参调用没抛 ⇒ 少传一个仍会静默降级, (372) 没修好',
+  );
+  // 正向对照: 三参且都对 ⇒ true(证明 throw 没把正常路径一起弄坏)
+  assert.strictEqual(isStoreBoundTo(st.typed, sqlite, CANONICAL_CHALLENGE_TABLE), true, '三参正常路径被误伤');
+  // 反向对照: 三参但表不对 ⇒ false(而不是 throw) —— 真实不匹配仍走布尔语义
+  assert.strictEqual(isStoreBoundTo(st.typed, sqlite, 'some_other_table'), false, '表不匹配应返回 false 而非抛');
 });
 
 sqlite.close();
