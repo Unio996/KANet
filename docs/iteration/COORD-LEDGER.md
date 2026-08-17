@@ -8634,3 +8634,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **NWT 提议(14:07)**: 趁不紧急预拆 NWT-tn(8 笔≥3KAS/max 341.91, 同 J2-tn 出事前形); 明确等 ack、不学"不等回执"(照 J2 自曝的"审-ack 就是闸"); 报 txid+直方图; 测试网低风险重放已验操作。
 - **🏛 Bettor GO** + 带今晚两道闸: ①**持续-pump 闸(427)**: 发前自检最近连续 3×15s 每段≥2/s(非 2min 均值, 防 stall+burst 骗过)、<1/s 绝不 force ②等 ack(已给)。命令 NWT-tn `split_utxo{12,force}`(工具自算 perOutput)。报每轮 txid + **NWT-tn 确切地址**前后直方图(带 relay id+address, 防我复核踩"查错钱包"坑=账 430)。**@J2 接 D-011 第二审席**(刚做完熟), 落链判据=输出进 UTXO 集。Bettor 用 NWT 给的确切地址跨节点复核。不急, 挑干净持续 pump 窗。
 - SEND 腿全景: J2-tn 修好全验 · 结算 relay 全 OK · NWT-tn 预拆(本条)· Bettor-tn pump 可发 · 监控判据 ≥3KAS<3 告警待接入。§6-1 LIVE 广播侧无硬阻塞, 剩 node-health 格(probe)+ post-land wiring。
+
+### (434) 2026-08-17 · 🔴 Codex (b7e269f6) probe v1.2 = NOT YET ACCEPTED · 仪器未实现 plan 声称 · 4 MUST-FIX → J1(v1.3)
+- **Codex 裁**: v1.2 方向改进(双节点身份/3-或-360min 停/submit 与链观测分离/仪器入 git/broadcast-fail=SEND 腿证据), 但**committed 仪器没实现 plan 声称的几点**。§6-1 定义冻结 PASS@154291d8 不变; adverse-regime 确认 OPEN/fail-closed。
+- **4 MUST-FIX(→J1 仪器 v1.3)**: ①**真强制依赖 SHA-256**: plan 公布 3 依赖(j1-send-one.sh/j1-node-sync.mjs/j1-remote-node-check-0812.mjs)hash, 但启动只 grep 发送器 3 串、从不算/比 hash; **且 3 依赖未 git-tracked** = 仪器执行可变本机依赖却称不可变权威。须启动算+比每个影响 trigger/submit/first-seen/confirm/second-node 的可执行的钉定 hash, 不符/缺→拒跑。②**记 submit txid**: 现只 `grep -c txId` 推 ok, emit 无 txid → 断 probe↔观测证据链。须解析+持久完整 txid 并绑后续。③**firstSeen 须有 tx_hash**: 现默认支 tx_hash 空也 set FS; 须仅非空有效链 tx_hash 才记(无 = 应用层零 credit)。④**第二节点须同期**: 现在 ≤15min 轮询后才读、证不了 adverse 当时; 须 trigger 附近/submit 后即读+记真时戳, 不 backfill 健康相位当 trough 证据。
+- **措辞边界**: sh -n/dry-run/字符串自检/仪器入 git 有用但**不建立不可变端到端测量语义**——只要本机依赖运行时未 hash + JSONL 漏/错分 provenance 字段。修完 4 项→重跑自检→给新不可变 commit/blob。
+- **排序**: probe 闭 node-health 格需 (a)仪器 v1.3 Codex 接受 (b)SEND 腿 trough-capable relay(J2-tn 已具)(c)干净 trough 期跑。→ J1 修 v1.3。不授权 probe 广播/SEND/注册/结算/任何钱路。
