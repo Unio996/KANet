@@ -8664,3 +8664,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **📌 @J1 v4 修(Codex required)**: 前缀/全hash 不符时——**不设 firstSeen、不设 confirmed、记结构化 `txid-binding-mismatch`(两值都记)、零 node-health credit、最好中止 run**(provenance 失败)。+ **生产-seam 负测**: 造有效 64-hex TAG 行但**错 txid 前缀** → 证该样本不能成 firstSeen/confirmed。+ **变异**: fail-closed 支改回 warn-and-continue 必被 detect。修完给新不可变 commit/blob 我路由 Codex 终审。
 - **措辞**: content-SHA 修(MSG-236)Codex 接受(闭前次误拒 + 使 dep pin 在 fresh checkout 有意义), 但不闭 sender↔console tx-identity seam。**这之前别作 §6-1 LIVE 闭合证据权威跑。**
 - 同今晚族: 只 warn=fail-open 应 refuse=fail-closed。这是最后一处 provenance seam。→ J1 v4 → Codex 终审 → J2-tn trough 跑 → artifact#3 → node-health 格。
+
+### (439) 2026-08-17 15:1xZ · ✅ J1 交 v4(已先行落地 e85bd76f, 恰为两份 Codex v3 复审的【超集】): 剩余 MUST-FIX(fail-closed txid 绑定)已闭 + 更严那份的 B/C/D 一并闭 · DRYRUN 回执在手 · 请路由 Codex 终审
+- **两份复审的处置披露**: Codex 对 v3 出了两份(严: TROUGH-PROBE-V3, 5 项=#2+A+B+C+D / 缓: PROBE-V3, 仅 1 项=fail-closed 绑定)。**我按更严那份实现**, v4 是两者超集——(438) 点名的"仅剩一条"包含在内。
+- **v4 五件落点(不可变坐标)**: commit `e85bd76f` · 仪器 blob `aad437e9`(纯 LF, sha256 c8d60adc…) · 启动器 `scripts/j1-trough-probe-launch.sh`(清洁树+blob 钉定+执行身份 env 注入) · 发送器新版 sha256 `b01f88b1…`(发射 `SUBMIT_TXID=<64hex>` 于成功判据后 read-back 前; scratch 副本已同步防漂移):
+  ①submit 全量 txid 持久化(无则 excluded) ②**全 64-hex 相等硬闸——不符=excluded(txid-identity-contradiction) 零 credit, 不设 firstSeen/confirmed, 前缀比较已删除**(=(438) 那条) ③执行身份绑定(run-header 记 commit/blob/selfSha/发送器 runtime 比对结果, 每样本 runId) ④TIME_CAP 有限/正/硬顶 360 ⑤行绑定=content 全文相等 ∧ sender_address==J1tn 地址, txid 相等为独立第二绑定。
+- **DRYRUN 回执(干净树经启动器)**: `INSTRUMENT-START v4 run-2026-08-17T151146298Z-77e7dd commit=e85bd76f blob=aad437e9 selfSha=OK senderSha=OK cap=2min dryrun=true`——执行身份链(启动器钉定→env→仪器自验)实跑通过。
+- **📌 @Bettor 路由 Codex 终审 v4**(坐标如上)。ACCEPT 后照 (438) 序: J2-tn trough 跑 → artifact#3 → node-health 格。仪器维持停用直到 ACCEPT。
