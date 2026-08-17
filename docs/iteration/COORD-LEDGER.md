@@ -8194,3 +8194,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **核过**:digest 一致 + lint 0 errors。`registerIdentity` 生产签名不再收任何时钟字段,内部固定 `() => Date.now()`;测试改走独立导出 `__testOnlyRegisterIdentityWithClock(args, clock)`,`clock` 是显式第二参数,连字段名都不共享 options 对象。**F-3 关键格**:把 `__testOnlyClock` 塞进生产入口,断言 `called===0`(不只断言结果对,断言那个函数从未被调用)——挡住"读了但碰巧因别的理由拒绝"的假阳性。
 - **顺带核过**:J2 自己抓的坑——改签名后旧变异锚点字符串从文件消失会静默变 INERT(数字体面但测不到东西),已重锚三格 + 新增一格直接模拟"逃逸口塞回生产签名"回归场景,锚点核对与新代码精确对应。
 - **verdict**: PASS。五级(用掉→同事务域→没过期→几点→逃逸口本身)到此未见第六级,同样不预判。
+
+### (368) 2026-08-17 06:4xZ · 🔴 Codex 挖第六级 verifier authority(与 clock 并列同族)· Bettor 裁: verifier 结构修 + 【一次性枚举签名所有注入面】防继续逐个挖
+- **Codex 裁(bcc8dd28)**: clock 注入面 **CLOSED by 07611e7d**(五级全闭)。**第六级 OPEN/MUST-FIX: signature-verifier authority**——`verifyMessageFn` 也是调用方可注入验证器面; copied root/xpub + 正确派生 pubkey + 注入 always-true verifier ⇒ 不持私钥也过 N8, PoP 失效。与 clock/now/challengeRecord **完全同族**。Codex: req.body 经 JSON 通常传不了函数**但对定义冻结不够**——内部 adapter/plugin/测试/未来 callsite 能传, 契约必须**结构拥有** verifier authority 不靠 transport shape/调用方自觉。
+- **🔴 元教训(我该早提)**: verifyMessageFn 一直和 __testOnlyClock **并列**在 registerIdentity 签名里, 我们逐个修 clock 时**只盯 clock 没扫并列注入面**——四方验 07611e7d 都漏了, Codex 抓到。**修一类洞必枚举同类全部**(在册"枚举 by effect 不 by keyword")。
+- **🏛 Bettor 裁**: ①verifier 结构修(同 clock 成功模式: 生产 registerIdentity 无调用方可选 verifier 面, 钉死真 kaspa-wasm verifyMessage; 测试注入移 test-only 入口; F-3/A-2 等价测试=生产传伪造 verifyMessageFn:async()=>true+无效签名 ⇒ 断言不被调+拒+无insert; 重锚变异)。②**@J2 一次性枚举 registerIdentity 签名所有参数**(sqlite/submission/challengeStore/verifyMessageFn/…), 逐个判"是不是调用方可注入的 authority 面", **全部结构做掉**——不再逐个被 Codex 挖(clock→verifier→…)。
+- 桥暂缓 Codex 等 J2 枚举全修的最终 commit。闭合以 Codex PASS 为准。deriveCustody+存储表 schema 仍 post-land。
