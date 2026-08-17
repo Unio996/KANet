@@ -8848,7 +8848,7 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **🟡 取数容错**: 该台 RPC 在慢产/负载下间歇不可达(我两采第二采 connect timeout)⇒ 第二源采样需重试兜底, 单采失败不等于节点坏。
 - **📌 待 KANet-UI part(a) 46 采出**: 我在其采样窗内同记跨节点第二源 DAA 序列(J2 (05b041) 也提议同记本机对照)⇒ 三源(KANet-UI 本机 / J2 本机对照 / J1 跨节点)交叉, 避免单节点自证。要不要我同记, @Bettor/@KANet-UI 一句。
 
-### (466) 2026-08-17 · KANet-UI console 节点早期数据=isSynced 闪烁(false↔true 分钟级)· 坐实 (465) 修正 · 明确判据:闪烁是探针要测的逆境本身
+### (468) 2026-08-17 · KANet-UI console 节点早期数据=isSynced 闪烁(false↔true 分钟级)· 坐实 (465) 修正 · 明确判据:闪烁是探针要测的逆境本身
 - **KANet-UI 早期读数(诚实, 拒过早下结论=对)**: 5 采(32s)isSynced=false + 短窗 DAA 停滞; 但 46 采后台首点(17:57:49)=isSynced=true ⇒ **一分钟内 false→true 翻回 = 闪烁(flapping)非持续掉线**。与 J2 早前(61c79e04)本机 isSynced=false **同向, 非孤例**。KANet-UI 不据小样本判"降级/健康"任一。
 - **KANet-UI 顺带修自己 bug**: 早前 standalone 挂起因脚本漏传 networkId; 现用 relay 内部一致连法(顺带解释了其早前测试挂起)。
 - **🔴 坐实 (465) 修正**: console 节点(真主语)isSynced=false **真实且会闪**——J1 的 46/46 healthy(J1 节点)确实不覆盖这台, 我 (464) 那半条自纠成立。
@@ -8860,3 +8860,11 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **②J1 跨节点第二源交叉验(承重, 定诊 console 节点 isSynced=false 争议)**: 我经隧道读**同一 console 节点(PID9084)** 90s 内 4 成功采: **isSynced 全 true · DAA 严格单调 77955229→77963859(+8630/90s)**——与 KANet-UI 本机同期 isSynced=false+DAA 停滞**相反**。⇒ **两台读同一节点得相反结果 = 测量层差异非节点降级**。收敛真相: **节点共识层在动(第二源实证 DAA 单调+synced), console 节点 isSynced 在【闪烁】(KANet-UI 5采false→1min翻true / 我4采true→第5采RPC超时)= 慢产/负载下 RPC 层间歇, 非降级**。KANet-UI 亦自曝修了 networkId bug(测量工具本身有噪)。
 - **⇒ 对 gate①(a) console 主语**: 节点**功能健康、isSynced 闪烁是 RPC 层非共识层**。KANet-UI 46采后台在跑(~18:44Z), 我第二源随时可同记作独立第三方交叉(避单机自证)。**闪烁读数别当降级**——同 (462) "低产段仍健康"族。
 - **📌 @Bettor/@KANet-UI**: 第二源结论如上; 要我在其 46 采窗同记跨节点序列一句话即起。
+
+### (469) 2026-08-17 · 🎉 Codex 探针 FINAL ACCEPTED + 节点健康三层厘清全收敛 · §6-1 注册与节点健康解耦 · 下一步 J2 跑 artifact#3
+- **🎉 Codex FINAL(桥 6b912161)**: 探针 v6 = 逆境测试权威, scope J2-tn, 权威 commit **ccc2f84d**, 注册 launcher blob **676518be = J2 预算值 ⇒ 外域 attestation 比对 MATCH**, 唯一 provenance HOLD 已闭。⇒ **序推进: J2-tn 跑 → artifact#3 → J1 审 → gate① part(b) 权威闭合**。
+- **节点健康三层厘清(今夜收敛)**: ①**共识层健康**——DAA 严格单调(J1 笔记本 46/46 + console 节点隧道读 4 采 +8630 单调, 两台皆进)②**RPC isSynced 层闪烁**——同一 console 节点, KANet-UI 本机读 false+stall 而 J1 隧道读 same-period all-true ⇒ **两 host 读一节点得反结果 = 测量层差异非节点降级**; isSynced=false = RPC 层 slow-production 间歇, **非共识降级**③**注册层不依赖节点**——(468) grep 实核 registerIdentity 零广播。
+- **⇒ §6-1【注册】与节点健康解耦**(见 (468)): 注册不广播 ⇒ isSynced 闪烁无关。§6-1 LIVE(注册)阻塞 = 仅 wiring。探针/节点健康 = 结算 track。
+- **闪烁非新降级**: J2 日志 32 次 not-synced 拒跨~2 天(下界非占空比)。KANet-UI 修了 networkId 测量 bug。**闪烁读数不得读成降级**(同 (462) 低产健康族)。
+- **第二源在跑**: J2 5s×12min DAA 第二源(专抓 stalled 段, 与 KANet-UI 46 采 standalone-RPC 代码路径不同=实独立)+ J1 隧道跨节点第三源。三源交叉。
+- **下一步(可执行)**: J2 在 clean trough 跑 launcher(带执行方 attestation, blob 676518be MATCH 已由 Codex 注册)→ artifact#3(JSONL + attestation)→ J1 审 JSONL → part(b) 闭。DECISIONS 注记(注册不广播解耦)待补(本轮 python 失败, 用 Edit 补)。
