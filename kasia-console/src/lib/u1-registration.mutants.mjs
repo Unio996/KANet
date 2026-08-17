@@ -65,7 +65,7 @@ const MUTANTS = [
       .replace('    const nowTx = clock();', '    const nowTx = globalThis.__popSnap;')],
   // ── (359): 签发/过期 authority ──
   ['🔴 record 改回收调用方给的(退回 (359) 原病: 伪造/未过期 record 骗过 PoP)',
-    (s) => s.replace('  const storeRecord = challengeStore.read(s.challenge);', '  const storeRecord = arguments[0]?.challengeRecord ?? challengeStore.read(s.challenge);')],
+    (s) => s.replace('  const storeRecord = ops.read(s.challenge);', '  const storeRecord = arguments[0]?.challengeRecord ?? ops.read(s.challenge);')],
   ['事务内 expiry 重检拆掉(过期发生在 PoP 之后就没人管)',
     (s) => s.replace('    if (!Number.isFinite(expMs) || !Number.isFinite(nowMs) || expMs <= nowMs) {', '    if (false) {')],
   // ── (343)+(354): 一次性挑战 + 事务域绑定, 每一段都要被咬 ──
@@ -82,6 +82,7 @@ const MUTANTS = [
 const UNREACHABLE = [
   ['消费抛错被吞', '前置读已保证 unused + store 的 CAS UPDATE 在同一事务/同一连接内必然 changes=1 ⇒ consume 在前置读通过后【不可能失败】。catch 是给将来存储不再同域留的纵深, 现在无法从外部触发。'],
   ['后置条件拆掉', 'SQL 归 store 拥有且是 CAS, 调用方【构造不出】空消费 ⇒ 后置读永远为真。这是 (354) 用结构替掉运行时检查的直接后果。'],
+  ['(374) 改回解引用调用方 store 的方法', "(374) 之后生产路径拿不到「带方法的绑定对象」: token 是冻结的、且本来就没有 read/consume(H-2 直接断言)。 所以「若 challengeStore.read 存在就用它」这一支永远走不到 —— 不是闸漏了, 是攻击摆不出来。 要真测它, 需要 harness 能变异 u1-challenge-store.mjs(把方法挂回 token), 那属已排期的 harness② 范围。"],
   ['摘掉 .immediate', 'DEFERRED 与 IMMEDIATE 的差别只在【并发取锁时刻】; 本用例是单进程顺序执行, 观察不到。要测它需要两个进程真争锁, 超出本 harness。'],
 ];
 

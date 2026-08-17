@@ -61,8 +61,11 @@ sqlite.exec(`CREATE TABLE IF NOT EXISTS u1_identity_challenge (
 function chStore() {
   const st = createChallengeStore(sqlite, 'u1_identity_challenge');
   return {
-    issue(c){ sqlite.prepare('INSERT OR REPLACE INTO u1_identity_challenge (challenge, used_at, expires_at) VALUES (?, NULL, ?)').run(c, Date.now()+60000); return st.read(c); },
-    read:(c)=>st.read(c), consume:(c)=>st.consume(c), typed: st,
+    issue(c){ sqlite.prepare('INSERT OR REPLACE INTO u1_identity_challenge (challenge, used_at, expires_at) VALUES (?, NULL, ?)').run(c, Date.now()+60000); return this.read(c); },
+    // 🔴 (374) 之后 token 上没有方法了; 夹具自己走 SQL 读写那张表(它本来就是测试夹具, 不是权威)
+    read:(c)=>{const r=sqlite.prepare('SELECT challenge, used_at, expires_at FROM u1_identity_challenge WHERE challenge = ?').get(c); return r?{challenge:r.challenge,usedAt:r.used_at,expiresAt:r.expires_at}:null;},
+    consume:(c)=>{const i=sqlite.prepare('UPDATE u1_identity_challenge SET used_at = ? WHERE challenge = ? AND used_at IS NULL').run(Date.now(), c); if(i.changes!==1) throw new Error('夹具消费失败');},
+    typed: st,
   };
 }
 // 成功路径的标准接线: 消费与重读都走上面那张真表
@@ -504,6 +507,39 @@ await t('(G-3) 🔴 (372) 两参调用 isStoreBoundTo ⇒ 必须 throw, 不许�
   assert.strictEqual(isStoreBoundTo(st.typed, sqlite, CANONICAL_CHALLENGE_TABLE), true, '三参正常路径被误伤');
   // 反向对照: 三参但表不对 ⇒ false(而不是 throw) —— 真实不匹配仍走布尔语义
   assert.strictEqual(isStoreBoundTo(st.typed, sqlite, 'some_other_table'), false, '表不匹配应返回 false 而非抛');
+});
+
+await t('(H-1) 🔴 (374) 拿【真绑定】的 store 去换它的方法 ⇒ 无效(绑对象身份≠绑对象行为)', async () => {
+  // 🔴 Codex 3ae9e7eb 第八级的直接复现:
+  //    上一版 read/consume 挂在返回给调用方的对象上, 而 WeakMap 只绑对象身份 ⇒
+  //    攻击者拿一个【真的】绑定 store, 把 read 换成"返回我挑的新鲜挑战"、consume 换成 no-op,
+  //    再传回来 —— 绑定检查照过, 一次性与过期的权威被整个换掉。
+  const relayId = insRelay({ mnemonic: 'enc-m-swap' });
+  const id = makeIdentity();
+  const ch = 'ch-swap';
+  const st = chStore();
+  // 注意: **故意不 issue** —— 真表里没有这条挑战。若攻击成功, 假 read 会让它"看起来存在且新鲜"。
+  let fakeRead = 0; let fakeConsume = 0;
+  try {
+    st.typed.read = (c) => { fakeRead += 1; return { challenge: c, usedAt: null, expiresAt: Date.now() + 3_600_000 }; };
+    st.typed.consume = () => { fakeConsume += 1; };
+  } catch (e) { /* 冻结对象在 strict mode 下会抛 —— 这本身就是防线之一, 不影响下面的断言 */ }
+
+  const r = await registerIdentity({ sqlite, submission: submissionFor(relayId, id, ch), challengeStore: st.typed });
+  assert.strictEqual(fakeRead, 0, '🔴 我换上去的 read 被调用了 ⇒ 权威仍挂在调用方能改的对象上, (374) 没修好');
+  assert.strictEqual(fakeConsume, 0, '🔴 我换上去的 consume 被调用了');
+  assert.strictEqual(r.ok, false, '🔴 换掉方法后注册成功 ⇒ 一次性/过期两道权威被调用方接管');
+  assert.strictEqual(r.code, REG_REJECT.POP_FAILED, `应当因真表里没这条挑战而在 PoP 层拒, 实际 ${r.code}: ${r.reason}`);
+  assert.match(r.reason, /CHALLENGE_UNKNOWN/, `拒因应为 CHALLENGE_UNKNOWN(证明读的是真表不是假 read), 实际 ${r.reason}`);
+  assert.strictEqual(sqlite.prepare('SELECT COUNT(*) n FROM u1_identity_registration WHERE relay_id = ?').get(relayId).n, 0, '拒了却落了库');
+});
+
+await t('(H-2) token 上本来就没有 authority 方法(不是"改了会被发现", 是"没东西可改")', () => {
+  // 🔵 与 H-1 互补: H-1 证"换了也没用", 本格证**那里本来就是空的** —— 这才是 (374) 的实际形状。
+  const st = chStore();
+  assert.strictEqual(typeof st.typed.read, 'undefined', 'token 上不该有 read —— 权威实现必须只活在模块私有 WeakMap 里');
+  assert.strictEqual(typeof st.typed.consume, 'undefined', 'token 上不该有 consume');
+  assert.ok(Object.isFrozen(st.typed), 'token 应当是冻结的(弱兜底, 非承重)');
 });
 
 sqlite.close();

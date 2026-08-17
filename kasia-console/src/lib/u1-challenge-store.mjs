@@ -48,7 +48,9 @@ export function createChallengeStore(sqlite, table) {
   //    **不让调用方有机会把它写成非 CAS**(上一版就是把这件事托付出去才出的洞)。
   const consumeStmt = sqlite.prepare(`UPDATE ${table} SET used_at = ? WHERE challenge = ? AND used_at IS NULL`);
 
-  const store = {
+  // 🔴 (374) 权威实现【留在模块里】, 不挂到返回给调用方的对象上。
+  //    返回的 store 是一个**不透明 token**: 它自己没有任何 authority-bearing 方法可供替换。
+  const ops = {
     read(challenge) {
       const r = readStmt.get(String(challenge));
       return r ? { challenge: r.challenge, usedAt: r.used_at, expiresAt: r.expires_at } : null;
@@ -60,7 +62,9 @@ export function createChallengeStore(sqlite, table) {
       }
     },
   };
-  BOUND.set(store, { sqlite, table });
+  // token 本身不带方法 —— 调用方拿到的是一个冻结的空壳, 换不掉任何东西(它上面本来就没有东西)。
+  const store = Object.freeze({ __u1ChallengeStoreToken: true });
+  BOUND.set(store, { sqlite, table, ops });
   return store;
 }
 
@@ -86,4 +90,26 @@ export function isStoreBoundTo(store, expectedSqlite, expectedTable) {
   if (!b) return false;
   // 两维都要 —— handle **且** 表身份。只验 handle 时, 指向别的表的 store 照样过。
   return b.sqlite === expectedSqlite && b.table === expectedTable;
+}
+
+/**
+ * 🔴 (374) 取【模块自持的】权威操作 —— registration 必须走这里, **不许解引用调用方手上那个对象**。
+ *
+ * Codex 3ae9e7eb 第八级: 上一版把 read/consume 挂在返回给调用方的对象上, 而 WeakMap 只绑
+ * **对象身份**({sqlite, table}), **不绑对象行为** ⇒ 攻击者拿一个真绑定的 store, 把 `store.read`
+ * 换成"返回一条他挑的新鲜挑战"、`store.consume` 换成 no-op, 再传回来 —— 绑定检查照过, 而
+ * 一次性保证被整个换掉。**绑对象身份 ≠ 绑对象行为。**
+ *
+ * ⇒ 现在返回的 store 是**不透明 token**(冻结、无方法), 真正的实现只存在于本模块的 WeakMap 里。
+ *   调用方改那个对象**改不到任何东西** —— 不是"改了会被检查出来", 是**那里本来就没有东西可改**。
+ * 🔵 `Object.freeze` 只是弱兜底(它拦不住原型层面的花招); 承重的是"**方法根本不在那个对象上**"。
+ *
+ * @returns {{read:function, consume:function}} 绑定校验通过时的模块自有操作
+ * @throws  绑定不符 ⇒ 抛(不返回 null: 让"忘了判返回值"的写法也不可能静默降级)
+ */
+export function getBoundOps(store, expectedSqlite, expectedTable) {
+  if (!isStoreBoundTo(store, expectedSqlite, expectedTable)) {
+    throw new Error('getBoundOps: store 未绑定到 (本次 sqlite 事务域 ∧ 规范表) —— 拒绝交出权威操作');
+  }
+  return BOUND.get(store).ops;
 }
