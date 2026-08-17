@@ -4,8 +4,8 @@
 # 通过后注入执行身份 env 交仪器自验(仪器内还有 self-sha256 与发送器 sha256 双闸)。
 # 用法: bash scripts/j1-trough-probe-launch.sh [TIME_CAP_MIN<=360] [DRYRUN]
 cd /d/kanet/kanet || exit 1
-PINNED_INSTRUMENT_BLOB=aad437e930e20cdca9fe890ba6abcf289a72e7ae
-PINNED_INSTRUMENT_SHA=c8d60adc8ebea09dd72dce57262878b9e5b77f5f2d609769b93fffc4fb325047
+PINNED_INSTRUMENT_BLOB=58a806c0ba5d1dfa9da30be022514b4fc7914688
+PINNED_INSTRUMENT_SHA=7508b539035024050819585159160b28dc1c23ccc9063ca4d9ef6fc51680c288
 DIRTY=$(git status --porcelain scripts/j1-trough-probe-instrument.mjs scripts/probe-deps/j1-send-one.sh)
 if [ -n "$DIRTY" ]; then echo "LAUNCH-REFUSED: 仪器/发送器路径工作树不干净:"; echo "$DIRTY"; exit 1; fi
 ACTUAL_BLOB=$(git hash-object scripts/j1-trough-probe-instrument.mjs)

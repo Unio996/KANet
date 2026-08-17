@@ -19,6 +19,10 @@ import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 const require = createRequire('D:/kanet/kanet/kasia-console/package.json');
 const { RpcClient, Encoding } = require('kaspa-wasm');
+// 绑定判定纯函数(gate#1 抽出, 带 test/mutants; 亦为测量链依赖 ⇒ 下方 sha256 钉定)
+const BINDING_MOD = 'D:/kanet/kanet/kasia-console/src/lib/j1-probe-binding.mjs';
+const PINNED_BINDING_SHA = 'b54d8af1bd166000be82019142043ebf3cf96500a596b9c4a90ce920a867d55d';
+const { decideProbeBinding } = await import('file:///' + BINDING_MOD);
 
 const NODE1 = { id: 'local-J1-ws://127.0.0.1:17210-testnet-12', url: 'ws://127.0.0.1:17210' };
 const NODE2 = { id: 'mining-host-100.99.147.101:17210', tunnelPort: 17225 };
@@ -63,6 +67,10 @@ if (!existsSync(SENDER)) { console.log('INSTRUMENT-REFUSED: 发送器 git 副本
 const senderShaActual = sha256(SENDER);
 if (senderShaActual !== PINNED_SENDER_SHA) {
   console.log(`INSTRUMENT-REFUSED: 发送器 sha256 不符 pinned=${PINNED_SENDER_SHA} actual=${senderShaActual}`); process.exit(1);
+}
+const bindingShaActual = sha256(BINDING_MOD);
+if (bindingShaActual !== PINNED_BINDING_SHA) {
+  console.log(`INSTRUMENT-REFUSED: 绑定模块 sha256 不符 pinned=${PINNED_BINDING_SHA} actual=${bindingShaActual}`); process.exit(1);
 }
 const RUN_ID = `run-${new Date().toISOString().replace(/[:.]/g, '')}-${randomBytes(3).toString('hex')}`;
 const runHeader = {
@@ -150,17 +158,16 @@ while (got < 3) {
         if (failClass === 'sender-refused') { console.log('ABORT: 发送器 REFUSED(中止判据②)'); break; }
         await new Promise(r => setTimeout(r, 60000)); continue;
       }
-      // 轮询 first-seen / confirmed; A: 全 64-hex 相等硬闸
+      // 轮询 first-seen / confirmed; 判定全权委托绑定模块(带 test/mutants 的那份, sha 已钉)
       let firstSeen = null, confirmed = null, contradiction = null;
       for (let k = 0; k < 90 && !confirmed && !contradiction; k++) {
         const row = await pollExactRow(tag, msg);
-        if (row && /^[0-9a-f]{64}$/.test(String(row.tx_hash || ''))) {
-          if (row.tx_hash !== submitTxid) {
-            contradiction = { t: now(), submitTxid, rowTxHash: row.tx_hash };
-          } else {
-            if (!firstSeen) firstSeen = { t: now(), txHash: row.tx_hash, status: row.status };
-            if (row.status === 'confirmed') confirmed = { t: now(), txHash: row.tx_hash };
-          }
+        const v = decideProbeBinding({ submitTxid, row, exactMsg: msg, expectedSender: MY_ADDR });
+        if (v.verdict === 'contradiction') {
+          contradiction = { t: now(), submitTxid, rowTxHash: v.txHash };
+        } else if (v.verdict === 'first-seen' || v.verdict === 'confirmed') {
+          if (!firstSeen) firstSeen = { t: now(), txHash: v.txHash, status: row.status };
+          if (v.verdict === 'confirmed') confirmed = { t: now(), txHash: v.txHash };
         }
         if (!confirmed && !contradiction) await new Promise(r => setTimeout(r, 10000));
       }
