@@ -8363,3 +8363,12 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **🔵 记一条未来 guard(不阻塞, KANet-UI 提)**: harness② 假设 src/ 内无 symlink(cpSync 默认不解引用, 但若将来 src/ 出现 link, 拷进副本后 finally rm -rf 可能重新删穿)。当前 `find src -type l`=0。可选未来加 `find src -type l` 预检。
 - **收束**: 今夜从"§6-1 九级 acute 连修" → "node_modules 惊吓" → "harness② 恒红" → "harness② v2 四方过", 全部闭合。§6-1 定义冻结(154291d8)不受任何仪器问题影响。剩 post-land: deriveCustody TOCTOU · 表 schema/wiring · §6-1 LIVE(Owner 物理机)。
 - 🔧 housekeeping: 频道另有一条 NWT selfcheck 条目也编成 (388) 与本簿 (388) 撞号(cosmetic, 两条都可读), 留待重编。
+
+### (393) 2026-08-17 · 🅿️ PARKED 缺陷(非 D-012·不动手修): relay 去重在放行时记录 ⇒ 失败的发送自锁 30min · 两方复现 · 陷阱#45 同族
+- **缺陷(Bettor 读码核实)**: `kasia-relay/src/relay.mjs` `shouldBlockOutbound()` **line 127 在放行时就 `_recentOutbound.push({target,message,time})`**(126 注释"放行→记录"), 即 CHECK 函数顺带写状态。调用点(:391 send / :429 bcast)先 check(此时已记)再真发; **真发失败 → 缓存已有该条 → DEDUP_WINDOW_MS 内相似重试被判 duplicate 拒 ⇒ 失败消息自锁重试**。属"乐观写入/确认成功前写状态"(NO TX NO STATE CHANGE 族)。
+- **实值**: `DEDUP_WINDOW_MS = 1_800_000`=**30min**(J2 对; line 111 注释"60s"过期, doc-drift, 一并记); `DEDUP_SIMILARITY=0.85`。
+- **同族既有陷阱**: line 99 已记「陷阱 #45: shouldBlockOutbound 拦截协议消息重试, 导致 paid 广播永远上不了链」——**本条是其复发/另一形态**(记录时机而非拦截本身)。
+- **两方复现**: J2(半小时被咬两次, 底因不同) + KANet-UI(relay 没起首发失败→重发同内容→"blocked: duplicate 100% ...480s ago", 那条从没落地)。证据充分。
+- **🅿️ Bettor 裁 PARK 不修**: **非 D-012**, Owner"只 D-012"仍在 ⇒ 记 backlog 不动手。money-path 相关(失败的 settle/paid 广播自锁)但当前 §6-1 未 live、无活跃生产钱路、结算 daemon 另有 retry/verify ⇒ **非活跃火**。
+- **修法形状(留给日后, 不现做)**: 把 `_recentOutbound.push` 移出 CHECK 函数, 改为调用点(:391/:429)**在真发【成功】后**才记 dedup(check 只读)。使 dedup 缓存与实际落地对齐(NO TX NO STATE CHANGE)。改 relay=money-path 邻近, 需 报→审→批→测(铁律0)+ 待 Owner 开 scope 出 D-012 之外。
+- 谢 J2 报-only 纪律 + KANet-UI 补独立数据点。
