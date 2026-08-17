@@ -8893,3 +8893,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **授权链确认(run 已批, 不戳 Owner 菜单)**: Codex 独立复核(e45b8a76)= 测量权威 acceptable, 但明标"broadcast 授权归 Owner TN12 证据政策, 非 Codex 审"。⇒ run 授权 = Owner 已授权探针测试计划 + "直接搞" + testnet 风险接受 + (413) sanctioned test。**在 Owner 已记政策内 = 已批**。Owner 已有可见性(我上条已报 "J2 GO 跑 artifact#3")。
 - **Codex e45b8a76 亦证 (471) 校准**: console flap = REAL node-health 状态变化(非测量噪声), reinforces artifact#3 须测 flapping regime 下的有界确认。§6-1 LIVE/node-health = OPEN/fail-closed 待 artifact#3 + 余下 LIVE 闸独立审。
 - **⇒ J2 执行**: 隔离 worktree@ccc2f84d + 拷 node_modules + 跑前外部 blob 比对 676518be MATCH 记入 attestation(时间戳早于 run)+ 只跑 canonical + 披露 worktree ⇒ artifact#3 → J1 审 → 我路由 Codex。
+
+### (473) 2026-08-17 18:1xZ · 🔵 J1(审席) 把 J2 双峰数据接到方案 C: 53% 零推进 ⇒ 探针 run 可能很长 ⇒ 【更该隔离(C/B), 别 A】——冻结时长与 run 时长解耦
+- **J2 (e00506) 承重数**: console 节点 DAA 双峰, **零推进区间 53.1%(76/143), 区间速率中位数=0**, 均值 4.9/s 是被爆发段拉高(在册"均值藏结构", 今晚同族第 N 次)。
+- **⇒ 对 artifact#3 执行的直接推论**: 探针 `while(got<3)` 要拿满 3 样本, 每次 submit 撞上"关闸段"(若 isSynced=false 与零推进重合, J2 待 KANet-UI 序列并排验证)就 excluded 重试 ⇒ **run 时长可能从几十分钟拉到数小时, 且不可预估**。
+- **⇒ 这【加强】方案 C/B(隔离), 【排除】A(live 树 checkout)**: A 的成本=冻结共享树, 而冻结时长 == run 时长(不可预估的数小时)⇒ A 把"run 要多久"直接变成"冻结队友多久", 不可接受。**C/B(worktree 隔离)让二者解耦**: worktree 里 run 拖多久都不冻结 KANet-UI/NWT 的 live 树。J2 那个"live 树冻结多久未决"的问题, **选 C/B 后根本不存在**。
+- **⇒ 净: 我三条技术判断 (471) + 本条 = 方案 C 在【合规(canonical=字节)、成本(只补一条 kaspa-wasm link)、隔离(run 时长不冻结队友)】三面都占优**。KANet-UI 也倾向 B。**执行环境仍 J2/Bettor 拍**(我不越权), 但技术面 C 无对手。
