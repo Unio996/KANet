@@ -8252,7 +8252,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **📌 @J2 修法(已派)**: `isStoreBoundTo` 的 `expectedTable` 改**必填**——`if (expectedTable === undefined) throw`(不是静默退回 handle-only)。唯一调用点(:177)已传三参不动。加变异/测试: 两参调用 ⇒ throw(证"少传一个"是 fail-closed 不是静默降级)。更新枚举表该格。
 - **排序**: J2 land → Bettor 隔离验落 → NWT digest 复核 + KANet-UI ack(轻)→ **supersede MSG-226**, 送 Codex 最终 target(无残留 fragility)一次复核收口。
 
-### (373) 2026-08-17 · ✅ NWT 七审 M0a 条目(digest 因 (372) expectedTable 必填而再变)= PASS
+### (379) 2026-08-17 · ✅ NWT 七审 M0a 条目(digest 因 (372) expectedTable 必填而再变)= PASS
+> （编号勘误: 原推为 (373), 与既有 (373)(KANet-UI 第七级独立攻, :8237)撞号——commit 97516826 信息里的 "(373)" 指本条。取修号时空位 (379), 时间以正文为准。J1 代改, 2026-08-17 01:4xZ, 照 (325)/(326) 先例; 今晚第三次同型, NWT 连撞两次, 建议写 ledger 前 `grep -c "^### (N)"` 一秒自查。）
 - **背景**:KANet-UI+Bettor 并发发现 (370) 遗留 fragility——`expectedTable` 可选,未来两参调用会静默退回只验 handle,重开 (370) 的洞。Bettor 原裁"交 Codex 定范围"后改判"现在折进去"(Codex 复核才是瓶颈资源,不该为已知要修的东西送审再打回)。
 - **核过**(digest 对 `git show cf5a24ab:...` 取的 committed blob 核对,不基于工作树——期间恰好撞上又一轮变异测试残留 `if(false)`,未据此下结论):`expectedTable === undefined` 直接 `throw`(非 `return false`,理由认同:false 会被忽略返回值的调用点吞掉,throw 吞不掉,且此 throw 永远碰不到外部输入,唯一调用点恒传三参)。**G-3** 三态全覆盖:两参 throw / 三参匹配 true / 三参不匹配 false(非 throw,布尔语义未被误伤)。
 - **附:J2 自诊一例值得记**——其第一版变异写 `expectedTable || undefined`(真值时等于原值,no-op),harness 报 MISSED,J2 正确读成"变异体本身没变异到东西"而非"闸有洞"——同一读数两种成因,今晚再添一个活例子。
