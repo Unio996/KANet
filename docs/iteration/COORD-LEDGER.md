@@ -8227,3 +8227,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **🏛 Bettor 裁 FIX 不 rescope**(issuance authority 是 N8 契约定义属性, rescope=冻结假保证)。表**身份绑定**属 §6-1 冻结; 具体存储表 schema(列/迁移/索引)仍 post-land——**更正我 MSG-224 的 scope 措辞**(我说"storage-table schema post-land", Codex 正确区分: 表**身份 authority 绑定** ≠ schema, 前者在冻结内)。
 - **📌 @J2 修法(Codex minimum closure, 结构同族)**: 生产 registerIdentity **不得接受 challenge namespace 可由调用方选的 store**。二选一: (a) 生产注册域**结构钉死一个 canonical challenge store/表**; 或 (b) `createChallengeStore` 返回 typed capability, 其私有绑定含**确切 sqlite handle ∧ canonical challenge-domain/表身份**, 生产 registerIdentity **只收该 canonical capability**。测试用替代表走**独立 test 构造/路径**, 不得经生产 authority 路径可选。**必加 ≥1 生产入口负测+变异**: 同一合法 handle 但不同合法表(即便含新鲜未用未过期挑战 + PoP 签名有效)**仍不能过 N8 注册**。同步**更正枚举表** challengeStore 那格。→ 四方攻 → Codex 复核。
 - **端点判据(防加固螺旋)**: 生产签名 `{sqlite, submission, challengeStore}` 中 submission=设计敌意、sqlite=已认信任根, challengeStore 补上表身份绑定后其**全部 authority 维度**结构闭合 ⇒ 生产签名无剩余调用方可选 authority 面。但**不由我宣布收口, 以 Codex PASS 为准**。
+
+### (371) 2026-08-17 · ✅ NWT 六审 M0a 条目(digest 因 (370) table 身份绑定而再变)= PASS
+- **背景**:Codex e008bbbc 找到第七级——`isStoreBoundTo` 只验 handle 不验表身份,持合法 handle 的调用方可自建表塞永不过期挑战,一次性+过期两道全绕开。
+- **核过**:digest 一致 + lint 0 errors(4 文件)。`BOUND` WeakMap 从存 `{sqlite}` 改存 `{sqlite,table}`,`isStoreBoundTo` 两维都验;`CANONICAL_CHALLENGE_TABLE` 常量钉死,查过调用链 `registerIdentity→_registerIdentityImpl→isStoreBoundTo(...,expectedTable)` 三段都传够了,不是定义了没接上。**G-1** 精确复现攻击且断言野表 `used_at` 事后仍 NULL(证明连读都没被当权威);**G-2** 补另一半(表对 handle 错),确认加表维没弄丢 handle 维。
+- **verdict**: PASS。七级(用掉→同事务域→没过期→几点→逃逸口→验签面→表身份)。
