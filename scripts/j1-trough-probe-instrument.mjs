@@ -1,17 +1,13 @@
-// J1 trough 探针测量仪器 v4 — Codex MSG-235/236 复审(#2 carried + A-D)合规版
-// 授权链: Owner 政策变更(ledger (420)) + 测试计划 docs/2026-08-17-j1-trough-probe-test-plan-v1.md(v1.4)
-// 🔴 只准经启动器运行: scripts/j1-trough-probe-launch.sh(清洁树+blob 钉定校验后注入执行身份 env)。
-// 用法: bash scripts/j1-trough-probe-launch.sh [TIME_CAP_MIN<=360] [DRYRUN]
-//
-// 相对 v3 的五处修(对应 Codex 条目):
-// #2 submit 阶段完整 txid: 发送器(新版 b01f88b1…)在成功判据成立后、read-back 前发射 `SUBMIT_TXID=<64hex>`,
-//    仪器在轮询前解析并持久化; 无该行=合同违约, 样本 excluded(class: no-machine-readable-submit-txid)。
-// A  身份矛盾硬拒: console 行 tx_hash 必须与 SUBMIT_TXID 全 64-hex 相等; 不等 ⇒ excluded(txid-identity-contradiction),
-//    零 credit。前缀比较已消失。
-// B  执行身份绑定: 仅当启动器注入的 EXPECTED_SELF_SHA == 实算 self sha 才运行; run-header JSONL 记
-//    {sourceCommit, instrumentBlob, selfSha, senderShaRuntimeCheck, treeClean} 全量执行身份, 每样本带 runId。
-// C  TIME_CAP: 有限、正、硬顶 360, 否则拒启。
-// D  行绑定: content 全文精确相等 ∧ sender_address == 本 relay 地址; tag 子串只作预过滤; txid 相等为独立第二绑定。
+// J1 trough 探针测量仪器 v6 — Codex MSG-237 终审(launcher 信任根/RPC 运行时来源/import 前核/标签一致)合规版
+// 授权链: Owner 政策变更(ledger (420)) + 测试计划 docs/2026-08-17-j1-trough-probe-test-plan-v1.md(v1.6)
+// 🔴 只准经启动器运行: scripts/j1-trough-probe-launch.sh(外部批准 commit 绑定 + 全 tracked 净树 + blob 校验后注入执行身份 env)。
+// 用法(执行方检出根, 树净且在被审 commit 上):
+//   J1_PROBE_APPROVED_COMMIT=<被审 commit> J1_PROBE_RELAY_ID=<J2-tn 完整 relayId> bash scripts/j1-trough-probe-launch.sh [TIME_CAP<=360] [DRYRUN]
+// pin 链(v6, 全部入 run-header): 外部批准 commit(来自 ledger/Codex 记录) → 启动器身份=HEAD@approved 版本(外绑, 非自证)
+//   → 仪器 blob/self-sha → 绑定模块 sha(import 之【前】核, 被换模块零执行) → 发送器 sha
+//   → RPC 运行时实体(kaspa-wasm 入口 JS + wasm 字节, resolve 落 vendored git-tracked 路径)。
+// 行为要点: SUBMIT_TXID 全量持久化后才轮询 / 身份矛盾=excluded 零 credit / 行绑定=全文+发送方精确相等
+//   / TIME_CAP 硬顶 360 / 失败分类学(node-not-synced-submit-reject 等)全字段入档。
 import { createRequire } from 'node:module';
 import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync } from 'node:fs';
 import { createHash, randomBytes } from 'node:crypto';
@@ -23,11 +19,32 @@ const SELF_PATH = fileURLToPath(import.meta.url);
 const REPO_ROOT = dirname(dirname(SELF_PATH));            // <root>/scripts/xxx.mjs → <root>
 const toBash = (p) => p.replace(/\\/g, '/').replace(/^([A-Za-z]):/, (m, d) => '/' + d.toLowerCase());
 const require = createRequire(join(REPO_ROOT, 'kasia-console', 'package.json'));
-const { RpcClient, Encoding } = require('kaspa-wasm');
-// 绑定判定纯函数(gate#1 抽出, 带 test/mutants; 亦为测量链依赖 ⇒ 下方 sha256 钉定)
+const _readFileSync = (await import('node:fs')).readFileSync;
+const _createHash = (await import('node:crypto')).createHash;
+const _sha256 = (p) => _createHash('sha256').update(_readFileSync(p)).digest('hex');
+// ── v6 blocker#3: 绑定模块 hash 在 import【之前】核——被换的模块一行顶层 JS 都不许执行 ──
 const BINDING_MOD = join(REPO_ROOT, 'kasia-console', 'src', 'lib', 'j1-probe-binding.mjs');
 const PINNED_BINDING_SHA = 'b54d8af1bd166000be82019142043ebf3cf96500a596b9c4a90ce920a867d55d';
+{
+  const actual = _sha256(BINDING_MOD);
+  if (actual !== PINNED_BINDING_SHA) {
+    console.log(`INSTRUMENT-REFUSED: 绑定模块 sha256 不符(import 前拦截) pinned=${PINNED_BINDING_SHA} actual=${actual}`);
+    process.exit(1);
+  }
+}
 const { decideProbeBinding } = await import(pathToFileURL(BINDING_MOD).href);
+// ── v6 blocker#2: RPC 运行时实体(kaspa-wasm 入口 JS + wasm 字节)进 pin 链——它决定 trough 判相/DAA 读/第二节点测 ──
+const RPC_ENTRY = require.resolve('kaspa-wasm');            // 实测 resolve 落仓库内 vendored 路径(git-tracked)
+const RPC_WASM = join(dirname(RPC_ENTRY), 'kaspa_bg.wasm');
+const PINNED_RPC_ENTRY_SHA = '07f86bebfb8496628f30a8637f90fcfcee67043612ce50f40c578d61f8064bb3';
+const PINNED_RPC_WASM_SHA = '51cec45e7f21dd7962bcc1830a4236c514d8f829d2babca30e77602a214c3791';
+const rpcEntryShaActual = _sha256(RPC_ENTRY);
+const rpcWasmShaActual = _sha256(RPC_WASM);
+if (rpcEntryShaActual !== PINNED_RPC_ENTRY_SHA || rpcWasmShaActual !== PINNED_RPC_WASM_SHA) {
+  console.log(`INSTRUMENT-REFUSED: RPC 运行时实体 sha256 不符 entry(${rpcEntryShaActual.slice(0,12)} vs ${PINNED_RPC_ENTRY_SHA.slice(0,12)}) wasm(${rpcWasmShaActual.slice(0,12)} vs ${PINNED_RPC_WASM_SHA.slice(0,12)})`);
+  process.exit(1);
+}
+const { RpcClient, Encoding } = require('kaspa-wasm');
 
 // v5(计划 v1.5): host 身份全部由启动器钉定注入(J2-tn host profile 写死在 launcher, 非自由参数)。
 // 安全承重=SENDER_ADDR(行绑定用, 完整钉定); RELAY_ID=传输寻址(前缀经 launcher 校验+此处全量入档)——
@@ -80,19 +97,17 @@ const senderShaActual = sha256(SENDER);
 if (senderShaActual !== PINNED_SENDER_SHA) {
   console.log(`INSTRUMENT-REFUSED: 发送器 sha256 不符 pinned=${PINNED_SENDER_SHA} actual=${senderShaActual}`); process.exit(1);
 }
-const bindingShaActual = sha256(BINDING_MOD);
-if (bindingShaActual !== PINNED_BINDING_SHA) {
-  console.log(`INSTRUMENT-REFUSED: 绑定模块 sha256 不符 pinned=${PINNED_BINDING_SHA} actual=${bindingShaActual}`); process.exit(1);
-}
 const RUN_ID = `run-${new Date().toISOString().replace(/[:.]/g, '')}-${randomBytes(3).toString('hex')}`;
 const runHeader = {
-  runHeader: true, runId: RUN_ID, t: now(), plan: 'v1.4', instrument: 'v4',
+  runHeader: true, runId: RUN_ID, t: now(), plan: 'v1.6', instrument: 'v6', approvedCommit: process.env.J1_PROBE_APPROVED_COMMIT || '',
   sourceCommit: SOURCE_COMMIT, instrumentBlob: INSTRUMENT_BLOB, selfSha, treeClean: TREE_CLEAN,
   senderShaRuntimeCheck: { pinned: PINNED_SENDER_SHA, actual: senderShaActual, equal: true },
+  bindingShaRuntimeCheck: { pinned: PINNED_BINDING_SHA, checkedBeforeImport: true },
+  rpcRuntime: { entry: RPC_ENTRY, entrySha: rpcEntryShaActual, wasmSha: rpcWasmShaActual, pinnedEntry: PINNED_RPC_ENTRY_SHA, pinnedWasm: PINNED_RPC_WASM_SHA },
   node1: NODE1.id, node2: NODE2.id, relay: RELAY_ID, addr: MY_ADDR, timeCapMin: TIME_CAP_MIN, dryrun: DRYRUN,
 };
 log(runHeader);
-console.log(`INSTRUMENT-START v4 ${RUN_ID} commit=${SOURCE_COMMIT.slice(0, 8)} blob=${INSTRUMENT_BLOB.slice(0, 8)} selfSha=OK senderSha=OK cap=${TIME_CAP_MIN}min dryrun=${DRYRUN}`);
+console.log(`INSTRUMENT-START v6 ${RUN_ID} commit=${SOURCE_COMMIT.slice(0, 8)} blob=${INSTRUMENT_BLOB.slice(0, 8)} selfSha=OK senderSha=OK cap=${TIME_CAP_MIN}min dryrun=${DRYRUN}`);
 
 async function rpcRead(url) {
   const rpc = new RpcClient({ url, encoding: Encoding.Borsh, networkId: 'testnet-12' });
