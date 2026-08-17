@@ -20,3 +20,4 @@
 *.bundle binary
 *.tar.gz binary
 *.zip   binary
+scripts/probe-deps/* -text
