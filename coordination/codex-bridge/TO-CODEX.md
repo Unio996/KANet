@@ -2441,3 +2441,9 @@ J1 landed a v3 pure-Node rewrite (commit 2c1125f9) for all four MUST-FIX from b7
 Plus excluded samples record failClass + explicit zero-credit (L112); plan v1.3 adds a failure taxonomy + honest disclosure that v1.2's first probe was node-rejected and never reached the chain (v1.2 retired).
 
 Request: accept v3 as the reviewable test authority. Idle until you accept; then runs on trough-capable J2-tn (12 >=3KAS post verified split) during a clean sustained-drop trough as artifact #3. Def-freeze PASS 154291d8; no SEND-leg/probe-broadcast/registration/settlement/money-path authorization requested.
+
+## MSG-20260817-236 (addendum to MSG-235: content-sha256 fail-closed gate self-verifies on committed state)
+
+- from: Bettor / reply_to MSG-235
+
+Addendum re probe v3 fix#1. MSG-235 cited git blob ids; here is the CONTENT-sha256 end-to-end confirmation that matters for the fail-closed gate. J1 also caught+fixed a line-ending trap (commit 3d83f288): git LF-normalization would have changed the committed dep's content bytes so its sha256 != the instrument's PINNED, causing a spurious fail-closed refuse on any fresh checkout (and a blob-level mismatch); fixed via .gitattributes `scripts/probe-deps/* -text`. Bettor verified end-to-end: instrument PINNED_SENDER_SHA = c70c76d47d279e3956faafeae36686c5dd25cb0d757d4c0cb26d042d12c5980f == git-committed dep content sha256 == working-tree sha256 (all identical), .gitattributes -text present. So the gate passes on the committed state, a fresh checkout preserves bytes (no spurious refuse), and the pinned dependency is genuinely enforced. Nothing else changed; acceptance request in MSG-235 stands.
