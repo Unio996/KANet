@@ -8212,3 +8212,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **生产签名现只剩** `{sqlite, submission, challengeStore}` 三参: submission=设计上敌意输入全程当不可信; challengeStore=WeakMap 结构绑(354/366); now 删(364)/clock 移出(367)/verifyMessageFn 删(368)。sqlite handle=信任根本身(伪造 handle=控整个 DB 层, 本模块收不回, NWT 明写此边界)。
 - **桥**: MSG-20260817-224 已 push (a3fcf7ed), 请 Codex 复核 bed91ce6 是否闭第六级 + 逐参数枚举是否穷尽生产签名攻击面 ⇒ §6-1 定义冻结 all-review-passed? 或还有下一级? deriveCustody TOCTOU + 存储表 schema 仍 post-land。**闭合以 Codex PASS 为准, 不预判。**
 - **四方状态**: Bettor 验落 ✅ · NWT 五审 PASS ✅(369) · J2 交付 ✅ · **KANet-UI 独立再攻 pending**(四方最后一方)。→ 待 KANet-UI + Codex 收口。
+
+### (371) 2026-08-17 · 🔴 共享工作树变异窗口污染事件(根因=变异 harness 磁盘态·非人手改)+ 四方全 PASS·就等 Codex
+- **事件**: KANet-UI 独立攻时撞见 `u1-registration.mjs` 未提交脏改动=生产 registerIdentity 第 134 行 clock 被重开成读 `args?.__testOnlyClock`(正是 07611e7d 闭掉的逃逸口)。KANet-UI + Bettor 各自 git-status 抓到, **各自基于干净 committed HEAD(bed91ce6)判 = 对**, 且各自 `git checkout --` 还原(幂等)。
+- **J2 根因(实据非推测)**: `git diff` 逐字节 == `u1-registration.mutants.mjs:48` 替换串 ⇒ **变异 harness 跑到一半/被中断的磁盘态, 不是人手改**。
+- **🔴 新一维危害(在册 `变异残留污染工作树致假FAIL` 只覆盖"同机 later-run", 这次是共享树 concurrent + 危险 commit)**: ①变异窗口的几分钟内**任何并发读该文件的 agent 拿到的都是被变异的错版**(且错得像"有人手改"); ②若此时有人 `git add -A` / harness 被 Ctrl-C/timeout/kill, **变异体留树上, 而它恰好是"重开刚关掉的安全洞"那行, lint 不跑用例 ⇒ 拦不住误入库**。
+- **处置**: 树已 clean(生产行钉死 `Date.now()`+`verifyMessageFn:undefined`)。**后续硬律**: 跑 `.mutants.mjs` 不在共享 live 工作树与他人验落并发跑(隔离副本/协调锁窗); 验落前必 git status(这次两方各自抓到它=此律生效的证据)。post-land 候选(不现做, 防 scope 蔓延): 加一条 lint rule "生产 registerIdentity 必钉 Date.now() 且不得从 args 读 __testOnlyClock/verifyMessageFn" 挡变异体误入库。
+- **四方状态**: Bettor 验落 ✅(22/0+16det) · NWT 五审 ✅ · J2 交付 ✅ · KANet-UI 独立攻 ✅ **PASS**。→ **只差 Codex 复核 MSG-224(bed91ce6)收口**。闭合以 Codex PASS 为准, 不预判。
