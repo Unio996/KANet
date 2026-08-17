@@ -8238,3 +8238,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **独立验**: `BOUND` WeakMap 现存 `{sqlite,table}` 对; `isStoreBoundTo` 两维都比; 生产入口传 `CANONICAL_CHALLENGE_TABLE`, 调用方在生产签名上够不到表名(跟前面 clock/verifier 同一处理: 参数不在生产 args 里)。独立重跑: registration test **24/24**(新增 G-1/G-2), mutants **18 detected/0 MISSED/INERT/BROKEN + 3 UNREACHABLE**, sha256 还原验过, 数字与 NWT (371) 一致。
 - **一条设计观察, 记一笔不是这轮的洞**: `isStoreBoundTo(store, expectedSqlite, expectedTable)` 自己的签名把 `expectedTable` 设成可选——第三参不传时表维检查整段跳过, 静默退回只验 handle 的弱版本。现在唯一调用点(u1-registration.mjs:177)总是传三参, 且 J2 已用变异专门锚死"这个调用点掉第三参"这个回归(mutants:42)。但这只保护了这一个调用点——`isStoreBoundTo` 本身是 export 的, 未来任何新文件两参调用会静默拿到弱检查, 无报错/警告。跟这一整晚同族(optional 参数=可被绕过的软保护), 只是发生在"函数自己签名设计"这一层。建议(不是我定): `expectedTable` 改必填, 成本低, 不建现在为它开新一轮。
 - verdict: **PASS**。七级到此没找到第八级。
+
+### (375) 2026-08-17 · ✅ Bettor 隔离 worktree 验落 40bb4a21(第七级)=24/0+18det · 四方全 PASS · fragility 交 Codex 定范围(不单方强推/不隐瞒)
+- **Bettor 验落(隔离 worktree·无共享树并发)**: 先在共享树自跑得 **20/4 FAIL**(`got CHALLENGE_CONSUME_FAILED, expected CHALLENGE_STORE_UNBOUND`)——组合"测试 FAIL + 跑后 git status 干净 + 他方全绿"=**(371) 并发变异污染签名**(他人正在共享树跑 mutants, 我测试读到变异窗口错文件)。**没据此报缺陷**(变异污染假 FAIL 陷阱)。→ `git worktree add --detach <scratch> 40bb4a21` 隔离重跑 = **24 PASS/0 FAIL + 18 detected/0 MISSED/0 INERT/0 BROKEN + 3 UNREACHABLE**, G-1/G-2 皆 PASS, 与 J2/NWT/KANet-UI 逐字一致。
+- **🔴 (371) 危害当场再实证**: 同一 commit 40bb4a21, 共享树假 FAIL、隔离树 24/0。⇒ **验落从此用隔离 worktree 为标准**; 加固 J2 harness 修法② 必要性。
+- **四方全 PASS**: Bettor 隔离验落 ✅ · NWT 六审 ✅(374) · J2 交付 ✅ · KANet-UI 独立攻 ✅(373, 24/24+18det)。**七级全闭, 无第八级被发现。**
+- **KANet-UI (373) + Bettor 并发独立注意到同一条 fragility**: `isStoreBoundTo(store, sqlite, expectedTable)` 的 `expectedTable` **可选**——第三参不传则表维检查整段跳过, 静默退回只验 handle 弱版本。唯一调用点(u1-registration.mjs:177)总传三参 + 变异(mutants:42)锚死回归; 但 `isStoreBoundTo` 是 export, 未来两参调用静默拿弱检查无报错。同族(optional 参=可绕过软保护), 在"函数签名设计"层。
+- **🏛 Bettor 裁**: 这是"该属性是否进定义冻结"的**范围问题 = Codex 收口裁量**。**不单方强推一轮**(尊重 KANet-UI"别现在开新一轮"), **也不隐瞒半边**。→ 桥 MSG-226 把 40bb4a21 作四方 PASS target 送 Codex + **全额披露此 fragility**, 请 Codex 定: 必须"expectedTable 改必填/fail-closed"进冻结, 还是唯一调用点已武装+变异守 ⇒ post-land 可接受。Codex 宽=立即收口; Codex 要=J2 补 2 行(throw on undefined)。
