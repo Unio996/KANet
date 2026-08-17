@@ -8801,3 +8801,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **Bettor 独立复验(隔离 clean 树, 新 tip ccc2f84d)**: probe-provenance 5/5 + launcher-authority v3 仍 5/5 + 树前后净。
 - **⇒ 探针状态**: 架构/txid 绑定/模块 pin/RPC pin/同深度对照/残洞披露 全 ACCEPTED; 唯一 HOLD 已闭并路由。**待 Owner 再触发 Codex 一次做终审 re-check**。终审过 → J2 在 clean trough 跑 artifact#3(带 launcher-blob 比对记录)→ J1 审 JSONL → 节点健康 cell 闭。
 - **给 J1/J2 的运行期硬约束(Codex 条件)**: artifact#3 **必须**含"执行方跑前 canonical launcher blob == Codex 批准 blob"的比对记录字段(非可选)。
+
+### (460) 2026-08-17 · J2(执行方)跑前实核=Codex 强制字段不存在 + "launcher 自填仍不满足"陷阱 · Bettor 裁: 外域执行方 attestation 非仪器字段
+- **J2 好抓(执行方独立算)**: `git hash-object scripts/j1-trough-probe-launch.sh` = `676518be...`(与 MSG-239/240 路由的 launcher blob 一致 ⇒ 交叉确认)。读 runHeader 实际字段: 无 Codex 强制的"执行方跑前 launcher-blob 比对"字段。
+- **🔴 J2 抓的陷阱(关键)**: **即便加该字段、但由 launcher/仪器自己填(哪怕填 `SELF_DISK`), 仍【不满足】Codex** —— 那还是**自报**, 而 Codex 要闭的正是"守卫盖不住自己"残洞(在册 `self-referential-guard-cannot-cover-its-own-removal`)。自填 = 把残洞原样重开。
+- **🏛 Bettor 裁(设计)**: 该记录**不做成 launcher/仪器 runHeader 字段**。改为**执行方在信任域外产出的独立 attestation**, 作为 artifact#3 bundle 的**单独一份**记录: {执行方独立 `git hash-object launcher` = 676518be · Codex ACCEPT 记录的批准 blob = <待终审> · MATCH/DIFF · 执行方身份=J2-tn · 时间戳}。这才是"外域闭合"的本义。**附带好处**: J1 仪器**零改动**(J2 不必碰 J1 正改的仪器 —— attestation 是执行方自己的产物)。仪器已自报的 `instrumentBlob/selfSha` 保留作交叉三角, 但**权威外闭行 = 执行方那份**。
+- **依赖链**: J2 值(676518be)已就绪; 比对**目标**(Codex ACCEPT 记录的 blob)**尚不存在**——Codex 未做 239/240 终审。⇒ attestation 可**预草**(执行方值已定), **完成待 Codex FINAL 命名批准 blob**(需 Owner 触发)。**不阻于 wiring, 阻于 Codex 终审**。
+- **plan v1.6 措辞**: "执行方独立 hash + artifact#3 记录" 本已对(是执行方 hash 非 launcher); 只需把"记录形态=执行方独立 attestation, 非仪器字段"写明, 免下一个人做成自填字段。归 J1 顺手在 plan 补一句(非阻塞)。
