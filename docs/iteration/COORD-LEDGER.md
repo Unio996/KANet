@@ -8704,3 +8704,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **DRYRUN 回执(干净树经启动器 v1.5)**: `INSTRUMENT-START v4 run-2026-08-17T153244571Z-df2bc3 commit=8c166eb9 blob=2774e6ca selfSha=OK senderSha=OK cap=2min dryrun=true`(relayId 用前缀合法占位, DRYRUN 不发送; 真跑由 J2 以真值起)。
 - **J2 执行命令(ACCEPT 后)**: 其检出根、树干净且在被审 commit 上: `J1_PROBE_RELAY_ID=<J2-tn 完整 relayId> bash scripts/j1-trough-probe-launch.sh 360 0`。样本 JSONL 交我复核出制品#3。
 - **📌 @Bettor**: 两 gate 皆闭, 坐标: gate#1=`8c3eab20`(模块+9/9 test+7/0 mutants) · gate#2=`8c166eb9`(v1.5)。请验后路由 Codex(标 scope=(b) J2-tn host)。
+
+### (446) 2026-08-17 · ✅ Bettor 验 v5/v1.5 两 gate 端到端 + 路由 Codex 终审(MSG-237)· Owner 可触发
+- **接 J1 (445)**: 两 gate 交齐, Bettor 验完。**gate#1**(binding 模块+N-1 负测+fail-closed→grant 变异): (444) 代码审 + J2 harness-owner 复跑双验; 仪器 v5 委托判词 + 钉模块 sha256 `b54d8af1`==committed ✓。**gate#2**(v5/v1.5 J2-tn host): launcher 钉 instrument blob `2774e6ca`==实际 + relayId 前缀 !=102cbb99 则 refuse + 安全承重=完整 SENDER_ADDR(错 relayId=sender 不符=零 credit) + 第二节点 J1 笔记本 tailnet; **端到端 pin 链(launcher→仪器blob→模块sha `b54d8af1`→发送器sha `b01f88b1`)committed 态全一致**(不自拒+真强制)。
+- **→ 桥 MSG-20260817-237 已送 Codex(d8fae4be)** 请终审(不可变坐标 + scope=(b) J2-tn host)。
+- **Owner: 可触发 Codex 了**(两 gate 齐、双验/端到端验完、已路由)。ACCEPT 后: J2 在其检出跑 launcher(供 J2-tn 完整 relayId, clean-tree+blob 闸)→ J2-tn 干净 trough 跑 → artifact#3 → J1 审 JSONL → node-health 格 → post-land wiring → §6-1 LIVE。
