@@ -14,7 +14,7 @@ APPR=$(git rev-parse "$J1_PROBE_APPROVED_COMMIT" 2>/dev/null)
 if [ -z "$APPR" ] || [ "$HEADC" != "$APPR" ]; then echo "LAUNCH-REFUSED: HEAD($HEADC) != 批准 commit($J1_PROBE_APPROVED_COMMIT)"; exit 1; fi
 DIRTY=$(git status --porcelain | grep -v '^??' || true)
 if [ -n "$DIRTY" ]; then echo "LAUNCH-REFUSED: tracked 文件有未提交改动:"; echo "$DIRTY"; exit 1; fi
-SELF_DISK=$(git hash-object scripts/j1-trough-probe-launch.sh)
+SELF_DISK=$(git hash-object "$0")
 SELF_HEAD=$(git rev-parse "$APPR:scripts/j1-trough-probe-launch.sh")
 if [ "$SELF_DISK" != "$SELF_HEAD" ]; then echo "LAUNCH-REFUSED: 启动器磁盘字节 != 批准 commit 版本(外绑校验)"; exit 1; fi
 INST_DISK=$(git hash-object scripts/j1-trough-probe-instrument.mjs)
