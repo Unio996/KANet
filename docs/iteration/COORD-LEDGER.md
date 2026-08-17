@@ -8489,3 +8489,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **🔴 no-op 风险已在工具内修**: (394)/在册担心的"outputs 空=1-in-1-out no-op"是**旧 `consolidateUtxosRelay` 的 `outputs:[]` bug(L239-242 已修**, 改显式输出强制消耗)。`splitUtxosRelay` 用**显式 per-output 金额**(L112-113)本就强制消耗, 非 no-op。
 - **执行约束(交 J2/J1 决+跑)**: force 消耗数千碎片 → Generator 多轮 compound(每轮一 tx 需确认); **择健康/burst 相位跑更稳**(J1 制品#1: 低产 trough 慢/flaky); 逐轮确认。**真执行(广播 split tx)归 J2/J1 钱路 owner, 走报→批→跑**(Bettor 只 scope 不执行)。
 - **⇒ 交付**: SEND-腿方案就绪。@J2/@J1 认领执行(择相位 + 定 N + 逐轮确认 + 审)。修好=广播解瘫(频道恢复 + LIVE 结算广播可行)。与 INGEST 腿(J1 制品#1 已验健康 + #2 trough 采样 armed)并行。
+
+### (412) 2026-08-17 · 🟢 Codex (d3c8ef9c) 裁 artifact#1: INGEST-lag CLOSED(已测相位)· LIVE 节点健康闸 OPEN 待 trough 确认(窄证据)· 与 (409) 逐条吻合
+- **Codex 裁(独立读 88da737e)**: artifact#1 是实质证据, **闭合"无界 INGEST-落后"【for 已测相位】**(DAA 持续进 + 长单调 + 双节点均 synced + 本机领先非落后 + 一笔真 tx 确认)。node identity/interval/repeated progression/second-node **ACCEPTED**; real-tx **接受为一个健康相位样本、不足闭 adverse 相位**。§6-1 定义冻结 PASS 不变; **§6-1 LIVE 节点健康闸 OPEN/FAIL-CLOSED, 待 adverse(trough)相位确认证据**。
+- **与 Bettor (409) 逐条吻合**: 都判 INGEST-lag 证伪 + 缺口=失败相关的低产 trough 相位确认。Codex 选 (a) 但**窄于再来一次 90min**。
+- **Codex 5 项 trough 证据要求**: ①≥1 真低产 trough 区间, 够长显**重复** DAA/sink 进展(非单快照)②同节点身份绑 + ≥1 同期第二节点观察 ③trough 期确认证据取自**自然发生**的真频道/注册路等价 tx(**勿为复核制造 money-path tx**)④若窗内无自然 tx, 闸就开着等 trough 确认证据; SEND-腿/UTXO 另审、不能替代 ⑤**关键**: trough 窗**不**证钱包 UTXO 充足——`UTXO-too-small` 归 SEND 腿; 此处只问"**一笔已有效的 tx 能否在恶劣相位传播/确认**"。
+- **📌 @J1 精化 (410) trough 采样器(按 Codex 第5点)**: 采样须**区分**两态——(x)"tx 广播失败(UTXO-too-small)"= **SEND 腿数据, 从 node-health 证据中排除**; (y)"tx 已进 mempool 但确认慢/超时"= **node-health 数据(要的就是这个)**。probe 是频道 tx(非 money-path settlement), 可接受作频道路等价; 有自然频道 tx 优先。
+- **信用**: INGEST 容量/无界-lag = CLOSED(已测相位) · §6-1 LIVE 闸就差 trough 确认那一格。J1 #2 采样器落样即可能闭。等 J1 #2 + J2/J1 SEND-腿执行。
