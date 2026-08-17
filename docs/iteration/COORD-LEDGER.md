@@ -8906,3 +8906,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **J2 第二源 DAA(18:13, 记功)**: 144 样本/12min(console IPC→relay, 与 KANet-UI standalone-RPC 不同代码路径), **均值 4.9/s 但中位=0 = 双峰, 一半时间零推进**。🔨 判据: **均值判健康会把双峰读成"正常"** —— 同 "2min 均值 2.07 过闸而中间停 75s"(分布版)。J2 明标作用域: 量的是 DAA 非 isSynced, 不拿 DAA 冻结当 isSynced 代理(17:55 同现是 n=1)。
 - **点对齐计划(J2 提, 采纳)**: KANet-UI 给 46 采时间戳, J2 逐点并排看"零推进区间"与"isSynced=false"重不重合 ⇒ **实测 DAA 能否当 isSynced 代理**(而非假设)。这是 gate①(a) 分布判据的正解。
 - **对探针含义**: 双峰(半时零推进)正是探针要测的逆境 —— tx 落在零推进区间会等下一波 burst, 有界确认(探针量这个界)。
+
+### (476) 2026-08-17 · 🔴 J2 跑前抓到批准 commit 内真缺陷: 发送器绝对路径指向不存在仓根 ⇒ 整跑首样必 ABORT · 🏛 裁甲(修路径)拒乙(关闸)
+- **缺陷(ccc2f84d 内即坏, Bettor 实核确认)**: `scripts/probe-deps/j1-send-one.sh:131` 硬编码 `node /d/kanet/kanet/scripts/check-message-safety.mjs` —— 绝对路径指向 `/d/kanet/kanet/`(本机仓根是 `/d/kanet-tn12/`)。而 `check-message-safety.mjs` **确实存在**于 `scripts/check-message-safety.mjs`(git-tracked)。`J1_ALLOW_INFRA_ADDR` 全链**无人设**(launcher/仪器各 0)⇒ :128 闸恒跑 ⇒ 跑不存在文件 ⇒ die2 ⇒ 仪器归类 sender-refused ⇒ :186 ABORT 中止判据② ⇒ **首样即整跑中止**。
+- **性质**: 闸本身是**好闸**(基础设施坐标硬闸: 拦 IP/user@host 进链上明文频道, 在册 dev-channel-is-onchain-plaintext)且**fail-closed**(路径坏→验不了→拒→中止=安全失败模式, 未造安全洞)。**只是路径写成别机布局**(在册 relocation-breaks-absolute-anchors, 同族"把本机形状当通例")。**依赖 pin 覆盖了仪器/发送器字节, 没覆盖发送器【派生的那个进程】**(check-message-safety.mjs = 二阶依赖, 不在 pin 链)。
+- **🏛 裁: 甲(修路径)· 拒乙(关闸)**。甲 = 把绝对路径改**相对/派生**(发送器在 scripts/probe-deps/, 检查器在 scripts/ ⇒ `$(dirname "$0")/../check-message-safety.mjs` 或从仓根派生), 恢复闸的 fail-closed-working。乙(设 J1_ALLOW_INFRA_ADDR=1 绕过)= **整个关掉基础设施坐标闸** = 安全回退(探针正是往链上明文频道发)⇒ **拒**。J2 拒静默走乙=完全对。
+- **J2 跑前抓一功**: 在批准 commit 里抓到 run-aborting 缺陷 + 拒不安全绕过。**印证"依赖审覆盖被调方没覆盖其派生进程"**——re-route Codex 时须告知这一类(发送器自身依赖面)。
+- **⇒ J1(发送器主)修**: 路径改相对/派生 → 新 sender blob → 更新仪器 PINNED_SENDER_SHA → 新仪器 blob → 新坐标 → 我 re-route Codex FINAL re-check(小增量, 同 provenance 修那轮)。修前探针不跑。
