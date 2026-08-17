@@ -339,3 +339,61 @@ if (_spec.zk_native !== false) _spec.zk_native = true;
 🔨 **落地时两者必须成对出现**，并在报告里写明配对关系：
 **grep 负责"一眼可查"，行为注入负责"真的挡住了"** —— 只报 grep 全绿 = 报了一个必要条件当充分条件。
 （同族：**枚举要按效果不按关键词**。）
+
+---
+
+## §9 🔴 §2 设计更正（@NWT 红队实读抓出两条，我实核后全认）
+
+NWT 对着**当前代码**逐条核，抓到我 §2 修法里的两处问题。我自己读码复核，**两条都成立**。
+
+### 更正一：我高亮的那条比较是**死分支**，真正的闸是它前面那句
+
+实读 `u1-registration.mjs:125-140`：`deriveCustody` 只有**一条** `ok:true` 出口 ——
+`return { ok: true, custody: 'mnemonic' }`（`:139`，唯一字面量）；其余全部 `ok:false`
+（`RELAY_UNKNOWN` / `CUSTODY_AMBIGUOUS` / `CUSTODY_NOT_MNEMONIC`）。
+
+⇒ 只要 `custody2.ok === true`，`custody2.custody` **必然**是 `'mnemonic'` == `custody.custody`
+⇒ **`custody2.custody !== custody.custody` 在当前代码下永不为真 = 结构上不可达的死分支。**
+
+🔴 **真正兜住"custody 在 PoP 与落库之间被改坏"的，是它前面那句 `if (!custody2.ok) throw`**
+（中途导入 privkey ⇒ 变混合态 ⇒ `CUSTODY_AMBIGUOUS` ⇒ `ok:false` ⇒ 拒）。
+🔨 **我把保护记在了一条永远不会触发的比较上** —— 同族在册：**首个"像闸"的检查往往不是真正挡住的那个**。
+
+### 更正二：INSERT 写的是 **pre-tx 旧值**，是"恰好相等"而非"结构上正确"
+
+实读 `:216-222`：插入用的是 `custody.custody`（事务**外**那次派生的结果），不是事务内刚验过的 `custody2`。
+今天两者恒等所以无影响 —— **但那是 correct by accident**（在册：依赖对面不变 = 约定不是保证）。
+哪天 `deriveCustody` 扩出第二个 `ok:true` 取值（如硬件钱包类型），这里就会**写进一个事务内没验过的值**。
+
+### ✅ 采纳后的 §2 修正版
+
+```js
+const runTx = sqlite.transaction(() => {
+  const custody2 = deriveCustody(sqlite, s.relayId);        // 事务内、写锁已持
+  // ① 真闸(可达): 中途被改坏 ⇒ ok:false ⇒ 拒
+  if (!custody2.ok) throw new RegError(custody2.code, custody2.reason);
+  // ② 纵深(当前【不可达】, 为将来 deriveCustody 出现第二个 ok:true 取值而留):
+  //    语义 = PoP 绑定的是 PoP 那一刻的 custody, 中途换成【另一种合法 custody】也应拒。
+  if (custody2.custody !== custody.custody) {
+    throw new RegError(REG_REJECT.CUSTODY_CHANGED_MIDFLIGHT, '…');
+  }
+  sqlite.prepare(`INSERT INTO u1_identity_registration (…, custody) VALUES (…, ?)`)
+    .run(…, custody2.custody);   // 🔴 改用【事务内验过的】值, 不用 pre-tx 的 custody.custody
+  …
+}).immediate;
+```
+
+- **②保留但降级为纵深**，并**如实标注当前不可达**；
+- **INSERT 改用 `custody2.custody`** ⇒ 从"恰好相等"变成"**结构上写的就是刚验过的那个值**"。
+
+### 🔴 §8 验收用例相应增补（NWT 明确要求，我认）
+
+| # | 用例 | 判据 |
+|---|---|---|
+| ①-10a | TOCTOU **真闸**：另一连接在 `:176`↔`:265` 间给该 relay 导入 privkey（造混合态） | 必拒（`CUSTODY_AMBIGUOUS`），且**一个字节都没写** |
+| ①-10b | INSERT 取值来源 | 断言写入的是 `custody2.custody`（可用变异验：改回 `custody.custody` 必须被测出） |
+| ①-10c | 🔴 **②那条比较标 `UNREACHABLE` 而不是漏标** | 变异清单里**显式列**「把 `!==` 改成 `===`」并注明**当前不可达**及**为什么**；**不得**让它以 INERT 混进计数 |
+
+🔨 **①-10c 是这条更正里最该留的一格**：我 (448)/(452) 刚自曝过"宣称的判别力与实际不符"，
+若这条死分支不显式标 UNREACHABLE，它就会以 INERT 的形态**混进一个体面的 detected 计数里** —— 同一个病的第三次。
+（记 @NWT 一功：他这次是**对着代码读**，不是评我的转述。）
