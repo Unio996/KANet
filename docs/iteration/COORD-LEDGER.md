@@ -8343,3 +8343,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **🟢 §6-1 完全不受影响(已核, 防恐慌)**: §6-1 的 19det/12det 是 Bettor 在**隔离 worktree checkout 于 154291d8** 跑**那时的** mutants 文件所得, 输出**区分 detected 与 UNREACHABLE**(store 12det + 1 UNREACHABLE; 恒红会把那 1 格也报 detected)⇒ 那套非恒红。恒红 bug 由 **658f4e6d 重构引入, 晚于 154291d8**。Codex promote 基于对 154291d8 独立复读、不经 harness②。⇒ §6-1 冻结证据 + promotion 不动。
 - **🏛 裁修法方向**: 倾向 J2 方案①(隔离树建 `kasia-console/.mut-tmp-<pid>/`, gitignore; node 模块解析向上走找 `kasia-console/node_modules`, **不建链接=无删穿**, 清理 rm -rf 只删该临时目录)。②npm install --prefix 慢弃 ③原地+锁退回被咬形状弃。**硬前置(采纳 J2)**: 下一版落地前自验(阳性 detect + 阴性 no-op 存活 + 副作用/整树项数)**必须先跑通**, 前置非事后补。
 - 当前 harness② 不可用, 谁都别用其读数(含 658f4e6d commit message 读数)。post-closure 仪器工作, 慢工, 不急。
+
+### (390) 2026-08-17 · 🔧 显撤 (389) 一条错理由(J2 更正)· §6-1 不受影响的结论仍站(靠 sound 理由)
+- **撤 (389) 那条**: "store 输出 12det + 1 UNREACHABLE, 恒红装置会把那 1 格也报 detected ⇒ 那套非恒红" —— **不成立**。UNREACHABLE 是 mutants 文件里**静态预声明**的("[结构上测不到·明列]"), 无论 detect 逻辑好坏都照样打印 ⇒ **区分不出好仪器与恒红装置**。若留着会成一条不管用的检查。(在册"正确结论可带一条会长寿的错理由——结论留、理由撤"; J2 更正。)
+- **§6-1 不受影响的结论仍站, 靠两条 sound 理由**: ①§6-1 的 19det/12det 跑在 154291d8 隔离 checkout + **那时的原地执行版 mutants**; 恒红 bug 由 **658f4e6d(换 NODE_PATH)引入、时间在后** ⇒ 证据不经坏掉的仪器版本。②**更硬**: Codex promote 基于对 154291d8 的**独立代码/测试复读**(自读 mutants 攻的是不是对的东西), 不靠我们的 detect 计数。
+- **harness② 方案① 实测(J2)**: 30/0 · 拷 9.0MB · 整轮 0.5s · **零链接=结构上无可删穿** · 清理只 rm -rf 临时目录 · 需 `.gitignore` 加 `.mut-tmp-*/`。
+- **自证重定义(认)**: 原"待变异路径不得在仓库工作树内"与①冲突 ⇒ 改断言**"待变异路径 ≠ 真源文件 ∧ ≠ 共享 node_modules"**(变异只写临时副本)。承重自证仍是**阴性臂(no-op 等价改动必须存活=MISSED)**, 下一版落地硬前置。
