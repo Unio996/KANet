@@ -8,20 +8,15 @@
 //
 // 🔴 三类计数缺一不可: MISSED(拆了没红) / INERT(没改到文件, 计数体面但什么都没测) / BROKEN(语法坏, 必然"检出")。
 // 🔴 收尾验还原逐字节相同 —— 变异体留在库里比不跑变异更糟(今晚已咬过两位审查者)。
-// ⚠ 与既有 harness 同一形状: **它会原地改生产文件** ⇒ 跑之前请在隔离 worktree, 或至少跑前跑后各查一次 git status。
-//    根治(变异跑临时副本)= 已排期的 harness②, 本文件不先行改形状(避免同时 churn 两个仪器)。
-import { readFileSync, writeFileSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
+// ✅ **本套已走隔离执行器**(harness② · mutation-runner.mjs): 变异发生在临时 git worktree 里,
+//    共享工作树全程零写入, 且【每次跑都正向自证】(打印变异目标绝对路径 + 共享树 sha256 跑前跑后比对)。
+//    ⇒ 旧版那句它会原地改生产文件、请自己在隔离树里跑**已不再成立**, 别照旧版理解。
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createHash } from 'node:crypto';
+import { runMutationsIsolated } from './mutation-runner.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const SRC = join(HERE, 'u1-challenge-store.mjs');
 const TEST = join(HERE, 'u1-registration.test.mjs');   // 沿用现套: 它已端到端覆盖 store 行为
-const CWD = join(HERE, '..', '..');
-const original = readFileSync(SRC, 'utf8');
-const originalSha = createHash('sha256').update(original).digest('hex');
 
 const MUTANTS = [
   // ── (376) 能力泄漏: 把 ops 重新导出 / 交出去 ──
@@ -64,27 +59,12 @@ const UNREACHABLE = [
   ['去掉内部 ops 的 Object.freeze', '(376) 之后【没有任何导出会交出 ops 对象】(I-1 逐个导出扫过) ⇒ 外部拿不到它, 也就无从观察它冻没冻。' +
     ' 冻结是留给将来某处不慎泄漏引用的纵深, 现在从模块外测不出差别。要能测它, 得先存在一条泄漏路径 —— 而那条路径本身就是缺陷。'],
 ];
-let det = 0; let miss = 0; let inert = 0; let broken = 0;
-try {
-  for (const [name, fn] of MUTANTS) {
-    const mutated = fn(original);
-    if (mutated === original) { inert += 1; console.log(`[INERT ] ${name} — 变异没改动文件, 这条什么也没测`); continue; }
-    writeFileSync(SRC, mutated, 'utf8');
-    let syntaxOk = true;
-    try { execFileSync(process.execPath, ['--check', SRC], { stdio: 'ignore' }); } catch { syntaxOk = false; }
-    if (!syntaxOk) { broken += 1; console.log(`[BROKEN] ${name} — 变异体语法坏, 必然"检出", 什么也没证`); continue; }
-    let green = true;
-    try { execFileSync(process.execPath, [TEST], { stdio: 'ignore', cwd: CWD }); } catch { green = false; }
-    if (green) { miss += 1; console.log(`[MISSED] ${name} — 闸被拆掉而用例【全绿】`); }
-    else { det += 1; console.log(`[detect] ${name}`); }
-  }
-} finally {
-  writeFileSync(SRC, original, 'utf8');
-  const back = createHash('sha256').update(readFileSync(SRC, 'utf8')).digest('hex');
-  console.log(back === originalSha ? '\n[restore] 逐字节还原已验(sha256 相同)' : `\n🔴🔴 [restore] 还原【对不上】! 手工检查 ${SRC}`);
-  if (back !== originalSha) process.exit(2);
-}
-console.log('\n[结构上观察不到 · 明列, 不计入 MISSED]');
-for (const [n, why] of UNREACHABLE) console.log(`  · ${n} — ${why}`);
-console.log(`\ndetected=${det}  MISSED=${miss}  INERT=${inert}  BROKEN=${broken}  UNREACHABLE=${UNREACHABLE.length}`);
-if (miss || inert || broken) process.exit(1);
+const REPO_ROOT = join(HERE, '..', '..', '..');
+const r = runMutationsIsolated({
+  repoRoot: REPO_ROOT,
+  srcRel: "kasia-console/src/lib/u1-challenge-store.mjs",
+  testRel: "kasia-console/src/lib/u1-registration.test.mjs",
+  mutants: MUTANTS,
+  unreachable: typeof UNREACHABLE !== 'undefined' ? UNREACHABLE : [],
+});
+if (r.miss || r.inert || r.broken) process.exit(1);
