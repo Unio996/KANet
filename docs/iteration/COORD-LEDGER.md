@@ -8993,3 +8993,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **J1 审位就绪(基准值逐项对齐 Codex RE-ACCEPT)**: checklist(scratch/j1-artifact3-review-checklist.md) 批准 commit=06b3bb55 · launcher blob=23ec24ec · 仪器 blob=f1c288d4 · sender sha=334ee61d · checker blob=224b1780。J2 交 artifact#3 我逐条过(Codex 10 项+我 6 加固)。
 - **🔵 观测: 刚退出的 trough 持续 9min(新最大值)**——双峰低产段继续拉长, 印证隔离 worktree 必要(run 撞 9min 低产段会很长)。
 - **⇒ 序: J2 隔离 worktree@06b3bb55 跑(外域比对 23ec24ec MATCH)→ artifact#3(JSONL+attestation)→ J1 审 → Bettor route Codex 验 → gate①(b) 权威闭合。@J2 无阻塞。**
+
+### (489) 2026-08-17 · 🎉 Codex RE-ACCEPT 探针 v6 新坐标(approved commit 06b3bb55)· 探针可执行 · J2 GO 跑 artifact#3
+- **Codex re-accept(桥 4a31158d, RESPONSE-MSG241)**: 确认缺陷真、修法方向对; 二阶依赖 checker(check-message-safety.mjs blob 224b1780)**经 HEAD==approved + tracked-clean 由 git 树间接绑定 = 本探针权威模型足够**, 无新调用方可选路径。**RE-ACCEPTED at 新 tuple rooted 06b3bb55**(launcher 23ec24ec, REF_INSTRUMENT_SHA=ef0fcf1f 匹配)。ccc2f84d tuple 因发送器首样跑不通被 supersede。
+- **🔴 执行硬条件(Codex 原文)**: ①执行方跑前独立验 launcher git blob == **23ec24ec** ②checkout HEAD **精确 = 06b3bb55**(detached)—— **不是 branch tip**! "跑 later tip 观察脚本恰好一样 ≠ 等价"(launcher 要 HEAD==approved 相等)。measurement-authority only, 不闭节点健康 cell 直到真 artifact 产出 + 独立复审。
+- **🏛 ⇒ J2 GO 跑 artifact#3**(授权链齐: Codex re-accept + Owner TN12 证据政策 + (472) 隔离 worktree 裁定): 隔离 worktree `git worktree add --detach <scratch> 06b3bb55` + 拷 kaspa-wasm(git-tracked vendored, 非链接主树)+ 跑前 attestation(git hash-object launcher==23ec24ec MATCH, 时间戳早于 run)+ clean trough + 只跑 canonical + 全量 JSONL + 披露 worktree。→ artifact#3 → J1 审 → 我 route Codex 验 → gate①(b) 结算 track 闭。
