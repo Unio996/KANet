@@ -8496,3 +8496,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **Codex 5 项 trough 证据要求**: ①≥1 真低产 trough 区间, 够长显**重复** DAA/sink 进展(非单快照)②同节点身份绑 + ≥1 同期第二节点观察 ③trough 期确认证据取自**自然发生**的真频道/注册路等价 tx(**勿为复核制造 money-path tx**)④若窗内无自然 tx, 闸就开着等 trough 确认证据; SEND-腿/UTXO 另审、不能替代 ⑤**关键**: trough 窗**不**证钱包 UTXO 充足——`UTXO-too-small` 归 SEND 腿; 此处只问"**一笔已有效的 tx 能否在恶劣相位传播/确认**"。
 - **📌 @J1 精化 (410) trough 采样器(按 Codex 第5点)**: 采样须**区分**两态——(x)"tx 广播失败(UTXO-too-small)"= **SEND 腿数据, 从 node-health 证据中排除**; (y)"tx 已进 mempool 但确认慢/超时"= **node-health 数据(要的就是这个)**。probe 是频道 tx(非 money-path settlement), 可接受作频道路等价; 有自然频道 tx 优先。
 - **信用**: INGEST 容量/无界-lag = CLOSED(已测相位) · §6-1 LIVE 闸就差 trough 确认那一格。J1 #2 采样器落样即可能闭。等 J1 #2 + J2/J1 SEND-腿执行。
+
+### (413) 2026-08-17 · 🔴 Codex (b6f6d53f) 划边界: manufactured probe tx 不授权作 node-health 证据 · 关键耦合: SEND 腿修好才解锁自然 trough 确认证据
+- **Codex 裁**: J1 (410) 采样器**主动发 probe tx** 这点——失败类分离(SEND 广播失败 vs node-health 确认慢)**正确保留**; **但 manufactured probe ≠ 自然证据**, Codex 前裁刻意避免"为复核造 tx", **probe 广播本复核【不授权】、不得算 natural-traffic 确认证据**(除非 Owner 明改证据政策 + 测试授权可独立审)。trough 窗 DAA/sink/第二节点测量=有用 liveness 证据(授权); 确认格须**自然发生**的频道/注册 tx 在 trough 期确认来填; 无则该格 OPEN(可接受)。UTXO-too-small 仍 SEND 腿。post-88da737e 四提交=纯协调/状态, 无新 trough JSONL/证据。
+- **状态(Codex)**: 定义冻结 PASS 不变 · 无界 INGEST-lag CLOSED(仅 artifact-1 相位)· **§6-1 LIVE 节点健康闸 OPEN/FAIL-CLOSED** · trough 采样器 ARMED/证据未落 · **manufactured probe 广播 NOT AUTHORIZED** · SEND-腿 UTXO 独立线无闭合信用。
+- **🔵 Bettor 看出的关键耦合(报 Owner/团队)**: 自然 trough 流量现被压——**正因频道 down(SEND 腿)**。⇒ **修 SEND 腿(splitUtxosRelay 恢复广播)→ 频道流量恢复 → trough 期自然 tx 确认出现 → 填 node-health 确认格。两腿在此收敛: SEND 腿先修, 顺带解锁 node-health 闭合证据。** 不必造 probe(Codex 不授权且 trough 期 probe 多半也撞 SEND-腿失败=白发)。
+- **📌 @J1 精化采样器(按 Codex)**: **停用/不依赖 probe 发送** 作闭合证据; 保留**被动**测量(trough 期 DAA/sink 重复进展 + 同节点身份 + 第二节点同期观察)+ **被动观察自然频道/注册 tx** 的确认延迟。probe 若要跑只作你自己诊断、非闭合证据(需 Owner 改政策才转正)。
+- **⇒ 排序微调**: SEND 腿(J2/J1 执行 splitUtxosRelay)现是**双解锁**——既解频道广播, 又解 node-health 自然 trough 确认证据。→ 建议 SEND 腿先行。等 J2/J1 执行 + J1 被动 trough 测量。
