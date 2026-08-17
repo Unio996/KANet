@@ -46,8 +46,10 @@ launcher / 仪器**自己填**的字段（哪怕填的就是它自己的 `SELF_D
 
 ```bash
 cd /d/kanet-tn12
-git hash-object scripts/j1-trough-probe-launch.sh          # ⇒ 676518be25b852ff652872535ec264b9e4528c5c
-git rev-parse 85451570:scripts/j1-trough-probe-launch.sh   # ⇒ 同上（证明磁盘字节 == 该 commit 里的字节）
+git rev-parse 06b3bb55:scripts/j1-trough-probe-launch.sh   # ⇒ 23ec24ec7ee09068a1a28fc4de5cb4c49cb993be
+# 三级 pin 链闭合(执行方自验, 不必信我):
+git show 06b3bb55:scripts/probe-deps/j1-send-one.sh          | sha256sum   # ⇒ 334ee61d…  == 仪器 PINNED_SENDER_SHA
+git show 06b3bb55:scripts/j1-trough-probe-instrument.mjs     | sha256sum   # ⇒ ef0fcf1f…  == launcher REF_INSTRUMENT_SHA
 ```
 
 🔵 **这份 attestation 的力量来自【可复现】，不是来自"相信 J2"** ——
@@ -81,9 +83,15 @@ git rev-parse 85451570:scripts/j1-trough-probe-launch.sh   # ⇒ 同上（证明
 
 ## 四、状态与依赖
 
-- ✅ 执行方值**已就绪并已交叉确认**（`676518be…`）。
+- ✅ 执行方值**已就绪**：**`23ec24ec…` @ `06b3bb55`**（旧 `676518be` @ `ccc2f84d` 已作废，见 §6）。
 - 🔴 **阻塞点不在 wiring，在 Codex 终审**：比对目标（Codex ACCEPT 记录的 blob）**尚不存在**
-  —— Codex 未对 MSG-239/240 做终检，而终检需 Owner 触发。
+  —— MSG-241 已 route，Codex 尚未 re-accept，而终检需 Owner 触发。
+
+> 🔴 **本文件自己刚犯了 §5 记的那个病，写下来比藏起来有用**：坐标从 `ccc2f84d` 换到 `06b3bb55` 后，
+> §1 的 JSON 我更新了，但**复现命令与本节仍留着旧值近一小时** —— 谁照那两行跑，会拿到 `23ec24ec`
+> 然后以为出了事。**一份文档里同一个值出现在三处，就会有一处忘记改。**
+> 🔨 ⇒ 这正是 §5 那条判据的加强版：**别在文档里散布同一个哈希；让它只出现在一处（JSON），
+> 其余地方引用"见 §1"，或者干脆只给【可复现的命令】而不给【答案】。**
 - ⇒ 本文件保持**预草**；Codex FINAL 命名 blob 后，我在**跑前**填入 `codex_accept_recorded_blob`、
   `match`、`hashed_at`、`run_id` 四格并重新取一次哈希（若届时 commit 已变，以**当时**的实读为准，不沿用本文件里的值）。
 
