@@ -64,6 +64,9 @@ const PINNED_SENDER_SHA = 'b01f88b18139654d36fb4bdcad6950d7201ea4c38c82101ccc213
 const PAYLOAD = join(REPO_ROOT, 'scratch', 'j1-trough-payload.json');
 const PAYLOAD_BASH = toBash(PAYLOAD);
 const HARD_TIME_CAP = 360;
+// 🔴 单一不可变 plan 标签常量(Codex MSG-238 MUST-FIX): run-header 与探针消息构造【共用】此常量,
+//    使两者标签结构上无法独立漂移。改版本只改这一处。禁在别处硬编码 v1.x 授权标签。
+const PLAN_LABEL = 'v1.6';
 mkdirSync(join(REPO_ROOT, 'scratch'), { recursive: true });
 
 const now = () => new Date().toISOString();
@@ -99,7 +102,7 @@ if (senderShaActual !== PINNED_SENDER_SHA) {
 }
 const RUN_ID = `run-${new Date().toISOString().replace(/[:.]/g, '')}-${randomBytes(3).toString('hex')}`;
 const runHeader = {
-  runHeader: true, runId: RUN_ID, t: now(), plan: 'v1.6', instrument: 'v6', approvedCommit: process.env.J1_PROBE_APPROVED_COMMIT || '',
+  runHeader: true, runId: RUN_ID, t: now(), plan: PLAN_LABEL, instrument: 'v6', approvedCommit: process.env.J1_PROBE_APPROVED_COMMIT || '',
   sourceCommit: SOURCE_COMMIT, instrumentBlob: INSTRUMENT_BLOB, selfSha, treeClean: TREE_CLEAN,
   senderShaRuntimeCheck: { pinned: PINNED_SENDER_SHA, actual: senderShaActual, equal: true },
   bindingShaRuntimeCheck: { pinned: PINNED_BINDING_SHA, checkedBeforeImport: true },
@@ -162,7 +165,7 @@ while (got < 3) {
       const trigger = { t: v.t, d1: d1.daa, d3: d3.daa, rateBucket: rate.toFixed(2), node1: { isSynced: v.isSynced, tips: v.tips } };
       const node2AtTrigger = await secondNodeRead('at-trigger');
       const tag = `${new Date().toISOString().slice(11, 19).replace(/:/g, '')}-${randomBytes(2).toString('hex')}`;
-      const msg = `[J1tn trough probe ${tag} · 计划 v1.4 授权样本] 随机尾: ${randomBytes(12).toString('hex')}`;
+      const msg = `[J1tn trough probe ${tag} · 计划 ${PLAN_LABEL} 授权样本] 随机尾: ${randomBytes(12).toString('hex')}`;
       writeFileSync(PAYLOAD, JSON.stringify({ relayId: RELAY_ID, channel: CHANNEL, message: msg }));
       const t0 = now();
       const send = spawnSync('bash', [SENDER_BASH, PAYLOAD_BASH], {
