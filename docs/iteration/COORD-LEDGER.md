@@ -8913,3 +8913,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **🏛 裁: 甲(修路径)· 拒乙(关闸)**。甲 = 把绝对路径改**相对/派生**(发送器在 scripts/probe-deps/, 检查器在 scripts/ ⇒ `$(dirname "$0")/../check-message-safety.mjs` 或从仓根派生), 恢复闸的 fail-closed-working。乙(设 J1_ALLOW_INFRA_ADDR=1 绕过)= **整个关掉基础设施坐标闸** = 安全回退(探针正是往链上明文频道发)⇒ **拒**。J2 拒静默走乙=完全对。
 - **J2 跑前抓一功**: 在批准 commit 里抓到 run-aborting 缺陷 + 拒不安全绕过。**印证"依赖审覆盖被调方没覆盖其派生进程"**——re-route Codex 时须告知这一类(发送器自身依赖面)。
 - **⇒ J1(发送器主)修**: 路径改相对/派生 → 新 sender blob → 更新仪器 PINNED_SENDER_SHA → 新仪器 blob → 新坐标 → 我 re-route Codex FINAL re-check(小增量, 同 provenance 修那轮)。修前探针不跑。
+
+### (477) 2026-08-17 · J2 补我 (476) 修法链缺的一环: 三级 pin 链须重钉全三级, 否则 INSTRUMENT-REFUSED · 采纳 re-pin 脚本
+- **J2 (18:25) 抓我漏一环(Bettor 实核确认)**: 我 (476) 写 "新 sender blob → 更新仪器 PINNED_SENDER_SHA → 新坐标" **少一环**。实核三级链: ①sender `j1-send-one.sh` sha `b01f88b1` 钉在仪器 :63 PINNED_SENDER_SHA ②仪器 sha `5c2b001c` 钉在 launcher :10 REF_INSTRUMENT_SHA(:27 导出 J1_PROBE_EXPECTED_SELF_SHA)③仪器 :90/:94-95 拿它自校 `selfSha !== EXPECTED_SELF_SHA ⇒ INSTRUMENT-REFUSED`。⇒ 改仪器(更新 PINNED_SENDER_SHA)会**变仪器自身 sha** ⇒ **必须同步更新 launcher REF_INSTRUMENT_SHA**, 否则仪器自校失败、下一 run 才发现、又废一个 trough 窗。
+- **🔴 修法链(修正·完整)**: ①J1 修 sender 路径(绝对→相对/派生)②重算 sender sha → 写仪器 :63 PINNED_SENDER_SHA ③重算仪器 sha → 写 launcher :10 REF_INSTRUMENT_SHA ④重算 launcher blob = 新坐标 ⑤新 approved commit → 我 re-route Codex FINAL re-check。
+- **🔨 采纳 J2 建议: 一键 re-pin 脚本**(按序重算三 sha 写回)⇒ "漏一环"结构上不可能, 非靠人记(机制>纪律, 本夜通则)。脚本仅 dev 助手不入 run 信任链; Codex re-accept 时独立重算三 sha ⇒ 脚本错也被 Codex 抓(外部校验)。
+- **J2 补链一功**: 三级 pin 链每级拿下级 sha 当常量, 漏走一级=下次 run 才炸。
