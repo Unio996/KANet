@@ -8919,3 +8919,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **🔴 修法链(修正·完整)**: ①J1 修 sender 路径(绝对→相对/派生)②重算 sender sha → 写仪器 :63 PINNED_SENDER_SHA ③重算仪器 sha → 写 launcher :10 REF_INSTRUMENT_SHA ④重算 launcher blob = 新坐标 ⑤新 approved commit → 我 re-route Codex FINAL re-check。
 - **🔨 采纳 J2 建议: 一键 re-pin 脚本**(按序重算三 sha 写回)⇒ "漏一环"结构上不可能, 非靠人记(机制>纪律, 本夜通则)。脚本仅 dev 助手不入 run 信任链; Codex re-accept 时独立重算三 sha ⇒ 脚本错也被 Codex 抓(外部校验)。
 - **J2 补链一功**: 三级 pin 链每级拿下级 sha 当常量, 漏走一级=下次 run 才炸。
+
+### (478) 2026-08-17 18:2xZ · ✅ J1 修 (476) 发送器路径 bug(走甲): check-message-safety 路径改自派生, 安全闸保持 armed · 三级 pin 链全走(sender→仪器→launcher)+ 一键 re-pin 脚本防漏环 · 新坐标待路由 Codex
+- **修法(甲, Bettor 裁)**: `j1-send-one.sh:131` 硬编码 `/d/kanet/kanet/scripts/check-message-safety.mjs` → `$(dirname "$_SELF_ABS")/../check-message-safety.mjs`(检查器 git-tracked 于 scripts/, worktree checkout 自带)。**安全闸保持开着+fail-closed**(不走乙的 env 关闸); 实测: 派生调用检查器对探针消息判 clean 退出 0, 三道保护完整。
+- **三级 pin 链全走(J2 (476) 提醒的四环, DRYRUN 证全闭)**: ①sender sha b01f88b1→`334ee61d` ②仪器 PINNED_SENDER_SHA 更新→仪器 sha `ef0fcf1f` ③launcher REF_INSTRUMENT_SHA 更新→launcher blob `23ec24ec` ④新 commit。**全链 DRYRUN: senderSha=OK selfSha=OK 通过**(四环无漏)。plan 附录旧 sender sha 已同步。
+- **🔨 采纳 J2 建议: 一键 re-pin 脚本** `scripts/j1-probe-repin.sh`——按序重算三级 sha 写回, 让"漏一环下次 run 才发现"变结构上不可能。幂等自验过(对已 pin 好的当前态零改动)。
+- **🔴 新坐标(Codex 须重注册, 676518be 作废)**: commit `a8eaa33de89cf68b6f1cf38179a853fc54f9cc85` · **launcher blob `23ec24ec7ee09068a1a28fc4de5cb4c49cb993be`(外域 attestation 新比对目标)** · 仪器 blob `f1c288d4` · sender sha `334ee61d`。J2 attestation 的 independent_launcher_blob 与 codex_accepted 都要换到新值。
+- **📌 @Bettor 路由 Codex 增量复核**: 架构层(launcher 外绑/import 前核/rpc pin/绑定判定)**零改动**, 仅 sender 一处路径 bug 修 + 连带三级 re-pin。Codex 应可增量确认+注册新 launcher blob。@J2 新坐标到位后按六步重跑外闭比对(比对目标换 23ec24ec)再开跑。
