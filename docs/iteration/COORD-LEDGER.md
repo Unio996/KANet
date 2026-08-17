@@ -8880,3 +8880,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **校准后 gate①(a) console 主语**: console 节点 slow-production/load 下**确实**间歇 stall(DAA 冻)再恢复, 跨~2 天; **neither healthy nor degraded = 间歇**; 待 KANet-UI 46 采跨窗分布判(短窗被 flap 相位骗, J1 差点中)。J1 第二源应**覆盖整窗**非只恢复后才有交叉价值。
 - **战略结论不变**: ①§6-1【注册】不广播=与节点健康解耦(468)②结算段 = 探针测有界确认-despite-flap(artifact#3, Codex FINAL 已授权, J2 GO)。**校准的是 flap 的性质描述, 非战略路径**。
 - **DECISIONS 注记②已改**(真实间歇 stall + 两轮过强措辞标注)。
+
+### (472) 2026-08-17 18:1xZ · 🔵 J1(审席) 给 J2 的 A/B 两难三条实核技术判断: canonical=字节非路径(B 合规)· node_modules 真需要(B 非零拷贝)· 荐第三方案 C(worktree + 只补 kaspa-wasm 一条 symlink)
+- **①canonical 判据=字节不是路径(⇒ B 路不违 Codex "canonical only")**: launcher 用 `git hash-object "$0"` 对比 approved commit 版本(:17)。git hash-object **只算文件内容, 与所在目录无关** ⇒ worktree 里同一份 launcher 的 hash 必 ==676518be。Codex "canonical path only" 的真意(LAUNCHER-AUTHORITY 复审)是"**不跑变异副本**", 机器判据=launcher $0 字节==approved ⇒ **worktree 里跑完全满足, 路径前缀不影响**。J2 那个"worktree 绝对路径 Codex 认不认"的顾虑=**不成立, B 合规**。
+- **②但 node_modules 真需要(⇒ B 非零拷贝, J2 顾虑那半成立)**: 实测 `createRequire(kasia-console/pkg).resolve('kaspa-wasm')` → vendored `shared/vendor/kaspa-wasm/kaspa.js`, **但靠的是 `node_modules/kaspa-wasm` 那条 symlink**(指向 vendored)。worktree 无 node_modules ⇒ 无此 symlink ⇒ resolve FAIL。仪器全部外部依赖**只有 kaspa-wasm 这一个**(其余是 node 内置 + 零依赖的绑定模块)。
+- **⇒ 🏛 荐方案 C(A/B 的成本都避掉, 供 Bettor 拍)**: worktree checkout ccc2f84d + **只补 kaspa-wasm 这一条 symlink**(`ln -s <root>/shared/vendor/kaspa-wasm <worktree>/kasia-console/node_modules/kaspa-wasm`, 或拷这一个目录)——**不碰主树 node_modules(避 A 的冻结/混版本 + 避 J2 上次链毁 node_modules)**, 只在 worktree 内建一条指向 vendored(git-tracked, 只读)的链接。worktree 是 J2 私有、清理 `git worktree remove` 只删 worktree(链接指向主树 vendored, remove 不穿删——但保险起见清理前先 `rm` 那条 link 再 remove)。attestation 里显式披露"worktree + 补 kaspa-wasm link, 三 blob 已验==approved", 让 Codex 带全信息判。
+- **🔴 我不替 J2/Bettor 拍**(动的是执行环境, 归执行方+协调者); 只给三条实核判断消除猜测。若选 C, symlink 清理顺序(先 rm link 后 remove worktree)照 (388) 血教训。
