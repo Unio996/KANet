@@ -73,7 +73,7 @@
 //     **这条本模块收不回来, 所以写明而不是宣称已解决。**
 import { rootFingerprint, verifyRegistrationBinding } from './u1-same-origin.mjs';
 import { verifyRegistrationPop } from './u1-registration-pop.mjs';
-import { isStoreBoundTo } from './u1-challenge-store.mjs';
+import { isStoreBoundTo, CANONICAL_CHALLENGE_TABLE } from './u1-challenge-store.mjs';
 
 export const REG_REJECT = Object.freeze({
   RELAY_UNKNOWN: 'RELAY_UNKNOWN',
@@ -131,7 +131,7 @@ export async function registerIdentity(args = {}) {
   // 🔴 (366) 生产入口**不接收任何时钟**, 也不看 args 里有没有类时钟的字段 ——
   //    时钟由这里【钉死】成服务端 `Date.now()`, 调用方在这条路上没有任何面可以影响它。
   //    ⇒ 就算有人把 `req.body` 整个展开进来, 也影响不到时间判定。
-  return _registerIdentityImpl(args, { clock: () => Date.now(), verifyMessageFn: undefined });
+  return _registerIdentityImpl(args, { clock: () => Date.now(), verifyMessageFn: undefined, expectedTable: CANONICAL_CHALLENGE_TABLE });
 }
 
 /**
@@ -145,11 +145,11 @@ export async function registerIdentity(args = {}) {
  * @param {object} args    同 registerIdentity
  * @param {function} clock 返回 ms 的时钟; 被调用两次(PoP 前 / 事务内)
  */
-export async function __testOnlyRegisterIdentityWithInjections(args, { clock, verifyMessageFn } = {}) {
-  return _registerIdentityImpl(args, { clock: clock || (() => Date.now()), verifyMessageFn });
+export async function __testOnlyRegisterIdentityWithInjections(args, { clock, verifyMessageFn, expectedTable } = {}) {
+  return _registerIdentityImpl(args, { clock: clock || (() => Date.now()), verifyMessageFn, expectedTable: expectedTable || CANONICAL_CHALLENGE_TABLE });
 }
 
-async function _registerIdentityImpl({ sqlite, submission, challengeStore } = {}, { clock, verifyMessageFn } = {}) {
+async function _registerIdentityImpl({ sqlite, submission, challengeStore } = {}, { clock, verifyMessageFn, expectedTable } = {}) {
   const s = submission || {};
 
   // ① N4-bis —— 注意: **完全不看 s.custody**
@@ -174,10 +174,10 @@ async function _registerIdentityImpl({ sqlite, submission, challengeStore } = {}
   //    `.immediate` 只序列化【身份表所在那个连接】; 存储若在别的连接/别的库, 我持的锁管不到它。
   //    ⇒ 这里不是"检查它长得像不像 store"(鸭子类型可伪造), 而是问
   //      **它是不是本进程用【同一个 sqlite handle】造出来的** —— 外部无法伪造 WeakMap 成员资格。
-  if (!isStoreBoundTo(challengeStore, sqlite)) {
+  if (!isStoreBoundTo(challengeStore, sqlite, expectedTable)) {
     return {
       ok: false, code: REG_REJECT.CHALLENGE_STORE_UNBOUND,
-      reason: 'challengeStore 未绑定到本次注册所用的 sqlite 事务域(必须由 createChallengeStore(同一 handle) 构造)⇒ 原子 CAS 不成立, 拒',
+      reason: `challengeStore 未绑定到 (本次 sqlite 事务域 ∧ 规范挑战表 ${expectedTable}) —— 必须由 createChallengeStore(同一 handle, 规范表) 构造。(370): 只绑 handle 不够, 持合法 handle 的调用方能指向他自己那张表。`,
     };
   }
 

@@ -16,7 +16,12 @@
 //
 // ⚠ 表 schema 按 Codex 可 post-land: 本工厂**要求表已存在**, 不自建表、不碰 migrate.js。
 
-const BOUND_HANDLE = new WeakMap();   // store 对象 → 构造它时用的那个 sqlite handle(唯一写入口在下面)
+const BOUND = new WeakMap();   // store 对象 → { sqlite, table } —— 唯一写入口在下面的工厂
+
+// 🔴 (370) Codex e008bbbc 第七级: 上一版绑定只记 handle, **不记表身份** ⇒ 持合法 handle 的调用方
+//    可以造一个指向【他自己那张表】的 store(里面塞永不过期、永远 unused 的挑战), 绑定检查照过。
+//    ⇒ 生产路径必须钉死【规范表】; 表名不是调用方能选的东西。
+export const CANONICAL_CHALLENGE_TABLE = 'u1_identity_challenge';
 
 /**
  * 造一个绑定到 `sqlite` 这个事务域的一次性挑战存储。
@@ -55,7 +60,7 @@ export function createChallengeStore(sqlite, table) {
       }
     },
   };
-  BOUND_HANDLE.set(store, sqlite);
+  BOUND.set(store, { sqlite, table });
   return store;
 }
 
@@ -63,7 +68,12 @@ export function createChallengeStore(sqlite, table) {
  * 这个 store 是不是【本模块造的】且【绑在 expectedSqlite 这个事务域上】。
  * 外部无法把自己塞进 BOUND_HANDLE ⇒ 伪造的 store 在这里必然 false。
  */
-export function isStoreBoundTo(store, expectedSqlite) {
+export function isStoreBoundTo(store, expectedSqlite, expectedTable) {
   if (!store || typeof store !== 'object') return false;
-  return BOUND_HANDLE.get(store) === expectedSqlite;
+  const b = BOUND.get(store);
+  if (!b) return false;
+  // 🔴 (370): 两维都要 —— handle **且** 表身份。只验 handle 时, 指向别的表的 store 照样过。
+  if (b.sqlite !== expectedSqlite) return false;
+  if (expectedTable !== undefined && b.table !== expectedTable) return false;
+  return true;
 }

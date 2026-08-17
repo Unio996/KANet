@@ -24,7 +24,7 @@ const realVerifyMessage = (args) => verifyMessage(args);
 const { deriveIdentityPubkey, rootFingerprint } = await import('./u1-same-origin.mjs');
 const { buildPopPayload, popMessageHashHex } = await import('./u1-registration-pop.mjs');
 const { registerIdentity, deriveCustody, REG_REJECT, __testOnlyRegisterIdentityWithInjections } = await import('./u1-registration.mjs');
-const { createChallengeStore } = await import('./u1-challenge-store.mjs');
+const { createChallengeStore, CANONICAL_CHALLENGE_TABLE } = await import('./u1-challenge-store.mjs');
 
 let pass = 0; let fail = 0;
 const t = async (name, fn) => {
@@ -56,12 +56,12 @@ const okChallenge = (c) => ({ challenge: c, usedAt: null, expiresAt: Date.now() 
 // 🔴 **故意用真 SQLite 表, 不用进程内 Map**: 契约的要害是"消费与落库同事务、要么都成要么都不成"。
 //    Map 不参与 better-sqlite3 事务 ⇒ 回滚时 Map 里的 usedAt 还留着, **原子性那一格会假绿**。
 //    (在册: 离线用例必须用真 schema, 否则约束/事务那一层根本没被测到。)
-sqlite.exec(`CREATE TABLE IF NOT EXISTS _test_challenge (
+sqlite.exec(`CREATE TABLE IF NOT EXISTS u1_identity_challenge (
   challenge TEXT PRIMARY KEY, used_at INTEGER, expires_at INTEGER)`);
 function chStore() {
-  const st = createChallengeStore(sqlite, '_test_challenge');
+  const st = createChallengeStore(sqlite, 'u1_identity_challenge');
   return {
-    issue(c){ sqlite.prepare('INSERT OR REPLACE INTO _test_challenge (challenge, used_at, expires_at) VALUES (?, NULL, ?)').run(c, Date.now()+60000); return st.read(c); },
+    issue(c){ sqlite.prepare('INSERT OR REPLACE INTO u1_identity_challenge (challenge, used_at, expires_at) VALUES (?, NULL, ?)').run(c, Date.now()+60000); return st.read(c); },
     read:(c)=>st.read(c), consume:(c)=>st.consume(c), typed: st,
   };
 }
@@ -227,7 +227,7 @@ await t('(A-3) 🔴 绑在【另一个 sqlite handle】上的真 store ⇒ 也�
   const st = chStore(); st.issue(ch);
   // 另开一个连接(**同一个库文件**, 但不同 handle ⇒ 不同事务域)
   const other = new Database(dbPath);
-  const otherStore = createChallengeStore(other, '_test_challenge');
+  const otherStore = createChallengeStore(other, 'u1_identity_challenge');
   // ⚠ 注意它是 createChallengeStore 造的【真】store, 行为无可挑剔 —— 唯一的问题是 handle 不同。
   const r = await registerIdentity({
     sqlite, submission: submissionFor(relayId, id, ch),
@@ -269,7 +269,7 @@ await t('(D) 🔴 真竞态: 另一连接在【PoP 读之后、事务之前】�
       if (!raced) {   // 只抢一次
         raced = true;
         const attacker = new Database(dbPath);   // 真·另一个连接
-        const info = attacker.prepare('UPDATE _test_challenge SET used_at = ? WHERE challenge = ? AND used_at IS NULL').run(Date.now(), ch);
+        const info = attacker.prepare('UPDATE u1_identity_challenge SET used_at = ? WHERE challenge = ? AND used_at IS NULL').run(Date.now(), ch);
         attacker.close();
         assert.strictEqual(info.changes, 1, '前置条件: 攻击连接确实抢到了这次消费(否则本格什么也没测到)');
       }
@@ -288,7 +288,7 @@ await t('(E-1) 🔴 (359) store 里挑战【已过期未用】⇒ 确定性拒 +
   const ch = 'ch-expired';
   const st = chStore(); st.issue(ch);
   // 把 store 里那条改成已过期(未用)
-  sqlite.prepare('UPDATE _test_challenge SET expires_at = ? WHERE challenge = ?').run(Date.now() - 60_000, ch);
+  sqlite.prepare('UPDATE u1_identity_challenge SET expires_at = ? WHERE challenge = ?').run(Date.now() - 60_000, ch);
   const r = await registerIdentity({ sqlite, submission: submissionFor(relayId, id, ch), ...wire(st) });
   assert.strictEqual(r.ok, false, '过期挑战竟然还能注册');
   assert.strictEqual(r.code, REG_REJECT.POP_FAILED, `实际 ${r.code}: ${r.reason}`);
@@ -303,7 +303,7 @@ await t('(E-2) 🔴 (359) 调用方【试图】塞一个未过期的伪造 recor
   const id = makeIdentity();
   const ch = 'ch-forged';
   const st = chStore(); st.issue(ch);
-  sqlite.prepare('UPDATE _test_challenge SET expires_at = ? WHERE challenge = ?').run(Date.now() - 60_000, ch);
+  sqlite.prepare('UPDATE u1_identity_challenge SET expires_at = ? WHERE challenge = ?').run(Date.now() - 60_000, ch);
   const forged = { challenge: ch, usedAt: null, expiresAt: Date.now() + 3_600_000 };   // ← 伪造: 声称还有一小时
   const r = await registerIdentity({
     sqlite, submission: submissionFor(relayId, id, ch), ...wire(st),
@@ -328,7 +328,7 @@ await t('(E-3) 🔴 (359) 过期发生在【PoP 之后、事务之前】⇒ 事�
       if (!raced) {
         raced = true;
         const other = new Database(dbPath);
-        other.prepare('UPDATE _test_challenge SET expires_at = ? WHERE challenge = ?').run(Date.now() - 1000, ch);
+        other.prepare('UPDATE u1_identity_challenge SET expires_at = ? WHERE challenge = ?').run(Date.now() - 1000, ch);
         other.close();
       }
       return realVerifyMessage(args);
@@ -371,7 +371,7 @@ await t('(F-1) 🔴 (364) 时钟不再由调用方给: 塞一个伪造的 now �
   const id = makeIdentity();
   const ch = 'ch-forged-now';
   const st = chStore(); st.issue(ch);
-  sqlite.prepare('UPDATE _test_challenge SET expires_at = ? WHERE challenge = ?').run(Date.now() - 60_000, ch);
+  sqlite.prepare('UPDATE u1_identity_challenge SET expires_at = ? WHERE challenge = ?').run(Date.now() - 60_000, ch);
   const r = await registerIdentity({
     sqlite, submission: submissionFor(relayId, id, ch), ...wire(st),
     now: Date.now() - 3_600_000,   // ← 老 API 的参数, 声称"一小时前", 那样这条挑战就还没过期
@@ -392,7 +392,7 @@ await t('(F-2) 🔴 (364) 时钟在事务内【重取】: 真实时间在请求�
   const st = chStore();
   const base = Date.now();
   st.issue(ch);
-  sqlite.prepare('UPDATE _test_challenge SET expires_at = ? WHERE challenge = ?').run(base + 5_000, ch);   // 5 秒后过期
+  sqlite.prepare('UPDATE u1_identity_challenge SET expires_at = ? WHERE challenge = ?').run(base + 5_000, ch);   // 5 秒后过期
 
   let calls = 0;
   const r = await __testOnlyRegisterIdentityWithInjections(
@@ -415,7 +415,7 @@ await t('(F-3) 🔴 (366) 生产入口塞时钟【无效】: 这一格是 A-2 �
   const id = makeIdentity();
   const ch = 'ch-clock-escape';
   const st = chStore(); st.issue(ch);
-  sqlite.prepare('UPDATE _test_challenge SET expires_at = ? WHERE challenge = ?').run(Date.now() - 60_000, ch);
+  sqlite.prepare('UPDATE u1_identity_challenge SET expires_at = ? WHERE challenge = ?').run(Date.now() - 60_000, ch);
   let called = 0;
   const r = await registerIdentity({
     sqlite, submission: submissionFor(relayId, id, ch), ...wire(st),
@@ -449,6 +449,45 @@ await t('(F-4) 🔴 (368) 生产入口塞 verifier 【无效】: 伪造签名 + 
   assert.strictEqual(r.ok, false, '🔴 恒真验证器让伪造签名过了');
   assert.strictEqual(sqlite.prepare('SELECT COUNT(*) n FROM u1_identity_registration WHERE relay_id = ?').get(relayId).n, 0, '拒了却落了库');
   assert.strictEqual(st.read(ch)?.usedAt, null, '拒的路径不该消费挑战');
+});
+
+await t('(G-1) 🔴 (370) 同一 handle、但 store 指向【调用方自己那张表】⇒ 必须被拒', async () => {
+  // 🔴 Codex e008bbbc 第七级: 上一版绑定只记 handle, 不记表身份。
+  //    持合法 handle 的调用方可以自建一张表, 塞一条【永不过期、永远 unused】的挑战, 造 store 指过去 ——
+  //    handle 相同 ⇒ 旧的绑定检查照过 ⇒ 一次性与过期两道全部形同虚设。
+  //    ⇒ 这一格就是那个攻击的直接复现。
+  const relayId = insRelay({ mnemonic: 'enc-m-rogue-table' });
+  const id = makeIdentity();
+  const ch = 'ch-rogue-table';
+
+  // 攻击者自建的表(同一个 handle, 完全合法的 SQLite 表)
+  sqlite.exec('CREATE TABLE IF NOT EXISTS _rogue_challenge (challenge TEXT PRIMARY KEY, used_at INTEGER, expires_at INTEGER)');
+  sqlite.prepare('INSERT OR REPLACE INTO _rogue_challenge (challenge, used_at, expires_at) VALUES (?, NULL, ?)')
+    .run(ch, Date.now() + 10 * 365 * 24 * 3600 * 1000);   // 十年后过期 = 实质永不过期
+  const rogue = createChallengeStore(sqlite, '_rogue_challenge');   // ← 真 store, 真工厂, 只是表不对
+
+  const r = await registerIdentity({ sqlite, submission: submissionFor(relayId, id, ch), challengeStore: rogue });
+  assert.strictEqual(r.ok, false, '🔴 指向调用方自建表的 store 过了 ⇒ 一次性/过期两道都被绕开, (370) 没修好');
+  assert.strictEqual(r.code, REG_REJECT.CHALLENGE_STORE_UNBOUND, `实际 ${r.code}: ${r.reason}`);
+  assert.match(r.reason, /u1_identity_challenge/, '拒因里应指明规范表名, 便于排错');
+  assert.strictEqual(sqlite.prepare('SELECT COUNT(*) n FROM u1_identity_registration WHERE relay_id = ?').get(relayId).n, 0, '拒了却落了库');
+  assert.strictEqual(sqlite.prepare('SELECT used_at FROM _rogue_challenge WHERE challenge = ?').get(ch).used_at, null,
+    '拒的路径不该动那张表(证明它连读都没被当权威)');
+});
+
+await t('(G-2) 绑定两维缺一不可: 规范表 + 另一个 handle ⇒ 仍拒(表对了也不够)', async () => {
+  // 🔵 与 (A-3) 互补: (A-3) 是"表对、handle 错"在旧版就该拒; 本格确认 (370) 加了表维之后**没有把 handle 维弄丢**。
+  const relayId = insRelay({ mnemonic: 'enc-m-two-dim' });
+  const id = makeIdentity();
+  const ch = 'ch-two-dim';
+  const st = chStore(); st.issue(ch);
+  const other = new Database(dbPath);
+  const otherStore = createChallengeStore(other, CANONICAL_CHALLENGE_TABLE);   // 表对, handle 不对
+  const r = await registerIdentity({ sqlite, submission: submissionFor(relayId, id, ch), challengeStore: otherStore });
+  other.close();
+  assert.strictEqual(r.ok, false, '表名对了就放行 ⇒ handle 维被 (370) 改丢了');
+  assert.strictEqual(r.code, REG_REJECT.CHALLENGE_STORE_UNBOUND, `实际 ${r.code}: ${r.reason}`);
+  assert.strictEqual(sqlite.prepare('SELECT COUNT(*) n FROM u1_identity_registration WHERE relay_id = ?').get(relayId).n, 0, '拒了却落了库');
 });
 
 sqlite.close();
