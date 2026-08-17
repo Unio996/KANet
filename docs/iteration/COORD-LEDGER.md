@@ -8401,3 +8401,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **🔵 harness② 可选未来加固(非阻塞, 记 backlog)**: 侧效面加**递归 manifest/hash** 才支持"零修改已证"的强断言。Codex 明说非 blocker(runner 已无写入共享依赖的路径)。
 - **Codex 旁证我的裁定**: ①§6-1 冻结不受任何仪器问题影响(印证 (395)/(396))②relay dedup / UTXO 冗余 / 找零索引 / mempool-reject 标 UTXO findings **明确非 D-012、parked**, 不算 §6-1 闭合证据, 不得据以动钱路(须另 Owner scope)——印证 (393)/(394)/(396) parking。
 - Disposition: harness② v2 = ACCEPTED with wording boundary; §6-1 freeze 仍 PASS@154291d8; §6-1 LIVE 仍 NOT AUTHORIZED。
+
+### (398) 2026-08-17 · ✅ Bettor 批 harness② 输出措辞修(Codex 边界落地): `mutation-runner.mjs:125` 去 overclaim
+- **J2 报备(铁律0)**: `mutation-runner.mjs:125` 现打印 `✅ 实依赖仍 N 项 ⇒ 依赖零改动(实测)`——但 `readdirSync(node_modules).length` 只数**顶层** ⇒ 工具**自身输出 overclaim**。J2 连到今晚同一个病("零写入自证只覆盖想到的那类")。
+- **🏛 Bettor 批**: 改成只声称实测的(顶层项数不变 / 未复现整删形态, 注非逐字节完整性)。判据: 字面只能覆盖 readdirSync.length 真给的信息。确切措辞 J2 定。**因是验证仪器: 改完重跑 selfcheck 三臂确认逻辑未动 + 贴读数**; 纯字符串改不必四方, 自跑 + 顺手一眼即可。
+- 递归 manifest/hash(支持"零改动"强断言)= 可选 backlog(Codex 非阻塞)。落地并入 harness② 收尾。
