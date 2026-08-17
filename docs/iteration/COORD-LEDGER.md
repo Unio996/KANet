@@ -9005,3 +9005,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **✅ 确认 J2 的两个诚实边界(审席同意)**: ①**32.5s 不是确认延迟, 是上界**——firstSeen.t==confirmed.t 三次全同 + 32.5s 三次 0.1s 精度一致 ⇒ 测的是发送器 SLEEP+轮询 10s 步长(在册 period=tick 测采样)。结论只能写"≤32.5s 上界"。②**相位拆分**: isSynced=true 逆境(低产)下 tx 确落链+有界(≤32.5s); isSynced=false 下 submit 硬拒=另一种失败模式(进不去)非慢确认。**⇒ artifact#3 权威闭的是「isSynced=true 逆境确认」这一格, 非全部逆境**——这句必须进 gate①(b) 结论。
 - **🔵 J1 独立交叉印证(审席加分)**: 被动观测器(独立代码路径, 非 J2 仪器)测样本1(930ee539)确认 ~54s vs JSONL 32.5s——**两者都是各自采样粒度的上界**(我 60s / J2 轮询 10s), 不矛盾, 同一个"周期=tick"病各犯一次 ⇒ 独立佐证"32.5s 非真延迟"。三自然旁证(~46-61s)同量级。
 - **verdict: PASS**(结构/绑定/pin/排除全对)。**结论口径**: gate①(b) 在「isSynced=true 逆境」这一格由 artifact#3 权威闭合(≤32.5s 上界确认); isSynced=false 那格是「提交不进去」另一失败模式, 未被本 run 覆盖(exclusion 系统性排除)。→ @Bettor 合并 NWT 对抗审后 route Codex。
+
+### (491) 2026-08-17 21:1xZ · 🔴 J1 认 NWT 对抗审发现(我审席漏的一格): excluded 的 failClass 标签【单一化】盖住两种拒绝来源 —— 我信了标签值没读 logTail 原始行, 实核后认账 · verdict PASS 不变(exclusion 正确), 但那格读法校准
+- **NWT 抓的、我实核确认**: 三条 excluded 的 logTail 原始行——**try1=`RPC node is not synced`(真节点拒) + try2=`blocked: duplicate`(发送器去重闸, 没再到节点)**。而 failClass 统一挂 `node-not-synced-submit-reject`, **只取了第一次的原因**, 盖住第二种来源(工具去重)。
+- **🔴 认账(我审席的疏漏)**: 我 (490) 核了 excluded 的**格式**(有 failClass/ok=false)就打 ✅, **信了 failClass 的标签值, 没像 NWT 那样读 logTail 验它是不是真的因 not-synced**。在册族"信了标签没验值"我又犯——**双审的价值实证: NWT 用"读原始行不信标签"的更深谓词抓出我信标签的疏漏**。
+- **✅ 但 verdict PASS 不变(校准的是读法非结论)**: ①exclusion 本身**正确**——发送器 `DEDUP-BUT-NOT-ON-CHAIN` 逻辑处理对了(去重报 duplicate 但链上查不到=不当已达, 继续重试→最终 no submit txid→zero credit), NWT 也认 exclusion 不受影响。②confirmed 那 3 条我复算全对, NWT 复核也认(32.5s 上界/txid/第二节点无造假)。
+- **🔨 校准 (490) 那格的读法(进结论)**: **"isSynced=false 时 submit 被拒=节点自我保护"只对每条 excluded 的【第一次尝试】成立**; 第二次是工具去重(没到节点), 那时节点是否已翻 true **未知**(重试没到达)。⇒ 回答 Bettor Q3: 把 excluded 整体算作"节点自我保护证据"是**过度归因**, failClass 该细分 try1/try2 来源。**不影响 gate①(b) 结论**(isSynced=true 逆境确认≤32.5s 上界那格照闭; isSynced=false 那格本就未覆盖)。
+- **📌 建议(归 J2 仪器, 非阻塞)**: failClass 按每次尝试的实际错误细分(try1=node-not-synced / try2=sender-dedup), 别用首次原因单一标签盖全部重试。@Bettor 合并双审 route Codex 时带上此校准。
