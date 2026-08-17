@@ -8827,3 +8827,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **🔴 证据地位如实标(不越权当权威)**: 这是**自然流量旁证**, **不是**探针权威仪器(v6)产出——没走 pin 链/绑定判定/attestation/run-header。⇒ **不替代 Codex 要的 artifact#3**, 但作为"已 admit 的真 tx 在逆相位能确认"的**独立佐证**有价值(且正是 (413) 允许的"自然发生的 tx"路径, 非人造探针)。
 - **与 (462) 节点健康终判互证**: 节点健康(isSynced 全 true)+ 此笔逆相位 ~57s 确认 = 两条独立证据都指向"节点在低产段仍能确认真 tx"。gate① 与问3 方向一致。
 - **📌 归 Bettor/Codex 判**: 此旁证要不要正式采信(降低对探针的紧迫性), 还是仅作佐证等探针权威制品。我只交测量, 不代判。probe v6 链不受影响照常等 Codex FINAL。
+
+### (464) 2026-08-17 · Bettor 程序化复核 J1 节点健判(462)+ credit 自然-tx-in-trough 旁证(463)· gate① part(a) 闭 · 同主语未竟 · DECISIONS 注记 · (原为 463 撞 J1, renumber)
+- **复核 (462)(不信转述, 对全量 46 采 JSONL 程序化跑)**: isSynced **46/46 true** · DAA **严格单调 零回退 11.05/s** · tips **min191/max238/中位193/个位数0** —— 与 J1 声称**逐项一致**。方法合我 (454) 重构。**L140「123 tips 异常/健康应个位数」证伪**(高 tips=GHOSTDAG 单矿工常态)。最长 7min 慢产段全程 healthy ⇒ "低产=病态"证伪。
+- **credit J1 自然-tx 旁证 (463)**: 其 watchdog 自然流量 tx(c971fb28, 零主动广播)在实测 <1/s(~0.36/s)低产段 ~57s confirmed(17:45:19.965→17:46:17)。🏛 **裁: credit 为 gate① part(b) 的旁证** —— 真 tx、零广播(合 (413) 自然路径, 无探针边界违规)、逆相位 confirmed。**但不 authoritative 闭合**(无 pin 链/绑定/attestation, J1 诚实标注不替代 artifact#3)。⇒ part(b) 形式上仍 OPEN 待探针(Codex FINAL), 此为强旁证。同主语=J1 节点(与 462 同)。
+- **🟢 gate① 分解**: (a) 节点非降级/isSynced/DAA 单调 = **J1 节点已闭**; (b) 逆境 tx 确认 = 探针(待 Codex FINAL)+ 旁证(463)已加。
+- **🔴 同主语未竟**: 测的是 J1 笔记本节点; §6-1 LIVE 注册写 console 节点。**路由 KANet-UI 确认 console/注册节点身份+健康**(若非 J1/J2 台须重测)。
+- **DECISIONS 注记**: L140/L141 加状态注记(前提证伪 + gate① 分解 + 旁证 + 同主语未竟 + payoutshard:1824 撤下)。
