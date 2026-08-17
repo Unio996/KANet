@@ -8722,3 +8722,13 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **J2 诚实自曝(好)**: blocker#1 的族(在册 `reference-self-referential-guard-cannot-cover-its-own-removal`)**同洞在 `mutation-runner.selfcheck.mjs`**——它是"改 mutation-runner 的强制落地闸"却**无人绑 selfcheck 自己**; 谁改它成无条件三臂全绿, 无检查能发现; 而它的绿灯被用来背书今夜所有变异读数。同 launcher 信任根问题, 只是没人查到 J2 这侧。J2 不自顺手加固(避加固螺旋 + 不在别人 blocker 开新战线), 报 backlog。
 - **🏛 Bettor triage: backlog, 不现修**。理由: ①当前 selfcheck 诚实(gate#1 变异读数已被 Codex 独立重算旁证=非空转)②测试基建 provenance 非 live/钱路 ③避加固螺旋(在册"加固螺旋要有终点")。修法(留档)= 同 v6: 信任域外绑 selfcheck(钉 commit + 外部核 blob)。**与 harness② + store-mutants 打包**一并做(都是 mutation-runner 域的 provenance 硬化), post §6-1-LIVE。
 - **🔵 强化 proportionality(给 Owner 的 (i)/(ii))**: 自指-guard 问题在 launcher(Codex blocker#1)与 selfcheck(J2 自曝)**双复发** ⇒ 完备 provenance 是**递归兔子洞**。gate#1 核心安全已 ACCEPTED+四点确认; bounded-stall(≤4min)+ 节点 measured-regime 健康已给答案。⇒ **option (ii) 风险接受 更显合理**(若 Owner 要速)。等 Owner 拍 (i)/(ii)。
+
+### (448) 2026-08-17 16:2xZ · ✅ J1 交 v6 全包(两份终审的全部条目): launcher 外绑信任根 + RPC 运行时入 pin 链 + import 前核 + 标签一致 + 计划 v1.6 全新重写 + launcher 权威层负测 4/4 · 全链 DRYRUN 回执 · 请路由 Codex
+- **两份终审(FINAL + LAUNCHER-AUTHORITY)条目对照**:
+  ①**launcher 外绑**(blocker1/AUTHORITY 主条): 信任根=`J1_PROBE_APPROVED_COMMIT`(外部值, 执行方从 Codex ACCEPT 记录抄入); 启动器校验 HEAD==approved + **自身 $0 磁盘字节==approved commit 版本**(变异副本在任何路径运行皆拒, 非自证)+ 仪器 blob==approved 版本。
+  ②**treeClean 如实**(blocker2): 全仓 tracked 零改动实测, 标签改 `tracked-clean@approved-commit`; **RPC 运行时实体入 pin 链**: kaspa-wasm resolve 实测落 vendored git-tracked 路径, 入口 JS `07f86beb…`+wasm `51cec45e…` 启动实算比对, 不符拒跑, 全量入 run-header。
+  ③**import 前核**(blocker3): 绑定模块 sha 在 dynamic import 之【前】核——被换字节零执行。
+  ④**标签一致**: runHeader/启动行/头注释全 v6/v1.6; 计划文档**全新重写**(叠层陈段落移除, 历史指 git log)。
+  ⑤**launcher 权威层负测**(AUTHORITY 点名): `scripts/j1-launcher-authority.test.sh` — 阳性对照(cap=999 内层拒=证穿透到被钉仪器)+三变异(拆 relay 前缀闸/换发送地址/拆 approved 检查, 只动 launcher 字节)全部结构性 LAUNCH-REFUSED, **干净树实跑 4/4**。途中负测自身抓到过一次净树闸履职(未提交测试文件被拒)=闸活的旁证。
+- **全链 DRYRUN 回执**: `INSTRUMENT-START v6 run-2026-08-17T161233298Z-a43ccd commit=481b83fc blob=77d7fc59 selfSha=OK senderSha=OK`(v6 首版); 负测后终版 commit=`53048c7997f7e0d53f567fe8b5d745a3e8097085`。**pin 链全程**: 外部批准 commit → launcher $0 字节 → 仪器 blob/self-sha → 绑定模块(import 前) → 发送器 → RPC entry+wasm。
+- **📌 @Bettor**: 终版坐标 commit `53048c7997f7e0d53f567fe8b5d745a3e8097085`(仪器 blob 77d7fc59 · 计划 v1.6 · 负测在库), 请验后路由 Codex。
