@@ -8716,3 +8716,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **+ provenance 清理**: runHeader 写 `plan:v1.4/instrument:v4` + start 行 `v4` + 文档 v1.5 含陈旧 v3/J1tn/8-prefix 文本 ⇒ artifact#3 前使元数据与 v5/v1.5 一致(或去人肉版本标签、只靠 commit/blob/digest)。
 - **🔴 Bettor 验证漏项(自认)**: 我 (445)/(446) 核了 launcher 钉的 pin 链(→仪器/模块/发送器), **但没核 launcher 自身是否被绑**——它是信任根却自授权, Codex 抓到我漏的一层。教训: 验 pin 链要问"谁绑这条链的根"。
 - **→ @J1 v6/v1.6**(小源增量): ①外域绑 launcher ②clean-exact 变真/或改名+绑 RPC 运行时 ③模块 sha 先验后 import ④修 v5/v1.5 标签/陈旧文本 ⑤dry-run 回执示完整 pin 链(launcher 权威→仪器 blob/self-sha→模块 sha→发送器 sha→RPC 运行时身份)。补完 → Bettor 验(这次含 launcher 自身绑定)→ 路由 Codex → Owner 触发。
+
+### (448) 2026-08-17 · gate#1 模块 sha 三方交叉确认 + J2 自曝 selfcheck 同 self-referential-guard 洞(backlog·不现修)· 强化 proportionality
+- **三方交叉确认 gate#1 模块 sha**: Codex 独立重算 `b54d8af1` == J2 harness 实源 sha `b54d8af1` == Bettor (444) 核 == 仪器 PINNED。四点同主语对上, gate#1 模块 provenance 稳。
+- **J2 诚实自曝(好)**: blocker#1 的族(在册 `reference-self-referential-guard-cannot-cover-its-own-removal`)**同洞在 `mutation-runner.selfcheck.mjs`**——它是"改 mutation-runner 的强制落地闸"却**无人绑 selfcheck 自己**; 谁改它成无条件三臂全绿, 无检查能发现; 而它的绿灯被用来背书今夜所有变异读数。同 launcher 信任根问题, 只是没人查到 J2 这侧。J2 不自顺手加固(避加固螺旋 + 不在别人 blocker 开新战线), 报 backlog。
+- **🏛 Bettor triage: backlog, 不现修**。理由: ①当前 selfcheck 诚实(gate#1 变异读数已被 Codex 独立重算旁证=非空转)②测试基建 provenance 非 live/钱路 ③避加固螺旋(在册"加固螺旋要有终点")。修法(留档)= 同 v6: 信任域外绑 selfcheck(钉 commit + 外部核 blob)。**与 harness② + store-mutants 打包**一并做(都是 mutation-runner 域的 provenance 硬化), post §6-1-LIVE。
+- **🔵 强化 proportionality(给 Owner 的 (i)/(ii))**: 自指-guard 问题在 launcher(Codex blocker#1)与 selfcheck(J2 自曝)**双复发** ⇒ 完备 provenance 是**递归兔子洞**。gate#1 核心安全已 ACCEPTED+四点确认; bounded-stall(≤4min)+ 节点 measured-regime 健康已给答案。⇒ **option (ii) 风险接受 更显合理**(若 Owner 要速)。等 Owner 拍 (i)/(ii)。
