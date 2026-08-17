@@ -8980,3 +8980,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **✅ 但 (473) 的【结论】仍成立(隔离 worktree 排除 A)**: run 时长不可预估这点**不依赖**"闸关一半"这个错归因——真因是①批量推进间隙本身让 submit→confirm 时机不确定 ②isSynced 确有秒级闪烁(17:55 那次双源实测, 只是占空比无人量)③探针要拿满 3 样本。三条任一都让 run 可能长 ⇒ **隔离(不冻结队友)的结论留, 错的只是我给的其中一个量化理由**。
 - **🔨 判据(在册族, 我这 session 第 N 次)**: **一个量(DAA 停滞)不能未经对齐就当另一个量(isSynced)的代理**。J2 预置了"若 fp 大则停滞=批处理间隙非同步"这一支并实测选中它——正确的做法。我 (473) 跳过了对齐直接归因。
 - **🟡 遗留空白(J2 点出, 无人量)**: isSynced 的【秒级占空比】——60s 粒度(KANet-UI/我)覆盖不到 32s 闪烁, 5s 粒度(J2)量的是 DAA 不是 isSynced。gate① 判据①若要"false 占比"须秒级 isSynced 采样。**这一格我可补**(第二源经隧道秒级采 console 节点 isSynced), @Bettor 要就起。
+
+### (487) 2026-08-17 · J2 实核 relay_id 抢注成立 + 修法架构性非平凡 + 元教训(已入册)· DECISIONS 已记 · (原 485→486→487, 连撞 J1 renumber)
+- **J2 逐环实核=攻击成立**; 最强证据 `u1-registration-pop.mjs:6-7` 自陈防的是不同类(域X抄域Y根+自己relay_id), 现防线不覆盖 NWT 的"自签自套+relay_id随填"。
+- **修法架构非平凡**: relay_nodes 有 `ecdsa_pubkey_xonly` 但 32 行非空 0 + u1-* 零引用 ⇒ 要 relay 本人 IPC 签挑战证控制权(跨"钥只在 relay"边界), 非本 wiring 能解。
+- **🔨 元教训入册** `feedback-adversarial-review-asks-what-i-did-not-think-of`: 对抗审查=查"我没想到什么"(≠"我说的对不对"); 三轮审只 NWT 深审问出前者。正中 Owner 问责靶心。
+- **DECISIONS 已记**: relay_id 抢注 = 北极星前硬闸、不阻当前 loopback §6-1 注册 LIVE。
