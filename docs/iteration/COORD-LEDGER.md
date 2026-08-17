@@ -9024,3 +9024,12 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **🔵 减轻(我核)**: :184 logTail 留最后 4 行含 try1+try2 全文 ⇒ **信息没丢, 丢的只是标量分类** ⇒ 可事后重分类。缺陷=分类字段单一化, 非信息丢失。
 - **🔨 修法(J2 荐)**: failClass 改按尝试逐次数组(容第三成因, 两档会再撞)。**排期非现在**: 改字节 ⇒ 三级 re-pin+Codex re-accept, 不为不改判精度洞烧一轮(artifact#3 已 PASS 双审收敛, 已带进 Codex 说明)。下次仪器动顺手改或 §6-1 LIVE 后独立小修。
 - **(393) 连线归 Bettor**(已在 (492) route): dedup 从"聊天不便"升"削弱证据采集精度"另一类别, 不重开裁定但补进 393 记录重称重。我不越域裁 park。
+
+### (494) 2026-08-17 21:5xZ · 🏆 Codex 终验 artifact#3 = gate①(b) isSynced=true 逆境格【CLOSED】· 探针链到达终点(v1.2→v6→路径修→RE-ACCEPT→跑→双审→Codex 独验)· 口径 Codex 采纳
+- **Codex 独立复核(RESPONSE-...MSG242-...)逐项与 J1 审席 (490) verdict 一致**: run-header pin 全 match(06b3bb55/f1c288d4/sender/binding/rpc)· 3 confirmed txid 身份一致 + 第二节点同期 isSynced=true · **excluded failClass 过度宽泛被 Codex 从原始 logTail 独立确认**(attempt1=not-synced/attempt2=dedup)——正是 NWT 抓、我 (491) 认账、(493) 认领那格, Codex 亦独证。
+- **🏆 裁定**:
+  - **Gate 1(b) isSynced=true / <1 DAA/s 逆境确认格 = CLOSED**(限本 J2-tn 权威/体制, **≤32.532s poll-limited 上界措辞 only**——三值近同 + firstSeen.t==confirmed.t 证采样粒度主导, 非真链延迟, 禁写更强 latency claim)。
+  - **isSynced=false 格 = OPEN / artifact#3 未测**(submit 在有 txid 前被拒 = fail-closed 非慢确认, **不得并入 isSynced=true 闭合声明**)。
+  - **§6-1 LIVE 整体不由本裁定自动授权**; 剩余独立 LIVE gate 各自状态。
+- **⇒ 探针链终点**: 从接位到此, 探针 v1.2→v6(Codex 9 轮硬化)→sender 路径 bug 修→RE-ACCEPT→J2 隔离 worktree 跑(3/3+3 excluded)→J1 审席 PASS+NWT 对抗审+Codex 独验, gate①(b) 的 isSynced=true 逆境格权威闭合。**gate①(a)**(节点非降级/三源真主语)+ **gate①(b) isSynced=true 格** 两者证据链完整。
+- **📌 剩(非探针链)**: ①isSynced=false 格若 §6-1 LIVE 需要则另测(fail-closed 非慢确认, 语义已明)②wiring ②(J2)③failClass 修(在案, 下次仪器动)④(393) 重称重(Bettor)。**@Bettor 汇总报 Owner 时口径照 Codex: gate①(b) 闭的是 isSynced=true 那格 + ≤32.5s 上界, 别读大成全逆境。**
