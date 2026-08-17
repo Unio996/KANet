@@ -8926,3 +8926,11 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **🔨 采纳 J2 建议: 一键 re-pin 脚本** `scripts/j1-probe-repin.sh`——按序重算三级 sha 写回, 让"漏一环下次 run 才发现"变结构上不可能。幂等自验过(对已 pin 好的当前态零改动)。
 - **🔴 新坐标(Codex 须重注册, 676518be 作废)**: commit `a8eaa33de89cf68b6f1cf38179a853fc54f9cc85` · **launcher blob `23ec24ec7ee09068a1a28fc4de5cb4c49cb993be`(外域 attestation 新比对目标)** · 仪器 blob `f1c288d4` · sender sha `334ee61d`。J2 attestation 的 independent_launcher_blob 与 codex_accepted 都要换到新值。
 - **📌 @Bettor 路由 Codex 增量复核**: 架构层(launcher 外绑/import 前核/rpc pin/绑定判定)**零改动**, 仅 sender 一处路径 bug 修 + 连带三级 re-pin。Codex 应可增量确认+注册新 launcher blob。@J2 新坐标到位后按六步重跑外闭比对(比对目标换 23ec24ec)再开跑。
+
+### (479) 2026-08-17 · J1 修(06b3bb55)Bettor 隔离实核全过 · 新坐标 supersede ccc2f84d · MSG-241 route Codex · 执行方 attestation 须换新 blob
+- **J1 修(06b3bb55)= 完整三级 re-pin(J1 自己就做全了, 我 (477)/J2 catch 是双保险)**: 路径改可移植 `$(dirname "$_SELF_ABS")/../check-message-safety.mjs`; 闸保持 ARMED+fail-closed(甲, 拒乙)。
+- **Bettor 隔离实核全过**: ①路径解析到 git-tracked checker ②三级链一致(sender 334ee61d==仪器 PINNED; 仪器 ef0fcf1f==launcher REF_INSTRUMENT_SHA)③闸仍 armed ④provenance 5/5 ⑤launcher-authority 5/5 ⑥06b3bb55 后脚本零改动 ⑦树净。
+- **新坐标(supersede ccc2f84d)**: approved commit **06b3bb55**; launcher blob **23ec24ec**; 仪器 blob **f1c288d4**/content **ef0fcf1f**; sender blob **6aae65d5**/content **334ee61d**; binding content **b54d8af1**(不变)。
+- **MSG-241 已 route Codex**(桥 ee4d4cde): 报缺陷=二阶依赖(发送器派生进程 check-message-safety.mjs)不在 pin 链 + 修法 + 新坐标, 请 FINAL re-accept。**等 Owner @GitHub 触发**。
+- **🔴 执行方 attestation 须换新 blob**: J2 预草的 attestation 比对目标从旧 **676518be → 新 23ec24ec**(跑前独立 git hash-object launcher == 23ec24ec MATCH)。
+- **序**: Owner 触发 → Codex re-accept 06b3bb55 → J2 隔离 worktree@06b3bb55(拷 kaspa-wasm)+ attestation(比 23ec24ec)→ 跑 → artifact#3 → J1 审 → 我 route Codex 验 artifact#3 → gate① 结算 track 闭。
