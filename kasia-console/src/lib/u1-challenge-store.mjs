@@ -62,6 +62,7 @@ export function createChallengeStore(sqlite, table) {
       }
     },
   };
+  Object.freeze(ops);   // 弱兜底: 即使将来某处不慎泄漏了引用, 方法也改不掉(承重的仍是不导出能力)
   // token 本身不带方法 —— 调用方拿到的是一个冻结的空壳, 换不掉任何东西(它上面本来就没有东西)。
   const store = Object.freeze({ __u1ChallengeStoreToken: true });
   BOUND.set(store, { sqlite, table, ops });
@@ -92,24 +93,27 @@ export function isStoreBoundTo(store, expectedSqlite, expectedTable) {
   return b.sqlite === expectedSqlite && b.table === expectedTable;
 }
 
-/**
- * 🔴 (374) 取【模块自持的】权威操作 —— registration 必须走这里, **不许解引用调用方手上那个对象**。
- *
- * Codex 3ae9e7eb 第八级: 上一版把 read/consume 挂在返回给调用方的对象上, 而 WeakMap 只绑
- * **对象身份**({sqlite, table}), **不绑对象行为** ⇒ 攻击者拿一个真绑定的 store, 把 `store.read`
- * 换成"返回一条他挑的新鲜挑战"、`store.consume` 换成 no-op, 再传回来 —— 绑定检查照过, 而
- * 一次性保证被整个换掉。**绑对象身份 ≠ 绑对象行为。**
- *
- * ⇒ 现在返回的 store 是**不透明 token**(冻结、无方法), 真正的实现只存在于本模块的 WeakMap 里。
- *   调用方改那个对象**改不到任何东西** —— 不是"改了会被检查出来", 是**那里本来就没有东西可改**。
- * 🔵 `Object.freeze` 只是弱兜底(它拦不住原型层面的花招); 承重的是"**方法根本不在那个对象上**"。
- *
- * @returns {{read:function, consume:function}} 绑定校验通过时的模块自有操作
- * @throws  绑定不符 ⇒ 抛(不返回 null: 让"忘了判返回值"的写法也不可能静默降级)
- */
-export function getBoundOps(store, expectedSqlite, expectedTable) {
+// 🔴🔴 (376) Codex 80b34870 第九级: 上一版导出 `getBoundOps()` 并 `return BOUND.get(store).ops`
+//    —— 交出去的是 registration **正在用的那个可变对象**。持真 token 的调用方自己调一次就拿到它,
+//    改掉 `leaked.read/consume` 即可让 registration 信任被改过的实现。
+//    🔨 **我把方法移出了 token, 却把保险柜的钥匙导出了。** (374) 那个洞换了一道门重开。
+//
+// 🔨 **现在的不变式(照 @Bettor 定的原话)**: 调用方**可以持有 token**, 但**永远拿不到、也替换不了** read/consume 能力。
+//    ⇒ 不再有任何导出会返回 op 对象。改为两个**动词式**导出: 各自先验绑定 → 跑模块私有 op → 只返回**数据**。
+//    🔵 判据: **别导出能力, 导出动作** —— 能力可以被握住和改写, 动作做完就没了。
+
+/** 读一条挑战记录(先验绑定)。返回纯数据快照, 不返回任何函数。 */
+export function readBoundChallenge(store, expectedSqlite, expectedTable, challenge) {
   if (!isStoreBoundTo(store, expectedSqlite, expectedTable)) {
-    throw new Error('getBoundOps: store 未绑定到 (本次 sqlite 事务域 ∧ 规范表) —— 拒绝交出权威操作');
+    throw new Error('readBoundChallenge: store 未绑定到 (本次 sqlite 事务域 ∧ 规范表) — 拒');
   }
-  return BOUND.get(store).ops;
+  return BOUND.get(store).ops.read(challenge);
+}
+
+/** 消费一条挑战(先验绑定)。CAS 语义在模块私有 op 内, 调用方无从改写。无返回值。 */
+export function consumeBoundChallenge(store, expectedSqlite, expectedTable, challenge, nowMs) {
+  if (!isStoreBoundTo(store, expectedSqlite, expectedTable)) {
+    throw new Error('consumeBoundChallenge: store 未绑定到 (本次 sqlite 事务域 ∧ 规范表) — 拒');
+  }
+  BOUND.get(store).ops.consume(challenge, nowMs);
 }

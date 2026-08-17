@@ -542,6 +542,59 @@ await t('(H-2) token 上本来就没有 authority 方法(不是"改了会被发�
   assert.ok(Object.isFrozen(st.typed), 'token 应当是冻结的(弱兜底, 非承重)');
 });
 
+await t('(I-1) 🔴 (376) 模块导出面里【没有任何东西】能交出 read/consume 能力', async () => {
+  // 🔴 Codex 80b34870 第九级: 上一版 getBoundOps 是 export 且交出 registration 正在用的那个可变 ops 对象。
+  //    本格钉的不是"某个函数被删了", 而是**整个导出面上不存在能拿到能力的路径** ——
+  //    否则下一个人换个名字重新导出一次, 洞就回来了, 而针对旧名字的测试仍然绿。
+  const mod = await import('./u1-challenge-store.mjs');
+  assert.strictEqual(typeof mod.getBoundOps, 'undefined', 'getBoundOps 不该还在(它交出的是可变 ops 对象)');
+  const st = chStore(); st.issue('ch-leak-probe');
+  for (const [name, fn] of Object.entries(mod)) {
+    if (typeof fn !== 'function' || name === 'createChallengeStore') continue;
+    let out;
+    try { out = fn(st.typed, sqlite, CANONICAL_CHALLENGE_TABLE, 'ch-leak-probe'); } catch { continue; }
+    if (out && typeof out === 'object') {
+      assert.strictEqual(typeof out.read, 'undefined', `导出 ${name} 交出了 read ⇒ 能力泄漏, (376) 没修好`);
+      assert.strictEqual(typeof out.consume, 'undefined', `导出 ${name} 交出了 consume ⇒ 能力泄漏`);
+      for (const v of Object.values(out)) {
+        assert.notStrictEqual(typeof v, 'function', `导出 ${name} 的返回值里带函数 ⇒ 可能是伪装的能力泄漏`);
+      }
+    }
+  }
+});
+
+await t('(I-2) 动词式导出: 绑定不符必抛, 且【消费真的落到规范表】(不是空转)', async () => {
+  const { readBoundChallenge, consumeBoundChallenge } = await import('./u1-challenge-store.mjs');
+  const st = chStore(); const ch = 'ch-verb'; st.issue(ch);
+
+  // 绑定不符(表名不对)⇒ 两个动作都必须抛, 不是静默返回空
+  assert.throws(() => readBoundChallenge(st.typed, sqlite, 'some_other_table', ch), /未绑定/, 'read 动作没验绑定');
+  assert.throws(() => consumeBoundChallenge(st.typed, sqlite, 'some_other_table', ch), /未绑定/, 'consume 动作没验绑定');
+  assert.strictEqual(st.read(ch)?.usedAt, null, '被拒的 consume 竟然动了表');
+
+  // 正路: 读回的是纯数据(无函数), 消费真落库
+  const rec = readBoundChallenge(st.typed, sqlite, CANONICAL_CHALLENGE_TABLE, ch);
+  assert.ok(rec && rec.challenge === ch, '正路读不到记录');
+  for (const v of Object.values(rec)) assert.notStrictEqual(typeof v, 'function', '读回的记录里不该有函数');
+  consumeBoundChallenge(st.typed, sqlite, CANONICAL_CHALLENGE_TABLE, ch);
+  assert.ok(st.read(ch)?.usedAt, 'consume 动作没有真的把它标成 used ⇒ 空转');
+  // CAS: 第二次消费必抛(而不是静默成功)
+  assert.throws(() => consumeBoundChallenge(st.typed, sqlite, CANONICAL_CHALLENGE_TABLE, ch), /不可消费/, '第二次消费没抛 ⇒ CAS 失守');
+});
+
+await t('(I-3) 工厂 fail-closed: 表不存在 ⇒ 必抛(不许造一个"每次都查空"的假 store)', () => {
+  // 🔴 本格是 store 变异套抓出来的【真缺口】, 不是想到的:
+  //    把工厂里 `if (!exists)` 拆掉后, 全套用例仍然全绿 —— 说明没有任何一格测过"表不存在"这条路。
+  //    而它的后果很静: 造出来的 store 每次 read 都返回 null, 看起来像"挑战没签发", 排错会走到完全错的方向。
+  assert.throws(
+    () => createChallengeStore(sqlite, 'table_that_does_not_exist'),
+    /不存在/,
+    '表不存在却造出了 store ⇒ fail-closed 失守',
+  );
+  // 对照臂: 表存在时照常能造(证明上面那一抛不是把工厂整个弄坏了)
+  assert.ok(createChallengeStore(sqlite, CANONICAL_CHALLENGE_TABLE), '规范表存在时应当能正常构造');
+});
+
 sqlite.close();
 rmSync(dir, { recursive: true, force: true });
 console.log(`\n${fail === 0 ? '✅' : '🔴'} u1-registration: ${pass} PASS / ${fail} FAIL`);

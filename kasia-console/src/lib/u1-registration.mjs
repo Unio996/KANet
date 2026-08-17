@@ -75,7 +75,14 @@
 //  | 解引用点 | 对象来源 | 承载 authority 吗 | 处置 |
 //  |---|---|---|---|
 //  | `s.relayId/rootXpub/identityIndex/identityPubkeyXOnly/challenge/signature` | `submission` | ❌ 纯数据, 且**本就当敌意输入** | 全部经 N4-bis/绑定/PoP 验; 不当权威 |
-//  | ~~`challengeStore.read()` / `.consume()`~~ | 调用方持有的对象 | 🔴 **是** —— 换掉它=换掉一次性与过期的全部权威 | **(374) 已删**: store 变不透明 token, 实现走 `getBoundOps()` 从模块私有 WeakMap 取 |
+//  | ~~`challengeStore.read()` / `.consume()`~~ | 调用方持有的对象 | 🔴 **是** —— 换掉它=换掉一次性与过期的全部权威 | **(374) 已删**: store 变不透明 token |
+//  | ~~`ops.read()` / `ops.consume()`(经 `getBoundOps()`)~~ | 模块私有对象, **但导出了 getter** | 🔴 **是** —— 见下 | **(376) 已删**: 不再有任何导出返回 op 对象 |
+//
+//  🔴 **(376) 第九级 —— 我把方法移出了 token, 却把【保险柜的钥匙】导出了**(Codex 80b34870):
+//     `getBoundOps` 是 export, 且 `return BOUND.get(store).ops` **交出 registration 正在用的那个可变对象**。
+//     持真 token 的调用方自己调一次就拿到它, 改掉 `leaked.read/consume` ⇒ (374) 那个洞换一道门重开。
+//     ⇒ 改为两个**动词式**导出 `readBoundChallenge` / `consumeBoundChallenge`: 各自先验绑定 → 跑模块私有 op → **只回数据**。
+//     🔨 **判据: 别导出【能力】, 导出【动作】** —— 能力可以被握住并改写, 动作做完就没了。
 //  | `sqlite.prepare()` / `.transaction()` | 调用方给的 handle | ⚠ 是, 但见下"信任边界" | 收不回, 明写 |
 //    ⇒ **生产路径现在对调用方对象的解引用只剩两类: `submission` 的纯数据字段, 与 `sqlite` 的 DB 方法。**
 //    ⚠ **加新参数 / 新调用 `x.y()` 时, 这张表必须同步更新** —— 这是本文件里最容易悄悄失效的一格。
@@ -86,7 +93,7 @@
 //     **这条本模块收不回来, 所以写明而不是宣称已解决。**
 import { rootFingerprint, verifyRegistrationBinding } from './u1-same-origin.mjs';
 import { verifyRegistrationPop } from './u1-registration-pop.mjs';
-import { isStoreBoundTo, getBoundOps, CANONICAL_CHALLENGE_TABLE } from './u1-challenge-store.mjs';
+import { isStoreBoundTo, readBoundChallenge, consumeBoundChallenge, CANONICAL_CHALLENGE_TABLE } from './u1-challenge-store.mjs';
 
 export const REG_REJECT = Object.freeze({
   RELAY_UNKNOWN: 'RELAY_UNKNOWN',
@@ -198,9 +205,8 @@ async function _registerIdentityImpl({ sqlite, submission, challengeStore } = {}
   //    上一版 PoP 验的是调用方直接递进来的 challengeRecord ⇒ 他可以递一个【伪造/未过期】的,
   //    即使 store 里那条早已过期或已用 —— 签发/过期的 authority 还在调用方手上, 消费的 authority 才被我收回。
   //    ⇒ 这里【不比对、不兜底】, 直接以 store 为唯一来源: 调用方连递的机会都没有(参数已删)。
-  // 🔴 (374): 取【模块自持】的 ops, 全程不解引用调用方那个对象上的任何方法。
-  const ops = getBoundOps(challengeStore, sqlite, expectedTable);
-  const storeRecord = ops.read(s.challenge);
+  // 🔴 (374)+(376): 不取能力对象, 只调**动作** —— 每次调用各自先验绑定, 且只回数据。
+  const storeRecord = readBoundChallenge(challengeStore, sqlite, expectedTable, s.challenge);
 
   // ②-b N8 PoP —— 用 store 取出来的 record 验(含 usedAt / expiresAt 两项)
   const pop = await verifyRegistrationPop({ submission: s, challengeRecord: storeRecord, now: clock(), verifyMessageFn });
@@ -222,7 +228,7 @@ async function _registerIdentityImpl({ sqlite, submission, challengeStore } = {}
     //    🔴 它成立的【前提】必须写出来(上一版漏写, 被 Codex c0a1f50c 抓下):
     //       store 与身份表**同一事务域**(由 ②-c 的 `isStoreBoundTo` 结构保证)+ `.immediate` 已持写锁。
     //       **离开这个前提, 这一读就不是 CAS** —— 跨连接时我的锁根本管不到对面那个库。
-    const before = ops.read(s.challenge);
+    const before = readBoundChallenge(challengeStore, sqlite, expectedTable, s.challenge);
     if (!before || before.usedAt) {
       throw new _RegTxError(REG_REJECT.CHALLENGE_ALREADY_USED,
         `事务内重读: 挑战已被并发请求用掉(或已不存在) ⇒ 拒, 整笔回滚(usedAt=${before?.usedAt ?? 'record-missing'})`);
@@ -245,13 +251,13 @@ async function _registerIdentityImpl({ sqlite, submission, challengeStore } = {}
     }
 
     // 消费: 抛错即回滚(连同上面那条 INSERT)
-    try { ops.consume(s.challenge); }
+    try { consumeBoundChallenge(challengeStore, sqlite, expectedTable, s.challenge); }
     catch (e) { throw new _RegTxError(REG_REJECT.CHALLENGE_CONSUME_FAILED, `挑战消费失败, 整笔回滚: ${e?.message || e}`); }
 
     // 🔴 后置条件: 事务内重读, 必须真的变成 used。
     //    没有这一条, 一个【什么也不做】的 consume 会读成成功 —— 那正是 (343) 被抓的形状
     //    (谓词对, 但没有东西让它的前提成立)。
-    const after = ops.read(s.challenge);
+    const after = readBoundChallenge(challengeStore, sqlite, expectedTable, s.challenge);
     if (!after || !after.usedAt) {
       throw new _RegTxError(REG_REJECT.CHALLENGE_NOT_CONSUMED,
         '消费后重读挑战仍非 used ⇒ 消费未真正持久化, 整笔回滚(空消费不算成功)');
