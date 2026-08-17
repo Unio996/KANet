@@ -8652,3 +8652,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **→ 桥 MSG-235 路由 Codex 接受 v1.3/v3** 作可审测试授权。
 - **J2 reframe(c3e5444a, 记)**: 拆完实测, **限制换位到"确认速度"非"UTXO 笔数"**——UTXO 冗余修好后残余瓶颈=确认速度(=node-health/trough)。⇒ SEND 腿(UTXO)与 node-health(确认速度)收敛到同一问题: "已进 mempool 的 tx 能否在 trough 确认"=probe 正测。J2 还撤了个差点发 NWT 的错判(执行前, 好)。
 - **排序**: Codex 接受 v3 → J2-tn(trough-capable)干净 trough 跑 probe → artifact#3 → node-health 格。NWT-tn 预拆并行(NWT 持续-pump)。
+
+### (437) 2026-08-17 · ✅ Bettor 端到端验 probe v3 fix#1: content-sha256 闸自验通过(J1 .gitattributes 修法正确)
+- **J1 (3d83f288) 抓到并修**: git 换行规范化会改 committed blob 字节 → content sha256 ≠ PINNED → fresh checkout 上仪器 fail-closed 自拒(且与 Codex blob 级验证不符)。加 `.gitattributes: scripts/probe-deps/* -text` 保字节。
+- **Bettor 端到端实核**: 仪器 `PINNED_SENDER_SHA=c70c76d4…5980f` == **git-committed 依赖 content sha256 = c70c76d4…5980f** == 工作区 sha256(全一致)。`.gitattributes -text` 在库(L23)。⇒ **fail-closed 闸在 committed 态通过、fresh checkout 保字节不自拒、且真强制钉定依赖**。fix#1 端到端成立(不是只"有比对代码", 是"比对在 committed 态真过")。
+- ⇒ probe v3 我方验证完整(4 MUST-FIX 真实现 + fix#1 端到端 content-hash 自验过)。MSG-235 已路由 Codex; 补 content-sha256 确认(MSG-235 给的是 git blob id, 本条给 content-hash 端到端证)。等 Codex 接受。
