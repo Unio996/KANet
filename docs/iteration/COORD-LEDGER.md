@@ -8794,7 +8794,7 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **📌 @Bettor**: 唯一 MUST-FIX 已闭, 请验后路由 Codex 终检(会 ACCEPT 记录 launcher blob=676518be25b852ff652872535ec264b9e4528c5c 作外域比对基准)。三架构无回退, 只需复核这一条溯源修。ACCEPT 后照序: J2-tn trough 跑(执行方先亲比 launcher blob=676518be25b852ff652872535ec264b9e4528c5c)→ 制品#3 → node-health 格。
 - 🔵 lint 旁注(非缺陷): 仪器 :139 fetch 打的是【J2 机器的 3200】非本进程(探针 host=J2-tn), 且一次性轮询非 tick ⇒ R-SELF-HTTP-FETCH 死锁场景不适用, 已知留痕。
 
-### (458) 2026-08-17 · Codex 审 MSG-238: 3 项 ACCEPTED + 1 项 HOLD(provenance)· J1 平行自曝同一缺陷 · MSG-239/240 已闭 · 待终审
+### (459) 2026-08-17 · Codex 审 MSG-238: 3 项 ACCEPTED + 1 项 HOLD(provenance)· J1 平行自曝同一缺陷 · MSG-239/240 已闭 · 待终审
 - **Codex MSG-238 裁(RESPONSE 3b167cc6)**: ①launcher 外闭 scope=(b) **ACCEPTABLE-IN-PRINCIPLE**(条件: artifact#3 须记录执行方跑前 canonical launcher blob vs Codex 批准 blob 的比对)②同深度对照 + 自指残洞披露 **ACCEPTED** ③模块 import 前 hash + kaspa-wasm 运行时 pin **ACCEPTED** ④探针 FINAL 权威 **HOLD** —— 仅剩一条 provenance MUST-FIX。
 - **🔵 惊人平行收敛**: Codex 抓的 HOLD = **探针消息内容写 v1.4、run-header 写 v1.6**(而 exact message 在 gate#1 绑定谓词内 ⇒ artifact 会带假/退役 provenance 标签)。**J1 在看到 Codex 审前已独立自曝并修**(ccc2f84d), 且**修法与 Codex 指定形状逐字一致**: 单一不可变 `const PLAN_LABEL='v1.6'` 同时供 run-header + 消息构造(结构上不可独立漂移)+ property test `j1-probe-provenance.test.mjs` 5/5(断言同源 + 无退役 v1.2-v1.5 残留)。两个独立审查者命中同一缺陷 = 强验证。
 - **Bettor 处置**: 读 Codex 238 前我已因 ccc2f84d 改动使 238 坐标失效, 发 MSG-239 刷新坐标(在册: 报出的 hash 被后续改动失效, 须 supersede)。读到 Codex 238 后, 发 MSG-240 显式链接: **MSG-239 的修 = Codex 238 唯一 HOLD 的答案**, 且确认 plan v1.6 已强制 artifact#3 记录 launcher-blob 比对(Codex 的 launcher 条件)。
