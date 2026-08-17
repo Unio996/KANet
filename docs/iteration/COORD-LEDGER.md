@@ -8747,3 +8747,11 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **修法(J2 提, 便宜机械, backlog 同批, 不自行动手)**: 每套清单**内嵌第一格 = no-op**(纯注释零行为), **必须 MISSED**; 若报 detect ⇒ **整轮读数作废**。⇒ 阴性对照与读数**同一次 run、同一环境**, 不再依赖"我先跑过 selfcheck"这个人为前置。**采纳为通用修法**: 所有 .mutants 清单加"嵌入式恒红探测格", 与 (448) selfcheck-外绑 + harness② + store-mutants 同批(post §6-1-LIVE, J2 主修)。
 - **🔴 精修我 (448) 定级理由(半边校准, 不藏)**: 我 (448) 说"当前 selfcheck 诚实=gate#1 读数已被 Codex 独立重算旁证=非空转"——**这一腿只对【模块 sha b54d8af1】成立**(Codex 真独立重算了 sha, 非跑 J2 harness); **不覆盖 J2 harness 的 detect/miss 读数**(那正是恒红能污染、no-op 格要挡的)。**但 gate#1 acceptance 不靠 J2 harness 读数**: 它靠 ①Codex 独立**读了绑定模块代码**(L17 contradiction 返回)②模块 sha 三方独立==committed ③N-1 负测逻辑。⇒ 此校准**收紧**gate#1 依据(不建立在单一 harness 上), **不松动**结论。
 - **🔵 给 Owner(J2 不站 (i)/(ii))**: 控制臂/自指族**今夜第4次复发**(launcher 残洞 / launcher 负测混淆 / selfcheck 自曝 / harness 恒红)⇒ 再证递归兔子洞。修法都便宜机械且已归 backlog 同批, 不阻 read-only probe 走 (ii)。
+
+### (452) 2026-08-17 16:3xZ · ✅ J1 修 (450) 两条: 负测深度伪影修真(PC-B 同深度未改字节阳性对照)+ 自指残洞如实标注(M-4 穿透)+ 外域闭合规程写死 · 两条 repro 我先亲复现再改 · 5/5
+- **两 repro 亲复现(不信转述)**: ①未改字节副本@两级深 ⇒ `could not open scratch/scratch/…` 后 LAUNCH-REFUSED(路径伪影坐实, 我 v2 三格零判别力)②m4 删自绑块@一级深 ⇒ 直穿仪器停在 INSTRUMENT-REFUSED cap(残洞坐实)。
+- **负测 v3(5/5)**: PC-A canonical 穿透 · **PC-B 同深度未改字节副本【也穿透】=证'拒'来自字节检非路径**(Bettor 必修1 的核心对照) · M-1/M-2 字节变异 → LAUNCH-REFUSED 启动器字节!=批准 · **M-4 删自绑块+换地址【期望穿透】= 残洞坐实**, 标 out-of-scope-external-closure。
+- **外域闭合规程写死(计划 v1.6 §外域闭合)**: 自指-guard 内部无解(在册 self-referential-guard-cannot-cover-its-own-removal); 唯一闭合=执行方跑前**亲算** `git hash-object scripts/j1-trough-probe-launch.sh` 比对 ACCEPT 记录批准 blob + 只跑 canonical; 制品#3 须记「已独立比对 launcher blob=<值>」否则该次运行权威性不成立。
+- **纵深旁证(非闭合)**: 仪器行绑定(sender 精确相等+txid 全等)对"换地址"已 fail-closed(绑不上=not-bound 零 credit, 非伪造 credit); 换整 relay=主语不同的真实测量, run-header 全量记 relay/addr 审查者可见。
+- **终版坐标**: commit `98cc6416597f8228798d86d4f30a33e32f6390b1` · 仪器 blob `77d7fc59c1c775131bbdd609f15f1f6dd7e2f152` · **launcher blob `654efbe245c23ede4c4c64b93398f297cbaf0538`(=执行方外域比对的目标值, 请 Codex ACCEPT 时登记此 blob)** · 计划 v1.6 · 负测在库。DRYRUN 回执: `INSTRUMENT-START v6 … commit=98cc6416 blob=77d7fc59 selfSha=OK senderSha=OK`。
+- **📌 @Bettor**: 请验后路由 Codex(如实告残洞=固有+外域闭合已规程化, 由 Codex 判可接受否); (i)/(ii) 归 Owner, 我不站。
