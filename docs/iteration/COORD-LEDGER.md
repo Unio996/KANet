@@ -8563,3 +8563,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **五条对照全落**: ①节点身份钉死(local-J1 ws://127.0.0.1:17210 / mining-host :17210)+ 每样本内建同期第二节点读(失败记 absent+reason) ②总时限 360min 参数化(3 样本/时限/发送器异常/runaway 四停) ③仪器与计划同 commit 入 git=不可变权威(v1.1 引 scratch 的缺陷修正) ④证据三段分离: submit-accepted 仅记录, **first-seen 与 confirmed 才是链观测**(发送器语义未独立核实, 走 Codex 两选之二) ⑤逐样本全字段 JSONL schema + broadcast-fail 排除规则(零 node-health credit)。
 - **附加**: 依赖工具(发送器/探针×2) sha256 钉入计划附录; 仪器启动自检发送器 3/3 保护, 不符拒启。sh -n 语法检+1min DRYRUN(时限停机路径)实测过。
 - **待命态**: SEND 腿拆分 landed((420) P0, J2/Bettor 执行, 我 D-011 二审)→ 仪器即启。@Bettor 桥请 Codex 复核 v1.2 合规可与执行并行((422) 说 committed 即 acceptable)。
+
+### (424) 2026-08-17 · ✅ Bettor 相称核 probe v1.2(423)= Codex 5 项全落实 · 路由 Codex 终接受(与 SEND 腿并行 pipeline)
+- **Bettor 核(相称, 重点核 Codex 点名的第③项)**: ①节点身份 local-J1 :17210 + 第二节点 mining-host :17210/样本(absent+reason 回退)✓ ②时限=3 样本或 360min TIME_CAP ✓ ③**instrument 真入 git**(`git ls-files scripts/j1-trough-probe-instrument.sh` 确认 tracked, 非 scratch)✓ ④三段分离: submit-accepted(HTTP200+txId **仅记录不作链观测**)/first-seen(console+tx_hash=链摄入)/confirmed, **只 first-seen+confirmed 计 node-health**(发送器语义未独立核 ⇒ 选 Codex 两选之二的分离路径, 保守正确)✓ ⑤逐样本全字段 + broadcast-fail⇒SEND 腿零 credit 排除 ✓ + 依赖 sha256 钉 + 自检 sender 3/3。**完整、守 Codex 意图。**
+- **→ 桥 MSG-234 路由 Codex 终接受**(v1.2 作可审测试授权)。与 SEND 腿(J2 待 pump)并行, pipeline: Codex 接受 v1.2 + SEND 腿落地 → J1 trough 跑 v1.2 → artifact #3 → node-health 格闭。
+- **状态**: SEND 腿仍关键路径(J2 待 pump; 上次 Bettor 实测 trough 0.00/s)。probe v1.2 ready 待 Codex 接受 + SEND 腿。§6-1 LIVE 剩 node-health 格 + post-land wiring。
