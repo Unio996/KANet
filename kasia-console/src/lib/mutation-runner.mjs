@@ -14,6 +14,9 @@
 //    而破坏发生在 **node_modules**。
 //    🔨 **自证只覆盖到你想到的那一类写入。声称"零写入"必须说清是【哪个范围】。**
 //    ⇒ 本版**不建任何链接**(junction/symlink 一律不用), 并把副作用面复验扩到依赖目录。
+//    ⚠ **而那条复验本身也只到"顶层项数"**(Codex 复核指出): 它能抓住 v1 那种**整目录被删**,
+//      **抓不住包内文件被改/删/替换**。要强断言"依赖零改动"需递归摘要 —— 229 个包会把 0.5s 一轮拖成分钟级,
+//      现按 Bettor 裁定**不做**, 列为可选 backlog。**代价不值 ≠ 已经证过**, 所以第 125 行文案只说实测那一档。
 //
 // **第二次(恒红装置)**: 我改用 `NODE_PATH` 接依赖 —— 而 **ESM 根本不认 NODE_PATH**(只对 CommonJS 生效)。
 //    隔离树里测试 `ERR_MODULE_NOT_FOUND` **永远失败** ⇒ **每一格变异都被判 detected**。
@@ -122,7 +125,10 @@ export function runMutationsIsolated({ repoRoot, srcRel, testRel, mutants, unrea
       throw new Error(`mutation-runner: 🔴🔴 主树 node_modules 项数变了(${nmBefore} → ${nmAfter}) — 正是第一次事故的形态, 立刻停手`);
     }
     console.log(`[isolate] ✅ 真源文件 sha256 未变 ⇒ 源零写入(实测)`);
-    console.log(`[isolate] ✅ 真依赖仍 ${nmAfter} 项 ⇒ 依赖零改动(实测)`);
+    // 🔴 措辞刻意压到实测那一档(Codex 复核指出, Bettor 批): `readdirSync().length` **只数顶层项**,
+    //    包内文件被改/删/替换时它一个数都不会变 ⇒ 只能声称"未复现 v1 那次整目录删除", **不能**声称"依赖零改动"。
+    //    这正是 v1 事故的同一个病(量的范围小于声称的范围), 所以这行文案本身就是那条教训的落点。
+    console.log(`[isolate] ✅ 真依赖顶层仍 ${nmAfter} 项 ⇒ 未复现 v1 的整目录删除(⚠ 只比顶层项数, 不证包内文件未被改)`);
     console.log(`[isolate] 临时副本 ${basename(tmpDir)} 已在 finally 中删除`);
     return { det, miss, inert, broken };
   } finally {
