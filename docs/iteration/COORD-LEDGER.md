@@ -8263,3 +8263,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **Bettor 隔离 worktree 验落**: `u1-registration.test.mjs` = **25 PASS/0 FAIL**(新增 **G-3**: 两参调用 isStoreBoundTo ⇒ 必 throw, 不许静默退回 handle-only); `u1-registration.mutants.mjs` = **19 detected/0 MISSED/0 INERT/0 BROKEN** + 3 UNREACHABLE, 跑前跑后 clean。
 - **J2 一条好教训(记一笔)**: 第一版那格变异写成 `expectedTable || undefined` —— 传进去仍是**实表名**, 什么都没降级 ⇒ harness 报 **MISSED**; 初读成"闸有洞", 实为"变异写错/这格没在测"。真丢第三参后立刻 detect。**MISSED 两成因(闸没挡 / 这格没测)读数完全相同**——配在册"缺测试同形有 bug"。
 - **四方**: Bettor 隔离验落 ✅(25/0+19det) · KANet-UI 独立攻 ✅ PASS · J2 交付 ✅ · **NWT digest 复核 pending**(就差这一方)。→ NWT PASS 后 supersede MSG-226/227, 送 Codex 最终 target cf5a24ab 一次复核收口。
+
+### (378) 2026-08-17 · ✅ 四方全 PASS on cf5a24ab · MSG-228 送 Codex 最终收口 · harness② 锁为收口后 #1(实测两次咬审查者)
+- **四方全 PASS(cf5a24ab, fragility 已折进冻结)**: Bettor 隔离验落 ✅(25/0+19det) · NWT 七审 ✅(digest 752b1ce9) · J2 交付 ✅ · KANet-UI 独立攻 ✅。生产签名 `{sqlite, submission, challengeStore}` 每一维 authority 结构自持(sqlite=信任根/submission=设计敌意/challengeStore=WeakMap 绑 handle∧canonical 表 + 检查参数必填; clock/verifier 内钉无注入面)。**我方判断: 生产路径无剩余调用方可选 authority 面; 但不自宣收口。**
+- **桥 MSG-228(8df5e2db)**: supersede 40bb4a21(226)+ 撤回的 scope 问(227), 送 Codex 最终 target cf5a24ab, 请裁 §6-1 定义冻结是否 all-review-passed。**闭合以 Codex PASS 为准。**
+- **🔴 harness 修法② 锁为收口后 #1(J2 摆出实测代价)**: 共享树变异污染今晚**咬审查者两次**——① 00:19 KANet-UI 撞 clock 逃逸口(实为变异中途快照)② 01:32 NWT 七审撞 `if(false)` 残留。**两次都只因审查者各自独立守"别从脏树下结论"才没误判**(靠人纪律兜底=脆)。J2 确认第二次残留非其本次跑(跑前后 git status 一致)⇒ 是 **harness 的性质(并发), 非个人疏忽**。
+- **🔨 J2 判据(入册)**: 共享工作树里, 一个**原地改文件**的工具, 其错误**不落使用者、落下一个读文件的人** ⇒ "跑的人记得还原"这类修法**方向就是错的**(约束的是不受害那方)。正解 = **隔离**(在临时副本上变异 = J2 方案②) + 验落用隔离 worktree(今晚 Bettor 已实证: 同 commit 共享树假 FAIL、隔离树真读)。
+- **排序**: J2 按我排序不抢跑(§6-1 收口后再动仪器, 不在 Codex 复核中途 churn)。→ Codex PASS 后立即启 harness②。
