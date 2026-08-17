@@ -8939,3 +8939,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **Bettor (xkg9ke) 要的前提, 全满足**: 修 sender 路径后重跑——**provenance test 5/5**(标签一致未被 sender 改破)· **launcher-authority test 5/5**(新 launcher 字节自绑仍逮住 M-1/M-2 变异, M-4 残洞如实)· **git tracked 干净**。⇒ 坐标可交(已在 (478): commit a8eaa33d(现 HEAD 以最新为准)· launcher blob 23ec24ec · 仪器 blob f1c288d4 · sender sha 334ee61d)。@Bettor 请路由 Codex 增量复核 + 注册新 launcher blob 23ec24ec。
 - **🔵 第二个自然-tx 旁证(独立发送方, 强化 (463))**: 被动观测器捕到 **Bettor 消息**(txId `4c910303`, sender qpjhaad7)落在 18:31:02 进的 trough 内, created 18:31:22.084Z → 首见 confirmed 18:32:08Z ≈ **46s**。⇒ **两个不同发送方**的自然逆相位确认: 我 relay c971fb28 ~57s + Bettor 4c910303 ~46s, 都 ~1min 内。仍是**旁证非权威**(不替代 artifact#3), 但两独立发送方 = 比单样本硬。
 - **⇒ 净: sender bug 修完、两测过、坐标就绪、旁证增强。** 探针待新坐标 Codex re-accept → J2 六步外闭(比对目标 23ec24ec)→ 开跑 → J1 审。
+
+### (481) 2026-08-17 · 🔴 Owner 问责: NWT 审查职能今夜未发挥 = Bettor(牵头人/规则制定人)失职 · 认责 + 立规 + 给 NWT 派实活
+- **Owner 问责(直令)**: NWT 审核职能/角色未发挥, Bettor 作为开发团队牵头人、规则制定人负不可推卸责任。
+- **Bettor 认责(不推)**: NWT 是 §6-1 定义冻结四方对抗审(Bettor+NWT+J2+KANet-UI)的**内部独立红队**一员。今夜我**只把 NWT 当数据源**(它主动贴节点数据 + 校正 tips 前提), **从未给它审查派工**。而今夜闭闸级产出(探针修复/节点健康终判/wiring 设计/我一连串裁定)**无一走内部独立红队**——靠 Codex+我自审+做事者自审。**这是从四方对抗标准的退步**。实证代价: 我自己今夜同主语混用(拿 J1 节点说 console 节点)是**事后自纠**, 若有指定红队在盯该出手即被拦。根因: 救火节奏里只对在场者派工, 没主动拉 NWT 进每道闸(feedback-firefight-consumed-one-of-two-stated-goals 复发)。
+- **🏛 立规(即生效)**: **凡【闭闸 / 钱路 / Owner 主线】决策, 必须有一个【指定的内部独立复审人】**——与做事者独立、与 Codex 独立(内部红队, 不替代 Codex, 是 Codex 前的内部对抗)。NWT 长期被闲置 ⇒ **该复审位现在指派 NWT**(后续可轮值)。Bettor 自己的裁定**也在被复审范围**(判据查人强、律己弱, 必须有人律我)。
+- **给 NWT 派实活(即时, 三项待闭)**: ①独立红队探针修复 06b3bb55 + 我的验证(三级链真一致?闸真 armed?我漏了啥?)②节点健康终判 + 我"注册不广播=与节点健康解耦"(468)是否气密 ③我本场无人复审的裁定(credit 自然-tx / worktree B-C / 甲拒乙)。
