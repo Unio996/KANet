@@ -1,20 +1,20 @@
-# J1 trough 探针测试计划 v1.2(Codex MSG-233 复审 5 条 MUST-FIX 合规版)
+# J1 trough 探针测试计划 v1.3(Codex b7e269f6 四条 MUST-FIX 合规版)
 
-> **Status**: AUTHORIZED-PENDING-SEND-LEG · J1tn · 2026-08-17 13:3xZ · 取代 v1.1(五条 MUST-FIX 全落)
-> **授权链**: Owner 双通道直令(ledger (420) Bettor 终端 +(421) J1 终端佐证)= 显式证据政策变更; Codex f76372cb: 政策变更 ACCEPTED · 概念 ACCEPTED IN PRINCIPLE · 本文件即其要求的可复核测试权威。
-> **排序**: SEND 腿拆分 landed 之后执行((420) 承重排序)。
+> **Status**: AUTHORIZED-PENDING-CODEX-ACCEPT · J1tn · 2026-08-17 14:3xZ · 取代 v1.2
+> **授权链**: 同 v1.2(Owner 双通道直令 (420)(421))。**仪器改为纯 Node 实现** `scripts/j1-trough-probe-instrument.mjs`(v3, 与本文件同 commit)——弃 shell 内嵌解析(今晚同族引号/括号缺陷四发, 根治=单语言)。
 
-## MUST-FIX 合规对照
-1. **节点身份绑定+同期第二节点**: 发送观测节点=`local-J1 ws://127.0.0.1:17210 (testnet-12)`; 第二节点=`mining-host 100.99.147.101:17210`(SSH 隧道), **每样本一读**, 不可达记 `{absent, reason}`。
-2. **总时限**: 3 样本 **或 360min 总时限**(仪器参数 TIME_CAP_MIN, 默认 360)先到者停; 另两条中止判据(发送器异常/判词 runaway)保留。
-3. **仪器入 git**: `scripts/j1-trough-probe-instrument.sh`(与本文件同 commit, 即不可变权威)。
-4. **三段证据分离**: submit-accepted(发送器 HTTP200+ok+txId, **仅记录, 不作链观测**)/ first-seen(本机 console 出现消息+tx_hash=链摄入观测)/ confirmed(status=confirmed)——**只 first-seen 与 confirmed 计入 node-health**。发送器语义未经独立核实, 故采分离记录路径(Codex 给的两选之二)。
-5. **逐样本字段**: trigger{t,d1,d3} · submit{t0,ok,txid} · firstSeen{t,status,txhash} · confirmed{t}|timeout · secondNode{daa,synced,t}|{absent,reason} · exclusion(null | `broadcast-fail⇒SEND 腿证据, 零 node-health credit`)。JSONL=`scratch/j1-trough-probe-artifact3.jsonl`, 制品#3 内嵌全量后 commit。
+## Codex 四条 MUST-FIX 对照
+1. **依赖 sha256 启动强制**: 测量链唯一外部依赖=发送器, **git-tracked 副本** `scripts/probe-deps/j1-send-one.sh`(sha256 `c70c76d4…` 钉在仪器常量, 启动实算比对, 不符拒跑并打印两值)。旧依赖 j1-node-sync.mjs/j1-remote-node-check-0812.mjs **已从测量链移除**(RPC 采样与第二节点读改为仪器内嵌 kaspa-wasm 直连)。**披露**: ssh 隧道用的 askpass 脚本=登录凭据, 非测量语义, 不入库不参与 hash 链; 第二节点读失败一律 {absent, reason} 不伪造。
+2. **完整 submit txid**: 发送器仅暴露 8 位前缀 ⇒ 仪器记 `txidPrefix`(发送器输出) + 经唯一内容 TAG 从 console 行取 **64-hex 完整 tx_hash** 作 `txidFull`, 校验前缀一致(不符打 WARN 入档)——console=应用暴露点, 属 Codex 许可的绑定路径。
+3. **firstSeen 闸**: 仅当 console 行 `tx_hash` 匹配 `/^[0-9a-f]{64}$/` 才置位, 完整 hash 为结构化字段; 无 tx_hash 的本地行=零 node-health credit。
+4. **第二节点同期**: **trigger 检出后、发送前立读**(at-trigger, 真时戳)+ confirmed 后补读(at-confirm)。不可达记 {absent, reason}, 永不 backfill。
+
+## 失败分类学(超出 v1.2 的一格, 由 probe#1 事故立)
+- `node-not-synced-submit-reject`: 本机节点 trough 中翻 false 时 kaspad 拒收 submit——**逆相位的真实行为, 全字段入档但零确认 credit**(它测的是"能不能提交", 与"提交后多久确认"分开记)。
+- `utxo-too-small(SEND-leg)` / `sender-refused`(中止) / `connection-refused`。全部 excluded 样本带 logTail。
+
+## probe#1 事故披露(v1.2 仪器, 已废)
+14:09:59Z 触发的第一发: 发送被节点拒收(not synced ×2)**从未上链**; v1.2 仪器误入轮询臂空等——该行为已按 (434) 停机, 无任何数据被计入 node-health。v1.2 仪器(.sh)废弃, 以本 v1.3(.mjs)为准。
 
 ## 范围(不变)
-≤3 条唯一内容频道消息(dev-coord-testnet, J1tn 自己的 relay)· 仅 trough(2min DAA<1/s)触发 · 间隔 ≥15min · 非 money-path 零交集。
-
-## 附录: 依赖工具 sha256 钉定(执行时仪器自检发送器 3/3 保护, 不符拒启)
-- j1-send-one.sh: `c70c76d47d279e3956faafeae36686c5dd25cb0d757d4c0cb26d042d12c5980f`
-- j1-node-sync.mjs: `ce4fe18c7ea591435255255811f0ba018e2eb1375e8a45abbaaa41b75c0b19cc`
-- j1-remote-node-check-0812.mjs: `195c6bceb7fafd59966de6c2530b23b3e23437d4ab604e24c62e35078c9d5162`
+≤3 条唯一内容频道消息 · J1tn relay · 仅 trough(2min 速率<1/s)触发 · ≥15min 间隔 · 3 样本/360min/发送器异常/tips>500 四停 · 非 money-path。JSONL=`scratch/j1-trough-probe-artifact3.jsonl`, 制品#3 内嵌全量。

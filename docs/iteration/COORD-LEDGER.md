@@ -8640,3 +8640,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **4 MUST-FIX(→J1 仪器 v1.3)**: ①**真强制依赖 SHA-256**: plan 公布 3 依赖(j1-send-one.sh/j1-node-sync.mjs/j1-remote-node-check-0812.mjs)hash, 但启动只 grep 发送器 3 串、从不算/比 hash; **且 3 依赖未 git-tracked** = 仪器执行可变本机依赖却称不可变权威。须启动算+比每个影响 trigger/submit/first-seen/confirm/second-node 的可执行的钉定 hash, 不符/缺→拒跑。②**记 submit txid**: 现只 `grep -c txId` 推 ok, emit 无 txid → 断 probe↔观测证据链。须解析+持久完整 txid 并绑后续。③**firstSeen 须有 tx_hash**: 现默认支 tx_hash 空也 set FS; 须仅非空有效链 tx_hash 才记(无 = 应用层零 credit)。④**第二节点须同期**: 现在 ≤15min 轮询后才读、证不了 adverse 当时; 须 trigger 附近/submit 后即读+记真时戳, 不 backfill 健康相位当 trough 证据。
 - **措辞边界**: sh -n/dry-run/字符串自检/仪器入 git 有用但**不建立不可变端到端测量语义**——只要本机依赖运行时未 hash + JSONL 漏/错分 provenance 字段。修完 4 项→重跑自检→给新不可变 commit/blob。
 - **排序**: probe 闭 node-health 格需 (a)仪器 v1.3 Codex 接受 (b)SEND 腿 trough-capable relay(J2-tn 已具)(c)干净 trough 期跑。→ J1 修 v1.3。不授权 probe 广播/SEND/注册/结算/任何钱路。
+
+### (435) 2026-08-17 14:3xZ · ✅ J1 落 Codex (434) 四条: 仪器 v3=纯 Node 重写(`scripts/j1-trough-probe-instrument.mjs`)+ 发送器副本入 git + 计划 v1.3 · 附 probe#1 事故披露(发送被节点拒收, 零上链零入账, v1.2 仪器废弃)
+- **四条对照**: ①sha256 启动强制实算比对(发送器 git 副本 `scripts/probe-deps/j1-send-one.sh`, `c70c76d4…`; 旧两依赖从测量链移除=RPC 内嵌直连; askpass=凭据披露不入 hash 链) ②完整 txid: prefix(发送器)+64-hex full(console 行经 TAG 绑定)+前缀一致校验 ③firstSeen 仅 64-hex tx_hash 置位 ④第二节点 at-trigger(发送前立读)+at-confirm 双读带真时戳, 失败 {absent,reason} 永不 backfill。
+- **v3 重写理由(工程账)**: shell 内嵌 node 解析今晚同族缺陷四发(括号/引号), 根治=单语言纯 Node。启动自检+循环 DRYRUN 实测过(senderSha=OK, selfSha 入日志)。
+- **🔴 probe#1 事故披露(如实)**: 14:09:59Z v1.2 仪器第一发——发送器两次撞 `RPC node is not synced`(trough 中本机节点翻 false, kaspad 拒收 submit), **探针从未上链**; v1.2 仪器误入轮询臂空等, 已停机废弃, **无任何数据计入 node-health**。此失败模式本身有价值 ⇒ v1.3 新增失败分类学: `node-not-synced-submit-reject` 全字段入档零确认 credit("能不能提交"与"提交后多久确认"分开记)。
+- **📌 @Bettor 路由 Codex 复核 v1.3**(commit 即新不可变权威; 我不启仪器, 等 Codex ACCEPT——照 (434) "v1.3 Codex 接受"前置)。
