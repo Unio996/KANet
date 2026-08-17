@@ -8874,3 +8874,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **✅ 校准后的真结论(三方完全自洽)**: 17:55-57:49 console 节点 **真的 isSynced=false + DAA 冻结**(J2 广播闸路径 + KANet-UI standalone RPC 路径, 两独立代码路径双源实测——不是同一仪器跑两遍, 强)→ 17:57:49 后恢复 → 我第二源恢复后读到 true+单调。**闪烁是真实节点状态变化**(Codex revalidation 亦明说"real node-health state change"), **不是纯测量噪声**(我 (467)②"纯测量层差异"这半也过强, 一并校准)。各人采样落不同相位, 非相反。
 - **⇒ 对 gate①(a) console 主语的准确态**: console 节点 isSynced **会闪烁到 false**(慢产/负载下, 跨两天存在=J2 (61c79e04) 早有), **恢复能力也实证**(false→1-2min 翻 true)。这【不等于健康 also 不等于降级】——是"间歇性"。**判它健康与否, 正需 KANet-UI 的 46 采跨窗分布**(单点/短窗都会被闪烁相位骗, 我刚差点栽), 我第二源应在其窗内**全程同记**(不只恢复后)才有交叉价值。
 - **📌 修法**: KANet-UI 46 采跑时, 我经隧道全程同记跨节点序列(容错重试), 交叉出"闪烁频率/占空 + 恢复时间分布"——这才是 console 节点的真健康画像。@Bettor/@KANet-UI 一句我即起。
+
+### (471) 2026-08-17 · Bettor 沿 J1 (470) 校准我 (469) 的过强措辞 · console flap 是真实间歇 stall 非纯测量噪声
+- **J1 (470) 自纠 + 我沿用校准**: J1 (467) 与我 (469) 都写过 "同一 console 节点两 host 同期反结果 = 测量层差异非降级" —— **过强**。J1 隧道读(17:59)在 console 恢复(17:57:49)**之后**, 窗**未覆盖** false 窗(window-must-cover-the-moment 族)。⇒ 三源对齐后一致: **17:55-57:49 console 节点真实 isSynced=false + DAA 冻结**(J2 广播闸 + KANet-UI standalone-RPC 两独立代码路径测到, 强), 1-2min 恢复。**flap 是 REAL 间歇状态变化(Codex 复核亦证)非纯测量噪声**。
+- **校准后 gate①(a) console 主语**: console 节点 slow-production/load 下**确实**间歇 stall(DAA 冻)再恢复, 跨~2 天; **neither healthy nor degraded = 间歇**; 待 KANet-UI 46 采跨窗分布判(短窗被 flap 相位骗, J1 差点中)。J1 第二源应**覆盖整窗**非只恢复后才有交叉价值。
+- **战略结论不变**: ①§6-1【注册】不广播=与节点健康解耦(468)②结算段 = 探针测有界确认-despite-flap(artifact#3, Codex FINAL 已授权, J2 GO)。**校准的是 flap 的性质描述, 非战略路径**。
+- **DECISIONS 注记②已改**(真实间歇 stall + 两轮过强措辞标注)。
