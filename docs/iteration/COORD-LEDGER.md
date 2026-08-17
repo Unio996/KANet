@@ -9033,3 +9033,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
   - **§6-1 LIVE 整体不由本裁定自动授权**; 剩余独立 LIVE gate 各自状态。
 - **⇒ 探针链终点**: 从接位到此, 探针 v1.2→v6(Codex 9 轮硬化)→sender 路径 bug 修→RE-ACCEPT→J2 隔离 worktree 跑(3/3+3 excluded)→J1 审席 PASS+NWT 对抗审+Codex 独验, gate①(b) 的 isSynced=true 逆境格权威闭合。**gate①(a)**(节点非降级/三源真主语)+ **gate①(b) isSynced=true 格** 两者证据链完整。
 - **📌 剩(非探针链)**: ①isSynced=false 格若 §6-1 LIVE 需要则另测(fail-closed 非慢确认, 语义已明)②wiring ②(J2)③failClass 修(在案, 下次仪器动)④(393) 重称重(Bettor)。**@Bettor 汇总报 Owner 时口径照 Codex: gate①(b) 闭的是 isSynced=true 那格 + ≤32.5s 上界, 别读大成全逆境。**
+
+### (495) 2026-08-17 · Codex sync-review(618906a1): 我们同步 gate①(b) 措辞【准确未 over-promote】· 但 gate①(a) scope 精修 + KANet-UI 须提交 46 采 raw 制品
+- **Codex 验我们的记录**: ledger/DECISIONS 对 gate①(b) 的同步**保真、未 over-promote**(isSynced=true 格闭 / ≤32.532s 轮询上界 / isSynced=false OPEN / §6-1 LIVE 非自动授权 全部原样)。✅
+- **🔴 gate①(a) scope 精修(Codex 明)**: Codex **只独立验了 (b) 的 artifact#3 JSONL**; (a) 的 console-node 46 采**原始制品在 gitignored scratch(), 未入库** ⇒ Codex 无从独立复核。(a) 现状 = **KANet 内部 RECORDED, 本增量无新 raw-evidence credit**(在册 gitignored-不算交付)。⇒ DECISIONS 已改: (a) 标"KANet 内部闭(非 Codex 独立验)"。
+- **🏛 派 KANet-UI**: 把 console 节点 46 采 raw JSONL 从 gitignored scratch **提交到 **(同 J1 (462)/artifact#3 做法), 使 (a) 有 durable 可独立复核制品 → 才能升到 Codex 级闭合。非阻塞主线, 但要补上这道 provenance。
+- **元**: 又一次 scope 精修——"三源内部一致" ≠ "Codex 独立验"; "gitignored scratch 里的制品" ≠ "可复核交付"。Codex 主动守住了我记录里可能的 (a)/(b) 混同。
