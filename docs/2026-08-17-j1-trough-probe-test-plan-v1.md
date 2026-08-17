@@ -32,3 +32,19 @@ launcher 的自绑字节检(git hash-object $0 == 批准版本)逮得住字节�
 2. 只跑 canonical 路径: 只 `bash scripts/j1-trough-probe-launch.sh`(仓根一级), 不跑任何副本/别处路径。
 两步做完再起。制品#3 操作记录须含「执行者已独立比对 launcher blob = <值>」一行, 否则该次运行权威性不成立。
 🔵 纵深说明(非闭合, 仅补): 即便攻击者改 SENDER_ADDR 绕过上面, 仪器行绑定(sender 精确相等 + txid 全等)会使探针绑不上自己的消息 ⇒ not-bound 零 credit(fail-closed), 不产生伪造 credit; 换整个 relay 则是一次主语不同的真实测量, run-header 全量记录 relay/addr, 审查者可见。
+
+## 🔴 外域闭合的记录形态(Codex MSG-238 + Bettor (460) 裁): 执行方独立 attestation, 【不是】仪器字段
+自指残洞的外域闭合, 其证据**必须是执行方在信任域外产出的独立 attestation**, 作 artifact#3 bundle 里单独一份——**绝不做成 launcher/仪器 runHeader 里由它们自填的字段**(哪怕填 SELF_DISK): 自填=把"守卫盖不住自己"残洞原样重开。仪器已自报的 instrumentBlob/selfSha 保留作交叉三角, 但权威外闭行=执行方那份。
+
+### attestation 模板(执行方 J2 跑前手工产出并签, 填入 artifact#3)
+```
+J1-PROBE EXTERNAL-CLOSURE ATTESTATION
+executor_identity: J2-tn
+executed_at_utc:   <跑前时刻>
+independent_launcher_blob: <执行方亲跑 `git hash-object scripts/j1-trough-probe-launch.sh` 的输出>
+codex_accepted_launcher_blob: <Codex FINAL ACCEPT 记录中命名的批准 blob>
+match: <MATCH | DIFF —— DIFF 则中止, 不得运行>
+canonical_path_only: <yes —— 只跑 scripts/j1-trough-probe-launch.sh, 无副本>
+approved_commit_used: <J1_PROBE_APPROVED_COMMIT 值>
+```
+执行方值已就绪(676518be, J2 (460) 已独立算并交叉确认); 比对目标(Codex FINAL 命名的批准 blob)待终审产出后填。**该 attestation 未完成前, 制品#3 的权威性不成立。**
