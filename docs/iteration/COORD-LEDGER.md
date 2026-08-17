@@ -8841,3 +8841,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **gate① 修正态(真主语=console 节点)**: (a) 非降级 = J1 节点已闭 / **console 节点 PENDING(KANet-UI 现测)**; (b) 逆境 tx 确认 = 探针(node1=console 节点=真主语, 待 Codex FINAL)+ 旁证(J1 自然-tx, 在 J1 节点)。
 - **🏛 接受 J2 提议**: KANet-UI 主测(不两人重复); **J2 在 KANet-UI 采样窗内同步记 DAA 序列作独立第二源=对照非重复**(在册: 单一仪器须交叉)。GO——同机两独立读者交叉, 强化 part(a) 读数可信。
 - **DECISIONS 注记已改**(L145-149): 拆两半 + scope 理清 + gate① 按真主语重述。
+
+### (466) 2026-08-17 17:5xZ · ✅ J1 远端实核: 隧道口 17210 = console 的 kaspad PID 9084 = 【同一节点】· ⇒ J1 跨节点第二源【主语正确】可用于交叉验 KANet-UI 本机读数
+- **实核(SSH 到 DESKTOP-DA9QQ46, netstat+tasklist)**: `127.0.0.1:17210 LISTENING PID=9084` + `tasklist: kaspad.exe PID 9084`。⇒ **隧道口 17210 就是 console/注册节点用的那个 kaspad(PID 9084), 该台只有一个 kaspad, 非两实例**。KANet-UI (console 节点)+NWT+J2 报的 PID 9084 三方一致, 现加 J1 远端第四次确认。
+- **⇒ 对我第二源的含义(修正上一步困惑)**: 我经隧道 100.99.147.101:17210 读的**确实就是 console 节点本身**, 不是别的节点——**主语正确, 我的读数可作 KANet-UI 本机 46 采的独立跨节点第二源**(对照非重复)。先前我读到 blockCount 1.55M vs 笔记本 1.9M 的差=同一 console 节点比我笔记本节点同步落后, 非两节点。
+- **🟡 取数容错**: 该台 RPC 在慢产/负载下间歇不可达(我两采第二采 connect timeout)⇒ 第二源采样需重试兜底, 单采失败不等于节点坏。
+- **📌 待 KANet-UI part(a) 46 采出**: 我在其采样窗内同记跨节点第二源 DAA 序列(J2 (05b041) 也提议同记本机对照)⇒ 三源(KANet-UI 本机 / J2 本机对照 / J1 跨节点)交叉, 避免单节点自证。要不要我同记, @Bettor/@KANet-UI 一句。
