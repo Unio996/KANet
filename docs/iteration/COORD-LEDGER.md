@@ -8945,3 +8945,11 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **Bettor 认责(不推)**: NWT 是 §6-1 定义冻结四方对抗审(Bettor+NWT+J2+KANet-UI)的**内部独立红队**一员。今夜我**只把 NWT 当数据源**(它主动贴节点数据 + 校正 tips 前提), **从未给它审查派工**。而今夜闭闸级产出(探针修复/节点健康终判/wiring 设计/我一连串裁定)**无一走内部独立红队**——靠 Codex+我自审+做事者自审。**这是从四方对抗标准的退步**。实证代价: 我自己今夜同主语混用(拿 J1 节点说 console 节点)是**事后自纠**, 若有指定红队在盯该出手即被拦。根因: 救火节奏里只对在场者派工, 没主动拉 NWT 进每道闸(feedback-firefight-consumed-one-of-two-stated-goals 复发)。
 - **🏛 立规(即生效)**: **凡【闭闸 / 钱路 / Owner 主线】决策, 必须有一个【指定的内部独立复审人】**——与做事者独立、与 Codex 独立(内部红队, 不替代 Codex, 是 Codex 前的内部对抗)。NWT 长期被闲置 ⇒ **该复审位现在指派 NWT**(后续可轮值)。Bettor 自己的裁定**也在被复审范围**(判据查人强、律己弱, 必须有人律我)。
 - **给 NWT 派实活(即时, 三项待闭)**: ①独立红队探针修复 06b3bb55 + 我的验证(三级链真一致?闸真 armed?我漏了啥?)②节点健康终判 + 我"注册不广播=与节点健康解耦"(468)是否气密 ③我本场无人复审的裁定(credit 自然-tx / worktree B-C / 甲拒乙)。
+
+### (482) 2026-08-17 · ✅ 纠正立竿见影: NWT 红队(接派工后)实读代码找到两处我 (456) 审漏的真问题 · Bettor 实核确认
+- **NWT 红队(接 (481) 派工即出)实读 u1-registration.mjs, 非评转述**。§1/§3 判断逐条核对属实。§2 TOCTOU 修法找到两处(Bettor grep 实核**确认 NWT 对**):
+  - **① 死分支**: J2 设计的 `if (custody2.custody !== custody.custody) throw CUSTODY_CHANGED` —— deriveCustody(:138)唯一 ok-return = `{ok:true, custody:'mnemonic'}`(字面量硬编码), ⇒ `'mnemonic' !== 'mnemonic'` **恒假 = 结构不可达死分支**。真兜住 TOCTOU 的是前一句 `if(!custody2.ok) throw`, 不是这条值比较。非安全洞(!ok 那支兜住当前全部), 但: 该分支**测不出变异**(`!==`→`===` 无自然输入触发 ⇒ INERT/测不到)= (448)/(452) 同族(自证只覆盖想到的)。
+  - **② correct-by-accident**: INSERT 写 `custody.custody`(pre-tx 旧值)非 `custody2.custody`(事务内刚验值); 今恒等无影响, 但"靠恰好相等躲过"= 在册 correct-by-accident-依赖对面不变; 若 deriveCustody 将来扩第二个 ok custody 取值(如硬件钱包), 就写错值。
+  - NWT 建议: INSERT 改用 custody2.custody(结构不变式); §8 把该比较标 **UNREACHABLE** 不漏标。
+- **✅ 纠正立竿见影 = 规则的实证**: NWT 独立红队**即刻**找到我 (456) 审 wiring 时**漏掉的两处**(死分支 + correct-by-accident)。这正是"判据查人强、律己弱, 必须有人律我"——我的审有盲点, 内部独立红队补上了。**Owner 问责成立且纠正已见效**。
+- **⇒ 路由 J2(设计主)收进 wiring 设计**: ①INSERT 用 custody2.custody ②值比较标 UNREACHABLE + 变异 caveat(或重估该比较是否该留——真 TOCTOU 保护=!custody2.ok 重查)。design-layer 非探针关键路径, bank 到 wiring-land。
