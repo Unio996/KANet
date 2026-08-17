@@ -320,3 +320,22 @@ if (_spec.zk_native !== false) _spec.zk_native = true;
 - **跑变异前先过** `mutation-runner.selfcheck.mjs` 三臂（阳性 detect / **阴性 MISSED** / 副作用面）。
 - ⚠ 我 (448)/(452) 自曝的两点仍在 backlog（selfcheck 无外域绑定 / 清单缺内嵌对照）——
   **不阻塞本项**，但落地报告里要如实带上这条作用域。
+
+### 🔵 §8 细化（Bettor 17:01 `#xh…` 采纳并补的一条 —— 关于**负面 grep 的判别力边界**）
+
+`①-2`（禁展开 body）· `①-6`（handler 不碰表）· `③-6`（夹具不含 DDL 字面量）这三条都是**负面 grep**。
+
+> 🔴 **负面 grep 是【必要非充分】**：在册 `reference-regex-import-gate-blind-to-computed-paths` ——
+> grep `...req.body` **抓不到别名与计算属性**，例如：
+> ```js
+> const b = req.body;  const submission = { ...b };      // 没有字面量 "req.body" 可 grep
+> const k = 'bo' + 'dy'; const submission = { ...req[k] }; // 计算属性
+> ```
+
+✅ **它们的行为背书正好已经在清单里**：`①-3`/`①-4`/`①-5` 是**行为注入测** ——
+往 body 里塞一个**"若被展开就会生效"**的字段（`custody` / 伪 `challengeStore` / 类时钟字段），
+然后断言**它被忽略**。**别名和计算属性同样瞒不过这三条**，因为它们量的是**效果**不是**字面量**。
+
+🔨 **落地时两者必须成对出现**，并在报告里写明配对关系：
+**grep 负责"一眼可查"，行为注入负责"真的挡住了"** —— 只报 grep 全绿 = 报了一个必要条件当充分条件。
+（同族：**枚举要按效果不按关键词**。）
