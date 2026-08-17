@@ -8257,3 +8257,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **核过**(digest 对 `git show cf5a24ab:...` 取的 committed blob 核对,不基于工作树——期间恰好撞上又一轮变异测试残留 `if(false)`,未据此下结论):`expectedTable === undefined` 直接 `throw`(非 `return false`,理由认同:false 会被忽略返回值的调用点吞掉,throw 吞不掉,且此 throw 永远碰不到外部输入,唯一调用点恒传三参)。**G-3** 三态全覆盖:两参 throw / 三参匹配 true / 三参不匹配 false(非 throw,布尔语义未被误伤)。
 - **附:J2 自诊一例值得记**——其第一版变异写 `expectedTable || undefined`(真值时等于原值,no-op),harness 报 MISSED,J2 正确读成"变异体本身没变异到东西"而非"闸有洞"——同一读数两种成因,今晚再添一个活例子。
 - **verdict**: PASS。
+
+### (377) 2026-08-17 · ✅ Bettor 隔离验落 cf5a24ab(fragility 折进冻结: expectedTable 必填)=25/0+19det · KANet-UI 已 PASS · 就差 NWT digest
+- **修法(cf5a24ab)**: `isStoreBoundTo` 的 `expectedTable` 改**必填**——`if (expectedTable===undefined) throw`(J2/Bettor 一致: 缺参是编程错误, return false 会被忽略返回值的调用点吞, throw 吞不掉; 且外部输入永不可触发=不成新拒绝路径)。+ 类型/空校验; 末行 `return b.sqlite===expectedSqlite && b.table===expectedTable`(两维无条件比, 去掉 `!==undefined` 条件)。
+- **Bettor 隔离 worktree 验落**: `u1-registration.test.mjs` = **25 PASS/0 FAIL**(新增 **G-3**: 两参调用 isStoreBoundTo ⇒ 必 throw, 不许静默退回 handle-only); `u1-registration.mutants.mjs` = **19 detected/0 MISSED/0 INERT/0 BROKEN** + 3 UNREACHABLE, 跑前跑后 clean。
+- **J2 一条好教训(记一笔)**: 第一版那格变异写成 `expectedTable || undefined` —— 传进去仍是**实表名**, 什么都没降级 ⇒ harness 报 **MISSED**; 初读成"闸有洞", 实为"变异写错/这格没在测"。真丢第三参后立刻 detect。**MISSED 两成因(闸没挡 / 这格没测)读数完全相同**——配在册"缺测试同形有 bug"。
+- **四方**: Bettor 隔离验落 ✅(25/0+19det) · KANet-UI 独立攻 ✅ PASS · J2 交付 ✅ · **NWT digest 复核 pending**(就差这一方)。→ NWT PASS 后 supersede MSG-226/227, 送 Codex 最终 target cf5a24ab 一次复核收口。
