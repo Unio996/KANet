@@ -8336,3 +8336,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **处置正确点**: Bettor "此刻绝不能重启 console/relay" 警告被遵守 ⇒ 那两进程占着 `.node` + 没重启 ⇒ 关键 deps 没丢(救命)。恢复用 `npm install` 不用 `npm ci`(Bettor 原建议 ci 会先清空撞锁 EPERM, J2 没照搬=对; 更正入账: live 进程持原生模块锁时用 install)。
 - **🔴 harness② 仍不算可信**: 它是验证仪器且刚闯祸("验证装置自己会坏")。解冻可跑但**先验落自己**(registration 19det/store 12det 逐字不变 + 注入已知变异经副本被 detect + 整树项数不变全绿)→ NWT/KANet-UI 独立过一眼 harness diff → 才升标准。
 - 教训已入记忆 `reference-a-zero-write-self-check-only-covers-the-writes-you-imagined`。§6-1 定义冻结不受本事故影响(那是已锁 commit 154291d8, 与本仪器开发无关)。
+
+### (389) 2026-08-17 · 🔴 harness② 自验抓到【恒红装置】· 验收判据(含 Bettor 批的)被证不足 · §6-1 不受影响
+- **J2 自验当场打下 harness②(658f4e6d)**: 注入**等价改写**(只加注释、零行为)⇒ 它**照报 detect** ⇒ **恒红装置(把什么都判红)**。"仪器未自证不信任"今晚第二次救场。J2 撤回其"两套读数逐字不变=没改坏仪器"的说法。
+- **🔴 判据教训(Bettor 认自己批的判据也不足)**: 正向臂(注入变异→必 detect)+ 逐字不变——**恒红装置全满足**。有判别力的是 J2 自加的**阴性臂**(等价/no-op 改动**必须存活=MISSED**)。**"读数没变"只在预期读数含【非全绿/非全红】格时才有判别力**(两套正确答案本就全 detected ⇒ 恒红与好仪器同数字)。归在册 `feedback-control-arm-known-answer-must-not-equal-failure-output` 族。
+- **🟢 §6-1 完全不受影响(已核, 防恐慌)**: §6-1 的 19det/12det 是 Bettor 在**隔离 worktree checkout 于 154291d8** 跑**那时的** mutants 文件所得, 输出**区分 detected 与 UNREACHABLE**(store 12det + 1 UNREACHABLE; 恒红会把那 1 格也报 detected)⇒ 那套非恒红。恒红 bug 由 **658f4e6d 重构引入, 晚于 154291d8**。Codex promote 基于对 154291d8 独立复读、不经 harness②。⇒ §6-1 冻结证据 + promotion 不动。
+- **🏛 裁修法方向**: 倾向 J2 方案①(隔离树建 `kasia-console/.mut-tmp-<pid>/`, gitignore; node 模块解析向上走找 `kasia-console/node_modules`, **不建链接=无删穿**, 清理 rm -rf 只删该临时目录)。②npm install --prefix 慢弃 ③原地+锁退回被咬形状弃。**硬前置(采纳 J2)**: 下一版落地前自验(阳性 detect + 阴性 no-op 存活 + 副作用/整树项数)**必须先跑通**, 前置非事后补。
+- 当前 harness② 不可用, 谁都别用其读数(含 658f4e6d commit message 读数)。post-closure 仪器工作, 慢工, 不急。
