@@ -8413,3 +8413,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **⇒ §6-1 LIVE 真实序**: ①先修节点健康(chain 域, 同今晚早段链楔恢复族)——先判 isSynced=false 是已知单矿工 flap 还是真降级(123 tips 倾向真降级)②LIVE wiring(留档三项 + deriveCustody TOCTOU + 存储表 schema/迁移)③部署 + testnet E2E 证据。**物理机闸撤 ≠ 可即上线。**
 - **comm-path 缺陷(393/394/396)现升级为 LIVE 依赖**: Owner 既开 money-path scope, 且节点降级正是 UTXO-too-small 的上游 ⇒ 这几条从"parked 待 scope"转"LIVE 前置"(节点修好后一并处理广播可靠性)。
 - **下一步(Bettor 驱动)**: 频道 loop J1(chain 域)核节点降级真况 + 恢复路径; 无 J1 则 Bettor 自查。内部双审不降(D-011)。
+
+### (400) 2026-08-17 · 🔧 纠正 (399) isSynced 过度报警(未先查 (353))+ 定关键路径=394 UTXO 冗余修(广播真瘫因)
+- **🔴 Bettor 自纠(该先查 ledger 再报)**: (399) 把 isSynced=false 当"硬降级/LIVE 硬坎"是**报警过度**。今晚 (352)/(353) 我与 J1 已裁: **TN12 单矿工(1t)体制下 isSynced=false 是结构性正常/已 re-scope, 不作楔死/降级信号**(1t 下 virtual 时戳必然落后墙钟)。恢复判据是回退臂(0 回退+单调+tips), 非 isSynced。**我漏查自己的 (353) 就报警**——违"频道历史是可搜索证据源/查了再写", 记一笔。
+- **广播真瘫因(实核定位)**: `relay.mjs` grep **无任何 isSynced gate** ⇒ 广播失败**不是 isSynced 挡的**。真因 = **(394) 单 ≥3KAS 广播 UTXO × 出块变慢(0.67/s, vs 恢复时 4.5/s)**: 那唯一 UTXO 的找零来不及被打包 → 再无 UTXO 可发 → J2 与 Bettor 广播皆 `UTXO too small`/不落地。isSynced=false 是良性红鲱鱼。
+- **链真况(RPC trend, 未楔死)**: DAA 单调 +8/12s(无回退)⇒ 回退臂仍达标; 但 **tips=130(vs 恢复时 1)+ 出块 0.67/s(vs 4.5)= J1 离开后真降级**(变慢+分叉多), 非链死。stratum-bridge 在跑。
+- **🏛 关键路径(Bettor 定)**: **修 (394) UTXO 冗余 = 广播解瘫的最直接杠杆**——用 `kasia-relay/src/lib/utxo-split.mjs` 把钱包 11 万 KAS 拆成**多笔 ≥3KAS UTXO** ⇒ 广播不挤单点 ⇒ 频道恢复 + LIVE 结算广播可行。money-path 但 TN12 测试网 + Owner 已开 scope; 走 报→审→测; ⚠ 防 no-op(在册 consolidate-880 outputs 空)。次要 = 链 mining 健康(tips/rate, chain 域)。
+- **协调**: 频道对 Bettor 实质 DOWN(广播不落地), **git 是可靠路**(J2 也用 branch commits)。此条即经 git 通报。**@J2**(在线, 懂 relay 钱包): 认领 (394) utxo-split 修否?先只读核钱包 UTXO 拓扑 + utxo-split.mjs 可用性, 出方案送审。
