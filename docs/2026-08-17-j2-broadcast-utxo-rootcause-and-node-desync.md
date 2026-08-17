@@ -15,6 +15,35 @@
 - ⇒ **不是节点死了，是它落后于网络** ⇒ 广播闸拒绝。
 - 🔴 **我没有动它**：重启节点影响全机，远超自决范围（且在册教训：这类修法方向常是"停矿"而非"重启"）。**请协调者排。**
 
+### 1.1 🔴 先说一个会害下一个人的坑：`/d/` 下有 **5 个** `kaspa-tn12-*` 目录，只有一个是活的
+
+| 目录 | 日志最后一行 | 说明 |
+|---|---|---|
+| `/d/kaspa-tn12-data` | **2026-08-17 13:35（活）** | ✅ **当前在跑的就是这台**（WRPC 127.0.0.1:17210） |
+| `/d/kaspa-tn12-A` | 2026-08-03 02:33 | 🔴 已停实例 —— 它的日志停在 **IBD / Orphaned blocks** |
+| `/d/kaspa-tn12-clean` | 2026-08-03 02:26 | 已停 |
+| `/d/kaspa-tn12-fresh-0802` | 2026-08-02 00:23 | 已停 |
+| `/d/kaspa-tn12-mining` | （无 log 目录） | — |
+
+⚠ **我自己先踩了一脚**：先翻到 `kaspa-tn12-A`，它的日志停在 8-03 且最后一行是 `IBD started` / `Orphaned 2 block(s)` ——
+**读起来完全像"节点从两周前就卡在 IBD"**。而当时 DAA 明明在推进 ⇒ **那份日志属于另一个已停实例**。
+🔨 判据：**一个停掉的实例，它的日志尾部与"卡住的活实例"长得一模一样**。查节点前先按 `mtime` 认哪份日志是活的。
+
+### 1.2 活节点在干什么（读 `/d/kaspa-tn12-data/kaspa-testnet-12/logs/rusty-kaspa.log`）
+
+```
+Processed 11 blocks and 11 headers in the last 10.00s (2503 transactions; 2 UTXO-validated blocks; ...)
+Processed  9 blocks and  9 headers in the last 10.01s (2170 transactions; 2 UTXO-validated blocks; ...)
+Accepted 6 blocks ..., 5 via relay and 1 via submit block
+```
+
+- **在收也在处理**块（≈1 块/s，与我量到的 DAA ≈1.1/s 吻合）；`1 via submit block` ⇒ **有矿工正往这台提交**。
+- 🔴 **但每 10 秒只有 2 个块被 UTXO-validated**，而同期到达 9~11 个块，且负载很重（**每 10 秒 2170~2503 笔交易**，TPB 227~241，mass ~46~49 万 compute）。
+- ⇒ **`isSynced=false` 与 UTXO 索引滞后是同一件事的两面**：virtual/UTXO 状态跟不上块的到达。
+  这正好解释我在 §2 看到的现象 —— **索引里还是上一笔已落块的币，而新交易在 mempool 里等**。
+- 🟡 我**没有**据此断言"节点需要重启/需要停矿"：这属于处理者的判断，我只把可行动的读数摆出来。
+- 🔵 附带（非关键）：4 个 DNS seeder 有 2 个解析失败（`os error 11002`），`tn12-dnsseed.kas.pa` / `tn12-dnsseed.kasia.fyi`。
+
 ## 二、✅ `UTXO too small for payload` 的真因 = **上一笔广播还没被打包**
 
 此前把方向判在 (a) 节点索引延迟 / (b) relay 侧过滤，**都不对**。证据链（全只读，零改码）：
