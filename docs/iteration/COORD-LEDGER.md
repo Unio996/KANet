@@ -8394,3 +8394,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **🔨 J2 元更正(记账)**: 其先前撤"失败污染 UTXO"是基于 `transaction.mjs:234`(只 submit 成功才 markUtxoSpent)**一个函数**, **漏了 mempool-reject 走的 `relay.mjs:471-475` 另一函数** ⇒ 撤过头。**同一症状多条代码路径, 从一条路径下结论会漏另一条**(在册"枚举 by effect 不 by keyword" / "只查预设漏 keys" 族)。
 - **修正 (395)**: 归因**已实质达成**(经零码日志, 非"需码钩才能查")——(395) 那句"需 failure-moment 码钩"被 J2 日志法超越。真根因 = mempool-reject 标 UTXO × (394) 零冗余交互(若有多笔≥3KAS, 标掉一笔不阻塞下一发)。
 - **🅿️ 仍 PARK(非 D-012)**: 诊断基本完成, 但**修**(改 relay 标记逻辑 / 或 (394) 做 UTXO 冗余)= money-path + 铁律0 + 待 Owner 开 scope。谢 J2 全程零码取证 + 连环自纠。
+
+### (397) 2026-08-17 · 🟢 Codex 独立复核 harness② v2 = ACCEPTED(附证据措辞边界)· 确认 §6-1 不受影响 + parked 项非 D-012
+- **Codex 裁(桥 dcd2dc19, target 72b839f6)**: mutation-runner v2 **ACCEPTED** 为 post-definition 测试基建改进; **不改/不重开 §6-1 冻结(154291d8)**; 无 LIVE 授权。独立代码复读确认五结构改动(拷贝树/无 junction/工作树版源/DETECTED-MISSED-INERT-BROKEN 区分不把静态 UNREACHABLE 当运行时判别/自验正+负臂, 负臂是承重分辨器)。v1 恒红读数须保持作废, v2 同数字本身非证据——有效证据是负臂存活+正臂 detect。
+- **🔴 证据措辞边界(精度要求, 非阻塞)**: 侧效面对 node_modules 只查**顶层项数**前后——够抓 v1 整删形态 + 无链接设计已结构移除删穿路径, **但不证明依赖内容逐字节未改**(等量替换/改内容/删+增保持项数会绕)。⇒ **"项数不变 / 未复现整删形态" 成立; "依赖树零修改已证" 不成立**(除非加递归 manifest/hash)。**核我方措辞**: ledger (391) 与 selfcheck.mjs 均用"项数不变"(成立措辞), 未 overclaim ✅。
+- **🔵 harness② 可选未来加固(非阻塞, 记 backlog)**: 侧效面加**递归 manifest/hash** 才支持"零修改已证"的强断言。Codex 明说非 blocker(runner 已无写入共享依赖的路径)。
+- **Codex 旁证我的裁定**: ①§6-1 冻结不受任何仪器问题影响(印证 (395)/(396))②relay dedup / UTXO 冗余 / 找零索引 / mempool-reject 标 UTXO findings **明确非 D-012、parked**, 不算 §6-1 闭合证据, 不得据以动钱路(须另 Owner scope)——印证 (393)/(394)/(396) parking。
+- Disposition: harness② v2 = ACCEPTED with wording boundary; §6-1 freeze 仍 PASS@154291d8; §6-1 LIVE 仍 NOT AUTHORIZED。
