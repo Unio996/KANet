@@ -9,7 +9,7 @@
 
 ## 执行与信任链(v6)
 - **信任根=外部批准 commit**: 执行方(J2)从 Codex ACCEPT 记录抄入 `J1_PROBE_APPROVED_COMMIT`。启动器强制: HEAD==approved · 全仓 tracked 零改动(untracked 不计, 标签如实=`tracked-clean@approved-commit`) · **启动器自身磁盘字节==approved commit 版本(外绑非自证)** · 仪器 blob==approved 版本。
-- **仪器内闸(依序)**: self-sha==启动器注入值 → **绑定模块 sha 在 import 之前核**(被换模块零执行) → 发送器 sha==`b01f88b1…` → **RPC 运行时实体**(kaspa-wasm 入口 JS `07f86beb…` + kaspa_bg.wasm `51cec45e…`, resolve 落 vendored git-tracked 路径)==钉定。全链结果+批准 commit 写入 run-header JSONL, 每样本带 runId。
+- **仪器内闸(依序)**: self-sha==启动器注入值 → **绑定模块 sha 在 import 之前核**(被换模块零执行) → 发送器 sha==`334ee61d…` → **RPC 运行时实体**(kaspa-wasm 入口 JS `07f86beb…` + kaspa_bg.wasm `51cec45e…`, resolve 落 vendored git-tracked 路径)==钉定。全链结果+批准 commit 写入 run-header JSONL, 每样本带 runId。
 - **host profile(启动器钉死)**: SENDER_ADDR=J2-tn 完整地址(安全承重, 行绑定用) · NODE1=J2 机器本地节点 · NODE2=J1 笔记本观测者 `ws://100.111.126.10:17210`(tailnet 直读) · RELAY_ID=传输寻址(J2 供给完整值+前缀 102cbb99 校验+全量入档; 错值⇒sender 不符⇒not-bound 零 credit, 结构上无法伪造)。
 
 ## 证据判定(gate#1, Codex 已 ACCEPT)
@@ -24,7 +24,7 @@ trigger{t,d1,d3,rate,node1 态} · node2AtTrigger(发送前立读, 失败{absent
 样本 JSONL 交 J1 复核, 制品#3 内嵌全量后 commit。
 
 ## 附录: pin 值(与本文件同 commit 的字节)
-发送器 b01f88b18139654d36fb4bdcad6950d7201ea4c38c82101ccc21353f6128364b · 绑定模块 b54d8af1bd166000be82019142043ebf3cf96500a596b9c4a90ce920a867d55d · RPC entry 07f86bebfb8496628f30a8637f90fcfcee67043612ce50f40c578d61f8064bb3 · RPC wasm 51cec45e7f21dd7962bcc1830a4236c514d8f829d2babca30e77602a214c3791 · 仪器/启动器 blob 见启动器内嵌与 ACCEPT 记录。
+发送器 334ee61d54ffe021e23c43d1900f49d8dcb4785accfb7ae54725047c090848a8 · 绑定模块 b54d8af1bd166000be82019142043ebf3cf96500a596b9c4a90ce920a867d55d · RPC entry 07f86bebfb8496628f30a8637f90fcfcee67043612ce50f40c578d61f8064bb3 · RPC wasm 51cec45e7f21dd7962bcc1830a4236c514d8f829d2babca30e77602a214c3791 · 仪器/启动器 blob 见启动器内嵌与 ACCEPT 记录。
 
 ## 🔴 外域闭合规程(Codex LAUNCHER-AUTHORITY 必修2 · 自指残洞的唯一闭合)
 launcher 的自绑字节检(git hash-object $0 == 批准版本)逮得住字节变异, 但关不掉「删掉自绑块本身」——在册 reference-self-referential-guard-cannot-cover-its-own-removal, launcher 内部无解(负测 M-4 坐实: 删块+换地址直穿仪器)。唯一闭合在信任域外, 执行方跑前手工做两步:
