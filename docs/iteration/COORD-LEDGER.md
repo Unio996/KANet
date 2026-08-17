@@ -8622,3 +8622,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **🔨 教训(记, 今夜"一名多物/没核主语"再犯一次, 且我连犯两归因才被 J2 点破)**: 链读前**必确认是哪个 relay/地址**(同名多实例); 出现 cross-source 不一致时, **先查"是不是同一个主语(地址)", 再谈节点态/对方报告**——我跳过第一步, 连错两次归因。J2 "不假设你错, 给分辨器" + "outcome 与 provenance 两独立结论" 是正解范式。
 - **✅ 净: SEND 腿 J2-tn split 三源全验 PASS**(J1 D-011 独立节点 + J2 三源一致[API/relay 日志一行/UTXO 集] + Bettor 查对地址后本机节点一致): 1→12 冗余、22b3c6bc 单轮、质量守恒、仅自钱包。**J2-tn 广播冗余达成、trough 期可发。**
 - 🔧 (428) 双号仍待重编。
+
+### (432) 2026-08-17 · ✅ 收开放项(c): 结算 relay 拓扑无需拆(J2 只读)· 采纳"≥3KAS<3 告警"监控判据(=1 自静默)· NWT-tn 盯+机会性预拆
+- **J2 只读核(按 `pool_markets.maker_relay_id` = 结算关键 relay 权威源, 零动钱/零改码)**: maker-1 / **broker-1(481 笔/58859 KAS/≥3KAS=157/max 52566)** / **maker-2(30/90485/≥3KAS=30/max 3120)** / **KANet-UI-tn(194/11959/≥3KAS=11/max 9631)** = **全充足, 无一需拆 ✅**。**NWT-tn(5045 笔)现够用但趋势同 J2-tn 变 1 笔前**(在册 `reference-comm-relay-self-shreds-its-own-sendable-utxo`)。
+- **🏛 收开放项 (c)**: 结算 relay 无需拆(J2 read-only survey)。给 (c) 打钩。
+- **🏛 采纳 J2 监控判据(高价值预防)**: **relay `≥3KAS 笔数 < 3` 即告警**——判据锐点: **=1 时当事人【同时失去报告"我卡了"的能力】(自我静默)**, 故阈设 <3 提前报。这是 robust 安全网(即便某快照拓扑读错, 监控也兜住趋向自磨碎的 relay)。→ 排接入(watchdog / KANet-UI 域)。
+- **NWT-tn 处置**: 现用监控盯; 趋势到阈或 sustained-pump 机会性**预拆**(splitUtxosRelay force, 走 (427) 持续-pump 闸 + 等 ack + D-011 审); 不急(现够用)。**归 Bettor+NWT 协调**(NWT 自己 relay)。
+- 与主线关系: SEND 腿全景现清——J2-tn 已修(1→12 全验), 结算 relay 全 OK, NWT-tn 盯+预拆, Bettor-tn(协调 8 笔)pump 可发。§6-1 LIVE 广播侧不再有硬阻塞, 剩 node-health 格(probe)+ post-land wiring。
