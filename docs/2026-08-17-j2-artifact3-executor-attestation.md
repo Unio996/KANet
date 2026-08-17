@@ -23,9 +23,15 @@ launcher / 仪器**自己填**的字段（哪怕填的就是它自己的 `SELF_D
   "executor_relay_id": "102cbb99-9115-4504-8928-5c22359f1852",
   "target_path": "scripts/j1-trough-probe-launch.sh",
   "method": "git hash-object <path>",
-  "executor_computed_blob": "676518be25b852ff652872535ec264b9e4528c5c",
-  "source_commit": "85451570e0a0afe9e145a96810e2f85749f4af20",
-  "blob_unchanged_across": ["77d8d78a", "85451570"],
+  "executor_computed_blob": "23ec24ec7ee09068a1a28fc4de5cb4c49cb993be",
+  "source_commit": "06b3bb55",
+  "superseded": { "old_commit": "ccc2f84d", "old_launcher_blob": "676518be25b852ff652872535ec264b9e4528c5c" },
+  "three_level_chain_selfverified_by_executor": {
+    "sender_sha256": "334ee61d54ffe021e23c43d1900f49d8dcb4785accfb7ae54725047c090848a8",
+    "equals_instrument_PINNED_SENDER_SHA": true,
+    "instrument_sha256": "ef0fcf1fac68f1ac8e62018617b17d67f26b07c15524c5374f737568ec91eaba",
+    "equals_launcher_REF_INSTRUMENT_SHA": true
+  },
   "worktree_equals_head": true,
   "tree_clean_at_hash_time": true,
   "instrument_blob_seen": "b18ae82bf03d0f6740112b572c00677509f1863f",
@@ -96,3 +102,34 @@ git rev-parse 85451570:scripts/j1-trough-probe-launch.sh   # ⇒ 同上（证明
 本文件的值只用于"执行方那一半已就绪"的预草，**不是**最终 attestation 的数据源。
 （同族在册：`reference-pre-push-reported-hash-invalidated-by-later-rebase` ——
 推前报的 hash 会被后续 rebase 静默改写。这次撞的是同一个形状，只是对象从 commit 换成了 blob 锚点。）
+
+---
+
+## 六、坐标更替（2026-08-17 18:31，`ccc2f84d` → `06b3bb55`）
+
+**起因**：我在开跑前实核发现 `scripts/probe-deps/j1-send-one.sh:131` 指向**一个不存在的仓库根**
+（`/d/kanet/kanet/…`，而 `/d/kanet` 整个不存在）⇒ 发送器必 `die2` ⇒ 仪器判 `sender-refused` ⇒ **第一个样本就 ABORT**。
+协调者裁 **走甲（修路径）· 拒乙（连短期也不走 env 绕过）**；J1 完成**完整三级 re-pin**（`06b3bb55`）。
+
+### 执行方独立重算（不采信任何人的转述，全部从 git 对象自算）
+
+| 项 | 我算出的值 | 与 J1/协调者报的 |
+|---|---|---|
+| launcher blob @`06b3bb55` | `23ec24ec7ee09068a1a28fc4de5cb4c49cb993be` | ✅ 一致 |
+| instrument blob | `f1c288d43854e51ae7558f2deaf5f2b9de22ff70` | ✅ 一致 |
+| sender blob | `6aae65d5a19d283279ff98d598e62d7a694b1b54` | ✅ 一致 |
+
+**三级 pin 链闭合，我自己验的**（从 `06b3bb55` 取内容重算，再与文件里钉的常量比对）：
+
+- sender sha256 `334ee61d…` **==** 仪器 `PINNED_SENDER_SHA` ✅
+- instrument sha256 `ef0fcf1f…` **==** launcher `REF_INSTRUMENT_SHA` ✅
+
+### 🔴 但 `codex_accept_recorded_blob` 仍留 `PENDING` —— 这是**刻意的**
+
+`23ec24ec` 目前来自**协调者的频道消息 / ledger (479)**，**不是 Codex ACCEPT 记录**
+（MSG-241 刚 route，等 Owner 触发后 Codex 才 re-accept）。
+
+而本文件第二节完成条件第 1 条写死：**比对目标必须逐字引自 Codex ACCEPT 记录原文，不得引自我们自己的 ledger/转述。**
+⇒ 若我现在把 `23ec24ec` 填进目标格，两半就都来自**我们自己**，那个"比对"只证明**我们一致地传播了同一个值**。
+**它极可能与 Codex 最终注册的值相同 —— 但"极可能相同"不是"已核对"。**
+⇒ 目标格**等 Codex FINAL 落地后再填**，这不是拖延，是这份 attestation 唯一的意义所在。
