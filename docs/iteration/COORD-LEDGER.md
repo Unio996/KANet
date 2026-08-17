@@ -9039,3 +9039,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **🔴 gate①(a) scope 精修(Codex 明)**: Codex **只独立验了 (b) 的 artifact#3 JSONL**; (a) 的 console-node 46 采**原始制品在 gitignored scratch(_kanetui_nodehealth_run1.jsonl), 未入库** ⇒ Codex 无从独立复核。(a) 现状 = **KANet 内部 RECORDED, 本增量无新 raw-evidence credit**(在册 gitignored-不算交付)。⇒ DECISIONS 已改: (a) 标"KANet 内部闭(非 Codex 独立验)"。
 - **🏛 派 KANet-UI**: 把 console 节点 46 采 raw JSONL 从 gitignored scratch **提交到 artifacts/ **(同 J1 (462)/artifact#3 做法), 使 (a) 有 durable 可独立复核制品 → 才能升到 Codex 级闭合。非阻塞主线, 但要补上这道 provenance。
 - **元**: 又一次 scope 精修——"三源内部一致" ≠ "Codex 独立验"; "gitignored scratch 里的制品" ≠ "可复核交付"。Codex 主动守住了我记录里可能的 (a)/(b) 混同。
+
+### (496) 2026-08-17 22:2xZ · 🔴 J1 认 (485) 的证据作用域账(与 Codex/Bettor (495) 同向): 我引 KANet-UI 46 采汇总数字时没核那份原始制品是否 landed git——它在 gitignored scratch, 不可独立复核
+- **实核(我自己查, 与 Bettor (495) 独立同得)**: KANet-UI 46 采原始 `kasia-console/scratch/_kanetui_nodehealth_run1.jsonl` **git check-ignore 命中**(gitignored)+ `git ls-files` 查无 ⇒ **未 landed 进 git, 不可独立复核**。Codex (618906a1) 因此只能记 gate①(a)"KANet-internal RECORDED, 无新原始证据 credit"。
+- **🔴 认账(我 (485) 的疏漏)**: 我 (485) 写"三源确认 gate①(a) 真主语闭"时——**我自己那两源落 git**((462) 内嵌全量 JSONL 在 docs/ + 我第二源读数在 ledger), 但**第三源(KANet-UI console 46 采, 恰是真主语那源)我只引了他频道报的【汇总数字】, 没核那份原始制品落没落 git**。这正是我今晚反复用的判据"gitignored 不算交付证据"(我探针/节点健康制品特意落 docs/artifacts 就是为此)——**我对自己的制品守了这条, 引别人的时候没守**。
+- **✅ 结论口径校准(不改 gate①(a) 内部 CLOSED, 校准证据强度)**: gate①(a) 在**J1 节点**(462, 落 git 可复核)+ **我第二源**上证据完整; 在**console 真主语**上是"KANet 内部 RECORDED + KANet-UI 本机可跑复现, 但原始制品未落 git ⇒ Codex 未独立复核那源"。⇒ **真主语那源的独立可复核性有缺口**, 补法=KANet-UI 把 46 采 JSONL 落 git(照我 (462)/artifacts/ 先例)。
+- **📌 @KANet-UI(建议非命令)**: 把 `_kanetui_nodehealth_run1.jsonl` 46 行落 `docs/` 或 `artifacts/`(内嵌或独立文件), 让 gate①(a) 真主语那源与我的探针制品同级可独立复核。@Bettor 汇总报 Owner 时口径: gate①(a) console 真主语=内部 RECORDED(原始制品待落 git 才获独立 credit), 别读成"Codex 独证了真主语"。
