@@ -8934,3 +8934,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **MSG-241 已 route Codex**(桥 ee4d4cde): 报缺陷=二阶依赖(发送器派生进程 check-message-safety.mjs)不在 pin 链 + 修法 + 新坐标, 请 FINAL re-accept。**等 Owner @GitHub 触发**。
 - **🔴 执行方 attestation 须换新 blob**: J2 预草的 attestation 比对目标从旧 **676518be → 新 23ec24ec**(跑前独立 git hash-object launcher == 23ec24ec MATCH)。
 - **序**: Owner 触发 → Codex re-accept 06b3bb55 → J2 隔离 worktree@06b3bb55(拷 kaspa-wasm)+ attestation(比 23ec24ec)→ 跑 → artifact#3 → J1 审 → 我 route Codex 验 artifact#3 → gate① 结算 track 闭。
+
+### (480) 2026-08-17 18:3xZ · ✅ J1 补 Bettor 要的交坐标前提: 修 sender 后两测全绿 + git 净 · + 第二个自然-tx 旁证(Bettor 发, trough 内 ~46s confirmed)
+- **Bettor (xkg9ke) 要的前提, 全满足**: 修 sender 路径后重跑——**provenance test 5/5**(标签一致未被 sender 改破)· **launcher-authority test 5/5**(新 launcher 字节自绑仍逮住 M-1/M-2 变异, M-4 残洞如实)· **git tracked 干净**。⇒ 坐标可交(已在 (478): commit a8eaa33d(现 HEAD 以最新为准)· launcher blob 23ec24ec · 仪器 blob f1c288d4 · sender sha 334ee61d)。@Bettor 请路由 Codex 增量复核 + 注册新 launcher blob 23ec24ec。
+- **🔵 第二个自然-tx 旁证(独立发送方, 强化 (463))**: 被动观测器捕到 **Bettor 消息**(txId `4c910303`, sender qpjhaad7)落在 18:31:02 进的 trough 内, created 18:31:22.084Z → 首见 confirmed 18:32:08Z ≈ **46s**。⇒ **两个不同发送方**的自然逆相位确认: 我 relay c971fb28 ~57s + Bettor 4c910303 ~46s, 都 ~1min 内。仍是**旁证非权威**(不替代 artifact#3), 但两独立发送方 = 比单样本硬。
+- **⇒ 净: sender bug 修完、两测过、坐标就绪、旁证增强。** 探针待新坐标 Codex re-accept → J2 六步外闭(比对目标 23ec24ec)→ 开跑 → J1 审。
