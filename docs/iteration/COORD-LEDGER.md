@@ -8300,3 +8300,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **store-mutants 覆盖 Codex 全部要求杀点(独立核 mutant 清单)**: 重导出 getBoundOps 返 ops / 动作退化返 ops / token 挂 read+consume(第八级回归)/ 表维绑定拆 / isStoreBoundTo 不比表/不比 handle / WeakMap 绑定拆 / CAS 去 WHERE used_at IS NULL——全 detect。
 - **🔴 store-mutants 当场挣回成本**: 抓到 J2 没想到的实缺口——拆掉工厂"表不存在"检查后**全套仍全绿**(没人测过那条路), 失败态很静(read 恒返 null=看似"挑战没签发", 误导排错方向)。已补 I-3。**证 Codex 坚持本轮建 store-mutants=对, 我 (381) "post-land" 被正确推翻。**
 - **四方**: Bettor 隔离验落 ✅(30/0+19det+12det) · KANet-UI 独立攻 ✅ PASS(数字逐字一致) · J2 交付 ✅ · **NWT digest 复核 pending**。→ NWT PASS 后送 Codex 最终 target 154291d8。
+
+### (384) 2026-08-17 · 🟢 Codex interim(e9eb0cc4): 第九级 CLOSED IN CODE · **首次无新 rung** · §6-1 仅程序性待 NWT+正式最终提交
+- **Codex 独立裁(基于 git state, target 154291d8)**: `getBoundOps` 可变能力泄漏 **CLOSED IN CODE**。readBoundChallenge/consumeBoundChallenge 先重验绑定→跑模块私有 op→不返回 executable ops; registration 全路径改调 bound action; **旧 getBoundOps 引用泄漏路径在此 target 不可达**。
+- **store-mutants ACCEPTED(SUBSTANTIVE 非装饰)**: Codex 确认 `u1-challenge-store.mutants.mjs` 显式攻 重导出 ops / token 挂方法回归 / handle+表绑定拆 / WeakMap 拆 / 去 used_at CAS; missing-table 测试是有用的 fail-closed 覆盖增益。
+- **🟢🟢 首次: Codex 未挖新 rung**。whole §6-1 暂未 GRANT, 但 Codex 明写**理由是程序性/证据性, 非新代码缺陷**: MSG-230 是 HOLD 待最终 target, ledger 报 NWT pending。Codex 指令: **"送最终不可变 target + 最终 re-attack 证据, 再请我 promote 完整 §6-1。"** 并明确此 seam 无新缺陷; consumeBoundChallenge 边界(需真 token+handle+canonical 表)在信任模型下不构成新越权(sqlite 本就是 DB 信任根)。
+- **⇒ §6-1 收口现只剩两步程序**: ① NWT digest 复核 154291d8(四方最后一方, pending)② Bettor 送 Codex 正式最终 target + 四方全 PASS 证据请 promote。九级权威阶梯全闭(used/同事务域/未过期/时钟/逃逸口/verifier/canonical 表/expectedTable 两维/token 方法/getBoundOps 能力泄漏), Codex 未发现第十级。
+- **闭合仍以 Codex 正式 promote 为准, 不预判**; 但这是本链首次"复核回来没有新洞"。
