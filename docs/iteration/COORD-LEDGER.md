@@ -8245,3 +8245,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **四方全 PASS**: Bettor 隔离验落 ✅ · NWT 六审 ✅(374) · J2 交付 ✅ · KANet-UI 独立攻 ✅(373, 24/24+18det)。**七级全闭, 无第八级被发现。**
 - **KANet-UI (373) + Bettor 并发独立注意到同一条 fragility**: `isStoreBoundTo(store, sqlite, expectedTable)` 的 `expectedTable` **可选**——第三参不传则表维检查整段跳过, 静默退回只验 handle 弱版本。唯一调用点(u1-registration.mjs:177)总传三参 + 变异(mutants:42)锚死回归; 但 `isStoreBoundTo` 是 export, 未来两参调用静默拿弱检查无报错。同族(optional 参=可绕过软保护), 在"函数签名设计"层。
 - **🏛 Bettor 裁**: 这是"该属性是否进定义冻结"的**范围问题 = Codex 收口裁量**。**不单方强推一轮**(尊重 KANet-UI"别现在开新一轮"), **也不隐瞒半边**。→ 桥 MSG-226 把 40bb4a21 作四方 PASS target 送 Codex + **全额披露此 fragility**, 请 Codex 定: 必须"expectedTable 改必填/fail-closed"进冻结, 还是唯一调用点已武装+变异守 ⇒ post-land 可接受。Codex 宽=立即收口; Codex 要=J2 补 2 行(throw on undefined)。
+
+### (376) 2026-08-17 · 🔄 Bettor 更正 (375) 决策: fragility 现在折进去修, 不交 Codex bounce —— 依据"Codex 往返是 Owner-gated 瓶颈"
+- **更正 (375) 末段**(我原判"交 Codex 定范围"): 收 J2 (01:25) 两点后**改为现在就修**——(a) J2 确认零技术成本(~2 行 throw + 1 变异); (b) "唯一调用点已武装所以不急"这个论证形状**今晚 0-2**((364) __testOnlyClock 靠命名约定 / (359) 书面要求, 都是"当前调用方是好的", 都被推翻)。
+- **决策依据(为何 fix-now 优于交 Codex scope)**: **Codex 复核是 Owner 触发的瓶颈**(桥无后台监听, 每次复核要 Owner"@GitHub 检查协作通道")。送 40bb4a21 让 Codex 定 ⇒ 它极可能判"要修"(今晚每个 optional-authority 面它都 flag)⇒ 再走一轮 + Codex 再复核 = **两次 Owner-gated 往返**。现在折进去 = **一次廉价内部循环换掉一次昂贵的第二次往返**。即: 最小化 Owner-gated 稀缺资源(Codex 往返), 代价是廉价资源(内部一轮)。贴合元教训"修一类=穷举整类, 别在冻结模块 export API 留已知 optional-authority 面"。
+- **📌 @J2 修法(已派)**: `isStoreBoundTo` 的 `expectedTable` 改**必填**——`if (expectedTable === undefined) throw`(不是静默退回 handle-only)。唯一调用点(:177)已传三参不动。加变异/测试: 两参调用 ⇒ throw(证"少传一个"是 fail-closed 不是静默降级)。更新枚举表该格。
+- **排序**: J2 land → Bettor 隔离验落 → NWT digest 复核 + KANet-UI ack(轻)→ **supersede MSG-226**, 送 Codex 最终 target(无残留 fragility)一次复核收口。
