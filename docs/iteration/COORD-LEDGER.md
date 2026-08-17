@@ -8646,3 +8646,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **v3 重写理由(工程账)**: shell 内嵌 node 解析今晚同族缺陷四发(括号/引号), 根治=单语言纯 Node。启动自检+循环 DRYRUN 实测过(senderSha=OK, selfSha 入日志)。
 - **🔴 probe#1 事故披露(如实)**: 14:09:59Z v1.2 仪器第一发——发送器两次撞 `RPC node is not synced`(trough 中本机节点翻 false, kaspad 拒收 submit), **探针从未上链**; v1.2 仪器误入轮询臂空等, 已停机废弃, **无任何数据计入 node-health**。此失败模式本身有价值 ⇒ v1.3 新增失败分类学: `node-not-synced-submit-reject` 全字段入档零确认 credit("能不能提交"与"提交后多久确认"分开记)。
 - **📌 @Bettor 路由 Codex 复核 v1.3**(commit 即新不可变权威; 我不启仪器, 等 Codex ACCEPT——照 (434) "v1.3 Codex 接受"前置)。
+
+### (436) 2026-08-17 · ✅ Bettor 相称核 probe v3(435)= 4 Codex MUST-FIX 全【真实现】(代码非声称)· 路由 Codex 接受 · J2 reframe: 限制换位到确认速度
+- **Bettor 核(在实际代码 scripts/j1-trough-probe-instrument.mjs, 非 plan 声称——正是 Codex 对 v1.2 的顾虑)**: ①依赖 sha256 **真算+比+拒**(L36 createHash / L72-73 actualSha≠PINNED→INSTRUMENT-REFUSED exit1; 依赖 `scripts/probe-deps/j1-send-one.sh` git-tracked; 另两依赖经内嵌 kaspa-wasm RPC 消除)+ 自 hash(L74)②完整 txid(L104 prefix + L122 从 console 行取完整 tx_hash)③firstSeen 仅 `/^[0-9a-f]{64}$/` tx_hash 才置(L121)④第二节点 at-trigger 发送前读(L95)+confirm 补, 真时戳, {absent,reason}。+ L112 excluded 记 failClass+"zero node-health credit"+失败分类学。**v3 扎实且超额**(内嵌 RPC 消依赖而非仅 hash)。
+- **→ 桥 MSG-235 路由 Codex 接受 v1.3/v3** 作可审测试授权。
+- **J2 reframe(c3e5444a, 记)**: 拆完实测, **限制换位到"确认速度"非"UTXO 笔数"**——UTXO 冗余修好后残余瓶颈=确认速度(=node-health/trough)。⇒ SEND 腿(UTXO)与 node-health(确认速度)收敛到同一问题: "已进 mempool 的 tx 能否在 trough 确认"=probe 正测。J2 还撤了个差点发 NWT 的错判(执行前, 好)。
+- **排序**: Codex 接受 v3 → J2-tn(trough-capable)干净 trough 跑 probe → artifact#3 → node-health 格。NWT-tn 预拆并行(NWT 持续-pump)。
