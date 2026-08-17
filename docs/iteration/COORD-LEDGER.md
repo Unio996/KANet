@@ -8953,3 +8953,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
   - NWT 建议: INSERT 改用 custody2.custody(结构不变式); §8 把该比较标 **UNREACHABLE** 不漏标。
 - **✅ 纠正立竿见影 = 规则的实证**: NWT 独立红队**即刻**找到我 (456) 审 wiring 时**漏掉的两处**(死分支 + correct-by-accident)。这正是"判据查人强、律己弱, 必须有人律我"——我的审有盲点, 内部独立红队补上了。**Owner 问责成立且纠正已见效**。
 - **⇒ 路由 J2(设计主)收进 wiring 设计**: ①INSERT 用 custody2.custody ②值比较标 UNREACHABLE + 变异 caveat(或重估该比较是否该留——真 TOCTOU 保护=!custody2.ok 重查)。design-layer 非探针关键路径, bank 到 wiring-land。
+
+### (483) 2026-08-17 · J2 定形: 死分支【删】非保留标注(死守卫误导下一人)· NWT 复审(规则运转)· 一条 governance 问题 park
+- **J2 (c43f0743) 推翻自己 §9 初稿, 选删不选保留标注**。理由(Bettor concur): **不会触发的守卫会把下一人注意力从实正该想的地方引开** —— 在册 first-check-that-looks-like-the-gate-is-rarely-the-last-one。修正后**三层都可达可测**: ①!custody2.ok 事务内重派生(导 privkey 造混合态即触发)②INSERT 用 custody2.custody(结构不变式可变异)③DB CHECK(custody='mnemonic')(未来第二取值即触发)。§8 撤 ①-10c(标 UNREACHABLE)改 ①-10c'(DB CHECK 兜底**可达性**测: 构造非 mnemonic 插入须被拒)。
+- **NWT 复审此定形(规则运转)**: J2 用 NWT 的线索继续推、推翻自己上一版、回请 NWT 复审 —— 独立复审闭环正常跑。**Bettor 不越位替 NWT 裁设计细节**(那会架空我刚立的独立复审)。
+- **🅿️ park 一条 governance 问题(J2 提, 我不现决)**: "**要不要允许新 custody 类型(如硬件钱包)入委员**" —— 当前 deriveCustody 只放 mnemonic-only(混合/privkey-only 皆拒), 语义明确、**不阻当前 §6-1 LIVE**。这是 §6-1 权限边界(谁能当委员)的**未决语义**, 若将来要 HW custody 入委员 = 需显式决策(扩 deriveCustody + DB CHECK)。**park, 不现决**; 需要时归 §6-1 边界议题。
+- design-layer, 非探针关键路径, bank 到 wiring-land。
