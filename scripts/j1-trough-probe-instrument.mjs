@@ -13,29 +13,41 @@
 // C  TIME_CAP: 有限、正、硬顶 360, 否则拒启。
 // D  行绑定: content 全文精确相等 ∧ sender_address == 本 relay 地址; tag 子串只作预过滤; txid 相等为独立第二绑定。
 import { createRequire } from 'node:module';
-import { readFileSync, writeFileSync, appendFileSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync } from 'node:fs';
 import { createHash, randomBytes } from 'node:crypto';
-import { spawn, spawnSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
-const require = createRequire('D:/kanet/kanet/kasia-console/package.json');
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { dirname, join } from 'node:path';
+// v5: 仓库根从仪器自身位置推导(J2 检出根=D:\kanet-tn12, 不能写死 J1 的根)
+const SELF_PATH = fileURLToPath(import.meta.url);
+const REPO_ROOT = dirname(dirname(SELF_PATH));            // <root>/scripts/xxx.mjs → <root>
+const toBash = (p) => p.replace(/\\/g, '/').replace(/^([A-Za-z]):/, (m, d) => '/' + d.toLowerCase());
+const require = createRequire(join(REPO_ROOT, 'kasia-console', 'package.json'));
 const { RpcClient, Encoding } = require('kaspa-wasm');
 // 绑定判定纯函数(gate#1 抽出, 带 test/mutants; 亦为测量链依赖 ⇒ 下方 sha256 钉定)
-const BINDING_MOD = 'D:/kanet/kanet/kasia-console/src/lib/j1-probe-binding.mjs';
+const BINDING_MOD = join(REPO_ROOT, 'kasia-console', 'src', 'lib', 'j1-probe-binding.mjs');
 const PINNED_BINDING_SHA = 'b54d8af1bd166000be82019142043ebf3cf96500a596b9c4a90ce920a867d55d';
-const { decideProbeBinding } = await import('file:///' + BINDING_MOD);
+const { decideProbeBinding } = await import(pathToFileURL(BINDING_MOD).href);
 
-const NODE1 = { id: 'local-J1-ws://127.0.0.1:17210-testnet-12', url: 'ws://127.0.0.1:17210' };
-const NODE2 = { id: 'mining-host-100.99.147.101:17210', tunnelPort: 17225 };
-const RELAY_ID = 'e7f51073-6b6c-41ea-b7fe-e82e98531a9a';
-const MY_ADDR = 'kaspatest:qzdh7nar8wnq4nsag835qv563zkc5q8pufjeq3fcc2nq337mrr04wcfjx6f6u';
+// v5(计划 v1.5): host 身份全部由启动器钉定注入(J2-tn host profile 写死在 launcher, 非自由参数)。
+// 安全承重=SENDER_ADDR(行绑定用, 完整钉定); RELAY_ID=传输寻址(前缀经 launcher 校验+此处全量入档)——
+// 错 relayId 只会让 sender_address 不符 ⇒ not-bound 零 credit, 结构上无法伪造 credit。
+const NODE1 = { id: process.env.J1_PROBE_NODE1_ID || '', url: 'ws://127.0.0.1:17210' };
+const NODE2 = { id: process.env.J1_PROBE_NODE2_ID || '', url: process.env.J1_PROBE_NODE2_URL || '' };
+const RELAY_ID = process.env.J1_PROBE_RELAY_ID || '';
+const MY_ADDR = process.env.J1_PROBE_SENDER_ADDR || '';
+if (!NODE1.id || !NODE2.id || !NODE2.url || !RELAY_ID || !MY_ADDR) {
+  console.log('INSTRUMENT-REFUSED: 缺 host profile env(NODE1_ID/NODE2_ID/NODE2_URL/RELAY_ID/SENDER_ADDR, 须经启动器注入)'); process.exit(1);
+}
 const CHANNEL = 'dev-coord-testnet';
-const LOG = 'D:/kanet/kanet/scratch/j1-trough-probe-artifact3.jsonl';
-const SENDER = 'D:/kanet/kanet/scripts/probe-deps/j1-send-one.sh';
-const SENDER_BASH = '/d/kanet/kanet/scripts/probe-deps/j1-send-one.sh';
+const LOG = join(REPO_ROOT, 'scratch', 'j1-trough-probe-artifact3.jsonl');
+const SENDER = join(REPO_ROOT, 'scripts', 'probe-deps', 'j1-send-one.sh');
+const SENDER_BASH = toBash(SENDER);
 const PINNED_SENDER_SHA = 'b01f88b18139654d36fb4bdcad6950d7201ea4c38c82101ccc21353f6128364b';
-const PAYLOAD = 'D:/kanet/kanet/scratch/j1-trough-payload.json';
-const PAYLOAD_BASH = '/d/kanet/kanet/scratch/j1-trough-payload.json';
+const PAYLOAD = join(REPO_ROOT, 'scratch', 'j1-trough-payload.json');
+const PAYLOAD_BASH = toBash(PAYLOAD);
 const HARD_TIME_CAP = 360;
+mkdirSync(join(REPO_ROOT, 'scratch'), { recursive: true });
 
 const now = () => new Date().toISOString();
 const log = (o) => appendFileSync(LOG, JSON.stringify(o) + '\n');
@@ -94,15 +106,13 @@ async function rpcRead(url) {
 }
 
 async function secondNodeRead(label) {
-  const ssh = spawn('ssh', ['-o', 'ConnectTimeout=12', '-L', `${NODE2.tunnelPort}:127.0.0.1:17210`, 'admin@100.99.147.101', 'ping -n 30 127.0.0.1 > NUL'],
-    { env: { ...process.env, SSH_ASKPASS: '/d/kanet/kanet/scratch/j1-askpass-0808.sh', SSH_ASKPASS_REQUIRE: 'force', DISPLAY: ':0' }, stdio: 'ignore' });
+  // v5: 第二节点=启动器钉定 URL 直连(J2-tn host 场景下指 J1 笔记本节点 100.111.126.10:17210, 绑 0.0.0.0 tailnet 可达)。
   try {
-    await new Promise(r => setTimeout(r, 5000));
-    const v = await rpcRead(`ws://127.0.0.1:${NODE2.tunnelPort}`);
+    const v = await rpcRead(NODE2.url);
     return { label, node: NODE2.id, ...v };
   } catch (e) {
     return { label, node: NODE2.id, absent: true, reason: String(e.message || e), t: now() };
-  } finally { try { ssh.kill(); } catch {} }
+  }
 }
 
 // D: 精确行绑定 — content 全文相等 ∧ sender == 本 relay 地址(tag 子串只是预过滤)

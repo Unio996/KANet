@@ -1,6 +1,6 @@
-# J1 trough 探针测试计划 v1.4(Codex MSG-235/236 五条合规版)
+# J1 trough 探针测试计划 v1.5(host=J2-tn, (443) 裁 + gate#1 test/mutants)
 
-> **Status**: AUTHORIZED-PENDING-CODEX-ACCEPT · J1tn · 2026-08-17 15:2xZ · 取代 v1.3
+> **Status**: AUTHORIZED-PENDING-CODEX-ACCEPT · J1tn · 2026-08-17 15:4xZ · 取代 v1.4
 > **授权链**: 同 v1.2(Owner 双通道直令 (420)(421))。**仪器改为纯 Node 实现** `scripts/j1-trough-probe-instrument.mjs`(v3, 与本文件同 commit)——弃 shell 内嵌解析(今晚同族引号/括号缺陷四发, 根治=单语言)。
 
 ## Codex 四条 MUST-FIX 对照
@@ -26,3 +26,10 @@
 - **C 时限硬顶**: TIME_CAP 须有限、>0、<=360(硬顶), 否则拒启; NaN/超值不再静默放行。
 - **D 精确行绑定**: content 全文逐字相等 ∧ sender_address==J1tn 地址; tag 子串仅预过滤; txid 相等为独立第二绑定。
 - 附录 hash 更新: 发送器=b01f88b18139654d36fb4bdcad6950d7201ea4c38c82101ccc21353f6128364b(scratch 副本已同步防漂移); 仪器 blob/sha 钉在启动器内(与本文件同 commit)。
+
+## v1.5 增量(host 换 J2-tn, ledger (443) 裁 + (441) gate#1 证据)
+- **host=J2-tn(裁定依据)**: probe 测「已 admit 的 TX 在 trough 中确认」, admission 是前提; J1tn 节点 trough 中拒收 submit(probe#1 实证), J2-tn 实证可 admit(12/11 冗余)。执行=J2 在其检出根跑 launcher, J1 持判据/复核位。
+- **身份注入(非自由参数)**: launcher 钉死 SENDER_ADDR(J2-tn 完整地址, 安全承重=行绑定用它)/NODE1_ID(J2 机器本地节点)/NODE2(J1 笔记本节点 ws://100.111.126.10:17210, 绑 0.0.0.0 tailnet 直读, 免 ssh 凭据)。RELAY_ID=传输寻址, J2 供给完整值+launcher 校验前缀 102cbb99+runHeader 全量入档——错 relayId 只会 sender 不符=not-bound 零 credit(被 N-5 用例与变异守护), 结构上无法伪造 credit。
+- **可移植性**: 仪器仓库根从自身位置推导(J2 根=D:\kanet-tn12); scratch 目录自建; bash 路径自动派生。
+- **gate#1 证据(绑定判定抽出为纯模块)**: kasia-console/src/lib/j1-probe-binding.mjs(+.test 9/9 含 Codex 点名负测 N-1 错 txid 零 credit; +.mutants 经隔离执行器 7 detected/0 MISSED/0 INERT/0 BROKEN 含「fail-closed→放行」点名变异; 执行器 selfcheck 三臂过)。仪器经 sha256 钉定引用该模块(测量链依赖)。
+- **J2 执行命令**: `J1_PROBE_RELAY_ID=<J2-tn 完整 relayId> bash scripts/j1-trough-probe-launch.sh 360 0`(其检出根, 树须干净且与被审 commit 一致)。
