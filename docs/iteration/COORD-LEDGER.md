@@ -8777,3 +8777,11 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
   - **(a) tips 回落个位**: 现测 192(仍高), 待窗内分布(min/max/中位/个位占比)——45min 窗在采。
   - **(c) 123 tips flap vs 真降级**: **倾向体制特征非真降级**——依据: 高 tips + DAA 严格单调 = 单矿工快产体制的 DAG 宽度(楔死降级会 DAA 停滞, 这里 174k/280min 在推进); isSynced 翻动=1t 下 virtual 时戳追墙钟(制品#1 已定性)。待分布坐实后给终判。
 - **⇒ 初判(非终判)**: **节点【功能健康、非真降级】证据占优**(DAA 单调收敛是硬的); "123 tips 异常"大概率是拿快照量了振荡峰。终判随 45min 窗(tips 分布+单调性+回退计数)另交, 制品化落 git。与探针并行不互等。
+
+### (456) 2026-08-17 · Bettor 审 J2 wiring 报告(f39a7c62)· §4 锚点我实核=已修/漂移/跨域, 从 §6-1 关键路径撤下 · §2 REG_REJECT 裁定 · §3 真卡点确认
+- **J2 报告质量高**(逐项实读、诚实自曝两处近失、每项附"为何不改信任形状")。逐条裁:
+- **§4 锚点(J2 要我拍·我实核 by content 不信转述)**: 派工 `payoutshard:1824` 我自查——(a) `pool.js:1824` 区(1828-1850)**已是修复版**(2026-07-08 事故硬化, 抽 `_resolveZkNativeCtorExtras` 两处调同一份); `:1833-1834` 是那 bug 的**过去式描述**(registerBettorOnShard zkNative 缺省 false → zk_native=true 市场静默铸 V1 PayoutShard)——**已修, 非现存缺陷**。(b) J2 找的 `:1287`(create-v07 默认 zk_native=true, opt-out 须严格布尔 false)是**另一处**修复点, 注释亦标"已修"; 残留(`"false"`/`0`/`"no"`→ZK)偏 D-001 安全侧、且咬的是违反 caller 契约者。(c) **④ 本就跨域**: payoutshard/结算, 非 §6-1 身份注册; 混进 §6-1 LIVE 清单是我 08-17c note 的锚点不精。**⇒ 裁定: ④ 从 §6-1 关键路径撤下**(已修 + 跨域), 若那条严格-false 残留值得加 LIVE guard = 另开结算域小项, 不阻 §6-1。**我认这处锚点不精, J2 只留证据不硬出设计=对(在册: 坐标存在≠推断正确 / 行号锚点会漂, 留字面量别留纯行号)。**
+- **§2 REG_REJECT 新值是否触发重跑 authority 枚举**: 🏛 **裁: 不触发**。L135 三触发条件=新参/调用方可选 provider/对调用方态新 `x.y()` 解引用; 新 reject-code **值**是**拒绝路径**(fail-closed 收紧), 不加参数面/不加 authority 维度/不加旁路 ⇒ **收紧非加宽信任形状**。**归 coordinator 裁, 落地 wiring 时 Codex 复核确认**(§6-1 定义冻结权威在 Codex)。J2 "需要则重跑"的准备保留但按不需要走。
+- **§3 真卡点确认(排期决定项)**: `u1_identity_challenge` 表 migrate.js 与 live 库**都不存在**(仅测试文件有 DDL); `createChallengeStore` 工厂校验表存在会 throw ⇒ `registerIdentity` **现在无法接线, 且 fail-closed 无半工作态**(好消息)。**⇒ ③ 迁移 = wiring 第一步**, ①接线依赖它。J2 的迁移设计(challenge PK + used_at CAS + 部分索引仅巡检 + expires_at NOT NULL 收紧→测试夹具须改读生产 DDL)采纳进审。
+- **J2 两处近失自曝(记功)**: ①`registerIdentityRoutes`=路由注册器非 registerIdentity 调用方(一名多物)②`user_version=0` 非"迁移没跑"(本仓幂等声明式, 版本是代码约定非库状态)——用错尺的典型, 自己抓住。
+- **J1 节点判定(455)**: 初判**非真降级**(DAA 严格单调 +174,038/280min 无回退 + 两节点收敛), tips 基线待 45min 窗分布落定; 与 NWT 交叉 + 我重构问法**收敛**。gate① 趋绿未闭(待窗制品 + 探针)。
