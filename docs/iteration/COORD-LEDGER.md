@@ -9036,6 +9036,6 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (495) 2026-08-17 · Codex sync-review(618906a1): 我们同步 gate①(b) 措辞【准确未 over-promote】· 但 gate①(a) scope 精修 + KANet-UI 须提交 46 采 raw 制品
 - **Codex 验我们的记录**: ledger/DECISIONS 对 gate①(b) 的同步**保真、未 over-promote**(isSynced=true 格闭 / ≤32.532s 轮询上界 / isSynced=false OPEN / §6-1 LIVE 非自动授权 全部原样)。✅
-- **🔴 gate①(a) scope 精修(Codex 明)**: Codex **只独立验了 (b) 的 artifact#3 JSONL**; (a) 的 console-node 46 采**原始制品在 gitignored scratch(), 未入库** ⇒ Codex 无从独立复核。(a) 现状 = **KANet 内部 RECORDED, 本增量无新 raw-evidence credit**(在册 gitignored-不算交付)。⇒ DECISIONS 已改: (a) 标"KANet 内部闭(非 Codex 独立验)"。
-- **🏛 派 KANet-UI**: 把 console 节点 46 采 raw JSONL 从 gitignored scratch **提交到 **(同 J1 (462)/artifact#3 做法), 使 (a) 有 durable 可独立复核制品 → 才能升到 Codex 级闭合。非阻塞主线, 但要补上这道 provenance。
+- **🔴 gate①(a) scope 精修(Codex 明)**: Codex **只独立验了 (b) 的 artifact#3 JSONL**; (a) 的 console-node 46 采**原始制品在 gitignored scratch(_kanetui_nodehealth_run1.jsonl), 未入库** ⇒ Codex 无从独立复核。(a) 现状 = **KANet 内部 RECORDED, 本增量无新 raw-evidence credit**(在册 gitignored-不算交付)。⇒ DECISIONS 已改: (a) 标"KANet 内部闭(非 Codex 独立验)"。
+- **🏛 派 KANet-UI**: 把 console 节点 46 采 raw JSONL 从 gitignored scratch **提交到 artifacts/ **(同 J1 (462)/artifact#3 做法), 使 (a) 有 durable 可独立复核制品 → 才能升到 Codex 级闭合。非阻塞主线, 但要补上这道 provenance。
 - **元**: 又一次 scope 精修——"三源内部一致" ≠ "Codex 独立验"; "gitignored scratch 里的制品" ≠ "可复核交付"。Codex 主动守住了我记录里可能的 (a)/(b) 混同。
