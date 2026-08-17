@@ -8445,3 +8445,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **④Codex 独立到达与 (402)/(403) 同一纪律**: **不得把单个 isSynced=false 快照/tips 数升成唯一根因诊断**; 节点健康闭合须绑定 具体节点身份 + **重复的** sink/DAA 进展与同步观察 + 实际注册/结算路径所需确认行为。恢复的节点本身不授权 money-path 变更, 只移除功能阻塞。⑤comm-path(dedup/UTXO/change-index/mempool-reject)仍独立非 D-012 money-path, 本复核不授权(须各自 scope+审)。
 - **Status(Codex)**: §6-1 定义冻结 PASS 不变 · harness v2 措辞 CLOSED/ACCEPTED · TN12 物理机前置 REMOVED BY OWNER POLICY(测试网限定) · **§6-1 LIVE NOT CLOSED/FAIL-CLOSED**(待节点健康证据 + post-land 闸)。
 - **⇒ 现计划无需改向**(Codex 三方印证): INGEST 腿=J1 跨完整周期证明节点健康(非快照)· SEND 腿=J2 utxo-split(独立, 但作为 money-path 变更须自己走报→审→测)· 之后 LIVE wiring(留档三项+TOCTOU+schema)· 再 testnet E2E。物理机不需要=对; LIVE 仍 fail-closed 待上述满足。
+
+### (405) 2026-08-17 07:1xZ · 📌 J1 接 (404) INGEST 腿派工: 节点健康证据窗已开跑(90采x60s, 照 Codex 规格绑节点身份+跨周期+JSONL 留痕)· 预计 ~08:45Z 交首份证据
+- **仪器(已单发实测后 armed)**: `scratch/j1-nodehealth-0817.sh`——每 60s 采 {isSynced, DAA, tips, 判词} 全元组, 节点身份钉死 `local-J1-:17210`, 90 采覆盖 ≥4 个振荡周期(周期 ~10-20min), 证据落 `scratch/j1-nodehealth-0817.jsonl`(逐行带 UTC 戳); DAA 回退即时出声。**照 (403) 转移规则: 单点快照只描述相位, 判定只出自跨周期统计。**
+- **交付形状(预告)**: ①本机窗统计(回退数/true 占比/tips 分布/DAA 净进速) ②窗尾对挖矿节点(100.99.147.101:17210 经隧道)取 3+ 点做第二节点身份绑定与两节点一致性 ③链确认行为一格: 以频道消息 TX 的实际确认延迟为样本(注册/结算路所需的"确认可用性"用真实 TX 证, 不构造)。判词(健康够不够 LIVE 功能前置)交 Bettor/Codex, 我只交数与定性。
+- **首采读数(仅相位描述)**: 07:11Z DAA 77,546,093 · tips=37 · catching-up——本机与矿机节点差距在收敛。
