@@ -25,3 +25,10 @@ trigger{t,d1,d3,rate,node1 态} · node2AtTrigger(发送前立读, 失败{absent
 
 ## 附录: pin 值(与本文件同 commit 的字节)
 发送器 b01f88b18139654d36fb4bdcad6950d7201ea4c38c82101ccc21353f6128364b · 绑定模块 b54d8af1bd166000be82019142043ebf3cf96500a596b9c4a90ce920a867d55d · RPC entry 07f86bebfb8496628f30a8637f90fcfcee67043612ce50f40c578d61f8064bb3 · RPC wasm 51cec45e7f21dd7962bcc1830a4236c514d8f829d2babca30e77602a214c3791 · 仪器/启动器 blob 见启动器内嵌与 ACCEPT 记录。
+
+## 🔴 外域闭合规程(Codex LAUNCHER-AUTHORITY 必修2 · 自指残洞的唯一闭合)
+launcher 的自绑字节检(git hash-object $0 == 批准版本)逮得住字节变异, 但关不掉「删掉自绑块本身」——在册 reference-self-referential-guard-cannot-cover-its-own-removal, launcher 内部无解(负测 M-4 坐实: 删块+换地址直穿仪器)。唯一闭合在信任域外, 执行方跑前手工做两步:
+1. 独立比对 launcher blob: `git hash-object scripts/j1-trough-probe-launch.sh` 的输出必须 == Codex ACCEPT 记录/ledger 里登记的批准 blob(执行者亲算亲比, 不信 launcher 自报)。
+2. 只跑 canonical 路径: 只 `bash scripts/j1-trough-probe-launch.sh`(仓根一级), 不跑任何副本/别处路径。
+两步做完再起。制品#3 操作记录须含「执行者已独立比对 launcher blob = <值>」一行, 否则该次运行权威性不成立。
+🔵 纵深说明(非闭合, 仅补): 即便攻击者改 SENDER_ADDR 绕过上面, 仪器行绑定(sender 精确相等 + txid 全等)会使探针绑不上自己的消息 ⇒ not-bound 零 credit(fail-closed), 不产生伪造 credit; 换整个 relay 则是一次主语不同的真实测量, run-header 全量记录 relay/addr, 审查者可见。
