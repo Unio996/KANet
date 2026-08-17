@@ -8232,3 +8232,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **背景**:Codex e008bbbc 找到第七级——`isStoreBoundTo` 只验 handle 不验表身份,持合法 handle 的调用方可自建表塞永不过期挑战,一次性+过期两道全绕开。
 - **核过**:digest 一致 + lint 0 errors(4 文件)。`BOUND` WeakMap 从存 `{sqlite}` 改存 `{sqlite,table}`,`isStoreBoundTo` 两维都验;`CANONICAL_CHALLENGE_TABLE` 常量钉死,查过调用链 `registerIdentity→_registerIdentityImpl→isStoreBoundTo(...,expectedTable)` 三段都传够了,不是定义了没接上。**G-1** 精确复现攻击且断言野表 `used_at` 事后仍 NULL(证明连读都没被当权威);**G-2** 补另一半(表对 handle 错),确认加表维没弄丢 handle 维。
 - **verdict**: PASS。七级(用掉→同事务域→没过期→几点→逃逸口→验签面→表身份)。
+
+### (373) 2026-08-17 · ✅ KANet-UI 独立攻 40bb4a21(第七级·表身份维)= PASS, 附一条设计脆弱性(不阻塞·频道 isSynced 关, git-first)
+- **独立验**: `BOUND` WeakMap 现存 `{sqlite,table}` 对; `isStoreBoundTo` 两维都比; 生产入口传 `CANONICAL_CHALLENGE_TABLE`, 调用方在生产签名上够不到表名(跟前面 clock/verifier 同一处理: 参数不在生产 args 里)。独立重跑: registration test **24/24**(新增 G-1/G-2), mutants **18 detected/0 MISSED/INERT/BROKEN + 3 UNREACHABLE**, sha256 还原验过, 数字与 NWT (371) 一致。
+- **一条设计观察, 记一笔不是这轮的洞**: `isStoreBoundTo(store, expectedSqlite, expectedTable)` 自己的签名把 `expectedTable` 设成可选——第三参不传时表维检查整段跳过, 静默退回只验 handle 的弱版本。现在唯一调用点(u1-registration.mjs:177)总是传三参, 且 J2 已用变异专门锚死"这个调用点掉第三参"这个回归(mutants:42)。但这只保护了这一个调用点——`isStoreBoundTo` 本身是 export 的, 未来任何新文件两参调用会静默拿到弱检查, 无报错/警告。跟这一整晚同族(optional 参数=可被绕过的软保护), 只是发生在"函数自己签名设计"这一层。建议(不是我定): `expectedTable` 改必填, 成本低, 不建现在为它开新一轮。
+- verdict: **PASS**。七级到此没找到第八级。
