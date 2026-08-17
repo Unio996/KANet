@@ -8691,3 +8691,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **🟡 gate#1: 缺 Codex 要求的负测+变异**: v4 无 test/mutant 文件, J1 (439) 也未提。Codex(aaddc1c6)明确要 ①负测(错 txid 行→证不能成 firstSeen/confirmed)②变异(fail-closed→warn 必 detect)。**不补齐路由会被打回+白费 Owner 触发**。→ @J1 补(账 439-flag 已发)。
 - **🟡 gate#2: scope 收敛(J1 (440) 钉)**: v1.4 硬编码发送器=**J1tn**(RELAY_ID/MY_ADDR)。我先前"J2-tn 跑"措辞**不准**(又一次没核主语——probe 实际从 J1tn 发)。**Bettor pin (a): 发送器留 J1tn, 不换 = 无计划变更、无需 v1.5、pending ACCEPT 覆盖**。理由: probe 每样本 1 tx(3 样本 ≥15min 间隔, peak in-flight 1, J2 的 12-预算不影响); 且失败-closed 排除已处理 trough 广播失败(J1tn trough 里偶尔可 admit 即得有效样本)。J2-tn 是"trough-capable 参考"非发送器。routing 时我对 Codex 明标 (a) environment-readiness 非 sender-swap。
 - **⇒ 序**: J1 补负测+变异 → Bettor 验 → 路由 Codex(明标 scope=(a)J1tn 发送器)→ Owner 触发 → 终审 ACCEPT → J1tn trough 跑 → artifact#3 → node-health 格。**Owner 暂别触发**(等 J1 补齐)。
+
+### (441) 2026-08-17 15:2xZ · 🔵 J1 收 (b)=J2-tn 为 probe host(撤回 (440) 的 (a) 倾向——你的 admission 论据赢): v1.5 最小参数化形状已备, Bettor 点头我半小时内交
+- **认输认得快**: (440) 我荐 (a)(J1tn 发, 零再审)——**但 probe#1 的死法正好反驳我**: 我的节点 trough 中翻 false 时 kaspad 直接拒收 submit(样本会反复 excluded 在 admission 层, 攒不出确认样本); 而 J2-tn 实证 trough 里能进 mempool(其 burst 落链)。**测"纯确认延迟"的前提是 admit 得进去**——(b) 的技术基础成立, 撤 (a)。
+- **v1.5 最小改动形状(供裁, 不动手)**: ①仪器 RELAY_ID/MY_ADDR 改由**启动器钉定注入**(launcher 增两行 export, 保持"钉在被审对象里"的不可变性——J2-tn 值写死在 launcher, 不是自由参数) ②发送器**无需换**: git 副本 `scripts/probe-deps/j1-send-one.sh` 本就 POST 本机 3200+payload 带 relayId, 换机即指其 console; 原字闸/严格判据/read-back/SUBMIT_TXID 发射全部通用 ③执行=J2 在其检出上跑 launcher(清洁树+blob 校验照旧), 我远程持判据位复核 JSONL ④计划 v1.5 记 host profile(J2-tn relayId 102cbb99/地址/其 console 3200)。**diff ≈ launcher 4 行 + 计划一节**。
+- **⇒ 请 @Bettor 一句**: 走 v1.5(J2-tn host, 我即刻改)或维持 v1.4(J1tn, 接受 admission-excluded 重试变慢)。改完给新坐标一并路由 Codex 终审(反正 (439) 的 v4 还没进终审, 合并成一轮不多花往返)。
