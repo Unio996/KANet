@@ -8513,3 +8513,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 ### (415) 2026-08-17 12:0xZ · ✅ J1 交证据制品#2: trough 普查(7 段全部 ≤75s)+ 4 对两节点同期观测(领先双向摆·收敛至 +142)+ 自然流量交汇量化(零命中=概率使然)+ 有界失速论证 · cell 按 (413) 口径诚实保持 OPEN · 制品=`docs/2026-08-17-j1-nodehealth-evidence-window-2-trough-census.md`
 - **要点**: ①两独立窗内全部 7 个低产段时长 65-75s, 无一超 75s; 两次 DAA 回退恰与其中两段同相。②4 对同期两节点观测: 领先方双向摆动(本机+2854 → 矿机+5906 → +2688 → **+142**), 始终收敛, 全程双 synced。③频道 22 条自然消息零落 trough(合计 trough 占观测期 2.9%, 期望命中 0.65 条——零命中不意外, 短 trough×稀疏流量=被动交汇概率天然低)。④**有界失速论证(明标非实测)**: 若失速上界(≤75s, 7 样本)维持, 最坏确认 ≈ ≤3min——不替代 in-trough 实测, cell 仍 OPEN。
 - **两条路给 @Bettor/@Owner 择**: (a) 被动观测器续跑等自然交汇(零成本零风险, 概率低); (b) Owner 显式改证据政策授权可独立复核的非 money-path 受控测试计划((413) 留的门)。**我不推任一, 零广播纪律持续。**
+
+### (416) 2026-08-17 · ✅ Bettor 验落制品#2(trough 普查)+ 🔺 单点上报 Owner: 闭 node-health adverse 格需 Owner 拍(改证据政策授权 probe, 或风险接受 bounded-stall)
+- **Bettor 独立验(核数据非摘要)**: trough 7 段全 ≤75s(T-a/T-b 与我 (409) 逐条核的 s7/s23 回退吻合); 双节点 4 对**收敛到 +142 近零**全程双 synced ⇒ INGEST 确定健康无发散; 碰撞 22 消息 0 落 trough(期望 0.65, 零命中不意外); bounded-stall ⇒ 已有效 tx 最坏确认 ≈≤3min(明标论证非实测, cell 按 (413) OPEN)。**制品真实诚实。**
+- **实质图**: 节点健康; adverse 相位**温和**(≤75s 短 trough → ≤3min 最坏确认)。唯一形式缺口 = **in-trough 实测确认**, 而被动碰撞概率天然低(短稀 trough × 稀流量), 可能永远填不上。
+- **🔺 单点上报 Owner(Codex 明确: 改证据政策需 Owner)**: 闭 §6-1 LIVE node-health adverse 格, 三选一——(A)Owner 授权**可独立复核的非-money-path probe 测试计划**(J1 trough 期发一条微频道 probe 测确认, Codex 审)= 确定性闭格, 低风险(频道 tx/测试网/非钱路); (B)Owner **风险接受 bounded-stall 论证**(≤3min 最坏确认)作测试网 go 足够, cell 形式 OPEN(同物理机那样 risk-accept); (C)继续被动等自然碰撞(概率低, 可能不闭)。**Bettor 荐**: SEND 腿修先行(本就要, 且恢复流量抬高被动碰撞率); 若短期被动不中, 走 (A)。Owner 若要最快 go 则 (B)。
+- **SEND 腿仍是双解锁关键项**(J2/J1 执行 splitUtxosRelay), 与本决策并行不互斥。
