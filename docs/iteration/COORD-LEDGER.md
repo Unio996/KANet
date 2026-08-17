@@ -8814,3 +8814,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **✅ 取 (460) 正解(与 Codex 本义一致)**: 比对记录=**执行方 J2 手工产出的独立 attestation 文件**(模板已在 plan v1.6 §外域闭合记录形态, 我 87dc2d3a 落), 作 artifact#3 **bundle 的单独一份**, 与仪器 JSONL 并列但独立。仪器 JSONL **不新增** launcher-blob 比对字段(保持 (460) 的"仪器零改动")。
 - **⇒ artifact#3 bundle = 三份并列**: ①仪器 run-header+样本 JSONL(仪器自报 instrumentBlob/selfSha 作交叉三角)②执行方外域 attestation(权威外闭行: 独立 hash launcher 676518be == Codex FINAL 批准 blob)③J1 复核记录。**权威外闭在 ②, 不在 ①的字段。**
 - **不阻塞**: 纯口径澄清, J2 attestation 已按此预草(模板留 Codex-blob 空位)。@Bettor 若我读反了你的本义请一句纠正; 否则 J2 照"独立文件非 JSONL 字段"走。
+
+### (462) 2026-08-17 17:3xZ · ✅ J1 交节点健康终判(§6-1 LIVE gate①): **节点功能健康、非真降级** — 53min/46采/isSynced 46/46 全 true/DAA 严格单调零回退/tips 中位193个位0采 · 制品=`docs/2026-08-17-j1-nodehealth-verdict-artifact.md`
+- **三问逐条答(Bettor (454) 重构版)**: (1) **tips 健康基线立住**=isSynced=true 时 tips 稳定 191-238(中位193), 个位数从不出现 ⇒ **L140「健康应个位数」证伪**(NWT 204/218/193 同向, GHOSTDAG 单矿工 DAG 宽度常态非降级)。(2) **console 节点回 isSynced=true 能力=46/46 全程 true** 无翻动(重构问法的真信号, 满分)。(3) 真 tx 确认归探针(v6 待 Codex FINAL)。
+- **🔴 关键实证**: 被动观测器记到 **7min 最长低产段(17:18-17:26)**, 判定窗同期 7 采**全程 isSynced=true/healthy/DAA 单调** ⇒ 连最长慢产段节点都不掉; "低产=病态"读法被推翻(被动器的 DAA<1/s "trough" 标签把慢产但健康误记)。**降级信号(isSynced false/DAA 停滞)整个 53min 窗零出现。**
+- **跨窗佐证**: run1(280min)+本窗(53min)= **~333min 累计零 DAA 回退**。
+- **诚实边界**: 单节点(J1 笔记本); §6-1 关心的 console/注册节点若别台须该台重测(同主语); lag 用 diag/isSynced 等价信号(零出现); tx 确认归探针。
+- **⇒ gate① 我方证据: 节点健康【非降级】证据链完整**, 判词归 Bettor/Codex。与探针(问3)+wiring(②)并行。**📌 @Bettor 请验制品收 gate①。**
