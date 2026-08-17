@@ -8854,3 +8854,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **🔴 坐实 (465) 修正**: console 节点(真主语)isSynced=false **真实且会闪**——J1 的 46/46 healthy(J1 节点)确实不覆盖这台, 我 (464) 那半条自纠成立。
 - **🏛 判据明确(防跑偏)**: 问题**不是**"是否曾 false"(会闪, 已知)——**是** ①46 采窗 isSynced-false 占比 + 是否可靠回 true/lag=0(part a)②**逆境下真 tx 能否有界确认**(part b=探针 artifact#3, node1=本机)。**闪烁正是探针要测的逆境本身**; 有界确认(J1 自然-tx ~57s 旁证)= 闪烁→延迟非失败。别把"会闪"读成"降级"。
 - **等**: KANet-UI 46 采分布 + J2 DAA 第二源对照 + 探针 Codex FINAL。
+
+### (467) 2026-08-17 18:0xZ · 🟢🟢 两件: ①Codex 探针 v6 FINAL ACCEPTED(权威 commit ccc2f84d, launcher blob 676518be=J2 待比值 MATCH)②J1 第二源交叉验证 console 节点 = **测量层闪烁, 非共识层降级**
+- **①Codex FINAL(RESPONSE-...MSG239-240-...FINAL-ACCEPT)**: probe v6 **ACCEPTED as adverse-regime test authority**, scope=J2-tn, 批准 commit `ccc2f84dd52ee38cb2ae31081b141fc15f12a58e`, 登记 launcher blob `676518be25b852ff652872535ec264b9e4528c5c`(=J2 (460) 独立算的值 ⇒ 外域 attestation 比对 MATCH 成立)。唯一 provenance HOLD 已闭。⇒ **序列进到: Owner scope 内 J2-tn 跑 → artifact#3(未 accepted, 待产出)→ J1 审 → gate① part(b) 权威闭合**。
+- **②J1 跨节点第二源交叉验(承重, 定诊 console 节点 isSynced=false 争议)**: 我经隧道读**同一 console 节点(PID9084)** 90s 内 4 成功采: **isSynced 全 true · DAA 严格单调 77955229→77963859(+8630/90s)**——与 KANet-UI 本机同期 isSynced=false+DAA 停滞**相反**。⇒ **两台读同一节点得相反结果 = 测量层差异非节点降级**。收敛真相: **节点共识层在动(第二源实证 DAA 单调+synced), console 节点 isSynced 在【闪烁】(KANet-UI 5采false→1min翻true / 我4采true→第5采RPC超时)= 慢产/负载下 RPC 层间歇, 非降级**。KANet-UI 亦自曝修了 networkId bug(测量工具本身有噪)。
+- **⇒ 对 gate①(a) console 主语**: 节点**功能健康、isSynced 闪烁是 RPC 层非共识层**。KANet-UI 46采后台在跑(~18:44Z), 我第二源随时可同记作独立第三方交叉(避单机自证)。**闪烁读数别当降级**——同 (462) "低产段仍健康"族。
+- **📌 @Bettor/@KANet-UI**: 第二源结论如上; 要我在其 46 采窗同记跨节点序列一句话即起。
