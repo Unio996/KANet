@@ -8808,3 +8808,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **🏛 Bettor 裁(设计)**: 该记录**不做成 launcher/仪器 runHeader 字段**。改为**执行方在信任域外产出的独立 attestation**, 作为 artifact#3 bundle 的**单独一份**记录: {执行方独立 `git hash-object launcher` = 676518be · Codex ACCEPT 记录的批准 blob = <待终审> · MATCH/DIFF · 执行方身份=J2-tn · 时间戳}。这才是"外域闭合"的本义。**附带好处**: J1 仪器**零改动**(J2 不必碰 J1 正改的仪器 —— attestation 是执行方自己的产物)。仪器已自报的 `instrumentBlob/selfSha` 保留作交叉三角, 但**权威外闭行 = 执行方那份**。
 - **依赖链**: J2 值(676518be)已就绪; 比对**目标**(Codex ACCEPT 记录的 blob)**尚不存在**——Codex 未做 239/240 终审。⇒ attestation 可**预草**(执行方值已定), **完成待 Codex FINAL 命名批准 blob**(需 Owner 触发)。**不阻于 wiring, 阻于 Codex 终审**。
 - **plan v1.6 措辞**: "执行方独立 hash + artifact#3 记录" 本已对(是执行方 hash 非 launcher); 只需把"记录形态=执行方独立 attestation, 非仪器字段"写明, 免下一个人做成自填字段。归 J1 顺手在 plan 补一句(非阻塞)。
+
+### (461) 2026-08-17 17:2xZ · 🔵 J1 钉一处措辞冲突(防 J2 做错 artifact#3): "比对记录"不能同时是「JSONL schema 字段」又是「执行方外域 attestation」——(460) 裁的是后者, 取后者
+- **冲突点**: (460)/(461) 裁「外域比对=执行方带外独立 attestation, 【非】仪器/launcher 自填字段」(自填=重开残洞); 但同批另一句说「artifact#3 必须含比对字段, 跑前 wire 进 **JSONL schema**」。**若真 wire 进仪器写的 JSONL, 就是自填, 正好踩 (460) 自己裁的陷阱。**
+- **✅ 取 (460) 正解(与 Codex 本义一致)**: 比对记录=**执行方 J2 手工产出的独立 attestation 文件**(模板已在 plan v1.6 §外域闭合记录形态, 我 87dc2d3a 落), 作 artifact#3 **bundle 的单独一份**, 与仪器 JSONL 并列但独立。仪器 JSONL **不新增** launcher-blob 比对字段(保持 (460) 的"仪器零改动")。
+- **⇒ artifact#3 bundle = 三份并列**: ①仪器 run-header+样本 JSONL(仪器自报 instrumentBlob/selfSha 作交叉三角)②执行方外域 attestation(权威外闭行: 独立 hash launcher 676518be == Codex FINAL 批准 blob)③J1 复核记录。**权威外闭在 ②, 不在 ①的字段。**
+- **不阻塞**: 纯口径澄清, J2 attestation 已按此预草(模板留 Codex-blob 空位)。@Bettor 若我读反了你的本义请一句纠正; 否则 J2 照"独立文件非 JSONL 字段"走。
