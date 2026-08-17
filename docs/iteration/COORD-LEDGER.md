@@ -8959,3 +8959,11 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **NWT 复审此定形(规则运转)**: J2 用 NWT 的线索继续推、推翻自己上一版、回请 NWT 复审 —— 独立复审闭环正常跑。**Bettor 不越位替 NWT 裁设计细节**(那会架空我刚立的独立复审)。
 - **🅿️ park 一条 governance 问题(J2 提, 我不现决)**: "**要不要允许新 custody 类型(如硬件钱包)入委员**" —— 当前 deriveCustody 只放 mnemonic-only(混合/privkey-only 皆拒), 语义明确、**不阻当前 §6-1 LIVE**。这是 §6-1 权限边界(谁能当委员)的**未决语义**, 若将来要 HW custody 入委员 = 需显式决策(扩 deriveCustody + DB CHECK)。**park, 不现决**; 需要时归 §6-1 边界议题。
 - design-layer, 非探针关键路径, bank 到 wiring-land。
+
+### (484) 2026-08-17 · 🔴🔴 NWT 第二轮深对抗审挖出 §6-1 主线信任边界洞: relay_id 身份抢注(无密码学锚定)· Bettor 实核确认 · + Owner 钦定 NWT 角色强化
+- **Owner 直令**: 更新 NWT 接位文件, 强化角色职能 —— 必须深入、真审、对抗审, 否则无意义。**已办**: 新建 [[project-nwt-role-deep-adversarial-review-mandate]](深/真/对抗三必须 + 无效审查禁止清单 + 必在环 scope 含 Bettor 自己裁定 + 在册判据族); MEMORY.md 索引置顶; NWT 08-12 handoff 抬头加"接位先读角色钦定"指针。
+- **🔴🔴 NWT 深审即出重货(Bettor grep 实核确认=真)**: NWT 第一轮浅(只核 §2 死分支), 第二轮**读全 u1-same-origin.mjs + u1-registration-pop.mjs、实去"打穿"** ⇒ 挖出 **relay_id 身份抢注**: deriveCustody(:126)只按 relayId 查 relay_nodes 的 custody **类型**(不验请求方控制该 relay); verifyRegistrationBinding(:180)只验提交方**自身**密钥内部一致(identity pubkey 派生自其自己的 rootXpub); INSERT(:220)把**提交方的**密钥写在其声称的 relayId 下。**⇒ 无任何"请求方密钥 ↔ relay_id"绑定** —— 攻击者自签自己一套 mnemonic/xpub/pubkey(PoP 必过, verifiedWith=攻击者自己 pubkey), s.relayId 填任一已存在的 custody=mnemonic id(如 J2test), 全过, 抢占 relay_id 主键(永久, 一次占死)。
+- **NWT severity 校准(精准)**: 资金操作(transfer :511 / mnemonic-reveal :530)影响半径封在 operator 自己资源(loopback + 零 per-resource 授权 = 现有 console API 信任模型); 但身份注册写永久 relayId 主键记录, 北极星=开放测试网 ⇒ 外部方将信任"relay_id=X 注册=X 控制"这一事实, 而它现**零密码学锚定=占位赛跑**。**面比资金操作宽**, 却 §0/§7 一次没提。
+- **NWT 处置建议(采纳·不 over-fix 不破范围)**: 不这轮补(破"零生产改/只报告"范围, 且非本 wiring 单独能解——整个 console API 信任模型要动)。①§0 显式声明继承的信任边界(loopback + 零 per-resource 授权, 同 transfer/reveal)②§7 加"relay_id 无密码学锚定=身份抢注面, 北极星前必须处理的既定风险, **不阻当前 wiring 落地**"。
+- **🏛 Bettor 裁**: NWT 校准成立。**当前 TN12 loopback 信任模型下 §6-1 注册可 live(非新暴露, 与既有资金操作同模型); relay_id 密码学锚定 = 北极星(开放测试网/外部方)前【硬闸】**。路由 J2 收 §0/§7。DECISIONS 记此风险。
+- **元**: 这正是 Owner 要的"有意义的深对抗审"实证——NWT 一挖就是九级阶梯 + Codex 定义冻结 + Bettor + J2 全都漏的主线洞(它们审的是 authority 委派机制, 没审"注册方是否真拥有 relay_id")。**问责→强化→立刻见大效**, 闭环。
