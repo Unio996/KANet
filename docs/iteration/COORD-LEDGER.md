@@ -8372,3 +8372,11 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **🅿️ Bettor 裁 PARK 不修**: **非 D-012**, Owner"只 D-012"仍在 ⇒ 记 backlog 不动手。money-path 相关(失败的 settle/paid 广播自锁)但当前 §6-1 未 live、无活跃生产钱路、结算 daemon 另有 retry/verify ⇒ **非活跃火**。
 - **修法形状(留给日后, 不现做)**: 把 `_recentOutbound.push` 移出 CHECK 函数, 改为调用点(:391/:429)**在真发【成功】后**才记 dedup(check 只读)。使 dedup 缓存与实际落地对齐(NO TX NO STATE CHANGE)。改 relay=money-path 邻近, 需 报→审→批→测(铁律0)+ 待 Owner 开 scope 出 D-012 之外。
 - 谢 J2 报-only 纪律 + KANet-UI 补独立数据点。
+
+### (394) 2026-08-17 · 🅿️ PARKED 缺陷#2(非 D-012·不动手): relay 广播 UTXO 零冗余(仅一笔≥3KAS, 余皆 2.8717 卡门槛下)· J2 实时自纠"必断"
+- **J2 实时自纠(好纪律)**: 上条"4s 不够⇒必断第2段"被**发出那条报告本身(3段/4s/3/3 全 HTTP 200)当场证伪** ⇒ "必"撤回, 找零 4s 内**有时**够。
+- **站得住的实问题**: relay 地址 **7341 笔 UTXO / 11 万 KAS, 但可广播(≥3 KAS)的仅【一笔】**, 其余最大批全 **2.8717**(卡 3 KAS 门槛下方一点点)。⇒ 非"发不出去", 是**零冗余**: 全队广播挤同一笔 UTXO, 它一忙别人撞 `need ~3 KAS, have 2.87`, 表现**间歇**。= 在册 `reference-comm-relay-self-shreds-its-own-sendable-utxo`(钱包自磨碎 sendable UTXO)族; J2 独立重发现。
+- **🔨 J2 判据(与在册吻合)**: **「余额充足」≠「发得出去」**。首见 `need ~3 KAS, have 2.87` 差点去 `consolidate_utxo`——而链上实有 11 万 KAS。**报错文本长得像"没钱", 照它动手=拿实金修不存在的病。**
+- **🅿️ Bettor 裁 PARK 不动手**: 非 D-012。修法=UTXO 拓扑(把大余额拆成数笔≥3KAS 做冗余)= money-path, 需铁律0(报→审→批→测)+ Owner 开 scope。**🔴 现在不 consolidate/不动钱**(误诊风险 + 在册 `reference-consolidate-utxo-880-fix-outputs-empty-noop` consolidate 可能 no-op)。
+- **修法形状(留档, 不现做)**: 先**只读**分辨 J2 未决的 (a 节点索引未收录找零 / b 别的过滤); 再设计拆分出多笔≥3KAS 广播 UTXO 做冗余(参 `reference-relay-utxo-topology-faucet-mega-consolidate`)。
+- 佐证: **Bettor 全程多段发送 VERIFIED ✓(2/2 3/3 4/4)** = 该路某些条件下可用, 佐证"间歇 contention"非"硬不可用"。两件(393 dedup 自锁 + 本条 UTXO 零冗余)均入 comm-path backlog, 待 Owner 开 scope。
