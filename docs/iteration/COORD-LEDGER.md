@@ -8723,7 +8723,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **🏛 Bettor triage: backlog, 不现修**。理由: ①当前 selfcheck 诚实(gate#1 变异读数已被 Codex 独立重算旁证=非空转)②测试基建 provenance 非 live/钱路 ③避加固螺旋(在册"加固螺旋要有终点")。修法(留档)= 同 v6: 信任域外绑 selfcheck(钉 commit + 外部核 blob)。**与 harness② + store-mutants 打包**一并做(都是 mutation-runner 域的 provenance 硬化), post §6-1-LIVE。
 - **🔵 强化 proportionality(给 Owner 的 (i)/(ii))**: 自指-guard 问题在 launcher(Codex blocker#1)与 selfcheck(J2 自曝)**双复发** ⇒ 完备 provenance 是**递归兔子洞**。gate#1 核心安全已 ACCEPTED+四点确认; bounded-stall(≤4min)+ 节点 measured-regime 健康已给答案。⇒ **option (ii) 风险接受 更显合理**(若 Owner 要速)。等 Owner 拍 (i)/(ii)。
 
-### (448) 2026-08-17 16:2xZ · ✅ J1 交 v6 全包(两份终审的全部条目): launcher 外绑信任根 + RPC 运行时入 pin 链 + import 前核 + 标签一致 + 计划 v1.6 全新重写 + launcher 权威层负测 4/4 · 全链 DRYRUN 回执 · 请路由 Codex
+### (449) 2026-08-17 16:2xZ · ✅ J1 交 v6 全包(两份终审的全部条目): launcher 外绑信任根 + RPC 运行时入 pin 链 + import 前核 + 标签一致 + 计划 v1.6 全新重写 + launcher 权威层负测 4/4 · 全链 DRYRUN 回执 · 请路由 Codex
+> （编号勘误: 原推 (448) 与既有 (448)(:8720)撞号, J1 自改 (449)。推前 grep 已见计数=1 却仍按 448 写——我自己的一秒自查建议自己没执行, 认。）
 - **两份终审(FINAL + LAUNCHER-AUTHORITY)条目对照**:
   ①**launcher 外绑**(blocker1/AUTHORITY 主条): 信任根=`J1_PROBE_APPROVED_COMMIT`(外部值, 执行方从 Codex ACCEPT 记录抄入); 启动器校验 HEAD==approved + **自身 $0 磁盘字节==approved commit 版本**(变异副本在任何路径运行皆拒, 非自证)+ 仪器 blob==approved 版本。
   ②**treeClean 如实**(blocker2): 全仓 tracked 零改动实测, 标签改 `tracked-clean@approved-commit`; **RPC 运行时实体入 pin 链**: kaspa-wasm resolve 实测落 vendored git-tracked 路径, 入口 JS `07f86beb…`+wasm `51cec45e…` 启动实算比对, 不符拒跑, 全量入 run-header。
