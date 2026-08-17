@@ -8887,7 +8887,7 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **⇒ 🏛 荐方案 C(A/B 的成本都避掉, 供 Bettor 拍)**: worktree checkout ccc2f84d + **只补 kaspa-wasm 这一条 symlink**(`ln -s <root>/shared/vendor/kaspa-wasm <worktree>/kasia-console/node_modules/kaspa-wasm`, 或拷这一个目录)——**不碰主树 node_modules(避 A 的冻结/混版本 + 避 J2 上次链毁 node_modules)**, 只在 worktree 内建一条指向 vendored(git-tracked, 只读)的链接。worktree 是 J2 私有、清理 `git worktree remove` 只删 worktree(链接指向主树 vendored, remove 不穿删——但保险起见清理前先 `rm` 那条 link 再 remove)。attestation 里显式披露"worktree + 补 kaspa-wasm link, 三 blob 已验==approved", 让 Codex 带全信息判。
 - **🔴 我不替 J2/Bettor 拍**(动的是执行环境, 归执行方+协调者); 只给三条实核判断消除猜测。若选 C, symlink 清理顺序(先 rm link 后 remove worktree)照 (388) 血教训。
 
-### (472) 2026-08-17 · 🏛 Bettor 裁: artifact#3 走【隔离 worktree】(选 B) 非冻结 live 树(选 A)· 授权链确认
+### (473) 2026-08-17 · 🏛 Bettor 裁: artifact#3 走【隔离 worktree】(选 B) 非冻结 live 树(选 A)· 授权链确认
 - **J2 (18:12) 拦格**: Codex 6 步第1步 "checkout ccc2f84d" 落共享 live 树 —— console+relay 从此树跑(多处 `await import()` 动态加载, checkout 中途混版本)+ KANet-UI 46 采/NWT 同树作业 + 仪器 `while(got<3)` 时长不可控(TIME_CAP 只上限, 最坏 360min)。选 A(冻结 live 树)vs 选 B(隔离 worktree + 拷 node_modules + 披露)。
 - **🏛 裁: 选 B(隔离 worktree)**。理由: ①**爆炸半径**: A=冻结共享 live 树最坏 360min + checkout 中途混 console 动态 import 版本 = live 钱路风险(在册 live-prod-tree-is-also-dev-tree); B=对 live 树零影响。②**主语正确保持**: worktree 只是代码位置, 仪器连的 node1=ws://127.0.0.1:17210(console 节点/J2 机)不变 ⇒ 测的仍是真主语。③**代码完整**: worktree@ccc2f84d, blob 已验同(launcher 676518be 等), fresh 树 clean, 满足 Codex 6 步全部。④**node_modules 拷贝非链接**(J2 对: 链接毁过 no-op + live node_modules 会变; 拷贝快照 kaspa-wasm 字节 ⇒ 运行时 pin 过; 且 node_modules gitignored 不脏 tracked-clean)。⑤**披露**: attestation 显式写"跑在 worktree 非主树"+三 blob 相同证据 ⇒ Codex 带全信息判(诚实非事后发现)。KANet-UI 亦荐 B(其无硬需 live 树、省"等我跑完"协调)。
 - **授权链确认(run 已批, 不戳 Owner 菜单)**: Codex 独立复核(e45b8a76)= 测量权威 acceptable, 但明标"broadcast 授权归 Owner TN12 证据政策, 非 Codex 审"。⇒ run 授权 = Owner 已授权探针测试计划 + "直接搞" + testnet 风险接受 + (413) sanctioned test。**在 Owner 已记政策内 = 已批**。Owner 已有可见性(我上条已报 "J2 GO 跑 artifact#3")。
@@ -8899,3 +8899,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **⇒ 对 artifact#3 执行的直接推论**: 探针 `while(got<3)` 要拿满 3 样本, 每次 submit 撞上"关闸段"(若 isSynced=false 与零推进重合, J2 待 KANet-UI 序列并排验证)就 excluded 重试 ⇒ **run 时长可能从几十分钟拉到数小时, 且不可预估**。
 - **⇒ 这【加强】方案 C/B(隔离), 【排除】A(live 树 checkout)**: A 的成本=冻结共享树, 而冻结时长 == run 时长(不可预估的数小时)⇒ A 把"run 要多久"直接变成"冻结队友多久", 不可接受。**C/B(worktree 隔离)让二者解耦**: worktree 里 run 拖多久都不冻结 KANet-UI/NWT 的 live 树。J2 那个"live 树冻结多久未决"的问题, **选 C/B 后根本不存在**。
 - **⇒ 净: 我三条技术判断 (471) + 本条 = 方案 C 在【合规(canonical=字节)、成本(只补一条 kaspa-wasm link)、隔离(run 时长不冻结队友)】三面都占优**。KANet-UI 也倾向 B。**执行环境仍 J2/Bettor 拍**(我不越权), 但技术面 C 无对手。
+
+### (474) 2026-08-17 · B-vs-C 执行细节收敛(隔离 worktree + 只供 kaspa-wasm, 拷非链)· J2 第二源 DAA 双峰(中位0)· 均值骗健康同族
+- **J1 (472/OptionC) 事实核(记功)**: ①canonical 判据 = **字节非路径**(`git hash-object $0` 目录无关; Codex "canonical only"=不跑变异副本, 机器判据=字节匹配)⇒ **worktree 跑合规**, J2 "Codex 认不认 worktree 绝对路径" 顾虑不成立。②仪器**唯一外部依赖 = kaspa-wasm**(`resolve('kaspa-wasm')` 经 node_modules/kaspa-wasm symlink 落 git-tracked 只读 vendored dir), bare worktree 缺它 resolve 失败。
+- **🏛 裁: B/C 混合 = 隔离 worktree + 只供 kaspa-wasm 依赖, 拷贝非链接**。理由: J1 对(只需 kaspa-wasm, 不必拷整 node_modules); J2 对(链接毁过 no-op) —— **两者兼顾**: **拷贝**那一个 git-tracked 只读 vendored kaspa-wasm(committed 字节 ⇒ 运行时 pin 过), **不用符号链接**(彻底避 J2 的链接事故), **不碰主树 node_modules**(避 A 的冻结/混版本)。node_modules gitignored ⇒ 不脏 tracked-clean。收尾按 (388): worktree remove 前清干净。
+- **J2 第二源 DAA(18:13, 记功)**: 144 样本/12min(console IPC→relay, 与 KANet-UI standalone-RPC 不同代码路径), **均值 4.9/s 但中位=0 = 双峰, 一半时间零推进**。🔨 判据: **均值判健康会把双峰读成"正常"** —— 同 "2min 均值 2.07 过闸而中间停 75s"(分布版)。J2 明标作用域: 量的是 DAA 非 isSynced, 不拿 DAA 冻结当 isSynced 代理(17:55 同现是 n=1)。
+- **点对齐计划(J2 提, 采纳)**: KANet-UI 给 46 采时间戳, J2 逐点并排看"零推进区间"与"isSynced=false"重不重合 ⇒ **实测 DAA 能否当 isSynced 代理**(而非假设)。这是 gate①(a) 分布判据的正解。
+- **对探针含义**: 双峰(半时零推进)正是探针要测的逆境 —— tx 落在零推进区间会等下一波 burst, 有界确认(探针量这个界)。
