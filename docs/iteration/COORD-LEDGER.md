@@ -8834,3 +8834,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **🟢 gate① 分解**: (a) 节点非降级/isSynced/DAA 单调 = **J1 节点已闭**; (b) 逆境 tx 确认 = 探针(待 Codex FINAL)+ 旁证(463)已加。
 - **🔴 同主语未竟**: 测的是 J1 笔记本节点; §6-1 LIVE 注册写 console 节点。**路由 KANet-UI 确认 console/注册节点身份+健康**(若非 J1/J2 台须重测)。
 - **DECISIONS 注记**: L140/L141 加状态注记(前提证伪 + gate① 分解 + 旁证 + 同主语未竟 + payoutshard:1824 撤下)。
+
+### (465) 2026-08-17 · Bettor 自纠同主语混用(我 464 犯了正警告别人的坑)· J2 PID 交叉锚解 scope · 接受 J2 DAA 第二源对照
+- **🔴 Bettor 自纠(显撤 464 半条)**: 我 (464)/DECISIONS 写 "L140 isSynced=false 是瞬时 flap 非真降级" —— **这条据 J1 节点(46/46 healthy)断, 而 L140「本机」= console 节点, 是别的主语**(在册 `evidence-can-be-true-and-about-a-different-subject`, 我今晚正拿它警告别人却自己踩)。**拆两半**: (i) tips premise 证伪=成立(regime-wide, J1+console 两台皆高 tips); (ii) isSynced=false premise **对真主语未结算**——console 节点(DESKTOP-DA9QQ46=J2-tn=探针 node1)**今日确实**读到 isSynced=false/starved/lag=680(J2 doc 61c79e04 + NWT 实测), 待 KANet-UI 46 采窗结算。
+- **🔵 J2 硬交叉锚(逐项非推断)解 scope**: J2 与 KANet-UI **同机**(hostname DESKTOP-DA9QQ46 + kaspad **PID 9084** 逐项对上)⇒ **探针 node1 = console 节点** ⇒ artifact#3 权威闭合的正是 gate① 真主语, 不用另找。我 17:54 的 "part(b) scope 错位" 顾虑**解除**。
+- **gate① 修正态(真主语=console 节点)**: (a) 非降级 = J1 节点已闭 / **console 节点 PENDING(KANet-UI 现测)**; (b) 逆境 tx 确认 = 探针(node1=console 节点=真主语, 待 Codex FINAL)+ 旁证(J1 自然-tx, 在 J1 节点)。
+- **🏛 接受 J2 提议**: KANet-UI 主测(不两人重复); **J2 在 KANet-UI 采样窗内同步记 DAA 序列作独立第二源=对照非重复**(在册: 单一仪器须交叉)。GO——同机两独立读者交叉, 强化 part(a) 读数可信。
+- **DECISIONS 注记已改**(L145-149): 拆两半 + scope 理清 + gate① 按真主语重述。

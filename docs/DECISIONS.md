@@ -142,9 +142,11 @@
 > 出处: Owner 终端 2026-08-17 · RPC 实测 node-status probe · COORD-LEDGER (399)。
 >
 > 📌 **状态注记(2026-08-17 · gate① 上文两处前提已被实测更正 · Bettor 记账, J1 制品, COORD-LEDGER (454)-(464))**:
-> 🔴 **L140「123 tips 异常/健康应个位数」= 前提证伪**(单点快照测一个易变量, 在册 window/volatility 族)。J1 节点健康终判(`docs/2026-08-17-j1-nodehealth-verdict-artifact.md`, 46 采/53min)+ NWT 独立跨节点数据 一致证明: **isSynced=true 时 tips 稳定 191-238(中位 193), 个位数从不出现** —— 高 tips = GHOSTDAG 单矿工体制 DAG 宽度**常态, 非降级信号**。Bettor 对全量 JSONL 程序化复核: isSynced **46/46 true** · DAA **严格单调 11.05/s 零回退** · 最长 7min 慢产段全程 healthy。**⇒ L140 的 isSynced=false 是瞬时 flap 非真降级; L141 "123 tips 倾向真降级" 判读作废。**
-> 🟢 **gate① 分解**: (a) 节点非降级/isSynced 健康/DAA 单调 = **对 J1 节点已闭**(强证据 + NWT 交叉); (b) 真 tx 逆境确认 = **探针**(v6, 待 Codex FINAL + artifact#3)。**旁证**: J1 被动观测器捕到一笔自然流量 tx(零主动广播, 413 permits 的自然路径)在实测 <1/s 低产段 ~57s confirmed(COORD-LEDGER (463))——**credit 为 (b) 的旁证但不 authoritative 闭合**(无 pin 链/绑定/attestation, 不替代 artifact#3)。
-> 🔴 **同主语未竟(J1 诚实边界)**: 本判测的是 **J1 笔记本节点**; §6-1 LIVE 注册/结算写 **console 节点**。须确认 console/注册节点身份 + 健康(若非 J1/J2 台须在该台重测)。
+> **⇒ 拆两半(Bettor 自纠今晚同主语混用, COORD-LEDGER (465))**:
+> 🔴 **(i) tips premise 证伪 = 成立(regime-wide)**: J1 笔记本节点(46 采, isSynced=true 时 tips 191-238/中位193/个位数0, Bettor 程序化复核)+ NWT/J2 在 console 节点(tips 204-218)**两台皆高 tips** ⇒ 高 tips = GHOSTDAG 单矿工体制常态, **非降级信号**。L141 "123 tips 倾向真降级" 判读**作废**(tips 部分)。此结论**跨主语成立**(regime 属性)。
+> 🔴 **(ii) isSynced=false premise 对【真主语】未结算**: J1 的 46/46 healthy 是 **J1 笔记本节点**; 而 L140「本机」= **console 节点(DESKTOP-DA9QQ46 = J2-tn = 探针 node1; J2 实读 kaspad PID 9084 逐项交叉锚定)**。该节点**今日确实**读到 `isSynced=false / starved / lag=680`(J2 带外 doc 61c79e04 + NWT 14:15-16:12 实测, 后恢复 isSynced=true/lag=0)。⇒ **「isSynced=false 是 flap 非降级」不能据 J1 节点断**——那是**别的主语**(在册 `evidence-can-be-true-and-about-a-different-subject`)。**待 KANet-UI 在 console 节点跑 46 采窗结算**(现进行)。
+> 🟢 **gate① 分解(按真主语=console 节点)**: (a) 节点非降级/isSynced 可靠 = **对 J1 节点已闭, 对 console 节点 PENDING**(KANet-UI 正测); (b) 真 tx 逆境确认 = **探针**(v6, node1=J2-tn=console 节点 ⇒ **权威闭合正是真主语**, 待 Codex FINAL + artifact#3)+ 旁证(J1 自然-tx ~57s, 但在 J1 节点)。
+> 🔵 **scope 已理清(J2 PID 交叉锚)**: 探针 node1 = console 节点(同机), 故 artifact#3 权威闭合的正是 gate① 关心的主语, 不用另找; part(a) 由 KANet-UI 现测补上。
 > 🔵 **L141 步②的 "payoutshard :1824" 已更正**(COORD-LEDGER (456), Bettor by-content 实核): `:1824` 区**早已修**(2026-07-08 `_resolveZkNativeCtorExtras`)且属**结算域非 §6-1 身份** ⇒ **从 §6-1 关键路径撤下**。§6-1 LIVE wiring 真实项 = ①registerIdentity 接线(依赖③迁移)②deriveCustody TOCTOU ③`u1_identity_challenge` 表迁移(真卡点·migrate.js 与 live 库皆无)⑤escape-hatch live-check。
 
 ### D-011 钱路改动"审核关卡 ≠ Owner 逐项点头"——去 Owner-gate 化,内部双审纪律不降 (2026-07-21 · Owner 频道直令 · Bettor 记账)
