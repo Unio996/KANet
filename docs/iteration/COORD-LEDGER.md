@@ -8761,3 +8761,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **✅ 独立核实 J1 防御纵深声称(不信转述, 读码)**: 仪器绑定 `j1-probe-binding.mjs:14` `if(row.sender_address !== expectedSender) return not-bound(sender-mismatch)`; verdict 只有 sender∧content∧txid 全等且 status=confirmed 才 'confirmed'。⇒ **换发送地址 fail-CLOSED 到 not-bound, 无法伪造健康读数**; m4 残洞最坏=假阴性(节点显得更差=保守方向), **不能**假阳性(显得更健康)。对"为上线背书"的健康探针, 危险方向被挡。
 - **✅ 外闭规程入 plan v1.6**: 执行方跑前独立 `git hash-object canonical` 比对 Codex ACCEPT 记录 blob + 只跑 canonical + artifact#3 记录之。= Codex blocker#1 原话 externally-checked-launcher-blob。
 - **🏛 Bettor 裁: v6/v3 两必修全闭 + 双缓解(外闭规程 + 仪器 fail-closed), 机制合格。→ 路由 Codex 终审**(如实告: m4 残洞=自指 guard 固有不可内闭, 已双缓解, 请判 read-only probe 可接受否)。Codex 需 Owner @GitHub 触发。
+
+### (454) 2026-08-17 · NWT 原始读数交叉核 = 质疑"123 tips 异常/健康应个位数"前提 · Bettor 重构 J1 节点健康问法
+- **NWT 交叉数据(好·主动核前提)**: 其一小时窗 tips=204→218→193, **从未个位数**; 且节点从 starved(lag 爬升)**直接翻回 isSynced=true/lag=0**——**不经过**"tips 收敛到个位再健康"这一步。⇒ 与 DECISIONS L140「123 tips 异常, 健康应个位数」**对不上**。
+- **🔴 Bettor 判: 前提存疑, 重构问法**。原 (16:43) 我照 L140 把"个位数 tips"当健康判据 = 未验前提(在册族: 单一读数需交叉、方向判据须先立基线)。真信号更可能是 **lag→0 / isSynced=true 的恢复能力**, 不是 tips 绝对值; 高 tips 在此 TN12 单矿工体制下**可能是常态**(GHOSTDAG 平行块)。
+- **⚠ 同主语纪律(我 (430) 的教训复用)**: NWT 三点(204/218/193)在**NWT 自己的节点**量; L140 的 123 在**特定节点/时刻**量。**不同节点/时刻不能直接比**——先确认量的是不是同一节点(§6-1 LIVE 关心的是 console/注册所在节点)。
+- **⇒ 重构给 J1 的判据**: 不问"是不是 123 / 个位数", 改问 **(1) 该 TN12 单矿工体制下 tips 的健康基线是多少**(先立基线再判异常)**(2) console/注册节点是否可靠回到 isSynced=true/lag=0**(NWT 见其节点能, 是正信号)**(3) 一笔真 tx 能否稳定 first-seen+confirmed**(探针答这条)。tips 绝对值降级为参考, 非判据。
