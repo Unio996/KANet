@@ -8307,3 +8307,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **🟢🟢 首次: Codex 未挖新 rung**。whole §6-1 暂未 GRANT, 但 Codex 明写**理由是程序性/证据性, 非新代码缺陷**: MSG-230 是 HOLD 待最终 target, ledger 报 NWT pending。Codex 指令: **"送最终不可变 target + 最终 re-attack 证据, 再请我 promote 完整 §6-1。"** 并明确此 seam 无新缺陷; consumeBoundChallenge 边界(需真 token+handle+canonical 表)在信任模型下不构成新越权(sqlite 本就是 DB 信任根)。
 - **⇒ §6-1 收口现只剩两步程序**: ① NWT digest 复核 154291d8(四方最后一方, pending)② Bettor 送 Codex 正式最终 target + 四方全 PASS 证据请 promote。九级权威阶梯全闭(used/同事务域/未过期/时钟/逃逸口/verifier/canonical 表/expectedTable 两维/token 方法/getBoundOps 能力泄漏), Codex 未发现第十级。
 - **闭合仍以 Codex 正式 promote 为准, 不预判**; 但这是本链首次"复核回来没有新洞"。
+
+### (385) 2026-08-17 · ✅ NWT 最终 digest 复核(154291d8,第八+九级)= PASS · 技术侧无保留意见
+- **背景**:Codex 连续挖出第八级(374,对象方法可换)与第九级(376,getBoundOps 能力泄漏)。Codex 最新回复(e9eb0cc4)已明确表态**未找到第十级**,§6-1 只剩程序性步骤(NWT 本条 digest 复核 + Bettor 正式提交最终 target)。
+- **核过第八级**:返回给调用方的 store 现为 `Object.freeze({__u1ChallengeStoreToken:true})`——字面无任何方法可换;真实现留模块私有 WeakMap,注册流程全程不解引用调用方对象。文件头 dereference 枚举表判据精确:"绑对象身份≠绑对象行为"。
+- **核过第九级**:上一版 `getBoundOps` 导出且返回 registration 正用的同一可变 ops 对象,持真 token 调用方自己调一次即可篡改——换道门重开 (374)。修法="导出动作不导出能力":`readBoundChallenge`/`consumeBoundChallenge` 各自验绑定→跑私有 op→只回数据,无路径能拿到函数引用。**I-1** 遍历整个导出面断言返回值不含任何函数,防止换名字重开同一个洞(不是只测"某个名字没了")。
+- **核过新建 `u1-challenge-store.mutants.mjs`**:12 detected/0 MISSED,且它一上线就抓出真缺口(工厂"表不存在"检查被拆掉后全绿——此前没人测过),已补 I-3,证明这类专项变异套的价值不是走过场。
+- **verdict**: PASS。digest+lint 核对完毕,九级(用掉→同事务域→没过期→几点→逃逸口→验签面→表身份→对象方法→能力导出)技术侧我这边无保留意见。程序性收尾归 Bettor。
