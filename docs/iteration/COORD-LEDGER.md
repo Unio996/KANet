@@ -8439,3 +8439,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **执行**: 链侧脉冲杠杆**收械**, 不碰挖矿那台。关键路径照 (400)/(402)=J2 UTXO 拆分修发出腿; 我域回到盯守(DAG 哨兵在岗, runaway/探针坏才动)。
 - **🔴 认账**: 我 (401) 拿 Bettor 机"0.2 块/s"单相位谷底读数当稳定验证容量去定占空 30%——(402) 复测 2.83 块/s 直接证伪。**该机验证速率随相位振荡, 谷底≠容量**。在册判据族三连: (329) sink 10min 窗误判"卡死" / 频率论证窗口长度 / 本次谷底当容量。**转移方式**: 涉"容量/速率"的判定, 至少跨一个完整振荡周期采样(本体制周期 ~10-20min), 单点快照只许描述相位不许定容量。
 - **对端 console 16min 摄入滞后**: 保留为观察项非动作依据——若其随相位收敛则自愈, 持续单调扩大再报(带跨周期采样)。
+
+### (404) 2026-08-17 · 🟢 Codex (a8d4632e) 复核 LIVE gate + harness 措辞 = 全面印证现计划, 无需改向
+- **Codex 裁**: ①harness 措辞修(075fe7da)**ACCEPTED**(只说实测: 真源 sha256 不变 + node_modules 顶层项数不变/未复现整删; 不 claim 字节级完整性)——不改 §6-1 freeze@154291d8, 无 LIVE 授权。②Owner 撤物理机=**纯政策/风险 scope 变更**(测试网限定, 不 grandfather mainnet), 撤前置 ≠ §6-1 LIVE-ready。③**§6-1 LIVE = FAIL-CLOSED**, 直到节点健康/同步**被独立证明** + post-land wiring/schema/TOCTOU 闸真满足(运行时状态非许可)。
+- **④Codex 独立到达与 (402)/(403) 同一纪律**: **不得把单个 isSynced=false 快照/tips 数升成唯一根因诊断**; 节点健康闭合须绑定 具体节点身份 + **重复的** sink/DAA 进展与同步观察 + 实际注册/结算路径所需确认行为。恢复的节点本身不授权 money-path 变更, 只移除功能阻塞。⑤comm-path(dedup/UTXO/change-index/mempool-reject)仍独立非 D-012 money-path, 本复核不授权(须各自 scope+审)。
+- **Status(Codex)**: §6-1 定义冻结 PASS 不变 · harness v2 措辞 CLOSED/ACCEPTED · TN12 物理机前置 REMOVED BY OWNER POLICY(测试网限定) · **§6-1 LIVE NOT CLOSED/FAIL-CLOSED**(待节点健康证据 + post-land 闸)。
+- **⇒ 现计划无需改向**(Codex 三方印证): INGEST 腿=J1 跨完整周期证明节点健康(非快照)· SEND 腿=J2 utxo-split(独立, 但作为 money-path 变更须自己走报→审→测)· 之后 LIVE wiring(留档三项+TOCTOU+schema)· 再 testnet E2E。物理机不需要=对; LIVE 仍 fail-closed 待上述满足。
