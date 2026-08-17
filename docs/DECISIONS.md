@@ -135,6 +135,12 @@
 > 🔴 **范围边界(Codex 明令不 over-promote)**: 本条**仅【定义冻结】**, **非** §6-1 LIVE/部署/迁移生产 schema/移钥/注册生产身份/签名广播/动任何生产钱路的授权。**post-land 闸原样保留**: `deriveCustody` pre-tx 读↔注册写之间的 TOCTOU 加严 · 具体持久表 schema/迁移/索引 + 生产 wiring · mutation-harness 改「变异临时副本」重构 · **Owner 物理机/LIVE 授权 + wiring 后运行证据**。⚠ **不 grandfather**: 未来生产 wiring 若改动被审信任形状(新参 / 调用方可选 provider / 对调用方态的新 `x.y()` 解引用), 本 PASS **不自动覆盖**, 须重跑参数/解引用 authority 枚举。
 > 出处: COORD-LEDGER (368)-(386) · 桥 MSG-224..231 + Codex responses(bcc8dd28/e008bbbc/3ae9e7eb/80b34870/e9eb0cc4/**65ee6818**) · target `154291d8`。
 
+> 📌 **状态注记(2026-08-17b · Owner 终端撤物理隔离机前置 · Bettor 记账)**:
+> 🔵 **Owner 2026-08-17 终端裁定「没条件搞, 不需要物理隔离机, 直接搞」** ⇒ **撤销 08-07 的「Owner 物理机 / ②密钥隔离验收」作为 §6-1 LIVE 硬前置**。风险接受: TN12 **测试网**(testnet KAS; Owner 多次定「测试网花真金无需顾虑」)。⚠ **本撤销 scoped 测试网**; 若未来上 mainnet, 密钥隔离问题须重议(不 grandfather)。
+> 🔴 **但 §6-1 LIVE 另有【非许可性·纯功能阻塞】现已 RPC 实核**: 本机 kaspad **isSynced=false**(2026-08-17 实测: isSynced=false / **123 tips**[异常, 健康应个位数] / ~2 块每 10s / blockCount==headerCount=1148156 / DAA=77545324 / isUtxoIndexed=true)。**节点降级未同步**——注册/结算需链确认, 降级链上=钱路不可靠(tx 间歇落地非稳定)。**物理机闸撤 ≠ 可即上线; 节点同步是现在的硬坎。**
+> 🔴 **⇒ §6-1 LIVE 真实序**: ①**先修节点健康**(chain 域, 与今晚早段链楔恢复同族, J1 域)——先判 isSynced=false 是已知单矿工 flap 还是真降级(123 tips 倾向真降级)②LIVE wiring(留档三项: registerIdentity 生产调用方接入 / payoutshard :1824 默认回落不对称 / u1-escape-hatch-live-check.cjs §5-6; + deriveCustody TOCTOU + 具体存储表 schema/迁移)③部署 + testnet E2E 运行证据。内部双审不降(D-011)。
+> 出处: Owner 终端 2026-08-17 · RPC 实测 node-status probe · COORD-LEDGER (399)。
+
 ### D-011 钱路改动"审核关卡 ≠ Owner 逐项点头"——去 Owner-gate 化,内部双审纪律不降 (2026-07-21 · Owner 频道直令 · Bettor 记账)
 - **触发**: #28/K-18 §3.4 修复清单里 Bettor 列了一条"等老板正式点头"才能上线,Owner 当场纠正:"这不是你决定做就可以的吗?你看看自己职责?我这块只看目标!具体做什么都是你排版,你驱动团队做事。"
 - **决策**: 涉钱路/covenant/结算的改动,**不再要求 Owner 对每一项逐笔点头才能上线**。Owner 只定方向、看结果;"什么时候技术上具备上线条件"由 Bettor 协调团队自行判定并驱动执行。

@@ -8406,3 +8406,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **J2 报备(铁律0)**: `mutation-runner.mjs:125` 现打印 `✅ 实依赖仍 N 项 ⇒ 依赖零改动(实测)`——但 `readdirSync(node_modules).length` 只数**顶层** ⇒ 工具**自身输出 overclaim**。J2 连到今晚同一个病("零写入自证只覆盖想到的那类")。
 - **🏛 Bettor 批**: 改成只声称实测的(顶层项数不变 / 未复现整删形态, 注非逐字节完整性)。判据: 字面只能覆盖 readdirSync.length 真给的信息。确切措辞 J2 定。**因是验证仪器: 改完重跑 selfcheck 三臂确认逻辑未动 + 贴读数**; 纯字符串改不必四方, 自跑 + 顺手一眼即可。
 - 递归 manifest/hash(支持"零改动"强断言)= 可选 backlog(Codex 非阻塞)。落地并入 harness② 收尾。
+
+### (399) 2026-08-17 · 🟢 Owner 撤物理隔离机前置「直接搞」+ 🔴 §6-1 LIVE 真实硬坎=节点未同步(RPC 实核)
+- **Owner 终端裁定(2026-08-17)**: 「没条件搞, 不需要物理隔离机, 直接搞」⇒ **撤销 08-07 的 Owner 物理机/密钥隔离验收作为 §6-1 LIVE 硬前置**。风险接受=TN12 测试网; **scoped 测试网, 未来 mainnet 须重议**。DECISIONS.md 已记权威注记(2026-08-17b)。
+- **🔴 但真实硬坎另在(Bettor RPC 实核, 非转述)**: 本机 kaspad **isSynced=false** · **123 tips**(异常, 健康应个位数) · ~2 块每 10s · blockCount==headerCount=1148156 · DAA=77545324 · isUtxoIndexed=true。**节点降级未同步**。J2 带外通报(61c79e04/c833802d)同源: `UTXO too small` 真因是"上一笔还没被打包"; 真跑目录 `/d/kaspa-tn12-data`。⇒ 注册/结算需链确认, 降级链上钱路不可靠(tx 间歇落地: 我方发送 VERIFIED 但 J2 屡断)。
+- **⇒ §6-1 LIVE 真实序**: ①先修节点健康(chain 域, 同今晚早段链楔恢复族)——先判 isSynced=false 是已知单矿工 flap 还是真降级(123 tips 倾向真降级)②LIVE wiring(留档三项 + deriveCustody TOCTOU + 存储表 schema/迁移)③部署 + testnet E2E 证据。**物理机闸撤 ≠ 可即上线。**
+- **comm-path 缺陷(393/394/396)现升级为 LIVE 依赖**: Owner 既开 money-path scope, 且节点降级正是 UTXO-too-small 的上游 ⇒ 这几条从"parked 待 scope"转"LIVE 前置"(节点修好后一并处理广播可靠性)。
+- **下一步(Bettor 驱动)**: 频道 loop J1(chain 域)核节点降级真况 + 恢复路径; 无 J1 则 Bettor 自查。内部双审不降(D-011)。
