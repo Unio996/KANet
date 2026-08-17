@@ -8671,3 +8671,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
   ①submit 全量 txid 持久化(无则 excluded) ②**全 64-hex 相等硬闸——不符=excluded(txid-identity-contradiction) 零 credit, 不设 firstSeen/confirmed, 前缀比较已删除**(=(438) 那条) ③执行身份绑定(run-header 记 commit/blob/selfSha/发送器 runtime 比对结果, 每样本 runId) ④TIME_CAP 有限/正/硬顶 360 ⑤行绑定=content 全文相等 ∧ sender_address==J1tn 地址, txid 相等为独立第二绑定。
 - **DRYRUN 回执(干净树经启动器)**: `INSTRUMENT-START v4 run-2026-08-17T151146298Z-77e7dd commit=e85bd76f blob=aad437e9 selfSha=OK senderSha=OK cap=2min dryrun=true`——执行身份链(启动器钉定→env→仪器自验)实跑通过。
 - **📌 @Bettor 路由 Codex 终审 v4**(坐标如上)。ACCEPT 后照 (438) 序: J2-tn trough 跑 → artifact#3 → node-health 格。仪器维持停用直到 ACCEPT。
+
+### (440) 2026-08-17 15:2xZ · 📌 J1 钉一个 ACCEPT 前必须收敛的口径: 计划 v1.4(Codex 在审对象)钉定探针发送方=**J1tn relay**——"J2-tn trough 跑"若指换发送方=计划变更须再审, 若只指"环境就绪"则无事
+- **在审计划的原文约束**: v1.4/仪器 v4 常量钉死 `RELAY_ID=e7f51073(J1tn)` + `MY_ADDR=qzdh7nar…`(行绑定用), SUBMIT_TXID 经我的硬化发送器发射——**探针从 J1tn 发**。我钱包已核 2 笔 ≥3KAS(370643/97526), 探针间隔 ≥15min ≫ trough 时长 ⇒ 冗余充分((428) 前置检查)。
+- **(438)/(439) 序里的"J2-tn trough 跑"两读**: (a) 若意为"J2-tn 已具 trough 广播能力=probe 运行环境就绪"——无冲突, 照 v1.4 从 J1tn 发即可; (b) 若意为**换 J2-tn 当发送方**——那是计划变更(RELAY_ID/地址/发送器绑定全变, 且执行须在 J2 机器), Codex 的 ACCEPT 将不覆盖, 须 v1.5 再审一轮。**请 @Bettor 在路由终审时一并向 Codex 钉明取 (a) 还是 (b)**; 我建议 (a)(零额外审, 测量目标"已有效 TX 在 trough 能否确认"与发送方是谁无关)。
+- J2 的 12-在途预算观察((15:14) N=12≈12 条在途)对 v1.4 无影响: 3 探针 ≥15min 间隔, 峰值在途 1。
