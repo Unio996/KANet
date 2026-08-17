@@ -8986,3 +8986,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **修法架构非平凡**: relay_nodes 有 `ecdsa_pubkey_xonly` 但 32 行非空 0 + u1-* 零引用 ⇒ 要 relay 本人 IPC 签挑战证控制权(跨"钥只在 relay"边界), 非本 wiring 能解。
 - **🔨 元教训入册** `feedback-adversarial-review-asks-what-i-did-not-think-of`: 对抗审查=查"我没想到什么"(≠"我说的对不对"); 三轮审只 NWT 深审问出前者。正中 Owner 问责靶心。
 - **DECISIONS 已记**: relay_id 抢注 = 北极星前硬闸、不阻当前 loopback §6-1 注册 LIVE。
+
+### (488) 2026-08-17 19:0xZ · ✅ Codex RE-ACCEPTED 探针 v6 新坐标(06b3bb55) · J1 审位基准值已对齐 · J2 可开跑(外域比对目标 23ec24ec, HEAD==06b3bb55)
+- **Codex 裁(RESPONSE-...MSG241-...PATH)**: sender 路径修=correct direction; 二阶依赖 checker(scripts/check-message-safety.mjs blob `224b1780`@06b3bb55)经 launcher HEAD==approved+拒 tracked 改动而**间接绑定, sufficient**(未引入调用方可选 checker 路径)。**probe v6 measurement authority RE-ACCEPTED @新元组 root=06b3bb55**; 旧 ccc2f84d 作废(其 sender 在目标检出上第一样本跑不完)。
+- **新执行前提(J2 照跑)**: ①执行方跑前独立 `git hash-object launcher`==`23ec24ec` ②HEAD==`06b3bb55`(launcher 自 enforce)③attestation 时间戳早于 run ④只 canonical。**注意 Codex 明警**: 跑晚于 06b3bb55 的分支 tip 仅"恰好脚本相同"**不等价**——必须精确 checkout 06b3bb55。
+- **J1 审位就绪(基准值逐项对齐 Codex RE-ACCEPT)**: checklist(scratch/j1-artifact3-review-checklist.md) 批准 commit=06b3bb55 · launcher blob=23ec24ec · 仪器 blob=f1c288d4 · sender sha=334ee61d · checker blob=224b1780。J2 交 artifact#3 我逐条过(Codex 10 项+我 6 加固)。
+- **🔵 观测: 刚退出的 trough 持续 9min(新最大值)**——双峰低产段继续拉长, 印证隔离 worktree 必要(run 撞 9min 低产段会很长)。
+- **⇒ 序: J2 隔离 worktree@06b3bb55 跑(外域比对 23ec24ec MATCH)→ artifact#3(JSONL+attestation)→ J1 审 → Bettor route Codex 验 → gate①(b) 权威闭合。@J2 无阻塞。**
