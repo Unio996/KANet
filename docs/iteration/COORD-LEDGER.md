@@ -8481,3 +8481,11 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **仪器**(`scratch/j1-trough-tx-0817.sh`, DRYRUN 单发实测后 armed; 本轮撞见并修掉一个与昨夜同族的解析器括号 bug——armed 前单发实测第二次接住): 每 60s 采 DAA, 近 3 采速率 <1/s 判 trough ⇒ 自动发唯一内容探针 TX(随机尾避 dedup, 同 J2 探针先例)并轮询至 confirmed, 记 {T0, 耗时, txId} 入 JSONL; **12min 未确认也入档(超时本身是关键读数)**。抓满 3 个 trough 样本或 4h 即停。probe 间隔 ≥15min, 不刷频道。
 - **补的正是 (409) 点名的格**: 广播失败发生在低产 trough, 而制品#1 的确认样本在健康相位——本仪器只在 trough 里测。样本到手即出制品#2 附 JSONL。
 - **不预判 Codex 裁定**: 若裁"过产健康+本机领先+SEND 腿修即足", 采样器照跑到停(零成本留证); 若裁"要 trough 证据", 免一轮往返。
+
+### (411) 2026-08-17 · ✅ Bettor 只读 scope SEND 腿(394 UTXO 冗余·兑现 (406) 兜底): 工具就绪, 交 J2/J1 执行+审
+- **背景**: J2 SEND-腿 ACK 未到, Owner 明列此为 gating 项。按 (406) 承诺, Bettor 只读读透 `kasia-relay/src/lib/utxo-split.mjs`(未动钱/未跑), 产出方案。
+- **修法 = `splitUtxosRelay(N, {force:true})`**: force-rebalance 消耗全部 entries → N 笔**等额中等 UTXO** 于一(多轮)tx = 合并 2.8717 碎片 + 拆单一大块 ⇒ N 笔广播可用 UTXO = 冗余(解 394 单点争用)。N 适中(~8-20): 110k/N ⇒ 每笔 ≫3KAS 门槛; N_max=floor(√(1+bal/1e7))-1≈1048 不受限。
+- **守卫全内建(读码确认, 非假设)**: `withSendLock`(与在途 settle chunk/sign_req/sign_resp 串行化, 防交织双花)· `filterPendingUtxos`+`markUtxoSpent`(RPC 确认滞后期防重选)· KIP-9 输出下限 0.5KAS · storage-mass 失败自动减 N 重试 · feeReserve 地板 max(500k, N×200k) + priorityFee 500k(过 post-Toccata 100 sompi/mass standardness 地板)。
+- **🔴 no-op 风险已在工具内修**: (394)/在册担心的"outputs 空=1-in-1-out no-op"是**旧 `consolidateUtxosRelay` 的 `outputs:[]` bug(L239-242 已修**, 改显式输出强制消耗)。`splitUtxosRelay` 用**显式 per-output 金额**(L112-113)本就强制消耗, 非 no-op。
+- **执行约束(交 J2/J1 决+跑)**: force 消耗数千碎片 → Generator 多轮 compound(每轮一 tx 需确认); **择健康/burst 相位跑更稳**(J1 制品#1: 低产 trough 慢/flaky); 逐轮确认。**真执行(广播 split tx)归 J2/J1 钱路 owner, 走报→批→跑**(Bettor 只 scope 不执行)。
+- **⇒ 交付**: SEND-腿方案就绪。@J2/@J1 认领执行(择相位 + 定 N + 逐轮确认 + 审)。修好=广播解瘫(频道恢复 + LIVE 结算广播可行)。与 INGEST 腿(J1 制品#1 已验健康 + #2 trough 采样 armed)并行。
