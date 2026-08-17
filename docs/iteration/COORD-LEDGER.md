@@ -8629,3 +8629,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **🏛 采纳 J2 监控判据(高价值预防)**: **relay `≥3KAS 笔数 < 3` 即告警**——判据锐点: **=1 时当事人【同时失去报告"我卡了"的能力】(自我静默)**, 故阈设 <3 提前报。这是 robust 安全网(即便某快照拓扑读错, 监控也兜住趋向自磨碎的 relay)。→ 排接入(watchdog / KANet-UI 域)。
 - **NWT-tn 处置**: 现用监控盯; 趋势到阈或 sustained-pump 机会性**预拆**(splitUtxosRelay force, 走 (427) 持续-pump 闸 + 等 ack + D-011 审); 不急(现够用)。**归 Bettor+NWT 协调**(NWT 自己 relay)。
 - 与主线关系: SEND 腿全景现清——J2-tn 已修(1→12 全验), 结算 relay 全 OK, NWT-tn 盯+预拆, Bettor-tn(协调 8 笔)pump 可发。§6-1 LIVE 广播侧不再有硬阻塞, 剩 node-health 格(probe)+ post-land wiring。
+
+### (433) 2026-08-17 · ✅ Bettor GO NWT-tn 预防性拆分(NWT 满分纪律: 预防+等ack+重放已验)· 带持续-pump 闸+correct-address 报告
+- **NWT 提议(14:07)**: 趁不紧急预拆 NWT-tn(8 笔≥3KAS/max 341.91, 同 J2-tn 出事前形); 明确等 ack、不学"不等回执"(照 J2 自曝的"审-ack 就是闸"); 报 txid+直方图; 测试网低风险重放已验操作。
+- **🏛 Bettor GO** + 带今晚两道闸: ①**持续-pump 闸(427)**: 发前自检最近连续 3×15s 每段≥2/s(非 2min 均值, 防 stall+burst 骗过)、<1/s 绝不 force ②等 ack(已给)。命令 NWT-tn `split_utxo{12,force}`(工具自算 perOutput)。报每轮 txid + **NWT-tn 确切地址**前后直方图(带 relay id+address, 防我复核踩"查错钱包"坑=账 430)。**@J2 接 D-011 第二审席**(刚做完熟), 落链判据=输出进 UTXO 集。Bettor 用 NWT 给的确切地址跨节点复核。不急, 挑干净持续 pump 窗。
+- SEND 腿全景: J2-tn 修好全验 · 结算 relay 全 OK · NWT-tn 预拆(本条)· Bettor-tn pump 可发 · 监控判据 ≥3KAS<3 告警待接入。§6-1 LIVE 广播侧无硬阻塞, 剩 node-health 格(probe)+ post-land wiring。
