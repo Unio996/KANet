@@ -53,6 +53,24 @@
 //       (343)(354) 两次证明"契约要求调用方提供 X" = 冻一个假保证; 第四级本来差点又走上那条路。
 //    ⚠ 验签(async)留在事务**外**先跑: better-sqlite3 的事务是同步的, 里面不能 await。
 //    ⚠ 表 schema 可 post-land; `createChallengeStore` 要求表**已存在**, 不自建、不碰 migrate.js。
+// 🔴🔴 **(368) 一次性枚举: 生产签名的每个参数, 逐个问"它是不是调用方可控的注入面"**
+//    (@Bettor 要求; 起因是我连栽两级同一形状 —— (364) 时钟、(366) 逃逸口, 而 (368) 的
+//     `verifyMessageFn` **一直就在同一个签名里**, 我改完时钟没有回头把签名扫一遍。)
+//    🔨 **判据: 打地鼠打不完 —— 修完一个注入面, 必须【当场枚举整个签名】, 而不是等下一轮被指出来。**
+//
+//  | 参数 | 是注入面吗 | 处置 |
+//  |---|---|---|
+//  | `sqlite` | ⚠ 是, 但它是**操作的对象本身** | 见下"信任边界"——不是本模块能收回的 |
+//  | `submission` | ✅ 是, **但它【本来就该是】不可信输入** | 全程当敌意数据验(N4-bis 不读 custody / 绑定 / PoP) |
+//  | `challengeStore` | 🔴 曾是 | (354)(366): 模块私有 WeakMap 绑 handle, 外部伪造不了 |
+//  | ~~`now`~~ | 🔴 曾是 | (364): **参数删除**, 内部取时钟 |
+//  | ~~`verifyMessageFn`~~ | 🔴 曾是 | **(368): 参数删除**, 生产恒走 kaspa-wasm 真验签 |
+//    ⇒ **生产签名现在只剩 `{ sqlite, submission, challengeStore }` 三个**, 前两个的性质如上, 第三个已结构绑定。
+//
+//  🔵 **信任边界(说清楚, 不假装收回)**: `sqlite` 是调用方给的 handle。一个传入伪造 handle 的调用方
+//     能让 `prepare/get/run` 返回任意东西 —— 但那已等于**控制了整个进程内的 DB 层**, 与"喂一个字段"不是同一量级,
+//     且 `createChallengeStore` 要求表真实存在、store 必须绑到**同一个** handle, 伪造成本是"整套仿真"而非"塞一个值"。
+//     **这条本模块收不回来, 所以写明而不是宣称已解决。**
 import { rootFingerprint, verifyRegistrationBinding } from './u1-same-origin.mjs';
 import { verifyRegistrationPop } from './u1-registration-pop.mjs';
 import { isStoreBoundTo } from './u1-challenge-store.mjs';
@@ -108,13 +126,12 @@ export function deriveCustody(sqlite, relayId) {
  * @param {object} a.challengeStore     **必传**: 由 `createChallengeStore(【同一个】sqlite handle, table)` 造。
  *                                     未绑定同一事务域 ⇒ 拒 `CHALLENGE_STORE_UNBOUND`(理由见文件头 (354) 那段)。
  *                                     store 自己拥有 SQL(消费是 CAS), 调用方没有机会把它写成非 CAS。
- * @param {function} [a.verifyMessageFn]   仅测试注入
  */
 export async function registerIdentity(args = {}) {
   // 🔴 (366) 生产入口**不接收任何时钟**, 也不看 args 里有没有类时钟的字段 ——
   //    时钟由这里【钉死】成服务端 `Date.now()`, 调用方在这条路上没有任何面可以影响它。
   //    ⇒ 就算有人把 `req.body` 整个展开进来, 也影响不到时间判定。
-  return _registerIdentityWithClock(args, () => Date.now());
+  return _registerIdentityImpl(args, { clock: () => Date.now(), verifyMessageFn: undefined });
 }
 
 /**
@@ -128,11 +145,11 @@ export async function registerIdentity(args = {}) {
  * @param {object} args    同 registerIdentity
  * @param {function} clock 返回 ms 的时钟; 被调用两次(PoP 前 / 事务内)
  */
-export async function __testOnlyRegisterIdentityWithClock(args, clock) {
-  return _registerIdentityWithClock(args, clock);
+export async function __testOnlyRegisterIdentityWithInjections(args, { clock, verifyMessageFn } = {}) {
+  return _registerIdentityImpl(args, { clock: clock || (() => Date.now()), verifyMessageFn });
 }
 
-async function _registerIdentityWithClock({ sqlite, submission, challengeStore, verifyMessageFn } = {}, clock) {
+async function _registerIdentityImpl({ sqlite, submission, challengeStore } = {}, { clock, verifyMessageFn } = {}) {
   const s = submission || {};
 
   // ① N4-bis —— 注意: **完全不看 s.custody**

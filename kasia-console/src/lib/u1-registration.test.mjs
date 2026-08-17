@@ -23,7 +23,7 @@ const { verifyMessage } = await import('kaspa-wasm');
 const realVerifyMessage = (args) => verifyMessage(args);
 const { deriveIdentityPubkey, rootFingerprint } = await import('./u1-same-origin.mjs');
 const { buildPopPayload, popMessageHashHex } = await import('./u1-registration-pop.mjs');
-const { registerIdentity, deriveCustody, REG_REJECT, __testOnlyRegisterIdentityWithClock } = await import('./u1-registration.mjs');
+const { registerIdentity, deriveCustody, REG_REJECT, __testOnlyRegisterIdentityWithInjections } = await import('./u1-registration.mjs');
 const { createChallengeStore } = await import('./u1-challenge-store.mjs');
 
 let pass = 0; let fail = 0;
@@ -263,9 +263,9 @@ await t('(D) 🔴 真竞态: 另一连接在【PoP 读之后、事务之前】�
   const st = chStore(); st.issue(ch);
 
   let raced = false;
-  const r = await registerIdentity({
-    sqlite, submission: submissionFor(relayId, id, ch), ...wire(st),
-    verifyMessageFn: (args) => {
+  const r = await __testOnlyRegisterIdentityWithInjections(
+    { sqlite, submission: submissionFor(relayId, id, ch), ...wire(st) },
+    { verifyMessageFn: (args) => {
       if (!raced) {   // 只抢一次
         raced = true;
         const attacker = new Database(dbPath);   // 真·另一个连接
@@ -322,9 +322,9 @@ await t('(E-3) 🔴 (359) 过期发生在【PoP 之后、事务之前】⇒ 事�
   const st = chStore(); st.issue(ch);
 
   let raced = false;
-  const r = await registerIdentity({
-    sqlite, submission: submissionFor(relayId, id, ch), ...wire(st),
-    verifyMessageFn: (args) => {
+  const r = await __testOnlyRegisterIdentityWithInjections(
+    { sqlite, submission: submissionFor(relayId, id, ch), ...wire(st) },
+    { verifyMessageFn: (args) => {
       if (!raced) {
         raced = true;
         const other = new Database(dbPath);
@@ -332,8 +332,8 @@ await t('(E-3) 🔴 (359) 过期发生在【PoP 之后、事务之前】⇒ 事�
         other.close();
       }
       return realVerifyMessage(args);
-    },
-  });
+    } },
+  );
   assert.ok(raced, '钩子没被调用 ⇒ 本格没测到那个窗口');
   assert.strictEqual(r.ok, false, '窗口内被改成过期仍注册成功 ⇒ 事务内 expiry 重检没在守');
   assert.strictEqual(r.code, REG_REJECT.CHALLENGE_EXPIRED, `必须由事务内 expiry 重检拦下, 实际 ${r.code}: ${r.reason}`);
@@ -395,10 +395,10 @@ await t('(F-2) 🔴 (364) 时钟在事务内【重取】: 真实时间在请求�
   sqlite.prepare('UPDATE _test_challenge SET expires_at = ? WHERE challenge = ?').run(base + 5_000, ch);   // 5 秒后过期
 
   let calls = 0;
-  const r = await __testOnlyRegisterIdentityWithClock(
+  const r = await __testOnlyRegisterIdentityWithInjections(
     { sqlite, submission: submissionFor(relayId, id, ch), ...wire(st) },
     // 第 1 次(PoP 前)= 还没过期; 第 2 次(事务内)= 已经跨过 expiresAt
-    () => { calls += 1; return calls === 1 ? base : base + 10_000; },
+    { clock: () => { calls += 1; return calls === 1 ? base : base + 10_000; } },
   );
   assert.ok(calls >= 2, `时钟必须被取【两次】(PoP 前 + 事务内), 实际 ${calls} 次 ⇒ 事务内没重取, 本格判据失效`);
   assert.strictEqual(r.ok, false, '时间在请求内跨过 expiresAt 仍注册成功 ⇒ 事务内没重取时钟');
@@ -426,6 +426,29 @@ await t('(F-3) 🔴 (366) 生产入口塞时钟【无效】: 这一格是 A-2 �
   assert.strictEqual(r.ok, false, '🔴 塞进来的时钟让过期挑战通过了');
   assert.strictEqual(r.code, REG_REJECT.POP_FAILED, `实际 ${r.code}: ${r.reason}`);
   assert.strictEqual(sqlite.prepare('SELECT COUNT(*) n FROM u1_identity_registration WHERE relay_id = ?').get(relayId).n, 0, '拒了却落了库');
+});
+
+await t('(F-4) 🔴 (368) 生产入口塞 verifier 【无效】: 伪造签名 + always-true 验证器仍须被拒', async () => {
+  // 🔴 Codex bcc8dd28 抓的第六级, 与 (F-3) 同款手法换成验签维度:
+  //    抄来的 root/xpub + 正确派生的 pubkey + 一个恒真的 verifyMessageFn ⇒ 若生产入口读它, N8 整层就没了。
+  //    (368) 之后该参数【不在生产签名里】, 所以这一格断言的是: 它一次都没被调用。
+  const relayId = insRelay({ mnemonic: 'enc-m-verifier' });
+  const id = makeIdentity();
+  const ch = 'ch-fake-verifier';
+  const st = chStore(); st.issue(ch);
+  // 签名故意做坏: 用另一个身份的私钥签, 真验签必拒
+  const other = makeIdentity();
+  const bad = submissionFor(relayId, other, ch);
+  bad.rootXpub = id.rootXpub; bad.identityPubkeyXOnly = id.pubkey;   // root/pubkey 抄成受害者的
+  let called = 0;
+  const r = await registerIdentity({
+    sqlite, submission: bad, ...wire(st),
+    verifyMessageFn: () => { called += 1; return true; },   // ← 恒真验证器
+  });
+  assert.strictEqual(called, 0, '🔴 生产入口竟然调用了调用方给的验证器 ⇒ N8 可被一个字段关掉');
+  assert.strictEqual(r.ok, false, '🔴 恒真验证器让伪造签名过了');
+  assert.strictEqual(sqlite.prepare('SELECT COUNT(*) n FROM u1_identity_registration WHERE relay_id = ?').get(relayId).n, 0, '拒了却落了库');
+  assert.strictEqual(st.read(ch)?.usedAt, null, '拒的路径不该消费挑战');
 });
 
 sqlite.close();

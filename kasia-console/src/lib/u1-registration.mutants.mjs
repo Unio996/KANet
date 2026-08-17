@@ -37,17 +37,20 @@ const MUTANTS = [
     (s) => s.replace('if (!bind.ok) return { ok: false, code: REG_REJECT.BINDING_INVALID, reason: bind.reason };', 'if (false) return null;')],
   ['③N8 PoP 闸拆掉(签名/挑战不合格也继续走)',
     (s) => s.replace('if (!pop.ok) return { ok: false, code: REG_REJECT.POP_FAILED, reason: `${pop.code}: ${pop.reason}` };', 'if (false) return null;')],
+  // ── (368): verifier 面必须在生产签名之外 ──
+  ['🔴 把 verifier 逃逸口搬回生产签名(恒真验证器可关掉整个 N8)',
+    (s) => s.replace('verifyMessageFn: undefined });', 'verifyMessageFn: args?.verifyMessageFn });')],
   // ── (366): 逃逸口必须在生产签名【之外】 ──
   //    ⚠ 这三格的锚点随 (366) 改签名一起换过 —— 旧锚点已不在文件里, 留着会变 INERT(等于什么都没测)。
   ['🔴 把时钟逃逸口搬回生产签名(退回 (364) 的命名约定档: 调用方塞同名字段即可伪造时间)',
     (s) => s.replace(
-      '  return _registerIdentityWithClock(args, () => Date.now());',
-      "  return _registerIdentityWithClock(args, typeof args?.__testOnlyClock === 'function' ? args.__testOnlyClock : () => Date.now());")],
+      '  return _registerIdentityImpl(args, { clock: () => Date.now(), verifyMessageFn: undefined });',
+      "  return _registerIdentityImpl(args, { clock: typeof args?.__testOnlyClock === 'function' ? args.__testOnlyClock : () => Date.now(), verifyMessageFn: undefined });")],
   // ── (364): 时钟 authority ──
   ['🔴 生产入口改收调用方的 now(退回 (364) 原病: 伪造 now 骗过过期检查)',
     (s) => s.replace(
-      '  return _registerIdentityWithClock(args, () => Date.now());',
-      '  return _registerIdentityWithClock(args, () => (args?.now ?? Date.now()));')],
+      '  return _registerIdentityImpl(args, { clock: () => Date.now(), verifyMessageFn: undefined });',
+      '  return _registerIdentityImpl(args, { clock: () => (args?.now ?? Date.now()), verifyMessageFn: undefined });')],
   ['事务内不再重取时钟(退回用 PoP 那一刻的时间)',
     (s) => s
       .replace('now: clock(), verifyMessageFn });', 'now: (globalThis.__popSnap = clock()), verifyMessageFn });')
