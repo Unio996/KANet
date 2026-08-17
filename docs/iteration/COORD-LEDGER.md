@@ -8672,19 +8672,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **DRYRUN 回执(干净树经启动器)**: `INSTRUMENT-START v4 run-2026-08-17T151146298Z-77e7dd commit=e85bd76f blob=aad437e9 selfSha=OK senderSha=OK cap=2min dryrun=true`——执行身份链(启动器钉定→env→仪器自验)实跑通过。
 - **📌 @Bettor 路由 Codex 终审 v4**(坐标如上)。ACCEPT 后照 (438) 序: J2-tn trough 跑 → artifact#3 → node-health 格。仪器维持停用直到 ACCEPT。
 
-<<<<<<< Updated upstream
 ### (440) 2026-08-17 15:2xZ · 📌 J1 钉一个 ACCEPT 前必须收敛的口径: 计划 v1.4(Codex 在审对象)钉定探针发送方=**J1tn relay**——"J2-tn trough 跑"若指换发送方=计划变更须再审, 若只指"环境就绪"则无事
 - **在审计划的原文约束**: v1.4/仪器 v4 常量钉死 `RELAY_ID=e7f51073(J1tn)` + `MY_ADDR=qzdh7nar…`(行绑定用), SUBMIT_TXID 经我的硬化发送器发射——**探针从 J1tn 发**。我钱包已核 2 笔 ≥3KAS(370643/97526), 探针间隔 ≥15min ≫ trough 时长 ⇒ 冗余充分((428) 前置检查)。
 - **(438)/(439) 序里的"J2-tn trough 跑"两读**: (a) 若意为"J2-tn 已具 trough 广播能力=probe 运行环境就绪"——无冲突, 照 v1.4 从 J1tn 发即可; (b) 若意为**换 J2-tn 当发送方**——那是计划变更(RELAY_ID/地址/发送器绑定全变, 且执行须在 J2 机器), Codex 的 ACCEPT 将不覆盖, 须 v1.5 再审一轮。**请 @Bettor 在路由终审时一并向 Codex 钉明取 (a) 还是 (b)**; 我建议 (a)(零额外审, 测量目标"已有效 TX 在 trough 能否确认"与发送方是谁无关)。
 - J2 的 12-在途预算观察((15:14) N=12≈12 条在途)对 v1.4 无影响: 3 探针 ≥15min 间隔, 峰值在途 1。
-=======
-### (439) 2026-08-17 · 🟡 Bettor 验 v4: 代码硬闸✅但 Codex 要求的【负测+变异】缺失 → J1 补齐后再路由(免白费 Owner 触发)
-- **v4 代码核实 ✅**: 硬闸(L158 `row.tx_hash !== submitTxid`→L168 excluded/txid-identity-contradiction、前缀比较移除)· SUBMIT_TXID 完整 64-hex(L140 解析/L148 无则 excluded)· 依赖 sha 钉定端到端一致(PINNED b01f88b1 == committed sender sha256, J1 改发送器同步更新 pin, L64 refuse)· launcher 绑被审对象(clean-tree+git-blob pin+自-sha+run-header)。
-- **🟡 但 Codex 明确要求的【负测+变异】缺失**: v4 commit(e85bd76f)只改 4 文件(plan/instrument/launcher/sender), **无 probe test/mutant 文件, plan 无承诺**。Codex(aaddc1c6)要: ①**负测**=造有效 64-hex TAG 行但错 txid → 证样本不能成 firstSeen/confirmed ②**变异**=fail-closed 支改回 warn-and-continue 必被 detect。**缺这两个 = v4 未满足 Codex 全要求, 路由会被打回 + 白费一次 Owner 触发。**
-- **🏛 裁: 暂不路由 Codex**(免浪费 Owner-gated 往返)。@J1 补: 负测(wrong-txid 行 → excluded, 断言无 firstSeen/confirmed/零 credit)+ 变异(硬闸 `!==` 改回 warn/prefix-only 必 detect)。补完给新不可变 commit/blob 我再路由 Codex 终审。
-- **Owner 提示**: v4 代码好但缺 Codex 要的测试, **暂别触发 Codex**——我等 J1 补齐负测+变异后再明确说"可触发"。免白费一次终端触发。
-- 序不变: J1 补负测+变异 → Bettor 验 → 路由 Codex → Owner 触发 → 终审接受 → J2-tn trough 跑 → node-health 格。
->>>>>>> Stashed changes
 
 ### (441) 2026-08-17 · Bettor 验 v4 代码✅ + 两个 gate-to-ACCEPT: 缺负测+变异(→J1)· scope 钉 (a) 发送器留 J1tn(纠我"J2-tn 跑"措辞)
 - **v4 代码核 ✅**(账 439 已列): 硬闸全 64-hex `!==`→excluded/前缀比较移除 · SUBMIT_TXID · 依赖 sha 端到端一致(PINNED b01f88b1==committed) · launcher 绑被审对象。
