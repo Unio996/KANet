@@ -9018,3 +9018,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **🟢 gate①(b) 结论(合并)**: **isSynced=true 逆境(低产 rate<1)格【权威内部闭】** —— 3/3 confirmed, ≤32.5s **上界**(非真延迟: firstSeen==confirmed 三样本 + 32.5s 三样本 0.1s 精度 = 发送 sleep+10s 轮询步, period=sampler-tick), 两节点同期 isSynced=true+DAA 单调, 三次自然旁证~46-61s 同数量级。**isSynced=false 格未覆盖**(submit 硬拒=不同失败模式, 非慢确认; 安全=无 admit-then-strand)。
 - **🔴 精度裂缝 = defect 393(J2 连线, 升级)**: excluded 的 failClass 单一化, 只取首次尝试成因(try1=node-not-synced 实拒), 掩盖 try2=dedup-blocked(去重闸拦, 从没再问节点)。根因=shouldBlockOutbound 放行时记去重(393)。**新后果类别: 削弱证据采集归因精度**(探针重试被自己去重闸拦、没到节点)⇒ 393 从"聊天不便"升级, 排期重新称重。**不改 verdict**(exclusion 仍正确: DEDUP-BUT-NOT-ON-CHAIN 未当已达)。修法= failClass 做**数组**(容第三种成因)。发送器日志本身对, 丢精度在仪器分类层(供 J1)。非阻塞。
 - **⇒ route Codex(MSG-242)**: artifact#3 + J1 PASS + NWT 对抗 + failClass/393 精度披露, 请独立验 → gate①(b) 权威闭。等 Owner @GitHub 触发。
+
+### (493) 2026-08-17 21:1xZ · ✅ J1 认领 failClass 精度洞=我仪器的账(:178 首个正则命中)· 修法在案(数组逐次分类, J2 荐)· 排期非现在(改字节要 re-pin+Codex re-accept)· logTail 完整=可事后重分类 · 补 (492) 未记的仪器归属细节
+- **责任层(J2 (4668e9) 点对, 我实核)**: 仪器(J1 owned):178 `failClass = /RPC node is not synced/.test(sendOut)?...` 对整个 sendOut(含所有重试)取**首个正则命中** ⇒ 永远报 try1 原因。发送器日志本身对(DEDUP-BUT-NOT-ON-CHAIN 不当已达)。**我仪器的账, 认领。**
+- **🔵 减轻(我核)**: :184 logTail 留最后 4 行含 try1+try2 全文 ⇒ **信息没丢, 丢的只是标量分类** ⇒ 可事后重分类。缺陷=分类字段单一化, 非信息丢失。
+- **🔨 修法(J2 荐)**: failClass 改按尝试逐次数组(容第三成因, 两档会再撞)。**排期非现在**: 改字节 ⇒ 三级 re-pin+Codex re-accept, 不为不改判精度洞烧一轮(artifact#3 已 PASS 双审收敛, 已带进 Codex 说明)。下次仪器动顺手改或 §6-1 LIVE 后独立小修。
+- **(393) 连线归 Bettor**(已在 (492) route): dedup 从"聊天不便"升"削弱证据采集精度"另一类别, 不重开裁定但补进 393 记录重称重。我不越域裁 park。
