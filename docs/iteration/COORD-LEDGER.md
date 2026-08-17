@@ -9012,3 +9012,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **✅ 但 verdict PASS 不变(校准的是读法非结论)**: ①exclusion 本身**正确**——发送器 `DEDUP-BUT-NOT-ON-CHAIN` 逻辑处理对了(去重报 duplicate 但链上查不到=不当已达, 继续重试→最终 no submit txid→zero credit), NWT 也认 exclusion 不受影响。②confirmed 那 3 条我复算全对, NWT 复核也认(32.5s 上界/txid/第二节点无造假)。
 - **🔨 校准 (490) 那格的读法(进结论)**: **"isSynced=false 时 submit 被拒=节点自我保护"只对每条 excluded 的【第一次尝试】成立**; 第二次是工具去重(没到节点), 那时节点是否已翻 true **未知**(重试没到达)。⇒ 回答 Bettor Q3: 把 excluded 整体算作"节点自我保护证据"是**过度归因**, failClass 该细分 try1/try2 来源。**不影响 gate①(b) 结论**(isSynced=true 逆境确认≤32.5s 上界那格照闭; isSynced=false 那格本就未覆盖)。
 - **📌 建议(归 J2 仪器, 非阻塞)**: failClass 按每次尝试的实际错误细分(try1=node-not-synced / try2=sender-dedup), 别用首次原因单一标签盖全部重试。@Bettor 合并双审 route Codex 时带上此校准。
+
+### (492) 2026-08-17 · Bettor 合并 artifact#3 双审(J1 审席 PASS + NWT 对抗)→ gate①(b) isSynced=true-逆境格内部闭 · 一处精度裂缝=defect 393(升级) · route Codex
+- **双审齐(新规则 (481) 运转)**: **J1 审席 (490) PASS**(11 项清单 + 从 06b3bb55 git 对象**独立重算** pin, 不信 J2 报告); **NWT 对抗 (5/6)** 核心 claim 成立且诚实收窄, 挖出 failClass 精度裂缝; **J1 (491) 认自己审席漏了该裂缝**(信了标签值没读 logTail 原文, NWT read-raw-lines 更深谓词逮到)——**双审价值第二次实证**(连 J1 细审也有盲点, NWT 补上)。
+- **🟢 gate①(b) 结论(合并)**: **isSynced=true 逆境(低产 rate<1)格【权威内部闭】** —— 3/3 confirmed, ≤32.5s **上界**(非真延迟: firstSeen==confirmed 三样本 + 32.5s 三样本 0.1s 精度 = 发送 sleep+10s 轮询步, period=sampler-tick), 两节点同期 isSynced=true+DAA 单调, 三次自然旁证~46-61s 同数量级。**isSynced=false 格未覆盖**(submit 硬拒=不同失败模式, 非慢确认; 安全=无 admit-then-strand)。
+- **🔴 精度裂缝 = defect 393(J2 连线, 升级)**: excluded 的 failClass 单一化, 只取首次尝试成因(try1=node-not-synced 实拒), 掩盖 try2=dedup-blocked(去重闸拦, 从没再问节点)。根因=shouldBlockOutbound 放行时记去重(393)。**新后果类别: 削弱证据采集归因精度**(探针重试被自己去重闸拦、没到节点)⇒ 393 从"聊天不便"升级, 排期重新称重。**不改 verdict**(exclusion 仍正确: DEDUP-BUT-NOT-ON-CHAIN 未当已达)。修法= failClass 做**数组**(容第三种成因)。发送器日志本身对, 丢精度在仪器分类层(供 J1)。非阻塞。
+- **⇒ route Codex(MSG-242)**: artifact#3 + J1 PASS + NWT 对抗 + failClass/393 精度披露, 请独立验 → gate①(b) 权威闭。等 Owner @GitHub 触发。
