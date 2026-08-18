@@ -9132,3 +9132,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **🔴 Bettor 认第4次验证miss + 补 verify-before-assert**: MSG-244 我写"dd36e7ef=真 fastify.inject", 实为 Proxy(:32 new Proxy)——**我没 grep 就断言**。真 Fastify 是 NWT b0d87ef9。我 execute-discipline 这次 grep 到了、但**在 MSG-244 发出【之后】** ⇒ 已发 MSG-245 更正。本会话第4次同类(五vs六 / reset / read-not-import / 此)。⇒ **纪律升级: 落任何具体技术断言(blob/计数/真vs假Fastify)【前】必先 grep/run 同轮核, 不是发出后再核。** 折进 [[feedback-bettor-passivity-drive-default-mechanism]] 同族(assert-before-verify 也是"图省事、代价转嫁")。
 - **§6-6 no-op-first-cell**: J2 正加 runner `expectMissedFirst`(首格 no-op 探针, 被 detect ⇒ 整轮作废), 补上"每轮自带阴性臂"。J2 自纠 06:34 那个 ✅ 有水分。
 - **状态**: wiring 内部四审齐 + Codex route/TOCTOU accept; 就差 Codex 复核 b0d87ef9/①-10(等 Owner 触发)→ wiring review-complete 待部署。
+
+### (511) 2026-08-18 · J2 查清 group_chat_log=v149 规格残留(0行0引用)· GO DATABASE.md 登记不删表 · scratch _*脚本隐患 park 为可见 backlog
+- **J2 只读实核**: group_chat_log + agent_groups 皆 v149 建(Tier2.2 群聊), 本机各 0 行, 全仓 *.js/*.mjs **零读取**; 唯一读它的是两个 gitignored 根 scratch(_nwt_read5/6.cjs, 6-9)把它当频道表查 ⇒ 恒空不报错。KANet-UI 今早"数据不一致"即同形(跑未入仓旧 scratch 查此空表)。
+- **🏛 GO J2 最小动作**: DATABASE.md 把 group_chat_log/agent_groups 登记为"v149 建·无写入/读取方·恒0行·规格残留", 让下一个人一秒判掉。**不删表**(J2 对: 0行0引用, 删要过迁移+审, 留着+标清更便宜; 在册 risk-asymmetry-dont-touch-working-code)。
+- **🅿️ scratch _* 脚本隐患 park(可见 backlog, 非 §6-1 blocker)**: gitignored 根 _* 脚本不入库、无检查扫、却被人再捡起来跑查陈旧/错表 —— 今日两起同族(我 reset 清工作 / KANet-UI 跑旧 scratch)。**不现修**(不开 scratch-hygiene 新战线, 守 §6-1 mainline focus + hardening-spiral-needs-endpoint); 记为已知隐患, 需要时再排(候选: 一条 lint/check 警告根 _* 脚本查 DB, 或例行归档)。
+- **J2 继续 §10 relay_id 锚定设计**(北极星前硬闸, 报备层)。
