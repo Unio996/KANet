@@ -39,3 +39,15 @@ J2 据 §2 需求设计 pubkey 跨节点身份机制(可复用 maker_relay_pk �
 - **N1/N4 的仓内先例(非新发明)**: `pool.js:4054-4057` 钱路已落"**不查** `relay_nodes.ecdsa_pubkey_xonly`(常 NULL、ccvr9 实测对不上), 改 `deriveXOnlyPubkey(address)` 活派生"。设计引它为先例。
 - **N7(新增, 由 J1 设计输入)**: P2PK 下 relay **address 本身即 pubkey 承诺**(可互转)——「payload 携带 pubkey」与「relay address」是同一信息两种编码。**N7: 身份规范编码必须钉死一种**(address 还是 x-only pubkey), 防同一身份出两个字符串的歧义。
 - **权威判据强化 N2**: J1 实测 3 行 stored==address-derived 3/3 MATCH, 但无 trigger/CHECK 守一致 + ccvr9 在册失配 ⇒ **库列最多做便利缓存, 权威只能是活钥/payload 自带 pubkey**(强化 N2)。
+
+## §6 Codex 审(08d92aba)= ACCEPTED DIRECTION + settle N7 + J2 设计验收链
+
+Codex 全面佐证 pivot(身份=pubkey ✅ / relay_id 非全局身份 REJECTED / 同机签名证明 REJECTED「新 brief 正确地不再依赖它」/ 不复用 ecdsa_pubkey_xonly 列作权威)。三条定死 + 一条验收链:
+
+- **N7 settle(Codex 定)**: canonical 身份 = **x-only pubkey 字节(恰 32B, 渲染为小写 64-hex, 用验签同一 crypto 库校验)**, **不是 address 串**。address 是网络/呈现编码, 可派生/缓存作路由/UI, **但绝不得为同一钥造出第二身份串**。⇒ §2 的 N7 由此定形。
+- **N5 强化**: 签名 = **域分隔的 canonical 声明**, 至少绑 {协议/域 tag, version, network, canonical relay pubkey, operation/type, replay/epoch}。**绝不签字段序/规范化会跨实现漂移的 ad-hoc JSON**, 除非 canonical 序列化本身冻结。
+- **N8(新, Codex 点6)**: **控钥 ≠ 身份连续性** —— pubkey K 自签只证控 K, **不证** K 承继某旧 relay_id/旧 pubkey。迁移/轮换**硬性 out-of-scope**; 在迁移协议存在前, **禁**从本地 DB 查静默推断「旧 relay_id → 新 pubkey」连续性。新钥身份与旧记录迁移是两个问题。
+
+**🔴 J2 最小设计验收链(Codex 给, 设计须逐环显示)**:
+`canonical relay pubkey → canonical 域分隔签名声明 → 远端从 payload 直验(不查本地表)→ uniqueness/replay 状态按该 canonical pubkey 建键 → 可选本地 relay_id 映射`
+**+ 负测必须证**: 改 network/domain/version/pubkey 或以本地 relay_id 替换 ⇒ **破验证/身份查找**, 而非静默把两个身份别名成一个。

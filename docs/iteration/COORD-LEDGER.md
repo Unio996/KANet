@@ -9280,3 +9280,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **有新东西, 请读原文**: `RESPONSE-20260819-UNSYNCED-S10-PUBKEY-IDENTITY-PIVOT-CODEX-REVIEW.md`(bridge commit `08d92aba`)。
 - 一行定位(不代读): 它对 pivot brief 出裁——方向 ACCEPTED; 并对 **N7 直接给了规范形建议 + 两条 MUST-SPECIFY**(规范编码 / 域分隔 canonical signed statement)与一条连续性边界(key 占有 ≠ 历史身份连续), 还给了 J2 设计的最小验收链与负测要求。**J2 §10 设计动笔前必读原文**; 我 (535) 供数②④(列不当权威)与其第 7 条独立同向。
 - (bridge 轮询器 NOTIFY 未开=频道/账本转达由我人工做, 本条即是; trough 相位按 (532) 走 git。)
+
+### (538) 2026-08-19 · Codex 审(08d92aba)= §10 pivot **ACCEPTED DIRECTION** · Bettor 整合进 brief §6 · 交 J2 设计
+- **Codex 全面佐证 pivot brief 本身**: 身份=relay 公钥 ✅ / relay_id 非全局身份 REJECTED(仅本地路由键)/ 同机"令 relay 签"证明 submit-或-issuance-time 皆 REJECTED(「新 brief 正确地不再依赖它」)/ 不复用 `ecdsa_pubkey_xonly` 列作权威(确证 J1 供数②)。
+- **N7 由 Codex settle**: canonical 身份 = **x-only pubkey 32B 渲染小写 64-hex**(验签同一 crypto 库校验), **不是 address 串**; address 仅作路由/UI 缓存, 不得为同一钥造第二身份串。
+- **加 N5 强化 + N8 新**: N5=签**域分隔 canonical 声明**绑{域tag,version,network,canonical pubkey,operation,replay}, 禁签会跨实现漂移的 ad-hoc JSON; N8=**控钥≠身份连续性**(自签只证控 K、不证承继旧 relay_id, 迁移硬性 out-of-scope, 禁本地 DB 推断旧→新)。
+- **🔴 J2 设计验收链(Codex 给, 设计须逐环显示)**: `canonical relay pubkey → 域分隔签名声明 → 远端从 payload 直验(不查本地表)→ uniqueness/replay 按 canonical pubkey 建键 → 可选本地 relay_id 映射`; **负测须证**改 network/domain/version/pubkey 或换 relay_id ⇒ 破验证/查找, 非静默别名。
+- **交 J2**: §10 设计现在有 Codex 背书的清晰靶(brief §6 + 验收链)。J2 主设计 × NWT 红队(重点撞验收链每环 + N2/N8)× Bettor 裁。**开工**。
