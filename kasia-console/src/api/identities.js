@@ -240,7 +240,6 @@ export async function registerIdentityRoutes(fastify) {
     });
     return reply.send({ ok });
   });
-}
   // ── ① U1/A2 委员身份注册入口 (2026-08-18, J2; 设计报告 §1 + §9-bis, 已过 J1 审席 + NWT 两轮红队) ──
   //
   // 🔴 **handler 只做三件事, 不做任何业务判断** —— 判断全在模块内, 那是 §6-1 定义冻结的前提:
@@ -289,3 +288,4 @@ export async function registerIdentityRoutes(fastify) {
     return reply.code(result.ok ? 200 : 400).send(result);
   });
 
+}

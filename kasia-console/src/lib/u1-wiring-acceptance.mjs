@@ -19,6 +19,27 @@ const t = (n, f) => { try { f(); console.log('[PASS] ' + n); pass++; } catch (e)
 const A = (c, m) => { if (!c) throw new Error(m || 'assert'); };
 assert.ok(routeSrc.length > 500, '取路由源码失败, 后面的断言会全部虚过');
 
+// 🔴 ①-0 是本套件【最先加、最后才想到】的一条, 加它的原因写在这里, 别删:
+//    ①-1..①-11 全部是 readFileSync + 正则/includes 的【纯文本】判据。
+//    2026-08-18 我把路由插到了 registerIdentityRoutes 函数体【外面】(模块顶层),
+//    该文件 import 即抛 ReferenceError: fastify is not defined,
+//    而这套静态验收照样 10 PASS —— 不是走运漏过, 是这类问题【不在文本匹配的判别范围内】。
+//    ⇒ 任何检查源码里有没有某段字的套件, 都必须配一条【真的把它加载起来】的用例。
+const ta = async (n, fn) => { try { await fn(); console.log('[PASS] ' + n); pass++; } catch (e) { console.log('[FAIL] ' + n + ' :: ' + e.message); fail++; } };
+
+await ta('①-0 模块可真 import, 且路由注册在 registerIdentityRoutes 函数体内(非模块顶层)', async () => {
+  const mod = await import('../api/identities.js');   // 顶层 fastify.post ⇒ 这一行就抛
+  A(typeof mod.registerIdentityRoutes === 'function', '未导出 registerIdentityRoutes');
+  // 阳性对照: 用假 fastify 调它, 必须真的注册到 u1-register
+  //   —— 路由若又被挪出函数体, import 会先炸; 若被挪进别的函数, 这里收不到。
+  const seen = [];
+  const fake = new Proxy({}, { get: (_, k) => (k === 'post' || k === 'get')
+    ? (path) => { seen.push(k + ' ' + path); } : () => {} });
+  mod.registerIdentityRoutes(fake);
+  A(seen.includes('post /api/identity/u1-register'),
+    '调 registerIdentityRoutes 后没看到 u1-register 注册, 实收: ' + JSON.stringify(seen));
+});
+
 t('①-1 registerIdentity 生产签名逐字未变(仍三键, 无新参; 时钟仍钉死在入口)', () => {
   const reg = readFileSync(new URL('./u1-registration.mjs', import.meta.url), 'utf8');
   A(reg.includes('export async function registerIdentity(args = {})'), '生产签名被改了');
