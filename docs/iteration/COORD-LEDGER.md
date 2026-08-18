@@ -9198,3 +9198,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **授权链齐**: Bettor 三点批 + Bettor 代码审 PASS(独读 179 行) + NWT plan GO + NWT 代码级审 PASS(9ebeeeb1 全文 18 处 logSafe 逐点核无泄露) + 密钥托管面 PASS + tester-3 get_pubkey 通/custody=mnemonic/不在 DENY。⇒ **Bettor 放行执行** `--relay=tester-3 --execute`, J2 跑, 三方验预注册判据(E1 阴性零写 / E2 ok+行+1 / custody 服务端派生 / root_fingerprint 重算 / E3 消费 / E4 重放拒 / E5 零附带)。
 - **backlog(NWT 提)**: logSafe = console.log 改名、无脱敏 ⇒ 零泄露靠人逐点核非函数自拦(守卫不自执行, 同自指-guard 族)。加真 redact/敏感 key 名拦。非阻本次。
 - **定性守死**: 证【验证半场 live 贯通】非"旗舰真能注册"(签发口=下一块砖)。
+
+### (522) 2026-08-19 · 🎉 §6-1 注册【验证半场】live 贯通 = 四方独立验成(12 PASS)· 授权回滚 · 定性守死
+- **执行 = 12 PASS / 0 FAIL**(J2 跑 --relay=tester-3 --execute, 执行前 Bettor+NWT 双代码审已齐, J2 澄清未抢跑=时序交叉)。**四方独立查 live 库全对上**(J2+KANet-UI+NWT+Bettor 各自不经脚本查): registration 1 行 tester-3/custody=mnemonic(服务端派生)/root_fingerprint 逐字对/pk==get_pubkey + challenge used_at 已消费 + 无第二行(重放拒未造重复)。E1 阴性 CUSTODY_NOT_MNEMONIC 零写 / E2 ok+行 0→1 / E3 消费 / E4 重放拒 / E5 零附带。**真 relay+真 PoP 签+真一次性挑战 CAS+真落库, live 非隔离库。**
+- **🔴 定性守死**: 证【验证半场】非"旗舰真能注册"——挑战手工 INSERT(签发口未建)、真实用户走不到第一步。**签发挑战入口 = §6-1 之后真正下一块砖。**
+- **回滚已授权**(证据四方留证后): J2 跑 DELETE registration+challenge 归 0。backlog: logSafe 无 redact(名字承诺了没实现的保证=比没名更险, 改真 redact 或改名 log)。
