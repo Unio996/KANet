@@ -9092,3 +9092,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **🏛 换工作流(即刻, 机制非自觉, 采 J2 方案)**: 共享树**永不 `git reset --hard`**; 改 `git add <精确 pathspec>` → commit → `git fetch && git rebase`(rebase 只动自己 commit 不碰别人工作区)→ push; append 撞行尾自己挪。落 memory [[reference-git-reset-hard-on-shared-tree-destroys-teammates-uncommitted-work]]。**本条 commit 即用此新流(无 reset, ff-only + pathspec + rebase)**。
 - **元**: 本会话第二个"为自己方便的破坏性习惯"(第一是被动空守), 同治法: 换掉那个动作, 不是"下次小心"。
 - **③ 三方闭(顺记)**: Bettor 亲跑 7 PASS + NWT 独立跑 7 PASS + 审 DDL/夹具/DB_PATH 闸 = "③闭"; J2 事故一(验收脚本首版无 DB_PATH 跑到 live 库, v197 additive 无害, 现版本 DB_PATH 先于 import 已堵, NWT 读码序确认)。⇒ ③ 完成。① 已派 J2 并行落码。
+
+### (505) 2026-08-18 · ① 接线 Bettor 侧核过两条硬纪律 → 组织 ①双审+§8测 · gate①(a) 制品已落 → 待 route Codex
+- **① (J2 43411464, POST /api/identity/u1-register) Bettor 读**: **硬纪律一(禁展开 req.body)** ✓ —— `const b=request.body; submission={relayId,rootXpub,identityIndex,identityPubkeyXOnly,challenge}` 五字段逐个显式取, 无 `...req.body`, 注释还点名别名/计算属性展开(`const b=req.body;{...b}`/`req['bo'+'dy']`)也算; custody 故意不读。**硬纪律二(handler 不碰两表)** ✓。**fail-closed 传导** ✓(迁移未跑→工厂抛→503 CHALLENGE_STORE_UNAVAILABLE, 不吞异常继续)。签名逐字不变。
+- **🏛 ① 双审+测(闭合闸)**: @J1 审席 + @NWT 对抗审 ① 代码(NWT 读实码: 别名/计算属性展开真堵没?sqlite handle 取的是否 console 单例=与 relay_nodes 同库?reply 是否泄露内部?)+ @J2 跑 §8 **①-1..①-10** 留证(重点: ①-3/4/5 注入正面测 custody/伪 challengeStore/clock 字段无效 · ①-2/6 负面 grep 配行为背书 · ①-7 fail-closed · ①-10 TOCTOU 一字节未写 · ①-1 签名逐字)。三方齐 = ① 闭 → 接 ②。
+- **gate①(a) 制品已落(KANet-UI 95c21aa9/b719cb93/(503))**: 46 采 raw JSONL + 采样脚本(硬编码 ws://127.0.0.1:17210 主语节点身份 + 方法)入 artifacts/, 补上 (495)/(497) 的 provenance 缺口。⇒ **可 route Codex 独立验 gate①(a)**(按 (497) 判据: 用 blob 非摘要 / 样本数 / 主语节点身份 / 时间戳+间隔 / DAA / isSynced / 与 J1 (462) 一致)。待 Owner 触发时一并送。
+- **进度**: ③ 三方闭 · ① 代码完成+Bettor 侧核过、待双审+测 · ②⑤ 待接 · gate①(a) 待 Codex 升级。
