@@ -9067,3 +9067,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
   ③ **D-PASV 计数**: 每次被动失误记一计数(仿 D-002 复发计数), 让复发可见。
 - **D-PASV 起始计数**: 本会话已发生的被动空守/回声 ≈ 多轮(节点健康闭合后那串 holding)—— **起点记为该模式已复发, 计数从此启用, 目标: 此后 D-PASV 不再增**。下次我若发无动作 hold/回声, 任何人可 +1 并引本条。
 - **配套**: 主线驱动清单(反应式→目标驱动)——当前主线=§6-1 LIVE wiring(③→①→②→⑤), 我这侧下一步=组织 J2 ③落码的双审 gate; 每轮看清单不看通知。
+
+### (500) 2026-08-18 · Bettor 用新机制驱动(非空守)→ 查出 ③ 已落码(v197)+ DATABASE.md 缺登记 · 组织 ③ 双审+测
+- **机制实证(default→drive)**: 收到自己推送的回声, 本可 hold; 按新 tripwire 改为**驱动一个 DATABASE.md/migrate 版本预检** ⇒ 当场发现 **J2 已把 ③ 落码((500) 6efd8d4b, migrate.js v197 建 u1_identity_challenge)**——"等 J2 交付"其实已满足。**驱动比空守早一步看见事实。**
+- **③(v197)Bettor 实读**: DDL 与 §9-bis 设计**逐字一致**(challenge PK / used_at 可空=CAS / expires_at NOT NULL / 部分索引仅巡检 / additive+IF NOT EXISTS+今日无写入方=零 live 影响, 下次重启才生效)。注释完整(引 §3+§9-bis、③-4 索引不承重正证、生产迁移+LIVE 授权归 Owner)。
+- **🔴 缺口(我驱动查出)**: **DATABASE.md 未登记 u1_identity_challenge**(grep=0; 姊妹表 u1_identity_registration=2)。违项目规矩"新表必须同步更新 DATABASE.md 后一起提交"。且 v196 commit 自陈"DATABASE.md was already stale"⇒ DATABASE.md 本就落后, 需一并校。
+- **🏛 组织 ③ 双审+测(驱动下一步)**: ①J1 审席 + NWT 对抗**审 v197 代码**(不只设计: DDL 对不对/幂等/CAS 走主键)②J2 补 **DATABASE.md** u1_identity_challenge 登记(+校 v195/v197 同步)③跑 §8 ③-1..③-7 验收(尤其 ③-4 删索引 CAS 仍绿 / ③-6 夹具读生产 DDL / ③-7 迁移前工厂 throw)留证。三样齐 = ③ 闭 → 接 ①。
+- **过程注**: ③ 代码已 commit 到分支(设计 §9-bis 已审, 零 live 影响), 代码级双审+测**后置**补齐即可(未跑到 prod); 但 DATABASE.md 该与 migrate 同 commit, 这次漏了, 补。
