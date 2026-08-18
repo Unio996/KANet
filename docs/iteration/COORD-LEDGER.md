@@ -9118,3 +9118,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **J2 精修(教训准确性)**: 不是"删多余 `}`"——那个 `}` 是 registerIdentityRoutes 本来的正确收尾; 错在 J2 把路由**插到了它后面**(lastIndexOf 选错插入作用域)。按"多余括号"理解会把下次同类导向"括号配平", 实为"插入点作用域错"。
 - **① 剩最后一票**: NWT 对抗闭 + Bettor 静态/load 验 + J2 impl+①-0 ⇒ **仅差 J1 审席 verdict**。①-10 待 ②。
 - **驱动**: 追 J1 出 ① 审席票; ② 进行中(J2 §9-bis)。
+
+### (509) 2026-08-18 · KANet-UI 补第三审席票: ①②⑤ 实读+实跑独立验 PASS(J1 静默3催后 Bettor 派)· 自纠一处找错制品的插曲
+- **① PASS**: `node --check` + 实 `import()` 干净(①-0 覆盖的 crash 已修确认); 亲跑 `u1-wiring-acceptance.mjs` = **11 PASS/0 FAIL**; 读 handler 实码(identities.js:263-289): 六字段逐个显式赋值无 spread, 不碰两表, fail-closed(503/CHALLENGE_STORE_UNAVAILABLE)。
+- **② PASS**: 亲跑 `u1-registration.test.mjs` = **36 PASS/0 FAIL**(含②-1..②-5/①-10c′); 读实码(u1-registration.mjs:217-296): 事务内重派生 custody2、不比对值(死分支已删, 注释理由站得住)、INSERT 用 custody2.custody 非 custodyPre、`.immediate` 语义核对(BEGIN 即取 RESERVED 锁, 不依赖语句顺序)。
+- **⑤ 插曲后 PASS**: 先误报"数据不一致"——找到的是一份**没入仓**的 2026-08-12 旧 scratch 脚本(`scratch/_j2_hatch_live_check_20260812.cjs`), 查的 `group_chat_log` 表整表 0 行(非 WAL 可见性问题, COUNT(*) 无 WHERE 也是 0)且不在 DATABASE.md 活跃表清单, 疑似废表。J2 澄清实际脚本是 git-tracked 的 `scripts/u1-escape-hatch-live-check.cjs`(3fa73bf6, 只读 broadcast_messages+relay_nodes)。**用 J2 给的命令独立重跑**: 5 个近期广播地址, 4 个本机 relay 逐字符对上 relay_nodes(311/311/113/88 条), 判据①②均不成立、非零数据, 与 J2 06:33/06:45 两次读数一致。⇒ **⑤ PASS**, 第 5 地址(疑 J1 :3300 节点)归属是确认题不阻裁定。
+- **误报教训(自己吃自己在册的病)**: 找制品时没先确认它是不是"当前权威、已入仓"的那份——文件名日期(2026-08-12)、gitignored scratch 位置本该是提示。已在频道向 J2/全队说清是我找错、非他数据有问题。
+- **状态**: ①②⑤ 三独立审席(J2 doer + NWT 对抗 + KANet-UI 审席; Bettor 亲执静态/load)据此可判 wiring **review-complete**, 唯独差 J1 对①②的审席票(NWT 对抗已闭, J1 静默 3 催未回)。
