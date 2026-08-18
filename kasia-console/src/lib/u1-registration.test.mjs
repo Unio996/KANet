@@ -56,8 +56,14 @@ const okChallenge = (c) => ({ challenge: c, usedAt: null, expiresAt: Date.now() 
 // 🔴 **故意用真 SQLite 表, 不用进程内 Map**: 契约的要害是"消费与落库同事务、要么都成要么都不成"。
 //    Map 不参与 better-sqlite3 事务 ⇒ 回滚时 Map 里的 usedAt 还留着, **原子性那一格会假绿**。
 //    (在册: 离线用例必须用真 schema, 否则约束/事务那一层根本没被测到。)
-sqlite.exec(`CREATE TABLE IF NOT EXISTS u1_identity_challenge (
-  challenge TEXT PRIMARY KEY, used_at INTEGER, expires_at INTEGER)`);
+//
+// 🔴 **v197 起: 本夹具【不再自带 DDL】 —— 那张表由上面的 `runMigrations()` 建, 即【生产迁移本身】。**
+//    起因是我自己欠的一笔债: 生产把 `expires_at` 收紧成 NOT NULL, 而夹具那份没有
+//    ⇒ 两者不再是同一张表, "用真 schema" 这句话就退化成了自我安慰。
+//    ⇒ 现在**不存在"同步"这个动作**: 用例用的就是生产迁移建出来的表, 生产改什么它自动跟着改。
+// 🔵 我第一版写的是"从 migrate.js 正则抽 DDL 原文再 exec" —— **那是多余的第二套弱机制**
+//    (还得维护一个会被格式变化打断的正则)。**已有更强的那套就在上面: `runMigrations()`。**
+//    判据: 加一层不如去掉一层 —— 能靠既有的强机制时, 别再造一个平行的弱机制。
 function chStore() {
   const st = createChallengeStore(sqlite, 'u1_identity_challenge');
   return {
