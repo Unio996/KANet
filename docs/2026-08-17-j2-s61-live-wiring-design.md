@@ -249,6 +249,33 @@ if (_spec.zk_native !== false) _spec.zk_native = true;
 
 ---
 
+### 📌 §5 实跑记录（2026-08-18 06:33 · J2 · 不改上方判据原文）
+
+`node scripts/u1-escape-hatch-live-check.cjs`（只读、零副作用）：
+
+```
+运行时签名地址 5 个
+  ✅ Bettor-tn 305 · J2-tn 294 · NWT-tn 111 · KANet-UI-tn 85  — 四个均 运行时地址 == relay_nodes 记录
+  ⓘ 1 个不在本机库: kaspatest:qzdh7nar…fjx6f6u（23 条）
+判据①（继承 PRIVKEY 顶掉全体）: ❌ 不成立
+判据②（继承 ACCOUNT_INDEX≠0）: ❌ 不成立
+```
+
+⇒ 按 §5 写死的判据：**两条都不成立 = 过**，且属【非零数据】（不是“零条广播 ⇒ 没有数据可判”那一档的未通过）。
+
+#### 第 5 个地址的归属（§5 留的“需人工确认”那一格）
+
+本机 `broadcast_messages` 里 4114 条（2026-07-03 → 2026-08-13），正文自称【J1tn …】（取样三条均为 J1 的 ledger / 跨节点核报告）；本机 `relay_nodes` 无此行。
+
+- ✅ **与“J1 在 :3300 的独立节点 relay”一致**，且**与逃逸口症状不一致**——
+  逃逸口会让【本机】relay 的地址相同或对不上，**不会凭空多出一个本机库里没有的**。
+- 🔴 **但这只是【内容自述】，不是密码学归属**：`sender_address` 取自 output0，在册是可伪造的
+  （`reference-bcast-sender-address-is-output0-spoofable`）。“消息里自称 J1tn”证明不了它就是 J1 的 relay。
+- ⇒ 记为 **【与 J1 relay 一致但未经确认】**，**不记为已归属**；待 J1 一句话关掉。
+  🔵 它是**确认题不是判据题**：§5 的两条判据只管本机 relay，这个地址本就不计入判据②。
+
+---
+
 ## §6 验收判据（预注册，事后不加项）
 
 1. **接线后 `registerIdentity` 的签名逐字未变**（`grep -n "export async function registerIdentity" -A1`）。
