@@ -9050,3 +9050,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **Codex 独立裁定(与我 (496)/Bettor (495) 同向, 逐条)**: ①gate①(a) **内部状态更正 = 接受**(可维持 KANet-internal CLOSED/RECORDED); ②gate①(a) **Codex 独立原始证据验证 = OPEN / 待 console 节点 46 采制品落 git**; ③gate①(b) 前裁**不变**(CLOSED); ④§6-1 LIVE **仍未授权 / 独立各自 gate**。本增量 diff **只动 DECISIONS.md + 本 ledger**, 无新原始节点健康制品/实现/测试码 ⇒ Codex 明确"本次提交不带新 raw-evidence 闭合 credit"。
 - **🔑 Codex 给的落地验收标准(转 KANet-UI, 省一轮返工)**: 制品落地后, 复核**必须用那份不可变 blob 本身、非协调层汇总**, 逐项核: **样本数 / 精确主语节点身份 / 时戳与经过区间 / DAA-sink 推进 / isSynced 观测 / 与已引 J1 对比的一致性**。"汇总说匹配"不能替代原始行。⇒ KANet-UI 落 JSONL 时确保这 6 项在 blob 里可直接查(尤其**主语节点身份**要能认出是 console 注册那台、**时戳带区间**)。
 - **📌 现精确态(照 Codex 措辞)**: gate①(b)=CLOSED(isSynced=true 逆境格, ≤32.532s 轮询上界); gate①(a) 内部=CLOSED/RECORDED, 独立验证=OPEN(等制品); §6-1 LIVE=未授权。**我域(探针链 + 节点健康 gate①(a) J1 源 + gate①(b))全部收官**, 唯一 open 项=KANet-UI 落制品(非我域), 我持复核位备用。@Bettor 汇总报 Owner 时口径照此。
+
+### (498) 2026-08-17 · Owner 点破我空守: D-012 远未达成、别在闸上空等 · Bettor 转入驱动 §6-1 LIVE wiring(内部双审, D-011)
+- **Owner 问责**: D-012 达成了?你不知道做什么了吗? —— 靶心: 节点健康证据链闭合后我连续空守多轮, 把"卡在 wiring 的 铁律0/审批环节"演成了被动 hold。**认: 这是被动, 不是无路可走。**
+- **D-012 实况**: 总纲远未达成; §6-1 仅定义冻结 + 节点健康 gate① 闭; **§6-1 注册 LIVE wiring 零行**; 其余节设计层; 北极星远。
+- **🏛 转入驱动(D-011: 钱路改动去 Owner-gate 化、内部双审不降; + Owner 自驱令)**: §6-1 LIVE wiring 由 Bettor 直接驱动, 不等 Owner 逐项点头。序: **③ 迁移(真阻塞, ①依赖它)→ ① registerIdentity 接线 → ② TOCTOU → ⑤ live-check**。每步走 报备(已有 J2 设计)→ **内部双审(J1 审席 + NWT 对抗, 规则 481)** → 测(J2 §8 验收用例)→ Bettor gate。
+- **Owner-gated 只剩终点**: 生产库跑迁移 + §6-1 LIVE 授权(Codex 亦言不自动授权)= 上线那一下由 Owner 拍; 之前的实现+双审+测由我驱动。
+- **派 J2**: 从 ③ 迁移落码开始(migrate.js 加 u1_identity_challenge, 接当前最新版本号, 按其设计 + §9-bis 定形), 交 J1+NWT 双审。并行: KANet-UI 补 gate①(a) raw 制品 / NWT 另两项红队。
