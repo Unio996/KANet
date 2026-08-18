@@ -9074,3 +9074,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **🔴 缺口(我驱动查出)**: **DATABASE.md 未登记 u1_identity_challenge**(grep=0; 姊妹表 u1_identity_registration=2)。违项目规矩"新表必须同步更新 DATABASE.md 后一起提交"。且 v196 commit 自陈"DATABASE.md was already stale"⇒ DATABASE.md 本就落后, 需一并校。
 - **🏛 组织 ③ 双审+测(驱动下一步)**: ①J1 审席 + NWT 对抗**审 v197 代码**(不只设计: DDL 对不对/幂等/CAS 走主键)②J2 补 **DATABASE.md** u1_identity_challenge 登记(+校 v195/v197 同步)③跑 §8 ③-1..③-7 验收(尤其 ③-4 删索引 CAS 仍绿 / ③-6 夹具读生产 DDL / ③-7 迁移前工厂 throw)留证。三样齐 = ③ 闭 → 接 ①。
 - **过程注**: ③ 代码已 commit 到分支(设计 §9-bis 已审, 零 live 影响), 代码级双审+测**后置**补齐即可(未跑到 prod); 但 DATABASE.md 该与 migrate 同 commit, 这次漏了, 补。
+
+### (502) 2026-08-18 · Bettor 独立验 ③收尾=7 PASS(亲跑非信报告)+ DATABASE.md/夹具核过 · 并行开 ①(不空等 ③ 双审)
+- **Bettor 亲跑 `u1-v197-migration-acceptance.mjs` = 7 PASS / 0 FAIL**(临时库, 非信 J2 报告): ③-4 删部分索引 CAS 仍全绿(索引不承重的正证)· ③-5 expires_at NOT NULL 抛 · ③-6 夹具无 DDL 字面量且走真 `runMigrations()`(J2 还删了"正则抽 DDL"那套多余弱机制=更强)· ③-7 迁移前工厂拒。DATABASE.md 现登记 u1_identity_challenge(grep=2, 我 (501) 找的缺口已补)。
+- **③ 状态**: J2 交付 + Bettor 独立验 7 PASS; **J1 审席 + NWT 对抗双审 pending**(J2 05:58 交双审, 附其两个自曝事故 → 纳入双审 scope)。三方齐 = ③ 闭。
+- **🏛 并行驱动 ①(default→drive, 不空等 ③ 双审)**: ① registerIdentity 生产接线设计(报告 §1: `POST /api/identity/u1-register` handler)已备 + NWT 红队过, 且 ①**不依赖 ③ 双审结论**(③ 是表, ① 用它)。⇒ 派 J2 现在起 ① 实现(handler 只做三件: 取 console sqlite handle → createChallengeStore → registerIdentity; 两条硬纪律: 禁展开 req.body 按五字段逐个赋值 / 禁 handler 自碰挑战表)。① 落码后同样 J1+NWT 双审 + §8 ①-1..①-10 测。
+- 序仍 ③→①→②→⑤; 只是 ① 实现与 ③ 双审并行以提速, 不牺牲各自双审。
