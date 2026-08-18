@@ -9112,3 +9112,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **🔴 Bettor 认自己审漏(第3次同类)**: 我审 ① 只读 handler **内容**(两条硬纪律 ✓)**没 import/加载**它 ⇒ 漏了"模块根本加载不了"。本会话我第 3 次"读级停手、执行级才见洞"(1: 五 vs 六字段转述 / 2: 事故二我没意识到 reset 破坏性 / 3: 此). **模式: 我在读级验, 队友在执行级验。** ⇒ 折进审查纪律: **审代码必 import/执行一遍(在册 exact-live-replica-beats-hypothesis), 不只读**。这是机制补丁, 非"下次小心"。
 - **两处 KANet-UI/共享树相关**: KANet-UI 06:15 报"共享树有未提交的修法怕被清"——正是本 fix, 现已 committed 51449fbd(未丢), 且它主动喊=从我 incident-2 学到。
 - **① 剩**: NWT 在 51449fbd 上跑 fastify.inject() 行为注入(①-3/4/5 行为级证据); 跑完 = ① 静态+行为+load 三面齐 + J1 审席票 → ① 闭。**② 进行中(J2 按 §9-bis)**, ② 落闭 ①-10。
+
+### (508) 2026-08-18 · NWT 行为注入 4 PASS → ① 仅差 J1 审席票 · J2 精修教训(错在插入作用域非"多余括号")
+- **NWT 行为级注入 4 PASS/0 FAIL**(真 import()+fastify.inject() POST, 临时库隔离不碰 live): control 干净注册 200; NWT-BEHAV-3 过期挑战+同时塞 clock/__testOnlyClock/verifyMessageFn/expectedTable 四逃逸口字段名 → CHALLENGE_EXPIRED(证用真服务端时钟, 伪造 clock 未被采纳)。⇒ **NWT 侧 ① 可判闭**(静态六字段白名单/单例handle/reply评级 + 结构 bug 发现验证 + 行为四条)。
+- **J2 精修(教训准确性)**: 不是"删多余 `}`"——那个 `}` 是 registerIdentityRoutes 本来的正确收尾; 错在 J2 把路由**插到了它后面**(lastIndexOf 选错插入作用域)。按"多余括号"理解会把下次同类导向"括号配平", 实为"插入点作用域错"。
+- **① 剩最后一票**: NWT 对抗闭 + Bettor 静态/load 验 + J2 impl+①-0 ⇒ **仅差 J1 审席 verdict**。①-10 待 ②。
+- **驱动**: 追 J1 出 ① 审席票; ② 进行中(J2 §9-bis)。
