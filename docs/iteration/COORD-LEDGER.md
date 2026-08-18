@@ -9170,3 +9170,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **⇒ 唯一缺口 = Owner 在管理员终端 `taskkill /PID 13140 /F`**( 本会话也非管理员=无效, 须机器上 elevated 终端)。安全: 在飞钱路空 + WAL 崩溃安全, 强杀不坏 13.4GB 库。
 - **kill 后分工(锁定)**: ①KANet-UI 起新 console(其正确流程, 强制 CONSOLE_PORT=3200 避端口默认 3400 bug, 从 8c902f74 → 跑 v197 迁移 + 上端点)②Bettor **独立验**(在本机: 新 PID≠13140 / u1_identity_challenge 建了 / 端点 404→400 RELAY_UNKNOWN / 32 relay+频道回)③Bettor 报 Owner 成败。
 - **状态**: 部署**未开始**(kill 没成)⇒ 现场零改变、无半截态、不需回滚。**全部就绪, 卡在一条 Owner 提权命令。**
+
+### (517) 2026-08-19 · Codex 审部署阻塞: 确认代码/态 + 纠 Bettor "WAL 强杀不坏库" 过度保证 · 部署=AUTHORIZED/NOT-STARTED
+- **Codex(1d4f0a3c)从 Git 确认**: 8c902f74 优雅 handler 在 + u1-register 路由在函数体内带 503 fail-close; 部署态 = **AUTHORIZED-BY-OWNER / NOT-YET-STARTED**; 主机层声明(PID 权限/在飞钱路/树穷举)非 Git 可验=host-reported。
+- **🔴 Codex 纠我过度保证(采纳)**: 我说"WAL 崩溃安全⇒强杀不坏 13.4GB 库"**太绝对**。校准: WAL 是**风险降低**非零损坏证明; 强杀下这套 live DB/WAL/SHM+应用态+副作用不保证零恢复工作。⇒ 已给 Owner 更正 + 改建议**先优雅(taskkill /PID 13140)后强杀(/F)**(优雅走 shutdown() 干净关库停 relay)。
+- **Codex 重启后闭合证据(并入 checklist)**: 旧进程不再占 :3200 + 新 PID≠旧 + 真起的是 8c902f74 + v197/挑战表在 + 端点 缺失→fail-closed 响应 + relay/频道恢复 + 无 DB 完整性失败; 任一挂=判部署未完成+停, 不升 LIVE。
+- **状态**: §6-1 部署卡 Owner 提权 kill, 未开始、现场零改。
