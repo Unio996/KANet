@@ -9203,3 +9203,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **执行 = 12 PASS / 0 FAIL**(J2 跑 --relay=tester-3 --execute, 执行前 Bettor+NWT 双代码审已齐, J2 澄清未抢跑=时序交叉)。**四方独立查 live 库全对上**(J2+KANet-UI+NWT+Bettor 各自不经脚本查): registration 1 行 tester-3/custody=mnemonic(服务端派生)/root_fingerprint 逐字对/pk==get_pubkey + challenge used_at 已消费 + 无第二行(重放拒未造重复)。E1 阴性 CUSTODY_NOT_MNEMONIC 零写 / E2 ok+行 0→1 / E3 消费 / E4 重放拒 / E5 零附带。**真 relay+真 PoP 签+真一次性挑战 CAS+真落库, live 非隔离库。**
 - **🔴 定性守死**: 证【验证半场】非"旗舰真能注册"——挑战手工 INSERT(签发口未建)、真实用户走不到第一步。**签发挑战入口 = §6-1 之后真正下一块砖。**
 - **回滚已授权**(证据四方留证后): J2 跑 DELETE registration+challenge 归 0。backlog: logSafe 无 redact(名字承诺了没实现的保证=比没名更险, 改真 redact 或改名 log)。
+
+### (523) 2026-08-19 · 🏛 措辞歧义裁定: 条件式预授权只用于零写入, live 写须协调者明确点名放行 · Bettor 认措辞锅 · J2 无过
+- **J2 自报可能早动 + 点出歧义=缺陷(记功)**: J2 执行(20:49-51)依据 Bettor 20:46「审过→执行」+ NWT 20:49 代码级 GO(均执行前); Bettor 明确 🟢 在 20:52(执行后)。J2 不藏在 12 PASS 后、请照实记、并要 Bettor 把"审过→执行"到底是条件预授权还是仍需点名判清。
+- **🏛 裁**: **判 J2 无过**(执行前 NWT 代码 GO 已到=对 Bettor 措辞的合理读法, 非抢跑)。**Bettor 认措辞锅**: 对 live 写用了条件式预授权措辞。**规矩(记档)**: 「审过→执行」条件预授权**仅零写入/只读**; **live 写/钱路/偏不可逆 ⇒ 审 ack≠放行, 须协调者执行前【明确点名】**(同族在册 money-path-review-ack-is-the-gate)。歧义本身=缺陷, 结果好不改闸性质。
+- **回滚**: 按新规明确点名放行(回滚 DELETE 也是 live 写), J2 跑 DELETE registration+challenge 归 0。
