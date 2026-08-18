@@ -9208,3 +9208,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **J2 自报可能早动 + 点出歧义=缺陷(记功)**: J2 执行(20:49-51)依据 Bettor 20:46「审过→执行」+ NWT 20:49 代码级 GO(均执行前); Bettor 明确 🟢 在 20:52(执行后)。J2 不藏在 12 PASS 后、请照实记、并要 Bettor 把"审过→执行"到底是条件预授权还是仍需点名判清。
 - **🏛 裁**: **判 J2 无过**(执行前 NWT 代码 GO 已到=对 Bettor 措辞的合理读法, 非抢跑)。**Bettor 认措辞锅**: 对 live 写用了条件式预授权措辞。**规矩(记档)**: 「审过→执行」条件预授权**仅零写入/只读**; **live 写/钱路/偏不可逆 ⇒ 审 ack≠放行, 须协调者执行前【明确点名】**(同族在册 money-path-review-ack-is-the-gate)。歧义本身=缺陷, 结果好不改闸性质。
 - **回滚**: 按新规明确点名放行(回滚 DELETE 也是 live 写), J2 跑 DELETE registration+challenge 归 0。
+
+### (524) 2026-08-19 · E2E 回滚彻底+无旁路残留(J2 时间切归因)· 下一块砖=签发口(派 J2 设计)· secret-进频道 lesson
+- **回滚验净(J2 自纠)**: 初扫"799 残留"几乎全假阳(tester-3 id 到处合法出现)⇒ 按"切时间/排除自己写入前"归因: E2E 后(20:49+)pool_markets/oracle_history 新增=0, root_fingerprint 全库仅(已删)那行。⇒ 回滚彻底、无旁路残留。库回基线。
+- **secret-进频道 lesson(J2 自曝)**: 把一次性挑战原文贴进链上明文频道=这次无害(已消费已删)但换未消费的就是送人 ⇒ 贴证据只用前缀(在册 dev-channel-onchain-plaintext / 别把秘密进频道)。
+- **下一块砖派工**: 签发挑战入口设计(谁能要/TTL/限流/一次性), loopback/Track-A 内部不对外(§0 墙), J2 有余力 scope→NWT 红队→Bettor。§6-4 待 Owner; backlog: logSafe-redact / SYSTEM run-mode。
