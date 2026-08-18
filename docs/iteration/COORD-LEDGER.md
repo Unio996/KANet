@@ -9138,3 +9138,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **🏛 GO J2 最小动作**: DATABASE.md 把 group_chat_log/agent_groups 登记为"v149 建·无写入/读取方·恒0行·规格残留", 让下一个人一秒判掉。**不删表**(J2 对: 0行0引用, 删要过迁移+审, 留着+标清更便宜; 在册 risk-asymmetry-dont-touch-working-code)。
 - **🅿️ scratch _* 脚本隐患 park(可见 backlog, 非 §6-1 blocker)**: gitignored 根 _* 脚本不入库、无检查扫、却被人再捡起来跑查陈旧/错表 —— 今日两起同族(我 reset 清工作 / KANet-UI 跑旧 scratch)。**不现修**(不开 scratch-hygiene 新战线, 守 §6-1 mainline focus + hardening-spiral-needs-endpoint); 记为已知隐患, 需要时再排(候选: 一条 lint/check 警告根 _* 脚本查 DB, 或例行归档)。
 - **J2 继续 §10 relay_id 锚定设计**(北极星前硬闸, 报备层)。
+
+### (512) 2026-08-18 · J2 §10 relay_id 锚定设计(39110344, 报备层)· 核心=否定结果(relay 签挡不住同机) · 路由 NWT 红队
+- **J2 §10 设计(北极星前硬闸, 零生产改动)**: 5 承重前提写成"前提→坏掉会怎样"、7 预注册判据(含否定判据: 对外措辞不得写"解决抢注")、5 格明列空白。发现: get_pubkey/ecdsa_sign IPC **已存在**(私钥不跨边界, 无需新命令)/ ecdsa_pubkey_xonly 32 行 0 非空(可回填但权威只能 IPC 现取)/ 既有 ecdsa_sign 签无域标签 JSON.stringify(迁移债范围=一入口下全命令类型, 比"收敛类"大)/ legacyUnmigratedPassCount 被诊断命令污染(测"有没有人探"非"未迁移流量", J2 差点误读、对照臂救)。
+- **🔴 核心否定结果(§3)**: relay 签挑战**挡不住 §1 那个抢注** —— 同机调用方能同时驱动"注册提交"与"relay IPC 签", 闸强度在调用点不在签名算法。Bettor 读: 逻辑成立且**同机 vs 跨机分界**——relay-sign 挡**跨机**抢注(攻击者远程做不出victim relay 的签), 挡不住**同机**(本机 DESKTOP-DA9QQ46 上 co-located relays 可互驱 IPC)。⇒ 锚定买到的是**对外部方(跨机)有意义**, 非同机抢注防护。与我先前"同机抢注是 loopback 信任模型固有"裁定一致、且**sharpen**它。
+- **🏛 路由 NWT 红队**(J2 点名两处): (a) §3 否定结论有没有推太远(跨机是否真买到保护?外部提交+relay 在提交方自己机器 ⇒ 那也是"同机", 跨机保护是否落空?) (b) 迁移债/域标签范围。**报备层, 不阻当前 §6-1 LIVE**(relay_id 仍北极星-parked)。
+- **主线不变**: §6-1 注册 wiring 内部四审齐 + Codex 接受实质, 待 Codex 复核 b0d87ef9/①-10(Owner 触发)+ 部署。
