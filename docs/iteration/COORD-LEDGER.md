@@ -9144,3 +9144,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **🔴 核心否定结果(§3)**: relay 签挑战**挡不住 §1 那个抢注** —— 同机调用方能同时驱动"注册提交"与"relay IPC 签", 闸强度在调用点不在签名算法。Bettor 读: 逻辑成立且**同机 vs 跨机分界**——relay-sign 挡**跨机**抢注(攻击者远程做不出victim relay 的签), 挡不住**同机**(本机 DESKTOP-DA9QQ46 上 co-located relays 可互驱 IPC)。⇒ 锚定买到的是**对外部方(跨机)有意义**, 非同机抢注防护。与我先前"同机抢注是 loopback 信任模型固有"裁定一致、且**sharpen**它。
 - **🏛 路由 NWT 红队**(J2 点名两处): (a) §3 否定结论有没有推太远(跨机是否真买到保护?外部提交+relay 在提交方自己机器 ⇒ 那也是"同机", 跨机保护是否落空?) (b) 迁移债/域标签范围。**报备层, 不阻当前 §6-1 LIVE**(relay_id 仍北极星-parked)。
 - **主线不变**: §6-1 注册 wiring 内部四审齐 + Codex 接受实质, 待 Codex 复核 b0d87ef9/①-10(Owner 触发)+ 部署。
+
+### (513) 2026-08-18 · §10 relay_id 锚定设计 NWT 红队 [7/7]=PASS + 2 精修 · §10 = 设计已审(北极星-parked)
+- **NWT [7/7] §10 body PASS**(独立读实码 relay.js:1783 + authorize.mjs:95-107 确认 §3 否定结论准确、甚至"说轻了": legacy-unmigrated 分支绕过 READONLY_ALLOWLIST, 无 caller↔relay_id 绑定点)。2 精修:
+  · 🔴 **§4.2 root_fingerprint 完成度缺口**: 设计没写死它是**服务端从 s.rootXpub 重算**还是读提交方字段。**同 N4-bis/364/366/368/374/376 反复那个病**(该服务端派生的值没写"必须重算"⇒实现时有人图省事透传)。J2 补一句: root_fingerprint = 服务端对 s.rootXpub 重算, 不收提交方字段。
+  · 🟡 §4 step-2(relayPubkeyXOnly===livePubkey)措辞: step-3 已用 livePubkey 验签, step-2 只是预过滤、不独立扛安全; 措辞别让人误判两步各自独立扛。
+- **🏛 路由 J2 收 2 精修进 §10 设计**(报备层)。收完 §10 = 设计已审完整(北极星前硬闸方案), **parked 待北极星工启动**, 不阻当前 §6-1 LIVE。
+- **主线不变**: §6-1 注册 wiring 内部四审 + Codex 接受实质, 待 Codex 复核 b0d87ef9/①-10(Owner 触发)+ 部署。
