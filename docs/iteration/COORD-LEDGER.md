@@ -9157,3 +9157,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **⇒ §6-1 注册 wiring = REVIEW-COMPLETE**: gate①(a) Codex CLOSED · gate①(b) Codex CLOSED · ① runtime-mount Codex CLOSED · ①-10 TOCTOU Codex CLOSED · ② accepted-in-code · ③ 闭 · ⑤ done · §6 7/7 · 内部四审(J2+NWT+Bettor+KANet-UI)全 PASS。**只剩一个 Owner 闸: 生产库跑迁移 + §6-1 LIVE 授权/部署。**
 - **§10(北极星 relay_id 锚定)**: 设计 + NWT 红队 + 3 精修 + §3.2 深洞(relay_id 是本地非跨节点 id, 跨节点身份=协议里的公钥, 本仓 markets 已这么做 trade-protocol-filter.js:714-720, Bettor 实核)⇒ **parked 待北极星工**, 方向已明(锚公钥非 relay_id)。落 memory reference-kanet-cross-node-identity-is-pubkey-in-protocol-not-local-relay-id。
 - **状态**: §6-1 注册 wiring 今天推到"待部署"(Owner 拍)。真 LIVE = Owner 部署那一下。整 D-012 总纲仍远未完(此 §6-1 一节)。
+
+### (515) 2026-08-18 · Codex 审 §10(d5c0b249)= 四方收敛确认 relay_id 非跨节点身份 + 北极星 spec · parked, 不改当前 §6-1 LIVE
+- **Codex §10 review**: 确认(与 J2/NWT/Bettor 收敛)跨节点身份须锚**relay 公钥**, relay_id 降为本地映射/便利键。确认 P6(同 Console IPC 域下, 声称他人 relay_id 能让本 Console 让该 relay 签, 那签名只证"Console 够得到该 relay 进程", 不证"提交方拥有该本地 relay 槽")。**关键规矩: `u1_identity_registration(relay_id PK)` 现形不得【未做 pubkey 命名空间拆分】就升为开放测试网跨节点身份注册表。**
+- **Codex 北极星 spec(留档待北极星工)**: relay_id→relay_pubkey_xonly 显式本地映射(权威=live relay key 非调用方 DB 值)· 验签 key 来自 live 源不来自 submission · DB 回填只写 live-派生 key · 签名域分隔 · root_fingerprint 服务端从 rootXpub 派生 · 不可达 relay/attestation 失败 fail-closed(禁 try/catch→skip)。
+- **明标**: §10 = pre-open-testnet **架构**问题, **非生产钱路授权**; 先前已闭项(runtime mount / TOCTOU)不变; 本审不授权任何部署。
+- **⇒ §10 四方审齐(J2 设计 + NWT 红队 + Bettor + Codex), 方向+约束+spec 全定, parked 待北极星工**。**不改当前 §6-1 LIVE 状态**(TN12 loopback wiring review-complete, 待 Owner 部署; relay_id 拆分是开放测试网前的事)。
