@@ -21,8 +21,13 @@ const MUTANTS = [
   // 🔴 头一条是 Bettor 20:09Z 点名那个具体回改: 落库读提交值而不是服务端派生值
   ['落库用提交方 custody 而非服务端派生值(整层承重点失守)',
     (s) => s.replace(
-      "        custody.custody);   // 🔴 服务端派生值, 不是 s.custody",
+      "        custody2.custody);   // 🔴 服务端派生值, 且是【事务内】那次 —— 不是 s.custody, 也不是事务外那次",
       "        s.custody);")],
+  // 🔴 ②/①-10b (2026-08-18): TOCTOU 修完后新增两格。
+  //    这两格盯的是【未来有人顺手清理】: 事务内重派生看上去像冗余
+  //    (上面刚算过一次), 而它正是 ② 的全部内容。
+  ['② 事务内重派生闸拆掉(重派生不 ok 也继续写)',
+    (s) => s.replace('    if (!custody2.ok) {', '    if (false) {')],
   // N4-bis 三道子闸(deriveCustody 内部)
   ['deriveCustody: relay 查无此 id 也放行',
     (s) => s.replace("if (!row) return { ok: false, code: REG_REJECT.RELAY_UNKNOWN, reason: `relay_nodes 里没有 id=${relayId}` };", '')],
@@ -32,7 +37,7 @@ const MUTANTS = [
     (s) => s.replace('if (!hasMnemonic) {', 'if (false) {')],
   // registerIdentity 主流程三道闸
   ['①N4-bis 闸拆掉(custody 不合格也继续走)',
-    (s) => s.replace('if (!custody.ok) return { ok: false, code: custody.code, reason: custody.reason };', 'if (false) return null;')],
+    (s) => s.replace('if (!custodyPre.ok) return { ok: false, code: custodyPre.code, reason: custodyPre.reason };', 'if (false) return null;')],
   ['②绑定闸拆掉(派生证明不合格也继续走)',
     (s) => s.replace('if (!bind.ok) return { ok: false, code: REG_REJECT.BINDING_INVALID, reason: bind.reason };', 'if (false) return null;')],
   ['③N8 PoP 闸拆掉(签名/挑战不合格也继续走)',
@@ -80,6 +85,7 @@ const MUTANTS = [
 // 🔴 **结构上测不到的三格 —— 不是漏测, 是 (354) 之后它们【进不去】了; 明列出来, 不删也不算进 MISSED**
 //    为什么不静默删: 一个永远 MISSED 的变异会训练人忽略 MISSED; 而静默删掉又会让下一个人以为这三处有覆盖。
 const UNREACHABLE = [
+  ['①-10b 落库改回用 custodyPre(事务外那次的旧结论)', '🔴 它在今天是【等价改写】, 不是缺陷: deriveCustody 的 ok 分支全文件只有一个取值(:138 return { ok: true, custody: 「mnemonic」 }, 已 grep 实核) ⇒ 两次都 ok 时 custodyPre.custody 与 custody2.custody 必然相等; 而一旦重派生不 ok, 上面那条 throw 已经整笔回滚、INSERT 根本不执行 ⇒ 【写哪个变量】在外部观察不到。 🔨 而这正是我删掉值比对那条死分支的同一个理由 —— §8 预注册 ①-10b 时没看出它得了同一种病, 我删比对时也没回头看这格。 🔵 ② 的承重点因此是【重新派生 + 不 ok 就回滚】, 不是【写哪个变量】; 那一格由另一条变异「② 事务内重派生闸拆掉」正面覆盖, 实测 detect。 🔴 保留 custody2 而不回改成 custodyPre: 它是 correct-by-construction, 将来 deriveCustody 多出第二个取值时不需要任何人想起来回来改这里。'],
   ['消费抛错被吞', '前置读已保证 unused + store 的 CAS UPDATE 在同一事务/同一连接内必然 changes=1 ⇒ consume 在前置读通过后【不可能失败】。catch 是给将来存储不再同域留的纵深, 现在无法从外部触发。'],
   ['后置条件拆掉', 'SQL 归 store 拥有且是 CAS, 调用方【构造不出】空消费 ⇒ 后置读永远为真。这是 (354) 用结构替掉运行时检查的直接后果。'],
   ['(374) 改回解引用调用方 store 的方法', "(374) 之后生产路径拿不到「带方法的绑定对象」: token 是冻结的、且本来就没有 read/consume(H-2 直接断言)。 所以「若 challengeStore.read 存在就用它」这一支永远走不到 —— 不是闸漏了, 是攻击摆不出来。 🔵 (376) 更新: 该攻击现已被 u1-challenge-store.mutants.mjs 【正面覆盖】(那边直接把方法挂回 token, 实测 detect)。 ⇒ 它在【本文件】仍测不到, 但在整体上不再是缺口 —— 这一条留着是为了说清「为什么本文件测不到它」, 不是说没人测。"],

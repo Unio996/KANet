@@ -672,6 +672,34 @@ await t('②-5 成功返回的 custody 来自【事务内实际写入的那个�
   assert.strictEqual(r.custody, row.custody, '返回值与落库值不一致 ⇒ 返回的是事务外那次的旧结论');
 });
 
+await t('①-10c′ DB CHECK 兜底是【可达】的: custody 非 mnemonic 的插入必被约束拒 + 零写入', async () => {
+  // 🔴 为什么这一格必须存在: ② 把“未来的保护”寄在了 v196 的 CHECK 上
+  //    (② 删掉了那条死分支后, 它是 custody 取值的唯一兵器)。
+  //    而【声称某个兜底存在】与【它真的会响】是两件事 —— 本仓已经吃过“闸建好了但没上膛”的亏。
+  //    🔵 这里【不】给生产开测试后门来制造非法值(那正是 (364)/(366)/(368) 一路在堵的病),
+  //       而是直接向真表发同一条 INSERT —— 被测对象就是约束本身。
+  const relayId = insRelay({ mnemonic: 'enc-mnemonic-blob' });
+  const id = makeIdentity();
+  const before = sqlite.prepare('SELECT COUNT(*) c FROM u1_identity_registration').get().c;
+  assert.throws(
+    () => sqlite.prepare(`INSERT INTO u1_identity_registration
+      (relay_id, root_fingerprint, root_xpub, identity_index, identity_pubkey_xonly, custody)
+      VALUES (?, ?, ?, ?, ?, ?)`)
+      .run(relayId, rootFingerprint(id.rootXpub), id.rootXpub, 0, id.pubkey, 'privkey'),
+    /CHECK constraint failed/,
+    '🔴 custody=「privkey」 居然写进去了 ⇒ v196 的 CHECK 形同虚设, ② 所依赖的兜底不存在',
+  );
+  assert.strictEqual(sqlite.prepare('SELECT COUNT(*) c FROM u1_identity_registration').get().c, before,
+    '约束拒了却有行落库');
+  // 阳性对照: 合法值必须能写 —— 证明上面那一抛不是【这条 INSERT 本来就写不进去】
+  sqlite.prepare(`INSERT INTO u1_identity_registration
+    (relay_id, root_fingerprint, root_xpub, identity_index, identity_pubkey_xonly, custody)
+    VALUES (?, ?, ?, ?, ?, ?)`)
+    .run(relayId, rootFingerprint(id.rootXpub), id.rootXpub, 0, id.pubkey, 'mnemonic');
+  assert.strictEqual(sqlite.prepare('SELECT COUNT(*) c FROM u1_identity_registration').get().c, before + 1,
+    '阳性对照没写进去 ⇒ 上面那一抛可能不是 CHECK 干的');
+});
+
 sqlite.close();
 rmSync(dir, { recursive: true, force: true });
 console.log(`\n${fail === 0 ? '✅' : '🔴'} u1-registration: ${pass} PASS / ${fail} FAIL`);

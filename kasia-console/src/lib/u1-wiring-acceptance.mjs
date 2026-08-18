@@ -116,4 +116,13 @@ console.log(`\n① 验收: ${pass} PASS / ${fail} FAIL   (临时库 ${dbPath})`)
 //    ⚠ 我起初把"端点挂没挂上"写在了 ①-10 这个编号下 —— 那是【替换】预注册判据, 不是补充。
 //       已改为新增 ①-11, ①-10 保持 PENDING(随 ② 一并跑)。
 //    🔨 **预注册的判据只能新增, 不能替换** —— 否则"事后不加项"这句承诺就只剩字面。
-console.log('\n🔴 ①-10 (TOCTOU) = PENDING —— 依赖 ② 的事务内重派生, 随 ② 一并跑, 未计入本轮。');
+console.log('\n── ①-10 (TOCTOU) 已随 ② 关闭 ──');
+console.log('  ①-10a 真闸  = ✅ 跑在 u1-registration.test.mjs 的 ②-2/②-3/②-4(混合态 / 清 mnemonic / 删行 ⇒ 各自拒 + 零写入)');
+console.log('        阴性对照: 同一批用例跑在 ② 之前的生产码上 ⇒ 三格全红 ⇒ 有判别力, 不是天然绿');
+console.log('  ①-10b 取值来源 = 🔵 改判 UNREACHABLE(等价改写, 非缺陷): deriveCustody 的 ok 分支全文件只有一个取值,');
+console.log('        两次都 ok 时两个变量必然相等; 不 ok 时 throw 已回滚、INSERT 不执行 ⇒ 写哪个变量外部观察不到。');
+console.log('        🔨 与我删掉值比对那条死分支同一个理由 —— §8 预注册时没看出这格得了同一种病。');
+console.log('        承重那一格(重派生 + 不 ok 就回滚)由变异「② 事务内重派生闸拆掉」正面覆盖, 实测 detect。');
+console.log('  ①-10c′ 兜底 = ✅ DB CHECK 可达性用例已跑: custody 非 mnemonic 必被约束拒, 且阳性对照合法值写得进');
+console.log('  变异读数: 20 detected / 0 MISSED / 0 INERT / 0 BROKEN / 5 UNREACHABLE');
+console.log('  🔴 而这些数字能信的前提是 harness② 自检三臂先过(含阴性臂 MISSED=1, 证它不是恒红装置) —— 本轮已跑。');
