@@ -50,7 +50,8 @@ import { createHash } from 'node:crypto';
  * @param {Array}  a.unreachable [[name, why], ...] —— ⚠ **只打印, 不执行**: 它是静态预声明,
  *                               **不能拿"输出里有 UNREACHABLE"当'仪器非恒红'的证据**(恒红装置照样打印它)。
  */
-export function runMutationsIsolated({ repoRoot, srcRel, testRel, mutants, unreachable = [] }) {
+export function runMutationsIsolated({
+  expectMissedFirst = false, repoRoot, srcRel, testRel, mutants, unreachable = [] }) {
   const consoleDir = join(repoRoot, 'kasia-console');
   const tmpDir = join(consoleDir, `.mut-tmp-${process.pid}`);
   const nodeModules = join(consoleDir, 'node_modules');
@@ -94,16 +95,30 @@ export function runMutationsIsolated({ repoRoot, srcRel, testRel, mutants, unrea
 
     const original = readFileSync(srcAbs, 'utf8');
     let det = 0; let miss = 0; let inert = 0; let broken = 0;
-    for (const [name, fn] of mutants) {
+    // 🔴 no-op 探针格(设计报告 §6.6 已采纳, 2026-08-18 补上):
+    //    首格是一个【不改行为】的等价改写, 它必须 MISSED。
+    //    它若被 detect ⇒ 本装置对任何改动都变红 ⇒ 【整轮读数作废】——
+    //    因为本类清单的正确答案本来就是全 detected, 恒红装置会产出一模一样的数字。
+    //    🔨 为什么内置而不是靠 selfcheck: 后者是另一个要有人【记得】去跑的脚本;
+    //    内置后, 任何人任何时候跑这份清单都自带阴性臂。靠人记得 → 靠结构保证。
+    let probe = null;
+    for (let __i = 0; __i < mutants.length; __i++) {
+      const [name, fn] = mutants[__i];
+      const isProbe = expectMissedFirst && __i === 0;
       const mutated = fn(original);
-      if (mutated === original) { inert += 1; console.log(`[INERT ] ${name} — 变异没改动文件, 这条什么也没测`); continue; }
+      if (mutated === original) { if (isProbe) { probe = 'INERT'; console.log(`[探针] ${name} — 🔴 探针没改动文件, 什么也没探到`); continue; } inert += 1; console.log(`[INERT ] ${name} — 变异没改动文件, 这条什么也没测`); continue; }
       writeFileSync(srcAbs, mutated, 'utf8');
       let syntaxOk = true;
       try { execFileSync(process.execPath, ['--check', srcAbs], { stdio: 'ignore' }); } catch { syntaxOk = false; }
-      if (!syntaxOk) { broken += 1; console.log(`[BROKEN] ${name} — 变异体语法坏, 必然"检出", 什么也没证`); writeFileSync(srcAbs, original, 'utf8'); continue; }
+      if (!syntaxOk) { if (isProbe) { probe = 'BROKEN'; console.log(`[探针] ${name} — 🔴 探针自己语法坏了`); writeFileSync(srcAbs, original, 'utf8'); continue; } broken += 1; console.log(`[BROKEN] ${name} — 变异体语法坏, 必然"检出", 什么也没证`); writeFileSync(srcAbs, original, 'utf8'); continue; }
       let green = true;
       try { execFileSync(process.execPath, [testAbs], { stdio: 'ignore', cwd: tmpDir }); } catch { green = false; }
-      if (green) { miss += 1; console.log(`[MISSED] ${name} — 闸被拆掉而用例【全绿】`); }
+      if (isProbe) {
+        probe = green ? 'MISSED' : 'detect';
+        console.log(green
+          ? `[探针] ${name} — ✅ 等价改写未被报红 ⇒ 本装置不是恒红`
+          : `[探针] ${name} — 🔴🔴 等价改写居然被报红 ⇒ 恒红装置, 整轮读数作废`);
+      } else if (green) { miss += 1; console.log(`[MISSED] ${name} — 闸被拆掉而用例【全绿】`); }
       else { det += 1; console.log(`[detect] ${name}`); }
       writeFileSync(srcAbs, original, 'utf8');
     }
@@ -111,6 +126,11 @@ export function runMutationsIsolated({ repoRoot, srcRel, testRel, mutants, unrea
     if (unreachable.length) {
       console.log('\n[结构上测不到 · 明列, 不计入 MISSED —— ⚠ 只打印不执行, 不是"非恒红"的证据]');
       for (const [n, why] of unreachable) console.log(`  · ${n} — ${why}`);
+    }
+    if (expectMissedFirst) {
+      console.log(probe === 'MISSED'
+        ? `\n[阴性臂] ✅ no-op 探针 = MISSED ⇒ 下面这些 detect 才是有内容的读数`
+        : `\n[阴性臂] 🔴🔴 no-op 探针 = ${probe} (应为 MISSED) ⇒ 【整轮读数作废】`);
     }
     console.log(`\ndetected=${det}  MISSED=${miss}  INERT=${inert}  BROKEN=${broken}`
       + (unreachable.length ? `  UNREACHABLE=${unreachable.length}` : ''));
@@ -130,7 +150,7 @@ export function runMutationsIsolated({ repoRoot, srcRel, testRel, mutants, unrea
     //    这正是 v1 事故的同一个病(量的范围小于声称的范围), 所以这行文案本身就是那条教训的落点。
     console.log(`[isolate] ✅ 真依赖顶层仍 ${nmAfter} 项 ⇒ 未复现 v1 的整目录删除(⚠ 只比顶层项数, 不证包内文件未被改)`);
     console.log(`[isolate] 临时副本 ${basename(tmpDir)} 已在 finally 中删除`);
-    return { det, miss, inert, broken };
+    return { det, miss, inert, broken, probe, probeOk: !expectMissedFirst || probe === 'MISSED' };
   } finally {
     // 目录内**不含任何链接** ⇒ 删不穿(这正是第一次事故的修法)
     try { rmSync(tmpDir, { recursive: true, force: true }); } catch { /* 已不在 */ }

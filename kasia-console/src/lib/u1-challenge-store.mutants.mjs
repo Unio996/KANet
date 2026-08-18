@@ -22,7 +22,16 @@ import { runMutationsIsolated } from './mutation-runner.mjs';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const TEST = join(HERE, 'u1-registration.test.mjs');   // 沿用现套: 它已端到端覆盖 store 行为
 
+const nlOf = (t) => (t.includes('\r\n') ? '\r\n' : '\n');
 const MUTANTS = [
+  // 🔴🔴 首格必须是 no-op 探针(设计报告 §6.6 采纳): 只加一行注释, 不改任何行为 ⇒ 必须 MISSED。
+  //    它若被 detect, 说明本装置对任何改动都变红 ⇒ 整轮读数作废。
+  //    🔨 为什么非要不可: 本套的【正确答案本来就是全 detected】,
+  //    所以一个恒红的坏仪器会产出与好仪器【逐字相同】的读数 ——
+  //    这个坑 2026-08-17 真发生过(ESM 不认 NODE_PATH, 恒红而读数完全正常)。
+  //    阴性臂是唯一能分辨这两者的东西。
+  ['[阴性臂] no-op 探针: 只加一行注释(不改行为) ⇒ 必须 MISSED',
+    (s) => s + nlOf(s) + '// no-op probe (mutation harness negative arm)'],
   // ── (376) 能力泄漏: 把 ops 重新导出 / 交出去 ──
   ['🔴 重新导出 getBoundOps(交出 registration 正在用的那个可变 ops 对象)',
     (s) => s + '\nexport function getBoundOps(store, sq, tb) { return BOUND.get(store).ops; }\n'],
@@ -65,10 +74,12 @@ const UNREACHABLE = [
 ];
 const REPO_ROOT = join(HERE, '..', '..', '..');
 const r = runMutationsIsolated({
+  expectMissedFirst: true,
   repoRoot: REPO_ROOT,
   srcRel: "kasia-console/src/lib/u1-challenge-store.mjs",
   testRel: "kasia-console/src/lib/u1-registration.test.mjs",
   mutants: MUTANTS,
   unreachable: typeof UNREACHABLE !== 'undefined' ? UNREACHABLE : [],
 });
-if (r.miss || r.inert || r.broken) process.exit(1);
+// 🔴 probeOk 也是退出条件: 探针不对 ⇒ 整轮读数作废, 不得当它通过。
+if (r.miss || r.inert || r.broken || !r.probeOk) process.exit(1);
