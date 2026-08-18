@@ -9098,3 +9098,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **🏛 ① 双审+测(闭合闸)**: @J1 审席 + @NWT 对抗审 ① 代码(NWT 读实码: 别名/计算属性展开真堵没?sqlite handle 取的是否 console 单例=与 relay_nodes 同库?reply 是否泄露内部?)+ @J2 跑 §8 **①-1..①-10** 留证(重点: ①-3/4/5 注入正面测 custody/伪 challengeStore/clock 字段无效 · ①-2/6 负面 grep 配行为背书 · ①-7 fail-closed · ①-10 TOCTOU 一字节未写 · ①-1 签名逐字)。三方齐 = ① 闭 → 接 ②。
 - **gate①(a) 制品已落(KANet-UI 95c21aa9/b719cb93/(503))**: 46 采 raw JSONL + 采样脚本(硬编码 ws://127.0.0.1:17210 主语节点身份 + 方法)入 artifacts/, 补上 (495)/(497) 的 provenance 缺口。⇒ **可 route Codex 独立验 gate①(a)**(按 (497) 判据: 用 blob 非摘要 / 样本数 / 主语节点身份 / 时间戳+间隔 / DAA / isSynced / 与 J1 (462) 一致)。待 Owner 触发时一并送。
 - **进度**: ③ 三方闭 · ① 代码完成+Bettor 侧核过、待双审+测 · ②⑤ 待接 · gate①(a) 待 Codex 升级。
+
+### (506) 2026-08-18 · 🔴 Bettor 更正自己"五字段"=错(实为六含 signature)· ① 双审近闭(NWT PASS + 10 PASS, ①-10 PENDING-耦合②)· 驱动 ②
+- **🔴 Bettor 自纠(转述错, J2 抓)**: 我 (505)/频道写 submission "**五字段**" —— **错, 实现是六字段**(漏 signature)。我照设计 §1 的"五"(那是 u1-registration.mjs 自读的五个)转述, 没核实现处还传 signature(PoP 需)。NWT [1/6] 其实写对了("六个"), 是我一人错。**违"不猜转述、核实现"**——正是本会话反复讲的病, 我这次中。更正: submission = relayId/rootXpub/identityIndex/identityPubkeyXOnly/challenge/**signature** 六字段显式取。
+- **① 双审(近闭)**: NWT [6/6] **静态 PASS**(三撞点全过: 别名/计算属性结构性堵死[逐字段显式构造, 比 grep 强]/ sqlite=console 单例[import 自 db/client.js, 与 relay_nodes 同库]/ reply 泄原始 SQLite 报错文本但无密钥); J2 交 §8 **10 PASS**(①-1..①-9 + ①-11), **①-10 TOCTOU 如实 PENDING**(它验 ② 的事务内重派生, ② 未实现 ⇒ 现在跑=与被验机制无关的假绿, 脚本显式打印 PENDING)。J2 自纠两处: ①-10 差点被"端点挂没挂"替换掉预注册判据(已拆出 ①-11, ①-10 留 PENDING)/ ①-8 坏负则对任何输入不命中=永过(已修)——都是本会话在册病, J2 自己中并修。
+- **⇒ ①-10 耦合 ②**: TOCTOU 测需 ② 落地。**驱动 ②**: 派 J2 实现 deriveCustody TOCTOU(§9-bis 定形: 事务内 `if(!custody2.ok) throw` 重派生 + INSERT 用 custody2.custody + **无死分支**[值比较已删] + DB CHECK 兜底), ② 落地同时闭 ①-10。
+- **reply-leak 裁**: 失败路径回传 reason 文本(表/约束名级, 无密钥)= 继承 loopback 信任模型, 当前非新暴露; **对外入口不回原始 DB 错 = 北极星前硬化项**(同 relay_id, parked, 不卡当前)。
+- **① 剩**: J1 审席 ① verdict(NWT 已对抗, J1 未出)+ ①-10(待 ②)。**② 一落 → ①-10 补测 → ①②同闭 → ⑤**。
