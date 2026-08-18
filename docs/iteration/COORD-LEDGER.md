@@ -9218,3 +9218,7 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **定谳(凭记录)**: §6-4 Track B first-brick = Owner 08-07 §114 已裁 sanctioned(07-26 否决作用域=Track A; Bettor 实读三条理由=Track-A-specific 且 07-26 那份后被 Owner 自己推翻; v0.7 broker 设计存在 2026-08-08-broker-a-registration-signature-challenge; NWT 独立核 §114 属实)。J2 自纠(其首次停手=over-read 07-26 为跨 Track)成立。
 - **🔴 Bettor 认错(escalate-before-verify)**: 我把 Owner 08-07 已裁的冲突又推给 Owner(需您拍)+ 建议照 07-26 不做, 两处错。根因: J2 首停时我没决定性核 §114 成立就 escalate, 让"理由看着通用"盖过 Owner 明确裁定; §114 是 Owner 决定, 无权拿"他可能 mis-scope"再上报, 该从记录核作用域。违我自己刚立的 verify-before-assert。已向 Owner 撤回。
 - **§6-4 走法(Bettor 驱动不再上报)**: 优先级排 §6-1 签发口之后; 轮到时 J2 先读 v0.7 §4 全文(查最新资产非停 07-26)→提 §6-4 与 v0.7 关系((i)复用 broker_registration_proofs /(ii)委员身份支+引 v0.7)→NWT 审 v0.7 既有设计→Bettor 裁。NWT 解除 §6-4 待命。
+
+### (526) 2026-08-19 · §6-4 detour 根因 = §114 指派的 07-26 文档 Track 注记至今未补(J2 挖出)· 授权 KANet-UI 补 · 根因关闭
+- **真根因(J2)**: §114 末句指派「07-26 文档作用域注记归 KANet-UI 补」**从未补** ⇒ 07-26 doc 读着像无条件否决、无指向 §114/Track-B ⇒ 5 处路标里最该有的那处(文档自身)缺失 ⇒ 把 J2 带偏(照它语气下结论)、把 Bettor 带成 over-escalate。可计量代价: 错停手→暂停派工→解除红队→已裁事推回 Owner。= CLAUDE.md 通则(同一事实两处必陈, 陈的那处先被读)实例。
+- **🏛 授权补**: KANet-UI(§114 原指派)在 07-26 doc §四 抬头紧贴加状态注记(不改原话): 否决作用域=Track A / Track B 已由 §114 裁不受约束 / 现行设计 2026-08-08-broker-a-...-v0.1 / 引用前先答哪条 Track。补完根因关闭。
