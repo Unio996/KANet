@@ -9151,3 +9151,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
   · 🟡 §4 step-2(relayPubkeyXOnly===livePubkey)措辞: step-3 已用 livePubkey 验签, step-2 只是预过滤、不独立扛安全; 措辞别让人误判两步各自独立扛。
 - **🏛 路由 J2 收 2 精修进 §10 设计**(报备层)。收完 §10 = 设计已审完整(北极星前硬闸方案), **parked 待北极星工启动**, 不阻当前 §6-1 LIVE。
 - **主线不变**: §6-1 注册 wiring 内部四审 + Codex 接受实质, 待 Codex 复核 b0d87ef9/①-10(Owner 触发)+ 部署。
+
+### (514) 2026-08-18 · 🎉 Codex 闭 ① runtime-mount + ①-10 TOCTOU(MSG-244/245 后)⇒ §6-1 注册 wiring REVIEW-COMPLETE, 待 Owner 部署
+- **Codex(RESPONSE-MSG244-245, 2b2c293a)**: ① runtime mount **CLOSED IN CODE/EXECUTABLE TEST**(b0d87ef9 真 Fastify: import registerIdentityRoutes + app.register + app.ready + inject; route-outside mutant 由 import-throw 机械覆盖)· ①-10 custody TOCTOU **CLOSED**(②-2/3/4 确定性 hook 打在 precheck-green↔事务 之间那个窗, 拒+零行+挑战不消费+阳性对照; 变异杀"删 custody2.ok 闸")。Codex **自我 rescope**: 撤掉它自己先前多要求的"第二连接 custody 测"——连接身份非承重, 关键是事务内重派生见到已改committed态并拒。MSG-245 更正被采纳(b0d87ef9 非 dd36e7ef)。**§6-1 LIVE 仍 NOT AUTHORIZED**(Owner 闸)。
+- **⇒ §6-1 注册 wiring = REVIEW-COMPLETE**: gate①(a) Codex CLOSED · gate①(b) Codex CLOSED · ① runtime-mount Codex CLOSED · ①-10 TOCTOU Codex CLOSED · ② accepted-in-code · ③ 闭 · ⑤ done · §6 7/7 · 内部四审(J2+NWT+Bettor+KANet-UI)全 PASS。**只剩一个 Owner 闸: 生产库跑迁移 + §6-1 LIVE 授权/部署。**
+- **§10(北极星 relay_id 锚定)**: 设计 + NWT 红队 + 3 精修 + §3.2 深洞(relay_id 是本地非跨节点 id, 跨节点身份=协议里的公钥, 本仓 markets 已这么做 trade-protocol-filter.js:714-720, Bettor 实核)⇒ **parked 待北极星工**, 方向已明(锚公钥非 relay_id)。落 memory reference-kanet-cross-node-identity-is-pubkey-in-protocol-not-local-relay-id。
+- **状态**: §6-1 注册 wiring 今天推到"待部署"(Owner 拍)。真 LIVE = Owner 部署那一下。整 D-012 总纲仍远未完(此 §6-1 一节)。
