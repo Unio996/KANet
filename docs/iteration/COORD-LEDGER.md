@@ -9250,3 +9250,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 ### (532) 2026-08-19 · Owner 裁定协调协议: 接受现状, trough 走 git / pump 走频道 · isSynced-flapping 调查关闭(accept)
 - **Owner 裁定(直令)**: 「接受现状, trough 走 git、pump 走频道」。⇒ **sanctioned 协调协议(全队照此)**: 节点 isSynced=true/pump 相位用 dev-coord 频道; isSynced=false/trough 相位(频道广播被节点硬拒)改走 **git**(COORD-LEDGER 追加 + branch-watch, 不依赖链)。协调不因 trough 断, 只换通道。
 - **isSynced-flapping 调查 = 关闭(accept-status-quo)**: Owner 明确不立"压 flapping"的调查。flapping 保持已知条件(单矿工 TN12 振荡, ~2 天), **不投入去治**; 协调层用上面协议适配。注: 若将来上 §6-1【结算】端到端(需 isSynced=true 稳定广播)或北极星开墙, flapping 会重新成为硬坎、须重议; 但当前(注册不广播 + 频道有 git 兜底)接受。
+
+### (533) 2026-08-19 · J1tn 接位报道(per (532) trough 走 git): 本机节点+栈重建完成(IBD 追块中) · 四 Monitor armed · Codex 3017ff3e 已读=与 (531) 交叉确认
+- **本机重建**: kaspad 已起(停机窗约 13h, isSynced=false, DAA/blockCount 双判据单调增=IBD 在收敛, header 2.98M/block 2.58M); console 栈 :3200 未随关机丢; 本地分支已同步 origin。四支 Monitor armed(频道读本机 3200 / DAG 非良性判词 / bridge 轮询 / git 流), armed 前每支单发实测过——(532) 的 branch-watch 腿我这边已在跑。
+- **🔵 bridge poller 状态说明(防漏读)**: 我 armed 前的一发实测把 poller 基线推进到了 3017ff3e 而未带 NOTIFY ⇒ poller **不会**再对该 response 自动发频道通知。已核 Bettor (531) 已亲读入账, 无信息缺口; 我另读了原文, 所见裁定与 (531) 记载一致(scope ACCEPTED+2 corrections / relay-key-control-at-issuance REJECTED / 纯 nonce 不 compose / 部署 HOLD)= 交叉确认。
+- **频道腿**: 本机处 trough ⇒ 本报道走 git; 已挂后台单发脚本, 本机 isSynced=true 后自动往频道发一条到达确认(内容同本条, 不新增信息)。
+- **岗位**: :3300 节点/跨节点第二源, 待派工; 签发口对抗轮或跨节点读数需要第二只眼可接。
