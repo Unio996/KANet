@@ -601,6 +601,77 @@ await t('(I-3) 工厂 fail-closed: 表不存在 ⇒ 必抛(不许造一个"每�
   assert.ok(createChallengeStore(sqlite, CANONICAL_CHALLENGE_TABLE), '规范表存在时应当能正常构造');
 });
 
+// ── ② deriveCustody TOCTOU: 事务内重派生(设计报告 §2 + §9-bis) ─────────────────
+//
+// 🔨 **怎么确定性地打中那个窗口**: 生产码里 `custodyPre` 在最前面派生, 事务在最后面开;
+//    中间隔着 PoP 验签。`verifyMessageFn` 正好在这中间被调用 ⇒ 把变异写在它里面,
+//    就落在【事务外已判 ok, 事务尚未开始】的那一刻, 且单线程可复现, 不靠竞态碰运气。
+//    (同一钩子上面 :268 已用过, 这里沿用同一惯用法。)
+//
+// 🔴 每个阴性用例都先断言【变异之前 custodyPre 确实判 ok】—— 否则请求会在预筛就被拒,
+//    用例仍然"红得好看"却**根本没走到事务内那次派生**, 变成一个测别的东西的空用例。
+
+async function runWithMutation(mutate) {
+  const relayId = insRelay({ mnemonic: 'enc-mnemonic-blob' });
+  const id = makeIdentity();
+  const ch = 'ch-toctou-' + randomUUID().slice(0, 8);
+  const st = chStore(); st.issue(ch);
+  // 前提: 变异【之前】预筛必须是 ok, 否则本用例测不到事务内那次
+  assert.strictEqual(deriveCustody(sqlite, relayId).ok, true, '前提不成立: 变异前预筛就已经拒了');
+  let hookCalled = 0;
+  const r = await __testOnlyRegisterIdentityWithInjections(
+    { sqlite, submission: submissionFor(relayId, id, ch), ...wire(st) },
+    { verifyMessageFn: (args) => { hookCalled += 1; mutate(relayId); return realVerifyMessage(args); } },
+  );
+  // 钩子没被调用 = 变异从未发生 ⇒ 后面的断言全部虚过, 必须显式挡掉
+  assert.strictEqual(hookCalled, 1, '验签钩子没被调用 ⇒ 变异没发生, 本用例是空的');
+  const row = sqlite.prepare('SELECT custody FROM u1_identity_registration WHERE relay_id = ?').get(relayId);
+  return { r, row, ch, st, relayId };
+}
+
+await t('②-1 阳性对照 · 窗口内【不】变异 ⇒ 仍然注册成功(证明这套钩子本身不会把好路径弄红)', async () => {
+  const { r, row, ch, st } = await runWithMutation(() => {});
+  assert.strictEqual(r.ok, true, `阳性臂必须过, 实际: ${r.code} ${r.reason}`);
+  assert.strictEqual(row?.custody, 'mnemonic');
+  assert.ok(st.read(ch)?.usedAt, '成功路径挑战应已消费');
+});
+
+await t('②-2 🔴 窗口内改成混合态(补挂裸私钥) ⇒ 事务内重派生拒 CUSTODY_AMBIGUOUS, 整笔回滚', async () => {
+  const { r, row, ch, st } = await runWithMutation((relayId) => {
+    sqlite.prepare('UPDATE relay_nodes SET privkey_encrypted = ? WHERE id = ?').run('enc-privkey-blob', relayId);
+  });
+  assert.strictEqual(r.ok, false, '混合态必须拒');
+  assert.strictEqual(r.code, REG_REJECT.CUSTODY_AMBIGUOUS, `拒因应为 CUSTODY_AMBIGUOUS, 实际 ${r.code}: ${r.reason}`);
+  assert.strictEqual(row, undefined, '🔴 拒了却有行落库 ⇒ 回滚失守(这正是 ② 之前会写进去的那个旧值)');
+  assert.strictEqual(st.read(ch)?.usedAt, null, '整笔回滚 ⇒ 挑战不该被消费掉');
+});
+
+await t('②-3 🔴 窗口内清掉 mnemonic ⇒ 拒 CUSTODY_NOT_MNEMONIC, 整笔回滚', async () => {
+  const { r, row, ch, st } = await runWithMutation((relayId) => {
+    sqlite.prepare('UPDATE relay_nodes SET mnemonic_encrypted = NULL WHERE id = ?').run(relayId);
+  });
+  assert.strictEqual(r.ok, false);
+  assert.strictEqual(r.code, REG_REJECT.CUSTODY_NOT_MNEMONIC, `实际 ${r.code}: ${r.reason}`);
+  assert.strictEqual(row, undefined, '拒了却有行落库 ⇒ 回滚失守');
+  assert.strictEqual(st.read(ch)?.usedAt, null, '整笔回滚 ⇒ 挑战不该被消费');
+});
+
+await t('②-4 🔴 窗口内整行删掉 ⇒ 拒 RELAY_UNKNOWN, 整笔回滚', async () => {
+  const { r, row, ch, st } = await runWithMutation((relayId) => {
+    sqlite.prepare('DELETE FROM relay_nodes WHERE id = ?').run(relayId);
+  });
+  assert.strictEqual(r.ok, false);
+  assert.strictEqual(r.code, REG_REJECT.RELAY_UNKNOWN, `实际 ${r.code}: ${r.reason}`);
+  assert.strictEqual(row, undefined, '拒了却有行落库 ⇒ 回滚失守');
+  assert.strictEqual(st.read(ch)?.usedAt, null, '整笔回滚 ⇒ 挑战不该被消费');
+});
+
+await t('②-5 成功返回的 custody 来自【事务内实际写入的那个值】, 与落库行一致', async () => {
+  const { r, row } = await runWithMutation(() => {});
+  assert.strictEqual(r.ok, true);
+  assert.strictEqual(r.custody, row.custody, '返回值与落库值不一致 ⇒ 返回的是事务外那次的旧结论');
+});
+
 sqlite.close();
 rmSync(dir, { recursive: true, force: true });
 console.log(`\n${fail === 0 ? '✅' : '🔴'} u1-registration: ${pass} PASS / ${fail} FAIL`);

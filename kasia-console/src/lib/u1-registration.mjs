@@ -173,8 +173,11 @@ async function _registerIdentityImpl({ sqlite, submission, challengeStore } = {}
   const s = submission || {};
 
   // ① N4-bis —— 注意: **完全不看 s.custody**
-  const custody = deriveCustody(sqlite, s.relayId);
-  if (!custody.ok) return { ok: false, code: custody.code, reason: custody.reason };
+  // 🔴 (②/TOCTOU) 这一次是【便宜预筛, 不承重】: 作用是在验签这种贵活之前先拒掉明显不成立的,
+  //    并让调用方拿到准确的拒因。**真正写进库的那个值由事务内那次派生决定**(见下面 custody2)。
+  //    ⇒ 不要因为这里已经派生过就把事务内那次当冗余删掉: 两次之间 relay_nodes 可被改。
+  const custodyPre = deriveCustody(sqlite, s.relayId);
+  if (!custodyPre.ok) return { ok: false, code: custodyPre.code, reason: custodyPre.reason };
 
   // ②-a 派生证明(便宜, 且不依赖签名) —— 先拒明显不成立的, 再做验签
   const bind = verifyRegistrationBinding({
@@ -213,13 +216,30 @@ async function _registerIdentityImpl({ sqlite, submission, challengeStore } = {}
   if (!pop.ok) return { ok: false, code: REG_REJECT.POP_FAILED, reason: `${pop.code}: ${pop.reason}` };
   // ③ 落库 + 消费 —— **同一事务**。N3/N4 由 v196 的 UNIQUE/CHECK 在写入那一刻兜底。
   const fp = rootFingerprint(s.rootXpub);
+  let custodyWritten = null;   // 事务内实际写入的那个值, 成功返回用它(不回退用事务外那次)
   const runTx = sqlite.transaction(() => {
+    // 🔴 ② TOCTOU: **在写锁之内重新派生一次托管形态**, 写库用的是【这一次】的结果。
+    //    窗口是真的: 事务外那次(custodyPre)到这条 INSERT 之间隔着验签等异步步骤, 这期间
+    //    relay_nodes 可被改成混合态(补挂裸私钥)或换掉密钥 —— 那样的身份不该入委员,
+    //    而只靠事务外那次判定, 我们会拿着一个【已经不成立的旧结论】把它写进去。
+    //    ⚠ 它成立的前提与下面那条 CAS 同源: `.immediate` 已在 BEGIN 那刻取到 RESERVED 写锁
+    //      ⇒ 这次重读与随后的 INSERT 之间没有别的写者能插进来。离开 IMMEDIATE 这又是一个 TOCTOU。
+    const custody2 = deriveCustody(sqlite, s.relayId);
+    if (!custody2.ok) {
+      throw new _RegTxError(custody2.code,
+        `事务内重派生托管形态: ${custody2.reason} (事务外那次曾判 ok ⇒ 两次之间 relay_nodes 被改) ⇒ 拒, 整笔回滚`);
+    }
+    // 🔵 **这里【不比对】custodyPre 与 custody2 的值** —— deriveCustody 的 ok 分支只有一个取值
+    //    ('mnemonic'), 比对写出来是一条**永远不会为真的分支**: 它不能失败, 所以不证明任何事,
+    //    却会让读的人以为多了一道闸。承重的是"重新派生 + 用新结果", 不是"两次相等"。
+    //    兜底在 schema: u1_identity_registration.custody 有 CHECK (custody = 'mnemonic')(v196)。
+    custodyWritten = custody2.custody;
     sqlite.prepare(`INSERT INTO u1_identity_registration
       (relay_id, root_fingerprint, root_xpub, identity_index, identity_pubkey_xonly, custody)
       VALUES (?, ?, ?, ?, ?, ?)`)
       .run(s.relayId, fp, String(s.rootXpub).trim(), s.identityIndex,
         String(s.identityPubkeyXOnly).trim().toLowerCase(),
-        custody.custody);   // 🔴 服务端派生值, 不是 s.custody
+        custody2.custody);   // 🔴 服务端派生值, 且是【事务内】那次 —— 不是 s.custody, 也不是事务外那次
 
     // 🔴 **前置条件(并发重放闸, J2 自查补)**: 在【持有写锁的事务内】重读一次, 必须仍是 unused。
     //    为什么必需: PoP 那步是在事务【外】用 store 现读的 record 判的 ⇒ 两个并发请求
@@ -280,5 +300,5 @@ async function _registerIdentityImpl({ sqlite, submission, challengeStore } = {}
     return { ok: false, code: REG_REJECT.CONSTRAINT, reason: `落库被约束拒: ${e?.message || e}` };
   }
 
-  return { ok: true, rootFingerprint: fp, custody: custody.custody, verifiedWith: pop.verifiedWith };
+  return { ok: true, rootFingerprint: fp, custody: custodyWritten, verifiedWith: pop.verifiedWith };
 }
