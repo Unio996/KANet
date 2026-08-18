@@ -124,6 +124,16 @@
 
 ---
 
+### group_chat_log / agent_groups — 规格残留（v149 建，恒 0 行，无写入方/无读取方）
+
+**2026-08-18 J2 实核（全仓 ripgrep + 本机库计数）**：两表同批由 **v149**（Tier 2.2 N-way 群聊设计）建。本机库现状：**两张表各 0 行**。全仓生产代码（`.js`/`.mjs`）**无任何写入方、无任何读取方**——唯一读过 `group_chat_log` 的是两个 **gitignored 根目录 scratch 脚本**（`kasia-console/_nwt_read5.cjs` / `_nwt_read6.cjs`，2026-06-09，非入库文件），把它当频道消息表查，永远返回空且不报错。
+
+**陷阱（本条即案例）**：该库真正的频道公开消息表是 `broadcast_messages`（见上）；若脚本/查询误查 `group_chat_log`，静默拿到空结果，不会报错——KANet-UI 2026-08-18 复核 §6-1 ⑤ escape-hatch live-check 时正撞上此形状（跑了一份未入库的旧 scratch 脚本查这张空表，读数与权威脚本 `scripts/u1-escape-hatch-live-check.cjs`（查 broadcast_messages）不符，经 J2 澄清+独立重跑确认非数据问题）。
+
+**处置（J2 建议，非删表）**：零行零引用，风险不在留着，在"删表"本身要过迁移+审；留着 + 登记文档，让下一个人一秒判掉即可。
+
+---
+
 ## 链上数据层
 
 ### chain_events（63230 条）
