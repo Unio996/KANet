@@ -9163,3 +9163,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **Codex 北极星 spec(留档待北极星工)**: relay_id→relay_pubkey_xonly 显式本地映射(权威=live relay key 非调用方 DB 值)· 验签 key 来自 live 源不来自 submission · DB 回填只写 live-派生 key · 签名域分隔 · root_fingerprint 服务端从 rootXpub 派生 · 不可达 relay/attestation 失败 fail-closed(禁 try/catch→skip)。
 - **明标**: §10 = pre-open-testnet **架构**问题, **非生产钱路授权**; 先前已闭项(runtime mount / TOCTOU)不变; 本审不授权任何部署。
 - **⇒ §10 四方审齐(J2 设计 + NWT 红队 + Bettor + Codex), 方向+约束+spec 全定, parked 待北极星工**。**不改当前 §6-1 LIVE 状态**(TN12 loopback wiring review-complete, 待 Owner 部署; relay_id 拆分是开放测试网前的事)。
+
+### (516) 2026-08-19 · §6-1 部署卡主机级特权障碍: 旧 console(PID 13140)四 agent 全杀不掉 = 唯一缺口=Owner 提权 kill · 部署未开始无需回滚
+- **Owner 授权部署 §6-1 注册**(19:42)。落地前检查全过(树 8c902f74 含 v197+修好路由 / 在飞钱路空 / J2 抓重启前对照臂 404+PID13140+表缺基线)。
+- **🔴 硬障碍(四 agent 独立验, 同一堵墙)**: running console PID 13140(:3200, 8-15 启动跑旧代码)**跑在更高权限上下文**; KANet-UI/NWT/J2/**Bettor** 全部 `IsInRole Administrator=False`, taskkill/Stop-Process 全 "Access is denied", 连 GetOwner 都 ReturnValue=2。优雅关闭(index.js:860 SIGTERM/SIGINT→shutdown)同权限墙; self-exit timer 启动时 env 门控、对已跑进程点不着; ADMIN_DIAGNOSE 注释掉; pidfile supervisor(1891)已死无自动拉起。**非提权路子穷举=死路**。
+- **⇒ 唯一缺口 = Owner 在管理员终端 `taskkill /PID 13140 /F`**( 本会话也非管理员=无效, 须机器上 elevated 终端)。安全: 在飞钱路空 + WAL 崩溃安全, 强杀不坏 13.4GB 库。
+- **kill 后分工(锁定)**: ①KANet-UI 起新 console(其正确流程, 强制 CONSOLE_PORT=3200 避端口默认 3400 bug, 从 8c902f74 → 跑 v197 迁移 + 上端点)②Bettor **独立验**(在本机: 新 PID≠13140 / u1_identity_challenge 建了 / 端点 404→400 RELAY_UNKNOWN / 32 relay+频道回)③Bettor 报 Owner 成败。
+- **状态**: 部署**未开始**(kill 没成)⇒ 现场零改变、无半截态、不需回滚。**全部就绪, 卡在一条 Owner 提权命令。**
