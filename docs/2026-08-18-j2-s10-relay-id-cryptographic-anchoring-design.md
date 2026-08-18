@@ -81,6 +81,47 @@ PoP 挡不住是因为它防的是**镜像方向**（抄别人的根 + 用自己
 
 ---
 
+### §3.2 🔴 答 @Bettor 的命门问题 + @NWT 的 P6 修正（2026-08-18 补，两位都对，我原框架的轴选错了）
+
+**Bettor 问**：开放测试网下提交方的 relay 也在他自己机器上，那也是"同机"，"跨机保护"落不落空？
+
+**我的第一版答法**（保留，但它不是最终判据）：轴不该是"同机/跨机"，该是
+「**攻击者能不能驱动他所声称的那个 `relay_id` 对应的 relay**」——
+Alice 给自己的 relay A 注册是合法的；她想抢 Bob 的 relay B，驱动不了 ⇒ 拦住。
+
+🔴 **NWT 的 P6 修正（比我的准，采纳为正式判据）**：
+真正的分界线是「**被 claim 的 `relay_id`，它的 IPC 归属域是不是等于提交方自己能触达的那个 console**」，
+**不是**"提交方在哪台物理机"。
+
+而**现状不满足这条**——NWT 实测：本机 `relay_nodes` **32 行全部由同一个 console 进程持有 IPC**
+（`J2test` / `NWT` / `maker-1` / 今晚讨论的 `J2-tn`/`NWT-tn`/`KANet-UI-tn` … 同库同 IPC 域）。
+
+⇒ 我报告里"relay 跑在提交方自己机器上"这句，**默认假设了"一个 relay 对应一个独立 console"的拓扑**，
+而那条前提我没写出来，现状也不满足它。
+🔵 这不推翻 §4 的密码学构造，也不推翻 §3 的否定结果；它补的是 §5 前提表里**缺的一行**（见 P6）。
+
+#### 🔴🔴 而这个问题还带出一个更上游的：`relay_id` 根本不是跨节点标识符
+
+实核（2026-08-18）：
+
+- `createRelayNode()` 里 `const id = randomUUID()`（`kasia-console/src/data/settings/relay-nodes.js:23`）
+  ⇒ **本地生成的 UUID**，跨节点无任何约定。
+- 现实佐证：⑤ live-check 里 J1 那台的 relay 发了 4114 条广播，**本机 `relay_nodes` 里根本没有它**。
+
+⇒ 一个以 `relay_id` 为主键的注册表，**跨节点本来就不可比**——"抢占 relay_id X"只在某一个节点自己的库里成立。
+🔵 这不推翻 §1 那个攻击（它在本节点内仍然成立且永久），但它改变了**锚定对象应该是什么**。
+
+🔨 **而本仓已经在别处做对过这道题**：跨节点市场协议携带的是 `maker_relay_pk`（**公钥**）而不是本地 relay id，
+`trade-protocol-filter.js:715` 的注释写得很死：
+
+> "Cross-node-correct identity via maker_relay_pk in protocol payload
+>  (= protocol membership lives in protocol fields not local relay_nodes infra)"
+
+⇒ **建议（写进待定，不在本报告自拍）**：跨节点含义的锚应该是 **relay 公钥**，`relay_id` 降为本地便利键。
+🔴 这一条比 §4 那套机制更靠上游 —— **先定锚什么，再设计怎么证**。
+
+---
+
 ## §4 设计：relay attestation 绑定
 
 ### §4.1 数据面
@@ -100,9 +141,16 @@ relayAttestation: {
 2. `relayAttestation.relayPubkeyXOnly === livePubkey` 否则拒（**不接受提交方自报的公钥当权威**）；
 3. 用 `livePubkey` 验 `relayAttestation.signature` 对 §4.2 那条消息 —— 不过即拒。
 
-🔴 **第 2 步是承重的**：若省掉、直接用提交方给的公钥验签，
-那就退化成「攻击者用自己的钥签自己的消息」= §1 原样重演，只是多绕了一层。
-（同族：`u1-registration-pop.mjs` 已经在 identity 那一侧踩过并写死了这条。）
+🔵 **第 2 步的措辞校准**（NWT 07:05，成立，我原写法会让人误判）：第 3 步已经用 `livePubkey` 验签，
+提交方自报的 `relayPubkeyXOnly` **从不参与验签运算** ⇒ 去掉第 2 步，最终结果不变
+（只少一次提前拒绝、少一个更清楚的拒因）。
+⇒ **第 2 步是早拒，不是独立承重的安全控制**；真正承重的是第 1+3 步（公钥取自 IPC）。
+
+🔴 **但有一个例外，我们两个一开始都没说：若回填 `ecdsa_pubkey_xonly` 写的是【提交方给的】那个值，
+第 2 步就变成唯一拦截点了。**
+⇒ 因此硬性规定：**回填只得写 `livePubkey`，永不得写 submission 里的值**。
+这样第 2 步才能安心地被描述成"只是早拒"。
+🔨 同族：一条"不承重"的检查，会因为别处多了一个消费方而**静默变成承重的**。
 
 🔵 `relay_nodes.ecdsa_pubkey_xonly` 那一列**可以顺带回填**，但**不得当权威**：
 它今天 0/32 非空，且它是一张普通表，能被改。**权威只能是 IPC 现取的 `livePubkey`。**
@@ -113,6 +161,16 @@ relayAttestation: {
 KANET-U1-RELAY-ATTEST-v1|<hex sha256(canonical)>
 canonical = JSON.stringify({relay_id, root_fingerprint, identity_pubkey_xonly, challenge})
 ```
+
+🔴 **`root_fingerprint` 必须是服务端对 `s.rootXpub` 重算得出，不接受提交方给的任何字段值。**
+（NWT 07:05 红队指出本稿漏写，成立，已补。）
+
+🔵 实核：现有 PoP 验证侧**已经是对的** —— `u1-registration-pop.mjs` 重建 payload 时写的是
+`rootFingerprint: rootFingerprint(s.rootXpub)`（服务端重算）。
+🔴 **陷阱在参数形状，不在实现**：`buildPopPayload({ rootFingerprint, ... })` 把它收作**参数**，
+函数自己不强制派生 ⇒ 下一个调用方完全可以递一个提交方给的值进去，**而没有任何东西会喊一声**。
+这正是 (364) 那条教训的同一形状：**挡路的不是"做不到"，是参数形状；形状不改，陷阱就还在。**
+⇒ 本设计落地时应把该值在函数**内部**派生，而不是从参数收。
 
 **为什么必须带前缀**：`ecdsa_sign` 是**任意串盲签**，同一把钥同时服务别的协议。
 实核既有两个生产者签的都是 `JSON.stringify({...})`（`trade-protocol-filter.js:325` oracle enroll、
@@ -137,6 +195,7 @@ canonical = JSON.stringify({relay_id, root_fingerprint, identity_pubkey_xonly, c
 | P3 | 挑战一次性、与 identity PoP **同一个** challenge 且**同一事务**消费 | 两次签名可被拆开重放 | 现有 challenge store 已是 CAS + 同事务（③ 已落） |
 | P4 | relay 进程活着且可达 | 注册**拒**（fail-closed），不得降级成"跳过 attestation" | 🔴 **必须写死**：这是最可能被加成 `try/catch` 的地方 |
 | P5 | 跨机场景下 Console 无法驱动对方 relay | 若将来给 Console 加了"代签"通道，§3.1 那一格立刻塌回本机档 | 今天成立；**是本设计全部价值的地基** |
+| P6 | 🔴 被 claim 的 `relay_id`，其 **IPC 归属域**只能由该 relay 真正 owner 所在的 console 驱动，摸不到别的 console | "外部提交方抢不了"整句塌掉 —— 攻击者只要能触达持有该 relay 的那个 console，就能驱动签名 | 🔴 **今天不成立**：NWT 实测本机 `relay_nodes` 32 行**全部由同一个 console 进程持有 IPC** ⇒ 现拓扑下这 32 个 relay 互相之间毫无保护 |
 
 🔴 **P4 单独说**：把 attestation 做成"取不到就跳过"，读起来像健壮性，实际是**把闸变成装饰**。
 本仓已在册的同族：`catch 返回合法空值抹掉失败`、`不干活换安全`。
