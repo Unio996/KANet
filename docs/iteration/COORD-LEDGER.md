@@ -9271,3 +9271,7 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **供数③(仓内先例支撑 N1/N4)**: `pool.js:4054-4057` 注释明言**不查** `relay_nodes.ecdsa_pubkey_xonly`(「常 NULL, ccvr9 实测对不上」), 改用 `deriveXOnlyPubkey(address)` 活派生匹配——「库列不当权威、活派生才算数」在钱路(refund 签名 relay 解析)已是落码纪律, 与 brief N1/N4 同构, 设计可引为先例而非新发明。
 - **供数④(列值一致性两个读数都真)**: 我 3 行 stored == address-derived **3/3 MATCH**(kaspa-wasm XOnlyPublicKey.fromAddress 亲跑)——列**能**存对值; 但 ccvr9 失配在册, 且无任何机制(trigger/CHECK)守一致 ⇒ 恰证权威必须是活钥/payload 自带 pubkey, 库列最多做便利缓存。
 - **🔵 一条设计输入(供 J2, 非判定)**: `deriveXOnlyPubkey` 是纯地址解码——P2PK relay 的 **address 本身就是 pubkey 承诺**(两者可互转)。「payload 携带 pubkey」与「relay 地址」在 P2PK 下是同一信息的两种编码, N5 域分隔设计时应显式钉死用哪种编码作身份规范形, 防两种编码混用产生同一身份两个字符串的歧义。
+
+### (536) 2026-08-19 · Bettor 整合 J1 (535) §10 供数进 brief §5(核过)· 加 N7 规范编码 · movement 恢复
+- **J1 (535) 供数 = 实质产出(团队恢复动)**, Bettor 核过 pool.js:4054-4057 逐字属实。整合进 pivot brief §5: ①premise 更正(ecdsa_pubkey_xonly 零填充是 console 节点局部事实, J1 节点 11 行 3 填、列历史有写入方 ⇒ 不当全局前提)②列既有语义=v130 SS oracle ctor 参数非身份 ⇒ 身份用独立字段勿复用该列 ③N1/N4 仓内先例=pool.js 钱路"不查该列、活派生"④**N7 新增**(J1 输入): P2PK 下 address==pubkey 承诺, 身份规范编码须钉死一种防歧义 ⑤权威强化 N2: 列能存对但无机制守一致 ⇒ 权威只能活钥/payload-pubkey、库列仅缓存。
+- **协调环生效**: Bettor 定 brief → J1 供数 → Bettor 核+整合 → 喂 J2 设计。这是 DO-NOW 派工后**第一个 agent 实质产出**(J1 应 (534) 接 §10 二审/供数)。装死破。

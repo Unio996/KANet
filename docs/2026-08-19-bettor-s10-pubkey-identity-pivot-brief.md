@@ -31,3 +31,11 @@
 ## §4 交接
 
 J2 据 §2 需求设计 pubkey 跨节点身份机制(可复用 maker_relay_pk 的验签形状)→ NWT 红队(重点撞 N2: 有没有又滑回某种 Console 中介的证明)→ Bettor 裁。**现在开工**, 非"有空再做"。
+
+## §5 J1 供数整合(COORD-LEDGER (535), Bettor 核过 pool.js:4054-4057 属实)
+
+- **premise 更正(烤进设计前必知)**: `ecdsa_pubkey_xonly` 的"零填充/零写入方"是 **console 节点局部事实**——J1 独立节点上是 11 行 3 填(其 2026-07-03 oracle 实验所写, 脚本已不在树)。⇒ **该列历史上有写入方, 跨节点填充不一**; 设计不得把"0 行"当全局前提。
+- **列的既有语义**: 该列生于 migrate.js **v130**(:3927-3929)= SS oracle ctor 参数(escrow oracle 用), **非身份**。挪用当身份锚 = 背一个已有别的语义的列 ⇒ **建议身份用独立表/字段, 不复用该列**。
+- **N1/N4 的仓内先例(非新发明)**: `pool.js:4054-4057` 钱路已落"**不查** `relay_nodes.ecdsa_pubkey_xonly`(常 NULL、ccvr9 实测对不上), 改 `deriveXOnlyPubkey(address)` 活派生"。设计引它为先例。
+- **N7(新增, 由 J1 设计输入)**: P2PK 下 relay **address 本身即 pubkey 承诺**(可互转)——「payload 携带 pubkey」与「relay address」是同一信息两种编码。**N7: 身份规范编码必须钉死一种**(address 还是 x-only pubkey), 防同一身份出两个字符串的歧义。
+- **权威判据强化 N2**: J1 实测 3 行 stored==address-derived 3/3 MATCH, 但无 trigger/CHECK 守一致 + ccvr9 在册失配 ⇒ **库列最多做便利缓存, 权威只能是活钥/payload 自带 pubkey**(强化 N2)。
