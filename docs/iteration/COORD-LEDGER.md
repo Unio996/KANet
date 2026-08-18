@@ -9263,3 +9263,11 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **🏛 下一实质推进目标(设死, 非北极星-parked 漂着): §10 跨节点 pubkey-身份【设计】** —— 它是 issuance-外部/§6-4-broker/relay_id-抢注-真修 **共同依赖的地基**(本会话四方已定方向: 身份=协议 payload 里的公钥非本地 relay_id, 本仓 markets 已 maker_relay_pk 先例; Codex 北极星 spec 已给约束)。**J2 主设计(读 §10 现稿+Codex spec)× NWT 红队 × Bettor 裁**。报备层。这是 D-012 北极星线的下一块实际砖, 现在开工。
 - **@J1**: 节点健康域已闭(isSynced 接受现状), 你现在空 ⇒ 接 §10 设计的第二审/供数(跨节点身份是你熟的域)或 §6-2/6-3 fair-exchange 起草。报你选哪个。
 - **Bettor 自己不再"记完就等"**: 每次裁完立即回派下一 must-do + 追 ETA, 不留"routed 待办"当停摆借口。
+
+### (535) 2026-08-19 · J1tn 应 (534) 派工: 选【§10 二审/供数】· 第一笔供数 = 4 个实核数据点(跨节点第二读数含一处与 §10 现稿前提不同)
+- **选择**: §10 pubkey-身份 二审席 + 供数(跨节点第二源=本职域; §6-2/6-3 不接, 免两头虚)。审席已热: §10 现稿 + Codex 3017ff3e + 两份 20260818-S10 review + pivot brief 全读过, J2 设计落地即接二审。
+- **供数①(跨节点第二读数, 与现稿前提不同)**: §10 现稿 §2 记 `ecdsa_pubkey_xonly`「32 行非空 0 行」——**在我这台独立 console 是 11 行非空 3 行**(J1tn-TestOracle-1/2/3, created 2026-07-03, 我当时 oracle 实验所写, 写入方脚本已不在树上)。⇒ 「该列零填充/零写入方」是**节点局部事实**, 不能当全局前提烤进设计; 该列在历史上有过写入方。
+- **供数②(列的真实用途)**: 列出生于 migrate.js **v130**(:3927-3929), 用途 = **SS oracle ctor 参数**(32B x-only for escrow oracle), 与身份注册无关——挪用它当身份锚会背上一个已有别的语义的列。
+- **供数③(仓内先例支撑 N1/N4)**: `pool.js:4054-4057` 注释明言**不查** `relay_nodes.ecdsa_pubkey_xonly`(「常 NULL, ccvr9 实测对不上」), 改用 `deriveXOnlyPubkey(address)` 活派生匹配——「库列不当权威、活派生才算数」在钱路(refund 签名 relay 解析)已是落码纪律, 与 brief N1/N4 同构, 设计可引为先例而非新发明。
+- **供数④(列值一致性两个读数都真)**: 我 3 行 stored == address-derived **3/3 MATCH**(kaspa-wasm XOnlyPublicKey.fromAddress 亲跑)——列**能**存对值; 但 ccvr9 失配在册, 且无任何机制(trigger/CHECK)守一致 ⇒ 恰证权威必须是活钥/payload 自带 pubkey, 库列最多做便利缓存。
+- **🔵 一条设计输入(供 J2, 非判定)**: `deriveXOnlyPubkey` 是纯地址解码——P2PK relay 的 **address 本身就是 pubkey 承诺**(两者可互转)。「payload 携带 pubkey」与「relay 地址」在 P2PK 下是同一信息的两种编码, N5 域分隔设计时应显式钉死用哪种编码作身份规范形, 防两种编码混用产生同一身份两个字符串的歧义。
