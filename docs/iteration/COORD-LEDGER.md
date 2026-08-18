@@ -9105,3 +9105,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **⇒ ①-10 耦合 ②**: TOCTOU 测需 ② 落地。**驱动 ②**: 派 J2 实现 deriveCustody TOCTOU(§9-bis 定形: 事务内 `if(!custody2.ok) throw` 重派生 + INSERT 用 custody2.custody + **无死分支**[值比较已删] + DB CHECK 兜底), ② 落地同时闭 ①-10。
 - **reply-leak 裁**: 失败路径回传 reason 文本(表/约束名级, 无密钥)= 继承 loopback 信任模型, 当前非新暴露; **对外入口不回原始 DB 错 = 北极星前硬化项**(同 relay_id, parked, 不卡当前)。
 - **① 剩**: J1 审席 ① verdict(NWT 已对抗, J1 未出)+ ①-10(待 ②)。**② 一落 → ①-10 补测 → ①②同闭 → ⑤**。
+
+### (507) 2026-08-18 · ① 崩溃 bug 已修+committed(51449fbd)+①-0 真import带阴性臂 · Bettor 认第3次"读级审漏了执行级洞" · NWT 跑行为注入 · ②进行中
+- **NWT 对(执行级 tiebreaker)**: 43411464 J2 ① 把 u1-register 路由放在 registerIdentityRoutes **函数体外**(lastIndexOf 落到文件最后一个 `}`, 而函数 :243 就结束了)⇒ import 即 `ReferenceError: fastify is not defined`, 崩的是整个 identities.js(含既有 12 路由)。J2 为写 handler 注入测第一次真 import 独立撞到同一处、认、修。
+- **已修+committed 51449fbd**: 路由挪回函数体内 + **①-0 常驻用例(真 import)带阴性臂**——路由在函数外⇒①-0 FAIL, 在内⇒PASS; 同两臂喂旧 includes 文本判据⇒都 PASS=零判别力(这就是"10 PASS"漏它的成因, J2 把 control-arm 做进用例)。Bettor 独立验: COMMITTED IMPORT OK + ①-0 在 u1-wiring-acceptance.mjs:30。**crash 解, live console 未重启(老进程内存旧版), 不重启。**
+- **🔴 Bettor 认自己审漏(第3次同类)**: 我审 ① 只读 handler **内容**(两条硬纪律 ✓)**没 import/加载**它 ⇒ 漏了"模块根本加载不了"。本会话我第 3 次"读级停手、执行级才见洞"(1: 五 vs 六字段转述 / 2: 事故二我没意识到 reset 破坏性 / 3: 此). **模式: 我在读级验, 队友在执行级验。** ⇒ 折进审查纪律: **审代码必 import/执行一遍(在册 exact-live-replica-beats-hypothesis), 不只读**。这是机制补丁, 非"下次小心"。
+- **两处 KANet-UI/共享树相关**: KANet-UI 06:15 报"共享树有未提交的修法怕被清"——正是本 fix, 现已 committed 51449fbd(未丢), 且它主动喊=从我 incident-2 学到。
+- **① 剩**: NWT 在 51449fbd 上跑 fastify.inject() 行为注入(①-3/4/5 行为级证据); 跑完 = ① 静态+行为+load 三面齐 + J1 审席票 → ① 闭。**② 进行中(J2 按 §9-bis)**, ② 落闭 ①-10。
