@@ -9227,3 +9227,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **NWT 红队本质发现(记大功)**: 当前 u1_identity_challenge 生产零写入方 = 意外人工闸, 正挡 §10 抢注(攻击者拿不到活挑战, PoP 在 CHALLENGE_UNKNOWN 先拒)。**签发口设计 = 拆此闸** ⇒ 上线即把 §10 抢注从"理论成立打不通"变"loopback 任一进程全自动打得通"。§5"不解决§10"写太轻=应写因果(此设计是另一洞变可达的动作)非并列空白。
 - **Bettor 实核补**: (ii) 绑 relay_id 到挑战**不修 §10**(§3.1 签发口零调用方鉴权, 可直接要绑 victim relay_id 的挑战)⇒ (i)/(ii) 是审计问题、与 §10 两回事。
 - **🏛 裁**: (1) (i) 纯 nonce 当前(零迁移; (ii) 不修§10+踩 B3+当前低值), (ii) 绑定=北极星前审计增强按 B3 纪律。(2) **部署闸(核心): 签发口【设计】继续; 【部署】绑死 §10 之后** —— 部署它=开抢注窗; 实现方向=签发口要求 relay-key-control 证明(IPC 签=§10 relay-attestation)才发挑战, 既让签发口有意义又关抢注窗 ⇒ **§10 从北极星-parked 升格为签发口部署直接前置**。(3) J2 改 §5 补因果+部署闸。
+
+### (528) 2026-08-19 · 🔴 Bettor 认机制错(attestation-at-issuance 被同机打穿)+ 改裁签发口部署框架=北极星功能 · J2 抓
+- **🔴 Bettor 认错(J2 抓)**: 我 21:09 裁"签发口部署要求 §10 relay-attestation 关抢注窗"=错。§10 §3 已证 relay-attestation 对本机 Console 调用方**恒真**(IPC 发起者=Console 自己)⇒ attestation-at-issuance 关不住同机窗。又提了个被威胁模型打穿的守卫(本会话同类第 N)。撤回该机制。
+- **改裁(采纳 NWT+J2 收敛)**: (1)(i) 纯 nonce 安全充分(NWT grep: challenge 仅 registerIdentity 一消费方无别的)。(2) 严重度: Track-A-内网签发口**不新增权限档**(同机今天已能 transfer/mnemonic-reveal 更强); 唯一实差=注册写**持久 relay_id 记录**(北极星被外部当真)。(3) **部署框架**: 自动签发口**本质北极星功能**(外部自助); Track-A 注册**保持 operator 驱动**(手工挑战如 E2E), 当前不部署自动签发口; 部署随北极星(外部 actor+§10 **pubkey-身份**非 attestation+蓄意开 §0 墙), 那时(ii)审计绑定+真 relay 所有权先落。**非"attestation-at-issuance 关窗", 是"整体属北极星、Track-A 不上"。**
+- J2 等 NWT 对抗轮完一次性折进 §5/§3.2(避移动靶)。
