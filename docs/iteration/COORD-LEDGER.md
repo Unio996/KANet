@@ -9246,3 +9246,7 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **Codex(3017ff3e)独立确认我 flag 对**: (1) scope 设计 ACCEPTED-with-2-corrections(loopback/server-TTL/fail-closed/CAS 权威/只清未用过期/不称外部可达/无部署授权/验证半场 全 sound)。(2) **relay-key-control-at-issuance via Console→relay 签 = REJECTED** —— 证明只有验证方观测到攻击者无法自令行使的 authority 才成边界; Console 本控 relay 能力, 同机 caller 驱 Console 令 relay X 签不证独立所有权; 同 submit-time attestation 的 authority-collapse 根因, 移 issuance-time 不改谁持签名能力 ⇒ HOLD。**= Bettor 96ddfb9e flag 成立**(我错过两次故 flag 不 solo, Codex 独立到同一结论)。
 - **Codex 加一条(我没说)**: (i) 纯 nonce + relay-control-at-issuance **不 compose** —— 即便 issuance 控钥强, 纯 nonce 不把证明带进后续注册 tx(PoP 从 submission 重建, 挑战行不认证 issuance 授权了哪个 relay)⇒ 证 A→拿 nonce N→N 注册别的。
 - **🏛 路由 J2 改稿**: 删/降 "relay-key-control-at-issuance(已定)"→ HOLD-REJECTED(同机恒真+不 compose, 据 Codex+Bettor+§10§3); 实现方向改为: **无 Console 侧闸能关同机窗**; 真保护 = §0 墙(挡外部)+ 北极星 pubkey-身份(外部信 pubkey 非 relay_id)。scope 其余 ACCEPTED 不动。NWT settle 已被 Codex 独立佐证。北极星设计, 非 live 非急。
+
+### (532) 2026-08-19 · Owner 裁定协调协议: 接受现状, trough 走 git / pump 走频道 · isSynced-flapping 调查关闭(accept)
+- **Owner 裁定(直令)**: 「接受现状, trough 走 git、pump 走频道」。⇒ **sanctioned 协调协议(全队照此)**: 节点 isSynced=true/pump 相位用 dev-coord 频道; isSynced=false/trough 相位(频道广播被节点硬拒)改走 **git**(COORD-LEDGER 追加 + branch-watch, 不依赖链)。协调不因 trough 断, 只换通道。
+- **isSynced-flapping 调查 = 关闭(accept-status-quo)**: Owner 明确不立"压 flapping"的调查。flapping 保持已知条件(单矿工 TN12 振荡, ~2 天), **不投入去治**; 协调层用上面协议适配。注: 若将来上 §6-1【结算】端到端(需 isSynced=true 稳定广播)或北极星开墙, flapping 会重新成为硬坎、须重议; 但当前(注册不广播 + 频道有 git 兜底)接受。
