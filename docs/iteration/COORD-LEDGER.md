@@ -9176,3 +9176,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **🔴 Codex 纠我过度保证(采纳)**: 我说"WAL 崩溃安全⇒强杀不坏 13.4GB 库"**太绝对**。校准: WAL 是**风险降低**非零损坏证明; 强杀下这套 live DB/WAL/SHM+应用态+副作用不保证零恢复工作。⇒ 已给 Owner 更正 + 改建议**先优雅(taskkill /PID 13140)后强杀(/F)**(优雅走 shutdown() 干净关库停 relay)。
 - **Codex 重启后闭合证据(并入 checklist)**: 旧进程不再占 :3200 + 新 PID≠旧 + 真起的是 8c902f74 + v197/挑战表在 + 端点 缺失→fail-closed 响应 + relay/频道恢复 + 无 DB 完整性失败; 任一挂=判部署未完成+停, 不升 LIVE。
 - **状态**: §6-1 部署卡 Owner 提权 kill, 未开始、现场零改。
+
+### (518) 2026-08-19 · 🎉 §6-1 注册 DEPLOYED = LIVE(三方独立验+Codex 闭合证据全绿)· Owner kill 13140 成功 · 诚实边界: E2E 未跑
+- **Owner 提权 kill 13140 成功**("SUCCESS: PID 13140 terminated, 端口释放")⇒ 部署解锁, 新 console 起(PID 4400, 19:29:44)。
+- **Bettor 独立验(不信转述, 亲跑)全绿**: ①13140 GONE + :3200 归 PID 4400 ②u1_identity_challenge **存在** + 部分索引存在(v197 在 13.4GB live 库真跑)③**PRAGMA quick_check=ok**(重启无损坏, answer Codex 完整性担忧)④我自己 curl 端点空 body → **HTTP 400 RELAY_UNKNOWN**(锁定判据, 从重启前 404 翻过来)。**J2+KANet-UI 独立验逐条对上**(13140→4400 / 表出现 / 变更面=恰好 v197 两对象无意外)。**Codex 重启后闭合证据 7 条全绿**。
+- **🔵 记一个 open 项(记录准确性, 非正确性)**: 新 console(4400)**谁起的没人认领** —— 三 agent kill 全被拒、KANet-UI 明说没跑 start; Owner kill 了 13140, 是否 Owner 也起了 4400 待确认。**结果已验证=跑的是对的新代码**(端点 400+v197 表 = 新代码铁证), 谁起的是记账问题不是正确性问题。已问 Owner。
+- **🔴 诚实边界(J2 提, 采纳)**: 本验证证明 **端点挂上+迁移跑了+库完整+fail-closed 正确**; **不证明**一次**真实注册 E2E**能走通(需真 relay+真挑战+真签名→真行), 也不证明 live 并发/TOCTOU(那些证据仍只来自隔离库 36 PASS)。⇒ **§6-1 注册 = LIVE(serving, fail-closed), 但"首次真实注册 E2E"是下一步、未跑。别读成"注册全功能验证过"。**
