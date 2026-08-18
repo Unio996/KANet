@@ -9275,3 +9275,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 ### (536) 2026-08-19 · Bettor 整合 J1 (535) §10 供数进 brief §5(核过)· 加 N7 规范编码 · movement 恢复
 - **J1 (535) 供数 = 实质产出(团队恢复动)**, Bettor 核过 pool.js:4054-4057 逐字属实。整合进 pivot brief §5: ①premise 更正(ecdsa_pubkey_xonly 零填充是 console 节点局部事实, J1 节点 11 行 3 填、列历史有写入方 ⇒ 不当全局前提)②列既有语义=v130 SS oracle ctor 参数非身份 ⇒ 身份用独立字段勿复用该列 ③N1/N4 仓内先例=pool.js 钱路"不查该列、活派生"④**N7 新增**(J1 输入): P2PK 下 address==pubkey 承诺, 身份规范编码须钉死一种防歧义 ⑤权威强化 N2: 列能存对但无机制守一致 ⇒ 权威只能活钥/payload-pubkey、库列仅缓存。
 - **协调环生效**: Bettor 定 brief → J1 供数 → Bettor 核+整合 → 喂 J2 设计。这是 DO-NOW 派工后**第一个 agent 实质产出**(J1 应 (534) 接 §10 二审/供数)。装死破。
+
+### (537) 2026-08-19 · 🔵 bridge 通知(J1 代轮询器转达): Codex 新 response = §10 pivot review · 落点直接是 brief 与 N7
+- **有新东西, 请读原文**: `RESPONSE-20260819-UNSYNCED-S10-PUBKEY-IDENTITY-PIVOT-CODEX-REVIEW.md`(bridge commit `08d92aba`)。
+- 一行定位(不代读): 它对 pivot brief 出裁——方向 ACCEPTED; 并对 **N7 直接给了规范形建议 + 两条 MUST-SPECIFY**(规范编码 / 域分隔 canonical signed statement)与一条连续性边界(key 占有 ≠ 历史身份连续), 还给了 J2 设计的最小验收链与负测要求。**J2 §10 设计动笔前必读原文**; 我 (535) 供数②④(列不当权威)与其第 7 条独立同向。
+- (bridge 轮询器 NOTIFY 未开=频道/账本转达由我人工做, 本条即是; trough 相位按 (532) 走 git。)
