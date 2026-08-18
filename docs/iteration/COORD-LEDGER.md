@@ -9191,5 +9191,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 
 ### (520) 2026-08-19 · E2E 定性更正(J2)=验证半场 · 签发口=§6-1 后真正下一块砖 · NWT 密钥面 PASS · §6-4 Bettor 建议(照 07-26)
 - **🔴 E2E 定性更正(J2 抓, Bettor 采纳, 纠我给 Owner 的过度声称)**: 注册流程**签发挑战那一半从没建**(u1-challenge-store 只有验证/消费, 无签发口)⇒ 本 E2E 只能证**验证半场 live 贯通**(真 relay+PoP+CAS+落库), **不能**证"旗舰真能注册"(真实用户走不到第一步=拿挑战)。改名「注册验证半场 live 贯通」。**⇒ 签发挑战入口 = §6-1 之后真正的下一块砖**(记进主线; 我先前"下步证旗舰能注册"是过度声称, 收回)。
-- **E2E 三授权点已裁**(a 手工 INSERT 挑战=标注夹具模拟缺失签发口/(b) tester-3 阳性 custody=mnemonic 可逆/(c) 进程内解密派生 xpub)。**NWT 密钥托管面 PASS**(实核 getRelayMnemonic 仅 2 调用点、console 解密自己 relay 助记词是 relay-manager spawn 路径长期例行机制、非新口子; 纯 in-process 零 HTTP/IPC)。NWT 预警(不阻): getRelayMnemonic  把"无助记词"与"解密失败"读成同一 null=既有精度洞 ⇒ E2E 脚本须解密后断言非空 loud-abort。待 J2 出脚本 + no-key-leak 核 + 执行 + 三方验。
+- **E2E 三授权点已裁**(a 手工 INSERT 挑战=标注夹具模拟缺失签发口/(b) tester-3 阳性 custody=mnemonic 可逆/(c) 进程内解密派生 xpub)。**NWT 密钥托管面 PASS**(实核 getRelayMnemonic 仅 2 调用点、console 解密自己 relay 助记词是 relay-manager spawn 路径长期例行机制、非新口子; 纯 in-process 零 HTTP/IPC)。NWT 预警(不阻): getRelayMnemonic 的 catch-return-null 把"无助记词"与"解密失败"读成同一 null=既有精度洞 ⇒ E2E 脚本须解密后断言非空 loud-abort。待 J2 出脚本 + no-key-leak 核 + 执行 + 三方验。
 - **§6-4 Owner 问"拍什么" ⇒ Bettor 澄清+建议(非逼 Owner 拍)**: §6-4=将来 Track B(外部 broker 自注册, 非开 Owner 实例)。矛盾=07-26 Owner"签名挑战冗余不做" vs D-012 §82/§105/§114 文本"命名它为第一块砖"。Bettor 建议**照 07-26 走(不做签名挑战、身份=Kaspa 地址、所有权靠链上使用)**, 真做 Broker 时按此 + 改 D-012 文本一致; Owner 不用现拍, 除非当初"要"的版另有理由。§6-4 暂停。
+
+### (521) 2026-08-19 · E2E 授权链完整 → Bettor 放行执行(tester-3)· 双代码审 PASS · logSafe-redact backlog
+- **授权链齐**: Bettor 三点批 + Bettor 代码审 PASS(独读 179 行) + NWT plan GO + NWT 代码级审 PASS(9ebeeeb1 全文 18 处 logSafe 逐点核无泄露) + 密钥托管面 PASS + tester-3 get_pubkey 通/custody=mnemonic/不在 DENY。⇒ **Bettor 放行执行** `--relay=tester-3 --execute`, J2 跑, 三方验预注册判据(E1 阴性零写 / E2 ok+行+1 / custody 服务端派生 / root_fingerprint 重算 / E3 消费 / E4 重放拒 / E5 零附带)。
+- **backlog(NWT 提)**: logSafe = console.log 改名、无脱敏 ⇒ 零泄露靠人逐点核非函数自拦(守卫不自执行, 同自指-guard 族)。加真 redact/敏感 key 名拦。非阻本次。
+- **定性守死**: 证【验证半场 live 贯通】非"旗舰真能注册"(签发口=下一块砖)。
