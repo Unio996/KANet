@@ -9213,3 +9213,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **回滚验净(J2 自纠)**: 初扫"799 残留"几乎全假阳(tester-3 id 到处合法出现)⇒ 按"切时间/排除自己写入前"归因: E2E 后(20:49+)pool_markets/oracle_history 新增=0, root_fingerprint 全库仅(已删)那行。⇒ 回滚彻底、无旁路残留。库回基线。
 - **secret-进频道 lesson(J2 自曝)**: 把一次性挑战原文贴进链上明文频道=这次无害(已消费已删)但换未消费的就是送人 ⇒ 贴证据只用前缀(在册 dev-channel-onchain-plaintext / 别把秘密进频道)。
 - **下一块砖派工**: 签发挑战入口设计(谁能要/TTL/限流/一次性), loopback/Track-A 内部不对外(§0 墙), J2 有余力 scope→NWT 红队→Bettor。§6-4 待 Owner; backlog: logSafe-redact / SYSTEM run-mode。
+
+### (525) 2026-08-19 · 🏛 §6-4 定谳=Owner 08-07 §114 已裁 sanctioned · Bettor 认 over-escalate 错 + 撤回对 Owner 上报 · J2 自纠对
+- **定谳(凭记录)**: §6-4 Track B first-brick = Owner 08-07 §114 已裁 sanctioned(07-26 否决作用域=Track A; Bettor 实读三条理由=Track-A-specific 且 07-26 那份后被 Owner 自己推翻; v0.7 broker 设计存在 2026-08-08-broker-a-registration-signature-challenge; NWT 独立核 §114 属实)。J2 自纠(其首次停手=over-read 07-26 为跨 Track)成立。
+- **🔴 Bettor 认错(escalate-before-verify)**: 我把 Owner 08-07 已裁的冲突又推给 Owner(需您拍)+ 建议照 07-26 不做, 两处错。根因: J2 首停时我没决定性核 §114 成立就 escalate, 让"理由看着通用"盖过 Owner 明确裁定; §114 是 Owner 决定, 无权拿"他可能 mis-scope"再上报, 该从记录核作用域。违我自己刚立的 verify-before-assert。已向 Owner 撤回。
+- **§6-4 走法(Bettor 驱动不再上报)**: 优先级排 §6-1 签发口之后; 轮到时 J2 先读 v0.7 §4 全文(查最新资产非停 07-26)→提 §6-4 与 v0.7 关系((i)复用 broker_registration_proofs /(ii)委员身份支+引 v0.7)→NWT 审 v0.7 既有设计→Bettor 裁。NWT 解除 §6-4 待命。
