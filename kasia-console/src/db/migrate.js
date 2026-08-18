@@ -5693,5 +5693,41 @@ export function runMigrations() {
     console.log('[migrate] v196: u1_identity_registration 建表完成 (A2 同源判定登记表; N3 锁1/N4 mnemonic 型已落成 UNIQUE+CHECK 结构约束; 今日无写入方).');
   }
 
+
+  // ── v197 (2026-08-18, J2): u1_identity_challenge —— A2 注册的一次性挑战表 ──────────────
+  //
+  //   🔴 **它是 §6-1 LIVE wiring 的【真阻塞】, 不是可选加固**: `registerIdentity` 要求 `challengeStore`
+  //     必传(否则 CHALLENGE_CONSUME_MISSING), 而 `createChallengeStore(sqlite, table)` 的工厂**校验表存在**
+  //     ⇒ 这张表不存在时**注册入口根本接不上线**, 且是 fail-closed 意义上的"不能半工作"(直接 throw, 无静默降级)。
+  //     ⇒ 本迁移落地前, ① registerIdentity 接线**无法进行**; 这也是 ③→①→②→⑤ 这个顺序的由来。
+  //
+  //   **形状取自设计报告 §3 + §9-bis(已过 J1 审席 + NWT 两轮红队)**:
+  //   · `challenge` 作 PRIMARY KEY ⇒ 天然唯一, 且一次性消费的 CAS
+  //     (`UPDATE … SET used_at=? WHERE challenge=? AND used_at IS NULL` + 判 `changes===1`)**走主键**。
+  //   · `used_at` 可空: **NULL = 未消费**, 它就是 CAS 的判据列。
+  //   · `expires_at` **NOT NULL**: 比测试夹具那份 DDL 收紧一格 —— **缺过期时间的挑战不该存在**。
+  //     ⚠ 收紧后夹具与生产不再逐字相同 ⇒ **夹具已改为读本文件的生产 DDL**(见 u1-registration.test.mjs),
+  //     否则测的是另一张表(在册: offline 测试须用真实 schema)。
+  //
+  //   🔵 **那条部分索引【不参与 CAS 正确性】, 只服务清理/巡检**("还有多少未消费且已过期")。
+  //     明写在这里, 免得下一个人把它当闸 —— 而且这不是一句声明: 验收用例 ③-4 **删掉该索引后重跑并发 CAS 用例,
+  //     必须仍全绿**, 那才是"它不承重"的正向证据。**声称某物不承重, 同样要一个实验去证。**
+  //
+  //   🔵 **对 live 的即时影响 = 零**: additive + IF NOT EXISTS + 今日无写入方(注册入口尚未接线);
+  //     migrate 在 console 启动时跑 ⇒ 下一个重启窗才生效。**生产库真正跑迁移 + LIVE 授权归 Owner 拍**(Bettor 05:45 派工口径)。
+  {
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS u1_identity_challenge (
+        challenge   TEXT    PRIMARY KEY,
+        used_at     INTEGER,
+        expires_at  INTEGER NOT NULL
+      )
+    `);
+    sqlite.exec(`
+      CREATE INDEX IF NOT EXISTS idx_u1_challenge_unused
+        ON u1_identity_challenge (expires_at) WHERE used_at IS NULL
+    `);
+    console.log('[migrate] v197: u1_identity_challenge 建表完成 (A2 一次性挑战; challenge PK 走 CAS, used_at NULL=未消费, expires_at NOT NULL; 部分索引仅巡检不参与正确性; 今日无写入方).');
+  }
   console.log('[migrate] DB migrations complete.');
 }
