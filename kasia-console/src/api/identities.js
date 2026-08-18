@@ -2,6 +2,8 @@ import { listIdentities, updateIdentity, getIdentityById, upsertIdentity, isAddr
 import { listRelayNodes } from '../data/settings/relay-nodes.js';
 import { parseLang, getT, isRtl, LANG_NAMES } from '../i18n/index.js';
 import { sqlite } from '../db/client.js';
+import { registerIdentity } from '../lib/u1-registration.mjs';
+import { createChallengeStore, CANONICAL_CHALLENGE_TABLE } from '../lib/u1-challenge-store.mjs';
 
 const TRUST_LEVELS = ['owner', 'recommended', 'normal', 'blocked'];
 
@@ -239,3 +241,51 @@ export async function registerIdentityRoutes(fastify) {
     return reply.send({ ok });
   });
 }
+  // ── ① U1/A2 委员身份注册入口 (2026-08-18, J2; 设计报告 §1 + §9-bis, 已过 J1 审席 + NWT 两轮红队) ──
+  //
+  // 🔴 **handler 只做三件事, 不做任何业务判断** —— 判断全在模块内, 那是 §6-1 定义冻结的前提:
+  //    ① 取 console 单例 sqlite handle(与 relay_nodes / 两张 u1 表同一个 handle、同一个库文件)
+  //    ② createChallengeStore(sqlite, CANONICAL_CHALLENGE_TABLE)
+  //    ③ registerIdentity({ sqlite, submission, challengeStore })
+  //
+  // 🔴 **硬纪律一: 禁止把 req.body 展开进 args/submission。** 必须逐字段显式取。
+  //    理由不是洁癖: (366) 那个洞的形态正是"调用方塞一个同名字段"。任何 `...req.body` /
+  //    `Object.assign(.., req.body)` 都会把它原样重开 —— 而 `registerIdentity` 的生产签名里
+  //    **刻意不存在** clock / verifyMessageFn / expectedTable 这些参数名, 展开就等于把它们送回来。
+  //    ⚠ **别名与计算属性同样算展开**(`const b=req.body; {...b}` / `req['bo'+'dy']`) ——
+  //      负面 grep 只是必要条件, 真正的背书是 ①-3/①-4/①-5 那三条**行为注入测**。
+  //
+  // 🔴 **硬纪律二: handler 不碰 u1_identity_challenge / u1_identity_registration 两张表。**
+  //    读写权归模块(store 是动词式导出, (376) 之后不再交出 ops 对象)。
+  //
+  // 🔵 **白名单是六个字段, 不是五个**: 我设计稿 §1 只列了 `u1-registration.mjs` 自己读的五个,
+  //    **漏了 `signature`** —— 它由 `u1-registration-pop.mjs` 从**同一个 submission** 读(`:84`/`:129`)。
+  //    照五字段实现会让每次注册都 `MALFORMED: signature missing`。**实现时才暴露的设计错, 记在这里。**
+  fastify.post('/api/identity/u1-register', async (request, reply) => {
+    const b = request.body || {};
+    const submission = {
+      relayId: b.relayId,
+      rootXpub: b.rootXpub,
+      identityIndex: b.identityIndex,
+      identityPubkeyXOnly: b.identityPubkeyXOnly,
+      challenge: b.challenge,
+      signature: b.signature,
+    };
+
+    // 🔴 fail-closed 传导: 迁移未跑(表不存在)时工厂必抛 ⇒ 这里**必须**回明确失败,
+    //    **绝不**能吞掉异常后继续走, 更不能返回"注册成功"。
+    let challengeStore;
+    try {
+      challengeStore = createChallengeStore(sqlite, CANONICAL_CHALLENGE_TABLE);
+    } catch (e) {
+      return reply.code(503).send({
+        ok: false,
+        code: 'CHALLENGE_STORE_UNAVAILABLE',
+        reason: `一次性挑战存储不可用(通常是 v197 迁移尚未在本库跑过): ${e.message}`,
+      });
+    }
+
+    const result = await registerIdentity({ sqlite, submission, challengeStore });
+    return reply.code(result.ok ? 200 : 400).send(result);
+  });
+
