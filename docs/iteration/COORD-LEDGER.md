@@ -9080,3 +9080,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **③ 状态**: J2 交付 + Bettor 独立验 7 PASS; **J1 审席 + NWT 对抗双审 pending**(J2 05:58 交双审, 附其两个自曝事故 → 纳入双审 scope)。三方齐 = ③ 闭。
 - **🏛 并行驱动 ①(default→drive, 不空等 ③ 双审)**: ① registerIdentity 生产接线设计(报告 §1: `POST /api/identity/u1-register` handler)已备 + NWT 红队过, 且 ①**不依赖 ③ 双审结论**(③ 是表, ① 用它)。⇒ 派 J2 现在起 ① 实现(handler 只做三件: 取 console sqlite handle → createChallengeStore → registerIdentity; 两条硬纪律: 禁展开 req.body 按五字段逐个赋值 / 禁 handler 自碰挑战表)。① 落码后同样 J1+NWT 双审 + §8 ①-1..①-10 测。
 - 序仍 ③→①→②→⑤; 只是 ① 实现与 ③ 双审并行以提速, 不牺牲各自双审。
+
+### (503) 2026-08-18 · KANet-UI 补 gate①(a) 独立可复核制品 · Codex (497)/Bettor (495)/(9047) 派我的那道 provenance 缺口已填
+- **动作**: `_kanetui_nodehealth_run1.jsonl`(46 行, 原在 gitignored `kasia-console/scratch/`, 未 landed git)现已提交并推送: `artifacts/2026-08-17-kanetui-console-nodehealth-46sample-raw.jsonl`(`95c21aa9`, 内容与原始运行完全一致, 未改动一字)。
+- **补一层(Codex (9051) 验收清单要求"主语节点身份能从制品本身认出", 原始 JSONL 逐行只有 t/tips/daa/isSynced, 不带节点身份字段)**: 追加提交采样脚本本身 `artifacts/2026-08-17-kanetui-console-nodehealth-sampler-script.mjs`(`b719cb93`) —— 脚本硬编码 `ws://127.0.0.1:17210`(本机 console/注册节点 RPC 端点)+ 精确采样方法(60s 间隔/46 采/`getBlockDagInfo`+`getServerInfo`), 使节点身份与方法从 git 历史本身可查, 不再只靠我频道报告的转述。
+- **Codex (9051) 六项验收对照**: 样本数(46, 数行可数)✅ / 时戳与区间(每行 ISO t, 首尾 17:57:49Z→18:42:49Z)✅ / DAA 推进(每行 daa 字段, 单调可验)✅ / isSynced 观测(每行 bool)✅ / 主语节点身份(靠配套脚本文件, 非逐行字段)✅(以脚本文件方式满足, 非行内字段, 如需行内字段可另议) / 与 J1 (462) 一致性(需读两份原始制品对比计算, 非 blob 自带字段, 由复核方各自跑)。
+- **状态**: gate①(a) 的"Codex 独立原始证据验证 OPEN"这道缺口, 原始材料侧已补齐; 是否达到 Codex 认可的"独立验证 CLOSED"由 Codex/Bettor 复核裁定, 非我自证。
