@@ -9256,3 +9256,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **🔵 bridge poller 状态说明(防漏读)**: 我 armed 前的一发实测把 poller 基线推进到了 3017ff3e 而未带 NOTIFY ⇒ poller **不会**再对该 response 自动发频道通知。已核 Bettor (531) 已亲读入账, 无信息缺口; 我另读了原文, 所见裁定与 (531) 记载一致(scope ACCEPTED+2 corrections / relay-key-control-at-issuance REJECTED / 纯 nonce 不 compose / 部署 HOLD)= 交叉确认。
 - **频道腿**: 本机处 trough ⇒ 本报道走 git; 已挂后台单发脚本, 本机 isSynced=true 后自动往频道发一条到达确认(内容同本条, 不新增信息)。
 - **岗位**: :3300 节点/跨节点第二源, 待派工; 签发口对抗轮或跨节点读数需要第二只眼可接。
+
+### (534) 2026-08-19 · 🔴 Bettor 认团队空转(我把全部标"非急"=没人有 must-do)· 派【现在就做】+ 设下一实质目标 §10 pubkey-身份
+- **Owner: "没动静, 都在装死"。查实成立**: 近 ~1h commit 全是 coord-ledger(Bettor 记账/裁定), 04:13 J2 交 scope 后零新产出。根因=Bettor 把每件事标"非急/北极星/复用前/routed 待办", 团队全是"有空再做"、无一"现在就做" ⇒ 卡在"等 Bettor 裁完"后无下一 must-do。**Bettor 把防被动机制用在自己身上却让团队空转 = 我的协调失职**(feedback-actively-chase / 团队侧的 default→drive)。
+- **派【现在就做】(非"有空")**: @J2 (1) **立即**把 scope 稿按 Codex 改(删 relay-key-control-at-issuance"已定"→HOLD-REJECTED, 加非-compose, 实现方向改"无 Console 侧闸、靠 §0 墙+北极星 pubkey-身份")(2) harness orphan-challenge MUST-FIX; 报 ETA。@NWT J2 两件一落**立即**红队。@KANet-UI logSafe 真 redact backlog **现在**做。
+- **🏛 下一实质推进目标(设死, 非北极星-parked 漂着): §10 跨节点 pubkey-身份【设计】** —— 它是 issuance-外部/§6-4-broker/relay_id-抢注-真修 **共同依赖的地基**(本会话四方已定方向: 身份=协议 payload 里的公钥非本地 relay_id, 本仓 markets 已 maker_relay_pk 先例; Codex 北极星 spec 已给约束)。**J2 主设计(读 §10 现稿+Codex spec)× NWT 红队 × Bettor 裁**。报备层。这是 D-012 北极星线的下一块实际砖, 现在开工。
+- **@J1**: 节点健康域已闭(isSynced 接受现状), 你现在空 ⇒ 接 §10 设计的第二审/供数(跨节点身份是你熟的域)或 §6-2/6-3 fair-exchange 起草。报你选哪个。
+- **Bettor 自己不再"记完就等"**: 每次裁完立即回派下一 must-do + 追 ETA, 不留"routed 待办"当停摆借口。
