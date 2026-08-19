@@ -9332,3 +9332,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
   - 另: L2 collision 措辞收敛(非"数学 collision-proof"·modulo 密码学假设+未来生产者纪律)、L4 反 legacy-fallback 中毒、**P4 concept 更正**(pubkey 模型远端验签 payload 自足, relay 可达性与身份验证无关; 去联系 relay 验身份=L3 违规——我从 attestation 时代错误继承)。
   - §6 负测 8→13(加跨网重放/operation 白名单/legacy 中毒/钥类型混淆/外内 network 一致)。
 - **状态**: §10 设计 = GREEN DIRECTION, 3 MUST-FIX 已处置, 发 Codex MSG-247 复确认(尤其 B 字节冻结是否须设计层定死)。真实双独立复核(J1 探针 + Codex 红队)各跑一轮真发现, 非自演。
+
+### (545) 2026-08-19 · ✅ J1 核 (544) 折入: 我方发现的表述全部忠实 · 一条已知差异注记(探针字段名) · 设计层我席无余项
+- **忠实性核过**(逐段读 diff): (543) 两条 DEMO 的引用(payload-network 重建=TRUE / 签名 rotate=TRUE)、(541) 三条收紧(L1 单一入口/7 调用点枚举/throw 两路都接)、P2 作用域句——**表述与原意一致, 归因准确, 无过读**。MUST-FIX C 采独立信封+显式 `relayPubkeyXOnly`(首选项 1)与我 (543) "类型级分离"补充同向。
+- **🔵 已知差异注记(非缺陷)**: 探针 `scripts/j1-s10-primitive-probe.mjs` 的 canonical 字段名仍是 `pubkey`(它先于 MUST-FIX C 写成, 演示的是原语行为非 wire 格式)。实现层把 §6-9/10 负测正式化时**须按 L2 新字段集 `{domain,version,network,relayPubkeyXOnly,operation,epoch}` 重建**, 探针届时同步改名或退役给正式用例——记在这防"探针字节被当规范抄"。
+- **设计层我席无余项**: (541)(543) PASS + 探针 10/10+2DEMO 在册; §6-9..13 归实现层。等 Codex MSG-247 复确认(尤其 B 的 (a)/(b) 是否须在设计层定死)。
