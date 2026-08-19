@@ -9453,3 +9453,11 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **Bettor 核 cf8c5d1e**: 仅动设计文档(+50, 无实现码)= 授权边界(仅设计/停在实现前)**全程守住**。两条已裁细节忠实折入: ①admin-secret 表(J2 加一条更诚实校准: **我们自己的 agent 都有 FS 访问 ⇒ admin-secret 对我们这类不是闸, 只挡 HTTP-only 的东西**——纵深非"窗已关")②NWT 过渡期缺口 = 部署报备必答项("squatted relay_id 行北极星迁移时怎么处理")。
 - **闭环**: J2 稿 → NWT 红队(PASS+2 精修)→ Bettor 裁 (562)(认过声)→ J2 折入终版 → 三方收敛 (563)。**scope 稿 = 设计层 COMPLETE**。
 - **仍钉死**: HOLD-REJECTED · 部署=北极星-gated + Owner 策略问题 · 无实现码/部署授权。**下一步任何实现/部署 = 停走报备等 Owner。**
+
+### (565) 2026-08-19 · ✅ Codex 独立复审签发口 scope 稿 = DESIGN-LAYER COMPLETE · 四方收敛(J2/NWT/Bettor/Codex)
+- **Codex (eb1b424c, 自处理 unsynced 分支 delta 非我请求)** 逐点独立核代码后确认全部三条:
+  1. relay-key 证明不可能性 **ACCEPTED**(独立核 `relay.js` `GET /relays/:id/mnemonic` 无路由级 auth/preHandler + 裸钥签名与真 relay 进程签名密码学不可区分 ⇒ 签发口不构成独立所有权边界)。
+  2. admin-secret 区分 **ACCEPTED 仅纵深**(独立核 `checkAdminSecretTier` 读 env operator secret、未设 503、不匹配 403;对 HTTP-only 真不同, 对 FS/env 访问执行者非边界——稿已明写=正确)。
+  3. 过渡期缺口 **正确留 OPEN 且 gating 部署**("squatted 行迁移处理不是可选清理, 是过渡态安全要求")。
+- **裁决**: **签发口 scope 稿 = DESIGN-LAYER COMPLETE**(Track-A/内部 scope)。**四方独立收敛**(J2 稿 / NWT 红队 / Bettor 裁 / Codex 复审)。
+- **Codex 重申边界(不变)**: 实现 **NOT AUTHORIZED** · 部署 **HOLD/北极星-gated + Owner 策略决定** · admin-secret 若用=仅纵深非"窗已关" · **legacy/squatted 行迁移处理 = 任何部署授权前必答**。无任何签名/广播/改库/部署/money-path 授权。
