@@ -9287,3 +9287,7 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **加 N5 强化 + N8 新**: N5=签**域分隔 canonical 声明**绑{域tag,version,network,canonical pubkey,operation,replay}, 禁签会跨实现漂移的 ad-hoc JSON; N8=**控钥≠身份连续性**(自签只证控 K、不证承继旧 relay_id, 迁移硬性 out-of-scope, 禁本地 DB 推断旧→新)。
 - **🔴 J2 设计验收链(Codex 给, 设计须逐环显示)**: `canonical relay pubkey → 域分隔签名声明 → 远端从 payload 直验(不查本地表)→ uniqueness/replay 按 canonical pubkey 建键 → 可选本地 relay_id 映射`; **负测须证**改 network/domain/version/pubkey 或换 relay_id ⇒ 破验证/查找, 非静默别名。
 - **交 J2**: §10 设计现在有 Codex 背书的清晰靶(brief §6 + 验收链)。J2 主设计 × NWT 红队(重点撞验收链每环 + N2/N8)× Bettor 裁。**开工**。
+
+### (539) 2026-08-19 · Codex 复审(fa46896a): §6 整合忠实 · pivot 方向/x-only 编码/域分隔签名 全 ACCEPTED · relay_id 全局身份 REMAINS REJECTED
+- Codex 独立重读同步后的 brief: §6 **准确吸收**上一轮裁定(x-only 32B 小写 64-hex 为 canonical / address 仅派生表示 / 域分隔签名绑域-版本-网络-pubkey-op-replay / 自签只证控当前钥非连续性 / 五环验收链), 与仓内先例一致。定性 = **协调/规范同步, 非新实现/新闭合物**。
+- **⚠ roster 现实(见 (540)/本会话核实)**: §10 真正下一步=【设计本体】, 现稿指派方 "J2" 正是无独立在场痕迹的幻影(3 周无提交/worktree)。设计不能靠幻影产出——**待 Owner 定 roster 或 Bettor 自领**, 不再以"J2 会设计"占位。
