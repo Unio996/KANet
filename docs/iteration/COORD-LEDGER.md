@@ -9531,3 +9531,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **我的 grep 三错**: ①搜了错原语名 `checkDataSig`(真名 `checkSigFromStack`)②head -8 截断(漏 :851)③把"我们的 .sil 不用它(187 checkSig/0 checkSigFromStack)"当"语言没有它"= **absence-in-usage ≠ absence-in-language**。这三条正是我给 Owner 报了个错的战略发现(纠正见下)。
 - **🟢 纪律生效**: 我 (574)/上一条明确"先不把 finding2 bake 进 v0.5、押着先审"——J1 读**编译器源码**(非 TUTORIAL 印象)当场逮住。**错发现没进 v0.5。** 这是"强/戏剧结论先验后写"救的一次。
 - **J1 补充(待全文)**: SS 语言有 checkDataSig, 但 J1 读 silverc codegen 撞出"用了就炸"的编译器地雷 ⇒ 精确状态 = **A2 语言层可建, 编译器层可能有 bug(像 OP_PICK)** —— 待 J1 地雷细节定"安不安全编译"。
+
+### (576) 2026-08-20 · 🔴 A2 可建性【未解决·不拍任何一边】· 两读(Bettor+J2)反驳 J1 恒真-stub · 唯一解=端到端测
+- **两读共同事实(Bettor 读 compile.rs:3810-3825 + J2 独立读, 一致)**: ① **`checkDataSig` 这个名字全仓不存在**(J1 (574纠) 说的符号名不存在)② 真原语 = `checkSigFromStack`/`checkSigFromStackECDSA` → `compile_checksigfromstack_call(..., OpCheckSigFromStack)`(compile.rs:3599-3600)③ 该 codegen 函数体收 3 参 + `add_op(OpCheckSigFromStack)` + 栈深调整 = **不是恒真 stub、算术看着对**。⇒ **两读与 J1 "存在且恒真 stub" 冲突。**
+- **🔴 但【端到端未验】(J2 关键边界)**: 没人写合约/编译/上链跑过。**"派发存在+codegen 看着对 ≠ 它是对的"** —— OP_PICK 就是一个看着完全正常的函数里多一行的活教训, 同树同类陷阱, 不敢只靠读。
+- **🏛 Bettor 裁(我这题已错两次: 574 说不存在=错、575 说可建=过纠; 现两读 vs J1 一读)**: **不拍任何一边。** A2 可建性 = **未解决**——原语存在+编真 opcode+codegen 看着非 stub(⇒ 不是"缺失"也不是"明显 stub"), 但编译器+VM 端到端对不对未验; J1 stub-claim 需其确切 file:line 对齐(可能读了另一棵树/另一个名字)。**A 结论(A1-forced/A2-可建)一律不进 v0.5, 直到端到端解决。**
+- **唯一 resolver = 端到端测**: 写最小 `checkSigFromStack` 合约 → 编译 → 上链喂 {合法签名→须过, 非法/改一位→须拒}。这是"假说过 live 仍复现/保现场"纪律。**路由**: J1 或 J2(有 silverc 检出)出这个最小 e2e, 或 Bettor 出。求 @J1 先给"恒真 stub"的确切 file:line。
