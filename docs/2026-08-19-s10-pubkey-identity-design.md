@@ -59,9 +59,11 @@
 | 5 | `operation` | 闭枚举，v1 仅 `"register"`（见下 operation 白名单） |
 | 6 | `epoch` | 一次性 challenge 串（见下 epoch 冻结） |
 
-- `u32be(len)` = 该字段 UTF-8 字节长度的 4 字节大端。**被签字节（传给 `signMessage`/`verifyMessage` 的 message）** = `"KANET-U1-IDENTITY-v1|" ‖ <network> ‖ "|" ‖ lowerhex(sha256(canonical_bytes))`。
-- **golden vectors 从本规范可导**：实现方各自算出的 canonical_bytes/sha256 必须逐字节一致，任一实现选了别的编码即不符合 v1。
-- 🔵 变动 canonical 编码 = 变协议 ⇒ **必须 bump `domain`/`version`**（老签名天然落在旧域，不跨版本冒充）。
+- `u32be(len)` = 该字段 UTF-8 字节长度的 4 字节大端。**被签字节（传给 `signMessage`/`verifyMessage` 的 message）** = `<prefix> ‖ <network> ‖ "|" ‖ lowerhex(sha256(canonical_bytes))`。
+- 🔴 **前缀【派生】不是字面量（J1 (547) 撞到的微歧义，钉死）**：`prefix = domain ‖ "-v" ‖ version ‖ "|"`。v1 即 `"KANET-U1-IDENTITY-v1|"`。⇒ **bump v2 时前缀随 domain/version 自动移**（`…-v2|`），前缀与被 hash 的 canonical 字段**永远同源**，不会一个变一个不变。
+- ✅ **golden vectors 已产 + 独立第二实现逐字节对拍 TRUE**（J1 (547)，`artifacts/2026-08-19-s10-golden-vectors-v1.json`，spec_commit 22aeb959，3 向量 testnet/mainnet/epoch，test-only priv=1 钥）= Codex MSG-247 要的"golden vectors derivable, shared by every implementation"那份对拍锚**已落地并经第二实现验证**。
+- 🔴 **对拍锚 = `canonical_bytes` / `canonical_sha256` / `signed_message` 三者逐字节；`signature` 不是锚**：J1 实测 kaspa-wasm `signMessage` **非确定**（BIP340 aux-rand，同钥同消息两签不同）⇒ 向量里的 `example_signature` 只可 `verifyMessage=true`、**不可复现**。别把"签名对不上"误判成实现不符。
+- 🔵 变动 canonical 编码/前缀 = 变协议 ⇒ **必须 bump `domain`/`version`**（老签名天然落在旧域，不跨版本冒充；前缀派生保证它一起移）。
 
 🟢 **epoch 语义【已冻结】（Codex MSG-247：challenge vs nonce 是不同重放协议、进 canonical 字节、须设计层定）**：**v1 = challenge-based**，`epoch` = 已评审的**持久 challenge**（CAS + 同事务消费，③ 已落，现稿 §5 P3）。**nonce 型留给未来版本**（要用则 bump version → 不同签名域 + 另设计单调性/持久化权威，本份不做）。
 

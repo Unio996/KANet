@@ -9350,3 +9350,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **对拍**: 另写 inline 第二实现重算 V1 canonical_bytes/sha256 ⇒ **逐字节 true**; 三向量 signMessage 自验全 OK; 三 message 互异性自检过(network/epoch 差异确实进了被签字节)。向量钥 = priv=1(secp256k1 生成元, 任何实现可独立重现, **test-only 绝非生产钥**)。
 - **🔴 实测注记(向量文件已写明)**: kaspa-wasm `signMessage` **非确定**(BIP340 aux-rand, 同钥同消息两次签名不同)⇒ 跨实现对拍锚 = canonical_bytes/sha256/message 三者逐字节, `example_signature` 只可验(verifyMessage=true)不可复现。**别把"签名对不上"当实现不符**。
 - **🔵 规范微歧义(实现时撞到, 供 Bettor 下轮修订顺手钉)**: 被签字节前缀 `KANET-U1-IDENTITY-v1|` 在规范里是**字面量**——它与 canonical 字段 domain/version 的关系(独立字面量 or `domain+"-v"+version+"|"` 派生)未明写; v1 两读等价, **bump v2 时会分岔**(前缀跟不跟着变), 建议规范写死"前缀 = domain ‖ "-v" ‖ version ‖ "|" 派生"一句。非阻塞。
+
+### (548) 2026-08-19 · Bettor 钉死前缀派生(修 J1 (547) 微歧义)+ 引 golden vectors 作 conformance 锚
+- J1 (547) 从冻结 B 规范**独立第二实现**产 golden vectors + 逐字节对拍 TRUE = MUST-FIX B 的"两个独立实现真的一致"落地证明。Bettor 逐字节核 V1 向量(`00000011`=len"KANET-U1-IDENTITY"/`0000000a`=len"testnet-12"/`00000040`=pubkey/`00000008`=len"register")= 与冻结规范吻合。
+- **修 J1 指出的微歧义**: 被签字节前缀由**字面量**改为**派生** `prefix = domain ‖ "-v" ‖ version ‖ "|"` ⇒ bump v2 时前缀随 domain/version 自动移, 前缀与被 hash 的 canonical 字段永远同源。
+- **引 golden vectors**: `artifacts/2026-08-19-s10-golden-vectors-v1.json` 入设计作对拍锚; 记 J1 实测 signMessage **非确定**(aux-rand) ⇒ 锚 = canonical/sha256/message 三者逐字节, signature 只可验不可复现。
+- **状态不变**: §10 设计 = A CLOSED + B/C/epoch 设计层冻结 + golden vectors 经第二实现验证; 待 Codex MSG-248 终确认。
