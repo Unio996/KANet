@@ -9578,3 +9578,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **🏛 Bettor 校准(不夸大)**: 严重度 = **forward-construction-risk + 极远未来**, **非"现存基金此刻在险"** —— 前提: 已部署实例的 `lockUntilDaa` 都已是 DAA 值(<5e11)。⚠ **该前提需一次快查证**(扫已部署 OracleStake_v1 实例的 lockUntilDaa 是否全 <5e11), 未查前只能说"appear safe 待验"。
 - **处置(独立于 §6-3)**: ①**低成本快查**: 核已部署实例 lockUntilDaa 全 <5e11(证现存基金安全)②**运维监控**(NWT 提议): 告警任何异常大 lockUntilDaa 值 ③§6-3 及未来新合约: J2 建议(显式模式 + 构造侧阈值断言)已入 (582)。①②归运维/covenant 域, ②③的实装涉 money-path ⇒ 报 Owner 定风险接受。
 - **上报 Owner**: 校准报(见下)。**这是 NWT 深审的价值: 从 §6-3 一个设计假设, 反向照出一个现存部署合约的裸 footgun。** 但独立于 §6-3 主线, 不阻 B。
+
+### (584) 2026-08-20 · deployed-footgun 项(583)收口: J2 验实现存 OracleStake_v1 funds 安全(全 DAA 模式)+ §6-3 assert-before-switch
+- **J2 (22:29) 验掉 (583) 的 needs-verify**: 构造侧全链路 (`trade-protocol-filter.js:364` parseInt + `oracle-pool-renewal-cron.mjs` 与 `currentDaa` 比) = **全按 DAA、无秒/毫秒混入** ⇒ **现存 OracleStake_v1 锁定 stake 安全(DAA<5e11 模式验实)**。⇒ (583) 校准坐实: **非"现存基金此刻在险", 是 forward-risk**。
+- **🔴 关键 ordering(J2)**: §6-3 改墙钟模式时值从 ~1e8 跳 ~1.8e12 = **跨阈值另一侧, "数字恰好小"的天然保护当场消失**; 单位口误(秒 vs 毫秒)把值打回 DAA 侧 ⇒ **阈值断言必须在改模式【之前】就位, 不是之后补**。补进 (582) 的 §6-3 deadline 冻结项。
+- **净(deployed-footgun 线闭)**: 现存 OracleStake_v1 安全(验实)· 运维监控(NWT 提议·告警异常大 lockUntilDaa)= 可选低成本纵深, 归运维域 · §6-3 = wall-clock deadline + assert-before-switch(582)。**NWT 深审价值兑现**: 从 §6-3 一个设计假设反照出现存合约裸 footgun, 且四方(J2 发现/NWT 升级现存/J2 验现存安全+ordering)收敛。
+- **§6-3 B 核心仍等 J1 (22:16) 两洞**(no-theft vs bounded-lock 决定项)。
