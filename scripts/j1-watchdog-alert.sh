@@ -61,14 +61,19 @@ PAYLOAD=$(printf '%s' "$PAYLOAD" | tr '\\' '/')
 J1_A_TS="$TS" J1_A_RC="$RC" J1_A_BODY="$BODY" J1_A_OUT="$PAYLOAD" J1_A_RELAY="$RELAY" node -e '
 const fs = require("fs");
 const body = process.env.J1_A_BODY || "";
+// rc=0 = 基线心跳(非告警), 头与脚注都不该穿告警的衣服 —— 恒红的头会稀释真告警(同 (566) 那个病)。
+const isAlert = process.env.J1_A_RC !== "0";
+const head = isAlert
+  ? "【🔴 自动告警 · 刹车那台 watchdog 哨兵】"
+  : "【ℹ️ 哨兵心跳 · 刹车那台】";
 const msg = [
-  "【🔴 自动告警 · 刹车那台 watchdog 哨兵】" + process.env.J1_A_TS,
+  head + process.env.J1_A_TS,
   "",
   "rc=" + process.env.J1_A_RC,
   body,
   "",
-  "■ 这条由计划任务自动发出(限流: 最多每小时一条), 不是人在敲。",
-  "■ 它只说【哨兵读到了什么】, 不代表矿机一定停了 —— rc=2 是「读不到」, 与「它没了」不同。",
+  "■ 这条由计划任务自动发出(告警限流: 每小时最多一条; 心跳: 每日一条), 不是人在敲。",
+  ...(isAlert ? ["■ 它只说【哨兵读到了什么】, 不代表矿机一定停了 —— rc=2 是「读不到」, 与「它没了」不同。"] : []),
   "■ 复核: scripts/j1-watchdog-sentinel-task.ps1 -Verify",
 ].join("\n");
 fs.writeFileSync(process.env.J1_A_OUT, JSON.stringify({

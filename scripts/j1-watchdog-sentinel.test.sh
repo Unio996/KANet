@@ -13,7 +13,7 @@ S=${J1_SENTINEL_UNDER_TEST:-$SELF_DIR/j1-watchdog-sentinel-once.sh}
 pass=0; fail=0
 
 run() { # name  line  expect_rc  expect_kw
-  out=$(J1_WD_TEST_LINE="$2" sh "$S" 2>&1); rc=$?
+  out=$(J1_WD_TEST_LINE="$2" J1_WD_EXPECTED="${EXP:-1}" sh "$S" 2>&1); rc=$?
   ok=1
   [ "$rc" != "$3" ] && ok=0
   if [ -n "$4" ]; then case "$out" in *"$4"*) ;; *) ok=0 ;; esac
@@ -24,6 +24,8 @@ run() { # name  line  expect_rc  expect_kw
 }
 
 echo "--- j1-watchdog-sentinel-once.sh ---"
+# ── 本节全部在 EXP=1(基线=有 watchdog)下跑: v2.1 部署翻基线后这就是生产判定链 ──
+EXP=1
 # fresh: 正常 ⇒ 静默 + rc 0
 run "fresh (30s)"                 "WD=1 MINER=1 HB=30000"     0 ""
 # exact boundary: 恰好等于上界 ⇒ 仍算新鲜(判据是 > 才故障, 边界要测在两侧)
@@ -103,6 +105,16 @@ run "halted + WD=0 ⇒ 报实例数"      "WD=0 MINER=1 HB=30000 BRAKE=halted BR
 # ssh 取不到 ⇒ rc 2, 与故障分开
 run "ssh unreachable"             "UNREACHABLE:Command failed" 2 "取不到"
 run "garbage line"                "hello"                      2 "取不到"
+
+# ── 基线=0 语义((555)/(566) 2026-08-19: 接受态静默, 偏离才响)──────────────
+EXP=0
+run "基线: WD=0+MINER=1 ⇒ 静默(555已裁接受)"   "WD=0 MINER=1 HB=none"      0 ""
+run "基线: HB/BRAKE 派生量不参与判定"           "WD=0 MINER=1"              0 ""
+run "🔴🔴 基线下矿机没了 ⇒ 升级条件"            "WD=0 MINER=0 HB=none"      1 "升级条件"
+run "基线下矿机多开也响"                        "WD=0 MINER=2"              1 "升级条件"
+run "watchdog 出现(偏离基线) ⇒ 响"              "WD=1 MINER=1 HB=30000"     1 "watchdog 出现"
+run "多实例(偏离基线) ⇒ 响"                     "WD=2 MINER=1 HB=30000"     1 "实例数=2"
+run "基线下取不到照旧 rc2"                      "UNREACHABLE:x"             2 "取不到"
 
 echo ""
 echo "result: $pass PASS / $fail FAIL"

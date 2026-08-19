@@ -64,9 +64,33 @@ MN=$(echo "$OUT" | sed -n 's/.*MINER=\([0-9]*\).*/\1/p')
 #    ⇒ **每一次带刹车状态的读数都会误报"心跳不可用"**。用例当场抓到, 读代码看不出来。
 HB=$(echo "$OUT" | sed -n 's/.*HB=\([^ ]*\).*/\1/p')
 
-if [ "$WD" != "1" ]; then
-  echo "🔴 刹车那台 watchdog 实例数=$WD (应为 1) · MINER=$MN — 矿机可能正在无人监管"
+# ── 基线语义((555)/(566) 2026-08-19)────────────────────────────────────────
+# (555) 裁定: watchdog 不盲拉 ⇒ WD=0 + MINER=1 = 【被有意接受的基线】, 不是故障。
+# (566) J2 抓的病: 对已拍板接受的状态每小时恒响 = 把告警训练成噪音, 真信号来时被划走。
+# ⇒ 告警语义改为【偏离基线才响】。基线常量在下面这一行:
+#   🔴 watchdog v2.1 落码部署时, 把默认值翻成 1(部署清单项)——那时全套 HB/BRAKE 判定自动复活。
+#   J1_WD_EXPECTED 只供用例注入(同 J1_WD_TEST_LINE 先例); 生产翻基线改这里的默认值, 不走 env。
+EXPECTED_WD=${J1_WD_EXPECTED:-0}
+
+if [ "$WD" != "$EXPECTED_WD" ]; then
+  if [ "$EXPECTED_WD" = "0" ] && [ "$WD" = "1" ]; then
+    # 基线是"无 watchdog"而它出现了 —— 不是好消息就静默: 楔死 postmortem 的死因正是
+    # "错版本守卫比没有更糟"。谁部署的? 若 v2.1 已落地属预期 ⇒ 翻本脚本 EXPECTED_WD 基线。
+    echo "🔵 watchdog 出现(实例=1, 而 (555) 基线=0) — 核部署者与版本; 若 v2.1 已落地属预期, 翻本脚本基线常量"
+    exit 1
+  fi
+  echo "🔴 刹车那台 watchdog 实例数=$WD (基线应为 $EXPECTED_WD) · MINER=$MN"
   exit 1
+fi
+
+if [ "$EXPECTED_WD" = "0" ]; then
+  # 基线=无 watchdog: HB/BRAKE 全是 watchdog 派生量, 此时无意义, 【只判矿机】。
+  # 🔴 这格是 (555) 承诺的升级条件: 矿机没了且无人能自动重启 = 单矿工 TN12 链停风险。
+  if [ "$MN" != "1" ]; then
+    echo "🔴🔴 矿机数=$MN 且 watchdog=0(无自动重启) — (555) 升级条件命中: 需人立即上那台机"
+    exit 1
+  fi
+  exit 0
 fi
 BR=$(echo "$OUT" | sed -n 's/.*BRAKE=\([a-z]*\).*/\1/p')
 BRKAGE=$(echo "$OUT" | sed -n 's/.*BRKAGE=\([^ ]*\).*/\1/p')

@@ -28,6 +28,25 @@ if [ "$rc" -ne 0 ]; then
   printf '[%s] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$a" >> "$LOG"
 fi
 
+# ── 24h 基线心跳((566) 2026-08-19: 告警静默化的补偿)────────────────────────
+# 基线告警静默后, 「哨兵死了」与「基线一切正常」在频道读数上相同 ⇒ 每 24h 发一条
+# 频道可见的基线心跳, 证明【哨兵+告警链】整条活着。
+# 🔴 用独立限流 state(J1_ALERT_STATE 覆盖) —— 不占真告警的小时限流槽, 两者互不压制。
+# 🔴 只在 rc=0(基线正常)时发; rc!=0 时真告警本身就是活性证明。发送失败不推进 state=下轮重试, 不改任务退码。
+if [ "$rc" -eq 0 ]; then
+  HB24=${J1_WD_HB24_STATE:-$LOG.hb24}
+  nowsec=$(date -u +%s)
+  lasthb=$(cat "$HB24" 2>/dev/null)
+  case "$lasthb" in ''|*[!0-9]*) lasthb=0 ;; esac
+  if [ $((nowsec - lasthb)) -ge 86400 ]; then
+    h=$(J1_ALERT_STATE="$LOG.hb24.limit" sh "$SELF_DIR/j1-watchdog-alert.sh" \
+      "ℹ️ 哨兵基线心跳(每日一条): 刹车那台读数=已接受基线((555) watchdog=0·MINER=1), 24h 内无偏离。本条只证明哨兵+告警链活着; 偏离基线会立即单独告警。" "0" 2>&1)
+    hrc=$?
+    printf '[%s] hb24 rc=%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$hrc" "$h" >> "$LOG"
+    if [ "$hrc" -eq 0 ]; then printf '%s' "$nowsec" > "$HB24"; fi
+  fi
+fi
+
 # 🔴 心跳行: **不管响没响都写一行到 .alive**, 每次覆盖。
 #    没有它, "日志为空"就有两种读法(一直健康 / 根本没在跑), 而它们导出的动作相反。
 #    这正是本哨兵守着刹车那台时用的同一招 —— 我差点没给守卫自己配一个。
