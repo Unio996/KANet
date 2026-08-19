@@ -39,7 +39,8 @@
 - **入口校验**（拒非规范形，贵活之前）：`/^[0-9a-f]{64}$/` **且** 能被 kaspa-wasm 解析为合法 x-only pubkey；两者任一不过 → 拒（fail-closed）。
 - 🔴 **不接受 address 作身份主键**：若提交带 address，只作路由缓存,且必须能从该 pubkey 派生出同一 address 才收（一致性校验），否则拒。**身份命名空间只有 pubkey 一种串**。
 - 🔴 **L1 校验必须内嵌在唯一性建键/查找的【同一函数·单一入口】**（J1 (541) 实测承重①）：实测 **kaspa-wasm 接受大写 hex pubkey 且 `verifyMessage` 返 `true`** ⇒ 同一把钥的大写/小写两串**在原语层就是合法别名**，小写归一是**唯一**防线。若 L1 只放 API 边界、而唯一性键在别处不归一，任何绕过边界的内部调用路径直接复活 P6 双串别名。⇒ 归一+校验与建键**同址**（与 `pool.js` `assertBrokerP2PK` 的 chokepoint-MAINTAIN 同族：护栏必须在决策点，不在门口）。
-- 🔴🔴 **MUST-FIX C（Codex MSG-246·§4 六字段矛盾）——身份钥必须是【独立显式字段 `relayPubkeyXOnly`】，不得复用 `identityPubkeyXOnly`**：实核既有 U1 六字段里的 `identityPubkeyXOnly` 是 **A2 身份钥**（由 `rootXpub + identityIndex` 派生），**不是 relay 全局签名身份**；现注册用 `relayId` 做本地 custody 派生。二者**没有已建立的 `A2 身份钥 == relay 全局身份钥` 不变式**。⇒ **§10 是独立协议信封**，带显式 canonical 字段 `relayPubkeyXOnly`（L2/L3/L4 的 `pubkey` 全指它）；**除非**设计显式证明该不变式，否则**禁**静默拿 `identityPubkeyXOnly` 当 §10 身份。J1 (543) 实测同向：语法合法的 x-only 钥 ≠ 语义正确的身份钥，需**类型级分离**。（负测见 §6-12。）
+- 🔴🔴 **MUST-FIX C（Codex MSG-246·§4 六字段矛盾）——身份钥必须是【独立显式字段 `relayPubkeyXOnly`】，不从 A2 提交推导**：实核既有 U1 六字段里的 `identityPubkeyXOnly` 是 **A2 身份钥**（由 `rootXpub + identityIndex` 派生），**不是 relay 全局签名身份**；现注册用 `relayId` 做本地 custody 派生。二者**没有已建立的 `A2 身份钥 == relay 全局身份钥` 不变式**。⇒ **§10 是独立协议信封**，带显式 canonical 字段 `relayPubkeyXOnly`（L2/L3/L4 的 `pubkey` 全指它）；**永不**从 A2 提交/`identityPubkeyXOnly` 推导 §10 身份（不同信封、不同签名域）。
+- 🟢 **`relayPubkeyXOnly` 的语义【Bettor 裁 Option A·Codex MSG-249】= 钥角色是【语境性】不是【内在】**：`relayPubkeyXOnly` = **那把"通过产出合法 S10-域自签名、自愿充当 S10 relay 身份"的钥**。⇒ payload 自足验证方**没有任何可观测比特**能分辨一把 x-only 钥曾否用作 A2 钥/别的角色（wire 字段名 `relayPubkeyXOnly` **不构成**密码学钥角色 provenance）。同一把钥**允许**既是 A2 钥又当 S10 relay 钥——**只要持有者有意签了 S10 声明**。⇒ 真正可执行的护栏**不是**"拒某类钥"，而是**跨域重放必拒**（A2-域签名/材料不能重放成 S10，反之亦然）——见 §6-12（改写后）+ J1 (550) 实测消息空间双向不相交。**选 Option A 理由**：无任何政策要求 A2 钥≠relay 钥；Option B（钥角色内在、须独立角色绑定权威）是大改且会破 payload 自足模型（L3/P4），无用户面理由。
 
 ### L2 · canonical 域分隔签名声明（本设计的承重新增，补 §2 的 DELTA）
 
@@ -138,7 +139,7 @@ Codex 明令：**改 network/domain/version/pubkey 或以本地 relay_id 替换 
 9. **🔴 跨网重放（MUST-FIX A，与 #1 不同）**：**合法签名的 testnet 声明【原样不改】** 送给 **mainnet 配置的验证方** ⇒ **必拒**（验证方用本地 network 校验 `payload.network`，非用 payload 自带的）。#1 是"签后改 network 复用旧签"，本条是"整条合法签名换个网络语境"。
 10. **🔴 operation 白名单（Codex 点6）**：**合法签名**的 `operation="rotate"` 或未知 operation 送到今天 register-only 验证方 ⇒ **必拒**。
 11. **🔴 legacy fallback 中毒（Codex 点2）**：有合法本地 `relay_id` 行 + 填充 legacy `ecdsa_pubkey_xonly`，但缺/废 canonical pubkey 证明 ⇒ 查找/注册**必拒**；重新引入"按 relay_id/legacy 列回退"的变异必须被杀。
-12. **🔴 relay-钥 vs A2-身份钥 混淆（MUST-FIX C）**：一个合法的 A2 `identityPubkeyXOnly`（语法合法 32B x-only）**不得**仅因"是合法 x-only 钥"就被当 §10 relay 身份收 ⇒ **必拒**（语义钥类型错）。
+12. **🔴 跨域重放必拒（MUST-FIX C·Option A 改写·Codex MSG-249）**：拿一条合法的 **A2-域签名/材料**（A2 PoP 签的是 blake2b256 的 64-hex 串，J1 (550) 实测 `u1-registration-pop.mjs:61`）当 §10 声明重放 ⇒ **必拒**；反向 S10 声明重放成 A2 亦拒。依据 = **两域消息空间双向结构不相交**（A2={64-hex}、S10=`KANET-U1-IDENTITY-v1|…`），非"分辨钥类型"（验证方无此比特）。J1 探针已加该负例、原语层红（11 PASS）。🔵 **注**：这**不**要求"A2 钥不能当 relay 钥"——同钥有意签 S10 声明即合法充当 relay 身份（Option A 语境性角色）；被拒的是**未经 S10-域签名的 A2 材料冒充 S10**。
 13. **🔴 外/内 network 一致（MUST-FIX A）**：若保留外层明文 network + canonical.network 冗余 ⇒ `outer != inner` **结构上不可能或 fail-closed**。
 
 🔴 **负测纪律（本仓已栽过）**: 抢注负例**在本机跑会绿得没有意义**（同库同 IPC 域，现稿 §3）⇒ 负例必须用「另一把钥签 / 模拟外部方」构造，并在用例里写清它模拟的是什么。参 memory `reference-negative-test-depth-confound-refuses-for-wrong-reason`。#4/#11 属注册表/回退逻辑、#9/#10/#12/#13 属状态机/权威，J1 原语探针不覆盖这些（它诚实标了 implementation-layer pending）⇒ **落地实现层验**。
@@ -157,7 +158,8 @@ Codex 明令：**改 network/domain/version/pubkey 或以本地 relay_id 替换 
 - **B canonical 字节冻结**：Codex MSG-247 裁"(a)/(b) 是协议设计、须设计层定" ⇒ **已选 (b) 长度前缀串接并逐字段冻结**（L2 表 + P8）；golden vectors 可导。
 - **C 信封形状**：Codex MSG-247 裁"形状是 wire-protocol 设计、须设计层选" ⇒ **已选独立 S10 信封**（§4，Codex 推荐 = 本设计原偏好）；选项 2 不采纳。
 - **epoch 重放**：Codex MSG-247 新提"challenge vs nonce 须设计层定" ⇒ **已冻结 v1 = challenge-only**（复用已评审持久 challenge CAS + 同事务）；Codex MSG-248 抓出 L4/P3 残留"或 nonce"自相矛盾 ⇒ **已扫净**（L4/P3/§7 全改 challenge-only、nonce 标 future-only/对 v1 非符合）。
-- **A/B/C 三条 Codex MSG-248 判定 = 全部 CLOSED AT DESIGN LAYER**（B 经 Codex 独立重算 3 golden vector SHA-256 一致强化）；epoch 一致性修正后 = **设计层完成**（待 Codex MSG-249 确认扫净）。
+- **A/B/C 三条 Codex MSG-248 判定 = 全部 CLOSED AT DESIGN LAYER**（B 经 Codex 独立重算 3 golden vector SHA-256 一致强化）；epoch 经 Codex MSG-249 确认 **CLOSED**。
+- **key-role / §6-12（Codex MSG-249 提的最后一个 OPEN）= Bettor 裁 Option A**：钥角色语境性；`relayPubkeyXOnly` = 自愿以 S10-域自签名充当 relay 身份的钥；§6-12 由"拒 A2 钥类型"（不可实现，验证方无此比特）改写为"**A2↔S10 跨域重放必拒**"（消息空间双向不相交，J1 探针已红）→ L1 语义 + §6-12。**至此 A/B/C/epoch/key-role 全闭 = §10 设计层完成**；发 Codex MSG-250 确认。
 - 另并入 Codex：L2 collision 措辞收敛、L4 反 legacy-fallback、P4 concept 更正（relay 可达性与身份验证无关）。
 - **仍 OPEN（明列，不假装闭）**：rotate/revoke 连续性（out-of-scope，未来版本另设 state-transition + 继承证明）。
 
