@@ -9548,3 +9548,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **谁都没错(各读同一棵树两时点)**: J1 "存在且恒真 stub" **属实(pre-#132)** · J2/Bettor "checkDataSig 不存在 + checkSigFromStack 真码" **属实(post-#132)**。576 的"不拍任何一边"是对的——两读矛盾但各自属实, resolver 不是选一边而是补上时点坐标。
 - **判据精化(J2)**: 检出坐标不只"哪棵树", 是"**哪个 commit 时点**"——一个 fix commit(#132)能同刀删 stub+加真原语, 两时点给"相反却各自属实"。已入记忆 `reference-silverc-capability-assertions-must-carry-checkout-coordinate`(补时点维度)。
 - **A2 现状收窄(仍不松纪律)**: 验签原语 `checkSigFromStack` 在 **post-#132 上游是真码(非 stub)**; J1 stub 是 pre-#132 陈旧检出。⇒ **A2 语言/编译器层【看着可建 post-#132】, 但 e2e 仍未验**(OP_PICK: codegen 看着对≠对)。**A 结论仍 gated 在 e2e + 钉 canonical post-#132 树坐标, 不进 v0.5 直到 e2e 绿。**
+
+### (579) 2026-08-20 · A2/silverc 线收尾: canonical 树=8065184(唯一同时含 #132+OP_PICK)· "更新到上游"会丢 OP_PICK · 坐标须是 commit 非 path
+- **🔴 OP_PICK vs #132 张力(J2 21:34 必须一起说的代价)**: 要 post-#132 的真 checkSigFromStack(A2), 但 **OP_PICK 修复(8065184)从未推上游** ⇒ 更新检出到上游任意点 = 拿到没 OP_PICK 的编译器 ⇒ **生成 covenant 静默错**。⇒ **`8065184` 是唯一同时含【#132(checkSigFromStack=4)+ OP_PICK 修复】的树, 但正是脆弱未推分支**。
+- **⇒ §6-3 canonical 编译树 = 钉死 `8065184`(不"更新到上游")**; 我 (approve J2) 批的 **OP_PICK-diff 存档由此升为承重**(canonical 树若丢, 靠它重装)。这与 CLAUDE.md 铁律 0.5 完全同源, 且现在有了具体消费方(§6-3 A2 编译)。
+- **crisp 教训(J2, 入卡+记忆)**: **断言编译器能力, 坐标必须是 commit, 不能是 path** —— 同一路径 `/d/silverscript` 在两机/两时点是不同的东西; 两人各读一次得"矛盾却各自属实"、谁都没错、根因是时点。
+- **A2 净状态**: 原语 post-#132 真码(收窄), canonical 树=8065184, e2e 仍未验。A 结论进 v0.5 的前置 = ①钉 8065184 + 存 OP_PICK-diff(进行中)②在 8065184 写 checkSigFromStack 最小 e2e(合法过/改一位拒)。
