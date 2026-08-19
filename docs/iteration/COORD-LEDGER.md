@@ -9484,3 +9484,11 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
   3. **造 §6-3 反验 §6-1 冻结**(冻结接口有没有漏, 造第一个消费者立刻暴露)= de-risk 刚达成的里程碑。
   4. §6-3 **现在就能 Track-A 造+测**, 不依赖北极星/§0 墙。
 - **下一步**: 查 fair-exchange 设计卡 + §6-1 冻结契约(`2026-08-03-oracle-skill-interface-permission-boundary-freeze-design.md`)复用面 + 现有 exchange 码 + KB → 排 §6-3 第一块【设计】砖 → 真实 roster(Bettor 设计 × J1/NWT 审 × Codex 红队)。**设计层可驱动; 实现仍报备等 Owner。**
+
+### (569) 2026-08-20 · §6-3 fair-exchange 设计卡 v0.1 落地(Bettor 主笔)· 答 Codex 三打回 + §6-1 复用审计揪出最尖的缝
+- **新文件** `docs/2026-08-20-s6-3-fair-exchange-adjudication-design-v01.md`。资产摸底(Explore)关键发现: Codex "fair-exchange 卡"**不存在**——是 Codex 裁决规定了卡须含 11 节 + 3 打回; §6-3 第一块砖 = 写这张卡。
+- **锚(§2)**: 裁决角色 = **对【共识态可独立验证的结果】产 §6-1 类型化 OutcomeAttestation, 能验就 attest / 不能验就 abstain, 从不碰钱**。钱由 covenant/结算独立消费 attestation 移动。三边界消费 §6-1 §4.1(类型签)+§4.2(守恒·不签付赢家)+§4.5(abstain 终态)。
+- **答三打回**: 不主张跨域唯一不可替代(可辩护版=单域无法 enforce 整转移时协调层可能有帮助)· 不假设原子性需中立裁决者(选形态 iii 外部 attestation + ii 密码学耦合, 每腿各自 attestation 门控 + 超时兜底、非全局原子)· 不用链上 preimage 做数字商品(v0.1 只做链上可验转账交割)。
+- **状态机替 concede-only 死路**: 新增 attestation 门控 `attesting` 态 ⇒ 不依赖任一方认输即可达终态(NWT ③ 结构空缺的解)。
+- **🔴 §6-3 反验 §6-1 最尖的缝(§7, 交 red-team 主攻)**: exchange 必须真交割 KAS 给 taker=移钱, 而 §4.2 委员钥守恒不能签付赢家 ⇒ "消费 attestation 授权非守恒交割"到底**谁的钥签、怎么门控不被同机绕**(§10§3 同机恒真同族)? = 第一个消费者暴露的冻结缝。
+- **交接**: J1/NWT 审锚+§7缝+状态机无单边套牢; Codex 红队(重点 §8 HTLC 对比最小例=及格线 + §7 §4.2 不 compose)。**实现层另报备等 Owner。**

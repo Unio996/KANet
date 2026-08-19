@@ -1,0 +1,80 @@
+# D-012 §6-3 fair-exchange 设计卡 v0.1 — Exchange 裁决角色（报备层 · 零生产改动）
+
+> **Status**: DRAFT v0.1 · Bettor 2026-08-20 主笔 · 设计层, 零生产码。
+> **定位**: §6-1 Oracle 权限边界契约(all-review-passed 冻结, target `154291d8`)的**第一个复用消费者**; DECISIONS.md §6 执行序 item3 = "从零造裁决角色, 非接现成接口"。**造它同时是对 §6-1 冻结的反向审计**(第一个消费者暴露契约漏没漏)。
+> **依据**: Codex `RESPONSE-20260731-…-ADVERSARIAL-CONCLUSION`(规定卡的 11 节 + 3 打回)· §6-1 冻结稿 `docs/2026-08-03-oracle-skill-interface-permission-boundary-freeze-design.md` §4 · KB `architecture/zk-track-c-verified-trustless-settle.md` + `00-position/northstar-open-collaboration-protocol.md` · 现有 exchange 码(exchange-machine.js / api/exchange.js:747-796 / exchange-machine.js:563)。
+> **权分**: Bettor 设计 × J1/NWT 审 × Codex 红队。**真实 roster**(J2/NWT 独立性未证实但内容可用; J1+Codex 确证独立)。
+> **证据纪律(承 §6-1 §6)**: 每条设计决策标 `[CONFIRMED·读]`/`[INFERRED]`/`[DESIGN-CHOICE]`, 且引它消费的 §6-1 §4.x 条款。
+
+## §0 Track 边界（先于正文，承 D-012 §0）
+本卡是 **Track B 协议能力设计**。**不授权 Owner 实例(Track A)对外开放**; 部署随北极星 + Owner 拍。设计层可推进; 任何实现码/部署 = 停, 走报备等 Owner。
+
+## §1 先把【不做什么】写死（避开 Codex 三打回 + 已知陷阱）
+
+- 🔴 **不主张"跨域结算是 KANet 唯一不可替代的位置"**(Codex 打回1)。可辩护的**唯一**主张 = 「**跨域交换是这样一类场景: 单一域自己无法 enforce 整个状态转移时, 一个额外协调层【可能】有帮助**」。卡的 §8 必须对 plain HTLC / adaptor-signature 做对比、证明协调层在何处真加价值, 否则本卡不及格(Codex 明令)。
+- 🔴 **不假设"原子性需要一个中立裁决域"**(Codex 打回2)。原子性有**四形态**, 本卡 §4 选一并辩护: (i)单域裁决 (ii)密码学耦合的本地裁决 (iii)外部 attestation (iv)非原子顺序执行。
+- 🔴 **不用"链上揭示 secret/preimage"做数字商品交割**(Codex 打回3): 链上 preimage 是**公开**的、非买家私有 ⇒ 对可复用 license key/凭证/API token 不适用; 且"hash 相等"不证明"揭示的东西=承诺的东西"。**v0.1 brick 明确 out-of-scope 隐私保护数字商品交割**(需 verifiable/adaptor 加密, 重子设计); v0.1 只做**交割本身即链上可独立验证的转账**那一类(KAS ↔ 另一链上资产)。
+- 🔴 **不把裁决角色框成"无签字 escrow"**(Codex 打回0/frame): 那是错框。
+- 🔴🔴 **裁决角色【不能】靠委员签名把钱移给赢家**(§6-1 §4.2 守恒: "签一笔付赢家的 tx"在冻结接口里不存在)。也**不能**独立裁判链下真相(KB northstar ⑥ + zk-track-c: covenant/ZK enforce 已授权转移 / closes layer-2 算术, **closes 不了 layer-1"谁赢"**)。
+
+## §2 裁决角色到底是什么（本卡的锚·先定锚再设计怎么证）
+
+**[DESIGN-CHOICE]** 裁决角色 = **一个对【共识态可独立验证的结果事实】产出 §6-1 类型化 attestation 的角色**, 三条硬边界:
+
+1. **只 attest 可独立验证的结果**(消费 §6-1 §4.3 binding): 它签的 OutcomeAttestation 里的结果, 必须能被任何验证方**从共识态独立复算/核验其绑定**(不接受喂来的结果对象)。链下不可验的真相 ⇒ **abstain**(§4.5), 绝不猜。
+2. **只签类型化 attestation、从不碰钱**(消费 §6-1 §4.1 + §4.2): 签的是域分隔的 `OutcomeAttestation` typed 对象(绑协议版本/网络/市场身份/结果命名空间/证据承诺/有效期/oracle 身份/防重放序号, **对象内不含任何交易输入输出/地址/金额/fee/change** —— 承 §6-1 §2.1 正路)。**钱的移动 = covenant/结算路独立消费该 attestation 校验授权**, 裁决者的钥永不签 payout。
+3. **abstain 是一等终态**(消费 §6-1 §4.5): 三态返回 `{agree|disagree|cannot-verify}`; `cannot-verify` ⇒ **零授权**, 不得降级成更便宜的检查再签, 不得折进 `disagree`。上线须报 abstain 率(≈100% abstain = defect 非"没触发")。
+
+🔵 **为什么这个锚同时答了 Codex 打回**: 它不主张"中立裁决"或"唯一原子性"; 它主张的是——**对【本可验证但两边各自看不全】的跨域结果, 提供一份两边都能消费的 attestation**; 这正是"单一域无法 enforce 整个转移时协调层可能有帮助"的可辩护版本。协调层的价值 = **让 A 链的结算能消费一份关于 B 链结果的、可独立核验的 attestation**, 而非"替谁做主观裁判"。
+
+## §3 参与者与资产（Codex §a/§b）
+
+- **[DESIGN-CHOICE] 参与者**: maker(挂单方)· taker(接单方)· **裁决委员集**(§6-1 委员, 产 OutcomeAttestation)· 结算/covenant 路(消费 attestation 移钱, 非裁决者)。
+- **[DESIGN-CHOICE] v0.1 资产范围**: KAS(本链)↔ 另一链上资产, **且交割腿本身链上可独立验证**(排除数字商品/凭证 → §1)。这样"结果事实"= 两条链上各自的转账是否落地, 均共识可验 ⇒ 满足 §2 边界1。
+
+## §4 状态机与原子性边界（Codex §c/§d）
+
+- **[DESIGN-CHOICE] 选原子性形态 = (iii) 外部 attestation + (ii) 密码学耦合的本地裁决 的组合**, 理由: KANet 委员已在做 outcome attestation(§6-1 v0.7 实例); 跨两条独立链**无法**做单域原子(打回2), 但可以: A 链的释放**密码学耦合**到「一份关于 B 链交割的 OutcomeAttestation」。**非**追求"全局原子"(不可得), 而是**每条腿的释放各自被一份可验 attestation 门控 + 超时兜底**。
+- **[DESIGN-CHOICE] 状态机(承现有 exchange-machine.js 骨架, 替换 concede-only 死路)**:
+  `open → matched → leg-A-locked → leg-B-locked → attesting →(agree)→ settling → completed`
+  分叉: `attesting →(cannot-verify/超时)→ timeout-refund`(双腿各自退回, 无人被单边套住) · `attesting →(disagree/证伪)→ refund`。
+  🔴 **替换 `api/exchange.js:747-796` 的 concede-only `/resolve`**: 现状"双方不认输即无路径达终态"(NWT ③)⇒ 新增 attestation 门控的 `attesting` 态, 使**不依赖任何一方认输**即可达终态(attest 或超时)。
+- **[CONFIRMED·读] 承重前提**: `checkStaleDisputes()`(exchange-machine.js:563)现为 stub ⇒ 超时兜底本就未建, v0.1 必须把 timeout-refund 设成**真终态**(记 `pre_dispute_status` 才能安全自动退, 见 :541-545 设计注)。
+
+## §5 隐私与真实性（Codex §e/§f）
+
+- **[DESIGN-CHOICE] 隐私**: v0.1 交割物是**链上公开转账**(非数字商品)⇒ 无 preimage 隐私问题(打回3 被 scope 规避, 非解决)。真实性 = OutcomeAttestation 域分隔签名(§6-1 §4.1)+ 结果绑定共识态(§4.3)。
+- 🔴 **明列 v0.1 不覆盖**: 隐私保护的数字商品交割(license/凭证/token)—— 需 verifiable encryption / adaptor 条件揭示 / 买家绑定一次性凭证, 单列 v0.2+。
+
+## §6 超时/griefing、重放/抢跑、证据连续性、确定性恢复（Codex §g/§h/§i/§j）
+
+- **[DESIGN-CHOICE] 超时/griefing**: 每腿锁定带 deadline(DAA 计, 承 `check_utxo_landed`+minDepth 先例); 任一方不推进 → 到期 timeout-refund 双退。无单边套牢。
+- **[DESIGN-CHOICE] 重放/抢跑**: OutcomeAttestation 带防重放序号 + market 身份绑定(§6-1 §2.1); attestation 一次性消费(CAS, 承 challenge store 先例)。
+- **[DESIGN-CHOICE] 证据连续性**: attestation 绑「证据承诺」(§6-1 §2.1 正路字段); 结算路验证据承诺 ↔ 结果一致, 断链 → abstain。
+- **[DESIGN-CHOICE] 确定性恢复**: 结果与 payout 均**纯函数 + 确定整数算术**从共识态复算(§6-1 §4.3 双条件: 确定性 AND 绑定)。恢复 = 任一节点从共识态重算得同一 (input-set root, payout-root) 对。
+
+## §7 §6-3 作为 §6-1 复用审计（本卡的第二产出·反验冻结）
+
+逐条记「本卡消费哪条 §4.x + 有没有不 compose」:
+- 消费 §4.1(类型签)✅ 直接用 OutcomeAttestation typed 对象。
+- 消费 §4.2(守恒)⚠ **潜在不 compose**: exchange **必须真把 KAS 交割给 taker**(移钱), 而 §4.2 说委员钥不能签 pay-winner。**本卡的解 = 移钱不经委员钥、经 covenant 消费 attestation**——但这要求 covenant 侧能独立消费 OutcomeAttestation 授权一笔**非守恒**(把锁定金给 taker)的转移。🔴 **待验(交 red-team)**: §6-1 冻结的委员接口是守恒类, 那"消费 attestation 授权非守恒交割"的机制**在哪一层、由谁的钥签**? 若最终仍需某个钥签一笔付 taker 的 tx, 那把钥是谁、它凭什么被 attestation 门控而非同机可绕(§10 §3 同机恒真的同族问)? **这是 §6-3 反验 §6-1 最可能暴露的缝。**
+- 消费 §4.3(复算+绑定)✅ 结果与 payout 复算。
+- 消费 §4.4(无 bypass)🔴 **依赖一个 §6-1 冻结稿自己标注【未实现】的不变量**(§4.4(b) live path 未建 + 同机持 ≥4 委员拓扑把 4-of-5 塌成 1-driver)⇒ v0.1 不得假设它已 enforce; 明列为前置。
+- 消费 §4.5(abstain)✅ 三态。
+
+## §8 与 plain HTLC / adaptor-signature 对比（Codex 明令·卡的及格线）
+
+- **[DESIGN-CHOICE·待 red-team 加强]** plain HTLC: 跨链原子交换成熟, 但 (a)要求两链都支持兼容 hashlock/timelock (b)preimage 公开(打回3)(c)不处理"链下/跨系统结果"。adaptor-sig: 更私密, 但仍要两域都能验对方腿。
+- **KANet 协调层的可辩护增量** = 当**一条腿的结果不是对方链能直接验的 hashlock, 而是需要一份【关于该腿的、可独立核验的 attestation】**时(如 A 链要根据"B 链上某 covenant 是否按规则结算"放钱, 而 B 的规则 A 链读不懂)——KANet 委员产的 OutcomeAttestation 提供这份两边可消费的可验事实。**若两腿都是简单 hashlock 可搞定 ⇒ 本卡不主张 KANet 更优**(诚实承认, 承打回1)。🔴 **待 red-team**: 举一个 HTLC/adaptor 做不到而本设计做得到的**具体最小例**, 否则 §8 不及格。
+
+## §9 明列空白（不假装覆盖）
+- §7 那条"谁签付-taker 的 tx + 怎么门控不被同机绕"= **最大未决**, 交 red-team 主攻。
+- 隐私数字商品交割(§5)= v0.2+。
+- §4.4 无-bypass 未实现 + 拓扑塌陷 = 前置, 非本卡解。
+- §8 的"HTLC 做不到的最小例"= 及格线, 未填则本卡不成立。
+- 具体表 schema / handler 落点 = 实现层, 另报备。
+
+## §10 交接（真实 roster）
+- **J1(独立节点)/ NWT**: 审 §2 锚是否真答三打回 + §7 复用审计的"付-taker 钥"缝 + §4 状态机无单边套牢。
+- **Codex(bridge)**: 红队全卡, 重点 §8 及格线(HTLC 对比最小例)+ §7 §4.2 不 compose 缝 + §2 边界是否被后文任何一处偷偷越过。
+- **Bettor**: 收意见迭代 v0.2。**实现层另起报备等 Owner。**
