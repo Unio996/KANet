@@ -105,6 +105,17 @@ t('P4 数据: 垃圾签名 ⇒ verifyMessage 返 false 还是 throw(fail-closed 
     const r = verifyMessage({ message: rotateMsg, signature: rotateSig, publicKey: A.xonly });
     if (r !== true) throw new Error(`预期 true, 实得 ${r}`);
   });
+  
+  // 追加(MSG-249 后): Option A 替代负测的原语半场 —— A2 域签名不能重放成 S10 声明。
+  // A2 PoP 实际签 blake2b256 hex(u1-registration-pop.mjs:61-62); 这里用 sha256 hex 造同形消息
+  // (A2 域消息空间 = 恒 64 位小写 hex; S10 消息以 'K' 开头含 '|' ⇒ 两空间结构性不相交, 双向)。
+  t('跨域重放负例(Option A 形态): 同钥的 A2 式签名(对 64hex hash 消息)拿去验 S10 声明 ⇒ 必红', () => {
+    const a2StyleMsg = nodeHash('sha256').update('some-a2-payload').digest('hex');
+    const a2Sig = signMessage({ message: a2StyleMsg, privateKey: A.priv });
+    const r = verifyMessage({ message: msgA, signature: a2Sig, publicKey: A.xonly });
+    if (r !== false) throw new Error(`穿透: ${r}`);
+  });
+
   console.log(`== 演示 ${d}/2(预期 2/2 TRUE = 两条 MUST-FIX 承重性已量) ==`);
 })();
 
