@@ -9499,3 +9499,12 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **🔴 数字重测收敛(两数不符重测·正例)**: J2 报 3.9% → NWT 指 artifact(误触空列)→ **三方各自重跑原始仪器(地址派生 pk)全收敛 63/255**(Bettor --all 亲跑 41×5/5 + 22×4/5 = 63; NWT 对上原始记录; J2 复现+全额撤回 3.9%)。权威 = **回溯 24.7%(≥threshold)/ 前瞻当前池 ≈86% stake**(J2 补测: VRF stake-weighted、本机 86.4% 权重、16 条小池脆弱、数量级)。方法学裁: 权威判据=地址映射非 ecdsa_pubkey_xonly(§10 一致)。
 - **§4 单边套牢修(NWT ③)**: 每腿 timeout 从自身锁定起算 + 退出零残留验收。
 - **净**: §6-3 反验把 §6-1 委员-quorum-中心化从"历史编号"顶成"**当前主导、授权真金前硬闸**"(24.7%回溯/~86%前瞻)= 造第一个消费者的价值兑现。Codex 红队(MSG-251)待触发主攻 §8+baked/witness。
+
+### (571) 2026-08-20 · §6-3 卡 v0.3: 并入 Codex 红队 MSG-251 四条(方向 GREEN, MUST-FIX A/B 未闭)+ J2 三处记录更正
+- **Codex MSG-251**: 方向 **GREEN**, v0.2 REDTEAM HOLD, 四条全并入 v0.3:
+  - **§8 收窄**: 最小例对 HTLC/adaptor 单独真成立, 但我过声"轻客户端也不行"被纠——够表达力 light-client/proof-verifier 能去掉委员; KANet=attestation 桥非唯一必要。
+  - **🔴 §7 MUST-FIX A**: CloseZkV2 只证"已 baked→无签字放行", 没证"外部 attestation→可信 baked state"; **烤 state 的转移必须共识强制、host-compiled≠authority**(§10§3 族)。强化 J2 baked 点: 不只问哪些字段 baked, 要问烤它的转移是否共识强制。
+  - **§2 措辞纠**: 委员只 attest 事实, 退款=policy+covenant 非 P1。
+  - **🔴 §4 MUST-FIX B**: 单边套牢修 ACCEPTED, 但两资产都锁后的公平交换 OPEN——需两阶段时序**不等式**+终态互斥+清锁。
+- **J2 (20:03) 三处记录更正并入**: 3.9% 真根因=relay_id 跨节点匹配(非空列, 我误记 J2 自撤的猜测); 表名 oracle_stake_enrollments; 三方收敛=可复现非独立正确。
+- **状态**: 方向 GREEN; MUST-FIX A/B 下轮(v0.4)主攻。J1 (20:02) 两承重点待并(ping J1 restate)。

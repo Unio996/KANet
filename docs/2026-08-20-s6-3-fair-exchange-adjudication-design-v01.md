@@ -1,6 +1,6 @@
 # D-012 §6-3 fair-exchange 设计卡 v0.1 — Exchange 裁决角色（报备层 · 零生产改动）
 
-> **Status**: DRAFT **v0.2** · Bettor 2026-08-20 主笔 · 设计层, 零生产码。**v0.2 = 并入 J1 二审(引用逐行核真码全属实/结构 SOUND)+ NWT+J2 红队**(§7 两层重构 + 数字分歧重测解决 + §4 单边套牢修)。见 §11。
+> **Status**: DRAFT **v0.3** · Bettor 2026-08-20 主笔 · 设计层, 零生产码。**v0.2 = J1 二审 + NWT+J2 红队; v0.3 = 并入 Codex 红队(MSG-251)四条**(§8 收窄/§7 MUST-FIX A/§2 措辞纠/§4 MUST-FIX B)+ J2 (20:03) 三处记录更正。**方向 Codex GREEN, 两条 MUST-FIX(A/B)未闭。** 见 §11。
 > **定位**: §6-1 Oracle 权限边界契约(all-review-passed 冻结, target `154291d8`)的**第一个复用消费者**; DECISIONS.md §6 执行序 item3 = "从零造裁决角色, 非接现成接口"。**造它同时是对 §6-1 冻结的反向审计**(第一个消费者暴露契约漏没漏)。
 > **依据**: Codex `RESPONSE-20260731-…-ADVERSARIAL-CONCLUSION`(规定卡的 11 节 + 3 打回)· §6-1 冻结稿 `docs/2026-08-03-oracle-skill-interface-permission-boundary-freeze-design.md` §4 · KB `architecture/zk-track-c-verified-trustless-settle.md` + `00-position/northstar-open-collaboration-protocol.md` · 现有 exchange 码(exchange-machine.js / api/exchange.js:747-796 / exchange-machine.js:563)。
 > **权分**: Bettor 设计 × J1/NWT 审 × Codex 红队。**真实 roster**(J2/NWT 独立性未证实但内容可用; J1+Codex 确证独立)。
@@ -27,6 +27,8 @@
 
 🔵 **为什么这个锚同时答了 Codex 打回**: 它不主张"中立裁决"或"唯一原子性"; 它主张的是——**对【本可验证但两边各自看不全】的跨域结果, 提供一份两边都能消费的 attestation**; 这正是"单一域无法 enforce 整个转移时协调层可能有帮助"的可辩护版本。协调层的价值 = **让 A 链的结算能消费一份关于 B 链结果的、可独立核验的 attestation**, 而非"替谁做主观裁判"。
 
+🔴 **v0.3 措辞纠(Codex MSG-251·守住锚不被 §4 偷渡)**: 委员**只 attest 事实谓词**(如"B 侧要求转账在 anchor H 前未满足条件 X"), **不决定**退/罚/延/放。"这个事实意味着退款还是别的" = **P2/policy + covenant 执行**决定, **不是 P1**。⇒ §4 里 `disagree → refund` **不得**读成"委员判退款"; 正确读法 = `(receipt + baked policy/state) → 确定性允许的转移`。委员产事实, 转移由 policy 定。
+
 ## §3 参与者与资产（Codex §a/§b）
 
 - **[DESIGN-CHOICE] 参与者**: maker(挂单方)· taker(接单方)· **裁决委员集**(§6-1 委员, 产 OutcomeAttestation)· 结算/covenant 路(消费 attestation 移钱, 非裁决者)。
@@ -42,6 +44,10 @@
 - **[CONFIRMED·读] 承重前提**: `checkStaleDisputes()`(exchange-machine.js:563)现为 stub ⇒ 超时兜底本就未建, v0.1 必须把 timeout-refund 设成**真终态**(记 `pre_dispute_status` 才能安全自动退, 见 :541-545 设计注)。
 - 🔴🔴 **v0.2 修单边套牢洞(NWT ③)**: **每腿的 timeout 必须从【该腿自身锁定那一刻】起算, 不是从"两腿都锁定后"起算**。否则"leg-A 已锁、leg-B 从未锁"这个场景**根本没有计时器被触发** ⇒ maker 锁定资金无限期卡住(不是"到期退", 是"根本没有到期")。⇒ 状态机: 进 `leg-A-locked` 即启动 leg-A 的 deadline; 若在 leg-A deadline 前未进 `leg-B-locked` ⇒ leg-A 自动 timeout-refund。**每腿独立计时、独立可退。**
 - 🔴 **v0.2 加验收(J2)**: 单边套牢负测不只测"另一方能不能走人", 还要测**走人之后账上有没有留半截状态**(fund_lock 泄漏 / 状态卡在中间态)——退出必须是干净终态, 零残留。
+- 🔴🔴 **MUST-FIX B(Codex MSG-251)——两阶段【锁-结】时序不变量(独立每腿超时只解决"第二腿锁前", 没解决"两腿都锁后"的公平交换)**: v0.2 的每腿独立超时挡住了"leg-A 锁/leg-B 从不锁"; 但**两资产都 committed 之后**, 谁先 claim/release、对方还来不来得及对等 claim, 仍是公平交换的核心。需具体跨腿规则:
+  - **① 时序须证成【不等式】非定性**: 任一腿的 claim/release 必须给对方腿留足**协议定义的时间/finality 余量**做对等 claim(`t_reciprocal_deadline − t_first_claim ≥ Δ_finality + Δ_margin`, 写成可核验不等式)。
+  - **② 终态互斥 + 清锁**: 对**同一个锁定 output/session**, `abort/refund` 与 `completed` **必须互斥**; **每一条终态路径都必须清掉锁状态**(承 §5 脆弱点 fund_lock 泄漏教训)。
+  - ⇒ **§4"两腿都锁后的公平交换" = OPEN/MUST-FIX B**(v0.2 只 ACCEPTED 了"第二腿锁前不套牢"这半)。
 
 ## §5 隐私与真实性（Codex §e/§f）
 
@@ -64,19 +70,32 @@
   - **层(a) payout 执行**: covenant 消费 OutcomeAttestation 授权非守恒交割, **零额外自定钥**, 照 CloseZkV2/bshard-close-enforce 先例。**非新造能力**。
   - **🔴🔴 层(b) attestation 产出 = 真正的同机风险落点(NWT)**: "谁能绕 payout 门控"不取决于 covenant 设计多干净, 取决于**产出一份够 quorum 的 OutcomeAttestation 能不能被同一台机器凑齐**。⇒ **这不是 §6-3 新缝, 是 §6-1 自己的【委员-quorum-中心化】问题在 §6-3 这第一个消费者身上长出第一个【授权真实资金转移】的实例**。
   - **🔵 精确数(数字分歧已重测解决; 权威 = Bettor 重跑原始仪器)**: J2 先报 3.9%, NWT 指其为方法学 artifact(走了依赖空列 `ecdsa_pubkey_xonly` 的路)。**Bettor 亲跑原脚本 `scratch/bettor-committee-locality-0804.mjs --all`(原方法=`XOnlyPublicKey.fromAddress` 地址派生, 32/32 relay 成功派生), 逐字对上原始记录**——255 市场分布: `0/5→8 · 1/5→167 · 2/5→7 · 3/5→10 · 4/5→22 · 5/5→41`。⇒ **回溯: 本机可独立达 quorum(≥threshold=4)= 63/255 = 24.7%**(5/5 全本机 = 41/255=16.1%)。**3.9% 作废(artifact)。**
-  - **🔴 前瞻(J2 (19:54) 补测, 与回溯同向且更重)**: 委员 = VRF **stake-weighted 抽 5**(migrate.js:4737), 池 = `oracle_stakes`。**当前池本机占 stake 权重 ≈ 86.4%** ⇒ 新市场委员 ≈ **86% 本机主导**。趋势非"早期集中今分散", 是"当时多抽外部、**今天池子已本机主导**"。⚠ caveat: 有放回近似、采样实现(去重/有无放回/权重入 VRF)未读 = **数量级参考**; 池仅 **16 条 active** = 小池本身脆弱(几笔质押改多数)。
-  - **🏛 方法学裁定(Bettor, 与 §10 一致)**: `relay_nodes.ecdsa_pubkey_xonly` 非空行=0(§10 已定"该列 all-NULL 不可作权威")⇒ **权威判据 = `committee_relay_ids`/`relay_address` 地址映射**(原脚本+J2 前瞻所用), **非**该 pubkey 列。J2 的 3.9% 正是误触该空列路径的产物。
+  - **🔴 前瞻(J2 (19:54) 补测, 与回溯同向且更重)**: 委员 = VRF **stake-weighted 抽 5** 入 `pool_committee`(migrate.js:4737 注), 质押池 = **`oracle_stake_enrollments`**(J2 (20:03) 更正: `oracle_stakes` 表不存在, Bettor 实核 CREATE TABLE 确认)。**当前池本机占 stake 权重 ≈ 86.4%** ⇒ 新市场委员 ≈ **86% 本机主导**。趋势非"早期集中今分散", 是"当时多抽外部、**今天池子已本机主导**"。⚠ caveat: 有放回近似、采样实现(去重/有无放回/权重入 VRF)未读 = **数量级参考**; 池仅 **16 条 active** = 小池本身脆弱(几笔质押改多数)。
+  - **🏛 方法学裁定(Bettor, 与 §10 一致; 根因经 J2 (20:03) 更正)**: **权威判据 = 从本机 relay 地址【派生 pubkey】(`XOnlyPublicKey.fromAddress`)与 `committee_pks` 匹配**(原脚本所用, 32/32 派生成功)。**J2 3.9% 的真根因 = 用 `relay_id`(`committee_relay_ids` 配 `relay_nodes.id`=本地 UUID)做跨节点匹配** —— 而 relay_id 是节点本地命名空间、跨节点无意义(J2 在 §10 刚论证过、转头自己用了; = "错理由活得比结论久"同族)。⚠ **注: "空列 ecdsa_pubkey_xonly"是 J2 19:54 的猜测且 19:56 已撤, 非真根因**(v0.2 一度误记, 此处更正)。真根因是**选错了 key(relay_id vs pubkey)**, 与 §10 结论完全同源。
   - **§6-3 上线前【必答】(NWT: 比"设计层未决"更进一步)**: "是否接受用今天这个 quorum 集中度授权真实资金转移" —— 桌上的数 = **回溯 24.7%(≥threshold)/ 前瞻 ≈86%(当前池, 数量级)**。**⇒ 委员-quorum-中心化是【当前主导】而非缩小的历史 artifact; §6-3 授权真金前这是硬闸, 归 Owner 策略决定**(如同 §6-1 签发口的部署闸性质)。
-  - **🔴 J2 补: 条件式不免费——绑定缺口**: 条件式下承重点移到 **"attestation 里哪几个字段是 baked 进合约 state、哪几个是 witness 喂的"**——witness 喂的攻击者说了算。⇒ **§4.3 复算的对象【必须是 baked 那部分】**, 否则复算的是攻击者给的值。先例 CloseZkV2 `zk_close` 只从合约自身 state 读 `attestedWinner`/`betsRootBaked`/`refundRootBaked`(= baked)有已在册绑定缺口, 是先例级警示。
-  - 🟢 **这正是 §6-3 反验 §6-1 的价值兑现**: 第一个消费者把 §6-1 的 quorum-中心化从"编号挂账"顶成了"授权真金的活闸"。
+  - **🔴 J2 补: 条件式不免费——绑定缺口**: 条件式下承重点移到 **"attestation 里哪几个字段是 baked 进合约 state、哪几个是 witness 喂的"**——witness 喂的攻击者说了算。⇒ **§4.3 复算的对象【必须是 baked 那部分】**, 否则复算的是攻击者给的值。
+  - **🔴🔴 MUST-FIX A(Codex MSG-251)——freeze attestation→baked-state 绑定, 且【烤它的转移必须共识强制】**: CloseZkV2 证明的是 **"已 baked 的授权 → 无签字条件放行"**(claim 路: 证 payout leaf 对 `payoutRootField`, 无 payout-authority 签名, 真); 但它**只证** `already-baked state → signatureless payout`, **没证** `外部 §6-1 OutcomeAttestation → 可信 baked state`——`attestedWinner` 是从自身 state 读的、mint 管线 `closezk-v2-mint.mjs` 从上一个 PayoutShardV2 attested state 读它构造新 redeem。**缺的环 = 外部 attestation 怎么【成为】可信 baked state。** 两种可接受形态: (1) attestation **直接就是** baked commitment; (2) 一个**前置 covenant 验证阈值 attestation, 且只能产出唯一一个后继 output, 其 baked state 从验过的 receipt 确定性派生**, 后继再用无签字 claim。**两形态都要求验证方绑死 §6-1 receipt 的 {身份/version/network/market-state/outcome/证据/committee-epoch/replay/policy} + 精确后继 state commitment**。🔴 **host 侧 builder"读一行 attested row 编个新 covenant"【不是授权】**(= 同机可绕, §10§3 族)。⇒ **强化 J2 baked 点(Codex): 不只问【哪些字段 baked】, 要问【烤它们的那个转移本身是否从验证过的 attestation 共识强制】**——host-compiled ≠ consensus-enforced。**§7 层(a)由此从"照先例即可"降级为 OPEN/MUST-FIX A**。
+  - 🟢 **这正是 §6-3 反验 §6-1 的价值兑现**: 第一个消费者把 §6-1 的 quorum-中心化(层 b)+ attestation→state 绑定(层 a MUST-FIX A)两条都顶成了"授权真金的活闸"。
 - 消费 §4.3(复算+绑定)✅ 结果与 payout 复算。
 - 消费 §4.4(无 bypass)🔴 **依赖一个 §6-1 冻结稿自己标注【未实现】的不变量**(§4.4(b) live path 未建 + 同机持 ≥4 委员拓扑把 4-of-5 塌成 1-driver)⇒ v0.1 不得假设它已 enforce; 明列为前置。
 - 消费 §4.5(abstain)✅ 三态。
 
-## §8 与 plain HTLC / adaptor-signature 对比（Codex 明令·卡的及格线）
+## §8 与 plain HTLC / adaptor-signature 对比（Codex 明令·卡的及格线 · v0.2 Bettor 主动啃, 待 Codex 红队）
 
-- **[DESIGN-CHOICE·待 red-team 加强]** plain HTLC: 跨链原子交换成熟, 但 (a)要求两链都支持兼容 hashlock/timelock (b)preimage 公开(打回3)(c)不处理"链下/跨系统结果"。adaptor-sig: 更私密, 但仍要两域都能验对方腿。
-- **KANet 协调层的可辩护增量** = 当**一条腿的结果不是对方链能直接验的 hashlock, 而是需要一份【关于该腿的、可独立核验的 attestation】**时(如 A 链要根据"B 链上某 covenant 是否按规则结算"放钱, 而 B 的规则 A 链读不懂)——KANet 委员产的 OutcomeAttestation 提供这份两边可消费的可验事实。**若两腿都是简单 hashlock 可搞定 ⇒ 本卡不主张 KANet 更优**(诚实承认, 承打回1)。🔴 **待 red-team**: 举一个 HTLC/adaptor 做不到而本设计做得到的**具体最小例**, 否则 §8 不及格。
+**基线能力**: plain HTLC = 跨链原子交换成熟, 但 (a)要两链都支持兼容 hashlock/timelock (b)preimage 公开(打回3)(c)条件只能是"揭示一个 secret"。adaptor-sig = 更私密, 但仍要两域都能验对方腿, 条件仍绑定到签名/secret。
+
+**🔴 最小例(HTLC/adaptor 结构上做不到)**: 交易者要用 KAS 买一个**其结算条件是【一个计算出来的跨域结果】而非一个 secret** 的头寸——例: "**iff B 链上预测市场 M 按规则 R 结算为 outcome X, 则放 KAS 给 taker**"。
+- HTLC 表达不了: 没有 secret 可揭示; outcome X 是**从 B 链共识态按规则 R 算出来的事实**, 不是一把钥背后的原像。
+- adaptor 同限: 它绑签名/secret, 绑不了"多输入算出的计算结果"。
+⇒ 对 HTLC/adaptor **单独**而言, 这一类**必须**有一份"关于该结果的、可核验的 attestation"才进得来。**这就是 §2 锚说的"单一域无法 enforce 整个转移"的具体最小例。**
+- 🔴 **v0.3 收窄(Codex MSG-251 纠我过声)**: **不得**说"轻客户端也做不到"——那是错的。若 A 链能验 B 的 header/finality **加一份足以验 P 的证明**(light-client/proof-verifier), 就能**完全去掉委员**。⇒ **正确边界 = "HTLC/adaptor 单独做不到; 但一个够表达力的 light-client/proof-verifier 能"**。KANet 是 **attestation 桥**——它的价值域 = **目标域【无法经济地/原生地】验证源域谓词, 且该谓词不可化约为 HTLC/adaptor 用的那个 secret 关系**; **不是**"委员中介唯一必要"的证明。
+
+**🔴🔴 但诚实的及格线在这里, 且它把 §8 钉死在 §7 上**:
+- 上面那个最小例**不是 KANet 独有**——任何**预言机/委员/桥**都能提供"M 结算为 X"这份 attestation(Codex 打回1 明列这些替代)。所以 KANet vs "HTLC + 一个**可信**预言机"**必须**答: 多出来的是什么?
+- KANet §6-1 契约多出的 = attestation 是**可独立复算 + 域分隔类型化 + abstain-不猜**的(§4.1/§4.3/§4.5)⇒ 目标是 **"可验证预言机"而非"可信预言机"**: 任何人能从共识态独立复算该结果、委员去中心 ⇒ 不必信任委员、只信数学。
+- 🔴 **而这个"可验证而非可信"的独特价值, 恰恰被 §7 的 quorum-中心化【当前抵消】**: §7 实测委员**本机主导(回溯 24.7% / 前瞻 ≈86%)**⇒ "独立复算 + 去中心"今天是**戏**(一台机器凑齐 quorum, "多方独立见证"名存实亡)⇒ **今天 KANet 退化成"HTLC + 一个纪律好的【可信】预言机", 不比基线更优**。
+- ⇒ **§8 的结论(诚实, 承打回1)**: KANet 相对 HTLC/adaptor 的可辩护增量 = **计算型跨域结果 + 可验证(非可信)attestation**; 但**该增量【当前不成立】, 因为它 100% 依赖委员去中心, 而 §7 证明委员今天本机主导**。⇒ **§8 及格 ⟺ §7 的 quorum-中心化被治好**; 两者是同一个闸。**在委员真去中心前, §6-3 不应对外主张"比 HTLC+可信预言机更优"。**
+- 🟢 **这对 Owner 的净意义**: §6-3 的价值命题**真实但 contingent** —— 它值得造(计算型跨域结果确实是 HTLC 进不来的类), 但它"信任地基更硬"这半**要等委员去中心才成立**, 而委员去中心 = 北极星"开放测试网"本就要解的同一题(§10 pubkey-身份 + 更大外部质押池稀释本机权重)。⇒ **§6-3 与 §10/北极星不是二选一, 是同一个去中心化地基的两面。**
 
 ## §9 明列空白（不假装覆盖）
 - §7 那条"谁签付-taker 的 tx + 怎么门控不被同机绕"= **最大未决**, 交 red-team 主攻。
@@ -99,6 +118,21 @@
 - **② §7 最尖的缝 → 两层重构**(见 §7 §4.2 条): "谁签"只对签名式放行成立; 本仓已有条件式先例(`CloseZkV2.sil` checkSig=0 / `bshard-close-enforce.mjs`, Bettor 实核)⇒ 选条件式则"谁签"消失; 同机风险**挪到 attestation 产出层** = §6-1 委员-quorum-中心化(§6-3 第一个消费者顶成授权真金的活闸)。
 - **③ §4 单边套牢洞(NWT)= 已修**(见 §4): 每腿 timeout 从**自身锁定那刻**起算(非"两腿都锁后"), 否则 leg-A 锁/leg-B 从不锁 → maker 资金无限卡; + J2 加验收(退出后账上零残留)。
 
-**🔴 数字分歧重测解决(方法论留痕·"两数不符重测")**: J2 先报 3.9% → NWT 指为方法学 artifact(误触空列 `ecdsa_pubkey_xonly`) → **三方各自重跑原始仪器(`XOnlyPublicKey.fromAddress` 地址派生, 32/32)全部收敛 63/255**(Bettor `--all` 亲跑 + NWT 重跑对上原始记录 + J2 重测复现) → J2 全额撤回 3.9%。**权威数 = 回溯 63/255=24.7%(≥threshold)、41/255=16.1%(5/5); 前瞻当前池 ≈86% stake(J2 补测, 数量级)**。无人让步认错数, 全部重测收敛 = 正例。
+**🔴 数字分歧重测解决(方法论留痕·"两数不符重测")**: J2 先报 3.9% → NWT 指为方法学 artifact → **三方【对齐到同一正确方法后】重跑收敛 63/255**(`XOnlyPublicKey.fromAddress` 地址派生 pk 配 `committee_pks`, 32/32): Bettor `--all` 亲跑 + NWT 对上原始记录 + J2 复现并全额撤回 3.9%。
+- **真根因(J2 20:03 更正, 非"空列")**: J2 3.9% = 用 `relay_id`(本地 UUID)做跨节点匹配; relay_id 跨节点无意义(§10 已证)⇒ 选错 key。"空列 ecdsa_pubkey_xonly"是 J2 19:54 猜测、19:56 已撤, v0.2 一度误记, 此处正。
+- **🔨 收敛性质校准(J2 20:03)**: 三方跑的是**同一原始仪器/同一派生法** ⇒ 收敛证的是**可复现(reproducible)**, **不是独立正确**(三法得同数才叫独立佐证)。**正确性另有支柱** = "地址派生 pubkey 是对的 key、relay_id 不是"(§10 独立结论)。两者本次都要, 但不许把可复现读成独立佐证。
+- **权威数 = 回溯 63/255=24.7%(≥threshold)、41/255=16.1%(5/5); 前瞻当前池 ≈86% stake(J2 补测·数量级)**。无人让步认错数、全部重测 = 正例。
 
 **净**: §6-3 v0.1→v0.2 使 §6-1 委员-quorum-中心化从"历史编号"变成"**当前主导、授权真金前必答的硬闸**"(24.7% 回溯 / ~86% 前瞻)——**这正是造第一个消费者反验冻结的价值兑现**。下一步 Codex 红队(MSG-251, 待 Owner 触发)主攻 §8 HTLC 及格线 + 条件式 baked/witness 绑定缝。
+
+## §12 v0.3 Codex 红队整合（2026-08-20 · MSG-251）
+
+**Codex 裁: 方向 GREEN, v0.2 REDTEAM HOLD**, 四条:
+- **§8 = PASS IF NARROWED** → 已收窄: 最小例对 HTLC/adaptor 单独真成立, 但**不得**说"轻客户端也不行"(够表达力的 light-client/proof-verifier 能验 P 去掉委员); KANet = **attestation 桥**(目标域无法经济原生验证源域谓词时), 非"委员唯一必要"。
+- **🔴 §7 = PARTIALLY RESOLVED + MUST-FIX A** → 已加: CloseZkV2 只证 `已 baked → 无签字放行`, 没证 `外部 attestation → 可信 baked state`; **烤 state 的转移必须共识强制、host-compiled ≠ authority**; 两形态(attestation 直接是 commitment / 前置 covenant 验 attestation 产唯一后继)+ 绑死 §6-1 receipt 字段 + 后继 state commitment。
+- **§2 = ACCEPTED + 措辞纠** → 已加: 委员只 attest 事实谓词, 退/罚/延=policy+covenant 非 P1; `disagree→refund` 读作 `(receipt+baked policy)→确定性转移`。
+- **🔴 §4 = 单边套牢 FIX ACCEPTED + MUST-FIX B** → 已加: 两阶段锁-结时序**不等式**(claim 留对方对等 claim 的 finality+margin 余量)+ 终态互斥 + 每终态清锁。
+
+**并入 J2 (20:03) 三处记录更正**: ①3.9% 真根因 = 用 relay_id 跨节点匹配(非"空列", J2 自撤的猜测被我误记)②表名 `oracle_stake_enrollments`(非 `oracle_stakes`)③三方收敛证"可复现"非"独立正确"(同法同数=reproducible; 正确性靠"地址派生 pubkey 是对 key"独立论证)。
+
+**v0.3 状态**: 方向 GREEN; **两条 MUST-FIX(A attestation→baked-state 共识强制 / B 两阶段时序不等式)= 下一轮(v0.4)主攻**。J1 (20:02) 两条承重点待并(已 ping J1 restate)。
