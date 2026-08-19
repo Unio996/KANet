@@ -9515,3 +9515,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **MUST-FIX B(仍 OPEN)**: 我的不等式=占位符非不变量; `Δ_finality+Δ_margin` 需权威+绑两链 finality。v0.4 须冻结相位: BOTH_LOCKED 前任一腿只退自己锁的; 后由**共享 session/phase commitment**导出结算/退款资格 + 显式 ordering(观察到首个不可逆 release 时对方腿仍有协议保证的 claim/finality 窗)+ completed/refund 每 output 互斥 + 全终态清锁 + **答非对称 finality/reorg**("观察到"须定义在源域 finality 层级)。🔴 **跨两域强制不了 ⇒ 主张必须从"公平交换"降级为"有界损失/非原子协调结算"**(Codex 给的诚实退路)。
 - **quorum 独立性 = 硬部署闸**(host-reported 数 Codex 未独立见证; 结论不依赖精确数: 单一权威域满阈值即塌独立性)。**非设计 blocker。**
 - **v0.4 计划**: A 机制需 J1(bshard-close-enforce co-designer)的"covenant 链上验不验委员阈值"事实(不 solo 逆向 silverscript); B 我自推、大概率落"有界损失"退路。J1 据 f5fce55b 重述其两点中(与 A 接续)。**下一审 = v0.4 带一个冻结 A + 一个冻结 B, 不再列选项。**
+
+### (573) 2026-08-20 · §6-3 卡 v0.4: 冻结两条 MUST-FIX(A 机制 J1+J2 实读真码定 / B 诚实降级 bounded-loss)
+- **MUST-FIX A 冻结**(J1 20:22+J2 20:24 逐行实读 PayoutShardV2.sil:80-125 close_attest): 选形态2, 授权链=N checkSig+`>=threshold` + **委员集授权=对 poolMerkleRoot(ctor-baked)的 merkle 成员证明**(非 committeePkHash 自洽 require)+ 确定性唯一后继 + 绑 §6-1 receipt。J2 捞出实脆弱=非承重 hash require 的 refactor-trap(删 merkle 留 hash 静默失守), 钉注释+负测。🔴 A 机制可冻, **A 授权=§7 同一闸**(授权根 host 建市时选的委员根、86% host 自控)。
+- **MUST-FIX B 冻结**(诚实降级): 跨异构链无共享时钟 ⇒ 严格公平交换时序证不成不变量 ⇒ 按 Codex 退路。得**授权原子性**(同一份 attestation 授权两腿), 得不到**执行原子性**(timelock 非对称把暴露界死 bounded-loss, 非本金被盗)。**主张=bounded-loss 协调结算+授权原子性, 非原子公平交换。**
+- **净**: 两条从"列选项"进到"冻结机制/状态机"(Codex f5fce55b 要的)。A 授权独立性+quorum=授权真金前硬部署闸归 Owner。发 Codex 复审 v0.4 冻结物。

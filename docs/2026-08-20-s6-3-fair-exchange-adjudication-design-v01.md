@@ -1,6 +1,6 @@
 # D-012 §6-3 fair-exchange 设计卡 v0.1 — Exchange 裁决角色（报备层 · 零生产改动）
 
-> **Status**: DRAFT **v0.3** · Bettor 2026-08-20 主笔 · 设计层, 零生产码。**v0.2 = J1 二审 + NWT+J2 红队; v0.3 = 并入 Codex 红队(MSG-251)四条**(§8 收窄/§7 MUST-FIX A/§2 措辞纠/§4 MUST-FIX B)+ J2 (20:03) 三处记录更正。**方向 Codex GREEN, 两条 MUST-FIX(A/B)未闭。** 见 §11。
+> **Status**: DRAFT **v0.4** · Bettor 2026-08-20 主笔 · 设计层, 零生产码。**v0.3 = Codex MSG-251/f5fce55b(方向 GREEN); v0.4 = 冻结两条 MUST-FIX**——**A**(J1+J2 实读 PayoutShardV2.sil 真码定机制: close_attest 4-of-5 链上验 + merkle 成员证明对 baked 根 + 确定性后继 + 脆弱钉死; 授权根=§7 闸)· **B**(诚实降级 = bounded-loss 协调结算 + 授权原子性, 非原子公平交换, 承 Codex 退路)。见 §13。
 > **定位**: §6-1 Oracle 权限边界契约(all-review-passed 冻结, target `154291d8`)的**第一个复用消费者**; DECISIONS.md §6 执行序 item3 = "从零造裁决角色, 非接现成接口"。**造它同时是对 §6-1 冻结的反向审计**(第一个消费者暴露契约漏没漏)。
 > **依据**: Codex `RESPONSE-20260731-…-ADVERSARIAL-CONCLUSION`(规定卡的 11 节 + 3 打回)· §6-1 冻结稿 `docs/2026-08-03-oracle-skill-interface-permission-boundary-freeze-design.md` §4 · KB `architecture/zk-track-c-verified-trustless-settle.md` + `00-position/northstar-open-collaboration-protocol.md` · 现有 exchange 码(exchange-machine.js / api/exchange.js:747-796 / exchange-machine.js:563)。
 > **权分**: Bettor 设计 × J1/NWT 审 × Codex 红队。**真实 roster**(J2/NWT 独立性未证实但内容可用; J1+Codex 确证独立)。
@@ -44,10 +44,13 @@
 - **[CONFIRMED·读] 承重前提**: `checkStaleDisputes()`(exchange-machine.js:563)现为 stub ⇒ 超时兜底本就未建, v0.1 必须把 timeout-refund 设成**真终态**(记 `pre_dispute_status` 才能安全自动退, 见 :541-545 设计注)。
 - 🔴🔴 **v0.2 修单边套牢洞(NWT ③)**: **每腿的 timeout 必须从【该腿自身锁定那一刻】起算, 不是从"两腿都锁定后"起算**。否则"leg-A 已锁、leg-B 从未锁"这个场景**根本没有计时器被触发** ⇒ maker 锁定资金无限期卡住(不是"到期退", 是"根本没有到期")。⇒ 状态机: 进 `leg-A-locked` 即启动 leg-A 的 deadline; 若在 leg-A deadline 前未进 `leg-B-locked` ⇒ leg-A 自动 timeout-refund。**每腿独立计时、独立可退。**
 - 🔴 **v0.2 加验收(J2)**: 单边套牢负测不只测"另一方能不能走人", 还要测**走人之后账上有没有留半截状态**(fund_lock 泄漏 / 状态卡在中间态)——退出必须是干净终态, 零残留。
-- 🔴🔴 **MUST-FIX B(Codex MSG-251)——两阶段【锁-结】时序不变量(独立每腿超时只解决"第二腿锁前", 没解决"两腿都锁后"的公平交换)**: v0.2 的每腿独立超时挡住了"leg-A 锁/leg-B 从不锁"; 但**两资产都 committed 之后**, 谁先 claim/release、对方还来不来得及对等 claim, 仍是公平交换的核心。需具体跨腿规则:
-  - **① 时序须证成【不等式】非定性**: 任一腿的 claim/release 必须给对方腿留足**协议定义的时间/finality 余量**做对等 claim(`t_reciprocal_deadline − t_first_claim ≥ Δ_finality + Δ_margin`, 写成可核验不等式)。
-  - **② 终态互斥 + 清锁**: 对**同一个锁定 output/session**, `abort/refund` 与 `completed` **必须互斥**; **每一条终态路径都必须清掉锁状态**(承 §5 脆弱点 fund_lock 泄漏教训)。
-  - ⇒ **§4"两腿都锁后的公平交换" = OPEN/MUST-FIX B**(v0.2 只 ACCEPTED 了"第二腿锁前不套牢"这半)。
+- 🔴🔴 **MUST-FIX B —— v0.4 冻结: 相位状态机 + 诚实降级(Codex 退路)**: v0.2 的每腿独立超时只挡"第二腿锁前"; 两腿都锁后, 跨两条独立-finality 异构链**无共享时钟** ⇒ 严格"公平交换"时序不等式**证不成协议不变量**(`Δ_finality+Δ_margin` 无跨链权威)。⇒ **按 Codex 退路诚实降级主张**, 冻结如下:
+  - **相位(两阶段, 共享 session commitment)**: `BOTH_LOCKED` 前——任一腿**只能退自己锁的资产**(v0.2/v0.3 已定)。`BOTH_LOCKED` 后——两腿的释放/退款资格**都由同一份 §6-1 OutcomeAttestation(= 共享 session/phase commitment)导出**。
+  - **🟢 得到什么 = 【授权原子性】**: 两腿被**同一份**单一 attestation 授权 ⇒ **不存在"leg-A 已授权而 leg-B 未授权"这个态**(要么该 attestation 落链两腿皆可 claim, 要么它没落两腿皆退)。这是 shared-attestation 相对独立双 preimage 的实质收益。
+  - **🔴 得不到什么 = 【执行原子性】**: attestation 落链后, 每方仍须在**自己腿的 timelock 窗内** claim; 非对称 finality/reorg 下, "谁先 claim、对方来不来得及"无法跨链严格保证。⇒ **只能 bounded-loss**: 用 **timelock 非对称**(照 HTLC: 后手腿的 refund-timeout 比先手长足 Δ)把最坏暴露**界死在 timelock 窗 + 手续费级 griefing**, **非本金被盗**。
+  - **"观察到"须定义在源域 finality 层级**(非首见): 首个不可逆 release 的判定 = 达到源域要求 finality 深度, 否则 reorg 翻盘。
+  - **终态互斥 + 清锁**: 同一锁定 output/session, `completed` 与 `refund` **互斥**; **每条终态路径清锁**(承 §5 fund_lock 泄漏教训)。
+  - ⇒ **v0.4 冻结的主张 = "bounded-loss 协调结算 + 授权原子性", 明确【不是】"原子公平交换"**(Codex 退路)。§8 的价值命题(计算型跨域结果 attestation 桥)在此主张下成立且诚实; 严格原子性留给"两腿都是 hashlock 可搞定"那类(那类本就 HTLC 更优, §8 已认)。
 
 ## §5 隐私与真实性（Codex §e/§f）
 
@@ -74,7 +77,11 @@
   - **🏛 方法学裁定(Bettor, 与 §10 一致; 根因经 J2 (20:03) 更正)**: **权威判据 = 从本机 relay 地址【派生 pubkey】(`XOnlyPublicKey.fromAddress`)与 `committee_pks` 匹配**(原脚本所用, 32/32 派生成功)。**J2 3.9% 的真根因 = 用 `relay_id`(`committee_relay_ids` 配 `relay_nodes.id`=本地 UUID)做跨节点匹配** —— 而 relay_id 是节点本地命名空间、跨节点无意义(J2 在 §10 刚论证过、转头自己用了; = "错理由活得比结论久"同族)。⚠ **注: "空列 ecdsa_pubkey_xonly"是 J2 19:54 的猜测且 19:56 已撤, 非真根因**(v0.2 一度误记, 此处更正)。真根因是**选错了 key(relay_id vs pubkey)**, 与 §10 结论完全同源。
   - **§6-3 上线前【必答】(NWT: 比"设计层未决"更进一步)**: "是否接受用今天这个 quorum 集中度授权真实资金转移" —— 桌上的数 = **回溯 24.7%(≥threshold)/ 前瞻 ≈86%(当前池, 数量级)**。**⇒ 委员-quorum-中心化是【当前主导】而非缩小的历史 artifact; §6-3 授权真金前这是硬闸, 归 Owner 策略决定**(如同 §6-1 签发口的部署闸性质)。
   - **🔴 J2 补: 条件式不免费——绑定缺口**: 条件式下承重点移到 **"attestation 里哪几个字段是 baked 进合约 state、哪几个是 witness 喂的"**——witness 喂的攻击者说了算。⇒ **§4.3 复算的对象【必须是 baked 那部分】**, 否则复算的是攻击者给的值。
-  - **🔴🔴 MUST-FIX A(Codex MSG-251)——freeze attestation→baked-state 绑定, 且【烤它的转移必须共识强制】**: CloseZkV2 证明的是 **"已 baked 的授权 → 无签字条件放行"**(claim 路: 证 payout leaf 对 `payoutRootField`, 无 payout-authority 签名, 真); 但它**只证** `already-baked state → signatureless payout`, **没证** `外部 §6-1 OutcomeAttestation → 可信 baked state`——`attestedWinner` 是从自身 state 读的、mint 管线 `closezk-v2-mint.mjs` 从上一个 PayoutShardV2 attested state 读它构造新 redeem。**缺的环 = 外部 attestation 怎么【成为】可信 baked state。** 两种可接受形态: (1) attestation **直接就是** baked commitment; (2) 一个**前置 covenant 验证阈值 attestation, 且只能产出唯一一个后继 output, 其 baked state 从验过的 receipt 确定性派生**, 后继再用无签字 claim。**两形态都要求验证方绑死 §6-1 receipt 的 {身份/version/network/market-state/outcome/证据/committee-epoch/replay/policy} + 精确后继 state commitment**。🔴 **host 侧 builder"读一行 attested row 编个新 covenant"【不是授权】**(= 同机可绕, §10§3 族)。⇒ **强化 J2 baked 点(Codex): 不只问【哪些字段 baked】, 要问【烤它们的那个转移本身是否从验证过的 attestation 共识强制】**——host-compiled ≠ consensus-enforced。**§7 层(a)由此从"照先例即可"降级为 OPEN/MUST-FIX A**。
+  - **🔴🔴 MUST-FIX A —— v0.4 冻结机制(选形态2·J1+J2 实读真码定, 非列选项)**: Codex 要"选定冻结一个机制+机械可检转移", 据 J1(20:22)+J2(20:24)逐行实读 `PayoutShardV2.sil:80-125` `close_attest` 定:
+    - **选形态(2)**: 前置 covenant 验证阈值 attestation → 只能产出唯一后继, 后继 baked state 从验过的 receipt 确定性派生 → 后继用无签字 claim(CloseZkV2 路)。**buildability = 确定**(有活实例)。
+    - **🔴 冻结的授权链(机械可检, 逐环)**: ① **阈值**: N 个 `checkSig` + `require(validSigs >= threshold)`(`close_attest` 实为 5 sig + `>=4`)。② **委员集授权 = 对 baked 委员根的 merkle 成员证明** —— 🔴🔴 **授权【不是】** `require(blake2b(pkConcat)==committeePkHash)`(J2 实证: 那是 witness-vs-witness 自洽、**什么都不绑**); **真承重 = 5 组 merkle 成员证明对 `poolMerkleRoot`(ctor-baked 值)**。③ **后继确定性**: 后继 output/state commitment 从验过的 receipt 确定性派生, **一条规则让所有其他后继不可能**(单一后继)。④ **绑死 §6-1 receipt**: {身份/version/network/market-state/outcome/证据承诺/committee-epoch/replay/policy}。
+    - **🔴 记进卡的实脆弱(J2 捞出·refactor-trap)**: 那句非承重的 `committeePkHash` require "看起来像委员绑定"; 谁将来删 merkle 段留 hash 句 → **合约静默失守**(任意 witness 委员都过)。⇒ **落地时 `.sil` 该 require 上方钉注释**: 「本句只保证 5 pk 与 committeePkHash 自洽, **不构成委员授权; 授权来自下方对 poolMerkleRoot(ctor 烤值)的 5 组 merkle 成员证明, 删它即失守」**。负测(实现): 改后继 commitment 拒 / receipt 复用第二后继拒 / 错 network-version-session-policy-epoch 拒 / 委员签名不足或重复拒 / host 供非确定性后继拒 / **删 merkle 留 hash 必须挂**。
+    - **🔴🔴 授权【根】的残留 = §7 同一闸(A 机制可冻, A 授权不可冻)**: 上述链把授权锚在 **`poolMerkleRoot`(ctor-baked)= host 在建市时选的委员集**。⇒ Codex "host-compiled ≠ authority" 与 §7 quorum-中心化**是同一条根**: 链上阈值验证验的是 host 自选(§7: 且 86% host 自控)的委员 ⇒ **"多方独立见证"是戏**。⇒ **MUST-FIX A 的【机制】v0.4 冻结(可建、可机械检); 但 A 的【授权独立性】= §7 硬部署闸**(委员根须来自 host 不控的源: 外部质押池稀释 + §10 pubkey-身份), **授权真金前不成立**。J2 元教训入册: 提"把闸放 X"必问"X 的授权来自谁"(= gate-strength-lives-at-call-site 族)。
   - 🟢 **这正是 §6-3 反验 §6-1 的价值兑现**: 第一个消费者把 §6-1 的 quorum-中心化(层 b)+ attestation→state 绑定(层 a MUST-FIX A)两条都顶成了"授权真金的活闸"。
 - 消费 §4.3(复算+绑定)✅ 结果与 payout 复算。
 - 消费 §4.4(无 bypass)🔴 **依赖一个 §6-1 冻结稿自己标注【未实现】的不变量**(§4.4(b) live path 未建 + 同机持 ≥4 委员拓扑把 4-of-5 塌成 1-driver)⇒ v0.1 不得假设它已 enforce; 明列为前置。
@@ -136,3 +143,19 @@
 **并入 J2 (20:03) 三处记录更正**: ①3.9% 真根因 = 用 relay_id 跨节点匹配(非"空列", J2 自撤的猜测被我误记)②表名 `oracle_stake_enrollments`(非 `oracle_stakes`)③三方收敛证"可复现"非"独立正确"(同法同数=reproducible; 正确性靠"地址派生 pubkey 是对 key"独立论证)。
 
 **v0.3 状态**: 方向 GREEN; **两条 MUST-FIX(A attestation→baked-state 共识强制 / B 两阶段时序不等式)= 下一轮(v0.4)主攻**。J1 (20:02) 两条承重点待并(已 ping J1 restate)。
+
+## §13 v0.4 冻结两条 MUST-FIX（2026-08-20 · Codex f5fce55b 要"选定冻结"非"列选项"）
+
+**MUST-FIX A — attestation→authoritative-state 机制【已冻结】**(J1 20:22 + J2 20:24 逐行实读 `PayoutShardV2.sil:80-125` `close_attest` 真码, 非逆向):
+- 选形态(2): 前置 covenant 验阈值 → 唯一后继 → 确定性 baked state → 无签字 claim。**可建=确定**(活实例)。
+- 授权链: N `checkSig`+`require(validSigs>=threshold)`(实为 5+`>=4`)· **委员集授权=对 `poolMerkleRoot`(ctor-baked)的 5 组 merkle 成员证明**(**不是** `committeePkHash` 那句 witness-vs-witness 自洽 require)· 后继确定性(一条规则让其他后继不可能)· 绑死 §6-1 receipt 全字段。
+- **实脆弱记档(J2)**: 那句非承重 hash require = refactor-trap(删 merkle 留 hash → 静默失守); `.sil` 钉注释 + 负测"删 merkle 留 hash 必挂"。
+- 🔴 **A 机制可冻, A 授权【不可冻】= §7 同一闸**: 授权锚在 host 建市时选的委员根(§7: 且 86% host 自控)⇒ Codex "host≠authority" 与 §7 quorum-中心化同根; 授权真金前须委员根来自 host 不控的源(外部质押池稀释 + §10 pubkey-身份)。
+
+**MUST-FIX B — 时序/finality【已冻结·诚实降级】**:
+- 跨两条独立-finality 异构链无共享时钟 ⇒ 严格公平交换时序不等式证不成不变量 ⇒ **按 Codex 退路降级主张**。
+- **得到=授权原子性**(两腿同一份 attestation 授权, 无"A 授权 B 未授权"态); **得不到=执行原子性**(非对称 finality/reorg 下用 timelock 非对称把暴露界死在 timelock 窗+手续费级 griefing, 非本金被盗)。
+- "观察到"定义在源域 finality 深度; completed/refund 互斥; 全终态清锁。
+- **v0.4 主张 = "bounded-loss 协调结算 + 授权原子性", 明确非"原子公平交换"**。
+
+**净**: 两条 MUST-FIX 从"列选项"进到"冻结机制/状态机"(Codex 要的)。A/B 均冻结; **A 的授权独立性 + quorum = 授权真金前硬部署闸(归 Owner)**。下一审 = Codex 对 v0.4 冻结物。
