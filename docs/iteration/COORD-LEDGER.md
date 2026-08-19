@@ -9567,3 +9567,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **principal-theft 唯一残留 = 跨链 timeout-ordering**: A 晚产 → 一腿已 timeout-refund 而另一腿刚可 claim。但 **A 一旦产出即公开可携带, 每方能【自己】把 A 呈给自己 incoming 腿** ⇒ 只要两腿 T 都 > (A 保证可得 + 跨链 finality margin), 各方自结算、无 theft。
 - **🔴 诚实 fork(Codex 退路)**: 跨链 timeout margin 保守设够长 → **no-principal-theft(条件于两链 finality 假设; 深 reorg >D 破之)**; 对抗 finality 下设不住 → 降级 **bounded-lock-duration**(最坏资产锁到 T、深 reorg 对手可致损)。
 - **耦合注记**: B 依赖 A2(两链验同一 A)⇒ **A/B 两条 MUST-FIX 耦合**, v0.5 须一起冻(Codex 也要"一个冻结 A + 一个冻结 B")。B 草案待: ①A2 E2E 定 A 可用 ②J1/NWT 红队本不变量(尤其"每方自呈 A"在 griefing 下真成立否)③把 timeout margin 的跨链 finality 关系写成可核验不等式(Codex MUST-FIX B 原要求)。**未进卡, 先记草案。**
+
+### (582) 2026-08-20 · B timelock 机制线闭(已验): deadline=墙钟 ms(>=5e11)+ 强制阈值断言 · 双模-timelock footgun · J1 两洞仍 pending B 核心
+- **验证(Bettor 实读 `OracleStake_v1.sil:14-16`, 因本 session 栽过 grep 错故先验)**: `Kaspa LOCK_TIME_THRESHOLD = 500_000_000_000`(5e11); `tx.time < 500B → DAA score / >= 500B → ms epoch`; TN12 DAA ~5e8 远 <500B。**J2 双模 claim 全对。**
+- **timelock 机制线闭(J2+J1 收敛, 已验)**: ① J2: DAA-窗墙钟追赶期缩 6x(实测 2.75/s)且与故障恢复**同因触发**(对手掉线+窗缩同时)⇒ 不能用 DAA 窗当跨链 margin。② J1(SS 域): covenant 时间闸**默认可墙钟**。③ ⇒ **B deadline = 墙钟 ms(值 >=5e11)** + 🔴 **强制构造侧断言(墙钟须 >=5e11 / DAA 须 <5e11)** —— 因 tx.time 双模由量级选、**单位口误(秒 vs 毫秒)静默换模式 → 资金解不开、不报错、逃类型检查**(J2 footgun, "失败像合法答案"族)。改用墙钟是最易踩此 footgun 的一步 ⇒ 断言强制。finality-**深度**("A 落到 D")是另一个 depth 概念、reorg-safety 用, 与 deadline 分开。
+- **🔴 B 核心仍 OPEN**: J1 (22:16) "self-present-A 两洞"(no-theft 失败路径)**尚无全文** —— 那才是"B 落 no-theft 还是 bounded-lock"的决定项。本条只闭 timelock 机制子线。等 J1 两洞。
