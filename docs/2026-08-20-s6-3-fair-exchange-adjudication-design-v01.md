@@ -1,6 +1,6 @@
 # D-012 §6-3 fair-exchange 设计卡 v0.1 — Exchange 裁决角色（报备层 · 零生产改动）
 
-> **Status**: DRAFT v0.1 · Bettor 2026-08-20 主笔 · 设计层, 零生产码。
+> **Status**: DRAFT **v0.2** · Bettor 2026-08-20 主笔 · 设计层, 零生产码。**v0.2 = 并入 J1 二审(引用逐行核真码全属实/结构 SOUND)+ NWT+J2 红队**(§7 两层重构 + 数字分歧重测解决 + §4 单边套牢修)。见 §11。
 > **定位**: §6-1 Oracle 权限边界契约(all-review-passed 冻结, target `154291d8`)的**第一个复用消费者**; DECISIONS.md §6 执行序 item3 = "从零造裁决角色, 非接现成接口"。**造它同时是对 §6-1 冻结的反向审计**(第一个消费者暴露契约漏没漏)。
 > **依据**: Codex `RESPONSE-20260731-…-ADVERSARIAL-CONCLUSION`(规定卡的 11 节 + 3 打回)· §6-1 冻结稿 `docs/2026-08-03-oracle-skill-interface-permission-boundary-freeze-design.md` §4 · KB `architecture/zk-track-c-verified-trustless-settle.md` + `00-position/northstar-open-collaboration-protocol.md` · 现有 exchange 码(exchange-machine.js / api/exchange.js:747-796 / exchange-machine.js:563)。
 > **权分**: Bettor 设计 × J1/NWT 审 × Codex 红队。**真实 roster**(J2/NWT 独立性未证实但内容可用; J1+Codex 确证独立)。
@@ -40,6 +40,8 @@
   分叉: `attesting →(cannot-verify/超时)→ timeout-refund`(双腿各自退回, 无人被单边套住) · `attesting →(disagree/证伪)→ refund`。
   🔴 **替换 `api/exchange.js:747-796` 的 concede-only `/resolve`**: 现状"双方不认输即无路径达终态"(NWT ③)⇒ 新增 attestation 门控的 `attesting` 态, 使**不依赖任何一方认输**即可达终态(attest 或超时)。
 - **[CONFIRMED·读] 承重前提**: `checkStaleDisputes()`(exchange-machine.js:563)现为 stub ⇒ 超时兜底本就未建, v0.1 必须把 timeout-refund 设成**真终态**(记 `pre_dispute_status` 才能安全自动退, 见 :541-545 设计注)。
+- 🔴🔴 **v0.2 修单边套牢洞(NWT ③)**: **每腿的 timeout 必须从【该腿自身锁定那一刻】起算, 不是从"两腿都锁定后"起算**。否则"leg-A 已锁、leg-B 从未锁"这个场景**根本没有计时器被触发** ⇒ maker 锁定资金无限期卡住(不是"到期退", 是"根本没有到期")。⇒ 状态机: 进 `leg-A-locked` 即启动 leg-A 的 deadline; 若在 leg-A deadline 前未进 `leg-B-locked` ⇒ leg-A 自动 timeout-refund。**每腿独立计时、独立可退。**
+- 🔴 **v0.2 加验收(J2)**: 单边套牢负测不只测"另一方能不能走人", 还要测**走人之后账上有没有留半截状态**(fund_lock 泄漏 / 状态卡在中间态)——退出必须是干净终态, 零残留。
 
 ## §5 隐私与真实性（Codex §e/§f）
 
@@ -57,7 +59,16 @@
 
 逐条记「本卡消费哪条 §4.x + 有没有不 compose」:
 - 消费 §4.1(类型签)✅ 直接用 OutcomeAttestation typed 对象。
-- 消费 §4.2(守恒)⚠ **潜在不 compose**: exchange **必须真把 KAS 交割给 taker**(移钱), 而 §4.2 说委员钥不能签 pay-winner。**本卡的解 = 移钱不经委员钥、经 covenant 消费 attestation**——但这要求 covenant 侧能独立消费 OutcomeAttestation 授权一笔**非守恒**(把锁定金给 taker)的转移。🔴 **待验(交 red-team)**: §6-1 冻结的委员接口是守恒类, 那"消费 attestation 授权非守恒交割"的机制**在哪一层、由谁的钥签**? 若最终仍需某个钥签一笔付 taker 的 tx, 那把钥是谁、它凭什么被 attestation 门控而非同机可绕(§10 §3 同机恒真的同族问)? **这是 §6-3 反验 §6-1 最可能暴露的缝。**
+- 消费 §4.2(守恒)—— **v0.1"谁签"问法问错了对象; v0.2 按 NWT/J2 红队重构为两层**(承重点从"谁签"移到"谁能凑 quorum attestation" + "哪些字段 baked"):
+  - **🔴 v0.1 §7 原写"谁签这笔付-taker 的非守恒 tx"—— 只对【签名式放行】那一支成立**。本仓已有**另一支【条件式/covenant 放行】的先例, 且经 Bettor 实核**: `CloseZkV2.sil` **checkSig=0**(vs `PayoutShardV2.sil` checkSig=10, worktree 实测)= 一份**零-checkSig、纯条件放行**合约; `bshard-close-enforce.mjs`(Track B autonomous-enforce, J1 co-design)= script 自核验授权数据后按预置规则放行输出、**无专门签 payout 的钥**。⇒ **§6-3 选条件式分支 ⇒ "谁签"这个问题消失**(无可驱动的签字方, 攻击者驱动谁)。
+  - **层(a) payout 执行**: covenant 消费 OutcomeAttestation 授权非守恒交割, **零额外自定钥**, 照 CloseZkV2/bshard-close-enforce 先例。**非新造能力**。
+  - **🔴🔴 层(b) attestation 产出 = 真正的同机风险落点(NWT)**: "谁能绕 payout 门控"不取决于 covenant 设计多干净, 取决于**产出一份够 quorum 的 OutcomeAttestation 能不能被同一台机器凑齐**。⇒ **这不是 §6-3 新缝, 是 §6-1 自己的【委员-quorum-中心化】问题在 §6-3 这第一个消费者身上长出第一个【授权真实资金转移】的实例**。
+  - **🔵 精确数(数字分歧已重测解决; 权威 = Bettor 重跑原始仪器)**: J2 先报 3.9%, NWT 指其为方法学 artifact(走了依赖空列 `ecdsa_pubkey_xonly` 的路)。**Bettor 亲跑原脚本 `scratch/bettor-committee-locality-0804.mjs --all`(原方法=`XOnlyPublicKey.fromAddress` 地址派生, 32/32 relay 成功派生), 逐字对上原始记录**——255 市场分布: `0/5→8 · 1/5→167 · 2/5→7 · 3/5→10 · 4/5→22 · 5/5→41`。⇒ **回溯: 本机可独立达 quorum(≥threshold=4)= 63/255 = 24.7%**(5/5 全本机 = 41/255=16.1%)。**3.9% 作废(artifact)。**
+  - **🔴 前瞻(J2 (19:54) 补测, 与回溯同向且更重)**: 委员 = VRF **stake-weighted 抽 5**(migrate.js:4737), 池 = `oracle_stakes`。**当前池本机占 stake 权重 ≈ 86.4%** ⇒ 新市场委员 ≈ **86% 本机主导**。趋势非"早期集中今分散", 是"当时多抽外部、**今天池子已本机主导**"。⚠ caveat: 有放回近似、采样实现(去重/有无放回/权重入 VRF)未读 = **数量级参考**; 池仅 **16 条 active** = 小池本身脆弱(几笔质押改多数)。
+  - **🏛 方法学裁定(Bettor, 与 §10 一致)**: `relay_nodes.ecdsa_pubkey_xonly` 非空行=0(§10 已定"该列 all-NULL 不可作权威")⇒ **权威判据 = `committee_relay_ids`/`relay_address` 地址映射**(原脚本+J2 前瞻所用), **非**该 pubkey 列。J2 的 3.9% 正是误触该空列路径的产物。
+  - **§6-3 上线前【必答】(NWT: 比"设计层未决"更进一步)**: "是否接受用今天这个 quorum 集中度授权真实资金转移" —— 桌上的数 = **回溯 24.7%(≥threshold)/ 前瞻 ≈86%(当前池, 数量级)**。**⇒ 委员-quorum-中心化是【当前主导】而非缩小的历史 artifact; §6-3 授权真金前这是硬闸, 归 Owner 策略决定**(如同 §6-1 签发口的部署闸性质)。
+  - **🔴 J2 补: 条件式不免费——绑定缺口**: 条件式下承重点移到 **"attestation 里哪几个字段是 baked 进合约 state、哪几个是 witness 喂的"**——witness 喂的攻击者说了算。⇒ **§4.3 复算的对象【必须是 baked 那部分】**, 否则复算的是攻击者给的值。先例 CloseZkV2 `zk_close` 只从合约自身 state 读 `attestedWinner`/`betsRootBaked`/`refundRootBaked`(= baked)有已在册绑定缺口, 是先例级警示。
+  - 🟢 **这正是 §6-3 反验 §6-1 的价值兑现**: 第一个消费者把 §6-1 的 quorum-中心化从"编号挂账"顶成了"授权真金的活闸"。
 - 消费 §4.3(复算+绑定)✅ 结果与 payout 复算。
 - 消费 §4.4(无 bypass)🔴 **依赖一个 §6-1 冻结稿自己标注【未实现】的不变量**(§4.4(b) live path 未建 + 同机持 ≥4 委员拓扑把 4-of-5 塌成 1-driver)⇒ v0.1 不得假设它已 enforce; 明列为前置。
 - 消费 §4.5(abstain)✅ 三态。
@@ -78,3 +89,16 @@
 - **J1(独立节点)/ NWT**: 审 §2 锚是否真答三打回 + §7 复用审计的"付-taker 钥"缝 + §4 状态机无单边套牢。
 - **Codex(bridge)**: 红队全卡, 重点 §8 及格线(HTLC 对比最小例)+ §7 §4.2 不 compose 缝 + §2 边界是否被后文任何一处偷偷越过。
 - **Bettor**: 收意见迭代 v0.2。**实现层另起报备等 Owner。**
+
+## §11 v0.2 红队整合记录（2026-08-20）
+
+**J1 二审(独立节点)**: 三处 §6-1/exchange 引用逐行读真码核过全属实(concede-only `/resolve`:747 · `checkStaleDisputes`:563 stub · `pre_dispute_status`:541 · §4.2 守恒 · §4.4 拓扑塌陷)· 设计结构 **SOUND** · "自己把最尖的缝标出来了"。
+
+**NWT+J2 红队三点**:
+- **① §2 锚泄漏 = PASS**(NWT 通读 §4/§6 无偷渡, attesting 三态全锚在"能否共识态独立复算")。
+- **② §7 最尖的缝 → 两层重构**(见 §7 §4.2 条): "谁签"只对签名式放行成立; 本仓已有条件式先例(`CloseZkV2.sil` checkSig=0 / `bshard-close-enforce.mjs`, Bettor 实核)⇒ 选条件式则"谁签"消失; 同机风险**挪到 attestation 产出层** = §6-1 委员-quorum-中心化(§6-3 第一个消费者顶成授权真金的活闸)。
+- **③ §4 单边套牢洞(NWT)= 已修**(见 §4): 每腿 timeout 从**自身锁定那刻**起算(非"两腿都锁后"), 否则 leg-A 锁/leg-B 从不锁 → maker 资金无限卡; + J2 加验收(退出后账上零残留)。
+
+**🔴 数字分歧重测解决(方法论留痕·"两数不符重测")**: J2 先报 3.9% → NWT 指为方法学 artifact(误触空列 `ecdsa_pubkey_xonly`) → **三方各自重跑原始仪器(`XOnlyPublicKey.fromAddress` 地址派生, 32/32)全部收敛 63/255**(Bettor `--all` 亲跑 + NWT 重跑对上原始记录 + J2 重测复现) → J2 全额撤回 3.9%。**权威数 = 回溯 63/255=24.7%(≥threshold)、41/255=16.1%(5/5); 前瞻当前池 ≈86% stake(J2 补测, 数量级)**。无人让步认错数, 全部重测收敛 = 正例。
+
+**净**: §6-3 v0.1→v0.2 使 §6-1 委员-quorum-中心化从"历史编号"变成"**当前主导、授权真金前必答的硬闸**"(24.7% 回溯 / ~86% 前瞻)——**这正是造第一个消费者反验冻结的价值兑现**。下一步 Codex 红队(MSG-251, 待 Owner 触发)主攻 §8 HTLC 及格线 + 条件式 baked/witness 绑定缝。
