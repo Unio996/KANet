@@ -9316,3 +9316,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
   - **L3 实测强化**(承重②): 垃圾签名 verifyMessage **throw** 非返 false ⇒ 「异常也拒」是必需非保险带。
 - **真实双独立复核就位**: J1(独立节点·探针 10/10)PASS + Codex 红队 MSG-246 在途(待 Owner GitHub 触发)。这是真 roster(J1+Codex+Bettor), 非本机自演。
 - **状态**: §10 设计 = J1-PASS, 待 Codex 红队回执 → Bettor 终并 → 设计闭合。**落地实现另起报备。**
+
+### (543) 2026-08-19 · 🔵 J1 收 Codex MSG-246 红队(bdd22354): 3 MUST-FIX 全认 · A 是我探针没够到的真捕获(测了绑定没测授权) · 探针补 2 条演示型实测: 两条 MUST-FIX 的承重性已量成数据
+- **收裁**: Codex 红队 §10 设计本体 = GREEN DIRECTION / **HOLD for 3 MUST-FIX**(A 本地 network 权威+跨网重放负测 / B 规范字节序列化 / C 全局 relay pubkey 的 wire 字段——六字段矛盾)+ 负测扩展(operation allowlist / legacy fallback 毒化 / A2-身份钥 vs relay-钥语义混淆 / 内外 network 一致)。**我全认, 无异议。**
+- **🔴 认账(作用域自查)**: MUST-FIX A 是我 (541) 探针没够到的**真捕获**——我负例1测的是「改字节后旧签名必红」(**签名绑定**), A 打的是「合法签名+验证方信 payload 自报 network」(**授权链**)。我判词写明了"原语层"、负例 4/5/6 标了待实现层, 无过读无需撤回; 但**捕获归 Codex**: 同一个字段我只从密码学半场量了它。判据(记): **binding 测完还有 authority 半场——"签名对不对"与"该不该信这份自报上下文"是两问。**
+- **探针追加 2 条演示型实测(scripts/j1-s10-primitive-probe.mjs, 现 10 PASS + 2 DEMO)**: ①合法 testnet 声明+按 payload 自报 network 重建字节 ⇒ `verify=TRUE`(量出: 签名层对跨网重放**零防护**, MUST-FIX A 的本地 network 权威是唯一拦点); ②`operation=rotate` 合法签名 ⇒ `verify=TRUE`(量出: 签名层不拦未知操作, verifier 硬 allowlist `operation==='register'` 承重)。两条预期 TRUE=演示洞存在, 非负测。
+- **C 的一条补充数据(我 (541) 枚举的直接推论)**: 现有六字段里 `identityPubkeyXOnly` 是 A2 身份钥(rootXpub+identityIndex 派生), **与 relay 全局钥无既定等式**——Codex 点名的"语义混淆负测"(合法 A2 钥冒充 S10 relay 身份必拒)与我负例 8 族同形, 实现层落表时两种 32B x-only 钥必须**类型级分开**, 不能靠"都是合法钥"混过。
+- **下一步**: Bettor 折 3 MUST-FIX 修订设计; 我探针的演示格在修订后可直接升级成负测(A: 加本地 network 参数后同输入必红; operation: allowlist 后 rotate 必拒)。

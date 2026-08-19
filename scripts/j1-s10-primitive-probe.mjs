@@ -87,5 +87,26 @@ t('P4 数据: 垃圾签名 ⇒ verifyMessage 返 false 还是 throw(fail-closed 
   console.log(`    [数据] 垃圾签名 ⇒ ${JSON.stringify(r)}`);
 });
 
+// ── 追加(2026-08-19 · Codex MSG-246 红队后): 两条【演示型】用例 ────────────
+// 它们不是负测(预期 verify=true), 是把"洞在授权层不在签名层"量成数据:
+// 签名本身救不了这两个场景 ⇒ MUST-FIX A(本地 network 权威)与 operation 硬 allowlist 是承重的。
+(function demos() {
+  let d = 0;
+  const demo = (name, fn) => { try { fn(); d++; console.log(`[DEMO] ${name}`); } catch (e) { console.log(`[DEMO-BROKE] ${name} — ${e.message}`); } };
+  demo('MUST-FIX A 演示: 合法 testnet 声明 + 验证方按 payload 自报 network 重建字节 ⇒ verify=TRUE(签名层放行, 只有本地 network 权威能拦)', () => {
+    // "mainnet 验证方"若信 payload.network 重建 ⇒ 与签名方字节一致 ⇒ 必然 true
+    const rebuiltFromPayload = statementBytes({ pubkey: A.xonly, epoch, network: 'testnet-12' });
+    const r = verifyMessage({ message: rebuiltFromPayload, signature: sigA, publicKey: A.xonly });
+    if (r !== true) throw new Error(`预期 true(演示洞存在), 实得 ${r}`);
+  });
+  demo('操作域演示: operation=rotate 的合法签名 ⇒ verify=TRUE(签名层不拦未知操作, verifier 硬 allowlist=承重)', () => {
+    const rotateMsg = statementBytes({ pubkey: A.xonly, epoch, operation: 'rotate' });
+    const rotateSig = signMessage({ message: rotateMsg, privateKey: A.priv });
+    const r = verifyMessage({ message: rotateMsg, signature: rotateSig, publicKey: A.xonly });
+    if (r !== true) throw new Error(`预期 true, 实得 ${r}`);
+  });
+  console.log(`== 演示 ${d}/2(预期 2/2 TRUE = 两条 MUST-FIX 承重性已量) ==`);
+})();
+
 console.log(`\n== ${pass} PASS / ${fail} FAIL ==`);
 process.exit(fail ? 1 : 0);
