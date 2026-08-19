@@ -9584,3 +9584,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **🔴 关键 ordering(J2)**: §6-3 改墙钟模式时值从 ~1e8 跳 ~1.8e12 = **跨阈值另一侧, "数字恰好小"的天然保护当场消失**; 单位口误(秒 vs 毫秒)把值打回 DAA 侧 ⇒ **阈值断言必须在改模式【之前】就位, 不是之后补**。补进 (582) 的 §6-3 deadline 冻结项。
 - **净(deployed-footgun 线闭)**: 现存 OracleStake_v1 安全(验实)· 运维监控(NWT 提议·告警异常大 lockUntilDaa)= 可选低成本纵深, 归运维域 · §6-3 = wall-clock deadline + assert-before-switch(582)。**NWT 深审价值兑现**: 从 §6-3 一个设计假设反照出现存合约裸 footgun, 且四方(J2 发现/NWT 升级现存/J2 验现存安全+ordering)收敛。
 - **§6-3 B 核心仍等 J1 (22:16) 两洞**(no-theft vs bounded-lock 决定项)。
+
+### (585) 2026-08-20 · Bettor traced 墙钟侧 call-sides = 正确 `*1000`(验实)· 现存 funds 安全 · 风险=程序性复发(bug 10d 类, 已修一次)· 校准 J2 升级
+- **验证(Bettor traced call-sides, 因 (584) 我说轻了 + J2 升级)**: 墙钟侧(Pool* / PredictionEscrow* / PredictionPool* 共 ~20 处 `deadline*1000`)的**调用侧正确 `*1000`**: `bettor.js:1899/1918` `deadlineSeconds*1000`(带注释"J1tn r303: 漏 *1000 致 kaspad DAA 模式 reject")· `pool.js:511` `BigInt(deadline)*1000n` · SS 注释 `PredictionPoolUnanimous3:105` "bug 10d fix — LOCK_TIME_THRESHOLD 500B needs ms operand"。⇒ **这个 footgun 曾是真 bug(代号 bug 10d)、已修; call-sides 现全对 ⇒ 现存部署 funds 安全(traced 验实)**。失败模式实为 **kaspad reject(tx 广播不了→funds 停原地)**, 非静默接受。
+- **🏛 校准(J2 升级方向对、严重度我下修)**: J2"两模式已在生产、墙钟靠手写 *1000"**属实**; 但 call-sides 已正确 `*1000`(验实)⇒ **非"现存裸险", 是【已修一次的 bug 类 + 程序性复发面】**(靠"记得 *1000"+注释撑, 无结构断言/单位-in-name)。⇒ 现存安全, 复发风险真但非急。
+- **处置(不变, 归运维/covenant 域·非急)**: J2/NWT 硬化建议(`deadlineSec`/`deadlineMs` 单位-in-name + 构造侧阈值断言)= 好的结构性纵深, 防 bug 10d 复发。§6-3 已 assert-before-switch (582/584)。**报 Owner 校准: 现存安全、已修 bug 类、建议结构硬化防复发。** 不阻 §6-3 B。
