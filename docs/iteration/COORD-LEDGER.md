@@ -9572,3 +9572,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **验证(Bettor 实读 `OracleStake_v1.sil:14-16`, 因本 session 栽过 grep 错故先验)**: `Kaspa LOCK_TIME_THRESHOLD = 500_000_000_000`(5e11); `tx.time < 500B → DAA score / >= 500B → ms epoch`; TN12 DAA ~5e8 远 <500B。**J2 双模 claim 全对。**
 - **timelock 机制线闭(J2+J1 收敛, 已验)**: ① J2: DAA-窗墙钟追赶期缩 6x(实测 2.75/s)且与故障恢复**同因触发**(对手掉线+窗缩同时)⇒ 不能用 DAA 窗当跨链 margin。② J1(SS 域): covenant 时间闸**默认可墙钟**。③ ⇒ **B deadline = 墙钟 ms(值 >=5e11)** + 🔴 **强制构造侧断言(墙钟须 >=5e11 / DAA 须 <5e11)** —— 因 tx.time 双模由量级选、**单位口误(秒 vs 毫秒)静默换模式 → 资金解不开、不报错、逃类型检查**(J2 footgun, "失败像合法答案"族)。改用墙钟是最易踩此 footgun 的一步 ⇒ 断言强制。finality-**深度**("A 落到 D")是另一个 depth 概念、reorg-safety 用, 与 deadline 分开。
 - **🔴 B 核心仍 OPEN**: J1 (22:16) "self-present-A 两洞"(no-theft 失败路径)**尚无全文** —— 那才是"B 落 no-theft 还是 bounded-lock"的决定项。本条只闭 timelock 机制子线。等 J1 两洞。
+
+### (583) 2026-08-20 · 🔴 独立项(非 §6-3): NWT 挖出 dual-mode timelock footgun【已部署在 OracleStake_v1、锁着真 stake】· 校准: 现存基金 forward-risk 非 at-risk-now
+- **NWT (22:28) 独立核 + 升级**: J2 的 dual-mode(阈值 5e11)逐字对上; 且**同一洞已部署在 `OracleStake_v1`(真 stake、跨节点扫链派生 P2SH 池), 无代码强制、只靠注释 + "今天 DAA ~5e8 << 5e11" 撑**。ctor 手滑传 ms epoch(或极远未来 DAA 涨到 5e11)→ 静默换模式 → `timeout_unlock` 提前解锁/锁死、不报错不回滚。
+- **🏛 Bettor 校准(不夸大)**: 严重度 = **forward-construction-risk + 极远未来**, **非"现存基金此刻在险"** —— 前提: 已部署实例的 `lockUntilDaa` 都已是 DAA 值(<5e11)。⚠ **该前提需一次快查证**(扫已部署 OracleStake_v1 实例的 lockUntilDaa 是否全 <5e11), 未查前只能说"appear safe 待验"。
+- **处置(独立于 §6-3)**: ①**低成本快查**: 核已部署实例 lockUntilDaa 全 <5e11(证现存基金安全)②**运维监控**(NWT 提议): 告警任何异常大 lockUntilDaa 值 ③§6-3 及未来新合约: J2 建议(显式模式 + 构造侧阈值断言)已入 (582)。①②归运维/covenant 域, ②③的实装涉 money-path ⇒ 报 Owner 定风险接受。
+- **上报 Owner**: 校准报(见下)。**这是 NWT 深审的价值: 从 §6-3 一个设计假设, 反向照出一个现存部署合约的裸 footgun。** 但独立于 §6-3 主线, 不阻 B。
