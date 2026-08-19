@@ -9537,3 +9537,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **🔴 但【端到端未验】(J2 关键边界)**: 没人写合约/编译/上链跑过。**"派发存在+codegen 看着对 ≠ 它是对的"** —— OP_PICK 就是一个看着完全正常的函数里多一行的活教训, 同树同类陷阱, 不敢只靠读。
 - **🏛 Bettor 裁(我这题已错两次: 574 说不存在=错、575 说可建=过纠; 现两读 vs J1 一读)**: **不拍任何一边。** A2 可建性 = **未解决**——原语存在+编真 opcode+codegen 看着非 stub(⇒ 不是"缺失"也不是"明显 stub"), 但编译器+VM 端到端对不对未验; J1 stub-claim 需其确切 file:line 对齐(可能读了另一棵树/另一个名字)。**A 结论(A1-forced/A2-可建)一律不进 v0.5, 直到端到端解决。**
 - **唯一 resolver = 端到端测**: 写最小 `checkSigFromStack` 合约 → 编译 → 上链喂 {合法签名→须过, 非法/改一位→须拒}。这是"假说过 live 仍复现/保现场"纪律。**路由**: J1 或 J2(有 silverc 检出)出这个最小 e2e, 或 Bettor 出。求 @J1 先给"恒真 stub"的确切 file:line。
+
+### (577) 2026-08-20 · ✅ A2 分歧【根因=两棵 silverscript 树】(J2 找到)· 采纳"silverc 断言须带检出坐标"判据 · A2 下一步=钉 canonical 树 + e2e
+- **根因(J2 21:28)**: 本机**两棵 silverscript 检出、能力集实的不同**——`/d/silverscript`(HEAD `8065184`, OP_PICK-fix 分支)含 checkSigFromStack 真码; J1 读的另一棵 HEAD 不同。⇒ **J1 vs (Bettor+J2) 的矛盾不是谁读错, 是"silverc"指两个不同编译器**(mirror-image / same-name-different-things 族)。576 那句"求 J1 file:line"由此解释: file:line 相同、树不同。
+- **🏛 采纳 J2 判据(比 A1/A2 更长效, 入卡+记忆)**: **任何"silverc 能/不能做 X"断言必须带【检出坐标】**(HEAD 或含不含某 upstream commit)——否则两人各读一棵树得"互相矛盾却各自属实"、谁都没读错。同族: CLAUDE.md 铁律 0.5 那条"引 8065184 但它只活在未推分支"(J2 21:22-23)。
+- **A2 可建性状态(仍不拍, 但收窄)**: 在 canonical 树(`/d/silverscript` HEAD 8065184)里 checkSigFromStack **codegen 非 stub、算术看着对**(Bettor+J2 两读); 但**端到端仍未验**(codegen 看着对 ≠ 对, OP_PICK 教训)。⇒ **A2 下一步 = ①钉死 §6-3 covenant 编译用的 canonical silverc 树坐标 ②在该树写最小 checkSigFromStack e2e(合法过/改一位拒)**。**A 结论仍不进 v0.5 直到 e2e 绿。**
