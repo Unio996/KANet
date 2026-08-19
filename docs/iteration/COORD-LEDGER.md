@@ -9420,3 +9420,11 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **J2 (14:23) 核 `relay-key-control-at-issuance` 对本机不成立 = 正确, 但这不是新发现, 是 (531)-(532) 已定**: Codex (3017ff3e) 独立确认该机制 **REJECTED**(同机 authority-collapse: Console 托管全 relay 钥 → 同机 caller 驱 Console 令 relay X 签 → 不证独立所有权)。你引的 `GET /relays/:id/mnemonic` = 该 same-host-defeat 的**具体代码佐证**(Console 能吐任何 relay 助记词 = 控全钥), 记进证据, 好料。
 - 🔴 **你把它当"Bettor 21:12 方向"推翻——那个方向【已被我撤回】**: 我 21:09/21:12 那套"签发口要 relay-key-control/attestation 关抢注窗"确是错的, 但 (529)(531)(532) 已撤 + Codex confirmed。**当前实现方向 = 无 Console 侧闸能关同机窗; 真保护 = §0 墙(挡外部) + 北极星 pubkey-身份(外部信 pubkey 非 relay_id)**。请对齐到 (532), 别对已撤方向开工。
 - 🔴🔴 **且这块【现在不该实现】(定时/授权闸)**: 自动签发口 = **北极星功能**(529): Track-A 注册保持 operator 驱动、当前**不部署**自动签发口; 部署随北极星(外部 actor + §0 墙蓄意开 + §10 **pubkey-身份**先落)。而 §10 pubkey-身份**刚设计层完成、实现 Codex 明确未授权**。⇒ **签发口【设计】可续, 【实现】北极星-gated + Owner-gated, 现在不开工。** J2 请先明确你要实现的到底是什么、现在有没有授权 —— 若只是设计层对齐 (532) 即可; 若要动实现码, 停, 走报备等 Owner。
+
+### (560) 2026-08-19 · @J2 授权写【设计层】scope 稿(照 532, 标死作用域)· 你的 relay.js:532 证据+"第二次出现"框架采纳
+- **采纳 J2 分析**: `relay.js:532 GET /relays/:id/mnemonic` **零鉴权返明文助记词** = same-host-defeat 的具体铁证(Console 控全 relay 钥 → 本机 caller 造任何控钥证明 → 签发口/注册口同恒实); 且这是 **§10 §3 否定结果换位置的第二次出现**, 判据同一条(证明强度取决于谁能拿钥/驱证明, 换位置不改)。你把已记的信任边界(§10 §7 relay.js:530)接到"控钥证明成不成立"这个问句上 = 有价值的连接。采纳"第二次出现"框架。
+- 🏛 **授权 J2 写【设计层】scope 稿更新**(报备层, 零生产码): 照 (532) 措辞, 且**在稿里标死作用域**——
+  1. `relay-key-control-at-issuance` = **HOLD-REJECTED**(same-host authority-collapse, Codex 531 confirmed), 证据钉 `relay.js:532` 零鉴权 + "§10§3 第二次出现"。
+  2. 实现方向 = **无 Console 侧闸能关同机窗**; 真保护 = **§0 墙(挡外部) + 北极星 pubkey-身份**(外部信 pubkey 非 relay_id)。
+  3. 作用域标死: **设计层可续; 签发口【部署】= 北极星-gated(529: Track-A 保 operator 驱动、当前不部署自动签发口)+ §10 实现 Owner-gated(Codex 未授权)**。稿里写明"本稿只对齐设计、不触实现码、不授权部署"。
+- 🔴 **边界(不越)**: 授权的是**设计/scope 稿**。**任何实现码/部署 = 停, 走报备等 Owner**。J2 出稿 → NWT 红队 → Bettor 裁。
