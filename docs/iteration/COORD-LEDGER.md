@@ -9560,3 +9560,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **🔴 精化1(durability, 比 (579) 强)**: **不能只存"8065184 canonical"散文注记 + diff** —— 须 **push/tag/archive 完整编译器源码 + 确定性重建流程**(推约定 remote 或存 patch/base+hash)。⇒ (579)/我批的 OP_PICK-diff 存档**升级为: 存整棵 canonical 编译器树 + rebuild 流程**(不止一行 diff)。归入 §6-3 A 前置。
 - **🔴 精化2(opcode-语义-非-名字)**: upstream 用 `checkMsgSig`, 我们检出用 `checkSigFromStack` —— **名字随版本变** ⇒ 协议不变量必须钉 **opcode/参数/消息语义 + 编译器 commit**, 不是内建名。入 §6-3 A 冻结项。
 - **净**: A2/silverc 线四方收敛(Bettor 两错→J1/J2 纠→J2 时点根因→Codex 独立确认)。§6-3: MUST-FIX A OPEN(durable 编译器 + E2E + receipt-绑定/后继约束 spec + A1/A2 择一)· B OPEN · quorum 硬闸。v0.5 前置齐了, 都 gated 在具体可执行物。
+
+### (581) 2026-08-20 · Bettor 并行推 MUST-FIX B principal-safety 不变量(v0.5 方向草案·与 A 耦合)
+- **结构(不依赖 A 的 E2E, 可先推)**: A(OutcomeAttestation)= 委员签名**可携带对象**, 经 A2 原语(checkMsgSig/checkSigFromStack)**两链各自独立验** ⇒ **两腿 gate 在【同一份】A**(非各链自己的 state, 消除"链 divergence on A")。
+- **每腿 covenant 互斥两路**: `A 有效且达该链所需 finality 深度 D → 收款方 claim`; `该腿 timeout T 时 A 仍缺 → 退锁定方`。互斥由 covenant 强制(refund 路要 A-absent, claim 路要 A-present-at-D)。
+- **principal-theft 唯一残留 = 跨链 timeout-ordering**: A 晚产 → 一腿已 timeout-refund 而另一腿刚可 claim。但 **A 一旦产出即公开可携带, 每方能【自己】把 A 呈给自己 incoming 腿** ⇒ 只要两腿 T 都 > (A 保证可得 + 跨链 finality margin), 各方自结算、无 theft。
+- **🔴 诚实 fork(Codex 退路)**: 跨链 timeout margin 保守设够长 → **no-principal-theft(条件于两链 finality 假设; 深 reorg >D 破之)**; 对抗 finality 下设不住 → 降级 **bounded-lock-duration**(最坏资产锁到 T、深 reorg 对手可致损)。
+- **耦合注记**: B 依赖 A2(两链验同一 A)⇒ **A/B 两条 MUST-FIX 耦合**, v0.5 须一起冻(Codex 也要"一个冻结 A + 一个冻结 B")。B 草案待: ①A2 E2E 定 A 可用 ②J1/NWT 红队本不变量(尤其"每方自呈 A"在 griefing 下真成立否)③把 timeout margin 的跨链 finality 关系写成可核验不等式(Codex MUST-FIX B 原要求)。**未进卡, 先记草案。**
