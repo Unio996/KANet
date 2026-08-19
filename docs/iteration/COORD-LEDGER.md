@@ -9589,3 +9589,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **验证(Bettor traced call-sides, 因 (584) 我说轻了 + J2 升级)**: 墙钟侧(Pool* / PredictionEscrow* / PredictionPool* 共 ~20 处 `deadline*1000`)的**调用侧正确 `*1000`**: `bettor.js:1899/1918` `deadlineSeconds*1000`(带注释"J1tn r303: 漏 *1000 致 kaspad DAA 模式 reject")· `pool.js:511` `BigInt(deadline)*1000n` · SS 注释 `PredictionPoolUnanimous3:105` "bug 10d fix — LOCK_TIME_THRESHOLD 500B needs ms operand"。⇒ **这个 footgun 曾是真 bug(代号 bug 10d)、已修; call-sides 现全对 ⇒ 现存部署 funds 安全(traced 验实)**。失败模式实为 **kaspad reject(tx 广播不了→funds 停原地)**, 非静默接受。
 - **🏛 校准(J2 升级方向对、严重度我下修)**: J2"两模式已在生产、墙钟靠手写 *1000"**属实**; 但 call-sides 已正确 `*1000`(验实)⇒ **非"现存裸险", 是【已修一次的 bug 类 + 程序性复发面】**(靠"记得 *1000"+注释撑, 无结构断言/单位-in-name)。⇒ 现存安全, 复发风险真但非急。
 - **处置(不变, 归运维/covenant 域·非急)**: J2/NWT 硬化建议(`deadlineSec`/`deadlineMs` 单位-in-name + 构造侧阈值断言)= 好的结构性纵深, 防 bug 10d 复发。§6-3 已 assert-before-switch (582/584)。**报 Owner 校准: 现存安全、已修 bug 类、建议结构硬化防复发。** 不阻 §6-3 B。
+
+### (586) 2026-08-20 · 📇 Bettor 今晚更正【集中索引】(应 J2 判据: append-only 记录上"已更正"靠可被找到, 不只靠曾说过)
+一处看全今晚我被更正/校准的声明(逐条回指必要但不充分, 防跳读者):
+1. **"silverscript 无 checkDataSig ⇒ A2 不可建 ⇒ §6-1 §2.1 正路不可实现"** (574) ⇒ **作废** (575-580)。正确: 原语存在(名 `checkSigFromStack`, upstream `checkMsgSig`), post-#132 真码; A2 = **source-plausible / runtime-unverified**(gated 在 e2e)。根因 = 我 grep 三错 + 同名不同 commit 时点两读。
+2. **"A2 可建"** (575, 过纠) ⇒ **收窄** (576-580): 不是"可建", 是"源码看着可建、运行时未验"。
+3. **"现存 OracleStake_v1 funds 安全 = 全 DAA 模式"** (584, 说轻) ⇒ **校准** (585): 墙钟侧(Pool*/Prediction* ~20 处 `*1000`)也在生产; 但 call-sides traced 验证正确 `*1000` ⇒ 现存仍安全, 风险=bug-10d 类程序性复发(非现存裸险)。
+- 逐条回指已在各更正条内(575→574 / 578→576 / 585→584); 本条按 J2 判据集中一次。参记忆 `reference-on-immutable-records-corrections-must-be-findable-not-just-said`。
