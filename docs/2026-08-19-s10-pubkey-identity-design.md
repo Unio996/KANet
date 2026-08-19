@@ -46,10 +46,24 @@
 字段集（**语义**，非序列化）：`{ domain, version, network, relayPubkeyXOnly, operation, epoch }`。
 被签字节外形：`KANET-U1-IDENTITY-v1|<network>|<hex(hash(canonical_bytes))>`。
 
-🔴🔴 **MUST-FIX B（Codex MSG-246）——冻结的是【字节】不是【JS 对象意图】**：`JSON.stringify({...})` 只对"这一段 JS 构造"确定；§10 是**跨节点/跨实现**协议身份，"对象字段按这个序"**不是语言无关的字节规范**。⇒ 落地前**二选一并写死**：
-- (a) 规范冻结**确切的 UTF-8 字节文法**：字段顺序、分隔符、转义、数字表示、无多余空白 —— 逐字节定义；**或**（首选）
-- (b) 定义**长度前缀 / canonical 序列化**（如 `len‖field` 串接），对**那串字节** hash。
-安全前缀 `KANET-U1-IDENTITY-v1|` 本身没问题；本条治的是**跨实现确定性**——别让"实现漂移"变成"验证分岔"。**在 (a)/(b) 冻结前，本设计的 L2 未达闭合。**
+🔴🔴 **MUST-FIX B —— canonical 字节【已在设计层冻结】（Codex MSG-247 裁：(a)/(b) 选择本身是协议设计、不得留给实现）**：
+
+选 **(b) 长度前缀串接**（消除 JSON 转义/字段序/空白歧义，跨语言最省心）。**v1 canonical 字节 = 按固定顺序对 6 个字段各 `u32be(len) ‖ utf8(value)` 串接**：
+
+| 序 | 字段 | 值域（全 ASCII，UTF-8 编码无歧义） |
+|---|---|---|
+| 1 | `domain` | 定值 `"KANET-U1-IDENTITY"` |
+| 2 | `version` | 定值 `"1"`（ASCII 十进制、无前导零） |
+| 3 | `network` | 闭枚举 `"testnet-12"` \| `"mainnet"`（**验证时取本地权威值**，见 MUST-FIX A） |
+| 4 | `relayPubkeyXOnly` | 恰 64 位**小写** hex |
+| 5 | `operation` | 闭枚举，v1 仅 `"register"`（见下 operation 白名单） |
+| 6 | `epoch` | 一次性 challenge 串（见下 epoch 冻结） |
+
+- `u32be(len)` = 该字段 UTF-8 字节长度的 4 字节大端。**被签字节（传给 `signMessage`/`verifyMessage` 的 message）** = `"KANET-U1-IDENTITY-v1|" ‖ <network> ‖ "|" ‖ lowerhex(sha256(canonical_bytes))`。
+- **golden vectors 从本规范可导**：实现方各自算出的 canonical_bytes/sha256 必须逐字节一致，任一实现选了别的编码即不符合 v1。
+- 🔵 变动 canonical 编码 = 变协议 ⇒ **必须 bump `domain`/`version`**（老签名天然落在旧域，不跨版本冒充）。
+
+🟢 **epoch 语义【已冻结】（Codex MSG-247：challenge vs nonce 是不同重放协议、进 canonical 字节、须设计层定）**：**v1 = challenge-based**，`epoch` = 已评审的**持久 challenge**（CAS + 同事务消费，③ 已落，现稿 §5 P3）。**nonce 型留给未来版本**（要用则 bump version → 不同签名域 + 另设计单调性/持久化权威，本份不做）。
 
 🔴🔴 **MUST-FIX A（Codex MSG-246）——本地 network 是权威，不是 payload 的 network**：现负测 §6-1 是"签后改 network"（正确地验签失败）；但更危险的是——签名方产一条 `network="testnet-12"` 的**完全合法**声明，原样送到 mainnet 验证方，验证方**用 payload 自带的 network** 重建消息 ⇒ **验签成功**、跨网重放成立。⇒ **要求**：验证方构造/验证消息用的 network 必须来自**唯一权威的本地配置**；验签前**独立校验 `payload.network === 本地配置 network`，不等即 fail-closed 拒**。若外层明文 network 与 canonical.network 冗余保留，**两者必须派生自同一个权威值，绝不接受两个调用方给的 network**。J1 (543) 实测确认：payload-network 重建**验签=TRUE** ⇒ 本条 load-bearing。（负测见 §6-9。）
 
@@ -79,10 +93,14 @@
 
 ## §4 数据面（落地时用，本份不改表）
 
-🔴🔴 **MUST-FIX C 信封抉择（Codex MSG-246·落地前必二选一并写死）**：既有 U1 六字段（`relayId/rootXpub/identityIndex/identityPubkeyXOnly/challenge/signature`）里**没有承载 relay 全局身份钥的字段**（`identityPubkeyXOnly` 是 A2 钥、语义不同）。⇒ §10 五环链现写法**缺一个明确的线上字段**。落地前择一：
-1. **§10 = 独立协议信封**，带显式 canonical 字段 `relayPubkeyXOnly`，与既有六字段 A2 提交**相互独立**（首选：语义清、不动 A2）；**或**
-2. 既有 U1 提交**加版本 + 新增显式 relay-global-pubkey 字段**。
-🔴 **禁**静默复用 `identityPubkeyXOnly`，除非设计显式证明 `A2 身份钥 == relay 全局身份钥`（现码语义**不成立此不变式**）。
+🔴🔴 **MUST-FIX C —— 信封形状【已在设计层冻结】（Codex MSG-247 裁：形状是 wire-protocol 设计、不得留给实现；Codex 推荐 = 本设计原偏好）**：**选【独立 S10 协议信封】**。既有 U1 六字段（`relayId/rootXpub/identityIndex/identityPubkeyXOnly/challenge/signature`）里 `identityPubkeyXOnly` 是 A2 钥、语义不同，**没有承载 relay 全局身份钥的字段**，且无 `A2 身份钥 == relay 全局身份钥` 不变式。
+
+**冻结的 §10 信封（与 A2 六字段提交相互独立、互不改）**，字段：
+```
+{ domain, version, network, relayPubkeyXOnly, operation, epoch, signature }
+```
+`signature` = relay 私钥对 L2 被签字节的签名；其余 6 个即 L2 canonical 字段。**这条不动既已评审的 A2/U1 六字段语义**，也**防**兼容期把 relay 全局身份误当 A2 身份重解读。
+🔴 **禁**静默复用 `identityPubkeyXOnly` 作 §10 身份（现码不成立 A2==relay-global 不变式）。选项 2（给 U1 提交加版本+新字段）**不采纳**。
 
 - 身份注册若落表，用**专用身份表**（主键 = canonical `relayPubkeyXOnly`），**不挂** `relay_nodes.ecdsa_pubkey_xonly`、**不按 relay_id 回退**。
 - 服务端派生值（若有 fingerprint 类）**函数内部派生、不从参数收**（现稿 §4.2 陷阱：`buildPopPayload` 把 rootFingerprint 收作参数、不强制派生 ⇒ 下一个调用方能递提交方的值进去而无人喊 → 落地时在函数内派生）。
@@ -100,7 +118,7 @@
 | P5 | 身份权威**只在**专用 pubkey 表，`ecdsa_pubkey_xonly`/`relay_id` 仅缓存不回退 | 复用旧列/relay_id 回退 ⇒ 背 SS-oracle 语义 + 跨节点填充不一 ⇒ 误判/绕过 | Codex 点2/7 + J1② 均确认；设计如此 |
 | P6 | canonical 只有 pubkey 一种串（address 仅派生缓存） | 同钥两身份串 ⇒ 别名/绕唯一性 | 设计如此（§3 L1）；实现须校验 address↔pubkey 派生一致 |
 | P7 | **network 权威来自本地配置**，验签前独立校验 `payload.network == 本地`，外/内 network 同源 | payload 自报 network ⇒ 跨网重放（签名合法照样过） | 🔴 MUST-FIX A（Codex）；J1 (543) 实测 payload-network 重建验签=TRUE |
-| P8 | L2 被签**字节**跨语言冻结（确切 UTF-8 文法 或 长度前缀 canonical 序列化） | "对象字段序"非语言无关 ⇒ 跨实现漂移变验证分岔 | 🔴 MUST-FIX B（Codex）；(a)/(b) 未冻结前 L2 未闭合 |
+| P8 | L2 被签**字节**跨语言冻结 = **(b) 长度前缀串接**（6 字段 `u32be(len)‖utf8` 固定序），变编码须 bump domain/version | "对象字段序"非语言无关 ⇒ 跨实现漂移变验证分岔 | ✅ MUST-FIX B **已冻结**（Codex MSG-247 要求设计层定，已选 (b)） |
 | P9 | 验证方**硬白名单** `operation === "register"`，非此即拒（即使签名合法） | 未知 operation 被当 register 处理 ⇒ 预留域退化成别名 | 🔴 Codex 点6；J1 (543) 实测签名 rotate 验签=TRUE |
 
 ## §6 预注册验收判据（实现时用，事后不加项 —— Codex 负测要求 + 本设计补充）
@@ -132,13 +150,15 @@ Codex 明令：**改 network/domain/version/pubkey 或以本地 relay_id 替换 
 
 ## §8 状态与交接（真实 roster）
 
-**当前状态（2026-08-19）= GREEN DIRECTION，本稿处置 Codex REDTEAM HOLD 的 3 条 MUST-FIX：**
-- **A** 本地 network 权威 + 跨网重放负测 → L2 MUST-FIX A + P7 + §6-9/13。
-- **B** 冻结跨语言 canonical 字节序列化 → L2 MUST-FIX B + P8（**落地择 (a)/(b) 并写死才算 L2 闭合**）。
-- **C** 显式 relay-global-pubkey 线上字段（解六字段矛盾）→ L1/§4 MUST-FIX C + P9(operation) + §6-10/11/12。
+**当前状态（2026-08-19）= 三条 MUST-FIX + 两项设计选择【全部设计层冻结】，待 Codex 终确认：**
+- **A 本地 network 权威**：**CLOSED AT DESIGN LAYER**（Codex MSG-247 明确）→ L2 MUST-FIX A + P7 + §6-9/13。
+- **B canonical 字节冻结**：Codex MSG-247 裁"(a)/(b) 是协议设计、须设计层定" ⇒ **已选 (b) 长度前缀串接并逐字段冻结**（L2 表 + P8）；golden vectors 可导。
+- **C 信封形状**：Codex MSG-247 裁"形状是 wire-protocol 设计、须设计层选" ⇒ **已选独立 S10 信封**（§4，Codex 推荐 = 本设计原偏好）；选项 2 不采纳。
+- **epoch 重放**：Codex MSG-247 新提"challenge vs nonce 须设计层定" ⇒ **已冻结 v1 = challenge-based**（复用已评审持久 challenge CAS），nonce 留未来版本。
 - 另并入 Codex：L2 collision 措辞收敛、L4 反 legacy-fallback、P4 concept 更正（relay 可达性与身份验证无关）。
+- **仍 OPEN（明列，不假装闭）**：rotate/revoke 连续性（out-of-scope，未来版本另设 state-transition + 继承证明）。
 
 **复核路径**:
-- **Codex（bridge）**：**复确认 3 条 MUST-FIX 是否达闭合**（尤其 B 的字节冻结二选一是否需在本设计层就定死 (a) 或 (b)、还是可留落地层）。已发 MSG-247。
-- **J1（独立节点，git）**：已 (541)(543) 二审 PASS + 探针 10/10 + 2 DEMO；后续跨节点负例（#9-13）落**实现层**验（设计层无可执行物，不冒充测过）。
-- **Bettor**：本稿并入 J1+Codex 两轮意见并裁。**落地实现另起报备**，不在本设计里动生产码。
+- **Codex（bridge）**：已发 **MSG-248** 请终确认 B/C/epoch 三项冻结是否达设计层闭合。
+- **J1（独立节点，git）**：(541)(543)(545) 二审 PASS + 核并入忠实 + 探针 10/10 + 2 DEMO；设计层席位无 open item。跨节点负例（#9-13）落**实现层**验。
+- **Bettor**：本稿并入 J1+Codex 三轮意见并拍三项设计选择。**落地实现另起报备**，不在本设计里动生产码。

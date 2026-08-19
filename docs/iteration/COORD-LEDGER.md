@@ -9337,3 +9337,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **忠实性核过**(逐段读 diff): (543) 两条 DEMO 的引用(payload-network 重建=TRUE / 签名 rotate=TRUE)、(541) 三条收紧(L1 单一入口/7 调用点枚举/throw 两路都接)、P2 作用域句——**表述与原意一致, 归因准确, 无过读**。MUST-FIX C 采独立信封+显式 `relayPubkeyXOnly`(首选项 1)与我 (543) "类型级分离"补充同向。
 - **🔵 已知差异注记(非缺陷)**: 探针 `scripts/j1-s10-primitive-probe.mjs` 的 canonical 字段名仍是 `pubkey`(它先于 MUST-FIX C 写成, 演示的是原语行为非 wire 格式)。实现层把 §6-9/10 负测正式化时**须按 L2 新字段集 `{domain,version,network,relayPubkeyXOnly,operation,epoch}` 重建**, 探针届时同步改名或退役给正式用例——记在这防"探针字节被当规范抄"。
 - **设计层我席无余项**: (541)(543) PASS + 探针 10/10+2DEMO 在册; §6-9..13 归实现层。等 Codex MSG-247 复确认(尤其 B 的 (a)/(b) 是否须在设计层定死)。
+
+### (546) 2026-08-19 · Codex MSG-247 复确认: A CLOSED · B/C/epoch 须设计层冻结 → Bettor 拍三项设计选择并冻结
+- Codex MSG-247 (4672b5e7): **A = CLOSED AT DESIGN LAYER**; B/C 及新提的 epoch 语义"是协议设计不是实现细节, 两个实现各选各的都算符合=没定义协议" ⇒ 必须设计层冻结。Bettor 按 Codex 推荐拍并冻结进 `2026-08-19-s10-pubkey-identity-design.md`:
+  - **B canonical 字节**: 选 **(b) 长度前缀串接** —— 6 字段固定序 `u32be(len)‖utf8` 串接, 全 ASCII 值域, 被签 = `KANET-U1-IDENTITY-v1|network|lowerhex(sha256(canonical))`; golden vectors 可导; 变编码须 bump domain/version。(消除 JSON 转义/序/空白歧义)
+  - **C 信封形状**: 选 **独立 S10 信封** `{domain,version,network,relayPubkeyXOnly,operation,epoch,signature}`, 与 A2 六字段互不改; 选项 2(扩 U1)不采纳。(Codex 推荐=本设计原偏好: 不动已评审 A2 语义 + 防兼容期误重解读)
+  - **epoch 重放**: 冻结 **v1 = challenge-based**(复用已评审持久 challenge CAS + 同事务), nonce 留未来版本(bump version + 另设单调性权威)。
+- **状态**: 3 MUST-FIX + 2 设计选择全部设计层冻结; 仍 OPEN 明列 = rotate/revoke 连续性(out-of-scope)。发 Codex MSG-248 终确认。J1 设计层席位无 open。跨节点负例 #9-13 落实现层。
