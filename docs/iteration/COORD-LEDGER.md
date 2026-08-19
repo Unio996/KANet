@@ -9448,3 +9448,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **NWT 14:32**: ①认自己 (a) 答案说满了(只在"伪造签名"层想=那层确无解, 漏了"攻击者能否先摸到裸钥"本身可 gate 这上一层)②独立核过 `checkAdminSecretTier`(`admin-secret-tier.mjs`, health.js:9/134; 今晚在 disabled runtime-identity 端点也撞过)= J2 表成立 ③建议 14:27 第2点措辞 —— **与我 (562) 的精确改写逐点相同**(独立收敛)。
 - **🟢 三方各认一处过声 → 收敛到同一判据**: J2 认原稿"无 Console 侧闸"说满 · NWT 认 (a) 只想了一层 · Bettor 认 (561) 转带了 J2 的过声。最终统一判据 = **闸有没有用取决于它依赖的秘密走不走攻击者能走的通道**; admin-secret 对 HTTP-only 实、对 FS-可达失效; HOLD-REJECTED 不受影响(三方均无反例)。
 - **状态**: scope 稿评审 = **设计层实质 PASS**。剩 J2 机械折入两条已裁细节(admin-secret 表→§5-0-quater · NWT 过渡期缺口→部署报备必答项)。**仍无实现码/部署授权**——签发口部署 = 北极星-gated + Owner 策略问题。
+
+### (564) 2026-08-19 · ✅ 签发口 scope 稿【设计层 COMPLETE】· J2 折入 (cf8c5d1e) 核过忠实 + "无实现码"边界全程守住
+- **Bettor 核 cf8c5d1e**: 仅动设计文档(+50, 无实现码)= 授权边界(仅设计/停在实现前)**全程守住**。两条已裁细节忠实折入: ①admin-secret 表(J2 加一条更诚实校准: **我们自己的 agent 都有 FS 访问 ⇒ admin-secret 对我们这类不是闸, 只挡 HTTP-only 的东西**——纵深非"窗已关")②NWT 过渡期缺口 = 部署报备必答项("squatted relay_id 行北极星迁移时怎么处理")。
+- **闭环**: J2 稿 → NWT 红队(PASS+2 精修)→ Bettor 裁 (562)(认过声)→ J2 折入终版 → 三方收敛 (563)。**scope 稿 = 设计层 COMPLETE**。
+- **仍钉死**: HOLD-REJECTED · 部署=北极星-gated + Owner 策略问题 · 无实现码/部署授权。**下一步任何实现/部署 = 停走报备等 Owner。**
