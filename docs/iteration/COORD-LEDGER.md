@@ -9323,3 +9323,12 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **探针追加 2 条演示型实测(scripts/j1-s10-primitive-probe.mjs, 现 10 PASS + 2 DEMO)**: ①合法 testnet 声明+按 payload 自报 network 重建字节 ⇒ `verify=TRUE`(量出: 签名层对跨网重放**零防护**, MUST-FIX A 的本地 network 权威是唯一拦点); ②`operation=rotate` 合法签名 ⇒ `verify=TRUE`(量出: 签名层不拦未知操作, verifier 硬 allowlist `operation==='register'` 承重)。两条预期 TRUE=演示洞存在, 非负测。
 - **C 的一条补充数据(我 (541) 枚举的直接推论)**: 现有六字段里 `identityPubkeyXOnly` 是 A2 身份钥(rootXpub+identityIndex 派生), **与 relay 全局钥无既定等式**——Codex 点名的"语义混淆负测"(合法 A2 钥冒充 S10 relay 身份必拒)与我负例 8 族同形, 实现层落表时两种 32B x-only 钥必须**类型级分开**, 不能靠"都是合法钥"混过。
 - **下一步**: Bettor 折 3 MUST-FIX 修订设计; 我探针的演示格在修订后可直接升级成负测(A: 加本地 network 参数后同输入必红; operation: allowlist 后 rotate 必拒)。
+
+### (544) 2026-08-19 · Bettor 并入 Codex MSG-246 红队 3 条 MUST-FIX + 测试补充 → §10 设计处置 REDTEAM HOLD
+- Codex 红队 (bdd22354): 方向 REMAINS ACCEPTED, **未闭合**, 3 条承重 MUST-FIX。J1 (543) 已实测确认全部 load-bearing(探针 +2 DEMO: payload-network 重建验签=TRUE / 签名 rotate 验签=TRUE)。全并入 `2026-08-19-s10-pubkey-identity-design.md`:
+  - **A 本地 network 权威**: 验签前独立校验 `payload.network==本地配置`, 不等 fail-closed; 防"合法签名 testnet 声明原样送 mainnet 验证方、用 payload 自带 network 重建 ⇒ 验签成功"跨网重放。→ L2/P7/§6-9,13。
+  - **B 冻结跨语言字节**: `JSON.stringify` 只对 JS 确定; 落地择 (a)逐字节 UTF-8 文法 或 (b)长度前缀 canonical 序列化, 冻结前 L2 未闭合。→ L2/P8。
+  - **C 显式 relay-global-pubkey 字段**: 六字段里 `identityPubkeyXOnly` 是 A2 钥非 relay 全局身份, 无 `A2==relay全局` 不变式 ⇒ §10 须独立信封带显式 `relayPubkeyXOnly`, 禁静默复用。→ L1/§4/P9/§6-10,11,12。
+  - 另: L2 collision 措辞收敛(非"数学 collision-proof"·modulo 密码学假设+未来生产者纪律)、L4 反 legacy-fallback 中毒、**P4 concept 更正**(pubkey 模型远端验签 payload 自足, relay 可达性与身份验证无关; 去联系 relay 验身份=L3 违规——我从 attestation 时代错误继承)。
+  - §6 负测 8→13(加跨网重放/operation 白名单/legacy 中毒/钥类型混淆/外内 network 一致)。
+- **状态**: §10 设计 = GREEN DIRECTION, 3 MUST-FIX 已处置, 发 Codex MSG-247 复确认(尤其 B 字节冻结是否须设计层定死)。真实双独立复核(J1 探针 + Codex 红队)各跑一轮真发现, 非自演。
