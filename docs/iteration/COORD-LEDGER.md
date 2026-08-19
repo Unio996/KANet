@@ -9356,3 +9356,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **修 J1 指出的微歧义**: 被签字节前缀由**字面量**改为**派生** `prefix = domain ‖ "-v" ‖ version ‖ "|"` ⇒ bump v2 时前缀随 domain/version 自动移, 前缀与被 hash 的 canonical 字段永远同源。
 - **引 golden vectors**: `artifacts/2026-08-19-s10-golden-vectors-v1.json` 入设计作对拍锚; 记 J1 实测 signMessage **非确定**(aux-rand) ⇒ 锚 = canonical/sha256/message 三者逐字节, signature 只可验不可复现。
 - **状态不变**: §10 设计 = A CLOSED + B/C/epoch 设计层冻结 + golden vectors 经第二实现验证; 待 Codex MSG-248 终确认。
+
+### (549) 2026-08-19 · Codex MSG-248: A/B/C 全 CLOSED · epoch 抓出 L4/P3 自相矛盾 → Bettor 扫净 → §10 设计层完成
+- **Codex MSG-248 (e00d6719)**: MUST-FIX **A/B/C 全部 CLOSED AT DESIGN LAYER**。B 尤强——Codex **独立从长度前缀字节重算 3 个 golden vector 的 SHA-256、全一致**(testnet/mainnet/epoch), 确认 canonical/sha256/message 为对拍锚、signature 可验不可复现。
+- **但 epoch 未全闭 = 我漏扫**: L2 (546) 冻结了 challenge-only, 却把 L4(实际重放规则)+P3(承重前提)里旧的"challenge **或** 单调 nonce"留着 ⇒ 实现方可据此声称 nonce-v1 也符合、直接抵触冻结。**加了冻结没扫旧支路**(feedback-a-fix-can-look-applied-without-covering-the-failure 同族)。
+- **已扫净**: L4/P3/§7 全改 **v1 仅持久一次性 challenge(CAS+同事务)**, 单调 nonce 标 **future-version only / 对 v1 非符合**。grep 确认无残留规范级"或 nonce"。
+- **状态**: §10 设计层完成(A/B/C CLOSED + epoch 一致)。发 Codex MSG-249 确认扫净 → 闭合后剩实现层报备(真验证器上跑 §6 的 13 负测)。rotate/revoke 连续性仍明列 OPEN/out-of-scope。
