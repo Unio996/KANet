@@ -9554,3 +9554,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **⇒ §6-3 canonical 编译树 = 钉死 `8065184`(不"更新到上游")**; 我 (approve J2) 批的 **OP_PICK-diff 存档由此升为承重**(canonical 树若丢, 靠它重装)。这与 CLAUDE.md 铁律 0.5 完全同源, 且现在有了具体消费方(§6-3 A2 编译)。
 - **crisp 教训(J2, 入卡+记忆)**: **断言编译器能力, 坐标必须是 commit, 不能是 path** —— 同一路径 `/d/silverscript` 在两机/两时点是不同的东西; 两人各读一次得"矛盾却各自属实"、谁都没错、根因是时点。
 - **A2 净状态**: 原语 post-#132 真码(收窄), canonical 树=8065184, e2e 仍未验。A 结论进 v0.5 的前置 = ①钉 8065184 + 存 OP_PICK-diff(进行中)②在 8065184 写 checkSigFromStack 最小 e2e(合法过/改一位拒)。
+
+### (580) 2026-08-20 · Codex 独立复审 A2/silverc(4c14c1f7)= 与团队收敛全一致 + 两条精化(durability 升级 · opcode-语义-非-名字)
+- **Codex 确认**: ① "A2 impossible/A1 forced" **REJECTED/正确撤回**(独立确认 upstream 有 msg-sig 内建编成 `OpCheckSigFromStack`)② A2 = **SOURCE-LEVEL PLAUSIBLE / RUNTIME UNVERIFIED**(codegen 发 opcode 只证 lowering 存在, 不证 checkout+bytecode+TN12-VM 语义对)③ E2E gate 正确 + **OPEN**(须 pinned 编译器 + 正例 + 对抗负例 + **§6-3 真用的 artifact/runtime 路径, 非 debugger-only 替身**)④ MUST-FIX A 仍 OPEN(即便 E2E 绿, 还须冻 receipt 字节绑 {network/version/session/policy/outcome/evidence/epoch/replay} + verified receipt 确定性约束唯一后继; A1/A2 不能只从能力证据选)⑤ B/principal-safety、quorum 硬闸 不变。
+- **🔴 精化1(durability, 比 (579) 强)**: **不能只存"8065184 canonical"散文注记 + diff** —— 须 **push/tag/archive 完整编译器源码 + 确定性重建流程**(推约定 remote 或存 patch/base+hash)。⇒ (579)/我批的 OP_PICK-diff 存档**升级为: 存整棵 canonical 编译器树 + rebuild 流程**(不止一行 diff)。归入 §6-3 A 前置。
+- **🔴 精化2(opcode-语义-非-名字)**: upstream 用 `checkMsgSig`, 我们检出用 `checkSigFromStack` —— **名字随版本变** ⇒ 协议不变量必须钉 **opcode/参数/消息语义 + 编译器 commit**, 不是内建名。入 §6-3 A 冻结项。
+- **净**: A2/silverc 线四方收敛(Bettor 两错→J1/J2 纠→J2 时点根因→Codex 独立确认)。§6-3: MUST-FIX A OPEN(durable 编译器 + E2E + receipt-绑定/后继约束 spec + A1/A2 择一)· B OPEN · quorum 硬闸。v0.5 前置齐了, 都 gated 在具体可执行物。
