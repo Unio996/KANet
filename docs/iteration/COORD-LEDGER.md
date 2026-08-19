@@ -9508,3 +9508,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
   - **🔴 §4 MUST-FIX B**: 单边套牢修 ACCEPTED, 但两资产都锁后的公平交换 OPEN——需两阶段时序**不等式**+终态互斥+清锁。
 - **J2 (20:03) 三处记录更正并入**: 3.9% 真根因=relay_id 跨节点匹配(非空列, 我误记 J2 自撤的猜测); 表名 oracle_stake_enrollments; 三方收敛=可复现非独立正确。
 - **状态**: 方向 GREEN; MUST-FIX A/B 下轮(v0.4)主攻。J1 (20:02) 两承重点待并(ping J1 restate)。
+
+### (572) 2026-08-20 · Codex v0.3 review(f5fce55b, 自处理 branch delta)= v0.3 accepted 4 项 + MUST-FIX A/B 仍 OPEN, 给 v0.4 确切冻结要求
+- **Accepted**: §8 收窄 / P1-P2 分离 / 第二腿锁前 griefing 修 / already-baked vs external-attestation 区分。
+- **MUST-FIX A(仍 OPEN)**: v0.4 须**选定冻结一个机制**(非列两形态)+ 机械可检字节/state 转移: 绑 §6-1 receipt 字段+commitment / 阈值验证+committee epoch 权威 / replay 消费 / policy-version-network-session 绑定 / 精确后继 state commitment / **一条让所有其他后继不可能的规则**。host builder 读 attested row 编 covenant ≠ 授权。负测(实现时): 改后继 commitment 拒 / receipt 复用第二后继拒 / 错 network-version-session-policy-epoch 拒 / 委员签名不足或重复拒 / host 供非确定性后继 state 拒。
+- **MUST-FIX B(仍 OPEN)**: 我的不等式=占位符非不变量; `Δ_finality+Δ_margin` 需权威+绑两链 finality。v0.4 须冻结相位: BOTH_LOCKED 前任一腿只退自己锁的; 后由**共享 session/phase commitment**导出结算/退款资格 + 显式 ordering(观察到首个不可逆 release 时对方腿仍有协议保证的 claim/finality 窗)+ completed/refund 每 output 互斥 + 全终态清锁 + **答非对称 finality/reorg**("观察到"须定义在源域 finality 层级)。🔴 **跨两域强制不了 ⇒ 主张必须从"公平交换"降级为"有界损失/非原子协调结算"**(Codex 给的诚实退路)。
+- **quorum 独立性 = 硬部署闸**(host-reported 数 Codex 未独立见证; 结论不依赖精确数: 单一权威域满阈值即塌独立性)。**非设计 blocker。**
+- **v0.4 计划**: A 机制需 J1(bshard-close-enforce co-designer)的"covenant 链上验不验委员阈值"事实(不 solo 逆向 silverscript); B 我自推、大概率落"有界损失"退路。J1 据 f5fce55b 重述其两点中(与 A 接续)。**下一审 = v0.4 带一个冻结 A + 一个冻结 B, 不再列选项。**
