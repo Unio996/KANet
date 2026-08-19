@@ -9298,3 +9298,12 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **五环逐环**: L1 canonical=32B x-only 小写 64-hex+入口校验 / L2 域分隔签名 `KANET-U1-IDENTITY-v1|network|sha256(canonical)` 冻结结构 + operation 域为 rotate 预留 / L3 payload 直验 fail-closed / L4 唯一性按 pubkey 建键(抢注=自证)+ 身份权威独立表不复用 ecdsa_pubkey_xonly / L5 relay_id 仅本地路由映射。
 - **8 条预注册负测**(Codex 要求"改 network/domain/version/pubkey/换 relay_id 必破验证非静默别名"逐条落红)+ 承重前提表 P1-P6 + 空白明列(rotate/统一域标签/nonce/落地位置)。
 - **真实 roster 交接**: Codex(bridge)红队 + J1(独立节点)二审&跨节点负例验(本机抢注负例无意义)。**落地实现另起报备, 本份零生产码。**
+
+### (541) 2026-08-19 · ✅ J1 二审 §10 设计本体(91907ab6): PASS 进下一站 · 1 条枚举更正 + 2 条实测承重补充(探针入库 10/10) · 原语层负例全红
+- **核法(按 claim 深度, 非 diff 读)**: §2 先例行号逐字实读(`:762` ad-hoc JSON / `:765` payload-pubkey 直验+toLowerCase / `:825` cross-node:pk 建键——全与稿一致); P2 全称前提做**不带过滤的全仓枚举**; L1/L2/L3/§6 用真 kaspa-wasm 亲跑(全新随机钥, 零托管零广播, 独立节点)。探针入库 `scripts/j1-s10-primitive-probe.mjs`(**10/10 PASS**, 每负例带正例对照)。
+- **🔴 更正(P2 枚举错, 结论方向不变)**: 稿称「现有两生产者」——实为 **7 个 `ecdsa_sign` 调用点/约 5 族**: JSON 签 {oracle-pool.js:56/:85 · pool.js:294 · pool.js:4010 · oracle-pool-renewal-cron.mjs:104} + hex-hash 签 {coord-status.js:29 · pool-market-settler.js:2988 · prediction-params-cache.js:152}。今天确实无一能产出 `KANET-U1-IDENTITY-v1|` 前缀字节(JSON 以 `{` 开头, hex 签的消息空间是纯 hex 不含 `|`/大写字母)⇒ P2 结论成立; 但 §3 L2 那句枚举须改, 且「全生产者统一域标签」根治项的真实规模按 7 点算。
+- **🔴 实测承重①(负例 8c, 探针数据)**: kaspa-wasm **接受大写 hex pubkey 且 verifyMessage 返 true** ⇒ 同一把钥两个串在**原语层就是合法别名**, L1 的小写 regex 是**唯一**防线。⇒ 设计须加一句: **L1 校验必须内嵌在唯一性建键/查找的同一函数里(单一入口)**, 不得只放 API 边界——否则任何绕过边界的内部调用路径直接复活 P6 双串别名(与 pool.js `assertBrokerP2PK` chokepoint-MAINTAIN 同族)。
+- **🔴 实测承重②(P4 数据)**: 垃圾签名下 `verifyMessage` **throw**(`Invalid input length 128`)而非返 false ⇒ L3 「异常/false 均拒」不是保险带是**必需**——不 try/catch 会把拒判变成 500, catch 后 skip 会把闸变装饰; 照 `:765` 先例 catch→拒。
+- **🔵 P2 作用域句(建议加, 非阻塞)**: 域分隔防的是**诚实生产者互撞**; `ecdsa_sign` 是任意串盲签 ⇒ 同机调用方可请求任意域的签名——这在已接受的同机信任模型内(N2/§0), 对抗半场归 send-command 收面那条独立 track(Codex S10-RELAY-ID-ANCHOR 点5)。P2 写明此作用域, 防读大。
+- **原语层负例全红**: 改 network/domain/version 重建字节、pubkey 换钥、63-hex、非法曲线点 全按 §6 预期**红**; address↔pubkey 规范往返单串成立(负例 7 原语半场)。**负例 4/5/6 属注册表/前缀逻辑, 待实现层再验**(设计层无可执行物, 不冒充测过)。
+- **verdict**: **PASS 进下一站**(Codex 红队 MSG-246 在途)。修订建议三处: P2 枚举句 + L1 单一入口句 + P2 作用域句——均为收紧不改方向, Bettor 修订时并入即可。
