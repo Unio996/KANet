@@ -9542,3 +9542,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **根因(J2 21:28)**: 本机**两棵 silverscript 检出、能力集实的不同**——`/d/silverscript`(HEAD `8065184`, OP_PICK-fix 分支)含 checkSigFromStack 真码; J1 读的另一棵 HEAD 不同。⇒ **J1 vs (Bettor+J2) 的矛盾不是谁读错, 是"silverc"指两个不同编译器**(mirror-image / same-name-different-things 族)。576 那句"求 J1 file:line"由此解释: file:line 相同、树不同。
 - **🏛 采纳 J2 判据(比 A1/A2 更长效, 入卡+记忆)**: **任何"silverc 能/不能做 X"断言必须带【检出坐标】**(HEAD 或含不含某 upstream commit)——否则两人各读一棵树得"互相矛盾却各自属实"、谁都没读错。同族: CLAUDE.md 铁律 0.5 那条"引 8065184 但它只活在未推分支"(J2 21:22-23)。
 - **A2 可建性状态(仍不拍, 但收窄)**: 在 canonical 树(`/d/silverscript` HEAD 8065184)里 checkSigFromStack **codegen 非 stub、算术看着对**(Bettor+J2 两读); 但**端到端仍未验**(codegen 看着对 ≠ 对, OP_PICK 教训)。⇒ **A2 下一步 = ①钉死 §6-3 covenant 编译用的 canonical silverc 树坐标 ②在该树写最小 checkSigFromStack e2e(合法过/改一位拒)**。**A 结论仍不进 v0.5 直到 e2e 绿。**
+
+### (578) 2026-08-20 · ✅ A2 分歧【完全解】: 同一棵树两时点·`#132` 一刀删 stub+加真原语(J2 逐 commit 数符号证)
+- **精确根因(J2 21:34 逐 commit 数)**: J1 坐标 `aedad5b`=`#121`(在 J2 树历史里、比 8065184 旧四步)。符号计数: `aedad5b(#121)` 有 `checkDataSig` 恒真 stub; `8065184` **checkDataSig=0 / checkSigFromStack=4**。⇒ **`#132` 同时【删 checkDataSig stub + 加 typed checkSigFromStack】**。
+- **谁都没错(各读同一棵树两时点)**: J1 "存在且恒真 stub" **属实(pre-#132)** · J2/Bettor "checkDataSig 不存在 + checkSigFromStack 真码" **属实(post-#132)**。576 的"不拍任何一边"是对的——两读矛盾但各自属实, resolver 不是选一边而是补上时点坐标。
+- **判据精化(J2)**: 检出坐标不只"哪棵树", 是"**哪个 commit 时点**"——一个 fix commit(#132)能同刀删 stub+加真原语, 两时点给"相反却各自属实"。已入记忆 `reference-silverc-capability-assertions-must-carry-checkout-coordinate`(补时点维度)。
+- **A2 现状收窄(仍不松纪律)**: 验签原语 `checkSigFromStack` 在 **post-#132 上游是真码(非 stub)**; J1 stub 是 pre-#132 陈旧检出。⇒ **A2 语言/编译器层【看着可建 post-#132】, 但 e2e 仍未验**(OP_PICK: codegen 看着对≠对)。**A 结论仍 gated 在 e2e + 钉 canonical post-#132 树坐标, 不进 v0.5 直到 e2e 绿。**
