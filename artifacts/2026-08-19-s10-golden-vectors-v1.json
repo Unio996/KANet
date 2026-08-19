@@ -1,0 +1,52 @@
+{
+  "spec": "docs/2026-08-19-s10-pubkey-identity-design.md L2 MUST-FIX B frozen (b) length-prefixed v1",
+  "spec_commit": "22aeb959",
+  "generator": "scripts/j1-s10-golden-vectors.mjs (J1 independent implementation from spec text)",
+  "key": {
+    "private_key_hex": "0000000000000000000000000000000000000000000000000000000000000001",
+    "note": "priv=1 test-only key, NEVER production",
+    "relayPubkeyXOnly": "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798"
+  },
+  "signature_note": "kaspa-wasm signMessage measured NON-deterministic (aux-rand); reproduce canonical_bytes/sha256/message byte-exact, verify example signature with verifyMessage",
+  "vectors": [
+    {
+      "name": "V1-testnet-register",
+      "fields": {
+        "network": "testnet-12",
+        "relayPubkeyXOnly": "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+        "operation": "register",
+        "epoch": "golden-epoch-0001"
+      },
+      "canonical_bytes_hex": "000000114b414e45542d55312d4944454e5449545900000001310000000a746573746e65742d3132000000403739626536363765663964636262616335356130363239356365383730623037303239626663646232646365323864393539663238313562313666383137393800000008726567697374657200000011676f6c64656e2d65706f63682d30303031",
+      "canonical_sha256": "ddd54db09b2404e793b4c5d23113c972352dc2ce996e4c4ac6b55c6e13eeebfd",
+      "signed_message": "KANET-U1-IDENTITY-v1|testnet-12|ddd54db09b2404e793b4c5d23113c972352dc2ce996e4c4ac6b55c6e13eeebfd",
+      "example_signature_verifiable_not_reproducible": "ffd35525bc99777cc14b248f51fb19a90efe01dfe1dc77aa108cfebdc3dc4708d6e986805de56d07324ff44d0f16e8fb84be40d5e4848c33456c1a390e6ff094"
+    },
+    {
+      "name": "V2-mainnet-register",
+      "fields": {
+        "network": "mainnet",
+        "relayPubkeyXOnly": "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+        "operation": "register",
+        "epoch": "golden-epoch-0001"
+      },
+      "canonical_bytes_hex": "000000114b414e45542d55312d4944454e544954590000000131000000076d61696e6e6574000000403739626536363765663964636262616335356130363239356365383730623037303239626663646232646365323864393539663238313562313666383137393800000008726567697374657200000011676f6c64656e2d65706f63682d30303031",
+      "canonical_sha256": "785a91cb1ade22f2b58be6a97db1db9cafcd401794474259957af9d9407a36bd",
+      "signed_message": "KANET-U1-IDENTITY-v1|mainnet|785a91cb1ade22f2b58be6a97db1db9cafcd401794474259957af9d9407a36bd",
+      "example_signature_verifiable_not_reproducible": "02dcf5d08aafd95ff8ba346d4c89e3eebb7c1f5d144361961b0f9393eacb5cd1b992563f59947515ac0cee10adc538a29c27d91057bbf8461d7347a9e54cc0c2"
+    },
+    {
+      "name": "V3-testnet-epoch2",
+      "fields": {
+        "network": "testnet-12",
+        "relayPubkeyXOnly": "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+        "operation": "register",
+        "epoch": "golden-epoch-0002"
+      },
+      "canonical_bytes_hex": "000000114b414e45542d55312d4944454e5449545900000001310000000a746573746e65742d3132000000403739626536363765663964636262616335356130363239356365383730623037303239626663646232646365323864393539663238313562313666383137393800000008726567697374657200000011676f6c64656e2d65706f63682d30303032",
+      "canonical_sha256": "06749a66962c8a8c98cb517826babd4c2accb3f5bb98886113042f09afcfbd47",
+      "signed_message": "KANET-U1-IDENTITY-v1|testnet-12|06749a66962c8a8c98cb517826babd4c2accb3f5bb98886113042f09afcfbd47",
+      "example_signature_verifiable_not_reproducible": "81b1de113f4687b135ad1720e9f51eac0f8aceeb83784c905213a3a4fb870a6211124db4e811b123eec515ceecd5c36d801e69e9af4d5ddfd5313014b25764e8"
+    }
+  ]
+}

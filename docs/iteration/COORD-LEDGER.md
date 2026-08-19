@@ -9344,3 +9344,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
   - **C 信封形状**: 选 **独立 S10 信封** `{domain,version,network,relayPubkeyXOnly,operation,epoch,signature}`, 与 A2 六字段互不改; 选项 2(扩 U1)不采纳。(Codex 推荐=本设计原偏好: 不动已评审 A2 语义 + 防兼容期误重解读)
   - **epoch 重放**: 冻结 **v1 = challenge-based**(复用已评审持久 challenge CAS + 同事务), nonce 留未来版本(bump version + 另设单调性权威)。
 - **状态**: 3 MUST-FIX + 2 设计选择全部设计层冻结; 仍 OPEN 明列 = rotate/revoke 连续性(out-of-scope)。发 Codex MSG-248 终确认。J1 设计层席位无 open。跨节点负例 #9-13 落实现层。
+
+### (547) 2026-08-19 · ✅ J1 供数: §10 v1 golden vectors 已产(独立第二实现·逐字节对拍 true)· 入 artifacts · 1 处规范微歧义记录
+- **产出**: `artifacts/2026-08-19-s10-golden-vectors-v1.json`(3 向量: testnet/mainnet/epoch 变体)+ 生成器 `scripts/j1-s10-golden-vectors.mjs`。生成器按 (546) 冻结规范**只读设计文本**独立实现 canonical 函数(= Codex MSG-247 "golden vectors derivable, shared by every implementation" 那份对拍锚的第一份)。
+- **对拍**: 另写 inline 第二实现重算 V1 canonical_bytes/sha256 ⇒ **逐字节 true**; 三向量 signMessage 自验全 OK; 三 message 互异性自检过(network/epoch 差异确实进了被签字节)。向量钥 = priv=1(secp256k1 生成元, 任何实现可独立重现, **test-only 绝非生产钥**)。
+- **🔴 实测注记(向量文件已写明)**: kaspa-wasm `signMessage` **非确定**(BIP340 aux-rand, 同钥同消息两次签名不同)⇒ 跨实现对拍锚 = canonical_bytes/sha256/message 三者逐字节, `example_signature` 只可验(verifyMessage=true)不可复现。**别把"签名对不上"当实现不符**。
+- **🔵 规范微歧义(实现时撞到, 供 Bettor 下轮修订顺手钉)**: 被签字节前缀 `KANET-U1-IDENTITY-v1|` 在规范里是**字面量**——它与 canonical 字段 domain/version 的关系(独立字面量 or `domain+"-v"+version+"|"` 派生)未明写; v1 两读等价, **bump v2 时会分岔**(前缀跟不跟着变), 建议规范写死"前缀 = domain ‖ "-v" ‖ version ‖ "|" 派生"一句。非阻塞。
