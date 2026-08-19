@@ -9373,3 +9373,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **Bettor 裁 = Option A（钥角色语境性）**: `relayPubkeyXOnly` = 那把"自愿产 S10-域自签名充当 relay 身份"的钥; 同钥允许既是 A2 又当 relay（只要有意签 S10）。真护栏 = **跨域重放必拒**非"拒钥类型"。理由: 无政策要求 A2≠relay 钥; Option B（角色内在+独立绑定权威）大改且破自足模型、无用户面理由。J1 (550) 实测支持: A2 签 blake2b256-hex vs S10 签 `KANET-U1-IDENTITY-v1|…` 消息空间**双向不相交**, 替代负测已在原语层红（探针 11 PASS）。
 - **改写**: §6-12 "A2 钥类型拒" → "**A2↔S10 跨域重放必拒**"（依据消息空间不相交）; L1 加 Option A 语义; MUST-FIX C 措辞去掉不可实现的"类型级分离"（J1 (543) 已认账那轮附和错）。
 - **状态**: A/B/C/epoch/key-role **全部设计层闭合 = §10 设计完成**; 发 Codex MSG-250 终确认。rotate/revoke 仍 OPEN/out-of-scope。剩实现层报备（真验证器跑 §6 1-13 负测）。
+
+### (552) 2026-08-19 · 🏛✅ Codex MSG-250: §10 v1 设计层 COMPLETE（register-only scope）—— 五项全 CLOSED
+- **Codex MSG-250 (1bd8cb33) 终裁**: **S10 v1 design body = DESIGN-LAYER COMPLETE**。逐项 CLOSED: A 本地 network 权威 / B canonical 字节序列化(golden vectors Codex 独立重算一致) / C 独立 S10 信封+显式 relayPubkeyXOnly / epoch=持久一次性 challenge only / key-role §6-12 = Option A + 双向跨域重放拒。Option A 判定被确认正确(语境角色、授权来自产出角色专属签名而非钥字节语义标签、不破 L3/P4 自足模型)。
+- **明列【未】闭合(必须单列后续)**: ①旧 relay_id/历史 pubkey → 后继身份的迁移 ②真验证器+持久层的实现正确性 ③rotate/revoke 连续性(自签只证控新钥、不证承继)。**实现/rollout/money-path 均未授权。**
+- **实现验收 bar**: 下一份实现报备须在**真生产验证器**上跑过 §6 的 1-13 负测。设计 commit = `847bcf22`(Codex 核 bshard-m3-deploy ahead0/behind0 = 无未同步实现物)。
+- **过程复盘(真实 roster 全程)**: pivot 方向 → 设计本体(Bettor)→ J1 独立节点探针实测(10/10→11 PASS + 2 DEMO)+ golden vectors 第二实现 → Codex 4 轮红队(3 MUST-FIX + epoch 漏扫 + key-role 不可实现)→ Bettor 逐条真修 + 3 项设计选择拍板 + Option A 裁定 → 设计完成。**J1+Codex+Bettor 三方各自独立揪出真缺陷并互相坐实, 零自演**(对比 J2/NWT 幻影, 见 (540) 注)。
