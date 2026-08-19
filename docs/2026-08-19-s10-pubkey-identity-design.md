@@ -38,6 +38,7 @@
 - 类型：`string`，**恰 32 字节 x-only，小写 64-hex**。
 - **入口校验**（拒非规范形，贵活之前）：`/^[0-9a-f]{64}$/` **且** 能被 kaspa-wasm 解析为合法 x-only pubkey；两者任一不过 → 拒（fail-closed）。
 - 🔴 **不接受 address 作身份主键**：若提交带 address，只作路由缓存,且必须能从该 pubkey 派生出同一 address 才收（一致性校验），否则拒。**身份命名空间只有 pubkey 一种串**。
+- 🔴 **L1 校验必须内嵌在唯一性建键/查找的【同一函数·单一入口】**（J1 (541) 实测承重①）：实测 **kaspa-wasm 接受大写 hex pubkey 且 `verifyMessage` 返 `true`** ⇒ 同一把钥的大写/小写两串**在原语层就是合法别名**，小写归一是**唯一**防线。若 L1 只放 API 边界、而唯一性键在别处不归一，任何绕过边界的内部调用路径直接复活 P6 双串别名。⇒ 归一+校验与建键**同址**（与 `pool.js` `assertBrokerP2PK` 的 chokepoint-MAINTAIN 同族：护栏必须在决策点，不在门口）。
 
 ### L2 · canonical 域分隔签名声明（本设计的承重新增，补 §2 的 DELTA）
 被签字节（**冻结此结构**，实现不得改序/改分隔）：
@@ -53,13 +54,14 @@ canonical = JSON.stringify({
 })
 ```
 - **前缀 + network 明文在 hash 之外也在 hash 之内**：外层给人/日志看，内层（domain/network 字段）保证「即使有人剥掉前缀直验 hash」也绑得住。
-- 🔴 **域分隔的理由（实核）**：`ecdsa_sign` 是任意串盲签，同钥同时服务别的协议；现有两生产者（`trade-protocol-filter.js:325` oracle enroll、`:762/:765` market publish）签的都以 `{` 开头、**都无域标签**，它们互不相撞只是"字段集恰好不同"、不是保证。本前缀 `KANET-U1-IDENTITY-v1|` 今天与它们结构不撞；**但这只是今天** → §5 P2 记为承重前提。
+- 🔴 **域分隔的理由（实核，J1 (541) 全仓枚举更正）**：`ecdsa_sign` 是任意串盲签，同钥同时服务别的协议；现有 **7 个 `ecdsa_sign` 调用点（约 5 族）**——JSON 签：`oracle-pool.js:56/:85`、`pool.js:294`、`pool.js:4010`、`oracle-pool-renewal-cron.mjs:104`（都以 `{` 开头）；hex-hash 签：`coord-status.js:29`、`pool-market-settler.js:2988`、`prediction-params-cache.js:152`（消息空间纯 hex，不含 `|`/大写字母）。**今天无一能产出 `KANET-U1-IDENTITY-v1|` 前缀字节** ⇒ 结构不相撞；**但这只是今天**（它们彼此不撞也只是"字段集恰好不同"）→ §5 P2 记为承重前提，且"全生产者统一域标签"根治项的真实规模按 **7 点**算。
 - 🔴 **operation 字段是为 out-of-scope 的 rotate/revoke 预留的域隔离**：今天只允许 `register`；将来加轮换用**不同 operation 值** ⇒ 老签名天然不能冒充新操作。**本设计不实现 rotate**，只把域留出来。
 
 ### L3 · 远端从 payload 直验（不查本地表）
 - `kaspa.verifyMessage({ message: <L2 被签字节>, signature: payload.signature, publicKey: payload.pubkey /*已过 L1 校验*/ })`。
 - **公钥来源 = payload 自带（已过 L1 校验），永不查 `relay_nodes`**（照 `:765` 先例）。
 - **fail-closed**：`verifyMessage` 抛异常 / 返 false / 任一字段缺 → **拒**，禁 `try/catch → skip`（现稿 §5 P4：这是最容易被加成"取不到就跳过"的地方）。
+- 🔴 **两路都必须接（J1 (541) 实测承重②）**：实测**垃圾签名下 `verifyMessage` 是 `throw`（`Invalid input length 128`），不是返 `false`** ⇒ 「异常也拒」不是保险带、是**必需**——不 `try/catch` 会把拒判变成 500，`catch` 后 skip 会把闸变装饰。照 `:765` 先例 `catch → 拒`。
 
 ### L4 · uniqueness / replay 按 canonical pubkey 建键
 - **注册表主键 = canonical pubkey**（不是 relay_id）。"抢占"只对 pubkey 有意义，且**抢 pubkey X 必须签得出 X 的私钥** ⇒ 抢注 = 证明你就是 X（§1 攻击对 pubkey 主键**天然失效**，这正是 pivot 的核心收益）。
@@ -81,7 +83,9 @@ canonical = JSON.stringify({
 | # | 前提 | 坏掉时 | 今天成不成立 |
 |---|---|---|---|
 | P1 | 验签公钥 = payload 自带且过 L1 校验，**永不查 DB 列** | 退化：DB 列可被改 ⇒ 冒充 | 设计如此；实现时"DB 读比解析快"最易把它优化掉 |
-| P2 | L2 被签字节域分隔，与其他 `ecdsa_sign` 生产者不相撞 | 别处的签名可搬来当身份证明 | 前缀成立于**今天**（§3 L2）；根治 = 全生产者统一域标签（单独立项） |
+| P2 | L2 被签字节域分隔，与其他 7 个 `ecdsa_sign` 生产者不相撞 | 别处的签名可搬来当身份证明 | 前缀成立于**今天**（§3 L2）；根治 = 全 7 生产者统一域标签（单独立项） |
+
+🔵 **P2 作用域（J1 (541) 建议，防读大）**：域分隔防的是**诚实生产者互撞**（不同协议无意间签出可互认的字节）。它**不防**"同机调用方主动请求某个域的签名"——`ecdsa_sign` 是任意串盲签，同机调用方本就能请求任意域，**这在已接受的同机信任模型内**（N2 / §0：Console 能驱动本机 relay = 已知且接受）。对抗半场（外部方能否诱导本机签它想要的域）属 **send-command 收面**那条独立 track（Codex `S10-RELAY-ID-ANCHOR` 点5），不在本设计的域分隔承诺内。
 | P3 | replay 材料一次性（challenge CAS + 同事务 / 单调 nonce） | 同签名可重放注册 | challenge store 已 CAS + 同事务（③ 已落）；nonce 路需另设计 |
 | P4 | verifyMessage 失败/不可达 = **拒**，不降级 | 闸变装饰 | 🔴 必须写死 fail-closed |
 | P5 | 身份权威**只在**专用 pubkey 表，`ecdsa_pubkey_xonly` 仅缓存 | 复用旧列 ⇒ 背 SS-oracle 语义 + 跨节点填充不一 ⇒ 误判 | Codex 点7 + J1② 均确认；设计如此 |
