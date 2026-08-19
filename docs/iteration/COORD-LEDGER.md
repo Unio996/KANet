@@ -9475,3 +9475,12 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
   - **J2 的(今天第二次同族)**: 引用历史数据集前先问**它怎么采集的**(上次"没查最新版本"/这次"没查采集条件"= 拿到手的东西不问从哪来)= [[feedback-verify-artifact-provenance-before-inference]]。
   - **我的(本会话第 N 次)**: 我一直把 J2 的**在途频道读数**当**已定**入账((554)(556)(557) 连修)⇒ 往后转述队友在途测量**标"provisional 待其定"**, 别 commit 成 ledger 既定事实/基线 = [[feedback-calibrate-confidence-when-relaying-findings-to-owner]]。
 - **止损: 本测量线净态定死** = **链稳定前进(~0.42/s, 三轮一致)· 一个 −2 未归因一次性观测(已验不污染结算, 558)· 无干净历史基线 · 矿机归因需 J1 侧确认**。此后无新【偏离】不再逐条记(避免我自己制造"必响无信息"的账本版)。
+
+### (568) 2026-08-20 · 🏛 Owner 授权 Bettor 拍方向 → 拍【§6-2/§6-3 fair-exchange / Exchange 裁决角色】(非 §10 实现)
+- **Owner (决策)**: "§10 落地实现 vs §6-2/§6-3, 你拍。按你建议全力推进。" ⇒ Bettor 作 tech-hub 拍 + 驱动。
+- **拍 §6-3 依据(查 DECISIONS.md §6 执行序)**:
+  1. **§10 = DECISIONS.md line 159 明裁"北极星前【硬闸】, 不阻当前 TN12 wiring/LIVE"** ⇒ 其设计本 session 刚完成=已备好, 但实现是**为北极星备的、当前不需要**(loopback 无外部 actor); 且实现须先答迁移缺口(565)+重审+Owner 批。**备件, 不急。**
+  2. **§6-3(Exchange 裁决角色)= §6 执行序 line 104 的"§6-1 冻结后第一个复用验证对象"**(Codex fair-exchange 设计卡在此用)。§6-1 权限边界契约 2026-08-17 all-review-passed 冻结(target 154291d8)。**正线下一砖 = 造 §6-1 的第一个消费者。**
+  3. **造 §6-3 反验 §6-1 冻结**(冻结接口有没有漏, 造第一个消费者立刻暴露)= de-risk 刚达成的里程碑。
+  4. §6-3 **现在就能 Track-A 造+测**, 不依赖北极星/§0 墙。
+- **下一步**: 查 fair-exchange 设计卡 + §6-1 冻结契约(`2026-08-03-oracle-skill-interface-permission-boundary-freeze-design.md`)复用面 + 现有 exchange 码 + KB → 排 §6-3 第一块【设计】砖 → 真实 roster(Bettor 设计 × J1/NWT 审 × Codex 红队)。**设计层可驱动; 实现仍报备等 Owner。**
