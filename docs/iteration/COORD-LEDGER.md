@@ -9291,3 +9291,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 ### (539) 2026-08-19 · Codex 复审(fa46896a): §6 整合忠实 · pivot 方向/x-only 编码/域分隔签名 全 ACCEPTED · relay_id 全局身份 REMAINS REJECTED
 - Codex 独立重读同步后的 brief: §6 **准确吸收**上一轮裁定(x-only 32B 小写 64-hex 为 canonical / address 仅派生表示 / 域分隔签名绑域-版本-网络-pubkey-op-replay / 自签只证控当前钥非连续性 / 五环验收链), 与仓内先例一致。定性 = **协调/规范同步, 非新实现/新闭合物**。
 - **⚠ roster 现实(见 (540)/本会话核实)**: §10 真正下一步=【设计本体】, 现稿指派方 "J2" 正是无独立在场痕迹的幻影(3 周无提交/worktree)。设计不能靠幻影产出——**待 Owner 定 roster 或 Bettor 自领**, 不再以"J2 会设计"占位。
+
+### (540) 2026-08-19 · §10 pubkey 身份【设计本体】落地(Bettor 主笔·真实 roster)· supersedes attestation §4 · 对 Codex 五环验收链逐环 + 8 负测
+- **新文件** `docs/2026-08-19-s10-pubkey-identity-design.md`。supersedes 现稿 §4(attestation 路已被其自身 §3 否定结果 + Codex 判死); 把被采纳的 pubkey 方向写成设计本体。
+- **grounding(逐字核过)**: `trade-protocol-filter.js:765`(pubkey-from-payload 直验不查 relay_nodes)+`:825`(按 pubkey 建键)= 形状可照抄; **但 `:762` 签 ad-hoc JSON 无域分隔** = §10 承重 DELTA(补 Codex 点5 域分隔)。
+- **五环逐环**: L1 canonical=32B x-only 小写 64-hex+入口校验 / L2 域分隔签名 `KANET-U1-IDENTITY-v1|network|sha256(canonical)` 冻结结构 + operation 域为 rotate 预留 / L3 payload 直验 fail-closed / L4 唯一性按 pubkey 建键(抢注=自证)+ 身份权威独立表不复用 ecdsa_pubkey_xonly / L5 relay_id 仅本地路由映射。
+- **8 条预注册负测**(Codex 要求"改 network/domain/version/pubkey/换 relay_id 必破验证非静默别名"逐条落红)+ 承重前提表 P1-P6 + 空白明列(rotate/统一域标签/nonce/落地位置)。
+- **真实 roster 交接**: Codex(bridge)红队 + J1(独立节点)二审&跨节点负例验(本机抢注负例无意义)。**落地实现另起报备, 本份零生产码。**
