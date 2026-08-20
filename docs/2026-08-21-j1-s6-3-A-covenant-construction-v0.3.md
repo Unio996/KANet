@@ -1,7 +1,7 @@
-# §6-3 A：fair-exchange 结算 covenant 完整构造（v0.2 · 报备层 · 零生产码）
+# §6-3 A：fair-exchange 结算 covenant 完整构造（v0.3 · 报备层 · 零生产码）
 
-> **Status**: CURRENT（v0.2 取代 v0.1，修 Codex MSG-260 三条 MUST-FIX + A-absent 全清）
-> **作者** J1 · **日期** 2026-08-21 · **派工** Bettor 16:22（出构造）+ 17:13（出 v0.2 修三条）
+> **Status**: CURRENT（v0.3 取代 v0.2，补 NWT 逮到的两-lineage 原子焊接缝）
+> **作者** J1 · **日期** 2026-08-21 · **派工** Bettor 16:22（出构造）+ 17:13（v0.2 修三条）+ 17:31（v0.3 补原子绑定）
 > **上游** J2 O-spec v4（`docs/2026-08-20-j2-o-earmark-construction-spec.md`）+ Codex MSG-260 verdict（`coordination/codex-bridge/responses/RESPONSE-20260820-MSG260-S6-3-O-LINEAGE-CODEX-REVIEW.md`，GREEN DIRECTION 架构接受）。
 > **适用** 🔴 **仅同链**（两腿都在 TN12）。跨链退 R1/light-client（O 构造完全不适用 + 仍需正 finalized-reveal 证，Codex MSG-260 附加条件）。
 
@@ -14,6 +14,18 @@ Codex 判**架构 GREEN**（script→cov_id provenance pivot / O-REPLACEMENT 无
 - 🔴 **MUST-FIX 1（我的真 bug，认）**：v0.1 行 36/98 把 reveal 侧本金 refund 写成 `require(A-absent)` = **回退到 v0.7 已否决错**（covenant 能正验一个提交的 A，**证不了链下 A 全局不存在**）。NWT 逐字核实两处。⇒ 改 **P-SAFE-1 单-live-lineage state machine**（§4-d 新写法），**A-absent 谓词全清**。这是我这 session 反复的错类（验机制在、漏它实际强制不了）+ 回退已否决设计，判据入册 [[feedback_read-the-thing-not-a-copy]]。
 - 🔴 **MUST-FIX 2**：`OpCovOutputCount(cid) >= 1` 允许**多个**续链 output → 违反唯一 capability。⇒ reveal 支改 **`== 1`**（恰一续继），每条 terminal/refund/cancel 支 **续链 output == 0** + 变异负测。教训：照搬 `ShardLeaf.sil:101` 的 `>=1` 是"活先例挡住的是它当初那个洞（允许多续继合理），不是我这个洞（要求唯一）"——先例 guard 带着为**别的需求**校准的强度（J2 判据，采纳）。
 - 🔴 **MUST-FIX 3**：`T_O` 从绝对 DAA deadline 改**相对 O 创建**：`current_daa >= OpTxInputDaaScore(O) + N_claim + N_margin`。用 O 自己 input 的本地 DAA 事实，不重新引入无锚绝对窗（O-lineage 采纳的初衷就是不靠外部/模糊 finality 钟）。
+
+---
+
+## §0.6 v0.3 变更（NWT 逮到的两-lineage 原子焊接缝 = MUST-FIX）
+
+NWT 红队"P-SAFE-1 lineage ↔ O cov_id-lineage 交互"逮到 v0.2 承重缝，J2/我独立收敛同一修法：
+
+- 🔴 **缝**：`LOCKED`（P-SAFE-1 lineage）与 `C`（cov_id lineage）是**两个独立 covenant UTXO**。§4-b（消费 C 造 O）与 §4-d 的 `LOCKED-transfer` 支**各自独立** require `checkSigFromStack(A)∧blake2b(s)==h`，**两处 witness 字面相同，但 v0.2 没有一句把它们钉到同一笔 tx**。
+- 🔴 **精确逻辑断链**：安全依赖 **s 被揭 ⟺ O 被造**。v0.2 有「消费 C ⟹ 造 O」（§4-b）+「领 principal ⟹ 揭 s」（§4-d transfer），但**缺「揭 s ⟹ 消费 C」**——故 s 可在【不消费 C ⇒ 不造 O】的 tx 里被揭。叠加 O-REPLACEMENT 去掉 (A,s) fallback ⇒ 首动方**只广播 LOCKED-transfer 那一笔**（拿本金 + s 公开）、**不广播造 O 那笔** ⇒ 反应方无 O 可花、无 fallback ⇒ **本该被 enforce-O-creation 堵住的 griefing/盗窃重现**。
+- ✅ **修法（J2/我同款，源码域我裁可建）**：`LOCKED-transfer` 支加 `require(OpInputCovenantId(C_idx) == cid)`——强制**同一笔 tx 必须也消费 C**，C 被消费即触发其 §4-b 支强制造 O。⇒ 揭 s ⟹ 消费 C ⟹ 造 O 三段原子焊死（§4-d 新写法 + §2.5 拓扑）。
+- 🔴 **附带 cutoff 排序不变量（我补，v0.2/J2 提议均未含）**：须 `T_cutoff_LOCKED <= C_terminal_refund_cutoff`。否则 LOCKED-transfer 活窗内，同笔消费 C 可走 C 的 terminal-refund 支（不造 O）绕过焊接。
+- 🔨 J2 判据（采纳）：**「生产 X 是领钱的前提」= 必须【同一笔 tx】；拆成两笔，它退化成两个各自独立可分别选择的动作，攻击者只选对自己有利那一个**（= "安全性质只能来自唯一路径"，此处路径被【拆成两步】而分岔）。J2 判据（采纳）：**这条缝的缺失约束【不在任何一行代码里】**——故负测是**交易级变异**（改怎么提交，不改任何 require 行），与族 B 语句级变异不同层（§6.2b）。
 
 ---
 
@@ -47,6 +59,19 @@ refund: reveal 侧本金走 P-SAFE-1 单-live-lineage（cutoff 前只 validated-
 ```
 
 🔴 **必须 O-REPLACEMENT**：保留 `(A,s)` fallback ⇒ 反应方可凭 `(A,s)` 在**非最终** reveal 上 claim ⇒ C4-FINALITY 原洞照旧。安全性质只能来自**唯一路径**（J2 判据，采纳）。
+
+## §2.5 显式 principal 拓扑（v0.3 补 —— v0.2 欠此=NWT 缝的根）
+
+> v0.2 没显式钉死"哪个 principal 在哪个 covenant、哪支揭 s、哪支花 O"，这条欠拓扑正是原子焊接缝的根。钉死：
+
+| 对象 | covenant | 谁的钱 | 唯一合法消费路径 |
+|---|---|---|---|
+| `LOCKED(session)` | P-SAFE-1 lineage | **首动方**本金 | 反应方**花 O** 领走（O-lineage）；或 cutoff 后首动方 terminal-refund |
+| `C` | cov_id lineage capability | 无（dust 种子） | 首动方 reveal-claim 消费 C 造 O（§4-b）；或 cutoff 后 terminal-refund |
+| `O` | C 的续继 | = LOCKED 的领取凭证 | 反应方花 O 领 LOCKED；或 T_O 后首动方回收 |
+| 反应方本金 | （对称的另一个 LOCKED'） | **反应方**本金 | 首动方揭 s 领走 |
+
+🔴 **焊接点**：首动方揭 s 领**反应方本金**（LOCKED'-transfer，§4-d）的**同一笔 tx** 必须消费 C 造 O（v0.3 焊接 require）。⇒ 首动方拿反应方的钱 ⟺ 造出 O ⟺ 反应方能凭 O 拿首动方的 LOCKED。**任一方拿钱都强制给对方留下拿钱的凭证，无单边。**
 
 ---
 
@@ -107,9 +132,17 @@ require(OpInputCovenantId(O_in_idx) == cid);        // 花的 O 血缘续自真 
 ### (d) refund / T_O 回收（全部 lineage-terminal，MUST-FIX 1+3 修）
 🔴 **MUST-FIX 1：本金 refund 走 P-SAFE-1 单-live-lineage state machine，不编码 A-absent 谓词**。covenant 证不了链下 A 全局不存在——只能验它自己 LOCKED 对象的**本地正事实**（被没被 validated-reveal 消费过）：
 - **reveal 侧本金锁 = `LOCKED(session)` covenant**，恰两条互斥后继支：
-  - **transfer 支**（cutoff 前）：`require(current_daa < T_cutoff) ∧ checkSigFromStack(A,sig_A) ∧ blake2b(s)==h`——validated-reveal 转移消费 LOCKED（正事实，非"证 A 不存在"）。
-  - **terminal-refund 支**（cutoff 后）：`require(current_daa >= T_cutoff)`——**still-unspent LOCKED** 转 terminal 明文退首动方。互斥由 UTXO once-spend 天然保证：reveal 发生 ⇒ LOCKED 已被 transfer 支花掉 ⇒ refund 支无 UTXO 可花（不需证 A-absent）。
+  - **transfer 支**（cutoff 前，v0.3 加原子焊接）：
+    ```
+    require(current_daa < T_cutoff_LOCKED);
+    require(checkSigFromStack(A, sig_A));
+    require(blake2b(s) == h);
+    require(OpInputCovenantId(C_idx) == cid);   // 🔴 v0.3 焊接: 同一笔 tx 必须也消费 C ⇒ 触发 C 的 §4-b 强制造 O ⇒ 揭s⟹消费C⟹造O 原子
+    ```
+    validated-reveal 转移消费 LOCKED（正事实，非"证 A 不存在"）。**焊接 require 强制这笔 tx 同时把 C 作为 input**（`OpInputCovenantId(C_idx)==cid` = ShardLeaf:99 读非 active input pattern），C 一被消费其 §4-b 支即强制造 O ⇒ 无法"拿本金却不造 O"。
+  - **terminal-refund 支**（cutoff 后）：`require(current_daa >= T_cutoff_LOCKED)`——**still-unspent LOCKED** 转 terminal 明文退首动方。互斥由 UTXO once-spend 天然保证：reveal 发生 ⇒ LOCKED 已被 transfer 支花掉 ⇒ refund 支无 UTXO 可花（不需证 A-absent）。
   - **产出必须 terminal 明文出、无续链**（闸③；`OpCovOutputCount == 0`）。
+- 🔴 **cutoff 排序不变量（v0.3，焊接生效前提）**：`T_cutoff_LOCKED <= C_terminal_refund_cutoff`。否则 LOCKED-transfer 活窗内，同笔消费 C 可走 C 的 terminal-refund 支（不造 O）绕过焊接。排序守住 ⇒ C 在 LOCKED-transfer 活窗内**唯一可走支 = reveal-claim（造 O）**。
 - **O 的 T_O 回收**（付回首动方）：🔴 **MUST-FIX 3**：`require(current_daa >= OpTxInputDaaScore(O) + N_claim + N_margin)`（相对 O 创建的本地 DAA，非绝对窗），**产出 terminal 明文、`OpCovOutputCount == 0`**（闸③；J2 自逮侧门）。
 - **C 的 terminal-refund**：同样 `OpCovOutputCount == 0`（闸③）。
 
@@ -127,6 +160,7 @@ require(OpInputCovenantId(O_in_idx) == cid);        // 花的 O 血缘续自真 
 
 1. **genesis-mint 义务**：relay 必 ① 把 C genesis-mint 为 covenant（`cid≠0`）② 每个 continuation output 续 `CovenantBinding(cid)` ③ 建 v1 tx（`TX_VERSION_TOCCATA`）+ compute_budget。**covenant 自己检查不出"当初没 mint"**（`PayoutShard.sil:26` 同款）。
 2. **唯一续继变异负测（MUST-FIX 2，承重·J2 验收族 B）**：① 把 reveal 支的 `OpCovOutputCount(cid) == 1` 改成 `>= 1` ⇒ 验收**必须挂**；② 让某条 terminal/refund/cancel 支产出**一个续链 output**（`OpCovOutputCount != 0`）⇒ 验收**必须挂**。⇒ 唯一性靠"改松有人红"，非"记得写 ==1"。**漏则闸③/唯一 capability 静默失效。**
+2b. 🔴 **原子焊接负测（v0.3·NWT 缝·【交易级】变异，与上面语句级不同层）**：把 `LOCKED-transfer` 与 `C-consume/O-create` **拆成两笔 tx 分别提交** ⇒ 领本金那笔（LOCKED-transfer）**必须被拒**（因焊接 require `OpInputCovenantId(C_idx)==cid` 在同笔找不到 C）。J2 判据：这条缝的**缺失约束不在任何一行代码里**，故负测改的是【怎么提交】不是【哪一行 require】——J2 验收族 B 已加（`86c04c55`）。附：cutoff 排序负测——令 `T_cutoff_LOCKED > C_terminal_refund_cutoff`，构造"同笔消费 C 走 C 的 terminal-refund（不造 O）"⇒ 必须被拒。
 3. **A-absent 全清核（MUST-FIX 1）**：全文 grep `A-absent` 必须**零命中**于 normative 构造（只许出现在 §0.5 变更说明里作为"已清除的旧写法"）。refund 只走 §4-d 的 still-unspent LOCKED state machine。
 4. **A2 腿 e2e**：`checkSigFromStack` 合法签过 / 改一位拒 —— 必在 canonical `8065184` 树上编 + 上链跑，读 codegen 不算（OP_PICK 教训）。
 5. **cov_id 派生 e2e**：造两个不同 funding outpoint 的 candidate C，验其 cid 不同、且只有 baked 那个的 O 过 reactive 检查。
@@ -155,6 +189,7 @@ require(OpInputCovenantId(O_in_idx) == cid);        // 花的 O 血缘续自真 
 | O 形状 | `OpTxOutputSpkSubstr` / `.value` | `compile.rs:3572` + CloseZkV2:125-126 | ✅ 已证 |
 | hashlock | `blake2b` | 既有 covenant 普遍用 | ✅ 已证 |
 | 时锁下界 | `tx.time >= X`（DAA） | `ShardLeaf.sil:96`、30 处 lower-bound | ✅ 已证 |
+| 多 covenant-input 一笔 tx（LOCKED+C 原子焊接） | `OpCovInputCount`/`OpCovInputIdx` + `OpInputCovenantId(C_idx)` | compile.rs:3577-78 + `ShardLeaf:99` 读非 active input cov_id | ✅ 已证（Q① 裁可建） |
 | adaptor 揭示签 | `checkSigFromStack(A)` | canonical `8065184`（#132） | 🟡 待 canonical 树 e2e |
 
-⇒ **净判断（v0.2）**：Codex 判**架构 GREEN**（cov_id-lineage + co-reorg 方向 PASS-AS-ARCHITECTURE），三条 MUST-FIX 本版已修（MUST-FIX 1 A-absent→P-SAFE-1 单-live-lineage 全清 / MUST-FIX 2 `>=1`→`==1`+terminal `==0`+变异负测 / MUST-FIX 3 T_O 相对 `OpTxInputDaaScore(O)` 锚）。**落码前硬前置 = ① 唯一续继/单出口变异负测（§6.2） ② A2 腿 canonical `8065184` 树 e2e ③ cov_id 派生 durable 证（§7.3）**。三条修完送 Codex 复审过 ⇒ 同链 design-closed = 无委员结构 Tier-2。跨链退 R1。落码 Owner 批实现闸。
+⇒ **净判断（v0.3）**：Codex 判**架构 GREEN**（cov_id-lineage + co-reorg PASS-AS-ARCHITECTURE）。v0.2 修三条 MUST-FIX；**v0.3 补 NWT 逮到的两-lineage 原子焊接缝**（LOCKED-transfer 加 `OpInputCovenantId(C_idx)==cid` 强制同笔消费 C + cutoff 排序不变量 + 显式 principal 拓扑 §2.5 + 交易级负测 §6.2b）。**落码前硬前置 = ① 唯一续继/单出口变异负测 + 原子焊接交易级负测（§6.2/6.2b） ② A2 腿 canonical `8065184` 树 e2e ③ cov_id 派生 durable 证（§7.3）**。v0.3 送 Codex MSG-261+ 复审过 ⇒ 同链 design-closed = 无委员结构 Tier-2。跨链退 R1。落码 Owner 批实现闸。
