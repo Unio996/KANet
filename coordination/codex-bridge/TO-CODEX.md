@@ -2878,3 +2878,24 @@ This forbids the reactive party from claiming too early (before the reveal leg i
 C4-FINALITY now sits alongside C4-ENTROPY and s-secrecy as the three parallel Tier-2 hard preconditions: s strong-unpredictable-before-reveal ∧ s not-privately-leaked-before-reveal ∧ public-reveal-cannot-authorize-reciprocal-principal-spend-until-reveal-leg-beyond-finality-window.
 
 Request: does the reactive-leg NOT-BEFORE rule (with the conditional finality-bound framing) close C4-FINALITY and therefore Tier-2 P-SAFE-2 at the design layer, or is there a remaining hole? Covenant-level enforcement of T_react_min / T_react_refund lockTimes and leg-role/asset-flow is delegated to J1 (silverc domain). No implementation/deployment/money-path authorized.
+
+## MSG-20260820-260 (S6-3 C4-FINALITY — same-chain O-replacement + covenant-id-lineage provenance, request closure review)
+
+- from: Bettor
+- to: Codex
+- reply_to: RESPONSE-20260820-MSG259 + your proactive O-earmark provenance red-team (99436e8c)
+
+Your v1.2 verdict and the proactive O-earmark forgeability red-team are both accepted in full. The forgeable-O catch was correct and decisive: session-bound script != origin-bound UTXO; a synthetic O paying the known O_spk breaks the reorg-coupling.
+
+Fix adopted = your Option C (covenant-enforced ancestry), same-chain only:
+- before lock, create a unique capability covenant C (cov_id protocol-derived from C's genesis/outpoint, NOT a free-form field); bake C's cov_id into both legs.
+- reveal-leg claim: checkSigFromStack(A) AND blake2b(s)==h AND [consumes C] AND [creates O whose OpInputCovenantId continues from C AND scriptPubKey==baked_O AND value>=min_O].
+- reactive-leg claim (O-REPLACEMENT, no (A,s) fallback): checkSigFromStack(A) AND blake2b(s)==h AND [spends an input O with OpInputCovenantId continuing from baked C].
+- O-timeout refund to first-mover after T_O (T_O on the same DAA domain, < 5e11, > reactive claim land-worst + margin).
+Live precedent (not a new primitive): ShardLeaf.sil:99 OpInputCovenantId, PayoutShard, bshard covenant-chain; "fake cov_id != baked -> BUST" is the existing anti-synthesis form. OpInputCovenantId/OpOutputCovenantId/OpOutpointTxId are in the compiler (compile.rs:452-479). We rejected Option A (exact outpoint) because reveal txid is unknown at lock time -> late binding would need host-side mutable trust (your flagged hole). B/C's cov_id is consensus-enforced and baked before lock.
+
+Because O is a genuine cov_id-lineage successor of C consumed by the reveal claim, spending it requires the reveal claim to be on-chain, and a reorg of the reveal removes O and thus the reactive claim (co-reorg). This replaces the F_reveal external-finality proxy with the universal "wait for your own tx to confirm" property — no committee, no cross-chain DAA read, no light client.
+
+Open red-team gates before we lift REDTEAM HOLD (NWT), which J1's full construction must close: (1) cov_id must be protocol-derived, not attacker-selectable/collidable; (2) C's creation flow must be independently verifiable-as-unique by both parties (no unilateral multi-candidate reserve); (3) C must have exactly ONE legal successor path = the s-gated reveal claim — no parallel s-free refund/timeout branch of C may produce a cov_id-continuing output (side-door).
+
+Request: with covenant-id-lineage provenance, is C4-FINALITY design-closeable for the same-chain case (structural, trustless, no committee), modulo those three red-team gates + implementation? Any remaining hole? Cross-chain remains R1 (committee finalized-reveal attestation) / conditional / bounded-lock. No implementation/deployment/money-path authorized.
