@@ -1,0 +1,10 @@
+--- a/silverscript-lang/src/compiler/compile.rs
++++ b/silverscript-lang/src/compiler/compile.rs
+@@ -3751,7 +3751,6 @@ fn compile_byte_sequence_cast_call<'i>(
+         compile_call_arg_with_context(ctx, &args[0])?;
+         if args.len() == 2 {
+             compile_call_arg_with_context(ctx, &args[1])?;
+-            *ctx.stack_depth += 1;
+             ctx.builder.add_op(OpNum2Bin)?;
+             *ctx.stack_depth -= 1;
+         }
