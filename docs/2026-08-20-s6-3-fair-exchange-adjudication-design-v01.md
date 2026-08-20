@@ -349,6 +349,7 @@ refund **不**表述为"查无 AUTHORIZED 记录"，而是**单一活状态 UTXO
 
 ### §17.8 v1.2 净状态（Codex v1.1 verdict 后·2026-08-20·RESPONSE-MSG258 桥 3337f419）
 > Codex v1.1: 方向 GREEN, v1.1 全部更正接受, 但 NEW MUST-FIX C4-FINALITY。本节替代 §17.7 的 Tier-2 开项清单。
+> 🔴 **本节 Tier-2 开项已被 §17.9 v1.2-verdict 替代（Codex reframe: NOT-BEFORE 不足、须 positive finalized-reveal binding）**：以 §17.9 为准。
 - ✅ v1.1 **全部接受**: weak-s=theft · C4-ENTROPY · s-secrecy(与熵分离, 同 theft 级) · cutoff leg-role 冻结 · P-SAFE-1 CLOSED(不变)。
 - 🔴 **NEW MUST-FIX C4-FINALITY（§17.2, v1.2 已加）**: reveal tx 广播即暴露 s 早于 finality ⇒ 反应方从非最终 reveal 取 s 花 reactive 腿, reveal 后被 reorg ⇒ 盗窃(不需弱熵/私泄, 连诚实路径都中)。修 = reactive-leg NOT-BEFORE 规则(`T_react_min >= T_reveal + F_reveal + clock_skew`, covenant 机械 enforce)+ 修双重计数 + 概率 finality ⇒ Tier-2 conditional on finality bound。
 - 🔴 **Tier-2 no-theft = 仍 OPEN / REDTEAM HOLD**: 三条并列硬前置 = C4-ENTROPY(s强随机)∧ s-secrecy(不私泄)∧ **C4-FINALITY(reveal 越 finality 窗前不授权对手本金花费)**。v1.2 已加 C4-FINALITY, 送 Codex MSG-259 复审。
@@ -356,3 +357,15 @@ refund **不**表述为"查无 AUTHORIZED 记录"，而是**单一活状态 UTXO
 - 🟡 A2-whole OPEN: 验收设计(846181e4)Codex 认方向 sound(含 merkle-删-vs-committeePkHash-诱饵判别测 + no-op 控制臂), **但零闭档 credit —— 生产 covenant 不存在**。建造 = Owner 闸(已上报)。
 - 硬闸: §7 quorum 独立性(真金前)。
 - **下一步**: v1.2(C4-FINALITY)送 Codex; J1 covenant 侧 enforce T_react_min/T_react_refund lockTime + leg-role 资产流; A2 covenant 建造待 Owner。
+
+### §17.9 v1.2-verdict 净状态（Codex MSG-259 verdict 后·2026-08-20·桥 358b04a2）——C4-FINALITY reframe
+> Codex v1.2 verdict：C4-FINALITY 未闭。**NOT-BEFORE(时间) 只是 hardening、不足以 closure**。本节替代 §17.8 的 Tier-2 开项。
+- 🔴🔴 **核心 reframe（Codex §1）**：`NOT-BEFORE(time) ≠ reveal-finalized`。时间只证流逝、不证 reveal 被收录/finalized。活 trace（不需弱熵/私泄/迟发）：s 广播公开 → reveal tx **从未被挖/被逐/never finalize** → 时间过 T_react_min → 反应方持 (A,s) 满足本地 NOT-BEFORE → claim 对手本金 → reveal 侧 refund（从未 finalize）= 盗窃。
+- 🎯 **要求（Codex §2）：reactive 授权须依赖【正的、共识可验的 finalized-reveal 事实】**，非时间延迟：
+  - **R1 — finalized-reveal attestation（fits §6-1、无光客户端·Bettor 出设计见 §18）**：reveal claim finalize 后委员发第二份 typed receipt `RevealFinalizedAttestation`；reactive claim require `valid A + s + valid R`。🔴 重引入委员 liveness/correctness ⇒ 受 §7 quorum 闸。
+  - **R2 — 光客户端/SPV**（已排除, 非 v1）。
+  - 🔵 **R2-lite（同链·若 introspection 可建）**：同链下 reactive covenant introspect **reveal SPEND 的链上存在+落链深度(>=20)** = 正 finalized 事实、挡 Codex trace（reveal 没落链⇒无可 introspect⇒REJECT）。**判据变了**：不是"读时间"、是"读另一 UTXO/spend 的存在+深度"（@J1 能力查）。能 ⇒ 同链走 R2-lite；不能 ⇒ 同链也须 R1。
+- ✅ **Codex 确认对**：① 竞争支路=race/incentive 非硬 deadline（OPEN 标注对）· 两腿锁定在前不能被 reactive-后构造悄悄替换（Codex §4 "别混模型"）· 同链 DAA 只解测量不解收录证明。
+- 🎯 **Codex 要的下一 artifact**：冻一条精确 Tier-2 转移 `reveal finalized under frozen policy → 正 receipt/proof R → reactive claim authorized` + session 绑定 + replay + 被拒 trace `mempool/公开 s 但未 finalized → reactive MUST REJECT`；并定死两腿是否锁定在前（是⇒reactive 须验正 finalized-reveal artifact）。
+- **状态**：P-SAFE-1 CLOSED · C4 hybrid PASS方向 · C4-ENTROPY/s-secrecy 硬假设接受 · **C4-FINALITY = 时间 gate PASS-as-hardening、NOT sufficient** · **positive finalized-reveal binding = NEW/CONTINUED MUST-FIX** · reveal 上界=OPEN(竞争支路 incentive 非硬 deadline) · A2-whole OPEN · §7 quorum 硬闸。
+- **下一步**：Bettor 出 R1 设计(§18)· J1 introspection 能力查(读 spend 存在+深度)判 R2-lite · 据能力+同链/跨链选一路冻 + 出 Codex 要的转移 artifact + 被拒 trace。
