@@ -6,9 +6,23 @@
 //   ✅ 证【未被接受】: REJECT 格那笔 UTXO 至今未花 ⇒ 那笔花费从未落链。
 //   🔴 不证【因脚本验证拒】: 拒因那一半只由捕获的 RPC 原文支撑, 天然非 DAG 可查。
 //   ⇒ 与 RPC 拒因证据是【互补】, 不是替代。
+const RPC_URL = 'ws://127.0.0.1:17210';   // ← 跨机核验请改这一行
 const W = await import('file:///D:/rusty-kaspa/wasm/nodejs/kaspa/kaspa.js');
-const rpc = new W.RpcClient({ url: 'ws://127.0.0.1:17210', encoding: W.Encoding.Borsh, networkId: 'testnet-12' });
+const rpc = new W.RpcClient({ url: RPC_URL, encoding: W.Encoding.Borsh, networkId: 'testnet-12' });
 await rpc.connect();
+
+// 🔴 2026-08-20 加固: 这个脚本存在的意义是【跨节点】核验, 而它默认连 loopback。
+//   若你想做跨机复核却忘了改 url, 你会连回【和被验方同一个节点】 ——
+//   脚本照样跑完、照样全绿, 而你以为自己做了独立验证。**这个失败是静默的。**
+//   实账: 当天一名复核者报'自己节点独立跑', 实际连的正是 ws://127.0.0.1:17210(同机)。
+const LOOPBACK = /127.0.0.1|localhost|[::1]/.test(RPC_URL);
+if (LOOPBACK) {
+  console.log('');
+  console.log('🔴 注意: 当前连的是 loopback (' + RPC_URL + ')');
+  console.log('   ⇒ 这是【同机复现】, 不是跨节点独立验证。');
+  console.log('   ⇒ 要做跨机核验, 请把 RPC_URL 改成【你自己那台】的节点地址。');
+  console.log('');
+}
 const P = 'kaspatest:pq646mlq82wt79kqkdhcpme2wwa072uwxdu6ectwk5qqa6r8hlpjzpys2te5s';
 const { entries } = await rpc.getUtxosByAddresses([P]);
 const live = new Set(entries.map((e) => e.outpoint.transactionId.slice(0, 12)));
