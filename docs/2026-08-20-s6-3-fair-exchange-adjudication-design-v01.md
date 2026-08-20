@@ -174,7 +174,13 @@
 - **🔴 v0.5→v0.6 修**: v0.5 把 auth-atomicity 放成【默认】错了 —— auth-atomicity **需要 C1**(两腿都能验同一 A), 而 C1 可失败; C1 假时一腿 attestation-gated、另一腿验不了 A ⇒ 无 auth-atomicity。⇒ **分三层, 保证随谓词升级**:
   - **Tier 0(base·所有受支持腿的默认)= bounded-lock-duration(墙钟 ms, 值域 `>=5e11`)**。**不含** auth-atomicity。任一支持的对手链至少拿这层。
   - **Tier 1(需 C1)= + authorization-atomicity**(同一份 A 两腿各自独立验, 无"A 授权 B 未授权"态)。**C1 假 ⇒ 落回 Tier 0**(不静默假装有 auth-atomicity)。〔备选: 若要 auth-atomicity 成硬默认, 则无 A-验证器的对手链 = **unsupported/fail-closed**, 不接入; 本 v0.6 取分层-非强制, 支持面更宽。〕
-  - **Tier 2(需 C1∧C2∧C3 + 下方 principal-safety 不变量)= + no-theft**。
+  - **Tier 2(需 C1∧C2∧C3 + 下方 principal-safety 不变量 P-SAFE)= + no-theft**。
+  - **🔴 P-SAFE — Tier2 principal-safety 不变量(v0.6→v0.7 冻结·答 Codex b41d51cc "机械定义否则 Tier2 是没有决定谓词的空承诺")**: 每腿恰两条**互斥** disposition, **两者都从同一份 canonical A 导出**(A 在该腿链 finality 深度 D 上验):
+    - `A valid @D → 收款方 claim`(incoming 方得对手本金)· `A absent @D 且到该腿 timeout T → 锁定方 refund`(自己本金回)。
+    - 每腿内互斥: A valid ⇒ refund 路关; A absent ⇒ claim 路关(covenant enforce: refund 支出条件含 A-absent@D, claim 含 A-valid@D)。
+    - **跨对相容(非仅 per-output)**: A 是**同一份**可携带委员签名对象、两腿各自验它 ⇒ 两腿 disposition 从**同一 A** 导出 ⇒ 一方**不可能**同时"一腿 claim(A valid)+ 另一腿 refund(A absent)", **除非两链对 A 是否存在分歧超过 finality D(深 reorg = C2 边界)**。
+  - **🔴 被拒对抗 trace(Codex 要)**: taker 用 A claim leg-A(得 maker 的 KAS)→ 再提交 leg-B(自己资产)的 refund ⇒ leg-B refund 支出条件 = A-absent@D, 但 A **valid**(正是 taker 刚用的那份)⇒ **leg-B refund 路【关】⇒ REJECT**。taker 拿不到 leg-B refund; maker 用 A claim leg-B。**无一方得双本金。**
+  - **残留 = 正好是 C2**: 若两链对"A 是否存在"分歧超 finality D(某链深 reorg > D)⇒ P-SAFE 破 ⇒ 落回 Tier1/bounded-lock。**这正是 Tier2 需 C2(对手链 finality 可保守上界)的原因** —— C2 不满 ⇒ P-SAFE 无保证 ⇒ 不给 Tier2。⇒ **Tier2 = C1(能验同一 A)∧ C2(finality 可界)∧ C3(refund 用墙钟)∧ P-SAFE(两腿从同一 A 导出、互斥、跨对相容), 缺一降层。**
 - **可判定谓词(缺一降一层, 非散文)**:
   - **C1**: 对手链能验同一份 A(具 msg-sig 验签原语); 否则收款方呈不了 A → 腿退化纯 timelock。
   - **C2**: 对手链 claim-land 最坏耗时可保守上界; 否则 refund_T 设不住。🔴 **任意对手链 C2 不可估 ⇒ 不可估性本身即降级触发, 非可调参数。**

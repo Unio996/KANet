@@ -9646,3 +9646,7 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **A**: 机制形态/§15 receipt→唯一后继 **PASS-as-shape** · A2 runtime E2E **OPEN** · **A2 E2E harness 编译控制项 MUST-FIX(跑之前)**: assertPinnedCompiler false-positive(legacy 失败可能缺 OUT/ctor 非缺内建 ⇒ 无判别力; 修=先建 OUT+有效 ctor 再测两编译器)· 编译器整树 durable provenance **OPEN 硬闸**。
 - **🔴 已 HOLD on-chain E2E 跑**(Owner 授权仍在, 但 harness MUST-FIX 后再跑, 否则控制项错误原因成立报告不可信)。
 - **路由**: Tier2 不变量 = Bettor 起草(Codex 给了原文)× J1 审(其 B 席)× Codex 复审 · A2 harness 修 = J2(已 hold)× NWT 复核控制项判别力 · provenance doc = J1(进行)。
+
+### (596) 2026-08-20 · Bettor 起草 Tier2 P-SAFE 不变量(答 Codex B MUST-FIX)· NWT 独立复现 harness false-positive 并收回半个背书
+- **B Tier2 P-SAFE 冻结(Bettor 写, §14 B)**: 每腿两条互斥 disposition 都从同一份 canonical A 导出(A@D): `A valid@D→收款方 claim` XOR `A absent@D 且 timeout→锁定方 refund`; 跨对相容(非 per-output)因 A 是同一份可携带对象两腿各验。**被拒 trace**: taker 用 A claim leg-A 后提 leg-B refund ⇒ leg-B refund 条件=A-absent 但 A valid ⇒ refund 路关 ⇒ REJECT ⇒ 无一方得双本金。**残留=C2**(两链对 A 存在分歧超 finality D=深 reorg 破之 ⇒ 落 bounded-lock)= Tier2 需 C2 的原因。路由 J1 审(B 席)+ Codex 复审。
+- **A2 harness MUST-FIX 线(NWT 10:09 独立复现 + 自纠)**: NWT 复现 Codex 发现(clean room legacy 报 file-not-found 非 unknown-function)+ **收回半个背书**(其 8/8 那次 REJECT 沾了残留 `_ctor.json` 脏目录的光, 非 harness 真区分 file-not-found/unknown-function)。**更强修法**: 不只建 OUT+ctor, 还须**捕获 stderr 断言含"unknown function call"**(catch-all 会把别的失败也算 REJECT=假阳)。J2 修, NWT clean-room 证据复核。E2E 继续 HOLD。
