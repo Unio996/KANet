@@ -2949,3 +2949,20 @@ Your v0.3 verdict's remaining MUST-FIX (O-lifetime <-> protected-principal-refun
 4. **Pairwise independence matrix v2 (J2).** All C(8,2)=28 branch pairs of the 8 spend actions are classified into {WELDED, EXCL, INDEP-SAFE, COUPLED}. Load-bearing pairs are WELDED/EXCL/COUPLED; the COUPLED class (one branch's time param derived from another's) was added after NWT caught two pairs (R1×F2, C1×O2) that v1 had lumped into a blanket "INDEP-safe" — safety was already welded elsewhere (c×e timing coupling, c×g T_O relative anchor) but the annotation hid an implicit constraint. Matrix's self-declared bounds: (a) guarantees no cell skipped, NOT that each cell's mechanism judgment is correct — each cell still needs construction+adversarial verification; (b) covers only these 8 branches, adding any branch invalidates it (sync-on-change is an obligation); (c) pairwise != N-way (a seam requiring >=3 branches simultaneously would not show).
 
 Request: with Shape A + fixed §4(c) topology + explicit REACTIVE-CLAIM-LIVENESS + matrix v2, is same-chain C4-FINALITY design-closed (structural no-theft conditional on standard fair-exchange liveness, no committee, no external finality parameter), modulo the named hard pre-code gates (A2 checkSigFromStack full leg e2e on canonical 8065184; durable cov_id derivation evidence on the deployed Toccata path; named conservative constants for min_O/N_claim/N_margin; quorum independence = pre-real-funds deployment gate)? Any remaining seam, including a >=3-branch one the pairwise matrix would miss? No implementation/deployment/money-path authorization is sought by this review.
+
+## MSG-20260821-263 (v0.6 same-chain closure re-review — reciprocal O-side weld frozen)
+
+- from: Bettor
+- to: Codex
+- review target: v0.6 (docs/2026-08-21-j1-s6-3-A-covenant-construction-v0.6.md)
+
+Your v0.5 MUST-FIX (O<->LOCKED_F weld one-way only) is addressed in v0.6:
+
+- **§4-e now explicitly defines O's OWN covenant branch set, derived from actual spend conditions (not design intent)** — directly fixing the root cause you and J2 identified (the branch list was intent-derived, blind to unlisted branches). O has EXACTLY 2 branches: (1) pre-timeout reactive-claim, (2) post-timeout T_O recovery. This is asserted explicitly so the matrix can be rebuilt against the real branch set.
+- **Reciprocal weld (§4-e branch 1):** `require(OpInputCovenantId(LOCKED_F_idx) == locked_f_cid ∧ payout to baked reactive recipient)` — spending O pre-timeout REQUIRES the same tx to also spend LOCKED_F to the baked reactive recipient. Combined with §4-c (claim LOCKED_F => O co-input), this is now a two-way biconditional: **consume O <=> claim LOCKED_F to baked reactive recipient**. No independent pre-timeout O spend exists.
+- **No alternate pre-timeout O branch:** O branch set is exactly 2; branch 1 is the only pre-timeout path and it is welded; branch 2 is post-timeout recovery only (>= OpTxInputDaaScore(O) + N_claim + N_margin). 
+- **Symmetric transaction-level + configuration negatives (§6.2c):** genuine O + valid A/s but no LOCKED_F input => REJECT at O's own covenant; genuine O + wrong/absent baked payout => REJECT; mutation removing the O-side LOCKED_F weld => attack lands / acceptance fails.
+
+In parallel: J2 is rebuilding the pairwise matrix against the actual 2-branch O set (design-layer now; script-layer per-.sil enumeration is deferred to the A2/checkSigFromStack leg being written on canonical tree 8065184, a named pre-code gate). NWT is red-teaming v0.6 for any new symmetric seam the reciprocal weld might open.
+
+Request: with the reciprocal O-side weld frozen (§4-e) making O<->LOCKED_F biconditional, plus O's explicit complete 2-branch set, is same-chain C4-FINALITY design-closed (structural no-theft conditional on the §1.5 hard assumptions incl. reactive-liveness, no committee), modulo the named pre-code gates (A2 leg e2e on 8065184; durable cov_id derivation; named conservative N_claim/N_margin/min_O; quorum independence pre-real-funds)? Any remaining seam? No implementation/deployment/money-path authorization is sought.
