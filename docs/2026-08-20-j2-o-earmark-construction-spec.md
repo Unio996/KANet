@@ -8,6 +8,30 @@
 
 ---
 
+## §0 v2 更正：**v1 的绑定方式被打穿（Codex），须绑 cov_id provenance 而非 script**
+
+**破法**：`O_spk` 是**公开可算**的脚本地址 ⇒ **谁都能往它打钱** ⇒ 可合成一个 spk/value 都对、
+却与真 reveal **毫无血缘**的 `O` ⇒「花 O ⇒ reveal 已上链」与「reveal reorg ⇒ claim 同死」**双双不成立**。
+
+🔴 **我错的那一步**：我检查过 `O_spk` 的 **session 唯一性**（不同 session 不可互换），
+**却把它读成了「只有 reveal 交易能产生 O」** ——
+**唯一性 ≠ 来源；script-bound ≠ origin-bound。查了"能否挪用"，没查"谁能造"。**
+
+### 🔴🔴 而这个错在本仓【有现成先例，且判据在记忆里】
+
+- **合约先例** `PayoutShard.sil:13-18`（J1 落，源于 NWT 2026-06-20 红队）逐字写着：
+  > 「destination-bind **必绑 cov_id PROVENANCE 非 template LOCATION**；
+  > template-match 可被 **recreatable-UTXO 造【同 template 自控 state 的假 PayoutShard】击穿**
+  > → 假 PS 被 attacker claim 走 = **真 theft/grief**。
+  > **cov_id（创世身份，跨 continuation 稳定不可伪）是唯一真实例锚。**」
+- **记忆判据** `feedback-recreatable-utxo-nullifier-defeatable` 写着：
+  > **「审任何 spent-once 机制必问：被花的对象能不能被攻击者重新造一个等价的？」**
+
+⇒ 我的构造**整个建立在"O 不可重造"之上**，而这条问句会**当场**逮到它。
+**这不是一个新坑，是本仓两个月前踩过、修好、并写进合约注释与记忆的同一个坑。**
+
+---
+
 ## §1 它要交付的性质（先写死，防被读成别的）
 
 > **反应腿的 claim 在【结构上】不可能早于 reveal 被链收录；且 reveal 一旦被 reorg，反应腿的 claim 同时失效。**
@@ -19,7 +43,25 @@
 
 ## §2 四个待定项
 
-### (a) `O` 的 scriptPubKey 派生
+### (a) 🔴 **provenance 绑定（v2 修正，取代原 spk 派生方案）**
+
+**绑的是 covenant 身份，不是脚本形状**：
+
+1. `O` 必须是 **reveal-腿锁定 UTXO 的 covenant 后继**（同一 `cov_id`，非任意付款）；
+2. reactive-腿 claim 支 `require(OpInputCovenantId(j) == baked_session_cov_id)`
+   —— 外人打钱造的 look-alike **拿不到该 cov_id** ⇒ **伪造面关闭**；
+3. `spk` / `value` 的检查**仍然保留**，但降级为**格式检查**，**不再承担 provenance**。
+
+🔴 **承重的 deploy 不变量（照 `PayoutShard.sil:26` 那条，漏一条绑定就静默不存在）**：
+relay 必 ① 把 reveal-腿 genesis-mint 为 covenant（`cov_id ≠ 0`）
+② 给**每一个 continuation output**续 `CovenantBinding(cov_id=…)`
+③ 建 v1 tx + compute_budget。
+⇒ **这三条属于链下构造方的义务；covenant 自己检查不出"当初没 mint"。**
+
+🟡 **我未核（J1 源码域）**：cov_id 能否读**非 active input**；reveal-claim 能否**强制**产出携带该 cov_id 的 O；
+该血缘是否**共识 enforce**。**这三条不成立则本 v2 同样不成立。**
+
+### (a-旧) ~~`O` 的 scriptPubKey 派生~~（v1，**已被打穿，保留以示推翻方式**）
 
 `O_spk = P2SH( OEscrow(session_id, reactive_pk, firstmover_pk, T_O) )`
 
