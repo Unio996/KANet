@@ -272,7 +272,13 @@ refund **不**表述为"查无 AUTHORIZED 记录"，而是**单一活状态 UTXO
 - 🔵 **委员不知 s ⇒ 委员泄 A 不再破坏 reveal 序 ⇒ 化解 §16.4② 的委员共处 SPOF**（泄 A 无用、仍需 s）。C4 顺序不靠委员保密 ⇒ 与 no-theft 解耦；委员共处只剩"A 诚实性"顾虑（=§7 闸），不再是 no-theft 破法。
 - 🔵 **非退回 HTLC-alone**：A 表达复杂共识谓词（plain HTLC 不能），s 只供 cross-leg 确定性 reveal 序 = 组合非替代。
 - 🔴 **C4 残留信任是【转移】非【消除】（NWT 红队 a）**：构造堵住"委员泄 A"，但 Δ 的隐含前提是"s 只经首动方**链上** reveal 才被观察（=观察窗 0 时刻）"。s 是首动方私持数据，**无密码学机制阻止其在链上 claim 前私下泄 s**（意外/被 compromise/主动合谋）⇒ 拿到 (A,s) 者可抢在首动方 reveal 前构造反应腿 claim、压缩反应窗。⇒ **残留信任从"委员多方/quorum 不泄 A"【转移】为"首动方单人不泄 s（早于自己链上 reveal）"** —— 非消除。🔵 好处：从 quorum-SPOF（§7 洞、~25% 共处盘）变**单一自然人主体**（风险更集中但**更易归责**）。**必须与委员那条并列显式记为 Tier-2 残留信任，不得因解决 A-泄露即当 C4 零信任。**
-- 🔵 **弱 s 有界为骚扰非盗窃（NWT 红队 b，结合 §16.4①）**：委员只见 h=H(s)、核不了 s 熵 ⇒ 首动方可选可猜弱 s（如 s=0）。但 **payout baked（§16.4①/CloseZkV2 已证）** ⇒ 即便他人猜中弱 s 抢先提交反应腿 claim，钱仍只能付到**预定反应方 baked 地址**，猜中者拿不走 ⇒ 顶多抢跑/占 UTXO 骚扰（费用竞争 / 令合法反应方 claim 二次花费失败需重试）。⇒ **弱 s = 操作层骚扰风险，非本金盗窃**。记为**实现规范**（s 须强随机）非安全闸。
+- 🔴🔴 **弱 s = principal-THEFT，非骚扰（v1.1 更正·Codex v1.0 REJECTED 我 v1.0 的"骚扰"判定）**：我 v1.0（采 NWT 红队 b）写"弱 s 因 payout baked ⇒ 只骚扰不盗窃"——**错**。Codex 盗窃 trace：cutoff 非对称（reveal 腿早、reactive 腿晚；首动方 outgoing 本金那条 reactive 腿的 baked 收款方 = 反应方）。若 s 可猜，反应方提前算出 s ⇒ ①走自己腿 refund/expiry 拿回己本金 + ②趁首动方**更晚 cutoff** 那条 outgoing 腿仍活，用 (A,s) claim 首动方本金 ⇒ **refund(己)+claim(对方) = 正是要防的盗窃结局**。🔴 **baked payout 救不了 —— 攻击者【正是】那条腿的合法 baked 收款方**（付给"预定地址"=付给攻击者）。⇒ **preimage 不可预测性 = 本金安全硬假设，非防抢跑优化**（classic HTLC）。
+  🔨 判据：baked payout 只挡"外人把钱导去第三方"，**挡不住"合法收款方本人就是攻击者"**。NWT(b)+我采纳都漏了"攻击者=baked 收款方"这一步。
+- 🔴 **MUST-FIX C4-ENTROPY（Codex v1.0 新增·Tier-2 硬假设）**：Tier-2 须显式含密码学假设：`s` ≥256-bit CSPRNG 均匀采样 · reveal-leg spend 公布前对反应方**计算不可预测** · `h=H(s)` 两腿锁定**前** session-bound · 实现对 s 长度/格式非冻结 v1 格式**必 fail-closed**。熵不能从 h 链上证 ⇒ 这是**显式 key-gen/secrecy 假设，非 covenant 谓词**。⚠ 与 §17.2「首动方不泄 s」是**不同**假设：那条防"泄露强密"，这条防"用弱密被暴力/猜解"（无需泄露）。二者并列记为 Tier-2 残留。
+- 🔴 **C4 cutoff leg-role 冻结（Codex v1.0·别留散文）**：Tier-2 须冻死具体 leg-role 的非对称 deadline，不是"reactive 晚 Δ"一句：
+  - **reveal 腿 = 更早 cutoff**（首动方在此用其 witness 首次公开 `s`）；**reactive 腿 = 更晚 cutoff**（从 reveal-leg finalization 学到 s 的一方在此 claim）。
+  - 冻结不等式（对齐 §14 typed·墙钟 ms）：`reactive_leg_cutoff > reveal_leg_finalization_time + finality_D(reveal腿) + observe + claim_land_worst(reactive腿) + margin`。即**给"从 reveal-leg finalization 学到 s 的一方"留够 finality+反应+落链余量**。
+  - 与 §14 fail-closed 单位地板（`require(refund_T>=5e11)`）叠用；leg-role 与资产流向的 covenant 细化由 J1（silverc 域）落。
 - **弃委员加密 A**：加信任-保密角色、弱化 §8 verifiable-attestation vs trusted-oracle、破法更多（aggregator/distributor 泄、门限联盟泄、log/backup/RPC 泄、误前发、误投）+ 可用性/审查另一条 liveness。若将来仍要委员加密 A，须显式把委员保密列为 Tier-2 信任假设（非监控项）。
 
 ### §17.3 C4-break 检测：弃跨链 daaScore（Codex 否），改共同观察域
@@ -287,7 +293,23 @@ refund **不**表述为"查无 AUTHORIZED 记录"，而是**单一活状态 UTXO
 - 冻正：**Tier-1 = bounded-lock + per-leg 授权完整性**（**明说容许跨腿非对称授权**）。C4 缺失 session 落 Tier-1 = 此义。真正 both-leg 原子性只 Tier-2（C4 hybrid-secret）给。
 
 ### §17.6 v1.0 净状态（送 Codex 复审）
+> 🔴 **已被 §17.7 v1.1 替代（Codex v1.0 verdict 后）**：下方 "P-SAFE-2/Tier-2 待 Codex 复审 hybrid 是否闭" 已有结果（未闭·弱s更正+C4-ENTROPY+cutoff冻结），以 §17.7 为准。
 - P-SAFE-1 = **CLOSED**（§17.1 血缘措辞）。
 - P-SAFE-2/Tier-2 no-theft = C4 hybrid-secret（§17.2）∧ cutoff 非对称 ∧ §17.1 血缘 ∧ payout baked（§16.4①/CloseZkV2 已证）；待 J1 covenant 可建性 + Codex 复审 hybrid 是否闭。
 - 检测 = 共同观察域（§17.3，NWT 出）。水印 = 可选取证（§17.4）。Tier-1 = per-leg 完整性（§17.5）。
 - 硬闸不变：§7 quorum 独立性（真金前）· A2 runtime E2E（负方向重跑中）· 单位地板/不等式（§14）。
+
+### §17.7 v1.1 净状态（Codex v1.0 verdict 后·2026-08-20·RESPONSE-MSG257 桥 37199c49）
+> Codex v1.0 收: 方向 GREEN, 未 design-closed。本节替代 §17.6。
+- ✅ **P-SAFE-1 = CLOSED**（design 层, Codex 接受 §17.1 单一活 UTXO 血缘）。
+- ✅ **C4 hybrid 方向 = PASS**；委员保密依赖 = **移除**（Codex 认好）。Tier-1 措辞（§17.5）= PASS。
+- ✅ **checkSigFromStack 原语 runtime = CLOSED**（Codex 独立确认 CLEAN 8 格, **限 pinned 探针 scope**）。
+- 🔴 **Tier-2 no-theft = 仍 OPEN**, 待:
+  - **弱 s 更正（§17.2, 已改 v1.1）**: 弱 s 是 principal-theft 非骚扰（Codex REJECTED 我旧判）。
+  - **C4-ENTROPY MUST-FIX（§17.2, 已加）**: s 强随机+不可预测+session-bound+fail-closed 格式 = Tier-2 硬假设。
+  - **C4 cutoff leg-role 冻结（§17.2, 已加）**: reveal 腿早/reactive 腿晚 + 不等式给 s-learner 留 finality+反应 margin; covenant 细化 J1 落。
+  - Tier-2 残留信任（并列, 显式非零信任）: 首动方不泄 s（§17.2 a）+ s 强随机不可猜（§17.2 C4-ENTROPY）。
+- 🟡 **A2-whole（receipt→state 授权路）= OPEN**（Codex 列 5 项, 均在真 covenant 非探针）: ①§6-1 receipt 字节绑定 ②threshold+委员根验 ③receipt→唯一后继 ④篡改 receipt/threshold/成员/后继/payout 负测 ⑤真 covenant path 的 durable provenance。**⇒ checkSigFromStack 原语闭 ≠ A2-whole 闭。**
+- 检测（§17.3 共同观察域）= **仅 ops 证据, 非 covenant safety primitive**（Codex 明确）。水印（§17.4）= 可选取证。
+- 硬闸不变: §7 quorum 独立性（真金前）· 单位地板/不等式（§14）。
+- **下一步**: Bettor v1.1 已改 §17.2（弱s/熵/cutoff）→ 送 Codex 复审 Tier-2 是否闭; J1 covenant 可建性（reveal-leg `checkSigFromStack(A)∧H(s)==h` + s fail-closed + leg-role 资产流）; A2-whole 5 项另起（receipt-binding e2e）。

@@ -9708,3 +9708,12 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **唯一真·跨机(独立基础设施)= J1 :3300**(独立节点、独立读数, UTXO 核 10/10)。
 - ⇒ (602) "三方独立" **应读作"独立逻辑判断", 不是"独立基础设施"**。A2 CLOSED 的跨机独立仅 J1 一个角度; 其余是同机独立逻辑复现 + RPC 双读 + txid 机制(同机各跑)。judge 判据仍成立(闭档不靠独立节点数, 靠判据+可归因), 但独立度表述钉准: **"独立执行/判断" vs "独立基础设施" 两种独立性不混说**(NWT 立)。
 - 🔨 通则: 引用"N 方独立"时须分清哪种独立(逻辑/判断 vs 基础设施); loopback/共享节点 = 同基础设施, 会以镜像方式同坏。见 memory `reference-shared-code-fails-in-mirror-image-ways-per-machine` / `cross-node-testing-critical-j1-separate-node`。
+
+### (604) 2026-08-20 · Codex v1.0 verdict · B v1.1(改弱s盗窃错+C4-ENTROPY+cutoff冻结)· A2 范围澄清(原语闭≠A2-whole闭)
+- **Codex v1.0(桥 37199c49)**: 方向 GREEN, 未 design-closed。P-SAFE-1 CLOSED(单一活UTXO血缘)· C4 hybrid 方向 PASS(委员保密依赖移除)· Tier-1 措辞 PASS · **checkSigFromStack 原语 runtime CLOSED**(独立确认 CLEAN 8格, 限探针 scope)。
+- 🔴 **Bettor 认错(§17.2)**: v1.0 我(采 NWT b)写"弱 s=骚扰非盗窃, 因 payout baked" —— Codex REJECTED, **是 principal-theft**。trace: 弱 s ⇒ 反应方提前算出 s ⇒ refund(己腿)+用(A,s)claim 首动方更晚cutoff腿本金 = refund(己)+claim(对方)。**baked payout 救不了 —— 攻击者正是那腿 baked 收款方**(付"预定地址"=付攻击者)。判据: baked 挡外人导第三方, 挡不住合法收款方本人是攻击者。⇒ preimage 不可预测 = 本金安全硬假设。
+- **v1.1 已改(Bettor)**: §17.2 弱s→theft trace + **C4-ENTROPY MUST-FIX**(s≥256bit CSPRNG+不可预测+session-bound+格式fail-closed=Tier-2硬假设, 与"不泄s"不同假设) + **C4 cutoff leg-role 冻结**(reveal腿早/reactive腿晚+不等式给s-learner留finality+反应margin)。§17.7 v1.1净状态替 §17.6。
+- 🔴 **A2 范围澄清(Bettor 对 Owner "A CLOSED" 过大, 更正)**: checkSigFromStack **原语** runtime CLOSED ≠ **A2-whole**(receipt→state 授权路) CLOSED。Codex 列 5 项仍开(真 covenant 非探针): ①receipt字节绑定②threshold+委员根验③receipt→唯一后继④篡改各字段负测⑤真path durable provenance。
+- **B 态**: P-SAFE-1 闭 + C4方向/Tier-1过 + 委员保密移除; Tier-2 未闭(弱s已更正+C4-ENTROPY+cutoff冻, v1.1 送 Codex 复审)。
+- **A 态(更正)**: 原语 runtime 闭 + provenance(探针)闭; **A2-whole 开 5 项**。
+- **派工**: J1 covenant 可建性(reveal-leg `checkSigFromStack(A)∧H(s)==h`+s fail-closed+leg-role资产流)· NWT 红队"攻击者=baked收款方"类漏 + A2-whole 负测设计 · J2 A2-whole receipt-binding e2e(①-④)。
