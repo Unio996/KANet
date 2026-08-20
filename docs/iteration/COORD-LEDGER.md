@@ -9607,3 +9607,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **B 冻结(J1 完整 verdict, 直读库)**: 默认 = **bounded-lock-duration(墙钟 ms >=5e11)+ authorization-atomicity**; **no-theft 仅 C1∧C2∧C3 子集**(C1 对手链能验同一 A / C2 对手链 claim-land 最坏耗时可保守上界·不可估即触发降级非可调参 / C3 refund deadline 墙钟非 DAA); **fail-closed 单位双闸地板** `require(refund_T>=5e11)` covenant+构造侧(= B 任何安全等级地基, 单位口误破连 bounded-lock); **不等式** 每腿 `refund_T > A_avail+finality_D+claim_land_worst+margin`。
 - **A 冻结+E2E-gated**(573/580): 委员阈值+merkle 成员证明对 baked 根+唯一后继+绑 §6-1 receipt; A2=`checkSigFromStack`(upstream `checkMsgSig`)= SOURCE-PLAUSIBLE/RUNTIME-UNVERIFIED; 前置=编译器整树归档(8065184)+e2e; 授权根=§7 quorum 硬闸。
 - **v0.5 落 §14 consolidated FROZEN**(集中一处, 应 J2 findable 判据)。发 Codex v0.5 终审(其要的"一个冻结 A+一个冻结 B")。未闭硬闸明列(A2 e2e/编译器归档/quorum/rotate)。**无实现/部署/money-path 授权。**
+
+### (589) 2026-08-20 · v0.6 修 Codex v0.5 review(18e2725b): B auth-atomicity-vs-C1 矛盾→分层 + 不等式 typed · A 机制 PASS-as-shape 仍 E2E-gated
+- **Codex v0.5 (18e2725b)**: 方向 GREEN, 未 design-complete。**A 机制形态 ACCEPTED**(A2 receipt 路 + merkle-成员证明对 baked 根 + 唯一后继; checkMsgSig/CSFS source-plausible)但**运行时/编译器 provenance 仍 OPEN 硬闸**(durable 编译器 + e2e valid-PASS/mutation-REJECT + 证 §6-1 receipt 字段唯一决定后继)。
+- **🔴 B MUST-FIX(真矛盾)**: v0.5 把 auth-atomicity 放【默认】—— 但它需 C1(两腿验同一 A)、C1 可失败 ⇒ C1 假时无 auth-atomicity。**修=分层**(v0.6): Tier0 base=bounded-lock(所有支持腿默认, 无 auth-atomicity)/ Tier1 +C1=auth-atomicity(C1 假落回 Tier0)/ Tier2 +C1∧C2∧C3+principal-safety=no-theft。取分层-非强制(支持面宽; 备选 C1 强制则无 A-验证器对手链 unsupported)。
+- **B 不等式 typed**(修维度歧义): `refund_T`(绝对墙钟ms>=5e11)> `A_avail`(绝对墙钟ms)+ `finality_D`/`claim_land_worst`/`margin`(时长ms); 量纲 绝对>绝对+Σ时长=绝对 一致。
+- **状态 v0.6**: A 机制 PASS-as-shape/E2E-gated · B 分层修 + typed。发 Codex MSG-254 复审。🚩 分层修细化了 J1 verdict(auth-atomicity 非默认、需 C1)—— 旗 J1 确认(其 B 席)。未闭硬闸不变(A2 e2e/编译器归档/quorum/rotate)。

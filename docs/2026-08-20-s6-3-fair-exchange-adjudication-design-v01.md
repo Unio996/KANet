@@ -1,6 +1,6 @@
 # D-012 §6-3 fair-exchange 设计卡 v0.1 — Exchange 裁决角色（报备层 · 零生产改动）
 
-> **Status**: DRAFT **v0.5** · Bettor 2026-08-20 主笔 · 设计层, 零生产码。**v0.3 = Codex MSG-251/f5fce55b(方向 GREEN); v0.4 = 冻结两条 MUST-FIX**——**A**(J1+J2 实读 PayoutShardV2.sil 真码定机制: close_attest 4-of-5 链上验 + merkle 成员证明对 baked 根 + 确定性后继 + 脆弱钉死; 授权根=§7 闸)· **B**(诚实降级 = bounded-loss 协调结算 + 授权原子性, 非原子公平交换, 承 Codex 退路)。见 §13。
+> **Status**: DRAFT **v0.6** · Bettor 2026-08-20 主笔 · 设计层, 零生产码。**v0.3 = Codex MSG-251/f5fce55b(方向 GREEN); v0.4 = 冻结两条 MUST-FIX**——**A**(J1+J2 实读 PayoutShardV2.sil 真码定机制: close_attest 4-of-5 链上验 + merkle 成员证明对 baked 根 + 确定性后继 + 脆弱钉死; 授权根=§7 闸)· **B**(诚实降级 = bounded-loss 协调结算 + 授权原子性, 非原子公平交换, 承 Codex 退路)。见 §13。
 > **定位**: §6-1 Oracle 权限边界契约(all-review-passed 冻结, target `154291d8`)的**第一个复用消费者**; DECISIONS.md §6 执行序 item3 = "从零造裁决角色, 非接现成接口"。**造它同时是对 §6-1 冻结的反向审计**(第一个消费者暴露契约漏没漏)。
 > **依据**: Codex `RESPONSE-20260731-…-ADVERSARIAL-CONCLUSION`(规定卡的 11 节 + 3 打回)· §6-1 冻结稿 `docs/2026-08-03-oracle-skill-interface-permission-boundary-freeze-design.md` §4 · KB `architecture/zk-track-c-verified-trustless-settle.md` + `00-position/northstar-open-collaboration-protocol.md` · 现有 exchange 码(exchange-machine.js / api/exchange.js:747-796 / exchange-machine.js:563)。
 > **权分**: Bettor 设计 × J1/NWT 审 × Codex 红队。**真实 roster**(J2/NWT 独立性未证实但内容可用; J1+Codex 确证独立)。
@@ -170,14 +170,23 @@
 - **A2 receipt 验签原语** = `checkSigFromStack`(upstream 名 `checkMsgSig`)编成 `OpCheckSigFromStack`。**状态 = SOURCE-PLAUSIBLE / RUNTIME-UNVERIFIED / E2E-GATED**: 前置 ①canonical 编译器**归档整树+重建流程**(不止 diff; 唯一同含 #132+OP_PICK 的 = `8065184` 脆弱未推分支)②最小 checkSigFromStack e2e(真 runtime 路径, 合法过/改一位拒)。**协议不变量钉 opcode 语义+编译器 commit, 非内建名。**
 - **A 授权【根】= §7 委员-quorum-中心化(回溯 24.7%/前瞻~86% 本机)= 授权真金前硬部署闸**(归 Owner)。
 
-### B（跨腿公平交换)— 冻结
-- **默认保证 = bounded-lock-duration(墙钟 ms, 值域 `>=5e11`) + authorization-atomicity**(同一份 A 两腿各自独立验, 无"A 授权 B 未授权"态)。
-- **no-theft = 非默认主张; 仅在可判定子集 C1∧C2∧C3 成立(缺一即退回 bounded-lock, 谓词非散文)**:
+### B（跨腿公平交换)— 冻结（v0.6 分层, 修 Codex 18e2725b 的 auth-atomicity-vs-C1 矛盾）
+- **🔴 v0.5→v0.6 修**: v0.5 把 auth-atomicity 放成【默认】错了 —— auth-atomicity **需要 C1**(两腿都能验同一 A), 而 C1 可失败; C1 假时一腿 attestation-gated、另一腿验不了 A ⇒ 无 auth-atomicity。⇒ **分三层, 保证随谓词升级**:
+  - **Tier 0(base·所有受支持腿的默认)= bounded-lock-duration(墙钟 ms, 值域 `>=5e11`)**。**不含** auth-atomicity。任一支持的对手链至少拿这层。
+  - **Tier 1(需 C1)= + authorization-atomicity**(同一份 A 两腿各自独立验, 无"A 授权 B 未授权"态)。**C1 假 ⇒ 落回 Tier 0**(不静默假装有 auth-atomicity)。〔备选: 若要 auth-atomicity 成硬默认, 则无 A-验证器的对手链 = **unsupported/fail-closed**, 不接入; 本 v0.6 取分层-非强制, 支持面更宽。〕
+  - **Tier 2(需 C1∧C2∧C3 + 下方 principal-safety 不变量)= + no-theft**。
+- **可判定谓词(缺一降一层, 非散文)**:
   - **C1**: 对手链能验同一份 A(具 msg-sig 验签原语); 否则收款方呈不了 A → 腿退化纯 timelock。
   - **C2**: 对手链 claim-land 最坏耗时可保守上界; 否则 refund_T 设不住。🔴 **任意对手链 C2 不可估 ⇒ 不可估性本身即降级触发, 非可调参数。**
   - **C3**: 每腿 refund deadline 用墙钟 tx.time(非 DAA; DAA 追赶期压缩窗)。
 - **🔴 fail-closed 单位地板(B 任何安全等级的地基, 非可选纵深)**: covenant 侧 `require(refund_T >= 5e11)` + 构造侧同断言(**双闸**, 链上那道防构造侧漏)。理由: 单位口误(秒→DAA 侧)把 refund_T 打回 DAA 模式 ⇒ 连 bounded-lock 的"锁 T 后必可退"都破(退款腿 129 年/kaspad-reject)。
-- **可冻结不等式(Codex MUST-FIX B)**: 每腿 `refund_T(墙钟ms) > A_avail + finality_D(该腿链) + claim_land_worst(该腿链,含拥堵) + margin`。KANet 腿各项可估; 对手腿 finality_D/claim_land 非 KANet 权威 ⇒ 落 C1/C2 判定。finality_D 取值法待 A2 e2e 定后 J1 补。
+- **可冻结不等式(Codex MUST-FIX B·v0.6 typed: 每项定类型/参照系, 修 Codex "维度歧义")**: 每腿
+  `refund_T > A_avail + finality_D + claim_land_worst + margin`, 其中:
+  - `refund_T` = **绝对墙钟时间戳(Unix ms, >=5e11)** —— 该腿 covenant 的 refund lockTime。
+  - `A_avail` = **绝对墙钟时间戳(Unix ms)** —— A 保证可得的最早时刻。
+  - `finality_D` / `claim_land_worst` / `margin` = **时长(ms)** —— 分别: 该腿链达所需 finality 深度耗时 / 该腿链 claim tx 落链最坏耗时(含拥堵) / 安全余量。
+  - ⇒ 量纲: 绝对ms > 绝对ms + Σ时长ms = 绝对ms(一致)。语义: refund 截止**晚于**"A 可得 + 走完 finality + claim 落链 + 余量"这个最迟完成时刻。
+  - KANet 腿各项可估; 对手腿 `finality_D`/`claim_land_worst` 非 KANet 权威 ⇒ 落 C1/C2 判定。`finality_D` 取值法待 A2 e2e 定后 J1 补。
 
 ### v0.5 净状态
 - 方向 GREEN(Codex 多轮)· §8 PASS(收窄)· A 机制冻+E2E-gated · B 冻(默认 bounded-lock+auth-atomicity, no-theft C1∧C2∧C3 子集, 单位双闸地板, 不等式)。
