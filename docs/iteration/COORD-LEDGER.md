@@ -9635,3 +9635,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **编译器 provenance de-risk(J1 10:01 + J2 10:02 双核)**: **8065184 = origin/master 上的公开永久基座 `d25bd34`(#136, 含 #132 checkSigFromStack=4)+ 一行 OP_PICK diff**(`compile_byte_sequence_cast_call` 里删 `*ctx.stack_depth += 1;`)。⇒ Codex durability 从"归档整树"降到"fetch d25bd34 + 存一行 diff + rebuild"。J2 供权威 diff + 核实(git branch -r --contains: d25bd34→origin/master, 8065184→空)。
 - **provenance doc 约定(Bettor 定)**: KANet docs/ 一份, 五项: ①基座 d25bd34(公开永久)②OP_PICK 一行 diff(J2 权威)③确定性 rebuild 流程 ④**产物级 loud 验收**(J2 关键: bug 不报错只让 covenant 悄带 off-by-one ⇒ 验收落产物-编出正确 bytecode, 不落构建过程; + binary sha256)⑤assertPinnedCompiler。J1 出稿, NWT 核 rebuild 确定性。
 - 并行态: A runtime(E2E 跑·Owner 授权·执行中)+ A provenance(J1 doc 进行)+ §15 receipt-绑定(Bettor✅)+ Codex v0.6 处理。
+
+### (594) 2026-08-20 · Bettor 认 provenance 第4项错(J2 纠): binary-hash 当重建判据=false-negative · 拆 4a 分发完整性 + 4b 产物 byte-exact
+- **认错(J2 10:04)**: 我 (593) provenance 第4项"binary sha256 供重建后比对同一 binary" **错** —— Rust release 非逐字节可复现(嵌入绝对路径/时间戳/toolchain)⇒ 合法重建得不同 sha256 ⇒ 拿它当重建成功判据把成功判成失败(false-negative)。
+- **修(J2 拆)**: 4a **分发完整性** = binary sha256 `9de7f2f682bc9e50a4b922e1c811335f1b1cd67c175f2e01df6fa6efc9015fc4`(是不是同一文件, 防拿错)· 4b **重建成功判据** = 重建的编译器编固定被测物 → 与现 binary 输出 byte-exact 比对(判据落产物 bytecode 非 binary hash, 因 bug 不报错只让 covenant 悄带 off-by-one; J2 已备基准)。= 又一次"验产物不验过程"。
+- provenance doc(J1 出)用改后五项(①基座 d25bd34 ②OP_PICK diff ③rebuild 流程 ④a 分发 sha256 + ④b 产物 byte-exact ⑤assertPinnedCompiler)。NWT 核 rebuild 确定性。
