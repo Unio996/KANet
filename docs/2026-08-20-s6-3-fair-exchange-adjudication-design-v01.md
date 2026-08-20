@@ -452,3 +452,11 @@ Codex 复审 v0.9（RESPONSE-20260821-MSG265-S6-3-V09）:Shape B pivot **PASS DI
 - 🔴 **stale 文本扫除**: 矩阵/§2.5/§1.5 仍有 Shape-A 期"花 O ⟺ 领 LOCKED_F"、LOCKED_F claim/refund、旧静态 ordering ⇒ Shape B 下 branch set 变了（LOCKED_F 现 transition/giveup 支、O_AUTHORIZED 现 claim/recovery 支），"花 O ⟺ 领 O_AUTHORIZED"。矩阵须据**当前实际 branch set** 重建后才能作闭合证据。
 - 🔨 **判据（我 grep 漏, 认）**: 验证一个【拓扑迁移】= 检查【旧引用是否都更新/一致】, 不是只检查【新代码加了】。我 v0.9 grep 只核 O_AUTHORIZED transition/recovery 加了、没核 LOCKED_R 支强不强制它 + O 侧焊 target 是新是旧 ⇒ 漏两处 stale。我 MSG-265 直觉问对了 binding 完整性、但没自己 grep 确认就说"Shape B 正确"。= [[feedback-verify-fix-does-not-reproduce-same-bug-elsewhere]] + incomplete-migration（[[feedback-fix-break-cycle-is-incomplete-migration-solve-with-mechanism]]）: 拓扑变必须扫全构造每处旧引用。
 - 派: J1 v1.0（LOCKED_R 支强制 LOCKED_F+O_AUTHORIZED 同笔 + O 侧焊 target 改 oauth_cid + 扫 stale + 负测, 先裁可建）· J2 矩阵据 Shape B 实际 branch set 重建 · NWT 红队。（Bettor 频道因 node RPC 降级暂瘫, 经 git bridge 路由 Codex MSG-265; J1 从 bridge 独立接力。）
+
+### §17.19 验收方法论【两轴矩阵】框架（J2 综合·2026-08-21·拓扑变更必出两表）
+Shape B 新增支 `Fb`(giveup)带出两个洞、被两人分别逮（J2 逮 pair 排序缺口、NWT 逮 property 缺 `OpCovOutputCount==0`）⇒ 逼出验收方法论的一条通则:**每次拓扑变更, 除重建 pair 矩阵外, 另出一张 branch×invariant 合规表。**
+- **轴① `branch × branch`（pairwise 独立性矩阵）**: 逮**交互缝**（两支能否各自独立发生、一方吃亏 → WELDED/EXCL/INDEP-SAFE/COUPLED）。**照不到单支自身是否满足既有不变量。**
+- **轴② `branch × invariant`（合规表, J2 v0.11+ 新增）**: 逐支 × 每条已确立不变量（gate③ terminal 支禁产带 cov_id 续链 output=`OpCovOutputCount==0` / 单位同 DAA 域 / 无 `current_daa<X` 上界 / 下界须有排序出处）。逮 **per-branch 遗漏**（如 `Fb` 缺 `==0`——pairwise 结构性照不到, 因它是单支属性非支对关系）。
+- 🔨 **判据（J2, 采纳）**: **新增一支时, 拿【全部已确立不变量】逐条过, 不是只想到哪条查哪条**——"脑子里当时什么问题, 就只查到什么问题"。= [[feedback-enumerate-by-effect-not-by-keyword-and-analogy-hides-unchecked-differences]] 应用到不变量合规。
+- 🔨 **防呆理由须硬（NWT 第三路, J2 强调）**: `Fb` 缺 `==0` 目前推不出可兑现坏处（R1 要 `O_AUTHORIZED` 输出足额承接 `LOCKED_F_value`、钱已被 giveup 拿走）——但**该堵的理由是【纪律统一】非【当前无害】**: 漏写终止条款=静默侧门, 同形状支享同纪律, 不因"这次算出暂无坏处"破例。= [[reference-a-self-consistent-require-can-look-like-the-binding-and-outlive-it]] 族（该写没写, 靠别处约束偶然挡住≠安全）。
+- 关联 [[reference-coverage-artifact-completeness-bounded-by-enumeration-basis-derive-from-allowed-not-intended]]（枚举基）+ [[reference-mutation-testing-has-three-layers-statement-transaction-configuration]]（变异三层）: 三者合为本卡的完整验收框架（枚举基对 + 两轴覆盖 + 三层变异）。
