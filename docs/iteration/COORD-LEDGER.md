@@ -9692,3 +9692,13 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **A2 runtime 8 格重跑**: 6 负例(V1-V5b)**全因脚本验证被拒**(`failed to verify the signature script`, V4=`script ran but verification failed`), 每格同窗 V0=PASS, V5c PASS —— 我+NWT 各自读 run-evidence.json 原文双独立 concur。**负方向坐实**。唯 V0-final(收尾冗余 V0)inconclusive = 资金时序 transient(非原语)。⇒ Bettor **不用裁量覆盖机械判据**(exit 1=未过), 授权干净重跑修 V0-final 注资/窗 → 零-inconclusive exit-0 单即闭。证据入库 `docs/csfs-e2e-evidence/`(scratch gitignored+覆盖, 判据③承重证据保现场)。
 - **纪律**: 今日判据第三次挡下假绿(晨 V0-control 挡 5 / exit-semantics 挡 1 / 现 zero-inconclusive 挡 V0-final)。
 - **A/B 对 Owner**: A = provenance CLOSED + runtime 负方向坐实差 1 张干净单; B = 方向 GREEN, Tier-2 v1.0 送 Codex 复审。待干净单 + Codex v1.0 verdict 合并报。
+
+### (602) 2026-08-20 · ✅ A2 runtime CLOSED(三方独立)⇒ A 全闭(provenance+runtime)· txid 撞车取证episode
+- **A2 runtime = CLOSED**: 8 格 CLEAN 单(exit 0/零 inconclusive)。负方向: checkSigFromStack 对 6 类篡改本轮各返 false、节点因**脚本验证**拒(`failed to verify the signature script`; V4=`script ran but verification failed`), 每窗同窗 V0=PASS 可归因。正方向: V5c(e0515f3f)+V0-final(b5306edd)+各窗 V0 全新链上接受 DAG 可查。
+- **txid 撞车 episode(取证纪律范本)**: Bettor 独立读 CLEAN 证据揪出 CLEAN V1/V2/V3 txid == dirty V3/V4/V5a(偏移2), HOLD 闭档。解释: **Kaspa txid 不含 signatureScript** ⇒ 复用未花 UTXO 的不同 witness tx **同 txid 不同交易**; CLEAN 改复用 P2SH 已有未花 UTXO(消注资延迟)按链上序取 ⇒ UTXO-格配对位移 ⇒ txid 撞。**排除陈旧(b)的决定性数据**: 撞 txid 6c1aa057 = dirty V4 拒因`script ran but verification failed` vs clean V2`not all signatures empty` = **同 txid 不同拒因 ⇒ 本轮重新提交、节点按本轮 witness 重验**(陈旧记录不可能变)。三方独立: J2 机制+数据 / NWT 先读错源(mutable scratch 被 CLEAN 覆写=CLEAN比CLEAN, 自撤)重做+亲跑 `_txid_witness.mjs` / Bettor 亲跑脚本+亲比 committed 双份。
+- **Bettor 自纠**: 12:30 说"负例=re-referenced 历史"错; 真相更强(本轮新提交新验, txid 撞是 witness-exclusion 假象)。NWT 自纠"被拒 tx 是不可变链上事实"错(拒绝 tx 从不进 DAG, 证据=捕获 RPC 拒因、非 DAG 可查, 此为可验证性边界)。
+- **附带加固**: 节点不按 txid 返缓存、每次实跑脚本按 witness 出结果(6c1aa057 同 txid 两拒因)。
+- **纪律**: 今日判据/独立读第 N 次挡下假绿(V0-control 5 / exit-semantics 1 / zero-inconclusive V0-final / Bettor-txid-flag 揪复用)。无人拿"8 PASS 绿了"当结论。J2 写 README 不让"CLEAN"暗示更多。
+- **⇒ A 全闭**: provenance(源树+4b, 三方独立)+ runtime(8 格 CLEAN, 三方独立)。硬闸仍在: §7 quorum 独立性(真金前)· A1 未选(走 A2)· rotate/revoke(out-of-scope)。
+- **B 态**: 方向 GREEN, v1.0 §17(5 fix, C4 hybrid-secret)送 Codex MSG-257 复审中; J1 confirm C4 hybrid covenant 可建(`require(blake2b(s)==h_baked)` + checkSigFromStack(A)); 残留=首动方不泄 s(转移非消除)+ 弱 s 有界骚扰。
+- **⇒ 报 Owner**: A=CLOSED; B=方向 GREEN、Tier-2 待 Codex v1.0 concur。
