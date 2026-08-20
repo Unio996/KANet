@@ -1,6 +1,6 @@
 # D-012 §6-3 fair-exchange 设计卡 v0.1 — Exchange 裁决角色（报备层 · 零生产改动）
 
-> **Status**: DRAFT **v0.4** · Bettor 2026-08-20 主笔 · 设计层, 零生产码。**v0.3 = Codex MSG-251/f5fce55b(方向 GREEN); v0.4 = 冻结两条 MUST-FIX**——**A**(J1+J2 实读 PayoutShardV2.sil 真码定机制: close_attest 4-of-5 链上验 + merkle 成员证明对 baked 根 + 确定性后继 + 脆弱钉死; 授权根=§7 闸)· **B**(诚实降级 = bounded-loss 协调结算 + 授权原子性, 非原子公平交换, 承 Codex 退路)。见 §13。
+> **Status**: DRAFT **v0.5** · Bettor 2026-08-20 主笔 · 设计层, 零生产码。**v0.3 = Codex MSG-251/f5fce55b(方向 GREEN); v0.4 = 冻结两条 MUST-FIX**——**A**(J1+J2 实读 PayoutShardV2.sil 真码定机制: close_attest 4-of-5 链上验 + merkle 成员证明对 baked 根 + 确定性后继 + 脆弱钉死; 授权根=§7 闸)· **B**(诚实降级 = bounded-loss 协调结算 + 授权原子性, 非原子公平交换, 承 Codex 退路)。见 §13。
 > **定位**: §6-1 Oracle 权限边界契约(all-review-passed 冻结, target `154291d8`)的**第一个复用消费者**; DECISIONS.md §6 执行序 item3 = "从零造裁决角色, 非接现成接口"。**造它同时是对 §6-1 冻结的反向审计**(第一个消费者暴露契约漏没漏)。
 > **依据**: Codex `RESPONSE-20260731-…-ADVERSARIAL-CONCLUSION`(规定卡的 11 节 + 3 打回)· §6-1 冻结稿 `docs/2026-08-03-oracle-skill-interface-permission-boundary-freeze-design.md` §4 · KB `architecture/zk-track-c-verified-trustless-settle.md` + `00-position/northstar-open-collaboration-protocol.md` · 现有 exchange 码(exchange-machine.js / api/exchange.js:747-796 / exchange-machine.js:563)。
 > **权分**: Bettor 设计 × J1/NWT 审 × Codex 红队。**真实 roster**(J2/NWT 独立性未证实但内容可用; J1+Codex 确证独立)。
@@ -159,3 +159,27 @@
 - **v0.4 主张 = "bounded-loss 协调结算 + 授权原子性", 明确非"原子公平交换"**。
 
 **净**: 两条 MUST-FIX 从"列选项"进到"冻结机制/状态机"(Codex 要的)。A/B 均冻结; **A 的授权独立性 + quorum = 授权真金前硬部署闸(归 Owner)**。下一审 = Codex 对 v0.4 冻结物。
+
+## §14 v0.5 FROZEN — A + B 冻结物（consolidated·给 Codex 终审的单一权威处·2026-08-20）
+
+> 本节把散在 §4/§7/§11-13 + 账本 (573)-(587) 的冻结物**集中一处**(应 J2 "不可撤记录更正须可被找到" 判据)。**A 机制冻、E2E-gated; B 冻。** 无实现/部署/money-path 授权。
+
+### A（attestation → authoritative state）— 机制冻结, 运行时 E2E-gated
+- **形态**: 前置 covenant 验阈值 attestation → 唯一确定性后继 → 无签字 claim(CloseZkV2/bshard-close-enforce 先例)。
+- **授权链**: N `checkSig`(spend 授权) + `require(validSigs>=threshold)`; **委员集授权 = 对 baked 委员根(`poolMerkleRoot` 类, ctor 烤)的 merkle 成员证明**(非 `committeePkHash` 自洽 require = 非承重, refactor-trap 已钉注释); 后继 state commitment 从验过 receipt 确定性派生(唯一后继); 绑 §6-1 receipt 全字段 {network/version/session/policy/outcome/evidence/committee-epoch/replay}。
+- **A2 receipt 验签原语** = `checkSigFromStack`(upstream 名 `checkMsgSig`)编成 `OpCheckSigFromStack`。**状态 = SOURCE-PLAUSIBLE / RUNTIME-UNVERIFIED / E2E-GATED**: 前置 ①canonical 编译器**归档整树+重建流程**(不止 diff; 唯一同含 #132+OP_PICK 的 = `8065184` 脆弱未推分支)②最小 checkSigFromStack e2e(真 runtime 路径, 合法过/改一位拒)。**协议不变量钉 opcode 语义+编译器 commit, 非内建名。**
+- **A 授权【根】= §7 委员-quorum-中心化(回溯 24.7%/前瞻~86% 本机)= 授权真金前硬部署闸**(归 Owner)。
+
+### B（跨腿公平交换)— 冻结
+- **默认保证 = bounded-lock-duration(墙钟 ms, 值域 `>=5e11`) + authorization-atomicity**(同一份 A 两腿各自独立验, 无"A 授权 B 未授权"态)。
+- **no-theft = 非默认主张; 仅在可判定子集 C1∧C2∧C3 成立(缺一即退回 bounded-lock, 谓词非散文)**:
+  - **C1**: 对手链能验同一份 A(具 msg-sig 验签原语); 否则收款方呈不了 A → 腿退化纯 timelock。
+  - **C2**: 对手链 claim-land 最坏耗时可保守上界; 否则 refund_T 设不住。🔴 **任意对手链 C2 不可估 ⇒ 不可估性本身即降级触发, 非可调参数。**
+  - **C3**: 每腿 refund deadline 用墙钟 tx.time(非 DAA; DAA 追赶期压缩窗)。
+- **🔴 fail-closed 单位地板(B 任何安全等级的地基, 非可选纵深)**: covenant 侧 `require(refund_T >= 5e11)` + 构造侧同断言(**双闸**, 链上那道防构造侧漏)。理由: 单位口误(秒→DAA 侧)把 refund_T 打回 DAA 模式 ⇒ 连 bounded-lock 的"锁 T 后必可退"都破(退款腿 129 年/kaspad-reject)。
+- **可冻结不等式(Codex MUST-FIX B)**: 每腿 `refund_T(墙钟ms) > A_avail + finality_D(该腿链) + claim_land_worst(该腿链,含拥堵) + margin`。KANet 腿各项可估; 对手腿 finality_D/claim_land 非 KANet 权威 ⇒ 落 C1/C2 判定。finality_D 取值法待 A2 e2e 定后 J1 补。
+
+### v0.5 净状态
+- 方向 GREEN(Codex 多轮)· §8 PASS(收窄)· A 机制冻+E2E-gated · B 冻(默认 bounded-lock+auth-atomicity, no-theft C1∧C2∧C3 子集, 单位双闸地板, 不等式)。
+- **未闭/硬闸(明列)**: A2 e2e(runtime)· 编译器整树归档 · §7 quorum 独立性(授权真金前) · A1/A2 里 A1 未选(本 v0.5 走 A2 receipt 路)· rotate/revoke 连续性(out-of-scope)。
+- **交 Codex v0.5 终审**(其要的"一个冻结 A + 一个冻结 B")。**无实现/部署/money-path 授权。**

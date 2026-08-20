@@ -9601,3 +9601,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **Codex 确认**: ①更正索引方向正确("A2 impossible" 与 "A2 buildable" 都过强, 正确=source-plausible/runtime-unverified/E2E-gated, 无 ledger-only 闭合 credit)②(585) 校准对: 现存 funds **非不安全**——`*1000` 在、畸形 DAA/墙钟解释**fail tx acceptance 非静默授权**(= 我说的 kaspad reject, 独立印证)。
 - **🔴 新 B 要求(Codex)**: MUST-FIX B **必须显式冻结【每腿的 chain-time domain + 单位 + 转换/finality 语义】+ 一条 fail-closed 类型/单位检查**(秒-vs-ms 回归不能静默改 principal-safety 语义)。**B 不得依赖人记得 `*1000`。** ⇒ 把 timelock/footgun 子线正式抬成 B 的冻结项(接 582/584/585 的 assert-before-switch + 单位-in-name)。
 - **B 现有要求集**(待 J1 两洞后一起冻 v0.5): ①两腿 gate 同一份 A + 每腿 claim/refund 互斥(581)②self-present-A 两洞 → 大概率 bounded-lock(J1 待全文)③wall-clock deadline + assert-before-switch(582/584)④**每腿时域/单位/转换/finality 显式冻结 + fail-closed 单位检查(587)**。B 核心 no-theft-vs-bounded-lock 仍等 J1 (22:16) 两洞。
+
+### (588) 2026-08-20 · ✅ v0.5 冻 B 出稿(J1 完整 verdict 直读库 + Owner 令)· §14 consolidated FROZEN A+B · 认追错(原件一读之遥)
+- **认错(J2 08:39 逮)**: 我 08:37 追 J1 补"子集条件"——但 J1 00:13 verdict **完整在库(len=1208, 未截断)**, 截断只在我监视器视图。**该先读库(`the-original-was-one-cheap-read-away`)**; 已直读库 00:13:41.429Z 拿到权威全文。
+- **B 冻结(J1 完整 verdict, 直读库)**: 默认 = **bounded-lock-duration(墙钟 ms >=5e11)+ authorization-atomicity**; **no-theft 仅 C1∧C2∧C3 子集**(C1 对手链能验同一 A / C2 对手链 claim-land 最坏耗时可保守上界·不可估即触发降级非可调参 / C3 refund deadline 墙钟非 DAA); **fail-closed 单位双闸地板** `require(refund_T>=5e11)` covenant+构造侧(= B 任何安全等级地基, 单位口误破连 bounded-lock); **不等式** 每腿 `refund_T > A_avail+finality_D+claim_land_worst+margin`。
+- **A 冻结+E2E-gated**(573/580): 委员阈值+merkle 成员证明对 baked 根+唯一后继+绑 §6-1 receipt; A2=`checkSigFromStack`(upstream `checkMsgSig`)= SOURCE-PLAUSIBLE/RUNTIME-UNVERIFIED; 前置=编译器整树归档(8065184)+e2e; 授权根=§7 quorum 硬闸。
+- **v0.5 落 §14 consolidated FROZEN**(集中一处, 应 J2 findable 判据)。发 Codex v0.5 终审(其要的"一个冻结 A+一个冻结 B")。未闭硬闸明列(A2 e2e/编译器归档/quorum/rotate)。**无实现/部署/money-path 授权。**
