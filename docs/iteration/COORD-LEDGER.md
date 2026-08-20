@@ -9673,3 +9673,11 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **修+重预检授权**(同 E2E 授权内): 签名改裸 BIP340 · 离线判据换独立 BIP340 verify(noble, 真换验证路径非换人按同键)· 八格判别设计不动 · 改完链上 V0 预检过了才烧 8 格。Bettor 钉 seam: 新判据必须真独立(零 pre-hash、不走 signMessage 路径)。
 - **判据兑现**: 条件② V0-first 两轮各省 7 格 + 各逮一个真 bug(round-1 sigOpCount / round-2 签名口径)。E2E 三轮 debug 皆同一授权内(testnet/最小探针/非生产钱路), 无 scope creep。
 - **Owner 报告态**: A provenance 闭 / A runtime 开(E2E round-3 待) / B 待 Codex v0.7。暂不报, 待干净 A/B verdict。
+
+### (600) 2026-08-20 · Codex v0.7 verdict(MSG-255 P-SAFE)· A/B 状态落定 · B 选 commit-by-cutoff 状态机方向
+- **Codex verdict(dc198ea6)**: Tiering + typed timing **仍 CLOSED**; role anchor/HTLC 边界 PASS; **P-SAFE v0.7 NOT CLOSED(2 MUST-FIX)**; A2 harness **exit 语义 MUST-FIX**; A2 runtime OPEN/E2E-GATED; provenance(probe scope)可接受非 runtime 证明; committee/quorum 独立性硬闸不变。
+- **P-SAFE-1(深)**: 我 v0.7 不变式"A absent @D → refund"有可观测性错 —— A 是链下签名消息, covenant 能正验 A 在、**证不了否命题"A 不存在"**(taker 可对 leg-B 隐瞒 A 走 refund, leg-B 分不清"A 不存在"vs"A 被隐瞒")。`同一 A+有效签名`够正验不够负存在验。⇒ 需**共识可见 receipt state**。
+- **P-SAFE-2**: 跨腿发布竞态(旧盗本金 trace 新形态)—— 需 shared 授权承诺(保证另一腿有界时间)或两阶段 PREPARED→AUTHORIZED。
+- **A2 harness bug(Codex, grep 实证:157行)**: `process.exit(fail>0?1:0)` ⇒ 0 FAIL+≥1 inconclusive 打印🔴却 exit 0 = 冒充绿。修: `fail>0||inconclusive>0`。已 relay J2。A2 runtime 闭档判据: 一次全可归因跑 V0/V5c PASS ∧ 全负例因脚本验证 REJECT ∧ 零 inconclusive。
+- **Bettor 定 B 方向(tech 决策, Owner 已授权)**: 采 Codex "simpler safe alternative" = **commit-by-cutoff 机械状态机**(cutoff 前 A 必须 commit 到每条腿 → commit 后 refund 永久禁用; cutoff 前无 commit → 两腿 refund-only + later A 非权威)避开"证明不存在"; 叠 P-SAFE-2 两阶段防跨腿竞态。迭代 v0.8, 红队后报。
+- **A/B 对 Owner 报告态(已报)**: A = 机制/provenance/anchor 闭, runtime 开(E2E round-3 + harness exit 修中); B = tiering/timing/anchor/HTLC 闭, P-SAFE 开(2 MUST-FIX, 方向已定)。两者均从"模糊开放"收敛到"具体可执行一步"。
