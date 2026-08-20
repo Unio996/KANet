@@ -1,0 +1,25 @@
+// CheckSigFromStackProbe.sil — 隔离验 checkSigFromStack 的【链上行为】(J2, 2026-08-20)
+//
+// 目的: 判 silverc codegen 是否把 (sig, digest, pubkey) 正确送进 OpCheckSigFromStack。
+//   ⚠ 不是验 secp256k1(那是节点的事), 是验【编译产物在链上的行为】。
+//   理由: 本仓先例 8065184 修的 OP_PICK off-by-one 就藏在一个"看着完全正常"的 codegen 函数里
+//        (多一行 `*ctx.stack_depth += 1;`)。⇒ 读代码不能结案。
+//
+// 🔴 判别(承重的是阴性臂, 不是正路):
+//   合法三元组 PASS ∧ 五类篡改各自 REJECT ⇒ 该原语在链上真的在验。
+//   任一篡改仍 PASS ⇒ 该入参【未参与运算】(stub 或参数序错) ⇒ 不可用于 §6-3。
+//   ⚠ 只有 V0 PASS 而没有阴性臂 = 零判别力: always-true 的坏 codegen 会让正路全绿。
+//
+// 🔴 编译坐标(必须): versioned-builds/silverc-zk-8065184.exe
+//   —— 默认路径 target/release/silverc.exe 是【legacy-2c46231 逐字节副本】(见该目录 MANIFEST.txt
+//      记的 2026-07-07 覆盖事故), 它【不认】本内建, 会报 unknown function call。
+//
+// pubkey 烤进 ctor 而非 witness: 否则测的是"自签自验", 与 codegen 正确性无关
+//   (同族: PayoutShardV2 的委员 pk 靠 merkle 绑回 ctor 烤值, 不信 witness)。
+pragma silverscript ^0.1.0;
+
+contract CheckSigFromStackProbe(pubkey pkBaked) {
+    entrypoint function verify(datasig s, byte[32] digest) {
+        require(checkSigFromStack(s, digest, pkBaked));
+    }
+}
