@@ -78,11 +78,9 @@ cargo build --release          # 产出编译器二进制
 
 `kasia-console/scripts/checksigfromstack-e2e-vectors.mjs` 的 `assertPinnedCompiler()`（J2 造，**带阳性对照**：实用默认路径试编该内建并**要求它失败**，实跑通过）。⇒ 任何 §6-3 编译路径**必须先跑它**：坐标不只写 commit，要写到具体二进制 `versioned-builds/silverc-zk-8065184.exe` 且脚本断言用的就是它、不接受默认路径。哪天默认路径居然编得出该内建 ⇒ 说明它被换过 ⇒ 脚本喊，而不是默默用错编译器。
 
-## §6 待填 / 交接
+## §6 状态 / 交接
 
 - ✅ **源树层交叉核 = CLOSED**（见 §3 🎯 块）：NWT 独立路径重建 == canonical `8065184^{tree}` = `69a6d85b…` 全值；full commit `80651849962f…` 三方全串一致；NWT 判**确定性重建 PASS**（两层 × 两独立路径、无互背书）。
-- ✅ **4b 产物层 = CLOSED**（NWT 独立自 build + 入库固定 ctor，与 pinned exe `cmp` IDENTICAL，sha256 `0c3b52de…`）。⇒ **provenance = 源树层 + 产物层【全闭】**（两层 × 两独立路径 × 无互背书；NWT 判"全闭无保留"）。
+- ✅ **4b 产物层 = CLOSED**（见 §4b）：权威可复现基准 40B script sha256 `671cf278…`（入库固定 ctor f1ed8c3b）+ NWT 独立 A/B rebuilt≡pinned byte-exact。⇒ **provenance = 源树层 + 产物层【全闭】**（NWT 判"全闭无保留"）。
 - 🔵 **作用域边界（别读大）**：本 doc 闭的是**编译器树 provenance**（能确定性重建出对的编译器）。**A2 的 on-chain runtime 验证 = 另一条闸**（checkSigFromStack 链上真在验签），**仍 OPEN**：首跑遇 J2 harness 的 `sigOpCount:1` tx 构造 bug（与被测原语无关），八格 0 PASS/1 FAIL/7 不可归因，待 harness 修（sigOpCount→0）+ 过 Bettor/NWT 眼 + 重跑。**provenance 闭 ≠ A2 runtime 闭。**
-- **4b 首次跑证**：待在 pinned 二进制上编 `CheckSigFromStackProbe.sil` 得 3648 字节基准 + 一次真重建复现（产物层）。
-- **NWT 核**：确定性重建是否真确定（照 (590) 派工）。
-- **归档位**：本 doc = provenance 权威（Bettor 定"写进 KANet docs/"）；diff applyable 副本入 `scratch/silverc-archive/`；二进制 `versioned-builds/`（J2）。
+- **归档位**（权威 CLOSED 副本）：本 doc = provenance 权威（KANet `docs/`）；diff applyable 副本 = 入库 `docs/silverc-canonical-provenance/oppick-fix-d25bd34-to-8065184.diff`；4b 固定 ctor = `docs/silverc-canonical-provenance/4b-baseline-ctor.json`；pinned 二进制 = `versioned-builds/silverc-zk-8065184.exe`（J2）。（离线 bundle 见 §2，gitignored `scratch/`，非 durable 仅本地便利。）
