@@ -9655,3 +9655,14 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **harness MUST-FIX 闭环**: Codex 找 false-positive(b41d51cc)→ NWT 独立复现+收回半个背书+更强修法(捕获 stderr 断言成因)→ J2 修(5604a23f, 三臂)+ 认自己 09:52 误背书(沾残留 ctor 脏目录光)+ HOLD 守住零 tx → **NWT 独立复核(rm -rf scratch/e2e 整删, 三臂亲手重跑不复用数字, 臂3 自写 checkSig-only 合约证 legacy 专门认不出该内建=判别力实)→ PASS**。
 - **⇒ HOLD 解除**(Bettor): 对照臂干净有判别力、Owner 授权仍在、节点同步 ⇒ 放行 on-chain E2E。判据: 八格链上全对=A2 runtime-verified=A runtime 闸闭; 任一篡改 PASS=STOP。出结果 Bettor 报 Owner。NWT 结果后可独立复核链上八格。
 - 并行态: A runtime(E2E 放行·跑中)· A provenance(J1 doc)· B Tier2 P-SAFE(v0.7·Codex MSG-255 复审 + J1 审)· Codex v0.7 处理。
+
+### (598) 2026-08-20 · provenance §6 全闭(源树+产物 4b 双层跨机独立)+ on-chain E2E 第一轮=harness bug(对照臂真开火救报告)+ 修+重跑带三条件再授权
+- **provenance §6 全闭·三方独立·顺序对**:
+  - 源树层: NWT fresh-clone github d25bd34 + apply 入库 diff → 树 hash `69a6d85ba5c9...`(全40位)== canonical `8065184^{tree}`(Bettor 本机读)== J2 本机; full commit `80651849962f...` 三台逐字符同 = 同 content-addressed 对象; 文件级 blob `compile.rs@8065184=8090ed19` 亦对上。NWT 先算 J2 后贴, J2 背书不了 NWT。
+  - 产物 4b 层: J2 入库固定常量-pk ctor `docs/silverc-canonical-provenance/4b-baseline-ctor.json`(f1ed8c3b)→ 可复现基准 = `script` bytecode **40 字节 · sha256=671cf278...**(NWT 从自己 rebuild 的编译器独立复现同值 = 跨机确认)。⚠ 旧 doc 记的"3648 字节"不可复现(JSON 文件大小·随机 pk)= 必改。
+  - NWT 判 §6【全闭无保留】。剩纯 doc-accuracy 编辑给 J1: §4 基准 3648→671cf278(+指定 ctor f1ed8c3b)· §3/§6 diff 路径 scratch→docs。
+- **on-chain E2E 第一轮 = 0 PASS / 1 FAIL / 余不可归因**: V0(合法)FAIL、其余不可归因 ⇒ **不是 STOP-for-broken-primitive**, 是 J2 harness tx 构造 bug(抄样板把 sigOpCount 0 改 1 无理由)。checkSigFromStack 这轮**一字没测到**。
+  - 🏆 **同窗 V0 对照臂真开火救了报告**: 没它 → V1-V5a 五格 harness-畸形 REJECT 会被顺理成章报"篡改都被拒=闸生效"=五个假阳。V0 该 PASS 却 FAIL 暴露 REJECT 非 checkSigFromStack 在验。纪律"对照臂输出≠失败输出/缺席有两因"生产开火。NWT grep+拒因分析独立佐证诊断(8格同拒因+V0同拒=连正路都进不了脚本, 与"进脚本前被节点拒"自洽, 非甩锅)。
+  - J2 三处纪律对: 原样贴含不利格 · 认无理由偏离(违了它自己在别处强推的"带理由") · 不自行重跑(认上次授权只针对那次)。
+- **修+重跑再授权(Bettor·在 Owner E2E 授权内: 同一最小探针 test/testnet/非生产钱路/纯 harness bug)· 三条件**: ① 整段 tx 构造 vs 样板全 diff, 每处偏离说理由(sigOpCount 只是撞到 V0 那处, 别只修一处)② V0-first 预检(先跑 V0 一格 PASS 再烧全8)③ 判据不变: 任一篡改仍 PASS=STOP。J2 出 diff+理由清单 Bettor 先瞄再跑; NWT 重跑后独立复核八格。
+- **A/B 对 Owner 报告态**: A provenance 闭 / A runtime 未闭(重跑中) / B Tier-2 待 Codex v0.7(MSG-255 未回)。两者皆未全闭 ⇒ 暂不报 Owner(避免中间态噪声), 待 A-runtime 或 B 出干净 verdict 合并单点报。
