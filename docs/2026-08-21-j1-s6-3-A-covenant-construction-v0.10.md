@@ -1,7 +1,15 @@
-# §6-3 A：fair-exchange 结算 covenant 完整构造（v0.9 · 报备层 · 零生产码）
+# §6-3 A：fair-exchange 结算 covenant 完整构造（v0.10 · 报备层 · 零生产码）
 
-> **Status**: CURRENT（v0.9 取代 v0.8：Shape B 现必需——reveal 四路原子转 LOCKED_F→O_AUTHORIZED，recovery 锚实际 O 创建，去 Shape A 的上界依赖）
-> **作者** J1 · **日期** 2026-08-21 · **派工** Bettor：v0.8 删 reveal 上界连带塌了 Shape A 的 ordering（Codex v0.8 MSG-264 逮）
+> **Status**: CURRENT（v0.10 取代 v0.9：补完 Shape B 重构的内部一致性——LOCKED_R 侧强制四路原子 + O 侧反向焊改引 O_AUTHORIZED）
+> **作者** J1 · **日期** 2026-08-21 · **派工** Bettor：Codex v0.9（MSG-265）逮我 v0.9 Shape B 重构【不完整】的两处内部不一致
+
+## §0.13 v0.10 变更（Codex v0.9：Shape B 重构不完整的两处内部不一致 = MUST-FIX，我认不完整重构）
+
+Codex 复审 v0.9：**Shape B 方向对 + 多项 PASS**（Shape-B pivot / recovery 锚实际后继 / confirm-not-broadcast / 去上界 guard 全 PASS），但读 normative §4 为实际 UTXO 图逮两处内部不一致（我 v0.9 只改了部分节到 Shape B）：
+
+- 🔴 **MUST-FIX 1（reveal 仍能完全省略 LOCKED_F）**：v0.9 声称四路原子，但 `LOCKED_F→O_AUTHORIZED` 的 require **只在 LOCKED_F transition 支内**，而该支**只在 LOCKED_F 实际作 input 时才评估**。⇒ 攻击者 reveal 可**不含 LOCKED_F**：花 `LOCKED_R + C`、造真 O、领反应方本金，同时**首动方原 LOCKED_F 原封不动** ⇒ 后续 giveup/refund 拿回 LOCKED_F = **双拿**。**修**：领 LOCKED_R 的 §4-d transfer 支**自身**必须 force 同笔消费 exact LOCKED_F + 造 exact O_AUTHORIZED（把四路焊到 LOCKED_R 领取路上，非只在可跳过的 LOCKED_F 支内）。= 同"焊在一侧、另一侧可跳"老病（我 v0.9 refactor 不完整）。
+- 🔴 **MUST-FIX 2（O 侧反向焊 stale 到 LOCKED_F）**：§4-c 已对（反应方花 **O_AUTHORIZED**），但 §4-e O 的反向焊仍要 `OpInputCovenantId(LOCKED_F_idx)==locked_f_cid`——**Shape B 下 LOCKED_F 已被 reveal 消费、UTXO 不存在** ⇒ happy path 内部矛盾。**修**：§4-e 反向焊改引 `oauth_cid`（O_AUTHORIZED 身份），"花 O ⟺ 领 **O_AUTHORIZED**"，与 §4-c 一致。`oauth_cid` 是 O_AUTHORIZED 的 covenant 身份（非 spent 的 LOCKED_F）。
+- 🔵 **§4-f/§2.6 matrix 须据 Shape B 实际支集重建**（LOCKED_F：transition/giveup；O_AUTHORIZED：claim/recovery），旧 F1/F2/LOCKED_F 格不作 closure 证据（J2 重建中）。**PASS 项**（Codex）：Shape-B pivot / 锚实际后继 / confirm 假设 / 去上界，均 PASS DIRECTION。
 
 ## §0.12 v0.9 变更（Codex v0.8：删上界塌了 Shape A ordering ⇒ Shape B 必需 + liveness→confirm + 真原语）
 
@@ -150,7 +158,8 @@ refund: 两 principal 各走 P-SAFE-1 单-live-lineage（LOCKED_R: cutoff 前只
 | 焊接点 | 类 | 机制 |
 |---|---|---|
 | 领 `LOCKED_R` ⟺ 消费 C 造 O | WELD | §4-d `OpInputCovenantId(C_idx)==cid`（洞①③） |
-| 花 O ⟺ 领 `LOCKED_F`（**双向**） | WELD | §4-c 领 LOCKED_F⟹O co-input（正）**+ §4-e 支1 花 O⟹领 LOCKED_F（反，v0.6 补 Codex 单向焊缝）** |
+| 花 O ⟺ 领 `O_AUTHORIZED`（**双向**，v0.10 Shape B） | WELD | §4-c 领 O_AUTHORIZED⟹O co-input（正）+ §4-e 支1 花 O⟹领 O_AUTHORIZED（反）。**LOCKED_F 已被 reveal 消费成 O_AUTHORIZED，反应方领的是后继非 LOCKED_F 本身** |
+| 领 LOCKED_R ⟺ 四路（消费 C+LOCKED_F+造 O+O_AUTHORIZED） | WELD | §4-d transfer 支自身 force（v0.10 MUST-FIX 1：省略任一路则领不了 LOCKED_R）|
 | C 非-reveal 支 ⇏ 产 lineage | EXCL | terminal `OpCovOutputCount==0`（洞②） |
 | reveal-消费-C 与 C-terminal-refund | EXCL | cutoff 排序 `T_cutoff_LOCKED_R <= C_terminal_refund_cutoff`（洞③） |
 | 花 O 领 `LOCKED_F` 与 `LOCKED_F`-refund | COUPLED | 时序 `T_refund_LOCKED_F >= T_cutoff_LOCKED_R + N_claim + N_margin`（洞④）+ 🔴 依赖 `reactive-liveness`（§1.5 假设 5） |
@@ -223,14 +232,17 @@ require(tx.outputs[O_out_idx].value >= min_O);      // §5
 🔴 **MUST-FIX 1：本金 refund 走 P-SAFE-1 单-live-lineage state machine，不编码 A-absent 谓词**。covenant 证不了链下 A 全局不存在——只能验它自己 LOCKED 对象的**本地正事实**（被没被 validated-reveal 消费过）：
 
 **`LOCKED_R`（反应方本金，首动方揭 s 领）恰两条互斥后继支**：
-  - **transfer 支**（v0.3 原子焊接；🔴 v0.8 删 `< T_cutoff_LOCKED_R` 上界）：
+  - **transfer 支**（🔴 v0.10：本支【自身】强制全四路，MUST-FIX 1）：
     ```
-    // 🔴 v0.8: 无上界(不可 enforce); 首动方须在 LOCKED_R-refund(>= T_cutoff_LOCKED_R 下界)开前 reveal, 独占窗见 §4-f
+    // 🔴 v0.8: 无上界(不可 enforce); 首动方须在 LOCKED_R-refund(>= T_cutoff_LOCKED_R)开前 reveal
     require(checkSigFromStack(A, sig_A));
     require(blake2b(s) == h);
-    require(OpInputCovenantId(C_idx) == cid);   // 🔴 v0.3 焊接: 同笔 tx 必须也消费 C ⇒ 触发 C 的 §4-b 强制造 O ⇒ 揭s⟹消费C⟹造O 原子
+    require(OpInputCovenantId(C_idx) == cid);              // 焊接①: 同笔消费 C ⇒ 触发 §4-b 造 O
+    require(OpInputCovenantId(locked_f_idx) == locked_f_cid);  // 🔴 v0.10 焊接②(MUST-FIX 1): 同笔【必须】消费 exact LOCKED_F
+    require(OpOutputCovenantId(oauth_out_idx) == oauth_cid);   // 🔴 v0.10 焊接③: 同笔【必须】造 exact O_AUTHORIZED
+    require(tx.outputs[oauth_out_idx].value == LOCKED_F_value);// O_AUTHORIZED 承接 LOCKED_F 全额(不 skim)
     ```
-    **焊接 require 强制这笔 tx 同时把 C 作为 input**，C 一被消费其 §4-b 支即强制造 O ⇒ 无法"拿反应方本金却不造 O"。
+    🔴 **v0.10 关键（MUST-FIX 1）**：领 LOCKED_R 的**本支自身**强制同笔消费 C + 消费 exact LOCKED_F + 造 exact O_AUTHORIZED（**四路焊在 LOCKED_R 领取路上**）。⇒ 攻击者**无法**"花 LOCKED_R+C、领本金、却把 LOCKED_F 留着走 giveup"——省略 LOCKED_F 则本支 `OpInputCovenantId(locked_f_idx)==locked_f_cid` 不过 = 领不了 LOCKED_R。堵住双拿。（v0.9 错把 LOCKED_F→O_AUTHORIZED 只放在 LOCKED_F 支内=可跳过。）
   - **terminal-refund 支**（cutoff 后）：`require(TxTime >= T_cutoff_LOCKED_R)`——still-unspent `LOCKED_R` 转 terminal 明文退**反应方**。互斥由 UTXO once-spend 天然保证。`OpCovOutputCount == 0`。
 
 🔴 **`LOCKED_F`（首动方本金）v0.9 走 Shape B（两条互斥后继，均无上界依赖）**：
@@ -248,17 +260,17 @@ require(tx.outputs[O_out_idx].value >= min_O);      // §5
 
 🔴 **v0.7 O 边界纯相对（Shape A1）**：O 的两支边界只用 `OpTxInputDaaScore(O) + N_claim + N_margin`（O 是本支 active input ⇒ 该量可读），**不引 baked `T_O` 常量**（避免"两个 baked 常量各自合法、相对值错"的不可 enforce 陷阱）。
 
-- **O 支 1（pre-timeout：反向焊，只能与 LOCKED_F reactive-claim 同笔）**：
+- **O 支 1（pre-timeout：反向焊，🔴 v0.10 改引 O_AUTHORIZED，MUST-FIX 2）**：
   ```
-  // 🔴 v0.8: 无上界(不可 enforce); 反应方在 O支2(>= OpTxInputDaaScore(O)+N 下界)开前有独占窗, §4-f
-  require(OpInputCovenantId(LOCKED_F_idx) == locked_f_cid);           // 🔴 反向焊: 同笔必须也花 LOCKED_F
+  // 🔴 v0.8: 无下界外无上界; 反应方在 O支2(>= OpTxInputDaaScore(O)+N)开前有独占窗, §4-f
+  require(OpInputCovenantId(oauth_in_idx) == oauth_cid);              // 🔴 v0.10 反向焊: 同笔必须也花 O_AUTHORIZED(非已消费的 LOCKED_F)
   require(OpTxOutputSpkSubstr(payout_idx,0,len) == baked_reactive_payout_spk);  // 且付反应方 baked 收款
-  require(tx.outputs[payout_idx].value == LOCKED_F_value);            // value 焊死
+  require(tx.outputs[payout_idx].value == OAUTH_value);              // value 焊死
   ```
-  ⇒ **花 O ⟹ 必同笔领 LOCKED_F 给反应方**。s/A 公开也没用：独立花 O（不带 LOCKED_F co-input）**过不了本支** ⇒ 外人毁不了 capability。
-- **O 支 2（回收：首动方超时收回）**：`require(TxTime >= OpTxInputDaaScore(O) + N_claim + N_margin)`（与支 1 上界同式，互斥），付首动方，`OpCovOutputCount == 0`（terminal）。
+  ⇒ **花 O ⟹ 必同笔领 O_AUTHORIZED 给反应方**。s/A 公开也没用：独立花 O（不带 O_AUTHORIZED co-input）**过不了本支** ⇒ 外人毁不了 capability。🔴 **v0.10 修（MUST-FIX 2）**：Shape B 下 LOCKED_F 已被 reveal 消费成 O_AUTHORIZED、其 UTXO 不存在 ⇒ 反向焊必须引 `oauth_cid`（O_AUTHORIZED 身份），非已消失的 `locked_f_cid`。与 §4-c（反应方花 O_AUTHORIZED）一致。
+- **O 支 2（回收：首动方超时收回）**：`require(TxTime >= OpTxInputDaaScore(O) + N_claim + N_margin)`（与 O_AUTHORIZED-recovery 同锚 reveal DAA，互斥），付首动方，`OpCovOutputCount == 0`（terminal）。
 
-🔵 **双向互焊闭合**：§4-c（领 LOCKED_F ⟹ O co-input）+ §4-e 支 1（花 O ⟹ 领 LOCKED_F）= **O 与 LOCKED_F 窗内只能一起花**。O 支集 = 恰 2 支。
+🔵 **双向互焊闭合（v0.10 全 O_AUTHORIZED）**：§4-c（领 O_AUTHORIZED ⟹ O co-input）+ §4-e 支 1（花 O ⟹ 领 O_AUTHORIZED）= **O 与 O_AUTHORIZED 窗内只能一起花**。O 支集 = 恰 2 支；O_AUTHORIZED 支集 = 恰 2 支（claim/recovery）。
 🔴 **ordering（baked、可 enforce）**：安全所需 = **`T_refund_LOCKED_F >= 最晚 O 创建 daa + N_claim + N_margin`**，而最晚 O 创建 daa `<= T_cutoff_LOCKED_R`（reveal 须在 LOCKED_R-refund 开前，§4-f）⇒ **v0.4 baked 不等式 `T_refund_LOCKED_F >= T_cutoff_LOCKED_R + N_claim + N_margin`（§4-d）已保守满足**，且 `T_cutoff_LOCKED_R` 锁 LOCKED_F 时已知=可 enforce（非 O-anchored）。
 
 ---
@@ -331,4 +343,4 @@ require(tx.outputs[O_out_idx].value >= min_O);      // §5
 | 多 covenant-input 一笔 tx（LOCKED+C 原子焊接） | `OpCovInputCount`/`OpCovInputIdx` + `OpInputCovenantId(C_idx)` | compile.rs:3577-78 + `ShardLeaf:99` 读非 active input cov_id | ✅ 已证（Q① 裁可建） |
 | adaptor 揭示签 | `checkSigFromStack(A)` | canonical `8065184`（#132） | 🟡 待 canonical 树 e2e |
 
-⇒ **净判断（v0.9）**：Codex v0.8 判**下界-only pivot 方向 PASS**，但竞争支路重构塌了 Shape A ordering（删 reveal 上界⇒T_cutoff_LOCKED_R 不再是最晚 reveal 界⇒晚 reveal 双拿）。**v0.9 走 Shape B（现必需）**：reveal 四路原子（消费 LOCKED_R+C + 造 O + **转 LOCKED_F→O_AUTHORIZED**），O_AUTHORIZED recovery 锚 `TxTime >= OpTxInputDaaScore(O_AUTHORIZED)+N`（= **实际** reveal DAA，consensus-visible，无上界依赖）⇒ 晚 reveal 不缩短反应方窗（§4-f 双拿闭）。+ liveness→**confirm**-before-threshold（MUST-FIX 2，watchtower 须确认非只广播）+ **真原语**（normative 用 `TxTime`/CLTV + `OpTxInputDaaScore`，去 phantom current_daa，MUST-FIX 3）。**落码前硬前置 = ① §4-f 每对独占性正测+晚reveal双拿LAND测 + 全构造零 `<` 上界 + 零 phantom current_daa 静态检查 ② A2 腿 canonical `8065184` e2e ③ cov_id durable 证 ④ min_O/N_claim/N_margin 具名常量 ⑤ §1.5 五假设(含 confirm) ⑥ quorum 独立**。v0.9 送 Codex 复审 + J2 矩阵据 Shape B/O_AUTHORIZED 支集重建 + NWT 红队 ⇒ 同链 design-closed = 无委员 Tier-2（**条件于 §1.5 假设**）。跨链退 R1。落码 Owner 批实现闸。
+⇒ **净判断（v0.10）**：Codex v0.9 判 **Shape-B 方向对 + 多项 PASS**（pivot / 锚实际后继 / confirm / 去上界）。v0.10 补 Codex 逮的 Shape B 重构**不完整**两处内部不一致：**MUST-FIX 1** reveal 能省略 LOCKED_F（LOCKED_F→O_AUTHORIZED require 只在可跳过的 LOCKED_F 支内）⇒ v0.10 把四路焊到 **§4-d transfer 支自身**（force 同笔消费 exact C+LOCKED_F + 造 exact O_AUTHORIZED，省略任一路则领不了 LOCKED_R）；**MUST-FIX 2** §4-e O 反向焊 stale 引已消失的 LOCKED_F ⇒ 改引 `oauth_cid`（O_AUTHORIZED），"花 O ⟺ 领 O_AUTHORIZED"，与 §4-c 一致。🟡 **残留**：§2.5 拓扑表 + §4-f 部分文字仍 Shape-A-era LOCKED_F 命名，待全 Shape-B 命名 sweep + J2 矩阵据实际支集（LOCKED_F:transition/giveup · O_AUTHORIZED:claim/recovery）重建（J2 已标矩阵 STALE）。**落码前硬前置**（不变）+ 四路省略任一路→拒 的交易级负测。v0.10 送 Codex 复审 ⇒ 同链 design-closed = 无委员 Tier-2（**条件于 §1.5 假设**）。跨链退 R1。落码 Owner 批实现闸。
