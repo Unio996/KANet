@@ -9613,3 +9613,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **🔴 B MUST-FIX(真矛盾)**: v0.5 把 auth-atomicity 放【默认】—— 但它需 C1(两腿验同一 A)、C1 可失败 ⇒ C1 假时无 auth-atomicity。**修=分层**(v0.6): Tier0 base=bounded-lock(所有支持腿默认, 无 auth-atomicity)/ Tier1 +C1=auth-atomicity(C1 假落回 Tier0)/ Tier2 +C1∧C2∧C3+principal-safety=no-theft。取分层-非强制(支持面宽; 备选 C1 强制则无 A-验证器对手链 unsupported)。
 - **B 不等式 typed**(修维度歧义): `refund_T`(绝对墙钟ms>=5e11)> `A_avail`(绝对墙钟ms)+ `finality_D`/`claim_land_worst`/`margin`(时长ms); 量纲 绝对>绝对+Σ时长=绝对 一致。
 - **状态 v0.6**: A 机制 PASS-as-shape/E2E-gated · B 分层修 + typed。发 Codex MSG-254 复审。🚩 分层修细化了 J1 verdict(auth-atomicity 非默认、需 C1)—— 旗 J1 确认(其 B 席)。未闭硬闸不变(A2 e2e/编译器归档/quorum/rotate)。
+
+### (590) 2026-08-20 · 📋 Bettor 并行派工(Owner 令"盯全员+进度并行")· §6-3 剩余硬闸并行, 不串行等 Codex v0.6
+- **盯全员状态**: J1 活跃(B 席完·free)· J2 活跃 channel(§6-3 贡献完·free)· NWT 稍静· KANet-UI 无法与本机 git 身份区分(探活中)· Codex 处理 v0.6· Bettor 协调。
+- **并行派工(报 ETA)**: **J1** 编译器整树归档(8065184 + 确定性重建, Codex durability 硬要求; 解 A provenance 闸)· **J2** 设计+备 checkSigFromStack 最小 E2E(合法-PASS/改一位-REJECT, pinned 8065184, 真 runtime 非 debugger-surrogate; 解 A runtime 闸; 链上跑另闸)· **NWT** 红队 E2E 设计 + 归档重建确定性· **KANet-UI** 探活 + logSafe backlog· **Bettor** A2 receipt-绑定 spec(Codex"§6-1 receipt 字段唯一决定后继")+ 盯全 + 收 Codex v0.6 报 Owner A/B。
+- 边界: 归档/E2E-设计/红队/spec = 报备层可推; 生产实现/部署/链上 money-path = 停报备等 Owner。
