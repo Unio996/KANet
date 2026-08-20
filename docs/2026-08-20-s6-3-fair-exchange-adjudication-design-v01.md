@@ -244,3 +244,11 @@
 - **C4 加入 §14 可判定谓词清单**：C4 = 确定性首动方（加密投递 / 角色固定序）。⚠ covenant 侧**不可直接链上验** ⇒ 属**部署前须证的运营条件**（同 §7 quorum 独立性档），非纯链上谓词。红队须把"C4 如何被破 + 如何检出"列清。
 - **不变（仍是任何 tier 地基）**：§14 fail-closed 单位地板 `require(refund_T >= 5e11)` + 双闸；可冻结不等式（typed）。本节只改 refund 谓词**语义**（"A 全局不存在" → "本腿 EXPIRED 本地态"）与 no-theft 的 tiering。
 - **待红队**：Codex 复审 §16 是否真闭 P-SAFE-1/2；J1 审 C4 实现的 covenant 可建性（AUTHORIZED/EXPIRED 状态转移用 §14 A 的 introspection enforce）；NWT 红队 C4 残留信任（委员泄 A 时序攻击）。
+
+### §16.4 v0.9 — NWT C4 红队整合（2026-08-20·§16.3 派工回填）
+- **① claim payout = baked/receipt-派生（非 witness 任意）⇒ 泄 A 后果量级钉死**：claim 的收款 output 由 §15 绑定链 enforce（`tx.outputs[k].scriptPubKey == successor_commit`，从【验过的 receipt】派生、非 witness 喂；`value == 确定性分配`）。⇒ 谁交出有效 A **改不了收款地址**，claim 只能付给 receipt 派生那方。⇒ **C4 被破（委员泄 A）最坏后果 = §16.2 的"非对称结局"（钱仍在两合法参与方间，一方被套一腿），不是"导去任意地址"的任意盗窃。** claim payout 与 §15 successor output = **同一物**（不重复定义）。〔答 NWT ④：安全支；doc 此前只在 §15 隐含，现 §16 显式钉。〕
+- **② C4 残留信任量化 + 接 §7 quorum 独立性**：实测（`scratch/bettor-committee-locality-0804.mjs`，255 盘）5/5 委员共处一机 = 41/255（~16%）；若签名阈值 4-of-5，能实际凑出 A 的 quorum 共处 ≈ 63/255（~25%）。⇒ 对这批盘，"委员泄 A" 非多方合谋、是**单一操作者能否自律 = SPOF**。⇒ **C4 残留信任对共处-quorum 盘 = §7 quorum 独立性的同一个洞；Tier-2 no-theft 对这批盘【也 gated on §7】**（C4 首动方机制单独不够，须 §7 quorum 真独立才使"委员泄 A"回落成多方合谋难度）。〔NWT ②：新连接非新担心。〕
+- **③ C4 被破的检测（补 §16.2 要求的"如何检出"）**：
+  - 事后（链上直证，不需自证）：两腿 claim tx 经 order/tx-id 关联后，比对落链 daaScore 顺序 —— **反应腿 claim 早于（或近同时于）揭示腿观察窗所需 Δ ⇒ C4 被破的直接链上证据**。
+  - 事前（建议，非硬要求）：委员对每次投递发水印/salt 过的加密 A ⇒ 泄露样本可回溯到具体投递 = 把"委员会不会泄"从纯自律变成"泄了能查源"增威慑。⚠ 待 J1 confirm 水印不破 A 功能性（covenant 可建性半）。
+- **⇒ Tier-2 就绪条件（NWT 红队后收敛）**：C1 ∧ C2 ∧ C3 ∧ C4 ∧ §16.1 状态机 ∧ cutoff 非对称 ∧ **payout baked（①，§15 已 enforce）** ∧ **共处-quorum 盘另 gated §7（②）**；③事后 daaScore 检测 = 运营期监控。缺任一降层。
