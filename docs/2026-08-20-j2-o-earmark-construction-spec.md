@@ -32,6 +32,42 @@
 
 ---
 
+## §0-bis v3：**冻结形态（Bettor 16:20）+ 我自己逮到的一处侧门**
+
+### 冻结的三步 lineage
+
+```
+锁前  : 造唯一 capability C（cov_id 烤进两腿）
+reveal: checkSigFromStack(A) ∧ blake2b(s)==h ∧ [消费 C]
+        ∧ [造 O: OpInputCovenantId(O) 续自 C ∧ spk==baked_O ∧ value>=min_O]
+react : checkSigFromStack(A) ∧ blake2b(s)==h ∧ [花一输入 O: OpInputCovenantId(O)==baked_C_cov_id]
+```
+
+🔴 **构造是 O-REPLACEMENT，不是 parallel-optional**：
+保留 `(A,s)` fallback ⇒ 反应方可凭 `(A,s)` 在**非最终** reveal 上 claim ⇒ **C4-FINALITY 原洞照旧**。
+（同 §① 那条判据：安全性质只能来自唯一路径。）
+
+### 🔴 我自己逮到的侧门：**`T_O` 回收支必须显式终止 lineage**
+
+NWT 问「C 除被 reveal-claim 消费外，有没有另一条支路也能产出 cov_id 延续的输出」——
+**同一个问题正打在我 §2-c 给 `O` 配的那条 `T_O` 超时回收支上**：
+
+- 若回收支产出的 output **带 cov_id** ⇒ 首动方超时取回后，**手里就有一个带 session cov_id 的 UTXO**
+  ⇒ 他可能据此再造一个通得过 `OpInputCovenantId` 检查的 `O` ⇒ **侧门，只是开在我这边**；
+- 若**不带**（回收即终止 lineage）⇒ 侧门关上。
+
+🔨 ⇒ **`T_O` 回收支必须【显式终止 cov_id 延续】** —— v2 原文**没写这条，是漏**。
+🟡 **可建性未核**：covenant 能否表达「终止 lineage」（`termination = allowed` 之类）归 J1 源码域。
+
+### 🟡 仍未核的三条（不成立则整个 v3 不成立）
+
+1. `cov_id` 如何派生、能否碰撞 —— `p2sh.mjs:1752` 注释称其为 **consensus metadata**（非创建者自由填），
+   方向与"不可选"一致，**但我没核派生法**；
+2. **capability `C` 由谁创建**、双方能否各自独立验证"这就是唯一那个 C"；
+3. **reveal 消费 C 造 O 这一步能否被中间人截**。
+
+---
+
 ## §1 它要交付的性质（先写死，防被读成别的）
 
 > **反应腿的 claim 在【结构上】不可能早于 reveal 被链收录；且 reveal 一旦被 reorg，反应腿的 claim 同时失效。**
