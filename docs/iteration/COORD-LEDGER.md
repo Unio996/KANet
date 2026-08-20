@@ -9681,3 +9681,14 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **A2 harness bug(Codex, grep 实证:157行)**: `process.exit(fail>0?1:0)` ⇒ 0 FAIL+≥1 inconclusive 打印🔴却 exit 0 = 冒充绿。修: `fail>0||inconclusive>0`。已 relay J2。A2 runtime 闭档判据: 一次全可归因跑 V0/V5c PASS ∧ 全负例因脚本验证 REJECT ∧ 零 inconclusive。
 - **Bettor 定 B 方向(tech 决策, Owner 已授权)**: 采 Codex "simpler safe alternative" = **commit-by-cutoff 机械状态机**(cutoff 前 A 必须 commit 到每条腿 → commit 后 refund 永久禁用; cutoff 前无 commit → 两腿 refund-only + later A 非权威)避开"证明不存在"; 叠 P-SAFE-2 两阶段防跨腿竞态。迭代 v0.8, 红队后报。
 - **A/B 对 Owner 报告态(已报)**: A = 机制/provenance/anchor 闭, runtime 开(E2E round-3 + harness exit 修中); B = tiering/timing/anchor/HTLC 闭, P-SAFE 开(2 MUST-FIX, 方向已定)。两者均从"模糊开放"收敛到"具体可执行一步"。
+
+### (601) 2026-08-20 · Codex v0.8 verdict(方向 GREEN·Tier-2 未闭·5 fix)+ B v1.0 §17(采纳更好 C4 hybrid-secret)+ A2 runtime 负方向 6/6 坐实(差 1 张干净单)
+- **Codex v0.8/v0.9 verdict(桥 6f58fb87)**: 方向 GREEN, Tier-2 P-SAFE 未 design-closed, 5 fix:
+  ① P-SAFE-1 = PASS-AS-DIRECTION/可闭(改写成单一 UTXO 血缘: LOCKED `<T_c`→AUTHORIZED / `>=T_c`→EXPIRED, 同 UTXO 互斥, 非"查无记录")。
+  ② C4 角色标签不够(挡不住两方都持 A 时抢先), 须密码学能力; Codex 给**更好构造 = 参与方持密 s + 公开 A 组合**(首动方选 s、h=H(s) 烤 session, reveal 需 valid A∧preimage s; 委员不知 s ⇒ 泄 A 不破序 ⇒ 化解 NWT ② 委员共处 SPOF)。弃委员加密 A(加信任-保密角色、破法多)。
+  ③ v0.9 daaScore 跨链检测 REJECTED(chain-local namespace 无跨链因果)。④ 水印降可选取证。⑤ Tier-1 措辞 MUST-CORRECT(§16.1 容许一腿 AUTHORIZED 一腿 EXPIRED ⇒ 非 authorization-atomicity ⇒ 改 per-leg 授权完整性)。
+- **B v1.0 §17(Bettor 出, 5 fix 全改)**: §17.1 UTXO 血缘(P-SAFE-1 CLOSED)· §17.2 C4 hybrid-secret(采纳 Codex)· §17.3 共同观察域检测(NWT 方案: block-ts±margin 区间比, 非 daaScore)· §17.4 水印可选· §17.5 Tier-1 per-leg 完整性。§16 头加 v1.0 更正指针(防并存)。
+- **NWT hybrid-secret 红队整合 §17.2**: (a) 残留信任=**转移非消除**(委员泄A → 首动方泄s, 多方/quorum→单一自然人, 更集中但易归责; 必显式记不当零信任)(b) 弱 s: 委员只见 h 核不了熵, 但 payout baked(§16.4①/CloseZkV2 已证)⇒ 猜中 s 者钱仍付预定地址 ⇒ 弱 s=骚扰非盗窃, 记实现规范非闸。
+- **A2 runtime 8 格重跑**: 6 负例(V1-V5b)**全因脚本验证被拒**(`failed to verify the signature script`, V4=`script ran but verification failed`), 每格同窗 V0=PASS, V5c PASS —— 我+NWT 各自读 run-evidence.json 原文双独立 concur。**负方向坐实**。唯 V0-final(收尾冗余 V0)inconclusive = 资金时序 transient(非原语)。⇒ Bettor **不用裁量覆盖机械判据**(exit 1=未过), 授权干净重跑修 V0-final 注资/窗 → 零-inconclusive exit-0 单即闭。证据入库 `docs/csfs-e2e-evidence/`(scratch gitignored+覆盖, 判据③承重证据保现场)。
+- **纪律**: 今日判据第三次挡下假绿(晨 V0-control 挡 5 / exit-semantics 挡 1 / 现 zero-inconclusive 挡 V0-final)。
+- **A/B 对 Owner**: A = provenance CLOSED + runtime 负方向坐实差 1 张干净单; B = 方向 GREEN, Tier-2 v1.0 送 Codex 复审。待干净单 + Codex v1.0 verdict 合并报。

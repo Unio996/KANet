@@ -210,6 +210,7 @@
 ## §16 v0.8 P-SAFE 重设计（答 Codex dc198ea6 P-SAFE-1 / P-SAFE-2·废 v0.7 "A-absent@D" 谓词）
 
 > Codex v0.7 verdict 否 v0.7 P-SAFE。两处修：谓词从"证明不存在"换成本地正事实（§16.1）；no-theft 的跨腿原子性诚实 tiering（§16.2）。**§14 B 的 v0.7 P-SAFE 块与其 rejected-trace 已作废，以本节为准。**
+> 🔴 **v1.0 更正（Codex v0.8 verdict, 见 §17）**：本 §16 的以下处已被 §17 更正，**以 §17 为准** —— §16.1 措辞→§17.1（UTXO 血缘）；§16.2 C4 角色标签→§17.2（密码学能力 + 参与方持密 s）；§16.4③ daaScore 检测→§17.3（共同观察域）；§16.4 水印→§17.4（降可选取证）；Tier-1 措辞→§17.5（per-leg 完整性非 atomicity）。
 
 ### §16.1 P-SAFE-1 修：refund 谓词 = 【本腿本地正事实】，不再"证明 A 全局不存在"（commit-by-cutoff 状态机）
 
@@ -252,3 +253,41 @@
   - 事后（链上直证，不需自证）：两腿 claim tx 经 order/tx-id 关联后，比对落链 daaScore 顺序 —— **反应腿 claim 早于（或近同时于）揭示腿观察窗所需 Δ ⇒ C4 被破的直接链上证据**。
   - 事前（建议，非硬要求）：委员对每次投递发水印/salt 过的加密 A ⇒ 泄露样本可回溯到具体投递 = 把"委员会不会泄"从纯自律变成"泄了能查源"增威慑。⚠ 待 J1 confirm 水印不破 A 功能性（covenant 可建性半）。
 - **⇒ Tier-2 就绪条件（NWT 红队后收敛）**：C1 ∧ C2 ∧ C3 ∧ C4 ∧ §16.1 状态机 ∧ cutoff 非对称 ∧ **payout baked（①，§15 已 enforce）** ∧ **共处-quorum 盘另 gated §7（②）**；③事后 daaScore 检测 = 运营期监控。缺任一降层。
+
+## §17 v1.0 P-SAFE — Codex v0.8 verdict 整合（5 fix·2026-08-20·RESPONSE-MSG256, 桥 6f58fb87）
+
+> Codex v0.8/v0.9 verdict：方向 GREEN，Tier-2 未 design-closed，给 5 处 fix。**本节冻结修正形态；§16 v0.8/v0.9 的对应处以本节为准**（§16.1 措辞→§17.1；§16.2 C4 角色→§17.2；§16.4③ daaScore→§17.3；水印→§17.4；Tier-1 措辞→§17.5）。
+
+### §17.1 P-SAFE-1 冻结为单一 UTXO/state 血缘（Codex：CLOSEABLE→措辞后 CLOSED）
+refund **不**表述为"查无 AUTHORIZED 记录"，而是**单一活状态 UTXO 血缘的超时支路花费**：
+- 活 `LOCKED(session)` output 在 chain-time `< T_c` **只能**花进唯一后继 `AUTHORIZED(A_hash, session)`（花费前验 A）；
+- 同一活 `LOCKED(session)` output 在 chain-time `>= T_c` **只能**花进唯一后继 `EXPIRED(session)`；
+- 两支路互斥 = **消费同一 UTXO/state 对象**（非"查记录"）；
+- 晚到 A 必失败：AUTHORIZED 支路 require chain-time `< T_c`。边界冻死 `<`（AUTHORIZED）vs `>=`（EXPIRED），时域/单位用 §14 已 bank 的 fail-closed 墙钟地板。
+⇒ P-SAFE-1 = **CLOSED**（covenant 判"活 LOCKED 经哪条支路花掉"=纯本地正事实）。
+
+### §17.2 C4 = 密码学能力不变式；采纳 Codex【参与方持密 s + 公开 A 组合】（弃委员保密 A）
+- 🔴 **角色标签不够**（Codex）：两方都持可携带 A 时，命名"首动方"挡不住另一方抢先交 A。C4 须是**密码学能力**：reveal 转移前，**恰首动方独有 reveal-leg spend 所需的缺失 witness**；反应方只能从链上 reveal 取得。
+- 🎯 **采纳构造（弃我的委员加密 A）**：首动方生成随机 `s`、锁前把 `h = H(s)` commit 进 session；A 绑该 session（且绑 h）。**A 可公开**。reveal-leg claim require `valid A ∧ preimage s`（`H(s)==h`）；s 发上 reveal 腿 ⇒ 反应方用 `valid A + s` 上另一腿（cutoff 更晚 Δ）。
+- 🔵 **委员不知 s ⇒ 委员泄 A 不再破坏 reveal 序 ⇒ 化解 §16.4② 的委员共处 SPOF**（泄 A 无用、仍需 s）。C4 顺序不靠委员保密 ⇒ 与 no-theft 解耦；委员共处只剩"A 诚实性"顾虑（=§7 闸），不再是 no-theft 破法。
+- 🔵 **非退回 HTLC-alone**：A 表达复杂共识谓词（plain HTLC 不能），s 只供 cross-leg 确定性 reveal 序 = 组合非替代。
+- 🔴 **C4 残留信任是【转移】非【消除】（NWT 红队 a）**：构造堵住"委员泄 A"，但 Δ 的隐含前提是"s 只经首动方**链上** reveal 才被观察（=观察窗 0 时刻）"。s 是首动方私持数据，**无密码学机制阻止其在链上 claim 前私下泄 s**（意外/被 compromise/主动合谋）⇒ 拿到 (A,s) 者可抢在首动方 reveal 前构造反应腿 claim、压缩反应窗。⇒ **残留信任从"委员多方/quorum 不泄 A"【转移】为"首动方单人不泄 s（早于自己链上 reveal）"** —— 非消除。🔵 好处：从 quorum-SPOF（§7 洞、~25% 共处盘）变**单一自然人主体**（风险更集中但**更易归责**）。**必须与委员那条并列显式记为 Tier-2 残留信任，不得因解决 A-泄露即当 C4 零信任。**
+- 🔵 **弱 s 有界为骚扰非盗窃（NWT 红队 b，结合 §16.4①）**：委员只见 h=H(s)、核不了 s 熵 ⇒ 首动方可选可猜弱 s（如 s=0）。但 **payout baked（§16.4①/CloseZkV2 已证）** ⇒ 即便他人猜中弱 s 抢先提交反应腿 claim，钱仍只能付到**预定反应方 baked 地址**，猜中者拿不走 ⇒ 顶多抢跑/占 UTXO 骚扰（费用竞争 / 令合法反应方 claim 二次花费失败需重试）。⇒ **弱 s = 操作层骚扰风险，非本金盗窃**。记为**实现规范**（s 须强随机）非安全闸。
+- **弃委员加密 A**：加信任-保密角色、弱化 §8 verifiable-attestation vs trusted-oracle、破法更多（aggregator/distributor 泄、门限联盟泄、log/backup/RPC 泄、误前发、误投）+ 可用性/审查另一条 liveness。若将来仍要委员加密 A，须显式把委员保密列为 Tier-2 信任假设（非监控项）。
+
+### §17.3 C4-break 检测：弃跨链 daaScore（Codex 否），改共同观察域
+- 🔴 §16.4③ 的"两腿 claim daaScore 顺序"**作废**：daaScore 是 chain-local namespace，跨两条独立链 `daaScore_X < daaScore_Y` 无因果/时间意义（Codex）。
+- 改：**共同观察域**（NWT 方案）—— 每条腿 finalized claim 落链后取**该链自己的 block timestamp**（非 daaScore/height），按各自共识时间戳容差（中位数时间/漂移界）折成 `claim_ts ± margin` **可比区间**，比区间而非比两个不同链本地 index。跨双链自证时间戳的交叉校验 = **可选加固**（新增"见证者不作恶/不合谋"信任面，不作闭档必需）。= ops-证据层, 非链上 covenant primitive。
+
+### §17.4 水印降为可选取证（Codex + J1 一致）
+- 不 watermark canonical A 本身（改签名语义）；wrapper 水印对**明文 A 泄露**证不了源（泄的明文仍同一 A）。⇒ wrapper 只作投递审计证据，非明文泄露的密码学源归因。降**可选取证**，须先给精确构造再采纳。J1"信封层可建但不算防线"与此一致。
+
+### §17.5 Tier-1 措辞更正（Codex MUST-CORRECT）
+- §16.1 承认可"一腿 AUTHORIZED、另一腿 EXPIRED" ⇒ §16.1 单独**不**蕴含 both-authorized-or-both-refund ⇒ **不得**称 Tier-1 = authorization-atomicity。
+- 冻正：**Tier-1 = bounded-lock + per-leg 授权完整性**（**明说容许跨腿非对称授权**）。C4 缺失 session 落 Tier-1 = 此义。真正 both-leg 原子性只 Tier-2（C4 hybrid-secret）给。
+
+### §17.6 v1.0 净状态（送 Codex 复审）
+- P-SAFE-1 = **CLOSED**（§17.1 血缘措辞）。
+- P-SAFE-2/Tier-2 no-theft = C4 hybrid-secret（§17.2）∧ cutoff 非对称 ∧ §17.1 血缘 ∧ payout baked（§16.4①/CloseZkV2 已证）；待 J1 covenant 可建性 + Codex 复审 hybrid 是否闭。
+- 检测 = 共同观察域（§17.3，NWT 出）。水印 = 可选取证（§17.4）。Tier-1 = per-leg 完整性（§17.5）。
+- 硬闸不变：§7 quorum 独立性（真金前）· A2 runtime E2E（负方向重跑中）· 单位地板/不等式（§14）。
