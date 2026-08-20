@@ -74,10 +74,20 @@ async function runVector(v) {
   const { entries } = await rpc.getUtxosByAddresses([p2shAddr]);
   const utxo = entries.find((e) => e.outpoint.transactionId === ftx) || entries[0];
   const fee = kaspaToSompi('0.02');
+  // 🔴 每个值的理由(2026-08-20 首跑八格全废的教训: 抄样板时【无理由偏离】= 整轮作废):
+  //   sigOpCount: 0   — v1(TX_VERSION_TOCCATA) 用 compute_budget 而非 SigOpCount 计价(p2sh.mjs:1739)。
+  //                     写 1 ⇒ 节点 pre-script 拒 "sig_op_count is inconsistent with transaction version 1",
+  //                     连正路 V0 都进不到脚本执行 ⇒ 八格全部不可归因。这就是首跑挂掉的字面成因。
+  //   computeBudget: 70 — 生产 flat 值(_BSHARD_COMPUTE_BUDGET, p2sh.mjs:1734)。allowed=70*10000+9999=709,999 units;
+  //                     本合约仅 1 次签名验证(同量级参照 P2PK checksig≈100,000u) ⇒ ~7x 余量。
+  //   fee 0.02 KAS    — ≥ 生产 0.01 KAS/input 的 compute-mass floor(_BSHARD_FEE_PER_INPUT)。
+  // 🔵 已核【无害】不必改: tx.inputs[0] 建后再赋 signatureScript —— 本 wasm 构建写回生效(离线实测), 非取值即拷贝。
+  // 🔵 已核【正确】: 单 entrypoint 合约【不押 selector】(押了会被当 int ctor 参数 ⇒ require fail, p2sh.mjs:308),
+  //     入参按 SS 声明序 forward 推(p2sh.mjs:1538) ⇒ push(sig)+push(digest)+push(redeem) 排布成立。
   const tx = new Transaction({
     version: 1,
     inputs: [{ previousOutpoint: { transactionId: utxo.outpoint.transactionId, index: utxo.outpoint.index },
-      signatureScript: '', sequence: 0n, sigOpCount: 1, computeBudget: 100, utxo }],
+      signatureScript: '', sequence: 0n, sigOpCount: 0, computeBudget: 70, utxo }],
     outputs: [new TransactionOutput(utxo.entry.amount - fee, toSpk)],
     lockTime: 0n, gas: 0n, subnetworkId: '0'.repeat(40), payload: '',
   });
