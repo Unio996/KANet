@@ -9629,3 +9629,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **🔴 编译坐标精确化(J2 约束, 采纳)**: §6-3/A2 坐标**不能只写 commit, 要写到具体二进制 `versioned-builds/silverc-zk-8065184.exe` + 脚本断言用的是它、不接受默认路径 `silverc.exe`**(后者不含该内建; 若先用不含内建的合约跑通流水线, 差异不显形直到实用)。强化"检出坐标"教训: 不只 commit/树, 还有哪个已编 binary。已更卡 §14 A。
 - **versioned-builds + MANIFEST = 现成归档机制**(记着一次 in-place 覆盖事故: 覆盖能编 ShardLeaf 的旧 binary → bshard 押注中断 23:41-00:47; 修法=按族分离+版本化+禁默认路径覆盖)⇒ **直接接 J1 的编译器归档任务 + Codex durability 要求**(J1 归档 = 确认 versioned-builds/silverc-zk-8065184.exe 已 durable + rebuild 流程)。
 - 并行态: Bettor §15+本条整合 · J2 E2E 设计 NWT-PASS(加 V5)+ compile-verified · NWT 红队完 · J1 归档(接 versioned-builds)· Codex v0.6 处理。
+
+### (593) 2026-08-20 · 🟢 Owner 授权 on-chain E2E 跑 + 编译器 provenance 收敛(J1 de-risk: 基座公开+一行脆弱)
+- **🟢 Owner 授权**(应 Bettor 单点报): checkSigFromStack testnet on-chain E2E 跑。前置全绿(J2 备料 99619741 + NWT 独立 8/8 PASS + no-key-leak + assertPinnedCompiler 阳性对照)。Bettor 下 J2/J1 执行(silverc+node 域), 照 J2 设计五步(坐标断言/跑前测同步/八格链上/成因可区分/最小探针非生产)。判据: 八格链上全对 ⇒ A2 runtime-verified = A runtime 闸闭; 任一篡改仍 PASS ⇒ STOP 报。
+- **编译器 provenance de-risk(J1 10:01 + J2 10:02 双核)**: **8065184 = origin/master 上的公开永久基座 `d25bd34`(#136, 含 #132 checkSigFromStack=4)+ 一行 OP_PICK diff**(`compile_byte_sequence_cast_call` 里删 `*ctx.stack_depth += 1;`)。⇒ Codex durability 从"归档整树"降到"fetch d25bd34 + 存一行 diff + rebuild"。J2 供权威 diff + 核实(git branch -r --contains: d25bd34→origin/master, 8065184→空)。
+- **provenance doc 约定(Bettor 定)**: KANet docs/ 一份, 五项: ①基座 d25bd34(公开永久)②OP_PICK 一行 diff(J2 权威)③确定性 rebuild 流程 ④**产物级 loud 验收**(J2 关键: bug 不报错只让 covenant 悄带 off-by-one ⇒ 验收落产物-编出正确 bytecode, 不落构建过程; + binary sha256)⑤assertPinnedCompiler。J1 出稿, NWT 核 rebuild 确定性。
+- 并行态: A runtime(E2E 跑·Owner 授权·执行中)+ A provenance(J1 doc 进行)+ §15 receipt-绑定(Bettor✅)+ Codex v0.6 处理。
