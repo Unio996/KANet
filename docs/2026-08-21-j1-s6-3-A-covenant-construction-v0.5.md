@@ -9,7 +9,7 @@ J2 独立建 8 支穷举矩阵（`docs/2026-08-21-j2-c4-pairwise-independence-ma
 
 - 🔴 **reactive-liveness（真发现，收）**：v0.4 不等式 `T_refund_LOCKED_F >= T_cutoff_LOCKED_R + N_claim + N_margin` 给反应方一个 claim 窗，但 **no-theft 在这格条件于「反应方在窗内主动 claim」——是活性假设，非结构保证**。反应方离线 ⇒ F 超时 refund 掉 LOCKED_F ⇒ 反应方自负（已被拿走 LOCKED_R、又没及时领 LOCKED_F）。这**不可"修"只可显式声明**（没法强制谁领自己的钱）。⇒ 列作第 5 条硬假设（§1.5）。
 - 🔴 **两两穷举 ≠ 全穷举（J2 警示，收）**：矩阵只覆盖 8 支两两关系；**三方以上联合时序看不见**，新增任一支矩阵即失效。⇒ §1.5 标为方法边界，改构造时同步更新矩阵是义务非一次性附录。
-- 🔵 **两矩阵 drift 解**：J2 的 matrix doc（8 支 WELDED/INDEP-SAFE/INDEP-SEAM 全分类）= **权威全枚举**；我 §2.6 收缩为"指向 J2 矩阵 + 只列本构造 normative 的 WELD/EXCL 焊接点"，不再各存一份会漂的全表（CLAUDE.md 通则：别处有权威副本⇒删会漂的那份）。
+- 🔵 **两矩阵 drift 解**：J2 的 matrix doc（8 支全归类，**类别方案以该文件为准**——不在此硬拷，否则 J2 改类别我这份即漂，正是要防的病）= **权威全枚举**；我 §2.6 收缩为"指向 J2 矩阵 + 只列本构造 normative 的 WELD/EXCL 焊接点"，不再各存一份会漂的全表（CLAUDE.md 通则：别处有权威副本⇒删会漂的那份）。
 
 ## §0.7 v0.4 变更（Codex v0.3 复审逮到的对称缝 = MUST-FIX + MUST-SPECIFY）
 
@@ -107,7 +107,7 @@ refund: 两 principal 各走 P-SAFE-1 单-live-lineage（LOCKED_R: cutoff 前只
 
 ## §2.6 两两独立性矩阵（v0.5：defer 到 J2 权威全枚举，本节只留 normative 焊接点）
 
-🔵 **权威全枚举 = J2 `docs/2026-08-21-j2-c4-pairwise-independence-matrix.md`**（8 支 C1/C2/R1/R2/F1/F2/O1/O2，28 格全归类 WELDED/COUPLED/INDEP-SAFE/INDEP-SEAM，NWT 红队精化 v2）。本构造不再各存一份会漂的全表（CLAUDE.md 通则）；改本构造支路时**同步更新 J2 矩阵是义务**（新增支即失效，§1.5 方法边界）。
+🔵 **权威全枚举 = J2 `docs/2026-08-21-j2-c4-pairwise-independence-matrix.md`**（8 支 C1/C2/R1/R2/F1/F2/O1/O2，28 格全归类，**类别方案与每格判定以该文件为准**——本构造不硬拷其类别列表以免漂，NWT 红队精化中）。改本构造支路时**同步更新 J2 矩阵是义务**（新增支即失效，§1.5 方法边界）。
 
 🔨 前 4 洞 + J2 矩阵逼出的第 5 条同一形状：**两个各自合法动作被留成可独立发生**。本节只钉本构造 **normative 的 WELD/EXCL 焊接点**（每条落码配"松开→必挂"负测）：
 
