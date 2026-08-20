@@ -276,10 +276,17 @@ refund **不**表述为"查无 AUTHORIZED 记录"，而是**单一活状态 UTXO
 - 🔴🔴 **弱 s = principal-THEFT，非骚扰（v1.1 更正·Codex v1.0 REJECTED 我 v1.0 的"骚扰"判定）**：我 v1.0（采 NWT 红队 b）写"弱 s 因 payout baked ⇒ 只骚扰不盗窃"——**错**。Codex 盗窃 trace：cutoff 非对称（reveal 腿早、reactive 腿晚；首动方 outgoing 本金那条 reactive 腿的 baked 收款方 = 反应方）。若 s 可猜，反应方提前算出 s ⇒ ①走自己腿 refund/expiry 拿回己本金 + ②趁首动方**更晚 cutoff** 那条 outgoing 腿仍活，用 (A,s) claim 首动方本金 ⇒ **refund(己)+claim(对方) = 正是要防的盗窃结局**。🔴 **baked payout 救不了 —— 攻击者【正是】那条腿的合法 baked 收款方**（付给"预定地址"=付给攻击者）。⇒ **preimage 不可预测性 = 本金安全硬假设，非防抢跑优化**（classic HTLC）。
   🔨 判据：baked payout 只挡"外人把钱导去第三方"，**挡不住"合法收款方本人就是攻击者"**。NWT(b)+我采纳都漏了"攻击者=baked 收款方"这一步。
 - 🔴 **MUST-FIX C4-ENTROPY（Codex v1.0 新增·Tier-2 硬假设）**：Tier-2 须显式含密码学假设：`s` ≥256-bit CSPRNG 均匀采样 · reveal-leg spend 公布前对反应方**计算不可预测** · `h=H(s)` 两腿锁定**前** session-bound · 实现对 s 长度/格式非冻结 v1 格式**必 fail-closed**。熵不能从 h 链上证 ⇒ 这是**显式 key-gen/secrecy 假设，非 covenant 谓词**。⚠ 与 §17.2「首动方不泄 s」是**不同**假设：那条防"泄露强密"，这条防"用弱密被暴力/猜解"（无需泄露）。二者并列记为 Tier-2 残留。
-- 🔴 **C4 cutoff leg-role 冻结（Codex v1.0·别留散文）**：Tier-2 须冻死具体 leg-role 的非对称 deadline，不是"reactive 晚 Δ"一句：
-  - **reveal 腿 = 更早 cutoff**（首动方在此用其 witness 首次公开 `s`）；**reactive 腿 = 更晚 cutoff**（从 reveal-leg finalization 学到 s 的一方在此 claim）。
-  - 冻结不等式（对齐 §14 typed·墙钟 ms）：`reactive_leg_cutoff > reveal_leg_finalization_time + finality_D(reveal腿) + observe + claim_land_worst(reactive腿) + margin`。即**给"从 reveal-leg finalization 学到 s 的一方"留够 finality+反应+落链余量**。
-  - 与 §14 fail-closed 单位地板（`require(refund_T>=5e11)`）叠用；leg-role 与资产流向的 covenant 细化由 J1（silverc 域）落。
+- 🔴 **C4 cutoff leg-role + C4-FINALITY（v1.2·Codex v1.1 NEW MUST-FIX）**：Tier-2 须冻死 leg-role 非对称 deadline **且**加一条 reactive-leg **NOT-BEFORE** 规则。
+  - **reveal 腿 = 更早 cutoff**（首动方在此用 witness 首次公开 `s`）；**reactive 腿 = 更晚**（从 reveal 学到 s 的一方在此 claim）。
+  - 🔴🔴 **C4-FINALITY（新洞·连诚实路径都中）**：reveal tx 一广播就在 reveal 链**暴露 s，早于它达 finality**。⇒ 即便 s 完美随机且从不私泄：反应方从**非最终**的 reveal tx/mempool 立刻取 s → 花 reactive 腿 → **reveal claim 后被 reorg 掉** → reveal 侧退回反应方，而它已拿首动方本金 = 同一 `refund(己)+claim(对方)` 盗窃，**不需弱熵/私泄**。原不等式只界了 reactive **最晚**时间，没挡它 **claim 太早**（reveal finality 前）。
+  - 🎯 **修 = reactive-leg NOT-BEFORE 规则（covenant 机械 enforce·no-light-client shape）**：
+    - 冻结绝对 `T_reveal`（reveal claim 必须 **< T_reveal**）；
+    - 冻结 reveal 链 finality 安全预算 `F_reveal` + 时钟/skew margin（概率性 finality ⇒ `F_reveal` 是**声明的概率安全假设/确认策略**，Tier-2 = **conditional on 该 finality bound** 的 no-theft，非无条件定理）；
+    - reactive-leg claim 在本地 `T_react_min` **前 covenant-invalid**：`T_react_min >= T_reveal + F_reveal + clock_skew_margin`；
+    - reactive refund cutoff：`T_react_refund > T_react_min + claim_land_worst(reactive) + safety_margin`。
+  - 🔨 **修双重计数（Codex）**：不再写 `finalization_time + finality_D`（同一量算两遍）；改用**从最晚合法 reveal 时间 `T_reveal` 起算的预注册保守界** —— reactive covenant **不假装能观测外链实际 finalization 时间**，只用 `T_reveal + F_reveal`。
+  - 与 §14 fail-closed 单位地板（`require(refund_T>=5e11)`）叠用；`T_react_min`/`T_react_refund` 的 covenant enforce（reactive spend 前置 lockTime `>= T_react_min`）+ leg-role/资产流细化由 J1（silverc 域）落。
+  - ⇒ **C4-FINALITY 与 C4-ENTROPY、s-secrecy 并列第三条 Tier-2 硬前置**：s 强随机 ∧ s 未私泄 ∧ **public reveal 在 reveal 腿越过冻结 finality-risk 窗前不能授权对手本金花费**。
 - **弃委员加密 A**：加信任-保密角色、弱化 §8 verifiable-attestation vs trusted-oracle、破法更多（aggregator/distributor 泄、门限联盟泄、log/backup/RPC 泄、误前发、误投）+ 可用性/审查另一条 liveness。若将来仍要委员加密 A，须显式把委员保密列为 Tier-2 信任假设（非监控项）。
 
 ### §17.3 C4-break 检测：弃跨链 daaScore（Codex 否），改共同观察域
@@ -314,3 +321,13 @@ refund **不**表述为"查无 AUTHORIZED 记录"，而是**单一活状态 UTXO
 - 检测（§17.3 共同观察域）= **仅 ops 证据, 非 covenant safety primitive**（Codex 明确）。水印（§17.4）= 可选取证。
 - 硬闸不变: §7 quorum 独立性（真金前）· 单位地板/不等式（§14）。
 - **下一步**: Bettor v1.1 已改 §17.2（弱s/熵/cutoff）→ 送 Codex 复审 Tier-2 是否闭; J1 covenant 可建性（reveal-leg `checkSigFromStack(A)∧H(s)==h` + s fail-closed + leg-role 资产流）; A2-whole 5 项另起（receipt-binding e2e）。
+
+### §17.8 v1.2 净状态（Codex v1.1 verdict 后·2026-08-20·RESPONSE-MSG258 桥 3337f419）
+> Codex v1.1: 方向 GREEN, v1.1 全部更正接受, 但 NEW MUST-FIX C4-FINALITY。本节替代 §17.7 的 Tier-2 开项清单。
+- ✅ v1.1 **全部接受**: weak-s=theft · C4-ENTROPY · s-secrecy(与熵分离, 同 theft 级) · cutoff leg-role 冻结 · P-SAFE-1 CLOSED(不变)。
+- 🔴 **NEW MUST-FIX C4-FINALITY（§17.2, v1.2 已加）**: reveal tx 广播即暴露 s 早于 finality ⇒ 反应方从非最终 reveal 取 s 花 reactive 腿, reveal 后被 reorg ⇒ 盗窃(不需弱熵/私泄, 连诚实路径都中)。修 = reactive-leg NOT-BEFORE 规则(`T_react_min >= T_reveal + F_reveal + clock_skew`, covenant 机械 enforce)+ 修双重计数 + 概率 finality ⇒ Tier-2 conditional on finality bound。
+- 🔴 **Tier-2 no-theft = 仍 OPEN / REDTEAM HOLD**: 三条并列硬前置 = C4-ENTROPY(s强随机)∧ s-secrecy(不私泄)∧ **C4-FINALITY(reveal 越 finality 窗前不授权对手本金花费)**。v1.2 已加 C4-FINALITY, 送 Codex MSG-259 复审。
+- ✅ checkSigFromStack 原语 CLOSED(探针 scope 不变)。
+- 🟡 A2-whole OPEN: 验收设计(846181e4)Codex 认方向 sound(含 merkle-删-vs-committeePkHash-诱饵判别测 + no-op 控制臂), **但零闭档 credit —— 生产 covenant 不存在**。建造 = Owner 闸(已上报)。
+- 硬闸: §7 quorum 独立性(真金前)。
+- **下一步**: v1.2(C4-FINALITY)送 Codex; J1 covenant 侧 enforce T_react_min/T_react_refund lockTime + leg-role 资产流; A2 covenant 建造待 Owner。

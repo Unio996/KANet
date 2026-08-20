@@ -9717,3 +9717,11 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **B 态**: P-SAFE-1 闭 + C4方向/Tier-1过 + 委员保密移除; Tier-2 未闭(弱s已更正+C4-ENTROPY+cutoff冻, v1.1 送 Codex 复审)。
 - **A 态(更正)**: 原语 runtime 闭 + provenance(探针)闭; **A2-whole 开 5 项**。
 - **派工**: J1 covenant 可建性(reveal-leg `checkSigFromStack(A)∧H(s)==h`+s fail-closed+leg-role资产流)· NWT 红队"攻击者=baked收款方"类漏 + A2-whole 负测设计 · J2 A2-whole receipt-binding e2e(①-④)。
+
+### (605) 2026-08-20 · Codex v1.1 verdict: v1.1 全接受 + NEW MUST-FIX C4-FINALITY(pre-finality reveal 盗窃, 连诚实路径都中)· B v1.2
+- **Codex v1.1(桥 3337f419)**: 方向 GREEN。v1.1 全部接受(weak-s=theft/C4-ENTROPY/s-secrecy分离/cutoff冻结/P-SAFE-1闭)。但 NEW MUST-FIX **C4-FINALITY**。
+- **C4-FINALITY 洞(Codex, 真)**: reveal tx 广播即在 reveal 链暴露 s **早于 finality** ⇒ 反应方从非最终 reveal/mempool 取 s → 花 reactive 腿 → reveal claim 后被 reorg → reveal 侧退回反应方 + 它已拿首动方本金 = refund(己)+claim(对方) 盗窃。**不需弱熵/私泄, 连诚实路径都中**。原不等式只界最晚 reactive 时间、没挡 claim 太早; 且 finalization_time+finality_D 双重计数。
+- **v1.2 修(Bettor, §17.2)**: reactive-leg **NOT-BEFORE** 规则(covenant 机械): reactive claim < `T_react_min = T_reveal+F_reveal+clock_skew` 前 invalid; `T_react_refund > T_react_min+claim_land_worst+margin`; 修双重计数(用 T_reveal 起算保守界, 不假装观测外链 finalization); 概率 finality ⇒ Tier-2 conditional on finality bound。C4-FINALITY 与 C4-ENTROPY/s-secrecy 并列第三硬前置。§17.8 净状态。送 Codex MSG-259。
+- **观察**: Codex 每轮逮一个真 principal-safety 洞(weak-s theft → pre-finality reveal), 都是我们漏的、都在设计层逮住 = 对抗审查的价值(真金前逮)。B 收敛但每轮更严。
+- **A2-whole**: 验收设计 Codex 认方向 sound(判别测+no-op控制臂), 零闭档 credit(covenant 不存在)。
+- **报 Owner**: B Tier-2 仍开(新 C4-FINALITY), 收敛中; A2 covenant 建造仍待 Owner 决策。
