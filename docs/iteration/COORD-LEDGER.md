@@ -9666,3 +9666,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
   - J2 三处纪律对: 原样贴含不利格 · 认无理由偏离(违了它自己在别处强推的"带理由") · 不自行重跑(认上次授权只针对那次)。
 - **修+重跑再授权(Bettor·在 Owner E2E 授权内: 同一最小探针 test/testnet/非生产钱路/纯 harness bug)· 三条件**: ① 整段 tx 构造 vs 样板全 diff, 每处偏离说理由(sigOpCount 只是撞到 V0 那处, 别只修一处)② V0-first 预检(先跑 V0 一格 PASS 再烧全8)③ 判据不变: 任一篡改仍 PASS=STOP。J2 出 diff+理由清单 Bettor 先瞄再跑; NWT 重跑后独立复核八格。
 - **A/B 对 Owner 报告态**: A provenance 闭 / A runtime 未闭(重跑中) / B Tier-2 待 Codex v0.7(MSG-255 未回)。两者皆未全闭 ⇒ 暂不报 Owner(避免中间态噪声), 待 A-runtime 或 B 出干净 verdict 合并单点报。
+
+### (599) 2026-08-20 · A provenance §6 = CLOSED(grep 复核三处残留全清·最后一过通过)+ A runtime E2E round-2 抓出结构性签名 bug(条件② V0-first 兑现)
+- **A provenance = CLOSED**: 验证层(源树层盲独立 NWT先 + 产物 4b 可复现 671cf278 + 盲独立 df861929, 三方独立无互背书)+ doc 层一致(d44c698e 整段 sweep §6)。J1 今日同族"补一处留一处"3次: §2漂移只修一处→我10:29逮/§6三处残留 b7c8faff 未清→我10:49逮+claim擦肩 b7c8faff 宣称完成→我10:54 grep 实证驳回→d44c698e 整段 sweep 才干净。判据: **验收=grep 后结果, 非 commit message 声明**(claim-to-code grep 核)。
+- **A runtime E2E round-2**: V0-first 预检(条件②)烧 1 格逮到**结构性签名口径 bug**: checkSigFromStack = 裸 BIP340(64B sig 验 32B digest 零 pre-hash); J2 用 kaspa-wasm signMessage(先 hash 再签)⇒ 合法签名签的是 hash(digest)≠链上验的 digest。且离线自验 signMessage+verifyMessage=同一实现自验 ⇒ 必然八格全绿零信息。**追溯: 09:53 那次离线 8/8(J2向量+NWT跑同runner)同样零信息** —— 坐实"runtime 闸不可被离线自验替代"。NWT 用 noble(独立 BIP340)复现 2×2 表 + 认自己那半(只验了期望值内部自洽, 没查 offlineVerify 建模对不对)。
+- **修+重预检授权**(同 E2E 授权内): 签名改裸 BIP340 · 离线判据换独立 BIP340 verify(noble, 真换验证路径非换人按同键)· 八格判别设计不动 · 改完链上 V0 预检过了才烧 8 格。Bettor 钉 seam: 新判据必须真独立(零 pre-hash、不走 signMessage 路径)。
+- **判据兑现**: 条件② V0-first 两轮各省 7 格 + 各逮一个真 bug(round-1 sigOpCount / round-2 签名口径)。E2E 三轮 debug 皆同一授权内(testnet/最小探针/非生产钱路), 无 scope creep。
+- **Owner 报告态**: A provenance 闭 / A runtime 开(E2E round-3 待) / B 待 Codex v0.7。暂不报, 待干净 A/B verdict。
