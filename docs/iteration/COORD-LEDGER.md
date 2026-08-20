@@ -9702,3 +9702,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **⇒ A 全闭**: provenance(源树+4b, 三方独立)+ runtime(8 格 CLEAN, 三方独立)。硬闸仍在: §7 quorum 独立性(真金前)· A1 未选(走 A2)· rotate/revoke(out-of-scope)。
 - **B 态**: 方向 GREEN, v1.0 §17(5 fix, C4 hybrid-secret)送 Codex MSG-257 复审中; J1 confirm C4 hybrid covenant 可建(`require(blake2b(s)==h_baked)` + checkSigFromStack(A)); 残留=首动方不泄 s(转移非消除)+ 弱 s 有界骚扰。
 - **⇒ 报 Owner**: A=CLOSED; B=方向 GREEN、Tier-2 待 Codex v1.0 concur。
+
+### (603) 2026-08-20 · (602) "三方独立" 独立度精确化(独立逻辑 ≠ 独立基础设施)
+- NWT pin 实(读 `_predict.mjs`:2 = `ws://127.0.0.1:17210` loopback): NWT/Bettor/J2 在**同一机同一节点进程**跑 ⇒ ③ NWT `_predict.mjs` 15/15、我的核 = **独立逻辑/独立判断/独立读, 非独立节点**。
+- **唯一真·跨机(独立基础设施)= J1 :3300**(独立节点、独立读数, UTXO 核 10/10)。
+- ⇒ (602) "三方独立" **应读作"独立逻辑判断", 不是"独立基础设施"**。A2 CLOSED 的跨机独立仅 J1 一个角度; 其余是同机独立逻辑复现 + RPC 双读 + txid 机制(同机各跑)。judge 判据仍成立(闭档不靠独立节点数, 靠判据+可归因), 但独立度表述钉准: **"独立执行/判断" vs "独立基础设施" 两种独立性不混说**(NWT 立)。
+- 🔨 通则: 引用"N 方独立"时须分清哪种独立(逻辑/判断 vs 基础设施); loopback/共享节点 = 同基础设施, 会以镜像方式同坏。见 memory `reference-shared-code-fails-in-mirror-image-ways-per-machine` / `cross-node-testing-critical-j1-separate-node`。
