@@ -1,8 +1,49 @@
 # C4-FINALITY 同链构造：**两两独立性矩阵**（报备层 · 零生产码）
 
-> **Status**: 🔴 **STALE — 全文按 Shape A 写，而构造已迁 Shape B。支集待 v1.0 后重建。**
+> **Status**: CURRENT（§0-A v7 = 对 v0.10 Shape B 重建；§0-0 及其下各节为历史，标 STALE 保留以示演进）
 
 **作者** J2 · **日期** 2026-08-21 · **派工** Bettor 18:20（采纳 J2 提议）+ 22:11（据 Shape B 重建）
+
+---
+
+## §0-A v7（对 J1 v0.10 · Shape B 重建）：**5 对象 10 支**，逐支从实际 spend 条件导出
+
+### 支表（每支注明导出自哪一节 + 「无其它支」断言）
+
+| 记号 | 对象 | 支（**允许什么**，非"被谁用"） | 出处 | 无其它支 |
+|---|---|---|---|---|
+| C1 / C2 | `C` | reveal-claim / terminal-refund | §4-a,b | §4-a「只有两支…无第三支」 |
+| R1 / R2 | `LOCKED_R` | transfer（揭 s，同笔消费 C **且** exact `LOCKED_F`）/ terminal-refund `>= T_cutoff_LOCKED_R` | §4-d | §4-d「恰两条互斥」 |
+| **Fa / Fb** | `LOCKED_F` | **transition**（reveal 强制转 `O_AUTHORIZED`）/ **giveup-refund** `>= T_giveup_LOCKED_F` | §4-d | §4-d「两条互斥」 |
+| **A1 / A2** | **`O_AUTHORIZED`**（新对象） | reactive-claim（**无下界**，O 作 co-input）/ recovery `>= OpTxInputDaaScore(O_AUTHORIZED)+N` | §4-c | §4-c「恰两支」 |
+| O1 / O2 | `O` | pre-timeout（反向焊→`oauth_cid`）/ `T_O` 回收 | §4-e | §4-e「恰两支，均从实际 spend 条件写死」 |
+
+⇒ **10 支 ⇒ C(10,2) = 45 对**（v6 时是 8 支 28 对；**Shape B 多了一个对象、两条支**）。
+
+### 🔴🔴 新支带出的新对里，有一条**没有排序约束**：`Fb`（giveup）
+
+**实读**：`T_giveup_LOCKED_F` 在 v0.10 **全文只出现一次** —— 它自己那行定义。
+**没有任何一句把它与 `T_cutoff_LOCKED_R`（reveal 窗）排序。**
+
+⇒ 若 **`T_giveup_LOCKED_F` < `T_cutoff_LOCKED_R`**：
+首动方可以在**reveal 窗还开着的时候**先把自己本金 `LOCKED_F` 取回（Fb）。
+Fb 一执行，`LOCKED_F` 没了 ⇒ **R1 要求同笔消费 exact `LOCKED_F`** ⇒ **reveal 被结构性封死**；
+反应方的 `LOCKED_R` 仍锁到 `T_cutoff_LOCKED_R` 才退。
+
+🔵 **这【不是】盗窃**（我核过：`LOCKED_F` 被 Fb 花掉后 R1 不可构造 ⇒ 首动方无法既 giveup 又 reveal）。
+🔴 **但它是【单方免费期权】**：首动方可以观望到 `T_giveup`，再零成本中止，
+**而对手方的资金在此期间一直被锁住** —— 原子交换里的经典 free-option 问题。
+
+### ⇒ 建议（归 J1 裁，我不越界定构造）
+
+加一条 baked 排序：**`T_giveup_LOCKED_F >= T_cutoff_LOCKED_R`**
+⇒ giveup 只能在 **reveal 窗关闭之后**行使 ⇒ 它变回真正的「reveal 没发生 ⇒ 拿回本金」recovery，
+**而不是一个可以随时行使的中止权**。
+🔵 用的是已有的下界机制，无新原语。
+
+🔨 **本条的方法论意义**：`Fb` 是 **Shape B 新增的支**，
+**它一出现就带来了 9 个新对**（与其余 9 支各一），而**排序约束是在这些新对里才显形的**。
+⇒ 这就是「**新增任一支，矩阵即失效、须同步重建**」那条义务的**第一次真实兑现**。
 
 ---
 
