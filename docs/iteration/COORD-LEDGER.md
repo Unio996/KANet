@@ -9623,3 +9623,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - 写 §15: 冻结绑定链(全 covenant 链上 enforce): ①验 attestation(checkSigFromStack×N+threshold+merkle 成员对 baked 根)②算 successor_commit=H(canonical(receipt 绑定字段 {network/version/session/policy/outcome/evidence/committee_epoch/replay})), canonical 复用 §14 B 冻结字节法(A/B 共用一处防漂移)③introspection(tx.outputs[].value/scriptPubKey, TN12 有·PoolSpine/PayoutShard 先例)enforce 恰一后继 + scriptPubKey==successor_commit(链上派生非 witness 喂)+ value==确定性分配 ④任何替代后继过不了 introspection ⇒ covenant 拒。
 - **host builder 非权威**: host 只拼 tx, enforce 唯一后继的是 covenant introspection(host 拼错=被链上拒)= 消同机绕过面(§10§3)。E2E 必含变异后继全 REJECT。
 - 这是 Codex A 闭合的一个必答项(除 e2e/编译器归档外)先落设计。并行进行中: J1 归档/J2 E2E/NWT 红队/我 spec。
+
+### (592) 2026-08-20 · A 进展(并行·J2 E2E 备料带出): A2 → compile-verified · 编译坐标精确到具体 binary · versioned-builds=归档机制
+- **🟢 A2 状态升级 source-plausible → compile-verified**: J2 (09:49) 用 pinned `versioned-builds/silverc-zk-8065184.exe` 编 checkSigFromStack 探针 **一次过, 产物 3512 字节** ⇒ 该内建在 pinned 二进制上**真的可编**(比只读源码强一档; 离 on-chain-verified 只差 E2E 链上跑)。OP_PICK 修复没丢(在该 binary 里, J2 上条"可能丢"推论作废)。
+- **🔴 编译坐标精确化(J2 约束, 采纳)**: §6-3/A2 坐标**不能只写 commit, 要写到具体二进制 `versioned-builds/silverc-zk-8065184.exe` + 脚本断言用的是它、不接受默认路径 `silverc.exe`**(后者不含该内建; 若先用不含内建的合约跑通流水线, 差异不显形直到实用)。强化"检出坐标"教训: 不只 commit/树, 还有哪个已编 binary。已更卡 §14 A。
+- **versioned-builds + MANIFEST = 现成归档机制**(记着一次 in-place 覆盖事故: 覆盖能编 ShardLeaf 的旧 binary → bshard 押注中断 23:41-00:47; 修法=按族分离+版本化+禁默认路径覆盖)⇒ **直接接 J1 的编译器归档任务 + Codex durability 要求**(J1 归档 = 确认 versioned-builds/silverc-zk-8065184.exe 已 durable + rebuild 流程)。
+- 并行态: Bettor §15+本条整合 · J2 E2E 设计 NWT-PASS(加 V5)+ compile-verified · NWT 红队完 · J1 归档(接 versioned-builds)· Codex v0.6 处理。
