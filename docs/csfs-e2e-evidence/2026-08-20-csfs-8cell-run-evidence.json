@@ -1,0 +1,56 @@
+[
+ {
+  "window": "V1",
+  "expect": "REJECT",
+  "v0Before": "PASS",
+  "result": "REJECT",
+  "reason": "RPC Server (remote error) -> Rejected transaction 0f87f8fc850c9acf4bb5a7c29015d8019843db40c9628672fd053d6a11042ef7: failed to verify the signature script: not all signatures empty on failed checkmultisig"
+ },
+ {
+  "window": "V2",
+  "expect": "REJECT",
+  "v0Before": "PASS",
+  "result": "REJECT",
+  "reason": "RPC Server (remote error) -> Rejected transaction d68c9d91f152814b3c4271e0296edd2fec03b14db141b0c8a0028a012f3ab363: failed to verify the signature script: not all signatures empty on failed checkmultisig"
+ },
+ {
+  "window": "V3",
+  "expect": "REJECT",
+  "v0Before": "PASS",
+  "result": "REJECT",
+  "reason": "RPC Server (remote error) -> Rejected transaction e098f4b17af51e28f5518b1fe4bcb43eabf45fae364ffe81b3b9d6312aee565d: failed to verify the signature script: not all signatures empty on failed checkmultisig"
+ },
+ {
+  "window": "V4",
+  "expect": "REJECT",
+  "v0Before": "PASS",
+  "result": "REJECT",
+  "reason": "RPC Server (remote error) -> Rejected transaction 6c1aa057ae222e048bb6aa92e9faab1714694555a5f34f5a750bb50f0f2fd28d: failed to verify the signature script: script ran, but verification failed"
+ },
+ {
+  "window": "V5a",
+  "expect": "REJECT",
+  "v0Before": "PASS",
+  "result": "REJECT",
+  "reason": "RPC Server (remote error) -> Rejected transaction 0cb56deb1b87398a23ad9a55c55e683613265ec19b7eed850001f32ef054118e: failed to verify the signature script: not all signatures empty on failed checkmultisig"
+ },
+ {
+  "window": "V5b",
+  "expect": "REJECT",
+  "v0Before": "PASS",
+  "result": "REJECT",
+  "reason": "RPC Server (remote error) -> Rejected transaction 600307372617dc16ebbee00825337caced00efc3d0abe24aa730ffaf85031c50: failed to verify the signature script: not all signatures empty on failed checkmultisig"
+ },
+ {
+  "window": "V5c",
+  "expect": "PASS",
+  "v0Before": "PASS",
+  "result": "PASS",
+  "txid": "e4d64101d2c438fdb4030d828bca6b4dd7cca48402ac110f194fdb94fbed387f"
+ },
+ {
+  "window": "V0-final",
+  "expect": "PASS",
+  "result": "INCONCLUSIVE"
+ }
+]

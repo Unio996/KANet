@@ -1,0 +1,64 @@
+{
+ "compiler": "D:/silverscript/versioned-builds/silverc-zk-8065184.exe",
+ "sil": "D:/kanet-tn12/kasia-console/src/lib/CheckSigFromStackProbe.sil",
+ "pkBaked": "ddf5e5f24cef95f13ca02762e8a86cc3947b2957e34264bd3d43c1df39c2523f",
+ "note": "🔴 privkey 不入此文件; 上链跑时现签或另传。本文件可公开。",
+ "vectors": [
+  {
+   "id": "V0",
+   "why": "合法三元组 —— 正路可用(但【不证明闸存在】)",
+   "sig": "f606fc78f34a6c7978a92a4113b40508fb730962279b2927b7887768ed301f1daf171db60d8c93577be341740f7255ca9464bdba014192b7482026860e30c4f7",
+   "digest": "404acc7136474855f404232146fc1e6314fbf8a34b776bf2ddb986a8b7932c88",
+   "expect": "PASS"
+  },
+  {
+   "id": "V1",
+   "why": "sig 翻一位 ⇒ 证明签名参与了运算",
+   "sig": "f706fc78f34a6c7978a92a4113b40508fb730962279b2927b7887768ed301f1daf171db60d8c93577be341740f7255ca9464bdba014192b7482026860e30c4f7",
+   "digest": "404acc7136474855f404232146fc1e6314fbf8a34b776bf2ddb986a8b7932c88",
+   "expect": "REJECT"
+  },
+  {
+   "id": "V2",
+   "why": "digest 翻一位 ⇒ 证明 digest 参与了运算(最像 stub 那格)",
+   "sig": "f606fc78f34a6c7978a92a4113b40508fb730962279b2927b7887768ed301f1daf171db60d8c93577be341740f7255ca9464bdba014192b7482026860e30c4f7",
+   "digest": "414acc7136474855f404232146fc1e6314fbf8a34b776bf2ddb986a8b7932c88",
+   "expect": "REJECT"
+  },
+  {
+   "id": "V3",
+   "why": "另一把钥的【格式完全合法】签名 ⇒ 排除\"根本没在比对公钥\"",
+   "sig": "d37a9ca66218ed57de118e3c6a3633df997eca1b13905ec336d1b01b43ee9380b1172cbe8be0d918ffd0b05d9a637025c7b9dce2fc09b0223673b74483a529cd",
+   "digest": "404acc7136474855f404232146fc1e6314fbf8a34b776bf2ddb986a8b7932c88",
+   "expect": "REJECT"
+  },
+  {
+   "id": "V4",
+   "why": "全零 sig(长度合法非签名) ⇒ 不接受平凡值",
+   "sig": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+   "digest": "404acc7136474855f404232146fc1e6314fbf8a34b776bf2ddb986a8b7932c88",
+   "expect": "REJECT"
+  },
+  {
+   "id": "V5a",
+   "why": "交叉配对 (sigA@D1, D2) —— 两半各自合法, 只有配对错",
+   "sig": "f606fc78f34a6c7978a92a4113b40508fb730962279b2927b7887768ed301f1daf171db60d8c93577be341740f7255ca9464bdba014192b7482026860e30c4f7",
+   "digest": "9cefd4c9e06c0f244440f414053776489d9f98cec77c10509ed774a0c41967e4",
+   "expect": "REJECT"
+  },
+  {
+   "id": "V5b",
+   "why": "交叉配对 (sigA@D2, D1) —— 反向, 排除单向巧合",
+   "sig": "b9af87f613e60427760c6cb7a4436ec71d266ed02f2e887a8b60de97d50817bd6c504b7f9f44428140e9974efef5a521bf59ce101fecce04dce072c7a53f1dc2",
+   "digest": "404acc7136474855f404232146fc1e6314fbf8a34b776bf2ddb986a8b7932c88",
+   "expect": "REJECT"
+  },
+  {
+   "id": "V5c",
+   "why": "V5 的阳性对照: (sigA@D2, D2) 必须 PASS, 否则 V5a/V5b 的 REJECT 无归因",
+   "sig": "b9af87f613e60427760c6cb7a4436ec71d266ed02f2e887a8b60de97d50817bd6c504b7f9f44428140e9974efef5a521bf59ce101fecce04dce072c7a53f1dc2",
+   "digest": "9cefd4c9e06c0f244440f414053776489d9f98cec77c10509ed774a0c41967e4",
+   "expect": "PASS"
+  }
+ ]
+}
