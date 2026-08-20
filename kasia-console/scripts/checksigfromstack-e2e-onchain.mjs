@@ -9,7 +9,7 @@
 // 🔴 捕获拒绝原文：不是只记 ok/fail，记 kaspad 原话，用来分辨"被脚本拒"与"被节点/费用/同步拒"。
 //
 // 编译坐标：versioned-builds/silverc-zk-8065184.exe（默认路径是 legacy 副本，编不出本内建）。
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 
 const NET = 'testnet-12';
@@ -114,11 +114,16 @@ async function runVector(v, requireLanded = false) {
     }
     return { id: v.id, result: 'PASS', txid: r.transactionId, landed };
   } catch (e) {
-    return { id: v.id, result: 'REJECT', reason: String(e?.message || e).slice(0, 220) };
+    return { id: v.id, result: 'REJECT', reason: String(e?.message || e).slice(0, 400) };
   }
 }
 
 // ── 同窗交替：每个阴性格前后各夹一次 V0 ────────────────────────────────
+// 🔴 预注册(2026-08-20, 在看到结果之前定): 只有拒因原文含此串才算【脚本验证拒】。
+//   tx 格式拒(sig_op_count…) / 节点状态拒(not synced) / 拒因读不到 —— 一律不算, 记不可归因。
+//   理由: REJECT 这个词对三种成因长得完全一样, 今早八格全 REJECT 却一格都没进脚本。
+const SCRIPT_REJECT_MARK = 'failed to verify the signature script';
+const evidence = [];
 const V0 = V.vectors.find((x) => x.id === 'V0');
 if (V0_ONLY) {
   log('V0 预检(Bettor 条件②): 只跑合法格, 要求【落链】');
@@ -138,7 +143,8 @@ for (const v of V.vectors) {
   const target = await runVector(v);
   results.push({ window: v.id, v0Before: before.result, target, expect: v.expect });
   log(`窗 ${v.id}: V0=${before.result} | ${v.id}=${target.result} (期望 ${v.expect})` +
-    (target.reason ? ` | 拒因: ${target.reason.slice(0, 90)}` : ''));
+    (target.reason ? `
+    拒因原文: ${target.reason}` : ''));
 }
 const v0Final = await runVector(V0);
 log(`收尾 V0 = ${v0Final.result} (期望 PASS)`);
@@ -150,8 +156,19 @@ judge('V0 (合法) PASS', v0Final.result === 'INCONCLUSIVE' ? null : v0Final.res
 for (const r of results) {
   if (r.target.result === 'INCONCLUSIVE') { judge(`${r.window}`, null, r.target.why); continue; }
   if (r.v0Before !== 'PASS') { judge(`${r.window}`, null, `同窗 V0=${r.v0Before} ⇒ 该窗读数不可归因于被测物`); continue; }
-  judge(`${r.window} 期望 ${r.expect}`, r.target.result === r.expect, `实得 ${r.target.result}${r.target.reason ? ' | ' + r.target.reason.slice(0, 120) : ''}`);
+  if (r.expect === 'REJECT' && r.target.result === 'REJECT' && !String(r.target.reason || '').includes(SCRIPT_REJECT_MARK)) {
+    judge(`${r.window}`, null, `REJECT 了, 但拒因【不是脚本验证】⇒ 不可归因于被测物。原文: ${r.target.reason || '(空)'}`);
+    continue;
+  }
+  judge(`${r.window} 期望 ${r.expect}`, r.target.result === r.expect, `实得 ${r.target.result}${r.target.reason ? ' | ' + r.target.reason : ''}`);
 }
+// 🔴 落盘证据: 上一轮 8/8 拿不到拒因原文, 正因为它只存在于进程内存里、日志又被截断。
+//   ⇒ 拒因原文必须落盘, 否则"判据③"事后【无法复核也无法补测】。
+for (const r of results) evidence.push({ window: r.window, expect: r.expect, v0Before: r.v0Before, result: r.target.result, txid: r.target.txid, reason: r.target.reason, why: r.target.why });
+evidence.push({ window: 'V0-final', expect: 'PASS', result: v0Final.result, txid: v0Final.txid, reason: v0Final.reason });
+writeFileSync(OUT + "/run-evidence.json", JSON.stringify(evidence, null, 1));
+console.log("");
+console.log("证据已落盘: " + OUT + "/run-evidence.json (拒因原文不再随进程消失)");
 console.log(`\n${fail === 0 && inconclusive === 0 ? '✅' : '🔴'} ${pass} PASS / ${fail} FAIL / ${inconclusive} 不可归因`);
 if (fail > 0) console.log('🔴🔴 有篡改格仍 PASS 或合法格被拒 ⇒ 按判据 STOP，立即报 Bettor，勿用于 §6-3。');
 await rpc.disconnect();
