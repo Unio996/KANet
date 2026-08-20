@@ -381,3 +381,12 @@ refund **不**表述为"查无 AUTHORIZED 记录"，而是**单一活状态 UTXO
 - ✅ **同链 C4-FINALITY = design-CLOSEABLE**（O-replacement + cov_id lineage 结构闭, trustless）。REDTEAM HOLD 待解 = [J1 完整 §6-3 A covenant 把 Q3 落显式 require+负测 + Codex MSG-260 design concur + 实现（Owner 闸）]。
 - 🟡 **跨链仍 OPEN**: O 在对手链 reactive 花不掉 ⇒ 退 R1（委员 finalized-reveal attestation）/ conditional / bounded-lock。⇒ **首实现锁同链 = 拿无委员结构 Tier-2**。
 - **Tier-2 状态**: P-SAFE-1 CLOSED · C4-ENTROPY/s-secrecy 硬假设 · **C4-FINALITY 同链 = closeable via O-construction（待 Codex concur + Q3 落码）** · 跨链 = R1/conditional。
+
+### §17.11 Codex MSG-260 verdict（2026-08-21·桥 09671451）——GREEN DIRECTION + 3 MUST-FIX（同链架构接受，未 design-closed）
+> Codex 接受 cov_id-lineage 架构（script→provenance pivot / O-REPLACEMENT / terminal 支必终止 lineage / ShardLeaf 先例确认真 provenance 非 codegen 猜），但 J1 构造 v0.1 有 3 MUST-FIX。
+- 🔴 **MUST-FIX 1（A-absent 回退·Bettor 认漏）**: J1 v0.1 reveal-侧 refund 写成 `require(A-absent) ∧ tx.time>=T_react_refund` = 回退 v0.7 已否决错（covenant 证不了链下 A 全局不存在）。⇒ **改回 §17.1 P-SAFE-1 单-live-lineage**（still-live LOCKED 互斥后继, cutoff 前只 validated-reveal 消费、timeout 后转 terminal refund）, A-absent 全清。⚠ Bettor 整合 §17.10 时没细读 J1 144 行、信收敛漏了此回退, Codex catch, integrator 守缝失手一次。
+- 🔴 **MUST-FIX 2（唯一后继）**: `OpCovOutputCount(cid)>=1` 允许多续链 output ⇒ 违反唯一 capability。改 **`==1`** + 每条 terminal/refund/cancel 支续链 output **==0** + 变异负测（==1→>=1 / terminal 产续链 ⇒ 验收必挂）。
+- 🔴 **MUST-FIX 3（T_O 相对锚）**: T_O 从绝对 DAA+无锚时长 改**相对 O 创建**: `refund 仅当 current_daa >= OpTxInputDaaScore(O) + N_claim + N_margin`（O 是 refund tx 的 input ⇒ OpTxInputDaaScore(O) 可用；早前解不了 model-b 的那个 opcode 这里正对上）。
+- 附加: 双方锁前验精确 genesis C+baked cid; cid!=0/O script/value>=min_O 是格式检查非 provenance 替代; cov_id 派生须 durable 源码/runtime 证（Toccata path）。**跨链本轮不闭**（仍需正 finalized-reveal 证 R1/光客户端）。
+- **状态**: synthetic-O attack FIX 方向接受 · cov_id ancestry/co-reorg PASS-AS-ARCHITECTURE · **P-SAFE-1 被 A-absent 回退 REOPENED=MUST-FIX** · 唯一后继 OPEN=MUST-FIX(==1) · T_O 反应窗 OPEN=MUST-FIX(相对锚)。
+- **下一步**: J1 v0.2 修三条+A-absent全清 · J2 验收族B加 ==1/terminal==0 变异负测+T_O相对锚 · NWT 修后红队(P-SAFE-1 lineage ↔ O-lineage 交互) · 送 Codex 复审 → 同链 design-closed。
