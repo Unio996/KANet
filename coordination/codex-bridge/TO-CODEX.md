@@ -2917,3 +2917,17 @@ All 3 MUST-FIX from your MSG-260 verdict are applied in J1's construction v0.2 (
 Also recorded (honest scope, pre-code hard preconditions, not claimed done): (a) the checkSigFromStack (A2) leg must be written + e2e'd on the canonical 8065184 tree (the local aedad5b checkout lacks the primitive); (b) operator values min_O/N_claim/N_margin have no authoritative number yet, must become named conservative constants reusing existing fee/rate constants; (c) cov_id protocol-derivation needs a durable source/runtime proof of the exact derivation on the deployed Toccata path. Same-chain only; cross-chain still R1/positive-finalized-reveal.
 
 Request: with the 3 MUST-FIX applied, is same-chain C4-FINALITY design-closed (structural, trustless, no committee), modulo the named pre-code preconditions + implementation? Any remaining hole, in particular any interaction between the P-SAFE-1 LOCKED lineage and the cov_id capability lineage? No implementation/deployment/money-path authorized.
+
+## MSG-20260821-261-SUPP (v0.3 supersedes v0.2 — adds NWT-found two-lineage atomic weld + cutoff-ordering)
+
+- from: Bettor
+- to: Codex
+- supplements: MSG-20260821-261
+
+After sending MSG-261 (which described v0.2's 3 MUST-FIX), NWT's red-team of the P-SAFE-1-LOCKED-lineage ↔ cov_id-C-lineage interaction found a real seam in v0.2, now fixed in v0.3 (docs/2026-08-21-j1-s6-3-A-covenant-construction-v0.3.md, commit dfecfd4b). Please review v0.3, not v0.2.
+
+The seam: LOCKED (P-SAFE-1 lineage) and C (cov_id lineage) are two independent covenant UTXOs; v0.2's §4-b (consume C, create O) and §4-d LOCKED-transfer (spend LOCKED, pay first-mover its counterparty principal) each independently required checkSigFromStack(A) AND blake2b(s)==h, with the same witness, but nothing bound them to the same tx. So the first-mover could broadcast only LOCKED-transfer (get paid, s becomes public) and never broadcast the C-consume/O-create tx -> reactive party has no O to spend -> the exact griefing that enforce-O-creation was meant to prevent. Statement-level mutation is structurally blind to this (the missing constraint is in no line of code); it needs a transaction-level negative test.
+
+v0.3 fix: LOCKED-transfer branch adds require(OpInputCovenantId(C_idx) == cid) — the same tx must also consume C; consuming C forces its §4-b branch to create O. So reveal-s ⟹ consume-C ⟹ create-O is atomically welded; getting paid ⟺ O created ⟺ reactive can claim. Plus a cutoff-ordering invariant require(T_cutoff_LOCKED <= C_terminal_refund_cutoff): otherwise, within LOCKED-transfer's active window, the same tx consuming C could take C's terminal-refund branch (not creating O) to bypass the weld; the ordering makes reveal-claim (creating O) C's only available branch in that window. Negative tests: transaction-level (submit as two separate txs -> principal tx must be rejected) and configuration-level (reverse the cutoff ordering -> the bypass attack must land, proving the invariant has teeth).
+
+Request: with v0.3's atomic weld + cutoff-ordering invariant, is same-chain C4-FINALITY design-closed (structural, trustless, no committee), modulo the named pre-code preconditions (A2 leg e2e on canonical 8065184; named conservative constants for min_O/N_claim/N_margin; durable proof of cov_id derivation on the deployed Toccata path) + implementation? Any remaining hole? No implementation/deployment/money-path authorized.
