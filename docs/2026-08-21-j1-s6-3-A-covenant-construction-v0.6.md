@@ -248,7 +248,7 @@ require(tx.outputs[payout_idx].value == LOCKED_F_value);                       /
 2c. 🔴 **O ↔ 被保护 principal 双向焊接负测（v0.4+v0.6·Codex 逮·交易级 + 配置级）**：
    - **正向**：花 `LOCKED_F`（领 principal）而**不带真 O** input ⇒ **必拒**（§4-c）。
    - 🔴 **反向（v0.6 补 Codex 单向焊缝）**：**独立花真 O**（pre-timeout，**不带 `LOCKED_F` co-input / 不付反应方 baked payout**）⇒ **必拒**（§4-e 支1）。这条是关键：s/A 公开后独立花 O 的 griefing，只有 O 自己的 covenant 反向焊能挡，F1 侧 co-input 挡不住。
-   - **配置级**：令 baked `T_refund_LOCKED_F < T_cutoff_LOCKED_R + N_claim + N_margin`（或 `T_O != T_refund_LOCKED_F` 锚点错位）⇒ non-conforming ⇒ 验收必挂。
+   - **配置级（对齐不变量，J2 矩阵 v4 formalize）**：`T_O` 锚点必须 **== `T_refund_LOCKED_F`** 锚点（两常量各自合法，错的只是相对值：若 `T_O` 晚于 `T_refund_LOCKED_F` ⇒ 存在"O 仍可花而 LOCKED_F 已 refund-eligible"的抢跑窗）。🔴 **负测须证对齐是承重非装饰**：① 对齐 ⇒ 抢跑攻击 **BUST**；② **故意错开 ⇒ 同一攻击必须 LAND**（否则这条对齐将来会被顺手简化掉）。同理 `T_refund_LOCKED_F < T_cutoff_LOCKED_R + N_claim + N_margin` 的错开也须攻击 LAND。
 3. **A-absent 全清核（MUST-FIX 1）**：全文 grep `A-absent` 必须**零命中**于 normative 构造（只许出现在 §0.5 变更说明里作为"已清除的旧写法"）。refund 只走 §4-d 的 still-unspent LOCKED state machine。
 4. **A2 腿 e2e**：`checkSigFromStack` 合法签过 / 改一位拒 —— 必在 canonical `8065184` 树上编 + 上链跑，读 codegen 不算（OP_PICK 教训）。
 5. **cov_id 派生 e2e**：造两个不同 funding outpoint 的 candidate C，验其 cid 不同、且只有 baked 那个的 O 过 reactive 检查。
