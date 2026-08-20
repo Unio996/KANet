@@ -26,17 +26,32 @@ const OUT = 'D:/kanet-tn12/scratch/e2e';
 //    这一条【必须在生成向量之前】跑 —— 否则我们会拿着一批向量去测一个编不出来的东西。
 function assertPinnedCompiler() {
   if (!existsSync(SILVERC)) throw new Error(`pinned 编译器不存在: ${SILVERC}`);
-  if (existsSync(LEGACY)) {
-    // 阳性对照: 证明"默认路径确实不认" —— 若它居然认了, 说明默认路径被换过, 本断言的前提变了, 要停下来看
-    let legacyRejects = false;
-    try { execFileSync(LEGACY, [SIL, '--ctor', `${OUT}/_ctor.json`, '-o', `${OUT}/_legacy_probe.json`], { stdio: 'pipe' }); }
-    catch { legacyRejects = true; }
-    if (!existsSync(`${OUT}/_legacy_probe.json`)) legacyRejects = true;
-    console.log(legacyRejects
-      ? '  ✅ 对照: 默认(legacy)路径确实编不了本内建 —— 与 MANIFEST 记载一致'
-      : '  🔴 对照失败: 默认路径居然编得出来 ⇒ 它被换过? 停下来核 MANIFEST 再继续');
+  if (!existsSync(`${OUT}/_ctor.json`)) throw new Error(
+    'ctor 文件不存在 —— 本断言必须在 ctor 生成【之后】跑; 否则 legacy 会因 file-not-found 失败, ' +
+    '而那与"缺内建"在 catch 里长得一模一样 ⇒ 控制项以错误原因成立(Codex b41d51cc 逮到的 false-positive)');
+  if (!existsSync(LEGACY)) { console.log('  ⓘ 默认路径不存在, 跳过对照臂(非失败)'); return; }
+  // 🔴 断言的是【失败的原因】, 不是"失败了" —— 这正是 Codex 逮到的那一格。
+  let stderr = '';
+  let compiled = false;
+  try {
+    stderr = String(execFileSync(LEGACY, [SIL, '--ctor', `${OUT}/_ctor.json`, '-o', `${OUT}/_legacy_probe.json`],
+      { stdio: 'pipe', encoding: 'utf8' }) || '');
+    compiled = existsSync(`${OUT}/_legacy_probe.json`);
+  } catch (e) { stderr = String(e?.stdout || '') + String(e?.stderr || '') + String(e?.message || ''); }
+  const byMissingBuiltin = /unknown function call:\s*checkSigFromStack/i.test(stderr);
+  const byFileNotFound = /failed to read|os error 2|no such file/i.test(stderr);
+  if (compiled) {
+    throw new Error('🔴 对照臂失效: 默认(legacy)路径居然编出了本内建 ⇒ 它被换过, 停下来核 MANIFEST');
   }
+  if (byFileNotFound) {
+    throw new Error(`🔴 对照臂【以错误原因成立】: legacy 因 file-not-found 失败, 不是因缺内建。原文: ${stderr.slice(0, 160)}`);
+  }
+  if (!byMissingBuiltin) {
+    throw new Error(`🔴 对照臂原因不可辨: 既非 unknown-function 也非 file-not-found。原文: ${stderr.slice(0, 200)}`);
+  }
+  console.log('  ✅ 对照臂成立且【原因正确】: legacy 报 "unknown function call: checkSigFromStack"(非 file-not-found)');
 }
+
 
 const kaspa = await import('kaspa-wasm');
 
@@ -84,9 +99,6 @@ const VECTORS = [
   { id: 'V5c', why: 'V5 的阳性对照: (sigA@D2, D2) 必须 PASS, 否则 V5a/V5b 的 REJECT 无归因', sig: SIG_A_D2, digest: D2, expect: 'PASS' },
 ];
 
-console.log('=== 编译坐标断言 ===');
-assertPinnedCompiler();
-
 console.log('\n=== 向量【离线自验】: 应然 vs kaspa-wasm 实测 ===');
 let bad = 0;
 for (const v of VECTORS) {
@@ -102,6 +114,9 @@ console.log(bad === 0
 mkdirSync(OUT, { recursive: true });
 const ctorArg = { kind: 'array', data: [...Buffer.from(KEY_A.pkXOnly, 'hex')].map((b) => ({ kind: 'byte', data: b })) };
 writeFileSync(`${OUT}/_ctor.json`, JSON.stringify([ctorArg]));
+
+console.log('\n=== 编译坐标断言(必须在 ctor 生成【之后】跑) ===');
+assertPinnedCompiler();
 writeFileSync(`${OUT}/vectors.json`, JSON.stringify({
   compiler: SILVERC, sil: SIL, pkBaked: KEY_A.pkXOnly,
   note: '🔴 privkey 不入此文件; 上链跑时现签或另传。本文件可公开。',
