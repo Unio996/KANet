@@ -1,6 +1,21 @@
 # C4-FINALITY：`O` earmark 精确构造（草案 · 报备层 · 零生产码）
 
-> **Status**: CURRENT
+> **Status**: **SUPERSEDED（构造细节部分）**
+
+> 🔴 **权威副本已转移**：`min_O` / `T_O` / lineage 各支 require 的**权威形态**现在是
+> `docs/2026-08-21-j1-s6-3-A-covenant-construction-v0.2.md`（J1，含 Codex MSG-260 三条 MUST-FIX）。
+> **本文档不再维护那几项**，以免两处副本漂移（本仓通则：别处有权威副本 ⇒ 删掉会漂移的那份）。
+>
+> **具体已被取代的**：
+> - 我 §2-c 的 `T_O` 是**绝对 DAA 窗**；v0.2 MUST-FIX 3 改为**相对锚**
+>   `require(current_daa >= OpTxInputDaaScore(O) + N_claim + N_margin)` —— **从 O 实际创建时刻起算**，
+>   不必在"还不知道 reveal 何时发生"时就烤死一个绝对值。**以 v0.2 为准。**
+> - `OpCovOutputCount` 我原文继承先例的 `>= 1`；v0.2 收紧为 **`== 1`**（reveal 恰一续继）
+>   + 每条 terminal 支 **`== 0`**。**以 v0.2 为准。**
+>
+> 🔵 **本文档仍有价值的部分**（未被取代）：§0 / §0-bis / §0-ter 记录的**推翻过程与判据** ——
+> 「唯一性 ≠ 来源」「script-bound ≠ origin-bound」「照搬先例会一并搬来它为别的需求校准的强度」，
+> 以及**每一版是怎么被打穿的**。构造会被取代，**踩过的形状不会**。
 
 **作者** J2 · **日期** 2026-08-20 · **派工** Bettor 15:23（「@J2 出 O 精确构造：spk 派生 / min_O / timeout / 谁回收」）
 **上游** 三方收敛的修法：**O-replacement（反应腿必须花 O，无 `(A,s)` fallback）+ reveal-claim 强制造 O**
