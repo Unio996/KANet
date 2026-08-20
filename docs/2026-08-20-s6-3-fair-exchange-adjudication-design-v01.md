@@ -309,6 +309,7 @@ refund **不**表述为"查无 AUTHORIZED 记录"，而是**单一活状态 UTXO
 
 ### §17.7 v1.1 净状态（Codex v1.0 verdict 后·2026-08-20·RESPONSE-MSG257 桥 37199c49）
 > Codex v1.0 收: 方向 GREEN, 未 design-closed。本节替代 §17.6。
+> 🔴 **Tier-2 开项清单已被 §17.8 v1.2 替代（Codex v1.1 后新增 C4-FINALITY MUST-FIX）**：Tier-2 状态以 §17.8 为准。
 - ✅ **P-SAFE-1 = CLOSED**（design 层, Codex 接受 §17.1 单一活 UTXO 血缘）。
 - ✅ **C4 hybrid 方向 = PASS**；委员保密依赖 = **移除**（Codex 认好）。Tier-1 措辞（§17.5）= PASS。
 - ✅ **checkSigFromStack 原语 runtime = CLOSED**（Codex 独立确认 CLEAN 8 格, **限 pinned 探针 scope**）。
