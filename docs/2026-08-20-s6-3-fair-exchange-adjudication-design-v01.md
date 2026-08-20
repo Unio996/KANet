@@ -175,12 +175,7 @@
   - **Tier 0(base·所有受支持腿的默认)= bounded-lock-duration(墙钟 ms, 值域 `>=5e11`)**。**不含** auth-atomicity。任一支持的对手链至少拿这层。
   - **Tier 1(需 C1)= + authorization-atomicity**(同一份 A 两腿各自独立验, 无"A 授权 B 未授权"态)。**C1 假 ⇒ 落回 Tier 0**(不静默假装有 auth-atomicity)。〔备选: 若要 auth-atomicity 成硬默认, 则无 A-验证器的对手链 = **unsupported/fail-closed**, 不接入; 本 v0.6 取分层-非强制, 支持面更宽。〕
   - **Tier 2(需 C1∧C2∧C3 + 下方 principal-safety 不变量 P-SAFE)= + no-theft**。
-  - **🔴 P-SAFE — Tier2 principal-safety 不变量(v0.6→v0.7 冻结·答 Codex b41d51cc "机械定义否则 Tier2 是没有决定谓词的空承诺")**: 每腿恰两条**互斥** disposition, **两者都从同一份 canonical A 导出**(A 在该腿链 finality 深度 D 上验):
-    - `A valid @D → 收款方 claim`(incoming 方得对手本金)· `A absent @D 且到该腿 timeout T → 锁定方 refund`(自己本金回)。
-    - 每腿内互斥: A valid ⇒ refund 路关; A absent ⇒ claim 路关(covenant enforce: refund 支出条件含 A-absent@D, claim 含 A-valid@D)。
-    - **跨对相容(非仅 per-output)**: A 是**同一份**可携带委员签名对象、两腿各自验它 ⇒ 两腿 disposition 从**同一 A** 导出 ⇒ 一方**不可能**同时"一腿 claim(A valid)+ 另一腿 refund(A absent)", **除非两链对 A 是否存在分歧超过 finality D(深 reorg = C2 边界)**。
-  - **🔴 被拒对抗 trace(Codex 要)**: taker 用 A claim leg-A(得 maker 的 KAS)→ 再提交 leg-B(自己资产)的 refund ⇒ leg-B refund 支出条件 = A-absent@D, 但 A **valid**(正是 taker 刚用的那份)⇒ **leg-B refund 路【关】⇒ REJECT**。taker 拿不到 leg-B refund; maker 用 A claim leg-B。**无一方得双本金。**
-  - **残留 = 正好是 C2**: 若两链对"A 是否存在"分歧超 finality D(某链深 reorg > D)⇒ P-SAFE 破 ⇒ 落回 Tier1/bounded-lock。**这正是 Tier2 需 C2(对手链 finality 可保守上界)的原因** —— C2 不满 ⇒ P-SAFE 无保证 ⇒ 不给 Tier2。⇒ **Tier2 = C1(能验同一 A)∧ C2(finality 可界)∧ C3(refund 用墙钟)∧ P-SAFE(两腿从同一 A 导出、互斥、跨对相容), 缺一降层。**
+  - **🔴🔴 P-SAFE v0.7 块【作废】—— 见下方 §16 v0.8(Codex dc198ea6 否 v0.7)**: v0.7 的 "A valid@D→claim / A absent@D→refund" 不变式 + 那条 rejected-trace 有**可观测性错**: A 是链下委员签名消息, covenant 能正验"A 在"、**证不了否命题"A 不存在"**(对手可对一条腿隐瞒 A 走 refund, 该腿分不清"A 不存在"vs"A 被隐瞒")。故 v0.7 rejected-trace 不成立。**Tier-2 判据与 P-SAFE 机械定义以 §16 为准**(承 doc 通则: 删会漂移的旧断言、不与新版并存)。§14 保留的仍生效物: fail-closed 单位地板 + 可冻结不等式(下方)。
 - **可判定谓词(缺一降一层, 非散文)**:
   - **C1**: 对手链能验同一份 A(具 msg-sig 验签原语); 否则收款方呈不了 A → 腿退化纯 timelock。
   - **C2**: 对手链 claim-land 最坏耗时可保守上界; 否则 refund_T 设不住。🔴 **任意对手链 C2 不可估 ⇒ 不可估性本身即降级触发, 非可调参数。**
@@ -211,3 +206,41 @@
 - **host builder 非权威**: host 只【拼】tx; **enforce 唯一后继的是 covenant 链上 introspection**。host 拼错后继 = 被 covenant 拒(不是被 host 自己的检查拒)= 消除"读 row 编 covenant"的同机绕过面。
 - **E2E 必含(接 A runtime 闸)**: 正确后继 → PASS; 变异后继(改 successor_commit 任一字段 / 改 value 分配 / 加/减 output / witness 喂非派生 state)→ 每条 REJECT。
 - **依赖**: silverscript introspection(已用先例)+ §14 B 的冻结 canonical 字节法(successor_commit 跨实现一致)。⇒ **A 与 B 的冻结字节法共用一处**(不重复定义, 防漂移)。
+
+## §16 v0.8 P-SAFE 重设计（答 Codex dc198ea6 P-SAFE-1 / P-SAFE-2·废 v0.7 "A-absent@D" 谓词）
+
+> Codex v0.7 verdict 否 v0.7 P-SAFE。两处修：谓词从"证明不存在"换成本地正事实（§16.1）；no-theft 的跨腿原子性诚实 tiering（§16.2）。**§14 B 的 v0.7 P-SAFE 块与其 rejected-trace 已作废，以本节为准。**
+
+### §16.1 P-SAFE-1 修：refund 谓词 = 【本腿本地正事实】，不再"证明 A 全局不存在"（commit-by-cutoff 状态机）
+
+**根因（Codex）**：A 是链下委员签名消息。covenant 能**正验**"A 在"（有人提交时验签），但**证不了否命题"不存在有效 A"**——对手可对一条腿**隐瞒** A、在那边走 refund，该腿 covenant 分不清"A 不存在"vs"A 存在但被隐瞒"。`同一 A + 有效签名`够正验、不够负存在验。
+
+**修**：每腿 covenant 一个显式链上状态 + 授权 cutoff 墙钟 `T_c`：
+- `LOCKED —(T_c 前，A 在本腿链上被提交且验签过)→ AUTHORIZED(A_hash)`：只可 claim；refund 支路**永久禁用**。
+- `LOCKED —(T_c 到，本腿无 AUTHORIZED 转移)→ EXPIRED`：只可 refund；**T_c 后到的 A 对本腿非权威**（covenant 拒收晚到 A 的 AUTHORIZED 转移）。
+- **refund 前置 = "本腿达 EXPIRED"** = 本地正事实（`T_c 过 ∧ 本腿无 AUTHORIZED 记录`），covenant **只读本腿本链态**，不再要求"A 全局不存在"。⇒ **谓词机械可判**。
+- claim 前置 = "本腿达 AUTHORIZED"。每腿 {claimed, refunded} 恰一（UTXO 花一次，天然互斥）。
+
+⇒ 消除 P-SAFE-1：refund 不再依赖不可证的否命题。
+
+### §16.2 P-SAFE-2：跨腿非对称结局（= 盗本金 trace 新形态）——诚实 tiering + 不可能性证明
+
+§16.1 单独**不防**"一腿 AUTHORIZED-claim、另一腿 EXPIRED-refund"的非对称结局（对手把 A 只提交给对自己有利那腿）。防它 = no-theft = Tier-2，须解跨腿原子。跨链原子无盗本金**本质上**两条路：
+
+**(a) 确定性揭示序（HTLC 式，需 C4）**：A 起 preimage 作用——用 A claim 一腿时 A 进 claim witness ⇒ **在该腿链公开** ⇒ 对手方观察到、用**同一 A** claim 另一腿。加 cutoff 非对称：`反应腿 refund-cutoff > 揭示腿 cutoff + Δ`（Δ = finality + 观察 + claim 落链 + margin）。
+- 🔴 **不可能性证明 ⇒ 必须 C4（确定性首动方）**：若两方**同时**持 A 且无序——护 taker 需 `T_A_reactive > T_B + Δ`，护 maker 需 `T_B_reactive > T_A + Δ`；二者 = `T_A > T_B ∧ T_B > T_A` **矛盾** ⇒ cutoff 非对称**只能护一个方向**，另一方暴露。⇒ **Tier-2 no-theft 必须有确定性首动方**（只一方能先揭示 A）。这与 HTLC 靠"仅一方持密"锁定首动序同源。
+- **C4 实现**：委员把 A **加密投递给指定首动方**（对手方须等 A 上链才得）；或**协议角色固定序**（如"买方=收链下货者"为首动方，须先 claim 揭示 A、卖方反应）。
+- 🔴 **C4 残留信任（红队须查）**：委员产 A ⇒ 委员可把 A **泄给反应方**破坏 C4（时序攻击）。这扩了信任模型：已信委员诚实产 A，现加"不泄 A 给反应方助攻时序"。记为 Tier-2 残留假设。
+
+**(b) 跨链状态证明（light-client/SPV 证另一腿 AUTHORIZED）**：两阶段 PREPARED→AUTHORIZED、claim 须证另一腿也 PREPARED。但跨链态观察 = 重（光客户端）且 **§1 明列不做** ⇒ 本卡不走 (b)。
+
+**⇒ 诚实结论**：
+- **Tier-2（no-theft）= C1 ∧ C2 ∧ C3 ∧ C4 ∧ §16.1 状态机 ∧ cutoff 非对称（揭示腿 < 反应腿 − Δ）**。C4 缺 ⇒ 不给 Tier-2。
+- **C4 不成立时**（同时持 A、无序、不走光客户端）：no-theft 不可达 ⇒ 落 **Tier-1（授权原子性经 §16.1 both-authorized-or-both-refund）/ bounded-lock**，且**必须披露**"非对称结局可能"（一方被套一腿），非静默当安全。
+- 🔵 这不是本设计缺陷，是**跨链公平交换的本质**（HTLC 亦需单方持密的首动序）。v0.7 错在把它当已解 + 用了不可证谓词。
+
+### §16.3 废止与合并（承 doc 通则：删会漂移的旧断言、不并存）
+- §14 B v0.7 P-SAFE 块（"A valid/absent @D"不变式 + rejected-trace）**作废**，已在 §14 就地替为指向本节的指针。
+- **C4 加入 §14 可判定谓词清单**：C4 = 确定性首动方（加密投递 / 角色固定序）。⚠ covenant 侧**不可直接链上验** ⇒ 属**部署前须证的运营条件**（同 §7 quorum 独立性档），非纯链上谓词。红队须把"C4 如何被破 + 如何检出"列清。
+- **不变（仍是任何 tier 地基）**：§14 fail-closed 单位地板 `require(refund_T >= 5e11)` + 双闸；可冻结不等式（typed）。本节只改 refund 谓词**语义**（"A 全局不存在" → "本腿 EXPIRED 本地态"）与 no-theft 的 tiering。
+- **待红队**：Codex 复审 §16 是否真闭 P-SAFE-1/2；J1 审 C4 实现的 covenant 可建性（AUTHORIZED/EXPIRED 状态转移用 §14 A 的 introspection enforce）；NWT 红队 C4 残留信任（委员泄 A 时序攻击）。
