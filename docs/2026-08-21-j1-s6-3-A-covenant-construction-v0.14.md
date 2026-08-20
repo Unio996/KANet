@@ -1,7 +1,9 @@
-# §6-3 A：fair-exchange 结算 covenant 完整构造（v0.13 · 报备层 · 零生产码）
+# §6-3 A：fair-exchange 结算 covenant 完整构造（v0.14 · 报备层 · 零生产码）
 
-> **Status**: CURRENT（v0.13：Codex v0.12 两 MUST-FIX（free-option 证无效 + oauth_cid provenance）+ Bettor checklist ①④⑤）
+> **Status**: CURRENT（v0.14：完成 normative-body 全 sweep——§0.x 标 non-normative + §2.5/§2.6 sweep 到 Shape B，正文规范 §1+ 零 Shape-A 残留）
 > **作者** J1 · **日期** 2026-08-21 · **派工** Bettor checklist ①④⑤ + Codex v0.12（e281a2ca）两 MUST-FIX
+
+> 🔴🔴 **§0.x 全部为【历史变更记录·NON-NORMATIVE】**（Codex v0.12 MUST-FIX 2 要求显式标）：以下所有 §0.x 描述**演化过程**，早期条目（§0.5-§0.10 等）的 Shape-A 文字（`current_daa < X` / `花 O ⟺ 领 LOCKED_F` / `latest O creation <= T_cutoff` / equality-anchor 等）**均已被后版取代、不作规范**。**当前规范正文 = §1 起**（§1.5 假设 / §2 三步 / §2.5 拓扑 / §2.6 焊接点 / §4 covenant 清单 / §6 负测）。读规范只读 §1+；§0.x 只为审计演化史。
 
 ## §0.16 v0.13 变更（Codex v0.12 两 MUST-FIX + Bettor checklist ①④⑤）
 
@@ -160,14 +162,14 @@ refund: 两 principal 各走 P-SAFE-1 单-live-lineage（LOCKED_R: cutoff 前只
 | `C` | cov_id capability | 无（dust 种子） | reveal 消费造 O（§4-b）/ terminal-refund | refund cutoff 后（无续链） |
 | `O` | C 的续继 | 反应方领 `O_AUTHORIZED` 的凭证 | reactive-spend（§4-e 支1，作 §4-c co-input）/ recovery | recovery `TxTime >= OpTxInputDaaScore(O)+N` 退首动方（无续链） |
 
-🔴 **两个焊接点（v0.4 双向都焊死，缺一即单边盗窃）**：
-1. **领 `LOCKED_R` ⟺ 造 O**（v0.3 焊接，§4-d transfer）：首动方揭 s 领反应方本金的同笔 tx 必须消费 C 造 O。
-2. **花 O ⟺ 领 `LOCKED_F`**（v0.4 新，§4-c）：反应方花 O 的同笔 tx 必须是 `LOCKED_F` 的 spend 支（O 作 co-input），且 `LOCKED_F` refund 寿命 >= `T_cutoff_LOCKED_R + N_claim + N_margin`（O 寿命 ↔ 被保护 principal 寿命耦合）。
-⇒ 首动方拿反应方钱 ⟺ 造 O；反应方凭 O 拿首动方钱、且首动方不能在反应方来得及花 O 前把 `LOCKED_F` 抢回。**双向无单边。**
+🔴 **焊接点（Shape B，v0.14 sweep 到 O_AUTHORIZED）**：
+1. **领 `LOCKED_R` ⟺ 四路原子**（§4-d transfer 支自身 force）：首动方揭 s 领反应方本金的同笔 tx 必须消费 C 造 O **且**消费 exact LOCKED_F 造 exact O_AUTHORIZED（续 `locked_f_cid`）。省略任一路则领不了 LOCKED_R。
+2. **花 O ⟺ 领 `O_AUTHORIZED`**（双向，§4-c 正 + §4-e 支1 反）：反应方 claim 的同笔 tx 花 O 与花 O_AUTHORIZED 互为 co-input、付反应方 baked。O_AUTHORIZED recovery 锚**实际 reveal DAA**（`OpTxInputDaaScore(O_AUTHORIZED)+N`），无上界依赖。
+⇒ 首动方拿反应方钱 ⟺ 造 O + O_AUTHORIZED；反应方凭 O 拿首动方钱（O_AUTHORIZED）、首动方 recovery 下界锚实际 reveal DAA 给反应方独占窗。**无单边**（free-option 残留由 reactive-liveness bound，§0.16 MUST-FIX 1）。
 
 ## §2.6 两两独立性矩阵（v0.5：defer 到 J2 权威全枚举，本节只留 normative 焊接点）
 
-🔵 **权威全枚举 = J2 `docs/2026-08-21-j2-c4-pairwise-independence-matrix.md`**（8 支 C1/C2/R1/R2/F1/F2/O1/O2，28 格全归类，**类别方案与每格判定以该文件为准**——本构造不硬拷其类别列表以免漂，NWT 红队精化中）。改本构造支路时**同步更新 J2 矩阵是义务**（新增支即失效，§1.5 方法边界）。
+🔵 **权威全枚举 = J2 `docs/2026-08-21-j2-c4-pairwise-independence-matrix.md`**（Shape B 支集：LOCKED_R{transfer/refund}·C{reveal/refund}·LOCKED_F{transition Fa/giveup Fb}·O_AUTHORIZED{claim/recovery}·O{spend/recovery} = 5 对象 10 支，全归类，**类别方案与每格判定以该文件为准**——本构造不硬拷以免漂，J2 矩阵 v8 两轴+Fb 格已改标）。改本构造支路时**同步更新 J2 矩阵是义务**（新增支即失效，§1.5 方法边界）。
 
 🔨 前 4 洞 + J2 矩阵逼出的第 5 条同一形状：**两个各自合法动作被留成可独立发生**。本节只钉本构造 **normative 的 WELD/EXCL 焊接点**（每条落码配"松开→必挂"负测）：
 
