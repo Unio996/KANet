@@ -411,3 +411,11 @@ Codex 复审 v0.3（RESPONSE-20260820-MSG261-SUPP-S6-3-V03）：**GREEN 架构�
 - 派工: J1 v0.4(Shape B 四路焊 + §4(c)=O_AUTHORIZED 支 + 两交易级负测, 先裁源码可建性) · NWT 红队 v0.4(是否又开新对称缝) · J2 验收加两负测 + O_AUTHORIZED 拓扑。
 - 硬 pre-code 门(Codex 重申 OPEN): A2 checkSigFromStack full leg canonical 8065184 · cov_id 派生 durable 证 · min_O/N_claim/N_margin 具名常量 · quorum 独立=pre-real-funds 硬部署门。
 - ⇒ **同链未 closed = v0.4(此耦合)+ Codex 复审 v0.4**。对称缝 design 前逮住、非钱上。
+
+### §17.14 v0.4 落地 + Shape A 认错 + REACTIVE-CLAIM-LIVENESS 硬假设（2026-08-21）
+J1 v0.4（14fb878d）修 Codex v0.3 逮的对称缝，走 **Shape A（静态 baked 不等式）非我判的 Shape B**：
+- **Shape A 实现**：`LOCKED_F` terminal-refund 支 `require(current_daa >= T_refund_LOCKED_F)` + baked `T_refund_LOCKED_F >= T_cutoff_LOCKED_R + N_claim + N_margin`（§4-d:184）；配置级负测 `T_refund_LOCKED_F < ...` ⇒ non-conforming（:209）；§4-c 改 `LOCKED_F` spend 支 + O 作 co-input + baked payout（Codex 拓扑 MUST-SPECIFY 闭，:11/79/207）；单位标注全 DAA-score（:187）。
+- 🔴 **Bettor 认错（我判 Shape B 过度设计）**：我理由"A 重引绝对窗/需新 host 参数"错——`T_cutoff_LOCKED_R` 是构造里**已存在**的可链上 enforce reveal deadline（非新参数），A 与 v0.3 cutoff 排序不变量**同模式**（我已接受那条），Codex 明列 A/B 皆可接受。安全推导：O 由 reveal 创造、reveal 要 `current_daa < T_cutoff_LOCKED_R` ⇒ O_creation < T_cutoff_LOCKED_R ⇒ `T_refund_LOCKED_F >= T_cutoff_LOCKED_R + N_claim + N_margin > O_creation + N_claim + N_margin` ⇒ LOCKED_F 锁到 O创建+margin 后、反应方有 ≥N_claim+N_margin 领窗 = 满足不变量。**A 安全够且最小；B 只早释放 LOCKED_F=资本效率非安全**，J1 记 §7 备选待 Owner/团队定=对。J2 与我同错（判据"请回绝对参数=修错层"套错对象、没核 A 复用已存 cutoff），**J1 一人逮我俩** ⇒ [[feedback-a-criterion-is-strong-checking-others-weak-binding-self]]（判据越顺手越要核前件）。
+- 🔴 **REACTIVE-CLAIM-LIVENESS = 第 4 条硬假设（J2 枚举逼出）**：v0.4 不等式保证反应方**有** ≥N_claim+N_margin 领窗，**不保证用**——反应方不领 ⇒ LOCKED_F 退首动方 ⇒ 首动方两本金都拿。"不去领自己的钱"合约救不了=标准 fair-exchange 活性模型（同 HTLC 超时），benign 但 load-bearing 于反应方本金安全，**必须显式命名不能默认**。⇒ 同链 Tier-2 正确表述 = **结构 no-theft【条件于此标准活性】非无条件**（并列 C4-ENTROPY / s-secrecy / C4-FINALITY 第 4 条）。
+- **§2.6 两两独立性矩阵（J2·c0def909）**：8 支穷举，承重格全 WELDED/EXCL，无"本该绑却没绑"。NWT 逮标注精度（非洞）：`a×e`/`b×g` 非独立（时刻参数互授权）、被 blanket 误盖，安全已由 c×e/c×g 焊住 ⇒ J2 单拎标注。矩阵三自界（J2 写死）：① 没格被跳≠每格判断对（逐格仍须 J1/NWT 核，NWT 当场行使逮 a×e/b×g）② 只覆盖 8 支、新增即失效=改构造同步义务 ③ 两两 ≠ N-way（≥3 支同时缝照不到）。
+- ⇒ **同链 design-closed 判据**：J2 修矩阵标注 → Codex 复审 v0.4（Shape A + 矩阵精标 + REACTIVE-CLAIM-LIVENESS 显式 + 三自界）+ 硬 pre-code 门（A2 leg 8065184 e2e · cov_id durable · min_O/N_claim/N_margin 具名常量 · quorum 独立 pre-real-funds）。跨链退 R1。落码 Owner 批。
