@@ -1,7 +1,15 @@
-# §6-3 A：fair-exchange 结算 covenant 完整构造（v0.4 · 报备层 · 零生产码）
+# §6-3 A：fair-exchange 结算 covenant 完整构造（v0.5 · 报备层 · 零生产码）
 
-> **Status**: CURRENT（v0.4 取代 v0.3，补 Codex 逮到的对称缝：O 寿命 ↔ 被保护 principal refund 寿命耦合 + reactive-claim 拓扑焊接）
-> **作者** J1 · **日期** 2026-08-21 · **派工** Bettor 16:22（出构造）+ 17:13（v0.2）+ 17:31（v0.3）+ Codex v0.3 复审（f5fa9db4）残留 MUST-FIX
+> **Status**: CURRENT（v0.5 取代 v0.4，加显式硬假设清单含 J2 矩阵逼出的 reactive-liveness + §2.6 defer 到 J2 权威矩阵解 drift）
+> **作者** J1 · **日期** 2026-08-21 · **派工** Bettor（出/修构造）+ Codex v0.3 复审残留 + J2 矩阵（`docs/2026-08-21-j2-c4-pairwise-independence-matrix.md`）逼出活性假设
+
+## §0.8 v0.5 变更（J2 矩阵逼出 reactive-liveness 活性假设 + 两矩阵 drift 解）
+
+J2 独立建 8 支穷举矩阵（`docs/2026-08-21-j2-c4-pairwise-independence-matrix.md`），§3 R1×F2 逼出一条 v0.4 **未显式列的活性假设**：
+
+- 🔴 **reactive-liveness（真发现，收）**：v0.4 不等式 `T_refund_LOCKED_F >= T_cutoff_LOCKED_R + N_claim + N_margin` 给反应方一个 claim 窗，但 **no-theft 在这格条件于「反应方在窗内主动 claim」——是活性假设，非结构保证**。反应方离线 ⇒ F 超时 refund 掉 LOCKED_F ⇒ 反应方自负（已被拿走 LOCKED_R、又没及时领 LOCKED_F）。这**不可"修"只可显式声明**（没法强制谁领自己的钱）。⇒ 列作第 5 条硬假设（§1.5）。
+- 🔴 **两两穷举 ≠ 全穷举（J2 警示，收）**：矩阵只覆盖 8 支两两关系；**三方以上联合时序看不见**，新增任一支矩阵即失效。⇒ §1.5 标为方法边界，改构造时同步更新矩阵是义务非一次性附录。
+- 🔵 **两矩阵 drift 解**：J2 的 matrix doc（8 支 WELDED/INDEP-SAFE/INDEP-SEAM 全分类）= **权威全枚举**；我 §2.6 收缩为"指向 J2 矩阵 + 只列本构造 normative 的 WELD/EXCL 焊接点"，不再各存一份会漂的全表（CLAUDE.md 通则：别处有权威副本⇒删会漂的那份）。
 
 ## §0.7 v0.4 变更（Codex v0.3 复审逮到的对称缝 = MUST-FIX + MUST-SPECIFY）
 
@@ -53,6 +61,18 @@ Bettor 16:22 定的 **REDTEAM-HOLD 解除三闸**——本文逐条给**源码�
 不是"等够深度"，是**共存亡**：`O` 由 reveal 交易创造，reactive claim 花掉它、且校验它血缘续自 reveal 侧唯一 capability `C`。
 ⇒ 专属 finality 预算参数 `F_reveal` **从安全承重位移除**（退化成"每笔交易等自己确认"的通用问题）。⇒ **同链无委员、无深度参数**。
 
+## §1.5 硬假设清单（v0.5 显式化 —— no-theft 之外的承重前提，缺一即性质不成立）
+
+| # | 假设 | 内容 | 违反后果 |
+|---|---|---|---|
+| 1 | `C4-ENTROPY` | adaptor secret `s` 高熵、不可预测（`h=blake2b(s)` 预像不可求） | s 被猜 ⇒ 任意方伪造 reveal |
+| 2 | `s-secrecy` | reveal 前 `s` 只首动方知 | 提前泄露 ⇒ 反应方抢先 |
+| 3 | `finality-bound` | 各腿交易在其自身 finality 窗内被收录（同链通用确认，非专属 F_reveal） | 深 reorg 超界 ⇒ 一般性重组风险（非本构造特有） |
+| 4 | `honest-reveal` | attestation `A` 的签发遵守协议语义（A2 契约层，§6-1 冻结） | A 被误签 ⇒ 授权语义破 |
+| 5 | 🔴 `reactive-liveness`（**v0.5 新，J2 矩阵逼出**） | 反应方在其 claim 窗 `[O_creation, T_refund_LOCKED_F]` 内主动花 O 领 `LOCKED_F`，否则自负 | 反应方离线 ⇒ F 超时 refund `LOCKED_F` ⇒ 反应方失两笔（**活性假设，结构不保**，无法强制谁领自己的钱） |
+
+🔴 **方法边界（J2 警示）**：§2.6 / J2 矩阵是**两两穷举，不等于全穷举**——三方以上联合时序、跨 session 交互看不见。矩阵只在"未新增支路"时有效，**改构造必同步更新矩阵**。
+
 ---
 
 ## §2 冻结的三步 lineage（Bettor 16:20，O-REPLACEMENT 非 parallel-optional）
@@ -85,25 +105,22 @@ refund: 两 principal 各走 P-SAFE-1 单-live-lineage（LOCKED_R: cutoff 前只
 2. **花 O ⟺ 领 `LOCKED_F`**（v0.4 新，§4-c）：反应方花 O 的同笔 tx 必须是 `LOCKED_F` 的 spend 支（O 作 co-input），且 `LOCKED_F` refund 寿命 >= `T_cutoff_LOCKED_R + N_claim + N_margin`（O 寿命 ↔ 被保护 principal 寿命耦合）。
 ⇒ 首动方拿反应方钱 ⟺ 造 O；反应方凭 O 拿首动方钱、且首动方不能在反应方来得及花 O 前把 `LOCKED_F` 抢回。**双向无单边。**
 
-## §2.6 两两独立性矩阵（v0.4·J2 提议·把"等下次红队逮"换成"一次枚举完"）
+## §2.6 两两独立性矩阵（v0.5：defer 到 J2 权威全枚举，本节只留 normative 焊接点）
 
-🔨 前 4 个洞同一形状：**两个各自合法的动作被留成"可独立发生"**（①reveal-claim×LOCKED_R-transfer ②C 非-reveal 支×lineage ③同笔消费 C×走哪支 ④花 O×`LOCKED_F`-refund）。⇒ 枚举**全部 spend 动作两两关系**，每对必须是 **WELD（须同笔共存）/ EXCL（互斥不可同）/ INDEP（可独立且安全）** 三者之一并给机制；任何"本该 WELD/EXCL 却是 INDEP"= 洞。
+🔵 **权威全枚举 = J2 `docs/2026-08-21-j2-c4-pairwise-independence-matrix.md`**（8 支 C1/C2/R1/R2/F1/F2/O1/O2，28 格全归类 WELDED/COUPLED/INDEP-SAFE/INDEP-SEAM，NWT 红队精化 v2）。本构造不再各存一份会漂的全表（CLAUDE.md 通则）；改本构造支路时**同步更新 J2 矩阵是义务**（新增支即失效，§1.5 方法边界）。
 
-动作：**a**=reveal 领 `LOCKED_R`(§4-d transfer) · **b**=消费 C 造 O(§4-b) · **c**=花 O 领 `LOCKED_F`(§4-c) · **d**=`LOCKED_R` terminal-refund→R · **e**=`LOCKED_F` terminal-refund→F · **f**=C terminal-refund · **g**=O 的 T_O 回收→F。
+🔨 前 4 洞 + J2 矩阵逼出的第 5 条同一形状：**两个各自合法动作被留成可独立发生**。本节只钉本构造 **normative 的 WELD/EXCL 焊接点**（每条落码配"松开→必挂"负测）：
 
-| 对 | 关系 | 机制（缺=洞） |
+| 焊接点 | 类 | 机制 |
 |---|---|---|
-| a×b | **WELD** | §4-d `OpInputCovenantId(C_idx)==cid` 强制同笔（洞①③修） |
-| b×(C 非 reveal 支) | **EXCL** | C 仅两支 reveal/terminal，terminal `OpCovOutputCount==0` 不产 lineage（洞②修） |
-| a×d | **EXCL** | 同 `LOCKED_R` UTXO once-spend + `T_cutoff_LOCKED_R` cutoff 排序 |
-| a×f | **EXCL** | cutoff 排序 `T_cutoff_LOCKED_R <= C_terminal_refund_cutoff`（洞③修） |
-| c×e | **EXCL** | 同 `LOCKED_F` UTXO once-spend + **时序耦合 `T_refund_LOCKED_F >= T_cutoff_LOCKED_R+N_claim+N_margin`**（洞④修） |
-| c×g | **EXCL** | 同 O UTXO once-spend + `T_O` 相对锚（花 O 在 T_O 前，回收在后） |
-| a×c | **INDEP-安全** | 不同 tx/不同方；a 造 O、c 后花 O，O-lineage 耦合，非同笔（co-live-or-die 由 lineage 保，非同笔）|
-| d×e | **INDEP-安全** | 双方都不进行则各自 refund（无交易发生），无盗窃 |
-| a×g / b×c | **序**（非独立）| a/b 造 O 在前、c/g 花/回收 O 在后，UTXO 依赖天然排序 |
+| 领 `LOCKED_R` ⟺ 消费 C 造 O | WELD | §4-d `OpInputCovenantId(C_idx)==cid`（洞①③） |
+| 花 O ⟺ 领 `LOCKED_F` | WELD | §4-c O 作 co-input + baked payout（Codex 对称缝） |
+| C 非-reveal 支 ⇏ 产 lineage | EXCL | terminal `OpCovOutputCount==0`（洞②） |
+| reveal-消费-C 与 C-terminal-refund | EXCL | cutoff 排序 `T_cutoff_LOCKED_R <= C_terminal_refund_cutoff`（洞③） |
+| 花 O 领 `LOCKED_F` 与 `LOCKED_F`-refund | COUPLED | 时序 `T_refund_LOCKED_F >= T_cutoff_LOCKED_R + N_claim + N_margin`（洞④）+ 🔴 依赖 `reactive-liveness`（§1.5 假设 5） |
+| 花 O 与 O 的 T_O 回收 | EXCL | 同 O once-spend + `T_O` 相对锚 |
 
-🔵 **其余对**（d×f、e×f、d×g 等 refund×refund/回收）均 INDEP-安全：都是各自 cutoff 后的 terminal 动作，不产 lineage、不互相授权，任意序都只是"某方拿回自己没成交的钱"。⇒ **无一对是"本该绑却没绑"**，矩阵满覆盖。落码时每个 WELD/EXCL 配一条负测（松开该关系→必挂），INDEP 对不需负测但列出以证"枚举过、不是漏看"。
+🔴 **COUPLED 那格的 no-theft 条件于 `reactive-liveness`**（§1.5 假设 5）——结构给窗，反应方须自己在窗内行动，非结构强制。
 
 ---
 
@@ -238,4 +255,4 @@ require(tx.outputs[payout_idx].value == LOCKED_F_value);                       /
 | 多 covenant-input 一笔 tx（LOCKED+C 原子焊接） | `OpCovInputCount`/`OpCovInputIdx` + `OpInputCovenantId(C_idx)` | compile.rs:3577-78 + `ShardLeaf:99` 读非 active input cov_id | ✅ 已证（Q① 裁可建） |
 | adaptor 揭示签 | `checkSigFromStack(A)` | canonical `8065184`（#132） | 🟡 待 canonical 树 e2e |
 
-⇒ **净判断（v0.4）**：Codex 判**架构 GREEN**（cov_id-lineage + co-reorg PASS-AS-ARCHITECTURE），v0.3 的 4 项已接受全 PASS。**v0.4 补 Codex 逮到的对称缝**（O 寿命 ↔ 被保护 principal `LOCKED_F` refund 寿命耦合：§4-c 改 `LOCKED_F` spend 支 + O co-input + baked payout；§4-d `T_refund_LOCKED_F >= T_cutoff_LOCKED_R + N_claim + N_margin`；§6.2c 交易/配置级负测）+ **§2.6 两两独立性矩阵**（枚举全部 spend 动作对，无"本该绑却没绑"，把 round-by-round 发现换成一次枚举）。**落码前硬前置 = ① 各 WELD/EXCL 关系的松开负测（§6.2/6.2b/6.2c + 矩阵每对） ② A2 腿 canonical `8065184` 树 e2e ③ cov_id 派生 durable 证 ④ min_O/N_claim/N_margin 具名保守常量**。v0.4 送 Codex 复审过 ⇒ 同链 design-closed = 无委员结构 Tier-2。跨链退 R1。落码 Owner 批实现闸。
+⇒ **净判断（v0.5）**：Codex 判**架构 GREEN**（cov_id-lineage + co-reorg PASS-AS-ARCHITECTURE），v0.3 四项 PASS。**v0.4 补对称缝**（O 寿命↔`LOCKED_F` refund 耦合）；**v0.5 加显式硬假设清单 §1.5**（含 J2 矩阵逼出的第 5 条 `reactive-liveness`——no-theft 条件于反应方在窗内行动，是活性假设非结构保证）+ §2.6 defer 到 J2 权威矩阵解 drift + 标方法边界（两两穷举≠全穷举）。**落码前硬前置 = ① 各 WELD/EXCL/COUPLED 松开负测（§6.2*+J2 矩阵每格） ② A2 腿 canonical `8065184` 树 e2e ③ cov_id 派生 durable 证 ④ min_O/N_claim/N_margin 具名保守常量 ⑤ 假设 §1.5 五条须运营/协议层各自兜住**。v0.5 送 Codex 复审过 ⇒ 同链 design-closed = 无委员结构 Tier-2（**在 §1.5 五假设下**）。跨链退 R1。落码 Owner 批实现闸。
