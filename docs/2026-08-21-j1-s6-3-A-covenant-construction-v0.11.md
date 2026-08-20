@@ -1,7 +1,10 @@
-# §6-3 A：fair-exchange 结算 covenant 完整构造（v0.10 · 报备层 · 零生产码）
+# §6-3 A：fair-exchange 结算 covenant 完整构造（v0.11 · 报备层 · 零生产码）
 
-> **Status**: CURRENT（v0.10 取代 v0.9：补完 Shape B 重构的内部一致性——LOCKED_R 侧强制四路原子 + O 侧反向焊改引 O_AUTHORIZED）
-> **作者** J1 · **日期** 2026-08-21 · **派工** Bettor：Codex v0.9（MSG-265）逮我 v0.9 Shape B 重构【不完整】的两处内部不一致
+> **Status**: CURRENT（v0.11 取代 v0.10：加 giveup 支 baked 排序 `T_giveup_LOCKED_F >= T_cutoff_LOCKED_R` 堵 J2 矩阵 v7 逮的 free-option）
+> **作者** J1 · **日期** 2026-08-21 · **派工** Bettor / J2 矩阵 v7（据 v0.10 Shape B 重建 5 对象 10 支）逮 giveup 支无排序
+
+## §0.14 v0.11 变更（J2 矩阵 v7 逮 giveup 支 free-option）
+J2 据 v0.10 Shape B 重建矩阵（5 对象 10 支=45 对），逮到新支 `Fb`（LOCKED_F giveup）的 `T_giveup_LOCKED_F` 全文只定义一次、**未与 `T_cutoff_LOCKED_R` 排序**。若 `T_giveup < T_cutoff`：非盗窃（giveup 后 reveal 不可构造），但**单方免费期权**（首动方观望到 T_giveup 零成本中止，对手 LOCKED_R 期间被锁）。⇒ 加 baked 排序 `T_giveup_LOCKED_F >= T_cutoff_LOCKED_R`（§4-d，giveup 只在 reveal 窗关后行使）+ 错序负测。🔨 J2 方法论印证："新增任一支矩阵即失效"——`Fb` 一出现带来 9 个新对，排序约束在这些新对里才显形。
 
 ## §0.13 v0.10 变更（Codex v0.9：Shape B 重构不完整的两处内部不一致 = MUST-FIX，我认不完整重构）
 
@@ -248,6 +251,7 @@ require(tx.outputs[O_out_idx].value >= min_O);      // §5
 🔴 **`LOCKED_F`（首动方本金）v0.9 走 Shape B（两条互斥后继，均无上界依赖）**：
   - **transition 支（reveal 强制，四路原子的一路）**：reveal 那笔 tx（消费 LOCKED_R+C 造 O）**同笔必须把 LOCKED_F 转 `O_AUTHORIZED` 后继**——`require(OpOutputCovenantId(oauth_out_idx) == oauth_cid)`（O_AUTHORIZED 续链）。由 §4-d transfer 支反向要求（领 LOCKED_R 的同笔必含 LOCKED_F→O_AUTHORIZED 转移）。⇒ **O_AUTHORIZED 与 O 在同一笔 reveal tx 创建，DAA 相同**。
   - **giveup-refund 支（首动方放弃，reveal 未发生）**：`require(TxTime >= T_giveup_LOCKED_F)`（baked 下界，CLTV；"我一直没 reveal ⇒ 拿回自己本金"）。与 transition 互斥（once-spend）：reveal 发生则 LOCKED_F 已转移、giveup 无 UTXO；反之首动方 giveup 拿回、但也没 claim LOCKED_R（无 reveal）⇒ 反应方 refund LOCKED_R，对称无 theft。
+    🔴 **v0.11 baked 排序（J2 矩阵 v7 逮 free-option，MUST）**：`T_giveup_LOCKED_F >= T_cutoff_LOCKED_R`。**若 giveup 早于 reveal 窗关**（`T_giveup < T_cutoff_LOCKED_R`）：不是盗窃（giveup 花掉 LOCKED_F 后 reveal 不可构造，无法既 giveup 又 reveal），**但是【单方免费期权】**——首动方可观望到 `T_giveup` 再零成本中止，而对手 LOCKED_R 期间被锁（原子交换经典 free-option）。⇒ 令 `T_giveup_LOCKED_F >= T_cutoff_LOCKED_R`：giveup 只在 reveal 窗关后行使 ⇒ 退化成真正的"reveal 没发生⇒拿回本金"recovery，无早中止期权。两常量均 baked、可读 ⇒ 排序可 enforce（同 §4-d/§4-f 下界方法论）。配错序负测：`T_giveup < T_cutoff_LOCKED_R` ⇒ free-option 攻击（观望套利）可达。
   - 🔵 **关键（解 Codex v0.8 塌）**：`O_AUTHORIZED` 的 recovery 下界 = `TxTime >= OpTxInputDaaScore(O_AUTHORIZED) + N_claim + N_margin`（= 实际 reveal DAA + N，见 §4-c）。**无论 reveal 早晚**，被保护本金在实际 O 创建 + N 前不能回首动方 ⇒ 不依赖"reveal 在 T_cutoff_LOCKED_R 前"这条不可 enforce 上界。
 
 🔴 **cutoff 排序不变量（焊接生效前提）**：`T_cutoff_LOCKED_R <= C_terminal_refund_cutoff`（否则同笔走 C 的 terminal-refund 不造 O 绕过 v0.3 焊接）。
