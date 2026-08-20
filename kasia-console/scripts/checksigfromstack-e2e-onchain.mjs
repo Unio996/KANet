@@ -23,6 +23,9 @@ const W = await import('file:///D:/rusty-kaspa/wasm/nodejs/kaspa/kaspa.js');
 const { RpcClient, Encoding, Address, Transaction, TransactionOutput, ScriptBuilder,
   SighashType, kaspaToSompi, payToAddressScript, addressFromScriptPublicKey } = W;
 
+// Bettor 条件②(2026-08-20): V0-first 预检 —— 先只跑合法格并确认【落链】, 过了才烧全 8 格。
+//   理由: V0 都不 PASS ⇒ harness 还没好, 8 格全是不可归因, 白烧链上代价。
+const V0_ONLY = process.argv.includes('--v0-only');
 const log = (m) => console.log(`[csfs-e2e ${new Date().toISOString().slice(11, 19)}] ${m}`);
 
 // relay：用 J2-tn（发送/注资），与今晚其它探针同源
@@ -63,7 +66,7 @@ const toAddr = (await rc({ type: 'get_pubkey' })).address;
 const toSpk = payToAddressScript(new Address(toAddr));
 
 // 跑一格：注资 → 用该向量的 witness 花费 → 记 submit 结果与【原文】
-async function runVector(v) {
+async function runVector(v, requireLanded = false) {
   const ftx = (await rc({ type: 'transfer', target: p2shAddr, amount: 2 })).txId;
   let funded = false;
   for (let i = 0; i < 45; i++) {
@@ -96,7 +99,15 @@ async function runVector(v) {
   tx.inputs[0].signatureScript = ss;
   try {
     const r = await rpc.submitTransaction({ transaction: tx, allowOrphan: false });
-    return { id: v.id, result: 'PASS', txid: r.transactionId };
+    if (!requireLanded) return { id: v.id, result: 'PASS', txid: r.transactionId };
+    // 🔵 边界: submit 被收 = 节点跑过脚本且返回 true(mempool 即做脚本校验) = 本卡要证的那件事;
+    //   【落链】另证矿工/共识也收了 —— Bettor 条件② 要的是这一层, 故 V0 预检才等它。
+    let landed = false;
+    for (let i = 0; i < 30; i++) {
+      if ((await rc({ type: 'check_utxo_landed', txid: r.transactionId, address: toAddr })).landed) { landed = true; break; }
+      await new Promise((s) => setTimeout(s, 2000));
+    }
+    return { id: v.id, result: 'PASS', txid: r.transactionId, landed };
   } catch (e) {
     return { id: v.id, result: 'REJECT', reason: String(e?.message || e).slice(0, 220) };
   }
@@ -104,6 +115,17 @@ async function runVector(v) {
 
 // ── 同窗交替：每个阴性格前后各夹一次 V0 ────────────────────────────────
 const V0 = V.vectors.find((x) => x.id === 'V0');
+if (V0_ONLY) {
+  log('V0 预检(Bettor 条件②): 只跑合法格, 要求【落链】');
+  const r0 = await runVector(V0, true);
+  log(`V0 = ${r0.result} | landed=${r0.landed} | ${r0.txid ? r0.txid.slice(0, 16) : (r0.reason || r0.why || "")}`);
+  const ok = r0.result === 'PASS' && r0.landed === true;
+  console.log(ok
+    ? '✅ V0 预检通过(PASS 且落链) ⇒ harness 已好, 可跑全 8 格'
+    : '🔴 V0 预检未过 ⇒ harness 仍有问题, 【不】跑 8 格, 先查');
+  await rpc.disconnect();
+  process.exit(ok ? 0 : 1);
+}
 const results = [];
 for (const v of V.vectors) {
   if (v.id === 'V0') continue;
