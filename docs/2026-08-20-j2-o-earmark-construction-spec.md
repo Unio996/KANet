@@ -68,6 +68,32 @@ NWT 问「C 除被 reveal-claim 消费外，有没有另一条支路也能产出
 
 ---
 
+## §0-ter v4：Q3 一般化 —— **不是只有 `T_O`，是 C 的【每一条】非 reveal-claim 支路**
+
+（J1 16:28 源码答 + NWT 16:29 复核：Q1 cov_id 派生、Q2 C 唯一性**已闭**；**Q3 是承重的授权义务**）
+
+我 v3 只写了「`T_O` 回收支必须终止 lineage」。**那是一个实例，不是规则。** 正确的规则是：
+
+> 🔴 **`C` 的每一条【非 reveal-claim】支路，都必须【显式禁止】续 cov_id lineage。**
+
+任何一条 s-free 的支路（refund / timeout / cancel / 未来新增的任何 entry）若产出 cov_id-续链 output，
+就是**一条不走 reveal 也能造出合法-lineage `O` 的侧门** —— 伪造面从"谁都能造"收窄到"C 的持有者能造"，
+**收窄了，但没关上**。
+
+### 🔨 落地方式：**显式 require + 配负测**，不靠"记得禁了"
+
+NWT 的原话值得照抄：**「光靠『我这么写的时候是这么想的』不构成保证，得有测试逼它显式失败才算数。」**
+
+⇒ **这正好接上我另一份文档的族 B（合约变异）**
+（`docs/2026-08-20-j2-a2-whole-receipt-binding-acceptance-design.md` §3）：
+
+> **必测格：删掉「禁止续 lineage」那句 require ⇒ 测试必须挂。**
+
+若删掉它测试仍全绿，说明**没有任何一格在守这条规则** —— 而它是 provenance 的承重件。
+（同族：今晚 `committeePkHash` 那个诱饵——**自洽的 require 看着像绑定，删了真绑定它还在**。）
+
+---
+
 ## §1 它要交付的性质（先写死，防被读成别的）
 
 > **反应腿的 claim 在【结构上】不可能早于 reveal 被链收录；且 reveal 一旦被 reorg，反应腿的 claim 同时失效。**
