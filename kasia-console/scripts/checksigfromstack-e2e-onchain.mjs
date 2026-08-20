@@ -66,20 +66,37 @@ const toAddr = (await rc({ type: 'get_pubkey' })).address;
 const toSpk = payToAddressScript(new Address(toAddr));
 
 // 跑一格：注资 → 用该向量的 witness 花费 → 记 submit 结果与【原文】
+// 🔴 transient 根因: 每格都要【等一笔新注资】, 而实测注资 68-191s 波动 —— 一格赶不上 180s 窗
+//   整轮就带 inconclusive。根因不是窗口太窄, 是"每格必须等注资"这个依赖本身。
+//   ⇒ 优先复用 P2SH 上【已有的未花 UTXO】(前几轮被拒的格留下的, 同一 redeem script 同一地址),
+//     把注资延迟这个变量直接消掉; 没有可用的才回落到注资+等待。
+//   🔵 复用不影响判别: UTXO 只是被花的钱, 判的是【花它那笔 tx 的 witness 能不能通过脚本】。
+const usedOutpoints = new Set();
+const opKey = (o) => o.transactionId + ":" + o.index;
+
 async function runVector(v, requireLanded = false) {
-  const ftx = (await rc({ type: 'transfer', target: p2shAddr, amount: 2 })).txId;
-  // 注资等待窗: 90s 太短 —— 2026-08-20 实测一笔注资在 90s 窗内判"未落", 事后查【其实落了】。
-  //   ⇒ 放宽到 180s, 并打印真实耗时, 免得下次还靠猜。窗口不足会把好格误判成不可归因(浪费), 不会造假绿。
-  let funded = false;
-  const fundT0 = Date.now();
-  for (let i = 0; i < 90; i++) {
-    if ((await rc({ type: 'check_utxo_landed', txid: ftx, address: p2shAddr })).landed) { funded = true; break; }
-    await new Promise((r) => setTimeout(r, 2000));
+  let utxo = null;
+  const pre = (await rpc.getUtxosByAddresses([p2shAddr])).entries
+    .filter((e) => !usedOutpoints.has(opKey(e.outpoint)));
+  if (pre.length) {
+    utxo = pre[0];
+    log(`  复用已有 UTXO ${utxo.outpoint.transactionId.slice(0, 12)}… (剩 ${pre.length - 1} 可用) — 零等待`);
+  } else {
+    const ftx = (await rc({ type: 'transfer', target: p2shAddr, amount: 2 })).txId;
+    let funded = false;
+    const fundT0 = Date.now();
+    for (let i = 0; i < 150; i++) {   // 300s 兜底窗(实测最长 191s)
+      if ((await rc({ type: 'check_utxo_landed', txid: ftx, address: p2shAddr })).landed) { funded = true; break; }
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+    log(`  注资 ${funded ? '落链' : '未落'} 用时 ${((Date.now() - fundT0) / 1000).toFixed(0)}s`);
+    if (!funded) return { id: v.id, result: 'INCONCLUSIVE', why: '注资未落链 —— 与被测物无关，本格作废重跑' };
+    const { entries } = await rpc.getUtxosByAddresses([p2shAddr]);
+    utxo = entries.find((e) => e.outpoint.transactionId === ftx)
+      || entries.filter((e) => !usedOutpoints.has(opKey(e.outpoint)))[0];
   }
-  log(`  注资 ${funded ? '落链' : '未落'} 用时 ${((Date.now() - fundT0) / 1000).toFixed(0)}s`);
-  if (!funded) return { id: v.id, result: 'INCONCLUSIVE', why: '注资未落链 —— 与被测物无关，本格作废重跑' };
-  const { entries } = await rpc.getUtxosByAddresses([p2shAddr]);
-  const utxo = entries.find((e) => e.outpoint.transactionId === ftx) || entries[0];
+  if (!utxo) return { id: v.id, result: 'INCONCLUSIVE', why: '无可用 UTXO —— 与被测物无关' };
+  usedOutpoints.add(opKey(utxo.outpoint));
   const fee = kaspaToSompi('0.02');
   // 🔴 每个值的理由(2026-08-20 首跑八格全废的教训: 抄样板时【无理由偏离】= 整轮作废):
   //   sigOpCount: 0   — v1(TX_VERSION_TOCCATA) 用 compute_budget 而非 SigOpCount 计价(p2sh.mjs:1739)。
