@@ -143,6 +143,7 @@ require(OpInputCovenantId(O_in_idx) == cid);        // 花的 O 血缘续自真 
   - **terminal-refund 支**（cutoff 后）：`require(current_daa >= T_cutoff_LOCKED)`——**still-unspent LOCKED** 转 terminal 明文退首动方。互斥由 UTXO once-spend 天然保证：reveal 发生 ⇒ LOCKED 已被 transfer 支花掉 ⇒ refund 支无 UTXO 可花（不需证 A-absent）。
   - **产出必须 terminal 明文出、无续链**（闸③；`OpCovOutputCount == 0`）。
 - 🔴 **cutoff 排序不变量（v0.3，焊接生效前提）**：`T_cutoff_LOCKED <= C_terminal_refund_cutoff`。否则 LOCKED-transfer 活窗内，同笔消费 C 可走 C 的 terminal-refund 支（不造 O）绕过焊接。排序守住 ⇒ C 在 LOCKED-transfer 活窗内**唯一可走支 = reveal-claim（造 O）**。
+  🔴 **单位显式标注（NWT 钉，防 footgun）**：这一对比较值 `T_cutoff_LOCKED` 与 `C_terminal_refund_cutoff` **必须同为 DAA-score（`< 5e11`，落 DAA 模式）**——与本构造全部 cutoff（T_cutoff、T_O 的 OpTxInputDaaScore、v1.3 总裁定）同单位。**新引入的比较对不得默认"应该没问题"**，落码时二者 ctor 参数须显式同单位来源。混单位 ⇒ 大小比较 vacuous（同 floor-direction 单位 footgun 族）。
 - **O 的 T_O 回收**（付回首动方）：🔴 **MUST-FIX 3**：`require(current_daa >= OpTxInputDaaScore(O) + N_claim + N_margin)`（相对 O 创建的本地 DAA，非绝对窗），**产出 terminal 明文、`OpCovOutputCount == 0`**（闸③；J2 自逮侧门）。
 - **C 的 terminal-refund**：同样 `OpCovOutputCount == 0`（闸③）。
 
