@@ -1,7 +1,16 @@
-# §6-3 A：fair-exchange 结算 covenant 完整构造（v0.6 · 报备层 · 零生产码）
+# §6-3 A：fair-exchange 结算 covenant 完整构造（v0.7 · 报备层 · 零生产码）
 
-> **Status**: CURRENT（v0.6 取代 v0.5，补 Codex v0.5 逮到的 O↔LOCKED_F 单向焊缝：显式定义 O 自己的 covenant 支路 + 反向焊死）
-> **作者** J1 · **日期** 2026-08-21 · **派工** Bettor（出/修构造）+ Codex v0.5 复审（MSG-262）逮单向焊缝
+> **Status**: CURRENT（v0.7 取代 v0.6，走 Shape A1：删不可 enforce 的 equality + F1 上界 guard + O 边界纯相对 + ordering 非 equality）
+> **作者** J1 · **日期** 2026-08-21 · **派工** Bettor（出/修构造）+ Codex v0.6 复审（MSG-263）逮 anchor 不可 enforce + F1/F2 race
+
+## §0.10 v0.7 变更（Codex v0.6 逮到 anchor 不可 enforce + F1/F2 race = MUST-FIX，我认自引）
+
+Codex 复审 v0.6：**反向焊 PASS AS DESIGN**（`花 O ⟺ 领 LOCKED_F` biconditional 修好），但逮一条 timing/anchor 矛盾 + 一个真 bug：
+
+- 🔴 **MUST-FIX（anchor 不可 enforce，我认自引）**：v0.6 §4-e 称 `T_O == T_refund_LOCKED_F` 且"均锚 `OpTxInputDaaScore(O)+N_claim+N_margin`" = **机制上不可能**。`T_refund_LOCKED_F` 在 **reveal 前就 baked**（那时 O 还不存在，`OpTxInputDaaScore(O)` 取不到）；LOCKED_F 跑 standalone refund 支时 O 非必需 co-input，covenant 读不到 O 的 daa。⇒ "令两 anchor 相等"是**散文/配置断言，非 covenant 可强制的不变量**。**这是我自引的错**（v0.6 §4-e 末尾我写的），没核"LOCKED_F 在其 bake 时刻读不读得到 O"。
+- 🔴 **真 bug（F1/F2 race）**：F1（reactive claim §4-c）无 `< T_refund_LOCKED_F` 上界 guard，F2（LOCKED_F terminal-refund）在 `>=` 开 ⇒ UTXO once-spend 只在落一笔后互斥、不使两支 eligibility 窗不重叠 ⇒ 阈值后 **F1/F2 可 race**（反应方 claim 与首动方 refund 抢）。
+- 🔴🔴 **四人共错（含 Bettor），我域首责**：我自抓对齐需求、NWT 确认、J2 升矩阵格、Bettor 背书"三角 well-covered"——**四人都没核 `T_refund_LOCKED_F` 在其 bake 时刻 O 还不存在**。Codex（外部对抗）逮出。🔨 **新判据（入册）**：**多个独立 reviewer 三角"同意"一条不变量不使它可 enforce——他们可共享盲点。可 enforce 性须单独核：这个 covenant 在这个执行时刻【读得到】它要比较的量吗？** 关联 [[feedback_read-the-thing-not-a-copy]]、[[feedback-samples-sharing-a-hidden-precondition-cannot-support-a-necessity-claim]] 的对偶。
+- ✅ **修法 = Shape A1（Codex 给，最小，保 Shape A）**：① 删假 equality（§4-e）② F1 加 `require(current_daa < T_refund_LOCKED_F)`（§4-c）③ O 边界纯相对：O1 `< OpTxInputDaaScore(O)+N_claim+N_margin` / O2 `>=` 同式（§4-e）④ equality 换 **ordering**：`T_refund_LOCKED_F >= latest_possible_O_creation + N_claim + N_margin`，而 latest O creation `< T_cutoff_LOCKED_R`（covenant 限 reveal 窗）⇒ **v0.4 baked 不等式 `T_refund_LOCKED_F >= T_cutoff_LOCKED_R + N_claim + N_margin` 已保守满足**（§4-d，只须精确 off-by-one）。
 
 ## §0.9 v0.6 变更（Codex v0.5 逮到 O↔LOCKED_F 单向焊 = MUST-FIX，我认）
 
@@ -182,12 +191,14 @@ require(tx.outputs[O_out_idx].value >= min_O);      // §5
 🔴 **v0.4 拓扑修正（MUST-SPECIFY）**：本支是 **`LOCKED_F`（首动方 principal）covenant 自己的一条 spend 支**，不是纯 O-spend。花 `LOCKED_F` 付反应方 baked payout，**同笔 tx 必须把 O 作 co-input**：
 ```
 // 本支 = LOCKED_F 的 active spend；O 是同笔 co-input
+require(current_daa < T_refund_LOCKED_F);           // 🔴 v0.7 上界 guard(Codex F1/F2 race 修): F1 只在 refund 窗前有效
 require(checkSigFromStack(A, sig_A));
 require(blake2b(s) == h);
 require(OpInputCovenantId(O_in_idx) == cid);        // 同笔必须花真 O（血缘续自 C）← ShardLeaf.sil:99 同款
 require(OpTxOutputSpkSubstr(payout_idx,0,len) == baked_reactive_payout_spk);  // 付款给反应方 baked 收款（recipient 焊死）
 require(tx.outputs[payout_idx].value == LOCKED_F_value);                       // value 焊死（不 skim）
 ```
+🔴 **v0.7 F1 上界 guard（Codex F1/F2 race 修）**：F1（本支）加 `current_daa < T_refund_LOCKED_F`，F2（§4-d LOCKED_F terminal-refund）在 `>= T_refund_LOCKED_F` 开 ⇒ **两支 eligibility 窗互不重叠**（非只靠 UTXO once-spend 落一笔后互斥）。无上界 guard ⇒ 阈值后 F1/F2 可 race。`T_refund_LOCKED_F` 在 LOCKED_F 锁时 baked（可读），非 O-anchored（O 那时不存在）。
 ⇒ **花 O ⟺ 领 `LOCKED_F`** 原子焊死：花 O 必在这笔（`LOCKED_F` 的 spend），领 `LOCKED_F` 必带 O co-input。无「O 独立于 principal 被消费」的两-tx 缝。
 🔵 **`OpInputCovenantId(idx)` 按任意索引读【非 active 输入】= 已证**（ShardLeaf.sil:99 `psInIdx` 非 active 索引，上链跑通）——O 作 co-input（非 active）按索引点准，可建。
 
@@ -217,18 +228,20 @@ require(tx.outputs[payout_idx].value == LOCKED_F_value);                       /
 ### (e) O 自己的 covenant 支路（v0.6 显式定义，从 O 的实际 spend 条件导出——反向焊）
 🔴 **根因修（Codex v0.5 缝）**：v0.5 从没显式写 O 自己的 covenant 支，只从"意图"（O 被 F1 co-input 消费）推断。⇒ 显式定义 O 恰两支，**均从 O 的实际 spend 条件写死**：
 
+🔴 **v0.7 O 边界纯相对（Shape A1）**：O 的两支边界只用 `OpTxInputDaaScore(O) + N_claim + N_margin`（O 是本支 active input ⇒ 该量可读），**不引 baked `T_O` 常量**（避免"两个 baked 常量各自合法、相对值错"的不可 enforce 陷阱）。
+
 - **O 支 1（pre-timeout：反向焊，只能与 LOCKED_F reactive-claim 同笔）**：
   ```
-  require(current_daa < T_O);                                   // 窗内
-  require(OpInputCovenantId(LOCKED_F_idx) == locked_f_cid);     // 🔴 反向焊: 同笔必须也花 LOCKED_F
+  require(current_daa < OpTxInputDaaScore(O) + N_claim + N_margin);   // 纯相对上界(O active⇒可读)
+  require(OpInputCovenantId(LOCKED_F_idx) == locked_f_cid);           // 🔴 反向焊: 同笔必须也花 LOCKED_F
   require(OpTxOutputSpkSubstr(payout_idx,0,len) == baked_reactive_payout_spk);  // 且付反应方 baked 收款
-  require(tx.outputs[payout_idx].value == LOCKED_F_value);      // value 焊死
+  require(tx.outputs[payout_idx].value == LOCKED_F_value);            // value 焊死
   ```
   ⇒ **花 O ⟹ 必同笔领 LOCKED_F 给反应方**。s/A 公开也没用：独立花 O（不带 LOCKED_F co-input）**过不了本支** ⇒ 外人毁不了 capability。
-- **O 支 2（T_O 回收：首动方超时收回）**：`require(current_daa >= OpTxInputDaaScore(O) + N_claim + N_margin)`，付首动方，`OpCovOutputCount == 0`（terminal）。
+- **O 支 2（回收：首动方超时收回）**：`require(current_daa >= OpTxInputDaaScore(O) + N_claim + N_margin)`（与支 1 上界同式，互斥），付首动方，`OpCovOutputCount == 0`（terminal）。
 
-🔵 **双向互焊闭合**：§4-c（领 LOCKED_F ⟹ O co-input）+ §4-e 支 1（花 O ⟹ 领 LOCKED_F）= **O 与 LOCKED_F 窗内只能一起花**（互为 co-input + 各自 payout 焊死），无任一方独立 spend。O 支集 = 恰 2 支（供 J2 重建矩阵）。
-🔴 **T_O = T_refund_LOCKED_F 须同刻或有序**：O 支 1 窗（`< T_O`）与 F1 可行使窗（`< T_refund_LOCKED_F`）须一致，否则出现"O 可花但 LOCKED_F 已 refund-eligible"或反之的错位；落码令 `T_O` 锚点 == `T_refund_LOCKED_F` 锚点（均 `OpTxInputDaaScore(O)+N_claim+N_margin`，同 DAA 域）。
+🔵 **双向互焊闭合**：§4-c（领 LOCKED_F ⟹ O co-input）+ §4-e 支 1（花 O ⟹ 领 LOCKED_F）= **O 与 LOCKED_F 窗内只能一起花**。O 支集 = 恰 2 支。
+🔴 **ordering 非 equality（v0.7 Shape A1，取代 v0.6 不可 enforce 的 equality）**：反应方能凭 O 领 LOCKED_F 的窗到 `OpTxInputDaaScore(O)+N_claim+N_margin`（O 支 1 上界，且 F1 §4-c 加了同向 `< T_refund_LOCKED_F` 上界）；首动方能 refund LOCKED_F 从 `T_refund_LOCKED_F`（F2）。安全所需 = **`T_refund_LOCKED_F >= 最晚可能 O 创建 daa + N_claim + N_margin`**。而最晚 O 创建 daa `< T_cutoff_LOCKED_R`（§4-d transfer 支 covenant 限 reveal 窗）⇒ **v0.4 baked 不等式 `T_refund_LOCKED_F >= T_cutoff_LOCKED_R + N_claim + N_margin`（§4-d）已保守满足此 ordering**，且它是 baked 时刻可读的量（`T_cutoff_LOCKED_R` 锁 LOCKED_F 时已知）——**非 equality、非 O-anchored、可 enforce**。落码只须精确 off-by-one（`>=` vs `>`）。
 
 ---
 
@@ -248,7 +261,12 @@ require(tx.outputs[payout_idx].value == LOCKED_F_value);                       /
 2c. 🔴 **O ↔ 被保护 principal 双向焊接负测（v0.4+v0.6·Codex 逮·交易级 + 配置级）**：
    - **正向**：花 `LOCKED_F`（领 principal）而**不带真 O** input ⇒ **必拒**（§4-c）。
    - 🔴 **反向（v0.6 补 Codex 单向焊缝）**：**独立花真 O**（pre-timeout，**不带 `LOCKED_F` co-input / 不付反应方 baked payout**）⇒ **必拒**（§4-e 支1）。这条是关键：s/A 公开后独立花 O 的 griefing，只有 O 自己的 covenant 反向焊能挡，F1 侧 co-input 挡不住。
-   - **配置级（对齐不变量，J2 矩阵 v4 formalize）**：`T_O` 锚点必须 **== `T_refund_LOCKED_F`** 锚点（两常量各自合法，错的只是相对值：若 `T_O` 晚于 `T_refund_LOCKED_F` ⇒ 存在"O 仍可花而 LOCKED_F 已 refund-eligible"的抢跑窗）。🔴 **负测须证对齐是承重非装饰**：① 对齐 ⇒ 抢跑攻击 **BUST**；② **故意错开 ⇒ 同一攻击必须 LAND**（否则这条对齐将来会被顺手简化掉）。同理 `T_refund_LOCKED_F < T_cutoff_LOCKED_R + N_claim + N_margin` 的错开也须攻击 LAND。
+   - 🔴 **边界负测 5 格（v0.7 Shape A1，Codex 给·取代 v0.6 不可 enforce 的 equality 负测）**：
+     1. **F1@`>= T_refund_LOCKED_F`** → 拒（§4-c 上界 guard）；
+     2. **F2@`< T_refund_LOCKED_F`** → 拒（§4-d LOCKED_F terminal-refund 下界）；
+     3. **O1@`>= OpTxInputDaaScore(O)+N_claim+N_margin`** → 拒（§4-e 支1 上界）；
+     4. **O2@`< OpTxInputDaaScore(O)+N_claim+N_margin`** → 拒（§4-e 支2 下界）；
+     5. 🔴 **错序 ⇒ theft race 可达（承重非装饰）**：令 baked `T_refund_LOCKED_F < T_cutoff_LOCKED_R + N_claim + N_margin` ⇒ **F1/F2 抢跑/盗窃攻击必须 LAND**（否则这条 ordering 是装饰，将来会被顺手简化掉）。这是**配置级**（`T_refund_LOCKED_F` 与 `T_cutoff_LOCKED_R` 均 baked、可读，ordering 可 enforce——区别于 v0.6 那条 O-anchored 的不可 enforce equality）。
 3. **A-absent 全清核（MUST-FIX 1）**：全文 grep `A-absent` 必须**零命中**于 normative 构造（只许出现在 §0.5 变更说明里作为"已清除的旧写法"）。refund 只走 §4-d 的 still-unspent LOCKED state machine。
 4. **A2 腿 e2e**：`checkSigFromStack` 合法签过 / 改一位拒 —— 必在 canonical `8065184` 树上编 + 上链跑，读 codegen 不算（OP_PICK 教训）。
 5. **cov_id 派生 e2e**：造两个不同 funding outpoint 的 candidate C，验其 cid 不同、且只有 baked 那个的 O 过 reactive 检查。
@@ -280,4 +298,4 @@ require(tx.outputs[payout_idx].value == LOCKED_F_value);                       /
 | 多 covenant-input 一笔 tx（LOCKED+C 原子焊接） | `OpCovInputCount`/`OpCovInputIdx` + `OpInputCovenantId(C_idx)` | compile.rs:3577-78 + `ShardLeaf:99` 读非 active input cov_id | ✅ 已证（Q① 裁可建） |
 | adaptor 揭示签 | `checkSigFromStack(A)` | canonical `8065184`（#132） | 🟡 待 canonical 树 e2e |
 
-⇒ **净判断（v0.6）**：Codex 判**架构 GREEN**，v0.5 全部修接受。**v0.6 补 Codex v0.5 逮到的 O↔LOCKED_F 单向焊缝**（§4-e 显式定义 O 的 2 支 covenant，pre-timeout 支反向焊 `require(LOCKED_F co-input + baked payout)` ⇒ 花 O⟺领 LOCKED_F 双向互焊；根因=支路清单须从 covenant 实际 spend 条件导出非意图）。O 支集恰 2 支（供 J2 重建矩阵）。**落码前硬前置 = ① 各 WELD（含双向）/EXCL/COUPLED 松开负测（§6.2*+J2 重建矩阵每格） ② A2 腿 canonical `8065184` 树 e2e ③ cov_id 派生 durable 证 ④ min_O/N_claim/N_margin 具名保守常量 ⑤ §1.5 五假设各自兜住**。v0.6 送 Codex 复审 + J2 据实际支集重建矩阵过 ⇒ 同链 design-closed = 无委员结构 Tier-2（**条件于 §1.5 假设**）。跨链退 R1。落码 Owner 批实现闸。
+⇒ **净判断（v0.7）**：Codex 判**架构 GREEN**，v0.6 反向焊 PASS AS DESIGN。**v0.7 走 Shape A1 修 Codex v0.6 逮到的 anchor 不可 enforce + F1/F2 race**：删假 equality（§4-e）+ F1 上界 guard `< T_refund_LOCKED_F`（§4-c）+ O 边界纯相对 `OpTxInputDaaScore(O)+N_claim+N_margin`（§4-e）+ ordering 非 equality（v0.4 baked 不等式 `T_refund_LOCKED_F >= T_cutoff_LOCKED_R+N_claim+N_margin` 已保守满足，可 enforce）+ 5 边界负测（§6.2c）。**落码前硬前置 = ① 各 WELD/EXCL/COUPLED + 5 边界松开负测（§6.2*+J2 矩阵） ② A2 腿 canonical `8065184` 树 e2e ③ cov_id 派生 durable 证 ④ min_O/N_claim/N_margin 具名保守常量 ⑤ §1.5 五假设兜住 ⑥ quorum 独立 pre-real-funds**。v0.7 送 Codex 复审过 ⇒ 同链 design-closed = 无委员结构 Tier-2（**条件于 §1.5 假设**）。跨链退 R1。落码 Owner 批实现闸。
