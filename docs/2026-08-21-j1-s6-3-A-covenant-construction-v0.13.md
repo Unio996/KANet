@@ -1,7 +1,14 @@
-# §6-3 A：fair-exchange 结算 covenant 完整构造（v0.12 · 报备层 · 零生产码）
+# §6-3 A：fair-exchange 结算 covenant 完整构造（v0.13 · 报备层 · 零生产码）
 
-> **Status**: CURRENT（v0.12 取代 v0.11：补 3 条 terminal 支缺的 `OpCovOutputCount==0`（闸③），NWT/J2 两轴矩阵逮）
-> **作者** J1 · **日期** 2026-08-21 · **派工** J2 矩阵 v8（新增支×不变量轴）+ NWT 独立核
+> **Status**: CURRENT（v0.13：Codex v0.12 两 MUST-FIX（free-option 证无效 + oauth_cid provenance）+ Bettor checklist ①④⑤）
+> **作者** J1 · **日期** 2026-08-21 · **派工** Bettor checklist ①④⑤ + Codex v0.12（e281a2ca）两 MUST-FIX
+
+## §0.16 v0.13 变更（Codex v0.12 两 MUST-FIX + Bettor checklist ①④⑤）
+
+Codex 复审 v0.12：多项 PASS（Shape-B 方向 / 四路焊方向 / O↔O_AUTHORIZED 焊 / v0.12 ==0 sweep / 两轴方法论），但两 MUST-FIX：
+- 🔴 **MUST-FIX 1（我认：free-option "closed" 证无效，又一次"下界 close 不了对面窗"）**：v0.11 `T_giveup_LOCKED_F >= T_cutoff_LOCKED_R` 我 claim"giveup 只在 reveal 窗关后"——**错**。下界-only 下 `T >= T_cutoff_LOCKED_R` 只让 LOCKED_R refund **可用**、**不 close reveal 窗**（reveal 无上界）⇒ 阈值后首动方仍有 **race-dependent 选择**（reveal vs giveup）。⇒ **诚实**：giveup 排序**降低不消除** free-option；残留 = 阈值后首动方 late-reveal-vs-giveup race，**由 reactive 及时 refund LOCKED_R（reactive-liveness，§1.5 假设 5）bound**，非结构消除。matrix Fb 格须相应改（下界排序≠close 对面支）。
+- 🔴 **MUST-FIX 2（我认：normative 残 Shape-A 文字 + oauth_cid provenance 门）**：(a) ①命名 sweep（§2.5 已改，§4-f 续）。(b) **`oauth_cid` provenance 门**：O_AUTHORIZED 在 reveal tx 创建（reveal 前 tx/outpoint 不存在），双方怎么 reveal 前 bake `oauth_cid`？**解（我域；Codex v0.10 已预留"除非 continuity 显式设计+机械证"）**：O_AUTHORIZED **续 LOCKED_F 的 cov_id lineage**（CovenantBinding 续链：`OpInputCovenantId(LOCKED_F)==locked_f_cid → OpOutputCovenantId(O_AUTHORIZED)==locked_f_cid`）⇒ **`oauth_cid ≡ locked_f_cid`（同一 lineage 身份、跨转移稳定、LOCKED_F session-time genesis-mint 时已 bake）**。故 O 反向焊引 `locked_f_cid`（= 续链身份）reveal 前可 bake，provenance 门闭。
+- ✅ **checklist ②③ 已 v0.11/v0.12 做**；**①④⑤ 本版**：①命名 sweep · ④四路省略任一路→拒 交易级负测 · ⑤O 侧焊 stale-input/无 O_AUTHORIZED→拒 负测（§6.2 补）。
 
 ## §0.15 v0.12 变更（NWT/J2 两轴矩阵逮 3 条 terminal 支漏闸③）
 NWT 独立核 v0.11 §4-d：`Fb`（giveup）缺 `OpCovOutputCount==0`——违反闸③（每条非-reveal 支须显式禁续 lineage）。**判据（J2）：新增一支须拿【全部】已确立不变量逐条过，非只想到哪条查哪条**（我/J2 加 giveup 时只想着时序、漏了 lineage-terminal；两轴矩阵的"支×不变量"轴才照得到单支合规）。⇒ 我**扫全 Shape B 支集**（非只 NWT 逮那条），补齐 3 条缺的：**§4-c reactive-claim（`OpCovOutputCount(oauth_cid)==0`）· §4-e O支1（`OpCovOutputCount(cid)==0`）· §4-d giveup（`OpCovOutputCount(locked_f_cid)==0`）**——均 terminal payout 支、应无续链。已有的（LOCKED_R-refund/O_AUTHORIZED-recovery/O支2/C-refund）不动。= 同 clamp-repeat-offender（扫全构造非修一实例）。
@@ -143,12 +150,15 @@ refund: 两 principal 各走 P-SAFE-1 单-live-lineage（LOCKED_R: cutoff 前只
 
 > 钉死"哪个 principal 在哪个 covenant、哪支揭 s、哪支花 O、refund 寿命怎么耦合"。命名：`LOCKED_R`=反应方本金，`LOCKED_F`=首动方本金。
 
-| 对象 | covenant | 谁的钱 | 唯一合法消费路径 | refund 支时序 |
+> 🔴 **v0.13 ① Shape-B 命名 sweep**：LOCKED_F 在 reveal 被消费**转成 O_AUTHORIZED 后继**（非反应方直接领 LOCKED_F）；refund 寿命论证换成锚**实际 reveal DAA**（`OpTxInputDaaScore(O_AUTHORIZED)`）非 baked cutoff。
+
+| 对象 | covenant | 谁的钱 | Shape-B 支路 | 时序（全下界·真原语 TxTime/CLTV） |
 |---|---|---|---|---|
-| `LOCKED_R` | P-SAFE-1 lineage | **反应方**本金 | **首动方揭 s 领走**（§4-d transfer，焊接消费 C 造 O） | `current_daa >= T_cutoff_LOCKED_R` 后退反应方 |
-| `LOCKED_F` | P-SAFE-1 lineage | **首动方**本金 | **反应方花 O 领走**（§4-c，O 作 co-input + baked payout） | `current_daa >= T_refund_LOCKED_F` 后退首动方，且 baked `T_refund_LOCKED_F >= T_cutoff_LOCKED_R + N_claim + N_margin`（§4-d 耦合） |
-| `C` | cov_id capability | 无（dust 种子） | 首动方 reveal 消费 C 造 O（§4-b） | cutoff 后 terminal-refund（无续链） |
-| `O` | C 的续继 | 反应方领 `LOCKED_F` 的凭证 | 反应方花 O（作 §4-c 的 co-input） | `T_O`（相对 O 创建）后首动方回收（无续链） |
+| `LOCKED_R` | P-SAFE-1 | **反应方**本金 | transfer（首动方揭 s 领，四路焊 §4-d）/ terminal-refund | refund `TxTime >= T_cutoff_LOCKED_R` 退反应方 |
+| `LOCKED_F` | P-SAFE-1 | **首动方**本金 | **transition→O_AUTHORIZED**（reveal 强制，§4-d Fa）/ **giveup**（§4-d Fb） | giveup `TxTime >= T_giveup_LOCKED_F`（baked `>= T_cutoff_LOCKED_R`）退首动方 |
+| `O_AUTHORIZED` | LOCKED_F 的 reveal-后继 | = 首动方本金（反应方凭 O 领） | reactive-claim（§4-c，O 作 co-input）/ recovery | recovery `TxTime >= OpTxInputDaaScore(O_AUTHORIZED)+N`（**实际 reveal DAA**）退首动方 |
+| `C` | cov_id capability | 无（dust 种子） | reveal 消费造 O（§4-b）/ terminal-refund | refund cutoff 后（无续链） |
+| `O` | C 的续继 | 反应方领 `O_AUTHORIZED` 的凭证 | reactive-spend（§4-e 支1，作 §4-c co-input）/ recovery | recovery `TxTime >= OpTxInputDaaScore(O)+N` 退首动方（无续链） |
 
 🔴 **两个焊接点（v0.4 双向都焊死，缺一即单边盗窃）**：
 1. **领 `LOCKED_R` ⟺ 造 O**（v0.3 焊接，§4-d transfer）：首动方揭 s 领反应方本金的同笔 tx 必须消费 C 造 O。
@@ -253,7 +263,7 @@ require(tx.outputs[O_out_idx].value >= min_O);      // §5
   - **terminal-refund 支**（cutoff 后）：`require(TxTime >= T_cutoff_LOCKED_R)`——still-unspent `LOCKED_R` 转 terminal 明文退**反应方**。互斥由 UTXO once-spend 天然保证。`OpCovOutputCount == 0`。
 
 🔴 **`LOCKED_F`（首动方本金）v0.9 走 Shape B（两条互斥后继，均无上界依赖）**：
-  - **transition 支（reveal 强制，四路原子的一路）**：reveal 那笔 tx（消费 LOCKED_R+C 造 O）**同笔必须把 LOCKED_F 转 `O_AUTHORIZED` 后继**——`require(OpOutputCovenantId(oauth_out_idx) == oauth_cid)`（O_AUTHORIZED 续链）。由 §4-d transfer 支反向要求（领 LOCKED_R 的同笔必含 LOCKED_F→O_AUTHORIZED 转移）。⇒ **O_AUTHORIZED 与 O 在同一笔 reveal tx 创建，DAA 相同**。
+  - **transition 支（reveal 强制，四路原子的一路）**：reveal 那笔 tx（消费 LOCKED_R+C 造 O）**同笔必须把 LOCKED_F 转 `O_AUTHORIZED` 后继**。🔴 **v0.13 provenance（MUST-FIX 2b）**：O_AUTHORIZED **续 LOCKED_F 的 cov_id lineage**——`require(OpInputCovenantId(locked_f_idx) == locked_f_cid ∧ OpOutputCovenantId(oauth_out_idx) == locked_f_cid)`（CovenantBinding 续链，同 ShardLeaf/bshard 续链）。⇒ **`oauth_cid ≡ locked_f_cid`（同一 lineage 身份、跨转移稳定）**，而 `locked_f_cid` 是 LOCKED_F session-time genesis-mint 时的 cov_id、**reveal 前双方已 bake**（解 Codex "reveal 前 O_AUTHORIZED 不存在、怎么 bake oauth_cid"）。⇒ 全文 `oauth_cid` 即 `locked_f_cid`（§4-c/§4-e 的引用据此可 enforce）。⇒ **O_AUTHORIZED 与 O 同笔创建，DAA 相同（= 实际 reveal DAA）**。
   - **giveup-refund 支（首动方放弃，reveal 未发生）**：`require(TxTime >= T_giveup_LOCKED_F)`（baked 下界，CLTV）+ 🔴 **`require(OpCovOutputCount(locked_f_cid) == 0)`（v0.12 闸③，NWT/J2 逮我漏）**——本支 terminal 退首动方明文，禁产 LOCKED_F 续链。与 transition 互斥（once-spend）：reveal 发生则 LOCKED_F 已转移、giveup 无 UTXO；反之首动方 giveup 拿回、但也没 claim LOCKED_R（无 reveal）⇒ 反应方 refund LOCKED_R，对称无 theft。
     🔴 **v0.11 baked 排序（J2 矩阵 v7 逮 free-option，MUST）**：`T_giveup_LOCKED_F >= T_cutoff_LOCKED_R`。**若 giveup 早于 reveal 窗关**（`T_giveup < T_cutoff_LOCKED_R`）：不是盗窃（giveup 花掉 LOCKED_F 后 reveal 不可构造，无法既 giveup 又 reveal），**但是【单方免费期权】**——首动方可观望到 `T_giveup` 再零成本中止，而对手 LOCKED_R 期间被锁（原子交换经典 free-option）。⇒ 令 `T_giveup_LOCKED_F >= T_cutoff_LOCKED_R`：giveup 只在 reveal 窗关后行使 ⇒ 退化成真正的"reveal 没发生⇒拿回本金"recovery，无早中止期权。两常量均 baked、可读 ⇒ 排序可 enforce（同 §4-d/§4-f 下界方法论）。配错序负测：`T_giveup < T_cutoff_LOCKED_R` ⇒ free-option 攻击（观望套利）可达。
   - 🔵 **关键（解 Codex v0.8 塌）**：`O_AUTHORIZED` 的 recovery 下界 = `TxTime >= OpTxInputDaaScore(O_AUTHORIZED) + N_claim + N_margin`（= 实际 reveal DAA + N，见 §4-c）。**无论 reveal 早晚**，被保护本金在实际 O 创建 + N 前不能回首动方 ⇒ 不依赖"reveal 在 T_cutoff_LOCKED_R 前"这条不可 enforce 上界。
@@ -321,6 +331,9 @@ require(tx.outputs[O_out_idx].value >= min_O);      // §5
      4. 🔴 **独占性正测（承重）**：首动方 recovery（F2/O2）在**阈值前**提交 ⇒ **必拒**（证独占窗真存在=反应方的保护来源）；
      5. 🔴 **错序 ⇒ 双拿攻击 LAND（承重非装饰）**：令 baked `T_refund_LOCKED_F < T_cutoff_LOCKED_R + N_claim + N_margin` ⇒ 首动方双拿攻击**必须 LAND**（否则 ordering 是装饰）。`T_refund_LOCKED_F`/`T_cutoff_LOCKED_R` 均 baked、可读 ⇒ ordering 可 enforce。
      6. 🔴 **不可加上界的静态检查**：源码 grep 全构造**零 `tx.time <` / 零 `current_daa <`**（上界不可 enforce，写了=假守卫）。= clamp-repeat-offender 防复发。
+2d. 🔴 **Shape B 四路 + O 侧焊交易级负测（v0.13 checklist ④⑤，Codex v0.9 MUST-FIX 1/2）**：
+   - ④ **四路省略任一路→拒**：给 §4-d transfer 支合法 A+s，但 reveal tx **省略/错 C、或省略 exact LOCKED_F、或不造 exact O_AUTHORIZED（含续链 `OpOutputCovenantId==locked_f_cid`）**中任一 ⇒ **领 LOCKED_R 的 tx 必拒**（证四路焊在 LOCKED_R 领取路自身、非可跳过的分支）。
+   - ⑤ **O 侧焊 stale/无 O_AUTHORIZED→拒**：(a) 花真 O 而**不带 O_AUTHORIZED co-input / 带 wrong oauth（≠locked_f_cid）** ⇒ 拒（§4-e 支1）；(b) 花 O_AUTHORIZED（领 principal）而**不带真 O** ⇒ 拒（§4-c）；(c) O_AUTHORIZED 的 cov_id **不续自 locked_f_cid**（假 continuation）⇒ 拒（provenance）。
 3. **A-absent 全清核（MUST-FIX 1）**：全文 grep `A-absent` 必须**零命中**于 normative 构造（只许出现在 §0.5 变更说明里作为"已清除的旧写法"）。refund 只走 §4-d 的 still-unspent LOCKED state machine。
 4. **A2 腿 e2e**：`checkSigFromStack` 合法签过 / 改一位拒 —— 必在 canonical `8065184` 树上编 + 上链跑，读 codegen 不算（OP_PICK 教训）。
 5. **cov_id 派生 e2e**：造两个不同 funding outpoint 的 candidate C，验其 cid 不同、且只有 baked 那个的 O 过 reactive 检查。
