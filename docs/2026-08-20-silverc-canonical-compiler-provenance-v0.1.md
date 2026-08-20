@@ -43,12 +43,20 @@ applyable 副本（**入库、durable**）：`docs/silverc-canonical-provenance/
 ```sh
 git clone https://github.com/kaspanet/silverscript.git   # 或 fetch 现有检出
 cd silverscript
-git checkout d25bd34                                      # 公开永久基座(含 #132)
-git apply <本仓>/scratch/silverc-archive/oppick-fix-d25bd34-to-8065184.diff
-# 验源树重建忠实(应与 J2 的 8065184 树一致):
-git rev-parse HEAD^{tree}      # 记此值; 应 == J2 报的 8065184 树 hash(待 §5 交叉核填)
+git checkout d25bd34                                      # 公开永久基座(含 #132), 树=71e8c022...
+DIFF=<KANet仓>/docs/silverc-canonical-provenance/oppick-fix-d25bd34-to-8065184.diff  # 🔴 入库durable路径, 不是scratch/
+git apply --check "$DIFF"     # 🔴 归档物验收=能不能用(J2判据), 不是"在不在"; 基座漂/行尾变会在此喊
+git apply "$DIFF"
+# 验源树重建忠实 — 应 == canonical 8065184^{tree}(全40位比对, 别只比前缀):
+git rev-parse HEAD^{tree}      # 期望 = 69a6d85ba5c9e060ee547fa5e4183774d2408447
 cargo build --release          # 产出编译器二进制
 ```
+
+🎯 **源树层交叉核 = CLOSED**（2026-08-20，多方独立路径全值吻合）:
+- 基座 `d25bd34^{tree}` = `71e8c022fdd4ccc8d704c24f4a9588afefd646ff`。
+- 重建后 `8065184^{tree}` = `69a6d85ba5c9e060ee547fa5e4183774d2408447`（canonical，J2/Bettor 各自从唯一有 8065184 的检出全串确认）。
+- **NWT 从完全独立路径**（fresh clone github `d25bd34` + apply 上面 durable 路径 diff，不用 bundle、不用任何人的检出）重建出 `69a6d85b…` **== canonical 全值** ⇒ 异机可从公开基座+一行 diff 确定性重建源树，坐实。
+- 🔧 一步分辨"基座取错"vs"补丁没 apply 干净"（只改一个文件，故 blob 级足够定位）: `compile.rs` @ `d25bd34` blob = `53935455b19eae92e2d42442e4211a221bea781b` / @ `8065184` blob = `8090ed1953ad3eab0ed94baaf610ea2a94e70cf5`。树 hash 对不上时先比这两个 blob：对得上 ⇒ 差异在别的文件(基座错)；对不上 ⇒ 差异在那一行(补丁错)。
 
 ## §4 产物指纹 — 两个用途，**分开写，别混**（Bettor item-4 拆分，J2 纠）
 
@@ -57,8 +65,12 @@ cargo build --release          # 产出编译器二进制
 - **4a 分发完整性**（答"你手上这份是不是我这份"，防拿错文件，**不是重建判据**）：
   `silverc-zk-8065184.exe` sha256 = `9de7f2f682bc9e50a4b922e1c811335f1b1cd67c175f2e01df6fa6efc9015fc4`
   对照 `silverc-legacy-2c46231.exe` = `e0e9b62c086df6b6a63344cbbbd21a0d176af76c5a869826131a879ff06a2c06`（与默认 `target/release/silverc.exe` 逐字符相同 ⇒ 印证**默认路径就是 legacy、编不出 checkSigFromStack**）。
-- **4b 重建成功判据**（判据落**产物 bytecode**，非二进制 hash）：
-  用重建出的编译器编**固定被测物** `kasia-console/src/lib/CheckSigFromStackProbe.sil`（pubkey 烤进 ctor，固定 ctor），与现有 `silverc-zk-8065184.exe` 的输出做 **byte-exact 比对**。基准产物 = **3648 字节**。
+- **4b 重建成功判据**（判据落**编译器产物**，非二进制 hash）✅ **CLOSED**：
+  用重建出的编译器编**固定被测物** `kasia-console/src/lib/CheckSigFromStackProbe.sil`，与 pinned `versioned-builds/silverc-zk-8065184.exe` 的输出做 **byte-exact 比对**。
+  🔴 **必须用入库的固定 ctor** `docs/silverc-canonical-provenance/4b-baseline-ctor.json`（commit f1ed8c3b，常量 pk）——原 ctor 由脚本烤**随机 pk**，换 pk 产物就变，各自生成会**假 FAIL**；固定输入把唯一自由变量钉成"哪个编译器编的"。
+  🔴 **比的是编译器产出的 `script` bytecode 逐字节，不是 JSON 文件大小**（此前误记"3648 字节"=随机-pk JSON 整体大小，作废；JSON 含 ABI/元数据随格式/pk 变）。
+  🎯 **权威基准（第三方可复现，因 ctor 入库）**：固定 ctor `4b-baseline-ctor.json`（f1ed8c3b）+ pinned exe ⇒ `script` bytecode **40 字节 · sha256 = `671cf278e91d8f994a8fb3cc2feec5a3a80132f1bb853ee98b4c66324af6c444`**。任何人拉同一份 ctor 编即得此数。（bytecode 是否独立于 ctor pk 待 J2 定；无论如何入库 ctor 已把它钉成可复现。）
+  ✅ **NWT 独立 rebuild-determinism A/B（互补另记）**：自源码 `cargo build` 出编译器 + 同一份入库固定 ctor，与 pinned exe 产物 `cmp` ⇒ IDENTICAL（artifact 3653 字节，两边 sha256 = `0c3b52de10c7b54b9ca2bd68d6896782aba68e8aca57e853076ee0ac08c87d95`）。⇒ 从已证==canonical 的源树 build 出的编译器，产物即参考、pinned 被反向佐证。
   🔨 判据 = 产物逐字节相同，**不是** `cargo build` 没报错——因为 OP_PICK bug **不报错**，只让产物悄悄带 off-by-one。
   ⚠ **范围注记（NWT）**：4b 验的是**该固定探针合约**产出相同产物，**不是**"重建出的编译器对任意合约都产出相同产物"。此收窄是有意的（OP_PICK 那行 diff 本身够窄，扩大成"编译器全域逐字节确定性"是过度加固）。**引用 4b 时不得读作编译器全域确定性。**
 
@@ -68,7 +80,9 @@ cargo build --release          # 产出编译器二进制
 
 ## §6 待填 / 交接
 
-- **§3 的 `8065184` 树 hash 交叉核**：待 J2 报 `git rev-parse 8065184^{tree}`；J1 apply diff 到 d25bd34 后验树 hash == 该值 = 重建源树忠实（源树层）。
+- ✅ **源树层交叉核 = CLOSED**（见 §3 🎯 块）：NWT 独立路径重建 == canonical `8065184^{tree}` = `69a6d85b…` 全值；full commit `80651849962f…` 三方全串一致；NWT 判**确定性重建 PASS**（两层 × 两独立路径、无互背书）。
+- ✅ **4b 产物层 = CLOSED**（NWT 独立自 build + 入库固定 ctor，与 pinned exe `cmp` IDENTICAL，sha256 `0c3b52de…`）。⇒ **provenance = 源树层 + 产物层【全闭】**（两层 × 两独立路径 × 无互背书；NWT 判"全闭无保留"）。
+- 🔵 **作用域边界（别读大）**：本 doc 闭的是**编译器树 provenance**（能确定性重建出对的编译器）。**A2 的 on-chain runtime 验证 = 另一条闸**（checkSigFromStack 链上真在验签），**仍 OPEN**：首跑遇 J2 harness 的 `sigOpCount:1` tx 构造 bug（与被测原语无关），八格 0 PASS/1 FAIL/7 不可归因，待 harness 修（sigOpCount→0）+ 过 Bettor/NWT 眼 + 重跑。**provenance 闭 ≠ A2 runtime 闭。**
 - **4b 首次跑证**：待在 pinned 二进制上编 `CheckSigFromStackProbe.sil` 得 3648 字节基准 + 一次真重建复现（产物层）。
 - **NWT 核**：确定性重建是否真确定（照 (590) 派工）。
 - **归档位**：本 doc = provenance 权威（Bettor 定"写进 KANet docs/"）；diff applyable 副本入 `scratch/silverc-archive/`；二进制 `versioned-builds/`（J2）。
