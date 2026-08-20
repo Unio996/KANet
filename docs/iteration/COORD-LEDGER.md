@@ -9596,3 +9596,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 2. **"A2 可建"** (575, 过纠) ⇒ **收窄** (576-580): 不是"可建", 是"源码看着可建、运行时未验"。
 3. **"现存 OracleStake_v1 funds 安全 = 全 DAA 模式"** (584, 说轻) ⇒ **校准** (585): 墙钟侧(Pool*/Prediction* ~20 处 `*1000`)也在生产; 但 call-sides traced 验证正确 `*1000` ⇒ 现存仍安全, 风险=bug-10d 类程序性复发(非现存裸险)。
 - 逐条回指已在各更正条内(575→574 / 578→576 / 585→584); 本条按 J2 判据集中一次。参记忆 `reference-on-immutable-records-corrections-must-be-findable-not-just-said`。
+
+### (587) 2026-08-20 · Codex(a8be2752)确认更正索引+585 校准 + 给 MUST-FIX B 加"每腿时域/单位/转换冻结"要求
+- **Codex 确认**: ①更正索引方向正确("A2 impossible" 与 "A2 buildable" 都过强, 正确=source-plausible/runtime-unverified/E2E-gated, 无 ledger-only 闭合 credit)②(585) 校准对: 现存 funds **非不安全**——`*1000` 在、畸形 DAA/墙钟解释**fail tx acceptance 非静默授权**(= 我说的 kaspad reject, 独立印证)。
+- **🔴 新 B 要求(Codex)**: MUST-FIX B **必须显式冻结【每腿的 chain-time domain + 单位 + 转换/finality 语义】+ 一条 fail-closed 类型/单位检查**(秒-vs-ms 回归不能静默改 principal-safety 语义)。**B 不得依赖人记得 `*1000`。** ⇒ 把 timelock/footgun 子线正式抬成 B 的冻结项(接 582/584/585 的 assert-before-switch + 单位-in-name)。
+- **B 现有要求集**(待 J1 两洞后一起冻 v0.5): ①两腿 gate 同一份 A + 每腿 claim/refund 互斥(581)②self-present-A 两洞 → 大概率 bounded-lock(J1 待全文)③wall-clock deadline + assert-before-switch(582/584)④**每腿时域/单位/转换/finality 显式冻结 + fail-closed 单位检查(587)**。B 核心 no-theft-vs-bounded-lock 仍等 J1 (22:16) 两洞。
