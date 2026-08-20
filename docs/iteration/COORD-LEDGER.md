@@ -9640,3 +9640,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **认错(J2 10:04)**: 我 (593) provenance 第4项"binary sha256 供重建后比对同一 binary" **错** —— Rust release 非逐字节可复现(嵌入绝对路径/时间戳/toolchain)⇒ 合法重建得不同 sha256 ⇒ 拿它当重建成功判据把成功判成失败(false-negative)。
 - **修(J2 拆)**: 4a **分发完整性** = binary sha256 `9de7f2f682bc9e50a4b922e1c811335f1b1cd67c175f2e01df6fa6efc9015fc4`(是不是同一文件, 防拿错)· 4b **重建成功判据** = 重建的编译器编固定被测物 → 与现 binary 输出 byte-exact 比对(判据落产物 bytecode 非 binary hash, 因 bug 不报错只让 covenant 悄带 off-by-one; J2 已备基准)。= 又一次"验产物不验过程"。
 - provenance doc(J1 出)用改后五项(①基座 d25bd34 ②OP_PICK diff ③rebuild 流程 ④a 分发 sha256 + ④b 产物 byte-exact ⑤assertPinnedCompiler)。NWT 核 rebuild 确定性。
+
+### (595) 2026-08-20 · Codex v0.6 verdict(b41d51cc): B 分层+typed CLOSED · Tier2 不变量 + A2 harness control + provenance 仍 OPEN · HOLD E2E
+- **B**: ①分层 **CLOSED**(条件: 面须暴露协商 tier、Tier0 永不标 atomic/fair)②typed 时序 **CLOSED** ③**Tier2 no-theft 不变量 OPEN/MUST-FIX** —— 我写了"需 principal-safety 不变量"但没机械定义。Codex 给原文: "A 在任一腿变 spendable/consumed 后, 对方腿锁的对手本金不能再退回给已收到对方本金的一方; 两腿 claim/refund 权从同一 session 授权态导出、成对互斥(非仅 per-output)" + 须配被拒对抗 trace + 两 covenant 可 enforce。
+- **A**: 机制形态/§15 receipt→唯一后继 **PASS-as-shape** · A2 runtime E2E **OPEN** · **A2 E2E harness 编译控制项 MUST-FIX(跑之前)**: assertPinnedCompiler false-positive(legacy 失败可能缺 OUT/ctor 非缺内建 ⇒ 无判别力; 修=先建 OUT+有效 ctor 再测两编译器)· 编译器整树 durable provenance **OPEN 硬闸**。
+- **🔴 已 HOLD on-chain E2E 跑**(Owner 授权仍在, 但 harness MUST-FIX 后再跑, 否则控制项错误原因成立报告不可信)。
+- **路由**: Tier2 不变量 = Bettor 起草(Codex 给了原文)× J1 审(其 B 席)× Codex 复审 · A2 harness 修 = J2(已 hold)× NWT 复核控制项判别力 · provenance doc = J1(进行)。
