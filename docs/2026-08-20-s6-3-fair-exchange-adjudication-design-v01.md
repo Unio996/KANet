@@ -400,3 +400,14 @@ refund **不**表述为"查无 AUTHORIZED 记录"，而是**单一活状态 UTXO
 | **配置级** | 不改代码, 改【烤入常量关系】 | "靠记得配对的 deploy 义务" | cutoff 顺序配反 → 同一攻击必 LAND（"有牙"双格: 正序 BUST / 反序 LAND） | NWT |
 - 🔨 **判据**: 只做语句级变异 = 对"该写没写"（交易级）与"配错关系"（配置级）**结构性失明**。承重构造的验收**三层都要**。且"有牙"格（反配→攻击 LAND）比"正配→攻击 BUST”格更关键——它证防御的牙是真的、非摆设。
 - 关联: 语句级=[[reference-a-self-consistent-require-can-look-like-the-binding-and-outlive-it]]；交易级/配置级=本 session 新增（缺失约束 + 隐含配对义务）。J2-BFAMILY-THREE-LAYERS。
+
+### §17.13 Codex v0.3 verdict（2026-08-21·GREEN 方向·未 closed·对称承重缝）
+Codex 复审 v0.3（RESPONSE-20260820-MSG261-SUPP-S6-3-V03）：**GREEN 架构方向, 但未 design-closed**。前 4 修全 PASS AS DESIGN（A-absent→P-SAFE-1 · `==1` 唯一续继 · T_O 相对锚 · v0.3 两-lineage 焊接="REAL FIX, 交易级负测恰当, 语句级测不出这类"）。
+🔴 **新 MUST-FIX（对称缝, Codex 逮, 内部全漏）= O 生命期 ↔ 被保护本金退款生命期未耦合**:
+- v0.3 焊死"拿反应方本金 LOCKED' ⟹ 同笔造真 O", 但**没焊**"真 O 存在 ⟹ 反应方有 ≥N_claim+N_margin 内不可被偷的本金可领"。
+- 攻击: 首动方拖到最晚 reveal, 一笔原子 tx 消费 LOCKED'+C(领钱+造真 O, v0.3 焊全过), 但自己 LOCKED 已 refund-eligible → 抢在反应方凭 O 领前 refund 掉自己本金 ⇒ 既拿对方本金又收回自己本金, O 真但经济无用。= 同一 principal-theft; T_O 只锚 O 创建, 没锚被保护本金退款窗。
+- 🎯 **Bettor 判方向 = Shape B（状态转移）非 Shape A（静态不等式）**: 全设计哲学=结构/相对/本地优于绝对/外部窗(O-construction 采纳初衷); A 重引绝对 cutoff + 需 `T_latest_reveal` 可强制链界=又一承重参数。**B 与 v0.3 焊接对称、统一 Codex 两点**: 造 O 那笔原子 tx 同时转首动方 LOCKED→`O_AUTHORIZED`(退款锚 `O_creation_daa+N_claim+N_margin` 或反应方凭 O 领)。⇒ 单笔四路原子焊: 消费 LOCKED'(付首动方)+消费 C+造 O+转 LOCKED→O_AUTHORIZED。不变量 `O 于 d 创建 ⟹ 被保护本金在 d+N_claim+N_margin 前不能回首动方`。
+- 🔴 **Codex 第二点(§4(c) 拓扑显式)B 一并解**: §4(c) 反应 claim = `O_AUTHORIZED` claim 支、要求真 O 作 co-input(非"只花 O"独立支, 否则又一两-tx 缝)。焊 payout recipient/value/state 同笔。交易级负测: (a) 花 O 缺被保护本金输入/缺精确 payout → REJECT (b) 花本金缺真 O 输入 → REJECT。
+- 派工: J1 v0.4(Shape B 四路焊 + §4(c)=O_AUTHORIZED 支 + 两交易级负测, 先裁源码可建性) · NWT 红队 v0.4(是否又开新对称缝) · J2 验收加两负测 + O_AUTHORIZED 拓扑。
+- 硬 pre-code 门(Codex 重申 OPEN): A2 checkSigFromStack full leg canonical 8065184 · cov_id 派生 durable 证 · min_O/N_claim/N_margin 具名常量 · quorum 独立=pre-real-funds 硬部署门。
+- ⇒ **同链未 closed = v0.4(此耦合)+ Codex 复审 v0.4**。对称缝 design 前逮住、非钱上。
