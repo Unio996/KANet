@@ -369,3 +369,15 @@ refund **不**表述为"查无 AUTHORIZED 记录"，而是**单一活状态 UTXO
 - 🎯 **Codex 要的下一 artifact**：冻一条精确 Tier-2 转移 `reveal finalized under frozen policy → 正 receipt/proof R → reactive claim authorized` + session 绑定 + replay + 被拒 trace `mempool/公开 s 但未 finalized → reactive MUST REJECT`；并定死两腿是否锁定在前（是⇒reactive 须验正 finalized-reveal artifact）。
 - **状态**：P-SAFE-1 CLOSED · C4 hybrid PASS方向 · C4-ENTROPY/s-secrecy 硬假设接受 · **C4-FINALITY = 时间 gate PASS-as-hardening、NOT sufficient** · **positive finalized-reveal binding = NEW/CONTINUED MUST-FIX** · reveal 上界=OPEN(竞争支路 incentive 非硬 deadline) · A2-whole OPEN · §7 quorum 硬闸。
 - **下一步**：Bettor 出 R1 设计(§18)· J1 introspection 能力查(读 spend 存在+深度)判 R2-lite · 据能力+同链/跨链选一路冻 + 出 Codex 要的转移 artifact + 被拒 trace。
+
+### §17.10 v1.3 forgeability 解决净状态（Codex O-earmark 红队后·2026-08-20·桥 99436e8c/MSG-260）——同链 O-construction trustless 结构闭
+> Codex 主动红队逮出 O 可伪造（session-bound script ≠ origin-bound UTXO）→ 团队走 Codex Option-C（covenant-id lineage）修 → NWT 全面红队闭。本节记同链结论。
+- 🔴 **forgeable-O catch（Codex, 决定性·已修）**: `O_spk` 锁前可算=公开 ⇒ 攻击者造合成 O（同 script、无 reveal 血缘）⇒ 花合成 O 破 reorg-coupling ⇒ 盗窃重现。⇒ **script-bound ≠ origin-bound；唯一寻址证不了唯一来源**。
+- ✅ **修 = Option-C covenant-id lineage（同链·trustless·可建·活先例）**: 锁前造唯一 capability C（cov_id 由 consensus 从 funding outpoint 派生、不可选/撞）→ reveal-claim 消费 C 造 O（O 的 cov_id 续自 C）→ reactive-claim（O-REPLACEMENT 无 (A,s) fallback）花 O 时 `require(OpInputCovenantId(O)续自 baked C)`。合成 O cov_id≠baked→BUST。原语 `OpInputCovenantId`/`OpOutputCovenantId`/`OpOutpointTxId`（compile.rs:452-479）· 活先例 ShardLeaf:99/PayoutShard/PoolSpine 续链。
+- ✅ **NWT 4 闸红队全闭（方向 PASS）**: ①cov_id 派生不可伪（撞≡blake2b 原像+控 outpoint=不可行）②多 candidate 无优势（各 cov_id=f(outpoint) 不同、reactive 只认 baked）③**C 每条非-reveal-claim 支须 lineage-terminal**（J1 从 J2 的 O-T_O 侧门一般化到 C 全部 refund/timeout 支）④MITM 截取 non-issue（逐支显式控制非隐含 AND）。
+- 🔴 **Q3 = 本构造真承重风险 = 漏写即静默的授权义务（PayoutShard:26 同病）**: 落码必**显式 require + 负测**（手写 refund 支产 cov_id output → 必 BUST），不靠"记得禁了"。= deploy 不变量。
+- 🔵 scope: cov_id-consensus 依赖 covenant-enabled consensus（TX_VERSION_TOCCATA）= 整条 bshard 线已依赖的同底座、**非新信任假设**。
+- **净参数账（J2 诚实定价）**: 消除 F_reveal（难估外链-finality 安全参数）→ 结构 co-reorg finality（无 proxy）+ T_O（本地 claim-延迟安全参数, 易估）。**非零参数、但从"外部难估"变"本地易估" + trustless + 无委员 liveness 瓶颈。**
+- ✅ **同链 C4-FINALITY = design-CLOSEABLE**（O-replacement + cov_id lineage 结构闭, trustless）。REDTEAM HOLD 待解 = [J1 完整 §6-3 A covenant 把 Q3 落显式 require+负测 + Codex MSG-260 design concur + 实现（Owner 闸）]。
+- 🟡 **跨链仍 OPEN**: O 在对手链 reactive 花不掉 ⇒ 退 R1（委员 finalized-reveal attestation）/ conditional / bounded-lock。⇒ **首实现锁同链 = 拿无委员结构 Tier-2**。
+- **Tier-2 状态**: P-SAFE-1 CLOSED · C4-ENTROPY/s-secrecy 硬假设 · **C4-FINALITY 同链 = closeable via O-construction（待 Codex concur + Q3 落码）** · 跨链 = R1/conditional。
