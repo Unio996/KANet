@@ -54,13 +54,23 @@ function assertPinnedCompiler() {
 
 
 const kaspa = await import('kaspa-wasm');
+// 🔴 2026-08-20 V0 预检实测更正: 链上 checkSigFromStack 要的是【对 32B digest 的裸 BIP340 schnorr】
+//   (TUTORIAL.md:851 "Verify a 64-byte Schnorr signature against a 32-byte digest")。
+//   而 kaspa-wasm signMessage 会【先 hash 再签】(relay.mjs:640 注释), 签的是 hash(digest) ⇒ 链上必拒。
+//   ⇒ 造签名与离线判据都改用 @noble/curves 的裸 BIP340。
+const { schnorr } = await import('@noble/curves/secp256k1');
 
 const newKey = () => {
   const acct = new kaspa.XPrv(new kaspa.Mnemonic(kaspa.Mnemonic.random().phrase).toSeed())
     .deriveChild(44, true).deriveChild(111111, true).deriveChild(0, true);
   const leaf = acct.deriveChild(0, false).deriveChild(0, false);
   const priv = (typeof leaf.toPrivateKey === 'function' ? leaf.toPrivateKey() : kaspa.PrivateKey.fromXPrv(leaf));
-  return { priv, pkXOnly: priv.toPublicKey().toXOnlyPublicKey().toString().toLowerCase() };
+  const privBytes = Buffer.from(priv.toString(), 'hex');
+  const pkXOnly = priv.toPublicKey().toXOnlyPublicKey().toString().toLowerCase();
+  // 自查: kaspa 派生的 xonly 公钥必须与 noble 由同一私钥算出的一致, 否则两套体系对不上, 后面全白做
+  const nobleXOnly = Buffer.from(schnorr.getPublicKey(privBytes)).toString('hex');
+  if (nobleXOnly !== pkXOnly) throw new Error(`🔴 kaspa/noble 公钥不一致: ${pkXOnly} vs ${nobleXOnly}`);
+  return { priv, privBytes, pkXOnly };
 };
 
 const flipBit = (hex) => {
@@ -69,9 +79,11 @@ const flipBit = (hex) => {
   return b.toString('hex');
 };
 
-// 离线"应然"验签: 用 kaspa-wasm 同一实现判这组向量【本该】通过还是失败
+// 离线"应然"验签 —— 🔴 判据是【链上规则】(BIP340 裸验), 不是 kaspa-wasm 自己的另一半。
+//   旧写法用 signMessage 签 / verifyMessage 验 = 自洽两半互相同意 ⇒ 必然全绿、零信息,
+//   它对"签名口径根本不对"这个错完全失明(2026-08-20 实账: 八格全绿, 链上 V0 照样 NULLFAIL)。
 const offlineVerify = (sigHex, digestHex, pkHex) => {
-  try { return kaspa.verifyMessage({ message: digestHex, signature: sigHex, publicKey: pkHex }) === true; }
+  try { return schnorr.verify(Buffer.from(sigHex, 'hex'), Buffer.from(digestHex, 'hex'), Buffer.from(pkHex, 'hex')) === true; }
   catch { return false; }
 };
 
@@ -79,7 +91,7 @@ const KEY_A = newKey();
 const KEY_B = newKey();                                   // V3 用: 另一把钥
 const D1 = randomBytes(32).toString('hex');
 const D2 = randomBytes(32).toString('hex');               // V5 用: 第二条消息
-const sign = (key, digestHex) => kaspa.signMessage({ message: digestHex, privateKey: key.priv });
+const sign = (key, digestHex) => Buffer.from(schnorr.sign(Buffer.from(digestHex, 'hex'), key.privBytes)).toString('hex');
 
 const SIG_A_D1 = sign(KEY_A, D1);
 const SIG_A_D2 = sign(KEY_A, D2);
@@ -99,7 +111,28 @@ const VECTORS = [
   { id: 'V5c', why: 'V5 的阳性对照: (sigA@D2, D2) 必须 PASS, 否则 V5a/V5b 的 REJECT 无归因', sig: SIG_A_D2, digest: D2, expect: 'PASS' },
 ];
 
-console.log('\n=== 向量【离线自验】: 应然 vs kaspa-wasm 实测 ===');
+// -- 判据自身的对照臂(2026-08-20 立): 先证明【这把尺会红】, 再用它量向量。 --
+//   上一版判据(signMessage 签 / verifyMessage 验)也是八格全绿, 而它【永远】全绿 = 零判别力。
+//   ⇒ 全绿本身不是证据; 必须先看到它对一个【已知错】的输入报 REJECT。
+{
+  const probeD = randomBytes(32).toString('hex');
+  const wrongSig = kaspa.signMessage({ message: probeD, privateKey: KEY_A.priv }); // 旧口径 = 已知链上不合法
+  const rightSig = sign(KEY_A, probeD);                                           // 新口径 = 应合法
+  const wrongOk = offlineVerify(wrongSig, probeD, KEY_A.pkXOnly);
+  const rightOk = offlineVerify(rightSig, probeD, KEY_A.pkXOnly);
+  console.log('');
+  console.log("=== 判据自身的对照臂(先证这把尺会红) ===");
+  console.log('  旧口径 signMessage 签名 -> ' + (wrongOk ? 'PASS' : 'REJECT') + ' (必须 REJECT)');
+  console.log('  新口径 裸 BIP340 签名   -> ' + (rightOk ? 'PASS' : 'REJECT') + ' (必须 PASS)');
+  if (wrongOk || !rightOk) {
+    console.log('🔴 判据失效: 这把尺不会红(或把对的判成错) ⇒ 下面八格无论什么结果都【不可采信】');
+    process.exit(1);
+  }
+  console.log('  ✅ 判据有判别力(会红也会绿) ⇒ 下面八格的读数才有意义');
+}
+
+  console.log('');
+  console.log("=== 向量【离线自验】: 应然 vs BIP340 裸验(= 链上规则) ===");
 let bad = 0;
 for (const v of VECTORS) {
   const actual = offlineVerify(v.sig, v.digest, KEY_A.pkXOnly) ? 'PASS' : 'REJECT';
