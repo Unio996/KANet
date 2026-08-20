@@ -68,11 +68,15 @@ const toSpk = payToAddressScript(new Address(toAddr));
 // 跑一格：注资 → 用该向量的 witness 花费 → 记 submit 结果与【原文】
 async function runVector(v, requireLanded = false) {
   const ftx = (await rc({ type: 'transfer', target: p2shAddr, amount: 2 })).txId;
+  // 注资等待窗: 90s 太短 —— 2026-08-20 实测一笔注资在 90s 窗内判"未落", 事后查【其实落了】。
+  //   ⇒ 放宽到 180s, 并打印真实耗时, 免得下次还靠猜。窗口不足会把好格误判成不可归因(浪费), 不会造假绿。
   let funded = false;
-  for (let i = 0; i < 45; i++) {
+  const fundT0 = Date.now();
+  for (let i = 0; i < 90; i++) {
     if ((await rc({ type: 'check_utxo_landed', txid: ftx, address: p2shAddr })).landed) { funded = true; break; }
     await new Promise((r) => setTimeout(r, 2000));
   }
+  log(`  注资 ${funded ? '落链' : '未落'} 用时 ${((Date.now() - fundT0) / 1000).toFixed(0)}s`);
   if (!funded) return { id: v.id, result: 'INCONCLUSIVE', why: '注资未落链 —— 与被测物无关，本格作废重跑' };
   const { entries } = await rpc.getUtxosByAddresses([p2shAddr]);
   const utxo = entries.find((e) => e.outpoint.transactionId === ftx) || entries[0];
@@ -102,8 +106,9 @@ async function runVector(v, requireLanded = false) {
     if (!requireLanded) return { id: v.id, result: 'PASS', txid: r.transactionId };
     // 🔵 边界: submit 被收 = 节点跑过脚本且返回 true(mempool 即做脚本校验) = 本卡要证的那件事;
     //   【落链】另证矿工/共识也收了 —— Bettor 条件② 要的是这一层, 故 V0 预检才等它。
+    // 等待窗与注资同量级: 实测注资落链 149s, 而这里原本只等 60s ⇒ 会把已 PASS 的格误判成未落链。
     let landed = false;
-    for (let i = 0; i < 30; i++) {
+    for (let i = 0; i < 90; i++) {
       if ((await rc({ type: 'check_utxo_landed', txid: r.transactionId, address: toAddr })).landed) { landed = true; break; }
       await new Promise((s) => setTimeout(s, 2000));
     }
@@ -150,4 +155,7 @@ for (const r of results) {
 console.log(`\n${fail === 0 && inconclusive === 0 ? '✅' : '🔴'} ${pass} PASS / ${fail} FAIL / ${inconclusive} 不可归因`);
 if (fail > 0) console.log('🔴🔴 有篡改格仍 PASS 或合法格被拒 ⇒ 按判据 STOP，立即报 Bettor，勿用于 §6-3。');
 await rpc.disconnect();
-process.exit(fail > 0 ? 1 : 0);
+// 🔴 Codex 2026-08-20 逮: 原本 `fail > 0 ? 1 : 0` 只看 fail ⇒ 一次【全格不可归因】的跑会 exit 0,
+//   而 summary(上一行)判绿的条件是 fail===0 && inconclusive===0 —— 两处判据不一致, 退出码更宽松。
+//   后果: 自动化/调用方只看退出码时, "什么都没测到"会冒充"全绿"。⇒ 与 summary 对齐。
+process.exit(fail > 0 || inconclusive > 0 ? 1 : 0);
