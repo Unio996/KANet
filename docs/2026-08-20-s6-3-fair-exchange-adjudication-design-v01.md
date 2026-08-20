@@ -390,3 +390,13 @@ refund **不**表述为"查无 AUTHORIZED 记录"，而是**单一活状态 UTXO
 - 附加: 双方锁前验精确 genesis C+baked cid; cid!=0/O script/value>=min_O 是格式检查非 provenance 替代; cov_id 派生须 durable 源码/runtime 证（Toccata path）。**跨链本轮不闭**（仍需正 finalized-reveal 证 R1/光客户端）。
 - **状态**: synthetic-O attack FIX 方向接受 · cov_id ancestry/co-reorg PASS-AS-ARCHITECTURE · **P-SAFE-1 被 A-absent 回退 REOPENED=MUST-FIX** · 唯一后继 OPEN=MUST-FIX(==1) · T_O 反应窗 OPEN=MUST-FIX(相对锚)。
 - **下一步**: J1 v0.2 修三条+A-absent全清 · J2 验收族B加 ==1/terminal==0 变异负测+T_O相对锚 · NWT 修后红队(P-SAFE-1 lineage ↔ O-lineage 交互) · 送 Codex 复审 → 同链 design-closed。
+
+### §17.12 验收变异测试【三层】框架（J2 综合·2026-08-21·防"只做语句级"）
+> C4-FINALITY 同链 O-construction 的验收族 B 凑齐三层, 每层逮不同盲区、每层由不同 reviewer 逮到——**它们能凑成一张表恰因没有一个人能靠自己想全**（验证多人对抗审查价值）。落码验收必覆盖三层, 不止第一层。
+| 层 | 手法 | 逮的盲区 | 本卡实例 | 谁逮 |
+|---|---|---|---|---|
+| **语句级** | 删/改某一行 require | "写下来的东西不够紧" | 删 merkle 留 committeePkHash 诱饵 / `OpCovOutputCount==1` 放松成 `>=1` | Codex |
+| **交易级** | 不改代码, 改【怎么提交】 | "该写的约束根本没写"（line-mutation 结构性失明） | LOCKED-transfer 与 C-consume/O-create 拆成两笔 tx 提交 → 领本金那笔必拒 | NWT |
+| **配置级** | 不改代码, 改【烤入常量关系】 | "靠记得配对的 deploy 义务" | cutoff 顺序配反 → 同一攻击必 LAND（"有牙"双格: 正序 BUST / 反序 LAND） | NWT |
+- 🔨 **判据**: 只做语句级变异 = 对"该写没写"（交易级）与"配错关系"（配置级）**结构性失明**。承重构造的验收**三层都要**。且"有牙"格（反配→攻击 LAND）比"正配→攻击 BUST”格更关键——它证防御的牙是真的、非摆设。
+- 关联: 语句级=[[reference-a-self-consistent-require-can-look-like-the-binding-and-outlive-it]]；交易级/配置级=本 session 新增（缺失约束 + 隐含配对义务）。J2-BFAMILY-THREE-LAYERS。
