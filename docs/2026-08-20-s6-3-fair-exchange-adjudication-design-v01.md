@@ -289,6 +289,12 @@ refund **不**表述为"查无 AUTHORIZED 记录"，而是**单一活状态 UTXO
   - `T_react_min`/`T_react_refund`/`T_reveal` 的 covenant enforce（lockTime 比较）+ leg-role/资产流细化由 J1（silverc 域）落。
   - 🔴🔴 **验收必含【提前 claim 必拒】阴性格（J2·否则测试全绿盖住 fail-OPEN）**：若 NOT-BEFORE 闸因量级写错静默退 DAA 模式（如秒级 delta `3600` 被当 DAA `3600 << 7.9e7` ⇒ 条件恒真），闸**形同不存在**，而**正例（合法方等够时间再 claim）照样 PASS** ⇒ 全绿假象。⇒ **判别力只在阴性格：故意在 `T_react_min` 前提交 reactive claim ⇒ 必须 REJECT**（接 §846181e4 验收设计 §3 族 A）。参照 silverscript 官方 `TUTORIAL.md:495` 反例 `require(tx.time >= 1640000000)`（1.64e9 < 5e11 ⇒ 被当 DAA 而非墙钟秒）——**官方示例本身就落在错模**，实现极易照抄。
   - 🔴 **F_reveal 取值须有协议出处（NWT②）**：`F_reveal`（reveal 链 finality 安全预算）是 Kaspa/GHOSTDAG 协议层**概率性参数**，不是本卡随手定的数。⇒ 仓里若有既有 canonical "多少确认算 final" 常量（settlement/payout 逻辑里）**必复用它**；若无，`F_reveal 取值依据` **单立一格验收判据**，不得悬空。🔴 **偏小 ⇒ 同一盗窃只是变成"需要更深 reorg"而非被消除**（Tier-2 = conditional on 该 bound 的措辞正为此）。
+    - 🔴🔴 **但 canonical 常量是【深度】不是【墙钟】，换算不稳（J2 实测·承重）**：仓里既有 `REORG_SAFE_MIN_DEPTH=20`（`kasia-console/src/lib/pool-shard-register.mjs:88`，出处注释 :83-87）—— 是**确认深度**，而 covenant NOT-BEFORE 用**墙钟 lockTime**。深度→墙钟换算**不是常数**：J2 实测同链同轮 DAA 增速在 **0.48–0.96/s 摆动（2×）** ⇒ 20 深度 = 21–42 秒不等。🔴 **链一慢，墙钟窗在深度够【之前】先到期 ⇒ reorg 安全没真达到 ⇒ C4-FINALITY 盗窃仍可能**。且有未解矛盾（代码里 BPS 假设陈旧 vs DAA-score 增速≠出块速率，未定哪个）。
+    - 🎯 **⇒ C4-FINALITY 落地前单立验收格「深度↔墙钟换算：出处 + 保守取值 + 单位分叉裁定」**（J2 建议，Bettor 排）：
+      - (i) 定 DAA-score 增速 vs 出块速率的关系（消歧那个矛盾）；
+      - (ii) F_reveal 若走墙钟 ⇒ 用**最慢合理速率的保守上界**（over-estimate 墙钟，使最慢时 20 深度仍达到），并给速率下界的出处；
+      - (iii) **单位分叉裁定**：NOT-BEFORE 到底 enforce 在**墙钟 lockTime**（需上面保守换算）还是**DAA-score lockTime**（深度直接、天然 reorg 单位，但落回 DAA 模式、不吃 5e11 墙钟地板）——两条各自的 fail-closed 形态不同，必须选一条并冻死，不能悬空。
+      - ⚠ 未定此格前，F_reveal 是**没人验证过的假设**，不得烤进 covenant。
   - 🔴🔴 **T_reveal 必须锚 covenant 可读的【链上量】，非广播/mempool 时刻（NWT③·否则整条规则不可 enforce）**：covenant **读不到**"reveal tx 几点进 mempool"（链下观测）。若 `T_reveal` 被实现成 mempool/广播时刻 ⇒ NOT-BEFORE 在 covenant 侧**根本无法机械验证 ⇒ 退回 P-SAFE-1 本要消除的不可判定谓词**。⇒ 钉死：`T_reveal` 及 `T_react_min` 的时间比较**只用 reactive 腿自己链上可读的时间量**（该 spend 所在上下文的 tx.time / 区块时间戳），`F_reveal` 作为**预注册常量**吸收 reveal 链的 finality 不确定性——reactive covenant **不读也不假装读** reveal 外链的实际状态（这正是 §17.3 "共同观察域仅 ops 证据、非 covenant primitive" 的同一条：跨链态不进 covenant 判定）。
   - ⇒ **C4-FINALITY 与 C4-ENTROPY、s-secrecy 并列第三条 Tier-2 硬前置**：s 强随机 ∧ s 未私泄 ∧ **public reveal 在 reveal 腿越过冻结 finality-risk 窗前不能授权对手本金花费**。
 - **弃委员加密 A**：加信任-保密角色、弱化 §8 verifiable-attestation vs trusted-oracle、破法更多（aggregator/distributor 泄、门限联盟泄、log/backup/RPC 泄、误前发、误投）+ 可用性/审查另一条 liveness。若将来仍要委员加密 A，须显式把委员保密列为 Tier-2 信任假设（非监控项）。
