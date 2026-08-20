@@ -9618,3 +9618,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **盯全员状态**: J1 活跃(B 席完·free)· J2 活跃 channel(§6-3 贡献完·free)· NWT 稍静· KANet-UI 无法与本机 git 身份区分(探活中)· Codex 处理 v0.6· Bettor 协调。
 - **并行派工(报 ETA)**: **J1** 编译器整树归档(8065184 + 确定性重建, Codex durability 硬要求; 解 A provenance 闸)· **J2** 设计+备 checkSigFromStack 最小 E2E(合法-PASS/改一位-REJECT, pinned 8065184, 真 runtime 非 debugger-surrogate; 解 A runtime 闸; 链上跑另闸)· **NWT** 红队 E2E 设计 + 归档重建确定性· **KANet-UI** 探活 + logSafe backlog· **Bettor** A2 receipt-绑定 spec(Codex"§6-1 receipt 字段唯一决定后继")+ 盯全 + 收 Codex v0.6 报 Owner A/B。
 - 边界: 归档/E2E-设计/红队/spec = 报备层可推; 生产实现/部署/链上 money-path = 停报备等 Owner。
+
+### (591) 2026-08-20 · Bettor 并行任务落: §15 A2 receipt→唯一后继绑定 spec(答 Codex "verified receipt 唯一决定 successor, host 非权威")
+- 写 §15: 冻结绑定链(全 covenant 链上 enforce): ①验 attestation(checkSigFromStack×N+threshold+merkle 成员对 baked 根)②算 successor_commit=H(canonical(receipt 绑定字段 {network/version/session/policy/outcome/evidence/committee_epoch/replay})), canonical 复用 §14 B 冻结字节法(A/B 共用一处防漂移)③introspection(tx.outputs[].value/scriptPubKey, TN12 有·PoolSpine/PayoutShard 先例)enforce 恰一后继 + scriptPubKey==successor_commit(链上派生非 witness 喂)+ value==确定性分配 ④任何替代后继过不了 introspection ⇒ covenant 拒。
+- **host builder 非权威**: host 只拼 tx, enforce 唯一后继的是 covenant introspection(host 拼错=被链上拒)= 消同机绕过面(§10§3)。E2E 必含变异后继全 REJECT。
+- 这是 Codex A 闭合的一个必答项(除 e2e/编译器归档外)先落设计。并行进行中: J1 归档/J2 E2E/NWT 红队/我 spec。

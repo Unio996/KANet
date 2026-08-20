@@ -1,6 +1,6 @@
 # D-012 §6-3 fair-exchange 设计卡 v0.1 — Exchange 裁决角色（报备层 · 零生产改动）
 
-> **Status**: DRAFT **v0.6** · Bettor 2026-08-20 主笔 · 设计层, 零生产码。**v0.3 = Codex MSG-251/f5fce55b(方向 GREEN); v0.4 = 冻结两条 MUST-FIX**——**A**(J1+J2 实读 PayoutShardV2.sil 真码定机制: close_attest 4-of-5 链上验 + merkle 成员证明对 baked 根 + 确定性后继 + 脆弱钉死; 授权根=§7 闸)· **B**(诚实降级 = bounded-loss 协调结算 + 授权原子性, 非原子公平交换, 承 Codex 退路)。见 §13。
+> **Status**: DRAFT **v0.6**（+§15 A2 receipt→唯一后继绑定 spec, Bettor 并行） · Bettor 2026-08-20 主笔 · 设计层, 零生产码。**v0.3 = Codex MSG-251/f5fce55b(方向 GREEN); v0.4 = 冻结两条 MUST-FIX**——**A**(J1+J2 实读 PayoutShardV2.sil 真码定机制: close_attest 4-of-5 链上验 + merkle 成员证明对 baked 根 + 确定性后继 + 脆弱钉死; 授权根=§7 闸)· **B**(诚实降级 = bounded-loss 协调结算 + 授权原子性, 非原子公平交换, 承 Codex 退路)。见 §13。
 > **定位**: §6-1 Oracle 权限边界契约(all-review-passed 冻结, target `154291d8`)的**第一个复用消费者**; DECISIONS.md §6 执行序 item3 = "从零造裁决角色, 非接现成接口"。**造它同时是对 §6-1 冻结的反向审计**(第一个消费者暴露契约漏没漏)。
 > **依据**: Codex `RESPONSE-20260731-…-ADVERSARIAL-CONCLUSION`(规定卡的 11 节 + 3 打回)· §6-1 冻结稿 `docs/2026-08-03-oracle-skill-interface-permission-boundary-freeze-design.md` §4 · KB `architecture/zk-track-c-verified-trustless-settle.md` + `00-position/northstar-open-collaboration-protocol.md` · 现有 exchange 码(exchange-machine.js / api/exchange.js:747-796 / exchange-machine.js:563)。
 > **权分**: Bettor 设计 × J1/NWT 审 × Codex 红队。**真实 roster**(J2/NWT 独立性未证实但内容可用; J1+Codex 确证独立)。
@@ -192,3 +192,16 @@
 - 方向 GREEN(Codex 多轮)· §8 PASS(收窄)· A 机制冻+E2E-gated · B 冻(默认 bounded-lock+auth-atomicity, no-theft C1∧C2∧C3 子集, 单位双闸地板, 不等式)。
 - **未闭/硬闸(明列)**: A2 e2e(runtime)· 编译器整树归档 · §7 quorum 独立性(授权真金前) · A1/A2 里 A1 未选(本 v0.5 走 A2 receipt 路)· rotate/revoke 连续性(out-of-scope)。
 - **交 Codex v0.5 终审**(其要的"一个冻结 A + 一个冻结 B")。**无实现/部署/money-path 授权。**
+
+## §15 A2 receipt → 唯一后继 绑定 spec（Bettor 并行任务·答 Codex "verified receipt 须唯一决定 successor state, host builder 非权威")
+
+> Codex(18e2725b/4c14c1f7)反复要: A 闭合还须证【验证过的 §6-1 receipt 字段唯一决定后继 state】—— 否则 host builder 读一行 attested row 编个 covenant = 非权威(§10§3 同机族)。本节把"唯一决定"写成 covenant 链上可机械 enforce 的形态。
+
+**冻结的绑定链(全部 covenant 链上 enforce, 非 host 侧)**:
+1. **验 attestation**: N×`checkSigFromStack`(对 receipt digest)+ `require(validSigs>=threshold)` + 委员集对 baked 委员根的 merkle 成员证明(§14 A)。
+2. **算唯一后继承诺(链上确定性)**: `successor_commit = H(canonical(receipt 绑定字段))`, 其中 canonical = §14 B 的长度前缀冻结序列化(同一冻结字节法), 绑定字段 = {network, version, session, policy, outcome, evidence_commit, committee_epoch, replay}。**同一 receipt → 同一 successor_commit(位确定)**。
+3. **introspection enforce 唯一后继**: covenant 用 `tx.outputs[]` introspection(TN12 有 `tx.outputs[i].value/scriptPubKey`, 见 `reference-silverscript-real-capabilities`; PoolSpine/PayoutShard 已用同类)要求: **恰一个后继 output** 且 `tx.outputs[k].scriptPubKey(或 baked-state) == successor_commit`(链上从验过的 receipt 派生, 非 witness 喂)且 `tx.outputs[k].value == 确定性 payout 分配`。
+4. ⇒ **任何替代后继**(改 state / 改 value 分配 / 多加 output / 少 output)**过不了第 3 步 introspection require ⇒ covenant 拒 ⇒ 没有合法花费能产出非-canonical 后继**。
+- **host builder 非权威**: host 只【拼】tx; **enforce 唯一后继的是 covenant 链上 introspection**。host 拼错后继 = 被 covenant 拒(不是被 host 自己的检查拒)= 消除"读 row 编 covenant"的同机绕过面。
+- **E2E 必含(接 A runtime 闸)**: 正确后继 → PASS; 变异后继(改 successor_commit 任一字段 / 改 value 分配 / 加/减 output / witness 喂非派生 state)→ 每条 REJECT。
+- **依赖**: silverscript introspection(已用先例)+ §14 B 的冻结 canonical 字节法(successor_commit 跨实现一致)。⇒ **A 与 B 的冻结字节法共用一处**(不重复定义, 防漂移)。
