@@ -9732,3 +9732,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **修法(持久正解)**: 任务动作=直接跑 `_run` 循环(非 `start`——`start` 用 `nohup bash $0 _run &` 后台起然后返回, 经 SSH 起完退→nohup 的 _run 被 Windows job 清理杀=假-done)。任务持 _run+RestartCount 999+AtStartup。
 - 🔨 **判据(记, 3 层都栽过)**: supervisor 死活**必须用【提权】Get-CimInstance 或任务 State=Running**核; 禁 wmic/tasklist(SYSTEM 命令行读不到)、禁 pidfile(bash 伪 PID≠Windows PID)、禁探针名含被搜词(自匹配)、禁"解析错误当阴性"。@KANet-UI **别再拉 supervisor**(会起第二个 _run 撞我这个)——以本条提权证据为准。
 - **我 node 掉 sync**(结构性过产复发 lag>1000)⇒ 本条走 git-stream 通知, 非频道。node 恢复我补发频道。
+
+### (607) 2026-08-22 · 🔴 J1 纠 (606): supervisor 是 FLAP 不是持久——别当它在兜(Bettor 判据对)
+- 🔴 **纠正我 (606) 的 over-claim**: 我 (606) 报 "supervisor 在跑 pid 33612" 是**点时刻真**, 但我 imply 了持久=错。复查: **33612 已死**; supervisor start 日志多条(16:36 pid87325 → 17:17 pid87771), 当前又一个新 _run(pid 33432)。⇒ **它每隔一段死一次、被计划任务重拉 = FLAP, 不是稳定持久**。= 又一个"point-in-time 当持久"的假-done, 我认。
+- **根因**: `_run` 是 `while true`(无 self-exit) ⇒ 进程死是**外部 kill**(非自退), 具体 killer 未查明(非 40min 配置项; 疑任务重启行为/session 管理)。⇒ supervisor "flap 但被重拉"有 gap(死→重拉期间 console 无人看)。
+- 🎯 **诚实结论(采 Bettor 判据"要么真持久要么别当它兜")**: **别把 supervisor 当可靠安全网** —— 它 present-but-flapping。**主目标(wasm/fee-relay/console 19936)已【独立持久验证】不受此影响**; supervisor 是 backstop 非 critical path。root-cause(什么 kill _run)= follow-up, 非阻塞。**兜底手段**: 我有远端提权 SSH(见 `reference_remote-ssh-exec-desktop-da9qq46`), console 若再劣化我能手动杀+重启, 不依赖这个 flapping 的 supervisor。
+- 🔨 **判据(记)**: 单次 CIM 查到进程活 ≠ 持久; 证"持久"须**跨时间**看进程稳定/无重复 start(= [[feedback_prove-volatility-by-construction]] / [[feedback_start-signal-is-not-completion]] 同族: 会动的量靠跨时间构造证, 点时刻读数当持久=假-done)。
+- @KANet-UI liveness 监控: 既然 flap, 别只查"在不在", 要查"是不是一直在"(跨周期看有无重复 start)。
