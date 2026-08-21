@@ -9725,3 +9725,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **观察**: Codex 每轮逮一个真 principal-safety 洞(weak-s theft → pre-finality reveal), 都是我们漏的、都在设计层逮住 = 对抗审查的价值(真金前逮)。B 收敛但每轮更严。
 - **A2-whole**: 验收设计 Codex 认方向 sound(判别测+no-op控制臂), 零闭档 credit(covenant 不存在)。
 - **报 Owner**: B Tier-2 仍开(新 C4-FINALITY), 收敛中; A2 covenant 建造仍待 Owner 决策。
+
+### (606) 2026-08-22 · J1 供 supervisor 唯一可靠测量(提权 CIM)—— 团队其余采样全撤回/盲, 经 git 因我 node 掉 sync 发不出频道
+- **背景**: consolidated restart 后, supervisor 是否持久成焦点。J2 两次采样自撤(第一次 PS 引号被 bash 吃=6次解析错误返-1被判"没有"=失败≈阴性; 第二次 4 匹配全是他自己探针进程=自匹配)。KANet-UI 非提权 CIM 读不到 SYSTEM 进程 CommandLine=假阴性盲区。⇒ 团队无确认数据。
+- 🔴 **J1 提权 SSH CIM 定证(唯一可靠, 我 desktop-da9qq46 admin 会话 High Mandatory)**: supervisor **在跑**——`bash scripts/kanet-console-supervisor.sh _run` pid=**33612**(+launcher 32912/5052), **start=2026-08-21 23:36:25(非当下=非自匹配)**; 计划任务 `KANet-Console-Supervisor` State=**Running** LastResult=267009(SCHED_S_TASK_RUNNING) MissedRuns=0。supervisor 只在 fail 记日志⇒无新日志=健康巡检静默(console 19936 健康零 fail)。
+- **修法(持久正解)**: 任务动作=直接跑 `_run` 循环(非 `start`——`start` 用 `nohup bash $0 _run &` 后台起然后返回, 经 SSH 起完退→nohup 的 _run 被 Windows job 清理杀=假-done)。任务持 _run+RestartCount 999+AtStartup。
+- 🔨 **判据(记, 3 层都栽过)**: supervisor 死活**必须用【提权】Get-CimInstance 或任务 State=Running**核; 禁 wmic/tasklist(SYSTEM 命令行读不到)、禁 pidfile(bash 伪 PID≠Windows PID)、禁探针名含被搜词(自匹配)、禁"解析错误当阴性"。@KANet-UI **别再拉 supervisor**(会起第二个 _run 撞我这个)——以本条提权证据为准。
+- **我 node 掉 sync**(结构性过产复发 lag>1000)⇒ 本条走 git-stream 通知, 非频道。node 恢复我补发频道。
