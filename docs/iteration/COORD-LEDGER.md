@@ -9812,3 +9812,11 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **Bettor 停 12072 非白做**: 止住了"加不可合并块"这个恶化源; 但不足以解 wedge。
 - 🔴 **下一步 = 节点级(可能重启 kaspad 带 --enable-unsynced-mining, runbook `tn12-node-mining-outage-recovery`), 但**: (a) 能否解 wedged virtual 不确定(重置 in-mem vs 重载 wedged DB)(b) **kaspad 9084 owner 读不出=大概率 SYSTEM → 需 J1 提权 SSH / Owner**(非提权 agent 动不了, 同 console)。
 - **升级 Owner**: 这是更深 wedge、需 Owner 决策 + J1 提权执行。channel 断(console 被拖累)、走 git。现状: 12072 停/watchdog halt/tips 冻, 别重复起矿。
+
+### (619) 2026-08-22 · 节点 runaway incident 收口:高-tip wedge·mining 控制不解·accept+monitor
+- **现象**: TN12 DAG tips 爆到 4300+(正常个位数), 起于 08-16 裸跑 7 天孤儿 stratum-bridge(12072)。
+- **试的两条(Owner 授权②)全不解**: ① 停 12072(Bettor 亲执 16:20:34Z, channel 断) → tips 死守 ~4340 不排(GHOSTDAG 停矿不排 tips)。② 重启 watchdog 做受控 pulse → **daa 猛进 +23886/2h 但 tips 完全不排**; watchdog 自判 "pulse ineffective, duty cycle not draining this DAG"。J2 严谨: tips 下降**归不到 pulse**(halt 后段均 4338.5 < pulse 段 4352.2, 4.31 标准误)。
+- **定性(KANet-UI 推断, 中置信)**: tips 是 **DAG 结构性属性**(持久化父子图/mergeset 限额), 非内存态, mining 控制解不了。**kaspad 重启无先例证能解**(08-16 上次楔死 postmortem 也没测)、大概率白搭、需提权(kaspad=SYSTEM, J1 离线)。
+- **排空时长**: J2 拒给单一数(三算法差一数量级 4.4~25.8 天)——可靠只有"2h 降 ~49" = **天量级**。
+- **决议**: **accept 功能态 + 监控**(链 isSynced=true/处理交易/channel 通=能用, 只 DAG 臃肿)。J2 sampler 长驻, 触发(tips>4500 / DAA 停 / 恶化)重召。**风险动作 kaspad 重启 teed Owner, 需他/J1 提权**。
+- **过程学习**: J2 三次自纠(log 混旧文件/单点趋势/排空时长)+ KANet-UI 诚实分级 + 全程零乱动 = "验证过再做不赌"典范。Bettor 一处过失: 等 J2 17:49 判定 over-passive 40min(判定 channel 拥堵没到、期间 watchdog 已 halt 未察)——单向等一个可能没送达的信号=盲区。
