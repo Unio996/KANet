@@ -24,7 +24,7 @@ v0.7 结算 daemon 每 tick 只处理 1 盘、而 ~126 盘在等，原因**不�
   + 状态属 SQL 允许集 & 无 settle_txid                116   筛掉 5
   + zk_native 排除                                   100   筛掉 16（设计如此，走 ZK 管线）
   + deadline_daa + 60 <= currentDaa                   79   筛掉 21（deadline 未到，正常）
-daemon 每 tick 实际处理                                 1   （日志 4758/4765 tick 均为 "1 ripe"）
+daemon 每 tick 实际进 ripe                              0   （当前活日志 3 小时内 tick 行 0 条、settling 行 0 条）
 ```
 
 **79 进了循环，只有 11 出现在 `[pre-gate]` 日志里。** 逐条重建 `:611-635` 的每个出口后：
@@ -37,9 +37,19 @@ daemon 每 tick 实际处理                                 1   （日志 4758/
 | `:632` UMA 退避 | 1 | 无 |
 | `:623` MTP 闸 / `:612` lease / `MAX_PER_TICK` 截断 | **0** | — |
 
-🔴 **`MAX_PER_TICK=20`（kanet.env:163）不是瓶颈** —— 日志里 4758/4765 个 tick 都只有 1 ripe，远未触顶。
+🔴 **`MAX_PER_TICK=20`（kanet.env:163）不是瓶颈** —— 当前 ripe 恒为 0，连一个 slot 都没用上。
 
-🟡 **未解**：重建得出「9 盘应进 ripe」，实际日志恒为 1。差 8 盘。`_leases` 是内存态、本次读不到，
+> 🔴 **本节数字曾被写错，留痕（2026-08-22 当日更正）**：初稿写的是「每 tick 处理 1 盘 / 4758 tick 均 1 ripe」。
+> 那是 `grep -h logs/*.log` **把三个月的日志文件混在一起**算出来的 ——
+> `logs/` 下有 2026-07-07 的 5.8GB `console-num2bin-fix.log`、07-15 的 bisect 日志、08-21 的 boot 日志，
+> 而**日志行只有 `HH:MM:SS` 没有日期**，混出来的数**看着完全正常**（11 gated、1 ripe 都是合理值）。
+> 🔨 **判据：先 `stat` 确认哪个文件是活的（本仓是 `logs/console.log`），再 grep。**
+> 更正后主结论**更强**：不是处理得慢，是 **0 处理**。
+
+**最后一次成功结算**：`ext-pool-v07-1784316481740-85fit`，`updated_at = 2026-07-20 07:35:02`，
+有 `settle_txid`、`protocol_status=completed` ⇒ **它就是「结算输出从 07-20 起为零」那一刻的最后一盘。**
+
+🟡 **未解**：重建得出「9 盘应进 ripe」，实际恒为 **0**。差 9 盘。`_leases` 是内存态、本次读不到，
 **未查清前不声称重建与实际等价。**
 
 ## §3 那 68 盘是什么（实测，非推断）
