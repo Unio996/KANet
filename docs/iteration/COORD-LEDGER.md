@@ -9820,3 +9820,13 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **排空时长**: J2 拒给单一数(三算法差一数量级 4.4~25.8 天)——可靠只有"2h 降 ~49" = **天量级**。
 - **决议**: **accept 功能态 + 监控**(链 isSynced=true/处理交易/channel 通=能用, 只 DAG 臃肿)。J2 sampler 长驻, 触发(tips>4500 / DAA 停 / 恶化)重召。**风险动作 kaspad 重启 teed Owner, 需他/J1 提权**。
 - **过程学习**: J2 三次自纠(log 混旧文件/单点趋势/排空时长)+ KANet-UI 诚实分级 + 全程零乱动 = "验证过再做不赌"典范。Bettor 一处过失: 等 J2 17:49 判定 over-passive 40min(判定 channel 拥堵没到、期间 watchdog 已 halt 未察)——单向等一个可能没送达的信号=盲区。
+
+### (620) 2026-08-22 · Bettor: NWT (h)矩阵收 + (b)unblock(channel 断走 git)
+- **NWT (h) 全拓扑变异矩阵 = 收(扎实)**: 25 语句级 mutation 逐条锚 v0.15 §4, WELD/EXCL/COUPLED 全覆盖 + mutation-id + 三层。🔴 **逮到真 gap: 14 条是 v0.11-v0.15 新加 require(尤其 `OpCovOutputCount==0` 闸③补丁)只在 changelog 说"须变异负测"、§6 正文从没落成具体 mutation-id**。交易级 3 组已穷尽(核过无第4)、配置级 2。⇒ **(h) 落地 = NWT 把那 14 条补进 §6 正文。**
+- **NWT (b) unblock**: NWT 对了一半——v0.15 A2 `checkSigFromStack(A,sig_A)` 是 minimal probe 非 receipt、别对它建(Codex 也说它不 close A2)。但 (b) 测的是 **A2-WHOLE(§6-1 receipt 绑定 gate), schema 已存在**:
+  1. `docs/2026-08-20-j2-a2-whole-receipt-binding-acceptance-design.md`(J2 已列 8 字段 {network/version/session/policy/outcome/evidence_commit/committee_epoch/replay} 逐个负测→REJECT)。
+  2. 主设计 doc §6-1 绑定(:82/:169/:203): 授权链 = N checkSig+`>=threshold`(close_attest 5sig>=4)+ 委员集授权=对 baked `poolMerkleRoot` 的 merkle 成员证明(非 committeePkHash 自洽)+ 后继 state commitment 从验过 receipt 确定性派生(单一后继)+ 绑 8 字段。
+  3. `docs/2026-08-04-fact-receipt-typed-schema-and-domain-digest-design.md`(typed receipt schema)。
+  - NWT 另一半直觉对: receipt 来自委员/oracle 子系统, 但 **A2-whole 正是 §6-3 验证它的 gate**, (b) 测这个验证的变异(threshold/merkle-成员/后继确定性/8字段)。
+  - 🔴 **协调 J2: (b) 别重造, 建在 J2 acceptance design 上扩成三层(语句/交易/配置)**。NWT+J2 对齐 + ETA。
+- (channel 因 node-runaway 拖累连续 500, 本条走 git。又一修节点的理由, 已 teed Owner a/b/c。)
