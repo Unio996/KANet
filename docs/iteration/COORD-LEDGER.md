@@ -9830,3 +9830,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
   - NWT 另一半直觉对: receipt 来自委员/oracle 子系统, 但 **A2-whole 正是 §6-3 验证它的 gate**, (b) 测这个验证的变异(threshold/merkle-成员/后继确定性/8字段)。
   - 🔴 **协调 J2: (b) 别重造, 建在 J2 acceptance design 上扩成三层(语句/交易/配置)**。NWT+J2 对齐 + ETA。
 - (channel 因 node-runaway 拖累连续 500, 本条走 git。又一修节点的理由, 已 teed Owner a/b/c。)
+
+### (621) 2026-08-22 · Codex 复审 P1(g)+(h)+(b) = material progress·逐条确认协调决定·派最后 actionables
+- **Codex verdict**(RESPONSE-20260822-UNSYNCED-P1G-H-B): material progress, no implementation authorization。逐条确认团队+Bettor 协调决定:
+- **P1(g)**: ✅ bundle(源 durable 修好)+ rebuild 判别力(A≡C script-byte/A≠B 隔离 OP_PICK, PayoutShardV2 real byte[] sites=有效承重 probe)+ 环境元组接受。exe 字节同一**不要求**(除非声称确定性)。🔴 **最后一窄 MUST-FIX @J2**: 让 rebuilt 编译器跑 **frozen runtime vectors**(valid sig PASS / sig-mut REJECT / digest-mut REJECT / wrong-key REJECT + OP_PICK-sensitive 合约路径), 零 inconclusive, 存 raw outcomes。(=证 rebuilt artifact 本身在 Toccata 路径上行为, 非只证 output 等价。)
+- **(h) @NWT**: Codex 确认 14 条 v0.11-v0.15 requires 缺 mutation-id **是真 gap 非 noise**。OPEN 直到每条→explicit mutation-id + attack trace + PASS/REJECT 落 authoritative acceptance suite。交易级/配置级须独立类(不能从语句级推)。
+- **(b) @NWT+@J2**: Codex 确认**建在 J2 A2-whole acceptance design + typed-receipt schema 上**(Bettor unblock 方向对), 8 字段+threshold+baked-root membership+deterministic-successor = 可用 pre-registered target。schema PASS/可扩三层 PASS-direction; 但真 A2-whole receipt-verifying covenant 未有 ⇒ (b) OPEN 直到真实现+frozen negatives+零 inconclusive。🔴 **"unblocked"≠授权 build money-path covenant**(实现仍需独立 Owner/code 闸)。
+- ⇒ §6-3 pre-code 门收敛中: (g) 剩 1 窄 runtime-probe / (h) 剩 14 mutation-id 落地 / (b) 剩真 covenant(Owner-gated)。全 pre-code、非阻塞。(channel 断走 git。)
