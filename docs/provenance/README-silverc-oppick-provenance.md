@@ -9,7 +9,9 @@
 - 所在分支: `j2-oppick-fix-2026-07-06` (本地 /d/silverscript)
 - 🔴 **remote 状态**: 未推任何 remote(`git branch -r --contains 8065184` = 空)。上游 github.com/kaspanet/silverscript 无此修复。
 - patch 文件: `silverc-oppick-fix-8065184.patch` (SHA-256: `b92c549c496942f932364a40064b86db189c6348a8ab56a17b8d9fcd07044f6d`)
-- 编译器二进制 silverc.exe (Jul 8 build) SHA-256: `e0e9b62c086df6b6a63344cbbbd21a0d176af76c5a869826131a879ff06a2c06`
+- 🔴 **更正(2026-08-22·J2 逮出·Bettor 原记错)**: OP_PICK-**fixed** 编译器二进制 = `/d/silverscript/versioned-builds/silverc-zk-8065184.exe` SHA-256 = **`9de7f2f682bc9e50...`**(commit 8065184, 见该目录 `MANIFEST.txt`)。
+  - ⚠ **原记的 `e0e9b62c086df6b6...` 是【legacy pre-fix】那份**(`silverc-legacy-2c46231.exe` / commit 2c46231 / V1 族 pool-shard-register 用)——我当初 `sha256sum target/release/silverc.exe` 拿到的是 legacy(按设计 target/release 就是 legacy build, fixed 的版本化单独存放防覆盖, 见 MANIFEST 事故背景)。**照旧 hash 核验会核到【不含修复】的对象且不报错**(两 hash 都真、都核得过 = `reference-verification-tooling-fails-into-plausible-output` 那类坑, Codex 早警告"别拿 Jul-8 binary 当 derivation 证")。
+  - ⇒ **fixed binary 确实存在**(9de7f2f6, 有 MANIFEST), 这比原记录更强; 但它仍是【观察】非【clean-rebuild derivation 证】(Codex item5 / J2 待做)。
 
 ## 恢复法(树若丢)
 🔴 **patch 存于 KANet 仓 `D:/kanet-tn12/docs/provenance/`, 不在 silverscript 树里** —— 恢复命令必须用【绝对路径】引它, 否则从 /d/silverscript 相对路径解析不到会失败(Codex P1(g) 复审逮到原命令此 bug, 已修)。从干净机器:
