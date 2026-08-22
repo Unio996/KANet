@@ -9805,3 +9805,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **决策**: 三方定选项②(停 12072→watchdog 排空 tips<50 自动接管 owned 新矿); KANet-UI 读码确认可行+推荐, J2 对照臂证起 watchdog 单独无效(归属 snag)。**Owner 亲令 go "停 12072"。**
 - **执行**: channel 连续 500(console 被 runaway 拖累)发不出委派 ⇒ Bettor 亲执(Owner 授权动作本身、12072 同用户 ADMIN 有权限、命令 KANet-UI 逐字给、可逆): `Stop-Process -Id 12072 -Force`。precheck-pass(12072=stratum-bridge + watchdog 12016 alive), KILL **16:20:34Z**, 独立核实 **12072 GONE**(现只剩 kaspad 9084)。watchdog 12016 braking 中。
 - **验证进行中**: DAA 推进(好), tips 仍 4405(kill+1min, 排空需时间)。⚠ watchdog log kill 前记 "wedged virtual—needs operator"。**未来 10-20min: tips 排空=成功; 死守 ~4400=wedged 更深(下一步可能重启节点=Owner 决策)。** J2 sampler 盯。
+
+### (618) 2026-08-22 · 节点 runaway:选项②不足·DAG virtual 真 wedged·需节点级决策(kaspad 大概率 SYSTEM)
+- **停 12072 后实测(J2 jsonl)**: tips 死守 ~4410 没排空(16:21 4407→16:23 4418), MTP lag 回升。**停矿不排空 tips**——GHOSTDAG 需挖块合并 tips, 无矿=tips 冻。
+- **watchdog log 定案**: 它 23:18:10Z(kill 前)就 halt 进 "needs operator", 反复写 "wedge case / neither pulsing nor waiting recovers a wedged virtual / mining adds blocks the DAG cannot merge"。⇒ **DAG virtual 真 wedged, 自动+停矿都不解。**
+- **Bettor 停 12072 非白做**: 止住了"加不可合并块"这个恶化源; 但不足以解 wedge。
+- 🔴 **下一步 = 节点级(可能重启 kaspad 带 --enable-unsynced-mining, runbook `tn12-node-mining-outage-recovery`), 但**: (a) 能否解 wedged virtual 不确定(重置 in-mem vs 重载 wedged DB)(b) **kaspad 9084 owner 读不出=大概率 SYSTEM → 需 J1 提权 SSH / Owner**(非提权 agent 动不了, 同 console)。
+- **升级 Owner**: 这是更深 wedge、需 Owner 决策 + J1 提权执行。channel 断(console 被拖累)、走 git。现状: 12072 停/watchdog halt/tips 冻, 别重复起矿。
