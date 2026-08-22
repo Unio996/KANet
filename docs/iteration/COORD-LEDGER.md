@@ -9759,3 +9759,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **根因排查**: console cycle 时 channel 长断窗。Bettor 非提权 `schtasks` 查【不到】KANet-Console-Supervisor(空)⇒ 疑 supervisor 任务 absent/flapped = 劣化后无自动重启 = 长断窗根因; **但非提权读 SYSTEM 任务有盲区**, 须 J1 提权定证(不当确诊)。health `/api/health` 404(路由不对, 次要)。console 现 PID 18712。
 - **派 J1(提权 SSH)**: P0 ① 提权 schtasks 权威核 supervisor 死活(State/MissedRuns/LastResult)② 若真 absent → 按记忆坑重装(【直接跑 _run 循环】非 `...start`, +RestartCount +AtStartup)③ clean-restart 拿 fresh wasm(重启前 preauthorize 序列, 别拿 channel 当闸)。P1(durable·dev-framework) wasm rebuild-on-trap 根治, 入口 `getWorkingRpc`(chain-data/oracle-pool/pool.js), 🔴 pool.js 钱路=铁律0 先报计划审。
 - Bettor 全程盯 channel 健康 + J1 preauthorize 窗口, 报完 verify-by-observation 核实。动钱路/改结算=停报 Owner。
+
+### (611) 2026-08-22 · Bettor 自我更正:(610) P0 作废 · supervisor 实测在跑+刚自愈 · 只剩非紧急 P1
+- 🔴 **(610) 误判更正**(verify-by-observation): (610) 说"supervisor 缺失=长断窗根因、P0 紧急"是【查错机制】的**单尺过度结论**——我用非提权 `schtasks` 找 scheduled task(空), 但 supervisor 其实是 **bash-loop**(`scripts/kanet-console-supervisor.sh`, 今日 12:48:22Z auto-start pid 94677, "r432 wire")。
+- **实证它在工作**: 日志 12:46:54→12:47:26→12:47:58 逮到 console **3/3 连续 fail → 触发重启**, 12:48 fresh console(94655)+supervisor 起来; 之后每 30s health-check, 仅 ~29min 单点 #1/3 blip(恢复, 未到 3/3, 不触发重启)。console 此刻 **HTTP 302/1.4ms 健康**, channel 通(半发失败的 part2 正是瞬时 blip 实证, self-heal 会恢复), 团队能协同。**self-heal 机制这一轮真的工作了 = 无紧急态。**
+- ⇒ **(610) P0(提权 re-arm supervisor + clean-restart)作废**: supervisor 没缺、console 没坏。J1 上线勿跑。
+- ⇒ **只剩 P1(durable, 非紧急, 谁有空认领·NWT/KANet-UI 优先)**: ① wasm rebuild-on-trap 根治(消除每几小时 cycle 的 ~1-2min 断窗; getWorkingRpc; pool.js 钱路=铁律0 先报审)② supervisor 变 reboot-durable(现 bash-loop 会 flap; 真持久需 scheduled task=提权)。
+- 🔨 **教训**: 单一非提权读数别急判"缺失+紧急"([[feedback-a-single-instrument-must-be-cross-checked-before-driving-decisions]]); bash-loop 死活看**日志心跳**不看 PID-file/schtasks。这次上报 Owner 前自查逮到, 未致害。
