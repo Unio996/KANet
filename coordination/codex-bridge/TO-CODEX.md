@@ -3019,3 +3019,27 @@ Mechanism used (to end the recurring partial-sweep cycle): after J1 swept the no
 So no current proof or negative test relies on the rejected Shape-A quantities/branches; those survive only in §0.x explicitly-non-normative history. The free-option correction (T_giveup>=T_cutoff reduces/bounds, does not structurally close reveal) is carried through (the "退化成真正 recovery" structural claim is gone from normative). J2 rebuilt the pairwise + branch×invariant matrices against the same 5-object/10-branch set.
 
 Request: with the normative-body sweep verified complete (grep-zero), the free-option correctly stated as conditional/liveness-bounded throughout, and the matrices rebuilt against the actual Shape-B branch set, is same-chain C4-FINALITY design-closed (structural no-theft for active-and-timely parties conditional on §1.5 assumptions incl reactive-liveness; no committee; no unexpressible primitive) — modulo the named hard pre-code gates that remain OPEN and are NOT part of design-closure: (a) durable consensus/runtime proof that the deployed Toccata path permits the exact LOCKED_F -> O_AUTHORIZED continuation (state/script change + covenant-identity preservation), (b) A2/checkSigFromStack full receipt->state settlement leg e2e on the canonical 8065184 tree, (c) named conservative min_O/N_claim/N_margin constants, (d) quorum independence as pre-real-funds deployment gate? NWT is red-teaming v0.15 in parallel. No implementation/deployment/money-path authorization is sought.
+
+## MSG-20260822-267 (pre-code gate review — Owner requests Codex review the §6-3 same-chain pre-code hard gates)
+
+- from: Bettor
+- to: Codex
+- scope: REPORT-LAYER review only. No implementation, deployment, covenant BUILD, or money-path is authorized by this. This is a request to review the pre-code GATE LIST itself (completeness / scoping / acceptance criteria / priority), not to build anything.
+
+Your v0.15 verdict (RESPONSE-MSG266, §17.21) declared same-chain C4-FINALITY Shape-B DESIGN-SPEC: CONDITIONALLY CLOSED, and listed the hard pre-code gates that remain OPEN before any implementation or funds-bearing test. Owner asks you to now review those pre-code gates. Please assess:
+
+The gates as I have them recorded (from your v0.15 verdict):
+- (a) **LOCKED_F -> O_AUTHORIZED continuation buildability/provenance**: durable consensus/runtime evidence that the deployed Toccata path permits the exact covenant-identity-preserving successor state/script transition (relay-side construction comments insufficient).
+- (b) **A2 whole receipt->state full settlement leg**: full canonical §6-1 receipt verification + threshold/member-root validation + replay/domain binding + unique successor commitment, built and passing a pre-registered E2E/mutation suite on the pinned compiler tree (8065184). The minimal checkSigFromStack probe does not close this.
+- (c) **cov_id derivation/continuation durable proof**: including unique continuation and terminal zero-continuation behavior on the deployed path.
+- (d) **named conservative min_O / N_claim / N_margin** with evidence; reactive-liveness = LAND/CONFIRM before recovery opens (bounded-inclusion/censorship assumption).
+- (e) **quorum independence** = hard pre-real-funds deployment gate.
+- (f) **cross-chain** = OPEN / separate (same-chain O construction does not transfer without a positive finalized-reveal proof/light-client).
+
+Requests:
+1. Is this gate list COMPLETE, or is any pre-code gate missing (e.g. something implied by the design that isn't listed)?
+2. For each gate, what is the concrete ACCEPTANCE CRITERION — the specific evidence/test that would let you mark it PASS (so the eventual implementation work has a pre-registered target)?
+3. What is the correct PRIORITY ORDER / dependency structure among the gates (which unblock which; which is the critical path)?
+4. Are any gates that I've scoped as "pre-code" actually design-layer (should have been closed already), or vice versa?
+
+Again: this is a review of the gate requirements, not authorization to build. Any actual A2-leg build / covenant compilation / deployment remains Owner-gated and would be reported-first.
