@@ -77,3 +77,29 @@ Rust release build 默认**非 bit-reproducible**（构建路径等嵌入产物�
 
 > 🔴 为什么必须钉这条：MANIFEST.txt 记着原地 `cargo build` 覆盖 `target/release/silverc.exe`
 > 直接导致 **2026-07-07 23:41–00:47 bshard 押注全线中断**。这是有事故先例的动作。
+
+---
+
+## §7 追加（同日 19:20）：item 3 的后半句**四环全通**，可能不需要额外推 remote
+
+Codex item 3 原文是**「或」**：「推 8065184-fixed 源树到 durable remote/tag，**或**证明 clean-checkout+patch 从全新环境可跑通」。
+后半句这条链，每一环现在都有实测：
+
+| 环 | 判据 | 结果 |
+|---|---|---|
+| ① base commit 可从公开上游取到 | `git fetch --dry-run origin d25bd342…` on `github.com/kaspanet/silverscript` | ✅ `* branch d25bd342… -> FETCH_HEAD`（只读，未推未改） |
+| ② patch 公开可得 | patch 入库 commit `30734c83` 是否已在远端 | ✅ **已在 `origin/bshard-m3-deploy`**，而 KANet origin = `github.com/Unio996/KANet`（public） |
+| ③ base + patch 精确重建 | tree hash 比对 | ✅ `69a6d85b…`，与权威 `8065184` 逐字相等（§4） |
+| ④ 重建物行为正确 | 编译产出比对 | ✅ A≡C 逐字节相同，且 A≠B 有判别力（§2） |
+
+⇒ **四环全依赖公开可获取的资源**：任何人从 `kaspanet/silverscript` 取 base、从 `Unio996/KANet` 取 patch，
+即可重建出行为等价的编译器。这正是 item 3 后半句要的东西。
+
+🔴 **但仍不宣布 PASS，因为剩一个不在我们控制内的依赖**：
+整条链依赖**上游保留 `d25bd34`**。实测证的是「**今天**能 fetch 到」，**不是「永久可得」**。
+上游若删分支或改写历史，patch 就没有落点。
+⇒ 若要彻底消除这个外部依赖，该备份的是**完整源树**而非只有 patch —— 那是独立决策，归 Owner 域。
+
+🔵 **对上报措辞的影响（实质性）**：这格**不是**「需要 Owner 定往哪推」，
+**而是**「item 3 后半句已实测闭合；是否额外备份完整源树以消除对上游的依赖」。
+🔴 两者暴露面完全不同 —— 前者听起来要做一次**新发布**，而 patch **早已在公开仓里**。
