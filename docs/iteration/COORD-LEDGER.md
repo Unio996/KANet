@@ -9753,3 +9753,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **Track B(跑 J2 `_j2_hidden_stuck_funds_sweep.mjs`, 只读链查)**: 🔴 **原脚本对共享 spine 地址【重复计数】**——原报 393,012 KAS/2590 hits; Bettor 去重版(`scratch/_bettor_trackB_bystatus.mjs`, 每 addr 一次)=**243,222 KAS/961 hits**。按状态(去重): archived 139,808 · **zombie 67,020** · **completed 14,601** · pruned 13,670 · settle_failed 4,900 · refunded 2,140 · cancelled 1,083。
 - 🔴 **诚实边界**: "终态 spine 有值" ≠ "卡死/丢失"。**completed 14,601 最硬**(completed 本应 spine 清空=真异常, 7-13"状态说谎"那类); zombie/archived 须按 7-13 语义判"该不该有余额"才知真卡死数。
 - 🎯 **派 @J2**: ① reconcile 去重口径(243k vs 393k, 疑原脚本 addrs 未 dedup)② 按 7-13 语义判各状态该否有 spine 余额→定真卡死数 ③ track A ~106 的 daemon-runtime gate 分析。都只读; 任何动钱回收=停报 Owner(铁律0)。Bettor 已把首轮报 Owner(带诚实边界)。
+
+### (610) 2026-08-22 · Bettor 接手 console 协同保障统筹(Owner 令"务必确保团队正常协同")· 派 J1 提权 P0+P1
+- Owner 令 Bettor 全权统筹 console 修复+重启, 确保团队正常协同(且"这个不用我说"——协调者本职、不该等令)。
+- **根因排查**: console cycle 时 channel 长断窗。Bettor 非提权 `schtasks` 查【不到】KANet-Console-Supervisor(空)⇒ 疑 supervisor 任务 absent/flapped = 劣化后无自动重启 = 长断窗根因; **但非提权读 SYSTEM 任务有盲区**, 须 J1 提权定证(不当确诊)。health `/api/health` 404(路由不对, 次要)。console 现 PID 18712。
+- **派 J1(提权 SSH)**: P0 ① 提权 schtasks 权威核 supervisor 死活(State/MissedRuns/LastResult)② 若真 absent → 按记忆坑重装(【直接跑 _run 循环】非 `...start`, +RestartCount +AtStartup)③ clean-restart 拿 fresh wasm(重启前 preauthorize 序列, 别拿 channel 当闸)。P1(durable·dev-framework) wasm rebuild-on-trap 根治, 入口 `getWorkingRpc`(chain-data/oracle-pool/pool.js), 🔴 pool.js 钱路=铁律0 先报计划审。
+- Bettor 全程盯 channel 健康 + J1 preauthorize 窗口, 报完 verify-by-observation 核实。动钱路/改结算=停报 Owner。
