@@ -9792,3 +9792,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **实核** silverscript OP_PICK 修复: commit `8065184` **仍在**(树没被重 clone/reset=威胁未发作), 但 `branch -r --contains` 仍**空**(未推任何 remote, 承重修复仍只以未推本地分支存在=风险活)。
 - **立即 de-risk**: 捕获 durable 备份到主仓 `docs/provenance/`: `silverc-oppick-fix-8065184.patch`(1529B, SHA-256 `b92c549c...44f6d`) + README(base=`d25bd342...`, silverc.exe SHA-256 `e0e9b62c...a2c06`, 恢复指令 `git checkout base && git apply patch`)。⇒ 即使 silverscript 树丢, 修复能从主仓 patch 恢复。**铁律0.5 "无声消失"风险从此有兜底。**
 - 🎯 **J2 P1(g) 起点已备好**: durable 备份完成; 剩 Codex (g) 完整 PASS 项 J2 主攻——① 推分支到我们控制的 durable remote ② 确定性重建指令(精确 rustc/cargo toolchain)+ 重建字节级同一 silverc.exe 验证 ③ 确认无其它 local-only 未推承重修复。
+
+### (616) 2026-08-22 · 结算停摆当前态完整拼齐(三方交叉核验)· 层② = 独立钱路洞(1369 注/~31910 KAS)
+- **触发**: Owner 令"主动驱动", Bettor 派 J2 track-A ③(~106 为何不结算)runtime 分析 → 挖出完整因果链。三方交叉核验(J2 读日志 + NWT 复用 daemon gate 逻辑只读 + Bettor 查码核实 :628)。
+- **四层当前态**(非 13 天前快照, 现测): ① 93 盘主 settler 跳 bshard(设计移交非 bug, `pool-market-settler.js:627`) ② **68 盘 commingled 静默 skip**(`bshard-settle-daemon.mjs:628` `if(logicalBets>0)continue`) ③ 11 盘 unreachablePreGate(7 belowFloor+4 repeat-offender, 比 13 天前缩小) ④ 监控盲区未修(`ps_coherence_gate_fail` 现查仍 0 条, 13 天前"失败 4715/读 0"原样在)。
+- **层② 定性(J2 VERDICT-A, 严谨)**: 68 盘=06-22 分片迁移"横跨迁移界"盘(旧键那半 1369 注从没搬), 塌成 6 个 spine_p2sh(均 11 盘/spine)。**合法 commingled** —— :628 跳它们对(B 数据异常被延迟分布否掉: 1369 注全 <40min=迁移窗尾流; "晚于"布尔无判别力不量分布会判反)。**:628 不该动**。真伤口=① 观察性(静默无告警, 停摆 5 周无人知)② 钱路(1369 注无结算无退款执行者)。
+- **关键排除**: 68 盘/~31910 KAS **≠ 已知 33735 KAS 卡 137 盘**——四维度集合比对**完全零交集**, 独立的额外搁浅钱(数字接近纯巧合)。链上实测钱全在没动(链上≥DB), 另 19224 KAS 在共用地址 DB 没记(来源 J2 查)。
+- **报 Owner(决策就绪)**: 建议 ① 观察性先修(便宜/不碰钱/防复发)② 钱路 remediation(1369 注)= 驱动层洞、同 maker-bond-reclaim 类、funds 链上安全非丢、测试网 KAS 不急 → 归 Owner 按 settle-not-refund orphan 先例拍。🔴 零改码零碰数据零 force-settle。
