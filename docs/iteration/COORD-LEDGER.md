@@ -9799,3 +9799,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **层② 定性(J2 VERDICT-A, 严谨)**: 68 盘=06-22 分片迁移"横跨迁移界"盘(旧键那半 1369 注从没搬), 塌成 6 个 spine_p2sh(均 11 盘/spine)。**合法 commingled** —— :628 跳它们对(B 数据异常被延迟分布否掉: 1369 注全 <40min=迁移窗尾流; "晚于"布尔无判别力不量分布会判反)。**:628 不该动**。真伤口=① 观察性(静默无告警, 停摆 5 周无人知)② 钱路(1369 注无结算无退款执行者)。
 - **关键排除**: 68 盘/~31910 KAS **≠ 已知 33735 KAS 卡 137 盘**——四维度集合比对**完全零交集**, 独立的额外搁浅钱(数字接近纯巧合)。链上实测钱全在没动(链上≥DB), 另 19224 KAS 在共用地址 DB 没记(来源 J2 查)。
 - **报 Owner(决策就绪)**: 建议 ① 观察性先修(便宜/不碰钱/防复发)② 钱路 remediation(1369 注)= 驱动层洞、同 maker-bond-reclaim 类、funds 链上安全非丢、测试网 KAS 不急 → 归 Owner 按 settle-not-refund orphan 先例拍。🔴 零改码零碰数据零 force-settle。
+
+### (617) 2026-08-22 · 节点 runaway 恢复:Owner 授权停孤儿矿 12072(Bettor 亲执·channel 断)
+- **背景**: TN12 DAG runaway(tips 4300+/正常个位数, MTP 曾滞后 26min)。根因 = 08-16 起裸跑 7 天的孤儿 stratum-bridge(PID 12072), v2 watchdog(12016, Bettor 16:03:56Z 起)因无归属记录拒绝碰它(防死螺旋守卫)⇒ 自动路径 wedge、需操作员。
+- **决策**: 三方定选项②(停 12072→watchdog 排空 tips<50 自动接管 owned 新矿); KANet-UI 读码确认可行+推荐, J2 对照臂证起 watchdog 单独无效(归属 snag)。**Owner 亲令 go "停 12072"。**
+- **执行**: channel 连续 500(console 被 runaway 拖累)发不出委派 ⇒ Bettor 亲执(Owner 授权动作本身、12072 同用户 ADMIN 有权限、命令 KANet-UI 逐字给、可逆): `Stop-Process -Id 12072 -Force`。precheck-pass(12072=stratum-bridge + watchdog 12016 alive), KILL **16:20:34Z**, 独立核实 **12072 GONE**(现只剩 kaspad 9084)。watchdog 12016 braking 中。
+- **验证进行中**: DAA 推进(好), tips 仍 4405(kill+1min, 排空需时间)。⚠ watchdog log kill 前记 "wedged virtual—needs operator"。**未来 10-20min: tips 排空=成功; 死守 ~4400=wedged 更深(下一步可能重启节点=Owner 决策)。** J2 sampler 盯。
