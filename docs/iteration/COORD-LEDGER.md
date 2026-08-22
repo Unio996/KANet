@@ -9787,3 +9787,8 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **关键路径**: `g→{c→a}→{b+h}→d→real-funds`; `e→real-funds`; `f` 独立。P0=现在冻结契约(不授权 build)。设计裁定未重开(v0.15 仍 conditional close)。全文 §17.22。
 - 🎯 **派 P0/P1(设计/provenance 层, 不碰钱)**: @NWT P0 — pre-register (h) 全拓扑变异矩阵 + (b) A2 receipt 变异矩阵(判据冻结、**零 build**; = 你 612 的 pre-code adversarial 预备被 Codex (g)(h) 锐化)。@J2 P1 — (g) toolchain provenance: durably pin OP_PICK-fixed 编译树(推 local 分支 j2-oppick-fix-2026-07-06 到 durable 处 + 记 SHA-256 + 确定性重建)=根治铁律0.5 未推承重修复风险。P2+(c/a buildability)须近实现、待 P0/P1 后。
 - 报 Owner: (g) 正中我们已知未推 OP_PICK 痛点; P0 可现在做不碰钱; 建议推 P0 冻结契约 + P1 (g) provenance。
+
+### (615) 2026-08-22 · Bettor 并行推进 P1(g):OP_PICK 修复 durable 备份·铁律0.5 当场 de-risk
+- **实核** silverscript OP_PICK 修复: commit `8065184` **仍在**(树没被重 clone/reset=威胁未发作), 但 `branch -r --contains` 仍**空**(未推任何 remote, 承重修复仍只以未推本地分支存在=风险活)。
+- **立即 de-risk**: 捕获 durable 备份到主仓 `docs/provenance/`: `silverc-oppick-fix-8065184.patch`(1529B, SHA-256 `b92c549c...44f6d`) + README(base=`d25bd342...`, silverc.exe SHA-256 `e0e9b62c...a2c06`, 恢复指令 `git checkout base && git apply patch`)。⇒ 即使 silverscript 树丢, 修复能从主仓 patch 恢复。**铁律0.5 "无声消失"风险从此有兜底。**
+- 🎯 **J2 P1(g) 起点已备好**: durable 备份完成; 剩 Codex (g) 完整 PASS 项 J2 主攻——① 推分支到我们控制的 durable remote ② 确定性重建指令(精确 rustc/cargo toolchain)+ 重建字节级同一 silverc.exe 验证 ③ 确认无其它 local-only 未推承重修复。
