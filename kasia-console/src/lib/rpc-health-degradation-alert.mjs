@@ -8,21 +8,36 @@
 // 已验证过的成熟先例, 不另造轮子)——边沿触发(只在"跨过阈值进入劣化态"那一刻报一次, 不是持续
 // 劣化期间每 tick 都刷屏), 恢复后自动重新武装(下次再劣化会再报一次)。
 //
-// 只做检测告警, 不做自动重启(Bettor 明确: 告警先行, 自动化动作等告警本身跑稳后再议, 防止把
-// 短暂网络抖动误判成需要重启的场景)。
-//
-// 自指风险说明(NWT #utf9ze note①要求写明): 本模块检测的是 getWorkingRpc() 这条 console 内部
-// RPC 连接链路(rpc-health.js), 播报走的是 /api/chat/send → relay-manager 子进程独立的链上广播
-// 通道(架构上不共享同一个 RPC 连接, 见 chat.js 全文零处引用 getWorkingRpc/rpc-health)——今天
-// 07:34/14:48 两次实况也验证了这条: RPC 降级期间频道消息照常发得出去, 不会出现"看门狗自己也
-// 哑火"的自指死锁。
+// 2026-08-22(KANet-UI, Bettor #4jsxdo(612)派工 + #4k4wdm(P1 scoping)审): wasm-trap 无进程内恢复
+// 路径(kaspa-wasm 是 Node ESM 缓存的进程级单例, trap 后损坏的是共享 wasm 内存, pool.js/relay.js
+// 等 30+ 调用点都是受害者不是病灶, 唯一解法=整进程重启), 而告警本身已跑稳 3 周+(07-21 至今),
+// "等告警跑稳再议自动化"的条件已满足 —— 加一层"确诊后自退, 交外部 supervisor 拉起"。
+// 🔴 承重安全点(Bettor 审定, 动码前必解): process.exit(1) 前必须先确认 supervisor 活着, 不在
+// 就【只播报不自退】——自退后没人拉起比继续带病硬撑更糟(= "自退与 reboot-durable supervisor
+// 是耦合的, 别让自退依赖一个可能已死的拉起方")。查活判据见 _isSupervisorAlive(): 用 Get-CimInstance
+// 按【进程名=bash.exe + 命令行含脚本路径+_run 参数】匹配, 不用 pidfile(bash 伪 PID ≠ Windows PID,
+// 在册 reference-windows-process-tree-attribution-parent-chain 同族坑) ——查询由 Node 直接
+// spawn powershell.exe(非经 bash -c 包一层), 结构上不会自匹配(查询进程是 powershell.exe, 谓词
+// 只认 bash.exe, 亲测验证过: 经 bash 包装跑同一谓词会自匹配"四命中全是自己"经典坑, 直接 spawn
+// 则 0 命中匹配 spawn 时 supervisor 实际未在跑的真实状态)。查询本身出错/超时 = fail-closed 判
+// "未确认活着", 同"不在"处理, 不自退。
 import { sqlite } from '../db/client.js';
 import { randomUUID } from 'crypto';
+import { execFile } from 'node:child_process';
 
 const TICK_INTERVAL_MS = Number(process.env.RPC_HEALTH_ALERT_TICK_MS) || 60_000; // 1min
 const STARTUP_GRACE_MS = 30_000;
 const WINDOW_MINUTES = Number(process.env.RPC_HEALTH_ALERT_WINDOW_MIN) || 3; // 统计过去几分钟内的失败次数
 const FAIL_THRESHOLD = Number(process.env.RPC_HEALTH_ALERT_THRESHOLD) || 5; // 窗口内达到几次判定"真劣化"非瞬时抖动
+// 自退开关: 默认关闭(=0), 需显式 opt-in(RPC_HEALTH_SELF_RESTART=1) 才启用 —— 落地当天先只跑
+// 告警+supervisor活性判据本身的验证, 自退动作本身单独拿 Bettor sign-off 后再开(铁律0: 报计划
+// 不等于报完就自动获得"动作"授权, "诊断"和"动作"是两个闸)。
+const SELF_RESTART_ENABLED = process.env.RPC_HEALTH_SELF_RESTART === '1';
+// 确诊阈值: 保守, 宁可晚退不可误退(Bettor 审定原话)。默认 10min ——比 WINDOW_MINUTES(3min) 的告警
+// 滚动窗口宽得多, 排除"单个 tick 的滚动窗口噪声", 也远小于历史真实故障时长量级(44min 冻结/~5h 周期),
+// 显著收紧暴露窗但不会对瞬时抖动反应过度。
+const SELF_RESTART_CONFIRM_MS = Number(process.env.RPC_HEALTH_SELF_RESTART_CONFIRM_MS) || 10 * 60 * 1000;
+const SUPERVISOR_CHECK_TIMEOUT_MS = 5_000;
 // Codex 卡③(2026-08-03, D-012 §6-2 挂账): 水位线只堵死了"同一批旧数据被重报"(2026-08-03
 // 01:26/01:28 那种重启场景), 没堵住"同一个未中断的劣化 episode 里持续冒出新失败行, 每个都比水位线
 // 新一点, 于是每 tick 都重新算作'新数据'并重报"——实测坐实: 一个连续 6-tick 的持续劣化(每 tick 多
@@ -63,6 +78,9 @@ let _lastAlertPostedAt = null;
 // 真故障/瞬时抖动), Bettor 批复(#mvcezr.2)方向对但要求 diff 附三种现象各自输出——见本文件同批
 // commit message, 这里只加"恢复"边沿事件本身。
 let _episodeStartedAt = null;
+// 本 episode 是否已尝试过自退——只尝试一次(成功则进程退出, 这个变量随进程消失重置为 false;
+// 失败/supervisor 未确认活着时也标记, 防止同一 episode 每个 tick 都重跑一次 powershell 查活)。
+let _selfRestartAttemptedForEpisode = false;
 
 function _formatDuration(ms) {
   const totalSec = Math.max(0, Math.round(ms / 1000));
@@ -130,6 +148,62 @@ function _lastAlertedEpisodeStartedAt() {
   } catch { return null; }
 }
 
+/**
+ * supervisor 是否活着——只信 Get-CimInstance 按【进程名+命令行内容】匹配, 不信 pidfile 数字
+ * (bash 伪 PID ≠ Windows PID, 在册坑)。Node 直接 spawn powershell.exe, 不经 bash -c 包一层,
+ * 结构上不会自匹配(本查询进程是 powershell.exe, 谓词只认 bash.exe)。
+ * 任何异常(spawn 失败/超时/解析失败)一律 fail-closed 返回 false ——"未确认活着"当"不在"处理,
+ * 宁可漏一次该退的退, 不可在 supervisor 实际已死时还自退把 console 拉没了。
+ */
+export function _isSupervisorAlive() {
+  return new Promise((resolve) => {
+    const psCmd = "(Get-CimInstance Win32_Process -Filter \"Name='bash.exe'\" | " +
+      "Where-Object { $_.CommandLine -like '*kanet-console-supervisor.sh*' -and $_.CommandLine -like '*_run*' } " +
+      "| Measure-Object).Count";
+    let settled = false;
+    const child = execFile('powershell.exe', ['-NoProfile', '-Command', psCmd],
+      { timeout: SUPERVISOR_CHECK_TIMEOUT_MS, windowsHide: true },
+      (err, stdout) => {
+        if (settled) return;
+        settled = true;
+        if (err) {
+          console.warn(`[rpc-health-degradation-alert] supervisor liveness check failed (fail-closed → treat as not-confirmed-alive): ${err.message}`);
+          return resolve(false);
+        }
+        const count = parseInt(String(stdout).trim(), 10);
+        resolve(Number.isFinite(count) && count > 0);
+      });
+    child.on('error', () => { if (!settled) { settled = true; resolve(false); } });
+  });
+}
+
+/**
+ * 确诊后自退: episode 持续超过 SELF_RESTART_CONFIRM_MS(保守阈值, 排除单窗口噪声)仍未恢复
+ * → 先核 supervisor 活着(fail-closed) → 活着才 process.exit(1)(干净退出, 交 supervisor 按
+ * kanet-start-headless 序列拉起); 不在/未确认 → 只播报升级告警, 不自退(自退与 reboot-durable
+ * supervisor 耦合, 别让自退依赖一个可能已死的拉起方)。每 episode 只尝试一次。
+ */
+async function _maybeSelfRestart(episodeStartedAt, count) {
+  if (!SELF_RESTART_ENABLED) return;
+  if (_selfRestartAttemptedForEpisode) return;
+  const sustainedMs = Date.now() - episodeStartedAt;
+  if (sustainedMs < SELF_RESTART_CONFIRM_MS) return;
+
+  _selfRestartAttemptedForEpisode = true;
+  const alive = await _isSupervisorAlive();
+  if (!alive) {
+    const msg = `🔴🔴【rpc-health-degradation-alert·自退升级】RPC 劣化已持续 ${_formatDuration(sustainedMs)}(${count} 次失败/${WINDOW_MINUTES}min 窗口), 已达自退确诊阈值, 但 supervisor 未确认活着 ⇒ 不自退(自退无人拉起更糟)。需要人工重启 console。`;
+    console.error(`[rpc-health-degradation-alert] SUSTAINED DEGRADED ${_formatDuration(sustainedMs)}, supervisor NOT confirmed alive — withholding self-restart, manual action needed`);
+    await _postToChannel(msg);
+    return;
+  }
+
+  const msg = `🔴【rpc-health-degradation-alert·自退】RPC 劣化已持续 ${_formatDuration(sustainedMs)}, supervisor 已确认活着, console 即将 process.exit(1) 自退, 交 supervisor 按现有序列拉起(pid=${process.pid}, ts=${new Date().toISOString()})。`;
+  console.error(`[rpc-health-degradation-alert] SUSTAINED DEGRADED ${_formatDuration(sustainedMs)}, supervisor alive — self-restarting now (pid=${process.pid})`);
+  await _postToChannel(msg);
+  process.exit(1);
+}
+
 async function _postToChannel(text) {
   try {
     const ctrl = new AbortController();
@@ -168,6 +242,11 @@ export async function rpcHealthAlertTick() {
       if (_episodeStartedAt === null) {
         _episodeStartedAt = row.minCreatedAt ? new Date(row.minCreatedAt + 'Z').getTime() : Date.now();
       }
+
+      // 自退判断跑在每个"仍然劣化"的 tick 上, 不受下面 hasNewData/冷却期短路影响——它问的是
+      // "这个 episode 持续了多久", 不是"该不该再吵频道一次"(两件事故意分开判, 同 alert 冷却期
+      // 与 rowid 水位线分离的既有设计)。process.exit(1) 会在满足条件时直接终止本函数往下执行。
+      await _maybeSelfRestart(_episodeStartedAt, count);
 
       const maxFailRowid = row.maxRowid;
       const hasNewData = !(_lastSeenMaxFailRowid != null && maxFailRowid != null && maxFailRowid <= _lastSeenMaxFailRowid);
@@ -219,6 +298,7 @@ export async function rpcHealthAlertTick() {
       if (_lastSeenMaxFailRowid !== null) _lastSeenMaxFailRowid = null;
       if (_lastAlertPostedAt !== null) _lastAlertPostedAt = null;
       _episodeStartedAt = null;
+      _selfRestartAttemptedForEpisode = false;
     }
     return { ok: true, degraded: false, count };
   } catch (e) {
@@ -231,7 +311,7 @@ export async function rpcHealthAlertTick() {
 
 export function startRpcHealthDegradationAlertCron() {
   if (timer) return;
-  console.log(`[rpc-health-degradation-alert] started — tick=${TICK_INTERVAL_MS}ms, window=${WINDOW_MINUTES}min, threshold=${FAIL_THRESHOLD} (只读监控, 不自动重启, 只写events+播${ALERT_CHANNEL}频道)`);
+  console.log(`[rpc-health-degradation-alert] started — tick=${TICK_INTERVAL_MS}ms, window=${WINDOW_MINUTES}min, threshold=${FAIL_THRESHOLD}, selfRestart=${SELF_RESTART_ENABLED ? `ON(confirm=${SELF_RESTART_CONFIRM_MS / 60000}min, supervisor-gated)` : 'OFF'} (写events+播${ALERT_CHANNEL}频道)`);
   setTimeout(() => { rpcHealthAlertTick().catch((e) => console.error('[rpc-health-degradation-alert] startup tick:', e.message)); }, STARTUP_GRACE_MS);
   timer = setInterval(() => { rpcHealthAlertTick().catch((e) => console.error('[rpc-health-degradation-alert] tick:', e.message)); }, TICK_INTERVAL_MS);
 }
@@ -246,6 +326,7 @@ export function stopRpcHealthDegradationAlertCron() {
   _lastAlertPostedAt = null;
   _dbWatermarkChecked = false;
   _episodeStartedAt = null;
+  _selfRestartAttemptedForEpisode = false;
 }
 
 // 测试专用: 重置 module-level 水位线状态。清 _dbWatermarkChecked 是关键——它模拟"进程重启"
@@ -257,4 +338,5 @@ export function _resetAlertStateForTest() {
   _lastAlertPostedAt = null;
   _dbWatermarkChecked = false;
   _episodeStartedAt = null;
+  _selfRestartAttemptedForEpisode = false;
 }
