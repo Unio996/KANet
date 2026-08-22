@@ -479,3 +479,18 @@ Codex 正式复审 v0.15（RESPONSE-MSG266）:**同链 C4-FINALITY Shape-B DESIG
 🔴 **HOLD·硬 pre-code 门（非 design-close 一部分、gate 实现/真金）**: (a) LOCKED_F→O_AUTHORIZED 续继 buildability/provenance（deployed Toccata 保 covenant 身份 + successor state/script 转移的 durable consensus/runtime 证；relay 注释不够）(b) **A2 whole receipt→state 全腿**（完整 §6-1 receipt 验 + threshold/member-root + replay/domain 绑定 + unique successor，pinned 树上 pre-registered E2E/mutation 过；minimal checkSigFromStack probe 不 close 这个）(c) cov_id 派生/续继 durable 证（含 unique continuation + terminal zero-continuation）(d) min_O/N_claim/N_margin 具名保守值 + 证；reactive-liveness = LAND/CONFIRM 非广播 (e) quorum 独立 = pre-real-funds 硬门 (f) cross-chain OPEN（同链后代构造不迁移到外链、须独立 finalized-reveal 证/light-client）。
 - 状态记录: same-chain C4-FINALITY Shape-B **DESIGN-SPEC CONDITIONALLY CLOSED**；实现/buildability **HOLD**；cross-chain **OPEN**；real-funds **HOLD**。
 - 🏆 **过程**: v0.1→v0.15、Codex 逐轮逮真缺陷（forgeable-O / 对称缝 / anchor 矛盾 / ordering 塌 / partial-migration ×N / giveup free-option 同病二发 / oauth_cid 门 / 规范 sweep）**全在 design 阶段、零码零钱**。四人内部共享盲点反复被外部 Codex 逮 = 多层对抗审查价值实证。规范 sweep 完备性靠 grep-zero 机制四方独立验证终结 partial-sweep 循环。
+
+### §17.22 Codex MSG-267 verdict = PRE-CODE 门契约锐化（2026-08-22·GATE LIST ACCEPTED +2 新增 (g)(h) +重分类·给关键路径）
+Codex 复审 §17.21 的 pre-code 硬门列表（RESPONSE-MSG267）:**GATE LIST ACCEPTED WITH TWO MATERIAL ADDITIONS + ONE RECLASSIFICATION**。设计裁定**未重开**（v0.15 仍 conditionally closed）;这轮是把"设计闭合→build/deploy 就绪"的路锐化成实现验收契约。**未授权任何实现/build/deploy/DB/签名/钱路。**
+🔴 **两个新增门（原 (a)-(f) 不足以当实现验收契约）**:
+- **(g) toolchain/artifact provenance**（= (a)(b)(c)(h) 的上游依赖）: 不能只钉 builtin 名或本地 checkout label `8065184`。PASS 须: 精确 durable 可取回编译树/commit（或 base+patch+hash）+ 确定性重建指令 + 编译器二进制 SHA-256 + 目标 runtime/network/feature revision + 独立环境重建出字节级同一 artifact（或精确规约并机械归一化容许的非确定性）+ **无 local-only 未推的承重修复残留**。🔴 直中铁律0.5 已知痛点（OP_PICK 修复只以未推本地分支存在）。缺此门 ⇒ A2 E2E 即使绿也不可复现、不能当 durable 协议证。
+- **(h) Shape-B 全拓扑一致性/对抗变异套件**（≠ (b) A2 receipt 验; pre-registered 实现验收门，判据现冻结、真 covenant 存在后才能 PASS）: 正确 A2 verifier 也可能被接进错 tx 拓扑、重开两世系/单向焊/终态续/陈旧支攻击。PASS 须: ① 枚举实编译支集 = v0.15 五对象/十支模型（无隐藏 money-moving 支）② 机械化每条 WELD/EXCL/COUPLED（含四路 reveal 焊 + O↔O_AUTHORIZED 互焊）③ 交易级负测（每腿/输入/输出遗漏、陈旧 LOCKED_F 形输入、错收款/值、拆 tx、替代终态续）④ 配置级负测（所有承重 ordering/单位关系）⑤ 每条承重 require 变异（删/松→预注册对抗案 LAND 或套件 fail）⑥ 矩阵须从实现支集重生成（加支即废旧矩阵）⑦ pairwise 只是覆盖辅助、另留 N-way 场景级套件。= "design closed"到"实现保住 design"缺的桥。
+🔵 **重分类**: (a)(c) = 真 pre-code buildability/provenance 门; (b)+(h) = pre-registered 实现验收门（判据 pre-code 冻结、PASS 须真 artifact）; (d) 拆分（参数语义=设计 / 数值+landing 证=运营 pre-deploy）; (e) = deployment 信任拓扑门（非设计闭合）; (f) = 独立未来 scope（同链 scope 机械 fail-closed 则非 blocker）。
+🔴 **关键路径**: `g → {c→a} → {b+h} → d → real-funds readiness`; `e → real-funds readiness`; `f` 独立分支。
+- **P0**（现在·不授权 build）: accept 门列表 + pre-register (b)/(h) 测试矩阵与精确 scope。
+- **P1** (g) toolchain provenance（之后所有编译都依赖它; 别用未钉/local-only 编译器产出安全 credit）。
+- **P2** (c) 通用 cov_id 语义 + (a) 精确 LOCKED_F→O_AUTHORIZED 续继（决定 Shape B 在 deployed Toccata 上到底能不能 build; 任一 fail ⇒ 停，别围绕不可能拓扑造 A2）。
+- **P3** (b) A2-whole E2E + (h) 全拓扑一致性（须一起; 任一单独过都不够）。
+- **P4** (d) 保守运营常量 + liveness/inclusion 证（对着 P3 产出的真实 tx 形状定; 形状稳前别猜 fee/输入输出）。
+- **P5** (e) quorum 独立 fresh 部署测量（real-funds 前立刻 PASS; 可并行但陈旧证须重跑）。
+- 状态: same-chain Shape-B DESIGN-SPEC 仍 **CONDITIONALLY CLOSED**; pre-code 门契约 = 上述 (a)-(h) + 关键路径; real-funds **HOLD**。

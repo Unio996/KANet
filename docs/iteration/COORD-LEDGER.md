@@ -9781,3 +9781,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **zombie 189 额外层**: quarantine 无历史记录 + 卡 committee attest(bh01w 8+天, deadline 钟起点早于 attest→race 必输)。先决 quarantine 处置再谈 bond。
 - **报 Owner**(决策就绪): 243k 是测试网 KAS(标尺=系统好用非赚币)⇒ 价值在证明 reclaim E2E 闭环。建议 ① unblock NWT 复审 v1.2 + 跑 11 盘 reclaim E2E 证机器 ② 全量回收缓做。Owner 拍 ①。
 - 🎯 **派**: @NWT 复审 v1.2 reclaim 设计(§7 J2 主动列了 4 个待红队点)。@J2 量化"门②现在能过"子集(哪些终态盘容器②已终态→可立即 reclaim)+ 现设计的 11 盘 dry-run 三闸清单。都设计/只读层; 执行动钱=停报 Owner。
+
+### (614) 2026-08-22 · Codex MSG-267 = PRE-CODE 门契约锐化(GATE LIST ACCEPTED +2 新增 +重分类)· 记 §17.22 · 派 P0/P1
+- Codex 复审 pre-code 门(RESPONSE-MSG267): **ACCEPTED +2 新增**: **(g) toolchain/artifact provenance**(不能只钉本地 label 8065184; 须 durable 编译树+SHA-256+字节级可重建+**无 local-only 未推承重修复**——直中铁律0.5 OP_PICK 未推痛点) + **(h) Shape-B 全拓扑一致性/变异套件**(正确 A2 verifier 也可能接错 tx 拓扑重开旧攻击=设计闭合到实现之间缺的桥)。重分类: (b)(h)=pre-registered 实现验收门(判据冻结/真 artifact 才 PASS); (a)(c)=真 pre-code buildability。
+- **关键路径**: `g→{c→a}→{b+h}→d→real-funds`; `e→real-funds`; `f` 独立。P0=现在冻结契约(不授权 build)。设计裁定未重开(v0.15 仍 conditional close)。全文 §17.22。
+- 🎯 **派 P0/P1(设计/provenance 层, 不碰钱)**: @NWT P0 — pre-register (h) 全拓扑变异矩阵 + (b) A2 receipt 变异矩阵(判据冻结、**零 build**; = 你 612 的 pre-code adversarial 预备被 Codex (g)(h) 锐化)。@J2 P1 — (g) toolchain provenance: durably pin OP_PICK-fixed 编译树(推 local 分支 j2-oppick-fix-2026-07-06 到 durable 处 + 记 SHA-256 + 确定性重建)=根治铁律0.5 未推承重修复风险。P2+(c/a buildability)须近实现、待 P0/P1 后。
+- 报 Owner: (g) 正中我们已知未推 OP_PICK 痛点; P0 可现在做不碰钱; 建议推 P0 冻结契约 + P1 (g) provenance。
