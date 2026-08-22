@@ -9766,3 +9766,10 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - ⇒ **(610) P0(提权 re-arm supervisor + clean-restart)作废**: supervisor 没缺、console 没坏。J1 上线勿跑。
 - ⇒ **只剩 P1(durable, 非紧急, 谁有空认领·NWT/KANet-UI 优先)**: ① wasm rebuild-on-trap 根治(消除每几小时 cycle 的 ~1-2min 断窗; getWorkingRpc; pool.js 钱路=铁律0 先报审)② supervisor 变 reboot-durable(现 bash-loop 会 flap; 真持久需 scheduled task=提权)。
 - 🔨 **教训**: 单一非提权读数别急判"缺失+紧急"([[feedback-a-single-instrument-must-be-cross-checked-before-driving-decisions]]); bash-loop 死活看**日志心跳**不看 PID-file/schtasks。这次上报 Owner 前自查逮到, 未致害。
+
+### (612) 2026-08-22 · Bettor 主动驱动各线(Owner 令"主动驱动不等")· channel blip→git 派工
+- **@J2** 结算三 follow-ups(609): ①去重 reconcile 243k/393k ②7-13 语义定真卡死 ③track A ~106 runtime。Bettor 并行挖②语义(读 disposal 设计)对齐后 J2 专攻①③。各报 ETA。
+- **@NWT** §6-3 pre-code 门 adversarial 预备: 别等 Codex(MSG-267 在审), 先对抗性预列各门验收判据+找漏门(枚举基从"机制允许"导)。报 ETA。
+- **@KANet-UI** console P1: scope wasm rebuild-on-trap(getWorkingRpc)+ supervisor reboot-durable; pool.js 钱路先报计划审, 勿动码。报 ETA。
+- **@J1**(offline) 回来接 P1 提权(supervisor scheduled-task)。
+- Bettor 每 ~30min 主动 sync, 不靠自觉报。
