@@ -32,3 +32,37 @@ Codex P1(g) 复审: **MATERIAL PROGRESS / GATE (g) STILL OPEN**(接受本备份�
 4. 🔴 钉死精确 Rust/Cargo/toolchain/依赖输入。
 5. 🔴 clean rebuild 复现编译器行为 + 记源树 hash + 产物 hash; 若声称字节级同一 exe 须【证明】字节同一(现 silverc.exe SHA-256 只是观察、非 derivation 证)。
 J2 主攻 3-5。
+
+---
+
+## 🔵 自包含备份（2026-08-23，J2 加，Bettor 20:28 APPROVED）：**bundle 消除了对上游的依赖**
+
+上面那条恢复法依赖 **上游 `github.com/kaspanet/silverscript` 保留 base commit `d25bd34`** ——
+上游若删分支或改写历史，patch 就没有落点。本 bundle 消除该依赖。
+
+```
+文件      docs/provenance/silverc-oppick-8065184.bundle    2.03 MB
+SHA-256   c9904eee00bc0f558ae08e0108b6594ce35d2b3f7468831df3a302655c4b8c16
+内容      分支 j2-oppick-fix-2026-07-06 的【完整历史】117 个 commit（含 base d25bd34）
+```
+
+**恢复命令（实测可跑，从任意干净机器）**：
+```
+git clone /path/to/silverc-oppick-8065184.bundle silverscript-restored
+cd silverscript-restored && git checkout j2-oppick-fix-2026-07-06
+```
+
+**✅ 从【本目录这份最终文件】实测复核（不是从 scratch 那次的结果背书）**：
+```
+HEAD          80651849962f1d83eb941c2c913eaaea06e867b7
+tree          69a6d85ba5c9e060ee547fa5e4183774d2408447   ← 与权威 8065184 逐字相等
+commit 数     117        base d25bd34 在库内 ✅
+源码肉眼确认   silverscript-lang/src/compiler/compile.rs :3752-3755 处
+              patch 删掉的那行 `*ctx.stack_depth += 1;` 确实不在 ✅
+```
+
+🔵 **暴露面**：上游 silverscript 是**公开开源仓**，patch 自 commit `30734c83` 起就在**公开的**
+KANet origin 里 ⇒ bundle 内容 = 公开源码 + 已公开的 patch，**无一字节新暴露**。
+
+🔵 **配套**：clean-rebuild 的行为等价证明见 `2026-08-23-j2-item5-rebuild-semantic-equivalence.md`
+（fresh rebuild 编译产出与权威 binary 逐字节相同，且带隔离变量的阴性对照）。
