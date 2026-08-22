@@ -9773,3 +9773,11 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **@KANet-UI** console P1: scope wasm rebuild-on-trap(getWorkingRpc)+ supervisor reboot-durable; pool.js 钱路先报计划审, 勿动码。报 ETA。
 - **@J1**(offline) 回来接 P1 提权(supervisor scheduled-task)。
 - Bettor 每 ~30min 主动 sync, 不靠自觉报。
+
+### (613) 2026-08-22 · Bettor 挖透结算语义:Track-B 243k = maker bond(容器①)park·非丢失·有 reclaim 设计(v1.2 待 NWT 复审)
+- 🔴 **Track-B 243k KAS 定义上全是 maker bond**: 扫的是 `spine_p2sh`=PoolSpine 容器①。架构铁证(`2026-07-13-cohort-b`/`reclaim`设计): 结算(bettor 侧 PayoutShard)**从不碰 PoolSpine**, 对任何结局成立。⇒ bettor 钱在容器②别处、不在此扫描; **completed 14,601 非异常**(bettor 结算完, maker bond 本就留 spine)。
+- **可回收 backlog, 非意外丢失**: `2026-07-13-bshard-poolspine-maker-bond-reclaim-design.md`(v1.2, NWT GREEN-with-MUST-FIX 已修·**待 NWT 复审**)。**零新 SilverScript** —— 复用链上 `refund_maker_unjoined` entry(PoolSpine_v07.sil:381-398), 缺口在驱动层。三 fail-closed 闸(isBshard/hasVerifiedContainer2Evidence/check_utxo_landed minDepth=20)+ 幂等。执行=钱路铁律0 须 Bettor 批。
+- **门控现实**: 门②只放 bettor 侧已终态的盘(completed 过、zombie/archived 容器②未终态则正确拒)。现设计只 scope 11 refunding 盘; 大头(archived/zombie/completed win 态)是 §5 同构后续卡, **未 scope**。
+- **zombie 189 额外层**: quarantine 无历史记录 + 卡 committee attest(bh01w 8+天, deadline 钟起点早于 attest→race 必输)。先决 quarantine 处置再谈 bond。
+- **报 Owner**(决策就绪): 243k 是测试网 KAS(标尺=系统好用非赚币)⇒ 价值在证明 reclaim E2E 闭环。建议 ① unblock NWT 复审 v1.2 + 跑 11 盘 reclaim E2E 证机器 ② 全量回收缓做。Owner 拍 ①。
+- 🎯 **派**: @NWT 复审 v1.2 reclaim 设计(§7 J2 主动列了 4 个待红队点)。@J2 量化"门②现在能过"子集(哪些终态盘容器②已终态→可立即 reclaim)+ 现设计的 11 盘 dry-run 三闸清单。都设计/只读层; 执行动钱=停报 Owner。
