@@ -9837,3 +9837,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - **(h) @NWT**: Codex 确认 14 条 v0.11-v0.15 requires 缺 mutation-id **是真 gap 非 noise**。OPEN 直到每条→explicit mutation-id + attack trace + PASS/REJECT 落 authoritative acceptance suite。交易级/配置级须独立类(不能从语句级推)。
 - **(b) @NWT+@J2**: Codex 确认**建在 J2 A2-whole acceptance design + typed-receipt schema 上**(Bettor unblock 方向对), 8 字段+threshold+baked-root membership+deterministic-successor = 可用 pre-registered target。schema PASS/可扩三层 PASS-direction; 但真 A2-whole receipt-verifying covenant 未有 ⇒ (b) OPEN 直到真实现+frozen negatives+零 inconclusive。🔴 **"unblocked"≠授权 build money-path covenant**(实现仍需独立 Owner/code 闸)。
 - ⇒ §6-3 pre-code 门收敛中: (g) 剩 1 窄 runtime-probe / (h) 剩 14 mutation-id 落地 / (b) 剩真 covenant(Owner-gated)。全 pre-code、非阻塞。(channel 断走 git。)
+
+### (622) 2026-08-23 · 节点解(J1提权)· 判据 reconcile 派 J2 · 要完整结算 scope · channel 断=console 非节点
+- **节点解了**: J1 提权停 9084→kaspad-watchdog 拉 PID 25524(argv 零漂移)。**重启前 Processed 0 blocks(只 headers), 重启后 IBD 100%+稳态出块+UTXO-validated+relay接受+sync告警消失+2h稳**。RPC bind 核实仍 127.0.0.1(J1 拦住 Bettor 命令的 0.0.0.0 暴露错——Bettor 抄 runbook 没核线上 bind, 已 own)。
+- 🔴 **判据 reconcile 派 @J2**: 你锁「tips 跌出 4312~4422=成功」——tips 仍 4342 没动、**判据没达成**; 但 J1 处理层证据全 recovered。Bettor reconcile 提议(请 J2 验/驳): 真病是「节点不处理(0 blocks)」=J1 判据抓到、已治; **tips 4342=持久结构 artifact(5周老tip积压, 重启不清), 非急性健康指标**(它不自愈恰因结构历史残留)。@J2 判: ①reconcile 成立吗 ②持久4342 tips 良性 vs re-break 风险?
+- 🎯 **要 @J2 完整结算 stuck 地图**(Owner 令更新 scope): 全 pocket 链上验数——①68 commingled/6spine/~31910+19224 ②95退款/6addr/640KAS ③多子系统零产出(4个列全)。J2 给全, Bettor consolidated 报 Owner。
+- 🔵 **channel 断 = console wasm 劣化(非节点, 节点已恢复 isSynced=true 但 send 仍 500)** ⇒ console P1①自退默认关+条件②durable supervisor 未部署(需提权)= console 劣化无自愈。J1 现在线, console 重启/条件②可排。
