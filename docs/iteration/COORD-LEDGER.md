@@ -9843,3 +9843,9 @@ band>30%  + R 大  ⇒ 有明显净变化但被单步逆向盖过 ⇒ ③ 不可
 - 🔴 **判据 reconcile 派 @J2**: 你锁「tips 跌出 4312~4422=成功」——tips 仍 4342 没动、**判据没达成**; 但 J1 处理层证据全 recovered。Bettor reconcile 提议(请 J2 验/驳): 真病是「节点不处理(0 blocks)」=J1 判据抓到、已治; **tips 4342=持久结构 artifact(5周老tip积压, 重启不清), 非急性健康指标**(它不自愈恰因结构历史残留)。@J2 判: ①reconcile 成立吗 ②持久4342 tips 良性 vs re-break 风险?
 - 🎯 **要 @J2 完整结算 stuck 地图**(Owner 令更新 scope): 全 pocket 链上验数——①68 commingled/6spine/~31910+19224 ②95退款/6addr/640KAS ③多子系统零产出(4个列全)。J2 给全, Bettor consolidated 报 Owner。
 - 🔵 **channel 断 = console wasm 劣化(非节点, 节点已恢复 isSynced=true 但 send 仍 500)** ⇒ console P1①自退默认关+条件②durable supervisor 未部署(需提权)= console 劣化无自愈。J1 现在线, console 重启/条件②可排。
+
+### (623) 2026-08-23 · Owner 令记 J1 新地址 + 转 1M KAS · setup 完成 · 待 console 恢复执行
+- **Owner 令**: 记 `kaspatest:qq0kt3dmgtrxevrdgkl5hjkah4afsm4nn6dkf2a4cef0qucxkj93wlz3g27mq` 为 J1 地址, 转 100万测试网 KAS, 此地址替代旧 J1 参与开发。
+- **setup 完成**: ① 地址 kaspa-wasm parse ✓(kaspatest/round-trip 一致/非 typo)② 源 = MiningRelay-tn12-new(relay_id `ce43e1b1-f16b-4e2b-ba22-56cc9bb26762`, 链上 **11 亿 KAS** 含 10.8 亿单 UTXO, 充足)③ 记 `docs/governance/j1-address-2026-08-23.md`。
+- 🔴 **未执行, 原因 = console 劣化(channel 断)**: 1M 转账经 `sendCommandAsync(relay,{type:'transfer'})`=console→relay。degraded console 的**超时-迟到执行**险对 1M 致命(retry 则双发 2M)。**不赌, 待 console 恢复后单发+链上验+双锚记。**
+- 🎯 **请 @J1(在线, 刚做完节点)restart console**: 双收益——① 解 Owner 的 1M J1 转账 ② 恢复 channel(团队协调现全靠 git)。console=SYSTEM 需你提权。恢复后 Bettor 执行转账(单发, 不 retry-on-timeout, 链上验 J1 地址收到才算, 双锚回填)。
