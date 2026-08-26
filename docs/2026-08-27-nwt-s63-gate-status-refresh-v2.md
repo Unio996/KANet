@@ -18,16 +18,16 @@
 | **(h)** Shape-B 变异一致性套件 | 🟢 **CLOSED AT DESIGN LAYER** | MSG-273/274 **eb4db39c**：*"(h) CLOSED AT DESIGN LAYER"*（H1 六臂在声明焊缝被拒、H2 独立配置臂、CF-4 归 (d)）；carry：机械执行待真 covenant | (h) v1.1 **7899a94e**；CF-4 归 (d) 已接 | 机械执行 = 真 covenant 后（锚从 §行换 `.sil` file:line、矩阵从真支集再生） | 执行层：真 covenant（Owner+J1） |
 | **P3** fee-source（(d) 子） | 🟢 **PASS（设计），(a)/(b) 待 Owner** | **eb4db39c**：*"P3 structure PASS, recommend (b)"*；`min_O` 只围 O/存储/价值地板重定义 | fee-source v0.3 **1f4c90a4**（NWT GREEN）；(b) 下 `min_O=SF×storage_floor`、`F_claim_reserve` 归 claimant/watchtower 就绪度 | (a) `OpTxInputCount==2` vs (b) 二选一 | **Owner（改 v0.15 正文）** |
 
-## (d) 残余六项（逐条）
+## (d) 残余六项（逐条 · 与 (d) v0.9 §7 六项同口径）
 
 | # | 内容 | 谁 | 依赖 | 现有工具 |
 |---|---|---|---|---|
-| ① | §5① claim-shape **深确认阈值测试**（≥30 笔、depth≥20）⇒ `N_claim` 从下界变实测；**部署硬前置** | J2/NWT | **节点同步** | (27) 采样器 provenance `docs/provenance/2026-08-27-claim-depth/`（3339a81b）+ (17) 清单 **③e** |
-| ② | §5② 节点 lag/停滞/reorg + **参考节点 DAA** 重采 ⇒ `M_observe`/`W_dis` | J2 | **节点同步** | (17) 清单 **③b** 采样器（120 min）|
-| ③ | P3 真形状 mass ⇒ `min_O` 费项 + **(a)/(b) 决定** | Owner + J1 | **真 covenant（(b)(h) 执行）** | fee-source v0.3（1f4c90a4）判据冻 |
-| ④ | **`k_max` 具名**（B_win=f(k) 有界；占位 55,200⟺k≲1000 是弱假设）⇒ 定 `N_margin` 的 `B_win` | **Owner/Codex** | **Owner 给 `H_adv` + 算力地板** | (21) k_max 成本 provenance + (23) 地板 v0.6 + B_win 仿真（8310f390）|
-| ⑤ | **`s_visible_max` 实值**（窗内最大单 coinbase 份额）⇒ 算力地板 `s_adv_cap` 输入 | J2/NWT | **节点同步**（s_visible_max）+ **Owner**（s_adv_cap 论证）| (24) s_max 提取器 provenance `docs/provenance/2026-08-27-smax/`（2718834c）+ (17) **③d** |
-| ⑥ | NWT 审 (d) v0.9（进行中）⇒ 桥报 Codex 收 (d) | NWT | — | (d) v0.9 + 本表 |
+| 1 | ≥30 真实 claim-shape 深度合格（≥20）落链观测，**Leg A 用 SENDER_TS 口径**（MEMPOOL_SEEN/PROXY_POLL 不入最终界）⇒ `N_claim = 实测包络 + 具名 S_unalloc`；**部署硬前置** | J2/NWT | **节点同步**（+ relay `[submit]` hook 待 Owner 批才有 claim SENDER_TS） | (27) v0.3 `docs/provenance/2026-08-27-claim-depth/`（3339a81b）+ (17) **③e** |
+| 2 | `W_dis` 双列重采（节点 lag/停滞/reorg + **参考节点 DAA**）⇒ `M_observe` | J2 | **节点同步** | (17) **③b** 采样器（120 min）|
+| 3 | **Owner 批准的具名 `k_max`，挂在 `H_floor_honest_lb = H_floor_total_lb×(1−s_adv_cap)` 上**——`s_adv_cap` 谁论证：(i) 1−s_self /(ii) 经济 H_adv /(iii) 身份路（开放匿名网不可用）；无可信 cap ⇒ fail-closed | **Owner/Codex** | **Owner 给 `H_adv` + `s_adv_cap` 依据** | (21) k_max 成本 + (23) 地板 v0.6（b6dbcfd0）+ (24) s_visible_max + B_win 仿真（8310f390）|
+| 4 | P3 真形状 mass + **(a)/(b) 终选** ⇒ `min_O` | Owner + J1 | **真 covenant（(b)(h) 执行）** | fee-source v0.3（1f4c90a4）判据冻 |
+| 5 | 证据齐后**具名最终常量**；**环境违约五类一律 fail-closed**（跌破地板 / 无可信 cap / 节点不健康 / 落链超界 / 固定难度期）| 落码 | 上四项齐 | — |
+| 6 | **工具官方跑**：(21) k_max（`scratch/_j2_kmax_cost.mjs` 待入库）、(24) s_visible_max、(27) claim-depth 各出带 sha256 正式 JSON | J2/NWT | **节点同步（SYNC-GATE 后）** | (17) **③c/③d/③e** provenance |
 
 ## Tier-2 定位（VB-5/VB-6）
 🔴 **§6-3 Tier-2 fair-exchange 现网禁用 = 【结构性】（未建：无码、无 covenant、无开关）**，非"翻某开关"（VB-5 盘点 b2d5dc7d、NWT GREEN 8fe85c93；术语表落 DEVELOPER-GUIDE + DECISIONS 指针 VB-6 4d000543）。live 有开关的是 **committed ZK 结算（另一 track、ADMIN_ZK_*=1 fail-closed）**，别混。⇒ **(23)/(21) 算力地板/k_max = 未来 (b)-实现的入场闸设计要求，非现网运行时控制。**
