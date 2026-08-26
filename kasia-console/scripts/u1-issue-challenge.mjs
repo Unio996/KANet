@@ -17,7 +17,9 @@
 // 用法(在 kasia-console 目录下):
 //   node scripts/u1-issue-challenge.mjs --relay <relay_id>                 # dry-run: 只报告, 零写入
 //   node scripts/u1-issue-challenge.mjs --relay <relay_id> --commit        # 真签发(先清孤儿, 再幂等检查, 再 INSERT)
-//   可选: --ttl-ms 600000  --db D:/kanet-tn12/kasia-console/data/console.db  --json
+//   可选: --ttl-ms 300000  --db D:/kanet-tn12/kasia-console/data/console.db  --json
+// 🔴 常驻约束(NWT 审定): 本脚本【永不】接 HTTP route / cron / daemon; 任何把它 wrap 成端点或定时任务的改动 = 自动签发口 = §10-gated, 须先报备。
+// 🔴 输出里的 challenge 在被消费(used_at 置非空)之前是【活 bearer token】: 不贴频道、不进持久证据; 消费后 inert 才可入证据。
 import { randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -27,7 +29,8 @@ const arg = (k, d) => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] :
 const COMMIT = argv.includes('--commit');
 const JSON_OUT = argv.includes('--json');
 const RELAY = arg('--relay', '');
-const TTL_MS = Number(arg('--ttl-ms', '600000'));
+// TTL 默认 5 min(NWT 审定: 活 nonce 的 TTL 窗 = ⑦ 抢注暴露窗, 越短越保守; operator 需要时 --ttl-ms 临时加, clamp 60s..60min)
+const TTL_MS = Number(arg('--ttl-ms', '300000'));
 const DB = arg('--db', 'D:/kanet-tn12/kasia-console/data/console.db');
 
 const out = (o) => console.log(JSON_OUT ? JSON.stringify(o) : Object.entries(o).map(([k, v]) => `  ${k}: ${typeof v === 'object' ? JSON.stringify(v) : v}`).join('\n'));
