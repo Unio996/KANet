@@ -1,5 +1,6 @@
 # §6-3 A covenant — 承重 require 的显式 mutation-id 权威验收表（(h) 落地）
 
+> **v1.1（2026-08-27 · Codex (h) 裁 MATERIAL PROGRESS → 两 MUST-FIX 后 CLOSED AT DESIGN LAYER）**：H1 交易级复合组【逐臂拆分】(乙 3 组→7 臂,每臂单点隔离目标焊缝);H2 单位域【独立配置 mutation ID】CFG-UNIT-DOMAIN(不再作散文前提)。carry-forward 四条见末「未决」。Codex 明示本裁**不重开 Shape-B 设计**。
 > 作者 NWT · 2026-08-27 · 派工 Owner 主线 §6-3 / Bettor (h) · Codex (621) 确认「14 条 v0.11–v0.15 新加 require 缺 mutation-id 是真 gap」
 > **被测对象** = `docs/2026-08-21-j1-s6-3-A-covenant-construction-v0.15.md`（v0.15 §4 require 清单）。**本文件 = Codex 桥可引用的单一权威 mutation-id 源。**
 > **性质**：pre-code 验收判据（判据冻结 · 零 build · 零节点 · 零链）。每条 = mutation-id / 锚（v0.15 §行 + require 原文）/ attack trace（攻击者改什么 → 期望 REJECT 原文）/ 层级。
@@ -58,42 +59,51 @@
 
 ---
 
-## 乙 · 交易级：3 组（v0.3/v0.13 · 改「怎么提交」不改任何 require 行 · Codex 冻结「不能从语句级推」）
+## 乙 · 交易级：7 臂（v0.3/v0.13 · 改「怎么提交」不改任何 require 行 · Codex 冻结「不能从语句级推」）
 
 > 交易级变异 = 攻击者不动任何一行 require，改的是 tx 如何**组装/提交**（拆笔、遗漏输入/输出、陈旧输入）。这类缝的**缺失约束不在任何一行代码里**（J2 判据 §0.6），故独立类。
+> 🔴 **v1.1（Codex H1 · 逐臂拆分）**：v1 把 `TX-4WAY-OMIT`（混 3 省略）与 `TX-O-STALE-OR-NO-OAUTH`（混 3 缺陷）各写成一臂。**一笔同时省多路的复合攻击 tx 会在【第一个】缺失条件上被拒 ⇒ 其余焊缝机械上没测到**（= 同 E2E arm(c) 顺序重放撞前置层、CAS 没测到 的同形）。⇒ **每臂只省一路、其余满足**，让 tx 够到并被【那一条】焊缝拒，各自 expected reject point。
 
-| mutation-id | 锚（v0.15 §6） | attack trace | 层 |
+| mutation-id | 锚（v0.15 §6 + 拒点 require） | attack trace（只省一路，其余满足 → 期望拒在指定焊缝） | 层 |
 |---|---|---|---|
-| **TX-SPLIT-WELD** | §6.2b（v0.3 · NWT 缝 · `86c04c55`） | 把 `LOCKED-transfer` 与 `C-consume/O-create` **拆成两笔 tx 分别提交** ⇒ 领本金那笔 **必 REJECT**：焊接 `OpInputCovenantId(C_idx)==cid` 在同笔找不到 C。附：cutoff 排序缝——令 `T_cutoff_LOCKED > C_terminal_refund_cutoff` 构造"同笔消费 C 走 C-terminal-refund 不造 O" ⇒ 必拒。 | 交易 |
-| **TX-4WAY-OMIT** | §6.2d ④（v0.13 checklist ④） | 给 §4-d transfer 支合法 A+s，但 reveal tx **省略/错 C、或省略 exact LOCKED_F、或不造 exact O_AUTHORIZED（含续链 `OpOutputCovenantId==locked_f_cid`）中任一** ⇒ 领 LOCKED_R 的 tx **必 REJECT**。证四路焊在 LOCKED_R 领取路自身、非可跳过分支。 | 交易 |
-| **TX-O-STALE-OR-NO-OAUTH** | §6.2d ⑤（v0.13 checklist ⑤） | (a) 花真 O 而**不带 O_AUTHORIZED co-input / 带 wrong oauth（≠locked_f_cid）** ⇒ 拒；(b) 花 O_AUTHORIZED 而**不带真 O** ⇒ 拒；(c) O_AUTHORIZED cov_id **不续自 locked_f_cid（假 continuation）** ⇒ 拒。 | 交易 |
+| **TX-SPLIT-WELD** | §6.2b（v0.3 · NWT 缝 · `86c04c55`）· 拒点 WELD-LR-CONSUME-C @L263 | 把 `LOCKED-transfer` 与 `C-consume/O-create` **拆成两笔 tx 分别提交** ⇒ 领本金那笔 **必 REJECT**：`OpInputCovenantId(C_idx)==cid` 在同笔找不到 C。 | 交易 |
+| **TX-4WAY-OMIT-C** | §6.2d ④ · 拒点 **WELD-LR-CONSUME-C @L263** | reveal tx **带 exact LOCKED_F + 造 exact O_AUTHORIZED（都满足），只省/错 C** ⇒ 领 LOCKED_R 必拒在 `OpInputCovenantId(C_idx)==cid`（不是被别的路先拒）。证 C-weld 单独承重。 | 交易 |
+| **TX-4WAY-OMIT-LOCKED_F** | §6.2d ④ · 拒点 **WELD-LR-CONSUME-LF @L264** | reveal tx **带 C + 造 O_AUTHORIZED（都满足），只省 exact LOCKED_F** ⇒ 必拒在 `OpInputCovenantId(locked_f_idx)==locked_f_cid`。证双拿防单独承重。 | 交易 |
+| **TX-4WAY-OMIT-OAUTH** | §6.2d ④ · 拒点 **WELD-LR-CREATE-OAUTH @L265 + PROV-OAUTH-LINEAGE @L272** | reveal tx **带 C + LOCKED_F（都满足），不造 exact O_AUTHORIZED（或造了但续链 `OpOutputCovenantId≠locked_f_cid`）** ⇒ 必拒在 create-OAUTH 焊 / provenance。证 O_AUTHORIZED 后继单独承重。 | 交易 |
+| **TX-O-WITHOUT-OAUTH** | §6.2d ⑤ · 拒点 **WELD-O-REVERSE-OAUTH @L290** | **花真 O，其余合法，只不带 O_AUTHORIZED co-input** ⇒ 必拒在 §4-e 支1 `OpInputCovenantId(oauth_in_idx)==oauth_cid`。证反向焊挡"独立花 O griefing"。 | 交易 |
+| **TX-OAUTH-WITHOUT-O** | §6.2d ⑤ · 拒点 **WELD-OAUTH-CO-O @L245** | **花 O_AUTHORIZED（领本金），其余合法，只不带真 O co-input** ⇒ 必拒在 §4-c `OpInputCovenantId(O_in_idx)==cid`。证正向焊。 | 交易 |
+| **TX-OAUTH-WRONG-LINEAGE** | §6.2d ⑤ · 拒点 **PROV-OAUTH-LINEAGE @L272** | **花 O + O_AUTHORIZED（co-input 都在），只把 O_AUTHORIZED 的 cov_id 做成不续自 locked_f_cid（假 continuation）** ⇒ 必拒在 provenance。证 lineage 身份单独承重（否则 §4-c/§4-e 引 oauth_cid 全 vacuous）。 | 交易 |
 
-**核过无第 4 组**（ledger (620)：交易级 3 组已穷尽）。
+🔴 **拆分判据**：每臂**必须证拒在【它指定的那条焊缝】**，不是"反正拒了"——若一臂的 tx 被别的路先拒，说明该臂没真测到目标焊缝，须重构 tx 让目标焊缝成为唯一失败点（same-family 单点隔离，同语句级"松开→必挂"要求单条）。
+**核过无第 8 臂**（原 3 组拆到 7 臂 = TX-SPLIT-WELD 1 + 4WAY 3 + O/OAUTH 3；ledger (620) 交易级 3 组穷尽,拆分不新增缝、只让每缝可单独机械测）。
 
 ---
 
-## 丙 · 配置级：2 条（baked 常量间关系 · 落码 ctor 参数 · Codex 冻结「不能从语句级推」）
+## 丙 · 配置级：3 条（baked 常量间关系 · 落码 ctor 参数 · Codex 冻结「不能从语句级推」）
 
 > 配置级变异 = 攻击者/误配把 **baked 常量之间的排序/单位关系**设错。这类不在任何单条 require 里，在常量的**相对值**里。
+> 🔴 **v1.1（Codex H2 · 单位域独立 ID）**：v1 把"单位不变量"写成 CFG-GIVEUP/CFG-CUTOFF 的**散文前提**。Codex 裁：**数值对但单位混也能让排序比较 vacuous ⇒ 它须自己一个配置级 mutation ID**，不寄生在排序臂下（本项目时间域坑反复出现，s/ms/DAA 混是独立失败模式）。
 
 | mutation-id | 锚 | attack trace | 层 |
 |---|---|---|---|
 | **CFG-GIVEUP-ORDER** | §4-d giveup `T_giveup_LOCKED_F >= T_cutoff_LOCKED_R`（v0.11/v0.15 · §6.2c 边界5） | 令 baked `T_giveup_LOCKED_F < T_cutoff_LOCKED_R`（giveup 早于 LOCKED_R-refund 开）⇒ **观望套利窗变长可测**。🔴 **诚实标（v0.15）**：free-option **非结构可消**（下界 close 不了 reveal 窗，§4-d），此测量的是**排序退化程度**非"消除"；残留由 reactive-liveness（§1.5 假设5）bound。REJECT 判据 = ctor 校验 `T_giveup >= T_cutoff` 不成立即拒装。 | 配置 |
 | **CFG-CUTOFF-ORDER** | §4-d `T_cutoff_LOCKED_R <= C_terminal_refund_cutoff`（§6.2b 附） | 令 `T_cutoff_LOCKED_R > C_terminal_refund_cutoff` ⇒ 构造"同笔走 C 的 terminal-refund（不造 O）绕过 v0.3 焊接" ⇒ **必 REJECT**。 | 配置 |
-
-**附·单位不变量（NWT 钉 · §4-d 单位段）**：`T_cutoff_LOCKED_R` / `C_terminal_refund_cutoff` / `T_giveup_LOCKED_F` / 各 `OpTxInputDaaScore(·)+N` 全部**同为 DAA-score（`< 5e11`）**。混单位 ⇒ baked 常量间比较 vacuous（floor-direction footgun 族）。🔵 归入配置级校验：ctor 参数须显式同单位来源。（此条是 CFG-GIVEUP-ORDER/CFG-CUTOFF-ORDER 成立的前提，非独立第 3 组——两条排序若混单位则 vacuous。）
+| **CFG-UNIT-DOMAIN**（v1.1 · Codex H2 独立臂） | §4-d 单位段 · 承重量 = `T_cutoff_LOCKED_R` / `C_terminal_refund_cutoff` / `T_giveup_LOCKED_F` / 各 `OpTxInputDaaScore(·)+N` | **把其中【一个】baked 常量的单位改域**（如 `T_giveup_LOCKED_F` 用【秒】或【ms】、其余仍 DAA-score）——**数值各自合法**，但 `T_giveup >= T_cutoff` 变成"1000(秒) vs 8e10(DAA)"这类**跨域比较 ⇒ 恒真/恒假、与意图无关 ⇒ 排序守卫（CFG-GIVEUP/CFG-CUTOFF）静默通过而语义已坏**（floor-direction footgun 族）。**REJECT 判据**：ctor 参数须带**单位标签/单一来源**，混域即拒装；或落一条"全部承重时量同为 DAA-score（`< 5e11`）"的显式一致性校验，任一量越出 DAA 量级即拒。**这条是 CFG-GIVEUP/CFG-CUTOFF 的【前提】但独立可变异**：排序臂测"顺序对不对"，本臂测"两个数还在不在同一把尺上"——尺错则顺序臂的比较本身 vacuous。 | 配置 |
 
 ---
 
 ## 三层覆盖判据（Codex「独立类」要求的落地形式）
 
 - **语句级**（甲，14 新 + 3 既有收口）：真 covenant 存在后，acceptance suite 逐条**删/松该 require → 预注册对抗 tx 必须 LAND（若 suite 未挂 = suite 漏，反向说明该 require 承重）**，或 mutation 后**预注册攻击 tx 从 REJECT 变 LAND = suite 必 fail**。松开→必挂。
-- **交易级**（乙，3 组）：不动 require，改 tx 组装 → 预注册"本应拒"的 tx 必 REJECT。**不能从语句级推**（缝不在代码行里）。
-- **配置级**（丙，2 条 + 单位前提）：改 baked 常量相对值 → ctor 校验拒装 / 或构造绕过 tx 必拒。**不能从语句级推**（缝在常量相对值里）。
+- **交易级**（乙，**7 臂**·v1.1 逐臂拆分）：不动 require，改 tx 组装 → 预注册"本应拒"的 tx 必 REJECT。**不能从语句级推**（缝不在代码行里）。
+- **配置级**（丙，**3 条**·v1.1 单位域独立 ID）：改 baked 常量相对值或**单位域** → ctor 校验拒装 / 或构造绕过 tx 必拒。**不能从语句级推**（缝在常量相对值里）。
 - **矩阵重生成义务**：加任何新支 ⇒ 本表 + J2 pairwise 矩阵同步失效重建（§6-3 设计 §5 caveat②）。
 
-## 未决 / 边界（不假装闭合）
-- 本表锚在 v0.15 §4 的 **§行号**（`docs/2026-08-21-j1-s6-3-A-covenant-construction-v0.15.md` 当前行）；真 covenant `.sil` 落码后须把锚从「§行」换成「`.sil` file:line」，逐条重锚（§行会随文档编辑漂）。
-- PASS/REJECT 的**机械化执行**须真 covenant 存在（pre-code，本表只冻判据，Owner-gated 实现）。
-- 组E 的 `N_claim`/`N_margin` 具体值未拍（§7），CFG 层的"N 太小=新洞"待保守上界落具名常量。
-- A2 腿（`checkSigFromStack`）与 cov_id 派生 e2e 归 §6.4/§6.5，不在本 mutation 表（它们是原语可建性证，非拓扑变异）。
+## 未决 / carry-forward（Codex (h) 裁明列四条 · 不假装闭合）
+> Codex CLOSED-AT-DESIGN-LAYER **不含**下列四条——它们是【真 covenant 落码后】才动的实现层义务，本表 pre-code 只能列、不能闭。
+1. **CF-1 · .sil 重锚**：本表锚在 v0.15 §4 的 **§行/@L 行号**（`docs/2026-08-21-j1-s6-3-A-covenant-construction-v0.15.md` 当前行,会随文档编辑漂）。真 covenant `.sil` 落码后须把每条锚从「§行」换成「`.sil` file:line」，逐条重锚。
+2. **CF-2 · 机械执行零 skipped**：PASS/REJECT 须真 covenant 存在、由 acceptance suite 机械化跑，**零 inconclusive / 零 skipped**（每条 mutation 后预注册对抗 tx 的 LAND/REJECT 必被 suite 实际执行到,不许"未触发"充当通过）。pre-code 本表只冻判据,Owner-gated 实现。
+3. **CF-3 · 分支集变即作废**：加任何新支 / 改支集 ⇒ **本表 + J2 pairwise 矩阵同步失效重建**（§6-3 设计 §5 caveat②）；旧表不得继续当权威。
+4. **CF-4 · N_claim / N_margin 归 (d)**：组E ANCHOR-* 与 CFG-UNIT-DOMAIN 依赖的 `N_claim`/`N_margin` 具体值**未拍**（§4-d/§5/§7），归结算参数域 (d)；"N 太小=反应方结构性 claim 不了 新洞"待保守上界落**具名常量**（复用既有 `_BSHARD_FEE_PER_INPUT` 等,不硬编经验值）。
+- 附：A2 腿（`checkSigFromStack`）与 cov_id 派生 e2e 归 §6.4/§6.5，不在本 mutation 表（它们是原语可建性证，非拓扑变异）。
+- 附：Codex 明示本裁**不重开 Shape-B 设计**——本 v1.1 只补 mutation-id 覆盖,不碰 §4 构造。
