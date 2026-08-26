@@ -1,5 +1,6 @@
-# §6-3 gate (d) · `k_max` 绝对成本表 · 方法稿 v0.2（设备算力已 WebSearch 填 UNVERIFIED-SOURCED · 现网算力栏等同步 · 零落码）
+# §6-3 gate (d) · `k_max` 绝对成本表 · 方法稿 v0.3（设备算力 UNVERIFIED-SOURCED 分 A/B/C 档 · 现网算力栏等同步 · 零落码）
 
+> **v0.3（NWT a66d9247 GREEN-WITH-NOTES 三须改）**：**A** §3 来源加可信度档（A 厂商官方 / B 聚合站·计算器 / C 社区·估值），并写明结论对分级**鲁棒**（GPU↔ASIC 差 3–4 个数量级，任何一档的误差远小于此）；**B** 5090 不删、标 C 档估值；明写**地板靠 §4 链上实测，不靠 §3 卡表加和**——卡表只用于攻击者侧成本与 sanity，我们自己的卡（含 5090）可直接实测填；**C** §5 成本基从"租赁/天"改为 **二手 ASIC CAPEX vs 头寸 value-at-risk**（NiceHash kHeavyHash 已停 + ASIC 可复用故按 CAPEX 而非日租），并接 NWT (23) 的 `H_floor_min = H_adv/(k_baked−1)`；边界值等 §4 实测。
 > **v0.2（NWT ac680df3 两须改 + Bettor 两补注）**：① 法 1/法 2 一致性判据改为**决策值取 `min(法1, 法2)`**（保守 = 不高估 `H_net` ⇒ 不高估攻击成本）；② "首动方 = 我们自己 + 开放 PoW 网 ⇒ 现网 GPU 级算力即 Tier-2 fail-closed" 从脚注升为 **§1 决策枢轴**，与 (d) v0.8 §6 算力地板政策互引；③ ASIC 厂商标称偏乐观 ⇒ 用作**攻击者**算力即保守方向（高估对手 = 安全方向）；④ §3 设备算力**已用 WebSearch 填**（2026-08-27，标来源与日期，PLACEHOLDER → UNVERIFIED-SOURCED），与 §4 现网算力（等同步）分开。
 > **Status**: METHOD v0.2 · J2 2026-08-27 · Bettor 派工 (21) · 用途 = Owner/Codex 具名 `k_max` 的决策输入（MSG-274 问的："`k_max ≲ 1000` 于近零算力测试网可否作过渡假设"——答案取决于 **1000× 在 TN12 到底值几张卡**）。
 > 脚本 `scratch/_j2_kmax_cost.mjs`（gitignored；**现在不跑，节点 IBD**；自带 SYNC-GATE，`daa ≤ 80,095,687 ∨ !isSynced` ⇒ 退出码 3 不出数）。已加进 (17) 同步后清单为 **③c**（与 ③a/③b 并行只读）。
@@ -28,14 +29,18 @@
 
 **IBD 陷阱**：IBD 期 `tip bits` 是历史块的、`estimateNetworkHashesPerSecond` 窗跨越追块期 ⇒ 全是假象；SYNC-GATE 同 `_j2_postibd_chaincheck_20260826/_common.cjs`（`daa > 80,095,687 ∧ isSynced`）。
 
-## §3 参考算力（kHeavyHash）——UNVERIFIED-SOURCED（WebSearch 2026-08-27，未实测；来源与日期具名）
-| 设备 / 渠道 | `H_card`（H/s）| 来源（2026-08-27 检索）| 状态 |
-|---|---|---|---|
-| RTX 4090（GPU）| **2.0e9**（WhatToMine 2.00 GH/s @240 W）～ **2.43e9**（cryptoage 2430 MH/s）| [WhatToMine KAS/4090](https://whattomine.com/coins/352-kas-kheavyhash/gpus/79-nvidia-geforce-rtx-4090) · [cryptoage](https://cryptoage.com/en/2950-nvidia-geforce-rtx-4090-hashrate-based-on-ethash,-et%D1%81hash,-kawpow,-autolykos2,-equihash,-octopus,-kaspa-algorithms.html) · [hashrate.no](https://hashrate.no/gpus/4090/KAS/analysis) | UNVERIFIED-SOURCED（矿池/计算器统计，随超频变）|
-| RTX 5090（GPU）| **无 kHeavyHash 公开数**（检索到的只有 PearlHash 376 TH/s 等其它算法）| [Kryptex 5090](https://www.kryptex.com/en/hardware/nvidia-rtx-5090) · [hashrate.no 5090](https://www.hashrate.no/gpus/5090) · [Kaspa wiki hashrate tables](https://wiki.kaspa.org/en/hashrate-tables) | UNVERIFIED-SOURCED（缺数；按 4090 的 1.5–2× 量级估 ~3e9–5e9，**估值，非来源**）|
-| IceRiver KS3M（ASIC）| **6.0e12**（6 TH/s @3400 W）；KS3 **8.0e12**（8 TH/s @3200 W）| [IceRiver 官方 KS3M](https://iceriver.app/products/iceriver-kas-ks3m) · [minerstat KS3M](https://minerstat.com/hardware/iceriver-kas-ks3m) · [Mining Now KS3](https://miningnow.com/asic-miner/iceriver-ks3-8th-s/) | UNVERIFIED-SOURCED（厂商标称）|
-| Bitmain Antminer KS5 Pro（ASIC）| **2.1e13**（21 TH/s ±3% @3150 W ±10%，150 J/T）| [ASIC Miner Value KS5 Pro](https://www.asicminervalue.com/miners/bitmain/antminer-ks5-pro-21th) · [Zeus Mining](https://www.zeusbtc.com/Asic-Miner/Asic-Miner-Details.asp?ID=3435) · [Amazon 商品页](https://www.amazon.com/Antminer-kHeavyHash-Hashrate-Efficiency-Air-Cooling/dp/B0CY3GJDNJ) | UNVERIFIED-SOURCED（厂商标称）|
-| 租赁（NiceHash kHeavyHash）| **不可用**：hashrate.no 标 NH-KHeavyHash "currently disabled and not receiving updates"；检索到的 "$117,874 per TH/s / $0.468 per TH/s·day" 语义不明（疑为硬件价与收益，非租价）| [hashrate.no NH-KHeavyHash](https://www.hashrate.no/coins/NH-KHeavyHash) · [minerstat NH-KHeavyHash](https://minerstat.com/coin/NH-KHeavyHash) · [NiceHash buying guide](https://www.nicehash.com/guide/nicehash-buying-guide) | **UNAVAILABLE**（租赁列在表里改为"二手 ASIC 购置"口径）|
+## §3 参考算力（kHeavyHash）——UNVERIFIED-SOURCED，分 A/B/C 可信度档（WebSearch 2026-08-27，未实测）
+**档位定义（v0.3）**：**A** = 厂商官方产品页/规格书；**B** = 聚合站·计算器（WhatToMine / minerstat / hashrate.no / ASIC Miner Value 等，转抄厂商或矿池统计）；**C** = 社区报告或本稿估值。
+🔴 **用途界定（v0.3，NWT B）**：**本表只用于两件事——(i) 攻击者侧成本折算（§4 表的分母）、(ii) §4 链上实测值的 sanity（"我们几张卡 ⇒ 期望 `H_net` 量级"）。地板 `H_floor` 一律靠 §4 链上实测（(23) 规格两法 `min`），不靠本表加和。** 我们自己的卡（含 5090）可以直接实测（矿工软件报的 H/s 或链上 `H_net` 变化）填进来并升为 A' 档（自测）。
+**结论对分级鲁棒**：§1 枢轴只用到 GPU（~1e9）与 ASIC（~1e12–1e13）之间 **3–4 个数量级**的差；任一档位来源的误差（超频 ±30%、标称 ±10%）远小于此 ⇒ A/B/C 哪一档都改不了枢轴方向，只影响 §4 折算的小数位。
+
+| 设备 / 渠道 | `H_card`（H/s）| 档 | 来源（2026-08-27 检索）| 状态 |
+|---|---|---|---|---|
+| RTX 4090（GPU）| **2.0e9**（WhatToMine 2.00 GH/s @240 W）～ **2.43e9**（cryptoage 2430 MH/s）| B（聚合站）/ C（cryptoage 社区）| [WhatToMine KAS/4090](https://whattomine.com/coins/352-kas-kheavyhash/gpus/79-nvidia-geforce-rtx-4090) · [cryptoage](https://cryptoage.com/en/2950-nvidia-geforce-rtx-4090-hashrate-based-on-ethash,-et%D1%81hash,-kawpow,-autolykos2,-equihash,-octopus,-kaspa-algorithms.html) · [hashrate.no](https://hashrate.no/gpus/4090/KAS/analysis) | UNVERIFIED-SOURCED（随超频变）|
+| RTX 5090（GPU）| **~3e9–5e9（估值）**：无 kHeavyHash 公开数（检索到的只有 PearlHash 376 TH/s 等其它算法），按 4090 的 1.5–2× 估 | **C（本稿估值）** | [Kryptex 5090](https://www.kryptex.com/en/hardware/nvidia-rtx-5090) · [hashrate.no 5090](https://www.hashrate.no/gpus/5090) · [Kaspa wiki hashrate tables](https://wiki.kaspa.org/en/hashrate-tables) | UNVERIFIED-SOURCED（估值非来源；**我们自己有 5090 ⇒ 同步后直接实测填，升 A'**）|
+| IceRiver KS3M（ASIC）| **6.0e12**（6 TH/s @3400 W）；KS3 **8.0e12**（8 TH/s @3200 W）| **A**（IceRiver 官方页）/ B | [IceRiver 官方 KS3M](https://iceriver.app/products/iceriver-kas-ks3m) · [minerstat KS3M](https://minerstat.com/hardware/iceriver-kas-ks3m) · [Mining Now KS3](https://miningnow.com/asic-miner/iceriver-ks3-8th-s/) | UNVERIFIED-SOURCED（厂商标称，偏乐观 = 作攻击者算力保守）|
+| Bitmain Antminer KS5 Pro（ASIC）| **2.1e13**（21 TH/s ±3% @3150 W ±10%，150 J/T）| B（ASIC Miner Value / Zeus / Amazon 转抄厂商规格；Bitmain 官方页未检索到 ⇒ 不给 A）| [ASIC Miner Value KS5 Pro](https://www.asicminervalue.com/miners/bitmain/antminer-ks5-pro-21th) · [Zeus Mining](https://www.zeusbtc.com/Asic-Miner/Asic-Miner-Details.asp?ID=3435) · [Amazon 商品页](https://www.amazon.com/Antminer-kHeavyHash-Hashrate-Efficiency-Air-Cooling/dp/B0CY3GJDNJ) | UNVERIFIED-SOURCED（厂商标称转抄）|
+| 租赁（NiceHash kHeavyHash）| **不可用**：hashrate.no 标 NH-KHeavyHash "currently disabled and not receiving updates"；检索到的 "$117,874 per TH/s / $0.468 per TH/s·day" 语义不明（疑为硬件价与收益，非租价）| B | [hashrate.no NH-KHeavyHash](https://www.hashrate.no/coins/NH-KHeavyHash) · [minerstat NH-KHeavyHash](https://minerstat.com/coin/NH-KHeavyHash) · [NiceHash buying guide](https://www.nicehash.com/guide/nicehash-buying-guide) | **UNAVAILABLE** ⇒ 成本基改 **二手 ASIC CAPEX**（§5）|
 
 🔵 **ASIC 标称偏乐观 ⇒ 保守方向**（Bettor 补注）：厂商标称是理想工况上限；本表把它当**攻击者**能拿到的算力 ⇒ 高估对手 = 安全方向，**不需要下修**。反之 GPU 的矿池统计偏实际，用作"随手攻"的下限也合适。
 
@@ -59,7 +64,10 @@
 （租赁列删：NiceHash kHeavyHash 已停，见 §3；"认真攻"的成本口径改为二手 ASIC 购置，价格另核。）
 
 ## §5 读表规则（预注册，防事后解释）
-- **判据**：若 k=1000 的折算 ≤ "一台入门 ASIC"（KS3M 6 TH/s）⇒ `k_max ≲ 1000` **不可作过渡假设**（攻击成本低于一次 Tier-2 头寸），(d) 稿 §7 1-bis 只能走 "Tier-2 禁用 / 实验-only"（Codex）；若 k=1000 需数百 GPU **且** `H_net` 本身已是 ASIC 级 ⇒ 可作**有限期**过渡假设，且 `k_max` 取表里 "成本 > 头寸上限" 的最小 k。**按 §3 量级，只要 `H_net` 是 GPU 级，前一支必然命中**（§1 枢轴）。
+- **成本基（v0.3 改，NWT C）**：不再用"租赁/天"（NiceHash kHeavyHash 已停）；改用 **二手 ASIC CAPEX**（一次性购置、且 ASIC 可复用/转售 ⇒ 真实沉没成本 ≤ CAPEX）**vs 头寸 value-at-risk**（反应方本金 `LOCKED_R`/`O_AUTHORIZED` 量级）。判据：`CAPEX(H_need) ≤ VaR` ⇒ 攻击划算 ⇒ 该 k 不可作假设。
+- **接 (23) 规格**：`H_floor_min = H_adv / (k_baked − 1)`（NWT c1d05ec0 §4）。本表给的是反向读法：给定 `k_baked`（占位 ≈1000）与 §4 实测 `H_floor`，**推出隐含的对抗预算 `H_adv_implied = (k_baked − 1) × H_floor`**，再用本表把它折成"几台 KS3M / KS5 Pro 的 CAPEX"——这就是 Owner 要判断"对手买不买得起"的那个数。
+- **判据**：若 `H_adv_implied` 的 CAPEX ≤ 一台入门 ASIC（KS3M 6 TH/s）二手价、或 ≤ 头寸 VaR ⇒ `k_max ≲ 1000` **不可作过渡假设**，(d) 稿 §7 1-bis 只能走 "Tier-2 禁用 / 实验-only"（Codex）；若 `H_adv_implied` 需数百 GPU **且** `H_net` 本身已是 ASIC 级 ⇒ 可作**有限期**过渡假设，且 `k_max` 取表里 "CAPEX > VaR" 的最小 k。**按 §3 量级，只要 `H_net` 是 GPU 级，前一支必然命中**（§1 枢轴）：k=1000 ⇒ `H_adv_implied ≈ 999 × 2e9 ≈ 2e12 ≈ 1/3 台 KS3M`。
+- 二手 ASIC 价格、头寸 VaR 边界值 = PLACEHOLDER，等 §4 实测 `H_floor` 与 Owner 给的头寸规模后填。
 - 决策值一律 `min(法1, 法2)`（§2）。
 - 数字一律带采样时刻与两法 `H_net`；参考算力一律带来源；不许用"量级 ~1e9"那类占位填表。
 - 表是**决策输入**，本稿不拍 `k_max`。
