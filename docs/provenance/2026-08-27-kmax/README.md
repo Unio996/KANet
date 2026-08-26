@@ -1,4 +1,6 @@
-# provenance · `k_max` 绝对成本表工具（(21) v0.5 入库 durable 版）
+# provenance · `k_max` 绝对成本表工具（(21) v0.6 入库 durable 版）
+
+> **v0.6（NWT 小注）**：本成本表用 **raw 法 3**（`法3_raw = 块数/W × work_per_block`）作 `H_net` 估；(23) 入场地板用 **`法3_raw/(1+口径/W)`**（口径 = 132 s 戳偏）打折后的**保守下界**——两处法 3 **不同值**，勿混：成本表要的是"攻击者要追平多少"（不打折、偏高 = 攻击看着更贵，用于 CAPEX 对照），入场闸要的是"网络至少有多少"（打折、偏低 = fail-closed 向）。
 
 > **v0.5（NWT 三注）**：① **法 3 瞬时估**（墙钟窗 `[t−W, t]` 按块**时间戳**计块数 / W × work_per_block，对齐 (23) v0.6；`--law3-window-s` 默认 600 s ≫ 132 s，输出 `stamp_bias_bound = 132/W`）作 fallback，`decideHNet = min(可用法)`；**只有法 1 可用 ⇒ `gate_input = PROVISIONAL_OVERESTIMATE`**（陈难度，算力跌后过估 `H_net` = 攻击成本看着更贵/地板入场太易 = 危险向），**不许作 (23) firm 输入**；② **可用法相差 >2× ⇒ 表内仍取 min 作参考，但 `gate_input = FAIL_CLOSED`**——喂 (23) 入场闸时 = 环境违约（测量不可靠）⇒ 不入场，**不是取 min 硬用**；③ 单位段：`H1/H2/H3` 与设备档同为 **kHeavyHash H/s**（4090 2.0 GH/s → 2.0e9），折算只用 kHeavyHash 专属 A/B 档，**C 档估值（5090）只列不折**（`units: null`）。`schema_version = kmax-cost/5`。
 
