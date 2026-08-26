@@ -1,6 +1,6 @@
 # 退款闭环死锁出路设计 — 95 笔 / 46 盘 / 514.82 KAS「两头堵死」的现状、出口矩阵与推荐
 
-> **Status**: DRAFT v0.1 · J2 2026-08-26 主笔 · Bettor 派工 (6)(对等消息, ledger 626 设计轮)· **待 NWT 审**
+> **Status**: DRAFT v0.2 · J2 2026-08-26 主笔 · Bettor 派工 (6)(对等消息, ledger 626 设计轮)· NWT 红队 `docs/2026-08-26-NWT-redteam-refund-deadlock-exit.md` = PASS-WITH-MUST-FIX · **v0.2 = §7 吸收 NWT ①②③④(① 承重: 授权字段是自动 tick 的选择键, 写它 = 上膛; §0/§3 的"状态不动、Owner 按批"措辞已按 §7 收窄)**
 > **性质**: 只读代码 + DB 只读 + 写稿。**零落码、零改 DB、零 TX、不动任何盘。** 本文只提出口, 每条出口都是钱路改动 ⇒ 铁律 0(报备→审核→Owner 批→测试), 本文不构成任何执行授权。
 > **证据标签**: `[SRC file:line]` 代码实读 · `[DB]` console.db 只读现查(2026-08-26 14:xxZ)· `[LOG]` 活日志 · `[DESIGN]` 选择 · `[LEDGER]`/`[MEMORY]` 出处带可 grep 短语。
 
@@ -61,7 +61,7 @@
 
 ## §3 推荐与理由
 
-**推荐 E1**, 顺序:
+**推荐 E1**, 顺序(🔴 v0.2:下面第 1-4 步之前**必须先完成 §7-① 的硬前置** —— `buildBettorRefundClaim` 与 legacy tick 的 landed-verify 落码并验证;否则第 2 步"写授权"= 给自动 tick 上膛):
 1. **先链核, 后授权**(UTXO 可用后 `scratch/_j2_postibd_chaincheck_20260826/run.cjs 3`):95 笔逐笔 `landed(side_p2sh, side_lock_tx)`。跨节点盘的本机 `claim_txid=NULL` 不可信(在册先例)—— **已花的那些根本不该进授权批次**。8/22 地址级读数 128 UTXO / 640 KAS vs DB 514.82 只说明"钱大体还在", 按笔不成立(6 址共用)。
 2. **Owner 批一批 reference**(如「2026-08-2x Owner 批: 46 盘 FINDING-2 存量 bettor 自取, 依据 8/04 §10.3-③」), 经 admin 端点写授权, 状态不变。
 3. **执行在持钥节点**:J1 侧节点的 claim-auto 读的是**它自己的** console.db —— 它那边这些盘/side 是否存在、`claim_txid` 是否已非空、`refund_authorization` 是否需要同样写入, **本文无法从本机核**(跨节点 DB 不同步是 (D-001 铁律 0.5) 的根因之一)。⇒ E1 的第 3 步是**跨机协调项**:先让 J1 在它的 DB 上跑同一条候选 SQL 报数, 再定授权写在哪一边(或两边)。
@@ -96,3 +96,38 @@
 - 没核 J1 侧 DB:两把 pk 的归属("J1 的 agent")是**推断**(pk 无本机 relay + 6 月跨节点样本 + 在册 ko421 先例), 不是实证;E1 第 3 步以 J1 报数为准。
 - 4 个 v0.7 非 bshard refunding 盘为何不进 `handleRefunding` 未核。
 - 不给 Owner 发菜单:出口选择由 Bettor 精炼后单点上报;本文只给推荐与理由。
+
+---
+
+## §7 v0.2 · NWT 红队 MUST-FIX 逐条吸收(2026-08-26)
+
+### 7.1 ① 🔴 承重:`refund_authorization` 有两个读者, 写它 = 给自动签广播的 tick 上膛 `[SRC 复核 pool-market-settler.js:470-535]`
+- **读者甲** = P1 闸 `refund-authorization.mjs:91`(allow/deny 一次 claim)—— v0.1 只算了它。
+- **读者乙** = `legacyRefundBuilderTick` 候选 SQL `:474-495`:`(pv NULL/v0.5 ∨ unfixable ∨ (status IN cancelled/refunded ∧ pv IN v0.6/v0.7)) ∧ deadline<=now ∧ side_lock_tx ∧ claim_txid IS NULL ∧ refund_attempted_at ∅/>1h ∧ json_valid ∧ refund_authorization IN 白名单`, `LIMIT batch×4`;`:503-504` 熔断闸后 `slice(batch)`(`LEGACY_REFUND_BATCH` 默认 1);`:511` **直接 `buildBettorRefundClaim(market_id,{sideId})` = 签名 + 广播**, `:512-514` 有 `refund_txid` 即 `triggered++`。**全 tick 无 `check_utxo_landed`**。
+- ⇒ **这 46 盘现在满足除最后一条外的每一条**;写 `owner_authorized` 的那一刻它们就是 tick 合格候选:在持钥节点(J1)写 ⇒ J1 的 settler **自动逐盘签广播, 不经任何 Owner 逐盘点头**(batch 只限速不限权);在 :3200(无钥)写 ⇒ tick 选中却签不了, 每小时 churn 一次 `bettor-key-cannot-sign`(`:520` 显式警告 + `refund_attempted_at` 节流)。
+- **v0.1 三处措辞据此收窄**:
+  1. "只写授权三元组、状态不动" → 字面对, 但**授权字段本身就是 arming key**;本文不再把它描述成被动记录。
+  2. "执行走持钥节点、Owner 按批签字" → 按批的**粒度控制不存在**:字段一写 tick 自己排空。要真按批, 必须是**独立门**(§7.1-b)。
+  3. "广播后 landed 才写 claim_txid" → 从"落码面之一"升为**写任何一盘授权之前的硬前置**(§7.1-a)。
+- **(a) 硬次序(MUST)**:① `buildBettorRefundClaim`(pool.js:394-548, 三入口共用)加**广播前** `check_utxo_landed(side_p2sh, side_lock_tx)=true`(lock 仍未花)与**广播后** `check_utxo_landed(output_addr, txid, minDepth)=true` 才写 `claim_txid`(修 claim-auto:146 / pool.js:518-540 / legacy tick :511-514 三处的乐观写, 同一个 helper);② 该改动 NWT diff 审 GREEN + 一笔最小实弹(1 side)链验;③ **然后**才允许任何节点写任何一盘的 `owner_authorized`。次序反了 = 自动 tick 在跨节点 stale `claim_txid=NULL`(ko421 先例)上重签已领盘, 只剩链的同输入双花兜底(§7.2)—— 那是最后一道, 不该当第一道。
+- **(b) "Owner 按批"要真控制 = 独立门(MUST, 三选一供 NWT/Bettor 定, 本文推荐 ⅰ)**:
+  - ⅰ **批次字段**:`authorizeRefundByOwner` 第二入口除三元组外再写 `refund_release_batch = <batch_id>`;legacy tick 候选 SQL 与 `assertBettorRefundAuthorized` **同时**要求 `refund_release_batch = env LEGACY_REFUND_RELEASE_BATCH`(默认空 ⇒ 谁都不匹配 ⇒ fail-closed)。Owner 每批放行 = 设一次 env + 重载;批完清空。两读者同一把钥匙(白名单 SQL 的生成方式已是"常量单源", 照抄)。
+  - ⅱ `LEGACY_REFUND_BATCH=0` 硬停 tick + 只经 admin 端点逐盘触发 —— 简单但把"自动"退化成"手动", 且 claim-auto 那条 5 min cron 也读同一字段, 要一并停。
+  - ⅲ 授权写到别的字段名(如 `refund_authorization_pending`), 由第二个动作"提交"成 `refund_authorization` —— 两步写, 但等于再造一个 §10.3 那样"决定与实现之间的缝"。
+- **本机 :3200 一律不写授权**(无钥 ⇒ 只会 churn);授权写在持钥节点的 DB, 且只在 (a) 完成后。
+
+### 7.2 ② 广播前 landed(side_p2sh) 的定位:纵深 + 早筛;硬锁是同输入双花
+- J1 侧 kaspad 若已同步, `getUtxosByAddresses` 见不到已花 side ⇒ landed:false ⇒ 挡 ✅;若 J1 kaspad 自己 stale ⇒ pre-check 假 true ⇒ 放行第二次广播 ⇒ **兜底 = 网络层同输入双花**:PoolSide claim 是单输入 `side_lock_tx:0`、1 in 1 out(在册 `project-stuck-33735` 陷阱 2), 第二次花的是同一个输入 ⇒ 网络拒 ⇒ 落不了。**与 1M 转账不同**(那条 change 造新币, 双花不自保);这里自保。
+- ⇒ pre-check 的价值 = 省一次注定失败的广播 + **在授权前就把 stale 已领盘筛出批次**, 不是"防双花"。**落码关 2(NWT)**:复核 `unlockPoolSideRefundCancelled` 构造的输入确为单输入 `side_lock_tx:0`, 且 `addFeeInput=false`(relay.mjs:881-903 现 `addFeeInput: !!cmd.add_fee_input`, claim-auto 未传 ⇒ false ✓;pool.js 端点须同样核)—— 一旦变多输入, 自保性消失。
+
+### 7.3 ③ 26 笔候选改写 = 对齐到 legacy tick 已在扫的集合;读数是上界含已领
+- 广义候选 `refunded ∧ claim_txid NULL ∧ side_lock_tx` 就是 `:474-490` 已在用的那组(减授权段);`side_lock_tx` 是 `pool_bettor_sides` 专属(bettor 侧), 不会误捞 maker ✅。
+- 🔴 但它**天然含跨节点 stale 已领盘**(ko421 先例), 候选 SQL 自己不过滤 ⇒ 改写**必须与 7.1-(a) 绑死**。**任何 "95/26 笔待退" 读数 = 上界含已领, 绝不当"要打的笔数"**;真正要打的是逐笔 `landed(side_p2sh, side_lock_tx)=true` 之后的子集(同 1M runbook "count ≠ 要打的笔数")。
+
+### 7.4 ④ 划界的承重前提"spine 已花"要链核, 且核的是 spine 不是 side;commingled 逐盘
+- 结构逻辑(PoolSpine 单 UTXO 多 entrypoint 互斥, maker 退款花掉 spine ⇒ settle 关)成立;**但 `refund_txid` 非空是 DB 记账, 不是 spine 已花的链证**;E1 第 1 步 `run.cjs 3` 核的是 side 未花(为 claim), 与 spine 已花(为划界)是**两个不同 UTXO**。
+- ⇒ **链核规格加一格(MUST)**:每盘 `landed(spine_p2sh, spine_lock_tx)` 必须 **false**(spine UTXO 不在了)才成立"settle 关闭、可退 bettor";任何一盘 spine 仍未花 ⇒ 该盘 settle 仍开着 ⇒ **退 bettor 违反 Owner 先例, 剔出批次、单报**。
+- 🔴 **commingled 共享 spine(45/46 至今共享, `[DB]` 3 个 spine 承载 46 盘)逐盘核, 不能一盘花了推全盘关闭**:共享地址上可能有多个 UTXO(各盘各自的 `spine_lock_tx:0`), 一笔 maker 退款只花自己那笔;判据必须按 **outpoint**(`landed(addr, 该盘 spine_lock_tx)`), 不按地址余额。脚本包 `run.cjs 4/8/9` 的 lockDiff 已是按 outpoint;给 `run.cjs 3` 加同款 `spine_lock` 臂(改动在 scratch, 不在本文范围内落)。
+
+### 7.5 v0.2 后 E1 的落码面(改写 §2 末段, 以此为准)
+① `buildBettorRefundClaim` 前后 landed-verify(三入口共用, 同一 helper)+ 输入单一性断言 → ② NWT diff 审 + 1 side 实弹链验 → ③ 独立批次门(7.1-b ⅰ)落 `authorizeRefundByOwner` 第二入口 + legacy tick/P1 闸两读者 → ④ 链核规格四臂(side 未花 / spine 已花按 outpoint / 跨节点 J1 DB 报数 / 读数=上界)→ ⑤ Owner 批第一批(建议 1 盘)→ 执行在持钥节点 → 落链核后回填。**任何一步前置未闭, 后一步不动。**
