@@ -1,6 +1,7 @@
 # start 脚本 remediation 设计稿 — Owner 待决 ②③ 两批（设计层 · 零落码）
 
-> **Status**: DRAFT v0.1 · KANet-UI 2026-08-26 · Bettor 派工 (F) · **零落码**; 目的 = Owner 一点方向即可直接进 NWT 审。改动对象全是运维/启动脚本(非产品码/非钱路), 但 **push 即生效 = deploy**(lint 域纪律), 故走报备→NWT 审→Owner 批。
+> **Status**: DRAFT **v0.2** · KANet-UI 2026-08-26 · Bettor 派工 (F) · **零落码**; 改动对象全是运维/启动脚本(非产品码/非钱路), **push 即生效 = deploy**, 走报备→NWT 审→Owner 批。
+> **v0.2(应 NWT 红队 `docs/2026-08-26-NWT-redteam-start-script-remediation.md` 32b47138, §A PASS-WITH-MUST-FIX)**: ①归因半错纠正 — mmap 模型 file-backed **不进私有 commit**(log:138 mmap=true / :142 CPU_Mapped 795.70 MiB), 删"系统 commit 主体=mmap 模型"; 30.2GB 里只 ~2-4GB(CUDA_Host)有出处, ~26GB 无出处(疑 CUDA VMM host backing, 推断); **A.5 低 ctx 重启实测私有 commit 从步骤升为【改默认值硬前置】, 测出前不许写"降 ctx 缩小 OOM 足迹"**。②256k 依据补 conversationHistory cap 实证 + 防回归注。③**第五 ctx 站: llm-watchdog.mjs:49 也硬编 1048576**(无 :8000 守卫, 若在跑会 taskkill 后用 1M 重拉复活双开源)。
 > **依据**: 漂移表 `docs/2026-08-26-kanet-ui-start-script-drift.md`(A/B 逐段 + §4 六处同病) + 探针稿 §0.5 内存闸 `docs/2026-08-26-kanet-ui-kaspad-probe-ibd-vs-dead-design.md`。
 > **证据纪律**: 每条 `[MEASURED]`(实测/日志) / `[READ]`(读码) / `[DESIGN-CHOICE]` / `[TODO·需实测]`。
 > **本稿进度**: **A + B + C 完整**(A 治 8/23 主因; B 六处改-A-忘-B; C 接位入库)。
@@ -28,13 +29,18 @@ Device 0: RTX 5090, VRAM 32606 MiB
   | 262,144 (256k) | **4,352 MiB (4.25 GiB)** | 省 13.0 GiB |
   | 131,072 (128k) | **2,176 MiB (2.13 GiB)** | 省 15.2 GiB |
 - 🔴 **现值 1M 已吃 82% 显存**: model 6212 + KV 17408 + compute 3120 + RS 201 = **26,941 MiB / 32,606 MiB = 82.6%**。这本身是脆点(GPU 无余量), 与系统 RAM 无关。
-- ⚠ **诚实区分(承重)**: 上表是 **VRAM**(GPU KV buffer), **不是** 8/23 撑顶的**系统 commit**(llama 进程私有 commit 实测 30.2 GB, 探针稿 §0.5)。系统 commit 主体 = mmap 的模型文件(7.36 GB Q6_K)+ CUDA host-pinned/VMM 预留(部分随 VRAM 用量走, `CUDA_Host` 显式 ~2.07 GB, 其余 CUDA runtime 预留无法只从日志逐字归因)。⇒ **降 ctx 明确降 VRAM(线性)+ 部分降 host 缓冲, 但"单实例系统 commit vs ctx"的精确关系需一次性重启在低 ctx 下实测**(重启 = live 动作, A.5 步骤内, Owner 批)。**8/23 OOM 的真正防线是探针稿 §0.5 内存闸; 降 ctx 是纵深防御 + GPU 余量 + 缩小单实例足迹, 不是替代内存闸。**
+- ⚠ **诚实区分(承重·v0.2 NWT ① 纠正)**: 上表是 **VRAM**(GPU KV buffer), **不是** 8/23 撑顶的**系统 commit**(llama 私有 commit 实测 30.2 GB, 探针稿 §0.5)。
+  - 🔴 **原稿"系统 commit 主体 = mmap 模型 7.36GB"已被证伪**: 日志 `:138 mmap = true` + `:142 CPU_Mapped model buffer = 795.70 MiB` ⇒ 模型是 **file-backed mmap, 不进私有 commit**(且映射到 host 的只有 795.70 MiB, 大头 6212 MiB 在 CUDA0 VRAM)。删该句。
+  - **私有 commit 30.2 GB 的构成【未验】**: 只 ~2-4 GB 归得出(`CUDA_Host` compute buffer ~2.07 GB pinned); **~26 GB 无逐字出处**(疑 CUDA VMM host backing, `VirtualSize` 247 GB 佐证——这是**推断**不是坐实)。
+  - ⇒ **降 ctx 降 VRAM 是真价值且已坐实**(82.6%→~42%, 线性); 但 **"降 ctx 缩小 8/23 那个系统 commit 足迹" = 未证**。**A.5 低 ctx 单实例重启实测私有 commit = 改默认值的硬前置(见 A.5)**; 测出前**本稿不许**声称降 ctx 缩小了 OOM 足迹。
+  - 🔴 **这反而强化: 8/23 OOM 真防线 = 探针稿 §0.5 内存闸**(它按实测 FreeVirtualMemory 拒拉, 不依赖"降 ctx 是否降 commit"这个未证命题)。降 ctx = GPU 余量 + 纵深防御, **不是** OOM 主刀。
 
 ### A.3 默认值依据（不拍脑袋）`[MEASURED + READ]`
 四条独立证据, 结论 = **256k 足够且有原生余量, 1M 是纯浪费**:
 1. **架构(硬证据)**: 日志 `n_ctx_orig_yarn = 262144` + `freq_scale = 0.25` ⇒ 模型**原生训练 context = 262,144(256k)**, 1M 是 **4x YaRN 外推**(freq_base 1e7, scale 0.25)。外推段质量降、且付 4x KV。**256k = 拿满原生高质量 context 而不付外推税。**
 2. **output 量(实测码)**: Mind/Qwen 调用的 `max_tokens` = **300**(`pool.js:4246` auto-recommend)/ **500**(`bettor-fundamental-enricher.js:188`)/ 默认 **1024**(`anthropic.mjs:14` `AI_MAX_TOKENS`)。输出全在千 token 级。
-3. **input 量(读码, 结构性封顶)**: prompt 由 `agent-mind/src/context-builder.mjs`(1208 行)装配, 各段**slice 硬封顶**: 连接 top 20(`:786`)、events top 10(`:741`)、goals top 5(`:397`)、peer notes last 5(`:643`)、discovery limit 200(`:761`)。⇒ 满载 prompt 也就低数万 token 量级, **比 128k 低一个数量级, 比 256k 低近两个**。
+3. **input 量(读码, 结构性封顶 + NWT ② 逐段核)**: prompt 由 `agent-mind/src/context-builder.mjs`(1208 行)装配, 各段 **slice 硬封顶**: 连接 top 20(`:786`)、events top 10(`:741`)、goals top 5(`:397`)、peer notes last 5(`:643`)、discovery limit 200 fetch→**3 桶×20 渲染**(`:761`, 大头)。**conversationHistory 渲染层无 cap, 但上游 `mind.mjs:65 EPISODE_MAX_HISTORY=20` + `:196 每条 .slice(0,500)` 双封顶**(20 turns × 500 char)。⇒ NWT 逐段核最坏 **~15-20k token**, **比 128k 低约一个数量级, 比 256k 低近两个**。
+   - 🔴 **防回归注(NWT ②)**: 此上界依赖 context-builder 那些 slice + mind.mjs 的 history cap。**若日后放开任一 slice/cap 上限, 须重估 ctx 默认**(否则"prompt≪ctx"前提失效)。128k 更激进档等 A.5 prompt 日志 P99 实测再定。
 4. **:8000 瓶颈(实测)**: 现网 :8000 压力来自 **slot 饱和**(4 slots, `pool.js:317` 饱和探针), **不是 context 长度**——降 ctx 不伤吞吐, 反而释显存可提 slot/batch 余量。
 - 🔴 **`[TODO·需实测]` 精确 input 分布未直采**: qwen-worker idle(167k polls/0 served, 走 adapter 直连非 worker)、llama-server 默认不记 per-request prompt 长度 ⇒ 历史 prompt 分布无日志。**建议(A.5 内, 落码前置)**: 给 adapter 加**一行** prompt token 数日志(`console.log` 级, 零行为变更), 跑一天收真实分布 P50/P99, 用它**确认** 256k(或据数据降 128k), 而非仅靠上面结构上界推断。**默认先定 256k(证据 1-4 已足够保守), 128k 待 P99 实测确认后可再降。**
 - **[DESIGN-CHOICE] 推荐默认 `LLAMA_CTX_SIZE=262144`(256k)**: 原生 context 上限、KV 4.25 GiB(省 13 GiB VRAM、GPU 从 82.6%→~42%)、对任何真实 Mind prompt 仍 ≥8x 余量。128k(2.13 GiB)是激进档, P99 实测确认 prompt 远低后可切, 但 256k 已消除 8/23 那类"GPU 顶到边"脆性且不赌 input 分布。
@@ -46,18 +52,21 @@ Device 0: RTX 5090, VRAM 32606 MiB
 | A-2 | `kanet-start-headless.sh:109` | 同上硬编 1048576 | 同 A-1 逐字 | 两脚本同源 |
 | A-3 | `kanet.env`(新增行) | (无 `LLAMA_CTX_SIZE`) | `LLAMA_CTX_SIZE=262144` | 单一真相源, 与 `LLAMA_MODEL_PATH` 同处管 |
 | A-4 | `kanet-start.sh:234-238` + `kanet-start-headless.sh:106-112` 的 spawn 块**之前** | (无内存闸) | 插入内存闸(A.6) | = 探针稿 §0.5 落点②③ |
-| A-5(可选·实测用) | agent-adapter 调 llama 处(provider `openai.mjs` 发请求前) | (不记 prompt 长度) | 加一行 `console.log` 打 prompt token 数 | 收 input 分布, 零行为变更 |
+| **A-1c(NWT ③ 第五站)** | `scripts/llm-watchdog.mjs:49` | `'--n-gpu-layers','99','--ctx-size','1048576',` | 读 env: `process.env.LLAMA_CTX_SIZE || '262144'` | 🔴 **它也硬编 1M**; 且无 :8000 守卫 —— 若在跑, taskkill 17428 后它会用 **1M** 重拉 = 废掉整个修复 + 复活双开源。**必须同改**, 且**补 :8000 守卫**(spawn 前 probe :8000, 在跑就不 spawn, 照 start 脚本) + 内存闸(§0.5 落点④) |
+| A-5(可选·实测用) | agent-adapter 调 llama 处(provider `openai.mjs` 发请求前) | (不记 prompt 长度) | 加一行 `console.log` 打 prompt token 数 | 收 input 分布, 零行为变更(产品码改动, 走报备) |
 - ⚠ `C:/KANet` 主网树两份(`kanet-start.sh:193`/`kanet-start-headless.sh:78`, ctx=262144)**不在本仓、不归本稿改**——它已是 256k, 但属独立部署, 若要统一另立主网侧报备。本稿只钉 D:/kanet-tn12 两份 + kanet.env。
 
 ### A.5 停 live llama(17428)使新 ctx 生效 — 执行步骤 `[READ]`
 🔴 **改脚本 ≠ 生效**: 两脚本 :8000 守卫都"已在跑就复用"(`kanet-start.sh:225` netstat / `kanet-start-headless.sh:101` curl /v1/models) ⇒ 新 ctx 只在 llama **被停后下一次拉起**才应用。`kanet-stop.sh:69-76` **明确不扫杀 llama**(防误杀 qclaude)。⇒ 需**显式**停:
 ```
 ① 报备 + Owner 批(live 动作: 停共享推理服务, Mind/Qwen 会短暂无 LLM)
-② 记 PID+CreationDate: Get-CimInstance Win32_Process -Filter "Name='llama-server.exe'"  (现 17428)
-③ 内存闸预检(A.6): 停之前先确认停后重拉不会撞内存(此时会释放 30GB, 空间必够)
-④ 停: taskkill //PID 17428 //F   (只此一个 llama, netstat :8000 确认无其它)
-⑤ 拉: 由下一次 kanet-start.sh / headless 的 :8000 守卫走 fallback spawn 起(带新 ctx); 或手动跑 start 脚本 llama 段
-⑥ 验(对照臂, A.7): 新 llama-server.log 的 `llama_kv_cache: size = 4352.00 MiB` (256k) ≠ 旧 17408
+🔴② **改默认值硬前置(NWT ①)**: 停 17428 之前, 先在**低 ctx** 起一个 llama 实测私有 commit(或停后以 256k 重拉立即量 `PrivatePageCount`), 与现 30.2GB 对比 —— **这一步是把 LLAMA_CTX_SIZE 默认值写进 kanet.env 的前提**; 测出前稿里不写"降 ctx 缩小 OOM 足迹"。若实测显示私有 commit 不随 ctx 显著降, 则 ctx 决策**只**由 VRAM + YaRN 原生 context 支撑(仍成立), OOM 防护全靠 §0.5 内存闸。
+🔴③ **确认 llm-watchdog 未跑(NWT ③)**: `Get-CimInstance Win32_Process -Filter "Name='node.exe'" | ? CommandLine -like '*llm-watchdog*'` 必须**空**——否则它会在 taskkill 后用 1M 重拉。在跑则先停它(且先落 A-1c 的守卫+ctx 改)。`[MEASURED 2026-08-26: 未跑]`
+④ 记 PID+CreationDate: Get-CimInstance Win32_Process -Filter "Name='llama-server.exe'"  (现 17428)
+⑤ 内存闸预检(A.6): 确认重拉不撞内存(停会释放 commit, 空间必够)
+⑥ 停: taskkill //PID 17428 //F
+⑦ **确认 :8000 真释放再重拉(NWT ③ 次要)**: `netstat -ano | grep ":8000 "` 无监听后, 才由下一次 start 脚本 :8000 守卫走 fallback spawn 起(带新 ctx)
+⑧ 验(对照臂, A.7): 新 llama-server.log `llama_kv_cache: size = 4352.00 MiB`(256k) ≠ 旧 17408; 同时量新实例 `PrivatePageCount` 收 ② 的数
 ```
 - 🔵 **时机**: 与 A-1..A-4 落码 + 内存闸同一个部署窗做; 别为单改 ctx 单开一次 llama 重启(它是共享服务, 每停一次 Mind/Qwen 断一次)。
 
