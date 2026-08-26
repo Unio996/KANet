@@ -13,7 +13,7 @@
 | 数据目录 | `D:/kaspa-tn12-data`(appdir) | `kaspad-watchdog.ps1:47` `--appdir=D:/kaspa-tn12-data` |
 | RPC 端点 | `ws://127.0.0.1:17210`(borsh, loopback); 另 :16210/:16311 | `netstat` :17210/:16210/:16311 全 pid 22428; `kanet.env:23` KASPA_RPC_URL |
 | console/relay 进程 | console **27412**; 32 个 relay 子进程(见 (A) 拓扑报告) | `netstat :3200`=27412 |
-| 🔴 relay 私钥归属 | **32/32 relay 私钥材料全在同一 `kasia-console/data/console.db`, 全由同一把 `CONSOLE_ENCRYPTION_KEY` 解密** | `SELECT COUNT(*) FROM relay_nodes WHERE mnemonic_encrypted OR privkey_encrypted` = 32/32 |
+| 🔴 relay 私钥归属 | **32/32 relay 私钥材料全在同一 `kasia-console/data/console.db`, 全由同一把 `CONSOLE_ENCRYPTION_KEY` 解密** | `SELECT COUNT(*) FROM relay_nodes WHERE mnemonic_encrypted IS NOT NULL OR privkey_encrypted IS NOT NULL` = 32/32(⚠ 须写 IS NOT NULL; 裸 `WHERE mnemonic_encrypted OR ...` 在 SQLite 里字符串布尔=0 会误得 0/32; relay-manager.js:184 生产同写法) |
 | 电源/网络/机器 | host **DESKTOP-DA9QQ46**, 物理 RAM 62GB, commit 上限 ~99.6GB(单机单 commit 池) | `Win32_ComputerSystem`/`Win32_OperatingSystem` |
 | watchdog 归属 | 本机: `kaspad-watchdog.ps1`(SYSTEM 计划任务, 拉 kaspad) + `kanet-console-supervisor.sh`(拉 console)——**都在本机同 OOM 域** | ledger (624); 计划任务非提权读不全 |
 | 8/23 型 OOM 会否同时打掉 | **会·一锅端**: 8/23 整机 commit 撑顶("分页文件太小")→console+32 relay+kaspad **全同时没**(整机失响)。commit 池是机器级单一资源 | ledger (624) 8/23 postmortem |
@@ -33,7 +33,7 @@
 | 项 | 事实 | 出处 |
 |---|---|---|
 | 存在 | `C:/KANet/kanet-start.sh` 存在 = 主网 console/kaspad 在**同一台 DESKTOP-DA9QQ46** | `ls C:/KANet` |
-| 独立性 | 不同 console 进程/不同 kaspad, **但同机** ⇒ 同电源/网/commit 池/GPU | 同机 |
+| 独立性 | **主网树同机, 但【当前未运行】** —— 本机现只 1 个 kaspad(22428, tn12), :3100 无监听=无主网 console(树外只 ws-proxy:17310+cc-bridge:9100)⇒ 作为 watchtower 候选 = **0 个观察点**; 即便运行也同电源/网/commit 池/GPU=同域 | `kaspad.exe` count=1; `netstat` :3100 无监听 |
 | 8/23 型 OOM | **会·一锅端**(机器级 OOM/断电不分 tn12 与 mainnet 树) | 机器级资源 |
 
 ## §2 结论（两格·Bettor 上报 Owner 用）
