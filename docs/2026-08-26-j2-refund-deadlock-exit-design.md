@@ -1,6 +1,6 @@
 # 退款闭环死锁出路设计 — 95 笔 / 46 盘 / 514.82 KAS「两头堵死」的现状、出口矩阵与推荐
 
-> **Status**: DRAFT v0.2 · J2 2026-08-26 主笔 · Bettor 派工 (6)(对等消息, ledger 626 设计轮)· NWT 红队 `docs/2026-08-26-NWT-redteam-refund-deadlock-exit.md` = PASS-WITH-MUST-FIX · **v0.2 = §7 吸收 NWT ①②③④(① 承重: 授权字段是自动 tick 的选择键, 写它 = 上膛; §0/§3 的"状态不动、Owner 按批"措辞已按 §7 收窄)**
+> **Status**: DRAFT v0.3 · (v0.3 = §7.1(b)ⅰ 批次门覆盖三处含计数 + §7.1(d) env 三审点 甲/乙/丙 + §7.5 放完清 env 与验收臂;供 NWT 正式 re-audit)· J2 2026-08-26 主笔 · Bettor 派工 (6)(对等消息, ledger 626 设计轮)· NWT 红队 `docs/2026-08-26-NWT-redteam-refund-deadlock-exit.md` = PASS-WITH-MUST-FIX · **v0.2 = §7 吸收 NWT ①②③④(① 承重: 授权字段是自动 tick 的选择键, 写它 = 上膛; §0/§3 的"状态不动、Owner 按批"措辞已按 §7 收窄)**
 > **性质**: 只读代码 + DB 只读 + 写稿。**零落码、零改 DB、零 TX、不动任何盘。** 本文只提出口, 每条出口都是钱路改动 ⇒ 铁律 0(报备→审核→Owner 批→测试), 本文不构成任何执行授权。
 > **证据标签**: `[SRC file:line]` 代码实读 · `[DB]` console.db 只读现查(2026-08-26 14:xxZ)· `[LOG]` 活日志 · `[DESIGN]` 选择 · `[LEDGER]`/`[MEMORY]` 出处带可 grep 短语。
 
@@ -111,7 +111,7 @@
   3. "广播后 landed 才写 claim_txid" → 从"落码面之一"升为**写任何一盘授权之前的硬前置**(§7.1-a)。
 - **(a) 硬次序(MUST)**:① `buildBettorRefundClaim`(pool.js:394-548, 三入口共用)加**广播前** `check_utxo_landed(side_p2sh, side_lock_tx)=true`(lock 仍未花)与**广播后** `check_utxo_landed(output_addr, txid, minDepth)=true` 才写 `claim_txid`(修 claim-auto:146 / pool.js:518-540 / legacy tick :511-514 三处的乐观写, 同一个 helper);② 该改动 NWT diff 审 GREEN + 一笔最小实弹(1 side)链验;③ **然后**才允许任何节点写任何一盘的 `owner_authorized`。次序反了 = 自动 tick 在跨节点 stale `claim_txid=NULL`(ko421 先例)上重签已领盘, 只剩链的同输入双花兜底(§7.2)—— 那是最后一道, 不该当第一道。
 - **(b) "Owner 按批"要真控制 = 独立门(MUST, 三选一供 NWT/Bettor 定, 本文推荐 ⅰ)**:
-  - ⅰ **批次字段**:`authorizeRefundByOwner` 第二入口除三元组外再写 `refund_release_batch = <batch_id>`;legacy tick 候选 SQL 与 `assertBettorRefundAuthorized` **同时**要求 `refund_release_batch = env LEGACY_REFUND_RELEASE_BATCH`(默认空 ⇒ 谁都不匹配 ⇒ fail-closed)。Owner 每批放行 = 设一次 env + 重载;批完清空。两读者同一把钥匙(白名单 SQL 的生成方式已是"常量单源", 照抄)。
+  - ⅰ **批次字段**:`authorizeRefundByOwner` 第二入口除三元组外再写 `refund_release_batch = <batch_id>`;**三处**同时认它(v0.3, NWT 定):**R①** `assertBettorRefundAuthorized`(花钱前最后一问)、**R②** legacy tick 候选 SQL `:493`(前置筛)、**L** backlog 计数 `:383-384`(拆成两格:「未授权」与「已授权但不在当前批」—— 计数不认批次的话, 授权一写 backlog 归零, 读数像"修好了"而 tick 还没放, 正是本卡从头在防的同形)。三处共用同一个判据 helper(白名单 SQL-IN 的"常量单源"方式照抄)。Owner 每批放行 = 给一次 env + 重载;批完清空(§7.1(d)丙)。
   - ⅱ `LEGACY_REFUND_BATCH=0` 硬停 tick + 只经 admin 端点逐盘触发 —— 简单但把"自动"退化成"手动", 且 claim-auto 那条 5 min cron 也读同一字段, 要一并停。
   - ⅲ 授权写到别的字段名(如 `refund_authorization_pending`), 由第二个动作"提交"成 `refund_authorization` —— 两步写, 但等于再造一个 §10.3 那样"决定与实现之间的缝"。
 - **本机 :3200 一律不写授权**(无钥 ⇒ 只会 churn);授权写在持钥节点的 DB, 且只在 (a) 完成后。
@@ -132,7 +132,11 @@
     | settler:2740 / :2745 | **W** | `dispatchRefund` 写 `refund_authorization`(+ `_tier`) |
     ⇒ **读 metadata 字段并据此决策的 = R① + R② 两处;L 计数一处;写两处(W-A dispatchRefund / W-B authorizeRefundByOwner);无第四个决策读者。** 但 R① 有**三个调用点**(claim-auto:75 / pool.js:433 经 `buildBettorRefundClaim`, 而 legacy tick :511 与 HTTP 端点都走 pool.js:433)⇒ 批次门放在 R① 谓词内 + R② SQL 内, 三入口自动全覆盖;R② 是前置筛, R① 是花钱前最后一问。
     (Bettor 复核时数到 12 处, 少的 4 处 = :327 注释 + :383/:384/:493 三条 SQL —— 它们写成 `'$.refund_authorization'`, 带引号的 json_extract 形式, 按 word 匹配会漏;附录按裸子串 grep, 以 16 处为准。)
-  - `LEGACY_REFUND_RELEASE_BATCH` 全仓零定义(kanet.env / kanet-start.sh / kanet-start-headless.sh / scripts)⇒ 进程读到 `undefined`;两套 start 脚本对 kanet.env 都是全量 passthrough(`kanet-start.sh:97` r551 "export EVERY kanet.env key", headless r472 同源)⇒ **只要它不写进 kanet.env 就在两套下都为空**;门的 fail-closed 判据必须写成 `!env ∨ env.trim()===''` ⇒ 不匹配, 且**禁止在代码里给它缺省值**(缺省值 = 把门焊开)。
+  - `LEGACY_REFUND_RELEASE_BATCH` 全仓零定义(kanet.env / kanet-start.sh / kanet-start-headless.sh / scripts)⇒ 进程读到 `undefined`;两套 start 脚本对 kanet.env 都是全量 passthrough(`kanet-start.sh:97` r551 "export EVERY kanet.env key", headless r472 同源)⇒ **只要它不写进 kanet.env 就在两套下都为空**。
+- **(d) env 三审点(v0.3, NWT 定, 落码硬条件)**:
+  - **甲 禁缺省**:禁抄 `parseInt(process.env.LEGACY_REFUND_BATCH,10) || 1`(settler:496/:507 现模式)——`|| default` 让门永不 fail-closed。判据一律 `const b = process.env.LEGACY_REFUND_RELEASE_BATCH; if (!b || b.trim()==='') ⇒ 关`;代码里**不得**出现该 env 的任何缺省值。
+  - **乙 空==空 fail-open**:门若写成 `market.refund_release_batch === env`, 某盘字段空/NULL 且 env 空 ⇒ `'' === ''` 放行。⇒ **三处都必须在等值比较之前先 fail-closed on 空 env**:JS 侧 `if (!b) return deny;` 在前;SQL 侧写成 `? IS NOT NULL AND ? <> '' AND json_extract(pm.metadata,'$.refund_release_batch') IS NOT NULL AND json_extract(...) = ?`(env 以参数传入, 三个 `?` 同值), 不许只靠等值。
+  - **丙 持久化 = 永久上膛**:RELEASE_BATCH 若写进 kanet.env 忘删, 此后每个 refunded-authorized 盘都自动释放。⇒ **kanet.env 里不许常驻**;env **per-batch 瞬时**(执行时命令行前缀 / 放完即删), 且 batch-id **精确匹配**(新盘写的是新 id, 旧 id 放不了新盘);§7.5 增"放完清 env"一步与验收臂。
 
 ### 7.2 ② 广播前 landed(side_p2sh) 的定位:纵深 + 早筛;硬锁是同输入双花
 - J1 侧 kaspad 若已同步, `getUtxosByAddresses` 见不到已花 side ⇒ landed:false ⇒ 挡 ✅;若 J1 kaspad 自己 stale ⇒ pre-check 假 true ⇒ 放行第二次广播 ⇒ **兜底 = 网络层同输入双花**:PoolSide claim 是单输入 `side_lock_tx:0`、1 in 1 out(在册 `project-stuck-33735` 陷阱 2), 第二次花的是同一个输入 ⇒ 网络拒 ⇒ 落不了。**与 1M 转账不同**(那条 change 造新币, 双花不自保);这里自保。
@@ -148,4 +152,5 @@
 - 🔴 **commingled 共享 spine(45/46 至今共享, `[DB]` 3 个 spine 承载 46 盘)逐盘核, 不能一盘花了推全盘关闭**:共享地址上可能有多个 UTXO(各盘各自的 `spine_lock_tx:0`), 一笔 maker 退款只花自己那笔;判据必须按 **outpoint**(`landed(addr, 该盘 spine_lock_tx)`), 不按地址余额。脚本包 `run.cjs 4/8/9` 的 lockDiff 已是按 outpoint;给 `run.cjs 3` 加同款 `spine_lock` 臂(改动在 scratch, 不在本文范围内落)。
 
 ### 7.5 v0.2 后 E1 的落码面(改写 §2 末段, 以此为准)
-① `buildBettorRefundClaim` 前后 landed-verify(三入口共用, 同一 helper)+ 输入单一性断言 → ② NWT diff 审 + 1 side 实弹链验 → ③ 独立批次门(7.1-b ⅰ)落 `authorizeRefundByOwner` 第二入口 + legacy tick/P1 闸两读者 → ④ 链核规格四臂(side 未花 / spine 已花按 outpoint / 跨节点 J1 DB 报数 / 读数=上界)→ ⑤ Owner 批第一批(建议 1 盘)→ 执行在持钥节点 → 落链核后回填。**任何一步前置未闭, 后一步不动。**
+① `buildBettorRefundClaim` 前后 landed-verify(三入口共用, 同一 helper)+ 输入单一性断言 → ② NWT diff 审 + 1 side 实弹链验 → ③ 独立批次门(7.1-b ⅰ)落 `authorizeRefundByOwner` 第二入口 + **三处**(R① 谓词 / R② tick SQL / L 计数两格), 满足 7.1(d) 甲乙丙 → ④ 链核规格四臂(side 未花 / spine 已花按 outpoint / 跨节点 J1 DB 报数 / 读数=上界)→ ⑤ Owner 批第一批(建议 1 盘, batch-id 唯一)→ 执行在持钥节点, env 以命令行前缀瞬时给出 → 落链核后回填 → **⑥ 放完清 env**(kanet.env 不得含 RELEASE_BATCH;进程 env 清空/重载)。**任何一步前置未闭, 后一步不动。**
+**验收臂(每批必跑, 三条缺一不可)**:(a) 放行前 env 空 ⇒ tick 一轮候选 = 0 且计数「已授权但不在当前批」= 本批盘数(证门关着、计数看得见);(b) env=本批 id ⇒ tick 候选 = 本批且仅本批(其它已授权盘 id 不同, 不进);(c) 放完清 env 后再 tick 一轮 ⇒ 候选 = 0、`grep RELEASE_BATCH kanet.env` 零命中(证没有永久上膛)。任一臂不过 ⇒ 停, 报 Bettor。
