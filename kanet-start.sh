@@ -224,15 +224,46 @@ if [ -f "$LLAMA_SERVER" ] && [ -f "$LLAMA_MODEL" ]; then
   echo -e "${C_BOLD}[0/1] llama-server${C_RESET}  port $LLAMA_PORT"
   if netstat -an 2>/dev/null | grep -q ":${LLAMA_PORT}.*LISTEN"; then
     ok "llama-server 已在运行 (port $LLAMA_PORT)"
+  # ── ctx 单一源 (Owner 2026-08-26 决 ②·禁代码缺省值): kanet.env LLAMA_CTX_SIZE 缺失即拒起, 不硬编回退 ──
+  elif [ -z "${LLAMA_CTX_SIZE:-}" ]; then
+    warn "llama-server 跳过: LLAMA_CTX_SIZE 未设 — kanet.env 必须显式配 (禁代码缺省值, 防静默用错 ctx)"
   else
-    info "启动 llama-server (Qwythos-9B, RTX 5090)..."
+    # ── 内存闸 (探针稿 §0.5·MF-2·fail-closed): 空闲 commit < 阈值 或 读不到 ⇒ 拒拉, 防 8/23 llama 双开撑顶 ──
+    # fail-closed 裁定 (Bettor 2026-08-26): CIM 查询在撑顶态最可能失败, "读不到"与"最不该拉"重合 ⇒ 读不到也拒.
+    # 本次拒起不影响下次: 脚本一次调用读一次; console 若重启, 下次调用重新读, 不永久放弃.
+    # override 用【单次调用参数 --memgate-force】(不用可继承 env, 防子树静默焊开闸=同 B/C ② 坑); watchdog 侧无此入口=不接受 force.
+    _MEMGATE_MIN_GB="${LLAMA_MIN_FREE_COMMIT_GB:-35}"   # llama 类 (私有 commit ~30GB + margin)
+    _MEMGATE_SKIP="false"
+    _MEMGATE_FORCE="false"; for _a in "$@"; do [ "$_a" = "--memgate-force" ] && _MEMGATE_FORCE="true"; done
+    if [ "$_MEMGATE_FORCE" = "true" ]; then
+      warn "llama-server memgate:forced (--memgate-force 单次调用覆盖, 跳过内存闸; 本参数不继承子进程)"
+    else
+      _MEMGATE_FREE=""
+      # 4 次读, 间隔 backoff 0/2/5/10s (~17s), 骑过开机 WMI 未就绪; 读不到=fail-closed 拒拉
+      for _mg_wait in 0 2 5 10; do
+        [ "$_mg_wait" -gt 0 ] && sleep "$_mg_wait"
+        _MEMGATE_FREE=$(powershell -NoProfile -Command "[math]::Floor((Get-CimInstance Win32_OperatingSystem).FreeVirtualMemory/1MB)" 2>/dev/null | tr -d '\r')
+        [ -n "$_MEMGATE_FREE" ] && break
+      done
+      if [ -z "$_MEMGATE_FREE" ]; then
+        warn "llama-server refuse-start:commit-unknown free=? (FreeVirtualMemory 读取 4x/backoff 失败, fail-closed 拒拉)"
+        _MEMGATE_SKIP="true"
+      elif [ "$_MEMGATE_FREE" -lt "$_MEMGATE_MIN_GB" ]; then
+        warn "llama-server refuse-start:low-commit free=${_MEMGATE_FREE}GB < ${_MEMGATE_MIN_GB}GB (内存闸拒拉, 防双开撑顶)"
+        _MEMGATE_SKIP="true"
+      fi
+    fi
+  if [ "$_MEMGATE_SKIP" = "true" ]; then
+    :  # 内存闸拒拉: 不 spawn, console 仍启动 (adapter 可回退)
+  else
+    info "启动 llama-server (Qwythos-9B, RTX 5090, ctx=$LLAMA_CTX_SIZE)..."
     > "$LLAMA_LOG"
     # cd 目标必须跟 LLAMA_SERVER 本身一起走 override (2026-07-07 回归: 之前这行硬编码默认路径,
     # LLAMA_SERVER_PATH 覆盖后 exe 路径对了但 cd 还是走旧默认值, 目录不存在直接炸)。
     (cd "$(dirname "$LLAMA_SERVER")" && "./$(basename "$LLAMA_SERVER")" \
       --model "$LLAMA_MODEL" \
       --host 0.0.0.0 --port $LLAMA_PORT \
-      --n-gpu-layers 99 --ctx-size 1048576 \
+      --n-gpu-layers 99 --ctx-size "$LLAMA_CTX_SIZE" \
       --cache-type-k q8_0 --cache-type-v q8_0 \
       --threads 8 --flash-attn on \
       >> "$LLAMA_LOG" 2>&1) &
@@ -251,8 +282,9 @@ if [ -f "$LLAMA_SERVER" ] && [ -f "$LLAMA_MODEL" ]; then
     else
       warn "llama-server 启动超时，Console 仍将启动（adapter 可回退到 Ollama）"
     fi
-  fi
-fi
+  fi   # 闭合 _MEMGATE_SKIP if
+  fi   # 闭合 netstat if-elif-else
+fi     # 闭合 [ -f LLAMA_SERVER ] && [ -f LLAMA_MODEL ]
 
 # ── 启动 kasia-console ──────────────────────────────────────────────────────
 # Console 启动后自动拉起: Adapter → UTXO 拆分 → Relay → Scanner

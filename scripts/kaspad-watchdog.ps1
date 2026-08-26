@@ -130,19 +130,38 @@ while ($true) {
       $failCount++
       Log "kaspad probe FAIL ($failCount/$FAIL_THRESHOLD) code=$($r.Code): $($r.Reason)"
       if ($failCount -ge $FAIL_THRESHOLD) {
-        # 🔴 只启不杀: 只 Start-Process, 永不 kill/Stop-Process。即使误判, 最坏是拉一个撞数据目录锁秒死的进程, 不伤 live。
-        Log "kaspad DEAD (>=$FAIL_THRESHOLD consecutive probe fails) -> archiving prior stdout/stderr logs (if any) + starting canonical (--enable-unsynced-mining)"
-        Archive-IfExists $stdoutLog
-        Archive-IfExists $stderrLog
-        $proc = Start-Process -FilePath $kaspadExe -ArgumentList $kaspadArgs -WorkingDirectory (Split-Path $kaspadExe) `
-          -RedirectStandardOutput $stdoutLog -RedirectStandardError $stderrLog -WindowStyle Hidden -PassThru
-        Log "Start-Process dispatched, new PID=$($proc.Id) (OS process launched; RPC readiness confirmed by post-start probe below)"
-        # 🔴 必改四: 拉起后【再探一次】确认真起来了(带超时·helper 自带)。不确认=假设, 而假设正是这一步要防的。
-        Start-Sleep -Seconds 8
-        $c = Probe-Tn12Node
-        if ($c.Alive) { Log "post-start probe OK: $($c.Reason)" }
-        else { Log "post-start probe still not-alive code=$($c.Code): $($c.Reason) (likely still starting / IBD; re-evaluate next tick)" }
-        $failCount = 0   # 动作已采取, 计数归零, 下一 tick 重新评估(不连锁重拉)
+        # ── memory gate (probe design 0.5 / MF-2 / fail-closed, Bettor 2026-08-26) ──
+        # commit read fail (4x backoff 0/2/5/10s) or below threshold => skip Start-Process THIS tick;
+        # failCount kept (NOT reset) so next tick re-reads => "refuse now does not give up permanently".
+        # NO force entry on this auto path: a script param would live for the whole watchdog process
+        # lifetime (= inheritable-env trap); force exists only on manual one-shot start scripts.
+        # Log strings are pure ASCII on purpose (this file is no-BOM UTF-8; Chinese only in # comments).
+        $minGb = if ($env:KASPAD_MIN_FREE_COMMIT_GB) { [int]$env:KASPAD_MIN_FREE_COMMIT_GB } else { 8 }
+        $freeGb = $null
+        foreach ($w in @(0,2,5,10)) {
+          if ($w -gt 0) { Start-Sleep -Seconds $w }
+          try { $freeGb = [math]::Floor((Get-CimInstance Win32_OperatingSystem).FreeVirtualMemory / 1MB) } catch { $freeGb = $null }
+          if ($null -ne $freeGb) { break }
+        }
+        if ($null -eq $freeGb) {
+          Log "kaspad refuse-start:commit-unknown free=? (FreeVirtualMemory 4x/backoff read failed, fail-closed: skip Start-Process this tick, failCount kept for re-read next tick)"
+        } elseif ($freeGb -lt $minGb) {
+          Log "kaspad refuse-start:low-commit free=${freeGb}GB < ${minGb}GB (memory gate: skip Start-Process, prevent OOM re-spawn; failCount kept, re-read next tick)"
+        } else {
+          # 🔴 只启不杀: 只 Start-Process, 永不 kill/Stop-Process。即使误判, 最坏是拉一个撞数据目录锁秒死的进程, 不伤 live。
+          Log "kaspad DEAD (>=$FAIL_THRESHOLD consecutive probe fails) -> memgate ok free=${freeGb}GB, archiving prior stdout/stderr logs (if any) + starting canonical (--enable-unsynced-mining)"
+          Archive-IfExists $stdoutLog
+          Archive-IfExists $stderrLog
+          $proc = Start-Process -FilePath $kaspadExe -ArgumentList $kaspadArgs -WorkingDirectory (Split-Path $kaspadExe) `
+            -RedirectStandardOutput $stdoutLog -RedirectStandardError $stderrLog -WindowStyle Hidden -PassThru
+          Log "Start-Process dispatched, new PID=$($proc.Id) (OS process launched; RPC readiness confirmed by post-start probe below)"
+          # 🔴 必改四: 拉起后【再探一次】确认真起来了(带超时·helper 自带)。不确认=假设, 而假设正是这一步要防的。
+          Start-Sleep -Seconds 8
+          $c = Probe-Tn12Node
+          if ($c.Alive) { Log "post-start probe OK: $($c.Reason)" }
+          else { Log "post-start probe still not-alive code=$($c.Code): $($c.Reason) (likely still starting / IBD; re-evaluate next tick)" }
+          $failCount = 0   # 动作已采取, 计数归零, 下一 tick 重新评估(不连锁重拉)
+        }
       }
     }
   } catch {
